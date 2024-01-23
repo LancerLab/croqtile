@@ -1,5 +1,7 @@
 # Choreo
+Choreo is a low-level Domain Specific Language (DSL) for GCU.
 
+Choreo is built on top of C++ language and is implemented as a source-to-source translator. It provides higher level abstraction to manipulate host and device for computations. It turns dataflow functions, kernels, and host C++ program into factorAPI based program.
 
 
 ## Getting started

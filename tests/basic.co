@@ -1,0 +1,31 @@
+#include <iostream>
+
+__kernel__ int bar(int d) {
+
+}
+
+__co__ int foo(f32 d) {
+  mdspan nd = {100, 100};
+  mdspan idz = [10, 10]; 
+  shared f32<nd> shared_buffer;
+  local f32<nd> local_buffer;
+  with [x, y] in idz {
+    parallel 6 do {
+      p0 = dma:10 d[idz]->shared_buffer[idz];
+      p1 = dma:10 d[idz]->shared_buffer[idz];
+      foreach x {
+        foreach y {
+          wait p0, p1;
+          p2 = dma shared_buffer[]->;
+          p3 = dma ...;
+          wait p2, p3;
+          call bar(x/6, y);
+        }
+      }
+    }
+  }
+}
+
+int bar(int a, int b) {
+  return foo(a) + b;
+}
