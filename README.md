@@ -6,9 +6,12 @@ Choreo is built on top of C++ language and is implemented as a source-to-source 
 
 ## Getting started
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
-
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+### Intialize the build environment
+To intialize the build environment, the below command is provided:
+```
+make setup
+```
+It fetches the required bison version (>=3.8).
 
 ## Add your files
 
