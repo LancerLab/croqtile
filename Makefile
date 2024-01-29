@@ -37,19 +37,23 @@ clean:
 
 # Toolchains
 FLEX = flex
-BISON = $(TOOLCHAIN)/bison
-BISON_MD5:=fbe6a2c8ec7c69ee8ee7a67e3dbc9bc8
+BISON_BIN = $(TOOLCHAIN)/bin/bison
+BISON_PKG = $(TOOLCHAIN)/bison.tgz
+BISON_MD5:=ad632d8c8dcab7033353dd1a923f6128
+BISON_ENV:=BISON_PKGDATADIR=$(TOOLCHAIN)/shared/bison/
+BISON:=$(BISON_ENV) $(BISON_BIN)
 
-bison-bin:
+bison-pkg:
 	@mkdir -p $(TOOLCHAIN); \
-	if [ "$(shell md5sum $(BISON) | cut -d ' ' -f 1)" != "$(BISON_MD5)"  ]; then \
+	if [ "$(shell md5sum $(BISON_PKG) | cut -d ' ' -f 1)" != "$(BISON_MD5)"  ]; then \
 		echo "MD5 hash does not match. Downloading the bison..."; \
-		rm -f $(BISON); \
-		curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/bison -o $(BISON);\
-		chmod +x $(BISON); \
+		rm -f $(BISON_BIN); \
+		curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/bison.tgz -o $(BISON_PKG);\
+		cd $(TOOLCHAIN) && tar -zvxf $(BISON_PKG); \
+		chmod +x $(BISON_BIN); \
 	else \
-		echo "$(BISON) MD5 hash matches. No need to download."; \
+		echo "$(BISON_PKG) MD5 hash matches. No need to download."; \
 	fi
 
-setup: bison-bin
+setup: bison-pkg
 
