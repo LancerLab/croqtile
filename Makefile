@@ -38,7 +38,7 @@ clean:
 # Toolchains
 FLEX = flex
 BISON = $(TOOLCHAIN)/bison
-BISON_MD5:=2e30c657b09cd365d8a621494ee48943
+BISON_MD5:=fbe6a2c8ec7c69ee8ee7a67e3dbc9bc8
 
 bison-bin:
 	@mkdir -p $(TOOLCHAIN); \
