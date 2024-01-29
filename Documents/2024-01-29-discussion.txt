@@ -1,0 +1,77 @@
+#include <iostream>
+
+// classification:
+//  - kernel program: program executed on SIP
+//  - device program: dataflow program executed on control processor
+//  - host program: program executed on CPU
+//
+// Design philosiphy:
+//  1. all the code in one file
+//  2. source-to-source translation
+//    2.1 kernel, host program -> pass by
+//    2.2 device program -> translation
+//  3. simpilify the data declaration, allocation on scratchpad.
+//  4. type checked
+//  5. tiling/slicing representation (???)
+//
+//
+// Discussion:
+//  1. design of async syntax:
+//    i. full manual handling
+//    ii. auto generate wait
+//    iii. optional wait?
+//  2. initial shape, parameter(dynamic) vs template(static)
+//  3. avoid mis-leading concept of using DMA
+
+// Detail design:
+//  - multiple dimension span: {x, y}
+//  - multiple dimension values: [x, y, z]
+//  - range (from:to:step): in x:y:z
+//  - range (0:num:1): by num
+
+// kernel program
+__kernel__ int bar(int d) {
+
+}
+
+// This is the device program
+// static: template <int dim1, int dim2> ?
+__co__ int foo(f32 d[]) {
+  //dyanmic: __co__ int foo(f32 d[], int dim1, int dim2) {
+  // mdspan ndims = {dim1, dim2};
+  mdspan ndims = {100, 100};  // shape, mdspan node
+  // mdstride? or mdtile? mdstride node
+  // mdspan / mdstride (legal)
+  // mdstride = ndims / mdtile;
+  mdspan idz = [10, 10];      // conceptual tiling/slice/stride
+  shared f32<ndims> shared_buffer; // location, shape -> scratchpad memory, lifetime management
+  local f32<ndims> local_buffer;
+
+  // range: from:to:step
+  // parallel z in 4:6:2 do {
+  parallel z by 6 do {
+    with [x, y] in idz {
+      // handle = dma:<size> <from>[index]-><to>[index]
+      // p0 is async handle
+      p0 = dma:10 d[idz]->shared_buffer[idz];
+      p1 = dma:10 d[idz]->shared_buffer[idz];
+      foreach x {
+        foreach y {
+          // p2 = dma p1.data-> local f32<ndims>[nindex];
+          wait p0, p1;  // force sync
+          p2 = dma shared_buffer[]->local_buffer[];
+          p3 = dma ...;
+          wait p2, p3;
+          call bar(x/6, y);
+        }
+      }
+    }
+  }
+
+  // implicit lifetime management -> destroy
+}
+
+// host program
+int bar(int a[], int b[]) {
+  return foo(a) + b;
+}

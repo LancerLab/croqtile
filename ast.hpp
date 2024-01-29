@@ -82,7 +82,6 @@ struct Program : public Node {
     std::vector<std::unique_ptr<Node>> declarations;
 };
 
-
 }  // end of namespace AST
 
 #endif // __CHOREO_AST_HPP__

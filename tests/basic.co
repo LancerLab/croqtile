@@ -1,22 +1,25 @@
 #include <iostream>
 
+// kernel program
 __kernel__ int bar(int d) {
 
 }
 
-__co__ int foo(f32 d) {
-  mdspan nd = {100, 100};
-  mdspan idz = [10, 10]; 
-  shared f32<nd> shared_buffer;
-  local f32<nd> local_buffer;
-  with [x, y] in idz {
-    parallel 6 do {
+// device program
+__co__ int foo(f32 d[]) {
+  mdspan ndims = {100, 100};  // shape, mdspan node
+  mdspan idz = [10, 10];      // conceptual tiling/slice/stride
+  shared f32<ndims> shared_buffer; // location, shape -> scratchpad memory, lifetime management
+  local f32<ndims> local_buffer;
+
+  parallel z by 6 do {
+    with [x, y] in idz {
       p0 = dma:10 d[idz]->shared_buffer[idz];
       p1 = dma:10 d[idz]->shared_buffer[idz];
       foreach x {
         foreach y {
-          wait p0, p1;
-          p2 = dma shared_buffer[]->;
+          wait p0, p1;  // force sync
+          p2 = dma shared_buffer[]->local_buffer[];
           p3 = dma ...;
           wait p2, p3;
           call bar(x/6, y);
@@ -26,6 +29,7 @@ __co__ int foo(f32 d) {
   }
 }
 
-int bar(int a, int b) {
+// host program
+int bar(int a[], int b[]) {
   return foo(a) + b;
 }
