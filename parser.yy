@@ -111,7 +111,8 @@ static Choreo::Parser::symbol_type yylex(Choreo::Scanner &scanner) {
 %token <std::string> IF ELSE WITH ITER RET
 
 // non-terminals
-%nterm <std::shared_ptr<AST::Node>> mdspans_decl mindices_decl statements value
+//%nterm <std::shared_ptr<AST::Node>> mdspans_decl mindices_decl statements value expr
+%nterm <std::shared_ptr<AST::Node>> statements value expr
 %nterm <std::shared_ptr<AST::MdimSpans>> init_list
 %nterm <std::shared_ptr<AST::Node>> pass_by
 %nterm <AST::BaseType> base_type
@@ -160,11 +161,14 @@ base_type: F32   { $$ = $1; }
 init_list:
       init_list COMMA NUM
       {  
-				$1->values.push_back($3);
+				$1->values.push_back(std::make_shared<AST::IntLiteral>($3));
 				$$ = $1;
       }
     | NUM
-      { $$ = std::make_shared<AST::IntLiteral>($1); }
+      { 
+				$$ = std::make_shared<AST::MdimSpans>();
+				$$->values.push_back(std::make_shared<AST::IntLiteral>($1));
+      }
 
 
 /* for now we only support init_list with constants
