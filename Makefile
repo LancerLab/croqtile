@@ -12,11 +12,19 @@ BISON_SRC = parser.yy
 #BISON_FLAGS = --language=c++ --skeleton=lalr1.cc -t -d  # Generates both parser.tab.c and parser.tab.h
 BISON_FLAGS = -t -d  # Generates both parser.tab.cpp and parser.tab.h
 
+# Test targets
+TEST_FILES := $(wildcard tests/*_test.co)
+TEST_TARGETS := $(TEST_FILES:.co=.test)
+$(info TEST_FILES is $(TEST_FILES))
+$(info TEST_TARGETS is $(TEST_TARGETS))
+
 CC = g++
 CFLAGS = -std=c++17 -Wall -Wextra -g
 
 # Build rules
 all: $(TARGET)
+
+test: $(TEST_TARGETS)
 
 $(TARGET): scanner.yy.o parser.tab.o
 	$(CC) $(CFLAGS) $^ -o $(TARGET)
@@ -31,9 +39,13 @@ parser.tab.cc parser.tab.hh: $(BISON_SRC)
 	$(CC) $(CFLAGS) $< -c -o $@
 
 clean:
-	rm -f *.cc *.hh *.o $(TARGET)
+	rm -f *.cc *.hh *.o $(TEST_TARGETS) tests/*.result
 
-.PHONY: all clean
+%.test: $(TEST_FILES)
+	filecheck $< > $@.result
+	@echo "Tested $<"
+
+.PHONY: all clean test
 
 # Toolchains
 FLEX = flex

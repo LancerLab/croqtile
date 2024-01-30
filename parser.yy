@@ -17,6 +17,7 @@ namespace Choreo { class Scanner; }
 
 %code top {
 
+#include <stdio.h>
 #include <iostream>
 #include <string>
 #include <cstring>
@@ -63,6 +64,23 @@ static Choreo::Parser::symbol_type yylex(Choreo::Scanner &scanner) {
 //#define yylex(x) scanner.get_next_token()
 
 }
+
+%{
+#include <stdio.h>
+extern int yylex();
+
+void choreo_info(const char *message) {
+    // fprintf(stderr, "Error: %s\n", s);
+  const char* GREEN = "\033[32m";
+  if (shell_supports_colors())
+      std::cerr << GREEN;
+  std::cerr << "Info: ";
+  if (shell_supports_colors())
+      std::cerr << reset;
+  std::cerr << message << std::endl;
+  std::cerr << "Info location: " << ::loc << std::endl;
+}
+%}
 
 // make yylex() expects one parameter of type 'Choreo::Scanner &'
 %lex-param { Choreo::Scanner &scanner  }
@@ -120,11 +138,18 @@ static Choreo::Parser::symbol_type yylex(Choreo::Scanner &scanner) {
 
 %%
 
+program
+  : /* match non-empty program */ program non_empty_program
+  | /* match empty program */ { Choreo::Parser::error("Empty Program"); exit(1); }
+  ;
 
-program:
-    program pass_by
-  | program dsl_function { print_wrapper_begin();  }
-  |                      { print_fixed_header();   }
+non_empty_program
+  : non_empty_program pass_by
+  | non_empty_program dsl_function { print_wrapper_begin();  }
+  | { 
+      printf("print fixed program header\n");
+      print_fixed_header();   
+    }
   ;
 
 pass_by:

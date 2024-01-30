@@ -1,0 +1,6 @@
+// RUN: choreo %s | FileCheck %s
+
+// smoke test for wrong program without contents
+// also test comment utils, correctly ignored by flex scanner
+
+// CHECK-NOT: hello

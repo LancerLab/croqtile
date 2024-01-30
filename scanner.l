@@ -38,6 +38,8 @@ num   [0-9]+
 blank [ \t\r]
 
 %%
+\/\/[^\n]*              ; // ignore comment line started from //
+
 <INITIAL>"__co__" {
   BEGIN(CO_FUNCTION);
   return Choreo::Parser::make_ATTR_CO(yytext, loc);
