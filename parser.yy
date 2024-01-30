@@ -11,8 +11,14 @@
 %locations
 
 %code requires {
+
 #include <string>
+#include <fstream>
+#include <cstdlib>
+#include <getopt.h>
+
 namespace Choreo { class Scanner; }
+
 }
 
 %code top {
@@ -29,7 +35,7 @@ namespace Choreo { class Scanner; }
 extern char* yytext;
 extern Choreo::location loc;
 
-AST::Program* root;
+AST::Program root;
 AST::SymbolTable symtab;
 
 const char* red = "\033[31m";
@@ -57,11 +63,18 @@ static inline void print_wrapper_begin() {
   std::cout << "  p([&](auto target_name) {\n";
 }
 
+static inline void print_wrapper_end() {
+  std::cout << "TEST(DoradoBasicTest, SimpleAddtest) {\n";
+  std::cout << "  };\n";
+  std::cout << "};\n";
+}
+
 static Choreo::Parser::symbol_type yylex(Choreo::Scanner &scanner) {
   return scanner.get_next_token();
 }
 
 //#define yylex(x) scanner.get_next_token()
+
 
 }
 
@@ -130,35 +143,39 @@ void choreo_info(const char *message) {
 
 // non-terminals
 //%nterm <std::shared_ptr<AST::Node>> mdspans_decl mindices_decl statements value expr
-%nterm <std::shared_ptr<AST::Node>> statements value expr
+%nterm <std::shared_ptr<AST::Node>> statement value expr
+%nterm <std::shared_ptr<AST::Statements>> statements
 %nterm <std::shared_ptr<AST::MdimSpans>> init_list
 %nterm <std::shared_ptr<AST::Node>> pass_by
 %nterm <AST::BaseType> base_type
 %nterm <std::shared_ptr<AST::DataType>> general_type aggregate_type
+%nterm <std::shared_ptr<AST::ParamList>> parameter_list
+%nterm <std::shared_ptr<AST::ParamType>> parameter
+%nterm <std::shared_ptr<AST::ChoreoFunction>> dsl_function
 
 %%
 
-program
-  : /* match non-empty program */ program non_empty_program
-  | /* match empty program */ { Choreo::Parser::error("Empty Program"); exit(1); }
-  ;
-
-non_empty_program
-  : non_empty_program pass_by
-  | non_empty_program dsl_function { print_wrapper_begin();  }
-  | { 
-      printf("print fixed program header\n");
-      print_fixed_header();   
-    }
+program:
+    /* Empty */ {}
+  | program pass_by      { root.nodes.push_back($2); }
+  | program dsl_function { root.nodes.push_back($2); }
+  | END {  }
   ;
 
 pass_by:
-    CPP_CODE { $$ = std::make_shared<AST::CppSourceCode>($1); }
+    CPP_CODE {
+      $$ = std::make_shared<AST::CppSourceCode>($1);
+    }
     ;
 
 dsl_function:
-    ATTR_CO general_type IDENTIFIER LPAREN parameters_list RPAREN LBRACE statements RBRACE {
-      std::cout << $3 << std::endl;
+    ATTR_CO general_type IDENTIFIER LPAREN parameter_list RPAREN LBRACE statements RBRACE {
+      $$ = std::make_shared<AST::ChoreoFunction>();
+      $$->name = $3;
+      $$->decls.name = $3;
+      $$->decls.ret_type = $2;
+      $$->decls.params = $5;
+      $$->states = $8;
     }
     ;
 
@@ -218,20 +235,28 @@ value:
     	}
      ;
 
-parameters_list:
+parameter_list:
     /* Empty */
-    | parameters_list COMMA parameter { /* handle multiple parameters here */ }
-    | parameter { /* handle single parameter here */ }
+      {  $$ = std::make_shared<AST::ParamList>();}
+    | parameter_list COMMA parameter { 
+        $$->values.push_back($3);
+      }
+    | parameter {
+        $$ = std::make_shared<AST::ParamList>();
+        $$->values.push_back($1);
+      }
     ;
 
 parameter:
-    general_type IDENTIFIER { /* handle parameter type and name here */ }
-    /* | general_type {} */
+    general_type IDENTIFIER { /* handle parameter type and name here */
+      $$ = std::make_shared<AST::ParamType>(std::pair($1, std::make_shared<AST::Identifier>($2)));
+    }
     ;
 
 statements: /* Empty */
+    { $$ = std::make_shared<AST::Statements>(); }
     | statements statement
-    {}
+    { $$->subs.push_back($2); }
     ;
 
 statement:
@@ -335,6 +360,7 @@ indices: IDENTIFIER
 
 %%
 
+
 // Bison expects us to provide implementation - otherwise linker complains
 void Choreo::Parser::error(const location &loc , const std::string &message) {
   if (shell_supports_colors())
@@ -343,14 +369,71 @@ void Choreo::Parser::error(const location &loc , const std::string &message) {
   if (shell_supports_colors())
       std::cerr << reset;
   std::cerr << message << std::endl;
-  std::cerr << "Error location: " << ::loc << std::endl;
+  std::cerr << "Error location: " << loc << std::endl;
 }
 
-int main() {
-//  print_fixed_header();
+int main(int argc, char* argv[]) {
+	std::string filename;
+	bool debugMode = false;
+	bool dumpAST = false;
+
+	// Define long options
+	static struct option long_options[] = {
+			{"debug", no_argument, 0, 'd'},
+			{"dump-ast", no_argument, 0, 'e'},
+			{0, 0, 0, 0}
+	};
+
+	// Parse command-line options
+	int opt;
+	int option_index = 0;
+	while ((opt = getopt_long(argc, argv, "de", long_options, &option_index)) != -1) {
+		switch (opt) {
+			case 'd':
+					debugMode = true;
+					break;
+			case 'e':
+					dumpAST = true;
+					break;
+			case '?':
+					// getopt_long already printed an error message
+					return 1;
+			default:
+					break;
+		}
+	}
+
+	if (optind >= argc) {
+    std::cerr << "Usage: " << argv[0] << " <filename>\n";
+    return 1;
+	}
+
+  filename = argv[optind];
+
+  if (filename.empty()) {
+    std::cerr << "Usage: " << argv[0] << " <filename>\n";
+    return 1;
+  }
+
+	std::ifstream file(filename);
+	if (!file) {
+		std::cerr << "Could not open file: " << filename << std::endl;
+		return 1;
+	}
+
   Choreo::Scanner s;
+  s.yyrestart(file);
   Choreo::Parser p(s);
-//  p.set_debug_level(1); // This turns on debugging output
+
+	if (debugMode) {
+		std::cout << "Choreo: Debug is on." << std::endl;
+		p.set_debug_level(1); // Enable Bison debugging
+	}
+
   p.parse();
+
+  if (dumpAST)
+    root.Print(std::cout);
+
   return 0;
 }

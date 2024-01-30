@@ -1,0 +1,20 @@
+// RUN: choreo -e %s | FileCheck %s
+
+// recognize the __co__ function
+
+#include <iostream>
+
+// device program
+__co__ int foo(f32 d) {
+}
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: foo
+// CHECK:  `- Return type: int
+// CHECK:  `- Parameters
+// CHECK:    `-  type: f32, symbol: d
+
+// host program
+int bar(int a) {
+  return foo(a);
+}
