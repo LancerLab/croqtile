@@ -10,12 +10,34 @@
 
 namespace AST {
 
+template <typename T>
+using ptr = std::shared_ptr<T>;
+
 // Base class for all AST nodes
 struct Node {
   virtual ~Node() {}
   virtual void Print(std::ostream& os, const std::string& prefix = {}) const {
     (void)os;
     (void)prefix;
+  }
+};
+
+// Single node with reference to another
+struct NodeRef {
+  ptr<Node> val;
+  NodeRef(ptr<Node> n) : val(n) {}
+  virtual void Print(std::ostream& os, const std::string& prefix = {}) const {
+    val->Print(os, prefix);
+  }
+};
+
+// General cluster of nodes
+struct MultiNodes : public Node {
+  std::vector<ptr<NodeRef>> vals;
+  explicit MultiNodes(){};
+  void Append(ptr<NodeRef>& m) { vals.push_back(m); }
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    for (auto& v : vals) v->Print(os, prefix);
   }
 };
 
@@ -27,8 +49,7 @@ enum class StorageSpec { LOCAL, GLOBAL, SHARED };
 
 class Identifier;
 class DataType;
-using ParamType =
-    std::pair<std::shared_ptr<DataType>, std::shared_ptr<Identifier>>;
+using ParamType = std::pair<ptr<DataType>, ptr<Identifier>>;
 
 inline static BaseType getTypeFromString(const std::string& input) {
   static const std::map<std::string, BaseType> typeMap = {
@@ -56,49 +77,74 @@ inline static std::string getStringFrom(BaseType dataType) {
   assert(0 && "unsupported type.");
 }
 
+struct IntLiteral : public Node {
+  int value;
+  IntLiteral(int v) : value(v) {}
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << prefix << value;
+  }
+};
+
+struct IntList : public Node {
+  std::vector<ptr<IntLiteral>> values;
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << prefix << "[";
+    for (size_t i = 0; i < values.size() - 1; ++i)
+      os << values[i]->value << ", ";
+    os << values.back()->value << "]";
+  }
+};
+
 // Represents both dimensions and s like {3, 4, 5} or {1, 2, 1}
-struct MdimSpans : public Node {
-  std::vector<std::shared_ptr<Node>> values;
-  explicit MdimSpans() {}
-  MdimSpans(const std::vector<std::shared_ptr<Node>>& v) : values(v) {}
+struct MultiSpans : public Node {
+  ptr<IntList> list;
+  std::string name;  // could be anonymous
+  explicit MultiSpans(ptr<IntList>& l) : list(l) {}
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << "\n" << prefix << "`- Decl (span): ";
+    if (name.size() > 0)
+      os << name << " ";
+    else
+      os << "(anonymous) ";
+    list->Print(os);
+  }
 };
 
 // Represents declarations like: mdimspans d{3, 4, 5};
 struct MdimSpansDecl : public Node {
   std::string name;
-  std::shared_ptr<MdimSpans> spans;
-  MdimSpansDecl(const std::string& n, const std::shared_ptr<MdimSpans>& s)
+  ptr<MultiSpans> spans;
+  MdimSpansDecl(const std::string& n, const ptr<MultiSpans>& s)
       : name(n), spans(s) {}
 };
 
+#if 0
 // Represents data declarations like: global f32 data{d};
 struct DataDecl : public Node {
   StorageSpec storage;
   BaseType type;
   std::string name;
-  std::shared_ptr<MdimSpans>
-      mdspans;  // Refers to a previously declared MdimSpans
+  ptr<MultiSpans> mdspans;
   DataDecl(StorageSpec s, BaseType t, const std::string& n,
-           const std::shared_ptr<MdimSpans>& spans)
+           const ptr<MultiSpans>& spans)
       : storage(s), type(t), name(n), mdspans(spans) {}
 };
+#endif
 
 struct DataType : public Node {
   bool scalar;
   BaseType type;
-  std::shared_ptr<MdimSpans> mdspans;
+  ptr<MultiSpans> mdspans;
   DataType(BaseType t) : scalar(true), type(t) {}
-  DataType(BaseType t, const std::shared_ptr<MdimSpans>& spans)
+  DataType(BaseType t, ptr<MultiSpans>& spans)
       : scalar(false), type(t), mdspans(spans) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     if (scalar) os << prefix << getStringFrom(type);
   }
-};
-
-struct IntLiteral : public Node {
-  int value;
-  IntLiteral(int v) : value(v) {}
 };
 
 struct Identifier : public Node {
@@ -110,9 +156,9 @@ struct Identifier : public Node {
 };
 
 struct ParamList : public Node {
-  std::vector<std::shared_ptr<ParamType>> values;
+  std::vector<ptr<ParamType>> values;
   explicit ParamList() {}
-  ParamList(std::vector<std::shared_ptr<ParamType>>& v) : values(v) {}
+  ParamList(std::vector<ptr<ParamType>>& v) : values(v) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "Parameters";
@@ -124,14 +170,10 @@ struct ParamList : public Node {
   }
 };
 
-struct Statements : public Node {
-  std::vector<std::shared_ptr<Node>> subs;
-};
-
 struct FunctionDecl : public Node {
-  std::shared_ptr<DataType> ret_type;
   std::string name;
-  std::shared_ptr<ParamList> params;
+  ptr<DataType> ret_type;
+  ptr<ParamList> params;
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "Name: " << name;
@@ -141,16 +183,14 @@ struct FunctionDecl : public Node {
   }
 };
 
-struct Declaration : public Node {};
-
 struct ChoreoFunction : public Node {
   std::string name;
-  FunctionDecl decls;
-  std::shared_ptr<Statements> states;
+  FunctionDecl f_decl;
+  ptr<MultiNodes> statms;
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "ChoreoFunction";
-    decls.Print(os, prefix + " `- ");
-    states->Print(os, prefix + " ");
+    f_decl.Print(os, prefix + " `- ");
+    if (statms) statms->Print(os, prefix + " ");
   }
 };
 
@@ -164,12 +204,12 @@ struct CppSourceCode : public Node {
 };
 
 struct Expression : public Node {
-  std::vector<std::shared_ptr<Node>> exprs;
+  std::vector<ptr<Node>> exprs;
 };
 
 // Top-level program structure
 struct Program : public Node {
-  std::vector<std::shared_ptr<Node>> nodes;
+  std::vector<ptr<Node>> nodes;
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     for (auto& node : nodes) node->Print(os, "");
     (void)prefix;

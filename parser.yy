@@ -43,7 +43,7 @@ const char* reset = "\033[0m";
 
 static inline bool shell_supports_colors() {
 	const char* term = getenv("TERM");
-	return term && (strcmp(term, "xterm-256color") == 0 
+	return term && (strcmp(term, "xterm-256color") == 0
 							 || strcmp(term, "xterm") == 0);
 }
 
@@ -136,23 +136,22 @@ void choreo_info(const char *message) {
 %token <std::string> CPP_CODE
 %token <std::string> IDENTIFIER ATTR_CO DMA COPY
 // type related
-%token <std::string> MDSPANS MINDS LOCAL SHARED GLOBAL
+%token <std::string> MDSPAN MINDS LOCAL SHARED GLOBAL
 %token <AST::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT
 // control related
 %token <std::string> IF ELSE WITH ITER RET
 
 // non-terminals
-//%nterm <std::shared_ptr<AST::Node>> mdspans_decl mindices_decl statements value expr
-%nterm <std::shared_ptr<AST::Node>> statement value expr
-%nterm <std::shared_ptr<AST::Statements>> statements
-%nterm <std::shared_ptr<AST::MdimSpans>> init_list
-%nterm <std::shared_ptr<AST::Node>> pass_by
 %nterm <AST::BaseType> base_type
-%nterm <std::shared_ptr<AST::DataType>> general_type aggregate_type
-%nterm <std::shared_ptr<AST::ParamList>> parameter_list
-%nterm <std::shared_ptr<AST::ParamType>> parameter
-%nterm <std::shared_ptr<AST::ChoreoFunction>> dsl_function
-
+%nterm <AST::ptr<AST::Node>> pass_by
+%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments
+%nterm <AST::ptr<AST::NodeRef>> statement declaration value expr
+%nterm <AST::ptr<AST::IntList>> int_list
+%nterm <AST::ptr<AST::DataType>> general_type aggregate_type
+%nterm <AST::ptr<AST::ParamList>> parameter_list
+%nterm <AST::ptr<AST::ParamType>> parameter
+%nterm <AST::ptr<AST::ChoreoFunction>> dsl_function
+%nterm <AST::ptr<AST::MultiSpans>> named_span_decl
 %%
 
 program:
@@ -172,21 +171,21 @@ dsl_function:
     ATTR_CO general_type IDENTIFIER LPAREN parameter_list RPAREN LBRACE statements RBRACE {
       $$ = std::make_shared<AST::ChoreoFunction>();
       $$->name = $3;
-      $$->decls.name = $3;
-      $$->decls.ret_type = $2;
-      $$->decls.params = $5;
-      $$->states = $8;
+      $$->f_decl.name = $3;
+      $$->f_decl.ret_type = $2;
+      $$->f_decl.params = $5;
+      $$->statms = $8;
     }
     ;
 
 general_type:
       base_type { $$ = std::make_shared<AST::DataType>($1); }
-    | aggregate_type { $$ = $1; }
+    | aggregate_type { /*$$ = std::make_shared<AST::NodeRef>($1);*/ }
     ;
 
 aggregate_type:
 	    base_type LBRAC IDENTIFIER RBRAC { $$ = std::make_shared<AST::DataType>($1); }
-    | base_type LBRAC init_list RBRAC  { $$ = std::make_shared<AST::DataType>($1, $3); }
+/*    | base_type LBRAC int_list RBRAC  { } */
 
 base_type: F32   { $$ = $1; }
          | F16   { $$ = $1; }
@@ -200,46 +199,39 @@ base_type: F32   { $$ = $1; }
          | INT   { $$ = $1; }
          ;
 
-init_list:
-      init_list COMMA NUM
-      {  
+int_list: int_list COMMA NUM {
 				$1->values.push_back(std::make_shared<AST::IntLiteral>($3));
 				$$ = $1;
-      }
-    | NUM
-      { 
-				$$ = std::make_shared<AST::MdimSpans>();
+        }
+      | NUM {
+				$$ = std::make_shared<AST::IntList>();
 				$$->values.push_back(std::make_shared<AST::IntLiteral>($1));
       }
+      ;
 
 
-/* for now we only support init_list with constants
-init_list: value
-						{
-								$$ = std::make_shared<AST::MdimSpans>();
-								$$->values.push_back($1);
-						}
-         | init_list COMMA value
-            {  
-				        $1->values.push_back($3);
-								$$ = $1;
-            }
-         ;
-
+/* for now we only support int_list with constants
+value_list:
+      value {
+          $$ = std::make_shared<AST::IntList>();
+          $$->values.push_back($1);
+        }
+      | value_list COMMA value {  $$->values.push_back($3); }
+     ;
 */
 
-value: 
-      NUM { $$ = std::make_shared<AST::IntLiteral>($1); }
+value: NUM { $$->val = std::make_shared<AST::IntLiteral>($1); }
     | IDENTIFIER {
-        $$ = std::make_shared<AST::Identifier>($1);
+        $$->val = std::make_shared<AST::Identifier>($1);
     	}
      ;
 
 parameter_list:
     /* Empty */
       {  $$ = std::make_shared<AST::ParamList>();}
-    | parameter_list COMMA parameter { 
-        $$->values.push_back($3);
+    | parameter_list COMMA parameter {
+        $1->values.push_back($3);
+        $$ = $1;
       }
     | parameter {
         $$ = std::make_shared<AST::ParamList>();
@@ -253,38 +245,61 @@ parameter:
     }
     ;
 
-statements: /* Empty */
-    { $$ = std::make_shared<AST::Statements>(); }
-    | statements statement
-    { $$->subs.push_back($2); }
+statements
+    : /* no statement */ { $$ = std::make_shared<AST::MultiNodes>(); }
+    | statements statement {
+        $1->Append($2);
+        $$ = $1;
+      }
     ;
 
-statement:
-      declaration SEMCOL
-    | assignments SEMCOL
+statement
+    : declarations SEMCOL { $$ = std::make_shared<AST::NodeRef>($1); }
+    | assignments SEMCOL  { $$ = std::make_shared<AST::NodeRef>($1); }
     | if_else
     | with_loop
     ;
 
-assignments:
-      assignments COMMA assignment
+assignments
+    : assignments COMMA assignment
     | assignment
     ;
 
+declarations:
+      declarations SEMCOL declaration {
+        $1->Append($3);
+        $$ = $1;
+      }
+    | declaration {
+        $$ = std::make_shared<AST::MultiNodes>();
+        $$->Append($1);
+      }
+
 declaration:
+      named_span_decl { $$ = std::make_shared<AST::NodeRef>($1); }
+    | scalar_decl
+    ;
+
+scalar_decl:
       base_type IDENTIFIER LBRACE NUM RBRACE
       {
       }
-    | storage_specifier MDSPANS IDENTIFIER LBRACE init_list RBRACE
-      {
-                //MdimSpansType dims;
-                //dims.dimensions = $4;
-//                store_dims($2, dims);  // Assuming you have this function to store the dimensions
+      ;
+
+named_span_decl:
+      MDSPAN IDENTIFIER ASSIGN LBRACE int_list RBRACE {
+        $$ = std::make_shared<AST::MultiSpans>($5);
+        $$->name = $2;
       }
-    | storage_specifier MINDS IDENTIFIER LBRAC init_list RBRAC
-      {
+      | IDENTIFIER COL LBRACE int_list RBRACE {
+        $$ = std::make_shared<AST::MultiSpans>($4);
+        $$->name = $1;
       }
-    ;
+      ;
+//    | MINDS IDENTIFIER LBRAC int_list RBRAC
+//      {
+//      }
+//    ;
 
 storage_specifier: LOCAL | SHARED | GLOBAL;
 
@@ -355,7 +370,7 @@ source_to_dest:
 ind_expr: LBRAC indices RBRAC
 
 indices: IDENTIFIER
-    | init_list
+/*    | int_list */
 
 
 %%
@@ -426,8 +441,9 @@ int main(int argc, char* argv[]) {
   Choreo::Parser p(s);
 
 	if (debugMode) {
-		std::cout << "Choreo: Debug is on." << std::endl;
+		std::cout << "Choreo: Debug of parsing is switched on." << std::endl;
 		p.set_debug_level(1); // Enable Bison debugging
+    Choreo::Scanner::SetDebug();
 	}
 
   p.parse();

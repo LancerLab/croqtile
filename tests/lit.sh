@@ -17,7 +17,9 @@ if ! which choreo &>/dev/null; then
     exit 1
 fi
 
-echo "Choreo SimpleLit - v0.1"
+echo "---------------------------------------"
+echo "        Choreo SimpleLit - v0.1"
+echo "---------------------------------------"
 echo ""
 
 failed_commands=()
@@ -28,8 +30,9 @@ num_tested=0
 execute_command() {
     local file=$1
     local command=$2
+    local count=$3
+    local total=$4
 
-    echo "Testing: $file"
     # Replace %s with the filename
     command=${command//%s/"$file"}
 
@@ -40,10 +43,14 @@ execute_command() {
     num_tested=$(($num_tested + 1))
 
     # Execute the command
-    eval "$command"
+    eval "$command" 2>/dev/null
 
-    if [[ $? -eq 0 ]]; then num_passed=$(($num_passed + 1));
-    else failed_commands+=("$command");
+    if [[ $? -eq 0 ]]; then
+      num_passed=$(($num_passed + 1));
+      echo "PASS: $file ($count of $total)"
+    else
+      failed_commands+=("$command");
+      echo "FAIL: $file ($count of $total)"
     fi
 }
 
@@ -62,21 +69,29 @@ fi
 # Iterate over the array
 for file in "${files_array[@]}"; do
     # Read the file and search for lines starting with "// RUN:"
+    run_num=$(grep "RUN:" $file | wc -l)
+    run_count=0
     while IFS= read -r line; do
         if [[ $line =~ ^//[[:blank:]]*RUN:[[:blank:]]*(.+) ]]; then
+            run_count=$(($run_count + 1))
             # Extract the command after "RUN:"
             run_command="${BASH_REMATCH[1]}"
             # Execute the command with replacements
-            execute_command "$file" "$run_command"
+            execute_command "$file" "$run_command" "$run_count" "$run_num"
         fi
     done < "$file"
 done
 
 echo ""
+echo "------ Lit Test summary ------"
 echo "Tested: $num_tested"
 echo "Passed: $num_passed"
+
 if [[ $num_passed -ne $num_tested ]]; then
   echo "Failed: $(($num_tested - $num_passed))"
+  echo ""
+
+  echo "Commands to reproduce failures:"
   for com in "${failed_commands[@]}"; do
     echo $com;
   done

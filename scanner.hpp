@@ -29,7 +29,6 @@
 #ifndef __CHOREO_SCANNER_H__
 #define __CHOREO_SCANNER_H__
 
-
 /**
  * Generated Flex class name is yyFlexLexer by default. If we want to use more flex-generated
  * classes we should name them differently. See scanner.l prefix option.
@@ -63,6 +62,13 @@ public:
 	virtual ~Scanner() {}
 	virtual Parser::symbol_type get_next_token();
         
+public:
+  static void Debug(std::string s);
+  static void SetDebug(bool d = true) { debug = d; }
+
+private:
+  static bool debug;
+
 //private:
 //    Interpreter &m_driver;
 };

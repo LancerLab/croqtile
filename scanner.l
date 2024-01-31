@@ -32,29 +32,41 @@ Choreo::location loc;
 
 %}
 
-%x CO_FUNCTION
+%x CO_FUNC
 
-id    [a-zA-Z][a-zA-Z_0-9]*
+id    [a-zA-Z_][a-zA-Z0-9_]*
 num   [0-9]+
 blank [ \t\r]
 
 %%
-"//".*     {}  // Ignore everything from // to the end of the line
+<INITIAL>"//".*   {
+  return Choreo::Parser::make_CPP_CODE(yytext, loc);
+}
 <INITIAL>"__co__" {
-  BEGIN(CO_FUNCTION);
-  //  std::cout << "entering co state " << std::endl;
+  BEGIN(CO_FUNC);
+  Choreo::Scanner::Debug("Entering Choreo Function");
   return Choreo::Parser::make_ATTR_CO(yytext, loc);
 }
-<INITIAL>. { return Choreo::Parser::make_CPP_CODE(yytext, loc); } // This matches everything outside the __co__ functions.
-<INITIAL>\n+ { return Choreo::Parser::make_CPP_CODE(yytext, loc); }
+<INITIAL>.  {
+  Choreo::Scanner::Debug("token (char): " + std::string(yytext));
+  return Choreo::Parser::make_CPP_CODE(yytext, loc);
+} // This matches everything outside the __co__ functions.
+<INITIAL>\n+ {
+  Choreo::Scanner::Debug("token (newline)");
+  return Choreo::Parser::make_CPP_CODE(yytext, loc);
+}
 <INITIAL><<EOF>> { return Choreo::Parser::make_END(loc); }
 
 
-<CO_FUNCTION>{
+<CO_FUNC>{
   {blank}+   {}
   \n+        {}
   {num}      return Choreo::Parser::make_NUM(std::stoi(yytext), loc);
-  "mdspans"  return Choreo::Parser::make_MDSPANS(yytext, loc);
+  "//".*     {}  // Ignore everything from // to the end of the line
+  "mdspan"   {
+    Choreo::Scanner::Debug("token (keyword): " + std::string(yytext));
+    return Choreo::Parser::make_MDSPAN(yytext, loc);
+  }
   "minds"    return Choreo::Parser::make_MINDS(yytext, loc);
   "local"    return Choreo::Parser::make_LOCAL(yytext, loc);
   "shared"   return Choreo::Parser::make_SHARED(yytext, loc);
@@ -102,12 +114,10 @@ blank [ \t\r]
                }
                return Choreo::Parser::make_RBRACE(loc);
              }
-  [a-zA-Z_][a-zA-Z0-9_]* {
-              return Choreo::Parser::make_IDENTIFIER(yytext, loc); }
-
+  {id}       { return Choreo::Parser::make_IDENTIFIER(yytext, loc); }
   .          { return Choreo::Parser::make_CHAR(yytext[0], loc); } // Any other single character within the function
 
-} // state <CO_FUNCTION>
+} // state <CO_FUNC>
 
 %%
 
@@ -115,3 +125,7 @@ blank [ \t\r]
 int yywrap() {
     return 1;
 }
+
+bool Choreo::Scanner::debug = false;
+void Choreo::Scanner::Debug(std::string s) { if (debug) std::cout << "[scanner] " << s << std::endl; }
+
