@@ -8,7 +8,7 @@ __kernel__ int bar(int d) {
 // device program
 __co__ int foo(f32 d[]) {
   mdspan ndims = {100, 100};  // shape, mdspan node
-  mdspan idz = [10, 10];      // conceptual tiling/slice/stride
+  ituple idz = [10, 10];      // conceptual tiling/slice/stride
   shared f32<ndims> shared_buffer; // location, shape -> scratchpad memory, lifetime management
   local f32<ndims> local_buffer;
 

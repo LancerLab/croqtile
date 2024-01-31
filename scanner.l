@@ -63,10 +63,8 @@ blank [ \t\r]
   \n+        {}
   {num}      return Choreo::Parser::make_NUM(std::stoi(yytext), loc);
   "//".*     {}  // Ignore everything from // to the end of the line
-  "mdspan"   {
-    Choreo::Scanner::Debug("token (keyword): " + std::string(yytext));
-    return Choreo::Parser::make_MDSPAN(yytext, loc);
-  }
+  "mdspan"   return Choreo::Parser::make_MDSPAN(yytext, loc);
+  "ituple"   return Choreo::Parser::make_ITUPLE(yytext, loc);
   "minds"    return Choreo::Parser::make_MINDS(yytext, loc);
   "local"    return Choreo::Parser::make_LOCAL(yytext, loc);
   "shared"   return Choreo::Parser::make_SHARED(yytext, loc);
@@ -106,8 +104,8 @@ blank [ \t\r]
   ":"        return Choreo::Parser::make_COL    (loc);
   "("        return Choreo::Parser::make_LPAREN (loc);
   ")"        return Choreo::Parser::make_RPAREN (loc);
-  "["        return Choreo::Parser::make_LBRAC  (loc);
-  "]"        return Choreo::Parser::make_RBRAC  (loc);
+  "["        return Choreo::Parser::make_LBRAKT (loc);
+  "]"        return Choreo::Parser::make_RBRAKT (loc);
   "{"        { scope++; return Choreo::Parser::make_LBRACE(loc); }
   "}"        { if (--scope == 0) {
                  BEGIN(INITIAL);

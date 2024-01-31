@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "symtab.hpp"
 
 namespace AST {
 
@@ -24,25 +25,22 @@ struct Node {
 
 // Single node with reference to another
 struct NodeRef {
-  ptr<Node> val;
-  NodeRef(ptr<Node> n) : val(n) {}
+  ptr<Node> value;
+  NodeRef(ptr<Node> n) : value(n) {}
   virtual void Print(std::ostream& os, const std::string& prefix = {}) const {
-    val->Print(os, prefix);
+    value->Print(os, prefix);
   }
 };
 
 // General cluster of nodes
 struct MultiNodes : public Node {
-  std::vector<ptr<NodeRef>> vals;
+  std::vector<ptr<NodeRef>> values;
   explicit MultiNodes(){};
-  void Append(ptr<NodeRef>& m) { vals.push_back(m); }
+  void Append(ptr<NodeRef>& m) { values.push_back(m); }
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    for (auto& v : vals) v->Print(os, prefix);
+    for (auto& v : values) v->Print(os, prefix);
   }
 };
-
-// For types like f32, f16, etc.
-enum class BaseType { F32, F16, BF16, U32, S32, U16, S16, U8, S8, INT };
 
 // For storage specifiers like local, global, shared
 enum class StorageSpec { LOCAL, GLOBAL, SHARED };
@@ -89,6 +87,8 @@ struct IntLiteral : public Node {
 struct IntList : public Node {
   std::vector<ptr<IntLiteral>> values;
 
+  void Append(ptr<IntLiteral> v) { values.push_back(v); }
+
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix << "[";
     for (size_t i = 0; i < values.size() - 1; ++i)
@@ -97,11 +97,27 @@ struct IntList : public Node {
   }
 };
 
+struct SValList : public Node {
+  std::vector<ptr<Node>> values;
+
+  void Append(ptr<Node> v) { values.push_back(v); }
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << prefix << "[";
+    for (size_t i = 0; i < values.size() - 1; ++i) {
+      values[i]->Print(os);
+      os << ", ";
+    }
+    values.back()->Print(os);
+    os << "]";
+  }
+};
+
 // Represents both dimensions and s like {3, 4, 5} or {1, 2, 1}
 struct MultiSpans : public Node {
-  ptr<IntList> list;
   std::string name;  // could be anonymous
-  explicit MultiSpans(ptr<IntList>& l) : list(l) {}
+  ptr<IntList> list;
+  explicit MultiSpans(std::string &n, ptr<IntList>& l) : name(n), list(l) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Decl (span): ";
@@ -113,12 +129,20 @@ struct MultiSpans : public Node {
   }
 };
 
-// Represents declarations like: mdimspans d{3, 4, 5};
-struct MdimSpansDecl : public Node {
-  std::string name;
-  ptr<MultiSpans> spans;
-  MdimSpansDecl(const std::string& n, const ptr<MultiSpans>& s)
-      : name(n), spans(s) {}
+// Represents declarations like: ituple t = {3, 4, 5};
+struct IntTuple : public Node {
+  std::string name;  // could be anonymous
+  ptr<SValList> value;
+  explicit IntTuple(std::string &n, ptr<SValList>& l) : name(n), value(l) {}
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << "\n" << prefix << "`- Decl (tuple): ";
+    if (name.size() > 0)
+      os << name << " ";
+    else
+      os << "(anonymous) ";
+    value->Print(os);
+  }
 };
 
 #if 0
@@ -141,6 +165,8 @@ struct DataType : public Node {
   DataType(BaseType t) : scalar(true), type(t) {}
   DataType(BaseType t, ptr<MultiSpans>& spans)
       : scalar(false), type(t), mdspans(spans) {}
+
+  BaseType getBaseType() const { return type; }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     if (scalar) os << prefix << getStringFrom(type);

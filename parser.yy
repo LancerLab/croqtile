@@ -111,8 +111,8 @@ void choreo_info(const char *message) {
   RPAREN  ")"
   LBRACE  "{"
   RBRACE  "}"
-  LBRAC   "["
-  RBRAC   "]"
+  LBRAKT  "["
+  RBRAKT  "]"
   COMMA   ","
   SEMCOL  ";"
   COL     ":"
@@ -136,22 +136,25 @@ void choreo_info(const char *message) {
 %token <std::string> CPP_CODE
 %token <std::string> IDENTIFIER ATTR_CO DMA COPY
 // type related
-%token <std::string> MDSPAN MINDS LOCAL SHARED GLOBAL
+%token <std::string> MDSPAN ITUPLE MINDS LOCAL SHARED GLOBAL
 %token <AST::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT
 // control related
 %token <std::string> IF ELSE WITH ITER RET
 
 // non-terminals
 %nterm <AST::BaseType> base_type
-%nterm <AST::ptr<AST::Node>> pass_by
+%nterm <AST::ptr<AST::Node>> pass_by sval_ref
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments
-%nterm <AST::ptr<AST::NodeRef>> statement declaration value expr
+%nterm <AST::ptr<AST::NodeRef>> statement declaration expr
 %nterm <AST::ptr<AST::IntList>> int_list
+%nterm <AST::ptr<AST::SValList>> sval_list
 %nterm <AST::ptr<AST::DataType>> general_type aggregate_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
 %nterm <AST::ptr<AST::ParamType>> parameter
 %nterm <AST::ptr<AST::ChoreoFunction>> dsl_function
 %nterm <AST::ptr<AST::MultiSpans>> named_span_decl
+%nterm <AST::ptr<AST::IntTuple>> named_tuple_decl
+
 %%
 
 program:
@@ -183,52 +186,74 @@ general_type:
     | aggregate_type { /*$$ = std::make_shared<AST::NodeRef>($1);*/ }
     ;
 
-aggregate_type:
-	    base_type LBRAC IDENTIFIER RBRAC { $$ = std::make_shared<AST::DataType>($1); }
-/*    | base_type LBRAC int_list RBRAC  { } */
+aggregate_type
+    : base_type LBRAKT IDENTIFIER RBRAKT { $$ = std::make_shared<AST::DataType>($1); }
+/*    | base_type LBRAKT int_list RBRAKT  { } */
+    ;
 
-base_type: F32   { $$ = $1; }
-         | F16   { $$ = $1; }
-         | BF16  { $$ = $1; }
-         | U16   { $$ = $1; }
-         | S16   { $$ = $1; }
-         | U8    { $$ = $1; }
-         | S8    { $$ = $1; }
-         | U32   { $$ = $1; }
-         | S32   { $$ = $1; }
-         | INT   { $$ = $1; }
-         ;
+base_type
+    : F32   { $$ = $1; }
+    | F16   { $$ = $1; }
+    | BF16  { $$ = $1; }
+    | U16   { $$ = $1; }
+    | S16   { $$ = $1; }
+    | U8    { $$ = $1; }
+    | S8    { $$ = $1; }
+    | U32   { $$ = $1; }
+    | S32   { $$ = $1; }
+    | INT   { $$ = $1; }
+    ;
 
-int_list: int_list COMMA NUM {
-				$1->values.push_back(std::make_shared<AST::IntLiteral>($3));
-				$$ = $1;
-        }
-      | NUM {
-				$$ = std::make_shared<AST::IntList>();
-				$$->values.push_back(std::make_shared<AST::IntLiteral>($1));
+int_list
+    : /* allows the empty list */ {
+        $$ = std::make_shared<AST::IntList>();
       }
-      ;
+    | int_list COMMA NUM {
+        $1->Append(std::make_shared<AST::IntLiteral>($3));
+        $$ = $1;
+      }
+    | NUM {
+        $$ = std::make_shared<AST::IntList>();
+        $$->values.push_back(std::make_shared<AST::IntLiteral>($1));
+      }
+    ;
 
+sval_list
+    : /* allows the empty list */ {
+    std::cout << "empty val." << std::endl;
+        $$ = std::make_shared<AST::SValList>();
+      }
+    | sval_list COMMA sval_ref {
+    std::cout << "multiple val." << std::endl;
+        $1->Append($3);
+        $$ = $1;
+      }
+    | sval_ref {
+    std::cout << "single val" << std::endl;
+        $$ = std::make_shared<AST::SValList>();
+        $$->Append($1);
+      }
+    ;
 
-/* for now we only support int_list with constants
-value_list:
-      value {
-          $$ = std::make_shared<AST::IntList>();
-          $$->values.push_back($1);
-        }
-      | value_list COMMA value {  $$->values.push_back($3); }
-     ;
-*/
-
-value: NUM { $$->val = std::make_shared<AST::IntLiteral>($1); }
+sval_ref
+    : NUM { $$ = std::make_shared<AST::IntLiteral>($1); }
     | IDENTIFIER {
-        $$->val = std::make_shared<AST::Identifier>($1);
-    	}
-     ;
+        if (!symtab.exists($1))
+          Choreo::Parser::error(loc,
+            "ODR violation: the symbol has not been defined.");
 
-parameter_list:
-    /* Empty */
-      {  $$ = std::make_shared<AST::ParamList>();}
+        if (symtab.getSymbol($1)->isAggregate() ||
+            symtab.getSymbol($1)->getType() != AST::BaseType::INT)
+          Choreo::Parser::error(loc, "expecting a symbol of integer.");
+
+        $$ = std::make_shared<AST::Identifier>($1);
+    	}
+    ;
+
+parameter_list
+    : /* Empty */ {
+        $$ = std::make_shared<AST::ParamList>();
+      }
     | parameter_list COMMA parameter {
         $1->values.push_back($3);
         $$ = $1;
@@ -239,10 +264,15 @@ parameter_list:
       }
     ;
 
-parameter:
-    general_type IDENTIFIER { /* handle parameter type and name here */
-      $$ = std::make_shared<AST::ParamType>(std::pair($1, std::make_shared<AST::Identifier>($2)));
-    }
+parameter
+    : general_type IDENTIFIER { /* handle parameter type and name here */
+        $$ = std::make_shared<AST::ParamType>(std::pair($1, std::make_shared<AST::Identifier>($2)));
+        if (symtab.exists($2)) {
+          Choreo::Parser::error(loc, "the symbol is already defined.");
+          exit(1);
+        }
+        symtab.addSymbol($2, $1->getBaseType());
+      }
     ;
 
 statements
@@ -277,6 +307,7 @@ declarations:
 
 declaration:
       named_span_decl { $$ = std::make_shared<AST::NodeRef>($1); }
+    | named_tuple_decl { $$ = std::make_shared<AST::NodeRef>($1);  }
     | scalar_decl
     ;
 
@@ -288,18 +319,21 @@ scalar_decl:
 
 named_span_decl:
       MDSPAN IDENTIFIER ASSIGN LBRACE int_list RBRACE {
-        $$ = std::make_shared<AST::MultiSpans>($5);
-        $$->name = $2;
+        $$ = std::make_shared<AST::MultiSpans>($2, $5);
       }
       | IDENTIFIER COL LBRACE int_list RBRACE {
-        $$ = std::make_shared<AST::MultiSpans>($4);
-        $$->name = $1;
+        $$ = std::make_shared<AST::MultiSpans>($1, $4);
       }
       ;
-//    | MINDS IDENTIFIER LBRAC int_list RBRAC
-//      {
-//      }
-//    ;
+
+named_tuple_decl:
+      ITUPLE IDENTIFIER ASSIGN LBRAKT sval_list RBRAKT {
+        $$ = std::make_shared<AST::IntTuple>($2, $5);
+      }
+      | IDENTIFIER COL LBRAKT sval_list RBRAKT {
+        $$ = std::make_shared<AST::IntTuple>($1, $4);
+      }
+      ;
 
 storage_specifier: LOCAL | SHARED | GLOBAL;
 
@@ -309,12 +343,12 @@ assignment: IDENTIFIER ASSIGN expr
     ;
 
 expr:
-	    expr PLUS value { std::cout << $1 << " + " << $3; }
-    | expr MINUS value { std::cout << $1 << " - " << $3; }
-    | expr STAR value { std::cout << $1 << " * " << $3; }
-    | expr SLASH value { std::cout << $1 << " / " << $3; }
-    | expr PECET value { std::cout << $1 << " % " << $3; }
-    | value
+	    expr PLUS sval_ref { std::cout << $1 << " + " << $3; }
+    | expr MINUS sval_ref { std::cout << $1 << " - " << $3; }
+    | expr STAR sval_ref { std::cout << $1 << " * " << $3; }
+    | expr SLASH sval_ref { std::cout << $1 << " / " << $3; }
+    | expr PECET sval_ref { std::cout << $1 << " % " << $3; }
+    | sval_ref
     ;
 
 if_else:
@@ -322,7 +356,7 @@ if_else:
     |  if_clause else_clause
 
 if_clause:
-       IF LBRAC cmp_expr RBRAC LBRACE statements RBRACE
+       IF LBRAKT cmp_expr RBRAKT LBRACE statements RBRACE
     ;
 
 else_clause:
@@ -361,13 +395,13 @@ iterate_clause:
     ;
 
 data_move: /* Empty */
-    | DMA COL value source_to_dest SEMCOL
-    | COPY COL value source_to_dest SEMCOL
+    | DMA COL sval_ref source_to_dest SEMCOL
+    | COPY COL sval_ref source_to_dest SEMCOL
 
 source_to_dest:
       IDENTIFIER ind_expr TRANS IDENTIFIER ind_expr
 
-ind_expr: LBRAC indices RBRAC
+ind_expr: LBRAKT indices RBRAKT
 
 indices: IDENTIFIER
 /*    | int_list */
