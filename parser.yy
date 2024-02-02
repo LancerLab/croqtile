@@ -154,6 +154,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::ChoreoFunction>> dsl_function
 %nterm <AST::ptr<AST::MultiSpans>> named_span_decl
 %nterm <AST::ptr<AST::IntTuple>> named_tuple_decl
+%nterm <AST::ptr<AST::IntVal>> scalar_decl
 
 %%
 
@@ -220,16 +221,13 @@ int_list
 
 sval_list
     : /* allows the empty list */ {
-    std::cout << "empty val." << std::endl;
         $$ = std::make_shared<AST::SValList>();
       }
     | sval_list COMMA sval_ref {
-    std::cout << "multiple val." << std::endl;
         $1->Append($3);
         $$ = $1;
       }
     | sval_ref {
-    std::cout << "single val" << std::endl;
         $$ = std::make_shared<AST::SValList>();
         $$->Append($1);
       }
@@ -240,7 +238,7 @@ sval_ref
     | IDENTIFIER {
         if (!symtab.exists($1))
           Choreo::Parser::error(loc,
-            "ODR violation: the symbol has not been defined.");
+            "The symbol has not been defined.");
 
         if (symtab.getSymbol($1)->isAggregate() ||
             symtab.getSymbol($1)->getType() != AST::BaseType::INT)
@@ -268,7 +266,7 @@ parameter
     : general_type IDENTIFIER { /* handle parameter type and name here */
         $$ = std::make_shared<AST::ParamType>(std::pair($1, std::make_shared<AST::Identifier>($2)));
         if (symtab.exists($2)) {
-          Choreo::Parser::error(loc, "the symbol is already defined.");
+          Choreo::Parser::error(loc, "ODR violation: the symbol is already defined.");
           exit(1);
         }
         symtab.addSymbol($2, $1->getBaseType());
@@ -305,17 +303,22 @@ declarations:
         $$->Append($1);
       }
 
-declaration:
-      named_span_decl { $$ = std::make_shared<AST::NodeRef>($1); }
+declaration
+    : named_span_decl { $$ = std::make_shared<AST::NodeRef>($1); }
     | named_tuple_decl { $$ = std::make_shared<AST::NodeRef>($1);  }
-    | scalar_decl
+    | scalar_decl { $$ = std::make_shared<AST::NodeRef>($1);  }
     ;
 
-scalar_decl:
-      base_type IDENTIFIER LBRACE NUM RBRACE
-      {
+scalar_decl
+    : INT IDENTIFIER ASSIGN sval_ref {
+        if (symtab.exists($2)) {
+          Choreo::Parser::error(loc, "ODR violation: the symbol is already defined.");
+          exit(1);
+        }
+        symtab.addSymbol($2, $1);
+        $$ = std::make_shared<AST::IntVal>($2, $4);
       }
-      ;
+    ;
 
 named_span_decl:
       MDSPAN IDENTIFIER ASSIGN LBRACE int_list RBRACE {

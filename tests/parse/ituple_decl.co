@@ -1,4 +1,4 @@
-// RUN: choreo -e %s | FileCheck %s
+// RUN: choreo -e %s | FileCheck --match-full-lines %s
 
 __co__ bf16 tuple_decls(int a, int b) {
   nvals : [100, 10, 1, b];

@@ -145,6 +145,22 @@ struct IntTuple : public Node {
   }
 };
 
+struct IntVal: public Node {
+  std::string name;  // could be anonymous
+  ptr<Node> value;
+  explicit IntVal(std::string &n, ptr<Node>& v) : name(n), value(v) {}
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << "\n" << prefix << "`- Decl (int): ";
+    if (name.size() > 0)
+      os << name << " ";
+    else
+      os << "(anonymous) ";
+    os << "= ";
+    value->Print(os);
+  }
+};
+
 #if 0
 // Represents data declarations like: global f32 data{d};
 struct DataDecl : public Node {
