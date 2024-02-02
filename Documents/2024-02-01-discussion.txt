@@ -1,0 +1,158 @@
+#include <iostream>
+
+// kernel program
+__kernel__ int bar(float a[], int size) {
+  int sum = 0;
+  for (int i = 0; i < size; ++i)
+    sum += a[i];
+  return sum;
+}
+
+mdspan: {}
+ituple: []
+
+// device program
+__co__ int parallel_reduce(f32 d0, int size, int sip_cnt) {
+  int sum = 0;
+
+  // set the dimensions of the input data
+  d0.set_dims({size, 1});
+
+  // parallel means:
+  //
+  //   1. p is [0-5];
+  //   2. 6 invokation on different SIP
+  //
+
+ {6}
+  sip_idx -> p
+  sip_count -> p 
+  dimensions -> d0
+
+  p
+  p.upper_bound
+  d0.dimAT(0)
+  d1.dimAT(1)
+
+  // 1-dimensional
+  parallel p by {size} dcb [6, 1] do {
+  parallel p by {6, 1} do {
+
+    // Keyword 'chunkAt':
+    //   generate CHUNK_AT expression, which set the lower bound
+    //   and the size for dma expression.
+    //
+    //  offset_begin = d0.size / 6 * p;
+    //  offset_end =
+    //      (d0.size / 6 * (p + 1)) < d0.size) ?
+    //      (d0.size / 6 * (p + 1)) : d0.size;
+    //  dma_transfer_size = offset_begin - offset_end;
+    //
+    //  Discussion:
+    //    should we assert when 6 can not be divided evenly by d0.size?
+    // 
+
+    dt0 = dte.linear d0.chunkAt(p)->shared;
+          dte.tranpose d0.addrAt()
+
+    // Keyword 'dcb' (Decomposed by).
+    //   It generate higher dimensional span with the given span
+    // 
+    // For example:
+    //  the span {size/p}  is decomposed-by (dcb) 10 to produce a span of
+    //  {size/p/10, 10}
+    //
+    //  span dcb ituple -> span: {a, b} dcb [10, 2] -> {a/10, 10, b/2, 2}
+ao, ai, bo, bi = sched.tiling(a, b, [10, 2])
+    ndims = {size / p} dcb 10;
+    ndims = {size / p} dcb [10];
+
+    // binding statement: 'with ituple in span {}'
+    //
+    // It binds a tuple with an span. When loop is invoked, the item in tuples
+    // becomes the iteration variable.
+    //
+    // Consideration:
+    //   it does not invoke loop directly. By observation, some code needs to
+    // be inserted in the middle or initialization part of loop. Therefore the
+    // separation of binding and looping leaves spaces for such work.
+
+    with index = [x, y] in ndims {
+
+      // loop statement: 'foreach', easy, but can be multiple lines like:
+      //
+      // foreach x {
+           int sum = 0;
+      //   foreach y {
+      //     ...
+      
+      foreach x, y {
+        wait dt0;  // force sync
+        dt1 = dt0.data[index]->local;
+        wait dt1;
+        sum += call bar(dt1.data, dt1.dsize); 
+      }
+    }
+  }
+
+  return sum;
+}
+    with index = [x, y] in ndims, idx = [z] in ydims {
+      foreach x {
+        foreach y, z {
+
+        }
+      }
+      }
+      foreach index {
+        foreach idx {
+        wait dt0, dt00;  // force sync
+        dt1 = dt0.data[index]->local;
+        wait dt1;
+        sum += call bar(dt1.data, dt1.dsize); 
+        }
+      }
+    }
+
+        wait dt0;
+        call small_kernel();
+        wait dt00;
+
+__global__ preduce() {
+  move memory
+  wait
+
+  reduce();
+}
+
+int parallel_reduce(float * d0, int size) {
+
+   dmem = topsMalloc(size)
+   topsMemcpy
+
+   launch()
+
+}
+
+p[] {
+  mem
+    for (i : sip_count) {
+      async_()
+    }
+}
+
+p1[] {
+  _load
+
+  kernel()
+  _store
+}
+
+;
+
+// effective dataflow program line: 17
+
+// host program
+int reduce(float* a[], int sz) {
+  return parallel_reduce(a, sz);
+}
