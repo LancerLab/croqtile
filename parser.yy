@@ -320,33 +320,34 @@ scalar_decl
       }
     ;
 
-named_span_decl:
-      MDSPAN IDENTIFIER ASSIGN LBRACE int_list RBRACE {
+named_span_decl
+    : MDSPAN IDENTIFIER ASSIGN LBRACE int_list RBRACE {
         $$ = std::make_shared<AST::MultiSpans>($2, $5);
       }
-      | IDENTIFIER COL LBRACE int_list RBRACE {
+    | IDENTIFIER COL LBRACE int_list RBRACE {
         $$ = std::make_shared<AST::MultiSpans>($1, $4);
       }
-      ;
+    ;
 
-named_tuple_decl:
-      ITUPLE IDENTIFIER ASSIGN LBRAKT sval_list RBRAKT {
+named_tuple_decl
+    : ITUPLE IDENTIFIER ASSIGN LBRAKT sval_list RBRAKT {
         $$ = std::make_shared<AST::IntTuple>($2, $5);
       }
-      | IDENTIFIER COL LBRAKT sval_list RBRAKT {
+    | IDENTIFIER COL LBRAKT sval_list RBRAKT {
         $$ = std::make_shared<AST::IntTuple>($1, $4);
       }
-      ;
+    ;
 
 storage_specifier: LOCAL | SHARED | GLOBAL;
 
-assignment: IDENTIFIER ASSIGN expr
+assignment
+    : IDENTIFIER ASSIGN expr
       {
       }
     ;
 
-expr:
-	    expr PLUS sval_ref { std::cout << $1 << " + " << $3; }
+expr
+    : expr PLUS sval_ref { std::cout << $1 << " + " << $3; }
     | expr MINUS sval_ref { std::cout << $1 << " - " << $3; }
     | expr STAR sval_ref { std::cout << $1 << " * " << $3; }
     | expr SLASH sval_ref { std::cout << $1 << " / " << $3; }
@@ -354,20 +355,20 @@ expr:
     | sval_ref
     ;
 
-if_else:
-       if_clause
-    |  if_clause else_clause
+if_else
+    : if_clause
+    | if_clause else_clause
 
-if_clause:
-       IF LBRAKT cmp_expr RBRAKT LBRACE statements RBRACE
+if_clause
+    : IF LBRAKT cmp_expr RBRAKT LBRACE statements RBRACE
     ;
 
 else_clause:
        ELSE LBRACE statements RBRACE
     ;
 
-cmp_expr:
-      expr LT expr
+cmp_expr
+    : expr LT expr
     | expr GT expr
     | expr EQ expr
     | expr NE expr

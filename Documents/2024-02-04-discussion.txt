@@ -1,0 +1,94 @@
+#include <choreo.h>
+// namespace choreo {
+//
+// template <int N> using mdspan = std::array<N>;
+//
+// template <typename T, int N>
+// struct dataspan {
+//   T* data;
+//   const std::array<int, N> span;
+//   dataspan(T* d, const std::array<int, N> & s) : data(d), span(s) {}
+// };
+//
+// using f32 = float;
+//
+// } // end namespace choreo
+
+__co__ int batchdot(f32 mdspan<1> input, f32 mdspan<1> weight, f32 mdspan<1> output, int m, int n, int k) {
+  // It requires compile time constant evaluation
+  int Kio = 32, Wsmr = 32;
+
+  // convert to 4-dimension
+  in_span_h : {1, input.span dcb [Kio]};   // input.span {(0), (1), (2) / Kio, Kio};
+  wt_span_c : weight.span { 1, (1), (2) / Wsmr, Wsmr };
+
+  span:
+      { int_expr, int_expr }
+  int a, b;
+  int_expr:
+       a * b;
+      | a / b;
+  int c = a / b;
+  int c = a * b;
+
+  weight.span(2)
+#if 0
+  in_span_s = in_span_h { 1, (2), (1), (3) };
+  wt_span_s = wt_span_h { (0), (2), (1), (3) };
+#endif
+  // apply A/B buffering
+  in_span_s : in_span_h { (0)/2, (2), (1), (3) };
+  wt_span_s : wt_span_h { (0)/2, (2), (1), (3) };
+  in_span_s : in_span_h { #0/2, #2, #1, (3) };
+  wt_span_s : wt_span_h { (0)/2, (2), (1), (3) };
+
+  // 1-dimensional
+  parallel p by 4 do {
+
+    with [idx] in {in_span_h / in_span_s},
+         [idx_i, wt_y] in {wt_span_h/ wt_span_c, wt_span_c / wt_span_s} 
+    where idx_i == idx {
+
+      with [m, n, k] in {M, N, K} {
+        foreach m {
+      cdt_weight = dte.linear weight.chunkAt(p, idx) -> shared;
+
+      foreach n {
+      sdt_input = dte.slice input.chunkAt(p, idx) -> local;
+      sdt_weight = dte.slice cdt_weight.chunkAt(p, wt_y) -> local;
+
+      }
+
+        }
+      }
+
+      sdt_input = dte.slice input.chunkAt(p, idx) -> local;
+      cdt_weight = dte.linear weight.chunkAt(p, idx) -> shared;
+      sdt_weight = dte.slice cdt_weight.chunkAt(p, wt_y) -> local;
+
+      foreach index {
+        wait sdt_input, sdt_weight;
+
+        sdt_input_next = dte.slice input.chunkAt(p, i_idx + 1) -> local;
+        cdt_weight_next = dte.linear weight.chunkAt(p, wt_x) -> shared;
+        sdt_weight_next = dte.slice cdt_weight.chunkAt(p, wt_y + 1) -> local;
+        
+        //local f32 block output;
+        local out = call bar(sdt_input.data, std_weight.data); 
+        sdt_output = dte.deslice out->output.chunkAt(p, index);
+
+        // swap the dte
+        sdt_input = sdt_input_next;
+        sdt_weight = sdt_weight_next;
+      }
+    }
+  }
+
+  return sum;
+}
+
+void foo(f32* input, f32* weight, f32* output) {
+  batchdot(choreo::dataspan(input,  {8, 128, 96}),
+           choreo::dataspan(weight, {8, 96, 128}),
+           choreo::dataspan(output, {8, 128, 128}));
+}
