@@ -25,7 +25,7 @@ CFLAGS = -std=c++17 -Wall -Wextra -g
 # Build rules
 all: $(TARGET)
 
-test:
+test: $(TARGET)
 	$(LIT) tests
 
 $(TARGET): scanner.yy.o parser.tab.o

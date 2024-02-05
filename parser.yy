@@ -321,7 +321,7 @@ scalar_decl
     ;
 
 named_span_decl
-    : MDSPAN IDENTIFIER ASSIGN LBRACE int_list RBRACE {
+    : MDSPAN IDENTIFIER COL LBRACE int_list RBRACE {
         $$ = std::make_shared<AST::MultiSpans>($2, $5);
       }
     | IDENTIFIER COL LBRACE int_list RBRACE {
