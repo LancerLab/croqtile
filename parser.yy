@@ -134,9 +134,9 @@ void choreo_info(const char *message) {
 %token <char> CHAR
 %token <int> NUM
 %token <std::string> CPP_CODE
-%token <std::string> IDENTIFIER ATTR_CO DMA COPY
+%token <std::string> IDENTIFIER ATTR_CO DMA COPY FNSPAN FNDATA
 // type related
-%token <std::string> MDSPAN ITUPLE MINDS LOCAL SHARED GLOBAL
+%token <std::string> MDSPAN ITUPLE LOCAL SHARED GLOBAL
 %token <AST::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT
 // control related
 %token <std::string> IF ELSE WITH ITER RET
@@ -144,52 +144,69 @@ void choreo_info(const char *message) {
 // non-terminals
 %nterm <AST::BaseType> base_type
 %nterm <AST::ptr<AST::Node>> pass_by sval_ref
-%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments
-%nterm <AST::ptr<AST::NodeRef>> statement declaration expr
+%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments span_list
+%nterm <AST::ptr<AST::NodeRef>> statement declaration expr span_elem
 %nterm <AST::ptr<AST::IntList>> int_list
 %nterm <AST::ptr<AST::SValList>> sval_list
-%nterm <AST::ptr<AST::DataType>> general_type aggregate_type
+%nterm <AST::ptr<AST::DataType>> general_type param_type aggregate_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
 %nterm <AST::ptr<AST::ParamType>> parameter
 %nterm <AST::ptr<AST::ChoreoFunction>> dsl_function
-%nterm <AST::ptr<AST::MultiSpans>> named_span_decl
+%nterm <AST::ptr<AST::MultiSpans>> named_span_decl span_decl
 %nterm <AST::ptr<AST::IntTuple>> named_tuple_decl
 %nterm <AST::ptr<AST::IntVal>> scalar_decl
+%nterm <AST::ptr<AST::IntIndex>> s_index
 
 %%
 
-program:
-    /* Empty */ {}
-  | program pass_by      { root.nodes.push_back($2); }
-  | program dsl_function { root.nodes.push_back($2); }
-  | END {  }
-  ;
+program
+    : /* Empty */ {}
+    | program pass_by      { root.nodes.push_back($2); }
+    | program dsl_function { root.nodes.push_back($2); }
+    | END {  }
+    ;
 
-pass_by:
-    CPP_CODE {
+pass_by
+    : CPP_CODE {
       $$ = std::make_shared<AST::CppSourceCode>($1);
     }
     ;
 
-dsl_function:
-    ATTR_CO general_type IDENTIFIER LPAREN parameter_list RPAREN LBRACE statements RBRACE {
-      $$ = std::make_shared<AST::ChoreoFunction>();
-      $$->name = $3;
-      $$->f_decl.name = $3;
-      $$->f_decl.ret_type = $2;
-      $$->f_decl.params = $5;
-      $$->statms = $8;
-    }
+dsl_function
+    : ATTR_CO param_type IDENTIFIER LPAREN parameter_list RPAREN LBRACE statements RBRACE {
+        $$ = std::make_shared<AST::ChoreoFunction>();
+        $$->name = $3;
+        $$->f_decl.name = $3;
+        $$->f_decl.ret_type = $2;
+        $$->f_decl.params = $5;
+        $$->statms = $8;
+      }
     ;
 
-general_type:
-      base_type { $$ = std::make_shared<AST::DataType>($1); }
-    | aggregate_type { /*$$ = std::make_shared<AST::NodeRef>($1);*/ }
+param_type
+    : base_type { $$ = std::make_shared<AST::DataType>($1); }
+    | base_type MDSPAN LT NUM GT { $$ = std::make_shared<AST::DataType>($1, false); }
+    ;
+
+general_type
+    : base_type { $$ = std::make_shared<AST::DataType>($1); }
+    | aggregate_type { $$ = $1; }
     ;
 
 aggregate_type
-    : base_type LBRAKT IDENTIFIER RBRAKT { $$ = std::make_shared<AST::DataType>($1); }
-/*    | base_type LBRAKT int_list RBRAKT  { } */
+    : base_type MDSPAN LBRAKT span_list RBRAKT {
+        $$ = std::make_shared<AST::DataType>($1,
+              std::make_shared<AST::MultiSpans>("", std::make_shared<AST::NodeRef>($4)));
+      }
+    | base_type LT IDENTIFIER GT {
+        if (!symtab.exists($3))
+          Choreo::Parser::error(loc, "The symbol has not been defined.");
+
+        if (!symtab.getSymbol($3)->isAggregate())
+          Choreo::Parser::error(loc, "expecting a symbol of aggregate type.");
+
+        $$ = std::make_shared<AST::DataType>($1, AST::DataType::getSpanType($3));
+      }
     ;
 
 base_type
@@ -263,13 +280,16 @@ parameter_list
     ;
 
 parameter
-    : general_type IDENTIFIER { /* handle parameter type and name here */
+    : param_type IDENTIFIER { /* handle parameter type and name here */
         $$ = std::make_shared<AST::ParamType>(std::pair($1, std::make_shared<AST::Identifier>($2)));
         if (symtab.exists($2)) {
           Choreo::Parser::error(loc, "ODR violation: the symbol is already defined.");
           exit(1);
         }
         symtab.addSymbol($2, $1->getBaseType());
+      }
+    | param_type {
+        $$ = std::make_shared<AST::ParamType>(std::pair($1, std::make_shared<AST::Identifier>(AST::SymbolTable::getAnonName())));
       }
     ;
 
@@ -320,12 +340,59 @@ scalar_decl
       }
     ;
 
-named_span_decl
-    : MDSPAN IDENTIFIER COL LBRACE int_list RBRACE {
-        $$ = std::make_shared<AST::MultiSpans>($2, $5);
+span_index
+    : IDENTIFIER LPAREN NUM RPAREN
+    ;
+
+s_index
+    : LPAREN NUM RPAREN {
+        $$ = std::make_shared<AST::IntIndex>($2);
       }
-    | IDENTIFIER COL LBRACE int_list RBRACE {
-        $$ = std::make_shared<AST::MultiSpans>($1, $4);
+    ;
+
+span_elem
+    : s_index { $$ = std::make_shared<AST::NodeRef>($1); }
+    | sval_ref { $$ = std::make_shared<AST::NodeRef>($1); }
+    ; // do not allow non-element
+
+span_list
+    : span_list COMMA span_elem {
+        $1->Append($3);
+        $$ = $1;
+      }
+    | span_elem {
+        $$ = std::make_shared<AST::MultiNodes>();
+        $$->Append($1);
+      }
+    ; // do not allow an empty list
+
+span_decl
+    : LBRACE int_list RBRACE {
+        $$ = std::make_shared<AST::MultiSpans>("", std::make_shared<AST::NodeRef>($2));
+      }
+    | IDENTIFIER FNSPAN LBRACE span_list RBRACE {
+        $$ = std::make_shared<AST::MultiSpans>("", $1, std::make_shared<AST::NodeRef>($4));
+      }
+    ;
+
+named_span_decl
+    : MDSPAN IDENTIFIER COL span_decl {
+        $4->name = $2;
+        $$ = $4;
+      }
+    | MDSPAN LT NUM GT IDENTIFIER COL span_decl {
+        // TODO: check if the span defined aligned with declaration
+        #if 0
+        if ($3 != $7->list.size())
+          Choreo::Parser::error(loc,
+            "The rank of mdspan is not consistent with its decleration.");
+            #endif
+        $7->name = $5;
+        $$ = $7;
+      }
+    | IDENTIFIER COL span_decl {
+        $3->name = $1;
+        $$ = $3;
       }
     ;
 
@@ -491,3 +558,6 @@ int main(int argc, char* argv[]) {
 
   return 0;
 }
+
+int AST::SymbolTable::anonymous_count = 0;
+std::unordered_map<std::string, AST::ptr<AST::MultiSpans>> AST::DataType::namedSpans;

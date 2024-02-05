@@ -65,7 +65,6 @@ blank [ \t\r]
   "//".*     {}  // Ignore everything from // to the end of the line
   "mdspan"   return Choreo::Parser::make_MDSPAN(yytext, loc);
   "ituple"   return Choreo::Parser::make_ITUPLE(yytext, loc);
-  "minds"    return Choreo::Parser::make_MINDS(yytext, loc);
   "local"    return Choreo::Parser::make_LOCAL(yytext, loc);
   "shared"   return Choreo::Parser::make_SHARED(yytext, loc);
   "global"   return Choreo::Parser::make_GLOBAL(yytext, loc);
@@ -81,6 +80,8 @@ blank [ \t\r]
   "int"      return Choreo::Parser::make_INT(AST::BaseType::INT, loc);
   "dma"      return Choreo::Parser::make_DMA(yytext, loc);
   "copy"     return Choreo::Parser::make_COPY(yytext, loc);
+  ".span"    return Choreo::Parser::make_FNSPAN(yytext, loc);
+  ".data"    return Choreo::Parser::make_FNDATA(yytext, loc);
   "=>"       return Choreo::Parser::make_TRANS  (loc);
   "if"       return Choreo::Parser::make_IF(yytext, loc);
   "else"     return Choreo::Parser::make_ELSE(yytext, loc);

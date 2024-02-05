@@ -5,14 +5,15 @@
 #include <iostream>
 
 // device program
-__co__ int foo(f32 d) {
+__co__ int foo(f32 mdspan<1> d, int) {
 }
 
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: foo
 // CHECK:  `- Return type: int
 // CHECK:  `- Parameters
-// CHECK:    `-  type: f32, symbol: d
+// CHECK:    `-  type: f32<>, symbol: d
+// CHECK:    `-  type: int, symbol: anon_0
 
 // host program
 int bar(int a) {

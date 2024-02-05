@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+
 #include "symtab.hpp"
 
 namespace AST {
@@ -115,17 +116,27 @@ struct SValList : public Node {
 
 // Represents both dimensions and s like {3, 4, 5} or {1, 2, 1}
 struct MultiSpans : public Node {
-  std::string name;  // could be anonymous
-  ptr<IntList> list;
-  explicit MultiSpans(std::string &n, ptr<IntList>& l) : name(n), list(l) {}
+  std::string name = "";      // could be anonymous
+  std::string ref_name = "";  // syntax delight
+  ptr<NodeRef> list;
+  explicit MultiSpans(const std::string& n, const ptr<NodeRef>& l)
+      : name(n), list(l) {}
+  explicit MultiSpans(const std::string& n, const std::string& rn,
+                      const ptr<NodeRef>& l)
+      : name(n), ref_name(rn), list(l) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Decl (span): ";
     if (name.size() > 0)
-      os << name << " ";
+      os << name << " - ";
     else
-      os << "(anonymous) ";
-    list->Print(os);
+      os << "(anon) - ";
+    if (ref_name != "") {
+      os << "{";
+      list->Print(os, " " + ref_name);
+      os << "}";
+    } else
+      list->Print(os);
   }
 };
 
@@ -133,7 +144,7 @@ struct MultiSpans : public Node {
 struct IntTuple : public Node {
   std::string name;  // could be anonymous
   ptr<SValList> value;
-  explicit IntTuple(std::string &n, ptr<SValList>& l) : name(n), value(l) {}
+  explicit IntTuple(std::string& n, ptr<SValList>& l) : name(n), value(l) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Decl (tuple): ";
@@ -145,10 +156,10 @@ struct IntTuple : public Node {
   }
 };
 
-struct IntVal: public Node {
+struct IntVal : public Node {
   std::string name;  // could be anonymous
   ptr<Node> value;
-  explicit IntVal(std::string &n, ptr<Node>& v) : name(n), value(v) {}
+  explicit IntVal(std::string& n, ptr<Node>& v) : name(n), value(v) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Decl (int): ";
@@ -158,6 +169,16 @@ struct IntVal: public Node {
       os << "(anonymous) ";
     os << "= ";
     value->Print(os);
+  }
+};
+
+struct IntIndex : public Node {
+  int value;
+  explicit IntIndex(int v) : value(v) {}
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << prefix << "(" << value << ")";
+    (void)prefix;
   }
 };
 
@@ -175,18 +196,42 @@ struct DataDecl : public Node {
 #endif
 
 struct DataType : public Node {
+ private:
   bool scalar;
+
+ private:
   BaseType type;
-  ptr<MultiSpans> mdspans;
-  DataType(BaseType t) : scalar(true), type(t) {}
-  DataType(BaseType t, ptr<MultiSpans>& spans)
-      : scalar(false), type(t), mdspans(spans) {}
+  ptr<MultiSpans> mdspans = nullptr;
+
+ public:
+  DataType(BaseType t, bool s = true) : scalar(s), type(t) {}
+
+  DataType(BaseType t, const ptr<MultiSpans>& spans)
+      : scalar(false), type(t), mdspans(spans) {
+    assert(namedSpans.count(spans->name) != 0 &&
+           "Unexpected: symbol already existed.");
+    namedSpans.emplace(spans->name, spans);
+  }
 
   BaseType getBaseType() const { return type; }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    if (scalar) os << prefix << getStringFrom(type);
+    if (scalar)
+      os << prefix << getStringFrom(type);
+    else if (mdspans == nullptr)
+      os << prefix << getStringFrom(type) << "<>";
+    else {
+      os << prefix << getStringFrom(type);
+      mdspans->Print(os);
+    }
   }
+
+  static ptr<MultiSpans> getSpanType(const std::string& name) {
+    assert(namedSpans.count(name) && "symbol does not exist.");
+    return namedSpans[name];
+  }
+
+  static std::unordered_map<std::string, ptr<MultiSpans>> namedSpans;
 };
 
 struct Identifier : public Node {

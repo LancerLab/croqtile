@@ -62,6 +62,12 @@ class SymbolTable {
   bool exists(const std::string& name) {
     return table.find(name) != table.end();
   }
+
+ public:
+  static std::string getAnonName() {
+    return "anon_" + std::to_string(anonymous_count++);
+  }
+  static int anonymous_count;
 };
 
 }  // end of namespace AST
