@@ -1,94 +1,115 @@
-#include <choreo.h>
-// namespace choreo {
-//
-// template <int N> using mdspan = std::array<N>;
-//
-// template <typename T, int N>
-// struct dataspan {
-//   T* data;
-//   const std::array<int, N> span;
-//   dataspan(T* d, const std::array<int, N> & s) : data(d), span(s) {}
-// };
-//
-// using f32 = float;
-//
-// } // end namespace choreo
+// INPUT: 2x8
+// 1 1 1 1 2 2 2 2
+// 3 3 3 3 4 4 4 4
+// OUTPUT: 6x24
+// 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+// 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+// 0 0 1 1 0 0 0 0 1 1 0 0 0 0 2 2 0 0 0 0 2 2 0 0
+// 0 0 3 3 0 0 0 0 3 3 0 0 0 0 4 4 0 0 0 0 4 4 0 0
+// 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+// 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
 
-__co__ int batchdot(f32 mdspan<1> input, f32 mdspan<1> weight, f32 mdspan<1> output, int m, int n, int k) {
-  // It requires compile time constant evaluation
-  int Kio = 32, Wsmr = 32;
+__co__ int pad_func(f32 mdspan<2> input, f32 mdspan<2> output) {
+  in_span_h : {2, 2};
+  ot_span_h : {6, 6};
 
-  // convert to 4-dimension
-  in_span_h : {1, input.span dcb [Kio]};   // input.span {(0), (1), (2) / Kio, Kio};
-  wt_span_c : weight.span { 1, (1), (2) / Wsmr, Wsmr };
+  // do linear copy from h to c
+  in_span_c : in_span_h;
+  ot_span_c : ot_span_h;
 
-  span:
-      { int_expr, int_expr }
-  int a, b;
-  int_expr:
-       a * b;
-      | a / b;
-  int c = a / b;
-  int c = a * b;
+  // tile c to s, pad mode has larger s tile
+  in_span_s : {4, 4};
+  ot_span_s : {4, 4};
 
-  weight.span(2)
-#if 0
-  in_span_s = in_span_h { 1, (2), (1), (3) };
-  wt_span_s = wt_span_h { (0), (2), (1), (3) };
-#endif
-  // apply A/B buffering
-  in_span_s : in_span_h { (0)/2, (2), (1), (3) };
-  wt_span_s : wt_span_h { (0)/2, (2), (1), (3) };
-  in_span_s : in_span_h { #0/2, #2, #1, (3) };
-  wt_span_s : wt_span_h { (0)/2, (2), (1), (3) };
+  // use less sips for lightweighted op
+  parallel p by 1 do {
 
-  // 1-dimensional
-  parallel p by 4 do {
+    with [idx_in_c, idx_ot_c] in {in_span_h / in_span_c, ot_span_h / ot_span_c},
+         [idx_in_s, idx_ot_s] in {in_span_c / in_span_s, ot_span_c / ot_span_s} 
+    // NOTE: use idx_in_c/s and idx_ot_c/s, seperately for intuitiveness, for reduction dim, bind them with where cluase
+    where idx_in_c == idx_ot_c
+    // NOTE: can use && logical operator
+    and   idx_in_s == idx_ot_s {
 
-    with [idx] in {in_span_h / in_span_s},
-         [idx_i, wt_y] in {wt_span_h/ wt_span_c, wt_span_c / wt_span_s} 
-    where idx_i == idx {
-
-      with [m, n, k] in {M, N, K} {
-        foreach m {
-      cdt_weight = dte.linear weight.chunkAt(p, idx) -> shared;
-
-      foreach n {
-      sdt_input = dte.slice input.chunkAt(p, idx) -> local;
-      sdt_weight = dte.slice cdt_weight.chunkAt(p, wt_y) -> local;
-
-      }
-
+      foreach idx_in_c, idx_ot_c {
+        cdt_input = dte.linear input.chunkAt(p, idx_in_c) -> shared;
+        foreach idx_in_s, idx_ot_s {
+          // NOTE: dte.pad with config parameters, pad low/high/mid, and pad value
+          sdt_input = dte.pad<[1, 1], [1, 1], [0, 0], 0> cdt_input.chunkAt(p, idx_in_s) -> local;
+          sdt_output = dte.pad<[1, 1], [1, 1], [0, 0], 0> sdt_input -> output.chunkAt(p, idx_ot_s);
         }
-      }
-
-      sdt_input = dte.slice input.chunkAt(p, idx) -> local;
-      cdt_weight = dte.linear weight.chunkAt(p, idx) -> shared;
-      sdt_weight = dte.slice cdt_weight.chunkAt(p, wt_y) -> local;
-
-      foreach index {
-        wait sdt_input, sdt_weight;
-
-        sdt_input_next = dte.slice input.chunkAt(p, i_idx + 1) -> local;
-        cdt_weight_next = dte.linear weight.chunkAt(p, wt_x) -> shared;
-        sdt_weight_next = dte.slice cdt_weight.chunkAt(p, wt_y + 1) -> local;
-        
-        //local f32 block output;
-        local out = call bar(sdt_input.data, std_weight.data); 
-        sdt_output = dte.deslice out->output.chunkAt(p, index);
-
-        // swap the dte
-        sdt_input = sdt_input_next;
-        sdt_weight = sdt_weight_next;
+        cdt_output = dte.linear sdt_output -> output.chunkAt(p, idx_ot_c);
       }
     }
   }
 
-  return sum;
+  // NOTE: non return
+  return;
 }
 
-void foo(f32* input, f32* weight, f32* output) {
-  batchdot(choreo::dataspan(input,  {8, 128, 96}),
-           choreo::dataspan(weight, {8, 96, 128}),
-           choreo::dataspan(output, {8, 128, 128}));
+void main() {
+  std::vector<uint8_t> input = {1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4};
+  std::vector<uint8_t> output(6 * 24, 0);
+  pad_func(choreo::dataspan(input,  {2, 8}),
+           choreo::dataspan(output, {6, 24}));
 }
+
+// ========================================================
+// FACTOR CODE
+// ========================================================
+
+FACTOR_PROGRAM(p);
+
+p([&](auto target_name) {
+  // FACTOR: type define + explicit alloc 
+  // CHOREO: span define only
+  auto in_hbm_tile = DRAMType(IntType(32), {2, 2});
+  auto sip_tile = L1Type(IntType(32), {4, 4});
+  auto out_hbm_tile = DRAMType(IntType(32), {6, 6});
+
+  // FACTOR: two function define boilerplate
+  // CHOREO: parallel, with, foreach boilerplate
+  D(main_)
+  ({in_hbm_tile}, [&](auto args) {
+    auto sip_input = alloc_(sip_tile);
+    auto sip_output = alloc_(sip_tile);
+    auto output = alloc_(out_hbm_tile);
+    auto sdma = alloc_dma_(SDMAType());
+
+    auto ts = async_([&]() {
+      launch_("foo", {args[0], sip_input, sip_output, sdma}, {output});
+    });
+
+    await_(ts);
+    return std::vector<Value>{output};
+  });
+
+  // FACTOR: arg aliasing + config stmt
+  // CHOREO: nope
+  D(func_)
+  ("foo", {in_hbm_tile, sip_tile, sip_tile, SDMAType()}, {out_hbm_tile},
+   [&](auto args, auto results) {
+     auto input = args[0];
+     auto sip_input0 = args[1];
+     auto sip_output0 = args[2];
+     auto output = results[0];
+     auto sdma = args[3];
+     dma::PadConfig pad_info1 = {{1, 1} /* padding low */,
+                                 {1, 1} /* padding high */,
+                                 {0, 0} /* padding middle */};
+     dma::PadConfig pad_info2 = {{1, 1} /* padding low */,
+                                 {1, 1} /* padding high */,
+                                 {0, 0} /* padding middle */};
+     dma::Pad(sdma, input, sip_input0, pad_info1, 0);
+     dma::Pad(sdma, sip_input0, output, pad_info2, 0);
+   });
+});
+
+const char *target_name = "pavo";
+p.Compile(target_name);
+p.Dump(target_name);
+
+std::vector<uint8_t> input_data = {1, 1, 1, 1, 2, 2, 2, 2,
+                                   3, 3, 3, 3, 4, 4, 4, 4};
+
+auto results = p.Run({input_data}, target_name);
