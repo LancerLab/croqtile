@@ -144,7 +144,7 @@ struct MultiSpans : public Node {
 struct IntTuple : public Node {
   std::string name;  // could be anonymous
   ptr<SValList> value;
-  explicit IntTuple(std::string& n, ptr<SValList>& l) : name(n), value(l) {}
+  explicit IntTuple(const std::string& n, ptr<SValList> l) : name(n), value(l) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Decl (tuple): ";
@@ -154,6 +154,31 @@ struct IntTuple : public Node {
       os << "(anonymous) ";
     value->Print(os);
   }
+};
+
+class ITupleSymbolTable {
+ private:
+  std::unordered_map<std::string, ptr<IntTuple>> table;
+
+ public:
+  // Add a symbol to the symbol table
+  void addITupleSymbol(const std::string& name, ptr<IntTuple>& ituple) {
+    table[name] = ituple;
+  }
+
+  // Retrieve a symbol from the symbol table
+  ptr<IntTuple> getSymbol(const std::string& name) {
+    if (table.find(name) != table.end()) {
+      return table[name];
+    }
+    return nullptr;
+  }
+
+  // Check if a symbol with the given name exists in the symbol table
+  bool exists(const std::string& name) {
+    return table.find(name) != table.end();
+  }
+
 };
 
 struct IntVal : public Node {
@@ -181,6 +206,20 @@ struct IntIndex : public Node {
     (void)prefix;
   }
 };
+
+struct IntIndexList : public Node {
+  std::vector<ptr<IntIndex>> indices;
+
+  void Append(ptr<IntIndex> v) { indices.push_back(v); }
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << prefix << "[";
+    for (size_t i = 0; i < indices.size() - 1; ++i)
+      os << indices[i]->value << ", ";
+    os << indices.back()->value << "]";
+  }
+};
+
 
 #if 0
 // Represents data declarations like: global f32 data{d};

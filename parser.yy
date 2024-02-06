@@ -37,6 +37,7 @@ extern Choreo::location loc;
 
 AST::Program root;
 AST::SymbolTable symtab;
+AST::ITupleSymbolTable ituple_symtab;
 
 const char* red = "\033[31m";
 const char* reset = "\033[0m";
@@ -153,9 +154,10 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::ParamType>> parameter
 %nterm <AST::ptr<AST::ChoreoFunction>> dsl_function
 %nterm <AST::ptr<AST::MultiSpans>> named_span_decl span_decl
-%nterm <AST::ptr<AST::IntTuple>> named_tuple_decl
+%nterm <AST::ptr<AST::IntTuple>> named_tuple_decl unnamed_tuple_decl
 %nterm <AST::ptr<AST::IntVal>> scalar_decl
-%nterm <AST::ptr<AST::IntIndex>> s_index
+%nterm <AST::ptr<AST::IntIndex>> s_index 
+%nterm <AST::ptr<AST::IntIndexList>> s_index_list
 
 %%
 
@@ -350,6 +352,20 @@ s_index
       }
     ;
 
+s_index_list
+    : /* allows the empty list */ {
+        $$ = std::make_shared<AST::IntIndexList>();
+      }
+    | s_index_list COMMA s_index {
+        $1->Append($3);
+        $$ = $1;
+      }
+    | s_index {
+        $$ = std::make_shared<AST::IntIndexList>();
+        $$->indices.push_back($1);
+      }
+    ;
+
 span_elem
     : s_index { $$ = std::make_shared<AST::NodeRef>($1); }
     | sval_ref { $$ = std::make_shared<AST::NodeRef>($1); }
@@ -396,12 +412,43 @@ named_span_decl
       }
     ;
 
+
+unnamed_tuple_decl
+    : LBRAKT sval_list RBRAKT {
+      $$ = std::make_shared<AST::IntTuple>("", $2);
+    }
+    ;
+
 named_tuple_decl
-    : ITUPLE IDENTIFIER ASSIGN LBRAKT sval_list RBRAKT {
-        $$ = std::make_shared<AST::IntTuple>($2, $5);
+    : ITUPLE IDENTIFIER ASSIGN unnamed_tuple_decl {
+        $4 -> name = $2;
+        /* TODO: workaround: use INT for ituple's base type use a dedicated type for ituple in symboltable */
+        ituple_symtab.addITupleSymbol($2, $4); 
+        $$ = $4;
       }
-    | IDENTIFIER COL LBRAKT sval_list RBRAKT {
-        $$ = std::make_shared<AST::IntTuple>($1, $4);
+    | IDENTIFIER COL unnamed_tuple_decl {
+        $3 -> name = $1;
+        ituple_symtab.addITupleSymbol($1, $3); 
+        $$ = $3;
+      }
+    | IDENTIFIER COL IDENTIFIER {
+        if (!ituple_symtab.exists($3))
+          Choreo::Parser::error(@3, "The symbol has not been defined.");
+        auto src_ituple = ituple_symtab.getSymbol($3);
+        auto ret_ituple = std::make_shared<AST::IntTuple>($1, src_ituple->value);
+        ituple_symtab.addITupleSymbol($1, ret_ituple); 
+        $$ = ret_ituple;
+      }
+    | IDENTIFIER COL IDENTIFIER LBRAKT s_index_list RBRAKT {
+        // anchor
+        if (!ituple_symtab.exists($3))
+          Choreo::Parser::error(@3, "The symbol has not been defined.");
+        auto src_ituple = ituple_symtab.getSymbol($3);
+        auto ret_tuple = std::make_shared<AST::SValList>();
+        for (AST::ptr<AST::IntIndex> idx : $5->indices) {
+          ret_tuple->Append(src_ituple->value->values[idx->value]);
+        }
+        $$ = std::make_shared<AST::IntTuple>($1, std::move(ret_tuple));
       }
     ;
 
@@ -563,3 +610,9 @@ int main(int argc, char* argv[]) {
 
 int AST::SymbolTable::anonymous_count = 0;
 std::unordered_map<std::string, AST::ptr<AST::MultiSpans>> AST::DataType::namedSpans;
+// tuple_decl
+//     : LBRACE sval_list RBRACE {
+//         $$ = std::make_shared<AST::IntTuple>("", $2);
+//       }
+//     ;
+// 
