@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "semantics.hpp"
+#include "visitor.hpp"
 #include "symtab.hpp"
 
 namespace AST {
@@ -340,6 +340,19 @@ struct ParamList : public Node {
       item->first->Print(os, " type: ");
       item->second->Print(os, ", symbol: ");
     }
+  }
+};
+
+struct ParallelBy : public Node {
+  std::string iv;
+  int bound;
+  // TODO: add pb-statements
+
+  ParallelBy(const std::string v, int b) : iv(v), bound(b) {}
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << "\n" << prefix << "`- Parellelization: ";
+    os << " IV symbol: " << iv << ", bound: " << bound << std::endl;
   }
 };
 

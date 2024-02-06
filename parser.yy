@@ -48,28 +48,6 @@ static inline bool shell_supports_colors() {
 							 || strcmp(term, "xterm") == 0);
 }
 
-static inline void print_fixed_header() {
-  std::cout << "#include \"../../utils/utils.h\"\n"
-            << "#include \"dtu/factor/factor.h\"\n"
-            << "#include \"dtu/factor/program_experimental.h\"\n"
-            << "#include \"llvm/ADT/ArrayRef.h\"\n"
-            << "#include \"logging_api.h\"\n"
-            << "#include \"tests/factor/api/base/fixture.h\"\n";
-}
-
-static inline void print_wrapper_begin() {
-  std::cout << "TEST(DoradoBasicTest, SimpleAddtest) {\n";
-  std::cout << "  using namespace factor;\n";
-  std::cout << "  FACTOR_PROGRAM(p);\n\n";
-  std::cout << "  p([&](auto target_name) {\n";
-}
-
-static inline void print_wrapper_end() {
-  std::cout << "TEST(DoradoBasicTest, SimpleAddtest) {\n";
-  std::cout << "  };\n";
-  std::cout << "};\n";
-}
-
 static Choreo::Parser::symbol_type yylex(Choreo::Scanner &scanner) {
   return scanner.get_next_token();
 }
@@ -132,18 +110,20 @@ void choreo_info(const char *message) {
 %token <char> CHAR
 %token <int> NUM
 %token <std::string> CPP_CODE
-%token <std::string> IDENTIFIER ATTR_CO DMA COPY FNSPAN FNDATA
+%token <std::string> IDENTIFIER ATTR_CO
 // type related
 %token <std::string> MDSPAN ITUPLE LOCAL SHARED GLOBAL
 %token <AST::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT
+// builtin operations
+%token <std::string> DMA COPY FNSPAN FNDATA
 // control related
-%token <std::string> IF ELSE WITH ITER RET
+%token <std::string> IF ELSE PARA BY WITH IN ITER RET
 
 // non-terminals
 %nterm <AST::BaseType> base_type
-%nterm <AST::ptr<AST::Node>> pass_by sval_ref
-%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments span_list mixed_span_list
-%nterm <AST::ptr<AST::NodeRef>> statement declaration expr span_elem mixed_span_elem
+%nterm <AST::ptr<AST::Node>> pass_by sval_ref para_by
+%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments pb_statements with_statements iterate_statements span_list mixed_span_list
+%nterm <AST::ptr<AST::NodeRef>> statement declaration pb_statement expr span_elem mixed_span_elem if_else for_each
 %nterm <AST::ptr<AST::IntList>> int_list
 %nterm <AST::ptr<AST::SValList>> sval_list
 %nterm <AST::ptr<AST::DataType>> general_type param_type aggregate_type
@@ -305,9 +285,26 @@ statements
 
 statement
     : declarations SEMCOL { $$ = std::make_shared<AST::NodeRef>($1); }
-    | assignments SEMCOL  { $$ = std::make_shared<AST::NodeRef>($1); }
+    | assignments  SEMCOL { $$ = std::make_shared<AST::NodeRef>($1); }
+    | para_by             { $$ = std::make_shared<AST::NodeRef>($1); }
+    ;
+
+para_by
+    : PARA IDENTIFIER BY NUM LBRACE pb_statements RBRACE {
+      $$ = std::make_shared<AST::ParallelBy>($2, $4);
+    }
+    ;
+
+pb_statements
+    : /* Empty */
+    | SEMCOL
+    | pb_statements pb_statement
+    ;
+
+pb_statement
+    : declarations SEMCOL { $$ = std::make_shared<AST::NodeRef>($1); }
+    | assignments  SEMCOL { $$ = std::make_shared<AST::NodeRef>($1); }
     | if_else
-    | with_loop
     ;
 
 assignments
@@ -484,12 +481,12 @@ named_tuple_decl
         ituple_symtab.addITupleSymbol($2, $4);
         $$ = $4;
       }
-    | IDENTIFIER COL unnamed_tuple_decl {
+    | IDENTIFIER ASSIGN unnamed_tuple_decl {
         $3 -> name = $1;
         ituple_symtab.addITupleSymbol($1, $3);
         $$ = $3;
       }
-    | IDENTIFIER COL IDENTIFIER {
+    | IDENTIFIER ASSIGN IDENTIFIER {
         if (!ituple_symtab.exists($3))
           Choreo::Parser::error(@3, "The symbol has not been defined.");
         auto src_ituple = ituple_symtab.getSymbol($3);
@@ -497,7 +494,7 @@ named_tuple_decl
         ituple_symtab.addITupleSymbol($1, ret_ituple);
         $$ = ret_ituple;
       }
-    | IDENTIFIER COL IDENTIFIER LBRAKT s_index_list RBRAKT {
+    | IDENTIFIER ASSIGN IDENTIFIER LBRAKT s_index_list RBRAKT {
         // anchor
         if (!ituple_symtab.exists($3))
           Choreo::Parser::error(@3, "The symbol has not been defined.");
@@ -515,8 +512,6 @@ storage_specifier: LOCAL | SHARED | GLOBAL;
 
 assignment
     : IDENTIFIER ASSIGN expr
-      {
-      }
     ;
 
 expr
@@ -533,11 +528,11 @@ if_else
     | if_clause else_clause
 
 if_clause
-    : IF LBRAKT cmp_expr RBRAKT LBRACE statements RBRACE
+    : IF LBRAKT cmp_expr RBRAKT LBRACE RBRACE
     ;
 
 else_clause:
-       ELSE LBRACE statements RBRACE
+       ELSE LBRACE RBRACE
     ;
 
 cmp_expr
@@ -549,30 +544,34 @@ cmp_expr
     | expr GE expr
     ;
 
-with_loop:
-      WITH assignments LBRACE with_statements RBRACE
+with_binding
+    : WITH IDENTIFIER LBRACE with_statements RBRACE
     ;
 
-with_statements: /* Empty */
-    |  with_statements w_statement
-    {}
+with_statements
+    : /*Empty*/
+    | with_statements w_statement
     ;
 
-w_statement:
-      declaration SEMCOL
-    | assignments SEMCOL
-    | data_move SEMCOL
+w_statement
+    : /*Empty */
+    | declarations SEMCOL
+    | assignments  SEMCOL
+    | dma SEMCOL
     | if_else
-    | iterate_clause
+    | for_each
     ;
 
-iterate_clause:
-    ITER IDENTIFIER LBRACE statements RBRACE
-    {}
+iterate_statements
+    : declarations SEMCOL
+    | assignments  SEMCOL
     ;
 
-data_move: /* Empty */
-    | DMA COL sval_ref source_to_dest SEMCOL
+for_each:
+    ITER IDENTIFIER LBRACE iterate_statements RBRACE
+    ;
+
+dma : DMA COL sval_ref source_to_dest SEMCOL
     | COPY COL sval_ref source_to_dest SEMCOL
 
 source_to_dest:

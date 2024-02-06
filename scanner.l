@@ -100,7 +100,10 @@ blank [ \t\r]
   "=>"       return Choreo::Parser::make_TRANS  (loc);
   "if"       return Choreo::Parser::make_IF(yytext, loc);
   "else"     return Choreo::Parser::make_ELSE(yytext, loc);
+  "parallel" return Choreo::Parser::make_PARA(yytext, loc);
+  "by"       return Choreo::Parser::make_BY(yytext, loc);
   "with"     return Choreo::Parser::make_WITH(yytext, loc);
+  "in"       return Choreo::Parser::make_IN(yytext, loc);
   "foreach"  return Choreo::Parser::make_ITER(yytext, loc);
   "return"   return Choreo::Parser::make_RET(yytext, loc);
   "-"        return Choreo::Parser::make_MINUS  (loc);

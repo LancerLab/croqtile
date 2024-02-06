@@ -2,9 +2,9 @@
 
 __co__ bf16 tuple_decls(int a, int b) {
   ituple val2 = [a, 9, 102];
-  nvals : [100, 10, 1, b];
-  nvals_reference_all : nvals;
-  nvals_reference : nvals_reference_all [(2), (1)];
+  nvals = [100, 10, 1, b];
+  nvals_reference_all = nvals;
+  nvals_reference = nvals_reference_all [(2), (1)];
 }
 
 // CHECK: ChoreoFunction
