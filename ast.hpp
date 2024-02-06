@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "semantics.hpp"
 #include "symtab.hpp"
 
 namespace AST {
@@ -18,28 +19,58 @@ using ptr = std::shared_ptr<T>;
 // Base class for all AST nodes
 struct Node {
   virtual ~Node() {}
+
   virtual void Print(std::ostream& os, const std::string& prefix = {}) const {
     (void)os;
     (void)prefix;
   }
+
+  // TODO: implementation for each derived-type
+  virtual void accept(Visitor& visitor) { visitor.visit(this); }
 };
 
-// Single node with reference to another
-struct NodeRef {
+// A node with the reference to another node.
+//
+// It is normally used for a non-terminal node that referring an union of other
+// nodes, i.e.:
+//
+//   non-term : term_1 | term_2
+//
+struct NodeRef : public Node {
   ptr<Node> value;
+
   NodeRef(ptr<Node> n) : value(n) {}
+
   virtual void Print(std::ostream& os, const std::string& prefix = {}) const {
     value->Print(os, prefix);
   }
+
+  void accept(Visitor& visitor) override { visitor.visit(&*value); }
 };
 
-// General cluster of nodes
+// A general cluster of nodes
+//
+// It is normally used for a non-terminal node that comprises multiple nodes,
+// i.e.:
+//
+//   non-term : non-term term_1 | term_2
+//
 struct MultiNodes : public Node {
   std::vector<ptr<NodeRef>> values;
+
   explicit MultiNodes(){};
-  void Append(ptr<NodeRef>& m) { values.push_back(m); }
+
+  void Append(ptr<NodeRef>& m) {
+    assert(m != nullptr && "Unexpected: null pointer.");
+    values.push_back(m);
+  }
+
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     for (auto& v : values) v->Print(os, prefix);
+  }
+
+  void accept(Visitor& visitor) override {
+    for (auto& v : values) visitor.visit(&*v);
   }
 };
 
@@ -116,13 +147,13 @@ struct SValList : public Node {
 
 // Represents both dimensions and s like {3, 4, 5} or {1, 2, 1}
 struct MultiSpans : public Node {
-  std::string name = "";      // could be anonymous
-  std::string ref_name = "";  // syntax delight
-  ptr<NodeRef> list;
-  explicit MultiSpans(const std::string& n, const ptr<NodeRef>& l)
+  std::string name = "";  // could be anonymous
+  std::string ref_name;   // syntax suger
+  ptr<Node> list;
+  explicit MultiSpans(const std::string& n, const ptr<Node>& l)
       : name(n), list(l) {}
   explicit MultiSpans(const std::string& n, const std::string& rn,
-                      const ptr<NodeRef>& l)
+                      const ptr<Node>& l)
       : name(n), ref_name(rn), list(l) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
@@ -131,12 +162,13 @@ struct MultiSpans : public Node {
       os << name << " - ";
     else
       os << "(anon) - ";
-    if (ref_name != "") {
-      os << "{";
+
+    os << "{";
+    if (!ref_name.empty()) {
       list->Print(os, " " + ref_name);
-      os << "}";
-    } else
-      list->Print(os);
+    } else if (list != nullptr)
+      list->Print(os, " ");
+    os << " }";
   }
 };
 
@@ -144,7 +176,8 @@ struct MultiSpans : public Node {
 struct IntTuple : public Node {
   std::string name;  // could be anonymous
   ptr<SValList> value;
-  explicit IntTuple(const std::string& n, ptr<SValList> l) : name(n), value(l) {}
+  explicit IntTuple(const std::string& n, ptr<SValList> l)
+      : name(n), value(l) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Decl (tuple): ";
@@ -178,7 +211,6 @@ class ITupleSymbolTable {
   bool exists(const std::string& name) {
     return table.find(name) != table.end();
   }
-
 };
 
 struct IntVal : public Node {
@@ -198,12 +230,27 @@ struct IntVal : public Node {
 };
 
 struct IntIndex : public Node {
-  int value;
-  explicit IntIndex(int v) : value(v) {}
+  ptr<Node> value;
+  explicit IntIndex(const ptr<Node>& v) : value(v) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << prefix << "(" << value << ")";
-    (void)prefix;
+    os << prefix << "(";
+    value->Print(os);
+    os << ")";
+  }
+};
+
+struct NthBound : public Node {
+  ptr<Node> mdarray;
+  ptr<IntIndex> index;
+
+  explicit NthBound(const ptr<Node>& a, const ptr<IntIndex>& i)
+      : mdarray(a), index(i) {}
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << prefix;
+    mdarray->Print(os);
+    index->Print(os);
   }
 };
 
@@ -219,7 +266,6 @@ struct IntIndexList : public Node {
     os << indices.back()->value << "]";
   }
 };
-
 
 #if 0
 // Represents data declarations like: global f32 data{d};
@@ -253,6 +299,7 @@ struct DataType : public Node {
   }
 
   BaseType getBaseType() const { return type; }
+  bool isAggregate() const { return !scalar; }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     if (scalar)

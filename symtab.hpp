@@ -33,7 +33,7 @@ class Symbol {
   bool aggregate = false;
 
   // Constructor
-  Symbol(const std::string& n, BaseType t) : name(n), type(t) {}
+  Symbol(const std::string& n, BaseType t, bool a = false) : name(n), type(t), aggregate(a) {}
   Symbol() {}
 
   BaseType getType() const { return type; }
@@ -46,8 +46,8 @@ class SymbolTable {
 
  public:
   // Add a symbol to the symbol table
-  void addSymbol(const std::string& name, BaseType type) {
-    table[name] = Symbol(name, type);
+  void addSymbol(const std::string& name, BaseType type, bool aggr = false) {
+    table[name] = Symbol(name, type, aggr);
   }
 
   // Retrieve a symbol from the symbol table

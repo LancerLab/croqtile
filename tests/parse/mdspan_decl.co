@@ -4,7 +4,7 @@
 // device program
 __co__ f16 spans(f32 d) {
   ndims : {100, 100};  // shape, mdspan node
-  mdspan dim2 : {9, 102};  // shape, mdspan node
+  mdspan dim2 : {9, d};  // shape, mdspan node
 }
 
 // CHECK: ChoreoFunction
@@ -12,8 +12,8 @@ __co__ f16 spans(f32 d) {
 // CHECK:  `- Return type: f16
 // CHECK:  `- Parameters
 // CHECK:    `-  type: f32, symbol: d
-// CHECK:  `- Decl (span): ndims - [100, 100]
-// CHECK:  `- Decl (span): dim2 - [9, 102]
+// CHECK:  `- Decl (span): ndims - { 100 100 }
+// CHECK:  `- Decl (span): dim2 - { 9 d }
 
 
 // host program

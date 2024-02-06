@@ -4,6 +4,7 @@
 // device program
 __co__ f16 spans(f32 mdspan<3> d, int f) {
   ndims : d.span{(2), (1), (0)};  // shape, mdspan node
+  mdspan<4> dim2 : {9, 102, ndims(1), d.span(2)};  // shape, mdspan node
 }
 
 // CHECK: ChoreoFunction
@@ -12,10 +13,5 @@ __co__ f16 spans(f32 mdspan<3> d, int f) {
 // CHECK:  `- Parameters
 // CHECK:    `-  type: f32<>, symbol: d
 // CHECK:    `-  type: int, symbol: f
-// CHECK:  `- Decl (span): ndims - { d(2) d(1) d(0)}
-
-
-// host program
-int bar(int a) {
-  return foo(a);
-}
+// CHECK:  `- Decl (span): ndims - { d(2) d(1) d(0) }
+// CHECK:  `- Decl (span): dim2 - { 9 102 ndims(1) d.span(2) }
