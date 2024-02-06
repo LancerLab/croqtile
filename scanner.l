@@ -17,18 +17,33 @@
 #include "symtab.hpp"
 #include "scanner.hpp"
 #include "parser.tab.hh"
+#include "location.hh"
 
 
 static int scope = 0;
 
 Choreo::location loc;
 
+void update_location(const char *text) {
+  const char* it = text;
+  while (*it) {
+    if (*it == '\n') {
+      loc.lines();
+      loc.step(); // Reset column to 0 or 1 based on your implementation
+    } else {
+      loc.columns();
+    }
+    ++it;
+  }
+}
+
 // Original yyterminate() macro returns int. Since we're using Bison 3 variants
 // as tokens, we must redefine it to change type from `int` to `Parser::semantic_type`
 #define yyterminate() { Choreo::Parser::make_END(loc); break; }
 
-/* update location on matching */
-#define YY_USER_ACTION loc.step(); loc.columns(yyleng);
+
+/* update location on each matching */
+#define YY_USER_ACTION update_location(yytext);
 
 %}
 

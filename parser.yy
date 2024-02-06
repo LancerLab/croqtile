@@ -200,10 +200,10 @@ aggregate_type
       }
     | base_type LT IDENTIFIER GT {
         if (!symtab.exists($3))
-          Choreo::Parser::error(loc, "The symbol has not been defined.");
+          Choreo::Parser::error(@3, "The symbol has not been defined.");
 
         if (!symtab.getSymbol($3)->isAggregate())
-          Choreo::Parser::error(loc, "expecting a symbol of aggregate type.");
+          Choreo::Parser::error(@3, "expecting a symbol of aggregate type.");
 
         $$ = std::make_shared<AST::DataType>($1, AST::DataType::getSpanType($3));
       }
@@ -254,12 +254,12 @@ sval_ref
     : NUM { $$ = std::make_shared<AST::IntLiteral>($1); }
     | IDENTIFIER {
         if (!symtab.exists($1))
-          Choreo::Parser::error(loc,
+          Choreo::Parser::error(@1,
             "The symbol has not been defined.");
 
         if (symtab.getSymbol($1)->isAggregate() ||
             symtab.getSymbol($1)->getType() != AST::BaseType::INT)
-          Choreo::Parser::error(loc, "expecting a symbol of integer.");
+          Choreo::Parser::error(@1, "expecting a symbol of integer.");
 
         $$ = std::make_shared<AST::Identifier>($1);
     	}
@@ -283,7 +283,7 @@ parameter
     : param_type IDENTIFIER { /* handle parameter type and name here */
         $$ = std::make_shared<AST::ParamType>(std::pair($1, std::make_shared<AST::Identifier>($2)));
         if (symtab.exists($2)) {
-          Choreo::Parser::error(loc, "ODR violation: the symbol is already defined.");
+          Choreo::Parser::error(@2, "ODR violation: the symbol is already defined.");
           exit(1);
         }
         symtab.addSymbol($2, $1->getBaseType());
@@ -332,7 +332,7 @@ declaration
 scalar_decl
     : INT IDENTIFIER ASSIGN sval_ref {
         if (symtab.exists($2)) {
-          Choreo::Parser::error(loc, "ODR violation: the symbol is already defined.");
+          Choreo::Parser::error(@2, "ODR violation: the symbol is already defined.");
           exit(1);
         }
         symtab.addSymbol($2, $1);
@@ -384,7 +384,7 @@ named_span_decl
         // TODO: check if the span defined aligned with declaration
         #if 0
         if ($3 != $7->list.size())
-          Choreo::Parser::error(loc,
+          Choreo::Parser::error(@3,
             "The rank of mdspan is not consistent with its decleration.");
             #endif
         $7->name = $5;
@@ -540,6 +540,8 @@ int main(int argc, char* argv[]) {
 		std::cerr << "Could not open file: " << filename << std::endl;
 		return 1;
 	}
+
+  loc.begin.filename = loc.end.filename = &filename;
 
   Choreo::Scanner s;
   s.yyrestart(file);
