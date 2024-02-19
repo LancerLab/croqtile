@@ -140,6 +140,7 @@ struct SValList : public Node {
       os << ", ";
     }
     values.back()->Print(os);
+    (void)prefix;
   }
 };
 
@@ -160,6 +161,7 @@ struct Expr : public Node {
     }
     else
       value_r->Print(os);
+    (void)prefix;
   }
 };
 
@@ -209,13 +211,18 @@ struct IntTuple : public Node {
   }
 };
 
-class ITupleSymbolTable {
+class ITupleTable {
  private:
   std::unordered_map<std::string, ptr<IntTuple>> table;
+  SymbolTable & st;
 
  public:
+  ITupleTable(SymbolTable & symtab): st(symtab) {}
+
   // Add a symbol to the symbol table
   void addITupleSymbol(const std::string& name, ptr<IntTuple>& ituple) {
+    std::cout << "added ituple symbol: " << name << "\n";
+    st.addSymbol(name, BaseType::INT);
     table[name] = ituple;
   }
 
@@ -236,7 +243,7 @@ class ITupleSymbolTable {
 struct IntVal : public Node {
   std::string name;  // could be anonymous
   ptr<Node> value;
-  explicit IntVal(std::string& n, const ptr<Node>& v) : name(n), value(v) {}
+  explicit IntVal(std::string& n, const ptr<Expr>& v) : name(n), value(v) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Decl (int): ";
@@ -245,6 +252,19 @@ struct IntVal : public Node {
     else
       os << "(anonymous) ";
     os << "= ";
+    value->Print(os);
+  }
+};
+
+struct Assignment: public Node {
+  std::string name;
+  ptr<Node> value;
+  explicit Assignment(std::string& n, const ptr<Expr>& v) : name(n), value(v) {
+    assert(n.size() > 0 && "invalid assignment to the un-named value.");
+  }
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << "\n" << prefix << "`- Assign: " << name << " = ";
     value->Print(os);
   }
 };
@@ -407,10 +427,6 @@ struct CppSourceCode : public Node {
     os << code;
     (void)prefix;
   }
-};
-
-struct Expression : public Node {
-  std::vector<ptr<Node>> exprs;
 };
 
 // Top-level program structure

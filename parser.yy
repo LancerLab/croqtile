@@ -37,7 +37,7 @@ extern Choreo::location loc;
 
 AST::Program root;
 AST::SymbolTable symtab;
-AST::ITupleSymbolTable ituple_symtab;
+AST::ITupleTable ituple_symtab(symtab);
 
 const char* red = "\033[31m";
 const char* reset = "\033[0m";
@@ -123,7 +123,7 @@ void choreo_info(const char *message) {
 %nterm <AST::BaseType> base_type
 %nterm <AST::ptr<AST::Node>> pass_by sval_ref para_by
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments pb_statements with_statements iterate_statements span_list mixed_span_list
-%nterm <AST::ptr<AST::NodeRef>> statement declaration pb_statement span_elem mixed_span_elem if_else for_each
+%nterm <AST::ptr<AST::NodeRef>> statement declaration pb_statement span_elem mixed_span_elem if_else for_each assignment
 %nterm <AST::ptr<AST::IntList>> int_list
 %nterm <AST::ptr<AST::SValList>> sval_list
 %nterm <AST::ptr<AST::Expr>> term expr
@@ -132,8 +132,8 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::ParamType>> parameter
 %nterm <AST::ptr<AST::ChoreoFunction>> dsl_function
 %nterm <AST::ptr<AST::MultiSpans>> named_span_decl unnamed_span_decl
-%nterm <AST::ptr<AST::IntTuple>> named_tuple_decl unnamed_tuple_decl
-%nterm <AST::ptr<AST::IntVal>> scalar_decl assignment
+%nterm <AST::ptr<AST::IntTuple>> named_tuple_decl unnamed_tuple_decl tuple_assign
+%nterm <AST::ptr<AST::IntVal>> scalar_decl
 %nterm <AST::ptr<AST::IntIndex>> s_index
 %nterm <AST::ptr<AST::IntIndexList>> s_index_list
 
@@ -298,9 +298,11 @@ para_by
     ;
 
 pb_statements
-    : /* Empty */
-    | SEMCOL
-    | pb_statements pb_statement
+    : /* Empty */ { $$ = std::make_shared<AST::MultiNodes>(); }
+    | pb_statements pb_statement {
+        $1->Append($2);
+        $$ = $1;
+      }
     ;
 
 pb_statement
@@ -310,12 +312,18 @@ pb_statement
     ;
 
 assignments
-    : assignments COMMA assignment
-    | assignment
+    : assignments COMMA assignment {
+        $1->Append($3);
+        $$ = $1;
+      }
+    | assignment {
+        $$ = std::make_shared<AST::MultiNodes>();
+        $$->Append($1);
+      }
     ;
 
 declarations
-    : declarations SEMCOL declaration {
+    : declarations COMMA declaration {
         $1->Append($3);
         $$ = $1;
       }
@@ -488,14 +496,6 @@ named_tuple_decl
         ituple_symtab.addITupleSymbol($1, $3);
         $$ = $3;
       }
-    | IDENTIFIER ASSIGN IDENTIFIER {
-        if (!ituple_symtab.exists($3))
-          Choreo::Parser::error(@3, "The symbol has not been defined.");
-        auto src_ituple = ituple_symtab.getSymbol($3);
-        auto ret_ituple = std::make_shared<AST::IntTuple>($1, src_ituple->value);
-        ituple_symtab.addITupleSymbol($1, ret_ituple);
-        $$ = ret_ituple;
-      }
     | IDENTIFIER ASSIGN IDENTIFIER LBRACE s_index_list RBRACE {
         // anchor
         if (!ituple_symtab.exists($3))
@@ -514,11 +514,22 @@ storage_specifier: LOCAL | SHARED | GLOBAL;
 
 assignment
     : IDENTIFIER ASSIGN expr {
+        // The assignment is overrided to be initilization of ituple
+        auto sym = std::dynamic_pointer_cast<AST::Identifier>($3->value_r);
+        if (sym) {
+          auto src_ituple = ituple_symtab.getSymbol(sym->name);
+          auto ret_ituple = std::make_shared<AST::IntTuple>($1, src_ituple->value);
+          ituple_symtab.addITupleSymbol($1, ret_ituple);
+          $$ = std::make_shared<AST::NodeRef>(ret_ituple);
+          break;
+        }
+
         if (!symtab.exists($1)) {
-          Choreo::Parser::error(@1, ": the symbol is not defined.");
+          Choreo::Parser::error(@1, ": the symbol '" + $1 + "` is not defined.");
           exit(1);
         }
-        $$ = std::make_shared<AST::IntVal>($1, $3);
+
+        $$ = std::make_shared<AST::NodeRef>(std::make_shared<AST::Assignment>($1, $3));
       }
     ;
 
@@ -576,16 +587,16 @@ w_statement
     ;
 
 iterate_statements
-    : declarations SEMCOL
-    | assignments  SEMCOL
+    : declarations
+    | assignments
     ;
 
 for_each:
     ITER IDENTIFIER LBRACE iterate_statements RBRACE
     ;
 
-dma : DMA COL sval_ref source_to_dest SEMCOL
-    | COPY COL sval_ref source_to_dest SEMCOL
+dma : DMA COL sval_ref source_to_dest
+    | COPY COL sval_ref source_to_dest
 
 source_to_dest:
       IDENTIFIER ind_expr TRANS IDENTIFIER ind_expr

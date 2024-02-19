@@ -2,7 +2,7 @@
 
 __co__ u8 scalar_decls(int a, int b) {
   int c = a + (b - a) * a + a / 5 - b % a;
-  //c = 6 + 1;    //BUG: has amiguity error, conflicting with named_tuple_decl
+  c = 6 + 1;
   int d = b + 2;
   int e = 6 + 1;
 }
@@ -14,6 +14,7 @@ __co__ u8 scalar_decls(int a, int b) {
 // CHECK:    `-  type: int, symbol: a
 // CHECK:    `-  type: int, symbol: b
 // CHECK:  `- Decl (int): c =  ( ( (a +  ( (b - a)  * a) )  +  (a / 5) )  -  (b % a) )
+// CHECK:  `- Assign: c =  (6 + 1)
 // CHECK:  `- Decl (int): d =  (b + 2)
 // CHECK:  `- Decl (int): e =  (6 + 1)
 
