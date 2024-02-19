@@ -131,7 +131,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::ParamList>> parameter_list
 %nterm <AST::ptr<AST::ParamType>> parameter
 %nterm <AST::ptr<AST::ChoreoFunction>> dsl_function
-%nterm <AST::ptr<AST::MultiSpans>> named_span_decl span_decl
+%nterm <AST::ptr<AST::MultiSpans>> named_span_decl unnamed_span_decl
 %nterm <AST::ptr<AST::IntTuple>> named_tuple_decl unnamed_tuple_decl
 %nterm <AST::ptr<AST::IntVal>> scalar_decl assignment
 %nterm <AST::ptr<AST::IntIndex>> s_index
@@ -237,12 +237,13 @@ sval_ref
           Choreo::Parser::error(@1,
             "The symbol `" + $1 + "' has not been defined.");
 
-        if (symtab.getSymbol($1)->isAggregate() ||
-            symtab.getSymbol($1)->getType() != AST::BaseType::INT) {
-          std::cout << "aggr: " << symtab.getSymbol($1)->isAggregate() << ", basetype: " << (int)symtab.getSymbol($1)->getType() << "\n";
+        if (symtab.getSymbol($1)->isAggregate())
           Choreo::Parser::error(@1, "expecting symbol `" + $1 +
-                                "' of the scalar integer type.");
-        }
+                                "' of a scalar type.");
+
+        if (symtab.getSymbol($1)->getType() != AST::BaseType::INT)
+          Choreo::Parser::error(@1, "expecting symbol `" + $1 +
+                                "' of an integer type.");
 
         $$ = std::make_shared<AST::Identifier>($1);
     	}
@@ -420,20 +421,20 @@ mixed_span_list
       }
     ;
 
-span_decl
-    : IDENTIFIER FNSPAN LBRACE span_list RBRACE {
+unnamed_span_decl
+    : IDENTIFIER FNSPAN LBRAKT span_list RBRAKT {
         $$ = std::make_shared<AST::MultiSpans>("", $1, $4);
       }
-    | IDENTIFIER LBRACE span_list RBRACE {
+    | IDENTIFIER LBRAKT span_list RBRAKT {
         $$ = std::make_shared<AST::MultiSpans>("", $1, $3);
       }
-    | LBRACE mixed_span_list RBRACE {
+    | LBRAKT mixed_span_list RBRAKT {
         $$ = std::make_shared<AST::MultiSpans>("", $2);
       }
     ;
 
 named_span_decl
-    : MDSPAN IDENTIFIER COL span_decl {
+    : MDSPAN IDENTIFIER COL unnamed_span_decl {
         if (symtab.exists($2)) {
           Choreo::Parser::error(@2, "ODR violation: the symbol is already defined.");
           exit(1);
@@ -442,7 +443,7 @@ named_span_decl
         $4->name = $2;
         $$ = $4;
       }
-    | MDSPAN LT NUM GT IDENTIFIER COL span_decl {
+    | MDSPAN LT NUM GT IDENTIFIER COL unnamed_span_decl {
         // TODO: check if the span defined aligned with declaration
         #if 0
         if ($3 != $7->list.size())
@@ -457,7 +458,7 @@ named_span_decl
         $7->name = $5;
         $$ = $7;
       }
-    | IDENTIFIER COL span_decl {
+    | IDENTIFIER COL unnamed_span_decl {
         if (symtab.exists($1)) {
           Choreo::Parser::error(@1, "ODR violation: the symbol is already defined.");
           exit(1);
@@ -470,7 +471,7 @@ named_span_decl
 
 
 unnamed_tuple_decl
-    : LBRAKT sval_list RBRAKT {
+    : LBRACE sval_list RBRACE {
       $$ = std::make_shared<AST::IntTuple>("", $2);
     }
     ;
@@ -495,7 +496,7 @@ named_tuple_decl
         ituple_symtab.addITupleSymbol($1, ret_ituple);
         $$ = ret_ituple;
       }
-    | IDENTIFIER ASSIGN IDENTIFIER LBRAKT s_index_list RBRAKT {
+    | IDENTIFIER ASSIGN IDENTIFIER LBRACE s_index_list RBRACE {
         // anchor
         if (!ituple_symtab.exists($3))
           Choreo::Parser::error(@3, "The symbol has not been defined.");

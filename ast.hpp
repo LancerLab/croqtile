@@ -135,13 +135,11 @@ struct SValList : public Node {
   void Append(ptr<Node> v) { values.push_back(v); }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << prefix << "[";
     for (size_t i = 0; i < values.size() - 1; ++i) {
       values[i]->Print(os);
       os << ", ";
     }
     values.back()->Print(os);
-    os << "]";
   }
 };
 
@@ -183,12 +181,12 @@ struct MultiSpans : public Node {
     else
       os << "(anon) - ";
 
-    os << "{";
+    os << "[";
     if (!ref_name.empty()) {
       list->Print(os, " " + ref_name);
     } else if (list != nullptr)
       list->Print(os, " ");
-    os << " }";
+    os << " ]";
   }
 };
 
@@ -205,7 +203,9 @@ struct IntTuple : public Node {
       os << name << " ";
     else
       os << "(anonymous) ";
+    os << "{";
     value->Print(os);
+    os << "}";
   }
 };
 

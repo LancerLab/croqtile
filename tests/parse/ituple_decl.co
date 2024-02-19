@@ -1,10 +1,10 @@
 // RUN: choreo -e %s | FileCheck %s --match-full-lines
 
 __co__ bf16 tuple_decls(int a, int b) {
-  ituple val2 = [a, 9, 102];
-  nvals = [100, 10, 1, b];
+  ituple val2 = {a, 9, 102};
+  nvals = {100, 10, 1, b};
   nvals_reference_all = nvals;
-  nvals_reference = nvals_reference_all [(2), (1)];
+  nvals_reference = nvals_reference_all {(2), (1)};
 }
 
 // CHECK: ChoreoFunction
@@ -13,10 +13,10 @@ __co__ bf16 tuple_decls(int a, int b) {
 // CHECK:  `- Parameters
 // CHECK:    `-  type: int, symbol: a
 // CHECK:    `-  type: int, symbol: b
-// CHECK:  `- Decl (tuple): val2 [a, 9, 102]
-// CHECK:  `- Decl (tuple): nvals [100, 10, 1, b]
-// CHECK:  `- Decl (tuple): nvals_reference_all [100, 10, 1, b]
-// CHECK:  `- Decl (tuple): nvals_reference [1, 10]
+// CHECK:  `- Decl (tuple): val2 {a, 9, 102}
+// CHECK:  `- Decl (tuple): nvals {100, 10, 1, b}
+// CHECK:  `- Decl (tuple): nvals_reference_all {100, 10, 1, b}
+// CHECK:  `- Decl (tuple): nvals_reference {1, 10}
 
 // host program
 int host(int a, int b) {
