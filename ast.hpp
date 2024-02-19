@@ -145,6 +145,26 @@ struct SValList : public Node {
   }
 };
 
+struct Expr : public Node {
+  std::string op;
+  ptr<Expr> value_l;
+  ptr<Node> value_r;
+  explicit Expr(const std::string& o, const ptr<Expr>& v1, const ptr<Node>& v2) : op(o), value_l(v1), value_r(v2) {}
+  explicit Expr(const ptr<Node>& v) : value_r(v) {}
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    if (op.size() > 0){
+      os << " " << "(";
+      value_l->Print(os);
+      os << " " << op << " ";
+      value_r->Print(os);
+      os << ")"  << " ";
+    }
+    else
+      value_r->Print(os);
+  }
+};
+
 // Represents both dimensions and s like {3, 4, 5} or {1, 2, 1}
 struct MultiSpans : public Node {
   std::string name = "";  // could be anonymous
@@ -216,7 +236,7 @@ class ITupleSymbolTable {
 struct IntVal : public Node {
   std::string name;  // could be anonymous
   ptr<Node> value;
-  explicit IntVal(std::string& n, ptr<Node>& v) : name(n), value(v) {}
+  explicit IntVal(std::string& n, const ptr<Node>& v) : name(n), value(v) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Decl (int): ";

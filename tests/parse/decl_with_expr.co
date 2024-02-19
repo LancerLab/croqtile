@@ -1,0 +1,23 @@
+// RUN: choreo -e %s | FileCheck --match-full-lines %s
+
+__co__ u8 scalar_decls(int a, int b) {
+  int c = a + (b - a) * a + a / 5 - b % a;
+  //c = 6 + 1;    //BUG: has amiguity error, conflicting with named_tuple_decl
+  int d = b + 2;
+  int e = 6 + 1;
+}
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: scalar_decls
+// CHECK:  `- Return type: u8
+// CHECK:  `- Parameters
+// CHECK:    `-  type: int, symbol: a
+// CHECK:    `-  type: int, symbol: b
+// CHECK:  `- Decl (int): c =  ( ( (a +  ( (b - a)  * a) )  +  (a / 5) )  -  (b % a) ) 
+// CHECK:  `- Decl (int): d =  (b + 2)
+// CHECK:  `- Decl (int): e =  (6 + 1)
+
+// host program
+int host(int a, int b) {
+  return scalar_decls(a, b);
+}

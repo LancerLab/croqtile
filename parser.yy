@@ -123,16 +123,17 @@ void choreo_info(const char *message) {
 %nterm <AST::BaseType> base_type
 %nterm <AST::ptr<AST::Node>> pass_by sval_ref para_by
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments pb_statements with_statements iterate_statements span_list mixed_span_list
-%nterm <AST::ptr<AST::NodeRef>> statement declaration pb_statement expr span_elem mixed_span_elem if_else for_each
+%nterm <AST::ptr<AST::NodeRef>> statement declaration pb_statement span_elem mixed_span_elem if_else for_each
 %nterm <AST::ptr<AST::IntList>> int_list
 %nterm <AST::ptr<AST::SValList>> sval_list
+%nterm <AST::ptr<AST::Expr>> term expr
 %nterm <AST::ptr<AST::DataType>> general_type param_type aggregate_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
 %nterm <AST::ptr<AST::ParamType>> parameter
 %nterm <AST::ptr<AST::ChoreoFunction>> dsl_function
 %nterm <AST::ptr<AST::MultiSpans>> named_span_decl span_decl
 %nterm <AST::ptr<AST::IntTuple>> named_tuple_decl unnamed_tuple_decl
-%nterm <AST::ptr<AST::IntVal>> scalar_decl
+%nterm <AST::ptr<AST::IntVal>> scalar_decl assignment
 %nterm <AST::ptr<AST::IntIndex>> s_index
 %nterm <AST::ptr<AST::IntIndexList>> s_index_list
 
@@ -329,7 +330,7 @@ declaration
     ;
 
 scalar_decl
-    : INT IDENTIFIER ASSIGN sval_ref {
+    : INT IDENTIFIER ASSIGN expr {
         if (symtab.exists($2)) {
           Choreo::Parser::error(@2, "ODR violation: the symbol is already defined.");
           exit(1);
@@ -511,16 +512,27 @@ named_tuple_decl
 storage_specifier: LOCAL | SHARED | GLOBAL;
 
 assignment
-    : IDENTIFIER ASSIGN expr
+    : IDENTIFIER ASSIGN expr {
+        if (!symtab.exists($1)) {
+          Choreo::Parser::error(@1, ": the symbol is not defined.");
+          exit(1);
+        }
+        $$ = std::make_shared<AST::IntVal>($1, $3);
+      }
     ;
 
 expr
-    : expr PLUS sval_ref { std::cout << $1 << " + " << $3; }
-    | expr MINUS sval_ref { std::cout << $1 << " - " << $3; }
-    | expr STAR sval_ref { std::cout << $1 << " * " << $3; }
-    | expr SLASH sval_ref { std::cout << $1 << " / " << $3; }
-    | expr PECET sval_ref { std::cout << $1 << " % " << $3; }
-    | sval_ref
+    : expr PLUS term { $$ = std::make_shared<AST::Expr>("+", $1, $3); }
+    | expr MINUS term { $$ = std::make_shared<AST::Expr>("-", $1, $3); }
+    | term { $$ = $1; }
+    ;
+
+term
+    : term STAR sval_ref { $$ = std::make_shared<AST::Expr>("*", $1, $3); }
+    | term SLASH sval_ref { $$ = std::make_shared<AST::Expr>("/", $1, $3); }
+    | term PECET sval_ref { $$ = std::make_shared<AST::Expr>("%", $1, $3); }
+    | LPAREN expr RPAREN { $$ = $2; }
+    | sval_ref { $$ = std::make_shared<AST::Expr>($1); }
     ;
 
 if_else
