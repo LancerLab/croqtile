@@ -1,0 +1,38 @@
+1. bool type + logical arith + ternary expression (VC)
+   (expr) ? a : b;
+
+   pred_expr:
+     expr > expr
+     expr < expr
+     expr == expr
+     expr != expr
+     expr <= expr
+     expr >= expr
+     pred_expr && pred_expr
+     pred_expr || pred_expr
+     !pred_expr
+
+2. if_else statement  depend-on 1
+
+3. mdspan arith: (Garfee)
+   span + span
+   span - span
+   span * ituple -> span
+   span / ituple -> span
+   span % ituple -> span
+
+4. with_statement, requires_clause and bind operation '<->' (AS)
+
+    with idx_lhs_c_non_reduce in lhs_c_non_reduce,
+         idx_lhs_c_reduce in lhs_c_reduce,
+         idx_rhs_c in rhs_c,
+         idx_out_c in out_c,
+         idx_group in feature_group_cnt
+    requires
+         idx_lhs_c_non_reduce <-> idx_out_c [(0), (1), (3)],
+         idx_lhs_c_reduce <-> idx_out_c [(2)],
+         idx_lhs_s <-> idx_out_s {}
+
+5. foreach
+
+6. dma, and chunkAt wait

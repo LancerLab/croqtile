@@ -1,0 +1,17 @@
+// RUN: choreo -e %s | FileCheck --match-full-lines %s
+
+__co__ int span_element(int d, int c) {
+  mdspan dims : [9, d];  // shape, mdspan node
+  dim1 : [c, 10];
+  int a = dims(c) + dim1(0) + d;
+}
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: span_element
+// CHECK:  `- Return type: int
+// CHECK:  `- Parameters
+// CHECK:    `-  type: int, symbol: d
+// CHECK:    `-  type: int, symbol: c
+// CHECK:  `- Decl (span): dims - [ 9 d ]
+// CHECK:  `- Decl (span): dim1 - [ c 10 ]
+// CHECK:  `- Decl (int): a =  ( (dims(c) + dim1(0))  + d)

@@ -29,8 +29,8 @@ auto Conv2d_kernel = [&](auto& lhs_buf, auto& rhs_buf, auto& out_buf,
   conv2d_(conv2d_params);
 };
 
-conv_dataflow(f32 mdspan<4> lhs_data, 
-              f32 mdspan<4> rhs_data, 
+conv_dataflow(f32 mdspan<4> lhs_data,
+              f32 mdspan<4> rhs_data,
               f32 mdspan<4> output,
               bool lhs_parallel,
               bool dma_broadcast,
@@ -61,10 +61,10 @@ conv_dataflow(f32 mdspan<4> lhs_data,
   // QUIZ: bool+condition or enum+switch-case
   // very complex dataflow, may use bool and enum for conditioning, and then define specialised tile-sizes case-by-case
   // handle cache patterns
-  bool uncache_reduce = true : rhs_span_h(reduce_dim) > rhs_span_c(reduce_dim); 
-  bool cacheL2_rhs_reduce = true : !uncache_reduce && rhs_span_c(reduce_dim) > rhs_span_s(reduce_dim); 
+  bool uncache_reduce = (rhs_span_h(reduce_dim) > rhs_span_c(reduce_dim)) ? true : false;
+  bool cacheL2_rhs_reduce = true : !uncache_reduce && rhs_span_c(reduce_dim) > rhs_span_s(reduce_dim);
   bool needcache_lhs_reduce = true : rhs_span_h(reduce_dim) > rhs_span_c(reduce_dim) && rhs_span_c(reduce_dim) > rhs_span_s(reduce_dim)
-  bool cacheL1_rhs_reduce = !uncache_reduce && !cacheL2_rhs_reduce && needcache_lhs_reduce; 
+  bool cacheL1_rhs_reduce = !uncache_reduce && !cacheL2_rhs_reduce && needcache_lhs_reduce;
   bool cacheL1_reduce = !uncache_reduce && !cacheL2_rhs_reduce && !cacheL1_rhs_reduce;
   pingpong = {1, 1, 1, 1, 1, 1};
   pingpong = {csb_prefetch_depth, 1, csb_prefetch_depth, sip_prefetch_depth, 1, sip_prefetch_depth} : cacheL1_reduce;
@@ -83,7 +83,7 @@ conv_dataflow(f32 mdspan<4> lhs_data,
 
   // merge dimensions at cdma level
   // SUGGEST: support dim merge
-  lhs_span_c = lhs_span_c {(0), (1), (-1), (2, 3)} : feature_group_cnt == 1 
+  lhs_span_c = lhs_span_c {(0), (1), (-1), (2, 3)} : feature_group_cnt == 1
                                                    && lhs_span_h(3) <= 64
                                                    && lhs_span_c(3) <= 64
                                                    && ...;
@@ -107,9 +107,11 @@ conv_dataflow(f32 mdspan<4> lhs_data,
            idx_rhs_c in rhs_c,
            idx_out_c in out_c,
            idx_group in feature_group_cnt
-      where idx_lhs_c_non_reduce == idx_out_c [(0), (1), (3)] 
-      and   idx_lhs_c_reduce == idx_out_c [(2)]
-      and   idx_lhs_s == idx_out_s {
+      requires
+        idx_lhs_c_non_reduce <-> idx_out_c [(0), (1), (3)],
+        idx_lhs_c_reduce <-> idx_out_c [(2)],
+        idx_lhs_s <-> idx_out_s
+      {
         foreach idx_lhs_c_non_reduce, idx_ot_c [(0), (1), (3)] {
           cdt_input = dte.linear input.chunkAt(p, idx_in_c) -> shared;
           foreach idx_in_c_reduce {
@@ -133,7 +135,7 @@ conv_dataflow(f32 mdspan<4> lhs_data,
       // one-line idx-span mapping
       with idx_rhs_c_non_reduce, idx_rhs_c_reduce, idx_lhs_c, idx_out_c in rhs_c_non_reduce, rhs_c_reduce, lhs_c, out_c,
            idx_group in feature_group_cnt
-      where idx_rhs_c_non_reduce == idx_out_c [(0), (1), (3)] 
+      where idx_rhs_c_non_reduce == idx_out_c [(0), (1), (3)]
       and   idx_rhs_c_reduce == idx_out_c [(2)]
       and   idx_rhs_s == idx_out_s {
         foreach idx_rhs_c_non_reduce, idx_ot_c [(0), (1), (3)] {
