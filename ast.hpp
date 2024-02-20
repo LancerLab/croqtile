@@ -8,13 +8,16 @@
 #include <string>
 #include <vector>
 
-#include "visitor.hpp"
 #include "symtab.hpp"
+#include "visitor.hpp"
 
 namespace AST {
 
 template <typename T>
 using ptr = std::shared_ptr<T>;
+
+#define __NODE_TYPE_STRING__ \
+  const std::string TypeString() override { return __PRETTY_FUNCTION__; }
 
 // Base class for all AST nodes
 struct Node {
@@ -25,6 +28,7 @@ struct Node {
     (void)prefix;
   }
 
+  virtual const std::string TypeString() = 0;
   // TODO: implementation for each derived-type
   virtual void accept(Visitor& visitor) { visitor.visit(this); }
 };
@@ -46,6 +50,8 @@ struct NodeRef : public Node {
   }
 
   void accept(Visitor& visitor) override { visitor.visit(&*value); }
+
+  __NODE_TYPE_STRING__
 };
 
 // A general cluster of nodes
@@ -72,6 +78,8 @@ struct MultiNodes : public Node {
   void accept(Visitor& visitor) override {
     for (auto& v : values) visitor.visit(&*v);
   }
+
+  __NODE_TYPE_STRING__
 };
 
 // For storage specifiers like local, global, shared
@@ -114,6 +122,8 @@ struct IntLiteral : public Node {
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix << value;
   }
+
+  __NODE_TYPE_STRING__
 };
 
 struct IntList : public Node {
@@ -127,6 +137,8 @@ struct IntList : public Node {
       os << values[i]->value << ", ";
     os << values.back()->value << "]";
   }
+
+  __NODE_TYPE_STRING__
 };
 
 struct SValList : public Node {
@@ -142,27 +154,31 @@ struct SValList : public Node {
     values.back()->Print(os);
     (void)prefix;
   }
+
+  __NODE_TYPE_STRING__
 };
 
 struct Expr : public Node {
   std::string op;
   ptr<Expr> value_l;
   ptr<Node> value_r;
-  explicit Expr(const std::string& o, const ptr<Expr>& v1, const ptr<Node>& v2) : op(o), value_l(v1), value_r(v2) {}
+  explicit Expr(const std::string& o, const ptr<Expr>& v1, const ptr<Node>& v2)
+      : op(o), value_l(v1), value_r(v2) {}
   explicit Expr(const ptr<Node>& v) : value_r(v) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    if (op.size() > 0){
-      os << " " << "(";
+    if (op.size() > 0) {
+      os << " (";
       value_l->Print(os);
       os << " " << op << " ";
       value_r->Print(os);
-      os << ")"  << " ";
-    }
-    else
+      os << ") ";
+    } else
       value_r->Print(os);
     (void)prefix;
   }
+
+  __NODE_TYPE_STRING__
 };
 
 // Represents both dimensions and s like {3, 4, 5} or {1, 2, 1}
@@ -190,6 +206,8 @@ struct MultiSpans : public Node {
       list->Print(os, " ");
     os << " ]";
   }
+
+  __NODE_TYPE_STRING__
 };
 
 // Represents declarations like: ituple t = {3, 4, 5};
@@ -209,19 +227,20 @@ struct IntTuple : public Node {
     value->Print(os);
     os << "}";
   }
+
+  __NODE_TYPE_STRING__
 };
 
 class ITupleTable {
  private:
   std::unordered_map<std::string, ptr<IntTuple>> table;
-  SymbolTable & st;
+  SymbolTable& st;
 
  public:
-  ITupleTable(SymbolTable & symtab): st(symtab) {}
+  ITupleTable(SymbolTable& symtab) : st(symtab) {}
 
   // Add a symbol to the symbol table
   void addITupleSymbol(const std::string& name, ptr<IntTuple>& ituple) {
-    std::cout << "added ituple symbol: " << name << "\n";
     st.addSymbol(name, BaseType::INT);
     table[name] = ituple;
   }
@@ -240,10 +259,10 @@ class ITupleTable {
   }
 };
 
-struct IntVal : public Node {
+struct Integer : public Node {
   std::string name;  // could be anonymous
   ptr<Node> value;
-  explicit IntVal(std::string& n, const ptr<Expr>& v) : name(n), value(v) {}
+  explicit Integer(std::string& n, const ptr<Node>& v) : name(n), value(v) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Decl (int): ";
@@ -254,9 +273,11 @@ struct IntVal : public Node {
     os << "= ";
     value->Print(os);
   }
+
+  __NODE_TYPE_STRING__
 };
 
-struct Assignment: public Node {
+struct Assignment : public Node {
   std::string name;
   ptr<Node> value;
   explicit Assignment(std::string& n, const ptr<Expr>& v) : name(n), value(v) {
@@ -267,6 +288,8 @@ struct Assignment: public Node {
     os << "\n" << prefix << "`- Assign: " << name << " = ";
     value->Print(os);
   }
+
+  __NODE_TYPE_STRING__
 };
 
 struct IntIndex : public Node {
@@ -278,6 +301,8 @@ struct IntIndex : public Node {
     value->Print(os);
     os << ")";
   }
+
+  __NODE_TYPE_STRING__
 };
 
 struct NthBound : public Node {
@@ -292,6 +317,8 @@ struct NthBound : public Node {
     mdarray->Print(os);
     index->Print(os);
   }
+
+  __NODE_TYPE_STRING__
 };
 
 struct IntIndexList : public Node {
@@ -305,6 +332,8 @@ struct IntIndexList : public Node {
       os << indices[i]->value << ", ";
     os << indices.back()->value << "]";
   }
+
+  __NODE_TYPE_STRING__
 };
 
 #if 0
@@ -358,6 +387,8 @@ struct DataType : public Node {
   }
 
   static std::unordered_map<std::string, ptr<MultiSpans>> namedSpans;
+
+  __NODE_TYPE_STRING__
 };
 
 struct Identifier : public Node {
@@ -366,6 +397,8 @@ struct Identifier : public Node {
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix << name;
   }
+
+  __NODE_TYPE_STRING__
 };
 
 struct ParamList : public Node {
@@ -381,6 +414,8 @@ struct ParamList : public Node {
       item->second->Print(os, ", symbol: ");
     }
   }
+
+  __NODE_TYPE_STRING__
 };
 
 struct ParallelBy : public Node {
@@ -394,6 +429,8 @@ struct ParallelBy : public Node {
     os << "\n" << prefix << "`- Parellelization: ";
     os << " IV symbol: " << iv << ", bound: " << bound << std::endl;
   }
+
+  __NODE_TYPE_STRING__
 };
 
 struct FunctionDecl : public Node {
@@ -407,6 +444,8 @@ struct FunctionDecl : public Node {
     ret_type->Print(os);
     params->Print(os, prefix);
   }
+
+  __NODE_TYPE_STRING__
 };
 
 struct ChoreoFunction : public Node {
@@ -418,6 +457,8 @@ struct ChoreoFunction : public Node {
     f_decl.Print(os, prefix + " `- ");
     if (statms) statms->Print(os, prefix + " ");
   }
+
+  __NODE_TYPE_STRING__
 };
 
 struct CppSourceCode : public Node {
@@ -427,6 +468,8 @@ struct CppSourceCode : public Node {
     os << code;
     (void)prefix;
   }
+
+  __NODE_TYPE_STRING__
 };
 
 // Top-level program structure
@@ -436,6 +479,8 @@ struct Program : public Node {
     for (auto& node : nodes) node->Print(os, "");
     (void)prefix;
   }
+
+  __NODE_TYPE_STRING__
 };
 
 }  // end of namespace AST

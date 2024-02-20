@@ -121,9 +121,9 @@ void choreo_info(const char *message) {
 
 // non-terminals
 %nterm <AST::BaseType> base_type
-%nterm <AST::ptr<AST::Node>> pass_by sval_ref para_by
+%nterm <AST::ptr<AST::Node>> pass_by simple_val para_by
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments pb_statements with_statements iterate_statements span_list mixed_span_list
-%nterm <AST::ptr<AST::NodeRef>> statement declaration pb_statement span_elem mixed_span_elem if_else for_each assignment
+%nterm <AST::ptr<AST::NodeRef>> statement declaration pb_statement span_elem mixed_span_elem if_else for_each assignment int_val
 %nterm <AST::ptr<AST::IntList>> int_list
 %nterm <AST::ptr<AST::SValList>> sval_list
 %nterm <AST::ptr<AST::Expr>> term expr
@@ -133,7 +133,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::ChoreoFunction>> dsl_function
 %nterm <AST::ptr<AST::MultiSpans>> named_span_decl unnamed_span_decl
 %nterm <AST::ptr<AST::IntTuple>> named_tuple_decl unnamed_tuple_decl tuple_assign
-%nterm <AST::ptr<AST::IntVal>> scalar_decl
+%nterm <AST::ptr<AST::Integer>> scalar_decl
 %nterm <AST::ptr<AST::IntIndex>> s_index
 %nterm <AST::ptr<AST::IntIndexList>> s_index_list
 
@@ -220,17 +220,17 @@ sval_list
     : /* allows the empty list */ {
         $$ = std::make_shared<AST::SValList>();
       }
-    | sval_list COMMA sval_ref {
+    | sval_list COMMA simple_val {
         $1->Append($3);
         $$ = $1;
       }
-    | sval_ref {
+    | simple_val {
         $$ = std::make_shared<AST::SValList>();
         $$->Append($1);
       }
     ;
 
-sval_ref
+simple_val
     : NUM { $$ = std::make_shared<AST::IntLiteral>($1); }
     | IDENTIFIER {
         if (!symtab.exists($1))
@@ -247,6 +247,21 @@ sval_ref
 
         $$ = std::make_shared<AST::Identifier>($1);
     	}
+    ;
+
+int_val
+    : IDENTIFIER s_index {
+        if (!symtab.exists($1)) {
+          Choreo::Parser::error(@1, ": the symbol '" + $1 + "` is not defined.");
+          exit(1);
+        }
+
+        auto nth = std::make_shared<AST::NthBound>(std::make_shared<AST::Identifier>($1), $2);
+        $$ = std::make_shared<AST::NodeRef>(nth);
+      }
+    | simple_val {
+        $$ = std::make_shared<AST::NodeRef>($1);
+      }
     ;
 
 parameter_list
@@ -345,12 +360,12 @@ scalar_decl
           exit(1);
         }
         symtab.addSymbol($2, $1);
-        $$ = std::make_shared<AST::IntVal>($2, $4);
+        $$ = std::make_shared<AST::Integer>($2, $4);
       }
     ;
 
 s_index
-    : LPAREN sval_ref RPAREN {
+    : LPAREN simple_val RPAREN {
         $$ = std::make_shared<AST::IntIndex>($2);
       }
     ;
@@ -371,7 +386,7 @@ s_index_list
 
 span_elem
     : s_index { $$ = std::make_shared<AST::NodeRef>($1); }
-    | sval_ref { $$ = std::make_shared<AST::NodeRef>($1); }
+    | simple_val { $$ = std::make_shared<AST::NodeRef>($1); }
     ; // do not allow non-element
 
 span_list
@@ -412,7 +427,7 @@ mixed_span_elem
 
         $$ = std::make_shared<AST::NodeRef>(nth_elem);
       }
-    | sval_ref { $$ = std::make_shared<AST::NodeRef>($1); }
+    | simple_val { $$ = std::make_shared<AST::NodeRef>($1); }
     ; // do not allow an empty item
 
 mixed_span_list
@@ -515,13 +530,16 @@ storage_specifier: LOCAL | SHARED | GLOBAL;
 assignment
     : IDENTIFIER ASSIGN expr {
         // The assignment is overrided to be initilization of ituple
-        auto sym = std::dynamic_pointer_cast<AST::Identifier>($3->value_r);
-        if (sym) {
-          auto src_ituple = ituple_symtab.getSymbol(sym->name);
-          auto ret_ituple = std::make_shared<AST::IntTuple>($1, src_ituple->value);
-          ituple_symtab.addITupleSymbol($1, ret_ituple);
-          $$ = std::make_shared<AST::NodeRef>(ret_ituple);
-          break;
+        auto ref = std::dynamic_pointer_cast<AST::NodeRef>($3->value_r);
+        if (ref) {
+          auto sym = std::dynamic_pointer_cast<AST::Identifier>(ref->value);
+          if (sym) {
+            auto src_ituple = ituple_symtab.getSymbol(sym->name);
+            auto ret_ituple = std::make_shared<AST::IntTuple>($1, src_ituple->value);
+            ituple_symtab.addITupleSymbol($1, ret_ituple);
+            $$ = std::make_shared<AST::NodeRef>(ret_ituple);
+            break;
+          }
         }
 
         if (!symtab.exists($1)) {
@@ -540,11 +558,11 @@ expr
     ;
 
 term
-    : term STAR sval_ref { $$ = std::make_shared<AST::Expr>("*", $1, $3); }
-    | term SLASH sval_ref { $$ = std::make_shared<AST::Expr>("/", $1, $3); }
-    | term PECET sval_ref { $$ = std::make_shared<AST::Expr>("%", $1, $3); }
+    : term STAR int_val { $$ = std::make_shared<AST::Expr>("*", $1, $3); }
+    | term SLASH int_val { $$ = std::make_shared<AST::Expr>("/", $1, $3); }
+    | term PECET int_val { $$ = std::make_shared<AST::Expr>("%", $1, $3); }
     | LPAREN expr RPAREN { $$ = $2; }
-    | sval_ref { $$ = std::make_shared<AST::Expr>($1); }
+    | int_val { $$ = std::make_shared<AST::Expr>($1); }
     ;
 
 if_else
@@ -595,8 +613,8 @@ for_each:
     ITER IDENTIFIER LBRACE iterate_statements RBRACE
     ;
 
-dma : DMA COL sval_ref source_to_dest
-    | COPY COL sval_ref source_to_dest
+dma : DMA COL simple_val source_to_dest
+    | COPY COL simple_val source_to_dest
 
 source_to_dest:
       IDENTIFIER ind_expr TRANS IDENTIFIER ind_expr
@@ -612,13 +630,13 @@ indices: IDENTIFIER
 
 // Bison expects us to provide implementation - otherwise linker complains
 void Choreo::Parser::error(const location &loc , const std::string &message) {
+  std::cerr << loc << ": ";
   if (shell_supports_colors())
       std::cerr << red;
   std::cerr << "Error: ";
   if (shell_supports_colors())
       std::cerr << reset;
   std::cerr << message << std::endl;
-  std::cerr << "Error location: " << loc << std::endl;
 }
 
 int main(int argc, char* argv[]) {
@@ -692,9 +710,3 @@ int main(int argc, char* argv[]) {
 
 int AST::SymbolTable::anonymous_count = 0;
 std::unordered_map<std::string, AST::ptr<AST::MultiSpans>> AST::DataType::namedSpans;
-// tuple_decl
-//     : LBRACE sval_list RBRACE {
-//         $$ = std::make_shared<AST::IntTuple>("", $2);
-//       }
-//     ;
-//
