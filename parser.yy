@@ -121,21 +121,22 @@ void choreo_info(const char *message) {
 
 // non-terminals
 %nterm <AST::BaseType> base_type
-%nterm <AST::ptr<AST::Node>> pass_by simple_val para_by
+%nterm <AST::ptr<AST::Node>> pass_by simple_val para_by span_val ituple_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments pb_statements with_statements iterate_statements span_list mixed_span_list
-%nterm <AST::ptr<AST::NodeRef>> statement declaration pb_statement span_elem mixed_span_elem if_else for_each assignment int_val
+%nterm <AST::ptr<AST::NodeRef>> statement declaration pb_statement span_elem mixed_span_elem if_else for_each int_val
 %nterm <AST::ptr<AST::IntList>> int_list
 %nterm <AST::ptr<AST::SValList>> sval_list
-%nterm <AST::ptr<AST::Expr>> term expr
+%nterm <AST::ptr<AST::Expr>> term expr span_expr span_term
 %nterm <AST::ptr<AST::DataType>> general_type param_type aggregate_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
 %nterm <AST::ptr<AST::ParamType>> parameter
 %nterm <AST::ptr<AST::ChoreoFunction>> dsl_function
-%nterm <AST::ptr<AST::MultiSpans>> named_span_decl unnamed_span_decl
-%nterm <AST::ptr<AST::IntTuple>> named_tuple_decl unnamed_tuple_decl tuple_assign
-%nterm <AST::ptr<AST::Integer>> scalar_decl
+%nterm <AST::ptr<AST::MultiSpans>> unnamed_span_decl
+%nterm <AST::ptr<AST::NamedDecl>> named_span_decl named_tuple_decl scalar_decl
+%nterm <AST::ptr<AST::IntTuple>> unnamed_tuple_decl tuple_assign
 %nterm <AST::ptr<AST::IntIndex>> s_index
 %nterm <AST::ptr<AST::IntIndexList>> s_index_list
+%nterm <AST::ptr<AST::Assignment>> assignment
 
 %%
 
@@ -143,13 +144,13 @@ program
     : /* Empty */ {}
     | program pass_by      { root.nodes.push_back($2); }
     | program dsl_function { root.nodes.push_back($2); }
-    | END {  }
+    | END {}
     ;
 
 pass_by
     : CPP_CODE {
-      $$ = std::make_shared<AST::CppSourceCode>($1);
-    }
+        $$ = std::make_shared<AST::CppSourceCode>($1);
+      }
     ;
 
 dsl_function
@@ -185,7 +186,7 @@ aggregate_type
         if (!symtab.getSymbol($3)->isAggregate())
           Choreo::Parser::error(@3, "expecting a symbol of aggregate type.");
 
-        $$ = std::make_shared<AST::DataType>($1, AST::DataType::getSpanType($3));
+        $$ = std::make_shared<AST::DataType>($1, std::make_shared<AST::Identifier>($3));
       }
     ;
 
@@ -237,9 +238,11 @@ simple_val
           Choreo::Parser::error(@1,
             "The symbol `" + $1 + "' has not been defined.");
 
+#if 0
         if (symtab.getSymbol($1)->isAggregate())
           Choreo::Parser::error(@1, "expecting symbol `" + $1 +
                                 "' of a scalar type.");
+#endif
 
         if (symtab.getSymbol($1)->getType() != AST::BaseType::INT)
           Choreo::Parser::error(@1, "expecting symbol `" + $1 +
@@ -308,8 +311,8 @@ statement
 
 para_by
     : PARA IDENTIFIER BY NUM LBRACE pb_statements RBRACE {
-      $$ = std::make_shared<AST::ParallelBy>($2, $4);
-    }
+        $$ = std::make_shared<AST::ParallelBy>($2, $4);
+      }
     ;
 
 pb_statements
@@ -346,6 +349,7 @@ declarations
         $$ = std::make_shared<AST::MultiNodes>();
         $$->Append($1);
       }
+    ;
 
 declaration
     : named_span_decl { $$ = std::make_shared<AST::NodeRef>($1); }
@@ -360,7 +364,7 @@ scalar_decl
           exit(1);
         }
         symtab.addSymbol($2, $1);
-        $$ = std::make_shared<AST::Integer>($2, $4);
+        $$ = std::make_shared<AST::NamedDecl>($2, "int", $4);
       }
     ;
 
@@ -371,7 +375,7 @@ s_index
     ;
 
 s_index_list
-    : /* allows the empty list */ {
+    : /* allow empty list */ {
         $$ = std::make_shared<AST::IntIndexList>();
       }
     | s_index_list COMMA s_index {
@@ -446,27 +450,32 @@ mixed_span_list
 
 unnamed_span_decl
     : IDENTIFIER FNSPAN LBRAKT span_list RBRAKT {
-        $$ = std::make_shared<AST::MultiSpans>("", $1, $4);
+        $$ = std::make_shared<AST::MultiSpans>($1, $4);
       }
     | IDENTIFIER LBRAKT span_list RBRAKT {
-        $$ = std::make_shared<AST::MultiSpans>("", $1, $3);
+        $$ = std::make_shared<AST::MultiSpans>($1, $3);
       }
     | LBRAKT mixed_span_list RBRAKT {
         $$ = std::make_shared<AST::MultiSpans>("", $2);
       }
     ;
 
+span_val
+    : unnamed_span_decl { $$ = $1; }
+    | IDENTIFIER { $$ = std::make_shared<AST::Identifier>($1); }
+    | IDENTIFIER FNSPAN { $$ = std::make_shared<AST::Identifier>($1 + $2); }
+    ;
+
 named_span_decl
-    : MDSPAN IDENTIFIER COL unnamed_span_decl {
+    : MDSPAN IDENTIFIER COL span_expr {
         if (symtab.exists($2)) {
           Choreo::Parser::error(@2, "ODR violation: the symbol is already defined.");
           exit(1);
         }
         symtab.addSymbol($2, AST::BaseType::INT, true);
-        $4->name = $2;
-        $$ = $4;
+        $$ = std::make_shared<AST::NamedDecl>($2, "span", $4, "-");
       }
-    | MDSPAN LT NUM GT IDENTIFIER COL unnamed_span_decl {
+    | MDSPAN LT NUM GT IDENTIFIER COL span_expr {
         // TODO: check if the span defined aligned with declaration
         #if 0
         if ($3 != $7->list.size())
@@ -478,50 +487,58 @@ named_span_decl
           exit(1);
         }
         symtab.addSymbol($5, AST::BaseType::INT, true);
-        $7->name = $5;
-        $$ = $7;
+        $$ = std::make_shared<AST::NamedDecl>($5, "span", $7, "-");
       }
-    | IDENTIFIER COL unnamed_span_decl {
+    | IDENTIFIER COL span_expr {
         if (symtab.exists($1)) {
           Choreo::Parser::error(@1, "ODR violation: the symbol is already defined.");
           exit(1);
         }
         symtab.addSymbol($1, AST::BaseType::INT, true);
-        $3->name = $1;
-        $$ = $3;
+        $$ = std::make_shared<AST::NamedDecl>($1, "span", $3, "-");
       }
     ;
-
 
 unnamed_tuple_decl
     : LBRACE sval_list RBRACE {
-      $$ = std::make_shared<AST::IntTuple>("", $2);
-    }
-    ;
-
-named_tuple_decl
-    : ITUPLE IDENTIFIER ASSIGN unnamed_tuple_decl {
-        $4 -> name = $2;
-        /* TODO: workaround: use INT for ituple's base type use a dedicated type for ituple in symboltable */
-        ituple_symtab.addITupleSymbol($2, $4);
-        $$ = $4;
+        $$ = std::make_shared<AST::IntTuple>("", $2);
       }
-    | IDENTIFIER ASSIGN unnamed_tuple_decl {
-        $3 -> name = $1;
-        ituple_symtab.addITupleSymbol($1, $3);
-        $$ = $3;
-      }
-    | IDENTIFIER ASSIGN IDENTIFIER LBRACE s_index_list RBRACE {
+    | IDENTIFIER LBRACE s_index_list RBRACE {
         // anchor
-        if (!ituple_symtab.exists($3))
-          Choreo::Parser::error(@3, "The symbol has not been defined.");
-        auto src_ituple = ituple_symtab.getSymbol($3);
+        if (!symtab.exists($1))
+          Choreo::Parser::error(@1, "The symbol has not been defined.");
+
+        $$ = std::make_shared<AST::IntTuple>($1, $3);
+        #if 0
+        auto src_ituple = ituple_symtab.getSymbol($1);
         auto ret_tuple = std::make_shared<AST::SValList>();
-        for (AST::ptr<AST::IntIndex> idx : $5->indices) {
+        for (AST::ptr<AST::IntIndex> idx : $3->indices) {
           // TODO: evaluate index later
           ret_tuple->Append(src_ituple->value->values[dynamic_cast<AST::IntLiteral*>(&*idx->value)->value]);
         }
         $$ = std::make_shared<AST::IntTuple>($1, std::move(ret_tuple));
+        #endif
+      }
+    ;
+
+ituple_val
+    : unnamed_tuple_decl { $$ = $1; }
+    | IDENTIFIER {
+        $$ = std::make_shared<AST::Identifier>($1);
+      }
+    ;
+
+named_tuple_decl
+    : ITUPLE IDENTIFIER ASSIGN ituple_val {
+        /* TODO: workaround: use INT for ituple's base type use a dedicated type for ituple in symboltable */
+        //ituple_symtab.addITupleSymbol($2, $4);
+        symtab.addSymbol($2, AST::BaseType::INT, true);
+        $$ = std::make_shared<AST::NamedDecl>($2, "ituple", $4);
+      }
+    | IDENTIFIER ASSIGN ituple_val {
+        //ituple_symtab.addITupleSymbol($1, $3);
+        symtab.addSymbol($1, AST::BaseType::INT, true);
+        $$ = std::make_shared<AST::NamedDecl>($1, "ituple", $3);
       }
     ;
 
@@ -529,6 +546,7 @@ storage_specifier: LOCAL | SHARED | GLOBAL;
 
 assignment
     : IDENTIFIER ASSIGN expr {
+        #if 0
         // The assignment is overrided to be initilization of ituple
         auto ref = std::dynamic_pointer_cast<AST::NodeRef>($3->value_r);
         if (ref) {
@@ -541,13 +559,14 @@ assignment
             break;
           }
         }
+        #endif
 
         if (!symtab.exists($1)) {
-          Choreo::Parser::error(@1, ": the symbol '" + $1 + "` is not defined.");
+          Choreo::Parser::error(@1, "the symbol '" + $1 + "` is not defined.");
           exit(1);
         }
 
-        $$ = std::make_shared<AST::NodeRef>(std::make_shared<AST::Assignment>($1, $3));
+        $$ = std::make_shared<AST::Assignment>($1, $3);
       }
     ;
 
@@ -565,9 +584,24 @@ term
     | int_val { $$ = std::make_shared<AST::Expr>($1); }
     ;
 
+span_expr
+    : span_expr PLUS span_term { $$ = std::make_shared<AST::Expr>("+", $1, $3); }
+    | span_expr MINUS span_term { $$ = std::make_shared<AST::Expr>("-", $1, $3); }
+    | span_term { $$ = $1; }
+    ;
+
+span_term
+    : span_term STAR ituple_val { $$ = std::make_shared<AST::Expr>("*", $1, $3); }
+    | span_term SLASH ituple_val { $$ = std::make_shared<AST::Expr>("/", $1, $3); }
+    | span_term PECET ituple_val { $$ = std::make_shared<AST::Expr>("%", $1, $3); }
+    | LPAREN span_expr RPAREN { $$ = $2; }
+    | span_val { $$ = std::make_shared<AST::Expr>($1); }
+    ;
+
 if_else
     : if_clause
     | if_clause else_clause
+    ;
 
 if_clause
     : IF LBRAKT cmp_expr RBRAKT LBRACE RBRACE
@@ -709,4 +743,3 @@ int main(int argc, char* argv[]) {
 }
 
 int AST::SymbolTable::anonymous_count = 0;
-std::unordered_map<std::string, AST::ptr<AST::MultiSpans>> AST::DataType::namedSpans;

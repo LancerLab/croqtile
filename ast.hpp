@@ -19,7 +19,7 @@ using ptr = std::shared_ptr<T>;
 #define __NODE_TYPE_STRING__ \
   const std::string TypeString() override { return __PRETTY_FUNCTION__; }
 
-// Base class for all AST nodes
+// interface class for all AST nodes
 struct Node {
   virtual ~Node() {}
 
@@ -62,11 +62,11 @@ struct NodeRef : public Node {
 //   non-term : non-term term_1 | term_2
 //
 struct MultiNodes : public Node {
-  std::vector<ptr<NodeRef>> values;
+  std::vector<ptr<Node>> values;
 
   explicit MultiNodes(){};
 
-  void Append(ptr<NodeRef>& m) {
+  void Append(const ptr<Node>& m) {
     assert(m != nullptr && "Unexpected: null pointer.");
     values.push_back(m);
   }
@@ -183,28 +183,45 @@ struct Expr : public Node {
 
 // Represents both dimensions and s like {3, 4, 5} or {1, 2, 1}
 struct MultiSpans : public Node {
-  std::string name = "";  // could be anonymous
-  std::string ref_name;   // syntax suger
+  std::string ref_name;  // syntax suger, could be empty
   ptr<Node> list;
+
   explicit MultiSpans(const std::string& n, const ptr<Node>& l)
-      : name(n), list(l) {}
-  explicit MultiSpans(const std::string& n, const std::string& rn,
-                      const ptr<Node>& l)
-      : name(n), ref_name(rn), list(l) {}
+      : ref_name(n), list(l) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << "\n" << prefix << "`- Decl (span): ";
-    if (name.size() > 0)
-      os << name << " - ";
-    else
-      os << "(anon) - ";
-
     os << "[";
+
     if (!ref_name.empty()) {
       list->Print(os, " " + ref_name);
     } else if (list != nullptr)
       list->Print(os, " ");
+
     os << " ]";
+
+    (void)prefix;
+  }
+
+  __NODE_TYPE_STRING__
+};
+
+struct NamedDecl : public Node {
+  const std::string name_str;
+  const std::string type_str;
+  const std::string disp_str;
+  const ptr<Node> value;
+
+  explicit NamedDecl(const std::string& n, const std::string& t,
+                     const ptr<Node>& v, const std::string& d = "=")
+      : name_str(n), type_str(t), disp_str(d), value(v) {
+    assert(name_str.size() > 0 && "Invalid name string.");
+    assert(type_str.size() > 0 && "Invalid type string.");
+  }
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << "\n" << prefix << "`- Decl (" << type_str << "): ";
+    os << name_str << " " << disp_str << " ";
+    value->Print(os);
   }
 
   __NODE_TYPE_STRING__
@@ -212,20 +229,18 @@ struct MultiSpans : public Node {
 
 // Represents declarations like: ituple t = {3, 4, 5};
 struct IntTuple : public Node {
-  std::string name;  // could be anonymous
-  ptr<SValList> value;
-  explicit IntTuple(const std::string& n, ptr<SValList> l)
-      : name(n), value(l) {}
+  std::string ref_name;  // could be anonymous
+  ptr<Node> list;
+
+  explicit IntTuple(const std::string& n, ptr<Node> l) : ref_name(n), list(l) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << "\n" << prefix << "`- Decl (tuple): ";
-    if (name.size() > 0)
-      os << name << " ";
-    else
-      os << "(anonymous) ";
+    if (ref_name.size() > 0) os << ref_name << " ";
     os << "{";
-    value->Print(os);
+    list->Print(os);
     os << "}";
+
+    (void)prefix;
   }
 
   __NODE_TYPE_STRING__
@@ -259,28 +274,10 @@ class ITupleTable {
   }
 };
 
-struct Integer : public Node {
-  std::string name;  // could be anonymous
-  ptr<Node> value;
-  explicit Integer(std::string& n, const ptr<Node>& v) : name(n), value(v) {}
-
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << "\n" << prefix << "`- Decl (int): ";
-    if (name.size() > 0)
-      os << name << " ";
-    else
-      os << "(anonymous) ";
-    os << "= ";
-    value->Print(os);
-  }
-
-  __NODE_TYPE_STRING__
-};
-
 struct Assignment : public Node {
   std::string name;
   ptr<Node> value;
-  explicit Assignment(std::string& n, const ptr<Expr>& v) : name(n), value(v) {
+  explicit Assignment(std::string& n, const ptr<Node>& v) : name(n), value(v) {
     assert(n.size() > 0 && "invalid assignment to the un-named value.");
   }
 
@@ -327,66 +324,52 @@ struct IntIndexList : public Node {
   void Append(ptr<IntIndex> v) { indices.push_back(v); }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << prefix << "[";
-    for (size_t i = 0; i < indices.size() - 1; ++i)
-      os << indices[i]->value << ", ";
-    os << indices.back()->value << "]";
+    if (indices.empty()) return;
+
+    size_t i = 0;
+    for (; i < indices.size() - 1; ++i) {
+      indices[i]->Print(os);
+      os << ", ";
+    }
+    indices[i]->Print(os);
+
+    (void)prefix;
   }
 
   __NODE_TYPE_STRING__
 };
 
-#if 0
-// Represents data declarations like: global f32 data{d};
-struct DataDecl : public Node {
-  StorageSpec storage;
-  BaseType type;
-  std::string name;
-  ptr<MultiSpans> mdspans;
-  DataDecl(StorageSpec s, BaseType t, const std::string& n,
-           const ptr<MultiSpans>& spans)
-      : storage(s), type(t), name(n), mdspans(spans) {}
-};
-#endif
-
+// A data type could either be
+//
+// 1. a simple type, including `int`, `bool`.
+// 2. a composited type, including the base type and the span type.
+//
 struct DataType : public Node {
  private:
   bool scalar;
 
  private:
-  BaseType type;
-  ptr<MultiSpans> mdspans = nullptr;
+  BaseType base_type;
+  ptr<Node> span_type = nullptr;
 
  public:
-  DataType(BaseType t, bool s = true) : scalar(s), type(t) {}
+  DataType(BaseType t, bool s = true) : scalar(s), base_type(t) {}
 
-  DataType(BaseType t, const ptr<MultiSpans>& spans)
-      : scalar(false), type(t), mdspans(spans) {
-    assert(namedSpans.count(spans->name) != 0 &&
-           "Unexpected: symbol already existed.");
-    namedSpans.emplace(spans->name, spans);
-  }
+  DataType(BaseType bt, const ptr<Node>& st)
+      : scalar(false), base_type(bt), span_type(st) {}
 
-  BaseType getBaseType() const { return type; }
+  BaseType getBaseType() const { return base_type; }
   bool isAggregate() const { return !scalar; }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    if (scalar)
-      os << prefix << getStringFrom(type);
-    else if (mdspans == nullptr)
-      os << prefix << getStringFrom(type) << "<>";
-    else {
-      os << prefix << getStringFrom(type);
-      mdspans->Print(os);
+    os << prefix << getStringFrom(base_type);
+    if (!scalar) {
+      if (span_type)
+        os << " " << span_type;
+      else
+        os << "<>";
     }
   }
-
-  static ptr<MultiSpans> getSpanType(const std::string& name) {
-    assert(namedSpans.count(name) && "symbol does not exist.");
-    return namedSpans[name];
-  }
-
-  static std::unordered_map<std::string, ptr<MultiSpans>> namedSpans;
 
   __NODE_TYPE_STRING__
 };
