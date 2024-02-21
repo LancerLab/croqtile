@@ -1,0 +1,23 @@
+// RUN: choreo -e %s | FileCheck %s --match-full-lines
+
+__co__ int para_with(int b) {
+  ndims : [3, b];
+  int sum = 0;
+  parallel p by 6 { 
+    with index in ndims {
+      sum = sum + index(0);
+    }
+  }
+}
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: para_with
+// CHECK:  `- Return type: int
+// CHECK:  `- Parameters
+// CHECK:    `-  type: int, symbol: b
+// CHECK:  `- Decl (span): ndims - [ 3 b ]
+// CHECK:  `- Decl (int): sum = 0
+// CHECK:  `- Parellelization:  IV symbol: p, bound: 6
+// CHECK:   `- WithBinding:
+// CHECK:    `- index in ndims
+// CHECK:    `- Assign: sum =  (sum + index(0))

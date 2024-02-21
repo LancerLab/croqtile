@@ -404,13 +404,55 @@ struct ParamList : public Node {
 struct ParallelBy : public Node {
   std::string iv;
   int bound;
-  // TODO: add pb-statements
+  ptr<MultiNodes> statms;
 
   ParallelBy(const std::string v, int b) : iv(v), bound(b) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Parellelization: ";
-    os << " IV symbol: " << iv << ", bound: " << bound << std::endl;
+    os << " IV symbol: " << iv << ", bound: " << bound;
+    if (!statms)
+      os << std::endl;
+    else
+      statms->Print(os, prefix + " ");
+  }
+
+  __NODE_TYPE_STRING__
+};
+
+struct WithIn : public Node {
+  ptr<Node> with;
+  ptr<Node> in;
+
+  WithIn(const ptr<Node> & w, const ptr<Node> & i) : with(w), in(i) {}
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << prefix << "`- ";
+    with->Print(os);
+    os << " in ";
+    in->Print(os);
+  }
+
+  __NODE_TYPE_STRING__
+};
+
+struct WithBinding: public Node {
+  ptr<MultiNodes> withins;
+  ptr<MultiNodes> reqs;    // optional requirements
+  ptr<MultiNodes> statms;  // may be empty
+
+  explicit WithBinding() {}
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << "\n" << prefix << "`- WithBinding:\n";
+    withins->Print(os, prefix + " ");
+    if (reqs) {
+      os << "\n";
+      reqs->Print(os, prefix + " ");
+    }
+    if (statms) {
+      statms->Print(os, prefix + " ");
+    }
   }
 
   __NODE_TYPE_STRING__

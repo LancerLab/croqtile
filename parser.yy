@@ -121,9 +121,9 @@ void choreo_info(const char *message) {
 
 // non-terminals
 %nterm <AST::BaseType> base_type
-%nterm <AST::ptr<AST::Node>> pass_by simple_val para_by span_val ituple_val assignment
-%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments pb_statements with_statements iterate_statements span_list mixed_span_list
-%nterm <AST::ptr<AST::NodeRef>> statement declaration pb_statement span_elem mixed_span_elem if_else for_each int_val
+%nterm <AST::ptr<AST::Node>> pass_by simple_val span_val ituple_val assignment pb_statement w_statement
+%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments pb_statements with_statements iterate_statements span_list mixed_span_list withins
+%nterm <AST::ptr<AST::NodeRef>> statement declaration span_elem mixed_span_elem if_else for_each int_val
 %nterm <AST::ptr<AST::IntList>> int_list
 %nterm <AST::ptr<AST::SValList>> sval_list
 %nterm <AST::ptr<AST::Expr>> term expr span_expr span_term
@@ -136,6 +136,9 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::IntTuple>> unnamed_tuple_decl tuple_assign
 %nterm <AST::ptr<AST::IntIndex>> s_index
 %nterm <AST::ptr<AST::IntIndexList>> s_index_list
+%nterm <AST::ptr<AST::WithBinding>> with_binding
+%nterm <AST::ptr<AST::WithIn>> within
+%nterm <AST::ptr<AST::ParallelBy>> para_by
 
 %%
 
@@ -311,6 +314,7 @@ statement
 para_by
     : PARA IDENTIFIER BY NUM LBRACE pb_statements RBRACE {
         $$ = std::make_shared<AST::ParallelBy>($2, $4);
+        $$->statms = $6;
       }
     ;
 
@@ -323,8 +327,9 @@ pb_statements
     ;
 
 pb_statement
-    : declarations SEMCOL { $$ = std::make_shared<AST::NodeRef>($1); }
-    | assignments  SEMCOL { $$ = std::make_shared<AST::NodeRef>($1); }
+    : declarations SEMCOL { $$ = $1; }
+    | assignments  SEMCOL { $$ = $1; }
+    | with_binding { $$ = $1; }
     | if_else
     ;
 
@@ -619,18 +624,46 @@ cmp_expr
     ;
 
 with_binding
-    : WITH IDENTIFIER LBRACE with_statements RBRACE
+    : WITH withins LBRACE with_statements RBRACE {
+        $$ = std::make_shared<AST::WithBinding>();
+        $$->withins = $2;
+        $$->statms = $4;
+      }
+    ;
+
+withins
+    : withins COMMA within {
+        $1->Append($1);
+        $$ = $1;
+      }
+    | within {
+        $$ = std::make_shared<AST::MultiNodes>();
+        $$->Append($1);
+      }
+    ; /* do not allow empty within */
+
+within
+    : IDENTIFIER IN IDENTIFIER {
+        if (!symtab.exists($3))
+          Choreo::Parser::error(@3, "The symbol has not been defined.");
+
+        symtab.addSymbol($1, AST::BaseType::INT, true);
+        $$ = std::make_shared<AST::WithIn>(std::make_shared<AST::Identifier>($1),
+                                           std::make_shared<AST::Identifier>($3));
+      }
     ;
 
 with_statements
-    : /*Empty*/
-    | with_statements w_statement
+    : /*Empty statement */ { $$ = std::make_shared<AST::MultiNodes>(); }
+    | with_statements w_statement {
+        $1->Append($2);
+        $$ = $1;
+      }
     ;
 
 w_statement
-    : /*Empty */
-    | declarations SEMCOL
-    | assignments  SEMCOL
+    : declarations SEMCOL { $$ = $1; }
+    | assignments  SEMCOL { $$ = $1; }
     | dma SEMCOL
     | if_else
     | for_each
