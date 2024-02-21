@@ -106,6 +106,8 @@ blank [ \t\r]
   "in"       return Choreo::Parser::make_IN(yytext, loc);
   "foreach"  return Choreo::Parser::make_ITER(yytext, loc);
   "return"   return Choreo::Parser::make_RET(yytext, loc);
+  "require"  return Choreo::Parser::make_REQUIRE(yytext, loc);
+  "<->"      return Choreo::Parser::make_BIND   (loc);
   "-"        return Choreo::Parser::make_MINUS  (loc);
   "+"        return Choreo::Parser::make_PLUS   (loc);
   "*"        return Choreo::Parser::make_STAR   (loc);

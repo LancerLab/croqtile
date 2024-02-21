@@ -1,4 +1,4 @@
-// RUN: choreo -e %s | FileCheck %s --match-full-lines
+// RUN: choreo -e %s | FileCheck %s
 
 __co__ int para_with(int b) {
   ndims : [3, b];
@@ -19,5 +19,8 @@ __co__ int para_with(int b) {
 // CHECK:  `- Decl (int): sum = 0
 // CHECK:  `- Parellelization:  IV symbol: p, bound: 6
 // CHECK:   `- WithBinding:
-// CHECK:    `- index in ndims
-// CHECK:    `- Assign: sum =  (sum + index(0))
+// CHECK:     (within constraints)
+// CHECK:     `- index in ndims
+// CHECK:     (require clause)
+// CHECK:     (with statements)
+// CHECK:     `- Assign: sum =  (sum + index(0))

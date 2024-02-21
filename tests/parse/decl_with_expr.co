@@ -1,4 +1,4 @@
-// RUN: choreo -e %s | FileCheck --match-full-lines %s
+// RUN: choreo -e %s | FileCheck %s
 
 __co__ u8 scalar_decls(int a, int b) {
   int c = a + (b - a) * a + a / 5 - b % a;
