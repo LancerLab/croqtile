@@ -463,7 +463,7 @@ struct WithBlock: public Node {
   explicit WithBlock() {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << "\n" << prefix << "`- WithBlock:\n";
+    os << "\n" << prefix << "`- With Block:\n";
     os << prefix << "  (within constraints)\n";
     withins->Print(os, prefix + "  ");
     if (reqs) {
@@ -475,7 +475,7 @@ struct WithBlock: public Node {
         os << prefix << "  (with empty statements)\n";
         return;
       }
-      os << prefix << "  (with statements)\n";
+      os << prefix << "  (with statements)";
       statms->Print(os, prefix + "  ");
     }
   }
@@ -493,7 +493,7 @@ struct ForeachBlock : public Node {
     }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << "\n" << prefix << "`- Foreach block:";
+    os << "\n" << prefix << "`- Foreach Block:";
     os << "\n" << prefix << " `- Iteration variables: ";
     ivs->Print(os);
     if (statms) {

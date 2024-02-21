@@ -7,7 +7,7 @@ __co__ int with_statement_empty_body() {
   int coordx = 0;
   int coordy = 0;
   int coordz = 0;
-  parallel p by 6 { 
+  parallel p by 6 {
     with index1 in span1,
          index2 in span2,
          index3 in span3 {
@@ -17,10 +17,10 @@ __co__ int with_statement_empty_body() {
 }
 
 // CHECK: `- Name: with_statement_empty_body
-// CHECK: `- WithBlock:
-// CHECK: (within constraints) 
-// CHECK-NOT: (require clause) 
-// CHECK: (with empty statements) 
+// CHECK: `- With Block:
+// CHECK: (within constraints)
+// CHECK-NOT: (require clause)
+// CHECK: (with empty statements)
 
 
 __co__ int with_statement_multi_within() {
@@ -30,11 +30,11 @@ __co__ int with_statement_multi_within() {
   int coord_v1_x = 0;
   int coord_v1_y = 0;
   int coord_v1_z = 0;
-  parallel p_v1_ by 6 { 
+  parallel p_v1_ by 6 {
     with index_v1_1 in span_v1_1,
          index_v1_2 in span_v1_2,
          index_v1_3 in span_v1_3 {
-      // TODO: do we need to segment assign and 
+      // TODO: do we need to segment assign and
       // assign-fused operation like assign-add
       coord_v1_x = coord_v1_x + index_v1_1(0);
       coord_v1_x = coord_v1_x + index_v1_1(1);
@@ -45,10 +45,10 @@ __co__ int with_statement_multi_within() {
 }
 
 // CHECK: `- Name: with_statement_multi_within
-// CHECK: `- WithBlock: 
-// CHECK: (within constraints) 
-// CHECK-NOT: (require clause) 
-// CHECK: (with statements) 
+// CHECK: `- With Block:
+// CHECK: (within constraints)
+// CHECK-NOT: (require clause)
+// CHECK: (with statements)
 
 
 __co__ int with_statement_require_clause() {
@@ -58,11 +58,11 @@ __co__ int with_statement_require_clause() {
   int coord_v2_x = 0;
   int coord_v2_y = 0;
   int coord_v2_z = 0;
-  parallel p_v2_ by 6 { 
+  parallel p_v2_ by 6 {
     with index_v2_1 in span_v2_1,
          index_v2_2 in span_v2_2,
          index_v2_3 in span_v2_3
-    require index_v2_2 <-> index_v2_3 {
+    requires index_v2_2 <-> index_v2_3 {
       coord_v2_x = coord_v2_x + index_v2_1(0);
       coord_v2_x = coord_v2_x + index_v2_1(1);
       coord_v2_y = coord_v2_x(1) + index_v2_2(0);
@@ -72,10 +72,10 @@ __co__ int with_statement_require_clause() {
 }
 
 // CHECK: `- Name: with_statement_require_clause
-// CHECK: `- WithBlock: 
-// CHECK: (within constraints) 
-// CHECK: (require clause) 
-// CHECK: (with statements) 
+// CHECK: `- With Block:
+// CHECK: (within constraints)
+// CHECK: (require clause)
+// CHECK: (with statements)
 
 
 __co__ int with_statement_require_clauses() {
@@ -85,11 +85,11 @@ __co__ int with_statement_require_clauses() {
   int coord_v3_x = 0;
   int coord_v3_y = 0;
   int coord_v3_z = 0;
-  parallel p_v3_ by 6 { 
+  parallel p_v3_ by 6 {
     with index_v3_1 in span_v3_1,
          index_v3_2 in span_v3_2,
          index_v3_3 in span_v3_3
-    require index_v3_2 <-> index_v3_3 {
+    requires index_v3_2 <-> index_v3_3 {
       coord_v3_x = coord_v3_x + index_v3_1(0);
       coord_v3_x = coord_v3_x + index_v3_1(1);
       coord_v3_y = coord_v3_x(1) + index_v3_2(0);
@@ -99,7 +99,7 @@ __co__ int with_statement_require_clauses() {
 }
 
 // CHECK: `- Name: with_statement_require_clauses
-// CHECK: `- WithBlock:
-// CHECK: (within constraints) 
-// CHECK: (require clause) 
-// CHECK: (with statements) 
+// CHECK: `- With Block:
+// CHECK: (within constraints)
+// CHECK: (require clause)
+// CHECK: (with statements)
