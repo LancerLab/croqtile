@@ -22,7 +22,6 @@ __co__ int with_statement_empty_body() {
 // CHECK-NOT: (require clause)
 // CHECK: (with empty statements)
 
-
 __co__ int with_statement_multi_within() {
   span_v1_1 : [7, 8];
   span_v1_2 : [13];
@@ -50,6 +49,25 @@ __co__ int with_statement_multi_within() {
 // CHECK-NOT: (require clause)
 // CHECK: (with statements)
 
+
+__co__ int with_statement_pattern_match_like_within() {
+  span_v4 : [7, 8];
+  int coord_v4_x = 0;
+  parallel p by 6 {
+    with index1 = {x, y} in span_v4 {
+      // TODO: use with-body = "{ statements }"
+      coord_v4_x = coord_v4_x + x;
+      coord_v4_x = coord_v4_x + y;
+    }
+  }
+}
+
+// CHECK: `- Name: with_statement_pattern_match_like_within
+// CHECK: `- With Block:
+// CHECK: (within constraints)
+// CHECK: `- index1 = {x, y} in span_v4
+// CHECK-NOT: (require clause)
+// CHECK: (with statements)
 
 __co__ int with_statement_require_clause() {
   span_v2_1 : [7, 8];

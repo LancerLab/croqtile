@@ -1,3 +1,6 @@
 *.result
+*.cc
+*.hh
+*.o
 tools/*
 choreo

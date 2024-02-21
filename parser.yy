@@ -126,7 +126,7 @@ void choreo_info(const char *message) {
 %nterm <AST::Storage> storage
 %nterm <AST::BaseType> base_type
 %nterm <AST::ptr<AST::Node>> pass_by foreach_block simple_val span_val ituple_val int_val declaration statement assignment pb_statement w_statement dma_statement wait_statement call_statement span_elem mixed_span_elem iv_expr
-%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments pb_statements w_statements iterate_statements span_list mixed_span_list withins iv_exprs require_binds require_clause id_list
+%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments pb_statements w_statements iterate_statements span_list mixed_span_list withins iv_exprs require_binds require_clause id_list with_matchers
 %nterm <AST::ptr<AST::NodeRef>> if_else
 %nterm <AST::ptr<AST::IntList>> int_list
 %nterm <AST::ptr<AST::SValList>> sval_list
@@ -660,6 +660,15 @@ within
         $$ = std::make_shared<AST::WithIn>(std::make_shared<AST::Identifier>($1),
                                            std::make_shared<AST::Identifier>($3));
       }
+    | IDENTIFIER ASSIGN LBRACE with_matchers RBRACE IN IDENTIFIER {
+        if (!symtab.exists($7))
+          Choreo::Parser::error(@7, "The symbol has not been defined.");
+
+        symtab.addSymbol($1, AST::BaseType::INT, true);
+        $$ = std::make_shared<AST::WithIn>(std::make_shared<AST::Identifier>($1),
+                                           std::make_shared<AST::Identifier>($7));
+        $$->with_matchers = $4;
+      }
     ;
 
 require_clause
@@ -769,6 +778,25 @@ id_list
       }
     | IDENTIFIER {
         $$ = std::make_shared<AST::MultiNodes>();
+        $$->Append(std::make_shared<AST::Identifier>($1));
+      }
+    ;
+
+with_matchers /* TODO: this special case is pattern-match ids for with-block */
+    : with_matchers COMMA IDENTIFIER {
+        $1->Append(std::make_shared<AST::Identifier>($3));
+        std::cout << symtab.exists($3) << std::endl;
+        symtab.addSymbol($3, AST::BaseType::INT, false); /* in withins, this values should be int only */
+        std::cout << symtab.exists($3) << std::endl;
+        std::cout << "here" << $3 << std::endl;
+        $$ = $1;
+      }
+    | IDENTIFIER {
+        $$ = std::make_shared<AST::MultiNodes>();
+        std::cout << symtab.exists($1) << std::endl;
+        symtab.addSymbol($1, AST::BaseType::INT, false); /* in withins, this values should be int only */
+        std::cout << symtab.exists($1) << std::endl;
+        std::cout << "here" << $1 << std::endl;
         $$->Append(std::make_shared<AST::Identifier>($1));
       }
     ;
