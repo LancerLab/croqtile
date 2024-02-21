@@ -3,7 +3,7 @@
 __co__ bf16 tuple_decls(int a, int b) {
   ituple val2 = {a, 9, 102};
   nvals = {100, 10, 1, b};
-  nvals_reference_all = nvals{};
+  nvals_reference_all = nvals;
   nvals_reference = nvals_reference_all {(2), (1)};
 }
 
@@ -15,7 +15,7 @@ __co__ bf16 tuple_decls(int a, int b) {
 // CHECK:    `-  type: int, symbol: b
 // CHECK:  `- Decl (ituple): val2 = {a, 9, 102}
 // CHECK:  `- Decl (ituple): nvals = {100, 10, 1, b}
-// CHECK:  `- Decl (ituple): nvals_reference_all = nvals {}
+// CHECK:  `- Decl (ituple): nvals_reference_all = nvals
 // CHECK:  `- Decl (ituple): nvals_reference = nvals_reference_all {(2), (1)}
 
 // host program

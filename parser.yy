@@ -121,7 +121,7 @@ void choreo_info(const char *message) {
 
 // non-terminals
 %nterm <AST::BaseType> base_type
-%nterm <AST::ptr<AST::Node>> pass_by simple_val para_by span_val ituple_val
+%nterm <AST::ptr<AST::Node>> pass_by simple_val para_by span_val ituple_val assignment
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments pb_statements with_statements iterate_statements span_list mixed_span_list
 %nterm <AST::ptr<AST::NodeRef>> statement declaration pb_statement span_elem mixed_span_elem if_else for_each int_val
 %nterm <AST::ptr<AST::IntList>> int_list
@@ -136,7 +136,6 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::IntTuple>> unnamed_tuple_decl tuple_assign
 %nterm <AST::ptr<AST::IntIndex>> s_index
 %nterm <AST::ptr<AST::IntIndexList>> s_index_list
-%nterm <AST::ptr<AST::Assignment>> assignment
 
 %%
 
@@ -375,10 +374,7 @@ s_index
     ;
 
 s_index_list
-    : /* allow empty list */ {
-        $$ = std::make_shared<AST::IntIndexList>();
-      }
-    | s_index_list COMMA s_index {
+    : s_index_list COMMA s_index {
         $1->Append($3);
         $$ = $1;
       }
@@ -386,7 +382,7 @@ s_index_list
         $$ = std::make_shared<AST::IntIndexList>();
         $$->indices.push_back($1);
       }
-    ;
+    ; /* do not allow empty list */
 
 span_elem
     : s_index { $$ = std::make_shared<AST::NodeRef>($1); }
@@ -535,7 +531,7 @@ named_tuple_decl
         symtab.addSymbol($2, AST::BaseType::INT, true);
         $$ = std::make_shared<AST::NamedDecl>($2, "ituple", $4);
       }
-    | IDENTIFIER ASSIGN ituple_val {
+    | IDENTIFIER ASSIGN unnamed_tuple_decl {
         //ituple_symtab.addITupleSymbol($1, $3);
         symtab.addSymbol($1, AST::BaseType::INT, true);
         $$ = std::make_shared<AST::NamedDecl>($1, "ituple", $3);
@@ -562,8 +558,10 @@ assignment
         #endif
 
         if (!symtab.exists($1)) {
-          Choreo::Parser::error(@1, "the symbol '" + $1 + "` is not defined.");
-          exit(1);
+          // since the symbol is not defined, it is a declaration without type annotation
+          symtab.addSymbol($1, AST::BaseType::INT, true);
+          $$ = std::make_shared<AST::NamedDecl>($1, "ituple", $3);
+          break;
         }
 
         $$ = std::make_shared<AST::Assignment>($1, $3);
