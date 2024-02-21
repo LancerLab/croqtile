@@ -121,9 +121,9 @@ void choreo_info(const char *message) {
 
 // non-terminals
 %nterm <AST::BaseType> base_type
-%nterm <AST::ptr<AST::Node>> pass_by simple_val span_val ituple_val assignment pb_statement w_statement
-%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments pb_statements with_statements iterate_statements span_list mixed_span_list withins
-%nterm <AST::ptr<AST::NodeRef>> statement declaration span_elem mixed_span_elem if_else for_each int_val
+%nterm <AST::ptr<AST::Node>> pass_by foreach_block simple_val span_val ituple_val int_val declaration statement assignment pb_statement w_statement dma_statement span_elem mixed_span_elem iv_expr
+%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments pb_statements w_statements iterate_statements span_list mixed_span_list withins iv_exprs
+%nterm <AST::ptr<AST::NodeRef>> if_else
 %nterm <AST::ptr<AST::IntList>> int_list
 %nterm <AST::ptr<AST::SValList>> sval_list
 %nterm <AST::ptr<AST::Expr>> term expr span_expr span_term
@@ -261,12 +261,9 @@ int_val
           exit(1);
         }
 
-        auto nth = std::make_shared<AST::NthBound>(std::make_shared<AST::Identifier>($1), $2);
-        $$ = std::make_shared<AST::NodeRef>(nth);
+        $$ = std::make_shared<AST::NthBound>(std::make_shared<AST::Identifier>($1), $2);
       }
-    | simple_val {
-        $$ = std::make_shared<AST::NodeRef>($1);
-      }
+    | simple_val { $$ = $1; }
     ;
 
 parameter_list
@@ -306,9 +303,9 @@ statements
     ;
 
 statement
-    : declarations SEMCOL { $$ = std::make_shared<AST::NodeRef>($1); }
-    | assignments  SEMCOL { $$ = std::make_shared<AST::NodeRef>($1); }
-    | para_by             { $$ = std::make_shared<AST::NodeRef>($1); }
+    : declarations SEMCOL { $$ = $1; }
+    | assignments  SEMCOL { $$ = $1; }
+    | para_by             { $$ = $1; }
     ;
 
 para_by
@@ -356,9 +353,9 @@ declarations
     ;
 
 declaration
-    : named_span_decl { $$ = std::make_shared<AST::NodeRef>($1); }
-    | named_tuple_decl { $$ = std::make_shared<AST::NodeRef>($1);  }
-    | scalar_decl { $$ = std::make_shared<AST::NodeRef>($1);  }
+    : named_span_decl  { $$ = $1; }
+    | named_tuple_decl { $$ = $1;  }
+    | scalar_decl      { $$ = $1;  }
     ;
 
 scalar_decl
@@ -390,8 +387,8 @@ s_index_list
     ; /* do not allow empty list */
 
 span_elem
-    : s_index { $$ = std::make_shared<AST::NodeRef>($1); }
-    | simple_val { $$ = std::make_shared<AST::NodeRef>($1); }
+    : s_index     { $$ = $1; }
+    | simple_val  { $$ = $1; }
     ; // do not allow non-element
 
 span_list
@@ -414,10 +411,8 @@ mixed_span_elem
         if (!symtab.getSymbol($1)->isAggregate())
           Choreo::Parser::error(@1, "expecting a symbol of aggregate type.");
 
-        auto nth_elem = std::make_shared<AST::NthBound>(
+        $$ = std::make_shared<AST::NthBound>(
             std::make_shared<AST::Identifier>($1), $2);
-
-        $$ = std::make_shared<AST::NodeRef>(nth_elem);
       }
     | IDENTIFIER FNSPAN s_index {
         if (!symtab.exists($1))
@@ -427,12 +422,11 @@ mixed_span_elem
         if (!symtab.getSymbol($1)->isAggregate())
           Choreo::Parser::error(@1, "expecting a symbol of aggregate type.");
 
-        auto nth_elem = std::make_shared<AST::NthBound>(
+        $$ = std::make_shared<AST::NthBound>(
             std::make_shared<AST::Identifier>($1+$2), $3);
 
-        $$ = std::make_shared<AST::NodeRef>(nth_elem);
       }
-    | simple_val { $$ = std::make_shared<AST::NodeRef>($1); }
+    | simple_val { $$ = $1; }
     ; // do not allow an empty item
 
 mixed_span_list
@@ -543,7 +537,7 @@ named_tuple_decl
       }
     ;
 
-storage_specifier: LOCAL | SHARED | GLOBAL;
+storage: LOCAL | SHARED | GLOBAL;
 
 assignment
     : IDENTIFIER ASSIGN expr {
@@ -624,7 +618,7 @@ cmp_expr
     ;
 
 with_binding
-    : WITH withins LBRACE with_statements RBRACE {
+    : WITH withins LBRACE w_statements RBRACE {
         $$ = std::make_shared<AST::WithBinding>();
         $$->withins = $2;
         $$->statms = $4;
@@ -633,7 +627,7 @@ with_binding
 
 withins
     : withins COMMA within {
-        $1->Append($1);
+        $1->Append($3);
         $$ = $1;
       }
     | within {
@@ -653,42 +647,54 @@ within
       }
     ;
 
-with_statements
+w_statements
     : /*Empty statement */ { $$ = std::make_shared<AST::MultiNodes>(); }
-    | with_statements w_statement {
+    | w_statements w_statement {
         $1->Append($2);
         $$ = $1;
       }
     ;
 
 w_statement
-    : declarations SEMCOL { $$ = $1; }
-    | assignments  SEMCOL { $$ = $1; }
-    | dma SEMCOL
-    | if_else
-    | for_each
+    : declarations SEMCOL   { $$ = $1; }
+    | assignments  SEMCOL   { $$ = $1; }
+    | dma_statement SEMCOL  { $$ = $1; }
+    | if_else               { $$ = $1; }
+    | foreach_block         { $$ = $1; }
     ;
 
-iterate_statements
-    : declarations
-    | assignments
+foreach_block
+    : ITER iv_exprs LBRACE w_statements RBRACE {
+        $$ = std::make_shared<AST::ForeachBlock>($2, $4);
+      }
     ;
 
-for_each:
-    ITER IDENTIFIER LBRACE iterate_statements RBRACE
+iv_exprs
+    : iv_exprs COMMA iv_expr  {
+        $1->Append($3);
+        $$ = $1;
+      }
+    | iv_expr {
+        $$ = std::make_shared<AST::MultiNodes>();
+        $$->Append($1);
+      }
+    ; /* do not allow the empty ivs */
+
+iv_expr
+    : IDENTIFIER { $$ = std::make_shared<AST::Identifier>($1); }
     ;
 
-dma : DMA COL simple_val source_to_dest
-    | COPY COL simple_val source_to_dest
+dma_statement
+    : IDENTIFIER ASSIGN dma_operation chunkat_expr TRANS storage
+    | IDENTIFIER ASSIGN dma_operation IDENTIFIER TRANS chunkat_expr
+    ;
 
-source_to_dest:
-      IDENTIFIER ind_expr TRANS IDENTIFIER ind_expr
+dma_operation
+    : DMA
+    ;
 
-ind_expr: LBRAKT indices RBRAKT
-
-indices: IDENTIFIER
-/*    | int_list */
-
+chunkat_expr:
+    ;
 
 %%
 

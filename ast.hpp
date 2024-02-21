@@ -458,6 +458,27 @@ struct WithBinding: public Node {
   __NODE_TYPE_STRING__
 };
 
+struct ForeachBlock : public Node {
+  ptr<MultiNodes> ivs;
+  ptr<MultiNodes> statms;
+
+  explicit ForeachBlock(const ptr<MultiNodes> & i, const ptr<MultiNodes> & s):
+    ivs(i), statms(s) {
+      assert(i != nullptr && "missing iteration variables for the statement.");
+    }
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << "\n" << prefix << "`- Foreach block:";
+    os << "\n" << prefix << " `- Iteration variables: ";
+    ivs->Print(os);
+    if (statms) {
+      statms->Print(os, prefix + " ");
+    }
+  }
+
+  __NODE_TYPE_STRING__
+};
+
 struct FunctionDecl : public Node {
   std::string name;
   ptr<DataType> ret_type;

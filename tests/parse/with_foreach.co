@@ -1,0 +1,27 @@
+// RUN: choreo -e %s | FileCheck %s --match-full-lines
+
+__co__ int with_foreach(int b) {
+  ndims : [3, b, 7];
+  int sum = 0;
+  parallel p by 6 { 
+    with index in ndims {
+      foreach index {
+        sum = sum + index(0);
+      }
+    }
+  }
+}
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: with_foreach
+// CHECK:  `- Return type: int
+// CHECK:  `- Parameters
+// CHECK:    `-  type: int, symbol: b
+// CHECK:  `- Decl (span): ndims - [ 3 b 7 ]
+// CHECK:  `- Decl (int): sum = 0
+// CHECK:  `- Parellelization:  IV symbol: p, bound: 6
+// CHECK:   `- WithBinding:
+// CHECK:    `- index in ndims
+// CHECK:    `- Foreach block:
+// CHECK:     `- Iteration variables: index
+// CHECK:     `- Assign: sum =  (sum + index(0))
