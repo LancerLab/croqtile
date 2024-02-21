@@ -72,7 +72,18 @@ struct MultiNodes : public Node {
   }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    for (auto& v : values) v->Print(os, prefix);
+    for (auto& v : values) {
+      v->Print(os, prefix);
+    }
+  }
+
+  // TODO: workaround for "x, y" like print, we may need typeid to merge this print
+  // logic into trivial Print()
+  void InlinePrint(std::ostream& os, const std::string& prefix = {}) const {
+    for (auto& v : values) {
+      v->Print(os, prefix);
+      if (&v != &values.back()) os << ", ";
+    }
   }
 
   void accept(Visitor& visitor) override {
@@ -442,12 +453,18 @@ struct RequireBind : public Node {
 struct WithIn : public Node {
   ptr<Node> with;
   ptr<Node> in;
+  ptr<MultiNodes> with_matchers;    // optional requirements
 
   WithIn(const ptr<Node>& w, const ptr<Node>& i) : with(w), in(i) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix << "`- ";
     with->Print(os);
+    if (with_matchers) {
+      os << " = {";
+      with_matchers->InlinePrint(os);
+      os << "}";
+    }
     os << " in ";
     in->Print(os);
     os << "\n";
