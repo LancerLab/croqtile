@@ -420,6 +420,24 @@ struct ParallelBy : public Node {
   __NODE_TYPE_STRING__
 };
 
+// `require_bind` parsing "idx_1 <-> idx_2"
+struct RequireBind : public Node {
+  ptr<Node> lhs;
+  ptr<Node> rhs;
+
+  RequireBind(const ptr<Node> &lhs, const ptr<Node> &rhs) : lhs(lhs), rhs(rhs) {}
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << prefix << "`- ";
+    lhs->Print(os);
+    os << " bind-to ";
+    rhs->Print(os);
+    os << "\n";
+  }
+
+  __NODE_TYPE_STRING__
+};
+
 struct WithIn : public Node {
   ptr<Node> with;
   ptr<Node> in;
@@ -431,27 +449,34 @@ struct WithIn : public Node {
     with->Print(os);
     os << " in ";
     in->Print(os);
+    os << "\n";
   }
 
   __NODE_TYPE_STRING__
 };
 
-struct WithBinding: public Node {
+struct WithBlock: public Node {
   ptr<MultiNodes> withins;
   ptr<MultiNodes> reqs;    // optional requirements
   ptr<MultiNodes> statms;  // may be empty
 
-  explicit WithBinding() {}
+  explicit WithBlock() {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << "\n" << prefix << "`- WithBinding:\n";
-    withins->Print(os, prefix + " ");
+    os << "\n" << prefix << "`- WithBlock:\n";
+    os << prefix << "  (within constraints)\n";
+    withins->Print(os, prefix + "  ");
     if (reqs) {
-      os << "\n";
-      reqs->Print(os, prefix + " ");
+      os << prefix << "  (require clause)\n";
+      reqs->Print(os, prefix + "  ");
     }
     if (statms) {
-      statms->Print(os, prefix + " ");
+      if (statms->values.size() == 0) {
+        os << prefix << "  (with empty statements)\n";
+        return;
+      }
+      os << prefix << "  (with statements)\n";
+      statms->Print(os, prefix + "  ");
     }
   }
 

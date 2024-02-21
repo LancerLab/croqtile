@@ -99,6 +99,7 @@ void choreo_info(const char *message) {
   LE      "<="
   GE      ">="
   TRANS   "=>"
+  BIND    "<->"
 ;
 
 
@@ -117,12 +118,12 @@ void choreo_info(const char *message) {
 // builtin operations
 %token <std::string> DMA COPY FNSPAN FNDATA
 // control related
-%token <std::string> IF ELSE PARA BY WITH IN ITER RET
+%token <std::string> IF ELSE PARA BY WITH IN ITER RET REQUIRE
 
 // non-terminals
 %nterm <AST::BaseType> base_type
 %nterm <AST::ptr<AST::Node>> pass_by foreach_block simple_val span_val ituple_val int_val declaration statement assignment pb_statement w_statement dma_statement span_elem mixed_span_elem iv_expr
-%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments pb_statements w_statements iterate_statements span_list mixed_span_list withins iv_exprs
+%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments pb_statements w_statements iterate_statements span_list mixed_span_list withins iv_exprs require_binds require_clause
 %nterm <AST::ptr<AST::NodeRef>> if_else
 %nterm <AST::ptr<AST::IntList>> int_list
 %nterm <AST::ptr<AST::SValList>> sval_list
@@ -136,8 +137,9 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::IntTuple>> unnamed_tuple_decl tuple_assign
 %nterm <AST::ptr<AST::IntIndex>> s_index
 %nterm <AST::ptr<AST::IntIndexList>> s_index_list
-%nterm <AST::ptr<AST::WithBinding>> with_binding
+%nterm <AST::ptr<AST::WithBlock>> with_block
 %nterm <AST::ptr<AST::WithIn>> within
+%nterm <AST::ptr<AST::RequireBind>> require_bind 
 %nterm <AST::ptr<AST::ParallelBy>> para_by
 
 %%
@@ -326,7 +328,7 @@ pb_statements
 pb_statement
     : declarations SEMCOL { $$ = $1; }
     | assignments  SEMCOL { $$ = $1; }
-    | with_binding { $$ = $1; }
+    | with_block { $$ = $1; }
     | if_else
     ;
 
@@ -617,11 +619,17 @@ cmp_expr
     | expr GE expr
     ;
 
-with_binding
+with_block
     : WITH withins LBRACE w_statements RBRACE {
-        $$ = std::make_shared<AST::WithBinding>();
+        $$ = std::make_shared<AST::WithBlock>();
         $$->withins = $2;
         $$->statms = $4;
+      }
+    | WITH withins require_clause LBRACE w_statements RBRACE {
+        $$ = std::make_shared<AST::WithBlock>();
+        $$->withins = $2;
+        $$->reqs = $3;
+        $$->statms = $5;
       }
     ;
 
@@ -643,6 +651,37 @@ within
 
         symtab.addSymbol($1, AST::BaseType::INT, true);
         $$ = std::make_shared<AST::WithIn>(std::make_shared<AST::Identifier>($1),
+                                           std::make_shared<AST::Identifier>($3));
+      }
+    ;
+
+require_clause
+    : REQUIRE require_binds {
+        /* $$ = std::make_shared<AST::RequireClause>();
+        $$->binds = $2;*/
+        $$ = $2;
+      }
+    ;
+
+require_binds
+    : require_binds COMMA require_bind {
+        $1->Append($3);
+        $$ = $1;
+      }
+    | require_bind {
+        $$ = std::make_shared<AST::MultiNodes>();
+        $$->Append($1);
+      }
+    ; /* do not allow empty require_bind */
+
+require_bind
+    : IDENTIFIER BIND IDENTIFIER {
+        if (!symtab.exists($1))
+          Choreo::Parser::error(@1, "The symbol has not been defined.");
+        if (!symtab.exists($3))
+          Choreo::Parser::error(@3, "The symbol has not been defined.");
+
+        $$ = std::make_shared<AST::RequireBind>(std::make_shared<AST::Identifier>($1),
                                            std::make_shared<AST::Identifier>($3));
       }
     ;
