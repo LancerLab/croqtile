@@ -1,11 +1,12 @@
 // RUN: choreo -e %s | FileCheck %s --match-full-lines
 
-__co__ int with_foreach(int b) {
+__co__ int with_foreach(int b, f32 mdspan<4> input) {
   ndims : [3, b, 7];
   int sum = 0;
   parallel p by 6 { 
     with index in ndims {
       foreach index {
+        f = dte.linear input.chunkat(p, index) => local;
         sum = sum + index(0);
       }
     }
@@ -17,6 +18,7 @@ __co__ int with_foreach(int b) {
 // CHECK:  `- Return type: int
 // CHECK:  `- Parameters
 // CHECK:    `-  type: int, symbol: b
+// CHECK:    `-  type: f32<>, symbol: input
 // CHECK:  `- Decl (span): ndims - [ 3 b 7 ]
 // CHECK:  `- Decl (int): sum = 0
 // CHECK:  `- Parellelization:  IV symbol: p, bound: 6
@@ -26,4 +28,8 @@ __co__ int with_foreach(int b) {
 // CHECK:     (with statements)
 // CHECK:     `- Foreach Block:
 // CHECK:      `- Iteration variables: index
+// CHECK:      `- DMA.linear
+// CHECK:        `- furture: f
+// CHECK:        `- from: input.ChunkAt(pindex)
+// CHECK:        `- to: local
 // CHECK:      `- Assign: sum =  (sum + index(0))

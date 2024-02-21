@@ -83,7 +83,7 @@ struct MultiNodes : public Node {
 };
 
 // For storage specifiers like local, global, shared
-enum class StorageSpec { LOCAL, GLOBAL, SHARED };
+enum class Storage { LOCAL, SHARED, GLOBAL };
 
 class Identifier;
 class DataType;
@@ -425,7 +425,8 @@ struct RequireBind : public Node {
   ptr<Node> lhs;
   ptr<Node> rhs;
 
-  RequireBind(const ptr<Node> &lhs, const ptr<Node> &rhs) : lhs(lhs), rhs(rhs) {}
+  RequireBind(const ptr<Node>& lhs, const ptr<Node>& rhs)
+      : lhs(lhs), rhs(rhs) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix << "`- ";
@@ -442,7 +443,7 @@ struct WithIn : public Node {
   ptr<Node> with;
   ptr<Node> in;
 
-  WithIn(const ptr<Node> & w, const ptr<Node> & i) : with(w), in(i) {}
+  WithIn(const ptr<Node>& w, const ptr<Node>& i) : with(w), in(i) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix << "`- ";
@@ -455,7 +456,7 @@ struct WithIn : public Node {
   __NODE_TYPE_STRING__
 };
 
-struct WithBlock: public Node {
+struct WithBlock : public Node {
   ptr<MultiNodes> withins;
   ptr<MultiNodes> reqs;    // optional requirements
   ptr<MultiNodes> statms;  // may be empty
@@ -483,14 +484,78 @@ struct WithBlock: public Node {
   __NODE_TYPE_STRING__
 };
 
+struct Memory : public Node {
+  Storage st;
+  Memory(const Storage s) : st(s) {}
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    (void)prefix;
+    switch (st) {
+      case Storage::LOCAL:
+        os << "local";
+        break;
+      case Storage::SHARED:
+        os << "shared";
+        break;
+      case Storage::GLOBAL:
+        os << "global";
+        break;
+    }
+  }
+
+  __NODE_TYPE_STRING__
+};
+
+struct DMA : public Node {
+  std::string operation;
+  ptr<Node> future;
+  ptr<Node> from;
+  ptr<Node> to;
+
+  DMA(const std::string& o, const ptr<Node>& r, const ptr<Node>& f,
+      const ptr<Node>& t)
+      : operation(o), future(r), from(f), to(t) {}
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << "\n" << prefix << "`- DMA" << operation;
+    os << "\n" << prefix << "  `- furture: ";
+    future->Print(os);
+    os << "\n" << prefix << "  `- from: ";
+    from->Print(os);
+    os << prefix << "  `- to: ";
+    to->Print(os);
+  }
+
+  __NODE_TYPE_STRING__
+};
+
+struct ChunkAt : public Node {
+  ptr<Node> data;
+  ptr<MultiNodes> positions;
+
+  ChunkAt(const ptr<Node>& d, const ptr<MultiNodes>& p)
+      : data(d), positions(p) {}
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    data->Print(os);
+    os << ".ChunkAt(";
+    positions->Print(os);
+    os << ")\n";
+
+    (void)prefix;
+  }
+
+  __NODE_TYPE_STRING__
+};
+
 struct ForeachBlock : public Node {
   ptr<MultiNodes> ivs;
   ptr<MultiNodes> statms;
 
-  explicit ForeachBlock(const ptr<MultiNodes> & i, const ptr<MultiNodes> & s):
-    ivs(i), statms(s) {
-      assert(i != nullptr && "missing iteration variables for the statement.");
-    }
+  explicit ForeachBlock(const ptr<MultiNodes>& i, const ptr<MultiNodes>& s)
+      : ivs(i), statms(s) {
+    assert(i != nullptr && "missing iteration variables for the statement.");
+  }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Foreach Block:";

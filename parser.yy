@@ -113,17 +113,20 @@ void choreo_info(const char *message) {
 %token <std::string> CPP_CODE
 %token <std::string> IDENTIFIER ATTR_CO
 // type related
-%token <std::string> MDSPAN ITUPLE LOCAL SHARED GLOBAL
+%token <std::string> MDSPAN ITUPLE
+%token <AST::Storage> LOCAL SHARED GLOBAL
 %token <AST::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT
 // builtin operations
-%token <std::string> DMA COPY FNSPAN FNDATA
+%token <std::string> DMA DLIN DSLICE DPAD COPY FNSPAN FNDATA CHUNKAT
 // control related
 %token <std::string> IF ELSE PARA BY WITH IN ITER RET REQUIRE
 
 // non-terminals
+%nterm <std::string> dma_operation
+%nterm <AST::Storage> storage
 %nterm <AST::BaseType> base_type
 %nterm <AST::ptr<AST::Node>> pass_by foreach_block simple_val span_val ituple_val int_val declaration statement assignment pb_statement w_statement dma_statement span_elem mixed_span_elem iv_expr
-%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments pb_statements w_statements iterate_statements span_list mixed_span_list withins iv_exprs require_binds require_clause
+%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments pb_statements w_statements iterate_statements span_list mixed_span_list withins iv_exprs require_binds require_clause id_list
 %nterm <AST::ptr<AST::NodeRef>> if_else
 %nterm <AST::ptr<AST::IntList>> int_list
 %nterm <AST::ptr<AST::SValList>> sval_list
@@ -141,6 +144,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::WithIn>> within
 %nterm <AST::ptr<AST::RequireBind>> require_bind 
 %nterm <AST::ptr<AST::ParallelBy>> para_by
+%nterm <AST::ptr<AST::ChunkAt>> chunkat_expr
 
 %%
 
@@ -539,7 +543,10 @@ named_tuple_decl
       }
     ;
 
-storage: LOCAL | SHARED | GLOBAL;
+storage
+    : LOCAL   { $$ = $1; }
+    | SHARED  { $$ = $1; }
+    | GLOBAL  { $$ = $1; };
 
 assignment
     : IDENTIFIER ASSIGN expr {
@@ -724,15 +731,44 @@ iv_expr
     ;
 
 dma_statement
-    : IDENTIFIER ASSIGN dma_operation chunkat_expr TRANS storage
-    | IDENTIFIER ASSIGN dma_operation IDENTIFIER TRANS chunkat_expr
+    : IDENTIFIER ASSIGN DMA dma_operation chunkat_expr TRANS storage {
+        $$ = std::make_shared<AST::DMA>(
+              $4,
+              std::make_shared<AST::Identifier>($1),
+              $5,
+              std::make_shared<AST::Memory>($7));
+      }
+    | IDENTIFIER ASSIGN DMA dma_operation IDENTIFIER TRANS chunkat_expr {
+        $$ = std::make_shared<AST::DMA>(
+              $4,
+              std::make_shared<AST::Identifier>($1),
+              std::make_shared<AST::Identifier>($5),
+              $7);
+      }
     ;
 
 dma_operation
-    : DMA
+    : DLIN    { $$ = $1; }
+    | DSLICE  { $$ = $1; }
+    | DPAD    { $$ = $1; }
     ;
 
-chunkat_expr:
+chunkat_expr
+    : IDENTIFIER CHUNKAT LPAREN id_list RPAREN {
+        $$ = std::make_shared<AST::ChunkAt>(
+              std::make_shared<AST::Identifier>($1), $4);
+      }
+    ;
+
+id_list
+    : id_list COMMA IDENTIFIER {
+        $1->Append(std::make_shared<AST::Identifier>($3));
+        $$ = $1;
+      }
+    | IDENTIFIER {
+        $$ = std::make_shared<AST::MultiNodes>();
+        $$->Append(std::make_shared<AST::Identifier>($1));
+      }
     ;
 
 %%

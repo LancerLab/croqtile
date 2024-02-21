@@ -80,9 +80,9 @@ blank [ \t\r]
   "//".*     {}  // Ignore everything from // to the end of the line
   "mdspan"   return Choreo::Parser::make_MDSPAN(yytext, loc);
   "ituple"   return Choreo::Parser::make_ITUPLE(yytext, loc);
-  "local"    return Choreo::Parser::make_LOCAL(yytext, loc);
-  "shared"   return Choreo::Parser::make_SHARED(yytext, loc);
-  "global"   return Choreo::Parser::make_GLOBAL(yytext, loc);
+  "local"    return Choreo::Parser::make_LOCAL(AST::Storage::LOCAL, loc);
+  "shared"   return Choreo::Parser::make_SHARED(AST::Storage::SHARED, loc);
+  "global"   return Choreo::Parser::make_GLOBAL(AST::Storage::GLOBAL, loc);
   "f32"      return Choreo::Parser::make_F32(AST::BaseType::F32, loc);
   "f16"      return Choreo::Parser::make_F16(AST::BaseType::F16, loc);
   "bf16"     return Choreo::Parser::make_BF16(AST::BaseType::BF16, loc);
@@ -93,10 +93,14 @@ blank [ \t\r]
   "u8"       return Choreo::Parser::make_U8(AST::BaseType::U8, loc);
   "s8"       return Choreo::Parser::make_S8(AST::BaseType::S8, loc);
   "int"      return Choreo::Parser::make_INT(AST::BaseType::INT, loc);
-  "dma"      return Choreo::Parser::make_DMA(yytext, loc);
+  "dte"      return Choreo::Parser::make_DMA(yytext, loc);
+  ".linear"  return Choreo::Parser::make_DLIN(yytext, loc);
+  ".slice"   return Choreo::Parser::make_DSLICE(yytext, loc);
+  ".pad"     return Choreo::Parser::make_DPAD(yytext, loc);
   "copy"     return Choreo::Parser::make_COPY(yytext, loc);
   ".span"    return Choreo::Parser::make_FNSPAN(yytext, loc);
   ".data"    return Choreo::Parser::make_FNDATA(yytext, loc);
+  ".chunkat" return Choreo::Parser::make_CHUNKAT(yytext, loc);
   "=>"       return Choreo::Parser::make_TRANS  (loc);
   "if"       return Choreo::Parser::make_IF(yytext, loc);
   "else"     return Choreo::Parser::make_ELSE(yytext, loc);
