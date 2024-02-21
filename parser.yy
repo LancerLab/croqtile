@@ -117,7 +117,7 @@ void choreo_info(const char *message) {
 %token <AST::Storage> LOCAL SHARED GLOBAL
 %token <AST::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT
 // builtin operations
-%token <std::string> DMA DLIN DSLICE DPAD COPY FNSPAN FNDATA CHUNKAT
+%token <std::string> DMA DLIN DSLICE DPAD COPY FNSPAN FNDATA CHUNKAT WAIT CALL
 // control related
 %token <std::string> IF ELSE PARA BY WITH IN ITER RET REQUIRE
 
@@ -125,7 +125,7 @@ void choreo_info(const char *message) {
 %nterm <std::string> dma_operation
 %nterm <AST::Storage> storage
 %nterm <AST::BaseType> base_type
-%nterm <AST::ptr<AST::Node>> pass_by foreach_block simple_val span_val ituple_val int_val declaration statement assignment pb_statement w_statement dma_statement span_elem mixed_span_elem iv_expr
+%nterm <AST::ptr<AST::Node>> pass_by foreach_block simple_val span_val ituple_val int_val declaration statement assignment pb_statement w_statement dma_statement wait_statement call_statement span_elem mixed_span_elem iv_expr
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments pb_statements w_statements iterate_statements span_list mixed_span_list withins iv_exprs require_binds require_clause id_list
 %nterm <AST::ptr<AST::NodeRef>> if_else
 %nterm <AST::ptr<AST::IntList>> int_list
@@ -705,6 +705,8 @@ w_statement
     : declarations SEMCOL   { $$ = $1; }
     | assignments  SEMCOL   { $$ = $1; }
     | dma_statement SEMCOL  { $$ = $1; }
+    | wait_statement SEMCOL { $$ = $1; }
+    | call_statement SEMCOL { $$ = $1; }
     | if_else               { $$ = $1; }
     | foreach_block         { $$ = $1; }
     ;
@@ -768,6 +770,23 @@ id_list
     | IDENTIFIER {
         $$ = std::make_shared<AST::MultiNodes>();
         $$->Append(std::make_shared<AST::Identifier>($1));
+      }
+    ;
+
+wait_statement
+    : WAIT IDENTIFIER {
+        $$ = std::make_shared<AST::Wait>(
+                std::make_shared<AST::Identifier>($2));
+      }
+    ;
+
+call_statement
+    : CALL IDENTIFIER LPAREN id_list RPAREN {
+        $$ = std::make_shared<AST::Call>(
+                std::make_shared<AST::Identifier>($2), $4);
+      }
+    | storage IDENTIFIER ASSIGN CALL IDENTIFIER LPAREN id_list RPAREN  {
+
       }
     ;
 

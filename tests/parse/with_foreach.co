@@ -8,6 +8,8 @@ __co__ int with_foreach(int b, f32 mdspan<4> input) {
       foreach index {
         f = dte.linear input.chunkat(p, index) => local;
         sum = sum + index(0);
+        wait f;
+        call cfunction(sum);
       }
     }
   }
@@ -33,3 +35,6 @@ __co__ int with_foreach(int b, f32 mdspan<4> input) {
 // CHECK:        `- from: input.ChunkAt(pindex)
 // CHECK:        `- to: local
 // CHECK:      `- Assign: sum =  (sum + index(0))
+// CHECK:      `- WAIT: f
+// CHECK:      `- Call: cfunction
+// CHECK:        `- with arguements:sum

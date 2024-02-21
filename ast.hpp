@@ -548,6 +548,35 @@ struct ChunkAt : public Node {
   __NODE_TYPE_STRING__
 };
 
+struct Wait : public Node {
+  ptr<Node> target;
+
+  Wait(const ptr<Node>& t) : target(t) {}
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << "\n" << prefix << "`- WAIT: ";
+    target->Print(os);
+  }
+
+  __NODE_TYPE_STRING__
+};
+
+struct Call : public Node {
+  ptr<Node> function;
+  ptr<Node> arguments;
+
+  Call(const ptr<Node>& f, const ptr<Node>& a) : function(f), arguments(a) {}
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << "\n" << prefix << "`- Call: ";
+    function->Print(os);
+    os << "\n" << prefix << "  `- with arguements:";
+    arguments->Print(os);
+  }
+
+  __NODE_TYPE_STRING__
+};
+
 struct ForeachBlock : public Node {
   ptr<MultiNodes> ivs;
   ptr<MultiNodes> statms;

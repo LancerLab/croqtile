@@ -109,6 +109,8 @@ blank [ \t\r]
   "with"     return Choreo::Parser::make_WITH(yytext, loc);
   "in"       return Choreo::Parser::make_IN(yytext, loc);
   "foreach"  return Choreo::Parser::make_ITER(yytext, loc);
+  "wait"     return Choreo::Parser::make_WAIT(yytext, loc);
+  "call"     return Choreo::Parser::make_CALL(yytext, loc);
   "return"   return Choreo::Parser::make_RET(yytext, loc);
   "requires" return Choreo::Parser::make_REQUIRE(yytext, loc);
   "<->"      return Choreo::Parser::make_BIND   (loc);
