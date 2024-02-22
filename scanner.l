@@ -22,7 +22,7 @@
 
 static int scope = 0;
 
-Choreo::location loc;
+extern Choreo::location loc;
 
 void update_location(const char *text) {
   const char* it = text;

@@ -3,8 +3,12 @@
 
 #include "visitor.hpp"
 
+namespace Choreo {
+
 struct CodeGenerator : public Visitor {
-  void visit(AST::Node*) override {};
+  bool Visit(AST::Node*) override;
 };
+
+} // end namespace Choreo
 
 #endif // __CHOREO_CODEGEN_HPP__

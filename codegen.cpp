@@ -1,3 +1,4 @@
+#include "ast.hpp"
 #include "codegen.hpp"
 #include <iostream>
 
@@ -23,3 +24,12 @@ static inline void print_wrapper_end() {
   std::cout << "};\n";
 }
 
+using namespace AST;
+
+namespace Choreo {
+
+bool CodeGenerator::Visit(AST::Node * n) {
+  return true;
+}
+
+} // end namespace Choreo

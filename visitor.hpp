@@ -3,9 +3,13 @@
 
 namespace AST { class Node; }
 
+namespace Choreo {
+
 struct Visitor {
-  virtual void visit(AST::Node*) = 0;
+  virtual bool Visit(AST::Node*) = 0;
 };
+
+} // end namespace Choreo
 
 #endif // __CHOREO_VISITOR_HPP__
 

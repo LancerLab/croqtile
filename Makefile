@@ -19,6 +19,9 @@ TEST_TARGETS := $(TEST_FILES:.co=.test)
 #$(info TEST_FILES is $(TEST_FILES))
 #$(info TEST_TARGETS is $(TEST_TARGETS))
 
+# headers
+HEADER_FILES :=  $(shell find tests -name '*.hpp')
+
 CC = g++
 CFLAGS = -std=c++17 -Wall -Wextra -g
 
@@ -28,7 +31,7 @@ all: $(TARGET)
 test: $(TARGET)
 	$(LIT) tests
 
-$(TARGET): scanner.yy.o parser.tab.o
+$(TARGET): scanner.yy.o parser.tab.o choreo_main.o codegen.o
 	$(CC) $(CFLAGS) $^ -o $(TARGET)
 
 scanner.yy.cc: $(LEX_SRC)
@@ -40,14 +43,20 @@ parser.tab.cc parser.tab.hh: $(PARSER_SRC)
 %.o : %.cc ast.hpp scanner.hpp symtab.hpp parser.tab.hh
 	$(CC) $(CFLAGS) $< -c -o $@
 
+%.o : %.cpp $(HEADER_FILES)
+	$(CC) $(CFLAGS) $< -c -o $@
+
 clean:
 	rm -f *.cc *.hh *.o $(TEST_TARGETS) tests/*.result
+
+lines:
+	wc -l *.cpp *.yy *.l *.hpp Makefile
 
 %.test: $(TEST_FILES)
 	filecheck $< > $@.result
 	@echo "Tested $<"
 
-.PHONY: all clean test
+.PHONY: all clean lines test
 
 # Toolchains
 FLEX = flex

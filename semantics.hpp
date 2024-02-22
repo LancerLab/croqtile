@@ -3,8 +3,12 @@
 
 #include "visitor.hpp"
 
+namespace Choreo {
+
 struct SemanticChecker : public Visitor {
-  void visit(AST::Node*) override {};
+  bool Visit(AST::Node*) override { return true; };
 };
 
+} // end namespace Choreo
+  //
 #endif // __CHOREO_SEMANTIC_CHECK_HPP__

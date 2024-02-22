@@ -13,85 +13,10 @@
 
 namespace AST {
 
+//------------------------- AST Node Fundamentals ----------------------------//
+
 template <typename T>
 using ptr = std::shared_ptr<T>;
-
-#define __NODE_TYPE_STRING__ \
-  const std::string TypeString() override { return __PRETTY_FUNCTION__; }
-
-// interface class for all AST nodes
-struct Node {
-  virtual ~Node() {}
-
-  virtual void Print(std::ostream& os, const std::string& prefix = {}) const {
-    (void)os;
-    (void)prefix;
-  }
-
-  virtual const std::string TypeString() = 0;
-  // TODO: implementation for each derived-type
-  virtual void accept(Visitor& visitor) { visitor.visit(this); }
-};
-
-// A node with the reference to another node.
-//
-// It is normally used for a non-terminal node that referring an union of other
-// nodes, i.e.:
-//
-//   non-term : term_1 | term_2
-//
-struct NodeRef : public Node {
-  ptr<Node> value;
-
-  NodeRef(ptr<Node> n) : value(n) {}
-
-  virtual void Print(std::ostream& os, const std::string& prefix = {}) const {
-    value->Print(os, prefix);
-  }
-
-  void accept(Visitor& visitor) override { visitor.visit(&*value); }
-
-  __NODE_TYPE_STRING__
-};
-
-// A general cluster of nodes
-//
-// It is normally used for a non-terminal node that comprises multiple nodes,
-// i.e.:
-//
-//   non-term : non-term term_1 | term_2
-//
-struct MultiNodes : public Node {
-  std::vector<ptr<Node>> values;
-
-  explicit MultiNodes(){};
-
-  void Append(const ptr<Node>& m) {
-    assert(m != nullptr && "Unexpected: null pointer.");
-    values.push_back(m);
-  }
-
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    for (auto& v : values) {
-      v->Print(os, prefix);
-    }
-  }
-
-  // TODO: workaround for "x, y" like print, we may need typeid to merge this print
-  // logic into trivial Print()
-  void InlinePrint(std::ostream& os, const std::string& prefix = {}) const {
-    for (auto& v : values) {
-      v->Print(os, prefix);
-      if (&v != &values.back()) os << ", ";
-    }
-  }
-
-  void accept(Visitor& visitor) override {
-    for (auto& v : values) visitor.visit(&*v);
-  }
-
-  __NODE_TYPE_STRING__
-};
 
 // For storage specifiers like local, global, shared
 enum class Storage { LOCAL, SHARED, GLOBAL };
@@ -126,6 +51,125 @@ inline static std::string getStringFrom(BaseType dataType) {
   assert(0 && "unsupported type.");
 }
 
+// smart typeid provider suggested by GPT
+template <typename T>
+struct TypeIDProvider {
+  static int unique;
+};
+
+template <typename T>
+int TypeIDProvider<T>::unique;
+
+#define __NODE_TYPE_INFO__                                                \
+  const std::string TypeString() override { return __PRETTY_FUNCTION__; } \
+  uint64_t TypeID() const override {                                      \
+    return reinterpret_cast<uint64_t>(                                    \
+        &TypeIDProvider<decltype(*this)>::unique);                        \
+  }
+
+// interface class for all AST nodes
+struct Node {
+  virtual ~Node() = default;
+
+  virtual void Print(std::ostream& os,
+                     const std::string& prefix = {}) const = 0;
+
+  // for the runtime type disambiguition
+  virtual const std::string TypeString() = 0;
+  virtual uint64_t TypeID() const = 0;
+
+  // TODO: implementation for each derived-type
+  virtual void accept(Choreo::Visitor& visitor) { visitor.Visit(this); }
+};
+
+// LLVM-style type utility functions for AST::Node
+//
+// Note:
+// To be simple, we do not handle any relationship about inheritance but only
+// the extact (most-derived) type
+//
+
+template <typename T>
+bool isa(Node* n) {
+  return ((T*)n)->TypeID() == n->TypeID();
+}
+
+template <typename T>
+T* dyn_cast(Node* n) {
+  if (isa<T>(n))
+    return (T*)n;
+  else
+    return nullptr;
+}
+
+template <typename T>
+T* cast(Node* n) {
+  if (isa<T>(n))
+    return (T*)n;
+  else {
+    std::cerr << "Cast failure for the type inconsistence." << std::endl;
+    abort();
+  }
+}
+
+//---------------------------------------------------------------------------//
+
+// A node with the reference to another node.
+//
+// TODO: deprecated it
+struct NodeRef : public Node {
+  ptr<Node> value;
+
+  NodeRef(ptr<Node> n) : value(n) {}
+
+  virtual void Print(std::ostream& os, const std::string& prefix = {}) const {
+    value->Print(os, prefix);
+  }
+
+  void accept(Choreo::Visitor& visitor) override { visitor.Visit(&*value); }
+
+  __NODE_TYPE_INFO__
+};
+
+// A general cluster of nodes
+//
+// It is normally used for a non-terminal node that comprises multiple nodes,
+// i.e.:
+//
+//   non-term : non-term term_1 | term_2
+//
+struct MultiNodes : public Node {
+  std::vector<ptr<Node>> values;
+
+  explicit MultiNodes(){};
+
+  void Append(const ptr<Node>& m) {
+    assert(m != nullptr && "Unexpected: null pointer.");
+    values.push_back(m);
+  }
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    for (auto& v : values) {
+      v->Print(os, prefix);
+    }
+  }
+
+  // TODO: workaround for "x, y" like print, we may need typeid to merge this
+  // print logic into trivial Print()
+  void InlinePrint(std::ostream& os, const std::string& prefix = {}) const {
+    for (auto& v : values) {
+      v->Print(os, prefix);
+      if (&v != &values.back()) os << ", ";
+    }
+  }
+
+  void accept(Choreo::Visitor& visitor) override {
+    for (auto& v : values) visitor.Visit(&*v);
+  }
+
+  __NODE_TYPE_INFO__
+};
+
 struct IntLiteral : public Node {
   int value;
   IntLiteral(int v) : value(v) {}
@@ -134,7 +178,7 @@ struct IntLiteral : public Node {
     os << prefix << value;
   }
 
-  __NODE_TYPE_STRING__
+  __NODE_TYPE_INFO__
 };
 
 struct IntList : public Node {
@@ -149,7 +193,7 @@ struct IntList : public Node {
     os << values.back()->value << "]";
   }
 
-  __NODE_TYPE_STRING__
+  __NODE_TYPE_INFO__
 };
 
 struct SValList : public Node {
@@ -166,7 +210,7 @@ struct SValList : public Node {
     (void)prefix;
   }
 
-  __NODE_TYPE_STRING__
+  __NODE_TYPE_INFO__
 };
 
 struct Expr : public Node {
@@ -189,7 +233,7 @@ struct Expr : public Node {
     (void)prefix;
   }
 
-  __NODE_TYPE_STRING__
+  __NODE_TYPE_INFO__
 };
 
 // Represents both dimensions and s like {3, 4, 5} or {1, 2, 1}
@@ -213,7 +257,7 @@ struct MultiSpans : public Node {
     (void)prefix;
   }
 
-  __NODE_TYPE_STRING__
+  __NODE_TYPE_INFO__
 };
 
 struct NamedDecl : public Node {
@@ -235,7 +279,7 @@ struct NamedDecl : public Node {
     value->Print(os);
   }
 
-  __NODE_TYPE_STRING__
+  __NODE_TYPE_INFO__
 };
 
 // Represents declarations like: ituple t = {3, 4, 5};
@@ -254,7 +298,7 @@ struct IntTuple : public Node {
     (void)prefix;
   }
 
-  __NODE_TYPE_STRING__
+  __NODE_TYPE_INFO__
 };
 
 class ITupleTable {
@@ -297,7 +341,7 @@ struct Assignment : public Node {
     value->Print(os);
   }
 
-  __NODE_TYPE_STRING__
+  __NODE_TYPE_INFO__
 };
 
 struct IntIndex : public Node {
@@ -310,7 +354,7 @@ struct IntIndex : public Node {
     os << ")";
   }
 
-  __NODE_TYPE_STRING__
+  __NODE_TYPE_INFO__
 };
 
 struct NthBound : public Node {
@@ -326,7 +370,7 @@ struct NthBound : public Node {
     index->Print(os);
   }
 
-  __NODE_TYPE_STRING__
+  __NODE_TYPE_INFO__
 };
 
 struct IntIndexList : public Node {
@@ -347,7 +391,7 @@ struct IntIndexList : public Node {
     (void)prefix;
   }
 
-  __NODE_TYPE_STRING__
+  __NODE_TYPE_INFO__
 };
 
 // A data type could either be
@@ -382,7 +426,7 @@ struct DataType : public Node {
     }
   }
 
-  __NODE_TYPE_STRING__
+  __NODE_TYPE_INFO__
 };
 
 struct Identifier : public Node {
@@ -392,7 +436,7 @@ struct Identifier : public Node {
     os << prefix << name;
   }
 
-  __NODE_TYPE_STRING__
+  __NODE_TYPE_INFO__
 };
 
 struct ParamList : public Node {
@@ -409,7 +453,7 @@ struct ParamList : public Node {
     }
   }
 
-  __NODE_TYPE_STRING__
+  __NODE_TYPE_INFO__
 };
 
 struct ParallelBy : public Node {
@@ -428,7 +472,7 @@ struct ParallelBy : public Node {
       statms->Print(os, prefix + " ");
   }
 
-  __NODE_TYPE_STRING__
+  __NODE_TYPE_INFO__
 };
 
 // `require_bind` parsing "idx_1 <-> idx_2"
@@ -447,13 +491,13 @@ struct RequireBind : public Node {
     os << "\n";
   }
 
-  __NODE_TYPE_STRING__
+  __NODE_TYPE_INFO__
 };
 
 struct WithIn : public Node {
   ptr<Node> with;
   ptr<Node> in;
-  ptr<MultiNodes> with_matchers;    // optional requirements
+  ptr<MultiNodes> with_matchers;  // optional requirements
 
   WithIn(const ptr<Node>& w, const ptr<Node>& i) : with(w), in(i) {}
 
@@ -470,7 +514,7 @@ struct WithIn : public Node {
     os << "\n";
   }
 
-  __NODE_TYPE_STRING__
+  __NODE_TYPE_INFO__
 };
 
 struct WithBlock : public Node {
@@ -498,7 +542,7 @@ struct WithBlock : public Node {
     }
   }
 
-  __NODE_TYPE_STRING__
+  __NODE_TYPE_INFO__
 };
 
 struct Memory : public Node {
@@ -520,7 +564,7 @@ struct Memory : public Node {
     }
   }
 
-  __NODE_TYPE_STRING__
+  __NODE_TYPE_INFO__
 };
 
 struct DMA : public Node {
@@ -543,7 +587,7 @@ struct DMA : public Node {
     to->Print(os);
   }
 
-  __NODE_TYPE_STRING__
+  __NODE_TYPE_INFO__
 };
 
 struct ChunkAt : public Node {
@@ -562,7 +606,7 @@ struct ChunkAt : public Node {
     (void)prefix;
   }
 
-  __NODE_TYPE_STRING__
+  __NODE_TYPE_INFO__
 };
 
 struct Wait : public Node {
@@ -575,7 +619,7 @@ struct Wait : public Node {
     target->Print(os);
   }
 
-  __NODE_TYPE_STRING__
+  __NODE_TYPE_INFO__
 };
 
 struct Call : public Node {
@@ -591,7 +635,7 @@ struct Call : public Node {
     arguments->Print(os);
   }
 
-  __NODE_TYPE_STRING__
+  __NODE_TYPE_INFO__
 };
 
 struct ForeachBlock : public Node {
@@ -612,7 +656,7 @@ struct ForeachBlock : public Node {
     }
   }
 
-  __NODE_TYPE_STRING__
+  __NODE_TYPE_INFO__
 };
 
 struct FunctionDecl : public Node {
@@ -627,7 +671,7 @@ struct FunctionDecl : public Node {
     params->Print(os, prefix);
   }
 
-  __NODE_TYPE_STRING__
+  __NODE_TYPE_INFO__
 };
 
 struct ChoreoFunction : public Node {
@@ -640,7 +684,7 @@ struct ChoreoFunction : public Node {
     if (statms) statms->Print(os, prefix + " ");
   }
 
-  __NODE_TYPE_STRING__
+  __NODE_TYPE_INFO__
 };
 
 struct CppSourceCode : public Node {
@@ -651,7 +695,7 @@ struct CppSourceCode : public Node {
     (void)prefix;
   }
 
-  __NODE_TYPE_STRING__
+  __NODE_TYPE_INFO__
 };
 
 // Top-level program structure
@@ -662,7 +706,7 @@ struct Program : public Node {
     (void)prefix;
   }
 
-  __NODE_TYPE_STRING__
+  __NODE_TYPE_INFO__
 };
 
 }  // end of namespace AST

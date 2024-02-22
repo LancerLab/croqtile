@@ -14,8 +14,6 @@
 
 #include <string>
 #include <fstream>
-#include <cstdlib>
-#include <getopt.h>
 
 namespace Choreo { class Scanner; }
 
@@ -35,9 +33,9 @@ namespace Choreo { class Scanner; }
 extern char* yytext;
 extern Choreo::location loc;
 
-AST::Program root;
-AST::SymbolTable symtab;
-AST::ITupleTable ituple_symtab(symtab);
+extern AST::Program root;
+extern AST::SymbolTable symtab;
+extern AST::ITupleTable ituple_symtab;
 
 const char* red = "\033[31m";
 const char* reset = "\033[0m";
@@ -831,74 +829,3 @@ void Choreo::Parser::error(const location &loc , const std::string &message) {
       std::cerr << reset;
   std::cerr << message << std::endl;
 }
-
-int main(int argc, char* argv[]) {
-	std::string filename;
-	bool debugMode = false;
-	bool dumpAST = false;
-
-	// Define long options
-	static struct option long_options[] = {
-			{"debug", no_argument, 0, 'd'},
-			{"dump-ast", no_argument, 0, 'e'},
-			{0, 0, 0, 0}
-	};
-
-	// Parse command-line options
-	int opt;
-	int option_index = 0;
-	while ((opt = getopt_long(argc, argv, "de", long_options, &option_index)) != -1) {
-		switch (opt) {
-			case 'd':
-					debugMode = true;
-					break;
-			case 'e':
-					dumpAST = true;
-					break;
-			case '?':
-					// getopt_long already printed an error message
-					return 1;
-			default:
-					break;
-		}
-	}
-
-	if (optind >= argc) {
-    std::cerr << "Usage: " << argv[0] << " <filename>\n";
-    return 1;
-	}
-
-  filename = argv[optind];
-
-  if (filename.empty()) {
-    std::cerr << "Usage: " << argv[0] << " <filename>\n";
-    return 1;
-  }
-
-	std::ifstream file(filename);
-	if (!file) {
-		std::cerr << "Could not open file: " << filename << std::endl;
-		return 1;
-	}
-
-  loc.begin.filename = loc.end.filename = &filename;
-
-  Choreo::Scanner s;
-  s.yyrestart(file);
-  Choreo::Parser p(s);
-
-	if (debugMode) {
-		std::cout << "Choreo: Debug of parsing is switched on." << std::endl;
-		p.set_debug_level(1); // Enable Bison debugging
-    Choreo::Scanner::SetDebug();
-	}
-
-  p.parse();
-
-  if (dumpAST)
-    root.Print(std::cout);
-
-  return 0;
-}
-
-int AST::SymbolTable::anonymous_count = 0;
