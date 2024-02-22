@@ -1,4 +1,5 @@
 #include <getopt.h>
+
 #include <cstdlib>
 
 #include "ast.hpp"
@@ -19,17 +20,23 @@ int main(int argc, char* argv[]) {
   bool debugMode = false;
   bool onlyDumpAST = false;
   bool onlySemaCheck = false;
+  bool removeComments = false;
+
+  enum class Target { Factor, Topscc };
+
+  Target tgt = Target::Factor;
 
   // Define long options
   static struct option long_options[] = {{"debug", no_argument, 0, 'd'},
                                          {"dump-ast", no_argument, 0, 'e'},
                                          {"sema-check", no_argument, 0, 's'},
+                                         {"remove-comments", no_argument, 0, 'n'},
                                          {0, 0, 0, 0}};
 
   // Parse command-line options
   int opt;
   int option_index = 0;
-  while ((opt = getopt_long(argc, argv, "des", long_options, &option_index)) !=
+  while ((opt = getopt_long(argc, argv, "desn", long_options, &option_index)) !=
          -1) {
     switch (opt) {
       case 'd':
@@ -40,6 +47,9 @@ int main(int argc, char* argv[]) {
         break;
       case 's':
         onlySemaCheck = true;
+        break;
+      case 'n':
+        removeComments = true;
         break;
       case '?':
         // getopt_long already printed an error message
@@ -79,6 +89,9 @@ int main(int argc, char* argv[]) {
     Choreo::Scanner::SetDebug();
   }
 
+  if (removeComments)
+    Choreo::Scanner::SetRemoveComments();
+
   p.parse();
 
   if (onlyDumpAST) {
@@ -96,8 +109,10 @@ int main(int argc, char* argv[]) {
 
   if (onlySemaCheck) return 0;
 
-  CodeGenerator codegen;
-  root.accept(codegen);
+  if (tgt == Target::Factor) {
+    FactorCodeGen codegen(std::cout);
+    root.accept(codegen);
+  }
 
   return 0;
 }

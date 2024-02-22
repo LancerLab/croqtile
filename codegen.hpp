@@ -6,9 +6,89 @@
 namespace Choreo {
 
 struct CodeGenerator : public Visitor {
-  bool Visit(AST::Node*) override;
+  std::ostream &os;
+
+  CodeGenerator(std::ostream &o) : os(o) {}
 };
 
-} // end namespace Choreo
+struct FactorCodeGen : public CodeGenerator {
+  // TODO: should the pointer be replaced?
+  std::vector<AST::ptr<AST::ParamType>> *current_parameters = nullptr;
+  AST::ptr<AST::DataType> current_output = nullptr;
 
-#endif // __CHOREO_CODEGEN_HPP__
+  FactorCodeGen(std::ostream &os) : CodeGenerator(os) {}
+
+  // bool Visit(AST::Node&) override;
+  bool BeforeVisit(AST::Node &) override;
+  bool AfterVisit(AST::Node &) override;
+
+  bool Visit(AST::NodeRef &) override;
+  bool Visit(AST::MultiNodes &) override;
+  bool Visit(AST::IntLiteral &) override;
+  bool Visit(AST::IntList &) override;
+  bool Visit(AST::SValList &) override;
+  bool Visit(AST::Expr &) override;
+  bool Visit(AST::MultiSpans &) override;
+  bool Visit(AST::NamedDecl &) override;
+  bool Visit(AST::IntTuple &) override;
+  bool Visit(AST::Assignment &) override;
+  bool Visit(AST::IntIndex &) override;
+  bool Visit(AST::NthBound &) override;
+  bool Visit(AST::IntIndexList &) override;
+  bool Visit(AST::DataType &) override;
+  bool Visit(AST::Identifier &) override;
+  bool Visit(AST::ParamList &) override;
+  bool Visit(AST::ParallelBy &) override;
+  bool Visit(AST::RequireBind &) override;
+  bool Visit(AST::WithIn &) override;
+  bool Visit(AST::WithBlock &) override;
+  bool Visit(AST::Memory &) override;
+  bool Visit(AST::DMA &) override;
+  bool Visit(AST::ChunkAt &) override;
+  bool Visit(AST::Wait &) override;
+  bool Visit(AST::Call &) override;
+  bool Visit(AST::ForeachBlock &) override;
+  bool Visit(AST::FunctionDecl &) override;
+  bool Visit(AST::ChoreoFunction &) override;
+  bool Visit(AST::CppSourceCode &) override;
+  bool Visit(AST::Program &) override;
+};
+
+struct TopsccCodeGen : public CodeGenerator {
+  // bool Visit(AST::Node&) override;
+
+  bool Visit(AST::NodeRef &) override { return true; };
+  bool Visit(AST::MultiNodes &) override { return true; };
+  bool Visit(AST::IntLiteral &) override { return true; };
+  bool Visit(AST::IntList &) override { return true; };
+  bool Visit(AST::SValList &) override { return true; };
+  bool Visit(AST::Expr &) override { return true; };
+  bool Visit(AST::MultiSpans &) override { return true; };
+  bool Visit(AST::NamedDecl &) override { return true; };
+  bool Visit(AST::IntTuple &) override { return true; };
+  bool Visit(AST::Assignment &) override { return true; };
+  bool Visit(AST::IntIndex &) override { return true; };
+  bool Visit(AST::NthBound &) override { return true; };
+  bool Visit(AST::IntIndexList &) override { return true; };
+  bool Visit(AST::DataType &) override { return true; };
+  bool Visit(AST::Identifier &) override { return true; };
+  bool Visit(AST::ParamList &) override { return true; };
+  bool Visit(AST::ParallelBy &) override { return true; };
+  bool Visit(AST::RequireBind &) override { return true; };
+  bool Visit(AST::WithIn &) override { return true; };
+  bool Visit(AST::WithBlock &) override { return true; };
+  bool Visit(AST::Memory &) override { return true; };
+  bool Visit(AST::DMA &) override { return true; };
+  bool Visit(AST::ChunkAt &) override { return true; };
+  bool Visit(AST::Wait &) override { return true; };
+  bool Visit(AST::Call &) override { return true; };
+  bool Visit(AST::ForeachBlock &) override { return true; };
+  bool Visit(AST::FunctionDecl &) override { return true; };
+  bool Visit(AST::ChoreoFunction &) override { return true; };
+  bool Visit(AST::CppSourceCode &) override { return true; };
+  bool Visit(AST::Program &) override { return true; };
+};
+
+}  // end namespace Choreo
+
+#endif  // __CHOREO_CODEGEN_HPP__

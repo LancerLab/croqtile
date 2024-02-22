@@ -65,9 +65,12 @@ public:
 public:
   static void Debug(std::string s);
   static void SetDebug(bool d = true) { debug = d; }
+  static void SetRemoveComments() { keep_comments = false; };
+  static bool KeepComments() { return keep_comments; };
 
 private:
   static bool debug;
+  static bool keep_comments;
 
 //private:
 //    Interpreter &m_driver;

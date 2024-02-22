@@ -1,4 +1,4 @@
-// RUN: choreo %s | FileCheck --allow-empty %s
+// RUN: choreo -n %s | FileCheck --allow-empty %s
 
 // smoke test for wrong program without contents
 // also test comment utils, correctly ignored by flex scanner

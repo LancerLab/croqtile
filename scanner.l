@@ -55,7 +55,8 @@ blank [ \t\r]
 
 %%
 <INITIAL>"//".*   {
-  return Choreo::Parser::make_CPP_CODE(yytext, loc);
+  if (Choreo::Scanner::KeepComments())
+    return Choreo::Parser::make_CPP_CODE(yytext, loc);
 }
 <INITIAL>"__co__" {
   BEGIN(CO_FUNC);
@@ -152,5 +153,6 @@ int yywrap() {
 }
 
 bool Choreo::Scanner::debug = false;
+bool Choreo::Scanner::keep_comments = true;
 void Choreo::Scanner::Debug(std::string s) { if (debug) std::cout << "[scanner] " << s << std::endl; }
 

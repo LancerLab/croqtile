@@ -9,7 +9,13 @@
 #include <vector>
 
 #include "symtab.hpp"
-#include "visitor.hpp"
+
+namespace Choreo { struct Visitor; }
+
+[[noreturn]] inline void choreo_unreachable(const char* msg = "Unreachable code reached", const char* file = __FILE__, int line = __LINE__) {
+  std::cerr << "Assertion failed: " << msg << ", file " << file << ", line " << line << std::endl;
+  std::abort();
+}
 
 namespace AST {
 
@@ -24,32 +30,6 @@ enum class Storage { LOCAL, SHARED, GLOBAL };
 class Identifier;
 class DataType;
 using ParamType = std::pair<ptr<DataType>, ptr<Identifier>>;
-
-inline static BaseType getTypeFromString(const std::string& input) {
-  static const std::map<std::string, BaseType> typeMap = {
-      {"f32", BaseType::F32}, {"f16", BaseType::F16}, {"bf16", BaseType::BF16},
-      {"u32", BaseType::U32}, {"s32", BaseType::S32}, {"u16", BaseType::U16},
-      {"s16", BaseType::S16}, {"u8", BaseType::U8},   {"s8", BaseType::S8},
-      {"int", BaseType::INT}};
-
-  auto it = typeMap.find(input);
-  if (it != typeMap.end()) return it->second;
-
-  assert(0 && "incorrect type string");
-}
-
-inline static std::string getStringFrom(BaseType dataType) {
-  static const std::map<BaseType, std::string> enumToString = {
-      {BaseType::F32, "f32"}, {BaseType::F16, "f16"}, {BaseType::BF16, "bf16"},
-      {BaseType::U32, "u32"}, {BaseType::S32, "s32"}, {BaseType::U16, "u16"},
-      {BaseType::S16, "s16"}, {BaseType::U8, "u8"},   {BaseType::S8, "s8"},
-      {BaseType::INT, "int"}};
-
-  auto it = enumToString.find(dataType);
-  if (it != enumToString.end()) return it->second;
-
-  assert(0 && "unsupported type.");
-}
 
 // smart typeid provider suggested by GPT
 template <typename T>
@@ -78,8 +58,7 @@ struct Node {
   virtual const std::string TypeString() = 0;
   virtual uint64_t TypeID() const = 0;
 
-  // TODO: implementation for each derived-type
-  virtual void accept(Choreo::Visitor& visitor) { visitor.Visit(this); }
+  virtual void accept(Choreo::Visitor&) = 0;
 };
 
 // LLVM-style type utility functions for AST::Node
@@ -91,7 +70,8 @@ struct Node {
 
 template <typename T>
 bool isa(Node* n) {
-  return ((T*)n)->TypeID() == n->TypeID();
+  T t;
+  return t.TypeID() == n->TypeID();
 }
 
 template <typename T>
@@ -126,7 +106,7 @@ struct NodeRef : public Node {
     value->Print(os, prefix);
   }
 
-  void accept(Choreo::Visitor& visitor) override { visitor.Visit(&*value); }
+  void accept(Choreo::Visitor& visitor) override;
 
   __NODE_TYPE_INFO__
 };
@@ -163,9 +143,7 @@ struct MultiNodes : public Node {
     }
   }
 
-  void accept(Choreo::Visitor& visitor) override {
-    for (auto& v : values) visitor.Visit(&*v);
-  }
+  void accept(Choreo::Visitor& visitor) override;
 
   __NODE_TYPE_INFO__
 };
@@ -177,6 +155,9 @@ struct IntLiteral : public Node {
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix << value;
   }
+
+
+  void accept(Choreo::Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -192,6 +173,9 @@ struct IntList : public Node {
       os << values[i]->value << ", ";
     os << values.back()->value << "]";
   }
+
+
+  void accept(Choreo::Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -209,6 +193,9 @@ struct SValList : public Node {
     values.back()->Print(os);
     (void)prefix;
   }
+
+
+  void accept(Choreo::Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -232,6 +219,9 @@ struct Expr : public Node {
       value_r->Print(os);
     (void)prefix;
   }
+
+
+  void accept(Choreo::Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -257,6 +247,9 @@ struct MultiSpans : public Node {
     (void)prefix;
   }
 
+
+  void accept(Choreo::Visitor&) override;
+
   __NODE_TYPE_INFO__
 };
 
@@ -279,6 +272,9 @@ struct NamedDecl : public Node {
     value->Print(os);
   }
 
+
+  void accept(Choreo::Visitor&) override;
+
   __NODE_TYPE_INFO__
 };
 
@@ -297,6 +293,9 @@ struct IntTuple : public Node {
 
     (void)prefix;
   }
+
+
+  void accept(Choreo::Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -341,6 +340,9 @@ struct Assignment : public Node {
     value->Print(os);
   }
 
+
+  void accept(Choreo::Visitor&) override;
+
   __NODE_TYPE_INFO__
 };
 
@@ -353,6 +355,9 @@ struct IntIndex : public Node {
     value->Print(os);
     os << ")";
   }
+
+
+  void accept(Choreo::Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -369,6 +374,9 @@ struct NthBound : public Node {
     mdarray->Print(os);
     index->Print(os);
   }
+
+
+  void accept(Choreo::Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -390,6 +398,9 @@ struct IntIndexList : public Node {
 
     (void)prefix;
   }
+
+
+  void accept(Choreo::Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -426,6 +437,9 @@ struct DataType : public Node {
     }
   }
 
+
+  void accept(Choreo::Visitor&) override;
+
   __NODE_TYPE_INFO__
 };
 
@@ -435,6 +449,9 @@ struct Identifier : public Node {
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix << name;
   }
+
+
+  void accept(Choreo::Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -452,6 +469,8 @@ struct ParamList : public Node {
       item->second->Print(os, ", symbol: ");
     }
   }
+
+  void accept(Choreo::Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -472,6 +491,9 @@ struct ParallelBy : public Node {
       statms->Print(os, prefix + " ");
   }
 
+
+  void accept(Choreo::Visitor&) override;
+
   __NODE_TYPE_INFO__
 };
 
@@ -490,6 +512,9 @@ struct RequireBind : public Node {
     rhs->Print(os);
     os << "\n";
   }
+
+
+  void accept(Choreo::Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -513,6 +538,9 @@ struct WithIn : public Node {
     in->Print(os);
     os << "\n";
   }
+
+
+  void accept(Choreo::Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -542,6 +570,9 @@ struct WithBlock : public Node {
     }
   }
 
+
+  void accept(Choreo::Visitor&) override;
+
   __NODE_TYPE_INFO__
 };
 
@@ -563,6 +594,9 @@ struct Memory : public Node {
         break;
     }
   }
+
+
+  void accept(Choreo::Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -587,6 +621,8 @@ struct DMA : public Node {
     to->Print(os);
   }
 
+  void accept(Choreo::Visitor&) override;
+
   __NODE_TYPE_INFO__
 };
 
@@ -606,6 +642,8 @@ struct ChunkAt : public Node {
     (void)prefix;
   }
 
+  void accept(Choreo::Visitor&) override;
+
   __NODE_TYPE_INFO__
 };
 
@@ -618,6 +656,9 @@ struct Wait : public Node {
     os << "\n" << prefix << "`- WAIT: ";
     target->Print(os);
   }
+
+
+  void accept(Choreo::Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -634,6 +675,7 @@ struct Call : public Node {
     os << "\n" << prefix << "  `- with arguements:";
     arguments->Print(os);
   }
+  void accept(Choreo::Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -656,6 +698,8 @@ struct ForeachBlock : public Node {
     }
   }
 
+  void accept(Choreo::Visitor&) override;
+
   __NODE_TYPE_INFO__
 };
 
@@ -670,6 +714,7 @@ struct FunctionDecl : public Node {
     ret_type->Print(os);
     params->Print(os, prefix);
   }
+  void accept(Choreo::Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -683,6 +728,7 @@ struct ChoreoFunction : public Node {
     f_decl.Print(os, prefix + " `- ");
     if (statms) statms->Print(os, prefix + " ");
   }
+  void accept(Choreo::Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -695,6 +741,9 @@ struct CppSourceCode : public Node {
     (void)prefix;
   }
 
+  std::string GetCode() { return code; }
+  void accept(Choreo::Visitor&) override;
+
   __NODE_TYPE_INFO__
 };
 
@@ -705,6 +754,8 @@ struct Program : public Node {
     for (auto& node : nodes) node->Print(os, "");
     (void)prefix;
   }
+
+  void accept(Choreo::Visitor&) override;
 
   __NODE_TYPE_INFO__
 };

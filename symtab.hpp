@@ -40,6 +40,32 @@ class Symbol {
   bool isAggregate() const { return aggregate; }
 };
 
+inline static BaseType getTypeFromString(const std::string& input) {
+  static const std::unordered_map<std::string, BaseType> typeMap = {
+      {"f32", BaseType::F32}, {"f16", BaseType::F16}, {"bf16", BaseType::BF16},
+      {"u32", BaseType::U32}, {"s32", BaseType::S32}, {"u16", BaseType::U16},
+      {"s16", BaseType::S16}, {"u8", BaseType::U8},   {"s8", BaseType::S8},
+      {"int", BaseType::INT}};
+
+  auto it = typeMap.find(input);
+  if (it != typeMap.end()) return it->second;
+
+  assert(0 && "incorrect type string");
+}
+
+inline static std::string getStringFrom(BaseType dataType) {
+  static const std::unordered_map<BaseType, std::string> enumToString = {
+      {BaseType::F32, "f32"}, {BaseType::F16, "f16"}, {BaseType::BF16, "bf16"},
+      {BaseType::U32, "u32"}, {BaseType::S32, "s32"}, {BaseType::U16, "u16"},
+      {BaseType::S16, "s16"}, {BaseType::U8, "u8"},   {BaseType::S8, "s8"},
+      {BaseType::INT, "int"}};
+
+  auto it = enumToString.find(dataType);
+  if (it != enumToString.end()) return it->second;
+
+  assert(0 && "unsupported type.");
+}
+
 class SymbolTable {
  private:
   std::unordered_map<std::string, Symbol> table;

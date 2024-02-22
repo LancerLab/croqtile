@@ -20,7 +20,7 @@ TEST_TARGETS := $(TEST_FILES:.co=.test)
 #$(info TEST_TARGETS is $(TEST_TARGETS))
 
 # headers
-HEADER_FILES :=  $(shell find tests -name '*.hpp')
+HEADER_FILES :=  $(shell find . -name '*.hpp')
 
 CC = g++
 CFLAGS = -std=c++17 -Wall -Wextra -g
@@ -31,7 +31,7 @@ all: $(TARGET)
 test: $(TARGET)
 	$(LIT) tests
 
-$(TARGET): scanner.yy.o parser.tab.o choreo_main.o codegen.o
+$(TARGET): scanner.yy.o parser.tab.o choreo_main.o codegen_factor.o ast.o
 	$(CC) $(CFLAGS) $^ -o $(TARGET)
 
 scanner.yy.cc: $(LEX_SRC)

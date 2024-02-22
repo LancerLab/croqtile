@@ -1,0 +1,25 @@
+// RUN: choreo %s | FileCheck --match-full-lines %s
+
+#include <iostream>
+
+// device program
+__co__ int foo(f32 mdspan<1> d, int) {
+}
+
+// CHECK:   using namespace factor;
+// CHECK:   FACTOR_PROGRAM(choreo_foo);
+// CHECK:   choreo_foo([&](auto target_name) {
+// CHECK:     auto d_type = DRAMType(FloatType(32), (1));
+// CHECK:     auto anon_0_type = DRAMType(IntType(32), (1));
+// CHECK:     auto choreo_output_type = DRAMType(IntType(32), (1));
+// CHECK:     D(main_)
+// CHECK:     ({d_type, anon_0_type}, [&](auto args) {
+// CHECK:       auto choreo_output = alloc_(choreo_output_type);
+// CHECK:   });
+// CHECK:   choreo_foo.Compile("dorado");
+// CHECK:   choreo_foo.Run();
+
+// host program
+int bar(int a) {
+  return foo(a);
+}
