@@ -220,12 +220,17 @@ struct Expr : public Node {
   explicit Expr(const std::string& o, const ptr<Expr>& v1, const ptr<Node>& v2)
       : op(o), value_l(v1), value_r(v2) {}
   explicit Expr(const ptr<Node>& v) : value_r(v) {}
+  explicit Expr(const std::string& o, const ptr<Node>& v2)
+      : op(o), value_r(v2) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     if (op.size() > 0) {
       os << " (";
-      value_l->Print(os);
-      os << " " << op << " ";
+      if(op != "!") {
+        value_l->Print(os);
+        os << " ";
+      }
+      os << op << " ";
       value_r->Print(os);
       os << ") ";
     } else

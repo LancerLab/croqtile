@@ -96,6 +96,9 @@ void choreo_info(const char *message) {
   NE      "!="
   LE      "<="
   GE      ">="
+  AND     "&&"
+  OR      "||"
+  NOT     "!"
   TRANS   "=>"
   BIND    "<->"
 ;
@@ -129,7 +132,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::NodeRef>> if_else
 %nterm <AST::ptr<AST::IntList>> int_list
 %nterm <AST::ptr<AST::SValList>> sval_list
-%nterm <AST::ptr<AST::Expr>> term expr span_expr span_term
+%nterm <AST::ptr<AST::Expr>> term expr cmp_expr logic_val logic_term logic_expr span_expr span_term
 %nterm <AST::ptr<AST::DataType>> general_type param_type aggregate_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
 %nterm <AST::ptr<AST::ParamType>> parameter
@@ -275,6 +278,17 @@ int_val
 bool_val
     : TRUE { $$ = std::make_shared<AST::Boolean>(std::string("true")); }
     | FALSE { $$ = std::make_shared<AST::Boolean>(std::string("false")); }
+    | IDENTIFIER {
+        if (!symtab.exists($1)) {
+          Choreo::Parser::error(@1, ": the symbol '" + $1 + "` is not defined.");
+          exit(1);
+        }
+        if (symtab.getSymbol($1)->getType() != AST::BaseType::BOOL)
+          Choreo::Parser::error(@1, "expecting symbol `" + $1 +
+                                "' of a bool type.");
+
+        $$ = std::make_shared<AST::Identifier>($1);
+    }
     ;
 
 parameter_list
@@ -365,8 +379,8 @@ declarations
 
 declaration
     : named_span_decl  { $$ = $1; }
-    | named_tuple_decl { $$ = $1;  }
-    | scalar_decl      { $$ = $1;  }
+    | named_tuple_decl { $$ = $1; }
+    | scalar_decl      { $$ = $1; }
     ;
 
 scalar_decl
@@ -378,7 +392,7 @@ scalar_decl
         symtab.addSymbol($2, $1);
         $$ = std::make_shared<AST::NamedDecl>($2, "int", $4);
       }
-    | BOOL IDENTIFIER ASSIGN expr {
+    | BOOL IDENTIFIER ASSIGN logic_expr {
         if (symtab.exists($2)) {
           Choreo::Parser::error(@2, "ODR violation: the symbol is already defined.");
           exit(1);
@@ -587,6 +601,16 @@ assignment
 
         $$ = std::make_shared<AST::Assignment>($1, $3);
       }
+    | IDENTIFIER ASSIGN logic_expr {
+        if (!symtab.exists($1)) {
+          // since the symbol is not defined, it is a declaration without type annotation
+          symtab.addSymbol($1, AST::BaseType::BOOL, true);
+          $$ = std::make_shared<AST::NamedDecl>($1, "bool", $3);
+          break;
+        }
+
+        $$ = std::make_shared<AST::Assignment>($1, $3);
+      }
     ;
 
 expr
@@ -601,7 +625,6 @@ term
     | term PECET int_val { $$ = std::make_shared<AST::Expr>("%", $1, $3); }
     | LPAREN expr RPAREN { $$ = $2; }
     | int_val { $$ = std::make_shared<AST::Expr>($1); }
-    | bool_val { $$ = std::make_shared<AST::Expr>($1); }
     ;
 
 span_expr
@@ -618,6 +641,32 @@ span_term
     | span_val { $$ = std::make_shared<AST::Expr>($1); }
     ;
 
+cmp_expr
+    : expr LT expr { $$ = std::make_shared<AST::Expr>("<", $1, $3); }
+    | expr GT expr { $$ = std::make_shared<AST::Expr>(">", $1, $3); }
+    | expr EQ expr { $$ = std::make_shared<AST::Expr>("==", $1, $3); }
+    | expr NE expr { $$ = std::make_shared<AST::Expr>("!=", $1, $3); }
+    | expr LE expr { $$ = std::make_shared<AST::Expr>("<=", $1, $3); }
+    | expr GE expr { $$ = std::make_shared<AST::Expr>(">=", $1, $3); }
+    ;
+
+logic_expr
+    : logic_expr OR logic_term { $$ = std::make_shared<AST::Expr>("||", $1, $3); }
+    | logic_term { $$ = $1; }
+    ;
+
+logic_term
+    : logic_term AND logic_val { $$ = std::make_shared<AST::Expr>("&&", $1, $3); }
+    | logic_val { $$ = $1; }
+    ;
+
+logic_val
+    : NOT logic_val { $$ = std::make_shared<AST::Expr>("!", $2); }
+    | LPAREN logic_expr RPAREN { $$ = $2; }
+    | cmp_expr { $$ = std::make_shared<AST::Expr>($1); }
+    | bool_val { $$ = std::make_shared<AST::Expr>($1); }
+    ;
+
 if_else
     : if_clause
     | if_clause else_clause
@@ -629,15 +678,6 @@ if_clause
 
 else_clause:
        ELSE LBRACE RBRACE
-    ;
-
-cmp_expr
-    : expr LT expr
-    | expr GT expr
-    | expr EQ expr
-    | expr NE expr
-    | expr LE expr
-    | expr GE expr
     ;
 
 with_block
