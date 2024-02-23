@@ -113,17 +113,18 @@ void choreo_info(const char *message) {
 // type related
 %token <std::string> MDSPAN ITUPLE
 %token <AST::Storage> LOCAL SHARED GLOBAL
-%token <AST::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT
+%token <AST::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT BOOL
 // builtin operations
 %token <std::string> DMA DLIN DSLICE DPAD COPY FNSPAN FNDATA CHUNKAT WAIT CALL
 // control related
 %token <std::string> IF ELSE PARA BY WITH IN ITER RET REQUIRE
+%token <std::string> TRUE FALSE
 
 // non-terminals
 %nterm <std::string> dma_operation
 %nterm <AST::Storage> storage
 %nterm <AST::BaseType> base_type
-%nterm <AST::ptr<AST::Node>> pass_by foreach_block simple_val span_val ituple_val int_val declaration statement assignment pb_statement w_statement dma_statement wait_statement call_statement span_elem mixed_span_elem iv_expr
+%nterm <AST::ptr<AST::Node>> pass_by foreach_block simple_val span_val ituple_val int_val bool_val declaration statement assignment pb_statement w_statement dma_statement wait_statement call_statement span_elem mixed_span_elem iv_expr
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments pb_statements w_statements iterate_statements span_list mixed_span_list withins iv_exprs require_binds require_clause id_list with_matchers
 %nterm <AST::ptr<AST::NodeRef>> if_else
 %nterm <AST::ptr<AST::IntList>> int_list
@@ -207,6 +208,7 @@ base_type
     | U32   { $$ = $1; }
     | S32   { $$ = $1; }
     | INT   { $$ = $1; }
+    | BOOL  { $$ = $1; }
     ;
 
 int_list
@@ -268,6 +270,11 @@ int_val
         $$ = std::make_shared<AST::NthBound>(std::make_shared<AST::Identifier>($1), $2);
       }
     | simple_val { $$ = $1; }
+    ;
+
+bool_val
+    : TRUE { $$ = std::make_shared<AST::Boolean>(std::string("true")); }
+    | FALSE { $$ = std::make_shared<AST::Boolean>(std::string("false")); }
     ;
 
 parameter_list
@@ -370,6 +377,14 @@ scalar_decl
         }
         symtab.addSymbol($2, $1);
         $$ = std::make_shared<AST::NamedDecl>($2, "int", $4);
+      }
+    | BOOL IDENTIFIER ASSIGN expr {
+        if (symtab.exists($2)) {
+          Choreo::Parser::error(@2, "ODR violation: the symbol is already defined.");
+          exit(1);
+        }
+        symtab.addSymbol($2, $1);
+        $$ = std::make_shared<AST::NamedDecl>($2, "bool", $4);
       }
     ;
 
@@ -586,6 +601,7 @@ term
     | term PECET int_val { $$ = std::make_shared<AST::Expr>("%", $1, $3); }
     | LPAREN expr RPAREN { $$ = $2; }
     | int_val { $$ = std::make_shared<AST::Expr>($1); }
+    | bool_val { $$ = std::make_shared<AST::Expr>($1); }
     ;
 
 span_expr

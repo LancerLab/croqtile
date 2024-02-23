@@ -148,6 +148,19 @@ struct MultiNodes : public Node {
   __NODE_TYPE_INFO__
 };
 
+struct Boolean : public Node {
+  std::string value;
+  Boolean(std::string v) : value(v) {}
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << prefix << value;
+  }
+
+  void accept(Choreo::Visitor&) override;
+
+  __NODE_TYPE_INFO__
+};
+
 struct IntLiteral : public Node {
   int value;
   IntLiteral(int v) : value(v) {}

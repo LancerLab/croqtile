@@ -94,6 +94,9 @@ blank [ \t\r]
   "u8"       return Choreo::Parser::make_U8(AST::BaseType::U8, loc);
   "s8"       return Choreo::Parser::make_S8(AST::BaseType::S8, loc);
   "int"      return Choreo::Parser::make_INT(AST::BaseType::INT, loc);
+  "bool"     return Choreo::Parser::make_BOOL(AST::BaseType::BOOL, loc);
+  "true"     return Choreo::Parser::make_TRUE(yytext, loc);
+  "false"    return Choreo::Parser::make_FALSE(yytext, loc);
   "dte"      return Choreo::Parser::make_DMA(yytext, loc);
   ".linear"  return Choreo::Parser::make_DLIN(yytext, loc);
   ".slice"   return Choreo::Parser::make_DSLICE(yytext, loc);

@@ -7,7 +7,7 @@
 namespace AST {
 
 // For types like f32, f16, etc.
-enum class BaseType { F32, F16, BF16, U32, S32, U16, S16, U8, S8, INT };
+enum class BaseType { F32, F16, BF16, U32, S32, U16, S16, U8, S8, INT, BOOL };
 
 #if 0
 enum class SymbolType {
@@ -45,7 +45,7 @@ inline static BaseType getTypeFromString(const std::string& input) {
       {"f32", BaseType::F32}, {"f16", BaseType::F16}, {"bf16", BaseType::BF16},
       {"u32", BaseType::U32}, {"s32", BaseType::S32}, {"u16", BaseType::U16},
       {"s16", BaseType::S16}, {"u8", BaseType::U8},   {"s8", BaseType::S8},
-      {"int", BaseType::INT}};
+      {"int", BaseType::INT}, {"bool", BaseType::BOOL}};
 
   auto it = typeMap.find(input);
   if (it != typeMap.end()) return it->second;
@@ -58,7 +58,7 @@ inline static std::string getStringFrom(BaseType dataType) {
       {BaseType::F32, "f32"}, {BaseType::F16, "f16"}, {BaseType::BF16, "bf16"},
       {BaseType::U32, "u32"}, {BaseType::S32, "s32"}, {BaseType::U16, "u16"},
       {BaseType::S16, "s16"}, {BaseType::U8, "u8"},   {BaseType::S8, "s8"},
-      {BaseType::INT, "int"}};
+      {BaseType::INT, "int"}, {BaseType::BOOL, "bool"}};
 
   auto it = enumToString.find(dataType);
   if (it != enumToString.end()) return it->second;
