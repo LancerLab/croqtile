@@ -128,9 +128,8 @@ void choreo_info(const char *message) {
 %nterm <std::string> dma_operation
 %nterm <AST::Storage> storage
 %nterm <AST::BaseType> base_type
-%nterm <AST::ptr<AST::Node>> pass_by foreach_block simple_val span_val ituple_val int_val bool_val declaration statement assignment pb_statement w_statement dma_statement wait_statement call_statement span_elem mixed_span_elem iv_expr
-%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments pb_statements w_statements iterate_statements span_list mixed_span_list withins iv_exprs require_binds require_clause id_list with_matchers
-%nterm <AST::ptr<AST::NodeRef>> if_else
+%nterm <AST::ptr<AST::Node>> pass_by foreach_block simple_val span_val ituple_val int_val bool_val declaration statement assignment pb_statement w_statement dma_statement wait_statement call_statement span_elem mixed_span_elem iv_expr if_else
+%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments pb_statements w_statements iterate_statements span_list mixed_span_list withins iv_exprs require_binds require_clause id_list with_matchers else_clause
 %nterm <AST::ptr<AST::IntList>> int_list
 %nterm <AST::ptr<AST::SValList>> sval_list
 %nterm <AST::ptr<AST::Expr>> term expr cmp_expr logic_val logic_sub_term logic_term logic_expr span_expr span_term
@@ -332,6 +331,7 @@ statement
     : declarations SEMCOL { $$ = $1; }
     | assignments  SEMCOL { $$ = $1; }
     | para_by             { $$ = $1; }
+    | if_else             { $$ = $1; }
     ;
 
 para_by
@@ -353,7 +353,6 @@ pb_statement
     : declarations SEMCOL { $$ = $1; }
     | assignments  SEMCOL { $$ = $1; }
     | with_block { $$ = $1; }
-    | if_else
     ;
 
 assignments
@@ -675,16 +674,12 @@ logic_val
     ;
 
 if_else
-    : if_clause
-    | if_clause else_clause
+    : IF logic_expr LBRACE statements RBRACE else_clause { $$ = std::make_shared<AST::IfElse>($2, $4, $6);}
     ;
 
-if_clause
-    : IF LBRAKT cmp_expr RBRAKT LBRACE RBRACE
-    ;
-
-else_clause:
-       ELSE LBRACE RBRACE
+else_clause
+    : ELSE LBRACE statements RBRACE { $$ = $3; }
+    | /* empty */ { $$ = std::make_shared<AST::MultiNodes>(); }
     ;
 
 with_block

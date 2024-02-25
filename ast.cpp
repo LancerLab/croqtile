@@ -27,6 +27,7 @@ void ParamList::accept(Choreo::Visitor& v) {
    v.Visit(*this);
 }
 
+void IfElse::accept(Choreo::Visitor& v) {}
 void ParallelBy::accept(Choreo::Visitor& v) {}
 void RequireBind::accept(Choreo::Visitor& v) {}
 void WithIn::accept(Choreo::Visitor& v) {}

@@ -504,6 +504,31 @@ struct ParamList : public Node {
   __NODE_TYPE_INFO__
 };
 
+struct IfElse : public Node {
+  ptr<Node> cond;
+  ptr<MultiNodes> if_stmts;
+  ptr<MultiNodes> else_stmts;  // optional requirements
+
+  IfElse(const ptr<Node>& c, const ptr<MultiNodes>& if_s) : cond(c), if_stmts(if_s) {}
+  IfElse(const ptr<Node>& c, const ptr<MultiNodes>& if_s, const ptr<MultiNodes>& else_s) : cond(c), if_stmts(if_s), else_stmts(else_s) {}
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << prefix << "\n`- IF: ";
+    cond->Print(os);
+    os << "\n`---- THEN: ";
+    if_stmts->Print(os);
+    if (!else_stmts->values.empty()) {
+      os << "\n`---- ELSE: ";
+      else_stmts->Print(os);
+    }
+    os << "\n";
+  }
+
+  void accept(Choreo::Visitor&) override;
+
+  __NODE_TYPE_INFO__
+};
+
 struct ParallelBy : public Node {
   std::string iv;
   int bound;
