@@ -6,7 +6,9 @@ __co__ u8 scalar_decls(int a, int b) {
   int d = b + 2;
   int e = 6 + 1;
   bool y = true && (d > c) || (d >= c) && (d < c) || (d <= c) && !(d == c) || !(d != c);
-  y = false || (d <= c) && !(d == c) || !(d != c);
+  y = false || (d <= c) && (!(d == c) || !(d != c));
+  int f = true ? d + e : d - e;
+  bool x = d > c ? d > e : d <= e;
 }
 
 // CHECK: ChoreoFunction
@@ -20,7 +22,9 @@ __co__ u8 scalar_decls(int a, int b) {
 // CHECK:  `- Decl (int): d =  (b + 2)
 // CHECK:  `- Decl (int): e =  (6 + 1)
 // CHECK:  `- Decl (bool): y =  ( ( ( (true &&  (d > c) )  ||  ( (d >= c)  &&  (d < c) ) )  ||  ( (d <= c)  &&  (!  (d == c) ) ) )  ||  (!  (d != c) ) )
-// CHECK:  `- Assign: y =  ( (false ||  ( (d <= c)  &&  (!  (d == c) ) ) )  ||  (!  (d != c) ) )
+// CHECK:  `- Assign: y =  (false ||  ( (d <= c)  &&  ( (!  (d == c) )  ||  (!  (d != c) ) ) ) )
+// CHECK:  `- Decl (int): f =  (true  ?  (d + e)  :  (d - e) )
+// CHECK:  `- Decl (bool): x =  ( (d > c)  ?  (d > e)  :  (d <= e) )
 
 // host program
 int host(int a, int b) {

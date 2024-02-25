@@ -99,6 +99,7 @@ void choreo_info(const char *message) {
   AND     "&&"
   OR      "||"
   NOT     "!"
+  QES     "?"
   TRANS   "=>"
   BIND    "<->"
 ;
@@ -132,7 +133,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::NodeRef>> if_else
 %nterm <AST::ptr<AST::IntList>> int_list
 %nterm <AST::ptr<AST::SValList>> sval_list
-%nterm <AST::ptr<AST::Expr>> term expr cmp_expr logic_val logic_term logic_expr span_expr span_term
+%nterm <AST::ptr<AST::Expr>> term expr cmp_expr logic_val logic_sub_term logic_term logic_expr span_expr span_term
 %nterm <AST::ptr<AST::DataType>> general_type param_type aggregate_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
 %nterm <AST::ptr<AST::ParamType>> parameter
@@ -616,6 +617,7 @@ assignment
 expr
     : expr PLUS term { $$ = std::make_shared<AST::Expr>("+", $1, $3); }
     | expr MINUS term { $$ = std::make_shared<AST::Expr>("-", $1, $3); }
+    | logic_expr QES expr COL expr { $$ = std::make_shared<AST::Expr>("$", $1, $3, $5); }
     | term { $$ = $1; }
     ;
 
@@ -652,17 +654,22 @@ cmp_expr
 
 logic_expr
     : logic_expr OR logic_term { $$ = std::make_shared<AST::Expr>("||", $1, $3); }
+    | logic_expr QES logic_expr COL logic_expr { $$ = std::make_shared<AST::Expr>("$", $1, $3, $5); }
     | logic_term { $$ = $1; }
     ;
 
 logic_term
-    : logic_term AND logic_val { $$ = std::make_shared<AST::Expr>("&&", $1, $3); }
+    : logic_term AND logic_sub_term { $$ = std::make_shared<AST::Expr>("&&", $1, $3); }
+    | logic_sub_term { $$ = $1; }
+    ;
+
+logic_sub_term
+    : NOT logic_val { $$ = std::make_shared<AST::Expr>("!", $2); }
     | logic_val { $$ = $1; }
     ;
 
 logic_val
-    : NOT logic_val { $$ = std::make_shared<AST::Expr>("!", $2); }
-    | LPAREN logic_expr RPAREN { $$ = $2; }
+    : LPAREN logic_expr RPAREN { $$ = $2; }
     | cmp_expr { $$ = std::make_shared<AST::Expr>($1); }
     | bool_val { $$ = std::make_shared<AST::Expr>($1); }
     ;
