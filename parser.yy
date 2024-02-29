@@ -601,6 +601,16 @@ assignment
 
         $$ = std::make_shared<AST::Assignment>($1, $3);
       }
+    | IDENTIFIER PLUS ASSIGN expr {
+        if (!symtab.exists($1)) {
+          // since the symbol is not defined, it is a declaration without type annotation
+          symtab.addSymbol($1, AST::BaseType::INT, true);
+          $$ = std::make_shared<AST::NamedDecl>($1, "ituple", $4);
+          break;
+        }
+
+        $$ = std::make_shared<AST::Assignment>($1, std::make_shared<AST::Expr>("+", $4, std::make_shared<AST::Identifier>($1)));
+      }
     | IDENTIFIER ASSIGN logic_expr {
         if (!symtab.exists($1)) {
           // since the symbol is not defined, it is a declaration without type annotation
