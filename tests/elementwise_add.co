@@ -1,0 +1,27 @@
+#include <iostream>
+
+// device program
+__co__ int mdspan<1> ele_add(int mdspan<1> a , int mdspan<1> b) {
+  mdspan ndims : [100];
+  local f32[ndims] local_buffer;
+
+  parallel p by 6 { 
+    with index in ndims {
+      foreach index {
+        f1 = dte.linear input.chunkat(p, index) => local;
+        f2 = dte.linear input.chunkat(p, index) => local;
+        wait f1;
+        wait f2;
+        local_buffer[index] = f1.data[index] + f2.data[index];
+        f3 = dte.linear local_buffer.chunkat(p, index) => global;
+        wait f3;
+      }
+    }
+  }
+  reture f3.data
+}
+
+// host program
+int bar(int a[], int b[]) {
+  return ele_add(a, b);
+}
