@@ -1,0 +1,79 @@
+#include <iostream>
+
+// kernel program
+void kernel(int * a, int * b, int * c, int n) {
+  for (int i = 0; i < n; ++i)
+    c[i] = a[i] + b[i];
+}
+
+
+// device program
+__co__ int mdspan<1> ele_add(int mdspan<1> a , int mdspan<1> b) {
+  // assert a.span == b.span
+  f32[a.span] global_buffer;
+  ndims : [10, 10];
+
+  // p is sip_index
+  parallel p by 6 {
+// kernel function begin
+//    with index in [100] {  // totally 100 chunks
+    // associate ituple with a span
+    with index = {x, y} in [10, 10] {  // totally 100 chunks
+    with index = {x, y} in ndims {  // totally 100 chunks
+      f1 = dte.linear input.chunkat(p, x) => local;
+      f2 = dte.linear input.chunkat(p, x) => local;
+
+      // TODO: chunkat codegen
+      // inbound is syntax sugar for predicate
+      foreach x {
+        0. if (x < ndims(0) - 1) {
+             f3 = dte.linear input.chunkat(p, x + 1) => local;
+             f4 = dte.linear input.chunkat(p, x + 1) => local;
+           }
+
+        // prefetch next bunch
+        1. f3 = dte.linear inbound input.chunkat(p, x + 1) => local;
+        2. f5 = dte.linear input.chunkat.inbound(p, x + 1) => local;
+        3. f6 = dte.linear input.inbound.chunkat(p, x + 1) => local;  // preferred
+        4. f7 = dte.linear input.chunkat(p, x + 1) : inbound => local;
+        5. f8 = dte.linear.prefetch input.chunkat(p, x) => local;
+
+        // code generation to:
+        // if (dfjkdjf < bound) {
+        //   dma....
+        // }
+
+        // DU?
+        wait f1, f2;  // TODO
+
+        // use f1.span as the span of local buffer
+        local f32[f1.span] local_buffer;   // TODO
+
+        // optional considering the arithmetic
+        // foreach y {
+        //   local_buffer.chunkat(p, x, y) = f1.data + f2.data;
+        // }
+
+        // calculate the total size of span.
+        // |f1.span|? a.span.size? sizeof(a.span)?
+        call kernel(f1.data, f2.data, local_buffer, |f1.span|); // TODO
+
+        f3 = dte.linear local_buffer => global_buffer.chunkat(p, index);
+        wait f3;
+
+        f1 = f3;  // make the future be correct
+        f2 = f4;
+
+        f1, f2 = f3, f4;  // TODO: make the future be correct
+      }
+    }
+// end kernel function
+  }
+
+  return global_buffer;
+}
+
+// host program
+int bar(int a[], int b[]) {
+  return ele_add(a, b);
+}
