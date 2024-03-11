@@ -21,10 +21,10 @@ int foo(int b);
 ```
 
 ### Spanned Types
-A spanned type is a composite type. It consists of a fundamental type, and a multi-dimensional-span(mdspan) type.
+A spanned type is a composite type. It always consists of a fundamental type, and a multi-dimensional-span(mdspan) type. However, interestingly, the *mdspan* could be manipulated alone.
 
 #### Partial-Typing: **mdspan**
-Unlike most type systems, *mdspan*, though comes as an partial entity for typing, can be defined alone. Such design is based on the oberservation that loop tiling/blocking cares nothing but the shape of multiple dimension data. Therefore, Choreo make *mdspan* a partial-type to make the daily work easy. In addition, it also makes the *mdspan* a part of type to allow more type checking to happen, which is likely to reduce possiblity of code error as early (ahead of execution, sometimes) as possble.
+Unlike most type systems, *mdspan*, though comes as an partial entity for typing, can be defined alone. Such design is based on the oberservation that loop tiling/blocking cares nothing but the shape of multiple dimension data. Therefore, Choreo allows programmers to manipulate *mdspan* regardless the fundanmental types associated to make the daily work easy. Meanwhile, it still makes the *mdspan* a part of type to allow more type checking to happen. In this way, it expects to reveal code errors as early (ahead of execution, when applies) as possble.
 
 To define a mdspan, simply use '[' and ']' to enclose the integer dimension values. I.e.
 ```
@@ -86,7 +86,15 @@ tiling_factor = {3, 2};
 spn : sp / tiling_factor;   // spn is defined as [2, 4];
 
 ```
+In Choreo, programmer can define a mdspan using such operations. The supported operations includes:
 
+- *mdspan* / *i-tuple*
+- *mdspan* + *i-tuple*
+- *mdspan* % *i-tuple*
+- *mdspan* * *i-tuple*
+- *mdspan* - *i-tuple*
+
+Note, most of the operations can be archieved with *mdspan* dimension-wise operations. However, the above operations could help programmer write more meaning full code.
 
 ## Control Structures
 
