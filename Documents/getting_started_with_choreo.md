@@ -30,27 +30,30 @@ To define a mdspan, simply use '[' and ']' to enclose the integer dimension valu
 ```
 mdspan sp : [7, 8];           // defined a mdspan of 2-dimensions
 mdspan<4> mds : [a, 3, 4, 1]; // 'a' is an existing integer
-d : [c, 4, 28];               // 'd' is not explicit annotated.
+d : [c, 4, 28];               // 'd' is not explicit annotated. Type is deduced.
 ```
-As illustrated, a 'mdspan' can be explicitly defined with *mdspan* partial-type keyword anotated, optionally with a '<' '>' enclosed total dimension value, or even implicit defined.
+As illustrated, a 'mdspan' can be explicitly defined with *mdspan* partial-type keyword as annotated, optionally with a '<' '>' enclosed total dimension value. It is also possible to define a mdspan without type annotation. As shown in definition of 'd' above.
+
+For C++ programmers, you may think a mdspan is the trait of a multiple dimensional array, where it described a multi-level-range. For example, 'sp' in the above example defines two-level of ranges, ranging from 0 to 6, and 0 to 7 in seperate.
 
 When a mdspan is defined, it is possible to get the integer dimension value using operator '()' over the mdspan.
 ```
 sp : [7, 8];
 int b = sp(0) + sp(1);   // 'b' equals to 15 (7 + 8)
 ```
+In the above example, the expression 'sp(0)' reasons about the first dimension value of mdspan 'sp'. The dimension values are in essence integer values, which are suitable for integer arithmetics.
 
 Conseqeuntly, you may derive a mdspan from existing one as the below code snippet:
 ```
 sp : [6, 8];
 spn : [1, sp(0)/2, sp(1)/4]; // define a new mdspan from the existing one.
 ```
-This is very convinient to apply tiling in code. Considering that tiling operation is normally a must in constructing the high-performance kernels, Choreo has provided syntax suger to make the work even easier:
+With such a facility, it is very convinient to apply tiling over multiple-dimensional spans in your Choreo code. Considering that tiling operation is always required in constructing the high-performance kernels, Choreo has provided syntax suger to make the work even easier:
 ```
 sp : [6, 8];
 spn : sp [1, (0)/2, (1)/4];  // spn is defined as [1, 3, 2]
 ```
-This code works the same way as the previous example, but in much simpler syntax.
+This code works the same way as the previous one, but obviously in a much simpler syntax. This follows one of Choreo's design philosophy - To enable functionalities with minimal code whenever possible.
 
 **Note, a mdspan can only be defined. No modification to an existing mdspan is allowed. Further, a mdspan can only be defined once.**
 
