@@ -123,14 +123,42 @@ parallel p by 6 {
   // SPMD code
 }
 ```
-The above code snippet illustrates the method to create a parallel region with Choreo keyword 'parallel' and 'by'. Here, we assume we have conceptually 6 processing elements. Each of the processing element execute the same SPMD code but with a different 'p' value. If you are familiar with programming CUDA, you may think 'p' is a equivalence of 'thread index'. Alternatively, if you are more familiar with sequential C/C++ programming, you may consider 'p' as an iteration variable of a loop of 6 iterations.
+The above code snippet illustrates the method to create a parallel region with Choreo keyword 'parallel' and 'by'. Here, it assume there are 6 execution threads. Each of the thread execute the same SPMD code inside but with a different 'p' value. If you are familiar with programming CUDA, you may think 'p' is a equivalence of 'thread index'. Alternatively, if you are more familiar with sequential C/C++ programming, you may consider 'p' as the iteration variable of a loop with 6 iterations.
 
-Note here is one implication, 'p' is an integer associated with its bound [0, 6). In Choreo, we call 'p' a **bounded integer** instead of a simple integer. In some special operations like 'chunkat', it requires the *bounded-integer* to work properly since the bound is essential for related computation.
+In Choreo there is one implication though, 'p' is an integer associated with its bound [0, 6). We name 'p' as a **bounded integer** instead of a simple integer. In some special operations like 'chunkat', it requires the *bounded-integer* to work properly since the bound is essential for its computation.
 
-### The 'with-in' and 'foreach' Block
+### The 'with-in' Block and 'requires' Clause
+Similar to 'parallel-by', 'with-in' statement can also bind *i-tuples* to a *mdspan*. The below code shows an example.
+```
+with index in [10, 10] {
+  // index is ituple with 2 elements
+}
+```
+Here, 'index' is a *i-tuple* with 2 elements. Sometimes programmers perfer that the 2 elements being named. This is possible by using the below syntax.
+```
+with {x, y} in [10, 10] {...}
+```
+Or even to name both the *i-tuple* and its elements.
+```
+with index = {x, y} in [10, 10] {...}
+```
+We name 'index' as a **bounded ituple** in such scenarios.
 
-### Special Async Operation: the DMA statement
-Execept for parallel execution, Choreo allows 
+You may think 'with-in' statement is similar to 'parallel-by'. However, it is not true. One significant difference is 'with-in' statement does not have implication for parallelism. The code block inside 'with-in' statement is sequentially executed. It does nothing more than creating the *bounded-ituple*.
+
+Neverthless, the 'with-in' block can have a 'requires-clause'. For example,
+```
+with {m, n} in [M, N], {n_p, k} in [N_P, K] requires N_P == N {
+  // matmul implements with m,n,K. n_p is no long useful.
+}
+```
+In the above example, we requires 'n' and 'n_p' to have identical ranges. Thus inside the 'with-in' statement, we could use 'n' whenever 'n_p' is required. Such a facility is useful for many AI kernels.
+
+### The 'foreach' Block
+Once the *bounded-ituple* is defined by the 'with-in' clause, programmers can plan iterations over the bounded-ituples/bounded-integers.
+
+### Async Operation: the DMA statement
+Execept for parallel execution, Choreo allows the some fixed form of async operation: the DMA statement.
 
 
 
