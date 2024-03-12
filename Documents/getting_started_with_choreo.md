@@ -76,7 +76,7 @@ This code works the same way as the previous one, but obviously in a much simple
 In Choreo, it allows some arithmetic operations over mdspan. We will introduce such operations when more detail of *i-tuple* is revealed.
 
 
-#### FullyyTyping t
+#### Fully-Typing
 A *mdspan* can not be applied alone to define the data for computation. In Choreo function, a data definition must be fully-typed, which consists of a fundamental type and a *mdspan*. The below code showcases how it works.
 ```
 ndims : [20, 15];
@@ -92,7 +92,7 @@ There are fundamental types that Choreo has supported, including:
 Note 'i32' and 'int' are different in Choreo. 'i32' is a fundamental type, which can not be applied for a fully typing.
 
 #### Memory Attributes
-A data in Choreo is usually large. For such large data, it could appears in different memory hierachy of accelerator hardware since choreo moves the data across different software managed memory. (It is known as scratchpad memory, SPM)
+A spanned-typed data in Choreo is usually large. For such large data, it could appears in different memory hierachy of accelerator hardware since choreo moves the data across different software managed memory. (It is known as scratchpad memory, SPM)
 
 In choreo, we defines three memory attributes to annotate the data being defined, including: 
 
