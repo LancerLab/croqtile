@@ -76,13 +76,37 @@ This code works the same way as the previous one, but obviously in a much simple
 In Choreo, it allows some arithmetic operations over mdspan. We will introduce such operations when more detail of *i-tuple* is revealed.
 
 
-#### Fully-Typing to Define Data
-However, a mdspan can not be applied alone to define the data for computation. 
+#### FullyyTyping t
+A *mdspan* can not be applied alone to define the data for computation. In Choreo function, a data definition must be fully-typed, which consists of a fundamental type and a *mdspan*. The below code showcases how it works.
+```
+ndims : [20, 15];
+f32 [10, 10] d0;
+f16 [ndims] d1;
+```
+There are fundamental types that Choreo has supported, including:
+
+- Unsigned Integers: *u8/u16/u32*
+- Signed Integers: *i8/i16/i32*
+- Floating-points: *f16/bf16/f32*
+
+Note 'i32' and 'int' are different in Choreo. 'i32' is a fundamental type, which can not be applied for a fully typing.
 
 #### Memory Attributes
-A Spanned data is usually large. For such large data, it could appears in different memory hierachy of accelerator hardware since choreo moves the data across different software managed memory. (It is known as scratchpad memory, SPM)
+A data in Choreo is usually large. For such large data, it could appears in different memory hierachy of accelerator hardware since choreo moves the data across different software managed memory. (It is known as scratchpad memory, SPM)
 
-In choreo, we defines three memory attributes to annotate the data being defined, including: *global*, *shared*, and *local*. By default, when no memory attribute shows, the data defined is from *global* memory.
+In choreo, we defines three memory attributes to annotate the data being defined, including: 
+
+- **global**,
+- **shared**,
+- and **local**.
+
+```
+ndims : [20, 15];
+local f32 [10, 10] d0;
+shared f16 [ndims] d1;
+```
+
+By default, when there is no memory attribute shows, the data defined is considered as from the *global* memory.
 
 ### I-Tuple Types
 An integer tuple is an unordered set of integers. As described, it is normally used as a (subscription) index.
@@ -94,7 +118,7 @@ ituple index = {5, 4, 3, 2, 1};  // It defines a tuple of 5 elements
 index = {a, b};  // 'a' and 'b' are existing integers
 ```
 
-### Sepcial Operations over *mdspan* and *i-tuple*
+### Operations over *mdspan* and *i-tuple*
 In Choreo, we allow special operation over *i-tuple* and *mdspan*. Below is an example to apply a fixed tiling over an mdspan:
 ```
 sp : [6, 8];
