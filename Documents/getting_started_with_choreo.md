@@ -1,30 +1,46 @@
 # Getting Started with Choreo Programming
 
 ## Introduction
-Choreo is a Domain Specific Language (DSL) designed for streamlining the manipulation of data transmission within accelerator hardware. It aims to simplify the daily tasks of engineers responsible for crafting high-performance kernels. This includes navigating the complexities of data transmission, such as tiling strategies and hardware capabilities. By leveraging Choreo, the programming process becomes more accessible, allowing engineers to optimize these critical processes with greater ease and efficiency.
+Choreo is a Domain Specific Language (DSL) designed for streamlining the manipulation of data transmission within accelerator hardware. It aims to simplify the daily tasks of engineers responsible for crafting high-performance kernels. This includes navigating the complexities of data transmission, such as tiling strategies, which is subjected to the hardware capabilities. By leveraging Choreo, the programming process becomes more accessible, allowing engineers to optimize these critical processes with greater ease and efficiency.
 
-## Choreo Function within C++ code
-Choreo is designed as an extension of C++ code.
+## Embedding Choreo within C++
+Choreo is the DSL code embedded within C++. The Choreo compiler performs the source-to-source translation of the Choreo function to be C++ code. And with the inclusion of "choreo.h", the translated code can work properly with other C++ code. The below code snippet showcases an example.
+
+```
+#include <choreo.h>   // Necessary for C++ code interaction
+// some C++ code
+__co__ void choreo_function() {
+  // choreo code
+}
+// another C++ code
+void foo() {
+  choreo_function();
+}
+```
+Note, a Choreo function is prefixed with "__co__" keyword. All code in the function scope is translated by the Choreo compiler. Other C++ code calls the Choreo function by its name as declared.
+
+In addition, certain Choreo-specific types are introduced to ensure consistency between Choreo function arguments and their respective callers. The detail will be shown as soon as the Choreo data types are explained.
 
 ## Variables and Data Types
-In Choreo, it introduces 3 basic types: integer-type, spanned-type, and integer-tuple-type (ituple-type). These types serve for different purposes.
+In Choreo, it introduces 3 type categories: integer-type, spanned-type, and integer-tuple-type (ituple-type). These types serve for different purposes.
 
-- Integer Type. It is designed to fullfil the logic of program control. For example, the parallel-factor, the dimension upper bound are all integers.
-- Spanned Type. This type represents the data for computation. In addition to the reference to the raw data, it also associate data with multi-dimensional ranges, which is useful for tiling purposes, etc. 
-- Integer Tuple Type. This type serves as the indices for the multi-dimensional data.
+- **Integer Type**. It is designed to fullfil the requirement of program control.  For instance, the factor of parallelization, and dimension value are all integers.
+- **Spanned Type**. It represents the data type for computation. Apart from referencing the raw data, it also associates data with multi-dimensional ranges, which proves useful for tiling purposes, among others. 
+- **Integer Tuple (I-Tuple) Type**. It represents a group of integer values. A common usage of *i-tuple* is to index multi-dimensional data.
 
 ### Integer Types
-Integer types are 
+Integer types in Choreo is similar to C++ type 'int' or 'int32_t'. It is an signed value which takes 32-bits, ranging from -2^31 ~ 2^31 - 1. The below code illustrates its usage for defining the data and function declaration.
 ```
 int a;
-int foo(int b);
+__co__ int foo(int b);
 ```
+In Choreo, we neither provide equivalence of unsigned scalar integers, nor equivalence of 8-bits, 16-bits, 64-bits scalar integers. The reason is simple: these types are not necessary for program control purpose.
 
 ### Spanned Types
-A spanned type is a composite type. It always consists of a fundamental type, and a multi-dimensional-span(mdspan) type. However, interestingly, the *mdspan* could be manipulated alone.
+A spanned type is a composite type. It always consists of a fundamental type, and a multi-dimensional-span(mdspan) type. However, interestingly, in Choreo, the *mdspan* could be manipulated alone.
 
 #### Partial-Typing: **mdspan**
-Unlike most type systems, *mdspan*, though comes as an partial entity for typing, can be defined alone. Such design is based on the oberservation that loop tiling/blocking cares nothing but the shape of multiple dimension data. Therefore, Choreo allows programmers to manipulate *mdspan* regardless the fundanmental types associated to make the daily work easy. Meanwhile, it still makes the *mdspan* a part of type to allow more type checking to happen. In this way, it expects to reveal code errors as early (ahead of execution, when applies) as possble.
+Unlike most type systems, *mdspan*, though comes as an partial entity for typing, can be defined alone. Such design is based on the oberservation that loop tiling/blocking cares nothing but the shape of multiple dimension data. Therefore, Choreo allows programmers to manipulate *mdspan* regardless the fundanmental type it associated with, in order to make the daily work easy. Meanwhile, it still makes the *mdspan* a part of type to allow more type checking to happen. In this way, it expects to reveal code errors as early (ahead of execution, when applies) as possble.
 
 To define a mdspan, simply use '[' and ']' to enclose the integer dimension values. I.e.
 ```
