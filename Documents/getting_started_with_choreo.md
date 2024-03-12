@@ -146,16 +146,26 @@ We name 'index' as a **bounded ituple** in such scenarios.
 
 You may think 'with-in' statement is similar to 'parallel-by'. However, it is not true. One significant difference is 'with-in' statement does not have implication for parallelism. The code block inside 'with-in' statement is sequentially executed. It does nothing more than creating the *bounded-ituple*.
 
-Neverthless, the 'with-in' block can have a 'requires-clause'. For example,
+Neverthless, programmers could append a 'requires-clause'. For example,
 ```
 with {m, n} in [M, N], {n_p, k} in [N_P, K] requires N_P == N {
   // matmul implements with m,n,K. n_p is no long useful.
 }
 ```
-In the above example, we requires 'n' and 'n_p' to have identical ranges. Thus inside the 'with-in' statement, we could use 'n' whenever 'n_p' is required. Such a facility is useful for many AI kernels.
+The code snippet requires 'n' and 'n_p' to have an identical range. Thus inside the 'with-in' block, it is possible to replace'n' whenever 'n_p' is required, or the opposite. Such a facility is useful to program many AI kernels.
 
 ### The 'foreach' Block
-Once the *bounded-ituple* is defined by the 'with-in' clause, programmers can plan iterations over the bounded-ituples/bounded-integers.
+Once the *bounded-ituple* is defined by the 'with-in' clause, programmers can loop over the bounded-ituples/bounded-integers. In Choreo, this is simple.
+
+```
+with x in [10] {
+  foreach x {
+    // do something with each x
+  }
+}
+```
+
+### The 'inbound' Operation
 
 ### Async Operation: the DMA statement
 Execept for parallel execution, Choreo allows the some fixed form of async operation: the DMA statement.
