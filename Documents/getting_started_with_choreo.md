@@ -196,7 +196,7 @@ with x in [10] {
 
 ### The 'inbound' Operation
 
-### Async Operation: the DMA statement
+### Async Operation: the DMA Statement
 Execept for parallel execution, Choreo allows one fixed form of async operation: the DMA statement.
 
 Conceptually, a DMA statement is executed asynchronously with the SPMD code. It works quite similar to CPU async thread, except its behavior is limited by the DMA configuration. (CPU allows to program the async thread as will) 
@@ -222,9 +222,18 @@ Here, we do not need to specify the exact target location where the DMA transfer
 
 DMA operations entail intricate details that demand careful programming. Programmers should refer to the DMA manual to make informed decisions for their code. Nonetheless, Choreo compiler provides plenty of static and runtime checks to assist programmers in avoiding potential errors in this aspect.
 
-### bounded-ituple/integer and'b 'chunkat' opertion
-'chunkat' is a operation over spanned data.
+### Bounded-ituple/integer and 'chunkat' Opertion
+'chunkat' is an operation performed on spanned data. It creates a new *mdspan* over the existing data. Thus in certain systems, it is referred to as 'subview'. However, as 'chunkat' accepts bounded-ituple and bounded-integer as parameters, it is named differently in Choreo.
+```
+global f32 [60, 10, 10] data;
+parallel p by 6 {
+  with index in [10, 10] {
+    f = dte.linear data.chunkat(p, index) => local;
+  }
+}
+```
+The above example showcases one typical usage of 'chunkat'. Here we have a f32 [60, 10, 10] typed data. 
 
-
+## Summary
 
 ## Function Calls
