@@ -113,10 +113,25 @@ In Choreo, programmer can define a mdspan using such operations. The supported o
 Note, most of the operations can be archieved with *mdspan* dimension-wise operations. However, the above operations could help programmer write more meaning full code.
 
 ## Control Structures
+Choreo follows C++ to include 'if-else' statement to handle the branches. However, it has significant difference with C++ on parallelization, loop, etc.
 
+### Parallel Region: the 'parallel-by' Block
+In systems like CPU, it allows of asynchonized thread to realize the parallel execution. However, in Choreo, it employs the Single Instruction Multiple Data (SPMD) model as it way to perform parallelization. This is similar to some OpenMP parallel directive and OpenCL/CUDA. However, the syntax is different and more C-like. In Choreo, it encloses the code for parallel execution within the 'parallel-by' block.
 
-### The 'parallel-by' Block
+```
+parallel p by 6 {
+  // SPMD code
+}
+```
+The above code snippet illustrates the method to create a parallel region with Choreo keyword 'parallel' and 'by'. Here, we assume we have conceptually 6 processing elements. Each of the processing element execute the same SPMD code but with a different 'p' value. If you are familiar with programming CUDA, you may think 'p' is a equivalence of 'thread index'. Alternatively, if you are more familiar with sequential C/C++ programming, you may consider 'p' as an iteration variable of a loop of 6 iterations.
+
+Note here is one implication, 'p' is an integer associated with its bound [0, 6). In Choreo, we call 'p' a **bounded integer** instead of a simple integer. In some special operations like 'chunkat', it requires the *bounded-integer* to work properly since the bound is essential for related computation.
 
 ### The 'with-in' and 'foreach' Block
+
+### Special Async Operation: the DMA statement
+Execept for parallel execution, Choreo allows 
+
+
 
 ## Function Calls
