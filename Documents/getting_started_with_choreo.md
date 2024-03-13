@@ -39,10 +39,10 @@ __co__ int foo(int b);
 In Choreo, we neither provide equivalence of unsigned scalar integers, nor equivalence of 8-bits, 16-bits, 64-bits scalar integers. The reason is simple: these types are not essential for program control purposes. And normally a 32-bits signed integer is enough for such work.
 
 ### Spanned Types
-A spanned type is a **Composite Type**. It always consists of a **fundamental type**, and a **multi-dimensional-span(mdspan) type**. However, interestingly, in Choreo, the *mdspan* could be manipulated alone.
+A spanned type is a **Composite Type**. It consists of a **fundamental type**, and a **multi-dimensional-span(mdspan) type**. Either the *fundamental type* or the *mdspan* can not type a data alone. Therefore we deem them as *partial types*. However, in Choreo, the partial type *mdspan* could be manipulated alone.
 
-#### Partial- Typing: **mdspan**
-Unlike most type systems, *mdspan*, though comes as an partial entity for typing. Here we claims it as partial since program is unable to define type for data with it. However, a *mdspan* can be defined solely. Such design is based on the oberservation that loop tiling/blocking cares nothing but the shape of multiple dimension data. Therefore, Choreo allows programmers to manipulate *mdspan* regardless the fundanmental type it associated with, in order to make data shape manipulation easy. Meanwhile, as *mdspan* is a part of a full type, the compiler could apply type checking with it. In this way, it expects to reveal code errors as early (ahead of execution, when applies) as possble.
+#### The Partial Type: **mdspan**
+Unlike most type systems, *mdspan*, comes as an partial entity for typing. Here we claims it as *partial* because Choreo program is unable to define data as a *mdspan* type. However, *mdspan* itself can be defined solely. Such design is based on the oberservation that loop tiling/blocking cares nothing but the shape of multiple dimension data. Therefore, Choreo allows programmers to manipulate *mdspan* regardless the fundanmental type it associated with, in order to make data shape manipulation easy. Meanwhile, as *mdspan* is a part of a full type, the compiler could apply type checking with it. In this way, it expects to reveal code errors as early (ahead of execution, when applies) as possble.
 
 To define a mdspan, simply use '[' and ']' to enclose the integer dimension values. I.e.
 ```
@@ -77,7 +77,7 @@ This code works the same way as the previous one, but obviously in a much simple
 
 Except for defining a mdspan in the above *dimension-wise* way, Choreo also support to define mdspan definition with other methods. We will introduce such methods when *i-tuple* is revealed.
 
-#### Fully- Typing
+#### Fully-Typing
 A *mdspan* can not be applied alone to define the data for computation. In Choreo function, a data definition must be fully-typed, which consists of a fundamental type and a *mdspan*. The below code showcases how it works.
 ```
 ndims : [20, 15];
@@ -128,7 +128,7 @@ tiling_factor = {3, 2};
 spn : sp / tiling_factor;   // spn is defined as [2, 4];
 
 ```
-In Choreo, programmer can define a mdspan using such operations. The supported operations includes:
+In Choreo, mdspan can be defined with such **Tuple-Span Operations". The supported operations includes:
 
 - *mdspan* / *i-tuple*
 - *mdspan* + *i-tuple*
@@ -136,7 +136,7 @@ In Choreo, programmer can define a mdspan using such operations. The supported o
 - *mdspan* * *i-tuple*
 - *mdspan* - *i-tuple*
 
-Note, most of the operations can be archieved with *mdspan* dimension-wise operations. However, the above operations could help programmer write more meaning full code.
+Essentially, these operations can be achieved through mdspan *dimension-wise* definition. However, *tuple-span operations* aid programmers in writing more readable code. This is also the objective that Choreo aims to achieve.
 
 ## Control Structures
 Choreo follows C++ to involve 'if-else' blocks to handle branches inside programs. However, it has significant difference with C++ on parallelization, loop, etc.
@@ -144,7 +144,7 @@ Choreo follows C++ to involve 'if-else' blocks to handle branches inside program
 ### Parallel Region: the 'parallel-by' Block
 In systems like CPU, it allows of asynchonized thread to realize the parallel execution. However, in Choreo, it employs the Single Instruction Multiple Data (SPMD) model as it way to realize parallelization. This is similar to some OpenMP parallel directive, and some parallel programming language like OpenCL/CUDA.
 
-However, the syntax of constructing a parallel region is quite different. It follows the C-style and encloses the code for parallel execution within the 'parallel-by' block.
+However, the syntax of constructing a parallel region is quite different. It employs the C-style bracket and encloses the code for parallel execution within the 'parallel-by' block.
 
 ```
 parallel p by 6 {
@@ -225,15 +225,52 @@ DMA operations entail intricate details that demand careful programming. Program
 ### Bounded-ituple/integer and 'chunkat' Opertion
 'chunkat' is an operation performed on spanned data. It creates a new *mdspan* over the existing data. Thus in certain systems, it is referred to as 'subview'. However, as 'chunkat' accepts bounded-ituple and bounded-integer as parameters, it is named differently in Choreo.
 ```
-global f32 [60, 10, 10] data;
+global f32 [6, 10, 100] data;
 parallel p by 6 {
   with index in [10, 10] {
     f = dte.linear data.chunkat(p, index) => local;
   }
 }
 ```
-The above example showcases one typical usage of 'chunkat'. Here we have a f32 [60, 10, 10] typed data. 
+The above example showcases one typical usage of 'chunkat'. Here we have a spanned data with its type is 'f32 [6, 10, 100]'. The chuckat operation receive two parameter, *integer* 'p' and *ituple* 'index', it assumes to divide the data into 6 * 10 * 10 pieces, which is the size of associated ranges relating to 'p' and 'index'. Then 1 piece is fetched for transference to the local data. That is 10 elements of data, which is consecutive considering it is the quotient is 10 for the least significant dimension.
+
+
+## Function Calls and Call Choreo Function
+Choreo functions are not allowed to call another Choreo function. However, inside a Choreo function, it is normal to have function calls to C++ kernels.
+
+```
+void bar() {...}    // C++ kernel function
+__co__ void foo() {
+  parallel p by 6 {
+    call bar();     // Call the C++ function
+  }
+}
+
+```
+In the above example, program calls the existing C++ function 'bar' using Choreo keyword 'call', which is intuitive.
+
+## Parameters Passing between Choreo and C++ Function
+Passing arguments to Choreo or opposite requires inclusion of Choreo header file: choreo.h. Normally, programmers combine the raw C++ pointer and associated dimensions info to construct Choreo spanned data. The below code domenstrate how it works.
+
+```
+#include "choreo.h"
+
+void bar(const float* data, unsigned size) {}
+
+__co__ void foo(f32 mdspan<2> d) {
+  parallel p by 6 {
+    call bar(d.data, |d|);     // Call the C++ function
+  }
+}
+
+void foobar(float* a) {
+  foo(choreo::make_spanned<2>(a, {1, 2}));
+}
+```
+In the example, we make use of choreo utility function (template) 'make_spanned' to make the spanned data. And in Choreo function 'foo', the parameter 'f32 mdspan<2>' is the correspondance entity. To get the raw pointer of the spanned data, simply use 'data' operation over the spanned parameter. And operation '|d|' obtains the total size of the spanned data 'd'. These are used for calling C++ function 'bar'.
+
 
 ## Summary
+Choreo introduces a novel approach to SPMD programming. It favors C++-style coding and is embedded within C++. However, its primary focus is on alleviating the burden of low-level programming details, particularly those related to data manipulation across various memory layers through DMA operations. At times, it is also referred to as the dataflow programming DSL. We developed this tool to support the daily task of constructing high-performance kernels. Our aim is to enable programmers to focus less on the intricacies of language construction and more on higher-level conceptual thinking.
 
-## Function Calls
+We wish you find it works as expected. And we are looking forward to be feedback for improvement.
