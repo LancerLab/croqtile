@@ -94,23 +94,6 @@ T* cast(Node* n) {
 
 //---------------------------------------------------------------------------//
 
-// A node with the reference to another node.
-//
-// TODO: deprecated it
-struct NodeRef : public Node {
-  ptr<Node> value;
-
-  NodeRef(ptr<Node> n) : value(n) {}
-
-  virtual void Print(std::ostream& os, const std::string& prefix = {}) const {
-    value->Print(os, prefix);
-  }
-
-  void accept(Choreo::Visitor& visitor) override;
-
-  __NODE_TYPE_INFO__
-};
-
 // A general cluster of nodes
 //
 // It is normally used for a non-terminal node that comprises multiple nodes,
@@ -437,7 +420,7 @@ struct IntIndexList : public Node {
 // A data type could either be
 //
 // 1. a simple type, including `int`, `bool`.
-// 2. a composited type, including the base type and the span type.
+// 2. a composited type, including the base type and the mdspan type.
 //
 struct DataType : public Node {
  private:
@@ -445,22 +428,22 @@ struct DataType : public Node {
 
  private:
   BaseType base_type;
-  ptr<Node> span_type = nullptr;
+  ptr<Node> mdspan_type = nullptr;
 
  public:
   DataType(BaseType t, bool s = true) : scalar(s), base_type(t) {}
 
   DataType(BaseType bt, const ptr<Node>& st)
-      : scalar(false), base_type(bt), span_type(st) {}
+      : scalar(false), base_type(bt), mdspan_type(st) {}
 
   BaseType getBaseType() const { return base_type; }
-  bool isAggregate() const { return !scalar; }
+  bool isScalar() const { return scalar; }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix << getStringFrom(base_type);
     if (!scalar) {
-      if (span_type)
-        os << " " << span_type;
+      if (mdspan_type)
+        os << " " << mdspan_type;
       else
         os << "<>";
     }

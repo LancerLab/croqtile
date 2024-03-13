@@ -84,7 +84,6 @@ bool FactorCodeGen::AfterVisit(AST::Node &n) {
   return 0;
 }
 
-bool FactorCodeGen::Visit(AST::NodeRef &) { return true; };
 bool FactorCodeGen::Visit(AST::MultiNodes &) { return true; };
 bool FactorCodeGen::Visit(AST::IntLiteral &) { return true; };
 bool FactorCodeGen::Visit(AST::IntList &) { return true; };
@@ -121,7 +120,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
 
   for (auto &param : *current_parameters) {
     auto name = param->second->name;
-    if (param->first->isAggregate()) {
+    if (!param->first->isScalar()) {
       os << "    auto " << name << "_type = DRAMType(";
       os << factor_typestr(param->first->getBaseType());
       os << ", (1));\n";  // todo

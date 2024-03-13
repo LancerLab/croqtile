@@ -22,7 +22,6 @@ struct FactorCodeGen : public CodeGenerator {
   bool BeforeVisit(AST::Node &) override;
   bool AfterVisit(AST::Node &) override;
 
-  bool Visit(AST::NodeRef &) override;
   bool Visit(AST::MultiNodes &) override;
   bool Visit(AST::IntLiteral &) override;
   bool Visit(AST::IntList &) override;
@@ -57,7 +56,6 @@ struct FactorCodeGen : public CodeGenerator {
 struct TopsccCodeGen : public CodeGenerator {
   // bool Visit(AST::Node&) override;
 
-  bool Visit(AST::NodeRef &) override { return true; };
   bool Visit(AST::MultiNodes &) override { return true; };
   bool Visit(AST::IntLiteral &) override { return true; };
   bool Visit(AST::IntList &) override { return true; };

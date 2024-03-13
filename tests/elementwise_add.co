@@ -1,24 +1,40 @@
 #include <iostream>
 
+// kernel program
+void kernel(int * a, int * b, int * c, int n) {
+  for (int i = 0; i < n; ++i)
+    c[i] = a[i] + b[i];
+}
+
+
 // device program
 __co__ int mdspan<1> ele_add(int mdspan<1> a , int mdspan<1> b) {
-  mdspan ndims : [100];
-  local f32[ndims] local_buffer;
+  // assert a.span == b.span
+  f32[a.span] global_buffer;
 
-  parallel p by 6 { 
-    with index in ndims {
-      foreach index {
-        f1 = dte.linear input.chunkat(p, index) => local;
-        f2 = dte.linear input.chunkat(p, index) => local;
-        wait f1;
-        wait f2;
-        local_buffer[index] = f1.data[index] + f2.data[index];
-        f3 = dte.linear local_buffer.chunkat(p, index) => global;
+  parallel p by 6 {  // p is sip_index
+    // kernel function begin
+    with index = {x, y} in [10, 10] {  // totally 100 chunks
+      foreach x {
+        f1 = dte.linear input.chunkat(p, x) => local;
+        f2 = dte.linear input.chunkat(p, x) => local;
+        wait f1, f2;
+
+        // use f1.span as the span of local buffer
+        local f32[f1.span] local_buffer;
+
+
+        // calculate the total size of span.
+        call kernel(f1.data, f2.data, local_buffer, #y);
+
+        f3 = dte.linear local_buffer => global_buffer.chunkat(p, index);
         wait f3;
       }
     }
+    // end kernel function
   }
-  reture f3.data
+
+  return global_buffer;
 }
 
 // host program

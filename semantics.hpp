@@ -8,7 +8,6 @@ namespace Choreo {
 struct SemanticChecker : public Visitor {
   //bool Visit(AST::Node&) override { return true; };
 
-	bool Visit(AST::NodeRef&) override { return true; };
 	bool Visit(AST::MultiNodes&) override { return true; };
 	bool Visit(AST::IntLiteral&) override { return true; };
 	bool Visit(AST::IntList&) override { return true; };

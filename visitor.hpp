@@ -12,7 +12,6 @@ struct Visitor {
   virtual bool AfterVisit(AST::Node &) { return 0; }
 
   // For any visitor, it should implement all the necessary steps
-	virtual bool Visit(AST::NodeRef&) = 0;
 	virtual bool Visit(AST::MultiNodes&) = 0;
 	virtual bool Visit(AST::IntLiteral&) = 0;
 	virtual bool Visit(AST::IntList&) = 0;

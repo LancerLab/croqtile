@@ -2,8 +2,6 @@
 
 namespace AST {
 
-void NodeRef::accept(Choreo::Visitor& visitor) { value->accept(visitor); }
-
 void MultiNodes::accept(Choreo::Visitor& v) {
   for (auto& sub : values) sub->accept(v);
 }

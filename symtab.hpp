@@ -3,6 +3,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace AST {
 
@@ -26,25 +27,40 @@ enum class SymbolType {
 };
 #endif
 
+struct SpanType {
+  std::vector<int> values;
+
+  SpanType(std::initializer_list<int> init) {
+    for (auto itr = init.begin(); itr != init.end(); ++itr)
+      values.push_back(*itr);
+  }
+
+  SpanType() {}
+};
+
 class Symbol {
  public:
   std::string name;  // The identifier's name
-  BaseType type;     // The identifier's type
-  bool aggregate = false;
+  BaseType type;     // The identifier's base type
+  SpanType s_type;   // The identifier's span type
+  bool spanned = false;
 
   // Constructor
-  Symbol(const std::string& n, BaseType t, bool a = false) : name(n), type(t), aggregate(a) {}
+  Symbol(const std::string& n, BaseType t)
+      : name(n), type(t), s_type(), spanned(false) {}
+  Symbol(const std::string& n, BaseType t, SpanType st)
+      : name(n), type(t), s_type(st), spanned(true) {}
   Symbol() {}
 
-  BaseType getType() const { return type; }
-  bool isAggregate() const { return aggregate; }
+  BaseType baseType() const { return type; }
+  bool isSpanned() const { return spanned; }
 };
 
 inline static BaseType getTypeFromString(const std::string& input) {
   static const std::unordered_map<std::string, BaseType> typeMap = {
-      {"f32", BaseType::F32}, {"f16", BaseType::F16}, {"bf16", BaseType::BF16},
-      {"u32", BaseType::U32}, {"s32", BaseType::S32}, {"u16", BaseType::U16},
-      {"s16", BaseType::S16}, {"u8", BaseType::U8},   {"s8", BaseType::S8},
+      {"f32", BaseType::F32}, {"f16", BaseType::F16},  {"bf16", BaseType::BF16},
+      {"u32", BaseType::U32}, {"s32", BaseType::S32},  {"u16", BaseType::U16},
+      {"s16", BaseType::S16}, {"u8", BaseType::U8},    {"s8", BaseType::S8},
       {"int", BaseType::INT}, {"bool", BaseType::BOOL}};
 
   auto it = typeMap.find(input);
@@ -55,9 +71,9 @@ inline static BaseType getTypeFromString(const std::string& input) {
 
 inline static std::string getStringFrom(BaseType dataType) {
   static const std::unordered_map<BaseType, std::string> enumToString = {
-      {BaseType::F32, "f32"}, {BaseType::F16, "f16"}, {BaseType::BF16, "bf16"},
-      {BaseType::U32, "u32"}, {BaseType::S32, "s32"}, {BaseType::U16, "u16"},
-      {BaseType::S16, "s16"}, {BaseType::U8, "u8"},   {BaseType::S8, "s8"},
+      {BaseType::F32, "f32"}, {BaseType::F16, "f16"},  {BaseType::BF16, "bf16"},
+      {BaseType::U32, "u32"}, {BaseType::S32, "s32"},  {BaseType::U16, "u16"},
+      {BaseType::S16, "s16"}, {BaseType::U8, "u8"},    {BaseType::S8, "s8"},
       {BaseType::INT, "int"}, {BaseType::BOOL, "bool"}};
 
   auto it = enumToString.find(dataType);
@@ -72,8 +88,12 @@ class SymbolTable {
 
  public:
   // Add a symbol to the symbol table
-  void addSymbol(const std::string& name, BaseType type, bool aggr = false) {
-    table[name] = Symbol(name, type, aggr);
+  void addSymbol(const std::string& name, BaseType type) {
+    table[name] = Symbol(name, type);
+  }
+
+  void addSymbol(const std::string& name, BaseType type, SpanType s_type) {
+    table[name] = Symbol(name, type, s_type);
   }
 
   // Retrieve a symbol from the symbol table

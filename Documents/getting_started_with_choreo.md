@@ -273,4 +273,4 @@ In the example, we make use of choreo utility function (template) 'make_spanned'
 ## Summary
 Choreo introduces a novel approach to SPMD programming. It favors C++-style coding and is embedded within C++. However, its primary focus is on alleviating the burden of low-level programming details, particularly those related to data manipulation across various memory layers through DMA operations. At times, it is also referred to as the dataflow programming DSL. We developed this tool to support the daily task of constructing high-performance kernels. Our aim is to enable programmers to focus less on the intricacies of language construction and more on higher-level conceptual thinking.
 
-We wish you find it works as expected. And we are looking forward to be feedback for improvement.
+We wish you find it functions as expected. And we are looking forward to any feedback for continuous improvement.
