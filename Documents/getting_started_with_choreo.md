@@ -97,10 +97,10 @@ There are fundamental types that Choreo has supported, including:
 
 Note 's32' and 'int' are different in Choreo. 's32' is a fundamental type, which can not be applied for a fully typing.
 
-#### The Memory Qualifier
+#### The Storage Qualifier
 A spanned-typed data in Choreo is usually large. For such large data, programmers could move it across different memory hierachy of accelerator to best utilize hardware resource.
 
-In choreo, we defines three memory qualifiers to annotate the data being defined, including: 
+In choreo, we defines three storage qualifiers to annotate the data being defined, including: 
 
 - **global**,
 - **shared**,
@@ -113,7 +113,7 @@ local f32 [10, 10] d0;
 shared f16 [ndims] d1;
 ```
 
-By default, when no memory qualifier appears, the data defined is considered as from the *global* memory.
+By default, when no storage qualifier appears, the data defined is considered as from the *global* memory.
 
 ### I-Tuple Types
 An integer tuple is an unordered set of integers. As described, it is normally used as a (subscription) index.

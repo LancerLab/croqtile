@@ -9,6 +9,7 @@ namespace AST {
 
 // BaseType, FundamentalType, and ScalarType
 enum class BaseType { F32, F16, BF16, U32, S32, U16, S16, U8, S8, INT, BOOL, ITUPLE };
+
 enum class FundamentalType {
   F32  = (int)BaseType::F32,
   F16  = (int)BaseType::F16,
@@ -20,10 +21,14 @@ enum class FundamentalType {
   S16  = (int)BaseType::S16,
   S8   = (int)BaseType::S8,
 };
+
 enum class ScalarType {
   INT  = (int)BaseType::INT,
   BOOL = (int)BaseType::BOOL,
 };
+
+enum class Storage { LOCAL, SHARED, GLOBAL, DEFAULT, NONE };
+
 
 #if 0
 enum class SymbolType {

@@ -20,7 +20,7 @@ __co__ f16 mdspan<1> spanned(f32 mdspan<3> d, int f) {
 // CHECK:    `-  type: int, symbol: f
 // CHECK:  `- Type Decl: dim1 - [ 100 100 ]
 // CHECK:  `- Type Decl: dim2 - [ 9 f ]
-// CHECK:  `- Var Decl (f32 [ dim1 ]): data0
-// CHECK:  `- Var Decl (u8 [ 10 20 30 ]): data1
-// CHECK:  `- Var Decl (f16 d.span): data2
-// CHECK:  `- Var Decl (s32  (dim2 / {1, 3}) ): data3
+// CHECK:  `- Var Decl (f32 [ dim1 ], default): data0
+// CHECK:  `- Var Decl (u8 [ 10 20 30 ], default): data1
+// CHECK:  `- Var Decl (f16 d.span, default): data2
+// CHECK:  `- Var Decl (s32  (dim2 / {1, 3}) , default): data3

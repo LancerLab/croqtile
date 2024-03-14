@@ -29,9 +29,6 @@ namespace AST {
 template <typename T>
 using ptr = std::shared_ptr<T>;
 
-// For storage specifiers like local, global, shared
-enum class Storage { LOCAL, SHARED, GLOBAL };
-
 class Identifier;
 class DataType;
 using ParamType = std::pair<ptr<DataType>, ptr<Identifier>>;
@@ -298,16 +295,47 @@ struct NamedTypeDecl : public Node {
   __NODE_TYPE_INFO__
 };
 
+struct Memory : public Node {
+  Storage st;
+  Memory(const Storage s) : st(s) {}
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    (void)prefix;
+    switch (st) {
+      case Storage::LOCAL:
+        os << "local";
+        break;
+      case Storage::SHARED:
+        os << "shared";
+        break;
+      case Storage::GLOBAL:
+        os << "global";
+        break;
+      case Storage::DEFAULT:
+        os << "default";
+        break;
+      default:
+        assert(false && "Unexpected storage type.");
+    }
+  }
+
+  void accept(Choreo::Visitor&) override;
+
+  __NODE_TYPE_INFO__
+};
+
 struct NamedVariableDecl : public Node {
   const std::string name_str;
   const std::string disp_str;
-  const ptr<Node> type;
+  const ptr<Memory> mem = nullptr;         // storage location
+  const ptr<Node> type = nullptr;
   const ptr<Node> init_value = nullptr;  // associated initializer
 
   explicit NamedVariableDecl(const std::string& n, const ptr<Node>& t,
+                             const ptr<Memory>& s = nullptr,
                              const ptr<Node>& v = nullptr,
                              const std::string& d = "=")
-      : name_str(n), disp_str(d), type(t), init_value(v) {
+      : name_str(n), disp_str(d), mem(s), type(t), init_value(v) {
     assert(name_str.size() > 0 && "Invalid name string.");
     assert(type && "Invalid type.");
   }
@@ -315,6 +343,10 @@ struct NamedVariableDecl : public Node {
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Var Decl (";
     type->Print(os);
+    if (mem) {
+      os << ", ";
+      mem->Print(os);
+    }
     os << "): " << name_str;
     if (init_value) {
       os << " " << disp_str << " ";
@@ -636,30 +668,6 @@ struct WithBlock : public Node {
       }
       os << prefix << "  (with statements)";
       statms->Print(os, prefix + "  ");
-    }
-  }
-
-  void accept(Choreo::Visitor&) override;
-
-  __NODE_TYPE_INFO__
-};
-
-struct Memory : public Node {
-  Storage st;
-  Memory(const Storage s) : st(s) {}
-
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    (void)prefix;
-    switch (st) {
-      case Storage::LOCAL:
-        os << "local";
-        break;
-      case Storage::SHARED:
-        os << "shared";
-        break;
-      case Storage::GLOBAL:
-        os << "global";
-        break;
     }
   }
 

@@ -129,6 +129,7 @@ void choreo_info(const char *message) {
 %nterm <std::string> dma_operation
 %nterm <AST::Storage> storage
 %nterm <AST::BaseType> fundamental_type
+%nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::Node>> pass_by foreach_block simple_val span_val ituple_val int_val bool_val declaration statement assignment pb_statement w_statement dma_statement wait_statement call_statement span_elem mixed_span_elem iv_expr if_else
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments pb_statements w_statements iterate_statements span_list mixed_span_list withins iv_exprs require_binds require_clause id_list with_matchers else_clause
 %nterm <AST::ptr<AST::IntList>> int_list
@@ -402,7 +403,7 @@ named_scalar_decl
         }
         symtab.addSymbol($2, $1);
         $$ = std::make_shared<AST::NamedVariableDecl>(
-              $2, std::make_shared<AST::DataType>(AST::BaseType::INT), $4);
+              $2, std::make_shared<AST::DataType>(AST::BaseType::INT), nullptr, $4);
       }
     | BOOL IDENTIFIER ASSIGN logic_expr {
         if (symtab.exists($2)) {
@@ -411,18 +412,18 @@ named_scalar_decl
         }
         symtab.addSymbol($2, $1);
         $$ = std::make_shared<AST::NamedVariableDecl>(
-              $2, std::make_shared<AST::DataType>(AST::BaseType::BOOL), $4);
+              $2, std::make_shared<AST::DataType>(AST::BaseType::BOOL), nullptr, $4);
       }
     ;
 
 named_spanned_decl
-    : spanned_type IDENTIFIER {
-        if (symtab.exists($2)) {
-          Choreo::Parser::error(@2, "ODR violation: the symbol is already defined.");
+    : storage_qual spanned_type IDENTIFIER {
+        if (symtab.exists($3)) {
+          Choreo::Parser::error(@3, "ODR violation: the symbol is already defined.");
           exit(1);
         }
-        symtab.addSymbol($2, AST::BaseType::INT, {});
-        $$ = std::make_shared<AST::NamedVariableDecl>($2, $1);
+        symtab.addSymbol($3, AST::BaseType::INT, {});
+        $$ = std::make_shared<AST::NamedVariableDecl>($3, $2, $1);
       }
     ;
 
@@ -586,20 +587,26 @@ named_tuple_decl
         //ituple_symtab.addITupleSymbol($2, $4);
         symtab.addSymbol($2, AST::BaseType::INT, {});
         $$ = std::make_shared<AST::NamedVariableDecl>(
-              $2, std::make_shared<AST::DataType>(AST::BaseType::ITUPLE), $4);
+              $2, std::make_shared<AST::DataType>(AST::BaseType::ITUPLE), nullptr, $4);
       }
     | IDENTIFIER ASSIGN unnamed_tuple_decl {
         //ituple_symtab.addITupleSymbol($1, $3);
         symtab.addSymbol($1, AST::BaseType::INT, {});
         $$ = std::make_shared<AST::NamedVariableDecl>(
-              $1, std::make_shared<AST::DataType>(AST::BaseType::ITUPLE), $3);
+              $1, std::make_shared<AST::DataType>(AST::BaseType::ITUPLE), nullptr, $3);
       }
     ; // do not allow uninitialized ituple
 
 storage
     : LOCAL   { $$ = $1; }
     | SHARED  { $$ = $1; }
-    | GLOBAL  { $$ = $1; };
+    | GLOBAL  { $$ = $1; }
+    ;
+
+storage_qual
+    : /* Empty */ { $$ = std::make_shared<AST::Memory>(AST::Storage::DEFAULT); }
+    | storage { $$ = std::make_shared<AST::Memory>($1); }
+    ;
 
 assignment
     : IDENTIFIER ASSIGN expr {
@@ -607,7 +614,7 @@ assignment
           // since the symbol is not defined, it is a declaration without type annotation
           symtab.addSymbol($1, AST::BaseType::INT, {});
           $$ = std::make_shared<AST::NamedVariableDecl>(
-                $1, std::make_shared<AST::DataType>(AST::BaseType::ITUPLE), $3);
+                $1, std::make_shared<AST::DataType>(AST::BaseType::ITUPLE), nullptr, $3);
           break;
         }
 
@@ -618,7 +625,7 @@ assignment
           // since the symbol is not defined, it is a declaration without type annotation
           symtab.addSymbol($1, AST::BaseType::INT, {});
           $$ = std::make_shared<AST::NamedVariableDecl>(
-                $1, std::make_shared<AST::DataType>(AST::BaseType::ITUPLE), $4);
+                $1, std::make_shared<AST::DataType>(AST::BaseType::ITUPLE), nullptr, $4);
           break;
         }
 
@@ -630,7 +637,7 @@ assignment
           // since the symbol is not defined, it is a declaration without type annotation
           symtab.addSymbol($1, AST::BaseType::BOOL, {});
           $$ = std::make_shared<AST::NamedVariableDecl>(
-                $1, std::make_shared<AST::DataType>(AST::BaseType::BOOL), $3);
+                $1, std::make_shared<AST::DataType>(AST::BaseType::BOOL), nullptr, $3);
           break;
         }
 
@@ -893,9 +900,6 @@ call_statement
     : CALL IDENTIFIER LPAREN id_list RPAREN {
         $$ = std::make_shared<AST::Call>(
                 std::make_shared<AST::Identifier>($2), $4);
-      }
-    | storage IDENTIFIER ASSIGN CALL IDENTIFIER LPAREN id_list RPAREN  {
-
       }
     ;
 
