@@ -2,7 +2,7 @@
 #include <iostream>
 
 // device program
-__co__ f16 spans(f32 mdspan<3> d, int f) {
+__co__ f16 mdspan<2> spans(f32 mdspan<3> d, int f) {
   dim1 : [100, 100];  // shape, mdspan node
   mdspan dim2 : [9, f];
   ndims : d.span[(2), (1), (0)];
@@ -11,14 +11,14 @@ __co__ f16 spans(f32 mdspan<3> d, int f) {
 
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: spans
-// CHECK:  `- Return type: f16
+// CHECK:  `- Return type: f16 <2>
 // CHECK:  `- Parameters
-// CHECK:    `-  type: f32<>, symbol: d
+// CHECK:    `-  type: f32 <3>, symbol: d
 // CHECK:    `-  type: int, symbol: f
-// CHECK:  `- Decl (span): dim1 - [ 100 100 ]
-// CHECK:  `- Decl (span): dim2 - [ 9 f ]
-// CHECK:  `- Decl (span): ndims - [ d(2) d(1) d(0) ]
-// CHECK:  `- Decl (span): dim3 - [ 9 102 dim1(1) d.span(2) ]
+// CHECK:  `- Type Decl: dim1 - [ 100 100 ]
+// CHECK:  `- Type Decl: dim2 - [ 9 f ]
+// CHECK:  `- Type Decl: ndims - [ d(2) d(1) d(0) ]
+// CHECK:  `- Type Decl: dim3 - [ 9 102 dim1(1) d.span(2) ]
 
 // host program
 int bar(int a) {

@@ -10,10 +10,15 @@
 
 #include "symtab.hpp"
 
-namespace Choreo { struct Visitor; }
+namespace Choreo {
+struct Visitor;
+}
 
-[[noreturn]] inline void choreo_unreachable(const char* msg = "Unreachable code reached", const char* file = __FILE__, int line = __LINE__) {
-  std::cerr << "Assertion failed: " << msg << ", file " << file << ", line " << line << std::endl;
+[[noreturn]] inline void choreo_unreachable(
+    const char* msg = "Unreachable code reached", const char* file = __FILE__,
+    int line = __LINE__) {
+  std::cerr << "Assertion failed: " << msg << ", file " << file << ", line "
+            << line << std::endl;
   std::abort();
 }
 
@@ -152,7 +157,6 @@ struct IntLiteral : public Node {
     os << prefix << value;
   }
 
-
   void accept(Choreo::Visitor&) override;
 
   __NODE_TYPE_INFO__
@@ -169,7 +173,6 @@ struct IntList : public Node {
       os << values[i]->value << ", ";
     os << values.back()->value << "]";
   }
-
 
   void accept(Choreo::Visitor&) override;
 
@@ -190,7 +193,6 @@ struct SValList : public Node {
     (void)prefix;
   }
 
-
   void accept(Choreo::Visitor&) override;
 
   __NODE_TYPE_INFO__
@@ -207,21 +209,22 @@ struct Expr : public Node {
       : op(o), value_r(v2) {}
   explicit Expr(const std::string& o, const ptr<Expr>& v1, const ptr<Node>& v2)
       : op(o), value_l(v1), value_r(v2) {}
-  explicit Expr(const std::string& o, const ptr<Expr>& c, const ptr<Expr>& v1, const ptr<Node>& v2)
+  explicit Expr(const std::string& o, const ptr<Expr>& c, const ptr<Expr>& v1,
+                const ptr<Node>& v2)
       : op(o), value_c(c), value_l(v1), value_r(v2) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     if (op.size() > 0) {
       os << " (";
-      if(op == "$") {
+      if (op == "$") {
         value_c->Print(os);
         os << " ? ";
       }
-      if(op != "!") {
+      if (op != "!") {
         value_l->Print(os);
         os << " ";
       }
-      if(op == "$")
+      if (op == "$")
         os << ": ";
       else
         os << op << " ";
@@ -232,58 +235,92 @@ struct Expr : public Node {
     (void)prefix;
   }
 
-
   void accept(Choreo::Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
 
 // Represents both dimensions and s like {3, 4, 5} or {1, 2, 1}
-struct MultiSpans : public Node {
+struct MultiDimSpans : public Node {
   std::string ref_name;  // syntax suger, could be empty
-  ptr<Node> list;
+  ptr<Node> list;        // null if the span is a dynamic value
+  int dim_count = 0;     // dynamic value with known dimension count
 
-  explicit MultiSpans(const std::string& n, const ptr<Node>& l)
-      : ref_name(n), list(l) {}
+  // If the mdspan is known
+  explicit MultiDimSpans(const std::string& n, const ptr<Node>& l)
+      : ref_name(n), list(l), dim_count(0) {
+    assert(list && "Unexpected: span list is not provided");
+  }
+
+  // mdspan is unknown - for parameter passing
+  explicit MultiDimSpans(const std::string& n, int c)
+      : ref_name(n), list(nullptr), dim_count(c) {
+    assert(dim_count > 0 && "Invalid dimensions.");
+  }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << "[";
-
-    if (!ref_name.empty()) {
+    if (!list)
+      os << "<" << dim_count << ">";
+    else {
+      os << "[";
       list->Print(os, " " + ref_name);
-    } else if (list != nullptr)
-      list->Print(os, " ");
-
-    os << " ]";
+      os << " ]";
+    }
 
     (void)prefix;
   }
-
 
   void accept(Choreo::Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
 
-struct NamedDecl : public Node {
+struct NamedTypeDecl : public Node {
   const std::string name_str;
-  const std::string type_str;
   const std::string disp_str;
-  const ptr<Node> value;
+  const ptr<Node> init_value;  // associated initializer
 
-  explicit NamedDecl(const std::string& n, const std::string& t,
-                     const ptr<Node>& v, const std::string& d = "=")
-      : name_str(n), type_str(t), disp_str(d), value(v) {
+  explicit NamedTypeDecl(const std::string& n, const ptr<Node>& v,
+                         const std::string& d = "-")
+      : name_str(n), disp_str(d), init_value(v) {
     assert(name_str.size() > 0 && "Invalid name string.");
-    assert(type_str.size() > 0 && "Invalid type string.");
+    assert(init_value && "Invalid value.");
   }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << "\n" << prefix << "`- Decl (" << type_str << "): ";
+    os << "\n" << prefix << "`- Type Decl: ";
     os << name_str << " " << disp_str << " ";
-    value->Print(os);
+    init_value->Print(os);
   }
 
+  void accept(Choreo::Visitor&) override;
+
+  __NODE_TYPE_INFO__
+};
+
+struct NamedVariableDecl : public Node {
+  const std::string name_str;
+  const std::string disp_str;
+  const ptr<Node> type;
+  const ptr<Node> init_value = nullptr;  // associated initializer
+
+  explicit NamedVariableDecl(const std::string& n, const ptr<Node>& t,
+                             const ptr<Node>& v = nullptr,
+                             const std::string& d = "=")
+      : name_str(n), disp_str(d), type(t), init_value(v) {
+    assert(name_str.size() > 0 && "Invalid name string.");
+    assert(type && "Invalid type.");
+  }
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << "\n" << prefix << "`- Var Decl (";
+    type->Print(os);
+    os << "): " << name_str;
+    if (init_value) {
+      os << " " << disp_str << " ";
+      init_value->Print(os);
+    }
+  }
 
   void accept(Choreo::Visitor&) override;
 
@@ -305,7 +342,6 @@ struct IntTuple : public Node {
 
     (void)prefix;
   }
-
 
   void accept(Choreo::Visitor&) override;
 
@@ -352,7 +388,6 @@ struct Assignment : public Node {
     value->Print(os);
   }
 
-
   void accept(Choreo::Visitor&) override;
 
   __NODE_TYPE_INFO__
@@ -367,7 +402,6 @@ struct IntIndex : public Node {
     value->Print(os);
     os << ")";
   }
-
 
   void accept(Choreo::Visitor&) override;
 
@@ -386,7 +420,6 @@ struct NthBound : public Node {
     mdarray->Print(os);
     index->Print(os);
   }
-
 
   void accept(Choreo::Visitor&) override;
 
@@ -411,7 +444,6 @@ struct IntIndexList : public Node {
     (void)prefix;
   }
 
-
   void accept(Choreo::Visitor&) override;
 
   __NODE_TYPE_INFO__
@@ -419,36 +451,37 @@ struct IntIndexList : public Node {
 
 // A data type could either be
 //
-// 1. a simple type, including `int`, `bool`.
-// 2. a composited type, including the base type and the mdspan type.
+// 1. A scalar type, including `int`, `bool`.
+// 2. A composited type, including the fundamental type and the mdspan type.
+// 3. An 'ituple' type.
 //
 struct DataType : public Node {
- private:
-  bool scalar;
-
  private:
   BaseType base_type;
   ptr<Node> mdspan_type = nullptr;
 
  public:
-  DataType(BaseType t, bool s = true) : scalar(s), base_type(t) {}
+  DataType(BaseType t) : base_type(t), mdspan_type(nullptr) {}
 
-  DataType(BaseType bt, const ptr<Node>& st)
-      : scalar(false), base_type(bt), mdspan_type(st) {}
+  DataType(BaseType bt, const ptr<Node>& st) : base_type(bt), mdspan_type(st) {
+    assert(bt != BaseType::ITUPLE && "Unexpected type!");
+    assert(bt != BaseType::INT && "Unexpected type!");
+    assert(bt != BaseType::BOOL && "Unexpected type!");
+  }
 
   BaseType getBaseType() const { return base_type; }
-  bool isScalar() const { return scalar; }
+
+  bool isScalar() const { return !mdspan_type; }
+  bool isITuple() const { return base_type == BaseType::ITUPLE; }
+  bool isSpanned() const { return mdspan_type.get() != nullptr; }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix << getStringFrom(base_type);
-    if (!scalar) {
-      if (mdspan_type)
-        os << " " << mdspan_type;
-      else
-        os << "<>";
+    if (isSpanned()) {
+      os << " ";
+      mdspan_type->Print(os);
     }
   }
-
 
   void accept(Choreo::Visitor&) override;
 
@@ -461,7 +494,6 @@ struct Identifier : public Node {
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix << name;
   }
-
 
   void accept(Choreo::Visitor&) override;
 
@@ -492,8 +524,11 @@ struct IfElse : public Node {
   ptr<MultiNodes> if_stmts;
   ptr<MultiNodes> else_stmts;  // optional requirements
 
-  IfElse(const ptr<Node>& c, const ptr<MultiNodes>& if_s) : cond(c), if_stmts(if_s) {}
-  IfElse(const ptr<Node>& c, const ptr<MultiNodes>& if_s, const ptr<MultiNodes>& else_s) : cond(c), if_stmts(if_s), else_stmts(else_s) {}
+  IfElse(const ptr<Node>& c, const ptr<MultiNodes>& if_s)
+      : cond(c), if_stmts(if_s) {}
+  IfElse(const ptr<Node>& c, const ptr<MultiNodes>& if_s,
+         const ptr<MultiNodes>& else_s)
+      : cond(c), if_stmts(if_s), else_stmts(else_s) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix << "\n`- IF: ";
@@ -528,7 +563,6 @@ struct ParallelBy : public Node {
       statms->Print(os, prefix + " ");
   }
 
-
   void accept(Choreo::Visitor&) override;
 
   __NODE_TYPE_INFO__
@@ -549,7 +583,6 @@ struct RequireBind : public Node {
     rhs->Print(os);
     os << "\n";
   }
-
 
   void accept(Choreo::Visitor&) override;
 
@@ -575,7 +608,6 @@ struct WithIn : public Node {
     in->Print(os);
     os << "\n";
   }
-
 
   void accept(Choreo::Visitor&) override;
 
@@ -607,7 +639,6 @@ struct WithBlock : public Node {
     }
   }
 
-
   void accept(Choreo::Visitor&) override;
 
   __NODE_TYPE_INFO__
@@ -631,7 +662,6 @@ struct Memory : public Node {
         break;
     }
   }
-
 
   void accept(Choreo::Visitor&) override;
 
@@ -693,7 +723,6 @@ struct Wait : public Node {
     os << "\n" << prefix << "`- WAIT: ";
     target->Print(os);
   }
-
 
   void accept(Choreo::Visitor&) override;
 

@@ -1,6 +1,6 @@
 // RUN: choreo -e %s | FileCheck %s
 
-__co__ u8 scalar_decls(int a, int b) {
+__co__ u8 mdspan<1> scalar_decls(int a, int b) {
   int c = a + (b - a) * a + a / 5 - b % a;
   c = 6 + 1;
   int d = b + 2;
@@ -16,20 +16,20 @@ __co__ u8 scalar_decls(int a, int b) {
 
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: scalar_decls
-// CHECK:  `- Return type: u8
+// CHECK:  `- Return type: u8 <1>
 // CHECK:  `- Parameters
 // CHECK:    `-  type: int, symbol: a
 // CHECK:    `-  type: int, symbol: b
-// CHECK:  `- Decl (int): c =  ( ( (a +  ( (b - a)  * a) )  +  (a / 5) )  -  (b % a) )
+// CHECK:  `- Var Decl (int): c =  ( ( (a +  ( (b - a)  * a) )  +  (a / 5) )  -  (b % a) )
 // CHECK:  `- Assign: c =  (6 + 1)
-// CHECK:  `- Decl (int): d =  (b + 2)
-// CHECK:  `- Decl (int): e =  (6 + 1)
-// CHECK:  `- Decl (bool): y =  ( ( ( (true &&  (d > c) )  ||  ( (d >= c)  &&  (d < c) ) )  ||  ( (d <= c)  &&  (!  (d == c) ) ) )  ||  (!  (d != c) ) )
+// CHECK:  `- Var Decl (int): d =  (b + 2)
+// CHECK:  `- Var Decl (int): e =  (6 + 1)
+// CHECK:  `- Var Decl (bool): y =  ( ( ( (true &&  (d > c) )  ||  ( (d >= c)  &&  (d < c) ) )  ||  ( (d <= c)  &&  (!  (d == c) ) ) )  ||  (!  (d != c) ) )
 // CHECK:  `- Assign: y =  (false ||  ( (d <= c)  &&  ( (!  (d == c) )  ||  (!  (d != c) ) ) ) )
-// CHECK:  `- Decl (int): f =  (true  ?  (d + e)  :  (d - e) )
+// CHECK:  `- Var Decl (int): f =  (true  ?  (d + e)  :  (d - e) )
 // CHECK:  `- Assign: f =  ( (c < d)  ? c : d)
 // CHECK:  `- Assign: f =  ( (a + 2)  + f)
-// CHECK:  `- Decl (bool): x =  ( (d > c)  ?  (d > e)  :  (d <= e) )
+// CHECK:  `- Var Decl (bool): x =  ( (d > c)  ?  (d > e)  :  (d <= e) )
 // CHECK:  `- Assign: x =  ( (d != c)  ?  (d > c)  :  (d <= c) )
 
 // host program

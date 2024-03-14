@@ -1,18 +1,18 @@
 // RUN: choreo -e %s | FileCheck --match-full-lines %s
 
-__co__ u8 scalar_decls(int a, int b) {
+__co__ u8 mdspan<1> scalar_decls(int a, int b) {
   int c = 1;
   int d = b;
 }
 
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: scalar_decls
-// CHECK:  `- Return type: u8
+// CHECK:  `- Return type: u8 <1>
 // CHECK:  `- Parameters
 // CHECK:    `-  type: int, symbol: a
 // CHECK:    `-  type: int, symbol: b
-// CHECK:  `- Decl (int): c = 1
-// CHECK:  `- Decl (int): d = b
+// CHECK:  `- Var Decl (int): c = 1
+// CHECK:  `- Var Decl (int): d = b
 
 // host program
 int host(int a, int b) {

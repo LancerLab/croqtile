@@ -17,8 +17,9 @@ struct Visitor {
 	virtual bool Visit(AST::IntList&) = 0;
 	virtual bool Visit(AST::SValList&) = 0;
 	virtual bool Visit(AST::Expr&) = 0;
-	virtual bool Visit(AST::MultiSpans&) = 0;
-	virtual bool Visit(AST::NamedDecl&) = 0;
+	virtual bool Visit(AST::MultiDimSpans&) = 0;
+	virtual bool Visit(AST::NamedTypeDecl&) = 0;
+	virtual bool Visit(AST::NamedVariableDecl&) = 0;
 	virtual bool Visit(AST::IntTuple&) = 0;
 	virtual bool Visit(AST::Assignment&) = 0;
 	virtual bool Visit(AST::IntIndex&) = 0;

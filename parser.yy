@@ -35,6 +35,7 @@ extern Choreo::location loc;
 
 extern AST::Program root;
 extern AST::SymbolTable symtab;
+extern AST::PartialTypeTable pttab;
 extern AST::ITupleTable ituple_symtab;
 
 const char* red = "\033[31m";
@@ -127,18 +128,19 @@ void choreo_info(const char *message) {
 // non-terminals
 %nterm <std::string> dma_operation
 %nterm <AST::Storage> storage
-%nterm <AST::BaseType> base_type
+%nterm <AST::BaseType> fundamental_type
 %nterm <AST::ptr<AST::Node>> pass_by foreach_block simple_val span_val ituple_val int_val bool_val declaration statement assignment pb_statement w_statement dma_statement wait_statement call_statement span_elem mixed_span_elem iv_expr if_else
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments pb_statements w_statements iterate_statements span_list mixed_span_list withins iv_exprs require_binds require_clause id_list with_matchers else_clause
 %nterm <AST::ptr<AST::IntList>> int_list
 %nterm <AST::ptr<AST::SValList>> sval_list
 %nterm <AST::ptr<AST::Expr>> term expr cmp_expr logic_val logic_sub_term logic_term logic_expr span_expr span_term
-%nterm <AST::ptr<AST::DataType>> general_type param_type spanned_type
+%nterm <AST::ptr<AST::DataType>> scalar_type param_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
 %nterm <AST::ptr<AST::ParamType>> parameter
 %nterm <AST::ptr<AST::ChoreoFunction>> dsl_function
-%nterm <AST::ptr<AST::MultiSpans>> unnamed_span_decl
-%nterm <AST::ptr<AST::NamedDecl>> named_span_decl named_tuple_decl scalar_decl spanned_decl
+%nterm <AST::ptr<AST::MultiDimSpans>> unnamed_span_decl
+%nterm <AST::ptr<AST::NamedTypeDecl>> named_span_decl
+%nterm <AST::ptr<AST::NamedVariableDecl>> named_tuple_decl named_scalar_decl named_spanned_decl
 %nterm <AST::ptr<AST::IntTuple>> unnamed_tuple_decl tuple_assign
 %nterm <AST::ptr<AST::IntIndex>> s_index
 %nterm <AST::ptr<AST::IntIndexList>> s_index_list
@@ -175,32 +177,29 @@ dsl_function
     ;
 
 param_type
-    : base_type { $$ = std::make_shared<AST::DataType>($1); }
-    | base_type MDSPAN LT NUM GT { $$ = std::make_shared<AST::DataType>($1, false); }
+    : scalar_type { $$ = $1; }
+    | fundamental_type MDSPAN LT NUM GT {
+        $$ = std::make_shared<AST::DataType>($1,
+                std::make_shared<AST::MultiDimSpans>(AST::PartialTypeTable::getAnonName(),
+                $4));
+      }
     ;
 
-general_type
-    : base_type { $$ = std::make_shared<AST::DataType>($1); }
-    | spanned_type { $$ = $1; }
+scalar_type
+    : INT   { $$ = std::make_shared<AST::DataType>($1); }
+    | BOOL  { $$ = std::make_shared<AST::DataType>($1); }
     ;
 
 spanned_type
-    : base_type MDSPAN LBRAKT span_list RBRAKT {
-        $$ = std::make_shared<AST::DataType>($1,
-              std::make_shared<AST::MultiSpans>("", $4));
+    : fundamental_type unnamed_span_decl {
+        $$ = std::make_shared<AST::DataType>($1, $2);
       }
-    | base_type LBRAKT IDENTIFIER RBRAKT {
-        if (!symtab.exists($3))
-          Choreo::Parser::error(@3, "The symbol `" + $3 + "' has not been defined.");
-
-        if (!symtab.getSymbol($3)->isSpanned())
-          Choreo::Parser::error(@3, "expecting a symbol of spanned type.");
-
-        $$ = std::make_shared<AST::DataType>($1, std::make_shared<AST::Identifier>($3));
+    | fundamental_type LBRAKT span_expr RBRAKT {
+        $$ = std::make_shared<AST::DataType>($1, $3);
       }
     ;
 
-base_type
+fundamental_type
     : F32   { $$ = $1; }
     | F16   { $$ = $1; }
     | BF16  { $$ = $1; }
@@ -210,8 +209,6 @@ base_type
     | S8    { $$ = $1; }
     | U32   { $$ = $1; }
     | S32   { $$ = $1; }
-    | INT   { $$ = $1; }
-    | BOOL  { $$ = $1; }
     ;
 
 int_list
@@ -318,7 +315,8 @@ parameter
           symtab.addSymbol($2, $1->getBaseType(), {});
       }
     | param_type {
-        $$ = std::make_shared<AST::ParamType>(std::pair($1, std::make_shared<AST::Identifier>(AST::SymbolTable::getAnonName())));
+        $$ = std::make_shared<AST::ParamType>(
+              std::pair($1, std::make_shared<AST::Identifier>(AST::SymbolTable::getAnonName())));
       }
     ;
 
@@ -381,20 +379,30 @@ declarations
     ;
 
 declaration
-    : named_span_decl  { $$ = $1; }
-    | named_tuple_decl { $$ = $1; }
-    | scalar_decl      { $$ = $1; }
-    | spanned_decl   { $$ = $1; }
+    : named_span_decl    { $$ = $1; }
+    | named_tuple_decl   { $$ = $1; }
+    | named_scalar_decl  { $$ = $1; }
+    | named_spanned_decl { $$ = $1; }
     ;
 
-scalar_decl
-    : INT IDENTIFIER ASSIGN expr {
+named_scalar_decl
+    : scalar_type IDENTIFIER {
+        if (symtab.exists($2)) {
+          Choreo::Parser::error(@2, "ODR violation: the symbol is already defined.");
+          exit(1);
+        }
+        auto type = symtab.getSymbol($2)->baseType();
+        symtab.addSymbol($2, type);
+        $$ = std::make_shared<AST::NamedVariableDecl>($2, $1);
+      }
+    | INT IDENTIFIER ASSIGN expr {
         if (symtab.exists($2)) {
           Choreo::Parser::error(@2, "ODR violation: the symbol is already defined.");
           exit(1);
         }
         symtab.addSymbol($2, $1);
-        $$ = std::make_shared<AST::NamedDecl>($2, "int", $4);
+        $$ = std::make_shared<AST::NamedVariableDecl>(
+              $2, std::make_shared<AST::DataType>(AST::BaseType::INT), $4);
       }
     | BOOL IDENTIFIER ASSIGN logic_expr {
         if (symtab.exists($2)) {
@@ -402,19 +410,19 @@ scalar_decl
           exit(1);
         }
         symtab.addSymbol($2, $1);
-        $$ = std::make_shared<AST::NamedDecl>($2, "bool", $4);
+        $$ = std::make_shared<AST::NamedVariableDecl>(
+              $2, std::make_shared<AST::DataType>(AST::BaseType::BOOL), $4);
       }
     ;
 
-spanned_decl
+named_spanned_decl
     : spanned_type IDENTIFIER {
         if (symtab.exists($2)) {
           Choreo::Parser::error(@2, "ODR violation: the symbol is already defined.");
           exit(1);
         }
         symtab.addSymbol($2, AST::BaseType::INT, {});
-        $$ = std::make_shared<AST::NamedDecl>(
-                $2, "aggr", std::make_shared<AST::Identifier>($2));
+        $$ = std::make_shared<AST::NamedVariableDecl>($2, $1);
       }
     ;
 
@@ -494,13 +502,13 @@ mixed_span_list
 
 unnamed_span_decl
     : IDENTIFIER FNSPAN LBRAKT span_list RBRAKT {
-        $$ = std::make_shared<AST::MultiSpans>($1, $4);
+        $$ = std::make_shared<AST::MultiDimSpans>($1, $4);
       }
     | IDENTIFIER LBRAKT span_list RBRAKT {
-        $$ = std::make_shared<AST::MultiSpans>($1, $3);
+        $$ = std::make_shared<AST::MultiDimSpans>($1, $3);
       }
     | LBRAKT mixed_span_list RBRAKT {
-        $$ = std::make_shared<AST::MultiSpans>("", $2);
+        $$ = std::make_shared<AST::MultiDimSpans>("", $2);
       }
     ;
 
@@ -517,7 +525,7 @@ named_span_decl
           exit(1);
         }
         symtab.addSymbol($2, AST::BaseType::INT, {});
-        $$ = std::make_shared<AST::NamedDecl>($2, "span", $4, "-");
+        $$ = std::make_shared<AST::NamedTypeDecl>($2, $4);
       }
     | MDSPAN LT NUM GT IDENTIFIER COL span_expr {
         // TODO: check if the span defined aligned with declaration
@@ -531,7 +539,7 @@ named_span_decl
           exit(1);
         }
         symtab.addSymbol($5, AST::BaseType::INT, {});
-        $$ = std::make_shared<AST::NamedDecl>($5, "span", $7, "-");
+        $$ = std::make_shared<AST::NamedTypeDecl>($5, $7);
       }
     | IDENTIFIER COL span_expr {
         if (symtab.exists($1)) {
@@ -539,7 +547,7 @@ named_span_decl
           exit(1);
         }
         symtab.addSymbol($1, AST::BaseType::INT, {});
-        $$ = std::make_shared<AST::NamedDecl>($1, "span", $3, "-");
+        $$ = std::make_shared<AST::NamedTypeDecl>($1, $3);
       }
     ;
 
@@ -577,14 +585,16 @@ named_tuple_decl
         /* TODO: workaround: use INT for ituple's base type use a dedicated type for ituple in symboltable */
         //ituple_symtab.addITupleSymbol($2, $4);
         symtab.addSymbol($2, AST::BaseType::INT, {});
-        $$ = std::make_shared<AST::NamedDecl>($2, "ituple", $4);
+        $$ = std::make_shared<AST::NamedVariableDecl>(
+              $2, std::make_shared<AST::DataType>(AST::BaseType::ITUPLE), $4);
       }
     | IDENTIFIER ASSIGN unnamed_tuple_decl {
         //ituple_symtab.addITupleSymbol($1, $3);
         symtab.addSymbol($1, AST::BaseType::INT, {});
-        $$ = std::make_shared<AST::NamedDecl>($1, "ituple", $3);
+        $$ = std::make_shared<AST::NamedVariableDecl>(
+              $1, std::make_shared<AST::DataType>(AST::BaseType::ITUPLE), $3);
       }
-    ;
+    ; // do not allow uninitialized ituple
 
 storage
     : LOCAL   { $$ = $1; }
@@ -593,25 +603,11 @@ storage
 
 assignment
     : IDENTIFIER ASSIGN expr {
-        #if 0
-        // The assignment is overrided to be initilization of ituple
-        auto ref = std::dynamic_pointer_cast<AST::NodeRef>($3->value_r);
-        if (ref) {
-          auto sym = std::dynamic_pointer_cast<AST::Identifier>(ref->value);
-          if (sym) {
-            auto src_ituple = ituple_symtab.getSymbol(sym->name);
-            auto ret_ituple = std::make_shared<AST::IntTuple>($1, src_ituple->value);
-            ituple_symtab.addITupleSymbol($1, ret_ituple);
-            $$ = std::make_shared<AST::NodeRef>(ret_ituple);
-            break;
-          }
-        }
-        #endif
-
         if (!symtab.exists($1)) {
           // since the symbol is not defined, it is a declaration without type annotation
           symtab.addSymbol($1, AST::BaseType::INT, {});
-          $$ = std::make_shared<AST::NamedDecl>($1, "ituple", $3);
+          $$ = std::make_shared<AST::NamedVariableDecl>(
+                $1, std::make_shared<AST::DataType>(AST::BaseType::ITUPLE), $3);
           break;
         }
 
@@ -621,17 +617,20 @@ assignment
         if (!symtab.exists($1)) {
           // since the symbol is not defined, it is a declaration without type annotation
           symtab.addSymbol($1, AST::BaseType::INT, {});
-          $$ = std::make_shared<AST::NamedDecl>($1, "ituple", $4);
+          $$ = std::make_shared<AST::NamedVariableDecl>(
+                $1, std::make_shared<AST::DataType>(AST::BaseType::ITUPLE), $4);
           break;
         }
 
-        $$ = std::make_shared<AST::Assignment>($1, std::make_shared<AST::Expr>("+", $4, std::make_shared<AST::Identifier>($1)));
+        $$ = std::make_shared<AST::Assignment>(
+              $1, std::make_shared<AST::Expr>("+", $4, std::make_shared<AST::Identifier>($1)));
       }
     | IDENTIFIER ASSIGN logic_expr {
         if (!symtab.exists($1)) {
           // since the symbol is not defined, it is a declaration without type annotation
           symtab.addSymbol($1, AST::BaseType::BOOL, {});
-          $$ = std::make_shared<AST::NamedDecl>($1, "bool", $3);
+          $$ = std::make_shared<AST::NamedVariableDecl>(
+                $1, std::make_shared<AST::DataType>(AST::BaseType::BOOL), $3);
           break;
         }
 

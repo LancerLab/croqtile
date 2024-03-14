@@ -11,8 +11,9 @@ void IntLiteral::accept(Choreo::Visitor& v) {}
 void IntList::accept(Choreo::Visitor& v) {}
 void SValList::accept(Choreo::Visitor& v) {}
 void Expr::accept(Choreo::Visitor& v) {}
-void MultiSpans::accept(Choreo::Visitor& v) {}
-void NamedDecl::accept(Choreo::Visitor& v) {}
+void MultiDimSpans::accept(Choreo::Visitor& v) {}
+void NamedTypeDecl::accept(Choreo::Visitor& v) {}
+void NamedVariableDecl::accept(Choreo::Visitor& v) {}
 void IntTuple::accept(Choreo::Visitor& v) {}
 void Assignment::accept(Choreo::Visitor& v) {}
 void IntIndex::accept(Choreo::Visitor& v) {}

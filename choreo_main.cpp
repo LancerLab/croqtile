@@ -118,3 +118,4 @@ int main(int argc, char* argv[]) {
 }
 
 int AST::SymbolTable::anonymous_count = 0;
+int AST::PartialTypeTable::anonymous_count = 0;

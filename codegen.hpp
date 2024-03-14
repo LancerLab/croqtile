@@ -27,8 +27,9 @@ struct FactorCodeGen : public CodeGenerator {
   bool Visit(AST::IntList &) override;
   bool Visit(AST::SValList &) override;
   bool Visit(AST::Expr &) override;
-  bool Visit(AST::MultiSpans &) override;
-  bool Visit(AST::NamedDecl &) override;
+  bool Visit(AST::MultiDimSpans &) override;
+  bool Visit(AST::NamedTypeDecl &) override;
+  bool Visit(AST::NamedVariableDecl &) override;
   bool Visit(AST::IntTuple &) override;
   bool Visit(AST::Assignment &) override;
   bool Visit(AST::IntIndex &) override;
@@ -61,8 +62,9 @@ struct TopsccCodeGen : public CodeGenerator {
   bool Visit(AST::IntList &) override { return true; };
   bool Visit(AST::SValList &) override { return true; };
   bool Visit(AST::Expr &) override { return true; };
-  bool Visit(AST::MultiSpans &) override { return true; };
-  bool Visit(AST::NamedDecl &) override { return true; };
+  bool Visit(AST::MultiDimSpans &) override { return true; };
+  bool Visit(AST::NamedTypeDecl &) override { return true; };
+  bool Visit(AST::NamedVariableDecl &) override { return true; };
   bool Visit(AST::IntTuple &) override { return true; };
   bool Visit(AST::Assignment &) override { return true; };
   bool Visit(AST::IntIndex &) override { return true; };

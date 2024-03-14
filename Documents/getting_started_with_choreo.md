@@ -24,22 +24,27 @@ In addition, certain Choreo-specific types are introduced to ensure consistency 
 ## Variables and Data Types
 Choreo introduces 3 type categories: integer-type, spanned-type, and integer-tuple-type (ituple-type). These types serve for different purposes.
 
-- **Integer Type**. It is designed to fullfil the requirement of program control.  For instance, the factor of parallelization, and dimension value are all integers.
+- **Scalar Type**. It is designed to fullfil the requirement of program control. It consist of *Integer Type* and "Boolean Type".
 - **Spanned Type**. It represents the data type for computation. Apart from referencing the raw data, it also associates data with multi-dimensional ranges, which proves useful for tiling purposes, among others. 
 - **Integer Tuple (I-Tuple) Type**. It represents a group of integer values. A common usage of *i-tuple* is to index multi-dimensional data.
 
 Among the three type categories, *integer* and *ituple* could be well accepted consider it maps to elements of existing languages. However, the *spanned type* is the special one. The following sections will show the detail.
 
-### Integer Types
-Integer types in Choreo is similar to C++ type 'int' or 'int32_t'. It is an signed value which takes 32-bits, ranging from -2^31 ~ 2^31 - 1. The below code illustrates its usage for defining the data and function declaration.
+### Scalar Types
+As described, Scalar types in Choreo includes the *Integer Type* and *Boolean Type*. The *Integer Type* is similar to C++ type 'int' or 'int32_t'. It is an signed value which takes 32-bits, ranging from -2^31 ~ 2^31 - 1. The below code illustrates its usage for defining the data and function declaration.
 ```
 int a;
 __co__ int foo(int b);
 ```
+Operations like integer arithmetics, shifting are all supported. And the syntax is indential to C++ builtin operations.
 In Choreo, we neither provide equivalence of unsigned scalar integers, nor equivalence of 8-bits, 16-bits, 64-bits scalar integers. The reason is simple: these types are not essential for program control purposes. And normally a 32-bits signed integer is enough for such work.
 
+And the *Boolean Type* in Choreo is similar to C++ type 'bool'. The operations on top of Boolean, and conversion between Integers, are identical to these of C++.
+
 ### Spanned Types
-A spanned type is a **Composite Type**. It consists of a **fundamental type**, and a **multi-dimensional-span(mdspan) type**. Either the *fundamental type* or the *mdspan* can not type a data alone. Therefore we deem them as *partial types*. However, in Choreo, the partial type *mdspan* could be manipulated alone.
+A spanned type is a **Composite Type**. It consists of a **fundamental type**, and a **multi-dimensional-span(mdspan) type**. Neither the *fundamental type* nor the *mdspan* is a *complete type*. It implies that neither of them can type a data alone. In Choreo, we name them as *partial types*.
+
+The reason for making the type *partial* is to specifically manipulate *mdspan* alone. This is crucial in AI scenarios where handling multi-dimensional data is common. In the following sections, we will demonstrate how to define such partial types and how to compose partial types into a complete type for declaring/defining multi-dimensional data purpose.
 
 #### The Partial Type: **mdspan**
 Unlike most type systems, *mdspan*, comes as an partial entity for typing. Here we claims it as *partial* because Choreo program is unable to define data as a *mdspan* type. However, *mdspan* itself can be defined solely. Such design is based on the oberservation that loop tiling/blocking cares nothing but the shape of multiple dimension data. Therefore, Choreo allows programmers to manipulate *mdspan* regardless the fundanmental type it associated with, in order to make data shape manipulation easy. Meanwhile, as *mdspan* is a part of a full type, the compiler could apply type checking with it. In this way, it expects to reveal code errors as early (ahead of execution, when applies) as possble.
@@ -87,10 +92,10 @@ f16 [ndims] d1;
 There are fundamental types that Choreo has supported, including:
 
 - Unsigned Integers: *u8/u16/u32*
-- Signed Integers: *i8/i16/i32*
+- Signed Integers: *s8/s16/s32*
 - Floating-points: *f16/bf16/f32*
 
-Note 'i32' and 'int' are different in Choreo. 'i32' is a fundamental type, which can not be applied for a fully typing.
+Note 's32' and 'int' are different in Choreo. 's32' is a fundamental type, which can not be applied for a fully typing.
 
 #### The Memory Qualifier
 A spanned-typed data in Choreo is usually large. For such large data, programmers could move it across different memory hierachy of accelerator to best utilize hardware resource.
@@ -269,6 +274,7 @@ void foobar(float* a) {
 ```
 In the example, we make use of choreo utility function (template) 'make_spanned' to make the spanned data. And in Choreo function 'foo', the parameter 'f32 mdspan<2>' is the correspondance entity. To get the raw pointer of the spanned data, simply use 'data' operation over the spanned parameter. And operation '|d|' obtains the total size of the spanned data 'd'. These are used for calling C++ function 'bar'.
 
+Similarly, *Scalar Type* data can also be passed from/to Choreo function. Neverthless, ituple is only used inside Choreo function.
 
 ## Summary
 Choreo introduces a novel approach to SPMD programming. It favors C++-style coding and is embedded within C++. However, its primary focus is on alleviating the burden of low-level programming details, particularly those related to data manipulation across various memory layers through DMA operations. At times, it is also referred to as the dataflow programming DSL. We developed this tool to support the daily task of constructing high-performance kernels. Our aim is to enable programmers to focus less on the intricacies of language construction and more on higher-level conceptual thinking.

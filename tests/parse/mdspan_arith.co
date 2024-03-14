@@ -1,11 +1,11 @@
 // RUN: choreo -e %s | FileCheck --match-full-lines %s
 
-__co__ bf16 mdspan<3> span_arith(int mdspan<4> d, int c) {
+__co__ bf16 mdspan<3> span_arith(s32 mdspan<4> d, int c) {
   mdspan dims : [9, c];  // shape, mdspan node
   dim1 : [3, 5, 7];
   ituple e = {7, 8, 9};
   sum : dims + d.span;
-  sub : d.span - [d, c];
+  sub : d.span - [d.span(0), c];
   mul : d.span * e;
   div : dims / {2, 3, 4};
   mod : d.span % e {(2), (3)};
@@ -13,15 +13,15 @@ __co__ bf16 mdspan<3> span_arith(int mdspan<4> d, int c) {
 
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: span_arith
-// CHECK:  `- Return type: bf16<>
+// CHECK:  `- Return type: bf16 <3>
 // CHECK:  `- Parameters
-// CHECK:    `-  type: int<>, symbol: d
+// CHECK:    `-  type: s32 <4>, symbol: d
 // CHECK:    `-  type: int, symbol: c
-// CHECK:  `- Decl (span): dims - [ 9 c ]
-// CHECK:  `- Decl (span): dim1 - [ 3 5 7 ]
-// CHECK:  `- Decl (ituple): e = {7, 8, 9}
-// CHECK:  `- Decl (span): sum -  (dims + d.span)
-// CHECK:  `- Decl (span): sub -  (d.span - [ d c ])
-// CHECK:  `- Decl (span): mul -  (d.span * e)
-// CHECK:  `- Decl (span): div -  (dims / {2, 3, 4})
-// CHECK:  `- Decl (span): mod -  (d.span % e {(2), (3)})
+// CHECK:  `- Type Decl: dims - [ 9 c ]
+// CHECK:  `- Type Decl: dim1 - [ 3 5 7 ]
+// CHECK:  `- Var Decl (ituple): e = {7, 8, 9}
+// CHECK:  `- Type Decl: sum -  (dims + d.span)
+// CHECK:  `- Type Decl: sub -  (d.span - [ d.span(0) c ])
+// CHECK:  `- Type Decl: mul -  (d.span * e)
+// CHECK:  `- Type Decl: div -  (dims / {2, 3, 4})
+// CHECK:  `- Type Decl: mod -  (d.span % e {(2), (3)})

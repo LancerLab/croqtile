@@ -12,6 +12,6 @@ __co__ int span_element(int d, int c) {
 // CHECK:  `- Parameters
 // CHECK:    `-  type: int, symbol: d
 // CHECK:    `-  type: int, symbol: c
-// CHECK:  `- Decl (span): dims - [ 9 d ]
-// CHECK:  `- Decl (span): dim1 - [ c 10 ]
-// CHECK:  `- Decl (int): a =  ( (dims(c) + dim1(0))  + d)
+// CHECK:  `- Type Decl: dims - [ 9 d ]
+// CHECK:  `- Type Decl: dim1 - [ c 10 ]
+// CHECK:  `- Var Decl (int): a =  ( (dims(c) + dim1(0))  + d)
