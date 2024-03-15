@@ -9,7 +9,7 @@
 #include "symtab.hpp"
 
 Choreo::location loc;
-AST::Program root;
+AST::Program root(loc);
 AST::SymbolTable symtab;
 
 using namespace AST;

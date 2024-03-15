@@ -31,19 +31,19 @@ all: $(TARGET)
 test: $(TARGET)
 	$(LIT) tests
 
-$(TARGET): scanner.yy.o parser.tab.o choreo_main.o codegen_factor.o ast.o
+$(TARGET): scanner.yy.o parser.tab.o choreo_main.o codegen_factor.o typeinfer.o ast.o
 	$(CC) $(CFLAGS) $^ -o $(TARGET)
 
 scanner.yy.cc: $(LEX_SRC)
 	$(FLEX) -o $@ $(LEX_SRC)
 
-parser.tab.cc parser.tab.hh: $(PARSER_SRC)
+parser.tab.cc parser.tab.hh location.hh: $(PARSER_SRC)
 	$(BISON) $(BISON_FLAGS) $(PARSER_SRC)
 
-%.o : %.cc ast.hpp scanner.hpp symtab.hpp parser.tab.hh
+%.o : %.cc ast.hpp scanner.hpp symtab.hpp parser.tab.hh location.hh
 	$(CC) $(CFLAGS) $< -c -o $@
 
-%.o : %.cpp $(HEADER_FILES)
+%.o : %.cpp $(HEADER_FILES) location.hh
 	$(CC) $(CFLAGS) $< -c -o $@
 
 clean:

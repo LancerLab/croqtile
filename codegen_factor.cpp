@@ -69,7 +69,7 @@ using namespace AST;
 namespace Choreo {
 
 bool FactorCodeGen::BeforeVisit(AST::Node &n) {
-  if (auto p = dyn_cast<Program>(&n)) {
+  if (isa<Program>(&n)) {
     print_fixed_header(os);
   } else if (auto p = dyn_cast<ChoreoFunction>(&n)) {
     print_wrapper_begin(os, p->name);
@@ -158,13 +158,13 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
   return true;
 }
 
-bool FactorCodeGen::Visit(AST::ChoreoFunction &n) { return true; }
+bool FactorCodeGen::Visit(AST::ChoreoFunction &) { return true; }
 
 bool FactorCodeGen::Visit(AST::CppSourceCode &n) {
   os << n.GetCode();
   return true;
 }
 
-bool FactorCodeGen::Visit(AST::Program &n) { return true; }
+bool FactorCodeGen::Visit(AST::Program &) { return true; }
 
 }  // end namespace Choreo

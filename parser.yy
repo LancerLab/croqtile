@@ -133,7 +133,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments pb_statements w_statements span_list mixed_span_list withins iv_exprs require_binds require_clause id_list with_matchers else_clause
 %nterm <AST::ptr<AST::IntList>> int_list
 %nterm <AST::ptr<AST::SValList>> sval_list
-%nterm <AST::ptr<AST::Expr>> term expr cmp_expr span_expr span_term
+%nterm <AST::ptr<AST::Expr>> expr span_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type param_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
 %nterm <AST::ptr<AST::ParamType>> parameter
@@ -166,18 +166,17 @@ program
     : /* Empty */ {}
     | program pass_by      { root.nodes.push_back($2); }
     | program dsl_function { root.nodes.push_back($2); }
-    | END {}
     ;
 
 pass_by
     : CPP_CODE {
-        $$ = std::make_shared<AST::CppSourceCode>($1);
+        $$ = std::make_shared<AST::CppSourceCode>(@1, $1);
       }
     ;
 
 dsl_function
     : ATTR_CO param_type IDENTIFIER LPAREN parameter_list RPAREN LBRACE statements RBRACE {
-        $$ = std::make_shared<AST::ChoreoFunction>();
+        $$ = std::make_shared<AST::ChoreoFunction>(@1);
         $$->name = $3;
         $$->f_decl.name = $3;
         $$->f_decl.ret_type = $2;
@@ -189,23 +188,23 @@ dsl_function
 param_type
     : scalar_type { $$ = $1; }
     | fundamental_type MDSPAN LT NUM GT {
-        $$ = std::make_shared<AST::DataType>($1,
-                std::make_shared<AST::MultiDimSpans>(AST::PartialTypeTable::getAnonName(),
+        $$ = std::make_shared<AST::DataType>(@1, $1,
+                std::make_shared<AST::MultiDimSpans>(@2, AST::PartialTypeTable::getAnonName(),
                 $4));
       }
     ;
 
 scalar_type
-    : INT   { $$ = std::make_shared<AST::DataType>($1); }
-    | BOOL  { $$ = std::make_shared<AST::DataType>($1); }
+    : INT   { $$ = std::make_shared<AST::DataType>(@1, $1); }
+    | BOOL  { $$ = std::make_shared<AST::DataType>(@1, $1); }
     ;
 
 spanned_type
     : fundamental_type unnamed_span_decl {
-        $$ = std::make_shared<AST::DataType>($1, $2);
+        $$ = std::make_shared<AST::DataType>(@1, $1, $2);
       }
     | fundamental_type LBRAKT span_expr RBRAKT {
-        $$ = std::make_shared<AST::DataType>($1, $3);
+        $$ = std::make_shared<AST::DataType>(@1, $1, $3);
       }
     ;
 
@@ -223,34 +222,34 @@ fundamental_type
 
 int_list
     : /* allows the empty list */ {
-        $$ = std::make_shared<AST::IntList>();
+        $$ = std::make_shared<AST::IntList>({});
       }
     | int_list COMMA NUM {
-        $1->Append(std::make_shared<AST::IntLiteral>($3));
+        $1->Append(std::make_shared<AST::IntLiteral>(@3, $3));
         $$ = $1;
       }
     | NUM {
-        $$ = std::make_shared<AST::IntList>();
-        $$->values.push_back(std::make_shared<AST::IntLiteral>($1));
+        $$ = std::make_shared<AST::IntList>(@1);
+        $$->values.push_back(std::make_shared<AST::IntLiteral>(@1, $1));
       }
     ;
 
 sval_list
     : /* allows the empty list */ {
-        $$ = std::make_shared<AST::SValList>();
+        $$ = std::make_shared<AST::SValList>(loc);
       }
     | sval_list COMMA simple_val {
         $1->Append($3);
         $$ = $1;
       }
     | simple_val {
-        $$ = std::make_shared<AST::SValList>();
+        $$ = std::make_shared<AST::SValList>(@1);
         $$->Append($1);
       }
     ;
 
 simple_val
-    : NUM { $$ = std::make_shared<AST::IntLiteral>($1); }
+    : NUM { $$ = std::make_shared<AST::IntLiteral>(@1, $1); }
     | IDENTIFIER {
         if (!symtab.exists($1))
           Choreo::Parser::error(@1,
@@ -266,7 +265,7 @@ simple_val
           Choreo::Parser::error(@1, "expecting symbol `" + $1 +
                                 "' of an integer type.");
 
-        $$ = std::make_shared<AST::Identifier>($1);
+        $$ = std::make_shared<AST::Identifier>(@1, $1);
     	}
     ;
 
@@ -277,33 +276,33 @@ int_val
           exit(1);
         }
 
-        $$ = std::make_shared<AST::NthBound>(std::make_shared<AST::Identifier>($1), $2);
+        $$ = std::make_shared<AST::NthBound>(@1, std::make_shared<AST::Identifier>(@1, $1), $2);
       }
     | simple_val { $$ = $1; }
     ;
 
 bool_literal
-    : TRUE { $$ = std::make_shared<AST::Boolean>(std::string("true")); }
-    | FALSE { $$ = std::make_shared<AST::Boolean>(std::string("false")); }
+    : TRUE { $$ = std::make_shared<AST::Boolean>(@1, std::string("true")); }
+    | FALSE { $$ = std::make_shared<AST::Boolean>(@1, std::string("false")); }
     ;
 
 parameter_list
     : /* Empty */ {
-        $$ = std::make_shared<AST::ParamList>();
+        $$ = std::make_shared<AST::ParamList>(loc);
       }
     | parameter_list COMMA parameter {
         $1->values.push_back($3);
         $$ = $1;
       }
     | parameter {
-        $$ = std::make_shared<AST::ParamList>();
+        $$ = std::make_shared<AST::ParamList>(@1);
         $$->values.push_back($1);
       }
     ;
 
 parameter
     : param_type IDENTIFIER { /* handle parameter type and name here */
-        $$ = std::make_shared<AST::ParamType>(std::pair($1, std::make_shared<AST::Identifier>($2)));
+        $$ = std::make_shared<AST::ParamType>(std::pair($1, std::make_shared<AST::Identifier>(@2, $2)));
         if (symtab.exists($2)) {
           Choreo::Parser::error(@2, "ODR violation: the symbol is already defined.");
           exit(1);
@@ -315,12 +314,12 @@ parameter
       }
     | param_type {
         $$ = std::make_shared<AST::ParamType>(
-              std::pair($1, std::make_shared<AST::Identifier>(AST::SymbolTable::getAnonName())));
+              std::pair($1, std::make_shared<AST::Identifier>(@1, AST::SymbolTable::getAnonName())));
       }
     ;
 
 statements
-    : /* no statement */ { $$ = std::make_shared<AST::MultiNodes>(); }
+    : /* no statement */ { $$ = std::make_shared<AST::MultiNodes>(loc); }
     | statements statement {
         $1->Append($2);
         $$ = $1;
@@ -336,13 +335,13 @@ statement
 
 para_by
     : PARA IDENTIFIER BY NUM LBRACE pb_statements RBRACE {
-        $$ = std::make_shared<AST::ParallelBy>($2, $4);
+        $$ = std::make_shared<AST::ParallelBy>(@1, $2, $4);
         $$->statms = $6;
       }
     ;
 
 pb_statements
-    : /* Empty */ { $$ = std::make_shared<AST::MultiNodes>(); }
+    : /* Empty */ { $$ = std::make_shared<AST::MultiNodes>(loc); }
     | pb_statements pb_statement {
         $1->Append($2);
         $$ = $1;
@@ -361,7 +360,7 @@ assignments
         $$ = $1;
       }
     | assignment {
-        $$ = std::make_shared<AST::MultiNodes>();
+        $$ = std::make_shared<AST::MultiNodes>(@1);
         $$->Append($1);
       }
     ;
@@ -372,7 +371,7 @@ declarations
         $$ = $1;
       }
     | declaration {
-        $$ = std::make_shared<AST::MultiNodes>();
+        $$ = std::make_shared<AST::MultiNodes>(@1);
         $$->Append($1);
       }
     ;
@@ -393,9 +392,9 @@ named_scalar_decl
         assert($1->isScalar() && "Not a scalar type.");
         symtab.addSymbol($2, $1->getBaseType());
         if (!$3)
-          $$ = std::make_shared<AST::NamedVariableDecl>($2, $1);
+          $$ = std::make_shared<AST::NamedVariableDecl>(@2, $2, $1);
         else
-          $$ = std::make_shared<AST::NamedVariableDecl>($2, $1, nullptr, $3);
+          $$ = std::make_shared<AST::NamedVariableDecl>(@2, $2, $1, nullptr, $3);
       }
     ;
 
@@ -411,13 +410,13 @@ named_spanned_decl
           exit(1);
         }
         symtab.addSymbol($3, AST::BaseType::INT, {});
-        $$ = std::make_shared<AST::NamedVariableDecl>($3, $2, $1);
+        $$ = std::make_shared<AST::NamedVariableDecl>(@3, $3, $2, $1);
       }
     ;
 
 s_index
     : LPAREN simple_val RPAREN {
-        $$ = std::make_shared<AST::IntIndex>($2);
+        $$ = std::make_shared<AST::IntIndex>(@2, $2);
       }
     ;
 
@@ -427,7 +426,7 @@ s_index_list
         $$ = $1;
       }
     | s_index {
-        $$ = std::make_shared<AST::IntIndexList>();
+        $$ = std::make_shared<AST::IntIndexList>(@1);
         $$->indices.push_back($1);
       }
     ; /* do not allow empty list */
@@ -443,7 +442,7 @@ span_list
         $$ = $1;
       }
     | span_elem {
-        $$ = std::make_shared<AST::MultiNodes>();
+        $$ = std::make_shared<AST::MultiNodes>(@1);
         $$->Append($1);
       }
     ; // do not allow an empty list
@@ -457,8 +456,8 @@ mixed_span_elem
         if (!symtab.getSymbol($1)->isSpanned())
           Choreo::Parser::error(@1, "expecting a symbol of aggregate type.");
 
-        $$ = std::make_shared<AST::NthBound>(
-            std::make_shared<AST::Identifier>($1), $2);
+        $$ = std::make_shared<AST::NthBound>(@1,
+            std::make_shared<AST::Identifier>(@1, $1), $2);
       }
     | IDENTIFIER FNSPAN s_index {
         if (!symtab.exists($1))
@@ -468,8 +467,8 @@ mixed_span_elem
         if (!symtab.getSymbol($1)->isSpanned())
           Choreo::Parser::error(@1, "expecting a symbol of aggregate type.");
 
-        $$ = std::make_shared<AST::NthBound>(
-            std::make_shared<AST::Identifier>($1+$2), $3);
+        $$ = std::make_shared<AST::NthBound>(@1,
+            std::make_shared<AST::Identifier>(@1, $1+$2), $3);
 
       }
     | simple_val { $$ = $1; }
@@ -477,34 +476,34 @@ mixed_span_elem
 
 mixed_span_list
     : /* Empty list */ {
-        $$ = std::make_shared<AST::MultiNodes>();
+        $$ = std::make_shared<AST::MultiNodes>(loc);
       }
     | mixed_span_list COMMA mixed_span_elem {
         $1->Append($3);
         $$ = $1;
       }
     | mixed_span_elem {
-        $$ = std::make_shared<AST::MultiNodes>();
+        $$ = std::make_shared<AST::MultiNodes>(@1);
         $$->Append($1);
       }
     ;
 
 unnamed_span_decl
     : IDENTIFIER FNSPAN LBRAKT span_list RBRAKT {
-        $$ = std::make_shared<AST::MultiDimSpans>($1, $4);
+        $$ = std::make_shared<AST::MultiDimSpans>(@1, $1, $4);
       }
     | IDENTIFIER LBRAKT span_list RBRAKT {
-        $$ = std::make_shared<AST::MultiDimSpans>($1, $3);
+        $$ = std::make_shared<AST::MultiDimSpans>(@1, $1, $3);
       }
     | LBRAKT mixed_span_list RBRAKT {
-        $$ = std::make_shared<AST::MultiDimSpans>("", $2);
+        $$ = std::make_shared<AST::MultiDimSpans>(@1, "", $2);
       }
     ;
 
 span_val
     : unnamed_span_decl { $$ = $1; }
-    | IDENTIFIER { $$ = std::make_shared<AST::Identifier>($1); }
-    | IDENTIFIER FNSPAN { $$ = std::make_shared<AST::Identifier>($1 + $2); }
+    | IDENTIFIER { $$ = std::make_shared<AST::Identifier>(@1, $1); }
+    | IDENTIFIER FNSPAN { $$ = std::make_shared<AST::Identifier>(@1, $1 + $2); }
     ;
 
 named_span_decl
@@ -514,7 +513,7 @@ named_span_decl
           exit(1);
         }
         symtab.addSymbol($2, AST::BaseType::INT, {});
-        $$ = std::make_shared<AST::NamedTypeDecl>($2, $4);
+        $$ = std::make_shared<AST::NamedTypeDecl>(@2, $2, $4);
       }
     | MDSPAN LT NUM GT IDENTIFIER COL span_expr {
         // TODO: check if the span defined aligned with declaration
@@ -528,7 +527,7 @@ named_span_decl
           exit(1);
         }
         symtab.addSymbol($5, AST::BaseType::INT, {});
-        $$ = std::make_shared<AST::NamedTypeDecl>($5, $7);
+        $$ = std::make_shared<AST::NamedTypeDecl>(@5, $5, $7);
       }
     | IDENTIFIER COL span_expr {
         if (symtab.exists($1)) {
@@ -536,20 +535,20 @@ named_span_decl
           exit(1);
         }
         symtab.addSymbol($1, AST::BaseType::INT, {});
-        $$ = std::make_shared<AST::NamedTypeDecl>($1, $3);
+        $$ = std::make_shared<AST::NamedTypeDecl>(@1, $1, $3);
       }
     ;
 
 unnamed_tuple_decl
     : LBRACE sval_list RBRACE {
-        $$ = std::make_shared<AST::IntTuple>("", $2);
+        $$ = std::make_shared<AST::IntTuple>(@1, "", $2);
       }
     | IDENTIFIER LBRACE s_index_list RBRACE {
         // anchor
         if (!symtab.exists($1))
           Choreo::Parser::error(@1, "The symbol has not been defined.");
 
-        $$ = std::make_shared<AST::IntTuple>($1, $3);
+        $$ = std::make_shared<AST::IntTuple>(@1, $1, $3);
         #if 0
         auto src_ituple = ituple_symtab.getSymbol($1);
         auto ret_tuple = std::make_shared<AST::SValList>();
@@ -565,7 +564,7 @@ unnamed_tuple_decl
 ituple_val
     : unnamed_tuple_decl { $$ = $1; }
     | IDENTIFIER {
-        $$ = std::make_shared<AST::Identifier>($1);
+        $$ = std::make_shared<AST::Identifier>(@1, $1);
       }
     ;
 
@@ -574,14 +573,14 @@ named_tuple_decl
         /* TODO: workaround: use INT for ituple's base type use a dedicated type for ituple in symboltable */
         //ituple_symtab.addITupleSymbol($2, $4);
         symtab.addSymbol($2, AST::BaseType::INT, {});
-        $$ = std::make_shared<AST::NamedVariableDecl>(
-              $2, std::make_shared<AST::DataType>(AST::BaseType::ITUPLE), nullptr, $4);
+        $$ = std::make_shared<AST::NamedVariableDecl>(@2,
+              $2, std::make_shared<AST::DataType>(@1, AST::BaseType::ITUPLE), nullptr, $4);
       }
     | IDENTIFIER ASSIGN unnamed_tuple_decl {
         //ituple_symtab.addITupleSymbol($1, $3);
         symtab.addSymbol($1, AST::BaseType::INT, {});
-        $$ = std::make_shared<AST::NamedVariableDecl>(
-              $1, std::make_shared<AST::DataType>(AST::BaseType::ITUPLE), nullptr, $3);
+        $$ = std::make_shared<AST::NamedVariableDecl>(@1,
+              $1, std::make_shared<AST::DataType>(@1, AST::BaseType::ITUPLE), nullptr, $3);
       }
     ; // do not allow uninitialized ituple
 
@@ -592,8 +591,8 @@ storage
     ;
 
 storage_qual
-    : /* Empty */ { $$ = std::make_shared<AST::Memory>(AST::Storage::DEFAULT); }
-    | storage { $$ = std::make_shared<AST::Memory>($1); }
+    : /* Empty */ { $$ = std::make_shared<AST::Memory>(loc); }
+    | storage { $$ = std::make_shared<AST::Memory>(@1, $1); }
     ;
 
 assignment
@@ -601,73 +600,73 @@ assignment
         if (!symtab.exists($1)) {
           // since the symbol is not defined, it is a declaration without type annotation
           symtab.addSymbol($1, AST::BaseType::UNKNOWN, {});
-          $$ = std::make_shared<AST::NamedVariableDecl>(
-                $1, std::make_shared<AST::DataType>(AST::BaseType::ITUPLE), nullptr, $3);
+          $$ = std::make_shared<AST::NamedVariableDecl>(@1,
+                $1, std::make_shared<AST::DataType>(@1, AST::BaseType::ITUPLE), nullptr, $3);
           break;
         }
-        $$ = std::make_shared<AST::Assignment>($1, $3);
+        $$ = std::make_shared<AST::Assignment>(@2, $1, $3);
       }
     | IDENTIFIER PLUS ASSIGN expr {
         if (!symtab.exists($1)) {
           // since the symbol is not defined, it is a declaration without type annotation
           symtab.addSymbol($1, AST::BaseType::INT, {});
-          $$ = std::make_shared<AST::NamedVariableDecl>(
-                $1, std::make_shared<AST::DataType>(AST::BaseType::ITUPLE), nullptr, $4);
+          $$ = std::make_shared<AST::NamedVariableDecl>(@1,
+                $1, std::make_shared<AST::DataType>(@1, AST::BaseType::ITUPLE), nullptr, $4);
           break;
         }
-        $$ = std::make_shared<AST::Assignment>(
-              $1, std::make_shared<AST::Expr>("+", $4, std::make_shared<AST::Identifier>($1)));
+        $$ = std::make_shared<AST::Assignment>(@1,
+              $1, std::make_shared<AST::Expr>(@1, "+", $4, std::make_shared<AST::Identifier>(@1, $1)));
       }
     ;
 
 expr
-    : expr PLUS expr { $$ = std::make_shared<AST::Expr>("+", $1, $3); }
-    | expr MINUS expr { $$ = std::make_shared<AST::Expr>("-", $1, $3); }
-    | expr STAR expr { $$ = std::make_shared<AST::Expr>("*", $1, $3); }
-    | expr SLASH expr { $$ = std::make_shared<AST::Expr>("/", $1, $3); }
-    | expr PECET expr { $$ = std::make_shared<AST::Expr>("%", $1, $3); }
-    | expr OR expr { $$ = std::make_shared<AST::Expr>("||", $1, $3); }
-    | expr AND expr { $$ = std::make_shared<AST::Expr>("&&", $1, $3); }
-    | NOT expr { $$ = std::make_shared<AST::Expr>("!", $2); }
+    : expr PLUS expr { $$ = std::make_shared<AST::Expr>(@1, "+", $1, $3); }
+    | expr MINUS expr { $$ = std::make_shared<AST::Expr>(@1, "-", $1, $3); }
+    | expr STAR expr { $$ = std::make_shared<AST::Expr>(@1, "*", $1, $3); }
+    | expr SLASH expr { $$ = std::make_shared<AST::Expr>(@1, "/", $1, $3); }
+    | expr PECET expr { $$ = std::make_shared<AST::Expr>(@1, "%", $1, $3); }
+    | expr OR expr { $$ = std::make_shared<AST::Expr>(@1, "||", $1, $3); }
+    | expr AND expr { $$ = std::make_shared<AST::Expr>(@1, "&&", $1, $3); }
+    | NOT expr { $$ = std::make_shared<AST::Expr>(@1, "!", $2); }
     | LPAREN expr RPAREN { $$ = $2; }
-    | LPAREN expr RPAREN QES expr COL expr { $$ = std::make_shared<AST::Expr>("$", $2, $5, $7); }
-    | expr LT expr { $$ = std::make_shared<AST::Expr>("<", $1, $3); }
-    | expr GT expr { $$ = std::make_shared<AST::Expr>(">", $1, $3); }
-    | expr EQ expr { $$ = std::make_shared<AST::Expr>("==", $1, $3); }
-    | expr NE expr { $$ = std::make_shared<AST::Expr>("!=", $1, $3); }
-    | expr LE expr { $$ = std::make_shared<AST::Expr>("<=", $1, $3); }
-    | expr GE expr { $$ = std::make_shared<AST::Expr>(">=", $1, $3); }
-    | bool_literal { $$ = std::make_shared<AST::Expr>($1); }
-    | int_val { $$ = std::make_shared<AST::Expr>($1); }
+    | LPAREN expr RPAREN QES expr COL expr { $$ = std::make_shared<AST::Expr>(@1, "$", $2, $5, $7); }
+    | expr LT expr { $$ = std::make_shared<AST::Expr>(@1, "<", $1, $3); }
+    | expr GT expr { $$ = std::make_shared<AST::Expr>(@1, ">", $1, $3); }
+    | expr EQ expr { $$ = std::make_shared<AST::Expr>(@1, "==", $1, $3); }
+    | expr NE expr { $$ = std::make_shared<AST::Expr>(@1, "!=", $1, $3); }
+    | expr LE expr { $$ = std::make_shared<AST::Expr>(@1, "<=", $1, $3); }
+    | expr GE expr { $$ = std::make_shared<AST::Expr>(@1, ">=", $1, $3); }
+    | bool_literal { $$ = std::make_shared<AST::Expr>(@1, $1); }
+    | int_val { $$ = std::make_shared<AST::Expr>(@1, $1); }
     ;
 
 span_expr
-    : span_expr PLUS span_expr { $$ = std::make_shared<AST::Expr>("+", $1, $3); }
-    | span_expr MINUS span_expr { $$ = std::make_shared<AST::Expr>("-", $1, $3); }
-    | span_expr STAR ituple_val { $$ = std::make_shared<AST::Expr>("*", $1, $3); }
-    | span_expr SLASH ituple_val { $$ = std::make_shared<AST::Expr>("/", $1, $3); }
-    | span_expr PECET ituple_val { $$ = std::make_shared<AST::Expr>("%", $1, $3); }
+    : span_expr PLUS span_expr { $$ = std::make_shared<AST::Expr>(@1, "+", $1, $3); }
+    | span_expr MINUS span_expr { $$ = std::make_shared<AST::Expr>(@1, "-", $1, $3); }
+    | span_expr STAR ituple_val { $$ = std::make_shared<AST::Expr>(@1, "*", $1, $3); }
+    | span_expr SLASH ituple_val { $$ = std::make_shared<AST::Expr>(@1, "/", $1, $3); }
+    | span_expr PECET ituple_val { $$ = std::make_shared<AST::Expr>(@1, "%", $1, $3); }
     | LPAREN span_expr RPAREN { $$ = $2; }
-    | span_val { $$ = std::make_shared<AST::Expr>($1); }
+    | span_val { $$ = std::make_shared<AST::Expr>(@1, $1); }
     ;
 
 if_else
-    : IF expr LBRACE statements RBRACE else_clause { $$ = std::make_shared<AST::IfElse>($2, $4, $6);}
+    : IF expr LBRACE statements RBRACE else_clause { $$ = std::make_shared<AST::IfElse>(@1, $2, $4, $6);}
     ;
 
 else_clause
     : ELSE LBRACE statements RBRACE { $$ = $3; }
-    | /* empty */ { $$ = std::make_shared<AST::MultiNodes>(); }
+    | /* empty */ { $$ = std::make_shared<AST::MultiNodes>(loc); }
     ;
 
 with_block
     : WITH withins LBRACE w_statements RBRACE {
-        $$ = std::make_shared<AST::WithBlock>();
+        $$ = std::make_shared<AST::WithBlock>(@1);
         $$->withins = $2;
         $$->statms = $4;
       }
     | WITH withins require_clause LBRACE w_statements RBRACE {
-        $$ = std::make_shared<AST::WithBlock>();
+        $$ = std::make_shared<AST::WithBlock>(@1);
         $$->withins = $2;
         $$->reqs = $3;
         $$->statms = $5;
@@ -680,7 +679,7 @@ withins
         $$ = $1;
       }
     | within {
-        $$ = std::make_shared<AST::MultiNodes>();
+        $$ = std::make_shared<AST::MultiNodes>(@1);
         $$->Append($1);
       }
     ; /* do not allow empty within */
@@ -688,11 +687,11 @@ withins
 within
     : IDENTIFIER IN span_val {
         symtab.addSymbol($1, AST::BaseType::INT, {});
-        $$ = std::make_shared<AST::WithIn>(std::make_shared<AST::Identifier>($1), $3);
+        $$ = std::make_shared<AST::WithIn>(@1, std::make_shared<AST::Identifier>(@1, $1), $3);
       }
     | IDENTIFIER ASSIGN LBRACE with_matchers RBRACE IN span_val {
         symtab.addSymbol($1, AST::BaseType::INT, {});
-        $$ = std::make_shared<AST::WithIn>(std::make_shared<AST::Identifier>($1), $7);
+        $$ = std::make_shared<AST::WithIn>(@1, std::make_shared<AST::Identifier>(@1, $1), $7);
         $$->with_matchers = $4;
       }
     ;
@@ -711,7 +710,7 @@ require_binds
         $$ = $1;
       }
     | require_bind {
-        $$ = std::make_shared<AST::MultiNodes>();
+        $$ = std::make_shared<AST::MultiNodes>(@1);
         $$->Append($1);
       }
     ; /* do not allow empty require_bind */
@@ -723,13 +722,13 @@ require_bind
         if (!symtab.exists($3))
           Choreo::Parser::error(@3, "The symbol has not been defined.");
 
-        $$ = std::make_shared<AST::RequireBind>(std::make_shared<AST::Identifier>($1),
-                                           std::make_shared<AST::Identifier>($3));
+        $$ = std::make_shared<AST::RequireBind>(@1, std::make_shared<AST::Identifier>(@1, $1),
+                                           std::make_shared<AST::Identifier>(@3, $3));
       }
     ;
 
 w_statements
-    : /*Empty statement */ { $$ = std::make_shared<AST::MultiNodes>(); }
+    : /*Empty statement */ { $$ = std::make_shared<AST::MultiNodes>(loc); }
     | w_statements w_statement {
         $1->Append($2);
         $$ = $1;
@@ -748,7 +747,7 @@ w_statement
 
 foreach_block
     : ITER iv_exprs LBRACE w_statements RBRACE {
-        $$ = std::make_shared<AST::ForeachBlock>($2, $4);
+        $$ = std::make_shared<AST::ForeachBlock>(@1, $2, $4);
       }
     ;
 
@@ -758,28 +757,28 @@ iv_exprs
         $$ = $1;
       }
     | iv_expr {
-        $$ = std::make_shared<AST::MultiNodes>();
+        $$ = std::make_shared<AST::MultiNodes>(@1);
         $$->Append($1);
       }
     ; /* do not allow the empty ivs */
 
 iv_expr
-    : IDENTIFIER { $$ = std::make_shared<AST::Identifier>($1); }
+    : IDENTIFIER { $$ = std::make_shared<AST::Identifier>(@1, $1); }
     ;
 
 dma_statement
     : IDENTIFIER ASSIGN DMA dma_operation chunkat_expr TRANS storage {
-        $$ = std::make_shared<AST::DMA>(
+        $$ = std::make_shared<AST::DMA>(@3,
               $4,
-              std::make_shared<AST::Identifier>($1),
+              std::make_shared<AST::Identifier>(@1, $1),
               $5,
-              std::make_shared<AST::Memory>($7));
+              std::make_shared<AST::Memory>(@7, $7));
       }
     | IDENTIFIER ASSIGN DMA dma_operation IDENTIFIER TRANS chunkat_expr {
-        $$ = std::make_shared<AST::DMA>(
+        $$ = std::make_shared<AST::DMA>(@3,
               $4,
-              std::make_shared<AST::Identifier>($1),
-              std::make_shared<AST::Identifier>($5),
+              std::make_shared<AST::Identifier>(@1, $1),
+              std::make_shared<AST::Identifier>(@5, $5),
               $7);
       }
     ;
@@ -792,46 +791,46 @@ dma_operation
 
 chunkat_expr
     : IDENTIFIER CHUNKAT LPAREN id_list RPAREN {
-        $$ = std::make_shared<AST::ChunkAt>(
-              std::make_shared<AST::Identifier>($1), $4);
+        $$ = std::make_shared<AST::ChunkAt>(@1,
+              std::make_shared<AST::Identifier>(@1,$1), $4);
       }
     ;
 
 id_list
     : id_list COMMA IDENTIFIER {
-        $1->Append(std::make_shared<AST::Identifier>($3));
+        $1->Append(std::make_shared<AST::Identifier>(@3, $3));
         $$ = $1;
       }
     | IDENTIFIER {
-        $$ = std::make_shared<AST::MultiNodes>();
-        $$->Append(std::make_shared<AST::Identifier>($1));
+        $$ = std::make_shared<AST::MultiNodes>(@1);
+        $$->Append(std::make_shared<AST::Identifier>(@1, $1));
       }
     ;
 
 with_matchers /* TODO: this special case is pattern-match ids for with-block */
     : with_matchers COMMA IDENTIFIER {
-        $1->Append(std::make_shared<AST::Identifier>($3));
+        $1->Append(std::make_shared<AST::Identifier>(@3, $3));
         symtab.addSymbol($3, AST::BaseType::INT); /* in withins, this values should be int only */
         $$ = $1;
       }
     | IDENTIFIER {
-        $$ = std::make_shared<AST::MultiNodes>();
+        $$ = std::make_shared<AST::MultiNodes>(@1);
         symtab.addSymbol($1, AST::BaseType::INT); /* in withins, this values should be int only */
-        $$->Append(std::make_shared<AST::Identifier>($1));
+        $$->Append(std::make_shared<AST::Identifier>(@1, $1));
       }
     ;
 
 wait_statement
     : WAIT IDENTIFIER {
-        $$ = std::make_shared<AST::Wait>(
-                std::make_shared<AST::Identifier>($2));
+        $$ = std::make_shared<AST::Wait>(@1,
+                std::make_shared<AST::Identifier>(@2, $2));
       }
     ;
 
 call_statement
     : CALL IDENTIFIER LPAREN id_list RPAREN {
-        $$ = std::make_shared<AST::Call>(
-                std::make_shared<AST::Identifier>($2), $4);
+        $$ = std::make_shared<AST::Call>(@1,
+                std::make_shared<AST::Identifier>(@2, $2), $4);
       }
     ;
 

@@ -32,15 +32,18 @@ enum class ScalarType {
 enum class Storage { LOCAL, SHARED, GLOBAL, DEFAULT, NONE };
 
 struct MDSpanType {
-  std::vector<int> val_nos;  // value numbers
-  bool dim_count = -1;       // dim_count is used when no value appears
+  std::vector<int> val_nos; // value numbers
+  int dim_count = -1;       // dim_count is used when no value appears
 
   MDSpanType(std::initializer_list<int> init) {
     for (auto itr = init.begin(); itr != init.end(); ++itr)
       val_nos.push_back(*itr);
+    dim_count = val_nos.size();
   }
 
   MDSpanType() {}
+
+  bool isValid() { return dim_count != -1; }
 };
 
 class Symbol {
