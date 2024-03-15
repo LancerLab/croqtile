@@ -4,11 +4,13 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <cassert>
 
 namespace AST {
 
 // BaseType, FundamentalType, and ScalarType
-enum class BaseType { F32, F16, BF16, U32, S32, U16, S16, U8, S8, INT, BOOL, ITUPLE };
+// if the type needs deduction, mark it as 'UNKNOWN'
+enum class BaseType { F32, F16, BF16, U32, S32, U16, S16, U8, S8, INT, BOOL, ITUPLE, UNKNOWN };
 
 enum class FundamentalType {
   F32  = (int)BaseType::F32,
@@ -29,46 +31,29 @@ enum class ScalarType {
 
 enum class Storage { LOCAL, SHARED, GLOBAL, DEFAULT, NONE };
 
+struct MDSpanType {
+  std::vector<int> val_nos;  // value numbers
+  bool dim_count = -1;       // dim_count is used when no value appears
 
-#if 0
-enum class SymbolType {
-  MDSPANS,
-  MINDS,
-  F32,
-  F16,
-  BF16,
-  U16,
-  S16,
-  U8,
-  S8,
-  U32,
-  S32,
-  INT,
-};
-#endif
-
-struct SpanType {
-  std::vector<int> values;
-
-  SpanType(std::initializer_list<int> init) {
+  MDSpanType(std::initializer_list<int> init) {
     for (auto itr = init.begin(); itr != init.end(); ++itr)
-      values.push_back(*itr);
+      val_nos.push_back(*itr);
   }
 
-  SpanType() {}
+  MDSpanType() {}
 };
 
 class Symbol {
  public:
-  std::string name;  // The identifier's name
-  BaseType type;     // The identifier's base type
-  SpanType s_type;   // The identifier's span type
+  std::string name;     // The identifier's name
+  BaseType type;        // The identifier's base type
+  MDSpanType s_type;    // The identifier's span type
   bool spanned = false;
 
   // Constructor
   Symbol(const std::string& n, BaseType t)
       : name(n), type(t), s_type(), spanned(false) {}
-  Symbol(const std::string& n, BaseType t, SpanType st)
+  Symbol(const std::string& n, BaseType t, MDSpanType st)
       : name(n), type(t), s_type(st), spanned(true) {}
   Symbol() {}
 
@@ -85,9 +70,9 @@ inline static BaseType getTypeFromString(const std::string& input) {
   };
 
   auto it = typeMap.find(input);
-  if (it != typeMap.end()) return it->second;
+  assert (it != typeMap.end()&& "incorrect type string");
 
-  assert(0 && "incorrect type string");
+  return it->second;
 }
 
 inline static std::string getStringFrom(BaseType dataType) {
@@ -99,9 +84,9 @@ inline static std::string getStringFrom(BaseType dataType) {
   };
 
   auto it = enumToString.find(dataType);
-  if (it != enumToString.end()) return it->second;
+  assert(it != enumToString.end() && "unsupported type.");
 
-  assert(0 && "unsupported type.");
+  return it->second;
 }
 
 struct PartialType {
@@ -151,7 +136,7 @@ class SymbolTable {
     table[name] = Symbol(name, type);
   }
 
-  void addSymbol(const std::string& name, BaseType type, SpanType s_type) {
+  void addSymbol(const std::string& name, BaseType type, MDSpanType s_type) {
     table[name] = Symbol(name, type, s_type);
   }
 

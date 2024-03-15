@@ -9,6 +9,7 @@ __co__ bf16 mdspan<3> span_arith(s32 mdspan<4> d, int c) {
   mul : d.span * e;
   div : dims / {2, 3, 4};
   mod : d.span % e {(2), (3)};
+  new : d.span / {7, 8, 9} * {1, 2};
 }
 
 // CHECK: ChoreoFunction
@@ -25,3 +26,4 @@ __co__ bf16 mdspan<3> span_arith(s32 mdspan<4> d, int c) {
 // CHECK:  `- Type Decl: mul -  (d.span * e)
 // CHECK:  `- Type Decl: div -  (dims / {2, 3, 4})
 // CHECK:  `- Type Decl: mod -  (d.span % e {(2), (3)})
+// CHECK:  `- Type Decl: new -  ( (d.span / {7, 8, 9})  * {1, 2})

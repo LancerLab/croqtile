@@ -105,7 +105,6 @@ void choreo_info(const char *message) {
   BIND    "<->"
 ;
 
-
 // instead of union, using c++17 variant for terminal and non-terminals
 %define api.value.type variant
 
@@ -130,11 +129,11 @@ void choreo_info(const char *message) {
 %nterm <AST::Storage> storage
 %nterm <AST::BaseType> fundamental_type
 %nterm <AST::ptr<AST::Memory>> storage_qual
-%nterm <AST::ptr<AST::Node>> pass_by foreach_block simple_val span_val ituple_val int_val bool_val declaration statement assignment pb_statement w_statement dma_statement wait_statement call_statement span_elem mixed_span_elem iv_expr if_else
-%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments pb_statements w_statements iterate_statements span_list mixed_span_list withins iv_exprs require_binds require_clause id_list with_matchers else_clause
+%nterm <AST::ptr<AST::Node>> pass_by foreach_block simple_val span_val ituple_val int_val bool_literal declaration statement assignment pb_statement w_statement dma_statement wait_statement call_statement span_elem mixed_span_elem iv_expr if_else optional_scalar_init
+%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments pb_statements w_statements span_list mixed_span_list withins iv_exprs require_binds require_clause id_list with_matchers else_clause
 %nterm <AST::ptr<AST::IntList>> int_list
 %nterm <AST::ptr<AST::SValList>> sval_list
-%nterm <AST::ptr<AST::Expr>> term expr cmp_expr logic_val logic_sub_term logic_term logic_expr span_expr span_term
+%nterm <AST::ptr<AST::Expr>> term expr cmp_expr span_expr span_term
 %nterm <AST::ptr<AST::DataType>> scalar_type param_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
 %nterm <AST::ptr<AST::ParamType>> parameter
@@ -142,14 +141,24 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::MultiDimSpans>> unnamed_span_decl
 %nterm <AST::ptr<AST::NamedTypeDecl>> named_span_decl
 %nterm <AST::ptr<AST::NamedVariableDecl>> named_tuple_decl named_scalar_decl named_spanned_decl
-%nterm <AST::ptr<AST::IntTuple>> unnamed_tuple_decl tuple_assign
+%nterm <AST::ptr<AST::IntTuple>> unnamed_tuple_decl
 %nterm <AST::ptr<AST::IntIndex>> s_index
 %nterm <AST::ptr<AST::IntIndexList>> s_index_list
 %nterm <AST::ptr<AST::WithBlock>> with_block
 %nterm <AST::ptr<AST::WithIn>> within
-%nterm <AST::ptr<AST::RequireBind>> require_bind 
+%nterm <AST::ptr<AST::RequireBind>> require_bind
 %nterm <AST::ptr<AST::ParallelBy>> para_by
 %nterm <AST::ptr<AST::ChunkAt>> chunkat_expr
+
+// precedence (low to high) and associativity
+%right ASSIGN
+%right QES COL
+%left OR
+%left AND
+%right NOT
+%nonassoc LT GT LE GE EQ NE
+%left PLUS MINUS
+%left STAR SLASH PECET
 
 %%
 
@@ -273,20 +282,9 @@ int_val
     | simple_val { $$ = $1; }
     ;
 
-bool_val
+bool_literal
     : TRUE { $$ = std::make_shared<AST::Boolean>(std::string("true")); }
     | FALSE { $$ = std::make_shared<AST::Boolean>(std::string("false")); }
-    | IDENTIFIER {
-        if (!symtab.exists($1)) {
-          Choreo::Parser::error(@1, ": the symbol '" + $1 + "` is not defined.");
-          exit(1);
-        }
-        if (symtab.getSymbol($1)->baseType() != AST::BaseType::BOOL)
-          Choreo::Parser::error(@1, "expecting symbol `" + $1 +
-                                "' of a bool type.");
-
-        $$ = std::make_shared<AST::Identifier>($1);
-    }
     ;
 
 parameter_list
@@ -387,33 +385,23 @@ declaration
     ;
 
 named_scalar_decl
-    : scalar_type IDENTIFIER {
+    : scalar_type IDENTIFIER optional_scalar_init {
         if (symtab.exists($2)) {
           Choreo::Parser::error(@2, "ODR violation: the symbol is already defined.");
           exit(1);
         }
-        auto type = symtab.getSymbol($2)->baseType();
-        symtab.addSymbol($2, type);
-        $$ = std::make_shared<AST::NamedVariableDecl>($2, $1);
+        assert($1->isScalar() && "Not a scalar type.");
+        symtab.addSymbol($2, $1->getBaseType());
+        if (!$3)
+          $$ = std::make_shared<AST::NamedVariableDecl>($2, $1);
+        else
+          $$ = std::make_shared<AST::NamedVariableDecl>($2, $1, nullptr, $3);
       }
-    | INT IDENTIFIER ASSIGN expr {
-        if (symtab.exists($2)) {
-          Choreo::Parser::error(@2, "ODR violation: the symbol is already defined.");
-          exit(1);
-        }
-        symtab.addSymbol($2, $1);
-        $$ = std::make_shared<AST::NamedVariableDecl>(
-              $2, std::make_shared<AST::DataType>(AST::BaseType::INT), nullptr, $4);
-      }
-    | BOOL IDENTIFIER ASSIGN logic_expr {
-        if (symtab.exists($2)) {
-          Choreo::Parser::error(@2, "ODR violation: the symbol is already defined.");
-          exit(1);
-        }
-        symtab.addSymbol($2, $1);
-        $$ = std::make_shared<AST::NamedVariableDecl>(
-              $2, std::make_shared<AST::DataType>(AST::BaseType::BOOL), nullptr, $4);
-      }
+    ;
+
+optional_scalar_init
+    : /*Empty */        { $$ = nullptr; }
+    | ASSIGN expr       { $$ = $2; }
     ;
 
 named_spanned_decl
@@ -612,12 +600,11 @@ assignment
     : IDENTIFIER ASSIGN expr {
         if (!symtab.exists($1)) {
           // since the symbol is not defined, it is a declaration without type annotation
-          symtab.addSymbol($1, AST::BaseType::INT, {});
+          symtab.addSymbol($1, AST::BaseType::UNKNOWN, {});
           $$ = std::make_shared<AST::NamedVariableDecl>(
                 $1, std::make_shared<AST::DataType>(AST::BaseType::ITUPLE), nullptr, $3);
           break;
         }
-
         $$ = std::make_shared<AST::Assignment>($1, $3);
       }
     | IDENTIFIER PLUS ASSIGN expr {
@@ -628,85 +615,44 @@ assignment
                 $1, std::make_shared<AST::DataType>(AST::BaseType::ITUPLE), nullptr, $4);
           break;
         }
-
         $$ = std::make_shared<AST::Assignment>(
               $1, std::make_shared<AST::Expr>("+", $4, std::make_shared<AST::Identifier>($1)));
-      }
-    | IDENTIFIER ASSIGN logic_expr {
-        if (!symtab.exists($1)) {
-          // since the symbol is not defined, it is a declaration without type annotation
-          symtab.addSymbol($1, AST::BaseType::BOOL, {});
-          $$ = std::make_shared<AST::NamedVariableDecl>(
-                $1, std::make_shared<AST::DataType>(AST::BaseType::BOOL), nullptr, $3);
-          break;
-        }
-
-        $$ = std::make_shared<AST::Assignment>($1, $3);
       }
     ;
 
 expr
-    : expr PLUS term { $$ = std::make_shared<AST::Expr>("+", $1, $3); }
-    | expr MINUS term { $$ = std::make_shared<AST::Expr>("-", $1, $3); }
-    | logic_expr QES expr COL expr { $$ = std::make_shared<AST::Expr>("$", $1, $3, $5); }
-    | term { $$ = $1; }
-    ;
-
-term
-    : term STAR int_val { $$ = std::make_shared<AST::Expr>("*", $1, $3); }
-    | term SLASH int_val { $$ = std::make_shared<AST::Expr>("/", $1, $3); }
-    | term PECET int_val { $$ = std::make_shared<AST::Expr>("%", $1, $3); }
+    : expr PLUS expr { $$ = std::make_shared<AST::Expr>("+", $1, $3); }
+    | expr MINUS expr { $$ = std::make_shared<AST::Expr>("-", $1, $3); }
+    | expr STAR expr { $$ = std::make_shared<AST::Expr>("*", $1, $3); }
+    | expr SLASH expr { $$ = std::make_shared<AST::Expr>("/", $1, $3); }
+    | expr PECET expr { $$ = std::make_shared<AST::Expr>("%", $1, $3); }
+    | expr OR expr { $$ = std::make_shared<AST::Expr>("||", $1, $3); }
+    | expr AND expr { $$ = std::make_shared<AST::Expr>("&&", $1, $3); }
+    | NOT expr { $$ = std::make_shared<AST::Expr>("!", $2); }
     | LPAREN expr RPAREN { $$ = $2; }
-    | int_val { $$ = std::make_shared<AST::Expr>($1); }
-    ;
-
-span_expr
-    : span_expr PLUS span_term { $$ = std::make_shared<AST::Expr>("+", $1, $3); }
-    | span_expr MINUS span_term { $$ = std::make_shared<AST::Expr>("-", $1, $3); }
-    | span_term { $$ = $1; }
-    ;
-
-span_term
-    : span_term STAR ituple_val { $$ = std::make_shared<AST::Expr>("*", $1, $3); }
-    | span_term SLASH ituple_val { $$ = std::make_shared<AST::Expr>("/", $1, $3); }
-    | span_term PECET ituple_val { $$ = std::make_shared<AST::Expr>("%", $1, $3); }
-    | LPAREN span_expr RPAREN { $$ = $2; }
-    | span_val { $$ = std::make_shared<AST::Expr>($1); }
-    ;
-
-cmp_expr
-    : expr LT expr { $$ = std::make_shared<AST::Expr>("<", $1, $3); }
+    | LPAREN expr RPAREN QES expr COL expr { $$ = std::make_shared<AST::Expr>("$", $2, $5, $7); }
+    | expr LT expr { $$ = std::make_shared<AST::Expr>("<", $1, $3); }
     | expr GT expr { $$ = std::make_shared<AST::Expr>(">", $1, $3); }
     | expr EQ expr { $$ = std::make_shared<AST::Expr>("==", $1, $3); }
     | expr NE expr { $$ = std::make_shared<AST::Expr>("!=", $1, $3); }
     | expr LE expr { $$ = std::make_shared<AST::Expr>("<=", $1, $3); }
     | expr GE expr { $$ = std::make_shared<AST::Expr>(">=", $1, $3); }
+    | bool_literal { $$ = std::make_shared<AST::Expr>($1); }
+    | int_val { $$ = std::make_shared<AST::Expr>($1); }
     ;
 
-logic_expr
-    : logic_expr OR logic_term { $$ = std::make_shared<AST::Expr>("||", $1, $3); }
-    | logic_expr QES logic_expr COL logic_expr { $$ = std::make_shared<AST::Expr>("$", $1, $3, $5); }
-    | logic_term { $$ = $1; }
-    ;
-
-logic_term
-    : logic_term AND logic_sub_term { $$ = std::make_shared<AST::Expr>("&&", $1, $3); }
-    | logic_sub_term { $$ = $1; }
-    ;
-
-logic_sub_term
-    : NOT logic_val { $$ = std::make_shared<AST::Expr>("!", $2); }
-    | logic_val { $$ = $1; }
-    ;
-
-logic_val
-    : LPAREN logic_expr RPAREN { $$ = $2; }
-    | cmp_expr { $$ = std::make_shared<AST::Expr>($1); }
-    | bool_val { $$ = std::make_shared<AST::Expr>($1); }
+span_expr
+    : span_expr PLUS span_expr { $$ = std::make_shared<AST::Expr>("+", $1, $3); }
+    | span_expr MINUS span_expr { $$ = std::make_shared<AST::Expr>("-", $1, $3); }
+    | span_expr STAR ituple_val { $$ = std::make_shared<AST::Expr>("*", $1, $3); }
+    | span_expr SLASH ituple_val { $$ = std::make_shared<AST::Expr>("/", $1, $3); }
+    | span_expr PECET ituple_val { $$ = std::make_shared<AST::Expr>("%", $1, $3); }
+    | LPAREN span_expr RPAREN { $$ = $2; }
+    | span_val { $$ = std::make_shared<AST::Expr>($1); }
     ;
 
 if_else
-    : IF logic_expr LBRACE statements RBRACE else_clause { $$ = std::make_shared<AST::IfElse>($2, $4, $6);}
+    : IF expr LBRACE statements RBRACE else_clause { $$ = std::make_shared<AST::IfElse>($2, $4, $6);}
     ;
 
 else_clause
@@ -740,21 +686,13 @@ withins
     ; /* do not allow empty within */
 
 within
-    : IDENTIFIER IN IDENTIFIER {
-        if (!symtab.exists($3))
-          Choreo::Parser::error(@3, "The symbol has not been defined.");
-
+    : IDENTIFIER IN span_val {
         symtab.addSymbol($1, AST::BaseType::INT, {});
-        $$ = std::make_shared<AST::WithIn>(std::make_shared<AST::Identifier>($1),
-                                           std::make_shared<AST::Identifier>($3));
+        $$ = std::make_shared<AST::WithIn>(std::make_shared<AST::Identifier>($1), $3);
       }
-    | IDENTIFIER ASSIGN LBRACE with_matchers RBRACE IN IDENTIFIER {
-        if (!symtab.exists($7))
-          Choreo::Parser::error(@7, "The symbol has not been defined.");
-
+    | IDENTIFIER ASSIGN LBRACE with_matchers RBRACE IN span_val {
         symtab.addSymbol($1, AST::BaseType::INT, {});
-        $$ = std::make_shared<AST::WithIn>(std::make_shared<AST::Identifier>($1),
-                                           std::make_shared<AST::Identifier>($7));
+        $$ = std::make_shared<AST::WithIn>(std::make_shared<AST::Identifier>($1), $7);
         $$->with_matchers = $4;
       }
     ;
@@ -873,18 +811,12 @@ id_list
 with_matchers /* TODO: this special case is pattern-match ids for with-block */
     : with_matchers COMMA IDENTIFIER {
         $1->Append(std::make_shared<AST::Identifier>($3));
-        std::cout << symtab.exists($3) << std::endl;
         symtab.addSymbol($3, AST::BaseType::INT); /* in withins, this values should be int only */
-        std::cout << symtab.exists($3) << std::endl;
-        std::cout << "here" << $3 << std::endl;
         $$ = $1;
       }
     | IDENTIFIER {
         $$ = std::make_shared<AST::MultiNodes>();
-        std::cout << symtab.exists($1) << std::endl;
         symtab.addSymbol($1, AST::BaseType::INT); /* in withins, this values should be int only */
-        std::cout << symtab.exists($1) << std::endl;
-        std::cout << "here" << $1 << std::endl;
         $$->Append(std::make_shared<AST::Identifier>($1));
       }
     ;

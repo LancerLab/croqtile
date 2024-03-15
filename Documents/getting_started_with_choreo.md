@@ -25,7 +25,7 @@ In addition, certain Choreo-specific types are introduced to ensure consistency 
 Choreo introduces 3 type categories: integer-type, spanned-type, and integer-tuple-type (ituple-type). These types serve for different purposes.
 
 - **Scalar Type**. It is designed to fullfil the requirement of program control. It consist of *Integer Type* and "Boolean Type".
-- **Spanned Type**. It represents the data type for computation. Apart from referencing the raw data, it also associates data with multi-dimensional ranges, which proves useful for tiling purposes, among others. 
+- **Spanned Type**. It represents the data type for computation. Apart from referencing the raw data, it also associates data with multi-dimensional ranges, which proves useful for tiling purposes, among others.
 - **Integer Tuple (I-Tuple) Type**. It represents a group of integer values. A common usage of *i-tuple* is to index multi-dimensional data.
 
 Among the three type categories, *integer* and *ituple* could be well accepted consider it maps to elements of existing languages. However, the *spanned type* is the special one. The following sections will show the detail.
@@ -55,7 +55,7 @@ mdspan sp : [7, 8];           // defined a mdspan of 2-dimensions
 mdspan<4> mds : [a, 3, 4, 1]; // 'a' is an existing integer
 d : [c, 4, 28];               // 'd' is not explicit annotated. Type is deduced.
 ```
-As illustrated, a 'mdspan' can be explicitly defined with *mdspan* partial-type keyword as annotated, optionally with a '<' '>' enclosed total dimension value. It is also possible to define a mdspan without type annotation. As shown in definition of 'd' above. (Note: 'mds' and 'd' are of the **dependent type**, considering the type depends on the evaluation of 'a' and 'b'. Programers may provides 'a' and 'b' with runtime values. However, in this way, some runtime check are paid consequently) 
+As illustrated, a 'mdspan' can be explicitly defined with *mdspan* partial-type keyword as annotated, optionally with a '<' '>' enclosed total dimension value. It is also possible to define a mdspan without type annotation. As shown in definition of 'd' above. (Note: 'mds' and 'd' are of the **dependent type**, considering the type depends on the evaluation of 'a' and 'b'. Programers may provides 'a' and 'b' with runtime values. However, in this way, some runtime check are paid consequently)
 
 For C++ programmers, you may think a mdspan as the trait of a multiple dimensional array, where it described a multi-level-range. For example, 'sp' in the above example defines two-level of ranges, ranging from 0 to 6, and 0 to 7 in seperate.
 
@@ -100,7 +100,7 @@ Note 's32' and 'int' are different in Choreo. 's32' is a fundamental type, which
 #### The Storage Qualifier
 A spanned-typed data in Choreo is usually large. For such large data, programmers could move it across different memory hierachy of accelerator to best utilize hardware resource.
 
-In choreo, we defines three storage qualifiers to annotate the data being defined, including: 
+In choreo, we defines three storage qualifiers to annotate the data being defined, including:
 
 - **global**,
 - **shared**,
@@ -182,11 +182,11 @@ You may think 'with-in' statement is similar to 'parallel-by'. However, it is no
 
 Neverthless, programmers could append a 'requires' clause. For example,
 ```
-with {m, n} in [M, N], {n_p, k} in [N_P, K] requires N_P == N {
+with {m, n} in [M, N], {n_p, k} in [N_P, K] requires n_p <-> n {
   // matmul implements with m,n,K. n_p is no long useful.
 }
 ```
-The code snippet requires 'n' and 'n_p' to have an identical range. Thus inside the 'with-in' block, it is possible to replace'n' whenever 'n_p' is required, or the opposite. Such a facility is useful to program many AI kernels.
+The code snippet requires 'n' and 'n_p' to have an identical value in all iterations. Thus inside the 'with-in' block, it is possible to replace'n' whenever 'n_p' is required, or the opposite. Such a facility is useful to program many AI kernels. Programmers should use operation '<->' to establishs such relations.
 
 ### The 'foreach' Block
 Once the *bounded-ituple* is defined by the 'with-in' clause, programmers can loop over the bounded-ituples/bounded-integers. In Choreo, this is simple.
@@ -204,7 +204,7 @@ with x in [10] {
 ### Async Operation: the DMA Statement
 Execept for parallel execution, Choreo allows one fixed form of async operation: the DMA statement.
 
-Conceptually, a DMA statement is executed asynchronously with the SPMD code. It works quite similar to CPU async thread, except its behavior is limited by the DMA configuration. (CPU allows to program the async thread as will) 
+Conceptually, a DMA statement is executed asynchronously with the SPMD code. It works quite similar to CPU async thread, except its behavior is limited by the DMA configuration. (CPU allows to program the async thread as will)
 
 The below code showcases one basic DMA statement.
 ```

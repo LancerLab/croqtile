@@ -22,6 +22,20 @@ __co__ int with_statement_empty_body() {
 // CHECK-NOT: (require clause)
 // CHECK: (with empty statements)
 
+__co__ int with_statement_unnamed_mdspans(f32 mdspan<2> data) {
+  parallel p by 6 {
+    with index1 in [2, 3],
+         index2 in data.span {
+    }
+  }
+}
+
+// CHECK: `- Name: with_statement_unnamed_mdspans
+// CHECK: `- With Block:
+// CHECK: (within constraints)
+// CHECK-NOT: (require clause)
+// CHECK: (with empty statements)
+
 __co__ int with_statement_multi_within() {
   span_v1_1 : [7, 8];
   span_v1_2 : [13];

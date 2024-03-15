@@ -7,11 +7,11 @@ __co__ u8 mdspan<1> scalar_decls(int a, int b) {
   int e = 6 + 1;
   bool y = true && (d > c) || (d >= c) && (d < c) || (d <= c) && !(d == c) || !(d != c);
   y = false || (d <= c) && (!(d == c) || !(d != c));
-  int f = true ? d + e : d - e;
-  f = c < d ? c : d;
+  int f = (true) ? d + e : d - e;
+  f = (c < d) ? c : d;
   f += a + 2;
-  bool x = d > c ? d > e : d <= e;
-  x = d != c ? d > c : d <= c;
+  bool x = (d > c) ? d > e : d <= e;
+  x = d != (c) ? d > c : d <= c;
 }
 
 // CHECK: ChoreoFunction

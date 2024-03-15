@@ -6,9 +6,8 @@ void kernel(int * a, int * b, int * c, int n) {
     c[i] = a[i] + b[i];
 }
 
-
 // device program
-__co__ int mdspan<1> ele_add(int mdspan<1> a , int mdspan<1> b) {
+__co__ s32 mdspan<1> ele_add(s32 mdspan<1> a, s32 mdspan<1> b) {
   // assert a.span == b.span
   f32[a.span] global_buffer;
 
@@ -22,7 +21,6 @@ __co__ int mdspan<1> ele_add(int mdspan<1> a , int mdspan<1> b) {
 
         // use f1.span as the span of local buffer
         local f32[f1.span] local_buffer;
-
 
         // calculate the total size of span.
         call kernel(f1.data, f2.data, local_buffer, #y);
