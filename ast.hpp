@@ -236,7 +236,7 @@ struct Expr : public Node {
         value_c->Print(os);
         os << " ? ";
       }
-      if (op != "!") {
+      if (op != "!" && op != "sizeof" && op != ".data") {
         value_l->Print(os);
         os << " ";
       }
@@ -768,6 +768,25 @@ struct Wait : public Node {
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- WAIT: ";
     target->Print(os);
+  }
+
+  void accept(Choreo::Visitor&) override;
+
+  __NODE_TYPE_INFO__
+};
+
+struct Return : public Node {
+  ptr<Node> value = nullptr;
+
+  Return(const Choreo::location& l) : Node(l) {}
+  Return(const Choreo::location& l, const ptr<Node>& t) : Node(l), value(t) {}
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << "\n" << prefix << "`- Return: ";
+    if (!value)
+      os << "void";
+    else
+      value->Print(os);
   }
 
   void accept(Choreo::Visitor&) override;

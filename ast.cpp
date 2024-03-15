@@ -35,6 +35,7 @@ void Memory::accept(Choreo::Visitor& v) { (void)v; }
 void DMA::accept(Choreo::Visitor& v) { (void)v; }
 void ChunkAt::accept(Choreo::Visitor& v) { (void)v; }
 void Wait::accept(Choreo::Visitor& v) { (void)v; }
+void Return::accept(Choreo::Visitor& v) { (void)v; }
 void Call::accept(Choreo::Visitor& v) { (void)v; }
 void ForeachBlock::accept(Choreo::Visitor& v) { (void)v; }
 

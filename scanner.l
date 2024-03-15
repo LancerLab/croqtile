@@ -147,6 +147,7 @@ blank [ \t\r]
                }
                return Choreo::Parser::make_RBRACE(loc);
              }
+  "|"        { return Choreo::Parser::make_PIPE(loc); }
   {id}       { return Choreo::Parser::make_IDENTIFIER(yytext, loc); }
   .          { return Choreo::Parser::make_CHAR(yytext[0], loc); } // Any other single character within the function
 

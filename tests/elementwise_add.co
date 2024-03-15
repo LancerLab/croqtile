@@ -23,7 +23,7 @@ __co__ s32 mdspan<1> ele_add(s32 mdspan<1> a, s32 mdspan<1> b) {
         local f32[f1.span] local_buffer;
 
         // calculate the total size of span.
-        call kernel(f1.data, f2.data, local_buffer, #y);
+        call kernel(f1.data, f2.data, local_buffer, |y|);
 
         f3 = dte.linear local_buffer => global_buffer.chunkat(p, index);
         wait f3;

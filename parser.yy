@@ -103,6 +103,7 @@ void choreo_info(const char *message) {
   QES     "?"
   TRANS   "=>"
   BIND    "<->"
+  PIPE    "|"
 ;
 
 // instead of union, using c++17 variant for terminal and non-terminals
@@ -129,8 +130,8 @@ void choreo_info(const char *message) {
 %nterm <AST::Storage> storage
 %nterm <AST::BaseType> fundamental_type
 %nterm <AST::ptr<AST::Memory>> storage_qual
-%nterm <AST::ptr<AST::Node>> pass_by foreach_block simple_val span_val ituple_val int_val bool_literal declaration statement assignment pb_statement w_statement dma_statement wait_statement call_statement span_elem mixed_span_elem iv_expr if_else optional_scalar_init
-%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments pb_statements w_statements span_list mixed_span_list withins iv_exprs require_binds require_clause id_list with_matchers else_clause
+%nterm <AST::ptr<AST::Node>> pass_by foreach_block simple_val span_val ituple_val int_val bool_literal passable declaration statement assignment pb_statement w_statement dma_statement wait_statement call_statement span_elem mixed_span_elem iv_expr if_else optional_scalar_init
+%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments pb_statements w_statements span_list mixed_span_list withins iv_exprs require_binds require_clause id_list with_matchers else_clause futures passables
 %nterm <AST::ptr<AST::IntList>> int_list
 %nterm <AST::ptr<AST::SValList>> sval_list
 %nterm <AST::ptr<AST::Expr>> expr span_expr
@@ -148,6 +149,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::WithIn>> within
 %nterm <AST::ptr<AST::RequireBind>> require_bind
 %nterm <AST::ptr<AST::ParallelBy>> para_by
+%nterm <AST::ptr<AST::Return>> return
 %nterm <AST::ptr<AST::ChunkAt>> chunkat_expr
 
 // precedence (low to high) and associativity
@@ -331,6 +333,12 @@ statement
     | assignments  SEMCOL { $$ = $1; }
     | para_by             { $$ = $1; }
     | if_else             { $$ = $1; }
+    | return SEMCOL       { $$ = $1; }
+    ;
+
+return
+    : RET          { $$ = std::make_shared<AST::Return>(@1);}
+    | RET passable { $$ = std::make_shared<AST::Return>(@1, $2); }
     ;
 
 para_by
@@ -638,6 +646,7 @@ expr
     | expr GE expr { $$ = std::make_shared<AST::Expr>(@1, ">=", $1, $3); }
     | bool_literal { $$ = std::make_shared<AST::Expr>(@1, $1); }
     | int_val { $$ = std::make_shared<AST::Expr>(@1, $1); }
+    | PIPE span_expr PIPE { $$ = std::make_shared<AST::Expr>(@1, "sizeof", $2); }
     ;
 
 span_expr
@@ -807,6 +816,25 @@ id_list
       }
     ;
 
+passables
+    : /* Empty */ {
+        $$ = std::make_shared<AST::MultiNodes>(loc);
+      }
+    | passable {
+        $$ = std::make_shared<AST::MultiNodes>(@1);
+        $$->Append($1);
+      }
+    | passables COMMA passable {
+        $1->Append($3);
+        $$ = $1;
+      }
+    ;
+
+passable
+    : expr { $$ = $1; }
+    | span_expr FNDATA { $$ = std::make_shared<AST::Expr>(@1, ".data", $1); }
+    ;
+
 with_matchers /* TODO: this special case is pattern-match ids for with-block */
     : with_matchers COMMA IDENTIFIER {
         $1->Append(std::make_shared<AST::Identifier>(@3, $3));
@@ -821,14 +849,24 @@ with_matchers /* TODO: this special case is pattern-match ids for with-block */
     ;
 
 wait_statement
-    : WAIT IDENTIFIER {
-        $$ = std::make_shared<AST::Wait>(@1,
-                std::make_shared<AST::Identifier>(@2, $2));
+    : WAIT futures {
+        $$ = std::make_shared<AST::Wait>(@1, $2);
+      }
+    ;
+
+futures
+    : futures COMMA IDENTIFIER {
+        $1->Append(std::make_shared<AST::Identifier>(@3, $3));
+        $$ = $1;
+      }
+    | IDENTIFIER {
+        $$ = std::make_shared<AST::MultiNodes>(@1);
+        $$->Append(std::make_shared<AST::Identifier>(@1, $1));
       }
     ;
 
 call_statement
-    : CALL IDENTIFIER LPAREN id_list RPAREN {
+    : CALL IDENTIFIER LPAREN passables RPAREN {
         $$ = std::make_shared<AST::Call>(@1,
                 std::make_shared<AST::Identifier>(@2, $2), $4);
       }
