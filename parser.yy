@@ -811,7 +811,7 @@ id_list
         $$ = $1;
       }
     | IDENTIFIER {
-        $$ = std::make_shared<AST::MultiNodes>(@1);
+        $$ = std::make_shared<AST::MultiNodes>(@1, ", ");
         $$->Append(std::make_shared<AST::Identifier>(@1, $1));
       }
     ;

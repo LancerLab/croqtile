@@ -115,8 +115,10 @@ T* cast(Node* n) {
 //
 struct MultiNodes : public Node {
   std::vector<ptr<Node>> values;
+  std::string delimiter;
 
-  explicit MultiNodes(const Choreo::location& l) : Node(l){};
+  explicit MultiNodes(const Choreo::location& l, std::string d = "")
+      : Node(l), delimiter(d){};
 
   void Append(const ptr<Node>& m) {
     assert(m != nullptr && "Unexpected: null pointer.");
@@ -124,8 +126,17 @@ struct MultiNodes : public Node {
   }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    for (auto& v : values) {
-      v->Print(os, prefix);
+    if (delimiter != "" && values.size() > 1) {
+      auto i = values.begin();
+      auto e = values.end();
+      (*i)->Print(os, prefix);
+      ++i;
+      for (; i != e; ++i) {
+        os << delimiter;
+        (*i)->Print(os, prefix);
+      }
+    } else {
+      for (auto& v : values) v->Print(os, prefix);
     }
   }
 
@@ -725,11 +736,11 @@ struct DMA : public Node {
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- DMA" << operation;
-    os << "\n" << prefix << "  `- furture: ";
+    os << "\n" << prefix << "  `- future: ";
     future->Print(os);
     os << "\n" << prefix << "  `- from: ";
     from->Print(os);
-    os << prefix << "  `- to: ";
+    os << "\n" << prefix << "  `- to: ";
     to->Print(os);
   }
 
@@ -750,7 +761,7 @@ struct ChunkAt : public Node {
     data->Print(os);
     os << ".ChunkAt(";
     positions->Print(os);
-    os << ")\n";
+    os << ")";
 
     (void)prefix;
   }

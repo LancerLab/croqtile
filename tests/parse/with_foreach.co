@@ -31,8 +31,8 @@ __co__ int with_foreach(int b, f32 mdspan<4> input) {
 // CHECK:     `- Foreach Block:
 // CHECK:      `- Iteration variables: index
 // CHECK:      `- DMA.linear
-// CHECK:        `- furture: f
-// CHECK:        `- from: input.ChunkAt(pindex)
+// CHECK:        `- future: f
+// CHECK:        `- from: input.ChunkAt(p, index)
 // CHECK:        `- to: local
 // CHECK:      `- Assign: sum =  (sum + index(0))
 // CHECK:      `- WAIT: f
