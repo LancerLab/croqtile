@@ -22,12 +22,18 @@ void IntIndexList::accept(Choreo::Visitor& v) { (void)v; }
 void DataType::accept(Choreo::Visitor& v) { (void)v; }
 void Identifier::accept(Choreo::Visitor& v) { (void)v; }
 
-void ParamList::accept(Choreo::Visitor& v) {
-   v.Visit(*this);
-}
+void ParamList::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
 void IfElse::accept(Choreo::Visitor& v) { (void)v; }
-void ParallelBy::accept(Choreo::Visitor& v) { (void)v; }
+
+void ParallelBy::accept(Choreo::Visitor& v) {
+  v.Visit(*this);
+
+  statms->accept(v);
+
+  v.AfterVisit(*this);
+}
+
 void RequireBind::accept(Choreo::Visitor& v) { (void)v; }
 void WithIn::accept(Choreo::Visitor& v) { (void)v; }
 void WithBlock::accept(Choreo::Visitor& v) { (void)v; }
@@ -56,9 +62,7 @@ void ChoreoFunction::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
-void CppSourceCode::accept(Choreo::Visitor& v) {
-  v.Visit(*this);
-}
+void CppSourceCode::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
 void Program::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
@@ -69,5 +73,4 @@ void Program::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
-
-} // end of namespace AST
+}  // end of namespace AST

@@ -23,7 +23,7 @@ __co__ int with_foreach(int b, f32 mdspan<4> input) {
 // CHECK:    `-  type: f32 <4>, symbol: input
 // CHECK:  `- Type Decl: ndims - [ 3 b 7 ]
 // CHECK:  `- Var Decl (int): sum = 0
-// CHECK:  `- Parellelization:  IV symbol: p, bound: 6
+// CHECK:  `- Parellelization: index symbol: p, bound [0, 6)
 // CHECK:   `- With Block:
 // CHECK:     (within constraints)
 // CHECK:     `- index in ndims

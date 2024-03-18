@@ -71,8 +71,6 @@ namespace Choreo {
 bool FactorCodeGen::BeforeVisit(AST::Node &n) {
   if (isa<Program>(&n)) {
     print_fixed_header(os);
-  } else if (auto p = dyn_cast<ChoreoFunction>(&n)) {
-    print_wrapper_begin(os, p->name);
   }
   return 0;
 }
@@ -80,11 +78,13 @@ bool FactorCodeGen::BeforeVisit(AST::Node &n) {
 bool FactorCodeGen::AfterVisit(AST::Node &n) {
   if (auto p = dyn_cast<ChoreoFunction>(&n)) {
     print_wrapper_end(os, p->name);
+  } else if (isa<ParallelBy>(&n)) {
+    os << "    }); // end of choreo-factor kernel function\n";
   }
   return 0;
 }
 
-bool FactorCodeGen::Visit(AST::MultiNodes &) { return true; };
+bool FactorCodeGen::Visit(AST::MultiNodes &) { return true; }
 bool FactorCodeGen::Visit(AST::IntLiteral &) { return true; };
 bool FactorCodeGen::Visit(AST::IntList &) { return true; };
 bool FactorCodeGen::Visit(AST::SValList &) { return true; };
@@ -103,9 +103,45 @@ bool FactorCodeGen::Visit(AST::Identifier &) { return true; };
 bool FactorCodeGen::Visit(AST::ParamList &pl) {
   current_parameters = &pl.values;
   return true;
-};
+}
 
-bool FactorCodeGen::Visit(AST::ParallelBy &) { return true; };
+bool FactorCodeGen::Visit(AST::ParallelBy &by) {
+  os << "      Dim3 grid_dim(1);\n";
+  os << "      Dim3 block_dim(" << by.bound << ");\n";
+  os << "      Value stream = alloc_stream_();\n";
+  os << "      create_stream_(stream);\n";
+  os << "      auto ts = launch_kernel_(\"" << current_fn
+     << "\", grid_dim, block_dim, stream, {";
+  if (current_parameters->size() > 0) {
+    os << "args[0]";
+    for (size_t i = 1; i < current_parameters->size(); ++i) {
+      os << ", "
+         << "args[" << i << "]";
+    }
+  }
+  os << "}, {output});\n";
+  os << "      destroy_stream_(stream);\n";
+  os << "      return std::vector<Value>{output};\n";
+  os << "    }); // end of choreo-factor dataflow program\n";
+  os << "\n";
+  os << "    D(func_)\n";
+  os << "    (\"" << current_fn << "\", {";
+  if (current_parameters->size() > 0) {
+    os << (*current_parameters)[0]->second->name << "_type";
+    for (unsigned i = 1; i < current_parameters->size(); ++i)
+      os << ", " << (*current_parameters)[i]->second->name << "_type";
+  }
+  os << "}, {choreo_output_type}, [&](";
+  if (current_parameters->size() > 0) {
+    os << (*current_parameters)[0]->second->name;
+    for (unsigned i = 1; i < current_parameters->size(); ++i)
+      os << ", " << (*current_parameters)[i]->second->name;
+  }
+  os << ") {\n";
+
+  return true;
+}
+
 bool FactorCodeGen::Visit(AST::RequireBind &) { return true; };
 bool FactorCodeGen::Visit(AST::WithIn &) { return true; };
 bool FactorCodeGen::Visit(AST::WithBlock &) { return true; };
@@ -137,7 +173,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
   os << ", (1));\n";  // todo
 
   os << "\n";
-  os << "    D(main_)\n";
+  os << "    D(main_) // choreo-factor dataflow function\n";
   os << "    ({";
 
   bool first_param = true;
@@ -158,7 +194,11 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
   return true;
 }
 
-bool FactorCodeGen::Visit(AST::ChoreoFunction &) { return true; }
+bool FactorCodeGen::Visit(AST::ChoreoFunction &n) {
+  print_wrapper_begin(os, n.name);
+  current_fn = n.name;
+  return true;
+}
 
 bool FactorCodeGen::Visit(AST::CppSourceCode &n) {
   os << n.GetCode();

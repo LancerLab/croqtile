@@ -37,17 +37,17 @@ using ParamType = std::pair<ptr<DataType>, ptr<Identifier>>;
 // smart typeid provider suggested by GPT
 template <typename T>
 struct TypeIDProvider {
-  static int unique;
+  static int __unique_id;
 };
 
 template <typename T>
-int TypeIDProvider<T>::unique;
+int TypeIDProvider<T>::__unique_id;
 
 #define __NODE_TYPE_INFO__                                                    \
   const std::string NodeTypeString() override { return __PRETTY_FUNCTION__; } \
-  uint64_t NodeTypeID() const override {                                      \
-    return reinterpret_cast<uint64_t>(                                        \
-        &TypeIDProvider<decltype(*this)>::unique);                            \
+  static uint64_t TypeID() { return (uint64_t)(&__unique_id); }               \
+  virtual uint64_t NodeTypeID() const override {                              \
+    return (uint64_t)(&__unique_id);                                          \
   }
 
 // interface class for all AST nodes
@@ -68,9 +68,11 @@ struct Node {
 
   // for the runtime type disambiguition
   virtual const std::string NodeTypeString() = 0;
-  virtual uint64_t NodeTypeID() const = 0;
 
   virtual void accept(Choreo::Visitor&) = 0;
+
+  virtual uint64_t NodeTypeID() const { return 0ULL; }
+  static uint64_t TypeID() { return 0ULL; }
 };
 
 // LLVM-style type utility functions for AST::Node
@@ -82,8 +84,7 @@ struct Node {
 
 template <typename T>
 bool isa(Node* n) {
-  T t(n->LOC());
-  return t.NodeTypeID() == n->NodeTypeID();
+  return T::TypeID() == n->NodeTypeID();
 }
 
 template <typename T>
@@ -113,7 +114,7 @@ T* cast(Node* n) {
 //
 //   non-term : non-term term_1 | term_2
 //
-struct MultiNodes : public Node {
+struct MultiNodes : public Node, public TypeIDProvider<MultiNodes> {
   std::vector<ptr<Node>> values;
   std::string delimiter;
 
@@ -154,7 +155,7 @@ struct MultiNodes : public Node {
   __NODE_TYPE_INFO__
 };
 
-struct Boolean : public Node {
+struct Boolean : public Node, public TypeIDProvider<Boolean> {
   std::string value;
   Boolean(const Choreo::location& l, std::string v) : Node(l), value(v) {}
 
@@ -167,7 +168,7 @@ struct Boolean : public Node {
   __NODE_TYPE_INFO__
 };
 
-struct IntLiteral : public Node {
+struct IntLiteral : public Node, public TypeIDProvider<IntLiteral> {
   int value;
   IntLiteral(const Choreo::location& l, int v) : Node(l), value(v) {}
 
@@ -180,7 +181,7 @@ struct IntLiteral : public Node {
   __NODE_TYPE_INFO__
 };
 
-struct IntList : public Node {
+struct IntList : public Node, public TypeIDProvider<IntList> {
   std::vector<ptr<IntLiteral>> values;
 
   IntList(const Choreo::location& l) : Node(l) {}
@@ -199,7 +200,7 @@ struct IntList : public Node {
   __NODE_TYPE_INFO__
 };
 
-struct SValList : public Node {
+struct SValList : public Node, public TypeIDProvider<SValList> {
   std::vector<ptr<Node>> values;
 
   SValList(const Choreo::location& l) : Node(l) {}
@@ -220,7 +221,7 @@ struct SValList : public Node {
   __NODE_TYPE_INFO__
 };
 
-struct Expr : public Node {
+struct Expr : public Node, public TypeIDProvider<Expr> {
   std::string op;
   ptr<Expr> value_c;
   ptr<Expr> value_l;
@@ -268,7 +269,7 @@ struct Expr : public Node {
 };
 
 // Represents both dimensions and s like {3, 4, 5} or {1, 2, 1}
-struct MultiDimSpans : public Node {
+struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
   std::string ref_name;  // syntax suger, could be empty
   ptr<Node> list;        // null if the span is a dynamic value
   int dim_count = 0;     // dynamic value with known dimension count
@@ -303,7 +304,7 @@ struct MultiDimSpans : public Node {
   __NODE_TYPE_INFO__
 };
 
-struct NamedTypeDecl : public Node {
+struct NamedTypeDecl : public Node, public TypeIDProvider<NamedTypeDecl> {
   const std::string name_str;
   const std::string disp_str;
   const ptr<Node> init_expr;  // associated init_expr
@@ -326,7 +327,7 @@ struct NamedTypeDecl : public Node {
   __NODE_TYPE_INFO__
 };
 
-struct Memory : public Node {
+struct Memory : public Node, public TypeIDProvider<Memory> {
   Storage st;
   Memory(const Choreo::location& l, const Storage s = Storage::DEFAULT)
       : Node(l), st(s) {}
@@ -356,7 +357,8 @@ struct Memory : public Node {
   __NODE_TYPE_INFO__
 };
 
-struct NamedVariableDecl : public Node {
+struct NamedVariableDecl : public Node,
+                           public TypeIDProvider<NamedVariableDecl> {
   const std::string name_str;
   const std::string disp_str;
   const ptr<Memory> mem = nullptr;  // storage location
@@ -392,7 +394,7 @@ struct NamedVariableDecl : public Node {
 };
 
 // Represents declarations like: ituple t = {3, 4, 5};
-struct IntTuple : public Node {
+struct IntTuple : public Node, public TypeIDProvider<IntTuple> {
   std::string ref_name;  // could be anonymous
   ptr<Node> list;
 
@@ -442,7 +444,7 @@ class ITupleTable {
   }
 };
 
-struct Assignment : public Node {
+struct Assignment : public Node, public TypeIDProvider<Assignment> {
   std::string name;
   ptr<Node> value;
   explicit Assignment(const Choreo::location& l, std::string& n,
@@ -461,7 +463,7 @@ struct Assignment : public Node {
   __NODE_TYPE_INFO__
 };
 
-struct IntIndex : public Node {
+struct IntIndex : public Node, public TypeIDProvider<IntIndex> {
   ptr<Node> value;
   explicit IntIndex(const Choreo::location& l, const ptr<Node>& v)
       : Node(l), value(v) {}
@@ -477,7 +479,7 @@ struct IntIndex : public Node {
   __NODE_TYPE_INFO__
 };
 
-struct NthBound : public Node {
+struct NthBound : public Node, public TypeIDProvider<NthBound> {
   ptr<Node> mdarray;
   ptr<IntIndex> index;
 
@@ -496,7 +498,7 @@ struct NthBound : public Node {
   __NODE_TYPE_INFO__
 };
 
-struct IntIndexList : public Node {
+struct IntIndexList : public Node, public TypeIDProvider<IntIndexList> {
   std::vector<ptr<IntIndex>> indices;
 
   IntIndexList(const Choreo::location& l) : Node(l) {}
@@ -527,7 +529,7 @@ struct IntIndexList : public Node {
 // 2. A composited type, including the fundamental type and the mdspan type.
 // 3. An 'ituple' type.
 //
-struct DataType : public Node {
+struct DataType : public Node, public TypeIDProvider<DataType> {
  private:
   BaseType base_type;
   ptr<Node> mdspan_type = nullptr;
@@ -562,7 +564,7 @@ struct DataType : public Node {
   __NODE_TYPE_INFO__
 };
 
-struct Identifier : public Node {
+struct Identifier : public Node, public TypeIDProvider<Identifier> {
   std::string name;
   Identifier(const Choreo::location& l, const std::string& n)
       : Node(l), name(n) {}
@@ -575,7 +577,7 @@ struct Identifier : public Node {
   __NODE_TYPE_INFO__
 };
 
-struct ParamList : public Node {
+struct ParamList : public Node, public TypeIDProvider<ParamList> {
   std::vector<ptr<ParamType>> values;
   explicit ParamList(const Choreo::location& l) : Node(l) {}
   ParamList(const Choreo::location& l, std::vector<ptr<ParamType>>& v)
@@ -595,7 +597,7 @@ struct ParamList : public Node {
   __NODE_TYPE_INFO__
 };
 
-struct IfElse : public Node {
+struct IfElse : public Node, public TypeIDProvider<IfElse> {
   ptr<Node> cond;
   ptr<MultiNodes> if_stmts;
   ptr<MultiNodes> else_stmts;  // optional requirements
@@ -624,17 +626,17 @@ struct IfElse : public Node {
   __NODE_TYPE_INFO__
 };
 
-struct ParallelBy : public Node {
-  std::string iv;
+struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
+  std::string biv;
   int bound;
   ptr<MultiNodes> statms;
 
   ParallelBy(const Choreo::location& l, const std::string v, int b)
-      : Node(l), iv(v), bound(b) {}
+      : Node(l), biv(v), bound(b) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Parellelization: ";
-    os << " IV symbol: " << iv << ", bound: " << bound;
+    os << " index symbol: " << biv << ", bound [0, " << bound << ")";
     if (!statms)
       os << std::endl;
     else
@@ -647,7 +649,7 @@ struct ParallelBy : public Node {
 };
 
 // `require_bind` parsing "idx_1 <-> idx_2"
-struct RequireBind : public Node {
+struct RequireBind : public Node, public TypeIDProvider<RequireBind> {
   ptr<Node> lhs;
   ptr<Node> rhs;
 
@@ -668,7 +670,7 @@ struct RequireBind : public Node {
   __NODE_TYPE_INFO__
 };
 
-struct WithIn : public Node {
+struct WithIn : public Node, public TypeIDProvider<WithIn> {
   ptr<Node> with;
   ptr<Node> in;
   ptr<MultiNodes> with_matchers;  // optional requirements
@@ -694,7 +696,7 @@ struct WithIn : public Node {
   __NODE_TYPE_INFO__
 };
 
-struct WithBlock : public Node {
+struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
   ptr<MultiNodes> withins;
   ptr<MultiNodes> reqs;    // optional requirements
   ptr<MultiNodes> statms;  // may be empty
@@ -724,7 +726,7 @@ struct WithBlock : public Node {
   __NODE_TYPE_INFO__
 };
 
-struct DMA : public Node {
+struct DMA : public Node, public TypeIDProvider<DMA> {
   std::string operation;
   ptr<Node> future;
   ptr<Node> from;
@@ -749,7 +751,7 @@ struct DMA : public Node {
   __NODE_TYPE_INFO__
 };
 
-struct ChunkAt : public Node {
+struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
   ptr<Node> data;
   ptr<MultiNodes> positions;
 
@@ -771,7 +773,7 @@ struct ChunkAt : public Node {
   __NODE_TYPE_INFO__
 };
 
-struct Wait : public Node {
+struct Wait : public Node, public TypeIDProvider<Wait> {
   ptr<Node> target;
 
   Wait(const Choreo::location& l, const ptr<Node>& t) : Node(l), target(t) {}
@@ -786,7 +788,7 @@ struct Wait : public Node {
   __NODE_TYPE_INFO__
 };
 
-struct Return : public Node {
+struct Return : public Node, public TypeIDProvider<Return> {
   ptr<Node> value = nullptr;
 
   Return(const Choreo::location& l) : Node(l) {}
@@ -805,7 +807,7 @@ struct Return : public Node {
   __NODE_TYPE_INFO__
 };
 
-struct Call : public Node {
+struct Call : public Node, public TypeIDProvider<Call> {
   ptr<Node> function;
   ptr<Node> arguments;
 
@@ -823,7 +825,7 @@ struct Call : public Node {
   __NODE_TYPE_INFO__
 };
 
-struct ForeachBlock : public Node {
+struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
   ptr<MultiNodes> ivs;
   ptr<MultiNodes> statms;
 
@@ -847,7 +849,7 @@ struct ForeachBlock : public Node {
   __NODE_TYPE_INFO__
 };
 
-struct FunctionDecl : public Node {
+struct FunctionDecl : public Node, public TypeIDProvider<FunctionDecl> {
   std::string name;
   ptr<DataType> ret_type;
   ptr<ParamList> params;
@@ -865,7 +867,7 @@ struct FunctionDecl : public Node {
   __NODE_TYPE_INFO__
 };
 
-struct ChoreoFunction : public Node {
+struct ChoreoFunction : public Node, public TypeIDProvider<ChoreoFunction> {
   std::string name;
   FunctionDecl f_decl;
   ptr<MultiNodes> statms;
@@ -882,7 +884,7 @@ struct ChoreoFunction : public Node {
   __NODE_TYPE_INFO__
 };
 
-struct CppSourceCode : public Node {
+struct CppSourceCode : public Node, public TypeIDProvider<CppSourceCode> {
   std::string code;
   CppSourceCode(const Choreo::location& l, const std::string& c)
       : Node(l), code(c) {}
@@ -898,7 +900,7 @@ struct CppSourceCode : public Node {
 };
 
 // Top-level program structure
-struct Program : public Node {
+struct Program : public Node, public TypeIDProvider<Program> {
   std::vector<ptr<Node>> nodes;
 
   Program(const Choreo::location& l) : Node(l) {}

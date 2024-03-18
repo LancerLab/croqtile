@@ -13,6 +13,7 @@ struct CodeGenerator : public Visitor {
 
 struct FactorCodeGen : public CodeGenerator {
   // TODO: should the pointer be replaced?
+  std::string current_fn = "";
   std::vector<AST::ptr<AST::ParamType>> *current_parameters = nullptr;
   AST::ptr<AST::DataType> current_output = nullptr;
 
