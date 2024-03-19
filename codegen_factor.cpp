@@ -98,7 +98,11 @@ bool FactorCodeGen::Visit(AST::IntIndex &) { return true; };
 bool FactorCodeGen::Visit(AST::NthBound &) { return true; };
 bool FactorCodeGen::Visit(AST::IntIndexList &) { return true; };
 bool FactorCodeGen::Visit(AST::DataType &) { return true; };
-bool FactorCodeGen::Visit(AST::Identifier &) { return true; };
+
+bool FactorCodeGen::Visit(AST::Identifier &n) {
+  os << n.name;
+  return true;
+}
 
 bool FactorCodeGen::Visit(AST::ParamList &pl) {
   current_parameters = &pl.values;
@@ -131,26 +135,37 @@ bool FactorCodeGen::Visit(AST::ParallelBy &by) {
     for (unsigned i = 1; i < current_parameters->size(); ++i)
       os << ", " << (*current_parameters)[i]->second->name << "_type";
   }
-  os << "}, {choreo_output_type}, [&](";
-  if (current_parameters->size() > 0) {
-    os << (*current_parameters)[0]->second->name;
-    for (unsigned i = 1; i < current_parameters->size(); ++i)
-      os << ", " << (*current_parameters)[i]->second->name;
+  os << "}, {choreo_output_type}, [&](auto args, auto results) {\n";
+  int i = 0;
+  for (auto &param : *current_parameters) {
+    os << "      "
+       << "auto k_" << param->second->name << " = args[" << i++ << "];\n";
   }
-  os << ") {\n";
 
   return true;
 }
 
 bool FactorCodeGen::Visit(AST::RequireBind &) { return true; };
 bool FactorCodeGen::Visit(AST::WithIn &) { return true; };
-bool FactorCodeGen::Visit(AST::WithBlock &) { return true; };
-bool FactorCodeGen::Visit(AST::Memory &) { return true; };
-bool FactorCodeGen::Visit(AST::DMA &) { return true; };
+
+bool FactorCodeGen::Visit(AST::WithBlock &n) { return true; }
+
+bool FactorCodeGen::Visit(AST::Memory &n) {
+  n.Print(os);
+  return true;
+}
+
+bool FactorCodeGen::Visit(AST::DMA &d) {
+  auto future_name = d.future->name;
+  os << "      auto " << future_name << "_dma = alloc_dma_(SDMAType());\n";
+  return true;
+}
+
 bool FactorCodeGen::Visit(AST::ChunkAt &) { return true; };
 bool FactorCodeGen::Visit(AST::Wait &) { return true; };
 bool FactorCodeGen::Visit(AST::Call &) { return true; };
-bool FactorCodeGen::Visit(AST::ForeachBlock &) { return true; };
+
+bool FactorCodeGen::Visit(AST::ForeachBlock &n) { return true; }
 
 bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
   current_output = d.ret_type;

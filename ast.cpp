@@ -20,7 +20,8 @@ void IntIndex::accept(Choreo::Visitor& v) { (void)v; }
 void NthBound::accept(Choreo::Visitor& v) { (void)v; }
 void IntIndexList::accept(Choreo::Visitor& v) { (void)v; }
 void DataType::accept(Choreo::Visitor& v) { (void)v; }
-void Identifier::accept(Choreo::Visitor& v) { (void)v; }
+
+void Identifier::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
 void ParamList::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
@@ -35,15 +36,28 @@ void ParallelBy::accept(Choreo::Visitor& v) {
 }
 
 void RequireBind::accept(Choreo::Visitor& v) { (void)v; }
-void WithIn::accept(Choreo::Visitor& v) { (void)v; }
-void WithBlock::accept(Choreo::Visitor& v) { (void)v; }
-void Memory::accept(Choreo::Visitor& v) { (void)v; }
-void DMA::accept(Choreo::Visitor& v) { (void)v; }
+
+void WithIn::accept(Choreo::Visitor& v) { v.Visit(*this); }
+
+void WithBlock::accept(Choreo::Visitor& v) {
+  withins->accept(v);
+  if (reqs) reqs->accept(v);
+  v.Visit(*this);
+  statms->accept(v);
+}
+
+void Memory::accept(Choreo::Visitor& v) { v.Visit(*this); }
+
+void DMA::accept(Choreo::Visitor& v) { v.Visit(*this); }
+
 void ChunkAt::accept(Choreo::Visitor& v) { (void)v; }
 void Wait::accept(Choreo::Visitor& v) { (void)v; }
 void Return::accept(Choreo::Visitor& v) { (void)v; }
 void Call::accept(Choreo::Visitor& v) { (void)v; }
-void ForeachBlock::accept(Choreo::Visitor& v) { (void)v; }
+void ForeachBlock::accept(Choreo::Visitor& v) {
+  v.Visit(*this);
+  statms->accept(v);
+}
 
 void FunctionDecl::accept(Choreo::Visitor& v) {
   params->accept(v);

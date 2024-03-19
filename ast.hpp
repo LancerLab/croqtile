@@ -728,11 +728,11 @@ struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
 
 struct DMA : public Node, public TypeIDProvider<DMA> {
   std::string operation;
-  ptr<Node> future;
+  ptr<Identifier> future;
   ptr<Node> from;
   ptr<Node> to;
 
-  DMA(const Choreo::location& l, const std::string& o, const ptr<Node>& r,
+  DMA(const Choreo::location& l, const std::string& o, const ptr<Identifier>& r,
       const ptr<Node>& f, const ptr<Node>& t)
       : Node(l), operation(o), future(r), from(f), to(t) {}
 
