@@ -124,5 +124,5 @@ int main(int argc, char* argv[]) {
   return 0;
 }
 
-int SymbolTable::anonymous_count = 0;
-int PartialTypeTable::anonymous_count = 0;
+unsigned SymbolTable::anonymous_count = 0;
+unsigned SymbolTable::anon_type_count = 0;

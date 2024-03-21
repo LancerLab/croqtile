@@ -60,6 +60,7 @@ enum class FundamentalType {
 
 enum class Storage { LOCAL, SHARED, GLOBAL, DEFAULT, NONE };
 
+// utility functions to map types to strings, and the opposite.
 inline static BaseType getTypeFromString(const std::string& input) {
   static const std::unordered_map<std::string, BaseType> typeMap = {
       {"f32", BaseType::F32},   {"f16", BaseType::F16},
@@ -91,11 +92,11 @@ inline static std::string getStringFrom(BaseType dataType) {
   return it->second;
 }
 
-// For mdspan type
+// Define ValueList as a group of values
 template <class T>
 inline constexpr bool always_false = false;
 
-static constexpr size_t __invalid = std::numeric_limits<size_t>::max();
+static constexpr size_t __INVALID_VALUE__ = std::numeric_limits<size_t>::max();
 
 using ValueListExpr = std::vector<std::string>;
 using ValueListElem = std::variant<int, ValueListExpr>;
@@ -225,8 +226,9 @@ struct ValueListRepo {
 struct MDSpanValue {
   static ValueListRepo values;  // value numbers
 
-  size_t val_no = __invalid;
-  size_t dim_count = __invalid;  // dim_count is used when no value appears
+  size_t val_no = __INVALID_VALUE__;
+  size_t dim_count =
+      __INVALID_VALUE__;  // dim_count is used when no value appears
 
   explicit MDSpanValue() {}  // this initialize an invalid MDSpanValue
                              // The type must be deduced for use
@@ -241,8 +243,8 @@ struct MDSpanValue {
   size_t Dims() const { return dim_count; }
   void Update() { dim_count = values[val_no].size(); }
   bool IsValid() const {
-    if (val_no == __invalid)
-      return dim_count != __invalid;
+    if (val_no == __INVALID_VALUE__)
+      return dim_count != __INVALID_VALUE__;
     else
       return dim_count == values[val_no].size();
   }
@@ -254,8 +256,6 @@ inline bool operator==(const MDSpanValue& lhs, const MDSpanValue& rhs) {
   return lhs.IsValid() && rhs.IsValid() && (lhs.Dims() == rhs.Dims()) &&
          isValueListEqual(lhs.Value(), rhs.Value());
 }
-
-inline MDSpanValue MakeUninitMDSpanValue() { return MDSpanValue(); }
 
 //
 struct Type {
@@ -274,13 +274,9 @@ struct Type {
 // The type is unknown. It requires type inference
 struct UnknownType final : public Type {
   explicit UnknownType() : Type(TypeCategory::UNKNOWN) {}
-  size_t Dims() const override { return __invalid; }
+  size_t Dims() const override { return __INVALID_VALUE__; }
   bool IsComplete() const override { return false; }
 };
-
-inline ptr<UnknownType> MakeUnknownType() {
-  return std::make_shared<UnknownType>();
-}
 
 struct ScalarType : public Type {
   ScalarType(TypeCategory t) : Type(t) {}
@@ -294,28 +290,20 @@ struct IntegerType : public ScalarType {
   bool IsComplete() const override { return true; }
 };
 
-inline ptr<IntegerType> MakeIntegerType() {
-  return std::make_shared<IntegerType>();
-}
-
 struct BooleanType final : public ScalarType {
   BooleanType() : ScalarType(TypeCategory::BOOL) {}
   bool IsComplete() const override { return true; }
 };
 
-inline ptr<BooleanType> MakeBooleanType() {
-  return std::make_shared<BooleanType>();
-}
-
 // ITuple is a dimensioned type
 struct ITupleType : public Type {
-  size_t dim_count = __invalid;
+  size_t dim_count = __INVALID_VALUE__;
 
   explicit ITupleType()
       : Type(TypeCategory::ITUPLE) {}  // this initialize an invalid ITupleType
                                        // The Type must be deduced for use
 
-  bool Valid() { return dim_count != __invalid; }
+  bool Valid() { return dim_count != __INVALID_VALUE__; }
 
   ITupleType(int n, TypeCategory tc = TypeCategory::ITUPLE)
       : Type(tc), dim_count(n) {}
@@ -323,10 +311,6 @@ struct ITupleType : public Type {
   size_t Dims() const override { return dim_count; }
   bool IsComplete() const override { return true; }
 };
-
-inline ptr<ITupleType> MakeUninitITupleType() {
-  return std::make_shared<ITupleType>();
-}
 
 struct MDSpanType : public Type {
   static constexpr TypeCategory __tc = TypeCategory::PARTIAL;
@@ -348,14 +332,6 @@ struct MDSpanType : public Type {
     return ((const MDSpanType&)ty).mdspan == mdspan;
   }
 };
-
-inline ptr<MDSpanType> MakeUninitMDSpanType() {
-  return std::make_shared<MDSpanType>(MakeUninitMDSpanValue());
-}
-
-inline ptr<MDSpanType> MakeDimSizedMDSpanType(size_t n) {
-  return std::make_shared<MDSpanType>(MDSpanValue(n));
-}
 
 struct SpannedType final : public MDSpanType {
   static constexpr TypeCategory __tc = TypeCategory::SPANNED;
@@ -405,6 +381,46 @@ struct BoundedITupleType final : public ITupleType {
     return (t.bounds == bounds) && ITupleType::operator==(ty);
   }
 };
+
+// Utility functions to generate types
+inline MDSpanValue GenUninitMDSpanValue() { return MDSpanValue(); }
+
+inline ptr<UnknownType> MakeUnknownType() {
+  return std::make_shared<UnknownType>();
+}
+
+inline ptr<IntegerType> MakeIntegerType() {
+  return std::make_shared<IntegerType>();
+}
+
+inline ptr<BooleanType> MakeBooleanType() {
+  return std::make_shared<BooleanType>();
+}
+
+inline ptr<ITupleType> MakeUninitITupleType() {
+  return std::make_shared<ITupleType>();
+}
+
+inline ptr<MDSpanType> MakeUninitMDSpanType() {
+  return std::make_shared<MDSpanType>(GenUninitMDSpanValue());
+}
+
+inline ptr<MDSpanType> MakeDimSizedMDSpanType(size_t n) {
+  return std::make_shared<MDSpanType>(MDSpanValue(n));
+}
+
+inline ptr<SpannedType> MakeSpannedType(FundamentalType ft, const MDSpanValue& v) {
+  return std::make_shared<SpannedType>(ft, v);
+}
+
+inline ptr<SpannedType> MakeSpannedType(BaseType ft, const MDSpanValue& v) {
+  return MakeSpannedType((FundamentalType)ft, v);
+}
+
+inline std::string GetAnonTypeName() {
+  static unsigned anonymous_count = 0;
+  return "anon_" + std::to_string(anonymous_count++);
+}
 
 }  // end namespace Choreo
 

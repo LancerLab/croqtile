@@ -24,11 +24,12 @@ In addition, certain Choreo-specific types are introduced to ensure consistency 
 ## Variables and Data Types
 Choreo introduces 3 type categories: integer-type, spanned-type, and integer-tuple-type (ituple-type). These types serve for different purposes.
 
-- **Scalar Type**. It is designed to fullfil the requirement of program control. It consist of *Integer Type* and "Boolean Type".
+- **Scalar Type**. It is designed to fullfil the requirement of program control. It consist of *Integer Type* and *Boolean Type*.
 - **Spanned Type**. It represents the data type for computation. Apart from referencing the raw data, it also associates data with multi-dimensional ranges, which proves useful for tiling purposes, among others.
 - **Integer Tuple (I-Tuple) Type**. It represents a group of integer values. A common usage of *i-tuple* is to index multi-dimensional data.
+- **Bounded (Integer/ITuple) Type**. This is the special type that is used to simplify data (sub-zone) reference.
 
-Among the three type categories, *integer* and *ituple* could be well accepted consider it maps to elements of existing languages. However, the *spanned type* is the special one. The following sections will show the detail.
+Among the four type categories, *scalar* and *ituple* could be well accepted consider it maps to elements of existing general purpose programming languages. However, the *spanned type*, and *bounded type* are specific to the domain. The following sections will show the detail.
 
 ### Scalar Types
 As described, Scalar types in Choreo includes the *Integer Type* and *Boolean Type*. The *Integer Type* is similar to C++ type 'int' or 'int32_t'. It is an signed value which takes 32-bits, ranging from -2^31 ~ 2^31 - 1. The below code illustrates its usage for defining the data and function declaration.
@@ -142,6 +143,11 @@ In Choreo, mdspan can be defined with such **Tuple-Span Operations". The support
 - *mdspan* - *i-tuple*
 
 Essentially, these operations can be achieved through mdspan *dimension-wise* definition. However, *tuple-span operations* aid programmers in writing more readable code. This is also the objective that Choreo aims to achieve.
+
+### Bounded Types
+Bounded types consists of **Bounded Scalar** and **Bounded ITuple**. Bounded Scalar takes a range of [0, ub], where is the 'ub' represents its upper bound. Therefore, if an integer 'p' is set as bounded, it should also be associated with a specific upper bound. To establish such associations, programmers must code explicitly inside the *Control Structures* of 'parallel-by' and 'with-in', which will be introduced later.
+
+Similarly, since *ITuple* is a group of *Integer*s, it can also be associated with a group of bounds. Specifically, in Choreo, the *Bounded ITuple* is associated with a *mdspan* value, where a group of upper bounds are settled. In later sections, we shall illustrate the detailed syntax.
 
 ## Control Structures
 Choreo follows C++ to involve 'if-else' blocks to handle branches inside programs. However, it has significant difference with C++ on parallelization, loop, etc.

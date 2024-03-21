@@ -18,7 +18,6 @@ struct Visitor {
   // For any visitor, it should implement all the necessary steps
   virtual bool Visit(AST::MultiNodes&) = 0;
   virtual bool Visit(AST::IntLiteral&) = 0;
-  virtual bool Visit(AST::IntList&) = 0;
   virtual bool Visit(AST::SValList&) = 0;
   virtual bool Visit(AST::Expr&) = 0;
   virtual bool Visit(AST::MultiDimSpans&) = 0;

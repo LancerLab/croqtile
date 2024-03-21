@@ -10,7 +10,6 @@ void MultiNodes::accept(Choreo::Visitor& v) {
 
 void Boolean::accept(Choreo::Visitor& v) { (void)v; }
 void IntLiteral::accept(Choreo::Visitor& v) { (void)v; }
-void IntList::accept(Choreo::Visitor& v) { (void)v; }
 void SValList::accept(Choreo::Visitor& v) { (void)v; }
 void Expr::accept(Choreo::Visitor& v) { (void)v; }
 void MultiDimSpans::accept(Choreo::Visitor& v) { (void)v; }

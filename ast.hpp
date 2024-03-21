@@ -37,6 +37,8 @@ class Identifier;
 class DataType;
 using ParamType = std::pair<ptr<DataType>, ptr<Identifier>>;
 
+static constexpr int __UNKNOWN_INTVAL__ = std::numeric_limits<int>::min();
+
 // smart typeid provider suggested by GPT
 template <typename T>
 struct TypeIDProvider {
@@ -177,29 +179,14 @@ struct Boolean : public Node, public TypeIDProvider<Boolean> {
 
 struct IntLiteral : public Node, public TypeIDProvider<IntLiteral> {
   int value;
-  IntLiteral(const location& l, int v) : Node(l), value(v) {}
+  IntLiteral(const location& l, int v = __UNKNOWN_INTVAL__)
+      : Node(l), value(v) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << prefix << value;
-  }
-
-  void accept(Visitor&) override;
-
-  __NODE_TYPE_INFO__
-};
-
-struct IntList : public Node, public TypeIDProvider<IntList> {
-  std::vector<ptr<IntLiteral>> values;
-
-  IntList(const location& l) : Node(l) {}
-
-  void Append(ptr<IntLiteral> v) { values.push_back(v); }
-
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << prefix << "[";
-    for (size_t i = 0; i < values.size() - 1; ++i)
-      os << values[i]->value << ", ";
-    os << values.back()->value << "]";
+    if (value == __UNKNOWN_INTVAL__)
+      os << prefix << "?";
+    else
+      os << prefix << value;
   }
 
   void accept(Visitor&) override;
@@ -579,14 +566,12 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
       case BaseType::S16:
       case BaseType::U8:
       case BaseType::S8:
-        assert(mdspan_type != nullptr);
-        if (isa<MultiDimSpans>(mdspan_type.get()))
-          return std::make_shared<SpannedType>(
-              (FundamentalType)base_type,
-              cast<MultiDimSpans>(mdspan_type.get())->MakeValueList());
+        assert(mdspan_type != nullptr && "Expecting a valid mdspan.");
+        if (auto* p_mdspan = dyn_cast<MultiDimSpans>(mdspan_type.get()))
+          return MakeSpannedType(base_type, p_mdspan->MakeValueList());
         else
-          return std::make_shared<SpannedType>(
-              (FundamentalType)base_type, MakeUninitMDSpanValue());  // TODO
+          return MakeSpannedType(
+              base_type, GenUninitMDSpanValue());  // infer the mdspan later
       case BaseType::ITUPLE:
         return MakeUninitITupleType();  // need type inference to retrieve the
                                         // dim count
@@ -955,6 +940,12 @@ struct Program : public Node, public TypeIDProvider<Program> {
 
   __NODE_TYPE_INFO__
 };
+
+// Utility to generate shared_ptr<Node>
+template <typename T, typename... Args>
+ptr<T> Make(Args&&... args) {
+  return std::make_shared<T>(std::forward<Args>(args)...);
+}
 
 }  // end of namespace AST
 

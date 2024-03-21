@@ -28,41 +28,6 @@ class Symbol {
   }
 };
 
-struct PartialType {
-  std::string name;  // The type's name
-                     // anything more?
-  PartialType(const std::string& n) : name(n) {}
-  PartialType() : name() {}
-};
-
-class PartialTypeTable {
- private:
-  std::unordered_map<std::string, PartialType> table;
-
- public:
-  // Add a partial type to the partial type table
-  void addType(const std::string& name) { table.emplace(name, name); }
-
-  // Retrieve a partial type from the table
-  PartialType* getType(const std::string& name) {
-    if (table.find(name) != table.end()) {
-      return &table[name];
-    }
-    return nullptr;
-  }
-
-  // Check if a symbol with the given name exists in the symbol table
-  bool exists(const std::string& name) {
-    return table.find(name) != table.end();
-  }
-
- public:
-  static std::string getAnonName() {
-    return "anon_" + std::to_string(anonymous_count++);
-  }
-  static int anonymous_count;
-};
-
 class SymbolTable {
  private:
   std::unordered_map<std::string, Symbol> table;
@@ -85,11 +50,18 @@ class SymbolTable {
     return table.find(name) != table.end();
   }
 
+  void Reset() { table.clear(); }
+
  public:
-  static std::string getAnonName() {
+  static std::string GetAnonName() {
     return "anon_" + std::to_string(anonymous_count++);
   }
-  static int anonymous_count;
+  static std::string GetAnonTypeName() {
+    return "anon_t_" + std::to_string(anon_type_count++);
+  }
+
+  static unsigned anonymous_count;
+  static unsigned anon_type_count;
 };
 
 }  // end of namespace Choreo

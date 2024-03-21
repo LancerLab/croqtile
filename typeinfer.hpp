@@ -11,7 +11,6 @@ struct TypeInference : public Visitor {
 
   bool Visit(AST::MultiNodes&) override { return true; };
   bool Visit(AST::IntLiteral&) override { return true; };
-  bool Visit(AST::IntList&) override { return true; };
   bool Visit(AST::SValList&) override { return true; };
   bool Visit(AST::Expr&) override { return true; };
   bool Visit(AST::MultiDimSpans&) override { return true; };

@@ -85,7 +85,6 @@ bool FactorCodeGen::AfterVisit(AST::Node &n) {
 
 bool FactorCodeGen::Visit(AST::MultiNodes &) { return true; }
 bool FactorCodeGen::Visit(AST::IntLiteral &) { return true; };
-bool FactorCodeGen::Visit(AST::IntList &) { return true; };
 bool FactorCodeGen::Visit(AST::SValList &) { return true; };
 bool FactorCodeGen::Visit(AST::Expr &) { return true; };
 bool FactorCodeGen::Visit(AST::MultiDimSpans &) { return true; };

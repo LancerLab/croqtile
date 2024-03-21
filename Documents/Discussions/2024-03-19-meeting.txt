@@ -1,0 +1,21 @@
+Go through the getting started.
+
+Two levels of parallel-by
+
+Parameter and return type:
+- Simplify synatx
+ f32 mdspan<x> -> f32<x>
+<Rejected>
+- Requires support: f32 [1, 3, 2]
+- Should we support: f32 [?, ?, 3]
+
+New operation:
+#y - the associated bound of bounded-integer/ituple "y"
+|y| - sizeof
+
+Codegen - dependent on the type inference
+
+Work dispatch:
+> Garfee - type inference
+> Vincent - factor environment & codegen
+> Albert - codegen
