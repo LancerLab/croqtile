@@ -1,5 +1,7 @@
 #include "visitor.hpp"
 
+namespace Choreo {
+
 namespace AST {
 
 void MultiNodes::accept(Choreo::Visitor& v) {
@@ -13,13 +15,26 @@ void SValList::accept(Choreo::Visitor& v) { (void)v; }
 void Expr::accept(Choreo::Visitor& v) { (void)v; }
 void MultiDimSpans::accept(Choreo::Visitor& v) { (void)v; }
 void NamedTypeDecl::accept(Choreo::Visitor& v) { (void)v; }
-void NamedVariableDecl::accept(Choreo::Visitor& v) { (void)v; }
+
+void NamedVariableDecl::accept(Choreo::Visitor& v) {
+  if (mem) mem->accept(v);
+  if (type) type->accept(v);
+  if (initializer) initializer->accept(v);
+
+  v.Visit(*this);
+}
+
 void IntTuple::accept(Choreo::Visitor& v) { (void)v; }
 void Assignment::accept(Choreo::Visitor& v) { (void)v; }
 void IntIndex::accept(Choreo::Visitor& v) { (void)v; }
 void NthBound::accept(Choreo::Visitor& v) { (void)v; }
 void IntIndexList::accept(Choreo::Visitor& v) { (void)v; }
-void DataType::accept(Choreo::Visitor& v) { (void)v; }
+
+void DataType::accept(Choreo::Visitor& v) {
+  if (mdspan_type) mdspan_type->accept(v);
+
+  v.Visit(*this);
+}
 
 void Identifier::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
@@ -88,3 +103,5 @@ void Program::accept(Choreo::Visitor& v) {
 }
 
 }  // end of namespace AST
+
+}  // end of namespace Choreo

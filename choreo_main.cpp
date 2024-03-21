@@ -7,10 +7,14 @@
 #include "scanner.hpp"
 #include "semantics.hpp"
 #include "symtab.hpp"
+#include "typeinfer.hpp"
+#include "types.hpp"
 
-Choreo::location loc;
+using namespace Choreo;
+
+location loc;
 AST::Program root(loc);
-AST::SymbolTable symtab;
+SymbolTable symtab;
 
 using namespace AST;
 using namespace Choreo;
@@ -27,11 +31,12 @@ int main(int argc, char* argv[]) {
   Target tgt = Target::Factor;
 
   // Define long options
-  static struct option long_options[] = {{"debug", no_argument, 0, 'd'},
-                                         {"dump-ast", no_argument, 0, 'e'},
-                                         {"sema-check", no_argument, 0, 's'},
-                                         {"remove-comments", no_argument, 0, 'n'},
-                                         {0, 0, 0, 0}};
+  static struct option long_options[] = {
+      {"debug", no_argument, 0, 'd'},
+      {"dump-ast", no_argument, 0, 'e'},
+      {"sema-check", no_argument, 0, 's'},
+      {"remove-comments", no_argument, 0, 'n'},
+      {0, 0, 0, 0}};
 
   // Parse command-line options
   int opt;
@@ -79,18 +84,17 @@ int main(int argc, char* argv[]) {
 
   loc.begin.filename = loc.end.filename = &filename;
 
-  Choreo::Scanner s;
+  Scanner s;
   s.yyrestart(file);
-  Choreo::Parser p(s);
+  Parser p(s);
 
   if (debugMode) {
     std::cout << "Choreo: Debug of parsing is switched on." << std::endl;
     p.set_debug_level(1);  // Enable Bison debugging
-    Choreo::Scanner::SetDebug();
+    Scanner::SetDebug();
   }
 
-  if (removeComments)
-    Choreo::Scanner::SetRemoveComments();
+  if (removeComments) Scanner::SetRemoveComments();
 
   p.parse();
 
@@ -104,8 +108,11 @@ int main(int argc, char* argv[]) {
     return 0;
   }
 
-  SemanticChecker semachk;
-  root.accept(semachk);
+  TypeInference type_infer;
+  root.accept(type_infer);
+
+  SemanticChecker sema_check;
+  root.accept(sema_check);
 
   if (onlySemaCheck) return 0;
 
@@ -117,5 +124,5 @@ int main(int argc, char* argv[]) {
   return 0;
 }
 
-int AST::SymbolTable::anonymous_count = 0;
-int AST::PartialTypeTable::anonymous_count = 0;
+int SymbolTable::anonymous_count = 0;
+int PartialTypeTable::anonymous_count = 0;

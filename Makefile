@@ -31,7 +31,7 @@ all: $(TARGET)
 test: $(TARGET)
 	$(LIT) tests
 
-$(TARGET): scanner.yy.o parser.tab.o choreo_main.o codegen_factor.o typeinfer.o ast.o
+$(TARGET): scanner.yy.o parser.tab.o choreo_main.o codegen_factor.o typeinfer.o ast.o types.o
 	$(CC) $(CFLAGS) $^ -o $(TARGET)
 
 scanner.yy.cc: $(LEX_SRC)

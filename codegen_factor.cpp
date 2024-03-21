@@ -2,6 +2,9 @@
 
 #include "ast.hpp"
 #include "codegen.hpp"
+#include "types.hpp"
+
+using namespace Choreo;
 
 namespace {
 
@@ -30,7 +33,7 @@ static inline void print_wrapper_end(std::ostream &os, std::string name) {
   os << "};\n";
 }
 
-static inline std::string factor_typestr(AST::BaseType t) {
+static inline std::string factor_typestr(Choreo::BaseType t) {
   switch (t) {
     case AST::BaseType::F32:
       return "FloatType(32)";
@@ -64,21 +67,17 @@ static inline std::string factor_typestr(AST::BaseType t) {
 
 }  // end anonymous namespace
 
-using namespace AST;
-
-namespace Choreo {
-
 bool FactorCodeGen::BeforeVisit(AST::Node &n) {
-  if (isa<Program>(&n)) {
+  if (AST::isa<AST::Program>(&n)) {
     print_fixed_header(os);
   }
   return 0;
 }
 
 bool FactorCodeGen::AfterVisit(AST::Node &n) {
-  if (auto p = dyn_cast<ChoreoFunction>(&n)) {
+  if (auto p = AST::dyn_cast<AST::ChoreoFunction>(&n)) {
     print_wrapper_end(os, p->name);
-  } else if (isa<ParallelBy>(&n)) {
+  } else if (AST::isa<AST::ParallelBy>(&n)) {
     os << "    }); // end of choreo-factor kernel function\n";
   }
   return 0;
@@ -221,5 +220,3 @@ bool FactorCodeGen::Visit(AST::CppSourceCode &n) {
 }
 
 bool FactorCodeGen::Visit(AST::Program &) { return true; }
-
-}  // end namespace Choreo

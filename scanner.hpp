@@ -1,8 +1,8 @@
 /*
  * The MIT License (MIT)
- * 
+ *
  * Copyright (c) 2014 Krzysztof Narkiewicz <krzysztof.narkiewicz@ezaquarii.com>
- * 
+ *
  * Permission is hereby granted, free of charge, to any person
  * obtaining a copy of this software and associated documentation
  * files (the "Software"), to deal in the Software without
@@ -11,10 +11,10 @@
  * copies of the Software, and to permit persons to whom the
  * Software is furnished to do so, subject to the following
  * conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be
  * included in all copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
  * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
  * OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
@@ -23,59 +23,63 @@
  * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
  * OTHER DEALINGS IN THE SOFTWARE.
- * 
+ *
  */
 
 #ifndef __CHOREO_SCANNER_H__
 #define __CHOREO_SCANNER_H__
 
 /**
- * Generated Flex class name is yyFlexLexer by default. If we want to use more flex-generated
- * classes we should name them differently. See scanner.l prefix option.
- * 
- * Unfortunately the implementation relies on this trick with redefining class name
- * with a preprocessor macro. See GNU Flex manual, "Generating C++ Scanners" section
+ * Generated Flex class name is yyFlexLexer by default. If we want to use more
+ * flex-generated classes we should name them differently. See scanner.l prefix
+ * option.
+ *
+ * Unfortunately the implementation relies on this trick with redefining class
+ * name with a preprocessor macro. See GNU Flex manual, "Generating C++
+ * Scanners" section
  */
-#if ! defined(yyFlexLexerOnce)
+#if !defined(yyFlexLexerOnce)
 #undef yyFlexLexer
-#define yyFlexLexer Choreo_FlexLexer // the trick with prefix; no namespace here :(
+#define yyFlexLexer \
+  Choreo_FlexLexer  // the trick with prefix; no namespace here :(
 #include <FlexLexer.h>
 #endif
 
-// Scanner method signature is defined by this macro. Original yylex() returns int.
-// Sinice Bison 3 uses symbol_type, we must change returned type. We also rename it
-// to something sane, since you cannot overload return type.
+// Scanner method signature is defined by this macro. Original yylex() returns
+// int. Sinice Bison 3 uses symbol_type, we must change returned type. We also
+// rename it to something sane, since you cannot overload return type.
 #undef YY_DECL
 #define YY_DECL Choreo::Parser::symbol_type Choreo::Scanner::get_next_token()
 
-#include "parser.tab.hh" // this is needed for symbol_type
+#include "parser.tab.hh"  // this is needed for symbol_type
 
 namespace Choreo {
 
-// Forward declare interpreter to avoid include. Header is added inimplementation file.
-//class Interpreter; 
-    
+// Forward declare interpreter to avoid include. Header is added
+// inimplementation file.
+// class Interpreter;
+
 class Scanner : public yyFlexLexer {
-public:
+ public:
   //      Scanner(Interpreter &driver) : m_driver(driver) {}
   Scanner() {}
-	virtual ~Scanner() {}
-	virtual Parser::symbol_type get_next_token();
-        
-public:
+  virtual ~Scanner() {}
+  virtual Parser::symbol_type get_next_token();
+
+ public:
   static void Debug(std::string s);
   static void SetDebug(bool d = true) { debug = d; }
   static void SetRemoveComments() { keep_comments = false; };
   static bool KeepComments() { return keep_comments; };
 
-private:
+ private:
   static bool debug;
   static bool keep_comments;
 
-//private:
-//    Interpreter &m_driver;
+  // private:
+  //    Interpreter &m_driver;
 };
 
-}
+}  // namespace Choreo
 
-#endif // __CHOREO_SCANNER_H__
+#endif  // __CHOREO_SCANNER_H__

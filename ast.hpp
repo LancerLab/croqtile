@@ -11,10 +11,6 @@
 #include "location.hh"
 #include "symtab.hpp"
 
-namespace Choreo {
-struct Visitor;
-}
-
 [[noreturn]] inline void choreo_unreachable(
     const char* msg = "Unreachable code reached", const char* file = __FILE__,
     int line = __LINE__) {
@@ -23,12 +19,19 @@ struct Visitor;
   std::abort();
 }
 
+namespace Choreo {
+struct Visitor;
+
 namespace AST {
 
-//------------------------- AST Node Fundamentals ----------------------------//
-
+// short hands
+using BaseType = Choreo::BaseType;
+using Storage = Choreo::Storage;
+using SymbolTable = Choreo::SymbolTable;
 template <typename T>
-using ptr = std::shared_ptr<T>;
+using ptr = Choreo::ptr<T>;
+
+//------------------------- AST Node Fundamentals ----------------------------//
 
 class Identifier;
 class DataType;
@@ -52,14 +55,18 @@ int TypeIDProvider<T>::__unique_id;
 
 // interface class for all AST nodes
 struct Node {
-  Choreo::location loc;
-  BaseType b_type;
+  location loc;
+  ptr<Type> pty = nullptr;
 
-  Node(const Choreo::location& l) : loc(l) {}
+  Node(const location& l) : loc(l) {}
 
-  virtual void SetBaseType(BaseType b) { b_type = b; }
-  virtual BaseType GetBaseType() { return b_type; }
-  virtual const Choreo::location& LOC() { return loc; }
+  virtual bool TypeUnknown() const {
+    return pty->Category() == TypeCategory::UNKNOWN;
+  }
+
+  virtual void SetType(const ptr<Type>& t) { pty = t; }
+  virtual const ptr<Type>& GetType() { return pty; }
+  virtual const location& LOC() { return loc; }
 
   virtual ~Node() = default;
 
@@ -69,7 +76,7 @@ struct Node {
   // for the runtime type disambiguition
   virtual const std::string NodeTypeString() = 0;
 
-  virtual void accept(Choreo::Visitor&) = 0;
+  virtual void accept(Visitor&) = 0;
 
   virtual uint64_t NodeTypeID() const { return 0ULL; }
   static uint64_t TypeID() { return 0ULL; }
@@ -118,7 +125,7 @@ struct MultiNodes : public Node, public TypeIDProvider<MultiNodes> {
   std::vector<ptr<Node>> values;
   std::string delimiter;
 
-  explicit MultiNodes(const Choreo::location& l, std::string d = "")
+  explicit MultiNodes(const location& l, std::string d = "")
       : Node(l), delimiter(d){};
 
   void Append(const ptr<Node>& m) {
@@ -150,33 +157,33 @@ struct MultiNodes : public Node, public TypeIDProvider<MultiNodes> {
     }
   }
 
-  void accept(Choreo::Visitor& visitor) override;
+  void accept(Visitor& visitor) override;
 
   __NODE_TYPE_INFO__
 };
 
 struct Boolean : public Node, public TypeIDProvider<Boolean> {
   std::string value;
-  Boolean(const Choreo::location& l, std::string v) : Node(l), value(v) {}
+  Boolean(const location& l, std::string v) : Node(l), value(v) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix << value;
   }
 
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
 
 struct IntLiteral : public Node, public TypeIDProvider<IntLiteral> {
   int value;
-  IntLiteral(const Choreo::location& l, int v) : Node(l), value(v) {}
+  IntLiteral(const location& l, int v) : Node(l), value(v) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix << value;
   }
 
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -184,7 +191,7 @@ struct IntLiteral : public Node, public TypeIDProvider<IntLiteral> {
 struct IntList : public Node, public TypeIDProvider<IntList> {
   std::vector<ptr<IntLiteral>> values;
 
-  IntList(const Choreo::location& l) : Node(l) {}
+  IntList(const location& l) : Node(l) {}
 
   void Append(ptr<IntLiteral> v) { values.push_back(v); }
 
@@ -195,7 +202,7 @@ struct IntList : public Node, public TypeIDProvider<IntList> {
     os << values.back()->value << "]";
   }
 
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -203,7 +210,7 @@ struct IntList : public Node, public TypeIDProvider<IntList> {
 struct SValList : public Node, public TypeIDProvider<SValList> {
   std::vector<ptr<Node>> values;
 
-  SValList(const Choreo::location& l) : Node(l) {}
+  SValList(const location& l) : Node(l) {}
 
   void Append(ptr<Node> v) { values.push_back(v); }
 
@@ -216,7 +223,7 @@ struct SValList : public Node, public TypeIDProvider<SValList> {
     (void)prefix;
   }
 
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -227,18 +234,16 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
   ptr<Expr> value_l;
   ptr<Node> value_r;
 
-  Expr(const Choreo::location& l) : Node(l) {}
+  Expr(const location& l) : Node(l) {}
 
-  explicit Expr(const Choreo::location& l, const ptr<Node>& v)
-      : Node(l), value_r(v) {}
-  explicit Expr(const Choreo::location& l, const std::string& o,
-                const ptr<Node>& v2)
+  explicit Expr(const location& l, const ptr<Node>& v) : Node(l), value_r(v) {}
+  explicit Expr(const location& l, const std::string& o, const ptr<Node>& v2)
       : Node(l), op(o), value_r(v2) {}
-  explicit Expr(const Choreo::location& l, const std::string& o,
-                const ptr<Expr>& v1, const ptr<Node>& v2)
+  explicit Expr(const location& l, const std::string& o, const ptr<Expr>& v1,
+                const ptr<Node>& v2)
       : Node(l), op(o), value_l(v1), value_r(v2) {}
-  explicit Expr(const Choreo::location& l, const std::string& o,
-                const ptr<Expr>& c, const ptr<Expr>& v1, const ptr<Node>& v2)
+  explicit Expr(const location& l, const std::string& o, const ptr<Expr>& c,
+                const ptr<Expr>& v1, const ptr<Node>& v2)
       : Node(l), op(o), value_c(c), value_l(v1), value_r(v2) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
@@ -263,28 +268,38 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
     (void)prefix;
   }
 
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
 
 // Represents both dimensions and s like {3, 4, 5} or {1, 2, 1}
 struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
-  std::string ref_name;  // syntax suger, could be empty
-  ptr<Node> list;        // null if the span is a dynamic value
-  int dim_count = 0;     // dynamic value with known dimension count
+  static constexpr size_t __invalid = std::numeric_limits<size_t>::max();
+
+  std::string ref_name;          // syntax suger, could be empty
+  ptr<Node> list;                // null if the span is a dynamic value
+  size_t dim_count = __invalid;  // dynamic value with known dimension count
 
   // If the mdspan is known
-  explicit MultiDimSpans(const Choreo::location& l, const std::string& n,
+  explicit MultiDimSpans(const location& l, const std::string& n,
                          const ptr<Node>& lst)
-      : Node(l), ref_name(n), list(lst), dim_count(0) {
+      : Node(l), ref_name(n), list(lst), dim_count(__invalid) {
     assert(list && "Unexpected: span list is not provided");
   }
 
   // mdspan is unknown - for parameter passing
-  explicit MultiDimSpans(const Choreo::location& l, const std::string& n, int c)
+  explicit MultiDimSpans(const location& l, const std::string& n, size_t c)
       : Node(l), ref_name(n), list(nullptr), dim_count(c) {
-    assert(dim_count > 0 && "Invalid dimensions.");
+    assert(dim_count != __invalid && "Invalid dimensions.");
+  }
+
+  MDSpanValue MakeValueList() {
+    if (!list) {
+      // dynamically valued
+      return {MDSpanValue(dim_count)};
+    } else
+      return {MDSpanValue(0) /*TODO: make Type from the list*/};
   }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
@@ -299,7 +314,7 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
     (void)prefix;
   }
 
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -309,7 +324,7 @@ struct NamedTypeDecl : public Node, public TypeIDProvider<NamedTypeDecl> {
   const std::string disp_str;
   const ptr<Node> init_expr;  // associated init_expr
 
-  explicit NamedTypeDecl(const Choreo::location& l, const std::string& n,
+  explicit NamedTypeDecl(const location& l, const std::string& n,
                          const ptr<Node>& v, const std::string& d = "-")
       : Node(l), name_str(n), disp_str(d), init_expr(v) {
     assert(name_str.size() > 0 && "Invalid name string.");
@@ -322,14 +337,14 @@ struct NamedTypeDecl : public Node, public TypeIDProvider<NamedTypeDecl> {
     init_expr->Print(os);
   }
 
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
 
 struct Memory : public Node, public TypeIDProvider<Memory> {
   Storage st;
-  Memory(const Choreo::location& l, const Storage s = Storage::DEFAULT)
+  Memory(const location& l, const Storage s = Storage::DEFAULT)
       : Node(l), st(s) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
@@ -352,7 +367,7 @@ struct Memory : public Node, public TypeIDProvider<Memory> {
     }
   }
 
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -365,7 +380,7 @@ struct NamedVariableDecl : public Node,
   const ptr<Node> type = nullptr;
   const ptr<Node> initializer = nullptr;  // associated initializer
 
-  explicit NamedVariableDecl(const Choreo::location& l, const std::string& n,
+  explicit NamedVariableDecl(const location& l, const std::string& n,
                              const ptr<Node>& t, const ptr<Memory>& s = nullptr,
                              const ptr<Node>& v = nullptr,
                              const std::string& d = "=")
@@ -388,7 +403,7 @@ struct NamedVariableDecl : public Node,
     }
   }
 
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -398,8 +413,7 @@ struct IntTuple : public Node, public TypeIDProvider<IntTuple> {
   std::string ref_name;  // could be anonymous
   ptr<Node> list;
 
-  explicit IntTuple(const Choreo::location& l, const std::string& n,
-                    ptr<Node> lst)
+  explicit IntTuple(const location& l, const std::string& n, ptr<Node> lst)
       : Node(l), ref_name(n), list(lst) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
@@ -411,7 +425,7 @@ struct IntTuple : public Node, public TypeIDProvider<IntTuple> {
     (void)prefix;
   }
 
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -426,7 +440,7 @@ class ITupleTable {
 
   // Add a symbol to the symbol table
   void addITupleSymbol(const std::string& name, ptr<IntTuple>& ituple) {
-    st.addSymbol(name, BaseType::INT);
+    st.AddSymbol(name, std::make_shared<IntegerType>());
     table[name] = ituple;
   }
 
@@ -447,8 +461,7 @@ class ITupleTable {
 struct Assignment : public Node, public TypeIDProvider<Assignment> {
   std::string name;
   ptr<Node> value;
-  explicit Assignment(const Choreo::location& l, std::string& n,
-                      const ptr<Node>& v)
+  explicit Assignment(const location& l, std::string& n, const ptr<Node>& v)
       : Node(l), name(n), value(v) {
     assert(n.size() > 0 && "invalid assignment to the un-named value.");
   }
@@ -458,14 +471,14 @@ struct Assignment : public Node, public TypeIDProvider<Assignment> {
     value->Print(os);
   }
 
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
 
 struct IntIndex : public Node, public TypeIDProvider<IntIndex> {
   ptr<Node> value;
-  explicit IntIndex(const Choreo::location& l, const ptr<Node>& v)
+  explicit IntIndex(const location& l, const ptr<Node>& v)
       : Node(l), value(v) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
@@ -474,7 +487,7 @@ struct IntIndex : public Node, public TypeIDProvider<IntIndex> {
     os << ")";
   }
 
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -483,7 +496,7 @@ struct NthBound : public Node, public TypeIDProvider<NthBound> {
   ptr<Node> mdarray;
   ptr<IntIndex> index;
 
-  explicit NthBound(const Choreo::location& l, const ptr<Node>& a,
+  explicit NthBound(const location& l, const ptr<Node>& a,
                     const ptr<IntIndex>& i)
       : Node(l), mdarray(a), index(i) {}
 
@@ -493,7 +506,7 @@ struct NthBound : public Node, public TypeIDProvider<NthBound> {
     index->Print(os);
   }
 
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -501,7 +514,7 @@ struct NthBound : public Node, public TypeIDProvider<NthBound> {
 struct IntIndexList : public Node, public TypeIDProvider<IntIndexList> {
   std::vector<ptr<IntIndex>> indices;
 
-  IntIndexList(const Choreo::location& l) : Node(l) {}
+  IntIndexList(const location& l) : Node(l) {}
 
   void Append(ptr<IntIndex> v) { indices.push_back(v); }
 
@@ -518,7 +531,7 @@ struct IntIndexList : public Node, public TypeIDProvider<IntIndexList> {
     (void)prefix;
   }
 
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -535,10 +548,10 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
   ptr<Node> mdspan_type = nullptr;
 
  public:
-  DataType(const Choreo::location& l, BaseType t)
+  DataType(const location& l, BaseType t)
       : Node(l), base_type(t), mdspan_type(nullptr) {}
 
-  DataType(const Choreo::location& l, BaseType bt, const ptr<Node>& st)
+  DataType(const location& l, BaseType bt, const ptr<Node>& st)
       : Node(l), base_type(bt), mdspan_type(st) {
     assert(bt != BaseType::ITUPLE && "Unexpected type!");
     assert(bt != BaseType::INT && "Unexpected type!");
@@ -551,6 +564,39 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
   bool isITuple() const { return base_type == BaseType::ITUPLE; }
   bool isSpanned() const { return mdspan_type.get() != nullptr; }
 
+  ptr<Type> MakeSemaType() {
+    switch (base_type) {
+      case BaseType::INT:
+        return std::make_shared<IntegerType>();
+      case BaseType::BOOL:
+        return std::make_shared<BooleanType>();
+      case BaseType::F32:
+      case BaseType::F16:
+      case BaseType::BF16:
+      case BaseType::U32:
+      case BaseType::S32:
+      case BaseType::U16:
+      case BaseType::S16:
+      case BaseType::U8:
+      case BaseType::S8:
+        assert(mdspan_type != nullptr);
+        if (isa<MultiDimSpans>(mdspan_type.get()))
+          return std::make_shared<SpannedType>(
+              (FundamentalType)base_type,
+              cast<MultiDimSpans>(mdspan_type.get())->MakeValueList());
+        else
+          return std::make_shared<SpannedType>(
+              (FundamentalType)base_type, MakeUninitMDSpanValue());  // TODO
+      case BaseType::ITUPLE:
+        return MakeUninitITupleType();  // need type inference to retrieve the
+                                        // dim count
+      default:
+        choreo_unreachable("Unexpected BaseType.");
+        break;
+    }
+    return nullptr;
+  }
+
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix << getStringFrom(base_type);
     if (isSpanned()) {
@@ -559,28 +605,27 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
     }
   }
 
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
 
 struct Identifier : public Node, public TypeIDProvider<Identifier> {
   std::string name;
-  Identifier(const Choreo::location& l, const std::string& n)
-      : Node(l), name(n) {}
+  Identifier(const location& l, const std::string& n) : Node(l), name(n) {}
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix << name;
   }
 
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
 
 struct ParamList : public Node, public TypeIDProvider<ParamList> {
   std::vector<ptr<ParamType>> values;
-  explicit ParamList(const Choreo::location& l) : Node(l) {}
-  ParamList(const Choreo::location& l, std::vector<ptr<ParamType>>& v)
+  explicit ParamList(const location& l) : Node(l) {}
+  ParamList(const location& l, std::vector<ptr<ParamType>>& v)
       : Node(l), values(v) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
@@ -592,7 +637,7 @@ struct ParamList : public Node, public TypeIDProvider<ParamList> {
     }
   }
 
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -602,11 +647,10 @@ struct IfElse : public Node, public TypeIDProvider<IfElse> {
   ptr<MultiNodes> if_stmts;
   ptr<MultiNodes> else_stmts;  // optional requirements
 
-  IfElse(const Choreo::location& l, const ptr<Node>& c,
-         const ptr<MultiNodes>& if_s)
+  IfElse(const location& l, const ptr<Node>& c, const ptr<MultiNodes>& if_s)
       : Node(l), cond(c), if_stmts(if_s) {}
-  IfElse(const Choreo::location& l, const ptr<Node>& c,
-         const ptr<MultiNodes>& if_s, const ptr<MultiNodes>& else_s)
+  IfElse(const location& l, const ptr<Node>& c, const ptr<MultiNodes>& if_s,
+         const ptr<MultiNodes>& else_s)
       : Node(l), cond(c), if_stmts(if_s), else_stmts(else_s) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
@@ -621,7 +665,7 @@ struct IfElse : public Node, public TypeIDProvider<IfElse> {
     os << "\n";
   }
 
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -631,7 +675,7 @@ struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
   int bound;
   ptr<MultiNodes> statms;
 
-  ParallelBy(const Choreo::location& l, const std::string v, int b)
+  ParallelBy(const location& l, const std::string v, int b)
       : Node(l), biv(v), bound(b) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
@@ -643,7 +687,7 @@ struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
       statms->Print(os, prefix + " ");
   }
 
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -653,8 +697,7 @@ struct RequireBind : public Node, public TypeIDProvider<RequireBind> {
   ptr<Node> lhs;
   ptr<Node> rhs;
 
-  RequireBind(const Choreo::location& l, const ptr<Node>& lhs,
-              const ptr<Node>& rhs)
+  RequireBind(const location& l, const ptr<Node>& lhs, const ptr<Node>& rhs)
       : Node(l), lhs(lhs), rhs(rhs) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
@@ -665,7 +708,7 @@ struct RequireBind : public Node, public TypeIDProvider<RequireBind> {
     os << "\n";
   }
 
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -675,7 +718,7 @@ struct WithIn : public Node, public TypeIDProvider<WithIn> {
   ptr<Node> in;
   ptr<MultiNodes> with_matchers;  // optional requirements
 
-  WithIn(const Choreo::location& l, const ptr<Node>& w, const ptr<Node>& i)
+  WithIn(const location& l, const ptr<Node>& w, const ptr<Node>& i)
       : Node(l), with(w), in(i) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
@@ -691,7 +734,7 @@ struct WithIn : public Node, public TypeIDProvider<WithIn> {
     os << "\n";
   }
 
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -701,7 +744,7 @@ struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
   ptr<MultiNodes> reqs;    // optional requirements
   ptr<MultiNodes> statms;  // may be empty
 
-  explicit WithBlock(const Choreo::location& l) : Node(l) {}
+  explicit WithBlock(const location& l) : Node(l) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- With Block:\n";
@@ -721,7 +764,7 @@ struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
     }
   }
 
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -732,7 +775,7 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
   ptr<Node> from;
   ptr<Node> to;
 
-  DMA(const Choreo::location& l, const std::string& o, const ptr<Identifier>& r,
+  DMA(const location& l, const std::string& o, const ptr<Identifier>& r,
       const ptr<Node>& f, const ptr<Node>& t)
       : Node(l), operation(o), future(r), from(f), to(t) {}
 
@@ -746,7 +789,7 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
     to->Print(os);
   }
 
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -755,8 +798,7 @@ struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
   ptr<Node> data;
   ptr<MultiNodes> positions;
 
-  ChunkAt(const Choreo::location& l, const ptr<Node>& d,
-          const ptr<MultiNodes>& p)
+  ChunkAt(const location& l, const ptr<Node>& d, const ptr<MultiNodes>& p)
       : Node(l), data(d), positions(p) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
@@ -768,7 +810,7 @@ struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
     (void)prefix;
   }
 
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -776,14 +818,14 @@ struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
 struct Wait : public Node, public TypeIDProvider<Wait> {
   ptr<Node> target;
 
-  Wait(const Choreo::location& l, const ptr<Node>& t) : Node(l), target(t) {}
+  Wait(const location& l, const ptr<Node>& t) : Node(l), target(t) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- WAIT: ";
     target->Print(os);
   }
 
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -791,8 +833,8 @@ struct Wait : public Node, public TypeIDProvider<Wait> {
 struct Return : public Node, public TypeIDProvider<Return> {
   ptr<Node> value = nullptr;
 
-  Return(const Choreo::location& l) : Node(l) {}
-  Return(const Choreo::location& l, const ptr<Node>& t) : Node(l), value(t) {}
+  Return(const location& l) : Node(l) {}
+  Return(const location& l, const ptr<Node>& t) : Node(l), value(t) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Return: ";
@@ -802,7 +844,7 @@ struct Return : public Node, public TypeIDProvider<Return> {
       value->Print(os);
   }
 
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -811,7 +853,7 @@ struct Call : public Node, public TypeIDProvider<Call> {
   ptr<Node> function;
   ptr<Node> arguments;
 
-  Call(const Choreo::location& l, const ptr<Node>& f, const ptr<Node>& a)
+  Call(const location& l, const ptr<Node>& f, const ptr<Node>& a)
       : Node(l), function(f), arguments(a) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
@@ -820,7 +862,7 @@ struct Call : public Node, public TypeIDProvider<Call> {
     os << "\n" << prefix << "  `- with arguements:";
     arguments->Print(os);
   }
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -829,7 +871,7 @@ struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
   ptr<MultiNodes> ivs;
   ptr<MultiNodes> statms;
 
-  explicit ForeachBlock(const Choreo::location& l, const ptr<MultiNodes>& i,
+  explicit ForeachBlock(const location& l, const ptr<MultiNodes>& i,
                         const ptr<MultiNodes>& s)
       : Node(l), ivs(i), statms(s) {
     assert(i != nullptr && "missing iteration variables for the statement.");
@@ -844,7 +886,7 @@ struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
     }
   }
 
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -854,7 +896,7 @@ struct FunctionDecl : public Node, public TypeIDProvider<FunctionDecl> {
   ptr<DataType> ret_type;
   ptr<ParamList> params;
 
-  FunctionDecl(const Choreo::location& l) : Node(l) {}
+  FunctionDecl(const location& l) : Node(l) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "Name: " << name;
@@ -862,7 +904,7 @@ struct FunctionDecl : public Node, public TypeIDProvider<FunctionDecl> {
     ret_type->Print(os);
     params->Print(os, prefix);
   }
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -872,29 +914,28 @@ struct ChoreoFunction : public Node, public TypeIDProvider<ChoreoFunction> {
   FunctionDecl f_decl;
   ptr<MultiNodes> statms;
 
-  ChoreoFunction(const Choreo::location& l) : Node(l), f_decl(l) {}
+  ChoreoFunction(const location& l) : Node(l), f_decl(l) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "ChoreoFunction";
     f_decl.Print(os, prefix + " `- ");
     if (statms) statms->Print(os, prefix + " ");
   }
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
 
 struct CppSourceCode : public Node, public TypeIDProvider<CppSourceCode> {
   std::string code;
-  CppSourceCode(const Choreo::location& l, const std::string& c)
-      : Node(l), code(c) {}
+  CppSourceCode(const location& l, const std::string& c) : Node(l), code(c) {}
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << code;
     (void)prefix;
   }
 
   std::string GetCode() { return code; }
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
@@ -903,18 +944,20 @@ struct CppSourceCode : public Node, public TypeIDProvider<CppSourceCode> {
 struct Program : public Node, public TypeIDProvider<Program> {
   std::vector<ptr<Node>> nodes;
 
-  Program(const Choreo::location& l) : Node(l) {}
+  Program(const location& l) : Node(l) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     for (auto& node : nodes) node->Print(os, "");
     (void)prefix;
   }
 
-  void accept(Choreo::Visitor&) override;
+  void accept(Visitor&) override;
 
   __NODE_TYPE_INFO__
 };
 
 }  // end of namespace AST
+
+}  // end of namespace Choreo
 
 #endif  // __CHOREO_AST_HPP__
