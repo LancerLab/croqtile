@@ -229,6 +229,7 @@ spanned_type
         $$ = AST::Make<AST::DataType>(@1, $1, $2);
       }
     | fundamental_type LBRAKT span_expr RBRAKT {
+        printf("1");
         $$ = AST::Make<AST::DataType>(@1, $1, $3);
       }
     ;

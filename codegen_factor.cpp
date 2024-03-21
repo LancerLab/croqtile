@@ -6,6 +6,8 @@
 
 using namespace Choreo;
 
+extern StringifyTable strtab;
+
 namespace {
 
 static inline void print_fixed_header(std::ostream &os) {
@@ -89,7 +91,33 @@ bool FactorCodeGen::Visit(AST::SValList &) { return true; };
 bool FactorCodeGen::Visit(AST::Expr &) { return true; };
 bool FactorCodeGen::Visit(AST::MultiDimSpans &) { return true; };
 bool FactorCodeGen::Visit(AST::NamedTypeDecl &) { return true; };
-bool FactorCodeGen::Visit(AST::NamedVariableDecl &) { return true; };
+
+// handle stmts like:
+//   f32 [a.span] g_buffer;
+//   local f32[f1.span] l_buffer;
+//
+// ast like:
+//   NamedVariableDecl
+bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) { 
+  // TODO(albert): 'a.span' will be replace to the type-decl related to 'a'
+  // auto dtype = AST::dyn_cast<AST::DataType>(node.type.get());
+  // auto ptype = dtype->getPartialType();
+  //
+  // auto spantype = AST::dyn_cast<AST::MultiDimSpans>(ptype);
+  // os << dtype->isSpanned();
+  // 
+  // dtype->Print(os);
+  // ptype->Print(os);
+  // os << spantype->ref_name;
+  // TODO: hardcode 'a', wait for expr eval
+  if (strtab.Exists("a")) {
+    os << "      auto " << node.name_str << " = alloc_(";
+    os << strtab.GetTypeSymbol("a");
+    os << ");\n";
+  }
+
+  return true; 
+};
 bool FactorCodeGen::Visit(AST::IntTuple &) { return true; };
 bool FactorCodeGen::Visit(AST::Assignment &) { return true; };
 bool FactorCodeGen::Visit(AST::IntIndex &) { return true; };
@@ -149,7 +177,7 @@ bool FactorCodeGen::Visit(AST::WithIn &) { return true; };
 bool FactorCodeGen::Visit(AST::WithBlock &n) { return true; }
 
 bool FactorCodeGen::Visit(AST::Memory &n) {
-  n.Print(os);
+  // n.Print(os);
   return true;
 }
 
@@ -171,13 +199,16 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
   for (auto &param : *current_parameters) {
     auto name = param->second->name;
     if (!param->first->isScalar()) {
-      os << "    auto " << name << "_type = DRAMType(";
-      os << factor_typestr(param->first->getBaseType());
-      os << ", (1));\n";  // todo
+      // define spanned type
+      auto type_symbol = name+"_type";
+      auto type_string = "DRAMType(" + factor_typestr(param->first->getBaseType()) + ", (1))";
+      strtab.AddSymbol(name, type_symbol, type_string);
+      os << "    auto " << strtab.GetTypeSymbol(name) << " = " << strtab.GetTypeString(name) << "\n";
     } else {
-      os << "    auto " << name << "_type = DRAMType(";
-      os << factor_typestr(param->first->getBaseType());
-      os << ", (1));\n";
+      auto type_symbol = name+"_type";
+      auto type_string = "DRAMType(" + factor_typestr(param->first->getBaseType()) + ", (1))";
+      strtab.AddSymbol(name, type_symbol, type_string);
+      os << "    auto " << strtab.GetTypeSymbol(name) << " = " << strtab.GetTypeString(name) << "\n";
     }
   }
 
