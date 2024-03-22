@@ -546,6 +546,7 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
   }
 
   BaseType getBaseType() const { return base_type; }
+  Node* getPartialType() const { return mdspan_type.get(); }
 
   bool isScalar() const { return !mdspan_type; }
   bool isITuple() const { return base_type == BaseType::ITUPLE; }

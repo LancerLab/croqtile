@@ -64,6 +64,43 @@ class SymbolTable {
   static unsigned anon_type_count;
 };
 
+// TODO(albert): remove this when other utils ready
+// currently, we need this for working-around on emit refered ids/types/vars
+// however, some objects are not printable in Factor form.
+class StringifyTable {
+ private:
+  std::unordered_map<std::string, std::string> type_string_table;
+  std::unordered_map<std::string, std::string> type_sym_table;
+
+ public:
+  // Add a symbol to the symbol table
+  // emittable = 'a'
+  // type_symbol = 'a_type'
+  // emitted = 'DRAMType(FloatType(32), {1, 2})'
+  void AddSymbol(const std::string& emittable, const std::string& symname, const std::string& emitted) {
+    type_string_table.emplace(emittable, emitted);
+    type_sym_table.emplace(emittable, symname);
+  }
+
+  // Retrieve a symbol from the symbol table
+  std::string& GetTypeSymbol(const std::string& emittable) {
+    if (type_sym_table.find(emittable) != type_sym_table.end()) return type_sym_table.at(emittable);
+  }
+
+  // Retrieve a symbol from the symbol table
+  std::string& GetTypeString(const std::string& emittable) {
+    if (type_string_table.find(emittable) != type_string_table.end()) return type_string_table.at(emittable);
+  }
+
+  // Check if a symbol with the given name exists in the symbol table
+  bool Exists(const std::string& emittable) {
+    return type_sym_table.find(emittable) != type_sym_table.end();
+  }
+
+  void Reset() { type_sym_table.clear(); }
+
+};
+
 }  // end of namespace Choreo
 
 #endif  // __CHOREO_SYMTAB_H__
