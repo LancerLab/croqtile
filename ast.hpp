@@ -36,30 +36,27 @@ using ptr = Choreo::ptr<T>;
 class Identifier;
 class DataType;
 
-static constexpr int __UNKNOWN_INTVAL__ = std::numeric_limits<int>::min();
-
 // interface class for all AST nodes
 struct Node {
   location loc;
-  ptr<Type> pty = nullptr;
+  ptr<Type> pty = MakeUnknownType();
 
-  Node(const location& l) : loc(l) {}
+  Node(const location& l, const ptr<Type>& p = MakeUnknownType()) : loc(l), pty(p) {}
 
-  virtual bool TypeUnknown() const {
-    return pty->Category() == TypeCategory::UNKNOWN;
-  }
+  virtual bool TypeUnknown() const { return isa<UnknownType>(pty.get()); }
 
   virtual void SetType(const ptr<Type>& t) { pty = t; }
-  virtual const ptr<Type>& GetType() { return pty; }
-  virtual const location& LOC() { return loc; }
+  virtual const ptr<Type>& GetType() const { return pty; }
+  virtual const location& LOC() const { return loc; }
 
   virtual ~Node() = default;
 
   virtual void Print(std::ostream& os,
                      const std::string& prefix = {}) const = 0;
 
-  virtual void PrintType(std::ostream& os) const {
-    if (!pty) os << "nulltype";
+  virtual void PrintType(std::ostream& os,
+                         const std::string& prefix = {}) const {
+    os << prefix;
     pty->Print(os);
   };
 
@@ -73,7 +70,7 @@ struct Node {
 
 //---------------------------------------------------------------------------//
 
-// A general cluster of nodes
+// A group of nodes
 //
 // It is normally used for a non-terminal node that comprises multiple nodes,
 // i.e.:
@@ -123,7 +120,7 @@ struct MultiNodes : public Node, public TypeIDProvider<MultiNodes> {
 
 struct Boolean : public Node, public TypeIDProvider<Boolean> {
   std::string value;
-  Boolean(const location& l, std::string v) : Node(l), value(v) {}
+  Boolean(const location& l, std::string v) : Node(l, MakeBooleanType()), value(v) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix << value;
@@ -137,7 +134,7 @@ struct Boolean : public Node, public TypeIDProvider<Boolean> {
 struct IntLiteral : public Node, public TypeIDProvider<IntLiteral> {
   int value;
   IntLiteral(const location& l, int v = __UNKNOWN_INTVAL__)
-      : Node(l), value(v) {}
+      : Node(l, MakeIntegerType()), value(v) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     if (value == __UNKNOWN_INTVAL__)
@@ -227,13 +224,21 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
   // If the mdspan is known
   explicit MultiDimSpans(const location& l, const std::string& n,
                          const ptr<Node>& lst)
-      : Node(l), ref_name(n), list(lst), dim_count(__INVALID_VALUE__) {
+      : Node(l, MakeUninitMDSpanType()), ref_name(n), list(lst), dim_count(__INVALID_VALUE__) {
     assert(list && "Unexpected: span list is not provided");
+  }
+
+  // set both the mdspan and dim count
+  explicit MultiDimSpans(const location& l, const std::string& n,
+                         const ptr<Node>& lst, size_t dc)
+      : Node(l, MakeUninitMDSpanType()), ref_name(n), list(lst), dim_count(dc) {
+    assert(list && "Unexpected: span list is not provided");
+    // check the consistent between dim_count and span list in semantic time
   }
 
   // mdspan is unknown - for parameter passing
   explicit MultiDimSpans(const location& l, const std::string& n, size_t c)
-      : Node(l), ref_name(n), list(nullptr), dim_count(c) {
+      : Node(l, MakeUninitMDSpanType()), ref_name(n), list(nullptr), dim_count(c) {
     assert(dim_count != __INVALID_VALUE__ && "Invalid dimensions.");
   }
 
@@ -357,7 +362,7 @@ struct IntTuple : public Node, public TypeIDProvider<IntTuple> {
   ptr<Node> list;
 
   explicit IntTuple(const location& l, const std::string& n, ptr<Node> lst)
-      : Node(l), ref_name(n), list(lst) {}
+      : Node(l, MakeUninitITupleType()), ref_name(n), list(lst) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     if (ref_name.size() > 0) os << ref_name << " ";
@@ -371,34 +376,6 @@ struct IntTuple : public Node, public TypeIDProvider<IntTuple> {
   void accept(Visitor&) override;
 
   __UDT_TYPE_INFO__
-};
-
-class ITupleTable {
- private:
-  std::unordered_map<std::string, ptr<IntTuple>> table;
-  SymbolTable& st;
-
- public:
-  ITupleTable(SymbolTable& symtab) : st(symtab) {}
-
-  // Add a symbol to the symbol table
-  void addITupleSymbol(const std::string& name, ptr<IntTuple>& ituple) {
-    st.AddSymbol(name, std::make_shared<IntegerType>());
-    table[name] = ituple;
-  }
-
-  // Retrieve a symbol from the symbol table
-  ptr<IntTuple> getSymbol(const std::string& name) {
-    if (table.find(name) != table.end()) {
-      return table[name];
-    }
-    return nullptr;
-  }
-
-  // Check if a symbol with the given name exists in the symbol table
-  bool exists(const std::string& name) {
-    return table.find(name) != table.end();
-  }
 };
 
 struct Assignment : public Node, public TypeIDProvider<Assignment> {
@@ -441,7 +418,7 @@ struct NthBound : public Node, public TypeIDProvider<NthBound> {
 
   explicit NthBound(const location& l, const ptr<Node>& a,
                     const ptr<IntIndex>& i)
-      : Node(l), mdarray(a), index(i) {}
+      : Node(l, MakeIntegerType()), mdarray(a), index(i) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix;
@@ -576,10 +553,11 @@ struct Parameter : public Node, public TypeIDProvider<Parameter> {
     assert(t && "invalid parameter without a type.");
   }
 
+  bool HasSymbol() const { return (bool)sym; }
+
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     type->Print(os, prefix + " type: ");
-    if (sym)
-      sym->Print(os, ", symbol: ");
+    if (sym) sym->Print(os, ", symbol: ");
   }
 
   void accept(Visitor&) override;
@@ -738,7 +716,7 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
 
   DMA(const location& l, const std::string& o, const ptr<Identifier>& r,
       const ptr<Node>& f, const ptr<Node>& t)
-      : Node(l), operation(o), future(r), from(f), to(t) {}
+      : Node(l, MakeFutureType()), operation(o), future(r), from(f), to(t) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- DMA" << operation;
@@ -921,6 +899,12 @@ struct Program : public Node, public TypeIDProvider<Program> {
 template <typename T, typename... Args>
 ptr<T> Make(Args&&... args) {
   return std::make_shared<T>(std::forward<Args>(args)...);
+}
+
+// Utility to check the type
+template <typename T>
+bool typeof(const Node *n) {
+  return isa<T>(n->GetType().get());
 }
 
 }  // end of namespace AST

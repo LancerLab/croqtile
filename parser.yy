@@ -37,7 +37,6 @@ extern location loc;
 
 extern AST::Program root;
 extern AST::SymbolTable symtab;
-extern AST::ITupleTable ituple_symtab;
 
 const char* red = "\033[31m";
 const char* reset = "\033[0m";
@@ -572,13 +571,11 @@ ituple_val
 named_ituple_decl
     : ITUPLE IDENTIFIER ASSIGN ituple_val {
         /* TODO: workaround: use INT for ituple's base type use a dedicated type for ituple in symboltable */
-        //ituple_symtab.addITupleSymbol($2, $4);
         symtab.AddSymbol($2, MakeUninitITupleType());
         $$ = AST::Make<AST::NamedVariableDecl>(@2,
               $2, AST::Make<AST::DataType>(@1, BaseType::ITUPLE), nullptr, $4);
       }
     | IDENTIFIER ASSIGN unnamed_ituple_decl {
-        //ituple_symtab.addITupleSymbol($1, $3);
         symtab.AddSymbol($1, MakeUninitITupleType());
         $$ = AST::Make<AST::NamedVariableDecl>(@1,
               $1, AST::Make<AST::DataType>(@1, BaseType::ITUPLE), nullptr, $3);

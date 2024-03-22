@@ -1,0 +1,13 @@
+// RUN: choreo -i %s | FileCheck --match-full-lines %s
+
+// recognize the __co__ function
+
+#include <iostream>
+
+// device program
+__co__ int foo(f32 [2, 3, 4] d, int e, bool, f32 mdspan<2> a) { }
+
+// CHECK: [Parameter] Symbol: d, Type: f32 mdspan<0> {}
+// CHECK: [Parameter] Symbol: e, Type: int
+// CHECK: [Parameter] Symbol: anon_0, Type: bool
+// CHECK: [Parameter] Symbol: a, Type: f32 mdspan<2> {}

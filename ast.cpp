@@ -12,8 +12,15 @@ void Boolean::accept(Choreo::Visitor& v) { (void)v; }
 void IntLiteral::accept(Choreo::Visitor& v) { (void)v; }
 void SValList::accept(Choreo::Visitor& v) { (void)v; }
 void Expr::accept(Choreo::Visitor& v) { (void)v; }
-void MultiDimSpans::accept(Choreo::Visitor& v) { (void)v; }
-void NamedTypeDecl::accept(Choreo::Visitor& v) { (void)v; }
+void MultiDimSpans::accept(Choreo::Visitor& v) {
+  v.Visit(*this);
+}
+
+void NamedTypeDecl::accept(Choreo::Visitor& v) {
+  if (init_expr)
+    init_expr->accept(v);
+  v.Visit(*this);
+}
 
 void NamedVariableDecl::accept(Choreo::Visitor& v) {
   if (mem) mem->accept(v);
@@ -38,10 +45,16 @@ void DataType::accept(Choreo::Visitor& v) {
 void Identifier::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
 void Parameter::accept(Choreo::Visitor& v) {
+  type->accept(v);
+  sym->accept(v);
+
   v.Visit(*this);
 }
 
 void ParamList::accept(Choreo::Visitor& v) {
+  for (auto p : values)
+    p->accept(v);
+
   v.Visit(*this);
 }
 

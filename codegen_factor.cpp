@@ -62,6 +62,9 @@ static inline std::string factor_typestr(Choreo::BaseType t) {
     case AST::BaseType::INT:
       return "IntType(32)";
       break;
+    case AST::BaseType::BOOL:
+      return "BoolType(32)";
+      break;
     default:
       choreo_unreachable();
   }
@@ -126,7 +129,7 @@ bool FactorCodeGen::Visit(AST::IntIndexList &) { return true; };
 bool FactorCodeGen::Visit(AST::DataType &) { return true; };
 
 bool FactorCodeGen::Visit(AST::Identifier &n) {
-  os << n.name;
+  //os << n.name;
   return true;
 }
 
@@ -203,7 +206,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
 
   for (auto &param : *cur_params) {
     auto name = param->sym->name;
-    if (!param->type->isScalar()) {
+    if (!AST::typeof<IntegerType>(param.get())) {
       // define spanned type
       auto type_symbol = name+"_type";
       auto type_string = "DRAMType(" + factor_typestr(param->type->getBaseType()) + ", (1));";

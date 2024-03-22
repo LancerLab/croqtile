@@ -261,10 +261,10 @@ struct ValueListRepo {
     return value_number;
   }
 
-  bool Exist(size_t value_number) { return valno_index.count(value_number); }
+  bool Exists(size_t value_number) { return valno_index.count(value_number); }
 
   const ValueList& operator[](size_t value_number) {
-    assert(Exist(value_number) && "Value Number does not exist.");
+    assert(Exists(value_number) && "Value Number does not exist.");
     assert((valno_index.size() > valno_index[value_number]) &&
            "Internal error: unexpected value number.");
 
@@ -305,6 +305,11 @@ struct MDSpanValue {
   size_t dim_count =
       __INVALID_VALUE__;  // dim_count is used when no value appears
 
+  void Invalidate() {
+    val_no = __INVALID_VALUE__;
+    dim_count = __INVALID_VALUE__;
+  }
+
   explicit MDSpanValue() {}  // this initialize an invalid MDSpanValue
                              // The type must be deduced for use
 
@@ -326,7 +331,14 @@ struct MDSpanValue {
 
   const ValueList& Value() const { return values[val_no]; }
 
-  void Print(std::ostream& os) const { PrintValueList(Value(), os); }
+  void Print(std::ostream& os) const {
+    if (val_no == __INVALID_VALUE__)
+      os << "{}";
+    else {
+      assert(values.Exists(val_no) && "bad value number.");
+      PrintValueList(Value(), os);
+    }
+  }
 };
 
 inline bool operator==(const MDSpanValue& lhs, const MDSpanValue& rhs) {
@@ -365,6 +377,7 @@ struct UnknownType final : public Type, public TypeIDProvider<UnknownType> {
   bool IsComplete() const override { return false; }
   void Print(std::ostream& os) const override { os << "unknown_type"; }
   const std::string Name() const override { return "unknown"; }
+  bool HasSufficientInfo() const { return false; }
 
   __UDT_TYPE_INFO__
 };
@@ -542,6 +555,15 @@ struct BoundedITupleType final : public Type,
   __UDT_TYPE_INFO__
 };
 
+struct FutureType : public ScalarType, public TypeIDProvider<FutureType> {
+  FutureType(TypeCategory t = TypeCategory::INT) : ScalarType(t) {}
+  bool IsComplete() const override { return true; }
+  void Print(std::ostream& os) const override { os << "fut"; }
+  const std::string Name() const override { return "future"; }
+
+  __UDT_TYPE_INFO__
+};
+
 // Utility functions to generate types
 inline MDSpanValue GenUninitMDSpanValue() { return MDSpanValue(); }
 
@@ -576,6 +598,10 @@ inline ptr<SpannedType> MakeSpannedType(FundamentalType ft,
 
 inline ptr<SpannedType> MakeSpannedType(BaseType ft, const MDSpanValue& v) {
   return MakeSpannedType((FundamentalType)ft, v);
+}
+
+inline ptr<FutureType> MakeFutureType() {
+  return std::make_shared<FutureType>();
 }
 
 }  // end namespace Choreo
