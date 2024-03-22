@@ -35,25 +35,8 @@ using ptr = Choreo::ptr<T>;
 
 class Identifier;
 class DataType;
-using ParamType = std::pair<ptr<DataType>, ptr<Identifier>>;
 
 static constexpr int __UNKNOWN_INTVAL__ = std::numeric_limits<int>::min();
-
-// smart typeid provider suggested by GPT
-template <typename T>
-struct TypeIDProvider {
-  static int __unique_id;
-};
-
-template <typename T>
-int TypeIDProvider<T>::__unique_id;
-
-#define __NODE_TYPE_INFO__                                                    \
-  const std::string NodeTypeString() override { return __PRETTY_FUNCTION__; } \
-  static uint64_t TypeID() { return (uint64_t)(&__unique_id); }               \
-  virtual uint64_t NodeTypeID() const override {                              \
-    return (uint64_t)(&__unique_id);                                          \
-  }
 
 // interface class for all AST nodes
 struct Node {
@@ -75,44 +58,18 @@ struct Node {
   virtual void Print(std::ostream& os,
                      const std::string& prefix = {}) const = 0;
 
-  // for the runtime type disambiguition
-  virtual const std::string NodeTypeString() = 0;
+  virtual void PrintType(std::ostream& os) const {
+    if (!pty) os << "nulltype";
+    pty->Print(os);
+  };
 
   virtual void accept(Visitor&) = 0;
 
-  virtual uint64_t NodeTypeID() const { return 0ULL; }
+  // for runtime type disambiguition
+  virtual const std::string NodeTypeString() = 0;
+  virtual uint64_t RuntimeID() const { return 0ULL; }
   static uint64_t TypeID() { return 0ULL; }
 };
-
-// LLVM-style type utility functions for AST::Node
-//
-// Note:
-// To be simple, we do not handle any relationship about inheritance but only
-// the extact (most-derived) type
-//
-
-template <typename T>
-bool isa(Node* n) {
-  return T::TypeID() == n->NodeTypeID();
-}
-
-template <typename T>
-T* dyn_cast(Node* n) {
-  if (isa<T>(n))
-    return (T*)n;
-  else
-    return nullptr;
-}
-
-template <typename T>
-T* cast(Node* n) {
-  if (isa<T>(n))
-    return (T*)n;
-  else {
-    std::cerr << "Cast failure for the type inconsistence." << std::endl;
-    abort();
-  }
-}
 
 //---------------------------------------------------------------------------//
 
@@ -161,7 +118,7 @@ struct MultiNodes : public Node, public TypeIDProvider<MultiNodes> {
 
   void accept(Visitor& visitor) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 struct Boolean : public Node, public TypeIDProvider<Boolean> {
@@ -174,7 +131,7 @@ struct Boolean : public Node, public TypeIDProvider<Boolean> {
 
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 struct IntLiteral : public Node, public TypeIDProvider<IntLiteral> {
@@ -191,7 +148,7 @@ struct IntLiteral : public Node, public TypeIDProvider<IntLiteral> {
 
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 struct SValList : public Node, public TypeIDProvider<SValList> {
@@ -212,7 +169,7 @@ struct SValList : public Node, public TypeIDProvider<SValList> {
 
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 struct Expr : public Node, public TypeIDProvider<Expr> {
@@ -257,28 +214,27 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
 
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 // Represents both dimensions and s like {3, 4, 5} or {1, 2, 1}
 struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
-  static constexpr size_t __invalid = std::numeric_limits<size_t>::max();
-
-  std::string ref_name;          // syntax suger, could be empty
-  ptr<Node> list;                // null if the span is a dynamic value
-  size_t dim_count = __invalid;  // dynamic value with known dimension count
+  std::string ref_name;  // syntax suger, could be empty
+  ptr<Node> list;        // null if the span is a dynamic value
+  size_t dim_count =
+      __INVALID_VALUE__;  // dynamic value with known dimension count
 
   // If the mdspan is known
   explicit MultiDimSpans(const location& l, const std::string& n,
                          const ptr<Node>& lst)
-      : Node(l), ref_name(n), list(lst), dim_count(__invalid) {
+      : Node(l), ref_name(n), list(lst), dim_count(__INVALID_VALUE__) {
     assert(list && "Unexpected: span list is not provided");
   }
 
   // mdspan is unknown - for parameter passing
   explicit MultiDimSpans(const location& l, const std::string& n, size_t c)
       : Node(l), ref_name(n), list(nullptr), dim_count(c) {
-    assert(dim_count != __invalid && "Invalid dimensions.");
+    assert(dim_count != __INVALID_VALUE__ && "Invalid dimensions.");
   }
 
   MDSpanValue MakeValueList() {
@@ -303,30 +259,30 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
 
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 struct NamedTypeDecl : public Node, public TypeIDProvider<NamedTypeDecl> {
   const std::string name_str;
-  const std::string disp_str;
+  const std::string init_str;
   const ptr<Node> init_expr;  // associated init_expr
 
   explicit NamedTypeDecl(const location& l, const std::string& n,
                          const ptr<Node>& v, const std::string& d = "-")
-      : Node(l), name_str(n), disp_str(d), init_expr(v) {
+      : Node(l), name_str(n), init_str(d), init_expr(v) {
     assert(name_str.size() > 0 && "Invalid name string.");
     assert(init_expr && "Invalid value.");
   }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Type Decl: ";
-    os << name_str << " " << disp_str << " ";
+    os << name_str << " " << init_str << " ";
     init_expr->Print(os);
   }
 
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 struct Memory : public Node, public TypeIDProvider<Memory> {
@@ -356,13 +312,13 @@ struct Memory : public Node, public TypeIDProvider<Memory> {
 
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 struct NamedVariableDecl : public Node,
                            public TypeIDProvider<NamedVariableDecl> {
   const std::string name_str;
-  const std::string disp_str;
+  const std::string init_str;
   const ptr<Memory> mem = nullptr;  // storage location
   const ptr<Node> type = nullptr;
   const ptr<Node> initializer = nullptr;  // associated initializer
@@ -371,7 +327,7 @@ struct NamedVariableDecl : public Node,
                              const ptr<Node>& t, const ptr<Memory>& s = nullptr,
                              const ptr<Node>& v = nullptr,
                              const std::string& d = "=")
-      : Node(l), name_str(n), disp_str(d), mem(s), type(t), initializer(v) {
+      : Node(l), name_str(n), init_str(d), mem(s), type(t), initializer(v) {
     assert(name_str.size() > 0 && "Invalid name string.");
     assert(type && "Invalid type.");
   }
@@ -385,14 +341,14 @@ struct NamedVariableDecl : public Node,
     }
     os << "): " << name_str;
     if (initializer) {
-      os << " " << disp_str << " ";
+      os << " " << init_str << " ";
       initializer->Print(os);
     }
   }
 
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 // Represents declarations like: ituple t = {3, 4, 5};
@@ -414,7 +370,7 @@ struct IntTuple : public Node, public TypeIDProvider<IntTuple> {
 
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 class ITupleTable {
@@ -460,7 +416,7 @@ struct Assignment : public Node, public TypeIDProvider<Assignment> {
 
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 struct IntIndex : public Node, public TypeIDProvider<IntIndex> {
@@ -476,7 +432,7 @@ struct IntIndex : public Node, public TypeIDProvider<IntIndex> {
 
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 struct NthBound : public Node, public TypeIDProvider<NthBound> {
@@ -495,7 +451,7 @@ struct NthBound : public Node, public TypeIDProvider<NthBound> {
 
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 struct IntIndexList : public Node, public TypeIDProvider<IntIndexList> {
@@ -520,7 +476,7 @@ struct IntIndexList : public Node, public TypeIDProvider<IntIndexList> {
 
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 // A data type could either be
@@ -593,39 +549,58 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
 
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 struct Identifier : public Node, public TypeIDProvider<Identifier> {
   std::string name;
-  Identifier(const location& l, const std::string& n) : Node(l), name(n) {}
+  Identifier(const location& l,
+             const std::string& n = SymbolTable::GetAnonName())
+      : Node(l), name(n) {}
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix << name;
   }
 
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
-struct ParamList : public Node, public TypeIDProvider<ParamList> {
-  std::vector<ptr<ParamType>> values;
-  explicit ParamList(const location& l) : Node(l) {}
-  ParamList(const location& l, std::vector<ptr<ParamType>>& v)
-      : Node(l), values(v) {}
+struct Parameter : public Node, public TypeIDProvider<Parameter> {
+  ptr<DataType> type = nullptr;
+  ptr<Identifier> sym = nullptr;
+
+  Parameter(const location& l, const ptr<DataType> t,
+            ptr<Identifier> n = nullptr)
+      : Node(l), type(t), sym(n) {
+    assert(t && "invalid parameter without a type.");
+  }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << "\n" << prefix << "Parameters";
-    for (auto& item : values) {
-      os << "\n  " << prefix;
-      item->first->Print(os, " type: ");
-      item->second->Print(os, ", symbol: ");
-    }
+    type->Print(os, prefix + " type: ");
+    if (sym)
+      sym->Print(os, ", symbol: ");
   }
 
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
+};
+
+struct ParamList : public Node, public TypeIDProvider<ParamList> {
+  std::vector<ptr<Parameter>> values;
+  explicit ParamList(const location& l) : Node(l) {}
+  ParamList(const location& l, std::vector<ptr<Parameter>>& v)
+      : Node(l), values(v) {}
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << "\n" << prefix << "Parameters";
+    for (auto& item : values) item->Print(os, "\n  " + prefix);
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__
 };
 
 struct IfElse : public Node, public TypeIDProvider<IfElse> {
@@ -653,7 +628,7 @@ struct IfElse : public Node, public TypeIDProvider<IfElse> {
 
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
@@ -675,7 +650,7 @@ struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
 
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 // `require_bind` parsing "idx_1 <-> idx_2"
@@ -696,7 +671,7 @@ struct RequireBind : public Node, public TypeIDProvider<RequireBind> {
 
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 struct WithIn : public Node, public TypeIDProvider<WithIn> {
@@ -722,7 +697,7 @@ struct WithIn : public Node, public TypeIDProvider<WithIn> {
 
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
@@ -752,7 +727,7 @@ struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
 
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 struct DMA : public Node, public TypeIDProvider<DMA> {
@@ -777,7 +752,7 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
 
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
@@ -798,7 +773,7 @@ struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
 
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 struct Wait : public Node, public TypeIDProvider<Wait> {
@@ -813,7 +788,7 @@ struct Wait : public Node, public TypeIDProvider<Wait> {
 
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 struct Return : public Node, public TypeIDProvider<Return> {
@@ -832,7 +807,7 @@ struct Return : public Node, public TypeIDProvider<Return> {
 
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 struct Call : public Node, public TypeIDProvider<Call> {
@@ -850,7 +825,7 @@ struct Call : public Node, public TypeIDProvider<Call> {
   }
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
@@ -874,7 +849,7 @@ struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
 
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 struct FunctionDecl : public Node, public TypeIDProvider<FunctionDecl> {
@@ -892,7 +867,7 @@ struct FunctionDecl : public Node, public TypeIDProvider<FunctionDecl> {
   }
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 struct ChoreoFunction : public Node, public TypeIDProvider<ChoreoFunction> {
@@ -909,7 +884,7 @@ struct ChoreoFunction : public Node, public TypeIDProvider<ChoreoFunction> {
   }
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 struct CppSourceCode : public Node, public TypeIDProvider<CppSourceCode> {
@@ -923,7 +898,7 @@ struct CppSourceCode : public Node, public TypeIDProvider<CppSourceCode> {
   std::string GetCode() { return code; }
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 // Top-level program structure
@@ -939,7 +914,7 @@ struct Program : public Node, public TypeIDProvider<Program> {
 
   void accept(Visitor&) override;
 
-  __NODE_TYPE_INFO__
+  __UDT_TYPE_INFO__
 };
 
 // Utility to generate shared_ptr<Node>

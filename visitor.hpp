@@ -30,6 +30,7 @@ struct Visitor {
   virtual bool Visit(AST::IntIndexList&) = 0;
   virtual bool Visit(AST::DataType&) = 0;
   virtual bool Visit(AST::Identifier&) = 0;
+  virtual bool Visit(AST::Parameter&) = 0;
   virtual bool Visit(AST::ParamList&) = 0;
   virtual bool Visit(AST::ParallelBy&) = 0;
   virtual bool Visit(AST::RequireBind&) = 0;

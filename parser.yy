@@ -134,15 +134,15 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::Node>> pass_by foreach_block simple_val span_val ituple_val int_val bool_literal passable declaration statement assignment pb_statement w_statement dma_statement wait_statement call_statement span_elem mixed_span_elem iv_expr if_else optional_scalar_init param_mdspan_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments pb_statements w_statements span_list mixed_span_list param_mdspan_list withins iv_exprs require_binds require_clause id_list with_matchers else_clause futures passables
 %nterm <AST::ptr<AST::SValList>> sval_list
-%nterm <AST::ptr<AST::Expr>> expr span_expr
+%nterm <AST::ptr<AST::Expr>> s_expr span_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type param_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
-%nterm <AST::ptr<AST::ParamType>> parameter
+%nterm <AST::ptr<AST::Parameter>> parameter
 %nterm <AST::ptr<AST::ChoreoFunction>> dsl_function
-%nterm <AST::ptr<AST::MultiDimSpans>> unnamed_span_decl param_mdspan
-%nterm <AST::ptr<AST::NamedTypeDecl>> named_span_decl
-%nterm <AST::ptr<AST::NamedVariableDecl>> named_tuple_decl named_scalar_decl named_spanned_decl
-%nterm <AST::ptr<AST::IntTuple>> unnamed_tuple_decl
+%nterm <AST::ptr<AST::MultiDimSpans>> unnamed_mdspan_decl param_mdspan
+%nterm <AST::ptr<AST::NamedTypeDecl>> named_mdspan_decl
+%nterm <AST::ptr<AST::NamedVariableDecl>> named_ituple_decl named_scalar_decl named_spanned_decl
+%nterm <AST::ptr<AST::IntTuple>> unnamed_ituple_decl
 %nterm <AST::ptr<AST::IntIndex>> s_index
 %nterm <AST::ptr<AST::IntIndexList>> s_index_list
 %nterm <AST::ptr<AST::WithBlock>> with_block
@@ -225,7 +225,7 @@ scalar_type
     ;
 
 spanned_type
-    : fundamental_type unnamed_span_decl {
+    : fundamental_type unnamed_mdspan_decl {
         $$ = AST::Make<AST::DataType>(@1, $1, $2);
       }
     | fundamental_type LBRAKT span_expr RBRAKT {
@@ -250,11 +250,11 @@ sval_list
     : /* allows the empty list */ {
         $$ = AST::Make<AST::SValList>(loc);
       }
-    | sval_list COMMA simple_val {
+    | sval_list COMMA s_expr {
         $1->Append($3);
         $$ = $1;
       }
-    | simple_val {
+    | s_expr {
         $$ = AST::Make<AST::SValList>(@1);
         $$->Append($1);
       }
@@ -267,12 +267,10 @@ simple_val
           Parser::error(@1,
             "The symbol `" + $1 + "' has not been defined.");
 
-        if (symtab.GetSymbol($1)->IsComposite())
-          Parser::error(@1, "expecting symbol `" + $1 + "' of a scalar type.");
-
-        if (symtab.GetSymbol($1)->GetTypeCategory() != TypeCategory::INT)
-          Parser::error(@1, "expecting symbol `" + $1 +
-                                "' of an integer type.");
+        auto ty = symtab.GetSymbol($1)->GetType();
+        if (!isa<IntegerType>(ty.get()))
+          Parser::error(@1, "expecting symbol `" + $1 + "' (type: " + ty->Name()
+                            + ") of a integer type.");
 
         $$ = AST::Make<AST::Identifier>(@1, $1);
     	}
@@ -311,16 +309,15 @@ parameter_list
 
 parameter
     : param_type IDENTIFIER { /* handle parameter type and name here */
-        $$ = AST::Make<AST::ParamType>(std::pair($1, AST::Make<AST::Identifier>(@2, $2)));
         if (symtab.Exists($2)) {
           Parser::error(@2, "ODR violation: the symbol '" + $2 + "` is already defined.");
           exit(1);
         }
         symtab.AddSymbol($2, $1->MakeSemaType());
+        $$ = AST::Make<AST::Parameter>(@1, $1, AST::Make<AST::Identifier>(@2, $2));
       }
     | param_type {
-        $$ = AST::Make<AST::ParamType>(
-              std::pair($1, AST::Make<AST::Identifier>(@1, AST::SymbolTable::GetAnonName())));
+        $$ = AST::Make<AST::Parameter>(@1, $1, AST::Make<AST::Identifier>(@1));
       }
     ;
 
@@ -389,8 +386,8 @@ declarations
     ;
 
 declaration
-    : named_span_decl    { $$ = $1; }
-    | named_tuple_decl   { $$ = $1; }
+    : named_mdspan_decl  { $$ = $1; }
+    | named_ituple_decl  { $$ = $1; }
     | named_scalar_decl  { $$ = $1; }
     | named_spanned_decl { $$ = $1; }
     ;
@@ -411,8 +408,8 @@ named_scalar_decl
     ;
 
 optional_scalar_init
-    : /*Empty */        { $$ = nullptr; }
-    | ASSIGN expr       { $$ = $2; }
+    : /*Empty */     { $$ = nullptr; }
+    | ASSIGN s_expr  { $$ = $2; }
     ;
 
 named_spanned_decl
@@ -501,7 +498,7 @@ mixed_span_list
       }
     ;
 
-unnamed_span_decl
+unnamed_mdspan_decl
     : IDENTIFIER FNSPAN LBRAKT span_list RBRAKT {
         $$ = AST::Make<AST::MultiDimSpans>(@1, $1, $4);
       }
@@ -514,12 +511,12 @@ unnamed_span_decl
     ;
 
 span_val
-    : unnamed_span_decl { $$ = $1; }
+    : unnamed_mdspan_decl { $$ = $1; }
     | IDENTIFIER { $$ = AST::Make<AST::Identifier>(@1, $1); }
     | IDENTIFIER FNSPAN { $$ = AST::Make<AST::Identifier>(@1, $1 + $2); }
     ;
 
-named_span_decl
+named_mdspan_decl
     : MDSPAN IDENTIFIER COL span_expr {
         if (symtab.Exists($2)) {
           Parser::error(@2, "ODR violation: the symbol '" + $2 + "`  is already defined.");
@@ -552,7 +549,7 @@ named_span_decl
       }
     ;
 
-unnamed_tuple_decl
+unnamed_ituple_decl
     : LBRACE sval_list RBRACE {
         $$ = AST::Make<AST::IntTuple>(@1, "", $2);
       }
@@ -562,26 +559,17 @@ unnamed_tuple_decl
           Parser::error(@1, "The symbol '" + $1 + "` has not been defined.");
 
         $$ = AST::Make<AST::IntTuple>(@1, $1, $3);
-        #if 0
-        auto src_ituple = ituple_symtab.GetSymbol($1);
-        auto ret_tuple = AST::Make<AST::SValList>();
-        for (AST::ptr<AST::IntIndex> idx : $3->indices) {
-          // TODO: evaluate index later
-          ret_tuple->Append(src_ituple->value->values[dynamic_cast<AST::IntLiteral*>(&*idx->value)->value]);
-        }
-        $$ = AST::Make<AST::IntTuple>($1, std::move(ret_tuple));
-        #endif
       }
     ;
 
 ituple_val
-    : unnamed_tuple_decl { $$ = $1; }
+    : unnamed_ituple_decl { $$ = $1; }
     | IDENTIFIER {
         $$ = AST::Make<AST::Identifier>(@1, $1);
       }
     ;
 
-named_tuple_decl
+named_ituple_decl
     : ITUPLE IDENTIFIER ASSIGN ituple_val {
         /* TODO: workaround: use INT for ituple's base type use a dedicated type for ituple in symboltable */
         //ituple_symtab.addITupleSymbol($2, $4);
@@ -589,7 +577,7 @@ named_tuple_decl
         $$ = AST::Make<AST::NamedVariableDecl>(@2,
               $2, AST::Make<AST::DataType>(@1, BaseType::ITUPLE), nullptr, $4);
       }
-    | IDENTIFIER ASSIGN unnamed_tuple_decl {
+    | IDENTIFIER ASSIGN unnamed_ituple_decl {
         //ituple_symtab.addITupleSymbol($1, $3);
         symtab.AddSymbol($1, MakeUninitITupleType());
         $$ = AST::Make<AST::NamedVariableDecl>(@1,
@@ -609,7 +597,7 @@ storage_qual
     ;
 
 assignment
-    : IDENTIFIER ASSIGN expr {
+    : IDENTIFIER ASSIGN s_expr {
         if (!symtab.Exists($1)) {
           // since the symbol is not defined, it is a declaration without type annotation
           symtab.AddSymbol($1, MakeUnknownType());
@@ -619,7 +607,7 @@ assignment
         }
         $$ = AST::Make<AST::Assignment>(@2, $1, $3);
       }
-    | IDENTIFIER PLUS ASSIGN expr {
+    | IDENTIFIER PLUS ASSIGN s_expr {
         if (!symtab.Exists($1))
           Parser::error(@1, "The symbol '" + $1 + "` has not been defined.");
         $$ = AST::Make<AST::Assignment>(@1,
@@ -627,23 +615,23 @@ assignment
       }
     ;
 
-expr
-    : expr PLUS expr { $$ = AST::Make<AST::Expr>(@1, "+", $1, $3); }
-    | expr MINUS expr { $$ = AST::Make<AST::Expr>(@1, "-", $1, $3); }
-    | expr STAR expr { $$ = AST::Make<AST::Expr>(@1, "*", $1, $3); }
-    | expr SLASH expr { $$ = AST::Make<AST::Expr>(@1, "/", $1, $3); }
-    | expr PECET expr { $$ = AST::Make<AST::Expr>(@1, "%", $1, $3); }
-    | expr OR expr { $$ = AST::Make<AST::Expr>(@1, "||", $1, $3); }
-    | expr AND expr { $$ = AST::Make<AST::Expr>(@1, "&&", $1, $3); }
-    | NOT expr { $$ = AST::Make<AST::Expr>(@1, "!", $2); }
-    | LPAREN expr RPAREN { $$ = $2; }
-    | LPAREN expr RPAREN QES expr COL expr { $$ = AST::Make<AST::Expr>(@1, "$", $2, $5, $7); }
-    | expr LT expr { $$ = AST::Make<AST::Expr>(@1, "<", $1, $3); }
-    | expr GT expr { $$ = AST::Make<AST::Expr>(@1, ">", $1, $3); }
-    | expr EQ expr { $$ = AST::Make<AST::Expr>(@1, "==", $1, $3); }
-    | expr NE expr { $$ = AST::Make<AST::Expr>(@1, "!=", $1, $3); }
-    | expr LE expr { $$ = AST::Make<AST::Expr>(@1, "<=", $1, $3); }
-    | expr GE expr { $$ = AST::Make<AST::Expr>(@1, ">=", $1, $3); }
+s_expr
+    : s_expr PLUS s_expr { $$ = AST::Make<AST::Expr>(@1, "+", $1, $3); }
+    | s_expr MINUS s_expr { $$ = AST::Make<AST::Expr>(@1, "-", $1, $3); }
+    | s_expr STAR s_expr { $$ = AST::Make<AST::Expr>(@1, "*", $1, $3); }
+    | s_expr SLASH s_expr { $$ = AST::Make<AST::Expr>(@1, "/", $1, $3); }
+    | s_expr PECET s_expr { $$ = AST::Make<AST::Expr>(@1, "%", $1, $3); }
+    | s_expr OR s_expr { $$ = AST::Make<AST::Expr>(@1, "||", $1, $3); }
+    | s_expr AND s_expr { $$ = AST::Make<AST::Expr>(@1, "&&", $1, $3); }
+    | NOT s_expr { $$ = AST::Make<AST::Expr>(@1, "!", $2); }
+    | LPAREN s_expr RPAREN { $$ = $2; }
+    | LPAREN s_expr RPAREN QES s_expr COL s_expr { $$ = AST::Make<AST::Expr>(@1, "$", $2, $5, $7); }
+    | s_expr LT s_expr { $$ = AST::Make<AST::Expr>(@1, "<", $1, $3); }
+    | s_expr GT s_expr { $$ = AST::Make<AST::Expr>(@1, ">", $1, $3); }
+    | s_expr EQ s_expr { $$ = AST::Make<AST::Expr>(@1, "==", $1, $3); }
+    | s_expr NE s_expr { $$ = AST::Make<AST::Expr>(@1, "!=", $1, $3); }
+    | s_expr LE s_expr { $$ = AST::Make<AST::Expr>(@1, "<=", $1, $3); }
+    | s_expr GE s_expr { $$ = AST::Make<AST::Expr>(@1, ">=", $1, $3); }
     | bool_literal { $$ = AST::Make<AST::Expr>(@1, $1); }
     | int_val { $$ = AST::Make<AST::Expr>(@1, $1); }
     | PIPE span_expr PIPE { $$ = AST::Make<AST::Expr>(@1, "sizeof", $2); }
@@ -660,7 +648,7 @@ span_expr
     ;
 
 if_else
-    : IF expr LBRACE statements RBRACE else_clause { $$ = AST::Make<AST::IfElse>(@1, $2, $4, $6);}
+    : IF s_expr LBRACE statements RBRACE else_clause { $$ = AST::Make<AST::IfElse>(@1, $2, $4, $6);}
     ;
 
 else_clause
@@ -831,7 +819,7 @@ passables
     ;
 
 passable
-    : expr { $$ = $1; }
+    : s_expr { $$ = $1; }
     | span_expr FNDATA { $$ = AST::Make<AST::Expr>(@1, ".data", $1); }
     ;
 

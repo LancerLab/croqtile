@@ -24,6 +24,7 @@ int main(int argc, char* argv[]) {
   std::string filename;
   bool debugMode = false;
   bool onlyDumpAST = false;
+  bool showInferOnly = false;
   bool onlySemaCheck = false;
   bool removeComments = false;
 
@@ -35,6 +36,7 @@ int main(int argc, char* argv[]) {
   static struct option long_options[] = {
       {"debug", no_argument, 0, 'd'},
       {"dump-ast", no_argument, 0, 'e'},
+      {"dump-infer", no_argument, 0, 'i'},
       {"sema-check", no_argument, 0, 's'},
       {"remove-comments", no_argument, 0, 'n'},
       {0, 0, 0, 0}};
@@ -42,7 +44,7 @@ int main(int argc, char* argv[]) {
   // Parse command-line options
   int opt;
   int option_index = 0;
-  while ((opt = getopt_long(argc, argv, "desn", long_options, &option_index)) !=
+  while ((opt = getopt_long(argc, argv, "deisn", long_options, &option_index)) !=
          -1) {
     switch (opt) {
       case 'd':
@@ -53,6 +55,9 @@ int main(int argc, char* argv[]) {
         break;
       case 's':
         onlySemaCheck = true;
+        break;
+      case 'i':
+        showInferOnly = true;
         break;
       case 'n':
         removeComments = true;
@@ -109,8 +114,10 @@ int main(int argc, char* argv[]) {
     return 0;
   }
 
-  TypeInference type_infer;
+  TypeInference type_infer(showInferOnly);
   root.accept(type_infer);
+
+  if (showInferOnly) return 0;
 
   SemanticChecker sema_check;
   root.accept(sema_check);

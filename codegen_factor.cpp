@@ -70,16 +70,16 @@ static inline std::string factor_typestr(Choreo::BaseType t) {
 }  // end anonymous namespace
 
 bool FactorCodeGen::BeforeVisit(AST::Node &n) {
-  if (AST::isa<AST::Program>(&n)) {
+  if (isa<AST::Program>(&n)) {
     print_fixed_header(os);
   }
   return 0;
 }
 
 bool FactorCodeGen::AfterVisit(AST::Node &n) {
-  if (auto p = AST::dyn_cast<AST::ChoreoFunction>(&n)) {
+  if (auto p = dyn_cast<AST::ChoreoFunction>(&n)) {
     print_wrapper_end(os, p->name);
-  } else if (AST::isa<AST::ParallelBy>(&n)) {
+  } else if (isa<AST::ParallelBy>(&n)) {
     os << "    }); // end of choreo-factor kernel function\n";
   }
   return 0;
@@ -130,8 +130,13 @@ bool FactorCodeGen::Visit(AST::Identifier &n) {
   return true;
 }
 
+bool FactorCodeGen::Visit(AST::Parameter &p) {
+  (void)p;
+  return true;
+}
+
 bool FactorCodeGen::Visit(AST::ParamList &pl) {
-  current_parameters = &pl.values;
+  cur_params = &pl.values;
   return true;
 }
 
@@ -142,9 +147,9 @@ bool FactorCodeGen::Visit(AST::ParallelBy &by) {
   os << "      create_stream_(stream);\n";
   os << "      auto ts = launch_kernel_(\"" << current_fn
      << "\", grid_dim, block_dim, stream, {";
-  if (current_parameters->size() > 0) {
+  if (cur_params->size() > 0) {
     os << "args[0]";
-    for (size_t i = 1; i < current_parameters->size(); ++i) {
+    for (size_t i = 1; i < cur_params->size(); ++i) {
       os << ", "
          << "args[" << i << "]";
     }
@@ -156,16 +161,16 @@ bool FactorCodeGen::Visit(AST::ParallelBy &by) {
   os << "\n";
   os << "    D(func_)\n";
   os << "    (\"" << current_fn << "\", {";
-  if (current_parameters->size() > 0) {
-    os << (*current_parameters)[0]->second->name << "_type";
-    for (unsigned i = 1; i < current_parameters->size(); ++i)
-      os << ", " << (*current_parameters)[i]->second->name << "_type";
+  if (cur_params->size() > 0) {
+    os << (*cur_params)[0]->sym->name << "_type";
+    for (unsigned i = 1; i < cur_params->size(); ++i)
+      os << ", " << (*cur_params)[i]->sym->name << "_type";
   }
   os << "}, {choreo_output_type}, [&](auto args, auto results) {\n";
   int i = 0;
-  for (auto &param : *current_parameters) {
+  for (auto &param : *cur_params) {
     os << "      "
-       << "auto k_" << param->second->name << " = args[" << i++ << "];\n";
+       << "auto k_" << param->sym->name << " = args[" << i++ << "];\n";
   }
 
   return true;
@@ -196,17 +201,17 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &n) { return true; }
 bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
   current_output = d.ret_type;
 
-  for (auto &param : *current_parameters) {
-    auto name = param->second->name;
-    if (!param->first->isScalar()) {
+  for (auto &param : *cur_params) {
+    auto name = param->sym->name;
+    if (!param->type->isScalar()) {
       // define spanned type
       auto type_symbol = name+"_type";
-      auto type_string = "DRAMType(" + factor_typestr(param->first->getBaseType()) + ", (1))";
+      auto type_string = "DRAMType(" + factor_typestr(param->type->getBaseType()) + ", (1));";
       strtab.AddSymbol(name, type_symbol, type_string);
       os << "    auto " << strtab.GetTypeSymbol(name) << " = " << strtab.GetTypeString(name) << "\n";
     } else {
       auto type_symbol = name+"_type";
-      auto type_string = "DRAMType(" + factor_typestr(param->first->getBaseType()) + ", (1))";
+      auto type_string = "DRAMType(" + factor_typestr(param->type->getBaseType()) + ", (1));";
       strtab.AddSymbol(name, type_symbol, type_string);
       os << "    auto " << strtab.GetTypeSymbol(name) << " = " << strtab.GetTypeString(name) << "\n";
     }
@@ -221,8 +226,8 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
   os << "    ({";
 
   bool first_param = true;
-  for (auto &param : *current_parameters) {
-    auto name = param->second->name;
+  for (auto &param : *cur_params) {
+    auto name = param->sym->name;
 
     if (first_param) {
       os << name + "_type";

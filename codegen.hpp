@@ -14,7 +14,7 @@ struct CodeGenerator : public Visitor {
 struct FactorCodeGen : public CodeGenerator {
   // TODO: should the pointer be replaced?
   std::string current_fn = "";
-  std::vector<AST::ptr<AST::ParamType>> *current_parameters = nullptr;
+  std::vector<AST::ptr<AST::Parameter>> *cur_params = nullptr;
   AST::ptr<AST::DataType> current_output = nullptr;
 
   FactorCodeGen(std::ostream &os) : CodeGenerator(os) {}
@@ -37,6 +37,7 @@ struct FactorCodeGen : public CodeGenerator {
   bool Visit(AST::IntIndexList &) override;
   bool Visit(AST::DataType &) override;
   bool Visit(AST::Identifier &) override;
+  bool Visit(AST::Parameter&) override;
   bool Visit(AST::ParamList &) override;
   bool Visit(AST::ParallelBy &) override;
   bool Visit(AST::RequireBind &) override;
@@ -71,6 +72,7 @@ struct TopsccCodeGen : public CodeGenerator {
   bool Visit(AST::IntIndexList &) override { return true; };
   bool Visit(AST::DataType &) override { return true; };
   bool Visit(AST::Identifier &) override { return true; };
+  bool Visit(AST::Parameter&) override { return true; };
   bool Visit(AST::ParamList &) override { return true; };
   bool Visit(AST::ParallelBy &) override { return true; };
   bool Visit(AST::RequireBind &) override { return true; };

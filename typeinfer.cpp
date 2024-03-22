@@ -9,38 +9,49 @@ using namespace Choreo;
 using namespace Choreo::AST;
 
 bool TypeInference::Visit(AST::DataType& n) {
-  assert((current_tc == TypeCategory::UNKNOWN) && "Expecting no type.");
+  assert((cur_type == nullptr) && "Expecting no type.");
 
   switch (n.getBaseType()) {
     case BaseType::ITUPLE:
-      current_tc = TypeCategory::ITUPLE;
+      cur_type = MakeUninitITupleType();
       break;
     case BaseType::INT:
-      current_tc = TypeCategory::INT;
+      cur_type = MakeIntegerType();
       break;
     case BaseType::BOOL:
-      current_tc = TypeCategory::BOOL;
+      cur_type = MakeBooleanType();
       break;
     default:
+      if (!n.isSpanned())
+        Error(n.LOC(), "Unexpected spanned type without mdspan partial type.");
+      cur_type = MakeSpannedType(n.getBaseType(), GenUninitMDSpanValue());
       break;
   }
-
-  if (!n.isSpanned())
-    Error(n.LOC(), "Unexpected spanned type without mdspan partial type.");
-
-  current_tc = TypeCategory::SPANNED;
 
   return true;
 }
 
 bool TypeInference::Visit(AST::NamedVariableDecl& n) {
-  if (current_tc == TypeCategory::UNKNOWN) {
-    Error(n.LOC(), "Can not inference the type of variable declaration.");
+  if (isa<UnknownType>(cur_type.get())) {
+    Error(n.LOC(), "can not infer the type of `" + n.name_str + "'.");
+    cur_type.reset();
     return false;
   }
 
-  // n.SetTypeCategory(current_tc);
-  current_tc = TypeCategory::UNKNOWN;
+  if (!cur_type->HasSufficientInfo()) {
+    Error(n.LOC(), "can not infer '" + cur_type->Name() + "' type detail of `" + n.name_str + "'.");
+    cur_type.reset();
+    return false;
+  }
+
+  n.SetType(cur_type);
+  cur_type.reset();
+
+  if (Dump) {
+    os << "Symbol: " << n.name_str << ", Type: ";
+    n.GetType()->Print(os);
+    os << "\n";
+  }
 
   return true;
 }
@@ -51,6 +62,6 @@ bool TypeInference::Visit(AST::NamedTypeDecl&) { return true; }
 bool TypeInference::Visit(AST::Assignment& n) { return true; }
 
 bool TypeInference::Visit(AST::FunctionDecl&) {
-  current_tc = TypeCategory::UNKNOWN;
+  cur_type.reset();
   return true;
 };

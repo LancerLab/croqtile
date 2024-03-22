@@ -1,13 +1,19 @@
 #ifndef __CHOREO_TYPE_INFERENCE_HPP__
 #define __CHOREO_TYPE_INFERENCE_HPP__
 
+#include <iostream>
 #include "types.hpp"
 #include "visitor.hpp"
 
 namespace Choreo {
 
 struct TypeInference : public Visitor {
-  TypeCategory current_tc = TypeCategory::UNKNOWN;
+  bool Dump = false;
+  std::ostream & os;
+
+  TypeInference(bool d, std::ostream & o = std::cout) : Dump(d), os(o) {}
+
+  ptr<Type> cur_type = nullptr;
 
   bool Visit(AST::MultiNodes&) override { return true; };
   bool Visit(AST::IntLiteral&) override { return true; };
@@ -23,6 +29,7 @@ struct TypeInference : public Visitor {
   bool Visit(AST::IntIndexList&) override { return true; };
   bool Visit(AST::DataType&) override;
   bool Visit(AST::Identifier&) override { return true; };
+  bool Visit(AST::Parameter&) override { return true; };
   bool Visit(AST::ParamList&) override { return true; };
   bool Visit(AST::ParallelBy&) override { return true; };
   bool Visit(AST::RequireBind&) override { return true; };

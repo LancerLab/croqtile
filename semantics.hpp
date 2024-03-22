@@ -22,6 +22,7 @@ struct SemanticChecker : public Visitor {
   bool Visit(AST::IntIndexList&) override { return true; };
   bool Visit(AST::DataType&) override { return true; };
   bool Visit(AST::Identifier&) override { return true; };
+  bool Visit(AST::Parameter&) override { return true; };
   bool Visit(AST::ParamList&) override { return true; };
   bool Visit(AST::ParallelBy&) override { return true; };
   bool Visit(AST::RequireBind&) override { return true; };

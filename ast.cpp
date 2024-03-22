@@ -37,7 +37,13 @@ void DataType::accept(Choreo::Visitor& v) {
 
 void Identifier::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
-void ParamList::accept(Choreo::Visitor& v) { v.Visit(*this); }
+void Parameter::accept(Choreo::Visitor& v) {
+  v.Visit(*this);
+}
+
+void ParamList::accept(Choreo::Visitor& v) {
+  v.Visit(*this);
+}
 
 void IfElse::accept(Choreo::Visitor& v) { (void)v; }
 
