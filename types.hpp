@@ -93,6 +93,15 @@ inline static std::string getStringFrom(BaseType dataType) {
   return it->second;
 }
 
+inline std::optional<std::string> PrefixedWith(const std::string& prefix,
+                                               const std::string& str) {
+  if (str.find(prefix) == 0)  // Check if 'prefix' is at the beginning
+    return str.substr(prefix.length());  // Return the substring after 'prefix'
+  else
+    return std::nullopt;  // Return an empty string if 'prefix' is not at the
+                          // beginning
+}
+
 // smart typeid provider suggested by GPT
 template <typename T>
 struct TypeIDProvider {
@@ -147,23 +156,18 @@ inline constexpr bool always_false = false;
 
 static constexpr size_t __INVALID_VALUE__ = std::numeric_limits<size_t>::max();
 static constexpr int __UNKNOWN_INTVAL__ = std::numeric_limits<int>::min();
+static constexpr int __INVALID_INTVAL__ = std::numeric_limits<int>::max();
 
-using ValueListExpr = std::vector<std::string>;
+using ValueListExpr = std::string;
 using ValueListElem = std::variant<int, ValueListExpr>;
 using ValueList = std::vector<ValueListElem>;
 
 struct ValueListExprHasher {
   std::size_t operator()(const ValueListExpr& v) const noexcept {
-    std::size_t hash = 0;
-    std::hash<std::string> hasher;
-    for (const auto& str : v) {
-      hash ^= hasher(str) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
-    }
-    return hash;
+    return std::hash<std::string>{}(v);
   }
 };
 
-// Custom hasher for std::variant<int, std::vector<std::string>>
 struct ValueListElemHasher {
   std::size_t operator()(const ValueListElem& var) const noexcept {
     std::size_t content_hash = std::visit(
@@ -171,7 +175,7 @@ struct ValueListElemHasher {
           using T = std::decay_t<decltype(arg)>;
           if constexpr (std::is_same_v<T, int>) {
             return std::hash<int>{}(arg);
-          } else if constexpr (std::is_same_v<T, std::vector<std::string>>) {
+          } else if constexpr (std::is_same_v<T, std::string>) {
             return ValueListExprHasher{}(arg);
           } else {
             static_assert(always_false<void>, "Unhandled type in variant");
@@ -198,22 +202,11 @@ struct ValueListHasher {
   }
 };
 
-// Helper function to compare two std::variant<int, std::vector<std::string>>
 inline bool isValueListElemEqual(const ValueListElem& a,
                                  const ValueListElem& b) {
   if (a.index() != b.index()) return false;  // Different types
 
-  if (a.index() == 0)
-    return std::get<0>(a) == std::get<0>(b);  // Compare ints directly
-  else if (a.index() == 1) {
-    auto& expr_a = std::get<1>(a);
-    auto& expr_b = std::get<1>(b);
-    return expr_a.size() == expr_b.size() &&
-           std::equal(expr_a.begin(), expr_a.end(), expr_b.begin());
-  } else {
-    assert(false && "Unhandled type in variant");
-    return false;
-  }
+  return a == b;
 }
 
 // Function to compare two ValueList
@@ -229,46 +222,45 @@ inline bool isValueListEqual(const ValueList& a, const ValueList& b) {
 // Stores all the value lists. It generates unique value number for each list.
 struct ValueListRepo {
   std::vector<ValueList> values;
-  std::unordered_map<size_t, size_t> valno_index;
+  std::unordered_map<size_t, size_t> hash_index;
 
   size_t Insert(const ValueList& st) {
-    size_t value_number = ValueListHasher{}(st);
+    size_t hash_val = ValueListHasher{}(st);
 
-    auto InsertValueList = [this, &st](int vn) {
+    auto InsertValueList = [this, &st](size_t vn) {
       values.push_back(st);
       size_t index = values.size() - 1;
 
-      valno_index.emplace(vn, index);
+      hash_index.emplace(vn, index);
     };
 
     // the value number does not exits, simply add the mdspan
-    if (!valno_index.count(value_number)) {
-      InsertValueList(value_number);
-      return value_number;
+    if (!hash_index.count(hash_val)) {
+      InsertValueList(hash_val);
+      return hash_val;
     }
 
     // value number exists
-    while (valno_index.count(value_number)) {
+    while (hash_index.count(hash_val)) {
       // ValueList exists, return the value number directly
-      if (isValueListEqual(values[valno_index[value_number]], st))
-        return value_number;
+      if (isValueListEqual(values[hash_index[hash_val]], st)) return hash_val;
 
       // conflicting keys, rehash
-      value_number++;
+      hash_val++;
     }
 
-    InsertValueList(value_number);
-    return value_number;
+    InsertValueList(hash_val);
+    return hash_val;
   }
 
-  bool Exists(size_t value_number) { return valno_index.count(value_number); }
+  bool Exists(size_t hash_val) { return hash_index.count(hash_val); }
 
-  const ValueList& operator[](size_t value_number) {
-    assert(Exists(value_number) && "Value Number does not exist.");
-    assert((valno_index.size() > valno_index[value_number]) &&
+  const ValueList& operator[](size_t hash_val) {
+    assert(Exists(hash_val) && "Value Number does not exist.");
+    assert((hash_index.size() > hash_index[hash_val]) &&
            "Internal error: unexpected value number.");
 
-    return values[valno_index[value_number]];
+    return values[hash_index[hash_val]];
   }
 };
 
@@ -276,15 +268,8 @@ inline void PrintValueList(const ValueList& vl, std::ostream& os) {
   auto print_variant = [&os](const ValueListElem& vle) {
     if (vle.index() == 0)
       os << std::get<0>(vle);
-    else {
-      os << "{";
-      auto& arr = std::get<1>(vle);
-      if (!arr.empty()) {
-        os << "\"" << arr[0] << "\"";
-        for (unsigned i = 1; i < arr.size(); ++i) os << " \"" << arr[i] << "\"";
-      }
-      os << "}";
-    }
+    else
+      os << std::get<1>(vle);
   };
   os << "[";
   if (!vl.empty()) {

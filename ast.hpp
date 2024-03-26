@@ -171,9 +171,9 @@ struct SValList : public Node, public TypeIDProvider<SValList> {
 
 struct Expr : public Node, public TypeIDProvider<Expr> {
   std::string op;
-  ptr<Expr> value_c;
-  ptr<Expr> value_l;
-  ptr<Node> value_r;
+  ptr<Expr> value_c = nullptr;
+  ptr<Expr> value_l = nullptr;
+  ptr<Node> value_r = nullptr;
 
   Expr(const location& l) : Node(l) {}
 
@@ -463,7 +463,6 @@ struct IntIndexList : public Node, public TypeIDProvider<IntIndexList> {
 // 3. An 'ituple' type.
 //
 struct DataType : public Node, public TypeIDProvider<DataType> {
- private:
   BaseType base_type;
   ptr<Node> mdspan_type = nullptr;
 
@@ -481,9 +480,9 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
   BaseType getBaseType() const { return base_type; }
   Node* getPartialType() const { return mdspan_type.get(); }
 
-  bool isScalar() const { return !mdspan_type; }
+  bool isScalar() const { return (base_type == BaseType::INT) || (base_type == BaseType::BOOL); }
   bool isITuple() const { return base_type == BaseType::ITUPLE; }
-  bool isSpanned() const { return mdspan_type.get() != nullptr; }
+  bool isSpanned() const { return (bool)mdspan_type; }
 
   ptr<Type> MakeSemaType() {
     switch (base_type) {
@@ -501,11 +500,7 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
       case BaseType::U8:
       case BaseType::S8:
         assert(mdspan_type != nullptr && "Expecting a valid mdspan.");
-        if (auto* p_mdspan = dyn_cast<MultiDimSpans>(mdspan_type.get()))
-          return MakeSpannedType(base_type, p_mdspan->MakeValueList());
-        else
-          return MakeSpannedType(
-              base_type, GenUninitMDSpanValue());  // infer the mdspan later
+        return GetType(); // the type has be deduced already
       case BaseType::ITUPLE:
         return MakeUninitITupleType();  // need type inference to retrieve the
                                         // dim count

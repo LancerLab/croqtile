@@ -5,6 +5,7 @@
 #include "ast.hpp"
 #include "codegen.hpp"
 #include "scanner.hpp"
+#include "valno.hpp"
 #include "semantics.hpp"
 #include "symtab.hpp"
 #include "typeinfer.hpp"
@@ -25,6 +26,7 @@ int main(int argc, char* argv[]) {
   bool debugMode = false;
   bool onlyDumpAST = false;
   bool showInferOnly = false;
+  bool printValueNumbers = false;
   bool onlySemaCheck = false;
   bool removeComments = false;
 
@@ -36,6 +38,7 @@ int main(int argc, char* argv[]) {
   static struct option long_options[] = {
       {"debug", no_argument, 0, 'd'},
       {"dump-ast", no_argument, 0, 'e'},
+      {"print-valno", no_argument, 0, 'v'},
       {"dump-infer", no_argument, 0, 'i'},
       {"sema-check", no_argument, 0, 's'},
       {"remove-comments", no_argument, 0, 'n'},
@@ -44,7 +47,7 @@ int main(int argc, char* argv[]) {
   // Parse command-line options
   int opt;
   int option_index = 0;
-  while ((opt = getopt_long(argc, argv, "deisn", long_options, &option_index)) !=
+  while ((opt = getopt_long(argc, argv, "deivsn", long_options, &option_index)) !=
          -1) {
     switch (opt) {
       case 'd':
@@ -52,6 +55,9 @@ int main(int argc, char* argv[]) {
         break;
       case 'e':
         onlyDumpAST = true;
+        break;
+      case 'v':
+        printValueNumbers = true;
         break;
       case 's':
         onlySemaCheck = true;
@@ -113,6 +119,9 @@ int main(int argc, char* argv[]) {
     root.Print(std::cout);
     return 0;
   }
+
+  ValueNumberingVisitor vn(printValueNumbers);
+  root.accept(vn);
 
   TypeInference type_infer(showInferOnly);
   root.accept(type_infer);

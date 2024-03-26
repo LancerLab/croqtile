@@ -6,13 +6,33 @@ namespace AST {
 
 void MultiNodes::accept(Choreo::Visitor& v) {
   for (auto& sub : values) sub->accept(v);
+  v.Visit(*this);
 }
 
 void Boolean::accept(Choreo::Visitor& v) { (void)v; }
-void IntLiteral::accept(Choreo::Visitor& v) { (void)v; }
-void SValList::accept(Choreo::Visitor& v) { (void)v; }
-void Expr::accept(Choreo::Visitor& v) { (void)v; }
+void IntLiteral::accept(Choreo::Visitor& v) { v.Visit(*this); }
+
+void SValList::accept(Choreo::Visitor& v) {
+  for (auto p : values)
+    p->accept(v);
+  v.Visit(*this);
+}
+
+void Expr::accept(Choreo::Visitor& v) {
+  if (value_c)
+    value_c->accept(v);
+  if (value_l)
+    value_l->accept(v);
+
+  assert(value_r && "invalid expression found.");
+  value_r->accept(v);
+
+  v.Visit(*this);
+}
+
 void MultiDimSpans::accept(Choreo::Visitor& v) {
+  if (list)
+    list->accept(v);
   v.Visit(*this);
 }
 
@@ -31,14 +51,27 @@ void NamedVariableDecl::accept(Choreo::Visitor& v) {
 }
 
 void IntTuple::accept(Choreo::Visitor& v) { (void)v; }
-void Assignment::accept(Choreo::Visitor& v) { (void)v; }
-void IntIndex::accept(Choreo::Visitor& v) { (void)v; }
-void NthBound::accept(Choreo::Visitor& v) { (void)v; }
+
+void Assignment::accept(Choreo::Visitor& v) {
+  value->accept(v);
+  v.Visit(*this);
+}
+
+void IntIndex::accept(Choreo::Visitor& v) {
+  value->accept(v);
+  v.Visit(*this);
+}
+
+void NthBound::accept(Choreo::Visitor& v) {
+  mdarray->accept(v);
+  index->accept(v);
+  v.Visit(*this);
+}
+
 void IntIndexList::accept(Choreo::Visitor& v) { (void)v; }
 
 void DataType::accept(Choreo::Visitor& v) {
   if (mdspan_type) mdspan_type->accept(v);
-
   v.Visit(*this);
 }
 
@@ -46,8 +79,7 @@ void Identifier::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
 void Parameter::accept(Choreo::Visitor& v) {
   type->accept(v);
-  sym->accept(v);
-
+  if (sym) sym->accept(v);
   v.Visit(*this);
 }
 
@@ -61,6 +93,7 @@ void ParamList::accept(Choreo::Visitor& v) {
 void IfElse::accept(Choreo::Visitor& v) { (void)v; }
 
 void ParallelBy::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
   v.Visit(*this);
 
   statms->accept(v);
@@ -73,10 +106,12 @@ void RequireBind::accept(Choreo::Visitor& v) { (void)v; }
 void WithIn::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
 void WithBlock::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
   withins->accept(v);
   if (reqs) reqs->accept(v);
   v.Visit(*this);
   statms->accept(v);
+  v.AfterVisit(*this);
 }
 
 void Memory::accept(Choreo::Visitor& v) { v.Visit(*this); }
@@ -88,8 +123,10 @@ void Wait::accept(Choreo::Visitor& v) { (void)v; }
 void Return::accept(Choreo::Visitor& v) { (void)v; }
 void Call::accept(Choreo::Visitor& v) { (void)v; }
 void ForeachBlock::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
   v.Visit(*this);
   statms->accept(v);
+  v.AfterVisit(*this);
 }
 
 void FunctionDecl::accept(Choreo::Visitor& v) {
@@ -101,10 +138,11 @@ void FunctionDecl::accept(Choreo::Visitor& v) {
 
 void ChoreoFunction::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
-  v.Visit(*this);
 
   f_decl.accept(v);
   statms->accept(v);
+
+  v.Visit(*this);
 
   v.AfterVisit(*this);
 }

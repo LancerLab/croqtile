@@ -1,4 +1,5 @@
 // RUN: choreo -i %s | FileCheck --match-full-lines %s
+// RUN: choreo -v %s | FileCheck --check-prefix=VALNO %s
 
 // recognize the __co__ function
 
@@ -7,7 +8,18 @@
 // device program
 __co__ int foo(f32 [2, 3, 4] d, int e, bool, f32 mdspan<2> a) { }
 
-// CHECK: [Parameter] Symbol: d, Type: f32 mdspan<0> {}
+// VALNO: scope-1 {
+// VALNO:  (New) VALNO: "const_2": #0
+// VALNO:  (New) VALNO: "const_3": #1
+// VALNO:  (New) VALNO: "const_4": #2
+// VALNO:  (New) VALNO: "#0,#1,#2": #3
+// VALNO:  alias VALNO: "d.span" : #3
+// VALNO:  alias VALNO: "d.span(0)" : #0
+// VALNO:  alias VALNO: "d.span(1)" : #1
+// VALNO:  alias VALNO: "d.span(2)" : #2
+// VALNO: } // end scope-1
+
+// CHECK: [Parameter] Symbol: d, Type: f32 mdspan<3> [2, 3, 4]
 // CHECK: [Parameter] Symbol: e, Type: int
 // CHECK: [Parameter] Symbol: anon_0, Type: bool
 // CHECK: [Parameter] Symbol: a, Type: f32 mdspan<2> {}

@@ -75,6 +75,9 @@ static inline std::string factor_typestr(Choreo::BaseType t) {
 bool FactorCodeGen::BeforeVisit(AST::Node &n) {
   if (isa<AST::Program>(&n)) {
     print_fixed_header(os);
+  } else if (auto c = dyn_cast<AST::ChoreoFunction>(&n)) {
+    print_wrapper_begin(os, c->name);
+    current_fn = c->name;
   }
   return 0;
 }
@@ -246,9 +249,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
   return true;
 }
 
-bool FactorCodeGen::Visit(AST::ChoreoFunction &n) {
-  print_wrapper_begin(os, n.name);
-  current_fn = n.name;
+bool FactorCodeGen::Visit(AST::ChoreoFunction &) {
   return true;
 }
 

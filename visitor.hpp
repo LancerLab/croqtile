@@ -12,8 +12,8 @@ namespace Choreo {
 
 struct Visitor {
   // virtual bool Visit(AST::Node&) = 0;
-  virtual bool BeforeVisit(AST::Node&) { return 0; }
-  virtual bool AfterVisit(AST::Node&) { return 0; }
+  virtual bool BeforeVisit(AST::Node&) { return true; }
+  virtual bool AfterVisit(AST::Node&) { return true; }
 
   // For any visitor, it should implement all the necessary steps
   virtual bool Visit(AST::MultiNodes&) = 0;
