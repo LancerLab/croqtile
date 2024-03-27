@@ -73,7 +73,7 @@ bool TypeInference::Visit(AST::NamedTypeDecl& ntd) {
 }
 
 // ituple override operator "=" for definition
-bool TypeInference::Visit(AST::Assignment& n) { return true; }
+bool TypeInference::Visit(AST::Assignment&) { return true; }
 
 bool TypeInference::Visit(AST::FunctionDecl&) {
   cur_type.reset();
@@ -97,15 +97,15 @@ bool TypeInference::Visit(AST::Parameter& p) {
   return true;
 }
 
-bool TypeInference::Visit(AST::ParamList& pl) { return true; }
+bool TypeInference::Visit(AST::ParamList&) { return true; }
 
-bool TypeInference::Visit(AST::MultiDimSpans& mds) {
+bool TypeInference::Visit(AST::MultiDimSpans&) {
   //  assert(!cur_mdspan_value.IsValid() && "Expecting null mdspan value.");
   //  cur_mdspan_value = mds.MakeValueList();
   return true;
 }
 
-bool TypeInference::Visit(AST::Expr& expr) { return true; }
+bool TypeInference::Visit(AST::Expr&) { return true; }
 
 bool TypeInference::Visit(AST::IntTuple& n) {
   cur_type = n.GetType();

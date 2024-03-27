@@ -4,8 +4,8 @@ __co__ bf16 mdspan<3> span_arith(s32 mdspan<4> d, int c) {
   mdspan dims : [9, c];  // shape, mdspan node
   dim1 : [3, 5, 7];
   ituple e = {7, 8, 9};
-  sum : dims + d.span;
-  sub : d.span - [d.span(0), c];
+  sum : d.span + e;
+  sub : d.span - {d.span(0), c} + e;
   mul : d.span * e;
   div : dims / {2, 3, 4};
   mod : d.span % e {(2), (3)};
@@ -21,8 +21,8 @@ __co__ bf16 mdspan<3> span_arith(s32 mdspan<4> d, int c) {
 // CHECK:  `- Type Decl: dims - [ 9 c ]
 // CHECK:  `- Type Decl: dim1 - [ 3 5 7 ]
 // CHECK:  `- Var Decl (ituple): e = {7, 8, 9}
-// CHECK:  `- Type Decl: sum -  (dims + d.span)
-// CHECK:  `- Type Decl: sub -  (d.span - [ d.span(0) c ])
+// CHECK:  `- Type Decl: sum -  (d.span + e)
+// CHECK:  `- Type Decl: sub -  ( (d.span - {d.span(0), c})  + e)
 // CHECK:  `- Type Decl: mul -  (d.span * e)
 // CHECK:  `- Type Decl: div -  (dims / {2, 3, 4})
 // CHECK:  `- Type Decl: mod -  (d.span % e {(2), (3)})

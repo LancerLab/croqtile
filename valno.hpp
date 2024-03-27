@@ -112,6 +112,7 @@ class ValueNumbering {
 
   std::optional<std::string> TrySimplifyNodeSignature(AST::Node& node) {
     if (auto* b = dyn_cast<AST::Identifier>(&node)) {
+      (void)b;
       return std::nullopt;
     } else if (auto* n = dyn_cast<AST::Expr>(&node)) {
       // Try to simplify immediately
@@ -306,7 +307,11 @@ class ValueNumbering {
 
       assert(b->value_r && "expr is invalid.");
       int valno = GetValueNumberForNode(*b->value_r);
-      assert((valno != __INVALID_INTVAL__) && "invalid value number.");
+      if (valno == __INVALID_INTVAL__) {
+        // a reference node may have no valNo
+        assert((b->t == AST::Expr::Reference) && "invalid value number.");
+        return "";
+      }
       return signature + ":#" + std::to_string(valno);
     } else if (auto* b = dyn_cast<AST::MultiNodes>(&node)) {
       std::string signature;
@@ -539,7 +544,7 @@ class ValueNumberingVisitor : public Visitor {
   bool Visit(AST::ForeachBlock&) { return true; };
   bool Visit(AST::FunctionDecl&) { return true; };
 
-  bool Visit(AST::ChoreoFunction& n) { return true; }
+  bool Visit(AST::ChoreoFunction&) { return true; }
 
   bool Visit(AST::CppSourceCode&) { return true; };
   bool Visit(AST::Program&) { return true; };

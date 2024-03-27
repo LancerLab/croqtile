@@ -132,7 +132,7 @@ bool FactorCodeGen::Visit(AST::IntIndexList &) { return true; };
 bool FactorCodeGen::Visit(AST::DataType &) { return true; };
 
 bool FactorCodeGen::Visit(AST::Identifier &n) {
-  //os << n.name;
+  (void)n;
   return true;
 }
 
@@ -185,10 +185,10 @@ bool FactorCodeGen::Visit(AST::ParallelBy &by) {
 bool FactorCodeGen::Visit(AST::RequireBind &) { return true; };
 bool FactorCodeGen::Visit(AST::WithIn &) { return true; };
 
-bool FactorCodeGen::Visit(AST::WithBlock &n) { return true; }
+bool FactorCodeGen::Visit(AST::WithBlock &) { return true; }
 
 bool FactorCodeGen::Visit(AST::Memory &n) {
-  // n.Print(os);
+  (void)n;
   return true;
 }
 
@@ -202,7 +202,7 @@ bool FactorCodeGen::Visit(AST::ChunkAt &) { return true; };
 bool FactorCodeGen::Visit(AST::Wait &) { return true; };
 bool FactorCodeGen::Visit(AST::Call &) { return true; };
 
-bool FactorCodeGen::Visit(AST::ForeachBlock &n) { return true; }
+bool FactorCodeGen::Visit(AST::ForeachBlock &) { return true; }
 
 bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
   current_output = d.ret_type;

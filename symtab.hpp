@@ -77,19 +77,24 @@ class StringifyTable {
   // emittable = 'a'
   // type_symbol = 'a_type'
   // emitted = 'DRAMType(FloatType(32), {1, 2})'
-  void AddSymbol(const std::string& emittable, const std::string& symname, const std::string& emitted) {
+  void AddSymbol(const std::string& emittable, const std::string& symname,
+                 const std::string& emitted) {
     type_string_table.emplace(emittable, emitted);
     type_sym_table.emplace(emittable, symname);
   }
 
   // Retrieve a symbol from the symbol table
-  std::string& GetTypeSymbol(const std::string& emittable) {
-    if (type_sym_table.find(emittable) != type_sym_table.end()) return type_sym_table.at(emittable);
+  std::string GetTypeSymbol(const std::string& emittable) {
+    if (type_sym_table.find(emittable) != type_sym_table.end())
+      return type_sym_table.at(emittable);
+    return "";
   }
 
   // Retrieve a symbol from the symbol table
-  std::string& GetTypeString(const std::string& emittable) {
-    if (type_string_table.find(emittable) != type_string_table.end()) return type_string_table.at(emittable);
+  std::string GetTypeString(const std::string& emittable) {
+    if (type_string_table.find(emittable) != type_string_table.end())
+      return type_string_table.at(emittable);
+    return "";
   }
 
   // Check if a symbol with the given name exists in the symbol table
@@ -98,7 +103,6 @@ class StringifyTable {
   }
 
   void Reset() { type_sym_table.clear(); }
-
 };
 
 }  // end of namespace Choreo

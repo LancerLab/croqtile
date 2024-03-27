@@ -160,11 +160,13 @@ struct SValList : public Node, public TypeIDProvider<SValList> {
   size_t Dims() const { return values.size(); }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    for (size_t i = 0; i < values.size() - 1; ++i) {
-      values[i]->Print(os);
+    if (values.size() == 0) return;
+
+    values[0]->Print(os);
+    for (size_t i = 1; i < values.size(); ++i) {
       os << ", ";
+      values[i]->Print(os);
     }
-    values.back()->Print(os);
     (void)prefix;
   }
 
@@ -202,6 +204,12 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
 
     assert(op.size() > 0 && "must have an operand.");
 
+    if (op == "dimof") {
+      value_l->Print(os, prefix);
+      value_r->Print(os);
+      return;
+    }
+
     os << " (";
     switch (t) {
       case Unary:
@@ -210,7 +218,7 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
         break;
       case Binary:
         value_l->Print(os);
-        if (op != "dimof") os << " " << op << " ";
+        os << " " << op << " ";
         value_r->Print(os);
         break;
       case Ternary:

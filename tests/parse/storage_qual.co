@@ -20,4 +20,4 @@ __co__ s16 mdspan<4> spans(f32 mdspan<3> d, int f) {
 // CHECK:  `- Type Decl: dim2 - [ 9 f ]
 // CHECK:  `- Var Decl (f16 [ dim1 ], local): a
 // CHECK:  `- Var Decl (bf16 [ dim2 ], shared): b
-// CHECK:  `- Var Decl (s8 d.span, global): c
+// CHECK:  `- Var Decl (s8 [ d.span ], global): c

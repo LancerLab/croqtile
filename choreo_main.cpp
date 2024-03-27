@@ -120,14 +120,17 @@ int main(int argc, char* argv[]) {
     return 0;
   }
 
+  // value numbering to partially evaluate the mdspan type
   ValueNumberingVisitor vn(printValueNumbers);
   root.accept(vn);
 
+  // infer the unknown types - decls
   TypeInference type_infer(showInferOnly);
   root.accept(type_infer);
 
   if (showInferOnly) return 0;
 
+  // apply type check
   SemanticChecker sema_check;
   root.accept(sema_check);
 

@@ -15,8 +15,8 @@ __co__ s32 mdspan<1> ele_add(s32 mdspan<1> a, s32 mdspan<1> b) {
     // kernel function begin
     with index = {x, y} in [10, 10] {  // totally 100 chunks
       foreach x {
-        f1 = dte.linear input.chunkat(p, x) => local;
-        f2 = dte.linear input.chunkat(p, x) => local;
+        f1 = dte.linear a.chunkat(p, x) => local; // new_size {a(0)/6, a(1)/10, a(2)/10}
+        f2 = dte.linear b.chunkat(p, x) => local;
         wait f1, f2;
 
         // use f1.span as the span of local buffer
