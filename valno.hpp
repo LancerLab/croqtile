@@ -12,6 +12,28 @@
 
 namespace Choreo {
 
+inline bool ValidVN(int vn) { return vn != __INVALID_INTVAL__; }
+
+// retrieve the n-th element from the comma-seperated input string
+inline std::optional<std::string> getNthElement(const std::string& input,
+                                                int n) {
+  std::istringstream iss(input);
+  std::string token;
+  int currentIndex = 0;
+
+  // Iterate through the tokens in the string
+  while (std::getline(iss, token, ',')) {
+    if (currentIndex == n) {
+      // We've found the token at the specified index
+      return token;
+    }
+    currentIndex++;
+  }
+
+  // If the index is out of range, return an empty string
+  return std::nullopt;
+}
+
 class ValueNumbering {
  private:
   std::vector<std::unordered_map<std::string, int>> variableScopes;
@@ -39,8 +61,20 @@ class ValueNumbering {
     if (!variableScopes.empty()) variableScopes.pop_back();
 
     if (trace)
-      os << ScopeIndent() << "} // end scope-" << variableScopes.size()
-         << "\n";
+      os << ScopeIndent() << "} // end scope-" << variableScopes.size() << "\n";
+  }
+
+  const std::string GetValueNumberExprForVariable(const std::string& varName) {
+    int valNo = __INVALID_INTVAL__;
+    for (auto it = variableScopes.rbegin(); it != variableScopes.rend(); ++it) {
+      if (it->find(varName) != it->end()) {
+        valNo = it->at(varName);
+        break;
+      }
+    }
+
+    assert(valNo != __INVALID_INTVAL__ && "value number is not found.");
+    return valueNumberExpressions[valNo];
   }
 
   int GetValueNumberForVariable(const std::string& varName) {
@@ -56,15 +90,27 @@ class ValueNumbering {
     return valueNumber;
   }
 
-  void AssignValueNumberForVariable(const std::string& varName, int valno) {
+  void AssignValueNumberToVariable(const std::string& varName, int valno) {
     variableScopes.back()[varName] = valno;
 
     if (trace)
-      os << ScopeIndent() << "alias VN: \"" << varName << "\" : #" << valno
-         << "\n";
+      os << ScopeIndent() << "Var \"" << varName << "\" -> #" << valno << "\n";
   }
 
-  std::optional<std::string> TrySimplifyExpression(AST::Node& node) {
+  // It binds a expression sigature with an existing value number.  use it
+  // carefully.
+  void AssociateSignatureWithValueNumber(const std::string& sig, int valno) {
+    assert(!expressionValueNumbers.count(sig) && "signature existed.");
+    assert(valueNumberExpressions.count(valno) &&
+           "invalid value number provided.");
+
+    expressionValueNumbers[sig] = valno;
+
+    if (trace)
+      os << ScopeIndent() << "Alias \"" << sig << "\" -> #" << valno << "\n";
+  }
+
+  std::optional<std::string> TrySimplifyNodeSignature(AST::Node& node) {
     if (auto* b = dyn_cast<AST::Identifier>(&node)) {
       return std::nullopt;
     } else if (auto* n = dyn_cast<AST::Expr>(&node)) {
@@ -74,60 +120,90 @@ class ValueNumbering {
               {"+",
                [this, &n]() -> std::optional<std::string> {
                  auto l_cv = PrefixedWith(
-                     "const_", GetValueNumberStringForExpression(*n->value_l));
+                     "const_", GetValueNumberExpressionForNode(*n->value_l));
                  auto r_cv = PrefixedWith(
-                     "const_", GetValueNumberStringForExpression(*n->value_r));
+                     "const_", GetValueNumberExpressionForNode(*n->value_r));
                  if (l_cv && r_cv) {
-                   int val = std::stoi(*l_cv) + std::stoi(*r_cv);
-                   return "const_" + std::to_string(val);
+                   auto res = "const_" + std::to_string(std::stoi(*l_cv) +
+                                                        std::stoi(*r_cv));
+                   if (trace)
+                     os << ScopeIndent() << "<Simplify> '"
+                        << GenerateNodeSignature(*n->value_l, false) << " + "
+                        << GenerateNodeSignature(*n->value_r, false) << "' to '"
+                        << res << "'\n";
+                   return res;
                  } else
                    return std::nullopt;
                }},
               {"-",
                [this, &n]() -> std::optional<std::string> {
                  auto l_cv = PrefixedWith(
-                     "const_", GetValueNumberStringForExpression(*n->value_l));
+                     "const_", GetValueNumberExpressionForNode(*n->value_l));
                  auto r_cv = PrefixedWith(
-                     "const_", GetValueNumberStringForExpression(*n->value_r));
+                     "const_", GetValueNumberExpressionForNode(*n->value_r));
                  if (l_cv && r_cv) {
-                   int val = std::stoi(*l_cv) - std::stoi(*r_cv);
-                   return "const_" + std::to_string(val);
+                   auto res = "const_" + std::to_string(std::stoi(*l_cv) -
+                                                        std::stoi(*r_cv));
+                   if (trace)
+                     os << ScopeIndent() << "<Simplify> '"
+                        << GenerateNodeSignature(*n->value_l, false) << " - "
+                        << GenerateNodeSignature(*n->value_r, false) << "' to '"
+                        << res << "'\n";
+                   return res;
                  } else
                    return std::nullopt;
                }},
               {"*",
                [this, &n]() -> std::optional<std::string> {
                  auto l_cv = PrefixedWith(
-                     "const_", GetValueNumberStringForExpression(*n->value_l));
+                     "const_", GetValueNumberExpressionForNode(*n->value_l));
                  auto r_cv = PrefixedWith(
-                     "const_", GetValueNumberStringForExpression(*n->value_r));
+                     "const_", GetValueNumberExpressionForNode(*n->value_r));
                  if (l_cv && r_cv) {
-                   int val = std::stoi(*l_cv) * std::stoi(*r_cv);
-                   return "const_" + std::to_string(val);
+                   auto res = "const_" + std::to_string(std::stoi(*l_cv) *
+                                                        std::stoi(*r_cv));
+                   if (trace)
+                     os << ScopeIndent() << "<Simplify> '"
+                        << GenerateNodeSignature(*n->value_l, false) << " * "
+                        << GenerateNodeSignature(*n->value_r, false) << "' to '"
+                        << res << "'\n";
+                   return res;
                  } else
                    return std::nullopt;
                }},
               {"/",
                [this, &n]() -> std::optional<std::string> {
                  auto l_cv = PrefixedWith(
-                     "const_", GetValueNumberStringForExpression(*n->value_l));
+                     "const_", GetValueNumberExpressionForNode(*n->value_l));
                  auto r_cv = PrefixedWith(
-                     "const_", GetValueNumberStringForExpression(*n->value_r));
+                     "const_", GetValueNumberExpressionForNode(*n->value_r));
                  if (l_cv && r_cv) {
-                   int val = std::stoi(*l_cv) / std::stoi(*r_cv);
-                   return "const_" + std::to_string(val);
+                   auto res = "const_" + std::to_string(std::stoi(*l_cv) /
+                                                        std::stoi(*r_cv));
+                   if (trace)
+                     os << ScopeIndent() << "<Simplify> '"
+                        << GenerateNodeSignature(*n->value_l, false) << " / "
+                        << GenerateNodeSignature(*n->value_r, false) << "' to '"
+                        << res << "'\n";
+                   return res;
                  } else
                    return std::nullopt;
                }},
               {"%",
                [this, &n]() -> std::optional<std::string> {
                  auto l_cv = PrefixedWith(
-                     "const_", GetValueNumberStringForExpression(*n->value_l));
+                     "const_", GetValueNumberExpressionForNode(*n->value_l));
                  auto r_cv = PrefixedWith(
-                     "const_", GetValueNumberStringForExpression(*n->value_r));
+                     "const_", GetValueNumberExpressionForNode(*n->value_r));
                  if (l_cv && r_cv) {
-                   int val = std::stoi(*l_cv) % std::stoi(*r_cv);
-                   return "const_" + std::to_string(val);
+                   auto res = "const_" + std::to_string(std::stoi(*l_cv) %
+                                                        std::stoi(*r_cv));
+                   if (trace)
+                     os << ScopeIndent() << "<Simplify> '"
+                        << GenerateNodeSignature(*n->value_l, false) << " % "
+                        << GenerateNodeSignature(*n->value_r, false) << "' to '"
+                        << res << "'\n";
+                   return res;
                  } else
                    return std::nullopt;
                }},
@@ -175,6 +251,21 @@ class ValueNumbering {
                [this, &n]() -> std::optional<std::string> {
                  return std::nullopt; /*TODO*/
                }},
+              {"dimof",  // calculate the dim of a given mdspan index
+               [this, &n]() -> std::optional<std::string> {
+                 auto mdspan = GetValueNumberExpressionForNode(*n->value_l);
+                 auto cv =
+                     PrefixedWith("index_const_",
+                                  GetValueNumberExpressionForNode(*n->value_r));
+                 assert(cv && "mdspan index can not be evaluated.");
+                 return mdspan + "(" + *cv + ")";
+               }},
+              {"ref",  // it is a reference to another node
+               [this, &n]() -> std::optional<std::string> {
+                 int valNo = GetValueNumberForNode(*n->value_r);
+                 if (ValidVN(valNo)) return GetExpressionFromValueNumber(valNo);
+                 return std::nullopt;
+               }},
           };
       auto it = actions.find(n->op);
       if (it != actions.end())
@@ -187,61 +278,68 @@ class ValueNumbering {
     return std::nullopt;
   }
 
-  std::string GenerateExpressionSignature(AST::Node& node) {
-    auto ss = TrySimplifyExpression(node);
-    if (ss) return *ss;
+  std::string GenerateNodeSignature(AST::Node& node, bool optimiz = true) {
+    if (optimiz) {
+      auto sns = TrySimplifyNodeSignature(node);
+      if (sns) return *sns;
+    }
 
     if (auto* n = dyn_cast<AST::IntLiteral>(&node)) {
       return "const_" + std::to_string(n->value);
     } else if (auto* v = dyn_cast<AST::Identifier>(&node)) {
       int valno = GetValueNumberForVariable(v->name);
       assert((valno != __INVALID_INTVAL__) && "invalid value number.");
-      return std::to_string(valno);
+      return v->name;
     } else if (auto* b = dyn_cast<AST::Expr>(&node)) {
       auto signature = b->op;
 
       if (b->value_c) {
-        int valno = GetValueNumberForExpression(*b->value_c);
+        int valno = GetValueNumberForNode(*b->value_c);
         assert((valno != __INVALID_INTVAL__) && "invalid value number.");
         signature += ":#" + std::to_string(valno);
       }
       if (b->value_l) {
-        int valno = GetValueNumberForExpression(*b->value_l);
+        int valno = GetValueNumberForNode(*b->value_l);
         assert((valno != __INVALID_INTVAL__) && "invalid value number.");
         signature += ":#" + std::to_string(valno);
       }
 
       assert(b->value_r && "expr is invalid.");
-      int valno = GetValueNumberForExpression(*b->value_r);
+      int valno = GetValueNumberForNode(*b->value_r);
       assert((valno != __INVALID_INTVAL__) && "invalid value number.");
       return signature + ":#" + std::to_string(valno);
     } else if (auto* b = dyn_cast<AST::MultiNodes>(&node)) {
       std::string signature;
-      if (b->values.size() > 0) {
-        signature =
-            "#" + std::to_string(GetValueNumberForExpression(*b->values[0]));
+      if (b->values.size() > 0 &&
+          ValidVN(GetValueNumberForNode(*b->values[0]))) {
+        signature = "#" + std::to_string(GetValueNumberForNode(*b->values[0]));
         for (size_t i = 1; i < b->values.size(); ++i)
           signature +=
-              ",#" + std::to_string(GetValueNumberForExpression(*b->values[i]));
+              ",#" + std::to_string(GetValueNumberForNode(*b->values[i]));
       }
       return signature;
     } else if (auto* b = dyn_cast<AST::ParamList>(&node)) {
       std::string signature;
       if (b->values.size() > 0) {
         signature =
-            "p:#" + std::to_string(GetValueNumberForExpression(*b->values[0]));
+            "p:#" + std::to_string(GetValueNumberForNode(*b->values[0]));
         for (size_t i = 1; i < b->values.size(); ++i)
           signature +=
-              ",#" + std::to_string(GetValueNumberForExpression(*b->values[i]));
+              ",#" + std::to_string(GetValueNumberForNode(*b->values[i]));
       }
       return signature;
+    } else if (auto* n = dyn_cast<AST::IntIndex>(&node)) {
+      return "index_" + GenerateNodeSignature(*n->value);
     }
     return "";
   }
 
-  int GetValueNumberForExpression(AST::Node& expr) {
-    std::string signature = GenerateExpressionSignature(expr);
+  int GetValueNumberForNode(AST::Node& expr) {
+    std::string signature = GenerateNodeSignature(expr);
     if (signature == "") return __INVALID_INTVAL__;
+
+    // std::cout << "sig: " << signature << ", expr: " << expr.NodeTypeString()
+    // << "\n";
 
     // Check if this expression has been encountered before
     auto it = expressionValueNumbers.find(signature);
@@ -254,18 +352,18 @@ class ValueNumbering {
     valueNumberExpressions[valueNumber] = signature;
 
     if (trace)
-      os << ScopeIndent() << "(New) VN: \"" << signature << "\": #"
-         << valueNumber << "\n";
+      os << ScopeIndent() << "New VN #" << valueNumber << ": '" << signature
+         << "'\n";
 
     return valueNumber;
   }
 
-  std::string GetExpressionStringForValueNumber(int vn) {
+  std::string GetExpressionFromValueNumber(int vn) {
     return valueNumberExpressions.at(vn);
   }
 
-  std::string GetValueNumberStringForExpression(AST::Node& expr) {
-    return GetExpressionStringForValueNumber(GetValueNumberForExpression(expr));
+  std::string GetValueNumberExpressionForNode(AST::Node& expr) {
+    return GetExpressionFromValueNumber(GetValueNumberForNode(expr));
   }
 
   void Print(std::ostream& os) {
@@ -318,23 +416,26 @@ class ValueNumberingVisitor : public Visitor {
 
  public:
   bool Visit(AST::MultiNodes& n) {
-    int valno = vn.GetValueNumberForExpression(n);
+    int valno = vn.GetValueNumberForNode(n);
     node_vn.emplace(&n, valno);
     cur_vn = valno;
     return true;
   }
 
   bool Visit(AST::IntLiteral& n) {
-    int valno = vn.GetValueNumberForExpression(n);
+    int valno = vn.GetValueNumberForNode(n);
     node_vn.emplace(&n, valno);
     cur_vn = valno;
     return true;
   }
 
-  bool Visit(AST::SValList&) { return true; };
+  bool Visit(AST::SValList&) {
+    // TODO: apply value numbering whenever possible for the list
+    return true;
+  }
 
   bool Visit(AST::Expr& n) {
-    int valno = vn.GetValueNumberForExpression(n);
+    int valno = vn.GetValueNumberForNode(n);
     node_vn.emplace(&n, valno);
     cur_vn = valno;
     return true;
@@ -351,22 +452,29 @@ class ValueNumberingVisitor : public Visitor {
   bool Visit(AST::NamedTypeDecl& n) {
     if (n.init_expr) {
       assert(cur_vn != __INVALID_INTVAL__);
-      vn.AssignValueNumberForVariable(n.name_str, cur_vn);
+      vn.AssignValueNumberToVariable(n.name_str, cur_vn);
       cur_vn = __INVALID_INTVAL__;
     }
     return true;
   }
 
   bool Visit(AST::NamedVariableDecl& n) {
-    if (n.initializer) {
-      assert(cur_vn != __INVALID_INTVAL__);
-      vn.AssignValueNumberForVariable(n.name_str, cur_vn);
+    if (n.initializer && cur_vn != __INVALID_INTVAL__) {
+      vn.AssignValueNumberToVariable(n.name_str, cur_vn);
       cur_vn = __INVALID_INTVAL__;
     }
     return true;
   }
 
-  bool Visit(AST::IntTuple&) { return true; };
+  bool Visit(AST::IntTuple& n) {
+    if (auto i = dyn_cast<AST::SValList>(n.list.get()))
+      n.SetType(MakeITupleType(i->Dims()));
+    else
+      n.SetType(MakeUninitITupleType());
+    cur_vn = __INVALID_INTVAL__;  // Currently cut off value numbering
+    return true;
+  }
+
   bool Visit(AST::Assignment&) { return true; };
   bool Visit(AST::IntIndex&) { return true; };
   bool Visit(AST::NthBound&) { return true; };
@@ -384,17 +492,21 @@ class ValueNumberingVisitor : public Visitor {
                "unexpected value number for mdspan.");
 
         // Put alias names of mdspan into the value number table
-        vn.AssignValueNumberForVariable(n.sym->name + ".span", cur_mdspan_vn);
-        auto vn_str = vn.GetExpressionStringForValueNumber(cur_mdspan_vn);
-        ProcessValueNumberString(vn_str, [this, &n](int valno, size_t index) {
-          vn.AssignValueNumberForVariable(
-              n.sym->name + ".span(" + std::to_string(index) + ")", valno);
-        });
+        vn.AssociateSignatureWithValueNumber(n.sym->name + ".span",
+                                             cur_mdspan_vn);
+        auto vn_str = vn.GetExpressionFromValueNumber(cur_mdspan_vn);
+        ProcessValueNumberString(
+            vn_str, [this, &n, &vn_str](int valno, size_t index) {
+              vn.AssociateSignatureWithValueNumber(
+                  vn_str + "(" + std::to_string(index) + ")", valno);
+            });
 
         auto vl = GenMDSpanValueFromVNString(vn_str);
-        if (span->dim_count != __INVALID_VALUE__ && vl.Dims() != span->dim_count) {
+        if (span->dim_count != __INVALID_VALUE__ &&
+            vl.Dims() != span->dim_count) {
           if (n.sym)
-            Error(n.LOC(), "parameter `" + n.sym->name +"''s dimension is inconsistent.");
+            Error(n.LOC(), "parameter `" + n.sym->name +
+                               "''s dimension is inconsistent.");
           else
             Error(n.LOC(), "dimension is inconsistent.");
         }
@@ -406,7 +518,8 @@ class ValueNumberingVisitor : public Visitor {
                "unexpected value number for mdspan.");
         cur_vn = __INVALID_INTVAL__;
         if (span->dim_count != __INVALID_VALUE__)
-          n.type->SetType(MakeSpannedType(n.type->base_type, span->MakeValueList()));
+          n.type->SetType(
+              MakeSpannedType(n.type->base_type, span->MakeValueList()));
       }
     }
 
@@ -476,7 +589,7 @@ class ValueNumberingVisitor : public Visitor {
       if (component[0] == '#') {
         // Look up value number in table and simplify
         int valNo = std::stoi(component.substr(1));
-        handleElement(vn.GetExpressionStringForValueNumber(valNo));
+        handleElement(vn.GetExpressionFromValueNumber(valNo));
       } else {
         // no value numbers
         handleElement(component);

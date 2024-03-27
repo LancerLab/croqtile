@@ -9,26 +9,26 @@
 namespace Choreo {
 
 struct TypeInference : public Visitor {
-private:
+ private:
   bool Dump = false;
   std::ostream &os;
 
-private:
+ private:
   ptr<Type> cur_type = nullptr;
   std::vector<ptr<Type>> cur_param_types;
   MDSpanValue cur_mdspan_value;
 
-public:
+ public:
   TypeInference(bool d, std::ostream &o = std::cout) : Dump(d), os(o) {}
 
   bool Visit(AST::MultiNodes &) override { return true; };
   bool Visit(AST::IntLiteral &) override { return true; };
-  bool Visit(AST::SValList &) override { return true; };
+  bool Visit(AST::SValList &) override;
   bool Visit(AST::Expr &) override;
   bool Visit(AST::MultiDimSpans &) override;
   bool Visit(AST::NamedTypeDecl &) override;
   bool Visit(AST::NamedVariableDecl &) override;
-  bool Visit(AST::IntTuple &) override { return true; };
+  bool Visit(AST::IntTuple &) override;
   bool Visit(AST::Assignment &) override;
   bool Visit(AST::IntIndex &) override { return true; };
   bool Visit(AST::NthBound &) override { return true; };

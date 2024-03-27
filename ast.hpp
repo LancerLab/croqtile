@@ -41,7 +41,8 @@ struct Node {
   location loc;
   ptr<Type> pty = MakeUnknownType();
 
-  Node(const location& l, const ptr<Type>& p = MakeUnknownType()) : loc(l), pty(p) {}
+  Node(const location& l, const ptr<Type>& p = MakeUnknownType())
+      : loc(l), pty(p) {}
 
   virtual bool TypeUnknown() const { return isa<UnknownType>(pty.get()); }
 
@@ -120,7 +121,8 @@ struct MultiNodes : public Node, public TypeIDProvider<MultiNodes> {
 
 struct Boolean : public Node, public TypeIDProvider<Boolean> {
   std::string value;
-  Boolean(const location& l, std::string v) : Node(l, MakeBooleanType()), value(v) {}
+  Boolean(const location& l, std::string v)
+      : Node(l, MakeBooleanType()), value(v) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix << value;
@@ -155,6 +157,8 @@ struct SValList : public Node, public TypeIDProvider<SValList> {
 
   void Append(ptr<Node> v) { values.push_back(v); }
 
+  size_t Dims() const { return values.size(); }
+
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     for (size_t i = 0; i < values.size() - 1; ++i) {
       values[i]->Print(os);
@@ -170,43 +174,57 @@ struct SValList : public Node, public TypeIDProvider<SValList> {
 };
 
 struct Expr : public Node, public TypeIDProvider<Expr> {
+  // Different expression type
+  enum Type { Unary, Binary, Ternary, Reference };
+
   std::string op;
   ptr<Expr> value_c = nullptr;
   ptr<Expr> value_l = nullptr;
   ptr<Node> value_r = nullptr;
+  Type t;
 
-  Expr(const location& l) : Node(l) {}
-
-  explicit Expr(const location& l, const ptr<Node>& v) : Node(l), value_r(v) {}
+  explicit Expr(const location& l, const ptr<Node>& v)
+      : Node(l), op("ref"), value_r(v), t(Reference) {}
   explicit Expr(const location& l, const std::string& o, const ptr<Node>& v2)
-      : Node(l), op(o), value_r(v2) {}
+      : Node(l), op(o), value_r(v2), t(Unary) {}
   explicit Expr(const location& l, const std::string& o, const ptr<Expr>& v1,
                 const ptr<Node>& v2)
-      : Node(l), op(o), value_l(v1), value_r(v2) {}
+      : Node(l), op(o), value_l(v1), value_r(v2), t(Binary) {}
   explicit Expr(const location& l, const std::string& o, const ptr<Expr>& c,
                 const ptr<Expr>& v1, const ptr<Node>& v2)
-      : Node(l), op(o), value_c(c), value_l(v1), value_r(v2) {}
+      : Node(l), op(o), value_c(c), value_l(v1), value_r(v2), t(Ternary) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    if (op.size() > 0) {
-      os << " (";
-      if (op == "$") {
+    if (t == Reference) {
+      value_r->Print(os, prefix);
+      return;
+    }
+
+    assert(op.size() > 0 && "must have an operand.");
+
+    os << " (";
+    switch (t) {
+      case Unary:
+        os << op << " ";
+        value_r->Print(os);
+        break;
+      case Binary:
+        value_l->Print(os);
+        if (op != "dimof") os << " " << op << " ";
+        value_r->Print(os);
+        break;
+      case Ternary:
         value_c->Print(os);
         os << " ? ";
-      }
-      if (op != "!" && op != "sizeof" && op != ".data") {
         value_l->Print(os);
-        os << " ";
-      }
-      if (op == "$")
-        os << ": ";
-      else
-        os << op << " ";
-      value_r->Print(os);
-      os << ") ";
-    } else
-      value_r->Print(os);
-    (void)prefix;
+        os << " : ";
+        value_r->Print(os);
+        break;
+      default:
+        choreo_unreachable("unhandled expression type.");
+        break;
+    }
+    os << ") ";
   }
 
   void accept(Visitor&) override;
@@ -224,7 +242,10 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
   // If the mdspan is known
   explicit MultiDimSpans(const location& l, const std::string& n,
                          const ptr<Node>& lst)
-      : Node(l, MakeUninitMDSpanType()), ref_name(n), list(lst), dim_count(__INVALID_VALUE__) {
+      : Node(l, MakeUninitMDSpanType()),
+        ref_name(n),
+        list(lst),
+        dim_count(__INVALID_VALUE__) {
     assert(list && "Unexpected: span list is not provided");
   }
 
@@ -238,7 +259,10 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
 
   // mdspan is unknown - for parameter passing
   explicit MultiDimSpans(const location& l, const std::string& n, size_t c)
-      : Node(l, MakeUninitMDSpanType()), ref_name(n), list(nullptr), dim_count(c) {
+      : Node(l, MakeUninitMDSpanType()),
+        ref_name(n),
+        list(nullptr),
+        dim_count(c) {
     assert(dim_count != __INVALID_VALUE__ && "Invalid dimensions.");
   }
 
@@ -480,7 +504,9 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
   BaseType getBaseType() const { return base_type; }
   Node* getPartialType() const { return mdspan_type.get(); }
 
-  bool isScalar() const { return (base_type == BaseType::INT) || (base_type == BaseType::BOOL); }
+  bool isScalar() const {
+    return (base_type == BaseType::INT) || (base_type == BaseType::BOOL);
+  }
   bool isITuple() const { return base_type == BaseType::ITUPLE; }
   bool isSpanned() const { return (bool)mdspan_type; }
 
@@ -500,7 +526,7 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
       case BaseType::U8:
       case BaseType::S8:
         assert(mdspan_type != nullptr && "Expecting a valid mdspan.");
-        return GetType(); // the type has be deduced already
+        return GetType();  // the type has be deduced already
       case BaseType::ITUPLE:
         return MakeUninitITupleType();  // need type inference to retrieve the
                                         // dim count
@@ -898,7 +924,7 @@ ptr<T> Make(Args&&... args) {
 
 // Utility to check the type
 template <typename T>
-bool typeof(const Node *n) {
+bool typeof(const Node* n) {
   return isa<T>(n->GetType().get());
 }
 

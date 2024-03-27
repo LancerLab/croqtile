@@ -462,8 +462,8 @@ mixed_span_elem
           Parser::error(@1,
             "The symbol `" + $1 + "' has not been defined.");
 
-        if (!symtab.GetSymbol($1)->IsComposite())
-          Parser::error(@1, "expecting a symbol of composite type.");
+//        if (!symtab.GetSymbol($1)->IsComposite())
+//          Parser::error(@1, "expecting a symbol of composite type.");
 
         $$ = AST::Make<AST::NthBound>(@1,
             AST::Make<AST::Identifier>(@1, $1), $2);
@@ -473,8 +473,8 @@ mixed_span_elem
           Parser::error(@1,
             "The symbol `" + $1 + "' has not been defined.");
 
-        if (!symtab.GetSymbol($1)->IsComposite())
-          Parser::error(@1, "expecting a symbol of composite type.");
+//        if (!symtab.GetSymbol($1)->IsComposite())
+//          Parser::error(@1, "expecting a symbol of composite type.");
 
         $$ = AST::Make<AST::NthBound>(@1,
             AST::Make<AST::Identifier>(@1, $1+$2), $3);
@@ -632,6 +632,7 @@ s_expr
     | bool_literal { $$ = AST::Make<AST::Expr>(@1, $1); }
     | int_val { $$ = AST::Make<AST::Expr>(@1, $1); }
     | PIPE span_expr PIPE { $$ = AST::Make<AST::Expr>(@1, "sizeof", $2); }
+    | span_expr s_index { $$ = AST::Make<AST::Expr>(@1, "dimof", $1, $2); }
     ;
 
 span_expr

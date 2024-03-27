@@ -13,16 +13,13 @@ void Boolean::accept(Choreo::Visitor& v) { (void)v; }
 void IntLiteral::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
 void SValList::accept(Choreo::Visitor& v) {
-  for (auto p : values)
-    p->accept(v);
+  for (auto p : values) p->accept(v);
   v.Visit(*this);
 }
 
 void Expr::accept(Choreo::Visitor& v) {
-  if (value_c)
-    value_c->accept(v);
-  if (value_l)
-    value_l->accept(v);
+  if (value_c) value_c->accept(v);
+  if (value_l) value_l->accept(v);
 
   assert(value_r && "invalid expression found.");
   value_r->accept(v);
@@ -31,14 +28,12 @@ void Expr::accept(Choreo::Visitor& v) {
 }
 
 void MultiDimSpans::accept(Choreo::Visitor& v) {
-  if (list)
-    list->accept(v);
+  if (list) list->accept(v);
   v.Visit(*this);
 }
 
 void NamedTypeDecl::accept(Choreo::Visitor& v) {
-  if (init_expr)
-    init_expr->accept(v);
+  if (init_expr) init_expr->accept(v);
   v.Visit(*this);
 }
 
@@ -50,7 +45,10 @@ void NamedVariableDecl::accept(Choreo::Visitor& v) {
   v.Visit(*this);
 }
 
-void IntTuple::accept(Choreo::Visitor& v) { (void)v; }
+void IntTuple::accept(Choreo::Visitor& v) {
+  list->accept(v);
+  v.Visit(*this);
+}
 
 void Assignment::accept(Choreo::Visitor& v) {
   value->accept(v);
@@ -84,8 +82,7 @@ void Parameter::accept(Choreo::Visitor& v) {
 }
 
 void ParamList::accept(Choreo::Visitor& v) {
-  for (auto p : values)
-    p->accept(v);
+  for (auto p : values) p->accept(v);
 
   v.Visit(*this);
 }

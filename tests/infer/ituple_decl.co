@@ -6,7 +6,10 @@
 #include <iostream>
 
 // device program
-__co__ int foo(f32 [2, 3, 4] d, int e, bool, f32 mdspan<2> a) { }
+__co__ int foo(f32 [2, 3, 4] d, int e) {
+  a = { 5, 1, d.span(2) / 3 };
+  b = {e, 3};
+}
 
 // VALNO: scope-1 {
 // VALNO:  New VN #0: 'const_2'
@@ -17,9 +20,14 @@ __co__ int foo(f32 [2, 3, 4] d, int e, bool, f32 mdspan<2> a) { }
 // VALNO:  Alias "#0,#1,#2(0)" -> #0
 // VALNO:  Alias "#0,#1,#2(1)" -> #1
 // VALNO:  Alias "#0,#1,#2(2)" -> #2
+// VALNO:  New VN #4: 'const_5'
+// VALNO:  New VN #5: 'const_1'
+// VALNO:  New VN #7: 'index_const_2'
+// VALNO:  <Simplify> 'dimof:#3:#7 / ref:#1' to 'const_1'
+// VALNO:  New VN #9: 'e'
 // VALNO: } // end scope-1
 
 // CHECK: [Parameter] Symbol: d, Type: f32 mdspan<3> [2, 3, 4]
 // CHECK: [Parameter] Symbol: e, Type: int
-// CHECK: [Parameter] Symbol: anon_0, Type: bool
-// CHECK: [Parameter] Symbol: a, Type: f32 mdspan<2> {}
+// CHECK: Symbol: a, Type: ituple<3>
+// CHECK: Symbol: b, Type: ituple<2>

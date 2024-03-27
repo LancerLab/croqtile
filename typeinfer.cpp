@@ -106,3 +106,10 @@ bool TypeInference::Visit(AST::MultiDimSpans& mds) {
 }
 
 bool TypeInference::Visit(AST::Expr& expr) { return true; }
+
+bool TypeInference::Visit(AST::IntTuple& n) {
+  cur_type = n.GetType();
+  return true;
+}
+
+bool TypeInference::Visit(AST::SValList&) { return true; }

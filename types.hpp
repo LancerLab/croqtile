@@ -403,8 +403,7 @@ struct ITupleType : public Type, public TypeIDProvider<ITupleType> {
 
   bool HasSufficientInfo() const { return dim_count != __INVALID_VALUE__; }
 
-  ITupleType(int n, TypeCategory tc = TypeCategory::ITUPLE)
-      : Type(tc), dim_count(n) {}
+  ITupleType(size_t n) : Type(tc), dim_count(n) {}
 
   size_t Dims() const override { return dim_count; }
   bool IsComplete() const override { return true; }
@@ -562,6 +561,10 @@ inline ptr<IntegerType> MakeIntegerType() {
 
 inline ptr<BooleanType> MakeBooleanType() {
   return std::make_shared<BooleanType>();
+}
+
+inline ptr<ITupleType> MakeITupleType(size_t n) {
+  return std::make_shared<ITupleType>(n);
 }
 
 inline ptr<ITupleType> MakeUninitITupleType() {
