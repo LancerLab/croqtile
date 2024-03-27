@@ -1,0 +1,13 @@
+Type inference:
+- target:
+   * deduce the mdspan values, as simple as possible
+   * tag declaration node with type
+- types.hpp: introduce all types inside choreo
+- how to inference:
+   * step 1: apply value numbering to partially evaluate mdspan values (since mdspan is typed)
+   * step 2: associate named type declaration with mdspanvalue, associate variable declaration with types
+
+Chunkat:
+- double confirmed the semantics
+- temporal buffering output
+- shape inference for "=>local", etc.

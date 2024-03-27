@@ -238,7 +238,11 @@ DMA operations entail intricate details that demand careful programming. Program
 ```
 global f32 [6, 10, 100] data;
 parallel p by 6 {
-  with index in [10, 10] {
+  with index = [x, y] in [10, 10] {
+    // for every data move, the stride into 'data' is
+    //    stride = p*1000 + x * 100 + y * 10
+    //
+    // for each chunk, the dimensioned size for the movement is {1, 1, 10}
     f = dte.linear data.chunkat(p, index) => local;
   }
 }
