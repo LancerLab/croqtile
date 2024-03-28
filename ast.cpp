@@ -60,12 +60,6 @@ void IntIndex::accept(Choreo::Visitor& v) {
   v.Visit(*this);
 }
 
-void NthBound::accept(Choreo::Visitor& v) {
-  mdarray->accept(v);
-  index->accept(v);
-  v.Visit(*this);
-}
-
 void IntIndexList::accept(Choreo::Visitor& v) { (void)v; }
 
 void DataType::accept(Choreo::Visitor& v) {

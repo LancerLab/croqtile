@@ -26,7 +26,6 @@ struct Visitor {
   virtual bool Visit(AST::IntTuple&) = 0;
   virtual bool Visit(AST::Assignment&) = 0;
   virtual bool Visit(AST::IntIndex&) = 0;
-  virtual bool Visit(AST::NthBound&) = 0;
   virtual bool Visit(AST::IntIndexList&) = 0;
   virtual bool Visit(AST::DataType&) = 0;
   virtual bool Visit(AST::Identifier&) = 0;

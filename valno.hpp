@@ -482,7 +482,6 @@ class ValueNumberingVisitor : public Visitor {
 
   bool Visit(AST::Assignment&) { return true; };
   bool Visit(AST::IntIndex&) { return true; };
-  bool Visit(AST::NthBound&) { return true; };
   bool Visit(AST::IntIndexList&) { return true; };
   bool Visit(AST::DataType&) { return true; };  // defer the mdspan evaluation
   bool Visit(AST::Identifier&) { return true; };

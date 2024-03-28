@@ -444,25 +444,6 @@ struct IntIndex : public Node, public TypeIDProvider<IntIndex> {
   __UDT_TYPE_INFO__
 };
 
-struct NthBound : public Node, public TypeIDProvider<NthBound> {
-  ptr<Node> mdarray;
-  ptr<IntIndex> index;
-
-  explicit NthBound(const location& l, const ptr<Node>& a,
-                    const ptr<IntIndex>& i)
-      : Node(l, MakeIntegerType()), mdarray(a), index(i) {}
-
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << prefix;
-    mdarray->Print(os);
-    index->Print(os);
-  }
-
-  void accept(Visitor&) override;
-
-  __UDT_TYPE_INFO__
-};
-
 struct IntIndexList : public Node, public TypeIDProvider<IntIndexList> {
   std::vector<ptr<IntIndex>> indices;
 

@@ -127,7 +127,6 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
 bool FactorCodeGen::Visit(AST::IntTuple &) { return true; };
 bool FactorCodeGen::Visit(AST::Assignment &) { return true; };
 bool FactorCodeGen::Visit(AST::IntIndex &) { return true; };
-bool FactorCodeGen::Visit(AST::NthBound &) { return true; };
 bool FactorCodeGen::Visit(AST::IntIndexList &) { return true; };
 bool FactorCodeGen::Visit(AST::DataType &) { return true; };
 

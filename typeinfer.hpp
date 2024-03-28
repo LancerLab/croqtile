@@ -31,7 +31,6 @@ struct TypeInference : public Visitor {
   bool Visit(AST::IntTuple &) override;
   bool Visit(AST::Assignment &) override;
   bool Visit(AST::IntIndex &) override { return true; };
-  bool Visit(AST::NthBound &) override { return true; };
   bool Visit(AST::IntIndexList &) override { return true; };
   bool Visit(AST::DataType &) override;
   bool Visit(AST::Identifier &) override { return true; };
