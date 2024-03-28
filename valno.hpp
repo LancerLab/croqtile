@@ -434,11 +434,6 @@ class ValueNumberingVisitor : public Visitor {
     return true;
   }
 
-  bool Visit(AST::SValList&) {
-    // TODO: apply value numbering whenever possible for the list
-    return true;
-  }
-
   bool Visit(AST::Expr& n) {
     int valno = vn.GetValueNumberForNode(n);
     node_vn.emplace(&n, valno);
@@ -472,8 +467,8 @@ class ValueNumberingVisitor : public Visitor {
   }
 
   bool Visit(AST::IntTuple& n) {
-    if (auto i = dyn_cast<AST::SValList>(n.list.get()))
-      n.SetType(MakeITupleType(i->Dims()));
+    if (auto i = dyn_cast<AST::MultiNodes>(n.list.get()))
+      n.SetType(MakeITupleType(i->Count()));
     else
       n.SetType(MakeUninitITupleType());
     cur_vn = __INVALID_INTVAL__;  // Currently cut off value numbering
@@ -482,7 +477,6 @@ class ValueNumberingVisitor : public Visitor {
 
   bool Visit(AST::Assignment&) { return true; };
   bool Visit(AST::IntIndex&) { return true; };
-  bool Visit(AST::IntIndexList&) { return true; };
   bool Visit(AST::DataType&) { return true; };  // defer the mdspan evaluation
   bool Visit(AST::Identifier&) { return true; };
 

@@ -90,6 +90,10 @@ struct MultiNodes : public Node, public TypeIDProvider<MultiNodes> {
     values.push_back(m);
   }
 
+  size_t Count() const { return values.size(); }
+
+  void SetDelimiter(const std::string & d) { delimiter = d; }
+
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     if (delimiter != "" && values.size() > 1) {
       auto i = values.begin();
@@ -150,31 +154,6 @@ struct IntLiteral : public Node, public TypeIDProvider<IntLiteral> {
   __UDT_TYPE_INFO__
 };
 
-struct SValList : public Node, public TypeIDProvider<SValList> {
-  std::vector<ptr<Node>> values;
-
-  SValList(const location& l) : Node(l) {}
-
-  void Append(ptr<Node> v) { values.push_back(v); }
-
-  size_t Dims() const { return values.size(); }
-
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    if (values.size() == 0) return;
-
-    values[0]->Print(os);
-    for (size_t i = 1; i < values.size(); ++i) {
-      os << ", ";
-      values[i]->Print(os);
-    }
-    (void)prefix;
-  }
-
-  void accept(Visitor&) override;
-
-  __UDT_TYPE_INFO__
-};
-
 struct Expr : public Node, public TypeIDProvider<Expr> {
   // Different expression type
   enum Type { Unary, Binary, Ternary, Reference };
@@ -195,6 +174,12 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
   explicit Expr(const location& l, const std::string& o, const ptr<Expr>& c,
                 const ptr<Expr>& v1, const ptr<Node>& v2)
       : Node(l), op(o), value_c(c), value_l(v1), value_r(v2), t(Ternary) {}
+
+  ptr<Node> GetReference() {
+    if (t == Reference)
+      return value_r;
+    return nullptr;
+  }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     if (t == Reference) {
@@ -437,31 +422,6 @@ struct IntIndex : public Node, public TypeIDProvider<IntIndex> {
     os << prefix << "(";
     value->Print(os);
     os << ")";
-  }
-
-  void accept(Visitor&) override;
-
-  __UDT_TYPE_INFO__
-};
-
-struct IntIndexList : public Node, public TypeIDProvider<IntIndexList> {
-  std::vector<ptr<IntIndex>> indices;
-
-  IntIndexList(const location& l) : Node(l) {}
-
-  void Append(ptr<IntIndex> v) { indices.push_back(v); }
-
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    if (indices.empty()) return;
-
-    size_t i = 0;
-    for (; i < indices.size() - 1; ++i) {
-      indices[i]->Print(os);
-      os << ", ";
-    }
-    indices[i]->Print(os);
-
-    (void)prefix;
   }
 
   void accept(Visitor&) override;

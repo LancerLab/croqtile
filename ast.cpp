@@ -12,11 +12,6 @@ void MultiNodes::accept(Choreo::Visitor& v) {
 void Boolean::accept(Choreo::Visitor& v) { (void)v; }
 void IntLiteral::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
-void SValList::accept(Choreo::Visitor& v) {
-  for (auto p : values) p->accept(v);
-  v.Visit(*this);
-}
-
 void Expr::accept(Choreo::Visitor& v) {
   if (value_c) value_c->accept(v);
   if (value_l) value_l->accept(v);
@@ -59,8 +54,6 @@ void IntIndex::accept(Choreo::Visitor& v) {
   value->accept(v);
   v.Visit(*this);
 }
-
-void IntIndexList::accept(Choreo::Visitor& v) { (void)v; }
 
 void DataType::accept(Choreo::Visitor& v) {
   if (mdspan_type) mdspan_type->accept(v);

@@ -30,3 +30,12 @@ __co__ bf16 mdspan<2> foobar(f32 [?, 4, 5] c, bool d) { }
 // CHECK:  `- Parameters
 // CHECK:    `-  type: f32 [ ? 4 5 ], symbol: c
 // CHECK:    `-  type: bool, symbol: d
+
+__co__ void foobar(f32 [?, 4, 5] e, bf16 [?, ?, 1] f) { }
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: foobar
+// CHECK:  `- Return type: void
+// CHECK:  `- Parameters
+// CHECK:    `-  type: f32 [ ? 4 5 ], symbol: e
+// CHECK:    `-  type: bf16 [ ? ? 1 ], symbol: f

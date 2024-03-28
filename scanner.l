@@ -95,6 +95,7 @@ blank [ \t\r]
   "s8"       return Choreo::Parser::make_S8(AST::BaseType::S8, loc);
   "int"      return Choreo::Parser::make_INT(AST::BaseType::INT, loc);
   "bool"     return Choreo::Parser::make_BOOL(AST::BaseType::BOOL, loc);
+  "void"     return Choreo::Parser::make_VOID(AST::BaseType::VOID, loc);
   "true"     return Choreo::Parser::make_TRUE(yytext, loc);
   "false"    return Choreo::Parser::make_FALSE(yytext, loc);
   "dte"      return Choreo::Parser::make_DMA(yytext, loc);

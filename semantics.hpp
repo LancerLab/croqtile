@@ -10,7 +10,6 @@ struct SemanticChecker : public Visitor {
 
   bool Visit(AST::MultiNodes&) override { return true; };
   bool Visit(AST::IntLiteral&) override { return true; };
-  bool Visit(AST::SValList&) override { return true; };
   bool Visit(AST::Expr&) override { return true; };
   bool Visit(AST::MultiDimSpans&) override { return true; };
   bool Visit(AST::NamedTypeDecl&) override { return true; };
@@ -18,7 +17,6 @@ struct SemanticChecker : public Visitor {
   bool Visit(AST::IntTuple&) override { return true; };
   bool Visit(AST::Assignment&) override { return true; };
   bool Visit(AST::IntIndex&) override { return true; };
-  bool Visit(AST::IntIndexList&) override { return true; };
   bool Visit(AST::DataType&) override { return true; };
   bool Visit(AST::Identifier&) override { return true; };
   bool Visit(AST::Parameter&) override { return true; };

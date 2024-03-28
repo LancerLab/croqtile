@@ -44,6 +44,7 @@ enum class BaseType {
   INT,
   BOOL,
   ITUPLE,
+  VOID,
   UNKNOWN
 };
 
@@ -70,6 +71,7 @@ inline static BaseType getTypeFromString(const std::string& input) {
       {"s16", BaseType::S16},   {"u8", BaseType::U8},
       {"s8", BaseType::S8},     {"int", BaseType::INT},
       {"bool", BaseType::BOOL}, {"ituple", BaseType::ITUPLE},
+      {"void", BaseType::VOID}, {"unknown", BaseType::UNKNOWN},
   };
 
   auto it = typeMap.find(input);
@@ -85,7 +87,9 @@ inline static std::string getStringFrom(BaseType dataType) {
       {BaseType::S32, "s32"},   {BaseType::U16, "u16"},
       {BaseType::S16, "s16"},   {BaseType::U8, "u8"},
       {BaseType::S8, "s8"},     {BaseType::INT, "int"},
-      {BaseType::BOOL, "bool"}, {BaseType::ITUPLE, "ituple"}};
+      {BaseType::BOOL, "bool"}, {BaseType::ITUPLE, "ituple"},
+      {BaseType::VOID, "void"}, {BaseType::UNKNOWN, "unknown"},
+  };
 
   auto it = enumToString.find(dataType);
   assert(it != enumToString.end() && "unsupported type.");

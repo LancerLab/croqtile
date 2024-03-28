@@ -51,6 +51,16 @@ static Parser::symbol_type yylex(Scanner &scanner) {
   return scanner.get_next_token();
 }
 
+// The flag is used to disambiguate syntax suger:
+//
+//   a {(0), (1), 3} represents { a(0), a(1), 3 }
+//
+// where:
+//
+//   {(0), (1), 3} represents {0, 1, 3}
+//
+static bool parsing_prefixed_list = false;
+
 }
 
 %{
@@ -118,7 +128,7 @@ void choreo_info(const char *message) {
 // type related
 %token <std::string> MDSPAN ITUPLE
 %token <AST::Storage> LOCAL SHARED GLOBAL
-%token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT BOOL
+%token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT BOOL VOID
 // builtin operations
 %token <std::string> DMA DLIN DSLICE DPAD COPY FNSPAN FNDATA CHUNKAT WAIT CALL
 // control related
@@ -130,11 +140,10 @@ void choreo_info(const char *message) {
 %nterm <AST::Storage> storage
 %nterm <Choreo::BaseType> fundamental_type
 %nterm <AST::ptr<AST::Memory>> storage_qual
-%nterm <AST::ptr<AST::Node>> pass_by foreach_block general_val simple_val span_val ituple_val bool_literal passable declaration statement assignment pb_statement w_statement dma_statement wait_statement call_statement span_elem iv_expr if_else optional_scalar_init param_mdspan_val
-%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments pb_statements w_statements span_list mixed_span_list param_mdspan_list withins iv_exprs require_binds require_clause id_list with_matchers else_clause futures passables
-%nterm <AST::ptr<AST::SValList>> sval_list
+%nterm <AST::ptr<AST::Node>> pass_by foreach_block general_val simple_int spanned_value ituple_val bool_literal passable declaration statement assignment paraby_statm w_statement dma_statement wait_statement call_statement index_or_value iv_expr if_else optional_scalar_init param_mdspan_val
+%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments paraby_statms w_statements index_value_list value_list param_mdspan_list withins iv_exprs require_binds require_clause id_list with_matchers else_clause futures passables
 %nterm <AST::ptr<AST::Expr>> s_expr
-%nterm <AST::ptr<AST::DataType>> scalar_type param_type spanned_type
+%nterm <AST::ptr<AST::DataType>> scalar_type void_type param_type return_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
 %nterm <AST::ptr<AST::Parameter>> parameter
 %nterm <AST::ptr<AST::ChoreoFunction>> dsl_function
@@ -143,11 +152,10 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::NamedVariableDecl>> named_ituple_decl named_scalar_decl named_spanned_decl
 %nterm <AST::ptr<AST::IntTuple>> unnamed_ituple_decl
 %nterm <AST::ptr<AST::IntIndex>> s_index
-%nterm <AST::ptr<AST::IntIndexList>> s_index_list
 %nterm <AST::ptr<AST::WithBlock>> with_block
 %nterm <AST::ptr<AST::WithIn>> within
 %nterm <AST::ptr<AST::RequireBind>> require_bind
-%nterm <AST::ptr<AST::ParallelBy>> para_by
+%nterm <AST::ptr<AST::ParallelBy>> parallel_by
 %nterm <AST::ptr<AST::Return>> return
 %nterm <AST::ptr<AST::ChunkAt>> chunkat_expr
 
@@ -177,7 +185,7 @@ pass_by
     ;
 
 dsl_function
-    : ATTR_CO param_type IDENTIFIER LPAREN parameter_list RPAREN LBRACE statements RBRACE {
+    : ATTR_CO return_type IDENTIFIER LPAREN parameter_list RPAREN LBRACE statements RBRACE {
         $$ = AST::Make<AST::ChoreoFunction>(@1);
         $$->name = $3;
         $$->f_decl.name = $3;
@@ -186,6 +194,10 @@ dsl_function
         $$->statms = $8;
       }
     ;
+
+return_type
+    : param_type { $$ = $1; }
+    | void_type  { $$ = $1; }
 
 param_type
     : scalar_type { $$ = $1; }
@@ -219,13 +231,17 @@ param_mdspan_val
     | QES   { $$ = AST::Make<AST::IntLiteral>(@1); }
     ;
 
+void_type
+    : VOID  { $$ = AST::Make<AST::DataType>(@1, $1); }
+    ;
+
 scalar_type
     : INT   { $$ = AST::Make<AST::DataType>(@1, $1); }
     | BOOL  { $$ = AST::Make<AST::DataType>(@1, $1); }
     ;
 
 spanned_type
-    : fundamental_type LBRAKT mixed_span_list RBRAKT {
+    : fundamental_type LBRAKT value_list RBRAKT {
         $$ = AST::Make<AST::DataType>(@1, $1, AST::Make<AST::MultiDimSpans>(@3, "", $3));
       }
     ;
@@ -240,20 +256,6 @@ fundamental_type
     | S8    { $$ = $1; }
     | U32   { $$ = $1; }
     | S32   { $$ = $1; }
-    ;
-
-sval_list
-    : /* allows the empty list */ {
-        $$ = AST::Make<AST::SValList>(loc);
-      }
-    | sval_list COMMA s_expr {
-        $1->Append($3);
-        $$ = $1;
-      }
-    | s_expr {
-        $$ = AST::Make<AST::SValList>(@1);
-        $$->Append($1);
-      }
     ;
 
 general_val
@@ -271,7 +273,7 @@ general_val
     | bool_literal { $$ = $1; }
     ;
 
-simple_val
+simple_int
     : NUM { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
     | IDENTIFIER {
         if (!symtab.Exists($1))
@@ -331,7 +333,7 @@ statements
 statement
     : declarations SEMCOL { $$ = $1; }
     | assignments  SEMCOL { $$ = $1; }
-    | para_by             { $$ = $1; }
+    | parallel_by         { $$ = $1; }
     | if_else             { $$ = $1; }
     | return SEMCOL       { $$ = $1; }
     ;
@@ -341,25 +343,26 @@ return
     | RET passable { $$ = AST::Make<AST::Return>(@1, $2); }
     ;
 
-para_by
-    : PARA IDENTIFIER BY NUM LBRACE pb_statements RBRACE {
+parallel_by
+    : PARA IDENTIFIER BY NUM LBRACE paraby_statms RBRACE {
         $$ = AST::Make<AST::ParallelBy>(@1, $2, $4);
         $$->statms = $6;
       }
     ;
 
-pb_statements
+paraby_statms
     : /* Empty */ { $$ = AST::Make<AST::MultiNodes>(loc); }
-    | pb_statements pb_statement {
+    | paraby_statms paraby_statm {
         $1->Append($2);
         $$ = $1;
       }
     ;
 
-pb_statement
+paraby_statm
     : declarations SEMCOL { $$ = $1; }
     | assignments  SEMCOL { $$ = $1; }
-    | with_block { $$ = $1; }
+    | parallel_by         { $$ = $1; }
+    | with_block          { $$ = $1; }
     ;
 
 assignments
@@ -423,44 +426,32 @@ named_spanned_decl
     ;
 
 s_index
-    : LPAREN simple_val RPAREN {
+    : LPAREN simple_int RPAREN {
         $$ = AST::Make<AST::IntIndex>(@2, $2);
       }
     ;
 
-s_index_list
-    : s_index_list COMMA s_index {
-        $1->Append($3);
-        $$ = $1;
-      }
-    | s_index {
-        $$ = AST::Make<AST::IntIndexList>(@1);
-        $$->indices.push_back($1);
-      }
-    ; /* do not allow empty list */
-
-span_elem
-    : s_index     { $$ = $1; }
-    | simple_val  { $$ = $1; }
+index_or_value
+    : s_expr      { $$ = $1; }
     | QES         { $$ = AST::Make<AST::IntLiteral>(@1); }
     ; // do not allow non-element
 
-span_list
-    : span_list COMMA span_elem {
+index_value_list
+    : index_value_list COMMA index_or_value {
         $1->Append($3);
         $$ = $1;
       }
-    | span_elem {
+    | index_or_value {
         $$ = AST::Make<AST::MultiNodes>(@1);
         $$->Append($1);
       }
     ; // do not allow an empty list
 
-mixed_span_list
+value_list
     : /* Empty list */ {
         $$ = AST::Make<AST::MultiNodes>(loc);
       }
-    | mixed_span_list COMMA s_expr {
+    | value_list COMMA s_expr {
         $1->Append($3);
         $$ = $1;
       }
@@ -471,18 +462,22 @@ mixed_span_list
     ;
 
 unnamed_mdspan_decl
-    : IDENTIFIER FNSPAN LBRAKT span_list RBRAKT {
+    : IDENTIFIER FNSPAN LBRAKT { parsing_prefixed_list = true; }
+      index_value_list RBRAKT {
+        $$ = AST::Make<AST::MultiDimSpans>(@1, $1, $5);
+        parsing_prefixed_list = false;
+      }
+    | IDENTIFIER LBRAKT { parsing_prefixed_list = true; }
+      index_value_list RBRAKT {
         $$ = AST::Make<AST::MultiDimSpans>(@1, $1, $4);
+        parsing_prefixed_list = false;
       }
-    | IDENTIFIER LBRAKT span_list RBRAKT {
-        $$ = AST::Make<AST::MultiDimSpans>(@1, $1, $3);
-      }
-    | LBRAKT mixed_span_list RBRAKT {
+    | LBRAKT value_list RBRAKT {
         $$ = AST::Make<AST::MultiDimSpans>(@1, "", $2);
       }
     ;
 
-span_val
+spanned_value
     : unnamed_mdspan_decl { $$ = $1; }
     | IDENTIFIER { $$ = AST::Make<AST::Identifier>(@1, $1); }
     | IDENTIFIER FNSPAN { $$ = AST::Make<AST::Identifier>(@1, $1 + $2); }
@@ -498,12 +493,6 @@ named_mdspan_decl
         $$ = AST::Make<AST::NamedTypeDecl>(@2, $2, $4);
       }
     | MDSPAN LT NUM GT IDENTIFIER COL s_expr {
-        // TODO: check if the span defined aligned with declaration
-        #if 0
-        if ($3 != $7->list.size())
-          Parser::error(@3,
-            "The rank of mdspan is not consistent with its decleration.");
-            #endif
         if (symtab.Exists($5)) {
           Parser::error(@5, "ODR violation: the symbol '" + $5 + "` is already defined.");
           exit(1);
@@ -523,15 +512,19 @@ named_mdspan_decl
 
 
 unnamed_ituple_decl
-    : LBRACE sval_list RBRACE {
+    : LBRACE value_list RBRACE {
+        $2->SetDelimiter(", ");
         $$ = AST::Make<AST::IntTuple>(@1, "", $2);
       }
-    | IDENTIFIER LBRACE s_index_list RBRACE {
+    | IDENTIFIER LBRACE { parsing_prefixed_list = true; }
+      index_value_list RBRACE {
         // anchor
         if (!symtab.Exists($1))
           Parser::error(@1, "The symbol '" + $1 + "` has not been defined.");
 
-        $$ = AST::Make<AST::IntTuple>(@1, $1, $3);
+        $4->SetDelimiter(", ");
+        $$ = AST::Make<AST::IntTuple>(@1, $1, $4);
+        parsing_prefixed_list = true;
       }
     ;
 
@@ -590,7 +583,30 @@ s_expr
     | s_expr OR s_expr { $$ = AST::Make<AST::Expr>(@1, "||", $1, $3); }
     | s_expr AND s_expr { $$ = AST::Make<AST::Expr>(@1, "&&", $1, $3); }
     | NOT s_expr { $$ = AST::Make<AST::Expr>(@1, "!", $2); }
-    | LPAREN s_expr RPAREN { $$ = $2; }
+    | LPAREN s_expr RPAREN {
+        // Does String "(0)" represent an indexing operation or an arithmetic operation 
+        if (!parsing_prefixed_list) {
+          $$ = $2;
+          break;
+        }
+
+        if (auto ref = $2->GetReference()) {
+          if (isa<AST::IntLiteral>(ref.get())) {
+            $$ = AST::Make<AST::Expr>(@2, AST::Make<AST::IntIndex>(@2, ref));
+            break;
+          } else if (auto id = dyn_cast<AST::Identifier>(ref.get())) {
+            if (!symtab.Exists(id->name))
+              Parser::error(id->LOC(),
+                "The symbol `" + id->name + "' has not been defined.");
+
+            $$ =  AST::Make<AST::Expr>(@2, AST::Make<AST::IntIndex>(@2, ref));
+            break;
+          }
+        }
+
+        // or else, it is arithmetical
+        $$ = $2;
+      }
     | LPAREN s_expr RPAREN QES s_expr COL s_expr {
         $$ = AST::Make<AST::Expr>(@1, "$", $2, $5, $7);
       }
@@ -642,11 +658,11 @@ withins
     ; /* do not allow empty within */
 
 within
-    : IDENTIFIER IN span_val {
+    : IDENTIFIER IN spanned_value {
         symtab.AddSymbol($1, MakeUnknownType()/*TODO*/);
         $$ = AST::Make<AST::WithIn>(@1, AST::Make<AST::Identifier>(@1, $1), $3);
       }
-    | IDENTIFIER ASSIGN LBRACE with_matchers RBRACE IN span_val {
+    | IDENTIFIER ASSIGN LBRACE with_matchers RBRACE IN spanned_value {
         symtab.AddSymbol($1, MakeUnknownType()/*TODO*/);
         $$ = AST::Make<AST::WithIn>(@1, AST::Make<AST::Identifier>(@1, $1), $7);
         $$->with_matchers = $4;
