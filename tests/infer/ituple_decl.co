@@ -16,19 +16,19 @@ __co__ int foo(f32 [2, 3, 4] d, int e) {
 // VALNO:  New VN #1: 'const_3'
 // VALNO:  New VN #2: 'const_4'
 // VALNO:  New VN #3: '#0,#1,#2'
-// VALNO:  Alias "d.span" -> #3
 // VALNO:  Alias "#0,#1,#2(0)" -> #0
 // VALNO:  Alias "#0,#1,#2(1)" -> #1
 // VALNO:  Alias "#0,#1,#2(2)" -> #2
-// VALNO:  New VN #4: 'const_5'
-// VALNO:  New VN #5: 'const_1'
-// VALNO:  New VN #7: 'index_const_2'
-// VALNO:  <Simplify> 'dimof:#3:#7 / ref:#1' to 'const_1'
-// VALNO:  <Simplify> 'dimof:#3:#7 / ref:#1' to 'const_1'
-// VALNO:  New VN #8: '#4,#5,#5'
-// VALNO:  New VN #10: 'e'
-// VALNO:  New VN #11: '#10,#1'
-// VALNO: } // end scope-1
+// VALNO:  Alias "d.span" -> #3
+// VALNO:   New VN #5: 'e'
+// VALNO:   New VN #6: 'const_5'
+// VALNO:   New VN #7: 'const_1'
+// VALNO:   New VN #8: 'index_const_2'
+// VALNO:   <Simplify> 'dimof:#3:#8 / ref:#1' to 'const_1'
+// VALNO:   <Simplify> 'dimof:#3:#8 / ref:#1' to 'const_1'
+// VALNO:   New VN #9: '#6,#7,#7'
+// VALNO:   New VN #10: '#5,#1'
+// VALNO:  } // end scope-1
 
 // CHECK: [Parameter] Symbol: d, Type: f32 mdspan<3> [2, 3, 4]
 // CHECK: [Parameter] Symbol: e, Type: int

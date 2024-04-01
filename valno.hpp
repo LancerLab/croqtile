@@ -12,7 +12,19 @@
 
 namespace Choreo {
 
-inline bool ValidVN(int vn) { return vn != __INVALID_INTVAL__; }
+inline constexpr size_t InvalidCount() { return __INVALID_VALUE__; }
+inline constexpr int InvalidValueNumber() { return __INVALID_INTVAL__; }
+inline bool ValidVN(int vn) { return vn != InvalidValueNumber(); }
+inline void InvalidateVN(int& vn) { vn = InvalidValueNumber(); }
+inline bool UnknownVN(int& vn) { return vn == __UNKNOWN_INTVAL__; }
+inline void SetUnknownVN(int& vn) { vn = __UNKNOWN_INTVAL__; }
+
+// Remove the prefix
+inline std::string RemovePrefix(const std::string& str,
+                                const std::string& prefix) {
+  if (str.find(prefix) == 0) return str.substr(prefix.length());
+  return str;
+}
 
 // retrieve the n-th element from the comma-seperated input string
 inline std::optional<std::string> getNthElement(const std::string& input,
@@ -34,368 +46,89 @@ inline std::optional<std::string> getNthElement(const std::string& input,
   return std::nullopt;
 }
 
+class ValueNumberingVisitor;
+
 class ValueNumbering {
  private:
-  std::vector<std::unordered_map<std::string, int>> variableScopes;
-  std::unordered_map<std::string, int> expressionValueNumbers;
-  std::unordered_map<int, std::string> valueNumberExpressions;
+  ValueNumberingVisitor* visitor;
+  std::vector<std::unordered_map<std::string, int>> expressionValueNumbers;
+  std::vector<std::unordered_map<int, std::string>> valueNumberExpressions;
 
   int nextValueNumber = 0;
 
   bool trace = false;
   std::ostream& os;
 
+  std::optional<std::string> ref = std::nullopt;
+
  public:
-  explicit ValueNumbering(bool t, std::ostream& o) : trace(t), os(o) {
-    variableScopes.emplace_back();
+  explicit ValueNumbering(ValueNumberingVisitor* v, bool t, std::ostream& o)
+      : visitor(v), trace(t), os(o) {}
+
+  void EnterScope();
+  void LeaveScope();
+
+  void SetListReference(const std::string& r) { ref = r; }
+  void ResetListReference() { ref.reset(); }
+
+  // It binds a expression sigature with an existing value number.
+  void AssociateSignatureWithValueNumber(const std::string& sig, int valno);
+
+  std::optional<std::string> TryToSimplifyNodeSignature(AST::Node& node);
+
+  std::string GenerateNodeSignature(AST::Node& node, bool optimiz = true);
+
+  int GetValueNumberForNode(AST::Node& expr);
+
+  int GetValueNumberFromSignature(const std::string& signature);
+
+  int GetOrInsertValueNumberFromSignature(const std::string& signature);
+
+  std::string GetSignatureFromValueNumber(int vn) {
+    return valueNumberExpressions.back().at(vn);
   }
 
-  void EnterScope() {
-    if (trace)
-      os << ScopeIndent() << "scope-" << variableScopes.size() << " {\n";
-
-    variableScopes.emplace_back();
-  }
-
-  void LeaveScope() {
-    if (!variableScopes.empty()) variableScopes.pop_back();
-
-    if (trace)
-      os << ScopeIndent() << "} // end scope-" << variableScopes.size() << "\n";
-  }
-
-  const std::string GetValueNumberExprForVariable(const std::string& varName) {
-    int valNo = __INVALID_INTVAL__;
-    for (auto it = variableScopes.rbegin(); it != variableScopes.rend(); ++it) {
-      if (it->find(varName) != it->end()) {
-        valNo = it->at(varName);
-        break;
-      }
-    }
-
-    assert(valNo != __INVALID_INTVAL__ && "value number is not found.");
-    return valueNumberExpressions[valNo];
-  }
-
-  int GetValueNumberForVariable(const std::string& varName) {
-    // Look for the variable in the current scope and up through outer scopes
-    for (auto it = variableScopes.rbegin(); it != variableScopes.rend(); ++it) {
-      if (it->find(varName) != it->end()) {
-        return it->at(varName);
-      }
-    }
-
-    int valueNumber = nextValueNumber++;
-    variableScopes.back()[varName] = valueNumber;
-    return valueNumber;
-  }
-
-  void AssignValueNumberToVariable(const std::string& varName, int valno) {
-    variableScopes.back()[varName] = valno;
-
-    if (trace)
-      os << ScopeIndent() << "Var \"" << varName << "\" -> #" << valno << "\n";
-  }
-
-  // It binds a expression sigature with an existing value number.  use it
-  // carefully.
-  void AssociateSignatureWithValueNumber(const std::string& sig, int valno) {
-    assert(!expressionValueNumbers.count(sig) && "signature existed.");
-    assert(valueNumberExpressions.count(valno) &&
-           "invalid value number provided.");
-
-    expressionValueNumbers[sig] = valno;
-
-    if (trace)
-      os << ScopeIndent() << "Alias \"" << sig << "\" -> #" << valno << "\n";
-  }
-
-  std::optional<std::string> TrySimplifyNodeSignature(AST::Node& node) {
-    if (auto* b = dyn_cast<AST::Identifier>(&node)) {
-      (void)b;
-      return std::nullopt;
-    } else if (auto* n = dyn_cast<AST::Expr>(&node)) {
-      // Try to simplify immediately
-      std::map<std::string, std::function<std::optional<std::string>()>>
-          actions = {
-              {"+",
-               [this, &n]() -> std::optional<std::string> {
-                 auto l_cv = PrefixedWith(
-                     "const_", GetValueNumberExpressionForNode(*n->value_l));
-                 auto r_cv = PrefixedWith(
-                     "const_", GetValueNumberExpressionForNode(*n->value_r));
-                 if (l_cv && r_cv) {
-                   auto res = "const_" + std::to_string(std::stoi(*l_cv) +
-                                                        std::stoi(*r_cv));
-                   if (trace)
-                     os << ScopeIndent() << "<Simplify> '"
-                        << GenerateNodeSignature(*n->value_l, false) << " + "
-                        << GenerateNodeSignature(*n->value_r, false) << "' to '"
-                        << res << "'\n";
-                   return res;
-                 } else
-                   return std::nullopt;
-               }},
-              {"-",
-               [this, &n]() -> std::optional<std::string> {
-                 auto l_cv = PrefixedWith(
-                     "const_", GetValueNumberExpressionForNode(*n->value_l));
-                 auto r_cv = PrefixedWith(
-                     "const_", GetValueNumberExpressionForNode(*n->value_r));
-                 if (l_cv && r_cv) {
-                   auto res = "const_" + std::to_string(std::stoi(*l_cv) -
-                                                        std::stoi(*r_cv));
-                   if (trace)
-                     os << ScopeIndent() << "<Simplify> '"
-                        << GenerateNodeSignature(*n->value_l, false) << " - "
-                        << GenerateNodeSignature(*n->value_r, false) << "' to '"
-                        << res << "'\n";
-                   return res;
-                 } else
-                   return std::nullopt;
-               }},
-              {"*",
-               [this, &n]() -> std::optional<std::string> {
-                 auto l_cv = PrefixedWith(
-                     "const_", GetValueNumberExpressionForNode(*n->value_l));
-                 auto r_cv = PrefixedWith(
-                     "const_", GetValueNumberExpressionForNode(*n->value_r));
-                 if (l_cv && r_cv) {
-                   auto res = "const_" + std::to_string(std::stoi(*l_cv) *
-                                                        std::stoi(*r_cv));
-                   if (trace)
-                     os << ScopeIndent() << "<Simplify> '"
-                        << GenerateNodeSignature(*n->value_l, false) << " * "
-                        << GenerateNodeSignature(*n->value_r, false) << "' to '"
-                        << res << "'\n";
-                   return res;
-                 } else
-                   return std::nullopt;
-               }},
-              {"/",
-               [this, &n]() -> std::optional<std::string> {
-                 auto l_cv = PrefixedWith(
-                     "const_", GetValueNumberExpressionForNode(*n->value_l));
-                 auto r_cv = PrefixedWith(
-                     "const_", GetValueNumberExpressionForNode(*n->value_r));
-                 if (l_cv && r_cv) {
-                   auto res = "const_" + std::to_string(std::stoi(*l_cv) /
-                                                        std::stoi(*r_cv));
-                   if (trace)
-                     os << ScopeIndent() << "<Simplify> '"
-                        << GenerateNodeSignature(*n->value_l, false) << " / "
-                        << GenerateNodeSignature(*n->value_r, false) << "' to '"
-                        << res << "'\n";
-                   return res;
-                 } else
-                   return std::nullopt;
-               }},
-              {"%",
-               [this, &n]() -> std::optional<std::string> {
-                 auto l_cv = PrefixedWith(
-                     "const_", GetValueNumberExpressionForNode(*n->value_l));
-                 auto r_cv = PrefixedWith(
-                     "const_", GetValueNumberExpressionForNode(*n->value_r));
-                 if (l_cv && r_cv) {
-                   auto res = "const_" + std::to_string(std::stoi(*l_cv) %
-                                                        std::stoi(*r_cv));
-                   if (trace)
-                     os << ScopeIndent() << "<Simplify> '"
-                        << GenerateNodeSignature(*n->value_l, false) << " % "
-                        << GenerateNodeSignature(*n->value_r, false) << "' to '"
-                        << res << "'\n";
-                   return res;
-                 } else
-                   return std::nullopt;
-               }},
-              {"||",
-               [this, &n]() -> std::optional<std::string> {
-                 return std::nullopt; /*TODO*/
-               }},
-              {"&&",
-               [this, &n]() -> std::optional<std::string> {
-                 return std::nullopt; /*TODO*/
-               }},
-              {"!",
-               [this, &n]() -> std::optional<std::string> {
-                 return std::nullopt; /*TODO*/
-               }},
-              {"$",
-               [this, &n]() -> std::optional<std::string> {
-                 return std::nullopt; /*TODO*/
-               }},
-              {"<",
-               [this, &n]() -> std::optional<std::string> {
-                 return std::nullopt; /*TODO*/
-               }},
-              {">",
-               [this, &n]() -> std::optional<std::string> {
-                 return std::nullopt; /*TODO*/
-               }},
-              {"==",
-               [this, &n]() -> std::optional<std::string> {
-                 return std::nullopt; /*TODO*/
-               }},
-              {"!=",
-               [this, &n]() -> std::optional<std::string> {
-                 return std::nullopt; /*TODO*/
-               }},
-              {"<=",
-               [this, &n]() -> std::optional<std::string> {
-                 return std::nullopt; /*TODO*/
-               }},
-              {">=",
-               [this, &n]() -> std::optional<std::string> {
-                 return std::nullopt; /*TODO*/
-               }},
-              {"sizeof",
-               [this, &n]() -> std::optional<std::string> {
-                 return std::nullopt; /*TODO*/
-               }},
-              {"dimof",  // calculate the dim of a given mdspan index
-               [this, &n]() -> std::optional<std::string> {
-                 auto mdspan = GetValueNumberExpressionForNode(*n->value_l);
-                 auto cv =
-                     PrefixedWith("index_const_",
-                                  GetValueNumberExpressionForNode(*n->value_r));
-                 assert(cv && "mdspan index can not be evaluated.");
-                 return mdspan + "(" + *cv + ")";
-               }},
-              {"ref",  // it is a reference to another node
-               [this, &n]() -> std::optional<std::string> {
-                 int valNo = GetValueNumberForNode(*n->value_r);
-                 if (ValidVN(valNo)) return GetExpressionFromValueNumber(valNo);
-                 return std::nullopt;
-               }},
-          };
-      auto it = actions.find(n->op);
-      if (it != actions.end())
-        return it->second();  // Execute the lambda function if found
-      else {
-        choreo_unreachable(("No handler for operation `" + n->op + "'")
-                               .c_str());  // Default case
-      }
-    }
-    return std::nullopt;
-  }
-
-  std::string GenerateNodeSignature(AST::Node& node, bool optimiz = true) {
-    if (optimiz) {
-      auto sns = TrySimplifyNodeSignature(node);
-      if (sns) return *sns;
-    }
-
-    if (auto* n = dyn_cast<AST::IntLiteral>(&node)) {
-      return "const_" + std::to_string(n->value);
-    } else if (auto* v = dyn_cast<AST::Identifier>(&node)) {
-      int valno = GetValueNumberForVariable(v->name);
-      assert((valno != __INVALID_INTVAL__) && "invalid value number.");
-      return v->name;
-    } else if (auto* b = dyn_cast<AST::Expr>(&node)) {
-      auto signature = b->op;
-
-      if (b->value_c) {
-        int valno = GetValueNumberForNode(*b->value_c);
-        assert((valno != __INVALID_INTVAL__) && "invalid value number.");
-        signature += ":#" + std::to_string(valno);
-      }
-      if (b->value_l) {
-        int valno = GetValueNumberForNode(*b->value_l);
-        assert((valno != __INVALID_INTVAL__) && "invalid value number.");
-        signature += ":#" + std::to_string(valno);
-      }
-
-      assert(b->value_r && "expr is invalid.");
-      int valno = GetValueNumberForNode(*b->value_r);
-      if (valno == __INVALID_INTVAL__) {
-        // a reference node may have no valNo
-        assert((b->t == AST::Expr::Reference) && "invalid value number.");
-        return "";
-      }
-      return signature + ":#" + std::to_string(valno);
-    } else if (auto* b = dyn_cast<AST::MultiNodes>(&node)) {
-      std::string signature;
-      if (b->values.size() > 0 &&
-          ValidVN(GetValueNumberForNode(*b->values[0]))) {
-        signature = "#" + std::to_string(GetValueNumberForNode(*b->values[0]));
-        for (size_t i = 1; i < b->values.size(); ++i)
-          signature +=
-              ",#" + std::to_string(GetValueNumberForNode(*b->values[i]));
-      }
-      return signature;
-    } else if (auto* b = dyn_cast<AST::ParamList>(&node)) {
-      std::string signature;
-      if (b->values.size() > 0) {
-        signature =
-            "p:#" + std::to_string(GetValueNumberForNode(*b->values[0]));
-        for (size_t i = 1; i < b->values.size(); ++i)
-          signature +=
-              ",#" + std::to_string(GetValueNumberForNode(*b->values[i]));
-      }
-      return signature;
-    } else if (auto* n = dyn_cast<AST::IntIndex>(&node)) {
-      return "index_" + GenerateNodeSignature(*n->value);
-    }
-    return "";
-  }
-
-  int GetValueNumberForNode(AST::Node& expr) {
-    std::string signature = GenerateNodeSignature(expr);
-    if (signature == "") return __INVALID_INTVAL__;
-
-    // std::cout << "sig: " << signature << ", expr: " << expr.NodeTypeString()
-    // << "\n";
-
-    // Check if this expression has been encountered before
-    auto it = expressionValueNumbers.find(signature);
-    if (it != expressionValueNumbers.end())
-      return it->second;  // Return existing value number
-
-    // If not, assign a new value number
-    int valueNumber = nextValueNumber++;
-    expressionValueNumbers[signature] = valueNumber;
-    valueNumberExpressions[valueNumber] = signature;
-
-    if (trace)
-      os << ScopeIndent() << "New VN #" << valueNumber << ": '" << signature
-         << "'\n";
-
-    return valueNumber;
-  }
-
-  std::string GetExpressionFromValueNumber(int vn) {
-    return valueNumberExpressions.at(vn);
-  }
-
-  std::string GetValueNumberExpressionForNode(AST::Node& expr) {
-    return GetExpressionFromValueNumber(GetValueNumberForNode(expr));
+  std::string GetSignatureForNode(AST::Node& expr) {
+    return GetSignatureFromValueNumber(GetValueNumberForNode(expr));
   }
 
   void Print(std::ostream& os) {
-    for (auto& item : expressionValueNumbers)
-      os << "expr: \"" << item.first << "\", value_no: #" << item.second
-         << "\n";
+    int scope = 0;
+    for (auto& stack : expressionValueNumbers) {
+      os << scope++ << "\n";
+      for (auto& item : stack)
+        os << "expr: \"" << item.first << "\", value_no: #" << item.second
+           << "\n";
+    }
   }
 
  private:
-  std::string ScopeIndent() {
-    std::string indent;
-    for (size_t i = 0; i < variableScopes.size() - 1; ++i) indent += " ";
-    return indent;
-  }
+  std::string ScopeIndent();
 };
+
+#define __TRACE_EACH_VISIT__          \
+  if (trace_visit) {                  \
+    os << n.NodeTypeString() << ": "; \
+    n.Print(os);                      \
+    os << "\n";                       \
+  }
 
 class ValueNumberingVisitor : public Visitor {
  private:
   ValueNumbering vn;
-  std::unordered_map<AST::Node*, int> node_vn;
+  std::unordered_map<AST::Node*, int> node_vn;  // TODO: caching (note scope)
 
-  int cur_vn = __INVALID_INTVAL__;
-  int cur_mdspan_vn = __INVALID_INTVAL__;
+  int cur_vn = InvalidValueNumber();
+  int cur_mdspan_vn = InvalidValueNumber();
+
+ private:
+  std::ostream& os;
+  // for debugging purpose only
+  bool trace_visit = false;
 
  public:
   ValueNumberingVisitor(bool t = false, std::ostream& o = std::cout)
-      : vn(t, o) {}
+      : vn(this, t, o), os(o), trace_visit(std::getenv("TRACE_VISIT")) {}
 
  public:
   void PrintValueNumbers(std::ostream& os) {
@@ -407,140 +140,227 @@ class ValueNumberingVisitor : public Visitor {
  public:
   virtual bool BeforeVisit(AST::Node& n) override {
     if (isa<AST::ChoreoFunction>(&n) || isa<AST::ParallelBy>(&n) ||
-        isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n))
+        isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n)) {
       vn.EnterScope();
+    } else if (auto* b = dyn_cast<AST::MultiDimSpans>(&n)) {
+      if (b->ref_name != "") vn.SetListReference(b->ref_name);
+    }
     return true;
   }
 
   virtual bool AfterVisit(AST::Node& n) override {
     if (isa<AST::ChoreoFunction>(&n) || isa<AST::ParallelBy>(&n) ||
-        isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n))
+        isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n)) {
       vn.LeaveScope();
+    } else if (isa<AST::MultiDimSpans>(&n)) {
+      vn.ResetListReference();
+    }
     return true;
   }
 
  public:
   bool Visit(AST::MultiNodes& n) {
-    int valno = vn.GetValueNumberForNode(n);
-    node_vn.emplace(&n, valno);
-    cur_vn = valno;
+    int valNo = vn.GetValueNumberForNode(n);
+    node_vn.emplace(&n, valNo);
+    cur_vn = valNo;
     return true;
   }
 
   bool Visit(AST::IntLiteral& n) {
-    int valno = vn.GetValueNumberForNode(n);
-    node_vn.emplace(&n, valno);
-    cur_vn = valno;
+    __TRACE_EACH_VISIT__;
+    int valNo = vn.GetValueNumberForNode(n);
+    node_vn.emplace(&n, valNo);
+    cur_vn = valNo;
     return true;
   }
 
   bool Visit(AST::Expr& n) {
-    int valno = vn.GetValueNumberForNode(n);
-    node_vn.emplace(&n, valno);
-    cur_vn = valno;
+    __TRACE_EACH_VISIT__;
+    int valNo = vn.GetValueNumberForNode(n);
+    node_vn.emplace(&n, valNo);
+    cur_vn = valNo;
     return true;
   }
 
   bool Visit(AST::MultiDimSpans& n) {
-    if (n.list)
+    __TRACE_EACH_VISIT__;
+
+    if (n.list) {
+      // The MDSpanValue now can be deduced from the value number.
+      // Update the type detail acoordingly.
+      auto vn_str = vn.GetSignatureFromValueNumber(cur_vn);
+
+      // set alias expressions with proper value numbers
+      ProcessValueNumberString(
+          vn_str, [this, &vn_str](int valno, size_t index) {
+            vn.AssociateSignatureWithValueNumber(
+                vn_str + "(" + std::to_string(index) + ")", valno);
+          });
+
+      auto vl = GenMDSpanValueFromVNString(vn_str);
+      n.SetTypeDetail(vl);
+
+      if (n.Dims() != InvalidCount()) {
+        if (vl.Dims() != n.Dims())
+          Error(n.LOC(),
+                "mdspan's dimension is inconsistent with its initialization "
+                "expression.");
+      } else
+        n.SetDims(vl.Dims());
+
+      // pass the value number over
       cur_mdspan_vn = cur_vn;
-    else
-      cur_mdspan_vn = __UNKNOWN_INTVAL__;
+    } else
+      SetUnknownVN(cur_mdspan_vn);  // failed to deduce the type detail
+
+    InvalidateVN(cur_vn);
     return true;
   }
 
   bool Visit(AST::NamedTypeDecl& n) {
+    __TRACE_EACH_VISIT__;
+
     if (n.init_expr) {
-      assert(cur_vn != __INVALID_INTVAL__);
-      vn.AssignValueNumberToVariable(n.name_str, cur_vn);
-      cur_vn = __INVALID_INTVAL__;
+      assert(ValidVN(cur_mdspan_vn) &&
+             "invalid value number for the named type.");
+      vn.AssociateSignatureWithValueNumber(n.name_str, cur_mdspan_vn);
+
+      InvalidateVN(cur_mdspan_vn);  // comsumes the mdspan
     }
     return true;
   }
 
   bool Visit(AST::NamedVariableDecl& n) {
-    if (n.initializer && cur_vn != __INVALID_INTVAL__) {
-      vn.AssignValueNumberToVariable(n.name_str, cur_vn);
-      cur_vn = __INVALID_INTVAL__;
+    __TRACE_EACH_VISIT__;
+    if (n.initializer && ValidVN(cur_vn)) {
+      vn.AssociateSignatureWithValueNumber(n.name_str, cur_vn);
+      InvalidateVN(cur_vn);
     }
     return true;
   }
 
   bool Visit(AST::IntTuple& n) {
+    __TRACE_EACH_VISIT__;
     if (auto i = dyn_cast<AST::MultiNodes>(n.list.get()))
       n.SetType(MakeITupleType(i->Count()));
     else
       n.SetType(MakeUninitITupleType());
-    cur_vn = __INVALID_INTVAL__;  // Currently cut off value numbering
+    InvalidateVN(cur_vn);  // Currently cut off value numbering
     return true;
   }
 
-  bool Visit(AST::Assignment&) { return true; };
-  bool Visit(AST::IntIndex&) { return true; };
-  bool Visit(AST::DataType&) { return true; };  // defer the mdspan evaluation
-  bool Visit(AST::Identifier&) { return true; };
+  bool Visit(AST::Assignment& n) {
+    __TRACE_EACH_VISIT__;
+    return true;
+  };
+
+  bool Visit(AST::IntIndex& n) {
+    __TRACE_EACH_VISIT__;
+    return true;
+  };
+
+  bool Visit(AST::DataType& n) {
+    __TRACE_EACH_VISIT__;
+    return true;
+  }
+
+  bool Visit(AST::Identifier& n) {
+    __TRACE_EACH_VISIT__;
+    int valNo = vn.GetValueNumberForNode(n);
+    node_vn.emplace(&n, valNo);
+    cur_vn = valNo;
+    return true;
+  };
 
   bool Visit(AST::Parameter& n) {
+    __TRACE_EACH_VISIT__;
     if (n.type->isSpanned()) {
       assert(isa<AST::MultiDimSpans>(n.type->mdspan_type.get()) &&
              "Invalid mdspan.");
       auto span = cast<AST::MultiDimSpans>(n.type->mdspan_type.get());
       if (span->list) {
-        assert((cur_mdspan_vn != __INVALID_INTVAL__) &&
-               "unexpected value number for mdspan.");
+        assert(ValidVN(cur_mdspan_vn) && "unexpected value number for mdspan.");
 
         // Put alias names of mdspan into the value number table
         vn.AssociateSignatureWithValueNumber(n.sym->name + ".span",
                                              cur_mdspan_vn);
-        auto vn_str = vn.GetExpressionFromValueNumber(cur_mdspan_vn);
-        ProcessValueNumberString(
-            vn_str, [this, &n, &vn_str](int valno, size_t index) {
-              vn.AssociateSignatureWithValueNumber(
-                  vn_str + "(" + std::to_string(index) + ")", valno);
-            });
 
-        auto vl = GenMDSpanValueFromVNString(vn_str);
-        if (span->dim_count != __INVALID_VALUE__ &&
-            vl.Dims() != span->dim_count) {
-          if (n.sym)
-            Error(n.LOC(), "parameter `" + n.sym->name +
-                               "''s dimension is inconsistent.");
-          else
-            Error(n.LOC(), "dimension is inconsistent.");
-        }
-        n.type->SetType(MakeSpannedType(n.type->base_type, vl));
-        cur_mdspan_vn = __INVALID_INTVAL__;
-        cur_vn = __INVALID_INTVAL__;
+        InvalidateVN(cur_mdspan_vn);
       } else {
-        assert((cur_mdspan_vn == __UNKNOWN_INTVAL__) &&
+        assert(UnknownVN(cur_mdspan_vn) &&
                "unexpected value number for mdspan.");
-        cur_vn = __INVALID_INTVAL__;
-        if (span->dim_count != __INVALID_VALUE__)
-          n.type->SetType(
-              MakeSpannedType(n.type->base_type, span->MakeValueList()));
+        InvalidateVN(cur_vn);
       }
+      n.type->SetType(
+          MakeSpannedType(n.type->base_type, span->GetTypeDetail()));
+      return true;
     }
 
     return true;
   }
 
-  bool Visit(AST::ParamList&) { return true; };
-  bool Visit(AST::ParallelBy&) { return true; };
-  bool Visit(AST::RequireBind&) { return true; };
-  bool Visit(AST::WithIn&) { return true; };
-  bool Visit(AST::WithBlock&) { return true; };
-  bool Visit(AST::Memory&) { return true; };
-  bool Visit(AST::DMA&) { return true; };
-  bool Visit(AST::ChunkAt&) { return true; };
-  bool Visit(AST::Wait&) { return true; };
-  bool Visit(AST::Call&) { return true; };
-  bool Visit(AST::ForeachBlock&) { return true; };
-  bool Visit(AST::FunctionDecl&) { return true; };
+  bool Visit(AST::ParamList& n) {
+    __TRACE_EACH_VISIT__;
+    return true;
+  };
+  bool Visit(AST::ParallelBy& n) {
+    __TRACE_EACH_VISIT__;
+    return true;
+  };
+  bool Visit(AST::RequireBind& n) {
+    __TRACE_EACH_VISIT__;
+    return true;
+  };
+  bool Visit(AST::WithIn& n) {
+    __TRACE_EACH_VISIT__;
+    return true;
+  };
+  bool Visit(AST::WithBlock& n) {
+    __TRACE_EACH_VISIT__;
+    return true;
+  };
+  bool Visit(AST::Memory& n) {
+    __TRACE_EACH_VISIT__;
+    return true;
+  };
+  bool Visit(AST::DMA& n) {
+    __TRACE_EACH_VISIT__;
+    return true;
+  };
+  bool Visit(AST::ChunkAt& n) {
+    __TRACE_EACH_VISIT__;
+    return true;
+  };
+  bool Visit(AST::Wait& n) {
+    __TRACE_EACH_VISIT__;
+    return true;
+  };
+  bool Visit(AST::Call& n) {
+    __TRACE_EACH_VISIT__;
+    return true;
+  };
+  bool Visit(AST::ForeachBlock& n) {
+    if (trace_visit) os << n.NodeTypeString() << "\n";
+    return true;
+  };
+  bool Visit(AST::FunctionDecl& n) {
+    if (trace_visit) os << n.NodeTypeString() << "\n";
+    return true;
+  };
 
-  bool Visit(AST::ChoreoFunction&) { return true; }
+  bool Visit(AST::ChoreoFunction& n) {
+    if (trace_visit) os << n.NodeTypeString() << "\n";
+    return true;
+  }
 
-  bool Visit(AST::CppSourceCode&) { return true; };
-  bool Visit(AST::Program&) { return true; };
+  bool Visit(AST::CppSourceCode& n) {
+    if (trace_visit) os << n.NodeTypeString() << "\n";
+    return true;
+  };
+  bool Visit(AST::Program& n) {
+    if (trace_visit) os << n.NodeTypeString() << "\n";
+    return true;
+  };
 
  private:
   void ProcessValueNumberString(const std::string& input,
@@ -561,18 +381,41 @@ class ValueNumberingVisitor : public Visitor {
     }
   }
 
+  // TODO: should be recursive
   MDSpanValue GenMDSpanValueFromVNString(const std::string& input) {
     ValueList result;
     std::istringstream stream(input);
     std::string component;
 
-    auto handleElement = [&result](const std::string& str) {
+    auto handleElement = [&result, this](const std::string& str) {
       auto digit = PrefixedWith("const_", str);
       if (digit) {
         int val = std::stoi(*digit);
         result.push_back(val);
-      } else
-        result.push_back(str);
+        return;
+      }
+
+      if (str[1] == ':' &&
+          ((str[0] == '+') || (str[0] == '-') || (str[0] == '*') ||
+           (str[0] == '/') || (str[0] == '%'))) {
+        std::vector<std::string> parts;
+        std::string part;
+
+        // Extract each part separated by ':'
+        std::istringstream stream(str);
+        while (std::getline(stream, part, ':')) {
+          if (part[0] == '#') {
+            auto sig =
+                vn.GetSignatureFromValueNumber(std::stoi(part.substr(1)));
+            parts.push_back(RemovePrefix(sig, "const_"));
+          } else
+            parts.push_back(part);
+        }
+        assert(parts.size() == 3);
+        result.push_back(parts[1] + parts[0] + parts[2]);
+        return;
+      }
+      result.push_back(str);
     };
 
     // assume earlier simplification makes value number expression only 1-level
@@ -587,7 +430,7 @@ class ValueNumberingVisitor : public Visitor {
       if (component[0] == '#') {
         // Look up value number in table and simplify
         int valNo = std::stoi(component.substr(1));
-        handleElement(vn.GetExpressionFromValueNumber(valNo));
+        handleElement(vn.GetSignatureFromValueNumber(valNo));
       } else {
         // no value numbers
         handleElement(component);

@@ -314,7 +314,7 @@ parameter
           Parser::error(@2, "ODR violation: the symbol '" + $2 + "` is already defined.");
           exit(1);
         }
-        symtab.AddSymbol($2, $1->MakeSemaType());
+        symtab.AddSymbol($2, $1->GetType());
         $$ = AST::Make<AST::Parameter>(@1, $1, AST::Make<AST::Identifier>(@2, $2));
       }
     | param_type {
@@ -401,7 +401,7 @@ named_scalar_decl
           exit(1);
         }
         assert($1->isScalar() && "Not a scalar type.");
-        symtab.AddSymbol($2, $1->MakeSemaType());
+        symtab.AddSymbol($2, $1->GetType());
         if (!$3)
           $$ = AST::Make<AST::NamedVariableDecl>(@2, $2, $1);
         else
@@ -420,7 +420,7 @@ named_spanned_decl
           Parser::error(@3, "ODR violation: the symbol '" + $3 + "` is already defined.");
           exit(1);
         }
-        symtab.AddSymbol($3, $2->MakeSemaType());
+        symtab.AddSymbol($3, $2->GetType());
         $$ = AST::Make<AST::NamedVariableDecl>(@3, $3, $2, $1);
       }
     ;
@@ -497,7 +497,7 @@ named_mdspan_decl
           Parser::error(@5, "ODR violation: the symbol '" + $5 + "` is already defined.");
           exit(1);
         }
-        symtab.AddSymbol($5, MakeDimSizedMDSpanType($3));
+        symtab.AddSymbol($5, MakeDimedMDSpanType($3));
         $$ = AST::Make<AST::NamedTypeDecl>(@5, $5, $7);
       }
     | IDENTIFIER COL s_expr {
@@ -561,7 +561,7 @@ assignment
           // since the symbol is not defined, it is a declaration without type annotation
           symtab.AddSymbol($1, MakeUnknownType());
           $$ = AST::Make<AST::NamedVariableDecl>(@1,
-                $1, AST::Make<AST::DataType>(@1, BaseType::ITUPLE), nullptr, $3);
+                $1, AST::Make<AST::DataType>(@1, BaseType::UNKNOWN), nullptr, $3);
           break;
         }
         $$ = AST::Make<AST::Assignment>(@2, $1, $3);

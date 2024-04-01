@@ -26,7 +26,9 @@ enum class TypeCategory {
   SPANNED,
   BOUNDED_INT,
   BOUNDED_ITUPLE,
+  VOID,
   UNKNOWN,
+  FUTURE,
 };
 
 // BaseType, FundamentalType, and ScalarType
@@ -346,9 +348,7 @@ struct Type {
   virtual bool HasSufficientInfo() const {
     return true;
   }  // is the information enough for semantic check and code generation
-  virtual bool operator==(const Type& t) const {
-    return (t.Dims() == Dims()) && (t.Category() == Category());
-  }
+  virtual bool operator==(const Type& t) const = 0;
   virtual void Print(std::ostream&) const = 0;
   virtual const std::string Name() const = 0;
 
@@ -359,6 +359,19 @@ struct Type {
   // can not have instance
 };
 
+struct VoidType final : public Type, public TypeIDProvider<VoidType> {
+  explicit VoidType() : Type(TypeCategory::VOID) {}
+  size_t Dims() const override { return __INVALID_VALUE__; }
+  bool IsComplete() const override { return true; }
+  void Print(std::ostream& os) const override { os << "void_type"; }
+  const std::string Name() const override { return "void"; }
+  bool HasSufficientInfo() const { return true; }
+
+  bool operator==(const Type& ty) const override { return isa<VoidType>(&ty); }
+
+  __UDT_TYPE_INFO__
+};
+
 // The type is unknown. It requires type inference
 struct UnknownType final : public Type, public TypeIDProvider<UnknownType> {
   explicit UnknownType() : Type(TypeCategory::UNKNOWN) {}
@@ -367,6 +380,9 @@ struct UnknownType final : public Type, public TypeIDProvider<UnknownType> {
   void Print(std::ostream& os) const override { os << "unknown_type"; }
   const std::string Name() const override { return "unknown"; }
   bool HasSufficientInfo() const { return false; }
+
+  // Not comparable
+  bool operator==(const Type&) const override { return false; }
 
   __UDT_TYPE_INFO__
 };
@@ -379,11 +395,12 @@ struct ScalarType : public Type {
 };
 
 struct IntegerType : public ScalarType, public TypeIDProvider<IntegerType> {
-  IntegerType(TypeCategory t = TypeCategory::INT) : ScalarType(t) {}
+  IntegerType() : ScalarType(TypeCategory::INT) {}
   bool IsComplete() const override { return true; }
   void Print(std::ostream& os) const override { os << "int"; }
   const std::string Name() const override { return "integer"; }
 
+  bool operator==(const Type& ty) const override { return isa<IntegerType>(&ty); }
   __UDT_TYPE_INFO__
 };
 
@@ -394,6 +411,9 @@ struct BooleanType final : public ScalarType,
   void Print(std::ostream& os) const override { os << "bool"; }
   const std::string Name() const override { return "boolean"; }
 
+  bool operator==(const Type& ty) const override {
+    return isa<BooleanType>(&ty);
+  }
   __UDT_TYPE_INFO__
 };
 
@@ -420,19 +440,31 @@ struct ITupleType : public Type, public TypeIDProvider<ITupleType> {
       os << "unknown";
     os << ">";
   }
+
   const std::string Name() const override { return "ituple"; }
+
+  bool operator==(const Type& ty) const override {
+    if (auto itty = dyn_cast<ITupleType>(&ty)) {
+      if ((Dims() == itty->Dims()) && HasSufficientInfo())
+        return true;
+    }
+    return false;
+  }
 
   __UDT_TYPE_INFO__
 };
 
 struct MDSpanType : public Type, public TypeIDProvider<MDSpanType> {
-  const MDSpanValue mdspan;
+  MDSpanValue value;
 
-  MDSpanType(const MDSpanValue& v) : Type(TypeCategory::PARTIAL), mdspan(v) {}
+  MDSpanType(const MDSpanValue& v) : Type(TypeCategory::PARTIAL), value(v) {}
+
+  void SetValue(const MDSpanValue &v) { value = v; }
+  const MDSpanValue & GetValue() { return value; }
 
   size_t Dims() const override {
-    assert(mdspan.IsValid() && "Invalid mdspan defined.");
-    return mdspan.Dims();
+    assert(value.IsValid() && "Invalid mdspan defined.");
+    return value.Dims();
   }
 
   // MDSpanType is an incomplete/partial type
@@ -444,14 +476,14 @@ struct MDSpanType : public Type, public TypeIDProvider<MDSpanType> {
 
   bool operator==(const Type& ty) const override {
     if (!isa<MDSpanType>(&ty)) return false;
-    return ((const MDSpanType&)ty).mdspan == mdspan;
+    return ((const MDSpanType&)ty).value == value;
   }
 
   void Print(std::ostream& os) const override {
     os << "mdspan<";
-    if (mdspan.IsValid()) os << Dims();
+    if (value.IsValid()) os << Dims();
     os << "> ";
-    mdspan.Print(os);
+    value.Print(os);
   }
 
   const std::string Name() const override { return "mdspan"; }
@@ -544,16 +576,29 @@ struct BoundedITupleType final : public Type,
 };
 
 struct FutureType : public ScalarType, public TypeIDProvider<FutureType> {
-  FutureType(TypeCategory t = TypeCategory::INT) : ScalarType(t) {}
+  FutureType(TypeCategory t = TypeCategory::FUTURE) : ScalarType(t) {}
   bool IsComplete() const override { return true; }
   void Print(std::ostream& os) const override { os << "fut"; }
   const std::string Name() const override { return "future"; }
 
+  bool operator==(const Type& ty) const override { return isa<FutureType>(&ty); }
   __UDT_TYPE_INFO__
 };
 
+inline bool operator==(const Type& t1, const Type& t2) {
+  return t1.operator==(t2);
+}
+
+inline bool operator!=(const Type& t1, const Type& t2) {
+  return !(operator==(t1, t2));
+}
+
 // Utility functions to generate types
 inline MDSpanValue GenUninitMDSpanValue() { return MDSpanValue(); }
+
+inline ptr<VoidType> MakeVoidType() {
+  return std::make_shared<VoidType>();
+}
 
 inline ptr<UnknownType> MakeUnknownType() {
   return std::make_shared<UnknownType>();
@@ -579,7 +624,7 @@ inline ptr<MDSpanType> MakeUninitMDSpanType() {
   return std::make_shared<MDSpanType>(GenUninitMDSpanValue());
 }
 
-inline ptr<MDSpanType> MakeDimSizedMDSpanType(size_t n) {
+inline ptr<MDSpanType> MakeDimedMDSpanType(size_t n) {
   return std::make_shared<MDSpanType>(MDSpanValue(n));
 }
 

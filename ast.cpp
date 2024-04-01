@@ -23,8 +23,12 @@ void Expr::accept(Choreo::Visitor& v) {
 }
 
 void MultiDimSpans::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+
   if (list) list->accept(v);
   v.Visit(*this);
+
+  v.AfterVisit(*this);
 }
 
 void NamedTypeDecl::accept(Choreo::Visitor& v) {

@@ -73,6 +73,17 @@ struct Visitor {
     }
   }
 
+  virtual size_t ScopeDepth() const { return scopeStack.size(); }
+
+  virtual std::string ScopeName(const std::string& prefix = "",
+                                const std::string& suffix = "") {
+    return prefix + std::to_string(ScopeDepth()) + suffix;
+  }
+
+  virtual std::string ScopedVariableName(const std::string& var) {
+    return var + "@" + ScopeName();
+  }
+
  public:
   void Error(const location& loc, const std::string& message) {
     static const char* red = "\033[31m";

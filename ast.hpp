@@ -69,6 +69,12 @@ struct Node {
   static uint64_t TypeID() { return 0ULL; }
 };
 
+// Utility to check the type
+template <typename T>
+bool typeof(const Node* n) {
+  return isa<T>(n->GetType().get());
+}
+
 //---------------------------------------------------------------------------//
 
 // A group of nodes
@@ -245,18 +251,37 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
   // set both the mdspan and dim count
   explicit MultiDimSpans(const location& l, const std::string& n,
                          const ptr<Node>& lst, size_t dc)
-      : Node(l, MakeUninitMDSpanType()), ref_name(n), list(lst), dim_count(dc) {
+      : Node(l, MakeDimedMDSpanType(dc)), ref_name(n), list(lst), dim_count(dc) {
     assert(list && "Unexpected: span list is not provided");
     // check the consistent between dim_count and span list in semantic time
   }
 
   // mdspan is unknown - for parameter passing
   explicit MultiDimSpans(const location& l, const std::string& n, size_t c)
-      : Node(l, MakeUninitMDSpanType()),
+      : Node(l, MakeDimedMDSpanType(c)),
         ref_name(n),
         list(nullptr),
         dim_count(c) {
     assert(dim_count != __INVALID_VALUE__ && "Invalid dimensions.");
+  }
+
+  explicit MultiDimSpans(const location& l, const std::string& n, const ptr<MDSpanType> & pty)
+      : Node(l, pty),
+        ref_name(n),
+        list(nullptr),
+        dim_count(pty->Dims()) {}
+
+  size_t Dims() const { return dim_count; }
+  void SetDims(size_t n) { dim_count = n; }
+
+  void SetTypeDetail(const MDSpanValue & mds) {
+    assert(typeof<MDSpanType>(this) && "Incorrect type for mdspan.");
+    cast<MDSpanType>(GetType().get())->SetValue(mds);
+  }
+
+  const MDSpanValue & GetTypeDetail() {
+    assert(typeof<MDSpanType>(this) && "Incorrect type for mdspan.");
+    return cast<MDSpanType>(GetType().get())->GetValue();
   }
 
   MDSpanValue MakeValueList() {
@@ -440,14 +465,15 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
   ptr<Node> mdspan_type = nullptr;
 
  public:
-  DataType(const location& l, BaseType t)
-      : Node(l), base_type(t), mdspan_type(nullptr) {}
+  explicit DataType(const location& l, BaseType t)
+      : Node(l), base_type(t), mdspan_type(nullptr) { InitSemaType(); }
 
-  DataType(const location& l, BaseType bt, const ptr<Node>& st)
+  explicit DataType(const location& l, BaseType bt, const ptr<Node>& st)
       : Node(l), base_type(bt), mdspan_type(st) {
     assert(bt != BaseType::ITUPLE && "Unexpected type!");
     assert(bt != BaseType::INT && "Unexpected type!");
     assert(bt != BaseType::BOOL && "Unexpected type!");
+    InitSemaType();
   }
 
   BaseType getBaseType() const { return base_type; }
@@ -459,33 +485,6 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
   bool isITuple() const { return base_type == BaseType::ITUPLE; }
   bool isSpanned() const { return (bool)mdspan_type; }
 
-  ptr<Type> MakeSemaType() {
-    switch (base_type) {
-      case BaseType::INT:
-        return std::make_shared<IntegerType>();
-      case BaseType::BOOL:
-        return std::make_shared<BooleanType>();
-      case BaseType::F32:
-      case BaseType::F16:
-      case BaseType::BF16:
-      case BaseType::U32:
-      case BaseType::S32:
-      case BaseType::U16:
-      case BaseType::S16:
-      case BaseType::U8:
-      case BaseType::S8:
-        assert(mdspan_type != nullptr && "Expecting a valid mdspan.");
-        return GetType();  // the type has be deduced already
-      case BaseType::ITUPLE:
-        return MakeUninitITupleType();  // need type inference to retrieve the
-                                        // dim count
-      default:
-        choreo_unreachable("Unexpected BaseType.");
-        break;
-    }
-    return nullptr;
-  }
-
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix << getStringFrom(base_type);
     if (isSpanned()) {
@@ -496,6 +495,44 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
 
   void accept(Visitor&) override;
 
+ private:
+  ptr<Type> InitSemaType() {
+    switch (base_type) {
+      case BaseType::INT:
+        SetType(MakeIntegerType());
+        break;
+      case BaseType::BOOL:
+        SetType(MakeBooleanType());
+        break;
+      case BaseType::F32:
+      case BaseType::F16:
+      case BaseType::BF16:
+      case BaseType::U32:
+      case BaseType::S32:
+      case BaseType::U16:
+      case BaseType::S16:
+      case BaseType::U8:
+      case BaseType::S8:
+        assert(mdspan_type != nullptr && "Expecting a valid mdspan.");
+        SetType(MakeSpannedType(base_type, GenUninitMDSpanValue())); // need type inference
+        break;
+      case BaseType::ITUPLE:
+        SetType(MakeUninitITupleType());  // need type inference to retrieve the dim count
+        break;
+      case BaseType::UNKNOWN:
+        SetType(MakeUnknownType());  // need type inference
+        break;
+      case BaseType::VOID:
+        SetType(MakeVoidType());  // need type inference
+        break;
+      default:
+        choreo_unreachable("Unexpected BaseType.");
+        break;
+    }
+    return nullptr;
+  }
+
+ public:
   __UDT_TYPE_INFO__
 };
 
@@ -869,12 +906,6 @@ struct Program : public Node, public TypeIDProvider<Program> {
 template <typename T, typename... Args>
 ptr<T> Make(Args&&... args) {
   return std::make_shared<T>(std::forward<Args>(args)...);
-}
-
-// Utility to check the type
-template <typename T>
-bool typeof(const Node* n) {
-  return isa<T>(n->GetType().get());
 }
 
 }  // end of namespace AST

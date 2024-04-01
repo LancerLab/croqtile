@@ -6,12 +6,58 @@
 #include "types.hpp"
 
 using namespace Choreo;
-using namespace Choreo::AST;
+
+void TypeInference::EnterScope() {
+  if (symbolTypes.empty())
+    symbolTypes.push_back({});
+  else
+    symbolTypes.push_back(symbolTypes.back());
+}
+
+void TypeInference::LeaveScope() {
+  assert(!symbolTypes.empty());
+
+  symbolTypes.pop_back();
+}
+
+bool TypeInference::BeforeVisit(AST::Node& n) {
+  if (isa<AST::ChoreoFunction>(&n) || isa<AST::ParallelBy>(&n) ||
+      isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n)) {
+    EnterScope();
+  }
+  return true;
+}
+
+bool TypeInference::AfterVisit(AST::Node& n) {
+  if (isa<AST::ChoreoFunction>(&n) || isa<AST::ParallelBy>(&n) ||
+      isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n)) {
+    LeaveScope();
+  }
+  return true;
+}
+
+bool TypeInference::AssignSymbolWithType(const location& loc, const std::string &sym, const ptr<Type> &ty) {
+  if (symbolTypes.back().count(sym) > 0) {
+    Error(loc, "symbol `" + sym + "' has already been associated with a type.");
+    return false;
+  }
+  symbolTypes.back().emplace(sym, ty);
+  return true;
+}
+
+ptr<Type> TypeInference::GetSymbolType(const location& loc, const std::string &sym) {
+  if (symbolTypes.back().count(sym) == 0) {
+    Error(loc, "symbol `" + sym + "' does not have a type.");
+    return nullptr;
+  }
+  return symbolTypes.back().at(sym);
+}
+
 
 bool TypeInference::Visit(AST::DataType& n) {
   assert((cur_type == nullptr) && "Expecting null type.");
 
-  cur_type = n.MakeSemaType();
+  cur_type = n.GetType();
 
   return true;
 }
@@ -63,10 +109,32 @@ bool TypeInference::Visit(AST::NamedVariableDecl& n) {
   return true;
 }
 
-bool TypeInference::Visit(AST::NamedTypeDecl& ntd) {
+bool TypeInference::Visit(AST::NamedTypeDecl& n) {
+  if (AST::typeof<UnknownType>(&n)) {
+    // need type inference
+    if (!n.init_expr) {
+      Error(n.LOC(), "`" + n.name_str + "' is declared without type annotation or initialization.");
+      return false;
+    }
+
+    if (AST::typeof<UnknownType>(n.init_expr.get())) {
+      Error(n.LOC(), "unable to inference the type of `" + n.name_str + "'.");
+      return false;
+    }
+
+    if (!n.init_expr->GetType()->HasSufficientInfo()) {
+      Error(n.LOC(), "unable to inference the type detail of `" + n.name_str + "'.");
+      return false;
+    }
+
+    n.SetType(n.init_expr->GetType());
+  }
+
+  AssignSymbolWithType(n.LOC(), n.name_str, n.GetType());
+
   if (Dump) {
-    os << "[Partial Type] " << ntd.name_str << ": ";
-    ntd.GetType()->Print(os);
+    os << "[Partial Type] " << n.name_str << ": ";
+    n.GetType()->Print(os);
     os << "\n";
   }
   return true;
@@ -81,9 +149,17 @@ bool TypeInference::Visit(AST::FunctionDecl&) {
 };
 
 bool TypeInference::Visit(AST::Parameter& p) {
-  p.SetType(cur_type);
+  // obtain its type
+  p.SetType(p.type->GetType());
+
+  if (p.HasSymbol()) {
+    AssignSymbolWithType(p.LOC(), p.sym->name, p.GetType());
+    if (p.type->isSpanned())
+      AssignSymbolWithType(p.LOC(), p.sym->name + ".span", p.GetType());
+  }
+
   // collect the parameter types
-  cur_param_types.push_back(cur_type);
+  cur_param_types.push_back(p.GetType());
 
   if (Dump) {
     os << "[Parameter] ";
@@ -105,7 +181,46 @@ bool TypeInference::Visit(AST::MultiDimSpans&) {
   return true;
 }
 
-bool TypeInference::Visit(AST::Expr&) { return true; }
+bool TypeInference::Visit(AST::Expr& n) {
+  if (auto ref = n.GetReference()) {
+    if (auto id = dyn_cast<AST::Identifier>(ref.get())) {
+      if (auto pty = GetSymbolType(n.LOC(), id->name)) {
+        n.SetType(pty);
+        return true;
+      }
+    }
+
+    // TODO: WE SHOULD DE-SUGERIZE EARLY TO AVOID SPECIAL HANDLING
+    // A single reference to the index is the syntax suger for indexing operation.
+    if (isa<AST::IntIndex>(ref.get())) {
+      n.SetType(MakeIntegerType());
+      return true;
+    }
+
+    if (AST::typeof<UnknownType>(ref.get())) {
+      Error(n.LOC(), "unable to infer the type of expression.");
+      return false;
+    }
+
+    n.SetType(ref->GetType());
+    return true;
+  } 
+
+  if (n.t == AST::Expr::Binary) {
+    if (n.op == "dimof" || n.op == "sizeof") {
+      n.SetType(MakeIntegerType());
+      return true;
+    }
+
+    if (*n.value_r->GetType() != *n.value_l->GetType()) {
+      Error(n.LOC(), "binary expression with different operand type.");
+      return false;
+    }
+    n.SetType(n.value_r->GetType());
+    return true;
+  }
+  return true;
+}
 
 bool TypeInference::Visit(AST::IntTuple& n) {
   cur_type = n.GetType();

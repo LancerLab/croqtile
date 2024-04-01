@@ -13,10 +13,10 @@ __co__ int foo(f32 [2, 3, 4] d, int e, bool, f32 mdspan<2> a) { }
 // VALNO:  New VN #1: 'const_3'
 // VALNO:  New VN #2: 'const_4'
 // VALNO:  New VN #3: '#0,#1,#2'
-// VALNO:  Alias "d.span" -> #3
 // VALNO:  Alias "#0,#1,#2(0)" -> #0
 // VALNO:  Alias "#0,#1,#2(1)" -> #1
 // VALNO:  Alias "#0,#1,#2(2)" -> #2
+// VALNO:  Alias "d.span" -> #3
 // VALNO: } // end scope-1
 
 // CHECK: [Parameter] Symbol: d, Type: f32 mdspan<3> [2, 3, 4]
