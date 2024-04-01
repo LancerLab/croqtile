@@ -46,14 +46,17 @@ struct Visitor {
 
   // general scoped variable handling
   std::vector<std::unordered_set<std::string>> scopeStack;
+  std::vector<std::string> scopeNames;
 
-  virtual void EnterScope() {
+  virtual void EnterScope(const std::string &name = "") {
     scopeStack.emplace_back();  // Push a new scope
+    scopeNames.emplace_back(name);
   }
 
   virtual void LeaveScope() {
     if (!scopeStack.empty()) {
       scopeStack.pop_back();  // Pop the last scope
+      scopeNames.pop_back();
     }
   }
 
@@ -73,15 +76,26 @@ struct Visitor {
     }
   }
 
-  virtual size_t ScopeDepth() const { return scopeStack.size(); }
-
-  virtual std::string ScopeName(const std::string& prefix = "",
-                                const std::string& suffix = "") {
-    return prefix + std::to_string(ScopeDepth()) + suffix;
+  virtual std::string UnscopedName(const std::string& name) {
+    size_t pos = name.find_last_of("::");
+    if (pos != std::string::npos) {
+        // If found, return the substring after the last "::"
+        return name.substr(pos + 2); // +2 to skip the "::" itself
+    }
+    return name; // Return the original string if "::" is not found
   }
 
-  virtual std::string ScopedVariableName(const std::string& var) {
-    return var + "@" + ScopeName();
+  virtual size_t ScopeDepth() const { return scopeStack.size(); }
+
+  virtual std::string ScopeName() {
+    std::string name;
+    for (auto it = scopeNames.rbegin(); it != scopeNames.rend(); ++it)
+      name += *it + "::";
+    return name;
+  }
+
+  virtual std::string ScopedName(const std::string& var) {
+    return ScopeName() + var;
   }
 
  public:

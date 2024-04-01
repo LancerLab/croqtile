@@ -18,10 +18,7 @@ struct TypeInference : public Visitor {
   std::vector<ptr<Type>> cur_param_types;
   MDSpanValue cur_mdspan_value;
 
-  std::vector<std::unordered_map<std::string, ptr<Type>>> symbolTypes;
-
-  void EnterScope() override;
-  void LeaveScope() override;
+  std::unordered_map<std::string, ptr<Type>> symbolTypes;
 
   bool BeforeVisit(AST::Node&) override;
   bool AfterVisit(AST::Node&) override;

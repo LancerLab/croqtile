@@ -113,7 +113,7 @@ blank [ \t\r]
   "by"       return Choreo::Parser::make_BY(yytext, loc);
   "with"     return Choreo::Parser::make_WITH(yytext, loc);
   "in"       return Choreo::Parser::make_IN(yytext, loc);
-  "foreach"  return Choreo::Parser::make_ITER(yytext, loc);
+  "foreach"  return Choreo::Parser::make_FOREACH(yytext, loc);
   "wait"     return Choreo::Parser::make_WAIT(yytext, loc);
   "call"     return Choreo::Parser::make_CALL(yytext, loc);
   "return"   return Choreo::Parser::make_RET(yytext, loc);

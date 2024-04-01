@@ -132,7 +132,7 @@ void choreo_info(const char *message) {
 // builtin operations
 %token <std::string> DMA DLIN DSLICE DPAD COPY FNSPAN FNDATA CHUNKAT WAIT CALL
 // control related
-%token <std::string> IF ELSE PARA BY WITH IN ITER RET REQUIRE
+%token <std::string> IF ELSE PARA BY WITH IN FOREACH RET REQUIRE
 %token <std::string> TRUE FALSE
 
 // non-terminals
@@ -310,10 +310,6 @@ parameter_list
 
 parameter
     : param_type IDENTIFIER { /* handle parameter type and name here */
-        if (symtab.Exists($2)) {
-          Parser::error(@2, "ODR violation: the symbol '" + $2 + "` is already defined.");
-          exit(1);
-        }
         symtab.AddSymbol($2, $1->GetType());
         $$ = AST::Make<AST::Parameter>(@1, $1, AST::Make<AST::Identifier>(@2, $2));
       }
@@ -396,10 +392,6 @@ declaration
 
 named_scalar_decl
     : scalar_type IDENTIFIER optional_scalar_init {
-        if (symtab.Exists($2)) {
-          Parser::error(@2, "ODR violation: the symbol '" + $2 + "` is already defined.");
-          exit(1);
-        }
         assert($1->isScalar() && "Not a scalar type.");
         symtab.AddSymbol($2, $1->GetType());
         if (!$3)
@@ -416,10 +408,6 @@ optional_scalar_init
 
 named_spanned_decl
     : storage_qual spanned_type IDENTIFIER {
-        if (symtab.Exists($3)) {
-          Parser::error(@3, "ODR violation: the symbol '" + $3 + "` is already defined.");
-          exit(1);
-        }
         symtab.AddSymbol($3, $2->GetType());
         $$ = AST::Make<AST::NamedVariableDecl>(@3, $3, $2, $1);
       }
@@ -485,26 +473,14 @@ spanned_value
 
 named_mdspan_decl
     : MDSPAN IDENTIFIER COL s_expr {
-        if (symtab.Exists($2)) {
-          Parser::error(@2, "ODR violation: the symbol '" + $2 + "`  is already defined.");
-          exit(1);
-        }
         symtab.AddSymbol($2, MakeUninitMDSpanType());
         $$ = AST::Make<AST::NamedTypeDecl>(@2, $2, $4);
       }
     | MDSPAN LT NUM GT IDENTIFIER COL s_expr {
-        if (symtab.Exists($5)) {
-          Parser::error(@5, "ODR violation: the symbol '" + $5 + "` is already defined.");
-          exit(1);
-        }
         symtab.AddSymbol($5, MakeDimedMDSpanType($3));
         $$ = AST::Make<AST::NamedTypeDecl>(@5, $5, $7);
       }
     | IDENTIFIER COL s_expr {
-        if (symtab.Exists($1)) {
-          Parser::error(@1, "ODR violation: the symbol '" + $1 + "` is already defined.");
-          exit(1);
-        }
         symtab.AddSymbol($1, MakeUninitMDSpanType());
         $$ = AST::Make<AST::NamedTypeDecl>(@1, $1, $3);
       }
@@ -719,7 +695,7 @@ w_statement
     ;
 
 foreach_block
-    : ITER iv_exprs LBRACE w_statements RBRACE {
+    : FOREACH iv_exprs LBRACE w_statements RBRACE {
         $$ = AST::Make<AST::ForeachBlock>(@1, $2, $4);
       }
     ;

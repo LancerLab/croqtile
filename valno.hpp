@@ -65,7 +65,7 @@ class ValueNumbering {
   explicit ValueNumbering(ValueNumberingVisitor* v, bool t, std::ostream& o)
       : visitor(v), trace(t), os(o) {}
 
-  void EnterScope();
+  void EnterScope(const std::string &);
   void LeaveScope();
 
   void SetListReference(const std::string& r) { ref = r; }
@@ -139,11 +139,19 @@ class ValueNumberingVisitor : public Visitor {
 
  public:
   virtual bool BeforeVisit(AST::Node& n) override {
-    if (isa<AST::ChoreoFunction>(&n) || isa<AST::ParallelBy>(&n) ||
-        isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n)) {
-      vn.EnterScope();
+    if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
+      vn.EnterScope(f->name);
+    } else if (isa<AST::ParallelBy>(&n)) {
+      static size_t count = 0;
+      vn.EnterScope("paraby_" + std::to_string(count++));
+    } else if (isa<AST::WithBlock>(&n)) {
+      static size_t count = 0;
+      vn.EnterScope("within_" + std::to_string(count++));
+    } else if (isa<AST::ForeachBlock>(&n)) {
+      static size_t count = 0;
+      vn.EnterScope("foreach_" + std::to_string(count++));
     } else if (auto* b = dyn_cast<AST::MultiDimSpans>(&n)) {
-      if (b->ref_name != "") vn.SetListReference(b->ref_name);
+      if (b->ref_name != "") vn.SetListReference(ScopedName(b->ref_name));
     }
     return true;
   }
@@ -188,16 +196,16 @@ class ValueNumberingVisitor : public Visitor {
     if (n.list) {
       // The MDSpanValue now can be deduced from the value number.
       // Update the type detail acoordingly.
-      auto vn_str = vn.GetSignatureFromValueNumber(cur_vn);
+      auto vn_sig = vn.GetSignatureFromValueNumber(cur_vn);
 
       // set alias expressions with proper value numbers
       ProcessValueNumberString(
-          vn_str, [this, &vn_str](int valno, size_t index) {
+          vn_sig, [this, &vn_sig](int valno, size_t index) {
             vn.AssociateSignatureWithValueNumber(
-                vn_str + "(" + std::to_string(index) + ")", valno);
+                vn_sig + "(" + std::to_string(index) + ")", valno);
           });
 
-      auto vl = GenMDSpanValueFromVNString(vn_str);
+      auto vl = GenMDSpanValueFromVNString(vn_sig);
       n.SetTypeDetail(vl);
 
       if (n.Dims() != InvalidCount()) {
@@ -223,7 +231,7 @@ class ValueNumberingVisitor : public Visitor {
     if (n.init_expr) {
       assert(ValidVN(cur_mdspan_vn) &&
              "invalid value number for the named type.");
-      vn.AssociateSignatureWithValueNumber(n.name_str, cur_mdspan_vn);
+      vn.AssociateSignatureWithValueNumber(ScopedName(n.name_str), cur_mdspan_vn);
 
       InvalidateVN(cur_mdspan_vn);  // comsumes the mdspan
     }
@@ -233,7 +241,7 @@ class ValueNumberingVisitor : public Visitor {
   bool Visit(AST::NamedVariableDecl& n) {
     __TRACE_EACH_VISIT__;
     if (n.initializer && ValidVN(cur_vn)) {
-      vn.AssociateSignatureWithValueNumber(n.name_str, cur_vn);
+      vn.AssociateSignatureWithValueNumber(ScopedName(n.name_str), cur_vn);
       InvalidateVN(cur_vn);
     }
     return true;
@@ -282,7 +290,7 @@ class ValueNumberingVisitor : public Visitor {
         assert(ValidVN(cur_mdspan_vn) && "unexpected value number for mdspan.");
 
         // Put alias names of mdspan into the value number table
-        vn.AssociateSignatureWithValueNumber(n.sym->name + ".span",
+        vn.AssociateSignatureWithValueNumber(ScopedName(n.sym->name + ".span"),
                                              cur_mdspan_vn);
 
         InvalidateVN(cur_mdspan_vn);

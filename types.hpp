@@ -585,12 +585,14 @@ struct FutureType : public ScalarType, public TypeIDProvider<FutureType> {
   __UDT_TYPE_INFO__
 };
 
+#if 0
 inline bool operator==(const Type& t1, const Type& t2) {
   return t1.operator==(t2);
 }
+#endif
 
 inline bool operator!=(const Type& t1, const Type& t2) {
-  return !(operator==(t1, t2));
+  return !t1.operator==(t2);
 }
 
 // Utility functions to generate types

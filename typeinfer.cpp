@@ -7,24 +7,20 @@
 
 using namespace Choreo;
 
-void TypeInference::EnterScope() {
-  if (symbolTypes.empty())
-    symbolTypes.push_back({});
-  else
-    symbolTypes.push_back(symbolTypes.back());
-}
-
-void TypeInference::LeaveScope() {
-  assert(!symbolTypes.empty());
-
-  symbolTypes.pop_back();
-}
-
 bool TypeInference::BeforeVisit(AST::Node& n) {
-  if (isa<AST::ChoreoFunction>(&n) || isa<AST::ParallelBy>(&n) ||
-      isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n)) {
-    EnterScope();
+  if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
+    EnterScope(f->name);
+  } else if (isa<AST::ParallelBy>(&n)) {
+    static size_t count = 0;
+    EnterScope("paraby_" + std::to_string(count++));
+  } else if (isa<AST::WithBlock>(&n)) {
+    static size_t count = 0;
+    EnterScope("within_" + std::to_string(count++));
+  } else if (isa<AST::ForeachBlock>(&n)) {
+    static size_t count = 0;
+    EnterScope("foreach_" + std::to_string(count++));
   }
+
   return true;
 }
 
@@ -37,22 +33,21 @@ bool TypeInference::AfterVisit(AST::Node& n) {
 }
 
 bool TypeInference::AssignSymbolWithType(const location& loc, const std::string &sym, const ptr<Type> &ty) {
-  if (symbolTypes.back().count(sym) > 0) {
+  if (symbolTypes.count(sym) > 0) {
     Error(loc, "symbol `" + sym + "' has already been associated with a type.");
     return false;
   }
-  symbolTypes.back().emplace(sym, ty);
+  symbolTypes.emplace(sym, ty);
   return true;
 }
 
 ptr<Type> TypeInference::GetSymbolType(const location& loc, const std::string &sym) {
-  if (symbolTypes.back().count(sym) == 0) {
+  if (symbolTypes.count(sym) == 0) {
     Error(loc, "symbol `" + sym + "' does not have a type.");
     return nullptr;
   }
-  return symbolTypes.back().at(sym);
+  return symbolTypes.at(sym);
 }
-
 
 bool TypeInference::Visit(AST::DataType& n) {
   assert((cur_type == nullptr) && "Expecting null type.");
@@ -130,7 +125,7 @@ bool TypeInference::Visit(AST::NamedTypeDecl& n) {
     n.SetType(n.init_expr->GetType());
   }
 
-  AssignSymbolWithType(n.LOC(), n.name_str, n.GetType());
+  AssignSymbolWithType(n.LOC(), ScopedName(n.name_str), n.GetType());
 
   if (Dump) {
     os << "[Partial Type] " << n.name_str << ": ";
@@ -153,9 +148,9 @@ bool TypeInference::Visit(AST::Parameter& p) {
   p.SetType(p.type->GetType());
 
   if (p.HasSymbol()) {
-    AssignSymbolWithType(p.LOC(), p.sym->name, p.GetType());
+    AssignSymbolWithType(p.LOC(), ScopedName(p.sym->name), p.GetType());
     if (p.type->isSpanned())
-      AssignSymbolWithType(p.LOC(), p.sym->name + ".span", p.GetType());
+      AssignSymbolWithType(p.LOC(), ScopedName(p.sym->name + ".span"), p.GetType());
   }
 
   // collect the parameter types
@@ -184,7 +179,7 @@ bool TypeInference::Visit(AST::MultiDimSpans&) {
 bool TypeInference::Visit(AST::Expr& n) {
   if (auto ref = n.GetReference()) {
     if (auto id = dyn_cast<AST::Identifier>(ref.get())) {
-      if (auto pty = GetSymbolType(n.LOC(), id->name)) {
+      if (auto pty = GetSymbolType(n.LOC(), ScopedName(id->name))) {
         n.SetType(pty);
         return true;
       }
