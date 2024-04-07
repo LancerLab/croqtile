@@ -161,7 +161,7 @@ bool TypeInference::Visit(AST::Parameter& p) {
 
   if (p.HasSymbol()) {
     AssignSymbolWithType(p.LOC(), p.sym->name, p.GetType());
-    if (p.type->isSpanned())
+    if (!isa<UnknownType>(p.type->GetType().get()))
       AssignSymbolWithType(p.LOC(), p.sym->name + ".span", p.GetType());
   }
 
@@ -239,5 +239,10 @@ bool TypeInference::Visit(AST::Expr& n) {
 
 bool TypeInference::Visit(AST::IntTuple& n) {
   cur_type = n.GetType();
+  return true;
+}
+
+bool TypeInference::Visit(AST::DMA &n) {
+  DefineSymbol(n.future->name, MakeFutureType());
   return true;
 }

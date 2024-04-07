@@ -717,6 +717,7 @@ iv_expr
 
 dma_statement
     : IDENTIFIER ASSIGN DMA dma_operation chunkat_expr TRANS storage {
+        symtab.AddSymbol($1, MakeFutureType());
         $$ = AST::Make<AST::DMA>(@3,
               $4,
               AST::Make<AST::Identifier>(@1, $1),
@@ -724,6 +725,7 @@ dma_statement
               AST::Make<AST::Memory>(@7, $7));
       }
     | IDENTIFIER ASSIGN DMA dma_operation IDENTIFIER TRANS chunkat_expr {
+        symtab.AddSymbol($1, MakeFutureType());
         $$ = AST::Make<AST::DMA>(@3,
               $4,
               AST::Make<AST::Identifier>(@1, $1),

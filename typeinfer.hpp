@@ -49,7 +49,7 @@ struct TypeInference : public Visitor {
   bool Visit(AST::WithIn &) override { return true; };
   bool Visit(AST::WithBlock &) override { return true; };
   bool Visit(AST::Memory &) override { return true; };
-  bool Visit(AST::DMA &) override { return true; };
+  bool Visit(AST::DMA &) override;
   bool Visit(AST::ChunkAt &) override { return true; };
   bool Visit(AST::Wait &) override { return true; };
   bool Visit(AST::Call &) override { return true; };

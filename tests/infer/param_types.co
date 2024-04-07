@@ -5,7 +5,6 @@
 
 #include <iostream>
 
-// device program
 __co__ int foo(f32 [2, 3, 4] d, int e, bool, f32 mdspan<2> a) { }
 
 // VALNO:  scope-1 {
@@ -23,10 +22,33 @@ __co__ int foo(f32 [2, 3, 4] d, int e, bool, f32 mdspan<2> a) { }
 // VALNO:   Alias "foo::d.span" -> #3
 // VALNO:   New VN #8: 'foo::e'
 // VALNO:   New VN #9: 'foo::anon_0'
-// VALNO:   New VN #10: 'foo::a'
+// VALNO:   New VN #10: '#-1,#-1'
+// VALNO:   New VN #11: 'foo::a'
+// VALNO:   Alias "foo::a.span" -> #10
 // VALNO:  } // end scope-1
 
 // CHECK: Parameter: foo::d, Type: f32 mdspan<3> [2, 3, 4]
 // CHECK: Parameter: foo::e, Type: int
 // CHECK: Parameter: foo::anon_0, Type: bool
-// CHECK: Parameter: foo::a, Type: f32 mdspan<2> {}
+// CHECK: Parameter: foo::a, Type: f32 mdspan<2> [?, ?]
+
+__co__ int bar(f32 [?, 2, ?, 4] d, f32 mdspan<4> a) { }
+
+// VALNO:  scope-1 {
+// VALNO:   New VN #0: 'const_2'
+// VALNO:   New VN #1: 'const_4'
+// VALNO:   New VN #2: '#-1,#0,#-1,#1'
+// VALNO:   New VN #3: 'index_const_1'
+// VALNO:   Alias "#-1,#0,#-1,#1(1)" -> #0
+// VALNO:   New VN #4: 'index_const_3'
+// VALNO:   Alias "#-1,#0,#-1,#1(3)" -> #1
+// VALNO:   New VN #5: 'bar::d'
+// VALNO:   Alias "bar::d.span" -> #2
+// VALNO:   New VN #6: '#-1,#-1,#-1,#-1'
+// VALNO:   New VN #7: 'bar::a'
+// VALNO:   Alias "bar::a.span" -> #6
+// VALNO:  } // end scope-1
+
+// CHECK: Parameter: bar::d, Type: f32 mdspan<4> [?, 2, ?, 4]
+// CHECK: Parameter: bar::a, Type: f32 mdspan<4> [?, ?, ?, ?]
+

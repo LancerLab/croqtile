@@ -15,11 +15,11 @@ namespace Choreo {
 
 inline constexpr size_t InvalidCount() { return __INVALID_VALUE__; }
 inline constexpr int InvalidValueNumber() { return __INVALID_INTVAL__; }
-inline constexpr int NoValue() { return -1; }
+inline constexpr int UnknownValue() { return -1; }
 inline bool ValidVN(int vn) { return vn != InvalidValueNumber(); }
 inline void InvalidateVN(int& vn) { vn = InvalidValueNumber(); }
-inline bool UnknownVN(int& vn) { return vn == __UNKNOWN_INTVAL__; }
-inline void SetUnknownVN(int& vn) { vn = __UNKNOWN_INTVAL__; }
+inline bool UnknownVN(int vn) { return vn == UnknownValue(); }
+inline void SetUnknownVN(int& vn) { vn = UnknownValue(); }
 
 // Remove the prefix
 inline std::string RemovePrefix(const std::string& str,
@@ -107,9 +107,12 @@ class ValueNumbering {
 
   // Retrieve the signature from a value number. About when fails.
   std::string GetSignatureFromValueNumber(int vn) {
+    if (vn == UnknownValue())
+      return "?";
+
     if (valueNumberExpressions.back().count(vn) == 0)
       choreo_unreachable("value number " + std::to_string(vn) +
-                         "does not exists in the value number table.");
+                         " does not exists in the value number table.");
     return (valueNumberExpressions.back())[vn];
   }
 
@@ -244,6 +247,7 @@ class ShapeInference : public Visitor {
       // set alias expressions with proper value numbers
       ProcessValueNumberString(
           vn_sig, [this, &vn_sig](int valno, size_t index) {
+            if (UnknownVN(valno)) return; // do not associate it with vn of "?"
             vn.GetOrInsertValueNumberFromSignature("index_const_" +
                                                    std::to_string(index));
             vn.AssociateSignatureWithValueNumber(
@@ -263,6 +267,12 @@ class ShapeInference : public Visitor {
 
       // pass the value number over
       cur_mdspan_vn = cur_vn;
+    } else if (n.dim_count > 0) {
+      std::string unknown_spans = "#" + std::to_string(UnknownValue());
+      for (size_t i = 1; i < n.dim_count; ++i)
+        unknown_spans = unknown_spans + ",#" + std::to_string(UnknownValue());
+      cur_mdspan_vn = vn.GetOrInsertValueNumberFromSignature(unknown_spans);
+      n.SetTypeDetail(GenMDSpanValueFromVNString(unknown_spans));
     } else
       SetUnknownVN(cur_mdspan_vn);  // failed to deduce the type detail
 
@@ -324,6 +334,7 @@ class ShapeInference : public Visitor {
 
     // set alias expressions with proper value numbers
     ProcessValueNumberString(vn_sig, [this, &vn_sig](int valno, size_t index) {
+      if (UnknownVN(valno)) return;  // do not associate it with vn of "?"
       vn.GetOrInsertValueNumberFromSignature("index_const_" +
                                              std::to_string(index));
       vn.AssociateSignatureWithValueNumber(
@@ -384,16 +395,23 @@ class ShapeInference : public Visitor {
         // Put alias names of mdspan into the value number table
         vn.AssociateSignatureWithValueNumber(ScopedName(n.sym->name + ".span"),
                                              cur_mdspan_vn);
+        n.type->SetType(
+          MakeSpannedType(n.type->base_type, span->GetTypeDetail()));
 
+      } else if (span->dim_count != __INVALID_VALUE__) {
+        assert(ValidVN(cur_mdspan_vn) && "unexpected value number for mdspan.");
+        // Put alias names of mdspan into the value number table
+        vn.AssociateSignatureWithValueNumber(ScopedName(n.sym->name + ".span"),
+                                             cur_mdspan_vn);
+        n.type->SetType(
+          MakeSpannedType(n.type->base_type, span->GetTypeDetail()));
       } else {
-        assert(UnknownVN(cur_mdspan_vn) &&
-               "unexpected value number for mdspan.");
-        // since the value number is unknown
+        // the value number is unknown at compile time
+        Error(n.LOC(), "The type can not be inference at compile time.");
+        return false;
       }
 
       InvalidateVN(cur_vn);
-      n.type->SetType(
-          MakeSpannedType(n.type->base_type, span->GetTypeDetail()));
 
       if (n.sym) DefineSymbol(n.sym->name + ".span", n.GetType());
 
@@ -434,10 +452,13 @@ class ShapeInference : public Visitor {
     __TRACE_EACH_VISIT__;
     return true;
   };
+
   bool Visit(AST::DMA& n) {
     __TRACE_EACH_VISIT__;
+    DefineSymbol(n.future->name, MakeFutureType());
     return true;
   };
+
   bool Visit(AST::ChunkAt& n) {
     __TRACE_EACH_VISIT__;
     return true;
@@ -476,7 +497,7 @@ class ShapeInference : public Visitor {
  private:
   void ProcessValueNumberString(const std::string& input,
                                 std::function<void(int, size_t)> lambda) {
-    std::regex valuePattern("#(\\d+)");
+    std::regex valuePattern("#(-?\\d+)");
     auto begin = std::sregex_iterator(input.begin(), input.end(), valuePattern);
     auto end = std::sregex_iterator();
 
