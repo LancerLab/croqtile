@@ -3,6 +3,7 @@
 
 #include <cstring>
 #include <iostream>
+#include <optional>
 #include <unordered_set>
 
 #include "ast.hpp"
@@ -17,6 +18,7 @@ struct Visitor {
 
   // For any visitor, it should implement all the necessary steps
   virtual bool Visit(AST::MultiNodes&) = 0;
+  virtual bool Visit(AST::MultiValues&) = 0;
   virtual bool Visit(AST::IntLiteral&) = 0;
   virtual bool Visit(AST::Expr&) = 0;
   virtual bool Visit(AST::MultiDimSpans&) = 0;
@@ -44,11 +46,12 @@ struct Visitor {
   virtual bool Visit(AST::CppSourceCode&) = 0;
   virtual bool Visit(AST::Program&) = 0;
 
+ public:
   // general scoped variable handling
-  std::vector<std::unordered_set<std::string>> scopeStack;
+  std::vector<std::unordered_map<std::string, Symbol>> scopeStack;
   std::vector<std::string> scopeNames;
 
-  virtual void EnterScope(const std::string &name = "") {
+  virtual void EnterScope(const std::string& name = "") {
     scopeStack.emplace_back();  // Push a new scope
     scopeNames.emplace_back(name);
   }
@@ -60,42 +63,72 @@ struct Visitor {
     }
   }
 
-  virtual bool IsDeclared(const std::string& varName) {
+  virtual bool IsDeclared(const std::string& sym_name) {
     // Iterate in reverse order to simulate stack behavior
     for (auto it = scopeStack.rbegin(); it != scopeStack.rend(); ++it) {
-      if (it->find(varName) != it->end()) {
-        return true;  // Found varName in the current or an enclosing scope
-      }
+      if (it->count(sym_name))
+        return true;  // Found sym_name in the current or an enclosing scope
     }
-    return false;  // varName not found in any scope
+    return false;  // sym_name not found in any scope
   }
 
-  virtual void DeclareVariable(const std::string& varName) {
+  virtual bool DefineSymbol(const std::string& n, const ptr<Type> ty) {
     if (!scopeStack.empty()) {
-      scopeStack.back().insert(varName);  // Insert into the current (top) scope
+      if (scopeStack.back().count(n) == 0) {
+        scopeStack.back().emplace(
+            n, Symbol(n, ty));  // Insert into the current (top) scope
+        return true;
+      }
     }
+    return false;
+  }
+
+  virtual const Symbol* LookupSymbol(const std::string& n) {
+    for (auto it = scopeStack.rbegin(); it != scopeStack.rend(); ++it) {
+      if (it->count(n)) return &(*it).at(n);
+    }
+    return nullptr;
   }
 
   virtual std::string UnscopedName(const std::string& name) {
     size_t pos = name.find_last_of("::");
     if (pos != std::string::npos) {
-        // If found, return the substring after the last "::"
-        return name.substr(pos + 2); // +2 to skip the "::" itself
+      // If found, return the substring after the last "::"
+      return name.substr(pos + 2);  // +2 to skip the "::" itself
     }
-    return name; // Return the original string if "::" is not found
+    return name;  // Return the original string if "::" is not found
   }
 
   virtual size_t ScopeDepth() const { return scopeStack.size(); }
 
-  virtual std::string ScopeName() {
+  virtual std::string ScopeName() const {
     std::string name;
-    for (auto it = scopeNames.rbegin(); it != scopeNames.rend(); ++it)
+    for (auto it = scopeNames.begin(); it != scopeNames.end(); ++it)
       name += *it + "::";
     return name;
   }
 
-  virtual std::string ScopedName(const std::string& var) {
-    return ScopeName() + var;
+  // If the variable is declared in (multi-level) scopes, retrievd the scoped
+  // name. Or else nothing
+  virtual std::string ScopedName(const std::string& name) const {
+    return ScopeName() + name;
+  }
+
+  // If the variable is declared in (multi-level) scopes, retrievd the scoped
+  // name. Or else nothing
+  virtual std::optional<std::string> InScopeName(
+      const std::string& name) const {
+    std::string scoped_name;
+    auto it = scopeStack.rbegin();
+    auto in = scopeNames.rbegin();
+    for (; it != scopeStack.rend(); ++it, ++in) {
+      if (it->count(name) == 0) continue;
+
+      for (; in != scopeNames.rend(); ++in)
+        scoped_name = *in + "::" + scoped_name;
+      return scoped_name + name;
+    }
+    return {};
   }
 
  public:
@@ -115,6 +148,26 @@ struct Visitor {
       std::cerr << red << "Error: " << reset;
     else
       std::cerr << "Error: ";
+
+    std::cerr << message << std::endl;
+  }
+
+  void Warning(const location& loc, const std::string& message) {
+    static const char* yellow = "\033[33m";
+    static const char* reset = "\033[0m";
+
+    auto shell_supports_colors = [&]() {
+      const char* term = getenv("TERM");
+      return term && (strcmp(term, "xterm-256color") == 0 ||
+                      strcmp(term, "xterm") == 0);
+    };
+
+    std::cerr << loc << ": ";
+
+    if (shell_supports_colors())
+      std::cerr << yellow << "Warning: " << reset;
+    else
+      std::cerr << "Warning: ";
 
     std::cerr << message << std::endl;
   }

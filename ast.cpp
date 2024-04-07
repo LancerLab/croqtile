@@ -9,6 +9,11 @@ void MultiNodes::accept(Choreo::Visitor& v) {
   v.Visit(*this);
 }
 
+void MultiValues::accept(Choreo::Visitor& v) {
+  for (auto& sub : values) sub->accept(v);
+  v.Visit(*this);
+}
+
 void Boolean::accept(Choreo::Visitor& v) { (void)v; }
 void IntLiteral::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
@@ -55,8 +60,10 @@ void Assignment::accept(Choreo::Visitor& v) {
 }
 
 void IntIndex::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
   value->accept(v);
   v.Visit(*this);
+  v.AfterVisit(*this);
 }
 
 void DataType::accept(Choreo::Visitor& v) {

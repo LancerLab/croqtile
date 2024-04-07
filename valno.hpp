@@ -1,6 +1,7 @@
 #ifndef __CHOREO_VALUE_NUMBERING_HPP__
 #define __CHOREO_VALUE_NUMBERING_HPP__
 
+#include <charconv>
 #include <regex>
 #include <string>
 #include <tuple>
@@ -14,6 +15,7 @@ namespace Choreo {
 
 inline constexpr size_t InvalidCount() { return __INVALID_VALUE__; }
 inline constexpr int InvalidValueNumber() { return __INVALID_INTVAL__; }
+inline constexpr int NoValue() { return -1; }
 inline bool ValidVN(int vn) { return vn != InvalidValueNumber(); }
 inline void InvalidateVN(int& vn) { vn = InvalidValueNumber(); }
 inline bool UnknownVN(int& vn) { return vn == __UNKNOWN_INTVAL__; }
@@ -46,13 +48,15 @@ inline std::optional<std::string> getNthElement(const std::string& input,
   return std::nullopt;
 }
 
-class ValueNumberingVisitor;
-
+class ShapeInference;
 class ValueNumbering {
  private:
-  ValueNumberingVisitor* visitor;
+  ShapeInference* visitor;
   std::vector<std::unordered_map<std::string, int>> expressionValueNumbers;
   std::vector<std::unordered_map<int, std::string>> valueNumberExpressions;
+
+  std::vector<std::unordered_map<AST::Node*, int>>
+      nodeValueNumbers;  // cache to direct map node to value number
 
   int nextValueNumber = 0;
 
@@ -62,10 +66,10 @@ class ValueNumbering {
   std::optional<std::string> ref = std::nullopt;
 
  public:
-  explicit ValueNumbering(ValueNumberingVisitor* v, bool t, std::ostream& o)
+  explicit ValueNumbering(ShapeInference* v, bool t, std::ostream& o)
       : visitor(v), trace(t), os(o) {}
 
-  void EnterScope(const std::string &);
+  void EnterScope(const std::string&);
   void LeaveScope();
 
   void SetListReference(const std::string& r) { ref = r; }
@@ -76,20 +80,41 @@ class ValueNumbering {
 
   std::optional<std::string> TryToSimplifyNodeSignature(AST::Node& node);
 
+  // Generate the signature for a node, simplify the signature when optimiz flag
+  // is set.
   std::string GenerateNodeSignature(AST::Node& node, bool optimiz = true);
 
-  int GetValueNumberForNode(AST::Node& expr);
+  // Directly get the value number. Abort when it fails.
+  int GetValueNumberForNode(AST::Node&);
 
-  int GetValueNumberFromSignature(const std::string& signature);
+  // Generate the new value number. Abort when the value number exists.
+  int GenerateValueNumberForNode(AST::Node&);
+
+  // Check if the value number exists for the node
+  bool HasValueNumberForNode(AST::Node&);
+
+  // Directly get the value number from a signature. Abort when it fails.
+  int GetValueNumberOfSignature(const std::string&);
+
+  // Generate the new value number from a signature. Abort when the value number
+  // exists.
+  int GenerateValueNumberFromSignature(const std::string& signature);
+
+  // Check if the value number exists for the signature
+  bool HasValueNumberOfSignature(const std::string&);
 
   int GetOrInsertValueNumberFromSignature(const std::string& signature);
 
+  // Retrieve the signature from a value number. About when fails.
   std::string GetSignatureFromValueNumber(int vn) {
-    return valueNumberExpressions.back().at(vn);
+    if (valueNumberExpressions.back().count(vn) == 0)
+      choreo_unreachable("value number " + std::to_string(vn) +
+                         "does not exists in the value number table.");
+    return (valueNumberExpressions.back())[vn];
   }
 
-  std::string GetSignatureForNode(AST::Node& expr) {
-    return GetSignatureFromValueNumber(GetValueNumberForNode(expr));
+  std::string GetSignatureForNode(AST::Node& n) {
+    return GetSignatureFromValueNumber(GetValueNumberForNode(n));
   }
 
   void Print(std::ostream& os) {
@@ -104,6 +129,9 @@ class ValueNumbering {
 
  private:
   std::string ScopeIndent();
+
+  void Error(const location& loc, const std::string& message);
+  void Warning(const location& loc, const std::string& message);
 };
 
 #define __TRACE_EACH_VISIT__          \
@@ -113,12 +141,12 @@ class ValueNumbering {
     os << "\n";                       \
   }
 
-class ValueNumberingVisitor : public Visitor {
+class ShapeInference : public Visitor {
  private:
   ValueNumbering vn;
-  std::unordered_map<AST::Node*, int> node_vn;  // TODO: caching (note scope)
 
   int cur_vn = InvalidValueNumber();
+  int cur_ituple_vn = InvalidValueNumber();
   int cur_mdspan_vn = InvalidValueNumber();
 
  private:
@@ -127,7 +155,7 @@ class ValueNumberingVisitor : public Visitor {
   bool trace_visit = false;
 
  public:
-  ValueNumberingVisitor(bool t = false, std::ostream& o = std::cout)
+  ShapeInference(bool t = false, std::ostream& o = std::cout)
       : vn(this, t, o), os(o), trace_visit(std::getenv("TRACE_VISIT")) {}
 
  public:
@@ -151,7 +179,23 @@ class ValueNumberingVisitor : public Visitor {
       static size_t count = 0;
       vn.EnterScope("foreach_" + std::to_string(count++));
     } else if (auto* b = dyn_cast<AST::MultiDimSpans>(&n)) {
-      if (b->ref_name != "") vn.SetListReference(ScopedName(b->ref_name));
+      if (b->ref_name != "") {
+        auto n = InScopeName(b->ref_name);
+        if (!n)
+          choreo_unreachable(
+              ("variable `" + b->ref_name + "' is not found in scopes.")
+                  .c_str());
+        vn.SetListReference(n.value());
+      }
+    } else if (auto* b = dyn_cast<AST::IntTuple>(&n)) {
+      if (b->ref_name != "") {
+        auto n = InScopeName(b->ref_name);
+        if (!n)
+          choreo_unreachable(
+              ("variable `" + b->ref_name + "' is not found in scopes.")
+                  .c_str());
+        vn.SetListReference(n.value());
+      }
     }
     return true;
   }
@@ -160,32 +204,31 @@ class ValueNumberingVisitor : public Visitor {
     if (isa<AST::ChoreoFunction>(&n) || isa<AST::ParallelBy>(&n) ||
         isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n)) {
       vn.LeaveScope();
-    } else if (isa<AST::MultiDimSpans>(&n)) {
+    } else if (isa<AST::MultiDimSpans>(&n) || isa<AST::IntTuple>(&n)) {
       vn.ResetListReference();
     }
     return true;
   }
 
  public:
-  bool Visit(AST::MultiNodes& n) {
-    int valNo = vn.GetValueNumberForNode(n);
-    node_vn.emplace(&n, valNo);
+  bool Visit(AST::MultiNodes&) { return true; }
+
+  bool Visit(AST::MultiValues& n) {
+    int valNo = vn.GenerateValueNumberForNode(n);
     cur_vn = valNo;
     return true;
   }
 
   bool Visit(AST::IntLiteral& n) {
     __TRACE_EACH_VISIT__;
-    int valNo = vn.GetValueNumberForNode(n);
-    node_vn.emplace(&n, valNo);
+    int valNo = vn.GenerateValueNumberForNode(n);
     cur_vn = valNo;
     return true;
   }
 
   bool Visit(AST::Expr& n) {
     __TRACE_EACH_VISIT__;
-    int valNo = vn.GetValueNumberForNode(n);
-    node_vn.emplace(&n, valNo);
+    int valNo = vn.GenerateValueNumberForNode(n);
     cur_vn = valNo;
     return true;
   }
@@ -201,6 +244,8 @@ class ValueNumberingVisitor : public Visitor {
       // set alias expressions with proper value numbers
       ProcessValueNumberString(
           vn_sig, [this, &vn_sig](int valno, size_t index) {
+            vn.GetOrInsertValueNumberFromSignature("index_const_" +
+                                                   std::to_string(index));
             vn.AssociateSignatureWithValueNumber(
                 vn_sig + "(" + std::to_string(index) + ")", valno);
           });
@@ -231,7 +276,10 @@ class ValueNumberingVisitor : public Visitor {
     if (n.init_expr) {
       assert(ValidVN(cur_mdspan_vn) &&
              "invalid value number for the named type.");
-      vn.AssociateSignatureWithValueNumber(ScopedName(n.name_str), cur_mdspan_vn);
+      DefineSymbol(n.name_str, n.GetType());
+
+      vn.AssociateSignatureWithValueNumber(ScopedName(n.name_str),
+                                           cur_mdspan_vn);
 
       InvalidateVN(cur_mdspan_vn);  // comsumes the mdspan
     }
@@ -240,25 +288,69 @@ class ValueNumberingVisitor : public Visitor {
 
   bool Visit(AST::NamedVariableDecl& n) {
     __TRACE_EACH_VISIT__;
-    if (n.initializer && ValidVN(cur_vn)) {
-      vn.AssociateSignatureWithValueNumber(ScopedName(n.name_str), cur_vn);
-      InvalidateVN(cur_vn);
+
+    if (IsDeclared(n.name_str)) {
+      Error(n.LOC(), "ODR violation: symbol `" + n.name_str +
+                         "' has been declared already.");
+      return false;
     }
+
+    DefineSymbol(n.name_str, n.GetType());
+
+    if (n.initializer) {
+      if (ValidVN(cur_ituple_vn)) {
+        // assert(!ValidVN(cur_vn) && "expected current value number.");
+        // assert(!ValidVN(cur_mdspan_vn) && "expected current mdspan value
+        // number.");
+        vn.AssociateSignatureWithValueNumber(ScopedName(n.name_str),
+                                             cur_ituple_vn);
+        InvalidateVN(cur_ituple_vn);
+      } else if (ValidVN(cur_vn)) {
+        vn.AssociateSignatureWithValueNumber(ScopedName(n.name_str), cur_vn);
+        InvalidateVN(cur_vn);
+      }
+    }
+
     return true;
   }
 
   bool Visit(AST::IntTuple& n) {
     __TRACE_EACH_VISIT__;
-    if (auto i = dyn_cast<AST::MultiNodes>(n.list.get()))
-      n.SetType(MakeITupleType(i->Count()));
-    else
-      n.SetType(MakeUninitITupleType());
+    auto i = n.list.get();
+    cur_ituple_vn = cur_vn;
+    n.SetType(MakeITupleType(i->Count()));
+
+    auto vn_sig = vn.GetSignatureFromValueNumber(cur_vn);
+
+    // set alias expressions with proper value numbers
+    ProcessValueNumberString(vn_sig, [this, &vn_sig](int valno, size_t index) {
+      vn.GetOrInsertValueNumberFromSignature("index_const_" +
+                                             std::to_string(index));
+      vn.AssociateSignatureWithValueNumber(
+          vn_sig + "(" + std::to_string(index) + ")", valno);
+    });
     InvalidateVN(cur_vn);  // Currently cut off value numbering
     return true;
   }
 
   bool Visit(AST::Assignment& n) {
     __TRACE_EACH_VISIT__;
+
+    if (IsDeclared(n.name)) {
+      return true;
+    }
+
+    // this is the un-type-annotated declaration
+    DefineSymbol(n.name, n.value->GetType());
+
+    if (ValidVN(cur_ituple_vn)) {
+      assert(!ValidVN(cur_vn) && "expected current value number.");
+      assert(!ValidVN(cur_mdspan_vn) &&
+             "expected current mdspan value number.");
+      vn.AssociateSignatureWithValueNumber(ScopedName(n.name), cur_ituple_vn);
+      InvalidateVN(cur_ituple_vn);
+    }
+
     return true;
   };
 
@@ -274,14 +366,14 @@ class ValueNumberingVisitor : public Visitor {
 
   bool Visit(AST::Identifier& n) {
     __TRACE_EACH_VISIT__;
-    int valNo = vn.GetValueNumberForNode(n);
-    node_vn.emplace(&n, valNo);
+    int valNo = vn.GenerateValueNumberForNode(n);
     cur_vn = valNo;
     return true;
   };
 
   bool Visit(AST::Parameter& n) {
     __TRACE_EACH_VISIT__;
+
     if (n.type->isSpanned()) {
       assert(isa<AST::MultiDimSpans>(n.type->mdspan_type.get()) &&
              "Invalid mdspan.");
@@ -293,14 +385,25 @@ class ValueNumberingVisitor : public Visitor {
         vn.AssociateSignatureWithValueNumber(ScopedName(n.sym->name + ".span"),
                                              cur_mdspan_vn);
 
-        InvalidateVN(cur_mdspan_vn);
       } else {
         assert(UnknownVN(cur_mdspan_vn) &&
                "unexpected value number for mdspan.");
-        InvalidateVN(cur_vn);
+        // since the value number is unknown
       }
+
+      InvalidateVN(cur_vn);
       n.type->SetType(
           MakeSpannedType(n.type->base_type, span->GetTypeDetail()));
+
+      if (n.sym) DefineSymbol(n.sym->name + ".span", n.GetType());
+
+      return true;
+    }
+
+    if (n.sym && n.type->isScalar()) {
+      // get the value number and make it defined
+      vn.GetValueNumberOfSignature(ScopedName(n.sym->name));
+      if (n.sym) DefineSymbol(n.sym->name, n.GetType());
       return true;
     }
 
@@ -392,42 +495,9 @@ class ValueNumberingVisitor : public Visitor {
   // TODO: should be recursive
   MDSpanValue GenMDSpanValueFromVNString(const std::string& input) {
     ValueList result;
+
     std::istringstream stream(input);
     std::string component;
-
-    auto handleElement = [&result, this](const std::string& str) {
-      auto digit = PrefixedWith("const_", str);
-      if (digit) {
-        int val = std::stoi(*digit);
-        result.push_back(val);
-        return;
-      }
-
-      if (str[1] == ':' &&
-          ((str[0] == '+') || (str[0] == '-') || (str[0] == '*') ||
-           (str[0] == '/') || (str[0] == '%'))) {
-        std::vector<std::string> parts;
-        std::string part;
-
-        // Extract each part separated by ':'
-        std::istringstream stream(str);
-        while (std::getline(stream, part, ':')) {
-          if (part[0] == '#') {
-            auto sig =
-                vn.GetSignatureFromValueNumber(std::stoi(part.substr(1)));
-            parts.push_back(RemovePrefix(sig, "const_"));
-          } else
-            parts.push_back(part);
-        }
-        assert(parts.size() == 3);
-        result.push_back(parts[1] + parts[0] + parts[2]);
-        return;
-      }
-      result.push_back(str);
-    };
-
-    // assume earlier simplification makes value number expression only 1-level
-    // of indirection
     while (std::getline(stream, component, ',')) {
       // Trim whitespace
       component.erase(remove_if(component.begin(), component.end(), isspace),
@@ -435,17 +505,43 @@ class ValueNumberingVisitor : public Visitor {
 
       assert(!component.empty() && "unexpected component.");
 
-      if (component[0] == '#') {
-        // Look up value number in table and simplify
-        int valNo = std::stoi(component.substr(1));
-        handleElement(vn.GetSignatureFromValueNumber(valNo));
-      } else {
-        // no value numbers
-        handleElement(component);
-      }
+      auto expr = GenerateExpression(component);
+      int int_val;
+      auto [ptr, ec] =
+          std::from_chars(expr.data(), expr.data() + expr.size(), int_val);
+      if (ec == std::errc() && ptr == expr.data() + expr.size()) {
+        result.emplace_back(int_val);
+      } else
+        result.emplace_back(expr);
     }
 
     return {result.size(), result};
+  }
+
+  std::string GenerateExpression(const std::string& sig) {
+    if (auto digit = PrefixedWith("const_", sig)) return *digit;
+
+    // a value number reference
+    if (auto digit = PrefixedWith("#", sig))
+      return GenerateExpression(
+          vn.GetSignatureFromValueNumber(std::stoi(*digit)));
+
+    // binary expressions
+    if (sig[1] == ':' &&
+        ((sig[0] == '+') || (sig[0] == '-') || (sig[0] == '*') ||
+         (sig[0] == '/') || (sig[0] == '%'))) {
+      std::istringstream stream(sig);
+      std::vector<std::string> parts;
+      std::string part;
+
+      while (std::getline(stream, part, ':')) parts.push_back(part);
+      assert(parts.size() == 3);
+      return GenerateExpression(parts[1]) + parts[0] +
+             GenerateExpression(parts[2]);
+    }
+
+    // this is a symbol
+    return sig;
   }
 };
 

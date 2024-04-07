@@ -141,7 +141,8 @@ void choreo_info(const char *message) {
 %nterm <Choreo::BaseType> fundamental_type
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::Node>> pass_by foreach_block general_val simple_int spanned_value ituple_val bool_literal passable declaration statement assignment paraby_statm w_statement dma_statement wait_statement call_statement index_or_value iv_expr if_else optional_scalar_init param_mdspan_val
-%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments paraby_statms w_statements index_value_list value_list param_mdspan_list withins iv_exprs require_binds require_clause id_list with_matchers else_clause futures passables
+%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments paraby_statms w_statements withins require_binds require_clause with_matchers else_clause
+%nterm <AST::ptr<AST::MultiValues>> index_value_list value_list param_mdspan_list iv_exprs id_list futures passables
 %nterm <AST::ptr<AST::Expr>> s_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type param_type return_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
@@ -221,7 +222,7 @@ param_mdspan_list
         $$ = $1;
       }
     | param_mdspan_val {
-        $$ = AST::Make<AST::MultiNodes>(@1);
+        $$ = AST::Make<AST::MultiValues>(@1);
         $$->Append($1);
       }
     ;
@@ -430,21 +431,21 @@ index_value_list
         $$ = $1;
       }
     | index_or_value {
-        $$ = AST::Make<AST::MultiNodes>(@1);
+        $$ = AST::Make<AST::MultiValues>(@1);
         $$->Append($1);
       }
     ; // do not allow an empty list
 
 value_list
     : /* Empty list */ {
-        $$ = AST::Make<AST::MultiNodes>(loc);
+        $$ = AST::Make<AST::MultiValues>(loc);
       }
     | value_list COMMA s_expr {
         $1->Append($3);
         $$ = $1;
       }
     | s_expr {
-        $$ = AST::Make<AST::MultiNodes>(@1);
+        $$ = AST::Make<AST::MultiValues>(@1);
         $$->Append($1);
       }
     ;
@@ -513,7 +514,6 @@ ituple_val
 
 named_ituple_decl
     : ITUPLE IDENTIFIER ASSIGN ituple_val {
-        /* TODO: workaround: use INT for ituple's base type use a dedicated type for ituple in symboltable */
         symtab.AddSymbol($2, MakeUninitITupleType());
         $$ = AST::Make<AST::NamedVariableDecl>(@2,
               $2, AST::Make<AST::DataType>(@1, BaseType::ITUPLE), nullptr, $4);
@@ -706,7 +706,7 @@ iv_exprs
         $$ = $1;
       }
     | iv_expr {
-        $$ = AST::Make<AST::MultiNodes>(@1);
+        $$ = AST::Make<AST::MultiValues>(@1);
         $$->Append($1);
       }
     ; /* do not allow the empty ivs */
@@ -751,17 +751,17 @@ id_list
         $$ = $1;
       }
     | IDENTIFIER {
-        $$ = AST::Make<AST::MultiNodes>(@1, ", ");
+        $$ = AST::Make<AST::MultiValues>(@1, ", ");
         $$->Append(AST::Make<AST::Identifier>(@1, $1));
       }
     ;
 
 passables
     : /* Empty */ {
-        $$ = AST::Make<AST::MultiNodes>(loc);
+        $$ = AST::Make<AST::MultiValues>(loc);
       }
     | passable {
-        $$ = AST::Make<AST::MultiNodes>(@1);
+        $$ = AST::Make<AST::MultiValues>(@1);
         $$->Append($1);
       }
     | passables COMMA passable {
@@ -800,7 +800,7 @@ futures
         $$ = $1;
       }
     | IDENTIFIER {
-        $$ = AST::Make<AST::MultiNodes>(@1);
+        $$ = AST::Make<AST::MultiValues>(@1);
         $$->Append(AST::Make<AST::Identifier>(@1, $1));
       }
     ;

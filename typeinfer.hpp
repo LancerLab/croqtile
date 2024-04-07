@@ -20,16 +20,18 @@ struct TypeInference : public Visitor {
 
   std::unordered_map<std::string, ptr<Type>> symbolTypes;
 
-  bool BeforeVisit(AST::Node&) override;
-  bool AfterVisit(AST::Node&) override;
+  bool BeforeVisit(AST::Node &) override;
+  bool AfterVisit(AST::Node &) override;
 
-  bool AssignSymbolWithType(const location &, const std::string &, const ptr<Type> &);
+  bool AssignSymbolWithType(const location &, const std::string &,
+                            const ptr<Type> &);
   ptr<Type> GetSymbolType(const location &, const std::string &);
 
  public:
   TypeInference(bool d, std::ostream &o = std::cout) : Dump(d), os(o) {}
 
   bool Visit(AST::MultiNodes &) override { return true; };
+  bool Visit(AST::MultiValues &) override { return true; };
   bool Visit(AST::IntLiteral &) override { return true; };
   bool Visit(AST::Expr &) override;
   bool Visit(AST::MultiDimSpans &) override;

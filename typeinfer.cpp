@@ -32,21 +32,28 @@ bool TypeInference::AfterVisit(AST::Node& n) {
   return true;
 }
 
-bool TypeInference::AssignSymbolWithType(const location& loc, const std::string &sym, const ptr<Type> &ty) {
-  if (symbolTypes.count(sym) > 0) {
+bool TypeInference::AssignSymbolWithType(const location& loc,
+                                         const std::string& sym,
+                                         const ptr<Type>& ty) {
+  if (!DefineSymbol(sym, ty)) {
     Error(loc, "symbol `" + sym + "' has already been associated with a type.");
     return false;
   }
-  symbolTypes.emplace(sym, ty);
   return true;
 }
 
-ptr<Type> TypeInference::GetSymbolType(const location& loc, const std::string &sym) {
-  if (symbolTypes.count(sym) == 0) {
-    Error(loc, "symbol `" + sym + "' does not have a type.");
+ptr<Type> TypeInference::GetSymbolType(const location& loc,
+                                       const std::string& name) {
+  if (!IsDeclared(name)) {
+    Error(loc, "symbol `" + name + "' has not been defined.");
     return nullptr;
   }
-  return symbolTypes.at(sym);
+  if (auto* sym = LookupSymbol(name)) {
+    return sym->GetType();
+  } else {
+    Error(loc, "symbol `" + name + "' is not associated with a type.");
+    return nullptr;
+  }
 }
 
 bool TypeInference::Visit(AST::DataType& n) {
@@ -95,8 +102,10 @@ bool TypeInference::Visit(AST::NamedVariableDecl& n) {
 
   cur_type.reset();
 
+  AssignSymbolWithType(n.LOC(), n.name_str, n.GetType());
+
   if (Dump) {
-    os << "Symbol: " << n.name_str << ", Type: ";
+    os << "Symbol:    " << *InScopeName(n.name_str) << ", Type: ";
     n.PrintType(os);
     os << "\n";
   }
@@ -108,7 +117,9 @@ bool TypeInference::Visit(AST::NamedTypeDecl& n) {
   if (AST::typeof<UnknownType>(&n)) {
     // need type inference
     if (!n.init_expr) {
-      Error(n.LOC(), "`" + n.name_str + "' is declared without type annotation or initialization.");
+      Error(n.LOC(),
+            "`" + n.name_str +
+                "' is declared without type annotation or initialization.");
       return false;
     }
 
@@ -118,17 +129,18 @@ bool TypeInference::Visit(AST::NamedTypeDecl& n) {
     }
 
     if (!n.init_expr->GetType()->HasSufficientInfo()) {
-      Error(n.LOC(), "unable to inference the type detail of `" + n.name_str + "'.");
+      Error(n.LOC(),
+            "unable to inference the type detail of `" + n.name_str + "'.");
       return false;
     }
 
     n.SetType(n.init_expr->GetType());
   }
 
-  AssignSymbolWithType(n.LOC(), ScopedName(n.name_str), n.GetType());
+  AssignSymbolWithType(n.LOC(), n.name_str, n.GetType());
 
   if (Dump) {
-    os << "[Partial Type] " << n.name_str << ": ";
+    os << "Partial:   " << *InScopeName(n.name_str) << ", Type: ";
     n.GetType()->Print(os);
     os << "\n";
   }
@@ -148,18 +160,21 @@ bool TypeInference::Visit(AST::Parameter& p) {
   p.SetType(p.type->GetType());
 
   if (p.HasSymbol()) {
-    AssignSymbolWithType(p.LOC(), ScopedName(p.sym->name), p.GetType());
+    AssignSymbolWithType(p.LOC(), p.sym->name, p.GetType());
     if (p.type->isSpanned())
-      AssignSymbolWithType(p.LOC(), ScopedName(p.sym->name + ".span"), p.GetType());
+      AssignSymbolWithType(p.LOC(), p.sym->name + ".span", p.GetType());
   }
 
   // collect the parameter types
   cur_param_types.push_back(p.GetType());
 
   if (Dump) {
-    os << "[Parameter] ";
-    if (p.HasSymbol()) os << "Symbol: " << p.sym->name << ",";
-    os << " Type: ";
+    os << "Parameter: ";
+    if (p.HasSymbol())
+      os << *InScopeName(p.sym->name);
+    else
+      os << "(unnamed)";
+    os << ", Type: ";
     p.GetType()->Print(os);
     os << "\n";
   }
@@ -179,14 +194,19 @@ bool TypeInference::Visit(AST::MultiDimSpans&) {
 bool TypeInference::Visit(AST::Expr& n) {
   if (auto ref = n.GetReference()) {
     if (auto id = dyn_cast<AST::Identifier>(ref.get())) {
-      if (auto pty = GetSymbolType(n.LOC(), ScopedName(id->name))) {
+      if (auto pty = GetSymbolType(n.LOC(), id->name)) {
         n.SetType(pty);
         return true;
+      } else {
+        Warning(n.LOC(),
+                "symbol `" + id->name + "' is not associated with a type.");
+        return false;
       }
     }
 
     // TODO: WE SHOULD DE-SUGERIZE EARLY TO AVOID SPECIAL HANDLING
-    // A single reference to the index is the syntax suger for indexing operation.
+    // A single reference to the index is the syntax suger for indexing
+    // operation.
     if (isa<AST::IntIndex>(ref.get())) {
       n.SetType(MakeIntegerType());
       return true;
@@ -199,7 +219,7 @@ bool TypeInference::Visit(AST::Expr& n) {
 
     n.SetType(ref->GetType());
     return true;
-  } 
+  }
 
   if (n.t == AST::Expr::Binary) {
     if (n.op == "dimof" || n.op == "sizeof") {

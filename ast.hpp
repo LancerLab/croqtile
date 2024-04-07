@@ -1,23 +1,15 @@
 #ifndef __CHOREO_AST_HPP__
 #define __CHOREO_AST_HPP__
 
-#include <cassert>
-#include <iostream>
 #include <map>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 
+#include "aux.hpp"
 #include "location.hh"
 #include "symtab.hpp"
-
-[[noreturn]] inline void choreo_unreachable(
-    const char* msg = "Unreachable code reached", const char* file = __FILE__,
-    int line = __LINE__) {
-  std::cerr << "Assertion failed: " << msg << ", file " << file << ", line "
-            << line << std::endl;
-  std::abort();
-}
 
 namespace Choreo {
 struct Visitor;
@@ -98,7 +90,52 @@ struct MultiNodes : public Node, public TypeIDProvider<MultiNodes> {
 
   size_t Count() const { return values.size(); }
 
-  void SetDelimiter(const std::string & d) { delimiter = d; }
+  void SetDelimiter(const std::string& d) { delimiter = d; }
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    if (delimiter != "" && values.size() > 1) {
+      auto i = values.begin();
+      auto e = values.end();
+      (*i)->Print(os, prefix);
+      ++i;
+      for (; i != e; ++i) {
+        os << delimiter;
+        (*i)->Print(os, prefix);
+      }
+    } else {
+      for (auto& v : values) v->Print(os, prefix);
+    }
+  }
+
+  // TODO: workaround for "x, y" like print, we may need typeid to merge this
+  // print logic into trivial Print()
+  void InlinePrint(std::ostream& os, const std::string& prefix = {}) const {
+    for (auto& v : values) {
+      v->Print(os, prefix);
+      if (&v != &values.back()) os << ", ";
+    }
+  }
+
+  void accept(Visitor& visitor) override;
+
+  __UDT_TYPE_INFO__
+};
+
+struct MultiValues : public Node, public TypeIDProvider<MultiValues> {
+  std::vector<ptr<Node>> values;
+  std::string delimiter;
+
+  explicit MultiValues(const location& l, std::string d = "")
+      : Node(l), delimiter(d){};
+
+  void Append(const ptr<Node>& m) {
+    assert(m != nullptr && "Unexpected: null pointer.");
+    values.push_back(m);
+  }
+
+  size_t Count() const { return values.size(); }
+
+  void SetDelimiter(const std::string& d) { delimiter = d; }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     if (delimiter != "" && values.size() > 1) {
@@ -182,8 +219,7 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
       : Node(l), op(o), value_c(c), value_l(v1), value_r(v2), t(Ternary) {}
 
   ptr<Node> GetReference() {
-    if (t == Reference)
-      return value_r;
+    if (t == Reference) return value_r;
     return nullptr;
   }
 
@@ -251,7 +287,10 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
   // set both the mdspan and dim count
   explicit MultiDimSpans(const location& l, const std::string& n,
                          const ptr<Node>& lst, size_t dc)
-      : Node(l, MakeDimedMDSpanType(dc)), ref_name(n), list(lst), dim_count(dc) {
+      : Node(l, MakeDimedMDSpanType(dc)),
+        ref_name(n),
+        list(lst),
+        dim_count(dc) {
     assert(list && "Unexpected: span list is not provided");
     // check the consistent between dim_count and span list in semantic time
   }
@@ -265,21 +304,19 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
     assert(dim_count != __INVALID_VALUE__ && "Invalid dimensions.");
   }
 
-  explicit MultiDimSpans(const location& l, const std::string& n, const ptr<MDSpanType> & pty)
-      : Node(l, pty),
-        ref_name(n),
-        list(nullptr),
-        dim_count(pty->Dims()) {}
+  explicit MultiDimSpans(const location& l, const std::string& n,
+                         const ptr<MDSpanType>& pty)
+      : Node(l, pty), ref_name(n), list(nullptr), dim_count(pty->Dims()) {}
 
   size_t Dims() const { return dim_count; }
   void SetDims(size_t n) { dim_count = n; }
 
-  void SetTypeDetail(const MDSpanValue & mds) {
+  void SetTypeDetail(const MDSpanValue& mds) {
     assert(typeof<MDSpanType>(this) && "Incorrect type for mdspan.");
     cast<MDSpanType>(GetType().get())->SetValue(mds);
   }
 
-  const MDSpanValue & GetTypeDetail() {
+  const MDSpanValue& GetTypeDetail() {
     assert(typeof<MDSpanType>(this) && "Incorrect type for mdspan.");
     return cast<MDSpanType>(GetType().get())->GetValue();
   }
@@ -401,9 +438,10 @@ struct NamedVariableDecl : public Node,
 // Represents declarations like: ituple t = {3, 4, 5};
 struct IntTuple : public Node, public TypeIDProvider<IntTuple> {
   std::string ref_name;  // could be anonymous
-  ptr<Node> list;
+  ptr<MultiValues> list;
 
-  explicit IntTuple(const location& l, const std::string& n, ptr<Node> lst)
+  explicit IntTuple(const location& l, const std::string& n,
+                    ptr<MultiValues> lst)
       : Node(l, MakeUninitITupleType()), ref_name(n), list(lst) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
@@ -466,7 +504,9 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
 
  public:
   explicit DataType(const location& l, BaseType t)
-      : Node(l), base_type(t), mdspan_type(nullptr) { InitSemaType(); }
+      : Node(l), base_type(t), mdspan_type(nullptr) {
+    InitSemaType();
+  }
 
   explicit DataType(const location& l, BaseType bt, const ptr<Node>& st)
       : Node(l), base_type(bt), mdspan_type(st) {
@@ -514,10 +554,12 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
       case BaseType::U8:
       case BaseType::S8:
         assert(mdspan_type != nullptr && "Expecting a valid mdspan.");
-        SetType(MakeSpannedType(base_type, GenUninitMDSpanValue())); // need type inference
+        SetType(MakeSpannedType(
+            base_type, GenUninitMDSpanValue()));  // need type inference
         break;
       case BaseType::ITUPLE:
-        SetType(MakeUninitITupleType());  // need type inference to retrieve the dim count
+        SetType(MakeUninitITupleType());  // need type inference to retrieve the
+                                          // dim count
         break;
       case BaseType::UNKNOWN:
         SetType(MakeUnknownType());  // need type inference
@@ -742,9 +784,9 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
 
 struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
   ptr<Node> data;
-  ptr<MultiNodes> positions;
+  ptr<MultiValues> positions;
 
-  ChunkAt(const location& l, const ptr<Node>& d, const ptr<MultiNodes>& p)
+  ChunkAt(const location& l, const ptr<Node>& d, const ptr<MultiValues>& p)
       : Node(l), data(d), positions(p) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
@@ -814,10 +856,10 @@ struct Call : public Node, public TypeIDProvider<Call> {
 };
 
 struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
-  ptr<MultiNodes> ivs;
+  ptr<MultiValues> ivs;
   ptr<MultiNodes> statms;
 
-  explicit ForeachBlock(const location& l, const ptr<MultiNodes>& i,
+  explicit ForeachBlock(const location& l, const ptr<MultiValues>& i,
                         const ptr<MultiNodes>& s)
       : Node(l), ivs(i), statms(s) {
     assert(i != nullptr && "missing iteration variables for the statement.");
@@ -906,6 +948,12 @@ struct Program : public Node, public TypeIDProvider<Program> {
 template <typename T, typename... Args>
 ptr<T> Make(Args&&... args) {
   return std::make_shared<T>(std::forward<Args>(args)...);
+}
+
+inline std::string STR(AST::Node& n) {
+  std::ostringstream oss;
+  n.Print(oss);
+  return oss.str();
 }
 
 }  // end of namespace AST

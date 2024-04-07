@@ -5,6 +5,7 @@
 #include "ast.hpp"
 #include "codegen.hpp"
 #include "scanner.hpp"
+#include "desugar.hpp"
 #include "valno.hpp"
 #include "semantics.hpp"
 #include "symtab.hpp"
@@ -120,19 +121,23 @@ int main(int argc, char* argv[]) {
     return 0;
   }
 
-  // value numbering to partially evaluate the mdspan type
-  ValueNumberingVisitor vn(printValueNumbers);
-  root.accept(vn);
+  // minor AST change: desugar for easiler handling
+  DeSugaring ds;
+  root.accept(ds);
+
+  // perform shape inference of mdspans
+  ShapeInference si(printValueNumbers);
+  root.accept(si);
 
   // infer the unknown types - decls
-  TypeInference type_infer(showInferOnly);
-  root.accept(type_infer);
+  TypeInference ti(showInferOnly);
+  root.accept(ti);
 
   if (showInferOnly) return 0;
 
   // apply type check
-  SemanticChecker sema_check;
-  root.accept(sema_check);
+  SemanticChecker sc;
+  root.accept(sc);
 
   if (onlySemaCheck) return 0;
 

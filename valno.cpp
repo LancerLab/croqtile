@@ -6,10 +6,13 @@ void ValueNumbering::EnterScope(const std::string& name) {
   std::string indent = ScopeIndent();
   visitor->EnterScope(name);
 
-  if (expressionValueNumbers.empty())
+  if (expressionValueNumbers.empty()) {
     expressionValueNumbers.push_back({});
-  else
+    nodeValueNumbers.push_back({});
+  } else {
     expressionValueNumbers.push_back(expressionValueNumbers.back());
+    nodeValueNumbers.push_back(nodeValueNumbers.back());
+  }
 
   if (valueNumberExpressions.empty())
     valueNumberExpressions.push_back({});
@@ -27,6 +30,7 @@ void ValueNumbering::LeaveScope() {
 
   expressionValueNumbers.pop_back();
   valueNumberExpressions.pop_back();
+  nodeValueNumbers.pop_back();
 
   if (trace) os << ScopeIndent() << "} // end scope-" << sname << "\n";
 }
@@ -190,22 +194,20 @@ std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
              }},
             {"dimof",  // calculate the dim of a given mdspan index
              [this, &n]() -> std::optional<std::string> {
-               auto mdspan = GetSignatureForNode(*n->value_l);
+               auto base = GetSignatureForNode(*n->value_l);
                auto cv = PrefixedWith("index_const_",
                                       GetSignatureForNode(*n->value_r));
-               assert(cv && "mdspan index can not be evaluated.");
-               return mdspan + "(" + *cv + ")";
+               assert(cv && "indexing of mdspan can not be evaluated.");
+               return base + "(" + *cv + ")";
              }},
             {"ref",  // it is a reference to another node
              [this, &n]() -> std::optional<std::string> {
-               int valNo = GetValueNumberForNode(*n->value_r);
-               if (!ValidVN(valNo)) return std::nullopt;
+               auto expr = GetSignatureForNode(*n->value_r);
 
-               auto expr = GetSignatureFromValueNumber(valNo);
-
+#if 0
                // handle syntax suger "a {(0)}";
                if (!ref) return expr;
-               int refNo = GetValueNumberFromSignature(ref.value());
+               int refNo = GetValueNumberOfSignature(ref.value());
                if (!ValidVN(refNo)) return expr;
                auto ref_expr = GetSignatureFromValueNumber(refNo);
 
@@ -217,6 +219,7 @@ std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
                       << signature << "\n";
                  return signature;
                }
+#endif
                return expr;
              }},
         };
@@ -241,10 +244,16 @@ std::string ValueNumbering::GenerateNodeSignature(AST::Node& node,
   if (auto* n = dyn_cast<AST::IntLiteral>(&node)) {
     return "const_" + std::to_string(n->value);
   } else if (auto* v = dyn_cast<AST::Identifier>(&node)) {
-    auto scoped_name = visitor->ScopedName(v->name);
-    int valno = GetOrInsertValueNumberFromSignature(scoped_name);
-    assert(ValidVN(valno));
-    return scoped_name;
+    if (auto name_in_scope = visitor->InScopeName(v->name)) {
+      if (HasValueNumberOfSignature(name_in_scope.value()))
+        return name_in_scope.value();
+      // error: the name exists but does not have a value number
+      Error(node.LOC(), "symbol `" + name_in_scope.value() +
+                            "' is not associated with a value number.");
+      choreo_unreachable();
+    }
+    // or else, it is a new name definition
+    return visitor->ScopedName(v->name);
   } else if (auto* b = dyn_cast<AST::Expr>(&node)) {
     auto signature = b->op;
 
@@ -267,15 +276,17 @@ std::string ValueNumbering::GenerateNodeSignature(AST::Node& node,
       return "";
     }
     return signature + ":#" + std::to_string(valno);
-  } else if (auto* b = dyn_cast<AST::MultiNodes>(&node)) {
-    std::string signature;
-    if (b->values.size() > 0 && ValidVN(GetValueNumberForNode(*b->values[0]))) {
-      signature = "#" + std::to_string(GetValueNumberForNode(*b->values[0]));
-      for (size_t i = 1; i < b->values.size(); ++i)
-        signature +=
-            ",#" + std::to_string(GetValueNumberForNode(*b->values[i]));
-    }
+  } else if (auto* b = dyn_cast<AST::MultiValues>(&node)) {
+    assert(b->values.size() > 0 && "must have values inside.");
+    std::string signature =
+        "#" + std::to_string(GetValueNumberForNode(*b->values[0]));
+    for (size_t i = 1; i < b->values.size(); ++i)
+      signature += ",#" + std::to_string(GetValueNumberForNode(*b->values[i]));
     return signature;
+  } else if (auto* it = dyn_cast<AST::IntTuple>(&node)) {
+    return GenerateNodeSignature(*(it->list));
+  } else if (auto* mds = dyn_cast<AST::MultiDimSpans>(&node)) {
+    return GenerateNodeSignature(*(mds->list));
   } else if (auto* b = dyn_cast<AST::ParamList>(&node)) {
     std::string signature;
     if (b->values.size() > 0) {
@@ -288,33 +299,100 @@ std::string ValueNumbering::GenerateNodeSignature(AST::Node& node,
   } else if (auto* n = dyn_cast<AST::IntIndex>(&node)) {
     return "index_" + GenerateNodeSignature(*n->value);
   }
-  return "";
+
+  if (trace)
+    Warning(node.LOC(), "invalid signature for expression `" + AST::STR(node) +
+                            "': " + node.NodeTypeString() + ".");
+
+  return "";  // invalid value
 }
 
-int ValueNumbering::GetValueNumberForNode(AST::Node& expr) {
-  std::string signature = GenerateNodeSignature(expr);
-  if (signature == "") return InvalidValueNumber();
+bool ValueNumbering::HasValueNumberForNode(AST::Node& n) {
+  // the node has been visited before
+  if (nodeValueNumbers.back().count(&n)) return true;
 
-  // std::cout << "Garfee: signature: " << signature << std::endl;
-  return GetOrInsertValueNumberFromSignature(signature);
+  std::string signature = GenerateNodeSignature(n);
+  if (signature == "") return false;
+
+  return HasValueNumberOfSignature(signature);
 }
 
-int ValueNumbering::GetValueNumberFromSignature(const std::string& signature) {
+int ValueNumbering::GetValueNumberForNode(AST::Node& n) {
+  // if it is an visited/numbered node
+  if (nodeValueNumbers.back().count(&n)) return (nodeValueNumbers.back())[&n];
+
+  if (auto id = dyn_cast<AST::Identifier>(&n)) {
+    // Must consider about the scope of any identifier reference
+    if (auto name = visitor->InScopeName(id->name))
+      return GetValueNumberOfSignature(name.value());
+    else
+      choreo_unreachable("symbol `" + id->name + "' is not valued.");
+  }
+
+  std::string signature = GenerateNodeSignature(n);
+  if (signature == "")
+    Error(n.LOC(),
+          "failed to generate signature for expression `" + AST::STR(n) + "'.");
+
+  return GetValueNumberOfSignature(signature);
+}
+
+int ValueNumbering::GenerateValueNumberForNode(AST::Node& n) {
+  std::string signature = GenerateNodeSignature(n);
+  if (signature == "")
+    Error(n.LOC(),
+          "failed to generate signature for nession `" + AST::STR(n) + "'.");
+
+  // Duplicated computation: different expression encounters the same signature
+  if (HasValueNumberOfSignature(signature))
+    return GetValueNumberOfSignature(signature);
+
+  int valNo = GenerateValueNumberFromSignature(signature);
+
+  // cache the value number
+  nodeValueNumbers.back().emplace(&n, valNo);
+
+  return valNo;
+}
+
+int ValueNumbering::GetValueNumberOfSignature(const std::string& signature) {
+  if (signature == "") choreo_unreachable("invalid signature provided.");
+
+  if (signature == "<no-value>") return NoValue();
+
   // Check if this expression has been encountered before
   auto it = expressionValueNumbers.back().find(signature);
   if (it != expressionValueNumbers.back().end())
     return it->second;  // Return existing value number
 
+  choreo_unreachable("failed to get value number of signature \"" + signature +
+                     "\".");
+
   return InvalidValueNumber();
+}
+
+bool ValueNumbering::HasValueNumberOfSignature(const std::string& signature) {
+  // Check if this expression has been encountered before
+  auto it = expressionValueNumbers.back().find(signature);
+  if (it != expressionValueNumbers.back().end())
+    return true;  // Return existing value number
+
+  return false;
 }
 
 int ValueNumbering::GetOrInsertValueNumberFromSignature(
     const std::string& signature) {
-  int valNo = GetValueNumberFromSignature(signature);
-  if (ValidVN(valNo)) return valNo;
+  if (HasValueNumberOfSignature(signature))
+    return GetValueNumberOfSignature(signature);
+  return GenerateValueNumberFromSignature(signature);
+}
 
-  // If not, assign a new value number
-  valNo = nextValueNumber++;
+int ValueNumbering::GenerateValueNumberFromSignature(
+    const std::string& signature) {
+  if (HasValueNumberOfSignature(signature))
+    choreo_unreachable("signature \"" + signature + "\" has already existed.");
+
+  int valNo = nextValueNumber++;
   expressionValueNumbers.back()[signature] = valNo;
   valueNumberExpressions.back()[valNo] = signature;
 
@@ -323,8 +401,16 @@ int ValueNumbering::GetOrInsertValueNumberFromSignature(
 
   return valNo;
 }
+
 std::string ValueNumbering::ScopeIndent() {
   std::string indent;
   for (size_t i = 0; i <= visitor->ScopeDepth(); ++i) indent += " ";
   return indent;
+}
+
+void ValueNumbering::Error(const location& loc, const std::string& message) {
+  visitor->Error(loc, message);
+}
+void ValueNumbering::Warning(const location& loc, const std::string& message) {
+  visitor->Warning(loc, message);
 }
