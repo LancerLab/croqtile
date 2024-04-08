@@ -44,15 +44,16 @@ struct TypeInference : public Visitor {
   bool Visit(AST::Identifier &) override { return true; };
   bool Visit(AST::Parameter &) override;
   bool Visit(AST::ParamList &) override;
-  bool Visit(AST::ParallelBy &) override { return true; };
+  bool Visit(AST::ParallelBy &) override;
   bool Visit(AST::RequireBind &) override { return true; };
-  bool Visit(AST::WithIn &) override { return true; };
+  bool Visit(AST::WithIn &) override;
   bool Visit(AST::WithBlock &) override { return true; };
   bool Visit(AST::Memory &) override { return true; };
   bool Visit(AST::DMA &) override;
   bool Visit(AST::ChunkAt &) override { return true; };
   bool Visit(AST::Wait &) override { return true; };
   bool Visit(AST::Call &) override { return true; };
+  bool Visit(AST::Return &) override { return true; };
   bool Visit(AST::ForeachBlock &) override { return true; };
   bool Visit(AST::FunctionDecl &) override;
   bool Visit(AST::ChoreoFunction &) override { return true; };

@@ -107,8 +107,7 @@ class ValueNumbering {
 
   // Retrieve the signature from a value number. About when fails.
   std::string GetSignatureFromValueNumber(int vn) {
-    if (vn == UnknownValue())
-      return "?";
+    if (vn == UnknownValue()) return "?";
 
     if (valueNumberExpressions.back().count(vn) == 0)
       choreo_unreachable("value number " + std::to_string(vn) +
@@ -247,14 +246,14 @@ class ShapeInference : public Visitor {
       // set alias expressions with proper value numbers
       ProcessValueNumberString(
           vn_sig, [this, &vn_sig](int valno, size_t index) {
-            if (UnknownVN(valno)) return; // do not associate it with vn of "?"
+            if (UnknownVN(valno)) return;  // do not associate it with vn of "?"
             vn.GetOrInsertValueNumberFromSignature("index_const_" +
                                                    std::to_string(index));
             vn.AssociateSignatureWithValueNumber(
                 vn_sig + "(" + std::to_string(index) + ")", valno);
           });
 
-      auto vl = GenMDSpanValueFromVNString(vn_sig);
+      auto vl = GenMDSpanValueFromSignature(vn_sig);
       n.SetTypeDetail(vl);
 
       if (n.Dims() != InvalidCount()) {
@@ -272,7 +271,7 @@ class ShapeInference : public Visitor {
       for (size_t i = 1; i < n.dim_count; ++i)
         unknown_spans = unknown_spans + ",#" + std::to_string(UnknownValue());
       cur_mdspan_vn = vn.GetOrInsertValueNumberFromSignature(unknown_spans);
-      n.SetTypeDetail(GenMDSpanValueFromVNString(unknown_spans));
+      n.SetTypeDetail(GenMDSpanValueFromSignature(unknown_spans));
     } else
       SetUnknownVN(cur_mdspan_vn);  // failed to deduce the type detail
 
@@ -377,8 +376,17 @@ class ShapeInference : public Visitor {
 
   bool Visit(AST::Identifier& n) {
     __TRACE_EACH_VISIT__;
-    int valNo = vn.GenerateValueNumberForNode(n);
-    cur_vn = valNo;
+    if (IsDeclared(n.name)) {
+      // it is a reference
+      assert(vn.HasValueNumberForNode(n) &&
+             "value number has not been generated.");
+      cur_vn = vn.HasValueNumberForNode(n);
+    } else {
+      assert(!vn.HasValueNumberForNode(n) &&
+             "value number has been generated.");
+      cur_vn = vn.GenerateValueNumberForNode(n);
+    }
+
     return true;
   };
 
@@ -396,7 +404,7 @@ class ShapeInference : public Visitor {
         vn.AssociateSignatureWithValueNumber(ScopedName(n.sym->name + ".span"),
                                              cur_mdspan_vn);
         n.type->SetType(
-          MakeSpannedType(n.type->base_type, span->GetTypeDetail()));
+            MakeSpannedType(n.type->base_type, span->GetTypeDetail()));
 
       } else if (span->dim_count != __INVALID_VALUE__) {
         assert(ValidVN(cur_mdspan_vn) && "unexpected value number for mdspan.");
@@ -404,7 +412,7 @@ class ShapeInference : public Visitor {
         vn.AssociateSignatureWithValueNumber(ScopedName(n.sym->name + ".span"),
                                              cur_mdspan_vn);
         n.type->SetType(
-          MakeSpannedType(n.type->base_type, span->GetTypeDetail()));
+            MakeSpannedType(n.type->base_type, span->GetTypeDetail()));
       } else {
         // the value number is unknown at compile time
         Error(n.LOC(), "The type can not be inference at compile time.");
@@ -432,16 +440,61 @@ class ShapeInference : public Visitor {
     __TRACE_EACH_VISIT__;
     return true;
   };
+
   bool Visit(AST::ParallelBy& n) {
     __TRACE_EACH_VISIT__;
+    std::string bound = "const_" + std::to_string(n.bound);
+    int valno = vn.GetOrInsertValueNumberFromSignature(bound);
+    std::string iv_name =
+        "@" + ScopedName(n.biv);  // upper-bound of bounded variable
+    vn.AssociateSignatureWithValueNumber(iv_name, valno);
+    n.SetType(MakeBoundedITupleType(
+        GenMDSpanValueFromSignature(vn.GetSignatureFromValueNumber(valno))));
     return true;
   };
+
   bool Visit(AST::RequireBind& n) {
     __TRACE_EACH_VISIT__;
     return true;
   };
   bool Visit(AST::WithIn& n) {
     __TRACE_EACH_VISIT__;
+    if (auto mds = dyn_cast<AST::MultiDimSpans>(n.in.get())) {
+      assert(ValidVN(cur_mdspan_vn) &&
+             "no valid value number generated for the mdspan.");
+      if (n.with_matchers)
+        if (n.with_matchers->Count() != mds->Dims()) {
+          Error(n.LOC(), "inconsistent with-in values and bounds.");
+          return false;
+        }
+
+      auto vn_sig = vn.GetSignatureFromValueNumber(cur_mdspan_vn);
+      ProcessValueNumberString(
+          vn_sig, [this, &vn_sig, &n](int valno, size_t index) {
+            if (UnknownVN(valno)) return;  // do not associate it with vn of "?"
+            if (n.with) {
+              std::string name =
+                  ScopedName(n.with->name) + "(" + std::to_string(index) + ")";
+              vn.AssociateSignatureWithValueNumber(name, valno);
+            }
+
+            if (n.with_matchers) {
+              auto sym =
+                  cast<AST::Identifier>((n.with_matchers->values[index]).get());
+              std::string name = "@" + ScopedName(sym->name);
+              vn.AssociateSignatureWithValueNumber(name, valno);
+              sym->SetType(MakeBoundedITupleType(GenMDSpanValueFromSignature(
+                  vn.GetSignatureFromValueNumber(valno))));
+            }
+          });
+
+      if (n.with)
+        n.with->SetType(
+            MakeBoundedITupleType(GenMDSpanValueFromSignature(vn_sig)));
+    } else {
+      // TODO
+      choreo_unreachable("span expression is required to be supported.");
+    }
     return true;
   };
   bool Visit(AST::WithBlock& n) {
@@ -468,6 +521,10 @@ class ShapeInference : public Visitor {
     return true;
   };
   bool Visit(AST::Call& n) {
+    __TRACE_EACH_VISIT__;
+    return true;
+  };
+  bool Visit(AST::Return& n) {
     __TRACE_EACH_VISIT__;
     return true;
   };
@@ -514,7 +571,7 @@ class ShapeInference : public Visitor {
   }
 
   // TODO: should be recursive
-  MDSpanValue GenMDSpanValueFromVNString(const std::string& input) {
+  MDSpanValue GenMDSpanValueFromSignature(const std::string& input) {
     ValueList result;
 
     std::istringstream stream(input);

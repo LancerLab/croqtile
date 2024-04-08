@@ -141,8 +141,8 @@ void choreo_info(const char *message) {
 %nterm <Choreo::BaseType> fundamental_type
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::Node>> pass_by foreach_block general_val simple_int spanned_value ituple_val bool_literal passable declaration statement assignment paraby_statm w_statement dma_statement wait_statement call_statement index_or_value iv_expr if_else optional_scalar_init param_mdspan_val
-%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments paraby_statms w_statements withins require_binds require_clause with_matchers else_clause
-%nterm <AST::ptr<AST::MultiValues>> index_value_list value_list param_mdspan_list iv_exprs id_list futures passables
+%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments paraby_statms w_statements withins require_binds require_clause else_clause
+%nterm <AST::ptr<AST::MultiValues>> index_value_list value_list param_mdspan_list iv_exprs id_list with_matchers futures passables
 %nterm <AST::ptr<AST::Expr>> s_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type param_type return_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
@@ -784,7 +784,7 @@ with_matchers /* TODO: this special case is pattern-match ids for with-block */
         $$ = $1;
       }
     | IDENTIFIER {
-        $$ = AST::Make<AST::MultiNodes>(@1);
+        $$ = AST::Make<AST::MultiValues>(@1, ", ");
         symtab.AddSymbol($1, MakeIntegerType()); /* in withins, this values should be int only */
         $$->Append(AST::Make<AST::Identifier>(@1, $1));
       }

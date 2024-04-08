@@ -46,6 +46,7 @@ struct FactorCodeGen : public CodeGenerator {
   bool Visit(AST::ChunkAt &) override;
   bool Visit(AST::Wait &) override;
   bool Visit(AST::Call &) override;
+  bool Visit(AST::Return &) override;
   bool Visit(AST::ForeachBlock &) override;
   bool Visit(AST::FunctionDecl &) override;
   bool Visit(AST::ChoreoFunction &) override;
@@ -79,6 +80,7 @@ struct TopsccCodeGen : public CodeGenerator {
   bool Visit(AST::ChunkAt &) override { return true; };
   bool Visit(AST::Wait &) override { return true; };
   bool Visit(AST::Call &) override { return true; };
+  bool Visit(AST::Return &) override { return true; };
   bool Visit(AST::ForeachBlock &) override { return true; };
   bool Visit(AST::FunctionDecl &) override { return true; };
   bool Visit(AST::ChoreoFunction &) override { return true; };

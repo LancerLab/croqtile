@@ -1,0 +1,17 @@
+// RUN: choreo -i %s | FileCheck --match-full-lines %s
+
+// device program
+__co__ void ele_add(s32 mdspan<1> a, s32 mdspan<1> b) {
+  parallel p by 6 {
+    with index = {x, y} in [10, 20] {
+      foreach x { }
+    }
+  }
+}
+
+// CHECK: Parameter: ele_add::a, Type: s32 mdspan<1> [?]
+// CHECK: Parameter: ele_add::b, Type: s32 mdspan<1> [?]
+// CHECK: Bounded: ele_add::paraby_0::p, Type: {int}->[6]
+// CHECK: Bounded: ele_add::paraby_0::within_0::index, Type: {int,int}->[10, 20]
+// CHECK: Bounded: ele_add::paraby_0::within_0::x, Type: {int}->[10]
+// CHECK: Bounded: ele_add::paraby_0::within_0::y, Type: {int}->[20]

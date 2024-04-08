@@ -33,8 +33,7 @@ void ValueNumbering::LeaveScope() {
   nodeValueNumbers.pop_back();
 
   // reset value number when leaving the function scope
-  if (expressionValueNumbers.empty())
-    nextValueNumber = 0;
+  if (expressionValueNumbers.empty()) nextValueNumber = 0;
 
   if (trace) os << ScopeIndent() << "} // end scope-" << sname << "\n";
 }
@@ -246,8 +245,7 @@ std::string ValueNumbering::GenerateNodeSignature(AST::Node& node,
   }
 
   if (auto* n = dyn_cast<AST::IntLiteral>(&node)) {
-    if (n->value == __UNKNOWN_INTVAL__)
-      return "?";
+    if (n->value == __UNKNOWN_INTVAL__) return "?";
     return "const_" + std::to_string(n->value);
   } else if (auto* v = dyn_cast<AST::Identifier>(&node)) {
     if (auto name_in_scope = visitor->InScopeName(v->name)) {
@@ -395,8 +393,7 @@ int ValueNumbering::GetOrInsertValueNumberFromSignature(
 
 int ValueNumbering::GenerateValueNumberFromSignature(
     const std::string& signature) {
-  if (signature == "?")
-    return UnknownValue();
+  if (signature == "?") return UnknownValue();
 
   if (HasValueNumberOfSignature(signature))
     choreo_unreachable("signature \"" + signature + "\" has already existed.");

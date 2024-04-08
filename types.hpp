@@ -164,25 +164,25 @@ static constexpr size_t __INVALID_VALUE__ = std::numeric_limits<size_t>::max();
 static constexpr int __UNKNOWN_INTVAL__ = std::numeric_limits<int>::min();
 static constexpr int __INVALID_INTVAL__ = std::numeric_limits<int>::max();
 
-using ValueListExpr = std::string;
-using ValueListElem = std::variant<int, ValueListExpr>;
-using ValueList = std::vector<ValueListElem>;
+using ValueExpr = std::string;
+using ValueItem = std::variant<int, ValueExpr>;
+using ValueList = std::vector<ValueItem>;
 
-struct ValueListExprHasher {
-  std::size_t operator()(const ValueListExpr& v) const noexcept {
+struct ValueExprHasher {
+  std::size_t operator()(const ValueExpr& v) const noexcept {
     return std::hash<std::string>{}(v);
   }
 };
 
-struct ValueListElemHasher {
-  std::size_t operator()(const ValueListElem& var) const noexcept {
+struct ValueItemHasher {
+  std::size_t operator()(const ValueItem& var) const noexcept {
     std::size_t content_hash = std::visit(
         [](auto&& arg) -> std::size_t {
           using T = std::decay_t<decltype(arg)>;
           if constexpr (std::is_same_v<T, int>) {
             return std::hash<int>{}(arg);
           } else if constexpr (std::is_same_v<T, std::string>) {
-            return ValueListExprHasher{}(arg);
+            return ValueExprHasher{}(arg);
           } else {
             static_assert(always_false<void>, "Unhandled type in variant");
             return 0;  // This line should theoretically never be reached.
@@ -200,7 +200,7 @@ struct ValueListElemHasher {
 struct ValueListHasher {
   std::size_t operator()(const ValueList& val) const noexcept {
     std::size_t hash = 0;
-    ValueListElemHasher variantHasher;
+    ValueItemHasher variantHasher;
     for (const auto& v : val)
       hash ^= variantHasher(v) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
 
@@ -208,8 +208,7 @@ struct ValueListHasher {
   }
 };
 
-inline bool isValueListElemEqual(const ValueListElem& a,
-                                 const ValueListElem& b) {
+inline bool isValueItemEqual(const ValueItem& a, const ValueItem& b) {
   if (a.index() != b.index()) return false;  // Different types
 
   return a == b;
@@ -220,7 +219,7 @@ inline bool isValueListEqual(const ValueList& a, const ValueList& b) {
   if (a.size() != b.size()) return false;  // Different sizes
 
   for (size_t i = 0; i < a.size(); ++i)
-    if (!isValueListElemEqual(a[i], b[i])) return false;  // Found a mismatch
+    if (!isValueItemEqual(a[i], b[i])) return false;  // Found a mismatch
 
   return true;  // All elements match
 }
@@ -271,7 +270,7 @@ struct ValueListRepo {
 };
 
 inline void PrintValueList(const ValueList& vl, std::ostream& os) {
-  auto print_variant = [&os](const ValueListElem& vle) {
+  auto print_variant = [&os](const ValueItem& vle) {
     if (vle.index() == 0)
       os << std::get<0>(vle);
     else
@@ -400,7 +399,9 @@ struct IntegerType : public ScalarType, public TypeIDProvider<IntegerType> {
   void Print(std::ostream& os) const override { os << "int"; }
   const std::string Name() const override { return "integer"; }
 
-  bool operator==(const Type& ty) const override { return isa<IntegerType>(&ty); }
+  bool operator==(const Type& ty) const override {
+    return isa<IntegerType>(&ty);
+  }
   __UDT_TYPE_INFO__
 };
 
@@ -445,8 +446,7 @@ struct ITupleType : public Type, public TypeIDProvider<ITupleType> {
 
   bool operator==(const Type& ty) const override {
     if (auto itty = dyn_cast<ITupleType>(&ty)) {
-      if ((Dims() == itty->Dims()) && HasSufficientInfo())
-        return true;
+      if ((Dims() == itty->Dims()) && HasSufficientInfo()) return true;
     }
     return false;
   }
@@ -459,8 +459,8 @@ struct MDSpanType : public Type, public TypeIDProvider<MDSpanType> {
 
   MDSpanType(const MDSpanValue& v) : Type(TypeCategory::PARTIAL), value(v) {}
 
-  void SetValue(const MDSpanValue &v) { value = v; }
-  const MDSpanValue & GetValue() { return value; }
+  void SetValue(const MDSpanValue& v) { value = v; }
+  const MDSpanValue& GetValue() { return value; }
 
   size_t Dims() const override {
     assert(value.IsValid() && "Invalid mdspan defined.");
@@ -519,11 +519,15 @@ struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
 
 struct BoundedIntegerType final : public Type,
                                   public TypeIDProvider<BoundedIntegerType> {
-  int bound = __UNKNOWN_INTVAL__;
+  ValueItem bound = __UNKNOWN_INTVAL__;
   BoundedIntegerType(int b) : Type(TypeCategory::BOUNDED_INT), bound(b) {}
+  BoundedIntegerType(const std::string& expr)
+      : Type(TypeCategory::BOUNDED_INT), bound(expr) {}
 
   bool IsComplete() const override { return true; }
-  bool HasSufficientInfo() const { return bound != __UNKNOWN_INTVAL__; }
+  bool HasSufficientInfo() const {
+    return bound != ValueItem{__UNKNOWN_INTVAL__};
+  }
 
   bool operator==(const Type& ty) const override {
     if (isa<BoundedIntegerType>(&ty)) return false;
@@ -531,10 +535,11 @@ struct BoundedIntegerType final : public Type,
   }
 
   void Print(std::ostream& os) const override {
-    if (bound == __UNKNOWN_INTVAL__)
+    if (bound == ValueItem{__UNKNOWN_INTVAL__})
       os << "int->[unknown]";
     else
-      os << "int->[0, " << bound << ")";
+      std::visit([this, &os](const auto& v) { os << "int->[0, " << v << ")"; },
+                 bound);
   }
 
   const std::string Name() const override { return "bounded-integer"; }
@@ -544,30 +549,27 @@ struct BoundedIntegerType final : public Type,
 
 struct BoundedITupleType final : public Type,
                                  public TypeIDProvider<BoundedITupleType> {
-  ITupleType ituple;
-  SpannedType bounds;
-  BoundedITupleType(size_t n, const SpannedType& s)
-      : Type(TypeCategory::BOUNDED_ITUPLE), ituple(n), bounds(s) {
-    assert(n == s.Dims() &&
-           "ituple has a different bounded range with the associated mdspan.");
-  }
+  MDSpanValue bounds;
+  BoundedITupleType(const MDSpanValue& s)
+      : Type(TypeCategory::BOUNDED_ITUPLE), bounds(s) {}
 
-  size_t Dims() const override { return ituple.Dims(); }
+  size_t Dims() const override { return bounds.Dims(); }
   bool IsComplete() const override { return true; }
-  bool HasSufficientInfo() const {
-    return ituple.HasSufficientInfo() && bounds.HasSufficientInfo();
-  }
+  bool HasSufficientInfo() const { return bounds.IsValid(); }
 
   bool operator==(const Type& ty) const override {
     if (!isa<BoundedITupleType>(&ty)) return false;
     auto& t = (BoundedITupleType&)ty;
-    return (t.bounds == bounds) && t.ituple == ituple;
+    return t.bounds == bounds;
   }
 
   void Print(std::ostream& os) const override {
-    ituple.Print(os);
-    os << "->";
-    bounds.Print(os);
+    if (Dims() > 0) {
+      os << "{int";
+      for (size_t i = 1; i < Dims(); ++i) os << ",int";
+      os << "}->";
+      bounds.Print(os);
+    }
   }
 
   const std::string Name() const override { return "bounded-ituple"; }
@@ -581,7 +583,9 @@ struct FutureType : public ScalarType, public TypeIDProvider<FutureType> {
   void Print(std::ostream& os) const override { os << "fut"; }
   const std::string Name() const override { return "future"; }
 
-  bool operator==(const Type& ty) const override { return isa<FutureType>(&ty); }
+  bool operator==(const Type& ty) const override {
+    return isa<FutureType>(&ty);
+  }
   __UDT_TYPE_INFO__
 };
 
@@ -598,9 +602,7 @@ inline bool operator!=(const Type& t1, const Type& t2) {
 // Utility functions to generate types
 inline MDSpanValue GenUninitMDSpanValue() { return MDSpanValue(); }
 
-inline ptr<VoidType> MakeVoidType() {
-  return std::make_shared<VoidType>();
-}
+inline ptr<VoidType> MakeVoidType() { return std::make_shared<VoidType>(); }
 
 inline ptr<UnknownType> MakeUnknownType() {
   return std::make_shared<UnknownType>();
@@ -637,6 +639,10 @@ inline ptr<SpannedType> MakeSpannedType(FundamentalType ft,
 
 inline ptr<SpannedType> MakeSpannedType(BaseType ft, const MDSpanValue& v) {
   return MakeSpannedType((FundamentalType)ft, v);
+}
+
+inline ptr<BoundedITupleType> MakeBoundedITupleType(const MDSpanValue& v) {
+  return std::make_shared<BoundedITupleType>(v);
 }
 
 inline ptr<FutureType> MakeFutureType() {

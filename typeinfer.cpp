@@ -45,7 +45,7 @@ bool TypeInference::AssignSymbolWithType(const location& loc,
 ptr<Type> TypeInference::GetSymbolType(const location& loc,
                                        const std::string& name) {
   if (!IsDeclared(name)) {
-    Error(loc, "symbol `" + name + "' has not been defined.");
+    Error(loc, "The symbol `" + name + "' has not been defined.");
     return nullptr;
   }
   if (auto* sym = LookupSymbol(name)) {
@@ -153,7 +153,7 @@ bool TypeInference::Visit(AST::Assignment&) { return true; }
 bool TypeInference::Visit(AST::FunctionDecl&) {
   cur_type.reset();
   return true;
-};
+}
 
 bool TypeInference::Visit(AST::Parameter& p) {
   // obtain its type
@@ -204,13 +204,8 @@ bool TypeInference::Visit(AST::Expr& n) {
       }
     }
 
-    // TODO: WE SHOULD DE-SUGERIZE EARLY TO AVOID SPECIAL HANDLING
-    // A single reference to the index is the syntax suger for indexing
-    // operation.
-    if (isa<AST::IntIndex>(ref.get())) {
-      n.SetType(MakeIntegerType());
-      return true;
-    }
+    // must have de-sugared early
+    assert(!isa<AST::IntIndex>(ref.get()));
 
     if (AST::typeof<UnknownType>(ref.get())) {
       Error(n.LOC(), "unable to infer the type of expression.");
@@ -244,5 +239,52 @@ bool TypeInference::Visit(AST::IntTuple& n) {
 
 bool TypeInference::Visit(AST::DMA &n) {
   DefineSymbol(n.future->name, MakeFutureType());
+  DefineSymbol(n.future->name + ".span", MakeUnknownType());
+  return true;
+}
+
+bool TypeInference::Visit(AST::ParallelBy &n) {
+  DefineSymbol(n.biv, n.GetType());
+  if (Dump) {
+    os << "Bounded: ";
+    os << *InScopeName(n.biv);
+    os << ", Type: ";
+    n.GetType()->Print(os);
+    os << "\n";
+  }
+  return true;
+}
+
+bool TypeInference::Visit(AST::WithIn &n) {
+  if (n.with)
+    DefineSymbol(n.with->name, n.with->GetType());
+
+  if (n.with_matchers) {
+    for (auto pid : n.with_matchers->values) {
+      auto id = cast<AST::Identifier>(pid.get());
+      DefineSymbol(id->name, id->GetType());
+    }
+  }
+
+  if (Dump) {
+    if (n.with) {
+      os << "Bounded: ";
+      os << *InScopeName(n.with->name);
+      os << ", Type: ";
+      n.with->GetType()->Print(os);
+      os << "\n";
+    }
+    if (n.with_matchers) {
+      for (auto pid : n.with_matchers->values) {
+        auto id = cast<AST::Identifier>(pid.get());
+        os << "Bounded: ";
+        os << *InScopeName(id->name);
+        os << ", Type: ";
+        id->GetType()->Print(os);
+        os << "\n";
+      }
+    }
+  }
+
   return true;
 }

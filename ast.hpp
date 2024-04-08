@@ -107,15 +107,6 @@ struct MultiNodes : public Node, public TypeIDProvider<MultiNodes> {
     }
   }
 
-  // TODO: workaround for "x, y" like print, we may need typeid to merge this
-  // print logic into trivial Print()
-  void InlinePrint(std::ostream& os, const std::string& prefix = {}) const {
-    for (auto& v : values) {
-      v->Print(os, prefix);
-      if (&v != &values.back()) os << ", ";
-    }
-  }
-
   void accept(Visitor& visitor) override;
 
   __UDT_TYPE_INFO__
@@ -702,12 +693,19 @@ struct RequireBind : public Node, public TypeIDProvider<RequireBind> {
 };
 
 struct WithIn : public Node, public TypeIDProvider<WithIn> {
-  ptr<Node> with;
+  ptr<Identifier> with;  // either with or with_matcher
   ptr<Node> in;
-  ptr<MultiNodes> with_matchers;  // optional requirements
+  ptr<MultiValues> with_matchers;
 
-  WithIn(const location& l, const ptr<Node>& w, const ptr<Node>& i)
-      : Node(l), with(w), in(i) {}
+  WithIn(const location& l, const ptr<Identifier>& w, const ptr<Node>& i)
+      : Node(l), with(w), in(i), with_matchers(nullptr) {}
+
+  WithIn(const location& l, const ptr<Node>& i, const ptr<MultiValues>& m)
+      : Node(l), with(nullptr), in(i), with_matchers(m) {}
+
+  WithIn(const location& l, const ptr<Identifier>& w, const ptr<Node>& i,
+         ptr<MultiValues> m)
+      : Node(l), with(w), in(i), with_matchers(m) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix << "`- ";
@@ -783,10 +781,10 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
 };
 
 struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
-  ptr<Node> data;
+  ptr<Identifier> data;
   ptr<MultiValues> positions;
 
-  ChunkAt(const location& l, const ptr<Node>& d, const ptr<MultiValues>& p)
+  ChunkAt(const location& l, const ptr<Identifier>& d, const ptr<MultiValues>& p)
       : Node(l), data(d), positions(p) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {

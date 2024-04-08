@@ -96,9 +96,13 @@ void ParallelBy::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
-void RequireBind::accept(Choreo::Visitor& v) { (void)v; }
+void RequireBind::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
-void WithIn::accept(Choreo::Visitor& v) { v.Visit(*this); }
+void WithIn::accept(Choreo::Visitor& v) {
+  in->accept(v);
+  // have to handle identifier/matcher inside 'within'
+  v.Visit(*this);
+}
 
 void WithBlock::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
@@ -113,10 +117,14 @@ void Memory::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
 void DMA::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
-void ChunkAt::accept(Choreo::Visitor& v) { (void)v; }
-void Wait::accept(Choreo::Visitor& v) { (void)v; }
-void Return::accept(Choreo::Visitor& v) { (void)v; }
-void Call::accept(Choreo::Visitor& v) { (void)v; }
+void ChunkAt::accept(Choreo::Visitor& v) { v.Visit(*this); }
+
+void Wait::accept(Choreo::Visitor& v) { v.Visit(*this); }
+
+void Return::accept(Choreo::Visitor& v) { v.Visit(*this); }
+
+void Call::accept(Choreo::Visitor& v) { v.Visit(*this); }
+
 void ForeachBlock::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
   v.Visit(*this);

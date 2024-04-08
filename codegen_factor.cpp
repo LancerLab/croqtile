@@ -199,6 +199,7 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
 bool FactorCodeGen::Visit(AST::ChunkAt &) { return true; };
 bool FactorCodeGen::Visit(AST::Wait &) { return true; };
 bool FactorCodeGen::Visit(AST::Call &) { return true; };
+bool FactorCodeGen::Visit(AST::Return &) { return true; };
 
 bool FactorCodeGen::Visit(AST::ForeachBlock &) { return true; }
 

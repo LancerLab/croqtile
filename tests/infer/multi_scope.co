@@ -65,22 +65,27 @@ __co__ int foo(f32 [2, 3, 4] d, int e) {
 // VALNO:   Alias "#9,#18,#2(2)" -> #2
 // VALNO:   Alias "foo::c" -> #19
 // VALNO:   scope-2 {
-// VALNO:    New VN #20: 'const_25'
-// VALNO:    New VN #21: '#20,#10,#8'
-// VALNO:    Alias "#20,#10,#8(0)" -> #20
-// VALNO:    Alias "#20,#10,#8(1)" -> #10
-// VALNO:    Alias "#20,#10,#8(2)" -> #8
-// VALNO:    Alias "foo::paraby_0::a" -> #21
+// VALNO:    New VN #20: 'const_6'
+// VALNO:    Alias "@foo::paraby_0::p" -> #20
+// VALNO:    New VN #21: 'const_25'
+// VALNO:    New VN #22: '#21,#10,#8'
+// VALNO:    Alias "#21,#10,#8(0)" -> #21
+// VALNO:    Alias "#21,#10,#8(1)" -> #10
+// VALNO:    Alias "#21,#10,#8(2)" -> #8
+// VALNO:    Alias "foo::paraby_0::a" -> #22
 // VALNO:    scope-3 {
-// VALNO:     <Simplify> 'dimof:#21:#4 / ref:#9' to 'const_5'
+// VALNO:     New VN #23: '#1'
+// VALNO:     Alias "#1(0)" -> #1
+// VALNO:     Alias "foo::paraby_0::within_0::g(0)" -> #1
+// VALNO:     <Simplify> 'dimof:#22:#4 / ref:#9' to 'const_5'
 // VALNO:     <Simplify> 'ref:#1 + dimof:#16:#6' to 'const_23'
-// VALNO:     New VN #22: 'const_23'
-// VALNO:     <Simplify> 'dimof:#21:#4 / ref:#9' to 'const_5'
-// VALNO:     New VN #23: '#9,#22'
-// VALNO:     Alias "#9,#22(0)" -> #9
-// VALNO:     Alias "#9,#22(1)" -> #22
-// VALNO:     <Simplify> 'dimof:#21:#4 / ref:#9' to 'const_5'
-// VALNO:     Alias "foo::paraby_0::within_0::b" -> #23
+// VALNO:     New VN #24: 'const_23'
+// VALNO:     <Simplify> 'dimof:#22:#4 / ref:#9' to 'const_5'
+// VALNO:     New VN #25: '#9,#24'
+// VALNO:     Alias "#9,#24(0)" -> #9
+// VALNO:     Alias "#9,#24(1)" -> #24
+// VALNO:     <Simplify> 'dimof:#22:#4 / ref:#9' to 'const_5'
+// VALNO:     Alias "foo::paraby_0::within_0::b" -> #25
 // VALNO:    } // end scope-3
 // VALNO:   } // end scope-2
 // VALNO:  } // end scope-1
