@@ -1,0 +1,51 @@
+Value numbering -> Shape inference
+
+1. Unsupported arithmetic:
+a : {} ; // mdspan
+c = [] ; // ituple
+// need support in value numbering
+g : a + c; //mdspan + ituple
+
+2. SSA definition
+
+a : {}  // mdspan is already singly defined
+c = []  // definition
+c = []  // re-definition, will break scope-based value numbering
+
+def of c
+|
+def of c
+
+solution: do not allow re-defintion of ituple, scalar
+
+  int a = 3;
+  if () {
+    a = 4;   // re-definition
+  } else {
+    ...
+  }
+  c : {a};   // where is the value comes
+
+   +<------+
+   |       |
+statms     |
+   |       |
+   +-------+
+
+rule 2: mdspan : { ... , bounded-variable, } do not allow bounded variable be inside mdspan
+
+bounded-ituple = bounded-ituple  // support arith?
+bounded-integer = bounded-integer // support arith?
+
+
+require/where  a<->b
+// check associated bound
+
+foreach a {
+  int b = 3;
+  foreach c {
+    int f = b + c;    // 'b' is an alias of 'a'
+  }
+}
+
+desugar? handle name scope issue...
