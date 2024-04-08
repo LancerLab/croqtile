@@ -158,7 +158,7 @@ class ShapeInference : public Visitor {
 
  public:
   ShapeInference(bool t = false, std::ostream& o = std::cout)
-      : vn(this, t, o), os(o), trace_visit(std::getenv("TRACE_VISIT")) {}
+      : vn(this, t, o), os(o), trace_visit(std::getenv("TRACE_VALNO")) {}
 
  public:
   void PrintValueNumbers(std::ostream& os) {

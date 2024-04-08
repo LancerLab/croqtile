@@ -7,7 +7,7 @@
 
 using namespace Choreo;
 
-bool TypeInference::BeforeVisit(AST::Node& n) {
+bool TypeInference::BeforeVisit(AST::Node &n) {
   if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
     EnterScope(f->name);
   } else if (isa<AST::ParallelBy>(&n)) {
@@ -24,7 +24,7 @@ bool TypeInference::BeforeVisit(AST::Node& n) {
   return true;
 }
 
-bool TypeInference::AfterVisit(AST::Node& n) {
+bool TypeInference::AfterVisit(AST::Node &n) {
   if (isa<AST::ChoreoFunction>(&n) || isa<AST::ParallelBy>(&n) ||
       isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n)) {
     LeaveScope();
@@ -32,9 +32,9 @@ bool TypeInference::AfterVisit(AST::Node& n) {
   return true;
 }
 
-bool TypeInference::AssignSymbolWithType(const location& loc,
-                                         const std::string& sym,
-                                         const ptr<Type>& ty) {
+bool TypeInference::AssignSymbolWithType(const location &loc,
+                                         const std::string &sym,
+                                         const ptr<Type> &ty) {
   if (!DefineSymbol(sym, ty)) {
     Error(loc, "symbol `" + sym + "' has already been associated with a type.");
     return false;
@@ -42,13 +42,13 @@ bool TypeInference::AssignSymbolWithType(const location& loc,
   return true;
 }
 
-ptr<Type> TypeInference::GetSymbolType(const location& loc,
-                                       const std::string& name) {
+ptr<Type> TypeInference::GetSymbolType(const location &loc,
+                                       const std::string &name) {
   if (!IsDeclared(name)) {
     Error(loc, "The symbol `" + name + "' has not been defined.");
     return nullptr;
   }
-  if (auto* sym = LookupSymbol(name)) {
+  if (auto *sym = LookupSymbol(name)) {
     return sym->GetType();
   } else {
     Error(loc, "symbol `" + name + "' is not associated with a type.");
@@ -56,15 +56,7 @@ ptr<Type> TypeInference::GetSymbolType(const location& loc,
   }
 }
 
-bool TypeInference::Visit(AST::DataType& n) {
-  assert((cur_type == nullptr) && "Expecting null type.");
-
-  cur_type = n.GetType();
-
-  return true;
-}
-
-bool TypeInference::SetCurrentType(AST::Node& nd, const std::string& n) {
+bool TypeInference::SetCurrentType(AST::Node &nd, const std::string &n) {
   const auto ty = nd.GetType();
   if (ty->HasSufficientInfo()) {
     // already has a type with sufficient info, check for consistence.
@@ -94,7 +86,53 @@ bool TypeInference::SetCurrentType(AST::Node& nd, const std::string& n) {
   return true;
 }
 
-bool TypeInference::Visit(AST::NamedVariableDecl& n) {
+#define __TRACE_EACH_VISIT__(n)       \
+  if (trace_visit) {                  \
+    os << n.NodeTypeString() << ": "; \
+    os << "\n";                       \
+  }
+
+bool TypeInference::Visit(AST::MultiNodes &n) {
+  __TRACE_EACH_VISIT__(n)
+  return true;
+}
+
+bool TypeInference::Visit(AST::MultiValues &n) {
+  __TRACE_EACH_VISIT__(n)
+  return true;
+}
+
+bool TypeInference::Visit(AST::IntLiteral &n) {
+  __TRACE_EACH_VISIT__(n)
+  return true;
+}
+
+bool TypeInference::Visit(AST::DataType &n) {
+  __TRACE_EACH_VISIT__(n)
+  assert((cur_type == nullptr) && "Expecting null type.");
+
+  if (!n.mdspan_type) {
+    cur_type = n.GetType();
+    return true;
+  }
+
+  if (auto mdspan = dyn_cast<AST::MultiDimSpans>(n.mdspan_type.get())) {
+    n.SetType(std::make_shared<SpannedType>(
+        n.getFundamentalType(), *(cast<MDSpanType>(mdspan->GetType().get()))));
+    cur_type = n.GetType();
+  }
+
+  return true;
+}
+
+bool TypeInference::Visit(AST::Identifier &n) {
+  __TRACE_EACH_VISIT__(n)
+  return true;
+}
+
+bool TypeInference::Visit(AST::NamedVariableDecl &n) {
+  __TRACE_EACH_VISIT__(n)
+
   if (!SetCurrentType(n, n.name_str)) {
     cur_type.reset();
     return false;
@@ -107,13 +145,15 @@ bool TypeInference::Visit(AST::NamedVariableDecl& n) {
   if (Dump) {
     os << "Symbol:    " << *InScopeName(n.name_str) << ", Type: ";
     n.PrintType(os);
+    if (n.mem) os << ", Storage: " << AST::STR(*n.mem);
     os << "\n";
   }
 
   return true;
 }
 
-bool TypeInference::Visit(AST::NamedTypeDecl& n) {
+bool TypeInference::Visit(AST::NamedTypeDecl &n) {
+  __TRACE_EACH_VISIT__(n)
   if (AST::typeof<UnknownType>(&n)) {
     // need type inference
     if (!n.init_expr) {
@@ -148,14 +188,24 @@ bool TypeInference::Visit(AST::NamedTypeDecl& n) {
 }
 
 // ituple override operator "=" for definition
-bool TypeInference::Visit(AST::Assignment&) { return true; }
+bool TypeInference::Visit(AST::Assignment &n) {
+  __TRACE_EACH_VISIT__(n)
+  return true;
+}
 
-bool TypeInference::Visit(AST::FunctionDecl&) {
+bool TypeInference::Visit(AST::IntIndex &n) {
+  __TRACE_EACH_VISIT__(n)
+  return true;
+}
+
+bool TypeInference::Visit(AST::FunctionDecl &n) {
+  __TRACE_EACH_VISIT__(n)
   cur_type.reset();
   return true;
 }
 
-bool TypeInference::Visit(AST::Parameter& p) {
+bool TypeInference::Visit(AST::Parameter &p) {
+  __TRACE_EACH_VISIT__(p)
   // obtain its type
   p.SetType(p.type->GetType());
 
@@ -183,15 +233,20 @@ bool TypeInference::Visit(AST::Parameter& p) {
   return true;
 }
 
-bool TypeInference::Visit(AST::ParamList&) { return true; }
+bool TypeInference::Visit(AST::ParamList &n) {
+  __TRACE_EACH_VISIT__(n)
+  return true;
+}
 
-bool TypeInference::Visit(AST::MultiDimSpans&) {
+bool TypeInference::Visit(AST::MultiDimSpans &n) {
+  __TRACE_EACH_VISIT__(n)
   //  assert(!cur_mdspan_value.IsValid() && "Expecting null mdspan value.");
   //  cur_mdspan_value = mds.MakeValueList();
   return true;
 }
 
-bool TypeInference::Visit(AST::Expr& n) {
+bool TypeInference::Visit(AST::Expr &n) {
+  __TRACE_EACH_VISIT__(n)
   if (auto ref = n.GetReference()) {
     if (auto id = dyn_cast<AST::Identifier>(ref.get())) {
       if (auto pty = GetSymbolType(n.LOC(), id->name)) {
@@ -232,21 +287,24 @@ bool TypeInference::Visit(AST::Expr& n) {
   return true;
 }
 
-bool TypeInference::Visit(AST::IntTuple& n) {
+bool TypeInference::Visit(AST::IntTuple &n) {
+  __TRACE_EACH_VISIT__(n)
   cur_type = n.GetType();
   return true;
 }
 
 bool TypeInference::Visit(AST::DMA &n) {
+  __TRACE_EACH_VISIT__(n)
   DefineSymbol(n.future->name, MakeFutureType());
   DefineSymbol(n.future->name + ".span", MakeUnknownType());
   return true;
 }
 
 bool TypeInference::Visit(AST::ParallelBy &n) {
+  __TRACE_EACH_VISIT__(n)
   DefineSymbol(n.biv, n.GetType());
   if (Dump) {
-    os << "Bounded: ";
+    os << "Bounded:   ";
     os << *InScopeName(n.biv);
     os << ", Type: ";
     n.GetType()->Print(os);
@@ -255,9 +313,14 @@ bool TypeInference::Visit(AST::ParallelBy &n) {
   return true;
 }
 
+bool TypeInference::Visit(AST::RequireBind &n) {
+  __TRACE_EACH_VISIT__(n)
+  return true;
+}
+
 bool TypeInference::Visit(AST::WithIn &n) {
-  if (n.with)
-    DefineSymbol(n.with->name, n.with->GetType());
+  __TRACE_EACH_VISIT__(n)
+  if (n.with) DefineSymbol(n.with->name, n.with->GetType());
 
   if (n.with_matchers) {
     for (auto pid : n.with_matchers->values) {
@@ -268,7 +331,7 @@ bool TypeInference::Visit(AST::WithIn &n) {
 
   if (Dump) {
     if (n.with) {
-      os << "Bounded: ";
+      os << "Bounded:   ";
       os << *InScopeName(n.with->name);
       os << ", Type: ";
       n.with->GetType()->Print(os);
@@ -277,7 +340,7 @@ bool TypeInference::Visit(AST::WithIn &n) {
     if (n.with_matchers) {
       for (auto pid : n.with_matchers->values) {
         auto id = cast<AST::Identifier>(pid.get());
-        os << "Bounded: ";
+        os << "Bounded:   ";
         os << *InScopeName(id->name);
         os << ", Type: ";
         id->GetType()->Print(os);
@@ -286,5 +349,46 @@ bool TypeInference::Visit(AST::WithIn &n) {
     }
   }
 
+  return true;
+}
+
+bool TypeInference::Visit(AST::WithBlock &n) {
+  __TRACE_EACH_VISIT__(n)
+  return true;
+}
+bool TypeInference::Visit(AST::Memory &n) {
+  __TRACE_EACH_VISIT__(n)
+  return true;
+}
+bool TypeInference::Visit(AST::ChunkAt &n) {
+  __TRACE_EACH_VISIT__(n)
+  return true;
+}
+bool TypeInference::Visit(AST::Wait &n) {
+  __TRACE_EACH_VISIT__(n)
+  return true;
+}
+bool TypeInference::Visit(AST::Call &n) {
+  __TRACE_EACH_VISIT__(n)
+  return true;
+}
+bool TypeInference::Visit(AST::Return &n) {
+  __TRACE_EACH_VISIT__(n)
+  return true;
+}
+bool TypeInference::Visit(AST::ForeachBlock &n) {
+  __TRACE_EACH_VISIT__(n)
+  return true;
+}
+bool TypeInference::Visit(AST::ChoreoFunction &n) {
+  __TRACE_EACH_VISIT__(n)
+  return true;
+}
+bool TypeInference::Visit(AST::CppSourceCode &n) {
+  __TRACE_EACH_VISIT__(n)
+  return true;
+}
+bool TypeInference::Visit(AST::Program &n) {
+  __TRACE_EACH_VISIT__(n)
   return true;
 }

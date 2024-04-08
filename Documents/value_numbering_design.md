@@ -1,11 +1,11 @@
-# Introduction of Choreo value numbering
-In Choreo, the value numbering process serves to facilitate Shape Inference of spanned data by either directly inferring shapes known at compile time or generating shape computation expressions.
+# Introduction to Choreo Value Numbering
+In Choreo, the value numbering process serves to facilitate Shape Inference by either directly inferring shapes known at compile time or generating shape computation expressions.
 
 While many value numbering approaches focus on eliminating redundant computations (expressions that consistently produce the same value), Choreo's value numbering aims to establish a progressive method for simplifying the Choreo domain-specific construct 'mdspan'. In this context, the application of constant propagation, algebraic simplification, and other techniques becomes more essential.
 
-In terms of the implementation method, Choreo utilizes a simple scoped value numbering approach, an extension of the local value numbering method, complemented by a lexical-scoped value number table[1]. Unlike other value numbering methods, Choreo does not necessitate the construction of basic blocks, pruned-SSA, or a compiler backend, as it applies value numbering directly onto the Abstract Syntax Tree (AST). However, to facilitate this approach, certain restrictions must be imposed on Choreo's syntax rules, particularly to prevent value mutation.
+In terms of the implementation method, Choreo utilizes a simple **scope-based** value numbering approach, an extension of the local value numbering method, complemented by a lexical-scoped value number table[1]. Unlike other value numbering methods, Choreo does not necessitate the construction of basic blocks, pruned-SSA, or a compiler backend, as it applies value numbering directly onto the Abstract Syntax Tree (AST). However, to facilitate this approach, certain restrictions must be imposed on Choreo's syntax rules, particularly to prevent value mutation.
 
-# Example
+## Quick Example
 The value numbering process assigns a value number to all entities containing a list of values, including for mdspan and ituple. For example,
 ```
 mdspan a : {1, b, c + 3}
@@ -19,7 +19,8 @@ The value numbering process would produce values including:
    VN #4:  +:#2:#3
    VN #5:  #0,#1,#4
 ```
-Here, value number #0 and #3 represents a reference to constant value, where #1, and #2 represents reference to the integer-typed variable "b" and "c". #4 represents the value number of the addition expression. And finally, value number #5 represents the list of values defined by mdspan 'a'.
+In this illustration, the number after "VN #" is the value number of an expression. I either represents a constant integer value (known at compile time), a symbolic value (like variable 'a', 'b'), or composition of other value numbers.
+Here, value number #0 and #3 represents a reference to constant value, where #1, and #2 represents reference to the integer-typed variable "b" and "c". #4 represents the value of an addition expression, which gives the sum of #2 and #3. That is the expression of 'c + 3' when dereferencing all the value numbers. And lastly, value number #5 represents the list of values defined by mdspan 'a' symbolically.
 With such a definition, we may translate the indexing operations, e.g. "a(0)", results in value number #0 and thus a constant of 1.
 
 # Implementations
@@ -75,10 +76,15 @@ The shape detail of *mdspan* could be runtime decided. However, in many scenario
 
 Consequently, except the constant values, it is required to generate expressions back from value numbers.
 
+# Design Considerations
+## Lexical Scopes and Restriction
+In Choreo, we applying the value numbering *GLOBALLY* but on top of AST. As it is a syntax-directed method without basic blocks and thus lack data flow analysis, it is impossible to inference a shape with varying dimensions.
 
-# Considerations
 ## Limitations
-In Choreo, we applying the value numbering *GLOBALLY*. Since it is a syntax-directed method without basic blocks and thus data flow analysis, it has limitations. However, as
+More specifically, it has to set two limitations:
+1. Any mdspan can not have element with bounded integer type, or produced from bounded ituple.
+2. Simple integer type and ituple type can not be re-defined.
+
 
 
 # Reference

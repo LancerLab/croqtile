@@ -508,6 +508,7 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
   }
 
   BaseType getBaseType() const { return base_type; }
+  FundamentalType getFundamentalType() const { return (FundamentalType)base_type; }
   Node* getPartialType() const { return mdspan_type.get(); }
 
   bool isScalar() const {

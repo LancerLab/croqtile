@@ -12,6 +12,7 @@ struct TypeInference : public Visitor {
  private:
   bool Dump = false;
   std::ostream &os;
+  bool trace_visit = false;  // for debugging purpose only
 
  private:
   ptr<Type> cur_type = nullptr;
@@ -28,37 +29,38 @@ struct TypeInference : public Visitor {
   ptr<Type> GetSymbolType(const location &, const std::string &);
 
  public:
-  TypeInference(bool d, std::ostream &o = std::cout) : Dump(d), os(o) {}
+  TypeInference(bool d, std::ostream &o = std::cout)
+      : Dump(d), os(o), trace_visit(std::getenv("TRACE_INFER")) {}
 
-  bool Visit(AST::MultiNodes &) override { return true; };
-  bool Visit(AST::MultiValues &) override { return true; };
-  bool Visit(AST::IntLiteral &) override { return true; };
+  bool Visit(AST::MultiNodes &) override;
+  bool Visit(AST::MultiValues &) override;
+  bool Visit(AST::IntLiteral &) override;
   bool Visit(AST::Expr &) override;
   bool Visit(AST::MultiDimSpans &) override;
   bool Visit(AST::NamedTypeDecl &) override;
   bool Visit(AST::NamedVariableDecl &) override;
   bool Visit(AST::IntTuple &) override;
   bool Visit(AST::Assignment &) override;
-  bool Visit(AST::IntIndex &) override { return true; };
+  bool Visit(AST::IntIndex &) override;
   bool Visit(AST::DataType &) override;
-  bool Visit(AST::Identifier &) override { return true; };
+  bool Visit(AST::Identifier &) override;
   bool Visit(AST::Parameter &) override;
   bool Visit(AST::ParamList &) override;
   bool Visit(AST::ParallelBy &) override;
-  bool Visit(AST::RequireBind &) override { return true; };
+  bool Visit(AST::RequireBind &) override;
   bool Visit(AST::WithIn &) override;
-  bool Visit(AST::WithBlock &) override { return true; };
-  bool Visit(AST::Memory &) override { return true; };
+  bool Visit(AST::WithBlock &) override;
+  bool Visit(AST::Memory &) override;
   bool Visit(AST::DMA &) override;
-  bool Visit(AST::ChunkAt &) override { return true; };
-  bool Visit(AST::Wait &) override { return true; };
-  bool Visit(AST::Call &) override { return true; };
-  bool Visit(AST::Return &) override { return true; };
-  bool Visit(AST::ForeachBlock &) override { return true; };
+  bool Visit(AST::ChunkAt &) override;
+  bool Visit(AST::Wait &) override;
+  bool Visit(AST::Call &) override;
+  bool Visit(AST::Return &) override;
+  bool Visit(AST::ForeachBlock &) override;
   bool Visit(AST::FunctionDecl &) override;
-  bool Visit(AST::ChoreoFunction &) override { return true; };
-  bool Visit(AST::CppSourceCode &) override { return true; };
-  bool Visit(AST::Program &) override { return true; };
+  bool Visit(AST::ChoreoFunction &) override;
+  bool Visit(AST::CppSourceCode &) override;
+  bool Visit(AST::Program &) override;
 
  private:
   bool SetCurrentType(AST::Node &, const std::string &);

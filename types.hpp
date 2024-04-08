@@ -99,6 +99,19 @@ inline static std::string getStringFrom(BaseType dataType) {
   return it->second;
 }
 
+inline static std::string getStringFrom(Storage st) {
+  static const std::unordered_map<Storage, std::string> enumToString = {
+      {Storage::LOCAL, "local"},     {Storage::GLOBAL, "global"},
+      {Storage::SHARED, "shared"},   {Storage::NONE, "none"},
+      {Storage::DEFAULT, "default"},
+  };
+
+  auto it = enumToString.find(st);
+  assert(it != enumToString.end() && "unsupported type.");
+
+  return it->second;
+}
+
 inline std::optional<std::string> PrefixedWith(const std::string& prefix,
                                                const std::string& str) {
   if (str.find(prefix) == 0)  // Check if 'prefix' is at the beginning
@@ -494,9 +507,11 @@ struct MDSpanType : public Type, public TypeIDProvider<MDSpanType> {
 struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
   FundamentalType f_type;
   MDSpanType s_type;
+  Storage m_type;
 
-  SpannedType(FundamentalType ft, const MDSpanType& s)
-      : Type(TypeCategory::SPANNED), f_type(ft), s_type(s) {}
+  SpannedType(FundamentalType ft, const MDSpanType& s,
+              Storage m = Storage::DEFAULT)
+      : Type(TypeCategory::SPANNED), f_type(ft), s_type(s), m_type(m) {}
 
   size_t Dims() const override { return s_type.Dims(); }
   bool IsComplete() const override { return true; }
@@ -508,6 +523,8 @@ struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
   }
 
   void Print(std::ostream& os) const override {
+    if (m_type != Storage::NONE && m_type != Storage::DEFAULT)
+      os << getStringFrom(m_type) << " ";
     os << getStringFrom((BaseType)f_type) << " ";
     s_type.Print(os);
   }
