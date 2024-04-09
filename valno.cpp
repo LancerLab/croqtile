@@ -52,104 +52,104 @@ void ValueNumbering::AssociateSignatureWithValueNumber(const std::string& sig,
     os << ScopeIndent() << "Alias \"" << sig << "\" -> #" << valno << "\n";
 }
 
+std::optional<std::string> ValueNumbering::TryToSimplifyTernary(
+    const location& loc, const std::string& op, const std::string& lhs,
+    const std::string& rhs, bool verbose) {
+  auto l_cv = PrefixedWith("const_", lhs);
+  auto r_cv = PrefixedWith("const_", rhs);
+  if (l_cv && r_cv) {
+    std::string res = "const_";
+    if (op == "+")
+      res += std::to_string(std::stoi(*l_cv) + std::stoi(*r_cv));
+    else if (op == "-")
+      res += std::to_string(std::stoi(*l_cv) - std::stoi(*r_cv));
+    else if (op == "*")
+      res += std::to_string(std::stoi(*l_cv) * std::stoi(*r_cv));
+    else if (op == "/")
+      res += std::to_string(std::stoi(*l_cv) / std::stoi(*r_cv));
+    else if (op == "%")
+      res += std::to_string(std::stoi(*l_cv) % std::stoi(*r_cv));
+    else {
+      Error(loc,
+            "simplification of operation `" + op + "' is not yet supported.");
+      return std::nullopt;
+    }
+    if (trace && verbose)
+      os << ScopeIndent() << "<Simplify> '" << lhs << " / " << rhs << " to '"
+         << res << "'\n";
+    return res;
+  }
+  return std::nullopt;
+}
+
 std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
     AST::Node& node) {
   if (auto* b = dyn_cast<AST::Identifier>(&node)) {
     (void)b;
     return std::nullopt;
   } else if (auto* n = dyn_cast<AST::Expr>(&node)) {
-    // Try to simplify immediately
-    std::map<std::string, std::function<std::optional<std::string>()>> actions =
-        {
+    // This is the algebraic simplification
+    std::map<std::string, std::function<std::optional<std::string>()>>
+        alg_simp = {
             {"+",
              [this, &n]() -> std::optional<std::string> {
-               auto l_cv =
-                   PrefixedWith("const_", GetSignatureForNode(*n->value_l));
-               auto r_cv =
-                   PrefixedWith("const_", GetSignatureForNode(*n->value_r));
-               if (l_cv && r_cv) {
-                 auto res = "const_" +
-                            std::to_string(std::stoi(*l_cv) + std::stoi(*r_cv));
-                 if (trace)
-                   os << ScopeIndent() << "<Simplify> '"
-                      << GenerateNodeSignature(*n->value_l, false) << " + "
-                      << GenerateNodeSignature(*n->value_r, false) << "' to '"
-                      << res << "'\n";
-                 return res;
-               } else
-                 return std::nullopt;
+               auto res = TryToSimplifyTernary(
+                   n->LOC(), "+", GetSignatureForNode(*n->value_l),
+                   GetSignatureForNode(*n->value_r));
+               if (res && trace)
+                 os << ScopeIndent() << "<Simplify> '"
+                    << GenerateNodeSignature(*n->value_l, false) << " + "
+                    << GenerateNodeSignature(*n->value_r, false) << "' to '"
+                    << res.value() << "'\n";
+               return res;
              }},
             {"-",
              [this, &n]() -> std::optional<std::string> {
-               auto l_cv =
-                   PrefixedWith("const_", GetSignatureForNode(*n->value_l));
-               auto r_cv =
-                   PrefixedWith("const_", GetSignatureForNode(*n->value_r));
-               if (l_cv && r_cv) {
-                 auto res = "const_" +
-                            std::to_string(std::stoi(*l_cv) - std::stoi(*r_cv));
-                 if (trace)
-                   os << ScopeIndent() << "<Simplify> '"
-                      << GenerateNodeSignature(*n->value_l, false) << " - "
-                      << GenerateNodeSignature(*n->value_r, false) << "' to '"
-                      << res << "'\n";
-                 return res;
-               } else
-                 return std::nullopt;
+               auto res = TryToSimplifyTernary(
+                   n->LOC(), "-", GetSignatureForNode(*n->value_l),
+                   GetSignatureForNode(*n->value_r));
+               if (res && trace)
+                 os << ScopeIndent() << "<Simplify> '"
+                    << GenerateNodeSignature(*n->value_l, false) << " - "
+                    << GenerateNodeSignature(*n->value_r, false) << "' to '"
+                    << res.value() << "'\n";
+               return res;
              }},
             {"*",
              [this, &n]() -> std::optional<std::string> {
-               auto l_cv =
-                   PrefixedWith("const_", GetSignatureForNode(*n->value_l));
-               auto r_cv =
-                   PrefixedWith("const_", GetSignatureForNode(*n->value_r));
-               if (l_cv && r_cv) {
-                 auto res = "const_" +
-                            std::to_string(std::stoi(*l_cv) * std::stoi(*r_cv));
-                 if (trace)
-                   os << ScopeIndent() << "<Simplify> '"
-                      << GenerateNodeSignature(*n->value_l, false) << " * "
-                      << GenerateNodeSignature(*n->value_r, false) << "' to '"
-                      << res << "'\n";
-                 return res;
-               } else
-                 return std::nullopt;
+               auto res = TryToSimplifyTernary(
+                   n->LOC(), "*", GetSignatureForNode(*n->value_l),
+                   GetSignatureForNode(*n->value_r));
+               if (res && trace)
+                 os << ScopeIndent() << "<Simplify> '"
+                    << GenerateNodeSignature(*n->value_l, false) << " * "
+                    << GenerateNodeSignature(*n->value_r, false) << "' to '"
+                    << res.value() << "'\n";
+               return res;
              }},
             {"/",
              [this, &n]() -> std::optional<std::string> {
-               auto l_cv =
-                   PrefixedWith("const_", GetSignatureForNode(*n->value_l));
-               auto r_cv =
-                   PrefixedWith("const_", GetSignatureForNode(*n->value_r));
-               if (l_cv && r_cv) {
-                 auto res = "const_" +
-                            std::to_string(std::stoi(*l_cv) / std::stoi(*r_cv));
-                 if (trace)
-                   os << ScopeIndent() << "<Simplify> '"
-                      << GenerateNodeSignature(*n->value_l, false) << " / "
-                      << GenerateNodeSignature(*n->value_r, false) << "' to '"
-                      << res << "'\n";
-                 return res;
-               } else
-                 return std::nullopt;
+               auto res = TryToSimplifyTernary(
+                   n->LOC(), "/", GetSignatureForNode(*n->value_l),
+                   GetSignatureForNode(*n->value_r));
+               if (res && trace)
+                 os << ScopeIndent() << "<Simplify> '"
+                    << GenerateNodeSignature(*n->value_l, false) << " / "
+                    << GenerateNodeSignature(*n->value_r, false) << "' to '"
+                    << res.value() << "'\n";
+               return res;
              }},
             {"%",
              [this, &n]() -> std::optional<std::string> {
-               auto l_cv =
-                   PrefixedWith("const_", GetSignatureForNode(*n->value_l));
-               auto r_cv =
-                   PrefixedWith("const_", GetSignatureForNode(*n->value_r));
-               if (l_cv && r_cv) {
-                 auto res = "const_" +
-                            std::to_string(std::stoi(*l_cv) % std::stoi(*r_cv));
-                 if (trace)
-                   os << ScopeIndent() << "<Simplify> '"
-                      << GenerateNodeSignature(*n->value_l, false) << " % "
-                      << GenerateNodeSignature(*n->value_r, false) << "' to '"
-                      << res << "'\n";
-                 return res;
-               } else
-                 return std::nullopt;
+               auto res = TryToSimplifyTernary(
+                   n->LOC(), "%", GetSignatureForNode(*n->value_l),
+                   GetSignatureForNode(*n->value_r));
+               if (res && trace)
+                 os << ScopeIndent() << "<Simplify> '"
+                    << GenerateNodeSignature(*n->value_l, false) << " % "
+                    << GenerateNodeSignature(*n->value_r, false) << "' to '"
+                    << res.value() << "'\n";
+               return res;
              }},
             {"||",
              [this, &n]() -> std::optional<std::string> {
@@ -207,27 +207,12 @@ std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
              [this, &n]() -> std::optional<std::string> {
                auto expr = GetSignatureForNode(*n->value_r);
 
-#if 0
-               // handle syntax suger "a {(0)}";
-               if (!ref) return expr;
-               int refNo = GetValueNumberOfSignature(ref.value());
-               if (!ValidVN(refNo)) return expr;
-               auto ref_expr = GetSignatureFromValueNumber(refNo);
-
-               if (auto cv = PrefixedWith("index_const_",
-                                          GetSignatureForNode(*n->value_r))) {
-                 auto signature = ref_expr + "(" + *cv + ")";
-                 if (trace)
-                   os << ScopeIndent() << "<DeRef> fill '(" + *cv + ")' to be "
-                      << signature << "\n";
-                 return signature;
-               }
-#endif
                return expr;
              }},
         };
-    auto it = actions.find(n->op);
-    if (it != actions.end())
+    // Try to simplify immediately
+    auto it = alg_simp.find(n->op);
+    if (it != alg_simp.end())
       return it->second();  // Execute the lambda function if found
     else {
       choreo_unreachable(("No handler for operation `" + n->op + "'")
@@ -282,6 +267,10 @@ std::string ValueNumbering::GenerateNodeSignature(AST::Node& node,
     return signature + ":#" + std::to_string(valno);
   } else if (auto* b = dyn_cast<AST::MultiValues>(&node)) {
     assert(b->values.size() > 0 && "must have values inside.");
+
+    // when it contains a single value, return the reference.
+    if (b->values.size() == 1) return GetSignatureForNode(*b->values[0]);
+
     std::string signature =
         "#" + std::to_string(GetValueNumberForNode(*b->values[0]));
     for (size_t i = 1; i < b->values.size(); ++i)

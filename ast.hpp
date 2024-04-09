@@ -390,42 +390,6 @@ struct Memory : public Node, public TypeIDProvider<Memory> {
   __UDT_TYPE_INFO__
 };
 
-struct NamedVariableDecl : public Node,
-                           public TypeIDProvider<NamedVariableDecl> {
-  const std::string name_str;
-  const std::string init_str;
-  const ptr<Memory> mem = nullptr;  // storage location
-  const ptr<Node> type = nullptr;
-  const ptr<Node> initializer = nullptr;  // associated initializer
-
-  explicit NamedVariableDecl(const location& l, const std::string& n,
-                             const ptr<Node>& t, const ptr<Memory>& s = nullptr,
-                             const ptr<Node>& v = nullptr,
-                             const std::string& d = "=")
-      : Node(l), name_str(n), init_str(d), mem(s), type(t), initializer(v) {
-    assert(name_str.size() > 0 && "Invalid name string.");
-    assert(type && "Invalid type.");
-  }
-
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << "\n" << prefix << "`- Var Decl (";
-    type->Print(os);
-    if (mem) {
-      os << ", ";
-      mem->Print(os);
-    }
-    os << "): " << name_str;
-    if (initializer) {
-      os << " " << init_str << " ";
-      initializer->Print(os);
-    }
-  }
-
-  void accept(Visitor&) override;
-
-  __UDT_TYPE_INFO__
-};
-
 // Represents declarations like: ituple t = {3, 4, 5};
 struct IntTuple : public Node, public TypeIDProvider<IntTuple> {
   std::string ref_name;  // could be anonymous
@@ -567,6 +531,42 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
   }
 
  public:
+  __UDT_TYPE_INFO__
+};
+
+struct NamedVariableDecl : public Node,
+                           public TypeIDProvider<NamedVariableDecl> {
+  const std::string name_str;
+  const std::string init_str;
+  const ptr<Memory> mem = nullptr;  // storage location
+  const ptr<DataType> type = nullptr;
+  const ptr<Node> initializer = nullptr;  // associated initializer
+
+  explicit NamedVariableDecl(const location& l, const std::string& n,
+                             const ptr<DataType>& t, const ptr<Memory>& s = nullptr,
+                             const ptr<Node>& v = nullptr,
+                             const std::string& d = "=")
+      : Node(l), name_str(n), init_str(d), mem(s), type(t), initializer(v) {
+    assert(name_str.size() > 0 && "Invalid name string.");
+    assert(type && "Invalid type.");
+  }
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << "\n" << prefix << "`- Var Decl (";
+    type->Print(os);
+    if (mem) {
+      os << ", ";
+      mem->Print(os);
+    }
+    os << "): " << name_str;
+    if (initializer) {
+      os << " " << init_str << " ";
+      initializer->Print(os);
+    }
+  }
+
+  void accept(Visitor&) override;
+
   __UDT_TYPE_INFO__
 };
 

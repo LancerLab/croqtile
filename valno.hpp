@@ -29,7 +29,7 @@ inline std::string RemovePrefix(const std::string& str,
 }
 
 // retrieve the n-th element from the comma-seperated input string
-inline std::optional<std::string> getNthElement(const std::string& input,
+inline std::optional<std::string> GetNthElement(const std::string& input,
                                                 int n) {
   std::istringstream iss(input);
   std::string token;
@@ -46,6 +46,15 @@ inline std::optional<std::string> getNthElement(const std::string& input,
 
   // If the index is out of range, return an empty string
   return std::nullopt;
+}
+
+inline int CountElementsInSignature(const std::string& input) {
+  if (input.empty()) return 0;  // Return 0 if the string is empty
+  int count = 1;
+  for (char c : input) {
+    if (c == ',') ++count;  // Increment for each comma found
+  }
+  return count;
 }
 
 class ShapeInference;
@@ -115,6 +124,10 @@ class ValueNumbering {
     return (valueNumberExpressions.back())[vn];
   }
 
+  std::string SignatureOfSymbol(std::string sym) {
+    return GetSignatureFromValueNumber(GetValueNumberOfSignature(sym));
+  }
+
   std::string GetSignatureForNode(AST::Node& n) {
     return GetSignatureFromValueNumber(GetValueNumberForNode(n));
   }
@@ -128,6 +141,12 @@ class ValueNumbering {
            << "\n";
     }
   }
+
+  std::optional<std::string> TryToSimplifyTernary(const location&,
+                                                  const std::string&,
+                                                  const std::string&,
+                                                  const std::string&,
+                                                  bool = false);
 
  private:
   std::string ScopeIndent();
@@ -230,8 +249,16 @@ class ShapeInference : public Visitor {
 
   bool Visit(AST::Expr& n) {
     __TRACE_EACH_VISIT__;
-    int valNo = vn.GenerateValueNumberForNode(n);
-    cur_vn = valNo;
+    if (auto ref = n.GetReference()) {
+      if (auto id = dyn_cast<AST::Identifier>(ref.get())) {
+        if (IsDeclared(id->name)) {
+          cur_vn = vn.GetValueNumberOfSignature(InScopeName(id->name).value());
+          return true;
+        }
+      }
+    }
+
+    cur_vn = vn.GenerateValueNumberForNode(n);
     return true;
   }
 
@@ -244,14 +271,19 @@ class ShapeInference : public Visitor {
       auto vn_sig = vn.GetSignatureFromValueNumber(cur_vn);
 
       // set alias expressions with proper value numbers
-      ProcessValueNumberString(
-          vn_sig, [this, &vn_sig](int valno, size_t index) {
-            if (UnknownVN(valno)) return;  // do not associate it with vn of "?"
-            vn.GetOrInsertValueNumberFromSignature("index_const_" +
-                                                   std::to_string(index));
-            vn.AssociateSignatureWithValueNumber(
-                vn_sig + "(" + std::to_string(index) + ")", valno);
-          });
+      if (CountElementsInSignature(vn_sig) > 1) {
+        ProcessValueNumberString(
+            vn_sig, [this, &vn_sig](int valno, size_t index) {
+              if (UnknownVN(valno))
+                return;  // do not associate it with vn of "?"
+              vn.GetOrInsertValueNumberFromSignature("index_const_" +
+                                                     std::to_string(index));
+              auto elem_sig = vn_sig + "(" + std::to_string(index) + ")";
+              if (!vn.HasValueNumberOfSignature(elem_sig))
+                vn.AssociateSignatureWithValueNumber(
+                    vn_sig + "(" + std::to_string(index) + ")", valno);
+            });
+      }
 
       auto vl = GenMDSpanValueFromSignature(vn_sig);
       n.SetTypeDetail(vl);
@@ -272,8 +304,9 @@ class ShapeInference : public Visitor {
         unknown_spans = unknown_spans + ",#" + std::to_string(UnknownValue());
       cur_mdspan_vn = vn.GetOrInsertValueNumberFromSignature(unknown_spans);
       n.SetTypeDetail(GenMDSpanValueFromSignature(unknown_spans));
-    } else
+    } else {
       SetUnknownVN(cur_mdspan_vn);  // failed to deduce the type detail
+    }
 
     InvalidateVN(cur_vn);
     return true;
@@ -318,6 +351,15 @@ class ShapeInference : public Visitor {
         vn.AssociateSignatureWithValueNumber(ScopedName(n.name_str), cur_vn);
         InvalidateVN(cur_vn);
       }
+    } else {
+      assert(n.type && "missed type annotation.");
+      if (ValidVN(cur_mdspan_vn))
+        vn.AssociateSignatureWithValueNumber(ScopedName(n.name_str + ".span"),
+                                             cur_mdspan_vn);
+      else if (ValidVN(cur_vn))
+        vn.AssociateSignatureWithValueNumber(ScopedName(n.name_str), cur_vn);
+      else
+        choreo_unreachable();
     }
 
     return true;
@@ -331,14 +373,17 @@ class ShapeInference : public Visitor {
 
     auto vn_sig = vn.GetSignatureFromValueNumber(cur_vn);
 
-    // set alias expressions with proper value numbers
-    ProcessValueNumberString(vn_sig, [this, &vn_sig](int valno, size_t index) {
-      if (UnknownVN(valno)) return;  // do not associate it with vn of "?"
-      vn.GetOrInsertValueNumberFromSignature("index_const_" +
-                                             std::to_string(index));
-      vn.AssociateSignatureWithValueNumber(
-          vn_sig + "(" + std::to_string(index) + ")", valno);
-    });
+    if (CountElementsInSignature(vn_sig) > 1) {
+      // set alias expressions with proper value numbers
+      ProcessValueNumberString(
+          vn_sig, [this, &vn_sig](int valno, size_t index) {
+            if (UnknownVN(valno)) return;  // do not associate it with vn of "?"
+            vn.GetOrInsertValueNumberFromSignature("index_const_" +
+                                                   std::to_string(index));
+            vn.AssociateSignatureWithValueNumber(
+                vn_sig + "(" + std::to_string(index) + ")", valno);
+          });
+    }
     InvalidateVN(cur_vn);  // Currently cut off value numbering
     return true;
   }
@@ -371,6 +416,10 @@ class ShapeInference : public Visitor {
 
   bool Visit(AST::DataType& n) {
     __TRACE_EACH_VISIT__;
+    if (ValidVN(cur_mdspan_vn)) {
+      cur_vn = cur_mdspan_vn;
+    }
+
     return true;
   }
 
@@ -382,13 +431,15 @@ class ShapeInference : public Visitor {
              "value number has not been generated.");
       cur_vn = vn.HasValueNumberForNode(n);
     } else {
-      assert(!vn.HasValueNumberForNode(n) &&
-             "value number has been generated.");
+      if (vn.HasValueNumberForNode(n)) {
+        Error(n.LOC(), "value number has been generated for `" + n.name + "'.");
+        return false;
+      }
       cur_vn = vn.GenerateValueNumberForNode(n);
     }
 
     return true;
-  };
+  }
 
   bool Visit(AST::Parameter& n) {
     __TRACE_EACH_VISIT__;
@@ -446,17 +497,19 @@ class ShapeInference : public Visitor {
     std::string bound = "const_" + std::to_string(n.bound);
     int valno = vn.GetOrInsertValueNumberFromSignature(bound);
     std::string iv_name =
-        "@" + ScopedName(n.biv);  // upper-bound of bounded variable
+        ScopedName("@" + n.biv);  // upper-bound of bounded variable
     vn.AssociateSignatureWithValueNumber(iv_name, valno);
     n.SetType(MakeBoundedITupleType(
         GenMDSpanValueFromSignature(vn.GetSignatureFromValueNumber(valno))));
+    DefineSymbol("@" + n.biv, n.GetType() /*TODO: fix type*/);
     return true;
   };
 
   bool Visit(AST::RequireBind& n) {
     __TRACE_EACH_VISIT__;
     return true;
-  };
+  }
+
   bool Visit(AST::WithIn& n) {
     __TRACE_EACH_VISIT__;
     if (auto mds = dyn_cast<AST::MultiDimSpans>(n.in.get())) {
@@ -469,10 +522,11 @@ class ShapeInference : public Visitor {
         }
 
       auto vn_sig = vn.GetSignatureFromValueNumber(cur_mdspan_vn);
+      bool gen_alias = (CountElementsInSignature(vn_sig) > 1);
       ProcessValueNumberString(
-          vn_sig, [this, &vn_sig, &n](int valno, size_t index) {
+          vn_sig, [this, &vn_sig, &n, gen_alias](int valno, size_t index) {
             if (UnknownVN(valno)) return;  // do not associate it with vn of "?"
-            if (n.with) {
+            if (n.with && gen_alias) {
               std::string name =
                   ScopedName(n.with->name) + "(" + std::to_string(index) + ")";
               vn.AssociateSignatureWithValueNumber(name, valno);
@@ -481,22 +535,29 @@ class ShapeInference : public Visitor {
             if (n.with_matchers) {
               auto sym =
                   cast<AST::Identifier>((n.with_matchers->values[index]).get());
-              std::string name = "@" + ScopedName(sym->name);
-              vn.AssociateSignatureWithValueNumber(name, valno);
+              std::string name = ScopedName("@" + sym->name);
+              if (gen_alias) vn.AssociateSignatureWithValueNumber(name, valno);
               sym->SetType(MakeBoundedITupleType(GenMDSpanValueFromSignature(
                   vn.GetSignatureFromValueNumber(valno))));
+              DefineSymbol("@" + sym->name, sym->GetType() /*TODO: fix type*/);
             }
           });
 
-      if (n.with)
+      if (n.with) {
+        vn.AssociateSignatureWithValueNumber(ScopedName("@" + n.with->name),
+                                             cur_mdspan_vn);
         n.with->SetType(
             MakeBoundedITupleType(GenMDSpanValueFromSignature(vn_sig)));
+        DefineSymbol("@" + n.with->name, n.with->GetType() /*TODO: fix type*/);
+      }
+      InvalidateVN(cur_mdspan_vn);
     } else {
       // TODO
       choreo_unreachable("span expression is required to be supported.");
     }
     return true;
-  };
+  }
+
   bool Visit(AST::WithBlock& n) {
     __TRACE_EACH_VISIT__;
     return true;
@@ -509,17 +570,86 @@ class ShapeInference : public Visitor {
   bool Visit(AST::DMA& n) {
     __TRACE_EACH_VISIT__;
     DefineSymbol(n.future->name, MakeFutureType());
+
+    std::string f_span = n.future->name + ".span";
+    assert(ValidVN(cur_vn) &&
+           "unexpected current value number for future.span inference.");
+
+    vn.AssociateSignatureWithValueNumber(ScopedName(f_span), cur_vn);
+    auto mds_ty = MakeMDSpanType(
+        GenMDSpanValueFromSignature(vn.GetSignatureFromValueNumber(cur_vn)));
+    DefineSymbol(f_span, mds_ty); // this is implicit symbol
+
     return true;
   };
 
   bool Visit(AST::ChunkAt& n) {
     __TRACE_EACH_VISIT__;
+
+    std::string data_sig =
+        vn.SignatureOfSymbol(InScopeName(n.data->name + ".span").value());
+    int dim_count = CountElementsInSignature(data_sig);
+    int dim_index = 0;
+
+    std::string fs_signature;  // signature of the future.span
+    auto AppendSignature = [this, &fs_signature, &n, &dim_index, dim_count](
+                               int dividend_vn, int divisor_vn) {
+      // the signature without optimiz
+      std::string res_sig = "/:#" + std::to_string(dividend_vn) + ":#" +
+                            std::to_string(divisor_vn);
+
+      if (auto quotient = vn.TryToSimplifyTernary(
+              n.LOC(), "/", vn.GetSignatureFromValueNumber(dividend_vn),
+              vn.GetSignatureFromValueNumber(divisor_vn), true))
+        res_sig = quotient.value();
+
+      // now generate the value number from the signature
+      int res_valno = vn.GetOrInsertValueNumberFromSignature(res_sig);
+
+      // and append the value number as
+      if (!fs_signature.empty()) fs_signature += ":";
+      fs_signature += "#" + std::to_string(res_valno);
+    };
+
+    for (auto pos : n.positions->values) {
+      auto biv = cast<AST::Identifier>(pos.get());
+      auto bound_name = InScopeName("@" + biv->name);
+      int bound_vn = vn.GetValueNumberOfSignature(bound_name.value());
+      std::string bound_sn = vn.GetSignatureFromValueNumber(bound_vn);
+      auto dim_ith = GetNthElement(data_sig, dim_index);
+      if (!dim_ith) {
+        Error(n.LOC(), "internal error: value number is not obtained.");
+        return false;
+      }
+      assert(dim_ith.value()[0] == '#');
+      int dim_valno = std::stoi(dim_ith.value().substr(1));
+
+      if (CountElementsInSignature(bound_sn) <= 1) {
+        // this is a simple bound
+        AppendSignature(dim_valno, bound_vn);
+      } else {
+        // multiple bounds
+        ProcessValueNumberString(bound_sn, [this, &dim_valno, &AppendSignature](
+                                               int valno, size_t index) {
+          AppendSignature(dim_valno, valno);
+        });
+      }
+
+      if (++dim_index > dim_count) {
+        Error(n.LOC(), "dimensions inconsistence is found between `" +
+                           n.data->name + "' and chunkat expression.");
+        return false;
+      }
+    }
+    int fs_valno = vn.GetOrInsertValueNumberFromSignature(fs_signature);
+    cur_vn = fs_valno;
     return true;
-  };
+  }
+
   bool Visit(AST::Wait& n) {
     __TRACE_EACH_VISIT__;
     return true;
-  };
+  }
   bool Visit(AST::Call& n) {
     __TRACE_EACH_VISIT__;
     return true;

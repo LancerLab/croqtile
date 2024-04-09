@@ -115,7 +115,11 @@ void WithBlock::accept(Choreo::Visitor& v) {
 
 void Memory::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
-void DMA::accept(Choreo::Visitor& v) { v.Visit(*this); }
+void DMA::accept(Choreo::Visitor& v) {
+  from->accept(v);
+  to->accept(v);
+  v.Visit(*this);
+}
 
 void ChunkAt::accept(Choreo::Visitor& v) { v.Visit(*this); }
 

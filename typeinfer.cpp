@@ -112,10 +112,11 @@ bool TypeInference::Visit(AST::DataType &n) {
   assert((cur_type == nullptr) && "Expecting null type.");
 
   if (!n.mdspan_type) {
-    cur_type = n.GetType();
+    cur_type = n.GetType();  // simple types
     return true;
   }
 
+  // compound type
   if (auto mdspan = dyn_cast<AST::MultiDimSpans>(n.mdspan_type.get())) {
     n.SetType(std::make_shared<SpannedType>(
         n.getFundamentalType(), *(cast<MDSpanType>(mdspan->GetType().get()))));
@@ -360,10 +361,12 @@ bool TypeInference::Visit(AST::Memory &n) {
   __TRACE_EACH_VISIT__(n)
   return true;
 }
+
 bool TypeInference::Visit(AST::ChunkAt &n) {
   __TRACE_EACH_VISIT__(n)
   return true;
 }
+
 bool TypeInference::Visit(AST::Wait &n) {
   __TRACE_EACH_VISIT__(n)
   return true;

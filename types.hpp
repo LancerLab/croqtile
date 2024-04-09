@@ -649,6 +649,10 @@ inline ptr<MDSpanType> MakeDimedMDSpanType(size_t n) {
   return std::make_shared<MDSpanType>(MDSpanValue(n));
 }
 
+inline ptr<MDSpanType> MakeMDSpanType(const MDSpanValue& v) {
+  return std::make_shared<MDSpanType>(v);
+}
+
 inline ptr<SpannedType> MakeSpannedType(FundamentalType ft,
                                         const MDSpanValue& v) {
   return std::make_shared<SpannedType>(ft, v);
