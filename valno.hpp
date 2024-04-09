@@ -607,7 +607,7 @@ class ShapeInference : public Visitor {
       int res_valno = vn.GetOrInsertValueNumberFromSignature(res_sig);
 
       // and append the value number as
-      if (!fs_signature.empty()) fs_signature += ":";
+      if (!fs_signature.empty()) fs_signature += ",";
       fs_signature += "#" + std::to_string(res_valno);
     };
 
@@ -630,7 +630,7 @@ class ShapeInference : public Visitor {
       } else {
         // multiple bounds
         ProcessValueNumberString(bound_sn, [this, &dim_valno, &AppendSignature](
-                                               int valno, size_t index) {
+                                               int valno, size_t) {
           AppendSignature(dim_valno, valno);
         });
       }

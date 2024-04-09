@@ -1,16 +1,16 @@
 // RUN: choreo -i %s | FileCheck --match-full-lines %s
 
 // device program
-__co__ s32 mdspan<1> spms(s32 [20, 40] a, s32 mdspan<1> b) {
-  f32[a.span] global_buffer;
+__co__ s32 mdspan<1> spms(s32 [20, 42, 80] a, s32 mdspan<1> b) {
+  f32[a.span] global_buffer;   // [20, 42, 80]
 
   parallel p by 2 {
-    shared f32 [a.span(1), 4] shared_buffer;
+    shared f32 [a.span(1), 4] shared_buffer;  // [42, 4]
     parallel q by 6 {
       with index = {x, y} in [10, 20] {
         foreach x {
-          f1 = dte.linear a.chunkat(p, x) => local;
-          local f32[f1.span] local_buffer;
+          f1 = dte.linear a.chunkat(p, q, x) => local; // [20/2, 42/6, 80/10]
+          local f32[f1.span] local_buffer;  // [10, 7, 8]
         }
       }
     }
@@ -20,13 +20,13 @@ __co__ s32 mdspan<1> spms(s32 [20, 40] a, s32 mdspan<1> b) {
   return global_buffer;
 }
 
-// CHECK: Parameter: spms::a, Type: s32 mdspan<2> [20, 40]
+// CHECK: Parameter: spms::a, Type: s32 mdspan<3> [20, 42, 80]
 // CHECK: Parameter: spms::b, Type: s32 mdspan<1> [?]
-// CHECK: Symbol:    spms::global_buffer, Type: f32 mdspan<2> [20, 40], Storage: default
+// CHECK: Symbol:    spms::global_buffer, Type: f32 mdspan<3> [20, 42, 80], Storage: default
 // CHECK: Bounded:   spms::paraby_0::p, Type: {int}->[2]
-// CHECK: Symbol:    spms::paraby_0::shared_buffer, Type: f32 mdspan<2> [40, 4], Storage: shared
+// CHECK: Symbol:    spms::paraby_0::shared_buffer, Type: f32 mdspan<2> [42, 4], Storage: shared
 // CHECK: Bounded:   spms::paraby_0::paraby_1::q, Type: {int}->[6]
 // CHECK: Bounded:   spms::paraby_0::paraby_1::within_0::index, Type: {int,int}->[10, 20]
 // CHECK: Bounded:   spms::paraby_0::paraby_1::within_0::x, Type: {int}->[10]
 // CHECK: Bounded:   spms::paraby_0::paraby_1::within_0::y, Type: {int}->[20]
-// CHECK: Symbol:    spms::paraby_0::paraby_1::within_0::foreach_0::local_buffer, Type: f32 mdspan<1> [10], Storage: local
+// CHECK: Symbol:    spms::paraby_0::paraby_1::within_0::foreach_0::local_buffer, Type: f32 mdspan<3> [10, 7, 8], Storage: local
