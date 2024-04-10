@@ -214,6 +214,9 @@ param_mdspan
     | LBRAKT param_mdspan_list RBRAKT {
         $$ = AST::Make<AST::MultiDimSpans>(@2, "", $2);
       }
+    | MDSPAN LBRAKT param_mdspan_list RBRAKT {
+        $$ = AST::Make<AST::MultiDimSpans>(@2, "", $3);
+      }
     ;
 
 param_mdspan_list

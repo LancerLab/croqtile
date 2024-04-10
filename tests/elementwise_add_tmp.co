@@ -1,0 +1,33 @@
+#include <iostream>
+// NOTE: this is a tmp test file that workarounds Value Numbering bug
+// referencing tops/factor/tests/samples/operators/add/main.cc
+// TODO(ALBERT): replace this test with elementwise_add.co after VN bug fixed
+
+// kernel program
+void kernel(int * a, int * b, int * c, int n) {
+  for (int i = 0; i < n; ++i)
+    c[i] = a[i] + b[i];
+}
+
+// device program
+__co__ s32 mdspan[11, 1025] ele_add(s32 mdspan[11, 1025] a, s32 mdspan[11, 1025] b) {
+  // assert a.span == b.span
+  f32[a.span] global_buffer;
+
+  parallel p by 6 {  // p is sip_index
+    // kernel function begin
+    with index = {x, y} in [10, 10] {  // totally 100 chunks
+      foreach x {
+        // empty loop body
+      }
+    }
+    // end kernel function
+  }
+
+  return global_buffer;
+}
+
+// host program
+int bar(int a[], int b[]) {
+  return ele_add(a, b);
+}
