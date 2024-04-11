@@ -208,12 +208,25 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
 
   for (auto &param : *cur_params) {
     auto name = param->sym->name;
-    if (!AST::typeof<IntegerType>(param.get())) {
+    if (!AST::typeof<IntegerType>(param.get()) &&
+        !AST::typeof<BooleanType>(param.get())) {
       // define spanned type
       auto type_symbol = name+"_type";
-      auto type_string = "DRAMType(" + factor_typestr(param->type->getBaseType()) + ", (1));";
+      std::ostringstream _os;
+      // param->type->Print(os, "");
+      if(param->type->getPartialType()) {
+        _os << param->type->getPartialType()->Stringify("");
+      } else {
+        // TODO: this guard code may not needed
+        _os << "[?]";
+      }
+      auto type_string = "DRAMType(" + 
+                         factor_typestr(param->type->getBaseType()) + 
+                         ", " + _os.str(); 
+
       strtab.AddSymbol(name, type_symbol, type_string);
-      os << "    auto " << strtab.GetTypeSymbol(name) << " = " << strtab.GetTypeString(name) << "\n";
+      os << "    auto " << strtab.GetTypeSymbol(name) << " = " << strtab.GetTypeString(name);
+      os << ");\n";
     } else {
       auto type_symbol = name+"_type";
       auto type_string = "DRAMType(" + factor_typestr(param->type->getBaseType()) + ", (1));";

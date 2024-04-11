@@ -5,7 +5,7 @@
 
 #include <iostream>
 
-__co__ int foo(f32 [2, 3, 4] d, int e, bool, f32 mdspan<2> a) { }
+__co__ int foo(f32 mdspan[2, 3, 4] d, int e, bool, f32 mdspan<2> a) { }
 
 // VALNO:  scope-1 {
 // VALNO:   New VN #0: 'const_2'
@@ -32,7 +32,7 @@ __co__ int foo(f32 [2, 3, 4] d, int e, bool, f32 mdspan<2> a) { }
 // CHECK: Parameter: foo::anon_0, Type: bool
 // CHECK: Parameter: foo::a, Type: f32 mdspan<2> [?, ?]
 
-__co__ int bar(f32 [?, 2, ?, 4] d, f32 mdspan<4> a) { }
+__co__ int bar(f32 mdspan[?, 2, ?, 4] d, f32 mdspan<4> a) { }
 
 // VALNO:  scope-1 {
 // VALNO:   New VN #0: 'const_2'

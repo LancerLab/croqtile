@@ -9,7 +9,7 @@ __co__ int foo(f32 mdspan<1> d, int) {
 // CHECK:   using namespace factor;
 // CHECK:   FACTOR_PROGRAM(choreo_foo);
 // CHECK:   choreo_foo([&](auto target_name) {
-// CHECK:     auto d_type = DRAMType(FloatType(32), (1));
+// CHECK:     auto d_type = DRAMType(FloatType(32), mdspan<1> [?]);
 // CHECK:     auto anon_0_type = DRAMType(IntType(32), (1));
 // CHECK:     auto choreo_output_type = DRAMType(IntType(32), (1));
 // CHECK:     D(main_) // choreo-factor dataflow function
