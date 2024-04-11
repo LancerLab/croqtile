@@ -62,6 +62,11 @@ class SymbolTable {
 
   static unsigned anonymous_count;
   static unsigned anon_type_count;
+
+  void Print() {
+	  for (auto item: table)
+		  std::cout << "symbol: " << item.first << ", type: " << STR(*item.second.GetType()) << "\n";
+  }
 };
 
 // TODO(albert): remove this when other utils ready

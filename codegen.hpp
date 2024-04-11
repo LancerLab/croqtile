@@ -34,8 +34,8 @@ struct CodeGenerator : public Visitor {
   }
 
   virtual ptr<Type> GetSymbolType(const std::string &n) {
-    assert(SymTab()->Exists(n) && "symbol is not declared.");
-    return SymTab()->GetSymbol(n)->GetType();
+    assert(SymTab()->Exists(SSTab().InScopeName(n)) && "symbol is not declared.");
+    return SymTab()->GetSymbol(SSTab().InScopeName(n))->GetType();
   }
 
   CodeGenerator(std::ostream &o, const ptr<SymbolTable> &symtab)
