@@ -17,7 +17,7 @@ struct TypeInference : public Visitor {
  private:
   ptr<Type> cur_type = nullptr;
   std::vector<ptr<Type>> cur_param_types;
-  MDSpanValue cur_mdspan_value;
+  Shape cur_mdspan_value;
 
   std::unordered_map<std::string, ptr<Type>> symbolTypes;
 

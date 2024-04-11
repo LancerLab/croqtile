@@ -302,22 +302,22 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
   size_t Dims() const { return dim_count; }
   void SetDims(size_t n) { dim_count = n; }
 
-  void SetTypeDetail(const MDSpanValue& mds) {
+  void SetTypeDetail(const Shape& mds) {
     assert(typeof<MDSpanType>(this) && "Incorrect type for mdspan.");
     cast<MDSpanType>(GetType().get())->SetValue(mds);
   }
 
-  const MDSpanValue& GetTypeDetail() {
+  const Shape& GetTypeDetail() {
     assert(typeof<MDSpanType>(this) && "Incorrect type for mdspan.");
     return cast<MDSpanType>(GetType().get())->GetValue();
   }
 
-  MDSpanValue MakeValueList() {
+  Shape MakeValueList() {
     if (!list) {
       // dynamically valued
-      return {MDSpanValue(dim_count)};
+      return {Shape(dim_count)};
     } else
-      return {MDSpanValue(0) /*TODO: make Type from the list*/};
+      return {Shape(0) /*TODO: make Type from the list*/};
   }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
@@ -511,7 +511,7 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
       case BaseType::S8:
         assert(mdspan_type != nullptr && "Expecting a valid mdspan.");
         SetType(MakeSpannedType(
-            base_type, GenUninitMDSpanValue()));  // need type inference
+            base_type, GenUninitShape()));  // need type inference
         break;
       case BaseType::ITUPLE:
         SetType(MakeUninitITupleType());  // need type inference to retrieve the

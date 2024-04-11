@@ -266,7 +266,7 @@ class ShapeInference : public Visitor {
     __TRACE_EACH_VISIT__;
 
     if (n.list) {
-      // The MDSpanValue now can be deduced from the value number.
+      // The Shape now can be deduced from the value number.
       // Update the type detail acoordingly.
       auto vn_sig = vn.GetSignatureFromValueNumber(cur_vn);
 
@@ -285,7 +285,7 @@ class ShapeInference : public Visitor {
             });
       }
 
-      auto vl = GenMDSpanValueFromSignature(vn_sig);
+      auto vl = GenShapeFromSignature(vn_sig);
       n.SetTypeDetail(vl);
 
       if (n.Dims() != InvalidCount()) {
@@ -303,7 +303,7 @@ class ShapeInference : public Visitor {
       for (size_t i = 1; i < n.dim_count; ++i)
         unknown_spans = unknown_spans + ",#" + std::to_string(UnknownValue());
       cur_mdspan_vn = vn.GetOrInsertValueNumberFromSignature(unknown_spans);
-      n.SetTypeDetail(GenMDSpanValueFromSignature(unknown_spans));
+      n.SetTypeDetail(GenShapeFromSignature(unknown_spans));
     } else {
       SetUnknownVN(cur_mdspan_vn);  // failed to deduce the type detail
     }
@@ -337,8 +337,6 @@ class ShapeInference : public Visitor {
       return false;
     }
 
-    DefineSymbol(n.name_str, n.GetType());
-
     if (n.initializer) {
       if (ValidVN(cur_ituple_vn)) {
         // assert(!ValidVN(cur_vn) && "expected current value number.");
@@ -347,18 +345,26 @@ class ShapeInference : public Visitor {
         vn.AssociateSignatureWithValueNumber(ScopedName(n.name_str),
                                              cur_ituple_vn);
         InvalidateVN(cur_ituple_vn);
+        DefineSymbol(n.name_str, MakeUninitITupleType());
+
       } else if (ValidVN(cur_vn)) {
         vn.AssociateSignatureWithValueNumber(ScopedName(n.name_str), cur_vn);
         InvalidateVN(cur_vn);
+        DefineSymbol(n.name_str, n.GetType());
       }
     } else {
       assert(n.type && "missed type annotation.");
-      if (ValidVN(cur_mdspan_vn))
+      if (ValidVN(cur_mdspan_vn)) {
         vn.AssociateSignatureWithValueNumber(ScopedName(n.name_str + ".span"),
                                              cur_mdspan_vn);
-      else if (ValidVN(cur_vn))
+        auto mds_value = GenShapeFromSignature(
+            vn.GetSignatureFromValueNumber(cur_mdspan_vn));
+        DefineSymbol(n.name_str, MakeSpannedType(n.type->base_type, mds_value));
+        DefineSymbol(n.name_str + ".span", MakeMDSpanType(mds_value));
+      } else if (ValidVN(cur_vn)) {
         vn.AssociateSignatureWithValueNumber(ScopedName(n.name_str), cur_vn);
-      else
+        DefineSymbol(n.name_str, n.GetType());
+      } else
         choreo_unreachable();
     }
 
@@ -427,9 +433,16 @@ class ShapeInference : public Visitor {
     __TRACE_EACH_VISIT__;
     if (IsDeclared(n.name)) {
       // it is a reference
-      assert(vn.HasValueNumberForNode(n) &&
+      auto name = n.name;
+      auto* sym = LookupSymbol(name);
+      if (isa<SpannedType>(sym->type.get()) ||
+          isa<FutureType>(sym->type.get())) {
+        name += ".span";
+        assert(IsDeclared(name) && "span symbol is not declared.");
+      }
+      assert(vn.HasValueNumberOfSignature(InScopeName(name).value()) &&
              "value number has not been generated.");
-      cur_vn = vn.HasValueNumberForNode(n);
+      cur_vn = vn.GetValueNumberOfSignature(InScopeName(name).value());
     } else {
       if (vn.HasValueNumberForNode(n)) {
         Error(n.LOC(), "value number has been generated for `" + n.name + "'.");
@@ -500,7 +513,7 @@ class ShapeInference : public Visitor {
         ScopedName("@" + n.biv);  // upper-bound of bounded variable
     vn.AssociateSignatureWithValueNumber(iv_name, valno);
     n.SetType(MakeBoundedITupleType(
-        GenMDSpanValueFromSignature(vn.GetSignatureFromValueNumber(valno))));
+        GenShapeFromSignature(vn.GetSignatureFromValueNumber(valno))));
     DefineSymbol("@" + n.biv, n.GetType() /*TODO: fix type*/);
     return true;
   };
@@ -537,7 +550,7 @@ class ShapeInference : public Visitor {
                   cast<AST::Identifier>((n.with_matchers->values[index]).get());
               std::string name = ScopedName("@" + sym->name);
               if (gen_alias) vn.AssociateSignatureWithValueNumber(name, valno);
-              sym->SetType(MakeBoundedITupleType(GenMDSpanValueFromSignature(
+              sym->SetType(MakeBoundedITupleType(GenShapeFromSignature(
                   vn.GetSignatureFromValueNumber(valno))));
               DefineSymbol("@" + sym->name, sym->GetType() /*TODO: fix type*/);
             }
@@ -546,8 +559,7 @@ class ShapeInference : public Visitor {
       if (n.with) {
         vn.AssociateSignatureWithValueNumber(ScopedName("@" + n.with->name),
                                              cur_mdspan_vn);
-        n.with->SetType(
-            MakeBoundedITupleType(GenMDSpanValueFromSignature(vn_sig)));
+        n.with->SetType(MakeBoundedITupleType(GenShapeFromSignature(vn_sig)));
         DefineSymbol("@" + n.with->name, n.with->GetType() /*TODO: fix type*/);
       }
       InvalidateVN(cur_mdspan_vn);
@@ -569,16 +581,17 @@ class ShapeInference : public Visitor {
 
   bool Visit(AST::DMA& n) {
     __TRACE_EACH_VISIT__;
-    DefineSymbol(n.future->name, MakeFutureType());
 
     std::string f_span = n.future->name + ".span";
     assert(ValidVN(cur_vn) &&
            "unexpected current value number for future.span inference.");
 
     vn.AssociateSignatureWithValueNumber(ScopedName(f_span), cur_vn);
-    auto mds_ty = MakeMDSpanType(
-        GenMDSpanValueFromSignature(vn.GetSignatureFromValueNumber(cur_vn)));
-    DefineSymbol(f_span, mds_ty); // this is implicit symbol
+    auto mds_val =
+        GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
+    n.SetType(MakeFutureType(mds_val));
+    DefineSymbol(n.future->name, n.GetType());
+    DefineSymbol(f_span, MakeMDSpanType(mds_val));  // this is implicit symbol
 
     return true;
   };
@@ -629,10 +642,10 @@ class ShapeInference : public Visitor {
         AppendSignature(dim_valno, bound_vn);
       } else {
         // multiple bounds
-        ProcessValueNumberString(bound_sn, [this, &dim_valno, &AppendSignature](
-                                               int valno, size_t) {
-          AppendSignature(dim_valno, valno);
-        });
+        ProcessValueNumberString(
+            bound_sn, [this, &dim_valno, &AppendSignature](int valno, size_t) {
+              AppendSignature(dim_valno, valno);
+            });
       }
 
       if (++dim_index > dim_count) {
@@ -701,7 +714,7 @@ class ShapeInference : public Visitor {
   }
 
   // TODO: should be recursive
-  MDSpanValue GenMDSpanValueFromSignature(const std::string& input) {
+  Shape GenShapeFromSignature(const std::string& input) {
     ValueList result;
 
     std::istringstream stream(input);

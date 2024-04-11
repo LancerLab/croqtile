@@ -296,8 +296,15 @@ bool TypeInference::Visit(AST::IntTuple &n) {
 
 bool TypeInference::Visit(AST::DMA &n) {
   __TRACE_EACH_VISIT__(n)
-  DefineSymbol(n.future->name, MakeFutureType());
-  DefineSymbol(n.future->name + ".span", MakeUnknownType());
+
+  // future's type has been obtained by shape inference
+  DefineSymbol(n.future->name, n.GetType());
+  auto mds_val = cast<FutureType>(n.GetType().get())->shape;
+  DefineSymbol(n.future->name + ".span", MakeMDSpanType(mds_val));
+  if (Dump) {
+    os << "Future:    " << *InScopeName(n.future->name);
+    os << ", Type: " << STR(*n.GetType()) << "\n";
+  }
   return true;
 }
 
@@ -305,11 +312,8 @@ bool TypeInference::Visit(AST::ParallelBy &n) {
   __TRACE_EACH_VISIT__(n)
   DefineSymbol(n.biv, n.GetType());
   if (Dump) {
-    os << "Bounded:   ";
-    os << *InScopeName(n.biv);
-    os << ", Type: ";
-    n.GetType()->Print(os);
-    os << "\n";
+    os << "Bounded:   " << *InScopeName(n.biv);
+    os << ", Type: " << STR(*n.GetType()) << "\n";
   }
   return true;
 }

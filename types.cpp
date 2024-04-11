@@ -2,6 +2,6 @@
 
 namespace Choreo {
 
-ValueListRepo MDSpanValue::values;
+ValueListRepo Shape::values;
 
 }  // end namespace Choreo

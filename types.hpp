@@ -8,6 +8,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <variant>
@@ -301,7 +302,7 @@ inline void PrintValueList(const ValueList& vl, std::ostream& os) {
 }
 
 // MDSpan is sized and dependent type (dependent on the others)
-struct MDSpanValue {
+struct Shape {
   static ValueListRepo values;  // value numbers
 
   size_t val_no = __INVALID_VALUE__;
@@ -313,13 +314,13 @@ struct MDSpanValue {
     dim_count = __INVALID_VALUE__;
   }
 
-  explicit MDSpanValue() {}  // this initialize an invalid MDSpanValue
-                             // The type must be deduced for use
+  explicit Shape() {}  // this initialize an invalid Shape
+                       // The type must be deduced for use
 
-  MDSpanValue(size_t n) : dim_count(n) {}
-  MDSpanValue(const ValueList& v) { val_no = values.Insert(v); }
-  // could be inconsist sized, but only be verified with sema checker
-  MDSpanValue(size_t n, const ValueList& v) : dim_count(n) {
+  Shape(size_t n) : dim_count(n) {}
+  Shape(const ValueList& v) { val_no = values.Insert(v); }
+  // could be inconsistently sized, but only be verified with sema checker
+  Shape(size_t n, const ValueList& v) : dim_count(n) {
     val_no = values.Insert(v);
   }
 
@@ -344,7 +345,7 @@ struct MDSpanValue {
   }
 };
 
-inline bool operator==(const MDSpanValue& lhs, const MDSpanValue& rhs) {
+inline bool operator==(const Shape& lhs, const Shape& rhs) {
   return lhs.IsValid() && rhs.IsValid() && (lhs.Dims() == rhs.Dims()) &&
          isValueListEqual(lhs.Value(), rhs.Value());
 }
@@ -468,12 +469,12 @@ struct ITupleType : public Type, public TypeIDProvider<ITupleType> {
 };
 
 struct MDSpanType : public Type, public TypeIDProvider<MDSpanType> {
-  MDSpanValue value;
+  Shape value;
 
-  MDSpanType(const MDSpanValue& v) : Type(TypeCategory::PARTIAL), value(v) {}
+  MDSpanType(const Shape& v) : Type(TypeCategory::PARTIAL), value(v) {}
 
-  void SetValue(const MDSpanValue& v) { value = v; }
-  const MDSpanValue& GetValue() { return value; }
+  void SetValue(const Shape& v) { value = v; }
+  const Shape& GetValue() { return value; }
 
   size_t Dims() const override {
     assert(value.IsValid() && "Invalid mdspan defined.");
@@ -566,8 +567,8 @@ struct BoundedIntegerType final : public Type,
 
 struct BoundedITupleType final : public Type,
                                  public TypeIDProvider<BoundedITupleType> {
-  MDSpanValue bounds;
-  BoundedITupleType(const MDSpanValue& s)
+  Shape bounds;
+  BoundedITupleType(const Shape& s)
       : Type(TypeCategory::BOUNDED_ITUPLE), bounds(s) {}
 
   size_t Dims() const override { return bounds.Dims(); }
@@ -595,14 +596,22 @@ struct BoundedITupleType final : public Type,
 };
 
 struct FutureType : public ScalarType, public TypeIDProvider<FutureType> {
-  FutureType(TypeCategory t = TypeCategory::FUTURE) : ScalarType(t) {}
+  Shape shape;  // the data shape associated with the future
+  FutureType() : ScalarType(TypeCategory::FUTURE) {}
+  FutureType(const Shape& mds) : ScalarType(TypeCategory::FUTURE), shape(mds) {}
   bool IsComplete() const override { return true; }
-  void Print(std::ostream& os) const override { os << "fut"; }
+  bool HasSufficientInfo() const { return shape.IsValid(); }
   const std::string Name() const override { return "future"; }
 
   bool operator==(const Type& ty) const override {
     return isa<FutureType>(&ty);
   }
+
+  void Print(std::ostream& os) const override {
+    os << "async=>";
+    shape.Print(os);
+  }
+
   __UDT_TYPE_INFO__
 };
 
@@ -616,8 +625,14 @@ inline bool operator!=(const Type& t1, const Type& t2) {
   return !t1.operator==(t2);
 }
 
+inline std::string STR(const Type& ty) {
+  std::ostringstream oss;
+  ty.Print(oss);
+  return oss.str();
+}
+
 // Utility functions to generate types
-inline MDSpanValue GenUninitMDSpanValue() { return MDSpanValue(); }
+inline Shape GenUninitShape() { return Shape(); }
 
 inline ptr<VoidType> MakeVoidType() { return std::make_shared<VoidType>(); }
 
@@ -642,28 +657,31 @@ inline ptr<ITupleType> MakeUninitITupleType() {
 }
 
 inline ptr<MDSpanType> MakeUninitMDSpanType() {
-  return std::make_shared<MDSpanType>(GenUninitMDSpanValue());
+  return std::make_shared<MDSpanType>(GenUninitShape());
 }
 
 inline ptr<MDSpanType> MakeDimedMDSpanType(size_t n) {
-  return std::make_shared<MDSpanType>(MDSpanValue(n));
+  return std::make_shared<MDSpanType>(Shape(n));
 }
 
-inline ptr<MDSpanType> MakeMDSpanType(const MDSpanValue& v) {
+inline ptr<MDSpanType> MakeMDSpanType(const Shape& v) {
   return std::make_shared<MDSpanType>(v);
 }
 
-inline ptr<SpannedType> MakeSpannedType(FundamentalType ft,
-                                        const MDSpanValue& v) {
+inline ptr<SpannedType> MakeSpannedType(FundamentalType ft, const Shape& v) {
   return std::make_shared<SpannedType>(ft, v);
 }
 
-inline ptr<SpannedType> MakeSpannedType(BaseType ft, const MDSpanValue& v) {
+inline ptr<SpannedType> MakeSpannedType(BaseType ft, const Shape& v) {
   return MakeSpannedType((FundamentalType)ft, v);
 }
 
-inline ptr<BoundedITupleType> MakeBoundedITupleType(const MDSpanValue& v) {
+inline ptr<BoundedITupleType> MakeBoundedITupleType(const Shape& v) {
   return std::make_shared<BoundedITupleType>(v);
+}
+
+inline ptr<FutureType> MakeFutureType(const Shape& v) {
+  return std::make_shared<FutureType>(v);
 }
 
 inline ptr<FutureType> MakeFutureType() {
