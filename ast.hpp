@@ -58,7 +58,7 @@ struct Node {
                                 Choreo::Target target = Choreo::Target::Factor) const {
     std::ostringstream _os;
     _os << prefix;
-    pty->Print(_os);
+    _os << pty->EmitTo(target);
     return _os.str();
   };
 

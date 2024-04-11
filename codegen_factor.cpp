@@ -217,7 +217,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
         _os << param->type->getPartialType()->EmitTo("", Target::Factor);
       } else {
         // TODO: this guard code may not needed
-        _os << "[?]";
+        _os << "{?}";
       }
       auto type_string = "DRAMType(" + 
                          factor_typestr(param->type->getBaseType()) + 
@@ -234,9 +234,33 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
     }
   }
 
-  os << "    auto choreo_output_type = DRAMType(";
-  os << factor_typestr(current_output->getBaseType());
-  os << ", (1));\n";  // todo
+  if (AST::typeof<SpannedType>(current_output.get())) {
+    auto type_symbol = "choreo_output_type";
+    std::ostringstream _os;
+    // param->type->Print(os, "");
+    if(current_output->getPartialType()) {
+      _os << current_output->getPartialType()->EmitTo("", Target::Factor);
+    } else {
+      // TODO: this guard code may not needed
+      _os << "{?}";
+    }
+    auto type_string = "DRAMType(" + 
+                       factor_typestr(current_output->getBaseType()) + 
+                       ", " + _os.str(); 
+
+    strtab.AddSymbol(type_symbol, type_symbol, type_string);
+    os << "    auto " << type_symbol << " = " << strtab.GetTypeString(type_symbol);
+    os << ");\n";
+  } else {
+    auto type_symbol = "choreo_output_type";
+    auto type_string = "DRAMType(" + factor_typestr(current_output->getBaseType()) + ", (1));";
+    strtab.AddSymbol(type_symbol, type_symbol, type_string);
+    os << "    auto " << strtab.GetTypeSymbol(type_symbol) << " = " << strtab.GetTypeString(type_symbol) << "\n";
+  }
+
+  // os << "    auto choreo_output_type = DRAMType(";
+  // os << factor_typestr(current_output->getBaseType());
+  // os << ", (1));\n";  // todo
 
   os << "\n";
   os << "    D(main_) // choreo-factor dataflow function\n";

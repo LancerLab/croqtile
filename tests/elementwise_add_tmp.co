@@ -1,7 +1,9 @@
-#include <iostream>
+// RUN: choreo %s | FileCheck --match-full-lines %s
+
 // NOTE: this is a tmp test file that workarounds Value Numbering bug
 // referencing tops/factor/tests/samples/operators/add/main.cc
 // TODO(ALBERT): replace this test with elementwise_add.co after VN bug fixed
+#include <iostream>
 
 // kernel program
 void kernel(int * a, int * b, int * c, int n) {
@@ -11,7 +13,9 @@ void kernel(int * a, int * b, int * c, int n) {
 
 // device program
 __co__ s32 mdspan[11, 1025] ele_add(s32 mdspan[11, 1025] a, s32 mdspan[11, 1025] b) {
-  // assert a.span == b.span
+  // CHECK: auto a_type = DRAMType(IntType(32), {11, 1025});
+  // CHECK: auto b_type = DRAMType(IntType(32), {11, 1025});
+  // CHECK: auto choreo_output_type = DRAMType(IntType(32), {11, 1025});
   f32[a.span] global_buffer;
 
   parallel p by 6 {  // p is sip_index
