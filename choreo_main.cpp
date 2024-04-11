@@ -138,7 +138,10 @@ int main(int argc, char* argv[]) {
   root.accept(ti);
   if (showInferOnly) return 0;
 
-ti.SymTab()->Print();
+  // debug: dump the symbol table
+  if (std::getenv("DUMP_SYMTAB"))
+    ti.SymTab()->Print(std::cout);
+
   // apply type check and generate symbol table
   TypeChecker sc(ti.SymTab());
   root.accept(sc);

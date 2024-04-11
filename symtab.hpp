@@ -63,9 +63,10 @@ class SymbolTable {
   static unsigned anonymous_count;
   static unsigned anon_type_count;
 
-  void Print() {
-	  for (auto item: table)
-		  std::cout << "symbol: " << item.first << ", type: " << STR(*item.second.GetType()) << "\n";
+  void Print(std::ostream& os) {
+    for (auto item : table)
+      os << "symbol: " << item.first
+         << ", type: " << STR(*item.second.GetType()) << "\n";
   }
 };
 
@@ -120,10 +121,10 @@ class ScopedSymbolTable {
   ptr<SymbolTable> symtab = nullptr;
 
  public:
-  ScopedSymbolTable(const ptr<SymbolTable> & s_tab = nullptr) : symtab(s_tab) {}
+  ScopedSymbolTable(const ptr<SymbolTable>& s_tab = nullptr) : symtab(s_tab) {}
 
   // produce the global symbol table
-  const ptr<SymbolTable> & GlobalSymbolTable() const { return symtab; }
+  const ptr<SymbolTable>& GlobalSymbolTable() const { return symtab; }
 
   size_t ScopeDepth() const { return scoped_symtab.size(); }
 
@@ -158,8 +159,7 @@ class ScopedSymbolTable {
     if (scoped_symtab.back().count(n) == 0) {
       // Insert into the current (top) scope and global symtab
       scoped_symtab.back().emplace(n, ty);
-      if (symtab)
-        symtab->AddSymbol(InScopeName(n), ty);
+      if (symtab) symtab->AddSymbol(InScopeName(n), ty);
 
       return true;
     }

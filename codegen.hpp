@@ -33,9 +33,13 @@ struct CodeGenerator : public Visitor {
     return true;
   }
 
+  virtual std::string InScopeName(const std::string & sym) {
+    return SSTab().InScopeName(sym);
+  }
+
   virtual ptr<Type> GetSymbolType(const std::string &n) {
-    assert(SymTab()->Exists(SSTab().InScopeName(n)) && "symbol is not declared.");
-    return SymTab()->GetSymbol(SSTab().InScopeName(n))->GetType();
+    assert(SymTab()->Exists(InScopeName(n)) && "symbol is not declared.");
+    return SymTab()->GetSymbol(InScopeName(n))->GetType();
   }
 
   CodeGenerator(std::ostream &o, const ptr<SymbolTable> &symtab)
