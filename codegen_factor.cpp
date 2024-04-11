@@ -175,6 +175,7 @@ bool FactorCodeGen::Visit(AST::ParallelBy &by) {
   }
   os << "}, {output});\n";
   os << "      destroy_stream_(stream);\n";
+  os << "      dealloc_stream_(stream);\n";
   os << "      return std::vector<Value>{output};\n";
   os << "    }); // end of choreo-factor dataflow program\n";
   os << "\n";

@@ -17,7 +17,11 @@ __co__ s32 mdspan[11, 1025] ele_add(s32 mdspan[11, 1025] a, s32 mdspan[11, 1025]
   // CHECK: auto b_type = DRAMType(IntType(32), {11, 1025});
   // CHECK: auto choreo_output_type = DRAMType(IntType(32), {11, 1025});
   f32[a.span] global_buffer;
+  // CHECK: auto choreo_output = alloc_(choreo_output_type);
+  // CHECK: auto global_buffer = alloc_(a_type);
 
+  // CHECK: Dim3 grid_dim(1);
+  // CHECK: Dim3 block_dim(6);
   parallel p by 6 {  // p is sip_index
     // kernel function begin
     with index = {x, y} in [10, 10] {  // totally 100 chunks
