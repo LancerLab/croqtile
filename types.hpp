@@ -14,6 +14,8 @@
 #include <variant>
 #include <vector>
 
+#include "enums.hpp"
+
 namespace Choreo {
 
 template <typename T>
@@ -366,7 +368,7 @@ struct Shape {
   }
 
   // util function for emit
-  std::string Stringify() const {
+  std::string EmitTo(Target target) const {
     std::ostringstream _os;
     if (val_no == __INVALID_VALUE__)
       _os << "{}";
@@ -400,7 +402,7 @@ struct Type {
   virtual const std::string Name() const = 0;
 
   // codegen util for emitting target's code in string format
-  virtual std::string Stringify() const { assert(false && "Stringify not impled for this type"); }
+  virtual std::string EmitTo(Target) const { assert(false && "Emit stringify not impled for this type"); }
 
   // for runtime type disambiguition
   virtual const std::string NodeTypeString() = 0;
@@ -537,13 +539,13 @@ struct MDSpanType : public Type, public TypeIDProvider<MDSpanType> {
     value.Print(os);
   }
 
-  std::string Stringify() const override {
+  std::string EmitTo(Target target) const override {
     std::ostringstream _os;
     // _os << "mdspan";
     if (value.IsValid()) {
       // value.Print(_os); 
       // TODO(albert): for readibility, consider change stringify to emit
-      _os << value.Stringify();
+      _os << value.EmitTo(target);
     }
     return _os.str();
 

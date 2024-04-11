@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "enums.hpp"
 #include "aux.hpp"
 #include "location.hh"
 #include "symtab.hpp"
@@ -53,9 +54,8 @@ struct Node {
     pty->Print(os);
   };
 
-  // TODO(albert): add target mode for dispatch different codegen emitting targets
-  // TODO(albert): replace emitting targets by enum target, not string
-  virtual std::string Stringify(const std::string& prefix = {}) const {
+  virtual std::string EmitTo(const std::string& prefix = {}, 
+                                Choreo::Target target = Choreo::Target::Factor) const {
     std::ostringstream _os;
     _os << prefix;
     pty->Print(_os);

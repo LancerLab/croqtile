@@ -208,14 +208,13 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
 
   for (auto &param : *cur_params) {
     auto name = param->sym->name;
-    if (!AST::typeof<IntegerType>(param.get()) &&
-        !AST::typeof<BooleanType>(param.get())) {
+    if (AST::typeof<SpannedType>(param.get())) {
       // define spanned type
       auto type_symbol = name+"_type";
       std::ostringstream _os;
       // param->type->Print(os, "");
       if(param->type->getPartialType()) {
-        _os << param->type->getPartialType()->Stringify("");
+        _os << param->type->getPartialType()->EmitTo("", Target::Factor);
       } else {
         // TODO: this guard code may not needed
         _os << "[?]";

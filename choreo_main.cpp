@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 
+#include "enums.hpp"
 #include "ast.hpp"
 #include "codegen.hpp"
 #include "scanner.hpp"
@@ -31,9 +32,7 @@ int main(int argc, char* argv[]) {
   bool onlySemaCheck = false;
   bool removeComments = false;
 
-  enum class Target { Factor, Topscc };
-
-  Target tgt = Target::Factor;
+  Choreo::Target tgt = Choreo::Target::Factor;
 
   // Define long options
   static struct option long_options[] = {
@@ -141,7 +140,7 @@ int main(int argc, char* argv[]) {
 
   if (onlySemaCheck) return 0;
 
-  if (tgt == Target::Factor) {
+  if (tgt == Choreo::Target::Factor) {
     FactorCodeGen codegen(std::cout);
     root.accept(codegen);
   }
