@@ -106,21 +106,34 @@ bool FactorCodeGen::Visit(AST::NamedTypeDecl &) { return true; };
 //   NamedVariableDecl
 bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) { 
   // TODO(albert): 'a.span' will be replace to the type-decl related to 'a'
-  // auto dtype = AST::dyn_cast<AST::DataType>(node.type.get());
-  // auto ptype = dtype->getPartialType();
+  // TODO(albert): refine this function with TYPE_STR new API
+  // os << AST::TYPE_STR(node);
+  auto dtype = dyn_cast<AST::DataType>(node.type.get());
+  auto ptype = dtype->getPartialType();
+  if (ptype) {
+    // get full name of mdspan type
+    // NOTE: full ref name may use "a.span" to ref to a var's span partial type
+    // the decl of new var will need this symbol "a", not "a.span"
+    // we do a hardcode workaround here
+    auto full_ref_name = ptype->getRefName();
+    auto ref_symbol = full_ref_name.substr(0, full_ref_name.find('.'));
+    if (strtab.Exists(ref_symbol)) {
+      os << "      auto " << node.name_str << " = alloc_(";
+      os << strtab.GetTypeSymbol("a");
+      os << ");\n";
+    }
+  } else {
+    // TODO(albert): handle anon case
+    os << "      auto " << node.name_str << " = alloc_(?";
+    os << ");\n";
+  }
   //
   // auto spantype = AST::dyn_cast<AST::MultiDimSpans>(ptype);
   // os << dtype->isSpanned();
   // 
-  // dtype->Print(os);
   // ptype->Print(os);
   // os << spantype->ref_name;
   // TODO: hardcode 'a', wait for expr eval
-  if (strtab.Exists("a")) {
-    os << "      auto " << node.name_str << " = alloc_(";
-    os << strtab.GetTypeSymbol("a");
-    os << ");\n";
-  }
 
   return true; 
 };

@@ -45,6 +45,8 @@ struct Node {
 
   virtual ~Node() = default;
 
+  virtual std::string getRefName() const { return ""; }
+
   virtual void Print(std::ostream& os,
                      const std::string& prefix = {}) const = 0;
 
@@ -327,6 +329,14 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
       return {Shape(dim_count)};
     } else
       return {Shape(0) /*TODO: make Type from the list*/};
+  }
+
+  std::string getRefName() const override {
+    std::ostringstream oss;
+    if (list) {
+      list->Print(oss, "");
+    }
+    return oss.str();
   }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
