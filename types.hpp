@@ -301,6 +301,26 @@ inline void PrintValueList(const ValueList& vl, std::ostream& os) {
   os << "]";
 }
 
+// TODO(albert): pack this util function together with other emit purpose classes/methods
+// TODO(albert): add emit target
+inline void EmitValueListForFactor(const ValueList& vl, std::ostream& os) {
+  auto print_variant = [&os](const ValueItem& vle) {
+    if (vle.index() == 0)
+      os << std::get<0>(vle);
+    else
+      os << std::get<1>(vle);
+  };
+  os << "{";
+  if (!vl.empty()) {
+    print_variant(vl[0]);
+    for (unsigned i = 1; i < vl.size(); ++i) {
+      os << ", ";
+      print_variant(vl[i]);
+    }
+  }
+  os << "}";
+}
+
 // MDSpan is sized and dependent type (dependent on the others)
 struct Shape {
   static ValueListRepo values;  // value numbers
@@ -337,11 +357,25 @@ struct Shape {
 
   void Print(std::ostream& os) const {
     if (val_no == __INVALID_VALUE__)
-      os << "{}";
+      os << "[]";
+      // PrintValueList(Value(), os);
     else {
       assert(values.Exists(val_no) && "bad value number.");
       PrintValueList(Value(), os);
     }
+  }
+
+  // util function for emit
+  std::string Stringify() const {
+    std::ostringstream _os;
+    if (val_no == __INVALID_VALUE__)
+      _os << "{}";
+      // PrintValueList(Value(), _os);
+    else {
+      assert(values.Exists(val_no) && "bad value number.");
+      EmitValueListForFactor(Value(), _os);
+    }
+    return _os.str();
   }
 };
 
@@ -364,6 +398,9 @@ struct Type {
   virtual bool operator==(const Type& t) const = 0;
   virtual void Print(std::ostream&) const = 0;
   virtual const std::string Name() const = 0;
+
+  // codegen util for emitting target's code in string format
+  virtual std::string Stringify() const { assert(false && "Stringify not impled for this type"); }
 
   // for runtime type disambiguition
   virtual const std::string NodeTypeString() = 0;
@@ -498,6 +535,18 @@ struct MDSpanType : public Type, public TypeIDProvider<MDSpanType> {
     if (value.IsValid()) os << Dims();
     os << "> ";
     value.Print(os);
+  }
+
+  std::string Stringify() const override {
+    std::ostringstream _os;
+    // _os << "mdspan";
+    if (value.IsValid()) {
+      // value.Print(_os); 
+      // TODO(albert): for readibility, consider change stringify to emit
+      _os << value.Stringify();
+    }
+    return _os.str();
+
   }
 
   const std::string Name() const override { return "mdspan"; }

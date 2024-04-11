@@ -53,6 +53,15 @@ struct Node {
     pty->Print(os);
   };
 
+  // TODO(albert): add target mode for dispatch different codegen emitting targets
+  // TODO(albert): replace emitting targets by enum target, not string
+  virtual std::string Stringify(const std::string& prefix = {}) const {
+    std::ostringstream _os;
+    _os << prefix;
+    pty->Print(_os);
+    return _os.str();
+  };
+
   virtual void accept(Visitor&) = 0;
 
   // for runtime type disambiguition
