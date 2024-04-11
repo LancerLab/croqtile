@@ -491,7 +491,9 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
   }
 
   BaseType getBaseType() const { return base_type; }
-  FundamentalType getFundamentalType() const { return (FundamentalType)base_type; }
+  FundamentalType getFundamentalType() const {
+    return (FundamentalType)base_type;
+  }
   Node* getPartialType() const { return mdspan_type.get(); }
 
   bool isScalar() const {
@@ -529,8 +531,8 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
       case BaseType::U8:
       case BaseType::S8:
         assert(mdspan_type != nullptr && "Expecting a valid mdspan.");
-        SetType(MakeSpannedType(
-            base_type, GenUninitShape()));  // need type inference
+        SetType(MakeSpannedType(base_type,
+                                GenUninitShape()));  // need type inference
         break;
       case BaseType::ITUPLE:
         SetType(MakeUninitITupleType());  // need type inference to retrieve the
@@ -562,7 +564,8 @@ struct NamedVariableDecl : public Node,
   const ptr<Node> initializer = nullptr;  // associated initializer
 
   explicit NamedVariableDecl(const location& l, const std::string& n,
-                             const ptr<DataType>& t, const ptr<Memory>& s = nullptr,
+                             const ptr<DataType>& t,
+                             const ptr<Memory>& s = nullptr,
                              const ptr<Node>& v = nullptr,
                              const std::string& d = "=")
       : Node(l), name_str(n), init_str(d), mem(s), type(t), initializer(v) {
@@ -804,7 +807,8 @@ struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
   ptr<Identifier> data;
   ptr<MultiValues> positions;
 
-  ChunkAt(const location& l, const ptr<Identifier>& d, const ptr<MultiValues>& p)
+  ChunkAt(const location& l, const ptr<Identifier>& d,
+          const ptr<MultiValues>& p)
       : Node(l), data(d), positions(p) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
@@ -968,10 +972,15 @@ ptr<T> Make(Args&&... args) {
   return std::make_shared<T>(std::forward<Args>(args)...);
 }
 
-inline std::string STR(AST::Node& n) {
+inline std::string STR(const AST::Node& n) {
   std::ostringstream oss;
   n.Print(oss);
   return oss.str();
+}
+inline std::string STR(const std::shared_ptr<AST::Node>& n) { return STR(*n); }
+inline std::string TYPE_STR(const AST::Node& n) { return STR(*n.GetType()); }
+inline std::string TYPE_STR(const std::shared_ptr<AST::Node>& n) {
+  return STR(*n->GetType());
 }
 
 }  // end of namespace AST

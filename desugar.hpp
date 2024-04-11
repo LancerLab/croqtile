@@ -18,7 +18,8 @@ struct DeSugaring : public Visitor {
   void ResetListReference() { list_ref = nullptr; }
 
  public:
-  DeSugaring() : trace(std::getenv("TRACE_DESUGAR")) {}
+  // it does not require a symbol table
+  DeSugaring() : Visitor(nullptr), trace(std::getenv("TRACE_DESUGAR")) {}
 
   bool BeforeVisit(AST::Node &n) override {
     if (auto *b = dyn_cast<AST::MultiDimSpans>(&n)) {

@@ -4,7 +4,7 @@ using namespace Choreo;
 
 void ValueNumbering::EnterScope(const std::string& name) {
   std::string indent = ScopeIndent();
-  visitor->EnterScope(name);
+  visitor->SSTab().EnterScope(name);
 
   if (expressionValueNumbers.empty()) {
     expressionValueNumbers.push_back({});
@@ -19,12 +19,14 @@ void ValueNumbering::EnterScope(const std::string& name) {
   else
     valueNumberExpressions.push_back(valueNumberExpressions.back());
 
-  if (trace) os << indent << "scope-" << visitor->ScopeDepth() << " {\n";
+  if (trace)
+    os << indent << "scope-" << visitor->SSTab().ScopeDepth()
+       << " {\n";
 }
 
 void ValueNumbering::LeaveScope() {
-  std::string sname = std::to_string(visitor->ScopeDepth());
-  visitor->LeaveScope();
+  std::string sname = std::to_string(visitor->SSTab().ScopeDepth());
+  visitor->SSTab().LeaveScope();
 
   assert(!expressionValueNumbers.empty() && !valueNumberExpressions.empty());
 
@@ -233,16 +235,15 @@ std::string ValueNumbering::GenerateNodeSignature(AST::Node& node,
     if (n->value == __UNKNOWN_INTVAL__) return "?";
     return "const_" + std::to_string(n->value);
   } else if (auto* v = dyn_cast<AST::Identifier>(&node)) {
-    if (auto name_in_scope = visitor->InScopeName(v->name)) {
-      if (HasValueNumberOfSignature(name_in_scope.value()))
-        return name_in_scope.value();
+    if (auto name_in_scope = visitor->SSTab().NameInScope(v->name)) {
+      if (HasValueNumberOfSignature(*name_in_scope)) return *name_in_scope;
       // error: the name exists but does not have a value number
-      Error(node.LOC(), "symbol `" + name_in_scope.value() +
+      Error(node.LOC(), "symbol `" + *name_in_scope +
                             "' is not associated with a value number.");
       choreo_unreachable();
     }
     // or else, it is a new name definition
-    return visitor->ScopedName(v->name);
+    return visitor->SSTab().ScopedName(v->name);
   } else if (auto* b = dyn_cast<AST::Expr>(&node)) {
     auto signature = b->op;
 
@@ -316,8 +317,8 @@ int ValueNumbering::GetValueNumberForNode(AST::Node& n) {
 
   if (auto id = dyn_cast<AST::Identifier>(&n)) {
     // Must consider about the scope of any identifier reference
-    if (auto name = visitor->InScopeName(id->name))
-      return GetValueNumberOfSignature(name.value());
+    if (auto name = visitor->SSTab().NameInScope(id->name))
+      return GetValueNumberOfSignature(*name);
     else
       choreo_unreachable("symbol `" + id->name + "' is not valued.");
   }
@@ -399,7 +400,8 @@ int ValueNumbering::GenerateValueNumberFromSignature(
 
 std::string ValueNumbering::ScopeIndent() {
   std::string indent;
-  for (size_t i = 0; i <= visitor->ScopeDepth(); ++i) indent += " ";
+  for (size_t i = 0; i <= visitor->SSTab().ScopeDepth(); ++i)
+    indent += " ";
   return indent;
 }
 

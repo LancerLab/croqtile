@@ -1,38 +1,25 @@
-#ifndef __CHOREO_TYPE_INFERENCE_HPP__
-#define __CHOREO_TYPE_INFERENCE_HPP__
+#ifndef __CHOREO_SYMBOL_VALIDATOR_CHECK_HPP__
+#define __CHOREO_SYMBOL_VALIDATOR_CHECK_HPP__
 
-#include <iostream>
+// This apply the type check and symbol table generation
 
-#include "types.hpp"
 #include "visitor.hpp"
 
 namespace Choreo {
 
-struct TypeInference : public Visitor {
+struct SymbolValidator : public Visitor {
  private:
-  bool Dump = false;
   std::ostream &os;
   bool trace_visit = false;  // for debugging purpose only
 
  private:
-  ptr<Type> cur_type = nullptr;
-  std::vector<ptr<Type>> cur_param_types;
-  Shape cur_mdspan_value;
-
   bool BeforeVisit(AST::Node &) override;
   bool AfterVisit(AST::Node &) override;
 
-  bool AssignSymbolWithType(const location &, const std::string &,
-                            const ptr<Type> &);
-  ptr<Type> GetSymbolType(const location &, const std::string &);
-
  public:
-  TypeInference(bool d, std::ostream &o = std::cout,
-                const ptr<SymbolTable> s_tab = std::make_shared<SymbolTable>())
-      : Visitor(s_tab),
-        Dump(d),
-        os(o),
-        trace_visit(std::getenv("TRACE_INFER")) {}
+  SymbolValidator(std::ostream &o = std::cout)
+      : os(o), trace_visit(std::getenv("TRACE_VALI")) {}
+  ~SymbolValidator() {}
 
   bool Visit(AST::MultiNodes &) override;
   bool Visit(AST::MultiValues &) override;
@@ -63,11 +50,8 @@ struct TypeInference : public Visitor {
   bool Visit(AST::ChoreoFunction &) override;
   bool Visit(AST::CppSourceCode &) override;
   bool Visit(AST::Program &) override;
-
- private:
-  bool SetCurrentType(AST::Node &, const std::string &);
 };
 
 }  // end namespace Choreo
 
-#endif  // __CHOREO_TYPE_INFERENCE_HPP__
+#endif  // __CHOREO_SYMBOL_VALIDATOR_CHECK_HPP__

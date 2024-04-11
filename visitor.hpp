@@ -47,89 +47,23 @@ struct Visitor {
   virtual bool Visit(AST::CppSourceCode&) = 0;
   virtual bool Visit(AST::Program&) = 0;
 
+ private:
+  // scoped variable handling
+  ScopedSymbolTable scoped_symtab;
+
  public:
-  // general scoped variable handling
-  std::vector<std::unordered_map<std::string, Symbol>> scopeStack;
-  std::vector<std::string> scopeNames;
+  Visitor(const ptr<SymbolTable>& s_tab = nullptr)
+      : scoped_symtab(s_tab) {}
+  virtual ~Visitor() {}
 
-  virtual void EnterScope(const std::string& name = "") {
-    scopeStack.emplace_back();  // Push a new scope
-    scopeNames.emplace_back(name);
-  }
+  // simple reference to the symbol table
+  virtual ScopedSymbolTable& SSTab() { return scoped_symtab; }
 
-  virtual void LeaveScope() {
-    if (!scopeStack.empty()) {
-      scopeStack.pop_back();  // Pop the last scope
-      scopeNames.pop_back();
-    }
-  }
-
-  virtual bool IsDeclared(const std::string& sym_name) {
-    // Iterate in reverse order to simulate stack behavior
-    for (auto it = scopeStack.rbegin(); it != scopeStack.rend(); ++it) {
-      if (it->count(sym_name))
-        return true;  // Found sym_name in the current or an enclosing scope
-    }
-    return false;  // sym_name not found in any scope
-  }
-
-  virtual bool DefineSymbol(const std::string& n, const ptr<Type> ty) {
-    if (!scopeStack.empty()) {
-      if (scopeStack.back().count(n) == 0) {
-        scopeStack.back().emplace(
-            n, Symbol(n, ty));  // Insert into the current (top) scope
-        return true;
-      }
-    }
-    return false;
-  }
-
-  virtual const Symbol* LookupSymbol(const std::string& n) {
-    for (auto it = scopeStack.rbegin(); it != scopeStack.rend(); ++it) {
-      if (it->count(n)) return &(*it).at(n);
-    }
+  virtual const ptr<SymbolTable> SymTab() const {
+    if (auto st = scoped_symtab.GlobalSymbolTable())
+      return st;
+    choreo_unreachable("Retrieving an invalid symbol table.");
     return nullptr;
-  }
-
-  virtual std::string UnscopedName(const std::string& name) {
-    size_t pos = name.find_last_of("::");
-    if (pos != std::string::npos) {
-      // If found, return the substring after the last "::"
-      return name.substr(pos + 2);  // +2 to skip the "::" itself
-    }
-    return name;  // Return the original string if "::" is not found
-  }
-
-  virtual size_t ScopeDepth() const { return scopeStack.size(); }
-
-  virtual std::string ScopeName() const {
-    std::string name;
-    for (auto it = scopeNames.begin(); it != scopeNames.end(); ++it)
-      name += *it + "::";
-    return name;
-  }
-
-  // If the variable is declared in (multi-level) scopes, retrievd the scoped
-  // name. Or else nothing
-  virtual std::string ScopedName(const std::string& name) const {
-    return ScopeName() + name;
-  }
-
-  // If the variable is declared in (multi-level) scopes, retrievd the scoped
-  // name. Or else nothing
-  virtual std::optional<std::string> InScopeName(
-      const std::string& name) const {
-    std::string scoped_name;
-    auto it = scopeStack.rbegin();
-    auto in = scopeNames.rbegin();
-    for (; it != scopeStack.rend(); ++it, ++in) {
-      if (it->count(name) == 0) continue;
-
-      for (; in != scopeNames.rend(); ++in)
-        scoped_name = *in + "::" + scoped_name;
-      return scoped_name + name;
-    }
-    return {};
   }
 
  public:

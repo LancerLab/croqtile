@@ -201,7 +201,7 @@ class ShapeInference : public Visitor {
       vn.EnterScope("foreach_" + std::to_string(count++));
     } else if (auto* b = dyn_cast<AST::MultiDimSpans>(&n)) {
       if (b->ref_name != "") {
-        auto n = InScopeName(b->ref_name);
+        auto n = SSTab().NameInScope(b->ref_name);
         if (!n)
           choreo_unreachable(
               ("variable `" + b->ref_name + "' is not found in scopes.")
@@ -210,7 +210,7 @@ class ShapeInference : public Visitor {
       }
     } else if (auto* b = dyn_cast<AST::IntTuple>(&n)) {
       if (b->ref_name != "") {
-        auto n = InScopeName(b->ref_name);
+        auto n = SSTab().NameInScope(b->ref_name);
         if (!n)
           choreo_unreachable(
               ("variable `" + b->ref_name + "' is not found in scopes.")
@@ -251,8 +251,8 @@ class ShapeInference : public Visitor {
     __TRACE_EACH_VISIT__;
     if (auto ref = n.GetReference()) {
       if (auto id = dyn_cast<AST::Identifier>(ref.get())) {
-        if (IsDeclared(id->name)) {
-          cur_vn = vn.GetValueNumberOfSignature(InScopeName(id->name).value());
+        if (SSTab().IsDeclared(id->name)) {
+          cur_vn = vn.GetValueNumberOfSignature(SSTab().InScopeName(id->name));
           return true;
         }
       }
@@ -318,9 +318,9 @@ class ShapeInference : public Visitor {
     if (n.init_expr) {
       assert(ValidVN(cur_mdspan_vn) &&
              "invalid value number for the named type.");
-      DefineSymbol(n.name_str, n.GetType());
+      SSTab().DefineSymbol(n.name_str, n.GetType());
 
-      vn.AssociateSignatureWithValueNumber(ScopedName(n.name_str),
+      vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(n.name_str),
                                            cur_mdspan_vn);
 
       InvalidateVN(cur_mdspan_vn);  // comsumes the mdspan
@@ -331,7 +331,7 @@ class ShapeInference : public Visitor {
   bool Visit(AST::NamedVariableDecl& n) {
     __TRACE_EACH_VISIT__;
 
-    if (IsDeclared(n.name_str)) {
+    if (SSTab().IsDeclared(n.name_str)) {
       Error(n.LOC(), "ODR violation: symbol `" + n.name_str +
                          "' has been declared already.");
       return false;
@@ -342,28 +342,31 @@ class ShapeInference : public Visitor {
         // assert(!ValidVN(cur_vn) && "expected current value number.");
         // assert(!ValidVN(cur_mdspan_vn) && "expected current mdspan value
         // number.");
-        vn.AssociateSignatureWithValueNumber(ScopedName(n.name_str),
+        vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(n.name_str),
                                              cur_ituple_vn);
         InvalidateVN(cur_ituple_vn);
-        DefineSymbol(n.name_str, MakeUninitITupleType());
+        SSTab().DefineSymbol(n.name_str, MakeUninitITupleType());
 
       } else if (ValidVN(cur_vn)) {
-        vn.AssociateSignatureWithValueNumber(ScopedName(n.name_str), cur_vn);
+        vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(n.name_str),
+                                             cur_vn);
         InvalidateVN(cur_vn);
-        DefineSymbol(n.name_str, n.GetType());
+        SSTab().DefineSymbol(n.name_str, n.GetType());
       }
     } else {
       assert(n.type && "missed type annotation.");
       if (ValidVN(cur_mdspan_vn)) {
-        vn.AssociateSignatureWithValueNumber(ScopedName(n.name_str + ".span"),
-                                             cur_mdspan_vn);
+        vn.AssociateSignatureWithValueNumber(
+            SSTab().ScopedName(n.name_str + ".span"), cur_mdspan_vn);
         auto mds_value = GenShapeFromSignature(
             vn.GetSignatureFromValueNumber(cur_mdspan_vn));
-        DefineSymbol(n.name_str, MakeSpannedType(n.type->base_type, mds_value));
-        DefineSymbol(n.name_str + ".span", MakeMDSpanType(mds_value));
+        SSTab().DefineSymbol(n.name_str,
+                              MakeSpannedType(n.type->base_type, mds_value));
+        SSTab().DefineSymbol(n.name_str + ".span", MakeMDSpanType(mds_value));
       } else if (ValidVN(cur_vn)) {
-        vn.AssociateSignatureWithValueNumber(ScopedName(n.name_str), cur_vn);
-        DefineSymbol(n.name_str, n.GetType());
+        vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(n.name_str),
+                                             cur_vn);
+        SSTab().DefineSymbol(n.name_str, n.GetType());
       } else
         choreo_unreachable();
     }
@@ -397,18 +400,19 @@ class ShapeInference : public Visitor {
   bool Visit(AST::Assignment& n) {
     __TRACE_EACH_VISIT__;
 
-    if (IsDeclared(n.name)) {
+    if (SSTab().IsDeclared(n.name)) {
       return true;
     }
 
     // this is the un-type-annotated declaration
-    DefineSymbol(n.name, n.value->GetType());
+    SSTab().DefineSymbol(n.name, n.value->GetType());
 
     if (ValidVN(cur_ituple_vn)) {
       assert(!ValidVN(cur_vn) && "expected current value number.");
       assert(!ValidVN(cur_mdspan_vn) &&
              "expected current mdspan value number.");
-      vn.AssociateSignatureWithValueNumber(ScopedName(n.name), cur_ituple_vn);
+      vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(n.name),
+                                           cur_ituple_vn);
       InvalidateVN(cur_ituple_vn);
     }
 
@@ -431,18 +435,17 @@ class ShapeInference : public Visitor {
 
   bool Visit(AST::Identifier& n) {
     __TRACE_EACH_VISIT__;
-    if (IsDeclared(n.name)) {
+    if (SSTab().IsDeclared(n.name)) {
       // it is a reference
       auto name = n.name;
-      auto* sym = LookupSymbol(name);
-      if (isa<SpannedType>(sym->type.get()) ||
-          isa<FutureType>(sym->type.get())) {
+      auto pty = SSTab().LookupSymbol(name);
+      if (isa<SpannedType>(pty.get()) || isa<FutureType>(pty.get())) {
         name += ".span";
-        assert(IsDeclared(name) && "span symbol is not declared.");
+        assert(SSTab().IsDeclared(name) && "span symbol is not declared.");
       }
-      assert(vn.HasValueNumberOfSignature(InScopeName(name).value()) &&
+      assert(vn.HasValueNumberOfSignature(SSTab().InScopeName(name)) &&
              "value number has not been generated.");
-      cur_vn = vn.GetValueNumberOfSignature(InScopeName(name).value());
+      cur_vn = vn.GetValueNumberOfSignature(SSTab().InScopeName(name));
     } else {
       if (vn.HasValueNumberForNode(n)) {
         Error(n.LOC(), "value number has been generated for `" + n.name + "'.");
@@ -465,16 +468,16 @@ class ShapeInference : public Visitor {
         assert(ValidVN(cur_mdspan_vn) && "unexpected value number for mdspan.");
 
         // Put alias names of mdspan into the value number table
-        vn.AssociateSignatureWithValueNumber(ScopedName(n.sym->name + ".span"),
-                                             cur_mdspan_vn);
+        vn.AssociateSignatureWithValueNumber(
+            SSTab().ScopedName(n.sym->name + ".span"), cur_mdspan_vn);
         n.type->SetType(
             MakeSpannedType(n.type->base_type, span->GetTypeDetail()));
 
       } else if (span->dim_count != __INVALID_VALUE__) {
         assert(ValidVN(cur_mdspan_vn) && "unexpected value number for mdspan.");
         // Put alias names of mdspan into the value number table
-        vn.AssociateSignatureWithValueNumber(ScopedName(n.sym->name + ".span"),
-                                             cur_mdspan_vn);
+        vn.AssociateSignatureWithValueNumber(
+            SSTab().ScopedName(n.sym->name + ".span"), cur_mdspan_vn);
         n.type->SetType(
             MakeSpannedType(n.type->base_type, span->GetTypeDetail()));
       } else {
@@ -485,15 +488,15 @@ class ShapeInference : public Visitor {
 
       InvalidateVN(cur_vn);
 
-      if (n.sym) DefineSymbol(n.sym->name + ".span", n.GetType());
+      if (n.sym) SSTab().DefineSymbol(n.sym->name + ".span", n.GetType());
 
       return true;
     }
 
     if (n.sym && n.type->isScalar()) {
       // get the value number and make it defined
-      vn.GetValueNumberOfSignature(ScopedName(n.sym->name));
-      if (n.sym) DefineSymbol(n.sym->name, n.GetType());
+      vn.GetValueNumberOfSignature(SSTab().ScopedName(n.sym->name));
+      if (n.sym) SSTab().DefineSymbol(n.sym->name, n.GetType());
       return true;
     }
 
@@ -510,11 +513,11 @@ class ShapeInference : public Visitor {
     std::string bound = "const_" + std::to_string(n.bound);
     int valno = vn.GetOrInsertValueNumberFromSignature(bound);
     std::string iv_name =
-        ScopedName("@" + n.biv);  // upper-bound of bounded variable
+        SSTab().ScopedName("@" + n.biv);  // upper-bound of bounded variable
     vn.AssociateSignatureWithValueNumber(iv_name, valno);
     n.SetType(MakeBoundedITupleType(
         GenShapeFromSignature(vn.GetSignatureFromValueNumber(valno))));
-    DefineSymbol("@" + n.biv, n.GetType() /*TODO: fix type*/);
+    SSTab().DefineSymbol("@" + n.biv, n.GetType() /*TODO: fix type*/);
     return true;
   };
 
@@ -540,27 +543,29 @@ class ShapeInference : public Visitor {
           vn_sig, [this, &vn_sig, &n, gen_alias](int valno, size_t index) {
             if (UnknownVN(valno)) return;  // do not associate it with vn of "?"
             if (n.with && gen_alias) {
-              std::string name =
-                  ScopedName(n.with->name) + "(" + std::to_string(index) + ")";
+              std::string name = SSTab().ScopedName(n.with->name) + "(" +
+                                 std::to_string(index) + ")";
               vn.AssociateSignatureWithValueNumber(name, valno);
             }
 
             if (n.with_matchers) {
               auto sym =
                   cast<AST::Identifier>((n.with_matchers->values[index]).get());
-              std::string name = ScopedName("@" + sym->name);
+              std::string name = SSTab().ScopedName("@" + sym->name);
               if (gen_alias) vn.AssociateSignatureWithValueNumber(name, valno);
               sym->SetType(MakeBoundedITupleType(GenShapeFromSignature(
                   vn.GetSignatureFromValueNumber(valno))));
-              DefineSymbol("@" + sym->name, sym->GetType() /*TODO: fix type*/);
+              SSTab().DefineSymbol("@" + sym->name,
+                                    sym->GetType() /*TODO: fix type*/);
             }
           });
 
       if (n.with) {
-        vn.AssociateSignatureWithValueNumber(ScopedName("@" + n.with->name),
-                                             cur_mdspan_vn);
+        vn.AssociateSignatureWithValueNumber(
+            SSTab().ScopedName("@" + n.with->name), cur_mdspan_vn);
         n.with->SetType(MakeBoundedITupleType(GenShapeFromSignature(vn_sig)));
-        DefineSymbol("@" + n.with->name, n.with->GetType() /*TODO: fix type*/);
+        SSTab().DefineSymbol("@" + n.with->name,
+                              n.with->GetType() /*TODO: fix type*/);
       }
       InvalidateVN(cur_mdspan_vn);
     } else {
@@ -586,12 +591,13 @@ class ShapeInference : public Visitor {
     assert(ValidVN(cur_vn) &&
            "unexpected current value number for future.span inference.");
 
-    vn.AssociateSignatureWithValueNumber(ScopedName(f_span), cur_vn);
+    vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(f_span), cur_vn);
     auto mds_val =
         GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
     n.SetType(MakeFutureType(mds_val));
-    DefineSymbol(n.future->name, n.GetType());
-    DefineSymbol(f_span, MakeMDSpanType(mds_val));  // this is implicit symbol
+    SSTab().DefineSymbol(n.future->name, n.GetType());
+    SSTab().DefineSymbol(f_span,
+                          MakeMDSpanType(mds_val));  // this is implicit symbol
 
     return true;
   };
@@ -600,7 +606,7 @@ class ShapeInference : public Visitor {
     __TRACE_EACH_VISIT__;
 
     std::string data_sig =
-        vn.SignatureOfSymbol(InScopeName(n.data->name + ".span").value());
+        vn.SignatureOfSymbol(SSTab().InScopeName(n.data->name + ".span"));
     int dim_count = CountElementsInSignature(data_sig);
     int dim_index = 0;
 
@@ -626,8 +632,8 @@ class ShapeInference : public Visitor {
 
     for (auto pos : n.positions->values) {
       auto biv = cast<AST::Identifier>(pos.get());
-      auto bound_name = InScopeName("@" + biv->name);
-      int bound_vn = vn.GetValueNumberOfSignature(bound_name.value());
+      auto bound_name = SSTab().InScopeName("@" + biv->name);
+      int bound_vn = vn.GetValueNumberOfSignature(bound_name);
       std::string bound_sn = vn.GetSignatureFromValueNumber(bound_vn);
       auto dim_ith = GetNthElement(data_sig, dim_index);
       if (!dim_ith) {

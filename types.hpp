@@ -369,6 +369,7 @@ struct Shape {
 
   // util function for emit
   std::string EmitTo(Target target) const {
+    (void)target;
     std::ostringstream _os;
     if (val_no == __INVALID_VALUE__)
       _os << "{}";

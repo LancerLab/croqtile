@@ -9,25 +9,24 @@ using namespace Choreo;
 
 bool TypeInference::BeforeVisit(AST::Node &n) {
   if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
-    EnterScope(f->name);
+    SSTab().EnterScope(f->name);
   } else if (isa<AST::ParallelBy>(&n)) {
     static size_t count = 0;
-    EnterScope("paraby_" + std::to_string(count++));
+    SSTab().EnterScope("paraby_" + std::to_string(count++));
   } else if (isa<AST::WithBlock>(&n)) {
     static size_t count = 0;
-    EnterScope("within_" + std::to_string(count++));
+    SSTab().EnterScope("within_" + std::to_string(count++));
   } else if (isa<AST::ForeachBlock>(&n)) {
     static size_t count = 0;
-    EnterScope("foreach_" + std::to_string(count++));
+    SSTab().EnterScope("foreach_" + std::to_string(count++));
   }
-
   return true;
 }
 
 bool TypeInference::AfterVisit(AST::Node &n) {
   if (isa<AST::ChoreoFunction>(&n) || isa<AST::ParallelBy>(&n) ||
       isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n)) {
-    LeaveScope();
+    SSTab().LeaveScope();
   }
   return true;
 }
@@ -35,7 +34,7 @@ bool TypeInference::AfterVisit(AST::Node &n) {
 bool TypeInference::AssignSymbolWithType(const location &loc,
                                          const std::string &sym,
                                          const ptr<Type> &ty) {
-  if (!DefineSymbol(sym, ty)) {
+  if (!SSTab().DefineSymbol(sym, ty)) {
     Error(loc, "symbol `" + sym + "' has already been associated with a type.");
     return false;
   }
@@ -44,12 +43,12 @@ bool TypeInference::AssignSymbolWithType(const location &loc,
 
 ptr<Type> TypeInference::GetSymbolType(const location &loc,
                                        const std::string &name) {
-  if (!IsDeclared(name)) {
+  if (!SSTab().IsDeclared(name)) {
     Error(loc, "The symbol `" + name + "' has not been defined.");
     return nullptr;
   }
-  if (auto *sym = LookupSymbol(name)) {
-    return sym->GetType();
+  if (auto pty = SSTab().LookupSymbol(name)) {
+    return pty;
   } else {
     Error(loc, "symbol `" + name + "' is not associated with a type.");
     return nullptr;
@@ -144,8 +143,7 @@ bool TypeInference::Visit(AST::NamedVariableDecl &n) {
   AssignSymbolWithType(n.LOC(), n.name_str, n.GetType());
 
   if (Dump) {
-    os << "Symbol:    " << *InScopeName(n.name_str) << ", Type: ";
-    n.PrintType(os);
+    os << "Symbol:    " << SSTab().InScopeName(n.name_str) << ", Type: " << AST::TYPE_STR(n);
     if (n.mem) os << ", Storage: " << AST::STR(*n.mem);
     os << "\n";
   }
@@ -181,9 +179,7 @@ bool TypeInference::Visit(AST::NamedTypeDecl &n) {
   AssignSymbolWithType(n.LOC(), n.name_str, n.GetType());
 
   if (Dump) {
-    os << "Partial:   " << *InScopeName(n.name_str) << ", Type: ";
-    n.GetType()->Print(os);
-    os << "\n";
+    os << "Partial:   " << SSTab().InScopeName(n.name_str) << ", Type: " << AST::TYPE_STR(n) << "\n";
   }
   return true;
 }
@@ -222,12 +218,10 @@ bool TypeInference::Visit(AST::Parameter &p) {
   if (Dump) {
     os << "Parameter: ";
     if (p.HasSymbol())
-      os << *InScopeName(p.sym->name);
+      os << SSTab().InScopeName(p.sym->name);
     else
       os << "(unnamed)";
-    os << ", Type: ";
-    p.GetType()->Print(os);
-    os << "\n";
+    os << ", Type: " << AST::TYPE_STR(p) << "\n";
   }
 
   cur_type.reset();
@@ -298,22 +292,20 @@ bool TypeInference::Visit(AST::DMA &n) {
   __TRACE_EACH_VISIT__(n)
 
   // future's type has been obtained by shape inference
-  DefineSymbol(n.future->name, n.GetType());
+  AssignSymbolWithType(n.LOC(), n.future->name, n.GetType());
   auto mds_val = cast<FutureType>(n.GetType().get())->shape;
-  DefineSymbol(n.future->name + ".span", MakeMDSpanType(mds_val));
+  AssignSymbolWithType(n.LOC(), n.future->name + ".span", MakeMDSpanType(mds_val));
   if (Dump) {
-    os << "Future:    " << *InScopeName(n.future->name);
-    os << ", Type: " << STR(*n.GetType()) << "\n";
+    os << "Future:    " << SSTab().InScopeName(n.future->name) << ", Type: " << AST::TYPE_STR(n) << "\n";
   }
   return true;
 }
 
 bool TypeInference::Visit(AST::ParallelBy &n) {
   __TRACE_EACH_VISIT__(n)
-  DefineSymbol(n.biv, n.GetType());
+  AssignSymbolWithType(n.LOC(), n.biv, n.GetType());
   if (Dump) {
-    os << "Bounded:   " << *InScopeName(n.biv);
-    os << ", Type: " << STR(*n.GetType()) << "\n";
+    os << "Bounded:   " << SSTab().InScopeName(n.biv) << ", Type: " << AST::TYPE_STR(n) << "\n";
   }
   return true;
 }
@@ -325,31 +317,24 @@ bool TypeInference::Visit(AST::RequireBind &n) {
 
 bool TypeInference::Visit(AST::WithIn &n) {
   __TRACE_EACH_VISIT__(n)
-  if (n.with) DefineSymbol(n.with->name, n.with->GetType());
+  if (n.with) AssignSymbolWithType(n.LOC(), n.with->name, n.with->GetType());
 
   if (n.with_matchers) {
     for (auto pid : n.with_matchers->values) {
       auto id = cast<AST::Identifier>(pid.get());
-      DefineSymbol(id->name, id->GetType());
+      AssignSymbolWithType(n.LOC(), id->name, id->GetType());
     }
   }
 
   if (Dump) {
     if (n.with) {
       os << "Bounded:   ";
-      os << *InScopeName(n.with->name);
-      os << ", Type: ";
-      n.with->GetType()->Print(os);
-      os << "\n";
+      os << SSTab().InScopeName(n.with->name) << ", Type: " << AST::TYPE_STR(*n.with) << "\n";
     }
     if (n.with_matchers) {
       for (auto pid : n.with_matchers->values) {
         auto id = cast<AST::Identifier>(pid.get());
-        os << "Bounded:   ";
-        os << *InScopeName(id->name);
-        os << ", Type: ";
-        id->GetType()->Print(os);
-        os << "\n";
+        os << "Bounded:   " << SSTab().InScopeName(id->name) << ", Type: " << AST::TYPE_STR(*id) << "\n";
       }
     }
   }

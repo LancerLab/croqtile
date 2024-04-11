@@ -12,12 +12,12 @@
   std::abort();
 }
 
-[[noreturn]] inline void choreo_unreachable(
-    const std::string & msg, const char* file = __FILE__,
-    int line = __LINE__) {
+[[noreturn]] inline void choreo_unreachable(const std::string& msg,
+                                            const char* file = __FILE__,
+                                            int line = __LINE__) {
   std::cerr << "Assertion failed: " << msg << ", file " << file << ", line "
             << line << std::endl;
   std::abort();
 }
 
-#endif // __CHOREO_AUX_HPP__
+#endif  // __CHOREO_AUX_HPP__

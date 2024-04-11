@@ -105,6 +105,119 @@ class StringifyTable {
   void Reset() { type_sym_table.clear(); }
 };
 
+// This is the scoped symbol table
+class ScopedSymbolTable {
+  std::vector<std::unordered_map<std::string, ptr<Type>>>
+      scoped_symtab;                     // k: symbol name, v: type
+  std::vector<std::string> scope_names;  // k: scope-index, v: scope-name
+
+  // global symbol table: set it when required
+  ptr<SymbolTable> symtab = nullptr;
+
+ public:
+  ScopedSymbolTable(const ptr<SymbolTable> & s_tab = nullptr) : symtab(s_tab) {}
+
+  // produce the global symbol table
+  const ptr<SymbolTable> & GlobalSymbolTable() const { return symtab; }
+
+  size_t ScopeDepth() const { return scoped_symtab.size(); }
+
+  void EnterScope(const std::string& name = "") {
+    scoped_symtab.emplace_back();  // Push a new scope
+    scope_names.emplace_back(name);
+  }
+
+  void LeaveScope() {
+    if (!scoped_symtab.empty()) {
+      scoped_symtab.pop_back();  // Pop the last scope
+      scope_names.pop_back();
+    }
+  }
+
+  bool IsDeclared(const std::string& sym_name) const {
+    // Iterate in reverse order to simulate stack behavior
+    for (auto it = scoped_symtab.rbegin(); it != scoped_symtab.rend(); ++it) {
+      if (it->count(sym_name))
+        return true;  // Found sym_name in the current or an enclosing scope
+    }
+    return false;  // sym_name not found in any scope
+  }
+
+  bool DefineSymbol(const std::string& n, const ptr<Type> ty) {
+    if (scoped_symtab.empty()) {
+      choreo_unreachable("internal error: symtab is empty (@ insertion of `" +
+                         n + "').");
+      return false;
+    }
+
+    if (scoped_symtab.back().count(n) == 0) {
+      // Insert into the current (top) scope and global symtab
+      scoped_symtab.back().emplace(n, ty);
+      if (symtab)
+        symtab->AddSymbol(InScopeName(n), ty);
+
+      return true;
+    }
+
+    choreo_unreachable("Symbol `" + n + "' has been defined.");
+    return false;
+  }
+
+  ptr<Type> LookupSymbol(const std::string& n) {
+    for (auto it = scoped_symtab.rbegin(); it != scoped_symtab.rend(); ++it) {
+      if (it->count(n)) return (*it)[n];
+    }
+    return nullptr;
+  }
+
+ public:
+  // utility functions
+  std::string UnscopedName(const std::string& name) {
+    size_t pos = name.find_last_of("::");
+    if (pos != std::string::npos) {
+      // If found, return the substring after the last "::"
+      return name.substr(pos + 2);  // +2 to skip the "::" itself
+    }
+    return name;  // Return the original string if "::" is not found
+  }
+
+  // get the current scope name
+  std::string ScopeName() const {
+    std::string name;
+    for (auto it = scope_names.begin(); it != scope_names.end(); ++it)
+      name += *it + "::";
+    return name;
+  }
+
+  // get the name when the symbol is assumed to be defined in current scope
+  std::string ScopedName(const std::string& name) const {
+    return ScopeName() + name;
+  }
+
+  // If the name is defined in scopes, return the scoped name
+  std::string InScopeName(const std::string& name) const {
+    auto n = NameInScope(name);
+    if (!n) choreo_unreachable("symbol `" + name + "' is not found in scope");
+    return *n;
+  }
+
+  // If the variable is declared in (multi-level) scopes, retrievd the scoped
+  // name. Or else nothing
+  std::optional<std::string> NameInScope(const std::string& name) const {
+    std::string scoped_name;
+    auto it = scoped_symtab.rbegin();
+    auto in = scope_names.rbegin();
+    for (; it != scoped_symtab.rend(); ++it, ++in) {
+      if (it->count(name) == 0) continue;
+
+      for (; in != scope_names.rend(); ++in)
+        scoped_name = *in + "::" + scoped_name;
+      return scoped_name + name;
+    }
+    return {};
+  }
+};
+
 }  // end of namespace Choreo
 
 #endif  // __CHOREO_SYMTAB_H__

@@ -5,13 +5,14 @@
 #include "enums.hpp"
 #include "ast.hpp"
 #include "codegen.hpp"
-#include "scanner.hpp"
 #include "desugar.hpp"
-#include "valno.hpp"
-#include "semantics.hpp"
+#include "scanner.hpp"
 #include "symtab.hpp"
+#include "symvalid.hpp"
+#include "typecheck.hpp"
 #include "typeinfer.hpp"
 #include "types.hpp"
+#include "valno.hpp"
 
 using namespace Choreo;
 
@@ -47,8 +48,8 @@ int main(int argc, char* argv[]) {
   // Parse command-line options
   int opt;
   int option_index = 0;
-  while ((opt = getopt_long(argc, argv, "deivsn", long_options, &option_index)) !=
-         -1) {
+  while ((opt = getopt_long(argc, argv, "deivsn", long_options,
+                            &option_index)) != -1) {
     switch (opt) {
       case 'd':
         debugMode = true;
@@ -120,28 +121,31 @@ int main(int argc, char* argv[]) {
     return 0;
   }
 
-  // minor AST change: desugar for easiler handling
+  // verify symbol references inside scopes
+  SymbolValidator sv;
+  root.accept(sv);
+
+  // minor AST change: desugar for canonicalized AST
   DeSugaring ds;
   root.accept(ds);
 
-  // perform shape inference of mdspans
+  // perform shape inference of mdspans, future, etc.
   ShapeInference si(printValueNumbers);
   root.accept(si);
 
-  // infer the unknown types - decls
+  // inference all the unknown types - decls
   TypeInference ti(showInferOnly);
   root.accept(ti);
-
   if (showInferOnly) return 0;
 
-  // apply type check
-  SemanticChecker sc;
+  // apply type check and generate symbol table
+  TypeChecker sc(ti.SymTab());
   root.accept(sc);
 
   if (onlySemaCheck) return 0;
 
-  if (tgt == Choreo::Target::Factor) {
-    FactorCodeGen codegen(std::cout);
+  if (tgt == Target::Factor) {
+    FactorCodeGen codegen(std::cout, sc.SymTab());
     root.accept(codegen);
   }
 

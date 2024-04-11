@@ -79,10 +79,12 @@ bool FactorCodeGen::BeforeVisit(AST::Node &n) {
     print_wrapper_begin(os, c->name);
     current_fn = c->name;
   }
+  CodeGenerator::BeforeVisit(n);
   return 0;
 }
 
 bool FactorCodeGen::AfterVisit(AST::Node &n) {
+  CodeGenerator::AfterVisit(n);
   if (auto p = dyn_cast<AST::ChoreoFunction>(&n)) {
     print_wrapper_end(os, p->name);
   } else if (isa<AST::ParallelBy>(&n)) {
