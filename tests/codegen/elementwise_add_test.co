@@ -20,10 +20,10 @@ __co__ s32 mdspan[12, 1025] ele_add(s32 [12, 1025] a, s32 [12, 1025] b) {
   // test global-level buffer decl
   // TODO(albert): remove this dupdundant decl first
   // TODO(albert): how implicitly handle output buffer? 
-  f32 [12, 1025] choreo_output_type;
+  s32 [12, 1025] choreo_output_type;
   f32[a.span] lhs_global;
   f32[b.span] rhs_global;
-  f32[a.span] choreo_output;
+  f32[choreo_output_type.span] choreo_output;
   // TODO: fix to avoid merging a.span, b.span, all to "a_type"
   // CHECK: auto lhs_global = alloc_(a_type);
   // CHECK: auto rhs_global = alloc_(a_type);

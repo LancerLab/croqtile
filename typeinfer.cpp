@@ -141,6 +141,11 @@ bool TypeInference::Visit(AST::NamedVariableDecl &n) {
   cur_type.reset();
 
   AssignSymbolWithType(n.LOC(), n.name_str, n.GetType());
+  // workaround code to add completetype 'a' and its partial type, 'a.span'
+  // TODO(albert): use partial type for 'a.span', not same complete type as 'a'
+  AssignSymbolWithType(n.LOC(), n.name_str+".span", n.GetType());
+  // SSTab().GlobalSymbolTable()->Print(std::cout);
+  // assert(0);
 
   if (Dump) {
     os << "Symbol:    " << SSTab().InScopeName(n.name_str) << ", Type: " << AST::TYPE_STR(n);
