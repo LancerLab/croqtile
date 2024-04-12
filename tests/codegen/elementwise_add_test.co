@@ -1,0 +1,68 @@
+// RUN: choreo %s | FileCheck --match-full-lines %s
+
+// NOTE: this is a tmp test file that workarounds Value Numbering bug
+// referencing tops/factor/tests/samples/operators/add/main.cc
+// TODO(ALBERT): replace this test with elementwise_add.co after VN bug fixed
+#include <iostream>
+
+// kernel program
+void kernel(int * a, int * b, int * c, int n) {
+  for (int i = 0; i < n; ++i)
+    c[i] = a[i] + b[i];
+}
+
+// test function decl
+__co__ s32 mdspan[12, 1025] ele_add(s32 [12, 1025] a, s32 [12, 1025] b) {
+  // CHECK: auto a_type = DRAMType(IntType(32), {12, 1025});
+  // CHECK: auto b_type = DRAMType(IntType(32), {12, 1025});
+  // CHECK: auto choreo_output_type = DRAMType(IntType(32), {12, 1025});
+
+  // test global-level buffer decl
+  // TODO(albert): remove this dupdundant decl first
+  // TODO(albert): how implicitly handle output buffer? 
+  f32 [12, 1025] choreo_output_type;
+  f32[a.span] lhs_global;
+  f32[b.span] rhs_global;
+  f32[a.span] choreo_output;
+  // TODO: fix to avoid merging a.span, b.span, all to "a_type"
+  // CHECK: auto lhs_global = alloc_(a_type);
+  // CHECK: auto rhs_global = alloc_(a_type);
+  // CHECK: auto choreo_output = alloc_(a_type);
+
+  // TODO(albert): test span decl
+  // l2_span : [25];  // shape, mdspan node
+  // l1_span : [25];  // shape, mdspan node
+
+  // test parallel-by
+  parallel p by 6 {  // p is sip_index
+    // CHECK: Dim3 grid_dim(1);
+    // CHECK: Dim3 block_dim(6);
+
+    // kernel function begin
+    // TODO(albert): support this -> with index in l1_span {  // totally 100 chunks
+    with index in [25] {  // totally 100 chunks
+      foreach index {
+        f1 = dte.linear a.chunkat(p, index) => local; // new_size {a(0)/6, a(1)/10, a(2)/10}
+        f2 = dte.linear b.chunkat(p, index) => local;
+        wait f1, f2;
+
+        // use f1.span as the span of local buffer
+        local f32[f1.span] local_buffer;
+
+        // calculate the total size of span.
+        call kernel(f1.data, f2.data, local_buffer, |index|);
+
+        f3 = dte.linear local_buffer => choreo_output.chunkat(p, index);
+        wait f3;
+      }
+    }
+    // end kernel function
+  }
+
+  return choreo_output;
+}
+
+// host program
+int bar(int a[], int b[]) {
+  return ele_add(a, b);
+}
