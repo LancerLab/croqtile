@@ -7,8 +7,8 @@
 #include <string>
 #include <vector>
 
-#include "enums.hpp"
 #include "aux.hpp"
+#include "enums.hpp"
 #include "location.hh"
 #include "symtab.hpp"
 
@@ -56,8 +56,9 @@ struct Node {
     pty->Print(os);
   };
 
-  virtual std::string EmitTo(const std::string& prefix = {}, 
-                                Choreo::Target target = Choreo::Target::Factor) const {
+  virtual std::string EmitTo(
+      const std::string& prefix = {},
+      Choreo::Target target = Choreo::Target::Factor) const {
     std::ostringstream _os;
     _os << prefix;
     _os << pty->EmitTo(target);
@@ -72,10 +73,25 @@ struct Node {
   static uint64_t TypeID() { return 0ULL; }
 };
 
-// Utility to check the type
+// utility functions
 template <typename T>
 bool typeof(const Node* n) {
   return isa<T>(n->GetType().get());
+}
+template <typename T>
+bool typeof(const ptr<Node>& n) {
+  return isa<T>(n->GetType().get());
+}
+
+inline std::string STR(const AST::Node& n) {
+  std::ostringstream oss;
+  n.Print(oss);
+  return oss.str();
+}
+inline std::string STR(const std::shared_ptr<AST::Node>& n) { return STR(*n); }
+inline std::string TYPE_STR(const AST::Node& n) { return STR(*n.GetType()); }
+inline std::string TYPE_STR(const std::shared_ptr<AST::Node>& n) {
+  return STR(*n->GetType());
 }
 
 //---------------------------------------------------------------------------//
@@ -313,14 +329,14 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
   size_t Dims() const { return dim_count; }
   void SetDims(size_t n) { dim_count = n; }
 
-  void SetTypeDetail(const Shape& mds) {
+  void SetTypeDetail(const Shape& s) {
     assert(typeof<MDSpanType>(this) && "Incorrect type for mdspan.");
-    cast<MDSpanType>(GetType().get())->SetValue(mds);
+    cast<MDSpanType>(GetType())->SetShape(s);
   }
 
-  const Shape& GetTypeDetail() {
+  const Shape GetTypeDetail() {
     assert(typeof<MDSpanType>(this) && "Incorrect type for mdspan.");
-    return cast<MDSpanType>(GetType().get())->GetValue();
+    return cast<MDSpanType>(GetType())->GetShape();
   }
 
   Shape MakeValueList() {
@@ -805,17 +821,19 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
 
 struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
   ptr<Identifier> data;
-  ptr<MultiValues> positions;
+  ptr<MultiValues> positions = nullptr;
 
   ChunkAt(const location& l, const ptr<Identifier>& d,
-          const ptr<MultiValues>& p)
+          const ptr<MultiValues>& p = nullptr)
       : Node(l), data(d), positions(p) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    data->Print(os);
-    os << ".ChunkAt(";
-    positions->Print(os);
-    os << ")";
+    if (!positions) {
+      os << STR(data);
+      return;
+    }
+
+    os << STR(data) << ".ChunkAt(" << STR(positions) << ")";
 
     (void)prefix;
   }
@@ -970,17 +988,6 @@ struct Program : public Node, public TypeIDProvider<Program> {
 template <typename T, typename... Args>
 ptr<T> Make(Args&&... args) {
   return std::make_shared<T>(std::forward<Args>(args)...);
-}
-
-inline std::string STR(const AST::Node& n) {
-  std::ostringstream oss;
-  n.Print(oss);
-  return oss.str();
-}
-inline std::string STR(const std::shared_ptr<AST::Node>& n) { return STR(*n); }
-inline std::string TYPE_STR(const AST::Node& n) { return STR(*n.GetType()); }
-inline std::string TYPE_STR(const std::shared_ptr<AST::Node>& n) {
-  return STR(*n->GetType());
 }
 
 }  // end of namespace AST

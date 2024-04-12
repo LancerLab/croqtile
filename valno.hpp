@@ -361,7 +361,7 @@ class ShapeInference : public Visitor {
         auto mds_value = GenShapeFromSignature(
             vn.GetSignatureFromValueNumber(cur_mdspan_vn));
         SSTab().DefineSymbol(n.name_str,
-                              MakeSpannedType(n.type->base_type, mds_value));
+                             MakeSpannedType(n.type->base_type, mds_value));
         SSTab().DefineSymbol(n.name_str + ".span", MakeMDSpanType(mds_value));
       } else if (ValidVN(cur_vn)) {
         vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(n.name_str),
@@ -488,7 +488,12 @@ class ShapeInference : public Visitor {
 
       InvalidateVN(cur_vn);
 
-      if (n.sym) SSTab().DefineSymbol(n.sym->name + ".span", n.GetType());
+      if (n.sym) {
+        SSTab().DefineSymbol(
+            n.sym->name + ".span",
+            cast<SpannedType>(n.type->GetType())->GetMDSpanType());
+        SSTab().DefineSymbol(n.sym->name, n.type->GetType());
+      }
 
       return true;
     }
@@ -515,9 +520,9 @@ class ShapeInference : public Visitor {
     std::string iv_name =
         SSTab().ScopedName("@" + n.biv);  // upper-bound of bounded variable
     vn.AssociateSignatureWithValueNumber(iv_name, valno);
-    n.SetType(MakeBoundedITupleType(
-        GenShapeFromSignature(vn.GetSignatureFromValueNumber(valno))));
-    SSTab().DefineSymbol("@" + n.biv, n.GetType() /*TODO: fix type*/);
+    Shape s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(valno));
+    n.SetType(MakeBoundedITupleType(s));
+    SSTab().DefineSymbol("@" + n.biv, MakeMDSpanType(s));
     return true;
   };
 
@@ -553,19 +558,19 @@ class ShapeInference : public Visitor {
                   cast<AST::Identifier>((n.with_matchers->values[index]).get());
               std::string name = SSTab().ScopedName("@" + sym->name);
               if (gen_alias) vn.AssociateSignatureWithValueNumber(name, valno);
-              sym->SetType(MakeBoundedITupleType(GenShapeFromSignature(
-                  vn.GetSignatureFromValueNumber(valno))));
-              SSTab().DefineSymbol("@" + sym->name,
-                                    sym->GetType() /*TODO: fix type*/);
+              Shape s =
+                  GenShapeFromSignature(vn.GetSignatureFromValueNumber(valno));
+              sym->SetType(MakeBoundedITupleType(s));
+              SSTab().DefineSymbol("@" + sym->name, MakeMDSpanType(s));
             }
           });
 
       if (n.with) {
         vn.AssociateSignatureWithValueNumber(
             SSTab().ScopedName("@" + n.with->name), cur_mdspan_vn);
-        n.with->SetType(MakeBoundedITupleType(GenShapeFromSignature(vn_sig)));
-        SSTab().DefineSymbol("@" + n.with->name,
-                              n.with->GetType() /*TODO: fix type*/);
+        Shape s = GenShapeFromSignature(vn_sig);
+        n.with->SetType(MakeBoundedITupleType(s));
+        SSTab().DefineSymbol("@" + n.with->name, MakeMDSpanType(s));
       }
       InvalidateVN(cur_mdspan_vn);
     } else {
@@ -592,12 +597,11 @@ class ShapeInference : public Visitor {
            "unexpected current value number for future.span inference.");
 
     vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(f_span), cur_vn);
-    auto mds_val =
-        GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
-    n.SetType(MakeFutureType(mds_val));
+    auto s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
+    n.SetType(MakeFutureType(s));
     SSTab().DefineSymbol(n.future->name, n.GetType());
     SSTab().DefineSymbol(f_span,
-                          MakeMDSpanType(mds_val));  // this is implicit symbol
+                         MakeMDSpanType(s));  // this is implicit symbol
 
     return true;
   };
@@ -605,63 +609,83 @@ class ShapeInference : public Visitor {
   bool Visit(AST::ChunkAt& n) {
     __TRACE_EACH_VISIT__;
 
-    std::string data_sig =
-        vn.SignatureOfSymbol(SSTab().InScopeName(n.data->name + ".span"));
-    int dim_count = CountElementsInSignature(data_sig);
-    int dim_index = 0;
+    int ca_valno = InvalidValueNumber();
 
-    std::string fs_signature;  // signature of the future.span
-    auto AppendSignature = [this, &fs_signature, &n, &dim_index, dim_count](
-                               int dividend_vn, int divisor_vn) {
-      // the signature without optimiz
-      std::string res_sig = "/:#" + std::to_string(dividend_vn) + ":#" +
-                            std::to_string(divisor_vn);
+    auto pty = SSTab().LookupSymbol(n.data->name);
+    assert(isa<SpannedType>(pty) && "unexpected data type.");
 
-      if (auto quotient = vn.TryToSimplifyTernary(
-              n.LOC(), "/", vn.GetSignatureFromValueNumber(dividend_vn),
-              vn.GetSignatureFromValueNumber(divisor_vn), true))
-        res_sig = quotient.value();
+    if (!n.positions) {
+      ca_valno = vn.GetValueNumberOfSignature(
+          SSTab().InScopeName(n.data->name + ".span"));
+      // it is just a symbol reference
+    } else {
+      std::string data_sig =
+          vn.SignatureOfSymbol(SSTab().InScopeName(n.data->name + ".span"));
+      int dim_count = CountElementsInSignature(data_sig);
+      int dim_index = 0;
 
-      // now generate the value number from the signature
-      int res_valno = vn.GetOrInsertValueNumberFromSignature(res_sig);
+      std::string fs_signature;  // signature of the future.span
+      auto AppendSignature = [this, &fs_signature, &n, &dim_index, dim_count](
+                                 int dividend_vn, int divisor_vn) {
+        // the signature without optimiz
+        std::string res_sig = "/:#" + std::to_string(dividend_vn) + ":#" +
+                              std::to_string(divisor_vn);
 
-      // and append the value number as
-      if (!fs_signature.empty()) fs_signature += ",";
-      fs_signature += "#" + std::to_string(res_valno);
-    };
+        if (auto quotient = vn.TryToSimplifyTernary(
+                n.LOC(), "/", vn.GetSignatureFromValueNumber(dividend_vn),
+                vn.GetSignatureFromValueNumber(divisor_vn), true))
+          res_sig = quotient.value();
 
-    for (auto pos : n.positions->values) {
-      auto biv = cast<AST::Identifier>(pos.get());
-      auto bound_name = SSTab().InScopeName("@" + biv->name);
-      int bound_vn = vn.GetValueNumberOfSignature(bound_name);
-      std::string bound_sn = vn.GetSignatureFromValueNumber(bound_vn);
-      auto dim_ith = GetNthElement(data_sig, dim_index);
-      if (!dim_ith) {
-        Error(n.LOC(), "internal error: value number is not obtained.");
-        return false;
+        // now generate the value number from the signature
+        int res_valno = vn.GetOrInsertValueNumberFromSignature(res_sig);
+
+        // and append the value number as
+        if (!fs_signature.empty()) fs_signature += ",";
+        fs_signature += "#" + std::to_string(res_valno);
+      };
+
+      for (auto pos : n.positions->values) {
+        auto biv = cast<AST::Identifier>(pos.get());
+        auto bound_name = SSTab().InScopeName("@" + biv->name);
+        int bound_vn = vn.GetValueNumberOfSignature(bound_name);
+        std::string bound_sn = vn.GetSignatureFromValueNumber(bound_vn);
+        auto dim_ith = GetNthElement(data_sig, dim_index);
+        if (!dim_ith) {
+          Error(n.LOC(), "internal error: value number is not obtained.");
+          return false;
+        }
+        assert(dim_ith.value()[0] == '#');
+        int dim_valno = std::stoi(dim_ith.value().substr(1));
+
+        if (CountElementsInSignature(bound_sn) <= 1) {
+          // this is a simple bound
+          AppendSignature(dim_valno, bound_vn);
+        } else {
+          // multiple bounds
+          ProcessValueNumberString(
+              bound_sn,
+              [this, &dim_valno, &AppendSignature](int valno, size_t) {
+                AppendSignature(dim_valno, valno);
+              });
+        }
+
+        if (++dim_index > dim_count) {
+          Error(n.LOC(), "dimensions inconsistence is found between `" +
+                             n.data->name + "' and chunkat expression.");
+          return false;
+        }
       }
-      assert(dim_ith.value()[0] == '#');
-      int dim_valno = std::stoi(dim_ith.value().substr(1));
-
-      if (CountElementsInSignature(bound_sn) <= 1) {
-        // this is a simple bound
-        AppendSignature(dim_valno, bound_vn);
-      } else {
-        // multiple bounds
-        ProcessValueNumberString(
-            bound_sn, [this, &dim_valno, &AppendSignature](int valno, size_t) {
-              AppendSignature(dim_valno, valno);
-            });
-      }
-
-      if (++dim_index > dim_count) {
-        Error(n.LOC(), "dimensions inconsistence is found between `" +
-                           n.data->name + "' and chunkat expression.");
-        return false;
-      }
+      ca_valno = vn.GetOrInsertValueNumberFromSignature(fs_signature);
     }
-    int fs_valno = vn.GetOrInsertValueNumberFromSignature(fs_signature);
+
+    // set the chunkat's type
+    n.SetType(MakeSpannedType(
+        cast<SpannedType>(pty)->f_type,
+        GenShapeFromSignature(vn.GetSignatureFromValueNumber(ca_valno))));
+
+    int fs_valno = ca_valno;
     cur_vn = fs_valno;
+
     return true;
   }
 

@@ -116,9 +116,9 @@ bool TypeInference::Visit(AST::DataType &n) {
   }
 
   // compound type
-  if (auto mdspan = dyn_cast<AST::MultiDimSpans>(n.mdspan_type.get())) {
-    n.SetType(std::make_shared<SpannedType>(
-        n.getFundamentalType(), *(cast<MDSpanType>(mdspan->GetType().get()))));
+  if (auto mdspan = dyn_cast<AST::MultiDimSpans>(n.mdspan_type)) {
+    n.SetType(MakeSpannedType(n.getFundamentalType(),
+                              cast<MDSpanType>(mdspan->GetType())->GetShape()));
     cur_type = n.GetType();
   }
 
@@ -140,15 +140,20 @@ bool TypeInference::Visit(AST::NamedVariableDecl &n) {
 
   cur_type.reset();
 
+  if (AST::typeof<UnknownType>(&n)) {
+    Error(n.LOC(), "can not infer the type of `" + n.name_str + "'.");
+    return false;
+  }
+
   AssignSymbolWithType(n.LOC(), n.name_str, n.GetType());
-  // workaround code to add completetype 'a' and its partial type, 'a.span'
-  // TODO(albert): use partial type for 'a.span', not same complete type as 'a'
-  AssignSymbolWithType(n.LOC(), n.name_str+".span", n.GetType());
-  // SSTab().GlobalSymbolTable()->Print(std::cout);
-  // assert(0);
+
+  if (AST::typeof<SpannedType>(&n))
+    AssignSymbolWithType(n.LOC(), n.name_str + ".span",
+                         cast<SpannedType>(n.GetType())->GetMDSpanType());
 
   if (Dump) {
-    os << "Symbol:    " << SSTab().InScopeName(n.name_str) << ", Type: " << AST::TYPE_STR(n);
+    os << "Symbol:    " << SSTab().InScopeName(n.name_str)
+       << ", Type: " << AST::TYPE_STR(n);
     if (n.mem) os << ", Storage: " << AST::STR(*n.mem);
     os << "\n";
   }
@@ -184,7 +189,8 @@ bool TypeInference::Visit(AST::NamedTypeDecl &n) {
   AssignSymbolWithType(n.LOC(), n.name_str, n.GetType());
 
   if (Dump) {
-    os << "Partial:   " << SSTab().InScopeName(n.name_str) << ", Type: " << AST::TYPE_STR(n) << "\n";
+    os << "Partial:   " << SSTab().InScopeName(n.name_str)
+       << ", Type: " << AST::TYPE_STR(n) << "\n";
   }
   return true;
 }
@@ -212,9 +218,14 @@ bool TypeInference::Visit(AST::Parameter &p) {
   p.SetType(p.type->GetType());
 
   if (p.HasSymbol()) {
+    if (isa<UnknownType>(p.type->GetType()) || isa<UnknownType>(p.GetType())) {
+      Error(p.LOC(),
+            "fail to deduce the type of parameter `" + p.sym->name + "'.");
+      return false;
+    }
+
     AssignSymbolWithType(p.LOC(), p.sym->name, p.GetType());
-    if (!isa<UnknownType>(p.type->GetType().get()))
-      AssignSymbolWithType(p.LOC(), p.sym->name + ".span", p.GetType());
+    AssignSymbolWithType(p.LOC(), p.sym->name + ".span", p.type->GetType());
   }
 
   // collect the parameter types
@@ -297,12 +308,21 @@ bool TypeInference::Visit(AST::DMA &n) {
   __TRACE_EACH_VISIT__(n)
 
   // future's type has been obtained by shape inference
-  AssignSymbolWithType(n.LOC(), n.future->name, n.GetType());
-  auto mds_val = cast<FutureType>(n.GetType().get())->shape;
-  AssignSymbolWithType(n.LOC(), n.future->name + ".span", MakeMDSpanType(mds_val));
-  if (Dump) {
-    os << "Future:    " << SSTab().InScopeName(n.future->name) << ", Type: " << AST::TYPE_STR(n) << "\n";
+  if (AST::typeof<UnknownType>(&n)) {
+    Error(n.LOC(),
+          "fail to infer the FUTURE type of `" + n.future->name + "'.");
+    return false;
   }
+
+  AssignSymbolWithType(n.LOC(), n.future->name, n.GetType());
+  auto s = cast<FutureType>(n.GetType())->GetShape();
+  AssignSymbolWithType(n.LOC(), n.future->name + ".span", MakeMDSpanType(s));
+
+  if (Dump) {
+    os << "Future:    " << SSTab().InScopeName(n.future->name)
+       << ", Type: " << AST::TYPE_STR(n) << "\n";
+  }
+
   return true;
 }
 
@@ -310,7 +330,8 @@ bool TypeInference::Visit(AST::ParallelBy &n) {
   __TRACE_EACH_VISIT__(n)
   AssignSymbolWithType(n.LOC(), n.biv, n.GetType());
   if (Dump) {
-    os << "Bounded:   " << SSTab().InScopeName(n.biv) << ", Type: " << AST::TYPE_STR(n) << "\n";
+    os << "Bounded:   " << SSTab().InScopeName(n.biv)
+       << ", Type: " << AST::TYPE_STR(n) << "\n";
   }
   return true;
 }
@@ -334,12 +355,14 @@ bool TypeInference::Visit(AST::WithIn &n) {
   if (Dump) {
     if (n.with) {
       os << "Bounded:   ";
-      os << SSTab().InScopeName(n.with->name) << ", Type: " << AST::TYPE_STR(*n.with) << "\n";
+      os << SSTab().InScopeName(n.with->name)
+         << ", Type: " << AST::TYPE_STR(*n.with) << "\n";
     }
     if (n.with_matchers) {
       for (auto pid : n.with_matchers->values) {
         auto id = cast<AST::Identifier>(pid.get());
-        os << "Bounded:   " << SSTab().InScopeName(id->name) << ", Type: " << AST::TYPE_STR(*id) << "\n";
+        os << "Bounded:   " << SSTab().InScopeName(id->name)
+           << ", Type: " << AST::TYPE_STR(*id) << "\n";
       }
     }
   }

@@ -34,7 +34,28 @@ struct CodeGenerator : public Visitor {
   }
 
   virtual std::string InScopeName(const std::string & sym) {
-    return SSTab().InScopeName(sym);
+    auto removeLastLevel = [](const std::string &input) -> std::string {
+      size_t lastPos = input.rfind("::");
+      if (lastPos == std::string::npos)
+        return input;  // No "::" found, return the original string
+      // Find the second-to-last "::" by searching up to the last found position
+      size_t secondLastPos = input.rfind("::", lastPos - 1);
+      if (secondLastPos == std::string::npos) return input;
+      return input.substr(0,
+                          secondLastPos + 2);  // Include the "::" in the result
+    };
+    std::string scope_name = SSTab().ScopeName();
+    while (true) {
+      std::string scoped_name = scope_name + sym;
+      if (SymTab()->Exists(scoped_name)) return scoped_name;
+      std::string stripped_scope = removeLastLevel(scope_name);
+      if (stripped_scope == scope_name) break;
+      scope_name = stripped_scope;
+    }
+
+    choreo_unreachable("unable to find symbol `" + sym +
+                       "' in the symbol table.");
+    return "";
   }
 
   virtual ptr<Type> GetSymbolType(const std::string &n) {

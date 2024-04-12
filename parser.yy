@@ -140,7 +140,7 @@ void choreo_info(const char *message) {
 %nterm <AST::Storage> storage
 %nterm <Choreo::BaseType> fundamental_type
 %nterm <AST::ptr<AST::Memory>> storage_qual
-%nterm <AST::ptr<AST::Node>> pass_by foreach_block general_val simple_int spanned_value ituple_val bool_literal passable declaration statement assignment paraby_statm w_statement dma_statement wait_statement call_statement index_or_value iv_expr if_else optional_scalar_init param_mdspan_val
+%nterm <AST::ptr<AST::Node>> pass_by foreach_block general_val simple_int spanned_value ituple_val bool_literal passable declaration statement assignment paraby_statm w_statement dma_statement wait_statement call_statement index_or_value iv_expr if_else optional_scalar_init param_mdspan_val chunkat_or_storage
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments paraby_statms w_statements withins require_binds require_clause else_clause
 %nterm <AST::ptr<AST::MultiValues>> index_value_list value_list param_mdspan_list iv_exprs id_list with_matchers futures passables
 %nterm <AST::ptr<AST::Expr>> s_expr
@@ -719,21 +719,10 @@ iv_expr
     ;
 
 dma_statement
-    : IDENTIFIER ASSIGN DMA dma_operation chunkat_expr TRANS storage {
+    : IDENTIFIER ASSIGN DMA dma_operation chunkat_expr TRANS chunkat_or_storage {
         symtab.AddSymbol($1, MakeFutureType());
-        $$ = AST::Make<AST::DMA>(@3,
-              $4,
-              AST::Make<AST::Identifier>(@1, $1),
-              $5,
-              AST::Make<AST::Memory>(@7, $7));
-      }
-    | IDENTIFIER ASSIGN DMA dma_operation IDENTIFIER TRANS chunkat_expr {
-        symtab.AddSymbol($1, MakeFutureType());
-        $$ = AST::Make<AST::DMA>(@3,
-              $4,
-              AST::Make<AST::Identifier>(@1, $1),
-              AST::Make<AST::Identifier>(@5, $5),
-              $7);
+        $$ = AST::Make<AST::DMA>(@3, $4,
+              AST::Make<AST::Identifier>(@1, $1), $5, $7);
       }
     ;
 
@@ -743,10 +732,17 @@ dma_operation
     | DPAD    { $$ = $1; }
     ;
 
+chunkat_or_storage
+    : chunkat_expr { $$ = $1; }
+    | storage      { $$ = AST::Make<AST::Memory>(@1, $1); }
+    ;
+
 chunkat_expr
     : IDENTIFIER CHUNKAT LPAREN id_list RPAREN {
-        $$ = AST::Make<AST::ChunkAt>(@1,
-              AST::Make<AST::Identifier>(@1,$1), $4);
+        $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $4);
+      }
+    | IDENTIFIER {
+        $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1));
       }
     ;
 

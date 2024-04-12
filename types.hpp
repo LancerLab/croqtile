@@ -151,6 +151,12 @@ int TypeIDProvider<T>::__unique_id;
 
 template <typename T, typename U>
 bool isa(U* n) {
+  if (!n) return false;
+  return T::TypeID() == n->RuntimeID();
+}
+template <typename T, typename U>
+bool isa(const ptr<U>& n) {
+  if (!n) return false;
   return T::TypeID() == n->RuntimeID();
 }
 
@@ -161,13 +167,29 @@ T* dyn_cast(U* n) {
   else
     return nullptr;
 }
+template <typename T, typename U>
+T* dyn_cast(const ptr<U>& n) {
+  if (isa<T>(n))
+    return (T*)(n.get());
+  else
+    return nullptr;
+}
 
 template <typename T, typename U>
 T* cast(U* n) {
   if (isa<T>(n))
     return (T*)n;
   else {
-    std::cerr << "Cast failure for the type inconsistence." << std::endl;
+    std::cerr << "Cast failure for the type inconsistence.\n";
+    abort();
+  }
+}
+template <typename T, typename U>
+T* cast(const ptr<U>& n) {
+  if (isa<T>(n))
+    return (T*)(n.get());
+  else {
+    std::cerr << "Cast failure for the type inconsistence.\n";
     abort();
   }
 }
@@ -241,6 +263,7 @@ inline bool isValueListEqual(const ValueList& a, const ValueList& b) {
 }
 
 // Stores all the value lists. It generates unique value number for each list.
+// lists with identical values are never replicated in the repo.
 struct ValueListRepo {
   std::vector<ValueList> values;
   std::unordered_map<size_t, size_t> hash_index;
@@ -303,7 +326,8 @@ inline void PrintValueList(const ValueList& vl, std::ostream& os) {
   os << "]";
 }
 
-// TODO(albert): pack this util function together with other emit purpose classes/methods
+// TODO(albert): pack this util function together with other emit purpose
+// classes/methods
 // TODO(albert): add emit target
 inline void EmitValueListForFactor(const ValueList& vl, std::ostream& os) {
   auto print_variant = [&os](const ValueItem& vle) {
@@ -346,6 +370,15 @@ struct Shape {
     val_no = values.Insert(v);
   }
 
+  // trivially copyable
+  Shape(const Shape& s) = default;
+  Shape(const Shape&& s) {
+    val_no = s.val_no;
+    dim_count = s.dim_count;
+    Invalidate();
+  }
+  constexpr Shape& operator=(const Shape&) = default;
+
   size_t Dims() const { return dim_count; }
   void Update() { dim_count = values[val_no].size(); }
   bool IsValid() const {
@@ -358,9 +391,8 @@ struct Shape {
   const ValueList& Value() const { return values[val_no]; }
 
   void Print(std::ostream& os) const {
-    if (val_no == __INVALID_VALUE__)
-      os << "[]";
-      // PrintValueList(Value(), os);
+    if (val_no == __INVALID_VALUE__) os << "[]";
+    // PrintValueList(Value(), os);
     else {
       assert(values.Exists(val_no) && "bad value number.");
       PrintValueList(Value(), os);
@@ -371,9 +403,8 @@ struct Shape {
   std::string EmitTo(Target target) const {
     (void)target;
     std::ostringstream _os;
-    if (val_no == __INVALID_VALUE__)
-      _os << "{}";
-      // PrintValueList(Value(), _os);
+    if (val_no == __INVALID_VALUE__) _os << "{}";
+    // PrintValueList(Value(), _os);
     else {
       assert(values.Exists(val_no) && "bad value number.");
       EmitValueListForFactor(Value(), _os);
@@ -403,7 +434,9 @@ struct Type {
   virtual const std::string Name() const = 0;
 
   // codegen util for emitting target's code in string format
-  virtual std::string EmitTo(Target) const { assert(false && "Emit stringify not impled for this type"); }
+  virtual std::string EmitTo(Target) const {
+    assert(false && "Emit stringify not impled for this type");
+  }
 
   // for runtime type disambiguition
   virtual const std::string NodeTypeString() = 0;
@@ -513,8 +546,8 @@ struct MDSpanType : public Type, public TypeIDProvider<MDSpanType> {
 
   MDSpanType(const Shape& v) : Type(TypeCategory::PARTIAL), value(v) {}
 
-  void SetValue(const Shape& v) { value = v; }
-  const Shape& GetValue() { return value; }
+  void SetShape(const Shape& v) { value = v; }
+  const Shape GetShape() { return value; }
 
   size_t Dims() const override {
     assert(value.IsValid() && "Invalid mdspan defined.");
@@ -544,12 +577,11 @@ struct MDSpanType : public Type, public TypeIDProvider<MDSpanType> {
     std::ostringstream _os;
     // _os << "mdspan";
     if (value.IsValid()) {
-      // value.Print(_os); 
+      // value.Print(_os);
       // TODO(albert): for readibility, consider change stringify to emit
       _os << value.EmitTo(target);
     }
     return _os.str();
-
   }
 
   const std::string Name() const override { return "mdspan"; }
@@ -559,27 +591,34 @@ struct MDSpanType : public Type, public TypeIDProvider<MDSpanType> {
 
 struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
   FundamentalType f_type;
-  MDSpanType s_type;
+  ptr<MDSpanType> s_type = nullptr;
   Storage m_type;
 
-  SpannedType(FundamentalType ft, const MDSpanType& s,
+  SpannedType(FundamentalType ft, const ptr<MDSpanType>& s,
               Storage m = Storage::DEFAULT)
-      : Type(TypeCategory::SPANNED), f_type(ft), s_type(s), m_type(m) {}
+      : Type(TypeCategory::SPANNED), f_type(ft), s_type(s), m_type(m) {
+    assert((s_type != nullptr) && "mdspan is not initialized.");
+  }
 
-  size_t Dims() const override { return s_type.Dims(); }
+  size_t Dims() const override { return s_type->Dims(); }
   bool IsComplete() const override { return true; }
-  bool HasSufficientInfo() const override { return s_type.HasSufficientInfo(); }
+  bool HasSufficientInfo() const override {
+    return s_type->HasSufficientInfo();
+  }
   bool operator==(const Type& ty) const override {
     if (!isa<SpannedType>(&ty)) return false;
     auto& t = (SpannedType&)ty;
-    return t.f_type == f_type && t.s_type == s_type;
+    return t.f_type == f_type && *t.s_type == *s_type;
   }
+
+  Shape GetShape() { return s_type->GetShape(); }
+  ptr<MDSpanType> GetMDSpanType() { return s_type; }
 
   void Print(std::ostream& os) const override {
     if (m_type != Storage::NONE && m_type != Storage::DEFAULT)
       os << getStringFrom(m_type) << " ";
     os << getStringFrom((BaseType)f_type) << " ";
-    s_type.Print(os);
+    s_type->Print(os);
   }
 
   const std::string Name() const override { return "spanned"; }
@@ -626,6 +665,7 @@ struct BoundedITupleType final : public Type,
   size_t Dims() const override { return bounds.Dims(); }
   bool IsComplete() const override { return true; }
   bool HasSufficientInfo() const { return bounds.IsValid(); }
+  Shape GetBounds() const { return bounds; }
 
   bool operator==(const Type& ty) const override {
     if (!isa<BoundedITupleType>(&ty)) return false;
@@ -654,6 +694,7 @@ struct FutureType : public ScalarType, public TypeIDProvider<FutureType> {
   bool IsComplete() const override { return true; }
   bool HasSufficientInfo() const { return shape.IsValid(); }
   const std::string Name() const override { return "future"; }
+  Shape GetShape() { return shape; }
 
   bool operator==(const Type& ty) const override {
     return isa<FutureType>(&ty);
@@ -683,7 +724,8 @@ inline std::string STR(const Type& ty) {
   return oss.str();
 }
 
-// Utility functions to generate types
+// utility functions to generate types
+// Note: should always use utility functions
 inline Shape GenUninitShape() { return Shape(); }
 
 inline ptr<VoidType> MakeVoidType() { return std::make_shared<VoidType>(); }
@@ -721,7 +763,7 @@ inline ptr<MDSpanType> MakeMDSpanType(const Shape& v) {
 }
 
 inline ptr<SpannedType> MakeSpannedType(FundamentalType ft, const Shape& v) {
-  return std::make_shared<SpannedType>(ft, v);
+  return std::make_shared<SpannedType>(ft, MakeMDSpanType(v));
 }
 
 inline ptr<SpannedType> MakeSpannedType(BaseType ft, const Shape& v) {

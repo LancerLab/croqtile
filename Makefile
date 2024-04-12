@@ -40,7 +40,7 @@ scanner.yy.cc: $(LEX_SRC)
 parser.tab.cc parser.tab.hh location.hh: $(PARSER_SRC)
 	$(BISON) $(BISON_FLAGS) $(PARSER_SRC)
 
-%.o : %.cc ast.hpp scanner.hpp symtab.hpp parser.tab.hh location.hh
+%.o : %.cc types.hpp aux.hpp ast.hpp scanner.hpp symtab.hpp parser.tab.hh location.hh
 	$(CC) $(CFLAGS) $< -c -o $@
 
 %.o : %.cpp $(HEADER_FILES) location.hh

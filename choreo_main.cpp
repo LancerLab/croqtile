@@ -13,6 +13,7 @@
 #include "typeinfer.hpp"
 #include "types.hpp"
 #include "valno.hpp"
+#include "visualize.hpp"
 
 using namespace Choreo;
 
@@ -141,6 +142,11 @@ int main(int argc, char* argv[]) {
   // debug: dump the symbol table
   if (std::getenv("DUMP_SYMTAB"))
     ti.SymTab()->Print(std::cout);
+
+  if (std::getenv("VISUALIZE")) {
+    Visualizer vl(ti.SymTab());
+    root.accept(vl);
+  }
 
   // apply type check and generate symbol table
   TypeChecker sc(ti.SymTab());
