@@ -160,6 +160,10 @@ struct MultiValues : public Node, public TypeIDProvider<MultiValues> {
     return values[idx];
   }
 
+  std::vector<ptr<Node>> getValues() const {
+    return values;
+  }
+
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     if (delimiter != "" && values.size() > 1) {
       auto i = values.begin();

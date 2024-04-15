@@ -215,8 +215,8 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   // handle .to  in AST::Memory
   // d.to->Print(os); // shared
   auto to_node_string = "";
-  auto from_node_string = "";
-  auto offset_string = "l1_tile";
+  std::string from_node_string = "";
+  std::string offset_string = "0";
   if (auto mem_node = dyn_cast<AST::Memory>(d.to)) {
     // TODO(albert): generate 'local_buffer' with more smart naming way by valno support
     switch(mem_node->getStorageLevel()) {
@@ -242,7 +242,18 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   // d.from->Print(os) => a.ChunkAt(p, l2_tile)
   // TODO(albert): resolve hardcode
   if (auto chunkat_node = dyn_cast<AST::ChunkAt>(d.from)) {
-    from_node_string = "a";
+    from_node_string = STR(chunkat_node->data);
+    auto tile_factors = chunkat_node->positions;
+    int dim_cursor = 0;
+    std::vector<int> dim = {12, 1024, 1};
+    for (const auto tile_factor : tile_factors->getValues()) {
+      auto tf_symbol = STR(tile_factor);
+      auto tf_bounds = dyn_cast<BoundedITupleType>(this->GetSymbolType(tf_symbol))->GetBounds().Value();
+      auto tf_bound = *(std::get_if<int>(&tf_bounds[0]));
+      offset_string = offset_string + " + " + std::to_string(dim[dim_cursor] / tf_bound * dim[dim_cursor+1]) + " * " + STR(tile_factor);
+      // os << offset_string;
+      ++dim_cursor;
+    }
   }
   auto future_name = d.future->name;
   os << "        auto " << future_name << " = alloc_dma_(SDMAType());\n";
