@@ -43,9 +43,15 @@ __co__ s32 mdspan[12, 1024] ele_add(s32 [12, 1024] a, s32 [12, 1024] b) {
     // kernel function begin
     // TODO(albert): support this -> with index in l1_span {  // totally 100 chunks
     with index = {l2_tile, l1_tile} in [1, 8] {  // totally 100 chunks
-      foreach index {
+      // TODO(albert): support two other style
+      // 1. foreach index {}
+      // 2. foreach l2_tile, l1_tile {
+      // TODO(albert): fix auto indent
+      foreach l2_tile { 
+        foreach l1_tile {
+          lhs_cdma = dte.linear a.chunkat(p, l2_tile) => shared; // new_size {a(0)/6, a(1)/10, a(2)/10}
+        }
         // move data from l3 to l2
-        lhs_cdma = dte.linear a.chunkat(p, l1_tile) => shared; // new_size {a(0)/6, a(1)/10, a(2)/10}
         // TODO(albert): refine filecheck with matched vars
         // CHECK: auto shared_buffer = alloc_(SRAMType());
         // CHECK: auto lhs_cdma = alloc_dma_(SDMAType());

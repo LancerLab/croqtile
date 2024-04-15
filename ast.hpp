@@ -155,6 +155,11 @@ struct MultiValues : public Node, public TypeIDProvider<MultiValues> {
 
   void SetDelimiter(const std::string& d) { delimiter = d; }
 
+  ptr<Node> getValueAt(const size_t idx) const {
+    assert(idx < this->Count() && "Out-of-bound error when querying MultiValues\n");
+    return values[idx];
+  }
+
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     if (delimiter != "" && values.size() > 1) {
       auto i = values.begin();
@@ -916,6 +921,10 @@ struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
     if (statms) {
       statms->Print(os, prefix + " ");
     }
+  }
+
+  ptr<MultiValues> getIterationVars() const {
+    return ivs;
   }
 
   void accept(Visitor&) override;

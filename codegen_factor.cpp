@@ -89,6 +89,8 @@ bool FactorCodeGen::AfterVisit(AST::Node &n) {
     print_wrapper_end(os, p->name);
   } else if (isa<AST::ParallelBy>(&n)) {
     os << "    }); // end of choreo-factor kernel function\n";
+  } else if (isa<AST::ForeachBlock>(&n)) {
+    os << "      }); // end of choreo-foreach block\n";
   }
   return 0;
 }
@@ -219,15 +221,15 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
     // TODO(albert): generate 'local_buffer' with more smart naming way by valno support
     switch(mem_node->getStorageLevel()) {
       case Storage::LOCAL:
-        os << "      auto local_buffer = alloc_(L1Type());\n";
+        os << "        auto local_buffer = alloc_(L1Type());\n";
         to_node_string = "local_buffer";
         break;
       case Storage::SHARED:
-        os << "      auto shared_buffer = alloc_(SRAMType());\n";
+        os << "        auto shared_buffer = alloc_(SRAMType());\n";
         to_node_string = "shared_buffer";
         break;
       case Storage::GLOBAL:
-        os << "      auto global_buffer = alloc_(DRAMType());\n";
+        os << "        auto global_buffer = alloc_(DRAMType());\n";
         to_node_string = "global_buffer";
         break;
       default:
@@ -237,17 +239,17 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
 
   // AST::ChunkAt
   // print as a.ChunkAt(p, l1_tile)
-  // d.from->Print(os) => a.ChunkAt(p, l1_tile)
+  // d.from->Print(os) => a.ChunkAt(p, l2_tile)
   // TODO(albert): resolve hardcode
   if (auto chunkat_node = dyn_cast<AST::ChunkAt>(d.from)) {
     from_node_string = "a";
   }
   auto future_name = d.future->name;
-  os << "      auto " << future_name << " = alloc_dma_(SDMAType());\n";
-  os << "      async_load_(" << future_name 
+  os << "        auto " << future_name << " = alloc_dma_(SDMAType());\n";
+  os << "        async_load_(" << future_name 
      << ", " << from_node_string << ", " 
      << to_node_string << ", " << offset_string <<  ");\n";
-  os << "      wait_dma_(" << future_name << ");\n";
+  os << "        wait_dma_(" << future_name << ");\n";
 
   return true;
 }
@@ -257,7 +259,38 @@ bool FactorCodeGen::Visit(AST::Wait &) { return true; };
 bool FactorCodeGen::Visit(AST::Call &) { return true; };
 bool FactorCodeGen::Visit(AST::Return &) { return true; };
 
-bool FactorCodeGen::Visit(AST::ForeachBlock &) { return true; }
+bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) { 
+  // auto ty = this->GetSymbolType("l2_tile");
+  // ty->Print(os);
+  // auto l2_tile_idx = itervars->getValueAt(0);
+  // auto l1_tile_idx = itervars->getValueAt(1);
+  //
+  auto itervars = forNode.getIterationVars();
+  for (auto idx = 0; idx != itervars->Count(); ++idx) {
+    // TODO(albert): support non-unit stride in loop
+    std::ostringstream _os;
+    itervars->getValueAt(idx)->Print(_os);
+    auto iv_str = _os.str();
+
+    // get the lower/upper and stride for spanned iter var
+    auto iv_type = this->GetSymbolType(iv_str);
+    auto iv_bounds = dyn_cast<BoundedITupleType>(iv_type)->GetBounds();
+    auto iv_values = iv_bounds.Value();
+    // for (const auto &value : iv_values) {
+    //   if (auto intValue = std::get_if<int>(&value)) os << *intValue;
+    // }
+    // NOTES: bounds always has one integer indicating the upperbound value
+    // we can certainly use idx=0 directly
+    auto upper_bound = *(std::get_if<int>(&iv_values[0]));
+
+    // synthesise the emitting string
+    os << "      for_(0, " << std::to_string(upper_bound) 
+       << ", " << 1 /* TODO(albert): need fix, unit stride is hardcoded for now*/ 
+       << ", " << "[&](auto " 
+       << iv_str << ") {\n";
+  }
+  return true; 
+}
 
 bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
   current_output = d.ret_type;
