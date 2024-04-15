@@ -73,6 +73,7 @@ struct CodeGenerator : public Visitor {
 struct FactorCodeGen : public CodeGenerator {
   // TODO: should the pointer be replaced?
   std::string current_fn = "";
+  std::string indent = "";
   std::vector<AST::ptr<AST::Parameter>> *cur_params = nullptr;
   AST::ptr<AST::DataType> current_output = nullptr;
 
@@ -112,6 +113,15 @@ struct FactorCodeGen : public CodeGenerator {
   bool Visit(AST::ChoreoFunction &) override;
   bool Visit(AST::CppSourceCode &) override;
   bool Visit(AST::Program &) override;
+
+  // common utils
+  void incrementIndent() {
+    this->indent += "  ";
+  }
+
+  void decrementIndent() {
+    if (this->indent.size() >= 2) this->indent = this->indent.substr(0, this->indent.size() - 2);
+  }
 };
 
 struct TopsccCodeGen : public CodeGenerator {

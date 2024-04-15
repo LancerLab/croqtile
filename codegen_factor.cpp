@@ -23,15 +23,15 @@ static inline void print_fixed_header(std::ostream &os) {
 static inline void print_wrapper_begin(std::ostream &os, std::string name) {
   name = "choreo_" + name;
   os << "TEST(DoradoBasicTest, " << name << "_test) {\n";
-  os << "  using namespace factor;\n";
-  os << "  FACTOR_PROGRAM(" << name << ");\n\n";
-  os << "  " << name << "([&](auto target_name) {\n";
+  os << "using namespace factor;\n";
+  os << "FACTOR_PROGRAM(" << name << ");\n\n";
+  os << "" << name << "([&](auto target_name) {\n";
 }
 
 static inline void print_wrapper_end(std::ostream &os, std::string name) {
-  os << "  });\n\n";
-  os << "  choreo_" << name << ".Compile(\"dorado\");\n";
-  os << "  choreo_" << name << ".Run();\n";
+  os << "});\n\n";
+  os << "choreo_" << name << ".Compile(\"dorado\");\n";
+  os << "choreo_" << name << ".Run();\n";
   os << "};\n";
 }
 
@@ -78,6 +78,11 @@ bool FactorCodeGen::BeforeVisit(AST::Node &n) {
   } else if (auto c = dyn_cast<AST::ChoreoFunction>(&n)) {
     print_wrapper_begin(os, c->name);
     current_fn = c->name;
+    this->incrementIndent();
+  } else if (isa<AST::ParallelBy>(&n)) {
+    this->incrementIndent();
+  } else if (isa<AST::ForeachBlock>(&n)) {
+    this->incrementIndent();
   }
   CodeGenerator::BeforeVisit(n);
   return 0;
@@ -88,9 +93,11 @@ bool FactorCodeGen::AfterVisit(AST::Node &n) {
   if (auto p = dyn_cast<AST::ChoreoFunction>(&n)) {
     print_wrapper_end(os, p->name);
   } else if (isa<AST::ParallelBy>(&n)) {
-    os << "    }); // end of choreo-factor kernel function\n";
+    this->decrementIndent();
+    os << this->indent << "}); // end of choreo-factor kernel function\n";
   } else if (isa<AST::ForeachBlock>(&n)) {
-    os << "      }); // end of choreo-foreach block\n";
+    this->decrementIndent();
+    os << this->indent << "}); // end of choreo-foreach block\n";
   }
   return 0;
 }
@@ -122,13 +129,15 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
     auto full_ref_name = ptype->getRefName();
     auto ref_symbol = full_ref_name.substr(0, full_ref_name.find('.'));
     if (strtab.Exists(ref_symbol)) {
-      os << "      auto " << node.name_str << " = alloc_(";
+      os << this->indent;
+      os << "auto " << node.name_str << " = alloc_(";
       os << strtab.GetTypeSymbol("a");
       os << ");\n";
     }
   } else {
     // TODO(albert): handle anon case
-    os << "      auto " << node.name_str << " = alloc_(?";
+    os << this->indent;
+    os << "auto " << node.name_str << " = alloc_(?";
     os << ");\n";
   }
   //
@@ -162,11 +171,11 @@ bool FactorCodeGen::Visit(AST::ParamList &pl) {
 }
 
 bool FactorCodeGen::Visit(AST::ParallelBy &by) {
-  os << "      Dim3 grid_dim(1);\n";
-  os << "      Dim3 block_dim(" << by.bound << ");\n";
-  os << "      Value stream = alloc_stream_();\n";
-  os << "      create_stream_(stream);\n";
-  os << "      auto ts = launch_kernel_(\"" << current_fn
+  os << this->indent << "Dim3 grid_dim(1);\n";
+  os << this->indent << "Dim3 block_dim(" << by.bound << ");\n";
+  os << this->indent << "Value stream = alloc_stream_();\n";
+  os << this->indent << "create_stream_(stream);\n";
+  os << this->indent << "auto ts = launch_kernel_(\"" << current_fn
      << "\", grid_dim, block_dim, stream, {";
   if (cur_params->size() > 0) {
     os << "args[0]";
@@ -176,19 +185,22 @@ bool FactorCodeGen::Visit(AST::ParallelBy &by) {
     }
   }
   os << "}, {output});\n";
-  os << "      destroy_stream_(stream);\n";
-  os << "      dealloc_stream_(stream);\n";
-  os << "      return std::vector<Value>{output};\n";
-  os << "    }); // end of choreo-factor dataflow program\n";
+  os << this->indent << "destroy_stream_(stream);\n";
+  os << this->indent << "dealloc_stream_(stream);\n";
+  os << this->indent << "return std::vector<Value>{output};\n";
+  os << this->indent << "}); // end of choreo-factor dataflow program\n";
   os << "\n";
-  os << "    D(func_)\n";
-  os << "    (\"" << current_fn << "\", {";
+
+  this->decrementIndent();
+  os << this->indent << "D(func_)\n";
+  os << this->indent << "(\"" << current_fn << "\", {";
   if (cur_params->size() > 0) {
     os << (*cur_params)[0]->sym->name << "_type";
     for (unsigned i = 1; i < cur_params->size(); ++i)
       os << ", " << (*cur_params)[i]->sym->name << "_type";
   }
   os << "}, {choreo_output_type}, [&](auto args, auto results) {\n";
+  this->incrementIndent();
   int i = 0;
   // NOTE: remove unused aliasing 'auto k_a = args[0];'
   // for (auto &param : *cur_params) {
@@ -221,15 +233,15 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
     // TODO(albert): generate 'local_buffer' with more smart naming way by valno support
     switch(mem_node->getStorageLevel()) {
       case Storage::LOCAL:
-        os << "        auto local_buffer = alloc_(L1Type());\n";
+        os << this->indent << "auto local_buffer = alloc_(L1Type());\n";
         to_node_string = "local_buffer";
         break;
       case Storage::SHARED:
-        os << "        auto shared_buffer = alloc_(SRAMType());\n";
+        os << this->indent << "auto shared_buffer = alloc_(SRAMType());\n";
         to_node_string = "shared_buffer";
         break;
       case Storage::GLOBAL:
-        os << "        auto global_buffer = alloc_(DRAMType());\n";
+        os << this->indent << "auto global_buffer = alloc_(DRAMType());\n";
         to_node_string = "global_buffer";
         break;
       default:
@@ -256,11 +268,11 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
     }
   }
   auto future_name = d.future->name;
-  os << "        auto " << future_name << " = alloc_dma_(SDMAType());\n";
-  os << "        async_load_(" << future_name 
+  os << this->indent << "auto " << future_name << " = alloc_dma_(SDMAType());\n";
+  os << this->indent << "async_load_(" << future_name 
      << ", " << from_node_string << ", " 
      << to_node_string << ", " << offset_string <<  ");\n";
-  os << "        wait_dma_(" << future_name << ");\n";
+  os << this->indent << "wait_dma_(" << future_name << ");\n";
 
   return true;
 }
@@ -295,7 +307,7 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
     auto upper_bound = *(std::get_if<int>(&iv_values[0]));
 
     // synthesise the emitting string
-    os << "      for_(0, " << std::to_string(upper_bound) 
+    os << this->indent << "for_(0, " << std::to_string(upper_bound) 
        << ", " << 1 /* TODO(albert): need fix, unit stride is hardcoded for now*/ 
        << ", " << "[&](auto " 
        << iv_str << ") {\n";
@@ -324,13 +336,13 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
                          ", " + _os.str(); 
 
       strtab.AddSymbol(name, type_symbol, type_string);
-      os << "    auto " << strtab.GetTypeSymbol(name) << " = " << strtab.GetTypeString(name);
+      os << this->indent << "auto " << strtab.GetTypeSymbol(name) << " = " << strtab.GetTypeString(name);
       os << ");\n";
     } else {
       auto type_symbol = name+"_type";
       auto type_string = "DRAMType(" + factor_typestr(param->type->getBaseType()) + ", (1));";
       strtab.AddSymbol(name, type_symbol, type_string);
-      os << "    auto " << strtab.GetTypeSymbol(name) << " = " << strtab.GetTypeString(name) << "\n";
+      os << this->indent << "auto " << strtab.GetTypeSymbol(name) << " = " << strtab.GetTypeString(name) << "\n";
     }
   }
 
@@ -349,13 +361,13 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
                        ", " + _os.str(); 
 
     strtab.AddSymbol(type_symbol, type_symbol, type_string);
-    os << "    auto " << type_symbol << " = " << strtab.GetTypeString(type_symbol);
+    os << this->indent << "auto " << type_symbol << " = " << strtab.GetTypeString(type_symbol);
     os << ");\n";
   } else {
     auto type_symbol = "choreo_output_type";
     auto type_string = "DRAMType(" + factor_typestr(current_output->getBaseType()) + ", (1));";
     strtab.AddSymbol(type_symbol, type_symbol, type_string);
-    os << "    auto " << strtab.GetTypeSymbol(type_symbol) << " = " << strtab.GetTypeString(type_symbol) << "\n";
+    os << this->indent << "auto " << strtab.GetTypeSymbol(type_symbol) << " = " << strtab.GetTypeString(type_symbol) << "\n";
   }
 
   // os << "    auto choreo_output_type = DRAMType(";
@@ -363,8 +375,8 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
   // os << ", (1));\n";  // todo
 
   os << "\n";
-  os << "    D(main_) // choreo-factor dataflow function\n";
-  os << "    ({";
+  os << this->indent << "D(main_) // choreo-factor dataflow function\n";
+  os << this->indent << "({";
 
   bool first_param = true;
   for (auto &param : *cur_params) {
