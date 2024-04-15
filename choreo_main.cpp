@@ -6,6 +6,7 @@
 #include "ast.hpp"
 #include "codegen.hpp"
 #include "desugar.hpp"
+#include "options.hpp"
 #include "scanner.hpp"
 #include "symtab.hpp"
 #include "symvalid.hpp"
@@ -26,94 +27,41 @@ using namespace AST;
 using namespace Choreo;
 
 int main(int argc, char* argv[]) {
-  std::string filename;
-  bool debugMode = false;
-  bool onlyDumpAST = false;
-  bool showInferOnly = false;
-  bool printValueNumbers = false;
-  bool onlySemaCheck = false;
-  bool removeComments = false;
+  Option<std::string> output("--output", "-o", "", true);
+  Option<bool> debug_on("--debug", "-d", false, false);
+  Option<bool> dump_ast("--dump-ast", "-e", false, false);
+  Option<bool> print_vn("--print-valno", "-v", false, false);
+  Option<bool> dump_inf("--dump-infer", "-i", false, false);
+  Option<bool> sema_chk("--sema-check", "-s", false, false);
+  Option<bool> del_comm("--remove-comments", "-n", false, false);
 
-  Choreo::Target tgt = Choreo::Target::Factor;
-
-  // Define long options
-  static struct option long_options[] = {
-      {"debug", no_argument, 0, 'd'},
-      {"dump-ast", no_argument, 0, 'e'},
-      {"print-valno", no_argument, 0, 'v'},
-      {"dump-infer", no_argument, 0, 'i'},
-      {"sema-check", no_argument, 0, 's'},
-      {"remove-comments", no_argument, 0, 'n'},
-      {0, 0, 0, 0}};
-
-  // Parse command-line options
-  int opt;
-  int option_index = 0;
-  while ((opt = getopt_long(argc, argv, "deivsn", long_options,
-                            &option_index)) != -1) {
-    switch (opt) {
-      case 'd':
-        debugMode = true;
-        break;
-      case 'e':
-        onlyDumpAST = true;
-        break;
-      case 'v':
-        printValueNumbers = true;
-        break;
-      case 's':
-        onlySemaCheck = true;
-        break;
-      case 'i':
-        showInferOnly = true;
-        break;
-      case 'n':
-        removeComments = true;
-        break;
-      case '?':
-        // getopt_long already printed an error message
-        return 1;
-      default:
-        break;
-    }
-  }
-
-  if (optind >= argc) {
+  // parse all the options
+  OptionRegistry& r = OptionRegistry::GetInstance();
+  if (!r.Parse(argc, argv)) {
     std::cerr << "Usage: " << argv[0] << " <filename>\n";
-    return 1;
+    exit(1);
   }
+  r.SetOutputStream(output.GetValue());
 
-  filename = argv[optind];
-
-  if (filename.empty()) {
-    std::cerr << "Usage: " << argv[0] << " <filename>\n";
-    return 1;
-  }
-
-  std::ifstream file(filename);
-  if (!file) {
-    std::cerr << "Could not open file: " << filename << std::endl;
-    return 1;
-  }
-
+  std::string filename = r.GetInputFileName();
   loc.begin.filename = loc.end.filename = &filename;
 
   Scanner s;
-  s.yyrestart(file);
+  s.yyrestart(r.GetInputStream());
   Parser p(s);
 
-  if (debugMode) {
+  if (debug_on) {
     std::cout << "Choreo: Debug of parsing is switched on." << std::endl;
     p.set_debug_level(1);  // Enable Bison debugging
     Scanner::SetDebug();
   }
 
-  if (removeComments) Scanner::SetRemoveComments();
+  if (del_comm) Scanner::SetRemoveComments();
 
   p.parse();
 
-  if (onlyDumpAST) {
-    if (onlySemaCheck)
+  if (dump_ast) {
+    if (sema_chk)
       std::cerr
           << "Warning: Semantic check is ignored since dumping AST is required."
           << std::endl;
@@ -131,13 +79,13 @@ int main(int argc, char* argv[]) {
   root.accept(ds);
 
   // perform shape inference of mdspans, future, etc.
-  ShapeInference si(printValueNumbers);
+  ShapeInference si(print_vn);
   root.accept(si);
 
   // inference all the unknown types - decls
-  TypeInference ti(showInferOnly);
+  TypeInference ti(dump_inf);
   root.accept(ti);
-  if (showInferOnly) return 0;
+  if (dump_inf) return 0;
 
   // debug: dump the symbol table
   if (std::getenv("DUMP_SYMTAB"))
@@ -152,7 +100,9 @@ int main(int argc, char* argv[]) {
   TypeChecker sc(ti.SymTab());
   root.accept(sc);
 
-  if (onlySemaCheck) return 0;
+  if (sema_chk) return 0;
+
+  Choreo::Target tgt = Choreo::Target::Factor;
 
   if (tgt == Target::Factor) {
     FactorCodeGen codegen(std::cout, sc.SymTab());

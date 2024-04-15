@@ -1,0 +1,6 @@
+1. Illustrate the usage of GetType.
+2. Other targets: CudaDMA
+3. Set target: Apr.28th ~ Apr.30th.
+ - code generation
+ - visualization
+ - presentation

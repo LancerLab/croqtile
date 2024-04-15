@@ -25,10 +25,14 @@ HEADER_FILES :=  $(shell find . -name '*.hpp')
 CC = g++
 CFLAGS = -std=c++17 -Wall -Wextra -g
 
+# For gtest
+GTEST_DIR = extern/gtest
+GTEST_LIBS = $(GTEST_DIR)/libgtest.a $(GTEST_DIR)/libgtest_main.a
+
 # Build rules
 all: $(TARGET)
 
-test: $(TARGET)
+test: $(TARGET) standalone_test
 	$(LIT) tests
 
 $(TARGET): scanner.yy.o parser.tab.o choreo_main.o codegen_factor.o symvalid.o typeinfer.o typecheck.o ast.o types.o valno.o
@@ -51,6 +55,9 @@ clean:
 
 lines:
 	wc -l *.cpp *.yy *.l *.hpp Makefile
+
+standalone_test: $(TARGET)
+	cd tests/standalone/ && $(MAKE) test
 
 %.test: $(TEST_FILES)
 	filecheck $< > $@.result
