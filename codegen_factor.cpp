@@ -226,23 +226,21 @@ bool FactorCodeGen::Visit(AST::Memory &n) {
 bool FactorCodeGen::Visit(AST::DMA &d) {
   // handle .to  in AST::Memory
   // d.to->Print(os); // shared
-  auto to_node_string = "";
-  std::string from_node_string = "";
+  auto future_name = d.future->name;
+  auto to_node_name = future_name + "_buffer";
+  std::string from_node_name = "";
   std::string offset_string = "0";
   if (auto mem_node = dyn_cast<AST::Memory>(d.to)) {
     // TODO(albert): generate 'local_buffer' with more smart naming way by valno support
     switch(mem_node->getStorageLevel()) {
       case Storage::LOCAL:
-        os << this->indent << "auto local_buffer = alloc_(L1Type());\n";
-        to_node_string = "local_buffer";
+        os << this->indent << "auto " + to_node_name + " = alloc_(L1Type());\n";
         break;
       case Storage::SHARED:
-        os << this->indent << "auto shared_buffer = alloc_(SRAMType());\n";
-        to_node_string = "shared_buffer";
+        os << this->indent << "auto " + to_node_name + " = alloc_(SRAMType());\n";
         break;
       case Storage::GLOBAL:
-        os << this->indent << "auto global_buffer = alloc_(DRAMType());\n";
-        to_node_string = "global_buffer";
+        os << this->indent << "auto " + to_node_name + " = alloc_(DRAMType());\n";
         break;
       default:
         assert(false && "Unexpected storage type.");
@@ -254,7 +252,7 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   // d.from->Print(os) => a.ChunkAt(p, l2_tile)
   // TODO(albert): resolve hardcode
   if (auto chunkat_node = dyn_cast<AST::ChunkAt>(d.from)) {
-    from_node_string = STR(chunkat_node->data);
+    from_node_name = STR(chunkat_node->data);
     auto tile_factors = chunkat_node->positions;
     int dim_cursor = 0;
     std::vector<int> dim = {12, 1024, 1};
@@ -267,11 +265,10 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
       ++dim_cursor;
     }
   }
-  auto future_name = d.future->name;
   os << this->indent << "auto " << future_name << " = alloc_dma_(SDMAType());\n";
   os << this->indent << "async_load_(" << future_name 
-     << ", " << from_node_string << ", " 
-     << to_node_string << ", " << offset_string <<  ");\n";
+     << ", " << from_node_name << ", " 
+     << to_node_name << ", " << offset_string <<  ");\n";
   os << this->indent << "wait_dma_(" << future_name << ");\n";
 
   return true;
