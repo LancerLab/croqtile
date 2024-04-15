@@ -420,6 +420,10 @@ struct Memory : public Node, public TypeIDProvider<Memory> {
     }
   }
 
+  Storage getStorageLevel() const {
+    return st;
+  }
+
   void accept(Visitor&) override;
 
   __UDT_TYPE_INFO__

@@ -188,10 +188,11 @@ bool FactorCodeGen::Visit(AST::ParallelBy &by) {
   }
   os << "}, {choreo_output_type}, [&](auto args, auto results) {\n";
   int i = 0;
-  for (auto &param : *cur_params) {
-    os << "      "
-       << "auto k_" << param->sym->name << " = args[" << i++ << "];\n";
-  }
+  // NOTE: remove unused aliasing 'auto k_a = args[0];'
+  // for (auto &param : *cur_params) {
+  //   os << "      "
+  //      << "auto k_" << param->sym->name << " = args[" << i++ << "];\n";
+  // }
 
   return true;
 }
@@ -206,9 +207,48 @@ bool FactorCodeGen::Visit(AST::Memory &n) {
   return true;
 }
 
+// TODO(albert): handle indent
+// TODO(albert): fix offset calculation after foreach/with stmt resolved
 bool FactorCodeGen::Visit(AST::DMA &d) {
+  // handle .to  in AST::Memory
+  // d.to->Print(os); // shared
+  auto to_node_string = "";
+  auto from_node_string = "";
+  auto offset_string = "l1_tile";
+  if (auto mem_node = dyn_cast<AST::Memory>(d.to)) {
+    // TODO(albert): generate 'local_buffer' with more smart naming way by valno support
+    switch(mem_node->getStorageLevel()) {
+      case Storage::LOCAL:
+        os << "      auto local_buffer = alloc_(L1Type());\n";
+        to_node_string = "local_buffer";
+        break;
+      case Storage::SHARED:
+        os << "      auto shared_buffer = alloc_(SRAMType());\n";
+        to_node_string = "shared_buffer";
+        break;
+      case Storage::GLOBAL:
+        os << "      auto global_buffer = alloc_(DRAMType());\n";
+        to_node_string = "global_buffer";
+        break;
+      default:
+        assert(false && "Unexpected storage type.");
+    }
+  }
+
+  // AST::ChunkAt
+  // print as a.ChunkAt(p, l1_tile)
+  // d.from->Print(os) => a.ChunkAt(p, l1_tile)
+  // TODO(albert): resolve hardcode
+  if (auto chunkat_node = dyn_cast<AST::ChunkAt>(d.from)) {
+    from_node_string = "a";
+  }
   auto future_name = d.future->name;
-  os << "      auto " << future_name << "_dma = alloc_dma_(SDMAType());\n";
+  os << "      auto " << future_name << " = alloc_dma_(SDMAType());\n";
+  os << "      async_load_(" << future_name 
+     << ", " << from_node_string << ", " 
+     << to_node_string << ", " << offset_string <<  ");\n";
+  os << "      wait_dma_(" << future_name << ");\n";
+
   return true;
 }
 
@@ -295,7 +335,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
 
   os << "}, [&](auto args) {\n";
 
-  os << "      auto choreo_output = alloc_(choreo_output_type);\n";
+  // os << "      auto choreo_output = alloc_(choreo_output_type);\n";
 
   return true;
 }

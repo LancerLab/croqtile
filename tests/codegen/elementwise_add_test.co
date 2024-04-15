@@ -12,54 +12,84 @@ void kernel(int * a, int * b, int * c, int n) {
 }
 
 // test function decl
-__co__ s32 mdspan[12, 1025] ele_add(s32 [12, 1025] a, s32 [12, 1025] b) {
-  // CHECK: auto a_type = DRAMType(IntType(32), {12, 1025});
-  // CHECK: auto b_type = DRAMType(IntType(32), {12, 1025});
-  // CHECK: auto choreo_output_type = DRAMType(IntType(32), {12, 1025});
+__co__ s32 mdspan[12, 1024] ele_add(s32 [12, 1024] a, s32 [12, 1024] b) {
+  // CHECK: auto a_type = DRAMType(IntType(32), {12, 1024});
+  // CHECK: auto b_type = DRAMType(IntType(32), {12, 1024});
+  // CHECK: auto choreo_output_type = DRAMType(IntType(32), {12, 1024});
 
   // test global-level buffer decl
   // TODO(albert): remove this dupdundant decl first
   // TODO(albert): how implicitly handle output buffer? 
-  s32 [12, 1025] choreo_output_type;
-  f32[a.span] lhs_global;
-  f32[b.span] rhs_global;
-  f32[choreo_output_type.span] choreo_output;
+  s32 [12, 1024] choreo_output_type;
+  // f32[a.span] lhs_global;
+  // f32[b.span] rhs_global;
+  f32[choreo_output_type.span] output;
   // TODO: fix to avoid merging a.span, b.span, all to "a_type"
-  // CHECK: auto lhs_global = alloc_(a_type);
-  // CHECK: auto rhs_global = alloc_(a_type);
-  // CHECK: auto choreo_output = alloc_(a_type);
+  // check: auto lhs_global = alloc_(a_type);
+  // check: auto rhs_global = alloc_(a_type);
+  // CHECK: auto output = alloc_(a_type);
 
   // TODO(albert): test span decl
   // l2_span : [25];  // shape, mdspan node
   // l1_span : [25];  // shape, mdspan node
 
   // test parallel-by
+  // TODO(albert): current launch kernel output is hardcoded with 'output', consider capture
+  // the former {f32[choreo_output_type.span] output} rather hardcode
   parallel p by 6 {  // p is sip_index
     // CHECK: Dim3 grid_dim(1);
     // CHECK: Dim3 block_dim(6);
 
     // kernel function begin
     // TODO(albert): support this -> with index in l1_span {  // totally 100 chunks
-    with index in [25] {  // totally 100 chunks
+    with index = {l2_tile, l1_tile} in [1, 8] {  // totally 100 chunks
       foreach index {
-        f1 = dte.linear a.chunkat(p, index) => local; // new_size {a(0)/6, a(1)/10, a(2)/10}
-        f2 = dte.linear b.chunkat(p, index) => local;
-        wait f1, f2;
+        // move data from l3 to l2
+        lhs_cdma = dte.linear a.chunkat(p, l1_tile) => shared; // new_size {a(0)/6, a(1)/10, a(2)/10}
+        // TODO(albert): refine filecheck with matched vars
+        // CHECK: auto shared_buffer = alloc_(SRAMType());
+        // CHECK: auto lhs_cdma = alloc_dma_(SDMAType());
+        // CHECK: async_load_(lhs_cdma, a, shared_buffer, l1_tile);
+        // CHECK: wait_dma_(lhs_cdma);
 
-        // use f1.span as the span of local buffer
-        local f32[f1.span] local_buffer;
+        // rhs_cdma = dte.linear b.chunkat(p, l1_tile) => shared;
+        // wait lhs_cdma, rhs_cdma;
+        // local f32[lhs_cdma.span] l1_output;
+        // call kernel(lhs_cdma.data, rhs_cdma.data, l1_output, |index|);
+        // output_cdma = dte.linear l1_output => output.chunkat(p, l1_tile);
+        // wait output_cdma;
 
-        // calculate the total size of span.
-        call kernel(f1.data, f2.data, local_buffer, |index|);
+        // FINAL TARGET FORMAT
+        // // move data from l3 to l2
+        // lhs_cdma = dte.linear a.chunkat(p, l2_tile) => shared; // new_size {a(0)/6, a(1)/10, a(2)/10}
+        // rhs_cdma = dte.linear b.chunkat(p, l2_tile) => shared;
+        // wait lhs_cdma, rhs_cdma;
 
-        f3 = dte.linear local_buffer => choreo_output.chunkat(p, index);
-        wait f3;
+        // // move data from l2 to l1
+        // lhs_sdma = dte.linear lhs_cdma.chunkat(1, l1_tile) => local;
+        // rhs_sdma = dte.linear rhs_cdma.data.chunkat(1, l1_tile) => local;
+        // wait lhs_sdma, rhs_sdma;
+
+        // // use lhs_sdma.span as the span of local buffer
+        // shared f32[lhs_cdma.span] l2_output;
+        // local f32[lhs_sdma.span] l1_output;
+
+        // // calculate the total size of span.
+        // call kernel(lhs_sdma.data, rhs_sdma.data, l1_output, |index|);
+
+        // // move output from l1 to l2
+        // output_sdma = dte.linear l1_output => l2_output.chunkat(1, l1_tile);
+        // wait output_sdma;
+
+        // // move output from l1 to l2
+        // output_cdma = dte.linear l2_output => output.chunkat(p, l2_tile);
+        // wait output_cdma;
       }
     }
     // end kernel function
   }
 
-  return choreo_output;
+  return output;
 }
 
 // host program

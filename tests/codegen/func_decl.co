@@ -14,7 +14,6 @@ __co__ int foo(f32 mdspan<1> d, int) {
 // CHECK:     auto choreo_output_type = DRAMType(IntType(32), (1));
 // CHECK:     D(main_) // choreo-factor dataflow function
 // CHECK:     ({d_type, anon_0_type}, [&](auto args) {
-// CHECK:       auto choreo_output = alloc_(choreo_output_type);
 // CHECK:   });
 // CHECK:   choreo_foo.Compile("dorado");
 // CHECK:   choreo_foo.Run();
