@@ -140,8 +140,8 @@ void choreo_info(const char *message) {
 %nterm <AST::Storage> storage
 %nterm <Choreo::BaseType> fundamental_type
 %nterm <AST::ptr<AST::Memory>> storage_qual
-%nterm <AST::ptr<AST::Node>> pass_by foreach_block general_val simple_int spanned_value ituple_val bool_literal passable declaration statement assignment paraby_statm w_statement dma_statement wait_statement call_statement index_or_value iv_expr if_else optional_scalar_init param_mdspan_val chunkat_or_storage
-%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments paraby_statms w_statements withins require_binds require_clause else_clause
+%nterm <AST::ptr<AST::Node>> pass_by foreach_block general_val simple_int spanned_value ituple_val bool_literal passable declaration statement assignment paraby_stmt w_statement dma_statement wait_statement call_statement index_or_value iv_expr if_else optional_scalar_init param_mdspan_val chunkat_or_storage
+%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments paraby_stmts w_statements withins require_binds require_clause else_clause
 %nterm <AST::ptr<AST::MultiValues>> index_value_list value_list param_mdspan_list iv_exprs id_list with_matchers futures passables
 %nterm <AST::ptr<AST::Expr>> s_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type param_type return_type spanned_type
@@ -192,7 +192,7 @@ dsl_function
         $$->f_decl.name = $3;
         $$->f_decl.ret_type = $2;
         $$->f_decl.params = $5;
-        $$->statms = $8;
+        $$->stmts = $8;
       }
     ;
 
@@ -344,21 +344,21 @@ return
     ;
 
 parallel_by
-    : PARA IDENTIFIER BY NUM LBRACE paraby_statms RBRACE {
+    : PARA IDENTIFIER BY NUM LBRACE paraby_stmts RBRACE {
         $$ = AST::Make<AST::ParallelBy>(@1, $2, $4);
-        $$->statms = $6;
+        $$->stmts = $6;
       }
     ;
 
-paraby_statms
+paraby_stmts
     : /* Empty */ { $$ = AST::Make<AST::MultiNodes>(loc); }
-    | paraby_statms paraby_statm {
+    | paraby_stmts paraby_stmt {
         $1->Append($2);
         $$ = $1;
       }
     ;
 
-paraby_statm
+paraby_stmt
     : declarations SEMCOL { $$ = $1; }
     | assignments  SEMCOL { $$ = $1; }
     | parallel_by         { $$ = $1; }
@@ -615,13 +615,13 @@ with_block
     : WITH withins LBRACE w_statements RBRACE {
         $$ = AST::Make<AST::WithBlock>(@1);
         $$->withins = $2;
-        $$->statms = $4;
+        $$->stmts = $4;
       }
     | WITH withins require_clause LBRACE w_statements RBRACE {
         $$ = AST::Make<AST::WithBlock>(@1);
         $$->withins = $2;
         $$->reqs = $3;
-        $$->statms = $5;
+        $$->stmts = $5;
       }
     ;
 

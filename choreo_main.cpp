@@ -32,6 +32,8 @@ int main(int argc, char* argv[]) {
   Option<bool> dump_ast("--dump-ast", "-e", false, false);
   Option<bool> print_vn("--print-valno", "-v", false, false);
   Option<bool> dump_inf("--dump-infer", "-i", false, false);
+  Option<bool> dump_sym("--dump-symbol", "-l", false, false);
+  Option<bool> visualiz("--visualize", "-u", false, false);
   Option<bool> sema_chk("--sema-check", "-s", false, false);
   Option<bool> del_comm("--remove-comments", "-n", false, false);
 
@@ -90,10 +92,10 @@ int main(int argc, char* argv[]) {
   if (dump_inf) return 0;
 
   // debug: dump the symbol table
-  if (std::getenv("DUMP_SYMTAB"))
+  if (std::getenv("DUMP_SYMTAB") || dump_sym)
     ti.SymTab()->Print(std::cout);
 
-  if (std::getenv("VISUALIZE")) {
+  if (std::getenv("VISUALIZE") || visualiz) {
     Visualizer vl(ti.SymTab());
     root.accept(vl);
   }

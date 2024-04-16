@@ -7,10 +7,15 @@
 
 namespace Choreo {
 
+struct Polyhedron {
+  std::vector<int> pos;
+  std::vector<int> length;
+};
+
 struct Visualizer : public VisitorWithSymTab {
  private:
   std::ostream &os;
-  std::vector<AST::DMA *> statms;
+  std::vector<Polyhedron> polyhedron;
 
  public:
   Visualizer(const ptr<SymbolTable> s_tab, std::ostream &o = std::cout)
@@ -38,25 +43,51 @@ struct Visualizer : public VisitorWithSymTab {
   bool Visit(AST::WithIn &) override { return true; }
   bool Visit(AST::WithBlock &) override { return true; }
   bool Visit(AST::Memory &) override { return true; }
+
   bool Visit(AST::DMA &n) override {
-    statms.push_back(&n);
     auto *from = n.from.get();
-    //auto *to = n.to.get();
+    // auto *to = n.to.get();
 
     // TODO: collect any information for visualize
     if (auto ca = dyn_cast<AST::ChunkAt>(from)) {
       if (ca->positions) {
+        std::vector<int> bounds;
         for (auto pos : ca->positions->values) {
           auto id = dyn_cast<AST::Identifier>(pos);
           assert(id && "unhandled value.");
-          std::cout << "name: " << id->name
-                    << ", type: " << STR(*GetSymbolType(id->name)) << "\n";
+          auto ty = id->GetType();
+          if (auto bivs = dyn_cast<BoundedITupleType>(ty)) {
+            for (auto b : bivs->GetBounds().Value()) {
+              if (auto pint = dyn_cast<int>(&b)) {
+                bounds.push_back(*pint);
+              } else {
+                Warning(n.LOC(), "unable to handle '" + *cast<ValueExpr>(&b) +
+                                     "' (with runtime value).");
+                return false;
+              }
+            }
+          } else if (auto biv = dyn_cast<BoundedIntegerType>(ty)) {
+            if (auto pint = dyn_cast<int>(&biv->bound)) {
+              bounds.push_back(*pint);
+            } else {
+              Warning(n.LOC(), "unable to handle '" +
+                                   *cast<ValueExpr>(&biv->bound) +
+                                   "' (with runtime value).");
+              return false;
+            }
+          } else {
+            os << STR(*ty) << " is not expected.\n";
+            choreo_unreachable("unable to handle the type.");
+          }
         }
+        os << "bounds: [ ";
+        for (auto b : bounds) os << b << " ";
+        os << "]\n";
       }
-      std::cout << "chuckat type: " << TYPE_STR(*from) << "\n";
     }
     return true;
   }
+
   bool Visit(AST::ChunkAt &) override { return true; }
   bool Visit(AST::Wait &) override { return true; }
   bool Visit(AST::Call &) override { return true; }

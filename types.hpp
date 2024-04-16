@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "enums.hpp"
+#include "aux.hpp"
 
 namespace Choreo {
 
@@ -205,6 +206,22 @@ static constexpr int __INVALID_INTVAL__ = std::numeric_limits<int>::max();
 using ValueExpr = std::string;
 using ValueItem = std::variant<int, ValueExpr>;
 using ValueList = std::vector<ValueItem>;
+
+// specialization for ValueItem
+template <typename T>
+T* dyn_cast(ValueItem * vi) {
+  if (std::holds_alternative<T>(*vi))
+    return &std::get<T>(*vi);
+  return nullptr;
+}
+
+template <typename T>
+T* cast(ValueItem * vi) {
+  if (T* res = dyn_cast<T>(vi))
+    return res;
+  choreo_unreachable("value item does not contain the type.");
+  return nullptr;
+}
 
 struct ValueExprHasher {
   std::size_t operator()(const ValueExpr& v) const noexcept {
@@ -633,6 +650,7 @@ struct BoundedIntegerType final : public Type,
   BoundedIntegerType(const std::string& expr)
       : Type(TypeCategory::BOUNDED_INT), bound(expr) {}
 
+  size_t Dims() const override { return 1; }
   bool IsComplete() const override { return true; }
   bool HasSufficientInfo() const {
     return bound != ValueItem{__UNKNOWN_INTVAL__};

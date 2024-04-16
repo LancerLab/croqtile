@@ -93,7 +93,7 @@ void ParallelBy::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
   v.Visit(*this);
 
-  statms->accept(v);
+  stmts->accept(v);
 
   v.AfterVisit(*this);
 }
@@ -113,7 +113,7 @@ void WithBlock::accept(Choreo::Visitor& v) {
   withins->accept(v);
   if (reqs) reqs->accept(v);
   v.Visit(*this);
-  statms->accept(v);
+  stmts->accept(v);
   v.AfterVisit(*this);
 }
 
@@ -136,7 +136,7 @@ void Call::accept(Choreo::Visitor& v) { v.Visit(*this); }
 void ForeachBlock::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
   v.Visit(*this);
-  statms->accept(v);
+  stmts->accept(v);
   v.AfterVisit(*this);
 }
 
@@ -151,7 +151,7 @@ void ChoreoFunction::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
 
   f_decl.accept(v);
-  statms->accept(v);
+  stmts->accept(v);
 
   v.Visit(*this);
 

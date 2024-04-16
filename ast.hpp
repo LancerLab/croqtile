@@ -704,7 +704,7 @@ struct IfElse : public Node, public TypeIDProvider<IfElse> {
 struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
   std::string biv;
   int bound;
-  ptr<MultiNodes> statms;
+  ptr<MultiNodes> stmts;
 
   ParallelBy(const location& l, const std::string v, int b)
       : Node(l), biv(v), bound(b) {}
@@ -712,10 +712,10 @@ struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Parellelization: ";
     os << " index symbol: " << biv << ", bound [0, " << bound << ")";
-    if (!statms)
+    if (!stmts)
       os << std::endl;
     else
-      statms->Print(os, prefix + " ");
+      stmts->Print(os, prefix + " ");
   }
 
   void accept(Visitor&) override;
@@ -780,7 +780,7 @@ struct WithIn : public Node, public TypeIDProvider<WithIn> {
 struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
   ptr<MultiNodes> withins;
   ptr<MultiNodes> reqs;    // optional requirements
-  ptr<MultiNodes> statms;  // may be empty
+  ptr<MultiNodes> stmts;  // may be empty
 
   explicit WithBlock(const location& l) : Node(l) {}
 
@@ -792,13 +792,13 @@ struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
       os << prefix << "  (require clause)\n";
       reqs->Print(os, prefix + "  ");
     }
-    if (statms) {
-      if (statms->values.size() == 0) {
+    if (stmts) {
+      if (stmts->values.size() == 0) {
         os << prefix << "  (with empty statements)\n";
         return;
       }
       os << prefix << "  (with statements)";
-      statms->Print(os, prefix + "  ");
+      stmts->Print(os, prefix + "  ");
     }
   }
 
@@ -909,11 +909,11 @@ struct Call : public Node, public TypeIDProvider<Call> {
 
 struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
   ptr<MultiValues> ivs;
-  ptr<MultiNodes> statms;
+  ptr<MultiNodes> stmts;
 
   explicit ForeachBlock(const location& l, const ptr<MultiValues>& i,
                         const ptr<MultiNodes>& s)
-      : Node(l), ivs(i), statms(s) {
+      : Node(l), ivs(i), stmts(s) {
     assert(i != nullptr && "missing iteration variables for the statement.");
   }
 
@@ -921,8 +921,8 @@ struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
     os << "\n" << prefix << "`- Foreach Block:";
     os << "\n" << prefix << " `- Iteration variables: ";
     ivs->Print(os);
-    if (statms) {
-      statms->Print(os, prefix + " ");
+    if (stmts) {
+      stmts->Print(os, prefix + " ");
     }
   }
 
@@ -956,14 +956,14 @@ struct FunctionDecl : public Node, public TypeIDProvider<FunctionDecl> {
 struct ChoreoFunction : public Node, public TypeIDProvider<ChoreoFunction> {
   std::string name;
   FunctionDecl f_decl;
-  ptr<MultiNodes> statms;
+  ptr<MultiNodes> stmts;
 
   ChoreoFunction(const location& l) : Node(l), f_decl(l) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "ChoreoFunction";
     f_decl.Print(os, prefix + " `- ");
-    if (statms) statms->Print(os, prefix + " ");
+    if (stmts) stmts->Print(os, prefix + " ");
   }
   void accept(Visitor&) override;
 
