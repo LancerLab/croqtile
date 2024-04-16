@@ -224,7 +224,7 @@ bool FactorCodeGen::Visit(AST::Memory &n) {
 bool FactorCodeGen::Visit(AST::DMA &d) {
   // handle .to  in AST::Memory
   // d.to->Print(os); // shared
-  auto future_name = d.future->name;
+  auto future_name = d.future;
   auto to_node_name = future_name + "_buffer";
   std::string from_node_name = "";
   std::string offset_string = "0";

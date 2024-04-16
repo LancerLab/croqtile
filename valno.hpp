@@ -592,14 +592,14 @@ class ShapeInference : public Visitor {
   bool Visit(AST::DMA& n) {
     __TRACE_EACH_VISIT__;
 
-    std::string f_span = n.future->name + ".span";
+    std::string f_span = n.future + ".span";
     assert(ValidVN(cur_vn) &&
            "unexpected current value number for future.span inference.");
 
     vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(f_span), cur_vn);
     auto s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
     n.SetType(MakeFutureType(s));
-    SSTab().DefineSymbol(n.future->name, n.GetType());
+    SSTab().DefineSymbol(n.future, n.GetType());
     SSTab().DefineSymbol(f_span,
                          MakeMDSpanType(s));  // this is implicit symbol
 

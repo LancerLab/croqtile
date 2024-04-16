@@ -140,6 +140,10 @@ class ScopedSymbolTable {
     }
   }
 
+  bool DeclaredInScope(const std::string& sym_name) const {
+    return scoped_symtab.back().count(sym_name);
+  }
+
   bool IsDeclared(const std::string& sym_name) const {
     // Iterate in reverse order to simulate stack behavior
     for (auto it = scoped_symtab.rbegin(); it != scoped_symtab.rend(); ++it) {

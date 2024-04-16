@@ -639,11 +639,11 @@ withins
 within
     : IDENTIFIER IN spanned_value {
         symtab.AddSymbol($1, MakeUnknownType()/*TODO*/);
-        $$ = AST::Make<AST::WithIn>(@1, AST::Make<AST::Identifier>(@1, $1), $3);
+        $$ = AST::Make<AST::WithIn>(@1, AST::Make<AST::Identifier>(@1,$1), $3);
       }
     | IDENTIFIER ASSIGN LBRACE with_matchers RBRACE IN spanned_value {
         symtab.AddSymbol($1, MakeUnknownType()/*TODO*/);
-        $$ = AST::Make<AST::WithIn>(@1, AST::Make<AST::Identifier>(@1, $1), $7);
+        $$ = AST::Make<AST::WithIn>(@1, AST::Make<AST::Identifier>(@1,$1), $7);
         $$->with_matchers = $4;
       }
     ;
@@ -721,8 +721,7 @@ iv_expr
 dma_statement
     : IDENTIFIER ASSIGN DMA dma_operation chunkat_expr TRANS chunkat_or_storage {
         symtab.AddSymbol($1, MakeFutureType());
-        $$ = AST::Make<AST::DMA>(@3, $4,
-              AST::Make<AST::Identifier>(@1, $1), $5, $7);
+        $$ = AST::Make<AST::DMA>(@3, $4, $1, $5, $7);
       }
     ;
 

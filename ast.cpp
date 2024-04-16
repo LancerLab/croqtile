@@ -74,9 +74,11 @@ void DataType::accept(Choreo::Visitor& v) {
 void Identifier::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
 void Parameter::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
   type->accept(v);
   if (sym) sym->accept(v);
   v.Visit(*this);
+  v.AfterVisit(*this);
 }
 
 void ParamList::accept(Choreo::Visitor& v) {
@@ -99,9 +101,11 @@ void ParallelBy::accept(Choreo::Visitor& v) {
 void RequireBind::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
 void WithIn::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
   in->accept(v);
   // have to handle identifier/matcher inside 'within'
   v.Visit(*this);
+  v.AfterVisit(*this);
 }
 
 void WithBlock::accept(Choreo::Visitor& v) {

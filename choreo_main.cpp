@@ -73,6 +73,8 @@ int main(int argc, char* argv[]) {
   // verify symbol references inside scopes
   SymbolValidator sv;
   root.accept(sv);
+  if (sv.HasError())
+    return 1;
 
   // minor AST change: desugar for canonicalized AST
   DeSugaring ds;

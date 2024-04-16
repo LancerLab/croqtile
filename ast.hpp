@@ -753,7 +753,7 @@ struct WithIn : public Node, public TypeIDProvider<WithIn> {
       : Node(l), with(w), in(i), with_matchers(nullptr) {}
 
   WithIn(const location& l, const ptr<Node>& i, const ptr<MultiValues>& m)
-      : Node(l), with(nullptr), in(i), with_matchers(m) {}
+      : Node(l), with(), in(i), with_matchers(m) {}
 
   WithIn(const location& l, const ptr<Identifier>& w, const ptr<Node>& i,
          ptr<MultiValues> m)
@@ -761,7 +761,7 @@ struct WithIn : public Node, public TypeIDProvider<WithIn> {
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix << "`- ";
-    with->Print(os);
+    if (with) os << with->name;
     if (with_matchers) {
       os << " = {";
       with_matchers->InlinePrint(os);
@@ -809,18 +809,17 @@ struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
 
 struct DMA : public Node, public TypeIDProvider<DMA> {
   std::string operation;
-  ptr<Identifier> future;
+  std::string future;
   ptr<Node> from;
   ptr<Node> to;
 
-  DMA(const location& l, const std::string& o, const ptr<Identifier>& r,
+  DMA(const location& l, const std::string& o, const std::string& r,
       const ptr<Node>& f, const ptr<Node>& t)
       : Node(l, MakeFutureType()), operation(o), future(r), from(f), to(t) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- DMA" << operation;
-    os << "\n" << prefix << "  `- future: ";
-    future->Print(os);
+    os << "\n" << prefix << "  `- future: " << future;
     os << "\n" << prefix << "  `- from: ";
     from->Print(os);
     os << "\n" << prefix << "  `- to: ";

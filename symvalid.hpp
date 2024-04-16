@@ -11,10 +11,18 @@ struct SymbolValidator : public Visitor {
  private:
   std::ostream &os;
   bool trace_visit = false;  // for debugging purpose only
+  size_t error_count = 0;
+
+ private:
+  bool in_decl =
+      false;  // we need context to judge if it is declaration or reference
 
  private:
   bool BeforeVisit(AST::Node &) override;
   bool AfterVisit(AST::Node &) override;
+
+  bool ReportErrorWhenUseBeforeDefine(const location &, const std::string &);
+  bool ReportErrorWhenViolateODR(const location &, const std::string &);
 
  public:
   SymbolValidator(std::ostream &o = std::cout)
@@ -50,6 +58,8 @@ struct SymbolValidator : public Visitor {
   bool Visit(AST::ChoreoFunction &) override;
   bool Visit(AST::CppSourceCode &) override;
   bool Visit(AST::Program &) override;
+
+  bool HasError();
 };
 
 }  // end namespace Choreo
