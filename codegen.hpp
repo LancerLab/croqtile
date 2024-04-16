@@ -5,66 +5,15 @@
 
 namespace Choreo {
 
-struct CodeGenerator : public Visitor {
+struct CodeGenerator : public VisitorWithSymTab {
   std::ostream &os;
 
-  // derived class must call this to incorporate with symbol table
-  bool BeforeVisit(AST::Node &n) override {
-    if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
-      SSTab().EnterScope(f->name);
-    } else if (isa<AST::ParallelBy>(&n)) {
-      static size_t count = 0;
-      SSTab().EnterScope("paraby_" + std::to_string(count++));
-    } else if (isa<AST::WithBlock>(&n)) {
-      static size_t count = 0;
-      SSTab().EnterScope("within_" + std::to_string(count++));
-    } else if (isa<AST::ForeachBlock>(&n)) {
-      static size_t count = 0;
-      SSTab().EnterScope("foreach_" + std::to_string(count++));
-    }
-    return true;
-  }
-
-  bool AfterVisit(AST::Node &n) override {
-    if (isa<AST::ChoreoFunction>(&n) || isa<AST::ParallelBy>(&n) ||
-        isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n)) {
-      SSTab().LeaveScope();
-    }
-    return true;
-  }
-
-  virtual std::string InScopeName(const std::string & sym) {
-    auto removeLastLevel = [](const std::string &input) -> std::string {
-      size_t lastPos = input.rfind("::");
-      if (lastPos == std::string::npos)
-        return input;  // No "::" found, return the original string
-      // Find the second-to-last "::" by searching up to the last found position
-      size_t secondLastPos = input.rfind("::", lastPos - 1);
-      if (secondLastPos == std::string::npos) return input;
-      return input.substr(0,
-                          secondLastPos + 2);  // Include the "::" in the result
-    };
-    std::string scope_name = SSTab().ScopeName();
-    while (true) {
-      std::string scoped_name = scope_name + sym;
-      if (SymTab()->Exists(scoped_name)) return scoped_name;
-      std::string stripped_scope = removeLastLevel(scope_name);
-      if (stripped_scope == scope_name) break;
-      scope_name = stripped_scope;
-    }
-
-    choreo_unreachable("unable to find symbol `" + sym +
-                       "' in the symbol table.");
-    return "";
-  }
-
-  virtual ptr<Type> GetSymbolType(const std::string &n) {
-    assert(SymTab()->Exists(InScopeName(n)) && "symbol is not declared.");
-    return SymTab()->GetSymbol(InScopeName(n))->GetType();
-  }
+  // some default method for the derived classes that do not want to override.
+  bool BeforeVisitImpl(AST::Node&) override { return true; }
+  bool AfterVisitImpl(AST::Node&) override { return true; }
 
   CodeGenerator(std::ostream &o, const ptr<SymbolTable> &symtab)
-      : Visitor(symtab), os(o) {
+      : VisitorWithSymTab(symtab), os(o) {
     if (symtab == nullptr)
       choreo_unreachable("symbol table must be initialized.");
   }
@@ -80,8 +29,8 @@ struct FactorCodeGen : public CodeGenerator {
   FactorCodeGen(std::ostream &os, const ptr<SymbolTable> &symtab)
       : CodeGenerator(os, symtab) {}
 
-  bool BeforeVisit(AST::Node&) override;
-  bool AfterVisit(AST::Node&) override;
+  bool BeforeVisitImpl(AST::Node&) override;
+  bool AfterVisitImpl(AST::Node&) override;
 
   // bool Visit(AST::Node&) override;
   bool Visit(AST::MultiNodes &) override;

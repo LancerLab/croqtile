@@ -52,16 +52,14 @@ struct Visitor {
   ScopedSymbolTable scoped_symtab;
 
  public:
-  Visitor(const ptr<SymbolTable>& s_tab = nullptr)
-      : scoped_symtab(s_tab) {}
+  Visitor(const ptr<SymbolTable>& s_tab = nullptr) : scoped_symtab(s_tab) {}
   virtual ~Visitor() {}
 
   // simple reference to the symbol table
   virtual ScopedSymbolTable& SSTab() { return scoped_symtab; }
 
   virtual const ptr<SymbolTable> SymTab() const {
-    if (auto st = scoped_symtab.GlobalSymbolTable())
-      return st;
+    if (auto st = scoped_symtab.GlobalSymbolTable()) return st;
     choreo_unreachable("Retrieving an invalid symbol table.");
     return nullptr;
   }
@@ -106,6 +104,74 @@ struct Visitor {
 
     std::cerr << message << std::endl;
   }
+};
+
+// This accepts static symbol table and provide symbol lookup capability
+struct VisitorWithSymTab : public Visitor {
+ protected:
+  // for the derived classes
+  virtual bool BeforeVisitImpl(AST::Node& n) = 0;
+  virtual bool AfterVisitImpl(AST::Node& n) = 0;
+
+  std::string InScopeName(const std::string& sym) {
+    auto removeLastLevel = [](const std::string& input) -> std::string {
+      size_t lastPos = input.rfind("::");
+      if (lastPos == std::string::npos)
+        return input;  // No "::" found, return the original string
+      // Find the second-to-last "::" by searching up to the last found position
+      size_t secondLastPos = input.rfind("::", lastPos - 1);
+      if (secondLastPos == std::string::npos) return input;
+      return input.substr(0,
+                          secondLastPos + 2);  // Include the "::" in the result
+    };
+    std::string scope_name = SSTab().ScopeName();
+    while (true) {
+      std::string scoped_name = scope_name + sym;
+      if (SymTab()->Exists(scoped_name)) return scoped_name;
+      std::string stripped_scope = removeLastLevel(scope_name);
+      if (stripped_scope == scope_name) break;
+      scope_name = stripped_scope;
+    }
+
+    choreo_unreachable("unable to find symbol `" + sym +
+                       "' in the symbol table.");
+    return "";
+  }
+
+  virtual ptr<Type> GetSymbolType(const std::string& n) {
+    return SymTab()->GetSymbol(InScopeName(n))->GetType();
+  }
+
+ public:
+  bool BeforeVisit(AST::Node& n) final {
+    if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
+      SSTab().EnterScope(f->name);
+    } else if (isa<AST::ParallelBy>(&n)) {
+      static size_t count = 0;
+      SSTab().EnterScope("paraby_" + std::to_string(count++));
+    } else if (isa<AST::WithBlock>(&n)) {
+      static size_t count = 0;
+      SSTab().EnterScope("within_" + std::to_string(count++));
+    } else if (isa<AST::ForeachBlock>(&n)) {
+      static size_t count = 0;
+      SSTab().EnterScope("foreach_" + std::to_string(count++));
+    }
+    BeforeVisitImpl(n);  // derived class to customize
+    return true;
+  }
+
+  bool AfterVisit(AST::Node& n) final {
+    if (isa<AST::ChoreoFunction>(&n) || isa<AST::ParallelBy>(&n) ||
+        isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n)) {
+      SSTab().LeaveScope();
+    }
+    AfterVisitImpl(n);  // derived class to customize
+    return true;
+  }
+
+ public:
+  VisitorWithSymTab(const ptr<SymbolTable>& s_tab) : Visitor(s_tab) {}
+  ~VisitorWithSymTab() {}
 };
 
 }  // end namespace Choreo

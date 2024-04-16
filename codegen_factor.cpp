@@ -72,7 +72,7 @@ static inline std::string factor_typestr(Choreo::BaseType t) {
 
 }  // end anonymous namespace
 
-bool FactorCodeGen::BeforeVisit(AST::Node &n) {
+bool FactorCodeGen::BeforeVisitImpl(AST::Node &n) {
   if (isa<AST::Program>(&n)) {
     print_fixed_header(os);
   } else if (auto c = dyn_cast<AST::ChoreoFunction>(&n)) {
@@ -84,12 +84,10 @@ bool FactorCodeGen::BeforeVisit(AST::Node &n) {
   } else if (isa<AST::ForeachBlock>(&n)) {
     this->incrementIndent();
   }
-  CodeGenerator::BeforeVisit(n);
   return 0;
 }
 
-bool FactorCodeGen::AfterVisit(AST::Node &n) {
-  CodeGenerator::AfterVisit(n);
+bool FactorCodeGen::AfterVisitImpl(AST::Node &n) {
   if (auto p = dyn_cast<AST::ChoreoFunction>(&n)) {
     print_wrapper_end(os, p->name);
   } else if (isa<AST::ParallelBy>(&n)) {
@@ -201,7 +199,7 @@ bool FactorCodeGen::Visit(AST::ParallelBy &by) {
   }
   os << "}, {choreo_output_type}, [&](auto args, auto results) {\n";
   this->incrementIndent();
-  int i = 0;
+  // int i = 0;
   // NOTE: remove unused aliasing 'auto k_a = args[0];'
   // for (auto &param : *cur_params) {
   //   os << "      "
@@ -286,7 +284,7 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
   // auto l1_tile_idx = itervars->getValueAt(1);
   //
   auto itervars = forNode.getIterationVars();
-  for (auto idx = 0; idx != itervars->Count(); ++idx) {
+  for (size_t idx = 0; idx != itervars->Count(); ++idx) {
     // TODO(albert): support non-unit stride in loop
     std::ostringstream _os;
     itervars->getValueAt(idx)->Print(_os);
