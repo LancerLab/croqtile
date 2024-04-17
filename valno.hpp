@@ -331,11 +331,15 @@ class ShapeInference : public Visitor {
   bool Visit(AST::NamedVariableDecl& n) {
     __TRACE_EACH_VISIT__;
 
-    if (SSTab().IsDeclared(n.name_str)) {
+    if (SSTab().DeclaredInScope(n.name_str)) {
       Error(n.LOC(), "ODR violation: symbol `" + n.name_str +
                          "' has been declared already.");
       return false;
     }
+
+    Storage s = Storage::NONE;
+    if (n.mem)
+      s = n.mem->st;
 
     if (n.initializer) {
       if (ValidVN(cur_ituple_vn)) {
@@ -361,7 +365,7 @@ class ShapeInference : public Visitor {
         auto mds_value = GenShapeFromSignature(
             vn.GetSignatureFromValueNumber(cur_mdspan_vn));
         SSTab().DefineSymbol(n.name_str,
-                             MakeSpannedType(n.type->base_type, mds_value));
+                             MakeSpannedType(n.type->base_type, mds_value, s));
         SSTab().DefineSymbol(n.name_str + ".span", MakeMDSpanType(mds_value));
       } else if (ValidVN(cur_vn)) {
         vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(n.name_str),
@@ -681,7 +685,8 @@ class ShapeInference : public Visitor {
     // set the chunkat's type
     n.SetType(MakeSpannedType(
         cast<SpannedType>(pty)->f_type,
-        GenShapeFromSignature(vn.GetSignatureFromValueNumber(ca_valno))));
+        GenShapeFromSignature(vn.GetSignatureFromValueNumber(ca_valno)),
+        cast<SpannedType>(pty)->GetStorage()));
 
     int fs_valno = ca_valno;
     cur_vn = fs_valno;

@@ -79,6 +79,11 @@ bool TypeInference::SetCurrentType(AST::Node &nd, const std::string &n) {
     return false;
   }
 
+  // complement the storage information when exists
+  if (auto st = dyn_cast<SpannedType>(cur_type))
+    if (auto n = dyn_cast<AST::NamedVariableDecl>(&nd))
+      st->SetStorage(n->mem->st);
+
   // The type is successfully inferred, set the node
   nd.SetType(cur_type);
 
@@ -309,8 +314,7 @@ bool TypeInference::Visit(AST::DMA &n) {
 
   // future's type has been obtained by shape inference
   if (AST::typeof<UnknownType>(&n)) {
-    Error(n.LOC(),
-          "fail to infer the FUTURE type of `" + n.future + "'.");
+    Error(n.LOC(), "fail to infer the FUTURE type of `" + n.future + "'.");
     return false;
   }
 

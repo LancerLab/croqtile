@@ -14,8 +14,8 @@
 #include <variant>
 #include <vector>
 
-#include "enums.hpp"
 #include "aux.hpp"
+#include "enums.hpp"
 
 namespace Choreo {
 
@@ -209,16 +209,14 @@ using ValueList = std::vector<ValueItem>;
 
 // specialization for ValueItem
 template <typename T>
-T* dyn_cast(ValueItem * vi) {
-  if (std::holds_alternative<T>(*vi))
-    return &std::get<T>(*vi);
+T* dyn_cast(ValueItem* vi) {
+  if (std::holds_alternative<T>(*vi)) return &std::get<T>(*vi);
   return nullptr;
 }
 
 template <typename T>
-T* cast(ValueItem * vi) {
-  if (T* res = dyn_cast<T>(vi))
-    return res;
+T* cast(ValueItem* vi) {
+  if (T* res = dyn_cast<T>(vi)) return res;
   choreo_unreachable("value item does not contain the type.");
   return nullptr;
 }
@@ -631,6 +629,9 @@ struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
   Shape GetShape() { return s_type->GetShape(); }
   ptr<MDSpanType> GetMDSpanType() { return s_type; }
 
+  void SetStorage(Storage s) { m_type = s; }
+  Storage GetStorage() { return m_type; }
+
   void Print(std::ostream& os) const override {
     if (m_type != Storage::NONE && m_type != Storage::DEFAULT)
       os << getStringFrom(m_type) << " ";
@@ -780,12 +781,14 @@ inline ptr<MDSpanType> MakeMDSpanType(const Shape& v) {
   return std::make_shared<MDSpanType>(v);
 }
 
-inline ptr<SpannedType> MakeSpannedType(FundamentalType ft, const Shape& v) {
-  return std::make_shared<SpannedType>(ft, MakeMDSpanType(v));
+inline ptr<SpannedType> MakeSpannedType(FundamentalType ft, const Shape& v,
+                                        const Storage& s = Storage::DEFAULT) {
+  return std::make_shared<SpannedType>(ft, MakeMDSpanType(v), s);
 }
 
-inline ptr<SpannedType> MakeSpannedType(BaseType ft, const Shape& v) {
-  return MakeSpannedType((FundamentalType)ft, v);
+inline ptr<SpannedType> MakeSpannedType(BaseType ft, const Shape& v,
+                                        const Storage& s = Storage::DEFAULT) {
+  return MakeSpannedType((FundamentalType)ft, v, s);
 }
 
 inline ptr<BoundedITupleType> MakeBoundedITupleType(const Shape& v) {
