@@ -142,19 +142,27 @@ struct VisitorWithSymTab : public Visitor {
     return SymTab()->GetSymbol(InScopeName(n))->GetType();
   }
 
+ private:
+  int pb_count = 0;  // counting for parallel_by
+  int wi_count = 0;  // counting for with_in
+  int fe_count = 0;  // counting for foreach
+
+  void Reset() {
+    pb_count = 0;
+    wi_count = 0;
+    fe_count = 0;
+  }
+
  public:
   bool BeforeVisit(AST::Node& n) final {
     if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
       SSTab().EnterScope(f->name);
     } else if (isa<AST::ParallelBy>(&n)) {
-      static size_t count = 0;
-      SSTab().EnterScope("paraby_" + std::to_string(count++));
+      SSTab().EnterScope("paraby_" + std::to_string(pb_count++));
     } else if (isa<AST::WithBlock>(&n)) {
-      static size_t count = 0;
-      SSTab().EnterScope("within_" + std::to_string(count++));
+      SSTab().EnterScope("within_" + std::to_string(wi_count++));
     } else if (isa<AST::ForeachBlock>(&n)) {
-      static size_t count = 0;
-      SSTab().EnterScope("foreach_" + std::to_string(count++));
+      SSTab().EnterScope("foreach_" + std::to_string(fe_count++));
     }
     BeforeVisitImpl(n);  // derived class to customize
     return true;
@@ -170,7 +178,7 @@ struct VisitorWithSymTab : public Visitor {
   }
 
  public:
-  VisitorWithSymTab(const ptr<SymbolTable>& s_tab) : Visitor(s_tab) {}
+  VisitorWithSymTab(const ptr<SymbolTable>& s_tab) : Visitor(s_tab) { Reset(); }
   ~VisitorWithSymTab() {}
 };
 
