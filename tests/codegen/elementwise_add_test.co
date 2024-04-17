@@ -56,7 +56,7 @@ __co__ s32 mdspan[12, 1024] ele_add(s32 [12, 1024] a, s32 [12, 1024] b) {
         // TODO(albert): refine filecheck with matched vars
         // CHECK: auto lhs_cdma_buffer = alloc_(SRAMType());
         // CHECK: auto lhs_cdma = alloc_dma_(SDMAType());
-        // CHECK: async_load_(lhs_cdma, a, lhs_cdma_buffer, 0 + 2048 * p + 1024 * l2_tile);
+        // check: async_load_(lhs_cdma, a, lhs_cdma_buffer, {0 + 2048 * p + 1024 * l2_tile);
         // CHECK: wait_dma_(lhs_cdma);
 
         // rhs_cdma = dte.linear b.chunkat(p, l1_tile) => shared;

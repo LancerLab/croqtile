@@ -199,6 +199,7 @@ bool FactorCodeGen::Visit(AST::ParallelBy &by) {
   }
   os << "}, {choreo_output_type}, [&](auto args, auto results) {\n";
   this->incrementIndent();
+  os << this->indent << "auto thread_id = thread_id_();\n";
   // int i = 0;
   // NOTE: remove unused aliasing 'auto k_a = args[0];'
   // for (auto &param : *cur_params) {
@@ -227,7 +228,7 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   auto future_name = d.future;
   auto to_node_name = future_name + "_buffer";
   std::string from_node_name = "";
-  std::string offset_string = "0";
+  std::string offset_string = "";
   std::string dma_op = "";
 
   assert((dyn_cast<AST::ChunkAt>(d.from)) && "Unexpected type for DMA's source.");
@@ -280,24 +281,43 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   // print as a.ChunkAt(p, l1_tile)
   // d.from->Print(os) => a.ChunkAt(p, l2_tile)
   // TODO(albert): resolve hardcode
-  if (auto chunkat_node = dyn_cast<AST::ChunkAt>(d.from)) {
+  auto chunkat_node = (src_level >= des_level)? dyn_cast<AST::ChunkAt>(d.from) : dyn_cast<AST::ChunkAt>(d.to);
+  if (chunkat_node) {
     from_node_name = STR(chunkat_node->data);
     auto tile_factors = chunkat_node->positions;
-    int dim_cursor = 0;
-    std::vector<int> dim = {12, 1024, 1};
+    auto data_shape = dyn_cast<SpannedType>(this->GetSymbolType(from_node_name))->GetShape();
+    int dim_sz = data_shape.Dims();
+    offset_string.append("{");
     if(tile_factors){
-      for (const auto tile_factor : tile_factors->getValues()) {
+      assert(dim_sz == tile_factors->getValues().size() && "Insonsistant sizes for DMA offset.");
+      auto dim = data_shape.values.values[0];
+      assert(dim_sz == dim.size() && "Insonsistant sizes for DMA offset.");
+      for (int dim_cursor = 0; dim_cursor < dim_sz;) {
+        auto tile_factor = tile_factors->getValues()[dim_cursor];
         auto tf_symbol = STR(tile_factor);
         auto tf_bounds = dyn_cast<BoundedITupleType>(this->GetSymbolType(tf_symbol))->GetBounds().Value();
         auto tf_bound = *(std::get_if<int>(&tf_bounds[0]));
-        offset_string = offset_string + " + " + std::to_string(dim[dim_cursor] / tf_bound * dim[dim_cursor+1]) + " * " + STR(tile_factor);
-        // os << offset_string;
+        auto dim_bound = *(std::get_if<int>(&dim[dim_cursor]));
+        assert( (tf_bound > 0 && dim_bound > 0) && "Invalid Dim size or Tile factor!");
+        auto offset = (dim_cursor == 0)? std::to_string(dim_bound/tf_bound) + "*thread_id" :
+                                         std::to_string(dim_bound/tf_bound) + "*" + STR(tile_factor);
+        offset_string = offset_string + offset;
         ++dim_cursor;
+        if(dim_cursor < dim_sz)
+          offset_string = offset_string + ",";
+      }
+    } else {
+      for (int dim_cursor = 0; dim_cursor < dim_sz;) {
+        offset_string = offset_string + "0";
+        ++dim_cursor;
+        if(dim_cursor < dim_sz)
+          offset_string = offset_string + ",";
       }
     }
+    offset_string = offset_string + "}";
   }
   else{
-      ////TODO: handle store offset for d.to
+    assert(false && "Unexpected!");
   }
 
   os << this->indent << "auto " << future_name << " = alloc_dma_(SDMAType());\n";
