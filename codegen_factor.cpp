@@ -228,6 +228,37 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   auto to_node_name = future_name + "_buffer";
   std::string from_node_name = "";
   std::string offset_string = "0";
+  std::string dma_op = "";
+
+  assert((dyn_cast<AST::ChunkAt>(d.from)) && "Unexpected type for DMA's source.");
+  assert((dyn_cast<AST::Memory>(d.to) || dyn_cast<AST::ChunkAt>(d.to)) && "Unexpected type for DMA's destination.");
+
+  auto getMemLevel = [](Storage s) -> int {
+    switch(s) {
+      case Storage::LOCAL:
+        return 0;
+      case Storage::SHARED:
+        return 1;
+      case Storage::GLOBAL:
+      case Storage::DEFAULT:
+        return 2;
+      default:
+        assert(false && "Unexpected storage type.");
+        return -1;
+    }
+  };
+
+  auto storage_level = (dyn_cast<AST::Memory>(d.to))? cast<AST::Memory>(d.to)->getStorageLevel():
+                      dyn_cast<SpannedType>(this->GetSymbolType(STR(cast<AST::ChunkAt>(d.to)->data)))->GetStorage();
+  int des_level = getMemLevel(storage_level);
+  storage_level = dyn_cast<SpannedType>(this->GetSymbolType(STR(cast<AST::ChunkAt>(d.from)->data)))->GetStorage();
+  int src_level = getMemLevel(storage_level);
+
+  if(src_level >= des_level)
+    dma_op.append("async_load_(");
+  else
+    dma_op.append("async_store_(");
+
   if (auto mem_node = dyn_cast<AST::Memory>(d.to)) {
     // TODO(albert): generate 'local_buffer' with more smart naming way by valno support
     switch(mem_node->getStorageLevel()) {
@@ -254,17 +285,23 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
     auto tile_factors = chunkat_node->positions;
     int dim_cursor = 0;
     std::vector<int> dim = {12, 1024, 1};
-    for (const auto tile_factor : tile_factors->getValues()) {
-      auto tf_symbol = STR(tile_factor);
-      auto tf_bounds = dyn_cast<BoundedITupleType>(this->GetSymbolType(tf_symbol))->GetBounds().Value();
-      auto tf_bound = *(std::get_if<int>(&tf_bounds[0]));
-      offset_string = offset_string + " + " + std::to_string(dim[dim_cursor] / tf_bound * dim[dim_cursor+1]) + " * " + STR(tile_factor);
-      // os << offset_string;
-      ++dim_cursor;
+    if(tile_factors){
+      for (const auto tile_factor : tile_factors->getValues()) {
+        auto tf_symbol = STR(tile_factor);
+        auto tf_bounds = dyn_cast<BoundedITupleType>(this->GetSymbolType(tf_symbol))->GetBounds().Value();
+        auto tf_bound = *(std::get_if<int>(&tf_bounds[0]));
+        offset_string = offset_string + " + " + std::to_string(dim[dim_cursor] / tf_bound * dim[dim_cursor+1]) + " * " + STR(tile_factor);
+        // os << offset_string;
+        ++dim_cursor;
+      }
     }
   }
+  else{
+      ////TODO: handle store offset for d.to
+  }
+
   os << this->indent << "auto " << future_name << " = alloc_dma_(SDMAType());\n";
-  os << this->indent << "async_load_(" << future_name 
+  os << this->indent << dma_op << future_name
      << ", " << from_node_name << ", " 
      << to_node_name << ", " << offset_string <<  ");\n";
   os << this->indent << "wait_dma_(" << future_name << ");\n";
