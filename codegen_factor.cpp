@@ -35,6 +35,20 @@ static inline void print_wrapper_end(std::ostream &os, std::string name) {
   os << "};\n";
 }
 
+static inline std::string factor_storage_str(Choreo::Storage s) {
+  switch (s) {
+    case Storage::LOCAL:
+      return "L1Type";
+    case Storage::SHARED:
+      return "SRAMType";
+    case Storage::GLOBAL:
+    case Storage::DEFAULT:
+      return "DRAMType";
+    default:
+      choreo_unreachable();
+  }
+}
+
 static inline std::string factor_typestr(Choreo::BaseType t) {
   switch (t) {
     case AST::BaseType::F32:
@@ -131,6 +145,31 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
       os << "auto " << node.name_str << " = alloc_(";
       os << strtab.GetTypeSymbol("a");
       os << ");\n";
+    } else { //use GetSymbolType to get the required information
+      auto ty = dyn_cast<SpannedType>(GetSymbolType(node.name_str));
+      assert(ty && "Invalied type for variable declaration!");
+
+      std::string storage_type = factor_storage_str(ty->GetStorage());
+      std::string base_type = factor_typestr(Choreo::BaseType(ty->f_type));
+      std::string shape_info = "{";
+      auto data_shape = ty->GetShape();
+      auto dim = data_shape.values.values[0];
+      int dim_sz = data_shape.Dims();
+      assert(dim_sz == (int)dim.size() && "Insonsistant sizes for variable span.");
+      for (int dim_cursor = 0; dim_cursor < dim_sz;) {
+        auto dim_bound = *(std::get_if<int>(&dim[dim_cursor]));
+        assert( dim_bound > 0 && "Invalid variable span!");
+        shape_info = shape_info + std::to_string(dim_bound);
+        ++dim_cursor;
+        if(dim_cursor < dim_sz)
+          shape_info = shape_info + ",";
+        else
+          shape_info = shape_info + "}";
+      }
+
+      os << this->indent << "auto " << node.name_str << " = alloc_(";
+      os << storage_type << "(" << base_type << ")," << shape_info;
+      os << ");\n";
     }
   } else {
     // TODO(albert): handle anon case
@@ -225,14 +264,15 @@ bool FactorCodeGen::Visit(AST::Memory &n) {
 bool FactorCodeGen::Visit(AST::DMA &d) {
   // handle .to  in AST::Memory
   // d.to->Print(os); // shared
-  auto future_name = d.future;
-  auto to_node_name = future_name + "_buffer";
-  std::string from_node_name = "";
-  std::string offset_string = "";
-  std::string dma_op = "";
-
   assert((dyn_cast<AST::ChunkAt>(d.from)) && "Unexpected type for DMA's source.");
   assert((dyn_cast<AST::Memory>(d.to) || dyn_cast<AST::ChunkAt>(d.to)) && "Unexpected type for DMA's destination.");
+
+  auto future_name = d.future;
+  auto to_node_name = (dyn_cast<AST::Memory>(d.to))? future_name + "_buffer" :
+                      STR(cast<AST::ChunkAt>(d.to)->data) ;
+  std::string from_node_name = STR(cast<AST::ChunkAt>(d.from)->data);
+  std::string offset_string = "";
+  std::string dma_op = "";
 
   auto getMemLevel = [](Storage s) -> int {
     switch(s) {
@@ -283,15 +323,15 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   // TODO(albert): resolve hardcode
   auto chunkat_node = (src_level >= des_level)? dyn_cast<AST::ChunkAt>(d.from) : dyn_cast<AST::ChunkAt>(d.to);
   if (chunkat_node) {
-    from_node_name = STR(chunkat_node->data);
+    auto chunkat_node_name = STR(chunkat_node->data);
     auto tile_factors = chunkat_node->positions;
-    auto data_shape = dyn_cast<SpannedType>(this->GetSymbolType(from_node_name))->GetShape();
+    auto data_shape = dyn_cast<SpannedType>(this->GetSymbolType(chunkat_node_name))->GetShape();
     int dim_sz = data_shape.Dims();
     offset_string.append("{");
     if(tile_factors){
-      assert(dim_sz == tile_factors->getValues().size() && "Insonsistant sizes for DMA offset.");
+      assert(dim_sz == (int)tile_factors->getValues().size() && "Insonsistant sizes for DMA offset.");
       auto dim = data_shape.values.values[0];
-      assert(dim_sz == dim.size() && "Insonsistant sizes for DMA offset.");
+      assert(dim_sz == (int)dim.size() && "Insonsistant sizes for DMA offset.");
       for (int dim_cursor = 0; dim_cursor < dim_sz;) {
         auto tile_factor = tile_factors->getValues()[dim_cursor];
         auto tf_symbol = STR(tile_factor);
