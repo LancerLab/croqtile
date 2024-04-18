@@ -364,13 +364,25 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   os << this->indent << dma_op << future_name
      << ", " << from_node_name << ", " 
      << to_node_name << ", " << offset_string <<  ");\n";
-  os << this->indent << "wait_dma_(" << future_name << ");\n";
 
   return true;
 }
 
 bool FactorCodeGen::Visit(AST::ChunkAt &) { return true; };
-bool FactorCodeGen::Visit(AST::Wait &) { return true; };
+
+bool FactorCodeGen::Visit(AST::Wait &w) {
+  auto dmas = dyn_cast<AST::MultiValues>(w.target);
+  assert(dmas && "Invalid wait target!");
+
+  for(auto dma : dmas->getValues()){
+    os << this->indent << "wait_dma_(";
+    dma->Print(os);
+    os << ");\n";
+  }
+
+  return true;
+};
+
 bool FactorCodeGen::Visit(AST::Call &) { return true; };
 bool FactorCodeGen::Visit(AST::Return &) { return true; };
 

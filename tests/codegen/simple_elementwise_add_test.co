@@ -49,5 +49,9 @@ int bar(int a[], int b[]) {
 // CHECK: auto thread_id = thread_id_();
 // CHECK: async_load_(f1, a, f1_buffer, {24*thread_id,10*x,10*y});
 // CHECK: async_load_(f2, b, f2_buffer, {24*thread_id,10*x,10*y});
+// CHECK: wait_dma_(f1);
+// CHECK: wait_dma_(f2);
 // CHECK: auto local_buffer = alloc_(L1Type(FloatType(32)),{144,100,100});
 // CHECK: async_store_(f3, local_buffer, global_buffer, {24*thread_id,10*x,10*y});
+// CHECK: wait_dma_(f3);
+
