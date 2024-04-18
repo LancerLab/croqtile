@@ -525,7 +525,7 @@ class ShapeInference : public Visitor {
         SSTab().ScopedName("@" + n.biv);  // upper-bound of bounded variable
     vn.AssociateSignatureWithValueNumber(iv_name, valno);
     Shape s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(valno));
-    n.SetType(MakeBoundedITupleType(s));
+    n.SetType(MakeBoundedITupleType(s, "pv"));
     SSTab().DefineSymbol("@" + n.biv, MakeMDSpanType(s));
     return true;
   };

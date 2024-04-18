@@ -98,11 +98,13 @@ int main(int argc, char* argv[]) {
   if (std::getenv("VISUALIZE") || visualiz) {
     Visualizer vl(ti.SymTab());
     root.accept(vl);
+    return 0;
   }
 
   // apply type check and generate symbol table
   TypeChecker sc(ti.SymTab());
   root.accept(sc);
+  if (sc.HasError()) return 1;
 
   if (sema_chk) return 0;
 

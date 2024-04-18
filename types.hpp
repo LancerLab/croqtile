@@ -404,6 +404,10 @@ struct Shape {
   }
 
   const ValueList& Value() const { return values[val_no]; }
+  int NthInteger(size_t index) const {
+    const ValueItem & vi = Value().at(index);
+    return *cast<int>(const_cast<ValueItem*>(&vi));
+ }
 
   void Print(std::ostream& os) const {
     if (val_no == __INVALID_VALUE__) os << "[]";
@@ -452,6 +456,8 @@ struct Type {
   virtual std::string EmitTo(Target) const {
     assert(false && "Emit stringify not impled for this type");
   }
+
+  virtual std::string GetNote() const { return ""; } // some annotation to make
 
   // for runtime type disambiguition
   virtual const std::string NodeTypeString() = 0;
@@ -647,9 +653,11 @@ struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
 struct BoundedIntegerType final : public Type,
                                   public TypeIDProvider<BoundedIntegerType> {
   ValueItem bound = __UNKNOWN_INTVAL__;
+  std::string note = "";
+
   BoundedIntegerType(int b) : Type(TypeCategory::BOUNDED_INT), bound(b) {}
-  BoundedIntegerType(const std::string& expr)
-      : Type(TypeCategory::BOUNDED_INT), bound(expr) {}
+  BoundedIntegerType(const std::string& expr, const std::string & n = "")
+      : Type(TypeCategory::BOUNDED_INT), bound(expr), note(n) {}
 
   size_t Dims() const override { return 1; }
   bool IsComplete() const override { return true; }
@@ -672,14 +680,17 @@ struct BoundedIntegerType final : public Type,
 
   const std::string Name() const override { return "bounded-integer"; }
 
+  std::string GetNote() const override { return note; };
+
   __UDT_TYPE_INFO__
 };
 
 struct BoundedITupleType final : public Type,
                                  public TypeIDProvider<BoundedITupleType> {
   Shape bounds;
-  BoundedITupleType(const Shape& s)
-      : Type(TypeCategory::BOUNDED_ITUPLE), bounds(s) {}
+  std::string note = "";
+  BoundedITupleType(const Shape& s, const std::string & n = "")
+      : Type(TypeCategory::BOUNDED_ITUPLE), bounds(s), note(n) {}
 
   size_t Dims() const override { return bounds.Dims(); }
   bool IsComplete() const override { return true; }
@@ -702,6 +713,8 @@ struct BoundedITupleType final : public Type,
   }
 
   const std::string Name() const override { return "bounded-ituple"; }
+
+  std::string GetNote() const override { return note; };
 
   __UDT_TYPE_INFO__
 };
@@ -740,6 +753,12 @@ inline bool operator!=(const Type& t1, const Type& t2) {
 inline std::string STR(const Type& ty) {
   std::ostringstream oss;
   ty.Print(oss);
+  return oss.str();
+}
+
+inline std::string STR(const Shape& s) {
+  std::ostringstream oss;
+  s.Print(oss);
   return oss.str();
 }
 
@@ -791,8 +810,8 @@ inline ptr<SpannedType> MakeSpannedType(BaseType ft, const Shape& v,
   return MakeSpannedType((FundamentalType)ft, v, s);
 }
 
-inline ptr<BoundedITupleType> MakeBoundedITupleType(const Shape& v) {
-  return std::make_shared<BoundedITupleType>(v);
+inline ptr<BoundedITupleType> MakeBoundedITupleType(const Shape& v, const std::string& n = "") {
+  return std::make_shared<BoundedITupleType>(v, n);
 }
 
 inline ptr<FutureType> MakeFutureType(const Shape& v) {

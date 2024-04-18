@@ -78,9 +78,9 @@ struct Visitor {
     std::cerr << loc << ": ";
 
     if (shell_supports_colors())
-      std::cerr << red << "Error: " << reset;
+      std::cerr << red << "error: " << reset;
     else
-      std::cerr << "Error: ";
+      std::cerr << "error: ";
 
     std::cerr << message << std::endl;
   }
@@ -98,9 +98,9 @@ struct Visitor {
     std::cerr << loc << ": ";
 
     if (shell_supports_colors())
-      std::cerr << yellow << "Warning: " << reset;
+      std::cerr << yellow << "warning: " << reset;
     else
-      std::cerr << "Warning: ";
+      std::cerr << "warning: ";
 
     std::cerr << message << std::endl;
   }

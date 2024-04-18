@@ -7,18 +7,21 @@
 
 namespace Choreo {
 
-struct TypeChecker : public Visitor {
+struct TypeChecker : public VisitorWithSymTab {
  private:
   std::ostream &os;
   bool trace_visit = false;  // for debugging purpose only
+  size_t error_count = 0;
 
  private:
-  bool BeforeVisit(AST::Node &) override;
-  bool AfterVisit(AST::Node &) override;
+  bool BeforeVisitImpl(AST::Node &) override;
+  bool AfterVisitImpl(AST::Node &) override;
+
+  bool ReportUnknown(AST::Node &);
 
  public:
   TypeChecker(const ptr<SymbolTable> s_tab, std::ostream &o = std::cout)
-      : Visitor(s_tab), os(o), trace_visit(std::getenv("TRACE_SEMA")) {}
+      : VisitorWithSymTab(s_tab), os(o), trace_visit(std::getenv("TRACE_SEMA")) {}
   ~TypeChecker() {}
 
   bool Visit(AST::MultiNodes &) override;
@@ -50,6 +53,8 @@ struct TypeChecker : public Visitor {
   bool Visit(AST::ChoreoFunction &) override;
   bool Visit(AST::CppSourceCode &) override;
   bool Visit(AST::Program &) override;
+
+  bool HasError();
 };
 
 }  // end namespace Choreo

@@ -820,7 +820,7 @@ void Parser::error(const location &loc , const std::string &message) {
   std::cerr << loc << ": ";
   if (shell_supports_colors())
       std::cerr << red;
-  std::cerr << "Error: ";
+  std::cerr << "error: ";
   if (shell_supports_colors())
       std::cerr << reset;
   std::cerr << message << std::endl;
