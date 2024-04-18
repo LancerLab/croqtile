@@ -77,6 +77,7 @@ class StringifyTable {
  private:
   std::unordered_map<std::string, std::string> type_string_table;
   std::unordered_map<std::string, std::string> type_sym_table;
+  std::vector<std::string> syms;
 
  public:
   // Add a symbol to the symbol table
@@ -87,6 +88,7 @@ class StringifyTable {
                  const std::string& emitted) {
     type_string_table.emplace(emittable, emitted);
     type_sym_table.emplace(emittable, symname);
+    syms.emplace_back(emittable);
   }
 
   // Retrieve a symbol from the symbol table
@@ -103,12 +105,21 @@ class StringifyTable {
     return "";
   }
 
+  int GetSymbolIndex(const std::string& emittable) {
+    int syms_num = syms.size();
+    for(int idx = 0; idx < syms_num; idx++) {
+      if(emittable == syms[idx])
+        return idx;
+    }
+    return -1;
+  }
+
   // Check if a symbol with the given name exists in the symbol table
   bool Exists(const std::string& emittable) {
     return type_sym_table.find(emittable) != type_sym_table.end();
   }
 
-  void Reset() { type_sym_table.clear(); }
+  void Reset() { type_sym_table.clear(); syms.clear();}
 };
 
 // This is the scoped symbol table

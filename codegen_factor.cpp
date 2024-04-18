@@ -375,6 +375,11 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   }
   offset_string = offset_string + "}";
 
+  int arg_idx = strtab.GetSymbolIndex(from_node_name);
+  from_node_name = arg_idx < 0 ? from_node_name : "args[" + std::to_string(arg_idx) + "]";
+  arg_idx = strtab.GetSymbolIndex(to_node_name);
+  to_node_name = arg_idx < 0 ? to_node_name : "args[" + std::to_string(arg_idx) + "]";
+
   os << this->indent << "auto " << future_name << " = alloc_dma_(SDMAType());\n";
   os << this->indent << dma_op << future_name
      << ", " << from_node_name << ", " 
