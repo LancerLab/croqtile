@@ -288,77 +288,92 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
         return -1;
     }
   };
-
   auto storage_level = (dyn_cast<AST::Memory>(d.to))? cast<AST::Memory>(d.to)->getStorageLevel():
                       dyn_cast<SpannedType>(this->GetSymbolType(STR(cast<AST::ChunkAt>(d.to)->data)))->GetStorage();
   int des_level = getMemLevel(storage_level);
   storage_level = dyn_cast<SpannedType>(this->GetSymbolType(STR(cast<AST::ChunkAt>(d.from)->data)))->GetStorage();
   int src_level = getMemLevel(storage_level);
 
+  auto chunkat_node = (src_level >= des_level)? dyn_cast<AST::ChunkAt>(d.from) : dyn_cast<AST::ChunkAt>(d.to);
+  assert(chunkat_node && "Unexpected !!!");
+  auto chunkat_node_name = STR(chunkat_node->data);
+  auto data_type = dyn_cast<SpannedType>(this->GetSymbolType(chunkat_node_name))->f_type;
+
+  if (auto mem_node = dyn_cast<AST::Memory>(d.to)) {
+    // TODO(albert): generate 'local_buffer' with more smart naming way by valno support
+    os << this->indent << "auto " << to_node_name << " = alloc_(";
+    switch(mem_node->getStorageLevel()) {
+      case Storage::LOCAL:
+        os << "L1Type(";
+        break;
+      case Storage::SHARED:
+        os << "SRAMType(";
+        break;
+      case Storage::GLOBAL:
+        os << "DRAMType(";
+        break;
+      default:
+        assert(false && "Unexpected storage type.");
+    }
+    os << factor_typestr((Choreo::BaseType)data_type) << "),";
+
+    auto ty = dyn_cast<FutureType>(GetSymbolType(future_name));
+    assert(ty && "Invalied return type of DMA op!");
+    std::string shape_info = "{";
+    auto data_shape = ty->GetShape();
+    auto dim = data_shape.values.values[0];
+    int dim_sz = data_shape.Dims();
+    assert(dim_sz == (int)dim.size() && "Insonsistant sizes for variable span.");
+    for (int dim_cursor = 0; dim_cursor < dim_sz;) {
+      auto dim_bound = *(std::get_if<int>(&dim[dim_cursor]));
+      assert( dim_bound > 0 && "Invalid variable span!");
+      shape_info = shape_info + std::to_string(dim_bound);
+      ++dim_cursor;
+      if(dim_cursor < dim_sz)
+        shape_info = shape_info + ",";
+      else
+        shape_info = shape_info + "}";
+    }
+    os << shape_info << ");\n";
+  }
+
   if(src_level >= des_level)
     dma_op.append("async_load_(");
   else
     dma_op.append("async_store_(");
 
-  if (auto mem_node = dyn_cast<AST::Memory>(d.to)) {
-    // TODO(albert): generate 'local_buffer' with more smart naming way by valno support
-    switch(mem_node->getStorageLevel()) {
-      case Storage::LOCAL:
-        os << this->indent << "auto " + to_node_name + " = alloc_(L1Type());\n";
-        break;
-      case Storage::SHARED:
-        os << this->indent << "auto " + to_node_name + " = alloc_(SRAMType());\n";
-        break;
-      case Storage::GLOBAL:
-        os << this->indent << "auto " + to_node_name + " = alloc_(DRAMType());\n";
-        break;
-      default:
-        assert(false && "Unexpected storage type.");
-    }
-  }
 
-  // AST::ChunkAt
-  // print as a.ChunkAt(p, l1_tile)
-  // d.from->Print(os) => a.ChunkAt(p, l2_tile)
-  // TODO(albert): resolve hardcode
-  auto chunkat_node = (src_level >= des_level)? dyn_cast<AST::ChunkAt>(d.from) : dyn_cast<AST::ChunkAt>(d.to);
-  if (chunkat_node) {
-    auto chunkat_node_name = STR(chunkat_node->data);
-    auto tile_factors = chunkat_node->positions;
-    auto data_shape = dyn_cast<SpannedType>(this->GetSymbolType(chunkat_node_name))->GetShape();
-    int dim_sz = data_shape.Dims();
-    offset_string.append("{");
-    if(tile_factors){
-      assert(dim_sz == (int)tile_factors->getValues().size() && "Insonsistant sizes for DMA offset.");
-      auto dim = data_shape.values.values[0];
-      assert(dim_sz == (int)dim.size() && "Insonsistant sizes for DMA offset.");
-      for (int dim_cursor = 0; dim_cursor < dim_sz;) {
-        auto tile_factor = tile_factors->getValues()[dim_cursor];
-        auto tf_symbol = STR(tile_factor);
-        auto tf_bounds = dyn_cast<BoundedITupleType>(this->GetSymbolType(tf_symbol))->GetBounds().Value();
-        auto tf_bound = *(std::get_if<int>(&tf_bounds[0]));
-        auto dim_bound = *(std::get_if<int>(&dim[dim_cursor]));
-        assert( (tf_bound > 0 && dim_bound > 0) && "Invalid Dim size or Tile factor!");
-        auto offset = (dim_cursor == 0)? std::to_string(dim_bound/tf_bound) + "*thread_id" :
-                                         std::to_string(dim_bound/tf_bound) + "*" + STR(tile_factor);
-        offset_string = offset_string + offset;
-        ++dim_cursor;
-        if(dim_cursor < dim_sz)
-          offset_string = offset_string + ",";
-      }
-    } else {
-      for (int dim_cursor = 0; dim_cursor < dim_sz;) {
-        offset_string = offset_string + "0";
-        ++dim_cursor;
-        if(dim_cursor < dim_sz)
-          offset_string = offset_string + ",";
-      }
+  auto tile_factors = chunkat_node->positions;
+  auto data_shape = dyn_cast<SpannedType>(this->GetSymbolType(chunkat_node_name))->GetShape();
+  int dim_sz = data_shape.Dims();
+  offset_string.append("{");
+  if(tile_factors){
+    assert(dim_sz == (int)tile_factors->getValues().size() && "Insonsistant sizes for DMA offset.");
+    auto dim = data_shape.values.values[0];
+    assert(dim_sz == (int)dim.size() && "Insonsistant sizes for DMA offset.");
+    for (int dim_cursor = 0; dim_cursor < dim_sz;) {
+      auto tile_factor = tile_factors->getValues()[dim_cursor];
+      auto tf_symbol = STR(tile_factor);
+      auto tf_bounds = dyn_cast<BoundedITupleType>(this->GetSymbolType(tf_symbol))->GetBounds().Value();
+      auto tf_bound = *(std::get_if<int>(&tf_bounds[0]));
+      auto dim_bound = *(std::get_if<int>(&dim[dim_cursor]));
+      assert( (tf_bound > 0 && dim_bound > 0) && "Invalid Dim size or Tile factor!");
+      auto offset = (dim_cursor == 0)? std::to_string(dim_bound/tf_bound) + "*thread_id" :
+                                       std::to_string(dim_bound/tf_bound) + "*" + STR(tile_factor);
+      offset_string = offset_string + offset;
+      ++dim_cursor;
+      if(dim_cursor < dim_sz)
+        offset_string = offset_string + ",";
     }
-    offset_string = offset_string + "}";
+  } else {
+    for (int dim_cursor = 0; dim_cursor < dim_sz;) {
+      offset_string = offset_string + "0";
+      ++dim_cursor;
+      if(dim_cursor < dim_sz)
+        offset_string = offset_string + ",";
+    }
   }
-  else{
-    assert(false && "Unexpected!");
-  }
+  offset_string = offset_string + "}";
 
   os << this->indent << "auto " << future_name << " = alloc_dma_(SDMAType());\n";
   os << this->indent << dma_op << future_name
