@@ -383,7 +383,51 @@ bool FactorCodeGen::Visit(AST::Wait &w) {
   return true;
 };
 
-bool FactorCodeGen::Visit(AST::Call &) { return true; };
+bool FactorCodeGen::Visit(AST::Call &c) {
+  os << this->indent << "call_(\"";
+  c.function->Print(os);
+  os << "\", {";
+  auto args = dyn_cast<AST::MultiValues>(c.arguments);
+  assert(args && "Invalid kernel call args!");
+  int arg_num = args->getValues().size();
+  for(int index = 0; index < arg_num;){
+    auto arg = dyn_cast<AST::Expr>(args->getValues()[index]);
+    assert(arg && "Invalid kernel call arg!");
+    switch (arg->t) {
+      case AST::Expr::Reference:
+        os << STR(arg->value_r);
+        break;
+      case AST::Expr::Unary:
+        if(arg->op == "sizeof"){
+          auto var = STR(arg->value_r).substr(0,STR(arg->value_r).find('.'));
+          assert(dyn_cast<FutureType>(this->GetSymbolType(var)) && "Unexpected !!!");
+          auto ty_ptr = cast<FutureType>(this->GetSymbolType(var));
+          auto shape = ty_ptr->GetShape();
+          auto dim = shape.values.values[0];
+          int dim_sz = shape.Dims(), size = 1;
+          for (int dim_cursor = 0; dim_cursor < dim_sz;)
+            size = size * (*(std::get_if<int>(&dim[dim_cursor++])));
+          os << std::to_string(size);
+        }
+        else if(arg->op == ".data"){
+          os << STR(arg->value_r) << "_buffer";
+        }
+        break;
+      default:
+        arg->Print(os);
+        choreo_unreachable("unhandled expression type.");
+        break;
+    }
+    index++;
+    if(index < arg_num)
+      os << ",";
+  }
+  os << "});\n";
+
+  return true;
+};
+
+
 bool FactorCodeGen::Visit(AST::Return &) { return true; };
 
 bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) { 

@@ -52,6 +52,7 @@ int bar(int a[], int b[]) {
 // CHECK: wait_dma_(f1);
 // CHECK: wait_dma_(f2);
 // CHECK: auto local_buffer = alloc_(L1Type(FloatType(32)),{144,100,100});
+// CHECK: call_("kernel", {f1_buffer,f2_buffer,local_buffer,1440000});
 // CHECK: async_store_(f3, local_buffer, global_buffer, {24*thread_id,10*x,10*y});
 // CHECK: wait_dma_(f3);
 
