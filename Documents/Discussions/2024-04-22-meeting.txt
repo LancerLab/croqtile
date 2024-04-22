@@ -1,0 +1,15 @@
+TODO of factor code gen:
+
+1. compile, run, prepare data.
+2. output type inconsistance.
+3. alloc hoist.
+
+Test environment: Vincent demo
+1. use docker
+2. refer to: http://git.enflame.cn/sw/tops/-/blob/master/factor/tools/topsfc/README.md
+3. generate two binaries.
+
+Slide:
+1. code generation
+2. visualization
+3. enumerate the mind-set savings
