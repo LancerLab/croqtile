@@ -9,6 +9,9 @@
 
 namespace Choreo {
 
+constexpr int label_distance = 20;
+constexpr double axis_scale[] = {1.3, 1.5, 3.2};
+
 std::vector<std::string> pov_colors = {
     "Orange", "Pink",   "Magenta", "Gold",   "Cyan",  "Brown", "Blue", "Green",
     "Red",    "Yellow", "Violet",  "Silver", "Black", "White"
@@ -33,10 +36,31 @@ struct ShapePolyhedron {
   std::vector<Polyhedron> polyhedrons;
   std::vector<int> minimums;
   std::vector<int> maximums;
+  std::vector<std::string> axes_labels;
+
+  std::string expr;
+
+  int text_scale = 1;
 
  public:
-  ShapePolyhedron(std::ostream &o = std::cout, bool d = false)
-      : os(o), debug(d) {}
+  ShapePolyhedron(const std::string &e, std::ostream &o = std::cout,
+                  bool d = false)
+      : os(o), debug(d), expr(e) {}
+
+  int MaxPointValue() {
+    int max = std::numeric_limits<int>::min();
+    for (auto m : maximums) max = (max > m) ? max : m;
+    return max;
+  }
+
+  std::vector<int> MaxPoints() { return maximums; }
+  std::vector<int> MinPoints() { return maximums; }
+
+  void SetAxesLabels(const std::vector<std::string> &axes) {
+    axes_labels = axes;
+  }
+
+  void SetTextScale(int ts) { text_scale = ts; }
 
   void Create(std::vector<int> &p, std::vector<size_t> &s, std::vector<int> &b,
               std::set<int> &pb, size_t index, std::vector<int> &currentPos,
@@ -65,7 +89,8 @@ struct ShapePolyhedron {
         Create(p, s, b, pb, index + 1, currentPos, i % pov_colors.size());
       else
         Create(p, s, b, pb, index + 1, currentPos, colorIndex);
-      maximums[index] = std::max(maximums[index], currentPos[index]);
+      maximums[index] =
+          std::max(maximums[index], currentPos[index] + (int)s[index]);
       minimums[index] = std::min(minimums[index], currentPos[index]);
     }
   }
@@ -80,8 +105,13 @@ struct ShapePolyhedron {
     Create(p, s, b, pb, 0, currentPos, 0);
   }
 
-  void RenderPov(std::ostream &pov) {
-    constexpr double scale = 1.5;
+  void RenderToPov(std::ostream &pov) {
+    if (debug) {
+      os << "min: [" << minimums[0] << ", " << minimums[1] << ", "
+         << minimums[2] << "]\n";
+      os << "max: [" << maximums[0] << ", " << maximums[1] << ", "
+         << maximums[2] << "]\n";
+    }
     for (const auto &polyhedron : polyhedrons) {
       int x2 = polyhedron.points[0] + polyhedron.sizes[0] * 0.9;
       int y2 = polyhedron.points[1] + polyhedron.sizes[1] * 0.9;
@@ -89,23 +119,28 @@ struct ShapePolyhedron {
 
       // Output the box
       pov << "box {\n";
-      pov << "<" << polyhedron.points[0] << ", " << polyhedron.points[1] << ", "
-          << polyhedron.points[2] << ">, <" << x2 << ", " << y2 << ", " << z2
-          << "> // Polyhedron Point\n";
+      pov << "  <" << polyhedron.points[0] << ", " << polyhedron.points[1]
+          << ", " << polyhedron.points[2] << ">, <" << x2 << ", " << y2 << ", "
+          << z2 << "> // Polyhedron Point\n";
       pov << "  pigment { " << polyhedron.color << " }\n";
       pov << "  finish {\n";
       pov << "    ambient 0.4\n";
       pov << "    diffuse 0.85\n";
-      pov << "    specular 0.05\n";
-      pov << "    roughness 0.3\n";
+      pov << "    specular 0.9\n";
+      pov << "    roughness 0.001\n";
+      pov << "    reflection { 0.5 metallic }\n";
       pov << "  }\n";
       pov << "}\n";
     }
 
     std::vector<double> axis_max{
-        (maximums[0] - minimums[0]) * scale + minimums[0],
-        (maximums[1] - minimums[1]) * scale + minimums[1],
-        (maximums[2] - minimums[2]) * scale + minimums[2]};
+        (maximums[0] - minimums[0]) * axis_scale[0] + minimums[0],
+        (maximums[1] - minimums[1]) * axis_scale[1] + minimums[1],
+        (maximums[2] - minimums[2]) * axis_scale[2] + minimums[2]};
+
+    // handle corner cases to avoid povray fails
+    for (size_t i = 0; i < axis_max.size(); ++i)
+      if (axis_max[i] < 10) axis_max[i] = 30;
 
     auto CreateAxis = [&axis_max, &pov, this](const std::string &name,
                                               size_t index) {
@@ -153,8 +188,9 @@ struct ShapePolyhedron {
       pov << "    finish { ambient 1 }\n";
       pov << "  }\n";
       pov << "  text {\n";
-      pov << "    internal 1, \"" << name << "\", 0.25, 0\n";
-      pov << "    scale 80\n";
+      pov << "    internal 1, \"" << name << "\", 0.05, 0\n";
+      int font_scale = (maximums[index] - minimums[index]) / 5;
+      if (font_scale > 1) pov << "    scale " << font_scale << "\n";
       pov << "    translate <";
       for (size_t i = 0; i < axis_max.size() - 1; ++i)
         pov << ((i == index)
@@ -165,48 +201,115 @@ struct ShapePolyhedron {
                   ? std::to_string(axis_max[index]) + " + Label_Distance"
                   : std::to_string(minimums[axis_max.size() - 1]))
           << ">\n";
-      // pov << "    " << direction << ",\n";
       pov << "    pigment {color Blue}\n";
       pov << "  }\n";
       pov << "}\n";
     };
 
-    CreateAxis("X", 0);
-    CreateAxis("Y", 1);
-    CreateAxis("Z", 2);
+    for (size_t i = 0; i < axes_labels.size(); ++i)
+      CreateAxis(axes_labels[i], i);
+
+    // now render the expression
+    pov << "  text {\n";
+    pov << "    internal 1, \"" << expr << "\", 0.05, 0\n";
+    pov << "    scale " << text_scale << "\n";
+    pov << "    translate <" << minimums[0] << ", "
+        << (maximums[1] - minimums[1]) + minimums[1] + text_scale << ", "
+        << (minimums[2] + maximums[2]) / 2 << ">\n";
+    pov << "    pigment {color Brown}\n";
+    pov << "  }\n";
+  }
+};
+
+struct DMAPolyhedron {
+  std::unique_ptr<ShapePolyhedron> from;
+  std::unique_ptr<ShapePolyhedron> to;
+
+  std::string fname;  // future name
+  std::string expr;
+  std::ostream &os;
+
+ public:
+  DMAPolyhedron(const std::string &n, const std::string &e, std::ostream &o) : fname(n), expr(e), os(o) {}
+
+ public:
+  void GeneratePov() {
+    auto filename = fname + ".pov";
+    std::replace(filename.begin(), filename.end(), ':', '_');
+    std::ofstream pov{filename};
+
+    // control the camera distance
+    int camera = std::numeric_limits<int>::min();
+    camera = (camera > to->MaxPointValue()) ? camera : to->MaxPointValue();
+    int max_y = (from->MaxPoints()[1] > to->MaxPoints()[1])
+                    ? from->MaxPoints()[1]
+                    : to->MaxPoints()[1];
+
+    assert(camera > 10 && "unreasonable camera value.");
+
+    pov << "// POV-Ray Scene Description Language File\n";
+    pov << "#version 3.7;\n";
+    pov << "#include \"colors.inc\"\n";
+    pov << "#declare Camera_Distance = " << camera << ";\n";
+    pov << "#declare Axis_Radius = 0.5;\n";
+    pov << "#declare Arrowhead_Length = 5;\n";
+    pov << "#declare Arrowhead_Radius = 2;\n";
+    pov << "#declare Label_Distance = " << label_distance << ";\n";
+    pov << "global_settings { assumed_gamma 1.0 }\n";
+    pov << "background { color rgb <0.8, 0.8, 0.8> }\n";
+    pov << "camera {\n";
+    pov << "  location <Camera_Distance, (Camera_Distance + " << max_y
+        << ")/2, -Camera_Distance>\n";
+    pov << "  look_at <Camera_Distance/2, " << max_y / 2 << ", 0>\n";
+    pov << "}\n";
+    pov << "light_source { <Camera_Distance*1.2, Camera_Distance*1.2, "
+           "-Camera_Distance*0.2>, color White spotlight point_at <0, 0, 0> "
+           "}\n";
+
+    int shapes_length = to->MaxPoints()[0] - from->MinPoints()[0];
+    int text_scale = shapes_length / 10;
+    if (text_scale < 1) text_scale = 1;
+
+    from->SetTextScale(text_scale);
+    to->SetTextScale(text_scale);
+
+    from->RenderToPov(pov);
+    to->RenderToPov(pov);
+
+    // now render the expression
+    pov << "  text {\n";
+    pov << "    internal 1, \"" << expr << "\", 0.05, 0\n";
+    pov << "    scale " << text_scale << "\n";
+    pov << "    translate <0, -" << text_scale * 1.5 << ", 0>\n";
+    pov << "    pigment {color Brown}\n";
+    pov << "  }\n";
+
+    os << "Generated POV: " << filename << "\n";
   }
 };
 
 struct Visualizer : public VisitorWithSymTab {
  private:
   std::ostream &os;
-  std::vector<std::unique_ptr<ShapePolyhedron>> shape_polyhedrons;
+  std::vector<std::unique_ptr<DMAPolyhedron>> dma_polyhedrons;
   bool debug = false;
 
-  void GeneratePov(std::ostream &pov) {
-    pov << "// POV-Ray Scene Description Language File\n";
-    pov << "#version 3.7;\n";
-    pov << "#include \"colors.inc\"\n";
-    pov << "#declare Camera_Distance = 2000.0;\n";
-    pov << "#declare Axis_Radius = 3;\n";
-    pov << "#declare Arrowhead_Length = 10;\n";
-    pov << "#declare Arrowhead_Radius = 3;\n";
-    pov << "#declare Label_Distance = 20;\n";
-    pov << "global_settings { assumed_gamma 1.0 }\n";
-    pov << "background { color Gray50 }\n";
-    pov << "camera {\n";
-    pov << "  location <Camera_Distance, Camera_Distance, -Camera_Distance>\n";
-    pov << "  look_at 0\n";
-    pov << "}\n";
-    pov << "light_source { <Camera_Distance+10, Camera_Distance+10, "
-           "-Camera_Distance-10>, color White }\n";
-    for (auto &polyhedron : shape_polyhedrons) polyhedron->RenderPov(pov);
-  }
+ private:
+  int parallel_factor = 1;
+
+ private:
+  int start_x = 0;
+  int start_y = 0;
 
  public:
   Visualizer(const ptr<SymbolTable> s_tab, std::ostream &o = std::cout,
              bool d = false)
-      : VisitorWithSymTab(s_tab), os(o), debug(d) {}
+      : VisitorWithSymTab(s_tab),
+        os(o),
+        debug(d),
+        parallel_factor(1),
+        start_x(0),
+        start_y(0) {}
   ~Visualizer() {}
 
   // derived class must call this to incorporate with symbol table
@@ -225,96 +328,32 @@ struct Visualizer : public VisitorWithSymTab {
   bool Visit(AST::Identifier &) override { return true; }
   bool Visit(AST::Parameter &) override { return true; }
   bool Visit(AST::ParamList &) override { return true; }
-  bool Visit(AST::ParallelBy &) override { return true; }
+  bool Visit(AST::ParallelBy &pb) override {
+    parallel_factor *= pb.bound;
+    return true;
+  }
   bool Visit(AST::RequireBind &) override { return true; }
   bool Visit(AST::WithIn &) override { return true; }
   bool Visit(AST::WithBlock &) override { return true; }
   bool Visit(AST::Memory &) override { return true; }
 
   bool Visit(AST::DMA &n) override {
-    auto *from = n.from.get();
-    // auto *to = n.to.get();
+    start_x = 0;
+    auto dp = std::make_unique<DMAPolyhedron>(InScopeName(n.future), n.SourceString(), os);
+    auto caf = cast<AST::ChunkAt>(n.from);
+    if (auto sp = HandleChunkAt(*caf, parallel_factor))
+      dp->from = std::move(sp);
 
-    int last_x = 0;
-    if (auto ca = dyn_cast<AST::ChunkAt>(from)) {
-      if (ca->positions) {
-        std::vector<int> bounds;
-        std::set<int> parallel_bounds;  // map bound to colors
-        for (auto pos : ca->positions->values) {
-          auto id = dyn_cast<AST::Identifier>(pos);
-          assert(id && "unhandled value.");
-          auto ty = GetSymbolType(id->name);
-          if (auto bivs = dyn_cast<BoundedITupleType>(ty)) {
-            bool parallel = (!bivs->GetNote().empty());
-            for (auto b : bivs->GetBounds().Value()) {
-              if (auto pint = dyn_cast<int>(&b)) {
-                bounds.push_back(*pint);
-              } else {
-                Warning(n.LOC(), "unable to handle '" + *cast<ValueExpr>(&b) +
-                                     "' (with runtime value).");
-                return false;
-              }
-              if (parallel) parallel_bounds.insert(bounds.size() - 1);
-            }
-          } else if (auto biv = dyn_cast<BoundedIntegerType>(ty)) {
-            assert(false && "not expected.");
-            if (auto pint = dyn_cast<int>(&biv->bound)) {
-              bounds.push_back(*pint);
-            } else {
-              Warning(n.LOC(), "unable to handle '" +
-                                   *cast<ValueExpr>(&biv->bound) +
-                                   "' (with runtime value).");
-              return false;
-            }
-          } else {
-            os << STR(*ty) << " is not expected.\n";
-            choreo_unreachable("unable to handle the type.");
-          }
-        }
-        Shape shape = cast<SpannedType>(ca->GetType())->GetShape();
-
-        assert(shape.Dims() > 1 && "unexpected shape dimensions.");
-        assert(shape.Dims() == bounds.size() &&
-               "inconsistence between shape bounds and tiling");
-
-        if (shape.Dims() > 3) {
-          Warning(n.LOC(), "unable to visualize tensors with high dimensions.");
-          return false;
-        }
-
-        auto pdata_type = GetSymbolType(ca->data->name);
-        Shape data_shape = cast<SpannedType>(pdata_type)->GetShape();
-        last_x += data_shape.NthInteger(0) + 100;
-
-        if (debug) {
-          os << "fullsize: " << STR(*pdata_type) << "\n";
-          os << "shape dims: " << shape.Dims() << "\n";
-        }
-        std::vector<size_t> sizes;
-        for (auto si : shape.Value()) {
-          if (auto pint = dyn_cast<int>(&si))
-            sizes.push_back(*pint);
-          else {
-            Warning(n.LOC(), "unable to handle '" + ca->data->name +
-                                 "' with runtime shape.");
-            return false;
-          }
-        }
-        if (debug) {
-          os << "bounds: [ ";
-          for (auto b : bounds) os << b << " ";
-          os << "]\nsize: [";
-          for (auto s : sizes) os << s << " ";
-          os << "]\n";
-        }
-
-        std::vector<int> positions(bounds.size(), 0);
-        positions[0] = last_x;
-        auto sp = std::make_unique<ShapePolyhedron>(os);
-        sp->Create(positions, sizes, bounds, parallel_bounds);
-        shape_polyhedrons.emplace_back(std::move(sp));
-      }
+    if (auto cat = dyn_cast<AST::ChunkAt>(n.to)) {
+      if (auto sp = HandleChunkAt(*cat, parallel_factor))
+        dp->to = std::move(sp);
+    } else {
+      auto m = dyn_cast<AST::Memory>(n.to);
+      if (auto sp = HandleImplicit(
+              *m, cast<FutureType>(n.GetType())->GetShape(), parallel_factor))
+        dp->to = std::move(sp);
     }
+    dma_polyhedrons.emplace_back(std::move(dp));
     return true;
   }
 
@@ -331,10 +370,140 @@ struct Visualizer : public VisitorWithSymTab {
  public:
   bool BeforeVisitImpl(AST::Node &) override { return true; }
   bool AfterVisitImpl(AST::Node &n) override {
+    if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+      parallel_factor /= pb->bound;
+      return true;
+    }
     if (!isa<AST::Program>(&n)) return true;
-    // render as .dot format
-    GeneratePov(os);
+
+    for (auto &dp : dma_polyhedrons) dp->GeneratePov();
+
     return true;
+  }
+
+ private:
+  constexpr static size_t p_dim = 1;
+
+  std::unique_ptr<ShapePolyhedron> HandleChunkAt(AST::ChunkAt &ca,
+                                                 int parallel_count = 1) {
+    std::string data_name = ca.data->name;
+    std::string expr = AST::STR(ca);
+    auto pdata_type = GetSymbolType(data_name);
+    Shape data_shape = cast<SpannedType>(pdata_type)->GetShape();
+
+    std::vector<size_t> data_sizes;
+    if (auto ilist = data_shape.GetUIntList())
+      data_sizes = *ilist;
+    else {
+      Warning(ca.LOC(),
+              "unable to handle '" + ca.data->name + "' with runtime shape.");
+      return nullptr;
+    }
+
+    std::vector<int> positions{start_x, start_y, 0};
+    start_x += data_sizes[0] * axis_scale[0] + label_distance + 100;
+
+    if (!ca.positions) {
+      // use whole data as a single chunk
+
+      // dimension 1 is repeated parellel_count times
+      std::vector<int> bounds(data_shape.Dims(), 1);
+      bounds[p_dim] = parallel_count;
+      std::set<int> parallel_bounds;
+      parallel_bounds.insert(p_dim);
+
+      auto sp = std::make_unique<ShapePolyhedron>(expr, os);
+      sp->Create(positions, data_sizes, bounds, parallel_bounds);
+      return sp;
+    }
+
+    std::vector<int> bounds;  // specify the repeating count for each dimension
+    std::vector<std::string> bv_names;  // the name of the bounded variable
+    std::set<int>
+        parallel_bounds;  // specify which dimension is executed in parallel
+    for (auto pos : ca.positions->values) {
+      auto id = dyn_cast<AST::Identifier>(pos);
+      assert(id && "node other than identifier is not handled.");
+      auto ty = GetSymbolType(id->name);
+      if (auto bivs = dyn_cast<BoundedITupleType>(ty)) {
+        bool parallel = (!bivs->GetNote().empty());
+        auto vlist = bivs->GetBounds().Value();
+        for (size_t i = 0; i < vlist.size(); ++i) {
+          if (auto pint = dyn_cast<int>(&vlist[i])) {
+            bounds.push_back(*pint);
+          } else {
+            Warning(ca.LOC(), "unable to handle '" +
+                                  *cast<ValueExpr>(&vlist[i]) +
+                                  "' (with runtime value).");
+            return nullptr;
+          }
+          if (vlist.size() == 1)
+            bv_names.push_back(id->name);
+          else
+            bv_names.push_back(id->name + "(" + std::to_string(i) + ")");
+          if (parallel) parallel_bounds.insert(bounds.size() - 1);
+        }
+      } else {
+        os << STR(*ty) << " is not expected.\n";
+        choreo_unreachable("unable to handle the type.");
+      }
+    }
+    // this calculate the tiled blocks
+    Shape block_shape = cast<SpannedType>(ca.GetType())->GetShape();
+
+    assert(block_shape.Dims() > 1 && "unexpected shape dimensions.");
+    assert(block_shape.Dims() == bounds.size() &&
+           "inconsistence between shape bounds and tiling");
+
+    if (block_shape.Dims() > 3) {
+      Warning(ca.LOC(), "unable to visualize tensors with high dimensions.");
+      return nullptr;
+    }
+
+    auto psizes = block_shape.GetUIntList();
+    if (!psizes) {
+      Warning(ca.LOC(), "unable to visualize tensors.");
+      return nullptr;
+    }
+
+    if (debug) {
+      os << "data shape: " << STR(data_shape) << "\n";
+      os << "block shape: " << STR(block_shape) << "\n";
+      os << "tiling factors: [ ";
+      for (auto b : bounds) os << b << " ";
+      os << "]\n";
+    }
+
+    auto sp = std::make_unique<ShapePolyhedron>(expr, os);
+    sp->Create(positions, *psizes, bounds, parallel_bounds);
+    sp->SetAxesLabels(bv_names);
+    return sp;
+  }
+
+  std::unique_ptr<ShapePolyhedron> HandleImplicit(AST::Memory &s, Shape shape,
+                                                  int parallel_count = 1) {
+    std::string mem = getStringFrom(s.st);
+
+    std::vector<size_t> sizes;
+    if (auto ilist = shape.GetUIntList())
+      sizes = *ilist;
+    else {
+      Warning(s.LOC(), "unable to handle '" + mem + "' with runtime shape.");
+      return nullptr;
+    }
+
+    std::vector<int> positions{start_x, start_y, 0};
+    start_x += sizes[0] * axis_scale[0] + label_distance + 100;
+
+    // the dimension representing parallelism is repeated parellel_count times
+    std::vector<int> bounds(shape.Dims(), 1);
+    bounds[p_dim] = parallel_count;
+    std::set<int> parallel_bounds;
+    parallel_bounds.insert(p_dim);
+
+    auto sp = std::make_unique<ShapePolyhedron>(mem, os);
+    sp->Create(positions, sizes, bounds, parallel_bounds);
+    return sp;
   }
 };
 

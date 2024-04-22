@@ -156,13 +156,12 @@ struct MultiValues : public Node, public TypeIDProvider<MultiValues> {
   void SetDelimiter(const std::string& d) { delimiter = d; }
 
   ptr<Node> getValueAt(const size_t idx) const {
-    assert(idx < this->Count() && "Out-of-bound error when querying MultiValues\n");
+    assert(idx < this->Count() &&
+           "Out-of-bound error when querying MultiValues\n");
     return values[idx];
   }
 
-  std::vector<ptr<Node>> getValues() const {
-    return values;
-  }
+  std::vector<ptr<Node>> getValues() const { return values; }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     if (delimiter != "" && values.size() > 1) {
@@ -429,9 +428,7 @@ struct Memory : public Node, public TypeIDProvider<Memory> {
     }
   }
 
-  Storage getStorageLevel() const {
-    return st;
-  }
+  Storage getStorageLevel() const { return st; }
 
   void accept(Visitor&) override;
 
@@ -779,7 +776,7 @@ struct WithIn : public Node, public TypeIDProvider<WithIn> {
 
 struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
   ptr<MultiNodes> withins;
-  ptr<MultiNodes> reqs;    // optional requirements
+  ptr<MultiNodes> reqs;   // optional requirements
   ptr<MultiNodes> stmts;  // may be empty
 
   explicit WithBlock(const location& l) : Node(l) {}
@@ -824,6 +821,11 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
     from->Print(os);
     os << "\n" << prefix << "  `- to: ";
     to->Print(os);
+  }
+
+  std::string SourceString() {
+    return future + " = dma" + operation + " " + STR(*from) + " => " +
+           STR(*to);
   }
 
   void accept(Visitor&) override;
@@ -926,9 +928,7 @@ struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
     }
   }
 
-  ptr<MultiValues> getIterationVars() const {
-    return ivs;
-  }
+  ptr<MultiValues> getIterationVars() const { return ivs; }
 
   void accept(Visitor&) override;
 

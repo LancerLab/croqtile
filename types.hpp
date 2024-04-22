@@ -404,10 +404,40 @@ struct Shape {
   }
 
   const ValueList& Value() const { return values[val_no]; }
+  ValueList Value() { return values[val_no]; }
+
   int NthInteger(size_t index) const {
-    const ValueItem & vi = Value().at(index);
+    const ValueItem& vi = Value().at(index);
     return *cast<int>(const_cast<ValueItem*>(&vi));
- }
+  }
+
+  std::optional<std::vector<int>> GetIntList() {
+    std::vector<int> int_list;
+    for (auto v : Value()) {
+      if (auto pint = dyn_cast<int>(&v))
+        int_list.push_back(*pint);
+      else
+        return std::nullopt;
+    }
+    return int_list;
+  }
+
+  std::optional<std::vector<size_t>> GetUIntList() {
+    std::vector<size_t> int_list;
+    for (auto v : Value()) {
+      if (auto pint = dyn_cast<int>(&v)) {
+        if (*pint < 0) return std::nullopt;
+        int_list.push_back(*pint);
+      } else
+        return std::nullopt;
+    }
+    return int_list;
+  }
+  std::vector<int> IntList() {
+    auto ilist = GetIntList();
+    if (!ilist) choreo_unreachable("fail to get an integer list.");
+    return *ilist;
+  }
 
   void Print(std::ostream& os) const {
     if (val_no == __INVALID_VALUE__) os << "[]";
@@ -457,7 +487,7 @@ struct Type {
     assert(false && "Emit stringify not impled for this type");
   }
 
-  virtual std::string GetNote() const { return ""; } // some annotation to make
+  virtual std::string GetNote() const { return ""; }  // some annotation to make
 
   // for runtime type disambiguition
   virtual const std::string NodeTypeString() = 0;
@@ -656,7 +686,7 @@ struct BoundedIntegerType final : public Type,
   std::string note = "";
 
   BoundedIntegerType(int b) : Type(TypeCategory::BOUNDED_INT), bound(b) {}
-  BoundedIntegerType(const std::string& expr, const std::string & n = "")
+  BoundedIntegerType(const std::string& expr, const std::string& n = "")
       : Type(TypeCategory::BOUNDED_INT), bound(expr), note(n) {}
 
   size_t Dims() const override { return 1; }
@@ -689,7 +719,7 @@ struct BoundedITupleType final : public Type,
                                  public TypeIDProvider<BoundedITupleType> {
   Shape bounds;
   std::string note = "";
-  BoundedITupleType(const Shape& s, const std::string & n = "")
+  BoundedITupleType(const Shape& s, const std::string& n = "")
       : Type(TypeCategory::BOUNDED_ITUPLE), bounds(s), note(n) {}
 
   size_t Dims() const override { return bounds.Dims(); }
@@ -810,7 +840,8 @@ inline ptr<SpannedType> MakeSpannedType(BaseType ft, const Shape& v,
   return MakeSpannedType((FundamentalType)ft, v, s);
 }
 
-inline ptr<BoundedITupleType> MakeBoundedITupleType(const Shape& v, const std::string& n = "") {
+inline ptr<BoundedITupleType> MakeBoundedITupleType(const Shape& v,
+                                                    const std::string& n = "") {
   return std::make_shared<BoundedITupleType>(v, n);
 }
 
