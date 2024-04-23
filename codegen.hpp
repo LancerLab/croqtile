@@ -9,8 +9,8 @@ struct CodeGenerator : public VisitorWithSymTab {
   std::ostream &os;
 
   // some default method for the derived classes that do not want to override.
-  bool BeforeVisitImpl(AST::Node&) override { return true; }
-  bool AfterVisitImpl(AST::Node&) override { return true; }
+  bool BeforeVisitImpl(AST::Node &) override { return true; }
+  bool AfterVisitImpl(AST::Node &) override { return true; }
 
   CodeGenerator(std::ostream &o, const ptr<SymbolTable> &symtab)
       : VisitorWithSymTab(symtab), os(o) {
@@ -26,11 +26,32 @@ struct FactorCodeGen : public CodeGenerator {
   std::vector<AST::ptr<AST::Parameter>> *cur_params = nullptr;
   AST::ptr<AST::DataType> current_output = nullptr;
 
+  bool void_return = false;
+
+ private:
+  // buffer the includes, factor function declarations, etc
+  std::ostringstream hs;
+  // buffer the function bodies
+  std::ostringstream bs;
+
+  // name of stub parameters
+  size_t sp_count = 0;
+  std::vector<std::string> stub_params;
+
+  void GenFunctionStub(const Type &, const std::string &);
+  std::string GenStubParamName() { return "sp" + std::to_string(sp_count++); }
+
+ public:
   FactorCodeGen(std::ostream &os, const ptr<SymbolTable> &symtab)
       : CodeGenerator(os, symtab) {}
 
-  bool BeforeVisitImpl(AST::Node&) override;
-  bool AfterVisitImpl(AST::Node&) override;
+  void FlushBuffers() {
+    os << hs.str() << bs.str();
+    hs.clear();
+    bs.clear();
+  }
+  bool BeforeVisitImpl(AST::Node &) override;
+  bool AfterVisitImpl(AST::Node &) override;
 
   // bool Visit(AST::Node&) override;
   bool Visit(AST::MultiNodes &) override;
@@ -64,12 +85,11 @@ struct FactorCodeGen : public CodeGenerator {
   bool Visit(AST::Program &) override;
 
   // common utils
-  void incrementIndent() {
-    this->indent += "  ";
-  }
+  void incrementIndent() { this->indent += "  "; }
 
   void decrementIndent() {
-    if (this->indent.size() >= 2) this->indent = this->indent.substr(0, this->indent.size() - 2);
+    if (this->indent.size() >= 2)
+      this->indent = this->indent.substr(0, this->indent.size() - 2);
   }
 };
 

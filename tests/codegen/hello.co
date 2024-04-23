@@ -1,0 +1,25 @@
+// RUN: choreo %s | FileCheck --match-full-lines %s
+#include <iostream>
+
+// kernel program
+void hello(int * a, int * b, int * c, int n) {
+  std::cout << "hello choreo" << std::endl;
+}
+
+// choreo program
+__co__ void co_hello() {
+  parallel p by 1 { call hello(); }
+}
+
+// host program
+int main() {
+  return co_hello();
+}
+
+// CHECK: void co_hello() {
+// CHECK:  using namespace factor;
+// CHECK:  FACTOR_PROGRAM(choreo_co_hello);
+// CHECK:  choreo_co_hello([&](auto target_name) {
+// CHECK:  choreo_co_hello.Compile("dorado");
+// CHECK:  choreo_co_hello.Run();
+// CHECK: }

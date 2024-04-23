@@ -22,17 +22,9 @@ static inline void print_fixed_header(std::ostream &os) {
 
 static inline void print_wrapper_begin(std::ostream &os, std::string name) {
   name = "choreo_" + name;
-  os << "TEST(DoradoBasicTest, " << name << "_test) {\n";
-  os << "using namespace factor;\n";
-  os << "FACTOR_PROGRAM(" << name << ");\n\n";
-  os << "" << name << "([&](auto target_name) {\n";
-}
-
-static inline void print_wrapper_end(std::ostream &os, std::string name) {
-  os << "});\n\n";
-  os << "choreo_" << name << ".Compile(\"dorado\");\n";
-  os << "choreo_" << name << ".Run();\n";
-  os << "};\n";
+  os << " using namespace factor;\n";
+  os << " FACTOR_PROGRAM(" << name << ");\n\n";
+  os << " " << name << "([&](auto target_name) {\n";
 }
 
 static inline std::string factor_storage_str(Choreo::Storage s) {
@@ -47,6 +39,27 @@ static inline std::string factor_storage_str(Choreo::Storage s) {
     default:
       choreo_unreachable();
   }
+}
+
+static inline std::string stub_type_str(const Choreo::Type & ty, bool ret = false) {
+  if (isa<VoidType>(&ty))
+    return "void";
+  else if (isa<IntegerType>(&ty))
+    return "int";
+  else if (isa<BooleanType>(&ty))
+    return "bool";
+  else if (auto sty = dyn_cast<SpannedType>(&ty)) {
+    if (ret)  // return by value
+      return "choreo::spanned<choreo::" +
+        getStringFrom((BaseType)sty->f_type) + ", " +
+        std::to_string(sty->Dims()) + ">";
+    else  // pass by reference
+      return "const choreo::spanned<choreo::" +
+        getStringFrom((BaseType)sty->f_type) + ", " +
+        std::to_string(sty->Dims()) + "> &";
+  }
+  choreo_unreachable("unsupported stub function type.");
+  return "";
 }
 
 static inline std::string factor_typestr(Choreo::BaseType t) {
@@ -90,8 +103,9 @@ bool FactorCodeGen::BeforeVisitImpl(AST::Node &n) {
   if (isa<AST::Program>(&n)) {
     print_fixed_header(os);
   } else if (auto c = dyn_cast<AST::ChoreoFunction>(&n)) {
-    print_wrapper_begin(os, c->name);
+    print_wrapper_begin(bs, c->name);
     current_fn = c->name;
+    sp_count = 0; // reset the count of stub parameter
     this->incrementIndent();
   } else if (isa<AST::ParallelBy>(&n)) {
     this->incrementIndent();
@@ -103,13 +117,24 @@ bool FactorCodeGen::BeforeVisitImpl(AST::Node &n) {
 
 bool FactorCodeGen::AfterVisitImpl(AST::Node &n) {
   if (auto p = dyn_cast<AST::ChoreoFunction>(&n)) {
-    print_wrapper_end(os, p->name);
+    bs << " });\n\n";
+    bs << " choreo_" << p->name << ".Compile(\"dorado\");\n";
+    bs << " choreo_" << p->name << ".Run(";
+    if (stub_params.size() > 0) {
+      bs << stub_params[0] << ".data";
+      for (size_t i = 1; i < stub_params.size(); ++i) {
+        bs << ", " << stub_params[i] << ".data";
+      }
+    }
+    bs <<  ");\n";
+    bs << "}\n";
+    FlushBuffers();
   } else if (isa<AST::ParallelBy>(&n)) {
     this->decrementIndent();
-    os << this->indent << "}); // end of choreo-factor kernel function\n";
+    bs << this->indent << "}); // end of choreo-factor kernel function\n";
   } else if (isa<AST::ForeachBlock>(&n)) {
     this->decrementIndent();
-    os << this->indent << "}); // end of choreo-foreach block\n";
+    bs << this->indent << "}); // end of choreo-foreach block\n";
   }
   return 0;
 }
@@ -127,10 +152,10 @@ bool FactorCodeGen::Visit(AST::NamedTypeDecl &) { return true; };
 //
 // ast like:
 //   NamedVariableDecl
-bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) { 
+bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
   // TODO(albert): 'a.span' will be replace to the type-decl related to 'a'
   // TODO(albert): refine this function with TYPE_STR new API
-  // os << AST::TYPE_STR(node);
+  // bs << AST::TYPE_STR(node);
   auto dtype = dyn_cast<AST::DataType>(node.type.get());
   auto ptype = dtype->getPartialType();
   if (ptype) {
@@ -141,10 +166,10 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
     auto full_ref_name = ptype->getRefName();
     auto ref_symbol = full_ref_name.substr(0, full_ref_name.find('.'));
     if (strtab.Exists(ref_symbol)) {
-      os << this->indent;
-      os << "auto " << node.name_str << " = alloc_(";
-      os << strtab.GetTypeSymbol("a");
-      os << ");\n";
+      bs << this->indent;
+      bs << "auto " << node.name_str << " = alloc_(";
+      bs << strtab.GetTypeSymbol("a");
+      bs << ");\n";
     } else { //use GetSymbolType to get the required information
       auto ty = dyn_cast<SpannedType>(GetSymbolType(node.name_str));
       assert(ty && "Invalied type for variable declaration!");
@@ -167,25 +192,25 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
           shape_info = shape_info + "}";
       }
 
-      os << this->indent << "auto " << node.name_str << " = alloc_(";
-      os << storage_type << "(" << base_type << ")," << shape_info;
-      os << ");\n";
+      bs << this->indent << "auto " << node.name_str << " = alloc_(";
+      bs << storage_type << "(" << base_type << ")," << shape_info;
+      bs << ");\n";
     }
   } else {
     // TODO(albert): handle anon case
-    os << this->indent;
-    os << "auto " << node.name_str << " = alloc_(?";
-    os << ");\n";
+    bs << this->indent;
+    bs << "auto " << node.name_str << " = alloc_(?";
+    bs << ");\n";
   }
   //
   // auto spantype = AST::dyn_cast<AST::MultiDimSpans>(ptype);
-  // os << dtype->isSpanned();
-  // 
+  // bs << dtype->isSpanned();
+  //
   // ptype->Print(os);
-  // os << spantype->ref_name;
+  // bs << spantype->ref_name;
   // TODO: hardcode 'a', wait for expr eval
 
-  return true; 
+  return true;
 };
 bool FactorCodeGen::Visit(AST::IntTuple &) { return true; };
 bool FactorCodeGen::Visit(AST::Assignment &) { return true; };
@@ -208,41 +233,41 @@ bool FactorCodeGen::Visit(AST::ParamList &pl) {
 }
 
 bool FactorCodeGen::Visit(AST::ParallelBy &by) {
-  os << this->indent << "Dim3 grid_dim(1);\n";
-  os << this->indent << "Dim3 block_dim(" << by.bound << ");\n";
-  os << this->indent << "Value stream = alloc_stream_();\n";
-  os << this->indent << "create_stream_(stream);\n";
-  os << this->indent << "auto ts = launch_kernel_(\"" << current_fn
+  bs << this->indent << "Dim3 grid_dim(1);\n";
+  bs << this->indent << "Dim3 block_dim(" << by.bound << ");\n";
+  bs << this->indent << "Value stream = alloc_stream_();\n";
+  bs << this->indent << "create_stream_(stream);\n";
+  bs << this->indent << "auto ts = launch_kernel_(\"" << current_fn
      << "\", grid_dim, block_dim, stream, {";
   if (cur_params->size() > 0) {
-    os << "args[0]";
+    bs << "args[0]";
     for (size_t i = 1; i < cur_params->size(); ++i) {
-      os << ", "
+      bs << ", "
          << "args[" << i << "]";
     }
   }
-  os << "}, {output});\n";
-  os << this->indent << "destroy_stream_(stream);\n";
-  os << this->indent << "dealloc_stream_(stream);\n";
-  os << this->indent << "return std::vector<Value>{output};\n";
-  os << this->indent << "}); // end of choreo-factor dataflow program\n";
-  os << "\n";
+  bs << "}, {" << ((void_return) ? "" : "output") << "});\n";
+  bs << this->indent << "destroy_stream_(stream);\n";
+  bs << this->indent << "dealloc_stream_(stream);\n";
+  bs << this->indent << "return std::vector<Value>{" << ((void_return) ? "" : "output") << "};\n";
+  bs << this->indent << "}); // end of choreo-factor dataflow program\n";
+  bs << "\n";
 
   this->decrementIndent();
-  os << this->indent << "D(func_)\n";
-  os << this->indent << "(\"" << current_fn << "\", {";
+  bs << this->indent << "D(func_)\n";
+  bs << this->indent << "(\"" << current_fn << "\", {";
   if (cur_params->size() > 0) {
-    os << (*cur_params)[0]->sym->name << "_type";
+    bs << (*cur_params)[0]->sym->name << "_type";
     for (unsigned i = 1; i < cur_params->size(); ++i)
-      os << ", " << (*cur_params)[i]->sym->name << "_type";
+      bs << ", " << (*cur_params)[i]->sym->name << "_type";
   }
-  os << "}, {choreo_output_type}, [&](auto args, auto results) {\n";
+  bs << "}, {" << ((void_return) ? "" : "choreo_output_type") << "}, [&](auto args, auto results) {\n";
   this->incrementIndent();
-  os << this->indent << "auto thread_id = thread_id_();\n";
+  bs << this->indent << "auto thread_id = thread_id_();\n";
   // int i = 0;
   // NOTE: remove unused aliasing 'auto k_a = args[0];'
   // for (auto &param : *cur_params) {
-  //   os << "      "
+  //   bs << "      "
   //      << "auto k_" << param->sym->name << " = args[" << i++ << "];\n";
   // }
 
@@ -301,21 +326,21 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
 
   if (auto mem_node = dyn_cast<AST::Memory>(d.to)) {
     // TODO(albert): generate 'local_buffer' with more smart naming way by valno support
-    os << this->indent << "auto " << to_node_name << " = alloc_(";
+    bs << this->indent << "auto " << to_node_name << " = alloc_(";
     switch(mem_node->getStorageLevel()) {
       case Storage::LOCAL:
-        os << "L1Type(";
+        bs << "L1Type(";
         break;
       case Storage::SHARED:
-        os << "SRAMType(";
+        bs << "SRAMType(";
         break;
       case Storage::GLOBAL:
-        os << "DRAMType(";
+        bs << "DRAMType(";
         break;
       default:
         assert(false && "Unexpected storage type.");
     }
-    os << factor_typestr((Choreo::BaseType)data_type) << "),";
+    bs << factor_typestr((Choreo::BaseType)data_type) << "),";
 
     auto ty = dyn_cast<FutureType>(GetSymbolType(future_name));
     assert(ty && "Invalied return type of DMA op!");
@@ -334,7 +359,7 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
       else
         shape_info = shape_info + "}";
     }
-    os << shape_info << ");\n";
+    bs << shape_info << ");\n";
   }
 
   if(src_level >= des_level)
@@ -380,9 +405,9 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   arg_idx = strtab.GetSymbolIndex(to_node_name);
   to_node_name = arg_idx < 0 ? to_node_name : "args[" + std::to_string(arg_idx) + "]";
 
-  os << this->indent << "auto " << future_name << " = alloc_dma_(SDMAType());\n";
-  os << this->indent << dma_op << future_name
-     << ", " << from_node_name << ", " 
+  bs << this->indent << "auto " << future_name << " = alloc_dma_(SDMAType());\n";
+  bs << this->indent << dma_op << future_name
+     << ", " << from_node_name << ", "
      << to_node_name << ", " << offset_string <<  ");\n";
 
   return true;
@@ -395,18 +420,16 @@ bool FactorCodeGen::Visit(AST::Wait &w) {
   assert(dmas && "Invalid wait target!");
 
   for(auto dma : dmas->getValues()){
-    os << this->indent << "wait_dma_(";
-    dma->Print(os);
-    os << ");\n";
+    bs << this->indent << "wait_dma_(" << AST::STR(*dma) << ");\n";
   }
 
   return true;
 };
 
 bool FactorCodeGen::Visit(AST::Call &c) {
-  os << this->indent << "call_(\"";
-  c.function->Print(os);
-  os << "\", {";
+  bs << this->indent << "call_(\"";
+  bs << STR(*c.function);
+  bs << "\", {";
   auto args = dyn_cast<AST::MultiValues>(c.arguments);
   assert(args && "Invalid kernel call args!");
   int arg_num = args->getValues().size();
@@ -415,7 +438,7 @@ bool FactorCodeGen::Visit(AST::Call &c) {
     assert(arg && "Invalid kernel call arg!");
     switch (arg->t) {
       case AST::Expr::Reference:
-        os << STR(arg->value_r);
+        bs << STR(arg->value_r);
         break;
       case AST::Expr::Unary:
         if(arg->op == "sizeof"){
@@ -427,22 +450,22 @@ bool FactorCodeGen::Visit(AST::Call &c) {
           int dim_sz = shape.Dims(), size = 1;
           for (int dim_cursor = 0; dim_cursor < dim_sz;)
             size = size * (*(std::get_if<int>(&dim[dim_cursor++])));
-          os << std::to_string(size);
+          bs << std::to_string(size);
         }
         else if(arg->op == ".data"){
-          os << STR(arg->value_r) << "_buffer";
+          bs << STR(arg->value_r) << "_buffer";
         }
         break;
       default:
-        arg->Print(os);
+        bs << STR(*arg);
         choreo_unreachable("unhandled expression type.");
         break;
     }
     index++;
     if(index < arg_num)
-      os << ",";
+      bs << ",";
   }
-  os << "});\n";
+  bs << "});\n";
 
   return true;
 };
@@ -450,7 +473,7 @@ bool FactorCodeGen::Visit(AST::Call &c) {
 
 bool FactorCodeGen::Visit(AST::Return &) { return true; };
 
-bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) { 
+bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
   // auto ty = this->GetSymbolType("l2_tile");
   // ty->Print(os);
   // auto l2_tile_idx = itervars->getValueAt(0);
@@ -468,23 +491,43 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
     auto iv_bounds = dyn_cast<BoundedITupleType>(iv_type)->GetBounds();
     auto iv_values = iv_bounds.Value();
     // for (const auto &value : iv_values) {
-    //   if (auto intValue = std::get_if<int>(&value)) os << *intValue;
+    //   if (auto intValue = std::get_if<int>(&value)) bs << *intValue;
     // }
     // NOTES: bounds always has one integer indicating the upperbound value
     // we can certainly use idx=0 directly
     auto upper_bound = *(std::get_if<int>(&iv_values[0]));
 
     // synthesise the emitting string
-    os << this->indent << "for_(0, " << std::to_string(upper_bound) 
-       << ", " << 1 /* TODO(albert): need fix, unit stride is hardcoded for now*/ 
-       << ", " << "[&](auto " 
+    bs << this->indent << "for_(0, " << std::to_string(upper_bound)
+       << ", " << 1 /* TODO(albert): need fix, unit stride is hardcoded for now*/
+       << ", " << "[&](auto "
        << iv_str << ") {\n";
   }
-  return true; 
+  return true;
+}
+
+void FactorCodeGen::GenFunctionStub(const Type & ty, const std::string & n) {
+  assert(isa<FunctionType>(&ty) && "unexpected type.");
+  auto &fty = *cast<FunctionType>(&ty);
+  hs << stub_type_str(*fty.out_ty, true) << " " << n << "(";
+  if (fty.in_tys.size() > 0) {
+    auto n = GenStubParamName();
+    stub_params.push_back(n);
+    hs << stub_type_str(*fty.in_tys[0]) << " " << n;
+    for (size_t i = 1; i < fty.in_tys.size(); ++i) {
+      auto n = GenStubParamName();
+      stub_params.push_back(n);
+      hs << ", " << stub_type_str(*fty.in_tys[i]) << " " << n;
+    }
+  }
+  hs << ") {\n";
 }
 
 bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
   current_output = d.ret_type;
+
+  assert(isa<FunctionType>(d.GetType()) && "expecting a function type.");
+  GenFunctionStub(*d.GetType(), d.name);
 
   for (auto &param : *cur_params) {
     auto name = param->sym->name;
@@ -499,18 +542,18 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
         // TODO: this guard code may not needed
         _os << "{?}";
       }
-      auto type_string = "DRAMType(" + 
-                         factor_typestr(param->type->getBaseType()) + 
-                         ", " + _os.str(); 
+      auto type_string = "DRAMType(" +
+                         factor_typestr(param->type->getBaseType()) +
+                         ", " + _os.str();
 
       strtab.AddSymbol(name, type_symbol, type_string);
-      os << this->indent << "auto " << strtab.GetTypeSymbol(name) << " = " << strtab.GetTypeString(name);
-      os << ");\n";
+      bs << this->indent << "auto " << strtab.GetTypeSymbol(name) << " = " << strtab.GetTypeString(name);
+      bs << ");\n";
     } else {
       auto type_symbol = name+"_type";
       auto type_string = "DRAMType(" + factor_typestr(param->type->getBaseType()) + ", (1));";
       strtab.AddSymbol(name, type_symbol, type_string);
-      os << this->indent << "auto " << strtab.GetTypeSymbol(name) << " = " << strtab.GetTypeString(name) << "\n";
+      bs << this->indent << "auto " << strtab.GetTypeSymbol(name) << " = " << strtab.GetTypeString(name) << "\n";
     }
   }
 
@@ -524,42 +567,44 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
       // TODO: this guard code may not needed
       _os << "{?}";
     }
-    auto type_string = "DRAMType(" + 
-                       factor_typestr(current_output->getBaseType()) + 
-                       ", " + _os.str(); 
+    auto type_string = "DRAMType(" +
+                       factor_typestr(current_output->getBaseType()) +
+                       ", " + _os.str();
 
     strtab.AddSymbol(type_symbol, type_symbol, type_string);
-    os << this->indent << "auto " << type_symbol << " = " << strtab.GetTypeString(type_symbol);
-    os << ");\n";
+    bs << this->indent << "auto " << type_symbol << " = " << strtab.GetTypeString(type_symbol);
+    bs << ");\n";
+  } else if (AST::typeof<VoidType>(current_output)) {
+    void_return = true;
   } else {
     auto type_symbol = "choreo_output_type";
     auto type_string = "DRAMType(" + factor_typestr(current_output->getBaseType()) + ", (1));";
     strtab.AddSymbol(type_symbol, type_symbol, type_string);
-    os << this->indent << "auto " << strtab.GetTypeSymbol(type_symbol) << " = " << strtab.GetTypeString(type_symbol) << "\n";
+    bs << this->indent << "auto " << strtab.GetTypeSymbol(type_symbol) << " = " << strtab.GetTypeString(type_symbol) << "\n";
   }
 
-  // os << "    auto choreo_output_type = DRAMType(";
-  // os << factor_typestr(current_output->getBaseType());
-  // os << ", (1));\n";  // todo
+  // bs << "    auto choreo_output_type = DRAMType(";
+  // bs << factor_typestr(current_output->getBaseType());
+  // bs << ", (1));\n";  // todo
 
-  os << "\n";
-  os << this->indent << "D(main_) // choreo-factor dataflow function\n";
-  os << this->indent << "({";
+  bs << "\n";
+  bs << this->indent << "D(main_) // choreo-factor dataflow function\n";
+  bs << this->indent << "({";
 
   bool first_param = true;
   for (auto &param : *cur_params) {
     auto name = param->sym->name;
 
     if (first_param) {
-      os << name + "_type";
+      bs << name + "_type";
       first_param = false;
     } else
-      os << ", " << name + "_type";
+      bs << ", " << name + "_type";
   }
 
-  os << "}, [&](auto args) {\n";
+  bs << "}, [&](auto args) {\n";
 
-  // os << "      auto choreo_output = alloc_(choreo_output_type);\n";
+  // bs << "      auto choreo_output = alloc_(choreo_output_type);\n";
 
   return true;
 }

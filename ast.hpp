@@ -863,8 +863,7 @@ struct Wait : public Node, public TypeIDProvider<Wait> {
   Wait(const location& l, const ptr<Node>& t) : Node(l), target(t) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << "\n" << prefix << "`- WAIT: ";
-    target->Print(os);
+    os << "\n" << prefix << "`- WAIT: " << AST::STR(*target);
   }
 
   void accept(Visitor&) override;
