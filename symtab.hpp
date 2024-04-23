@@ -22,6 +22,7 @@ class Symbol {
   // Symbol() {}
 
   const ptr<Type>& GetType() const { return type; }
+  void SetType(const ptr<Type>& ty) { type = ty; }
   TypeCategory GetTypeCategory() const { return type->Category(); }
   bool IsComposite() const {
     return GetTypeCategory() == TypeCategory::SPANNED;
@@ -107,9 +108,8 @@ class StringifyTable {
 
   int GetSymbolIndex(const std::string& emittable) {
     int syms_num = syms.size();
-    for(int idx = 0; idx < syms_num; idx++) {
-      if(emittable == syms[idx])
-        return idx;
+    for (int idx = 0; idx < syms_num; idx++) {
+      if (emittable == syms[idx]) return idx;
     }
     return -1;
   }
@@ -119,7 +119,10 @@ class StringifyTable {
     return type_sym_table.find(emittable) != type_sym_table.end();
   }
 
-  void Reset() { type_sym_table.clear(); syms.clear();}
+  void Reset() {
+    type_sym_table.clear();
+    syms.clear();
+  }
 };
 
 // This is the scoped symbol table
@@ -188,6 +191,20 @@ class ScopedSymbolTable {
       if (it->count(n)) return (*it)[n];
     }
     return nullptr;
+  }
+
+  bool ModifySymbolType(const std::string& n, const ptr<Type>& ty) {
+    for (auto it = scoped_symtab.rbegin(); it != scoped_symtab.rend(); ++it) {
+      if (it->count(n)) {
+        (*it)[n] = ty;
+        if (symtab) {
+          auto sym = symtab->GetSymbol(InScopeName(n));
+          sym->SetType(ty);
+        }
+        return true;
+      }
+    }
+    return false;
   }
 
  public:

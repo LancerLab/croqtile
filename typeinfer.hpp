@@ -25,6 +25,8 @@ struct TypeInference : public Visitor {
   bool AssignSymbolWithType(const location &, const std::string &,
                             const ptr<Type> &);
   ptr<Type> GetSymbolType(const location &, const std::string &);
+  bool ModifySymbolType(const location &, const std::string &,
+                        const ptr<Type> &);
 
  public:
   TypeInference(bool d, std::ostream &o = std::cout,

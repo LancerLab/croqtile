@@ -9,7 +9,9 @@ using namespace Choreo;
   }
 
 bool SymbolValidator::BeforeVisit(AST::Node& n) {
-  if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
+  if (isa<AST::Program>(&n)) {
+    SSTab().EnterScope("");  // global scope
+  } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
     SSTab().EnterScope(f->name);
   } else if (isa<AST::ParallelBy>(&n)) {
     static size_t count = 0;
@@ -30,8 +32,9 @@ bool SymbolValidator::BeforeVisit(AST::Node& n) {
 }
 
 bool SymbolValidator::AfterVisit(AST::Node& n) {
-  if (isa<AST::ChoreoFunction>(&n) || isa<AST::ParallelBy>(&n) ||
-      isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n)) {
+  if (isa<AST::Program>(&n) || isa<AST::ChoreoFunction>(&n) ||
+      isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n) ||
+      isa<AST::ForeachBlock>(&n)) {
     SSTab().LeaveScope();
   }
 
@@ -114,7 +117,7 @@ bool SymbolValidator::Visit(AST::Parameter& n) {
   __TRACE_EACH_VISIT__(n)
   if (n.sym && n.type->isSpanned())
     ReportErrorWhenViolateODR(n.LOC(), n.sym->name + ".span");
-    
+
   return true;
 }
 

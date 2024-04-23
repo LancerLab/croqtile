@@ -1,6 +1,6 @@
 // RUN: choreo %s | FileCheck --match-full-lines %s
 
-#include <iostream>
+#include "choreo.h"
 
 // kernel program
 void kernel(int * a, int * b, int * c, int n) {
@@ -41,7 +41,8 @@ __co__ s32 mdspan<3> ele_add(s32 [144, 100, 100] a, s32 [144, 100, 100] b) {
 
 // host program
 int bar(int a[], int b[]) {
-  return ele_add(a, b);
+  return ele_add(choreo::make_spanned<3>(a, {144, 100, 100}),
+                 choreo::make_spanned<3>(b, {144, 100, 100});
 }
 
 // CHECK: auto a_type = DRAMType(IntType(32), {144, 100, 100});
@@ -60,4 +61,3 @@ int bar(int a[], int b[]) {
 // CHECK: auto f3 = alloc_dma_(SDMAType());
 // CHECK: async_store_(f3, local_buffer, global_buffer, {24*thread_id,10*x,10*y});
 // CHECK: wait_dma_(f3);
-

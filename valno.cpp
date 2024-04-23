@@ -20,12 +20,14 @@ void ValueNumbering::EnterScope(const std::string& name) {
     valueNumberExpressions.push_back(valueNumberExpressions.back());
 
   if (trace)
-    os << indent << "scope-" << visitor->SSTab().ScopeDepth()
-       << " {\n";
+    if (visitor->SSTab().ScopeDepth() > 1)
+      os << indent << "scope-" << visitor->SSTab().ScopeDepth() - 1 << " {\n";
 }
 
 void ValueNumbering::LeaveScope() {
-  std::string sname = std::to_string(visitor->SSTab().ScopeDepth());
+  if (visitor->SSTab().ScopeDepth() <= 1) return;
+
+  std::string sname = std::to_string(visitor->SSTab().ScopeDepth() - 1);
   visitor->SSTab().LeaveScope();
 
   assert(!expressionValueNumbers.empty() && !valueNumberExpressions.empty());
@@ -35,7 +37,8 @@ void ValueNumbering::LeaveScope() {
   nodeValueNumbers.pop_back();
 
   // reset value number when leaving the function scope
-  if (expressionValueNumbers.empty()) nextValueNumber = 0;
+  if (expressionValueNumbers.empty() || expressionValueNumbers.size() == 1)
+    nextValueNumber = 0;
 
   if (trace) os << ScopeIndent() << "} // end scope-" << sname << "\n";
 }
@@ -400,8 +403,7 @@ int ValueNumbering::GenerateValueNumberFromSignature(
 
 std::string ValueNumbering::ScopeIndent() {
   std::string indent;
-  for (size_t i = 0; i <= visitor->SSTab().ScopeDepth(); ++i)
-    indent += " ";
+  for (size_t i = 0; i <= visitor->SSTab().ScopeDepth(); ++i) indent += " ";
   return indent;
 }
 

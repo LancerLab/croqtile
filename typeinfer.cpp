@@ -8,7 +8,12 @@
 using namespace Choreo;
 
 bool TypeInference::BeforeVisit(AST::Node &n) {
-  if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
+  if (isa<AST::Program>(&n)) {
+    SSTab().EnterScope("");  // global scope
+  } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
+    AssignSymbolWithType(n.LOC(), f->name,
+                         MakeUnknownType());  // the type will be modified after
+                                              // parameters/return are processed
     SSTab().EnterScope(f->name);
   } else if (isa<AST::ParallelBy>(&n)) {
     static size_t count = 0;
@@ -24,8 +29,9 @@ bool TypeInference::BeforeVisit(AST::Node &n) {
 }
 
 bool TypeInference::AfterVisit(AST::Node &n) {
-  if (isa<AST::ChoreoFunction>(&n) || isa<AST::ParallelBy>(&n) ||
-      isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n)) {
+  if (isa<AST::Program>(&n) || isa<AST::ChoreoFunction>(&n) ||
+      isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n) ||
+      isa<AST::ForeachBlock>(&n)) {
     SSTab().LeaveScope();
   }
   return true;
@@ -53,6 +59,20 @@ ptr<Type> TypeInference::GetSymbolType(const location &loc,
     Error(loc, "symbol `" + name + "' is not associated with a type.");
     return nullptr;
   }
+}
+
+bool TypeInference::ModifySymbolType(const location &loc,
+                                     const std::string &name,
+                                     const ptr<Type> &ty) {
+  if (!SSTab().IsDeclared(name)) {
+    Error(loc, "The symbol `" + name + "' has not been defined.");
+    return false;
+  }
+  if (!SSTab().ModifySymbolType(name, ty)) {
+    Error(loc, "symbol `" + name + "' is not associated with a type.");
+    return false;
+  }
+  return true;
 }
 
 bool TypeInference::SetCurrentType(AST::Node &nd, const std::string &n) {
@@ -214,6 +234,12 @@ bool TypeInference::Visit(AST::IntIndex &n) {
 bool TypeInference::Visit(AST::FunctionDecl &n) {
   __TRACE_EACH_VISIT__(n)
   cur_type.reset();
+  std::vector<ptr<Type>> param_tys;
+  for (auto &param : n.params->values) param_tys.emplace_back(param->GetType());
+
+  n.SetType(MakeFunctionType(n.ret_type->GetType(), param_tys));
+  if (!ModifySymbolType(n.LOC(), n.name, n.GetType())) return false;
+
   return true;
 }
 

@@ -188,7 +188,9 @@ class ShapeInference : public Visitor {
 
  public:
   virtual bool BeforeVisit(AST::Node& n) override {
-    if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
+    if (isa<AST::Program>(&n)) {
+      vn.EnterScope("");  // global scope
+    } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
       vn.EnterScope(f->name);
     } else if (isa<AST::ParallelBy>(&n)) {
       static size_t count = 0;
@@ -222,8 +224,9 @@ class ShapeInference : public Visitor {
   }
 
   virtual bool AfterVisit(AST::Node& n) override {
-    if (isa<AST::ChoreoFunction>(&n) || isa<AST::ParallelBy>(&n) ||
-        isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n)) {
+    if (isa<AST::Program>(&n) || isa<AST::ChoreoFunction>(&n) ||
+        isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n) ||
+        isa<AST::ForeachBlock>(&n)) {
       vn.LeaveScope();
     } else if (isa<AST::MultiDimSpans>(&n) || isa<AST::IntTuple>(&n)) {
       vn.ResetListReference();
@@ -338,8 +341,7 @@ class ShapeInference : public Visitor {
     }
 
     Storage s = Storage::NONE;
-    if (n.mem)
-      s = n.mem->st;
+    if (n.mem) s = n.mem->st;
 
     if (n.initializer) {
       if (ValidVN(cur_ituple_vn)) {

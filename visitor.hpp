@@ -155,7 +155,9 @@ struct VisitorWithSymTab : public Visitor {
 
  public:
   bool BeforeVisit(AST::Node& n) final {
-    if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
+    if (isa<AST::Program>(&n)) {
+      SSTab().EnterScope("");  // global scope
+    } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
       SSTab().EnterScope(f->name);
     } else if (isa<AST::ParallelBy>(&n)) {
       SSTab().EnterScope("paraby_" + std::to_string(pb_count++));
@@ -169,8 +171,9 @@ struct VisitorWithSymTab : public Visitor {
   }
 
   bool AfterVisit(AST::Node& n) final {
-    if (isa<AST::ChoreoFunction>(&n) || isa<AST::ParallelBy>(&n) ||
-        isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n)) {
+    if (isa<AST::Program>(&n) || isa<AST::ChoreoFunction>(&n) ||
+        isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n) ||
+        isa<AST::ForeachBlock>(&n)) {
       SSTab().LeaveScope();
     }
     AfterVisitImpl(n);  // derived class to customize

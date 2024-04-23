@@ -359,10 +359,11 @@ paraby_stmts
     ;
 
 paraby_stmt
-    : declarations SEMCOL { $$ = $1; }
-    | assignments  SEMCOL { $$ = $1; }
-    | parallel_by         { $$ = $1; }
-    | with_block          { $$ = $1; }
+    : declarations   SEMCOL { $$ = $1; }
+    | assignments    SEMCOL { $$ = $1; }
+    | call_statement SEMCOL { $$ = $1; }
+    | parallel_by           { $$ = $1; }
+    | with_block            { $$ = $1; }
     ;
 
 assignments

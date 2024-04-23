@@ -20,14 +20,14 @@ __co__ s32 mdspan<1> spms(s32 [20, 42, 80] a, s32 mdspan<1> b) {
   return global_buffer;
 }
 
-// CHECK: Parameter: spms::a, Type: s32 mdspan<3> [20, 42, 80]
-// CHECK: Parameter: spms::b, Type: s32 mdspan<1> [?]
-// CHECK: Symbol:    spms::global_buffer, Type: f32 mdspan<3> [20, 42, 80], Storage: default
-// CHECK: Bounded:   spms::paraby_0::p, Type: {int}->[2]
-// CHECK: Symbol:    spms::paraby_0::shared_buffer, Type: shared f32 mdspan<2> [42, 4], Storage: shared
-// CHECK: Bounded:   spms::paraby_0::paraby_1::q, Type: {int}->[6]
-// CHECK: Bounded:   spms::paraby_0::paraby_1::within_0::index, Type: {int,int}->[10, 20]
-// CHECK: Bounded:   spms::paraby_0::paraby_1::within_0::x, Type: {int}->[10]
-// CHECK: Bounded:   spms::paraby_0::paraby_1::within_0::y, Type: {int}->[20]
-// CHECK: Future:    spms::paraby_0::paraby_1::within_0::foreach_0::f1, Type: async=>[10, 7, 8]
-// CHECK: Symbol:    spms::paraby_0::paraby_1::within_0::foreach_0::local_buffer, Type: local f32 mdspan<3> [10, 7, 8], Storage: local
+// CHECK: Parameter: ::spms::a, Type: s32 mdspan<3> [20, 42, 80]
+// CHECK: Parameter: ::spms::b, Type: s32 mdspan<1> [?]
+// CHECK: Symbol:    ::spms::global_buffer, Type: f32 mdspan<3> [20, 42, 80], Storage: default
+// CHECK: Bounded:   ::spms::paraby_0::p, Type: {int}->[2]
+// CHECK: Symbol:    ::spms::paraby_0::shared_buffer, Type: shared f32 mdspan<2> [42, 4], Storage: shared
+// CHECK: Bounded:   ::spms::paraby_0::paraby_1::q, Type: {int}->[6]
+// CHECK: Bounded:   ::spms::paraby_0::paraby_1::within_0::index, Type: {int,int}->[10, 20]
+// CHECK: Bounded:   ::spms::paraby_0::paraby_1::within_0::x, Type: {int}->[10]
+// CHECK: Bounded:   ::spms::paraby_0::paraby_1::within_0::y, Type: {int}->[20]
+// CHECK: Future:    ::spms::paraby_0::paraby_1::within_0::foreach_0::f1, Type: async=>[10, 7, 8]
+// CHECK: Symbol:    ::spms::paraby_0::paraby_1::within_0::foreach_0::local_buffer, Type: local f32 mdspan<3> [10, 7, 8], Storage: local

@@ -31,8 +31,9 @@ enum class TypeCategory {
   BOUNDED_INT,
   BOUNDED_ITUPLE,
   VOID,
-  UNKNOWN,
   FUTURE,
+  FUNCTION,
+  UNKNOWN,
 };
 
 // BaseType, FundamentalType, and ScalarType
@@ -496,6 +497,22 @@ struct Type {
   // can not have instance
 };
 
+inline bool operator!=(const Type& t1, const Type& t2) {
+  return !t1.operator==(t2);
+}
+
+inline std::string STR(const Type& ty) {
+  std::ostringstream oss;
+  ty.Print(oss);
+  return oss.str();
+}
+
+inline std::string STR(const Shape& s) {
+  std::ostringstream oss;
+  s.Print(oss);
+  return oss.str();
+}
+
 struct VoidType final : public Type, public TypeIDProvider<VoidType> {
   explicit VoidType() : Type(TypeCategory::VOID) {}
   size_t Dims() const override { return __INVALID_VALUE__; }
@@ -770,27 +787,45 @@ struct FutureType : public ScalarType, public TypeIDProvider<FutureType> {
   __UDT_TYPE_INFO__
 };
 
+struct FunctionType : public Type, public TypeIDProvider<FunctionType> {
+  ptr<Type> out_ty;
+  std::vector<ptr<Type>> in_tys;
+
+  FunctionType(const ptr<Type>& ot, const std::vector<ptr<Type>>& its)
+      : Type(TypeCategory::FUNCTION), out_ty(ot), in_tys(its) {}
+
+  size_t Dims() const override {
+    choreo_unreachable("a function can not have dimensions.");
+    return 0;
+  }
+  bool IsComplete() const override { return true; }
+  bool operator==(const Type& type) const override {
+    if (auto t = dyn_cast<FunctionType>(&type)) {
+      if (t->in_tys.size() != in_tys.size()) return false;
+      for (size_t i = 0; i < in_tys.size(); ++i)
+        if (*t->in_tys[i] != *in_tys[i]) return false;
+      return *out_ty == *t->out_ty;
+    }
+    return false;
+  }
+  void Print(std::ostream& os) const override {
+    os << STR(*out_ty) << " (*)(";
+    if (in_tys.size() > 0) os << STR(*in_tys[0]);
+    for (size_t i = 1; i < in_tys.size(); ++i) {
+      os << ", " << STR(*in_tys[i]);
+    }
+    os << ")";
+  }
+  const std::string Name() const override { return "function"; }
+
+  __UDT_TYPE_INFO__
+};
+
 #if 0
 inline bool operator==(const Type& t1, const Type& t2) {
   return t1.operator==(t2);
 }
 #endif
-
-inline bool operator!=(const Type& t1, const Type& t2) {
-  return !t1.operator==(t2);
-}
-
-inline std::string STR(const Type& ty) {
-  std::ostringstream oss;
-  ty.Print(oss);
-  return oss.str();
-}
-
-inline std::string STR(const Shape& s) {
-  std::ostringstream oss;
-  s.Print(oss);
-  return oss.str();
-}
 
 // utility functions to generate types
 // Note: should always use utility functions
@@ -851,6 +886,11 @@ inline ptr<FutureType> MakeFutureType(const Shape& v) {
 
 inline ptr<FutureType> MakeFutureType() {
   return std::make_shared<FutureType>();
+}
+
+inline ptr<FunctionType> MakeFunctionType(const ptr<Type> ot,
+                                          const std::vector<ptr<Type>>& its) {
+  return std::make_shared<FunctionType>(ot, its);
 }
 
 }  // end namespace Choreo
