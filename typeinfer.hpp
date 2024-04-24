@@ -18,6 +18,7 @@ struct TypeInference : public Visitor {
   ptr<Type> cur_type = nullptr;
   std::vector<ptr<Type>> cur_param_types;
   Shape cur_mdspan_value;
+  std::string cur_func_name;  // current function name
 
   bool BeforeVisit(AST::Node &) override;
   bool AfterVisit(AST::Node &) override;

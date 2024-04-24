@@ -22,9 +22,14 @@ struct CodeGenerator : public VisitorWithSymTab {
 struct FactorCodeGen : public CodeGenerator {
   // TODO: should the pointer be replaced?
   std::string current_fn = "";
+  std::string entry_fn = "";
   std::string indent = "";
   std::vector<AST::ptr<AST::Parameter>> *cur_params = nullptr;
   AST::ptr<AST::DataType> current_output = nullptr;
+
+  std::string bin_fn;                // temporal filename of factor binary
+  AST::ptr<Type> cur_fty = nullptr;  // current function type
+  int parallel_factor = 1;
 
   bool void_return = false;
 
@@ -36,10 +41,10 @@ struct FactorCodeGen : public CodeGenerator {
 
   // name of stub parameters
   size_t sp_count = 0;
-  std::vector<std::string> stub_params;
+  std::vector<std::pair<std::string, size_t>> entry_data;
 
-  void GenFunctionStub(const Type &, const std::string &);
-  std::string GenStubParamName() { return "sp" + std::to_string(sp_count++); }
+  void GenerateHostFunction(std::ostream &, const Type &, const std::string &);
+  std::string GenEntryParamName() { return "sp" + std::to_string(sp_count++); }
 
  public:
   FactorCodeGen(std::ostream &os, const ptr<SymbolTable> &symtab)

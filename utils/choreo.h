@@ -7,8 +7,19 @@
 
 #include <cstdint>           // For fixed-width integer types
 #include <initializer_list>  // for std::initializer_list
+#include <iostream>          // report error
 
 namespace choreo {
+
+[[noreturn]] inline void choreo_assert(bool p, const char* msg,
+                                       const char* file = __FILE__,
+                                       int line = __LINE__) {
+  if (!p) {
+    std::cerr << "Assertion failed: " << msg << ", file " << file << ", line "
+              << line << std::endl;
+    std::abort();
+  }
+}
 
 namespace {
 template <typename T, uint32_t N>
@@ -45,37 +56,55 @@ class SimpleArray {
 
 }  // end anonymous namespace
 
-template <int N>
-using mdspan = SimpleArray<int, N>;
+template <int Rank>
+using mdspan = SimpleArray<int, Rank>;
 
-template <typename T, int N>
+// A spanned data is ranked, but no necessary to have compile-time dimensions
+template <typename T, int Rank>
 struct spanned {
-  T* data;
-  const mdspan<N> span;
-  explicit spanned(T* d, const mdspan<N>& s) : data(d), span(s) {}
-  unsigned size() {
-    if (span.size() == 0) return 0;
+  T* data = nullptr;
+  const mdspan<Rank> shape;
+  explicit spanned(T* d, const mdspan<Rank>& s) : data(d), shape(s) {}
 
+  size_t dims() const {
+    choreo_assert(shape.size() == 0, "unexpected size == 0");
+    return shape.size();
+  }
+
+  size_t size() const {
+    choreo_assert(shape.size() == 0, "unexpected size == 0");
     unsigned sz = 1;
-    for (auto itr = span.begin(); itr != span.end(); ++itr)
-      sz *= *itr;
+    for (auto itr = shape.begin(); itr != shape.end(); ++itr) sz *= *itr;
     return sz;
   }
+
+  size_t bytes() const { return size() * sizeof(T) }
 };
 
-template <int N>
-mdspan<N> make_mdspan(std::initializer_list<int> init) {
-  return mdspan<N>(init);
+template <int Rank>
+mdspan<Rank> make_mdspan(std::initializer_list<int> init) {
+  return mdspan<Rank>(init);
 }
 
-template <int N, typename T>
-spanned<T, N> make_spanned(T* ptr, std::initializer_list<int> init) {
-  return spanned<T, N>(ptr, make_mdspan<N>(init));
+// note: spanned does not invoke copy. Instead, it associates data with a
+// multi-dimension view of memory
+template <int Rank, typename T>
+spanned<T, Rank> make_spanned(T* ptr, std::initializer_list<int> init) {
+  return spanned<T, Rank>(ptr, make_mdspan<Rank>(init));
 }
 
 template <typename T, int N, int M>
 spanned<T, 2> make_spanned(T (&arr)[N][M]) {
   return spanned<T, 2>((T*)arr, {N, M});
+}
+
+// converting from vector of another type
+template <int Rank, typename T, typename U>
+spanned<T, Rank> make_spanned(const std::vector<U>& d,
+                              std::initializer_list<int> init) {
+  auto res = make_spanned<Rank>((T*)d.data(), init);
+  choreo_assert(res.bytes() == d.size() * sizeof(U), "size does not match");
+  return res;
 }
 
 // Floating-point types

@@ -69,6 +69,26 @@ enum class FundamentalType {
 
 enum class Storage { LOCAL, SHARED, GLOBAL, DEFAULT, NONE };
 
+inline static size_t getByteSizeOf(FundamentalType ft) {
+  switch (ft) {
+    case FundamentalType::F32:
+    case FundamentalType::U32:
+    case FundamentalType::S32:
+      return 4;
+    case FundamentalType::F16:
+    case FundamentalType::BF16:
+    case FundamentalType::U16:
+    case FundamentalType::S16:
+      return 2;
+    case FundamentalType::U8:
+    case FundamentalType::S8:
+      return 1;
+    default:
+      choreo_unreachable("fundamental type is not supported.");
+  }
+  return 0;
+}
+
 // utility functions to map types to strings, and the opposite.
 inline static BaseType getTypeFromString(const std::string& input) {
   static const std::unordered_map<std::string, BaseType> typeMap = {
@@ -412,7 +432,7 @@ struct Shape {
     return *cast<int>(const_cast<ValueItem*>(&vi));
   }
 
-  std::optional<std::vector<int>> GetIntList() {
+  std::optional<std::vector<int>> GetIntList() const {
     std::vector<int> int_list;
     for (auto v : Value()) {
       if (auto pint = dyn_cast<int>(&v))
@@ -423,7 +443,7 @@ struct Shape {
     return int_list;
   }
 
-  std::optional<std::vector<size_t>> GetUIntList() {
+  std::optional<std::vector<size_t>> GetUIntList() const {
     std::vector<size_t> int_list;
     for (auto v : Value()) {
       if (auto pint = dyn_cast<int>(&v)) {
@@ -434,10 +454,21 @@ struct Shape {
     }
     return int_list;
   }
-  std::vector<int> IntList() {
+
+  std::vector<int> IntList() const {
     auto ilist = GetIntList();
     if (!ilist) choreo_unreachable("fail to get an integer list.");
     return *ilist;
+  }
+
+  size_t Size() const {
+    auto ilist = IntList();
+    size_t sz = 1;
+    for (int s : ilist) {
+      if (s < 0) choreo_unreachable("negative value is found.");
+      sz *= s;
+    }
+    return sz;
   }
 
   void Print(std::ostream& os) const {
@@ -679,9 +710,10 @@ struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
     return t.f_type == f_type && *t.s_type == *s_type;
   }
 
-  Shape GetShape() { return s_type->GetShape(); }
+  Shape GetShape() const { return s_type->GetShape(); }
   ptr<MDSpanType> GetMDSpanType() { return s_type; }
 
+  size_t ByteSize() const { return getByteSizeOf(f_type) * GetShape().Size(); }
   void SetStorage(Storage s) { m_type = s; }
   Storage GetStorage() { return m_type; }
 
@@ -826,6 +858,20 @@ inline bool operator==(const Type& t1, const Type& t2) {
   return t1.operator==(t2);
 }
 #endif
+
+inline size_t GetByteSizeOf(const Type& ty) {
+  if (isa<VoidType>(&ty)) return 0;
+  if (isa<IntegerType>(&ty))
+    return 4;
+  else if (isa<IntegerType>(&ty))
+    return 4;
+  else if (isa<BoundedIntegerType>(&ty))
+    return 4;
+  else if (auto t = dyn_cast<SpannedType>(&ty))
+    return t->ByteSize();
+  choreo_unreachable(STR(ty) + " does not imply runtime storage.");
+  return 0;
+}
 
 // utility functions to generate types
 // Note: should always use utility functions

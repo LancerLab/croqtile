@@ -10,21 +10,140 @@ extern StringifyTable strtab;
 
 namespace {
 
-static inline void print_fixed_header(std::ostream &os) {
-  os << "#include \"../../utils/utils.h\"\n"
-     << "#include \"dtu/factor/factor.h\"\n"
-     << "#include \"dtu/factor/program_experimental.h\"\n"
-     << "#include \"llvm/ADT/ArrayRef.h\"\n"
-     << "#include \"logging_api.h\"\n"
-     << "#include \"tests/factor/api/base/fixture.h\"\n"
-     << "#include \"choreo.h\"\n";
+using EntryParamType = std::vector<std::pair<std::string, size_t>>;
+
+static inline void print_host_head(std::ostream &os) {
+  os <<
+R"(
+#ifdef __CHOREO_HOST_CODE__  // this is the host code
+#include <fstream>
+#include <iostream>
+#include <iterator>
+#include <string>
+#include <vector>
+
+// dependant on the topsruntime
+#include "tops/tops_ext.h"
+#include "tops/tops_runtime.h"
+
+// choreo header
+#include "choreo.h"
+
+using namespace choreo;
+
+namespace {
+
+// Nasty data copy. Need optimization together with factor
+template <typename T, int Rank>
+static inline std::vector<uint8_t> ToFactorData(const spanned<T, Rank> &v) {
+  auto u8_data = reinterpret_cast<const uint8_t *>(v.data);
+    return std::vector<uint8_t>(u8_data, v.bytes());
 }
 
-static inline void print_wrapper_begin(std::ostream &os, std::string name) {
-  name = "choreo_" + name;
-  os << " using namespace factor;\n";
-  os << " FACTOR_PROGRAM(" << name << ");\n\n";
-  os << " " << name << "([&](auto target_name) {\n";
+template <int N, typename T>
+static inline spanned<N, T> ToSpanned(const std::vector<uint8_t> &v) {
+  return make_spanned<N, T, uint8_t>(v.data());
+}
+
+// must be true
+#define CHECK(a) choreo_assert(a, ##a, __FILE__, __LINE__)
+
+} // end anonymous namespace
+#endif //__CHOREO_HOST_CODE__
+)";
+}
+
+// phase 1: create tops executable from a file
+static inline void print_host_phase1(std::ostream &os, const std::string & f_n) {
+  os <<
+R"(#ifdef __CHOREO_HOST_CODE__  // this is the host code
+  std::vector<char> binary;
+  // Read bin file and store to a vector
+)";
+  os << "  std::ifstream ifs(" << f_n << ", std::ios::binary);";
+  os << R"(
+  std::copy(std::istreambuf_iterator<char>(ifs),
+            std::istreambuf_iterator<char>(), std::back_inserter(binary));
+  ifs.close();
+
+  // Create executable
+  topsExecutable_t executable = nullptr;
+  CHECK(topsCreateExecutable(&executable, binary.data(), binary.size()));
+  topsStream_t stream = nullptr;
+  CHECK(topsStreamCreate(&stream));
+
+#endif //__CHOREO_HOST_CODE__
+)";
+}
+
+// phase 2: allocate device memory and copy
+static inline void print_host_phase2(std::ostream &os,
+																		 const EntryParamType & params,
+																		 size_t out_size,
+																		 std::vector<std::string> & d_params) {
+  assert((d_params.size() == 0) && "expecting an empty vector.");
+
+  os << "#ifdef __CHOREO_HOST_CODE__  // this is the host code\n";
+
+  // input parameters
+	for (auto & p : params) {
+		auto mem_name = "in_mem" + std::to_string(d_params.size());
+    os << "  void *" << mem_name << " = nullptr;\n";
+    os << "  CHECK(topsMalloc(&" << mem_name << ", " << p.second << "));\n";
+    os << "  CHECK(topsMemcpy(" << mem_name << ", reinterpret_cast<void *>("
+			 << p.first << ", " << p.second << ", topsMemcpyHostToDevice));\n";
+		d_params.push_back(mem_name);
+	}
+  os << "  void * device_inputs[] = {" << DelimitedString(d_params) << "};\n\n";
+
+  // output parameter
+	if (out_size) {
+		os << "  void * out_mem = nullptr;\n";
+		os << "  CHECK(topsMalloc(&out_mem, " << out_size << "));\n";
+		os << "  void *device_outputs[] = {out_mem};\n";
+	}
+  os << "#endif //__CHOREO_HOST_CODE__";
+}
+
+// phase 3: Execute the executable and fetch the output
+static inline void print_host_phase3(std::ostream &os,
+																		 size_t parallel_factor,
+																		 size_t out_size) {
+  os << " size_t input_dim = " << parallel_factor << ";\n";
+  os << R"(
+  size_t input_rank = 1;\n";
+
+  CHECK(topsLaunchExecutableV2(
+      executable, nullptr, device_inputs,
+      sizeof(device_inputs) / sizeof(void *), &input_dim,
+      &input_rank, device_outputs,
+      sizeof(device_outputs) / sizeof(void *), stream));
+  CHECK(topsStreamSynchronize(stream));
+
+)";
+
+	if (out_size) {
+		os << R"(
+  // Copy output data from device to host
+  std::vector<uint8_t> host_mem2 = {0, 0, 0, 0}; // TODO: manage the memory by mdspan
+  CHECK(topsMemcpy(reinterpret_cast<void *>(host_mem2.data()), out_mem,
+)";
+		os << "                 " << out_size << ", topsMemcpyDeviceToHost));\n";
+	}
+}
+
+// resource deallocation
+static inline void print_host_phase4(std::ostream &os,
+																		 std::vector<std::string> & d_params) {
+  os << "// Free up the resources\n";
+  for (auto & p : d_params)
+    os << "  topsFree(" << p << ");\n";
+  os << R"(
+  topsStreamDestroy(stream);
+  topsDestroyExecutable(executable);
+
+  return 0;
+})";
 }
 
 static inline std::string factor_storage_str(Choreo::Storage s) {
@@ -41,7 +160,8 @@ static inline std::string factor_storage_str(Choreo::Storage s) {
   }
 }
 
-static inline std::string stub_type_str(const Choreo::Type & ty, bool ret = false) {
+static inline std::string stub_type_str(const Choreo::Type & ty,
+                                        bool is_ret = false) {
   if (isa<VoidType>(&ty))
     return "void";
   else if (isa<IntegerType>(&ty))
@@ -49,7 +169,7 @@ static inline std::string stub_type_str(const Choreo::Type & ty, bool ret = fals
   else if (isa<BooleanType>(&ty))
     return "bool";
   else if (auto sty = dyn_cast<SpannedType>(&ty)) {
-    if (ret)  // return by value
+    if (is_ret)  // return by value
       return "choreo::spanned<choreo::" +
         getStringFrom((BaseType)sty->f_type) + ", " +
         std::to_string(sty->Dims()) + ">";
@@ -101,11 +221,15 @@ static inline std::string factor_typestr(Choreo::BaseType t) {
 
 bool FactorCodeGen::BeforeVisitImpl(AST::Node &n) {
   if (isa<AST::Program>(&n)) {
-    print_fixed_header(os);
+//    print_fixed_header(os);
   } else if (auto c = dyn_cast<AST::ChoreoFunction>(&n)) {
-    print_wrapper_begin(bs, c->name);
-    current_fn = c->name;
     sp_count = 0; // reset the count of stub parameter
+    entry_fn = c->name;
+    current_fn = "__choreo_" + entry_fn;
+    // declare a factor function with proper name
+    bs << " using namespace factor;\n";
+    bs << " FACTOR_PROGRAM(" << current_fn << ");\n\n";
+    bs << " " << current_fn << "([&](auto target_name) {\n";
     this->incrementIndent();
   } else if (isa<AST::ParallelBy>(&n)) {
     this->incrementIndent();
@@ -117,18 +241,49 @@ bool FactorCodeGen::BeforeVisitImpl(AST::Node &n) {
 
 bool FactorCodeGen::AfterVisitImpl(AST::Node &n) {
   if (auto p = dyn_cast<AST::ChoreoFunction>(&n)) {
-    bs << " });\n\n";
-    bs << " choreo_" << p->name << ".Compile(\"dorado\");\n";
-    bs << " choreo_" << p->name << ".Run(";
-    if (stub_params.size() > 0) {
-      bs << stub_params[0] << ".data";
-      for (size_t i = 1; i < stub_params.size(); ++i) {
-        bs << ", " << stub_params[i] << ".data";
+    size_t out_size = GetByteSizeOf(*(cast<FunctionType>(cur_fty)->out_ty));
+    bs << " });\n\n"; // end the factor function definition
+    print_host_head(bs);
+		GenerateHostFunction(bs, *cur_fty, entry_fn);
+		print_host_phase1(bs, bin_fn);
+    std::vector<std::string> device_mems;
+		print_host_phase2(bs, entry_data, out_size, device_mems);
+		print_host_phase3(bs, parallel_factor, out_size);
+		print_host_phase4(bs, device_mems);
+
+#if 0
+    bs << " // compile the choreo-factor program\n";
+    bs << " CompileOptions compile_options;\n";
+    bs << " compile_options.gcu_arch = target_name.c_str();\n";
+    std::string exe_name = "choreo_" + p->name + "_exe";
+    std::string res_name = "choreo_" + p->name + "_res";
+    bs << " auto " << exe_name << " = Compile(" << current_fn << ", compile_options);\n";
+
+    // This is the ugly part, we have to copy spanned data into a std::vector
+    std::vector<std::string> inputs;
+    if (entry_data.size() > 0) {
+      bs << " std::vector<std::vector<uint8_t>> inputs_data;\n";
+      for (auto & data_size : ) {
+        auto input_name = "input" + std::to_string(inputs.size());
+        bs << " std::vector<uint8_t> " << input_name
+          << "(reinterpret_cast<uint8_t*>(" << data_size.first
+          << "), reinterpret_cast<uint8_t*>(" << data_size.first
+          << ") + " << data_size.second << ");\n";
+        inputs.push_back(input_name);
       }
     }
-    bs <<  ");\n";
+
+    bs << " auto " << res_name << " = factor::experimental::Run(";
+    for (auto &in: inputs)
+      bs << in << ", ";
+    bs <<  "compile_options.gcu_arch, reinterpret_cast<char*>(std::get<0>("
+       << exe_name << ").get()), std::get<1>(" << exe_name << "));\n";
     bs << "}\n";
+#endif
+
+    // now flush both buffer to the output
     FlushBuffers();
+    cur_fty = nullptr;
   } else if (isa<AST::ParallelBy>(&n)) {
     this->decrementIndent();
     bs << this->indent << "}); // end of choreo-factor kernel function\n";
@@ -233,6 +388,7 @@ bool FactorCodeGen::Visit(AST::ParamList &pl) {
 }
 
 bool FactorCodeGen::Visit(AST::ParallelBy &by) {
+  parallel_factor *= by.bound;
   bs << this->indent << "Dim3 grid_dim(1);\n";
   bs << this->indent << "Dim3 block_dim(" << by.bound << ");\n";
   bs << this->indent << "Value stream = alloc_stream_();\n";
@@ -506,28 +662,37 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
   return true;
 }
 
-void FactorCodeGen::GenFunctionStub(const Type & ty, const std::string & n) {
+void FactorCodeGen::GenerateHostFunction(std::ostream &os, const Type & ty,
+																				 const std::string & n) {
   assert(isa<FunctionType>(&ty) && "unexpected type.");
   auto &fty = *cast<FunctionType>(&ty);
-  hs << stub_type_str(*fty.out_ty, true) << " " << n << "(";
+  os << "#ifdef __CHOREO_HOST_CODE__  // this is the host code\n";
+  os << stub_type_str(*fty.out_ty, true) << " " << n << "(";
   if (fty.in_tys.size() > 0) {
-    auto n = GenStubParamName();
-    stub_params.push_back(n);
-    hs << stub_type_str(*fty.in_tys[0]) << " " << n;
+    auto n = GenEntryParamName();
+    if (auto sty = dyn_cast<SpannedType>(fty.in_tys[0]))
+      entry_data.push_back(std::make_pair(n + ".data", sty->ByteSize()));
+    else
+      entry_data.push_back(std::make_pair(n, 1));
+    os << stub_type_str(*fty.in_tys[0]) << " " << n;
     for (size_t i = 1; i < fty.in_tys.size(); ++i) {
-      auto n = GenStubParamName();
-      stub_params.push_back(n);
-      hs << ", " << stub_type_str(*fty.in_tys[i]) << " " << n;
+      auto n = GenEntryParamName();
+      if (auto sty = dyn_cast<SpannedType>(fty.in_tys[i]))
+        entry_data.push_back(std::make_pair(n + ".data", sty->ByteSize()));
+      else
+        entry_data.push_back(std::make_pair(n, 1));
+      os << ", " << stub_type_str(*fty.in_tys[i]) << " " << n;
     }
   }
-  hs << ") {\n";
+  os << ") {\n";
+  os << "#endif //__CHOREO_HOST_CODE__\n";
 }
 
 bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
   current_output = d.ret_type;
 
   assert(isa<FunctionType>(d.GetType()) && "expecting a function type.");
-  GenFunctionStub(*d.GetType(), d.name);
+  cur_fty = d.GetType();
 
   for (auto &param : *cur_params) {
     auto name = param->sym->name;

@@ -16,10 +16,22 @@ int main() {
   return co_hello();
 }
 
-// CHECK: void co_hello() {
 // CHECK:  using namespace factor;
-// CHECK:  FACTOR_PROGRAM(choreo_co_hello);
-// CHECK:  choreo_co_hello([&](auto target_name) {
-// CHECK:  choreo_co_hello.Compile("dorado");
-// CHECK:  choreo_co_hello.Run();
-// CHECK: }
+// CHECK:  FACTOR_PROGRAM(__choreo_co_hello);
+// CHECK:  __choreo_co_hello([&](auto target_name) {
+// CHECK: #include "choreo.h"
+// CHECK: void co_hello() {
+// CHECK:    {{.*}}topsCreateExecutable{{.*}}
+// CHECK:    {{.*}}topsStreamCreate{{.*}}
+// CHECK:    {{.*}}topsMalloc{{.*}}
+// CHECK:    {{.*}}topsMemcpy{{.*}}
+// CHECK:    {{.*}}topsMalloc{{.*}}
+// CHECK:    {{.*}}topsMemcpy{{.*}}
+// CHECK:    {{.*}}topsMalloc{{.*}}
+// CHECK:    {{.*}}topsLaunchExecutableV2{{.*}}
+// CHECK:    {{.*}}topsStreamSynchronize{{.*}}
+// CHECK:    {{.*}}topsStreamDestroy{{.*}}
+// CHECK:    {{.*}}topsDestroyExecutable{{.*}}
+// CHECK:    {{.*}}topsFree{{.*}}
+// CHECK:    {{.*}}topsFree{{.*}}
+// CHECK:    {{.*}}topsFree{{.*}}

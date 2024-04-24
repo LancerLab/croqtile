@@ -15,6 +15,7 @@ bool TypeInference::BeforeVisit(AST::Node &n) {
                          MakeUnknownType());  // the type will be modified after
                                               // parameters/return are processed
     SSTab().EnterScope(f->name);
+    cur_func_name = f->name;
   } else if (isa<AST::ParallelBy>(&n)) {
     static size_t count = 0;
     SSTab().EnterScope("paraby_" + std::to_string(count++));
@@ -34,6 +35,17 @@ bool TypeInference::AfterVisit(AST::Node &n) {
       isa<AST::ForeachBlock>(&n)) {
     SSTab().LeaveScope();
   }
+  if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
+    cur_func_name = "";
+    auto sym_ty = GetSymbolType(f->LOC(), f->name);
+    auto func_ty = cast<FunctionType>(sym_ty);
+    if (auto fty = dyn_cast<SpannedType>(func_ty->out_ty)) {
+      // update the return type node since type inference could have changed the
+      // function type already
+      f->f_decl.ret_type->SetType(func_ty->out_ty);
+      f->f_decl.SetType(sym_ty);
+    }
+  }
   return true;
 }
 
@@ -44,6 +56,10 @@ bool TypeInference::AssignSymbolWithType(const location &loc,
     Error(loc, "symbol `" + sym + "' has already been associated with a type.");
     return false;
   }
+
+  if (trace_visit)
+    os << "Assign symbol `" << sym << "` with type: " << STR(*ty) << "\n";
+
   return true;
 }
 
@@ -72,6 +88,10 @@ bool TypeInference::ModifySymbolType(const location &loc,
     Error(loc, "symbol `" + name + "' is not associated with a type.");
     return false;
   }
+
+  if (trace_visit)
+    os << "Modify symbol `" << name << "` with type: " << STR(*ty) << "\n";
+
   return true;
 }
 
@@ -422,10 +442,55 @@ bool TypeInference::Visit(AST::Call &n) {
   __TRACE_EACH_VISIT__(n)
   return true;
 }
+
 bool TypeInference::Visit(AST::Return &n) {
   __TRACE_EACH_VISIT__(n)
+
+  if (!n.value) return true;
+
+  ptr<Type> vty = n.value->GetType();
+  if (auto ref = cast<AST::Expr>(n.value)->GetReference())
+    if (auto id = dyn_cast<AST::Identifier>(ref))
+      vty = GetSymbolType(n.LOC(), id->name);
+
+  // get the value's type
+  if (isa<UnknownType>(vty)) {
+    Error(n.LOC(), "failed to inference the type of " + AST::STR(*n.value));
+    return false;
+  }
+
+  auto ty = GetSymbolType(n.LOC(), cur_func_name);
+  if (auto fty = dyn_cast<FunctionType>(ty)) {
+    if (auto rty = dyn_cast<SpannedType>(fty->out_ty)) {
+      auto tty = cast<SpannedType>(vty);
+      if (!tty->HasSufficientInfo()) {
+        Error(n.LOC(),
+              "failed to inference the type detail of " + AST::STR(*n.value));
+        return false;
+      }
+      if (rty->Dims() != tty->Dims()) {
+        Error(n.LOC(),
+              "return type inconsistant: " + STR(*rty) + " vs. " + STR(*tty));
+        return false;
+      }
+
+#if 0
+      // TODO: why triggers?
+      // already has sufficient info, make a comparison to avoid inconsistent return type
+      if (rty->HasSufficientInfo()) {
+        if (*rty != *tty) {
+          Error(n.LOC(), "return type inconsistant: " + STR(*rty) + " vs. " + STR(*tty));
+          return false;
+        }
+      } else
+#endif
+      ModifySymbolType(n.LOC(), cur_func_name,
+                       MakeFunctionType(vty, fty->in_tys));
+    }
+  }
   return true;
 }
+
 bool TypeInference::Visit(AST::ForeachBlock &n) {
   __TRACE_EACH_VISIT__(n)
   return true;
