@@ -240,7 +240,7 @@ bool FactorCodeGen::BeforeVisitImpl(AST::Node &n) {
 }
 
 bool FactorCodeGen::AfterVisitImpl(AST::Node &n) {
-  if (auto p = dyn_cast<AST::ChoreoFunction>(&n)) {
+  if (isa<AST::ChoreoFunction>(&n)) {
     size_t out_size = GetByteSizeOf(*(cast<FunctionType>(cur_fty)->out_ty));
     bs << " });\n\n"; // end the factor function definition
     print_host_head(bs);

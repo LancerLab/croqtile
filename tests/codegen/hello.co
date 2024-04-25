@@ -1,9 +1,12 @@
 // RUN: choreo %s | FileCheck --match-full-lines %s
 #include <iostream>
 
-// kernel program
+__cok__ { // kernel program
+
 void hello(int * a, int * b, int * c, int n) {
   std::cout << "hello choreo" << std::endl;
+}
+
 }
 
 // choreo program

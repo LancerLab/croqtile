@@ -51,6 +51,8 @@
 #undef YY_DECL
 #define YY_DECL Choreo::Parser::symbol_type Choreo::Scanner::get_next_token()
 
+#include <cstring>
+
 #include "parser.tab.hh"  // this is needed for symbol_type
 
 namespace Choreo {
@@ -72,9 +74,27 @@ class Scanner : public yyFlexLexer {
   static void SetRemoveComments() { keep_comments = false; };
   static bool KeepComments() { return keep_comments; };
 
+  void Error(const location& loc, const std::string& error_message) {
+    std::cerr << loc << ": ";
+    if (shell_supports_colors()) std::cerr << red;
+    std::cerr << "error: ";
+    if (shell_supports_colors()) std::cerr << reset;
+    std::cerr << error_message << std::endl;
+    std::exit(EXIT_FAILURE);  // Terminate the program immediately
+  }
+
  private:
   static bool debug;
   static bool keep_comments;
+
+  const char* red = "\033[31m";
+  const char* reset = "\033[0m";
+
+  static bool shell_supports_colors() {
+    const char* term = getenv("TERM");
+    return term &&
+           (strcmp(term, "xterm-256color") == 0 || strcmp(term, "xterm") == 0);
+  }
 
   // private:
   //    Interpreter &m_driver;

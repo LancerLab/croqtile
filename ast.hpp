@@ -824,8 +824,7 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
   }
 
   std::string SourceString() {
-    return future + " = dma" + operation + " " + STR(*from) + " => " +
-           STR(*to);
+    return future + " = dma" + operation + " " + STR(*from) + " => " + STR(*to);
   }
 
   void accept(Visitor&) override;
@@ -971,7 +970,9 @@ struct ChoreoFunction : public Node, public TypeIDProvider<ChoreoFunction> {
 
 struct CppSourceCode : public Node, public TypeIDProvider<CppSourceCode> {
   std::string code;
-  CppSourceCode(const location& l, const std::string& c) : Node(l), code(c) {}
+  bool host;  // host or kernel
+  CppSourceCode(const location& l, const std::string& c, bool h = true)
+      : Node(l), code(c), host(h) {}
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << code;
     (void)prefix;

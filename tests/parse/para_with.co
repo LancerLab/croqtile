@@ -15,8 +15,8 @@ __co__ int para_with(int b) {
 // CHECK:  `- Return type: int
 // CHECK:  `- Parameters
 // CHECK:    `-  type: int, symbol: b
-// CHECK:  `- Decl (span): ndims - [ 3 b ]
-// CHECK:  `- Decl (int): sum = 0
+// CHECK:  `- Type Decl: ndims - [ 3 b ]
+// CHECK:  `- Var Decl (int): sum = 0
 // CHECK:  `- Parellelization:  index symbol: p, bound [0, 6)
 // CHECK:   `- WithBinding:
 // CHECK:     (within constraints)

@@ -123,8 +123,8 @@ void choreo_info(const char *message) {
 %token END 0 "end of file"
 %token <char> CHAR
 %token <int> NUM
-%token <std::string> CPP_CODE
-%token <std::string> IDENTIFIER ATTR_CO
+%token <std::string> HOST_CODE KERNEL_CODE
+%token <std::string> IDENTIFIER ATTR_CO ATTR_COK
 // type related
 %token <std::string> MDSPAN ITUPLE
 %token <AST::Storage> LOCAL SHARED GLOBAL
@@ -139,8 +139,9 @@ void choreo_info(const char *message) {
 %nterm <std::string> dma_operation
 %nterm <AST::Storage> storage
 %nterm <Choreo::BaseType> fundamental_type
+%nterm <AST::ptr<AST::CppSourceCode>> pass_by host_code
 %nterm <AST::ptr<AST::Memory>> storage_qual
-%nterm <AST::ptr<AST::Node>> pass_by foreach_block general_val simple_int spanned_value ituple_val bool_literal passable declaration statement assignment paraby_stmt w_statement dma_statement wait_statement call_statement index_or_value iv_expr if_else optional_scalar_init param_mdspan_val chunkat_or_storage
+%nterm <AST::ptr<AST::Node>> foreach_block general_val simple_int spanned_value ituple_val bool_literal passable declaration statement assignment paraby_stmt w_statement dma_statement wait_statement call_statement index_or_value iv_expr if_else optional_scalar_init param_mdspan_val chunkat_or_storage
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments paraby_stmts w_statements withins require_binds require_clause else_clause
 %nterm <AST::ptr<AST::MultiValues>> index_value_list value_list param_mdspan_list iv_exprs id_list with_matchers futures passables
 %nterm <AST::ptr<AST::Expr>> s_expr
@@ -170,17 +171,27 @@ void choreo_info(const char *message) {
 %left PLUS MINUS
 %left STAR SLASH PECET
 %nonassoc LPAREN RPAREN
+//%left HOST_CODE
 
 %%
 
 program
     : /* Empty */ {}
-    | program pass_by      { root.nodes.push_back($2); }
-    | program dsl_function { root.nodes.push_back($2); }
-    ;
+    | program pass_by       { root.nodes.push_back($2); }
+    | program dsl_function  { root.nodes.push_back($2); }
 
 pass_by
-    : CPP_CODE {
+    : host_code   { $$ = $1; }
+    | ATTR_COK KERNEL_CODE {
+        $$ = AST::Make<AST::CppSourceCode>(@1, $1, false);
+      }
+    ;
+
+host_code
+    : host_code HOST_CODE {
+        $$ = AST::Make<AST::CppSourceCode>(@1, $1->code + $2);
+      }
+    | HOST_CODE /* can not be empty */ {
         $$ = AST::Make<AST::CppSourceCode>(@1, $1);
       }
     ;

@@ -37,42 +37,68 @@ void update_location(const char *text) {
   }
 }
 
+std::string kernel_buffer; // buffering the kernel code
+
 // Original yyterminate() macro returns int. Since we're using Bison 3 variants
 // as tokens, we must redefine it to change type from `int` to `Parser::semantic_type`
 #define yyterminate() { Choreo::Parser::make_END(loc); break; }
-
 
 /* update location on each matching */
 #define YY_USER_ACTION update_location(yytext);
 
 %}
 
-%x CO_FUNC
+%x CO_FUNC KERNEL
 
 id    [a-zA-Z_][a-zA-Z0-9_]*
 num   [0-9]+
 blank [ \t\r]
 
 %%
-<INITIAL>"//".*   {
-  if (Choreo::Scanner::KeepComments())
-    return Choreo::Parser::make_CPP_CODE(yytext, loc);
+<INITIAL>{
+  "//".*   {
+    if (Choreo::Scanner::KeepComments())
+      return Choreo::Parser::make_HOST_CODE(yytext, loc);
+  }
+  "__co__" {
+    BEGIN(CO_FUNC);
+    Choreo::Scanner::Debug("Entering Choreo Function");
+    return Choreo::Parser::make_ATTR_CO(yytext, loc);
+  }
+  "__cok__" {
+    if (scope != 0)
+      Error(loc, "unexpected kernel code (mustn't be inside of existing scope).");
+    BEGIN(KERNEL);
+    Choreo::Scanner::Debug("Begin Kernel code");
+    return Choreo::Parser::make_ATTR_COK(yytext, loc);
+  }
+  . {
+    Choreo::Scanner::Debug("token (char): " + std::string(yytext));
+    return Choreo::Parser::make_HOST_CODE(yytext, loc);
+  } // This matches everything outside the __co__ functions.
+  \n+ {
+    Choreo::Scanner::Debug("token (newline)");
+    return Choreo::Parser::make_HOST_CODE(yytext, loc);
+  }
+  <<EOF>> { return Choreo::Parser::make_END(loc); }
 }
-<INITIAL>"__co__" {
-  BEGIN(CO_FUNC);
-  Choreo::Scanner::Debug("Entering Choreo Function");
-  return Choreo::Parser::make_ATTR_CO(yytext, loc);
-}
-<INITIAL>.  {
-  Choreo::Scanner::Debug("token (char): " + std::string(yytext));
-  return Choreo::Parser::make_CPP_CODE(yytext, loc);
-} // This matches everything outside the __co__ functions.
-<INITIAL>\n+ {
-  Choreo::Scanner::Debug("token (newline)");
-  return Choreo::Parser::make_CPP_CODE(yytext, loc);
-}
-<INITIAL><<EOF>> { return Choreo::Parser::make_END(loc); }
 
+<KERNEL>{
+  "{"      { scope++; if (scope > 1) kernel_buffer += yytext; }
+  "}"      { if (--scope == 0) {
+               BEGIN(INITIAL);
+               kernel_buffer = "";  // reset the buffer
+               return Choreo::Parser::make_KERNEL_CODE(kernel_buffer, loc);
+             } else
+               kernel_buffer += yytext;
+           }
+  .        { kernel_buffer += yytext; }
+  <<EOF>>  { if (scope > 0)
+                Choreo::Scanner::Error(loc, "missing '}' for the kernel code.");
+             kernel_buffer = "";  // reset the buffer
+             return Choreo::Parser::make_KERNEL_CODE(kernel_buffer, loc);
+           }
+} // state <KERNEL>
 
 <CO_FUNC>{
   {blank}+   {}
@@ -143,9 +169,7 @@ blank [ \t\r]
   "["        return Choreo::Parser::make_LBRAKT (loc);
   "]"        return Choreo::Parser::make_RBRAKT (loc);
   "{"        { scope++; return Choreo::Parser::make_LBRACE(loc); }
-  "}"        { if (--scope == 0) {
-                 BEGIN(INITIAL);
-               }
+  "}"        { if (--scope == 0) { BEGIN(INITIAL); }
                return Choreo::Parser::make_RBRACE(loc);
              }
   "|"        { return Choreo::Parser::make_PIPE(loc); }

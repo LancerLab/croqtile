@@ -39,7 +39,7 @@ bool TypeInference::AfterVisit(AST::Node &n) {
     cur_func_name = "";
     auto sym_ty = GetSymbolType(f->LOC(), f->name);
     auto func_ty = cast<FunctionType>(sym_ty);
-    if (auto fty = dyn_cast<SpannedType>(func_ty->out_ty)) {
+    if (isa<SpannedType>(func_ty->out_ty)) {
       // update the return type node since type inference could have changed the
       // function type already
       f->f_decl.ret_type->SetType(func_ty->out_ty);
