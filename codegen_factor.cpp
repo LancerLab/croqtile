@@ -331,24 +331,28 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
 
       std::string storage_type = factor_storage_str(ty->GetStorage());
       std::string base_type = factor_typestr(Choreo::BaseType(ty->f_type));
-      std::string shape_info = "{";
+      std::string shape_info = "";
       auto data_shape = ty->GetShape();
-      auto dim = data_shape.values.values[0];
-      int dim_sz = data_shape.Dims();
-      assert(dim_sz == (int)dim.size() && "Insonsistant sizes for variable span.");
-      for (int dim_cursor = 0; dim_cursor < dim_sz;) {
-        auto dim_bound = *(std::get_if<int>(&dim[dim_cursor]));
-        assert( dim_bound > 0 && "Invalid variable span!");
-        shape_info = shape_info + std::to_string(dim_bound);
-        ++dim_cursor;
-        if(dim_cursor < dim_sz)
-          shape_info = shape_info + ",";
-        else
-          shape_info = shape_info + "}";
-      }
+      std::ostringstream _os;
+      _os << data_shape.EmitTo(Target::Factor);
+      shape_info += _os.str();
+      // auto dim = data_shape.values.values[0];
+      // int dim_sz = data_shape.Dims();
+      // assert(dim_sz == (int)dim.size() && "Insonsistant sizes for variable span.");
+      // for (int dim_cursor = 0; dim_cursor < dim_sz;) {
+      //   auto dim_bound = *(std::get_if<int>(&dim[dim_cursor]));
+      //   assert( dim_bound > 0 && "Invalid variable span!");
+      //   // shape_info = shape_info + std::to_string(dim_bound/tf_bound);
+      //   shape_info = shape_info + std::to_string(dim_bound);
+      //   ++dim_cursor;
+      //   if(dim_cursor < dim_sz)
+      //     shape_info = shape_info + ",";
+      //   else
+      //     shape_info = shape_info + "}";
+      // }
 
       bs << this->indent << "auto " << node.name_str << " = alloc_(";
-      bs << storage_type << "(" << base_type << ")," << shape_info;
+      bs << storage_type << "(" << base_type << "," << shape_info;
       bs << ");\n";
     }
   } else {
@@ -494,25 +498,30 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
       default:
         assert(false && "Unexpected storage type.");
     }
-    bs << factor_typestr((Choreo::BaseType)data_type) << "),";
+    bs << factor_typestr((Choreo::BaseType)data_type) << ",";
 
     auto ty = dyn_cast<FutureType>(GetSymbolType(future_name));
     assert(ty && "Invalied return type of DMA op!");
-    std::string shape_info = "{";
+    std::string shape_info = "";
     auto data_shape = ty->GetShape();
-    auto dim = data_shape.values.values[0];
-    int dim_sz = data_shape.Dims();
-    assert(dim_sz == (int)dim.size() && "Insonsistant sizes for variable span.");
-    for (int dim_cursor = 0; dim_cursor < dim_sz;) {
-      auto dim_bound = *(std::get_if<int>(&dim[dim_cursor]));
-      assert( dim_bound > 0 && "Invalid variable span!");
-      shape_info = shape_info + std::to_string(dim_bound);
-      ++dim_cursor;
-      if(dim_cursor < dim_sz)
-        shape_info = shape_info + ",";
-      else
-        shape_info = shape_info + "}";
-    }
+    std::ostringstream _os;
+    _os << data_shape.EmitTo(Target::Factor);
+    shape_info += _os.str();
+    // WE USE node.SHAPE, not node.DIM_BOUND
+    // auto dim = data_shape.values.values[0];
+    // bs << dim;
+    // int dim_sz = data_shape.Dims();
+    // assert(dim_sz == (int)dim.size() && "Insonsistant sizes for variable span.");
+    // for (int dim_cursor = 0; dim_cursor < dim_sz;) {
+    //   auto dim_bound = *(std::get_if<int>(&dim[dim_cursor]));
+    //   assert( dim_bound > 0 && "Invalid variable span!");
+    //   shape_info = shape_info + std::to_string(dim_bound);
+    //   ++dim_cursor;
+    //   if(dim_cursor < dim_sz)
+    //     shape_info = shape_info + ",";
+    //   else
+    //     shape_info = shape_info + "}";
+    // }
     bs << shape_info << ");\n";
   }
 
@@ -537,8 +546,10 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
       auto tf_bound = *(std::get_if<int>(&tf_bounds[0]));
       auto dim_bound = *(std::get_if<int>(&dim[dim_cursor]));
       assert( (tf_bound > 0 && dim_bound > 0) && "Invalid Dim size or Tile factor!");
-      auto offset = (dim_cursor == 0)? std::to_string(dim_bound/tf_bound) + "*thread_id" :
-                                       std::to_string(dim_bound/tf_bound) + "*" + STR(tile_factor);
+      // auto offset = (dim_cursor == 0)? std::to_string(dim_bound/tf_bound) + "*thread_id" :
+      //                                  std::to_string(dim_bound/tf_bound) + "*" + STR(tile_factor);
+      auto offset = (dim_cursor == 0)? "thread_id" :
+                                       STR(tile_factor);
       offset_string = offset_string + offset;
       ++dim_cursor;
       if(dim_cursor < dim_sz)

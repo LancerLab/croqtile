@@ -20,7 +20,7 @@ __co__ s32 mdspan<3> ele_add(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) {
           // l2_lhs_load = dte.linear lhs.chunkat(p, l2_x, l2_y) => shared; // new_size {lhs(0)/6, lhs(1)/1, lhs(2)/1}
           // l2_rhs_load = dte.linear rhs.chunkat(p, l2_x, l2_y) => shared;
           // wait l2_lhs_load, l2_rhs_load;
-          // shared f32[l2_lhs_load.span] l2_out; // use f1.span as the span of local buffer
+          // shared i32[l2_lhs_load.span] l2_out; // use f1.span as the span of local buffer
 
           lhs_load = dte.linear lhs.chunkat(p, x, y) => local; // new_size {lhs(0)/6, lhs(1)/1, lhs(2)/1}
           rhs_load = dte.linear rhs.chunkat(p, x, y) => local;
