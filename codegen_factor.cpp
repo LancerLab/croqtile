@@ -440,8 +440,6 @@ bool FactorCodeGen::Visit(AST::Memory &n) {
   return true;
 }
 
-// TODO(albert): handle indent
-// TODO(albert): fix offset calculation after foreach/with stmt resolved
 bool FactorCodeGen::Visit(AST::DMA &d) {
   // handle .to  in AST::Memory
   // d.to->Print(os); // shared

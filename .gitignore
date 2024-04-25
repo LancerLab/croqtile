@@ -4,3 +4,5 @@
 *.o
 tools/*
 choreo
+demo/*.bin
+demo/*.fb
