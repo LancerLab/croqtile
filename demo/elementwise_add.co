@@ -1,0 +1,63 @@
+// RUN: choreo %s | FileCheck --match-full-lines %s
+
+#include "choreo.h"
+
+// kernel program
+void kernel(int * a, int * b, int * c, int n) {
+  for (int i = 0; i < n; ++i)
+    c[i] = a[i] + b[i];
+}
+
+// device program
+__co__ s32 mdspan<3> ele_add(s32 [144, 100, 100] a, s32 [144, 100, 100] b) {
+  // assert a.span == b.span
+  f32[a.span] global_buffer;
+
+  parallel p by 6 {  // p is sip_index
+    // kernel function begin
+    with index = {x, y} in [10, 10] {  // totally 100 chunks
+     foreach x {
+      foreach y { 
+        f1 = dte.linear a.chunkat(p, x, y) => local; // new_size {a(0)/6, a(1)/10, a(2)/10}
+        f2 = dte.linear b.chunkat(p, x, y) => local;
+        wait f1, f2;
+
+        // use f1.span as the span of local buffer
+        local f32[f1.span] local_buffer;
+
+        // calculate the total size of span.
+        call kernel(f1.data, f2.data, local_buffer, |f1.span|);
+
+        f3 = dte.linear local_buffer => global_buffer.chunkat(p, x, y);
+        wait f3;
+      }
+     }
+    }
+    // end kernel function
+  }
+
+  return global_buffer;
+}
+
+// host program
+int bar(int a[], int b[]) {
+  return ele_add(choreo::make_spanned<3>(a, {144, 100, 100}),
+                 choreo::make_spanned<3>(b, {144, 100, 100});
+}
+
+// CHECK: auto a_type = DRAMType(IntType(32), {144, 100, 100});
+// CHECK: auto b_type = DRAMType(IntType(32), {144, 100, 100});
+// CHECK: auto thread_id = thread_id_();
+// CHECK: auto f1_buffer = alloc_(L1Type(IntType(32)),{144,100,100});
+// CHECK: auto f1 = alloc_dma_(SDMAType());
+// CHECK: async_load_(f1, args[0], f1_buffer, {24*thread_id,10*x,10*y});
+// CHECK: auto f2_buffer = alloc_(L1Type(IntType(32)),{144,100,100});
+// CHECK: auto f2 = alloc_dma_(SDMAType());
+// CHECK: async_load_(f2, args[1], f2_buffer, {24*thread_id,10*x,10*y});
+// CHECK: wait_dma_(f1);
+// CHECK: wait_dma_(f2);
+// CHECK: auto local_buffer = alloc_(L1Type(FloatType(32)),{144,100,100});
+// CHECK: call_("kernel", {f1_buffer,f2_buffer,local_buffer,1440000});
+// CHECK: auto f3 = alloc_dma_(SDMAType());
+// CHECK: async_store_(f3, local_buffer, global_buffer, {24*thread_id,10*x,10*y});
+// CHECK: wait_dma_(f3);

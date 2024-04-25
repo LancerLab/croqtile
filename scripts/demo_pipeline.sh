@@ -5,9 +5,9 @@ set -x
 
 source $(dirname "$0")/demo_env_setting.sh
 
-KERNEL_SRC=$KERNEL_PATH"/elementwise_kernel.cc"
-FATBIN_TARGET=$KERNEL_PATH"/elementwise_test.fb"
-BIN_TARGET=$KERNEL_PATH"/elementwise_test.bin"
+KERNEL_SRC=$KERNEL_PATH"/elementwise_add_kernel.cpp"
+FATBIN_TARGET=$KERNEL_PATH"/elementwise_add.fb"
+BIN_TARGET=$KERNEL_PATH"/elementwise_add.bin"
 
 docker exec -it "root_dev" bash -c "
     set -e
