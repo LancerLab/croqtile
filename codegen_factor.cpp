@@ -227,14 +227,14 @@ bool FactorCodeGen::BeforeVisitImpl(AST::Node &n) {
     entry_fn = c->name;
     current_fn = "__choreo_" + entry_fn;
     // declare a factor function with proper name
-    bs << " using namespace factor;\n";
-    bs << " FACTOR_PROGRAM(" << current_fn << ");\n\n";
-    bs << " " << current_fn << "([&](auto target_name) {\n";
+    bs << "using namespace factor;\n";
+    bs << "FACTOR_PROGRAM(" << current_fn << ");\n\n";
+    bs << "" << current_fn << "([&](auto target_name) {\n";
     this->incrementIndent();
   } else if (isa<AST::ParallelBy>(&n)) {
-    this->incrementIndent();
+    // this->incrementIndent();
   } else if (isa<AST::ForeachBlock>(&n)) {
-    this->incrementIndent();
+    // this->incrementIndent();
   }
   return 0;
 }
@@ -242,7 +242,7 @@ bool FactorCodeGen::BeforeVisitImpl(AST::Node &n) {
 bool FactorCodeGen::AfterVisitImpl(AST::Node &n) {
   if (isa<AST::ChoreoFunction>(&n)) {
     size_t out_size = GetByteSizeOf(*(cast<FunctionType>(cur_fty)->out_ty));
-    bs << " });\n\n"; // end the factor function definition
+    bs << "});\n\n"; // end the factor function definition
     print_host_head(bs);
 		GenerateHostFunction(bs, *cur_fty, entry_fn);
 		print_host_phase1(bs, bin_fn);
@@ -323,7 +323,7 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
     if (strtab.Exists(ref_symbol)) {
       bs << this->indent;
       bs << "auto " << node.name_str << " = alloc_(";
-      bs << strtab.GetTypeSymbol("a");
+      bs << strtab.GetTypeSymbol(ref_symbol);
       bs << ");\n";
     } else { //use GetSymbolType to get the required information
       auto ty = dyn_cast<SpannedType>(GetSymbolType(node.name_str));
@@ -406,12 +406,12 @@ bool FactorCodeGen::Visit(AST::ParallelBy &by) {
   bs << this->indent << "destroy_stream_(stream);\n";
   bs << this->indent << "dealloc_stream_(stream);\n";
   bs << this->indent << "return std::vector<Value>{" << ((void_return) ? "" : "output") << "};\n";
+  this->decrementIndent();
   bs << this->indent << "}); // end of choreo-factor dataflow program\n";
   bs << "\n";
 
-  this->decrementIndent();
-  bs << this->indent << "D(func_)\n";
-  bs << this->indent << "(\"" << current_fn << "\", {";
+  bs << this->indent << "\n";
+  bs << this->indent << "D(func_)(\"" << current_fn << "\", {";
   if (cur_params->size() > 0) {
     bs << (*cur_params)[0]->sym->name << "_type";
     for (unsigned i = 1; i < cur_params->size(); ++i)
@@ -657,6 +657,7 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
        << ", " << "[&](auto "
        << iv_str << ") {\n";
   }
+  this->incrementIndent();
   return true;
 }
 
@@ -751,8 +752,8 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
   // bs << ", (1));\n";  // todo
 
   bs << "\n";
-  bs << this->indent << "D(main_) // choreo-factor dataflow function\n";
-  bs << this->indent << "({";
+  bs << this->indent << "// choreo-factor dataflow function\n";
+  bs << this->indent << "D(main_)({";
 
   bool first_param = true;
   for (auto &param : *cur_params) {
@@ -767,7 +768,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
 
   bs << "}, [&](auto args) {\n";
 
-  // bs << "      auto choreo_output = alloc_(choreo_output_type);\n";
+  this->incrementIndent();
 
   return true;
 }
