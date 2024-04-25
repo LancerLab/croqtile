@@ -611,10 +611,11 @@ bool FactorCodeGen::Visit(AST::Call &c) {
           assert(dyn_cast<FutureType>(this->GetSymbolType(var)) && "Unexpected !!!");
           auto ty_ptr = cast<FutureType>(this->GetSymbolType(var));
           auto shape = ty_ptr->GetShape();
+          auto shapes = shape.Value();
           auto dim = shape.values.values[0];
           int dim_sz = shape.Dims(), size = 1;
           for (int dim_cursor = 0; dim_cursor < dim_sz;)
-            size = size * (*(std::get_if<int>(&dim[dim_cursor++])));
+            size = size * (*(std::get_if<int>(&shapes[dim_cursor++])));
           bs << std::to_string(size);
         }
         else if(arg->op == ".data"){
