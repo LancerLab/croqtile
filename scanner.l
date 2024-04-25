@@ -66,11 +66,10 @@ blank [ \t\r]
     return Choreo::Parser::make_ATTR_CO(yytext, loc);
   }
   "__cok__" {
+    BEGIN(KERNEL);
     if (scope != 0)
       Error(loc, "unexpected kernel code (mustn't be inside of existing scope).");
-    BEGIN(KERNEL);
     Choreo::Scanner::Debug("Begin Kernel code");
-    return Choreo::Parser::make_ATTR_COK(yytext, loc);
   }
   . {
     Choreo::Scanner::Debug("token (char): " + std::string(yytext));
@@ -87,16 +86,20 @@ blank [ \t\r]
   "{"      { scope++; if (scope > 1) kernel_buffer += yytext; }
   "}"      { if (--scope == 0) {
                BEGIN(INITIAL);
+               auto res = Choreo::Parser::make_KERNEL_CODE(kernel_buffer, loc);
                kernel_buffer = "";  // reset the buffer
-               return Choreo::Parser::make_KERNEL_CODE(kernel_buffer, loc);
+               return res;
              } else
                kernel_buffer += yytext;
            }
-  .        { kernel_buffer += yytext; }
+  .        { if (scope > 0) kernel_buffer += yytext; }
+  \n+      { if (scope > 0) kernel_buffer += yytext; }
   <<EOF>>  { if (scope > 0)
                 Choreo::Scanner::Error(loc, "missing '}' for the kernel code.");
+             Choreo::Scanner::Debug("token (char): " + std::string(yytext));
+             auto res = Choreo::Parser::make_KERNEL_CODE(kernel_buffer, loc);
              kernel_buffer = "";  // reset the buffer
-             return Choreo::Parser::make_KERNEL_CODE(kernel_buffer, loc);
+             return res;
            }
 } // state <KERNEL>
 

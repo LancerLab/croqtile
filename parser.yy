@@ -124,7 +124,7 @@ void choreo_info(const char *message) {
 %token <char> CHAR
 %token <int> NUM
 %token <std::string> HOST_CODE KERNEL_CODE
-%token <std::string> IDENTIFIER ATTR_CO ATTR_COK
+%token <std::string> IDENTIFIER ATTR_CO
 // type related
 %token <std::string> MDSPAN ITUPLE
 %token <AST::Storage> LOCAL SHARED GLOBAL
@@ -182,7 +182,7 @@ program
 
 pass_by
     : host_code   { $$ = $1; }
-    | ATTR_COK KERNEL_CODE {
+    | KERNEL_CODE {
         $$ = AST::Make<AST::CppSourceCode>(@1, $1, false);
       }
     ;

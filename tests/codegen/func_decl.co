@@ -7,16 +7,31 @@ __co__ int foo(f32 [32] d, int) {
 }
 
 // CHECK:    using namespace factor;
-// CHECK:    FACTOR_PROGRAM(__choreo_foo);
-// CHECK:    __choreo_foo([&](auto target_name) {
+// CHECK:    void __choreo_foo() {
 // CHECK:      auto d_type = DRAMType(FloatType(32), {32});
 // CHECK:      auto anon_0_type = DRAMType(IntType(32), (1));
 // CHECK:      auto choreo_output_type = DRAMType(IntType(32), (1));
-// CHECK:      D(main_) // choreo-factor dataflow function
-// CHECK:      ({d_type, anon_0_type}, [&](auto args) {
+// CHECK:      D(main_)({d_type, anon_0_type}, [&](auto args) {
 // CHECK:    });
-// CHECK:  int foo(const choreo::spanned<choreo::f32, 1> & sp0, int sp1) {
-// CHECK:  }
+// CHECK:  int foo(const choreo::spanned<choreo::f32, 1> & sp0, int sp1){{.*}}
+// CHECK:    {{.*}}topsCreateExecutable{{.*}}
+// CHECK:    {{.*}}topsStreamCreate{{.*}}
+// CHECK:    {{.*}}topsMalloc{{.*}}
+// CHECK:    {{.*}}topsMemcpy{{.*}}
+// CHECK:    {{.*}}topsMalloc{{.*}}
+// CHECK:    {{.*}}topsMemcpy{{.*}}
+// CHECK:    {{.*}}topsMalloc{{.*}}
+// CHECK:    {{.*}}topsMemcpy{{.*}}
+// CHECK:    {{.*}}topsMalloc{{.*}}
+// CHECK:    {{.*}}topsLaunchExecutableV2{{.*}}
+// CHECK:    {{.*}}topsStreamSynchronize{{.*}}
+// CHECK:    {{.*}}topsMemcpy{{.*}}
+// CHECK:    {{.*}}topsFree{{.*}}
+// CHECK:    {{.*}}topsFree{{.*}}
+// CHECK:    {{.*}}topsFree{{.*}}
+// CHECK:    {{.*}}topsFree{{.*}}
+// CHECK:    {{.*}}topsStreamDestroy{{.*}}
+// CHECK:    {{.*}}topsDestroyExecutable{{.*}}
 
 // host program
 int bar(int a) {

@@ -12,10 +12,24 @@ namespace {
 
 using EntryParamType = std::vector<std::pair<std::string, size_t>>;
 
+constexpr const char* backpatch_filename =
+  "__choreo_kernel_file_name_that_will_be_back_patched_soon_ok_enough_i_am_bored__";
+
+inline static void ReplaceInString(std::string& str, const std::string& from,
+																	 const std::string& to) {
+	if(from.empty())
+		return;
+
+	size_t startPos = 0;
+	while((startPos = str.find(from, startPos)) != std::string::npos) {
+		str.replace(startPos, from.length(), to);
+		startPos += to.length(); // In case 'to' contains 'from', like replacing 'x' with 'yx'
+	}
+}
+
 static inline void print_host_head(std::ostream &os) {
   os <<
 R"(
-#ifdef __CHOREO_HOST_CODE__  // this is the host code
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -49,18 +63,16 @@ static inline spanned<N, T> ToSpanned(const std::vector<uint8_t> &v) {
 #define CHECK(a) choreo_assert(a, ##a, __FILE__, __LINE__)
 
 } // end anonymous namespace
-#endif //__CHOREO_HOST_CODE__
 )";
 }
 
 // phase 1: create tops executable from a file
 static inline void print_host_phase1(std::ostream &os, const std::string & f_n) {
   os <<
-R"(#ifdef __CHOREO_HOST_CODE__  // this is the host code
-  std::vector<char> binary;
+R"(std::vector<char> binary;
   // Read bin file and store to a vector
 )";
-  os << "  std::ifstream ifs(" << f_n << ", std::ios::binary);";
+  os << "  std::ifstream ifs(\"" << f_n << "\", std::ios::binary);";
   os << R"(
   std::copy(std::istreambuf_iterator<char>(ifs),
             std::istreambuf_iterator<char>(), std::back_inserter(binary));
@@ -72,7 +84,6 @@ R"(#ifdef __CHOREO_HOST_CODE__  // this is the host code
   topsStream_t stream = nullptr;
   CHECK(topsStreamCreate(&stream));
 
-#endif //__CHOREO_HOST_CODE__
 )";
 }
 
@@ -82,8 +93,6 @@ static inline void print_host_phase2(std::ostream &os,
 																		 size_t out_size,
 																		 std::vector<std::string> & d_params) {
   assert((d_params.size() == 0) && "expecting an empty vector.");
-
-  os << "#ifdef __CHOREO_HOST_CODE__  // this is the host code\n";
 
   // input parameters
 	for (auto & p : params) {
@@ -102,16 +111,15 @@ static inline void print_host_phase2(std::ostream &os,
 		os << "  CHECK(topsMalloc(&out_mem, " << out_size << "));\n";
 		os << "  void *device_outputs[] = {out_mem};\n";
 	}
-  os << "#endif //__CHOREO_HOST_CODE__";
 }
 
 // phase 3: Execute the executable and fetch the output
 static inline void print_host_phase3(std::ostream &os,
 																		 size_t parallel_factor,
 																		 size_t out_size) {
-  os << " size_t input_dim = " << parallel_factor << ";\n";
+  os << "  size_t input_dim = " << parallel_factor << ";";
   os << R"(
-  size_t input_rank = 1;\n";
+  size_t input_rank = 1;
 
   CHECK(topsLaunchExecutableV2(
       executable, nullptr, device_inputs,
@@ -227,9 +235,14 @@ bool FactorCodeGen::BeforeVisitImpl(AST::Node &n) {
     entry_fn = c->name;
     current_fn = "__choreo_" + entry_fn;
     // declare a factor function with proper name
-    bs << "using namespace factor;\n";
-    bs << "FACTOR_PROGRAM(" << current_fn << ");\n\n";
-    bs << "" << current_fn << "([&](auto target_name) {\n";
+    fs <<
+R"(
+#include <vector>
+#include "gcu/factor/factor.h"
+
+using namespace factor;
+)";
+    fs << " void " << current_fn << "() {\n";
     this->incrementIndent();
   } else if (isa<AST::ParallelBy>(&n)) {
     // this->incrementIndent();
@@ -240,56 +253,18 @@ bool FactorCodeGen::BeforeVisitImpl(AST::Node &n) {
 }
 
 bool FactorCodeGen::AfterVisitImpl(AST::Node &n) {
-  if (isa<AST::ChoreoFunction>(&n)) {
+  if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
     size_t out_size = GetByteSizeOf(*(cast<FunctionType>(cur_fty)->out_ty));
-    bs << "});\n\n"; // end the factor function definition
-    print_host_head(bs);
-		GenerateHostFunction(bs, *cur_fty, entry_fn);
-		print_host_phase1(bs, bin_fn);
-    std::vector<std::string> device_mems;
-		print_host_phase2(bs, entry_data, out_size, device_mems);
-		print_host_phase3(bs, parallel_factor, out_size);
-		print_host_phase4(bs, device_mems);
-
-#if 0
-    bs << " // compile the choreo-factor program\n";
-    bs << " CompileOptions compile_options;\n";
-    bs << " compile_options.gcu_arch = target_name.c_str();\n";
-    std::string exe_name = "choreo_" + p->name + "_exe";
-    std::string res_name = "choreo_" + p->name + "_res";
-    bs << " auto " << exe_name << " = Compile(" << current_fn << ", compile_options);\n";
-
-    // This is the ugly part, we have to copy spanned data into a std::vector
-    std::vector<std::string> inputs;
-    if (entry_data.size() > 0) {
-      bs << " std::vector<std::vector<uint8_t>> inputs_data;\n";
-      for (auto & data_size : ) {
-        auto input_name = "input" + std::to_string(inputs.size());
-        bs << " std::vector<uint8_t> " << input_name
-          << "(reinterpret_cast<uint8_t*>(" << data_size.first
-          << "), reinterpret_cast<uint8_t*>(" << data_size.first
-          << ") + " << data_size.second << ");\n";
-        inputs.push_back(input_name);
-      }
-    }
-
-    bs << " auto " << res_name << " = factor::experimental::Run(";
-    for (auto &in: inputs)
-      bs << in << ", ";
-    bs <<  "compile_options.gcu_arch, reinterpret_cast<char*>(std::get<0>("
-       << exe_name << ").get()), std::get<1>(" << exe_name << "));\n";
-    bs << "}\n";
-#endif
-
-    // now flush both buffer to the output
-    FlushBuffers();
+    fs << " });\n\n"; // end the factor function definition
+    OutputScript(f->name, out_size);
+    ResetBuffers();
     cur_fty = nullptr;
   } else if (isa<AST::ParallelBy>(&n)) {
     this->decrementIndent();
-    bs << this->indent << "}); // end of choreo-factor kernel function\n";
+    fs << this->indent << "}); // end of choreo-factor kernel function\n";
   } else if (isa<AST::ForeachBlock>(&n)) {
     this->decrementIndent();
-    bs << this->indent << "}); // end of choreo-foreach block\n";
+    fs << this->indent << "}); // end of choreo-foreach block\n";
   }
   return 0;
 }
@@ -310,7 +285,7 @@ bool FactorCodeGen::Visit(AST::NamedTypeDecl &) { return true; };
 bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
   // TODO(albert): 'a.span' will be replace to the type-decl related to 'a'
   // TODO(albert): refine this function with TYPE_STR new API
-  // bs << AST::TYPE_STR(node);
+  // fs << AST::TYPE_STR(node);
   auto dtype = dyn_cast<AST::DataType>(node.type.get());
   auto ptype = dtype->getPartialType();
   if (ptype) {
@@ -321,10 +296,10 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
     auto full_ref_name = ptype->getRefName();
     auto ref_symbol = full_ref_name.substr(0, full_ref_name.find('.'));
     if (strtab.Exists(ref_symbol)) {
-      bs << this->indent;
-      bs << "auto " << node.name_str << " = alloc_(";
-      bs << strtab.GetTypeSymbol(ref_symbol);
-      bs << ");\n";
+      fs << this->indent;
+      fs << "auto " << node.name_str << " = alloc_(";
+      fs << strtab.GetTypeSymbol(ref_symbol);
+      fs << ");\n";
     } else { //use GetSymbolType to get the required information
       auto ty = dyn_cast<SpannedType>(GetSymbolType(node.name_str));
       assert(ty && "Invalied type for variable declaration!");
@@ -351,22 +326,22 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
       //     shape_info = shape_info + "}";
       // }
 
-      bs << this->indent << "auto " << node.name_str << " = alloc_(";
-      bs << storage_type << "(" << base_type << "," << shape_info;
-      bs << ");\n";
+      fs << this->indent << "auto " << node.name_str << " = alloc_(";
+      fs << storage_type << "(" << base_type << "," << shape_info;
+      fs << ");\n";
     }
   } else {
     // TODO(albert): handle anon case
-    bs << this->indent;
-    bs << "auto " << node.name_str << " = alloc_(?";
-    bs << ");\n";
+    fs << this->indent;
+    fs << "auto " << node.name_str << " = alloc_(?";
+    fs << ");\n";
   }
   //
   // auto spantype = AST::dyn_cast<AST::MultiDimSpans>(ptype);
-  // bs << dtype->isSpanned();
+  // fs << dtype->isSpanned();
   //
   // ptype->Print(os);
-  // bs << spantype->ref_name;
+  // fs << spantype->ref_name;
   // TODO: hardcode 'a', wait for expr eval
 
   return true;
@@ -393,41 +368,42 @@ bool FactorCodeGen::Visit(AST::ParamList &pl) {
 
 bool FactorCodeGen::Visit(AST::ParallelBy &by) {
   parallel_factor *= by.bound;
-  bs << this->indent << "Dim3 grid_dim(1);\n";
-  bs << this->indent << "Dim3 block_dim(" << by.bound << ");\n";
-  bs << this->indent << "Value stream = alloc_stream_();\n";
-  bs << this->indent << "create_stream_(stream);\n";
-  bs << this->indent << "auto ts = launch_kernel_(\"" << current_fn
+  fs << this->indent << "Dim3 grid_dim(1);\n";
+  fs << this->indent << "Dim3 block_dim(" << by.bound << ");\n";
+  fs << this->indent << "Value stream = alloc_stream_();\n";
+  fs << this->indent << "create_stream_(stream);\n";
+  fs << this->indent << "auto ts = launch_kernel_(\"" << current_fn
      << "\", grid_dim, block_dim, stream, {";
   if (cur_params->size() > 0) {
-    bs << "args[0]";
+    fs << "args[0]";
     for (size_t i = 1; i < cur_params->size(); ++i) {
-      bs << ", "
+      fs << ", "
          << "args[" << i << "]";
     }
   }
-  bs << "}, {" << ((void_return) ? "" : "output") << "});\n";
-  bs << this->indent << "destroy_stream_(stream);\n";
-  bs << this->indent << "dealloc_stream_(stream);\n";
-  bs << this->indent << "return std::vector<Value>{" << ((void_return) ? "" : "output") << "};\n";
+  fs << "}, {" << ((void_return) ? "" : "output") << "});\n";
+  fs << this->indent << "destroy_stream_(stream);\n";
+  fs << this->indent << "dealloc_stream_(stream);\n";
+  fs << this->indent << "return std::vector<Value>{" << ((void_return) ? "" : "output") << "};\n";
   this->decrementIndent();
-  bs << this->indent << "}); // end of choreo-factor dataflow program\n";
-  bs << "\n";
+  fs << indent << "include_(\"" << backpatch_filename << "\")\n";
+  fs << this->indent << "}); // end of choreo-factor dataflow program\n";
+  fs << "\n";
 
-  bs << this->indent << "\n";
-  bs << this->indent << "D(func_)(\"" << current_fn << "\", {";
+  fs << this->indent << "\n";
+  fs << this->indent << "D(func_)(\"" << current_fn << "\", {";
   if (cur_params->size() > 0) {
-    bs << (*cur_params)[0]->sym->name << "_type";
+    fs << (*cur_params)[0]->sym->name << "_type";
     for (unsigned i = 1; i < cur_params->size(); ++i)
-      bs << ", " << (*cur_params)[i]->sym->name << "_type";
+      fs << ", " << (*cur_params)[i]->sym->name << "_type";
   }
-  bs << "}, {" << ((void_return) ? "" : "choreo_output_type") << "}, [&](auto args, auto results) {\n";
+  fs << "}, {" << ((void_return) ? "" : "choreo_output_type") << "}, [&](auto args, auto results) {\n";
   this->incrementIndent();
-  bs << this->indent << "auto thread_id = thread_id_();\n";
+  fs << this->indent << "auto thread_id = thread_id_();\n";
   // int i = 0;
   // NOTE: remove unused aliasing 'auto k_a = args[0];'
   // for (auto &param : *cur_params) {
-  //   bs << "      "
+  //   fs << "      "
   //      << "auto k_" << param->sym->name << " = args[" << i++ << "];\n";
   // }
 
@@ -484,21 +460,21 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
 
   if (auto mem_node = dyn_cast<AST::Memory>(d.to)) {
     // TODO(albert): generate 'local_buffer' with more smart naming way by valno support
-    bs << this->indent << "auto " << to_node_name << " = alloc_(";
+    fs << this->indent << "auto " << to_node_name << " = alloc_(";
     switch(mem_node->getStorageLevel()) {
       case Storage::LOCAL:
-        bs << "L1Type(";
+        fs << "L1Type(";
         break;
       case Storage::SHARED:
-        bs << "SRAMType(";
+        fs << "SRAMType(";
         break;
       case Storage::GLOBAL:
-        bs << "DRAMType(";
+        fs << "DRAMType(";
         break;
       default:
         assert(false && "Unexpected storage type.");
     }
-    bs << factor_typestr((Choreo::BaseType)data_type) << ",";
+    fs << factor_typestr((Choreo::BaseType)data_type) << ",";
 
     auto ty = dyn_cast<FutureType>(GetSymbolType(future_name));
     assert(ty && "Invalied return type of DMA op!");
@@ -522,7 +498,7 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
     //   else
     //     shape_info = shape_info + "}";
     // }
-    bs << shape_info << ");\n";
+    fs << shape_info << ");\n";
   }
 
   if(src_level >= des_level)
@@ -570,8 +546,8 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   arg_idx = strtab.GetSymbolIndex(to_node_name);
   to_node_name = arg_idx < 0 ? to_node_name : "args[" + std::to_string(arg_idx) + "]";
 
-  bs << this->indent << "auto " << future_name << " = alloc_dma_(SDMAType());\n";
-  bs << this->indent << dma_op << future_name
+  fs << this->indent << "auto " << future_name << " = alloc_dma_(SDMAType());\n";
+  fs << this->indent << dma_op << future_name
      << ", " << from_node_name << ", "
      << to_node_name << ", " << offset_string <<  ");\n";
 
@@ -585,16 +561,16 @@ bool FactorCodeGen::Visit(AST::Wait &w) {
   assert(dmas && "Invalid wait target!");
 
   for(auto dma : dmas->getValues()){
-    bs << this->indent << "wait_dma_(" << AST::STR(*dma) << ");\n";
+    fs << this->indent << "wait_dma_(" << AST::STR(*dma) << ");\n";
   }
 
   return true;
 };
 
 bool FactorCodeGen::Visit(AST::Call &c) {
-  bs << this->indent << "call_(\"";
-  bs << STR(*c.function);
-  bs << "\", {";
+  fs << this->indent << "call_(\"";
+  fs << STR(*c.function);
+  fs << "\", {";
   auto args = dyn_cast<AST::MultiValues>(c.arguments);
   assert(args && "Invalid kernel call args!");
   int arg_num = args->getValues().size();
@@ -603,7 +579,7 @@ bool FactorCodeGen::Visit(AST::Call &c) {
     assert(arg && "Invalid kernel call arg!");
     switch (arg->t) {
       case AST::Expr::Reference:
-        bs << STR(arg->value_r);
+        fs << STR(arg->value_r);
         break;
       case AST::Expr::Unary:
         if(arg->op == "sizeof"){
@@ -616,22 +592,22 @@ bool FactorCodeGen::Visit(AST::Call &c) {
           int dim_sz = shape.Dims(), size = 1;
           for (int dim_cursor = 0; dim_cursor < dim_sz;)
             size = size * (*(std::get_if<int>(&shapes[dim_cursor++])));
-          bs << std::to_string(size);
+          fs << std::to_string(size);
         }
         else if(arg->op == ".data"){
-          bs << STR(arg->value_r) << "_buffer";
+          fs << STR(arg->value_r) << "_buffer";
         }
         break;
       default:
-        bs << STR(*arg);
+        fs << STR(*arg);
         choreo_unreachable("unhandled expression type.");
         break;
     }
     index++;
     if(index < arg_num)
-      bs << ",";
+      fs << ",";
   }
-  bs << "});\n";
+  fs << "});\n";
 
   return true;
 };
@@ -657,14 +633,14 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
     auto iv_bounds = dyn_cast<BoundedITupleType>(iv_type)->GetBounds();
     auto iv_values = iv_bounds.Value();
     // for (const auto &value : iv_values) {
-    //   if (auto intValue = std::get_if<int>(&value)) bs << *intValue;
+    //   if (auto intValue = std::get_if<int>(&value)) fs << *intValue;
     // }
     // NOTES: bounds always has one integer indicating the upperbound value
     // we can certainly use idx=0 directly
     auto upper_bound = *(std::get_if<int>(&iv_values[0]));
 
     // synthesise the emitting string
-    bs << this->indent << "for_(0, " << std::to_string(upper_bound)
+    fs << this->indent << "for_(0, " << std::to_string(upper_bound)
        << ", " << 1 /* TODO(albert): need fix, unit stride is hardcoded for now*/
        << ", " << "[&](auto "
        << iv_str << ") {\n";
@@ -674,10 +650,9 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
 }
 
 void FactorCodeGen::GenerateHostFunction(std::ostream &os, const Type & ty,
-																				 const std::string & n) {
+																				 const std::string & n, bool decl_only) {
   assert(isa<FunctionType>(&ty) && "unexpected type.");
   auto &fty = *cast<FunctionType>(&ty);
-  os << "#ifdef __CHOREO_HOST_CODE__  // this is the host code\n";
   os << stub_type_str(*fty.out_ty, true) << " " << n << "(";
   if (fty.in_tys.size() > 0) {
     auto n = GenEntryParamName();
@@ -695,8 +670,7 @@ void FactorCodeGen::GenerateHostFunction(std::ostream &os, const Type & ty,
       os << ", " << stub_type_str(*fty.in_tys[i]) << " " << n;
     }
   }
-  os << ") {\n";
-  os << "#endif //__CHOREO_HOST_CODE__\n";
+  os << ")" << ((decl_only) ? ";" : " {") << "\n";
 }
 
 bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
@@ -723,13 +697,13 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
                          ", " + _os.str();
 
       strtab.AddSymbol(name, type_symbol, type_string);
-      bs << this->indent << "auto " << strtab.GetTypeSymbol(name) << " = " << strtab.GetTypeString(name);
-      bs << ");\n";
+      fs << this->indent << "auto " << strtab.GetTypeSymbol(name) << " = " << strtab.GetTypeString(name);
+      fs << ");\n";
     } else {
       auto type_symbol = name+"_type";
       auto type_string = "DRAMType(" + factor_typestr(param->type->getBaseType()) + ", (1));";
       strtab.AddSymbol(name, type_symbol, type_string);
-      bs << this->indent << "auto " << strtab.GetTypeSymbol(name) << " = " << strtab.GetTypeString(name) << "\n";
+      fs << this->indent << "auto " << strtab.GetTypeSymbol(name) << " = " << strtab.GetTypeString(name) << "\n";
     }
   }
 
@@ -748,37 +722,37 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
                        ", " + _os.str();
 
     strtab.AddSymbol(type_symbol, type_symbol, type_string);
-    bs << this->indent << "auto " << type_symbol << " = " << strtab.GetTypeString(type_symbol);
-    bs << ");\n";
+    fs << this->indent << "auto " << type_symbol << " = " << strtab.GetTypeString(type_symbol);
+    fs << ");\n";
   } else if (AST::typeof<VoidType>(current_output)) {
     void_return = true;
   } else {
     auto type_symbol = "choreo_output_type";
     auto type_string = "DRAMType(" + factor_typestr(current_output->getBaseType()) + ", (1));";
     strtab.AddSymbol(type_symbol, type_symbol, type_string);
-    bs << this->indent << "auto " << strtab.GetTypeSymbol(type_symbol) << " = " << strtab.GetTypeString(type_symbol) << "\n";
+    fs << this->indent << "auto " << strtab.GetTypeSymbol(type_symbol) << " = " << strtab.GetTypeString(type_symbol) << "\n";
   }
 
-  // bs << "    auto choreo_output_type = DRAMType(";
-  // bs << factor_typestr(current_output->getBaseType());
-  // bs << ", (1));\n";  // todo
+  // fs << "    auto choreo_output_type = DRAMType(";
+  // fs << factor_typestr(current_output->getBaseType());
+  // fs << ", (1));\n";  // todo
 
-  bs << "\n";
-  bs << this->indent << "// choreo-factor dataflow function\n";
-  bs << this->indent << "D(main_)({";
+  fs << "\n";
+  fs << this->indent << "// choreo-factor dataflow function\n";
+  fs << this->indent << "D(main_)({";
 
   bool first_param = true;
   for (auto &param : *cur_params) {
     auto name = param->sym->name;
 
     if (first_param) {
-      bs << name + "_type";
+      fs << name + "_type";
       first_param = false;
     } else
-      bs << ", " << name + "_type";
+      fs << ", " << name + "_type";
   }
 
-  bs << "}, [&](auto args) {\n";
+  fs << "}, [&](auto args) {\n";
 
   this->incrementIndent();
 
@@ -790,8 +764,66 @@ bool FactorCodeGen::Visit(AST::ChoreoFunction &) {
 }
 
 bool FactorCodeGen::Visit(AST::CppSourceCode &n) {
-  os << n.GetCode();
+  if (n.host)
+    hs << n.GetCode();
+  else
+    ks << n.GetCode();
   return true;
 }
 
 bool FactorCodeGen::Visit(AST::Program &) { return true; }
+
+void FactorCodeGen::OutputScript(const std::string &n, size_t out_size) {
+  // it requires two temporal file for the compilation process
+  std::string kernel_fn = "__choreo_" + n + "_kernel";
+  std::string factor_fn = "__choreo_" + n + "_factor";
+  std::string factor_bn = "__choreo_" + n + "_factor.bin";
+  std::string host_fn   = "__choreo_" + n + "_host";
+  std::string target_fn = "__choreo_" + n;
+
+  // Generate the host code
+  std::string user_code = hs.str();
+  hs.clear();
+  print_host_head(hs);
+  GenerateHostFunction(hs, *cur_fty, n, true);
+  hs << user_code;
+  GenerateHostFunction(hs, *cur_fty, n);
+  print_host_phase1(hs, factor_bn);
+  std::vector<std::string> device_mems;
+  print_host_phase2(hs, entry_data, out_size, device_mems);
+  print_host_phase3(hs, parallel_factor, out_size);
+  print_host_phase4(hs, device_mems);
+
+  // backpatch the factor bin filename
+  std::string factor_src = fs.str();
+  ReplaceInString(factor_src, std::string(backpatch_filename), factor_bn);
+
+  // Now generate the script
+  os <<
+R"(#!/usr/bin/env bash
+
+# This the the choreo generated bash script to compile factor code
+
+)";
+  os << "# step 1: write the kernel source code into a temp file\n";
+  os << "kernel_src=$(mktemp /tmp/" << kernel_fn << ".XXXXXX)\n";
+  os << "cat <<EOF > \"$kernel_src\n";
+  os << ks.str() << "\nEOF\n\n";
+
+  os << "# step 2: write the factor source code into a temp file\n";
+  os << "factor_src=$(mktemp /tmp/" << factor_fn << ".XXXXXX)\n"; os << "cat <<EOF > \"$factor_src\n";
+  os << factor_src << "\nEOF\n\n";
+
+  os << "# step 3: compile factor code into a binary\n";
+  os << "factor_bin="<< factor_bn << "\n";
+  os << "# TODO: sfc ${factor_src} -o ${factor_bin}\n\n";
+
+  os << "# step 4: generate the host source\n";
+  os << "host_src=$(mktemp /tmp/" << host_fn << ".XXXXXX)\n";
+  os << "cat <<EOF > \"$host_src\n";
+  os << hs.str() << "\nEOF\n\n";
+
+  os << "# step 5: compile the host source to target executable\n";
+  os << "target=" << target_fn << "\n";
+  os << "# TODO: sfc ${host_src} -o ${target}\n";
+}

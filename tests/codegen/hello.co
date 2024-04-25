@@ -20,21 +20,12 @@ int main() {
 }
 
 // CHECK:  using namespace factor;
-// CHECK:  FACTOR_PROGRAM(__choreo_co_hello);
-// CHECK:  __choreo_co_hello([&](auto target_name) {
+// CHECK:  void __choreo_co_hello() {
 // CHECK: #include "choreo.h"
 // CHECK: void co_hello() {
 // CHECK:    {{.*}}topsCreateExecutable{{.*}}
 // CHECK:    {{.*}}topsStreamCreate{{.*}}
-// CHECK:    {{.*}}topsMalloc{{.*}}
-// CHECK:    {{.*}}topsMemcpy{{.*}}
-// CHECK:    {{.*}}topsMalloc{{.*}}
-// CHECK:    {{.*}}topsMemcpy{{.*}}
-// CHECK:    {{.*}}topsMalloc{{.*}}
 // CHECK:    {{.*}}topsLaunchExecutableV2{{.*}}
 // CHECK:    {{.*}}topsStreamSynchronize{{.*}}
 // CHECK:    {{.*}}topsStreamDestroy{{.*}}
 // CHECK:    {{.*}}topsDestroyExecutable{{.*}}
-// CHECK:    {{.*}}topsFree{{.*}}
-// CHECK:    {{.*}}topsFree{{.*}}
-// CHECK:    {{.*}}topsFree{{.*}}

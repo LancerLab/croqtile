@@ -34,27 +34,33 @@ struct FactorCodeGen : public CodeGenerator {
   bool void_return = false;
 
  private:
-  // buffer the includes, factor function declarations, etc
+  // buffer the kernel code
+  std::ostringstream ks;
+  // buffer the factor code
+  std::ostringstream fs;
+  // buffer the host code
   std::ostringstream hs;
-  // buffer the function bodies
-  std::ostringstream bs;
 
   // name of stub parameters
   size_t sp_count = 0;
   std::vector<std::pair<std::string, size_t>> entry_data;
 
-  void GenerateHostFunction(std::ostream &, const Type &, const std::string &);
+  void GenerateHostFunction(std::ostream &, const Type &, const std::string &,
+                            bool = false);
   std::string GenEntryParamName() { return "sp" + std::to_string(sp_count++); }
 
  public:
   FactorCodeGen(std::ostream &os, const ptr<SymbolTable> &symtab)
       : CodeGenerator(os, symtab) {}
 
-  void FlushBuffers() {
-    os << hs.str() << bs.str();
+  void ResetBuffers() {
+    ks.clear();
+    fs.clear();
     hs.clear();
-    bs.clear();
   }
+
+  void OutputScript(const std::string &, size_t);
+
   bool BeforeVisitImpl(AST::Node &) override;
   bool AfterVisitImpl(AST::Node &) override;
 
