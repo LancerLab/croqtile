@@ -40,14 +40,17 @@ struct FactorCodeGen : public CodeGenerator {
   std::ostringstream fs;
   // buffer the host code
   std::ostringstream hs;
+  std::string host_fn;
+  std::string target_fn;
 
-  // name of stub parameters
+  // name of entry parameters
   size_t sp_count = 0;
   std::vector<std::pair<std::string, size_t>> entry_data;
 
   void GenerateHostFunction(std::ostream &, const Type &, const std::string &,
                             bool = false);
   std::string GenEntryParamName() { return "sp" + std::to_string(sp_count++); }
+  void ResetEntryParamCount() { sp_count = 0; }
 
  public:
   FactorCodeGen(std::ostream &os, const ptr<SymbolTable> &symtab)
@@ -59,7 +62,7 @@ struct FactorCodeGen : public CodeGenerator {
     hs.clear();
   }
 
-  void OutputScript(const std::string &, size_t);
+  void OutputScript(const std::string &, const std::string &, size_t, const Shape &);
 
   bool BeforeVisitImpl(AST::Node &) override;
   bool AfterVisitImpl(AST::Node &) override;

@@ -344,14 +344,14 @@ struct ValueListRepo {
   }
 };
 
-inline void PrintValueList(const ValueList& vl, std::ostream& os) {
+inline void PrintValueList(const ValueList& vl, std::ostream& os, char lb = '[', char rb = ']') {
   auto print_variant = [&os](const ValueItem& vle) {
     if (vle.index() == 0)
       os << std::get<0>(vle);
     else
       os << std::get<1>(vle);
   };
-  os << "[";
+  os << lb;
   if (!vl.empty()) {
     print_variant(vl[0]);
     for (unsigned i = 1; i < vl.size(); ++i) {
@@ -359,7 +359,7 @@ inline void PrintValueList(const ValueList& vl, std::ostream& os) {
       print_variant(vl[i]);
     }
   }
-  os << "]";
+  os << rb;
 }
 
 // TODO(albert): pack this util function together with other emit purpose
@@ -475,8 +475,16 @@ struct Shape {
     if (val_no == __INVALID_VALUE__) os << "[]";
     // PrintValueList(Value(), os);
     else {
-      assert(values.Exists(val_no) && "bad value number.");
+      assert(values.Exists(val_no) && "invalid value number.");
       PrintValueList(Value(), os);
+    }
+  }
+
+  void PrintAsList(std::ostream& os) const {
+    if (val_no == __INVALID_VALUE__) os << "[]";
+    else {
+      assert(values.Exists(val_no) && "invalid value number.");
+      PrintValueList(Value(), os, '{', '}');
     }
   }
 
@@ -863,12 +871,26 @@ inline size_t GetByteSizeOf(const Type& ty) {
   if (isa<VoidType>(&ty)) return 0;
   if (isa<IntegerType>(&ty))
     return 4;
-  else if (isa<IntegerType>(&ty))
+  else if (isa<BooleanType>(&ty))
     return 4;
   else if (isa<BoundedIntegerType>(&ty))
     return 4;
   else if (auto t = dyn_cast<SpannedType>(&ty))
     return t->ByteSize();
+  choreo_unreachable(STR(ty) + " does not imply runtime storage.");
+  return 0;
+}
+
+inline std::string GetBaseTypeStringOf(const Type& ty) {
+  if (isa<VoidType>(&ty)) return "void";
+  if (isa<IntegerType>(&ty))
+    return "int";
+  else if (isa<BooleanType>(&ty))
+    return "bool";
+  else if (isa<BoundedIntegerType>(&ty))
+    return "int";
+  else if (auto t = dyn_cast<SpannedType>(&ty))
+    return getStringFrom((BaseType)t->f_type);
   choreo_unreachable(STR(ty) + " does not imply runtime storage.");
   return 0;
 }

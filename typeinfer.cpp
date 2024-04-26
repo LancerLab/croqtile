@@ -44,6 +44,7 @@ bool TypeInference::AfterVisit(AST::Node &n) {
       // function type already
       f->f_decl.ret_type->SetType(func_ty->out_ty);
       f->f_decl.SetType(sym_ty);
+      f->SetType(sym_ty);
     }
   }
   return true;
