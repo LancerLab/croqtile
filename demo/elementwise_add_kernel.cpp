@@ -3,7 +3,8 @@
 
 using namespace factor;
 void __choreo_ele_add() {
-  include_("__choreo_ele_add_micro_kernel.cpp");
+  include_("/tmp/1714104412747419274_1___choreo_ele_add_micro_kernel.cpp");
+  // include_("/root/choreo/demo/__choreo_ele_add_micro_kernel.cpp");
   auto lhs_type = DRAMType(IntType(32), {6, 17, 128});
   auto rhs_type = DRAMType(IntType(32), {6, 17, 128});
   auto output_type = DRAMType(IntType(32), {6, 17, 128});
@@ -44,4 +45,4 @@ void __choreo_ele_add() {
   }); // end of choreo-factor kernel function
 }
 
-MODULE_REGISTER("factor_program__choreo_ele_add", __choreo_ele_add);
+MODULE_REGISTER("module__choreo_ele_add", __choreo_ele_add);

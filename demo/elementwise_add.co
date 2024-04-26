@@ -2,7 +2,7 @@
 
 __cok__ {
 // kernel program
-void kernel(int * a, int * b, int * c, int n) {
+extern "C" void kernel(int * a, int * b, int * c, int n) {
   for (int i = 0; i < n; ++i)
     c[i] = a[i] + b[i];
 }
@@ -46,8 +46,12 @@ __co__ s32 [6, 17, 128] ele_add(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) {
 }
 
 // host program
-int bar(int a[], int b[]) {
-  return ele_add(choreo::make_spanned<3>(a, {144, 100, 100}),
-                 choreo::make_spanned<3>(b, {144, 100, 100});
+int main() {
+  choreo::s32 a[6][17][128] = {0};
+  choreo::s32 b[6][17][128] = {0};
+  std::fill_n(&a[0][0][0], sizeof(a) / sizeof(a[0][0][0]), 1);
+  std::fill_n(&b[0][0][0], sizeof(b) / sizeof(b[0][0][0]), 2);
+  ele_add(choreo::make_spanned<3, choreo::s32>((int*)a, {6, 17, 128}),
+                 choreo::make_spanned<3, choreo::s32>((int*)b, {6, 17, 128}));
 }
 

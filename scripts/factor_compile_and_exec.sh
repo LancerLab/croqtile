@@ -5,12 +5,13 @@ set -x
 
 source $(dirname "$0")/demo_env_setting.sh
 
-KERNEL_SRC=$KERNEL_PATH"/elementwise_add_kernel.cpp"
-FATBIN_TARGET=$KERNEL_PATH"/elementwise_add.fb"
-HOST_SRC=$KERNEL_PATH"/elementwise_add_main.cpp"
-BIN_TARGET=$KERNEL_PATH"/elementwise_add.bin"
+KERNEL_SRC=$1
+FATBIN_TARGET=$2
+HOST_SRC=$3
+BIN_TARGET=$4
 
 docker exec -it "root_dev" bash -c "
+    cd $CHOREO_PATH
     set -e
     set -x
     echo \"Running inside efdocker\"
@@ -19,7 +20,8 @@ docker exec -it "root_dev" bash -c "
     sudo bash $COMPILE_SHELL $KERNEL_SRC $FATBIN_TARGET $HOST_SRC $BIN_TARGET
 
     echo \"Run Demo\"
-    $BIN_TARGET $FATBIN_TARGET
+    pwd
+    $CHOREO_PATH/demo/$BIN_TARGET $FATBIN_TARGET
 "
 
 echo "Exiting efdocker"
