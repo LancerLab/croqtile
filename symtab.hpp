@@ -123,6 +123,14 @@ class StringifyTable {
     type_sym_table.clear();
     syms.clear();
   }
+
+  void Print(std::ostream& os) {
+    os << "\n";
+    for (auto symbol : syms)
+      os << "symbol: " << symbol
+         << ", name: " << type_sym_table.find(symbol)->second
+         << ", type: " << type_string_table.find(symbol)->second << "\n";
+  }
 };
 
 // This is the scoped symbol table
