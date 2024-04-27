@@ -141,16 +141,22 @@ static inline void print_host_phase2(std::ostream &os,
 }
 
 // phase 3: Execute the executable and fetch the output
-static inline void print_host_phase3(std::ostream &os, size_t parallel_factor,
+static inline void print_host_phase3(std::ostream &os,
+                                     const EntryParamType &params,
                                      size_t out_size) {
-  os << "  int64_t input_dim = " << parallel_factor << ";";
+  os << "  int64_t input_dims[] = {";
+  if (params.size() > 0) {
+    os << params[0].second;
+    for (size_t i = 1; i < params.size(); ++i) os << ", " << params[i].second;
+  }
+  os << "};";
   os << R"(
-  size_t input_rank = 1;
+  size_t input_ranks[] = {1, 1};
 
   CHECK(topsLaunchExecutableV2(
       executable, nullptr, device_inputs,
-      sizeof(device_inputs) / sizeof(void *), &input_dim,
-      &input_rank, device_outputs,
+      sizeof(device_inputs) / sizeof(void *), (int64_t*)input_dims,
+      (size_t*)input_ranks, device_outputs,
       sizeof(device_outputs) / sizeof(void *), stream));
   CHECK(topsStreamSynchronize(stream));
 
@@ -881,7 +887,7 @@ void FactorCodeGen::OutputScript(const std::string &n,
   print_host_phase1(hs, factor_bfn);
   std::vector<std::string> device_mems;
   print_host_phase2(hs, entry_data, out_size, device_mems);
-  print_host_phase3(hs, parallel_factor, out_size);
+  print_host_phase3(hs, entry_data, out_size);
   if (out_shape.IsValid()) {
     std::ostringstream oss;
     out_shape.PrintAsList(oss);
