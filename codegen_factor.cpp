@@ -1,7 +1,7 @@
 #include <filesystem>
 #include <iostream>
-#include <thread>
 #include <sstream>
+#include <thread>
 
 #include "ast.hpp"
 #include "codegen.hpp"
@@ -167,19 +167,18 @@ static inline void print_host_phase3(std::ostream &os, size_t parallel_factor,
 // resource deallocation
 static inline void print_host_phase4(std::ostream &os,
                                      std::vector<std::string> &d_params,
-				     const std::string & out_type, 
-				     size_t out_rank,
-				     const std::string & init) {
-  os << "// Free up the resources\n";
+                                     const std::string &out_type,
+                                     size_t out_rank, const std::string &init) {
+  os << "  // Free up the resources\n";
   for (auto &p : d_params) os << "  topsFree(" << p << ");\n";
   os << R"(
   topsStreamDestroy(stream);
   topsDestroyExecutable(executable);
 )";
   if (out_rank != 0) {
-  os << "  return ToSpanned<" << out_rank << ", choreo::" << out_type
-     << ">(res, " << init << ");\n";
-  os << "}\n";
+    os << "  return ToSpanned<" << out_rank << ", choreo::" << out_type
+       << ">(res, " << init << ");\n";
+    os << "}\n";
   } else
     os << "  return choreo::" << out_type << "(res);\n";
 }
@@ -285,15 +284,16 @@ using namespace factor;
 
 bool FactorCodeGen::AfterVisitImpl(AST::Node &n) {
   if (isa<AST::Program>(&n)) {
-  os << "# step 4.1: generate the host source\n";
-  os << "host_src=" << host_fn << "\n";
-  os << "cat <<EOF > ${host_src}\n";
-  os << hs.str() << "\nEOF\n\n";
+    os << "# step 4.1: generate the host source\n";
+    os << "host_src=" << host_fn << "\n";
+    os << "cat <<EOF > ${host_src}\n";
+    os << hs.str() << "\nEOF\n\n";
 
-  os << "# step 5: compile the host source to target executable\n";
-  os << "target=" << target_fn << "\n";
-  os << "# TODO: sfc ${host_src} -o ${target}\n";
-  os << "~/choreo/scripts/factor_compile_and_exec.sh ${factor_src} ${factor_bin} ${host_src} ${target}\n";
+    os << "# step 5: compile the host source to target executable\n";
+    os << "target=" << target_fn << "\n";
+    os << "# TODO: sfc ${host_src} -o ${target}\n";
+    os << "~/choreo/scripts/factor_compile_and_exec.sh ${factor_src} "
+          "${factor_bin} ${host_src} ${target}\n";
 
   } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
     entry_fn = f->name;
@@ -303,9 +303,11 @@ bool FactorCodeGen::AfterVisitImpl(AST::Node &n) {
     fs << "}\n\nMODULE_REGISTER(\"module" << current_fn << "\", " << current_fn
        << ");";  // end the factor function definition
     if (auto sty = dyn_cast<SpannedType>(out_type)) {
-      OutputScript(f->name, GetBaseTypeStringOf(*out_type), out_size, sty->GetShape());
+      OutputScript(f->name, GetBaseTypeStringOf(*out_type), out_size,
+                   sty->GetShape());
     } else
-      OutputScript(f->name, GetBaseTypeStringOf(*out_type), out_size, Shape()/*invalid shape*/);
+      OutputScript(f->name, GetBaseTypeStringOf(*out_type), out_size,
+                   Shape() /*invalid shape*/);
     ResetBuffers();
     cur_fty = nullptr;
   } else if (isa<AST::ParallelBy>(&n)) {
@@ -728,20 +730,20 @@ void FactorCodeGen::GenerateHostFunction(std::ostream &os, const Type &ty,
   if (fty.in_tys.size() > 0) {
     auto n = GenEntryParamName();
     if (!decl_only) {
-    if (auto sty = dyn_cast<SpannedType>(fty.in_tys[0]))
-      entry_data.push_back(std::make_pair(n + ".data", sty->ByteSize()));
-    else
-      entry_data.push_back(std::make_pair(n, 1));
-    }
-    os << stub_type_str(*fty.in_tys[0]) << " " << n;
-    for (size_t i = 1; i < fty.in_tys.size(); ++i) {
-      auto n = GenEntryParamName();
-    if (!decl_only) {
-      if (auto sty = dyn_cast<SpannedType>(fty.in_tys[i]))
+      if (auto sty = dyn_cast<SpannedType>(fty.in_tys[0]))
         entry_data.push_back(std::make_pair(n + ".data", sty->ByteSize()));
       else
         entry_data.push_back(std::make_pair(n, 1));
     }
+    os << stub_type_str(*fty.in_tys[0]) << " " << n;
+    for (size_t i = 1; i < fty.in_tys.size(); ++i) {
+      auto n = GenEntryParamName();
+      if (!decl_only) {
+        if (auto sty = dyn_cast<SpannedType>(fty.in_tys[i]))
+          entry_data.push_back(std::make_pair(n + ".data", sty->ByteSize()));
+        else
+          entry_data.push_back(std::make_pair(n, 1));
+      }
       os << ", " << stub_type_str(*fty.in_tys[i]) << " " << n;
     }
   }
@@ -848,8 +850,7 @@ bool FactorCodeGen::Visit(AST::ChoreoFunction &) { return true; }
 bool FactorCodeGen::Visit(AST::CppSourceCode &n) {
   if (n.host) {
     hs << n.GetCode();
-  }
-  else {
+  } else {
     ks << n.GetCode();
   }
   return true;
@@ -857,7 +858,9 @@ bool FactorCodeGen::Visit(AST::CppSourceCode &n) {
 
 bool FactorCodeGen::Visit(AST::Program &) { return true; }
 
-void FactorCodeGen::OutputScript(const std::string &n, const std::string & out_type, size_t out_size, const Shape & out_shape) {
+void FactorCodeGen::OutputScript(const std::string &n,
+                                 const std::string &out_type, size_t out_size,
+                                 const Shape &out_shape) {
   // it requires temporal files for the compilation process
   std::string kernel_fn =
       create_unique_filename("__choreo_" + n + "_micro_kernel.cpp");
@@ -883,8 +886,7 @@ void FactorCodeGen::OutputScript(const std::string &n, const std::string & out_t
     std::ostringstream oss;
     out_shape.PrintAsList(oss);
     print_host_phase4(hs, device_mems, out_type, out_shape.Dims(), oss.str());
-  }
-  else
+  } else
     print_host_phase4(hs, device_mems, out_type, 0, "{1}");
 
   // backpatch the factor bin filename
@@ -1075,5 +1077,4 @@ EOF
   os << "# TODO: sfc ${host_src} -o ${target}\n";
   os << "~/choreo/scripts/factor_compile_and_exec.sh ${factor_src} ${factor_bin} ${host_src} ${target}\n";
 #endif
-
 }

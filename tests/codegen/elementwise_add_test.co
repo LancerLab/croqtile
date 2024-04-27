@@ -15,7 +15,7 @@ void kernel(int * a, int * b, int * c, int n) {
 __co__ s32 mdspan[12, 1024] ele_add(s32 [12, 1024] a, s32 [12, 1024] b) {
   // CHECK: auto a_type = DRAMType(IntType(32), {12, 1024});
   // CHECK: auto b_type = DRAMType(IntType(32), {12, 1024});
-  // CHECK: auto choreo_output_type = DRAMType(IntType(32), {12, 1024});
+  // CHECK: auto output_type = DRAMType(IntType(32), {12, 1024});
 
   // test global-level buffer decl
   // TODO(albert): remove this dupdundant decl first
@@ -23,11 +23,11 @@ __co__ s32 mdspan[12, 1024] ele_add(s32 [12, 1024] a, s32 [12, 1024] b) {
   s32 [12, 1024] choreo_output_type;
   // f32[a.span] lhs_global;
   // f32[b.span] rhs_global;
-  f32[choreo_output_type.span] output;
+  f32 [choreo_output_type.span] output;
   // TODO: fix to avoid merging a.span, b.span, all to "a_type"
   // check: auto lhs_global = alloc_(a_type);
   // check: auto rhs_global = alloc_(a_type);
-  // CHECK: auto output = alloc_(choreo_output_type);
+  // CHECK: auto output = alloc_(DRAMType(FloatType(32),{12, 1024}));
 
   // TODO(albert): test span decl
   // l2_span : [25];  // shape, mdspan node
