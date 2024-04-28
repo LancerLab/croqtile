@@ -329,13 +329,43 @@ bool FactorCodeGen::AfterVisitImpl(AST::Node &n) {
     os << "# step 5: compile the host source to target executable\n";
     os << "target=" << target_fn << "\n";
     os << "# TODO: sfc ${host_src} -o ${target}\n";
-    os << "~/choreo/scripts/factor_compile_and_exec.sh ${factor_src} "
-          "${factor_bin} ${host_src} ${target}\n";
     os << R"(
-echo ">>>> Line of Code without Choreo"
-wc -l ${factor_src} ${host_src} ${kernel_src}
-echo ">>>> Line of Code with Choreo"
-wc -l ~/choreo/demo/elementwise_add.co
+if [ "$#" -ne 1 ]; then
+    echo "    Usage: $0 | --execute           -> compile and execute choreo in factor
+                    | --statistics        -> show Line Of Code (LOC) statistic compare between kernel code boosted w./w.o. Choreo
+                    | --show-kernel       -> show the generated inner kernel code
+                    | --show-tileflow     -> show the generated tileflow code scheduled by choreo
+                    | --show-host         -> show the generated host side boilerplates
+                    | --show-choreo       -> show the choreo source code"
+    exit 1
+fi
+    )";
+    os << R"(
+if [ "$1" == "--execute" ]; then
+  ~/choreo/scripts/factor_compile_and_exec.sh ${factor_src} ${factor_bin} ${host_src} ${target}
+elif [ "$1" == "--statistics" ]; then
+  echo ">>>> Line of Code without Choreo"
+  wc -l ${factor_src} ${host_src} ${kernel_src}
+  echo ">>>> Line of Code with Choreo"
+  wc -l ~/choreo/demo/elementwise_add.co
+  # grep -v '^ *//' ~/choreo/demo/elementwise_add.co | wc -l
+elif [ "$1" == "--show-kernel" ]; then
+  nvim ${kernel_src}
+elif [ "$1" == "--show-host" ]; then
+  nvim ${host_src}
+elif [ "$1" == "--show-tileflow" ]; then
+  nvim ${factor_src}
+elif [ "$1" == "--show-choreo" ]; then
+  nvim ~/choreo/demo/elementwise_add.co
+else
+    echo "    Usage: $0 | --execute           -> compile and execute choreo in factor
+                    | --statistics        -> show Line Of Code (LOC) statistic compare between kernel code boosted w./w.o. Choreo
+                    | --show-kernel       -> show the generated inner kernel code
+                    | --show-tileflow     -> show the generated tileflow code scheduled by choreo
+                    | --show-host         -> show the generated host side boilerplates
+                    | --show-choreo       -> show the choreo source code"
+    exit 1
+fi
     )";
 
   } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {

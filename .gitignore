@@ -7,4 +7,5 @@ choreo
 demo/*.bin
 demo/*.fb
 demo/__*
+__*
 
