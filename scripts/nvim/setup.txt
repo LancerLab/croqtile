@@ -1,0 +1,5 @@
+# This makes vim automatically detect choreo file with .co suffix
+echo 'au BufRead,BufNewFile *.co set filetype=co' your/vim_config/ftdetect/co.vim
+
+# This adds the syntax highlighting
+cp co.vim your/vim_config/syntax/

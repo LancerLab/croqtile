@@ -28,7 +28,7 @@ __co__ s32 [6, 17, 128] ele_add(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) {
           rhs_load = dte.linear rhs.chunkat(p, x, y) => local;
           wait lhs_load, rhs_load;
 
-          local s32[lhs_load.span] l1_out; // use f1.span as the span of local buffer
+          local s32[lhs_load.span] l1_out; // alternative: s32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
 
           
           call kernel(lhs_load.data, rhs_load.data, l1_out, |lhs_load.span|); // |span| calculate the total size of span.
