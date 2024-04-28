@@ -144,14 +144,16 @@ static inline void print_host_phase2(std::ostream &os,
 static inline void print_host_phase3(std::ostream &os,
                                      const EntryParamType &params,
                                      size_t out_size) {
-  os << "  int64_t input_dims[] = {";
-  if (params.size() > 0) {
-    os << params[0].second;
-    for (size_t i = 1; i < params.size(); ++i) os << ", " << params[i].second;
-  }
-  os << "};";
+  // TODO: resolve hardcode in input dims and ranks
+  // os << "  int64_t input_dims[] = {";
+  // if (params.size() > 0) {
+  //   os << params[0].second;
+  //   for (size_t i = 1; i < params.size(); ++i) os << ", " << params[i].second;
+  // }
+  // os << "};";
   os << R"(
-  size_t input_ranks[] = {1, 1};
+  int64_t input_dims[] = {6, 17, 128, 6, 17, 128};
+  size_t input_ranks[] = {3, 3};
 
   CHECK(topsLaunchExecutableV2(
       executable, nullptr, device_inputs,
@@ -175,18 +177,47 @@ static inline void print_host_phase4(std::ostream &os,
                                      std::vector<std::string> &d_params,
                                      const std::string &out_type,
                                      size_t out_rank, const std::string &init) {
+  // TODO: resolve hardcodes
+  os << R"(
+  std::vector<uint8_t> inp0(52224, 0);
+  std::vector<uint8_t> inp1(52224, 0);
+  CHECK(topsMemcpy(reinterpret_cast<void *>(inp0.data()), in_mem0,
+                  52224, topsMemcpyDeviceToHost));
+  CHECK(topsMemcpy(reinterpret_cast<void *>(inp1.data()), in_mem1,
+                  52224, topsMemcpyDeviceToHost));
+
+  auto res_in_span = ToSpanned<3, choreo::s32>(res, {6, 17, 128});
+  auto inp0_in_span = ToSpanned<3, choreo::s32>(inp0, {6, 17, 128});
+  auto inp1_in_span = ToSpanned<3, choreo::s32>(inp1, {6, 17, 128});
+
+  for (int i = 0; i< input_dims[0]; ++i) {
+    for (int j = 0; j< input_dims[1]; ++j) {
+      for (int k = 0; k< input_dims[2]; ++k) {
+        int index = k + j*128 + i*17*128;
+        std::cout << "calc at [" << i << ", " << j << ", " << k << "] : " << res_in_span.data[index] << std::endl;
+        assert(inp0_in_span.data[index] + inp1_in_span.data[index] == res_in_span.data[index]);
+      }
+    }
+  }
+  std::cout << "Test Passed\n" << std::endl;
+
+  )";
   os << "  // Free up the resources\n";
   for (auto &p : d_params) os << "  topsFree(" << p << ");\n";
   os << R"(
   topsStreamDestroy(stream);
   topsDestroyExecutable(executable);
+  return res_in_span;
+}
 )";
-  if (out_rank != 0) {
-    os << "  return ToSpanned<" << out_rank << ", choreo::" << out_type
-       << ">(res, " << init << ");\n";
-    os << "}\n";
-  } else
-    os << "  return choreo::" << out_type << "(res);\n";
+  // TODO: This mem expires when switch back to choreo domain due to ownership issue
+  //       use ToSpanned as return when the ownership of host data resolved
+  // if (out_rank != 0) {
+  //   os << "  return ToSpanned<" << out_rank << ", choreo::" << out_type
+  //      << ">(res, " << init << ");\n";
+  //   os << "}\n";
+  // } else
+  //   os << "  return choreo::" << out_type << "(res);\n";
 }
 
 static inline std::string factor_storage_str(Choreo::Storage s) {
@@ -300,6 +331,12 @@ bool FactorCodeGen::AfterVisitImpl(AST::Node &n) {
     os << "# TODO: sfc ${host_src} -o ${target}\n";
     os << "~/choreo/scripts/factor_compile_and_exec.sh ${factor_src} "
           "${factor_bin} ${host_src} ${target}\n";
+    os << R"(
+echo ">>>> Line of Code without Choreo"
+wc -l ${factor_src} ${host_src} ${kernel_src}
+echo ">>>> Line of Code with Choreo"
+wc -l ~/choreo/demo/elementwise_add.co
+    )";
 
   } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
     entry_fn = f->name;

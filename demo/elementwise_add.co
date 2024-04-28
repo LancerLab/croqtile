@@ -16,7 +16,7 @@ __co__ s32 [6, 17, 128] ele_add(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) {
   parallel p by 6 {  // p is sip_index
     // kernel function begin
 
-    with index = {x, y} in [17, 8] {  // totally 100 chunks
+    with index = {x, y} in [17, 4] {  // totally 100 chunks
       foreach x {
         foreach y { 
           // l2_lhs_load = dte.linear lhs.chunkat(p, l2_x, l2_y) => shared; // new_size {lhs(0)/6, lhs(1)/1, lhs(2)/1}
