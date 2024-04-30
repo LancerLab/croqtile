@@ -1,15 +1,22 @@
 // RUN: choreo -e %s | FileCheck %s --match-full-lines
 
-__co__ int with_foreach(int b, f32 mdspan<4> input) {
-  ndims : [3, b, 7];
+__co__ int with_foreach(int b, f32 [36, 27, 128] input) {
+  ndims: [3, b];
   int sum = 0;
-  parallel p by 6 { 
-    with index in ndims {
+  parallel p by 6 {        // 'p' is bounded to [0, 6)
+    with index in ndims {  // index is bounded to
+      // foreach to create two-level loop nests, be like:
+      //
+      // for ( index_0 = 0; index_0 < 6; index_0++ )
+      //   for ( index_1 = 0; index_1 < 6; index_1++ )
       foreach index {
+        // shape of each chunk:
+        //    [36 / #p, 27 / #index.dim(0), 6 / #index.dim(1)]
+        //  = [6, 9, 128 / b]
         f = dte.linear input.chunkat(p, index) => local;
         sum = sum + index(0);
         wait f;
-        call cfunction(sum);
+        call cfunction(f.data);
       }
     }
   }
@@ -20,8 +27,8 @@ __co__ int with_foreach(int b, f32 mdspan<4> input) {
 // CHECK:  `- Return type: int
 // CHECK:  `- Parameters
 // CHECK:    `-  type: int, symbol: b
-// CHECK:    `-  type: f32 <4>, symbol: input
-// CHECK:  `- Type Decl: ndims - [ 3 b 7 ]
+// CHECK:    `-  type: f32 [ 36 27 128  ], symbol: input
+// CHECK:  `- Type Decl: ndims - [ 3 b ]
 // CHECK:  `- Var Decl (int): sum = 0
 // CHECK:  `- Parellelization: index symbol: p, bound [0, 6)
 // CHECK:   `- With Block:
@@ -37,4 +44,4 @@ __co__ int with_foreach(int b, f32 mdspan<4> input) {
 // CHECK:      `- Assign: sum =  (sum + index(0))
 // CHECK:      `- WAIT: f
 // CHECK:      `- Call: cfunction
-// CHECK:        `- with arguements:sum
+// CHECK:        `- with arguements: (dataof f)

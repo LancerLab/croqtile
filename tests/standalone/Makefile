@@ -3,7 +3,7 @@ CXX = g++
 CXXFLAGS = -Wall -g -std=c++17
 GTEST_DIR = ../../extern/gtest/
 GTEST_LIBS = $(GTEST_DIR)/libgtest.a $(GTEST_DIR)/libgtest_main.a
-HEADER_FILES :=  $(shell find ../.. -name '*.hpp')
+HEADER_FILES :=  $(shell find ../.. -name '*.hpp') ../../utils/choreo.h
 
 # Your application's files
 SOURCES = $(wildcard *.cpp)

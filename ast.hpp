@@ -249,6 +249,11 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
     return nullptr;
   }
 
+  Identifier* GetSymbol() {
+    if (t != Reference) return nullptr;
+    return dyn_cast<Identifier>(value_r);
+  }
+
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     if (t == Reference) {
       value_r->Print(os, prefix);

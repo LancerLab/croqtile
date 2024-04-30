@@ -21,7 +21,7 @@ __co__ bf16 mdspan<1> ret1(bf16 mdspan<1> d) {
 // CHECK:  `- Return type: bf16 <1>
 // CHECK:  `- Parameters
 // CHECK:    `-  type: bf16 <1>, symbol: d
-// CHECK:  `- Return:  (.data d)
+// CHECK:  `- Return:  (dataof d)
 
 __co__ int ret2(bf16 mdspan<1> e) {
   return |e|;

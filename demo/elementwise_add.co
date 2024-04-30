@@ -36,7 +36,17 @@ int main() { /// host program
   choreo::s32 b[6][17][128] = {0};
   std::fill_n(&a[0][0][0], sizeof(a) / sizeof(a[0][0][0]), 1);
   std::fill_n(&b[0][0][0], sizeof(b) / sizeof(b[0][0][0]), 2);
-  ele_add(choreo::make_spanned<3, choreo::s32>((int*)a, {6, 17, 128}),
-          choreo::make_spanned<3, choreo::s32>((int*)b, {6, 17, 128}));
+
+  auto res
+    = ele_add(choreo::make_spanned<3, choreo::s32>((int*)a, {6, 17, 128}),
+              choreo::make_spanned<3, choreo::s32>((int*)b, {6, 17, 128}));
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; i < res.shape()[1]; ++i)
+      for (size_t k = 0; i < res.shape()[2]; ++i)
+        assert(a[i][j][k] + b[i][j][k] == res[i][j][k]);
+
+  std::cout << "Test Passed\n" << std::endl;
 }
 

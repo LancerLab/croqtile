@@ -784,7 +784,9 @@ passables
 
 passable
     : s_expr { $$ = $1; }
-    | s_expr FNDATA { $$ = AST::Make<AST::Expr>(@1, ".data", $1); }
+    | s_expr FNDATA {
+      $$ = AST::Make<AST::Expr>(@1, "dataof", $1);
+    }
     ;
 
 with_matchers /* TODO: this special case is pattern-match ids for with-block */

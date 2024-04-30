@@ -6,6 +6,7 @@
 #include "ast.hpp"
 #include "codegen.hpp"
 #include "types.hpp"
+#include "choreo_header.inc"
 
 using namespace Choreo;
 
@@ -75,14 +76,15 @@ namespace {
 
 // Nasty data copy. Need optimization together with factor
 template <typename T, int Rank>
-static inline std::vector<uint8_t> ToFactorData(const spanned<T, Rank> &v) {
-  auto u8_data = reinterpret_cast<const uint8_t *>(v.data);
-    return std::vector<uint8_t>(u8_data, v.bytes());
+static inline std::vector<uint8_t>
+ToFactorData(const spanned_view<T, Rank> &v) {
+  return std::vector<uint8_t>((const uint8_t *)(v.data()), v.bytes());
 }
 
-template <int N, typename T>
-static inline spanned<T, N> ToSpanned(const std::vector<uint8_t> &v, std::initializer_list<T> &&shape) {
-  return make_spanned<N, T>((T*)v.data(), shape);
+template <int N, typename T, typename U>
+static inline spanned_data<T, N>
+ToSpanned(const std::vector<U> &v, std::initializer_list<int> && shape) {
+  return copy_as_spanned<N, T>((T*)v.data(), v.size() * sizeof(U), shape);
 }
 
 // must be true
@@ -143,7 +145,9 @@ static inline void print_host_phase2(std::ostream &os,
 // phase 3: Execute the executable and fetch the output
 static inline void print_host_phase3(std::ostream &os,
                                      const EntryParamType &params,
-                                     size_t out_size) {
+                                     size_t out_size,
+                                     const std::string &out_type,
+                                     size_t out_rank, const std::string &out_shape) {
   // TODO: resolve hardcode in input dims and ranks
   // os << "  int64_t input_dims[] = {";
   // if (params.size() > 0) {
@@ -165,8 +169,9 @@ static inline void print_host_phase3(std::ostream &os,
 )";
 
   if (out_size) {
+    os << "  auto res = choreo::make_spandata<" << out_type << ", " << out_rank << ">("
+     << out_shape << ");\n";
     os << "  // Copy output data from device to host\n";
-    os << "  std::vector<uint8_t> res(" << out_size << ", 0);\n";
     os << "  CHECK(topsMemcpy(reinterpret_cast<void *>(res.data()), out_mem,\n";
     os << "                  " << out_size << ", topsMemcpyDeviceToHost));\n";
   }
@@ -174,50 +179,17 @@ static inline void print_host_phase3(std::ostream &os,
 
 // resource deallocation
 static inline void print_host_phase4(std::ostream &os,
-                                     std::vector<std::string> &d_params,
-                                     const std::string &out_type,
-                                     size_t out_rank, const std::string &init) {
-  // TODO: resolve hardcodes
+                                     std::vector<std::string> &d_params) {
   os << R"(
-  std::vector<uint8_t> inp0(52224, 0);
-  std::vector<uint8_t> inp1(52224, 0);
-  CHECK(topsMemcpy(reinterpret_cast<void *>(inp0.data()), in_mem0,
-                  52224, topsMemcpyDeviceToHost));
-  CHECK(topsMemcpy(reinterpret_cast<void *>(inp1.data()), in_mem1,
-                  52224, topsMemcpyDeviceToHost));
-
-  auto res_in_span = ToSpanned<3, choreo::s32>(res, {6, 17, 128});
-  auto inp0_in_span = ToSpanned<3, choreo::s32>(inp0, {6, 17, 128});
-  auto inp1_in_span = ToSpanned<3, choreo::s32>(inp1, {6, 17, 128});
-
-  for (int i = 0; i< input_dims[0]; ++i) {
-    for (int j = 0; j< input_dims[1]; ++j) {
-      for (int k = 0; k< input_dims[2]; ++k) {
-        int index = k + j*128 + i*17*128;
-        std::cout << "calc at [" << i << ", " << j << ", " << k << "] : " << res_in_span.data[index] << std::endl;
-        assert(inp0_in_span.data[index] + inp1_in_span.data[index] == res_in_span.data[index]);
-      }
-    }
-  }
-  std::cout << "Test Passed\n" << std::endl;
-
-  )";
-  os << "  // Free up the resources\n";
+  // Free up the resources";
+)";
   for (auto &p : d_params) os << "  topsFree(" << p << ");\n";
   os << R"(
   topsStreamDestroy(stream);
   topsDestroyExecutable(executable);
-  return res_in_span;
+  return res;
 }
 )";
-  // TODO: This mem expires when switch back to choreo domain due to ownership issue
-  //       use ToSpanned as return when the ownership of host data resolved
-  // if (out_rank != 0) {
-  //   os << "  return ToSpanned<" << out_rank << ", choreo::" << out_type
-  //      << ">(res, " << init << ");\n";
-  //   os << "}\n";
-  // } else
-  //   os << "  return choreo::" << out_type << "(res);\n";
 }
 
 static inline std::string factor_storage_str(Choreo::Storage s) {
@@ -741,7 +713,7 @@ bool FactorCodeGen::Visit(AST::Call &c) {
           for (int dim_cursor = 0; dim_cursor < dim_sz;)
             size = size * (*(std::get_if<int>(&shapes[dim_cursor++])));
           fs << std::to_string(size);
-        } else if (arg->op == ".data") {
+        } else if (arg->op == "dataof") {
           fs << STR(arg->value_r) << "_buffer"
              << ".addr_()";
         }
@@ -954,13 +926,13 @@ void FactorCodeGen::OutputScript(const std::string &n,
   print_host_phase1(hs, factor_bfn);
   std::vector<std::string> device_mems;
   print_host_phase2(hs, entry_data, out_size, device_mems);
-  print_host_phase3(hs, entry_data, out_size);
   if (out_shape.IsValid()) {
     std::ostringstream oss;
     out_shape.PrintAsList(oss);
-    print_host_phase4(hs, device_mems, out_type, out_shape.Dims(), oss.str());
+    print_host_phase3(hs, entry_data, out_size, out_type, out_shape.Dims(), oss.str());
   } else
-    print_host_phase4(hs, device_mems, out_type, 0, "{1}");
+    print_host_phase3(hs, entry_data, out_size, out_type, 1, "{1}");
+  print_host_phase4(hs, device_mems);
 
   // backpatch the factor bin filename
   std::string factor_src = fs.str();
@@ -975,156 +947,7 @@ void FactorCodeGen::OutputScript(const std::string &n,
 )";
   os << "# copy choreo.h to /tmp\n";
   os << "cat <<EOF > /tmp/choreo.h\n";
-  os << R"__choreo_h_(
-#ifndef __CHOREO_H__
-#define __CHOREO_H__
-
-#if __cplusplus < 201703L
-// #error "Choreo requires C++17 or later"
-#endif
-
-#include <cstdint>           // For fixed-width integer types
-#include <initializer_list>  // for std::initializer_list
-#include <iostream>          // report error
-#include <vector>
-
-namespace choreo {
-
-[[noreturn]] inline void choreo_assert(bool p, const char* msg,
-                                       const char* file = __FILE__,
-                                       int line = __LINE__) {
-  if (!p) {
-    std::cerr << "Assertion failed: " << msg << ", file " << file << ", line "
-              << line << std::endl;
-    std::abort();
-  }
-}
-
-namespace {
-template <typename T, uint32_t N>
-class SimpleArray {
- public:
-  // Constructor for brace-initialization
-  SimpleArray(std::initializer_list<T> init) {
-    std::size_t count = 0;
-    for (auto& value : init) {
-      if (count >= N) break;  // Avoid exceeding the array size
-      data[count++] = value;
-    }
-  }
-
-  // Returns the element at specified index
-  T& operator[](uint32_t index) { return data[index]; }
-
-  // Returns the element at specified index (const version)
-  const T& operator[](uint32_t index) const { return data[index]; }
-
-  // Returns the number of elements in the array
-  constexpr uint32_t size() const noexcept { return N; }
-
-  // Returns a pointer to the underlying array serving as element storage
-  T* begin() { return data; }
-  const T* begin() const { return data; }
-
-  T* end() { return data + N; }
-  const T* end() const { return data + N; }
-
- private:
-  T data[N];
-};
-
-}  // end anonymous namespace
-
-template <int Rank>
-using mdspan = SimpleArray<int, Rank>;
-
-// A spanned data is ranked, but no necessary to have compile-time dimensions
-template <typename T, int Rank>
-struct spanned {
-  T* data = nullptr;
-  const mdspan<Rank> shape;
-  explicit spanned(T* d, const mdspan<Rank>& s) : data(d), shape(s) {}
-
-  size_t dims() const {
-    choreo_assert(shape.size() == 0, "unexpected size == 0");
-    return shape.size();
-  }
-
-  size_t size() const {
-    choreo_assert(shape.size() == 0, "unexpected size == 0");
-    unsigned sz = 1;
-    for (auto itr = shape.begin(); itr != shape.end(); ++itr) sz *= *itr;
-    return sz;
-  }
-
-  size_t bytes() const { return size() * sizeof(T); }
-};
-
-template <int Rank>
-mdspan<Rank> make_mdspan(std::initializer_list<int> init) {
-  return mdspan<Rank>(init);
-}
-
-// note: spanned does not invoke copy. Instead, it associates data with a
-// multi-dimension view of memory
-template <int Rank, typename T>
-spanned<T, Rank> make_spanned(T* ptr, std::initializer_list<int> init) {
-  return spanned<T, Rank>(ptr, make_mdspan<Rank>(init));
-}
-
-template <typename T, int N, int M>
-spanned<T, 2> make_spanned(T (&arr)[N][M]) {
-  return spanned<T, 2>((T*)arr, {N, M});
-}
-
-// converting from vector of another type
-template <int Rank, typename T, typename U>
-spanned<T, Rank> make_spanned(const std::vector<U>& d,
-                              std::initializer_list<int> init) {
-  auto res = spanned<T, Rank>((T*)d.data, make_mdspan<Rank>(init));
-  choreo_assert(res.bytes() == d.size() * sizeof(U), "size does not match");
-  return res;
-}
-
-// Floating-point types
-using f32 = float;
-using f16 = __fp16;
-
-// Check for __bf16 support
-/*
-#if defined(__clang__)
-#if __clang_major__ >= 11
-#define BF16_SUPPORTED 1
-using bf16 = __bf16;
-#endif
-#elif defined(__GNUC__)
-#if __GNUC__ >= 11
-#define BF16_SUPPORTED 1
-using bf16 = __bf16;
-#endif
-#endif
-*/
-
-#ifndef BF16_SUPPORTED
-//#error \
-    "Compiler does not support __bf16. Please use a compiler that supports __bf16 or define a fallback type."
-#endif
-
-// Unsigned integer types
-using u32 = uint32_t;  // 32-bit unsigned integer
-using u16 = uint16_t;  // 16-bit unsigned integer
-using u8 = uint8_t;    // 8-bit unsigned integer
-
-// Signed integer types
-using s32 = int32_t;  // 32-bit signed integer
-using s16 = int16_t;  // 16-bit signed integer
-using s8 = int8_t;    // 8-bit signed integer
-
-}  // end namespace choreo
-
-#endif  // __CHOREO_H__
-EOF
-)__choreo_h_";
+  os << __choreo_header_as_string;
   os << "# step 1: write the kernel source code into a temp file\n";
   os << "kernel_src=" << kernel_fn << "\n";
   os << "cat <<EOF > ${kernel_src}\n";

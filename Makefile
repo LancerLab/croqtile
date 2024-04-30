@@ -20,7 +20,7 @@ TEST_TARGETS := $(TEST_FILES:.co=.test)
 #$(info TEST_TARGETS is $(TEST_TARGETS))
 
 # headers
-HEADER_FILES :=  $(shell find . -name '*.hpp')
+HEADER_FILES :=  $(shell find . -name '*.hpp') choreo_header.inc
 
 CC = g++
 CFLAGS = -std=c++17 -Wall -Wextra -g
@@ -50,8 +50,16 @@ parser.tab.cc parser.tab.hh location.hh: $(PARSER_SRC)
 %.o : %.cpp $(HEADER_FILES) location.hh
 	$(CC) $(CFLAGS) $< -c -o $@
 
+choreo_header.inc : utils/choreo.h
+	echo "#ifndef __CHOREO_RUNTIME_HEADER_H__" > $@
+	echo "#define __CHOREO_RUNTIME_HEADER_H__" >> $@
+	echo "static const char* __choreo_header_as_string = R\"(" >> $@
+	cat $< >> $@
+	echo ")\";" >> $@
+	echo "#endif // __CHOREO_RUNTIME_HEADER_H__" >> $@
+
 clean:
-	rm -f *.cc *.hh *.o $(TEST_TARGETS) tests/*.result
+	rm -f *.cc *.hh *.inc *.o $(TEST_TARGETS) tests/*.result
 
 lines:
 	wc -l *.cpp *.yy *.l *.hpp Makefile

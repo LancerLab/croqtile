@@ -1,7 +1,7 @@
 // RUN: choreo -e %s | FileCheck --match-full-lines %s
 #include <iostream>
 
-// device program
+// choreo program
 __co__ f16 mdspan<2> spans(f32 mdspan<3> d, int f) {
   dim1 : [100, 100];  // shape, mdspan node
   mdspan dim2 : [9, f];
