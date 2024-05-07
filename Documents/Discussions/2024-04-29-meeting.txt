@@ -1,0 +1,50 @@
+#include "choreo.h"
+
+__cok__ {
+void micro_kernel(int * a, int * b, int * c, int n) {
+  for (int i = 0; i < n; ++i)
+    c[i] = a[i] + b[i];
+}
+} // end of kernel
+
+  class runtime_evaluate {
+    size_t output_offset;
+    size_t lhs_load_data_offset;
+    ...
+    //
+    evaluate_at_runtime(int a);
+    l2_l1_memory_jit_assignment();  // backpatch output, lhs_load,
+    apply_patching();
+  };
+__co__ auto ele_add(s32 [aa, 17, 128] lhs, s32 [6, 17, 128] rhs) {
+  auto __stub_code= [](runtime_evaluation & re, int aa) {
+    re.evaluate_at_runtime(a);
+    re.l2_l1_memory_jit_assignment();
+    apply_patching();
+  }
+  __stub_code();
+  //...
+  s32 [lhs.span] output;   // [a, 17, 128]
+  parallel p by 6 {  // SPMD-style parallel execution
+    with index = {x, y} in [17, 8] {
+      foreach x, y {
+        lhs_load = dte.linear lhs.chunkat(p, x, y) => local;
+        rhs_load = dte.linear rhs.chunkat(p, x, y) => local;
+        wait lhs_load, rhs_load;
+
+        local s32 [lhs_load.span] l1_out;
+        call micro_kernel(lhs_load.data, rhs_load.data, l1_out, |lhs_load.span|);
+
+        out_store = dte.linear l1_out => output.chunkat(p, x, y);
+        wait out_store;
+      }
+    }
+  }
+  return output;
+}
+
+int bar(int a[][17][128], int b[6][17][128], aa) {
+  auto res = ele_add(choreo::make_spanned<3>(a, {aa, 17, 128}),
+                     choreo::make_spanned<3>(b, {6, 17, 128});
+  return res.size();
+}
