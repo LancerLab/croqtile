@@ -89,7 +89,7 @@ int main(int argc, char* argv[]) {
   // inference all the unknown types - decls
   TypeInference ti(dump_inf);
   root.accept(ti);
-  if (dump_inf) return 0;
+  if (dump_inf || print_vn) return 0;
 
   // debug: dump the symbol table
   if (std::getenv("DUMP_SYMTAB") || dump_sym)

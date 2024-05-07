@@ -130,7 +130,7 @@ void choreo_info(const char *message) {
 %token <AST::Storage> LOCAL SHARED GLOBAL
 %token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT BOOL VOID
 // builtin operations
-%token <std::string> DMA DLIN DSLICE DPAD COPY FNSPAN FNDATA CHUNKAT WAIT CALL
+%token <std::string> DMA DLIN DSLICE DPAD COPY FNSPAN FNDATA CHUNKAT WAIT CALL AUTO
 // control related
 %token <std::string> IF ELSE PARA BY WITH IN FOREACH RET REQUIRE
 %token <std::string> TRUE FALSE
@@ -145,7 +145,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments paraby_stmts w_statements withins require_binds require_clause else_clause
 %nterm <AST::ptr<AST::MultiValues>> index_value_list value_list param_mdspan_list iv_exprs id_list with_matchers futures passables
 %nterm <AST::ptr<AST::Expr>> s_expr
-%nterm <AST::ptr<AST::DataType>> scalar_type void_type param_type return_type spanned_type
+%nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
 %nterm <AST::ptr<AST::Parameter>> parameter
 %nterm <AST::ptr<AST::ChoreoFunction>> dsl_function
@@ -210,6 +210,8 @@ dsl_function
 return_type
     : param_type { $$ = $1; }
     | void_type  { $$ = $1; }
+    | auto_type  { $$ = $1; }
+    ;
 
 param_type
     : scalar_type { $$ = $1; }
@@ -248,6 +250,10 @@ param_mdspan_val
 
 void_type
     : VOID  { $$ = AST::Make<AST::DataType>(@1, $1); }
+    ;
+
+auto_type
+    : AUTO  { $$ = AST::Make<AST::DataType>(@1, BaseType::UNKNOWN); }
     ;
 
 scalar_type

@@ -38,14 +38,19 @@ bool TypeInference::AfterVisit(AST::Node &n) {
   if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
     cur_func_name = "";
     auto sym_ty = GetSymbolType(f->LOC(), f->name);
+    assert(!isa<UnknownType>(sym_ty) && "symbol type is not deduced.");
+
     auto func_ty = cast<FunctionType>(sym_ty);
-    if (isa<SpannedType>(func_ty->out_ty)) {
+    if (AST::typeof<UnknownType>(f) || isa<SpannedType>(func_ty->out_ty)) {
       // update the return type node since type inference could have changed the
       // function type already
       f->f_decl.ret_type->SetType(func_ty->out_ty);
       f->f_decl.SetType(sym_ty);
       f->SetType(sym_ty);
     }
+    if (Dump)
+      os << "Function:  " << SSTab().InScopeName(f->name) << ", Type: "
+         << AST::TYPE_STR(*f) << "\n";
   }
   return true;
 }
@@ -447,14 +452,14 @@ bool TypeInference::Visit(AST::Call &n) {
 bool TypeInference::Visit(AST::Return &n) {
   __TRACE_EACH_VISIT__(n)
 
-  if (!n.value) return true;
+  if (!n.value) return true; // void return;
 
   ptr<Type> vty = n.value->GetType();
   if (auto ref = cast<AST::Expr>(n.value)->GetReference())
     if (auto id = dyn_cast<AST::Identifier>(ref))
       vty = GetSymbolType(n.LOC(), id->name);
 
-  // get the value's type
+  // get the return value's type
   if (isa<UnknownType>(vty)) {
     Error(n.LOC(), "failed to inference the type of " + AST::STR(*n.value));
     return false;
@@ -485,6 +490,10 @@ bool TypeInference::Visit(AST::Return &n) {
         }
       } else
 #endif
+      // supplement information
+      ModifySymbolType(n.LOC(), cur_func_name,
+                       MakeFunctionType(vty, fty->in_tys));
+    } else if (isa<UnknownType>(fty->out_ty)){
       ModifySymbolType(n.LOC(), cur_func_name,
                        MakeFunctionType(vty, fty->in_tys));
     }

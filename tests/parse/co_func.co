@@ -39,3 +39,12 @@ __co__ void foobar(f32 [?, 4, 5] e, bf16 [?, ?, 1] f) { }
 // CHECK:  `- Parameters
 // CHECK:    `-  type: f32 [ ? 4 5 ], symbol: e
 // CHECK:    `-  type: bf16 [ ? ? 1 ], symbol: f
+
+__co__ auto barfoo(f32 [?, 4, 5] a) { return a; }
+
+// CHECK:ChoreoFunction
+// CHECK: `- Name: barfoo
+// CHECK: `- Return type: unknown
+// CHECK: `- Parameters
+// CHECK:   `-  type: f32 [ ? 4 5 ], symbol: a
+// CHECK: `- Return: a

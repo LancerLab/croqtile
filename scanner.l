@@ -108,6 +108,7 @@ blank [ \t\r]
   \n+        {}
   {num}      return Choreo::Parser::make_NUM(std::stoi(yytext), loc);
   "//".*     {}  // Ignore everything from // to the end of the line
+  "auto"     return Choreo::Parser::make_AUTO(yytext, loc);
   "mdspan"   return Choreo::Parser::make_MDSPAN(yytext, loc);
   "ituple"   return Choreo::Parser::make_ITUPLE(yytext, loc);
   "local"    return Choreo::Parser::make_LOCAL(AST::Storage::LOCAL, loc);
