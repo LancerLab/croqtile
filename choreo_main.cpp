@@ -2,10 +2,11 @@
 
 #include <cstdlib>
 
-#include "enums.hpp"
 #include "ast.hpp"
 #include "codegen.hpp"
 #include "desugar.hpp"
+#include "dynshape.hpp"
+#include "enums.hpp"
 #include "options.hpp"
 #include "scanner.hpp"
 #include "symtab.hpp"
@@ -28,6 +29,8 @@ using namespace Choreo;
 
 int main(int argc, char* argv[]) {
   Option<std::string> output("--output", "-o", "", true);
+  Option<std::string> target("--target", "-t", "factor", true);
+  Option<std::string> stop_after("--stop-after", "-sa", "", true);
   Option<bool> debug_on("--debug", "-d", false, false);
   Option<bool> dump_ast("--dump-ast", "-e", false, false);
   Option<bool> print_vn("--print-valno", "-v", false, false);
@@ -75,12 +78,14 @@ int main(int argc, char* argv[]) {
   // verify symbol references inside scopes
   SymbolValidator sv;
   root.accept(sv);
-  if (sv.HasError())
-    return 1;
+  if (sv.HasError()) return 1;
 
   // minor AST change: desugar for canonicalized AST
   DeSugaring ds;
   root.accept(ds);
+
+  if (stop_after.GetValue() == "desugar")
+    return 0;
 
   // perform shape inference of mdspans, future, etc.
   ShapeInference si(print_vn);
@@ -92,8 +97,7 @@ int main(int argc, char* argv[]) {
   if (dump_inf || print_vn) return 0;
 
   // debug: dump the symbol table
-  if (std::getenv("DUMP_SYMTAB") || dump_sym)
-    ti.SymTab()->Print(std::cout);
+  if (std::getenv("DUMP_SYMTAB") || dump_sym) ti.SymTab()->Print(std::cout);
 
   if (std::getenv("VISUALIZE") || visualiz) {
     Visualizer vl(ti.SymTab());
@@ -101,18 +105,39 @@ int main(int argc, char* argv[]) {
     return 0;
   }
 
-  // apply type check and generate symbol table
+  // apply the type check
   TypeChecker sc(ti.SymTab());
   root.accept(sc);
   if (sc.HasError()) return 1;
 
   if (sema_chk) return 0;
 
-  Choreo::Target tgt = Choreo::Target::Factor;
+  // collect information for dynamic/runtime shape handling
+  ShapeDynamics sds(ti.SymTab());
+  root.accept(sds);
+  if (sds.HasError()) return 1;
 
-  if (tgt == Target::Factor) {
-    FactorCodeGen codegen(std::cout, sc.SymTab());
-    root.accept(codegen);
+  auto tgt = Choreo::Target::Unknown;
+  if (target.GetValue() == "factor") tgt = Choreo::Target::Factor;
+
+  switch (tgt) {
+    case Target::Factor: {
+      FactorCodeGen codegen(std::cout, sc.SymTab());
+      root.accept(codegen);
+      break;
+    }
+    case Target::Unknown: {
+      std::cerr << "Invalid target: '" << target.GetValue() << "'\n";
+      return 1;
+    }
+    case Target::Topscc: {
+      std::cerr << "Target '" << target.GetValue()
+                << "' has not been supported yet.\n";
+      return 1;
+    }
+    default:
+      std::cerr << "Invalid target: '" << target.GetValue() << "'\n";
+      return 1;
   }
 
   return 0;

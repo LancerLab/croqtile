@@ -301,7 +301,7 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
 // Represents both dimensions and s like {3, 4, 5} or {1, 2, 1}
 struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
   std::string ref_name;  // syntax suger, could be empty
-  ptr<Node> list;        // null if the span is a dynamic value
+  ptr<Node> list;        // null if the span is dynamically valued
   size_t dim_count =
       __INVALID_VALUE__;  // dynamic value with known dimension count
 

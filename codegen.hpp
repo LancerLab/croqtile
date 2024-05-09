@@ -33,6 +33,9 @@ struct FactorCodeGen : public CodeGenerator {
 
   bool void_return = false;
 
+  // parameters: the name and associated size expression
+  using EntryParamsInfo = std::vector<std::pair<std::string, std::string>>;
+
  private:
   // buffer the kernel code
   std::ostringstream ks;
@@ -45,7 +48,8 @@ struct FactorCodeGen : public CodeGenerator {
 
   // name of entry parameters
   size_t sp_count = 0;
-  std::vector<std::pair<std::string, size_t>> entry_data;
+
+  EntryParamsInfo entry_params;
 
   void GenerateHostFunction(std::ostream &, const Type &, const std::string &,
                             bool = false);

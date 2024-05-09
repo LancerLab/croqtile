@@ -480,19 +480,17 @@ bool TypeInference::Visit(AST::Return &n) {
         return false;
       }
 
-#if 0
-      // TODO: why triggers?
       // already has sufficient info, make a comparison to avoid inconsistent return type
-      if (rty->HasSufficientInfo()) {
+      if (rty->HasSufficientInfo() && !rty->RuntimeShaped()) {
         if (*rty != *tty) {
           Error(n.LOC(), "return type inconsistant: " + STR(*rty) + " vs. " + STR(*tty));
           return false;
         }
-      } else
-#endif
-      // supplement information
-      ModifySymbolType(n.LOC(), cur_func_name,
-                       MakeFunctionType(vty, fty->in_tys));
+      } else {
+        // supplement information
+        ModifySymbolType(n.LOC(), cur_func_name,
+                         MakeFunctionType(vty, fty->in_tys));
+      }
     } else if (isa<UnknownType>(fty->out_ty)){
       ModifySymbolType(n.LOC(), cur_func_name,
                        MakeFunctionType(vty, fty->in_tys));

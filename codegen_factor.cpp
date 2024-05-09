@@ -14,8 +14,6 @@ extern StringifyTable strtab;
 
 namespace {
 
-using EntryParamType = std::vector<std::pair<std::string, size_t>>;
-
 constexpr const char *backpatch_filename =
     "__choreo_kernel_file_name_that_will_be_back_patched_soon_ok_enough_i_am_"
     "bored__";
@@ -118,7 +116,7 @@ static inline void print_host_phase1(std::ostream &os, const std::string &f_n) {
 
 // phase 2: allocate device memory and copy
 static inline void print_host_phase2(std::ostream &os,
-                                     const EntryParamType &params,
+                                     const FactorCodeGen::EntryParamsInfo &params,
                                      size_t out_size,
                                      std::vector<std::string> &d_params) {
   assert((d_params.size() == 0) && "expecting an empty vector.");
@@ -144,7 +142,7 @@ static inline void print_host_phase2(std::ostream &os,
 
 // phase 3: Execute the executable and fetch the output
 static inline void print_host_phase3(std::ostream &os,
-                                     const EntryParamType &params,
+                                     const FactorCodeGen::EntryParamsInfo &params,
                                      size_t out_size,
                                      const std::string &out_type,
                                      size_t out_rank, const std::string &out_shape) {
@@ -258,7 +256,7 @@ static inline std::string factor_typestr(Choreo::BaseType t) {
       return "BoolType(32)";
       break;
     default:
-      choreo_unreachable();
+      choreo_unreachable("Type '" + getStringFrom(t) + "' is not supported.");
   }
 }
 
@@ -673,7 +671,7 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   return true;
 }
 
-bool FactorCodeGen::Visit(AST::ChunkAt &) { return true; };
+bool FactorCodeGen::Visit(AST::ChunkAt &) { return true; }
 
 bool FactorCodeGen::Visit(AST::Wait &w) {
   auto dmas = dyn_cast<AST::MultiValues>(w.target);
@@ -684,7 +682,7 @@ bool FactorCodeGen::Visit(AST::Wait &w) {
   }
 
   return true;
-};
+}
 
 bool FactorCodeGen::Visit(AST::Call &c) {
   fs << this->indent << "call_(\"";
@@ -729,9 +727,9 @@ bool FactorCodeGen::Visit(AST::Call &c) {
   fs << "});\n";
 
   return true;
-};
+}
 
-bool FactorCodeGen::Visit(AST::Return &) { return true; };
+bool FactorCodeGen::Visit(AST::Return &) { return true; }
 
 bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
   // auto ty = this->GetSymbolType("l2_tile");
@@ -776,18 +774,18 @@ void FactorCodeGen::GenerateHostFunction(std::ostream &os, const Type &ty,
     auto n = GenEntryParamName();
     if (!decl_only) {
       if (auto sty = dyn_cast<SpannedType>(fty.in_tys[0]))
-        entry_data.push_back(std::make_pair(n + ".data", sty->ByteSize()));
+        entry_params.push_back(std::make_pair(n + ".data", sty->ByteSizeExpression()));
       else
-        entry_data.push_back(std::make_pair(n, 1));
+        entry_params.push_back(std::make_pair(n, "1"));
     }
     os << stub_type_str(*fty.in_tys[0]) << " " << n;
     for (size_t i = 1; i < fty.in_tys.size(); ++i) {
       auto n = GenEntryParamName();
       if (!decl_only) {
         if (auto sty = dyn_cast<SpannedType>(fty.in_tys[i]))
-          entry_data.push_back(std::make_pair(n + ".data", sty->ByteSize()));
+          entry_params.push_back(std::make_pair(n + ".data", sty->ByteSizeExpression()));
         else
-          entry_data.push_back(std::make_pair(n, 1));
+          entry_params.push_back(std::make_pair(n, "1"));
       }
       os << ", " << stub_type_str(*fty.in_tys[i]) << " " << n;
     }
@@ -833,19 +831,19 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
     }
   }
 
-  if (AST::typeof<SpannedType>(current_output.get())) {
+  if (auto out_ty = dyn_cast<SpannedType>(cast<FunctionType>(cur_fty)->out_ty)) {
     auto name = "output";
     auto type_symbol = "output_type";
     std::ostringstream _os;
     // param->type->Print(os, "");
-    if (current_output->getPartialType()) {
-      _os << current_output->getPartialType()->EmitTo("", Target::Factor);
+    if (const auto & pty = out_ty->GetMDSpanType()) {
+      _os << pty->EmitTo(Target::Factor);
     } else {
       // TODO: this guard code may not needed
       _os << "{?}";
     }
     auto type_string = "DRAMType(" +
-                       factor_typestr(current_output->getBaseType()) + ", " +
+                       factor_typestr(out_ty->ElementType()) + ", " +
                        _os.str();
 
     strtab.AddSymbol(name, type_symbol, type_string);
@@ -925,13 +923,13 @@ void FactorCodeGen::OutputScript(const std::string &n,
   GenerateHostFunction(hs, *cur_fty, n);
   print_host_phase1(hs, factor_bfn);
   std::vector<std::string> device_mems;
-  print_host_phase2(hs, entry_data, out_size, device_mems);
+  print_host_phase2(hs, entry_params, out_size, device_mems);
   if (out_shape.IsValid()) {
     std::ostringstream oss;
     out_shape.PrintAsList(oss);
-    print_host_phase3(hs, entry_data, out_size, out_type, out_shape.Dims(), oss.str());
+    print_host_phase3(hs, entry_params, out_size, out_type, out_shape.Dims(), oss.str());
   } else
-    print_host_phase3(hs, entry_data, out_size, out_type, 1, "{1}");
+    print_host_phase3(hs, entry_params, out_size, out_type, 1, "{1}");
   print_host_phase4(hs, device_mems);
 
   // backpatch the factor bin filename

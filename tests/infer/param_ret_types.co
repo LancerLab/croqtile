@@ -18,51 +18,75 @@ __co__ int foo(f32 mdspan[2, 3, 4] d, int e, bool, f32 mdspan<2> a) { }
 // VALNO:   Alias "::foo::d.span" -> #3
 // VALNO:   New VN #8: '::foo::e'
 // VALNO:   New VN #9: '::foo::anon_0'
-// VALNO:   New VN #10: '#-1,#-1'
-// VALNO:   New VN #11: '::foo::a'
-// VALNO:   Alias "::foo::a.span" -> #10
+// VALNO:   New VN #10: '::foo::$0'
+// VALNO:   New VN #11: '::foo::$1'
+// VALNO:   New VN #12: '#10,#11'
+// VALNO:   Alias "#10,#11(0)" -> #10
+// VALNO:   Alias "#10,#11(1)" -> #11
+// VALNO:   New VN #13: '::foo::a'
+// VALNO:   Alias "::foo::a.span" -> #12
 // VALNO:  } // end scope-1
 
 // CHECK: Parameter: ::foo::d, Type: f32 mdspan<3> [2, 3, 4]
 // CHECK: Parameter: ::foo::e, Type: int
 // CHECK: Parameter: ::foo::anon_0, Type: bool
-// CHECK: Parameter: ::foo::a, Type: f32 mdspan<2> [?, ?]
-// CHECK: Function:  ::foo, Type: int (*)(f32 mdspan<3> [2, 3, 4], int, bool, f32 mdspan<2> [?, ?])
+// CHECK: Parameter: ::foo::a, Type: f32 mdspan<2> [::foo::$0, ::foo::$1]
+// CHECK: Function:  ::foo, Type: int (*)(f32 mdspan<3> [2, 3, 4], int, bool, f32 mdspan<2> [::foo::$0, ::foo::$1])
 
 __co__ int bar(f32 mdspan[?, 2, ?, 4] d, f32 mdspan<4> a) { }
 
 // VALNO:  scope-1 {
-// VALNO:   New VN #0: 'const_2'
-// VALNO:   New VN #1: 'const_4'
-// VALNO:   New VN #2: '#-1,#0,#-1,#1'
-// VALNO:   New VN #3: 'index_const_1'
-// VALNO:   Alias "#-1,#0,#-1,#1(1)" -> #0
-// VALNO:   New VN #4: 'index_const_3'
-// VALNO:   Alias "#-1,#0,#-1,#1(3)" -> #1
-// VALNO:   New VN #5: '::bar::d'
-// VALNO:   Alias "::bar::d.span" -> #2
-// VALNO:   New VN #6: '#-1,#-1,#-1,#-1'
-// VALNO:   New VN #7: '::bar::a'
-// VALNO:   Alias "::bar::a.span" -> #6
+// VALNO:   New VN #0: '::bar::$0'
+// VALNO:   New VN #1: 'const_2'
+// VALNO:   New VN #2: '::bar::$1'
+// VALNO:   New VN #3: 'const_4'
+// VALNO:   New VN #4: '#0,#1,#2,#3'
+// VALNO:   New VN #5: 'index_const_0'
+// VALNO:   Alias "#0,#1,#2,#3(0)" -> #0
+// VALNO:   New VN #6: 'index_const_1'
+// VALNO:   Alias "#0,#1,#2,#3(1)" -> #1
+// VALNO:   New VN #7: 'index_const_2'
+// VALNO:   Alias "#0,#1,#2,#3(2)" -> #2
+// VALNO:   New VN #8: 'index_const_3'
+// VALNO:   Alias "#0,#1,#2,#3(3)" -> #3
+// VALNO:   New VN #9: '::bar::d'
+// VALNO:   Alias "::bar::d.span" -> #4
+// VALNO:   New VN #10: '::bar::$2'
+// VALNO:   New VN #11: '::bar::$3'
+// VALNO:   New VN #12: '::bar::$4'
+// VALNO:   New VN #13: '::bar::$5'
+// VALNO:   New VN #14: '#10,#11,#12,#13'
+// VALNO:   Alias "#10,#11,#12,#13(0)" -> #10
+// VALNO:   Alias "#10,#11,#12,#13(1)" -> #11
+// VALNO:   Alias "#10,#11,#12,#13(2)" -> #12
+// VALNO:   Alias "#10,#11,#12,#13(3)" -> #13
+// VALNO:   New VN #15: '::bar::a'
+// VALNO:   Alias "::bar::a.span" -> #14
 // VALNO:  } // end scope-1
 
-// CHECK: Parameter: ::bar::d, Type: f32 mdspan<4> [?, 2, ?, 4]
-// CHECK: Parameter: ::bar::a, Type: f32 mdspan<4> [?, ?, ?, ?]
-// CHECK: Function:  ::bar, Type: int (*)(f32 mdspan<4> [?, 2, ?, 4], f32 mdspan<4> [?, ?, ?, ?])
+// CHECK: Parameter: ::bar::d, Type: f32 mdspan<4> [::bar::$0, 2, ::bar::$1, 4]
+// CHECK: Parameter: ::bar::a, Type: f32 mdspan<4> [::bar::$2, ::bar::$3, ::bar::$4, ::bar::$5]
+// CHECK: Function:  ::bar, Type: int (*)(f32 mdspan<4> [::bar::$0, 2, ::bar::$1, 4], f32 mdspan<4> [::bar::$2, ::bar::$3, ::bar::$4, ::bar::$5])
 
 __co__ auto foobar(f32 mdspan[?, 2, ?, 4] a) { return a; }
 
 // VALNO:  scope-1 {
-// VALNO:   New VN #0: 'const_2'
-// VALNO:   New VN #1: 'const_4'
-// VALNO:   New VN #2: '#-1,#0,#-1,#1'
-// VALNO:   New VN #3: 'index_const_1'
-// VALNO:   Alias "#-1,#0,#-1,#1(1)" -> #0
-// VALNO:   New VN #4: 'index_const_3'
-// VALNO:   Alias "#-1,#0,#-1,#1(3)" -> #1
-// VALNO:   New VN #5: '::foobar::a'
-// VALNO:   Alias "::foobar::a.span" -> #2
+// VALNO:   New VN #0: '::foobar::$0'
+// VALNO:   New VN #1: 'const_2'
+// VALNO:   New VN #2: '::foobar::$1'
+// VALNO:   New VN #3: 'const_4'
+// VALNO:   New VN #4: '#0,#1,#2,#3'
+// VALNO:   New VN #5: 'index_const_0'
+// VALNO:   Alias "#0,#1,#2,#3(0)" -> #0
+// VALNO:   New VN #6: 'index_const_1'
+// VALNO:   Alias "#0,#1,#2,#3(1)" -> #1
+// VALNO:   New VN #7: 'index_const_2'
+// VALNO:   Alias "#0,#1,#2,#3(2)" -> #2
+// VALNO:   New VN #8: 'index_const_3'
+// VALNO:   Alias "#0,#1,#2,#3(3)" -> #3
+// VALNO:   New VN #9: '::foobar::a'
+// VALNO:   Alias "::foobar::a.span" -> #4
 // VALNO:  } // end scope-1
 
-// CHECK: Parameter: ::foobar::a, Type: f32 mdspan<4> [?, 2, ?, 4]
-// CHECK: Function:  ::foobar, Type: f32 mdspan<4> [?, 2, ?, 4] (*)(f32 mdspan<4> [?, 2, ?, 4])
+// CHECK: Parameter: ::foobar::a, Type: f32 mdspan<4> [::foobar::$0, 2, ::foobar::$1, 4]
+// CHECK: Function:  ::foobar, Type: f32 mdspan<4> [::foobar::$0, 2, ::foobar::$1, 4] (*)(f32 mdspan<4> [::foobar::$0, 2, ::foobar::$1, 4])

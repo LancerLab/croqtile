@@ -11,11 +11,19 @@ namespace Choreo {
 struct DeSugaring : public Visitor {
  private:
   bool trace = false;
+  bool changed = false;
+  std::string old;
+
+  size_t count = 0;  // name suffix of runtime int values
+
+  bool handle_parameter = false;
   ptr<AST::Expr> list_ref = nullptr;
   void SetListReference(const location &l, const std::string &r) {
     list_ref = AST::Make<AST::Expr>(l, AST::Make<AST::Identifier>(l, r));
   }
   void ResetListReference() { list_ref = nullptr; }
+
+  std::string GetRuntimeValueString() { return "$" + std::to_string(count++); }
 
  public:
   // it does not require a symbol table
@@ -23,16 +31,47 @@ struct DeSugaring : public Visitor {
 
   bool BeforeVisit(AST::Node &n) override {
     if (auto *b = dyn_cast<AST::MultiDimSpans>(&n)) {
-      if (b->ref_name != "") SetListReference(n.LOC(), b->ref_name);
+      if (b->ref_name != "") {
+        SetListReference(n.LOC(), b->ref_name);
+        return true;
+      }
+
+      if (b->list) return true;
+      if (!handle_parameter) return true;
+
+      assert(b->Dims() != __INVALID_VALUE__);
+
+      // append the node that have multiple dynamic values
+      auto mvals = AST::Make<AST::MultiValues>(n.LOC());
+      for (size_t i = 0; i < b->Dims(); ++i)
+        mvals->Append(AST::Make<AST::IntLiteral>(n.LOC()));
+      b->list = mvals;
+      changed = true;
     } else if (auto *b = dyn_cast<AST::IntTuple>(&n)) {
       if (b->ref_name != "") SetListReference(n.LOC(), b->ref_name);
+    } else if (auto p = dyn_cast<AST::Parameter>(&n)) {
+      handle_parameter = true;
+      old = AST::STR(*p->type);
+      changed = false;
     }
     return true;
   }
 
   bool AfterVisit(AST::Node &n) override {
-    if (isa<AST::MultiDimSpans>(&n) || isa<AST::IntTuple>(&n)) {
+    if (auto *b = dyn_cast<AST::MultiDimSpans>(&n)) {
       ResetListReference();
+      b->ref_name = "";  // no reference is required
+    } else if (isa<AST::IntTuple>(&n)) {
+      ResetListReference();
+    } else if (auto p = dyn_cast<AST::Parameter>(&n)) {
+      handle_parameter = false;
+      if (changed && trace)
+        std::cout << "Name dims of `" << STR(*p->sym) << "': " << old
+                  << " ---> " << STR(*p->type) << "\n";
+      old.clear();
+      changed = false;
+    } else if (isa<AST::ChoreoFunction>(&n)) {
+      count = 0;
     }
     return true;
   }
@@ -40,36 +79,48 @@ struct DeSugaring : public Visitor {
   bool Visit(AST::MultiNodes &) override { return true; }
 
   bool Visit(AST::MultiValues &n) override {
-    if (!list_ref) return true;  // no syntax sugar
-
-    ptr<AST::Expr> new_expr = nullptr;
-    size_t i = 0;
-    for (; i < n.values.size(); ++i) {
-      auto pv = n.values[i];
-      if (auto expr = dyn_cast<AST::Expr>(pv.get())) {
-        if (auto ref = expr->GetReference()) {
-          if (!isa<AST::IntIndex>(ref.get())) continue;
-
-          // apply desugaring a {(0), 1} -> {a(0), 1}
-          new_expr = AST::Make<AST::Expr>(expr->LOC(), "dimof", list_ref, ref);
-
-          if (trace) {
-            std::cout << "Desugaring node: ";
-            expr->Print(std::cout);
-            std::cout << " --->";
-            new_expr->Print(std::cout);
-            std::cout << "\n";
+    if (list_ref) {  // desugar the list reference
+      for (size_t i = 0; i < n.values.size(); ++i) {
+        if (auto expr = dyn_cast<AST::Expr>(n.values[i])) {
+          if (auto ref = expr->GetReference()) {
+            if (isa<AST::IntIndex>(ref.get())) {
+              // apply desugaring a {(0), 1} -> {a(0), 1}
+              auto new_expr =
+                  AST::Make<AST::Expr>(expr->LOC(), "dimof", list_ref, ref);
+              if (trace)
+                std::cout << "Desugar ref: " << STR(*expr) << " ---> "
+                          << STR(*new_expr) << "\n";
+              n.values[i] = new_expr;
+            }
           }
-
-          break;
         }
       }
     }
 
-    if (new_expr) n.values[i] = new_expr;
+    if (handle_parameter) {  // make runtime values of "?" to be named
+      for (size_t i = 0; i < n.values.size(); ++i) {
+        if (auto il = dyn_cast<AST::IntLiteral>(n.values[i])) {
+          if (il->value != __UNKNOWN_INTVAL__) continue;
+          auto new_il =
+              AST::Make<AST::Identifier>(il->LOC(), GetRuntimeValueString());
+
+#if 0
+          if (trace) {
+            il->Print(std::cout);
+            std::cout << " --->";
+            new_il->Print(std::cout);
+            std::cout << "\n";
+          }
+#endif
+          changed = true;
+          n.values[i] = new_il;
+        }
+      }
+    }
 
     return true;
   }
+
   bool Visit(AST::IntLiteral &) override { return true; }
   bool Visit(AST::Expr &n) override {
     if (!list_ref) return true;  // no syntax sugar
@@ -90,6 +141,8 @@ struct DeSugaring : public Visitor {
           std::cout << "\n";
         }
 
+        changed = true;
+
         return ret;
       }
       return nullptr;
@@ -104,6 +157,7 @@ struct DeSugaring : public Visitor {
 
     return true;
   }
+
   bool Visit(AST::MultiDimSpans &) override { return true; }
   bool Visit(AST::NamedTypeDecl &) override { return true; }
   bool Visit(AST::NamedVariableDecl &) override { return true; }

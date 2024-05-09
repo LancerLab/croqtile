@@ -2,7 +2,7 @@
 Choreo is a low-level embedded Domain Specific Language (eDSL) specifically engineered to program data movement entities like DMAs, which traditionally focus on hardware configuration rather than the data itself. This language facilitates the programming of data flow across a hardware’s memory hierarchy, where at each level, data is partitioned into smaller chunks that are positioned closer to the processing elements. By making data tiling and flowing more manageable, Choreo pioneers the 'TileFlow' programming paradigm. This new approach aims to significantly streamline the engineering tasks involved, particularly for professionals developing AI operations on specific hardware.
 
 ## Choreo and Device-Level C++
-Choreo has close relationship to the device-level C++ programming, which is usually provided by the hardware vendor. In current implementation, Choreo performs source-to-source translation to convert *choreo-c++* programs to vendor-supported(like factor, topscc) C++ language entities and APIs. Despite of turning higher level abstraction of *TileFlow* functions into corresponding low level C++API calls, Choreo also glues the kernels, the host program into executables. Consequently, using Choreo compiler is easy when the vendor-provided compiler is properly configured. 
+Choreo has close relationship to the device-level C++ programming, which is usually provided by the hardware vendor. In current implementation, Choreo performs source-to-source translation to convert *choreo-c++* programs to vendor-supported(like factor, topscc) C++ language entities and APIs. Despite of turning higher level abstraction of *TileFlow* functions into corresponding low level C++API calls, Choreo also glues the kernels, the host program into executables. Consequently, using Choreo compiler is easy when the vendor-provided compiler is properly configured.
 
 ## Features
 ### Productivity
@@ -26,31 +26,36 @@ programmers can view the data movement using Choreo's visualization capability. 
 This is helpful for programmers escpecially for novices as visualization gives clear projection about the tiling behavior. Or else, programmers have to visualize in their mind, which is more error-prone.
 
 ### Program Safty
-And one of the most important feature about **code quality** is the **compile-time check** of code. In Choreo, we introduce different types, bound with corresponding shapes. The types, shapes, together with other programming entities are checked statically at compile time, which allows programmers to discover code issues as early as possible. 
+And one of the most important feature about **code quality** is the **compile-time check** of code. In Choreo, we introduce different types, bound with corresponding shapes. The types, shapes, together with other programming entities are checked statically at compile time, which allows programmers to discover code issues as early as possible.
 
-## Getting Started
-### How to Program with Choreo
+# Getting Started
+## How to Program with Choreo
 It is good to read [Getting Started with Choreo](./Documents/getting_started_with_choreo.md). The document demonstrates the skeleton to program with Choreo.
 
 
-### Build Choreo from Scratch
-To build choreo, it requires to intialize the build environment first. The below command is provided:
+## Build Choreo from Scratch
+### Prerequisitions
+- GCC >=8.1 or clang >=6, where c++17 is fully supported.
+- Bison >=3.8, Flex >=2.6.4, where c++ features are supported.
+
+### Environment
+To facilitate the setting-up of choreo build environment, currently programmer can use the below command:
 ```
 make setup
 ```
-to fetches the required bison executable (version >=3.8), FileCheck utility etc.
+to fetches the dependant software, including the bison executable (version >=3.8), FileCheck utility, gtest source code, etc.
 
-And if nothing is missing, build Choreo is done by single command:
+When the environment setting is satisfied, building Choreo can be done with the command:
 ```
 make
 ```
-Since Choreo is under development, performing unit tests could beneficial to avoid using incorrect version:
+As Choreo is under development, performing unit tests is necessary to avoid corrupted version:
 ```
 make test
 ```
-All the unit tests are executed. And if any issue happens, the test should stop to report errors.
+If any issue happens, the test should stop to report errors.
 
-### Compile Choreo-C++ Program
+## Compile Choreo-C++ Program
 Compile Choreo program is easy:
 ```
 choreo your_program.co

@@ -3,7 +3,7 @@
 
 namespace Choreo {
   
-enum class Target { Factor, Topscc };
+enum class Target { Unknown, Factor, Topscc };
 
 }  // end namespace Choreo
 

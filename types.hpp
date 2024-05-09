@@ -234,10 +234,33 @@ T* dyn_cast(ValueItem* vi) {
   if (std::holds_alternative<T>(*vi)) return &std::get<T>(*vi);
   return nullptr;
 }
+template <typename T>
+const T* dyn_cast(const ValueItem* vi) {
+  if (std::holds_alternative<T>(*vi)) return &std::get<T>(*vi);
+  return nullptr;
+}
+
+template <typename T>
+bool isa(ValueItem* vi) {
+  if (std::holds_alternative<T>(*vi)) return true;
+  return false;
+}
+template <typename T>
+bool isa(const ValueItem* vi) {
+  if (std::holds_alternative<T>(*vi)) return true;
+  return false;
+}
 
 template <typename T>
 T* cast(ValueItem* vi) {
   if (T* res = dyn_cast<T>(vi)) return res;
+  choreo_unreachable("value item does not contain the type.");
+  return nullptr;
+}
+
+template <typename T>
+const T* cast(const ValueItem* vi) {
+  if (auto* res = dyn_cast<T>(vi)) return res;
   choreo_unreachable("value item does not contain the type.");
   return nullptr;
 }
@@ -271,6 +294,12 @@ struct ValueItemHasher {
   }
 };
 
+inline std::string ValueItemAsString(const ValueItem & vi) {
+  if (auto pint = dyn_cast<int>(&vi))
+    return std::to_string(*pint);
+  return *cast<ValueExpr>(&vi);
+}
+
 struct ValueListHasher {
   std::size_t operator()(const ValueList& val) const noexcept {
     std::size_t hash = 0;
@@ -282,7 +311,7 @@ struct ValueListHasher {
   }
 };
 
-inline bool isValueItemEqual(const ValueItem& a, const ValueItem& b) {
+inline bool IsValueItemEqual(const ValueItem& a, const ValueItem& b) {
   if (a.index() != b.index()) return false;  // Different types
 
   return a == b;
@@ -293,7 +322,7 @@ inline bool isValueListEqual(const ValueList& a, const ValueList& b) {
   if (a.size() != b.size()) return false;  // Different sizes
 
   for (size_t i = 0; i < a.size(); ++i)
-    if (!isValueItemEqual(a[i], b[i])) return false;  // Found a mismatch
+    if (!IsValueItemEqual(a[i], b[i])) return false;  // Found a mismatch
 
   return true;  // All elements match
 }
@@ -443,6 +472,22 @@ struct Shape {
     return int_list;
   }
 
+  bool IsDynamic() const {
+    for (auto v : Value())
+      if (!isa<int>(&v))
+        return true;
+    return false;
+  }
+
+  std::string GetShapeExpression() const {
+    assert(!Value().empty() && "no values inside the shape.");
+    std::string res;
+    res = ValueItemAsString(Value()[0]);
+    for (size_t i = 1; i < Value().size(); ++i)
+      res += " * " + ValueItemAsString(Value()[i]);
+    return res;
+  }
+
   std::optional<std::vector<size_t>> GetUIntList() const {
     std::vector<size_t> int_list;
     for (auto v : Value()) {
@@ -533,7 +578,7 @@ struct Type {
   virtual const std::string NodeTypeString() = 0;
   virtual uint64_t RuntimeID() const { return 0xDEADBEEFULL; }
   static uint64_t TypeID() { return 0xDEADBEEFULL; }
-  // can not have instance
+  // forbidden to have instance
 };
 
 inline bool operator!=(const Type& t1, const Type& t2) {
@@ -707,6 +752,7 @@ struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
     assert((s_type != nullptr) && "mdspan is not initialized.");
   }
 
+  BaseType ElementType() const { return (BaseType)f_type; }
   size_t Dims() const override { return s_type->Dims(); }
   bool IsComplete() const override { return true; }
   bool HasSufficientInfo() const override {
@@ -721,7 +767,19 @@ struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
   Shape GetShape() const { return s_type->GetShape(); }
   ptr<MDSpanType> GetMDSpanType() { return s_type; }
 
+  bool RuntimeShaped() const {
+    assert(s_type && "missing the spanned type.");
+    return GetShape().IsDynamic();
+  }
+
   size_t ByteSize() const { return getByteSizeOf(f_type) * GetShape().Size(); }
+  std::string ByteSizeExpression() const {
+    if (RuntimeShaped())
+      return GetShape().GetShapeExpression();
+    else
+      return std::to_string(ByteSize());
+  }
+
   void SetStorage(Storage s) { m_type = s; }
   Storage GetStorage() { return m_type; }
 
