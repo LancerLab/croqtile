@@ -27,15 +27,15 @@
 // and clang-6. This pre-requisition should be satisfied.
 
 #if defined(__GNUC__) && !defined(__clang__)
-    #if (__GNUC__ < 8) || (__GNUC__ == 8 && __GNUC_MINOR__ < 1)
-        #error "GCC version must be at least 8.1"
-    #endif
+#if (__GNUC__ < 8) || (__GNUC__ == 8 && __GNUC_MINOR__ < 1)
+#error "GCC version must be at least 8.1"
+#endif
 #endif
 
 #if defined(__clang__)
-    #if (__clang_major__ < 6)
-        #error "Clang version must be at least 6"
-    #endif
+#if (__clang_major__ < 6)
+#error "Clang version must be at least 6"
+#endif
 #endif
 
 // Macro that captures the file and line
@@ -59,14 +59,14 @@ inline std::string DelimitedString(const std::vector<T>& v) {
 
 // Function to check if 'str' starts with 'prefix'
 inline bool PrefixWith(const std::string& str, const std::string& prefix) {
-	if (prefix.size() > str.size()) return false;
-	return str.compare(0, prefix.size(), prefix) == 0;
+  if (prefix.size() > str.size()) return false;
+  return str.compare(0, prefix.size(), prefix) == 0;
 }
 
 // Function to check if 'str' ends with 'suffix'
 inline bool SuffixWith(const std::string& str, const std::string& suffix) {
-	if (suffix.size() > str.size()) return false;
-	return str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0;
+  if (suffix.size() > str.size()) return false;
+  return str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
 #endif  // __CHOREO_AUX_HPP__

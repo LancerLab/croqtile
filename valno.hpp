@@ -557,26 +557,25 @@ class ShapeInference : public Visitor {
 
     auto vn_sig = vn.GetSignatureFromValueNumber(cur_mdspan_vn);
     bool gen_alias = (CountElementsInSignature(vn_sig) > 1);
-    ProcessValueNumberString(
-        vn_sig, [this, &vn_sig, &n, gen_alias](int valno, size_t index) {
-          if (UnknownVN(valno)) return;  // do not associate it with vn of "?"
-          if (n.with && gen_alias) {
-            std::string name = SSTab().ScopedName(n.with->name) + "(" +
-                               std::to_string(index) + ")";
-            vn.AssociateSignatureWithValueNumber(name, valno);
-          }
+    ProcessValueNumberString(vn_sig, [this, &vn_sig, &n, gen_alias](
+                                         int valno, size_t index) {
+      if (UnknownVN(valno)) return;  // do not associate it with vn of "?"
+      if (n.with && gen_alias) {
+        std::string name = SSTab().ScopedName(n.with->name) + "(" +
+                           std::to_string(index) + ")";
+        vn.AssociateSignatureWithValueNumber(name, valno);
+      }
 
-          if (n.with_matchers) {
-            auto sym =
-                cast<AST::Identifier>((n.with_matchers->values[index]).get());
-            std::string name = SSTab().ScopedName("@" + sym->name);
-            if (gen_alias) vn.AssociateSignatureWithValueNumber(name, valno);
-            Shape s =
-                GenShapeFromSignature(vn.GetSignatureFromValueNumber(valno));
-            sym->SetType(MakeBoundedITupleType(s));
-            SSTab().DefineSymbol("@" + sym->name, MakeMDSpanType(s));
-          }
-        });
+      if (n.with_matchers) {
+        auto sym =
+            cast<AST::Identifier>((n.with_matchers->values[index]).get());
+        std::string name = SSTab().ScopedName("@" + sym->name);
+        if (gen_alias) vn.AssociateSignatureWithValueNumber(name, valno);
+        Shape s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(valno));
+        sym->SetType(MakeBoundedITupleType(s));
+        SSTab().DefineSymbol("@" + sym->name, MakeMDSpanType(s));
+      }
+    });
 
     if (n.with) {
       vn.AssociateSignatureWithValueNumber(

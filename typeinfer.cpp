@@ -49,8 +49,8 @@ bool TypeInference::AfterVisit(AST::Node &n) {
       f->SetType(sym_ty);
     }
     if (Dump)
-      os << "Function:  " << SSTab().InScopeName(f->name) << ", Type: "
-         << AST::TYPE_STR(*f) << "\n";
+      os << "Function:  " << SSTab().InScopeName(f->name)
+         << ", Type: " << AST::TYPE_STR(*f) << "\n";
   }
   return true;
 }
@@ -344,13 +344,15 @@ bool TypeInference::Visit(AST::Expr &n) {
 
   if (n.t == AST::Expr::Unary) {
     if (n.op == "ubound") {
-      auto id = cast<AST::Identifier>(n.value_r); 
-      if (auto bty = dyn_cast<BoundedITupleType>(GetSymbolType(id->LOC(), id->name)))
+      auto id = cast<AST::Identifier>(n.value_r);
+      if (auto bty =
+              dyn_cast<BoundedITupleType>(GetSymbolType(id->LOC(), id->name)))
         n.SetType(MakeITupleType(bty->Dims()));
       else if (isa<BoundedIntegerType>(GetSymbolType(id->LOC(), id->name)))
         n.SetType(MakeIntegerType());
       else
-        choreo_unreachable("ubound type '" + AST::TYPE_STR(n.value_r) + "' is unexpected.");
+        choreo_unreachable("ubound type '" + AST::TYPE_STR(n.value_r) +
+                           "' is unexpected.");
       return true;
     } else if (n.op == "sizeof") {
       n.SetType(MakeIntegerType());
@@ -365,20 +367,23 @@ bool TypeInference::Visit(AST::Expr &n) {
       return true;
     }
 
-    auto & pty_lhs = n.value_l->GetType();
-    auto & pty_rhs = n.value_r->GetType();
+    auto &pty_lhs = n.value_l->GetType();
+    auto &pty_rhs = n.value_r->GetType();
     if (*pty_lhs != *pty_rhs) {
-      if ((isa<MDSpanType>(pty_lhs) && isa<ITupleType>(pty_rhs))
-          || (isa<MDSpanType>(pty_rhs) && isa<ITupleType>(pty_lhs))) {
+      if ((isa<MDSpanType>(pty_lhs) && isa<ITupleType>(pty_rhs)) ||
+          (isa<MDSpanType>(pty_rhs) && isa<ITupleType>(pty_lhs))) {
         if (pty_lhs->Dims() == pty_rhs->Dims()) {
           return true;
-      } else {
-          Error(n.LOC(), "The operands of the expression be performed for inconsistant shape dimension.");
+        } else {
+          Error(n.LOC(),
+                "The operands of the expression be performed for inconsistant "
+                "shape dimension.");
           return false;
         }
       }
 
-      Error(n.LOC(), "The operands of the expression cannot undergo '" + n.op + "' operation.");
+      Error(n.LOC(), "The operands of the expression cannot undergo '" + n.op +
+                         "' operation.");
       return false;
     }
     n.SetType(n.value_r->GetType());
@@ -485,7 +490,7 @@ bool TypeInference::Visit(AST::Call &n) {
 bool TypeInference::Visit(AST::Return &n) {
   __TRACE_EACH_VISIT__(n)
 
-  if (!n.value) return true; // void return;
+  if (!n.value) return true;  // void return;
 
   ptr<Type> vty = n.value->GetType();
   if (auto ref = cast<AST::Expr>(n.value)->GetReference())
@@ -513,10 +518,12 @@ bool TypeInference::Visit(AST::Return &n) {
         return false;
       }
 
-      // already has sufficient info, make a comparison to avoid inconsistent return type
+      // already has sufficient info, make a comparison to avoid inconsistent
+      // return type
       if (rty->HasSufficientInfo() && !rty->RuntimeShaped()) {
         if (*rty != *tty) {
-          Error(n.LOC(), "return type inconsistant: " + STR(*rty) + " vs. " + STR(*tty));
+          Error(n.LOC(),
+                "return type inconsistant: " + STR(*rty) + " vs. " + STR(*tty));
           return false;
         }
       } else {
@@ -524,7 +531,7 @@ bool TypeInference::Visit(AST::Return &n) {
         ModifySymbolType(n.LOC(), cur_func_name,
                          MakeFunctionType(vty, fty->in_tys));
       }
-    } else if (isa<UnknownType>(fty->out_ty)){
+    } else if (isa<UnknownType>(fty->out_ty)) {
       ModifySymbolType(n.LOC(), cur_func_name,
                        MakeFunctionType(vty, fty->in_tys));
     }

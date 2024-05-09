@@ -203,7 +203,8 @@ std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
             {"ubound",
              [this, &n]() -> std::optional<std::string> {
                if (auto id = dyn_cast<AST::Identifier>(n->value_r)) {
-                 return visitor->SSTab().NameInScope("@" + cast<AST::Identifier>(id)->name);
+                 return visitor->SSTab().NameInScope(
+                     "@" + cast<AST::Identifier>(id)->name);
                } else
                  choreo_unreachable("upper bound expression is unexpected.");
              }},

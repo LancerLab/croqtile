@@ -17,11 +17,13 @@ struct TypeChecker : public VisitorWithSymTab {
   bool BeforeVisitImpl(AST::Node &) override;
   bool AfterVisitImpl(AST::Node &) override;
 
-  bool ReportUnknown(AST::Node &, const char*, int);
+  bool ReportUnknown(AST::Node &, const char *, int);
 
  public:
   TypeChecker(const ptr<SymbolTable> s_tab, std::ostream &o = std::cout)
-      : VisitorWithSymTab(s_tab), os(o), trace_visit(std::getenv("TRACE_SEMA")) {}
+      : VisitorWithSymTab(s_tab),
+        os(o),
+        trace_visit(std::getenv("TRACE_SEMA")) {}
   ~TypeChecker() {}
 
   bool Visit(AST::MultiNodes &) override;

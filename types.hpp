@@ -294,9 +294,8 @@ struct ValueItemHasher {
   }
 };
 
-inline std::string ValueItemAsString(const ValueItem & vi) {
-  if (auto pint = dyn_cast<int>(&vi))
-    return std::to_string(*pint);
+inline std::string ValueItemAsString(const ValueItem& vi) {
+  if (auto pint = dyn_cast<int>(&vi)) return std::to_string(*pint);
   return *cast<ValueExpr>(&vi);
 }
 
@@ -373,7 +372,8 @@ struct ValueListRepo {
   }
 };
 
-inline void PrintValueList(const ValueList& vl, std::ostream& os, char lb = '[', char rb = ']') {
+inline void PrintValueList(const ValueList& vl, std::ostream& os, char lb = '[',
+                           char rb = ']') {
   auto print_variant = [&os](const ValueItem& vle) {
     if (vle.index() == 0)
       os << std::get<0>(vle);
@@ -474,14 +474,12 @@ struct Shape {
 
   bool IsDynamic() const {
     for (auto v : Value())
-      if (!isa<int>(&v))
-        return true;
+      if (!isa<int>(&v)) return true;
     return false;
   }
 
   std::string GetSizeExpression() const {
-    if (!IsDynamic())
-      return std::to_string(Size());
+    if (!IsDynamic()) return std::to_string(Size());
 
     assert(!Value().empty() && "no values inside the shape.");
     std::string res;
@@ -529,7 +527,8 @@ struct Shape {
   }
 
   void PrintAsList(std::ostream& os) const {
-    if (val_no == __INVALID_VALUE__) os << "[]";
+    if (val_no == __INVALID_VALUE__)
+      os << "[]";
     else {
       assert(values.Exists(val_no) && "invalid value number.");
       PrintValueList(Value(), os, '{', '}');
@@ -778,7 +777,8 @@ struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
   size_t ByteSize() const { return getByteSizeOf(f_type) * GetShape().Size(); }
   std::string ByteSizeExpression() const {
     if (RuntimeShaped())
-      return GetShape().GetSizeExpression() + " * " + std::to_string(getByteSizeOf(f_type));
+      return GetShape().GetSizeExpression() + " * " +
+             std::to_string(getByteSizeOf(f_type));
     else
       return std::to_string(ByteSize());
   }

@@ -1,5 +1,6 @@
-#include "aux.hpp"
 #include "typecheck.hpp"
+
+#include "aux.hpp"
 
 using namespace Choreo;
 
@@ -68,7 +69,7 @@ bool TypeChecker::Visit(AST::DataType& n) {
 }
 bool TypeChecker::Visit(AST::Identifier& n) {
   __TRACE_EACH_VISIT__(n)
-  if (PrefixWith(n.name, "$")) return true; // do not check internal symbols
+  if (PrefixWith(n.name, "$")) return true;  // do not check internal symbols
   if (isa<UnknownType>(GetSymbolType(n.name))) {
     ++error_count;
     Error(n.LOC(), "failed to get/infer the type of " + n.name + ".");
@@ -148,12 +149,11 @@ bool TypeChecker::Visit(AST::Program& n) {
   return true;
 }
 
-bool TypeChecker::ReportUnknown(AST::Node & n, const char* file, int line) {
+bool TypeChecker::ReportUnknown(AST::Node& n, const char* file, int line) {
   if (AST::typeof<UnknownType>(&n)) {
     ++error_count;
     Error(n.LOC(), "failed to get/infer the type.");
-    if (trace_visit)
-      os << file << ":" << line << ", " << AST::STR(n) << "\n" ;
+    if (trace_visit) os << file << ":" << line << ", " << AST::STR(n) << "\n";
     return false;
   }
   return true;

@@ -4,9 +4,9 @@
 #include <thread>
 
 #include "ast.hpp"
+#include "choreo_header.inc"
 #include "codegen.hpp"
 #include "types.hpp"
-#include "choreo_header.inc"
 
 using namespace Choreo;
 
@@ -115,10 +115,9 @@ static inline void print_host_phase1(std::ostream &os, const std::string &f_n) {
 }
 
 // phase 2: allocate device memory and copy
-static inline void print_host_phase2(std::ostream &os,
-                                     const FactorCodeGen::EntryParamsInfo &params,
-                                     const std::string & out_size,
-                                     std::vector<std::string> &d_params) {
+static inline void print_host_phase2(
+    std::ostream &os, const FactorCodeGen::EntryParamsInfo &params,
+    const std::string &out_size, std::vector<std::string> &d_params) {
   assert((d_params.size() == 0) && "expecting an empty vector.");
 
   // input parameters
@@ -141,16 +140,16 @@ static inline void print_host_phase2(std::ostream &os,
 }
 
 // phase 3: Execute the executable and fetch the output
-static inline void print_host_phase3(std::ostream &os,
-                                     const FactorCodeGen::EntryParamsInfo &params,
-                                     const std::string & out_size,
-                                     const std::string &out_type,
-                                     size_t out_rank, const std::string &out_shape) {
+static inline void print_host_phase3(
+    std::ostream &os, const FactorCodeGen::EntryParamsInfo &params,
+    const std::string &out_size, const std::string &out_type, size_t out_rank,
+    const std::string &out_shape) {
   // TODO: resolve hardcode in input dims and ranks
   // os << "  int64_t input_dims[] = {";
   // if (params.size() > 0) {
   //   os << params[0].second;
-  //   for (size_t i = 1; i < params.size(); ++i) os << ", " << params[i].second;
+  //   for (size_t i = 1; i < params.size(); ++i) os << ", " <<
+  //   params[i].second;
   // }
   // os << "};";
   os << R"(
@@ -167,8 +166,8 @@ static inline void print_host_phase3(std::ostream &os,
 )";
 
   if (!out_size.empty()) {
-    os << "  auto res = choreo::make_spandata<" << out_type << ", " << out_rank << ">("
-     << out_shape << ");\n";
+    os << "  auto res = choreo::make_spandata<" << out_type << ", " << out_rank
+       << ">(" << out_shape << ");\n";
     os << "  // Copy output data from device to host\n";
     os << "  CHECK(topsMemcpy(reinterpret_cast<void *>(res.data()), out_mem,\n";
     os << "                  " << out_size << ", topsMemcpyDeviceToHost));\n";
@@ -779,7 +778,8 @@ void FactorCodeGen::GenerateHostFunction(std::ostream &os, const Type &ty,
     auto n = GenEntryParamName();
     if (!decl_only) {
       if (auto sty = dyn_cast<SpannedType>(fty.in_tys[0]))
-        entry_params.push_back(std::make_pair(n + ".data", sty->ByteSizeExpression()));
+        entry_params.push_back(
+            std::make_pair(n + ".data", sty->ByteSizeExpression()));
       else
         entry_params.push_back(std::make_pair(n, "1"));
     }
@@ -788,7 +788,8 @@ void FactorCodeGen::GenerateHostFunction(std::ostream &os, const Type &ty,
       auto n = GenEntryParamName();
       if (!decl_only) {
         if (auto sty = dyn_cast<SpannedType>(fty.in_tys[i]))
-          entry_params.push_back(std::make_pair(n + ".data", sty->ByteSizeExpression()));
+          entry_params.push_back(
+              std::make_pair(n + ".data", sty->ByteSizeExpression()));
         else
           entry_params.push_back(std::make_pair(n, "1"));
       }
@@ -836,20 +837,20 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
     }
   }
 
-  if (auto out_ty = dyn_cast<SpannedType>(cast<FunctionType>(cur_fty)->out_ty)) {
+  if (auto out_ty =
+          dyn_cast<SpannedType>(cast<FunctionType>(cur_fty)->out_ty)) {
     auto name = "output";
     auto type_symbol = "output_type";
     std::ostringstream _os;
     // param->type->Print(os, "");
-    if (const auto & pty = out_ty->GetMDSpanType()) {
+    if (const auto &pty = out_ty->GetMDSpanType()) {
       _os << pty->EmitTo(Target::Factor);
     } else {
       // TODO: this guard code may not needed
       _os << "{?}";
     }
-    auto type_string = "DRAMType(" +
-                       factor_typestr(out_ty->ElementType()) + ", " +
-                       _os.str();
+    auto type_string =
+        "DRAMType(" + factor_typestr(out_ty->ElementType()) + ", " + _os.str();
 
     strtab.AddSymbol(name, type_symbol, type_string);
     fs << this->indent << "auto " << strtab.GetTypeSymbol(name) << " = "
@@ -907,7 +908,8 @@ bool FactorCodeGen::Visit(AST::CppSourceCode &n) {
 bool FactorCodeGen::Visit(AST::Program &) { return true; }
 
 void FactorCodeGen::OutputScript(const std::string &n,
-                                 const std::string &out_type, const std::string & out_size,
+                                 const std::string &out_type,
+                                 const std::string &out_size,
                                  const Shape &out_shape) {
   // it requires temporal files for the compilation process
   std::string kernel_fn =
@@ -932,7 +934,8 @@ void FactorCodeGen::OutputScript(const std::string &n,
   if (out_shape.IsValid()) {
     std::ostringstream oss;
     out_shape.PrintAsList(oss);
-    print_host_phase3(hs, entry_params, out_size, out_type, out_shape.Dims(), oss.str());
+    print_host_phase3(hs, entry_params, out_size, out_type, out_shape.Dims(),
+                      oss.str());
   } else
     print_host_phase3(hs, entry_params, out_size, out_type, 1, "{1}");
   print_host_phase4(hs, device_mems);
