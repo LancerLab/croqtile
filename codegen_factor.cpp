@@ -117,7 +117,7 @@ static inline void print_host_phase1(std::ostream &os, const std::string &f_n) {
 // phase 2: allocate device memory and copy
 static inline void print_host_phase2(std::ostream &os,
                                      const FactorCodeGen::EntryParamsInfo &params,
-                                     size_t out_size,
+                                     const std::string & out_size,
                                      std::vector<std::string> &d_params) {
   assert((d_params.size() == 0) && "expecting an empty vector.");
 
@@ -133,7 +133,7 @@ static inline void print_host_phase2(std::ostream &os,
   os << "  void * device_inputs[] = {" << DelimitedString(d_params) << "};\n\n";
 
   // output parameter
-  if (out_size) {
+  if (!out_size.empty()) {
     os << "  void * out_mem = nullptr;\n";
     os << "  CHECK(topsMalloc(&out_mem, " << out_size << "));\n";
     os << "  void *device_outputs[] = {out_mem};\n";
@@ -143,7 +143,7 @@ static inline void print_host_phase2(std::ostream &os,
 // phase 3: Execute the executable and fetch the output
 static inline void print_host_phase3(std::ostream &os,
                                      const FactorCodeGen::EntryParamsInfo &params,
-                                     size_t out_size,
+                                     const std::string & out_size,
                                      const std::string &out_type,
                                      size_t out_rank, const std::string &out_shape) {
   // TODO: resolve hardcode in input dims and ranks
@@ -166,7 +166,7 @@ static inline void print_host_phase3(std::ostream &os,
 
 )";
 
-  if (out_size) {
+  if (!out_size.empty()) {
     os << "  auto res = choreo::make_spandata<" << out_type << ", " << out_rank << ">("
      << out_shape << ");\n";
     os << "  // Copy output data from device to host\n";
@@ -342,7 +342,7 @@ fi
     entry_fn = f->name;
     current_fn = "__choreo_" + entry_fn;
     auto &out_type = cast<FunctionType>(cur_fty)->out_ty;
-    size_t out_size = GetByteSizeOf(*out_type);
+    auto out_size = GetByteSizeExprOf(*out_type);
     fs << "}\n\nMODULE_REGISTER(\"module" << current_fn << "\", " << current_fn
        << ");";  // end the factor function definition
     if (auto sty = dyn_cast<SpannedType>(out_type)) {
@@ -631,6 +631,7 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
           dyn_cast<BoundedITupleType>(this->GetSymbolType(tf_symbol))
               ->GetBounds()
               .Value();
+#if 0
       auto tf_bound = *(std::get_if<int>(&tf_bounds[0]));
       auto dim_bound = *(std::get_if<int>(&dim[dim_cursor]));
       assert((tf_bound > 0 && dim_bound > 0) &&
@@ -639,6 +640,7 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
       // "*thread_id" :
       //                                  std::to_string(dim_bound/tf_bound) +
       //                                  "*" + STR(tile_factor);
+#endif
       auto offset = (dim_cursor == 0) ? "thread_id" : STR(tile_factor);
       offset_string = offset_string + offset;
       ++dim_cursor;
@@ -705,12 +707,15 @@ bool FactorCodeGen::Visit(AST::Call &c) {
                  "Unexpected !!!");
           auto ty_ptr = cast<FutureType>(this->GetSymbolType(var));
           auto shape = ty_ptr->GetShape();
+#if 0
           auto shapes = shape.Value();
           auto dim = shape.values.values[0];
           int dim_sz = shape.Dims(), size = 1;
           for (int dim_cursor = 0; dim_cursor < dim_sz;)
             size = size * (*(std::get_if<int>(&shapes[dim_cursor++])));
           fs << std::to_string(size);
+#endif
+          fs << shape.GetSizeExpression();
         } else if (arg->op == "dataof") {
           fs << STR(arg->value_r) << "_buffer"
              << ".addr_()";
@@ -902,7 +907,7 @@ bool FactorCodeGen::Visit(AST::CppSourceCode &n) {
 bool FactorCodeGen::Visit(AST::Program &) { return true; }
 
 void FactorCodeGen::OutputScript(const std::string &n,
-                                 const std::string &out_type, size_t out_size,
+                                 const std::string &out_type, const std::string & out_size,
                                  const Shape &out_shape) {
   // it requires temporal files for the compilation process
   std::string kernel_fn =

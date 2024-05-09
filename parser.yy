@@ -114,6 +114,7 @@ void choreo_info(const char *message) {
   TRANS   "=>"
   BIND    "<->"
   PIPE    "|"
+  UBOUND  "#"
 ;
 
 // instead of union, using c++17 variant for terminal and non-terminals
@@ -141,10 +142,10 @@ void choreo_info(const char *message) {
 %nterm <Choreo::BaseType> fundamental_type
 %nterm <AST::ptr<AST::CppSourceCode>> pass_by host_code
 %nterm <AST::ptr<AST::Memory>> storage_qual
-%nterm <AST::ptr<AST::Node>> foreach_block general_val simple_int spanned_value ituple_val bool_literal passable declaration statement assignment paraby_stmt w_statement dma_statement wait_statement call_statement index_or_value iv_expr if_else optional_scalar_init param_mdspan_val chunkat_or_storage
+%nterm <AST::ptr<AST::Node>> foreach_block general_val simple_int span_val ituple_val direct_ituple_val bool_literal passable declaration statement assignment paraby_stmt w_statement dma_statement wait_statement call_statement index_or_value iv_expr if_else optional_scalar_init param_mdspan_val chunkat_or_storage
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments paraby_stmts w_statements withins require_binds require_clause else_clause
 %nterm <AST::ptr<AST::MultiValues>> index_value_list value_list param_mdspan_list iv_exprs id_list with_matchers futures passables
-%nterm <AST::ptr<AST::Expr>> s_expr
+%nterm <AST::ptr<AST::Expr>> s_expr span_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
 %nterm <AST::ptr<AST::Parameter>> parameter
@@ -152,7 +153,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::MultiDimSpans>> unnamed_mdspan_decl param_mdspan
 %nterm <AST::ptr<AST::NamedTypeDecl>> named_mdspan_decl
 %nterm <AST::ptr<AST::NamedVariableDecl>> named_ituple_decl named_scalar_decl named_spanned_decl
-%nterm <AST::ptr<AST::IntTuple>> unnamed_ituple_decl
+%nterm <AST::ptr<AST::IntTuple>> unnamed_ituple_decl sugar_unnamed_ituple_decl sugarless_unnamed_ituple_decl
 %nterm <AST::ptr<AST::IntIndex>> s_index
 %nterm <AST::ptr<AST::WithBlock>> with_block
 %nterm <AST::ptr<AST::WithIn>> within
@@ -162,6 +163,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::ChunkAt>> chunkat_expr
 
 // precedence (low to high) and associativity
+%right LBRACE
 %right ASSIGN
 %right QES COL
 %left OR
@@ -170,6 +172,7 @@ void choreo_info(const char *message) {
 %nonassoc LT GT LE GE EQ NE
 %left PLUS MINUS
 %left STAR SLASH PECET
+%nonassoc UBOUND
 %nonassoc LPAREN RPAREN
 //%left HOST_CODE
 
@@ -288,8 +291,8 @@ general_val
 
         $$ = AST::Make<AST::Identifier>(@1, $1);
       }
-    | unnamed_mdspan_decl { $$ = $1; }
     | IDENTIFIER FNSPAN { $$ = AST::Make<AST::Identifier>(@1, $1 + $2); }
+    | unnamed_mdspan_decl { $$ = $1; }
     | unnamed_ituple_decl { $$ = $1; }
     | bool_literal { $$ = $1; }
     ;
@@ -361,9 +364,11 @@ return
     ;
 
 parallel_by
-    : PARA IDENTIFIER BY NUM LBRACE paraby_stmts RBRACE {
+    : PARA IDENTIFIER BY NUM {
+        symtab.AddSymbol($2, MakeBoundedIntegerType($4));
+      } LBRACE paraby_stmts RBRACE {
         $$ = AST::Make<AST::ParallelBy>(@1, $2, $4);
-        $$->stmts = $6;
+        $$->stmts = $7;
       }
     ;
 
@@ -487,7 +492,7 @@ unnamed_mdspan_decl
       }
     ;
 
-spanned_value
+span_val
     : unnamed_mdspan_decl { $$ = $1; }
     | IDENTIFIER { $$ = AST::Make<AST::Identifier>(@1, $1); }
     | IDENTIFIER FNSPAN { $$ = AST::Make<AST::Identifier>(@1, $1 + $2); }
@@ -508,13 +513,13 @@ named_mdspan_decl
       }
     ;
 
-
 unnamed_ituple_decl
-    : LBRACE value_list RBRACE {
-        $2->SetDelimiter(", ");
-        $$ = AST::Make<AST::IntTuple>(@1, "", $2);
-      }
-    | IDENTIFIER LBRACE { parsing_prefixed_list = true; }
+    : sugarless_unnamed_ituple_decl { $$ = $1; }
+    | sugar_unnamed_ituple_decl     { $$ = $1; }
+    ;
+
+sugar_unnamed_ituple_decl
+    : IDENTIFIER LBRACE { parsing_prefixed_list = true; }
       index_value_list RBRACE {
         // anchor
         if (!symtab.Exists($1))
@@ -526,8 +531,22 @@ unnamed_ituple_decl
       }
     ;
 
+sugarless_unnamed_ituple_decl
+    : LBRACE value_list RBRACE {
+        $2->SetDelimiter(", ");
+        $$ = AST::Make<AST::IntTuple>(@1, "", $2);
+      }
+    ;
+
 ituple_val
     : unnamed_ituple_decl { $$ = $1; }
+    | IDENTIFIER {
+        $$ = AST::Make<AST::Identifier>(@1, $1);
+      }
+    ;
+
+direct_ituple_val
+    : sugarless_unnamed_ituple_decl { $$ = $1; }
     | IDENTIFIER {
         $$ = AST::Make<AST::Identifier>(@1, $1);
       }
@@ -613,9 +632,21 @@ s_expr
     | s_expr NE s_expr { $$ = AST::Make<AST::Expr>(@1, "!=", $1, $3); }
     | s_expr LE s_expr { $$ = AST::Make<AST::Expr>(@1, "<=", $1, $3); }
     | s_expr GE s_expr { $$ = AST::Make<AST::Expr>(@1, ">=", $1, $3); }
-    | general_val { $$ = AST::Make<AST::Expr>(@1, $1); }
+    | general_val      { $$ = AST::Make<AST::Expr>(@1, $1); }
     | PIPE s_expr PIPE { $$ = AST::Make<AST::Expr>(@1, "sizeof", $2); }
-    | s_expr s_index { $$ = AST::Make<AST::Expr>(@1, "dimof", $1, $2); }
+    | s_expr s_index   { $$ = AST::Make<AST::Expr>(@1, "dimof", $1, $2); }
+    | UBOUND IDENTIFIER {
+        $$ = AST::Make<AST::Expr>(@1, "ubound", AST::Make<AST::Identifier>(@2, $2));
+      }
+    ;
+
+span_expr
+    : span_expr PLUS  direct_ituple_val { $$ = AST::Make<AST::Expr>(@1, "+", $1, $3); }
+    | span_expr MINUS direct_ituple_val { $$ = AST::Make<AST::Expr>(@1, "-", $1, $3); }
+    | span_expr STAR  direct_ituple_val { $$ = AST::Make<AST::Expr>(@1, "*", $1, $3); }
+    | span_expr SLASH direct_ituple_val { $$ = AST::Make<AST::Expr>(@1, "/", $1, $3); }
+    | span_expr PECET direct_ituple_val { $$ = AST::Make<AST::Expr>(@1, "%", $1, $3); }
+    | span_val { $$ = AST::Make<AST::Expr>(@1, $1); }
     ;
 
 if_else
@@ -655,12 +686,12 @@ withins
     ; /* do not allow empty within */
 
 within
-    : IDENTIFIER IN spanned_value {
-        symtab.AddSymbol($1, MakeUnknownType()/*TODO*/);
+    : IDENTIFIER IN span_expr {
+        symtab.AddSymbol($1, MakeUnknownType()/*Need inference*/);
         $$ = AST::Make<AST::WithIn>(@1, AST::Make<AST::Identifier>(@1,$1), $3);
       }
-    | IDENTIFIER ASSIGN LBRACE with_matchers RBRACE IN spanned_value {
-        symtab.AddSymbol($1, MakeUnknownType()/*TODO*/);
+    | IDENTIFIER ASSIGN LBRACE with_matchers RBRACE IN span_expr {
+        symtab.AddSymbol($1, MakeUnknownType()/*Need inference*/);
         $$ = AST::Make<AST::WithIn>(@1, AST::Make<AST::Identifier>(@1,$1), $7);
         $$->with_matchers = $4;
       }

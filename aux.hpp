@@ -4,6 +4,7 @@
 #include <cassert>
 #include <iostream>
 #include <sstream>
+#include <vector>
 
 #if 0
 [[noreturn]] inline void choreo_unreachable_impl(
@@ -54,6 +55,18 @@ inline std::string DelimitedString(const std::vector<T>& v) {
     }
   }
   return iss.str();
+}
+
+// Function to check if 'str' starts with 'prefix'
+inline bool PrefixWith(const std::string& str, const std::string& prefix) {
+	if (prefix.size() > str.size()) return false;
+	return str.compare(0, prefix.size(), prefix) == 0;
+}
+
+// Function to check if 'str' ends with 'suffix'
+inline bool SuffixWith(const std::string& str, const std::string& suffix) {
+	if (suffix.size() > str.size()) return false;
+	return str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
 #endif  // __CHOREO_AUX_HPP__

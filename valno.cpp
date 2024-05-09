@@ -200,6 +200,13 @@ std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
              [this, &n]() -> std::optional<std::string> {
                return std::nullopt; /*TODO*/
              }},
+            {"ubound",
+             [this, &n]() -> std::optional<std::string> {
+               if (auto id = dyn_cast<AST::Identifier>(n->value_r)) {
+                 return visitor->SSTab().NameInScope("@" + cast<AST::Identifier>(id)->name);
+               } else
+                 choreo_unreachable("upper bound expression is unexpected.");
+             }},
             {"dimof",  // calculate the dim of a given mdspan index
              [this, &n]() -> std::optional<std::string> {
                auto base = GetSignatureForNode(*n->value_l);

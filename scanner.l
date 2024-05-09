@@ -168,6 +168,7 @@ blank [ \t\r]
   ","        return Choreo::Parser::make_COMMA  (loc);
   ";"        return Choreo::Parser::make_SEMCOL (loc);
   ":"        return Choreo::Parser::make_COL    (loc);
+  "#"        return Choreo::Parser::make_UBOUND (loc);
   "("        return Choreo::Parser::make_LPAREN (loc);
   ")"        return Choreo::Parser::make_RPAREN (loc);
   "["        return Choreo::Parser::make_LBRAKT (loc);

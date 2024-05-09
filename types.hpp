@@ -479,7 +479,10 @@ struct Shape {
     return false;
   }
 
-  std::string GetShapeExpression() const {
+  std::string GetSizeExpression() const {
+    if (!IsDynamic())
+      return std::to_string(Size());
+
     assert(!Value().empty() && "no values inside the shape.");
     std::string res;
     res = ValueItemAsString(Value()[0]);
@@ -775,7 +778,7 @@ struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
   size_t ByteSize() const { return getByteSizeOf(f_type) * GetShape().Size(); }
   std::string ByteSizeExpression() const {
     if (RuntimeShaped())
-      return GetShape().GetShapeExpression();
+      return GetShape().GetSizeExpression() + " * " + std::to_string(getByteSizeOf(f_type));
     else
       return std::to_string(ByteSize());
   }
@@ -939,6 +942,20 @@ inline size_t GetByteSizeOf(const Type& ty) {
   return 0;
 }
 
+inline std::string GetByteSizeExprOf(const Type& ty) {
+  if (isa<VoidType>(&ty)) return {};
+  if (isa<IntegerType>(&ty))
+    return "4";
+  else if (isa<BooleanType>(&ty))
+    return "4";
+  else if (isa<BoundedIntegerType>(&ty))
+    return "4";
+  else if (auto t = dyn_cast<SpannedType>(&ty))
+    return t->ByteSizeExpression();
+  choreo_unreachable(STR(ty) + " does not imply runtime storage.");
+  return {};
+}
+
 inline std::string GetBaseTypeStringOf(const Type& ty) {
   if (isa<VoidType>(&ty)) return "void";
   if (isa<IntegerType>(&ty))
@@ -999,6 +1016,10 @@ inline ptr<SpannedType> MakeSpannedType(FundamentalType ft, const Shape& v,
 inline ptr<SpannedType> MakeSpannedType(BaseType ft, const Shape& v,
                                         const Storage& s = Storage::DEFAULT) {
   return MakeSpannedType((FundamentalType)ft, v, s);
+}
+
+inline ptr<BoundedIntegerType> MakeBoundedIntegerType(int ub) {
+  return std::make_shared<BoundedIntegerType>(ub);
 }
 
 inline ptr<BoundedITupleType> MakeBoundedITupleType(const Shape& v,

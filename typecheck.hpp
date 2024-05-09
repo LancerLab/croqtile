@@ -17,7 +17,7 @@ struct TypeChecker : public VisitorWithSymTab {
   bool BeforeVisitImpl(AST::Node &) override;
   bool AfterVisitImpl(AST::Node &) override;
 
-  bool ReportUnknown(AST::Node &);
+  bool ReportUnknown(AST::Node &, const char*, int);
 
  public:
   TypeChecker(const ptr<SymbolTable> s_tab, std::ostream &o = std::cout)

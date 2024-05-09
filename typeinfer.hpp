@@ -68,7 +68,7 @@ struct TypeInference : public Visitor {
   bool Visit(AST::Program &) override;
 
  private:
-  bool SetCurrentType(AST::Node &, const std::string &);
+  bool SetAsCurrentType(AST::Node &, const std::string &);
 };
 
 }  // end namespace Choreo

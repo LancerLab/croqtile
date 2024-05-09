@@ -101,7 +101,7 @@ bool TypeInference::ModifySymbolType(const location &loc,
   return true;
 }
 
-bool TypeInference::SetCurrentType(AST::Node &nd, const std::string &n) {
+bool TypeInference::SetAsCurrentType(AST::Node &nd, const std::string &n) {
   const auto ty = nd.GetType();
   if (ty->HasSufficientInfo()) {
     // already has a type with sufficient info, check for consistence.
@@ -184,7 +184,7 @@ bool TypeInference::Visit(AST::Identifier &n) {
 bool TypeInference::Visit(AST::NamedVariableDecl &n) {
   __TRACE_EACH_VISIT__(n)
 
-  if (!SetCurrentType(n, n.name_str)) {
+  if (!SetAsCurrentType(n, n.name_str)) {
     cur_type.reset();
     return false;
   }
@@ -282,7 +282,8 @@ bool TypeInference::Visit(AST::Parameter &p) {
     }
 
     AssignSymbolWithType(p.LOC(), p.sym->name, p.GetType());
-    AssignSymbolWithType(p.LOC(), p.sym->name + ".span", p.type->GetType());
+    if (auto sty = dyn_cast<SpannedType>(p.GetType()))
+      AssignSymbolWithType(p.LOC(), p.sym->name + ".span", sty->s_type);
   }
 
   // collect the parameter types
@@ -308,8 +309,6 @@ bool TypeInference::Visit(AST::ParamList &n) {
 
 bool TypeInference::Visit(AST::MultiDimSpans &n) {
   __TRACE_EACH_VISIT__(n)
-  //  assert(!cur_mdspan_value.IsValid() && "Expecting null mdspan value.");
-  //  cur_mdspan_value = mds.MakeValueList();
   return true;
 }
 
@@ -318,6 +317,10 @@ bool TypeInference::Visit(AST::Expr &n) {
   if (auto ref = n.GetReference()) {
     if (auto id = dyn_cast<AST::Identifier>(ref.get())) {
       if (auto pty = GetSymbolType(n.LOC(), id->name)) {
+        // special handling of the span-of spanned type
+        if (SuffixWith(id->name, ".span")) {
+          assert(isa<MDSpanType>(pty) && "incorrect type annotated.");
+        }
         n.SetType(pty);
         return true;
       } else {
@@ -339,14 +342,43 @@ bool TypeInference::Visit(AST::Expr &n) {
     return true;
   }
 
+  if (n.t == AST::Expr::Unary) {
+    if (n.op == "ubound") {
+      auto id = cast<AST::Identifier>(n.value_r); 
+      if (auto bty = dyn_cast<BoundedITupleType>(GetSymbolType(id->LOC(), id->name)))
+        n.SetType(MakeITupleType(bty->Dims()));
+      else if (isa<BoundedIntegerType>(GetSymbolType(id->LOC(), id->name)))
+        n.SetType(MakeIntegerType());
+      else
+        choreo_unreachable("ubound type '" + AST::TYPE_STR(n.value_r) + "' is unexpected.");
+      return true;
+    } else if (n.op == "sizeof") {
+      n.SetType(MakeIntegerType());
+      return true;
+    }
+    choreo_unreachable("type inference is yet to implement.");
+  }
+
   if (n.t == AST::Expr::Binary) {
-    if (n.op == "dimof" || n.op == "sizeof") {
+    if (n.op == "dimof") {
       n.SetType(MakeIntegerType());
       return true;
     }
 
-    if (*n.value_r->GetType() != *n.value_l->GetType()) {
-      Error(n.LOC(), "binary expression with different operand type.");
+    auto & pty_lhs = n.value_l->GetType();
+    auto & pty_rhs = n.value_r->GetType();
+    if (*pty_lhs != *pty_rhs) {
+      if ((isa<MDSpanType>(pty_lhs) && isa<ITupleType>(pty_rhs))
+          || (isa<MDSpanType>(pty_rhs) && isa<ITupleType>(pty_lhs))) {
+        if (pty_lhs->Dims() == pty_rhs->Dims()) {
+          return true;
+      } else {
+          Error(n.LOC(), "The operands of the expression be performed for inconsistant shape dimension.");
+          return false;
+        }
+      }
+
+      Error(n.LOC(), "The operands of the expression cannot undergo '" + n.op + "' operation.");
       return false;
     }
     n.SetType(n.value_r->GetType());
@@ -379,6 +411,7 @@ bool TypeInference::Visit(AST::DMA &n) {
        << ", Type: " << AST::TYPE_STR(n) << "\n";
   }
 
+  cur_type.reset();
   return true;
 }
 

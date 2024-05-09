@@ -539,7 +539,7 @@ class ShapeInference : public Visitor {
 
   bool Visit(AST::WithIn& n) {
     __TRACE_EACH_VISIT__;
-    if (auto mds = dyn_cast<AST::MultiDimSpans>(n.in.get())) {
+    if (auto mds = dyn_cast<AST::MultiDimSpans>(n.in)) {
       assert(ValidVN(cur_mdspan_vn) &&
              "no valid value number generated for the mdspan.");
       if (n.with_matchers)
@@ -548,41 +548,45 @@ class ShapeInference : public Visitor {
           return false;
         }
 
-      auto vn_sig = vn.GetSignatureFromValueNumber(cur_mdspan_vn);
-      bool gen_alias = (CountElementsInSignature(vn_sig) > 1);
-      ProcessValueNumberString(
-          vn_sig, [this, &vn_sig, &n, gen_alias](int valno, size_t index) {
-            if (UnknownVN(valno)) return;  // do not associate it with vn of "?"
-            if (n.with && gen_alias) {
-              std::string name = SSTab().ScopedName(n.with->name) + "(" +
-                                 std::to_string(index) + ")";
-              vn.AssociateSignatureWithValueNumber(name, valno);
-            }
-
-            if (n.with_matchers) {
-              auto sym =
-                  cast<AST::Identifier>((n.with_matchers->values[index]).get());
-              std::string name = SSTab().ScopedName("@" + sym->name);
-              if (gen_alias) vn.AssociateSignatureWithValueNumber(name, valno);
-              Shape s =
-                  GenShapeFromSignature(vn.GetSignatureFromValueNumber(valno));
-              sym->SetType(MakeBoundedITupleType(s));
-              SSTab().DefineSymbol("@" + sym->name, MakeMDSpanType(s));
-            }
-          });
-
-      if (n.with) {
-        vn.AssociateSignatureWithValueNumber(
-            SSTab().ScopedName("@" + n.with->name), cur_mdspan_vn);
-        Shape s = GenShapeFromSignature(vn_sig);
-        n.with->SetType(MakeBoundedITupleType(s));
-        SSTab().DefineSymbol("@" + n.with->name, MakeMDSpanType(s));
-      }
-      InvalidateVN(cur_mdspan_vn);
+    } else if (isa<AST::Expr>(n.in)) {
+      cur_mdspan_vn = cur_vn;
+      InvalidateVN(cur_vn);
     } else {
-      // TODO
-      choreo_unreachable("span expression is required to be supported.");
+      choreo_unreachable("unexpected with-in statement.");
     }
+
+    auto vn_sig = vn.GetSignatureFromValueNumber(cur_mdspan_vn);
+    bool gen_alias = (CountElementsInSignature(vn_sig) > 1);
+    ProcessValueNumberString(
+        vn_sig, [this, &vn_sig, &n, gen_alias](int valno, size_t index) {
+          if (UnknownVN(valno)) return;  // do not associate it with vn of "?"
+          if (n.with && gen_alias) {
+            std::string name = SSTab().ScopedName(n.with->name) + "(" +
+                               std::to_string(index) + ")";
+            vn.AssociateSignatureWithValueNumber(name, valno);
+          }
+
+          if (n.with_matchers) {
+            auto sym =
+                cast<AST::Identifier>((n.with_matchers->values[index]).get());
+            std::string name = SSTab().ScopedName("@" + sym->name);
+            if (gen_alias) vn.AssociateSignatureWithValueNumber(name, valno);
+            Shape s =
+                GenShapeFromSignature(vn.GetSignatureFromValueNumber(valno));
+            sym->SetType(MakeBoundedITupleType(s));
+            SSTab().DefineSymbol("@" + sym->name, MakeMDSpanType(s));
+          }
+        });
+
+    if (n.with) {
+      vn.AssociateSignatureWithValueNumber(
+          SSTab().ScopedName("@" + n.with->name), cur_mdspan_vn);
+      Shape s = GenShapeFromSignature(vn_sig);
+      n.with->SetType(MakeBoundedITupleType(s));
+      SSTab().DefineSymbol("@" + n.with->name, MakeMDSpanType(s));
+    }
+    InvalidateVN(cur_mdspan_vn);
+
     return true;
   }
 

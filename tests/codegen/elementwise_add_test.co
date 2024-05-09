@@ -12,10 +12,10 @@ void kernel(int * a, int * b, int * c, int n) {
 }
 
 // test function decl
-__co__ s32 mdspan[12, 1024] ele_add(s32 [12, 1024] a, s32 [12, 1024] b) {
+__co__ f32 mdspan[12, 1024] ele_add(s32 [12, 1024] a, s32 [12, 1024] b) {
   // CHECK: auto a_type = DRAMType(IntType(32), {12, 1024});
   // CHECK: auto b_type = DRAMType(IntType(32), {12, 1024});
-  // CHECK: auto output_type = DRAMType(IntType(32), {12, 1024});
+  // CHECK: auto output_type = DRAMType(FloatType(32), {12, 1024});
 
   // test global-level buffer decl
   // TODO(albert): remove this dupdundant decl first
