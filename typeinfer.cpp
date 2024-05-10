@@ -318,7 +318,7 @@ bool TypeInference::Visit(AST::Expr &n) {
     if (auto id = dyn_cast<AST::Identifier>(ref.get())) {
       if (auto pty = GetSymbolType(n.LOC(), id->name)) {
         // special handling of the span-of spanned type
-        if (SuffixWith(id->name, ".span")) {
+        if (SuffixedWith(id->name, ".span")) {
           assert(isa<MDSpanType>(pty) && "incorrect type annotated.");
         }
         n.SetType(pty);
@@ -373,6 +373,8 @@ bool TypeInference::Visit(AST::Expr &n) {
       if ((isa<MDSpanType>(pty_lhs) && isa<ITupleType>(pty_rhs)) ||
           (isa<MDSpanType>(pty_rhs) && isa<ITupleType>(pty_lhs))) {
         if (pty_lhs->Dims() == pty_rhs->Dims()) {
+          n.SetType(
+              MakeMDSpanType(n.s));  // note: the shape has been inferenced
           return true;
         } else {
           Error(n.LOC(),

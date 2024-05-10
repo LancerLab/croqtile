@@ -1,10 +1,6 @@
 // RUN: choreo -i %s | FileCheck --match-full-lines %s
 // RUN: choreo -v %s | FileCheck --check-prefix=VALNO --match-full-lines %s
 
-// recognize the __co__ function
-
-#include <iostream>
-
 // device program
 __co__ int foo(f32 [2, 3, 4] d, int e) {
   a = { 5, 1, d.span(2) / 3 };

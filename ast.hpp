@@ -232,6 +232,7 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
   ptr<Expr> value_l = nullptr;
   ptr<Node> value_r = nullptr;
   Type t;
+  Shape s;  // to pass information between shape inference & type inference
 
   explicit Expr(const location& l, const ptr<Node>& v)
       : Node(l), op("ref"), value_r(v), t(Reference) {}

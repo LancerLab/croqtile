@@ -80,21 +80,26 @@ int main(int argc, char* argv[]) {
   root.accept(sv);
   if (sv.HasError()) return 1;
 
+  if (stop_after.GetValue() == "check1") return 0;
+
   // minor AST change: desugar for canonicalized AST
   DeSugaring ds;
   root.accept(ds);
 
-  if (stop_after.GetValue() == "desugar")
-    return 0;
+  if (stop_after.GetValue() == "desugar") return 0;
 
   // perform shape inference of mdspans, future, etc.
   ShapeInference si(print_vn);
   root.accept(si);
 
+  if (stop_after.GetValue() == "shapeinfer") return 0;
+
   // inference all the unknown types - decls
   TypeInference ti(dump_inf);
   root.accept(ti);
   if (dump_inf || print_vn) return 0;
+
+  if (stop_after.GetValue() == "typeinfer") return 0;
 
   // debug: dump the symbol table
   if (std::getenv("DUMP_SYMTAB") || dump_sym) ti.SymTab()->Print(std::cout);
@@ -111,6 +116,8 @@ int main(int argc, char* argv[]) {
   if (sc.HasError()) return 1;
 
   if (sema_chk) return 0;
+
+  if (stop_after.GetValue() == "check2") return 0;
 
   // collect information for dynamic/runtime shape handling
   ShapeDynamics sds(ti.SymTab());

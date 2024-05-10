@@ -142,11 +142,15 @@ class ValueNumbering {
     }
   }
 
-  std::optional<std::string> TryToSimplifyTernary(const location&,
-                                                  const std::string&,
-                                                  const std::string&,
-                                                  const std::string&,
-                                                  bool = false);
+  std::optional<std::string> TryToSimplifyBinary(const location&,
+                                                 const std::string&,
+                                                 const std::string&,
+                                                 const std::string&,
+                                                 bool = false);
+
+  std::string SignBinaryCompositeValues(const location&, const std::string&,
+                                        const std::string&, const std::string&,
+                                        bool = false);
 
  private:
   std::string ScopeIndent();
@@ -261,7 +265,10 @@ class ShapeInference : public Visitor {
       }
     }
 
+    // the expression could be mdspan/ituple. record the information for later
+    // type inference
     cur_vn = vn.GenerateValueNumberForNode(n);
+    n.s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
     return true;
   }
 
@@ -445,9 +452,12 @@ class ShapeInference : public Visitor {
       // it is a reference
       auto name = n.name;
       auto pty = SSTab().LookupSymbol(name);
-      if (isa<SpannedType>(pty.get()) || isa<FutureType>(pty.get())) {
+      if (isa<SpannedType>(pty) || isa<FutureType>(pty)) {
         name += ".span";
         assert(SSTab().IsDeclared(name) && "span symbol is not declared.");
+      } else if (isa<BoundedITupleType>(pty)) {
+        name = "@" + name;
+        assert(SSTab().IsDeclared(name) && "ubound symbol is not declared.");
       }
       assert(vn.HasValueNumberOfSignature(SSTab().InScopeName(name)) &&
              "value number has not been generated.");
@@ -529,6 +539,7 @@ class ShapeInference : public Visitor {
     Shape s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(valno));
     n.SetType(MakeBoundedITupleType(s, "pv"));
     SSTab().DefineSymbol("@" + n.biv, MakeMDSpanType(s));
+    SSTab().DefineSymbol(n.biv, n.GetType());
     return true;
   };
 
@@ -561,7 +572,7 @@ class ShapeInference : public Visitor {
                                          int valno, size_t index) {
       if (UnknownVN(valno)) return;  // do not associate it with vn of "?"
       if (n.with && gen_alias) {
-        std::string name = SSTab().ScopedName(n.with->name) + "(" +
+        std::string name = SSTab().ScopedName("@" + n.with->name) + "(" +
                            std::to_string(index) + ")";
         vn.AssociateSignatureWithValueNumber(name, valno);
       }
@@ -640,7 +651,7 @@ class ShapeInference : public Visitor {
         std::string res_sig = "/:#" + std::to_string(dividend_vn) + ":#" +
                               std::to_string(divisor_vn);
 
-        if (auto quotient = vn.TryToSimplifyTernary(
+        if (auto quotient = vn.TryToSimplifyBinary(
                 n.LOC(), "/", vn.GetSignatureFromValueNumber(dividend_vn),
                 vn.GetSignatureFromValueNumber(divisor_vn), true))
           res_sig = quotient.value();
@@ -780,10 +791,10 @@ class ShapeInference : public Visitor {
   }
 
   std::string GenerateExpression(const std::string& sig) {
-    if (auto digit = PrefixedWith("const_", sig)) return *digit;
+    if (auto digit = RemovePrefixOrNull("const_", sig)) return *digit;
 
     // a value number reference
-    if (auto digit = PrefixedWith("#", sig))
+    if (auto digit = RemovePrefixOrNull("#", sig))
       return GenerateExpression(
           vn.GetSignatureFromValueNumber(std::stoi(*digit)));
 

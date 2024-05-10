@@ -159,7 +159,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::WithIn>> within
 %nterm <AST::ptr<AST::RequireBind>> require_bind
 %nterm <AST::ptr<AST::ParallelBy>> parallel_by
-%nterm <AST::ptr<AST::Return>> return
+%nterm <AST::ptr<AST::Return>> return_stmt
 %nterm <AST::ptr<AST::ChunkAt>> chunkat_expr
 
 // precedence (low to high) and associativity
@@ -355,10 +355,10 @@ statement
     | assignments  SEMCOL { $$ = $1; }
     | parallel_by         { $$ = $1; }
     | if_else             { $$ = $1; }
-    | return SEMCOL       { $$ = $1; }
+    | return_stmt  SEMCOL { $$ = $1; }
     ;
 
-return
+return_stmt
     : RET          { $$ = AST::Make<AST::Return>(@1);}
     | RET passable { $$ = AST::Make<AST::Return>(@1, $2); }
     ;

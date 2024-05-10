@@ -3,6 +3,7 @@
 
 #include <cassert>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <vector>
 
@@ -58,15 +59,24 @@ inline std::string DelimitedString(const std::vector<T>& v) {
 }
 
 // Function to check if 'str' starts with 'prefix'
-inline bool PrefixWith(const std::string& str, const std::string& prefix) {
+inline bool PrefixedWith(const std::string& str, const std::string& prefix) {
   if (prefix.size() > str.size()) return false;
   return str.compare(0, prefix.size(), prefix) == 0;
 }
 
 // Function to check if 'str' ends with 'suffix'
-inline bool SuffixWith(const std::string& str, const std::string& suffix) {
+inline bool SuffixedWith(const std::string& str, const std::string& suffix) {
   if (suffix.size() > str.size()) return false;
   return str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+inline std::optional<std::string> RemovePrefixOrNull(const std::string& prefix,
+                                                     const std::string& str) {
+  if (str.find(prefix) == 0)  // Check if 'prefix' is at the beginning
+    return str.substr(prefix.length());  // Return the substring after 'prefix'
+  else
+    return std::nullopt;  // Return an empty string if 'prefix' is not at the
+                          // beginning
 }
 
 #endif  // __CHOREO_AUX_HPP__

@@ -24,7 +24,7 @@ bool SymbolValidator::BeforeVisit(AST::Node& n) {
     SSTab().EnterScope("foreach_" + std::to_string(count++));
   }
 
-  if (isa<AST::Parameter>(&n) || isa<AST::WithIn>(&n)) {
+  if (isa<AST::Parameter>(&n)) {
     in_decl = true;
   }
 
@@ -38,7 +38,7 @@ bool SymbolValidator::AfterVisit(AST::Node& n) {
     SSTab().LeaveScope();
   }
 
-  if (isa<AST::Parameter>(&n) || isa<AST::WithIn>(&n)) {
+  if (isa<AST::Parameter>(&n)) {
     in_decl = false;
   }
   return true;
@@ -71,16 +71,17 @@ bool SymbolValidator::Visit(AST::MultiDimSpans& n) {
 
 bool SymbolValidator::Visit(AST::NamedTypeDecl& n) {
   __TRACE_EACH_VISIT__(n)
-  ReportErrorWhenViolateODR(n.LOC(), n.name_str);
-  ReportErrorWhenViolateODR(n.LOC(), n.name_str + ".span");
+  ReportErrorWhenViolateODR(n.LOC(), n.name_str, __FILE__, __LINE__);
+  ReportErrorWhenViolateODR(n.LOC(), n.name_str + ".span", __FILE__, __LINE__);
   return true;
 }
 
 bool SymbolValidator::Visit(AST::NamedVariableDecl& n) {
   __TRACE_EACH_VISIT__(n)
-  ReportErrorWhenViolateODR(n.LOC(), n.name_str);
+  ReportErrorWhenViolateODR(n.LOC(), n.name_str, __FILE__, __LINE__);
   if (n.type->isSpanned())
-    ReportErrorWhenViolateODR(n.LOC(), n.name_str + ".span");
+    ReportErrorWhenViolateODR(n.LOC(), n.name_str + ".span", __FILE__,
+                              __LINE__);
   return true;
 }
 
@@ -107,7 +108,7 @@ bool SymbolValidator::Visit(AST::DataType& n) {
 bool SymbolValidator::Visit(AST::Identifier& n) {
   __TRACE_EACH_VISIT__(n)
   if (in_decl)
-    ReportErrorWhenViolateODR(n.LOC(), n.name);
+    ReportErrorWhenViolateODR(n.LOC(), n.name, __FILE__, __LINE__);
   else
     ReportErrorWhenUseBeforeDefine(n.LOC(), n.name);
   return true;
@@ -116,7 +117,8 @@ bool SymbolValidator::Visit(AST::Identifier& n) {
 bool SymbolValidator::Visit(AST::Parameter& n) {
   __TRACE_EACH_VISIT__(n)
   if (n.sym && n.type->isSpanned())
-    ReportErrorWhenViolateODR(n.LOC(), n.sym->name + ".span");
+    ReportErrorWhenViolateODR(n.LOC(), n.sym->name + ".span", __FILE__,
+                              __LINE__);
 
   return true;
 }
@@ -128,7 +130,7 @@ bool SymbolValidator::Visit(AST::ParamList& n) {
 
 bool SymbolValidator::Visit(AST::ParallelBy& n) {
   __TRACE_EACH_VISIT__(n)
-  ReportErrorWhenViolateODR(n.LOC(), n.biv);
+  ReportErrorWhenViolateODR(n.LOC(), n.biv, __FILE__, __LINE__);
   return true;
 }
 
@@ -139,7 +141,10 @@ bool SymbolValidator::Visit(AST::RequireBind& n) {
 
 bool SymbolValidator::Visit(AST::WithIn& n) {
   __TRACE_EACH_VISIT__(n)
-  ReportErrorWhenViolateODR(n.LOC(), n.with->name);
+  in_decl = true;
+  if (n.with) n.with->accept(*this);
+  if (n.with_matchers) n.with_matchers->accept(*this);
+  in_decl = false;
   return true;
 }
 bool SymbolValidator::Visit(AST::WithBlock& n) {
@@ -151,16 +156,20 @@ bool SymbolValidator::Visit(AST::Memory& n) {
   return true;
 }
 bool SymbolValidator::Visit(AST::DMA& n) {
-  ReportErrorWhenViolateODR(n.LOC(), n.future);
-  ReportErrorWhenViolateODR(n.LOC(), n.future + ".span");
-  ReportErrorWhenViolateODR(n.LOC(), n.future + ".data");
+  ReportErrorWhenViolateODR(n.LOC(), n.future, __FILE__, __LINE__);
+  ReportErrorWhenViolateODR(n.LOC(), n.future + ".span", __FILE__, __LINE__);
+  ReportErrorWhenViolateODR(n.LOC(), n.future + ".data", __FILE__, __LINE__);
   __TRACE_EACH_VISIT__(n)
   return true;
 }
+
 bool SymbolValidator::Visit(AST::ChunkAt& n) {
   __TRACE_EACH_VISIT__(n)
+  n.data->accept(*this);
+  if (n.positions) n.positions->accept(*this);
   return true;
 }
+
 bool SymbolValidator::Visit(AST::Wait& n) {
   __TRACE_EACH_VISIT__(n)
   return true;
@@ -205,10 +214,12 @@ bool SymbolValidator::ReportErrorWhenUseBeforeDefine(const location& loc,
 }
 
 bool SymbolValidator::ReportErrorWhenViolateODR(const location& loc,
-                                                const std::string& name) {
+                                                const std::string& name,
+                                                const char* file, int line) {
   if (SSTab().DeclaredInScope(name)) {
     Error(loc, "symbol `" + name + "' has been declared already.");
     ++error_count;
+    if (trace_visit) os << "Error in " << file << ", line: " << line << ".\n";
     return false;
   }
   SSTab().DefineSymbol(name, MakeUnknownType());  // TODO: improve the type

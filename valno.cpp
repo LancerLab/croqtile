@@ -2,6 +2,49 @@
 
 using namespace Choreo;
 
+namespace {
+std::vector<int> CollectValueNumbers(const std::string& input) {
+  std::vector<int> res;
+  std::regex valuePattern("#(-?\\d+)");
+  auto begin = std::sregex_iterator(input.begin(), input.end(), valuePattern);
+  auto end = std::sregex_iterator();
+
+  for (auto i = begin; i != end; ++i) {
+    std::smatch match = *i;
+    std::string matchStr =
+        match.str(1);  // Capture the number part of the match
+    res.push_back(std::stoi(matchStr));
+  }
+  return res;
+}
+
+std::vector<int> GetOperandsValNo(const std::string& input) {
+  std::vector<int> operands;
+  size_t startPos = 0;
+  size_t colonPos;
+
+  // Loop through all colon-separated parts of the string
+  while ((colonPos = input.find(':', startPos)) != std::string::npos) {
+    std::string part = input.substr(startPos, colonPos - startPos);
+    std::istringstream iss(part.substr(1));
+    int number;
+    // Try to extract a number from the current part
+    if (iss >> number) operands.push_back(number);
+    startPos = colonPos + 1;
+  }
+
+  // Handle the last part after the last colon
+  if (startPos + 1 < input.length()) {
+    std::istringstream iss(input.substr(startPos + 1));
+    int number;
+    if (iss >> number) operands.push_back(number);
+  }
+
+  return operands;
+}
+
+}  // namespace
+
 void ValueNumbering::EnterScope(const std::string& name) {
   std::string indent = ScopeIndent();
   visitor->SSTab().EnterScope(name);
@@ -47,7 +90,12 @@ void ValueNumbering::LeaveScope() {
 // carefully.
 void ValueNumbering::AssociateSignatureWithValueNumber(const std::string& sig,
                                                        int valno) {
-  assert(!expressionValueNumbers.back().count(sig) && "signature existed.");
+  if (expressionValueNumbers.back().count(sig)) {
+    // signature exists
+    assert((expressionValueNumbers.back()[sig] == valno) &&
+           "associate signature with different value number.");
+  }
+
   assert(valueNumberExpressions.back().count(valno) &&
          "invalid value number provided.");
 
@@ -57,11 +105,45 @@ void ValueNumbering::AssociateSignatureWithValueNumber(const std::string& sig,
     os << ScopeIndent() << "Alias \"" << sig << "\" -> #" << valno << "\n";
 }
 
-std::optional<std::string> ValueNumbering::TryToSimplifyTernary(
+std::string ValueNumbering::SignBinaryCompositeValues(const location& loc,
+                                                      const std::string& op,
+                                                      const std::string& lhs,
+                                                      const std::string& rhs,
+                                                      bool verbose) {
+  assert(CountElementsInSignature(lhs) > 1);
+  assert(CountElementsInSignature(lhs) == CountElementsInSignature(rhs));
+
+  auto l_vns = CollectValueNumbers(lhs);
+  auto r_vns = CollectValueNumbers(rhs);
+  assert(l_vns.size() == r_vns.size());
+
+  std::vector<int> signatures;
+  for (size_t i = 0; i < l_vns.size(); ++i) {
+    auto l_sig = GetSignatureFromValueNumber(l_vns[i]);
+    auto r_sig = GetSignatureFromValueNumber(r_vns[i]);
+    auto opt_sig = TryToSimplifyBinary(loc, op, l_sig, r_sig, verbose);
+    if (opt_sig)
+      signatures.push_back(GetOrInsertValueNumberFromSignature(*opt_sig));
+    else {
+      std::ostringstream oss;
+      oss << op << ":#" << GetValueNumberOfSignature(l_sig) << ":#"
+          << GetValueNumberOfSignature(r_sig);
+      signatures.push_back(GetOrInsertValueNumberFromSignature(oss.str()));
+    }
+  }
+  assert(signatures.size() > 0);
+
+  std::ostringstream oss;
+  oss << "#" << signatures[0];
+  for (size_t i = 1; i < signatures.size(); ++i) oss << ",#" << signatures[i];
+  return oss.str();
+}
+
+std::optional<std::string> ValueNumbering::TryToSimplifyBinary(
     const location& loc, const std::string& op, const std::string& lhs,
     const std::string& rhs, bool verbose) {
-  auto l_cv = PrefixedWith("const_", lhs);
-  auto r_cv = PrefixedWith("const_", rhs);
+  auto l_cv = RemovePrefixOrNull("const_", lhs);
+  auto r_cv = RemovePrefixOrNull("const_", rhs);
   if (l_cv && r_cv) {
     std::string res = "const_";
     if (op == "+")
@@ -80,10 +162,27 @@ std::optional<std::string> ValueNumbering::TryToSimplifyTernary(
       return std::nullopt;
     }
     if (trace && verbose)
-      os << ScopeIndent() << "<Simplify> '" << lhs << " / " << rhs << " to '"
-         << res << "'\n";
+      os << ScopeIndent() << "<Simplify> '" << lhs << " " << op << " " << rhs
+         << " to '" << res << "'\n";
     return res;
   }
+
+  // simplify a/(a/b) = b
+  if ((op == "/") && PrefixedWith(rhs, "/:") &&
+      !PrefixedWith(lhs, "#") /*not multiple values*/) {
+    auto div = GetOperandsValNo(rhs);
+    assert(div.size() == 2);
+    if (GetValueNumberOfSignature(lhs) == div[0]) {
+      auto res = GetSignatureFromValueNumber(div[1]);
+
+      if (trace && verbose)
+        os << ScopeIndent() << "<Simplify> '" << lhs << " " << op << " " << rhs
+           << " to '" << res << "'\n";
+
+      return res;
+    }
+  }
+
   return std::nullopt;
 }
 
@@ -93,14 +192,14 @@ std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
     (void)b;
     return std::nullopt;
   } else if (auto* n = dyn_cast<AST::Expr>(&node)) {
-    // This is the algebraic simplification
+    // Applies the algebraic simplification
     std::map<std::string, std::function<std::optional<std::string>()>>
         alg_simp = {
             {"+",
              [this, &n]() -> std::optional<std::string> {
-               auto res = TryToSimplifyTernary(
-                   n->LOC(), "+", GetSignatureForNode(*n->value_l),
-                   GetSignatureForNode(*n->value_r));
+               auto res = TryToSimplifyBinary(n->LOC(), "+",
+                                              GetSignatureForNode(*n->value_l),
+                                              GetSignatureForNode(*n->value_r));
                if (res && trace)
                  os << ScopeIndent() << "<Simplify> '"
                     << GenerateNodeSignature(*n->value_l, false) << " + "
@@ -110,9 +209,9 @@ std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
              }},
             {"-",
              [this, &n]() -> std::optional<std::string> {
-               auto res = TryToSimplifyTernary(
-                   n->LOC(), "-", GetSignatureForNode(*n->value_l),
-                   GetSignatureForNode(*n->value_r));
+               auto res = TryToSimplifyBinary(n->LOC(), "-",
+                                              GetSignatureForNode(*n->value_l),
+                                              GetSignatureForNode(*n->value_r));
                if (res && trace)
                  os << ScopeIndent() << "<Simplify> '"
                     << GenerateNodeSignature(*n->value_l, false) << " - "
@@ -122,9 +221,9 @@ std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
              }},
             {"*",
              [this, &n]() -> std::optional<std::string> {
-               auto res = TryToSimplifyTernary(
-                   n->LOC(), "*", GetSignatureForNode(*n->value_l),
-                   GetSignatureForNode(*n->value_r));
+               auto res = TryToSimplifyBinary(n->LOC(), "*",
+                                              GetSignatureForNode(*n->value_l),
+                                              GetSignatureForNode(*n->value_r));
                if (res && trace)
                  os << ScopeIndent() << "<Simplify> '"
                     << GenerateNodeSignature(*n->value_l, false) << " * "
@@ -134,9 +233,9 @@ std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
              }},
             {"/",
              [this, &n]() -> std::optional<std::string> {
-               auto res = TryToSimplifyTernary(
-                   n->LOC(), "/", GetSignatureForNode(*n->value_l),
-                   GetSignatureForNode(*n->value_r));
+               auto res = TryToSimplifyBinary(n->LOC(), "/",
+                                              GetSignatureForNode(*n->value_l),
+                                              GetSignatureForNode(*n->value_r));
                if (res && trace)
                  os << ScopeIndent() << "<Simplify> '"
                     << GenerateNodeSignature(*n->value_l, false) << " / "
@@ -146,9 +245,9 @@ std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
              }},
             {"%",
              [this, &n]() -> std::optional<std::string> {
-               auto res = TryToSimplifyTernary(
-                   n->LOC(), "%", GetSignatureForNode(*n->value_l),
-                   GetSignatureForNode(*n->value_r));
+               auto res = TryToSimplifyBinary(n->LOC(), "%",
+                                              GetSignatureForNode(*n->value_l),
+                                              GetSignatureForNode(*n->value_r));
                if (res && trace)
                  os << ScopeIndent() << "<Simplify> '"
                     << GenerateNodeSignature(*n->value_l, false) << " % "
@@ -211,8 +310,8 @@ std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
             {"dimof",  // calculate the dim of a given mdspan index
              [this, &n]() -> std::optional<std::string> {
                auto base = GetSignatureForNode(*n->value_l);
-               auto cv = PrefixedWith("index_const_",
-                                      GetSignatureForNode(*n->value_r));
+               auto cv = RemovePrefixOrNull("index_const_",
+                                            GetSignatureForNode(*n->value_r));
                assert(cv && "indexing of mdspan can not be evaluated.");
                return base + "(" + *cv + ")";
              }},
@@ -223,6 +322,11 @@ std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
                return expr;
              }},
         };
+    if ((n->t == AST::Expr::Binary) &&
+        (CountElementsInSignature(GetSignatureForNode(*n->value_r)) > 1))
+      return SignBinaryCompositeValues(n->LOC(), n->op,
+                                       GetSignatureForNode(*n->value_l),
+                                       GetSignatureForNode(*n->value_r));
     // Try to simplify immediately
     auto it = alg_simp.find(n->op);
     if (it != alg_simp.end())

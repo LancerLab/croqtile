@@ -8,6 +8,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <regex>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -137,15 +138,6 @@ inline static std::string getStringFrom(Storage st) {
   return it->second;
 }
 
-inline std::optional<std::string> PrefixedWith(const std::string& prefix,
-                                               const std::string& str) {
-  if (str.find(prefix) == 0)  // Check if 'prefix' is at the beginning
-    return str.substr(prefix.length());  // Return the substring after 'prefix'
-  else
-    return std::nullopt;  // Return an empty string if 'prefix' is not at the
-                          // beginning
-}
-
 // smart typeid provider suggested by GPT
 template <typename T>
 struct TypeIDProvider {
@@ -157,11 +149,18 @@ int TypeIDProvider<T>::__unique_id;
 
 // User defined type that utilize isa/cast/dyn_cast must place the macro inside
 // its class definition
-#define __UDT_TYPE_INFO__                                                     \
-  const std::string NodeTypeString() override { return __PRETTY_FUNCTION__; } \
-  static uint64_t TypeID() { return (uint64_t)(&__unique_id); }               \
-  virtual uint64_t RuntimeID() const override {                               \
-    return (uint64_t)(&__unique_id);                                          \
+#define __UDT_TYPE_INFO__                                       \
+  const std::string NodeTypeString() override {                 \
+    std::string name = __PRETTY_FUNCTION__;                     \
+    std::regex prefix_regex("^.*Choreo::");                     \
+    name = std::regex_replace(name, prefix_regex, "");          \
+    std::regex suffix_regex("::NodeTypeString.*$");             \
+    name = std::regex_replace(name, suffix_regex, "");          \
+    return name;                                                \
+  }                                                             \
+  static uint64_t TypeID() { return (uint64_t)(&__unique_id); } \
+  virtual uint64_t RuntimeID() const override {                 \
+    return (uint64_t)(&__unique_id);                            \
   }
 
 // LLVM-style type utility functions

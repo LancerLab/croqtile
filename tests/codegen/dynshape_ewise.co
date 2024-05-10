@@ -1,50 +1,24 @@
 #include "choreo.h"
 
-__cok__ { /// kernel program
-extern "C" void kernel(int * a, int * b, int * c, int n) {
-  for (int i = 0; i < n; ++i)
-    c[i] = a[i] + b[i];
-}
-} /// end of kernel decl
-
 __co__ auto ele_add(s32 [6, ?, 128] lhs, s32 [6, ?, 128] rhs) {
   s32[lhs.span] output;
 
   parallel p by 6 {
-    with index = {q, x, y} in lhs.span / {#p, 2, 32} {
-      foreach index {
-          lhs_load = dte.linear lhs.chunkat(index) => local;
-          rhs_load = dte.linear rhs.chunkat(index) => local;
-          wait lhs_load, rhs_load;
+    with idx0 = {q, x, y} in lhs.span / {#p, 2, 32}, // [6/6, lhs.span(1) / 2, 128/32] = [1, lhs.span(1) / 2, 4 ]
+         idx1 = {w, z, b} in rhs.span / {#p, 2, 32}
+    requires x <-> z {
+      foreach idx0 {
+        lhs_load = dte.linear lhs.chunkat(q, x, y) => local;
+        rhs_load = dte.linear rhs.chunkat(w, z, b) => local;
+        wait lhs_load, rhs_load;
 
-          local s32[lhs_load.span] l1_out;
-          call kernel(lhs_load.data, rhs_load.data, l1_out, |lhs_load.span|);
+        local s32[lhs_load.span] l1_out;
+        call kernel(lhs_load.data, rhs_load.data, l1_out, |lhs_load.span|);
 
-          out_store = dte.linear l1_out => output.chunkat(index);
-          wait out_store;
-        }
+        out_store = dte.linear l1_out => output.chunkat(q,x,y);
+        wait out_store;
       }
     }
   } // can use python styling
   return output;
 }
-
-int main() { /// host program
-  choreo::s32 a[6][17][128] = {0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge
-  choreo::s32 b[6][17][128] = {0};
-  std::fill_n(&a[0][0][0], sizeof(a) / sizeof(a[0][0][0]), 1);
-  std::fill_n(&b[0][0][0], sizeof(b) / sizeof(b[0][0][0]), 2);
-
-  auto res
-    = ele_add(choreo::make_spanned<3, choreo::s32>((int*)a, {6, 17, 128}),
-              choreo::make_spanned<3, choreo::s32>((int*)b, {6, 17, 128}));
-
-  // verfication
-  for (size_t i = 0; i < res.shape()[0]; ++i)
-    for (size_t j = 0; i < res.shape()[1]; ++i)
-      for (size_t k = 0; i < res.shape()[2]; ++i)
-        assert(a[i][j][k] + b[i][j][k] == res[i][j][k]);
-
-  std::cout << "Test Passed\n" << std::endl;
-}
-

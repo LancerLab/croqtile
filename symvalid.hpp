@@ -22,7 +22,8 @@ struct SymbolValidator : public Visitor {
   bool AfterVisit(AST::Node &) override;
 
   bool ReportErrorWhenUseBeforeDefine(const location &, const std::string &);
-  bool ReportErrorWhenViolateODR(const location &, const std::string &);
+  bool ReportErrorWhenViolateODR(const location &, const std::string &,
+                                 const char *, int);
 
  public:
   SymbolValidator(std::ostream &o = std::cout)
