@@ -482,7 +482,7 @@ struct Visualizer : public VisitorWithSymTab {
 
   std::unique_ptr<ShapePolyhedron> HandleImplicit(AST::Memory &s, Shape shape,
                                                   int parallel_count = 1) {
-    std::string mem = getStringFrom(s.st);
+    std::string mem = STR(s.st);
 
     std::vector<size_t> sizes;
     if (auto ilist = shape.GetUIntList())

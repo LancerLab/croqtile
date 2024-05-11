@@ -70,7 +70,12 @@ enum class FundamentalType {
 
 enum class Storage { LOCAL, SHARED, GLOBAL, DEFAULT, NONE };
 
-inline static size_t getByteSizeOf(FundamentalType ft) {
+enum Attribute : uint16_t {
+  ATT_NONE = 0,
+  ATT_SHADOW_TO_GLOBAL = 1,  // shadow the host memory to global
+};
+
+inline static size_t GetByteSizeOf(FundamentalType ft) {
   switch (ft) {
     case FundamentalType::F32:
     case FundamentalType::U32:
@@ -91,7 +96,7 @@ inline static size_t getByteSizeOf(FundamentalType ft) {
 }
 
 // utility functions to map types to strings, and the opposite.
-inline static BaseType getTypeFromString(const std::string& input) {
+inline static BaseType BaseTypeFromString(const std::string& input) {
   static const std::unordered_map<std::string, BaseType> typeMap = {
       {"f32", BaseType::F32},   {"f16", BaseType::F16},
       {"bf16", BaseType::BF16}, {"u32", BaseType::U32},
@@ -108,7 +113,9 @@ inline static BaseType getTypeFromString(const std::string& input) {
   return it->second;
 }
 
-inline static std::string getStringFrom(BaseType dataType) {
+namespace __internal__ {
+
+inline static std::string GetStringFrom(BaseType dataType) {
   static const std::unordered_map<BaseType, std::string> enumToString = {
       {BaseType::F32, "f32"},   {BaseType::F16, "f16"},
       {BaseType::BF16, "bf16"}, {BaseType::U32, "u32"},
@@ -125,7 +132,7 @@ inline static std::string getStringFrom(BaseType dataType) {
   return it->second;
 }
 
-inline static std::string getStringFrom(Storage st) {
+inline static std::string GetStringFrom(Storage st) {
   static const std::unordered_map<Storage, std::string> enumToString = {
       {Storage::LOCAL, "local"},     {Storage::GLOBAL, "global"},
       {Storage::SHARED, "shared"},   {Storage::NONE, "none"},
@@ -136,6 +143,16 @@ inline static std::string getStringFrom(Storage st) {
   assert(it != enumToString.end() && "unsupported type.");
 
   return it->second;
+}
+
+}  // end namespace __internal__
+
+inline static std::string STR(BaseType bt) {
+  return __internal__::GetStringFrom(bt);
+}
+inline static std::string STR(FundamentalType ft) { return STR((BaseType)ft); }
+inline static std::string STR(Storage st) {
+  return __internal__::GetStringFrom(st);
 }
 
 // smart typeid provider suggested by GPT
@@ -773,11 +790,11 @@ struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
     return GetShape().IsDynamic();
   }
 
-  size_t ByteSize() const { return getByteSizeOf(f_type) * GetShape().Size(); }
+  size_t ByteSize() const { return GetByteSizeOf(f_type) * GetShape().Size(); }
   std::string ByteSizeExpression() const {
     if (RuntimeShaped())
       return GetShape().GetSizeExpression() + " * " +
-             std::to_string(getByteSizeOf(f_type));
+             std::to_string(GetByteSizeOf(f_type));
     else
       return std::to_string(ByteSize());
   }
@@ -787,8 +804,8 @@ struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
 
   void Print(std::ostream& os) const override {
     if (m_type != Storage::NONE && m_type != Storage::DEFAULT)
-      os << getStringFrom(m_type) << " ";
-    os << getStringFrom((BaseType)f_type) << " ";
+      os << STR(m_type) << " ";
+    os << STR(f_type) << " ";
     s_type->Print(os);
   }
 
@@ -964,7 +981,7 @@ inline std::string GetBaseTypeStringOf(const Type& ty) {
   else if (isa<BoundedIntegerType>(&ty))
     return "int";
   else if (auto t = dyn_cast<SpannedType>(&ty))
-    return getStringFrom((BaseType)t->f_type);
+    return STR(t->f_type);
   choreo_unreachable(STR(ty) + " does not imply runtime storage.");
   return 0;
 }

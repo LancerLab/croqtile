@@ -213,11 +213,11 @@ static inline std::string stub_type_str(const Choreo::Type &ty,
     return "bool";
   else if (auto sty = dyn_cast<SpannedType>(&ty)) {
     if (is_ret)  // return by value
-      return "choreo::spanned<choreo::" + getStringFrom((BaseType)sty->f_type) +
+      return "choreo::spanned<choreo::" + STR(sty->f_type) +
              ", " + std::to_string(sty->Dims()) + ">";
     else  // pass by reference
       return "const choreo::spanned<choreo::" +
-             getStringFrom((BaseType)sty->f_type) + ", " +
+             STR(sty->f_type) + ", " +
              std::to_string(sty->Dims()) + "> &";
   }
   choreo_unreachable("unsupported stub function type.");
@@ -226,36 +226,36 @@ static inline std::string stub_type_str(const Choreo::Type &ty,
 
 static inline std::string factor_typestr(Choreo::BaseType t) {
   switch (t) {
-    case AST::BaseType::F32:
+    case BaseType::F32:
       return "FloatType(32)";
       break;
-    case AST::BaseType::F16:
+    case BaseType::F16:
       return "FloatType(16)";
       break;
-    case AST::BaseType::BF16:
+    case BaseType::BF16:
       return "BFloatType(16)";
       break;
-    case AST::BaseType::U32:
-    case AST::BaseType::S32:
+    case BaseType::U32:
+    case BaseType::S32:
       return "IntType(32)";
       break;
-    case AST::BaseType::U16:
-    case AST::BaseType::S16:
+    case BaseType::U16:
+    case BaseType::S16:
       return "IntType(16)";
       break;
-    case AST::BaseType::U8:
-    case AST::BaseType::S8:
+    case BaseType::U8:
+    case BaseType::S8:
       return "IntType(8)";
       break;
     // should it be passed in?
-    case AST::BaseType::INT:
+    case BaseType::INT:
       return "IntType(32)";
       break;
-    case AST::BaseType::BOOL:
+    case BaseType::BOOL:
       return "BoolType(32)";
       break;
     default:
-      choreo_unreachable("Type '" + getStringFrom(t) + "' is not supported.");
+      choreo_unreachable("Type '" + STR(t) + "' is not supported.");
   }
 }
 

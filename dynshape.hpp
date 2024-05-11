@@ -7,13 +7,17 @@
 
 namespace Choreo {
 
-struct RuntimeShapeInfo {};
+  struct RuntimeShapeInfo {
+
+  };
 
 struct ShapeDynamics : public VisitorWithSymTab {
  private:
   std::ostream &os;
   bool trace_visit = false;  // for debugging purpose only
   size_t error_count = 0;
+
+  std::unordered_map<std::string, AST::Parameter *> cur_params;
 
  private:
   bool BeforeVisitImpl(AST::Node &) { return true; }

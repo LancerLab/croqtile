@@ -36,7 +36,7 @@ extern char* yytext;
 extern location loc;
 
 extern AST::Program root;
-extern AST::SymbolTable symtab;
+extern Choreo::SymbolTable symtab;
 
 const char* red = "\033[31m";
 const char* reset = "\033[0m";
@@ -128,7 +128,7 @@ void choreo_info(const char *message) {
 %token <std::string> IDENTIFIER ATTR_CO
 // type related
 %token <std::string> MDSPAN ITUPLE
-%token <AST::Storage> LOCAL SHARED GLOBAL
+%token <Choreo::Storage> LOCAL SHARED GLOBAL
 %token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT BOOL VOID
 // builtin operations
 %token <std::string> DMA DLIN DSLICE DPAD COPY FNSPAN FNDATA CHUNKAT WAIT CALL AUTO
@@ -138,7 +138,7 @@ void choreo_info(const char *message) {
 
 // non-terminals
 %nterm <std::string> dma_operation
-%nterm <AST::Storage> storage
+%nterm <Choreo::Storage> storage
 %nterm <Choreo::BaseType> fundamental_type
 %nterm <AST::ptr<AST::CppSourceCode>> pass_by host_code
 %nterm <AST::ptr<AST::Memory>> storage_qual

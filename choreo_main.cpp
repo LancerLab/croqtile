@@ -16,6 +16,7 @@
 #include "types.hpp"
 #include "valno.hpp"
 #include "visualize.hpp"
+#include "gcucheck.hpp"
 
 using namespace Choreo;
 
@@ -129,6 +130,8 @@ int main(int argc, char* argv[]) {
 
   switch (tgt) {
     case Target::Factor: {
+      GCUCheck gcu_checker(sc.SymTab());
+      root.accept(gcu_checker);
       FactorCodeGen codegen(std::cout, sc.SymTab());
       root.accept(codegen);
       break;

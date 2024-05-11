@@ -18,9 +18,6 @@ struct Visitor;
 namespace AST {
 
 // short hands
-using BaseType = Choreo::BaseType;
-using Storage = Choreo::Storage;
-using SymbolTable = Choreo::SymbolTable;
 template <typename T>
 using ptr = Choreo::ptr<T>;
 
@@ -535,7 +532,7 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
   bool isSpanned() const { return (bool)mdspan_type; }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << prefix << getStringFrom(base_type);
+    os << prefix << STR(base_type);
     if (isSpanned()) {
       os << " ";
       mdspan_type->Print(os);
@@ -641,6 +638,7 @@ struct Identifier : public Node, public TypeIDProvider<Identifier> {
 struct Parameter : public Node, public TypeIDProvider<Parameter> {
   ptr<DataType> type = nullptr;
   ptr<Identifier> sym = nullptr;
+  Attribute attr = ATT_NONE;
 
   Parameter(const location& l, const ptr<DataType> t,
             ptr<Identifier> n = nullptr)
@@ -845,6 +843,11 @@ struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
   ChunkAt(const location& l, const ptr<Identifier>& d,
           const ptr<MultiValues>& p = nullptr)
       : Node(l), data(d), positions(p) {}
+
+  std::string RefSymbol() const {
+    assert(data && "ref data is not set.");
+    return data->name;
+  }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     if (!positions) {
