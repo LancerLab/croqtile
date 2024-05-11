@@ -1,7 +1,7 @@
 // RUN: choreo -i %s | FileCheck --match-full-lines %s
 // RUN: choreo -v %s | FileCheck --check-prefix=VALNO --match-full-lines %s
 
-__co__ int foo(f32 mdspan[2, 3, 4] d, int e, bool, f32 mdspan<2> a) { }
+__co__ void foo(f32 mdspan[2, 3, 4] d, int e, bool, f32 mdspan<2> a) { }
 
 // VALNO:  scope-1 {
 // VALNO:   New VN #0: 'const_2'
@@ -31,9 +31,9 @@ __co__ int foo(f32 mdspan[2, 3, 4] d, int e, bool, f32 mdspan<2> a) { }
 // CHECK: Parameter: ::foo::e, Type: int
 // CHECK: Parameter: ::foo::anon_0, Type: bool
 // CHECK: Parameter: ::foo::a, Type: f32 mdspan<2> [::foo::$0, ::foo::$1]
-// CHECK: Function:  ::foo, Type: int (*)(f32 mdspan<3> [2, 3, 4], int, bool, f32 mdspan<2> [::foo::$0, ::foo::$1])
+// CHECK: Function:  ::foo, Type: void (*)(f32 mdspan<3> [2, 3, 4], int, bool, f32 mdspan<2> [::foo::$0, ::foo::$1])
 
-__co__ int bar(f32 mdspan[?, 2, ?, 4] d, f32 mdspan<4> a) { }
+__co__ void bar(f32 mdspan[?, 2, ?, 4] d, f32 mdspan<4> a) { }
 
 // VALNO:  scope-1 {
 // VALNO:   New VN #0: '::bar::$0'
@@ -66,7 +66,7 @@ __co__ int bar(f32 mdspan[?, 2, ?, 4] d, f32 mdspan<4> a) { }
 
 // CHECK: Parameter: ::bar::d, Type: f32 mdspan<4> [::bar::$0, 2, ::bar::$1, 4]
 // CHECK: Parameter: ::bar::a, Type: f32 mdspan<4> [::bar::$2, ::bar::$3, ::bar::$4, ::bar::$5]
-// CHECK: Function:  ::bar, Type: int (*)(f32 mdspan<4> [::bar::$0, 2, ::bar::$1, 4], f32 mdspan<4> [::bar::$2, ::bar::$3, ::bar::$4, ::bar::$5])
+// CHECK: Function:  ::bar, Type: void (*)(f32 mdspan<4> [::bar::$0, 2, ::bar::$1, 4], f32 mdspan<4> [::bar::$2, ::bar::$3, ::bar::$4, ::bar::$5])
 
 __co__ auto foobar(f32 mdspan[?, 2, ?, 4] a) { return a; }
 

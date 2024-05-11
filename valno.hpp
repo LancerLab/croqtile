@@ -259,7 +259,10 @@ class ShapeInference : public Visitor {
     if (auto ref = n.GetReference()) {
       if (auto id = dyn_cast<AST::Identifier>(ref.get())) {
         if (SSTab().IsDeclared(id->name)) {
-          cur_vn = vn.GetValueNumberOfSignature(SSTab().InScopeName(id->name));
+          if (vn.HasValueNumberOfSignature(SSTab().InScopeName(id->name)))
+            cur_vn = vn.GetValueNumberOfSignature(SSTab().InScopeName(id->name));
+          else
+            InvalidateVN(cur_vn);  // a spanned data does not have a value number
           return true;
         }
       }

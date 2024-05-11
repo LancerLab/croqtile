@@ -6,7 +6,7 @@
 #include <iostream>
 
 // choreo program
-__co__ int foo(f32 [2, 3, 4] d, int e) {
+__co__ void foo(f32 [2, 3, 4] d, int e) {
   int f = 4;
   a : [ 5, 1, d.span(2) / 3 ];       // [5, 1, 1]
   b : [ a(2), e + 1, 7 * 3 - 1 ];    // [1, e + 1, 20]

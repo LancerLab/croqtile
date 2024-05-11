@@ -1,4 +1,4 @@
-HELL:=/bin/bash
+SHELL:=/bin/bash
 
 WORK_DIR:=$(PWD)
 TOOLCHAIN=$(WORK_DIR)/tools
@@ -78,7 +78,7 @@ FLEX = flex
 BISON_BIN = $(TOOLCHAIN)/bin/bison
 LIT:=$(WORK_DIR)/tests/lit.sh
 FILECHECK:=$(TOOLCHAIN)/bin/FileCheck
-PACKAGE_NAME=choreo_toolchain.tgz
+PACKAGE_NAME=choreo_toolchain_240511.tgz
 SUPPORT_PKG = $(TOOLCHAIN)/$(PACKAGE_NAME)
 PACKAGE_MD5:=1f77ae0083922fa94ed6c84c5f9cad24
 BISON_ENV:=BISON_PKGDATADIR=$(TOOLCHAIN)/shared/bison/

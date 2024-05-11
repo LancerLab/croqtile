@@ -22,7 +22,7 @@ __co__ s32 mdspan<3> spms(s32 [20, 42, 80] a, s32 mdspan<1> b) {
 
 // CHECK: Parameter: ::spms::a, Type: s32 mdspan<3> [20, 42, 80]
 // CHECK: Parameter: ::spms::b, Type: s32 mdspan<1> [::spms::$0]
-// CHECK: Symbol:    ::spms::global_buffer, Type: f32 mdspan<3> [20, 42, 80], Storage: default
+// CHECK: Symbol:    ::spms::global_buffer, Type: global f32 mdspan<3> [20, 42, 80], Storage: global
 // CHECK: Bounded:   ::spms::paraby_0::p, Type: {int}->[2]
 // CHECK: Symbol:    ::spms::paraby_0::shared_buffer, Type: shared f32 mdspan<2> [42, 4], Storage: shared
 // CHECK: Bounded:   ::spms::paraby_0::paraby_1::q, Type: {int}->[6]

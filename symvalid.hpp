@@ -17,6 +17,9 @@ struct SymbolValidator : public Visitor {
   bool in_decl =
       false;  // we need context to judge if it is declaration or reference
 
+  bool requires_return = false;  // only void function does not require return value
+  bool found_return = false;
+
  private:
   bool BeforeVisit(AST::Node &) override;
   bool AfterVisit(AST::Node &) override;

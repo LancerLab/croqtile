@@ -413,25 +413,11 @@ struct Memory : public Node, public TypeIDProvider<Memory> {
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     (void)prefix;
-    switch (st) {
-      case Storage::LOCAL:
-        os << "local";
-        break;
-      case Storage::SHARED:
-        os << "shared";
-        break;
-      case Storage::GLOBAL:
-        os << "global";
-        break;
-      case Storage::DEFAULT:
-        os << "default";
-        break;
-      default:
-        assert(false && "Unexpected storage type.");
-    }
+    os << STR(st);
   }
 
-  Storage getStorageLevel() const { return st; }
+  Storage Get() const { return st; }
+  void Set(Storage s) { st = s; }
 
   void accept(Visitor&) override;
 
@@ -525,6 +511,7 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
   }
   Node* getPartialType() const { return mdspan_type.get(); }
 
+  bool IsVoid() const { return base_type == BaseType::VOID; }
   bool isScalar() const {
     return (base_type == BaseType::INT) || (base_type == BaseType::BOOL);
   }

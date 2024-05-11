@@ -160,7 +160,18 @@ struct DeSugaring : public Visitor {
 
   bool Visit(AST::MultiDimSpans &) override { return true; }
   bool Visit(AST::NamedTypeDecl &) override { return true; }
-  bool Visit(AST::NamedVariableDecl &) override { return true; }
+  bool Visit(AST::NamedVariableDecl &n) override {
+    if (n.mem && (n.mem->Get() == Storage::DEFAULT)) {
+      // Should this be set by target?
+      n.mem->Set(Storage::GLOBAL);
+
+      if (trace)
+        std::cout << "Place storage of '" << n.name_str
+                  << "': DEFAULT ---> GLOBAL\n";
+    }
+
+    return true;
+  }
   bool Visit(AST::IntTuple &) override { return true; }
   bool Visit(AST::Assignment &) override { return true; }
   bool Visit(AST::IntIndex &) override { return true; }

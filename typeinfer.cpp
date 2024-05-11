@@ -60,6 +60,7 @@ bool TypeInference::AssignSymbolWithType(const location &loc,
                                          const ptr<Type> &ty) {
   if (!SSTab().DefineSymbol(sym, ty)) {
     Error(loc, "symbol `" + sym + "' has already been associated with a type.");
+    error_count++;
     return false;
   }
 
@@ -73,12 +74,14 @@ ptr<Type> TypeInference::GetSymbolType(const location &loc,
                                        const std::string &name) {
   if (!SSTab().IsDeclared(name)) {
     Error(loc, "The symbol `" + name + "' has not been defined.");
+    error_count++;
     return nullptr;
   }
   if (auto pty = SSTab().LookupSymbol(name)) {
     return pty;
   } else {
     Error(loc, "symbol `" + name + "' is not associated with a type.");
+    error_count++;
     return nullptr;
   }
 }
@@ -88,10 +91,12 @@ bool TypeInference::ModifySymbolType(const location &loc,
                                      const ptr<Type> &ty) {
   if (!SSTab().IsDeclared(name)) {
     Error(loc, "The symbol `" + name + "' has not been defined.");
+    error_count++;
     return false;
   }
   if (!SSTab().ModifySymbolType(name, ty)) {
     Error(loc, "symbol `" + name + "' is not associated with a type.");
+    error_count++;
     return false;
   }
 
@@ -107,6 +112,7 @@ bool TypeInference::SetAsCurrentType(AST::Node &nd, const std::string &n) {
     // already has a type with sufficient info, check for consistence.
     if (cur_type->HasSufficientInfo() && !(*cur_type == *ty)) {
       Error(nd.LOC(), "can not infer the type of `" + n + "'.");
+      error_count++;
       return false;
     } else
       return true;
@@ -116,12 +122,14 @@ bool TypeInference::SetAsCurrentType(AST::Node &nd, const std::string &n) {
   // Check for inference failures
   if (isa<UnknownType>(cur_type.get())) {
     Error(nd.LOC(), "can not infer the type of `" + n + "'.");
+    error_count++;
     return false;
   }
 
   if (!cur_type->HasSufficientInfo()) {
     Error(nd.LOC(), "can not infer '" + cur_type->Name() +
                         "' type detail of symbol `" + n + "'.");
+    error_count++;
     return false;
   }
 
@@ -153,6 +161,7 @@ bool TypeInference::Visit(AST::MultiValues &n) {
 }
 
 bool TypeInference::Visit(AST::IntLiteral &n) {
+  n.SetType(MakeIntegerType());
   __TRACE_EACH_VISIT__(n)
   return true;
 }
@@ -193,6 +202,7 @@ bool TypeInference::Visit(AST::NamedVariableDecl &n) {
 
   if (AST::typeof<UnknownType>(&n)) {
     Error(n.LOC(), "can not infer the type of `" + n.name_str + "'.");
+    error_count++;
     return false;
   }
 
@@ -220,17 +230,20 @@ bool TypeInference::Visit(AST::NamedTypeDecl &n) {
       Error(n.LOC(),
             "`" + n.name_str +
                 "' is declared without type annotation or initialization.");
+      error_count++;
       return false;
     }
 
     if (AST::typeof<UnknownType>(n.init_expr.get())) {
       Error(n.LOC(), "unable to inference the type of `" + n.name_str + "'.");
+      error_count++;
       return false;
     }
 
     if (!n.init_expr->GetType()->HasSufficientInfo()) {
       Error(n.LOC(),
             "unable to inference the type detail of `" + n.name_str + "'.");
+      error_count++;
       return false;
     }
 
@@ -278,6 +291,7 @@ bool TypeInference::Visit(AST::Parameter &p) {
     if (isa<UnknownType>(p.type->GetType()) || isa<UnknownType>(p.GetType())) {
       Error(p.LOC(),
             "fail to deduce the type of parameter `" + p.sym->name + "'.");
+      error_count++;
       return false;
     }
 
@@ -309,6 +323,7 @@ bool TypeInference::Visit(AST::ParamList &n) {
 
 bool TypeInference::Visit(AST::MultiDimSpans &n) {
   __TRACE_EACH_VISIT__(n)
+  cur_type.reset();
   return true;
 }
 
@@ -335,6 +350,7 @@ bool TypeInference::Visit(AST::Expr &n) {
 
     if (AST::typeof<UnknownType>(ref.get())) {
       Error(n.LOC(), "unable to infer the type of expression.");
+      error_count++;
       return false;
     }
 
@@ -380,12 +396,14 @@ bool TypeInference::Visit(AST::Expr &n) {
           Error(n.LOC(),
                 "The operands of the expression be performed for inconsistant "
                 "shape dimension.");
+          error_count++;
           return false;
         }
       }
 
       Error(n.LOC(), "The operands of the expression cannot undergo '" + n.op +
                          "' operation.");
+      error_count++;
       return false;
     }
     n.SetType(n.value_r->GetType());
@@ -406,6 +424,7 @@ bool TypeInference::Visit(AST::DMA &n) {
   // future's type has been obtained by shape inference
   if (AST::typeof<UnknownType>(&n)) {
     Error(n.LOC(), "fail to infer the FUTURE type of `" + n.future + "'.");
+    error_count++;
     return false;
   }
 
@@ -502,6 +521,7 @@ bool TypeInference::Visit(AST::Return &n) {
   // get the return value's type
   if (isa<UnknownType>(vty)) {
     Error(n.LOC(), "failed to inference the type of " + AST::STR(*n.value));
+    error_count++;
     return false;
   }
 
@@ -512,11 +532,13 @@ bool TypeInference::Visit(AST::Return &n) {
       if (!tty->HasSufficientInfo()) {
         Error(n.LOC(),
               "failed to inference the type detail of " + AST::STR(*n.value));
+        error_count++;
         return false;
       }
       if (rty->Dims() != tty->Dims()) {
         Error(n.LOC(),
               "return type inconsistant: " + STR(*rty) + " vs. " + STR(*tty));
+        error_count++;
         return false;
       }
 
@@ -526,16 +548,25 @@ bool TypeInference::Visit(AST::Return &n) {
         if (*rty != *tty) {
           Error(n.LOC(),
                 "return type inconsistant: " + STR(*rty) + " vs. " + STR(*tty));
+          error_count++;
           return false;
         }
       } else {
-        // supplement information
+        // supplement information, note global should be mapped back
+        auto nty = MakeSpannedType(tty->ElementType(), tty->GetShape());
         ModifySymbolType(n.LOC(), cur_func_name,
-                         MakeFunctionType(vty, fty->in_tys));
+                         MakeFunctionType(nty, fty->in_tys));
       }
     } else if (isa<UnknownType>(fty->out_ty)) {
-      ModifySymbolType(n.LOC(), cur_func_name,
-                       MakeFunctionType(vty, fty->in_tys));
+      // the type must be inferenced
+      if (auto tty = dyn_cast<SpannedType>(vty)) {
+        // global should be mapped back
+        auto nty = MakeSpannedType(tty->ElementType(), tty->GetShape());
+        ModifySymbolType(n.LOC(), cur_func_name,
+                         MakeFunctionType(nty, fty->in_tys));
+      } else
+        ModifySymbolType(n.LOC(), cur_func_name,
+                         MakeFunctionType(vty, fty->in_tys));
     }
   }
   return true;

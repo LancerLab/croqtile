@@ -13,6 +13,7 @@ struct TypeInference : public Visitor {
   bool Dump = false;
   std::ostream &os;
   bool trace_visit = false;  // for debugging purpose only
+  size_t error_count = 0;
 
  private:
   ptr<Type> cur_type = nullptr;
@@ -66,6 +67,11 @@ struct TypeInference : public Visitor {
   bool Visit(AST::ChoreoFunction &) override;
   bool Visit(AST::CppSourceCode &) override;
   bool Visit(AST::Program &) override;
+  bool HasError() {
+    if (error_count)
+      os << "Totally " << error_count << " errors have been detected.\n";
+    return error_count != 0;
+  }
 
  private:
   bool SetAsCurrentType(AST::Node &, const std::string &);

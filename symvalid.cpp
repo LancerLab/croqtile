@@ -13,6 +13,8 @@ bool SymbolValidator::BeforeVisit(AST::Node& n) {
     SSTab().EnterScope("");  // global scope
   } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
     SSTab().EnterScope(f->name);
+    requires_return = false;
+    found_return = false;
   } else if (isa<AST::ParallelBy>(&n)) {
     static size_t count = 0;
     SSTab().EnterScope("paraby_" + std::to_string(count++));
@@ -36,6 +38,16 @@ bool SymbolValidator::AfterVisit(AST::Node& n) {
       isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n) ||
       isa<AST::ForeachBlock>(&n)) {
     SSTab().LeaveScope();
+  }
+
+  if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
+    if (requires_return && !found_return) {
+      Error(n.LOC(), "non-void function '" + f->name + "` does not contain a return statement.");
+      error_count++;
+    } else if (!requires_return && found_return) {
+      Error(n.LOC(), "return statement found in void function '" + f->name + "`.");
+      error_count++;
+    }
   }
 
   if (isa<AST::Parameter>(&n)) {
@@ -180,16 +192,25 @@ bool SymbolValidator::Visit(AST::Call& n) {
 }
 bool SymbolValidator::Visit(AST::Return& n) {
   __TRACE_EACH_VISIT__(n)
+  found_return = true;
   return true;
 }
 bool SymbolValidator::Visit(AST::ForeachBlock& n) {
   __TRACE_EACH_VISIT__(n)
   return true;
 }
+
 bool SymbolValidator::Visit(AST::FunctionDecl& n) {
   __TRACE_EACH_VISIT__(n)
+
+  if (n.ret_type->IsVoid())
+    requires_return = false;
+  else
+    requires_return = true;
+
   return true;
 }
+
 bool SymbolValidator::Visit(AST::ChoreoFunction& n) {
   __TRACE_EACH_VISIT__(n)
   return true;
@@ -228,7 +249,7 @@ bool SymbolValidator::ReportErrorWhenViolateODR(const location& loc,
 
 bool SymbolValidator::HasError() {
   if (error_count > 0) {
-    os << "Totally " << error_count << " errors are detected.\n";
+    os << "Totally " << error_count << " errors have been detected.\n";
     return true;
   }
   return false;

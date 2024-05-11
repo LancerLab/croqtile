@@ -546,7 +546,7 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   };
   auto storage_level =
       (dyn_cast<AST::Memory>(d.to))
-          ? cast<AST::Memory>(d.to)->getStorageLevel()
+          ? cast<AST::Memory>(d.to)->Get()
           : dyn_cast<SpannedType>(
                 this->GetSymbolType(STR(cast<AST::ChunkAt>(d.to)->data)))
                 ->GetStorage();
@@ -568,7 +568,7 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
     // TODO(albert): generate 'local_buffer' with more smart naming way by valno
     // support
     fs << this->indent << "auto " << to_node_name << " = alloc_(";
-    switch (mem_node->getStorageLevel()) {
+    switch (mem_node->Get()) {
       case Storage::LOCAL:
         fs << "L1Type(";
         break;

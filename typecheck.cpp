@@ -161,7 +161,7 @@ bool TypeChecker::ReportUnknown(AST::Node& n, const char* file, int line) {
 
 bool TypeChecker::HasError() {
   if (error_count) {
-    os << "Totally " << error_count << " errors are detected in type check.\n";
+    os << "Totally " << error_count << " errors have been detected.\n";
     return true;
   }
   return false;

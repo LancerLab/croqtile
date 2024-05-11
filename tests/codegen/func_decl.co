@@ -3,8 +3,7 @@
 #include <iostream>
 
 // device program
-__co__ int foo(f32 [32] d, int) {
-}
+__co__ int foo(f32 [32] d, int) { return 1;}
 
 // CHECK:    using namespace factor;
 // CHECK:    void __choreo_foo() {

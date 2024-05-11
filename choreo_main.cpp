@@ -98,9 +98,8 @@ int main(int argc, char* argv[]) {
   // inference all the unknown types - decls
   TypeInference ti(dump_inf);
   root.accept(ti);
-  if (dump_inf || print_vn) return 0;
-
-  if (stop_after.GetValue() == "typeinfer") return 0;
+  if (dump_inf || print_vn || (stop_after.GetValue() == "typeinfer")) return 0;
+  if (ti.HasError()) return 1;
 
   // debug: dump the symbol table
   if (std::getenv("DUMP_SYMTAB") || dump_sym) ti.SymTab()->Print(std::cout);
@@ -114,11 +113,9 @@ int main(int argc, char* argv[]) {
   // apply the type check
   TypeChecker sc(ti.SymTab());
   root.accept(sc);
+
+  if (sema_chk || (stop_after.GetValue() == "check2")) return 0;
   if (sc.HasError()) return 1;
-
-  if (sema_chk) return 0;
-
-  if (stop_after.GetValue() == "check2") return 0;
 
   // collect information for dynamic/runtime shape handling
   ShapeDynamics sds(ti.SymTab());
@@ -130,8 +127,12 @@ int main(int argc, char* argv[]) {
 
   switch (tgt) {
     case Target::Factor: {
+      // apply the gcu specific checking
       GCUCheck gcu_checker(sc.SymTab());
       root.accept(gcu_checker);
+      if (gcu_checker.HasError())
+        return 1;
+
       FactorCodeGen codegen(std::cout, sc.SymTab());
       root.accept(codegen);
       break;

@@ -619,8 +619,8 @@ struct VoidType final : public Type, public TypeIDProvider<VoidType> {
   explicit VoidType() : Type(TypeCategory::VOID) {}
   size_t Dims() const override { return __INVALID_VALUE__; }
   bool IsComplete() const override { return true; }
-  void Print(std::ostream& os) const override { os << "void_type"; }
-  const std::string Name() const override { return "void"; }
+  void Print(std::ostream& os) const override { os << "void"; }
+  const std::string Name() const override { return "void_type"; }
   bool HasSufficientInfo() const { return true; }
 
   bool operator==(const Type& ty) const override { return isa<VoidType>(&ty); }
@@ -633,8 +633,8 @@ struct UnknownType final : public Type, public TypeIDProvider<UnknownType> {
   explicit UnknownType() : Type(TypeCategory::UNKNOWN) {}
   size_t Dims() const override { return __INVALID_VALUE__; }
   bool IsComplete() const override { return false; }
-  void Print(std::ostream& os) const override { os << "unknown_type"; }
-  const std::string Name() const override { return "unknown"; }
+  void Print(std::ostream& os) const override { os << "unknown"; }
+  const std::string Name() const override { return "unknown_type"; }
   bool HasSufficientInfo() const { return false; }
 
   // Not comparable

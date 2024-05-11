@@ -1,6 +1,6 @@
 // RUN: TRACE_DESUGAR= choreo -sa desugar %s | FileCheck --match-full-lines %s
 
-__co__ int foo(f32 mdspan[2, 3, 4] d, int e, bool, f32 mdspan<2> a) {
+__co__ void foo(f32 [2, 3, 4] d, int e, bool, f32 mdspan<2> a) {
   c : a [(0), (1)];
   b : d [1, (0), (2)];
 }
@@ -11,6 +11,12 @@ __co__ int foo(f32 mdspan[2, 3, 4] d, int e, bool, f32 mdspan<2> a) {
 // CHECK: Desugar ref: (0) ---> d(0)
 // CHECK: Desugar ref: (2) ---> d(2)
 
-__co__ auto foobar(f32 mdspan[?, 2, ?, 4] a) { return a; }
+__co__ auto foobar(f32 [?, 2, ?, 4] a) { return a; }
 
 // CHECK: Name dims of `a': f32 [ ? 2 ? 4 ] ---> f32 [ $0 2 $1 4 ]
+
+__co__ void bar() {
+  f32 [1, 2, 3, 4] aa;
+}
+
+// CHECK: Place storage of 'aa': DEFAULT ---> GLOBAL

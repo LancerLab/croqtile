@@ -14,13 +14,25 @@ struct GCUCheck : public VisitorWithSymTab {
   size_t error_count = 0;
 
   std::unordered_map<std::string, AST::Parameter *> cur_params;
+  int parallel_level = 0;
+  int local_level = 0;
 
  private:
   bool BeforeVisitImpl(AST::Node &n) {
-    if (isa<AST::ChoreoFunction>(&n)) cur_params.clear();
+    if (isa<AST::ChoreoFunction>(&n)) {
+      local_level = 0;
+      cur_params.clear();
+    }
     return true;
   }
-  bool AfterVisitImpl(AST::Node &) { return true; }
+
+  bool AfterVisitImpl(AST::Node &n) {
+    if (isa<AST::ParallelBy>(&n)) {
+      parallel_level--;
+      assert(parallel_level >= 0 && "Unexpected parallel level");
+    }
+    return true;
+  }
 
  public:
   GCUCheck(const ptr<SymbolTable> s_tab, std::ostream &o = std::cout)
@@ -35,7 +47,54 @@ struct GCUCheck : public VisitorWithSymTab {
   bool Visit(AST::Expr &) { return true; }
   bool Visit(AST::MultiDimSpans &) { return true; }
   bool Visit(AST::NamedTypeDecl &) { return true; }
-  bool Visit(AST::NamedVariableDecl &) { return true; }
+  bool Visit(AST::NamedVariableDecl &n) {
+    auto ty = GetSymbolType(n.name_str);
+    if (!isa<SpannedType>(ty)) return true;
+    auto st = cast<SpannedType>(ty)->GetStorage();
+    switch (st) {
+      case Storage::GLOBAL:
+        if (parallel_level != 0) {
+          Error(n.LOC(), "global variable '" + n.name_str +
+                             "` mustn't be declared inside parallel-by.");
+          error_count++;
+        }
+        break;
+      case Storage::SHARED:
+        if (parallel_level != 1) {
+          Error(n.LOC(),
+                "shared variable '" + n.name_str +
+                    "` must be declared inside single level of parallel-by.");
+          error_count++;
+        } else if (local_level == 1) {
+          Error(n.LOC(), "shared variable '" + n.name_str +
+                             "` mustn't be declared within the same level of "
+                             "parallel-by as local variables.");
+          error_count++;
+        } else if (local_level == 0)
+          local_level = 2;
+        break;
+      case Storage::LOCAL:
+        if (parallel_level == 0) {
+          Error(n.LOC(), "local variable '" + n.name_str +
+                             "` must be declared inside parallel-by.");
+          error_count++;
+        } else if (local_level != 0 && parallel_level != local_level) {
+          Error(n.LOC(), "local variable '" + n.name_str +
+                             "` must be declared inside a level of parallel-by "
+                             "that is identical to other local variables and "
+                             "different with shared variables.");
+          error_count++;
+        } else if (local_level == 0)
+          local_level = parallel_level;
+        break;
+      default:
+        Error(n.LOC(), "can not declare variable '" + n.name_str + "` as " +
+                           STR(st) + " inside choreo function.");
+        error_count++;
+        break;
+    }
+    return true;
+  }
   bool Visit(AST::IntTuple &) { return true; }
   bool Visit(AST::Assignment &) { return true; }
   bool Visit(AST::IntIndex &) { return true; }
@@ -46,7 +105,11 @@ struct GCUCheck : public VisitorWithSymTab {
     return true;
   }
   bool Visit(AST::ParamList &) { return true; }
-  bool Visit(AST::ParallelBy &) { return true; }
+  bool Visit(AST::ParallelBy &) {
+    parallel_level++;
+    assert((parallel_level < 3) && "unexpected parallel level.");
+    return true;
+  }
   bool Visit(AST::RequireBind &) { return true; }
   bool Visit(AST::WithIn &) { return true; }
   bool Visit(AST::WithBlock &) { return true; }
@@ -95,7 +158,11 @@ struct GCUCheck : public VisitorWithSymTab {
   bool Visit(AST::CppSourceCode &) { return true; }
   bool Visit(AST::Program &) { return true; }
 
-  bool HasError() { return false; }
+  bool HasError() {
+    if (error_count)
+      os << "Totally " << error_count << " errors have been detected.\n";
+    return error_count != 0;
+  }
 };
 
 }  // end namespace Choreo

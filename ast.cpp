@@ -129,7 +129,10 @@ void ChunkAt::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
 void Wait::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
-void Return::accept(Choreo::Visitor& v) { v.Visit(*this); }
+void Return::accept(Choreo::Visitor& v) {
+  if (value) value->accept(v);
+  v.Visit(*this);
+}
 
 void Call::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
