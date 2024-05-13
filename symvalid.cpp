@@ -146,7 +146,7 @@ bool SymbolValidator::Visit(AST::ParallelBy& n) {
   return true;
 }
 
-bool SymbolValidator::Visit(AST::RequireBind& n) {
+bool SymbolValidator::Visit(AST::WhereBind& n) {
   __TRACE_EACH_VISIT__(n)
   return true;
 }

@@ -110,7 +110,7 @@ struct GCUCheck : public VisitorWithSymTab {
     assert((parallel_level < 3) && "unexpected parallel level.");
     return true;
   }
-  bool Visit(AST::RequireBind &) { return true; }
+  bool Visit(AST::WhereBind &) { return true; }
   bool Visit(AST::WithIn &) { return true; }
   bool Visit(AST::WithBlock &) { return true; }
   bool Visit(AST::Memory &) { return true; }

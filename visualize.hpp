@@ -332,7 +332,7 @@ struct Visualizer : public VisitorWithSymTab {
     parallel_factor *= pb.bound;
     return true;
   }
-  bool Visit(AST::RequireBind &) override { return true; }
+  bool Visit(AST::WhereBind &) override { return true; }
   bool Visit(AST::WithIn &) override { return true; }
   bool Visit(AST::WithBlock &) override { return true; }
   bool Visit(AST::Memory &) override { return true; }

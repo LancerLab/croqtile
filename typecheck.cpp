@@ -90,7 +90,7 @@ bool TypeChecker::Visit(AST::ParallelBy& n) {
   __TRACE_EACH_VISIT__(n)
   return true;
 }
-bool TypeChecker::Visit(AST::RequireBind& n) {
+bool TypeChecker::Visit(AST::WhereBind& n) {
   __TRACE_EACH_VISIT__(n)
   return true;
 }

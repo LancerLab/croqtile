@@ -147,7 +147,7 @@ blank [ \t\r]
   "wait"     return Choreo::Parser::make_WAIT(yytext, loc);
   "call"     return Choreo::Parser::make_CALL(yytext, loc);
   "return"   return Choreo::Parser::make_RET(yytext, loc);
-  "requires" return Choreo::Parser::make_REQUIRE(yytext, loc);
+  "where"    return Choreo::Parser::make_WHERE(yytext, loc);
   "<->"      return Choreo::Parser::make_BIND   (loc);
   "-"        return Choreo::Parser::make_MINUS  (loc);
   "+"        return Choreo::Parser::make_PLUS   (loc);

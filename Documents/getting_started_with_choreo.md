@@ -167,7 +167,7 @@ The above code snippet illustrates the method to create a parallel region with C
 
 Despite parallelism, there is one more implication of 'parallel-by'. In the statement, 'p' is an integer associated with its bound [0, 6). We name 'p' as a **bounded integer** instead of a simple integer. In some special operations like 'chunkat' (explain later), it requires the *bounded-integer* to work properly since the bound is essential for its computation.
 
-### The 'with-in' Block and 'requires' Clause
+### The 'with-in' Block and 'where' Clause
 Similar to 'parallel-by', 'with-in' statement can also bind *i-tuples* to a *mdspan*. The below code shows an example.
 ```
 with index in [10, 10] {
@@ -186,9 +186,9 @@ We name 'index' as a **bounded ituple** in such scenarios.
 
 You may think 'with-in' statement is similar to 'parallel-by'. However, it is not true. One significant difference is 'with-in' statement does not have implication for parallelism. The code block inside 'with-in' statement is sequentially executed. It does nothing more than creating the *bounded-ituple*.
 
-Neverthless, programmers could append a 'requires' clause. For example,
+Neverthless, programmers could append a 'where' clause. For example,
 ```
-with {m, n} in [M, N], {n_p, k} in [N_P, K] requires n_p <-> n {
+with {m, n} in [M, N], {n_p, k} in [N_P, K] where n_p <-> n {
   // matmul implements with m,n,K. n_p is no long useful.
 }
 ```

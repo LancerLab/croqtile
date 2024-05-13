@@ -451,7 +451,7 @@ bool TypeInference::Visit(AST::ParallelBy &n) {
   return true;
 }
 
-bool TypeInference::Visit(AST::RequireBind &n) {
+bool TypeInference::Visit(AST::WhereBind &n) {
   __TRACE_EACH_VISIT__(n)
   return true;
 }

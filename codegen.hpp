@@ -88,7 +88,7 @@ struct FactorCodeGen : public CodeGenerator {
   bool Visit(AST::Parameter &) override;
   bool Visit(AST::ParamList &) override;
   bool Visit(AST::ParallelBy &) override;
-  bool Visit(AST::RequireBind &) override;
+  bool Visit(AST::WhereBind &) override;
   bool Visit(AST::WithIn &) override;
   bool Visit(AST::WithBlock &) override;
   bool Visit(AST::Memory &) override;
@@ -130,7 +130,7 @@ struct TopsccCodeGen : public CodeGenerator {
   bool Visit(AST::Parameter &) override { return true; };
   bool Visit(AST::ParamList &) override { return true; };
   bool Visit(AST::ParallelBy &) override { return true; };
-  bool Visit(AST::RequireBind &) override { return true; };
+  bool Visit(AST::WhereBind &) override { return true; };
   bool Visit(AST::WithIn &) override { return true; };
   bool Visit(AST::WithBlock &) override { return true; };
   bool Visit(AST::Memory &) override { return true; };

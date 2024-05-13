@@ -504,7 +504,7 @@ bool FactorCodeGen::Visit(AST::ParallelBy &by) {
   return true;
 }
 
-bool FactorCodeGen::Visit(AST::RequireBind &) { return true; };
+bool FactorCodeGen::Visit(AST::WhereBind &) { return true; };
 bool FactorCodeGen::Visit(AST::WithIn &) { return true; };
 
 bool FactorCodeGen::Visit(AST::WithBlock &) { return true; }

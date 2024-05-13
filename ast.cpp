@@ -98,7 +98,7 @@ void ParallelBy::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
-void RequireBind::accept(Choreo::Visitor& v) { v.Visit(*this); }
+void WhereBind::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
 void WithIn::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);

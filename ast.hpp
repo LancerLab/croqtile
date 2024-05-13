@@ -712,11 +712,11 @@ struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
 };
 
 // `require_bind` parsing "idx_1 <-> idx_2"
-struct RequireBind : public Node, public TypeIDProvider<RequireBind> {
+struct WhereBind : public Node, public TypeIDProvider<WhereBind> {
   ptr<Node> lhs;
   ptr<Node> rhs;
 
-  RequireBind(const location& l, const ptr<Node>& lhs, const ptr<Node>& rhs)
+  WhereBind(const location& l, const ptr<Node>& lhs, const ptr<Node>& rhs)
       : Node(l), lhs(lhs), rhs(rhs) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
@@ -777,7 +777,7 @@ struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
     os << prefix << "  (within constraints)\n";
     withins->Print(os, prefix + "  ");
     if (reqs) {
-      os << prefix << "  (require clause)\n";
+      os << prefix << "  (where clause)\n";
       reqs->Print(os, prefix + "  ");
     }
     if (stmts) {

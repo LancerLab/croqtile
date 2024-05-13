@@ -546,7 +546,7 @@ class ShapeInference : public Visitor {
     return true;
   };
 
-  bool Visit(AST::RequireBind& n) {
+  bool Visit(AST::WhereBind& n) {
     __TRACE_EACH_VISIT__;
     return true;
   }

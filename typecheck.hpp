@@ -41,7 +41,7 @@ struct TypeChecker : public VisitorWithSymTab {
   bool Visit(AST::Parameter &) override;
   bool Visit(AST::ParamList &) override;
   bool Visit(AST::ParallelBy &) override;
-  bool Visit(AST::RequireBind &) override;
+  bool Visit(AST::WhereBind &) override;
   bool Visit(AST::WithIn &) override;
   bool Visit(AST::WithBlock &) override;
   bool Visit(AST::Memory &) override;

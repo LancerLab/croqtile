@@ -21,6 +21,6 @@ __co__ int para_with(int b) {
 // CHECK:   `- WithBinding:
 // CHECK:     (within constraints)
 // CHECK:     `- index in ndims
-// CHECK:     (require clause)
+// CHECK:     (where clause)
 // CHECK:     (with statements)
 // CHECK:     `- Assign: sum =  (sum + index(0))

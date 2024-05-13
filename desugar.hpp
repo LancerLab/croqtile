@@ -180,7 +180,7 @@ struct DeSugaring : public Visitor {
   bool Visit(AST::Parameter &) override { return true; }
   bool Visit(AST::ParamList &) override { return true; }
   bool Visit(AST::ParallelBy &) override { return true; }
-  bool Visit(AST::RequireBind &) override { return true; }
+  bool Visit(AST::WhereBind &) override { return true; }
   bool Visit(AST::WithIn &) override { return true; }
   bool Visit(AST::WithBlock &) override { return true; }
   bool Visit(AST::Memory &) override { return true; }

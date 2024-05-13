@@ -133,7 +133,7 @@ void choreo_info(const char *message) {
 // builtin operations
 %token <std::string> DMA DLIN DSLICE DPAD COPY FNSPAN FNDATA CHUNKAT WAIT CALL AUTO
 // control related
-%token <std::string> IF ELSE PARA BY WITH IN FOREACH RET REQUIRE
+%token <std::string> IF ELSE PARA BY WITH IN FOREACH RET WHERE
 %token <std::string> TRUE FALSE
 
 // non-terminals
@@ -143,7 +143,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::CppSourceCode>> pass_by host_code
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::Node>> foreach_block general_val simple_int span_val ituple_val direct_ituple_val bool_literal passable declaration statement assignment paraby_stmt w_statement dma_statement wait_statement call_statement index_or_value iv_expr if_else optional_scalar_init param_mdspan_val chunkat_or_storage
-%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments paraby_stmts w_statements withins require_binds require_clause else_clause
+%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments paraby_stmts w_statements withins where_binds where_clause else_clause
 %nterm <AST::ptr<AST::MultiValues>> index_value_list value_list param_mdspan_list iv_exprs id_list with_matchers futures passables
 %nterm <AST::ptr<AST::Expr>> s_expr span_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
@@ -157,7 +157,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::IntIndex>> s_index
 %nterm <AST::ptr<AST::WithBlock>> with_block
 %nterm <AST::ptr<AST::WithIn>> within
-%nterm <AST::ptr<AST::RequireBind>> require_bind
+%nterm <AST::ptr<AST::WhereBind>> where_bind
 %nterm <AST::ptr<AST::ParallelBy>> parallel_by
 %nterm <AST::ptr<AST::Return>> return_stmt
 %nterm <AST::ptr<AST::ChunkAt>> chunkat_expr
@@ -666,7 +666,7 @@ with_block
         $$->withins = $2;
         $$->stmts = $4;
       }
-    | WITH withins require_clause LBRACE w_statements RBRACE {
+    | WITH withins where_clause LBRACE w_statements RBRACE {
         $$ = AST::Make<AST::WithBlock>(@1);
         $$->withins = $2;
         $$->reqs = $3;
@@ -697,33 +697,29 @@ within
       }
     ;
 
-require_clause
-    : REQUIRE require_binds {
-        /* $$ = AST::Make<AST::RequireClause>();
-        $$->binds = $2;*/
-        $$ = $2;
-      }
+where_clause
+    : WHERE where_binds { $$ = $2; }
     ;
 
-require_binds
-    : require_binds COMMA require_bind {
+where_binds
+    : where_binds COMMA where_bind {
         $1->Append($3);
         $$ = $1;
       }
-    | require_bind {
+    | where_bind {
         $$ = AST::Make<AST::MultiNodes>(@1);
         $$->Append($1);
       }
-    ; /* do not allow empty require_bind */
+    ; /* do not allow empty where_bind */
 
-require_bind
+where_bind
     : IDENTIFIER BIND IDENTIFIER {
         if (!symtab.Exists($1))
           Parser::error(@1, "The symbol '" + $1 + "` has not been defined.");
         if (!symtab.Exists($3))
           Parser::error(@3, "The symbol '" + $1 + "` has not been defined.");
 
-        $$ = AST::Make<AST::RequireBind>(@1, AST::Make<AST::Identifier>(@1, $1),
+        $$ = AST::Make<AST::WhereBind>(@1, AST::Make<AST::Identifier>(@1, $1),
                                            AST::Make<AST::Identifier>(@3, $3));
       }
     ;

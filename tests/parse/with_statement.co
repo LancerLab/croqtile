@@ -19,7 +19,7 @@ __co__ int with_statement_empty_body() {
 // CHECK: `- Name: with_statement_empty_body
 // CHECK: `- With Block:
 // CHECK: (within constraints)
-// CHECK-NOT: (require clause)
+// CHECK-NOT: (where clause)
 // CHECK: (with empty statements)
 
 __co__ int with_statement_unnamed_mdspans(f32 mdspan<2> data) {
@@ -33,7 +33,7 @@ __co__ int with_statement_unnamed_mdspans(f32 mdspan<2> data) {
 // CHECK: `- Name: with_statement_unnamed_mdspans
 // CHECK: `- With Block:
 // CHECK: (within constraints)
-// CHECK-NOT: (require clause)
+// CHECK-NOT: (where clause)
 // CHECK: (with empty statements)
 
 __co__ int with_statement_multi_within() {
@@ -60,7 +60,7 @@ __co__ int with_statement_multi_within() {
 // CHECK: `- Name: with_statement_multi_within
 // CHECK: `- With Block:
 // CHECK: (within constraints)
-// CHECK-NOT: (require clause)
+// CHECK-NOT: (where clause)
 // CHECK: (with statements)
 
 
@@ -80,10 +80,10 @@ __co__ int with_statement_pattern_match_like_within() {
 // CHECK: `- With Block:
 // CHECK: (within constraints)
 // CHECK: `- index1 = {x, y} in span_v4
-// CHECK-NOT: (require clause)
+// CHECK-NOT: (where clause)
 // CHECK: (with statements)
 
-__co__ int with_statement_require_clause() {
+__co__ int with_statement_where_clause() {
   span_v2_1 : [7, 8];
   span_v2_2 : [13];
   span_v2_3 : [13];
@@ -94,7 +94,7 @@ __co__ int with_statement_require_clause() {
     with index_v2_1 in span_v2_1,
          index_v2_2 in span_v2_2,
          index_v2_3 in span_v2_3
-    requires index_v2_2 <-> index_v2_3 {
+    where index_v2_2 <-> index_v2_3 {
       coord_v2_x = coord_v2_x + index_v2_1(0);
       coord_v2_x = coord_v2_x + index_v2_1(1);
       coord_v2_y = coord_v2_x(1) + index_v2_2(0);
@@ -103,14 +103,14 @@ __co__ int with_statement_require_clause() {
   }
 }
 
-// CHECK: `- Name: with_statement_require_clause
+// CHECK: `- Name: with_statement_where_clause
 // CHECK: `- With Block:
 // CHECK: (within constraints)
-// CHECK: (require clause)
+// CHECK: (where clause)
 // CHECK: (with statements)
 
 
-__co__ int with_statement_require_clauses() {
+__co__ int with_statement_where_clauses() {
   span_v3_1 : [7, 8];
   span_v3_2 : [13];
   span_v3_3 : [13];
@@ -121,7 +121,7 @@ __co__ int with_statement_require_clauses() {
     with index_v3_1 in span_v3_1,
          index_v3_2 in span_v3_2,
          index_v3_3 in span_v3_3
-    requires index_v3_2 <-> index_v3_3 {
+    where index_v3_2 <-> index_v3_3 {
       coord_v3_x = coord_v3_x + index_v3_1(0);
       coord_v3_x = coord_v3_x + index_v3_1(1);
       coord_v3_y = coord_v3_x(1) + index_v3_2(0);
@@ -130,8 +130,8 @@ __co__ int with_statement_require_clauses() {
   }
 }
 
-// CHECK: `- Name: with_statement_require_clauses
+// CHECK: `- Name: with_statement_where_clauses
 // CHECK: `- With Block:
 // CHECK: (within constraints)
-// CHECK: (require clause)
+// CHECK: (where clause)
 // CHECK: (with statements)
