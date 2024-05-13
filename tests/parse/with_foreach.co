@@ -13,7 +13,7 @@ __co__ int with_foreach(int b, f32 [36, 27, 128] input) {
         // shape of each chunk:
         //    [36 / #p, 27 / #index.dim(0), 6 / #index.dim(1)]
         //  = [6, 9, 128 / b]
-        f = dte.linear input.chunkat(p, index) => local;
+        f = dma.copy.async input.chunkat(p, index) => local;
         sum = sum + index(0);
         wait f;
         call cfunction(f.data);
@@ -37,7 +37,7 @@ __co__ int with_foreach(int b, f32 [36, 27, 128] input) {
 // CHECK:     (with statements)
 // CHECK:     `- Foreach Block:
 // CHECK:      `- Iteration variables: index
-// CHECK:      `- DMA.linear
+// CHECK:      `- DMA.copy.async
 // CHECK:        `- future: f
 // CHECK:        `- from: input.ChunkAt(p, index)
 // CHECK:        `- to: local

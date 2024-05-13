@@ -619,12 +619,12 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   int dim_sz = data_shape.Dims();
   offset_string.append("{");
   if (tile_factors) {
-    assert(dim_sz == (int)tile_factors->getValues().size() &&
+    assert(dim_sz == (int)tile_factors->GetValues().size() &&
            "Insonsistant sizes for DMA offset.");
     auto dim = data_shape.values.values[0];
     assert(dim_sz == (int)dim.size() && "Insonsistant sizes for DMA offset.");
     for (int dim_cursor = 0; dim_cursor < dim_sz;) {
-      auto tile_factor = tile_factors->getValues()[dim_cursor];
+      auto tile_factor = tile_factors->GetValues()[dim_cursor];
       auto tf_symbol = STR(tile_factor);
       auto tf_bounds =
           dyn_cast<BoundedITupleType>(this->GetSymbolType(tf_symbol))
@@ -675,10 +675,10 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
 bool FactorCodeGen::Visit(AST::ChunkAt &) { return true; }
 
 bool FactorCodeGen::Visit(AST::Wait &w) {
-  auto dmas = dyn_cast<AST::MultiValues>(w.target);
+  auto dmas = w.targets;
   assert(dmas && "Invalid wait target!");
 
-  for (auto dma : dmas->getValues()) {
+  for (auto dma : dmas->GetValues()) {
     fs << this->indent << "wait_dma_(" << AST::STR(*dma) << ");\n";
   }
 
@@ -691,9 +691,9 @@ bool FactorCodeGen::Visit(AST::Call &c) {
   fs << "\", {";
   auto args = dyn_cast<AST::MultiValues>(c.arguments);
   assert(args && "Invalid kernel call args!");
-  int arg_num = args->getValues().size();
+  int arg_num = args->GetValues().size();
   for (int index = 0; index < arg_num;) {
-    auto arg = dyn_cast<AST::Expr>(args->getValues()[index]);
+    auto arg = dyn_cast<AST::Expr>(args->GetValues()[index]);
     assert(arg && "Invalid kernel call arg!");
     switch (arg->t) {
       case AST::Expr::Reference:

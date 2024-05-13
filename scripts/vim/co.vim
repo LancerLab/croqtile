@@ -13,8 +13,8 @@ runtime! syntax/cpp.vim
 syntax keyword coKeyword chunkAt mdspan with parallel ituple by in foreach shared local global where
 syntax match coType "\<\(f32\|f16\|bf16\|u32\|s32\|u16\|s16\|u8\|s8\)\>"
 syntax match coAttribute "\(__co__\|__cok__\)"
-syntax match coOperator "\(=>\|dcb\|#)"
-syntax match coFunction "\<\(wait\|call\|dte\.reshape\|dte\.linear\|dte\.slice\|dte\.deslice\)\>"
+syntax match coOperator "\(=>\|#\)"
+syntax match coFunction "\(\<wait\>\|\<call\>\|\<dma\.\(reshape\|copy\|slice\|deslice\|pad\)\>\(\.async\)\?\)"
 
 highlight coOperator guifg=cyan ctermfg=cyan gui=bold
 

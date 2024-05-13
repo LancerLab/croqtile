@@ -14,15 +14,15 @@ __co__ s32 [6, 17, 128] ele_add(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) { //
     with index = {x, y} in [17, 4] {  // decl your tiled spans
       foreach x { // alternative: foreach index, index.x, index.y
         foreach y { 
-          lhs_load = dte.linear lhs.chunkat(p, x, y) => local; // tiling_factor: {6, 17, 4}, new_size {lhs(0)/6, lhs(1)/17, lhs(2)/4}
-          rhs_load = dte.linear rhs.chunkat(p, x, y) => local; // no explicit decl the target buffer, but can refer by <FutureType>.data
+          lhs_load = dma.copy.async lhs.chunkat(p, x, y) => local; // tiling_factor: {6, 17, 4}, new_size {lhs(0)/6, lhs(1)/17, lhs(2)/4}
+          rhs_load = dma.copy.async rhs.chunkat(p, x, y) => local; // no explicit decl the target buffer, but can refer by <FutureType>.data
           wait lhs_load, rhs_load;
 
           local s32[lhs_load.span] l1_out; // alternative: s32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
           
           call kernel(lhs_load.data, rhs_load.data, l1_out, |lhs_load.span|); // |span| calculate the total size of span.
 
-          out_store = dte.linear l1_out => output.chunkat(p, x, y); // can use defined vars
+          out_store = dma.copy.async l1_out => output.chunkat(p, x, y); // can use defined vars
           wait out_store;
         }
       }

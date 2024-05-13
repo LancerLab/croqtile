@@ -18,8 +18,8 @@ __co__ s32 mdspan<3> ele_add(s32 [144, 100, 100] a, s32 [144, 100, 100] b) {
     with index = {x, y} in [10, 10] {  // totally 100 chunks
      foreach x {
       foreach y { 
-        f1 = dte.linear a.chunkat(p, x, y) => local; // new_size {a(0)/6, a(1)/10, a(2)/10}
-        f2 = dte.linear b.chunkat(p, x, y) => local;
+        f1 = dma.copy.async a.chunkat(p, x, y) => local; // new_size {a(0)/6, a(1)/10, a(2)/10}
+        f2 = dma.copy.async b.chunkat(p, x, y) => local;
         wait f1, f2;
 
         // use f1.span as the span of local buffer
@@ -28,7 +28,7 @@ __co__ s32 mdspan<3> ele_add(s32 [144, 100, 100] a, s32 [144, 100, 100] b) {
         // calculate the total size of span.
         call kernel(f1.data, f2.data, local_buffer, |f1.span|);
 
-        f3 = dte.linear local_buffer => global_buffer.chunkat(p, x, y);
+        f3 = dma.copy.async local_buffer => global_buffer.chunkat(p, x, y);
         wait f3;
       }
      }

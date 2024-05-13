@@ -42,10 +42,12 @@ bool SymbolValidator::AfterVisit(AST::Node& n) {
 
   if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
     if (requires_return && !found_return) {
-      Error(n.LOC(), "non-void function '" + f->name + "` does not contain a return statement.");
+      Error(n.LOC(), "non-void function '" + f->name +
+                         "` does not contain a return statement.");
       error_count++;
     } else if (!requires_return && found_return) {
-      Error(n.LOC(), "return statement found in void function '" + f->name + "`.");
+      Error(n.LOC(),
+            "return statement found in void function '" + f->name + "`.");
       error_count++;
     }
   }
@@ -168,7 +170,8 @@ bool SymbolValidator::Visit(AST::Memory& n) {
   return true;
 }
 bool SymbolValidator::Visit(AST::DMA& n) {
-  ReportErrorWhenViolateODR(n.LOC(), n.future, __FILE__, __LINE__);
+  ReportErrorWhenViolateODR(n.LOC(), n.future, __FILE__, __LINE__,
+                            MakeFutureType(n.async));
   ReportErrorWhenViolateODR(n.LOC(), n.future + ".span", __FILE__, __LINE__);
   ReportErrorWhenViolateODR(n.LOC(), n.future + ".data", __FILE__, __LINE__);
   __TRACE_EACH_VISIT__(n)
@@ -184,8 +187,28 @@ bool SymbolValidator::Visit(AST::ChunkAt& n) {
 
 bool SymbolValidator::Visit(AST::Wait& n) {
   __TRACE_EACH_VISIT__(n)
+
+  for (auto& v : n.targets->GetValues()) {
+    auto id = dyn_cast<AST::Identifier>(v);
+    if (!id) Error(n.LOC(), "expecting symbol but got '" + AST::STR(*id));
+
+    auto ty = SSTab().LookupSymbol(id->name);
+
+    if (auto fty = dyn_cast<FutureType>(ty)) {
+      if (!fty->IsAsync()) {
+        Error(n.LOC(),
+              "non-async future '" + id->name + "` can not be waited.");
+        error_count++;
+      }
+    } else {
+      Error(n.LOC(), "'" + id->name + "` can not be waited.");
+      error_count++;
+    }
+  }
+
   return true;
 }
+
 bool SymbolValidator::Visit(AST::Call& n) {
   __TRACE_EACH_VISIT__(n)
   return true;
@@ -236,14 +259,15 @@ bool SymbolValidator::ReportErrorWhenUseBeforeDefine(const location& loc,
 
 bool SymbolValidator::ReportErrorWhenViolateODR(const location& loc,
                                                 const std::string& name,
-                                                const char* file, int line) {
+                                                const char* file, int line,
+                                                const ptr<Type>& type) {
   if (SSTab().DeclaredInScope(name)) {
     Error(loc, "symbol `" + name + "' has been declared already.");
     ++error_count;
     if (trace_visit) os << "Error in " << file << ", line: " << line << ".\n";
     return false;
   }
-  SSTab().DefineSymbol(name, MakeUnknownType());  // TODO: improve the type
+  SSTab().DefineSymbol(name, type);  // TODO: improve the type
   return true;
 }
 

@@ -127,7 +127,12 @@ void DMA::accept(Choreo::Visitor& v) {
 
 void ChunkAt::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
-void Wait::accept(Choreo::Visitor& v) { v.Visit(*this); }
+void Wait::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+  targets->accept(v);
+  v.Visit(*this);
+  v.AfterVisit(*this);
+}
 
 void Return::accept(Choreo::Visitor& v) {
   if (value) value->accept(v);

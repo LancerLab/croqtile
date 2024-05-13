@@ -49,7 +49,7 @@ __co__ f32 mdspan[12, 1024] ele_add(s32 [12, 1024] a, s32 [12, 1024] b) {
       // TODO(albert): fix auto indent
       foreach l2_tile { 
         foreach l1_tile {
-          lhs_cdma = dte.linear a.chunkat(p, l2_tile) => shared; // new_size {a(0)/6, a(1)/10, a(2)/10}
+          lhs_cdma = dma.copy a.chunkat(p, l2_tile) => shared; // new_size {a(0)/6, a(1)/10, a(2)/10}
           shared f32[lhs_cdma.span] l2_output;
         }
         // move data from l3 to l2
@@ -59,22 +59,22 @@ __co__ f32 mdspan[12, 1024] ele_add(s32 [12, 1024] a, s32 [12, 1024] b) {
         // check: async_load_(lhs_cdma, a, lhs_cdma_buffer, {0 + 2048 * p + 1024 * l2_tile);
         // check: wait_dma_(lhs_cdma);
 
-        // rhs_cdma = dte.linear b.chunkat(p, l1_tile) => shared;
+        // rhs_cdma = dma.copy b.chunkat(p, l1_tile) => shared;
         // wait lhs_cdma, rhs_cdma;
         // local f32[lhs_cdma.span] l1_output;
         // call kernel(lhs_cdma.data, rhs_cdma.data, l1_output, |index|);
-        // output_cdma = dte.linear l1_output => output.chunkat(p, l1_tile);
+        // output_cdma = dma.copy l1_output => output.chunkat(p, l1_tile);
         // wait output_cdma;
 
         // FINAL TARGET FORMAT
         // // move data from l3 to l2
-        // lhs_cdma = dte.linear a.chunkat(p, l2_tile) => shared; // new_size {a(0)/6, a(1)/10, a(2)/10}
-        // rhs_cdma = dte.linear b.chunkat(p, l2_tile) => shared;
+        // lhs_cdma = dma.copy a.chunkat(p, l2_tile) => shared; // new_size {a(0)/6, a(1)/10, a(2)/10}
+        // rhs_cdma = dma.copy b.chunkat(p, l2_tile) => shared;
         // wait lhs_cdma, rhs_cdma;
 
         // // move data from l2 to l1
-        // lhs_sdma = dte.linear lhs_cdma.chunkat(1, l1_tile) => local;
-        // rhs_sdma = dte.linear rhs_cdma.data.chunkat(1, l1_tile) => local;
+        // lhs_sdma = dma.copy lhs_cdma.chunkat(1, l1_tile) => local;
+        // rhs_sdma = dma.copy rhs_cdma.data.chunkat(1, l1_tile) => local;
         // wait lhs_sdma, rhs_sdma;
 
         // // use lhs_sdma.span as the span of local buffer
@@ -85,11 +85,11 @@ __co__ f32 mdspan[12, 1024] ele_add(s32 [12, 1024] a, s32 [12, 1024] b) {
         // call kernel(lhs_sdma.data, rhs_sdma.data, l1_output, |index|);
 
         // // move output from l1 to l2
-        // output_sdma = dte.linear l1_output => l2_output.chunkat(1, l1_tile);
+        // output_sdma = dma.copy l1_output => l2_output.chunkat(1, l1_tile);
         // wait output_sdma;
 
         // // move output from l1 to l2
-        // output_cdma = dte.linear l2_output => output.chunkat(p, l2_tile);
+        // output_cdma = dma.copy l2_output => output.chunkat(p, l2_tile);
         // wait output_cdma;
       }
     }

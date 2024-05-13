@@ -885,19 +885,26 @@ struct BoundedITupleType final : public Type,
 
 struct FutureType : public ScalarType, public TypeIDProvider<FutureType> {
   Shape shape;  // the data shape associated with the future
-  FutureType() : ScalarType(TypeCategory::FUTURE) {}
-  FutureType(const Shape& mds) : ScalarType(TypeCategory::FUTURE), shape(mds) {}
+  bool async;
+
+  FutureType(bool a) : ScalarType(TypeCategory::FUTURE), async(a) {}
+  FutureType(const Shape& mds, bool a)
+      : ScalarType(TypeCategory::FUTURE), shape(mds), async(a) {}
   bool IsComplete() const override { return true; }
   bool HasSufficientInfo() const { return shape.IsValid(); }
   const std::string Name() const override { return "future"; }
   Shape GetShape() { return shape; }
+  bool IsAsync() const { return async; }
 
   bool operator==(const Type& ty) const override {
     return isa<FutureType>(&ty);
   }
 
   void Print(std::ostream& os) const override {
-    os << "async=>";
+    if (async)
+      os << "async=>";
+    else
+      os << "sync=>";
     shape.Print(os);
   }
 
@@ -1043,12 +1050,12 @@ inline ptr<BoundedITupleType> MakeBoundedITupleType(const Shape& v,
   return std::make_shared<BoundedITupleType>(v, n);
 }
 
-inline ptr<FutureType> MakeFutureType(const Shape& v) {
-  return std::make_shared<FutureType>(v);
+inline ptr<FutureType> MakeFutureType(const Shape& v, bool async) {
+  return std::make_shared<FutureType>(v, async);
 }
 
-inline ptr<FutureType> MakeFutureType() {
-  return std::make_shared<FutureType>();
+inline ptr<FutureType> MakeFutureType(bool async) {
+  return std::make_shared<FutureType>(async);
 }
 
 inline ptr<FunctionType> MakeFunctionType(const ptr<Type> ot,

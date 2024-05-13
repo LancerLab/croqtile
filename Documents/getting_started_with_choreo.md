@@ -216,7 +216,7 @@ The below code showcases one basic DMA statement.
 ```
 global f32 [10] g_data;
 local f32 [10] l_data;
-f = dte.linear g_data => l_data;
+f = dma.copy g_data => l_data;
 // ... async operations
 wait f;         // explicit wait
 ```
@@ -225,7 +225,7 @@ Here, we utilize the data transfer engine (DTE) to invoke a linear copy, which m
 At times, programmers may find it tedious to explicitly define temporal data. Choreo offers an even simpler syntax:
 ```
 global f32 [10] data;
-f = dte.linear data => local;
+f = dma.copy data => local;
 wait f;
 ... f.data;  // retrieve the 'local' data from the future
 ```
@@ -243,7 +243,7 @@ parallel p by 6 {
     //    stride = p*1000 + x * 100 + y * 10
     //
     // for each chunk, the dimensioned size for the movement is {1, 1, 10}
-    f = dte.linear data.chunkat(p, index) => local;
+    f = dma.copy data.chunkat(p, index) => local;
   }
 }
 ```

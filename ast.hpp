@@ -158,7 +158,7 @@ struct MultiValues : public Node, public TypeIDProvider<MultiValues> {
     return values[idx];
   }
 
-  std::vector<ptr<Node>> getValues() const { return values; }
+  std::vector<ptr<Node>> GetValues() const { return values; }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     if (delimiter != "" && values.size() > 1) {
@@ -800,18 +800,22 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
   std::string future;
   ptr<Node> from;
   ptr<Node> to;
+  bool async;
 
-  DMA(const location& l, const std::string& o, const std::string& r,
-      const ptr<Node>& f, const ptr<Node>& t)
-      : Node(l, MakeFutureType()), operation(o), future(r), from(f), to(t) {}
+  explicit DMA(const location& l, const std::string& o, const std::string& r,
+               const ptr<Node>& f, const ptr<Node>& t, bool a)
+      : Node(l, MakeFutureType(a)),
+        operation(o),
+        future(r),
+        from(f),
+        to(t),
+        async(a) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << "\n" << prefix << "`- DMA" << operation;
+    os << "\n" << prefix << "`- DMA" << operation << ((async) ? ".async" : "");
     os << "\n" << prefix << "  `- future: " << future;
-    os << "\n" << prefix << "  `- from: ";
-    from->Print(os);
-    os << "\n" << prefix << "  `- to: ";
-    to->Print(os);
+    os << "\n" << prefix << "  `- from: " << STR(from);
+    os << "\n" << prefix << "  `- to: " << STR(to);
   }
 
   std::string SourceString() {
@@ -853,12 +857,12 @@ struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
 };
 
 struct Wait : public Node, public TypeIDProvider<Wait> {
-  ptr<Node> target;
+  ptr<MultiValues> targets;
 
-  Wait(const location& l, const ptr<Node>& t) : Node(l), target(t) {}
+  Wait(const location& l, const ptr<MultiValues>& t) : Node(l), targets(t) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << "\n" << prefix << "`- WAIT: " << AST::STR(*target);
+    os << "\n" << prefix << "`- WAIT: " << AST::STR(*targets);
   }
 
   void accept(Visitor&) override;

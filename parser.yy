@@ -131,20 +131,21 @@ void choreo_info(const char *message) {
 %token <Choreo::Storage> LOCAL SHARED GLOBAL
 %token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT BOOL VOID
 // builtin operations
-%token <std::string> DMA DLIN DSLICE DPAD COPY FNSPAN FNDATA CHUNKAT WAIT CALL AUTO
+%token <std::string> DMA COPY SLICE PAD ASYNC FNSPAN FNDATA CHUNKAT WAIT CALL AUTO
 // control related
 %token <std::string> IF ELSE PARA BY WITH IN FOREACH RET WHERE
 %token <std::string> TRUE FALSE
 
 // non-terminals
 %nterm <std::string> dma_operation
+%nterm <bool> sync_type
 %nterm <Choreo::Storage> storage
 %nterm <Choreo::BaseType> fundamental_type
 %nterm <AST::ptr<AST::CppSourceCode>> pass_by host_code
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::Node>> foreach_block general_val simple_int span_val ituple_val direct_ituple_val bool_literal passable declaration statement assignment paraby_stmt w_statement dma_statement wait_statement call_statement index_or_value iv_expr if_else optional_scalar_init param_mdspan_val chunkat_or_storage
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments paraby_stmts w_statements withins where_binds where_clause else_clause
-%nterm <AST::ptr<AST::MultiValues>> index_value_list value_list param_mdspan_list iv_exprs id_list with_matchers futures passables
+%nterm <AST::ptr<AST::MultiValues>> index_value_list value_list param_mdspan_list iv_exprs id_list with_matchers passables
 %nterm <AST::ptr<AST::Expr>> s_expr span_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
@@ -764,16 +765,21 @@ iv_expr
     ;
 
 dma_statement
-    : IDENTIFIER ASSIGN DMA dma_operation chunkat_expr TRANS chunkat_or_storage {
-        symtab.AddSymbol($1, MakeFutureType());
-        $$ = AST::Make<AST::DMA>(@3, $4, $1, $5, $7);
+    : IDENTIFIER ASSIGN DMA dma_operation sync_type chunkat_expr TRANS chunkat_or_storage {
+        symtab.AddSymbol($1, MakeFutureType($5));
+        $$ = AST::Make<AST::DMA>(@3, $4, $1, $6, $8, $5);
       }
     ;
 
 dma_operation
-    : DLIN    { $$ = $1; }
-    | DSLICE  { $$ = $1; }
-    | DPAD    { $$ = $1; }
+    : COPY   { $$ = $1; }
+    | SLICE  { $$ = $1; }
+    | PAD    { $$ = $1; }
+    ;
+
+sync_type
+    : { $$ = false; }
+    | ASYNC { $$ = true; }
     ;
 
 chunkat_or_storage
@@ -836,19 +842,8 @@ with_matchers /* TODO: this special case is pattern-match ids for with-block */
     ;
 
 wait_statement
-    : WAIT futures {
+    : WAIT id_list {
         $$ = AST::Make<AST::Wait>(@1, $2);
-      }
-    ;
-
-futures
-    : futures COMMA IDENTIFIER {
-        $1->Append(AST::Make<AST::Identifier>(@3, $3));
-        $$ = $1;
-      }
-    | IDENTIFIER {
-        $$ = AST::Make<AST::MultiValues>(@1);
-        $$->Append(AST::Make<AST::Identifier>(@1, $1));
       }
     ;
 

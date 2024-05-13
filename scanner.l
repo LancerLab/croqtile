@@ -128,11 +128,11 @@ blank [ \t\r]
   "void"     return Choreo::Parser::make_VOID(BaseType::VOID, loc);
   "true"     return Choreo::Parser::make_TRUE(yytext, loc);
   "false"    return Choreo::Parser::make_FALSE(yytext, loc);
-  "dte"      return Choreo::Parser::make_DMA(yytext, loc);
-  ".linear"  return Choreo::Parser::make_DLIN(yytext, loc);
-  ".slice"   return Choreo::Parser::make_DSLICE(yytext, loc);
-  ".pad"     return Choreo::Parser::make_DPAD(yytext, loc);
-  "copy"     return Choreo::Parser::make_COPY(yytext, loc);
+  "dma"      return Choreo::Parser::make_DMA(yytext, loc);
+  ".copy"    return Choreo::Parser::make_COPY(yytext, loc);
+  ".slice"   return Choreo::Parser::make_SLICE(yytext, loc);
+  ".pad"     return Choreo::Parser::make_PAD(yytext, loc);
+  ".async"   return Choreo::Parser::make_ASYNC(yytext, loc);
   ".span"    return Choreo::Parser::make_FNSPAN(yytext, loc);
   ".data"    return Choreo::Parser::make_FNDATA(yytext, loc);
   ".chunkat" return Choreo::Parser::make_CHUNKAT(yytext, loc);

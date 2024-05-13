@@ -174,6 +174,9 @@ class ShapeInference : public Visitor {
   int cur_ituple_vn = InvalidValueNumber();
   int cur_mdspan_vn = InvalidValueNumber();
 
+  // when values are consumed instead of generated
+  bool gen_multi_values = true;
+
  private:
   std::ostream& os;
   // for debugging purpose only
@@ -223,6 +226,8 @@ class ShapeInference : public Visitor {
                   .c_str());
         vn.SetListReference(n.value());
       }
+    } else if (isa<AST::Wait>(&n)) {
+      gen_multi_values = false;
     }
     return true;
   }
@@ -234,6 +239,8 @@ class ShapeInference : public Visitor {
       vn.LeaveScope();
     } else if (isa<AST::MultiDimSpans>(&n) || isa<AST::IntTuple>(&n)) {
       vn.ResetListReference();
+    } else if (isa<AST::Wait>(&n)) {
+      gen_multi_values = true;
     }
     return true;
   }
@@ -242,8 +249,11 @@ class ShapeInference : public Visitor {
   bool Visit(AST::MultiNodes&) { return true; }
 
   bool Visit(AST::MultiValues& n) {
-    int valNo = vn.GenerateValueNumberForNode(n);
-    cur_vn = valNo;
+    if (gen_multi_values) {
+      int valNo = vn.GenerateValueNumberForNode(n);
+      cur_vn = valNo;
+    } else
+      InvalidateVN(cur_vn);
     return true;
   }
 
@@ -621,7 +631,7 @@ class ShapeInference : public Visitor {
 
     vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(f_span), cur_vn);
     auto s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
-    n.SetType(MakeFutureType(s));
+    n.SetType(MakeFutureType(s, n.async));
     SSTab().DefineSymbol(n.future, n.GetType());
     SSTab().DefineSymbol(f_span,
                          MakeMDSpanType(s));  // this is implicit symbol

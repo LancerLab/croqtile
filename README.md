@@ -17,7 +17,7 @@ Programmers can easily make a shape with a tiling factor of {2, 4, 1} from data 
 ### Visualization
 Another prominent feature of Choreo is its **analytic and visualization functionality**. For example, for a DMA statement
 
-`f1 = dte.linear a.chunkat(p, x, y) => local;`
+`f1 = dma.copy a.chunkat(p, x, y) => local;`
 
 programmers can view the data movement using Choreo's visualization capability. The result is like the image shows:
 
