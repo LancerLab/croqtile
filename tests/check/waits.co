@@ -1,0 +1,30 @@
+// RUN: not choreo -i %s 2>&1 | FileCheck %s
+
+__co__ void fail1(f32 [36, 27, 128] input, f32 [18, 9, 128]) {
+  parallel p by 6 {
+    with index in [3, 9] {
+      foreach index {
+        f = dma.copy input.chunkat(p, index) => local;
+        wait f;
+      }
+    }
+  }
+}
+// CHECK:  non-async future 'f` can not be waited.
+
+__co__ void fail2(f32 [36, 27, 128] input, f32 [18, 9, 128] input1) {
+  tf : [3, 8];
+  int sum = 0;
+  parallel p by 6 {
+    with index in tf {
+      foreach index {
+        f1 = dma.copy.async input.chunkat(p, index) => local;
+        f2 = dma.copy input1.chunkat(p, index) => local;
+        sum = sum + index(0);
+        wait f1;
+        wait f2;
+      }
+    }
+  }
+}
+// CHECK:  non-async future 'f2` can not be waited.
