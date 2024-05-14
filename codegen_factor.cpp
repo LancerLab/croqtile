@@ -479,11 +479,11 @@ bool FactorCodeGen::Visit(AST::ParallelBy &by) {
          << "args[" << i << "]";
     }
   }
-  fs << "}, {" << ((void_return) ? "" : "output") << "});\n";
+  fs << "}, {" << ((void_return) ? "" : "$$out$$") << "});\n"; // "$$out$$" : magic string for output, will be replaced later
   fs << this->indent << "destroy_stream_(stream);\n";
   fs << this->indent << "dealloc_stream_(stream);\n";
   fs << this->indent << "return std::vector<Value>{"
-     << ((void_return) ? "" : "output") << "};\n";
+     << ((void_return) ? "" : "$$out$$") << "};\n";
   this->decrementIndent();
   fs << this->indent << "}); // end of choreo-factor dataflow program\n";
   fs << "\n";
@@ -739,7 +739,11 @@ bool FactorCodeGen::Visit(AST::Call &c) {
   return true;
 }
 
-bool FactorCodeGen::Visit(AST::Return &) { return true; }
+bool FactorCodeGen::Visit(AST::Return &ReturnNode) {
+  if(ReturnNode.value)
+    output_v = STR(*ReturnNode.value);
+  return true;
+}
 
 bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
   // auto ty = this->GetSymbolType("l2_tile");
@@ -950,6 +954,7 @@ void FactorCodeGen::OutputScript(const std::string &n,
   std::string factor_src = fs.str();
   if(!alloc_in_fs.str().empty())
     factor_src.insert(alloc_pos, alloc_in_fs.str());
+  ReplaceInString(factor_src, std::string("$$out$$"), output_v);
   ReplaceInString(factor_src, std::string(backpatch_filename), kernel_fn);
 
   // Now generate the script

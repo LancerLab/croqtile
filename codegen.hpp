@@ -49,6 +49,8 @@ struct FactorCodeGen : public CodeGenerator {
   // buffer of "alloc" statements in factor code
   std::ostringstream alloc_in_fs;
   std::string::size_type alloc_pos;
+  // output variable name
+  std::string output_v;
 
   // name of entry parameters
   size_t sp_count = 0;
