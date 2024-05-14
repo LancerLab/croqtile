@@ -42,7 +42,7 @@ __co__ s32 mdspan<3> ele_add(s32 [144, 100, 100] a, s32 [144, 100, 100] b) {
 // host program
 int bar(int a[], int b[]) {
   return ele_add(choreo::make_spanned<3>(a, {144, 100, 100}),
-                 choreo::make_spanned<3>(b, {144, 100, 100});
+                 choreo::make_spanned<3>(b, {144, 100, 100}));
 }
 
 // CHECK: auto a_type = DRAMType(IntType(32), {144, 100, 100});
@@ -50,14 +50,14 @@ int bar(int a[], int b[]) {
 // CHECK: auto thread_id = thread_id_();
 // CHECK: auto f1_buffer = alloc_(L1Type(IntType(32),{24, 10, 10}));
 // CHECK: auto f1 = alloc_dma_(SDMAType());
-// CHECK: async_load_(f1, args[0], f1_buffer, {thread_id,x,y});
 // CHECK: auto f2_buffer = alloc_(L1Type(IntType(32),{24, 10, 10}));
 // CHECK: auto f2 = alloc_dma_(SDMAType());
+// CHECK: auto local_buffer = alloc_(L1Type(FloatType(32),{24, 10, 10}));
+// CHECK: auto f3 = alloc_dma_(SDMAType());
+// CHECK: async_load_(f1, args[0], f1_buffer, {thread_id,x,y});
 // CHECK: async_load_(f2, args[1], f2_buffer, {thread_id,x,y});
 // CHECK: wait_dma_(f1);
 // CHECK: wait_dma_(f2);
-// CHECK: auto local_buffer = alloc_(L1Type(FloatType(32),{24, 10, 10}));
 // CHECK: call_("kernel", {f1_buffer.addr_(),f2_buffer.addr_(),local_buffer.addr_(),2400});
-// CHECK: auto f3 = alloc_dma_(SDMAType());
 // CHECK: async_store_(f3, local_buffer, global_buffer, {thread_id,x,y});
 // CHECK: wait_dma_(f3);

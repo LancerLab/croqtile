@@ -418,10 +418,15 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
       //   else
       //     shape_info = shape_info + "}";
       // }
-
-      fs << this->indent << "auto " << node.name_str << " = alloc_(";
-      fs << storage_type << "(" << base_type << "," << shape_info << ")";
-      fs << ");\n";
+      _os.str("");
+      _os.clear();
+      _os << "    " << "auto " << node.name_str << " = alloc_(";
+      _os << storage_type << "(" << base_type << "," << shape_info << ")";
+      _os << ");\n";
+      if(storage_type == "DRAMType")
+        fs << _os.str();
+      else
+        alloc_in_fs << _os.str();
     }
   } else {
     // TODO(albert): handle anon case
@@ -494,6 +499,7 @@ bool FactorCodeGen::Visit(AST::ParallelBy &by) {
      << "}, [&](auto args, auto results) {\n";
   this->incrementIndent();
   fs << this->indent << "auto thread_id = thread_id_();\n";
+  alloc_pos = fs.str().size();
   // int i = 0;
   // NOTE: remove unused aliasing 'auto k_a = args[0];'
   // for (auto &param : *cur_params) {
@@ -567,21 +573,21 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   if (auto mem_node = dyn_cast<AST::Memory>(d.to)) {
     // TODO(albert): generate 'local_buffer' with more smart naming way by valno
     // support
-    fs << this->indent << "auto " << to_node_name << " = alloc_(";
+    alloc_in_fs << "    " << "auto " << to_node_name << " = alloc_(";
     switch (mem_node->Get()) {
       case Storage::LOCAL:
-        fs << "L1Type(";
+        alloc_in_fs << "L1Type(";
         break;
       case Storage::SHARED:
-        fs << "SRAMType(";
+        alloc_in_fs << "SRAMType(";
         break;
       case Storage::GLOBAL:
-        fs << "DRAMType(";
+        alloc_in_fs << "DRAMType(";
         break;
       default:
         assert(false && "Unexpected storage type.");
     }
-    fs << factor_typestr((Choreo::BaseType)data_type) << ",";
+    alloc_in_fs << factor_typestr((Choreo::BaseType)data_type) << ",";
 
     auto ty = dyn_cast<FutureType>(GetSymbolType(future_name));
     assert(ty && "Invalied return type of DMA op!");
@@ -605,7 +611,7 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
     //   else
     //     shape_info = shape_info + "}";
     // }
-    fs << shape_info << "));\n";
+    alloc_in_fs << shape_info << "));\n";
   }
 
   if (src_level >= des_level)
@@ -664,7 +670,7 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   to_node_name = arg_idx < 0 ? to_node_name
                              : "results[" + std::to_string(arg_idx - 2) + "]";
 
-  fs << this->indent << "auto " << future_name
+  alloc_in_fs << "    " << "auto " << future_name
      << " = alloc_dma_(SDMAType());\n";
   fs << this->indent << dma_op << future_name << ", " << from_node_name << ", "
      << to_node_name << ", " << offset_string << ");\n";
@@ -942,6 +948,8 @@ void FactorCodeGen::OutputScript(const std::string &n,
 
   // backpatch the factor bin filename
   std::string factor_src = fs.str();
+  if(!alloc_in_fs.str().empty())
+    factor_src.insert(alloc_pos, alloc_in_fs.str());
   ReplaceInString(factor_src, std::string(backpatch_filename), kernel_fn);
 
   // Now generate the script
