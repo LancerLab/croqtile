@@ -20,7 +20,7 @@ __co__ void fail2(f32 [36, 27, 128] input, f32 [18, 9, 128] input1) {
       foreach index {
         f1 = dma.copy.async input.chunkat(p, index) => local;
         f2 = dma.copy input1.chunkat(p, index) => local;
-        sum = sum + index(0);
+        sum = sum + f1.span(0);
         wait f1;
         wait f2;
       }

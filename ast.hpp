@@ -337,6 +337,7 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
                          const ptr<MDSpanType>& pty)
       : Node(l, pty), ref_name(n), list(nullptr), dim_count(pty->Dims()) {}
 
+  bool HasValidDims() const { return dim_count == __INVALID_VALUE__; }
   size_t Dims() const { return dim_count; }
   void SetDims(size_t n) { dim_count = n; }
 
@@ -397,8 +398,7 @@ struct NamedTypeDecl : public Node, public TypeIDProvider<NamedTypeDecl> {
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Type Decl: ";
-    os << name_str << " " << init_str << " ";
-    init_expr->Print(os);
+    os << name_str << " " << init_str << " " << STR(*init_expr);
   }
 
   void accept(Visitor&) override;
@@ -512,6 +512,7 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
   Node* getPartialType() const { return mdspan_type.get(); }
 
   bool IsVoid() const { return base_type == BaseType::VOID; }
+  bool IsUnknown() const { return base_type == BaseType::UNKNOWN; }
   bool isScalar() const {
     return (base_type == BaseType::INT) || (base_type == BaseType::BOOL);
   }
@@ -795,38 +796,6 @@ struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
   __UDT_TYPE_INFO__
 };
 
-struct DMA : public Node, public TypeIDProvider<DMA> {
-  std::string operation;
-  std::string future;
-  ptr<Node> from;
-  ptr<Node> to;
-  bool async;
-
-  explicit DMA(const location& l, const std::string& o, const std::string& r,
-               const ptr<Node>& f, const ptr<Node>& t, bool a)
-      : Node(l, MakeFutureType(a)),
-        operation(o),
-        future(r),
-        from(f),
-        to(t),
-        async(a) {}
-
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << "\n" << prefix << "`- DMA" << operation << ((async) ? ".async" : "");
-    os << "\n" << prefix << "  `- future: " << future;
-    os << "\n" << prefix << "  `- from: " << STR(from);
-    os << "\n" << prefix << "  `- to: " << STR(to);
-  }
-
-  std::string SourceString() {
-    return future + " = dma" + operation + " " + STR(*from) + " => " + STR(*to);
-  }
-
-  void accept(Visitor&) override;
-
-  __UDT_TYPE_INFO__
-};
-
 struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
   ptr<Identifier> data;
   ptr<MultiValues> positions = nullptr;
@@ -849,6 +818,45 @@ struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
     os << STR(data) << ".ChunkAt(" << STR(positions) << ")";
 
     (void)prefix;
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__
+};
+
+struct DMA : public Node, public TypeIDProvider<DMA> {
+  std::string operation;
+  std::string future;
+  bool async;
+  ptr<Node> from;
+  ptr<Node> to;
+
+  explicit DMA(const location& l, const std::string& o, const std::string& r,
+               const ptr<Node>& f, const ptr<Node>& t, bool a)
+      : Node(l, MakeFutureType(a)),
+        operation(o),
+        future(r),
+        async(a),
+        from(f),
+        to(t) {}
+
+  std::string FromSymbol() const { return cast<ChunkAt>(from)->RefSymbol(); }
+
+  std::string ToSymbol() const {
+    if (auto tochunk = dyn_cast<ChunkAt>(to)) return tochunk->data->name;
+    return "";
+  }
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << "\n" << prefix << "`- DMA" << operation << ((async) ? ".async" : "");
+    os << "\n" << prefix << "  `- future: " << future;
+    os << "\n" << prefix << "  `- from: " << STR(from);
+    os << "\n" << prefix << "  `- to: " << STR(to);
+  }
+
+  std::string SourceString() {
+    return future + " = dma" + operation + " " + STR(*from) + " => " + STR(*to);
   }
 
   void accept(Visitor&) override;
@@ -891,16 +899,14 @@ struct Return : public Node, public TypeIDProvider<Return> {
 
 struct Call : public Node, public TypeIDProvider<Call> {
   ptr<Node> function;
-  ptr<Node> arguments;
+  ptr<MultiValues> arguments;
 
-  Call(const location& l, const ptr<Node>& f, const ptr<Node>& a)
+  Call(const location& l, const ptr<Node>& f, const ptr<MultiValues>& a)
       : Node(l), function(f), arguments(a) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << "\n" << prefix << "`- Call: ";
-    function->Print(os);
-    os << "\n" << prefix << "  `- with arguements:";
-    arguments->Print(os);
+    os << "\n" << prefix << "`- Call: " << STR(*function);
+    os << "\n" << prefix << "  `- with arguements: " << STR(*arguments);
   }
   void accept(Visitor&) override;
 

@@ -35,7 +35,7 @@ all: $(TARGET)
 test: $(TARGET) standalone_test
 	$(LIT) tests
 
-$(TARGET): scanner.yy.o parser.tab.o choreo_main.o codegen_factor.o symvalid.o typeinfer.o typecheck.o ast.o types.o valno.o
+$(TARGET): scanner.yy.o parser.tab.o choreo_main.o codegen_factor.o earlysema.o typeinfer.o typecheck.o ast.o types.o valno.o
 	$(CC) $(CFLAGS) $^ -o $(TARGET)
 
 scanner.yy.cc: $(LEX_SRC)
@@ -62,7 +62,7 @@ clean:
 	rm -f *.cc *.hh *.inc *.o $(TEST_TARGETS) tests/*.result
 
 lines:
-	wc -l *.cpp *.yy *.l *.hpp Makefile
+	wc -l *.cpp *.yy *.l *.hpp Makefile utils/*.h
 
 standalone_test: $(TARGET)
 	cd tests/standalone/ && $(MAKE) test

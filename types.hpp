@@ -26,6 +26,7 @@ using ptr = std::shared_ptr<T>;
 enum class TypeCategory {
   INT,
   BOOL,
+  INDEX,
   ITUPLE,
   PARTIAL,
   SPANNED,
@@ -153,6 +154,21 @@ inline static std::string STR(BaseType bt) {
 inline static std::string STR(FundamentalType ft) { return STR((BaseType)ft); }
 inline static std::string STR(Storage st) {
   return __internal__::GetStringFrom(st);
+}
+
+// safe version for pointers
+template <typename T>
+inline static std::string PSTR(T *pt) {
+  if (!pt)
+    return "invalid";
+  return STR(*pt);
+}
+
+template <typename T>
+inline static std::string PSTR(const ptr<T> &pt) {
+  if (!pt)
+    return "invalid";
+  return STR(*pt);
 }
 
 // smart typeid provider suggested by GPT
@@ -675,6 +691,17 @@ struct BooleanType final : public ScalarType,
   __UDT_TYPE_INFO__
 };
 
+struct IndexType : public Type, public TypeIDProvider<IndexType> {
+  IndexType() : Type(TypeCategory::INDEX) {}
+  size_t Dims() const override { return 0; }
+  bool IsComplete() const override { return true; }
+  void Print(std::ostream& os) const override { os << "idx"; }
+  const std::string Name() const override { return "index"; }
+
+  bool operator==(const Type& ty) const override { return isa<IndexType>(&ty); }
+  __UDT_TYPE_INFO__
+};
+
 // ITuple is a dimensioned type
 struct ITupleType : public Type, public TypeIDProvider<ITupleType> {
   size_t dim_count = __INVALID_VALUE__;
@@ -719,10 +746,7 @@ struct MDSpanType : public Type, public TypeIDProvider<MDSpanType> {
   void SetShape(const Shape& v) { value = v; }
   const Shape GetShape() { return value; }
 
-  size_t Dims() const override {
-    assert(value.IsValid() && "Invalid mdspan defined.");
-    return value.Dims();
-  }
+  size_t Dims() const override { return value.Dims(); }
 
   // MDSpanType is an incomplete/partial type
   bool IsComplete() const override { return false; }
@@ -868,12 +892,15 @@ struct BoundedITupleType final : public Type,
   }
 
   void Print(std::ostream& os) const override {
-    if (Dims() > 0) {
-      os << "{int";
-      for (size_t i = 1; i < Dims(); ++i) os << ",int";
-      os << "}->";
-      bounds.Print(os);
+    if (!bounds.IsValid()) {
+      os << "{invalid}";
+      return;
     }
+    assert(Dims() > 0 && "dim of bounded ituple is incorrect.");
+    os << "{int";
+    for (size_t i = 1; i < Dims(); ++i) os << ",int";
+    os << "}->";
+    bounds.Print(os);
   }
 
   const std::string Name() const override { return "bounded-ituple"; }
@@ -993,6 +1020,14 @@ inline std::string GetBaseTypeStringOf(const Type& ty) {
   return 0;
 }
 
+inline bool IsScalarType(const ptr<Type>& ty) {
+  return isa<IntegerType>(ty) && isa<BooleanType>(ty);
+}
+
+inline bool IsBoundedType(const ptr<Type>& ty) {
+  return isa<BoundedIntegerType>(ty) || isa<BoundedITupleType>(ty);
+}
+
 // utility functions to generate types
 // Note: should always use utility functions
 inline Shape GenUninitShape() { return Shape(); }
@@ -1011,6 +1046,8 @@ inline ptr<BooleanType> MakeBooleanType() {
   return std::make_shared<BooleanType>();
 }
 
+inline ptr<IndexType> MakeIndexType() { return std::make_shared<IndexType>(); }
+
 inline ptr<ITupleType> MakeITupleType(size_t n) {
   return std::make_shared<ITupleType>(n);
 }
@@ -1024,6 +1061,7 @@ inline ptr<MDSpanType> MakeUninitMDSpanType() {
 }
 
 inline ptr<MDSpanType> MakeDimedMDSpanType(size_t n) {
+  if (n == __INVALID_VALUE__) return MakeUninitMDSpanType();
   return std::make_shared<MDSpanType>(Shape(n));
 }
 
@@ -1041,6 +1079,16 @@ inline ptr<SpannedType> MakeSpannedType(BaseType ft, const Shape& v,
   return MakeSpannedType((FundamentalType)ft, v, s);
 }
 
+// all the values are fake. it is used only to indicate a spanned type without
+// the shape detail
+inline ptr<SpannedType> MakeUninitSpannedType() {
+  return MakeSpannedType(BaseType::S32, GenUninitShape(), Storage::DEFAULT);
+}
+
+inline ptr<SpannedType> MakeDimedSpannedType(size_t n) {
+  return MakeSpannedType(BaseType::S32, Shape(n), Storage::DEFAULT);
+}
+
 inline ptr<BoundedIntegerType> MakeBoundedIntegerType(int ub) {
   return std::make_shared<BoundedIntegerType>(ub);
 }
@@ -1048,6 +1096,10 @@ inline ptr<BoundedIntegerType> MakeBoundedIntegerType(int ub) {
 inline ptr<BoundedITupleType> MakeBoundedITupleType(const Shape& v,
                                                     const std::string& n = "") {
   return std::make_shared<BoundedITupleType>(v, n);
+}
+
+inline ptr<BoundedITupleType> MakeUninitBoundedITupleType() {
+  return std::make_shared<BoundedITupleType>(GenUninitShape(), "");
 }
 
 inline ptr<FutureType> MakeFutureType(const Shape& v, bool async) {

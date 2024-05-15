@@ -8,14 +8,14 @@ __co__ auto ele_add(s32 [6, ?, 128] lhs, s32 [6, ?, 128] rhs) {
          idx1 = {w, z, b} in rhs.span / {#p, 2, 32}
     where x <-> z {
       foreach idx0 {
-        lhs_load = dma.copy lhs.chunkat(q, x, y) => local;
-        rhs_load = dma.copy rhs.chunkat(w, z, b) => local;
+        lhs_load = dma.copy.async lhs.chunkat(q, x, y) => local;
+        rhs_load = dma.copy.async rhs.chunkat(w, z, b) => local;
         wait lhs_load, rhs_load;
 
         local s32[lhs_load.span] l1_out;
         call kernel(lhs_load.data, rhs_load.data, l1_out, |lhs_load.span|);
 
-        out_store = dma.copy l1_out => output.chunkat(q,x,y);
+        out_store = dma.copy.async l1_out => output.chunkat(q,x,y);
         wait out_store;
       }
     }
@@ -23,36 +23,34 @@ __co__ auto ele_add(s32 [6, ?, 128] lhs, s32 [6, ?, 128] rhs) {
   return output;
 }
 
-#if 0
-__co__ auto ele_add2(s32 [6, ?, 128] lhs, s32 [6, ?, 128] rhs) {
-  s32[lhs.span] output;
-
-  tile_shape = {6, 2, 32};
-  l_tiling_factor = (lhs + tile_shape - 1) / tile_shape;
-  l_padded_shape : tile_shape * l_tiling_factor;
-  r_tiling_factor = (rhs + tile_shape - 1) / tile_shape;
-  r_padded_shape : tile_shape * r_tiling_factor;
-
-  g_lhs = dma.pad(l_padded_shape) lhs => global;
-  g_rhs = dma.pad(r_padded_shape) rhs => global;
-
-  parallel p by 6 {
-    with idx0 = {q, x, y} in g_lhs.span / {#p, 2, 32}, // [6/6, lhs.span(1) / 2, 128/32] = [1, lhs.span(1) / 2, 4 ]
-         idx1 = {w, z, b} in g_rhs.span / {#p, 2, 32}
-    where x <-> z {
-      foreach q, x, y {
-        lhs_load = dma.copy g_lhs.chunkat(q, x, y) => local;
-        rhs_load = dma.copy l_rhs.chunkat(w, z, b) => local;
-        wait lhs_load, rhs_load;
-
-        local s32[lhs_load.span] l1_out;
-        call kernel(lhs_load.data, rhs_load.data, l1_out, |lhs_load.span|);
-
-        out_store = dma.copy l1_out => output.chunkat(q,x,y);
-        wait out_store;
-      }
-    }
-  } // can use python styling
-  return output;
-}
-#endif
+// __co__ auto ele_add2(s32 [6, ?, 128] lhs, s32 [6, ?, 128] rhs) {
+//   s32[lhs.span] output;
+//
+//   tile_shape = {6, 2, 32};
+//   l_tiling_factor = (lhs + tile_shape - 1) / tile_shape;
+//   l_padded_shape : tile_shape * l_tiling_factor;
+//   r_tiling_factor = (rhs + tile_shape - 1) / tile_shape;
+//   r_padded_shape : tile_shape * r_tiling_factor;
+//
+//   g_lhs = dma.pad(l_padded_shape) lhs => global;
+//   g_rhs = dma.pad(r_padded_shape) rhs => global;
+//
+//   parallel p by 6 {
+//     with idx0 = {q, x, y} in g_lhs.span / {#p, 2, 32}, // [6/6, lhs.span(1) / 2, 128/32] = [1, lhs.span(1) / 2, 4 ]
+//          idx1 = {w, z, b} in g_rhs.span / {#p, 2, 32}
+//     where x <-> z {
+//       foreach q, x, y {
+//         lhs_load = dma.copy g_lhs.chunkat(q, x, y) => local;
+//         rhs_load = dma.copy l_rhs.chunkat(w, z, b) => local;
+//         wait lhs_load, rhs_load;
+//
+//         local s32[lhs_load.span] l1_out;
+//         call kernel(lhs_load.data, rhs_load.data, l1_out, |lhs_load.span|);
+//
+//         out_store = dma.copy l1_out => output.chunkat(q,x,y);
+//         wait out_store;
+//       }
+//     }
+//   } // can use python styling
+//   return output;
+// }

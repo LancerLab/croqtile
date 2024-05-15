@@ -1,5 +1,5 @@
-#ifndef __CHOREO_SYMBOL_VALIDATOR_CHECK_HPP__
-#define __CHOREO_SYMBOL_VALIDATOR_CHECK_HPP__
+#ifndef __CHOREO_EARLY_SEMANTICS_CHECK_HPP__
+#define __CHOREO_EARLY_SEMANTICS_CHECK_HPP__
 
 // This apply the type check and symbol table generation
 
@@ -7,7 +7,7 @@
 
 namespace Choreo {
 
-struct SymbolValidator : public Visitor {
+struct EarlySemantics : public Visitor {
  private:
   std::ostream &os;
   bool trace_visit = false;  // for debugging purpose only
@@ -20,6 +20,8 @@ struct SymbolValidator : public Visitor {
   bool requires_return =
       false;  // only void function does not require return value
   bool found_return = false;
+  bool return_deduction = false;
+  int parallel_level = 0;
 
  private:
   bool BeforeVisit(AST::Node &) override;
@@ -30,10 +32,29 @@ struct SymbolValidator : public Visitor {
                                  const char *, int,
                                  const ptr<Type> & = MakeUnknownType());
 
+  ptr<Type> NodeType(AST::Node &n) {
+    if (auto id = dyn_cast<AST::Identifier>(&n))
+      return SSTab().LookupSymbol(id->name);
+    else if (auto expr = dyn_cast<AST::Expr>(&n)) {
+      if (auto ref = expr->GetReference()) {
+        if (auto id = dyn_cast<AST::Identifier>(ref))
+          return SSTab().LookupSymbol(id->name);
+      } else if (expr->op == "dataof") {
+        if (auto ref = cast<AST::Expr>(expr->value_r)->GetReference()) {
+          auto id = cast<AST::Identifier>(ref);
+          if (!SSTab().LookupSymbol(id->name)) // make sure the symbol exists
+            return nullptr;
+          return SSTab().LookupSymbol(id->name + ".data");
+        }
+      }
+    }
+    return n.GetType();
+  }
+
  public:
-  SymbolValidator(std::ostream &o = std::cout)
+  EarlySemantics(std::ostream &o = std::cout)
       : os(o), trace_visit(std::getenv("TRACE_VALI")) {}
-  ~SymbolValidator() {}
+  ~EarlySemantics() {}
 
   bool Visit(AST::MultiNodes &) override;
   bool Visit(AST::MultiValues &) override;
@@ -70,4 +91,4 @@ struct SymbolValidator : public Visitor {
 
 }  // end namespace Choreo
 
-#endif  // __CHOREO_SYMBOL_VALIDATOR_CHECK_HPP__
+#endif  // __CHOREO_EARLY_SEMANTICS_CHECK_HPP__

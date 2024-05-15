@@ -213,11 +213,10 @@ static inline std::string stub_type_str(const Choreo::Type &ty,
     return "bool";
   else if (auto sty = dyn_cast<SpannedType>(&ty)) {
     if (is_ret)  // return by value
-      return "choreo::spanned<choreo::" + STR(sty->f_type) +
-             ", " + std::to_string(sty->Dims()) + ">";
+      return "choreo::spanned<choreo::" + STR(sty->f_type) + ", " +
+             std::to_string(sty->Dims()) + ">";
     else  // pass by reference
-      return "const choreo::spanned<choreo::" +
-             STR(sty->f_type) + ", " +
+      return "const choreo::spanned<choreo::" + STR(sty->f_type) + ", " +
              std::to_string(sty->Dims()) + "> &";
   }
   choreo_unreachable("unsupported stub function type.");
@@ -701,7 +700,7 @@ bool FactorCodeGen::Visit(AST::Call &c) {
   fs << this->indent << "call_(\"";
   fs << STR(*c.function);
   fs << "\", {";
-  auto args = dyn_cast<AST::MultiValues>(c.arguments);
+  auto args = c.arguments;
   assert(args && "Invalid kernel call args!");
   int arg_num = args->GetValues().size();
   for (int index = 0; index < arg_num;) {

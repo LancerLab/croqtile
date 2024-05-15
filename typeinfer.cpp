@@ -373,6 +373,11 @@ bool TypeInference::Visit(AST::Expr &n) {
     } else if (n.op == "sizeof") {
       n.SetType(MakeIntegerType());
       return true;
+    } else if (n.op == "dataof") {
+      auto ref = cast<AST::Expr>(n.value_r)->GetReference();
+      auto id = cast<AST::Identifier>(ref);
+      n.SetType(GetSymbolType(id->LOC(), id->name + ".data"));
+      return true;
     }
     choreo_unreachable("type inference is yet to implement.");
   }
@@ -430,7 +435,17 @@ bool TypeInference::Visit(AST::DMA &n) {
 
   AssignSymbolWithType(n.LOC(), n.future, n.GetType());
   auto s = cast<FutureType>(n.GetType())->GetShape();
+  auto fty = cast<SpannedType>(SSTab().LookupSymbol(n.FromSymbol()));
+  Storage st = Storage::NONE;
+  if (n.ToSymbol().empty())
+    st = cast<AST::Memory>(n.to)->Get();
+  else {
+    auto tty = SSTab().LookupSymbol(n.ToSymbol());
+    st = cast<SpannedType>(tty)->GetStorage();
+  }
   AssignSymbolWithType(n.LOC(), n.future + ".span", MakeMDSpanType(s));
+  AssignSymbolWithType(n.LOC(), n.future + ".data",
+                       MakeSpannedType(fty->ElementType(), s, st));
 
   if (Dump) {
     os << "Future:    " << SSTab().InScopeName(n.future)

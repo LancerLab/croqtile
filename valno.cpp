@@ -295,6 +295,10 @@ std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
              [this, &n]() -> std::optional<std::string> {
                return std::nullopt; /*TODO*/
              }},
+            {"dataof",
+             [this, &n]() -> std::optional<std::string> {
+               return std::nullopt; /*TODO*/
+             }},
             {"sizeof",
              [this, &n]() -> std::optional<std::string> {
                return std::nullopt; /*TODO*/

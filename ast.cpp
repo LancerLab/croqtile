@@ -98,7 +98,13 @@ void ParallelBy::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
-void WhereBind::accept(Choreo::Visitor& v) { v.Visit(*this); }
+void WhereBind::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+  lhs->accept(v);
+  rhs->accept(v);
+  v.Visit(*this);
+  v.AfterVisit(*this);
+}
 
 void WithIn::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
@@ -139,7 +145,12 @@ void Return::accept(Choreo::Visitor& v) {
   v.Visit(*this);
 }
 
-void Call::accept(Choreo::Visitor& v) { v.Visit(*this); }
+void Call::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+  arguments->accept(v);
+  v.Visit(*this);
+  v.AfterVisit(*this);
+}
 
 void ForeachBlock::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);

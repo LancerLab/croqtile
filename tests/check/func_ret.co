@@ -4,7 +4,7 @@ __co__ s32 mdspan<3> foo() {}
 // CHECK: non-void function 'foo` does not contain a return statement.
 
 __co__ auto bar(int) {}
-// CHECK: non-void function 'bar` does not contain a return statement.
+// CHECK-NOT: bar
 
 __co__ void foobar(bool) {}
 // CHECK-NOT: foobar
@@ -15,4 +15,4 @@ __co__ void barfoo() { return 1; }
 __co__ auto correct() { return 1; }
 // CHECK-NOT: correct
 
-// CHECK: Totally 3 errors have been detected.
+// CHECK: Totally 2 errors have been detected.

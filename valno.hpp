@@ -226,7 +226,7 @@ class ShapeInference : public Visitor {
                   .c_str());
         vn.SetListReference(n.value());
       }
-    } else if (isa<AST::Wait>(&n)) {
+    } else if (isa<AST::Wait>(&n) || isa<AST::Call>(&n)) {
       gen_multi_values = false;
     }
     return true;
@@ -239,7 +239,7 @@ class ShapeInference : public Visitor {
       vn.LeaveScope();
     } else if (isa<AST::MultiDimSpans>(&n) || isa<AST::IntTuple>(&n)) {
       vn.ResetListReference();
-    } else if (isa<AST::Wait>(&n)) {
+    } else if (isa<AST::Wait>(&n) || isa<AST::Call>(&n)) {
       gen_multi_values = true;
     }
     return true;
@@ -267,15 +267,20 @@ class ShapeInference : public Visitor {
   bool Visit(AST::Expr& n) {
     __TRACE_EACH_VISIT__;
     if (auto ref = n.GetReference()) {
-      if (auto id = dyn_cast<AST::Identifier>(ref.get())) {
+      if (auto id = dyn_cast<AST::Identifier>(ref)) {
         if (SSTab().IsDeclared(id->name)) {
           if (vn.HasValueNumberOfSignature(SSTab().InScopeName(id->name)))
-            cur_vn = vn.GetValueNumberOfSignature(SSTab().InScopeName(id->name));
+            cur_vn =
+                vn.GetValueNumberOfSignature(SSTab().InScopeName(id->name));
           else
-            InvalidateVN(cur_vn);  // a spanned data does not have a value number
+            InvalidateVN(
+                cur_vn);  // a spanned data does not have a value number
           return true;
         }
       }
+    } else if (n.op == "dataof") {
+      InvalidateVN(cur_vn);  // a spanned data does not have a value number
+      return true;
     }
 
     // the expression could be mdspan/ituple. record the information for later

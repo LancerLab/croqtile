@@ -1,0 +1,10 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ void illegal_params0(f32 [36, 27, 128] a, int a) { }
+// CHECK: symbol `a' has been declared already.
+
+__co__ auto illegal_params2(int b) {
+  int b = 1;
+}
+// CHECK: symbol `b' has been declared already.
+// CHECK: Totally 2 errors have been detected

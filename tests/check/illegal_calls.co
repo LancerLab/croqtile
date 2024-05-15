@@ -1,0 +1,57 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ auto illegal_call0(f32 [36, 27, 128] input, int) {
+  call abc();
+  parallel p by 6 {
+    with index in [3, 9] {
+      foreach index {
+        f = dma.copy input.chunkat(p, index) => local;
+      }
+    }
+  }
+}
+// CHECK: Unable to call kernel function outside the parallel-by block(s).
+
+__co__ auto illegal_call1(f32 [36, 27, 128] input) {
+  parallel p by 6 {
+    with index in [3] {
+      foreach index {
+        f = dma.copy input.chunkat(p, index) => local;
+        call abc(f);
+      }
+    }
+  }
+}
+// CHECK: (1th) argument of type 'sync=>[]` can not be passed to the kernel function.
+
+__co__ auto illegal_call2(f32 [36, 27, 128] input) {
+  parallel p by 6 {
+    with index in [3] {
+      foreach index {
+        f = dma.copy input.chunkat(p, index) => local;
+        call bcd(1, f.span);
+      }
+    }
+  }
+}
+// CHECK: (2th) argument of type 'mdspan<> []` can not be passed to the kernel function.
+
+__co__ auto illegal_call3(f32 [36, 27, 128] input) {
+  parallel p by 6 {
+    with index in [3] {
+      foreach index {
+        f = dma.copy input.chunkat(p, index) => local;
+      }
+      call def(f.data, true, {4, 5});
+    }
+    parallel q by 4 {
+      call anything(input[(0), 1] + {1, 2});
+    }
+  }
+}
+// CHECK: symbol `f' is used before declaration.
+// CHECK: in operation "dataof": expecting a future type but got `invalid'.
+// CHECK: (1th) argument of type 'invalid` can not be passed to the kernel function.
+// CHECK: (3th) argument of type 'ituple<unknown>` can not be passed to the kernel function.
+// CHECK: (1th) argument of type 'mdspan<> []` can not be passed to the kernel function.
+// CHECK: Totally 8 errors have been detected.

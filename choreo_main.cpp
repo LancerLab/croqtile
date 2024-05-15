@@ -6,17 +6,17 @@
 #include "codegen.hpp"
 #include "desugar.hpp"
 #include "dynshape.hpp"
+#include "earlysema.hpp"
 #include "enums.hpp"
+#include "gcucheck.hpp"
 #include "options.hpp"
 #include "scanner.hpp"
 #include "symtab.hpp"
-#include "symvalid.hpp"
 #include "typecheck.hpp"
 #include "typeinfer.hpp"
 #include "types.hpp"
 #include "valno.hpp"
 #include "visualize.hpp"
-#include "gcucheck.hpp"
 
 using namespace Choreo;
 
@@ -49,6 +49,13 @@ int main(int argc, char* argv[]) {
   }
   r.SetOutputStream(output.GetValue());
 
+  if (dump_ast) {
+    if (sema_chk)
+      std::cerr
+          << "Warning: Semantic check is ignored since dumping AST is required."
+          << std::endl;
+  }
+
   std::string filename = r.GetInputFileName();
   loc.begin.filename = loc.end.filename = &filename;
 
@@ -67,17 +74,12 @@ int main(int argc, char* argv[]) {
   p.parse();
 
   if (dump_ast) {
-    if (sema_chk)
-      std::cerr
-          << "Warning: Semantic check is ignored since dumping AST is required."
-          << std::endl;
-
     root.Print(std::cout);
     return 0;
   }
 
-  // verify symbol references inside scopes
-  SymbolValidator sv;
+  // apply early semantics check without knowing type details
+  EarlySemantics sv;
   root.accept(sv);
   if (sv.HasError()) return 1;
 
@@ -130,8 +132,7 @@ int main(int argc, char* argv[]) {
       // apply the gcu specific checking
       GCUCheck gcu_checker(sc.SymTab());
       root.accept(gcu_checker);
-      if (gcu_checker.HasError())
-        return 1;
+      if (gcu_checker.HasError()) return 1;
 
       FactorCodeGen codegen(std::cout, sc.SymTab());
       root.accept(codegen);

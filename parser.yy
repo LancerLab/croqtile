@@ -143,8 +143,8 @@ void choreo_info(const char *message) {
 %nterm <Choreo::BaseType> fundamental_type
 %nterm <AST::ptr<AST::CppSourceCode>> pass_by host_code
 %nterm <AST::ptr<AST::Memory>> storage_qual
-%nterm <AST::ptr<AST::Node>> foreach_block general_val simple_int span_val ituple_val direct_ituple_val bool_literal passable declaration statement assignment paraby_stmt w_statement dma_statement wait_statement call_statement index_or_value iv_expr if_else optional_scalar_init param_mdspan_val chunkat_or_storage
-%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments paraby_stmts w_statements withins where_binds where_clause else_clause
+%nterm <AST::ptr<AST::Node>> foreach_block general_val simple_int span_val ituple_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt index_or_value iv_expr if_else_block optional_scalar_init param_mdspan_val chunkat_or_storage
+%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause else_block
 %nterm <AST::ptr<AST::MultiValues>> index_value_list value_list param_mdspan_list iv_exprs id_list with_matchers passables
 %nterm <AST::ptr<AST::Expr>> s_expr span_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
@@ -156,10 +156,10 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::NamedVariableDecl>> named_ituple_decl named_scalar_decl named_spanned_decl
 %nterm <AST::ptr<AST::IntTuple>> unnamed_ituple_decl sugar_unnamed_ituple_decl sugarless_unnamed_ituple_decl
 %nterm <AST::ptr<AST::IntIndex>> s_index
-%nterm <AST::ptr<AST::WithBlock>> with_block
+%nterm <AST::ptr<AST::WithBlock>> within_block
 %nterm <AST::ptr<AST::WithIn>> within
 %nterm <AST::ptr<AST::WhereBind>> where_bind
-%nterm <AST::ptr<AST::ParallelBy>> parallel_by
+%nterm <AST::ptr<AST::ParallelBy>> paraby_block
 %nterm <AST::ptr<AST::Return>> return_stmt
 %nterm <AST::ptr<AST::ChunkAt>> chunkat_expr
 
@@ -354,9 +354,14 @@ statements
 statement
     : declarations SEMCOL { $$ = $1; }
     | assignments  SEMCOL { $$ = $1; }
-    | parallel_by         { $$ = $1; }
-    | if_else             { $$ = $1; }
+    | dma_stmt     SEMCOL { $$ = $1; }
+    | wait_stmt    SEMCOL { $$ = $1; }
+    | call_stmt    SEMCOL { $$ = $1; }
     | return_stmt  SEMCOL { $$ = $1; }
+    | paraby_block        { $$ = $1; }
+    | within_block        { $$ = $1; }
+    | if_else_block       { $$ = $1; }
+    | foreach_block       { $$ = $1; }
     ;
 
 return_stmt
@@ -364,29 +369,13 @@ return_stmt
     | RET passable { $$ = AST::Make<AST::Return>(@1, $2); }
     ;
 
-parallel_by
+paraby_block
     : PARA IDENTIFIER BY NUM {
         symtab.AddSymbol($2, MakeBoundedIntegerType($4));
-      } LBRACE paraby_stmts RBRACE {
+      } LBRACE statements RBRACE {
         $$ = AST::Make<AST::ParallelBy>(@1, $2, $4);
         $$->stmts = $7;
       }
-    ;
-
-paraby_stmts
-    : /* Empty */ { $$ = AST::Make<AST::MultiNodes>(loc); }
-    | paraby_stmts paraby_stmt {
-        $1->Append($2);
-        $$ = $1;
-      }
-    ;
-
-paraby_stmt
-    : declarations   SEMCOL { $$ = $1; }
-    | assignments    SEMCOL { $$ = $1; }
-    | call_statement SEMCOL { $$ = $1; }
-    | parallel_by           { $$ = $1; }
-    | with_block            { $$ = $1; }
     ;
 
 assignments
@@ -650,24 +639,24 @@ span_expr
     | span_val { $$ = AST::Make<AST::Expr>(@1, $1); }
     ;
 
-if_else
-    : IF LPAREN s_expr RPAREN LBRACE statements RBRACE else_clause {
+if_else_block
+    : IF LPAREN s_expr RPAREN LBRACE statements RBRACE else_block {
         $$ = AST::Make<AST::IfElse>(@1, $3, $6, $8);
       }
     ;
 
-else_clause
+else_block
     : ELSE LBRACE statements RBRACE { $$ = $3; }
     | /* empty */ { $$ = AST::Make<AST::MultiNodes>(loc); }
     ;
 
-with_block
-    : WITH withins LBRACE w_statements RBRACE {
+within_block
+    : WITH withins LBRACE statements RBRACE {
         $$ = AST::Make<AST::WithBlock>(@1);
         $$->withins = $2;
         $$->stmts = $4;
       }
-    | WITH withins where_clause LBRACE w_statements RBRACE {
+    | WITH withins where_clause LBRACE statements RBRACE {
         $$ = AST::Make<AST::WithBlock>(@1);
         $$->withins = $2;
         $$->reqs = $3;
@@ -725,26 +714,8 @@ where_bind
       }
     ;
 
-w_statements
-    : /*Empty statement */ { $$ = AST::Make<AST::MultiNodes>(loc); }
-    | w_statements w_statement {
-        $1->Append($2);
-        $$ = $1;
-      }
-    ;
-
-w_statement
-    : declarations SEMCOL   { $$ = $1; }
-    | assignments  SEMCOL   { $$ = $1; }
-    | dma_statement SEMCOL  { $$ = $1; }
-    | wait_statement SEMCOL { $$ = $1; }
-    | call_statement SEMCOL { $$ = $1; }
-    | if_else               { $$ = $1; }
-    | foreach_block         { $$ = $1; }
-    ;
-
 foreach_block
-    : FOREACH iv_exprs LBRACE w_statements RBRACE {
+    : FOREACH iv_exprs LBRACE statements RBRACE {
         $$ = AST::Make<AST::ForeachBlock>(@1, $2, $4);
       }
     ;
@@ -764,7 +735,7 @@ iv_expr
     : IDENTIFIER { $$ = AST::Make<AST::Identifier>(@1, $1); }
     ;
 
-dma_statement
+dma_stmt
     : IDENTIFIER ASSIGN DMA dma_operation sync_type chunkat_expr TRANS chunkat_or_storage {
         symtab.AddSymbol($1, MakeFutureType($5));
         $$ = AST::Make<AST::DMA>(@3, $4, $1, $6, $8, $5);
@@ -841,13 +812,13 @@ with_matchers /* TODO: this special case is pattern-match ids for with-block */
       }
     ;
 
-wait_statement
+wait_stmt
     : WAIT id_list {
         $$ = AST::Make<AST::Wait>(@1, $2);
       }
     ;
 
-call_statement
+call_stmt
     : CALL IDENTIFIER LPAREN passables RPAREN {
         $$ = AST::Make<AST::Call>(@1,
                 AST::Make<AST::Identifier>(@2, $2), $4);
