@@ -533,8 +533,10 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
                           ? future_name + "_buffer"
                           : STR(cast<AST::ChunkAt>(d.to)->data);
   std::string from_node_name = STR(cast<AST::ChunkAt>(d.from)->data);
-  std::string offset_string = "";
-  std::string dma_op = "";
+
+  auto ty = dyn_cast<FutureType>(GetSymbolType(future_name));
+  assert(ty && "Invalied return type of DMA op!");
+  auto dst_data_shape = ty->GetShape();
 
   auto getMemLevel = [](Storage s) -> int {
     switch (s) {
@@ -589,12 +591,9 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
     }
     alloc_in_fs << factor_typestr((Choreo::BaseType)data_type) << ",";
 
-    auto ty = dyn_cast<FutureType>(GetSymbolType(future_name));
-    assert(ty && "Invalied return type of DMA op!");
     std::string shape_info = "";
-    auto data_shape = ty->GetShape();
     std::ostringstream _os;
-    _os << data_shape.EmitTo(Target::Factor);
+    _os << dst_data_shape.EmitTo(Target::Factor);
     shape_info += _os.str();
     // WE USE node.SHAPE, not node.DIM_BOUND
     // auto dim = data_shape.values.values[0];
@@ -614,39 +613,46 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
     alloc_in_fs << shape_info << "));\n";
   }
 
+  std::string dma_op = "";
   if (src_level >= des_level)
     dma_op.append("async_load_(");
   else
     dma_op.append("async_store_(");
 
-  auto tile_factors = chunkat_node->positions;
-  auto data_shape =
-      dyn_cast<SpannedType>(this->GetSymbolType(chunkat_node_name))->GetShape();
-  int dim_sz = data_shape.Dims();
+  auto tile_shape = (src_level >= des_level) ? dst_data_shape :
+                     dyn_cast<SpannedType>(this->GetSymbolType(from_node_name))->GetShape();
+  int dim_sz = tile_shape.Dims();
+  auto tile_shape_string = tile_shape.EmitTo(Target::Factor);
+  tile_shape_string = tile_shape_string.substr(1, tile_shape_string.size()-2);
+
+  std::string offset_string = "";
   offset_string.append("{");
+  auto tile_factors = chunkat_node->positions;
   if (tile_factors) {
     assert(dim_sz == (int)tile_factors->GetValues().size() &&
-           "Insonsistant sizes for DMA offset.");
-    auto dim = data_shape.values.values[0];
-    assert(dim_sz == (int)dim.size() && "Insonsistant sizes for DMA offset.");
+           "Inconsistant sizes for DMA offset.");
+    //auto dim = tile_shape.values.values[0];
+    //assert(dim_sz == (int)dim.size() && "Inconsistant sizes for tensor shapes.");
     for (int dim_cursor = 0; dim_cursor < dim_sz;) {
       auto tile_factor = tile_factors->GetValues()[dim_cursor];
+#if 0
       auto tf_symbol = STR(tile_factor);
       auto tf_bounds =
           dyn_cast<BoundedITupleType>(this->GetSymbolType(tf_symbol))
               ->GetBounds()
               .Value();
-#if 0
       auto tf_bound = *(std::get_if<int>(&tf_bounds[0]));
       auto dim_bound = *(std::get_if<int>(&dim[dim_cursor]));
       assert((tf_bound > 0 && dim_bound > 0) &&
              "Invalid Dim size or Tile factor!");
-      // auto offset = (dim_cursor == 0)? std::to_string(dim_bound/tf_bound) +
-      // "*thread_id" :
-      //                                  std::to_string(dim_bound/tf_bound) +
-      //                                  "*" + STR(tile_factor);
+
 #endif
-      auto offset = (dim_cursor == 0) ? "thread_id" : STR(tile_factor);
+      auto pos = tile_shape_string.find(",");
+      auto dim_bound = tile_shape_string.substr(0, pos);
+      tile_shape_string = tile_shape_string.substr(pos+1);
+      auto offset = (dim_cursor == 0)? dim_bound + "*thread_id" :
+                                       dim_bound + "*" + STR(tile_factor);
+      //auto offset = (dim_cursor == 0) ? "thread_id" : STR(tile_factor);
       offset_string = offset_string + offset;
       ++dim_cursor;
       if (dim_cursor < dim_sz) offset_string = offset_string + ",";
