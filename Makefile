@@ -62,7 +62,8 @@ clean:
 	rm -f *.cc *.hh *.inc *.o $(TEST_TARGETS) tests/*.result
 
 lines:
-	wc -l *.cpp *.yy *.l *.hpp Makefile utils/*.h
+	echo "source files:"; wc -l *.cpp *.yy *.l *.hpp Makefile utils/*.h; \
+	echo "test files"; wc -l $$(find tests/ -type f |grep -v "\.test")
 
 standalone_test: $(TARGET)
 	cd tests/standalone/ && $(MAKE) test

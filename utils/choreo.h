@@ -22,6 +22,14 @@ inline void choreo_assert(bool p, const char* msg, const char* file = __FILE__,
   return;
 }
 
+inline void runtime_check(bool p, const char* msg) {
+  if (!p) {
+    std::cerr << "choreo runtime check failed: " << msg << std::endl;
+    std::abort();
+  }
+  return;
+}
+
 namespace {
 
 template <typename T, size_t N>

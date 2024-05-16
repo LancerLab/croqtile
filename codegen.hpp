@@ -33,9 +33,6 @@ struct FactorCodeGen : public CodeGenerator {
 
   bool void_return = false;
 
-  // parameters: the name and associated size expression
-  using EntryParamsInfo = std::vector<std::pair<std::string, std::string>>;
-
  private:
   // buffer the kernel code
   std::ostringstream ks;
@@ -55,12 +52,22 @@ struct FactorCodeGen : public CodeGenerator {
   // name of entry parameters
   size_t sp_count = 0;
 
-  EntryParamsInfo entry_params;
+  // parameters: the name (of factor data) and associated size expression
+  std::vector<std::pair<std::string, std::string>> param_map;
+  std::map<std::string, std::string> sym_map;
+  std::vector<std::string> host_params;
 
-  void GenerateHostFunction(std::ostream &, const Type &, const std::string &,
-                            bool = false);
-  std::string GenEntryParamName() { return "sp" + std::to_string(sp_count++); }
-  void ResetEntryParamCount() { sp_count = 0; }
+  void EmitHostHead(std::ostream &);
+  void EmitHostFuncDecl(std::ostream &, const Type &, const std::string &,
+                        bool = false);
+  void EmitRuntimeCheck(std::ostream &, const Type &);
+  void EmitHostFuncBody(std::ostream &, const Type &, const std::string &fname,
+                        const std::string & o_sz, const std::string &o_ty,
+                        const Shape & s);
+
+  std::string GenHostParamName() { return "sp" + std::to_string(sp_count++); }
+  void ResetHostParamCount() { sp_count = 0; }
+  void ReplaceRuntimeNames(std::string &);
 
  public:
   FactorCodeGen(std::ostream &os, const ptr<SymbolTable> &symtab)

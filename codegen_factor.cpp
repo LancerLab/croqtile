@@ -52,143 +52,6 @@ inline static std::string create_unique_filename(
   return filename;
 }
 
-static inline void print_host_head(std::ostream &os) {
-  os <<
-      R"(
-#include <fstream>
-#include <iostream>
-#include <iterator>
-#include <string>
-#include <vector>
-
-// dependant on the topsruntime
-#include "tops/tops_ext.h"
-#include "tops/tops_runtime.h"
-
-// choreo header
-#include "choreo.h"
-
-using namespace choreo;
-
-namespace {
-
-// Nasty data copy. Need optimization together with factor
-template <typename T, int Rank>
-static inline std::vector<uint8_t>
-ToFactorData(const spanned_view<T, Rank> &v) {
-  return std::vector<uint8_t>((const uint8_t *)(v.data()), v.bytes());
-}
-
-template <int N, typename T, typename U>
-static inline spanned_data<T, N>
-ToSpanned(const std::vector<U> &v, std::initializer_list<int> && shape) {
-  return copy_as_spanned<N, T>((T*)v.data(), v.size() * sizeof(U), shape);
-}
-
-// must be true
-//#define CHECK(a) choreo_assert((a), "", __FILE__, __LINE__)
-#define CHECK(a) (a)
-
-} // end anonymous namespace
-)";
-}
-
-// phase 1: create tops executable from a file
-static inline void print_host_phase1(std::ostream &os, const std::string &f_n) {
-  os <<
-      R"(std::vector<char> binary;
-  // Read bin file and store to a vector
-)";
-  os << "  std::ifstream ifs(\"" << f_n << "\", std::ios::binary);";
-  os << R"(
-  std::copy(std::istreambuf_iterator<char>(ifs),
-            std::istreambuf_iterator<char>(), std::back_inserter(binary));
-  ifs.close();
-
-  // Create executable
-  topsExecutable_t executable = nullptr;
-  CHECK(topsCreateExecutable(&executable, binary.data(), binary.size()));
-  topsStream_t stream = nullptr;
-  CHECK(topsStreamCreate(&stream));
-
-)";
-}
-
-// phase 2: allocate device memory and copy
-static inline void print_host_phase2(
-    std::ostream &os, const FactorCodeGen::EntryParamsInfo &params,
-    const std::string &out_size, std::vector<std::string> &d_params) {
-  assert((d_params.size() == 0) && "expecting an empty vector.");
-
-  // input parameters
-  for (auto &p : params) {
-    auto mem_name = "in_mem" + std::to_string(d_params.size());
-    os << "  void *" << mem_name << " = nullptr;\n";
-    os << "  CHECK(topsMalloc(&" << mem_name << ", " << p.second << "));\n";
-    os << "  CHECK(topsMemcpy(" << mem_name << ", reinterpret_cast<void *>("
-       << p.first << "), " << p.second << ", topsMemcpyHostToDevice));\n";
-    d_params.push_back(mem_name);
-  }
-  os << "  void * device_inputs[] = {" << DelimitedString(d_params) << "};\n\n";
-
-  // output parameter
-  if (!out_size.empty()) {
-    os << "  void * out_mem = nullptr;\n";
-    os << "  CHECK(topsMalloc(&out_mem, " << out_size << "));\n";
-    os << "  void *device_outputs[] = {out_mem};\n";
-  }
-}
-
-// phase 3: Execute the executable and fetch the output
-static inline void print_host_phase3(
-    std::ostream &os, const FactorCodeGen::EntryParamsInfo &params,
-    const std::string &out_size, const std::string &out_type, size_t out_rank,
-    const std::string &out_shape) {
-  // TODO: resolve hardcode in input dims and ranks
-  // os << "  int64_t input_dims[] = {";
-  // if (params.size() > 0) {
-  //   os << params[0].second;
-  //   for (size_t i = 1; i < params.size(); ++i) os << ", " <<
-  //   params[i].second;
-  // }
-  // os << "};";
-  os << R"(
-  int64_t input_dims[] = {6, 17, 128, 6, 17, 128};
-  size_t input_ranks[] = {3, 3};
-
-  CHECK(topsLaunchExecutableV2(
-      executable, nullptr, device_inputs,
-      sizeof(device_inputs) / sizeof(void *), (int64_t*)input_dims,
-      (size_t*)input_ranks, device_outputs,
-      sizeof(device_outputs) / sizeof(void *), stream));
-  CHECK(topsStreamSynchronize(stream));
-
-)";
-
-  if (!out_size.empty()) {
-    os << "  auto res = choreo::make_spandata<" << out_type << ", " << out_rank
-       << ">(" << out_shape << ");\n";
-    os << "  // Copy output data from device to host\n";
-    os << "  CHECK(topsMemcpy(reinterpret_cast<void *>(res.data()), out_mem,\n";
-    os << "                  " << out_size << ", topsMemcpyDeviceToHost));\n";
-  }
-}
-
-// resource deallocation
-static inline void print_host_phase4(std::ostream &os,
-                                     std::vector<std::string> &d_params) {
-  os << R"(
-  // Free up the resources";
-)";
-  for (auto &p : d_params) os << "  topsFree(" << p << ");\n";
-  os << R"(
-  topsStreamDestroy(stream);
-  topsDestroyExecutable(executable);
-  return res;
-}
-)";
-}
-
 static inline std::string factor_storage_str(Choreo::Storage s) {
   switch (s) {
     case Storage::LOCAL:
@@ -203,7 +66,7 @@ static inline std::string factor_storage_str(Choreo::Storage s) {
   }
 }
 
-static inline std::string stub_type_str(const Choreo::Type &ty,
+static inline std::string HostTypeString(const Choreo::Type &ty,
                                         bool is_ret = false) {
   if (isa<VoidType>(&ty))
     return "void";
@@ -213,13 +76,13 @@ static inline std::string stub_type_str(const Choreo::Type &ty,
     return "bool";
   else if (auto sty = dyn_cast<SpannedType>(&ty)) {
     if (is_ret)  // return by value
-      return "choreo::spanned<choreo::" + STR(sty->f_type) + ", " +
+      return "choreo::spanned_data<choreo::" + STR(sty->f_type) + ", " +
              std::to_string(sty->Dims()) + ">";
     else  // pass by reference
-      return "const choreo::spanned<choreo::" + STR(sty->f_type) + ", " +
+      return "const choreo::spanned_view<choreo::" + STR(sty->f_type) + ", " +
              std::to_string(sty->Dims()) + "> &";
   }
-  choreo_unreachable("unsupported stub function type.");
+  choreo_unreachable("unsupported host function type.");
   return "";
 }
 
@@ -265,6 +128,9 @@ bool FactorCodeGen::BeforeVisitImpl(AST::Node &n) {
     //    print_fixed_header(os);
   } else if (auto c = dyn_cast<AST::ChoreoFunction>(&n)) {
     sp_count = 0;  // reset the count of stub parameter
+    param_map.clear();
+    sym_map.clear();
+    host_params.clear();
     entry_fn = c->name;
     current_fn = "__choreo_" + entry_fn;
     // declare a factor function with proper name
@@ -784,35 +650,102 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
   return true;
 }
 
-void FactorCodeGen::GenerateHostFunction(std::ostream &os, const Type &ty,
-                                         const std::string &n, bool decl_only) {
+void FactorCodeGen::ReplaceRuntimeNames(std::string & expr) {
+  for (auto & s : sym_map) {
+    size_t start_pos = expr.find(s.first);
+    if (start_pos != std::string::npos)
+      expr.replace(start_pos, s.first.length(), s.second);
+  }
+}
+
+void FactorCodeGen::EmitRuntimeCheck(std::ostream &os, const Type &ty) {
   assert(isa<FunctionType>(&ty) && "unexpected type.");
   auto &fty = *cast<FunctionType>(&ty);
-  os << stub_type_str(*fty.out_ty, true) << " " << n << "(";
-  if (fty.in_tys.size() > 0) {
-    auto n = GenEntryParamName();
-    if (!decl_only) {
-      if (auto sty = dyn_cast<SpannedType>(fty.in_tys[0]))
-        entry_params.push_back(
-            std::make_pair(n + ".data", sty->ByteSizeExpression()));
-      else
-        entry_params.push_back(std::make_pair(n, "1"));
-    }
-    os << stub_type_str(*fty.in_tys[0]) << " " << n;
-    for (size_t i = 1; i < fty.in_tys.size(); ++i) {
-      auto n = GenEntryParamName();
-      if (!decl_only) {
-        if (auto sty = dyn_cast<SpannedType>(fty.in_tys[i]))
-          entry_params.push_back(
-              std::make_pair(n + ".data", sty->ByteSizeExpression()));
-        else
-          entry_params.push_back(std::make_pair(n, "1"));
+
+  assert(fty.in_tys.size() == host_params.size() &&
+         "internal error when dealing with the host parameter size.");
+
+  // check if the input shape is as declared in choreo
+  if (fty.in_tys.size() == 0)  return;
+
+  if (auto sty = dyn_cast<SpannedType>(fty.in_tys[0])) {
+    auto name = host_params[0];
+    size_t count = 0;
+    for (auto vi : sty->GetShape().Value()) {
+      if (auto vale = dyn_cast<int>(&vi)) {
+        auto elem_name = name + ".shape()[" + std::to_string(count) + "]";
+        os << "  choreo::runtime_check(" << elem_name << " == " <<  *vale;
+        os << ", \"shape inconstant on 1st parameter (dim: " << count
+           <<").\");\n";
       }
-      os << ", " << stub_type_str(*fty.in_tys[i]) << " " << n;
+      count++;
     }
   }
-  os << ")" << ((decl_only) ? ";" : " {") << "\n";
-  if (decl_only) ResetEntryParamCount();
+  for (size_t i = 1; i < fty.in_tys.size(); ++i) {
+    auto name = host_params[i];
+    if (auto sty = dyn_cast<SpannedType>(fty.in_tys[i])) {
+      size_t count = 0;
+      for (auto vi : sty->GetShape().Value()) {
+        if (auto vale = dyn_cast<int>(&vi)) {
+          auto elem_name = name + ".shape()[" + std::to_string(count) + "]";
+          os << "  choreo::runtime_check(" << elem_name << " == " <<  *vale;
+          os << ", \"shape inconstant on " << i + 1 << "th parameter (dim: "
+             << count <<").\");\n"; 
+        }
+        count++;
+      }
+    }
+  }
+}
+
+void FactorCodeGen::EmitHostFuncDecl(std::ostream &os, const Type &ty,
+                                      const std::string &n, bool decl_only) {
+  assert(isa<FunctionType>(&ty) && "unexpected type.");
+  auto &fty = *cast<FunctionType>(&ty);
+  os << HostTypeString(*fty.out_ty, true) << " " << n << "(";
+
+  auto MapRuntimeNames =
+    [this](SpannedType* sty, const std::string &name) {
+    size_t count = 0;
+    for (auto vi : sty->GetShape().Value()) {
+      if (auto vale = dyn_cast<ValueExpr>(&vi)) {
+        auto elem_name = name + ".shape()[" + std::to_string(count) + "]";
+        sym_map.emplace(*vale, elem_name);
+      }
+      count++;
+    }
+  };
+
+  if (fty.in_tys.size() > 0) {
+    auto n = GenHostParamName();
+    if (!decl_only) {
+      host_params.push_back(n);
+      if (auto sty = dyn_cast<SpannedType>(fty.in_tys[0])) {
+        std::string bs_expr = sty->ByteSizeExpression();
+        MapRuntimeNames(sty, n);
+        ReplaceRuntimeNames(bs_expr);
+        param_map.push_back(std::make_pair(n + ".data", bs_expr));
+      } else
+        param_map.push_back(std::make_pair(n, "1"));
+    }
+    os << HostTypeString(*fty.in_tys[0]) << " " << n;
+    for (size_t i = 1; i < fty.in_tys.size(); ++i) {
+      auto n = GenHostParamName();
+      if (!decl_only) {
+        host_params.push_back(n);
+        if (auto sty = dyn_cast<SpannedType>(fty.in_tys[i])) {
+          auto bs_expr = sty->ByteSizeExpression();
+          MapRuntimeNames(sty, n);
+          ReplaceRuntimeNames(bs_expr);
+          param_map.push_back(std::make_pair(n + ".data", bs_expr));
+        } else
+          param_map.push_back(std::make_pair(n, "1"));
+      }
+      os << ", " << HostTypeString(*fty.in_tys[i]) << " " << n;
+    }
+  }
+  os << ")" << ((decl_only) ? ";\n" : " ");
+  if (decl_only) ResetHostParamCount();
 }
 
 bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
@@ -823,7 +756,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
 
   for (auto &param : *cur_params) {
     auto name = param->sym->name;
-    if (AST::typeof<SpannedType>(param.get())) {
+    if (AST::typeof<SpannedType>(param)) {
       // define spanned type
       auto type_symbol = name + "_type";
       std::ostringstream _os;
@@ -922,6 +855,146 @@ bool FactorCodeGen::Visit(AST::CppSourceCode &n) {
 
 bool FactorCodeGen::Visit(AST::Program &) { return true; }
 
+void FactorCodeGen::EmitHostHead(std::ostream &os) {
+  os <<
+      R"(
+#include <fstream>
+#include <iostream>
+#include <iterator>
+#include <string>
+#include <vector>
+
+// dependant on the topsruntime
+#include "tops/tops_ext.h"
+#include "tops/tops_runtime.h"
+
+// choreo header
+#include "choreo.h"
+
+using namespace choreo;
+
+namespace {
+
+// Nasty data copy. Need optimization together with factor
+template <typename T, int Rank>
+static inline std::vector<uint8_t>
+ToFactorData(const spanned_view<T, Rank> &v) {
+  return std::vector<uint8_t>((const uint8_t *)(v.data()), v.bytes());
+}
+
+template <int N, typename T, typename U>
+static inline spanned_data<T, N>
+ToSpanned(const std::vector<U> &v, std::initializer_list<int> && shape) {
+  return copy_as_spanned<N, T>((T*)v.data(), v.size() * sizeof(U), shape);
+}
+
+// must be true
+//#define CHECK(a) choreo_assert((a), "", __FILE__, __LINE__)
+#define CHECK(a) (a)
+
+} // end anonymous namespace
+)";
+}
+
+void FactorCodeGen::EmitHostFuncBody(std::ostream &os, const Type &ty,
+    const std::string &f_n, const std::string &out_size,
+    const std::string &out_type, const Shape &out_shape) {
+
+  // phase 1: create tops executable from a file
+  os << "{\n";
+  EmitRuntimeCheck(os, ty);
+  os << R"(
+  std::vector<char> binary;
+  // Read bin file and store to a vector
+)";
+  os << "  std::ifstream ifs(\"" << f_n << "\", std::ios::binary);";
+  os << R"(
+  std::copy(std::istreambuf_iterator<char>(ifs),
+            std::istreambuf_iterator<char>(), std::back_inserter(binary));
+  ifs.close();
+
+  // Create executable
+  topsExecutable_t executable = nullptr;
+  CHECK(topsCreateExecutable(&executable, binary.data(), binary.size()));
+  topsStream_t stream = nullptr;
+  CHECK(topsStreamCreate(&stream));
+
+)";
+
+  // phase 2: allocate device memory and copy
+  std::vector<std::string> device_mems;
+  for (auto &p : param_map) {
+    auto mem_name = "in_mem" + std::to_string(device_mems.size());
+    os << "  void *" << mem_name << " = nullptr;\n";
+    os << "  CHECK(topsMalloc(&" << mem_name << ", " << p.second << "));\n";
+    os << "  CHECK(topsMemcpy(" << mem_name << ", reinterpret_cast<void *>("
+       << p.first << "), " << p.second << ", topsMemcpyHostToDevice));\n";
+    device_mems.push_back(mem_name);
+  }
+  os << "  void * device_inputs[] = {" << DelimitedString(device_mems) << "};\n\n";
+
+  std::string size_string = out_size;
+  ReplaceRuntimeNames(size_string);
+
+  if (!out_size.empty()) {
+    os << "  void * out_mem = nullptr;\n";
+    os << "  CHECK(topsMalloc(&out_mem, " << size_string << "));\n";
+    os << "  void *device_outputs[] = {out_mem};\n";
+  }
+
+  // phase 3: Execute the executable and fetch the output
+  // TODO: resolve hardcode in input dims and ranks
+  // os << "  int64_t input_dims[] = {";
+  // if (param_map.size() > 0) {
+  //   os << param_map[0].second;
+  //   for (size_t i = 1; i < param_map.size(); ++i) os << ", " <<
+  //   param_map[i].second;
+  // }
+  // os << "};";
+  os << R"(
+  int64_t input_dims[] = {6, 17, 128, 6, 17, 128};
+  size_t input_ranks[] = {3, 3};
+
+  CHECK(topsLaunchExecutableV2(
+      executable, nullptr, device_inputs,
+      sizeof(device_inputs) / sizeof(void *), (int64_t*)input_dims,
+      (size_t*)input_ranks, device_outputs,
+      sizeof(device_outputs) / sizeof(void *), stream));
+  CHECK(topsStreamSynchronize(stream));
+
+)";
+
+  size_t out_rank = 1;
+  std::string shape_string = "{1}";
+  if (out_shape.IsValid()) {
+    std::ostringstream oss;
+    out_shape.PrintAsList(oss);
+    out_rank = out_shape.Dims();
+    shape_string = oss.str();
+    ReplaceRuntimeNames(shape_string);
+  }
+
+  if (!out_size.empty()) {
+    os << "  auto res = choreo::make_spandata<" << out_type << ", " << out_rank
+       << ">(" << shape_string << ");\n";
+    os << "  // Copy output data from device to host\n";
+    os << "  CHECK(topsMemcpy(reinterpret_cast<void *>(res.data()), out_mem,\n";
+    os << "                  " << size_string << ", topsMemcpyDeviceToHost));\n";
+  }
+
+  // phase 4: Free up the resources
+  os << R"(
+  // Free up the resources";
+)";
+  for (auto &p : device_mems) os << "  topsFree(" << p << ");\n";
+  os << R"(
+  topsStreamDestroy(stream);
+  topsDestroyExecutable(executable);
+  return res;
+}
+)";
+}
+
 void FactorCodeGen::OutputScript(const std::string &n,
                                  const std::string &out_type,
                                  const std::string &out_size,
@@ -939,21 +1012,15 @@ void FactorCodeGen::OutputScript(const std::string &n,
   // Generate the host code
   std::string user_code = hs.str();
   hs.clear();
-  print_host_head(hs);
-  GenerateHostFunction(hs, *cur_fty, n, true);
-  hs << user_code;
-  GenerateHostFunction(hs, *cur_fty, n);
-  print_host_phase1(hs, factor_bfn);
-  std::vector<std::string> device_mems;
-  print_host_phase2(hs, entry_params, out_size, device_mems);
-  if (out_shape.IsValid()) {
-    std::ostringstream oss;
-    out_shape.PrintAsList(oss);
-    print_host_phase3(hs, entry_params, out_size, out_type, out_shape.Dims(),
-                      oss.str());
-  } else
-    print_host_phase3(hs, entry_params, out_size, out_type, 1, "{1}");
-  print_host_phase4(hs, device_mems);
+
+  EmitHostHead(hs);
+  if (!user_code.empty()) {
+    // user code needs the choreo function decal for call
+    EmitHostFuncDecl(hs, *cur_fty, n, true);
+    hs << user_code;
+  }
+  EmitHostFuncDecl(hs, *cur_fty, n);
+  EmitHostFuncBody(hs, *cur_fty, factor_bfn, out_size, out_type, out_shape);
 
   // backpatch the factor bin filename
   std::string factor_src = fs.str();
