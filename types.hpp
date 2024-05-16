@@ -76,6 +76,22 @@ enum Attribute : uint16_t {
   ATT_SHADOW_TO_GLOBAL = 1,  // shadow the host memory to global
 };
 
+inline BaseType TC2BT(TypeCategory tc) {
+  switch (tc) {
+    case TypeCategory::INT:
+      return BaseType::INT;
+    case TypeCategory::BOOL:
+      return BaseType::BOOL;
+    case TypeCategory::VOID:
+      return BaseType::VOID;
+    default:
+      choreo_unreachable(
+          "unsupported mapping from type category to base type.");
+  }
+
+  return BaseType::UNKNOWN;
+}
+
 inline static size_t GetByteSizeOf(FundamentalType ft) {
   switch (ft) {
     case FundamentalType::F32:
@@ -158,16 +174,14 @@ inline static std::string STR(Storage st) {
 
 // safe version for pointers
 template <typename T>
-inline static std::string PSTR(T *pt) {
-  if (!pt)
-    return "invalid";
+inline static std::string PSTR(T* pt) {
+  if (!pt) return "invalid";
   return STR(*pt);
 }
 
 template <typename T>
-inline static std::string PSTR(const ptr<T> &pt) {
-  if (!pt)
-    return "invalid";
+inline static std::string PSTR(const ptr<T>& pt) {
+  if (!pt) return "invalid";
   return STR(*pt);
 }
 
@@ -423,28 +437,9 @@ inline void PrintValueList(const ValueList& vl, std::ostream& os, char lb = '[',
   os << rb;
 }
 
-// TODO(albert): pack this util function together with other emit purpose
-// classes/methods
-// TODO(albert): add emit target
-inline void EmitValueListForFactor(const ValueList& vl, std::ostream& os) {
-  auto print_variant = [&os](const ValueItem& vle) {
-    if (vle.index() == 0)
-      os << std::get<0>(vle);
-    else
-      os << std::get<1>(vle);
-  };
-  os << "{";
-  if (!vl.empty()) {
-    print_variant(vl[0]);
-    for (unsigned i = 1; i < vl.size(); ++i) {
-      os << ", ";
-      print_variant(vl[i]);
-    }
-  }
-  os << "}";
-}
+// target specific value list printing
+void EmitValueListForFactor(const ValueList& vl, std::ostream& os);
 
-// MDSpan is sized and dependent type (dependent on the others)
 struct Shape {
   static ValueListRepo values;  // value numbers
 

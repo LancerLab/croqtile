@@ -12,11 +12,20 @@ __co__ int foo(f32 [32] d, int) { return 1;}
 // CHECK:      auto output_type = DRAMType(IntType(32), (1));
 // CHECK:      D(main_)({d_type, anon_0_type}, [&](auto args){{.*}}
 // CHECK:    }
-// CHECK:  int foo(const choreo::spanned_view<choreo::f32, 1> & sp0, int sp1){{.*}}
+
+__co__ auto foobar(f32 [32] a, int, bool b, f16 [?]) { return 1;}
+// CHECK: void __choreo_foobar() {
+// CHECK:   auto a_type = DRAMType(FloatType(32), {32});
+// CHECK:   auto anon_1_type = DRAMType(IntType(32), (1));
+// CHECK:   auto b_type = DRAMType(BoolType(32), (1));
+// CHECK:   auto anon_2_type = DRAMType(FloatType(16), {-1});
+// CHECK:   auto output_type = DRAMType(IntType(32), (1));
+// CHECK:   D(main_)({a_type, anon_1_type, b_type, anon_2_type}, [&](auto args){{.*}}
+// CHECK: }
+
+// CHECK:  int foo(const choreo::spanned_view<choreo::f32, 1> & hp0, int hp1){{.*}}
 // CHECK:    {{.*}}topsCreateExecutable{{.*}}
 // CHECK:    {{.*}}topsStreamCreate{{.*}}
-// CHECK:    {{.*}}topsMalloc{{.*}}
-// CHECK:    {{.*}}topsMemcpy{{.*}}
 // CHECK:    {{.*}}topsMalloc{{.*}}
 // CHECK:    {{.*}}topsMemcpy{{.*}}
 // CHECK:    {{.*}}topsMalloc{{.*}}
@@ -28,9 +37,10 @@ __co__ int foo(f32 [32] d, int) { return 1;}
 // CHECK:    {{.*}}topsFree{{.*}}
 // CHECK:    {{.*}}topsFree{{.*}}
 // CHECK:    {{.*}}topsFree{{.*}}
-// CHECK:    {{.*}}topsFree{{.*}}
 // CHECK:    {{.*}}topsStreamDestroy{{.*}}
 // CHECK:    {{.*}}topsDestroyExecutable{{.*}}
+
+// CHECK:  int foobar(const choreo::spanned_view<choreo::f32, 1> & hp0, int hp1, bool hp2, const choreo::spanned_view<choreo::f16, 1> & hp3){{.*}}
 
 // host program
 int bar(int a) {

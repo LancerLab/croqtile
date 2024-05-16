@@ -27,8 +27,7 @@ struct FactorCodeGen : public CodeGenerator {
   std::vector<AST::ptr<AST::Parameter>> *cur_params = nullptr;
   AST::ptr<AST::DataType> current_output = nullptr;
 
-  std::string bin_fn;                // temporal filename of factor binary
-  AST::ptr<Type> cur_fty = nullptr;  // current function type
+  std::string bin_fn;  // temporal filename of factor binary
   int parallel_factor = 1;
 
   bool void_return = false;
@@ -52,22 +51,24 @@ struct FactorCodeGen : public CodeGenerator {
   // name of entry parameters
   size_t sp_count = 0;
 
+  // mapping from a symbolic shape dimension to its runtime name
+  std::map<std::string, std::string> rts_nmap;
+  // runtime host parameter names
+  std::vector<std::string> host_params;
   // parameters: the name (of factor data) and associated size expression
   std::vector<std::pair<std::string, std::string>> param_map;
-  std::map<std::string, std::string> sym_map;
-  std::vector<std::string> host_params;
 
   void EmitHostHead(std::ostream &);
   void EmitHostFuncDecl(std::ostream &, const Type &, const std::string &,
                         bool = false);
   void EmitRuntimeCheck(std::ostream &, const Type &);
   void EmitHostFuncBody(std::ostream &, const Type &, const std::string &fname,
-                        const std::string & o_sz, const std::string &o_ty,
-                        const Shape & s);
+                        const std::string &o_sz, const std::string &o_ty,
+                        const Shape &s);
 
-  std::string GenHostParamName() { return "sp" + std::to_string(sp_count++); }
+  std::string GenHostParamName() { return "hp" + std::to_string(sp_count++); }
   void ResetHostParamCount() { sp_count = 0; }
-  void ReplaceRuntimeNames(std::string &);
+  std::string ReplaceRuntimeNames(const std::string &, bool host_code = true);
 
  public:
   FactorCodeGen(std::ostream &os, const ptr<SymbolTable> &symtab)
@@ -79,7 +80,7 @@ struct FactorCodeGen : public CodeGenerator {
     hs.clear();
   }
 
-  void OutputScript(const std::string &, const std::string &,
+  void OutputScript(FunctionType *, const std::string &, const std::string &,
                     const std::string &, const Shape &);
 
   bool BeforeVisitImpl(AST::Node &) override;

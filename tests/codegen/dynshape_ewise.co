@@ -24,6 +24,20 @@ __co__ auto ele_add(s32 [6, ?, 128] lhs, s32 [6, ?, 128] rhs) {
   } // can use python styling
   return output;
 }
+// CHECK:	auto lhs_type = DRAMType(IntType(32), {6, -1, 128}));
+// CHECK:  auto rhs_type = DRAMType(IntType(32), {6, -1, 128}));
+// CHECK:  auto output_type = DRAMType(IntType(32), {6, -1, 128});
+// CHECK:    auto lhs_load_buffer = alloc_(L1Type(IntType(32),{6, 2, 32}));
+// CHECK:    auto rhs_load_buffer = alloc_(L1Type(IntType(32),{6, 2, 32}));
+// CHECK:    auto l1_out = alloc_(L1Type(IntType(32),{6, 2, 32}));
+// CHECK:      async_load_(lhs_load, args[0], lhs_load_buffer, {6*thread_id, 2*x, 32*y});
+// CHECK:      async_load_(rhs_load, args[1], rhs_load_buffer, {6*thread_id, 2*z, 32*b});
+// CHECK:      wait_dma_(lhs_load);
+// CHECK:      wait_dma_(rhs_load);
+// CHECK:      call_("kernel", {lhs_load_buffer.addr_(),rhs_load_buffer.addr_(),l1_out.addr_(),384});
+// CHECK:      async_store_(out_store, l1_out, results[0], {6*thread_id, 2*x, 32*y});
+// CHECK:      wait_dma_(out_store);
+
 // CHECK:  choreo::runtime_check(sp0.shape()[0] == 6, "shape inconstant on 1st parameter (dim: 0).");
 // CHECK:  choreo::runtime_check(sp0.shape()[2] == 128, "shape inconstant on 1st parameter (dim: 2).");
 // CHECK:  choreo::runtime_check(sp1.shape()[0] == 6, "shape inconstant on 2th parameter (dim: 0).");
