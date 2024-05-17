@@ -270,6 +270,8 @@ static constexpr size_t __INVALID_VALUE__ = std::numeric_limits<size_t>::max();
 static constexpr int __UNKNOWN_INTVAL__ = std::numeric_limits<int>::min();
 static constexpr int __INVALID_INTVAL__ = std::numeric_limits<int>::max();
 
+inline constexpr size_t InvalidRank() { return __INVALID_VALUE__; }
+
 using ValueExpr = std::string;
 using ValueItem = std::variant<int, ValueExpr>;
 using ValueList = std::vector<ValueItem>;
@@ -444,12 +446,11 @@ struct Shape {
   static ValueListRepo values;  // value numbers
 
   size_t val_no = __INVALID_VALUE__;
-  size_t dim_count =
-      __INVALID_VALUE__;  // dim_count is used when no value appears
+  size_t dim_count = InvalidRank();  // dim_count is used when no value appears
 
   void Invalidate() {
     val_no = __INVALID_VALUE__;
-    dim_count = __INVALID_VALUE__;
+    dim_count = InvalidRank();
   }
 
   explicit Shape() {}  // this initialize an invalid Shape
@@ -475,7 +476,7 @@ struct Shape {
   void Update() { dim_count = values[val_no].size(); }
   bool IsValid() const {
     if (val_no == __INVALID_VALUE__)
-      return dim_count != __INVALID_VALUE__;
+      return dim_count != InvalidRank();
     else
       return dim_count == values[val_no].size();
   }
@@ -589,10 +590,12 @@ struct Type {
   virtual TypeCategory Category() const { return tc; }
   virtual size_t Dims() const = 0;
   virtual bool IsComplete() const = 0;  // it is a partial or compelete type
-  virtual bool HasSufficientInfo() const {
-    return true;
-  }  // is the information enough for semantic check and code generation
+  // is the information enough for semantic check and code generation
+  virtual bool HasSufficientInfo() const { return true; }
   virtual bool operator==(const Type& t) const = 0;
+  // in-precise comparison without considering the shape detail
+  virtual bool ApprxEqual(const Type& t) const = 0;
+
   virtual void Print(std::ostream&) const = 0;
   virtual const std::string Name() const = 0;
 
@@ -628,13 +631,14 @@ inline std::string STR(const Shape& s) {
 
 struct VoidType final : public Type, public TypeIDProvider<VoidType> {
   explicit VoidType() : Type(TypeCategory::VOID) {}
-  size_t Dims() const override { return __INVALID_VALUE__; }
+  size_t Dims() const override { return InvalidRank(); }
   bool IsComplete() const override { return true; }
   void Print(std::ostream& os) const override { os << "void"; }
   const std::string Name() const override { return "void_type"; }
   bool HasSufficientInfo() const { return true; }
 
   bool operator==(const Type& ty) const override { return isa<VoidType>(&ty); }
+  bool ApprxEqual(const Type& ty) const override { return isa<VoidType>(&ty); }
 
   __UDT_TYPE_INFO__
 };
@@ -642,7 +646,7 @@ struct VoidType final : public Type, public TypeIDProvider<VoidType> {
 // The type is unknown. It requires type inference
 struct UnknownType final : public Type, public TypeIDProvider<UnknownType> {
   explicit UnknownType() : Type(TypeCategory::UNKNOWN) {}
-  size_t Dims() const override { return __INVALID_VALUE__; }
+  size_t Dims() const override { return InvalidRank(); }
   bool IsComplete() const override { return false; }
   void Print(std::ostream& os) const override { os << "unknown"; }
   const std::string Name() const override { return "unknown_type"; }
@@ -650,6 +654,7 @@ struct UnknownType final : public Type, public TypeIDProvider<UnknownType> {
 
   // Not comparable
   bool operator==(const Type&) const override { return false; }
+  bool ApprxEqual(const Type&) const override { return false; }
 
   __UDT_TYPE_INFO__
 };
@@ -670,6 +675,8 @@ struct IntegerType : public ScalarType, public TypeIDProvider<IntegerType> {
   bool operator==(const Type& ty) const override {
     return isa<IntegerType>(&ty);
   }
+  bool ApprxEqual(const Type& ty) const override { return operator==(ty); }
+
   __UDT_TYPE_INFO__
 };
 
@@ -683,6 +690,9 @@ struct BooleanType final : public ScalarType,
   bool operator==(const Type& ty) const override {
     return isa<BooleanType>(&ty);
   }
+  bool ApprxEqual(const Type& ty) const override {
+    return isa<BooleanType>(&ty);
+  }
   __UDT_TYPE_INFO__
 };
 
@@ -694,18 +704,20 @@ struct IndexType : public Type, public TypeIDProvider<IndexType> {
   const std::string Name() const override { return "index"; }
 
   bool operator==(const Type& ty) const override { return isa<IndexType>(&ty); }
+  bool ApprxEqual(const Type& ty) const override { return isa<IndexType>(&ty); }
+
   __UDT_TYPE_INFO__
 };
 
 // ITuple is a dimensioned type
 struct ITupleType : public Type, public TypeIDProvider<ITupleType> {
-  size_t dim_count = __INVALID_VALUE__;
+  size_t dim_count = InvalidRank();
 
   explicit ITupleType()
       : Type(TypeCategory::ITUPLE) {}  // this initialize an invalid ITupleType
                                        // The Type must be deduced for use
 
-  bool HasSufficientInfo() const { return dim_count != __INVALID_VALUE__; }
+  bool HasSufficientInfo() const { return dim_count != InvalidRank(); }
 
   ITupleType(size_t n) : Type(TypeCategory::ITUPLE), dim_count(n) {}
 
@@ -724,6 +736,13 @@ struct ITupleType : public Type, public TypeIDProvider<ITupleType> {
   const std::string Name() const override { return "ituple"; }
 
   bool operator==(const Type& ty) const override {
+    if (auto itty = dyn_cast<ITupleType>(&ty)) {
+      if ((Dims() == itty->Dims()) && HasSufficientInfo()) return true;
+    }
+    return false;
+  }
+
+  bool ApprxEqual(const Type& ty) const override {
     if (auto itty = dyn_cast<ITupleType>(&ty)) {
       if ((Dims() == itty->Dims()) && HasSufficientInfo()) return true;
     }
@@ -753,6 +772,11 @@ struct MDSpanType : public Type, public TypeIDProvider<MDSpanType> {
   bool operator==(const Type& ty) const override {
     if (!isa<MDSpanType>(&ty)) return false;
     return ((const MDSpanType&)ty).value == value;
+  }
+
+  bool ApprxEqual(const Type& ty) const override {
+    if (!isa<MDSpanType>(&ty)) return false;
+    return ty.Dims() == Dims();
   }
 
   void Print(std::ostream& os) const override {
@@ -799,6 +823,12 @@ struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
     if (!isa<SpannedType>(&ty)) return false;
     auto& t = (SpannedType&)ty;
     return t.f_type == f_type && *t.s_type == *s_type;
+  }
+
+  bool ApprxEqual(const Type& ty) const override {
+    if (!isa<SpannedType>(&ty)) return false;
+    auto& t = (SpannedType&)ty;
+    return t.f_type == f_type && t.s_type->ApprxEqual(*s_type);
   }
 
   Shape GetShape() const { return s_type->GetShape(); }
@@ -853,6 +883,8 @@ struct BoundedIntegerType final : public Type,
     return ((BoundedIntegerType&)ty).bound == bound;
   }
 
+  bool ApprxEqual(const Type& ty) const override { return operator==(ty); }
+
   void Print(std::ostream& os) const override {
     if (bound == ValueItem{__UNKNOWN_INTVAL__})
       os << "int->[unknown]";
@@ -884,6 +916,12 @@ struct BoundedITupleType final : public Type,
     if (!isa<BoundedITupleType>(&ty)) return false;
     auto& t = (BoundedITupleType&)ty;
     return t.bounds == bounds;
+  }
+
+  bool ApprxEqual(const Type& ty) const override {
+    if (!isa<BoundedITupleType>(&ty)) return false;
+    auto& t = (BoundedITupleType&)ty;
+    return t.Dims() == Dims();
   }
 
   void Print(std::ostream& os) const override {
@@ -919,8 +957,13 @@ struct FutureType : public ScalarType, public TypeIDProvider<FutureType> {
   bool IsAsync() const { return async; }
 
   bool operator==(const Type& ty) const override {
-    return isa<FutureType>(&ty);
+    if (auto fty = dyn_cast<FutureType>(&ty))
+      return fty->async == async;
+    else
+      return false;
   }
+
+  bool ApprxEqual(const Type& ty) const override { return operator==(ty); }
 
   void Print(std::ostream& os) const override {
     if (async)
@@ -951,6 +994,15 @@ struct FunctionType : public Type, public TypeIDProvider<FunctionType> {
       for (size_t i = 0; i < in_tys.size(); ++i)
         if (*t->in_tys[i] != *in_tys[i]) return false;
       return *out_ty == *t->out_ty;
+    }
+    return false;
+  }
+  bool ApprxEqual(const Type& type) const override {
+    if (auto t = dyn_cast<FunctionType>(&type)) {
+      if (t->in_tys.size() != in_tys.size()) return false;
+      for (size_t i = 0; i < in_tys.size(); ++i)
+        if (!t->in_tys[i]->ApprxEqual(*in_tys[i])) return false;
+      return out_ty->ApprxEqual(*t->out_ty);
     }
     return false;
   }
@@ -1056,7 +1108,7 @@ inline ptr<MDSpanType> MakeUninitMDSpanType() {
 }
 
 inline ptr<MDSpanType> MakeDimedMDSpanType(size_t n) {
-  if (n == __INVALID_VALUE__) return MakeUninitMDSpanType();
+  if (n == InvalidRank()) return MakeUninitMDSpanType();
   return std::make_shared<MDSpanType>(Shape(n));
 }
 
@@ -1080,8 +1132,9 @@ inline ptr<SpannedType> MakeUninitSpannedType() {
   return MakeSpannedType(BaseType::S32, GenUninitShape(), Storage::DEFAULT);
 }
 
-inline ptr<SpannedType> MakeDimedSpannedType(size_t n) {
-  return MakeSpannedType(BaseType::S32, Shape(n), Storage::DEFAULT);
+inline ptr<SpannedType> MakeDimedSpannedType(size_t n,
+                                             BaseType bt = BaseType::S32) {
+  return MakeSpannedType(bt, Shape(n), Storage::DEFAULT);
 }
 
 inline ptr<BoundedIntegerType> MakeBoundedIntegerType(int ub) {

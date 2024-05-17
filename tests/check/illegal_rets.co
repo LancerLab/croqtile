@@ -10,7 +10,7 @@ __co__ auto illegal_ret0(f32 [36, 27, 128] input, f32 [18, 9, 128]) {
     }
   }
 }
-// CHECK: Unable to return inside the parallel-by block(s)
+// CHECK: unable to return inside the parallel-by block(s)
 
 __co__ auto illegal_ret1(f32 [36, 27, 128] input) {
   parallel p by 6 {
@@ -22,7 +22,7 @@ __co__ auto illegal_ret1(f32 [36, 27, 128] input) {
     }
   }
 }
-// CHECK: Unable to return inside the parallel-by block(s)
+// CHECK: unable to return inside the parallel-by block(s)
 
 __co__ auto illegal_ret2(f32 [36, 27, 128] input) {
   parallel p by 6 {
@@ -35,5 +35,5 @@ __co__ auto illegal_ret2(f32 [36, 27, 128] input) {
     }
   }
 }
-// CHECK: Unable to return inside the parallel-by block(s)
+// CHECK: unable to return inside the parallel-by block(s)
 // CHECK: Totally 3 errors have been detected

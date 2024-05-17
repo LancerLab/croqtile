@@ -39,11 +39,11 @@ struct DeSugaring : public Visitor {
       if (b->list) return true;
       if (!handle_parameter) return true;
 
-      assert(b->Dims() != __INVALID_VALUE__);
+      assert(b->Rank() != __INVALID_VALUE__);
 
       // append the node that have multiple dynamic values
       auto mvals = AST::Make<AST::MultiValues>(n.LOC());
-      for (size_t i = 0; i < b->Dims(); ++i)
+      for (size_t i = 0; i < b->Rank(); ++i)
         mvals->Append(AST::Make<AST::IntLiteral>(n.LOC()));
       b->list = mvals;
       changed = true;

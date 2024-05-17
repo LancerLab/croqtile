@@ -1,6 +1,8 @@
 #ifndef __CHOREO_VISITOR_HPP__
 #define __CHOREO_VISITOR_HPP__
 
+#include <unistd.h>
+
 #include <cstring>
 #include <iostream>
 #include <optional>
@@ -64,20 +66,24 @@ struct Visitor {
     return nullptr;
   }
 
+  static bool shell_supports_colors() {
+    const char* term = getenv("TERM");
+    return term &&
+           (strcmp(term, "xterm-256color") == 0 || strcmp(term, "xterm") == 0);
+  }
+
+  static bool should_use_colors() {
+    return isatty(fileno(stdout)) && shell_supports_colors();
+  }
+
  public:
   void Error(const location& loc, const std::string& message) {
     static const char* red = "\033[31m";
     static const char* reset = "\033[0m";
 
-    auto shell_supports_colors = [&]() {
-      const char* term = getenv("TERM");
-      return term && (strcmp(term, "xterm-256color") == 0 ||
-                      strcmp(term, "xterm") == 0);
-    };
-
     std::cerr << loc << ": ";
 
-    if (shell_supports_colors())
+    if (should_use_colors())
       std::cerr << red << "error: " << reset;
     else
       std::cerr << "error: ";
@@ -89,15 +95,9 @@ struct Visitor {
     static const char* yellow = "\033[33m";
     static const char* reset = "\033[0m";
 
-    auto shell_supports_colors = [&]() {
-      const char* term = getenv("TERM");
-      return term && (strcmp(term, "xterm-256color") == 0 ||
-                      strcmp(term, "xterm") == 0);
-    };
-
     std::cerr << loc << ": ";
 
-    if (shell_supports_colors())
+    if (should_use_colors())
       std::cerr << yellow << "warning: " << reset;
     else
       std::cerr << "warning: ";

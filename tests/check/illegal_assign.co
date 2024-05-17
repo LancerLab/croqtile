@@ -1,0 +1,59 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ void illegal_reassign_int() {
+  int ia = 3;
+  ia = 4;    // not allow for current simple valno
+  with ia in [4] {}  // ok. 'ia' is a bounded integer
+}
+// CHECK: error: current compiler does not support re-assignment of 'integer'.
+// CHECK-NOT: error:{{.*}}ia{{.*}}
+
+__co__ void illegal_reassign_bool() {
+  bool ba = true;
+  ba = false;    // not allow for current simple valno
+  parallel ba by 6 {}   // ok. 'ba' is bounded integer
+  with ba in [4] {}     // ok. 'ba' is another bounded integer
+}
+// CHECK: error: current compiler does not support re-assignment of 'boolean'.
+// CHECK-NOT: error:{{.*}}ba{{.*}}
+
+__co__ void illegal_reassign_ituple() {
+  ita = {3, 4};
+  ita = {5, 6};  // error: reassign
+  itb = {4};
+  parallel p by 6 {
+    itb = {2, 32, 78};  // ok. "itb" is in another scope
+  }
+  with ita in [7, 8] {}  // ok. "ita" is in another scope
+}
+// CHECK: error: `ita' of type 'ituple' can not be re-assigned.
+// CHECK-NOT: error:{{.*}}itb{{.*}}
+// CHECK-NOT: error:{{.*}}ita{{.*}}
+
+__co__ void illegal_reassign_span() {
+  mdsa = [3, 4];
+  mdsa = [5, 6];           // error: redefine
+  parallel mdsa by 6 {     // ok. "mdsa" is a bounded integer
+    mdsa = {4, 56, 78};    // fail. conflict with parallel by
+  }
+  parallel p by 8 {
+    mdsg = [3, 4];
+    mdsg = 4;              // error: re-assgin different type
+  }
+  parallel q by 8 {
+    mdsf = [3, 4];
+    mdsf = {5, 6, 7, 8};   // error: re-assgin different type
+  }
+  with b in [7, 8] {
+    mdsb = {4, 56, 78};
+    with c in [3, 3] {
+       mdsb = {3, 3};    // ok. "mdsa" is in another scope
+    }
+  }
+}
+
+// CHECK: error: `mdsa' of type 'mdspan' can not be re-assigned.
+// CHECK: error: `mdsa' of type '{invalid}' can not be re-assigned as 'ituple<3>'.
+// CHECK: error: `mdsg' of type 'mdspan<2> []' is assigned as int.
+// CHECK: error: `mdsf' of type 'mdspan<2> []' can not be re-assigned as 'ituple<4>'.
+// CHECK: Totally 7 errors have been detected

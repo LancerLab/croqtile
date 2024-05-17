@@ -298,10 +298,9 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
 
 // Represents both dimensions and s like {3, 4, 5} or {1, 2, 1}
 struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
-  std::string ref_name;  // syntax suger, could be empty
-  ptr<Node> list;        // null if the span is dynamically valued
-  size_t dim_count =
-      __INVALID_VALUE__;  // dynamic value with known dimension count
+  std::string ref_name;             // syntax suger, could be empty
+  ptr<Node> list;                   // null if the span is dynamically valued
+  size_t rank = __INVALID_VALUE__;  // dynamic value with known dimension count
 
   // If the mdspan is known
   explicit MultiDimSpans(const location& l, const std::string& n,
@@ -309,37 +308,31 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
       : Node(l, MakeUninitMDSpanType()),
         ref_name(n),
         list(lst),
-        dim_count(__INVALID_VALUE__) {
+        rank(__INVALID_VALUE__) {
     assert(list && "Unexpected: span list is not provided");
   }
 
   // set both the mdspan and dim count
   explicit MultiDimSpans(const location& l, const std::string& n,
                          const ptr<Node>& lst, size_t dc)
-      : Node(l, MakeDimedMDSpanType(dc)),
-        ref_name(n),
-        list(lst),
-        dim_count(dc) {
+      : Node(l, MakeDimedMDSpanType(dc)), ref_name(n), list(lst), rank(dc) {
     assert(list && "Unexpected: span list is not provided");
-    // check the consistent between dim_count and span list in semantic time
+    // check the consistent between rank and span list in semantic time
   }
 
   // mdspan is unknown - for parameter passing
   explicit MultiDimSpans(const location& l, const std::string& n, size_t c)
-      : Node(l, MakeDimedMDSpanType(c)),
-        ref_name(n),
-        list(nullptr),
-        dim_count(c) {
-    assert(dim_count != __INVALID_VALUE__ && "Invalid dimensions.");
+      : Node(l, MakeDimedMDSpanType(c)), ref_name(n), list(nullptr), rank(c) {
+    assert(rank != __INVALID_VALUE__ && "Invalid dimensions.");
   }
 
   explicit MultiDimSpans(const location& l, const std::string& n,
                          const ptr<MDSpanType>& pty)
-      : Node(l, pty), ref_name(n), list(nullptr), dim_count(pty->Dims()) {}
+      : Node(l, pty), ref_name(n), list(nullptr), rank(pty->Dims()) {}
 
-  bool HasValidDims() const { return dim_count == __INVALID_VALUE__; }
-  size_t Dims() const { return dim_count; }
-  void SetDims(size_t n) { dim_count = n; }
+  bool HasValidDims() const { return rank == __INVALID_VALUE__; }
+  size_t Rank() const { return rank; }
+  void SetRank(size_t n) { rank = n; }
 
   void SetTypeDetail(const Shape& s) {
     assert(typeof<MDSpanType>(this) && "Incorrect type for mdspan.");
@@ -354,7 +347,7 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
   Shape MakeValueList() {
     if (!list) {
       // dynamically valued
-      return {Shape(dim_count)};
+      return {Shape(rank)};
     } else
       return {Shape(0) /*TODO: make Type from the list*/};
   }
@@ -369,7 +362,7 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     if (!list)
-      os << "<" << dim_count << ">";
+      os << "<" << rank << ">";
     else {
       os << "[";
       list->Print(os, " " + ref_name);
@@ -427,18 +420,16 @@ struct Memory : public Node, public TypeIDProvider<Memory> {
 // Represents declarations like: ituple t = {3, 4, 5};
 struct IntTuple : public Node, public TypeIDProvider<IntTuple> {
   std::string ref_name;  // could be anonymous
-  ptr<MultiValues> list;
+  ptr<MultiValues> vlist;
 
   explicit IntTuple(const location& l, const std::string& n,
                     ptr<MultiValues> lst)
-      : Node(l, MakeUninitITupleType()), ref_name(n), list(lst) {}
+      : Node(l, MakeUninitITupleType()), ref_name(n), vlist(lst) {}
 
+  const ptr<MultiValues>& GetValues() const { return vlist; }
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     if (ref_name.size() > 0) os << ref_name << " ";
-    os << "{";
-    list->Print(os);
-    os << "}";
-
+    os << "{" << STR(*vlist) << "}";
     (void)prefix;
   }
 
@@ -578,14 +569,14 @@ struct NamedVariableDecl : public Node,
   const std::string init_str;
   const ptr<Memory> mem = nullptr;  // storage location
   const ptr<DataType> type = nullptr;
-  const ptr<Node> initializer = nullptr;  // associated initializer
+  const ptr<Node> init_expr = nullptr;  // associated initializer
 
   explicit NamedVariableDecl(const location& l, const std::string& n,
                              const ptr<DataType>& t,
                              const ptr<Memory>& s = nullptr,
                              const ptr<Node>& v = nullptr,
                              const std::string& d = "=")
-      : Node(l), name_str(n), init_str(d), mem(s), type(t), initializer(v) {
+      : Node(l), name_str(n), init_str(d), mem(s), type(t), init_expr(v) {
     assert(name_str.size() > 0 && "Invalid name string.");
     assert(type && "Invalid type.");
   }
@@ -598,9 +589,9 @@ struct NamedVariableDecl : public Node,
       mem->Print(os);
     }
     os << "): " << name_str;
-    if (initializer) {
+    if (init_expr) {
       os << " " << init_str << " ";
-      initializer->Print(os);
+      init_expr->Print(os);
     }
   }
 

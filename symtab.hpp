@@ -162,8 +162,9 @@ class ScopedSymbolTable {
     }
   }
 
+  // declare in current scope
   bool DeclaredInScope(const std::string& sym_name) const {
-    return scoped_symtab.back().count(sym_name);
+    return scoped_symtab.back().count(sym_name) != 0;
   }
 
   bool IsDeclared(const std::string& sym_name) const {
@@ -260,6 +261,22 @@ class ScopedSymbolTable {
       return scoped_name + name;
     }
     return {};
+  }
+
+  // Dump current status
+  void Dump() const {
+    // Iterate in reverse order to simulate stack behavior
+    size_t count = 0;
+    std::string indent = "";
+    for (auto it = scoped_symtab.rbegin(); it != scoped_symtab.rend(); ++it) {
+      std::cout << indent << "<" << scope_names[count] << ">\n";
+      for (auto item : *it) {
+        std::cout << indent << " - sym: " << item.first
+                  << ", type: " << STR(*item.second) << "\n";
+      }
+      ++count;
+      indent = indent + " ";
+    }
   }
 };
 

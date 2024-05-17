@@ -397,7 +397,7 @@ std::string ValueNumbering::GenerateNodeSignature(AST::Node& node,
       signature += ",#" + std::to_string(GetValueNumberForNode(*b->values[i]));
     return signature;
   } else if (auto* it = dyn_cast<AST::IntTuple>(&node)) {
-    return GenerateNodeSignature(*(it->list));
+    return GenerateNodeSignature(*(it->GetValues()));
   } else if (auto* mds = dyn_cast<AST::MultiDimSpans>(&node)) {
     return GenerateNodeSignature(*(mds->list));
   } else if (auto* b = dyn_cast<AST::ParamList>(&node)) {

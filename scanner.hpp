@@ -52,6 +52,7 @@
 #define YY_DECL Choreo::Parser::symbol_type Choreo::Scanner::get_next_token()
 
 #include <cstring>
+#include <unistd.h>
 
 #include "parser.tab.hh"  // this is needed for symbol_type
 
@@ -76,9 +77,9 @@ class Scanner : public yyFlexLexer {
 
   void Error(const location& loc, const std::string& error_message) {
     std::cerr << loc << ": ";
-    if (shell_supports_colors()) std::cerr << red;
+    if (should_use_colors()) std::cerr << red;
     std::cerr << "error: ";
-    if (shell_supports_colors()) std::cerr << reset;
+    if (should_use_colors()) std::cerr << reset;
     std::cerr << error_message << std::endl;
     std::exit(EXIT_FAILURE);  // Terminate the program immediately
   }
@@ -94,6 +95,10 @@ class Scanner : public yyFlexLexer {
     const char* term = getenv("TERM");
     return term &&
            (strcmp(term, "xterm-256color") == 0 || strcmp(term, "xterm") == 0);
+  }
+
+  static bool should_use_colors() {
+    return isatty(fileno(stdout)) && shell_supports_colors();
   }
 
   // private:

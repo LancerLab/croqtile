@@ -13,7 +13,6 @@
 
 namespace Choreo {
 
-inline constexpr size_t InvalidCount() { return __INVALID_VALUE__; }
 inline constexpr int InvalidValueNumber() { return __INVALID_INTVAL__; }
 inline constexpr int UnknownValue() { return -1; }
 inline bool ValidVN(int vn) { return vn != InvalidValueNumber(); }
@@ -316,19 +315,21 @@ class ShapeInference : public Visitor {
       auto vl = GenShapeFromSignature(vn_sig);
       n.SetTypeDetail(vl);
 
-      if (n.Dims() != InvalidCount()) {
-        if (vl.Dims() != n.Dims())
+      if (n.Rank() != InvalidRank()) {
+        if (vl.Dims() != n.Rank())
           Error(n.LOC(),
                 "mdspan's dimension is inconsistent with its initialization "
-                "expression.");
+                "expression: " +
+                    std::to_string(vl.Dims()) + " vs. " +
+                    std::to_string(n.Rank()) + ".");
       } else
-        n.SetDims(vl.Dims());
+        n.SetRank(vl.Dims());
 
       // pass the value number over
       cur_mdspan_vn = cur_vn;
-    } else if (n.dim_count > 0) {
+    } else if (n.Rank() > 0) {
       std::string unknown_spans = "#" + std::to_string(UnknownValue());
-      for (size_t i = 1; i < n.dim_count; ++i)
+      for (size_t i = 1; i < n.Rank(); ++i)
         unknown_spans = unknown_spans + ",#" + std::to_string(UnknownValue());
       cur_mdspan_vn = vn.GetOrInsertValueNumberFromSignature(unknown_spans);
       n.SetTypeDetail(GenShapeFromSignature(unknown_spans));
@@ -368,7 +369,7 @@ class ShapeInference : public Visitor {
     Storage s = Storage::NONE;
     if (n.mem) s = n.mem->st;
 
-    if (n.initializer) {
+    if (n.init_expr) {
       if (ValidVN(cur_ituple_vn)) {
         // assert(!ValidVN(cur_vn) && "expected current value number.");
         // assert(!ValidVN(cur_mdspan_vn) && "expected current mdspan value
@@ -407,9 +408,9 @@ class ShapeInference : public Visitor {
 
   bool Visit(AST::IntTuple& n) {
     __TRACE_EACH_VISIT__;
-    auto i = n.list.get();
+    auto mvals = n.GetValues();
     cur_ituple_vn = cur_vn;
-    n.SetType(MakeITupleType(i->Count()));
+    n.SetType(MakeITupleType(mvals->Count()));
 
     auto vn_sig = vn.GetSignatureFromValueNumber(cur_vn);
 
@@ -507,7 +508,7 @@ class ShapeInference : public Visitor {
         n.type->SetType(
             MakeSpannedType(n.type->base_type, span->GetTypeDetail()));
 
-      } else if (span->dim_count != __INVALID_VALUE__) {
+      } else if (span->Rank() != __INVALID_VALUE__) {
         assert(ValidVN(cur_mdspan_vn) && "unexpected value number for mdspan.");
         // Put alias names of mdspan into the value number table
         vn.AssociateSignatureWithValueNumber(
@@ -572,7 +573,7 @@ class ShapeInference : public Visitor {
       assert(ValidVN(cur_mdspan_vn) &&
              "no valid value number generated for the mdspan.");
       if (n.with_matchers)
-        if (n.with_matchers->Count() != mds->Dims()) {
+        if (n.with_matchers->Count() != mds->Rank()) {
           Error(n.LOC(), "inconsistent with-in values and bounds.");
           return false;
         }

@@ -44,13 +44,13 @@ void NamedTypeDecl::accept(Choreo::Visitor& v) {
 void NamedVariableDecl::accept(Choreo::Visitor& v) {
   if (mem) mem->accept(v);
   if (type) type->accept(v);
-  if (initializer) initializer->accept(v);
+  if (init_expr) init_expr->accept(v);
 
   v.Visit(*this);
 }
 
 void IntTuple::accept(Choreo::Visitor& v) {
-  list->accept(v);
+  vlist->accept(v);
   v.Visit(*this);
 }
 

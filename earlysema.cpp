@@ -166,7 +166,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       return false;
     } else if (!(isa<IntegerType>(lty) && isa<IndexType>(rty)) &&
                !(isa<IntegerType>(rty) && isa<IndexType>(lty)) &&
-               (*lty != *rty)) {
+               (!lty->ApprxEqual(*rty))) {
       Error(n.LOC(), "in operation \"" + n.op +
                          "\": unable to apply to the types (" + PSTR(lty) +
                          " vs. " + PSTR(rty) + ").");
@@ -178,7 +178,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
              (n.op == "!=") || (n.op == "<=") || (n.op == ">=")) {
     auto lty = NodeType(*n.value_l);
     auto rty = NodeType(*n.value_r);
-    if (*lty != *rty) {
+    if (!(lty->ApprxEqual(*rty))) {
       Error(n.LOC(), "in operation \"" + n.op +
                          "\": unable to apply to the types (" + PSTR(lty) +
                          " vs. " + PSTR(rty) + ").");
@@ -211,7 +211,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     auto cty = NodeType(*n.value_c);
     auto lty = NodeType(*n.value_l);
     auto rty = NodeType(*n.value_r);
-    if (!isa<BooleanType>(cty) || (*lty != *rty)) {
+    if (!isa<BooleanType>(cty) || (!lty->ApprxEqual(*rty))) {
       Error(n.LOC(), "in operation \"" + n.op +
                          "\": unable to apply to the types (" + PSTR(cty) +
                          ") " + PSTR(lty) + " : " + PSTR(rty) + ").");
@@ -226,7 +226,32 @@ bool EarlySemantics::Visit(AST::Expr& n) {
 
 bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
   __TRACE_EACH_VISIT__(n)
-  n.SetType(MakeDimedMDSpanType(n.Dims()));
+  size_t rank = InvalidRank();
+
+  // try to figure out the dimensions
+  if (auto mvals = dyn_cast<AST::MultiValues>(n.list))
+    rank = mvals->Count();
+  else if (isa<AST::Expr>(n.list))
+    rank = n.list->GetType()->Dims();
+
+  if (n.Rank() == InvalidRank())
+    n.SetRank(rank);
+  else if (rank == InvalidRank())
+    rank = n.Rank();
+  else {
+    if (n.Rank() != rank) {
+      Warning(n.LOC(), "mdspan is initialized with a rank of " +
+                           std::to_string(rank) + " but declared as rank of " +
+                           std::to_string(n.Rank()) + ".");
+      Warning(n.LOC(),
+              "assume the mdspan as a rank of " + std::to_string(rank) + ".");
+      if (trace_visit)
+        os << "Warning in " << __FILE__ << ", line: " << __LINE__ << ".\n";
+      n.SetRank(rank);
+    }
+  }
+
+  n.SetType(MakeDimedMDSpanType(rank));
   return true;
 }
 
@@ -239,6 +264,12 @@ bool EarlySemantics::Visit(AST::NamedTypeDecl& n) {
 
 bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
   __TRACE_EACH_VISIT__(n)
+  if (isa<UnknownType>(n.type->GetType())) {
+    // sometimes the parser can not decide the type. We need to figure out from
+    // the initialization expression
+    n.type->SetType(n.init_expr->GetType());
+  }
+  // if (auto ity = dyn_cast<ITupleType>(n.init))
   ReportErrorWhenViolateODR(n.LOC(), n.name_str, __FILE__, __LINE__,
                             n.type->GetType());
   if (auto ty = dyn_cast<SpannedType>(n.type->GetType())) {
@@ -250,11 +281,73 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
 
 bool EarlySemantics::Visit(AST::IntTuple& n) {
   __TRACE_EACH_VISIT__(n)
+  n.SetType(MakeITupleType(n.GetValues()->Count()));
   return true;
 }
 
 bool EarlySemantics::Visit(AST::Assignment& n) {
   __TRACE_EACH_VISIT__(n)
+  // SSTab().Dump();
+  if (!SSTab().DeclaredInScope(n.name)) {
+    // It is a definition instead of assignment. parsing fails to distiguish
+    // them
+    auto sty = NodeType(*n.value);
+    assert((sty && !isa<UnknownType>(sty)) &&
+           "internal error: failed to find the type.");
+    if (isa<MDSpanType>(sty)) {
+      Error(n.LOC(),
+            "use ':' to define the \"" + STR(*sty) + "\" type variable.");
+      ++error_count;
+      if (trace_visit)
+        os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
+      return false;
+    }
+    ReportErrorWhenViolateODR(n.LOC(), n.name, __FILE__, __LINE__, sty);
+    if (auto ty = dyn_cast<SpannedType>(sty)) {
+      ReportErrorWhenViolateODR(n.LOC(), n.name + ".span", __FILE__, __LINE__,
+                                MakeDimedMDSpanType(ty->Dims()));
+      if (trace_visit)
+        os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
+    }
+    return true;
+  }
+
+  auto vty = SSTab().LookupSymbol(n.name);  // variable type
+  auto ety = NodeType(*n.value);            // assignment expression type
+  // ituples/mdspan/spanned can not be assigned after initialization
+  if (isa<ITupleType>(ety) || isa<MDSpanType>(ety) || isa<SpannedType>(ety)) {
+    if (vty->ApprxEqual(*ety))
+      Error(n.LOC(), "`" + n.name + "' of type '" + vty->Name() +
+                         "' can not be re-assigned.");
+    else
+      Error(n.LOC(), "`" + n.name + "' of type '" + STR(*vty) +
+                         "' can not be re-assigned as '" + STR(*ety) + "'.");
+    ++error_count;
+    if (trace_visit)
+      os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
+    return false;
+  }
+
+  // check for type consistent
+  if (!vty->ApprxEqual(*ety)) {
+    Error(n.LOC(), "`" + n.name + "' of type '" + STR(*vty) +
+                       "' is assigned as " + STR(*ety) + ".");
+    ++error_count;
+    if (trace_visit)
+      os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
+    return false;
+  }
+
+  // For now, we have to keep the single assignment
+  {
+    Error(n.LOC(), "current compiler does not support re-assignment of '" +
+                       ety->Name() + "'.");
+    ++error_count;
+    if (trace_visit)
+      os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
+    return false;
+  }
+
   return true;
 }
 
@@ -266,7 +359,13 @@ bool EarlySemantics::Visit(AST::IntIndex& n) {
 
 bool EarlySemantics::Visit(AST::DataType& n) {
   __TRACE_EACH_VISIT__(n)
-  // sema type has been generated at construction ast
+  // sema type has been generated at construction ast. refine with dims
+  if (isa<SpannedType>(n.GetType())) {
+    if (auto sty = dyn_cast<MDSpanType>(n.mdspan_type->GetType())) {
+      n.SetType(MakeDimedSpannedType(sty->Dims(), n.base_type));
+    }
+    return true;
+  }
   return true;
 }
 
@@ -412,7 +511,7 @@ bool EarlySemantics::Visit(AST::Call& n) {
 
   if (parallel_level == 0) {
     Error(n.LOC(),
-          "Unable to call kernel function outside the parallel-by block(s).");
+          "unable to call kernel function outside the parallel-by block(s).");
     error_count++;
     return false;
   }
@@ -437,7 +536,7 @@ bool EarlySemantics::Visit(AST::Return& n) {
   __TRACE_EACH_VISIT__(n)
   found_return = true;
   if (parallel_level != 0) {
-    Error(n.LOC(), "Unable to return inside the parallel-by block(s).");
+    Error(n.LOC(), "unable to return inside the parallel-by block(s).");
     error_count++;
     return false;
   }

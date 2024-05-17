@@ -29,6 +29,7 @@ namespace Choreo { class Scanner; }
 #include "ast.hpp"
 #include "symtab.hpp"
 #include "scanner.hpp"
+#include <unistd.h>
 
 using namespace Choreo;
 
@@ -46,6 +47,11 @@ static inline bool shell_supports_colors() {
 	return term && (strcmp(term, "xterm-256color") == 0
 							 || strcmp(term, "xterm") == 0);
 }
+
+static inline bool should_use_colors() {
+  return isatty(fileno(stdout)) && shell_supports_colors();
+}
+
 
 static Parser::symbol_type yylex(Scanner &scanner) {
   return scanner.get_next_token();
@@ -70,10 +76,10 @@ extern int yylex();
 void choreo_info(const char *message) {
     // fprintf(stderr, "Error: %s\n", s);
   const char* GREEN = "\033[32m";
-  if (shell_supports_colors())
+  if (should_use_colors())
       std::cerr << GREEN;
   std::cerr << "Info: ";
-  if (shell_supports_colors())
+  if (should_use_colors())
       std::cerr << reset;
   std::cerr << message << std::endl;
   std::cerr << "Info location: " << ::loc << std::endl;
@@ -569,14 +575,17 @@ assignment
           $$ = AST::Make<AST::NamedVariableDecl>(@1,
                 $1, AST::Make<AST::DataType>(@1, BaseType::UNKNOWN), nullptr, $3);
           break;
+        } else {
+          $$ = AST::Make<AST::Assignment>(@2, $1, $3);
         }
-        $$ = AST::Make<AST::Assignment>(@2, $1, $3);
       }
     | IDENTIFIER PLUS ASSIGN s_expr {
-        if (!symtab.Exists($1))
+        if (!symtab.Exists($1)) {
           Parser::error(@1, "The symbol '" + $1 + "` has not been defined.");
-        $$ = AST::Make<AST::Assignment>(@1,
+        } else {
+          $$ = AST::Make<AST::Assignment>(@1,
               $1, AST::Make<AST::Expr>(@1, "+", $4, AST::Make<AST::Identifier>(@1, $1)));
+        }
       }
     ;
 
