@@ -56,4 +56,5 @@ __co__ void illegal_reassign_span() {
 // CHECK: error: `mdsa' of type '{invalid}' can not be re-assigned as 'ituple<3>'.
 // CHECK: error: `mdsg' of type 'mdspan<2> []' is assigned as int.
 // CHECK: error: `mdsf' of type 'mdspan<2> []' can not be re-assigned as 'ituple<4>'.
+// CHECK-NOT: error:{{.*}}mdsb{{.*}}
 // CHECK: Totally 7 errors have been detected

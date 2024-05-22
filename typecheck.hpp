@@ -23,7 +23,7 @@ struct TypeChecker : public VisitorWithSymTab {
   TypeChecker(const ptr<SymbolTable> s_tab, std::ostream &o = std::cout)
       : VisitorWithSymTab(s_tab),
         os(o),
-        trace_visit(std::getenv("TRACE_SEMA")) {}
+        trace_visit(std::getenv("TRACE_CHECK")) {}
   ~TypeChecker() {}
 
   bool Visit(AST::MultiNodes &) override;

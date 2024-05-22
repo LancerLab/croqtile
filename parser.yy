@@ -691,8 +691,10 @@ within
       }
     | IDENTIFIER ASSIGN LBRACE with_matchers RBRACE IN span_expr {
         symtab.AddSymbol($1, MakeUnknownType()/*Need inference*/);
-        $$ = AST::Make<AST::WithIn>(@1, AST::Make<AST::Identifier>(@1,$1), $7);
-        $$->with_matchers = $4;
+        $$ = AST::Make<AST::WithIn>(@1, AST::Make<AST::Identifier>(@1,$1), $7, $4);
+      }
+    | LBRACE with_matchers RBRACE IN span_expr {
+        $$ = AST::Make<AST::WithIn>(@1, $5, $2); // no identifier
       }
     ;
 

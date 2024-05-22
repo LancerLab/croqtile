@@ -347,6 +347,37 @@ inline std::string ValueItemAsString(const ValueItem& vi) {
   return *cast<ValueExpr>(&vi);
 }
 
+// some operations
+inline ValueItem operator+(const ValueItem& vi1, const ValueItem& vi2) {
+  if (!isa<int>(&vi1) || !isa<int>(&vi2))
+    return ValueItemAsString(vi1) + "+" + ValueItemAsString(vi2);
+  return *cast<int>(&vi1) + *cast<int>(&vi2);
+}
+
+inline ValueItem operator-(const ValueItem& vi1, const ValueItem& vi2) {
+  if (!isa<int>(&vi1) || !isa<int>(&vi2))
+    return ValueItemAsString(vi1) + "-" + ValueItemAsString(vi2);
+  return *cast<int>(&vi1) - *cast<int>(&vi2);
+}
+
+inline ValueItem operator*(const ValueItem& vi1, const ValueItem& vi2) {
+  if (!isa<int>(&vi1) || !isa<int>(&vi2))
+    return ValueItemAsString(vi1) + "*" + ValueItemAsString(vi2);
+  return *cast<int>(&vi1) * *cast<int>(&vi2);
+}
+
+inline ValueItem operator/(const ValueItem& vi1, const ValueItem& vi2) {
+  if (!isa<int>(&vi1) || !isa<int>(&vi2))
+    return ValueItemAsString(vi1) + "/" + ValueItemAsString(vi2);
+  return *cast<int>(&vi1) / *cast<int>(&vi2);
+}
+
+inline ValueItem operator%(const ValueItem& vi1, const ValueItem& vi2) {
+  if (!isa<int>(&vi1) || !isa<int>(&vi2))
+    return ValueItemAsString(vi1) + "%" + ValueItemAsString(vi2);
+  return *cast<int>(&vi1) % *cast<int>(&vi2);
+}
+
 struct ValueListHasher {
   std::size_t operator()(const ValueList& val) const noexcept {
     std::size_t hash = 0;
@@ -868,6 +899,7 @@ struct BoundedIntegerType final : public Type,
   ValueItem bound = __UNKNOWN_INTVAL__;
   std::string note = "";
 
+  BoundedIntegerType() : Type(TypeCategory::BOUNDED_INT) {}
   BoundedIntegerType(int b) : Type(TypeCategory::BOUNDED_INT), bound(b) {}
   BoundedIntegerType(const std::string& expr, const std::string& n = "")
       : Type(TypeCategory::BOUNDED_INT), bound(expr), note(n) {}
@@ -883,7 +915,10 @@ struct BoundedIntegerType final : public Type,
     return ((BoundedIntegerType&)ty).bound == bound;
   }
 
-  bool ApprxEqual(const Type& ty) const override { return operator==(ty); }
+  bool ApprxEqual(const Type& ty) const override {
+    // do not care about the bound expression
+    return isa<BoundedIntegerType>(&ty);
+  }
 
   void Print(std::ostream& os) const override {
     if (bound == ValueItem{__UNKNOWN_INTVAL__})
@@ -1139,6 +1174,14 @@ inline ptr<SpannedType> MakeDimedSpannedType(size_t n,
 
 inline ptr<BoundedIntegerType> MakeBoundedIntegerType(int ub) {
   return std::make_shared<BoundedIntegerType>(ub);
+}
+
+inline ptr<BoundedIntegerType> MakeBoundedIntegerType(const std::string& ub) {
+  return std::make_shared<BoundedIntegerType>(ub);
+}
+
+inline ptr<BoundedIntegerType> MakeUnknownBoundedIntegerType() {
+  return std::make_shared<BoundedIntegerType>();
 }
 
 inline ptr<BoundedITupleType> MakeBoundedITupleType(const Shape& v,

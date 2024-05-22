@@ -71,7 +71,10 @@ int main(int argc, char* argv[]) {
 
   if (del_comm) Scanner::SetRemoveComments();
 
-  p.parse();
+  if (p.parse() != 0) {
+    std::cerr << "Parsing failed due to syntax errors." << std::endl;
+    return 1;
+  }
 
   if (dump_ast) {
     root.Print(std::cout);

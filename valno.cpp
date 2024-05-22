@@ -313,11 +313,18 @@ std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
              }},
             {"dimof",  // calculate the dim of a given mdspan index
              [this, &n]() -> std::optional<std::string> {
-               auto base = GetSignatureForNode(*n->value_l);
+               std::string base_sig;
+               if (IsBoundedType(n->value_l->GetType())) {
+                 auto id = n->value_l->GetSymbol();
+                 assert(id != nullptr && "not an identifier.");
+                 base_sig = SignatureOfSymbol(
+                     *visitor->SSTab().NameInScope("@" + id->name));
+               } else
+                 base_sig = GetSignatureForNode(*n->value_l);
                auto cv = RemovePrefixOrNull("index_const_",
                                             GetSignatureForNode(*n->value_r));
                assert(cv && "indexing of mdspan can not be evaluated.");
-               return base + "(" + *cv + ")";
+               return base_sig + "(" + *cv + ")";
              }},
             {"ref",  // it is a reference to another node
              [this, &n]() -> std::optional<std::string> {

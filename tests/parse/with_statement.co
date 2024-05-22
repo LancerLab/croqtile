@@ -1,6 +1,6 @@
 // RUN: choreo -e %s | FileCheck %s --match-full-lines
 
-__co__ int with_statement_empty_body() {
+__co__ auto with_statement_empty_body() {
   span1 : [7, 8];
   span2 : [13];
   span3 : [13];
@@ -22,7 +22,7 @@ __co__ int with_statement_empty_body() {
 // CHECK-NOT: (where clause)
 // CHECK: (with empty statements)
 
-__co__ int with_statement_unnamed_mdspans(f32 mdspan<2> data) {
+__co__ auto with_statement_unnamed_mdspans(f32 mdspan<2> data) {
   parallel p by 6 {
     with index1 in [2, 3],
          index2 in data.span {
@@ -36,7 +36,7 @@ __co__ int with_statement_unnamed_mdspans(f32 mdspan<2> data) {
 // CHECK-NOT: (where clause)
 // CHECK: (with empty statements)
 
-__co__ int with_statement_multi_within() {
+__co__ auto with_statement_multi_within() {
   span_v1_1 : [7, 8];
   span_v1_2 : [13];
   span_v1_3 : [13];
@@ -50,8 +50,8 @@ __co__ int with_statement_multi_within() {
       // TODO: do we need to segment assign and
       // assign-fused operation like assign-add
       coord_v1_x = coord_v1_x + index_v1_1(0);
-      coord_v1_x = coord_v1_x + index_v1_1(1);
-      coord_v1_y = coord_v1_x(1) + index_v1_2(0);
+      coord_v1_w = coord_v1_x + index_v1_1(1);
+      coord_v1_y = coord_v1_x + index_v1_2(0);
       coord_v1_z = coord_v1_y + index_v1_3(0);
     }
   }
@@ -64,14 +64,14 @@ __co__ int with_statement_multi_within() {
 // CHECK: (with statements)
 
 
-__co__ int with_statement_pattern_match_like_within() {
+__co__ auto with_statement_pattern_match_like_within() {
   span_v4 : [7, 8];
   int coord_v4_x = 0;
   parallel p by 6 {
     with index1 = {x, y} in span_v4 {
       // TODO: use with-body = "{ statements }"
       coord_v4_x = coord_v4_x + x;
-      coord_v4_x = coord_v4_x + y;
+      coord_v4_y = coord_v4_x + y;
     }
   }
 }
@@ -83,7 +83,7 @@ __co__ int with_statement_pattern_match_like_within() {
 // CHECK-NOT: (where clause)
 // CHECK: (with statements)
 
-__co__ int with_statement_where_clause() {
+__co__ void with_statement_where_clause() {
   span_v2_1 : [7, 8];
   span_v2_2 : [13];
   span_v2_3 : [13];
@@ -96,8 +96,8 @@ __co__ int with_statement_where_clause() {
          index_v2_3 in span_v2_3
     where index_v2_2 <-> index_v2_3 {
       coord_v2_x = coord_v2_x + index_v2_1(0);
-      coord_v2_x = coord_v2_x + index_v2_1(1);
-      coord_v2_y = coord_v2_x(1) + index_v2_2(0);
+      coord_v2_w = coord_v2_x + index_v2_1(1);
+      coord_v2_y = coord_v2_x + index_v2_2(0);
       coord_v2_z = coord_v2_y + index_v2_3(0);
     }
   }
@@ -110,7 +110,7 @@ __co__ int with_statement_where_clause() {
 // CHECK: (with statements)
 
 
-__co__ int with_statement_where_clauses() {
+__co__ void with_statement_where_clauses() {
   span_v3_1 : [7, 8];
   span_v3_2 : [13];
   span_v3_3 : [13];
@@ -122,9 +122,9 @@ __co__ int with_statement_where_clauses() {
          index_v3_2 in span_v3_2,
          index_v3_3 in span_v3_3
     where index_v3_2 <-> index_v3_3 {
-      coord_v3_x = coord_v3_x + index_v3_1(0);
-      coord_v3_x = coord_v3_x + index_v3_1(1);
-      coord_v3_y = coord_v3_x(1) + index_v3_2(0);
+      coord_v3_a = coord_v3_x + index_v3_1(0);
+      coord_v3_b = coord_v3_x + index_v3_1(1);
+      coord_v3_y = coord_v3_x + index_v3_2(0);
       coord_v3_z = coord_v3_y + index_v3_3(0);
     }
   }
@@ -135,3 +135,15 @@ __co__ int with_statement_where_clauses() {
 // CHECK: (within constraints)
 // CHECK: (where clause)
 // CHECK: (with statements)
+
+__co__ void with_statement_matcher_only() {
+  span_v4 : [7, 8];
+  int coord_v4_x = 0;
+  parallel p by 6 {
+    with {x, y} in span_v4 {
+      coord_v4_x = coord_v4_x + x;
+      coord_v4_y = coord_v4_x + y;
+    }
+  }
+}
+

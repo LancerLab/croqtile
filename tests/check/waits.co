@@ -10,7 +10,7 @@ __co__ void fail1(f32 [36, 27, 128] input, f32 [18, 9, 128]) {
     }
   }
 }
-// CHECK:  non-async future 'f` can not be waited.
+// CHECK: error: non-async future 'f` can not be waited.
 
 __co__ void fail2(f32 [36, 27, 128] input, f32 [18, 9, 128] input1) {
   tf : [3, 8];
@@ -27,4 +27,4 @@ __co__ void fail2(f32 [36, 27, 128] input, f32 [18, 9, 128] input1) {
     }
   }
 }
-// CHECK:  non-async future 'f2` can not be waited.
+// CHECK: error: non-async future 'f2` can not be waited.

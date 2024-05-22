@@ -42,7 +42,7 @@ struct EarlySemantics : public Visitor {
       } else if (expr->op == "dataof") {
         if (auto ref = cast<AST::Expr>(expr->value_r)->GetReference()) {
           auto id = cast<AST::Identifier>(ref);
-          if (!SSTab().LookupSymbol(id->name)) // make sure the symbol exists
+          if (!SSTab().LookupSymbol(id->name))  // make sure the symbol exists
             return nullptr;
           return SSTab().LookupSymbol(id->name + ".data");
         }
@@ -51,9 +51,15 @@ struct EarlySemantics : public Visitor {
     return n.GetType();
   }
 
+  void SetNodeType(AST::Node &n, const ptr<Type> &ty) {
+    n.SetType(ty);
+    if (trace_visit)
+      os << "Set type of " << STR(n) << " as " << STR(*n.GetType()) << "\n";
+  }
+
  public:
   EarlySemantics(std::ostream &o = std::cout)
-      : os(o), trace_visit(std::getenv("TRACE_VALI")) {}
+      : os(o), trace_visit(std::getenv("TRACE_SEMA")) {}
   ~EarlySemantics() {}
 
   bool Visit(AST::MultiNodes &) override;

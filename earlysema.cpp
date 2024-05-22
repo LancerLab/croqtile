@@ -78,15 +78,16 @@ bool EarlySemantics::Visit(AST::MultiValues& n) {
 
 bool EarlySemantics::Visit(AST::IntLiteral& n) {
   __TRACE_EACH_VISIT__(n)
-  n.SetType(MakeIntegerType());
+  SetNodeType(n, MakeIntegerType());
   return true;
 }
 
 bool EarlySemantics::Visit(AST::Expr& n) {
   __TRACE_EACH_VISIT__(n)
   if (auto ref = n.GetReference()) {
-    assert(!isa<UnknownType>(ref) && "reference type is unknown.");
-    n.SetType(ref->GetType());
+    auto rty = NodeType(*ref);
+    assert(!isa<UnknownType>(rty) && "reference type is unknown.");
+    SetNodeType(n, rty);
   } else if (n.op == "dataof") {
     auto ty = NodeType(*n.value_r);
     if (!isa<FutureType>(ty)) {
@@ -96,7 +97,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       error_count++;
       return false;
     }
-    n.SetType(MakeUninitSpannedType());
+    SetNodeType(n, MakeUninitSpannedType());
   } else if (n.op == "sizeof") {
     auto ty = NodeType(*n.value_r);
     if (!isa<MDSpanType>(ty)) {
@@ -106,14 +107,14 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       error_count++;
       return false;
     }
-    n.SetType(MakeIntegerType());
+    SetNodeType(n, MakeIntegerType());
   } else if (n.op == "dimof") {
     auto lty = NodeType(*n.value_l);
     auto rty = NodeType(*n.value_r);
-    if (!isa<MDSpanType>(lty)) {
+    if (!isa<MDSpanType>(lty) && !isa<ITupleType>(lty) && !IsBoundedType(lty)) {
       Error(n.LOC(), "in operation \"" + n.op +
-                         "\": expecting a mdspan type but got `" + PSTR(lty) +
-                         "'.");
+                         "\": expecting a indexable type but got `" +
+                         PSTR(lty) + "'.");
       error_count++;
       return false;
     }
@@ -124,7 +125,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       error_count++;
       return false;
     }
-    n.SetType(MakeIntegerType());
+    SetNodeType(n, MakeIntegerType());
   } else if (n.op == "ubound") {
     auto ty = NodeType(*n.value_r);
     if (!IsBoundedType(ty)) {
@@ -134,13 +135,13 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       error_count++;
       return false;
     }
-    n.SetType(MakeIntegerType());
+    SetNodeType(n, MakeIntegerType());
   } else if ((n.op == "+") || (n.op == "-") || (n.op == "*") || (n.op == "/") ||
              (n.op == "%")) {
     auto lty = NodeType(*n.value_l);
     auto rty = NodeType(*n.value_r);
     if ((isa<MDSpanType>(lty) && isa<ITupleType>(rty)) ||
-        (isa<MDSpanType>(rty) && isa<ITupleType>(rty))) {
+        (isa<MDSpanType>(rty) && isa<ITupleType>(lty))) {
       if (lty->Dims() != rty->Dims()) {
         Error(n.LOC(), "in operation \"" + n.op +
                            "\": dimension inconsistent (" +
@@ -149,7 +150,22 @@ bool EarlySemantics::Visit(AST::Expr& n) {
         error_count++;
         return false;
       }
-      n.SetType(MakeDimedMDSpanType(lty->Dims()));
+      SetNodeType(n, MakeDimedMDSpanType(lty->Dims()));
+    } else if ((isa<BoundedIntegerType>(lty) && isa<IntegerType>(rty)) ||
+               (isa<BoundedIntegerType>(rty) && isa<IntegerType>(lty))) {
+      // this is promissing, simply allow it
+      SetNodeType(n, MakeUnknownBoundedIntegerType());
+    } else if ((isa<BoundedITupleType>(lty) && isa<ITupleType>(rty)) ||
+               (isa<BoundedITupleType>(rty) && isa<ITupleType>(lty))) {
+      if (lty->Dims() != rty->Dims()) {
+        Error(n.LOC(), "in operation \"" + n.op +
+                           "\": dimension inconsistent (" +
+                           std::to_string(lty->Dims()) + " vs. " +
+                           std::to_string(rty->Dims()) + ").");
+        error_count++;
+        return false;
+      }
+      SetNodeType(n, MakeITupleType(lty->Dims()));
     } else if ((isa<MDSpanType>(lty) && isa<MDSpanType>(rty)) ||
                (isa<ITupleType>(lty) && isa<ITupleType>(rty)) ||
                (isa<BooleanType>(lty) && isa<BooleanType>(rty))) {
@@ -164,16 +180,20 @@ bool EarlySemantics::Visit(AST::Expr& n) {
                          " vs. " + PSTR(rty) + ").");
       error_count++;
       return false;
-    } else if (!(isa<IntegerType>(lty) && isa<IndexType>(rty)) &&
-               !(isa<IntegerType>(rty) && isa<IndexType>(lty)) &&
-               (!lty->ApprxEqual(*rty))) {
+    } else if ((isa<IntegerType>(lty) && isa<IndexType>(rty)) ||
+               (isa<IntegerType>(rty) && isa<IndexType>(lty))) {
+      // when desugaring of ituple/mdspan has not been applied, we have to deal
+      // with nodes like:
+      //   a {1 + (1)}
+      SetNodeType(n, lty);
+    } else if (!lty->ApprxEqual(*rty)) {
       Error(n.LOC(), "in operation \"" + n.op +
                          "\": unable to apply to the types (" + PSTR(lty) +
                          " vs. " + PSTR(rty) + ").");
       error_count++;
       return false;
-    }
-    n.SetType(lty);
+    } else
+      SetNodeType(n, lty);
   } else if ((n.op == "<") || (n.op == ">") || (n.op == "==") ||
              (n.op == "!=") || (n.op == "<=") || (n.op == ">=")) {
     auto lty = NodeType(*n.value_l);
@@ -185,7 +205,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       error_count++;
       return false;
     }
-    n.SetType(MakeBooleanType());
+    SetNodeType(n, MakeBooleanType());
   } else if ((n.op == "&&") || (n.op == "||")) {
     auto lty = NodeType(*n.value_l);
     auto rty = NodeType(*n.value_r);
@@ -196,7 +216,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       error_count++;
       return false;
     }
-    n.SetType(MakeBooleanType());
+    SetNodeType(n, MakeBooleanType());
   } else if (n.op == "!") {
     auto rty = NodeType(*n.value_r);
     if (!isa<BooleanType>(rty)) {  // TODO: will we allow integer?
@@ -206,7 +226,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       error_count++;
       return false;
     }
-    n.SetType(MakeBooleanType());
+    SetNodeType(n, MakeBooleanType());
   } else if (n.op == "?") {
     auto cty = NodeType(*n.value_c);
     auto lty = NodeType(*n.value_l);
@@ -218,7 +238,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       error_count++;
       return false;
     }
-    n.SetType(lty);
+    SetNodeType(n, lty);
   } else
     choreo_unreachable("operation in expression is not supported yet.");
   return true;
@@ -251,7 +271,7 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
     }
   }
 
-  n.SetType(MakeDimedMDSpanType(rank));
+  SetNodeType(n, MakeDimedMDSpanType(rank));
   return true;
 }
 
@@ -269,7 +289,6 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
     // the initialization expression
     n.type->SetType(n.init_expr->GetType());
   }
-  // if (auto ity = dyn_cast<ITupleType>(n.init))
   ReportErrorWhenViolateODR(n.LOC(), n.name_str, __FILE__, __LINE__,
                             n.type->GetType());
   if (auto ty = dyn_cast<SpannedType>(n.type->GetType())) {
@@ -281,7 +300,7 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
 
 bool EarlySemantics::Visit(AST::IntTuple& n) {
   __TRACE_EACH_VISIT__(n)
-  n.SetType(MakeITupleType(n.GetValues()->Count()));
+  SetNodeType(n, MakeITupleType(n.GetValues()->Count()));
   return true;
 }
 
@@ -353,7 +372,7 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
 
 bool EarlySemantics::Visit(AST::IntIndex& n) {
   __TRACE_EACH_VISIT__(n)
-  n.SetType(MakeIndexType());
+  SetNodeType(n, MakeIndexType());
   return true;
 }
 
@@ -362,7 +381,7 @@ bool EarlySemantics::Visit(AST::DataType& n) {
   // sema type has been generated at construction ast. refine with dims
   if (isa<SpannedType>(n.GetType())) {
     if (auto sty = dyn_cast<MDSpanType>(n.mdspan_type->GetType())) {
-      n.SetType(MakeDimedSpannedType(sty->Dims(), n.base_type));
+      SetNodeType(n, MakeDimedSpannedType(sty->Dims(), n.base_type));
     }
     return true;
   }
@@ -411,7 +430,14 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
   in_decl = true;
   if (n.with) {
     n.with->accept(*this);
-    SSTab().ModifySymbolType(n.with->name, MakeUninitBoundedITupleType());
+    if (n.with_matchers) {
+      // simple infer the rank from matchers
+      SSTab().ModifySymbolType(
+          n.with->name, MakeBoundedITupleType(Shape(n.with_matchers->Count())));
+    } else {
+      // can not figure out the dimensions at this time
+      SSTab().ModifySymbolType(n.with->name, MakeUninitBoundedITupleType());
+    }
   }
   if (n.with_matchers) {
     n.with_matchers->accept(*this);
@@ -420,8 +446,8 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
         Error(v->LOC(), "expecting an identifier.");
         continue;
       }
-      SSTab().ModifySymbolType(cast<AST::Identifier>(v)->name,
-                               MakeUninitBoundedITupleType());
+      auto sname = cast<AST::Identifier>(v)->name;
+      SSTab().ModifySymbolType(sname, MakeBoundedIntegerType(sname));
     }
   }
   in_decl = false;
@@ -478,7 +504,7 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
     }
   }
   size_t rank = cast<SpannedType>(NodeType(*n.data))->Dims();
-  n.SetType(MakeDimedSpannedType(rank));
+  SetNodeType(n, MakeDimedSpannedType(rank));
   return true;
 }
 
