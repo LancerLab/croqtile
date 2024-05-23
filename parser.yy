@@ -149,7 +149,7 @@ void choreo_info(const char *message) {
 %nterm <Choreo::BaseType> fundamental_type
 %nterm <AST::ptr<AST::CppSourceCode>> pass_by host_code
 %nterm <AST::ptr<AST::Memory>> storage_qual
-%nterm <AST::ptr<AST::Node>> foreach_block general_val simple_int span_val ituple_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt index_or_value iv_expr if_else_block optional_scalar_init param_mdspan_val chunkat_or_storage
+%nterm <AST::ptr<AST::Node>> foreach_block general_val simple_int span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt index_or_value iv_expr if_else_block optional_scalar_init param_mdspan_val chunkat_or_storage
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause else_block
 %nterm <AST::ptr<AST::MultiValues>> index_value_list value_list param_mdspan_list iv_exprs id_list with_matchers passables
 %nterm <AST::ptr<AST::Expr>> s_expr span_expr
@@ -534,13 +534,6 @@ sugarless_unnamed_ituple_decl
       }
     ;
 
-ituple_val
-    : unnamed_ituple_decl { $$ = $1; }
-    | IDENTIFIER {
-        $$ = AST::Make<AST::Identifier>(@1, $1);
-      }
-    ;
-
 direct_ituple_val
     : sugarless_unnamed_ituple_decl { $$ = $1; }
     | IDENTIFIER {
@@ -549,10 +542,15 @@ direct_ituple_val
     ;
 
 named_ituple_decl
-    : ITUPLE IDENTIFIER ASSIGN ituple_val {
+    : ITUPLE IDENTIFIER ASSIGN s_expr {
         symtab.AddSymbol($2, MakeUninitITupleType());
         $$ = AST::Make<AST::NamedVariableDecl>(@2,
               $2, AST::Make<AST::DataType>(@1, BaseType::ITUPLE), nullptr, $4);
+      }
+    | ITUPLE LT NUM GT IDENTIFIER ASSIGN s_expr {
+        symtab.AddSymbol($5, MakeUninitITupleType());
+        $$ = AST::Make<AST::NamedVariableDecl>(@5,
+              $5, AST::Make<AST::DataType>(@1, BaseType::ITUPLE, $3), nullptr, $7);
       }
     ; // do not allow uninitialized ituple
 
@@ -842,10 +840,10 @@ call_stmt
 // Bison expects us to provide implementation - otherwise linker complains
 void Parser::error(const location &loc , const std::string &message) {
   std::cerr << loc << ": ";
-  if (shell_supports_colors())
+  if (should_use_colors())
       std::cerr << red;
   std::cerr << "error: ";
-  if (shell_supports_colors())
+  if (should_use_colors())
       std::cerr << reset;
   std::cerr << message << std::endl;
 }

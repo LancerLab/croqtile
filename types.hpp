@@ -775,7 +775,10 @@ struct ITupleType : public Type, public TypeIDProvider<ITupleType> {
 
   bool ApprxEqual(const Type& ty) const override {
     if (auto itty = dyn_cast<ITupleType>(&ty)) {
-      if ((Dims() == itty->Dims()) && HasSufficientInfo()) return true;
+      if (HasSufficientInfo() && itty->HasSufficientInfo())
+        return (Dims() == itty->Dims());
+      else
+        return true;
     }
     return false;
   }

@@ -166,15 +166,34 @@ bool EarlySemantics::Visit(AST::Expr& n) {
         return false;
       }
       SetNodeType(n, MakeITupleType(lty->Dims()));
-    } else if ((isa<MDSpanType>(lty) && isa<MDSpanType>(rty)) ||
-               (isa<ITupleType>(lty) && isa<ITupleType>(rty)) ||
-               (isa<BooleanType>(lty) && isa<BooleanType>(rty))) {
-      Error(n.LOC(), "in operation \"" + n.op +
-                         "\": unable to apply to the types (" + PSTR(lty) +
-                         " vs. " + PSTR(rty) + ").");
-      error_count++;
-      return false;
-    } else if (isa<IndexType>(lty) && isa<IndexType>(rty)) {
+    } else if (isa<MDSpanType>(lty) && isa<MDSpanType>(rty)) {
+      // only allow div/mod operations
+      if ((n.op != "/") && (n.op != "%")) {
+        Error(n.LOC(), "in operation \"" + n.op +
+                           "\": unable to apply to the types (" + PSTR(lty) +
+                           " vs. " + PSTR(rty) + ").");
+        return false;
+      }
+      if (lty->Dims() != rty->Dims()) {
+        Error(n.LOC(), "in operation \"" + n.op +
+                           "\": dimension inconsistent (" +
+                           std::to_string(lty->Dims()) + " vs. " +
+                           std::to_string(rty->Dims()) + ").");
+        error_count++;
+        return false;
+      }
+      SetNodeType(n, MakeITupleType(lty->Dims()));
+    } else if ((isa<MDSpanType>(lty) && isa<IntegerType>(rty)) ||
+               (isa<MDSpanType>(rty) && isa<IntegerType>(lty)) ||
+               (isa<ITupleType>(lty) && isa<IntegerType>(rty)) ||
+               (isa<ITupleType>(rty) && isa<IntegerType>(lty))) {
+      if (isa<MDSpanType>(lty) || isa<ITupleType>(lty))
+        SetNodeType(n, lty);
+      else
+        SetNodeType(n, rty);
+    } else if ((isa<ITupleType>(lty) && isa<ITupleType>(rty)) ||
+               (isa<BooleanType>(lty) && isa<BooleanType>(rty)) ||
+               (isa<IndexType>(lty) && isa<IndexType>(rty))) {
       Error(n.LOC(), "in operation \"" + n.op +
                          "\": unable to apply to the types (" + PSTR(lty) +
                          " vs. " + PSTR(rty) + ").");
@@ -277,18 +296,36 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
 
 bool EarlySemantics::Visit(AST::NamedTypeDecl& n) {
   __TRACE_EACH_VISIT__(n)
-  ReportErrorWhenViolateODR(n.LOC(), n.name_str, __FILE__, __LINE__,
-                            NodeType(*n.init_expr));
+  auto nty = NodeType(*n.init_expr);
+  ReportErrorWhenViolateODR(n.LOC(), n.name_str, __FILE__, __LINE__, nty);
+  SetNodeType(n, nty);
   return true;
 }
 
 bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
   __TRACE_EACH_VISIT__(n)
   if (isa<UnknownType>(n.type->GetType())) {
-    // sometimes the parser can not decide the type. We need to figure out from
-    // the initialization expression
-    n.type->SetType(n.init_expr->GetType());
+    if (!n.init_expr) {
+      Error(n.LOC(), "unable to deduce the type of `" + n.name_str + "'.");
+      error_count++;
+      // keep working
+    } else {
+      // sometimes the parser can not decide the type. We need to figure out
+      // from the initialization expression
+      SetNodeType(*n.type, n.init_expr->GetType());
+    }
   }
+
+  // check for type consistency between annotation and init expr.
+  if (n.init_expr &&
+      (!n.type->GetType()->ApprxEqual(*n.init_expr->GetType()))) {
+    Error(n.LOC(), "`" + n.name_str + "' is declared as \"" +
+                       PSTR(n.type->GetType()) + "\" but initialized as \"" +
+                       PSTR(n.init_expr->GetType()) + "\".");
+    error_count++;
+    // keep working
+  }
+
   ReportErrorWhenViolateODR(n.LOC(), n.name_str, __FILE__, __LINE__,
                             n.type->GetType());
   if (auto ty = dyn_cast<SpannedType>(n.type->GetType())) {

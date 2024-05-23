@@ -480,6 +480,7 @@ struct IntIndex : public Node, public TypeIDProvider<IntIndex> {
 //
 struct DataType : public Node, public TypeIDProvider<DataType> {
   BaseType base_type;
+  size_t rank = InvalidRank();  // for annotated ituple only
   ptr<Node> mdspan_type = nullptr;
 
  public:
@@ -493,6 +494,12 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
     assert(bt != BaseType::ITUPLE && "Unexpected type!");
     assert(bt != BaseType::INT && "Unexpected type!");
     assert(bt != BaseType::BOOL && "Unexpected type!");
+    InitSemaType();
+  }
+
+  explicit DataType(const location& l, BaseType bt, int r)
+      : Node(l), base_type(bt), rank(r) {
+    assert(bt == BaseType::ITUPLE && "Unexpected type!");
     InitSemaType();
   }
 
@@ -543,8 +550,11 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
                                 GenUninitShape()));  // need type inference
         break;
       case BaseType::ITUPLE:
-        SetType(MakeUninitITupleType());  // need type inference to retrieve the
-                                          // dim count
+        if (rank == InvalidRank())
+          SetType(MakeUninitITupleType());  // need type inference to retrieve
+                                            // the dim count
+        else
+          SetType(MakeITupleType(rank));
         break;
       case BaseType::UNKNOWN:
         SetType(MakeUnknownType());  // need type inference

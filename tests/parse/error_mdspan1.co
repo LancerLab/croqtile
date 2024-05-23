@@ -1,0 +1,9 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ auto illegal_mdspan() {
+  mdspan it = [7, 8];
+}
+
+// CHECK: error: syntax error, unexpected =, expecting :
+// CHECK-NOT: error:
+

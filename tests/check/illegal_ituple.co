@@ -1,0 +1,10 @@
+// RUN: not choreo -sa check1 %s 2>&1 | FileCheck %s
+
+__co__ auto illegal_ituple1() {
+  ituple it1 = [7, 8];
+  ituple<1> it2 = {7, 8};
+}
+
+// CHECK: error: `it1' is declared as "ituple<unknown>" but initialized as "mdspan<2> []".
+// CHECK: error: `it2' is declared as "ituple<1>" but initialized as "ituple<2>".
+// CHECK: Totally 2 errors have been detected.

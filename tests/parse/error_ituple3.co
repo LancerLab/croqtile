@@ -1,0 +1,9 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ auto illegal_ituple(int a) {
+  it = {7 a};  // must be "," separated
+}
+
+// CHECK: error: syntax error, unexpected IDENTIFIER, expecting } or ","
+// CHECK-NOT: error:
+
