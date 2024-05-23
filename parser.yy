@@ -501,7 +501,7 @@ named_mdspan_decl
       }
     | MDSPAN LT NUM GT IDENTIFIER COL s_expr {
         symtab.AddSymbol($5, MakeDimedMDSpanType($3));
-        $$ = AST::Make<AST::NamedTypeDecl>(@5, $5, $7);
+        $$ = AST::Make<AST::NamedTypeDecl>(@5, $5, $7, $3);
       }
     | IDENTIFIER COL s_expr {
         symtab.AddSymbol($1, MakeUninitMDSpanType());

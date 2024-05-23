@@ -1,0 +1,13 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ auto illegal_mdspan() {
+  mdspan mds1 : {7, 8};  // must use '[]'
+  mdspan<1> mds2 : [7, 8];  // rank inconsistence
+  mdspan mds3 : [2, 3, 4];  // annotation ok
+}
+
+// CHECK: error: `mds1' is declared as "mdspan<> []" but initialized as "ituple<2>".
+// CHECK: error: `mds2' is declared as "mdspan<1> []" but initialized as "mdspan<2> []".
+// CHECK-NOT: error:
+// CHECK: Totally 2 errors have been detected.
+

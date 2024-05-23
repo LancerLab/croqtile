@@ -296,9 +296,19 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
 
 bool EarlySemantics::Visit(AST::NamedTypeDecl& n) {
   __TRACE_EACH_VISIT__(n)
-  auto nty = NodeType(*n.init_expr);
-  ReportErrorWhenViolateODR(n.LOC(), n.name_str, __FILE__, __LINE__, nty);
-  SetNodeType(n, nty);
+  assert(n.init_expr && "missing init expr.");
+  auto ety = NodeType(*n.init_expr);
+  auto nty = (n.rank != InvalidRank()) ? MakeDimedMDSpanType(n.rank)
+                                       : MakeUninitMDSpanType();
+  // check for the type consistency
+  if (!ety->ApprxEqual(*nty)) {
+    Error(n.LOC(), "`" + n.name_str + "' is declared as \"" + PSTR(nty) +
+                       "\" but initialized as \"" + PSTR(ety) + "\".");
+    error_count++;
+    // keep processing
+  }
+  ReportErrorWhenViolateODR(n.LOC(), n.name_str, __FILE__, __LINE__, ety);
+  SetNodeType(n, ety);
   return true;
 }
 

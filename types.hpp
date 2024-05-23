@@ -801,7 +801,7 @@ struct MDSpanType : public Type, public TypeIDProvider<MDSpanType> {
 
   // TODO: if the value is not evaluated, or can not be evaluated, not
   // sufficient information is obtained
-  bool HasSufficientInfo() const override { return true; }
+  bool HasSufficientInfo() const override { return value.IsValid(); }
 
   bool operator==(const Type& ty) const override {
     if (!isa<MDSpanType>(&ty)) return false;
@@ -809,8 +809,13 @@ struct MDSpanType : public Type, public TypeIDProvider<MDSpanType> {
   }
 
   bool ApprxEqual(const Type& ty) const override {
-    if (!isa<MDSpanType>(&ty)) return false;
-    return ty.Dims() == Dims();
+    if (auto sty = dyn_cast<MDSpanType>(&ty)) {
+      if (!HasSufficientInfo() || !sty->HasSufficientInfo())
+        return true;  // it is ok when the shape is unknown
+      else
+        return ty.Dims() == Dims();
+    }
+    return false;
   }
 
   void Print(std::ostream& os) const override {

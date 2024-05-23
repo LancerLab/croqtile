@@ -1,0 +1,8 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ auto illegal_mdspan(int a) {
+  mdspan<1> it : [7 a];  // comma separated list
+}
+
+// CHECK: error: syntax error, unexpected IDENTIFIER, expecting ] or ","
+// CHECK-NOT: error:

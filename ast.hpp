@@ -381,10 +381,19 @@ struct NamedTypeDecl : public Node, public TypeIDProvider<NamedTypeDecl> {
   const std::string name_str;
   const std::string init_str;
   const ptr<Node> init_expr;  // associated init_expr
+  size_t rank = InvalidRank();  // rank annotation only
 
   explicit NamedTypeDecl(const location& l, const std::string& n,
                          const ptr<Node>& v, const std::string& d = "-")
       : Node(l), name_str(n), init_str(d), init_expr(v) {
+    assert(name_str.size() > 0 && "Invalid name string.");
+    assert(init_expr && "Invalid value.");
+  }
+
+  explicit NamedTypeDecl(const location& l, const std::string& n,
+                         const ptr<Node>& v, size_t r,
+                         const std::string& d = "-")
+      : Node(l), name_str(n), init_str(d), init_expr(v), rank(r) {
     assert(name_str.size() > 0 && "Invalid name string.");
     assert(init_expr && "Invalid value.");
   }

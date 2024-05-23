@@ -1,0 +1,9 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ auto illegal_mdspan() {
+  mdspan[3, 4] it;  // expecting rank annotation '<num>'
+}
+
+// CHECK: error: syntax error, unexpected [, expecting < or IDENTIFIER
+// CHECK-NOT: error:
+
