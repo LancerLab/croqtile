@@ -20,10 +20,10 @@ TEST_TARGETS := $(TEST_FILES:.co=.test)
 #$(info TEST_TARGETS is $(TEST_TARGETS))
 
 # headers
-HEADER_FILES :=  $(shell find . -name '*.hpp') choreo_header.inc
+HEADER_FILES :=  $(shell find . -name '*.hpp') choreo_header.inc factor_script.inc
 
 CC = g++
-CFLAGS = -std=c++17 -Wall -Wextra -g
+CFLAGS = -std=c++17 -Wall -Wextra -g -D__CHOREO_FACTOR_DIR__="$(TOOLCHAIN)"
 
 # For gtest
 GTEST_DIR = extern/gtest
@@ -53,13 +53,23 @@ parser.tab.cc parser.tab.hh location.hh: $(PARSER_SRC)
 choreo_header.inc : utils/choreo.h
 	echo "#ifndef __CHOREO_RUNTIME_HEADER_H__" > $@
 	echo "#define __CHOREO_RUNTIME_HEADER_H__" >> $@
-	echo "static const char* __choreo_header_as_string = R\"(" >> $@
+	echo -n "static const char* __choreo_header_as_string = R\"(" >> $@
 	cat $< >> $@
 	echo ")\";" >> $@
 	echo "#endif // __CHOREO_RUNTIME_HEADER_H__" >> $@
 
+factor_script.inc : scripts/factor_script.sh
+	echo "#ifndef __CHOREO_FACTOR_SCRIPT_H__" > $@
+	echo "#define __CHOREO_FACTOR_SCRIPT_H__" >> $@
+	echo -n "static const char* __factor_script_as_string = R\"__co_factor__(" >> $@
+	cat $< >> $@
+	echo ")__co_factor__\";" >> $@
+	echo "#endif // __CHOREO_FACTOR_SCRIPT_H__" >> $@
+
 clean:
 	rm -f *.cc *.hh *.inc *.o $(TEST_TARGETS) tests/*.result
+
+clobber: clean
 	rm -fr $(TOOLCHAIN)/*
 
 lines:

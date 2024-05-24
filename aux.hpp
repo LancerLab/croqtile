@@ -1,6 +1,9 @@
 #ifndef __CHOREO_AUX_HPP__
 #define __CHOREO_AUX_HPP__
 
+#define STRINGIZE_HELPER(x) #x
+#define STRINGIZE(x) STRINGIZE_HELPER(x)
+
 #include <cassert>
 #include <iostream>
 #include <optional>
