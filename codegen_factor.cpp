@@ -540,10 +540,11 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
 
 #endif
       auto pos = tile_shape_string.find(",");
+      // TODO: strip " "
       auto dim_bound = tile_shape_string.substr(0, pos);
       tile_shape_string = tile_shape_string.substr(pos+1);
-      auto offset = (dim_cursor == 0)? dim_bound + "*thread_id" :
-                                       dim_bound + "*" + STR(tile_factor);
+      auto offset = (dim_cursor == 0)? "Value(" + RemovePrefixOrNull(" ", dim_bound).value_or(dim_bound) + ")*thread_id" :
+                                       "Value(" + RemovePrefixOrNull(" ", dim_bound).value_or("1") + ")*" + STR(tile_factor);
       //auto offset = (dim_cursor == 0) ? "thread_id" : STR(tile_factor);
       offset_string = offset_string + offset;
       ++dim_cursor;

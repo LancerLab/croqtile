@@ -316,12 +316,14 @@ class ShapeInference : public Visitor {
       n.SetTypeDetail(vl);
 
       if (n.Rank() != InvalidRank()) {
+#if 0
         if (vl.Dims() != n.Rank())
           Error(n.LOC(),
                 "mdspan's dimension is inconsistent with its initialization "
                 "expression: " +
                     std::to_string(vl.Dims()) + " vs. " +
                     std::to_string(n.Rank()) + ".");
+#endif
       } else
         n.SetRank(vl.Dims());
 
