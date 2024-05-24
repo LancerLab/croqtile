@@ -60,6 +60,7 @@ choreo_header.inc : utils/choreo.h
 
 clean:
 	rm -f *.cc *.hh *.inc *.o $(TEST_TARGETS) tests/*.result
+	rm -fr $(TOOLCHAIN)/*
 
 lines:
 	echo "source files:"; wc -l *.cpp *.yy *.l *.hpp Makefile utils/*.h; \
@@ -80,7 +81,7 @@ BISON_BIN = $(TOOLCHAIN)/bin/bison
 LIT:=$(WORK_DIR)/tests/lit.sh
 FILECHECK:=$(TOOLCHAIN)/bin/FileCheck
 PACKAGE_NAME=choreo_toolchain_240511.tgz
-SUPPORT_PKG = $(TOOLCHAIN)/$(PACKAGE_NAME)
+SUPPORT_PKG =$(TOOLCHAIN)/$(PACKAGE_NAME)
 PACKAGE_MD5:=1f77ae0083922fa94ed6c84c5f9cad24
 BISON_ENV:=BISON_PKGDATADIR=$(TOOLCHAIN)/shared/bison/
 BISON:=$(BISON_ENV) $(BISON_BIN)
@@ -88,7 +89,7 @@ BISON:=$(BISON_ENV) $(BISON_BIN)
 support-pkg:
 	@if [ "$(shell md5sum $(SUPPORT_PKG) | cut -d ' ' -f 1)" != "$(PACKAGE_MD5)"  ]; then \
 		echo "MD5 hash does not match. Downloading the supporting package..."; \
-		rm -fr $(TOOLCHAIN)/*; mkdir -p $(TOOLCHAIN); \
+		mkdir -p $(TOOLCHAIN); \
 		curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(PACKAGE_NAME) -o $(SUPPORT_PKG);\
 		cd $(TOOLCHAIN) && tar -zvxf $(SUPPORT_PKG); \
 		chmod +x $(BISON_BIN); \
@@ -96,4 +97,32 @@ support-pkg:
 		echo "$(SUPPORT_PKG) MD5 hash matches. No need to download."; \
 	fi
 
-setup: support-pkg
+GCU_CMP_NAME=240524-gcu-compiler.tgz
+GCU_CMP_PKG = $(TOOLCHAIN)/$(GCU_CMP_NAME)
+GCU_CMP_PKG_MD5:=f6e0b029763acd1f66a192542a068ae5
+
+gcu-pkg:
+	@if [ "$(shell md5sum $(GCU_CMP_PKG) | cut -d ' ' -f 1)" != "$(PACKAGE_MD5)"  ]; then \
+		echo "MD5 hash does not match. Downloading the GCU compiler package..."; \
+		mkdir -p $(TOOLCHAIN); \
+		curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU_CMP_NAME) -o $(GCU_CMP_PKG);\
+		cd $(TOOLCHAIN) && tar -zvxf $(GCU_CMP_PKG); \
+	else \
+		echo "$(GCU_CMP_PKG) MD5 hash matches. No need to download."; \
+	fi
+
+GCU_KMD_NAME=240524-enflame-x86_64-gcc-1.0.1.6.run
+GCU_KMD_PKG = $(TOOLCHAIN)/$(GCU_KMD_NAME)
+GCU_KMD_PKG_MD5:=efe16643457b9a0e3a02de3198590ec0
+
+gcu-kmd:
+	@if [ "$(shell md5sum $(GCU_KMD_PKG) | cut -d ' ' -f 1)" != "$(PACKAGE_MD5)"  ]; then \
+		sudo echo "MD5 hash does not match. Downloading the GCU kmd package..."; \
+		mkdir -p $(TOOLCHAIN); \
+		curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU_KMD_NAME) -o $(GCU_KMD_PKG);\
+		sudo bash $(GCU_KMD_PKG);\
+	else \
+		echo "$(GCU_KMD_PKG) MD5 hash matches. No need to download."; \
+	fi
+
+setup: support-pkg gcu-pkg
