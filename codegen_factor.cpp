@@ -253,9 +253,27 @@ fi
   } else if (isa<AST::ParallelBy>(&n)) {
     this->decrementIndent();
     fs << this->indent << "}); // end of choreo-factor kernel function\n";
-  } else if (isa<AST::ForeachBlock>(&n)) {
-    this->decrementIndent();
-    fs << this->indent << "}); // end of choreo-foreach block\n";
+  } else if (auto f = dyn_cast<AST::ForeachBlock>(&n)) {
+    for (auto id : f->ivs->GetValues()) {
+      auto name = cast<AST::Identifier>(id)->name;
+      int dec_by = 1;
+      bool multiple_bounds = cur_bounded_vars.count(name);
+      if (multiple_bounds) dec_by = cur_bounded_vars[name].size();
+      for (int i = 0; i < dec_by; ++i) {
+        this->decrementIndent();
+        fs << this->indent << "}); // end of choreo-foreach block";
+        if (multiple_bounds)
+          fs << " on '" << cur_bounded_vars[name][i] << "'";
+        fs << ".\n";
+      }
+    }
+  } else if (auto wb = dyn_cast<AST::WithBlock>(&n)) {
+    for (auto wi : wb->withins->AllSubs()) {
+      auto w = cast<AST::WithIn>(wi);
+      if (w->with && w->with_matchers) {
+        cur_bounded_vars.erase(w->with->name);
+      }
+    }
   }
   return 0;
 }
@@ -411,7 +429,16 @@ bool FactorCodeGen::Visit(AST::ParallelBy &by) {
 }
 
 bool FactorCodeGen::Visit(AST::WhereBind &) { return true; };
-bool FactorCodeGen::Visit(AST::WithIn &) { return true; };
+bool FactorCodeGen::Visit(AST::WithIn &n) {
+  if (n.with && n.with_matchers) {
+    std::vector<std::string> matchers;
+    for (auto mn : n.with_matchers->GetValues()) {
+      matchers.push_back(cast<AST::Identifier>(mn)->name);
+    }
+    cur_bounded_vars.emplace(n.with->name, matchers);
+  }
+  return true;
+};
 
 bool FactorCodeGen::Visit(AST::WithBlock &) { return true; }
 
@@ -671,11 +698,10 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
   for (size_t idx = 0; idx != itervars->Count(); ++idx) {
     // TODO(albert): support non-unit stride in loop
     std::ostringstream _os;
-    itervars->getValueAt(idx)->Print(_os);
-    auto iv_str = _os.str();
+    auto id = cast<AST::Identifier>(itervars->getValueAt(idx));
 
     // get the lower/upper and stride for spanned iter var
-    auto iv_type = this->GetSymbolType(iv_str);
+    auto iv_type = this->GetSymbolType(id->name);
     auto iv_bounds = dyn_cast<BoundedITupleType>(iv_type)->GetBounds();
     auto iv_values = iv_bounds.Value();
     // for (const auto &value : iv_values) {
@@ -686,12 +712,24 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
     auto upper_bound = *(std::get_if<int>(&iv_values[0]));
 
     // synthesise the emitting string
-    fs << this->indent << "for_(0, " << std::to_string(upper_bound) << ", "
-       << 1 /* TODO(albert): need fix, unit stride is hardcoded for now*/
-       << ", "
-       << "[&](auto " << iv_str << ") {\n";
+    if (iv_type->Dims() == 1) {
+      fs << this->indent << "for_(0, " << std::to_string(upper_bound) << ", "
+         << 1 /* TODO(albert): need fix, unit stride is hardcoded for now*/
+         << ", [&](auto " << id->name << ") {\n";
+      this->incrementIndent();
+    } else {
+      assert(cur_bounded_vars.count(id->name) &&
+             "can not find the bounded name.");
+      assert((cur_bounded_vars[id->name].size() == iv_bounds.Dims()) &&
+             "can not find the bounded name.");
+      for (auto name : cur_bounded_vars[id->name]) {
+        fs << this->indent << "for_(0, " << std::to_string(upper_bound) << ", "
+           << 1 /* TODO(albert): need fix, unit stride is hardcoded for now*/
+           << ", [&](auto " << name << ") {\n";
+        this->incrementIndent();
+      }
+    }
   }
-  this->incrementIndent();
   return true;
 }
 

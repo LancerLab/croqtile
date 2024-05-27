@@ -26,6 +26,7 @@ struct FactorCodeGen : public CodeGenerator {
   std::string indent = "";
   std::vector<AST::ptr<AST::Parameter>> *cur_params = nullptr;
   AST::ptr<AST::DataType> current_output = nullptr;
+  std::map<std::string, std::vector<std::string>> cur_bounded_vars;
 
   std::string bin_fn;  // temporal filename of factor binary
   int parallel_factor = 1;

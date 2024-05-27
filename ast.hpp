@@ -116,6 +116,8 @@ struct MultiNodes : public Node, public TypeIDProvider<MultiNodes> {
 
   void SetDelimiter(const std::string& d) { delimiter = d; }
 
+  std::vector<ptr<Node>> AllSubs() { return values; }
+
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     if (delimiter != "" && values.size() > 1) {
       auto i = values.begin();
