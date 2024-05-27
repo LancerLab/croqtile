@@ -150,6 +150,7 @@ class spanned_view {
   size_t size() const { return span_size(dims); }
   size_t bytes() const { return size() * sizeof(T); }
   T* data() { return ptr; }
+  T* data() const { return ptr; }
 
   // allow multi-dim-style access, be like: a[1][3]
   template <size_t M = Rank>
@@ -166,7 +167,7 @@ class spanned_view {
   typename std::enable_if<(M > 1), ArrayProxy<T, Rank - 1>>::type operator[](
       int index) {
     choreo_assert(index >= 0, "Index out of bounds", __FILE__, __LINE__);
-    choreo_assert((size_t)index < dims[0], "Index out of bounds", __FILE__,
+    choreo_assert((size_t)index < dims[M - 1], "Index out of bounds", __FILE__,
                   __LINE__);
     const auto& sub_dims =
         *reinterpret_cast<const mdspan<Rank - 1>*>(&(dims[1]));
@@ -218,7 +219,7 @@ class spanned_data {
   typename std::enable_if<(M > 1), ArrayProxy<T, Rank - 1>>::type operator[](
       int index) {
     choreo_assert(index >= 0, "Index out of bounds", __FILE__, __LINE__);
-    choreo_assert((size_t)index < dims[0], "Index out of bounds", __FILE__,
+    choreo_assert((size_t)index < dims[M - 1], "Index out of bounds", __FILE__,
                   __LINE__);
     const auto& sub_dims =
         *reinterpret_cast<const mdspan<Rank - 1>*>(&(dims[1]));
@@ -282,7 +283,7 @@ auto copy_as_spanned(T* ptr, std::initializer_list<size_t> init) {
 // Floating-point types
 using f32 = float;
 
-#ifndef NATIVE_BF16_SUPPORT
+#ifndef NATIVE_FP16_SUPPORT
 // this fp16 accepts literal initialization, but without arith support
 class fp16 {
  private:
@@ -342,8 +343,54 @@ class fp16 {
 };
 #else
 using f16 = __fp16;
-#endif
+#endif  // NATIVE_FP16_SUPPORT
 
+#ifndef NATIVE_BF16_SUPPORT
+class bf16 {
+ private:
+  uint16_t bits;  // Storage for the half-precision bits
+
+ public:
+  // Default constructor
+  bf16() : bits(0) {}
+
+  // Constructor for conversion from float
+  bf16(float value) { bits = floatToHalfBits(value); }
+
+  // Constructor for conversion from double
+  bf16(double value) { bits = floatToHalfBits(static_cast<float>(value)); }
+
+  // Implicit conversion from float
+  bf16& operator=(float value) {
+    bits = floatToHalfBits(value);
+    return *this;
+  }
+
+  // Implicit conversion from double
+  bf16& operator=(double value) {
+    bits = floatToHalfBits(static_cast<float>(value));
+    return *this;
+  }
+
+  // Function to convert float to half precision bits (naive and placeholder)
+  static uint16_t floatToHalfBits(float value) {
+    // Simplified conversion: this does not handle rounding, infinities, or NaNs
+    // correctly In practice, use a library or a fully implemented conversion
+    // function
+    int32_t fltInt32 = *((int32_t*)&value);
+    return (fltInt32 & 0xFFFF0000) >> 16;
+  }
+
+  // Function to convert half precision bits to float (naive and placeholder)
+  static float halfBitsToFloat(uint16_t bits) {
+    int32_t fltInt32 = ((uint32_t)bits) << 16;
+    return *((float*)&fltInt32);
+  }
+
+  // Method to get the float value from the bf16 object
+  float toFloat() const { return halfBitsToFloat(bits); }
+};
+#else
 // Check for __bf16 support
 #if defined(__clang__)
 #if __clang_major__ >= 11
@@ -356,6 +403,7 @@ using bf16 = __bf16;
 using bf16 = __bf16;
 #endif
 #endif
+#endif  // NATIVE_BF16_SUPPORT
 
 #ifndef BF16_SUPPORTED
 //#error \

@@ -111,14 +111,48 @@ GCU_CMP_NAME=240524-gcu-compiler.tgz
 GCU_CMP_PKG = $(TOOLCHAIN)/$(GCU_CMP_NAME)
 GCU_CMP_PKG_MD5:=f6e0b029763acd1f66a192542a068ae5
 
-gcu-pkg:
-	@if [ "$(shell md5sum $(GCU_CMP_PKG) | cut -d ' ' -f 1)" != "$(PACKAGE_MD5)"  ]; then \
+gcu-sfc-pkg:
+	@if [ "$(shell md5sum $(GCU_CMP_PKG) | cut -d ' ' -f 1)" != "$(GCU_CMP_PKG_MD5)"  ]; then \
 		echo "MD5 hash does not match. Downloading the GCU compiler package..."; \
 		mkdir -p $(TOOLCHAIN); \
 		curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU_CMP_NAME) -o $(GCU_CMP_PKG);\
 		cd $(TOOLCHAIN) && tar -zvxf $(GCU_CMP_PKG); \
 	else \
 		echo "$(GCU_CMP_PKG) MD5 hash matches. No need to download."; \
+	fi
+
+GCU_PLATFORM_NAME=TopsPlatform_1.0.1.6-a1e560_deb_amd64.run
+GCU_PLATFORM_PKG = $(TOOLCHAIN)/$(GCU_PLATFORM_NAME)
+GCU_PLATFORM_PKG_MD5:=216051f60566227b6b95bf7502a70178
+
+gcu-platform-pkg:
+	@if [ "$(shell md5sum $(GCU_PLATFORM_PKG) | cut -d ' ' -f 1)" != "$(GCU_PLATFORM_PKG_MD5)"  ]; then \
+		echo "MD5 hash does not match. Downloading the GCU compiler package..."; \
+		mkdir -p $(TOOLCHAIN); \
+		curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU_PLATFORM_NAME) -o $(GCU_PLATFORM_PKG);\
+		chmod +x $(GCU_PLATFORM_PKG); \
+		$(GCU_PLATFORM_PKG) -y -C topsruntime --install-dir $(TOOLCHAIN); \
+		$(GCU_PLATFORM_PKG) -y -C topscc --install-dir $(TOOLCHAIN); \
+		rsync -av $(TOOLCHAIN)/opt/tops $(TOOLCHAIN); \
+		rm -fr $(TOOLCHAIN)/opt; \
+	else \
+		echo "$(GCU_PLATFORM_PKG) MD5 hash matches. No need to download."; \
+	fi
+
+GCU_FACTOR_NAME=topsfactor_3.0.1-1_amd64.deb
+GCU_FACTOR_PKG = $(TOOLCHAIN)/$(GCU_FACTOR_NAME)
+GCU_FACTOR_PKG_MD5:=03a257e7069cc4bb42270103e3616438
+
+gcu-factor-pkg:
+	@if [ "$(shell md5sum $(GCU_FACTOR_PKG) | cut -d ' ' -f 1)" != "$(GCU_FACTOR_PKG_MD5)"  ]; then \
+		echo "MD5 hash does not match. Downloading the GCU compiler package..."; \
+		mkdir -p $(TOOLCHAIN); \
+		curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU_FACTOR_NAME) -o $(GCU_FACTOR_PKG);\
+		fakeroot sudo dpkg --instdir=$(TOOLCHAIN) -i $(GCU_FACTOR_PKG); \
+		rsync -av $(TOOLCHAIN)/usr/ $(TOOLCHAIN); \
+		fakeroot sudo rm -fr $(TOOLCHAIN)/usr/; \
+	else \
+		echo "$(GCU_FACTOR_PKG) MD5 hash matches. No need to download."; \
 	fi
 
 GCU_KMD_NAME=240524-enflame-x86_64-gcc-1.0.1.6.run
@@ -134,5 +168,7 @@ gcu-kmd:
 	else \
 		echo "$(GCU_KMD_PKG) MD5 hash matches. No need to download."; \
 	fi
+
+gcu-pkg: gcu-sfc-pkg gcu-platform-pkg gcu-factor-pkg
 
 setup: support-pkg gcu-pkg

@@ -38,15 +38,19 @@ int main() { /// host program
   std::fill_n(&b[0][0][0], sizeof(b) / sizeof(b[0][0][0]), 2);
 
   auto res
-    = ele_add(choreo::make_spanned<3, choreo::s32>((int*)a, {6, 17, 128}),
-              choreo::make_spanned<3, choreo::s32>((int*)b, {6, 17, 128}));
+    = ele_add(choreo::make_spanview<3, choreo::s32>((int*)a, {6, 17, 128}),
+              choreo::make_spanview<3, choreo::s32>((int*)b, {6, 17, 128}));
 
   // verfication
   for (size_t i = 0; i < res.shape()[0]; ++i)
     for (size_t j = 0; i < res.shape()[1]; ++i)
-      for (size_t k = 0; i < res.shape()[2]; ++i)
-        assert(a[i][j][k] + b[i][j][k] == res[i][j][k]);
+      for (size_t k = 0; i < res.shape()[2]; ++i) {
+        std::cout << "i: " << i << ", j: " << j << ", k: " << k << "\n";
+        std::cout << "a: " << a[i][j][k] << ", b: " << b[i][j][k] << ", res: " << res[i][j][k] << "\n";
+        if (a[i][j][k] + b[i][j][k] != res[i][j][k]) {
+          assert(a[i][j][k] + b[i][j][k] == res[i][j][k]);
+        }
+      }
 
   std::cout << "Test Passed\n" << std::endl;
 }
-

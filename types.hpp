@@ -451,15 +451,15 @@ struct ValueListRepo {
   }
 };
 
-inline void PrintValueList(const ValueList& vl, std::ostream& os, char lb = '[',
-                           char rb = ']') {
+inline void PrintValueList(const ValueList& vl, std::ostream& os,
+                           const char* lb = "[", const char* rb = "]") {
   auto print_variant = [&os](const ValueItem& vle) {
     if (vle.index() == 0)
       os << std::get<0>(vle);
     else
       os << std::get<1>(vle);
   };
-  os << lb;
+  if (lb) os << lb;
   if (!vl.empty()) {
     print_variant(vl[0]);
     for (unsigned i = 1; i < vl.size(); ++i) {
@@ -467,7 +467,7 @@ inline void PrintValueList(const ValueList& vl, std::ostream& os, char lb = '[',
       print_variant(vl[i]);
     }
   }
-  os << rb;
+  if (rb) os << rb;
 }
 
 // target specific value list printing
@@ -590,7 +590,16 @@ struct Shape {
       os << "[]";
     else {
       assert(values.Exists(val_no) && "invalid value number.");
-      PrintValueList(Value(), os, '{', '}');
+      PrintValueList(Value(), os, "{", "}");
+    }
+  }
+
+  void PrintPlain(std::ostream& os) const {
+    if (val_no == __INVALID_VALUE__)
+      os << "";
+    else {
+      assert(values.Exists(val_no) && "invalid value number.");
+      PrintValueList(Value(), os, nullptr, nullptr);
     }
   }
 

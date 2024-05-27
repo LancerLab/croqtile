@@ -166,9 +166,7 @@ bool FactorCodeGen::BeforeVisitImpl(AST::Node &n) {
     entry_fn = c->name;
     current_fn = "__choreo_" + entry_fn;
     // declare a factor function with proper name
-    fs <<
-        R"(
-#include <vector>
+    fs << R"(#include <vector>
 
 #include "gcu/factor/factor.h"
 
@@ -897,18 +895,33 @@ void FactorCodeGen::EmitHostFuncBody(std::ostream &os, const Type &ty,
   }
 
   // phase 3: Execute the executable and fetch the output
-  // TODO: resolve hardcode in input dims and ranks
-  // os << "  int64_t input_dims[] = {";
-  // if (param_map.size() > 0) {
-  //   os << param_map[0].second;
-  //   for (size_t i = 1; i < param_map.size(); ++i) os << ", " <<
-  //   param_map[i].second;
-  // }
-  // os << "};";
-  os << R"(
+  auto &fty = *cast<FunctionType>(&ty);
+  if (fty.in_tys.size() > 0) {
+    os << "  int64_t input_dims[] = {";
+    if (auto sty = dyn_cast<SpannedType>(fty.in_tys[0])) {
+      sty->GetShape().PrintPlain(os);
+      for (size_t i = 1; i < fty.in_tys.size(); ++i)
+        if (auto sty = dyn_cast<SpannedType>(fty.in_tys[i])) {
+          os << ", ";
+          sty->GetShape().PrintPlain(os);
+        }
+    }
+    os << "};\n";
+    os << "  size_t input_ranks[] = {";
+    if (auto sty = dyn_cast<SpannedType>(fty.in_tys[0])) {
+      os << sty->GetShape().Dims();
+      for (size_t i = 1; i < fty.in_tys.size(); ++i)
+        if (auto sty = dyn_cast<SpannedType>(fty.in_tys[i]))
+          os << ", " << sty->GetShape().Dims();
+    }
+  }
+  os << "};\n";
+#if 0
   int64_t input_dims[] = {6, 17, 128, 6, 17, 128};
   size_t input_ranks[] = {3, 3};
+#endif
 
+  os << R"(
   CHECK(topsLaunchExecutableV2(
       executable, nullptr, device_inputs,
       sizeof(device_inputs) / sizeof(void *), (int64_t*)input_dims,
@@ -1018,17 +1031,18 @@ void FactorCodeGen::EmitHostFuncDecl(std::ostream &os, const Type &ty,
   if (fty.in_tys.size() > 0) {
     if (!decl_only) {
       if (auto sty = dyn_cast<SpannedType>(fty.in_tys[0])) {
-        param_map.push_back(std::make_pair(
-            n + ".data", ReplaceRuntimeNames(sty->ByteSizeExpression())));
+        param_map.push_back(
+            std::make_pair(host_params[0] + ".data()",
+                           ReplaceRuntimeNames(sty->ByteSizeExpression())));
       } else
-        param_map.push_back(std::make_pair(n, "1"));
+        param_map.push_back(std::make_pair(host_params[0], "1"));
     }
     os << HostTypeString(*fty.in_tys[0]) << " " << host_params[0];
     for (size_t i = 1; i < fty.in_tys.size(); ++i) {
       if (!decl_only) {
         if (auto sty = dyn_cast<SpannedType>(fty.in_tys[i])) {
           param_map.push_back(
-              std::make_pair(host_params[i] + ".data",
+              std::make_pair(host_params[i] + ".data()",
                              ReplaceRuntimeNames(sty->ByteSizeExpression())));
         } else
           param_map.push_back(std::make_pair(host_params[i], "1"));

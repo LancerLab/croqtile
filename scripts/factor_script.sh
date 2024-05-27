@@ -26,8 +26,8 @@ HOST_SRC=$3
 BIN_TARGET=$4
 
 echo "Compile ${BIN_TARGET}"
-${TOPS_BIN_PATH}/topsfc ${KERNEL_SRC} -gcu-arch=gcu210 -resource=2c24s -o ${FATBIN_TARGET}
-${TOPS_BIN_PATH}/topsfc ${HOST_SRC} ${TOPS_INC_PATH} ${TOPS_LINK_ARG} -o ${BIN_TARGET}
+LD_LIBRARY_PATH=${TOPS_LIB_PATH} ${TOPS_BIN_PATH}/topsfc ${KERNEL_SRC} -gcu-arch=gcu210 -resource=2c24s -o ${FATBIN_TARGET} -I${TOPS_INC_PATH} -L${TOPS_LIB_PATH} --host-link-options="-L${TOPS_LIB_PATH}"
+LD_LIBRARY_PATH=${TOPS_LIB_PATH} ${TOPS_BIN_PATH}/topsfc ${HOST_SRC} ${TOPS_LINK_ARG} -o ${BIN_TARGET} -I${TOPS_INC_PATH} -L${TOPS_LIB_PATH} --host-link-options="-L${TOPS_LIB_PATH}"
 
 echo "Run Demo"
 LD_LIBRARY_PATH=${TOPS_LIB_PATH} ./${BIN_TARGET} ${FATBIN_TARGET}
