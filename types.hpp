@@ -197,11 +197,11 @@ int TypeIDProvider<T>::__unique_id;
 // User defined type that utilize isa/cast/dyn_cast must place the macro inside
 // its class definition
 #define __UDT_TYPE_INFO__                                       \
-  const std::string NodeTypeString() override {                 \
+  const std::string TypeNameString() override {                 \
     std::string name = __PRETTY_FUNCTION__;                     \
     std::regex prefix_regex("^.*Choreo::");                     \
     name = std::regex_replace(name, prefix_regex, "");          \
-    std::regex suffix_regex("::NodeTypeString.*$");             \
+    std::regex suffix_regex("::TypeNameString.*$");             \
     name = std::regex_replace(name, suffix_regex, "");          \
     return name;                                                \
   }                                                             \
@@ -647,7 +647,7 @@ struct Type {
   virtual std::string GetNote() const { return ""; }  // some annotation to make
 
   // for runtime type disambiguition
-  virtual const std::string NodeTypeString() = 0;
+  virtual const std::string TypeNameString() = 0;
   virtual uint64_t RuntimeID() const { return 0xDEADBEEFULL; }
   static uint64_t TypeID() { return 0xDEADBEEFULL; }
   // forbidden to have instance

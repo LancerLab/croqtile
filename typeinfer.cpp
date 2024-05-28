@@ -146,7 +146,7 @@ bool TypeInference::SetAsCurrentType(AST::Node &nd, const std::string &n) {
 
 #define __TRACE_EACH_VISIT__(n)       \
   if (trace_visit) {                  \
-    os << n.NodeTypeString() << ": "; \
+    os << n.TypeNameString() << ": "; \
     os << "\n";                       \
   }
 

@@ -160,7 +160,7 @@ class ValueNumbering {
 
 #define __TRACE_EACH_VISIT__          \
   if (trace_visit) {                  \
-    os << n.NodeTypeString() << ": "; \
+    os << n.TypeNameString() << ": "; \
     n.Print(os);                      \
     os << "\n";                       \
   }
@@ -744,25 +744,25 @@ class ShapeInference : public Visitor {
     return true;
   };
   bool Visit(AST::ForeachBlock& n) {
-    if (trace_visit) os << n.NodeTypeString() << "\n";
+    if (trace_visit) os << n.TypeNameString() << "\n";
     return true;
   };
   bool Visit(AST::FunctionDecl& n) {
-    if (trace_visit) os << n.NodeTypeString() << "\n";
+    if (trace_visit) os << n.TypeNameString() << "\n";
     return true;
   };
 
   bool Visit(AST::ChoreoFunction& n) {
-    if (trace_visit) os << n.NodeTypeString() << "\n";
+    if (trace_visit) os << n.TypeNameString() << "\n";
     return true;
   }
 
   bool Visit(AST::CppSourceCode& n) {
-    if (trace_visit) os << n.NodeTypeString() << "\n";
+    if (trace_visit) os << n.TypeNameString() << "\n";
     return true;
   };
   bool Visit(AST::Program& n) {
-    if (trace_visit) os << n.NodeTypeString() << "\n";
+    if (trace_visit) os << n.TypeNameString() << "\n";
     return true;
   };
 

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "aux.hpp"
+#include "dmaconf.hpp"
 #include "enums.hpp"
 #include "location.hh"
 #include "symtab.hpp"
@@ -65,7 +66,7 @@ struct Node {
   virtual void accept(Visitor&) = 0;
 
   // for runtime type disambiguition
-  virtual const std::string NodeTypeString() = 0;
+  virtual const std::string TypeNameString() = 0;
   virtual uint64_t RuntimeID() const { return 0ULL; }
   static uint64_t TypeID() { return 0ULL; }
 };
@@ -209,6 +210,8 @@ struct IntLiteral : public Node, public TypeIDProvider<IntLiteral> {
   int value;
   IntLiteral(const location& l, int v = __UNKNOWN_INTVAL__)
       : Node(l, MakeIntegerType()), value(v) {}
+
+  int Val() const { return value; }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     if (value == __UNKNOWN_INTVAL__)
@@ -382,7 +385,7 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
 struct NamedTypeDecl : public Node, public TypeIDProvider<NamedTypeDecl> {
   const std::string name_str;
   const std::string init_str;
-  const ptr<Node> init_expr;  // associated init_expr
+  const ptr<Node> init_expr;    // associated init_expr
   size_t rank = InvalidRank();  // rank annotation only
 
   explicit NamedTypeDecl(const location& l, const std::string& n,
@@ -843,15 +846,18 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
   bool async;
   ptr<Node> from;
   ptr<Node> to;
+  ptr<DMAConfig> config;
 
   explicit DMA(const location& l, const std::string& o, const std::string& r,
-               const ptr<Node>& f, const ptr<Node>& t, bool a)
+               const ptr<Node>& f, const ptr<Node>& t, bool a,
+               const ptr<DMAConfig>& c = nullptr)
       : Node(l, MakeFutureType(a)),
         operation(o),
         future(r),
         async(a),
         from(f),
-        to(t) {}
+        to(t),
+        config(c) {}
 
   std::string FromSymbol() const { return cast<ChunkAt>(from)->RefSymbol(); }
 
@@ -860,8 +866,11 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
     return "";
   }
 
+  void SetConfig(const ptr<DMAConfig>& cfg) { config = cfg; }
+
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- DMA" << operation << ((async) ? ".async" : "");
+    if (config) os << "\n" << prefix << "  `- config: " << STR(*config);
     os << "\n" << prefix << "  `- future: " << future;
     os << "\n" << prefix << "  `- from: " << STR(from);
     os << "\n" << prefix << "  `- to: " << STR(to);

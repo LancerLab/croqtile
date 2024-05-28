@@ -4,7 +4,7 @@ using namespace Choreo;
 
 #define __TRACE_EACH_VISIT__(n)       \
   if (trace_visit) {                  \
-    os << n.NodeTypeString() << ": "; \
+    os << n.TypeNameString() << ": "; \
     os << "\n";                       \
   }
 

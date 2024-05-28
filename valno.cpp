@@ -422,7 +422,7 @@ std::string ValueNumbering::GenerateNodeSignature(AST::Node& node,
 
   if (trace)
     Warning(node.LOC(), "invalid signature for expression `" + AST::STR(node) +
-                            "': " + node.NodeTypeString() + ".");
+                            "': " + node.TypeNameString() + ".");
 
   return "";  // invalid value
 }

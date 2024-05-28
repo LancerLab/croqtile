@@ -144,6 +144,7 @@ void choreo_info(const char *message) {
 
 // non-terminals
 %nterm <std::string> dma_operation
+%nterm <ptr<DMAConfig>> dma_config
 %nterm <bool> sync_type
 %nterm <Choreo::Storage> storage
 %nterm <Choreo::BaseType> fundamental_type
@@ -151,7 +152,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::Node>> foreach_block general_val simple_int span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt index_or_value iv_expr if_else_block optional_scalar_init param_mdspan_val chunkat_or_storage
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause else_block
-%nterm <AST::ptr<AST::MultiValues>> index_value_list value_list param_mdspan_list iv_exprs id_list with_matchers passables
+%nterm <AST::ptr<AST::MultiValues>> index_value_list value_list param_mdspan_list iv_exprs iv_list id_list with_matchers passables
 %nterm <AST::ptr<AST::Expr>> s_expr span_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
@@ -745,9 +746,9 @@ iv_expr
     ;
 
 dma_stmt
-    : IDENTIFIER ASSIGN DMA dma_operation sync_type chunkat_expr TRANS chunkat_or_storage {
+    : IDENTIFIER ASSIGN DMA dma_operation sync_type dma_config chunkat_expr TRANS chunkat_or_storage {
         symtab.AddSymbol($1, MakeFutureType($5));
-        $$ = AST::Make<AST::DMA>(@3, $4, $1, $6, $8, $5);
+        $$ = AST::Make<AST::DMA>(@3, $4, $1, $7, $9, $5, $6);
       }
     ;
 
@@ -755,6 +756,21 @@ dma_operation
     : COPY   { $$ = $1; }
     | SLICE  { $$ = $1; }
     | PAD    { $$ = $1; }
+    ;
+
+dma_config
+    : LT LBRACE iv_list RBRACE COMMA LBRACE iv_list RBRACE COMMA LBRACE iv_list RBRACE COMMA NUM GT {
+        auto pc = std::make_shared<PadConfig>();
+        for (auto high : $3->values)
+          pc->pad_high.push_back(cast<AST::IntLiteral>(high)->Val());
+        for (auto low : $7->values)
+          pc->pad_low.push_back(cast<AST::IntLiteral>(low)->Val());
+        for (auto mid : $11->values)
+          pc->pad_mid.push_back(cast<AST::IntLiteral>(mid)->Val());
+        pc->SetPadValue($14);
+        $$ = pc;
+      }
+    | /* Empty for no config */ { $$ = nullptr; }
     ;
 
 sync_type
@@ -775,6 +791,18 @@ chunkat_expr
         $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1));
       }
     ;
+
+iv_list
+    : iv_list COMMA NUM {
+        $1->Append(AST::Make<AST::IntLiteral>(@3, $3));
+        $$ = $1;
+      }
+    | NUM {
+        $$ = AST::Make<AST::MultiValues>(@1, ", ");
+        $$->Append(AST::Make<AST::IntLiteral>(@1, $1));
+      }
+    ;
+
 
 id_list
     : id_list COMMA IDENTIFIER {
