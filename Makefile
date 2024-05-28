@@ -133,7 +133,7 @@ gcu-platform-pkg:
 		chmod +x $(GCU_PLATFORM_PKG); \
 		$(GCU_PLATFORM_PKG) -y -C topsruntime --install-dir $(TOOLCHAIN); \
 		$(GCU_PLATFORM_PKG) -y -C topscc --install-dir $(TOOLCHAIN); \
-		rsync -av $(TOOLCHAIN)/opt/tops $(TOOLCHAIN); \
+		rsync -av $(TOOLCHAIN)/opt/tops/* $(TOOLCHAIN); \
 		rm -fr $(TOOLCHAIN)/opt; \
 	else \
 		echo "$(GCU_PLATFORM_PKG) MD5 hash matches. No need to download."; \
@@ -149,7 +149,7 @@ gcu-factor-pkg:
 		mkdir -p $(TOOLCHAIN); \
 		curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU_FACTOR_NAME) -o $(GCU_FACTOR_PKG);\
 		fakeroot sudo dpkg --instdir=$(TOOLCHAIN) -i $(GCU_FACTOR_PKG); \
-		rsync -av $(TOOLCHAIN)/usr/ $(TOOLCHAIN); \
+		rsync -av $(TOOLCHAIN)/usr/* $(TOOLCHAIN); \
 		fakeroot sudo rm -fr $(TOOLCHAIN)/usr/; \
 	else \
 		echo "$(GCU_FACTOR_PKG) MD5 hash matches. No need to download."; \
