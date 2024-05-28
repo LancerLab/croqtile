@@ -40,11 +40,14 @@ int main() { /// host program
   auto res
     = ele_add(choreo::make_spanview<3, choreo::s32>((int*)a, {6, 17, 128}),
               choreo::make_spanview<3, choreo::s32>((int*)b, {6, 17, 128}));
+  std::cout << res.shape()[0] << std::endl;
+  std::cout << res.shape()[1] << std::endl;
+  std::cout << res.shape()[2] << std::endl;
 
   // verfication
   for (size_t i = 0; i < res.shape()[0]; ++i)
-    for (size_t j = 0; i < res.shape()[1]; ++i)
-      for (size_t k = 0; i < res.shape()[2]; ++i) {
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k) {
         std::cout << "i: " << i << ", j: " << j << ", k: " << k << "\n";
         std::cout << "a: " << a[i][j][k] << ", b: " << b[i][j][k] << ", res: " << res[i][j][k] << "\n";
         if (a[i][j][k] + b[i][j][k] != res[i][j][k]) {
