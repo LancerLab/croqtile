@@ -1,5 +1,7 @@
-#ifndef __CHOREO_DESUGARING_HPP__
-#define __CHOREO_DESUGARING_HPP__
+#ifndef __CHOREO_NORMALIZATION_HPP__
+#define __CHOREO_NORMALIZATION_HPP__
+
+// This applies 'normalization' or 'canonicalization' of AST for easier handling in later visiting passes.
 
 #include <iostream>
 
@@ -8,12 +10,15 @@
 
 namespace Choreo {
 
-struct DeSugaring : public Visitor {
+struct Normalizer : public Visitor {
  private:
+  std::ostream & os;
   bool trace = false;
-  bool changed = false;
-  std::string old;
 
+ private:
+  bool changed = false;
+
+  std::string old;
   size_t count = 0;  // name suffix of runtime int values
 
   bool handle_parameter = false;
@@ -23,11 +28,11 @@ struct DeSugaring : public Visitor {
   }
   void ResetListReference() { list_ref = nullptr; }
 
-  std::string GetRuntimeValueString() { return "$" + std::to_string(count++); }
+  std::string GetInternalValueString() { return "$" + std::to_string(count++); }
 
  public:
   // it does not require a symbol table
-  DeSugaring() : Visitor(nullptr), trace(std::getenv("TRACE_DESUGAR")) {}
+  Normalizer(std::ostream &o) : Visitor(nullptr), os(o), trace(std::getenv("TRACE_NORM")) {}
 
   bool BeforeVisit(AST::Node &n) override {
     if (auto *b = dyn_cast<AST::MultiDimSpans>(&n)) {
@@ -66,7 +71,7 @@ struct DeSugaring : public Visitor {
     } else if (auto p = dyn_cast<AST::Parameter>(&n)) {
       handle_parameter = false;
       if (changed && trace)
-        std::cout << "Name dims of `" << STR(*p->sym) << "': " << old
+        os << "Name dims of `" << STR(*p->sym) << "': " << old
                   << " ---> " << STR(*p->type) << "\n";
       old.clear();
       changed = false;
@@ -88,7 +93,7 @@ struct DeSugaring : public Visitor {
               auto new_expr =
                   AST::Make<AST::Expr>(expr->LOC(), "dimof", list_ref, ref);
               if (trace)
-                std::cout << "Desugar ref: " << STR(*expr) << " ---> "
+                os << "Desugar ref: " << STR(*expr) << " ---> "
                           << STR(*new_expr) << "\n";
               n.values[i] = new_expr;
             }
@@ -102,14 +107,14 @@ struct DeSugaring : public Visitor {
         if (auto il = dyn_cast<AST::IntLiteral>(n.values[i])) {
           if (il->value != __UNKNOWN_INTVAL__) continue;
           auto new_il =
-              AST::Make<AST::Identifier>(il->LOC(), GetRuntimeValueString());
+              AST::Make<AST::Identifier>(il->LOC(), GetInternalValueString());
 
 #if 0
           if (trace) {
-            il->Print(std::cout);
-            std::cout << " --->";
-            new_il->Print(std::cout);
-            std::cout << "\n";
+            il->Print(os);
+            os << " --->";
+            new_il->Print(os);
+            os << "\n";
           }
 #endif
           changed = true;
@@ -123,36 +128,38 @@ struct DeSugaring : public Visitor {
 
   bool Visit(AST::IntLiteral &) override { return true; }
   bool Visit(AST::Expr &n) override {
-    if (!list_ref) return true;  // no syntax sugar
+    if (list_ref) { // could be with syntax sugar
+      auto Apply = [this](AST::Expr *expr) -> ptr<AST::Expr> {
+        if (!expr) return nullptr;
+        if (auto ref = expr->GetReference()) {
+          if (!isa<AST::IntIndex>(ref.get())) return nullptr;
 
-    auto Apply = [this](AST::Expr *expr) -> ptr<AST::Expr> {
-      if (!expr) return nullptr;
-      if (auto ref = expr->GetReference()) {
-        if (!isa<AST::IntIndex>(ref.get())) return nullptr;
+          // apply desugaring a {(0), 1} -> {a(0), 1}
+          auto ret = AST::Make<AST::Expr>(expr->LOC(), "dimof", list_ref, ref);
 
-        // apply desugaring a {(0), 1} -> {a(0), 1}
-        auto ret = AST::Make<AST::Expr>(expr->LOC(), "dimof", list_ref, ref);
+          if (trace) {
+            os << "Desugaring expression node: ";
+            expr->Print(os);
+            os << " --->";
+            ret->Print(os);
+            os << "\n";
+          }
 
-        if (trace) {
-          std::cout << "Desugaring expression node: ";
-          expr->Print(std::cout);
-          std::cout << " --->";
-          ret->Print(std::cout);
-          std::cout << "\n";
+          changed = true;
+
+          return ret;
         }
+        return nullptr;
+      };
 
-        changed = true;
-
-        return ret;
+      if (auto new_value = Apply(n.value_c.get())) n.value_c = new_value;
+      if (auto new_value = Apply(n.value_l.get())) n.value_l = new_value;
+      if (isa<AST::Expr>(n.value_r)) {
+        if (auto new_value = Apply(cast<AST::Expr>(n.value_r.get())))
+          n.value_r = new_value;
       }
-      return nullptr;
-    };
 
-    if (auto new_value = Apply(n.value_c.get())) n.value_c = new_value;
-    if (auto new_value = Apply(n.value_l.get())) n.value_l = new_value;
-    if (isa<AST::Expr>(n.value_r.get())) {
-      if (auto new_value = Apply(cast<AST::Expr>(n.value_r.get())))
-        n.value_r = new_value;
+      return true;
     }
 
     return true;
@@ -166,7 +173,7 @@ struct DeSugaring : public Visitor {
       n.mem->Set(Storage::GLOBAL);
 
       if (trace)
-        std::cout << "Place storage of '" << n.name_str
+        os << "Place storage of '" << n.name_str
                   << "': DEFAULT ---> GLOBAL\n";
     }
 
@@ -201,4 +208,4 @@ struct DeSugaring : public Visitor {
 
 }  // end namespace Choreo
 
-#endif  // __CHOREO_DESUGARING_HPP__
+#endif  // __CHOREO_NORMALIZATION_HPP__

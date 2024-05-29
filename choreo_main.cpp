@@ -89,10 +89,10 @@ int main(int argc, char* argv[]) {
   if (stop_after.GetValue() == "check1") return 0;
 
   // minor AST change: desugar for canonicalized AST
-  DeSugaring ds;
+  Normalizer ds(std::cout);
   root.accept(ds);
 
-  if (stop_after.GetValue() == "desugar") return 0;
+  if (stop_after.GetValue() == "norm") return 0;
 
   // perform shape inference of mdspans, future, etc.
   ShapeInference si(print_vn);

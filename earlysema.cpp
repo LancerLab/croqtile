@@ -142,6 +142,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     auto rty = NodeType(*n.value_r);
     if ((isa<MDSpanType>(lty) && isa<ITupleType>(rty)) ||
         (isa<MDSpanType>(rty) && isa<ITupleType>(lty))) {
+      // mdspan + ituple
       if (lty->Dims() != rty->Dims()) {
         Error(n.LOC(), "in operation \"" + n.op +
                            "\": dimension inconsistent (" +
@@ -151,6 +152,26 @@ bool EarlySemantics::Visit(AST::Expr& n) {
         return false;
       }
       SetNodeType(n, MakeDimedMDSpanType(lty->Dims()));
+    } else if ((isa<ITupleType>(lty) && isa<IntegerType>(rty)) ||
+               (isa<MDSpanType>(lty) && isa<IntegerType>(rty))) {
+      SetNodeType(n, lty);
+    } else if ((isa<ITupleType>(rty) && isa<IntegerType>(lty)) ||
+               (isa<MDSpanType>(rty) && isa<IntegerType>(lty))) {
+      SetNodeType(n, rty);
+    } else if ((isa<ITupleType>(lty) && isa<ITupleType>(rty))) {
+      // ituple + ituple
+      if (lty->HasSufficientInfo() && rty->HasSufficientInfo()) {
+        if (lty->Dims() != rty->Dims()) {
+          Error(n.LOC(), "in operation \"" + n.op +
+                "\": dimension inconsistent (" +
+                std::to_string(lty->Dims()) + " vs. " +
+                std::to_string(rty->Dims()) + ").");
+          error_count++;
+          return false;
+        }
+        SetNodeType(n, lty);
+      } else
+        SetNodeType(n, MakeUninitBoundedITupleType());
     } else if ((isa<BoundedIntegerType>(lty) && isa<IntegerType>(rty)) ||
                (isa<BoundedIntegerType>(rty) && isa<IntegerType>(lty))) {
       // this is promissing, simply allow it
@@ -488,7 +509,7 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
   }
   if (n.with_matchers) {
     n.with_matchers->accept(*this);
-    for (auto v : n.with_matchers->GetValues()) {
+    for (auto v : n.with_matchers->AllValues()) {
       if (!isa<AST::Identifier>(v)) {
         Error(v->LOC(), "expecting an identifier.");
         continue;
@@ -541,7 +562,7 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
   }
   if (n.positions) {
     n.positions->accept(*this);
-    for (auto& v : n.positions->GetValues()) {
+    for (auto& v : n.positions->AllValues()) {
       auto ty = NodeType(*v);
       if (!isa<BoundedIntegerType>(ty) && !isa<BoundedITupleType>(ty)) {
         Error(n.LOC(), "expecting '" + cast<AST::Identifier>(v)->name +
@@ -558,7 +579,7 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
 bool EarlySemantics::Visit(AST::Wait& n) {
   __TRACE_EACH_VISIT__(n)
 
-  for (auto& v : n.targets->GetValues()) {
+  for (auto& v : n.targets->AllValues()) {
     auto id = dyn_cast<AST::Identifier>(v);
     if (!id) Error(n.LOC(), "expecting symbol but got '" + AST::STR(*v));
 
@@ -590,7 +611,7 @@ bool EarlySemantics::Visit(AST::Call& n) {
   }
 
   size_t count = 0;
-  for (auto& v : n.arguments->GetValues()) {
+  for (auto& v : n.arguments->AllValues()) {
     count++;
     auto ty = NodeType(*v);
     // must be a callable type

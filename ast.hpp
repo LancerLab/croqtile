@@ -161,7 +161,7 @@ struct MultiValues : public Node, public TypeIDProvider<MultiValues> {
     return values[idx];
   }
 
-  std::vector<ptr<Node>> GetValues() const { return values; }
+  std::vector<ptr<Node>> AllValues() const { return values; }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     if (delimiter != "" && values.size() > 1) {
@@ -257,6 +257,18 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
     return dyn_cast<Identifier>(value_r);
   }
 
+  bool IsUnary() const { return t == Type::Unary; }
+  bool IsBinary() const { return t == Type::Binary; }
+  bool IsTernary() const { return t == Type::Ternary; }
+  bool IsReference() const { return t == Type::Reference; }
+
+  bool IsArith() const {
+    if (!IsBinary()) return false;
+    if ((op == "+") || (op == "-") || (op == "*") || (op == "/") || (op == "%"))
+      return true;
+    return false;
+  }
+
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     if (t == Reference) {
       value_r->Print(os, prefix);
@@ -335,7 +347,7 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
                          const ptr<MDSpanType>& pty)
       : Node(l, pty), ref_name(n), list(nullptr), rank(pty->Dims()) {}
 
-  bool HasValidDims() const { return rank == __INVALID_VALUE__; }
+  bool HasValidRank() const { return rank == __INVALID_VALUE__; }
   size_t Rank() const { return rank; }
   void SetRank(size_t n) { rank = n; }
 
@@ -438,7 +450,9 @@ struct IntTuple : public Node, public TypeIDProvider<IntTuple> {
 
   explicit IntTuple(const location& l, const std::string& n,
                     ptr<MultiValues> lst)
-      : Node(l, MakeUninitITupleType()), ref_name(n), vlist(lst) {}
+    : Node(l, MakeUninitITupleType()), ref_name(n), vlist(lst) {
+      vlist->SetDelimiter(", ");
+    }
 
   const ptr<MultiValues>& GetValues() const { return vlist; }
   void Print(std::ostream& os, const std::string& prefix = {}) const override {

@@ -254,7 +254,7 @@ fi
     this->decrementIndent();
     fs << this->indent << "}); // end of choreo-factor kernel function\n";
   } else if (auto f = dyn_cast<AST::ForeachBlock>(&n)) {
-    for (auto id : f->ivs->GetValues()) {
+    for (auto id : f->ivs->AllValues()) {
       auto name = cast<AST::Identifier>(id)->name;
       int dec_by = 1;
       bool multiple_bounds = cur_bounded_vars.count(name);
@@ -432,7 +432,7 @@ bool FactorCodeGen::Visit(AST::WhereBind &) { return true; };
 bool FactorCodeGen::Visit(AST::WithIn &n) {
   if (n.with && n.with_matchers) {
     std::vector<std::string> matchers;
-    for (auto mn : n.with_matchers->GetValues()) {
+    for (auto mn : n.with_matchers->AllValues()) {
       matchers.push_back(cast<AST::Identifier>(mn)->name);
     }
     cur_bounded_vars.emplace(n.with->name, matchers);
@@ -560,13 +560,13 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   offset_string.append("{");
   auto tile_factors = chunkat_node->positions;
   if (tile_factors) {
-    assert(dim_sz == (int)tile_factors->GetValues().size() &&
+    assert(dim_sz == (int)tile_factors->AllValues().size() &&
            "Inconsistant sizes for DMA offset.");
     // auto dim = tile_shape.values.values[0];
     // assert(dim_sz == (int)dim.size() && "Inconsistant sizes for tensor
     // shapes.");
     for (int dim_cursor = 0; dim_cursor < dim_sz;) {
-      auto tile_factor = tile_factors->GetValues()[dim_cursor];
+      auto tile_factor = tile_factors->AllValues()[dim_cursor];
 #if 0
       auto tf_symbol = STR(tile_factor);
       auto tf_bounds =
@@ -628,7 +628,7 @@ bool FactorCodeGen::Visit(AST::Wait &w) {
   auto dmas = w.targets;
   assert(dmas && "Invalid wait target!");
 
-  for (auto dma : dmas->GetValues()) {
+  for (auto dma : dmas->AllValues()) {
     fs << this->indent << "wait_dma_(" << AST::STR(*dma) << ");\n";
   }
 
@@ -641,9 +641,9 @@ bool FactorCodeGen::Visit(AST::Call &c) {
   fs << "\", {";
   auto args = c.arguments;
   assert(args && "Invalid kernel call args!");
-  int arg_num = args->GetValues().size();
+  int arg_num = args->AllValues().size();
   for (int index = 0; index < arg_num;) {
-    auto arg = dyn_cast<AST::Expr>(args->GetValues()[index]);
+    auto arg = dyn_cast<AST::Expr>(args->AllValues()[index]);
     assert(arg && "Invalid kernel call arg!");
     switch (arg->t) {
       case AST::Expr::Reference:
