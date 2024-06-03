@@ -470,9 +470,6 @@ inline void PrintValueList(const ValueList& vl, std::ostream& os,
   if (rb) os << rb;
 }
 
-// target specific value list printing
-void EmitValueListForFactor(const ValueList& vl, std::ostream& os);
-
 struct Shape {
   static ValueListRepo values;  // value numbers
 
@@ -603,18 +600,7 @@ struct Shape {
     }
   }
 
-  // util function for emit
-  std::string EmitTo(Target target) const {
-    (void)target;
-    std::ostringstream _os;
-    if (val_no == __INVALID_VALUE__) _os << "{}";
-    // PrintValueList(Value(), _os);
-    else {
-      assert(values.Exists(val_no) && "bad value number.");
-      EmitValueListForFactor(Value(), _os);
-    }
-    return _os.str();
-  }
+  std::string EmitTo(Target target) const;
 };
 
 inline bool operator==(const Shape& lhs, const Shape& rhs) {

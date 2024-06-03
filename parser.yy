@@ -787,6 +787,9 @@ chunkat_expr
     : IDENTIFIER CHUNKAT LPAREN id_list RPAREN {
         $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $4);
       }
+    /*| IDENTIFIER CHUNKAT LPAREN value_list RPAREN {
+        $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $4);
+      }*/
     | IDENTIFIER {
         $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1));
       }

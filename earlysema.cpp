@@ -172,6 +172,18 @@ bool EarlySemantics::Visit(AST::Expr& n) {
         SetNodeType(n, lty);
       } else
         SetNodeType(n, MakeUninitBoundedITupleType());
+    } else if ((isa<BoundedITupleType>(lty) && isa<BoundedIntegerType>(rty)) || 
+               (isa<BoundedIntegerType>(lty) && isa<BoundedITupleType>(rty)) ||
+               (isa<BoundedIntegerType>(lty) && isa<BoundedIntegerType>(rty))){
+      // allow only * operator for catesian products on two bounded-vars
+      // currently, only support boundedituple * boundedint or boundedint * boundedint
+      // os << STR(n.value_l) << "lty = " << PSTR(lty) << "; rty = " << PSTR(rty);
+      if ((n.op != "*")) {
+        Error(n.LOC(), "in operation \"" + n.op +
+                           "\": unable to apply to the types (" + PSTR(lty) +
+                           " vs. " + PSTR(rty) + ").");
+        return false;
+      }
     } else if ((isa<BoundedIntegerType>(lty) && isa<IntegerType>(rty)) ||
                (isa<BoundedIntegerType>(rty) && isa<IntegerType>(lty))) {
       // this is promissing, simply allow it
@@ -238,6 +250,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
              (n.op == "!=") || (n.op == "<=") || (n.op == ">=")) {
     auto lty = NodeType(*n.value_l);
     auto rty = NodeType(*n.value_r);
+    assert(false);
     if (!(lty->ApprxEqual(*rty))) {
       Error(n.LOC(), "in operation \"" + n.op +
                          "\": unable to apply to the types (" + PSTR(lty) +
@@ -249,6 +262,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
   } else if ((n.op == "&&") || (n.op == "||")) {
     auto lty = NodeType(*n.value_l);
     auto rty = NodeType(*n.value_r);
+    assert(false);
     if (!isa<BooleanType>(lty) || !isa<BooleanType>(rty)) {
       Error(n.LOC(), "in operation \"" + n.op +
                          "\": unable to apply to the types (" + PSTR(lty) +
@@ -563,12 +577,19 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
   if (n.positions) {
     n.positions->accept(*this);
     for (auto& v : n.positions->AllValues()) {
-      auto ty = NodeType(*v);
-      if (!isa<BoundedIntegerType>(ty) && !isa<BoundedITupleType>(ty)) {
-        Error(n.LOC(), "expecting '" + cast<AST::Identifier>(v)->name +
-                           "` be a bounded type.");
-        error_count++;
-      }
+      // if this is a expr, do expr check, otherwise to normal bounded var check
+      // if (auto node = cast<AST::Expr>(v)) {
+      //   this->Visit(*node);
+      // } else {
+        auto ty = NodeType(*v);
+        if (!isa<BoundedIntegerType>(ty) &&
+            !isa<BoundedIntegerType>(ty) &&
+            !isa<BoundedITupleType>(ty)) {
+          Error(n.LOC(), "expecting '" + v->TypeNameString() +
+                             "` be a bounded type.");
+          error_count++;
+        }
+      // }
     }
   }
   size_t rank = cast<SpannedType>(NodeType(*n.data))->Dims();

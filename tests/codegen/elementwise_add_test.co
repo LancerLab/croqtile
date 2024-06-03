@@ -27,7 +27,7 @@ __co__ f32 mdspan[12, 1024] ele_add(s32 [12, 1024] a, s32 [12, 1024] b) {
   // TODO: fix to avoid merging a.span, b.span, all to "a_type"
   // check: auto lhs_global = alloc_(a_type);
   // check: auto rhs_global = alloc_(a_type);
-  // CHECK: auto output = alloc_(DRAMType(FloatType(32),{12, 1024}));
+  // CHECK: auto output = alloc_(output_type);
 
   // TODO(albert): test span decl
   // l2_span : [25];  // shape, mdspan node

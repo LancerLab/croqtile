@@ -1,3 +1,5 @@
+#include "codegen_factor.hpp"
+
 #include <filesystem>
 #include <iostream>
 #include <sstream>
@@ -13,146 +15,10 @@
 #error "missing macro definition of __CHOREO_FACTOR_DIR__"
 #endif
 
-namespace Choreo {
-
-// TODO(albert): pack this util function together with other emit purpose
-// classes/methods
-// TODO(albert): add emit target
-// MDSpan is sized and dependent type (dependent on the others)
-void EmitValueListForFactor(const ValueList &vl, std::ostream &os) {
-  auto print_variant = [&os](const ValueItem &vle) {
-    if (vle.index() == 0)
-      os << std::get<0>(vle);
-    else
-      os << std::get<1>(vle);
-  };
-  os << "{";
-  if (!vl.empty()) {
-    print_variant(vl[0]);
-    for (unsigned i = 1; i < vl.size(); ++i) {
-      os << ", ";
-      print_variant(vl[i]);
-    }
-  }
-  os << "}";
-}
-
-}  // end namespace Choreo
-
 using namespace Choreo;
+using namespace Choreo::Factor;
 
 extern StringifyTable strtab;
-
-namespace {
-
-constexpr const char *backpatch_filename =
-    "__choreo_kernel_file_name_that_will_be_back_patched_soon_ok_enough_i_am_"
-    "bored__";
-
-inline static void ReplaceInString(std::string &str, const std::string &from,
-                                   const std::string &to) {
-  if (from.empty()) return;
-
-  size_t startPos = 0;
-  while ((startPos = str.find(from, startPos)) != std::string::npos) {
-    str.replace(startPos, from.length(), to);
-    startPos += to.length();  // In case 'to' contains 'from', like replacing
-                              // 'x' with 'yx'
-  }
-}
-
-inline static std::string create_unique_filename(
-    const std::string &custom_string) {
-  // Get a high-resolution timestamp
-  auto now = std::chrono::high_resolution_clock::now();
-  auto duration = now.time_since_epoch();
-
-  // Convert timestamp to a more granular unit, like nanoseconds
-  auto nanoseconds =
-      std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count();
-
-  // Get the thread or process ID
-  std::stringstream ss;
-  ss << std::this_thread::get_id();
-  std::string thread_id = ss.str();
-
-  // Construct the filename
-  std::string filename = "/tmp/" + std::to_string(nanoseconds) + "_" +
-                         thread_id + "_" + custom_string;
-
-  return filename;
-}
-
-static inline std::string factor_storage_str(Choreo::Storage s) {
-  switch (s) {
-    case Storage::LOCAL:
-      return "L1Type";
-    case Storage::SHARED:
-      return "SRAMType";
-    case Storage::GLOBAL:
-    case Storage::DEFAULT:
-      return "DRAMType";
-    default:
-      choreo_unreachable();
-  }
-}
-
-static inline std::string HostTypeString(const Choreo::Type &ty,
-                                         bool is_ret = false) {
-  if (isa<VoidType>(&ty))
-    return "void";
-  else if (isa<IntegerType>(&ty))
-    return "int";
-  else if (isa<BooleanType>(&ty))
-    return "bool";
-  else if (auto sty = dyn_cast<SpannedType>(&ty)) {
-    if (is_ret)  // return by value
-      return "choreo::spanned_data<choreo::" + STR(sty->f_type) + ", " +
-             std::to_string(sty->Dims()) + ">";
-    else  // pass by reference
-      return "const choreo::spanned_view<choreo::" + STR(sty->f_type) + ", " +
-             std::to_string(sty->Dims()) + "> &";
-  }
-  choreo_unreachable("unsupported host function type.");
-  return "";
-}
-
-static inline std::string factor_typestr(Choreo::BaseType t) {
-  switch (t) {
-    case BaseType::F32:
-      return "FloatType(32)";
-      break;
-    case BaseType::F16:
-      return "FloatType(16)";
-      break;
-    case BaseType::BF16:
-      return "BFloatType(16)";
-      break;
-    case BaseType::U32:
-    case BaseType::S32:
-      return "IntType(32)";
-      break;
-    case BaseType::U16:
-    case BaseType::S16:
-      return "IntType(16)";
-      break;
-    case BaseType::U8:
-    case BaseType::S8:
-      return "IntType(8)";
-      break;
-    // should it be passed in?
-    case BaseType::INT:
-      return "IntType(32)";
-      break;
-    case BaseType::BOOL:
-      return "BoolType(32)";
-      break;
-    default:
-      choreo_unreachable("Type '" + STR(t) + "' is not supported.");
-  }
-}
-
-}  // end anonymous namespace
 
 bool FactorCodeGen::BeforeVisitImpl(AST::Node &n) {
   if (isa<AST::Program>(&n)) {
@@ -183,6 +49,7 @@ using namespace factor;
   return 0;
 }
 
+// CLEAN
 bool FactorCodeGen::AfterVisitImpl(AST::Node &n) {
   if (isa<AST::Program>(&n)) {
     os << "# step 4.1: generate the host source\n";
@@ -291,6 +158,7 @@ bool FactorCodeGen::Visit(AST::NamedTypeDecl &) { return true; };
 //
 // ast like:
 //   NamedVariableDecl
+//   CLEAN
 bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
   // TODO(albert): 'a.span' will be replace to the type-decl related to 'a'
   // TODO(albert): refine this function with TYPE_STR new API
@@ -302,8 +170,10 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
     // NOTE: full ref name may use "a.span" to ref to a var's span partial type
     // the decl of new var will need this symbol "a", not "a.span"
     // we do a hardcode workaround here
-    auto full_ref_name = ptype->getRefName();
-    auto ref_symbol = full_ref_name.substr(0, full_ref_name.find('.'));
+    // auto full_ref_name = ptype->getRefName();
+    // auto ref_symbol = full_ref_name.substr(0, full_ref_name.find('.'));
+    // os << ref_symbol;
+    auto ref_symbol = node.name_str;
     if (strtab.Exists(ref_symbol)) {
       fs << this->indent;
       fs << "auto " << node.name_str << " = alloc_(";
@@ -344,6 +214,14 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
         fs << _os.str();
       else
         alloc_in_fs << _os.str();
+
+      // generate "memset_()" action to initiate each alloc_memory with value 0
+      if (storage_type == "L1Type")
+        fs << this->indent << "auto " << node.name_str << "_init = alloc_dma_(SDMAType());\n"; 
+      else
+        fs << this->indent << "auto " << node.name_str << "_init = alloc_dma_(CDMAType());\n"; 
+
+      fs << this->indent << "memset_(" << node.name_str << "_init, " << node.name_str << ", 0);\n";
     }
   } else {
     // TODO(albert): handle anon case
@@ -381,6 +259,7 @@ bool FactorCodeGen::Visit(AST::ParamList &pl) {
   return true;
 }
 
+// CLEAN
 bool FactorCodeGen::Visit(AST::ParallelBy &by) {
   parallel_factor *= by.bound;
   fs << this->indent << "Dim3 grid_dim(1);\n";
@@ -429,6 +308,8 @@ bool FactorCodeGen::Visit(AST::ParallelBy &by) {
 }
 
 bool FactorCodeGen::Visit(AST::WhereBind &) { return true; };
+
+// CLEAN
 bool FactorCodeGen::Visit(AST::WithIn &n) {
   if (n.with && n.with_matchers) {
     std::vector<std::string> matchers;
@@ -447,6 +328,7 @@ bool FactorCodeGen::Visit(AST::Memory &n) {
   return true;
 }
 
+// CLEAN
 bool FactorCodeGen::Visit(AST::DMA &d) {
   // handle .to  in AST::Memory
   // d.to->Print(os); // shared
@@ -583,13 +465,18 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
       // TODO: strip " "
       auto dim_bound = tile_shape_string.substr(0, pos);
       tile_shape_string = tile_shape_string.substr(pos + 1);
-      auto offset =
-          (dim_cursor == 0)
-              ? "Value(" +
-                    RemovePrefixOrNull(" ", dim_bound).value_or(dim_bound) +
-                    ")*thread_id"
-              : "Value(" + RemovePrefixOrNull(" ", dim_bound).value_or("1") +
-                    ")*" + STR(tile_factor);
+
+      // if tile_factor_str == p, replace into thread_id
+      auto tile_factor_str = (STR(tile_factor) == "p") ? "thread_id" : STR(tile_factor);
+      auto offset = "Value(" + RemovePrefixOrNull(" ", dim_bound).value_or(dim_bound) +
+                    ")*" + tile_factor_str;
+      // auto offset =
+      //     (dim_cursor == 0)
+      //         ? "Value(" +
+      //               RemovePrefixOrNull(" ", dim_bound).value_or(dim_bound) +
+      //               ")*thread_id"
+      //         : "Value(" + RemovePrefixOrNull(" ", dim_bound).value_or("1") +
+      //               ")*" + STR(tile_factor);
       // auto offset = (dim_cursor == 0) ? "thread_id" : STR(tile_factor);
       offset_string = offset_string + offset;
       ++dim_cursor;
@@ -635,6 +522,7 @@ bool FactorCodeGen::Visit(AST::Wait &w) {
   return true;
 }
 
+// CLEAN
 bool FactorCodeGen::Visit(AST::Call &c) {
   fs << this->indent << "call_(\"";
   fs << STR(*c.function);
@@ -671,7 +559,7 @@ bool FactorCodeGen::Visit(AST::Call &c) {
         }
         break;
       default:
-        fs << STR(*arg);
+        os << STR(arg->t);
         choreo_unreachable("unhandled expression type.");
         break;
     }
@@ -688,6 +576,7 @@ bool FactorCodeGen::Visit(AST::Return &ReturnNode) {
   return true;
 }
 
+// CLEAN
 bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
   // auto ty = this->GetSymbolType("l2_tile");
   // ty->Print(os);
@@ -704,16 +593,15 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
     auto iv_type = this->GetSymbolType(id->name);
     auto iv_bounds = dyn_cast<BoundedITupleType>(iv_type)->GetBounds();
     auto iv_values = iv_bounds.Value();
-    // for (const auto &value : iv_values) {
-    //   if (auto intValue = std::get_if<int>(&value)) fs << *intValue;
-    // }
-    // NOTES: bounds always has one integer indicating the upperbound value
+
+    // NOTES: foreach block ranges between [0, UB),
+    // it always use one integer indicating the UB
     // we can certainly use idx=0 directly
-    auto upper_bound = *(std::get_if<int>(&iv_values[0]));
+    auto ub_value = GetAt<int>(iv_values, 0);
 
     // synthesise the emitting string
     if (iv_type->Dims() == 1) {
-      fs << this->indent << "for_(0, " << std::to_string(upper_bound) << ", "
+      fs << this->indent << "for_(0, " << std::to_string(ub_value) << ", "
          << 1 /* TODO(albert): need fix, unit stride is hardcoded for now*/
          << ", [&](auto " << id->name << ") {\n";
       this->incrementIndent();
@@ -723,7 +611,7 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
       assert((cur_bounded_vars[id->name].size() == iv_bounds.Dims()) &&
              "can not find the bounded name.");
       for (auto name : cur_bounded_vars[id->name]) {
-        fs << this->indent << "for_(0, " << std::to_string(upper_bound) << ", "
+        fs << this->indent << "for_(0, " << std::to_string(ub_value) << ", "
            << 1 /* TODO(albert): need fix, unit stride is hardcoded for now*/
            << ", [&](auto " << name << ") {\n";
         this->incrementIndent();
@@ -733,6 +621,7 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
   return true;
 }
 
+// CLEAN
 bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
   auto ty = d.GetType();
   assert(isa<FunctionType>(ty) && "unexpected type.");
