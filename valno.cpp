@@ -80,8 +80,10 @@ void ValueNumbering::LeaveScope() {
   nodeValueNumbers.pop_back();
 
   // reset value number when leaving the function scope
-  if (expressionValueNumbers.empty() || expressionValueNumbers.size() == 1)
+  if (expressionValueNumbers.empty() || expressionValueNumbers.size() == 1) {
     nextValueNumber = 0;
+    bind_info.Clear();
+  }
 
   if (trace) os << ScopeIndent() << "} // end scope-" << sname << "\n";
 }
@@ -93,7 +95,7 @@ void ValueNumbering::AssociateSignatureWithValueNumber(const std::string& sig,
   if (expressionValueNumbers.back().count(sig)) {
     // signature exists
     assert((expressionValueNumbers.back()[sig] == valno) &&
-           "associate signature with different value number.");
+           "must associate signature with different value number.");
   }
 
   assert(valueNumberExpressions.back().count(valno) &&
@@ -110,7 +112,8 @@ std::string ValueNumbering::SignBinaryCompositeValues(const location& loc,
                                                       const std::string& l_sig,
                                                       const std::string& r_sig,
                                                       bool verbose) {
-  assert((CountElementsInSignature(l_sig) > 1) || (CountElementsInSignature(r_sig) > 1));
+  assert((CountElementsInSignature(l_sig) > 1) ||
+         (CountElementsInSignature(r_sig) > 1));
 
   std::string lhs, rhs;
   // specially handle ituple/mdspan + integer: broadcast integer
@@ -119,16 +122,14 @@ std::string ValueNumbering::SignBinaryCompositeValues(const location& loc,
     assert(elem_count > 1);
     int valno = GetValueNumberOfSignature(l_sig);
     lhs = "#" + std::to_string(valno);
-    for (int i = 1; i < elem_count; ++i)
-      lhs += ",#" + std::to_string(valno);
+    for (int i = 1; i < elem_count; ++i) lhs += ",#" + std::to_string(valno);
     rhs = r_sig;
   } else if (CountElementsInSignature(r_sig) == 1) {
     int elem_count = CountElementsInSignature(l_sig);
     assert(elem_count > 1);
     int valno = GetValueNumberOfSignature(r_sig);
     rhs = "#" + std::to_string(valno);
-    for (int i = 1; i < elem_count; ++i)
-      rhs += ",#" + std::to_string(valno);
+    for (int i = 1; i < elem_count; ++i) rhs += ",#" + std::to_string(valno);
     lhs = l_sig;
   } else {
     lhs = l_sig;
@@ -196,14 +197,17 @@ std::optional<std::string> ValueNumbering::TryToSimplifyBinary(
       !PrefixedWith(lhs, "#") /*not multiple values*/) {
     auto div = GetOperandsValNo(rhs);
     assert(div.size() == 2);
-    if (GetValueNumberOfSignature(lhs) == div[0]) {
-      auto res = GetSignatureFromValueNumber(div[1]);
+    auto bind_set = GetBindSet(div[0]);
+    for (auto div_val : bind_set) {
+      if (GetValueNumberOfSignature(lhs) == div_val) {
+        auto res = GetSignatureFromValueNumber(div[1]);
 
-      if (trace && verbose)
-        os << ScopeIndent() << "<Simplify> '" << lhs << " " << op << " " << rhs
-           << " to '" << res << "'\n";
+        if (trace && verbose)
+          os << ScopeIndent() << "<Simplify> '" << lhs << " " << op << " "
+             << rhs << " to '" << res << "'\n";
 
-      return res;
+        return res;
+      }
     }
   }
 
@@ -514,6 +518,15 @@ int ValueNumbering::GetValueNumberOfSignature(const std::string& signature) {
                      "\".");
 
   return InvalidValueNumber();
+}
+
+void ValueNumbering::BindValueNumbers(int vn0, int vn1) {
+  assert(ValidVN(vn0) && ValidVN(vn1) && "invalid value number is provided.");
+
+  bind_info.AddBind(vn0, vn1);
+
+  if (trace)
+    os << ScopeIndent() << "<Bind> VN #" << vn0 << " <-> VN #" << vn1 << "\n";
 }
 
 bool ValueNumbering::HasValueNumberOfSignature(const std::string& signature) {

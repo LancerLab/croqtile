@@ -8,4 +8,4 @@ demo/*.bin
 demo/*.fb
 demo/__*
 __*
-
+tests/standalone/*.test

@@ -23,20 +23,20 @@ __co__ s32 [120, 512] ele_add(s32 [120, 256] lhs, s32 [256, 512] rhs) { /// devi
   parallel p by 1 {  // p is sip_index
     with index = {m_tile, k_tile, n_tile} in [120, 16, 32] {  // decl your tiled spans
       foreach m_tile { // alternative: foreach index, index.x, index.y
-        foreach n_tile { 
+        foreach n_tile {
           // METHOD3
           // m_tile_size : #output.span(0)/#m_tile
           // n_tile_size : #output.span(1)/#n_tile
           // local s32[m_tile_size, n_tile_size] l2_out; // alternative: s32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
           local s32[1, 16] l1_out; // alternative: s32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
-          foreach k_tile { 
+          foreach k_tile {
             // chunkat can support bounded_var algebra.
             lhs_load = dma.copy.async lhs.chunkat(m_tile, k_tile) => local; // tiling_factor: {6, 17, 4}, new_size {lhs(0)/6, lhs(1)/17, lhs(2)/4}
             rhs_load = dma.copy.async rhs.chunkat(k_tile, n_tile) => local; // no explicit decl the target buffer, but can refer by <FutureType>.data
             wait lhs_load, rhs_load;
 
             // local s32[lhs_load.span(0), rhs_load.span(1)] l1_out; // alternative: s32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
-            
+
             call kernel(lhs_load.data, rhs_load.data, l1_out); // |span| calculate the total size of span.
 
             out_store = dma.copy.async l1_out => output.chunkat(m_tile, n_tile); // can use defined vars

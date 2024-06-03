@@ -9,6 +9,7 @@
 
 #include "ast.hpp"
 #include "types.hpp"
+#include "valbind.hpp"
 #include "visitor.hpp"
 
 namespace Choreo {
@@ -62,6 +63,7 @@ class ValueNumbering {
   ShapeInference* visitor;
   std::vector<std::unordered_map<std::string, int>> expressionValueNumbers;
   std::vector<std::unordered_map<int, std::string>> valueNumberExpressions;
+  ValBind::BindInfo<int> bind_info;
 
   std::vector<std::unordered_map<AST::Node*, int>>
       nodeValueNumbers;  // cache to direct map node to value number
@@ -103,6 +105,14 @@ class ValueNumbering {
 
   // Directly get the value number from a signature. Abort when it fails.
   int GetValueNumberOfSignature(const std::string&);
+
+  // Bind two value numbers
+  void BindValueNumbers(int, int);
+
+  // Bind two value numbers
+  const ValBind::Binds<int>::Set& GetBindSet(int vn) {
+    return bind_info.GetSet(vn);
+  }
 
   // Generate the new value number from a signature. Abort when the value number
   // exists.
@@ -289,7 +299,7 @@ class ShapeInference : public Visitor {
 
     if (AST::typeof<MDSpanType>(&n)) {
       cur_mdspan_vn = cur_vn;
-//      InvalidateVN(cur_vn);
+      //      InvalidateVN(cur_vn);
     }
 
     return true;
@@ -572,6 +582,24 @@ class ShapeInference : public Visitor {
 
   bool Visit(AST::WhereBind& n) {
     __TRACE_EACH_VISIT__;
+    assert(isa<AST::Identifier>(n.lhs) &&
+           "non-id is not supported in where bind.");
+    assert(isa<AST::Identifier>(n.rhs) &&
+           "non-id is not supported in where bind.");
+
+    auto l_id = cast<AST::Identifier>(n.lhs);
+    auto r_id = cast<AST::Identifier>(n.rhs);
+    auto l_vn =
+        vn.GetValueNumberOfSignature(SSTab().ScopedName("@" + l_id->name));
+    auto r_vn =
+        vn.GetValueNumberOfSignature(SSTab().ScopedName("@" + r_id->name));
+    auto& bind_set = vn.GetBindSet(r_vn);
+    if (bind_set.count(l_vn)) {
+      Error(n.LOC(), "can not bind '" + l_id->name + "' with '" + r_id->name +
+                         "' since their bound are already aliased.");
+      return false;
+    }
+    vn.BindValueNumbers(l_vn, r_vn);
     return true;
   }
 

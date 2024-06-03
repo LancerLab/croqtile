@@ -450,9 +450,9 @@ struct IntTuple : public Node, public TypeIDProvider<IntTuple> {
 
   explicit IntTuple(const location& l, const std::string& n,
                     ptr<MultiValues> lst)
-    : Node(l, MakeUninitITupleType()), ref_name(n), vlist(lst) {
-      vlist->SetDelimiter(", ");
-    }
+      : Node(l, MakeUninitITupleType()), ref_name(n), vlist(lst) {
+    vlist->SetDelimiter(", ");
+  }
 
   const ptr<MultiValues>& GetValues() const { return vlist; }
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
@@ -750,11 +750,7 @@ struct WhereBind : public Node, public TypeIDProvider<WhereBind> {
       : Node(l), lhs(lhs), rhs(rhs) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << prefix << "`- ";
-    lhs->Print(os);
-    os << " bind-to ";
-    rhs->Print(os);
-    os << "\n";
+    os << prefix << "`- " << STR(*lhs) << " bind-to " << STR(*rhs) << "\n";
   }
 
   void accept(Visitor&) override;

@@ -172,7 +172,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
         SetNodeType(n, lty);
       } else
         SetNodeType(n, MakeUninitBoundedITupleType());
-    } else if ((isa<BoundedITupleType>(lty) && isa<BoundedIntegerType>(rty)) || 
+    } else if ((isa<BoundedITupleType>(lty) && isa<BoundedIntegerType>(rty)) ||
                (isa<BoundedIntegerType>(lty) && isa<BoundedITupleType>(rty)) ||
                (isa<BoundedIntegerType>(lty) && isa<BoundedIntegerType>(rty))){
       // allow only * operator for catesian products on two bounded-vars
