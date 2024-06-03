@@ -286,6 +286,12 @@ class ShapeInference : public Visitor {
     // type inference
     cur_vn = vn.GenerateValueNumberForNode(n);
     n.s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
+
+    if (AST::typeof<MDSpanType>(&n)) {
+      cur_mdspan_vn = cur_vn;
+//      InvalidateVN(cur_vn);
+    }
+
     return true;
   }
 

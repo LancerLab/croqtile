@@ -168,6 +168,9 @@ bool TypeInference::Visit(AST::IntLiteral &n) {
 
 bool TypeInference::Visit(AST::DataType &n) {
   __TRACE_EACH_VISIT__(n)
+  if (n.getBaseType() == BaseType::UNKNOWN)
+    return true; // ignore the annotation that needs inference
+
   assert((cur_type == nullptr) && "Expecting null type.");
 
   if (!n.mdspan_type) {
@@ -224,17 +227,9 @@ bool TypeInference::Visit(AST::NamedVariableDecl &n) {
 
 bool TypeInference::Visit(AST::NamedTypeDecl &n) {
   __TRACE_EACH_VISIT__(n)
-  if (AST::typeof<UnknownType>(&n)) {
-    // need type inference
-    if (!n.init_expr) {
-      Error(n.LOC(),
-            "`" + n.name_str +
-                "' is declared without type annotation or initialization.");
-      error_count++;
-      return false;
-    }
 
-    if (AST::typeof<UnknownType>(n.init_expr.get())) {
+  if (n.init_expr) {
+    if (AST::typeof<UnknownType>(n.init_expr)) {
       Error(n.LOC(), "unable to inference the type of `" + n.name_str + "'.");
       error_count++;
       return false;
@@ -248,6 +243,13 @@ bool TypeInference::Visit(AST::NamedTypeDecl &n) {
     }
 
     n.SetType(n.init_expr->GetType());
+  } else if (AST::typeof<UnknownType>(&n)) {
+    // need type inference
+    Error(n.LOC(),
+          "`" + n.name_str +
+          "' is declared without type annotation or initialization.");
+    error_count++;
+    return false;
   }
 
   AssignSymbolWithType(n.LOC(), n.name_str, n.GetType());
@@ -390,29 +392,72 @@ bool TypeInference::Visit(AST::Expr &n) {
 
     auto &pty_lhs = n.value_l->GetType();
     auto &pty_rhs = n.value_r->GetType();
-    if (*pty_lhs != *pty_rhs) {
-      if ((isa<MDSpanType>(pty_lhs) && isa<ITupleType>(pty_rhs)) ||
-          (isa<MDSpanType>(pty_rhs) && isa<ITupleType>(pty_lhs))) {
-        if (pty_lhs->Dims() == pty_rhs->Dims()) {
-          n.SetType(
-              MakeMDSpanType(n.s));  // note: the shape has been inferenced
-          return true;
-        } else {
-          Error(n.LOC(),
-                "The operands of the expression be performed for inconsistant "
-                "shape dimension.");
-          error_count++;
-          return false;
-        }
+    if ((isa<MDSpanType>(pty_lhs) && isa<ITupleType>(pty_rhs)) ||
+        (isa<MDSpanType>(pty_rhs) && isa<ITupleType>(pty_lhs))) {
+      if (pty_lhs->Dims() == pty_rhs->Dims()) {
+        n.SetType(MakeMDSpanType(n.s));  // note: the shape has been inferenced
+        cur_type = n.GetType();
+        return true;
+      } else {
+        Error(n.LOC(),
+              "The operands of the expression be performed for inconsistant "
+              "shape dimension.");
+        error_count++;
+        return false;
       }
-
+    } else if (isa<MDSpanType>(pty_lhs) && isa<MDSpanType>(pty_rhs)) {
+      if (!(((n.op == "/") || (n.op == "%")))) {
+        Error(n.LOC(), "The operands of the expression cannot undergo '" +
+                           n.op + "' operation.");
+        error_count++;
+        return false;
+      } else if (pty_lhs->Dims() == pty_rhs->Dims()) {
+        n.SetType(MakeITupleType(pty_lhs->Dims()));
+        cur_type = n.GetType();
+        return true;
+      } else {
+        Error(n.LOC(),
+              "The operands of the expression be performed for inconsistant "
+              "shape dimension.");
+        error_count++;
+        return false;
+      }
+    } else if (isa<ITupleType>(pty_rhs) && isa<ITupleType>(pty_lhs)) {
+      if (pty_lhs->Dims() == pty_rhs->Dims()) {
+        n.SetType(pty_rhs);
+        cur_type = n.GetType();
+        return true;
+      } else {
+        Error(n.LOC(),
+              "The operands of the expression be performed for inconsistant "
+              "shape dimension.");
+        error_count++;
+        return false;
+      }
+    } else if (isa<ITupleType>(pty_rhs) && isa<IntegerType>(pty_lhs)) {
+      n.SetType(pty_rhs);
+      cur_type = n.GetType();
+    } else if (isa<ITupleType>(pty_lhs) && isa<IntegerType>(pty_rhs)) {
+      n.SetType(pty_lhs);
+      cur_type = n.GetType();
+    } else if ((isa<MDSpanType>(pty_rhs) && isa<IntegerType>(pty_lhs)) ||
+               (isa<MDSpanType>(pty_lhs) && isa<IntegerType>(pty_rhs))) {
+      n.SetType(MakeMDSpanType(n.s));
+      cur_type = n.GetType();
+    } else if (*pty_lhs != *pty_rhs) {
       Error(n.LOC(), "The operands of the expression cannot undergo '" + n.op +
                          "' operation.");
       error_count++;
       return false;
+    } else {
+      n.SetType(n.value_r->GetType());
+      cur_type = n.GetType();
+      return true;
     }
-    n.SetType(n.value_r->GetType());
-    return true;
+  }  // AST::Expr::Binary
+
+  if (n.t == AST::Expr::Ternary) {
+    choreo_unreachable("inference of ternary operation is not implemented.");
   }
   return true;
 }

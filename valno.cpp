@@ -107,10 +107,34 @@ void ValueNumbering::AssociateSignatureWithValueNumber(const std::string& sig,
 
 std::string ValueNumbering::SignBinaryCompositeValues(const location& loc,
                                                       const std::string& op,
-                                                      const std::string& lhs,
-                                                      const std::string& rhs,
+                                                      const std::string& l_sig,
+                                                      const std::string& r_sig,
                                                       bool verbose) {
-  assert(CountElementsInSignature(lhs) > 1);
+  assert((CountElementsInSignature(l_sig) > 1) || (CountElementsInSignature(r_sig) > 1));
+
+  std::string lhs, rhs;
+  // specially handle ituple/mdspan + integer: broadcast integer
+  if (CountElementsInSignature(l_sig) == 1) {
+    int elem_count = CountElementsInSignature(r_sig);
+    assert(elem_count > 1);
+    int valno = GetValueNumberOfSignature(l_sig);
+    lhs = "#" + std::to_string(valno);
+    for (int i = 1; i < elem_count; ++i)
+      lhs += ",#" + std::to_string(valno);
+    rhs = r_sig;
+  } else if (CountElementsInSignature(r_sig) == 1) {
+    int elem_count = CountElementsInSignature(l_sig);
+    assert(elem_count > 1);
+    int valno = GetValueNumberOfSignature(r_sig);
+    rhs = "#" + std::to_string(valno);
+    for (int i = 1; i < elem_count; ++i)
+      rhs += ",#" + std::to_string(valno);
+    lhs = l_sig;
+  } else {
+    lhs = l_sig;
+    rhs = r_sig;
+  }
+
   assert(CountElementsInSignature(lhs) == CountElementsInSignature(rhs));
 
   auto l_vns = CollectValueNumbers(lhs);
@@ -167,7 +191,7 @@ std::optional<std::string> ValueNumbering::TryToSimplifyBinary(
     return res;
   }
 
-  // simplify a/(a/b) = b
+  // useful simplification: a/(a/b) = b
   if ((op == "/") && PrefixedWith(rhs, "/:") &&
       !PrefixedWith(lhs, "#") /*not multiple values*/) {
     auto div = GetOperandsValNo(rhs);
@@ -333,8 +357,9 @@ std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
                return expr;
              }},
         };
-    if ((n->t == AST::Expr::Binary) &&
-        (CountElementsInSignature(GetSignatureForNode(*n->value_r)) > 1))
+    if ((n->t == AST::Expr::Binary) && (n->op != "dimof") &&
+        ((CountElementsInSignature(GetSignatureForNode(*n->value_r)) > 1) ||
+         (CountElementsInSignature(GetSignatureForNode(*n->value_l)) > 1)))
       return SignBinaryCompositeValues(n->LOC(), n->op,
                                        GetSignatureForNode(*n->value_l),
                                        GetSignatureForNode(*n->value_r));
