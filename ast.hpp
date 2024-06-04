@@ -155,13 +155,15 @@ struct MultiValues : public Node, public TypeIDProvider<MultiValues> {
 
   void SetDelimiter(const std::string& d) { delimiter = d; }
 
-  ptr<Node> getValueAt(const size_t idx) const {
+  ptr<Node> ValueAt(const size_t idx) const {
     assert(idx < this->Count() &&
            "Out-of-bound error when querying MultiValues\n");
     return values[idx];
   }
 
-  std::vector<ptr<Node>> AllValues() const { return values; }
+  ptr<Node> operator[](const size_t idx) const { return ValueAt(idx); }
+
+  const std::vector<ptr<Node>> & AllValues() const { return values; }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     if (delimiter != "" && values.size() > 1) {

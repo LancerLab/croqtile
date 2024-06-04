@@ -248,7 +248,7 @@ T* cast(U* n) {
   if (isa<T>(n))
     return (T*)n;
   else {
-    std::cerr << "Cast failure for the type inconsistence.\n";
+    std::cerr << "type cast failure for incompatibility.\n";
     abort();
   }
 }
@@ -257,7 +257,7 @@ T* cast(const ptr<U>& n) {
   if (isa<T>(n))
     return (T*)(n.get());
   else {
-    std::cerr << "Cast failure for the type inconsistence.\n";
+    std::cerr << "type cast failure for incompatibility.\n";
     abort();
   }
 }

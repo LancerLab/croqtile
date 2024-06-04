@@ -58,6 +58,8 @@ bool EarlySemantics::AfterVisit(AST::Node& n) {
   } else if (isa<AST::ParallelBy>(&n)) {
     assert(parallel_level > 0);
     parallel_level--;
+  } else if (isa<AST::WithBlock>(&n)) {
+    with_syms.clear();
   }
 
   if (isa<AST::Parameter>(&n)) {
@@ -163,9 +165,9 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       if (lty->HasSufficientInfo() && rty->HasSufficientInfo()) {
         if (lty->Dims() != rty->Dims()) {
           Error(n.LOC(), "in operation \"" + n.op +
-                "\": dimension inconsistent (" +
-                std::to_string(lty->Dims()) + " vs. " +
-                std::to_string(rty->Dims()) + ").");
+                             "\": dimension inconsistent (" +
+                             std::to_string(lty->Dims()) + " vs. " +
+                             std::to_string(rty->Dims()) + ").");
           error_count++;
           return false;
         }
@@ -174,10 +176,11 @@ bool EarlySemantics::Visit(AST::Expr& n) {
         SetNodeType(n, MakeUninitBoundedITupleType());
     } else if ((isa<BoundedITupleType>(lty) && isa<BoundedIntegerType>(rty)) ||
                (isa<BoundedIntegerType>(lty) && isa<BoundedITupleType>(rty)) ||
-               (isa<BoundedIntegerType>(lty) && isa<BoundedIntegerType>(rty))){
+               (isa<BoundedIntegerType>(lty) && isa<BoundedIntegerType>(rty))) {
       // allow only * operator for catesian products on two bounded-vars
-      // currently, only support boundedituple * boundedint or boundedint * boundedint
-      // os << STR(n.value_l) << "lty = " << PSTR(lty) << "; rty = " << PSTR(rty);
+      // currently, only support boundedituple * boundedint or boundedint *
+      // boundedint os << STR(n.value_l) << "lty = " << PSTR(lty) << "; rty = "
+      // << PSTR(rty);
       if ((n.op != "*")) {
         Error(n.LOC(), "in operation \"" + n.op +
                            "\": unable to apply to the types (" + PSTR(lty) +
@@ -504,6 +507,28 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
 
 bool EarlySemantics::Visit(AST::WhereBind& n) {
   __TRACE_EACH_VISIT__(n)
+  if (!isa<AST::Identifier>(n.lhs)) {
+    Error(n.lhs->LOC(), "expecting an indentifier.");
+    error_count++;
+    return false;
+  }
+  if (!isa<AST::Identifier>(n.rhs)) {
+    Error(n.rhs->LOC(), "expecting an indentifier.");
+    error_count++;
+    return false;
+  }
+  auto lname = cast<AST::Identifier>(n.lhs)->name;
+  auto rname = cast<AST::Identifier>(n.rhs)->name;
+  if (with_syms.count(lname) == 0) {
+    Error(n.lhs->LOC(),
+          "symbol `" + lname + "' is not defined inside the with statement.");
+    error_count++;
+  }
+  if (with_syms.count(rname) == 0) {
+    Error(n.rhs->LOC(),
+          "symbol `" + rname + "' is not defined inside the with statement.");
+    error_count++;
+  }
   return true;
 }
 
@@ -512,6 +537,7 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
   in_decl = true;
   if (n.with) {
     n.with->accept(*this);
+    with_syms.insert(n.with->name);
     if (n.with_matchers) {
       // simple infer the rank from matchers
       SSTab().ModifySymbolType(
@@ -529,6 +555,14 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
         continue;
       }
       auto sname = cast<AST::Identifier>(v)->name;
+      if (with_syms.count(sname)) {
+        Error(v->LOC(),
+              "symbol `" + sname +
+                  "' has been defined inside the with statement already.");
+        error_count++;
+        continue;
+      }
+      with_syms.insert(sname);
       SSTab().ModifySymbolType(sname, MakeBoundedIntegerType(sname));
     }
   }
@@ -538,6 +572,15 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
   if (!isa<MDSpanType>(ity)) {
     Error(n.in->LOC(),
           "expecting a span type but got the " + PSTR(ity) + " type.");
+    error_count++;
+  }
+
+  if (n.with_matchers &&
+      n.with_matchers->Count() != cast<MDSpanType>(ity)->Dims()) {
+    Error(n.in->LOC(),
+          "un-matched with-matcher-count(" +
+              std::to_string(n.with_matchers->Count()) + ") and mdspan rank(" +
+              std::to_string(cast<MDSpanType>(ity)->Dims()) + ").");
     error_count++;
   }
 
@@ -581,14 +624,13 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
       // if (auto node = cast<AST::Expr>(v)) {
       //   this->Visit(*node);
       // } else {
-        auto ty = NodeType(*v);
-        if (!isa<BoundedIntegerType>(ty) &&
-            !isa<BoundedIntegerType>(ty) &&
-            !isa<BoundedITupleType>(ty)) {
-          Error(n.LOC(), "expecting '" + v->TypeNameString() +
-                             "` be a bounded type.");
-          error_count++;
-        }
+      auto ty = NodeType(*v);
+      if (!isa<BoundedIntegerType>(ty) && !isa<BoundedIntegerType>(ty) &&
+          !isa<BoundedITupleType>(ty)) {
+        Error(n.LOC(),
+              "expecting '" + v->TypeNameString() + "` be a bounded type.");
+        error_count++;
+      }
       // }
     }
   }

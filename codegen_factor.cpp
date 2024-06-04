@@ -54,7 +54,7 @@ bool FactorCodeGen::AfterVisitImpl(AST::Node &n) {
   if (isa<AST::Program>(&n)) {
     os << "# step 4.1: generate the host source\n";
     os << "host_src=" << host_fn << "\n";
-    os << "cat <<EOF > ${host_src}\n";
+    os << "cat <<'EOF' > ${host_src}\n";
     os << hs.str() << "\nEOF\n\n";
 
     os << "# step 5: compile the host source to target executable\n";
@@ -586,14 +586,14 @@ bool FactorCodeGen::Visit(AST::Return &ReturnNode) {
 bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
   // auto ty = this->GetSymbolType("l2_tile");
   // ty->Print(os);
-  // auto l2_tile_idx = itervars->getValueAt(0);
-  // auto l1_tile_idx = itervars->getValueAt(1);
+  // auto l2_tile_idx = itervars->ValueAt(0);
+  // auto l1_tile_idx = itervars->ValueAt(1);
   //
   auto itervars = forNode.getIterationVars();
   for (size_t idx = 0; idx != itervars->Count(); ++idx) {
     // TODO(albert): support non-unit stride in loop
     std::ostringstream _os;
-    auto id = cast<AST::Identifier>(itervars->getValueAt(idx));
+    auto id = cast<AST::Identifier>(itervars->ValueAt(idx));
 
     // get the lower/upper and stride for spanned iter var
     auto iv_type = this->GetSymbolType(id->name);
@@ -837,16 +837,18 @@ void FactorCodeGen::EmitHostFuncBody(std::ostream &os, const Type &ty,
 
   // phase 3: Execute the executable and fetch the output
   auto &fty = *cast<FunctionType>(&ty);
+  std::ostringstream tss; // temporal stream
   if (fty.in_tys.size() > 0) {
-    os << "  int64_t input_dims[] = {";
+    tss << "  int64_t input_dims[] = {";
     if (auto sty = dyn_cast<SpannedType>(fty.in_tys[0])) {
-      sty->GetShape().PrintPlain(os);
+      sty->GetShape().PrintPlain(tss);
       for (size_t i = 1; i < fty.in_tys.size(); ++i)
         if (auto sty = dyn_cast<SpannedType>(fty.in_tys[i])) {
-          os << ", ";
-          sty->GetShape().PrintPlain(os);
+          tss << ", ";
+          sty->GetShape().PrintPlain(tss);
         }
     }
+    os << ReplaceRuntimeNames(tss.str());
     os << "};\n";
     os << "  size_t input_ranks[] = {";
     if (auto sty = dyn_cast<SpannedType>(fty.in_tys[0])) {
@@ -857,10 +859,6 @@ void FactorCodeGen::EmitHostFuncBody(std::ostream &os, const Type &ty,
     }
   }
   os << "};\n";
-#if 0
-  int64_t input_dims[] = {6, 17, 128, 6, 17, 128};
-  size_t input_ranks[] = {3, 3};
-#endif
 
   os << R"(
   CHECK(topsLaunchExecutableV2(
@@ -1041,16 +1039,16 @@ void FactorCodeGen::OutputScript(FunctionType *fty, const std::string &n,
   os << "chmod +x /tmp/factor_script.sh\n";
 
   os << "# copy choreo.h and factor scripts/env to /tmp\n";
-  os << "cat <<EOF > /tmp/choreo.h\n";
+  os << "cat <<'EOF' > /tmp/choreo.h\n";
   os << __choreo_header_as_string << "\nEOF\n\n";
   os << "# step 1: write the kernel source code into a temp file\n";
   os << "kernel_src=" << kernel_fn << "\n";
-  os << "cat <<EOF > ${kernel_src}\n";
+  os << "cat <<'EOF' > ${kernel_src}\n";
   os << ks.str() << "\nEOF\n\n";
 
   os << "# step 2: write the factor source code into a temp file\n";
   os << "factor_src=" << factor_fn << "\n";
-  os << "cat <<EOF > ${factor_src}\n";
+  os << "cat <<'EOF' > ${factor_src}\n";
   os << factor_src << "\nEOF\n\n";
 
   os << "# step 3: compile factor code into a binary\n";
@@ -1059,7 +1057,7 @@ void FactorCodeGen::OutputScript(FunctionType *fty, const std::string &n,
 
   os << "# step 4: generate the host source\n";
   os << "host_src=" << host_fn << "\n";
-  os << "cat <<EOF > ${host_src}\n";
+  os << "cat <<'EOF' > ${host_src}\n";
   os << hs.str() << "\nEOF\n\n";
 
 #if 0

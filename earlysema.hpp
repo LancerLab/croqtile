@@ -3,6 +3,8 @@
 
 // This apply the type check and symbol table generation
 
+#include <unordered_set>
+
 #include "visitor.hpp"
 
 namespace Choreo {
@@ -22,6 +24,9 @@ struct EarlySemantics : public Visitor {
   bool found_return = false;
   bool return_deduction = false;
   int parallel_level = 0;
+
+  std::unordered_set<std::string>
+      with_syms;  // symbol defined in with-in statement
 
  private:
   bool BeforeVisit(AST::Node &) override;

@@ -636,8 +636,7 @@ class ShapeInference : public Visitor {
       }
 
       if (n.with_matchers) {
-        auto sym =
-            cast<AST::Identifier>((n.with_matchers->values[index]).get());
+        auto sym = cast<AST::Identifier>((*n.with_matchers)[index]);
         std::string name = SSTab().ScopedName("@" + sym->name);
         if (gen_alias) vn.AssociateSignatureWithValueNumber(name, valno);
         Shape s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(valno));
