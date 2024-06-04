@@ -1,0 +1,45 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ auto illegal_arith(f32 [1, 2, 3] a, s32 [78, 69] b, int c) {
+  mds1 : [7, 8];        // ok
+  mds2 : [78888, 8999]; // ok
+  mds3 : mds1 + mds2;
+  mds4 : mds1 - b.span;
+  mds5 : mds1 * b.span;
+  mds6 : mds2 / a.span;
+  mds7 : mds2 % b.span;
+  it1 = mds1 / b.span;  // ok
+  it2 = {3, 4, 5};      // ok
+  mds9 : a.span + 1;    // ok
+  mds10 : b.span - c;   // ok
+  mds11 : 1 * a.span;   // ok
+  mds12 : c / a.span;   // ok
+  mds13 : c + 1 % a.span;   // ok
+  mds14 : a.span + it1;
+  mds15 : b.span * it2;
+  mds16 : it1 - mds9;
+  mds17 : it2 / mds10;
+  mds18 : mds9 - it2;  // ok
+  with index in mds10 % it2 {}
+  f32 [mds10 / it1] data;  // ok
+}
+
+// CHECK: error: in operation "+": unable to apply to the types (mdspan<2> [] vs. mdspan<2> []).
+// CHECK: error: `mds3' is declared as "mdspan<> []" but initialized as "unknown".
+// CHECK: error: in operation "-": unable to apply to the types (mdspan<2> [] vs. mdspan<2> []).
+// CHECK: error: `mds4' is declared as "mdspan<> []" but initialized as "unknown".
+// CHECK: error: in operation "*": unable to apply to the types (mdspan<2> [] vs. mdspan<2> []).
+// CHECK: error: `mds5' is declared as "mdspan<> []" but initialized as "unknown".
+// CHECK: error: in operation "/": dimension inconsistent (2 vs. 3).
+// CHECK: error: `mds6' is declared as "mdspan<> []" but initialized as "unknown".
+// CHECK: error: `mds7' is declared as "mdspan<> []" but initialized as "ituple<2>".
+// CHECK: error: in operation "+": dimension inconsistent (3 vs. 2).
+// CHECK: error: `mds14' is declared as "mdspan<> []" but initialized as "unknown".
+// CHECK: error: in operation "*": dimension inconsistent (2 vs. 3).
+// CHECK: error: `mds15' is declared as "mdspan<> []" but initialized as "unknown".
+// CHECK: error: in operation "-": dimension inconsistent (2 vs. 3).
+// CHECK: error: `mds16' is declared as "mdspan<> []" but initialized as "unknown".
+// CHECK: error: in operation "/": dimension inconsistent (3 vs. 2).
+// CHECK: error: `mds17' is declared as "mdspan<> []" but initialized as "unknown".
+// CHECK: error: in operation "%": dimension inconsistent (2 vs. 3).
+// CHECK: error: expecting a span type but got the unknown type.
