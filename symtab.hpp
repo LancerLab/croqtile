@@ -218,13 +218,13 @@ class ScopedSymbolTable {
 
  public:
   // utility functions
-  std::string UnscopedName(const std::string& name) {
-    size_t pos = name.find_last_of("::");
+  std::string UnScopedName(const std::string& name) const {
+    size_t pos = name.find_last_of(':');
     if (pos != std::string::npos) {
-      // If found, return the substring after the last "::"
-      return name.substr(pos + 2);  // +2 to skip the "::" itself
+      // If found, return the substring after the last ":"
+      return name.substr(pos + 1);  // skip the ":"
     }
-    return name;  // Return the original string if "::" is not found
+    return name;  // Return the original string if ":" is not found
   }
 
   // get the current scope name
@@ -242,14 +242,14 @@ class ScopedSymbolTable {
 
   // If the name is defined in scopes, return the scoped name
   std::string InScopeName(const std::string& name) const {
-    auto n = NameInScope(name);
+    auto n = NameInScopeOrNull(name);
     if (!n) choreo_unreachable("symbol `" + name + "' is not found in scope");
     return *n;
   }
 
   // If the variable is declared in (multi-level) scopes, retrievd the scoped
   // name. Or else nothing
-  std::optional<std::string> NameInScope(const std::string& name) const {
+  std::optional<std::string> NameInScopeOrNull(const std::string& name) const {
     std::string scoped_name;
     auto it = scoped_symtab.rbegin();
     auto in = scope_names.rbegin();

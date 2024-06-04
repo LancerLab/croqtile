@@ -2,6 +2,7 @@
 #define __CHOREO_CODEGEN_HPP__
 
 #include "visitor.hpp"
+#include "valbind.hpp"
 
 namespace Choreo {
 
@@ -32,6 +33,8 @@ struct FactorCodeGen : public CodeGenerator {
   int parallel_factor = 1;
 
   bool void_return = false;
+
+  ValBind::BindInfo<std::string> bind_info;
 
  private:
   // buffer the kernel code

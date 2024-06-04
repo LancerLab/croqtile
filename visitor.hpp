@@ -113,7 +113,7 @@ struct VisitorWithSymTab : public Visitor {
   virtual bool BeforeVisitImpl(AST::Node& n) = 0;
   virtual bool AfterVisitImpl(AST::Node& n) = 0;
 
-  std::string InScopeName(const std::string& sym) {
+  virtual std::string InScopeName(const std::string& sym) {
     auto removeLastLevel = [](const std::string& input) -> std::string {
       size_t lastPos = input.rfind("::");
       if (lastPos == std::string::npos)

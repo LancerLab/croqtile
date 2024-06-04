@@ -111,8 +111,11 @@ class ValueNumbering {
 
   // Bind two value numbers
   const ValBind::Binds<int>::Set& GetBindSet(int vn) {
-    return bind_info.GetSet(vn);
+    auto& ret = bind_info.GetSet(vn);
+    return ret;
   }
+
+  void AddBind(int vn0, int vn1) { bind_info.AddBind(vn0, vn1); }
 
   // Generate the new value number from a signature. Abort when the value number
   // exists.
@@ -219,7 +222,7 @@ class ShapeInference : public Visitor {
       vn.EnterScope("foreach_" + std::to_string(count++));
     } else if (auto* b = dyn_cast<AST::MultiDimSpans>(&n)) {
       if (b->ref_name != "") {
-        auto n = SSTab().NameInScope(b->ref_name);
+        auto n = SSTab().NameInScopeOrNull(b->ref_name);
         if (!n)
           choreo_unreachable(
               ("variable `" + b->ref_name + "' is not found in scopes.")
@@ -228,7 +231,7 @@ class ShapeInference : public Visitor {
       }
     } else if (auto* b = dyn_cast<AST::IntTuple>(&n)) {
       if (b->ref_name != "") {
-        auto n = SSTab().NameInScope(b->ref_name);
+        auto n = SSTab().NameInScopeOrNull(b->ref_name);
         if (!n)
           choreo_unreachable(
               ("variable `" + b->ref_name + "' is not found in scopes.")

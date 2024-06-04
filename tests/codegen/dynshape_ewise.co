@@ -11,7 +11,7 @@ __co__ auto ele_add(s32 [6, ?, 128] lhs, s32 [6, ?, 128] rhs) {
     where x <-> z {
       foreach idx0 {
         lhs_load = dma.copy.async lhs.chunkat(q, x, y) => local;
-        rhs_load = dma.copy.async rhs.chunkat(w, z, b) => local;
+        rhs_load = dma.copy.async rhs.chunkat(q, z, y) => local;
         wait lhs_load, rhs_load;
 
         local s32[lhs_load.span] l1_out;

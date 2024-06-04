@@ -217,9 +217,9 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
 
       // generate "memset_()" action to initiate each alloc_memory with value 0
       if (storage_type == "L1Type")
-        fs << this->indent << "auto " << node.name_str << "_init = alloc_dma_(SDMAType());\n"; 
+        fs << this->indent << "auto " << node.name_str << "_init = alloc_dma_(SDMAType());\n";
       else
-        fs << this->indent << "auto " << node.name_str << "_init = alloc_dma_(CDMAType());\n"; 
+        fs << this->indent << "auto " << node.name_str << "_init = alloc_dma_(CDMAType());\n";
 
       fs << this->indent << "memset_(" << node.name_str << "_init, " << node.name_str << ", 0);\n";
     }
@@ -307,7 +307,13 @@ bool FactorCodeGen::Visit(AST::ParallelBy &by) {
   return true;
 }
 
-bool FactorCodeGen::Visit(AST::WhereBind &) { return true; };
+bool FactorCodeGen::Visit(AST::WhereBind &n) {
+  // establish the binding
+  auto lid = cast<AST::Identifier>(n.lhs);
+  auto rid = cast<AST::Identifier>(n.rhs);
+  bind_info.AddBind(SSTab().ScopedName(lid->name), SSTab().ScopedName(rid->name));
+  return true;
+}
 
 // CLEAN
 bool FactorCodeGen::Visit(AST::WithIn &n) {
@@ -605,6 +611,9 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
          << 1 /* TODO(albert): need fix, unit stride is hardcoded for now*/
          << ", [&](auto " << id->name << ") {\n";
       this->incrementIndent();
+      for (auto bind : bind_info.GetBinds(SSTab().ScopedName(id->name))) {
+        fs << indent << InScopeName(bind) << " = " << id->name << ";\n";
+      }
     } else {
       assert(cur_bounded_vars.count(id->name) &&
              "can not find the bounded name.");
@@ -615,6 +624,11 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
            << 1 /* TODO(albert): need fix, unit stride is hardcoded for now*/
            << ", [&](auto " << name << ") {\n";
         this->incrementIndent();
+        for (auto bind : bind_info.GetBinds(InScopeName(name))) {
+          auto bname = SSTab().UnScopedName(bind);
+          if (bname != id->name)
+            fs << indent << "auto " << bname << " = " << name << ";\n";
+        }
       }
     }
   }

@@ -193,13 +193,15 @@ std::optional<std::string> ValueNumbering::TryToSimplifyBinary(
   }
 
   // useful simplification: a/(a/b) = b
-  if ((op == "/") && PrefixedWith(rhs, "/:") &&
-      !PrefixedWith(lhs, "#") /*not multiple values*/) {
-    auto div = GetOperandsValNo(rhs);
-    assert(div.size() == 2);
-    auto bind_set = GetBindSet(div[0]);
-    for (auto div_val : bind_set) {
-      if (GetValueNumberOfSignature(lhs) == div_val) {
+  if ((op == "/") && !PrefixedWith(lhs, "#") /*not multiple values*/) {
+    int rvn = GetValueNumberOfSignature(rhs);
+    auto bind_set = GetBindSet(rvn);
+    for (auto div_vn : bind_set) {
+      auto sig = GetSignatureFromValueNumber(div_vn);
+      if (!PrefixedWith(rhs, "/:")) continue;
+      auto div = GetOperandsValNo(sig);
+      assert(div.size() == 2);
+      if (GetValueNumberOfSignature(lhs) == div[0]) {
         auto res = GetSignatureFromValueNumber(div[1]);
 
         if (trace && verbose)
@@ -334,7 +336,7 @@ std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
             {"ubound",
              [this, &n]() -> std::optional<std::string> {
                if (auto id = dyn_cast<AST::Identifier>(n->value_r)) {
-                 return visitor->SSTab().NameInScope(
+                 return visitor->SSTab().NameInScopeOrNull(
                      "@" + cast<AST::Identifier>(id)->name);
                } else
                  choreo_unreachable("upper bound expression is unexpected.");
@@ -346,7 +348,7 @@ std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
                  auto id = n->value_l->GetSymbol();
                  assert(id != nullptr && "not an identifier.");
                  base_sig = SignatureOfSymbol(
-                     *visitor->SSTab().NameInScope("@" + id->name));
+                     visitor->SSTab().InScopeName("@" + id->name));
                } else
                  base_sig = GetSignatureForNode(*n->value_l);
                auto cv = RemovePrefixOrNull("index_const_",
@@ -390,7 +392,7 @@ std::string ValueNumbering::GenerateNodeSignature(AST::Node& node,
     if (n->value == __UNKNOWN_INTVAL__) return "?";
     return "const_" + std::to_string(n->value);
   } else if (auto* v = dyn_cast<AST::Identifier>(&node)) {
-    if (auto name_in_scope = visitor->SSTab().NameInScope(v->name)) {
+    if (auto name_in_scope = visitor->SSTab().NameInScopeOrNull(v->name)) {
       if (HasValueNumberOfSignature(*name_in_scope)) return *name_in_scope;
       // error: the name exists but does not have a value number
       Error(node.LOC(), "symbol `" + *name_in_scope +
@@ -472,7 +474,7 @@ int ValueNumbering::GetValueNumberForNode(AST::Node& n) {
 
   if (auto id = dyn_cast<AST::Identifier>(&n)) {
     // Must consider about the scope of any identifier reference
-    if (auto name = visitor->SSTab().NameInScope(id->name))
+    if (auto name = visitor->SSTab().NameInScopeOrNull(id->name))
       return GetValueNumberOfSignature(*name);
     else
       choreo_unreachable("symbol `" + id->name + "' is not valued.");
@@ -523,7 +525,7 @@ int ValueNumbering::GetValueNumberOfSignature(const std::string& signature) {
 void ValueNumbering::BindValueNumbers(int vn0, int vn1) {
   assert(ValidVN(vn0) && ValidVN(vn1) && "invalid value number is provided.");
 
-  bind_info.AddBind(vn0, vn1);
+  AddBind(vn0, vn1);
 
   if (trace)
     os << ScopeIndent() << "<Bind> VN #" << vn0 << " <-> VN #" << vn1 << "\n";
