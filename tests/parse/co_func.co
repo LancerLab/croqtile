@@ -48,3 +48,10 @@ __co__ auto barfoo(f32 [?, 4, 5] a) { return a; }
 // CHECK: `- Parameters
 // CHECK:   `-  type: f32 [ ? 4 5 ], symbol: a
 // CHECK: `- Return: a
+
+__co__ auto none() { }
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: none
+// CHECK:  `- Return type: unknown
+// CHECK:  `- Parameters

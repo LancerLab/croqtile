@@ -45,6 +45,11 @@ bool EarlySemantics::AfterVisit(AST::Node& n) {
 
   if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
     if (return_deduction) {
+      // maybe this can be moved to type inference
+      if (!found_return && f->f_decl.ret_type->IsUnknown()) {
+         f->f_decl.ret_type->base_type = BaseType::VOID;
+         f->f_decl.ret_type->SetType(MakeVoidType());
+      }
       // anything is ok
     } else if (requires_return && !found_return) {
       Error(n.LOC(), "non-void function '" + f->name +

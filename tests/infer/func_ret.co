@@ -1,0 +1,9 @@
+// RUN: choreo %s -i | FileCheck %s
+
+__co__ auto bar(int) {}
+
+__co__ auto correct() { return 1; }
+
+// CHECK: Parameter: ::bar::anon_0, Type: int
+// CHECK: Function:  ::bar, Type: void (*)(int)
+// CHECK: Function:  ::correct, Type: int (*)()

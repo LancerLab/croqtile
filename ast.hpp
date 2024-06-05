@@ -590,7 +590,7 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
         SetType(MakeUnknownType());  // need type inference
         break;
       case BaseType::VOID:
-        SetType(MakeVoidType());  // need type inference
+        SetType(MakeVoidType());
         break;
       default:
         choreo_unreachable("Unexpected BaseType.");

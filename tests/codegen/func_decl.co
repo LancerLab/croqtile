@@ -1,8 +1,5 @@
 // RUN: choreo %s | FileCheck --match-full-lines %s
 
-#include <iostream>
-
-// device program
 __co__ int foo(f32 [32] d, int) { return 1;}
 
 // CHECK:    using namespace factor;
@@ -11,6 +8,13 @@ __co__ int foo(f32 [32] d, int) { return 1;}
 // CHECK:      auto anon_0_type = DRAMType(IntType(32), (1));
 // CHECK:      auto output_type = DRAMType(IntType(32), (1));
 // CHECK:      D(main_)({d_type, anon_0_type}, [&](auto args){{.*}}
+// CHECK:    }
+
+__co__ auto bar() {}
+
+// CHECK:    void __choreo_bar() {
+// CHECK:      auto d_type = DRAMType(FloatType(32), {32});
+// CHECK:      D(main_)({}, [&](auto args){{.*}}
 // CHECK:    }
 
 __co__ auto foobar(f32 [32] a, int, bool b, f16 [?]) { return 1;}
