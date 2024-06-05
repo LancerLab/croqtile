@@ -613,6 +613,11 @@ bool EarlySemantics::Visit(AST::DMA& n) {
                               MakeDimedMDSpanType(rank));
     ReportErrorWhenViolateODR(n.LOC(), n.future + ".data", __FILE__, __LINE__,
                               MakeDimedSpannedType(rank));
+  } else {
+    if (n.async) {
+      Error(n.LOC(), "forbid to associated async dma without a named future.");
+      error_count++;
+    }
   }
   return true;
 }

@@ -28,3 +28,17 @@ __co__ void fail2(f32 [36, 27, 128] input, f32 [18, 9, 128] input1) {
   }
 }
 // CHECK: error: non-async future 'f2` can not be waited.
+
+__co__ void fail3(f32 [36, 27, 128] input, f32 [18, 9, 128] input1) {
+  parallel p by 6 {
+    with index in [3, 8] {
+      foreach index {
+        dma.copy.async input.chunkat(p, index) => local;
+        dma.copy input1.chunkat(p, index) => local;
+      }
+    }
+  }
+}
+// CHECK: error: forbid to associated async dma without a named future.
+
+// CHECK: Totally 3 errors have been detected.
