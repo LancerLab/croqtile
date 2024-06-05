@@ -186,6 +186,7 @@ class ShapeInference : public Visitor {
   int cur_ituple_vn = InvalidValueNumber();
   int cur_mdspan_vn = InvalidValueNumber();
 
+  std::string cur_fn;
   // when values are consumed instead of generated
   bool gen_multi_values = true;
 
@@ -193,6 +194,8 @@ class ShapeInference : public Visitor {
   std::ostream& os;
   // for debugging purpose only
   bool trace_visit = false;
+  bool cannot_proceed = false;
+  size_t error_count = 0;
 
  public:
   ShapeInference(bool t = false, std::ostream& o = std::cout)
@@ -205,12 +208,20 @@ class ShapeInference : public Visitor {
     os << "\n";
   }
 
+  bool HasError() {
+    if (error_count)
+      os << "Totally " << error_count << " errors have been detected.\n";
+    return error_count != 0;
+  }
+
  public:
   virtual bool BeforeVisit(AST::Node& n) override {
     if (isa<AST::Program>(&n)) {
       vn.EnterScope("");  // global scope
     } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
       vn.EnterScope(f->name);
+      cur_fn = f->name;
+      cannot_proceed = false;  // recover state when starting a new function
     } else if (isa<AST::ParallelBy>(&n)) {
       static size_t count = 0;
       vn.EnterScope("paraby_" + std::to_string(count++));
@@ -258,9 +269,13 @@ class ShapeInference : public Visitor {
   }
 
  public:
-  bool Visit(AST::MultiNodes&) { return true; }
+  bool Visit(AST::MultiNodes&) {
+    if (cannot_proceed) return true;
+    return true;
+  }
 
   bool Visit(AST::MultiValues& n) {
+    if (cannot_proceed) return true;
     if (gen_multi_values) {
       int valNo = vn.GenerateValueNumberForNode(n);
       cur_vn = valNo;
@@ -271,6 +286,8 @@ class ShapeInference : public Visitor {
 
   bool Visit(AST::IntLiteral& n) {
     __TRACE_EACH_VISIT__;
+
+    if (cannot_proceed) return true;
     int valNo = vn.GenerateValueNumberForNode(n);
     cur_vn = valNo;
     return true;
@@ -278,15 +295,23 @@ class ShapeInference : public Visitor {
 
   bool Visit(AST::Expr& n) {
     __TRACE_EACH_VISIT__;
+
+    if (cannot_proceed) return true;
     if (auto ref = n.GetReference()) {
       if (auto id = dyn_cast<AST::Identifier>(ref)) {
         if (SSTab().IsDeclared(id->name)) {
-          if (vn.HasValueNumberOfSignature(SSTab().InScopeName(id->name)))
+          if (vn.HasValueNumberOfSignature(SSTab().InScopeName(id->name))) {
             cur_vn =
                 vn.GetValueNumberOfSignature(SSTab().InScopeName(id->name));
-          else
-            InvalidateVN(
-                cur_vn);  // a spanned data does not have a value number
+            auto pty = SSTab().LookupSymbol(id->name);
+            if (isa<MDSpanType>(pty)) {
+              cur_mdspan_vn = cur_vn;
+              InvalidateVN(cur_vn);
+            }
+          } else {
+            // no value number is obtained
+            InvalidateVN(cur_vn);
+          }
           return true;
         }
       }
@@ -310,6 +335,8 @@ class ShapeInference : public Visitor {
 
   bool Visit(AST::MultiDimSpans& n) {
     __TRACE_EACH_VISIT__;
+
+    if (cannot_proceed) return true;
 
     if (n.list) {
       // The Shape now can be deduced from the value number.
@@ -365,6 +392,8 @@ class ShapeInference : public Visitor {
   bool Visit(AST::NamedTypeDecl& n) {
     __TRACE_EACH_VISIT__;
 
+    if (cannot_proceed) return true;
+
     if (n.init_expr) {
       assert(ValidVN(cur_mdspan_vn) &&
              "invalid value number for the named type.");
@@ -381,9 +410,12 @@ class ShapeInference : public Visitor {
   bool Visit(AST::NamedVariableDecl& n) {
     __TRACE_EACH_VISIT__;
 
+    if (cannot_proceed) return true;
+
     if (SSTab().DeclaredInScope(n.name_str)) {
       Error(n.LOC(), "ODR violation: symbol `" + n.name_str +
                          "' has been declared already.");
+      error_count++;
       return false;
     }
 
@@ -429,6 +461,9 @@ class ShapeInference : public Visitor {
 
   bool Visit(AST::IntTuple& n) {
     __TRACE_EACH_VISIT__;
+
+    if (cannot_proceed) return true;
+
     auto mvals = n.GetValues();
     cur_ituple_vn = cur_vn;
     n.SetType(MakeITupleType(mvals->Count()));
@@ -453,6 +488,8 @@ class ShapeInference : public Visitor {
   bool Visit(AST::Assignment& n) {
     __TRACE_EACH_VISIT__;
 
+    if (cannot_proceed) return true;
+
     if (SSTab().IsDeclared(n.name)) {
       return true;
     }
@@ -474,11 +511,17 @@ class ShapeInference : public Visitor {
 
   bool Visit(AST::IntIndex& n) {
     __TRACE_EACH_VISIT__;
+
+    if (cannot_proceed) return true;
+
     return true;
   };
 
   bool Visit(AST::DataType& n) {
     __TRACE_EACH_VISIT__;
+
+    if (cannot_proceed) return true;
+
     if (ValidVN(cur_mdspan_vn)) {
       cur_vn = cur_mdspan_vn;
     }
@@ -488,6 +531,9 @@ class ShapeInference : public Visitor {
 
   bool Visit(AST::Identifier& n) {
     __TRACE_EACH_VISIT__;
+
+    if (cannot_proceed) return true;
+
     if (SSTab().IsDeclared(n.name)) {
       // it is a reference
       auto name = n.name;
@@ -505,6 +551,7 @@ class ShapeInference : public Visitor {
     } else {
       if (vn.HasValueNumberForNode(n)) {
         Error(n.LOC(), "value number has been generated for `" + n.name + "'.");
+        error_count++;
         return false;
       }
       cur_vn = vn.GenerateValueNumberForNode(n);
@@ -515,6 +562,8 @@ class ShapeInference : public Visitor {
 
   bool Visit(AST::Parameter& n) {
     __TRACE_EACH_VISIT__;
+
+    if (cannot_proceed) return true;
 
     if (n.type->isSpanned()) {
       assert(isa<AST::MultiDimSpans>(n.type->mdspan_type.get()) &&
@@ -539,6 +588,7 @@ class ShapeInference : public Visitor {
       } else {
         // the value number is unknown at compile time
         Error(n.LOC(), "The type can not be inference at compile time.");
+        error_count++;
         return false;
       }
 
@@ -566,11 +616,17 @@ class ShapeInference : public Visitor {
 
   bool Visit(AST::ParamList& n) {
     __TRACE_EACH_VISIT__;
+
+    if (cannot_proceed) return true;
+
     return true;
   };
 
   bool Visit(AST::ParallelBy& n) {
     __TRACE_EACH_VISIT__;
+
+    if (cannot_proceed) return true;
+
     std::string bound = "const_" + std::to_string(n.bound);
     int valno = vn.GetOrInsertValueNumberFromSignature(bound);
     std::string iv_name =
@@ -585,6 +641,9 @@ class ShapeInference : public Visitor {
 
   bool Visit(AST::WhereBind& n) {
     __TRACE_EACH_VISIT__;
+
+    if (cannot_proceed) return true;
+
     assert(isa<AST::Identifier>(n.lhs) &&
            "non-id is not supported in where bind.");
     assert(isa<AST::Identifier>(n.rhs) &&
@@ -600,6 +659,7 @@ class ShapeInference : public Visitor {
     if (bind_set.count(l_vn)) {
       Error(n.LOC(), "can not bind '" + l_id->name + "' with '" + r_id->name +
                          "' since their bound are already aliased.");
+      error_count++;
       return false;
     }
     vn.BindValueNumbers(l_vn, r_vn);
@@ -608,12 +668,16 @@ class ShapeInference : public Visitor {
 
   bool Visit(AST::WithIn& n) {
     __TRACE_EACH_VISIT__;
+
+    if (cannot_proceed) return true;
+
     if (auto mds = dyn_cast<AST::MultiDimSpans>(n.in)) {
       assert(ValidVN(cur_mdspan_vn) &&
              "no valid value number generated for the mdspan.");
       if (n.with_matchers)
         if (n.with_matchers->Count() != mds->Rank()) {
           Error(n.LOC(), "inconsistent with-in values and bounds.");
+          error_count++;
           return false;
         }
 
@@ -625,6 +689,23 @@ class ShapeInference : public Visitor {
     }
 
     auto vn_sig = vn.GetSignatureFromValueNumber(cur_mdspan_vn);
+
+    // requires the elements inside mdspan to be non-zero values
+    bool found_zero = false;
+    ProcessValueNumberString(vn_sig,
+                             [this, &vn_sig, &n, &found_zero](int valno, size_t) {
+                               auto sig = vn.GetSignatureFromValueNumber(valno);
+                               if (sig == "const_0") {
+                               found_zero = true;}
+                             });
+    if (found_zero) {
+      Error(n.LOC(),
+            "zero value is deduced for the mdspan inside the with-in statement.");
+      error_count++;
+      cannot_proceed = true;
+      Error(n.LOC(), "unable to apply shape inference for function '" + cur_fn + "'.");
+      return false;
+    }
     bool gen_alias = (CountElementsInSignature(vn_sig) > 1);
     ProcessValueNumberString(vn_sig, [this, &vn_sig, &n, gen_alias](
                                          int valno, size_t index) {
@@ -659,15 +740,30 @@ class ShapeInference : public Visitor {
 
   bool Visit(AST::WithBlock& n) {
     __TRACE_EACH_VISIT__;
+
+    if (cannot_proceed) return true;
+
     return true;
   };
+
   bool Visit(AST::Memory& n) {
     __TRACE_EACH_VISIT__;
+
+    if (cannot_proceed) return true;
+
     return true;
   };
 
   bool Visit(AST::DMA& n) {
     __TRACE_EACH_VISIT__;
+
+    if (cannot_proceed) return true;
+
+    if (n.future.empty()) {
+      // unnamed future, simply return
+      InvalidateVN(cur_vn);
+      return true;
+    }
 
     std::string f_span = n.future + ".span";
     assert(ValidVN(cur_vn) &&
@@ -679,6 +775,7 @@ class ShapeInference : public Visitor {
     SSTab().DefineSymbol(n.future, n.GetType());
     SSTab().DefineSymbol(f_span,
                          MakeMDSpanType(s));  // this is implicit symbol
+    InvalidateVN(cur_vn);
 
     return true;
   };
@@ -686,10 +783,13 @@ class ShapeInference : public Visitor {
   bool Visit(AST::ChunkAt& n) {
     __TRACE_EACH_VISIT__;
 
+    if (cannot_proceed) return true;
+
     int ca_valno = InvalidValueNumber();
 
     auto pty = SSTab().LookupSymbol(n.data->name);
-    assert(isa<SpannedType>(pty) && "unexpected data type.");
+    assert((isa<SpannedType>(pty) || isa<FutureType>(pty)) &&
+           "unexpected data type.");
 
     if (!n.positions) {
       ca_valno = vn.GetValueNumberOfSignature(
@@ -729,6 +829,7 @@ class ShapeInference : public Visitor {
         auto dim_ith = GetNthElement(data_sig, dim_index);
         if (!dim_ith) {
           Error(n.LOC(), "internal error: value number is not obtained.");
+          error_count++;
           return false;
         }
         assert(dim_ith.value()[0] == '#');
@@ -749,6 +850,7 @@ class ShapeInference : public Visitor {
         if (++dim_index > dim_count) {
           Error(n.LOC(), "dimensions inconsistence is found between `" +
                              n.data->name + "' and chunkat expression.");
+          error_count++;
           return false;
         }
       }
@@ -769,40 +871,69 @@ class ShapeInference : public Visitor {
 
   bool Visit(AST::Wait& n) {
     __TRACE_EACH_VISIT__;
+
+    if (cannot_proceed) return true;
+
     return true;
   }
+
   bool Visit(AST::Call& n) {
     __TRACE_EACH_VISIT__;
+
+    if (cannot_proceed) return true;
+
     return true;
   };
+
   bool Visit(AST::Return& n) {
     __TRACE_EACH_VISIT__;
+
+    if (cannot_proceed) return true;
+
     return true;
   };
+
   bool Visit(AST::ForeachBlock& n) {
     if (trace_visit) os << n.TypeNameString() << "\n";
+
+    if (cannot_proceed) return true;
+
     return true;
   };
+
   bool Visit(AST::FunctionDecl& n) {
     if (trace_visit) os << n.TypeNameString() << "\n";
+
+    if (cannot_proceed) return true;
+
     return true;
   };
 
   bool Visit(AST::ChoreoFunction& n) {
     if (trace_visit) os << n.TypeNameString() << "\n";
+
+    if (cannot_proceed) return true;
+
     return true;
   }
 
   bool Visit(AST::CppSourceCode& n) {
     if (trace_visit) os << n.TypeNameString() << "\n";
+
+    if (cannot_proceed) return true;
+
     return true;
   };
   bool Visit(AST::Program& n) {
     if (trace_visit) os << n.TypeNameString() << "\n";
+
+    if (cannot_proceed) return true;
+
     return true;
   };
 
  private:
+  // Given a multi-value signature, process each value
   void ProcessValueNumberString(const std::string& input,
                                 std::function<void(int, size_t)> lambda) {
     std::regex valuePattern("#(-?\\d+)");

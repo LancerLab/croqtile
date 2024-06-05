@@ -478,22 +478,26 @@ bool TypeInference::Visit(AST::DMA &n) {
     return false;
   }
 
-  AssignSymbolWithType(n.LOC(), n.future, n.GetType());
-  auto s = cast<FutureType>(n.GetType())->GetShape();
-  auto fty = cast<SpannedType>(SSTab().LookupSymbol(n.FromSymbol()));
-  Storage st = Storage::NONE;
-  if (n.ToSymbol().empty())
-    st = cast<AST::Memory>(n.to)->Get();
-  else {
-    auto tty = SSTab().LookupSymbol(n.ToSymbol());
-    st = cast<SpannedType>(tty)->GetStorage();
+  if (!n.future.empty()) {
+    AssignSymbolWithType(n.LOC(), n.future, n.GetType());
+
+    // inference the storage and shape from 'from' and 'to'
+    auto s = cast<FutureType>(n.GetType())->GetShape();
+    auto fty = cast<SpannedType>(SSTab().LookupSymbol(n.FromSymbol()));
+    Storage st = Storage::NONE;
+    if (n.ToSymbol().empty())
+      st = cast<AST::Memory>(n.to)->Get();
+    else {
+      auto tty = SSTab().LookupSymbol(n.ToSymbol());
+      st = cast<SpannedType>(tty)->GetStorage();
+    }
+    AssignSymbolWithType(n.LOC(), n.future + ".span", MakeMDSpanType(s));
+    AssignSymbolWithType(n.LOC(), n.future + ".data",
+                         MakeSpannedType(fty->ElementType(), s, st));
   }
-  AssignSymbolWithType(n.LOC(), n.future + ".span", MakeMDSpanType(s));
-  AssignSymbolWithType(n.LOC(), n.future + ".data",
-                       MakeSpannedType(fty->ElementType(), s, st));
 
   if (Dump) {
-    os << "Future:    " << SSTab().InScopeName(n.future)
+    os << "Future: " << ((n.future.empty()) ? "" : SSTab().InScopeName(n.future))
        << ", Type: " << AST::TYPE_STR(n) << "\n";
   }
 

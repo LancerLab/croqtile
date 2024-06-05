@@ -574,9 +574,9 @@ struct Shape {
   }
 
   void Print(std::ostream& os) const {
-    if (val_no == __INVALID_VALUE__) os << "[]";
-    // PrintValueList(Value(), os);
-    else {
+    if (val_no == __INVALID_VALUE__) {
+      os << "[]";
+    } else {
       assert(values.Exists(val_no) && "invalid value number.");
       PrintValueList(Value(), os);
     }
@@ -584,7 +584,7 @@ struct Shape {
 
   void PrintAsList(std::ostream& os) const {
     if (val_no == __INVALID_VALUE__)
-      os << "[]";
+      os << "{}";
     else {
       assert(values.Exists(val_no) && "invalid value number.");
       PrintValueList(Value(), os, "{", "}");
@@ -992,6 +992,7 @@ struct FutureType : public ScalarType, public TypeIDProvider<FutureType> {
   bool HasSufficientInfo() const { return shape.IsValid(); }
   const std::string Name() const override { return "future"; }
   Shape GetShape() { return shape; }
+  size_t Dims() const override { return shape.Dims(); }
   bool IsAsync() const { return async; }
 
   bool operator==(const Type& ty) const override {

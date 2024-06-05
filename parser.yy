@@ -750,6 +750,9 @@ dma_stmt
         symtab.AddSymbol($1, MakeFutureType($5));
         $$ = AST::Make<AST::DMA>(@3, $4, $1, $7, $9, $5, $6);
       }
+    | DMA dma_operation sync_type dma_config chunkat_expr TRANS chunkat_or_storage {
+        $$ = AST::Make<AST::DMA>(@1, $2, "", $5, $7, $3, $4);
+      }
     ;
 
 dma_operation
@@ -787,12 +790,14 @@ chunkat_expr
     : IDENTIFIER CHUNKAT LPAREN id_list RPAREN {
         $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $4);
       }
+    | IDENTIFIER FNDATA CHUNKAT LPAREN id_list RPAREN {
+        $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $5);
+      }
     /*| IDENTIFIER CHUNKAT LPAREN value_list RPAREN {
         $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $4);
       }*/
-    | IDENTIFIER {
-        $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1));
-      }
+    | IDENTIFIER { $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1)); }
+    | IDENTIFIER FNDATA { $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1)); }
     ;
 
 iv_list

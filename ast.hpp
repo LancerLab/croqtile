@@ -883,7 +883,7 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- DMA" << operation << ((async) ? ".async" : "");
     if (config) os << "\n" << prefix << "  `- config: " << STR(*config);
-    os << "\n" << prefix << "  `- future: " << future;
+    if (!future.empty()) os << "\n" << prefix << "  `- future: " << future;
     os << "\n" << prefix << "  `- from: " << STR(from);
     os << "\n" << prefix << "  `- to: " << STR(to);
   }

@@ -45,3 +45,24 @@ __co__ void dma_test(int b, f32 [36, 27, 128] input) {
 // CHECK:      `- WAIT: f
 // CHECK:      `- Call: cfunction
 // CHECK:        `- with arguements:  (dataof f)  (dataof f1)
+
+__co__ void dma_test1(f32 [36, 27, 128] input) {
+   f32 [9, 3, 8] dst;
+   with index in [5, 6] {
+     dma.copy input.chunkat(p, index) => dst;
+   }
+}
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: dma_test1
+// CHECK:  `- Return type: void
+// CHECK:  `- Parameters
+// CHECK:    `-  type: f32 [ 36 27 128 ], symbol: input
+// CHECK:  `- Var Decl (f32 [ 9 3 8 ], default): dst
+// CHECK:  `- With Block:
+// CHECK:    (within constraints)
+// CHECK:    `- index in [ 5 6 ]
+// CHECK:    (with statements)
+// CHECK:    `- DMA.copy
+// CHECK:      `- from: input.ChunkAt(p, index)
+// CHECK:      `- to: dst

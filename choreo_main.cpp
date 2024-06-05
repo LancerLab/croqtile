@@ -98,6 +98,7 @@ int main(int argc, char* argv[]) {
   ShapeInference si(print_vn);
   root.accept(si);
 
+  if (si.HasError()) return 1;
   if (stop_after.GetValue() == "shapeinfer") return 0;
 
   // inference all the unknown types - decls

@@ -47,8 +47,8 @@ bool EarlySemantics::AfterVisit(AST::Node& n) {
     if (return_deduction) {
       // maybe this can be moved to type inference
       if (!found_return && f->f_decl.ret_type->IsUnknown()) {
-         f->f_decl.ret_type->base_type = BaseType::VOID;
-         f->f_decl.ret_type->SetType(MakeVoidType());
+        f->f_decl.ret_type->base_type = BaseType::VOID;
+        f->f_decl.ret_type->SetType(MakeVoidType());
       }
       // anything is ok
     } else if (requires_return && !found_return) {
@@ -604,13 +604,16 @@ bool EarlySemantics::Visit(AST::Memory& n) {
 
 bool EarlySemantics::Visit(AST::DMA& n) {
   __TRACE_EACH_VISIT__(n)
-  ReportErrorWhenViolateODR(n.LOC(), n.future, __FILE__, __LINE__,
-                            MakeFutureType(n.async));
-  size_t rank = cast<SpannedType>(NodeType(*n.from))->Dims();
-  ReportErrorWhenViolateODR(n.LOC(), n.future + ".span", __FILE__, __LINE__,
-                            MakeDimedMDSpanType(rank));
-  ReportErrorWhenViolateODR(n.LOC(), n.future + ".data", __FILE__, __LINE__,
-                            MakeDimedSpannedType(rank));
+  if (!n.future.empty()) {
+    size_t rank = NodeType(*n.from)->Dims();
+    assert(rank != InvalidRank());
+    ReportErrorWhenViolateODR(n.LOC(), n.future, __FILE__, __LINE__,
+                              MakeFutureType(Shape(rank), n.async));
+    ReportErrorWhenViolateODR(n.LOC(), n.future + ".span", __FILE__, __LINE__,
+                              MakeDimedMDSpanType(rank));
+    ReportErrorWhenViolateODR(n.LOC(), n.future + ".data", __FILE__, __LINE__,
+                              MakeDimedSpannedType(rank));
+  }
   return true;
 }
 
@@ -618,8 +621,10 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
   __TRACE_EACH_VISIT__(n)
 
   n.data->accept(*this);
-  if (!isa<SpannedType>(NodeType(*n.data))) {
-    Error(n.LOC(), "expecting '" + n.data->name + "` of a spanned data.");
+  auto nty = NodeType(*n.data);
+  if (!isa<SpannedType>(nty) && !isa<FutureType>(nty)) {
+    Error(n.LOC(),
+          "expecting '" + n.data->name + "` of a spanned data or future type.");
     error_count++;
   }
   if (n.positions) {
@@ -639,8 +644,8 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
       // }
     }
   }
-  size_t rank = cast<SpannedType>(NodeType(*n.data))->Dims();
-  SetNodeType(n, MakeDimedSpannedType(rank));
+  assert(nty->Dims() != InvalidRank());
+  SetNodeType(n, MakeDimedSpannedType(nty->Dims()));
   return true;
 }
 
