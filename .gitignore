@@ -2,6 +2,7 @@
 *.cc
 *.hh
 *.o
+*.inc
 tools/*
 choreo
 demo/*.bin

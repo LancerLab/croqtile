@@ -92,83 +92,105 @@ LIT:=$(WORK_DIR)/tests/lit.sh
 FILECHECK:=$(TOOLCHAIN)/bin/FileCheck
 PACKAGE_NAME=choreo_toolchain_240511.tgz
 SUPPORT_PKG =$(TOOLCHAIN)/$(PACKAGE_NAME)
-PACKAGE_MD5:=1f77ae0083922fa94ed6c84c5f9cad24
+PACKAGE_MD5:=161b1740077b4cb68543b167c5570dc5
 BISON_ENV:=BISON_PKGDATADIR=$(TOOLCHAIN)/shared/bison/
 BISON:=$(BISON_ENV) $(BISON_BIN)
 
 support-pkg:
 	@if [ "$(shell md5sum $(SUPPORT_PKG) | cut -d ' ' -f 1)" != "$(PACKAGE_MD5)"  ]; then \
 		echo "MD5 hash does not match. Downloading the supporting package..."; \
-		mkdir -p $(TOOLCHAIN); \
 		curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(PACKAGE_NAME) -o $(SUPPORT_PKG);\
 		cd $(TOOLCHAIN) && tar -zvxf $(SUPPORT_PKG); \
 		chmod +x $(BISON_BIN); \
 	else \
 		echo "$(SUPPORT_PKG) MD5 hash matches. No need to download."; \
-	fi
+	fi;
+
+install-support-pkg:
+	cd $(TOOLCHAIN) && tar -zvxf $(SUPPORT_PKG); \
+	chmod +x $(BISON_BIN)
 
 GCU_CMP_NAME=240524-gcu-compiler.tgz
 GCU_CMP_PKG = $(TOOLCHAIN)/$(GCU_CMP_NAME)
 GCU_CMP_PKG_MD5:=f6e0b029763acd1f66a192542a068ae5
+CUR_GCU_CMP_PKG_MD5:=$(shell md5sum $(GCU_CMP_PKG) 2>/dev/null| cut -d ' ' -f 1)
 
-gcu-sfc-pkg:
-	@if [ "$(shell md5sum $(GCU_CMP_PKG) | cut -d ' ' -f 1)" != "$(GCU_CMP_PKG_MD5)"  ]; then \
+check-gcu-sfc-pkg:
+	@if [ "$(CUR_GCU_CMP_PKG_MD5)" != "$(GCU_CMP_PKG_MD5)"  ]; then \
 		echo "MD5 hash does not match. Downloading the GCU compiler package..."; \
-		mkdir -p $(TOOLCHAIN); \
-		curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU_CMP_NAME) -o $(GCU_CMP_PKG);\
-		cd $(TOOLCHAIN) && tar -zvxf $(GCU_CMP_PKG); \
+		$(MAKE) download-gcu-sfc-pkg; \
 	else \
 		echo "$(GCU_CMP_PKG) MD5 hash matches. No need to download."; \
+	fi
+
+download-gcu-sfc-pkg:
+	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU_CMP_NAME) -o $(GCU_CMP_PKG);\
+
+install-gcu-sfc-pkg:
+	cd $(TOOLCHAIN) && tar -zvxf $(GCU_CMP_PKG);
+
+setup-gcu-sfc-pkg: check-gcu-sfc-pkg
+	@if [ "$(CUR_GCU_CMP_PKG_MD5)" != "$(GCU_CMP_PKG_MD5)"  ]; then \
+	    $(MAKE) install-gcu-sfc-pkg; \
 	fi
 
 GCU_PLATFORM_NAME=TopsPlatform_1.0.1.6-a1e560_deb_amd64.run
 GCU_PLATFORM_PKG = $(TOOLCHAIN)/$(GCU_PLATFORM_NAME)
 GCU_PLATFORM_PKG_MD5:=216051f60566227b6b95bf7502a70178
+CUR_GCU_PLATFORM_PKG_MD5:=$(shell md5sum $(GCU_PLATFORM_PKG) 2>/dev/null| cut -d ' ' -f 1)
 
-gcu-platform-pkg:
-	@if [ "$(shell md5sum $(GCU_PLATFORM_PKG) | cut -d ' ' -f 1)" != "$(GCU_PLATFORM_PKG_MD5)"  ]; then \
+check-gcu-platform-pkg:
+	@if [ "$(CUR_GCU_PLATFORM_PKG_MD5)" != "$(GCU_PLATFORM_PKG_MD5)"  ]; then \
 		echo "MD5 hash does not match. Downloading the GCU compiler package..."; \
-		mkdir -p $(TOOLCHAIN); \
-		curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU_PLATFORM_NAME) -o $(GCU_PLATFORM_PKG);\
-		chmod +x $(GCU_PLATFORM_PKG); \
-		$(GCU_PLATFORM_PKG) -y -C topsruntime --install-dir $(TOOLCHAIN); \
-		$(GCU_PLATFORM_PKG) -y -C topscc --install-dir $(TOOLCHAIN); \
-		rsync -av $(TOOLCHAIN)/opt/tops/* $(TOOLCHAIN); \
-		rm -fr $(TOOLCHAIN)/opt; \
+		$(MAKE) download-gcu-platform-pkg; \
 	else \
 		echo "$(GCU_PLATFORM_PKG) MD5 hash matches. No need to download."; \
+	fi
+
+download-gcu-platform-pkg:
+	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU_PLATFORM_NAME) -o $(GCU_PLATFORM_PKG);\
+	chmod +x $(GCU_PLATFORM_PKG);
+
+install-gcu-platform-pkg:
+	$(GCU_PLATFORM_PKG) -y -C topsruntime --install-dir $(TOOLCHAIN); \
+	$(GCU_PLATFORM_PKG) -y -C topscc --install-dir $(TOOLCHAIN); \
+	rsync -av $(TOOLCHAIN)/opt/tops/* $(TOOLCHAIN); \
+	rm -fr $(TOOLCHAIN)/opt;
+
+setup-gcu-platform-pkg: check-gcu-platform-pkg
+	@if [ "$(CUR_GCU_PLATFORM_PKG_MD5)" != "$(GCU_PLATFORM_PKG_MD5)"  ]; then \
+	    $(MAKE) install-gcu-platform-pkg; \
 	fi
 
 GCU_FACTOR_NAME=topsfactor_3.0.1-1_amd64.deb
 GCU_FACTOR_PKG = $(TOOLCHAIN)/$(GCU_FACTOR_NAME)
 GCU_FACTOR_PKG_MD5:=03a257e7069cc4bb42270103e3616438
+CUR_GCU_FACTOR_PKG_MD5:=$(shell md5sum $(GCU_FACTOR_PKG) 2>/dev/null| cut -d ' ' -f 1)
 
-gcu-factor-pkg:
-	@if [ "$(shell md5sum $(GCU_FACTOR_PKG) | cut -d ' ' -f 1)" != "$(GCU_FACTOR_PKG_MD5)"  ]; then \
+check-gcu-factor-pkg:
+	@if [ "$(CUR_GCU_FACTOR_PKG_MD5)" != "$(GCU_FACTOR_PKG_MD5)"  ]; then \
 		echo "MD5 hash does not match. Downloading the GCU compiler package..."; \
-		mkdir -p $(TOOLCHAIN); \
-		curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU_FACTOR_NAME) -o $(GCU_FACTOR_PKG);\
-		fakeroot sudo dpkg --instdir=$(TOOLCHAIN) -i $(GCU_FACTOR_PKG); \
-		rsync -av $(TOOLCHAIN)/usr/* $(TOOLCHAIN); \
-		fakeroot sudo rm -fr $(TOOLCHAIN)/usr/; \
+		$(MAKE) download-gcu-factor-pkg; \
 	else \
 		echo "$(GCU_FACTOR_PKG) MD5 hash matches. No need to download."; \
 	fi
 
-GCU_KMD_NAME=240524-enflame-x86_64-gcc-1.0.1.6.run
-GCU_KMD_PKG = $(TOOLCHAIN)/$(GCU_KMD_NAME)
-GCU_KMD_PKG_MD5:=efe16643457b9a0e3a02de3198590ec0
+download-gcu-factor-pkg:
+	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU_FACTOR_NAME) -o $(GCU_FACTOR_PKG);\
 
-gcu-kmd:
-	@if [ "$(shell md5sum $(GCU_KMD_PKG) | cut -d ' ' -f 1)" != "$(PACKAGE_MD5)"  ]; then \
-		sudo echo "MD5 hash does not match. Downloading the GCU kmd package..."; \
-		mkdir -p $(TOOLCHAIN); \
-		curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU_KMD_NAME) -o $(GCU_KMD_PKG);\
-		sudo bash $(GCU_KMD_PKG);\
-	else \
-		echo "$(GCU_KMD_PKG) MD5 hash matches. No need to download."; \
+install-gcu-factor-pkg:
+	fakeroot sudo dpkg --instdir=$(TOOLCHAIN) -i $(GCU_FACTOR_PKG); \
+	rsync -av $(TOOLCHAIN)/usr/* $(TOOLCHAIN); \
+	fakeroot sudo rm -fr $(TOOLCHAIN)/usr/;
+
+setup-gcu-factor-pkg: check-gcu-factor-pkg
+	@if [ "$(CUR_GCU_FACTOR_PKG_MD5)" != "$(GCU_FACTOR_PKG_MD5)"  ]; then \
+	    $(MAKE) install-gcu-factor-pkg; \
 	fi
 
-gcu-pkg: gcu-sfc-pkg gcu-platform-pkg gcu-factor-pkg
+gcu-kmd: check-gcu-platform-pkg
+	sudo $(GCU_PLATFORM_PKG) -y -C enflame
 
+gcu-pkg: setup-gcu-sfc-pkg setup-gcu-platform-pkg setup-gcu-factor-pkg
 setup: support-pkg gcu-pkg
+resetup: install-support-pkg install-gcu-sfc-pkg install-gcu-platform-pkg install-gcu-factor-pkg
