@@ -183,7 +183,6 @@ class ShapeInference : public Visitor {
   ValueNumbering vn;
 
   int cur_vn = InvalidValueNumber();
-  int cur_ituple_vn = InvalidValueNumber();
   int cur_mdspan_vn = InvalidValueNumber();
 
   std::string cur_fn;
@@ -423,24 +422,17 @@ class ShapeInference : public Visitor {
     if (n.mem) s = n.mem->st;
 
     if (n.init_expr) {
-      if (ValidVN(cur_ituple_vn)) {
-        // assert(!ValidVN(cur_vn) && "expected current value number.");
-        // assert(!ValidVN(cur_mdspan_vn) && "expected current mdspan value
-        // number.");
-        vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(n.name_str),
-                                             cur_ituple_vn);
-        InvalidateVN(cur_ituple_vn);
-        SSTab().DefineSymbol(n.name_str, MakeUninitITupleType());
-
-      } else if (ValidVN(cur_vn)) {
-        vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(n.name_str),
-                                             cur_vn);
-        InvalidateVN(cur_vn);
-        SSTab().DefineSymbol(n.name_str, n.GetType());
-      }
+      // ituple, int, bool: get the value number from the init_expr
+      assert(ValidVN(cur_vn) && "expected a valid current value number.");
+      vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(n.name_str),
+                                           cur_vn);
+      SSTab().DefineSymbol(n.name_str, n.init_expr->GetType());
+      InvalidateVN(cur_vn);
     } else {
       assert(n.type && "missed type annotation.");
       if (ValidVN(cur_mdspan_vn)) {
+        // TODO: IS THIS USEFUL?
+        // spanned: only value number the ".span"
         vn.AssociateSignatureWithValueNumber(
             SSTab().ScopedName(n.name_str + ".span"), cur_mdspan_vn);
         auto mds_value = GenShapeFromSignature(
@@ -448,10 +440,13 @@ class ShapeInference : public Visitor {
         SSTab().DefineSymbol(n.name_str,
                              MakeSpannedType(n.type->base_type, mds_value, s));
         SSTab().DefineSymbol(n.name_str + ".span", MakeMDSpanType(mds_value));
+        InvalidateVN(cur_mdspan_vn);
       } else if (ValidVN(cur_vn)) {
+        // TODO: used for all?
         vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(n.name_str),
                                              cur_vn);
         SSTab().DefineSymbol(n.name_str, n.GetType());
+        InvalidateVN(cur_vn);
       } else
         choreo_unreachable();
     }
@@ -465,7 +460,7 @@ class ShapeInference : public Visitor {
     if (cannot_proceed) return true;
 
     auto mvals = n.GetValues();
-    cur_ituple_vn = cur_vn;
+    // cur_ituple_vn = cur_vn;
     n.SetType(MakeITupleType(mvals->Count()));
 
     auto vn_sig = vn.GetSignatureFromValueNumber(cur_vn);
@@ -497,14 +492,8 @@ class ShapeInference : public Visitor {
     // this is the un-type-annotated declaration
     SSTab().DefineSymbol(n.name, n.value->GetType());
 
-    if (ValidVN(cur_ituple_vn)) {
-      assert(!ValidVN(cur_vn) && "expected current value number.");
-      assert(!ValidVN(cur_mdspan_vn) &&
-             "expected current mdspan value number.");
-      vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(n.name),
-                                           cur_ituple_vn);
-      InvalidateVN(cur_ituple_vn);
-    }
+    assert(ValidVN(cur_vn) && "expected a valid current value number.");
+    vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(n.name), cur_vn);
 
     return true;
   };
@@ -692,18 +681,21 @@ class ShapeInference : public Visitor {
 
     // requires the elements inside mdspan to be non-zero values
     bool found_zero = false;
-    ProcessValueNumberString(vn_sig,
-                             [this, &vn_sig, &n, &found_zero](int valno, size_t) {
-                               auto sig = vn.GetSignatureFromValueNumber(valno);
-                               if (sig == "const_0") {
-                               found_zero = true;}
-                             });
+    ProcessValueNumberString(
+        vn_sig, [this, &vn_sig, &n, &found_zero](int valno, size_t) {
+          auto sig = vn.GetSignatureFromValueNumber(valno);
+          if (sig == "const_0") {
+            found_zero = true;
+          }
+        });
     if (found_zero) {
-      Error(n.LOC(),
-            "zero value is deduced for the mdspan inside the with-in statement.");
+      Error(
+          n.LOC(),
+          "zero value is deduced for the mdspan inside the with-in statement.");
       error_count++;
       cannot_proceed = true;
-      Error(n.LOC(), "unable to apply shape inference for function '" + cur_fn + "'.");
+      Error(n.LOC(),
+            "unable to apply shape inference for function '" + cur_fn + "'.");
       return false;
     }
     bool gen_alias = (CountElementsInSignature(vn_sig) > 1);

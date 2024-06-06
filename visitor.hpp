@@ -104,6 +104,10 @@ struct Visitor {
 
     std::cerr << message << std::endl;
   }
+
+  void Note(const location& loc, const std::string& message) {
+    std::cerr << loc << ": note: " << message << std::endl;
+  }
 };
 
 // This accepts static symbol table and provide symbol lookup capability

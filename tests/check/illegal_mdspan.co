@@ -1,13 +1,22 @@
 // RUN: not choreo %s 2>&1 | FileCheck %s
 
-__co__ auto illegal_mdspan() {
+__co__ auto illegal_mdspan(f32 [?] a) {
   mdspan mds1 : {7, 8};  // must use '[]'
   mdspan<1> mds2 : [7, 8];  // rank inconsistence
   mdspan mds3 : [2, 3, 4];  // annotation ok
+  parallel p by 2 {
+    with idx in [1, 2, 3] {
+      mds4 : [ true, a, {1, 2}, [4], idx, p ];
+    }
+  }
 }
 
 // CHECK: error: `mds1' is declared as "mdspan<> []" but initialized as "ituple<2>".
 // CHECK: error: `mds2' is declared as "mdspan<1> []" but initialized as "mdspan<2> []".
+// CHECK: error: unexpected data type 'bool' is found in mdspan.
+// CHECK: error: unexpected data type 'f32 mdspan<1> []' is found in mdspan.
+// CHECK: error: unexpected data type '{int,int,int}->[]' is found in mdspan.
+// CHECK: error: unexpected data type '{int}->[]' is found in mdspan.
 // CHECK-NOT: error:
-// CHECK: Totally 2 errors have been detected.
+// CHECK: Totally 6 errors have been detected.
 

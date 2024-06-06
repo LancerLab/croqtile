@@ -304,7 +304,8 @@ bool EarlySemantics::Visit(AST::Expr& n) {
   } else if (n.op == "concat") {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
-    if (!isa<MDSpanType>(lty) || !isa<MDSpanType>(rty)) {
+    if (!((isa<MDSpanType>(lty) || isa<ITupleType>(lty)) &&
+          (isa<MDSpanType>(rty) || isa<ITupleType>(rty)))) {
       Error(n.LOC(), "in operation \"" + n.op +
                          "\": unable to apply to the types " + PSTR(lty) +
                          " and " + PSTR(rty) + ".");
@@ -331,7 +332,7 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
       std::vector<ptr<AST::Node>> wl;
       wl.push_back(nullptr);
       for (auto& v : mvals->AllValues()) {
-        if (isa<MDSpanType>(v->GetType())) {
+        if (isa<MDSpanType>(v->GetType()) || isa<ITupleType>(v->GetType())) {
           if (wl.back() == nullptr)
             wl.back() = v;
           else
@@ -340,7 +341,7 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
           continue;
         }
 
-        // normal values are pushed to the multidimspan
+        // normal values are added to the mdspan
         if (wl.back() == nullptr)
           wl.back() = AST::Make<AST::MultiDimSpans>(
               v->LOC(), "" /*anon*/, AST::Make<AST::MultiValues>(v->LOC()));
@@ -362,6 +363,21 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
              << "\n";
         n.list = last;
         n.list->accept(*this);  // go evaluate the concatanation
+      }
+    }
+  }
+
+  // check the elements type
+  if (auto mvals = dyn_cast<AST::MultiValues>(n.list)) {
+    if (n.ref_name.empty()) {
+      for (auto& v : mvals->AllValues()) {
+        auto ty = NodeType(*v);
+        if (!isa<IntegerType>(ty) && !isa<MDSpanType>(ty) &&
+            !isa<ITupleType>(ty)) {
+          Error(v->LOC(), "unexpected data type '" + PSTR(v->GetType()) +
+                              "' is found in mdspan.");
+          error_count++;
+        }
       }
     }
   }
@@ -562,7 +578,7 @@ bool EarlySemantics::Visit(AST::ParamList& n) {
 bool EarlySemantics::Visit(AST::ParallelBy& n) {
   __TRACE_EACH_VISIT__(n)
   ReportErrorWhenViolateODR(n.LOC(), n.biv, __FILE__, __LINE__,
-                            MakeUninitBoundedITupleType());
+                            MakeBoundedITupleType(Shape(1), "pv"));
   return true;
 }
 
@@ -596,38 +612,6 @@ bool EarlySemantics::Visit(AST::WhereBind& n) {
 bool EarlySemantics::Visit(AST::WithIn& n) {
   __TRACE_EACH_VISIT__(n)
   in_decl = true;
-  if (n.with) {
-    n.with->accept(*this);
-    with_syms.insert(n.with->name);
-    if (n.with_matchers) {
-      // simple infer the rank from matchers
-      SSTab().ModifySymbolType(
-          n.with->name, MakeBoundedITupleType(Shape(n.with_matchers->Count())));
-    } else {
-      // can not figure out the dimensions at this time
-      SSTab().ModifySymbolType(n.with->name, MakeUninitBoundedITupleType());
-    }
-  }
-  if (n.with_matchers) {
-    n.with_matchers->accept(*this);
-    for (auto v : n.with_matchers->AllValues()) {
-      if (!isa<AST::Identifier>(v)) {
-        Error(v->LOC(), "expecting an identifier.");
-        continue;
-      }
-      auto sname = cast<AST::Identifier>(v)->name;
-      if (with_syms.count(sname)) {
-        Error(v->LOC(),
-              "symbol `" + sname +
-                  "' has been defined inside the with statement already.");
-        error_count++;
-        continue;
-      }
-      with_syms.insert(sname);
-      SSTab().ModifySymbolType(sname, MakeBoundedIntegerType(sname));
-    }
-  }
-  in_decl = false;
 
   auto ity = NodeType(*n.in);
   if (!isa<MDSpanType>(ity)) {
@@ -636,6 +620,7 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
     error_count++;
   }
 
+  // check the if rank equal between with-in and with-matcher
   if (n.with_matchers &&
       n.with_matchers->Count() != cast<MDSpanType>(ity)->Dims()) {
     Error(n.in->LOC(),
@@ -644,6 +629,36 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
               std::to_string(cast<MDSpanType>(ity)->Dims()) + ").");
     error_count++;
   }
+
+  // infer the type of bounded type
+  if (n.with) {
+    n.with->accept(*this);  // make the symbol be defined
+    with_syms.insert(n.with->name);
+    SSTab().ModifySymbolType(
+        n.with->name,
+        MakeBoundedITupleType(Shape(cast<MDSpanType>(ity)->Dims())));
+  }
+
+  if (n.with_matchers) {
+    n.with_matchers->accept(*this);  // make the symbol be defined
+    for (auto v : n.with_matchers->AllValues()) {
+      // only id are accepted in with-matcher
+      if (!isa<AST::Identifier>(v)) {
+        Error(v->LOC(), "expecting an identifier.");
+        continue;
+      }
+      auto sname = cast<AST::Identifier>(v)->name;
+      if (with_syms.count(sname)) {
+        Note(v->LOC(),
+             "symbol `" + sname +
+                 "' has been defined inside the with statement already.");
+        continue;
+      }
+      with_syms.insert(sname);
+      SSTab().ModifySymbolType(sname, MakeBoundedIntegerType(sname));
+    }
+  }
+  in_decl = false;
 
   return true;
 }

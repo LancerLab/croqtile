@@ -169,7 +169,7 @@ bool TypeInference::Visit(AST::IntLiteral &n) {
 bool TypeInference::Visit(AST::DataType &n) {
   __TRACE_EACH_VISIT__(n)
   if (n.getBaseType() == BaseType::UNKNOWN)
-    return true; // ignore the annotation that needs inference
+    return true;  // ignore the annotation that needs inference
 
   assert((cur_type == nullptr) && "Expecting null type.");
 
@@ -218,7 +218,6 @@ bool TypeInference::Visit(AST::NamedVariableDecl &n) {
   if (Dump) {
     os << "Symbol:    " << SSTab().InScopeName(n.name_str)
        << ", Type: " << AST::TYPE_STR(n);
-    if (n.mem) os << ", Storage: " << AST::STR(*n.mem);
     os << "\n";
   }
 
@@ -247,7 +246,7 @@ bool TypeInference::Visit(AST::NamedTypeDecl &n) {
     // need type inference
     Error(n.LOC(),
           "`" + n.name_str +
-          "' is declared without type annotation or initialization.");
+              "' is declared without type annotation or initialization.");
     error_count++;
     return false;
   }
@@ -264,6 +263,22 @@ bool TypeInference::Visit(AST::NamedTypeDecl &n) {
 // ituple override operator "=" for definition
 bool TypeInference::Visit(AST::Assignment &n) {
   __TRACE_EACH_VISIT__(n)
+  if (SSTab().IsDeclared(n.name)) {
+    Error(n.LOC(), "current choreo does not support symbol re-assignment.");
+    error_count++;
+  }
+  if (isa<UnknownType>(n.value->GetType())) {
+    Error(n.LOC(), "fail to deduce type of `" + n.name + "'.");
+    error_count++;
+  } else {
+    auto ty = n.value->GetType();
+    AssignSymbolWithType(n.LOC(), n.name, ty);
+
+    if (Dump) {
+      os << "Symbol:    " << SSTab().InScopeName(n.name)
+         << ", Type: " << PSTR(ty) << "\n";
+    }
+  }
   return true;
 }
 
@@ -394,6 +409,10 @@ bool TypeInference::Visit(AST::Expr &n) {
     auto &pty_rhs = n.GetR()->GetType();
     if ((isa<MDSpanType>(pty_lhs) && isa<ITupleType>(pty_rhs)) ||
         (isa<MDSpanType>(pty_rhs) && isa<ITupleType>(pty_lhs))) {
+      if (n.op == "concat") {
+        n.SetType(MakeMDSpanType(n.s));
+        return true;
+      }
       if (pty_lhs->Dims() == pty_rhs->Dims()) {
         n.SetType(MakeMDSpanType(n.s));  // note: the shape has been inferenced
         cur_type = n.GetType();
@@ -406,8 +425,10 @@ bool TypeInference::Visit(AST::Expr &n) {
         return false;
       }
     } else if (isa<MDSpanType>(pty_lhs) && isa<MDSpanType>(pty_rhs)) {
-      if (n.op == "concat")
+      if (n.op == "concat") {
+        n.SetType(MakeMDSpanType(n.s));
         return true;
+      }
       if (!((n.op == "/") || (n.op == "%"))) {
         Error(n.LOC(), "The operands of the expression cannot undergo '" +
                            n.op + "' operation.");
@@ -425,6 +446,13 @@ bool TypeInference::Visit(AST::Expr &n) {
         return false;
       }
     } else if (isa<ITupleType>(pty_rhs) && isa<ITupleType>(pty_lhs)) {
+      if (n.op == "concat") {
+        if (!cast<ITupleType>(pty_rhs)->IsDimValid() ||
+            !cast<ITupleType>(pty_lhs)->IsDimValid())
+          n.SetType(MakeUninitITupleType());
+        n.SetType(MakeITupleType(pty_rhs->Dims() + pty_lhs->Dims()));
+        return true;
+      }
       if (pty_lhs->Dims() == pty_rhs->Dims()) {
         n.SetType(pty_rhs);
         cur_type = n.GetType();
@@ -499,7 +527,8 @@ bool TypeInference::Visit(AST::DMA &n) {
   }
 
   if (Dump) {
-    os << "Future: " << ((n.future.empty()) ? "" : SSTab().InScopeName(n.future))
+    os << "Future:    "
+       << ((n.future.empty()) ? "" : SSTab().InScopeName(n.future))
        << ", Type: " << AST::TYPE_STR(n) << "\n";
   }
 

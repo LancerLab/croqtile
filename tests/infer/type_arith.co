@@ -20,5 +20,5 @@ __co__ void arith1(s32 [32, 18, 6, 1] d, int c) {
 // CHECK: Symbol:    ::arith1::h, Type: ituple<4>
 // CHECK: Partial:   ::arith1::e, Type: mdspan<4> [37, 23, 11, 6]
 // CHECK: Symbol:    ::arith1::f, Type: ituple<4>
-// CHECK: Symbol:    ::arith1::i, Type: global s16 mdspan<4> [39, 25, 13, 8], Storage: global
+// CHECK: Symbol:    ::arith1::i, Type: global s16 mdspan<4> [39, 25, 13, 8]
 // CHECK: Function:  ::arith1, Type: void (*)(s32 mdspan<4> [32, 18, 6, 1], int)

@@ -748,6 +748,7 @@ struct ITupleType : public Type, public TypeIDProvider<ITupleType> {
   ITupleType(size_t n) : Type(TypeCategory::ITUPLE), dim_count(n) {}
 
   size_t Dims() const override { return dim_count; }
+  bool IsDimValid() const { return dim_count != InvalidRank(); }
   bool IsComplete() const override { return true; }
 
   void Print(std::ostream& os) const override {

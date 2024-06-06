@@ -189,9 +189,15 @@ std::optional<std::string> ValueNumbering::TryToSimplifyBinary(
       res += std::to_string(std::stoi(*l_cv) - std::stoi(*r_cv));
     else if (op == "*")
       res += std::to_string(std::stoi(*l_cv) * std::stoi(*r_cv));
-    else if (op == "/")
-      res += std::to_string(std::stoi(*l_cv) / std::stoi(*r_cv));
-    else if (op == "%")
+    else if (op == "/") {
+      int div_end = std::stoi(*r_cv);
+      if (div_end == 0) {
+        os << ScopeIndent() << "<ERROR> divide by zero: " << lhs << " / " << rhs
+           << "\n";
+        choreo_unreachable("divide by zero is found in shape evaluation.");
+      }
+      res += std::to_string(std::stoi(*l_cv) / div_end);
+    } else if (op == "%")
       res += std::to_string(std::stoi(*l_cv) % std::stoi(*r_cv));
     else {
       Error(loc,
@@ -440,10 +446,14 @@ std::string ValueNumbering::GenerateNodeSignature(AST::Node& node,
     // when it contains a single value, return the reference.
     if (b->values.size() == 1) return GetSignatureForNode(*b->values[0]);
 
-    std::string signature =
-        "#" + std::to_string(GetValueNumberForNode(*b->values[0]));
+    auto NodeSignature = [this](AST::Node& n) {
+      int vn = GetValueNumberForNode(n);
+      auto sig = GetSignatureFromValueNumber(vn);
+      return "#" + std::to_string(vn);
+    };
+    std::string signature = NodeSignature(*b->values[0]);
     for (size_t i = 1; i < b->values.size(); ++i)
-      signature += ",#" + std::to_string(GetValueNumberForNode(*b->values[i]));
+      signature += "," + NodeSignature(*b->values[i]);
     return signature;
   } else if (auto* it = dyn_cast<AST::IntTuple>(&node)) {
     return GenerateNodeSignature(*(it->GetValues()));

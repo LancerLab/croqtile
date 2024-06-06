@@ -14,7 +14,7 @@ __co__ auto illegal_mdspan(f32 [3, ?, 18] a, s16 [?, 4] b) {
 // CHECK: error: un-matched with-matcher-count(3) and mdspan rank(4).
 // CHECK: error: symbol `x' has been declared already.
 // CHECK: error: symbol `y' has been declared already.
-// CHECK: error: symbol `x' has been defined inside the with statement already.
-// CHECK: error: symbol `y' has been defined inside the with statement already
+// CHECK: note: symbol `x' has been defined inside the with statement already.
+// CHECK: note: symbol `y' has been defined inside the with statement already
 // CHECK: error: symbol `x' is not defined inside the with statement.
-// CHECK: Totally 7 errors have been detected.
+// CHECK: Totally 5 errors have been detected.
