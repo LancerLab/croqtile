@@ -429,7 +429,7 @@ bool TypeInference::Visit(AST::Expr &n) {
         n.SetType(MakeMDSpanType(n.s));
         return true;
       }
-      if (!((n.op == "/") || (n.op == "%"))) {
+      if (!((n.op == "/") || (n.op == "%") || (n.op == "cdiv"))) {
         Error(n.LOC(), "The operands of the expression cannot undergo '" +
                            n.op + "' operation.");
         error_count++;

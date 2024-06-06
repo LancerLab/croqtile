@@ -301,7 +301,8 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
 
   bool IsArith() const {
     if (!IsBinary()) return false;
-    if ((op == "+") || (op == "-") || (op == "*") || (op == "/") || (op == "%"))
+    if ((op == "+") || (op == "-") || (op == "*") || (op == "/") ||
+        (op == "%") || (op == "cdiv"))
       return true;
     return false;
   }

@@ -197,8 +197,23 @@ std::optional<std::string> ValueNumbering::TryToSimplifyBinary(
         choreo_unreachable("divide by zero is found in shape evaluation.");
       }
       res += std::to_string(std::stoi(*l_cv) / div_end);
-    } else if (op == "%")
+    } else if (op == "%") {
+      int div_end = std::stoi(*r_cv);
+      if (div_end == 0) {
+        os << ScopeIndent() << "<ERROR> divide by zero: " << lhs << " / " << rhs
+           << "\n";
+        choreo_unreachable("divide by zero is found in shape evaluation.");
+      }
       res += std::to_string(std::stoi(*l_cv) % std::stoi(*r_cv));
+    } else if (op == "cdiv") {
+      int div_end = std::stoi(*r_cv);
+      if (div_end == 0) {
+        os << ScopeIndent() << "<ERROR> divide by zero: " << lhs << " / " << rhs
+           << "\n";
+        choreo_unreachable("divide by zero is found in shape evaluation.");
+      }
+      res += std::to_string((std::stoi(*l_cv) + std::stoi(*r_cv) - 1) / std::stoi(*r_cv));
+    }
     else {
       Error(loc,
             "simplification of operation `" + op + "' is not yet supported.");
@@ -298,6 +313,18 @@ std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
                if (res && trace)
                  os << ScopeIndent() << "<Simplify> '"
                     << GenerateNodeSignature(*n->GetL(), false) << " % "
+                    << GenerateNodeSignature(*n->GetR(), false) << "' to '"
+                    << res.value() << "'\n";
+               return res;
+             }},
+            {"cdiv",
+             [this, &n]() -> std::optional<std::string> {
+               auto res = TryToSimplifyBinary(n->LOC(), "cdiv",
+                                              GetSignatureForNode(*n->GetL()),
+                                              GetSignatureForNode(*n->GetR()));
+               if (res && trace)
+                 os << ScopeIndent() << "<Simplify> '"
+                    << GenerateNodeSignature(*n->GetL(), false) << " cdiv "
                     << GenerateNodeSignature(*n->GetR(), false) << "' to '"
                     << res.value() << "'\n";
                return res;

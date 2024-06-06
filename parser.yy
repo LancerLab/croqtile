@@ -121,6 +121,7 @@ void choreo_info(const char *message) {
   BIND    "<->"
   PIPE    "|"
   UBOUND  "#"
+  CDIV    "cdiv"
 ;
 
 // instead of union, using c++17 variant for terminal and non-terminals
@@ -594,6 +595,7 @@ s_expr
     | s_expr STAR s_expr { $$ = AST::Make<AST::Expr>(@1, "*", $1, $3); }
     | s_expr SLASH s_expr { $$ = AST::Make<AST::Expr>(@1, "/", $1, $3); }
     | s_expr PECET s_expr { $$ = AST::Make<AST::Expr>(@1, "%", $1, $3); }
+    | CDIV LPAREN s_expr COMMA s_expr RPAREN { $$ = AST::Make<AST::Expr>(@1, "cdiv", $3, $5); }
     | s_expr OR s_expr { $$ = AST::Make<AST::Expr>(@1, "||", $1, $3); }
     | s_expr AND s_expr { $$ = AST::Make<AST::Expr>(@1, "&&", $1, $3); }
     | NOT s_expr { $$ = AST::Make<AST::Expr>(@1, "!", $2); }

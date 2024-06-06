@@ -144,7 +144,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     }
     SetNodeType(n, MakeIntegerType());
   } else if ((n.op == "+") || (n.op == "-") || (n.op == "*") || (n.op == "/") ||
-             (n.op == "%")) {
+             (n.op == "%") || (n.op == "cdiv")) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
     if ((isa<MDSpanType>(lty) && isa<ITupleType>(rty)) ||
@@ -209,7 +209,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       SetNodeType(n, MakeITupleType(lty->Dims()));
     } else if (isa<MDSpanType>(lty) && isa<MDSpanType>(rty)) {
       // only allow div/mod operations
-      if ((n.op != "/") && (n.op != "%")) {
+      if ((n.op != "/") && (n.op != "%") && (n.op != "cdiv")) {
         Error(n.LOC(), "in operation \"" + n.op +
                            "\": unable to apply to the types (" + PSTR(lty) +
                            " vs. " + PSTR(rty) + ").");

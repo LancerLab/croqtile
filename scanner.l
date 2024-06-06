@@ -154,6 +154,7 @@ blank [ \t\r]
   "*"        return Choreo::Parser::make_STAR   (loc);
   "/"        return Choreo::Parser::make_SLASH  (loc);
   "%"        return Choreo::Parser::make_PECET  (loc);
+  "cdiv"     return Choreo::Parser::make_CDIV   (loc);
   "="        return Choreo::Parser::make_ASSIGN (loc);
   "<"        return Choreo::Parser::make_LT     (loc);
   ">"        return Choreo::Parser::make_GT     (loc);
