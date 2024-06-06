@@ -152,11 +152,11 @@ struct Normalizer : public Visitor {
         return nullptr;
       };
 
-      if (auto new_value = Apply(n.value_c.get())) n.value_c = new_value;
-      if (auto new_value = Apply(n.value_l.get())) n.value_l = new_value;
-      if (isa<AST::Expr>(n.value_r)) {
-        if (auto new_value = Apply(cast<AST::Expr>(n.value_r.get())))
-          n.value_r = new_value;
+      if (auto new_value = Apply(n.GetC().get())) n.SetC(new_value);
+      if (auto lv = dyn_cast<AST::Expr>(n.GetL()))
+        if (auto new_value = Apply(lv)) n.SetL(new_value);
+      if (auto rv = dyn_cast<AST::Expr>(n.GetR())) {
+        if (auto new_value = Apply(rv)) n.SetR(new_value);
       }
 
       return true;

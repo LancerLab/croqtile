@@ -1,0 +1,14 @@
+// RUN: choreo -i %s | FileCheck --match-full-lines %s
+
+__co__ void concat(s32 [20, 7] a, s32 mdspan<1> b) {
+  c : [a.span, [3, 2]];
+  with index in [c, b.span] {}
+  d : [c, 1, c(3)];
+}
+
+// CHECK:Parameter: ::concat::a, Type: s32 mdspan<2> [20, 7]
+// CHECK:Parameter: ::concat::b, Type: s32 mdspan<1> [::concat::$0]
+// CHECK:Partial:   ::concat::c, Type: mdspan<4> [20, 7, 3, 2]
+// CHECK:Bounded:   ::concat::within_0::index, Type: {int,int,int,int,int}->[20, 7, 3, 2, ::concat::$0]
+// CHECK:Partial:   ::concat::d, Type: mdspan<6> [20, 7, 3, 2, 1, 2]
+// CHECK:Function:  ::concat, Type: void (*)(s32 mdspan<2> [20, 7], s32 mdspan<1> [::concat::$0])

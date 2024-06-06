@@ -163,7 +163,7 @@ struct MultiValues : public Node, public TypeIDProvider<MultiValues> {
 
   ptr<Node> operator[](const size_t idx) const { return ValueAt(idx); }
 
-  const std::vector<ptr<Node>> & AllValues() const { return values; }
+  const std::vector<ptr<Node>>& AllValues() const { return values; }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     if (delimiter != "" && values.size() > 1) {
@@ -229,25 +229,60 @@ struct IntLiteral : public Node, public TypeIDProvider<IntLiteral> {
 
 struct Expr : public Node, public TypeIDProvider<Expr> {
   // Different expression type
-  enum Type { Unary, Binary, Ternary, Reference };
+  enum Form { Unary, Binary, Ternary, Reference };
 
   std::string op;
+
+ private:
   ptr<Expr> value_c = nullptr;
-  ptr<Expr> value_l = nullptr;
+  ptr<Node> value_l = nullptr;
   ptr<Node> value_r = nullptr;
-  Type t;
+  Form t;
+
+ public:
+  const ptr<Node>& GetR() const { return value_r; }
+  const ptr<Node>& GetL() const { return value_l; }
+  const ptr<Expr>& GetC() const { return value_c; }
+  Form GetForm() const { return t; }
+  void SetR(const ptr<Node>& r) {
+    assert(r);
+    value_r = r;
+  }
+  void SetL(const ptr<Node>& l) {
+    assert(l);
+    assert((t == Binary) || (t == Ternary));
+    value_l = l;
+  }
+  void SetC(const ptr<Expr>& c) {
+    assert(c);
+    assert((t == Ternary));
+    value_c = c;
+  }
+
+ public:
   Shape s;  // to pass information between shape inference & type inference
 
   explicit Expr(const location& l, const ptr<Node>& v)
-      : Node(l), op("ref"), value_r(v), t(Reference) {}
+      : Node(l), op("ref"), value_r(v), t(Reference) {
+    assert(value_r);
+  }
   explicit Expr(const location& l, const std::string& o, const ptr<Node>& v2)
-      : Node(l), op(o), value_r(v2), t(Unary) {}
-  explicit Expr(const location& l, const std::string& o, const ptr<Expr>& v1,
+      : Node(l), op(o), value_r(v2), t(Unary) {
+    assert(value_r);
+  }
+  explicit Expr(const location& l, const std::string& o, const ptr<Node>& v1,
                 const ptr<Node>& v2)
-      : Node(l), op(o), value_l(v1), value_r(v2), t(Binary) {}
+      : Node(l), op(o), value_l(v1), value_r(v2), t(Binary) {
+    assert(value_l);
+    assert(value_r);
+  }
   explicit Expr(const location& l, const std::string& o, const ptr<Expr>& c,
-                const ptr<Expr>& v1, const ptr<Node>& v2)
-      : Node(l), op(o), value_c(c), value_l(v1), value_r(v2), t(Ternary) {}
+                const ptr<Node>& v1, const ptr<Node>& v2)
+      : Node(l), op(o), value_c(c), value_l(v1), value_r(v2), t(Ternary) {
+    assert(value_c);
+    assert(value_l);
+    assert(value_r);
+  }
 
   ptr<Node> GetReference() {
     if (t == Reference) return value_r;
@@ -259,10 +294,10 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
     return dyn_cast<Identifier>(value_r);
   }
 
-  bool IsUnary() const { return t == Type::Unary; }
-  bool IsBinary() const { return t == Type::Binary; }
-  bool IsTernary() const { return t == Type::Ternary; }
-  bool IsReference() const { return t == Type::Reference; }
+  bool IsUnary() const { return t == Unary; }
+  bool IsBinary() const { return t == Binary; }
+  bool IsTernary() const { return t == Ternary; }
+  bool IsReference() const { return t == Reference; }
 
   bool IsArith() const {
     if (!IsBinary()) return false;

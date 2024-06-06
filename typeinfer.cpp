@@ -360,23 +360,23 @@ bool TypeInference::Visit(AST::Expr &n) {
     return true;
   }
 
-  if (n.t == AST::Expr::Unary) {
+  if (n.GetForm() == AST::Expr::Unary) {
     if (n.op == "ubound") {
-      auto id = cast<AST::Identifier>(n.value_r);
+      auto id = cast<AST::Identifier>(n.GetR());
       if (auto bty =
               dyn_cast<BoundedITupleType>(GetSymbolType(id->LOC(), id->name)))
         n.SetType(MakeITupleType(bty->Dims()));
       else if (isa<BoundedIntegerType>(GetSymbolType(id->LOC(), id->name)))
         n.SetType(MakeIntegerType());
       else
-        choreo_unreachable("ubound type '" + AST::TYPE_STR(n.value_r) +
+        choreo_unreachable("ubound type '" + AST::TYPE_STR(n.GetR()) +
                            "' is unexpected.");
       return true;
     } else if (n.op == "sizeof") {
       n.SetType(MakeIntegerType());
       return true;
     } else if (n.op == "dataof") {
-      auto ref = cast<AST::Expr>(n.value_r)->GetReference();
+      auto ref = cast<AST::Expr>(n.GetR())->GetReference();
       auto id = cast<AST::Identifier>(ref);
       n.SetType(GetSymbolType(id->LOC(), id->name + ".data"));
       return true;
@@ -384,14 +384,14 @@ bool TypeInference::Visit(AST::Expr &n) {
     choreo_unreachable("type inference is yet to implement.");
   }
 
-  if (n.t == AST::Expr::Binary) {
+  if (n.GetForm() == AST::Expr::Binary) {
     if (n.op == "dimof") {
       n.SetType(MakeIntegerType());
       return true;
     }
 
-    auto &pty_lhs = n.value_l->GetType();
-    auto &pty_rhs = n.value_r->GetType();
+    auto &pty_lhs = n.GetL()->GetType();
+    auto &pty_rhs = n.GetR()->GetType();
     if ((isa<MDSpanType>(pty_lhs) && isa<ITupleType>(pty_rhs)) ||
         (isa<MDSpanType>(pty_rhs) && isa<ITupleType>(pty_lhs))) {
       if (pty_lhs->Dims() == pty_rhs->Dims()) {
@@ -406,7 +406,9 @@ bool TypeInference::Visit(AST::Expr &n) {
         return false;
       }
     } else if (isa<MDSpanType>(pty_lhs) && isa<MDSpanType>(pty_rhs)) {
-      if (!(((n.op == "/") || (n.op == "%")))) {
+      if (n.op == "concat")
+        return true;
+      if (!((n.op == "/") || (n.op == "%"))) {
         Error(n.LOC(), "The operands of the expression cannot undergo '" +
                            n.op + "' operation.");
         error_count++;
@@ -450,13 +452,13 @@ bool TypeInference::Visit(AST::Expr &n) {
       error_count++;
       return false;
     } else {
-      n.SetType(n.value_r->GetType());
+      n.SetType(n.GetR()->GetType());
       cur_type = n.GetType();
       return true;
     }
   }  // AST::Expr::Binary
 
-  if (n.t == AST::Expr::Ternary) {
+  if (n.GetForm() == AST::Expr::Ternary) {
     choreo_unreachable("inference of ternary operation is not implemented.");
   }
   return true;

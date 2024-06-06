@@ -539,13 +539,13 @@ bool FactorCodeGen::Visit(AST::Call &c) {
   for (int index = 0; index < arg_num;) {
     auto arg = dyn_cast<AST::Expr>(args->AllValues()[index]);
     assert(arg && "Invalid kernel call arg!");
-    switch (arg->t) {
+    switch (arg->GetForm()) {
       case AST::Expr::Reference:
-        fs << STR(arg->value_r) << ".addr_()";
+        fs << STR(arg->GetR()) << ".addr_()";
         break;
       case AST::Expr::Unary:
         if (arg->op == "sizeof") {
-          auto var = STR(arg->value_r).substr(0, STR(arg->value_r).find('.'));
+          auto var = STR(arg->GetR()).substr(0, STR(arg->GetR()).find('.'));
           assert(dyn_cast<FutureType>(this->GetSymbolType(var)) &&
                  "Unexpected !!!");
           auto ty_ptr = cast<FutureType>(this->GetSymbolType(var));
@@ -560,12 +560,12 @@ bool FactorCodeGen::Visit(AST::Call &c) {
 #endif
           fs << shape.GetSizeExpression();
         } else if (arg->op == "dataof") {
-          fs << STR(arg->value_r) << "_buffer"
+          fs << STR(arg->GetR()) << "_buffer"
              << ".addr_()";
         }
         break;
       default:
-        os << STR(arg->t);
+        os << STR(arg->GetForm());
         choreo_unreachable("unhandled expression type.");
         break;
     }

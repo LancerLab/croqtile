@@ -45,7 +45,7 @@ struct EarlySemantics : public Visitor {
         if (auto id = dyn_cast<AST::Identifier>(ref))
           return SSTab().LookupSymbol(id->name);
       } else if (expr->op == "dataof") {
-        if (auto ref = cast<AST::Expr>(expr->value_r)->GetReference()) {
+        if (auto ref = cast<AST::Expr>(expr->GetR())->GetReference()) {
           auto id = cast<AST::Identifier>(ref);
           if (!SSTab().LookupSymbol(id->name))  // make sure the symbol exists
             return nullptr;

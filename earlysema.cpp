@@ -96,7 +96,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     assert(!isa<UnknownType>(rty) && "reference type is unknown.");
     SetNodeType(n, rty);
   } else if (n.op == "dataof") {
-    auto ty = NodeType(*n.value_r);
+    auto ty = NodeType(*n.GetR());
     if (!isa<FutureType>(ty)) {
       Error(n.LOC(), "in operation \"" + n.op +
                          "\": expecting a future type but got `" + PSTR(ty) +
@@ -106,7 +106,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     }
     SetNodeType(n, MakeUninitSpannedType());
   } else if (n.op == "sizeof") {
-    auto ty = NodeType(*n.value_r);
+    auto ty = NodeType(*n.GetR());
     if (!isa<MDSpanType>(ty)) {
       Error(n.LOC(), "in operation \"" + n.op +
                          "\": expecting a mdspan type but got `" + PSTR(ty) +
@@ -116,8 +116,8 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     }
     SetNodeType(n, MakeIntegerType());
   } else if (n.op == "dimof") {
-    auto lty = NodeType(*n.value_l);
-    auto rty = NodeType(*n.value_r);
+    auto lty = NodeType(*n.GetL());
+    auto rty = NodeType(*n.GetR());
     if (!isa<MDSpanType>(lty) && !isa<ITupleType>(lty) && !IsBoundedType(lty)) {
       Error(n.LOC(), "in operation \"" + n.op +
                          "\": expecting a indexable type but got `" +
@@ -134,7 +134,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     }
     SetNodeType(n, MakeIntegerType());
   } else if (n.op == "ubound") {
-    auto ty = NodeType(*n.value_r);
+    auto ty = NodeType(*n.GetR());
     if (!IsBoundedType(ty)) {
       Error(n.LOC(), "in operation \"" + n.op +
                          "\": expecting a bounded type but got `" + PSTR(ty) +
@@ -145,8 +145,8 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     SetNodeType(n, MakeIntegerType());
   } else if ((n.op == "+") || (n.op == "-") || (n.op == "*") || (n.op == "/") ||
              (n.op == "%")) {
-    auto lty = NodeType(*n.value_l);
-    auto rty = NodeType(*n.value_r);
+    auto lty = NodeType(*n.GetL());
+    auto rty = NodeType(*n.GetR());
     if ((isa<MDSpanType>(lty) && isa<ITupleType>(rty)) ||
         (isa<MDSpanType>(rty) && isa<ITupleType>(lty))) {
       // mdspan + ituple
@@ -184,7 +184,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
                (isa<BoundedIntegerType>(lty) && isa<BoundedIntegerType>(rty))) {
       // allow only * operator for catesian products on two bounded-vars
       // currently, only support boundedituple * boundedint or boundedint *
-      // boundedint os << STR(n.value_l) << "lty = " << PSTR(lty) << "; rty = "
+      // boundedint os << STR(n.GetL()) << "lty = " << PSTR(lty) << "; rty = "
       // << PSTR(rty);
       if ((n.op != "*")) {
         Error(n.LOC(), "in operation \"" + n.op +
@@ -256,8 +256,8 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       SetNodeType(n, lty);
   } else if ((n.op == "<") || (n.op == ">") || (n.op == "==") ||
              (n.op == "!=") || (n.op == "<=") || (n.op == ">=")) {
-    auto lty = NodeType(*n.value_l);
-    auto rty = NodeType(*n.value_r);
+    auto lty = NodeType(*n.GetL());
+    auto rty = NodeType(*n.GetR());
     assert(false);
     if (!(lty->ApprxEqual(*rty))) {
       Error(n.LOC(), "in operation \"" + n.op +
@@ -268,8 +268,8 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     }
     SetNodeType(n, MakeBooleanType());
   } else if ((n.op == "&&") || (n.op == "||")) {
-    auto lty = NodeType(*n.value_l);
-    auto rty = NodeType(*n.value_r);
+    auto lty = NodeType(*n.GetL());
+    auto rty = NodeType(*n.GetR());
     assert(false);
     if (!isa<BooleanType>(lty) || !isa<BooleanType>(rty)) {
       Error(n.LOC(), "in operation \"" + n.op +
@@ -280,7 +280,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     }
     SetNodeType(n, MakeBooleanType());
   } else if (n.op == "!") {
-    auto rty = NodeType(*n.value_r);
+    auto rty = NodeType(*n.GetR());
     if (!isa<BooleanType>(rty)) {  // TODO: will we allow integer?
       Error(n.LOC(), "in operation \"" + n.op +
                          "\": unable to apply to the type (" + PSTR(rty) +
@@ -290,9 +290,9 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     }
     SetNodeType(n, MakeBooleanType());
   } else if (n.op == "?") {
-    auto cty = NodeType(*n.value_c);
-    auto lty = NodeType(*n.value_l);
-    auto rty = NodeType(*n.value_r);
+    auto cty = NodeType(*n.GetC());
+    auto lty = NodeType(*n.GetL());
+    auto rty = NodeType(*n.GetR());
     if (!isa<BooleanType>(cty) || (!lty->ApprxEqual(*rty))) {
       Error(n.LOC(), "in operation \"" + n.op +
                          "\": unable to apply to the types (" + PSTR(cty) +
@@ -301,6 +301,20 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       return false;
     }
     SetNodeType(n, lty);
+  } else if (n.op == "concat") {
+    auto lty = NodeType(*n.GetL());
+    auto rty = NodeType(*n.GetR());
+    if (!isa<MDSpanType>(lty) || !isa<MDSpanType>(rty)) {
+      Error(n.LOC(), "in operation \"" + n.op +
+                         "\": unable to apply to the types " + PSTR(lty) +
+                         " and " + PSTR(rty) + ".");
+      error_count++;
+      return false;
+    }
+    if ((lty->Dims() == InvalidRank()) || (rty->Dims() == InvalidRank()))
+      SetNodeType(n, MakeUninitMDSpanType());
+    else
+      SetNodeType(n, MakeDimedMDSpanType(lty->Dims() + rty->Dims()));
   } else
     choreo_unreachable("operation in expression is not supported yet.");
   return true;
@@ -309,6 +323,48 @@ bool EarlySemantics::Visit(AST::Expr& n) {
 bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
   __TRACE_EACH_VISIT__(n)
   size_t rank = InvalidRank();
+
+  // transform [a.span, b.span] to be an expr of concat(a.span, b.span)
+  if (auto mvals = dyn_cast<AST::MultiValues>(n.list)) {
+    // concat can not work with syntactic sugar
+    if (n.ref_name.empty()) {
+      std::vector<ptr<AST::Node>> wl;
+      wl.push_back(nullptr);
+      for (auto& v : mvals->AllValues()) {
+        if (isa<MDSpanType>(v->GetType())) {
+          if (wl.back() == nullptr)
+            wl.back() = v;
+          else
+            wl.push_back(v);
+          wl.push_back(nullptr);  // accepting new values
+          continue;
+        }
+
+        // normal values are pushed to the multidimspan
+        if (wl.back() == nullptr)
+          wl.back() = AST::Make<AST::MultiDimSpans>(
+              v->LOC(), "" /*anon*/, AST::Make<AST::MultiValues>(v->LOC()));
+        cast<AST::MultiValues>(cast<AST::MultiDimSpans>(wl.back())->list)
+            ->Append(v);
+      }
+
+      if (wl.back() == nullptr) wl.pop_back();
+
+      if (wl.size() > 1) {  // mdspan inside
+        ptr<AST::Node> last = wl[0];
+        for (size_t i = 1; i < wl.size(); ++i) {
+          auto concat =
+              AST::Make<AST::Expr>(last->LOC(), "concat", last, wl[i]);
+          last = concat;
+        }
+        if (trace_visit)
+          os << "Transform: " << PSTR(n.list) << " to be " << PSTR(last)
+             << "\n";
+        n.list = last;
+        n.list->accept(*this);  // go evaluate the concatanation
+      }
+    }
+  }
 
   // try to figure out the dimensions
   if (auto mvals = dyn_cast<AST::MultiValues>(n.list))
