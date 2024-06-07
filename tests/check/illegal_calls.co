@@ -14,7 +14,7 @@ __co__ auto illegal_call0(f32 [36, 27, 128] input, int) {
 
 __co__ auto illegal_call1(f32 [36, 27, 128] input) {
   parallel p by 6 {
-    with index in [3] {
+    with index in [3, 4] {
       foreach index {
         f = dma.copy input.chunkat(p, index) => local;
         call abc(f);
@@ -26,7 +26,7 @@ __co__ auto illegal_call1(f32 [36, 27, 128] input) {
 
 __co__ auto illegal_call2(f32 [36, 27, 128] input) {
   parallel p by 6 {
-    with index in [3] {
+    with index in [3, 8] {
       foreach index {
         f = dma.copy input.chunkat(p, index) => local;
         call bcd(1, f.span);
@@ -38,7 +38,7 @@ __co__ auto illegal_call2(f32 [36, 27, 128] input) {
 
 __co__ auto illegal_call3(f32 [36, 27, 128] input) {
   parallel p by 6 {
-    with index in [3] {
+    with index in [3, 12] {
       foreach index {
         f = dma.copy input.chunkat(p, index) => local;
       }

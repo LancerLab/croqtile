@@ -752,21 +752,19 @@ class ShapeInference : public Visitor {
 
     if (cannot_proceed) return true;
 
-    if (n.future.empty()) {
-      // unnamed future, simply return
-      InvalidateVN(cur_vn);
-      return true;
-    }
-
-    std::string f_span = n.future + ".span";
     assert(ValidVN(cur_vn) &&
-           "unexpected current value number for future.span inference.");
-
-    vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(f_span), cur_vn);
+           "unexpected current value number for shape inference of dma.");
+    // annotate the shape on AST for later type inference
     auto s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
     n.SetType(MakeShapedFutureType(s, n.async));
-    SSTab().DefineSymbol(n.future, n.GetType());
-    SSTab().DefineSymbol(f_span, MakeMDSpanType(s));  // implicit symbol
+
+    if (!n.future.empty()) {
+      std::string f_span = n.future + ".span";
+      vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(f_span), cur_vn);
+      SSTab().DefineSymbol(n.future, n.GetType());
+      SSTab().DefineSymbol(f_span, MakeMDSpanType(s));  // implicit symbol
+    }
+
     InvalidateVN(cur_vn);
 
     return true;

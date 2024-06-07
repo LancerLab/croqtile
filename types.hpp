@@ -724,7 +724,8 @@ struct BooleanType final : public ScalarType,
 
 struct IndexType : public Type, public TypeIDProvider<IndexType> {
   IndexType() : Type(TypeCategory::INDEX) {}
-  size_t Dims() const override { return 0; }
+  // note: index type takes 1 dim in mdspan/ituple declaration
+  size_t Dims() const override { return 1; }
   bool IsComplete() const override { return true; }
   void Print(std::ostream& os) const override { os << "idx"; }
   const std::string Name() const override { return "index"; }

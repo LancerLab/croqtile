@@ -383,9 +383,14 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
   }
 
   // try to figure out the dimensions
-  if (auto mvals = dyn_cast<AST::MultiValues>(n.list))
-    rank = mvals->Count();
-  else if (isa<AST::Expr>(n.list))
+  if (auto mvals = dyn_cast<AST::MultiValues>(n.list)) {
+    size_t elem_count = 0;
+    for (auto& v : mvals->AllValues()) {
+      auto ty = NodeType(*v);
+      elem_count += ty->Dims();
+    }
+    rank = elem_count;
+  } else if (isa<AST::Expr>(n.list))
     rank = n.list->GetType()->Dims();
 
   if (n.Rank() == InvalidRank())
@@ -455,7 +460,7 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
                             n.type->GetType());
   if (auto ty = dyn_cast<SpannedType>(n.type->GetType())) {
     ReportErrorWhenViolateODR(n.LOC(), n.name_str + ".span", __FILE__, __LINE__,
-                              MakeRankedMDSpanType(ty->Dims()));
+                              ty->GetMDSpanType());
   }
   return true;
 }
@@ -541,6 +546,7 @@ bool EarlySemantics::Visit(AST::IntIndex& n) {
 bool EarlySemantics::Visit(AST::DataType& n) {
   __TRACE_EACH_VISIT__(n)
   // sema type has been generated at construction ast. refine with dims
+
   if (isa<SpannedType>(n.GetType())) {
     if (auto sty = dyn_cast<MDSpanType>(n.mdspan_type->GetType())) {
       SetNodeType(n, MakeRankedSpannedType(sty->Dims(), n.base_type));
@@ -563,9 +569,9 @@ bool EarlySemantics::Visit(AST::Parameter& n) {
   __TRACE_EACH_VISIT__(n)
   if (n.sym) {
     SSTab().ModifySymbolType(n.sym->name, n.type->GetType());
-    if (auto ty = dyn_cast<SpannedType>(n.type->GetType()))
-      SSTab().DefineSymbol(n.sym->name + ".span",
-                           MakeRankedMDSpanType(ty->Dims()));
+    if (auto ty = dyn_cast<SpannedType>(n.type->GetType())) {
+      SSTab().DefineSymbol(n.sym->name + ".span", ty->GetMDSpanType());
+    }
   }
   return true;
 }
@@ -705,13 +711,18 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
           "expecting '" + n.data->name + "` of a spanned data or future type.");
     error_count++;
   }
+
+  SpannedType* sty = nullptr;
+  if (auto fty = dyn_cast<FutureType>(nty))
+    sty = fty->GetSpannedType().get();
+  else
+    sty = cast<SpannedType>(nty);
+
   if (n.positions) {
     n.positions->accept(*this);
+    size_t rank = sty->Dims();
+    size_t r_count = 0;
     for (auto& v : n.positions->AllValues()) {
-      // if this is a expr, do expr check, otherwise to normal bounded var check
-      // if (auto node = cast<AST::Expr>(v)) {
-      //   this->Visit(*node);
-      // } else {
       auto ty = NodeType(*v);
       if (!isa<BoundedIntegerType>(ty) && !isa<BoundedIntegerType>(ty) &&
           !isa<BoundedITupleType>(ty)) {
@@ -719,7 +730,14 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
               "expecting '" + v->TypeNameString() + "` be a bounded type.");
         error_count++;
       }
-      // }
+      r_count += ty->Dims();
+    }
+    // report error when the ranks do not match
+    if (rank != r_count) {
+      Error(n.LOC(), "un-matched ranks between spanned data (" +
+                         std::to_string(rank) + ") and bounded variables (" +
+                         std::to_string(r_count) + ").");
+      error_count++;
     }
   }
   assert(nty->Dims() != InvalidRank());

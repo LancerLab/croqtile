@@ -514,13 +514,13 @@ bool TypeInference::Visit(AST::DMA &n) {
     return false;
   }
 
-  if (!n.future.empty()) {
-    auto fty = cast<FutureType>(n.GetType());
-    // fill the storage, fundanmental type
-    auto sty = MakeSpannedType(dma_fmty, fty->GetShape(), dma_mem);
-    auto nty = MakeFutureType(sty, fty->IsAsync());
-    n.SetType(nty);
+  // update the future type. fill info including storage, fundanmental type
+  auto fty = cast<FutureType>(n.GetType());
+  auto sty = MakeSpannedType(dma_fmty, fty->GetShape(), dma_mem);
+  auto nty = MakeFutureType(sty, fty->IsAsync());
+  n.SetType(nty);
 
+  if (!n.future.empty()) {
     AssignSymbolWithType(n.LOC(), n.future + ".span",
                          MakeMDSpanType(fty->GetShape()));
     AssignSymbolWithType(n.LOC(), n.future + ".data", sty);
@@ -529,7 +529,8 @@ bool TypeInference::Visit(AST::DMA &n) {
 
   if (Dump) {
     os << "Future:    "
-       << ((n.future.empty()) ? "" : SSTab().InScopeName(n.future))
+       << ((n.future.empty()) ? SSTab().ScopeName() + "(anon)"
+                              : SSTab().InScopeName(n.future))
        << ", Type: " << AST::TYPE_STR(n) << "\n";
   }
 
