@@ -1,0 +1,42 @@
+ceil division: 'cdiv' is supported
+requires:
+1. memset(spanned_view, 0), spanned_view includes spanned_data.
+2. dyn_elementwise to be finished.
+3. updated pad_op: spanned_view as a parameter.
+
+possible extension:
+1. with idx_in_c, idx_ot_c in [in_span_h / in_span_c], [ot_span_h / ot_span_c],
+2. |bounded_var1 * bounded_var2| elements in cat-prod
+
+__co__ auto pad_func(f32 [?, ?] input) {
+  f32 [(input.span / 2 + 2) * 2] output;
+  // do linear copy from h to c
+  in_shape_c : input.span / 2;
+  ot_shape_c : output.span / 2;
+
+  // tile c to s, pad mode has larger s tile
+  in_shape_s : [in_shape_c + 2];
+  ot_shape_s : [ot_shape_c + 2];
+
+  // use less sips for lightweighted op
+  parallel p by 1 {
+    with tile_in_c in [input.span / in_shape_c],
+         tile_ot_c in [output.span / ot_shape_c] {
+      cdt_input = dma.copy input.chunkat(p, tile_in_c) => shared;
+      // NOTE: dma.pad with config parameters, pad low/high/mid, and pad value
+      sdt_input = dma.pad<{1, 1}, {1, 1}, {0, 0}, 0> cdt_input.data => local;
+      sdt_out = dma.pad<{1, 1}, {1, 1}, {0, 0}, 0> sdt_input.data => shared;
+      dma.copy sdt_out => output.chunkat(p, tile_ot_c);
+    }
+  }
+
+  return output;
+}
+
+void main() {
+  std::vector<uint8_t> input = {1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4};
+  auto output = pad_func(choreo::dataspan(input,  {2, 8}),
+                         choreo::dataspan(output, {6, 24}));
+}
+
+compare vn with: isl, storage uniquer, fpl
