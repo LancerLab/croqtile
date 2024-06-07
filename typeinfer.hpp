@@ -20,6 +20,8 @@ struct TypeInference : public Visitor {
   std::vector<ptr<Type>> cur_param_types;
   Shape cur_mdspan_value;
   std::string cur_func_name;  // current function name
+  BaseType dma_fmty = BaseType::UNKNOWN;
+  Storage dma_mem = Storage::NONE;
 
   bool BeforeVisit(AST::Node &) override;
   bool AfterVisit(AST::Node &) override;

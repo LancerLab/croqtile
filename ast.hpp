@@ -370,14 +370,14 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
   // set both the mdspan and dim count
   explicit MultiDimSpans(const location& l, const std::string& n,
                          const ptr<Node>& lst, size_t dc)
-      : Node(l, MakeDimedMDSpanType(dc)), ref_name(n), list(lst), rank(dc) {
+      : Node(l, MakeRankedMDSpanType(dc)), ref_name(n), list(lst), rank(dc) {
     assert(list && "Unexpected: span list is not provided");
     // check the consistent between rank and span list in semantic time
   }
 
   // mdspan is unknown - for parameter passing
   explicit MultiDimSpans(const location& l, const std::string& n, size_t c)
-      : Node(l, MakeDimedMDSpanType(c)), ref_name(n), list(nullptr), rank(c) {
+      : Node(l, MakeRankedMDSpanType(c)), ref_name(n), list(nullptr), rank(c) {
     assert(rank != __INVALID_VALUE__ && "Invalid dimensions.");
   }
 
@@ -899,7 +899,7 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
   explicit DMA(const location& l, const std::string& o, const std::string& r,
                const ptr<Node>& f, const ptr<Node>& t, bool a,
                const ptr<DMAConfig>& c = nullptr)
-      : Node(l, MakeFutureType(a)),
+      : Node(l, MakeDummyFutureType(a)),
         operation(o),
         future(r),
         async(a),

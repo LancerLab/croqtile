@@ -11,7 +11,7 @@ __co__ auto illegal_mdspan(f32 [?] a) {
   }
 }
 
-// CHECK: error: `mds1' is declared as "mdspan<> []" but initialized as "ituple<2>".
+// CHECK: error: `mds1' is declared as "mdspan<>" but initialized as "ituple<2>".
 // CHECK: error: `mds2' is declared as "mdspan<1> []" but initialized as "mdspan<2> []".
 // CHECK: error: unexpected data type 'bool' is found in mdspan.
 // CHECK: error: unexpected data type 'f32 mdspan<1> []' is found in mdspan.

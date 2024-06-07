@@ -25,6 +25,9 @@ bool TypeInference::BeforeVisit(AST::Node &n) {
   } else if (isa<AST::ForeachBlock>(&n)) {
     static size_t count = 0;
     SSTab().EnterScope("foreach_" + std::to_string(count++));
+  } else if (isa<AST::DMA>(&n)) {
+    dma_fmty = BaseType::UNKNOWN;
+    dma_mem = Storage::NONE;
   }
   return true;
 }
@@ -51,6 +54,9 @@ bool TypeInference::AfterVisit(AST::Node &n) {
     if (Dump)
       os << "Function:  " << SSTab().InScopeName(f->name)
          << ", Type: " << AST::TYPE_STR(*f) << "\n";
+  } else if (isa<AST::DMA>(&n)) {
+    dma_fmty = BaseType::UNKNOWN;
+    dma_mem = Storage::NONE;
   }
   return true;
 }
@@ -509,21 +515,16 @@ bool TypeInference::Visit(AST::DMA &n) {
   }
 
   if (!n.future.empty()) {
-    AssignSymbolWithType(n.LOC(), n.future, n.GetType());
+    auto fty = cast<FutureType>(n.GetType());
+    // fill the storage, fundanmental type
+    auto sty = MakeSpannedType(dma_fmty, fty->GetShape(), dma_mem);
+    auto nty = MakeFutureType(sty, fty->IsAsync());
+    n.SetType(nty);
 
-    // inference the storage and shape from 'from' and 'to'
-    auto s = cast<FutureType>(n.GetType())->GetShape();
-    auto fty = cast<SpannedType>(SSTab().LookupSymbol(n.FromSymbol()));
-    Storage st = Storage::NONE;
-    if (n.ToSymbol().empty())
-      st = cast<AST::Memory>(n.to)->Get();
-    else {
-      auto tty = SSTab().LookupSymbol(n.ToSymbol());
-      st = cast<SpannedType>(tty)->GetStorage();
-    }
-    AssignSymbolWithType(n.LOC(), n.future + ".span", MakeMDSpanType(s));
-    AssignSymbolWithType(n.LOC(), n.future + ".data",
-                         MakeSpannedType(fty->ElementType(), s, st));
+    AssignSymbolWithType(n.LOC(), n.future + ".span",
+                         MakeMDSpanType(fty->GetShape()));
+    AssignSymbolWithType(n.LOC(), n.future + ".data", sty);
+    AssignSymbolWithType(n.LOC(), n.future, nty);
   }
 
   if (Dump) {
@@ -584,13 +585,29 @@ bool TypeInference::Visit(AST::WithBlock &n) {
   __TRACE_EACH_VISIT__(n)
   return true;
 }
+
 bool TypeInference::Visit(AST::Memory &n) {
   __TRACE_EACH_VISIT__(n)
+  dma_mem = n.Get();
   return true;
 }
 
 bool TypeInference::Visit(AST::ChunkAt &n) {
   __TRACE_EACH_VISIT__(n)
+  auto ty = GetSymbolType(n.data->LOC(), n.data->name);
+  if (isa<FutureType>(ty))
+    ty = GetSymbolType(n.data->LOC(), n.data->name + ".data");
+  auto sty = cast<SpannedType>(ty);
+  auto fmty = sty->ElementType();
+  auto sto = sty->GetStorage();
+  assert(fmty != BaseType::UNKNOWN);
+  if ((dma_fmty != BaseType::UNKNOWN) && (fmty != dma_fmty)) {
+    Error(n.LOC(), "transfer data type with different types: " + STR(fmty) +
+                       " vs. " + STR(dma_fmty));
+    error_count++;
+  }
+  dma_fmty = fmty;
+  dma_mem = sto;
   return true;
 }
 
@@ -598,6 +615,7 @@ bool TypeInference::Visit(AST::Wait &n) {
   __TRACE_EACH_VISIT__(n)
   return true;
 }
+
 bool TypeInference::Visit(AST::Call &n) {
   __TRACE_EACH_VISIT__(n)
   return true;

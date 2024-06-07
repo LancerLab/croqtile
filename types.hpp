@@ -817,8 +817,8 @@ struct MDSpanType : public Type, public TypeIDProvider<MDSpanType> {
   void Print(std::ostream& os) const override {
     os << "mdspan<";
     if (value.IsValid()) os << Dims();
-    os << "> ";
-    value.Print(os);
+    os << ">";
+    if (HasSufficientInfo()) os << " " << STR(value);
   }
 
   std::string EmitTo(Target target) const override {
@@ -983,34 +983,40 @@ struct BoundedITupleType final : public Type,
 };
 
 struct FutureType : public ScalarType, public TypeIDProvider<FutureType> {
-  Shape shape;  // the data shape associated with the future
+  ptr<SpannedType> psty =
+      nullptr;  // the spanned data associated with the future
   bool async;
 
-  FutureType(bool a) : ScalarType(TypeCategory::FUTURE), async(a) {}
-  FutureType(const Shape& mds, bool a)
-      : ScalarType(TypeCategory::FUTURE), shape(mds), async(a) {}
+  FutureType(const ptr<SpannedType>& s, bool a)
+      : ScalarType(TypeCategory::FUTURE), psty(s), async(a) {}
   bool IsComplete() const override { return true; }
-  bool HasSufficientInfo() const { return shape.IsValid(); }
+  bool HasSufficientInfo() const { return psty->HasSufficientInfo(); }
   const std::string Name() const override { return "future"; }
-  Shape GetShape() { return shape; }
-  size_t Dims() const override { return shape.Dims(); }
+  Shape GetShape() { return psty->GetShape(); }
+  const ptr<SpannedType>& GetSpannedType() const { return psty; }
+  size_t Dims() const override { return psty->Dims(); }
   bool IsAsync() const { return async; }
 
   bool operator==(const Type& ty) const override {
     if (auto fty = dyn_cast<FutureType>(&ty))
-      return fty->async == async;
+      return (fty->async == async) && (*fty->psty == *psty);
     else
       return false;
   }
 
-  bool ApprxEqual(const Type& ty) const override { return operator==(ty); }
+  bool ApprxEqual(const Type& ty) const override {
+    if (auto fty = dyn_cast<FutureType>(&ty))
+      return (fty->async == async) && (fty->psty->ApprxEqual(*psty));
+    else
+      return false;
+  }
 
   void Print(std::ostream& os) const override {
     if (async)
       os << "async=>";
     else
       os << "sync=>";
-    shape.Print(os);
+    psty->Print(os);
   }
 
   __UDT_TYPE_INFO__
@@ -1147,7 +1153,7 @@ inline ptr<MDSpanType> MakeUninitMDSpanType() {
   return std::make_shared<MDSpanType>(GenUninitShape());
 }
 
-inline ptr<MDSpanType> MakeDimedMDSpanType(size_t n) {
+inline ptr<MDSpanType> MakeRankedMDSpanType(size_t n) {
   if (n == InvalidRank()) return MakeUninitMDSpanType();
   return std::make_shared<MDSpanType>(Shape(n));
 }
@@ -1168,13 +1174,20 @@ inline ptr<SpannedType> MakeSpannedType(BaseType ft, const Shape& v,
 
 // all the values are fake. it is used only to indicate a spanned type without
 // the shape detail
-inline ptr<SpannedType> MakeUninitSpannedType() {
+inline ptr<SpannedType> MakeDummySpannedType() {
   return MakeSpannedType(BaseType::S32, GenUninitShape(), Storage::DEFAULT);
 }
 
-inline ptr<SpannedType> MakeDimedSpannedType(size_t n,
-                                             BaseType bt = BaseType::S32) {
+inline ptr<SpannedType> MakeRankedSpannedType(size_t n,
+                                              BaseType bt = BaseType::S32) {
+  // only care about the rank of span
   return MakeSpannedType(bt, Shape(n), Storage::DEFAULT);
+}
+
+inline ptr<SpannedType> MakeShapedSpannedType(const Shape& s,
+                                              BaseType bt = BaseType::S32) {
+  // only care about the precise shape
+  return MakeSpannedType(bt, s, Storage::DEFAULT);
 }
 
 inline ptr<BoundedIntegerType> MakeBoundedIntegerType(int ub) {
@@ -1198,12 +1211,20 @@ inline ptr<BoundedITupleType> MakeUninitBoundedITupleType() {
   return std::make_shared<BoundedITupleType>(GenUninitShape(), "");
 }
 
-inline ptr<FutureType> MakeFutureType(const Shape& v, bool async) {
+inline ptr<FutureType> MakeFutureType(const ptr<SpannedType>& v, bool async) {
   return std::make_shared<FutureType>(v, async);
 }
 
-inline ptr<FutureType> MakeFutureType(bool async) {
-  return std::make_shared<FutureType>(async);
+inline ptr<FutureType> MakeRankedFutureType(size_t n, bool async) {
+  return std::make_shared<FutureType>(MakeRankedSpannedType(n), async);
+}
+
+inline ptr<FutureType> MakeShapedFutureType(const Shape& v, bool async) {
+  return std::make_shared<FutureType>(MakeShapedSpannedType(v), async);
+}
+
+inline ptr<FutureType> MakeDummyFutureType(bool async) {
+  return std::make_shared<FutureType>(MakeDummySpannedType(), async);
 }
 
 inline ptr<FunctionType> MakeFunctionType(const ptr<Type> ot,

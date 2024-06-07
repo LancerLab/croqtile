@@ -543,6 +543,7 @@ class ShapeInference : public Visitor {
         error_count++;
         return false;
       }
+      // sometime we need the value a symbol (symbolic value)
       cur_vn = vn.GenerateValueNumberForNode(n);
     }
 
@@ -763,10 +764,9 @@ class ShapeInference : public Visitor {
 
     vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(f_span), cur_vn);
     auto s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
-    n.SetType(MakeFutureType(s, n.async));
+    n.SetType(MakeShapedFutureType(s, n.async));
     SSTab().DefineSymbol(n.future, n.GetType());
-    SSTab().DefineSymbol(f_span,
-                         MakeMDSpanType(s));  // this is implicit symbol
+    SSTab().DefineSymbol(f_span, MakeMDSpanType(s));  // implicit symbol
     InvalidateVN(cur_vn);
 
     return true;
@@ -783,13 +783,19 @@ class ShapeInference : public Visitor {
     assert((isa<SpannedType>(pty) || isa<FutureType>(pty)) &&
            "unexpected data type.");
 
+    auto span_name = RemoveSuffix(n.data->name, ".data") + ".span";
+    SpannedType* sty = nullptr;
+    if (auto fty = dyn_cast<FutureType>(pty)) {
+      sty = fty->GetSpannedType().get();
+    } else
+      sty = cast<SpannedType>(pty);
+
     if (!n.positions) {
-      ca_valno = vn.GetValueNumberOfSignature(
-          SSTab().InScopeName(n.data->name + ".span"));
       // it is just a symbol reference
+      ca_valno = vn.GetValueNumberOfSignature(SSTab().InScopeName(span_name));
     } else {
       std::string data_sig =
-          vn.SignatureOfSymbol(SSTab().InScopeName(n.data->name + ".span"));
+          vn.SignatureOfSymbol(SSTab().InScopeName(span_name));
       int dim_count = CountElementsInSignature(data_sig);
       int dim_index = 0;
 
@@ -851,9 +857,9 @@ class ShapeInference : public Visitor {
 
     // set the chunkat's type
     n.SetType(MakeSpannedType(
-        cast<SpannedType>(pty)->f_type,
+        sty->f_type,
         GenShapeFromSignature(vn.GetSignatureFromValueNumber(ca_valno)),
-        cast<SpannedType>(pty)->GetStorage()));
+        sty->GetStorage()));
 
     int fs_valno = ca_valno;
     cur_vn = fs_valno;

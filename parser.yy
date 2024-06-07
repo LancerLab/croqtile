@@ -502,7 +502,7 @@ named_mdspan_decl
         $$ = AST::Make<AST::NamedTypeDecl>(@2, $2, $4);
       }
     | MDSPAN LT NUM GT IDENTIFIER COL s_expr {
-        symtab.AddSymbol($5, MakeDimedMDSpanType($3));
+        symtab.AddSymbol($5, MakeRankedMDSpanType($3));
         $$ = AST::Make<AST::NamedTypeDecl>(@5, $5, $7, $3);
       }
     | IDENTIFIER COL s_expr {
@@ -749,7 +749,7 @@ iv_expr
 
 dma_stmt
     : IDENTIFIER ASSIGN DMA dma_operation sync_type dma_config chunkat_expr TRANS chunkat_or_storage {
-        symtab.AddSymbol($1, MakeFutureType($5));
+        symtab.AddSymbol($1, MakeDummyFutureType($5));
         $$ = AST::Make<AST::DMA>(@3, $4, $1, $7, $9, $5, $6);
       }
     | DMA dma_operation sync_type dma_config chunkat_expr TRANS chunkat_or_storage {

@@ -50,7 +50,10 @@ __co__ void dma_test1(f32 [36, 27, 128] input) {
    f32 [9, 3, 8] dst;
    with index in [5, 6] {
      dma.copy input.chunkat(p, index) => dst;
+     f = dma.copy dst => local;
+     dma.copy f.data => dst;
    }
+   return dst;
 }
 
 // CHECK: ChoreoFunction
@@ -66,3 +69,11 @@ __co__ void dma_test1(f32 [36, 27, 128] input) {
 // CHECK:    `- DMA.copy
 // CHECK:      `- from: input.ChunkAt(p, index)
 // CHECK:      `- to: dst
+// CHECK:    `- DMA.copy
+// CHECK:      `- future: f
+// CHECK:      `- from: dst
+// CHECK:      `- to: local
+// CHECK:    `- DMA.copy
+// CHECK:      `- from: f
+// CHECK:      `- to: dst
+// CHECK:  `- Return: dst

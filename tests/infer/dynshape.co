@@ -108,8 +108,8 @@ __co__ auto ele_add(s32 [6, ?, 128] lhs, s32 [6, ?, 128] rhs) {
 // CHECK: Bounded:   ::ele_add::paraby_0::within_0::w, Type: {int}->[1]
 // CHECK: Bounded:   ::ele_add::paraby_0::within_0::z, Type: {int}->[::ele_add::$1/2]
 // CHECK: Bounded:   ::ele_add::paraby_0::within_0::b, Type: {int}->[4]
-// CHECK: Future:    ::ele_add::paraby_0::within_0::foreach_0::lhs_load, Type: sync=>[6, 2, 32]
-// CHECK: Future:    ::ele_add::paraby_0::within_0::foreach_0::rhs_load, Type: sync=>[6, 2, 32]
+// CHECK: Future:    ::ele_add::paraby_0::within_0::foreach_0::lhs_load, Type: sync=>local s32 mdspan<3> [6, 2, 32]
+// CHECK: Future:    ::ele_add::paraby_0::within_0::foreach_0::rhs_load, Type: sync=>local s32 mdspan<3> [6, 2, 32]
 // CHECK: Symbol:    ::ele_add::paraby_0::within_0::foreach_0::l1_out, Type: local s32 mdspan<3> [6, 2, 32]
-// CHECK: Future:    ::ele_add::paraby_0::within_0::foreach_0::out_store, Type: sync=>[6, 2, 32]
+// CHECK: Future:    ::ele_add::paraby_0::within_0::foreach_0::out_store, Type: sync=>global s32 mdspan<3> [6, 2, 32]
 // CHECK: Function:  ::ele_add, Type: s32 mdspan<3> [6, ::ele_add::$0, 128] (*)(s32 mdspan<3> [6, ::ele_add::$0, 128], s32 mdspan<3> [6, ::ele_add::$1, 128])

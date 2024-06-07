@@ -22,7 +22,7 @@ __co__ auto illegal_call1(f32 [36, 27, 128] input) {
     }
   }
 }
-// CHECK: error: (1th) argument of type 'sync=>[]` can not be passed to the kernel function.
+// CHECK: error: (1th) argument of type 'sync=>s32 mdspan<3> []` can not be passed to the kernel function.
 
 __co__ auto illegal_call2(f32 [36, 27, 128] input) {
   parallel p by 6 {

@@ -104,7 +104,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       error_count++;
       return false;
     }
-    SetNodeType(n, MakeUninitSpannedType());
+    SetNodeType(n, MakeDummySpannedType());
   } else if (n.op == "sizeof") {
     auto ty = NodeType(*n.GetR());
     if (!isa<MDSpanType>(ty)) {
@@ -158,7 +158,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
         error_count++;
         return false;
       }
-      SetNodeType(n, MakeDimedMDSpanType(lty->Dims()));
+      SetNodeType(n, MakeRankedMDSpanType(lty->Dims()));
     } else if ((isa<ITupleType>(lty) && isa<IntegerType>(rty)) ||
                (isa<MDSpanType>(lty) && isa<IntegerType>(rty))) {
       SetNodeType(n, lty);
@@ -315,7 +315,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     if ((lty->Dims() == InvalidRank()) || (rty->Dims() == InvalidRank()))
       SetNodeType(n, MakeUninitMDSpanType());
     else
-      SetNodeType(n, MakeDimedMDSpanType(lty->Dims() + rty->Dims()));
+      SetNodeType(n, MakeRankedMDSpanType(lty->Dims() + rty->Dims()));
   } else
     choreo_unreachable("operation in expression is not supported yet.");
   return true;
@@ -405,7 +405,7 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
     }
   }
 
-  SetNodeType(n, MakeDimedMDSpanType(rank));
+  SetNodeType(n, MakeRankedMDSpanType(rank));
   return true;
 }
 
@@ -413,7 +413,7 @@ bool EarlySemantics::Visit(AST::NamedTypeDecl& n) {
   __TRACE_EACH_VISIT__(n)
   assert(n.init_expr && "missing init expr.");
   auto ety = NodeType(*n.init_expr);
-  auto nty = (n.rank != InvalidRank()) ? MakeDimedMDSpanType(n.rank)
+  auto nty = (n.rank != InvalidRank()) ? MakeRankedMDSpanType(n.rank)
                                        : MakeUninitMDSpanType();
   // check for the type consistency
   if (!ety->ApprxEqual(*nty)) {
@@ -455,7 +455,7 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
                             n.type->GetType());
   if (auto ty = dyn_cast<SpannedType>(n.type->GetType())) {
     ReportErrorWhenViolateODR(n.LOC(), n.name_str + ".span", __FILE__, __LINE__,
-                              MakeDimedMDSpanType(ty->Dims()));
+                              MakeRankedMDSpanType(ty->Dims()));
   }
   return true;
 }
@@ -486,7 +486,7 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
     ReportErrorWhenViolateODR(n.LOC(), n.name, __FILE__, __LINE__, sty);
     if (auto ty = dyn_cast<SpannedType>(sty)) {
       ReportErrorWhenViolateODR(n.LOC(), n.name + ".span", __FILE__, __LINE__,
-                                MakeDimedMDSpanType(ty->Dims()));
+                                MakeRankedMDSpanType(ty->Dims()));
       if (trace_visit)
         os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
     }
@@ -543,7 +543,7 @@ bool EarlySemantics::Visit(AST::DataType& n) {
   // sema type has been generated at construction ast. refine with dims
   if (isa<SpannedType>(n.GetType())) {
     if (auto sty = dyn_cast<MDSpanType>(n.mdspan_type->GetType())) {
-      SetNodeType(n, MakeDimedSpannedType(sty->Dims(), n.base_type));
+      SetNodeType(n, MakeRankedSpannedType(sty->Dims(), n.base_type));
     }
     return true;
   }
@@ -565,7 +565,7 @@ bool EarlySemantics::Visit(AST::Parameter& n) {
     SSTab().ModifySymbolType(n.sym->name, n.type->GetType());
     if (auto ty = dyn_cast<SpannedType>(n.type->GetType()))
       SSTab().DefineSymbol(n.sym->name + ".span",
-                           MakeDimedMDSpanType(ty->Dims()));
+                           MakeRankedMDSpanType(ty->Dims()));
   }
   return true;
 }
@@ -678,12 +678,14 @@ bool EarlySemantics::Visit(AST::DMA& n) {
   if (!n.future.empty()) {
     size_t rank = NodeType(*n.from)->Dims();
     assert(rank != InvalidRank());
-    ReportErrorWhenViolateODR(n.LOC(), n.future, __FILE__, __LINE__,
-                              MakeFutureType(Shape(rank), n.async));
+
     ReportErrorWhenViolateODR(n.LOC(), n.future + ".span", __FILE__, __LINE__,
-                              MakeDimedMDSpanType(rank));
+                              MakeRankedMDSpanType(rank));
+    auto spanned_ty = MakeRankedSpannedType(rank);
     ReportErrorWhenViolateODR(n.LOC(), n.future + ".data", __FILE__, __LINE__,
-                              MakeDimedSpannedType(rank));
+                              spanned_ty);
+    ReportErrorWhenViolateODR(n.LOC(), n.future, __FILE__, __LINE__,
+                              MakeFutureType(spanned_ty, n.async));
   } else {
     if (n.async) {
       Error(n.LOC(), "forbid to associated async dma without a named future.");
@@ -721,7 +723,7 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
     }
   }
   assert(nty->Dims() != InvalidRank());
-  SetNodeType(n, MakeDimedSpannedType(nty->Dims()));
+  SetNodeType(n, MakeRankedSpannedType(nty->Dims()));
   return true;
 }
 

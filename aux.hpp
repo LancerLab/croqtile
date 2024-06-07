@@ -82,4 +82,14 @@ inline std::optional<std::string> RemovePrefixOrNull(const std::string& prefix,
                           // beginning
 }
 
+// remove suffix
+inline std::string RemoveSuffix(const std::string& str,
+                                const std::string& suffix) {
+  if (suffix.size() > str.size()) return str;
+  if (str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0)
+    return str.substr(0, str.size() - suffix.size());
+  else
+    return str;
+}
+
 #endif  // __CHOREO_AUX_HPP__
