@@ -143,8 +143,7 @@ fi
       for (int i = 0; i < dec_by; ++i) {
         this->decrementIndent();
         fs << this->indent << "}); // end of choreo-foreach block";
-        if (multiple_bounds)
-          fs << " on '" << cur_bounded_vars[name][i] << "'";
+        if (multiple_bounds) fs << " on '" << cur_bounded_vars[name][i] << "'";
         fs << ".\n";
       }
     }
@@ -231,11 +230,14 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
 
       // generate "memset_()" action to initiate each alloc_memory with value 0
       if (storage_type == "L1Type")
-        fs << this->indent << "auto " << node.name_str << "_init = alloc_dma_(SDMAType());\n";
+        fs << this->indent << "auto " << node.name_str
+           << "_init = alloc_dma_(SDMAType());\n";
       else
-        fs << this->indent << "auto " << node.name_str << "_init = alloc_dma_(CDMAType());\n";
+        fs << this->indent << "auto " << node.name_str
+           << "_init = alloc_dma_(CDMAType());\n";
 
-      fs << this->indent << "memset_(" << node.name_str << "_init, " << node.name_str << ", 0);\n";
+      fs << this->indent << "memset_(" << node.name_str << "_init, "
+         << node.name_str << ", 0);\n";
     }
   } else {
     // TODO(albert): handle anon case
@@ -325,7 +327,8 @@ bool FactorCodeGen::Visit(AST::WhereBind &n) {
   // establish the binding
   auto lid = cast<AST::Identifier>(n.lhs);
   auto rid = cast<AST::Identifier>(n.rhs);
-  bind_info.AddBind(SSTab().ScopedName(lid->name), SSTab().ScopedName(rid->name));
+  bind_info.AddBind(SSTab().ScopedName(lid->name),
+                    SSTab().ScopedName(rid->name));
   return true;
 }
 
@@ -367,8 +370,8 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
 
   // cook a valid dst name
   auto dst_node_name = (isa<AST::Memory>(d.to))
-                          ? future_name + "_buffer"
-                          : STR(cast<AST::ChunkAt>(d.to)->data);
+                           ? future_name + "_buffer"
+                           : STR(cast<AST::ChunkAt>(d.to)->data);
 
   std::string src_node_name = STR(cast<AST::ChunkAt>(d.from)->data);
   assert(!src_node_name.empty() && "expect a named future/span in chunkat.");
@@ -391,7 +394,7 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   };
 
   // retrieve the spanned type from a chunkat
-  auto GetSpannedType = [this](AST::Node & ca) -> SpannedType* {
+  auto GetSpannedType = [this](AST::Node &ca) -> SpannedType * {
     auto sty = ca.GetType();
     if (auto fty = dyn_cast<FutureType>(sty))
       return fty->GetSpannedType().get();
@@ -399,7 +402,8 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
       return cast<SpannedType>(sty);
   };
 
-  auto dst_sto = (isa<AST::Memory>(d.to)) ? cast<AST::Memory>(d.to)->Get() : GetSpannedType(*d.to)->GetStorage();
+  auto dst_sto = (isa<AST::Memory>(d.to)) ? cast<AST::Memory>(d.to)->Get()
+                                          : GetSpannedType(*d.to)->GetStorage();
   int dst_level = MemLevel(dst_sto);
   int src_level = MemLevel(GetSpannedType(*d.from)->GetStorage());
 
@@ -408,14 +412,14 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
     // TODO(albert): generate 'local_buffer' with more smart naming way by valno
     // support
     static std::map<Storage, std::string> sto2alloc = {
-      {Storage::LOCAL, "L1Type"},
-      {Storage::SHARED, "SRAMType"},
-      {Storage::GLOBAL, "DRAMType"},
+        {Storage::LOCAL, "L1Type"},
+        {Storage::SHARED, "SRAMType"},
+        {Storage::GLOBAL, "DRAMType"},
     };
     alloc_in_fs << "    auto " << dst_node_name << " = alloc_("
-      << sto2alloc.at(mem_node->Get()) << "("
-      << factor_typestr(GetSpannedType(*d.from)->ElementType()) << ","
-      << ReplaceRuntimeNames(LSTR(dst_data_shape), false) << "));\n";
+                << sto2alloc.at(mem_node->Get()) << "("
+                << factor_typestr(GetSpannedType(*d.from)->ElementType()) << ","
+                << ReplaceRuntimeNames(LSTR(dst_data_shape), false) << "));\n";
   }
 
   // decide the dma operation
@@ -426,10 +430,9 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
     dma_op.append("async_store_(");
 
   // the shape of block/tile after tiling
-  auto tile_shape =
-      (src_level >= dst_level)
-          ? dst_data_shape
-          : GetSpannedType(*d.from)->GetShape();
+  auto tile_shape = (src_level >= dst_level)
+                        ? dst_data_shape
+                        : GetSpannedType(*d.from)->GetShape();
   size_t dim_sz = tile_shape.Dims();
 
   auto chunkat_node = (src_level >= dst_level) ? cast<AST::ChunkAt>(d.from)
@@ -439,9 +442,9 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   std::ostringstream offss;
   offss << "{";
   auto bounded_values = chunkat_node->positions;
-  if (bounded_values) { // it is a chunkat expression
+  if (bounded_values) {  // it is a chunkat expression
     size_t dim_cursor = 0;
-    for (auto & bv : bounded_values->AllValues()) {
+    for (auto &bv : bounded_values->AllValues()) {
       auto bvn = cast<AST::Identifier>(bv)->name;
       if (auto bity = dyn_cast<BoundedITupleType>(bv->GetType())) {
         for (size_t it_idx = 0; it_idx < bity->Dims(); ++it_idx) {
@@ -463,7 +466,8 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
               choreo_unreachable("invalid type note.");
           }
 
-          offss << "Value(" << RSTR(tile_shape.ValueAt(dim_cursor)) << ")*" << iv_str;
+          offss << "Value(" << RSTR(tile_shape.ValueAt(dim_cursor)) << ")*"
+                << iv_str;
           if (++dim_cursor < dim_sz) offss << ",";
         }
       } else
@@ -483,15 +487,14 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   // TODO(albert): need a param table to resolve hardcode, connecting symbol
   // with results, and symbols with args
   dst_node_name = arg_idx < 0 ? dst_node_name
-                             : "results[" + std::to_string(arg_idx - 2) + "]";
+                              : "results[" + std::to_string(arg_idx - 2) + "]";
 
   alloc_in_fs << "    auto " << future_name << " = alloc_dma_(SDMAType());\n";
   fs << this->indent << dma_op << future_name << ", " << src_node_name << ", "
      << dst_node_name << ", " << offss.str() << ");\n";
 
   // synchornized dma must be waited
-  if (!ty->IsAsync())
-    fs << indent << "wait_dma_(" << future_name << ");\n";
+  if (!ty->IsAsync()) fs << indent << "wait_dma_(" << future_name << ");\n";
 
   return true;
 }
@@ -648,9 +651,9 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
     if (auto sty = dyn_cast<SpannedType>(param->GetType())) {
       // define spanned type
       auto type_symbol = name + "_type";
-      auto type_string =
-          "DRAMType(" + factor_typestr(sty->ElementType()) + ", " +
-          ReplaceRuntimeNames(LSTR(sty->GetShape()), false);
+      auto type_string = "DRAMType(" + factor_typestr(sty->ElementType()) +
+                         ", " +
+                         ReplaceRuntimeNames(LSTR(sty->GetShape()), false);
 
       strtab.AddSymbol(name, type_symbol, type_string);
       fs << this->indent << "auto " << strtab.GetTypeSymbol(name) << " = "
@@ -669,9 +672,8 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
   if (auto rty = dyn_cast<SpannedType>(fty.out_ty)) {
     auto name = "output";
     auto type_symbol = "output_type";
-    auto type_string =
-        "DRAMType(" + factor_typestr(rty->ElementType()) + ", " +
-        ReplaceRuntimeNames(LSTR(rty->GetShape()), false);
+    auto type_string = "DRAMType(" + factor_typestr(rty->ElementType()) + ", " +
+                       ReplaceRuntimeNames(LSTR(rty->GetShape()), false);
 
     strtab.AddSymbol(name, type_symbol, type_string);
     fs << this->indent << "auto " << strtab.GetTypeSymbol(name) << " = "
@@ -818,7 +820,7 @@ void FactorCodeGen::EmitHostFuncBody(std::ostream &os, const Type &ty,
 
   // phase 3: Execute the executable and fetch the output
   auto &fty = *cast<FunctionType>(&ty);
-  std::ostringstream tss; // temporal stream
+  std::ostringstream tss;  // temporal stream
   if (fty.in_tys.size() > 0) {
     tss << "  int64_t input_dims[] = {";
     if (auto sty = dyn_cast<SpannedType>(fty.in_tys[0])) {
