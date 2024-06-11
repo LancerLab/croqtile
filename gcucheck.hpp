@@ -15,23 +15,39 @@ struct GCUCheck : public VisitorWithSymTab {
 
   std::unordered_map<std::string, AST::Parameter *> cur_params;
   int parallel_level = 0;
+  int max_parallel_level = 0;
   int local_level = 0;
 
  private:
   bool BeforeVisitImpl(AST::Node &n) {
+    TraceEachVisit(n, "(pre)");
     if (isa<AST::ChoreoFunction>(&n)) {
       local_level = 0;
       cur_params.clear();
+    } else if (isa<AST::ParallelBy>(&n)) {
+      parallel_level++;
+      assert((parallel_level < 3) && "unexpected parallel level.");
+      max_parallel_level = parallel_level;
     }
     return true;
   }
 
   bool AfterVisitImpl(AST::Node &n) {
-    if (isa<AST::ParallelBy>(&n)) {
+    TraceEachVisit(n, "(post)");
+    if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+      auto pty = cast<BoundedITupleType>(GetSymbolType(pb->biv));
+      pty->AppendNote(":" +
+                      std::to_string(max_parallel_level - parallel_level));
+
       parallel_level--;
       assert(parallel_level >= 0 && "Unexpected parallel level");
+      max_parallel_level = 0;
     }
     return true;
+  }
+
+  void TraceEachVisit(AST::Node &n, std::string sup = "") {
+    if (trace_visit) os << n.TypeNameString() << sup << "\n";
   }
 
  public:
@@ -41,13 +57,32 @@ struct GCUCheck : public VisitorWithSymTab {
         trace_visit(std::getenv("TRACE_GCU")) {}
   ~GCUCheck() {}
 
-  bool Visit(AST::MultiNodes &) { return true; }
-  bool Visit(AST::MultiValues &) { return true; }
-  bool Visit(AST::IntLiteral &) { return true; }
-  bool Visit(AST::Expr &) { return true; }
-  bool Visit(AST::MultiDimSpans &) { return true; }
-  bool Visit(AST::NamedTypeDecl &) { return true; }
+  bool Visit(AST::MultiNodes &n) {
+    TraceEachVisit(n);
+    return true;
+  }
+  bool Visit(AST::MultiValues &n) {
+    TraceEachVisit(n);
+    return true;
+  }
+  bool Visit(AST::IntLiteral &n) {
+    TraceEachVisit(n);
+    return true;
+  }
+  bool Visit(AST::Expr &n) {
+    TraceEachVisit(n);
+    return true;
+  }
+  bool Visit(AST::MultiDimSpans &n) {
+    TraceEachVisit(n);
+    return true;
+  }
+  bool Visit(AST::NamedTypeDecl &n) {
+    TraceEachVisit(n);
+    return true;
+  }
   bool Visit(AST::NamedVariableDecl &n) {
+    TraceEachVisit(n);
     auto ty = GetSymbolType(n.name_str);
     if (!isa<SpannedType>(ty)) return true;
     auto st = cast<SpannedType>(ty)->GetStorage();
@@ -95,34 +130,69 @@ struct GCUCheck : public VisitorWithSymTab {
     }
     return true;
   }
-  bool Visit(AST::IntTuple &) { return true; }
-  bool Visit(AST::Assignment &) { return true; }
-  bool Visit(AST::IntIndex &) { return true; }
-  bool Visit(AST::DataType &) { return true; }
-  bool Visit(AST::Identifier &) { return true; }
+  bool Visit(AST::IntTuple &n) {
+    TraceEachVisit(n);
+    return true;
+  }
+  bool Visit(AST::Assignment &n) {
+    TraceEachVisit(n);
+    return true;
+  }
+  bool Visit(AST::IntIndex &n) {
+    TraceEachVisit(n);
+    return true;
+  }
+  bool Visit(AST::DataType &n) {
+    TraceEachVisit(n);
+    return true;
+  }
+  bool Visit(AST::Identifier &n) {
+    TraceEachVisit(n);
+    return true;
+  }
   bool Visit(AST::Parameter &n) {
+    TraceEachVisit(n);
     if (n.sym) cur_params.emplace(InScopeName(n.sym->name), &n);
     return true;
   }
-  bool Visit(AST::ParamList &) { return true; }
-  bool Visit(AST::ParallelBy &) {
-    parallel_level++;
-    assert((parallel_level < 3) && "unexpected parallel level.");
+  bool Visit(AST::ParamList &n) {
+    TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::WhereBind &) { return true; }
-  bool Visit(AST::WithIn &) { return true; }
-  bool Visit(AST::WithBlock &) { return true; }
-  bool Visit(AST::Memory &) { return true; }
+  bool Visit(AST::ParallelBy &n) {
+    TraceEachVisit(n);
+    return true;
+  }
+  bool Visit(AST::WhereBind &n) {
+    TraceEachVisit(n);
+    return true;
+  }
+  bool Visit(AST::WithIn &n) {
+    TraceEachVisit(n);
+    return true;
+  }
+  bool Visit(AST::WithBlock &n) {
+    TraceEachVisit(n);
+    return true;
+  }
+  bool Visit(AST::Memory &n) {
+    TraceEachVisit(n);
+    return true;
+  }
   bool Visit(AST::DMA &n) {
+    TraceEachVisit(n);
     // The user does not have to explicitly claim a global memory that requires
     // direct copy from host to device. Here Choreo judge if a spanned memory is
     // shadowed from the data movement. Later, codegen handles such a shadow.
     if (!isa<AST::ChunkAt>(n.from)) return true;
     auto f_name = cast<AST::ChunkAt>(n.from)->RefSymbol();
-    if (cast<SpannedType>(GetSymbolType(f_name))->GetStorage() !=
-        Storage::DEFAULT)
-      return true;
+    SpannedType *sty = nullptr;
+    if (auto fty = dyn_cast<FutureType>(GetSymbolType(f_name)))
+      sty = fty->GetSpannedType().get();
+    else
+      sty = cast<SpannedType>(GetSymbolType(f_name));
+
+    if (sty->GetStorage() != Storage::DEFAULT) return true;
 
     // not referencing the parameter
     if (!cur_params.count(InScopeName(f_name))) return true;
@@ -148,15 +218,42 @@ struct GCUCheck : public VisitorWithSymTab {
 
     return true;
   }
-  bool Visit(AST::ChunkAt &) { return true; }
-  bool Visit(AST::Wait &) { return true; }
-  bool Visit(AST::Call &) { return true; }
-  bool Visit(AST::Return &) { return true; }
-  bool Visit(AST::ForeachBlock &) { return true; }
-  bool Visit(AST::FunctionDecl &) { return true; }
-  bool Visit(AST::ChoreoFunction &) { return true; }
-  bool Visit(AST::CppSourceCode &) { return true; }
-  bool Visit(AST::Program &) { return true; }
+  bool Visit(AST::ChunkAt &n) {
+    TraceEachVisit(n);
+    return true;
+  }
+  bool Visit(AST::Wait &n) {
+    TraceEachVisit(n);
+    return true;
+  }
+  bool Visit(AST::Call &n) {
+    TraceEachVisit(n);
+    return true;
+  }
+  bool Visit(AST::Return &n) {
+    TraceEachVisit(n);
+    return true;
+  }
+  bool Visit(AST::ForeachBlock &n) {
+    TraceEachVisit(n);
+    return true;
+  }
+  bool Visit(AST::FunctionDecl &n) {
+    TraceEachVisit(n);
+    return true;
+  }
+  bool Visit(AST::ChoreoFunction &n) {
+    TraceEachVisit(n);
+    return true;
+  }
+  bool Visit(AST::CppSourceCode &n) {
+    TraceEachVisit(n);
+    return true;
+  }
+  bool Visit(AST::Program &n) {
+    TraceEachVisit(n);
+    return true;
+  }
 
   bool HasError() {
     if (error_count)

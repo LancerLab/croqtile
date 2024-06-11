@@ -1,8 +1,8 @@
 #ifndef __CHOREO_CODEGEN_HPP__
 #define __CHOREO_CODEGEN_HPP__
 
-#include "visitor.hpp"
 #include "valbind.hpp"
+#include "visitor.hpp"
 
 namespace Choreo {
 
@@ -54,6 +54,8 @@ struct FactorCodeGen : public CodeGenerator {
 
   // name of entry parameters
   size_t sp_count = 0;
+
+  int parallel_level = 0;
 
   // mapping from a symbolic shape dimension to its runtime name
   std::map<std::string, std::string> rts_nmap;

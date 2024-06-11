@@ -18,6 +18,18 @@
 using namespace Choreo;
 using namespace Choreo::Factor;
 
+std::string Shape::EmitTo(Target target) const {
+  (void)target;
+  std::ostringstream _os;
+  if (val_no == __INVALID_VALUE__) _os << "{}";
+  // PrintValueList(Value(), _os);
+  else {
+    assert(values.Exists(val_no) && "bad value number.");
+    Factor::EmitFactorValueList(Value(), _os);
+  }
+  return _os.str();
+}
+
 extern StringifyTable strtab;
 
 bool FactorCodeGen::BeforeVisitImpl(AST::Node &n) {
@@ -42,6 +54,7 @@ using namespace factor;
     this->incrementIndent();
     fs << indent << "include_(\"" << backpatch_filename << "\");\n";
   } else if (isa<AST::ParallelBy>(&n)) {
+    parallel_level++;
     // this->incrementIndent();
   } else if (isa<AST::ForeachBlock>(&n)) {
     // this->incrementIndent();
@@ -118,6 +131,7 @@ fi
                    Shape() /*invalid shape*/);
     ResetBuffers();
   } else if (isa<AST::ParallelBy>(&n)) {
+    parallel_level--;
     this->decrementIndent();
     fs << this->indent << "}); // end of choreo-factor kernel function\n";
   } else if (auto f = dyn_cast<AST::ForeachBlock>(&n)) {
@@ -188,7 +202,7 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
       std::string shape_info = "";
       auto data_shape = ty->GetShape();
       std::ostringstream _os;
-      _os << ReplaceRuntimeNames(data_shape.EmitTo(Target::Factor), false);
+      _os << ReplaceRuntimeNames(LSTR(data_shape), false);
       shape_info += _os.str();
       // auto dim = data_shape.values.values[0];
       // int dim_sz = data_shape.Dims();
@@ -337,23 +351,31 @@ bool FactorCodeGen::Visit(AST::Memory &n) {
 // CLEAN
 bool FactorCodeGen::Visit(AST::DMA &d) {
   // handle .to  in AST::Memory
-  // d.to->Print(os); // shared
-  assert((dyn_cast<AST::ChunkAt>(d.from)) &&
-         "Unexpected type for DMA's source.");
-  assert((dyn_cast<AST::Memory>(d.to) || dyn_cast<AST::ChunkAt>(d.to)) &&
+  assert((isa<AST::ChunkAt>(d.from)) && "Unexpected type for DMA's source.");
+  assert((isa<AST::Memory>(d.to) || isa<AST::ChunkAt>(d.to)) &&
          "Unexpected type for DMA's destination.");
 
+  auto ty = dyn_cast<FutureType>(d.GetType());
+  assert(ty && "Invalid type of DMA statement!");
+
+  // cook a valid future name
   auto future_name = d.future;
-  auto to_node_name = (dyn_cast<AST::Memory>(d.to))
+  if (future_name.empty()) {
+    static size_t future_count = 0;
+    future_name = "__choreo_anon_future" + std::to_string(future_count++);
+  }
+
+  // cook a valid dst name
+  auto dst_node_name = (isa<AST::Memory>(d.to))
                           ? future_name + "_buffer"
                           : STR(cast<AST::ChunkAt>(d.to)->data);
-  std::string from_node_name = STR(cast<AST::ChunkAt>(d.from)->data);
 
-  auto ty = dyn_cast<FutureType>(GetSymbolType(future_name));
-  assert(ty && "Invalied return type of DMA op!");
+  std::string src_node_name = STR(cast<AST::ChunkAt>(d.from)->data);
+  assert(!src_node_name.empty() && "expect a named future/span in chunkat.");
+
   auto dst_data_shape = ty->GetShape();
 
-  auto getMemLevel = [](Storage s) -> int {
+  auto MemLevel = [](Storage s) -> int {
     switch (s) {
       case Storage::LOCAL:
         return 0;
@@ -363,154 +385,113 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
       case Storage::DEFAULT:
         return 2;
       default:
-        assert(false && "Unexpected storage type.");
+        choreo_unreachable("Unexpected storage type.");
         return -1;
     }
   };
-  auto storage_level =
-      (dyn_cast<AST::Memory>(d.to))
-          ? cast<AST::Memory>(d.to)->Get()
-          : dyn_cast<SpannedType>(
-                this->GetSymbolType(STR(cast<AST::ChunkAt>(d.to)->data)))
-                ->GetStorage();
-  int des_level = getMemLevel(storage_level);
-  storage_level =
-      dyn_cast<SpannedType>(
-          this->GetSymbolType(STR(cast<AST::ChunkAt>(d.from)->data)))
-          ->GetStorage();
-  int src_level = getMemLevel(storage_level);
 
-  auto chunkat_node = (src_level >= des_level) ? dyn_cast<AST::ChunkAt>(d.from)
-                                               : dyn_cast<AST::ChunkAt>(d.to);
-  assert(chunkat_node && "Unexpected !!!");
-  auto chunkat_node_name = STR(chunkat_node->data);
-  auto data_type =
-      dyn_cast<SpannedType>(this->GetSymbolType(chunkat_node_name))->f_type;
+  // retrieve the spanned type from a chunkat
+  auto GetSpannedType = [this](AST::Node & ca) -> SpannedType* {
+    auto sty = ca.GetType();
+    if (auto fty = dyn_cast<FutureType>(sty))
+      return fty->GetSpannedType().get();
+    else
+      return cast<SpannedType>(sty);
+  };
 
+  auto dst_sto = (isa<AST::Memory>(d.to)) ? cast<AST::Memory>(d.to)->Get() : GetSpannedType(*d.to)->GetStorage();
+  int dst_level = MemLevel(dst_sto);
+  int src_level = MemLevel(GetSpannedType(*d.from)->GetStorage());
+
+  // allocate storage for dma destination when not explicit stated.
   if (auto mem_node = dyn_cast<AST::Memory>(d.to)) {
     // TODO(albert): generate 'local_buffer' with more smart naming way by valno
     // support
-    alloc_in_fs << "    "
-                << "auto " << to_node_name << " = alloc_(";
-    switch (mem_node->Get()) {
-      case Storage::LOCAL:
-        alloc_in_fs << "L1Type(";
-        break;
-      case Storage::SHARED:
-        alloc_in_fs << "SRAMType(";
-        break;
-      case Storage::GLOBAL:
-        alloc_in_fs << "DRAMType(";
-        break;
-      default:
-        assert(false && "Unexpected storage type.");
-    }
-    alloc_in_fs << factor_typestr((Choreo::BaseType)data_type) << ",";
-
-    std::string shape_info = "";
-    std::ostringstream _os;
-    _os << ReplaceRuntimeNames(dst_data_shape.EmitTo(Target::Factor), false);
-    shape_info += _os.str();
-    // WE USE node.SHAPE, not node.DIM_BOUND
-    // auto dim = data_shape.values.values[0];
-    // bs << dim;
-    // int dim_sz = data_shape.Dims();
-    // assert(dim_sz == (int)dim.size() && "Insonsistant sizes for variable
-    // span."); for (int dim_cursor = 0; dim_cursor < dim_sz;) {
-    //   auto dim_bound = *(std::get_if<int>(&dim[dim_cursor]));
-    //   assert( dim_bound > 0 && "Invalid variable span!");
-    //   shape_info = shape_info + std::to_string(dim_bound);
-    //   ++dim_cursor;
-    //   if(dim_cursor < dim_sz)
-    //     shape_info = shape_info + ",";
-    //   else
-    //     shape_info = shape_info + "}";
-    // }
-    alloc_in_fs << shape_info << "));\n";
+    static std::map<Storage, std::string> sto2alloc = {
+      {Storage::LOCAL, "L1Type"},
+      {Storage::SHARED, "SRAMType"},
+      {Storage::GLOBAL, "DRAMType"},
+    };
+    alloc_in_fs << "    auto " << dst_node_name << " = alloc_("
+      << sto2alloc.at(mem_node->Get()) << "("
+      << factor_typestr(GetSpannedType(*d.from)->ElementType()) << ","
+      << ReplaceRuntimeNames(LSTR(dst_data_shape), false) << "));\n";
   }
 
+  // decide the dma operation
   std::string dma_op = "";
-  if (src_level >= des_level)
+  if (src_level >= dst_level)
     dma_op.append("async_load_(");
   else
     dma_op.append("async_store_(");
 
+  // the shape of block/tile after tiling
   auto tile_shape =
-      (src_level >= des_level)
+      (src_level >= dst_level)
           ? dst_data_shape
-          : dyn_cast<SpannedType>(this->GetSymbolType(from_node_name))
-                ->GetShape();
-  int dim_sz = tile_shape.Dims();
-  auto tile_shape_string = tile_shape.EmitTo(Target::Factor);
-  tile_shape_string = tile_shape_string.substr(1, tile_shape_string.size() - 2);
+          : GetSpannedType(*d.from)->GetShape();
+  size_t dim_sz = tile_shape.Dims();
 
-  std::string offset_string = "";
-  offset_string.append("{");
-  auto tile_factors = chunkat_node->positions;
-  if (tile_factors) {
-    assert(dim_sz == (int)tile_factors->AllValues().size() &&
-           "Inconsistant sizes for DMA offset.");
-    // auto dim = tile_shape.values.values[0];
-    // assert(dim_sz == (int)dim.size() && "Inconsistant sizes for tensor
-    // shapes.");
-    for (int dim_cursor = 0; dim_cursor < dim_sz;) {
-      auto tile_factor = tile_factors->AllValues()[dim_cursor];
-#if 0
-      auto tf_symbol = STR(tile_factor);
-      auto tf_bounds =
-          dyn_cast<BoundedITupleType>(this->GetSymbolType(tf_symbol))
-              ->GetBounds()
-              .Value();
-      auto tf_bound = *(std::get_if<int>(&tf_bounds[0]));
-      auto dim_bound = *(std::get_if<int>(&dim[dim_cursor]));
-      assert((tf_bound > 0 && dim_bound > 0) &&
-             "Invalid Dim size or Tile factor!");
+  auto chunkat_node = (src_level >= dst_level) ? cast<AST::ChunkAt>(d.from)
+                                               : cast<AST::ChunkAt>(d.to);
+  assert(chunkat_node && "Unexpected !!!");
 
-#endif
-      auto pos = tile_shape_string.find(",");
-      // TODO: strip " "
-      auto dim_bound = tile_shape_string.substr(0, pos);
-      tile_shape_string = tile_shape_string.substr(pos + 1);
+  std::ostringstream offss;
+  offss << "{";
+  auto bounded_values = chunkat_node->positions;
+  if (bounded_values) { // it is a chunkat expression
+    size_t dim_cursor = 0;
+    for (auto & bv : bounded_values->AllValues()) {
+      auto bvn = cast<AST::Identifier>(bv)->name;
+      if (auto bity = dyn_cast<BoundedITupleType>(bv->GetType())) {
+        for (size_t it_idx = 0; it_idx < bity->Dims(); ++it_idx) {
+          std::string iv_str;
+          if (within_map.count(bvn) == 0)  // not mapped
+            iv_str = bvn;
+          else
+            iv_str = within_map[bvn][it_idx];
 
-      // if tile_factor_str == p, replace into thread_id
-      auto tile_factor_str = (STR(tile_factor) == "p") ? "thread_id" : STR(tile_factor);
-      auto offset = "Value(" + RemovePrefixOrNull(" ", dim_bound).value_or(dim_bound) +
-                    ")*" + tile_factor_str;
-      // auto offset =
-      //     (dim_cursor == 0)
-      //         ? "Value(" +
-      //               RemovePrefixOrNull(" ", dim_bound).value_or(dim_bound) +
-      //               ")*thread_id"
-      //         : "Value(" + RemovePrefixOrNull(" ", dim_bound).value_or("1") +
-      //               ")*" + STR(tile_factor);
-      // auto offset = (dim_cursor == 0) ? "thread_id" : STR(tile_factor);
-      offset_string = offset_string + offset;
-      ++dim_cursor;
-      if (dim_cursor < dim_sz) offset_string = offset_string + ",";
+          // special handling for the parallel tiling factor
+          auto l = RemovePrefixOrNull("pv:", bity->GetNote());
+          if (l.has_value()) {
+            // is marked as parallel whose level is decided by target check
+            if (*l == "0")
+              iv_str = "thread_id";
+            else if (*l == "1")
+              iv_str = "block_id";
+            else
+              choreo_unreachable("invalid type note.");
+          }
+
+          offss << "Value(" << RSTR(tile_shape.ValueAt(dim_cursor)) << ")*" << iv_str;
+          if (++dim_cursor < dim_sz) offss << ",";
+        }
+      } else
+        choreo_unreachable("unsupported type.");
     }
   } else {
-    for (int dim_cursor = 0; dim_cursor < dim_sz;) {
-      offset_string = offset_string + "0";
-      ++dim_cursor;
-      if (dim_cursor < dim_sz) offset_string = offset_string + ",";
-    }
+    // a 'dim_sz' sized zeros' string
+    offss << DelimitedString(std::vector<size_t>(dim_sz, 0));
   }
-  offset_string = offset_string + "}";
+  offss << "}";
 
   // strtab.Print(fs);
-  int arg_idx = strtab.GetSymbolIndex(from_node_name);
-  from_node_name =
-      arg_idx < 0 ? from_node_name : "args[" + std::to_string(arg_idx) + "]";
-  arg_idx = strtab.GetSymbolIndex(to_node_name);
+  int arg_idx = strtab.GetSymbolIndex(src_node_name);
+  src_node_name =
+      arg_idx < 0 ? src_node_name : "args[" + std::to_string(arg_idx) + "]";
+  arg_idx = strtab.GetSymbolIndex(dst_node_name);
   // TODO(albert): need a param table to resolve hardcode, connecting symbol
   // with results, and symbols with args
-  to_node_name = arg_idx < 0 ? to_node_name
+  dst_node_name = arg_idx < 0 ? dst_node_name
                              : "results[" + std::to_string(arg_idx - 2) + "]";
 
-  alloc_in_fs << "    "
-              << "auto " << future_name << " = alloc_dma_(SDMAType());\n";
-  fs << this->indent << dma_op << future_name << ", " << from_node_name << ", "
-     << to_node_name << ", " << offset_string << ");\n";
+  alloc_in_fs << "    auto " << future_name << " = alloc_dma_(SDMAType());\n";
+  fs << this->indent << dma_op << future_name << ", " << src_node_name << ", "
+     << dst_node_name << ", " << offss.str() << ");\n";
+
+  // synchornized dma must be waited
+  if (!ty->IsAsync())
+    fs << indent << "wait_dma_(" << future_name << ");\n";
 
   return true;
 }
@@ -669,7 +650,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
       auto type_symbol = name + "_type";
       auto type_string =
           "DRAMType(" + factor_typestr(sty->ElementType()) + ", " +
-          ReplaceRuntimeNames(sty->GetShape().EmitTo(Target::Factor), false);
+          ReplaceRuntimeNames(LSTR(sty->GetShape()), false);
 
       strtab.AddSymbol(name, type_symbol, type_string);
       fs << this->indent << "auto " << strtab.GetTypeSymbol(name) << " = "
@@ -690,7 +671,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
     auto type_symbol = "output_type";
     auto type_string =
         "DRAMType(" + factor_typestr(rty->ElementType()) + ", " +
-        ReplaceRuntimeNames(rty->GetShape().EmitTo(Target::Factor), false);
+        ReplaceRuntimeNames(LSTR(rty->GetShape()), false);
 
     strtab.AddSymbol(name, type_symbol, type_string);
     fs << this->indent << "auto " << strtab.GetTypeSymbol(name) << " = "
@@ -873,11 +854,8 @@ void FactorCodeGen::EmitHostFuncBody(std::ostream &os, const Type &ty,
   size_t out_rank = 1;
   std::string shape_string = "{1}";
   if (out_shape.IsValid()) {
-    std::ostringstream oss;
-    out_shape.PrintAsList(oss);
     out_rank = out_shape.Dims();
-    shape_string = oss.str();
-    shape_string = ReplaceRuntimeNames(shape_string);
+    shape_string = ReplaceRuntimeNames(LSTR(out_shape));
   }
 
   if (!out_size.empty()) {

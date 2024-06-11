@@ -35,10 +35,10 @@ int main(int argc, char* argv[]) {
   Option<bool> debug_on("--debug", "-d", false, false);
   Option<bool> dump_ast("--dump-ast", "-e", false, false);
   Option<bool> print_vn("--print-valno", "-v", false, false);
-  Option<bool> dump_inf("--dump-infer", "-i", false, false);
+  Option<bool> inf_type("--infer-types", "-i", false, false);
   Option<bool> dump_sym("--dump-symbol", "-l", false, false);
   Option<bool> visualiz("--visualize", "-u", false, false);
-  Option<bool> sema_chk("--sema-check", "-s", false, false);
+  Option<bool> gen_none("--no-codegen", "-s", false, false);
   Option<bool> del_comm("--remove-comments", "-n", false, false);
 
   // parse all the options
@@ -50,7 +50,7 @@ int main(int argc, char* argv[]) {
   r.SetOutputStream(output.GetValue());
 
   if (dump_ast) {
-    if (sema_chk)
+    if (gen_none)
       std::cerr
           << "Warning: Semantic check is ignored since dumping AST is required."
           << std::endl;
@@ -86,7 +86,7 @@ int main(int argc, char* argv[]) {
   root.accept(sv);
   if (sv.HasError()) return 1;
 
-  if (stop_after.GetValue() == "check1") return 0;
+  if (stop_after.GetValue() == "check") return 0;
 
   // minor AST change: desugar for canonicalized AST
   Normalizer ds(std::cout);
@@ -102,9 +102,9 @@ int main(int argc, char* argv[]) {
   if (stop_after.GetValue() == "shapeinfer") return 0;
 
   // inference all the unknown types - decls
-  TypeInference ti(dump_inf);
+  TypeInference ti(inf_type);
   root.accept(ti);
-  if (dump_inf || print_vn || (stop_after.GetValue() == "typeinfer")) return 0;
+  if (inf_type || print_vn || (stop_after.GetValue() == "typeinf")) return 0;
   if (ti.HasError()) return 1;
 
   // debug: dump the symbol table
@@ -120,8 +120,8 @@ int main(int argc, char* argv[]) {
   TypeChecker sc(ti.SymTab());
   root.accept(sc);
 
-  if (sema_chk || (stop_after.GetValue() == "check2")) return 0;
   if (sc.HasError()) return 1;
+  if (gen_none || (stop_after.GetValue() == "recheck")) return 0;
 
   // collect information for dynamic/runtime shape handling
   ShapeDynamics sds(ti.SymTab());
@@ -137,6 +137,7 @@ int main(int argc, char* argv[]) {
       GCUCheck gcu_checker(sc.SymTab());
       root.accept(gcu_checker);
       if (gcu_checker.HasError()) return 1;
+      if (stop_after.GetValue() == "gcucheck") return 0;
 
       FactorCodeGen codegen(std::cout, sc.SymTab());
       root.accept(codegen);

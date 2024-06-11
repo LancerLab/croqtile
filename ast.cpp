@@ -131,7 +131,10 @@ void DMA::accept(Choreo::Visitor& v) {
   v.Visit(*this);
 }
 
-void ChunkAt::accept(Choreo::Visitor& v) { v.Visit(*this); }
+void ChunkAt::accept(Choreo::Visitor& v) {
+  // note: visit the positions inside
+  v.Visit(*this);
+}
 
 void Wait::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);

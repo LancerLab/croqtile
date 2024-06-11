@@ -138,24 +138,11 @@ void EmitFactorValueList(const ValueList &vl, std::ostream &os) {
   os << "}";
 }
 
-template<typename T>
+template <typename T>
 T GetAt(ValueList vlist, int idx) {
   return *(std::get_if<T>(&vlist[idx]));
 };
 
 }  // end namespace Factor
 
-inline std::string Shape::EmitTo(Target target) const {
-  (void)target;
-  std::ostringstream _os;
-  if (val_no == __INVALID_VALUE__) _os << "{}";
-  // PrintValueList(Value(), _os);
-  else {
-    assert(values.Exists(val_no) && "bad value number.");
-    Factor::EmitFactorValueList(Value(), _os);
-  }
-  return _os.str();
-}
-
 }  // end namespace Choreo
-

@@ -572,7 +572,7 @@ bool TypeInference::Visit(AST::WithIn &n) {
     }
     if (n.with_matchers) {
       for (auto pid : n.with_matchers->values) {
-        auto id = cast<AST::Identifier>(pid.get());
+        auto id = cast<AST::Identifier>(pid);
         os << "Bounded:   " << SSTab().InScopeName(id->name)
            << ", Type: " << AST::TYPE_STR(*id) << "\n";
       }
@@ -609,6 +609,13 @@ bool TypeInference::Visit(AST::ChunkAt &n) {
   }
   dma_fmty = fmty;
   dma_mem = sto;
+
+  if (n.positions) {
+    // update all the nodes with correct types
+    for (auto &v : n.positions->AllValues()) {
+      v->SetType(NodeType(*v));
+    }
+  }
   return true;
 }
 

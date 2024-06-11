@@ -512,6 +512,14 @@ struct Shape {
   const ValueList& Value() const { return values[val_no]; }
   ValueList Value() { return values[val_no]; }
 
+  const ValueItem& ValueAt(size_t index) const {
+    if (!IsValid()) choreo_unreachable("the shape is invalid.");
+    if (index > dim_count)
+      choreo_unreachable("index '" + std::to_string(index) +
+                         "' exceeds rank: " + std::to_string(dim_count) + ".");
+    return Value().at(index);
+  }
+
   int NthInteger(size_t index) const {
     const ValueItem& vi = Value().at(index);
     return *cast<int>(const_cast<ValueItem*>(&vi));
@@ -630,8 +638,6 @@ struct Type {
     assert(false && "Emit stringify not impled for this type");
   }
 
-  virtual std::string GetNote() const { return ""; }  // some annotation to make
-
   // for runtime type disambiguition
   virtual const std::string TypeNameString() = 0;
   virtual uint64_t RuntimeID() const { return 0xDEADBEEFULL; }
@@ -652,6 +658,38 @@ inline std::string STR(const Type& ty) {
 inline std::string STR(const Shape& s) {
   std::ostringstream oss;
   s.Print(oss);
+  return oss.str();
+}
+
+// string as list
+inline std::string LSTR(const Shape& s) {
+  std::ostringstream oss;
+  s.PrintAsList(oss);
+  return oss.str();
+}
+
+inline std::string LSTR(const ValueItem& vi) {
+  std::ostringstream oss;
+  if (auto iv = dyn_cast<int>(&vi))
+    oss << "{" << *iv << "}";
+  else
+    oss << "{" << *cast<std::string>(&vi) << "}";
+  return oss.str();
+}
+
+// un-braced 'raw' string
+inline std::string RSTR(const Shape& s) {
+  std::ostringstream oss;
+  s.PrintPlain(oss);
+  return oss.str();
+}
+
+inline std::string RSTR(const ValueItem& vi) {
+  std::ostringstream oss;
+  if (auto iv = dyn_cast<int>(&vi))
+    oss << *iv;
+  else
+    oss << *cast<std::string>(&vi);
   return oss.str();
 }
 
@@ -899,21 +937,36 @@ struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
   __UDT_TYPE_INFO__
 };
 
-struct BoundedIntegerType final : public Type,
+struct BoundedType : public Type {
+  std::string note = "";  // some annotation to make
+  BoundedType(TypeCategory tc, const std::string& n) : Type(tc), note(n) {}
+  virtual std::string GetNote() const { return note; };
+  virtual void AppendNote(const std::string& n) { note += n; };
+};
+
+struct BoundedIntegerType final : public BoundedType,
                                   public TypeIDProvider<BoundedIntegerType> {
   ValueItem bound = __UNKNOWN_INTVAL__;
-  std::string note = "";
 
-  BoundedIntegerType() : Type(TypeCategory::BOUNDED_INT) {}
-  BoundedIntegerType(int b) : Type(TypeCategory::BOUNDED_INT), bound(b) {}
+  BoundedIntegerType() : BoundedType(TypeCategory::BOUNDED_INT, "") {}
+  BoundedIntegerType(int b, const std::string& n = "")
+      : BoundedType(TypeCategory::BOUNDED_INT, n), bound(b) {}
   BoundedIntegerType(const std::string& expr, const std::string& n = "")
-      : Type(TypeCategory::BOUNDED_INT), bound(expr), note(n) {}
+      : BoundedType(TypeCategory::BOUNDED_INT, n), bound(expr) {}
 
   size_t Dims() const override { return 1; }
   bool IsComplete() const override { return true; }
   bool HasSufficientInfo() const {
     return bound != ValueItem{__UNKNOWN_INTVAL__};
   }
+  ValueItem GetBound() const { return bound; }
+#if 0
+  Shape GetBounds() const {
+    ValueList vl;
+    vl.emplace_back(bound);
+    return Shape(vl);
+  }
+#endif
 
   bool operator==(const Type& ty) const override {
     if (isa<BoundedIntegerType>(&ty)) return false;
@@ -935,22 +988,20 @@ struct BoundedIntegerType final : public Type,
 
   const std::string Name() const override { return "bounded-integer"; }
 
-  std::string GetNote() const override { return note; };
-
   __UDT_TYPE_INFO__
 };
 
-struct BoundedITupleType final : public Type,
+struct BoundedITupleType final : public BoundedType,
                                  public TypeIDProvider<BoundedITupleType> {
   Shape bounds;
-  std::string note = "";
   BoundedITupleType(const Shape& s, const std::string& n = "")
-      : Type(TypeCategory::BOUNDED_ITUPLE), bounds(s), note(n) {}
+      : BoundedType(TypeCategory::BOUNDED_ITUPLE, n), bounds(s) {}
 
   size_t Dims() const override { return bounds.Dims(); }
   bool IsComplete() const override { return true; }
   bool HasSufficientInfo() const { return bounds.IsValid(); }
   Shape GetBounds() const { return bounds; }
+  const ValueItem& GetBound(size_t idx) const { return bounds.Value().at(idx); }
 
   bool operator==(const Type& ty) const override {
     if (!isa<BoundedITupleType>(&ty)) return false;
@@ -978,18 +1029,16 @@ struct BoundedITupleType final : public Type,
 
   const std::string Name() const override { return "bounded-ituple"; }
 
-  std::string GetNote() const override { return note; };
-
   __UDT_TYPE_INFO__
 };
 
-struct FutureType : public ScalarType, public TypeIDProvider<FutureType> {
+struct FutureType : public Type, public TypeIDProvider<FutureType> {
   ptr<SpannedType> psty =
       nullptr;  // the spanned data associated with the future
   bool async;
 
   FutureType(const ptr<SpannedType>& s, bool a)
-      : ScalarType(TypeCategory::FUTURE), psty(s), async(a) {}
+      : Type(TypeCategory::FUTURE), psty(s), async(a) {}
   bool IsComplete() const override { return true; }
   bool HasSufficientInfo() const { return psty->HasSufficientInfo(); }
   const std::string Name() const override { return "future"; }

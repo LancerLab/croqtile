@@ -146,6 +146,9 @@ struct VisitorWithSymTab : public Visitor {
     return SymTab()->GetSymbol(InScopeName(n))->GetType();
   }
 
+  // special to within: map 'with' to its 'with-matchers'
+  std::unordered_map<std::string, std::vector<std::string>> within_map;
+
  private:
   int pb_count = 0;  // counting for parallel_by
   int wi_count = 0;  // counting for with_in
@@ -169,18 +172,25 @@ struct VisitorWithSymTab : public Visitor {
       SSTab().EnterScope("within_" + std::to_string(wi_count++));
     } else if (isa<AST::ForeachBlock>(&n)) {
       SSTab().EnterScope("foreach_" + std::to_string(fe_count++));
+    } else if (auto w = dyn_cast<AST::WithIn>(&n)) {
+      if (w->with && w->with_matchers) {
+        std::vector<std::string> matchers;
+        for (auto v : w->with_matchers->AllValues())
+          matchers.push_back(cast<AST::Identifier>(v)->name);
+        within_map.emplace(w->with->name, matchers);
+      }
     }
     BeforeVisitImpl(n);  // derived class to customize
     return true;
   }
 
   bool AfterVisit(AST::Node& n) final {
+    AfterVisitImpl(n);  // derived class to customize
     if (isa<AST::Program>(&n) || isa<AST::ChoreoFunction>(&n) ||
         isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n) ||
         isa<AST::ForeachBlock>(&n)) {
       SSTab().LeaveScope();
     }
-    AfterVisitImpl(n);  // derived class to customize
     return true;
   }
 

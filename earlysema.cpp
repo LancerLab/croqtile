@@ -636,7 +636,7 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
     error_count++;
   }
 
-  // infer the type of bounded type
+  // infer the type of bounded variable
   if (n.with) {
     n.with->accept(*this);  // make the symbol be defined
     with_syms.insert(n.with->name);
@@ -724,13 +724,13 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
     size_t r_count = 0;
     for (auto& v : n.positions->AllValues()) {
       auto ty = NodeType(*v);
-      if (!isa<BoundedIntegerType>(ty) && !isa<BoundedIntegerType>(ty) &&
-          !isa<BoundedITupleType>(ty)) {
+      if (!IsBoundedType(ty)) {
         Error(n.LOC(),
               "expecting '" + v->TypeNameString() + "` be a bounded type.");
         error_count++;
       }
       r_count += ty->Dims();
+      v->SetType(ty);
     }
     // report error when the ranks do not match
     if (rank != r_count) {
