@@ -206,7 +206,7 @@ int TypeIDProvider<T>::__unique_id;
     return name;                                                \
   }                                                             \
   static uint64_t TypeID() { return (uint64_t)(&__unique_id); } \
-  virtual uint64_t RuntimeID() const override {                 \
+  uint64_t RuntimeID() const override {                         \
     return (uint64_t)(&__unique_id);                            \
   }
 
@@ -1229,9 +1229,10 @@ inline ptr<SpannedType> MakeDummySpannedType() {
 }
 
 inline ptr<SpannedType> MakeRankedSpannedType(size_t n,
-                                              BaseType bt = BaseType::S32) {
+                                              BaseType bt = BaseType::S32,
+                                              Storage sto = Storage::DEFAULT) {
   // only care about the rank of span
-  return MakeSpannedType(bt, Shape(n), Storage::DEFAULT);
+  return MakeSpannedType(bt, Shape(n), sto);
 }
 
 inline ptr<SpannedType> MakeShapedSpannedType(const Shape& s,

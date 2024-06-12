@@ -26,7 +26,7 @@ __co__ auto pad_func(f32 [4, 4] input) {
 // CHECK: Bounded:   ::pad_func::paraby_0::within_0::tile_in_c, Type: {int,int}->[2, 2]
 // CHECK: Bounded:   ::pad_func::paraby_0::within_0::tile_ot_c, Type: {int,int}->[2, 2]
 // CHECK: Future:    ::pad_func::paraby_0::within_0::cdt_input, Type: sync=>shared f32 mdspan<2> [2, 2]
-// CHECK: Future:    ::pad_func::paraby_0::within_0::sdt_input, Type: sync=>local f32 mdspan<2> [2, 2]
-// CHECK: Future:    ::pad_func::paraby_0::within_0::sdt_out, Type: sync=>shared f32 mdspan<2> [2, 2]
+// CHECK: Future:    ::pad_func::paraby_0::within_0::sdt_input, Type: sync=>local f32 mdspan<2> [4, 4]
+// CHECK: Future:    ::pad_func::paraby_0::within_0::sdt_out, Type: sync=>shared f32 mdspan<2> [6, 6]
 // CHECK: Future:    ::pad_func::paraby_0::within_0::(anon), Type: sync=>global f32 mdspan<2> [4, 4]
 // CHECK: Function:  ::pad_func, Type: f32 mdspan<2> [8, 8] (*)(f32 mdspan<2> [4, 4])

@@ -681,13 +681,29 @@ bool EarlySemantics::Visit(AST::Memory& n) {
 
 bool EarlySemantics::Visit(AST::DMA& n) {
   __TRACE_EACH_VISIT__(n)
+
+  SpannedType* sty = nullptr;
+  if (auto fty = dyn_cast<FutureType>(NodeType(*n.from)))
+    sty = fty->GetSpannedType().get();
+  else
+    sty = cast<SpannedType>(NodeType(*n.from));
+
+  SpannedType* tty = nullptr;
+  if (!isa<AST::Memory>(n.to)) tty = cast<SpannedType>(NodeType(*n.to));
+
   if (!n.future.empty()) {
-    size_t rank = NodeType(*n.from)->Dims();
+    size_t rank = sty->Dims();
     assert(rank != InvalidRank());
 
     ReportErrorWhenViolateODR(n.LOC(), n.future + ".span", __FILE__, __LINE__,
                               MakeRankedMDSpanType(rank));
-    auto spanned_ty = MakeRankedSpannedType(rank);
+    Storage sto = Storage::NONE;
+    if (auto m = dyn_cast<AST::Memory>(n.to))
+      sto = m->Get();
+    else
+      sto = tty->GetStorage();
+
+    auto spanned_ty = MakeRankedSpannedType(rank, sty->ElementType(), sto);
     ReportErrorWhenViolateODR(n.LOC(), n.future + ".data", __FILE__, __LINE__,
                               spanned_ty);
     ReportErrorWhenViolateODR(n.LOC(), n.future, __FILE__, __LINE__,
@@ -695,6 +711,38 @@ bool EarlySemantics::Visit(AST::DMA& n) {
   } else {
     if (n.async) {
       Error(n.LOC(), "forbid to associated async dma without a named future.");
+      error_count++;
+    }
+  }
+
+  if (!isa<AST::Memory>(n.to)) {
+    if (sty->Dims() != tty->Dims()) {
+      Error(n.LOC(),
+            "The DMA statement contains a rank mismatch: the 'from' and 'to' "
+            "arrays have inconsistent dimensions.");
+      error_count++;
+    } else if (sty->ElementType() != tty->ElementType()) {
+      Error(n.LOC(),
+            "The DMA statement contains a type mismatch: the element types of "
+            "the 'from'(" +
+                STR(sty->ElementType()) + ") and 'to'(" +
+                STR(tty->ElementType()) + ") arrays are inconsistent.");
+      error_count++;
+    }
+  }
+
+  // dma.pad specific check
+  if (auto pcfg = dyn_cast<PadConfig>(n.config)) {
+    if (!((pcfg->pad_high.size() == pcfg->pad_low.size()) &&
+          (pcfg->pad_low.size() == pcfg->pad_mid.size()))) {
+      Error(n.LOC(),
+            "The DMA statement contains a rank mismatch: the paddings have "
+            "inconsistent ranks.");
+      error_count++;
+    } else if (NodeType(*n.from)->Dims() != pcfg->pad_high.size()) {
+      Error(n.LOC(),
+            "The rank of the data to transfer is inconsistent with the DMA "
+            "padding settings");
       error_count++;
     }
   }
@@ -741,7 +789,8 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
     }
   }
   assert(nty->Dims() != InvalidRank());
-  SetNodeType(n, MakeRankedSpannedType(nty->Dims()));
+  SetNodeType(n, MakeRankedSpannedType(nty->Dims(), sty->ElementType(),
+                                       sty->GetStorage()));
   return true;
 }
 

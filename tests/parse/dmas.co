@@ -32,12 +32,12 @@ __co__ void dma_test(int b, f32 [36, 27, 128] input) {
 // CHECK:     `- Foreach Block:
 // CHECK:      `- Iteration variables: index
 // CHECK:      `- DMA.pad.async
-// CHECK:        `- config: pad: high{1, 1}, low{1, 1}, mid{1, 0}, value: 1
+// CHECK:        `- config: padding: high{1, 1}, low{1, 1}, mid{1, 0}, value: 1
 // CHECK:        `- future: f
 // CHECK:        `- from: input.ChunkAt(p, index)
 // CHECK:        `- to: local
 // CHECK:      `- DMA.pad
-// CHECK:        `- config: pad: high{0, 0, 0}, low{0, 0, 0}, mid{1, 0, 3}, value: 0
+// CHECK:        `- config: padding: high{0, 0, 0}, low{0, 0, 0}, mid{1, 0, 3}, value: 0
 // CHECK:        `- future: f1
 // CHECK:        `- from: input.ChunkAt(p, index)
 // CHECK:        `- to: local

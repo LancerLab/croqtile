@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <iostream>
+#include <numeric>
 #include <sstream>
 #include <thread>
 
@@ -313,12 +314,7 @@ bool FactorCodeGen::Visit(AST::ParallelBy &by) {
   this->incrementIndent();
   fs << this->indent << "auto thread_id = thread_id_();\n";
   alloc_pos = fs.str().size();
-  // int i = 0;
-  // NOTE: remove unused aliasing 'auto k_a = args[0];'
-  // for (auto &param : *cur_params) {
-  //   fs << "      "
-  //      << "auto k_" << param->sym->name << " = args[" << i++ << "];\n";
-  // }
+  alloc_indent = indent;
 
   return true;
 }
@@ -358,25 +354,14 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   assert((isa<AST::Memory>(d.to) || isa<AST::ChunkAt>(d.to)) &&
          "Unexpected type for DMA's destination.");
 
-  auto ty = dyn_cast<FutureType>(d.GetType());
-  assert(ty && "Invalid type of DMA statement!");
-
-  // cook a valid future name
-  auto future_name = d.future;
-  if (future_name.empty()) {
-    static size_t future_count = 0;
-    future_name = "__choreo_anon_future" + std::to_string(future_count++);
-  }
-
-  // cook a valid dst name
-  auto dst_node_name = (isa<AST::Memory>(d.to))
-                           ? future_name + "_buffer"
-                           : STR(cast<AST::ChunkAt>(d.to)->data);
-
-  std::string src_node_name = STR(cast<AST::ChunkAt>(d.from)->data);
-  assert(!src_node_name.empty() && "expect a named future/span in chunkat.");
-
-  auto dst_data_shape = ty->GetShape();
+  // retrieve the spanned type from a chunkat
+  auto GetSpannedType = [this](AST::Node &ca) -> SpannedType * {
+    auto sty = ca.GetType();
+    if (auto fty = dyn_cast<FutureType>(sty))
+      return fty->GetSpannedType().get();
+    else
+      return cast<SpannedType>(sty);
+  };
 
   auto MemLevel = [](Storage s) -> int {
     switch (s) {
@@ -393,21 +378,35 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
     }
   };
 
-  // retrieve the spanned type from a chunkat
-  auto GetSpannedType = [this](AST::Node &ca) -> SpannedType * {
-    auto sty = ca.GetType();
-    if (auto fty = dyn_cast<FutureType>(sty))
-      return fty->GetSpannedType().get();
-    else
-      return cast<SpannedType>(sty);
-  };
+  auto ty = dyn_cast<FutureType>(d.GetType());
+  assert(ty && "Invalid type of DMA statement!");
 
+  // cook a valid future name
+  auto future_name = d.future;
+  if (future_name.empty()) {
+    static size_t future_count = 0;
+    future_name = "__choreo_anon_future" + std::to_string(future_count++);
+  }
+
+  // cook a valid dst buffer name
+  auto dst_node_name = (isa<AST::Memory>(d.to))
+                           ? future_name + "_buffer"
+                           : STR(cast<AST::ChunkAt>(d.to)->data);
+
+  // use source symbol as the buffer name
+  std::string src_node_name = STR(cast<AST::ChunkAt>(d.from)->data);
+  assert(!src_node_name.empty() && "expect a named future/span in chunkat.");
+
+  auto sty = GetSpannedType(*d.from);  // source spanned type
+  size_t rank = sty->Dims();
+  auto src_shape = sty->GetShape();
+  auto dst_shape = ty->GetShape();
   auto dst_sto = (isa<AST::Memory>(d.to)) ? cast<AST::Memory>(d.to)->Get()
                                           : GetSpannedType(*d.to)->GetStorage();
   int dst_level = MemLevel(dst_sto);
-  int src_level = MemLevel(GetSpannedType(*d.from)->GetStorage());
+  int src_level = MemLevel(sty->GetStorage());
 
-  // allocate storage for dma destination when not explicit stated.
+  // allocate storage for DMA destination when it is not explicitly stated.
   if (auto mem_node = dyn_cast<AST::Memory>(d.to)) {
     // TODO(albert): generate 'local_buffer' with more smart naming way by valno
     // support
@@ -416,43 +415,37 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
         {Storage::SHARED, "SRAMType"},
         {Storage::GLOBAL, "DRAMType"},
     };
-    alloc_in_fs << "    auto " << dst_node_name << " = alloc_("
+    // buffer in another stream
+    alloc_in_fs << alloc_indent << "auto " << dst_node_name << " = alloc_("
                 << sto2alloc.at(mem_node->Get()) << "("
-                << factor_typestr(GetSpannedType(*d.from)->ElementType()) << ","
-                << ReplaceRuntimeNames(LSTR(dst_data_shape), false) << "));\n";
+                << factor_typestr(sty->ElementType()) << ","
+                << ReplaceRuntimeNames(LSTR(dst_shape), false) << "));\n";
   }
 
-  // decide the dma operation
-  std::string dma_op = "";
-  if (src_level >= dst_level)
-    dma_op.append("async_load_(");
-  else
-    dma_op.append("async_store_(");
+  auto GenerateOffsetString = [this, &GetSpannedType](AST::Node &n) {
+    auto sty = GetSpannedType(n);
+    auto shape = sty->GetShape();
+    size_t rank = sty->Dims();
 
-  // the shape of block/tile after tiling
-  auto tile_shape = (src_level >= dst_level)
-                        ? dst_data_shape
-                        : GetSpannedType(*d.from)->GetShape();
-  size_t dim_sz = tile_shape.Dims();
+    auto ca = cast<AST::ChunkAt>(&n);
+    if (!ca->positions) {
+      // symbol only, the offset is a multi-dim-zeros
+      return "{" + DelimitedString(std::vector<size_t>(rank, 0)) + "}";
+    }
 
-  auto chunkat_node = (src_level >= dst_level) ? cast<AST::ChunkAt>(d.from)
-                                               : cast<AST::ChunkAt>(d.to);
-  assert(chunkat_node && "Unexpected !!!");
-
-  std::ostringstream offss;
-  offss << "{";
-  auto bounded_values = chunkat_node->positions;
-  if (bounded_values) {  // it is a chunkat expression
+    std::ostringstream offss;
+    offss << "{";
     size_t dim_cursor = 0;
-    for (auto &bv : bounded_values->AllValues()) {
+    for (auto &bv : ca->positions->AllValues()) {
       auto bvn = cast<AST::Identifier>(bv)->name;
       if (auto bity = dyn_cast<BoundedITupleType>(bv->GetType())) {
         for (size_t it_idx = 0; it_idx < bity->Dims(); ++it_idx) {
           std::string iv_str;
-          if (within_map.count(bvn) == 0)  // not mapped
-            iv_str = bvn;
-          else
+          if (within_map.count(bvn))  // with-matcher existed
             iv_str = within_map[bvn][it_idx];
+          else {
+            iv_str = bvn;
+          }
 
           // special handling for the parallel tiling factor
           auto l = RemovePrefixOrNull("pv:", bity->GetNote());
@@ -466,18 +459,16 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
               choreo_unreachable("invalid type note.");
           }
 
-          offss << "Value(" << RSTR(tile_shape.ValueAt(dim_cursor)) << ")*"
+          offss << "Value(" << RSTR(shape.ValueAt(dim_cursor)) << ")*"
                 << iv_str;
-          if (++dim_cursor < dim_sz) offss << ",";
+          if (++dim_cursor < rank) offss << ",";
         }
       } else
         choreo_unreachable("unsupported type.");
     }
-  } else {
-    // a 'dim_sz' sized zeros' string
-    offss << DelimitedString(std::vector<size_t>(dim_sz, 0));
-  }
-  offss << "}";
+    offss << "}";
+    return offss.str();
+  };
 
   // strtab.Print(fs);
   int arg_idx = strtab.GetSymbolIndex(src_node_name);
@@ -489,9 +480,43 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   dst_node_name = arg_idx < 0 ? dst_node_name
                               : "results[" + std::to_string(arg_idx - 2) + "]";
 
-  alloc_in_fs << "    auto " << future_name << " = alloc_dma_(SDMAType());\n";
-  fs << this->indent << dma_op << future_name << ", " << src_node_name << ", "
-     << dst_node_name << ", " << offss.str() << ");\n";
+  // decide the dma allocation type
+  auto DMATypeString = [](int src_lvl, int dst_lvl) {
+    if ((src_lvl == 2 && dst_lvl == 2) || (src_lvl == 2 && dst_lvl == 1) ||
+        (src_lvl == 1 && dst_lvl == 2) || (src_lvl == 1 && dst_lvl == 1))
+      return "CDMAType";
+    else
+      return "SDMAType";
+  };
+
+  // buffer the allocation in another stream
+  alloc_in_fs << alloc_indent << "auto " << future_name << " = alloc_dma_("
+              << DMATypeString(src_level, dst_level) << "());\n";
+
+  // decide the dma operation
+  std::string dma_op = "";
+  if (src_level >= dst_level)
+    dma_op.append("async_load_");
+  else
+    dma_op.append("async_store_");
+
+  auto chunkat_node = (src_level >= dst_level) ? cast<AST::ChunkAt>(d.from)
+                                               : cast<AST::ChunkAt>(d.to);
+  assert(chunkat_node && "Unexpected !!!");
+
+  fs << this->indent << dma_op << "(" << future_name << ", " << src_node_name
+     << ", " << dst_node_name << ", " << GenerateOffsetString(*chunkat_node);
+
+  if (auto pcfg = dyn_cast<PadConfig>(d.config)) {
+    std::vector<size_t> layout(rank);
+    std::iota(layout.begin(), layout.end(), 0);  // no transpose
+    fs << "{" << DelimitedString(layout) << "}, {"
+       << DelimitedString(pcfg->pad_low) << "}, {"
+       << DelimitedString(pcfg->pad_high) << "}, {"
+       << DelimitedString(pcfg->pad_mid) << "}, " << pcfg->value.v;
+  }
+
+  fs << ");\n";
 
   // synchornized dma must be waited
   if (!ty->IsAsync()) fs << indent << "wait_dma_(" << future_name << ");\n";

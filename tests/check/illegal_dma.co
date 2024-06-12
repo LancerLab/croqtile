@@ -1,0 +1,20 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ void illegal_copy(f32 [1, 2, 3] src) {
+  dma.copy src => local;
+  f32 [3, 2] dst;
+  dma.copy src => dst;
+  f16 [3, 2, 1] dst1;
+  dma.copy src => dst1;
+}
+
+__co__ void illegal_pad(f32 [1, 2, 3] src) {
+  dma.pad<{1, 0}, {1, 0, 3}, {0, 0}, 4> src => local;
+  dma.pad<{1, 0}, {1, 0}, {0, 0}, 2> src => local;
+}
+
+// CHECK: error: The DMA statement contains a rank mismatch: the 'from' and 'to' arrays have inconsistent dimensions.
+// CHECK: error: The DMA statement contains a type mismatch: the element types of the 'from'(f32) and 'to'(f16) arrays are inconsistent.
+// CHECK: error: The DMA statement contains a rank mismatch: the paddings have inconsistent ranks.
+// CHECK: error: The rank of the data to transfer is inconsistent with the DMA padding settings
+// CHECK: Totally 4 errors have been detected.

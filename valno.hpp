@@ -754,6 +754,27 @@ class ShapeInference : public Visitor {
 
     assert(ValidVN(cur_vn) &&
            "unexpected current value number for shape inference of dma.");
+
+    if (auto pcfg = dyn_cast<PadConfig>(n.config)) {
+      size_t size = pcfg->pad_high.size();
+      std::vector<size_t> all_pads(size);
+      std::fill_n(all_pads.begin(), size, 0);
+      for (size_t i = 0; i < size; ++i)
+        all_pads[i] += pcfg->pad_high[i] + pcfg->pad_low[i] + pcfg->pad_mid[i];
+      // now generate signature for original signature plus padding values
+      auto ElementSignature = [this](size_t n) {
+        std::string cv = "const_" + std::to_string(n);
+        return "#" + std::to_string(vn.GetOrInsertValueNumberFromSignature(cv));
+      };
+      std::string sig = ElementSignature(all_pads[0]);
+      for (size_t i = 1; i < size; ++i)
+        sig += ",#" + ElementSignature(all_pads[i]);
+      std::string add_sig = vn.SignBinaryCompositeValues(
+          n.LOC(), "+", vn.GetSignatureFromValueNumber(cur_vn), sig);
+      // update the cur_vn
+      cur_vn = vn.GetOrInsertValueNumberFromSignature(add_sig);
+    }
+
     // annotate the shape on AST for later type inference
     auto s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
     n.SetType(MakeShapedFutureType(s, n.async));

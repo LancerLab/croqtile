@@ -55,10 +55,11 @@ struct PadConfig final : public DMAConfig, public TypeIDProvider<PadConfig> {
 
   const std::string Name() const { return "pad"; }
   void Print(std::ostream &os) const override {
-    os << "pad: high{" << DelimitedString(pad_high) << "}, low{"
+    os << "padding: high{" << DelimitedString(pad_high) << "}, low{"
        << DelimitedString(pad_high) << "}, mid{" << DelimitedString(pad_mid)
        << "}, value: " << value.v;
   }
+
   __UDT_TYPE_INFO__
 };
 
