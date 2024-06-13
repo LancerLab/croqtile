@@ -22,8 +22,8 @@ using namespace Choreo::Factor;
 std::string Shape::EmitTo(Target target) const {
   (void)target;
   std::ostringstream _os;
-  if (val_no == __INVALID_VALUE__) _os << "{}";
-  // PrintValueList(Value(), _os);
+  if (!IsValidValueNumber(val_no))
+    _os << "{}";
   else {
     assert(values.Exists(val_no) && "bad value number.");
     Factor::EmitFactorValueList(Value(), _os);
@@ -399,12 +399,12 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
 
   auto sty = GetSpannedType(*d.from);  // source spanned type
   size_t rank = sty->Dims();
-  auto src_shape = sty->GetShape();
   auto dst_shape = ty->GetShape();
+  auto src_sto = sty->GetStorage();
   auto dst_sto = (isa<AST::Memory>(d.to)) ? cast<AST::Memory>(d.to)->Get()
                                           : GetSpannedType(*d.to)->GetStorage();
+  int src_level = MemLevel(src_sto);
   int dst_level = MemLevel(dst_sto);
-  int src_level = MemLevel(sty->GetStorage());
 
   // allocate storage for DMA destination when it is not explicitly stated.
   if (auto mem_node = dyn_cast<AST::Memory>(d.to)) {
@@ -434,7 +434,6 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
     }
 
     std::ostringstream offss;
-    offss << "{";
     size_t dim_cursor = 0;
     for (auto &bv : ca->positions->AllValues()) {
       auto bvn = cast<AST::Identifier>(bv)->name;
@@ -466,8 +465,7 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
       } else
         choreo_unreachable("unsupported type.");
     }
-    offss << "}";
-    return offss.str();
+    return "{" + offss.str() + "}";
   };
 
   // strtab.Print(fs);
@@ -510,7 +508,7 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   if (auto pcfg = dyn_cast<PadConfig>(d.config)) {
     std::vector<size_t> layout(rank);
     std::iota(layout.begin(), layout.end(), 0);  // no transpose
-    fs << "{" << DelimitedString(layout) << "}, {"
+    fs << ", {" << DelimitedString(layout) << "}, {"
        << DelimitedString(pcfg->pad_low) << "}, {"
        << DelimitedString(pcfg->pad_high) << "}, {"
        << DelimitedString(pcfg->pad_mid) << "}, " << pcfg->value.v;

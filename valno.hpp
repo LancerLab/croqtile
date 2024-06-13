@@ -14,10 +14,9 @@
 
 namespace Choreo {
 
-inline constexpr int InvalidValueNumber() { return __INVALID_INTVAL__; }
 inline constexpr int UnknownValue() { return -1; }
-inline bool ValidVN(int vn) { return vn != InvalidValueNumber(); }
-inline void InvalidateVN(int& vn) { vn = InvalidValueNumber(); }
+inline bool ValidVN(int vn) { return IsValidValueNumber(vn); }
+inline void InvalidateVN(int& vn) { vn = GetInvalidValueNumber(); }
 inline bool UnknownVN(int vn) { return vn == UnknownValue(); }
 inline void SetUnknownVN(int& vn) { vn = UnknownValue(); }
 
@@ -182,8 +181,8 @@ class ShapeInference : public Visitor {
  private:
   ValueNumbering vn;
 
-  int cur_vn = InvalidValueNumber();
-  int cur_mdspan_vn = InvalidValueNumber();
+  int cur_vn = GetInvalidValueNumber();
+  int cur_mdspan_vn = GetInvalidValueNumber();
 
   std::string cur_fn;
   // when values are consumed instead of generated
@@ -360,7 +359,7 @@ class ShapeInference : public Visitor {
       auto vl = GenShapeFromSignature(vn_sig);
       n.SetTypeDetail(vl);
 
-      if (n.Rank() != InvalidRank()) {
+      if (IsValidRank(n.Rank())) {
 #if 0
         if (vl.Dims() != n.Rank())
           Error(n.LOC(),
@@ -568,7 +567,7 @@ class ShapeInference : public Visitor {
         n.type->SetType(
             MakeSpannedType(n.type->base_type, span->GetTypeDetail()));
 
-      } else if (span->Rank() != __INVALID_VALUE__) {
+      } else if (IsValidRank(span->Rank())) {
         assert(ValidVN(cur_mdspan_vn) && "unexpected value number for mdspan.");
         // Put alias names of mdspan into the value number table
         vn.AssociateSignatureWithValueNumber(
@@ -796,7 +795,7 @@ class ShapeInference : public Visitor {
 
     if (cannot_proceed) return true;
 
-    int ca_valno = InvalidValueNumber();
+    int ca_valno = GetInvalidValueNumber();
 
     auto pty = SSTab().LookupSymbol(n.data->name);
     assert((isa<SpannedType>(pty) || isa<FutureType>(pty)) &&

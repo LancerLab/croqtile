@@ -4,7 +4,7 @@
 
 #include "ast.hpp"
 #include "codegen.hpp"
-#include "desugar.hpp"
+#include "normalize.hpp"
 #include "dynshape.hpp"
 #include "earlysema.hpp"
 #include "enums.hpp"

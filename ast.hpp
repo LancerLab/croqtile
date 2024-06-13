@@ -210,13 +210,13 @@ struct Boolean : public Node, public TypeIDProvider<Boolean> {
 
 struct IntLiteral : public Node, public TypeIDProvider<IntLiteral> {
   int value;
-  IntLiteral(const location& l, int v = __UNKNOWN_INTVAL__)
+  IntLiteral(const location& l, int v = GetUnKnownInteger())
       : Node(l, MakeIntegerType()), value(v) {}
 
   int Val() const { return value; }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    if (value == __UNKNOWN_INTVAL__)
+    if (IsUnKnownInteger(value))
       os << prefix << "?";
     else
       os << prefix << value;
@@ -353,9 +353,9 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
 
 // Represents both dimensions and s like {3, 4, 5} or {1, 2, 1}
 struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
-  std::string ref_name;             // syntax suger, could be empty
-  ptr<Node> list;                   // null if the span is dynamically valued
-  size_t rank = __INVALID_VALUE__;  // dynamic value with known dimension count
+  std::string ref_name;            // syntax suger, could be empty
+  ptr<Node> list;                  // null if the span is dynamically valued
+  size_t rank = GetInvalidRank();  // dynamic value with known dimension count
 
   // If the mdspan is known
   explicit MultiDimSpans(const location& l, const std::string& n,
@@ -363,7 +363,7 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
       : Node(l, MakeUninitMDSpanType()),
         ref_name(n),
         list(lst),
-        rank(__INVALID_VALUE__) {
+        rank(GetInvalidRank()) {
     assert(list && "Unexpected: span list is not provided");
   }
 
@@ -378,14 +378,14 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
   // mdspan is unknown - for parameter passing
   explicit MultiDimSpans(const location& l, const std::string& n, size_t c)
       : Node(l, MakeRankedMDSpanType(c)), ref_name(n), list(nullptr), rank(c) {
-    assert(rank != __INVALID_VALUE__ && "Invalid dimensions.");
+    assert(IsValidRank(rank) && "Invalid dimensions.");
   }
 
   explicit MultiDimSpans(const location& l, const std::string& n,
                          const ptr<MDSpanType>& pty)
       : Node(l, pty), ref_name(n), list(nullptr), rank(pty->Dims()) {}
 
-  bool HasValidRank() const { return rank == __INVALID_VALUE__; }
+  bool HasValidRank() const { return IsValidRank(rank); }
   size_t Rank() const { return rank; }
   void SetRank(size_t n) { rank = n; }
 
@@ -435,8 +435,8 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
 struct NamedTypeDecl : public Node, public TypeIDProvider<NamedTypeDecl> {
   const std::string name_str;
   const std::string init_str;
-  const ptr<Node> init_expr;    // associated init_expr
-  size_t rank = InvalidRank();  // rank annotation only
+  const ptr<Node> init_expr;       // associated init_expr
+  size_t rank = GetInvalidRank();  // rank annotation only
 
   explicit NamedTypeDecl(const location& l, const std::string& n,
                          const ptr<Node>& v, const std::string& d = "-")
@@ -546,7 +546,7 @@ struct IntIndex : public Node, public TypeIDProvider<IntIndex> {
 //
 struct DataType : public Node, public TypeIDProvider<DataType> {
   BaseType base_type;
-  size_t rank = InvalidRank();  // for annotated ituple only
+  size_t rank = GetInvalidRank();  // for annotated ituple only
   ptr<Node> mdspan_type = nullptr;
 
  public:
@@ -616,9 +616,9 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
                                 GenUninitShape()));  // need type inference
         break;
       case BaseType::ITUPLE:
-        if (rank == InvalidRank())
-          SetType(MakeUninitITupleType());  // need type inference to retrieve
-                                            // the dim count
+        if (!IsValidRank(rank))
+          SetType(MakeUninitITupleType());  // type inference to deduce the dim
+                                            // count
         else
           SetType(MakeITupleType(rank));
         break;
@@ -819,9 +819,7 @@ struct WithIn : public Node, public TypeIDProvider<WithIn> {
       with_matchers->InlinePrint(os);
       os << "}";
     }
-    os << " in ";
-    in->Print(os);
-    os << "\n";
+    os << " in " << STR(*in) << "\n";
   }
 
   void accept(Visitor&) override;

@@ -1,7 +1,8 @@
 #ifndef __CHOREO_NORMALIZATION_HPP__
 #define __CHOREO_NORMALIZATION_HPP__
 
-// This applies 'normalization' or 'canonicalization' of AST for easier handling in later visiting passes.
+// This applies 'normalization' or 'canonicalization' of AST for easier handling
+// in later visiting passes.
 
 #include <iostream>
 
@@ -12,7 +13,7 @@ namespace Choreo {
 
 struct Normalizer : public Visitor {
  private:
-  std::ostream & os;
+  std::ostream &os;
   bool trace = false;
 
  private:
@@ -32,7 +33,8 @@ struct Normalizer : public Visitor {
 
  public:
   // it does not require a symbol table
-  Normalizer(std::ostream &o) : Visitor(nullptr), os(o), trace(std::getenv("TRACE_NORM")) {}
+  Normalizer(std::ostream &o)
+      : Visitor(nullptr), os(o), trace(std::getenv("TRACE_NORM")) {}
 
   bool BeforeVisit(AST::Node &n) override {
     if (auto *b = dyn_cast<AST::MultiDimSpans>(&n)) {
@@ -44,7 +46,7 @@ struct Normalizer : public Visitor {
       if (b->list) return true;
       if (!handle_parameter) return true;
 
-      assert(b->Rank() != __INVALID_VALUE__);
+      assert(IsValidRank(b->Rank()));
 
       // append the node that have multiple dynamic values
       auto mvals = AST::Make<AST::MultiValues>(n.LOC());
@@ -71,8 +73,8 @@ struct Normalizer : public Visitor {
     } else if (auto p = dyn_cast<AST::Parameter>(&n)) {
       handle_parameter = false;
       if (changed && trace)
-        os << "Name dims of `" << STR(*p->sym) << "': " << old
-                  << " ---> " << STR(*p->type) << "\n";
+        os << "Name dims of `" << STR(*p->sym) << "': " << old << " ---> "
+           << STR(*p->type) << "\n";
       old.clear();
       changed = false;
     } else if (isa<AST::ChoreoFunction>(&n)) {
@@ -94,7 +96,7 @@ struct Normalizer : public Visitor {
                   AST::Make<AST::Expr>(expr->LOC(), "dimof", list_ref, ref);
               if (trace)
                 os << "Desugar ref: " << STR(*expr) << " ---> "
-                          << STR(*new_expr) << "\n";
+                   << STR(*new_expr) << "\n";
               n.values[i] = new_expr;
             }
           }
@@ -105,7 +107,7 @@ struct Normalizer : public Visitor {
     if (handle_parameter) {  // make runtime values of "?" to be named
       for (size_t i = 0; i < n.values.size(); ++i) {
         if (auto il = dyn_cast<AST::IntLiteral>(n.values[i])) {
-          if (il->value != __UNKNOWN_INTVAL__) continue;
+          if (!IsUnKnownInteger(il->value)) continue;
           auto new_il =
               AST::Make<AST::Identifier>(il->LOC(), GetInternalValueString());
 
@@ -128,7 +130,7 @@ struct Normalizer : public Visitor {
 
   bool Visit(AST::IntLiteral &) override { return true; }
   bool Visit(AST::Expr &n) override {
-    if (list_ref) { // could be with syntax sugar
+    if (list_ref) {  // could be with syntax sugar
       auto Apply = [this](AST::Expr *expr) -> ptr<AST::Expr> {
         if (!expr) return nullptr;
         if (auto ref = expr->GetReference()) {
@@ -173,8 +175,7 @@ struct Normalizer : public Visitor {
       n.mem->Set(Storage::GLOBAL);
 
       if (trace)
-        os << "Place storage of '" << n.name_str
-                  << "': DEFAULT ---> GLOBAL\n";
+        os << "Place storage of '" << n.name_str << "': DEFAULT ---> GLOBAL\n";
     }
 
     return true;
@@ -188,7 +189,37 @@ struct Normalizer : public Visitor {
   bool Visit(AST::ParamList &) override { return true; }
   bool Visit(AST::ParallelBy &) override { return true; }
   bool Visit(AST::WhereBind &) override { return true; }
-  bool Visit(AST::WithIn &) override { return true; }
+
+  bool Visit(AST::WithIn &n) override {
+    if (n.with_matchers) return true;
+    assert(n.with && "must have with statement.");
+
+    auto wty = n.with->GetType();
+    assert(isa<BoundedITupleType>(wty) && "expect a bounded ituple type.");
+
+    if (wty->Dims() == 1) return true;
+
+    auto mval = AST::Make<AST::MultiValues>(n.LOC(), ",");
+    // fill the with-matchers
+    for (size_t i = 0; i < wty->Dims(); ++i) {
+      mval->Append(AST::Make<AST::Identifier>(
+          n.with->LOC(), n.with->name + "__elem__" + std::to_string(i)));
+      auto bity = cast<BoundedITupleType>(wty);
+      if (bity->HasValidBound())
+        mval->ValueAt(i)->SetType(MakeBoundedIntegerType(bity->GetBound(i)));
+      else
+        mval->ValueAt(i)->SetType(MakeUnknownBoundedIntegerType());
+    }
+
+    n.with_matchers = mval;
+
+    if (trace)
+      os << "Generate with-matchers for '" << n.with->name << "': " << STR(mval)
+         << "\n";
+
+    return true;
+  }
+
   bool Visit(AST::WithBlock &) override { return true; }
   bool Visit(AST::Memory &) override { return true; }
   bool Visit(AST::DMA &) override { return true; }

@@ -206,9 +206,7 @@ int TypeIDProvider<T>::__unique_id;
     return name;                                                \
   }                                                             \
   static uint64_t TypeID() { return (uint64_t)(&__unique_id); } \
-  uint64_t RuntimeID() const override {                         \
-    return (uint64_t)(&__unique_id);                            \
-  }
+  uint64_t RuntimeID() const override { return (uint64_t)(&__unique_id); }
 
 // LLVM-style type utility functions
 //
@@ -266,15 +264,50 @@ T* cast(const ptr<U>& n) {
 template <class T>
 inline constexpr bool always_false = false;
 
-static constexpr size_t __INVALID_VALUE__ = std::numeric_limits<size_t>::max();
-static constexpr int __UNKNOWN_INTVAL__ = std::numeric_limits<int>::min();
-static constexpr int __INVALID_INTVAL__ = std::numeric_limits<int>::max();
+namespace __internal {
+static constexpr size_t INVALID_UNSIGNED = std::numeric_limits<size_t>::max();
+static constexpr int INVALID_SIGNED = std::numeric_limits<int>::max();
+static constexpr int UNKNOWN_SIGNED =
+    std::numeric_limits<int>::min();  // represent literal value '?' only
+}  // namespace __internal
 
-inline constexpr size_t InvalidRank() { return __INVALID_VALUE__; }
+inline constexpr size_t GetInvalidUnsigned() {
+  return __internal::INVALID_UNSIGNED;
+}
+inline constexpr int GetInvalidSigned() { return __internal::INVALID_SIGNED; }
+inline constexpr int GetInvalidValueNumber() {
+  return __internal::INVALID_SIGNED;
+}
+inline constexpr int GetUnKnownInteger() { return __internal::UNKNOWN_SIGNED; }
+inline constexpr size_t GetInvalidRank() {
+  return __internal::INVALID_UNSIGNED;
+}
+
+inline constexpr bool IsValidUnsigned(size_t v) {
+  return v != __internal::INVALID_UNSIGNED;
+}
+inline constexpr bool IsValidSigned(int v) {
+  return v != __internal::INVALID_SIGNED;
+}
+inline constexpr bool IsValidValueNumber(int v) {
+  return v != __internal::INVALID_SIGNED;
+}
+inline constexpr bool IsUnKnownInteger(int v) {
+  return v == __internal::UNKNOWN_SIGNED;
+}
+inline constexpr bool IsValidRank(size_t v) {
+  return v != __internal::INVALID_UNSIGNED;
+}
 
 using ValueExpr = std::string;
 using ValueItem = std::variant<int, ValueExpr>;
 using ValueList = std::vector<ValueItem>;
+
+inline ValueItem GetInvalidValueItem() { return ValueItem{GetInvalidSigned()}; }
+inline bool IsValidValueItem(const ValueItem& vi) {
+  if (std::holds_alternative<ValueExpr>(vi)) return true;
+  return IsValidSigned(std::get<int>(vi));
+}
 
 // specialization for ValueItem
 template <typename T>
@@ -473,12 +506,13 @@ inline void PrintValueList(const ValueList& vl, std::ostream& os,
 struct Shape {
   static ValueListRepo values;  // value numbers
 
-  size_t val_no = __INVALID_VALUE__;
-  size_t dim_count = InvalidRank();  // dim_count is used when no value appears
+  size_t val_no = GetInvalidValueNumber();
+  size_t dim_count =
+      GetInvalidRank();  // dim_count is used when no value appears
 
   void Invalidate() {
-    val_no = __INVALID_VALUE__;
-    dim_count = InvalidRank();
+    val_no = GetInvalidUnsigned();
+    dim_count = GetInvalidRank();
   }
 
   explicit Shape() {}  // this initialize an invalid Shape
@@ -502,22 +536,34 @@ struct Shape {
 
   size_t Dims() const { return dim_count; }
   void Update() { dim_count = values[val_no].size(); }
-  bool IsValid() const {
-    if (val_no == __INVALID_VALUE__)
-      return dim_count != InvalidRank();
-    else
-      return dim_count == values[val_no].size();
+
+  bool IsRanked() const {
+    // ok to hold a valid rank only
+    if (!IsValidValueNumber(val_no)) return IsValidRank(dim_count);
+    return dim_count == values[val_no].size();
   }
 
-  const ValueList& Value() const { return values[val_no]; }
-  ValueList Value() { return values[val_no]; }
+  bool IsValid() const {
+    if (!IsValidValueNumber(val_no)) return false;
+    return dim_count == values[val_no].size();
+  }
+
+  const ValueList& Value() const {
+    if (!IsValid()) choreo_unreachable("the shape is not accessible.");
+    return values[val_no];
+  }
+
+  ValueList Value() {
+    if (!IsValid()) choreo_unreachable("the shape is not accessible.");
+    return values[val_no];
+  }
 
   const ValueItem& ValueAt(size_t index) const {
-    if (!IsValid()) choreo_unreachable("the shape is invalid.");
+    if (!IsValid()) choreo_unreachable("the shape is not accessible.");
     if (index > dim_count)
       choreo_unreachable("index '" + std::to_string(index) +
                          "' exceeds rank: " + std::to_string(dim_count) + ".");
-    return Value().at(index);
+    return values[val_no].at(index);
   }
 
   int NthInteger(size_t index) const {
@@ -538,7 +584,9 @@ struct Shape {
 
   bool IsDynamic() const {
     for (auto v : Value())
-      if (!isa<int>(&v)) return true;
+      if (!isa<int>(&v))
+        return true;  // a symbolic value represents that the value is decided
+                      // at runtime
     return false;
   }
 
@@ -582,7 +630,7 @@ struct Shape {
   }
 
   void Print(std::ostream& os) const {
-    if (val_no == __INVALID_VALUE__) {
+    if (!IsValidValueNumber(val_no)) {
       os << "[]";
     } else {
       assert(values.Exists(val_no) && "invalid value number.");
@@ -591,7 +639,7 @@ struct Shape {
   }
 
   void PrintAsList(std::ostream& os) const {
-    if (val_no == __INVALID_VALUE__)
+    if (!IsValidValueNumber(val_no))
       os << "{}";
     else {
       assert(values.Exists(val_no) && "invalid value number.");
@@ -600,7 +648,7 @@ struct Shape {
   }
 
   void PrintPlain(std::ostream& os) const {
-    if (val_no == __INVALID_VALUE__)
+    if (!IsValidValueNumber(val_no))
       os << "";
     else {
       assert(values.Exists(val_no) && "invalid value number.");
@@ -627,7 +675,8 @@ struct Type {
   // is the information enough for semantic check and code generation
   virtual bool HasSufficientInfo() const { return true; }
   virtual bool operator==(const Type& t) const = 0;
-  // in-precise comparison without considering the shape detail
+  // in-precise comparison without considering the shape detail.
+  // used in early semantics
   virtual bool ApprxEqual(const Type& t) const = 0;
 
   virtual void Print(std::ostream&) const = 0;
@@ -695,7 +744,7 @@ inline std::string RSTR(const ValueItem& vi) {
 
 struct VoidType final : public Type, public TypeIDProvider<VoidType> {
   explicit VoidType() : Type(TypeCategory::VOID) {}
-  size_t Dims() const override { return InvalidRank(); }
+  size_t Dims() const override { return GetInvalidRank(); }
   bool IsComplete() const override { return true; }
   void Print(std::ostream& os) const override { os << "void"; }
   const std::string Name() const override { return "void_type"; }
@@ -710,7 +759,7 @@ struct VoidType final : public Type, public TypeIDProvider<VoidType> {
 // The type is unknown. It requires type inference
 struct UnknownType final : public Type, public TypeIDProvider<UnknownType> {
   explicit UnknownType() : Type(TypeCategory::UNKNOWN) {}
-  size_t Dims() const override { return InvalidRank(); }
+  size_t Dims() const override { return GetInvalidRank(); }
   bool IsComplete() const override { return false; }
   void Print(std::ostream& os) const override { os << "unknown"; }
   const std::string Name() const override { return "unknown_type"; }
@@ -776,18 +825,18 @@ struct IndexType : public Type, public TypeIDProvider<IndexType> {
 
 // ITuple is a dimensioned type
 struct ITupleType : public Type, public TypeIDProvider<ITupleType> {
-  size_t dim_count = InvalidRank();
+  size_t dim_count = GetInvalidRank();
 
   explicit ITupleType()
       : Type(TypeCategory::ITUPLE) {}  // this initialize an invalid ITupleType
                                        // The Type must be deduced for use
 
-  bool HasSufficientInfo() const { return dim_count != InvalidRank(); }
+  bool HasSufficientInfo() const { return IsValidRank(dim_count); }
 
   ITupleType(size_t n) : Type(TypeCategory::ITUPLE), dim_count(n) {}
 
   size_t Dims() const override { return dim_count; }
-  bool IsDimValid() const { return dim_count != InvalidRank(); }
+  bool IsDimValid() const { return IsValidRank(dim_count); }
   bool IsComplete() const override { return true; }
 
   void Print(std::ostream& os) const override {
@@ -845,7 +894,7 @@ struct MDSpanType : public Type, public TypeIDProvider<MDSpanType> {
 
   bool ApprxEqual(const Type& ty) const override {
     if (auto sty = dyn_cast<MDSpanType>(&ty)) {
-      if (!HasSufficientInfo() || !sty->HasSufficientInfo())
+      if (!value.IsRanked() || !sty->value.IsRanked())
         return true;  // it is ok when the shape is unknown
       else
         return ty.Dims() == Dims();
@@ -855,9 +904,9 @@ struct MDSpanType : public Type, public TypeIDProvider<MDSpanType> {
 
   void Print(std::ostream& os) const override {
     os << "mdspan<";
-    if (value.IsValid()) os << Dims();
+    if (value.IsRanked()) os << Dims();
     os << ">";
-    if (HasSufficientInfo()) os << " " << STR(value);
+    if (value.IsRanked()) os << " " << STR(value);
   }
 
   std::string EmitTo(Target target) const override {
@@ -893,6 +942,7 @@ struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
   bool HasSufficientInfo() const override {
     return s_type->HasSufficientInfo();
   }
+
   bool operator==(const Type& ty) const override {
     if (!isa<SpannedType>(&ty)) return false;
     auto& t = (SpannedType&)ty;
@@ -940,33 +990,24 @@ struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
 struct BoundedType : public Type {
   std::string note = "";  // some annotation to make
   BoundedType(TypeCategory tc, const std::string& n) : Type(tc), note(n) {}
+  virtual bool HasValidBound() const = 0;
   virtual std::string GetNote() const { return note; };
   virtual void AppendNote(const std::string& n) { note += n; };
 };
 
 struct BoundedIntegerType final : public BoundedType,
                                   public TypeIDProvider<BoundedIntegerType> {
-  ValueItem bound = __UNKNOWN_INTVAL__;
+  ValueItem bound = GetInvalidValueItem();
 
   BoundedIntegerType() : BoundedType(TypeCategory::BOUNDED_INT, "") {}
-  BoundedIntegerType(int b, const std::string& n = "")
-      : BoundedType(TypeCategory::BOUNDED_INT, n), bound(b) {}
-  BoundedIntegerType(const std::string& expr, const std::string& n = "")
-      : BoundedType(TypeCategory::BOUNDED_INT, n), bound(expr) {}
+  BoundedIntegerType(const ValueItem& expr, const std::string& note = "")
+      : BoundedType(TypeCategory::BOUNDED_INT, note), bound(expr) {}
 
   size_t Dims() const override { return 1; }
   bool IsComplete() const override { return true; }
-  bool HasSufficientInfo() const {
-    return bound != ValueItem{__UNKNOWN_INTVAL__};
-  }
+  bool HasSufficientInfo() const { return HasValidBound(); }
+  bool HasValidBound() const override { return IsValidValueItem(bound); }
   ValueItem GetBound() const { return bound; }
-#if 0
-  Shape GetBounds() const {
-    ValueList vl;
-    vl.emplace_back(bound);
-    return Shape(vl);
-  }
-#endif
 
   bool operator==(const Type& ty) const override {
     if (isa<BoundedIntegerType>(&ty)) return false;
@@ -979,7 +1020,7 @@ struct BoundedIntegerType final : public BoundedType,
   }
 
   void Print(std::ostream& os) const override {
-    if (bound == ValueItem{__UNKNOWN_INTVAL__})
+    if (HasValidBound())
       os << "int->[unknown]";
     else
       std::visit([this, &os](const auto& v) { os << "int->[0, " << v << ")"; },
@@ -1001,7 +1042,8 @@ struct BoundedITupleType final : public BoundedType,
   bool IsComplete() const override { return true; }
   bool HasSufficientInfo() const { return bounds.IsValid(); }
   Shape GetBounds() const { return bounds; }
-  const ValueItem& GetBound(size_t idx) const { return bounds.Value().at(idx); }
+  const ValueItem& GetBound(size_t idx) const { return bounds.ValueAt(idx); }
+  bool HasValidBound() const override { return bounds.IsValid(); }
 
   bool operator==(const Type& ty) const override {
     if (!isa<BoundedITupleType>(&ty)) return false;
@@ -1016,7 +1058,7 @@ struct BoundedITupleType final : public BoundedType,
   }
 
   void Print(std::ostream& os) const override {
-    if (!bounds.IsValid()) {
+    if (!bounds.IsRanked()) {
       os << "{invalid}";
       return;
     }
@@ -1204,7 +1246,7 @@ inline ptr<MDSpanType> MakeUninitMDSpanType() {
 }
 
 inline ptr<MDSpanType> MakeRankedMDSpanType(size_t n) {
-  if (n == InvalidRank()) return MakeUninitMDSpanType();
+  if (!IsValidRank(n)) return MakeUninitMDSpanType();
   return std::make_shared<MDSpanType>(Shape(n));
 }
 
@@ -1241,11 +1283,7 @@ inline ptr<SpannedType> MakeShapedSpannedType(const Shape& s,
   return MakeSpannedType(bt, s, Storage::DEFAULT);
 }
 
-inline ptr<BoundedIntegerType> MakeBoundedIntegerType(int ub) {
-  return std::make_shared<BoundedIntegerType>(ub);
-}
-
-inline ptr<BoundedIntegerType> MakeBoundedIntegerType(const std::string& ub) {
+inline ptr<BoundedIntegerType> MakeBoundedIntegerType(const ValueItem& ub) {
   return std::make_shared<BoundedIntegerType>(ub);
 }
 

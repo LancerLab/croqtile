@@ -20,3 +20,9 @@ __co__ void bar() {
 }
 
 // CHECK: Place storage of 'aa': DEFAULT ---> GLOBAL
+
+__co__ void fillup(f32 [3, 4, 5] b) {
+  with abc in [b.span + 1] {}
+}
+
+// CHECK: Generate with-matchers for 'abc': abc__elem__0,abc__elem__1,abc__elem__2

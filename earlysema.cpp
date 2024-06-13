@@ -312,7 +312,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       error_count++;
       return false;
     }
-    if ((lty->Dims() == InvalidRank()) || (rty->Dims() == InvalidRank()))
+    if ((!IsValidRank(lty->Dims())) || (!IsValidRank(rty->Dims())))
       SetNodeType(n, MakeUninitMDSpanType());
     else
       SetNodeType(n, MakeRankedMDSpanType(lty->Dims() + rty->Dims()));
@@ -323,7 +323,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
 
 bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
   __TRACE_EACH_VISIT__(n)
-  size_t rank = InvalidRank();
+  size_t rank = GetInvalidRank();
 
   // transform [a.span, b.span] to be an expr of concat(a.span, b.span)
   if (auto mvals = dyn_cast<AST::MultiValues>(n.list)) {
@@ -393,9 +393,9 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
   } else if (isa<AST::Expr>(n.list))
     rank = n.list->GetType()->Dims();
 
-  if (n.Rank() == InvalidRank())
+  if (!IsValidRank(n.Rank()))
     n.SetRank(rank);
-  else if (rank == InvalidRank())
+  else if (!IsValidRank(rank))
     rank = n.Rank();
   else {
     if (n.Rank() != rank) {
@@ -418,8 +418,8 @@ bool EarlySemantics::Visit(AST::NamedTypeDecl& n) {
   __TRACE_EACH_VISIT__(n)
   assert(n.init_expr && "missing init expr.");
   auto ety = NodeType(*n.init_expr);
-  auto nty = (n.rank != InvalidRank()) ? MakeRankedMDSpanType(n.rank)
-                                       : MakeUninitMDSpanType();
+  auto nty = (IsValidRank(n.rank)) ? MakeRankedMDSpanType(n.rank)
+                                   : MakeUninitMDSpanType();
   // check for the type consistency
   if (!ety->ApprxEqual(*nty)) {
     Error(n.LOC(), "`" + n.name_str + "' is declared as \"" + PSTR(nty) +
@@ -640,9 +640,9 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
   if (n.with) {
     n.with->accept(*this);  // make the symbol be defined
     with_syms.insert(n.with->name);
-    SSTab().ModifySymbolType(
-        n.with->name,
-        MakeBoundedITupleType(Shape(cast<MDSpanType>(ity)->Dims())));
+    auto wty = MakeBoundedITupleType(Shape(cast<MDSpanType>(ity)->Dims()));
+    SSTab().ModifySymbolType(n.with->name, wty);
+    n.with->SetType(wty);
   }
 
   if (n.with_matchers) {
@@ -661,8 +661,14 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
         continue;
       }
       with_syms.insert(sname);
-      SSTab().ModifySymbolType(sname, MakeBoundedIntegerType(sname));
+      auto mty = MakeBoundedIntegerType(sname);
+      SSTab().ModifySymbolType(sname, mty);
+      v->SetType(mty);
     }
+    if (n.with)
+      n.with_matchers->SetType(n.with->GetType());
+    else
+      n.with_matchers->SetType(MakeBoundedITupleType(n.with_matchers->Count()));
   }
   in_decl = false;
 
@@ -693,7 +699,7 @@ bool EarlySemantics::Visit(AST::DMA& n) {
 
   if (!n.future.empty()) {
     size_t rank = sty->Dims();
-    assert(rank != InvalidRank());
+    assert(IsValidRank(rank));
 
     ReportErrorWhenViolateODR(n.LOC(), n.future + ".span", __FILE__, __LINE__,
                               MakeRankedMDSpanType(rank));
@@ -788,7 +794,7 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
       error_count++;
     }
   }
-  assert(nty->Dims() != InvalidRank());
+  assert(IsValidRank(nty->Dims()));
   SetNodeType(n, MakeRankedSpannedType(nty->Dims(), sty->ElementType(),
                                        sty->GetStorage()));
   return true;

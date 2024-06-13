@@ -212,9 +212,9 @@ std::optional<std::string> ValueNumbering::TryToSimplifyBinary(
            << "\n";
         choreo_unreachable("divide by zero is found in shape evaluation.");
       }
-      res += std::to_string((std::stoi(*l_cv) + std::stoi(*r_cv) - 1) / std::stoi(*r_cv));
-    }
-    else {
+      res += std::to_string((std::stoi(*l_cv) + std::stoi(*r_cv) - 1) /
+                            std::stoi(*r_cv));
+    } else {
       Error(loc,
             "simplification of operation `" + op + "' is not yet supported.");
       return std::nullopt;
@@ -433,7 +433,7 @@ std::string ValueNumbering::GenerateNodeSignature(AST::Node& node,
   }
 
   if (auto* n = dyn_cast<AST::IntLiteral>(&node)) {
-    if (n->value == __UNKNOWN_INTVAL__) return "?";
+    if (IsUnKnownInteger(n->value)) return "?";
     return "const_" + std::to_string(n->value);
   } else if (auto* v = dyn_cast<AST::Identifier>(&node)) {
     if (auto name_in_scope = visitor->SSTab().NameInScopeOrNull(v->name)) {
@@ -567,7 +567,7 @@ int ValueNumbering::GetValueNumberOfSignature(const std::string& signature) {
   choreo_unreachable("failed to get value number of signature \"" + signature +
                      "\".");
 
-  return InvalidValueNumber();
+  return GetInvalidValueNumber();
 }
 
 void ValueNumbering::BindValueNumbers(int vn0, int vn1) {
