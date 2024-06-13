@@ -417,9 +417,13 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
                              ? future_name + "_buffer"
                              : STR(cast<AST::ChunkAt>(d.to)->data);
 
-  // use source symbol as the buffer name
   std::string src_node_name = STR(cast<AST::ChunkAt>(d.from)->data);
   assert(!src_node_name.empty() && "expect a named future/span in chunkat.");
+  // use source symbol as the buffer name
+  std::string src_buffer_name = src_node_name;
+  if (isa<FutureType>(GetSymbolType(
+          RemoveSuffix(cast<AST::ChunkAt>(d.from)->data->name, ".data"))))
+    src_buffer_name = src_node_name + "_buffer";
 
   auto sty = GetSpannedType(*d.from);  // source spanned type
   size_t rank = sty->Dims();
@@ -496,8 +500,8 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
 
   // strtab.Print(fs);
   int arg_idx = strtab.GetSymbolIndex(src_node_name);
-  src_node_name =
-      arg_idx < 0 ? src_node_name : "args[" + std::to_string(arg_idx) + "]";
+  src_buffer_name =
+      arg_idx < 0 ? src_buffer_name : "args[" + std::to_string(arg_idx) + "]";
 
   // decide the dma allocation type
   auto DMATypeString = [](int src_lvl, int dst_lvl) {
@@ -519,12 +523,17 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   else
     dma_op.append("async_store_");
 
-  auto chunkat_node = (src_level >= dst_level) ? cast<AST::ChunkAt>(d.from)
-                                               : cast<AST::ChunkAt>(d.to);
-  assert(chunkat_node && "Unexpected !!!");
+  ptr<AST::Node> chunkat_node = nullptr;
 
-  fs << indent << dma_op << "(" << future_name << ", " << src_node_name << ", "
-     << dst_buffer_name << ", " << GenerateOffsetString(*chunkat_node);
+  if (isa<AST::Memory>(d.to))
+    chunkat_node = d.from;
+  else if (cast<AST::ChunkAt>(d.to)->positions)
+    chunkat_node = d.to;
+  else
+    choreo_unreachable("factor: unsupported chunkat.");
+
+  fs << indent << dma_op << "(" << future_name << ", " << src_buffer_name
+     << ", " << dst_buffer_name << ", " << GenerateOffsetString(*chunkat_node);
 
   if (auto pcfg = dyn_cast<PadConfig>(d.config)) {
     std::vector<size_t> layout(rank);

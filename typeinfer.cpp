@@ -521,8 +521,7 @@ bool TypeInference::Visit(AST::DMA &n) {
   n.SetType(nty);
 
   if (!n.future.empty()) {
-    AssignSymbolWithType(n.LOC(), n.future + ".span",
-                         MakeMDSpanType(fty->GetShape()));
+    AssignSymbolWithType(n.LOC(), n.future + ".span", sty->GetMDSpanType());
     AssignSymbolWithType(n.LOC(), n.future + ".data", sty);
     AssignSymbolWithType(n.LOC(), n.future, nty);
   }
@@ -616,6 +615,10 @@ bool TypeInference::Visit(AST::ChunkAt &n) {
       v->SetType(NodeType(*v));
     }
   }
+  // also update current node
+  n.SetType(
+      MakeSpannedType(fmty, cast<SpannedType>(n.GetType())->GetShape(), sto));
+
   return true;
 }
 

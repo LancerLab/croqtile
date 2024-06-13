@@ -1,0 +1,62 @@
+__co__ auto pad_func(s32 [4, 4] input) {
+  s32 [(input.span / 2 + 2) * 2] output;
+  // do linear copy from h to c
+  in_shape_c : input.span / 2;
+  ot_shape_c : output.span / 2;
+
+  // tile c to s, pad mode has larger s tile
+  in_shape_s : [in_shape_c + 2];
+  ot_shape_s : [ot_shape_c + 2];
+
+  // use less sips for lightweighted op
+  parallel p by 1 {
+    with tile_in_c in [input.span / in_shape_c],
+         tile_ot_c in [output.span / ot_shape_c] {
+      cdt_input = dma.copy input.chunkat(tile_in_c) => shared;
+      // NOTE: dma.pad with config parameters, pad low/high/mid, and pad value
+      sdt_input = dma.pad<{1, 1}, {1, 1}, {0, 0}, 0> cdt_input.data => local;
+      sdt_out = dma.pad<{1, 1}, {1, 1}, {0, 0}, 0> sdt_input.data => shared;
+      dma.copy sdt_out => output.chunkat(tile_ot_c);
+    }
+  }
+
+  return output;
+}
+
+int main() {
+  choreo::s32 input[4][4] = {
+    {1,1,1,1},
+    {2,2,2,2},
+    {3,3,3,3},
+    {4,4,4,4}
+  };
+  choreo::s32 output[8][8] = {
+    {0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0},
+    {0,0,1,1,1,1,0,0},
+    {0,0,2,2,2,2,0,0},
+    {0,0,3,3,3,3,0,0},
+    {0,0,4,4,4,4,0,0},
+    {0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0},
+  };
+  auto res = pad_func(choreo::make_spanview<2, choreo::s32>((int*)input,  {4, 4}));
+
+  std::cout << res.shape()[0] << std::endl;
+  std::cout << res.shape()[1] << std::endl;
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+      std::cout << "i: " << i << ", j: " << j << "\n";
+      std::cout << "ref: " << output[i][j] << ", res: " << res[i][j] << "\n";
+      if (res[i][j] != output[i][j]) {
+        std::cout << "expected: " << output[i][j] << ", actual: " << res[i][j] << "\n";
+        abort();
+      }
+    }
+
+  std::cout << "Test Passed\n" << std::endl;
+
+  return 1;
+}
+
