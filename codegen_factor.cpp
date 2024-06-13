@@ -19,6 +19,12 @@
 using namespace Choreo;
 using namespace Choreo::Factor;
 
+bool FactorCodeGen::ContainsLoopVar(const std::string &iv) const {
+  for (auto &loop_var : loop_vars)
+    if (loop_var.count(iv)) return true;
+  return false;
+}
+
 std::string Shape::EmitTo(Target target) const {
   (void)target;
   std::ostringstream _os;
@@ -58,6 +64,7 @@ using namespace factor;
     parallel_level++;
     // this->incrementIndent();
   } else if (isa<AST::ForeachBlock>(&n)) {
+    loop_vars.push_back({});
     // this->incrementIndent();
   }
   return 0;
@@ -136,14 +143,18 @@ fi
     this->decrementIndent();
     fs << this->indent << "}); // end of choreo-factor kernel function\n";
   } else if (auto f = dyn_cast<AST::ForeachBlock>(&n)) {
+    // erase the loop variables
+    assert(!loop_vars.empty());
+    loop_vars.pop_back();
+
     for (auto id : f->ivs->AllValues()) {
       auto name = cast<AST::Identifier>(id)->name;
       int dec_by = 1;
       bool multiple_bounds = cur_bounded_vars.count(name);
       if (multiple_bounds) dec_by = cur_bounded_vars[name].size();
       for (int i = 0; i < dec_by; ++i) {
-        this->decrementIndent();
-        fs << this->indent << "}); // end of choreo-foreach block";
+        decrementIndent();
+        fs << indent << "}); // end of choreo-foreach block";
         if (multiple_bounds) fs << " on '" << cur_bounded_vars[name][i] << "'";
         fs << ".\n";
       }
@@ -312,7 +323,10 @@ bool FactorCodeGen::Visit(AST::ParallelBy &by) {
   fs << "}, {" << ((void_return) ? "" : "output_type")
      << "}, [&](auto args, auto results) {\n";
   this->incrementIndent();
+  // generate a reference name of the output
+  if (!void_return) fs << indent << "auto & $$out$$ = results[0];\n";
   fs << this->indent << "auto thread_id = thread_id_();\n";
+  fs << this->indent << "auto block_id = block_id_();\n";
   alloc_pos = fs.str().size();
   alloc_indent = indent;
 
@@ -330,6 +344,9 @@ bool FactorCodeGen::Visit(AST::WhereBind &n) {
 
 // CLEAN
 bool FactorCodeGen::Visit(AST::WithIn &n) {
+  assert(n.with_matchers && "expect matcher to be exist.");
+
+  // associate with to the matcher.
   if (n.with && n.with_matchers) {
     std::vector<std::string> matchers;
     for (auto mn : n.with_matchers->AllValues()) {
@@ -337,6 +354,13 @@ bool FactorCodeGen::Visit(AST::WithIn &n) {
     }
     cur_bounded_vars.emplace(n.with->name, matchers);
   }
+
+  for (auto mn : n.with_matchers->AllValues()) {
+    auto mname = cast<AST::Identifier>(mn)->name;
+    fs << indent << "var_ " << mname << "(IntType(32));\n";
+    fs << indent << mname << " = 0;\n";
+  }
+
   return true;
 };
 
@@ -385,13 +409,13 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   auto future_name = d.future;
   if (future_name.empty()) {
     static size_t future_count = 0;
-    future_name = "__choreo_anon_future" + std::to_string(future_count++);
+    future_name = "__choreo_anon_fut__" + std::to_string(future_count++);
   }
 
   // cook a valid dst buffer name
-  auto dst_node_name = (isa<AST::Memory>(d.to))
-                           ? future_name + "_buffer"
-                           : STR(cast<AST::ChunkAt>(d.to)->data);
+  auto dst_buffer_name = (isa<AST::Memory>(d.to))
+                             ? future_name + "_buffer"
+                             : STR(cast<AST::ChunkAt>(d.to)->data);
 
   // use source symbol as the buffer name
   std::string src_node_name = STR(cast<AST::ChunkAt>(d.from)->data);
@@ -416,7 +440,7 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
         {Storage::GLOBAL, "DRAMType"},
     };
     // buffer in another stream
-    alloc_in_fs << alloc_indent << "auto " << dst_node_name << " = alloc_("
+    alloc_in_fs << alloc_indent << "auto " << dst_buffer_name << " = alloc_("
                 << sto2alloc.at(mem_node->Get()) << "("
                 << factor_typestr(sty->ElementType()) << ","
                 << ReplaceRuntimeNames(LSTR(dst_shape), false) << "));\n";
@@ -442,9 +466,11 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
           std::string iv_str;
           if (within_map.count(bvn))  // with-matcher existed
             iv_str = within_map[bvn][it_idx];
-          else {
+          else
             iv_str = bvn;
-          }
+
+          // prefix iteration variable
+          if (ContainsLoopVar(iv_str)) iv_str = "iv_" + iv_str;
 
           // special handling for the parallel tiling factor
           auto l = RemovePrefixOrNull("pv:", bity->GetNote());
@@ -472,11 +498,6 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   int arg_idx = strtab.GetSymbolIndex(src_node_name);
   src_node_name =
       arg_idx < 0 ? src_node_name : "args[" + std::to_string(arg_idx) + "]";
-  arg_idx = strtab.GetSymbolIndex(dst_node_name);
-  // TODO(albert): need a param table to resolve hardcode, connecting symbol
-  // with results, and symbols with args
-  dst_node_name = arg_idx < 0 ? dst_node_name
-                              : "results[" + std::to_string(arg_idx - 2) + "]";
 
   // decide the dma allocation type
   auto DMATypeString = [](int src_lvl, int dst_lvl) {
@@ -502,8 +523,8 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
                                                : cast<AST::ChunkAt>(d.to);
   assert(chunkat_node && "Unexpected !!!");
 
-  fs << this->indent << dma_op << "(" << future_name << ", " << src_node_name
-     << ", " << dst_node_name << ", " << GenerateOffsetString(*chunkat_node);
+  fs << indent << dma_op << "(" << future_name << ", " << src_node_name << ", "
+     << dst_buffer_name << ", " << GenerateOffsetString(*chunkat_node);
 
   if (auto pcfg = dyn_cast<PadConfig>(d.config)) {
     std::vector<size_t> layout(rank);
@@ -614,12 +635,16 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
 
     // synthesise the emitting string
     if (iv_type->Dims() == 1) {
-      fs << this->indent << "for_(0, " << std::to_string(ub_value) << ", "
+      fs << this->indent << "for_(" << id->name << ", "
+         << std::to_string(ub_value) << ", "
          << 1 /* TODO(albert): need fix, unit stride is hardcoded for now*/
-         << ", [&](auto " << id->name << ") {\n";
-      this->incrementIndent();
-      for (auto bind : bind_info.GetBinds(SSTab().ScopedName(id->name))) {
-        fs << indent << InScopeName(bind) << " = " << id->name << ";\n";
+         << ", [&](auto iv_" << id->name << ") {\n";
+      incrementIndent();
+      loop_vars.back().insert(id->name);
+      for (auto bind : bind_info.GetBinds(InScopeName(id->name))) {
+        loop_vars.back().insert(SSTab().UnScopedName(bind));
+        fs << indent << "iv_" << SSTab().UnScopedName(bind) << " = iv_"
+           << id->name << ";\n";
       }
     } else {
       assert(cur_bounded_vars.count(id->name) &&
@@ -627,14 +652,18 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
       assert((cur_bounded_vars[id->name].size() == iv_bounds.Dims()) &&
              "can not find the bounded name.");
       for (auto name : cur_bounded_vars[id->name]) {
-        fs << this->indent << "for_(0, " << std::to_string(ub_value) << ", "
+        fs << this->indent << "for_(" << name << ", "
+           << std::to_string(ub_value) << ", "
            << 1 /* TODO(albert): need fix, unit stride is hardcoded for now*/
-           << ", [&](auto " << name << ") {\n";
-        this->incrementIndent();
+           << ", [&](auto iv_" << name << ") {\n";
+        std::string scoped_var = InScopeName(id->name);
+        loop_vars.back().insert(id->name);
+        incrementIndent();
         for (auto bind : bind_info.GetBinds(InScopeName(name))) {
           auto bname = SSTab().UnScopedName(bind);
+          loop_vars.back().insert(bname);
           if (bname != id->name)
-            fs << indent << "auto " << bname << " = " << name << ";\n";
+            fs << indent << "auto iv_" << bname << " = iv_" << name << ";\n";
         }
       }
     }

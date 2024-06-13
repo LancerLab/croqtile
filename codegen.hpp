@@ -36,6 +36,9 @@ struct FactorCodeGen : public CodeGenerator {
 
   ValBind::BindInfo<std::string> bind_info;
 
+  std::vector<std::unordered_set<std::string>> loop_vars;  // the loop variables
+  bool ContainsLoopVar(const std::string &) const;
+
  private:
   // buffer the kernel code
   std::ostringstream ks;
