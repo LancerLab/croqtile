@@ -339,6 +339,19 @@ bool FactorCodeGen::Visit(AST::WhereBind &n) {
   auto rid = cast<AST::Identifier>(n.rhs);
   bind_info.AddBind(SSTab().ScopedName(lid->name),
                     SSTab().ScopedName(rid->name));
+
+  // also adds the value binding for the with-matchers
+  if (cur_bounded_vars.count(lid->name)) {
+    assert(cur_bounded_vars.count(rid->name));
+    auto lbvs = cur_bounded_vars[lid->name];
+    auto rbvs = cur_bounded_vars[rid->name];
+    assert(lbvs.size() == rbvs.size());
+
+    for (size_t i = 0; i < lbvs.size(); ++i) {
+      bind_info.AddBind(SSTab().ScopedName(lbvs[i]),
+                        SSTab().ScopedName(rbvs[i]));
+    }
+  }
   return true;
 }
 
@@ -651,7 +664,8 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
       incrementIndent();
       loop_vars.back().insert(id->name);
       for (auto bind : bind_info.GetBinds(InScopeName(id->name))) {
-        loop_vars.back().insert(SSTab().UnScopedName(bind));
+        auto bname = SSTab().UnScopedName(bind);
+        loop_vars.back().insert(bname);
         fs << indent << "auto iv_" << SSTab().UnScopedName(bind) << " = iv_"
            << id->name << ";\n";
       }
@@ -665,13 +679,13 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
            << std::to_string(ub_value) << ", "
            << 1 /* TODO(albert): need fix, unit stride is hardcoded for now*/
            << ", [&](auto iv_" << name << ") {\n";
-        std::string scoped_var = InScopeName(id->name);
-        loop_vars.back().insert(id->name);
+        std::string scoped_var = InScopeName(name);
+        loop_vars.back().insert(name);
         incrementIndent();
         for (auto bind : bind_info.GetBinds(InScopeName(name))) {
           auto bname = SSTab().UnScopedName(bind);
           loop_vars.back().insert(bname);
-          if (bname != id->name)
+          if (bname != name)
             fs << indent << "auto iv_" << bname << " = iv_" << name << ";\n";
         }
       }
