@@ -1,0 +1,21 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ auto illegal_mdspan(f32 [3, ?, 18] a, s16 [?, 4] b) {
+  c = 3;
+  foreach c {}
+  foreach a {};
+  foreach f {};
+  with idx = {x, y} in b.span {
+   foreach c {}
+   foreach x, y {}
+   foreach idx {}
+  }
+  
+}
+
+// CHECK: expecting a bounded type for iteration variable 'c' but got 'int'.
+// CHECK: expecting a bounded type for iteration variable 'a' but got 'f32 mdspan<3> []'.
+// CHECK: symbol `f' is used before declaration.
+// CHECK: expecting a bounded type for iteration variable 'f' but got 'invalid'.
+// CHECK: expecting a bounded type for iteration variable 'c' but got 'int'.
+// CHECK: Totally 5 errors have been detected.
