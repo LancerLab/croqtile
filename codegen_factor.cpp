@@ -652,7 +652,7 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
       loop_vars.back().insert(id->name);
       for (auto bind : bind_info.GetBinds(InScopeName(id->name))) {
         loop_vars.back().insert(SSTab().UnScopedName(bind));
-        fs << indent << "iv_" << SSTab().UnScopedName(bind) << " = iv_"
+        fs << indent << "auto iv_" << SSTab().UnScopedName(bind) << " = iv_"
            << id->name << ";\n";
       }
     } else {

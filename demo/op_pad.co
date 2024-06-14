@@ -1,4 +1,4 @@
-__co__ auto pad_func(s32 [4, 4] input) {
+__co__ auto pad_func(s32 [8, 8] input) {
   s32 [(input.span / 2 + 2) * 2] output;
   // do linear copy from h to c
   in_shape_c : input.span / 2;
@@ -10,13 +10,28 @@ __co__ auto pad_func(s32 [4, 4] input) {
 
   // use less sips for lightweighted op
   parallel p by 1 {
-    with tile_in_c in [input.span / in_shape_c],
-         tile_ot_c in [output.span / ot_shape_c] {
-      cdt_input = dma.copy input.chunkat(tile_in_c) => shared;
-      // NOTE: dma.pad with config parameters, pad low/high/mid, and pad value
-      sdt_input = dma.pad<{1, 1}, {1, 1}, {0, 0}, 0> cdt_input.data => local;
-      sdt_out = dma.pad<{1, 1}, {1, 1}, {0, 0}, 0> sdt_input.data => shared;
-      dma.copy sdt_out => output.chunkat(tile_ot_c);
+//    with tile_in_c in [input.span / in_shape_c],  // [2, 2]
+//         tile_ot_c in [output.span / ot_shape_c]  // [2, 2]
+//    where tile_in_c <-> tile_ot_c {
+//      foreach tile_in_c {
+//        cdt_input = dma.copy input.chunkat(tile_in_c) => shared;
+//        // NOTE: dma.pad with config parameters, pad low/high/mid, and pad value
+//        sdt_input = dma.pad<{1, 1}, {1, 1}, {0, 0}, 0> cdt_input.data => local;
+//        //sdt_out = dma.pad<{1, 1}, {1, 1}, {0, 0}, 0> sdt_input.data => shared;
+//        sdt_out = dma.copy sdt_input.data => shared;
+//        dma.copy sdt_out => output.chunkat(tile_ot_c);
+//      }
+//    }
+    with {tile_in_c_x, tile_in_c_y} in [input.span / in_shape_c],  // [2, 2]
+         {tile_ot_c_x, tile_ot_c_y} in [output.span / ot_shape_c]  // [2, 2]
+    where tile_in_c_x <-> tile_ot_c_x, tile_in_c_y <-> tile_ot_c_y {
+      foreach tile_in_c_x, tile_in_c_y {
+        cdt_input = dma.copy input.chunkat(tile_in_c_x, tile_in_c_y) => shared;
+        // NOTE: dma.pad with config parameters, pad low/high/mid, and pad value
+        sdt_input = dma.pad<{1, 1}, {1, 1}, {0, 0}, 0> cdt_input.data => local;
+        sdt_out = dma.copy sdt_input.data => shared;
+        dma.copy sdt_out => output.chunkat(tile_ot_c_x, tile_ot_c_y);
+      }
     }
   }
 
@@ -24,38 +39,60 @@ __co__ auto pad_func(s32 [4, 4] input) {
 }
 
 int main() {
-  choreo::s32 input[4][4] = {
-    {1,1,1,1},
-    {2,2,2,2},
-    {3,3,3,3},
-    {4,4,4,4}
+  choreo::s32 input[8][8] = {
+    {1,1,1,1,1,1,1,1},
+    {2,2,2,2,2,2,2,2},
+    {3,3,3,3,3,3,3,3},
+    {4,4,4,4,4,4,4,4},
+    {5,5,5,5,5,5,5,5},
+    {6,6,6,6,6,6,6,6},
+    {7,7,7,7,7,7,7,7},
+    {8,8,8,8,8,8,8,8},
   };
-  choreo::s32 output[8][8] = {
-    {0,0,0,0,0,0,0,0},
-    {0,0,0,0,0,0,0,0},
-    {0,0,1,1,1,1,0,0},
-    {0,0,2,2,2,2,0,0},
-    {0,0,3,3,3,3,0,0},
-    {0,0,4,4,4,4,0,0},
-    {0,0,0,0,0,0,0,0},
-    {0,0,0,0,0,0,0,0},
+  choreo::s32 output[12][12] = {
+    {0,0,0,0,0,0,0,0,0,0,0,0},
+    {0,1,1,1,1,0,0,1,1,1,1,0},
+    {0,2,2,2,2,0,0,2,2,2,2,0},
+    {0,3,3,3,3,0,0,3,3,3,3,0},
+    {0,4,4,4,4,0,0,4,4,4,4,0},
+    {0,0,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0,0,0},
+    {0,5,5,5,5,0,0,5,5,5,5,0},
+    {0,6,6,6,6,0,0,6,6,6,6,0},
+    {0,7,7,7,7,0,0,7,7,7,7,0},
+    {0,8,8,8,8,0,0,8,8,8,8,0},
+    {0,0,0,0,0,0,0,0,0,0,0,0},
   };
-  auto res = pad_func(choreo::make_spanview<2, choreo::s32>((int*)input,  {4, 4}));
+  auto res = pad_func(choreo::make_spanview<2, choreo::s32>((int*)input, {8, 8}));
 
   std::cout << res.shape()[0] << std::endl;
   std::cout << res.shape()[1] << std::endl;
+
+  bool fail = false;
   // verfication
-  for (size_t i = 0; i < res.shape()[0]; ++i)
+  for (size_t i = 0; i < res.shape()[0]; ++i) {
     for (size_t j = 0; j < res.shape()[1]; ++j) {
+#if CHECK_ALL
       std::cout << "i: " << i << ", j: " << j << "\n";
       std::cout << "ref: " << output[i][j] << ", res: " << res[i][j] << "\n";
       if (res[i][j] != output[i][j]) {
         std::cout << "expected: " << output[i][j] << ", actual: " << res[i][j] << "\n";
         abort();
       }
+#else
+      std::cout << res[i][j];
+      if (res[i][j] != output[i][j]) {
+        std::cout << "|" << output[i][j] << ", ";
+        fail = true;
+      } else
+        std::cout << ",   ";
+#endif
     }
+    std::cout << "\n";
+  }
 
-  std::cout << "Test Passed\n" << std::endl;
+  if (!fail)
+    std::cout << "Test Passed\n" << std::endl;
 
   return 1;
 }

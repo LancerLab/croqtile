@@ -644,13 +644,11 @@ class ShapeInference : public Visitor {
         vn.GetValueNumberOfSignature(SSTab().ScopedName("@" + l_id->name));
     auto r_vn =
         vn.GetValueNumberOfSignature(SSTab().ScopedName("@" + r_id->name));
-    auto& bind_set = vn.GetBindSet(r_vn);
-    if (bind_set.count(l_vn)) {
-      Error(n.LOC(), "can not bind '" + l_id->name + "' with '" + r_id->name +
-                         "' since their bound are already aliased.");
-      error_count++;
-      return false;
-    }
+
+    // TODO: sometimes the lhs would have same valno with existing one, which is
+    // allowed. However, for runtime valued bound, they may have different
+    // bound. The problem here is how to judge if the upper bound of bounded
+    // variables are actually illegal? (e.g, different static upper bound)
     vn.BindValueNumbers(l_vn, r_vn);
     return true;
   }
