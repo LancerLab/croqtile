@@ -591,7 +591,12 @@ bool FactorCodeGen::Visit(AST::Call &c) {
     assert(arg && "Invalid kernel call arg!");
     switch (arg->GetForm()) {
       case AST::Expr::Reference:
-        fs << STR(arg->GetR()) << ".addr_()";
+        try {
+          std::stoi(STR(arg->GetR()));
+          fs << STR(arg->GetR());
+        } catch (const std::invalid_argument& e) {
+          fs << STR(arg->GetR()) << ".addr_()";
+        }
         break;
       case AST::Expr::Unary:
         if (arg->op == "sizeof") {
