@@ -863,6 +863,21 @@ bool EarlySemantics::Visit(AST::Return& n) {
 
 bool EarlySemantics::Visit(AST::ForeachBlock& n) {
   __TRACE_EACH_VISIT__(n)
+  for (auto & i : n.ivs->AllValues()) {
+    if (auto id = dyn_cast<AST::Identifier>(i)) {
+      auto ity = NodeType(*id);
+      if (!(IsBoundedType(ity))) {
+        Error(n.LOC(), "expecting a bounded type for iteration variable '" + id->name + "' but got '" + PSTR(ity) + "'.");
+        error_count++;
+      }
+    } else {
+      auto ity = i->GetType();
+      if (!(IsBoundedType(ity))) {
+        Error(n.LOC(), "expecting a bounded type but got '" + PSTR(ity) + "'.");
+        error_count++;
+      }
+    }
+  }
   return true;
 }
 

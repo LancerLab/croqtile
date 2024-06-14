@@ -157,6 +157,7 @@ void Call::accept(Choreo::Visitor& v) {
 
 void ForeachBlock::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
+  ivs->accept(v);
   v.Visit(*this);
   stmts->accept(v);
   v.AfterVisit(*this);

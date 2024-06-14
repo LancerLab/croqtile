@@ -357,6 +357,7 @@ statements
         $1->Append($2);
         $$ = $1;
       }
+    | statements SEMCOL { $$ = $1; }
     ;
 
 statement
