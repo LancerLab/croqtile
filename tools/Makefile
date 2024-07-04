@@ -1,0 +1,162 @@
+TOOLCHAIN_DIR:=$(PWD)
+
+#------------------------- GCU-2.x -------------------------#
+GCU_REL_PATH=.
+GCU_CMP_NAME=240524-gcu-compiler.tgz
+GCU_CMP_PKG = $(TOOLCHAIN_DIR)/$(GCU_CMP_NAME)
+GCU_CMP_PKG_MD5:=f6e0b029763acd1f66a192542a068ae5
+CUR_GCU_CMP_PKG_MD5:=$(shell md5sum $(GCU_CMP_PKG) 2>/dev/null| cut -d ' ' -f 1)
+
+check-gcu-sfc-kit:
+	@if [ "$(CUR_GCU_CMP_PKG_MD5)" != "$(GCU_CMP_PKG_MD5)"  ]; then \
+		echo "MD5 hash does not match. Downloading the GCU compiler package..."; \
+		$(MAKE) download-gcu-sfc-kit; \
+	else \
+		echo "$(GCU_CMP_PKG) MD5 hash matches. No need to download."; \
+	fi
+
+download-gcu-sfc-kit:
+	mkdir -p $(TOOLCHAIN_DIR) ;\
+	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU_REL_PATH)/$(GCU_CMP_NAME) -o $(GCU_CMP_PKG);\
+
+install-gcu-sfc-kit:
+	mkdir -p $(TOOLCHAIN_DIR) ;\
+	cd $(TOOLCHAIN_DIR) && tar -zvxf $(GCU_CMP_PKG);
+
+setup-gcu-sfc-kit: check-gcu-sfc-kit
+	@if [ "$(CUR_GCU_CMP_PKG_MD5)" != "$(GCU_CMP_PKG_MD5)"  ]; then \
+	    $(MAKE) install-gcu-sfc-kit; \
+	fi
+
+GCU_PLATFORM_NAME=TopsPlatform_1.0.1.6-a1e560_deb_amd64.run
+GCU_PLATFORM_PKG=$(TOOLCHAIN_DIR)/$(GCU_PLATFORM_NAME)
+GCU_PLATFORM_PKG_MD5:=216051f60566227b6b95bf7502a70178
+CUR_GCU_PLATFORM_PKG_MD5:=$(shell md5sum $(GCU_PLATFORM_PKG) 2>/dev/null| cut -d ' ' -f 1)
+
+check-gcu-platform-kit:
+	@if [ "$(CUR_GCU_PLATFORM_PKG_MD5)" != "$(GCU_PLATFORM_PKG_MD5)"  ]; then \
+		echo "MD5 hash does not match. Downloading the GCU compiler package..."; \
+		$(MAKE) download-gcu-platform-kit; \
+	else \
+		echo "$(GCU_PLATFORM_PKG) MD5 hash matches. No need to download."; \
+	fi
+
+download-gcu-platform-kit:
+	mkdir -p $(TOOLCHAIN_DIR) ;\
+	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU_REL_PATH)/$(GCU_PLATFORM_NAME) -o $(GCU_PLATFORM_PKG);\
+	chmod +x $(GCU_PLATFORM_PKG);
+
+install-gcu-platform-kit:
+	mkdir -p $(TOOLCHAIN_DIR) ;\
+	$(GCU_PLATFORM_PKG) -y -C topsruntime --install-dir $(TOOLCHAIN_DIR); \
+	$(GCU_PLATFORM_PKG) -y -C topscc --install-dir $(TOOLCHAIN_DIR); \
+	rsync -av $(TOOLCHAIN_DIR)/opt/tops/* $(TOOLCHAIN_DIR); \
+	rm -fr $(TOOLCHAIN_DIR)/opt;
+
+setup-gcu-platform-kit: check-gcu-platform-kit
+	@if [ "$(CUR_GCU_PLATFORM_PKG_MD5)" != "$(GCU_PLATFORM_PKG_MD5)"  ]; then \
+	    $(MAKE) install-gcu-platform-kit; \
+	fi
+
+GCU_FACTOR_NAME=topsfactor_3.0.1-1_amd64.deb
+GCU_FACTOR_PKG = $(TOOLCHAIN_DIR)/$(GCU_FACTOR_NAME)
+GCU_FACTOR_PKG_MD5:=03a257e7069cc4bb42270103e3616438
+CUR_GCU_FACTOR_PKG_MD5:=$(shell md5sum $(GCU_FACTOR_PKG) 2>/dev/null| cut -d ' ' -f 1)
+
+check-gcu-factor-kit:
+	@if [ "$(CUR_GCU_FACTOR_PKG_MD5)" != "$(GCU_FACTOR_PKG_MD5)"  ]; then \
+		echo "MD5 hash does not match. Downloading the GCU compiler package..."; \
+		$(MAKE) download-gcu-factor-kit; \
+	else \
+		echo "$(GCU_FACTOR_PKG) MD5 hash matches. No need to download."; \
+	fi
+
+download-gcu-factor-kit:
+	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU_REL_PATH)/$(GCU_FACTOR_NAME) -o $(GCU_FACTOR_PKG);\
+
+install-gcu-factor-kit:
+	dpkg-deb -x $(GCU_FACTOR_PKG) $(TOOLCHAIN_DIR)/; \
+	rsync -av $(TOOLCHAIN_DIR)/usr/* $(TOOLCHAIN_DIR); \
+	rsync -av $(TOOLCHAIN_DIR)/local/* $(TOOLCHAIN_DIR); \
+	rm -fr $(TOOLCHAIN_DIR)/usr/;
+	rm -fr $(TOOLCHAIN_DIR)/local/;
+
+setup-gcu-factor-kit: check-gcu-factor-kit
+	@if [ "$(CUR_GCU_FACTOR_PKG_MD5)" != "$(GCU_FACTOR_PKG_MD5)"  ]; then \
+	    $(MAKE) install-gcu-factor-kit; \
+	fi
+
+#------------------------- GCU-2.x -------------------------#
+GCU3_REL_PATH=240617/gcu30
+GCU3_PLATFORM_NAME=TopsPlatform_1.0.7.2-976607_deb_amd64.run
+GCU3_PLATFORM_PKG=$(TOOLCHAIN_DIR)/$(GCU3_PLATFORM_NAME)
+GCU3_PLATFORM_PKG_MD5:=765431635b89bcc55eca66cdf2a35e7a
+CUR_GCU3_PLATFORM_PKG_MD5:=$(shell md5sum $(GCU3_PLATFORM_PKG) 2>/dev/null| cut -d ' ' -f 1)
+
+check-gcu3-platform-kit:
+	@if [ "$(CUR_GCU3_PLATFORM_PKG_MD5)" != "$(GCU3_PLATFORM_PKG_MD5)"  ]; then \
+		echo "MD5 hash does not match. Downloading the GCU compiler package..."; \
+		$(MAKE) download-gcu3-platform-kit; \
+	else \
+		echo "$(GCU3_PLATFORM_PKG) MD5 hash matches. No need to download."; \
+	fi
+
+download-gcu3-platform-kit:
+	mkdir -p $(TOOLCHAIN_DIR) ;\
+	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU3_REL_PATH)/$(GCU3_PLATFORM_NAME) -o $(GCU3_PLATFORM_PKG);\
+	chmod +x $(GCU3_PLATFORM_PKG);
+
+install-gcu3-platform-kit:
+	mkdir -p $(TOOLCHAIN_DIR) ;\
+	$(GCU3_PLATFORM_PKG) -y -C topsruntime --install-dir $(TOOLCHAIN_DIR); \
+	$(GCU3_PLATFORM_PKG) -y -C topscc --install-dir $(TOOLCHAIN_DIR); \
+	rsync -av $(TOOLCHAIN_DIR)/opt/tops/* $(TOOLCHAIN_DIR); \
+	rm -fr $(TOOLCHAIN_DIR)/opt;
+
+setup-gcu3-platform-kit: check-gcu3-platform-kit
+	@if [ "$(CUR_GCU3_PLATFORM_PKG_MD5)" != "$(GCU3_PLATFORM_PKG_MD5)"  ]; then \
+	    $(MAKE) install-gcu3-platform-kit; \
+	fi
+
+GCU3_FACTOR_NAME=topsfactor_3.1.0-1_amd64.deb
+GCU3_FACTOR_PKG = $(TOOLCHAIN_DIR)/$(GCU3_FACTOR_NAME)
+GCU3_FACTOR_PKG_MD5:=24bf22bcf9d87ce549c271aaa02d6e94
+CUR_GCU3_FACTOR_PKG_MD5:=$(shell md5sum $(GCU3_FACTOR_PKG) 2>/dev/null| cut -d ' ' -f 1)
+
+check-gcu3-factor-kit:
+	@if [ "$(CUR_GCU3_FACTOR_PKG_MD5)" != "$(GCU3_FACTOR_PKG_MD5)"  ]; then \
+		echo "MD5 hash does not match. Downloading the GCU compiler package..."; \
+		$(MAKE) download-gcu3-factor-kit; \
+	else \
+		echo "$(GCU3_FACTOR_PKG) MD5 hash matches. No need to download."; \
+	fi
+
+download-gcu3-factor-kit:
+	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU3_REL_PATH)/$(GCU3_FACTOR_NAME) -o $(GCU3_FACTOR_PKG);\
+
+install-gcu3-factor-kit:
+	dpkg-deb -x $(GCU3_FACTOR_PKG) $(TOOLCHAIN_DIR)/; \
+	rsync -av $(TOOLCHAIN_DIR)/usr/* $(TOOLCHAIN_DIR); \
+	rsync -av $(TOOLCHAIN_DIR)/local/* $(TOOLCHAIN_DIR); \
+	rm -fr $(TOOLCHAIN_DIR)/usr/;
+	rm -fr $(TOOLCHAIN_DIR)/local/;
+
+setup-gcu3-factor-kit: check-gcu3-factor-kit
+	@if [ "$(CUR_GCU3_FACTOR_PKG_MD5)" != "$(GCU3_FACTOR_PKG_MD5)"  ]; then \
+	    $(MAKE) install-gcu3-factor-kit; \
+	fi
+
+#-----------------------------------------------------------#
+
+gcu2-kmd: check-gcu-platform-kit
+	sudo $(GCU_PLATFORM_PKG) -y -C enflame
+
+gcu3-kmd: check-gcu3-platform-kit
+	sudo $(GCU3_PLATFORM_PKG) -y -C enflame
+
+gcu2-kit: setup-gcu-sfc-kit setup-gcu-platform-kit setup-gcu-factor-kit
+gcu3-kit: setup-gcu3-platform-kit setup-gcu3-factor-kit
+
+gcu2-install: install-gcu-sfc-kit install-gcu-platform-kit install-gcu-factor-kit
+gcu3-install: install-gcu3-platform-kit install-gcu3-factor-kit
+

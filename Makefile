@@ -70,7 +70,7 @@ clean:
 	rm -f *.cc *.hh *.inc *.o $(TEST_TARGETS) tests/*.result
 
 clobber: clean
-	rm -fr $(TOOLCHAIN_DIR)/*
+	find $(TOOLCHAIN_DIR) -mindepth 1 ! -name 'Makefile' -print0 | xargs -0 rm -rf
 
 lines:
 	echo "source files:"; wc -l *.cpp *.yy *.l *.hpp Makefile utils/*.h; \
@@ -93,116 +93,48 @@ FILECHECK:=$(TOOLCHAIN_DIR)/bin/FileCheck
 PACKAGE_NAME=choreo_toolchain_240703.tgz
 SUPPORT_PKG =$(TOOLCHAIN_DIR)/$(PACKAGE_NAME)
 PACKAGE_MD5:=2b630f549063d8fbfbe31ac23984ea6d
+CUR_PKG_MD5:=$(shell md5sum $(SUPPORT_PKG) 2>/dev/null| cut -d ' ' -f 1)
 BISON_ENV:=BISON_PKGDATADIR=$(TOOLCHAIN_DIR)/shared/bison/
 BISON:=$(BISON_ENV) $(BISON_BIN)
 
-support-pkg:
-	@if [ "$(shell md5sum $(SUPPORT_PKG) | cut -d ' ' -f 1)" != "$(PACKAGE_MD5)"  ]; then \
+check-choreo-kit:
+	@if [ "$(CUR_PKG_MD5)" != "$(PACKAGE_MD5)"  ]; then \
 		echo "MD5 hash does not match. Downloading the supporting package..."; \
-		curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(PACKAGE_NAME) -o $(SUPPORT_PKG);\
-		mkdir -p $(TOOLCHAIN_DIR) ;\
-		cd $(TOOLCHAIN_DIR) && tar -zvxf $(SUPPORT_PKG); \
-		chmod +x $(BISON_BIN); \
+		$(MAKE) download-choreo-kit; \
 	else \
 		echo "$(SUPPORT_PKG) MD5 hash matches. No need to download."; \
 	fi;
 
-install-support-pkg:
-	mkdir -p $(TOOLCHAIN_DIR) ;\
+download-choreo-kit:
+	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(PACKAGE_NAME) -o $(SUPPORT_PKG);\
+
+install-choreo-kit: check-choreo-kit
 	cd $(TOOLCHAIN_DIR) && tar -zvxf $(SUPPORT_PKG); \
 	chmod +x $(BISON_BIN)
 
-GCU_REL_PATH=.
-GCU_CMP_NAME=240524-gcu-compiler.tgz
-GCU_CMP_PKG = $(TOOLCHAIN_DIR)/$(GCU_CMP_NAME)
-GCU_CMP_PKG_MD5:=f6e0b029763acd1f66a192542a068ae5
-CUR_GCU_CMP_PKG_MD5:=$(shell md5sum $(GCU_CMP_PKG) 2>/dev/null| cut -d ' ' -f 1)
+setup-choreo-kit: check-choreo-kit
+	@if [ "$(CUR_PKG_MD5)" != "$(PACKAGE_MD5)"  ]; then \
+	  $(MAKE) install-choreo-kit; \
+	fi;
 
-check-gcu-sfc-pkg:
-	@if [ "$(CUR_GCU_CMP_PKG_MD5)" != "$(GCU_CMP_PKG_MD5)"  ]; then \
-		echo "MD5 hash does not match. Downloading the GCU compiler package..."; \
-		$(MAKE) download-gcu-sfc-pkg; \
-	else \
-		echo "$(GCU_CMP_PKG) MD5 hash matches. No need to download."; \
-	fi
+setup: setup-choreo-kit
+	git submodule update --init --recursive;\
 
-download-gcu-sfc-pkg:
-	mkdir -p $(TOOLCHAIN_DIR) ;\
-	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU_REL_PATH)/$(GCU_CMP_NAME) -o $(GCU_CMP_PKG);\
+setup-gcu2: setup
+	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu2-kit FTP_SERVER=$(FTP_SERVER)
 
-install-gcu-sfc-pkg:
-	mkdir -p $(TOOLCHAIN_DIR) ;\
-	cd $(TOOLCHAIN_DIR) && tar -zvxf $(GCU_CMP_PKG);
+setup-gcu3: setup
+	git submodule update --init --recursive;\
+	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu3-kit FTP_SERVER=$(FTP_SERVER)
 
-setup-gcu-sfc-pkg: check-gcu-sfc-pkg
-	@if [ "$(CUR_GCU_CMP_PKG_MD5)" != "$(GCU_CMP_PKG_MD5)"  ]; then \
-	    $(MAKE) install-gcu-sfc-pkg; \
-	fi
+resetup-gcu2: install-choreo-kit
+	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu2-install FTP_SERVER=$(FTP_SERVER)
 
-GCU_PLATFORM_NAME=TopsPlatform_1.0.1.6-a1e560_deb_amd64.run
-GCU_PLATFORM_PKG=$(TOOLCHAIN_DIR)/$(GCU_PLATFORM_NAME)
-GCU_PLATFORM_PKG_MD5:=216051f60566227b6b95bf7502a70178
-CUR_GCU_PLATFORM_PKG_MD5:=$(shell md5sum $(GCU_PLATFORM_PKG) 2>/dev/null| cut -d ' ' -f 1)
+resetup-gcu3: install-choreo-kit
+	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu3-install FTP_SERVER=$(FTP_SERVER)
 
-check-gcu-platform-pkg:
-	@if [ "$(CUR_GCU_PLATFORM_PKG_MD5)" != "$(GCU_PLATFORM_PKG_MD5)"  ]; then \
-		echo "MD5 hash does not match. Downloading the GCU compiler package..."; \
-		$(MAKE) download-gcu-platform-pkg; \
-	else \
-		echo "$(GCU_PLATFORM_PKG) MD5 hash matches. No need to download."; \
-	fi
+gcu2-kmd:
+	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu2-kmd FTP_SERVER=$(FTP_SERVER)
 
-download-gcu-platform-pkg:
-	mkdir -p $(TOOLCHAIN_DIR) ;\
-	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU_REL_PATH)/$(GCU_PLATFORM_NAME) -o $(GCU_PLATFORM_PKG);\
-	chmod +x $(GCU_PLATFORM_PKG);
-
-install-gcu-platform-pkg:
-	mkdir -p $(TOOLCHAIN_DIR) ;\
-	$(GCU_PLATFORM_PKG) -y -C topsruntime --install-dir $(TOOLCHAIN_DIR); \
-	$(GCU_PLATFORM_PKG) -y -C topscc --install-dir $(TOOLCHAIN_DIR); \
-	rsync -av $(TOOLCHAIN_DIR)/opt/tops/* $(TOOLCHAIN_DIR); \
-	rm -fr $(TOOLCHAIN_DIR)/opt;
-
-setup-gcu-platform-pkg: check-gcu-platform-pkg
-	@if [ "$(CUR_GCU_PLATFORM_PKG_MD5)" != "$(GCU_PLATFORM_PKG_MD5)"  ]; then \
-	    $(MAKE) install-gcu-platform-pkg; \
-	fi
-
-GCU_FACTOR_NAME=topsfactor_3.0.1-1_amd64.deb
-GCU_FACTOR_PKG = $(TOOLCHAIN_DIR)/$(GCU_FACTOR_NAME)
-GCU_FACTOR_PKG_MD5:=03a257e7069cc4bb42270103e3616438
-CUR_GCU_FACTOR_PKG_MD5:=$(shell md5sum $(GCU_FACTOR_PKG) 2>/dev/null| cut -d ' ' -f 1)
-
-check-gcu-factor-pkg:
-	@if [ "$(CUR_GCU_FACTOR_PKG_MD5)" != "$(GCU_FACTOR_PKG_MD5)"  ]; then \
-		echo "MD5 hash does not match. Downloading the GCU compiler package..."; \
-		$(MAKE) download-gcu-factor-pkg; \
-	else \
-		echo "$(GCU_FACTOR_PKG) MD5 hash matches. No need to download."; \
-	fi
-
-download-gcu-factor-pkg:
-	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU_REL_PATH)/$(GCU_FACTOR_NAME) -o $(GCU_FACTOR_PKG);\
-
-install-gcu-factor-pkg:
-	dpkg-deb -x $(GCU_FACTOR_PKG) $(TOOLCHAIN_DIR)/; \
-	rsync -av $(TOOLCHAIN_DIR)/usr/* $(TOOLCHAIN_DIR); \
-	rsync -av $(TOOLCHAIN_DIR)/local/* $(TOOLCHAIN_DIR); \
-	rm -fr $(TOOLCHAIN_DIR)/usr/;
-	rm -fr $(TOOLCHAIN_DIR)/local/;
-
-setup-gcu-factor-pkg: check-gcu-factor-pkg
-	@if [ "$(CUR_GCU_FACTOR_PKG_MD5)" != "$(GCU_FACTOR_PKG_MD5)"  ]; then \
-	    $(MAKE) install-gcu-factor-pkg; \
-	fi
-
-gcu-kmd: check-gcu-platform-pkg
-	sudo $(GCU_PLATFORM_PKG) -y -C enflame
-
-gcu-pkg: setup-gcu-sfc-pkg setup-gcu-platform-pkg setup-gcu-factor-pkg
-
-setup: support-pkg gcu-pkg
-	git submodule update --init --recursive
-
-resetup: install-support-pkg install-gcu-sfc-pkg install-gcu-platform-pkg install-gcu-factor-pkg
+gcu3-kmd:
+	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu3-kmd FTP_SERVER=$(FTP_SERVER)

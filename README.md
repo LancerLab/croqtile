@@ -39,24 +39,46 @@ It is good to read [Getting Started with Choreo](./Documents/getting_started_wit
 - Bison >=3.8, Flex >=2.6.4, where c++ features are supported.
 
 ### Environment
-To facilitate the setting-up of choreo build environment, currently programmer can use the below command:
+To streamline the configuration of the Choreo build environment, developers can currently utilize the following command:
 ```
 make setup
 ```
-to fetches the dependant software, including the bison executable (version >=3.8), FileCheck utility, gtest source code, etc.
+This command retrieves the essential software prerequisites, such as the flex executable, bison executable (version 3.8 or higher), FileCheck utility, and gtest source code, among others. This process enables the building and testing of Choreo.
 
-When the environment setting is satisfied, building Choreo can be done with the command:
+Once the environment configuration is complete, Choreo can be built using the command:
 ```
 make
 ```
-As Choreo is under development, performing unit tests is necessary to avoid corrupted version:
+Given that Choreo is still in development, running unit tests is crucial to prevent using corrupted version:
 ```
 make test
 ```
-If any issue happens, the test should stop to report errors.
+In the event of any issues, the test should halt and report errors.
+
+To run the compiled Choreo program on real hardware like GCU, the current Makefile can assist with the environment configuration. The command:
+```
+make setup-gcu2
+```
+sets up the GCU-2.x compiler and runtime environment. Additionally,
+```
+make kmd-gcu2
+```
+helps configure the GCU-2.x hardware driver.
+
+Similarly, the commands:
+```
+make setup-gcu3
+```
+and
+```
+make kmd-gcu3
+```
+assist in setting up the GCU-3.x compiler, runtime, and hardware driver.
+
 
 ## Compile Choreo-C++ Program
-Compile Choreo program is easy:
+Once choreo is built, developers can compile Choreo program with the following command:
 ```
 choreo your_program.co
 ```
+Despite of generating target source code, in current implementation, choreo also generates scripts to drive further low-level compilation and execution invokation.
