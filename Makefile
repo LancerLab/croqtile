@@ -1,7 +1,7 @@
 SHELL:=/bin/bash
 
 WORK_DIR:=$(PWD)
-TOOLCHAIN=$(WORK_DIR)/tools
+TOOLCHAIN_DIR=$(WORK_DIR)/tools
 
 FTP_SERVER:=172.16.11.50
 
@@ -23,7 +23,7 @@ TEST_TARGETS := $(TEST_FILES:.co=.test)
 HEADER_FILES :=  $(shell find . -name '*.hpp') choreo_header.inc factor_script.inc
 
 CC = g++
-CFLAGS = -std=c++17 -Wall -Wextra -g -D__CHOREO_FACTOR_DIR__="$(TOOLCHAIN)"
+CFLAGS = -std=c++17 -Wall -Wextra -g -D__CHOREO_FACTOR_DIR__="$(TOOLCHAIN_DIR)"
 
 # For gtest
 GTEST_DIR = extern/gtest
@@ -70,7 +70,7 @@ clean:
 	rm -f *.cc *.hh *.inc *.o $(TEST_TARGETS) tests/*.result
 
 clobber: clean
-	rm -fr $(TOOLCHAIN)/*
+	rm -fr $(TOOLCHAIN_DIR)/*
 
 lines:
 	echo "source files:"; wc -l *.cpp *.yy *.l *.hpp Makefile utils/*.h; \
@@ -85,33 +85,36 @@ standalone_test: $(TARGET)
 
 .PHONY: all clean lines test
 
-# Toolchains
-FLEX = flex
-BISON_BIN = $(TOOLCHAIN)/bin/bison
+# toolchains
+FLEX = $(TOOLCHAIN_DIR)/bin/flex
+BISON_BIN = $(TOOLCHAIN_DIR)/bin/bison
 LIT:=$(WORK_DIR)/tests/lit.sh
-FILECHECK:=$(TOOLCHAIN)/bin/FileCheck
-PACKAGE_NAME=choreo_toolchain_240511.tgz
-SUPPORT_PKG =$(TOOLCHAIN)/$(PACKAGE_NAME)
-PACKAGE_MD5:=161b1740077b4cb68543b167c5570dc5
-BISON_ENV:=BISON_PKGDATADIR=$(TOOLCHAIN)/shared/bison/
+FILECHECK:=$(TOOLCHAIN_DIR)/bin/FileCheck
+PACKAGE_NAME=choreo_toolchain_240703.tgz
+SUPPORT_PKG =$(TOOLCHAIN_DIR)/$(PACKAGE_NAME)
+PACKAGE_MD5:=2b630f549063d8fbfbe31ac23984ea6d
+BISON_ENV:=BISON_PKGDATADIR=$(TOOLCHAIN_DIR)/shared/bison/
 BISON:=$(BISON_ENV) $(BISON_BIN)
 
 support-pkg:
 	@if [ "$(shell md5sum $(SUPPORT_PKG) | cut -d ' ' -f 1)" != "$(PACKAGE_MD5)"  ]; then \
 		echo "MD5 hash does not match. Downloading the supporting package..."; \
 		curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(PACKAGE_NAME) -o $(SUPPORT_PKG);\
-		cd $(TOOLCHAIN) && tar -zvxf $(SUPPORT_PKG); \
+		mkdir -p $(TOOLCHAIN_DIR) ;\
+		cd $(TOOLCHAIN_DIR) && tar -zvxf $(SUPPORT_PKG); \
 		chmod +x $(BISON_BIN); \
 	else \
 		echo "$(SUPPORT_PKG) MD5 hash matches. No need to download."; \
 	fi;
 
 install-support-pkg:
-	cd $(TOOLCHAIN) && tar -zvxf $(SUPPORT_PKG); \
+	mkdir -p $(TOOLCHAIN_DIR) ;\
+	cd $(TOOLCHAIN_DIR) && tar -zvxf $(SUPPORT_PKG); \
 	chmod +x $(BISON_BIN)
 
+GCU_REL_PATH=.
 GCU_CMP_NAME=240524-gcu-compiler.tgz
-GCU_CMP_PKG = $(TOOLCHAIN)/$(GCU_CMP_NAME)
+GCU_CMP_PKG = $(TOOLCHAIN_DIR)/$(GCU_CMP_NAME)
 GCU_CMP_PKG_MD5:=f6e0b029763acd1f66a192542a068ae5
 CUR_GCU_CMP_PKG_MD5:=$(shell md5sum $(GCU_CMP_PKG) 2>/dev/null| cut -d ' ' -f 1)
 
@@ -124,10 +127,12 @@ check-gcu-sfc-pkg:
 	fi
 
 download-gcu-sfc-pkg:
-	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU_CMP_NAME) -o $(GCU_CMP_PKG);\
+	mkdir -p $(TOOLCHAIN_DIR) ;\
+	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU_REL_PATH)/$(GCU_CMP_NAME) -o $(GCU_CMP_PKG);\
 
 install-gcu-sfc-pkg:
-	cd $(TOOLCHAIN) && tar -zvxf $(GCU_CMP_PKG);
+	mkdir -p $(TOOLCHAIN_DIR) ;\
+	cd $(TOOLCHAIN_DIR) && tar -zvxf $(GCU_CMP_PKG);
 
 setup-gcu-sfc-pkg: check-gcu-sfc-pkg
 	@if [ "$(CUR_GCU_CMP_PKG_MD5)" != "$(GCU_CMP_PKG_MD5)"  ]; then \
@@ -135,7 +140,7 @@ setup-gcu-sfc-pkg: check-gcu-sfc-pkg
 	fi
 
 GCU_PLATFORM_NAME=TopsPlatform_1.0.1.6-a1e560_deb_amd64.run
-GCU_PLATFORM_PKG = $(TOOLCHAIN)/$(GCU_PLATFORM_NAME)
+GCU_PLATFORM_PKG=$(TOOLCHAIN_DIR)/$(GCU_PLATFORM_NAME)
 GCU_PLATFORM_PKG_MD5:=216051f60566227b6b95bf7502a70178
 CUR_GCU_PLATFORM_PKG_MD5:=$(shell md5sum $(GCU_PLATFORM_PKG) 2>/dev/null| cut -d ' ' -f 1)
 
@@ -148,14 +153,16 @@ check-gcu-platform-pkg:
 	fi
 
 download-gcu-platform-pkg:
-	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU_PLATFORM_NAME) -o $(GCU_PLATFORM_PKG);\
+	mkdir -p $(TOOLCHAIN_DIR) ;\
+	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU_REL_PATH)/$(GCU_PLATFORM_NAME) -o $(GCU_PLATFORM_PKG);\
 	chmod +x $(GCU_PLATFORM_PKG);
 
 install-gcu-platform-pkg:
-	$(GCU_PLATFORM_PKG) -y -C topsruntime --install-dir $(TOOLCHAIN); \
-	$(GCU_PLATFORM_PKG) -y -C topscc --install-dir $(TOOLCHAIN); \
-	rsync -av $(TOOLCHAIN)/opt/tops/* $(TOOLCHAIN); \
-	rm -fr $(TOOLCHAIN)/opt;
+	mkdir -p $(TOOLCHAIN_DIR) ;\
+	$(GCU_PLATFORM_PKG) -y -C topsruntime --install-dir $(TOOLCHAIN_DIR); \
+	$(GCU_PLATFORM_PKG) -y -C topscc --install-dir $(TOOLCHAIN_DIR); \
+	rsync -av $(TOOLCHAIN_DIR)/opt/tops/* $(TOOLCHAIN_DIR); \
+	rm -fr $(TOOLCHAIN_DIR)/opt;
 
 setup-gcu-platform-pkg: check-gcu-platform-pkg
 	@if [ "$(CUR_GCU_PLATFORM_PKG_MD5)" != "$(GCU_PLATFORM_PKG_MD5)"  ]; then \
@@ -163,7 +170,7 @@ setup-gcu-platform-pkg: check-gcu-platform-pkg
 	fi
 
 GCU_FACTOR_NAME=topsfactor_3.0.1-1_amd64.deb
-GCU_FACTOR_PKG = $(TOOLCHAIN)/$(GCU_FACTOR_NAME)
+GCU_FACTOR_PKG = $(TOOLCHAIN_DIR)/$(GCU_FACTOR_NAME)
 GCU_FACTOR_PKG_MD5:=03a257e7069cc4bb42270103e3616438
 CUR_GCU_FACTOR_PKG_MD5:=$(shell md5sum $(GCU_FACTOR_PKG) 2>/dev/null| cut -d ' ' -f 1)
 
@@ -176,12 +183,14 @@ check-gcu-factor-pkg:
 	fi
 
 download-gcu-factor-pkg:
-	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU_FACTOR_NAME) -o $(GCU_FACTOR_PKG);\
+	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GCU_REL_PATH)/$(GCU_FACTOR_NAME) -o $(GCU_FACTOR_PKG);\
 
 install-gcu-factor-pkg:
-	fakeroot sudo dpkg --instdir=$(TOOLCHAIN) -i $(GCU_FACTOR_PKG); \
-	rsync -av $(TOOLCHAIN)/usr/* $(TOOLCHAIN); \
-	fakeroot sudo rm -fr $(TOOLCHAIN)/usr/;
+	dpkg-deb -x $(GCU_FACTOR_PKG) $(TOOLCHAIN_DIR)/; \
+	rsync -av $(TOOLCHAIN_DIR)/usr/* $(TOOLCHAIN_DIR); \
+	rsync -av $(TOOLCHAIN_DIR)/local/* $(TOOLCHAIN_DIR); \
+	rm -fr $(TOOLCHAIN_DIR)/usr/;
+	rm -fr $(TOOLCHAIN_DIR)/local/;
 
 setup-gcu-factor-pkg: check-gcu-factor-pkg
 	@if [ "$(CUR_GCU_FACTOR_PKG_MD5)" != "$(GCU_FACTOR_PKG_MD5)"  ]; then \
@@ -192,5 +201,8 @@ gcu-kmd: check-gcu-platform-pkg
 	sudo $(GCU_PLATFORM_PKG) -y -C enflame
 
 gcu-pkg: setup-gcu-sfc-pkg setup-gcu-platform-pkg setup-gcu-factor-pkg
+
 setup: support-pkg gcu-pkg
+	git submodule update --init --recursive
+
 resetup: install-support-pkg install-gcu-sfc-pkg install-gcu-platform-pkg install-gcu-factor-pkg
