@@ -1,6 +1,6 @@
 // RUN: not choreo %s 2>&1 | FileCheck %s
 
-__co__ auto illegal_mdspan(f32 [3, 4] a) {
+__co__ auto illegal_chunkat(f32 [3, 4] a) {
   parallel p by 2 {
     with idx in [1, 2, 3] {
       dma.copy a.chunkat(p, idx) => local;
@@ -9,4 +9,16 @@ __co__ auto illegal_mdspan(f32 [3, 4] a) {
 }
 
 // CHECK: error: un-matched ranks between spanned data (2) and bounded variables (4).
-// CHECK: Totally 1 errors have been detected.
+
+__co__ auto illegal_chunkat2(f32 [3, 4, 5, 2, 2] a) {
+  parallel p by 2 {
+    with idx in [2, 2] {
+      dma.copy a.chunkat(p, idx) => local;
+    }
+  }
+}
+
+// CHECK: error: un-matched ranks between spanned data (5) and bounded variables (3).
+
+
+// CHECK: Totally 2 errors have been detected.

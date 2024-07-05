@@ -14,6 +14,20 @@ __co__ auto illegal_ret0(f32 [36, 27, 128] input, f32 [18, 9, 128]) {
 
 __co__ auto illegal_ret1(f32 [36, 27, 128] input) {
   parallel p by 6 {
+    parallel q by 2 {
+      return input;
+      with index in [3] {
+        foreach index {
+          f = dma.copy input.chunkat(p, index, q) => local;
+        }
+      }
+    }
+  }
+}
+// CHECK: unable to return inside the parallel-by block(s)
+
+__co__ auto illegal_ret2(f32 [36, 27, 128] input) {
+  parallel p by 6 {
     with index in [3, 9] {
       return 1;
       foreach index {
@@ -24,7 +38,7 @@ __co__ auto illegal_ret1(f32 [36, 27, 128] input) {
 }
 // CHECK: unable to return inside the parallel-by block(s)
 
-__co__ auto illegal_ret2(f32 [36, 27, 128] input) {
+__co__ auto illegal_ret3(f32 [36, 27, 128] input) {
   parallel p by 6 {
     with index in [3, 9] {
       foreach index {
@@ -36,4 +50,4 @@ __co__ auto illegal_ret2(f32 [36, 27, 128] input) {
   }
 }
 // CHECK: unable to return inside the parallel-by block(s)
-// CHECK: Totally 3 errors have been detected
+// CHECK: Totally 4 errors have been detected

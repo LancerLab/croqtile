@@ -1,0 +1,6 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ void illegal_params(float f) { }
+
+// CHECK: error: syntax error, unexpected IDENTIFIER, expecting ) or ","
+// CHECK: Parsing failed due to syntax errors.

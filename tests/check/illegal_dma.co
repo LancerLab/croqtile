@@ -2,10 +2,14 @@
 
 __co__ void illegal_copy(f32 [1, 2, 3] src) {
   dma.copy src => local;
-  f32 [3, 2] dst;
-  dma.copy src => dst;
-  f16 [3, 2, 1] dst1;
+  f32 [3, 2] dst0;
+  dma.copy src => dst0;
+  f32 [3, 3, 2, 2, 1] dst1;
   dma.copy src => dst1;
+  f16 [3, 2, 1] dst2;
+  dma.copy src => dst2;
+  s32 [3, 2, 1, 4] dst3;
+  dma.copy src => dst3;
 }
 
 __co__ void illegal_pad(f32 [1, 2, 3] src) {
@@ -14,7 +18,9 @@ __co__ void illegal_pad(f32 [1, 2, 3] src) {
 }
 
 // CHECK: error: The DMA statement contains a rank mismatch: the 'from' and 'to' arrays have inconsistent dimensions.
+// CHECK: error: The DMA statement contains a rank mismatch: the 'from' and 'to' arrays have inconsistent dimensions.
 // CHECK: error: The DMA statement contains a type mismatch: the element types of the 'from'(f32) and 'to'(f16) arrays are inconsistent.
+// CHECK: error: The DMA statement contains a rank mismatch: the 'from' and 'to' arrays have inconsistent dimensions.
 // CHECK: error: The DMA statement contains a rank mismatch: the paddings have inconsistent ranks.
 // CHECK: error: The rank of the data to transfer is inconsistent with the DMA padding settings
-// CHECK: Totally 4 errors have been detected.
+// CHECK: Totally 6 errors have been detected.
