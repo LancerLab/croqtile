@@ -15,4 +15,7 @@ __co__ void barfoo() { return 1; }
 __co__ auto correct() { return 1; }
 // CHECK-NOT: correct
 
+__co__ int correct_int() { return 1; }
+// CHECK-NOT: correct_int
+
 // CHECK: Totally 2 errors have been detected.

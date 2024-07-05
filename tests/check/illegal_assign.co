@@ -3,12 +3,16 @@
 __co__ void illegal_reassign_int() {
   int ia = 3;
   ia = 4;    // not allow for current simple valno
+  parallel ia by 6 {} // ok. 'ia' is a bounded integer
   with ia in [4] {}  // ok. 'ia' is a bounded integer
 }
 // CHECK: error: current compiler does not support re-assignment of 'integer'.
 // CHECK-NOT: error:{{.*}}ia{{.*}}
 
 __co__ void illegal_reassign_bool() {
+  // TODO(wsj) line 16
+  // error: failed to generate signature for expression `true'.
+  // valno.cpp:558: Assertion failed: invalid signature provided.
   bool ba = true;
   ba = false;    // not allow for current simple valno
   parallel ba by 6 {}   // ok. 'ba' is bounded integer
@@ -31,30 +35,42 @@ __co__ void illegal_reassign_ituple() {
 // CHECK-NOT: error:{{.*}}ita{{.*}}
 
 __co__ void illegal_reassign_span() {
-  mdsa = [3, 4];
-  mdsa = [5, 6];           // error: redefine
+  mdsa : [3, 4];
+  mdsa : [5, 6];           // error: redefine
+  mdsa = [7, 8];           // error: re-assignment
   parallel mdsa by 6 {     // ok. "mdsa" is a bounded integer
-    mdsa = {4, 56, 78};    // fail. conflict with parallel by
+    mdsa : [4, 56, 78];    // fail. conflict with parallel by
+    mdsa = [4, 56, 78];    // fail. conflict with parallel by
   }
   parallel p by 8 {
-    mdsg = [3, 4];
+    mdsg : [3, 4];
+    mdsg : 5;              // error: redefine
     mdsg = 4;              // error: re-assgin different type
   }
   parallel q by 8 {
-    mdsf = [3, 4];
+    mdsf : [3, 4];
+    mdsf : {5, 6, 7, 8};   // error: redefine
     mdsf = {5, 6, 7, 8};   // error: re-assgin different type
   }
   with b in [7, 8] {
-    mdsb = {4, 56, 78};
+    mdsb : [4, 56, 78];
     with c in [3, 3] {
-       mdsb = {3, 3};    // ok. "mdsa" is in another scope
+       mdsb : [3, 3];    // ok. "mdsa" is in another scope
+       mdsb = [3, 3];    // error: re-assgin
     }
   }
 }
 
+// CHECK: error: symbol `mdsa' has been declared already.
 // CHECK: error: `mdsa' of type 'mdspan' can not be re-assigned.
-// CHECK: error: `mdsa' of type '{int}->[]' can not be re-assigned as 'ituple<3>'.
+// CHECK: error: symbol `mdsa' has been declared already.
+// CHECK: error: `mdsa' of type '{int}->[]' can not be re-assigned as 'mdspan<3> []'.
+// CHECK: error: `mdsg' is declared as "mdspan<>" but initialized as "int".
+// CHECK: error: symbol `mdsg' has been declared already.
 // CHECK: error: `mdsg' of type 'mdspan<2> []' is assigned as int.
+// CHECK: error: `mdsf' is declared as "mdspan<>" but initialized as "ituple<4>".
+// CHECK: error: symbol `mdsf' has been declared already.
 // CHECK: error: `mdsf' of type 'mdspan<2> []' can not be re-assigned as 'ituple<4>'.
-// CHECK-NOT: error:{{.*}}mdsb{{.*}}
-// CHECK: Totally 7 errors have been detected
+// CHECK: error: `mdsb' of type 'mdspan' can not be re-assigned.
+
+// CHECK: Totally 14 errors have been detected

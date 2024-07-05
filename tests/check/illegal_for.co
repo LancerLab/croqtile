@@ -1,14 +1,22 @@
 // RUN: not choreo %s 2>&1 | FileCheck %s
 
-__co__ auto illegal_mdspan(f32 [3, ?, 18] a, s16 [?, 4] b) {
+__co__ auto illegal_foreach(f32 [3, ?, 18] a, s16 [?, 4] b) {
   c = 3;
   foreach c {}
   foreach a {};
   foreach f {};
+  ituple<2> it = {3, 5};
+  foreach it {}
   with idx = {x, y} in b.span {
-   foreach c {}
-   foreach x, y {}
-   foreach idx {}
+    foreach c {}
+    foreach x {}
+    foreach x, y {}
+    foreach y, x {}
+    foreach idx {}
+    foreach idx, x, y {}
+  }
+  parallel p by 6 {
+    foreach p {}
   }
   
 }
@@ -17,5 +25,6 @@ __co__ auto illegal_mdspan(f32 [3, ?, 18] a, s16 [?, 4] b) {
 // CHECK: expecting a bounded type for iteration variable 'a' but got 'f32 mdspan<3> []'.
 // CHECK: symbol `f' is used before declaration.
 // CHECK: expecting a bounded type for iteration variable 'f' but got 'invalid'.
+// CHECK: error: expecting a bounded type for iteration variable 'it' but got 'ituple<2>'.
 // CHECK: expecting a bounded type for iteration variable 'c' but got 'int'.
-// CHECK: Totally 5 errors have been detected.
+// CHECK: Totally 6 errors have been detected.
