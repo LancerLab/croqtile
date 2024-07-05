@@ -440,6 +440,13 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
       error_count++;
       // keep working
     } else {
+      if (isa<MDSpanType>(n.init_expr->GetType())) {
+        Error(n.LOC(), "use ':' instead of '=' to define the \"" + STR(*n.init_expr->GetType()) + "\" type variable.");
+        error_count++;
+        if (trace_visit)
+            os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
+        // keep working
+      }
       // sometimes the parser can not decide the type. We need to figure out
       // from the initialization expression
       SetNodeType(*n.type, n.init_expr->GetType());
