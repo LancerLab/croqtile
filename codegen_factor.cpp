@@ -112,6 +112,8 @@ if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then
     gcu_device=gcu3
   elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then
     gcu_device=gcu2
+  elif [[ "$(lspci | grep Tencent)" != "" ]]; then
+    gcu_device=gcu2
   else
     echo "can not determine the GCU device type."
     exit 1
@@ -161,7 +163,8 @@ fi
   } else if (isa<AST::ParallelBy>(&n)) {
     parallel_level--;
     this->decrementIndent();
-    fs << this->indent << "}); // end of choreo-factor kernel function\n";
+    if (parallel_level == 0) 
+      fs << this->indent << "}); // end of choreo-factor kernel function\n";
   } else if (auto f = dyn_cast<AST::ForeachBlock>(&n)) {
     // erase the loop variables
     assert(!loop_vars.empty());
@@ -310,6 +313,9 @@ bool FactorCodeGen::Visit(AST::ParamList &pl) {
 // CLEAN
 bool FactorCodeGen::Visit(AST::ParallelBy &by) {
   parallel_factor *= by.bound;
+  if (parallel_level > 1) {
+    return true;
+  }
   fs << this->indent << "Dim3 grid_dim(1);\n";
   fs << this->indent << "Dim3 block_dim(" << by.bound << ");\n";
   fs << this->indent << "Value stream = alloc_stream_();\n";
@@ -833,6 +839,7 @@ bool FactorCodeGen::Visit(AST::Program &) { return true; }
 void FactorCodeGen::EmitHostHead(std::ostream &os) {
   os <<
       R"(
+#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -944,12 +951,18 @@ void FactorCodeGen::EmitHostFuncBody(std::ostream &os, const Type &ty,
   os << "};\n";
 
   os << R"(
+  auto start = std::chrono::high_resolution_clock::now();
+
   CHECK(topsLaunchExecutableV2(
       executable, nullptr, device_inputs,
       sizeof(device_inputs) / sizeof(void *), (int64_t*)input_dims,
       (size_t*)input_ranks, device_outputs,
       sizeof(device_outputs) / sizeof(void *), stream));
   CHECK(topsStreamSynchronize(stream));
+
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+  std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
 
 )";
 
