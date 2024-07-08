@@ -73,7 +73,7 @@ using namespace factor;
 // CLEAN
 bool FactorCodeGen::AfterVisitImpl(AST::Node &n) {
   if (isa<AST::Program>(&n)) {
-    os << "# step 4.1: generate the host source\n";
+    os << "# step 4: generate the host source\n";
     os << "host_src=" << host_fn << "\n";
     os << "cat <<'EOF' > ${host_src}\n";
     os << hs.str() << "\nEOF\n\n";
@@ -82,7 +82,13 @@ bool FactorCodeGen::AfterVisitImpl(AST::Node &n) {
     os << "target=" << target_fn << "\n";
     os << "# TODO: sfc ${host_src} -o ${target}\n";
     os << R"(
-if [ "$#" -ne 1 ]; then
+if command -v nvim &> /dev/null
+then
+  EDITOR=nvim
+else
+  EDITOR=less
+fi
+if [ "$#" -gt 1 ]; then
     echo "    Usage: $0 | --execute           -> compile and execute choreo in factor
                     | --statistics        -> show Line Of Code (LOC) statistic compare between kernel code boosted w./w.o. Choreo
                     | --show-kernel       -> show the generated inner kernel code
@@ -93,11 +99,25 @@ if [ "$#" -ne 1 ]; then
 fi
     )";
     os << R"(
-if [ "$1" == "--execute" ]; then
+if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then
 )";
     os << "  export FACTOR_INSTALL=" << STRINGIZE(__CHOREO_FACTOR_DIR__)
        << "\n";
-    os << R"(  /tmp/factor_script.sh ${factor_src} ${factor_bin} ${host_src} ${target}
+    os << R"script(
+  GCU_DEVICE_STR="$(lspci | grep Enflame | head -1)"
+  echo $GCU_DEVICE_STR
+  if [[ "${GCU_DEVICE_STR}" == *"S60G"* ]]; then
+    gcu_device=gcu3
+  elif [[ "${GCU_DEVICE_STR}" == *"c035"* ]]; then
+    gcu_device=gcu3
+  elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then
+    gcu_device=gcu2
+  else
+    echo "can not determine the GCU device type."
+    exit 1
+  fi
+  # JIT compile and execute
+  /tmp/factor_script.sh ${factor_src} ${factor_bin} ${host_src} ${target} ${gcu_device}
 elif [ "$1" == "--statistics" ]; then
   echo ">>>> Line of Code without Choreo"
   wc -l ${factor_src} ${host_src} ${kernel_src}
@@ -105,13 +125,13 @@ elif [ "$1" == "--statistics" ]; then
   wc -l ~/choreo/demo/elementwise_add.co
   # grep -v '^ *//' ~/choreo/demo/elementwise_add.co | wc -l
 elif [ "$1" == "--show-kernel" ]; then
-  nvim ${kernel_src}
+  ${EDITOR} ${kernel_src}
 elif [ "$1" == "--show-host" ]; then
-  nvim ${host_src}
+  ${EDITOR} ${host_src}
 elif [ "$1" == "--show-tileflow" ]; then
-  nvim ${factor_src}
+  ${EDITOR} ${factor_src}
 elif [ "$1" == "--show-choreo" ]; then
-  nvim ~/choreo/demo/elementwise_add.co
+  ${EDITOR} ~/choreo/demo/elementwise_add.co
 else
     echo "    Usage: $0 | --execute           -> compile and execute choreo in factor
                     | --statistics        -> show Line Of Code (LOC) statistic compare between kernel code boosted w./w.o. Choreo
@@ -121,7 +141,7 @@ else
                     | --show-choreo       -> show the choreo source code"
     exit 1
 fi
-    )";
+    )script";
 
   } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
     entry_fn = f->name;
@@ -1114,16 +1134,4 @@ void FactorCodeGen::OutputScript(FunctionType *fty, const std::string &n,
   os << "# step 3: compile factor code into a binary\n";
   os << "factor_bin=" << factor_bfn << "\n";
   os << "# TODO: sfc ${factor_src} -o ${factor_bin}\n\n";
-
-  os << "# step 4: generate the host source\n";
-  os << "host_src=" << host_fn << "\n";
-  os << "cat <<'EOF' > ${host_src}\n";
-  os << hs.str() << "\nEOF\n\n";
-
-#if 0
-  os << "# step 5: compile the host source to target executable\n";
-  os << "target=" << target_fn << "\n";
-  os << "# TODO: sfc ${host_src} -o ${target}\n";
-  os << "~/choreo/scripts/factor_compile_and_exec.sh ${factor_src} ${factor_bin} ${host_src} ${target}\n";
-#endif
 }

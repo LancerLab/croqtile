@@ -45,7 +45,10 @@ class SimpleArray {
       data[count++] = value;
     }
   }
-  //  SimpleArray() = default;
+
+  SimpleArray(const SimpleArray &) = default;
+  SimpleArray& operator=(const SimpleArray &) = default;
+  ~SimpleArray() = default;
 
   // Returns the element at specified index
   T& operator[](uint32_t index) { return data[index]; }
@@ -83,6 +86,13 @@ inline static bool operator==(const SimpleArray<T, N>& l,
 
 template <int Rank>
 using mdspan = SimpleArray<size_t, Rank>;
+
+template<size_t N>
+inline std::ostream& operator<<(std::ostream& os, const mdspan<N> &s) {
+  for (size_t i = 0; i < N; ++i)
+    os << s[i] << " ";
+  return os;
+}
 
 template <size_t Rank>
 inline size_t span_size(const mdspan<Rank>& s) {
@@ -195,6 +205,8 @@ class spanned_data {
       : ptr(std::move(d)), dims(s) {}
 
   spanned_data(const spanned_data&) = delete;  // move only
+  spanned_data& operator=(const spanned_data&) = delete;
+
   spanned_data(spanned_data&& sd) : ptr(std::move(sd.ptr)), dims(sd.dims) {}
 
   constexpr size_t rank() const { return Rank; }

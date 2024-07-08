@@ -24,9 +24,21 @@ KERNEL_SRC=$1
 FATBIN_TARGET=$2
 HOST_SRC=$3
 BIN_TARGET=$4
+GCU_TARGET=$5
+
+if [ ${GCU_TARGET} == "gcu3" ]; then
+  GCU_ARCH=gcu300
+  GCU_RESOURCE=1c12s
+elif [ ${GCU_TARGET} == "gcu2" ]; then
+  GCU_ARCH=gcu210
+  GCU_RESOURCE=2c24s
+else
+  GCU_ARCH=gcu210
+  GCU_RESOURCE=2c24s
+fi
 
 echo "Compile ${BIN_TARGET}"
-LD_LIBRARY_PATH=${TOPS_LIB_PATH} ${TOPS_BIN_PATH}/topsfc ${KERNEL_SRC} -gcu-arch=gcu210 -resource=2c24s -o ${FATBIN_TARGET} -I${TOPS_INC_PATH} -L${TOPS_LIB_PATH} --host-link-options="-L${TOPS_LIB_PATH}"
+LD_LIBRARY_PATH=${TOPS_LIB_PATH} ${TOPS_BIN_PATH}/topsfc ${KERNEL_SRC} -gcu-arch=${GCU_ARCH} -resource=${GCU_RESOURCE} -o ${FATBIN_TARGET} -I${TOPS_INC_PATH} -L${TOPS_LIB_PATH} --host-link-options="-L${TOPS_LIB_PATH}"
 LD_LIBRARY_PATH=${TOPS_LIB_PATH} ${TOPS_BIN_PATH}/topsfc ${HOST_SRC} ${TOPS_LINK_ARG} -o ${BIN_TARGET} -I${TOPS_INC_PATH} -L${TOPS_LIB_PATH} --host-link-options="-L${TOPS_LIB_PATH}"
 
 echo "Run Demo"
