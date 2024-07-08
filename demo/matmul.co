@@ -3,9 +3,9 @@
 // extern "C" void kernel(int * lhs, int * rhs, int * out, int m, int k, int n) {
 __cok__ { /// kernel program
 extern "C" void kernel(int * lhs, int * rhs, int * out) {
-  int m = 1;
-  int k = 16;
-  int n = 16;
+  int m = 8;
+  int k = 1024;
+  int n = 128;
   for (int i = 0; i < m; ++i) {
     for (int j = 0; j < n; ++j) {
       for (int z = 0; z < k; ++z) {
@@ -17,18 +17,18 @@ extern "C" void kernel(int * lhs, int * rhs, int * out) {
 }
 } /// end of kernel decl
 
-__co__ s32 [120, 512] ele_add(s32 [120, 256] lhs, s32 [256, 512] rhs) { /// device program
+__co__ s32 [512, 1024] ele_add(s32 [512, 1024] lhs, s32 [1024, 1024] rhs) { /// device program
   s32[lhs.span(0), rhs.span(1)] output; // use same shape as lhs
 
   parallel p by 1 {  // p is sip_index
-    with index = {m_tile, k_tile, n_tile} in [120, 16, 32] {  // decl your tiled spans
+    with index = {m_tile, k_tile, n_tile} in [64, 1, 8] {  // decl your tiled spans
       foreach m_tile { // alternative: foreach index, index.x, index.y
         foreach n_tile {
           // METHOD3
           // m_tile_size : #output.span(0)/#m_tile
           // n_tile_size : #output.span(1)/#n_tile
           // local s32[m_tile_size, n_tile_size] l2_out; // alternative: s32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
-          local s32[1, 16] l1_out; // alternative: s32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
+          local s32[8, 128] l1_out; // alternative: s32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
           foreach k_tile {
             // chunkat can support bounded_var algebra.
             lhs_load = dma.copy.async lhs.chunkat(m_tile, k_tile) => local; // tiling_factor: {6, 17, 4}, new_size {lhs(0)/6, lhs(1)/17, lhs(2)/4}
@@ -50,15 +50,21 @@ __co__ s32 [120, 512] ele_add(s32 [120, 256] lhs, s32 [256, 512] rhs) { /// devi
 }
 
 int main() { /// host program
-  choreo::s32 a[120][256] = {0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::s32 b[256][512] = {0};
-  choreo::s32 b[256][512] = {0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::s32 b[256][512] = {0};
+  choreo::s32 a[512][1024] = {0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::s32 b[512][512] = {0};
+  choreo::s32 b[1024][1024] = {0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::s32 b[512][512] = {0};
   std::fill_n(&a[0][0], sizeof(a) / sizeof(a[0][0]), 1);
   std::fill_n(&b[0][0], sizeof(b) / sizeof(b[0][0]), 1);
-  auto lhs_data = choreo::make_spanview<2, choreo::s32>((int*)a, {120, 256});
-  auto rhs_data = choreo::make_spanview<2, choreo::s32>((int*)b, {256, 512});
+  auto lhs_data = choreo::make_spanview<2, choreo::s32>((int*)a, {512, 1024});
+  auto rhs_data = choreo::make_spanview<2, choreo::s32>((int*)b, {1024, 1024});
+
+  auto start = std::chrono::high_resolution_clock::now();
 
   auto res
     = ele_add(lhs_data, rhs_data);
+
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
   std::cout << res.shape()[0] << std::endl;
   std::cout << res.shape()[1] << std::endl;
 
@@ -76,4 +82,5 @@ int main() { /// host program
         assert(ref == res[i][j]);
       }
   std::cout << "Test Passed\n" << std::endl;
+  std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
 }
