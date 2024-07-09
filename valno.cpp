@@ -435,6 +435,8 @@ std::string ValueNumbering::GenerateNodeSignature(AST::Node& node,
   if (auto* n = dyn_cast<AST::IntLiteral>(&node)) {
     if (IsUnKnownInteger(n->value)) return "?";
     return "const_" + std::to_string(n->value);
+  } else if (auto* n = dyn_cast<AST::Boolean>(&node)) {
+    return n->value;
   } else if (auto* v = dyn_cast<AST::Identifier>(&node)) {
     if (auto name_in_scope = visitor->SSTab().NameInScopeOrNull(v->name)) {
       if (HasValueNumberOfSignature(*name_in_scope)) return *name_in_scope;

@@ -172,6 +172,12 @@ bool TypeInference::Visit(AST::IntLiteral &n) {
   return true;
 }
 
+bool TypeInference::Visit(AST::Boolean &n) {
+  n.SetType(MakeBooleanType());
+  __TRACE_EACH_VISIT__(n)
+  return true;
+}
+
 bool TypeInference::Visit(AST::DataType &n) {
   __TRACE_EACH_VISIT__(n)
   if (n.getBaseType() == BaseType::UNKNOWN)

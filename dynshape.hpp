@@ -33,6 +33,7 @@ struct ShapeDynamics : public VisitorWithSymTab {
   bool Visit(AST::MultiNodes &) { return true; }
   bool Visit(AST::MultiValues &) { return true; }
   bool Visit(AST::IntLiteral &) { return true; }
+  bool Visit(AST::Boolean &) { return true; }
   bool Visit(AST::Expr &) { return true; }
   bool Visit(AST::MultiDimSpans &) { return true; }
   bool Visit(AST::NamedTypeDecl &) { return true; }

@@ -129,6 +129,7 @@ struct Normalizer : public Visitor {
   }
 
   bool Visit(AST::IntLiteral &) override { return true; }
+  bool Visit(AST::Boolean &) override { return true; }
   bool Visit(AST::Expr &n) override {
     if (list_ref) {  // could be with syntax sugar
       auto Apply = [this](AST::Expr *expr) -> ptr<AST::Expr> {

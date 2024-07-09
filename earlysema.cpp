@@ -89,6 +89,12 @@ bool EarlySemantics::Visit(AST::IntLiteral& n) {
   return true;
 }
 
+bool EarlySemantics::Visit(AST::Boolean& n) {
+  __TRACE_EACH_VISIT__(n)
+  SetNodeType(n, MakeBooleanType());
+  return true;
+}
+
 bool EarlySemantics::Visit(AST::Expr& n) {
   __TRACE_EACH_VISIT__(n)
   if (auto ref = n.GetReference()) {

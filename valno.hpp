@@ -291,6 +291,15 @@ class ShapeInference : public Visitor {
     return true;
   }
 
+  bool Visit(AST::Boolean& n) {
+    __TRACE_EACH_VISIT__;
+    
+    if (cannot_proceed) return true;
+    int valNo = vn.GenerateValueNumberForNode(n);
+    cur_vn = valNo;
+    return true;
+  }
+
   bool Visit(AST::Expr& n) {
     __TRACE_EACH_VISIT__;
 

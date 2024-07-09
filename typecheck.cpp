@@ -27,6 +27,11 @@ bool TypeChecker::Visit(AST::IntLiteral& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
+bool TypeChecker::Visit(AST::Boolean& n) {
+  __TRACE_EACH_VISIT__(n)
+  if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
+  return true;
+}
 bool TypeChecker::Visit(AST::Expr& n) {
   __TRACE_EACH_VISIT__(n)
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
