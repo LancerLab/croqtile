@@ -1,25 +1,29 @@
 // RUN: not choreo %s 2>&1 | FileCheck %s
 
 __co__ void illegal_reassign_int() {
-  int ia = 3;
-  ia = 4;    // not allow for current simple valno
-  parallel ia by 6 {} // ok. 'ia' is a bounded integer
-  with ia in [4] {}  // ok. 'ia' is a bounded integer
+  int i0 = 3;
+  i0 = 4;    // not allow for current simple valno
+  parallel i0 by 6 {} // ok. 'i0' is a bounded integer
+  with i0 in [4] {}  // ok. 'i0' is a bounded integer
 }
 // CHECK: error: current compiler does not support re-assignment of 'integer'.
-// CHECK-NOT: error:{{.*}}ia{{.*}}
+// CHECK-NOT: error:{{.*}}i0{{.*}}
 
 __co__ void illegal_reassign_bool() {
-  // TODO(wsj) line 16
-  // error: failed to generate signature for expression `true'.
-  // valno.cpp:558: Assertion failed: invalid signature provided.
   bool ba = true;
   ba = false;    // not allow for current simple valno
   parallel ba by 6 {}   // ok. 'ba' is bounded integer
   with ba in [4] {}     // ok. 'ba' is another bounded integer
+  bool bb = 0;   // not allow
+  bool bc = false;
+  ba = bc;       // not allow for current simple valno
+  bc = 1;        // not allow
 }
 // CHECK: error: current compiler does not support re-assignment of 'boolean'.
 // CHECK-NOT: error:{{.*}}ba{{.*}}
+// CHECK: error: `bb' is declared as "bool" but initialized as "int".
+// CHECK: error: current compiler does not support re-assignment of 'boolean'.
+// CHECK: error: `bc' of type 'bool' is assigned as int.
 
 __co__ void illegal_reassign_ituple() {
   ita = {3, 4};
@@ -73,4 +77,4 @@ __co__ void illegal_reassign_span() {
 // CHECK: error: `mdsf' of type 'mdspan<2> []' can not be re-assigned as 'ituple<4>'.
 // CHECK: error: `mdsb' of type 'mdspan' can not be re-assigned.
 
-// CHECK: Totally 14 errors have been detected
+// CHECK: Totally 17 errors have been detected
