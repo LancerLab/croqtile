@@ -1,0 +1,2376 @@
+#!/usr/bin/env bash
+
+# This the the choreo generated bash script to compile factor code
+
+# copy factor scripts & environment to /tmp
+cat <<'EOF' > /tmp/factor_script.sh
+#!/usr/bin/env bash
+
+set -e
+set -x
+
+DIR=$(dirname "$(realpath "$0")")
+
+if [ ! -d ${FACTOR_INSTALL} ]; then
+  echo "Invalid FACTOR_INSTALL path: ${FACTOR_INSTALL}"
+  exit 1
+fi
+
+if [ ! -f ${FACTOR_INSTALL}/bin/topsfc ]; then
+  echo "Can not find compiler in FACTOR_INSTALL path: ${FACTOR_INSTALL}"
+  exit 1
+fi
+
+TOPS_BIN_PATH=${FACTOR_INSTALL}/bin
+TOPS_INC_PATH=${FACTOR_INSTALL}/include
+TOPS_LIB_PATH=${FACTOR_INSTALL}/lib
+TOPS_LINK_ARG="-L${TOPS_LIB_PATH} -ltopsrt"
+
+KERNEL_SRC=$1
+FATBIN_TARGET=$2
+HOST_SRC=$3
+BIN_TARGET=$4
+GCU_TARGET=$5
+
+if [ ${GCU_TARGET} == "gcu3" ]; then
+  GCU_ARCH=gcu300
+  GCU_RESOURCE=1c12s
+elif [ ${GCU_TARGET} == "gcu2" ]; then
+  GCU_ARCH=gcu210
+  GCU_RESOURCE=2c24s
+else
+  GCU_ARCH=gcu210
+  GCU_RESOURCE=2c24s
+fi
+
+echo "Compile ${BIN_TARGET}"
+LD_LIBRARY_PATH=${TOPS_LIB_PATH} ${TOPS_BIN_PATH}/topsfc ${KERNEL_SRC} -gcu-arch=${GCU_ARCH} -resource=${GCU_RESOURCE} -o ${FATBIN_TARGET} -I${TOPS_INC_PATH} -L${TOPS_LIB_PATH} --host-link-options="-L${TOPS_LIB_PATH}"
+LD_LIBRARY_PATH=${TOPS_LIB_PATH} ${TOPS_BIN_PATH}/topsfc ${HOST_SRC} ${TOPS_LINK_ARG} -o ${BIN_TARGET} -I${TOPS_INC_PATH} -L${TOPS_LIB_PATH} --host-link-options="-L${TOPS_LIB_PATH}"
+
+echo "Run Demo"
+LD_LIBRARY_PATH=${TOPS_LIB_PATH} ./${BIN_TARGET} ${FATBIN_TARGET}
+
+
+EOF
+chmod +x /tmp/factor_script.sh
+# copy choreo.h and factor scripts/env to /tmp
+cat <<'EOF' > /tmp/choreo.h
+#ifndef __CHOREO_H__
+#define __CHOREO_H__
+
+#if __cplusplus < 201703L
+// #error "Choreo requires C++17 or later"
+#endif
+
+#include <cstdint>           // For fixed-width integer types
+#include <initializer_list>  // for std::initializer_list
+#include <iostream>          // report error
+#include <memory>
+
+namespace choreo {
+
+inline void choreo_assert(bool p, const char* msg, const char* file = __FILE__,
+                          int line = __LINE__) {
+  if (!p) {
+    std::cerr << "Assertion failed: " << msg << ", file " << file << ", line "
+              << line << std::endl;
+    std::abort();
+  }
+  return;
+}
+
+inline void runtime_check(bool p, const char* msg) {
+  if (!p) {
+    std::cerr << "choreo runtime check failed: " << msg << std::endl;
+    std::abort();
+  }
+  return;
+}
+
+namespace {
+
+template <typename T, size_t N>
+class SimpleArray {
+  static_assert(N > 0, "can not create 0-dim array");
+
+ public:
+  // Constructor for brace-initialization
+  SimpleArray(std::initializer_list<T> init) {
+    std::size_t count = 0;
+    for (auto& value : init) {
+      if (count >= N) break;  // Avoid exceeding the array size
+      data[count++] = value;
+    }
+  }
+
+  SimpleArray(const SimpleArray &) = default;
+  SimpleArray& operator=(const SimpleArray &) = default;
+  ~SimpleArray() = default;
+
+  // Returns the element at specified index
+  T& operator[](uint32_t index) { return data[index]; }
+
+  // Returns the element at specified index (const version)
+  const T& operator[](uint32_t index) const { return data[index]; }
+
+  // Returns the number of elements in the array
+  constexpr uint32_t size() const noexcept { return N; }
+
+  // Returns a pointer to the underlying array serving as element storage
+  T* begin() { return data; }
+  const T* begin() const { return data; }
+
+  T* end() { return data + N; }
+  const T* end() const { return data + N; }
+
+ private:
+  T data[N];
+};
+
+template <typename T, size_t N, size_t M>
+inline static bool operator==(const SimpleArray<T, N>& l,
+                              const SimpleArray<T, M>& r) {
+  if constexpr (N != M)
+    return false;
+  else {
+    for (size_t i = 0; i < N; ++i)
+      if (l.data[i] != r.data[i]) return false;
+    return true;
+  }
+}
+
+}  // end anonymous namespace
+
+template <int Rank>
+using mdspan = SimpleArray<size_t, Rank>;
+
+template<size_t N>
+inline std::ostream& operator<<(std::ostream& os, const mdspan<N> &s) {
+  for (size_t i = 0; i < N; ++i)
+    os << s[i] << " ";
+  return os;
+}
+
+template <size_t Rank>
+inline size_t span_size(const mdspan<Rank>& s) {
+  size_t sz = 1;
+  for (size_t i = 0; i < Rank; ++i) sz *= s[i];
+  return sz;
+}
+
+namespace {
+
+// For multi-dimensional array reference
+template <typename T, size_t N>
+class ArrayProxy {
+  T* data;
+  const mdspan<N>* dims;
+  size_t offset;
+
+ public:
+  ArrayProxy(T* arr, const mdspan<N>& dimensions, size_t off)
+      : data(arr), dims(&dimensions), offset(off) {}
+
+  template <size_t M = N>
+  typename std::enable_if<(M == 1),
+                          T&>::type  // make sure to return the reference type
+  operator[](int index) {
+    choreo_assert(index >= 0, "Index out of bounds", __FILE__, __LINE__);
+    choreo_assert((size_t)index < (*dims)[0], "Index out of bounds", __FILE__,
+                  __LINE__);
+
+    // Direct element access
+    return data[offset + (size_t)index];
+  }
+
+  template <size_t M = N>
+  typename std::enable_if<(M > 1), ArrayProxy<T, N - 1>>::type operator[](
+      int index) {
+    choreo_assert(index >= 0, "Index out of bounds", __FILE__, __LINE__);
+    choreo_assert((size_t)index < (*dims)[0], "Index out of bounds", __FILE__,
+                  __LINE__);
+
+    // Recurse with reduced dimensionality
+    const auto& sub_dims =
+        *reinterpret_cast<const mdspan<N - 1>*>(&((*dims)[1]));
+    return ArrayProxy<T, N - 1>(data, sub_dims,
+                                (offset + (size_t)index) * (*dims)[1]);
+  }
+};
+
+}  // end anonymous namespace
+
+// A 'spanned_view' is a memview of data. It is ranked, but no necessary to have
+// compile-time dimensions
+template <typename T, size_t Rank>
+class spanned_view {
+  static_assert(Rank != 0, "unexpected 0-dims.");
+  T* ptr = nullptr;
+  const mdspan<Rank> dims;
+
+ public:
+  explicit spanned_view(T* d, const mdspan<Rank>& s) : ptr(d), dims(s) {}
+
+  constexpr size_t rank() const { return Rank; }
+  const mdspan<Rank>& shape() const { return dims; }
+
+  size_t size() const { return span_size(dims); }
+  size_t bytes() const { return size() * sizeof(T); }
+  T* data() { return ptr; }
+  T* data() const { return ptr; }
+
+  // allow multi-dim-style access, be like: a[1][3]
+  template <size_t M = Rank>
+  typename std::enable_if<(M == 1),
+                          T&>::type  // make sure to return the reference type
+  operator[](int index) {
+    choreo_assert(index >= 0, "Index out of bounds", __FILE__, __LINE__);
+    choreo_assert((size_t)index < dims[0], "Index out of bounds", __FILE__,
+                  __LINE__);
+    return ptr[index];
+  }
+
+  template <size_t M = Rank>
+  typename std::enable_if<(M > 1), ArrayProxy<T, Rank - 1>>::type operator[](
+      int index) {
+    choreo_assert(index >= 0, "Index out of bounds", __FILE__, __LINE__);
+    choreo_assert((size_t)index < dims[M - 1], "Index out of bounds", __FILE__,
+                  __LINE__);
+    const auto& sub_dims =
+        *reinterpret_cast<const mdspan<Rank - 1>*>(&(dims[1]));
+    return ArrayProxy<T, Rank - 1>(ptr, sub_dims, (size_t)index * dims[1]);
+  }
+
+  friend bool operator==(const spanned_view& l, const spanned_view& r) {
+    if (l.dims != r.dims) return false;
+
+    for (size_t i = 0; i < l.size(); ++i)
+      if (l.ptr[i] != r.ptr[i]) return false;
+
+    return true;
+  }
+};
+
+// A 'spanned_data' is similar to 'spanned_view' but manage memory
+template <typename T, size_t Rank>
+class spanned_data {
+  std::unique_ptr<T[]> ptr = nullptr;  // this is used as the output
+  mdspan<Rank> dims;
+
+ public:
+  explicit spanned_data(std::unique_ptr<T[]>&& d, const mdspan<Rank>& s)
+      : ptr(std::move(d)), dims(s) {}
+
+  spanned_data(const spanned_data&) = delete;  // move only
+  spanned_data& operator=(const spanned_data&) = delete;
+
+  spanned_data(spanned_data&& sd) : ptr(std::move(sd.ptr)), dims(sd.dims) {}
+
+  constexpr size_t rank() const { return Rank; }
+  const mdspan<Rank>& shape() const { return dims; }
+
+  size_t size() const { return span_size(dims); }
+  size_t bytes() const { return size() * sizeof(T); }
+  T* data() { return ptr.get(); }
+
+  // allow multi-dim-style access, be like: a[1][3]
+  template <size_t M = Rank>
+  typename std::enable_if<(M == 1),
+                          T&>::type  // make sure to return the reference type
+  operator[](int index) {
+    choreo_assert(index >= 0, "Index out of bounds", __FILE__, __LINE__);
+    choreo_assert((size_t)index < dims[0], "Index out of bounds", __FILE__,
+                  __LINE__);
+    return ptr[index];
+  }
+
+  template <size_t M = Rank>
+  typename std::enable_if<(M > 1), ArrayProxy<T, Rank - 1>>::type operator[](
+      int index) {
+    choreo_assert(index >= 0, "Index out of bounds", __FILE__, __LINE__);
+    choreo_assert((size_t)index < dims[M - 1], "Index out of bounds", __FILE__,
+                  __LINE__);
+    const auto& sub_dims =
+        *reinterpret_cast<const mdspan<Rank - 1>*>(&(dims[1]));
+    return ArrayProxy<T, Rank - 1>(ptr.get(), sub_dims,
+                                   (size_t)index * dims[1]);
+  }
+
+  friend bool operator==(const spanned_data& l, const spanned_data& r) {
+    if (l.dims != r.dims) return false;
+
+    for (size_t i = 0; i < l.size(); ++i)
+      if (l.ptr[i] != r.ptr[i]) return false;
+
+    return true;
+  }
+};
+
+template <size_t Rank>
+mdspan<Rank> make_mdspan(const std::initializer_list<size_t>& init) {
+  return mdspan<Rank>(init);
+}
+
+// note: spanned_view does not invoke copy. Instead, it associates data with a
+// multi-dimension view of memory
+template <size_t Rank, typename T>
+spanned_view<T, Rank> make_spanview(T* ptr,
+                                    std::initializer_list<size_t> init) {
+  return spanned_view<T, Rank>(ptr, make_mdspan<Rank>(init));
+}
+
+template <typename T, size_t N, size_t M>
+spanned_view<T, 2> make_spanview(T (&arr)[N][M]) {
+  return spanned_view<T, 2>((T*)arr, {N, M});
+}
+
+template <typename T, size_t Rank>
+spanned_data<T, Rank> make_spandata(std::initializer_list<size_t> init) {
+  size_t size = 1;
+  for (auto& value : init) size *= value;
+  choreo_assert(size > 1, "error: invalid size.", __FILE__, __LINE__);
+
+  return spanned_data<T, Rank>(std::make_unique<T[]>(size),
+                               make_mdspan<Rank>(init));
+}
+
+// converting from vector to another type
+template <size_t Rank, typename T>
+auto copy_as_spanned(T* ptr, std::initializer_list<size_t> init) {
+  size_t size = 1;
+  for (auto& value : init) size *= value;
+  choreo_assert(size > 1, "error: invalid size.", __FILE__, __LINE__);
+
+  auto parr = std::make_unique<T[]>(size);
+  std::copy(ptr, ptr + size, parr.get());
+  auto res = spanned_data<T, Rank>(std::move(parr), make_mdspan<Rank>(init));
+  choreo_assert(res.bytes() == size * sizeof(T), "error: size does not match.",
+                __FILE__, __LINE__);
+  return res;
+}
+
+// Floating-point types
+using f32 = float;
+
+#ifndef NATIVE_FP16_SUPPORT
+// this fp16 accepts literal initialization, but without arith support
+class fp16 {
+ private:
+  uint16_t bits;  // Storage for the half-precision bits
+
+ public:
+  // Default constructor
+  fp16() : bits(0) {}
+
+  // Constructor for conversion from float
+  fp16(float value) { bits = floatToHalfBits(value); }
+
+  // Constructor for conversion from double
+  fp16(double value) { bits = floatToHalfBits(static_cast<float>(value)); }
+
+  // Implicit conversion from float
+  fp16& operator=(float value) {
+    bits = floatToHalfBits(value);
+    return *this;
+  }
+
+  // Implicit conversion from double
+  fp16& operator=(double value) {
+    bits = floatToHalfBits(static_cast<float>(value));
+    return *this;
+  }
+
+  // Function to convert float to half precision bits (naive and placeholder)
+  static uint16_t floatToHalfBits(float value) {
+    // Simplified conversion: this does not handle rounding, infinities, or NaNs
+    // correctly In practice, use a library or a fully implemented conversion
+    // function
+    int32_t fltInt32 = *((int32_t*)&value);
+    int32_t t1 = (fltInt32 & 0x7FFFFFFF) >> 13;  // Non-sign bits
+    int32_t t2 = (fltInt32 & 0x80000000) >> 16;  // Sign bit
+    int32_t t3 = ((fltInt32 & 0x7F800000) >> 13) - (112 << 10);
+
+    int32_t t4 = std::max(0, std::min(t3, (1 << 10) - 1));
+    return (t2 | t4 | t1);
+  }
+
+  // Function to convert half precision bits to float (naive and placeholder)
+  static float halfBitsToFloat(uint16_t bits) {
+    // Simplified conversion: this does not handle rounding, infinities, or NaNs
+    // correctly In practice, use a library or a fully implemented conversion
+    // function
+    int32_t t1 = (bits & 0x7FFF) << 13;  // Non-sign bits
+    int32_t t2 = (bits & 0x8000) << 16;  // Sign bit
+    int32_t t3 = ((bits & 0x7C00) << 13) + (112 << 23);
+
+    int32_t fltInt32 = t2 | t3 | t1;
+    return *((float*)&fltInt32);
+  }
+
+  // Method to get the float value from the fp16 object
+  float toFloat() const { return halfBitsToFloat(bits); }
+};
+#else
+using f16 = __fp16;
+#endif  // NATIVE_FP16_SUPPORT
+
+#ifndef NATIVE_BF16_SUPPORT
+class bf16 {
+ private:
+  uint16_t bits;  // Storage for the half-precision bits
+
+ public:
+  // Default constructor
+  bf16() : bits(0) {}
+
+  // Constructor for conversion from float
+  bf16(float value) { bits = floatToHalfBits(value); }
+
+  // Constructor for conversion from double
+  bf16(double value) { bits = floatToHalfBits(static_cast<float>(value)); }
+
+  // Implicit conversion from float
+  bf16& operator=(float value) {
+    bits = floatToHalfBits(value);
+    return *this;
+  }
+
+  // Implicit conversion from double
+  bf16& operator=(double value) {
+    bits = floatToHalfBits(static_cast<float>(value));
+    return *this;
+  }
+
+  // Function to convert float to half precision bits (naive and placeholder)
+  static uint16_t floatToHalfBits(float value) {
+    // Simplified conversion: this does not handle rounding, infinities, or NaNs
+    // correctly In practice, use a library or a fully implemented conversion
+    // function
+    int32_t fltInt32 = *((int32_t*)&value);
+    return (fltInt32 & 0xFFFF0000) >> 16;
+  }
+
+  // Function to convert half precision bits to float (naive and placeholder)
+  static float halfBitsToFloat(uint16_t bits) {
+    int32_t fltInt32 = ((uint32_t)bits) << 16;
+    return *((float*)&fltInt32);
+  }
+
+  // Method to get the float value from the bf16 object
+  float toFloat() const { return halfBitsToFloat(bits); }
+};
+#else
+// Check for __bf16 support
+#if defined(__clang__)
+#if __clang_major__ >= 11
+#define BF16_SUPPORTED 1
+using bf16 = __bf16;
+#endif
+#elif defined(__GNUC__)
+#if __GNUC__ >= 11
+#define BF16_SUPPORTED 1
+using bf16 = __bf16;
+#endif
+#endif
+#endif  // NATIVE_BF16_SUPPORT
+
+#ifndef BF16_SUPPORTED
+//#error \
+//    "Compiler does not support __bf16. Please use a compiler that supports __bf16 or define a fallback type."
+#endif
+
+// Unsigned integer types
+using u32 = uint32_t;  // 32-bit unsigned integer
+using u16 = uint16_t;  // 16-bit unsigned integer
+using u8 = uint8_t;    // 8-bit unsigned integer
+
+// Signed integer types
+using s32 = int32_t;  // 32-bit signed integer
+using s16 = int16_t;  // 16-bit signed integer
+using s8 = int8_t;    // 8-bit signed integer
+
+}  // end namespace choreo
+
+#endif  // __CHOREO_H__
+
+EOF
+
+# step 1: write the kernel source code into a temp file
+kernel_src=/tmp/1720590568821258519_1___choreo_ele_add_micro_kernel.cpp
+cat <<'EOF' > ${kernel_src}
+ /// kernel program
+extern "C" void kernel(int * lhs, int * rhs, int * out) {
+  int M = 256;
+  int K = 256;
+  int N = 256;
+  for (int m = 0; m < M; ++m) {
+    for (int no = 0; no < N/16; ++no) {
+      for (int ko = 0; ko < K/16; ++ko) {
+        // FIT VMM action
+        for (int ki = 0; ki < 16; ++ki)
+          for (int ni = 0; ni < 16; ++ni)
+            out[m*N + no*16 + ni] += lhs[m*K + ko*16 + ki]*rhs[ko*16*N + ki*N + no*16 + ni];
+        // out[i*n + j] = lhs[i*k+z] + rhs[z*n+j];
+      }
+    }
+  }
+}
+
+extern "C" void  __attribute__((no_mem_alias_in_tar, loop_iterator_less_than_1024))
+fake_kernel(int* lhs_addr_ptr, int* rhs_addr_ptr,
+                int M, int K, int N, int reduce_index, int reduce_cnt,
+                int* out_addr_ptr) {
+  int lhs_addr = reinterpret_cast<int>(lhs_addr_ptr);
+  int rhs_addr = reinterpret_cast<int>(rhs_addr_ptr);
+  int out_addr = reinterpret_cast<int>(out_addr_ptr);
+  int vmem_lhs_addr = (lhs_addr >> 6);
+  int vmem_rhs_addr = (rhs_addr >> 6);
+  int vmem_output_addr = (out_addr >> 6);
+  int* lhs = reinterpret_cast<int*>(lhs_addr);
+  int* rhs = reinterpret_cast<int*>(rhs_addr);
+  int* out = reinterpret_cast<int*>(out_addr);
+  // for (int m = 0; m < M; ++m) {
+  //   for (int no = 0; no < N; ++no) {
+  //     out_addr_ptr[m*N + no] = rhs_addr_ptr;
+  //     // out_addr_ptr[m*N + no] = vmem_output_addr;
+  //   }
+  // }
+  for (int m = 0; m < M; ++m) {
+    for (int no = 0; no < N/16; ++no) {
+      for (int ko = 0; ko < K/16; ++ko) {
+        // FIT VMM action
+        for (int ki = 0; ki < 16; ++ki)
+          for (int ni = 0; ni < 16; ++ni)
+            out[m*N + no*16 + ni] += lhs[m*K + ko*16 + ki]*rhs[ko*16*N + ki*N + no*16 + ni];
+        // out[i*n + j] = lhs[i*k+z] + rhs[z*n+j];
+      }
+    }
+  }
+}
+
+extern "C" void dot_general_kernel_lhs_parallel_no_transpose(int* lhs_addr_ptr,
+                                                            int* rhs_addr_ptr,
+                                                            int M,
+                                                            int K,
+                                                            int N,
+                                                            int reduce_index,
+                                                            int reduce_cnt,
+                                                            int* out_addr_ptr
+                                                            )
+    __attribute__((no_mem_alias_in_tar)) {
+  int Bpe = 4;
+  int lhs_addr = reinterpret_cast<int>(lhs_addr_ptr);
+  int rhs_addr = reinterpret_cast<int>(rhs_addr_ptr);
+  int out_addr = reinterpret_cast<int>(out_addr_ptr);
+  smr_t smr;
+  v16f32 vr_rhs0, vr_rhs1, vr_rhs2, vr_rhs3, vr_rhs4, vr_rhs5, vr_rhs6, vr_rhs7,
+      vr_rhs8, vr_rhs9, vr_rhs10, vr_rhs11, vr_rhs12, vr_rhs13, vr_rhs14,
+      vr_rhs15;
+  v16f32 vr_lhs0, vr_lhs1, vr_lhs2, vr_lhs3, vr_lhs4, vr_lhs5, vr_lhs6, vr_lhs7,
+      vr_lhs8, vr_lhs9, vr_lhs10, vr_lhs11, vr_lhs12, vr_lhs13, vr_lhs14,
+      vr_lhs15, vr_dummy;
+  va16f32 vacc0, vacc1, vacc2, vacc3, vacc4, vacc5, vacc6, vacc7, vacc8, vacc9,
+      vacc10, vacc11, vacc12, vacc13, vacc14, vacc15;
+
+  // Special Register Configuration
+  __dtu_c_movsr2vab_lv_s(0);
+  __dtu_c_movsr2vab_m_s1(0);
+  __dtu_c_movsr2vab_m_d(0);
+
+  //
+  // Input Address/Offset Configuration
+  //
+  // set targs base address
+  volatile int vmem_lhs_addr = reinterpret_cast<int>(lhs_addr >> 6);
+  vmem_lhs_addr = ((vmem_lhs_addr + (K >> 4)) << 16) | vmem_lhs_addr;
+  tar_t input_addr_base = __dtu_c_movsr2targ(vmem_lhs_addr);
+  // set targs base address
+  int input_offset_m = (2 * K);
+  int input_offset_n = -(K >> 4);
+  int input_offset_k_dummy = -(2 * K) + 1;
+  int input_offset_k = (K >> 3);
+  tar_t t_input_offset_n = __dtu_c_movsr2tari(
+      (input_offset_n << 16) | (input_offset_n & 0xffff), input_addr_base);
+  tar_t t_input_offset_k = __dtu_c_movsr2tari(
+      (input_offset_k << 16) | (input_offset_k & 0xffff), input_addr_base);
+  tar_t t_input_offset_k_dummy = __dtu_c_movsr2tari(
+      (input_offset_k_dummy << 16) | (input_offset_k_dummy & 0xffff),
+      input_addr_base);
+  tar_t t_input_offset_m = __dtu_c_movsr2tari(
+      (input_offset_m << 16) | (input_offset_m & 0xffff), input_addr_base);
+  //
+  // Weight Address/Offset Configuration
+  //
+  volatile int vmem_rhs_addr = reinterpret_cast<int>(rhs_addr >> 6);
+  vmem_rhs_addr = (vmem_rhs_addr) << 16 | vmem_rhs_addr;
+  tar_t weight_addr_base = __dtu_c_movsr2targ(vmem_rhs_addr);
+  int weight_offset_k = (N >> 4);
+  int weight_offset_n = -K * (N >> 4) + 1;
+  int weight_offset_m = -(N >> 4);
+  tar_t t_weight_offset_k = __dtu_c_movsr2tari(
+      (weight_offset_k << 16) | (weight_offset_k & 0xffff), weight_addr_base);
+  tar_t t_weight_offset_n = __dtu_c_movsr2tari(
+      (weight_offset_n << 16) | (weight_offset_n & 0xffff), weight_addr_base);
+  tar_t t_weight_offset_m = __dtu_c_movsr2tari(
+      (weight_offset_m << 16) | (weight_offset_m & 0xffff), weight_addr_base);
+  //
+  // Output Address Configuraiton
+  //
+  volatile int vmem_output_addr = reinterpret_cast<int>(out_addr >> 6);
+  vmem_output_addr = ((vmem_output_addr + (N >> 4)) << 16 | vmem_output_addr);
+  tar_t output_addr_base = __dtu_c_movsr2targ(vmem_output_addr);
+
+  int output_offset_n = N >> 3;
+  int output_offset_n_dummy = -(2 * N) + 1;
+  int output_offset_m = (31 * N) >> 4;
+  tar_t t_output_offset_n = __dtu_c_movsr2tari(
+      (output_offset_n << 16) | (output_offset_n & 0xffff), output_addr_base);
+  tar_t t_output_offset_n_dummy = __dtu_c_movsr2tari(
+      (output_offset_n_dummy << 16) | (output_offset_n_dummy & 0xffff),
+      output_addr_base);
+  tar_t t_output_offset_m = __dtu_c_movsr2tari(
+      (output_offset_m << 16) | (output_offset_m & 0xffff), output_addr_base);
+
+  int vab_shift = 0;
+  int naccovr = 0x1;
+  if (reduce_index == 0) {
+    naccovr = 0x10001;
+  }
+
+  vr_rhs0 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  vr_rhs1 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  vr_rhs2 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  vr_rhs3 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  vr_rhs4 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  vr_rhs5 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  vr_rhs6 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  vr_rhs7 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  vr_rhs8 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  vr_rhs9 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  vr_rhs10 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  vr_rhs11 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  vr_rhs12 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  vr_rhs13 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  vr_rhs14 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  vr_rhs15 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+  if (K == 16) {
+    vr_dummy = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_n);
+    if (N == 16)
+      vr_dummy = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_m);
+  }
+
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs0, 0);
+  vr_lhs0 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs0 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs1, 1);
+  vr_lhs1 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs1 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs2, 2);
+  vr_lhs2 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs2 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs3, 3);
+  vr_lhs3 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs3 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs4, 4);
+  vr_lhs4 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs4 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs5, 5);
+  vr_lhs5 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs5 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs6, 6);
+  vr_lhs6 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs6 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs7, 7);
+  vr_lhs7 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs7 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs8, 8);
+  vr_lhs8 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs8 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs9, 9);
+  vr_lhs9 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs9 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs10, 10);
+  vr_lhs10 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs10 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs11, 11);
+  vr_lhs11 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs11 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs12, 12);
+  vr_lhs12 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs12 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs13, 13);
+  vr_lhs13 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs13 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs14, 14);
+  vr_lhs14 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs14 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs15, 15);
+  vr_lhs15 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs15 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+  vr_dummy = __dtu_s_tivld_itar(input_addr_base, t_input_offset_k_dummy);
+  //
+  // Loop logic
+  //
+#pragma clang loop unroll(disable)
+  for (int m_idx = 0; m_idx < M; m_idx = m_idx + 32) {
+#pragma clang loop unroll(disable)
+    for (int n_idx = 0; n_idx < N; n_idx = n_idx + 16) {
+      __dtu_c_movsr2naccovr(naccovr);
+#pragma clang loop unroll(disable)
+      for (int k_idx = 0; k_idx < K; k_idx += 16) {
+        if (K == 16) {
+          vr_dummy = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_n);
+          vr_dummy = __dtu_s_tivld_itar(input_addr_base, t_input_offset_n);
+          if (n_idx == (N - 16)) {
+            vr_dummy = __dtu_s_tivld_itar(input_addr_base, t_input_offset_m);
+          }
+
+          if ((n_idx == (N - 32)) || (N == 16)) {
+            vr_dummy = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_m);
+          }
+        } else {
+          if (k_idx == (K - 32)) {
+            vr_dummy = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_n);
+            if (n_idx == (N - 16)) {
+              vr_dummy =
+                  __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_m);
+            }
+          } else if (k_idx == (K - 16)) {
+            vr_dummy = __dtu_s_tivld_itar(input_addr_base, t_input_offset_n);
+            if (n_idx == (N - 16)) {
+              vr_dummy = __dtu_s_tivld_itar(input_addr_base, t_input_offset_m);
+            }
+          }
+        }
+
+        // Unroll h & w loop here
+        // Load weight for oc0-15 ci0~ci15
+        // Load input hxw 00, 01, 02, 10, 11, 12, 20, 21, 22 caculate
+        vacc0 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc0, vr_lhs0, smr, vr_rhs0, 0);
+
+        vacc1 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc1, vr_lhs1, smr, vr_rhs1, 1);
+        vr_lhs0 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs0 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc2 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc2, vr_lhs2, smr, vr_rhs2, 2);
+        vr_lhs1 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs1 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc3 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc3, vr_lhs3, smr, vr_rhs3, 3);
+        vr_lhs2 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs2 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc4 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc4, vr_lhs4, smr, vr_rhs4, 4);
+        vr_lhs3 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs3 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc5 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc5, vr_lhs5, smr, vr_rhs5, 5);
+        vr_lhs4 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs4 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc6 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc6, vr_lhs6, smr, vr_rhs6, 6);
+        vr_lhs5 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs5 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc7 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc7, vr_lhs7, smr, vr_rhs7, 7);
+        vr_lhs6 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs6 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc8 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc8, vr_lhs8, smr, vr_rhs8, 8);
+        vr_lhs7 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs7 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc9 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc9, vr_lhs9, smr, vr_rhs9, 9);
+        vr_lhs8 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs8 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc10 =
+            __dtu_m_vmm_mode3_f_vs0_ld_row(vacc10, vr_lhs10, smr, vr_rhs10, 10);
+        vr_lhs9 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs9 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc11 =
+            __dtu_m_vmm_mode3_f_vs0_ld_row(vacc11, vr_lhs11, smr, vr_rhs11, 11);
+        vr_lhs10 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs10 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc12 =
+            __dtu_m_vmm_mode3_f_vs0_ld_row(vacc12, vr_lhs12, smr, vr_rhs12, 12);
+        vr_lhs11 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs11 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc13 =
+            __dtu_m_vmm_mode3_f_vs0_ld_row(vacc13, vr_lhs13, smr, vr_rhs13, 13);
+        vr_lhs12 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs12 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc14 =
+            __dtu_m_vmm_mode3_f_vs0_ld_row(vacc14, vr_lhs14, smr, vr_rhs14, 14);
+        vr_lhs13 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs13 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc15 =
+            __dtu_m_vmm_mode3_f_vs0_ld_row(vacc15, vr_lhs15, smr, vr_rhs15, 15);
+        vr_lhs14 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs14 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vr_lhs15 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs15 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        // Only the first time vacc need to be initialized
+        smr = __dtu_v_swapsmr(smr);
+        __dtu_c_movsr2naccovr(0x1);
+        vr_dummy = __dtu_s_tivld_itar(input_addr_base, t_input_offset_k_dummy);
+      }  // K
+
+      vab_shift += 16;
+      __dtu_c_movsr2vab_m_s1(vab_shift);
+      __dtu_c_movsr2vab_m_d(vab_shift);
+    }  // N
+  }    // M
+
+  if (reduce_index == (reduce_cnt - 1)) {
+    vab_shift = 0;
+    for (int m_idx = 0; m_idx < M; m_idx += 32) {
+      for (int n_idx = 0; n_idx < N; n_idx += 16) {
+        __dtu_l_tvsta_w(vacc0, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc1, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc2, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc3, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc4, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc5, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc6, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc7, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc8, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc9, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc10, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc11, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc12, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc13, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc14, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc15, output_addr_base, t_output_offset_n);
+
+        vab_shift += 16;
+        __dtu_c_movsr2vab_lv_s(vab_shift);
+        vr_dummy =
+            __dtu_s_tivld_itar(output_addr_base, t_output_offset_n_dummy);
+      }
+      vr_dummy = __dtu_s_tivld_itar(output_addr_base, t_output_offset_m);
+    }
+  }
+}
+
+extern "C" void dot_general_kernel_lhs_parallel(int* lhs_addr_ptr,
+                                                            int* rhs_addr_ptr,
+                                                            int M,
+                                                            int K,
+                                                            int N,
+                                                            int reduce_index,
+                                                            int reduce_cnt,
+                                                            int* out_addr_ptr
+                                                            )
+    __attribute__((no_mem_alias_in_tar)) {
+  int Bpe = 4;
+  int lhs_addr = reinterpret_cast<int>(lhs_addr_ptr);
+  int rhs_addr = reinterpret_cast<int>(rhs_addr_ptr);
+  int out_addr = reinterpret_cast<int>(out_addr_ptr);
+  smr_t smr;
+  v16f32 vr_rhs0, vr_rhs1, vr_rhs2, vr_rhs3, vr_rhs4, vr_rhs5, vr_rhs6, vr_rhs7,
+      vr_rhs8, vr_rhs9, vr_rhs10, vr_rhs11, vr_rhs12, vr_rhs13, vr_rhs14,
+      vr_rhs15;
+  v16f32 vr_lhs0, vr_lhs1, vr_lhs2, vr_lhs3, vr_lhs4, vr_lhs5, vr_lhs6, vr_lhs7,
+      vr_lhs8, vr_lhs9, vr_lhs10, vr_lhs11, vr_lhs12, vr_lhs13, vr_lhs14,
+      vr_lhs15, vr_dummy;
+  va16f32 vacc0, vacc1, vacc2, vacc3, vacc4, vacc5, vacc6, vacc7, vacc8, vacc9,
+      vacc10, vacc11, vacc12, vacc13, vacc14, vacc15;
+
+  // Special Register Configuration
+  __dtu_c_movsr2vab_lv_s(0);
+  __dtu_c_movsr2vab_m_s1(0);
+  __dtu_c_movsr2vab_m_d(0);
+
+  //
+  // Input Address/Offset Configuration
+  //
+  // set targs base address
+  volatile int vmem_lhs_addr = reinterpret_cast<int>(lhs_addr >> 6);
+  vmem_lhs_addr = ((vmem_lhs_addr + 1) << 16) | vmem_lhs_addr;
+  tar_t input_addr_base = __dtu_c_movsr2targ(vmem_lhs_addr);
+  // set targs base address
+  int input_offset_m = (32);
+  int input_offset_n = -M * ((K >> 4) + 1);
+  int input_offset_k_dummy = M - 32;
+  int input_offset_k = 2;
+  tar_t t_input_offset_n = __dtu_c_movsr2tari(
+      (input_offset_n << 16) | (input_offset_n & 0xffff), input_addr_base);
+  tar_t t_input_offset_k = __dtu_c_movsr2tari(
+      (input_offset_k << 16) | (input_offset_k & 0xffff), input_addr_base);
+  tar_t t_input_offset_k_dummy = __dtu_c_movsr2tari(
+      (input_offset_k_dummy << 16) | (input_offset_k_dummy & 0xffff),
+      input_addr_base);
+  tar_t t_input_offset_m = __dtu_c_movsr2tari(
+      (input_offset_m << 16) | (input_offset_m & 0xffff), input_addr_base);
+  //
+  // Weight Address/Offset Configuration
+  //
+  volatile int vmem_rhs_addr = reinterpret_cast<int>(rhs_addr >> 6);
+  vmem_rhs_addr = (vmem_rhs_addr) << 16 | vmem_rhs_addr;
+  tar_t weight_addr_base = __dtu_c_movsr2targ(vmem_rhs_addr);
+  int weight_offset_k = 1;
+  int weight_offset_n = -32;
+  int weight_offset_m = -K * (N >> 4);
+  tar_t t_weight_offset_k = __dtu_c_movsr2tari(
+      (weight_offset_k << 16) | (weight_offset_k & 0xffff), weight_addr_base);
+  tar_t t_weight_offset_n = __dtu_c_movsr2tari(
+      (weight_offset_n << 16) | (weight_offset_n & 0xffff), weight_addr_base);
+  tar_t t_weight_offset_m = __dtu_c_movsr2tari(
+      (weight_offset_m << 16) | (weight_offset_m & 0xffff), weight_addr_base);
+  //
+  // Output Address Configuraiton
+  //
+  volatile int vmem_output_addr = reinterpret_cast<int>(out_addr >> 6);
+  vmem_output_addr = ((vmem_output_addr + (N >> 4)) << 16 | vmem_output_addr);
+  tar_t output_addr_base = __dtu_c_movsr2targ(vmem_output_addr);
+
+  int output_offset_n = N >> 3;
+  int output_offset_n_dummy = -(2 * N) + 1;
+  int output_offset_m = (31 * N) >> 4;
+  int output_offset_dummy = -(2 * N);
+  int output_offset_zero = 0;
+  tar_t t_output_offset_n = __dtu_c_movsr2tari(
+      (output_offset_n << 16) | (output_offset_n & 0xffff), output_addr_base);
+  tar_t t_output_offset_n_dummy = __dtu_c_movsr2tari(
+      (output_offset_n_dummy << 16) | (output_offset_n_dummy & 0xffff),
+      output_addr_base);
+  tar_t t_output_offset_m = __dtu_c_movsr2tari(
+      (output_offset_m << 16) | (output_offset_m & 0xffff), output_addr_base);
+  tar_t t_output_offset_dummy = __dtu_c_movsr2tari(
+      (output_offset_dummy << 16) | (output_offset_dummy & 0xffff),
+      output_addr_base);
+  tar_t t_output_offset_zero = __dtu_c_movsr2tari(
+      (output_offset_zero << 16) | (output_offset_zero & 0xffff),
+      output_addr_base);
+
+  int vab_shift = 0;
+  int naccovr = 0x1;
+  if (reduce_index == 0) {
+    naccovr = 0x10001;
+  }
+  //
+  // Loop logic
+  //
+#pragma clang loop unroll(disable)
+  for (int m_idx = 0; m_idx < M; m_idx = m_idx + 32) {
+#pragma clang loop unroll(disable)
+    for (int n_idx = 0; n_idx < N; n_idx = n_idx + 16) {
+      __dtu_c_movsr2naccovr(naccovr);
+
+      vr_rhs0 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      vr_rhs1 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      vr_rhs2 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      vr_rhs3 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      vr_rhs4 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      vr_rhs5 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      vr_rhs6 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      vr_rhs7 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      vr_rhs8 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      vr_rhs9 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      vr_rhs10 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      vr_rhs11 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      vr_rhs12 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      vr_rhs13 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      vr_rhs14 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      vr_rhs15 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs0, 0);
+      vr_lhs0 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs0 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs1, 1);
+      vr_lhs1 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs1 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs2, 2);
+      vr_lhs2 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs2 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs3, 3);
+      vr_lhs3 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs3 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs4, 4);
+      vr_lhs4 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs4 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs5, 5);
+      vr_lhs5 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs5 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs6, 6);
+      vr_lhs6 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs6 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs7, 7);
+      vr_lhs7 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs7 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs8, 8);
+      vr_lhs8 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs8 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs9, 9);
+      vr_lhs9 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs9 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs10, 10);
+      vr_lhs10 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs10 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs11, 11);
+      vr_lhs11 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs11 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs12, 12);
+      vr_lhs12 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs12 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs13, 13);
+      vr_lhs13 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs13 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs14, 14);
+      vr_lhs14 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs14 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs15, 15);
+      vr_lhs15 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs15 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vr_dummy = __dtu_s_tivld_itar(input_addr_base, t_input_offset_k_dummy);
+
+#pragma clang loop unroll(disable)
+      for (int k_idx = 0; k_idx < K; k_idx += 16) {
+        // Unroll h & w loop here
+        // Load weight for oc0-15 ci0~ci15
+        // Load input hxw 00, 01, 02, 10, 11, 12, 20, 21, 22 caculate
+        vacc0 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc0, vr_lhs0, smr, vr_rhs0, 0);
+
+        vacc1 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc1, vr_lhs1, smr, vr_rhs1, 1);
+        vr_lhs0 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs0 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc2 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc2, vr_lhs2, smr, vr_rhs2, 2);
+        vr_lhs1 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs1 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc3 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc3, vr_lhs3, smr, vr_rhs3, 3);
+        vr_lhs2 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs2 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc4 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc4, vr_lhs4, smr, vr_rhs4, 4);
+        vr_lhs3 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs3 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc5 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc5, vr_lhs5, smr, vr_rhs5, 5);
+        vr_lhs4 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs4 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc6 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc6, vr_lhs6, smr, vr_rhs6, 6);
+        vr_lhs5 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs5 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc7 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc7, vr_lhs7, smr, vr_rhs7, 7);
+        vr_lhs6 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs6 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc8 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc8, vr_lhs8, smr, vr_rhs8, 8);
+        vr_lhs7 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs7 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc9 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc9, vr_lhs9, smr, vr_rhs9, 9);
+        vr_lhs8 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs8 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc10 =
+            __dtu_m_vmm_mode3_f_vs0_ld_row(vacc10, vr_lhs10, smr, vr_rhs10, 10);
+        vr_lhs9 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs9 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc11 =
+            __dtu_m_vmm_mode3_f_vs0_ld_row(vacc11, vr_lhs11, smr, vr_rhs11, 11);
+        vr_lhs10 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs10 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc12 =
+            __dtu_m_vmm_mode3_f_vs0_ld_row(vacc12, vr_lhs12, smr, vr_rhs12, 12);
+        vr_lhs11 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs11 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc13 =
+            __dtu_m_vmm_mode3_f_vs0_ld_row(vacc13, vr_lhs13, smr, vr_rhs13, 13);
+        vr_lhs12 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs12 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc14 =
+            __dtu_m_vmm_mode3_f_vs0_ld_row(vacc14, vr_lhs14, smr, vr_rhs14, 14);
+        vr_lhs13 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs13 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc15 =
+            __dtu_m_vmm_mode3_f_vs0_ld_row(vacc15, vr_lhs15, smr, vr_rhs15, 15);
+        vr_lhs14 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs14 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vr_lhs15 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs15 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        // Only the first time vacc need to be initialized
+        smr = __dtu_v_swapsmr(smr);
+        __dtu_c_movsr2naccovr(0x1);
+        vr_dummy = __dtu_s_tivld_itar(input_addr_base, t_input_offset_k_dummy);
+      }  // K
+
+      vab_shift += 16;
+      __dtu_c_movsr2vab_m_s1(vab_shift);
+      __dtu_c_movsr2vab_m_d(vab_shift);
+
+      vr_dummy = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_n);
+      vr_dummy = __dtu_s_tivld_itar(input_addr_base, t_input_offset_n);
+    }  // N
+
+    vr_dummy = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_m);
+    vr_dummy = __dtu_s_tivld_itar(input_addr_base, t_input_offset_m);
+  }  // M
+
+  if (reduce_index == (reduce_cnt - 1)) {
+    vab_shift = 0;
+    for (int m_idx = 0; m_idx < M; m_idx += 32) {
+      for (int n_idx = 0; n_idx < N; n_idx += 16) {
+        __dtu_l_tvsta_w(vacc0, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc1, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc2, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc3, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc4, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc5, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc6, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc7, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc8, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc9, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc10, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc11, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc12, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc13, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc14, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc15, output_addr_base, t_output_offset_n);
+
+        vab_shift += 16;
+        __dtu_c_movsr2vab_lv_s(vab_shift);
+        vr_dummy =
+            __dtu_s_tivld_itar(output_addr_base, t_output_offset_n_dummy);
+      }
+      vr_dummy = __dtu_s_tivld_itar(output_addr_base, t_output_offset_m);
+    }
+  }
+}
+
+extern "C" void __attribute__((no_mem_alias_in_tar, loop_iterator_less_than_1024))
+dot_general_fp32(int lhs_addr, int rhs_addr,
+                int M, int K, int N, int reduce_index, int reduce_cnt,
+                int out_addr) {
+  int Bpe = 4;
+  smr_t smr;
+  v16f32 vr_rhs0, vr_rhs1, vr_rhs2, vr_rhs3, vr_rhs4, vr_rhs5, vr_rhs6, vr_rhs7,
+      vr_rhs8, vr_rhs9, vr_rhs10, vr_rhs11, vr_rhs12, vr_rhs13, vr_rhs14,
+      vr_rhs15;
+  v16f32 vr_lhs0, vr_lhs1, vr_lhs2, vr_lhs3, vr_lhs4, vr_lhs5, vr_lhs6, vr_lhs7,
+      vr_lhs8, vr_lhs9, vr_lhs10, vr_lhs11, vr_lhs12, vr_lhs13, vr_lhs14,
+      vr_lhs15, vr_dummy;
+  va16f32 vacc0, vacc1, vacc2, vacc3, vacc4, vacc5, vacc6, vacc7, vacc8, vacc9,
+      vacc10, vacc11, vacc12, vacc13, vacc14, vacc15;
+  int vab_shift = 0;
+
+  //
+  // Weight Address/Offset Configuration
+  //
+  int vmem_rhs_addr = (rhs_addr >> 6);
+  vmem_rhs_addr = (vmem_rhs_addr + 3) << 16 | (vmem_rhs_addr + 2);
+  tar_t weight_addr_base = __dtu_c_movsr2targ(vmem_rhs_addr);
+  int weight_offset_k = 2;
+  int weight_offset_k_b = -6;
+  int weight_offset_k_f = 10;
+  int weight_offset_m = -(N * (K >> 4));
+  int weight_offset_zero = 0;
+  tar_t t_weight_offset_k = __dtu_c_movsr2tari(
+      (weight_offset_k << 16) | (weight_offset_k & 0xffff), weight_addr_base);
+  tar_t t_weight_offset_k_b = __dtu_c_movsr2tari(
+      (weight_offset_k_b << 16) | (weight_offset_k_b & 0xffff),
+      weight_addr_base);
+  tar_t t_weight_offset_k_f = __dtu_c_movsr2tari(
+      (weight_offset_k_f << 16) | (weight_offset_k_f & 0xffff),
+      weight_addr_base);
+  tar_t t_weight_offset_m = __dtu_c_movsr2tari(
+      (weight_offset_m << 16) | (weight_offset_m & 0xffff), weight_addr_base);
+  tar_t t_weight_offset_zero = __dtu_c_movsr2tari(
+      (weight_offset_zero << 16) | (weight_offset_zero & 0xffff),
+      weight_addr_base);
+  //
+  // Input Address/Offset Configuration
+  //
+  // set targs base address
+  int vmem_lhs_addr = (lhs_addr >> 6);
+  vmem_lhs_addr = ((vmem_lhs_addr) << 16) | vmem_lhs_addr;
+  tar_t input_addr_base = __dtu_c_movsr2targ(vmem_lhs_addr);
+  // set targs base address
+  int input_offset_m = (32) - (M * (K >> 4));
+  int input_offset_n = -(M * (K >> 4));
+  int input_offset_k_dummy = -29;
+  int input_offset_k_dummy1 = 2 * M - 31;
+  int input_offset_k = 2;
+  tar_t t_input_offset_n = __dtu_c_movsr2tari(
+      (input_offset_n << 16) | (input_offset_n & 0xffff), input_addr_base);
+  tar_t t_input_offset_k = __dtu_c_movsr2tari(
+      (input_offset_k << 16) | (input_offset_k & 0xffff), input_addr_base);
+  tar_t t_input_offset_k_dummy = __dtu_c_movsr2tari(
+      (input_offset_k_dummy << 16) | (input_offset_k_dummy & 0xffff),
+      input_addr_base);
+  tar_t t_input_offset_k_dummy1 = __dtu_c_movsr2tari(
+      (input_offset_k_dummy1 << 16) | (input_offset_k_dummy1 & 0xffff),
+      input_addr_base);
+  tar_t t_input_offset_m = __dtu_c_movsr2tari(
+      (input_offset_m << 16) | (input_offset_m & 0xffff), input_addr_base);
+
+  vr_rhs0 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  vr_rhs1 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  vr_rhs2 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+  vr_rhs3 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+  vr_rhs4 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  vr_rhs5 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  vr_rhs6 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+  vr_rhs7 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+  // Special Register Configuration
+  __dtu_c_movsr2vab_lv_s(0);
+  __dtu_c_movsr2vab_m_s1(0);
+  __dtu_c_movsr2vab_m_d(0);
+  vr_rhs8 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  vr_rhs9 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  vr_rhs10 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+  vr_rhs11 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+  vr_rhs12 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  vr_rhs13 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  vr_rhs14 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+  vr_rhs15 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+  //
+  // Output Address Configuraiton
+  //
+  int vmem_output_addr = (out_addr >> 6);
+  vmem_output_addr = ((vmem_output_addr + 1) << 16 | vmem_output_addr);
+  tar_t output_addr_base = __dtu_c_movsr2targ(vmem_output_addr);
+
+  int output_offset_n = N >> 4;
+  int output_offset_n_dummy = -N + 2 + (N >> 4);
+  int output_offset_m = (15 * (N >> 4));
+  tar_t t_output_offset_n = __dtu_c_movsr2tari(
+      (output_offset_n << 16) | (output_offset_n & 0xffff), output_addr_base);
+  tar_t t_output_offset_n_dummy = __dtu_c_movsr2tari(
+      (output_offset_n_dummy << 16) | (output_offset_n_dummy & 0xffff),
+      output_addr_base);
+  tar_t t_output_offset_m = __dtu_c_movsr2tari(
+      (output_offset_m << 16) | (output_offset_m & 0xffff), output_addr_base);
+
+  bool is_last = false;
+  int naccovr_init_value = 0x1;
+  int k_count = K >> 5;
+  int n_count = N >> 5;
+
+  if (reduce_index == 0) {
+    naccovr_init_value = 0x10001;
+  }
+
+  if (reduce_index == (reduce_cnt - 1)) {
+    is_last = true;
+  }
+  bool is_next_m = false;
+  //
+  // Loop logic
+  //
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs0, 1);
+  vr_lhs0 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs0 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs1, 2);
+  vr_lhs1 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs1 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs2, 3);
+  vr_lhs2 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs2 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs3, 0);
+  vr_lhs3 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs3 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs4, 5);
+  vr_lhs4 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs4 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs5, 6);
+  vr_lhs5 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs5 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs6, 7);
+  vr_lhs6 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs6 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs7, 4);
+  vr_lhs7 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs7 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs8, 9);
+  vr_lhs8 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs8 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs9, 10);
+  vr_lhs9 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs9 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs10, 11);
+  vr_lhs10 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs10 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs11, 8);
+  vr_lhs11 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs11 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs12, 13);
+  vr_lhs12 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs12 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs13, 14);
+  vr_lhs13 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs13 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs14, 15);
+  vr_lhs14 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+  vr_rhs14 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+  smr = __dtu_m_ldsmr_mode3_f_row(smr, vr_rhs15, 12);
+  vr_lhs15 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k_dummy);
+  vr_rhs15 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+#pragma clang loop unroll(disable)
+  for (int m_idx = 0; m_idx < M; m_idx = m_idx + 16) {
+#pragma clang loop unroll(disable)
+    for (int n_idx = 0; n_idx < N - 32; n_idx = n_idx + 32) {
+      __dtu_c_movsr2naccovr(naccovr_init_value);
+
+#pragma clang loop unroll(disable)
+      for (int k_idx = 0; k_idx < k_count - 1; k_idx += 1) {
+        // Unroll h & w loop here
+        // Load weight for oc0-15 ci0~ci15
+        // Load input hxw 00, 01, 02, 10, 11, 12, 20, 21, 22 caculate
+        vacc0 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc0, vr_lhs0, smr, vr_rhs0, 1);
+        vr_lhs0 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs0 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+        vacc1 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc1, vr_lhs1, smr, vr_rhs1, 2);
+        vr_lhs1 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs1 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc2 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc2, vr_lhs2, smr, vr_rhs2, 3);
+        vr_lhs2 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs2 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+        vacc3 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc3, vr_lhs3, smr, vr_rhs3, 0);
+        vr_lhs3 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs3 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+        vacc4 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc4, vr_lhs4, smr, vr_rhs4, 5);
+        vr_lhs4 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs4 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc5 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc5, vr_lhs5, smr, vr_rhs5, 6);
+        vr_lhs5 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs5 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc6 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc6, vr_lhs6, smr, vr_rhs6, 7);
+        vr_lhs6 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs6 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+        vacc7 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc7, vr_lhs7, smr, vr_rhs7, 4);
+        vr_lhs7 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs7 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+        vacc8 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc8, vr_lhs8, smr, vr_rhs8, 9);
+        vr_lhs8 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs8 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc9 =
+            __dtu_m_vmm_mode3_f_vs0_ld_row(vacc9, vr_lhs9, smr, vr_rhs9, 10);
+        vr_lhs9 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs9 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc10 =
+            __dtu_m_vmm_mode3_f_vs0_ld_row(vacc10, vr_lhs10, smr, vr_rhs10, 11);
+        vr_lhs10 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs10 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+        vacc11 =
+            __dtu_m_vmm_mode3_f_vs0_ld_row(vacc11, vr_lhs11, smr, vr_rhs11, 8);
+        vr_lhs11 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs11 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+        vacc12 =
+            __dtu_m_vmm_mode3_f_vs0_ld_row(vacc12, vr_lhs12, smr, vr_rhs12, 13);
+        vr_lhs12 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs12 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc13 =
+            __dtu_m_vmm_mode3_f_vs0_ld_row(vacc13, vr_lhs13, smr, vr_rhs13, 14);
+        vr_lhs13 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs13 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc14 =
+            __dtu_m_vmm_mode3_f_vs0_ld_row(vacc14, vr_lhs14, smr, vr_rhs14, 15);
+        vr_lhs14 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs14 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+        vacc15 =
+            __dtu_m_vmm_mode3_f_vs0_ld_row(vacc15, vr_lhs15, smr, vr_rhs15, 12);
+        vr_lhs15 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k_dummy1);
+        vr_rhs15 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+        // Only the first time vacc need to be initialized
+        smr = __dtu_v_swapsmr(smr);
+        __dtu_s_tvld_itar(weight_addr_base, t_weight_offset_zero);
+        __dtu_c_movsr2naccovr(0x1);
+
+        vacc0 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc0, vr_lhs0, smr, vr_rhs0, 1);
+        vr_lhs0 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs0 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+        vacc1 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc1, vr_lhs1, smr, vr_rhs1, 2);
+        vr_lhs1 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs1 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc2 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc2, vr_lhs2, smr, vr_rhs2, 3);
+        vr_lhs2 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs2 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+        vacc3 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc3, vr_lhs3, smr, vr_rhs3, 0);
+        vr_lhs3 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs3 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+        vacc4 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc4, vr_lhs4, smr, vr_rhs4, 5);
+        vr_lhs4 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs4 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc5 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc5, vr_lhs5, smr, vr_rhs5, 6);
+        vr_lhs5 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs5 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc6 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc6, vr_lhs6, smr, vr_rhs6, 7);
+        vr_lhs6 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs6 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+        vacc7 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc7, vr_lhs7, smr, vr_rhs7, 4);
+        vr_lhs7 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs7 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+        vacc8 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc8, vr_lhs8, smr, vr_rhs8, 9);
+        vr_lhs8 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs8 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc9 =
+            __dtu_m_vmm_mode3_f_vs0_ld_row(vacc9, vr_lhs9, smr, vr_rhs9, 10);
+        vr_lhs9 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs9 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc10 =
+            __dtu_m_vmm_mode3_f_vs0_ld_row(vacc10, vr_lhs10, smr, vr_rhs10, 11);
+        vr_lhs10 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs10 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+        vacc11 =
+            __dtu_m_vmm_mode3_f_vs0_ld_row(vacc11, vr_lhs11, smr, vr_rhs11, 8);
+        vr_lhs11 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs11 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+        vacc12 =
+            __dtu_m_vmm_mode3_f_vs0_ld_row(vacc12, vr_lhs12, smr, vr_rhs12, 13);
+        vr_lhs12 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs12 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc13 =
+            __dtu_m_vmm_mode3_f_vs0_ld_row(vacc13, vr_lhs13, smr, vr_rhs13, 14);
+        vr_lhs13 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs13 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+        vacc14 =
+            __dtu_m_vmm_mode3_f_vs0_ld_row(vacc14, vr_lhs14, smr, vr_rhs14, 15);
+        vr_lhs14 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+        vr_rhs14 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+        vacc15 =
+            __dtu_m_vmm_mode3_f_vs0_ld_row(vacc15, vr_lhs15, smr, vr_rhs15, 12);
+        vr_lhs15 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k_dummy);
+        vr_rhs15 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+        // Only the first time vacc need to be initialized
+        smr = __dtu_v_swapsmr(smr);
+      }  // K
+
+      // Unroll h & w loop here
+      // Load weight for oc0-15 ci0~ci15
+      // Load input hxw 00, 01, 02, 10, 11, 12, 20, 21, 22 caculate
+      vacc0 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc0, vr_lhs0, smr, vr_rhs0, 1);
+      vr_lhs0 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs0 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vacc1 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc1, vr_lhs1, smr, vr_rhs1, 2);
+      vr_lhs1 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs1 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vacc2 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc2, vr_lhs2, smr, vr_rhs2, 3);
+      vr_lhs2 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs2 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+      vacc3 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc3, vr_lhs3, smr, vr_rhs3, 0);
+      vr_lhs3 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs3 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+      vacc4 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc4, vr_lhs4, smr, vr_rhs4, 5);
+      vr_lhs4 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs4 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vacc5 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc5, vr_lhs5, smr, vr_rhs5, 6);
+      vr_lhs5 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs5 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vacc6 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc6, vr_lhs6, smr, vr_rhs6, 7);
+      vr_lhs6 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs6 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+      vacc7 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc7, vr_lhs7, smr, vr_rhs7, 4);
+      vr_lhs7 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs7 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+      vacc8 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc8, vr_lhs8, smr, vr_rhs8, 9);
+      vr_lhs8 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs8 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vacc9 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc9, vr_lhs9, smr, vr_rhs9, 10);
+      vr_lhs9 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs9 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vacc10 =
+          __dtu_m_vmm_mode3_f_vs0_ld_row(vacc10, vr_lhs10, smr, vr_rhs10, 11);
+      vr_lhs10 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs10 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+      vacc11 =
+          __dtu_m_vmm_mode3_f_vs0_ld_row(vacc11, vr_lhs11, smr, vr_rhs11, 8);
+      vr_lhs11 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs11 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+      vacc12 =
+          __dtu_m_vmm_mode3_f_vs0_ld_row(vacc12, vr_lhs12, smr, vr_rhs12, 13);
+      vr_lhs12 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs12 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vacc13 =
+          __dtu_m_vmm_mode3_f_vs0_ld_row(vacc13, vr_lhs13, smr, vr_rhs13, 14);
+      vr_lhs13 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs13 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vacc14 =
+          __dtu_m_vmm_mode3_f_vs0_ld_row(vacc14, vr_lhs14, smr, vr_rhs14, 15);
+      vr_lhs14 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs14 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+      vacc15 =
+          __dtu_m_vmm_mode3_f_vs0_ld_row(vacc15, vr_lhs15, smr, vr_rhs15, 12);
+      vr_lhs15 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k_dummy1);
+      vr_rhs15 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+      // Only the first time vacc need to be initialized
+      vr_dummy = __dtu_s_tvld_itar(input_addr_base, t_input_offset_n);
+      __dtu_c_movsr2naccovr(0x1);
+      smr = __dtu_v_swapsmr(smr);
+
+      vacc0 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc0, vr_lhs0, smr, vr_rhs0, 1);
+      vr_lhs0 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs0 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vacc1 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc1, vr_lhs1, smr, vr_rhs1, 2);
+      vr_lhs1 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs1 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      vacc2 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc2, vr_lhs2, smr, vr_rhs2, 3);
+      vr_lhs2 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs2 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+      vacc3 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc3, vr_lhs3, smr, vr_rhs3, 0);
+      vr_lhs3 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs3 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+      vacc4 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc4, vr_lhs4, smr, vr_rhs4, 5);
+      vr_lhs4 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs4 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vacc5 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc5, vr_lhs5, smr, vr_rhs5, 6);
+      vr_lhs5 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs5 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vacc6 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc6, vr_lhs6, smr, vr_rhs6, 7);
+      vr_lhs6 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs6 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+      vacc7 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc7, vr_lhs7, smr, vr_rhs7, 4);
+      vr_lhs7 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs7 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+      vacc8 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc8, vr_lhs8, smr, vr_rhs8, 9);
+      vr_lhs8 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs8 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vacc9 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc9, vr_lhs9, smr, vr_rhs9, 10);
+      vr_lhs9 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs9 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vacc10 =
+          __dtu_m_vmm_mode3_f_vs0_ld_row(vacc10, vr_lhs10, smr, vr_rhs10, 11);
+      vr_lhs10 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs10 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+      vacc11 =
+          __dtu_m_vmm_mode3_f_vs0_ld_row(vacc11, vr_lhs11, smr, vr_rhs11, 8);
+      vr_lhs11 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs11 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+      vacc12 =
+          __dtu_m_vmm_mode3_f_vs0_ld_row(vacc12, vr_lhs12, smr, vr_rhs12, 13);
+      vr_lhs12 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs12 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vacc13 =
+          __dtu_m_vmm_mode3_f_vs0_ld_row(vacc13, vr_lhs13, smr, vr_rhs13, 14);
+      vr_lhs13 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs13 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vacc14 =
+          __dtu_m_vmm_mode3_f_vs0_ld_row(vacc14, vr_lhs14, smr, vr_rhs14, 15);
+      vr_lhs14 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs14 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+      vacc15 =
+          __dtu_m_vmm_mode3_f_vs0_ld_row(vacc15, vr_lhs15, smr, vr_rhs15, 12);
+      vr_lhs15 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k_dummy);
+      vr_rhs15 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+      // Only the first time vacc need to be initialized
+      vab_shift += 16;
+      smr = __dtu_v_swapsmr(smr);
+      __dtu_c_movsr2vab_m_s1(vab_shift);
+      __dtu_c_movsr2vab_m_d(vab_shift);
+    }  // N
+
+    __dtu_c_movsr2naccovr(naccovr_init_value);
+
+#pragma clang loop unroll(disable)
+    for (int k_idx = 0; k_idx < k_count - 1; k_idx += 1) {
+      // Unroll h & w loop here
+      // Load weight for oc0-15 ci0~ci15
+      // Load input hxw 00, 01, 02, 10, 11, 12, 20, 21, 22 caculate
+      vacc0 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc0, vr_lhs0, smr, vr_rhs0, 1);
+      vr_lhs0 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs0 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      vacc1 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc1, vr_lhs1, smr, vr_rhs1, 2);
+      vr_lhs1 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs1 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vacc2 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc2, vr_lhs2, smr, vr_rhs2, 3);
+      vr_lhs2 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs2 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+      vacc3 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc3, vr_lhs3, smr, vr_rhs3, 0);
+      vr_lhs3 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs3 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+      vacc4 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc4, vr_lhs4, smr, vr_rhs4, 5);
+      vr_lhs4 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs4 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vacc5 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc5, vr_lhs5, smr, vr_rhs5, 6);
+      vr_lhs5 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs5 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vacc6 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc6, vr_lhs6, smr, vr_rhs6, 7);
+      vr_lhs6 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs6 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+      vacc7 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc7, vr_lhs7, smr, vr_rhs7, 4);
+      vr_lhs7 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs7 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+      vacc8 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc8, vr_lhs8, smr, vr_rhs8, 9);
+      vr_lhs8 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs8 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vacc9 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc9, vr_lhs9, smr, vr_rhs9, 10);
+      vr_lhs9 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs9 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vacc10 =
+          __dtu_m_vmm_mode3_f_vs0_ld_row(vacc10, vr_lhs10, smr, vr_rhs10, 11);
+      vr_lhs10 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs10 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+      vacc11 =
+          __dtu_m_vmm_mode3_f_vs0_ld_row(vacc11, vr_lhs11, smr, vr_rhs11, 8);
+      vr_lhs11 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs11 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+      vacc12 =
+          __dtu_m_vmm_mode3_f_vs0_ld_row(vacc12, vr_lhs12, smr, vr_rhs12, 13);
+      vr_lhs12 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs12 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vacc13 =
+          __dtu_m_vmm_mode3_f_vs0_ld_row(vacc13, vr_lhs13, smr, vr_rhs13, 14);
+      vr_lhs13 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs13 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vacc14 =
+          __dtu_m_vmm_mode3_f_vs0_ld_row(vacc14, vr_lhs14, smr, vr_rhs14, 15);
+      vr_lhs14 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs14 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+      vacc15 =
+          __dtu_m_vmm_mode3_f_vs0_ld_row(vacc15, vr_lhs15, smr, vr_rhs15, 12);
+      vr_lhs15 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k_dummy1);
+      vr_rhs15 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+      // Only the first time vacc need to be initialized
+      smr = __dtu_v_swapsmr(smr);
+      __dtu_s_tvld_itar(weight_addr_base, t_weight_offset_zero);
+      __dtu_c_movsr2naccovr(0x1);
+
+      vacc0 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc0, vr_lhs0, smr, vr_rhs0, 1);
+      vr_lhs0 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs0 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+      vacc1 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc1, vr_lhs1, smr, vr_rhs1, 2);
+      vr_lhs1 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs1 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vacc2 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc2, vr_lhs2, smr, vr_rhs2, 3);
+      vr_lhs2 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs2 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+      vacc3 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc3, vr_lhs3, smr, vr_rhs3, 0);
+      vr_lhs3 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs3 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+      vacc4 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc4, vr_lhs4, smr, vr_rhs4, 5);
+      vr_lhs4 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs4 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vacc5 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc5, vr_lhs5, smr, vr_rhs5, 6);
+      vr_lhs5 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs5 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vacc6 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc6, vr_lhs6, smr, vr_rhs6, 7);
+      vr_lhs6 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs6 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+      vacc7 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc7, vr_lhs7, smr, vr_rhs7, 4);
+      vr_lhs7 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs7 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+      vacc8 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc8, vr_lhs8, smr, vr_rhs8, 9);
+      vr_lhs8 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs8 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vacc9 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc9, vr_lhs9, smr, vr_rhs9, 10);
+      vr_lhs9 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs9 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vacc10 =
+          __dtu_m_vmm_mode3_f_vs0_ld_row(vacc10, vr_lhs10, smr, vr_rhs10, 11);
+      vr_lhs10 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs10 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+      vacc11 =
+          __dtu_m_vmm_mode3_f_vs0_ld_row(vacc11, vr_lhs11, smr, vr_rhs11, 8);
+      vr_lhs11 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs11 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+      vacc12 =
+          __dtu_m_vmm_mode3_f_vs0_ld_row(vacc12, vr_lhs12, smr, vr_rhs12, 13);
+      vr_lhs12 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs12 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vacc13 =
+          __dtu_m_vmm_mode3_f_vs0_ld_row(vacc13, vr_lhs13, smr, vr_rhs13, 14);
+      vr_lhs13 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs13 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+      vacc14 =
+          __dtu_m_vmm_mode3_f_vs0_ld_row(vacc14, vr_lhs14, smr, vr_rhs14, 15);
+      vr_lhs14 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+      vr_rhs14 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+      vacc15 =
+          __dtu_m_vmm_mode3_f_vs0_ld_row(vacc15, vr_lhs15, smr, vr_rhs15, 12);
+      vr_lhs15 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k_dummy);
+      vr_rhs15 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+      // Only the first time vacc need to be initialized
+      smr = __dtu_v_swapsmr(smr);
+    }  // K
+
+    { vr_dummy = __dtu_s_tvld_itar(weight_addr_base, t_weight_offset_m); }
+    __dtu_c_movsr2vab_m_s1(vab_shift);
+
+    // Unroll h & w loop here
+    // Load weight for oc0-15 ci0~ci15
+    // Load input hxw 00, 01, 02, 10, 11, 12, 20, 21, 22 caculate
+    vacc0 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc0, vr_lhs0, smr, vr_rhs0, 1);
+    vr_lhs0 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs0 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+    vacc1 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc1, vr_lhs1, smr, vr_rhs1, 2);
+    vr_lhs1 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs1 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+    vacc2 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc2, vr_lhs2, smr, vr_rhs2, 3);
+    vr_lhs2 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs2 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+    vacc3 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc3, vr_lhs3, smr, vr_rhs3, 0);
+    vr_lhs3 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs3 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+    vacc4 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc4, vr_lhs4, smr, vr_rhs4, 5);
+    vr_lhs4 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs4 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+    vacc5 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc5, vr_lhs5, smr, vr_rhs5, 6);
+    vr_lhs5 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs5 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+    vacc6 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc6, vr_lhs6, smr, vr_rhs6, 7);
+    vr_lhs6 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs6 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+    vacc7 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc7, vr_lhs7, smr, vr_rhs7, 4);
+    vr_lhs7 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs7 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+    vacc8 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc8, vr_lhs8, smr, vr_rhs8, 9);
+    vr_lhs8 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs8 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+    vacc9 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc9, vr_lhs9, smr, vr_rhs9, 10);
+    vr_lhs9 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs9 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+    vacc10 =
+        __dtu_m_vmm_mode3_f_vs0_ld_row(vacc10, vr_lhs10, smr, vr_rhs10, 11);
+    vr_lhs10 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs10 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+    vacc11 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc11, vr_lhs11, smr, vr_rhs11, 8);
+    vr_lhs11 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs11 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+    vacc12 =
+        __dtu_m_vmm_mode3_f_vs0_ld_row(vacc12, vr_lhs12, smr, vr_rhs12, 13);
+    vr_lhs12 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs12 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+    vacc13 =
+        __dtu_m_vmm_mode3_f_vs0_ld_row(vacc13, vr_lhs13, smr, vr_rhs13, 14);
+    vr_lhs13 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs13 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+    vacc14 =
+        __dtu_m_vmm_mode3_f_vs0_ld_row(vacc14, vr_lhs14, smr, vr_rhs14, 15);
+    vr_lhs14 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs14 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+    vacc15 =
+        __dtu_m_vmm_mode3_f_vs0_ld_row(vacc15, vr_lhs15, smr, vr_rhs15, 12);
+    vr_lhs15 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k_dummy1);
+    vr_rhs15 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+    // Only the first time vacc need to be initialized
+    __dtu_c_movsr2naccovr(0x1);
+    vr_dummy = __dtu_s_tvld_itar(input_addr_base, t_input_offset_m);
+    smr = __dtu_v_swapsmr(smr);
+
+    vacc0 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc0, vr_lhs0, smr, vr_rhs0, 1);
+    vr_lhs0 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs0 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+    vacc1 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc1, vr_lhs1, smr, vr_rhs1, 2);
+    vr_lhs1 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs1 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+    vacc2 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc2, vr_lhs2, smr, vr_rhs2, 3);
+    vr_lhs2 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs2 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+    vacc3 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc3, vr_lhs3, smr, vr_rhs3, 0);
+    vr_lhs3 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs3 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+    vacc4 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc4, vr_lhs4, smr, vr_rhs4, 5);
+    vr_lhs4 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs4 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+    vacc5 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc5, vr_lhs5, smr, vr_rhs5, 6);
+    vr_lhs5 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs5 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+    vacc6 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc6, vr_lhs6, smr, vr_rhs6, 7);
+    vr_lhs6 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs6 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+    vacc7 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc7, vr_lhs7, smr, vr_rhs7, 4);
+    vr_lhs7 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs7 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+    vacc8 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc8, vr_lhs8, smr, vr_rhs8, 9);
+    vr_lhs8 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs8 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+    vacc9 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc9, vr_lhs9, smr, vr_rhs9, 10);
+    vr_lhs9 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs9 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+    vacc10 =
+        __dtu_m_vmm_mode3_f_vs0_ld_row(vacc10, vr_lhs10, smr, vr_rhs10, 11);
+    vr_lhs10 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs10 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+    vacc11 = __dtu_m_vmm_mode3_f_vs0_ld_row(vacc11, vr_lhs11, smr, vr_rhs11, 8);
+    vr_lhs11 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs11 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+    vacc12 =
+        __dtu_m_vmm_mode3_f_vs0_ld_row(vacc12, vr_lhs12, smr, vr_rhs12, 13);
+    vr_lhs12 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs12 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+    vacc13 =
+        __dtu_m_vmm_mode3_f_vs0_ld_row(vacc13, vr_lhs13, smr, vr_rhs13, 14);
+    vr_lhs13 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs13 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k);
+
+    vacc14 =
+        __dtu_m_vmm_mode3_f_vs0_ld_row(vacc14, vr_lhs14, smr, vr_rhs14, 15);
+    vr_lhs14 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k);
+    vr_rhs14 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_b);
+
+    vacc15 =
+        __dtu_m_vmm_mode3_f_vs0_ld_row(vacc15, vr_lhs15, smr, vr_rhs15, 12);
+    vr_lhs15 = __dtu_s_tvld_itar(input_addr_base, t_input_offset_k_dummy);
+    vr_rhs15 = __dtu_s_tivld_itar(weight_addr_base, t_weight_offset_k_f);
+
+    // Only the first time vacc need to be initialized
+    vab_shift += 16;
+    smr = __dtu_v_swapsmr(smr);
+    __dtu_c_movsr2vab_m_s1(vab_shift);
+    __dtu_c_movsr2vab_m_d(vab_shift);
+  }  // M
+
+  if (is_last) {
+    vab_shift = 0;
+#pragma clang loop unroll(disable)
+    for (int m_idx = 0; m_idx < M; m_idx = m_idx + 16) {
+#pragma clang loop unroll(disable)
+      for (int n_idx = 0; n_idx < n_count; n_idx = n_idx + 1) {
+        __dtu_l_tvsta_w(vacc0, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc1, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc2, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc3, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc4, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc5, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc6, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc7, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc8, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc9, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc10, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc11, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc12, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc13, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc14, output_addr_base, t_output_offset_n);
+        __dtu_l_tvsta_w(vacc15, output_addr_base, t_output_offset_n_dummy);
+        vab_shift += 16;
+        __dtu_c_movsr2vab_lv_s(vab_shift);
+      }
+      vr_dummy = __dtu_s_tivld_itar(output_addr_base, t_output_offset_m);
+    }
+  }
+}
+
+EOF
+
+# step 2: write the factor source code into a temp file
+factor_src=/tmp/1720590568821261539_1___choreo_ele_add_factor.cpp
+cat <<'EOF' > ${factor_src}
+#include <vector>
+
+#include "gcu/factor/factor.h"
+
+using namespace factor;
+void __choreo_ele_add() {
+  include_("/tmp/1720590568821258519_1___choreo_ele_add_micro_kernel.cpp");
+  auto lhs_type = DRAMType(IntType(32), {512, 1024});
+  auto rhs_type = DRAMType(IntType(32), {1024, 1024});
+  auto output_type = DRAMType(IntType(32), {512, 1024});
+
+  // choreo-factor dataflow function
+  D(main_)({lhs_type, rhs_type}, [&](auto args) {
+    auto output = alloc_(output_type);
+    Dim3 grid_dim(1);
+    Dim3 block_dim(1);
+    Value stream = alloc_stream_();
+    create_stream_(stream);
+    auto ts = launch_kernel_("__choreo_ele_add", grid_dim, block_dim, stream, {args[0], args[1]}, {output});
+    destroy_stream_(stream);
+    dealloc_stream_(stream);
+    return std::vector<Value>{output};
+  }); // end of choreo-factor dataflow program
+
+  
+  D(func_)("__choreo_ele_add", {lhs_type, rhs_type}, {output_type}, [&](auto args, auto results) {
+    auto & output = results[0];
+    auto thread_id = thread_id_();
+    auto block_id = block_id_();
+    auto l2_out = alloc_(SRAMType(IntType(32),{512, 1024}));
+    auto lhs_load_buffer = alloc_(SRAMType(IntType(32),{512, 1024}));
+    auto lhs_load = alloc_dma_(CDMAType()).shared_();
+    auto rhs_load_buffer = alloc_(SRAMType(IntType(32),{1024, 1024}));
+    auto rhs_load = alloc_dma_(CDMAType()).shared_();
+
+    // CHANGE II: alloc pingpong buffer
+    // ping
+    auto lhs_load_s_buffer_0 = alloc_(L1Type(IntType(32),{128, 256}));
+    auto rhs_load_s_buffer_0 = alloc_(L1Type(IntType(32),{256, 128}));
+    // auto lhs_load_s_0 = alloc_dma_(SDMAType());
+    // auto rhs_load_s_0 = alloc_dma_(SDMAType());
+
+    // pong
+    auto lhs_load_s_buffer_1 = alloc_(L1Type(IntType(32),{128, 256}));
+    auto rhs_load_s_buffer_1 = alloc_(L1Type(IntType(32),{256, 128}));
+    // auto lhs_load_s_1 = alloc_dma_(SDMAType());
+    // auto rhs_load_s_1 = alloc_dma_(SDMAType());
+
+    auto lhs_load_s = alloc_dma_(SDMAType());
+    auto rhs_load_s = alloc_dma_(SDMAType());
+    auto out_load_s_buffer = alloc_(L1Type(IntType(32),{128, 128}));
+    auto out_load_s = alloc_dma_(SDMAType());
+    auto out_store_s = alloc_dma_(SDMAType());
+
+    // CHANGE I: cdma to shared_()
+    // auto out_store = alloc_dma_(CDMAType());
+    auto out_store = alloc_dma_(CDMAType()).shared_();
+    var_ m_tile(IntType(32));
+    m_tile = 0;
+    var_ k_tile(IntType(32));
+    k_tile = 0;
+    var_ n_tile(IntType(32));
+    n_tile = 0;
+    for_(m_tile, 1, 1, [&](auto iv_m_tile) {
+      for_(n_tile, 1, 1, [&](auto iv_n_tile) {
+        auto l2_out_init = alloc_dma_(CDMAType());
+        memset_(l2_out_init, l2_out, 0);
+        for_(k_tile, 1, 1, [&](auto iv_k_tile) {
+          async_load_(lhs_load, args[0], lhs_load_buffer, {Value(512)*iv_m_tile,Value(1024)*iv_k_tile}).multi_notify_(lhs_load_s);
+          async_load_(rhs_load, args[1], rhs_load_buffer, {Value(1024)*iv_k_tile,Value(1024)*iv_n_tile}).multi_notify_(rhs_load_s);
+          // async_load_(lhs_load, args[0], lhs_load_buffer, {Value(512)*iv_m_tile,Value(1024)*iv_k_tile});
+          // async_load_(rhs_load, args[1], rhs_load_buffer, {Value(1024)*iv_k_tile,Value(1024)*iv_n_tile});
+          // wait_dma_(lhs_load);
+          // wait_dma_(rhs_load);
+          var_ m_tile_s(IntType(32));
+          m_tile_s = 0;
+          var_ k_tile_s(IntType(32));
+          k_tile_s = 0;
+          var_ n_tile_s(IntType(32));
+          n_tile_s = 0;
+
+          // CHANGE III: generate pingpong var decl
+          // pingpong var decl
+          var_ pingpong(IntType(32));
+          pingpong = 0;
+          for_(m_tile_s, 4, 1, [&](auto iv_m_tile_s) {
+            for_(n_tile_s, 8, 1, [&](auto iv_n_tile_s) {
+              for_(k_tile_s, 4, 1, [&](auto iv_k_tile_s) {
+                // auto lhs_load_s = select_(pingpong == 0, lhs_load_s_0, lhs_load_s_1);
+                // auto rhs_load_s = select_(pingpong == 0, rhs_load_s_0, rhs_load_s_1);
+                async_load_(out_load_s, l2_out, out_load_s_buffer, {Value(128)*iv_m_tile_s,Value(128)*iv_n_tile_s});
+
+                // CHANGE IV: insert select by pingpong
+                auto lhs_load_s_buffer = select_(pingpong == 0, lhs_load_s_buffer_0, lhs_load_s_buffer_1);
+                auto rhs_load_s_buffer = select_(pingpong == 0, rhs_load_s_buffer_0, rhs_load_s_buffer_1);
+                async_load_(lhs_load_s, lhs_load_buffer, lhs_load_s_buffer, {Value(128)*iv_m_tile_s,Value(256)*iv_k_tile_s}).wait_on_(lhs_load);
+                async_load_(rhs_load_s, rhs_load_buffer, rhs_load_s_buffer, {Value(256)*iv_k_tile_s,Value(128)*iv_n_tile_s}).wait_on_(rhs_load);
+                wait_dma_(out_load_s);
+                call_("dot_general_kernel_lhs_parallel", {lhs_load_s_buffer.addr_(),rhs_load_s_buffer.addr_(),128,256,128,0,8,out_load_s_buffer.addr_()});
+		            // async_store_(out_store_s, out_load_s_buffer, l2_out, {Value(128)*iv_m_tile_s,Value(128)*iv_n_tile_s});
+		            // wait_dma_(out_store_s);
+		            async_store_(out_store_s, out_load_s_buffer, l2_out, {Value(128)*iv_m_tile_s,Value(128)*iv_n_tile_s}).notify_(out_store);
+
+		            // CHANGE V: insert pingpong var varing rule at tail
+                pingpong = var_(1) - pingpong;
+              }); // end of choreo-foreach block.
+            }); // end of choreo-foreach block.
+          }); // end of choreo-foreach block.
+        }); // end of choreo-foreach block.
+	      async_store_(out_store, l2_out, output, {Value(512)*iv_m_tile,Value(1024)*iv_n_tile}).multi_wait_on_(out_store_s);
+	      // async_store_(out_store, l2_out, output, {Value(512)*iv_m_tile,Value(1024)*iv_n_tile});
+        // wait_dma_(out_store);
+      }); // end of choreo-foreach block.
+    }); // end of choreo-foreach block.
+  }); // end of choreo-factor kernel function
+}
+
+MODULE_REGISTER("module__choreo_ele_add", __choreo_ele_add);
+EOF
+
+# step 3: compile factor code into a binary
+factor_bin=/tmp/1720590568821263440_1___choreo_ele_add_factor.fb
+# TODO: sfc ${factor_src} -o ${factor_bin}
+
+# step 4: generate the host source
+host_src=/tmp/1720590568821265207_1___choreo_ele_add_host.cpp
+cat <<'EOF' > ${host_src}
+#include "choreo.h"
+#include <chrono>
+
+// extern "C" void kernel(int * lhs, int * rhs, int * out, int m, int k, int n) {
+ /// end of kernel decl
+
+// UPDATE: from kernel-6, it only occupies half of the L1 mem, which is not optimised enough for reuse.
+// for kernel-7, let us try a <256,256,256> setting, where occupies 3/4 of L1 MEM
+
+// Analysis 1:
+//
+// HW: in DORADO: 1 card = 2 clusters = 6 csb = 6 L2 = 24 SIP = 24 L1, each CSB = 8MB, each L1 = 1 MB
+//
+// GMEM: unchanged from kernel 5 
+// SMEM: unchanged from kernel 5 
+// LMEM: lhs_load_s=<64x1024>=256KB, rhs_load=<1024x64>=256KB, l2_out=<64x64>=4KB  < 1MB
+
+// Analysis: compute intensity
+// kernel 6 calculate <32x32> results per thread requires:
+//   32x1024 loads from lhs
+//   32x1024 loads from rhs
+//   32x32 loads and stores from out
+//   => 65 loads + 1 store per result
+//
+// kernel 7 calculate <256x256> results per thread requires:
+//   256x256x4 loads from lhs
+//   256x256x4 loads from rhs
+//   256x256x4 loads and stores from out
+//   => 12 loads and 4 store per result
+
+
+#include <chrono>
+#include <fstream>
+#include <iostream>
+#include <iterator>
+#include <string>
+#include <vector>
+
+// dependant on the topsruntime
+#include "tops/tops_ext.h"
+#include "tops/tops_runtime.h"
+
+// choreo header
+#include "choreo.h"
+
+using namespace choreo;
+
+namespace {
+
+// Nasty data copy. Need optimization together with factor
+template <typename T, int Rank>
+static inline std::vector<uint8_t>
+ToFactorData(const spanned_view<T, Rank> &v) {
+  return std::vector<uint8_t>((const uint8_t *)(v.data()), v.bytes());
+}
+
+template <int N, typename T, typename U>
+static inline spanned_data<T, N>
+ToSpanned(const std::vector<U> &v, std::initializer_list<int> && shape) {
+  return copy_as_spanned<N, T>((T*)v.data(), v.size() * sizeof(U), shape);
+}
+
+// must be true
+//#define CHECK(a) choreo_assert((a), "", __FILE__, __LINE__)
+#define CHECK(a) (a)
+
+} // end anonymous namespace
+choreo::spanned_data<choreo::s32, 2> ele_add(const choreo::spanned_view<choreo::s32, 2> & hp0, const choreo::spanned_view<choreo::s32, 2> & hp1);
+#include "choreo.h"
+#include <chrono>
+
+// extern "C" void kernel(int * lhs, int * rhs, int * out, int m, int k, int n) {
+ /// end of kernel decl
+
+// UPDATE: from kernel-6, it only occupies half of the L1 mem, which is not optimised enough for reuse.
+// for kernel-7, let us try a <256,256,256> setting, where occupies 3/4 of L1 MEM
+
+// Analysis 1:
+//
+// HW: in DORADO: 1 card = 2 clusters = 6 csb = 6 L2 = 24 SIP = 24 L1, each CSB = 8MB, each L1 = 1 MB
+//
+// GMEM: unchanged from kernel 5 
+// SMEM: unchanged from kernel 5 
+// LMEM: lhs_load_s=<64x1024>=256KB, rhs_load=<1024x64>=256KB, l2_out=<64x64>=4KB  < 1MB
+
+// Analysis: compute intensity
+// kernel 6 calculate <32x32> results per thread requires:
+//   32x1024 loads from lhs
+//   32x1024 loads from rhs
+//   32x32 loads and stores from out
+//   => 65 loads + 1 store per result
+//
+// kernel 7 calculate <256x256> results per thread requires:
+//   256x256x4 loads from lhs
+//   256x256x4 loads from rhs
+//   256x256x4 loads and stores from out
+//   => 12 loads and 4 store per result
+
+choreo::spanned_data<choreo::s32, 2> ele_add(const choreo::spanned_view<choreo::s32, 2> & hp0, const choreo::spanned_view<choreo::s32, 2> & hp1) {
+  choreo::runtime_check(hp0.shape()[0] == 512, "shape inconstant on 1st parameter (dim: 0).");
+  choreo::runtime_check(hp0.shape()[1] == 1024, "shape inconstant on 1st parameter (dim: 1).");
+  choreo::runtime_check(hp1.shape()[0] == 1024, "shape inconstant on 2th parameter (dim: 0).");
+  choreo::runtime_check(hp1.shape()[1] == 1024, "shape inconstant on 2th parameter (dim: 1).");
+
+  std::vector<char> binary;
+  // Read bin file and store to a vector
+  std::ifstream ifs("/tmp/1720590568821263440_1___choreo_ele_add_factor.fb", std::ios::binary);
+  std::copy(std::istreambuf_iterator<char>(ifs),
+            std::istreambuf_iterator<char>(), std::back_inserter(binary));
+  ifs.close();
+
+  // Create executable
+  topsExecutable_t executable = nullptr;
+  CHECK(topsCreateExecutable(&executable, binary.data(), binary.size()));
+  topsStream_t stream = nullptr;
+  CHECK(topsStreamCreate(&stream));
+
+  void *in_mem0 = nullptr;
+  CHECK(topsMalloc(&in_mem0, 2097152));
+  CHECK(topsMemcpy(in_mem0, reinterpret_cast<void *>(hp0.data()), 2097152, topsMemcpyHostToDevice));
+  void *in_mem1 = nullptr;
+  CHECK(topsMalloc(&in_mem1, 4194304));
+  CHECK(topsMemcpy(in_mem1, reinterpret_cast<void *>(hp1.data()), 4194304, topsMemcpyHostToDevice));
+  void * device_inputs[] = {in_mem0, in_mem1};
+
+  void * out_mem = nullptr;
+  CHECK(topsMalloc(&out_mem, 2097152));
+  void *device_outputs[] = {out_mem};
+  int64_t input_dims[] = {512, 1024, 1024, 1024};
+  size_t input_ranks[] = {2, 2};
+
+  auto start = std::chrono::high_resolution_clock::now();
+
+  CHECK(topsLaunchExecutableV2(
+      executable, nullptr, device_inputs,
+      sizeof(device_inputs) / sizeof(void *), (int64_t*)input_dims,
+      (size_t*)input_ranks, device_outputs,
+      sizeof(device_outputs) / sizeof(void *), stream));
+  CHECK(topsStreamSynchronize(stream));
+
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+  std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
+
+  auto res = choreo::make_spandata<s32, 2>({512, 1024});
+  // Copy output data from device to host
+  CHECK(topsMemcpy(reinterpret_cast<void *>(res.data()), out_mem,
+                  2097152, topsMemcpyDeviceToHost));
+
+  // Free up the resources";
+  topsFree(in_mem0);
+  topsFree(in_mem1);
+
+  topsStreamDestroy(stream);
+  topsDestroyExecutable(executable);
+  return res;
+}
+
+
+int main() { /// host program
+  choreo::s32 a[512][1024] = {0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::s32 b[512][512] = {0};
+  choreo::s32 b[1024][1024] = {0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::s32 b[512][512] = {0};
+  std::fill_n(&a[0][0], sizeof(a) / sizeof(a[0][0]), 1);
+  std::fill_n(&b[0][0], sizeof(b) / sizeof(b[0][0]), 1);
+  auto lhs_data = choreo::make_spanview<2, choreo::s32>((int*)a, {512, 1024});
+  auto rhs_data = choreo::make_spanview<2, choreo::s32>((int*)b, {1024, 1024});
+
+  auto start = std::chrono::high_resolution_clock::now();
+
+  auto res
+    = ele_add(lhs_data, rhs_data);
+
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
+  std::cout << res.shape()[0] << std::endl;
+  std::cout << res.shape()[1] << std::endl;
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+        // std::cout << "i: " << i << ", j: " << j << "\n";
+        // std::cout << "res: " << res[i][j] << "\n";
+        int ref = 0;
+        for (size_t k = 0; k < lhs_data.shape()[1]; ++k) {
+          ref += a[i][k]*b[k][j];
+
+        }
+        // std::cout << "ref: " << ref << std::endl;
+        // assert(ref == res[i][j]);
+      }
+  // std::cout << "Test Passed\n" << std::endl;
+  std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
+}
+
+EOF
+
+# step 5: compile the host source to target executable
+target=__choreo_ele_add
+# TODO: sfc ${host_src} -o ${target}
+
+if command -v nvim &> /dev/null
+then
+  EDITOR=nvim
+else
+  EDITOR=less
+fi
+if [ "$#" -gt 1 ]; then
+    echo "    Usage: $0 | --execute           -> compile and execute choreo in factor
+                    | --statistics        -> show Line Of Code (LOC) statistic compare between kernel code boosted w./w.o. Choreo
+                    | --show-kernel       -> show the generated inner kernel code
+                    | --show-tileflow     -> show the generated tileflow code scheduled by choreo
+                    | --show-host         -> show the generated host side boilerplates
+                    | --show-choreo       -> show the choreo source code"
+    exit 1
+fi
+    
+if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then
+  export FACTOR_INSTALL=/root/choreo/tools
+
+  GCU_DEVICE_STR="$(lspci | grep Enflame | head -1)"
+  echo $GCU_DEVICE_STR
+  if [[ "${GCU_DEVICE_STR}" == *"S60G"* ]]; then
+    gcu_device=gcu3
+  elif [[ "${GCU_DEVICE_STR}" == *"c035"* ]]; then
+    gcu_device=gcu3
+  elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then
+    gcu_device=gcu2
+  elif [[ "$(lspci | grep Tencent)" != "" ]]; then
+    gcu_device=gcu2
+  else
+    echo "can not determine the GCU device type."
+    exit 1
+  fi
+  # JIT compile and execute
+  /tmp/factor_script.sh ${factor_src} ${factor_bin} ${host_src} ${target} ${gcu_device}
+elif [ "$1" == "--statistics" ]; then
+  echo ">>>> Line of Code without Choreo"
+  wc -l ${factor_src} ${host_src} ${kernel_src}
+  echo ">>>> Line of Code with Choreo"
+  wc -l ~/choreo/demo/elementwise_add.co
+  # grep -v '^ *//' ~/choreo/demo/elementwise_add.co | wc -l
+elif [ "$1" == "--show-kernel" ]; then
+  ${EDITOR} ${kernel_src}
+elif [ "$1" == "--show-host" ]; then
+  ${EDITOR} ${host_src}
+elif [ "$1" == "--show-tileflow" ]; then
+  ${EDITOR} ${factor_src}
+elif [ "$1" == "--show-choreo" ]; then
+  ${EDITOR} ~/choreo/demo/elementwise_add.co
+else
+    echo "    Usage: $0 | --execute           -> compile and execute choreo in factor
+                    | --statistics        -> show Line Of Code (LOC) statistic compare between kernel code boosted w./w.o. Choreo
+                    | --show-kernel       -> show the generated inner kernel code
+                    | --show-tileflow     -> show the generated tileflow code scheduled by choreo
+                    | --show-host         -> show the generated host side boilerplates
+                    | --show-choreo       -> show the choreo source code"
+    exit 1
+fi
+    
