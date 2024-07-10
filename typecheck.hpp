@@ -29,6 +29,7 @@ struct TypeChecker : public VisitorWithSymTab {
   bool Visit(AST::MultiNodes &) override;
   bool Visit(AST::MultiValues &) override;
   bool Visit(AST::IntLiteral &) override;
+  bool Visit(AST::Boolean &) override;
   bool Visit(AST::Expr &) override;
   bool Visit(AST::MultiDimSpans &) override;
   bool Visit(AST::NamedTypeDecl &) override;

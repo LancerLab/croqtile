@@ -22,6 +22,7 @@ struct Visitor {
   virtual bool Visit(AST::MultiNodes&) = 0;
   virtual bool Visit(AST::MultiValues&) = 0;
   virtual bool Visit(AST::IntLiteral&) = 0;
+  virtual bool Visit(AST::Boolean&) = 0;
   virtual bool Visit(AST::Expr&) = 0;
   virtual bool Visit(AST::MultiDimSpans&) = 0;
   virtual bool Visit(AST::NamedTypeDecl&) = 0;

@@ -196,6 +196,7 @@ fi
 bool FactorCodeGen::Visit(AST::MultiNodes &) { return true; }
 bool FactorCodeGen::Visit(AST::MultiValues &) { return true; }
 bool FactorCodeGen::Visit(AST::IntLiteral &) { return true; };
+bool FactorCodeGen::Visit(AST::Boolean &) { return true; };
 bool FactorCodeGen::Visit(AST::Expr &) { return true; };
 bool FactorCodeGen::Visit(AST::MultiDimSpans &) { return true; };
 bool FactorCodeGen::Visit(AST::NamedTypeDecl &) { return true; };
