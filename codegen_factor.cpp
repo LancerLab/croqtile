@@ -938,14 +938,22 @@ void FactorCodeGen::EmitHostFuncBody(std::ostream &os, const Type &ty,
 
   size_t i = 0;
   std::vector<std::string> inputs;
-  for (auto &p : param_map) {
+  for (; i < fty.in_tys.size(); ++i) {
     os << "  std::unique_ptr<char[]> memref_raw" << i
-       << "(new char[SizeOfRankedMemref(" << p.second << ")]);\n";
+       << "(new char[SizeOfRankedMemref(";
+    if (auto sty = dyn_cast<SpannedType>(fty.in_tys[i]))
+      os << sty->Dims();
+    else
+      os << "1";
+    os << ")]);\n";
     os << "  auto input" << i << " = CreateUnrankedMemref(in_mem" << i
-       << ", memref_raw" << i << ".get(), ToVector<int64_t>(" << p.first
-       << ".shape()));\n";
+       << ", memref_raw" << i << ".get(), ";
+    if (auto sty = dyn_cast<SpannedType>(fty.in_tys[i]))
+      sty->GetShape().PrintAsList(os);
+    else
+      os << "{1}";
+    os << ");\n";
     inputs.push_back("input" + std::to_string(i));
-    ++i;
   }
 
   if (auto rty = dyn_cast<SpannedType>(fty.out_ty)) {
@@ -960,20 +968,16 @@ void FactorCodeGen::EmitHostFuncBody(std::ostream &os, const Type &ty,
 
   if (!void_return) {
     os << "  std::unique_ptr<char[]> memref_raw" << i
-       << "(new char[SizeOfRankedMemref(" << size_string << ")]);\n";
+       << "(new char[SizeOfRankedMemref(out_shape.size())]);\n";
     os << "  auto output = CreateUnrankedMemref(out_mem, memref_raw" << i
        << ".get(), out_shape);\n";
   }
 
   // phase 3: Execute the executable and fetch the output
-  os << "auto start = std::chrono::high_resolution_clock::now();\n";
   os << "\n  " << current_fn << "(";
   for (auto &in : inputs) os << "&" << in << ", ";
   os << "stream" << ((void_return) ? "" : ", &output") << ");\n";
   os << R"(  CHECK(topsStreamSynchronize(stream));
-  auto end = std::chrono::high_resolution_clock::now();
-  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-  std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
 
 )";
 
@@ -994,16 +998,13 @@ void FactorCodeGen::EmitHostFuncBody(std::ostream &os, const Type &ty,
   }
 
   // phase 4: Free up the resources
-  os << R"(
-  // Free up the resources";
-)";
+  os << "  // Free up the resources\n";
   for (auto &p : device_mems) os << "  topsFree(" << p << ");\n";
-  os << R"(  topsFree(out_mem);
-
-  topsStreamDestroy(stream);
-  return res;
-}
-)";
+  os << "  topsFree(out_mem);\n\n";
+  os << "  // TODO: figure out why stream destroying crash some applications.\n";
+  os << "  // topsStreamDestroy(stream);\n";
+  os << "  return res;\n";
+  os << "}\n";
 }
 
 std::string FactorCodeGen::ReplaceRuntimeNames(const std::string &e,
@@ -1150,11 +1151,11 @@ void FactorCodeGen::OutputScript(FunctionType *fty, const std::string &n,
   elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then
     gcu_arch=gcu210
     gcu_resource=2c24s
-    gcu_target_string="dorado_${gcu_resource}"
+    gcu_target_string="dorado_2c"
   elif [[ "$(lspci | grep Tencent)" != "" ]]; then
     gcu_arch=gcu210
     gcu_resource=2c24s
-    gcu_target_string="dorado_${gcu_resource}"
+    gcu_target_string="dorado_2c"
   else
     echo "can not determine the GCU device type."
     exit 1
