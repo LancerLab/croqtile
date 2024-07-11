@@ -86,11 +86,11 @@ setup-gcu-factor-kit: check-gcu-factor-kit
 	    $(MAKE) install-gcu-factor-kit; \
 	fi
 
-#------------------------- GCU-2.x -------------------------#
-GCU3_REL_PATH=240617/gcu30
-GCU3_PLATFORM_NAME=TopsPlatform_1.0.7.2-976607_deb_amd64.run
+#------------------------- GCU-3.x -------------------------#
+GCU3_REL_PATH=240708/gcu30
+GCU3_PLATFORM_NAME=TopsPlatform_1.1.0.11-32c651_deb_amd64.run
 GCU3_PLATFORM_PKG=$(TOOLCHAIN_DIR)/$(GCU3_PLATFORM_NAME)
-GCU3_PLATFORM_PKG_MD5:=765431635b89bcc55eca66cdf2a35e7a
+GCU3_PLATFORM_PKG_MD5:=364c35f07e1b8452ab4aaad7dc64af17
 CUR_GCU3_PLATFORM_PKG_MD5:=$(shell md5sum $(GCU3_PLATFORM_PKG) 2>/dev/null| cut -d ' ' -f 1)
 
 check-gcu3-platform-kit:
@@ -120,7 +120,7 @@ setup-gcu3-platform-kit: check-gcu3-platform-kit
 
 GCU3_FACTOR_NAME=topsfactor_3.1.0-1_amd64.deb
 GCU3_FACTOR_PKG = $(TOOLCHAIN_DIR)/$(GCU3_FACTOR_NAME)
-GCU3_FACTOR_PKG_MD5:=24bf22bcf9d87ce549c271aaa02d6e94
+GCU3_FACTOR_PKG_MD5:=d5228c2b592595712e1026fab852e077
 CUR_GCU3_FACTOR_PKG_MD5:=$(shell md5sum $(GCU3_FACTOR_PKG) 2>/dev/null| cut -d ' ' -f 1)
 
 check-gcu3-factor-kit:
@@ -138,8 +138,11 @@ install-gcu3-factor-kit:
 	dpkg-deb -x $(GCU3_FACTOR_PKG) $(TOOLCHAIN_DIR)/; \
 	rsync -av $(TOOLCHAIN_DIR)/usr/* $(TOOLCHAIN_DIR); \
 	rsync -av $(TOOLCHAIN_DIR)/local/* $(TOOLCHAIN_DIR); \
-	rm -fr $(TOOLCHAIN_DIR)/usr/;
-	rm -fr $(TOOLCHAIN_DIR)/local/;
+	rsync -av $(TOOLCHAIN_DIR)/opt/tops/* $(TOOLCHAIN_DIR); \
+	ln -sf `pwd`/bin `pwd`/bin/clang11; \
+	rm -fr $(TOOLCHAIN_DIR)/usr/; \
+	rm -fr $(TOOLCHAIN_DIR)/local/; \
+	rm -fr $(TOOLCHAIN_DIR)/opt;
 
 setup-gcu3-factor-kit: check-gcu3-factor-kit
 	@if [ "$(CUR_GCU3_FACTOR_PKG_MD5)" != "$(GCU3_FACTOR_PKG_MD5)"  ]; then \

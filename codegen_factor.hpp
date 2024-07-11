@@ -29,8 +29,7 @@ inline static void ReplaceInString(std::string &str, const std::string &from,
   }
 }
 
-inline static std::string create_unique_filename(
-    const std::string &custom_string) {
+inline static std::string create_unique_path() {
   // Get a high-resolution timestamp
   auto now = std::chrono::high_resolution_clock::now();
   auto duration = now.time_since_epoch();
@@ -44,11 +43,10 @@ inline static std::string create_unique_filename(
   ss << std::this_thread::get_id();
   std::string thread_id = ss.str();
 
-  // Construct the filename
-  std::string filename = "/tmp/" + std::to_string(nanoseconds) + "_" +
-                         thread_id + "_" + custom_string;
+  // Construct the path
+  std::string path = "/tmp/" + std::to_string(nanoseconds) + "_" + thread_id;
 
-  return filename;
+  return path;
 }
 
 static inline std::string factor_storage_str(Choreo::Storage s) {

@@ -2,6 +2,14 @@
 
 #include "choreo.h"
 
+__cok__ {
+extern "C" void kernel(int * a, int * b, int * c, int n) {
+  for (int i = 0; i < n; ++i)
+    c[i] = a[i] + b[i];
+}
+
+}
+
 __co__ auto ele_add(s32 [6, ?, 128] lhs, s32 [6, ?, 128] rhs) {
   s32[lhs.span] output;
 

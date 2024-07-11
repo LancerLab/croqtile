@@ -73,14 +73,16 @@ using namespace factor;
 // CLEAN
 bool FactorCodeGen::AfterVisitImpl(AST::Node &n) {
   if (isa<AST::Program>(&n)) {
-    os << "# step 4: generate the host source\n";
+    os << "\n# step 4: generate the host source\n";
     os << "host_src=" << host_fn << "\n";
-    os << "cat <<'EOF' > ${host_src}\n";
+    os << "echo \"#include \\\"${gcu_target_string}_lib" << current_fn
+       << ".h\\\"\" > ${host_src}\n";
+    os << "cat <<'EOF' >> ${host_src}\n";
     os << hs.str() << "\nEOF\n\n";
 
-    os << "# step 5: compile the host source to target executable\n";
+    os << "\n# step 5: JIT compile and execute\n";
+    os << "# TODO: enable workflow of AOT compilation\n";
     os << "target=" << target_fn << "\n";
-    os << "# TODO: sfc ${host_src} -o ${target}\n";
     os << R"(
 if command -v nvim &> /dev/null
 then
@@ -97,29 +99,16 @@ if [ "$#" -gt 1 ]; then
                     | --show-choreo       -> show the choreo source code"
     exit 1
 fi
-    )";
+)";
     os << R"(
 if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then
 )";
     os << "  export FACTOR_INSTALL=" << STRINGIZE(__CHOREO_FACTOR_DIR__)
-       << "\n";
+       << "\n# JIT compile and execute\n";
+    os << build_path
+       << "/factor_script.sh ${factor_src} ${factor_bin} ${host_src} ${target} "
+          "${gcu_arch} ${gcu_resource}";
     os << R"script(
-  GCU_DEVICE_STR="$(lspci | grep Enflame | head -1)"
-  echo $GCU_DEVICE_STR
-  if [[ "${GCU_DEVICE_STR}" == *"S60G"* ]]; then
-    gcu_device=gcu3
-  elif [[ "${GCU_DEVICE_STR}" == *"c035"* ]]; then
-    gcu_device=gcu3
-  elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then
-    gcu_device=gcu2
-  elif [[ "$(lspci | grep Tencent)" != "" ]]; then
-    gcu_device=gcu2
-  else
-    echo "can not determine the GCU device type."
-    exit 1
-  fi
-  # JIT compile and execute
-  /tmp/factor_script.sh ${factor_src} ${factor_bin} ${host_src} ${target} ${gcu_device}
 elif [ "$1" == "--statistics" ]; then
   echo ">>>> Line of Code without Choreo"
   wc -l ${factor_src} ${host_src} ${kernel_src}
@@ -143,7 +132,7 @@ else
                     | --show-choreo       -> show the choreo source code"
     exit 1
 fi
-    )script";
+)script";
 
   } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
     entry_fn = f->name;
@@ -151,7 +140,7 @@ fi
     auto fty = cast<FunctionType>(f->GetType());
     auto &out_type = fty->out_ty;
     auto out_size = GetByteSizeExprOf(*out_type);
-    fs << "}\n\nMODULE_REGISTER(\"module" << current_fn << "\", " << current_fn
+    fs << "}\n\nMODULE_REGISTER(\"lib" << current_fn << "\", " << current_fn
        << ");";  // end the factor function definition
     if (auto sty = dyn_cast<SpannedType>(out_type)) {
       OutputScript(fty, f->name, GetBaseTypeStringOf(*out_type), out_size,
@@ -163,7 +152,7 @@ fi
   } else if (isa<AST::ParallelBy>(&n)) {
     parallel_level--;
     this->decrementIndent();
-    if (parallel_level == 0) 
+    if (parallel_level == 0)
       fs << this->indent << "}); // end of choreo-factor kernel function\n";
   } else if (auto f = dyn_cast<AST::ForeachBlock>(&n)) {
     // erase the loop variables
@@ -319,29 +308,22 @@ bool FactorCodeGen::Visit(AST::ParallelBy &by) {
   }
   fs << this->indent << "Dim3 grid_dim(1);\n";
   fs << this->indent << "Dim3 block_dim(" << by.bound << ");\n";
-  fs << this->indent << "Value stream = alloc_stream_();\n";
-  fs << this->indent << "create_stream_(stream);\n";
   fs << this->indent << "auto ts = launch_kernel_(\"" << current_fn
-     << "\", grid_dim, block_dim, stream, {";
+     << "_parallel\", grid_dim, block_dim, args.back(), {";
   if (cur_params->size() > 0) {
     fs << "args[0]";
-    for (size_t i = 1; i < cur_params->size(); ++i) {
-      fs << ", "
-         << "args[" << i << "]";
-    }
+    for (size_t i = 1; i < cur_params->size(); ++i) fs << ", args[" << i << "]";
   }
   fs << "}, {" << ((void_return) ? "" : "$$out$$")
      << "});\n";  // "$$out$$" : magic string for output, will be replaced later
-  fs << this->indent << "destroy_stream_(stream);\n";
-  fs << this->indent << "dealloc_stream_(stream);\n";
   fs << this->indent << "return std::vector<Value>{"
      << ((void_return) ? "" : "$$out$$") << "};\n";
   this->decrementIndent();
-  fs << this->indent << "}); // end of choreo-factor dataflow program\n";
+  fs << this->indent << "}, true); // end of choreo-factor dataflow program\n";
   fs << "\n";
 
   fs << this->indent << "\n";
-  fs << this->indent << "D(func_)(\"" << current_fn << "\", {";
+  fs << this->indent << "D(func_)(\"" << current_fn << "_parallel\", {";
   if (cur_params->size() > 0) {
     fs << (*cur_params)[0]->sym->name << "_type";
     for (unsigned i = 1; i < cur_params->size(); ++i)
@@ -621,7 +603,7 @@ bool FactorCodeGen::Visit(AST::Call &c) {
         try {
           std::stoi(STR(arg->GetR()));
           fs << STR(arg->GetR());
-        } catch (const std::invalid_argument& e) {
+        } catch (const std::invalid_argument &e) {
           fs << STR(arg->GetR()) << ".addr_()";
         }
         break;
@@ -804,20 +786,11 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
 
   fs << "\n";
   fs << this->indent << "// choreo-factor dataflow function\n";
-  fs << this->indent << "D(main_)({";
+  fs << this->indent << "D(host_func_)(\"" << current_fn << "\", {";
 
-  bool first_param = true;
-  for (auto &param : *cur_params) {
-    auto name = param->sym->name;
+  for (auto &param : *cur_params) fs << param->sym->name + "_type, ";
 
-    if (first_param) {
-      fs << name + "_type";
-      first_param = false;
-    } else
-      fs << ", " << name + "_type";
-  }
-
-  fs << "}, [&](auto args) {\n";
+  fs << "StreamType()}, [&](auto args) {\n";
 
   this->incrementIndent();
 
@@ -858,6 +831,41 @@ using namespace choreo;
 
 namespace {
 
+int64_t SizeOfRankedMemref(size_t rank) {
+  return sizeof(topsMemref) +
+         rank * sizeof(reinterpret_cast<topsMemref *>(0)->data[0]);
+}
+
+struct topsUnrankedMemref CreateUnrankedMemref(void *dev_mem, char *memref_raw,
+                                               std::vector<int64_t> shape) {
+  struct topsUnrankedMemref unranked_memref;
+  unranked_memref.rank = shape.size();
+  unranked_memref.ranked_memref = reinterpret_cast<topsMemref *>(memref_raw);
+
+  // Set address
+  uint64_t dev_addr = reinterpret_cast<uint64_t>(dev_mem);
+  unranked_memref.ranked_memref->high_addr =
+      reinterpret_cast<int32_t *>((dev_addr >> 32) & 0xFFFFFFFF);
+  unranked_memref.ranked_memref->low_addr =
+      reinterpret_cast<int32_t *>(dev_addr & 0xFFFFFFFF);
+
+  // Set offset & shape
+  unranked_memref.ranked_memref->offset = 0;
+  for (size_t i = 0; i < shape.size(); ++i) {
+    unranked_memref.ranked_memref->data[i] = shape[i];
+  }
+
+  return unranked_memref;
+}
+
+template<typename T, size_t Rank>
+inline std::vector<T> ToVector(const mdspan<Rank> &span) {
+   std::vector<T> res;
+   for (size_t i = 0; i < Rank; ++i)
+     res.push_back(span[i]);
+   return res;
+ }
+
 // Nasty data copy. Need optimization together with factor
 template <typename T, int Rank>
 static inline std::vector<uint8_t>
@@ -884,6 +892,9 @@ void FactorCodeGen::EmitHostFuncBody(std::ostream &os, const Type &ty,
                                      const std::string &out_size,
                                      const std::string &out_type,
                                      const Shape &out_shape) {
+  assert(isa<FunctionType>(&ty) && "unexpected type.");
+  auto &fty = *cast<FunctionType>(&ty);
+
   // phase 1: create tops executable from a file
   os << "{\n";
   EmitRuntimeCheck(os, ty);
@@ -897,9 +908,7 @@ void FactorCodeGen::EmitHostFuncBody(std::ostream &os, const Type &ty,
             std::istreambuf_iterator<char>(), std::back_inserter(binary));
   ifs.close();
 
-  // Create executable
-  topsExecutable_t executable = nullptr;
-  CHECK(topsCreateExecutable(&executable, binary.data(), binary.size()));
+  // Create stream
   topsStream_t stream = nullptr;
   CHECK(topsStreamCreate(&stream));
 
@@ -912,7 +921,8 @@ void FactorCodeGen::EmitHostFuncBody(std::ostream &os, const Type &ty,
     os << "  void *" << mem_name << " = nullptr;\n";
     os << "  CHECK(topsMalloc(&" << mem_name << ", " << p.second << "));\n";
     os << "  CHECK(topsMemcpy(" << mem_name << ", reinterpret_cast<void *>("
-       << p.first << "), " << p.second << ", topsMemcpyHostToDevice));\n";
+       << p.first << ".data()), " << p.second
+       << ", topsMemcpyHostToDevice));\n";
     device_mems.push_back(mem_name);
   }
   os << "  void * device_inputs[] = {" << DelimitedString(device_mems)
@@ -926,41 +936,41 @@ void FactorCodeGen::EmitHostFuncBody(std::ostream &os, const Type &ty,
     os << "  void *device_outputs[] = {out_mem};\n";
   }
 
-  // phase 3: Execute the executable and fetch the output
-  auto &fty = *cast<FunctionType>(&ty);
-  std::ostringstream tss;  // temporal stream
-  if (fty.in_tys.size() > 0) {
-    tss << "  int64_t input_dims[] = {";
-    if (auto sty = dyn_cast<SpannedType>(fty.in_tys[0])) {
-      sty->GetShape().PrintPlain(tss);
-      for (size_t i = 1; i < fty.in_tys.size(); ++i)
-        if (auto sty = dyn_cast<SpannedType>(fty.in_tys[i])) {
-          tss << ", ";
-          sty->GetShape().PrintPlain(tss);
-        }
-    }
+  size_t i = 0;
+  std::vector<std::string> inputs;
+  for (auto &p : param_map) {
+    os << "  std::unique_ptr<char[]> memref_raw" << i
+       << "(new char[SizeOfRankedMemref(" << p.second << ")]);\n";
+    os << "  auto input" << i << " = CreateUnrankedMemref(in_mem" << i
+       << ", memref_raw" << i << ".get(), ToVector<int64_t>(" << p.first
+       << ".shape()));\n";
+    inputs.push_back("input" + std::to_string(i));
+    ++i;
+  }
+
+  if (auto rty = dyn_cast<SpannedType>(fty.out_ty)) {
+    std::ostringstream tss;  // temporal stream
+    tss << "  std::vector<int64_t> out_shape = {";
+    rty->GetShape().PrintPlain(tss);
     os << ReplaceRuntimeNames(tss.str());
     os << "};\n";
-    os << "  size_t input_ranks[] = {";
-    if (auto sty = dyn_cast<SpannedType>(fty.in_tys[0])) {
-      os << sty->GetShape().Dims();
-      for (size_t i = 1; i < fty.in_tys.size(); ++i)
-        if (auto sty = dyn_cast<SpannedType>(fty.in_tys[i]))
-          os << ", " << sty->GetShape().Dims();
-    }
+  } else if (!isa<VoidType>(fty.out_ty)) {
+    os << "  std::vector<int64_t> out_shape = {1};\n";
   }
-  os << "};\n";
 
-  os << R"(
-  auto start = std::chrono::high_resolution_clock::now();
+  if (!void_return) {
+    os << "  std::unique_ptr<char[]> memref_raw" << i
+       << "(new char[SizeOfRankedMemref(" << size_string << ")]);\n";
+    os << "  auto output = CreateUnrankedMemref(out_mem, memref_raw" << i
+       << ".get(), out_shape);\n";
+  }
 
-  CHECK(topsLaunchExecutableV2(
-      executable, nullptr, device_inputs,
-      sizeof(device_inputs) / sizeof(void *), (int64_t*)input_dims,
-      (size_t*)input_ranks, device_outputs,
-      sizeof(device_outputs) / sizeof(void *), stream));
-  CHECK(topsStreamSynchronize(stream));
-
+  // phase 3: Execute the executable and fetch the output
+  os << "auto start = std::chrono::high_resolution_clock::now();\n";
+  os << "\n  " << current_fn << "(";
+  for (auto &in : inputs) os << "&" << in << ", ";
+  os << "stream" << ((void_return) ? "" : ", &output") << ");\n";
+  os << R"(  CHECK(topsStreamSynchronize(stream));
   auto end = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
   std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
@@ -988,9 +998,9 @@ void FactorCodeGen::EmitHostFuncBody(std::ostream &os, const Type &ty,
   // Free up the resources";
 )";
   for (auto &p : device_mems) os << "  topsFree(" << p << ");\n";
-  os << R"(
+  os << R"(  topsFree(out_mem);
+
   topsStreamDestroy(stream);
-  topsDestroyExecutable(executable);
   return res;
 }
 )";
@@ -1064,9 +1074,8 @@ void FactorCodeGen::EmitHostFuncDecl(std::ostream &os, const Type &ty,
   if (fty.in_tys.size() > 0) {
     if (!decl_only) {
       if (auto sty = dyn_cast<SpannedType>(fty.in_tys[0])) {
-        param_map.push_back(
-            std::make_pair(host_params[0] + ".data()",
-                           ReplaceRuntimeNames(sty->ByteSizeExpression())));
+        param_map.push_back(std::make_pair(
+            host_params[0], ReplaceRuntimeNames(sty->ByteSizeExpression())));
       } else
         param_map.push_back(std::make_pair(host_params[0], "1"));
     }
@@ -1074,9 +1083,8 @@ void FactorCodeGen::EmitHostFuncDecl(std::ostream &os, const Type &ty,
     for (size_t i = 1; i < fty.in_tys.size(); ++i) {
       if (!decl_only) {
         if (auto sty = dyn_cast<SpannedType>(fty.in_tys[i])) {
-          param_map.push_back(
-              std::make_pair(host_params[i] + ".data()",
-                             ReplaceRuntimeNames(sty->ByteSizeExpression())));
+          param_map.push_back(std::make_pair(
+              host_params[i], ReplaceRuntimeNames(sty->ByteSizeExpression())));
         } else
           param_map.push_back(std::make_pair(host_params[i], "1"));
       }
@@ -1090,14 +1098,15 @@ void FactorCodeGen::OutputScript(FunctionType *fty, const std::string &n,
                                  const std::string &out_type,
                                  const std::string &out_size,
                                  const Shape &out_shape) {
-  // it requires temporal files for the compilation process
-  std::string kernel_fn =
-      create_unique_filename("__choreo_" + n + "_micro_kernel.cpp");
-  std::string factor_fn =
-      create_unique_filename("__choreo_" + n + "_factor.cpp");
+  // a temporal path for the compilation process
+  build_path = create_unique_path();
+  std::string build_prefix = build_path + "/__choreo_" + n;
+
+  std::string kernel_fn = build_prefix + "_micro_kernel.cpp";
+  std::string factor_fn = build_prefix + "_factor.cpp";
   std::string factor_bfn =
-      create_unique_filename("__choreo_" + n + "_factor.fb");
-  host_fn = create_unique_filename("__choreo_" + n + "_host.cpp");
+      build_path + "/${gcu_target_string}_lib" + current_fn + ".o";
+  host_fn = build_prefix + "_host.cpp";
   target_fn = "__choreo_" + n;
 
   // Generate the host code
@@ -1121,31 +1130,55 @@ void FactorCodeGen::OutputScript(FunctionType *fty, const std::string &n,
   ReplaceInString(factor_src, std::string(backpatch_filename), kernel_fn);
 
   // Now generate the script
-  os <<
-      R"(#!/usr/bin/env bash
+  os << "#!/usr/bin/env bash\n\n";
+  os << "# This is the choreo generated bash script to compile factor code\n";
 
-# This the the choreo generated bash script to compile factor code
-
-)";
-  os << "# copy factor scripts & environment to /tmp\n";
-  os << "cat <<'EOF' > /tmp/factor_script.sh\n";
+  os << R"script(
+  # check the device
+  # TODO: improve the target check with more solid code
+  GCU_DEVICE_STR="$(lspci | grep Enflame | head -1)"
+  echo $GCU_DEVICE_STR
+  if [[ "${GCU_DEVICE_STR}" == *"S60G"* ]]; then
+    gcu_arch=gcu300
+    gcu_resource=1c12s
+    gcu_target_string="scorpio_${gcu_resource}"
+  elif [[ "${GCU_DEVICE_STR}" == *"c035"* ]]; then
+    gcu_arch=gcu300
+    gcu_resource=1c12s
+    gcu_target_string="scorpio_${gcu_resource}"
+    export TOP_VISIBLE_DEVICES=1
+  elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then
+    gcu_arch=gcu210
+    gcu_resource=2c24s
+    gcu_target_string="dorado_${gcu_resource}"
+  elif [[ "$(lspci | grep Tencent)" != "" ]]; then
+    gcu_arch=gcu210
+    gcu_resource=2c24s
+    gcu_target_string="dorado_${gcu_resource}"
+  else
+    echo "can not determine the GCU device type."
+    exit 1
+  fi
+)script";
+  os << "\n# step 0: set up the environment\n";
+  os << "rm -fr " << build_path << "\n";
+  os << "mkdir -p " << build_path << "\n";
+  os << "cat <<'EOF' > " << build_path << "/factor_script.sh\n";
   os << __factor_script_as_string << "\nEOF\n";
-  os << "chmod +x /tmp/factor_script.sh\n";
-
-  os << "# copy choreo.h and factor scripts/env to /tmp\n";
-  os << "cat <<'EOF' > /tmp/choreo.h\n";
+  os << "chmod +x " << build_path << "/factor_script.sh\n";
+  os << "cat <<'EOF' > " << build_path << "/choreo.h\n";
   os << __choreo_header_as_string << "\nEOF\n\n";
-  os << "# step 1: write the kernel source code into a temp file\n";
+
+  os << "\n# step 1: write the kernel source code into a temp file\n";
   os << "kernel_src=" << kernel_fn << "\n";
   os << "cat <<'EOF' > ${kernel_src}\n";
-  os << ks.str() << "\nEOF\n\n";
+  os << ks.str() << "\nEOF\n";
 
-  os << "# step 2: write the factor source code into a temp file\n";
+  os << "\n# step 2: write the factor source code into a temp file\n";
   os << "factor_src=" << factor_fn << "\n";
   os << "cat <<'EOF' > ${factor_src}\n";
   os << factor_src << "\nEOF\n\n";
 
-  os << "# step 3: compile factor code into a binary\n";
+  os << "\n# step 3: set the factor binary file name\n";
   os << "factor_bin=" << factor_bfn << "\n";
-  os << "# TODO: sfc ${factor_src} -o ${factor_bin}\n\n";
 }

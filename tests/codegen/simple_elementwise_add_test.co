@@ -48,7 +48,7 @@ int bar(int a[], int b[]) {
 // CHECK: auto a_type = DRAMType(IntType(32), {144, 100, 100});
 // CHECK: auto b_type = DRAMType(IntType(32), {144, 100, 100});
 // CHECK: auto global_buffer = alloc_(DRAMType(IntType(32),{144, 100, 100}));
-// CHECK: auto ts = launch_kernel_("__choreo_ele_add", grid_dim, block_dim, stream, {args[0], args[1]}, {global_buffer});
+// CHECK: auto ts = launch_kernel_("__choreo_ele_add_parallel", grid_dim, block_dim, args.back(), {args[0], args[1]}, {global_buffer});
 // CHECK: return std::vector<Value>{global_buffer};
 // CHECK: auto thread_id = thread_id_();
 // CHECK: auto f1_buffer = alloc_(L1Type(IntType(32),{24, 10, 10}));
