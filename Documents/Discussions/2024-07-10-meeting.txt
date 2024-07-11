@@ -1,0 +1,13 @@
+1. notify-waiton. new keyword 'after'. example:
+f1 = dma.copy xxx => shared;
+f2 = dma.copy f1.data => local after f1;
+
+2. multi-buffering.
+shared f32 [...] a, b, c;
+foreach x {
+  foreach y {
+    f1 = dma.copy data.chunkat(...) => select(x % 3, a, b, c);
+  }
+}
+
+3. swizzle.
