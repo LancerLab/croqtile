@@ -23,7 +23,6 @@ using namespace Choreo;
 location loc;
 AST::Program root(loc);
 SymbolTable symtab;
-StringifyTable strtab;
 
 using namespace AST;
 using namespace Choreo;

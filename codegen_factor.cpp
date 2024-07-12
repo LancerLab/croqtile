@@ -37,7 +37,7 @@ std::string Shape::EmitTo(Target target) const {
   return _os.str();
 }
 
-extern StringifyTable strtab;
+static StringifyTable factor_symbols;
 
 bool FactorCodeGen::BeforeVisitImpl(AST::Node &n) {
   if (isa<AST::Program>(&n)) {
@@ -46,6 +46,8 @@ bool FactorCodeGen::BeforeVisitImpl(AST::Node &n) {
     sp_count = 0;  // reset the count of stub parameter
     param_map.clear();
     rts_nmap.clear();
+    rts_pidx.clear();
+    rts_nidx.clear();
     host_params.clear();
     indent.clear();
     entry_fn = c->name;
@@ -105,6 +107,7 @@ if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then
 )";
     os << "  export FACTOR_INSTALL=" << STRINGIZE(__CHOREO_FACTOR_DIR__)
        << "\n# JIT compile and execute\n";
+    if (dyn_shaped) os << "VIEW_CONFIG=1 ENABLE_DYNSHAPE=1 ";
     os << build_path
        << "/factor_script.sh ${factor_src} ${factor_bin} ${host_src} ${target} "
           "${gcu_arch} ${gcu_resource}";
@@ -200,83 +203,39 @@ bool FactorCodeGen::Visit(AST::NamedTypeDecl &) { return true; };
 bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
   // TODO(albert): 'a.span' will be replace to the type-decl related to 'a'
   // TODO(albert): refine this function with TYPE_STR new API
-  // fs << AST::TYPE_STR(node);
-  auto dtype = dyn_cast<AST::DataType>(node.type.get());
-  auto ptype = dtype->getPartialType();
-  if (ptype) {
-    // get full name of mdspan type
-    // NOTE: full ref name may use "a.span" to ref to a var's span partial type
-    // the decl of new var will need this symbol "a", not "a.span"
-    // we do a hardcode workaround here
-    // auto full_ref_name = ptype->getRefName();
-    // auto ref_symbol = full_ref_name.substr(0, full_ref_name.find('.'));
-    // os << ref_symbol;
-    auto ref_symbol = node.name_str;
-    if (strtab.Exists(ref_symbol)) {
-      fs << this->indent;
-      fs << "auto " << node.name_str << " = alloc_(";
-      fs << strtab.GetTypeSymbol(ref_symbol);
-      fs << ");\n";
-    } else {  // use GetSymbolType to get the required information
-      auto ty = dyn_cast<SpannedType>(GetSymbolType(node.name_str));
-      assert(ty && "Invalied type for variable declaration!");
-
-      std::string storage_type = factor_storage_str(ty->GetStorage());
-      std::string base_type = factor_typestr(Choreo::BaseType(ty->f_type));
-      std::string shape_info = "";
-      auto data_shape = ty->GetShape();
+  auto nty = node.GetType();
+  auto sym = node.name_str;
+  if (auto sty = dyn_cast<SpannedType>(nty)) {
+    assert(isa<SpannedType>(GetSymbolType(sym)) && "Inconsistent types!");
+    if (factor_symbols.Exists(sym)) {
+      fs << indent << "auto " << sym << " = alloc_("
+         << factor_symbols.GetTypeName(sym) << ");\n";
+    } else {
+      std::string storage_type = factor_storage_str(sty->GetStorage());
+      std::string base_type = factor_typestr(Choreo::BaseType(sty->f_type));
       std::ostringstream _os;
-      _os << ReplaceRuntimeNames(LSTR(data_shape), false);
-      shape_info += _os.str();
-      // auto dim = data_shape.values.values[0];
-      // int dim_sz = data_shape.Dims();
-      // assert(dim_sz == (int)dim.size() && "Insonsistant sizes for variable
-      // span."); for (int dim_cursor = 0; dim_cursor < dim_sz;) {
-      //   auto dim_bound = *(std::get_if<int>(&dim[dim_cursor]));
-      //   assert( dim_bound > 0 && "Invalid variable span!");
-      //   // shape_info = shape_info + std::to_string(dim_bound/tf_bound);
-      //   shape_info = shape_info + std::to_string(dim_bound);
-      //   ++dim_cursor;
-      //   if(dim_cursor < dim_sz)
-      //     shape_info = shape_info + ",";
-      //   else
-      //     shape_info = shape_info + "}";
-      // }
-      _os.str("");
-      _os.clear();
-      _os << "    "
-          << "auto " << node.name_str << " = alloc_(";
-      _os << storage_type << "(" << base_type << "," << shape_info << ")";
-      _os << ");\n";
+      _os << "auto " << sym << " = alloc_(" << storage_type << "(" << base_type
+          << "," << ReplaceRuntimeNames(LSTR(sty->GetShape()), "", false) << ")"
+          << ");\n";
       if (storage_type == "DRAMType")
-        fs << _os.str();
+        fs << indent << _os.str();
       else
-        alloc_in_fs << _os.str();
+        alloc_in_fs << "    " << _os.str();
+
+      fs << indent << "auto " << sym << "_init = alloc_dma_("
+         << ((storage_type == "L1Type") ? "SDMAType()" : "CDMAType()")
+         << ");\n";
 
       // generate "memset_()" action to initiate each alloc_memory with value 0
-      if (storage_type == "L1Type")
-        fs << this->indent << "auto " << node.name_str
-           << "_init = alloc_dma_(SDMAType());\n";
-      else
-        fs << this->indent << "auto " << node.name_str
-           << "_init = alloc_dma_(CDMAType());\n";
-
-      fs << this->indent << "memset_(" << node.name_str << "_init, "
-         << node.name_str << ", 0);\n";
+      fs << indent << "memset_(" << sym << "_init, " << sym << ", 0);\n";
     }
   } else {
+    choreo_unreachable("non-spanned is not yet supported.");
     // TODO(albert): handle anon case
     fs << this->indent;
     fs << "auto " << node.name_str << " = alloc_(?";
     fs << ");\n";
   }
-  //
-  // auto spantype = AST::dyn_cast<AST::MultiDimSpans>(ptype);
-  // fs << dtype->isSpanned();
-  //
-  // ptype->Print(os);
-  // fs << spantype->ref_name;
-  // TODO: hardcode 'a', wait for expr eval
 
   return true;
 };
@@ -469,7 +428,7 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
     alloc_in_fs << alloc_indent << "auto " << dst_buffer_name << " = alloc_("
                 << sto2alloc.at(mem_node->Get()) << "("
                 << factor_typestr(sty->ElementType()) << ","
-                << ReplaceRuntimeNames(LSTR(dst_shape), false) << "));\n";
+                << ReplaceRuntimeNames(LSTR(dst_shape), "", false) << "));\n";
   }
 
   auto GenerateOffsetString = [this, &GetSpannedType](AST::Node &n) {
@@ -520,8 +479,8 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
     return "{" + offss.str() + "}";
   };
 
-  // strtab.Print(fs);
-  int arg_idx = strtab.GetSymbolIndex(src_node_name);
+  // factor_symbols.Print(fs);
+  int arg_idx = factor_symbols.GetSymbolIndex(src_node_name);
   src_buffer_name =
       arg_idx < 0 ? src_buffer_name : "args[" + std::to_string(arg_idx) + "]";
 
@@ -629,8 +588,8 @@ bool FactorCodeGen::Visit(AST::Call &c) {
         }
         break;
       default:
-        os << STR(arg->GetForm());
-        choreo_unreachable("unhandled expression type.");
+        choreo_unreachable("unhandled expression type: " +
+                           std::to_string((int)(arg->GetForm())) + ".");
         break;
     }
     index++;
@@ -714,13 +673,15 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
   assert(isa<FunctionType>(ty) && "unexpected type.");
   auto &fty = *cast<FunctionType>(ty);
 
-  auto MapRuntimeShapeNames = [this](SpannedType *sty,
-                                     const std::string &name) {
+  auto MapRuntimeShapeNames = [this](SpannedType *sty, const std::string &name,
+                                     size_t p_index) {
     size_t count = 0;
     for (auto vi : sty->GetShape().Value()) {
       if (auto vale = dyn_cast<ValueExpr>(&vi)) {
         auto elem_name = name + ".shape()[" + std::to_string(count) + "]";
         rts_nmap.emplace(*vale, elem_name);
+        rts_pidx.emplace(*vale, p_index);
+        rts_nidx.emplace(*vale, count);
       }
       count++;
     }
@@ -732,57 +693,66 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
     auto n = GenHostParamName();
     host_params.push_back(n);
     if (auto sty = dyn_cast<SpannedType>(fty.in_tys[i]))
-      MapRuntimeShapeNames(sty, n);
+      MapRuntimeShapeNames(sty, n, i);
   }
 
+  std::ostringstream dss;  // for the shape string
   for (auto &param : *cur_params) {
-    auto name = param->sym->name;
+    auto pname = param->sym->name;
+    std::string type_name = pname + "_type";
+    std::string type_string;
     if (auto sty = dyn_cast<SpannedType>(param->GetType())) {
       // define spanned type
-      auto type_symbol = name + "_type";
-      auto type_string = "DRAMType(" + factor_typestr(sty->ElementType()) +
-                         ", " +
-                         ReplaceRuntimeNames(LSTR(sty->GetShape()), false);
-
-      strtab.AddSymbol(name, type_symbol, type_string);
-      fs << this->indent << "auto " << strtab.GetTypeSymbol(name) << " = "
-         << strtab.GetTypeString(name);
-      fs << ");\n";
+      type_string = "DRAMType(" + factor_typestr(sty->ElementType()) + ", " +
+                    ReplaceRuntimeNames(LSTR(sty->GetShape()), "", false) + ")";
+      factor_symbols.AddSymbol(pname, type_name, type_string);
     } else {
-      auto type_symbol = name + "_type";
-      auto type_string =
-          "DRAMType(" + factor_typestr(param->type->getBaseType()) + ", (1));";
-      strtab.AddSymbol(name, type_symbol, type_string);
-      fs << this->indent << "auto " << strtab.GetTypeSymbol(name) << " = "
-         << strtab.GetTypeString(name) << "\n";
+      type_string =
+          "DRAMType(" + factor_typestr(param->type->getBaseType()) + ", (1))";
+      factor_symbols.AddSymbol(pname, type_name, type_string);
     }
+    fs << indent << "auto " << type_name << " = " << type_string << ";\n";
   }
 
   if (auto rty = dyn_cast<SpannedType>(fty.out_ty)) {
-    auto name = "output";
-    auto type_symbol = "output_type";
+    std::string name = "output";
+    std::string type_name = "output_type";
     auto type_string = "DRAMType(" + factor_typestr(rty->ElementType()) + ", " +
-                       ReplaceRuntimeNames(LSTR(rty->GetShape()), false);
+                       ReplaceRuntimeNames(LSTR(rty->GetShape()), "", false);
 
-    strtab.AddSymbol(name, type_symbol, type_string);
-    fs << this->indent << "auto " << strtab.GetTypeSymbol(name) << " = "
-       << strtab.GetTypeString(name);
-    fs << ");\n";
+    // handle dynamic-typed output when necessary. Generate code snippet like:
+    //
+    //   auto output_rt_dim0 = dim_(args[0], 1);
+    //   auto output = alloc_({output_rt_dim0}, output_type);
+    //
+    const auto &dyn_dims = rty->GetShape().GetDynamicDims();
+    if (!dyn_dims.empty()) {
+      dyn_shaped = true;
+      type_name = "{";
+      size_t i = 0;
+      for (auto &ddim : dyn_dims) {
+        auto ddim_name = name + "_rt_dim" + std::to_string(i);
+        dss << "auto " << ddim_name << " = " << GetDynDimName(ddim.second)
+            << ";\n";
+        type_name += ddim_name;
+        if (++i != dyn_dims.size()) type_name += ", ";
+      }
+      type_name += "}, output_type";
+    }
+
+    fs << indent << "auto output_type = " << type_string << ");\n";
+    factor_symbols.AddSymbol(name, type_name, type_string);
+
   } else if (isa<VoidType>(fty.out_ty)) {
     void_return = true;
   } else {
     auto name = "output";
-    auto type_symbol = "output_type";
+    auto type_name = "output_type";
     auto type_string =
         "DRAMType(" + factor_typestr(TC2BT(fty.out_ty->Category())) + ", (1));";
-    strtab.AddSymbol(name, type_symbol, type_string);
-    fs << this->indent << "auto " << strtab.GetTypeSymbol(name) << " = "
-       << strtab.GetTypeString(name) << "\n";
+    factor_symbols.AddSymbol(name, type_name, type_string);
+    fs << indent << "auto " << type_name << " = " << type_string << "\n";
   }
-
-  // fs << "    auto output_type = DRAMType(";
-  // fs << factor_typestr(current_output->getBaseType());
-  // fs << ", (1));\n";  // todo
 
   fs << "\n";
   fs << this->indent << "// choreo-factor dataflow function\n";
@@ -793,6 +763,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
   fs << "StreamType()}, [&](auto args) {\n";
 
   this->incrementIndent();
+  fs << indent << dss.str();  // dynamic-shape specific
 
   return true;
 }
@@ -813,7 +784,6 @@ bool FactorCodeGen::Visit(AST::Program &) { return true; }
 void FactorCodeGen::EmitHostHead(std::ostream &os) {
   os <<
       R"(
-#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -857,14 +827,6 @@ struct topsUnrankedMemref CreateUnrankedMemref(void *dev_mem, char *memref_raw,
 
   return unranked_memref;
 }
-
-template<typename T, size_t Rank>
-inline std::vector<T> ToVector(const mdspan<Rank> &span) {
-   std::vector<T> res;
-   for (size_t i = 0; i < Rank; ++i)
-     res.push_back(span[i]);
-   return res;
- }
 
 // Nasty data copy. Need optimization together with factor
 template <typename T, int Rank>
@@ -936,35 +898,36 @@ void FactorCodeGen::EmitHostFuncBody(std::ostream &os, const Type &ty,
     os << "  void *device_outputs[] = {out_mem};\n";
   }
 
+  std::vector<std::string> inputs;  // factor input paramters
+
+  os << "\n  // adaption: convert to the factor parameters\n";
   size_t i = 0;
-  std::vector<std::string> inputs;
+  std::ostringstream tss;
   for (; i < fty.in_tys.size(); ++i) {
-    os << "  std::unique_ptr<char[]> memref_raw" << i
-       << "(new char[SizeOfRankedMemref(";
+    tss << "  std::unique_ptr<char[]> memref_raw" << i
+        << "(new char[SizeOfRankedMemref(";
     if (auto sty = dyn_cast<SpannedType>(fty.in_tys[i]))
-      os << sty->Dims();
+      tss << sty->Dims();
     else
-      os << "1";
-    os << ")]);\n";
-    os << "  auto input" << i << " = CreateUnrankedMemref(in_mem" << i
-       << ", memref_raw" << i << ".get(), ";
-    if (auto sty = dyn_cast<SpannedType>(fty.in_tys[i]))
-      sty->GetShape().PrintAsList(os);
-    else
-      os << "{1}";
-    os << ");\n";
+      tss << "1";
+    tss << ")]);\n";
+    tss << "  auto input" << i << " = CreateUnrankedMemref(in_mem" << i
+        << ", memref_raw" << i << ".get(), ";
+    if (auto sty = dyn_cast<SpannedType>(fty.in_tys[i])) {
+      tss << LSTR(sty->GetShape());
+    } else
+      tss << "{1}";
+    tss << ");\n";
     inputs.push_back("input" + std::to_string(i));
   }
 
   if (auto rty = dyn_cast<SpannedType>(fty.out_ty)) {
-    std::ostringstream tss;  // temporal stream
-    tss << "  std::vector<int64_t> out_shape = {";
-    rty->GetShape().PrintPlain(tss);
-    os << ReplaceRuntimeNames(tss.str());
-    os << "};\n";
+    tss << "  std::vector<int64_t> out_shape = {" << RSTR(rty->GetShape())
+        << "};\n";
   } else if (!isa<VoidType>(fty.out_ty)) {
-    os << "  std::vector<int64_t> out_shape = {1};\n";
+    tss << "  std::vector<int64_t> out_shape = {1};\n";
   }
+  os << ReplaceRuntimeNames(tss.str(), "(int64_t)");
 
   if (!void_return) {
     os << "  std::unique_ptr<char[]> memref_raw" << i
@@ -977,9 +940,7 @@ void FactorCodeGen::EmitHostFuncBody(std::ostream &os, const Type &ty,
   os << "\n  " << current_fn << "(";
   for (auto &in : inputs) os << "&" << in << ", ";
   os << "stream" << ((void_return) ? "" : ", &output") << ");\n";
-  os << R"(  CHECK(topsStreamSynchronize(stream));
-
-)";
+  os << "  CHECK(topsStreamSynchronize(stream));\n";
 
   size_t out_rank = 1;
   std::string shape_string = "{1}";
@@ -1001,25 +962,38 @@ void FactorCodeGen::EmitHostFuncBody(std::ostream &os, const Type &ty,
   os << "  // Free up the resources\n";
   for (auto &p : device_mems) os << "  topsFree(" << p << ");\n";
   os << "  topsFree(out_mem);\n\n";
-  os << "  // TODO: figure out why stream destroying crash some applications.\n";
+  os << "  // TODO: figure out why stream destroying crash some "
+        "applications.\n";
   os << "  // topsStreamDestroy(stream);\n";
   os << "  return res;\n";
   os << "}\n";
 }
 
 std::string FactorCodeGen::ReplaceRuntimeNames(const std::string &e,
+                                               const std::string &prefix,
                                                bool host_code) {
   std::string expr = e;
   for (auto &s : rts_nmap) {
-    size_t start_pos = expr.find(s.first);
-    if (start_pos != std::string::npos) {
+    size_t pos = 0;
+    while ((pos = expr.find(s.first, pos)) != std::string::npos) {
       if (host_code)
-        expr.replace(start_pos, s.first.length(), s.second);
+        expr.replace(pos, s.first.length(), prefix + s.second);
       else
-        expr.replace(start_pos, s.first.length(), "-1");
+        expr.replace(pos, s.first.length(), "-1");
     }
   }
   return expr;
+}
+
+std::string FactorCodeGen::GetDynDimName(const ValueExpr &e) {
+  std::string expr = e;
+  for (auto &s : rts_nidx) {
+    if (e == s.first)
+      return "dim_(args[" + std::to_string(rts_pidx[s.first]) + "], " +
+             std::to_string(s.second) + ")";
+  }
+  assert(false && "ValueExpr is not found.");
+  return "";
 }
 
 void FactorCodeGen::EmitRuntimeCheck(std::ostream &os, const Type &ty) {

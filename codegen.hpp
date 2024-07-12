@@ -58,13 +58,21 @@ struct FactorCodeGen : public CodeGenerator {
   // output variable name
   std::string output_v;
 
-  // name of entry parameters
+  // name suffix of factor function parameters
   size_t sp_count = 0;
 
   int parallel_level = 0;
 
-  // mapping from a symbolic shape dimension to its runtime name
-  std::map<std::string, std::string> rts_nmap;
+  bool dyn_shaped = false;
+
+  // mapping from a symbolic shape dimensions to the associated runtime name
+  std::map<std::string, std::string>
+      rts_nmap;  // symbolic name to the runtime name
+  std::map<std::string, size_t>
+      rts_pidx;  // shape index in parameter list for the runtime shape name
+  std::map<std::string, size_t>
+      rts_nidx;  // dim index in shape for the runtime shape name
+
   // runtime host parameter names
   std::vector<std::string> host_params;
   // parameters: the name (of factor data) and associated size expression
@@ -79,8 +87,9 @@ struct FactorCodeGen : public CodeGenerator {
                         const Shape &s);
 
   std::string GenHostParamName() { return "hp" + std::to_string(sp_count++); }
-  void ResetHostParamCount() { sp_count = 0; }
-  std::string ReplaceRuntimeNames(const std::string &, bool host_code = true);
+  std::string ReplaceRuntimeNames(const std::string &, const std::string & = "",
+                                  bool host_code = true);
+  std::string GetDynDimName(const ValueExpr &);
 
  public:
   FactorCodeGen(std::ostream &os, const ptr<SymbolTable> &symtab)

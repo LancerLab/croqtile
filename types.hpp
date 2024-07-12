@@ -590,6 +590,18 @@ struct Shape {
     return false;
   }
 
+  // retrieve the dimensions that are dynamic
+  std::unordered_map<int, ValueExpr> GetDynamicDims() const {
+    std::unordered_map<int, ValueExpr> res;
+    size_t i = 0;
+    for (auto & v : Value()) {
+      if (!isa<int>(&v))
+        res.emplace(i, *cast<ValueExpr>(&v));
+      ++i;
+    }
+    return res;
+  }
+
   std::string GetSizeExpression() const {
     if (!IsDynamic()) return std::to_string(Size());
 
@@ -710,19 +722,19 @@ inline std::string STR(const Shape& s) {
   return oss.str();
 }
 
+inline std::string STR(const ValueItem& vi) {
+  std::ostringstream oss;
+  if (auto iv = dyn_cast<int>(&vi))
+    oss << *iv;
+  else
+    oss << *cast<std::string>(&vi);
+  return oss.str();
+}
+
 // string as list
 inline std::string LSTR(const Shape& s) {
   std::ostringstream oss;
   s.PrintAsList(oss);
-  return oss.str();
-}
-
-inline std::string LSTR(const ValueItem& vi) {
-  std::ostringstream oss;
-  if (auto iv = dyn_cast<int>(&vi))
-    oss << "{" << *iv << "}";
-  else
-    oss << "{" << *cast<std::string>(&vi) << "}";
   return oss.str();
 }
 

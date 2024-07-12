@@ -92,8 +92,8 @@ class StringifyTable {
     syms.emplace_back(emittable);
   }
 
-  // Retrieve a symbol from the symbol table
-  std::string GetTypeSymbol(const std::string& emittable) {
+  // Retrieve typename of a symbol
+  std::string GetTypeName(const std::string& emittable) {
     if (type_sym_table.find(emittable) != type_sym_table.end())
       return type_sym_table.at(emittable);
     return "";
