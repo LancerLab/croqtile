@@ -629,7 +629,7 @@ s_expr
         $$ = $2;
       }
     | LPAREN s_expr RPAREN QES s_expr COL s_expr {
-        $$ = AST::Make<AST::Expr>(@1, "$", $2, $5, $7);
+        $$ = AST::Make<AST::Expr>(@1, "?", $2, $5, $7);
       }
     | s_expr LT s_expr { $$ = AST::Make<AST::Expr>(@1, "<", $1, $3); }
     | s_expr GT s_expr { $$ = AST::Make<AST::Expr>(@1, ">", $1, $3); }

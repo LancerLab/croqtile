@@ -264,7 +264,9 @@ bool EarlySemantics::Visit(AST::Expr& n) {
              (n.op == "!=") || (n.op == "<=") || (n.op == ">=")) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
-    assert(false);
+    // assert(false);
+    // only support IntegerType currently
+    assert(isa<IntegerType>(lty) && isa<IntegerType>(rty));
     if (!(lty->ApprxEqual(*rty))) {
       Error(n.LOC(), "in operation \"" + n.op +
                          "\": unable to apply to the types (" + PSTR(lty) +
