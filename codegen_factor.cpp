@@ -620,18 +620,16 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
 
     // get the lower/upper and stride for spanned iter var
     auto iv_type = this->GetSymbolType(id->name);
-    auto iv_bounds = dyn_cast<BoundedITupleType>(iv_type)->GetBounds();
-    auto iv_values = iv_bounds.Value();
+    auto iv_bounds = cast<BoundedITupleType>(iv_type)->GetBounds();
 
     // NOTES: foreach block ranges between [0, UB),
     // it always use one integer indicating the UB
     // we can certainly use idx=0 directly
-    auto ub_value = GetAt<int>(iv_values, 0);
 
     // synthesise the emitting string
     if (iv_type->Dims() == 1) {
       fs << this->indent << "for_(" << id->name << ", "
-         << std::to_string(ub_value) << ", "
+         << ReplaceDynDimName(STR(iv_bounds.ValueAt(0))) << ", "
          << 1 /* TODO(albert): need fix, unit stride is hardcoded for now*/
          << ", [&](auto iv_" << id->name << ") {\n";
       incrementIndent();
@@ -647,9 +645,10 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
              "can not find the bounded name.");
       assert((cur_bounded_vars[id->name].size() == iv_bounds.Dims()) &&
              "can not find the bounded name.");
+      size_t i = 0;
       for (auto name : cur_bounded_vars[id->name]) {
         fs << this->indent << "for_(" << name << ", "
-           << std::to_string(ub_value) << ", "
+           << ReplaceDynDimName(STR(iv_bounds.ValueAt(i))) << ", "
            << 1 /* TODO(albert): need fix, unit stride is hardcoded for now*/
            << ", [&](auto iv_" << name << ") {\n";
         std::string scoped_var = InScopeName(name);
@@ -661,6 +660,7 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
           if (bname != name)
             fs << indent << "auto iv_" << bname << " = iv_" << name << ";\n";
         }
+        ++i;
       }
     }
   }
@@ -732,7 +732,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
       size_t i = 0;
       for (auto &ddim : dyn_dims) {
         auto ddim_name = name + "_rt_dim" + std::to_string(i);
-        dss << "auto " << ddim_name << " = " << GetDynDimName(ddim.second)
+        dss << "auto " << ddim_name << " = " << ReplaceDynDimName(ddim.second)
             << ";\n";
         type_name += ddim_name;
         if (++i != dyn_dims.size()) type_name += ", ";
@@ -985,15 +985,17 @@ std::string FactorCodeGen::ReplaceRuntimeNames(const std::string &e,
   return expr;
 }
 
-std::string FactorCodeGen::GetDynDimName(const ValueExpr &e) {
+std::string FactorCodeGen::ReplaceDynDimName(const std::string &e) {
   std::string expr = e;
   for (auto &s : rts_nidx) {
-    if (e == s.first)
-      return "dim_(args[" + std::to_string(rts_pidx[s.first]) + "], " +
-             std::to_string(s.second) + ")";
+    size_t pos = 0;
+    while ((pos = expr.find(s.first, pos)) != std::string::npos) {
+      std::string dim_value = "dim_(args[" + std::to_string(rts_pidx[s.first]) +
+                              "], " + std::to_string(s.second) + ")";
+      expr.replace(pos, s.first.length(), dim_value);
+    }
   }
-  assert(false && "ValueExpr is not found.");
-  return "";
+  return expr;
 }
 
 void FactorCodeGen::EmitRuntimeCheck(std::ostream &os, const Type &ty) {

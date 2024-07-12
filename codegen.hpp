@@ -89,7 +89,7 @@ struct FactorCodeGen : public CodeGenerator {
   std::string GenHostParamName() { return "hp" + std::to_string(sp_count++); }
   std::string ReplaceRuntimeNames(const std::string &, const std::string & = "",
                                   bool host_code = true);
-  std::string GetDynDimName(const ValueExpr &);
+  std::string ReplaceDynDimName(const std::string &);
 
  public:
   FactorCodeGen(std::ostream &os, const ptr<SymbolTable> &symtab)
