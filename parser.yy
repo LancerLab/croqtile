@@ -152,7 +152,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::CppSourceCode>> pass_by host_code
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::Node>> foreach_block general_val simple_int span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt index_or_value iv_expr if_else_block optional_scalar_init param_mdspan_val chunkat_or_storage
-%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause else_block
+%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause else_block named_spanned_decls
 %nterm <AST::ptr<AST::MultiValues>> index_value_list value_list param_mdspan_list iv_exprs iv_list id_list with_matchers passables
 %nterm <AST::ptr<AST::Expr>> s_expr span_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
@@ -161,7 +161,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::ChoreoFunction>> dsl_function
 %nterm <AST::ptr<AST::MultiDimSpans>> unnamed_mdspan_decl param_mdspan
 %nterm <AST::ptr<AST::NamedTypeDecl>> named_mdspan_decl
-%nterm <AST::ptr<AST::NamedVariableDecl>> named_ituple_decl named_scalar_decl named_spanned_decl
+%nterm <AST::ptr<AST::NamedVariableDecl>> named_ituple_decl named_scalar_decl
 %nterm <AST::ptr<AST::IntTuple>> unnamed_ituple_decl sugar_unnamed_ituple_decl sugarless_unnamed_ituple_decl
 %nterm <AST::ptr<AST::IntIndex>> s_index
 %nterm <AST::ptr<AST::WithBlock>> within_block
@@ -399,13 +399,12 @@ assignments
     ;
 
 declarations
-    : declarations COMMA declaration {
-        $1->Append($3);
-        $$ = $1;
-      }
-    | declaration {
+    : declaration {
         $$ = AST::Make<AST::MultiNodes>(@1);
         $$->Append($1);
+      }
+    | named_spanned_decls {
+        $$ = $1;
       }
     ;
 
@@ -413,7 +412,6 @@ declaration
     : named_mdspan_decl  { $$ = $1; }
     | named_ituple_decl  { $$ = $1; }
     | named_scalar_decl  { $$ = $1; }
-    | named_spanned_decl { $$ = $1; }
     ;
 
 named_scalar_decl
@@ -432,10 +430,16 @@ optional_scalar_init
     | ASSIGN s_expr  { $$ = $2; }
     ;
 
-named_spanned_decl
-    : storage_qual spanned_type IDENTIFIER {
-        symtab.AddSymbol($3, $2->GetType());
-        $$ = AST::Make<AST::NamedVariableDecl>(@3, $3, $2, $1);
+named_spanned_decls
+    : named_spanned_decls COMMA IDENTIFIER {
+        const auto& node = std::dynamic_pointer_cast<AST::NamedVariableDecl>($1->values[0]);
+        symtab.AddSymbol($3, node->GetType());
+        $1->Append(AST::Make<AST::NamedVariableDecl>(@3, $3, node->type, node->mem));
+        $$ = $1;
+      }
+    | storage_qual spanned_type IDENTIFIER {
+        $$ = AST::Make<AST::MultiNodes>(@1);
+        $$->Append(AST::Make<AST::NamedVariableDecl>(@3, $3, $2, $1));
       }
     ;
 
