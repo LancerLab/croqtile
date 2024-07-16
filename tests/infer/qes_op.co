@@ -1,0 +1,117 @@
+// RUN: choreo -i %s | FileCheck --match-full-lines %s
+// RUN: choreo -v %s | FileCheck --check-prefix=VALNO --match-full-lines %s
+
+#include "choreo.h"
+
+__co__ void qes_op(int u_x, int u_y) {
+  bool f = false;
+  bool t = true;
+
+  // c for cant
+  // u for u
+
+  int c_x = 10;
+  int c_y = 10;
+  int c_z = 200;
+
+  int a = 0;
+  int b = 1;
+
+  int c_0 = (c_x > c_z) ? a : b;
+  int c_1 = (c_x < c_z) ? a : b;
+  int c_2 = (c_x == c_y) ? a : b;
+  int c_3 = (c_x != c_z) ? a : b;
+  int c_4 = (c_x <= c_z) ? a : b;
+  int c_5 = (c_x < c_y) ? a : b;
+  int c_6 = (c_x != c_z) ? a : b;
+  int c_7 = (c_x > c_z) ? 999 : b;
+  int c_8 = (c_x >= c_z) ? 999 : 9;
+  int c_9 = (9 <= 999) ? 999 : 9;
+
+  int u_0 = (u_x > u_y) ? a : b;
+  int u_1 = (u_x == c_x) ? a : b;
+  int u_2 = (u_x != u_y) ? u_x : b;
+  int u_3 = (c_x < c_z) ? u_x : b;
+  int u_4 = (c_x < c_z) ? u_x : 999;
+  int u_5 = (u_x < c_z) ? 99 : 999;
+}
+
+// VALNO:   scope-1 {
+// VALNO:    New VN #0: '::qes_op::u_x'
+// VALNO:    New VN #1: '::qes_op::u_y'
+// VALNO:    New VN #2: 'false'
+// VALNO:    Alias "::qes_op::f" -> #2
+// VALNO:    New VN #3: 'true'
+// VALNO:    Alias "::qes_op::t" -> #3
+// VALNO:    New VN #4: 'const_10'
+// VALNO:    Alias "::qes_op::c_x" -> #4
+// VALNO:    Alias "::qes_op::c_y" -> #4
+// VALNO:    New VN #5: 'const_200'
+// VALNO:    Alias "::qes_op::c_z" -> #5
+// VALNO:    New VN #6: 'const_0'
+// VALNO:    Alias "::qes_op::a" -> #6
+// VALNO:    New VN #7: 'const_1'
+// VALNO:    Alias "::qes_op::b" -> #7
+// VALNO:    <Simplify> 'ref:#4 > ref:#5' to 'false'
+// VALNO:    <Simplify> '>:#4:#5 ? ref:#6 : ref:#7' to 'const_1'
+// VALNO:    Alias "::qes_op::c_0" -> #7
+// VALNO:    <Simplify> 'ref:#4 < ref:#5' to 'true'
+// VALNO:    <Simplify> '<:#4:#5 ? ref:#6 : ref:#7' to 'const_0'
+// VALNO:    Alias "::qes_op::c_1" -> #6
+// VALNO:    <Simplify> 'ref:#4 == ref:#4' to 'true'
+// VALNO:    <Simplify> '==:#4:#4 ? ref:#6 : ref:#7' to 'const_0'
+// VALNO:    Alias "::qes_op::c_2" -> #6
+// VALNO:    <Simplify> 'ref:#4 != ref:#5' to 'true'
+// VALNO:    <Simplify> '!=:#4:#5 ? ref:#6 : ref:#7' to 'const_0'
+// VALNO:    Alias "::qes_op::c_3" -> #6
+// VALNO:    <Simplify> 'ref:#4 <= ref:#5' to 'true'
+// VALNO:    <Simplify> '<=:#4:#5 ? ref:#6 : ref:#7' to 'const_0'
+// VALNO:    Alias "::qes_op::c_4" -> #6
+// VALNO:    <Simplify> 'ref:#4 < ref:#4' to 'false'
+// VALNO:    <Simplify> '<:#4:#4 ? ref:#6 : ref:#7' to 'const_1'
+// VALNO:    Alias "::qes_op::c_5" -> #7
+// VALNO:    <Simplify> 'ref:#4 != ref:#5' to 'true'
+// VALNO:    <Simplify> '!=:#4:#5 ? ref:#6 : ref:#7' to 'const_0'
+// VALNO:    Alias "::qes_op::c_6" -> #6
+// VALNO:    <Simplify> 'ref:#4 > ref:#5' to 'false'
+// VALNO:    New VN #8: 'const_999'
+// VALNO:    <Simplify> '>:#4:#5 ? ref:#8 : ref:#7' to 'const_1'
+// VALNO:    Alias "::qes_op::c_7" -> #7
+// VALNO:    <Simplify> 'ref:#4 >= ref:#5' to 'false'
+// VALNO:    New VN #9: 'const_9'
+// VALNO:    <Simplify> '>=:#4:#5 ? ref:#8 : ref:#9' to 'const_9'
+// VALNO:    Alias "::qes_op::c_8" -> #9
+// VALNO:    <Simplify> 'ref:#9 <= ref:#8' to 'true'
+// VALNO:    <Simplify> '<=:#9:#8 ? ref:#8 : ref:#9' to 'const_999'
+// VALNO:    Alias "::qes_op::c_9" -> #8
+// VALNO:    New VN #10: '>:#0:#1'
+// VALNO:    New VN #11: '?:#10:#6:#7'
+// VALNO:    Alias "::qes_op::u_0" -> #11
+// VALNO:    New VN #12: '==:#0:#4'
+// VALNO:    New VN #13: '?:#12:#6:#7'
+// VALNO:    Alias "::qes_op::u_1" -> #13
+// VALNO:    New VN #14: '!=:#0:#1'
+// VALNO:    New VN #15: '?:#14:#0:#7'
+// VALNO:    Alias "::qes_op::u_2" -> #15
+// VALNO:    <Simplify> 'ref:#4 < ref:#5' to 'true'
+// VALNO:    <Simplify> '<:#4:#5 ? ref:#0 : ref:#7' to '::qes_op::u_x'
+// VALNO:    Alias "::qes_op::u_3" -> #0
+// VALNO:    <Simplify> 'ref:#4 < ref:#5' to 'true'
+// VALNO:    <Simplify> '<:#4:#5 ? ref:#0 : ref:#8' to '::qes_op::u_x'
+// VALNO:    Alias "::qes_op::u_4" -> #0
+// VALNO:    New VN #16: '<:#0:#5'
+// VALNO:    New VN #17: 'const_99'
+// VALNO:    New VN #18: '?:#16:#17:#8'
+// VALNO:    Alias "::qes_op::u_5" -> #18
+// VALNO:   } // end scope-1
+
+// CHECK: Parameter: ::qes_op::u_x, Type: int
+// CHECK: Parameter: ::qes_op::u_y, Type: int
+// CHECK: Symbol:    ::qes_op::f, Type: bool
+// CHECK: Symbol:    ::qes_op::t, Type: bool
+// CHECK: Symbol:    ::qes_op::c_x, Type: int
+// CHECK: Symbol:    ::qes_op::c_y, Type: int
+// CHECK: Symbol:    ::qes_op::c_z, Type: int
+// CHECK: Symbol:    ::qes_op::a, Type: int
+// CHECK: Symbol:    ::qes_op::b, Type: int
+// CHECK-NOT: Symbol:{{.*}}
