@@ -438,6 +438,7 @@ named_spanned_decls
         $$ = $1;
       }
     | storage_qual spanned_type IDENTIFIER {
+        symtab.AddSymbol($3, $2->GetType());
         $$ = AST::Make<AST::MultiNodes>(@1);
         $$->Append(AST::Make<AST::NamedVariableDecl>(@3, $3, $2, $1));
       }
