@@ -234,6 +234,10 @@ struct GCUCheck : public VisitorWithSymTab {
     TraceEachVisit(n);
     return true;
   }
+  bool Visit(AST::Select &n) {
+    TraceEachVisit(n);
+    return true;
+  }
   bool Visit(AST::Return &n) {
     TraceEachVisit(n);
     return true;

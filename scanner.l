@@ -146,6 +146,7 @@ blank [ \t\r]
   "foreach"  return Choreo::Parser::make_FOREACH(yytext, loc);
   "wait"     return Choreo::Parser::make_WAIT(yytext, loc);
   "call"     return Choreo::Parser::make_CALL(yytext, loc);
+  "select"   return Choreo::Parser::make_SELECT(yytext, loc);
   "return"   return Choreo::Parser::make_RET(yytext, loc);
   "where"    return Choreo::Parser::make_WHERE(yytext, loc);
   "<->"      return Choreo::Parser::make_BIND   (loc);

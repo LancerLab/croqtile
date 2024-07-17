@@ -138,7 +138,7 @@ void choreo_info(const char *message) {
 %token <Choreo::Storage> LOCAL SHARED GLOBAL
 %token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT BOOL VOID
 // builtin operations
-%token <std::string> DMA COPY SLICE PAD ASYNC FNSPAN FNDATA CHUNKAT WAIT CALL AUTO
+%token <std::string> DMA COPY SLICE PAD ASYNC FNSPAN FNDATA CHUNKAT WAIT CALL AUTO SELECT
 // control related
 %token <std::string> IF ELSE PARA BY WITH IN FOREACH RET WHERE
 %token <std::string> TRUE FALSE
@@ -151,9 +151,9 @@ void choreo_info(const char *message) {
 %nterm <Choreo::BaseType> fundamental_type
 %nterm <AST::ptr<AST::CppSourceCode>> pass_by host_code
 %nterm <AST::ptr<AST::Memory>> storage_qual
-%nterm <AST::ptr<AST::Node>> foreach_block general_val simple_int span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt index_or_value iv_expr if_else_block optional_scalar_init param_mdspan_val chunkat_or_storage
+%nterm <AST::ptr<AST::Node>> foreach_block general_val simple_int span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt index_or_value iv_expr if_else_block optional_scalar_init param_mdspan_val chunkat_or_storage_or_select
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause else_block named_spanned_decls
-%nterm <AST::ptr<AST::MultiValues>> index_value_list value_list param_mdspan_list iv_exprs iv_list id_list with_matchers passables
+%nterm <AST::ptr<AST::MultiValues>> index_value_list value_list param_mdspan_list iv_exprs iv_list id_list with_matchers passables span_val_list
 %nterm <AST::ptr<AST::Expr>> s_expr span_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
@@ -170,6 +170,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::ParallelBy>> paraby_block
 %nterm <AST::ptr<AST::Return>> return_stmt
 %nterm <AST::ptr<AST::ChunkAt>> chunkat_expr
+%nterm <AST::ptr<AST::Select>> select_expr
 
 // precedence (low to high) and associativity
 %right LBRACE
@@ -502,6 +503,18 @@ span_val
     | IDENTIFIER FNSPAN { $$ = AST::Make<AST::Identifier>(@1, $1 + $2); }
     ;
 
+span_val_list
+    : span_val_list COMMA span_val {
+        $1->Append($3);
+        $$ = $1;
+      }
+    | span_val {
+        $$ = AST::Make<AST::MultiValues>(@1);
+        $$->SetDelimiter(", ");
+        $$->Append($1);
+      }
+    ;
+
 named_mdspan_decl
     : MDSPAN IDENTIFIER COL s_expr {
         symtab.AddSymbol($2, MakeUninitMDSpanType());
@@ -754,11 +767,11 @@ iv_expr
     ;
 
 dma_stmt
-    : IDENTIFIER ASSIGN DMA dma_operation sync_type dma_config chunkat_expr TRANS chunkat_or_storage {
+    : IDENTIFIER ASSIGN DMA dma_operation sync_type dma_config chunkat_expr TRANS chunkat_or_storage_or_select {
         symtab.AddSymbol($1, MakeDummyFutureType($5));
         $$ = AST::Make<AST::DMA>(@3, $4, $1, $7, $9, $5, $6);
       }
-    | DMA dma_operation sync_type dma_config chunkat_expr TRANS chunkat_or_storage {
+    | DMA dma_operation sync_type dma_config chunkat_expr TRANS chunkat_or_storage_or_select {
         $$ = AST::Make<AST::DMA>(@1, $2, "", $5, $7, $3, $4);
       }
     ;
@@ -789,9 +802,10 @@ sync_type
     | ASYNC { $$ = true; }
     ;
 
-chunkat_or_storage
+chunkat_or_storage_or_select
     : chunkat_expr { $$ = $1; }
     | storage      { $$ = AST::Make<AST::Memory>(@1, $1); }
+    | select_expr  { $$ = $1; }
     ;
 
 chunkat_expr
@@ -807,6 +821,11 @@ chunkat_expr
     | IDENTIFIER { $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1)); }
     | IDENTIFIER FNDATA { $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1)); }
     ;
+
+select_expr
+    : SELECT LPAREN s_expr COMMA span_val_list RPAREN {
+        $$ = AST::Make<AST::Select>(@1, $3, $5);
+      }
 
 iv_list
     : iv_list COMMA NUM {
