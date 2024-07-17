@@ -7,8 +7,8 @@ __co__ void qes_op(int u_x, int u_y) {
   bool f = false;
   bool t = true;
 
-  // c for cant
-  // u for u
+  // c for constant
+  // u for unknown
 
   int c_x = 10;
   int c_y = 10;
