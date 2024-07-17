@@ -1520,36 +1520,35 @@ __co__ s32 [512, 1024] ele_add(s32 [512, 1024] lhs, s32 [1024, 1024] rhs) { /// 
         foreach n_tile {
           shared s32[512, 1024] l2_out; // alternative: s32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
           foreach k_tile {
-            // chunkat can support bounded_var algebra.
             lhs_load = dma.copy.async lhs.chunkat(m_tile, k_tile) => shared; // tiling_factor: {6, 17, 4}, new_size {lhs(0)/6, lhs(1)/17, lhs(2)/4}
             rhs_load = dma.copy.async rhs.chunkat(k_tile, n_tile) => shared; // no explicit decl the target buffer, but can refer by <FutureType>.data
-            wait lhs_load, rhs_load;
+            // CHANGE 1: NO WAIT
+            // wait lhs_load, rhs_load;
             parallel q by 1 {
               with index = {m_tile_s, k_tile_s, n_tile_s} in [2, 4, 4] {
                 foreach m_tile_s {
                   foreach n_tile_s {
-                    // ALT: local s32[1, 16] l1_out; // alternative: s32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
                     foreach k_tile_s{
-                      lhs_load_s = dma.copy.async lhs_load.data.chunkat(m_tile_s, k_tile_s) => local;
-                      rhs_load_s = dma.copy.async rhs_load.data.chunkat(k_tile_s, n_tile_s) => local;
+                      // CHANGE 2: add after primitive to chain up paired DMAs
+                      lhs_load_s = dma.copy.async lhs_load.data.chunkat(m_tile_s, k_tile_s) => local after lhs_load;
+                      rhs_load_s = dma.copy.async rhs_load.data.chunkat(k_tile_s, n_tile_s) => local after rhs_load;
                       out_load_s = dma.copy.async l2_out.chunkat(m_tile_s, n_tile_s) => local;
-                      wait lhs_load_s, rhs_load_s, out_load_s;
+                      wait out_load_s;
+                      // CHANGE 1: NO WAIT
+                      // wait lhs_load_s, rhs_load_s, out_load_s;
                       call dot_general_fp32(lhs_load_s.data, rhs_load_s.data, 256, 256, 256, 0, 8, out_load_s.data); // |span| calculate the total size of span.
-                      // KERNEL 2: call dot_general_kernel_lhs_parallel(lhs_load_s.data, rhs_load_s.data, 256, 256, 256, 0, 8, out_load_s.data); // |span| calculate the total size of span.
-                      // KENREL 3: call dot_general_kernel_lhs_parallel_no_transpose(lhs_load_s.data, rhs_load_s.data, 256, 256, 256, 0, 8, out_load_s.data); // |span| calculate the total size of span.
-                      // KERNEL 4: call fake_kernel(lhs_load_s.data, rhs_load_s.data, 256, 256, 256, 0, 8, out_load_s.data); // |span| calculate the total size of span.
-                      // NAIVE KERNEL: call kernel(lhs_load_s.data, rhs_load_s.data, l1_out); // |span| calculate the total size of span.
                       out_store_s = dma.copy.async out_load_s.data => l2_out.chunkat(m_tile_s, n_tile_s); // can use defined vars
-                      // ALT: out_store_s = dma.copy.async l1_out => l2_out.chunkat(m_tile_s, n_tile_s); // can use defined vars
-                      wait out_store_s;
+                      // CHANGE 1: NO WAIT
+                      // wait out_store_s;
                     }
                   }
                 }
               }
             }
-
-            out_store = dma.copy.async l2_out => output.chunkat(m_tile, n_tile); // can use defined vars
-            wait out_store;
+            // CHANGE 2: add after primitive to chain up paired DMAs
+            out_store = dma.copy.async l2_out => output.chunkat(m_tile, n_tile) after out_store_s; // can use defined vars
+            // CHANGE 1: NO WAIT
+            // wait out_store;
           }
         }
       }

@@ -122,6 +122,7 @@ void choreo_info(const char *message) {
   PIPE    "|"
   UBOUND  "#"
   CDIV    "cdiv"
+  CHAIN   "after"
 ;
 
 // instead of union, using c++17 variant for terminal and non-terminals
@@ -771,8 +772,15 @@ dma_stmt
         symtab.AddSymbol($1, MakeDummyFutureType($5));
         $$ = AST::Make<AST::DMA>(@3, $4, $1, $7, $9, $5, $6);
       }
+    | IDENTIFIER ASSIGN DMA dma_operation sync_type dma_config chunkat_expr TRANS chunkat_or_storage_or_select CHAIN IDENTIFIER {
+        symtab.AddSymbol($1, MakeDummyFutureType($5));
+        $$ = AST::Make<AST::DMA>(@3, $4, $1, $11, $7, $9, $5, $6);
+      }
     | DMA dma_operation sync_type dma_config chunkat_expr TRANS chunkat_or_storage_or_select {
         $$ = AST::Make<AST::DMA>(@1, $2, "", $5, $7, $3, $4);
+      }
+    | DMA dma_operation sync_type dma_config chunkat_expr TRANS chunkat_or_storage_or_select CHAIN IDENTIFIER {
+        $$ = AST::Make<AST::DMA>(@1, $2, "", $9, $5, $7, $3, $4);
       }
     ;
 

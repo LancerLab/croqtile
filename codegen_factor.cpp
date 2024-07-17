@@ -417,7 +417,6 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
 
   // allocate storage for DMA destination when it is not explicitly stated.
   if (auto mem_node = dyn_cast<AST::Memory>(d.to)) {
-    // TODO(albert): generate 'local_buffer' with more smart naming way by valno
     // support
     static std::map<Storage, std::string> sto2alloc = {
         {Storage::LOCAL, "L1Type"},
@@ -494,7 +493,14 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   };
 
   // buffer the allocation in another stream
-  alloc_in_fs << alloc_indent << "auto " << future_name << " = alloc_dma_("
+  // if use pipeline-mode, make all cdma with shared_ annotation
+  if (d.chained == true && 
+      ((d.chain_to != "" && src_level > dst_level) ||
+      (d.chain_from != "" && src_level < dst_level)))
+    alloc_in_fs << alloc_indent << "auto " << future_name << " = alloc_dma_("
+              << DMATypeString(src_level, dst_level) << "()).shared_();\n";
+  else
+    alloc_in_fs << alloc_indent << "auto " << future_name << " = alloc_dma_("
               << DMATypeString(src_level, dst_level) << "());\n";
 
   // decide the dma operation
@@ -525,10 +531,24 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
        << DelimitedString(pcfg->pad_mid) << "}, " << pcfg->value.v;
   }
 
-  fs << ");\n";
+  if (d.chained == false) {
+    fs << ");\n";
+    // synchornized dma must be waited
+    if (!ty->IsAsync()) fs << indent << "wait_dma_(" << future_name << ");\n";
+  } else {
+    assert(ty->IsAsync() && "Notifying DMA only apply to async primitives in factor lang.");
+    if (d.chain_from != "") 
+      if (src_level >= dst_level)
+        fs << ").wait_on_(" << d.chain_from << ");\n";
+      else
+        fs << ").multi_wait_on_(" << d.chain_from << ");\n";
 
-  // synchornized dma must be waited
-  if (!ty->IsAsync()) fs << indent << "wait_dma_(" << future_name << ");\n";
+    if (d.chain_to != "")
+      if (src_level >= dst_level)
+        fs << ").multi_notify_(" << d.chain_to << ");\n";
+      else 
+        fs << ").notify_(" << d.chain_to << ");\n";
+  }
 
   return true;
 }

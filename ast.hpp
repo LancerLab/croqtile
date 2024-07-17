@@ -908,6 +908,12 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
   std::string operation;
   std::string future;
   bool async;
+  // if this DMA is chained with other DMA in pipeline mode
+  bool chained;
+  // SYMBOL string of its chained DMA B, direction is B->A
+  std::string chain_from;
+  // SYMBOL string of its chained DMA B, direction is A->B
+  std::string chain_to;
   ptr<Node> from;
   ptr<Node> to;
   ptr<DMAConfig> config;
@@ -921,7 +927,26 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
         async(a),
         from(f),
         to(t),
-        config(c) {}
+        config(c) {
+          chained = false;
+          chain_to = "";
+          chain_from = "";
+        }
+
+  explicit DMA(const location& l, const std::string& o, const std::string& r,
+               const std::string& chained_from,
+               const ptr<Node>& f, const ptr<Node>& t, bool a,
+               const ptr<DMAConfig>& c = nullptr)
+      : Node(l, MakeDummyFutureType(a)),
+        operation(o),
+        future(r),
+        async(a),
+        from(f),
+        to(t),
+        config(c){
+          chained = true;
+          chain_from = chained_from;
+        }
 
   std::string FromSymbol() const { return cast<ChunkAt>(from)->RefSymbol(); }
 
@@ -940,6 +965,12 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
     if (!future.empty()) os << "\n" << prefix << "  `- future: " << future;
     os << "\n" << prefix << "  `- from: " << STR(from);
     os << "\n" << prefix << "  `- to: " << STR(to);
+    if (chained) {
+      if (chain_to != "")
+        os << "\n" << prefix << "  `- chained to: " << chain_to;
+      if (chain_from != "")
+        os << "\n" << prefix << "  `- chained from: " << chain_from;
+    }
   }
 
   std::string SourceString() {

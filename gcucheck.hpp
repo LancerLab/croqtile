@@ -7,6 +7,31 @@
 
 namespace Choreo {
 
+class WorkingList {
+ private:
+  std::unordered_map<std::string, AST::DMA*> string_to_dma;
+
+ public:
+  // Add a symbol to the symbol table
+  // emittable = 'a'
+  // type_symbol = 'a_type'
+  // emitted = 'DRAMType(FloatType(32), {1, 2})'
+  void AddDMA(AST::DMA& dma) {
+    string_to_dma.emplace(dma.future, &dma);
+  }
+
+  // Retrieve typename of a symbol
+  AST::DMA* GetDMA(const std::string& mnemonic) {
+    if (string_to_dma.find(mnemonic) != string_to_dma.end())
+      return string_to_dma.at(mnemonic);
+    return nullptr;
+  }
+
+  void Reset() {
+    string_to_dma.clear();
+  }
+};
+
 struct GCUCheck : public VisitorWithSymTab {
  private:
   std::ostream &os;
@@ -14,6 +39,7 @@ struct GCUCheck : public VisitorWithSymTab {
   size_t error_count = 0;
 
   std::unordered_map<std::string, AST::Parameter *> cur_params;
+  WorkingList workinglist;
   int parallel_level = 0;
   int max_parallel_level = 0;
   int local_level = 0;
@@ -190,16 +216,28 @@ struct GCUCheck : public VisitorWithSymTab {
     // shadowed from the data movement. Later, codegen handles such a shadow.
     if (!isa<AST::ChunkAt>(n.from)) return true;
     auto f_name = cast<AST::ChunkAt>(n.from)->RefSymbol();
+
+    // remember all DMA for last chain check
+    workinglist.AddDMA(n);
+    // handle chained info, filling the DMA chain.
+    if (n.chained) {
+      auto _chain_from_ptr = workinglist.GetDMA(n.chain_from);
+      assert(_chain_from_ptr != nullptr && "after primitive chained to non-exist future id\n");
+      _chain_from_ptr->chained = true;
+      _chain_from_ptr->chain_to = n.future;
+    }
+
     SpannedType *sty = nullptr;
     if (auto fty = dyn_cast<FutureType>(GetSymbolType(f_name)))
       sty = fty->GetSpannedType().get();
     else
       sty = cast<SpannedType>(GetSymbolType(f_name));
 
-    if (sty->GetStorage() != Storage::DEFAULT) return true;
+    // storage level must be specified
+    if (sty->GetStorage() == Storage::NONE) return false;
 
     // not referencing the parameter
-    if (!cur_params.count(InScopeName(f_name))) return true;
+    if (!cur_params.count(InScopeName(f_name))) return false;
 
     auto annotate_by_storage = [this, &f_name](Storage st) {
       switch (st) {
