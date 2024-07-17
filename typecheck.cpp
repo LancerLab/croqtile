@@ -129,6 +129,10 @@ bool TypeChecker::Visit(AST::Call& n) {
   __TRACE_EACH_VISIT__(n)
   return true;
 }
+bool TypeChecker::Visit(AST::Select& n) {
+  __TRACE_EACH_VISIT__(n)
+  return true;
+}
 bool TypeChecker::Visit(AST::Return& n) {
   __TRACE_EACH_VISIT__(n)
   return true;

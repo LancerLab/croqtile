@@ -886,6 +886,24 @@ struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
   __UDT_TYPE_INFO__
 };
 
+struct Select : public Node, public TypeIDProvider<Select> {
+  ptr<Expr> select_factor = nullptr;
+  int bound;
+  ptr<MultiValues> val_list = nullptr;
+
+  Select(const location& l,  const ptr<Expr>& sf, const ptr<MultiValues>& val_list = nullptr)
+      : Node(l), select_factor(sf), val_list(val_list) {}
+      
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << "select(" << STR(select_factor) << ", " << STR(val_list) << ")";
+    (void)prefix;
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__
+};
+
 struct DMA : public Node, public TypeIDProvider<DMA> {
   std::string operation;
   std::string future;
@@ -909,6 +927,8 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
 
   std::string ToSymbol() const {
     if (auto tochunk = dyn_cast<ChunkAt>(to)) return tochunk->data->name;
+    // TODO: symbol is dynamic?
+    // if (auto sel = dyn_cast<AST::Select>(to)) {}
     return "";
   }
 

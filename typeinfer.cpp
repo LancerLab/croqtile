@@ -638,6 +638,11 @@ bool TypeInference::Visit(AST::Call &n) {
   return true;
 }
 
+bool TypeInference::Visit(AST::Select &n) {
+  __TRACE_EACH_VISIT__(n)
+  return true;
+}
+
 bool TypeInference::Visit(AST::Return &n) {
   __TRACE_EACH_VISIT__(n)
 

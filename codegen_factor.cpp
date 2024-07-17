@@ -356,7 +356,7 @@ bool FactorCodeGen::Visit(AST::Memory &n) {
 bool FactorCodeGen::Visit(AST::DMA &d) {
   // handle .to  in AST::Memory
   assert((isa<AST::ChunkAt>(d.from)) && "Unexpected type for DMA's source.");
-  assert((isa<AST::Memory>(d.to) || isa<AST::ChunkAt>(d.to)) &&
+  assert((isa<AST::Memory>(d.to) || isa<AST::ChunkAt>(d.to) || isa<AST::Select>(d.to)) &&
          "Unexpected type for DMA's destination.");
 
   // retrieve the spanned type from a chunkat
@@ -597,6 +597,11 @@ bool FactorCodeGen::Visit(AST::Call &c) {
   }
   fs << "});\n";
 
+  return true;
+}
+
+bool FactorCodeGen::Visit(AST::Select &c) {
+  // TODO
   return true;
 }
 

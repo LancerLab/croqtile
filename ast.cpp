@@ -136,6 +136,10 @@ void ChunkAt::accept(Choreo::Visitor& v) {
   v.Visit(*this);
 }
 
+void Select::accept(Choreo::Visitor& v) {
+  v.Visit(*this);
+}
+
 void Wait::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
   targets->accept(v);

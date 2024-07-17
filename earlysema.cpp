@@ -865,6 +865,43 @@ bool EarlySemantics::Visit(AST::Call& n) {
   return true;
 }
 
+bool EarlySemantics::Visit(AST::Select &n) {
+  __TRACE_EACH_VISIT__(n)
+
+  n.select_factor->accept(*this);
+  // TODO(wsj) isa<IntegerType>(rty)?
+  if (!isa<BoundedIntegerType>(NodeType(*n.select_factor))) {
+    Error(n.LOC(), "expecting `" + n.select_factor->TypeNameString() +
+                       "` be a bounded integer type.");
+    error_count++;
+  }
+
+  // TODO(wsj) assert bound <= span_val_list.count ?
+
+  // check value types in val_list are the same
+  assert(n.val_list->Count() > 0);
+  const auto &v0 = n.val_list->AllValues()[0];
+  auto v0ty = NodeType(*v0);
+  for (auto &v : n.val_list->AllValues()) {
+    // TODO: need shape checking at typecheck
+    if (auto sty = dyn_cast<SpannedType>(NodeType(*v))) {
+      if (!sty->ApprxEqual(*NodeType(*v0))) {
+        Error(v->LOC(), "expecting `" + v->TypeNameString() +
+                           "` is the same type as `" + v0->TypeNameString() + "`.");
+        error_count++;
+      }
+    } else {
+      Error(v->LOC(),
+            "expecting `" + v->TypeNameString() + "` to be spanned type.");
+      error_count++;
+    }
+  }
+
+  SetNodeType(n, NodeType(*v0));
+
+  return true;
+}
+
 bool EarlySemantics::Visit(AST::Return& n) {
   __TRACE_EACH_VISIT__(n)
   found_return = true;

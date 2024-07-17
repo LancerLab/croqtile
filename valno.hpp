@@ -908,6 +908,14 @@ class ShapeInference : public Visitor {
     return true;
   };
 
+  bool Visit(AST::Select& n) {
+    __TRACE_EACH_VISIT__;
+
+    if (cannot_proceed) return true;
+
+    return true;
+  };
+
   bool Visit(AST::Return& n) {
     __TRACE_EACH_VISIT__;
 
