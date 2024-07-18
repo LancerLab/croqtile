@@ -657,9 +657,14 @@ bool FactorCodeGen::Visit(AST::Call &c) {
 
 bool FactorCodeGen::Visit(AST::Select &c) {
   __TRACE_EACH_VISIT__(c)
-  // TODO(albert): support bool condition not i32: like x % 2 => (x % 2 == 0)
-  fs << this->indent << "auto " << c.future << " = select_(" << STR(c.select_factor) << " == 0 , " << STR(c.val_list) << ");\n";
-  // fs << this->indent << "auto " << c.future << " = select_(" << STR(c.select_factor) << ", " << STR(c.val_list) << ");\n";
+  size_t val_count = c.val_list->Count();
+  // if val_count == 1, pingpong is meaningless? ( TODO: maybe assert when earlysema)
+  assert(val_count >= 2);
+  fs << this->indent << "auto " << c.future << " = ";
+  for (size_t i = 0; i < val_count - 1; i++) {
+    fs << "select_(" << STR(c.select_factor) << "== " << i << ", " << STR(c.val_list->ValueAt(i)) << (i < val_count-1 ? ", " : "");
+  }
+  fs << STR(c.val_list->AllValues().back()) << std::string(val_count-1, ')') << ";\n";
   return true;
 }
 
