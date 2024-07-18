@@ -4,6 +4,7 @@
 // This apply the GCU target specific check and information annotation
 
 #include "visitor.hpp"
+#include "ast.hpp"
 
 namespace Choreo {
 

@@ -21,6 +21,7 @@ namespace AST {
 // short hands
 template <typename T>
 using ptr = Choreo::ptr<T>;
+static int unique_id_select = 0;
 
 //------------------------- AST Node Fundamentals ----------------------------//
 
@@ -887,12 +888,16 @@ struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
 };
 
 struct Select : public Node, public TypeIDProvider<Select> {
+  std::string future;
+  Storage st = Storage::DEFAULT;
   ptr<Expr> select_factor = nullptr;
   int bound;
   ptr<MultiValues> val_list = nullptr;
 
-  Select(const location& l,  const ptr<Expr>& sf, const ptr<MultiValues>& val_list = nullptr)
-      : Node(l), select_factor(sf), val_list(val_list) {}
+  Select(const location& l, const ptr<Expr>& sf, const ptr<MultiValues>& val_list = nullptr)
+      : Node(l), select_factor(sf), val_list(val_list) {
+        // TODO(albert): we need mem level for Select
+      }
       
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "select(" << STR(select_factor) << ", " << STR(val_list) << ")";
@@ -903,6 +908,7 @@ struct Select : public Node, public TypeIDProvider<Select> {
 
   __UDT_TYPE_INFO__
 };
+
 
 struct DMA : public Node, public TypeIDProvider<DMA> {
   std::string operation;
@@ -931,6 +937,9 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
           chained = false;
           chain_to = "";
           chain_from = "";
+          if (auto tptr = dyn_cast<AST::Select>(t)) {
+            tptr->future = future + "_buffer";
+          }
         }
 
   explicit DMA(const location& l, const std::string& o, const std::string& r,
@@ -946,14 +955,15 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
         config(c){
           chained = true;
           chain_from = chained_from;
+          if (auto tptr = dyn_cast<AST::Select>(t)) {
+            tptr->future = future + "_buffer";
+          }
         }
 
   std::string FromSymbol() const { return cast<ChunkAt>(from)->RefSymbol(); }
 
   std::string ToSymbol() const {
     if (auto tochunk = dyn_cast<ChunkAt>(to)) return tochunk->data->name;
-    // TODO: symbol is dynamic?
-    // if (auto sel = dyn_cast<AST::Select>(to)) {}
     return "";
   }
 

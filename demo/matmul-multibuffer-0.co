@@ -1522,16 +1522,17 @@ __co__ s32 [512, 1024] ele_add(s32 [512, 1024] lhs, s32 [1024, 1024] rhs) { /// 
           foreach k_tile {
             lhs_load = dma.copy.async lhs.chunkat(m_tile, k_tile) => shared; // tiling_factor: {6, 17, 4}, new_size {lhs(0)/6, lhs(1)/17, lhs(2)/4}
             rhs_load = dma.copy.async rhs.chunkat(k_tile, n_tile) => shared; // no explicit decl the target buffer, but can refer by <FutureType>.data
-            // CHANGE 1: NO WAIT
-            // wait lhs_load, rhs_load;
+
             parallel q by 1 {
-              with index = {m_tile_s, k_tile_s, n_tile_s} in [2, 4, 4] {
+              with index = {m_tile_s, k_tile_s, n_tile_s} in [4, 4, 8] {
+                local s32 [128, 256] lhs_load_s_buffer_0, lhs_load_s_buffer_1;
+                local s32 [256, 128] rhs_load_s_buffer_0, rhs_load_s_buffer_1;
                 foreach m_tile_s {
                   foreach n_tile_s {
                     foreach k_tile_s{
                       // CHANGE 2: add after primitive to chain up paired DMAs
-                      lhs_load_s = dma.copy.async lhs_load.data.chunkat(m_tile_s, k_tile_s) => local after lhs_load;
-                      rhs_load_s = dma.copy.async rhs_load.data.chunkat(k_tile_s, n_tile_s) => local after rhs_load;
+                      lhs_load_s = dma.copy.async lhs_load.data.chunkat(m_tile_s, k_tile_s) => select(k_tile_s % 2, lhs_load_s_buffer_0, lhs_load_s_buffer_1) after lhs_load;
+                      rhs_load_s = dma.copy.async rhs_load.data.chunkat(k_tile_s, n_tile_s) => select(k_tile_s % 2, rhs_load_s_buffer_0, rhs_load_s_buffer_1) after rhs_load;
                       out_load_s = dma.copy.async l2_out.chunkat(m_tile_s, n_tile_s) => local;
                       wait out_load_s;
                       // CHANGE 1: NO WAIT

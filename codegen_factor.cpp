@@ -19,6 +19,12 @@
 using namespace Choreo;
 using namespace Choreo::Factor;
 
+#define __TRACE_EACH_VISIT__(d)       \
+  if (trace_visit) {                  \
+    os << d.TypeNameString() << ": "; \
+    os << "\n";                       \
+  }
+
 bool FactorCodeGen::ContainsLoopVar(const std::string &iv) const {
   for (auto &loop_var : loop_vars)
     if (loop_var.count(iv)) return true;
@@ -40,6 +46,7 @@ std::string Shape::EmitTo(Target target) const {
 static StringifyTable factor_symbols;
 
 bool FactorCodeGen::BeforeVisitImpl(AST::Node &n) {
+  __TRACE_EACH_VISIT__(n)
   if (isa<AST::Program>(&n)) {
     //    print_fixed_header(os);
   } else if (auto c = dyn_cast<AST::ChoreoFunction>(&n)) {
@@ -74,6 +81,7 @@ using namespace factor;
 
 // CLEAN
 bool FactorCodeGen::AfterVisitImpl(AST::Node &n) {
+  __TRACE_EACH_VISIT__(n)
   if (isa<AST::Program>(&n)) {
     os << "\n# step 4: generate the host source\n";
     os << "host_src=" << host_fn << "\n";
@@ -201,6 +209,7 @@ bool FactorCodeGen::Visit(AST::NamedTypeDecl &) { return true; };
 //   NamedVariableDecl
 //   CLEAN
 bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
+  __TRACE_EACH_VISIT__(node)
   // TODO(albert): 'a.span' will be replace to the type-decl related to 'a'
   // TODO(albert): refine this function with TYPE_STR new API
   auto nty = node.GetType();
@@ -245,22 +254,26 @@ bool FactorCodeGen::Visit(AST::IntIndex &) { return true; };
 bool FactorCodeGen::Visit(AST::DataType &) { return true; };
 
 bool FactorCodeGen::Visit(AST::Identifier &n) {
+  __TRACE_EACH_VISIT__(n)
   (void)n;
   return true;
 }
 
 bool FactorCodeGen::Visit(AST::Parameter &p) {
+  __TRACE_EACH_VISIT__(p)
   (void)p;
   return true;
 }
 
 bool FactorCodeGen::Visit(AST::ParamList &pl) {
+  __TRACE_EACH_VISIT__(pl)
   cur_params = &pl.values;
   return true;
 }
 
 // CLEAN
 bool FactorCodeGen::Visit(AST::ParallelBy &by) {
+  __TRACE_EACH_VISIT__(by)
   parallel_factor *= by.bound;
   if (parallel_level > 1) {
     return true;
@@ -302,6 +315,7 @@ bool FactorCodeGen::Visit(AST::ParallelBy &by) {
 }
 
 bool FactorCodeGen::Visit(AST::WhereBind &n) {
+  __TRACE_EACH_VISIT__(n)
   // establish the binding
   auto lid = cast<AST::Identifier>(n.lhs);
   auto rid = cast<AST::Identifier>(n.rhs);
@@ -325,6 +339,7 @@ bool FactorCodeGen::Visit(AST::WhereBind &n) {
 
 // CLEAN
 bool FactorCodeGen::Visit(AST::WithIn &n) {
+  __TRACE_EACH_VISIT__(n)
   assert(n.with_matchers && "expect matcher to be exist.");
 
   // associate with to the matcher.
@@ -348,12 +363,14 @@ bool FactorCodeGen::Visit(AST::WithIn &n) {
 bool FactorCodeGen::Visit(AST::WithBlock &) { return true; }
 
 bool FactorCodeGen::Visit(AST::Memory &n) {
+  __TRACE_EACH_VISIT__(n)
   (void)n;
   return true;
 }
 
 // CLEAN
 bool FactorCodeGen::Visit(AST::DMA &d) {
+  __TRACE_EACH_VISIT__(d)
   // handle .to  in AST::Memory
   assert((isa<AST::ChunkAt>(d.from)) && "Unexpected type for DMA's source.");
   assert((isa<AST::Memory>(d.to) || isa<AST::ChunkAt>(d.to) || isa<AST::Select>(d.to)) &&
@@ -394,13 +411,19 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   }
 
   // cook a valid dst buffer name
-  auto dst_buffer_name = (isa<AST::Memory>(d.to))
-                             ? future_name + "_buffer"
-                             : STR(cast<AST::ChunkAt>(d.to)->data);
+  // note: for select, we also use the future_name + "_buffer" as handle name.
+  auto dst_buffer_name = (isa<AST::ChunkAt>(d.to))
+                             ? STR(cast<AST::ChunkAt>(d.to)->data)
+                             : future_name + "_buffer";
+  // if to node is AST::SELECT, use its future name, otherwise keep default one
+  // dst_buffer_name = (isa<AST::Select>(d.to))
+  //                            ? STR(cast<AST::Select>(d.to)->future)
+  //                            : future_name + "_buffer";
 
   std::string src_node_name = STR(cast<AST::ChunkAt>(d.from)->data);
   assert(!src_node_name.empty() && "expect a named future/span in chunkat.");
   // use source symbol as the buffer name
+  // lhs_load => lhs_load_buffer used by user of lhs_load
   std::string src_buffer_name = src_node_name;
   if (isa<FutureType>(GetSymbolType(
           RemoveSuffix(cast<AST::ChunkAt>(d.from)->data->name, ".data"))))
@@ -410,8 +433,18 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   size_t rank = sty->Dims();
   auto dst_shape = ty->GetShape();
   auto src_sto = sty->GetStorage();
-  auto dst_sto = (isa<AST::Memory>(d.to)) ? cast<AST::Memory>(d.to)->Get()
-                                          : GetSpannedType(*d.to)->GetStorage();
+  auto dst_sto = Storage::DEFAULT;
+  if (isa<AST::Memory>(d.to))
+    dst_sto = cast<AST::Memory>(d.to)->Get();
+  else if (isa<AST::Select>(d.to))
+    // TODO(albert): get mem level from selects operands
+    dst_sto = Storage::LOCAL;
+  else
+    dst_sto = GetSpannedType(*d.to)->GetStorage();
+  // auto dst_sto = (isa<AST::Memory>(d.to)) ? cast<AST::Memory>(d.to)->Get()
+  //                                         : GetSpannedType(*d.to)->GetStorage();
+  // dst_sto = (isa<AST::Select>(d.to)) ? Storage::LOCAL
+  //                                         : GetSpannedType(*d.to)->GetStorage();
   int src_level = MemLevel(src_sto);
   int dst_level = MemLevel(dst_sto);
 
@@ -512,10 +545,10 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
 
   ptr<AST::Node> chunkat_node = nullptr;
 
-  if (isa<AST::Memory>(d.to))
+  if (isa<AST::Memory>(d.to) || isa<AST::Select>(d.to))
     chunkat_node = d.from;
   else if (cast<AST::ChunkAt>(d.to)->positions)
-    chunkat_node = d.to;
+      chunkat_node = d.to;
   else
     choreo_unreachable("factor: unsupported chunkat.");
 
@@ -556,6 +589,7 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
 bool FactorCodeGen::Visit(AST::ChunkAt &) { return true; }
 
 bool FactorCodeGen::Visit(AST::Wait &w) {
+  __TRACE_EACH_VISIT__(w)
   auto dmas = w.targets;
   assert(dmas && "Invalid wait target!");
 
@@ -568,6 +602,7 @@ bool FactorCodeGen::Visit(AST::Wait &w) {
 
 // CLEAN
 bool FactorCodeGen::Visit(AST::Call &c) {
+  __TRACE_EACH_VISIT__(c)
   fs << this->indent << "call_(\"";
   fs << STR(*c.function);
   fs << "\", {";
@@ -621,17 +656,22 @@ bool FactorCodeGen::Visit(AST::Call &c) {
 }
 
 bool FactorCodeGen::Visit(AST::Select &c) {
-  // TODO
+  __TRACE_EACH_VISIT__(c)
+  // TODO(albert): support bool condition not i32: like x % 2 => (x % 2 == 0)
+  fs << this->indent << "auto " << c.future << " = select_(" << STR(c.select_factor) << " == 0 , " << STR(c.val_list) << ");\n";
+  // fs << this->indent << "auto " << c.future << " = select_(" << STR(c.select_factor) << ", " << STR(c.val_list) << ");\n";
   return true;
 }
 
-bool FactorCodeGen::Visit(AST::Return &ReturnNode) {
-  if (ReturnNode.value) output_v = STR(*ReturnNode.value);
+bool FactorCodeGen::Visit(AST::Return &returnNode) {
+  __TRACE_EACH_VISIT__(returnNode)
+  if (returnNode.value) output_v = STR(*returnNode.value);
   return true;
 }
 
 // CLEAN
 bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
+  __TRACE_EACH_VISIT__(forNode)
   // auto ty = this->GetSymbolType("l2_tile");
   // ty->Print(os);
   // auto l2_tile_idx = itervars->ValueAt(0);
@@ -694,6 +734,7 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
 
 // CLEAN
 bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
+  __TRACE_EACH_VISIT__(d)
   auto ty = d.GetType();
   assert(isa<FunctionType>(ty) && "unexpected type.");
   auto &fty = *cast<FunctionType>(ty);
@@ -796,6 +837,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
 bool FactorCodeGen::Visit(AST::ChoreoFunction &) { return true; }
 
 bool FactorCodeGen::Visit(AST::CppSourceCode &n) {
+  __TRACE_EACH_VISIT__(n)
   if (n.host) {
     hs << n.GetCode();
   } else {

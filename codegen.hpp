@@ -65,6 +65,8 @@ struct FactorCodeGen : public CodeGenerator {
 
   bool dyn_shaped = false;
 
+  bool trace_visit = false;  // for debugging purpose only
+
   // mapping from a symbolic shape dimensions to the associated runtime name
   std::map<std::string, std::string>
       rts_nmap;  // symbolic name to the runtime name
@@ -93,7 +95,7 @@ struct FactorCodeGen : public CodeGenerator {
 
  public:
   FactorCodeGen(std::ostream &os, const ptr<SymbolTable> &symtab)
-      : CodeGenerator(os, symtab) {}
+      : CodeGenerator(os, symtab), trace_visit(std::getenv("TRACE_CODEGEN")) {}
 
   void ResetBuffers() {
     ks.clear();
