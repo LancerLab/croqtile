@@ -1,0 +1,82 @@
+#include "choreo.h"
+
+// extern "C" void kernel(int * lhs, int * rhs, int * out, int m, int k, int n) {
+__cok__ { /// kernel program
+extern "C" void kernel(int * lhs, int * rhs, int * out) {
+  int m = 8;
+  int k = 1024;
+  int n = 128;
+  for (int i = 0; i < m; ++i) {
+    for (int j = 0; j < n; ++j) {
+      for (int z = 0; z < k; ++z) {
+        out[i*n + j] += lhs[i*k+z]*rhs[z*n+j];
+        // out[i*n + j] = lhs[i*k+z] + rhs[z*n+j];
+      }
+    }
+  }
+}
+} /// end of kernel decl
+
+__co__ auto matmul(s32 [512, ?] lhs, s32 [?, ?] rhs) { /// device program
+  s32[lhs.span(0), rhs.span(1)] output; // use same shape as lhs
+
+  parallel p by 1 {  // p is sip_index
+    with index = {m_tile, k_tile} in lhs.span / {8, 1024},
+                 {k_tile1, n_tile} in rhs.span / {1024, 128}
+    where k_tile <-> k_tile1 {
+      foreach m_tile { // alternative: foreach index, index.x, index.y
+        foreach n_tile {
+          local s32[8, 128] l1_out;
+          foreach k_tile {
+            // chunkat can support bounded_var algebra.
+            lhs_load = dma.copy.async lhs.chunkat(m_tile, k_tile) => local;
+            rhs_load = dma.copy.async rhs.chunkat(k_tile, n_tile) => local;
+            wait lhs_load, rhs_load;
+
+            call kernel(lhs_load.data, rhs_load.data, l1_out); // |span| calculate the total size of span.
+
+            out_store = dma.copy.async l1_out => output.chunkat(m_tile, n_tile); // can use defined vars
+            wait out_store;
+          }
+        }
+      }
+    }
+  } // can use python styling
+  return output;
+}
+
+int main() { /// host program
+  choreo::s32 a[512][1024] = {0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::s32 b[512][512] = {0};
+  choreo::s32 b[1024][1024] = {0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::s32 b[512][512] = {0};
+  std::fill_n(&a[0][0], sizeof(a) / sizeof(a[0][0]), 1);
+  std::fill_n(&b[0][0], sizeof(b) / sizeof(b[0][0]), 1);
+  auto lhs_data = choreo::make_spanview<2, choreo::s32>((int*)a, {512, 1024});
+  auto rhs_data = choreo::make_spanview<2, choreo::s32>((int*)b, {1024, 1024});
+
+  auto start = std::chrono::high_resolution_clock::now();
+
+  auto res = matmul(lhs_data, rhs_data);
+
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
+  std::cout << "result in a shape: [" << res.shape() << "]" << std::endl;
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+        int ref = 0;
+        for (size_t k = 0; k < lhs_data.shape()[1]; ++k) {
+          ref += a[i][k]*b[k][j];
+
+        }
+        if (ref != res[i][j]) {
+          std::cout << "i: " << i << ", j: " << j << "\n";
+          std::cout << "res: " << res[i][j] << "\n";
+          std::cout << "ref: " << ref << std::endl;
+          assert(ref == res[i][j]);
+        }
+      }
+  std::cout << "Test Passed\n" << std::endl;
+  std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
+}

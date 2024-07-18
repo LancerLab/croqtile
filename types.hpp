@@ -553,7 +553,9 @@ struct Shape {
   }
   constexpr Shape& operator=(const Shape&) = default;
 
-  size_t Dims() const { return dim_count; }
+  size_t Dims() const { return dim_count; }  // TODO: remove this interface
+  size_t Rank() const { return dim_count; }
+
   void Update() { dim_count = values[val_no].size(); }
 
   bool IsRanked() const {

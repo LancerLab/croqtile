@@ -21,7 +21,6 @@ namespace AST {
 // short hands
 template <typename T>
 using ptr = Choreo::ptr<T>;
-static int unique_id_select = 0;
 
 //------------------------- AST Node Fundamentals ----------------------------//
 

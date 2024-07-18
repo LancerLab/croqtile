@@ -195,11 +195,11 @@ fi
 
 bool FactorCodeGen::Visit(AST::MultiNodes &) { return true; }
 bool FactorCodeGen::Visit(AST::MultiValues &) { return true; }
-bool FactorCodeGen::Visit(AST::IntLiteral &) { return true; };
-bool FactorCodeGen::Visit(AST::Boolean &) { return true; };
-bool FactorCodeGen::Visit(AST::Expr &) { return true; };
-bool FactorCodeGen::Visit(AST::MultiDimSpans &) { return true; };
-bool FactorCodeGen::Visit(AST::NamedTypeDecl &) { return true; };
+bool FactorCodeGen::Visit(AST::IntLiteral &) { return true; }
+bool FactorCodeGen::Visit(AST::Boolean &) { return true; }
+bool FactorCodeGen::Visit(AST::Expr &) { return true; }
+bool FactorCodeGen::Visit(AST::MultiDimSpans &) { return true; }
+bool FactorCodeGen::Visit(AST::NamedTypeDecl &) { return true; }
 
 // handle stmts like:
 //   f32 [a.span] g_buffer;
@@ -247,11 +247,12 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
   }
 
   return true;
-};
-bool FactorCodeGen::Visit(AST::IntTuple &) { return true; };
-bool FactorCodeGen::Visit(AST::Assignment &) { return true; };
-bool FactorCodeGen::Visit(AST::IntIndex &) { return true; };
-bool FactorCodeGen::Visit(AST::DataType &) { return true; };
+}
+
+bool FactorCodeGen::Visit(AST::IntTuple &) { return true; }
+bool FactorCodeGen::Visit(AST::Assignment &) { return true; }
+bool FactorCodeGen::Visit(AST::IntIndex &) { return true; }
+bool FactorCodeGen::Visit(AST::DataType &) { return true; }
 
 bool FactorCodeGen::Visit(AST::Identifier &n) {
   __TRACE_EACH_VISIT__(n)
@@ -373,7 +374,8 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   __TRACE_EACH_VISIT__(d)
   // handle .to  in AST::Memory
   assert((isa<AST::ChunkAt>(d.from)) && "Unexpected type for DMA's source.");
-  assert((isa<AST::Memory>(d.to) || isa<AST::ChunkAt>(d.to) || isa<AST::Select>(d.to)) &&
+  assert((isa<AST::Memory>(d.to) || isa<AST::ChunkAt>(d.to) ||
+          isa<AST::Select>(d.to)) &&
          "Unexpected type for DMA's destination.");
 
   // retrieve the spanned type from a chunkat
@@ -442,9 +444,11 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   else
     dst_sto = GetSpannedType(*d.to)->GetStorage();
   // auto dst_sto = (isa<AST::Memory>(d.to)) ? cast<AST::Memory>(d.to)->Get()
-  //                                         : GetSpannedType(*d.to)->GetStorage();
+  //                                         :
+  //                                         GetSpannedType(*d.to)->GetStorage();
   // dst_sto = (isa<AST::Select>(d.to)) ? Storage::LOCAL
-  //                                         : GetSpannedType(*d.to)->GetStorage();
+  //                                         :
+  //                                         GetSpannedType(*d.to)->GetStorage();
   int src_level = MemLevel(src_sto);
   int dst_level = MemLevel(dst_sto);
 
@@ -527,14 +531,13 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
 
   // buffer the allocation in another stream
   // if use pipeline-mode, make all cdma with shared_ annotation
-  if (d.chained == true && 
-      ((d.chain_to != "" && src_level > dst_level) ||
-      (d.chain_from != "" && src_level < dst_level)))
+  if (d.chained == true && ((d.chain_to != "" && src_level > dst_level) ||
+                            (d.chain_from != "" && src_level < dst_level)))
     alloc_in_fs << alloc_indent << "auto " << future_name << " = alloc_dma_("
-              << DMATypeString(src_level, dst_level) << "()).shared_();\n";
+                << DMATypeString(src_level, dst_level) << "()).shared_();\n";
   else
     alloc_in_fs << alloc_indent << "auto " << future_name << " = alloc_dma_("
-              << DMATypeString(src_level, dst_level) << "());\n";
+                << DMATypeString(src_level, dst_level) << "());\n";
 
   // decide the dma operation
   std::string dma_op = "";
@@ -548,7 +551,7 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   if (isa<AST::Memory>(d.to) || isa<AST::Select>(d.to))
     chunkat_node = d.from;
   else if (cast<AST::ChunkAt>(d.to)->positions)
-      chunkat_node = d.to;
+    chunkat_node = d.to;
   else
     choreo_unreachable("factor: unsupported chunkat.");
 
@@ -569,18 +572,21 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
     // synchornized dma must be waited
     if (!ty->IsAsync()) fs << indent << "wait_dma_(" << future_name << ");\n";
   } else {
-    assert(ty->IsAsync() && "Notifying DMA only apply to async primitives in factor lang.");
-    if (d.chain_from != "") 
+    assert(ty->IsAsync() &&
+           "Notifying DMA only apply to async primitives in factor lang.");
+    if (d.chain_from != "") {
       if (src_level >= dst_level)
         fs << ").wait_on_(" << d.chain_from << ");\n";
       else
         fs << ").multi_wait_on_(" << d.chain_from << ");\n";
+    }
 
-    if (d.chain_to != "")
+    if (d.chain_to != "") {
       if (src_level >= dst_level)
         fs << ").multi_notify_(" << d.chain_to << ");\n";
-      else 
+      else
         fs << ").notify_(" << d.chain_to << ");\n";
+    }
   }
 
   return true;
@@ -658,13 +664,16 @@ bool FactorCodeGen::Visit(AST::Call &c) {
 bool FactorCodeGen::Visit(AST::Select &c) {
   __TRACE_EACH_VISIT__(c)
   size_t val_count = c.val_list->Count();
-  // if val_count == 1, pingpong is meaningless? ( TODO: maybe assert when earlysema)
+  // if val_count == 1, pingpong is meaningless? ( TODO: maybe assert when
+  // earlysema)
   assert(val_count >= 2);
   fs << this->indent << "auto " << c.future << " = ";
   for (size_t i = 0; i < val_count - 1; i++) {
-    fs << "select_(" << STR(c.select_factor) << "== " << i << ", " << STR(c.val_list->ValueAt(i)) << (i < val_count-1 ? ", " : "");
+    fs << "select_(" << STR(c.select_factor) << "== " << i << ", "
+       << STR(c.val_list->ValueAt(i)) << (i < val_count - 1 ? ", " : "");
   }
-  fs << STR(c.val_list->AllValues().back()) << std::string(val_count-1, ')') << ";\n";
+  fs << STR(c.val_list->AllValues().back()) << std::string(val_count - 1, ')')
+     << ";\n";
   return true;
 }
 
@@ -799,16 +808,19 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
     const auto &dyn_dims = rty->GetShape().GetDynamicDims();
     if (!dyn_dims.empty()) {
       dyn_shaped = true;
-      type_name = "{";
+      type_name.clear();
       size_t i = 0;
       for (auto &ddim : dyn_dims) {
         auto ddim_name = name + "_rt_dim" + std::to_string(i);
-        dss << "auto " << ddim_name << " = " << ReplaceDynDimName(ddim.second)
-            << ";\n";
-        type_name += ddim_name;
-        if (++i != dyn_dims.size()) type_name += ", ";
+        dss << indent << "  auto " << ddim_name << " = "
+            << ReplaceDynDimName(ddim.second) << ";\n";
+        if (type_name.size() == 0)
+          type_name += ddim_name;
+        else
+          type_name = ddim_name + ", " + type_name;
+        ++i;
       }
-      type_name += "}, output_type";
+      type_name = "{" + type_name + "}, output_type";
     }
 
     fs << indent << "auto output_type = " << type_string << ");\n";
@@ -834,7 +846,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
   fs << "StreamType()}, [&](auto args) {\n";
 
   this->incrementIndent();
-  fs << indent << dss.str();  // dynamic-shape specific
+  fs << dss.str();  // dynamic-shape specific
 
   return true;
 }

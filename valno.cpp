@@ -241,6 +241,7 @@ std::optional<std::string> ValueNumbering::TryToSimplifyBinary(
   if ((op == "/") && !PrefixedWith(lhs, "#") /*not multiple values*/) {
     int rvn = GetValueNumberOfSignature(rhs);
     auto bind_set = GetBindSet(rvn);
+    bind_set.insert(rvn);  // always add self
     for (auto div_vn : bind_set) {
       auto sig = GetSignatureFromValueNumber(div_vn);
       if (!PrefixedWith(rhs, "/:")) continue;
