@@ -25,6 +25,14 @@ HEADER_FILES :=  $(shell find . -name '*.hpp') choreo_header.inc factor_script.i
 CC = g++
 CFLAGS = -std=c++17 -Wall -Wextra -g -D__CHOREO_FACTOR_DIR__="$(TOOLCHAIN_DIR)"
 
+# Decls for CUDA
+NVCC = nvcc
+CUFILES := $(wildcard demos/cuda/sgemm_ref/*.cu)
+CUDA_EXECUTABLE = sgemm-ref
+CUDA_SYS_INCLUDES = -I/usr/local/cuda/include
+CUDA_CHOREO_INCLUDES = -I./demos/cuda/sgemm_ref/
+CUDA_INCLUDES = $(CUDA_SYS_INCLUDES) $(CUDA_CHOREO_INCLUDES)
+
 # For gtest
 GTEST_DIR = extern/gtest
 GTEST_LIBS = $(GTEST_DIR)/libgtest.a $(GTEST_DIR)/libgtest_main.a
@@ -67,7 +75,8 @@ factor_script.inc : scripts/factor_script.sh
 	echo "#endif // __CHOREO_FACTOR_SCRIPT_H__" >> $@
 
 clean:
-	rm -f *.cc *.hh *.inc *.o $(TEST_TARGETS) tests/*.result
+	@rm -f *.cc *.hh *.inc *.o $(TEST_TARGETS) tests/*.result
+	@rm -f $(CUDA_EXECUTABLE)
 
 clobber: clean
 	find $(TOOLCHAIN_DIR) -mindepth 1 ! -name 'Makefile' -print0 | xargs -0 rm -rf
@@ -138,3 +147,13 @@ gcu2-kmd:
 
 gcu3-kmd:
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu3-kmd FTP_SERVER=$(FTP_SERVER)
+
+# build rules for nvcc 
+
+build-cuda-ref: $(CUDA_EXECUTABLE)
+
+$(CUDA_EXECUTABLE): $(CUFILES)
+	$(NVCC) $(CUDA_INCLUDES) -o $(CUDA_EXECUTABLE) $(CUFILES) -gencode arch=compute_86,code=sm_86 -rdc=true -lcublas
+
+bench-cuda:
+	./$(CUDA_EXECUTABLE) $(KERNEL)

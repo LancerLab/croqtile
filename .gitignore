@@ -5,6 +5,7 @@
 *.inc
 tools/*
 choreo
+sgemm-ref
 demo/*.bin
 demo/*.fb
 demo/__*
