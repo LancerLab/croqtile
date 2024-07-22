@@ -129,6 +129,7 @@ int main(int argc, char* argv[]) {
 
   auto tgt = Choreo::Target::Unknown;
   if (target.GetValue() == "factor") tgt = Choreo::Target::Factor;
+  if (target.GetValue() == "cuda") tgt = Choreo::Target::CUDA;
 
   switch (tgt) {
     case Target::Factor: {
@@ -142,13 +143,18 @@ int main(int argc, char* argv[]) {
       root.accept(codegen);
       break;
     }
-    case Target::Unknown: {
-      std::cerr << "Invalid target: '" << target.GetValue() << "'\n";
-      return 1;
+    case Target::CUDA: {
+      FactorCodeGen codegen(std::cout, sc.SymTab());
+      root.accept(codegen);
+      break;
     }
     case Target::Topscc: {
       std::cerr << "Target '" << target.GetValue()
                 << "' has not been supported yet.\n";
+      return 1;
+    }
+    case Target::Unknown: {
+      std::cerr << "Invalid target: '" << target.GetValue() << "'\n";
       return 1;
     }
     default:
