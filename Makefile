@@ -149,11 +149,15 @@ gcu3-kmd:
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu3-kmd FTP_SERVER=$(FTP_SERVER)
 
 # build rules for nvcc 
-
+# replace to build-cuda after all works
 build-cuda-ref: $(CUDA_EXECUTABLE)
 
 $(CUDA_EXECUTABLE): $(CUFILES)
 	$(NVCC) $(CUDA_INCLUDES) -o $(CUDA_EXECUTABLE) $(CUFILES) -gencode arch=compute_86,code=sm_86 -rdc=true -lcublas
 
-bench-cuda:
+bench-cuda: build-cuda-ref
 	./$(CUDA_EXECUTABLE) $(KERNEL)
+	
+profile-cuda: build-cuda-ref
+	@mkdir -p __profiling_tmp__
+	@ncu --set full --export __profiling_tmp__/$(CUDA_EXECUTABLE)_$(KERNEL) --force-overwrite ./$(CUDA_EXECUTABLE) $(KERNEL)
