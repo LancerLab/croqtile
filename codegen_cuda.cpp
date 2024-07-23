@@ -9,7 +9,7 @@
 #include "ast.hpp"
 #include "choreo_cuda_header.inc"
 #include "codegen.hpp"
-// #include "cuda_script.inc"
+#include "cuda_script.inc"
 #include "types.hpp"
 
 #ifndef __CHOREO_CUDA_DIR__
@@ -68,7 +68,7 @@ if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then
     os << "  export FACTOR_INSTALL=" << STRINGIZE(__CHOREO_FACTOR_DIR__)
        << "\n# JIT compile and execute\n";
     if (dyn_shaped) os << "VIEW_CONFIG=1 ENABLE_DYNSHAPE=1 ";
-    os << "# TODO(albert): replace with build and run commands";
+    os << "./scripts/cuda_script.sh ./demos/cuda/test_dir/ ./demos/cuda/test_dir/sgemm_main.cu sgemm";
     os << R"script(
 elif [ "$1" == "--statistics" ]; then
   echo ">>>> Line of Code without Choreo"
@@ -637,14 +637,14 @@ echo "CUDA_ARCH: ${CUDA_ARCH}"
 echo "CUDA_CC: ${CUDA_CC}"
 
 )script";
-  // os << "\n# step 0: set up the environment\n";
-  // os << "rm -fr " << build_path << "\n";
-  // os << "mkdir -p " << build_path << "\n";
-  //
+  os << "\n# step 0: set up the environment\n";
+  os << "rm -fr " << build_path << "\n";
+  os << "mkdir -p " << build_path << "\n";
+
   // no need to gen run shell, since cuda compile is simple enough to handle
-  // os << "cat <<'EOF' > " << build_path << "/cuda_script.sh\n";
-  // os << __cuda_script_as_string << "\nEOF\n";
-  // os << "chmod +x " << build_path << "/cuda_script.sh\n";
+  os << "cat <<'EOF' > " << build_path << "/cuda_script.sh\n";
+  os << __cuda_script_as_string << "\nEOF\n";
+  os << "chmod +x " << build_path << "/cuda_script.sh\n";
   //
   // os << "cat <<'EOF' > " << build_path << "/choreo_cuda.h\n";
   // os << __choreo_header_as_string << "\nEOF\n\n";

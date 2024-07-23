@@ -20,7 +20,7 @@ TEST_TARGETS := $(TEST_FILES:.co=.test)
 #$(info TEST_TARGETS is $(TEST_TARGETS))
 
 # headers
-HEADER_FILES :=  $(shell find . -name '*.hpp') choreo_header.inc choreo_cuda_header.inc factor_script.inc
+HEADER_FILES :=  $(shell find . -name '*.hpp') choreo_header.inc choreo_cuda_header.inc factor_script.inc cuda_script.inc
 
 CC = g++
 CFLAGS = -std=c++17 -Wall -Wextra -g -D__CHOREO_FACTOR_DIR__="$(TOOLCHAIN_DIR)" -D__CHOREO_CUDA_DIR__="$(TOOLCHAIN_DIR)"
@@ -81,6 +81,14 @@ factor_script.inc : scripts/factor_script.sh
 	cat $< >> $@
 	echo ")__co_factor__\";" >> $@
 	echo "#endif // __CHOREO_FACTOR_SCRIPT_H__" >> $@
+
+cuda_script.inc : scripts/cuda_script.sh
+	echo "#ifndef __CHOREO_CUDA_SCRIPT_H__" > $@
+	echo "#define __CHOREO_CUDA_SCRIPT_H__" >> $@
+	echo -n "static const char* __cuda_script_as_string = R\"__co_cuda__(" >> $@
+	cat $< >> $@
+	echo ")__co_cuda__\";" >> $@
+	echo "#endif // __CHOREO_CUDA_SCRIPT_H__" >> $@
 
 clean:
 	@rm -f *.cc *.hh *.inc *.o $(TEST_TARGETS) tests/*.result
