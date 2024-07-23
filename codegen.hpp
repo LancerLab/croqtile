@@ -65,6 +65,12 @@ struct FactorCodeGen : public CodeGenerator {
 
   bool dyn_shaped = false;
 
+  // pair(rtshape_check, sig2pos), see stoesti.hpp
+  std::pair<
+      std::vector<std::tuple<std::vector<std::string>, location, std::string>>,
+      std::map<std::string, std::string>>
+      rt_mem_usage_info;
+
   bool trace_visit = false;  // for debugging purpose only
 
   // mapping from a symbolic shape dimensions to the associated runtime name
@@ -84,6 +90,7 @@ struct FactorCodeGen : public CodeGenerator {
   void EmitHostFuncDecl(std::ostream &, const Type &, const std::string &,
                         bool = false);
   void EmitRuntimeCheck(std::ostream &, const Type &);
+  void EmitRuntimeMemUsageCheck(std::ostream &, const Type &);
   void EmitHostFuncBody(std::ostream &, const Type &, const std::string &fname,
                         const std::string &o_sz, const std::string &o_ty,
                         const Shape &s);
@@ -96,6 +103,12 @@ struct FactorCodeGen : public CodeGenerator {
  public:
   FactorCodeGen(std::ostream &os, const ptr<SymbolTable> &symtab)
       : CodeGenerator(os, symtab), trace_visit(std::getenv("TRACE_CODEGEN")) {}
+  FactorCodeGen(std::ostream &os, const ptr<SymbolTable> &symtab,
+                const std::pair<std::vector<std::tuple<std::vector<std::string>,
+                                                       location, std::string>>,
+                                std::map<std::string, std::string>> &info)
+      : CodeGenerator(os, symtab), rt_mem_usage_info(info),
+        trace_visit(std::getenv("TRACE_CODEGEN")) {}
 
   void ResetBuffers() {
     ks.clear();

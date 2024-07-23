@@ -11,6 +11,7 @@
 #include "gcucheck.hpp"
 #include "options.hpp"
 #include "scanner.hpp"
+#include "stoesti.hpp"
 #include "symtab.hpp"
 #include "typecheck.hpp"
 #include "typeinfer.hpp"
@@ -39,6 +40,7 @@ int main(int argc, char* argv[]) {
   Option<bool> visualiz("--visualize", "-u", false, false);
   Option<bool> gen_none("--no-codegen", "-s", false, false);
   Option<bool> del_comm("--remove-comments", "-n", false, false);
+  Option<bool> sto_esti("--storage-esti", "-se", false, false);
 
   // parse all the options
   OptionRegistry& r = OptionRegistry::GetInstance();
@@ -139,7 +141,13 @@ int main(int argc, char* argv[]) {
       if (gcu_checker.HasError()) return 1;
       if (stop_after.GetValue() == "gcucheck") return 0;
 
-      FactorCodeGen codegen(std::cout, sc.SymTab());
+      StoEstimate sto_estimater(sc.SymTab(), Target::Factor,
+                                sto_esti ? true : false);
+      root.accept(sto_estimater);
+      if (sto_estimater.HasError()) return 1;
+      if (stop_after.GetValue() == "stoesti") return 0;
+
+      FactorCodeGen codegen(std::cout, sc.SymTab(), sto_estimater.GetRtMemUsageInfo());
       root.accept(codegen);
       break;
     }
