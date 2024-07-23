@@ -45,6 +45,8 @@ bool CUDACodeGen::AfterVisitImpl(AST::Node &n) {
     os << "\n# step 5: JIT compile and execute\n";
     os << "# TODO: enable workflow of AOT compilation\n";
     os << "# target=" << target_fn << "\n";
+    os << "build_path=" << build_path << "\n";
+    os << "cuda_script=" << build_path << "/cuda_script.sh\n";
     os << R"(
 if command -v nvim &> /dev/null
 then
@@ -53,8 +55,9 @@ else
   EDITOR=less
 fi
 if [ "$#" -ne 1 ]; then
-    echo "    Usage: $0 | --execute           -> compile and execute choreo in factor
+    echo "    Usage: $0 | --execute           -> compile and execute choreo in cuda
                     | --statistics        -> show Line Of Code (LOC) statistic compare between kernel code boosted w./w.o. Choreo
+                    | --list-sources      -> show the tree view of all sources
                     | --show-kernel       -> show the generated inner kernel code
                     | --show-tileflow     -> show the generated tileflow code scheduled by choreo
                     | --show-host         -> show the generated host side boilerplates
@@ -65,14 +68,16 @@ fi
     os << R"(
 if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then
 )";
-    os << "  export FACTOR_INSTALL=" << STRINGIZE(__CHOREO_FACTOR_DIR__)
+    os << "  export cuda_INSTALL=" << STRINGIZE(__CHOREO_cuda_DIR__)
        << "\n# JIT compile and execute\n";
     if (dyn_shaped) os << "VIEW_CONFIG=1 ENABLE_DYNSHAPE=1 ";
-    os << "./scripts/cuda_script.sh ./demos/cuda/test_dir/ ./demos/cuda/test_dir/sgemm_main.cu sgemm";
+    os << "${cuda_script} ${build_path} /root/choreo/demos/cuda/test_dir/sgemm_main.cu sgemm";
     os << R"script(
+elif [ "$1" == "--list-sources" ]; then
+  tree ${build_path} -L 1
 elif [ "$1" == "--statistics" ]; then
   echo ">>>> Line of Code without Choreo"
-  wc -l ${factor_src} ${host_src} ${kernel_src}
+  wc -l ${cuda_src} ${host_src} ${kernel_src}
   echo ">>>> Line of Code with Choreo"
   wc -l ~/choreo/demo/elementwise_add.co
   # grep -v '^ *//' ~/choreo/demo/elementwise_add.co | wc -l
@@ -81,12 +86,13 @@ elif [ "$1" == "--show-kernel" ]; then
 elif [ "$1" == "--show-host" ]; then
   ${EDITOR} ${host_src}
 elif [ "$1" == "--show-tileflow" ]; then
-  ${EDITOR} ${factor_src}
+  ${EDITOR} ${cuda_src}
 elif [ "$1" == "--show-choreo" ]; then
   ${EDITOR} ~/choreo/demo/elementwise_add.co
 else
-    echo "    Usage: $0 | --execute           -> compile and execute choreo in factor
+    echo "    Usage: $0 | --execute           -> compile and execute choreo in cuda
                     | --statistics        -> show Line Of Code (LOC) statistic compare between kernel code boosted w./w.o. Choreo
+                    | --list-sources      -> show the tree view of all sources
                     | --show-kernel       -> show the generated inner kernel code
                     | --show-tileflow     -> show the generated tileflow code scheduled by choreo
                     | --show-host         -> show the generated host side boilerplates
@@ -101,8 +107,44 @@ fi
     auto fty = cast<FunctionType>(f->GetType());
     auto &out_type = fty->out_ty;
     auto out_size = GetByteSizeExprOf(*out_type);
-    fs << "}\n\nMODULE_REGISTER(\"lib" << current_fn << "\", " << current_fn
-       << ");";  // end the factor function definition
+    // fs << "}\n\nMODULE_REGISTER(\"lib" << current_fn << "\", " << current_fn
+    //    << ");";  // end the cuda function definition
+    // TODO(albert): resolve hardcode
+    fs << R"(
+#pragma once
+
+#include <cstdio>
+#include <cstdlib>
+#include <cublas_v2.h>
+#include <cuda_runtime.h>
+
+/*
+
+Matrix sizes:
+MxK * KxN = MxN
+
+*/
+
+__global__ void sgemm_naive(int M, int N, int K, float alpha, const float *A,
+                            const float *B, float beta, float *C) {
+  const uint x = blockIdx.x * blockDim.x + threadIdx.x;
+  const uint y = blockIdx.y * blockDim.y + threadIdx.y;
+  // blockIdx.y * BLOCKSIZE
+  // threadIdx.x++ => x++ | y==
+  // x to M
+
+  // if statement is necessary to make things work under tile quantization
+  if (x < M && y < N) {
+    float tmp = 0.0;
+    for (int i = 0; i < K; ++i) {
+      tmp += A[x * K + i] * B[i * N + y];
+    }
+    // C = α*(A@B)+β*C
+    C[x * N + y] = alpha * tmp + beta * C[x * N + y];
+  }
+}
+)";
+
     if (auto sty = dyn_cast<SpannedType>(out_type)) {
       OutputScript(fty, f->name, GetBaseTypeStringOf(*out_type), out_size,
                    sty->GetShape());
@@ -517,11 +559,10 @@ void CUDACodeGen::OutputScript(FunctionType *fty, const std::string &n,
   // a temporal path for the compilation process
   build_path = create_unique_path();
   std::string build_prefix = build_path + "/__choreo_" + n;
+  std::string build_prefix_anonymous = build_path + "/__choreo";
 
-  std::string kernel_fn = build_prefix + "_micro_kernel.cpp";
-  std::string cuda_fn = build_prefix + "_cuda.cpp";
-  std::string cuda_bfn =
-      build_path + "/${gcu_target_string}_lib" + current_fn + ".o";
+  std::string kernel_fn = build_prefix + "_kernel_inlined.cuh";
+  std::string cuda_fn = build_prefix_anonymous + "_cuda_kernel.cuh";
   host_fn = build_prefix + "_host.cpp";
   target_fn = "__choreo_" + n;
   //
@@ -539,11 +580,11 @@ void CUDACodeGen::OutputScript(FunctionType *fty, const std::string &n,
   // EmitHostFuncBody(hs, *fty, cuda_bfn, out_size, out_type, out_shape);
   //
   // // backpatch the cuda bin filename
-  // std::string cuda_src = fs.str();
-  // if (!alloc_in_fs.str().empty())
-  //   cuda_src.insert(alloc_pos, alloc_in_fs.str());
-  // ReplaceInString(cuda_src, std::string("$$out$$"), output_v);
-  // ReplaceInString(cuda_src, std::string(backpatch_filename), kernel_fn);
+  std::string cuda_src = fs.str();
+  if (!alloc_in_fs.str().empty())
+    cuda_src.insert(alloc_pos, alloc_in_fs.str());
+  ReplaceInString(cuda_src, std::string("$$out$$"), output_v);
+  ReplaceInString(cuda_src, std::string(backpatch_filename), kernel_fn);
 
   // Now generate the script
   os << "#!/usr/bin/env bash\n\n";
@@ -551,6 +592,8 @@ void CUDACodeGen::OutputScript(FunctionType *fty, const std::string &n,
 
   os << R"script(
 #!/bin/bash
+
+set -x
 
 NVCC=nvcc
 CUDA_SYS_INCLUDES="-I/usr/local/cuda/include"
@@ -645,20 +688,18 @@ echo "CUDA_CC: ${CUDA_CC}"
   os << "cat <<'EOF' > " << build_path << "/cuda_script.sh\n";
   os << __cuda_script_as_string << "\nEOF\n";
   os << "chmod +x " << build_path << "/cuda_script.sh\n";
-  //
-  // os << "cat <<'EOF' > " << build_path << "/choreo_cuda.h\n";
-  // os << __choreo_header_as_string << "\nEOF\n\n";
-  //
-  // os << "\n# step 1: write the kernel source code into a temp file\n";
-  // os << "kernel_src=" << kernel_fn << "\n";
-  // os << "cat <<'EOF' > ${kernel_src}\n";
-  // os << ks.str() << "\nEOF\n";
-  //
-  // os << "\n# step 2: write the cuda source code into a temp file\n";
-  // os << "cuda_src=" << cuda_fn << "\n";
-  // os << "cat <<'EOF' > ${cuda_src}\n";
-  // os << cuda_src << "\nEOF\n\n";
-  //
-  // os << "\n# step 3: set the cuda binary file name\n";
-  // os << "cuda_bin=" << cuda_bfn << "\n";
+
+  os << "cat <<'EOF' > " << build_path << "/choreo_cuda.h\n";
+  os << __choreo_header_as_string << "\nEOF\n\n";
+
+  // TODO(albert): support INLINED ASM FOR CUDA
+  os << "\n# step 1: write the kernel source code into a temp file\n";
+  os << "kernel_src=" << kernel_fn << "\n";
+  os << "cat <<'EOF' > ${kernel_src}\n";
+  os << ks.str() << "\nEOF\n";
+
+  os << "\n# step 2: write the cuda source code into a temp file\n";
+  os << "cuda_src=" << cuda_fn << "\n";
+  os << "cat <<'EOF' > ${cuda_src}\n";
+  os << cuda_src << "\nEOF\n\n";
 }
