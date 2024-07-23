@@ -20,10 +20,10 @@ TEST_TARGETS := $(TEST_FILES:.co=.test)
 #$(info TEST_TARGETS is $(TEST_TARGETS))
 
 # headers
-HEADER_FILES :=  $(shell find . -name '*.hpp') choreo_header.inc factor_script.inc
+HEADER_FILES :=  $(shell find . -name '*.hpp') choreo_header.inc choreo_cuda_header.inc factor_script.inc
 
 CC = g++
-CFLAGS = -std=c++17 -Wall -Wextra -g -D__CHOREO_FACTOR_DIR__="$(TOOLCHAIN_DIR)"
+CFLAGS = -std=c++17 -Wall -Wextra -g -D__CHOREO_FACTOR_DIR__="$(TOOLCHAIN_DIR)" -D__CHOREO_CUDA_DIR__="$(TOOLCHAIN_DIR)"
 
 # Decls for CUDA
 NVCC = nvcc
@@ -43,7 +43,7 @@ all: $(TARGET)
 test: $(TARGET) standalone_test
 	$(LIT) tests
 
-$(TARGET): scanner.yy.o parser.tab.o choreo_main.o codegen_factor.o earlysema.o typeinfer.o typecheck.o ast.o types.o valno.o
+$(TARGET): scanner.yy.o parser.tab.o choreo_main.o codegen_factor.o codegen_cuda.o earlysema.o typeinfer.o typecheck.o ast.o types.o valno.o
 	$(CC) $(CFLAGS) $^ -o $(TARGET)
 
 scanner.yy.cc: $(LEX_SRC)
@@ -59,6 +59,14 @@ parser.tab.cc parser.tab.hh location.hh: $(PARSER_SRC)
 	$(CC) $(CFLAGS) $< -c -o $@
 
 choreo_header.inc : utils/choreo.h
+	echo "#ifndef __CHOREO_RUNTIME_HEADER_H__" > $@
+	echo "#define __CHOREO_RUNTIME_HEADER_H__" >> $@
+	echo -n "static const char* __choreo_header_as_string = R\"(" >> $@
+	cat $< >> $@
+	echo ")\";" >> $@
+	echo "#endif // __CHOREO_RUNTIME_HEADER_H__" >> $@
+
+choreo_cuda_header.inc : utils/choreo_cuda.h
 	echo "#ifndef __CHOREO_RUNTIME_HEADER_H__" > $@
 	echo "#define __CHOREO_RUNTIME_HEADER_H__" >> $@
 	echo -n "static const char* __choreo_header_as_string = R\"(" >> $@

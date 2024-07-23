@@ -100,7 +100,7 @@ then
 else
   EDITOR=less
 fi
-if [ "$#" -gt 1 ]; then
+if [ "$#" -ne 1 ]; then
     echo "    Usage: $0 | --execute           -> compile and execute choreo in factor
                     | --statistics        -> show Line Of Code (LOC) statistic compare between kernel code boosted w./w.o. Choreo
                     | --show-kernel       -> show the generated inner kernel code

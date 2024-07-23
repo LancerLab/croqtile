@@ -144,7 +144,7 @@ int main(int argc, char* argv[]) {
       break;
     }
     case Target::CUDA: {
-      FactorCodeGen codegen(std::cout, sc.SymTab());
+      CUDACodeGen codegen(std::cout, sc.SymTab());
       root.accept(codegen);
       break;
     }
