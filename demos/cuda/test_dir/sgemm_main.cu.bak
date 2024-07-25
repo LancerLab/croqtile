@@ -1,0 +1,174 @@
+
+// choreo header
+#include <cstdio>
+#include <cstdlib>
+#include <cassert>
+#include <ctime>
+#include <fstream>
+#include <iostream>
+#include <vector>
+#include <iterator>
+#include <string>
+#include <chrono>
+
+#include <choreo_cuda.h>
+
+using namespace choreo;
+using namespace choreo::cuda;
+
+// extern "C" void kernel(int * lhs, int * rhs, int * out, int m, int k, int n) {
+ /// end of kernel decl
+
+// UPDATE: from kernel-6, it only occupies half of the L1 mem, which is not optimised enough for reuse.
+// for kernel-7, let us try a <256,256,256> setting, where occupies 3/4 of L1 MEM
+
+// Analysis 1:
+//
+// HW: in DORADO: 1 card = 2 clusters = 6 csb = 6 L2 = 24 SIP = 24 L1, each CSB = 8MB, each L1 = 1 MB
+//
+// GMEM: unchanged from kernel 5 
+// SMEM: unchanged from kernel 5 
+// LMEM: lhs_load_s=<64x1024>=256KB, rhs_load=<1024x64>=256KB, l2_out=<64x64>=4KB  < 1MB
+
+// Analysis: compute intensity
+// kernel 6 calculate <32x32> results per thread requires:
+//   32x1024 loads from lhs
+//   32x1024 loads from rhs
+//   32x32 loads and stores from out
+//   => 65 loads + 1 store per result
+//
+// kernel 7 calculate <256x256> results per thread requires:
+//   256x256x4 loads from lhs
+//   256x256x4 loads from rhs
+//   256x256x4 loads and stores from out
+//   => 12 loads and 4 store per result
+
+
+
+namespace {
+
+// Nasty data copy. Need optimization together with factor
+template <typename T, int Rank>
+static inline std::vector<uint8_t>
+ToCUDAData(const spanned_view<T, Rank> &v) {
+  return std::vector<uint8_t>((const uint8_t *)(v.data()), v.bytes());
+}
+
+template <int N, typename T, typename U>
+static inline spanned_data<T, N>
+ToSpanned(const std::vector<U> &v, std::initializer_list<int> && shape) {
+  return copy_as_spanned<N, T>((T*)v.data(), v.size() * sizeof(U), shape);
+}
+
+// must be true
+//#define CHECK(a) choreo_assert((a), "", __FILE__, __LINE__)
+#define CHECK(a) (a)
+
+} // end anonymous namespace
+
+choreo::spanned_data<choreo::s32, 2> ele_add(const choreo::spanned_view<choreo::s32, 2> & hp0, const choreo::spanned_view<choreo::s32, 2> & hp1) {
+  choreo::runtime_check(hp0.shape()[0] == 4096, "shape inconstant on 1st parameter (dim: 0).");
+  choreo::runtime_check(hp0.shape()[1] == 4096, "shape inconstant on 1st parameter (dim: 1).");
+  choreo::runtime_check(hp1.shape()[0] == 4096, "shape inconstant on 2th parameter (dim: 0).");
+  choreo::runtime_check(hp1.shape()[1] == 4096, "shape inconstant on 2th parameter (dim: 1).");
+
+  int deviceIdx = 0;
+  printf("Running on device %d.\n", deviceIdx);
+
+  cublasHandle_t handle;
+  if (cublasCreate(&handle)) {
+    std::cerr << "Create cublas handle error." << std::endl;
+    exit(EXIT_FAILURE);
+  };
+
+  float elapsed_time;
+  cudaEvent_t beg, end;
+  cudaEventCreate(&beg);
+  cudaEventCreate(&end);
+
+  float alpha = 1.0, beta = 0.0; // GEMM input parameters, C=α*AB+β*C
+
+  float* host_in0 = (float *)malloc(sizeof(float) * 4096 * 4096);
+  float* host_in1 = (float *)malloc(sizeof(float) * 4096 * 4096);
+
+  randomize_matrix(host_in0, 4096 * 4096);
+  randomize_matrix(host_in1, 4096 * 4096);
+
+  float* in_mem0 = nullptr;
+  float* in_mem1 = nullptr;
+  float* out_mem = nullptr;
+  CUDACheck(cudaMalloc(&in_mem0, sizeof(float) * 4096 * 4096));
+  CUDACheck(cudaMalloc(&in_mem1, sizeof(float) * 4096 * 4096));
+  CUDACheck(cudaMalloc(&out_mem, sizeof(float) * 4096 * 4096));
+  CUDACheck(cudaMemcpy(in_mem0, host_in0, sizeof(float) * 4096 * 4096, cudaMemcpyHostToDevice));
+  CUDACheck(cudaMemcpy(in_mem1, host_in1, sizeof(float) * 4096 * 4096, cudaMemcpyHostToDevice));
+
+  cudaEventRecord(beg);
+
+  // We don't reset dC between runs to save time
+  run_kernel(4096, 4096, 4096, alpha, in_mem0, in_mem1, beta, out_mem, handle);
+
+  cudaEventRecord(end);
+  cudaEventSynchronize(beg);
+  cudaEventSynchronize(end);
+  cudaEventElapsedTime(&elapsed_time, beg, end);
+  elapsed_time /= 1000.; // Convert to seconds
+
+  long flops = 2 * 4096 * 4096 * 4096;
+  printf(
+      "Average elapsed time: (%7.6f) s, performance: (%7.1f) GFLOPS. size: "
+      "(%ld)x(%ld)x(%ld).\n",
+      elapsed_time,
+      (flops * 1e-9) / elapsed_time, 4096, 4096, 4096);
+  fflush(stdout);
+  
+  auto host_out = choreo::make_spandata<s32, 2>({4096, 4096});
+  // Copy output data from device to host
+  CUDACheck(cudaMemcpy(reinterpret_cast<float *>(host_out.data()), out_mem, sizeof(float) * 4096 * 4096, cudaMemcpyDeviceToDevice));
+
+  // Free up CPU and GPU space
+  free(host_in0);
+  free(host_in1);
+  cudaFree(in_mem0);
+  cudaFree(in_mem1);
+  cudaFree(out_mem);
+  cublasDestroy(handle);
+
+  return host_out;
+}
+
+
+int main() { /// host program
+  choreo::s32 a[4096][4096] = {0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::s32 b[512][512] = {0};
+  choreo::s32 b[4096][4096] = {0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::s32 b[512][512] = {0};
+  std::fill_n(&a[0][0], sizeof(a) / sizeof(a[0][0]), 1);
+  std::fill_n(&b[0][0], sizeof(b) / sizeof(b[0][0]), 1);
+  auto lhs_data = choreo::make_spanview<2, choreo::s32>((int*)a, {4096, 4096});
+  auto rhs_data = choreo::make_spanview<2, choreo::s32>((int*)b, {4096, 4096});
+
+  auto start = std::chrono::high_resolution_clock::now();
+
+  auto res
+    = ele_add(lhs_data, rhs_data);
+
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
+  std::cout << res.shape()[0] << std::endl;
+  std::cout << res.shape()[1] << std::endl;
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+        // std::cout << "i: " << i << ", j: " << j << "\n";
+        // std::cout << "res: " << res[i][j] << "\n";
+        int ref = 0;
+        for (size_t k = 0; k < lhs_data.shape()[1]; ++k) {
+          ref += a[i][k]*b[k][j];
+
+        }
+        // std::cout << "ref: " << ref << std::endl;
+        assert(ref == res[i][j]);
+      }
+  std::cout << "Test Passed\n" << std::endl;
+}

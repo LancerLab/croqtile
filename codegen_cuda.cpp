@@ -262,73 +262,96 @@ bool CUDACodeGen::Visit(AST::CppSourceCode &n) {
 
 bool CUDACodeGen::Visit(AST::Program &) { return true; }
 
-// void CUDACodeGen::EmitHostHead(std::ostream &os) {
-//   os <<
-//       R"(
-// #include <fstream>
-// #include <iostream>
-// #include <iterator>
-// #include <string>
-// #include <vector>
-//
-// // dependant on the topsruntime
-// #include "tops/tops_ext.h"
-// #include "tops/tops_runtime.h"
-//
-// // choreo header
-// #include "choreo.h"
-//
-// using namespace choreo;
-//
-// namespace {
-//
-// int64_t SizeOfRankedMemref(size_t rank) {
-//   return sizeof(topsMemref) +
-//          rank * sizeof(reinterpret_cast<topsMemref *>(0)->data[0]);
-// }
-//
-// struct topsUnrankedMemref CreateUnrankedMemref(void *dev_mem, char *memref_raw,
-//                                                std::vector<int64_t> shape) {
-//   struct topsUnrankedMemref unranked_memref;
-//   unranked_memref.rank = shape.size();
-//   unranked_memref.ranked_memref = reinterpret_cast<topsMemref *>(memref_raw);
-//
-//   // Set address
-//   uint64_t dev_addr = reinterpret_cast<uint64_t>(dev_mem);
-//   unranked_memref.ranked_memref->high_addr =
-//       reinterpret_cast<int32_t *>((dev_addr >> 32) & 0xFFFFFFFF);
-//   unranked_memref.ranked_memref->low_addr =
-//       reinterpret_cast<int32_t *>(dev_addr & 0xFFFFFFFF);
-//
-//   // Set offset & shape
-//   unranked_memref.ranked_memref->offset = 0;
-//   for (size_t i = 0; i < shape.size(); ++i) {
-//     unranked_memref.ranked_memref->data[i] = shape[i];
-//   }
-//
-//   return unranked_memref;
-// }
-//
-// // Nasty data copy. Need optimization together with cuda
-// template <typename T, int Rank>
-// static inline std::vector<uint8_t>
-// ToCUDAData(const spanned_view<T, Rank> &v) {
-//   return std::vector<uint8_t>((const uint8_t *)(v.data()), v.bytes());
-// }
-//
-// template <int N, typename T, typename U>
-// static inline spanned_data<T, N>
-// ToSpanned(const std::vector<U> &v, std::initializer_list<int> && shape) {
-//   return copy_as_spanned<N, T>((T*)v.data(), v.size() * sizeof(U), shape);
-// }
-//
-// // must be true
-// //#define CHECK(a) choreo_assert((a), "", __FILE__, __LINE__)
-// #define CHECK(a) (a)
-//
-// } // end anonymous namespace
-// )";
-// }
+void CUDACodeGen::EmitHostHead(std::ostream &os) {
+  os <<
+      R"(
+// choreo header
+#include <cstdio>
+#include <cstdlib>
+#include <ctime>
+#include <fstream>
+#include <iostream>
+#include <vector>
+#include <iterator>
+
+#include <choreo_cuda.h>
+
+using namespace::choreo::cuda;
+
+namespace {
+
+int64_t SizeOfRankedMemref(size_t rank) {
+  return sizeof(topsMemref) +
+         rank * sizeof(reinterpret_cast<topsMemref *>(0)->data[0]);
+}
+
+struct topsUnrankedMemref CreateUnrankedMemref(void *dev_mem, char *memref_raw,
+                                               std::vector<int64_t> shape) {
+  struct topsUnrankedMemref unranked_memref;
+  unranked_memref.rank = shape.size();
+  unranked_memref.ranked_memref = reinterpret_cast<topsMemref *>(memref_raw);
+
+  // Set address
+  uint64_t dev_addr = reinterpret_cast<uint64_t>(dev_mem);
+  unranked_memref.ranked_memref->high_addr =
+      reinterpret_cast<int32_t *>((dev_addr >> 32) & 0xFFFFFFFF);
+  unranked_memref.ranked_memref->low_addr =
+      reinterpret_cast<int32_t *>(dev_addr & 0xFFFFFFFF);
+
+  // Set offset & shape
+  unranked_memref.ranked_memref->offset = 0;
+  for (size_t i = 0; i < shape.size(); ++i) {
+    unranked_memref.ranked_memref->data[i] = shape[i];
+  }
+
+  return unranked_memref;
+}
+
+// Nasty data copy. Need optimization together with cuda
+template <typename T, int Rank>
+static inline std::vector<uint8_t>
+ToCUDAData(const spanned_view<T, Rank> &v) {
+  return std::vector<uint8_t>((const uint8_t *)(v.data()), v.bytes());
+}
+
+template <int N, typename T, typename U>
+static inline spanned_data<T, N>
+ToSpanned(const std::vector<U> &v, std::initializer_list<int> && shape) {
+  return copy_as_spanned<N, T>((T*)v.data(), v.size() * sizeof(U), shape);
+}
+
+// must be true
+//#define CHECK(a) choreo_assert((a), "", __FILE__, __LINE__)
+#define CHECK(a) (a)
+
+} // end anonymous namespace
+
+int main(int argc, char **argv) {
+
+  // get environment variable for device
+  int deviceIdx = 0;
+  printf("Running on device %d.\n", deviceIdx);
+
+  // print some device info
+  // CudaDeviceInfo();
+
+  // Declare the handle, create the handle, cublasCreate will return a value of
+  // type cublasStatus_t to determine whether the handle was created
+  // successfully (the value is 0)
+  cublasHandle_t handle;
+  if (cublasCreate(&handle)) {
+    std::cerr << "Create cublas handle error." << std::endl;
+    exit(EXIT_FAILURE);
+  };
+
+  // Using cudaEvent for gpu stream timing, cudaEvent is equivalent to
+  // publishing event tasks in the target stream
+  float elapsed_time;
+  cudaEvent_t beg, end;
+  cudaEventCreate(&beg);
+  cudaEventCreate(&end);
+)";
+}
 
 // void CUDACodeGen::EmitHostFuncBody(std::ostream &os, const Type &ty,
 //                                      const std::string &f_n,

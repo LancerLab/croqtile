@@ -17,8 +17,8 @@ extern "C" void kernel(int * lhs, int * rhs, int * out) {
 }
 } /// end of kernel decl
 
-__co__ s32 [512, 1024] ele_add(s32 [512, 1024] lhs, s32 [1024, 1024] rhs) { /// device program
-  s32[lhs.span(0), rhs.span(1)] output; // use same shape as lhs
+__co__ f32 [512, 1024] ele_add(f32 [512, 1024] lhs, f32 [1024, 1024] rhs) { /// device program
+  f32[lhs.span(0), rhs.span(1)] output; // use same shape as lhs
 
   parallel p by 1 {  // p is sip_index
     with index = {m_tile, k_tile, n_tile} in [64, 1, 8] {  // decl your tiled spans
@@ -27,15 +27,15 @@ __co__ s32 [512, 1024] ele_add(s32 [512, 1024] lhs, s32 [1024, 1024] rhs) { /// 
           // METHOD3
           // m_tile_size : #output.span(0)/#m_tile
           // n_tile_size : #output.span(1)/#n_tile
-          // local s32[m_tile_size, n_tile_size] l2_out; // alternative: s32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
-          local s32[8, 128] l1_out; // alternative: s32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
+          // local f32[m_tile_size, n_tile_size] l2_out; // alternative: f32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
+          local f32[8, 128] l1_out; // alternative: f32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
           foreach k_tile {
             // chunkat can support bounded_var algebra.
             lhs_load = dma.copy.async lhs.chunkat(m_tile, k_tile) => local; // tiling_factor: {6, 17, 4}, new_size {lhs(0)/6, lhs(1)/17, lhs(2)/4}
             rhs_load = dma.copy.async rhs.chunkat(k_tile, n_tile) => local; // no explicit decl the target buffer, but can refer by <FutureType>.data
             wait lhs_load, rhs_load;
 
-            // local s32[lhs_load.span(0), rhs_load.span(1)] l1_out; // alternative: s32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
+            // local f32[lhs_load.span(0), rhs_load.span(1)] l1_out; // alternative: f32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
 
             call kernel(lhs_load.data, rhs_load.data, l1_out); // |span| calculate the total size of span.
 
@@ -50,20 +50,15 @@ __co__ s32 [512, 1024] ele_add(s32 [512, 1024] lhs, s32 [1024, 1024] rhs) { /// 
 }
 
 int main() { /// host program
-  choreo::s32 a[512][1024] = {0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::s32 b[512][512] = {0};
-  choreo::s32 b[1024][1024] = {0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::s32 b[512][512] = {0};
+  choreo::f32 a[4096][4096] = {0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::f32 b[512][512] = {0};
+  choreo::f32 b[4096][4096] = {0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::f32 b[512][512] = {0};
   std::fill_n(&a[0][0], sizeof(a) / sizeof(a[0][0]), 1);
   std::fill_n(&b[0][0], sizeof(b) / sizeof(b[0][0]), 1);
-  auto lhs_data = choreo::make_spanview<2, choreo::s32>((int*)a, {512, 1024});
-  auto rhs_data = choreo::make_spanview<2, choreo::s32>((int*)b, {1024, 1024});
-
-  auto start = std::chrono::high_resolution_clock::now();
+  auto lhs_data = choreo::make_spanview<2, choreo::f32>((int*)a, {4096});
+  auto rhs_data = choreo::make_spanview<2, choreo::f32>((int*)b, {4096});
 
   auto res
     = ele_add(lhs_data, rhs_data);
-
-  auto end = std::chrono::high_resolution_clock::now();
-  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
   std::cout << res.shape()[0] << std::endl;
   std::cout << res.shape()[1] << std::endl;
