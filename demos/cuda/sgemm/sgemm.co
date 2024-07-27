@@ -17,7 +17,7 @@ extern "C" void kernel(int * lhs, int * rhs, int * out) {
 }
 } /// end of kernel decl
 
-__co__ f32 [512, 1024] ele_add(f32 [512, 1024] lhs, f32 [1024, 1024] rhs) { /// device program
+__co__ f32 [512, 1024] sgemm(f32 [512, 1024] lhs, f32 [1024, 1024] rhs) { /// device program
   f32[lhs.span(0), rhs.span(1)] output; // use same shape as lhs
 
   parallel p by 1 {  // p is sip_index
@@ -58,7 +58,7 @@ int main() { /// host program
   auto rhs_data = choreo::make_spanview<2, choreo::f32>((int*)b, {4096});
 
   auto res
-    = ele_add(lhs_data, rhs_data);
+    = sgemm(lhs_data, rhs_data);
 
   std::cout << res.shape()[0] << std::endl;
   std::cout << res.shape()[1] << std::endl;

@@ -89,7 +89,7 @@ echo "CUDA_CC: ${CUDA_CC}"
 HOST_DIR=$1
 HOST_SRC=$2
 BIN_TARGET=$3
-CUDA_CHOREO_INCLUDES="-I./demos/cuda/sgemm_ref/"
+# CUDA_CHOREO_INCLUDES="-I./demos/cuda/sgemm_ref/"
 CUDA_INCLUDES="${CUDA_SYS_INCLUDES} -I${HOST_DIR}"
 
 if [ "$#" -ne 3 ]; then
