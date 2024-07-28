@@ -296,10 +296,12 @@ struct CUDACodeGen : public CodeGenerator {
   void EmitHostFuncBody(std::ostream &, const Type &, const std::string &fname,
                         const std::string &o_sz, const std::string &o_ty,
                         const Shape &s);
+  void EmitHostTail(std::ostream &);
   std::string GenHostParamName() { return "hp" + std::to_string(sp_count++); }
   std::string ReplaceRuntimeNames(const std::string &, const std::string & = "",
                                   bool host_code = true);
   std::string ReplaceDynDimName(const std::string &);
+  std::string EmitTo(Target target);
 
   // common utils
   void incrementIndent() { this->indent += "  "; }

@@ -1,10 +1,10 @@
-#include "choreo.h"
+#include "choreo_cuda.h"
 
 // extern "C" void kernel(int * lhs, int * rhs, int * out, int m, int k, int n) {
 __cok__ { /// kernel program
 extern "C" void kernel(int * lhs, int * rhs, int * out) {
   int m = 8;
-  int k = 1024;
+  int k = 4096;
   int n = 128;
   for (int i = 0; i < m; ++i) {
     for (int j = 0; j < n; ++j) {
@@ -17,7 +17,7 @@ extern "C" void kernel(int * lhs, int * rhs, int * out) {
 }
 } /// end of kernel decl
 
-__co__ f32 [512, 1024] sgemm(f32 [512, 1024] lhs, f32 [1024, 1024] rhs) { /// device program
+__co__ f32 [4096, 4096] sgemm(f32 [4096, 4096] lhs, f32 [4096, 4096] rhs) { /// device program
   f32[lhs.span(0), rhs.span(1)] output; // use same shape as lhs
 
   parallel p by 1 {  // p is sip_index
@@ -50,32 +50,17 @@ __co__ f32 [512, 1024] sgemm(f32 [512, 1024] lhs, f32 [1024, 1024] rhs) { /// de
 }
 
 int main() { /// host program
-  choreo::f32 a[4096][4096] = {0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::f32 b[512][512] = {0};
-  choreo::f32 b[4096][4096] = {0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::f32 b[512][512] = {0};
-  std::fill_n(&a[0][0], sizeof(a) / sizeof(a[0][0]), 1);
-  std::fill_n(&b[0][0], sizeof(b) / sizeof(b[0][0]), 1);
-  auto lhs_data = choreo::make_spanview<2, choreo::f32>((int*)a, {4096});
-  auto rhs_data = choreo::make_spanview<2, choreo::f32>((int*)b, {4096});
+  unsigned long m, n, k;
+  m = 4096;
+  n = 4096;
+  k = 4096;
 
-  auto res
-    = sgemm(lhs_data, rhs_data);
+  float* a = (float *)malloc(sizeof(float) * m * k);
+  float* b = (float *)malloc(sizeof(float) * k * n);
+  auto lhs_data = choreo::make_spanview<2>((float*)a, {m, k});
+  auto rhs_data = choreo::make_spanview<2>((float*)b, {k, n});
 
-  std::cout << res.shape()[0] << std::endl;
-  std::cout << res.shape()[1] << std::endl;
+  auto res = sgemm(lhs_data, rhs_data);
 
-  // verfication
-  for (size_t i = 0; i < res.shape()[0]; ++i)
-    for (size_t j = 0; j < res.shape()[1]; ++j) {
-        std::cout << "i: " << i << ", j: " << j << "\n";
-        std::cout << "res: " << res[i][j] << "\n";
-        int ref = 0;
-        for (size_t k = 0; k < lhs_data.shape()[1]; ++k) {
-          ref += a[i][k]*b[k][j];
-
-        }
-        std::cout << "ref: " << ref << std::endl;
-        assert(ref == res[i][j]);
-      }
-  std::cout << "Test Passed\n" << std::endl;
-  std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
+  return 0;
 }
