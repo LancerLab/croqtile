@@ -1,0 +1,16 @@
+1. CUDA initial work:
+- discussion: only cover shared memory for now.
+
+2. memory estimation:
+- add occupacy (usage percentage).
+- fix input occupacy.
+- runtime memory estimation.
+
+3. dma optization issues break down:
+- add 'span_as' keyword to support reshape.
+- requires dma.transpose to work.
+
+4. Planning:
+- Aug.19th - Frank to join operator writing (transpose + dma).
+- Sep.20th - Next discussion meeting.
+- Oct.18~25th - Trial version release.
