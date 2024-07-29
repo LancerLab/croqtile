@@ -503,6 +503,25 @@ inline void PrintValueList(const ValueList& vl, std::ostream& os,
   if (rb) os << rb;
 }
 
+inline void PrintValueListAccumulator(const ValueList& vl, std::ostream& os,
+                           const char* lb = "[", const char* rb = "]") {
+  auto print_variant = [&os](const ValueItem& vle) {
+    if (vle.index() == 0)
+      os << std::get<0>(vle);
+    else
+      os << std::get<1>(vle);
+  };
+  if (lb) os << lb;
+  if (!vl.empty()) {
+    print_variant(vl[0]);
+    for (unsigned i = 1; i < vl.size(); ++i) {
+      os << " * ";
+      print_variant(vl[i]);
+    }
+  }
+  if (rb) os << rb;
+}
+
 struct Shape {
   static ValueListRepo values;  // value numbers
 
@@ -650,6 +669,26 @@ struct Shape {
     }
   }
 
+  // os << [4096, 4096]
+  void PrintAsCUDAShape(std::ostream& os) const {
+    if (!IsValidValueNumber(val_no)) {
+      os << "[]";
+    } else {
+      assert(values.Exists(val_no) && "invalid value number.");
+      PrintValueList(Value(), os);
+    }
+  }
+
+  // os << [4096 * 4096]
+  void PrintAsCUDASize(std::ostream& os) const {
+    if (!IsValidValueNumber(val_no)) {
+      os << "[]";
+    } else {
+      assert(values.Exists(val_no) && "invalid value number.");
+      PrintValueListAccumulator(Value(), os);
+    }
+  }
+
   void PrintAsList(std::ostream& os) const {
     if (!IsValidValueNumber(val_no))
       os << "{}";
@@ -735,6 +774,20 @@ inline std::string STR(const ValueItem& vi) {
 inline std::string LSTR(const Shape& s) {
   std::ostringstream oss;
   s.PrintAsList(oss);
+  return oss.str();
+}
+
+// >> [4096, 4096]
+inline std::string CUDASHAPE(const Shape& s) {
+  std::ostringstream oss;
+  s.PrintAsCUDAShape(oss);
+  return oss.str();
+}
+
+// >> [4096, 4096]
+inline std::string CUDASIZE(const Shape& s) {
+  std::ostringstream oss;
+  s.PrintAsCUDASize(oss);
   return oss.str();
 }
 

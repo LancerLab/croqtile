@@ -50,15 +50,17 @@ inline static std::string create_unique_path() {
   return path;
 }
 
+// stringify func for Choreo::Storage emited to CUDA
 static inline std::string cuda_storage_str(Choreo::Storage s) {
   switch (s) {
     case Storage::LOCAL:
-      return "L1Type";
+      return "";
     case Storage::SHARED:
-      return "SRAMType";
+      return "__shared__";
     case Storage::GLOBAL:
+      return "__global__";
     case Storage::DEFAULT:
-      return "DRAMType";
+      return "";
     default:
       choreo_unreachable();
   }
@@ -84,35 +86,41 @@ static inline std::string HostTypeString(const Choreo::Type &ty,
   return "";
 }
 
-static inline std::string cuda_typestr(Choreo::BaseType t) {
+static inline std::string cuda_type_str(Choreo::BaseType t) {
   switch (t) {
     case BaseType::F32:
-      return "FloatType(32)";
+      return "float";
       break;
     case BaseType::F16:
-      return "FloatType(16)";
+      return "half";
       break;
     case BaseType::BF16:
-      return "BFloatType(16)";
+      return "__nv_bfloat16";
       break;
     case BaseType::U32:
+      return "uint32_t";
+      break;
     case BaseType::S32:
-      return "IntType(32)";
+      return "int32_t";
       break;
     case BaseType::U16:
+      return "uint16_t";
+      break;
     case BaseType::S16:
-      return "IntType(16)";
+      return "int16_t";
       break;
     case BaseType::U8:
+      return "uint8_t";
+      break;
     case BaseType::S8:
-      return "IntType(8)";
+      return "int8_t";
       break;
     // should it be passed in?
     case BaseType::INT:
-      return "IntType(32)";
+      return "int";
       break;
     case BaseType::BOOL:
-      return "BoolType(32)";
+      return "bool";
       break;
     default:
       choreo_unreachable("Type '" + STR(t) + "' is not supported.");

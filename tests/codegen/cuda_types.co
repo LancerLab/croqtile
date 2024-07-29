@@ -1,0 +1,10 @@
+// RUN: choreo -n -t cuda %s | FileCheck --match-full-lines %s
+
+__co__ auto foobar(f32 [32] a, int, bool b, f16 [?]) { 
+  f32 [1024, 1024] var_f32;
+  s32 [1024, 1024] var_s32;
+  return 1;
+}
+
+// CHECK: __global__ float var_f32[1024 * 1024];
+// CHECK: __global__ int32_t var_s32[1024 * 1024];

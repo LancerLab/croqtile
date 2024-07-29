@@ -31,7 +31,7 @@ bool CUDACodeGen::ContainsLoopVar(const std::string &iv) const {
   return false;
 }
 
-// TODO(albert) rename to EmitTo and put at common file
+// TODO(albert) rename to EmitTo and extract to common file
 std::string CUDACodeGen::EmitTo(Target target) {
   (void)target;
   // std::ostringstream _os;
@@ -62,12 +62,6 @@ bool CUDACodeGen::BeforeVisitImpl(AST::Node &n) {
     entry_fn = c->name;
     current_fn = "__choreo_" + entry_fn;
     // declare a cuda function with proper name
-//     fs << R"(#include <vector>
-//
-// #include "gcu/cuda/cuda.h"
-//
-// using namespace cuda;
-// )";
     // fs << "void " << current_fn << "() {\n";
     this->incrementIndent();
     // fs << indent << "include_(\"" << backpatch_filename << "\");\n";
@@ -92,7 +86,6 @@ bool CUDACodeGen::AfterVisitImpl(AST::Node &n) {
        << "\nEOF\n\n";
 
     os << "\n# step 5: JIT compile and execute\n";
-    os << "# TODO: enable workflow of AOT compilation\n";
     os << "target=" << target_fn << "\n";
     os << "build_path=" << build_path << "\n";
     os << "cuda_script=" << build_path << "/cuda_script.sh\n";
@@ -158,9 +151,6 @@ fi
     auto fty = cast<FunctionType>(f->GetType());
     auto &out_type = fty->out_ty;
     auto out_size = GetByteSizeExprOf(*out_type);
-    // fs << "}\n\nMODULE_REGISTER(\"lib" << current_fn << "\", " << current_fn
-    //    << ");";  // end the cuda function definition
-    // TODO(albert): resolve hardcode
     fs << R"(
 #pragma once
 
@@ -206,8 +196,8 @@ __global__ void sgemm_naive(int M, int N, int K, float alpha, const float *A,
   } else if (isa<AST::ParallelBy>(&n)) {
     parallel_level--;
     this->decrementIndent();
-    // if (parallel_level == 0)
-    //   fs << this->indent << "}); // end of choreo-cuda kernel function\n";
+    if (parallel_level == 0)
+      fs << this->indent << "}); // end of choreo-cuda kernel function\n";
   } else if (auto f = dyn_cast<AST::ForeachBlock>(&n)) {
     // erase the loop variables
     assert(!loop_vars.empty());
@@ -218,12 +208,12 @@ __global__ void sgemm_naive(int M, int N, int K, float alpha, const float *A,
       int dec_by = 1;
       bool multiple_bounds = cur_bounded_vars.count(name);
       if (multiple_bounds) dec_by = cur_bounded_vars[name].size();
-      // for (int i = 0; i < dec_by; ++i) {
-      //   decrementIndent();
-      //   fs << indent << "}); // end of choreo-foreach block";
-      //   if (multiple_bounds) fs << " on '" << cur_bounded_vars[name][i] << "'";
-      //   fs << ".\n";
-      // }
+      for (int i = 0; i < dec_by; ++i) {
+        decrementIndent();
+        fs << indent << "}); // end of choreo-foreach block";
+        if (multiple_bounds) fs << " on '" << cur_bounded_vars[name][i] << "'";
+        fs << ".\n";
+      }
     }
   } else if (auto wb = dyn_cast<AST::WithBlock>(&n)) {
     for (auto wi : wb->withins->AllSubs()) {
@@ -246,39 +236,33 @@ bool CUDACodeGen::Visit(AST::NamedTypeDecl &) { return true; };
 
 bool CUDACodeGen::Visit(AST::NamedVariableDecl &node) {
   __TRACE_EACH_VISIT__(node)
-  // auto nty = node.GetType();
-  // auto sym = node.name_str;
-  // if (auto sty = dyn_cast<SpannedType>(nty)) {
-  //   assert(isa<SpannedType>(GetSymbolType(sym)) && "Inconsistent types!");
-  //   if (cuda_symbols.Exists(sym)) {
-  //     fs << indent << "auto " << sym << " = alloc_("
-  //        << cuda_symbols.GetTypeName(sym) << ");\n";
-  //   } else {
-  //     std::string storage_type = cuda_storage_str(sty->GetStorage());
-  //     std::string base_type = cuda_typestr(Choreo::BaseType(sty->f_type));
-  //     std::ostringstream _os;
-  //     _os << "auto " << sym << " = alloc_(" << storage_type << "(" << base_type
-  //         << "," << ReplaceRuntimeNames(LSTR(sty->GetShape()), "", false) << ")"
-  //         << ");\n";
-  //     if (storage_type == "DRAMType")
-  //       fs << indent << _os.str();
-  //     else
-  //       alloc_in_fs << "    " << _os.str();
-  //
-  //     fs << indent << "auto " << sym << "_init = alloc_dma_("
-  //        << ((storage_type == "L1Type") ? "SDMAType()" : "CDMAType()")
-  //        << ");\n";
-  //
-  //     // generate "memset_()" action to initiate each alloc_memory with value 0
-  //     fs << indent << "memset_(" << sym << "_init, " << sym << ", 0);\n";
-  //   }
-  // } else {
-  //   choreo_unreachable("non-spanned is not yet supported.");
-  //   // TODO(albert): handle anon case
-  //   fs << this->indent;
-  //   fs << "auto " << node.name_str << " = alloc_(?";
-  //   fs << ");\n";
-  // }
+  auto nty = node.GetType();
+  auto sym = node.name_str;
+  if (auto sty = dyn_cast<SpannedType>(nty)) {
+    assert(isa<SpannedType>(GetSymbolType(sym)) && "Inconsistent types!");
+    if (cuda_symbols.Exists(sym)) {
+      fs << indent << "auto " << sym << " = alloc_("
+         << cuda_symbols.GetTypeName(sym) << ");\n";
+    } else {
+      auto storage_type = sty->GetStorage();
+      auto base_type = Choreo::BaseType(sty->f_type);
+      std::ostringstream _os;
+      // if (storage_type == Choreo::Storage::SHARED) {
+      _os << cuda_storage_str(storage_type) << " " << cuda_type_str(base_type) << " " << sym
+        << ReplaceRuntimeNames(CUDASIZE(sty->GetShape()), "", false) << ";\n";
+      fs << indent << _os.str();
+      // }
+      // if (storage_type == "DRAMType")
+      //   fs << indent << _os.str();
+      // else
+      //   alloc_in_fs << "    " << _os.str();
+    }
+  } else {
+    choreo_unreachable("non-spanned is not yet supported.");
+    fs << this->indent;
+    fs << "auto " << node.name_str << " = alloc_(?";
+    fs << ");\n";
+  }
   return true;
 };
 bool CUDACodeGen::Visit(AST::IntTuple &) { return true; };
@@ -490,7 +474,7 @@ bool CUDACodeGen::Visit(AST::DMA &d) {
   //   // buffer in another stream
   //   alloc_in_fs << alloc_indent << "auto " << dst_buffer_name << " = alloc_("
   //               << sto2alloc.at(mem_node->Get()) << "("
-  //               << cuda_typestr(sty->ElementType()) << ","
+  //               << cuda_type_str(sty->ElementType()) << ","
   //               << ReplaceRuntimeNames(LSTR(dst_shape), "", false) << "));\n";
   // }
   //
@@ -800,12 +784,12 @@ bool CUDACodeGen::Visit(AST::FunctionDecl &d) {
     std::string type_string;
     if (auto sty = dyn_cast<SpannedType>(param->GetType())) {
       // define spanned type
-      type_string = "DRAMType(" + cuda_typestr(sty->ElementType()) + ", " +
+      type_string = "DRAMType(" + cuda_type_str(sty->ElementType()) + ", " +
                     ReplaceRuntimeNames(LSTR(sty->GetShape()), "", false) + ")";
       cuda_symbols.AddSymbol(pname, type_name, type_string);
     } else {
       type_string =
-          "DRAMType(" + cuda_typestr(param->type->getBaseType()) + ", (1))";
+          "DRAMType(" + cuda_type_str(param->type->getBaseType()) + ", (1))";
       cuda_symbols.AddSymbol(pname, type_name, type_string);
     }
     // fs << indent << "auto " << type_name << " = " << type_string << ";\n";
@@ -814,7 +798,7 @@ bool CUDACodeGen::Visit(AST::FunctionDecl &d) {
   if (auto rty = dyn_cast<SpannedType>(fty.out_ty)) {
     std::string name = "output";
     std::string type_name = "output_type";
-    auto type_string = "DRAMType(" + cuda_typestr(rty->ElementType()) + ", " +
+    auto type_string = "DRAMType(" + cuda_type_str(rty->ElementType()) + ", " +
                        ReplaceRuntimeNames(LSTR(rty->GetShape()), "", false);
 
     // handle dynamic-typed output when necessary. Generate code snippet like:
@@ -846,7 +830,7 @@ bool CUDACodeGen::Visit(AST::FunctionDecl &d) {
     auto name = "output";
     auto type_name = "output_type";
     auto type_string =
-        "DRAMType(" + cuda_typestr(TC2BT(fty.out_ty->Category())) + ", (1));";
+        "DRAMType(" + cuda_type_str(TC2BT(fty.out_ty->Category())) + ", (1));";
     cuda_symbols.AddSymbol(name, type_name, type_string);
     // fs << indent << "auto " << type_name << " = " << type_string << "\n";
   }
@@ -892,7 +876,6 @@ void CUDACodeGen::EmitHostHead(std::ostream &os) {
 #include <string>
 #include <chrono>
 
-#include <choreo_cuda.h>
 
 using namespace choreo;
 using namespace choreo::cuda;
@@ -947,61 +930,8 @@ ToSpanned(const std::vector<U> &v, std::initializer_list<int> && shape) {
 }
 
 void CUDACodeGen::EmitHostTail(std::ostream &os) {
-  os <<
-      R"(// choreo tail 
-
-choreo::spanned_data<choreo::f32, 2> ele_add(const choreo::spanned_view<choreo::f32, 2> & hp0, const choreo::spanned_view<choreo::f32, 2> & hp1) {
-  choreo::runtime_check(hp0.shape()[0] == 4096, "shape inconstant on 1st parameter (dim: 0).");
-  choreo::runtime_check(hp0.shape()[1] == 4096, "shape inconstant on 1st parameter (dim: 1).");
-  choreo::runtime_check(hp1.shape()[0] == 4096, "shape inconstant on 2th parameter (dim: 0).");
-  choreo::runtime_check(hp1.shape()[1] == 4096, "shape inconstant on 2th parameter (dim: 1).");
-
-  int deviceIdx = 0;
-  printf("Running on device %d.\n", deviceIdx);
-
-  cublasHandle_t handle;
-  if (cublasCreate(&handle)) {
-    std::cerr << "Create cublas handle error." << std::endl;
-    exit(EXIT_FAILURE);
-  };
-
-  float elapsed_time;
-  cudaEvent_t beg, end;
-  cudaEventCreate(&beg);
-  cudaEventCreate(&end);
-
-  float alpha = 1.0, beta = 0.0; // GEMM input parameters, C=α*AB+β*C
-
-
-  float* in_mem0 = nullptr;
-  float* in_mem1 = nullptr;
-  float* out_mem = nullptr;
-  float* out_mem_ref = nullptr;
-  CUDACheck(cudaMalloc((void **)&in_mem0, sizeof(float) * hp0.shape()[0] * hp0.shape()[1]));
-  CUDACheck(cudaMalloc((void **)&in_mem1, sizeof(float) * hp1.shape()[0] * hp1.shape()[1]));
-  CUDACheck(cudaMalloc((void **)&out_mem, sizeof(float) * hp0.shape()[0] * hp1.shape()[1]));
-  CUDACheck(cudaMalloc((void **)&out_mem_ref, sizeof(float) * hp0.shape()[0] * hp1.shape()[1]));
-
-  CUDACheck(cudaMemcpy(in_mem0, hp0.data(), sizeof(float) * hp0.shape()[0] * hp0.shape()[1], cudaMemcpyHostToDevice));
-  CUDACheck(cudaMemcpy(in_mem1, hp1.data(), sizeof(float) * hp1.shape()[0] * hp1.shape()[1], cudaMemcpyHostToDevice));
-
-  // CHECK CORRECTNESS
-  auto res_ref = choreo::make_spandata<choreo::f32, 2>({hp0.shape()[0], hp1.shape()[1]});
-  run_kernel(0, hp0.shape()[0], hp1.shape()[1], hp0.shape()[1], alpha, in_mem0, in_mem1, beta, out_mem_ref, handle);
-  CUDACheck(cudaDeviceSynchronize());
-  cudaMemcpy(res_ref.data(), out_mem_ref, sizeof(float) * hp0.shape()[0] * hp1.shape()[1], cudaMemcpyDeviceToHost);
-
-
-  cudaEventRecord(beg);
-
-  run_kernel(1, hp0.shape()[0], hp1.shape()[1], hp0.shape()[1], alpha, in_mem0, in_mem1, beta, out_mem, handle);
-
-  cudaEventRecord(end);
-  cudaEventSynchronize(beg);
-  cudaEventSynchronize(end);
-  cudaEventElapsedTime(&elapsed_time, beg, end);
-  elapsed_time /= 1000.; // Convert to seconds
-
+  // compare results
+  os << R"(
   unsigned long flops = 2 * hp0.shape()[0] * hp1.shape()[1] * hp0.shape()[1];
   printf(
       "Average elapsed time: (%7.6f) s, performance: (%7.1f) GFLOPS. size: "
@@ -1010,30 +940,17 @@ choreo::spanned_data<choreo::f32, 2> ele_add(const choreo::spanned_view<choreo::
       (flops * 1e-9) / elapsed_time, hp0.shape()[0]);
   fflush(stdout);
 
-  // auto out_host = (float *)malloc(sizeof(float) * m * n);
-  auto res = choreo::make_spandata<choreo::f32, 2>({hp0.shape()[0], hp1.shape()[1]});
-  CUDACheck(cudaMemcpy(res.data(), out_mem, sizeof(float) * hp0.shape()[0] * hp1.shape()[1], cudaMemcpyDeviceToHost));
-
-  if (!verify_matrix(res_ref.data(), res.data(), hp0.shape()[0] * hp1.shape()[1])) {
+  if (!verify_matrix(res_cublas.data(), res_choreo.data(), res_choreo.shape()[0] * res_choreo.shape()[1])) {
     std::cout
         << "Failed to pass the correctness verification against NVIDIA "
            "cuBLAS."
         << std::endl;
     exit(EXIT_FAILURE);
   }
-
-  cudaFree(in_mem0);
-  cudaFree(in_mem1);
-  cudaFree(out_mem);
-  cublasDestroy(handle);
-
-  std::cout
-      << "SGEMM passed with correct results "
-      << std::endl;
-
-  return res;
-};
-)";
+  std::cout << "Compute Correct with Cublas";
+  )";
+  os << "  return res_choreo;\n";
+  os << "}\n";
 }
 
 void CUDACodeGen::EmitHostFuncBody(std::ostream &os, const Type &ty,
@@ -1044,15 +961,17 @@ void CUDACodeGen::EmitHostFuncBody(std::ostream &os, const Type &ty,
   assert(isa<FunctionType>(&ty) && "unexpected type.");
   auto &fty = *cast<FunctionType>(&ty);
 
-  // phase 1: create tops executable from a file
+  // TODO
+  // 1. make alpha and beta into arguments
+  // 3. 
   os << "{\n";
   EmitRuntimeCheck(os, ty);
   os << R"(
   int deviceIdx = 0;
   printf("Running on device %d.\n", deviceIdx);
 
-  cublasHandle_t handle;
-  if (cublasCreate(&handle)) {
+  cublasHandle_t cublas_handle;
+  if (cublasCreate(&cublas_handle)) {
     std::cerr << "Create cublas handle error." << std::endl;
     exit(EXIT_FAILURE);
   };
@@ -1093,49 +1012,8 @@ void CUDACodeGen::EmitHostFuncBody(std::ostream &os, const Type &ty,
 
   std::vector<std::string> inputs;  // cuda input paramters
 
-  // os << "\n  // adaption: convert to the cuda parameters\n";
-  // size_t i = 0;
-  // std::ostringstream tss;
-  // for (; i < fty.in_tys.size(); ++i) {
-  //   tss << "  std::unique_ptr<char[]> memref_raw" << i
-  //       << "(new char[SizeOfRankedMemref(";
-  //   if (auto sty = dyn_cast<SpannedType>(fty.in_tys[i]))
-  //     tss << sty->Dims();
-  //   else
-  //     tss << "1";
-  //   tss << ")]);\n";
-  //   tss << "  auto input" << i << " = CreateUnrankedMemref(in_mem" << i
-  //       << ", memref_raw" << i << ".get(), ";
-  //   if (auto sty = dyn_cast<SpannedType>(fty.in_tys[i])) {
-  //     tss << LSTR(sty->GetShape());
-  //   } else
-  //     tss << "{1}";
-  //   tss << ");\n";
-  //   inputs.push_back("input" + std::to_string(i));
-  // }
-
-  // if (auto rty = dyn_cast<SpannedType>(fty.out_ty)) {
-  //   tss << "  std::vector<int64_t> out_shape = {" << RSTR(rty->GetShape())
-  //       << "};\n";
-  // } else if (!isa<VoidType>(fty.out_ty)) {
-  //   tss << "  std::vector<int64_t> out_shape = {1};\n";
-  // }
-  // os << ReplaceRuntimeNames(tss.str(), "(int64_t)");
-
-  // if (!void_return) {
-  //   os << "  std::unique_ptr<char[]> memref_raw" << i
-  //      << "(new char[SizeOfRankedMemref(out_shape.size())]);\n";
-  //   os << "  auto output = CreateUnrankedMemref(out_mem, memref_raw" << i
-  //      << ".get(), out_shape);\n";
-  // }
-
-  // phase 3: Execute the executable and fetch the output
-  // os << "\n  " << current_fn << "(";
-  // for (auto &in : inputs) os << "&" << in << ", ";
-  // os << "stream" << ((void_return) ? "" : ", &output") << ");\n";
-
   // go ref impl with cublas
-  os << "\n  run_kernel(0, hp0.shape()[0], hp1.shape()[1], hp0.shape()[1], alpha, in_mem0, in_mem1, beta, out_mem_cublas, handle);\n";
+  os << "\n  run_kernel(0, hp0.shape()[0], hp1.shape()[1], hp0.shape()[1], alpha, " << DelimitedString(device_mems) << ", beta, out_mem_cublas, cublas_handle);\n";
   os << "  CUDACheck(cudaDeviceSynchronize());\n";
   size_t out_rank = 1;
   std::string shape_string = "{1}";
@@ -1153,8 +1031,9 @@ void CUDACodeGen::EmitHostFuncBody(std::ostream &os, const Type &ty,
   }
 
   // go our impl
+  // TODO(albert) cleanup HC, make size and alpha/beta into interface arguments
   os << "\n  cudaEventRecord(beg);\n";
-  os << "\n  run_kernel(1, hp0.shape()[0], hp1.shape()[1], hp0.shape()[1], alpha, in_mem0, in_mem1, beta, out_mem_choreo, handle);\n";
+  os << "\n  run_kernel(1, hp0.shape()[0], hp1.shape()[1], hp0.shape()[1], alpha, " << DelimitedString(device_mems) << ", beta, out_mem_choreo, cublas_handle);\n";
   os << "  CUDACheck(cudaDeviceSynchronize());\n";
   os << R"(
   cudaEventRecord(end);
@@ -1162,14 +1041,6 @@ void CUDACodeGen::EmitHostFuncBody(std::ostream &os, const Type &ty,
   cudaEventSynchronize(end);
   cudaEventElapsedTime(&elapsed_time, beg, end);
   elapsed_time /= 1000.; // Convert to seconds
-
-  unsigned long flops = 2 * hp0.shape()[0] * hp1.shape()[1] * hp0.shape()[1];
-  printf(
-      "Average elapsed time: (%7.6f) s, performance: (%7.1f) GFLOPS. size: "
-      "(%lu).\n",
-      elapsed_time,
-      (flops * 1e-9) / elapsed_time, hp0.shape()[0]);
-  fflush(stdout);
   )";
   if (!out_size.empty()) {
     os << "auto res_choreo = choreo::make_spandata<" << out_type << ", " << out_rank
@@ -1180,29 +1051,13 @@ void CUDACodeGen::EmitHostFuncBody(std::ostream &os, const Type &ty,
        << ", cudaMemcpyDeviceToHost));\n";
   }
 
-  // compare results
-  os << R"(
-  if (!verify_matrix(res_cublas.data(), res_choreo.data(), res_choreo.shape()[0] * res_choreo.shape()[1])) {
-    std::cout
-        << "Failed to pass the correctness verification against NVIDIA "
-           "cuBLAS."
-        << std::endl;
-    exit(EXIT_FAILURE);
-  }
-    
-  )";
 
   // phase 4: Free up the resources
   os << "  // Free up the resources\n";
-  os << "  cublasDestroy(handle);\n";
+  os << "  cublasDestroy(cublas_handle);\n";
   for (auto &p : device_mems) os << "  cudaFree(" << p << ");\n";
   os << "  cudaFree(out_mem_choreo);\n";
   os << "  cudaFree(out_mem_cublas);\n\n";
-  os << R"(
-  std::cout << "Compute Correct with Cublas";
-  )";
-  os << "  return res_choreo;\n";
-  os << "}\n";
 }
 
 std::string CUDACodeGen::ReplaceRuntimeNames(const std::string &e,
@@ -1335,7 +1190,7 @@ void CUDACodeGen::OutputScript(FunctionType *fty, const std::string &n,
   }
   EmitHostFuncDecl(hs, *fty, n);
   EmitHostFuncBody(hs, *fty, cuda_bfn, out_size, out_type, out_shape);
-  // EmitHostTail(hs);
+  EmitHostTail(hs);
   //
   // // backpatch the cuda bin filename
   std::string cuda_src = fs.str();

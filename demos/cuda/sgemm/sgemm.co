@@ -3,43 +3,39 @@
 // extern "C" void kernel(int * lhs, int * rhs, int * out, int m, int k, int n) {
 __cok__ { /// kernel program
 extern "C" void kernel(int * lhs, int * rhs, int * out) {
-  int m = 8;
-  int k = 4096;
-  int n = 128;
-  for (int i = 0; i < m; ++i) {
-    for (int j = 0; j < n; ++j) {
-      for (int z = 0; z < k; ++z) {
-        out[i*n + j] += lhs[i*k+z]*rhs[z*n+j];
-        // out[i*n + j] = lhs[i*k+z] + rhs[z*n+j];
-      }
-    }
-  }
+  return;
 }
 } /// end of kernel decl
 
-__co__ f32 [4096, 4096] sgemm(f32 [4096, 4096] lhs, f32 [4096, 4096] rhs) { /// device program
-  f32[lhs.span(0), rhs.span(1)] output; // use same shape as lhs
-
+__co__ f32 [4096, 4096] sgemm(f32 [4096, 4096] lhs, f32 [4096, 4096] rhs, f32 [4096, 4096] output) { /// device program
   parallel p by 1 {  // p is sip_index
-    with index = {m_tile, k_tile, n_tile} in [64, 1, 8] {  // decl your tiled spans
+    with index = {m_tile, k_tile, n_tile} in [1, 1, 1] {  // decl your tiled spans
       foreach m_tile { // alternative: foreach index, index.x, index.y
         foreach n_tile {
-          // METHOD3
-          // m_tile_size : #output.span(0)/#m_tile
-          // n_tile_size : #output.span(1)/#n_tile
-          // local f32[m_tile_size, n_tile_size] l2_out; // alternative: f32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
-          local f32[8, 128] l1_out; // alternative: f32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
+          shared f32[4096, 4096] l2_out; // alternative: f32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
           foreach k_tile {
-            // chunkat can support bounded_var algebra.
-            lhs_load = dma.copy.async lhs.chunkat(m_tile, k_tile) => local; // tiling_factor: {6, 17, 4}, new_size {lhs(0)/6, lhs(1)/17, lhs(2)/4}
-            rhs_load = dma.copy.async rhs.chunkat(k_tile, n_tile) => local; // no explicit decl the target buffer, but can refer by <FutureType>.data
+            lhs_load = dma.copy.async lhs.chunkat(m_tile, k_tile) => shared; // tiling_factor: {6, 17, 4}, new_size {lhs(0)/6, lhs(1)/17, lhs(2)/4}
+            rhs_load = dma.copy.async rhs.chunkat(k_tile, n_tile) => shared; // no explicit decl the target buffer, but can refer by <FutureType>.data
             wait lhs_load, rhs_load;
+            parallel q by 1 {
+              with index = {m_tile_s, k_tile_s, n_tile_s} in [2, 4, 4] {
+                foreach m_tile_s {
+                  foreach n_tile_s {
+                    foreach k_tile_s{
+                      lhs_load_s = dma.copy.async lhs_load.data.chunkat(m_tile_s, k_tile_s) => local;
+                      rhs_load_s = dma.copy.async rhs_load.data.chunkat(k_tile_s, n_tile_s) => local;
+                      out_load_s = dma.copy.async l2_out.chunkat(m_tile_s, n_tile_s) => local;
+                      wait lhs_load_s, rhs_load_s, out_load_s;
+                      call kernel(lhs_load_s.data, rhs_load_s.data, out_load_s.data); // |span| calculate the total size of span.
+                      out_store_s = dma.copy.async out_load_s.data => l2_out.chunkat(m_tile_s, n_tile_s); // can use defined vars
+                      wait out_store_s;
+                    }
+                  }
+                }
+              }
+            }
 
-            // local f32[lhs_load.span(0), rhs_load.span(1)] l1_out; // alternative: f32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
-
-            call kernel(lhs_load.data, rhs_load.data, l1_out); // |span| calculate the total size of span.
-
-            out_store = dma.copy.async l1_out => output.chunkat(m_tile, n_tile); // can use defined vars
+            out_store = dma.copy.async l2_out => output.chunkat(m_tile, n_tile); // can use defined vars
             wait out_store;
           }
         }
