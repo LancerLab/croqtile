@@ -113,6 +113,33 @@ fi
     os << R"(
 if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then
 )";
+    os << R"script(
+  # check the device
+  # TODO: improve the target check with more solid code
+  GCU_DEVICE_STR="$(lspci | grep Enflame | head -1)"
+  echo $GCU_DEVICE_STR
+  if [[ "${GCU_DEVICE_STR}" == *"S60G"* ]]; then
+    gcu_arch=gcu300
+    gcu_resource=1c12s
+    gcu_target_string="scorpio_${gcu_resource}"
+  elif [[ "${GCU_DEVICE_STR}" == *"c035"* ]]; then
+    gcu_arch=gcu300
+    gcu_resource=1c12s
+    gcu_target_string="scorpio_${gcu_resource}"
+    export TOP_VISIBLE_DEVICES=1
+  elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then
+    gcu_arch=gcu210
+    gcu_resource=2c24s
+    gcu_target_string="dorado_2c"
+  elif [[ "$(lspci | grep Tencent)" != "" ]]; then
+    gcu_arch=gcu210
+    gcu_resource=2c24s
+    gcu_target_string="dorado_2c"
+  else
+    echo "can not determine the GCU device type."
+    exit 1
+  fi
+)script";
     os << "  export FACTOR_INSTALL=" << STRINGIZE(__CHOREO_FACTOR_DIR__)
        << "\n# JIT compile and execute\n";
     if (dyn_shaped) os << "VIEW_CONFIG=1 ENABLE_DYNSHAPE=1 ";
@@ -1194,33 +1221,33 @@ void FactorCodeGen::OutputScript(FunctionType *fty, const std::string &n,
   os << "#!/usr/bin/env bash\n\n";
   os << "# This is the choreo generated bash script to compile factor code\n";
 
-  os << R"script(
-  # check the device
-  # TODO: improve the target check with more solid code
-  GCU_DEVICE_STR="$(lspci | grep Enflame | head -1)"
-  echo $GCU_DEVICE_STR
-  if [[ "${GCU_DEVICE_STR}" == *"S60G"* ]]; then
-    gcu_arch=gcu300
-    gcu_resource=1c12s
-    gcu_target_string="scorpio_${gcu_resource}"
-  elif [[ "${GCU_DEVICE_STR}" == *"c035"* ]]; then
-    gcu_arch=gcu300
-    gcu_resource=1c12s
-    gcu_target_string="scorpio_${gcu_resource}"
-    export TOP_VISIBLE_DEVICES=1
-  elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then
-    gcu_arch=gcu210
-    gcu_resource=2c24s
-    gcu_target_string="dorado_2c"
-  elif [[ "$(lspci | grep Tencent)" != "" ]]; then
-    gcu_arch=gcu210
-    gcu_resource=2c24s
-    gcu_target_string="dorado_2c"
-  else
-    echo "can not determine the GCU device type."
-    exit 1
-  fi
-)script";
+//   os << R"script(
+//   # check the device
+//   # TODO: improve the target check with more solid code
+//   GCU_DEVICE_STR="$(lspci | grep Enflame | head -1)"
+//   echo $GCU_DEVICE_STR
+//   if [[ "${GCU_DEVICE_STR}" == *"S60G"* ]]; then
+//     gcu_arch=gcu300
+//     gcu_resource=1c12s
+//     gcu_target_string="scorpio_${gcu_resource}"
+//   elif [[ "${GCU_DEVICE_STR}" == *"c035"* ]]; then
+//     gcu_arch=gcu300
+//     gcu_resource=1c12s
+//     gcu_target_string="scorpio_${gcu_resource}"
+//     export TOP_VISIBLE_DEVICES=1
+//   elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then
+//     gcu_arch=gcu210
+//     gcu_resource=2c24s
+//     gcu_target_string="dorado_2c"
+//   elif [[ "$(lspci | grep Tencent)" != "" ]]; then
+//     gcu_arch=gcu210
+//     gcu_resource=2c24s
+//     gcu_target_string="dorado_2c"
+//   else
+//     echo "can not determine the GCU device type."
+//     exit 1
+//   fi
+// )script";
   os << "\n# step 0: set up the environment\n";
   os << "rm -fr " << build_path << "\n";
   os << "mkdir -p " << build_path << "\n";
