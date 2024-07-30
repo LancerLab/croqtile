@@ -209,7 +209,7 @@ struct CUDACodeGen : public CodeGenerator {
   std::map<std::string, std::vector<std::string>> cur_bounded_vars;
 
   std::string bin_fn;  // temporal filename of factor binary
-  int parallel_factor = 1;
+  int parallel_cuda = 1;
 
   bool void_return = false;
 

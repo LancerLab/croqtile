@@ -1,13 +1,5 @@
-#include "choreo_cuda.h"
+// RUN: choreo -n -t cuda %s | FileCheck --match-full-lines %s
 
-// extern "C" void kernel(int * lhs, int * rhs, int * out, int m, int k, int n) {
-__cok__ { /// kernel program
-extern "C" void sgemm_kernel(int * lhs, int * rhs, int * out) {
-  return;
-}
-} /// end of kernel decl
-
-// __co__ f32 [4096, 4096] sgemm(f32 [4096, 4096] lhs, f32 [4096, 4096] rhs, f32 [4096, 4096] output) { /// device program
 __co__ void sgemm(f32 [4096, 4096] lhs, f32 [4096, 4096] rhs, f32 [4096, 4096] output) { /// device program
   parallel p by 128 {  // p is sip_index
     parallel q by 128 {
@@ -25,21 +17,5 @@ __co__ void sgemm(f32 [4096, 4096] lhs, f32 [4096, 4096] rhs, f32 [4096, 4096] o
   }
 }
 
-int main() { /// host program
-  unsigned long m, n, k;
-  m = 4096;
-  n = 4096;
-  k = 4096;
-
-  float* a = (float *)malloc(sizeof(float) * m * k);
-  float* b = (float *)malloc(sizeof(float) * k * n);
-  // float* c = (float *)malloc(sizeof(float) * m * n);
-  auto lhs_data = choreo::make_spanview<2>((float*)a, {m, k});
-  auto rhs_data = choreo::make_spanview<2>((float*)b, {k, n});
-  // auto out_data = choreo::make_spanview<2>((float*)c, {m, n});
-
-  // auto res = sgemm(lhs_data, rhs_data, out_data);
-  auto res = sgemm(lhs_data, rhs_data);
-
-  return 0;
-}
+// CHECK: for (auto iv_k_tile = 0; iv_k_tile < 1; iv_k_tile++) {
+// CHECK: } // end of choreo-foreach block.

@@ -60,10 +60,36 @@ bool CUDACodeGen::BeforeVisitImpl(AST::Node &n) {
     host_params.clear();
     indent.clear();
     entry_fn = c->name;
-    current_fn = "__choreo_" + entry_fn;
-    // declare a cuda function with proper name
-    fs << "void " << current_fn << "() {\n";
+    current_fn = "__choreo_" + entry_fn + "_host";
+    fs << R"(
+#pragma once
+
+#include <cassert>
+#include <cstdio>
+#include <cstdlib>
+#include <cublas_v2.h>
+#include <cuda_runtime.h>
+
+#define CEIL_DIV(M, N) (((M) + (N)-1) / (N))
+#define OFFSET(row, col, ld) ((row)*(ld)+(col))
+#define FETCH_FLOAT4(pointer) (reinterpret_cast<float4*>(&(pointer))[0])
+
+)";
+    // TODO(albert): to add host params
+    fs << this->indent << "void " << current_fn << "(";
+    bool need_delimiter = false;
+    // f32 [4096, 4096] lhs ==> float* lhs
+    for (auto value : c->f_decl.params->values) {
+      if (need_delimiter) fs<< ", ";
+      fs << cuda_type_str(value->type->getBaseType());
+      if (value->type->mdspan_type != nullptr) fs << "*";
+      fs << " ";
+      value->sym->Print(fs);
+      need_delimiter = true;
+    }
+    fs << ") {\n";
     this->incrementIndent();
+
   } else if (isa<AST::ParallelBy>(&n)) {
     parallel_level++;
     // this->incrementIndent();
@@ -230,28 +256,14 @@ else
 fi
 )script";
 
-  } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
-    entry_fn = f->name;
+  } else if (auto fnode = dyn_cast<AST::ChoreoFunction>(&n)) {
+    entry_fn = fnode->name;
     current_fn = "__choreo_" + entry_fn;
-    auto fty = cast<FunctionType>(f->GetType());
+    auto fty = cast<FunctionType>(fnode->GetType());
     auto &out_type = fty->out_ty;
     auto out_size = GetByteSizeExprOf(*out_type);
     fs << R"(
-#pragma once
-
-#include <cstdio>
-#include <cstdlib>
-#include <cublas_v2.h>
-#include <cuda_runtime.h>
-
-/*
-
-Matrix sizes:
-MxK * KxN = MxN
-
-*/
-
-__global__ void sgemm_naive(int M, int N, int K, float alpha, const float *A,
+__global__ void __choreo_sgemm(int M, int N, int K, float alpha, const float *A,
                             const float *B, float beta, float *C) {
   const uint x = blockIdx.x * blockDim.x + threadIdx.x;
   const uint y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -272,17 +284,17 @@ __global__ void sgemm_naive(int M, int N, int K, float alpha, const float *A,
 )";
 
     if (auto sty = dyn_cast<SpannedType>(out_type)) {
-      OutputScript(fty, f->name, GetBaseTypeStringOf(*out_type), out_size,
+      OutputScript(fty, fnode->name, GetBaseTypeStringOf(*out_type), out_size,
                    sty->GetShape());
     } else
-      OutputScript(fty, f->name, GetBaseTypeStringOf(*out_type), out_size,
+      OutputScript(fty, fnode->name, GetBaseTypeStringOf(*out_type), out_size,
                    Shape() /*invalid shape*/);
     ResetBuffers();
   } else if (isa<AST::ParallelBy>(&n)) {
     parallel_level--;
     this->decrementIndent();
     if (parallel_level == 0)
-      fs << this->indent << "}); // end of choreo-cuda kernel function\n";
+      fs << this->indent << "} // end of choreo-cuda kernel function\n";
   } else if (auto f = dyn_cast<AST::ForeachBlock>(&n)) {
     // erase the loop variables
     assert(!loop_vars.empty());
@@ -295,7 +307,7 @@ __global__ void sgemm_naive(int M, int N, int K, float alpha, const float *A,
       if (multiple_bounds) dec_by = cur_bounded_vars[name].size();
       for (int i = 0; i < dec_by; ++i) {
         decrementIndent();
-        fs << indent << "}); // end of choreo-foreach block";
+        fs << indent << "} // end of choreo-foreach block";
         if (multiple_bounds) fs << " on '" << cur_bounded_vars[name][i] << "'";
         fs << ".\n";
       }
@@ -376,42 +388,60 @@ bool CUDACodeGen::Visit(AST::ParamList &n) {
 // CLEAN
 bool CUDACodeGen::Visit(AST::ParallelBy &by) {
   __TRACE_EACH_VISIT__(by)
-  // parallel_cuda *= by.bound;
-  // if (parallel_level > 1) {
-  //   return true;
-  // }
-  // fs << this->indent << "Dim3 grid_dim(1);\n";
-  // fs << this->indent << "Dim3 block_dim(" << by.bound << ");\n";
-  // fs << this->indent << "auto ts = launch_kernel_(\"" << current_fn
-  //    << "_parallel\", grid_dim, block_dim, args.back(), {";
-  // if (cur_params->size() > 0) {
-  //   fs << "args[0]";
-  //   for (size_t i = 1; i < cur_params->size(); ++i) fs << ", args[" << i << "]";
-  // }
-  // fs << "}, {" << ((void_return) ? "" : "$$out$$")
-  //    << "});\n";  // "$$out$$" : magic string for output, will be replaced later
-  // fs << this->indent << "return std::vector<Value>{"
-  //    << ((void_return) ? "" : "$$out$$") << "};\n";
-  // this->decrementIndent();
-  // fs << this->indent << "}, true); // end of choreo-cuda dataflow program\n";
-  // fs << "\n";
-  //
-  // fs << this->indent << "\n";
-  // fs << this->indent << "D(func_)(\"" << current_fn << "_parallel\", {";
-  // if (cur_params->size() > 0) {
-  //   fs << (*cur_params)[0]->sym->name << "_type";
-  //   for (unsigned i = 1; i < cur_params->size(); ++i)
-  //     fs << ", " << (*cur_params)[i]->sym->name << "_type";
-  // }
-  // fs << "}, {" << ((void_return) ? "" : "output_type")
-  //    << "}, [&](auto args, auto results) {\n";
-  // this->incrementIndent();
-  // // generate a reference name of the output
-  // if (!void_return) fs << indent << "auto & $$out$$ = results[0];\n";
-  // fs << this->indent << "auto thread_id = thread_id_();\n";
-  // fs << this->indent << "auto block_id = block_id_();\n";
-  // alloc_pos = fs.str().size();
-  // alloc_indent = indent;
+  parallel_cuda *= by.bound;
+  if (parallel_level > 1) {
+    return true;
+  }
+  // emit 
+  // dim3 blockDim
+  // dim3 gridDim
+  // func_parallel<<<gridDim, blockDim>>>(arg0, arg1, arg2, ...) 
+  fs << this->indent << "dim3 blockDim(32, 32);\n";
+  // TODO(albert): resolve HC
+  // fs << this->indent << "dim3 blockDim(" << by.bound << ");\n";
+  // fs << this->indent << "dim3 blockDim(16, 16);\n";
+
+  // TODO(albert): HC, here uses 1536 magic number, which is the max threads in active
+  // for Ampere GA104 architecture, we should use a HW property to describe this occupacy
+  // consideration.
+  fs << this->indent << "dim3 gridDim(128, 128);\n";
+  // TODO(albert): CEIL_DIV(M, 128), CEIL_DIV(N, 128)
+  // fs << this->indent << "dim3 gridDim(256, 256);\n";
+  fs << this->indent << current_fn
+     << "_parallel" << "<<<gridDim, blockDim>>>(";
+  bool need_delimiter = false;
+  for (unsigned i = 0; i < cur_params->size(); ++i) {
+    if (need_delimiter) fs << ", ";
+    fs << (*cur_params)[i]->sym->name;
+    need_delimiter = true;
+  }
+  fs << ((void_return) ? "" : "$$out$$")
+     << ");\n";  // "$$out$$" : magic string for output, will be replaced later
+  this->decrementIndent();
+  fs << "} // end of choreo-cuda dataflow program\n";
+  this->decrementIndent();
+  fs << "\n";
+
+  // emit __global__ void func_parallel(arg0, arg1, arg2, ...) {
+  fs << this->indent << "__global__ void " << current_fn << "_parallel(";
+  need_delimiter = false;
+  for (unsigned i = 0; i < cur_params->size(); ++i) {
+    if (need_delimiter) fs << ", ";
+    fs << (*cur_params)[i]->sym->name;
+    need_delimiter = true;
+  }
+  fs << ") {\n";
+  this->incrementIndent();
+  // generate a reference name of the output
+  if (!void_return) fs << indent << "auto & $$out$$ = results[0];\n";
+  fs << this->indent << "auto block_x = blockIdx.x;\n";
+  fs << this->indent << "auto block_y = blockIdx.y;\n";
+  fs << this->indent << "auto block_z = blockIdx.z;\n";
+  fs << this->indent << "auto thread_x = threadIdx.x;\n";
+  fs << this->indent << "auto thread_y = threadIdx.y;\n";
+  fs << this->indent << "auto thread_z = threadIdx.z;\n";
+  alloc_pos = fs.str().size();
+  alloc_indent = indent;
 
   return true;
 }
@@ -441,22 +471,22 @@ bool CUDACodeGen::Visit(AST::WhereBind &n) {
 // CLEAN
 bool CUDACodeGen::Visit(AST::WithIn &n) {
   __TRACE_EACH_VISIT__(n)
-  // assert(n.with_matchers && "expect matcher to be exist.");
-  //
-  // // associate with to the matcher.
-  // if (n.with && n.with_matchers) {
-  //   std::vector<std::string> matchers;
-  //   for (auto mn : n.with_matchers->AllValues()) {
-  //     matchers.push_back(cast<AST::Identifier>(mn)->name);
-  //   }
-  //   cur_bounded_vars.emplace(n.with->name, matchers);
-  // }
-  //
-  // for (auto mn : n.with_matchers->AllValues()) {
-  //   auto mname = cast<AST::Identifier>(mn)->name;
-  //   fs << indent << "var_ " << mname << "(IntType(32));\n";
-  //   fs << indent << mname << " = 0;\n";
-  // }
+  assert(n.with_matchers && "expect matcher to be exist.");
+
+  // associate with to the matcher.
+  if (n.with && n.with_matchers) {
+    std::vector<std::string> matchers;
+    for (auto mn : n.with_matchers->AllValues()) {
+      matchers.push_back(cast<AST::Identifier>(mn)->name);
+    }
+    cur_bounded_vars.emplace(n.with->name, matchers);
+  }
+
+  for (auto mn : n.with_matchers->AllValues()) {
+    auto mname = cast<AST::Identifier>(mn)->name;
+    fs << indent << "var_ " << mname << "(IntType(32));\n";
+    fs << indent << mname << " = 0;\n";
+  }
   return true;
 };
 
@@ -777,58 +807,63 @@ bool CUDACodeGen::Visit(AST::Return &returnNode) {
 // CLEAN
 bool CUDACodeGen::Visit(AST::ForeachBlock &forNode) {
   __TRACE_EACH_VISIT__(forNode)
-  // auto itervars = forNode.getIterationVars();
-  // for (size_t idx = 0; idx != itervars->Count(); ++idx) {
-  //   // TODO(albert): support non-unit stride in loop
-  //   std::ostringstream _os;
-  //   auto id = cast<AST::Identifier>(itervars->ValueAt(idx));
-  //
-  //   // get the lower/upper and stride for spanned iter var
-  //   auto iv_type = this->GetSymbolType(id->name);
-  //   auto iv_bounds = cast<BoundedITupleType>(iv_type)->GetBounds();
-  //
-  //   // NOTES: foreach block ranges between [0, UB),
-  //   // it always use one integer indicating the UB
-  //   // we can certainly use idx=0 directly
-  //
-  //   // synthesise the emitting string
-  //   if (iv_type->Dims() == 1) {
-  //     fs << this->indent << "for_(" << id->name << ", "
-  //        << ReplaceDynDimName(STR(iv_bounds.ValueAt(0))) << ", "
-  //        << 1 /* TODO(albert): need fix, unit stride is hardcoded for now*/
-  //        << ", [&](auto iv_" << id->name << ") {\n";
-  //     incrementIndent();
-  //     loop_vars.back().insert(id->name);
-  //     for (auto bind : bind_info.GetBinds(InScopeName(id->name))) {
-  //       auto bname = SSTab().UnScopedName(bind);
-  //       loop_vars.back().insert(bname);
-  //       fs << indent << "auto iv_" << SSTab().UnScopedName(bind) << " = iv_"
-  //          << id->name << ";\n";
-  //     }
-  //   } else {
-  //     assert(cur_bounded_vars.count(id->name) &&
-  //            "can not find the bounded name.");
-  //     assert((cur_bounded_vars[id->name].size() == iv_bounds.Dims()) &&
-  //            "can not find the bounded name.");
-  //     size_t i = 0;
-  //     for (auto name : cur_bounded_vars[id->name]) {
-  //       fs << this->indent << "for_(" << name << ", "
-  //          << ReplaceDynDimName(STR(iv_bounds.ValueAt(i))) << ", "
-  //          << 1 /* TODO(albert): need fix, unit stride is hardcoded for now*/
-  //          << ", [&](auto iv_" << name << ") {\n";
-  //       std::string scoped_var = InScopeName(name);
-  //       loop_vars.back().insert(name);
-  //       incrementIndent();
-  //       for (auto bind : bind_info.GetBinds(InScopeName(name))) {
-  //         auto bname = SSTab().UnScopedName(bind);
-  //         loop_vars.back().insert(bname);
-  //         if (bname != name)
-  //           fs << indent << "auto iv_" << bname << " = iv_" << name << ";\n";
-  //       }
-  //       ++i;
-  //     }
-  //   }
-  // }
+  auto itervars = forNode.getIterationVars();
+  for (size_t idx = 0; idx != itervars->Count(); ++idx) {
+    // TODO(albert): support non-unit stride in loop
+    std::ostringstream _os;
+    auto id = cast<AST::Identifier>(itervars->ValueAt(idx));
+
+    // get the lower/upper and stride for spanned iter var
+    auto iv_type = this->GetSymbolType(id->name);
+    auto iv_bounds = cast<BoundedITupleType>(iv_type)->GetBounds();
+
+    // NOTES: foreach block ranges between [0, UB),
+    // it always use one integer indicating the UB
+    // we can certainly use idx=0 directly
+
+    // synthesise the emitting string
+    if (iv_type->Dims() == 1) {
+      // fs << this->indent << "for_(" << id->name << ", "
+      //    << ReplaceDynDimName(STR(iv_bounds.ValueAt(0))) << ", "
+      //    << 1 /* TODO(albert): need fix, unit stride is hardcoded for now*/
+      //    << ", [&](auto iv_" << id->name << ") {\n";
+      auto var_name = "iv_" + id->name;
+      fs << this->indent;
+      fs << "for (auto " << var_name << " = 0; ";
+      fs << var_name << " < " << ReplaceDynDimName(STR(iv_bounds.ValueAt(0))) << "; ";
+      fs << var_name << "++) {\n";
+      incrementIndent();
+      loop_vars.back().insert(id->name);
+      // for (auto bind : bind_info.GetBinds(InScopeName(id->name))) {
+      //   auto bname = SSTab().UnScopedName(bind);
+      //   loop_vars.back().insert(bname);
+      //   fs << indent << "auto iv_" << SSTab().UnScopedName(bind) << " = iv_"
+      //      << id->name << ";\n";
+      // }
+    } else {
+      assert(cur_bounded_vars.count(id->name) &&
+             "can not find the bounded name.");
+      assert((cur_bounded_vars[id->name].size() == iv_bounds.Dims()) &&
+             "can not find the bounded name.");
+      size_t i = 0;
+      for (auto name : cur_bounded_vars[id->name]) {
+        fs << this->indent << "for_(" << name << ", "
+           << ReplaceDynDimName(STR(iv_bounds.ValueAt(i))) << ", "
+           << 1 /* TODO(albert): need fix, unit stride is hardcoded for now*/
+           << ", [&](auto iv_" << name << ") {\n";
+        std::string scoped_var = InScopeName(name);
+        loop_vars.back().insert(name);
+        incrementIndent();
+        for (auto bind : bind_info.GetBinds(InScopeName(name))) {
+          auto bname = SSTab().UnScopedName(bind);
+          loop_vars.back().insert(bname);
+          if (bname != name)
+            fs << indent << "auto iv_" << bname << " = iv_" << name << ";\n";
+        }
+        ++i;
+      }
+    }
+  }
   return true;
 }
 
@@ -933,7 +968,14 @@ bool CUDACodeGen::Visit(AST::FunctionDecl &d) {
   return true;
 }
 
-bool CUDACodeGen::Visit(AST::ChoreoFunction &) { return true; }
+bool CUDACodeGen::Visit(AST::ChoreoFunction &node) { 
+  // entry_fn = node.name;
+  // current_fn = "__choreo_" + entry_fn + "_host";
+  // auto fty = cast<FunctionType>(node.GetType());
+  // auto &out_type = fty->out_ty;
+  // auto out_size = GetByteSizeExprOf(*out_type);
+  return true; 
+}
 
 bool CUDACodeGen::Visit(AST::CppSourceCode &n) {
   __TRACE_EACH_VISIT__(n)
