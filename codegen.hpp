@@ -3,6 +3,7 @@
 
 #include "valbind.hpp"
 #include "visitor.hpp"
+#include "stoesti.hpp"
 
 namespace Choreo {
 
@@ -65,11 +66,7 @@ struct FactorCodeGen : public CodeGenerator {
 
   bool dyn_shaped = false;
 
-  // pair(rtshape_check, sig2pos), see stoesti.hpp
-  std::pair<
-      std::vector<std::tuple<std::vector<std::string>, location, std::string>>,
-      std::map<std::string, std::string>>
-      rt_mem_usage_info;
+  std::vector<RtMemUsageCheckInfo> rt_mem_usage_check_list;
 
   bool trace_visit = false;  // for debugging purpose only
 
@@ -104,10 +101,8 @@ struct FactorCodeGen : public CodeGenerator {
   FactorCodeGen(std::ostream &os, const ptr<SymbolTable> &symtab)
       : CodeGenerator(os, symtab), trace_visit(std::getenv("TRACE_CODEGEN")) {}
   FactorCodeGen(std::ostream &os, const ptr<SymbolTable> &symtab,
-                const std::pair<std::vector<std::tuple<std::vector<std::string>,
-                                                       location, std::string>>,
-                                std::map<std::string, std::string>> &info)
-      : CodeGenerator(os, symtab), rt_mem_usage_info(info),
+                const std::vector<RtMemUsageCheckInfo> &list)
+      : CodeGenerator(os, symtab), rt_mem_usage_check_list(list),
         trace_visit(std::getenv("TRACE_CODEGEN")) {}
 
   void ResetBuffers() {

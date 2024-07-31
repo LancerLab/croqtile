@@ -1158,62 +1158,16 @@ void FactorCodeGen::EmitRuntimeMemUsageCheck(std::ostream &os, const Type &ty) {
          "internal error when dealing with the host parameter size.");
 
   // check if the input shape is as declared in choreo
-  if (fty.in_tys.size() == 0) return;
-
-  const auto &rtshape_check = rt_mem_usage_info.first;
-  const auto &sig2pos = rt_mem_usage_info.second;
-
-  // split input to vector using delimiter
-  auto SplitString = [](std::string input, const std::string &delimiter) {
-    std::vector<std::string> tokens;
-    size_t pos = 0;
-    while ((pos = input.find(delimiter)) != std::string::npos) {
-      std::string token = input.substr(0, pos);
-      // remove leading and trailing whitespace
-      token.erase(0, token.find_first_not_of(" \t"));
-      token.erase(token.find_last_not_of(" \t") + 1);
-      tokens.push_back(token);
-      input.erase(0, pos + 1);
-    }
-    std::string token = input;
-    token.erase(0, token.find_first_not_of(" \t"));
-    token.erase(token.find_last_not_of(" \t") + 1);
-    tokens.push_back(token);
-    return tokens;
-  };
-
-  // Joint ss to a string using sep
-  auto JointString = [](const std::vector<std::string> &ss,
-                        const std::string &sep) {
-    std::string result;
-    for (const auto &str : ss) {
-      if (!result.empty())
-        result += sep;
-      result += str;
-    }
-    return result;
-  };
+  if (fty.in_tys.size() == 0)
+    return;
 
   // there should be runtime memory usage check
-  if (!rtshape_check.empty())
+  if (!rt_mem_usage_check_list.empty())
     os << "\n  // Check if the runtime memory usage will exceed the limit\n";
 
-  // map from signature to host name of value
-  std::map<std::string, std::string> sig2name;
-  for (const auto &[sig, pos] : sig2pos) {
-    assert(pos.length() >= 3);
-    auto mid = pos.find("-");
-    assert(mid != std::string::npos);
-    auto param_idx = pos.substr(0, mid);
-    auto dyndim_idx = pos.substr(mid + 1);
-    auto name = host_params[std::stoi(param_idx)];
-    auto elem_name = name + ".shape()[" + dyndim_idx + "]";
-    sig2name.emplace(sig, elem_name);
-  }
-
-  for (const auto &[useds, loc, limit] : rtshape_check) {
+  for (const auto &[useds, loc, limit] : rt_mem_usage_check_list) {
     std::ostringstream used_ss;
-    used_ss << "  choreo::runtime_check((unsigned long long)";
+    used_ss << "  choreo::runtime_check((size_t)";
     for (auto &used : useds) {
       if (used.find(":") == std::string::npos) {
         // `used` is compile time memory usage
@@ -1221,11 +1175,11 @@ void FactorCodeGen::EmitRuntimeMemUsageCheck(std::ostream &os, const Type &ty) {
         continue;
       }
       // `used` is runtime memory usage
-      auto operands = SplitString(used, "*");
+      auto operands = SplitStringByDelimiter(used, "*");
       for (auto &o : operands) {
         if (o.find(":") != std::string::npos) {
           // `o` is dynamic dim. Should replace it with host name
-          for (auto &[sig, name] : sig2name) {
+          for (auto &[sig, name] : rts_nmap) {
             for (size_t p = o.find(sig); p != std::string::npos;
                  p = o.find(sig)) {
               o.replace(p, sig.size(), name);
@@ -1233,13 +1187,13 @@ void FactorCodeGen::EmitRuntimeMemUsageCheck(std::ostream &os, const Type &ty) {
           }
         }
       }
-      // add (unsigned long long) to avoid integer overflow
-      used_ss << (used_ss.str().back() == ')' ? "" : " + ")
-              << "(unsigned long long)" << JointString(operands, "*");
+      // add (size_t) to avoid integer overflow
+      used_ss << (used_ss.str().back() == ')' ? "" : " + ") << "(size_t)"
+              << DelimitedString(operands, "*");
     }
-    used_ss << " <= " << limit
-            << "ull, \"total memory usage(compile time and runtime) should not "
-               "exceed limit, happends at "
+    used_ss << " <= (size_t)" << limit
+            << ", \"total memory usage(compile time and runtime) "
+               "should not exceed limit, happends at "
             << loc << "\");\n";
     os << used_ss.str();
   }

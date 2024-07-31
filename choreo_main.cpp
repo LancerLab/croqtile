@@ -32,6 +32,7 @@ int main(int argc, char* argv[]) {
   Option<std::string> output("--output", "-o", "", true);
   Option<std::string> target("--target", "-t", "factor", true);
   Option<std::string> stop_after("--stop-after", "-sa", "", true);
+  Option<std::string> arch("--architecture", "-arch", "gcu300", true);
   Option<bool> debug_on("--debug", "-d", false, false);
   Option<bool> dump_ast("--dump-ast", "-e", false, false);
   Option<bool> print_vn("--print-valno", "-v", false, false);
@@ -40,7 +41,7 @@ int main(int argc, char* argv[]) {
   Option<bool> visualiz("--visualize", "-u", false, false);
   Option<bool> gen_none("--no-codegen", "-s", false, false);
   Option<bool> del_comm("--remove-comments", "-n", false, false);
-  Option<bool> sto_esti("--storage-esti", "-se", false, false);
+  Option<bool> mem_usag("--memory-usage-check", "-muc", false, false);
 
   // parse all the options
   OptionRegistry& r = OptionRegistry::GetInstance();
@@ -141,13 +142,14 @@ int main(int argc, char* argv[]) {
       if (gcu_checker.HasError()) return 1;
       if (stop_after.GetValue() == "gcucheck") return 0;
 
-      StoEstimate sto_estimater(sc.SymTab(), Target::Factor,
-                                sto_esti ? true : false);
-      root.accept(sto_estimater);
-      if (sto_estimater.HasError()) return 1;
-      if (stop_after.GetValue() == "stoesti") return 0;
+      assert(arch.GetValue().size() >= 3 && arch.GetValue().substr(0, 3) == "gcu");
+      MemUsageCheck mem_usage_checker(sc.SymTab(), Target::Factor, arch.GetValue(),
+                                mem_usag ? true : false);
+      root.accept(mem_usage_checker);
+      if (mem_usage_checker.HasError()) return 1;
+      if (stop_after.GetValue() == "mucheck") return 0;
 
-      FactorCodeGen codegen(std::cout, sc.SymTab(), sto_estimater.GetRtMemUsageInfo());
+      FactorCodeGen codegen(std::cout, sc.SymTab(), mem_usage_checker.GetRtMemUsageInfo());
       root.accept(codegen);
       break;
     }
