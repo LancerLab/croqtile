@@ -11,7 +11,7 @@
 #include "gcucheck.hpp"
 #include "options.hpp"
 #include "scanner.hpp"
-#include "stoesti.hpp"
+#include "MemUsageCheck.hpp"
 #include "symtab.hpp"
 #include "typecheck.hpp"
 #include "typeinfer.hpp"

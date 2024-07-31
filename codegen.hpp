@@ -3,7 +3,7 @@
 
 #include "valbind.hpp"
 #include "visitor.hpp"
-#include "stoesti.hpp"
+#include "MemUsageCheck.hpp"
 
 namespace Choreo {
 
