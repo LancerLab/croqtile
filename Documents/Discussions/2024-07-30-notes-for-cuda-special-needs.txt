@@ -1,0 +1,60 @@
+for a 4096x4096x4096 M,N,K matmul case, I found following needs for choreo:
+
+code:
+__co__ void sgemm(f32 [4096, 4096] lhs, f32 [4096, 4096] rhs, f32 [4096, 4096] output) { /// device program
+  parallel (p, q) by [128, 128] {  // p is sip_index
+    with index = {m_tile, n_tile, k_tile} in [32, 32, 1] {  // decl your tiled spans
+      shared f32[1, 1] l2_out; // alternative: f32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
+      foreach k_tile {
+        lhs_load = dma.copy lhs.chunkat(p*m_tile, k_tile) => shared; // tiling_factor: {6, 17, 4}, new_size {lhs(0)/6, lhs(1)/17, lhs(2)/4}
+        rhs_load = dma.copy rhs.chunkat(k_tile, q*n_tile) => shared; // no explicit decl the target buffer, but can refer by <FutureType>.data
+        call sgemm_kernel(lhs_load.data, rhs_load.data, l2_out); // |span| calculate the total size of span.
+        out_store = dma.copy l2_out => output.chunkat(p*m_tile, q*n_tile); // can use defined vars
+      }
+    }
+  } // can use python styling
+}
+
+1. multi vars support in parallel-by
+parallel (p, q) by [128, 128]
+to map to: 
+dim3 gridDim(128, 128);
+
+alter:
+  parallel p by 128 {  // p is sip_index
+    parallel q by 128 {
+
+2. expr support in chunkat
+for a typical operator case where one output element per thread
+we may use pattern: chunkat(a*b, ...)
+e.g.
+we use parallel-by to distribute workgroups: p => griddim
+we then use with-in and foreach to distribute workitems/threads: m_tile => blockdim
+then output indexing should be: output.chunkat(p*m_tile, ...)
+
+alternative 1:
+  parallel p by 128 {  // p is sip_index
+    parallel q by 128 {
+    // use p and q for m_tile and n_tile
+      with index = {m_tile_times_p, n_tile_times_q, k_tile} in [32*p, 32*q, 1] {  // decl your tiled spans
+        shared f32[1, 1] l2_out; // alternative: f32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
+        foreach k_tile {
+          lhs_load = dma.copy lhs.chunkat(m_tile_times_p, k_tile) => shared; // tiling_factor: {6, 17, 4}, new_size {lhs(0)/6, lhs(1)/17, lhs(2)/4}
+          rhs_load = dma.copy rhs.chunkat(k_tile, n_tile_times_q) => shared; // no explicit decl the target buffer, but can refer by <FutureType>.data
+          call sgemm_kernel(lhs_load.data, rhs_load.data, l2_out); // |span| calculate the total size of span.
+          out_store = dma.copy l2_out => output.chunkat(m_tile_times_p, n_tile_times_q); // can use defined vars
+        }
+      }
+    } // can use python styling
+  }
+
+
+3. do we need to config max scratch-pad memory
+  // L1 cache becomes useless, since we access GMEM only via SMEM, so we carve
+  // out all of L1 to SMEM. This doesn't currently make a difference, since
+  // occupancy is limited by reg and thread count, but it's good to do anyway.
+  cudaFuncSetAttribute(sgemm_shared_mem_block<32>,
+                       cudaFuncAttributePreferredSharedMemoryCarveout,
+                       cudaSharedmemCarveoutMaxShared);
+
+

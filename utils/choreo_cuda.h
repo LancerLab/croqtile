@@ -159,17 +159,10 @@ void runCublasFP32(cublasHandle_t handle, int M, int N, int K, float alpha,
                CUBLAS_GEMM_DEFAULT_TENSOR_OP);
 }
 
-void run_sgemm(int M, int N, int K, float alpha, float *A, float *B,
-                     float beta, float *C) {
-  dim3 gridDim(CEIL_DIV(M, 32), CEIL_DIV(N, 32));
-  dim3 blockDim(32, 32);
-  sgemm_naive<<<gridDim, blockDim>>>(M, N, K, alpha, A, B, beta, C);
-}
-
-void run_kernel(int kernel_id, int M, int N, int K, float alpha, float *A,
-                float *B, float beta, float *C, cublasHandle_t handle) {
+void run_kernel(int kernel_id, int M, int N, int K, float alpha, float beta, float *A,
+                float *B, float *C, cublasHandle_t handle) {
   if (kernel_id != 0)
-    run_sgemm(M, N, K, alpha, A, B, beta, C);
+    assert(false);
   else
     runCublasFP32(handle, M, N, K, alpha, A, B, beta, C);
 }
