@@ -47,18 +47,39 @@
   choreo_unreachable_impl(__FILE__, __LINE__ __VA_OPT__(, ) __VA_ARGS__)
 
 template <typename T>
-inline std::string DelimitedString(const std::vector<T>& v) {
+inline std::string DelimitedString(const std::vector<T> &v,
+                                   std::string delimiter = ", ") {
   std::ostringstream iss;
   if (v.size() > 0) {
     iss << v[0];
     for (size_t i = 1; i < v.size(); ++i) {
       if constexpr (std::is_same_v<T, std::string>)
-        iss << ", " << v[i];
+        iss << delimiter << v[i];
       else
-        iss << ", " << std::to_string(v[i]);
+        iss << delimiter << std::to_string(v[i]);
     }
   }
   return iss.str();
+}
+
+// split `input` to a vector
+inline std::vector<std::string>
+SplitStringByDelimiter(std::string input, std::string delimiter = ",") {
+  std::vector<std::string> tokens;
+  size_t pos = 0;
+  while ((pos = input.find(delimiter)) != std::string::npos) {
+    std::string token = input.substr(0, pos);
+    // remove leading and trailing whitespace
+    token.erase(0, token.find_first_not_of(" \t"));
+    token.erase(token.find_last_not_of(" \t") + 1);
+    tokens.push_back(token);
+    input.erase(0, pos + 1);
+  }
+  std::string token = input;
+  token.erase(0, token.find_first_not_of(" \t"));
+  token.erase(token.find_last_not_of(" \t") + 1);
+  tokens.push_back(token);
+  return tokens;
 }
 
 // Function to check if 'str' starts with 'prefix'
