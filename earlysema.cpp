@@ -871,7 +871,7 @@ bool EarlySemantics::Visit(AST::Select &n) {
   n.select_factor->accept(*this);
   // TODO(wsj) isa<IntegerType>(rty)?
   if (!isa<BoundedIntegerType>(NodeType(*n.select_factor))) {
-    Error(n.LOC(), "expecting `" + n.select_factor->TypeNameString() +
+    Error(n.LOC(), "expecting `" + PSTR(n.select_factor) +
                        "` be a bounded integer type.");
     error_count++;
   }
@@ -885,14 +885,14 @@ bool EarlySemantics::Visit(AST::Select &n) {
   for (auto &v : n.val_list->AllValues()) {
     // TODO: need shape checking at typecheck
     if (auto sty = dyn_cast<SpannedType>(NodeType(*v))) {
-      if (!sty->ApprxEqual(*NodeType(*v0))) {
-        Error(v->LOC(), "expecting `" + v->TypeNameString() +
-                           "` is the same type as `" + v0->TypeNameString() + "`.");
+      if (!sty->ApprxEqual(*v0ty)) {
+        Error(v->LOC(), "expecting `" + PSTR(v) +
+                           "` is the same type as `" + PSTR(v0) + "`.");
         error_count++;
       }
     } else {
       Error(v->LOC(),
-            "expecting `" + v->TypeNameString() + "` to be spanned type.");
+            "expecting `" + PSTR(v) + "` to be spanned type.");
       error_count++;
     }
   }
