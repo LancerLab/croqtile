@@ -176,4 +176,4 @@ bench-cuda: build-cuda-ref
 	
 profile-cuda: build-cuda-ref
 	@mkdir -p __profiling_tmp__
-	@ncu --set full --export __profiling_tmp__/$(CUDA_EXECUTABLE)_$(KERNEL) --force-overwrite ./$(CUDA_EXECUTABLE) $(KERNEL)
+	@ncu --set basic --export __profiling_tmp__/$(CUDA_EXECUTABLE)_$(KERNEL) --force-overwrite ./$(CUDA_EXECUTABLE) $(KERNEL)

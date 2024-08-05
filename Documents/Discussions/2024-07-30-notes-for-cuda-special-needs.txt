@@ -14,17 +14,23 @@ __co__ void sgemm(f32 [4096, 4096] lhs, f32 [4096, 4096] rhs, f32 [4096, 4096] o
     }
   } // can use python styling
 }
+// need support:
+//  with index = {m_tile} in [32] {  // decl your tiled spans
+//  with m_tile in [32] {  // decl your tiled spans
 
 1. multi vars support in parallel-by
-parallel (p, q) by [128, 128]
+parallel {p, q} by [128, 128]
 to map to: 
 dim3 gridDim(128, 128);
-
 alter:
   parallel p by 128 {  // p is sip_index
     parallel q by 128 {
+p => blockIdx.x
+p, q => blockIdx.x and y
+p, q, r => blockIdx.x and y and z
+conclusion: p, q, r => z, y, x for row-major convention
 
-2. expr support in chunkat
+2. expr support in chunkat and within
 for a typical operator case where one output element per thread
 we may use pattern: chunkat(a*b, ...)
 e.g.
@@ -57,4 +63,54 @@ alternative 1:
                        cudaFuncAttributePreferredSharedMemoryCarveout,
                        cudaSharedmemCarveoutMaxShared);
 
+
+4. mapping between tile-vars and indexing
+
+// current version
+  // block level view, easy
+  __shared__ float lhs_load_buffer[32 * 32];
+  __shared__ float rhs_load_buffer[32 * 32];
+  __shared__ float l2_out[32 * 32];
+  fill_zero_elementwise(l2_out);
+  __syncthreads();
+
+  for (auto k_tile = 0; k_tile < 128; k_tile++) {
+    // thread level view, need carefully treatment
+    lhs_load_buffer[tid_y*32 + tid_x] = lhs[tid_y*32+tid_x+32*p*4096+32*k_tile*4096];
+    rhs_load_buffer[tid_y*32 + tid_x] = rhs[tid_y*32+tid_x+32*k_tile*4096+32*q*4096];
+    ukernel_sgemm_32x32x32(lhs_load_buffer,rhs_load_buffer,l2_out);
+    __syncthreads();
+
+    output[tid_y*32+tid_x+32*p*4096+32*q*4096] = l2_out[tid_y*32 + tid_x];
+  } // end of choreo-foreach block.
+
+
+mem access from g to s, thread-level view
+need to attach tile vars to thread-level index
+async_load_(lhs_load, args[0], lhs_load_buffer, {Value(512)*iv_m_tile,Value(1024)*iv_k_tile});
+async_load_(rhs_load, args[1], rhs_load_buffer, {Value(1024)*iv_k_tile,Value(1024)*iv_n_tile});
+
+Diff 1: dimensional offset => flatten offset
+Diff 2: arrange threads, 
+   2.1 this sample uses x-always-lowest-policy, to ensure global mem access coalesced
+   2.2 this sample maps idx(x,y) in both load and store with same pattern, no swizzle used
+
+Pattern:
+  1. smem thread-level idx: sum(thread_idx * stride)
+  2. gmem block level to idx (block idx): sum(tile_idx * tile_size);
+  3. gmem idx to thread level: sum(tile_idx * tile_size * stride) + sum(thread_idx * stride);
+
+What makes impact on performance (for inner-product matmul scheme):
+  1. thread-level index, no control by choreo syntax, free to optimise in a space of config, try out sample shells under ROOT/samples/cuda/trials
+  2. tid_y*32 + tid_x determines if per load/store can use full coalesced resource, parallel (p, q)'s p (related to threadIdx.x) should not be too large
+
+
+other:
+tried destination passing style in .co code.
+
+
+TODO:
+  1. parallel p, q by
+  2. affine expr for chunkat
+  3. try out more op implementations, find a good mapping method between tile-vars and indexing
 
