@@ -127,11 +127,10 @@ private:
         for (auto it = inst_set.rbegin(); it != inst_set.rend(); it++)
           ct_mem_alloc_inst_set[sto].push(*it);
         Error(n.LOC(),
-              "In the scope " + SSTab().ScopeName() +
-                  ", compile time memory usage at " +
+              __internal__::GetStringFrom(sto) + " memory OUT OF BOUND!\n\t" +
+                  "In the scope " + SSTab().ScopeName() + ", compile-time " +
                   __internal__::GetStringFrom(sto) +
-                  " level is out of bound! \n\tUsed: " +
-                  std::to_string(ct_tot_mem_usage[sto]) +
+                  " memory:\n\tUsed: " + std::to_string(ct_tot_mem_usage[sto]) +
                   " bytes, Limit: " + std::to_string(mem_usage_limit[sto]) +
                   " bytes. With variables:" + oss.str());
         error_count++;
@@ -227,14 +226,15 @@ public:
         mem_usage_limit[Storage::GLOBAL] =
             (size_t)4 * 1024 * 1024 * 1024; // 4GB
       } else {
-        choreo_unreachable("unsupported gcu architecture " + arch + " in memory usage check.");
+        choreo_unreachable("unsupported gcu architecture " + arch +
+                           " in memory usage check.");
       }
 
     } else {
       choreo_unreachable("unsupported target in memory usage check.");
     }
     TRACE(os << "[MemUsage] "
-             << "Memory usage limit of architectur " << arch << " is:\n"
+             << "Memory usage limit of architecture " << arch << " is:\n"
              << GetMemUsageMapDetail(mem_usage_limit));
   }
   ~MemUsageCheck() {}

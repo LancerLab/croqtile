@@ -1,0 +1,70 @@
+// RUN: choreo -arch gcu210 %s 2>&1 | FileCheck %s
+
+__co__ auto mem_usage_check(s32 [128, 128, 128] i0, s32 [64, 256, 2] i1) {
+  s32 [i0.span] output; // OK
+
+  parallel p by 1 {
+    shared s8 [1024, 1024, 23] s0;                         // OK
+
+    with idx = {x, y, z} in [32, 16, 2] {
+      foreach x, y, z {
+        s1 = dma.copy.async i0.chunkat(x, y, z) => shared;  // OK
+        s2 = dma.copy.async i1.chunkat(x, y, z) => shared;  // OK
+        wait s1, s2;
+        parallel q by 1 {
+          local s8 [1024, 1008] l0; // OK
+        }
+        parallel q by 1 {
+          local s8 [1024, 1008] l0; // OK
+          local s8 [1] l1;          // local out of bound!
+        }
+      }
+    }
+
+    with idx = {x, y, z} in [32, 16, 2] {
+      foreach x, y, z {
+        s1 = dma.copy.async i0.chunkat(x, y, z) => shared;  // OK
+        s2 = dma.copy.async i1.chunkat(x, y, z) => shared;  // OK
+        wait s1, s2;
+        shared s8 [1024, 1024] s3;                          // shared out of bound! 
+        parallel q by 1 {
+          local s8 [1024, 1008] l0; // local OK, but shared level out of bound!
+        }
+      }
+    }
+  }
+
+  s8 [1024, 1024, 1024, 4] g0;      // out of bound!
+
+  return output;
+}
+
+// CHECK: error: local memory OUT OF BOUND!
+// CHECK: 	In the scope ::mem_usage_check::paraby_0::within_0::foreach_0::paraby_2::, compile-time local memory:
+// CHECK: 	Used: 1032193 bytes, Limit: 1032192 bytes. With variables:
+// CHECK: 		::mem_usage_check::paraby_0::within_0::foreach_0::paraby_2::l1
+// CHECK: 		::mem_usage_check::paraby_0::within_0::foreach_0::paraby_2::l0
+// CHECK: error: shared memory OUT OF BOUND!
+// CHECK: 	In the scope ::mem_usage_check::paraby_0::within_1::foreach_1::paraby_3::, compile-time shared memory:
+// CHECK: 	Used: 25174144 bytes, Limit: 25165824 bytes. With variables:
+// CHECK: 		::mem_usage_check::paraby_0::within_1::foreach_1::s3
+// CHECK: 		::mem_usage_check::paraby_0::within_1::foreach_1::s2
+// CHECK: 		::mem_usage_check::paraby_0::within_1::foreach_1::s1
+// CHECK: 		::mem_usage_check::paraby_0::within_0::foreach_0::s1
+// CHECK: 		::mem_usage_check::paraby_0::s0
+// CHECK: error: shared memory OUT OF BOUND!
+// CHECK: 	In the scope ::mem_usage_check::paraby_0::within_1::foreach_1::, compile-time shared memory:
+// CHECK: 	Used: 25174144 bytes, Limit: 25165824 bytes. With variables:
+// CHECK: 		::mem_usage_check::paraby_0::within_1::foreach_1::s3
+// CHECK: 		::mem_usage_check::paraby_0::within_1::foreach_1::s2
+// CHECK: 		::mem_usage_check::paraby_0::within_1::foreach_1::s1
+// CHECK: 		::mem_usage_check::paraby_0::within_0::foreach_0::s1
+// CHECK: 		::mem_usage_check::paraby_0::s0
+// CHECK: error: global memory OUT OF BOUND!
+// CHECK: 	In the scope ::mem_usage_check::, compile-time global memory:
+// CHECK: 	Used: 4311875584 bytes, Limit: 4294967296 bytes. With variables:
+// CHECK: 		::mem_usage_check::g0
+// CHECK: 		::mem_usage_check::output
+// CHECK: 		parameter of function mem_usage_check:  type: s32 [ 64 256 2 ], symbol: i1
+// CHECK: 		parameter of function mem_usage_check:  type: s32 [ 128 128 128 ], symbol: i0
+// CHECK: Totally 4 errors have been detected.

@@ -17,5 +17,5 @@ __co__ void sgemm(f32 [4096, 4096] lhs, f32 [4096, 4096] rhs, f32 [4096, 4096] o
   }
 }
 
-// CHECK: for (auto iv_k_tile = 0; iv_k_tile < 1; iv_k_tile++) {
+// CHECK: for (auto k_tile = 0; k_tile < 1; k_tile++) {
 // CHECK: } // end of choreo-foreach block.

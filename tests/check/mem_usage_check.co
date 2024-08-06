@@ -1,0 +1,62 @@
+// RUN: choreo -muc -sa mucheck -arch gcu210 %s 2>&1 | FileCheck %s
+
+__co__ auto mem_usage_check(s32 [128, 128, 128] i0, s32 [64, 256, 2] i1) {
+  s32 [i0.span] output;
+
+  parallel p by 1 {
+    with idx = {x, y, z} in [32, 16, 2] {
+      foreach x, y, z {
+        s0 = dma.copy.async i0.chunkat(x, y, z) => shared;
+        s1 = dma.copy.async i1.chunkat(x, y, z) => shared;
+        wait s0, s1;
+        parallel q by 1 {
+          local s8[1024, 1008] l;
+        }
+      }
+    }
+  }
+  return output;
+}
+
+// CHECK: [MemUsage] Memory usage limit of architecture gcu210 is:
+// CHECK: 	 local( 0%):		0x0000fc000 bytes(1008 KB)
+// CHECK: 	shared( 0%):		0x001800000 bytes(24 MB)
+// CHECK: 	global( 0%):		0x100000000 bytes(4 GB)
+// CHECK: [MemUsage] Function parameter `::mem_usage_check::i0`(global) need 8388608 bytes.
+// CHECK: [MemUsage] Function parameter `::mem_usage_check::i1`(global) need 131072 bytes.
+// CHECK: [MemUsage] Total compile-time mem used of parameters of function mem_usage_check:
+// CHECK: 	 local( 0%):		0x000000000 bytes(0 B)
+// CHECK: 	shared( 0%):		0x000000000 bytes(0 B)
+// CHECK: 	global( 0%):		0x000820000 bytes(8.125 MB)
+// CHECK: [MemUsage] global `::mem_usage_check::output` need 8388608 bytes(8 MB).
+// CHECK: [MemUsage] shared `::mem_usage_check::paraby_0::within_0::foreach_0::s0` need 8192 bytes(8 KB).
+// CHECK: [MemUsage] shared `::mem_usage_check::paraby_0::within_0::foreach_0::s1` need 128 bytes(128 B).
+// CHECK: [MemUsage] local `::mem_usage_check::paraby_0::within_0::foreach_0::paraby_1::l` need 1032192 bytes(1008 KB).
+// CHECK: [MemUsage] Total compile-time mem used before leaving scope ::mem_usage_check::paraby_0::within_0::foreach_0::paraby_1::
+// CHECK: 	 local(100%):		0x0000fc000 bytes(1008 KB)
+// CHECK: 	shared( 0%):		0x000002080 bytes(8.125 KB)
+// CHECK: 	global( 0%):		0x001020000 bytes(16.125 MB)
+// CHECK: [MemUsage] Total compile-time mem used before leaving scope ::mem_usage_check::paraby_0::within_0::foreach_0::
+// CHECK: 	 local( 0%):		0x000000000 bytes(0 B)
+// CHECK: 	shared( 0%):		0x000002080 bytes(8.125 KB)
+// CHECK: 	global( 0%):		0x001020000 bytes(16.125 MB)
+// CHECK: [MemUsage] Total compile-time mem used before leaving scope ::mem_usage_check::paraby_0::within_0::
+// CHECK: 	 local( 0%):		0x000000000 bytes(0 B)
+// CHECK: 	shared( 0%):		0x000000000 bytes(0 B)
+// CHECK: 	global( 0%):		0x001020000 bytes(16.125 MB)
+// CHECK: [MemUsage] Total compile-time mem used before leaving scope ::mem_usage_check::paraby_0::
+// CHECK: 	 local( 0%):		0x000000000 bytes(0 B)
+// CHECK: 	shared( 0%):		0x000000000 bytes(0 B)
+// CHECK: 	global( 0%):		0x001020000 bytes(16.125 MB)
+// CHECK: [MemUsage] Total compile-time mem used before leaving scope ::mem_usage_check::
+// CHECK: 	 local( 0%):		0x000000000 bytes(0 B)
+// CHECK: 	shared( 0%):		0x000000000 bytes(0 B)
+// CHECK: 	global( 0%):		0x001020000 bytes(16.125 MB)
+// CHECK: [MemUsage] Total compile-time mem used before leaving scope ::
+// CHECK: 	 local( 0%):		0x000000000 bytes(0 B)
+// CHECK: 	shared( 0%):		0x000000000 bytes(0 B)
+// CHECK: 	global( 0%):		0x000000000 bytes(0 B)
+// CHECK: [MemUsage] The maximum memory usages at compile time for each level(Not at the same time):
+// CHECK: 	 local( 0%):		0x0000fc000 bytes(1008 KB)
+// CHECK: 	shared( 0%):		0x000002080 bytes(8.125 KB)
+// CHECK: 	global( 0%):		0x001020000 bytes(16.125 MB)
