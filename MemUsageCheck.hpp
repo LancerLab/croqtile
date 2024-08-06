@@ -1,5 +1,5 @@
-#ifndef __CHOREO_STORAGE_ESTIMATE_INFO_HPP__
-#define __CHOREO_STORAGE_ESTIMATE_INFO_HPP__
+#ifndef __CHOREO_MEMORY_USAGE_CHECK_HPP__
+#define __CHOREO_MEMORY_USAGE_CHECK_HPP__
 
 #include "ast.hpp"
 #include "visitor.hpp"
@@ -181,7 +181,7 @@ private:
     // ct memory usage is always a single integer
     res.push_back(std::to_string(ct_tot_mem_usage[sto]));
     // rt memory usage may contain several expressions
-    for (const auto usage : rt_tot_mem_usage[sto])
+    for (const auto &usage : rt_tot_mem_usage[sto])
       res.push_back(usage);
     return res;
   }
@@ -474,4 +474,4 @@ public:
 
 } // end namespace Choreo
 
-#endif // __CHOREO_STORAGE_ESTIMATE_INFO_HPP__
+#endif // __CHOREO_MEMORY_USAGE_CHECK_HPP__

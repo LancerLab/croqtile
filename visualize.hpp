@@ -408,7 +408,7 @@ struct Visualizer : public VisitorWithSymTab {
     if (!ca.positions) {
       // use whole data as a single chunk
 
-      // dimension 1 is repeated parellel_count times
+      // dimension 1 is repeated parallel_count times
       std::vector<int> bounds(data_shape.Dims(), 1);
       bounds[p_dim] = parallel_count;
       std::set<int> parallel_bounds;
@@ -497,7 +497,7 @@ struct Visualizer : public VisitorWithSymTab {
     std::vector<int> positions{start_x, start_y, 0};
     start_x += sizes[0] * axis_scale[0] + label_distance + 100;
 
-    // the dimension representing parallelism is repeated parellel_count times
+    // the dimension representing parallelism is repeated parallel_count times
     std::vector<int> bounds(shape.Dims(), 1);
     bounds[p_dim] = parallel_count;
     std::set<int> parallel_bounds;

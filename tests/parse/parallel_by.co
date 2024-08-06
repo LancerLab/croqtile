@@ -10,4 +10,4 @@ __co__ int parallel_by(int a, int b) {
 // CHECK:  `- Parameters
 // CHECK:    `-  type: int, symbol: a
 // CHECK:    `-  type: int, symbol: b
-// CHECK:  `- Parellelization:  index symbol: p, bound [0, 6)
+// CHECK:  `- Parallelization:  index symbol: p, bound [0, 6)

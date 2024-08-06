@@ -766,7 +766,7 @@ struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
       : Node(l), biv(v), bound(b) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << "\n" << prefix << "`- Parellelization: ";
+    os << "\n" << prefix << "`- Parallelization: ";
     os << " index symbol: " << biv << ", bound [0, " << bound << ")";
     if (!stmts)
       os << std::endl;
