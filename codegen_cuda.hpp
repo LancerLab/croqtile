@@ -86,6 +86,40 @@ static inline std::string HostTypeString(const Choreo::Type &ty,
   return "";
 }
 
+static inline std::string cuda_fundamental_type_str(Choreo::FundamentalType t) {
+  switch (t) {
+    case FundamentalType::F32:
+      return "float";
+      break;
+    case FundamentalType::F16:
+      return "half";
+      break;
+    case FundamentalType::BF16:
+      return "__nv_bfloat16";
+      break;
+    case FundamentalType::U32:
+      return "uint32_t";
+      break;
+    case FundamentalType::S32:
+      return "int32_t";
+      break;
+    case FundamentalType::U16:
+      return "uint16_t";
+      break;
+    case FundamentalType::S16:
+      return "int16_t";
+      break;
+    case FundamentalType::U8:
+      return "uint8_t";
+      break;
+    case FundamentalType::S8:
+      return "int8_t";
+      break;
+    default:
+      choreo_unreachable("Type '" + STR(t) + "' is not supported.");
+  }
+}
+
 static inline std::string cuda_type_str(Choreo::BaseType t) {
   switch (t) {
     case BaseType::F32:
@@ -126,6 +160,21 @@ static inline std::string cuda_type_str(Choreo::BaseType t) {
       choreo_unreachable("Type '" + STR(t) + "' is not supported.");
   }
 }
+
+inline std::string cuda_type_stringify(const Type& ty) {
+  if (isa<VoidType>(&ty)) return "void";
+  if (isa<IntegerType>(&ty))
+    return "int";
+  else if (isa<BooleanType>(&ty))
+    return "bool";
+  else if (isa<BoundedIntegerType>(&ty))
+    return "int";
+  else if (auto t = dyn_cast<SpannedType>(&ty))
+    return cuda_fundamental_type_str(t->f_type);
+  choreo_unreachable(STR(ty) + " does not imply runtime storage.");
+  return 0;
+}
+
 
 void EmitCUDAValueList(const ValueList &vl, std::ostream &os) {
   auto print_variant = [&os](const ValueItem &vle) {

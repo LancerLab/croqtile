@@ -110,7 +110,13 @@ tried destination passing style in .co code.
 
 
 TODO:
-  1. parallel p, q by
-  2. affine expr for chunkat
-  3. try out more op implementations, find a good mapping method between tile-vars and indexing
+  0.5 refactor codegen module for better readability
+  1. multi-buffering impls
+  2. transpose example, and span_as feature
+  3. cuda op implementations, find a good mapping method between tile-vars and indexing
+    3.1 auto enable, coalecsing and swizzle in G-TO-S memcpy
+    3.1 support vector load/store
+    3.2 support outer-product 2dtile matmul implementation
+    3.3 async memcpy
+    3.4 vmm intrinsic support
 

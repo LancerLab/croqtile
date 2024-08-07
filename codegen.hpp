@@ -33,6 +33,7 @@ struct FactorCodeGen : public CodeGenerator {
   std::string bin_fn;  // temporal filename of factor binary
   int parallel_factor = 1;
 
+ // TODO merge with is_dest_passing_style
   bool void_return = false;
 
   ValBind::BindInfo<std::string> bind_info;
@@ -207,6 +208,8 @@ struct CUDACodeGen : public CodeGenerator {
   int parallel_cuda = 1;
 
   bool void_return = false;
+ // TODO merge with is_dest_passing_style
+  std::string return_string;
 
   ValBind::BindInfo<std::string> bind_info;
 
@@ -262,8 +265,12 @@ struct CUDACodeGen : public CodeGenerator {
 
   bool BeforeVisitImpl(AST::Node &) override;
   bool AfterVisitImpl(AST::Node &) override;
-  void OutputScript(FunctionType *, const std::string &, const std::string &,
-                    const std::string &, const Shape &);
+  void OutputScript(FunctionType *, 
+                    const std::string &, 
+                    bool,
+                    const std::string &,
+                    const std::string &, 
+                    const Shape &);
 
   bool Visit(AST::Assignment &) override;
   bool Visit(AST::Boolean &) override;
@@ -298,11 +305,16 @@ struct CUDACodeGen : public CodeGenerator {
   bool Visit(AST::WithBlock &) override;
 
   void EmitHostHead(std::ostream &);
-  void EmitHostFuncDecl(std::ostream &, const Type &, const std::string &,
+  void EmitHostFuncDecl(std::ostream &, 
+                        const Type &, const std::string &,
                         bool = false);
   void EmitRuntimeCheck(std::ostream &, const Type &);
-  void EmitHostFuncBody(std::ostream &, const Type &, const std::string &fname,
-                        const std::string &o_sz, const std::string &o_ty,
+  void EmitHostFuncBody(std::ostream &, 
+                        const Type &, 
+                        const std::string &fname,
+                        bool,
+                        const std::string &o_sz, 
+                        const std::string &o_ty,
                         const Shape &s);
   void EmitHostTail(std::ostream &);
   std::string GenHostParamName() { return "hp" + std::to_string(sp_count++); }
