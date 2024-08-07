@@ -1,0 +1,10 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ void i_parallel_by3() {
+  parallel {p} by [6, 128] {
+    int a = 100;
+  }
+}
+
+// CHECK: error: The number of arguments in parallel statements should be consistent.
+// CHECK-NOT: error:
