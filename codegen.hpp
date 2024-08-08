@@ -268,7 +268,6 @@ struct CUDACodeGen : public CodeGenerator {
   bool AfterVisitImpl(AST::Node &) override;
   void OutputScript(FunctionType *, 
                     const std::string &, 
-                    bool,
                     const std::string &,
                     const std::string &, 
                     const Shape &);
@@ -313,7 +312,6 @@ struct CUDACodeGen : public CodeGenerator {
   void EmitHostFuncBody(std::ostream &, 
                         const Type &, 
                         const std::string &fname,
-                        bool,
                         const std::string &o_sz, 
                         const std::string &o_ty,
                         const Shape &s);

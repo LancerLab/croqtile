@@ -166,10 +166,6 @@ fi
 if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then
 )";
     os << R"script(
-  NVCC=nvcc
-  CUDA_SYS_INCLUDES="-I/usr/local/cuda/include"
-  CUDA_CHOREO_INCLUDES="-I./demos/cuda/sgemm_ref/"
-  CUDA_INCLUDES="${CUDA_SYS_INCLUDES} ${CUDA_CHOREO_INCLUDES}"
   CUDA_CC="sm_35"
   CUDA_ARCH="compute_35"
 
@@ -251,12 +247,16 @@ if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then
   echo "CUDA_CC: ${CUDA_CC}"
 
 )script";
-    os << "  export cuda_INSTALL=" << STRINGIZE(__CHOREO_cuda_DIR__)
-       << "\n# JIT compile and execute\n";
+    os << "  export CUDA_INSTALL=" << STRINGIZE(__CHOREO_cuda_DIR__)
+       << "\n  # JIT compile and execute\n";
     if (dyn_shaped) os << "VIEW_CONFIG=1 ENABLE_DYNSHAPE=1 ";
-    // os << "${cuda_script} ${build_path} ./demos/cuda/test_dir/sgemm_main.cu ${target}\n";
-    os << "${cuda_script} ${build_path} ${host_src} ${target}\n";
-    // os << "diff ${host_src} ./demos/cuda/test_dir/sgemm_main.cu";
+    os << "  ${cuda_script} ${build_path} ${host_src} ${target}\n";
+    os << R"script(
+elif [ "$1" == "--profiling" ]; then
+	mkdir -p __profiling_tmp__
+	ncu --set basic --export __profiling_tmp__/${target} --force-overwrite ./${target}
+	ncu --import __profiling_tmp__/${target}.ncu-rep --page details
+    )script";
     os << R"script(
 elif [ "$1" == "--list-sources" ]; then
   tree ${build_path} -L 1
@@ -276,6 +276,7 @@ elif [ "$1" == "--show-choreo" ]; then
   ${EDITOR} ~/choreo/demo/elementwise_add.co
 else
     echo "    Usage: $0 | --execute           -> compile and execute choreo in cuda
+                    | --profiling         -> profiling and analyse choreo-gen'd CUDA code with Nsight Compute CLI tools.
                     | --statistics        -> show Line Of Code (LOC) statistic compare between kernel code boosted w./w.o. Choreo
                     | --list-sources      -> show the tree view of all sources
                     | --show-kernel       -> show the generated inner kernel code
@@ -299,11 +300,11 @@ fi
 
     if (auto sty = dyn_cast<SpannedType>(out_type)) {
       assert(sty != nullptr && "Size of the result type should be positive integer\n");
-      OutputScript(fty, fnode->name, false /* is-destination-passing-style for void func */, GetBaseTypeStringOf(*out_type), out_size,
+      OutputScript(fty, fnode->name, GetBaseTypeStringOf(*out_type), out_size,
                    sty->GetShape());
     } else if (auto sty = dyn_cast<SpannedType>(in_type)) {
       assert(sty != nullptr && "Size of the input type should be positive integer\n");
-      OutputScript(fty, fnode->name, true /* is-destination-passing-style = false if non-void func */, GetBaseTypeStringOf(*in_type), in_size,
+      OutputScript(fty, fnode->name, GetBaseTypeStringOf(*in_type), in_size,
                    sty->GetShape());
     } else {
       assert(false && "return value is ambiguous to infer");
@@ -1127,7 +1128,6 @@ void CUDACodeGen::EmitHostTail(std::ostream &os) {
 void CUDACodeGen::EmitHostFuncBody(std::ostream &os, 
                                    const Type &ty,
                                    const std::string &f_n,
-                                   bool is_dest_passing_style,
                                    const std::string &out_size,
                                    const std::string &out_type,
                                    const Shape &out_shape) {
@@ -1363,7 +1363,6 @@ void CUDACodeGen::EmitHostFuncDecl(std::ostream &os, const Type &ty,
 }
 
 void CUDACodeGen::OutputScript(FunctionType *fty, const std::string &n,
-                                 bool is_dest_passing_style,
                                  const std::string &out_type,
                                  const std::string &out_size,
                                  const Shape &out_shape) {
@@ -1390,7 +1389,7 @@ void CUDACodeGen::OutputScript(FunctionType *fty, const std::string &n,
     hs << user_code;
   }
   EmitHostFuncDecl(hs, *fty, n);
-  EmitHostFuncBody(hs, *fty, cuda_bfn, is_dest_passing_style, out_size, out_type, out_shape);
+  EmitHostFuncBody(hs, *fty, cuda_bfn, out_size, out_type, out_shape);
   EmitHostTail(hs);
   //
   // // backpatch the cuda bin filename
