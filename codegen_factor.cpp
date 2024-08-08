@@ -126,7 +126,7 @@ if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then
     gcu_arch=gcu300
     gcu_resource=1c12s
     gcu_target_string="scorpio_${gcu_resource}"
-    export TOP_VISIBLE_DEVICES=1
+    export TOPS_VISIBLE_DEVICES=1
   elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then
     gcu_arch=gcu210
     gcu_resource=2c24s
@@ -1284,7 +1284,7 @@ void FactorCodeGen::OutputScript(FunctionType *fty, const std::string &n,
 //     gcu_arch=gcu300
 //     gcu_resource=1c12s
 //     gcu_target_string="scorpio_${gcu_resource}"
-//     export TOP_VISIBLE_DEVICES=1
+//     export TOPS_VISIBLE_DEVICES=1
 //   elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then
 //     gcu_arch=gcu210
 //     gcu_resource=2c24s
