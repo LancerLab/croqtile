@@ -208,6 +208,7 @@ struct CUDACodeGen : public CodeGenerator {
   int parallel_cuda = 1;
 
   bool void_return = false;
+  bool host_enclosed = false;
  // TODO merge with is_dest_passing_style
   std::string return_string;
 

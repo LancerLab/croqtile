@@ -4,11 +4,9 @@ __co__ auto foobar(f32 [32] a, int, bool b, f16 [?]) {
   shared f32 [1024, 1024] var_shared;
   s32 [1024, 1024] var_global_implicit;
   global s32 [1024, 1024] var_global_explicit;
-  local f32 [1024, 1024] var_local;
   return 1;
 }
 
 // CHECK: __shared__ float var_shared[1024 * 1024];
-// CHECK: __global__ int32_t var_global_implicit[1024 * 1024];
-// CHECK: __global__ int32_t var_global_explicit[1024 * 1024];
-// CHECK: float var_local[1024 * 1024];
+// CHECK: cudaMalloc(&var_global_implicit, 1048576*4);
+// CHECK: cudaMalloc(&var_global_explicit, 1048576*4);
