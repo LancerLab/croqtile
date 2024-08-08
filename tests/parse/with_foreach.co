@@ -30,7 +30,7 @@ __co__ int with_foreach(int b, f32 [36, 27, 128] input) {
 // CHECK:    `-  type: f32 [ 36 27 128  ], symbol: input
 // CHECK:  `- Type Decl: ndims - [ 3 b ]
 // CHECK:  `- Var Decl (int): sum = 0
-// CHECK:  `- Parellelization: index symbol: p, bound [0, 6)
+// CHECK:  `- Parallelization: index symbol: p, bound [0, 6)
 // CHECK:   `- With Block:
 // CHECK:     (within constraints)
 // CHECK:     `- index in ndims

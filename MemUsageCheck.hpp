@@ -1,5 +1,5 @@
-#ifndef __CHOREO_STORAGE_ESTIMATE_INFO_HPP__
-#define __CHOREO_STORAGE_ESTIMATE_INFO_HPP__
+#ifndef __CHOREO_MEMORY_USAGE_CHECK_HPP__
+#define __CHOREO_MEMORY_USAGE_CHECK_HPP__
 
 #include "ast.hpp"
 #include "visitor.hpp"
@@ -69,29 +69,15 @@ private:
         isa<AST::ForeachBlock>(&n)) {
       UpdateCtMaxMemUsage();
       CheckCtMemUsage(n);
-      TRACE(os << "[MemUsage] "
-               << "Total mem used before leaving scope " << SSTab().ScopeName()
-               << "\n"
+      TRACE(os << "[MemUsage] " << "Total compile-time mem used before leaving scope "
+               << SSTab().ScopeName() << "\n"
                << GetMemUsageMapDetail(ct_tot_mem_usage));
-
-      // restore ct mem usage
-      for (const auto &[sto, mem_used_in_scop] : ct_mem_usage_list.top()) {
-        ct_tot_mem_usage[sto] -= mem_used_in_scop;
-        // if CheckCtMemUsage processed, ct_mem_usage_list may be empty
-        if (!ct_mem_alloc_inst_set[sto].empty())
-          ct_mem_alloc_inst_set[sto].pop();
-      }
-      ct_mem_usage_list.pop();
-
-      // restore rt mem usage
-      for (const auto &[sto, rt_mem_used_in_scop] : rt_mem_usage_list.top()) {
-        for (size_t i = rt_mem_used_in_scop.size(); i > 0; i--) {
-          rt_tot_mem_usage[sto].pop_back();
-        }
-        // no inst tracing when dealing with rt usage check yet
-      }
-      rt_mem_usage_list.pop();
+      RestoreMemUsage();
     }
+
+    // special handling for AS::FunctionDecl
+    if (isa<AST::ChoreoFunction>(&n))
+      RestoreMemUsage();
 
     // the program is exiting, show the maximum ct mem usage
     if (isa<AST::Program>(&n)) {
@@ -99,6 +85,7 @@ private:
                << "The maximum memory usages at compile time for each level"
                   "(Not at the same time):\n"
                << GetMemUsageMapDetail(ct_max_mem_usage));
+      assert(ct_mem_usage_list.empty() && rt_mem_usage_list.empty());
     }
     return true;
   }
@@ -108,22 +95,42 @@ private:
       os << n.TypeNameString() << sup << "\n";
   }
 
+  void RestoreMemUsage() {
+    // restore ct mem usage
+    for (const auto &[sto, mem_used_in_scop] : ct_mem_usage_list.top()) {
+      ct_tot_mem_usage[sto] -= mem_used_in_scop;
+      ct_mem_alloc_inst_set[sto].pop();
+    }
+    ct_mem_usage_list.pop();
+
+    // restore rt mem usage
+    for (const auto &[sto, rt_mem_used_in_scop] : rt_mem_usage_list.top()) {
+      for (size_t i = rt_mem_used_in_scop.size(); i > 0; i--)
+        rt_tot_mem_usage[sto].pop_back();
+      // no inst tracing when dealing with rt usage check yet
+    }
+    rt_mem_usage_list.pop();
+  }
+
   // Check whether the ct memory usage at each level exceeds limits
   void CheckCtMemUsage(AST::Node &n) {
     for (const auto &sto : valid_storage_type) {
       if (ct_tot_mem_usage[sto] > mem_usage_limit[sto]) {
         // get the variables which lead to out of bound
         std::ostringstream oss;
+        std::vector<std::string> inst_set;
         while (!ct_mem_alloc_inst_set[sto].empty()) {
-          oss << "\n\t\t" << ct_mem_alloc_inst_set[sto].top();
+          inst_set.push_back(ct_mem_alloc_inst_set[sto].top());
+          oss << "\n\t\t" << inst_set.back();
           ct_mem_alloc_inst_set[sto].pop();
         }
+        for (auto it = inst_set.rbegin(); it != inst_set.rend(); it++)
+          ct_mem_alloc_inst_set[sto].push(*it);
         Error(n.LOC(),
-              "In the scope " + SSTab().ScopeName() +
-                  ", compile time memory usage at " +
+              __internal__::GetStringFrom(sto) + " memory OUT OF BOUND!\n\t" +
+                  "In the scope " + SSTab().ScopeName() + ", compile-time " +
                   __internal__::GetStringFrom(sto) +
-                  " level is out of bound! \n\tUsed: " +
-                  std::to_string(ct_tot_mem_usage[sto]) +
+                  " memory:\n\tUsed: " + std::to_string(ct_tot_mem_usage[sto]) +
                   " bytes, Limit: " + std::to_string(mem_usage_limit[sto]) +
                   " bytes. With variables:" + oss.str());
         error_count++;
@@ -174,7 +181,7 @@ private:
     // ct memory usage is always a single integer
     res.push_back(std::to_string(ct_tot_mem_usage[sto]));
     // rt memory usage may contain several expressions
-    for (const auto usage : rt_tot_mem_usage[sto])
+    for (const auto &usage : rt_tot_mem_usage[sto])
       res.push_back(usage);
     return res;
   }
@@ -219,14 +226,15 @@ public:
         mem_usage_limit[Storage::GLOBAL] =
             (size_t)4 * 1024 * 1024 * 1024; // 4GB
       } else {
-        choreo_unreachable("unsupported gcu architecture " + arch + " in memory usage check.");
+        choreo_unreachable("unsupported gcu architecture " + arch +
+                           " in memory usage check.");
       }
 
     } else {
       choreo_unreachable("unsupported target in memory usage check.");
     }
     TRACE(os << "[MemUsage] "
-             << "Memory usage limit of architectur " << arch << " is:\n"
+             << "Memory usage limit of architecture " << arch << " is:\n"
              << GetMemUsageMapDetail(mem_usage_limit));
   }
   ~MemUsageCheck() {}
@@ -278,6 +286,7 @@ public:
       TRACE(os << "[MemUsage] " << __internal__::GetStringFrom(sto) << " `"
                << SSTab().ScopedName(n.name_str)
                << "` need : " << sty->ByteSizeExpression() << " bytes.\n");
+      rt_mem_usage_list.top()[sto].push_back(sty->ByteSizeExpression());
       rt_tot_mem_usage[sto].push_back(sty->ByteSizeExpression());
       rt_mem_usage_check_list.push_back(
           std::make_tuple(SumUpCtRtUsage(sto), n.LOC(), mem_usage_limit[sto]));
@@ -353,6 +362,7 @@ public:
         TRACE(os << "[MemUsage] " << __internal__::GetStringFrom(dst_sto)
                  << " `" << SSTab().ScopedName(d.future)
                  << "` need : " << sty->ByteSizeExpression() << " bytes.\n");
+        rt_mem_usage_list.top()[dst_sto].push_back(sty->ByteSizeExpression());
         rt_tot_mem_usage[dst_sto].push_back(sty->ByteSizeExpression());
         rt_mem_usage_check_list.push_back(std::make_tuple(
             SumUpCtRtUsage(dst_sto), d.LOC(), mem_usage_limit[dst_sto]));
@@ -396,35 +406,50 @@ public:
   }
   bool Visit(AST::FunctionDecl &n) {
     TraceEachVisit(n);
+    // special handling
+    // Because AST::FunctionDecl.accept doesn't call BeforeVisit)
+    ct_mem_usage_list.push(std::map<Storage, size_t>{});
+    rt_mem_usage_list.push(std::map<Storage, std::vector<std::string>>{});
+
     int param_idx = 0;
     Storage func_param_sto = Storage::GLOBAL;
     for (const auto &p : n.params->values) {
-      if (p->type->isSpanned()) {
+      if (auto sty = dyn_cast<SpannedType>(p->GetType())) {
         std::string name = "::" + n.name + "::";
         name +=
             (p->HasSymbol() ? p->sym->name : ("#" + std::to_string(param_idx)));
-        auto mds = cast<AST::MultiDimSpans>(p->type->getPartialType());
-        auto &shape = mds->GetTypeDetail();
-        auto size = mds->GetTypeDetail().GetSizeExpression();
-        if (shape.IsDynamic()) {
-          rt_tot_mem_usage[func_param_sto].push_back(size);
+        if (sty->RuntimeShaped()) {
+          rt_mem_usage_list.top()[func_param_sto].push_back(
+              sty->ByteSizeExpression());
+          rt_tot_mem_usage[func_param_sto].push_back(sty->ByteSizeExpression());
           rt_mem_usage_check_list.push_back(
               std::make_tuple(SumUpCtRtUsage(func_param_sto), p->LOC(),
                               mem_usage_limit[func_param_sto]));
+          TRACE(os << "[MemUsage] " << "Function parameter `" << name << "`("
+                   << __internal__::GetStringFrom(func_param_sto) << ") need "
+                   << sty->ByteSizeExpression() << " bytes.\n");
         } else {
-          ct_tot_mem_usage[func_param_sto] += std::stoi(size);
+          ct_mem_usage_list.top()[func_param_sto] += sty->ByteSize();
+          ct_tot_mem_usage[func_param_sto] += sty->ByteSize();
           std::ostringstream oss;
           p->Print(oss);
           ct_mem_alloc_inst_set[func_param_sto].push("parameter of function " +
                                                      n.name + ": " + oss.str());
+          TRACE(os << "[MemUsage] " << "Function parameter `" << name << "`("
+                   << __internal__::GetStringFrom(func_param_sto) << ") need "
+                   << sty->ByteSize() << " bytes.\n");
         }
-        TRACE(os << "[MemUsage] "
-                 << "Function parameter `" << name << "`("
-                 << __internal__::GetStringFrom(func_param_sto) << ") need "
-                 << size << " bytes.\n");
       }
       param_idx++;
     }
+    // special handling
+    // Because AST::FunctionDecl.accept doesn't call AfterVisit
+    UpdateCtMaxMemUsage();
+    CheckCtMemUsage(n);
+    TRACE(os << "[MemUsage] "
+             << "Total compile-time mem used of parameters of function "
+             << n.name << ":\n"
+             << GetMemUsageMapDetail(ct_tot_mem_usage));
     return true;
   }
   bool Visit(AST::ChoreoFunction &n) {
@@ -449,4 +474,4 @@ public:
 
 } // end namespace Choreo
 
-#endif // __CHOREO_STORAGE_ESTIMATE_INFO_HPP__
+#endif // __CHOREO_MEMORY_USAGE_CHECK_HPP__

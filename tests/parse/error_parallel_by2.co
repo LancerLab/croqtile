@@ -1,0 +1,8 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ void i_parallel_by2(int a, int b) {
+  parallel [p] by 6 { }
+}
+
+// CHECK: error: syntax error, unexpected [, expecting { or IDENTIFIER
+// CHECK-NOT: error:

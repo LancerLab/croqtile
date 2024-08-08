@@ -13,6 +13,8 @@
 #include "location.hh"
 #include "symtab.hpp"
 
+extern Choreo::SymbolTable symtab;
+
 namespace Choreo {
 struct Visitor;
 
@@ -21,6 +23,12 @@ namespace AST {
 // short hands
 template <typename T>
 using ptr = Choreo::ptr<T>;
+
+// Utility to generate shared_ptr<Node>
+template <typename T, typename... Args>
+ptr<T> Make(Args&&... args) {
+  return std::make_shared<T>(std::forward<Args>(args)...);
+}
 
 //------------------------- AST Node Fundamentals ----------------------------//
 
@@ -760,13 +768,52 @@ struct IfElse : public Node, public TypeIDProvider<IfElse> {
 struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
   std::string biv;
   int bound;
+  ptr<MultiValues> id_list;
+  ptr<MultiValues> iv_list;
   ptr<MultiNodes> stmts;
 
   ParallelBy(const location& l, const std::string v, int b)
       : Node(l), biv(v), bound(b) {}
 
+  ParallelBy(const location &l, const ptr<MultiValues> &id_l,
+             const ptr<MultiValues> &iv_l, const ptr<MultiNodes> &ss)
+      : Node(l), id_list(id_l), iv_list(iv_l), stmts(ss) {
+    auto id = id_l->ValueAt(0);
+    auto *identifier = dyn_cast<Identifier>(id);
+    assert(identifier != nullptr);
+    auto iv = iv_l->ValueAt(0);
+    auto *num = dyn_cast<IntLiteral>(iv);
+    assert(num != nullptr);
+    biv = identifier->name;
+    bound = num->value;
+    symtab.AddSymbol(biv, MakeBoundedIntegerType(bound));
+    if (id_l->Count() > 1) 
+      stmts = ConstructParallelByRecursively(stmts, 1, id_list, iv_list);
+  }
+
+  ptr<MultiNodes> ConstructParallelByRecursively(const ptr<MultiNodes> &ss,
+                                                 size_t idx,
+                                                 const ptr<MultiValues> &id_l,
+                                                 const ptr<MultiValues> &iv_l) {
+    auto id = id_l->ValueAt(idx);
+    auto *identifier = dyn_cast<Identifier>(id);
+    assert(identifier != nullptr);
+    auto iv = iv_l->ValueAt(idx);
+    auto *num = dyn_cast<IntLiteral>(iv);
+    assert(num != nullptr);
+    symtab.AddSymbol(identifier->name, MakeBoundedIntegerType(num->value));
+    auto pb = Make<ParallelBy>(id->loc, identifier->name, num->value);
+    if (idx == id_l->Count() - 1)
+      pb->stmts = ss;
+    else
+      pb->stmts = ConstructParallelByRecursively(ss, idx + 1, id_l, iv_l);
+    auto mn = Make<MultiNodes>(id->loc);
+    mn->Append(pb);
+    return mn;
+  }
+
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << "\n" << prefix << "`- Parellelization: ";
+    os << "\n" << prefix << "`- Parallelization: ";
     os << " index symbol: " << biv << ", bound [0, " << bound << ")";
     if (!stmts)
       os << std::endl;
@@ -1132,12 +1179,6 @@ struct Program : public Node, public TypeIDProvider<Program> {
 
   __UDT_TYPE_INFO__
 };
-
-// Utility to generate shared_ptr<Node>
-template <typename T, typename... Args>
-ptr<T> Make(Args&&... args) {
-  return std::make_shared<T>(std::forward<Args>(args)...);
-}
 
 }  // end of namespace AST
 

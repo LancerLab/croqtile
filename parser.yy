@@ -387,6 +387,16 @@ paraby_block
         $$ = AST::Make<AST::ParallelBy>(@1, $2, $4);
         $$->stmts = $7;
       }
+    | PARA LBRACE id_list RBRACE BY LBRAKT iv_list RBRAKT LBRACE statements RBRACE {
+        // symbols are added in ast.hpp
+        if ($3->Count() != $7->Count())
+          Parser::error(@3, "The number of arguments in parallel statements "
+                         "should be consistent.");
+        $$ = AST::Make<AST::ParallelBy>(@1, $3, $7, $10);
+        // workaround: init stmts like next line doesn't work.
+        // in ast.hpp, ->stmts is nullptr. Why?
+        // $$->stmts = $10;
+      }
     ;
 
 assignments
