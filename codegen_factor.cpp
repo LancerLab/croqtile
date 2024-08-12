@@ -733,7 +733,13 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
     // we can certainly use idx=0 directly
 
     // synthesise the emitting string
-    if (iv_type->Dims() == 1) {
+    /*
+    A: with index={m,n} in [1,2] { foreach m {} }
+    B: with index in [2] { foreach index {} }
+    if (iv_type->Dims() == 1 && !cur_bounded_vars.count(id->name)): A
+    if (iv_type->Dims() == 1 && cur_bounded_vars.count(id->name)):  B
+    */
+    if (iv_type->Dims() == 1 && !cur_bounded_vars.count(id->name)) {
       fs << this->indent << "for_(" << id->name << ", "
          << ReplaceDynDimName(STR(iv_bounds.ValueAt(0))) << ", "
          << 1 /* TODO(albert): need fix, unit stride is hardcoded for now*/

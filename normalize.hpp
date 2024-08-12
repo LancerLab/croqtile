@@ -198,7 +198,8 @@ struct Normalizer : public Visitor {
     auto wty = n.with->GetType();
     assert(isa<BoundedITupleType>(wty) && "expect a bounded ituple type.");
 
-    if (wty->Dims() == 1) return true;
+    // comment to support new feature
+    // if (wty->Dims() == 1) return true;
 
     auto mval = AST::Make<AST::MultiValues>(n.LOC(), ",");
     // fill the with-matchers
