@@ -705,11 +705,10 @@ class ShapeInference : public Visitor {
             "unable to apply shape inference for function '" + cur_fn + "'.");
       return false;
     }
-    bool gen_alias = (CountElementsInSignature(vn_sig) > 1);
-    ProcessValueNumberString(vn_sig, [this, &vn_sig, &n, gen_alias](
-                                         int valno, size_t index) {
+    
+    auto GenSignatureAndDoValno = [this, &vn_sig, &n](int valno, size_t index) {
       if (UnknownVN(valno)) return;  // do not associate it with vn of "?"
-      if (n.with && gen_alias) {
+      if (n.with) {
         std::string name = SSTab().ScopedName("@" + n.with->name) + "(" +
                            std::to_string(index) + ")";
         vn.AssociateSignatureWithValueNumber(name, valno);
@@ -718,12 +717,16 @@ class ShapeInference : public Visitor {
       if (n.with_matchers) {
         auto sym = cast<AST::Identifier>((*n.with_matchers)[index]);
         std::string name = SSTab().ScopedName("@" + sym->name);
-        if (gen_alias) vn.AssociateSignatureWithValueNumber(name, valno);
+        vn.AssociateSignatureWithValueNumber(name, valno);
         Shape s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(valno));
         sym->SetType(MakeBoundedITupleType(s));
         SSTab().DefineSymbol("@" + sym->name, MakeMDSpanType(s));
       }
-    });
+    };
+    if (CountElementsInSignature(vn_sig) == 1) // support `with idx={m} in [xx] {}`
+      GenSignatureAndDoValno(vn.GetValueNumberOfSignature(vn_sig), 0);
+    else
+      ProcessValueNumberString(vn_sig, GenSignatureAndDoValno);
 
     if (n.with) {
       vn.AssociateSignatureWithValueNumber(
@@ -855,8 +858,22 @@ class ShapeInference : public Visitor {
           error_count++;
           return false;
         }
-        assert(dim_ith.value()[0] == '#');
-        int dim_valno = std::stoi(dim_ith.value().substr(1));
+
+        // multiple || single
+        /*
+        single: sig of idx is const_128
+          with idx in [128] {
+            foreach idx { 
+              ... input.chunkat(idx) => ...
+            }
+          }
+        */
+        assert(dim_ith.value()[0] == '#' ||
+               (dim_ith.value().substr(0, 6) == "const_"));
+
+        int dim_valno = dim_ith.value()[0] == '#'
+                            ? std::stoi(dim_ith.value().substr(1))
+                            : vn.GetValueNumberOfSignature(dim_ith.value());
 
         if (CountElementsInSignature(bound_sn) <= 1) {
           // this is a simple bound

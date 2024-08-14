@@ -19,6 +19,16 @@ __co__ int with_foreach(int b, f32 [36, 27, 128] input) {
         call cfunction(f.data);
       }
     }
+    with idx in [6] {
+      with {m} in [3] {
+        foreach idx, m {
+          f = dma.copy.async input.chunkat(p, idx, m) => local;
+          sum = sum + index(0);
+          wait f;
+          call cfunction(f.data);
+        }
+      }
+    }
   }
 }
 
@@ -45,3 +55,21 @@ __co__ int with_foreach(int b, f32 [36, 27, 128] input) {
 // CHECK:      `- WAIT: f
 // CHECK:      `- Call: cfunction
 // CHECK:        `- with arguements: (dataof f)
+// CHECK:   `- With Block:
+// CHECK:     (within constraints)
+// CHECK:     `- idx in [ 6 ]
+// CHECK:     (with statements)
+// CHECK:     `- With Block:
+// CHECK:       (within constraints)
+// CHECK:       `-  = {m} in [ 3 ]
+// CHECK:       (with statements)
+// CHECK:       `- Foreach Block:
+// CHECK:        `- Iteration variables: idxm
+// CHECK:        `- DMA.copy.async
+// CHECK:          `- future: f
+// CHECK:          `- from: input.ChunkAt(p, idx, m)
+// CHECK:          `- to: local
+// CHECK:        `- Assign: sum =  (sum + index(0)) 
+// CHECK:        `- WAIT: f
+// CHECK:        `- Call: cfunction
+// CHECK:          `- with arguements:  (dataof f) 

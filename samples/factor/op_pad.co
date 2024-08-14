@@ -64,6 +64,6 @@ int main() {
 
   std::cout << "Test Passed\n" << std::endl;
 
-  return 1;
+  return 0;
 }
 
