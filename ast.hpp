@@ -1090,6 +1090,9 @@ struct Call : public Node, public TypeIDProvider<Call> {
 struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
   ptr<MultiValues> ivs;
   ptr<MultiNodes> stmts;
+  // for now, lb_offset >= 0, ub_offset <= 0
+  int lb_offset = 0;
+  int ub_offset = 0;
 
   explicit ForeachBlock(const location& l, const ptr<MultiValues>& i,
                         const ptr<MultiNodes>& s)
@@ -1097,10 +1100,24 @@ struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
     assert(i != nullptr && "missing iteration variables for the statement.");
   }
 
+  explicit ForeachBlock(const location& l, const ptr<Node>& i,
+                        const ptr<MultiNodes>& s, const int lb_o, const int ub_o)
+      : Node(l), stmts(s), lb_offset(lb_o), ub_offset(-1 * ub_o) {
+    assert(i != nullptr && "missing iteration variables for the statement.");
+    ivs = Make<MultiValues>(i->LOC());
+    ivs->Append(i);
+  }
+
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Foreach Block:";
     os << "\n" << prefix << " `- Iteration variables: ";
     ivs->Print(os);
+    if (ivs->Count() == 1) {
+      if (lb_offset != 0)
+        os << "\n" << prefix << "      (lower bound offset is " << lb_offset << ")";
+      if (ub_offset != 0)
+        os << "\n" << prefix << "      (upper bound offset is " << ub_offset << ")";
+    }
     if (stmts) {
       stmts->Print(os, prefix + " ");
     }

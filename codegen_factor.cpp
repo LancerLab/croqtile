@@ -740,8 +740,13 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
     if (iv_type->Dims() == 1 && cur_bounded_vars.count(id->name)):  B
     */
     if (iv_type->Dims() == 1 && !cur_bounded_vars.count(id->name)) {
-      fs << this->indent << "for_(" << id->name << ", "
-         << ReplaceDynDimName(STR(iv_bounds.ValueAt(0))) << ", "
+      fs << this->indent << "for_(" << id->name;
+      if (forNode.lb_offset)
+        fs << " + (" << forNode.lb_offset << ")";
+      fs << ", " << ReplaceDynDimName(STR(iv_bounds.ValueAt(0)));
+      if (forNode.ub_offset)
+        fs << " + (" << forNode.ub_offset << ")";
+      fs << ", "
          << 1 /* TODO(albert): need fix, unit stride is hardcoded for now*/
          << ", [&](auto iv_" << id->name << ") {\n";
       incrementIndent();

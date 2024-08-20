@@ -765,6 +765,18 @@ foreach_block
     : FOREACH iv_exprs LBRACE statements RBRACE {
         $$ = AST::Make<AST::ForeachBlock>(@1, $2, $4);
       }
+    | FOREACH iv_expr LPAREN COL RPAREN LBRACE statements RBRACE {
+        $$ = AST::Make<AST::ForeachBlock>(@1, $2, $7, 0, 0);
+      }
+    | FOREACH iv_expr LPAREN COL MINUS NUM RPAREN LBRACE statements RBRACE {
+        $$ = AST::Make<AST::ForeachBlock>(@1, $2, $9, 0, $6);
+      }
+    | FOREACH iv_expr LPAREN NUM COL RPAREN LBRACE statements RBRACE {
+        $$ = AST::Make<AST::ForeachBlock>(@1, $2, $8, $4, 0);
+      }
+    | FOREACH iv_expr LPAREN NUM COL MINUS NUM RPAREN LBRACE statements RBRACE {
+        $$ = AST::Make<AST::ForeachBlock>(@1, $2, $10, $4, $7);
+      }
     ;
 
 iv_exprs

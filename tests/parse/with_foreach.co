@@ -29,6 +29,13 @@ __co__ int with_foreach(int b, f32 [36, 27, 128] input) {
         }
       }
     }
+
+    with {m} in [3] {
+      foreach m(1:-1) {}
+      foreach m(2:) {}
+      foreach m(:-2) {}
+      foreach m(:) {}
+    }
   }
 }
 
@@ -73,3 +80,19 @@ __co__ int with_foreach(int b, f32 [36, 27, 128] input) {
 // CHECK:        `- WAIT: f
 // CHECK:        `- Call: cfunction
 // CHECK:          `- with arguements:  (dataof f) 
+// CHECK:   `- With Block:
+// CHECK:     (within constraints)
+// CHECK:     `-  = {m} in [ 3 ]
+// CHECK:     (with statements)
+// CHECK:     `- Foreach Block:
+// CHECK:      `- Iteration variables: m
+// CHECK:           (lower bound offset is 1)
+// CHECK:           (upper bound offset is -1)
+// CHECK:     `- Foreach Block:
+// CHECK:      `- Iteration variables: m
+// CHECK:           (lower bound offset is 2)
+// CHECK:     `- Foreach Block:
+// CHECK:      `- Iteration variables: m
+// CHECK:           (upper bound offset is -2)
+// CHECK:     `- Foreach Block:
+// CHECK:      `- Iteration variables: m
