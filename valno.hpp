@@ -433,10 +433,18 @@ class ShapeInference : public Visitor {
     }
 
     Storage s = Storage::NONE;
+    if (auto sel = dyn_cast<AST::Select>(n.init_expr)) {
+      auto sty = dyn_cast<SpannedType>(sel->GetType());
+      assert(sty);
+      assert(!n.mem);
+      s = sty->GetStorage();
+    }
+    
     if (n.mem) s = n.mem->st;
 
-    if (n.init_expr) {
+    if (n.init_expr && !isa<AST::Select>(n.init_expr)) {
       // ituple, int, bool: get the value number from the init_expr
+      // init_expr of select need using cur_mdspan_cn
       assert(ValidVN(cur_vn) && "expected a valid current value number.");
       vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(n.name_str),
                                            cur_vn);
@@ -740,6 +748,12 @@ class ShapeInference : public Visitor {
         Shape s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(valno));
         sym->SetType(MakeBoundedITupleType(s));
         SSTab().DefineSymbol("@" + sym->name, MakeMDSpanType(s));
+
+        // because we use bounded integer var as identifier
+        name = SSTab().ScopedName(sym->name);
+        SSTab().DefineSymbol(sym->name, sym->GetType());
+        // vn.GetOrInsertValueNumberFromSignature(name);
+        // TODO(wsj): deal with expression contains bounded integers
       }
     };
     if (CountElementsInSignature(vn_sig) == 1) // support `with idx={m} in [xx] {}`
@@ -948,6 +962,10 @@ class ShapeInference : public Visitor {
     __TRACE_EACH_VISIT__;
 
     if (cannot_proceed) return true;
+
+    cur_vn = vn.GenerateValueNumberForNode(n);
+    assert(isa<SpannedType>(n.GetType()));
+    cur_mdspan_vn = cur_vn;
 
     return true;
   };

@@ -154,7 +154,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::Node>> foreach_block general_val simple_int span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt index_or_value iv_expr if_else_block optional_scalar_init param_mdspan_val chunkat_or_storage_or_select
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause else_block named_spanned_decls
-%nterm <AST::ptr<AST::MultiValues>> index_value_list value_list param_mdspan_list iv_exprs iv_list id_list with_matchers passables span_val_list
+%nterm <AST::ptr<AST::MultiValues>> index_value_list value_list param_mdspan_list iv_exprs iv_list id_list with_matchers passables span_expr_list
 %nterm <AST::ptr<AST::Expr>> s_expr span_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
@@ -519,18 +519,6 @@ span_val
     | IDENTIFIER FNSPAN { $$ = AST::Make<AST::Identifier>(@1, $1 + $2); }
     ;
 
-span_val_list
-    : span_val_list COMMA span_val {
-        $1->Append($3);
-        $$ = $1;
-      }
-    | span_val {
-        $$ = AST::Make<AST::MultiValues>(@1);
-        $$->SetDelimiter(", ");
-        $$->Append($1);
-      }
-    ;
-
 named_mdspan_decl
     : MDSPAN IDENTIFIER COL s_expr {
         symtab.AddSymbol($2, MakeUninitMDSpanType());
@@ -622,6 +610,17 @@ assignment
               $1, AST::Make<AST::Expr>(@1, "+", $4, AST::Make<AST::Identifier>(@1, $1)));
         }
       }
+    | IDENTIFIER ASSIGN select_expr {
+        if (!symtab.Exists($1)) {
+          // since the symbol is not defined, it is a declaration without type annotation
+          symtab.AddSymbol($1, MakeUnknownType());
+          $$ = AST::Make<AST::NamedVariableDecl>(@1,
+                $1, AST::Make<AST::DataType>(@1, BaseType::UNKNOWN), nullptr, $3);
+          break;
+        } else {
+          $$ = AST::Make<AST::Assignment>(@2, $1, $3);
+        }
+      }
     ;
 
 s_expr
@@ -682,6 +681,18 @@ span_expr
     | span_expr SLASH direct_ituple_val { $$ = AST::Make<AST::Expr>(@1, "/", $1, $3); }
     | span_expr PECET direct_ituple_val { $$ = AST::Make<AST::Expr>(@1, "%", $1, $3); }
     | span_val { $$ = AST::Make<AST::Expr>(@1, $1); }
+    ;
+
+span_expr_list
+    : span_expr_list COMMA span_expr {
+        $1->Append($3);
+        $$ = $1;
+      }
+    | span_expr {
+        $$ = AST::Make<AST::MultiValues>(@1);
+        $$->SetDelimiter(", ");
+        $$->Append($1);
+      }
     ;
 
 if_else_block
@@ -858,7 +869,7 @@ chunkat_expr
     ;
 
 select_expr
-    : SELECT LPAREN s_expr COMMA span_val_list RPAREN {
+    : SELECT LPAREN s_expr COMMA span_expr_list RPAREN {
         $$ = AST::Make<AST::Select>(@1, $3, $5);
       }
 

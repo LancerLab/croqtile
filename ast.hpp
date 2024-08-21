@@ -935,18 +935,20 @@ struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
 
 struct Select : public Node, public TypeIDProvider<Select> {
   std::string future;
-  Storage st = Storage::DEFAULT;
   ptr<Expr> select_factor = nullptr;
   int bound;
-  ptr<MultiValues> val_list = nullptr;
+  ptr<MultiValues> span_expr_list = nullptr;
+  bool inDMA = false;
 
-  Select(const location& l, const ptr<Expr>& sf, const ptr<MultiValues>& val_list = nullptr)
-      : Node(l), select_factor(sf), val_list(val_list) {
-        // TODO(albert): we need mem level for Select
-      }
-      
+  Select(const location& l, const ptr<Expr>& sf,
+         const ptr<MultiValues>& list = nullptr)
+      : Node(l), select_factor(sf), span_expr_list(list) {}
+
+  // TODO(wsj)
+  // x = select(IntLiteral, a, b, c)
+
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << "select(" << STR(select_factor) << ", " << STR(val_list) << ")";
+    os << "select(" << STR(select_factor) << ", " << STR(span_expr_list) << ")";
     (void)prefix;
   }
 
@@ -984,6 +986,7 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
           chain_to = "";
           chain_from = "";
           if (auto tptr = dyn_cast<AST::Select>(t)) {
+            tptr->inDMA = true;
             tptr->future = future + "_buffer";
           }
         }
@@ -1002,6 +1005,7 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
           chained = true;
           chain_from = chained_from;
           if (auto tptr = dyn_cast<AST::Select>(t)) {
+            tptr->inDMA = true;
             tptr->future = future + "_buffer";
           }
         }

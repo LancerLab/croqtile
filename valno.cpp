@@ -579,6 +579,10 @@ std::string ValueNumbering::GenerateNodeSignature(AST::Node& node,
     return signature;
   } else if (auto* n = dyn_cast<AST::IntIndex>(&node)) {
     return "index_" + GenerateNodeSignature(*n->value);
+  } else if (auto* s = dyn_cast<AST::Select>(&node)) {
+    // only care about span
+    auto vn = GetValueNumberForNode(*s->span_expr_list->ValueAt(0));
+    return GetSignatureFromValueNumber(vn);
   }
 
   if (trace)
@@ -602,12 +606,22 @@ int ValueNumbering::GetValueNumberForNode(AST::Node& n) {
   // if it is an visited/numbered node
   if (nodeValueNumbers.back().count(&n)) return (nodeValueNumbers.back())[&n];
 
+  // workaround
+  // TODO(wsj) reference with bounded var and spanned var
   if (auto id = dyn_cast<AST::Identifier>(&n)) {
     // Must consider about the scope of any identifier reference
-    if (auto name = visitor->SSTab().NameInScopeOrNull(id->name))
-      return GetValueNumberOfSignature(*name);
+    auto name = id->name;
+    auto pty = visitor->SSTab().LookupSymbol(name);
+    if (isa<SpannedType>(pty) || isa<FutureType>(pty)) {
+      name += ".span";
+    } else if (isa<BoundedITupleType>(pty)) {
+      name = "@" + name;
+    }
+    if (auto name_in_scope = visitor->SSTab().NameInScopeOrNull(name))
+      return GetValueNumberOfSignature(*name_in_scope);
     else
-      choreo_unreachable("symbol `" + id->name + "' is not valued.");
+      choreo_unreachable("symbol `" + id->name + "` with name: " + name +
+                         " is not valued.");
   }
 
   std::string signature = GenerateNodeSignature(n);
