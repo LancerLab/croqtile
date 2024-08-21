@@ -188,6 +188,8 @@ class ShapeInference : public Visitor {
   // when values are consumed instead of generated
   bool gen_multi_values = true;
 
+  bool allow_named_dim = false;  // named dimension (mdspan param only)
+
  private:
   std::ostream& os;
   // for debugging purpose only
@@ -249,6 +251,8 @@ class ShapeInference : public Visitor {
       }
     } else if (isa<AST::Wait>(&n) || isa<AST::Call>(&n)) {
       gen_multi_values = false;
+    } else if (isa<AST::Parameter>(&n)) {
+      allow_named_dim = true;
     }
     return true;
   }
@@ -262,6 +266,8 @@ class ShapeInference : public Visitor {
       vn.ResetListReference();
     } else if (isa<AST::Wait>(&n) || isa<AST::Call>(&n)) {
       gen_multi_values = true;
+    } else if (isa<AST::Parameter>(&n)) {
+      allow_named_dim = false;
     }
     return true;
   }
@@ -517,6 +523,8 @@ class ShapeInference : public Visitor {
   bool Visit(AST::DataType& n) {
     __TRACE_EACH_VISIT__;
 
+    allow_named_dim = false;
+
     if (cannot_proceed) return true;
 
     if (ValidVN(cur_mdspan_vn)) {
@@ -546,13 +554,24 @@ class ShapeInference : public Visitor {
              "value number has not been generated.");
       cur_vn = vn.GetValueNumberOfSignature(SSTab().InScopeName(name));
     } else {
+      if (allow_named_dim) { // for named dims in parameters
+        if (!SSTab().DeclaredInScope(n.name)) {
+          SSTab().DefineSymbol(n.name, MakeIntegerType());
+          cur_vn = vn.GenerateValueNumberFromSignature(SSTab().InScopeName(n.name));
+        } else {
+          cur_vn = vn.GetValueNumberOfSignature(SSTab().InScopeName(n.name));
+        }
+        return true;
+      }
+
       if (vn.HasValueNumberForNode(n)) {
         Error(n.LOC(), "value number has been generated for `" + n.name + "'.");
         error_count++;
         return false;
       }
-      // sometime we need the value a symbol (symbolic value)
+      // sometime we need value a symbol (symbolic value)
       cur_vn = vn.GenerateValueNumberForNode(n);
+
     }
 
     return true;

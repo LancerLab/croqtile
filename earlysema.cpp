@@ -31,6 +31,7 @@ bool EarlySemantics::BeforeVisit(AST::Node& n) {
 
   if (isa<AST::Parameter>(&n)) {
     in_decl = true;
+    allow_named_dim = true;  // tolerate repeated symbols inside mdspan params
   }
 
   return true;
@@ -69,6 +70,7 @@ bool EarlySemantics::AfterVisit(AST::Node& n) {
 
   if (isa<AST::Parameter>(&n)) {
     in_decl = false;
+    allow_named_dim = false;
   }
   return true;
 }
@@ -560,8 +562,10 @@ bool EarlySemantics::Visit(AST::IntIndex& n) {
 
 bool EarlySemantics::Visit(AST::DataType& n) {
   __TRACE_EACH_VISIT__(n)
-  // sema type has been generated at construction ast. refine with dims
 
+  allow_named_dim = false;  // no duplicated symbol is allowed except for mdspan
+
+  // sema type has been generated at construction ast. refine with dims
   if (isa<SpannedType>(n.GetType())) {
     if (auto sty = dyn_cast<MDSpanType>(n.mdspan_type->GetType())) {
       SetNodeType(n, MakeRankedSpannedType(sty->Dims(), n.base_type));
@@ -573,9 +577,13 @@ bool EarlySemantics::Visit(AST::DataType& n) {
 
 bool EarlySemantics::Visit(AST::Identifier& n) {
   __TRACE_EACH_VISIT__(n)
-  if (in_decl)
-    ReportErrorWhenViolateODR(n.LOC(), n.name, __FILE__, __LINE__);
-  else
+  if (in_decl) {
+    if (allow_named_dim) {
+      if (!SSTab().DeclaredInScope(n.name))
+        SSTab().DefineSymbol(n.name, MakeIntegerType()); // named dim is integer
+    } else
+      ReportErrorWhenViolateODR(n.LOC(), n.name, __FILE__, __LINE__);
+  } else
     ReportErrorWhenUseBeforeDefine(n.LOC(), n.name);
   return true;
 }

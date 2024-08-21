@@ -260,6 +260,11 @@ param_mdspan_list
 param_mdspan_val
     : NUM   { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
     | QES   { $$ = AST::Make<AST::IntLiteral>(@1); }
+    | IDENTIFIER {
+        $$ = AST::Make<AST::Identifier>(@1, $1);
+        if (!symtab.Exists($1)) // allows same dim name
+          symtab.AddSymbol($1, MakeIntegerType());
+      }
     ;
 
 void_type
@@ -569,7 +574,7 @@ sugarless_unnamed_ituple_decl
 direct_ituple_val
     : sugarless_unnamed_ituple_decl { $$ = $1; }
     | IDENTIFIER {
-        $$ = AST::Make<AST::Identifier>(@1, $1);
+        $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1));
       }
     ;
 
@@ -630,7 +635,7 @@ s_expr
     | s_expr AND s_expr { $$ = AST::Make<AST::Expr>(@1, "&&", $1, $3); }
     | NOT s_expr { $$ = AST::Make<AST::Expr>(@1, "!", $2); }
     | LPAREN s_expr RPAREN {
-        // Does String "(0)" represent an indexing operation or an arithmetic operation 
+        // Does String "(0)" represent an indexing operation or an arithmetic operation
         if (!parsing_prefixed_list) {
           $$ = $2;
           break;

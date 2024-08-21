@@ -55,3 +55,12 @@ __co__ auto none() { }
 // CHECK:  `- Name: none
 // CHECK:  `- Return type: unknown
 // CHECK:  `- Parameters
+
+__co__ auto matmul(f32 [M, N] a, f32 [N, K] b) { }
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: matmul
+// CHECK:  `- Return type: unknown
+// CHECK:  `- Parameters
+// CHECK:   `-  type: f32 [ M N  ], symbol: a
+// CHECK:   `-  type: f32 [ N K  ], symbol: b

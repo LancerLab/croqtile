@@ -28,6 +28,8 @@ bool TypeInference::BeforeVisit(AST::Node &n) {
   } else if (isa<AST::DMA>(&n)) {
     dma_fmty = BaseType::UNKNOWN;
     dma_mem = Storage::NONE;
+  } else if (isa<AST::Parameter>(&n)) {
+    allow_named_dim = true;
   }
   return true;
 }
@@ -57,6 +59,8 @@ bool TypeInference::AfterVisit(AST::Node &n) {
   } else if (isa<AST::DMA>(&n)) {
     dma_fmty = BaseType::UNKNOWN;
     dma_mem = Storage::NONE;
+  } else if (isa<AST::Parameter>(&n)) {
+    allow_named_dim = false;
   }
   return true;
 }
@@ -180,6 +184,9 @@ bool TypeInference::Visit(AST::Boolean &n) {
 
 bool TypeInference::Visit(AST::DataType &n) {
   __TRACE_EACH_VISIT__(n)
+
+  allow_named_dim = false;
+
   if (n.getBaseType() == BaseType::UNKNOWN)
     return true;  // ignore the annotation that needs inference
 
@@ -202,6 +209,11 @@ bool TypeInference::Visit(AST::DataType &n) {
 
 bool TypeInference::Visit(AST::Identifier &n) {
   __TRACE_EACH_VISIT__(n)
+
+  // for named dims in parameters
+  if (allow_named_dim && !SSTab().DeclaredInScope(n.name))
+    SSTab().DefineSymbol(n.name, MakeIntegerType());
+
   return true;
 }
 
@@ -442,7 +454,7 @@ bool TypeInference::Visit(AST::Expr &n) {
         return true;
       }
       if (!((n.op == "/") || (n.op == "%") || (n.op == "cdiv"))) {
-        Error(n.LOC(), "The operands of the expression cannot undergo '" +
+        Error(n.LOC(), "The operands of the div/mod expression cannot undergo '" +
                            n.op + "' operation.");
         error_count++;
         return false;

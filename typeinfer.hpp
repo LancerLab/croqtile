@@ -22,6 +22,7 @@ struct TypeInference : public Visitor {
   std::string cur_func_name;  // current function name
   BaseType dma_fmty = BaseType::UNKNOWN;
   Storage dma_mem = Storage::NONE;
+  bool allow_named_dim = false;  // named dimensions (mdspan param only)
 
   bool BeforeVisit(AST::Node &) override;
   bool AfterVisit(AST::Node &) override;
