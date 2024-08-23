@@ -148,13 +148,14 @@ void choreo_info(const char *message) {
 %nterm <std::string> dma_operation
 %nterm <ptr<DMAConfig>> dma_config
 %nterm <bool> sync_type
+%nterm <int> int_or_null
 %nterm <Choreo::Storage> storage
 %nterm <Choreo::BaseType> fundamental_type
 %nterm <AST::ptr<AST::CppSourceCode>> pass_by host_code
 %nterm <AST::ptr<AST::Memory>> storage_qual
-%nterm <AST::ptr<AST::Node>> foreach_block general_val simple_int span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt index_or_value iv_expr if_else_block optional_scalar_init param_mdspan_val chunkat_or_storage_or_select
+%nterm <AST::ptr<AST::Node>> foreach_block general_val simple_int span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt index_or_value range_expr if_else_block optional_scalar_init param_mdspan_val chunkat_or_storage_or_select
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause else_block named_spanned_decls
-%nterm <AST::ptr<AST::MultiValues>> index_value_list value_list param_mdspan_list iv_exprs iv_list id_list with_matchers passables span_expr_list
+%nterm <AST::ptr<AST::MultiValues>> index_value_list value_list param_mdspan_list range_exprs iv_list id_list with_matchers passables span_expr_list
 %nterm <AST::ptr<AST::Expr>> s_expr span_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
@@ -773,36 +774,36 @@ where_bind
     ;
 
 foreach_block
-    : FOREACH iv_exprs LBRACE statements RBRACE {
+    : FOREACH range_exprs LBRACE statements RBRACE {
         $$ = AST::Make<AST::ForeachBlock>(@1, $2, $4);
-      }
-    | FOREACH iv_expr LPAREN COL RPAREN LBRACE statements RBRACE {
-        $$ = AST::Make<AST::ForeachBlock>(@1, $2, $7, 0, 0);
-      }
-    | FOREACH iv_expr LPAREN COL MINUS NUM RPAREN LBRACE statements RBRACE {
-        $$ = AST::Make<AST::ForeachBlock>(@1, $2, $9, 0, $6);
-      }
-    | FOREACH iv_expr LPAREN NUM COL RPAREN LBRACE statements RBRACE {
-        $$ = AST::Make<AST::ForeachBlock>(@1, $2, $8, $4, 0);
-      }
-    | FOREACH iv_expr LPAREN NUM COL MINUS NUM RPAREN LBRACE statements RBRACE {
-        $$ = AST::Make<AST::ForeachBlock>(@1, $2, $10, $4, $7);
       }
     ;
 
-iv_exprs
-    : iv_exprs COMMA iv_expr  {
+range_exprs
+    : range_exprs COMMA range_expr  {
         $1->Append($3);
         $$ = $1;
       }
-    | iv_expr {
+    | range_expr {
         $$ = AST::Make<AST::MultiValues>(@1);
         $$->Append($1);
       }
     ; /* do not allow the empty ivs */
 
-iv_expr
-    : IDENTIFIER { $$ = AST::Make<AST::Identifier>(@1, $1); }
+int_or_null
+    : NUM { $$ = $1; }
+    | MINUS NUM { $$ = -$2; }
+    | /*nothing*/ { $$ = GetInvalidBound(); }
+    ;
+
+range_expr
+    : IDENTIFIER { $$ = AST::Make<AST::LoopRange>(@1, AST::Make<AST::Identifier>(@1, $1)); }
+    | IDENTIFIER LPAREN int_or_null COL int_or_null RPAREN {
+        $$ = AST::Make<AST::LoopRange>(@1, AST::Make<AST::Identifier>(@1, $1), $3, $5);
+      }
+    | IDENTIFIER LPAREN int_or_null COL int_or_null COL int_or_null RPAREN {
+        $$ = AST::Make<AST::LoopRange>(@1, AST::Make<AST::Identifier>(@1, $1), $3, $5, $7);
+      }
     ;
 
 dma_stmt

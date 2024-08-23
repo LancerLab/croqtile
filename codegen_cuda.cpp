@@ -322,8 +322,8 @@ fi
     assert(!loop_vars.empty());
     loop_vars.pop_back();
 
-    for (auto id : f->ivs->AllValues()) {
-      auto name = cast<AST::Identifier>(id)->name;
+    for (auto rng : f->getRanges()) {
+      auto name = cast<AST::LoopRange>(rng)->IVName();
       int dec_by = 1;
       bool multiple_bounds = cur_bounded_vars.count(name);
       if (multiple_bounds) dec_by = cur_bounded_vars[name].size();
@@ -846,18 +846,23 @@ bool CUDACodeGen::Visit(AST::Return &returnNode) {
   return true;
 }
 
+bool CUDACodeGen::Visit(AST::LoopRange &n) {
+  __TRACE_EACH_VISIT__(n)
+  return true;
+}
+
 // CLEAN
 bool CUDACodeGen::Visit(AST::ForeachBlock &forNode) {
   __TRACE_EACH_VISIT__(forNode)
-  auto itervars = forNode.getIterationVars();
-  for (size_t idx = 0; idx != itervars->Count(); ++idx) {
+  auto ranges = forNode.getRanges();
+  for (size_t idx = 0; idx != ranges.size(); ++idx) {
     // TODO(albert): support non-unit stride in loop
     std::ostringstream _os;
-    auto id = cast<AST::Identifier>(itervars->ValueAt(idx));
+    auto iv_name = cast<AST::LoopRange>(ranges[idx])->IVName();
 
     // get the lower/upper and stride for spanned iter var
-    auto iv_type = this->GetSymbolType(id->name);
-    auto iv_bounds = cast<BoundedITupleType>(iv_type)->GetBounds();
+    auto iv_type = this->GetSymbolType(iv_name);
+    auto iv_sizes = cast<BoundedITupleType>(iv_type)->GetSizes();
 
     // NOTES: foreach block ranges between [0, UB),
     // it always use one integer indicating the UB
@@ -865,36 +870,36 @@ bool CUDACodeGen::Visit(AST::ForeachBlock &forNode) {
 
     // synthesise the emitting string
     if (iv_type->Dims() == 1) {
-      // fs << this->indent << "for_(" << id->name << ", "
-      //    << ReplaceDynDimName(STR(iv_bounds.ValueAt(0))) << ", "
+      // fs << this->indent << "for_(" << iv_name << ", "
+      //    << ReplaceDynDimName(STR(iv_sizes.ValueAt(0))) << ", "
       //    << 1 /* TODO(albert): need fix, unit stride is hardcoded for now*/
-      //    << ", [&](auto iv_" << id->name << ") {\n";
-      auto var_name = id->name;
+      //    << ", [&](auto iv_" << iv_name << ") {\n";
+      auto var_name = iv_name;
       fs << this->indent;
       fs << "for (auto " << var_name << " = 0; ";
-      fs << var_name << " < " << ReplaceDynDimName(STR(iv_bounds.ValueAt(0))) << "; ";
+      fs << var_name << " < " << ReplaceDynDimName(STR(iv_sizes.ValueAt(0))) << "; ";
       fs << var_name << "++) {\n";
       incrementIndent();
-      loop_vars.back().insert(id->name);
-      // for (auto bind : bind_info.GetBinds(InScopeName(id->name))) {
+      loop_vars.back().insert(iv_name);
+      // for (auto bind : bind_info.GetBinds(InScopeName(iv_name))) {
       //   auto bname = SSTab().UnScopedName(bind);
       //   loop_vars.back().insert(bname);
       //   fs << indent << "auto iv_" << SSTab().UnScopedName(bind) << " = iv_"
-      //      << id->name << ";\n";
+      //      << iv_name << ";\n";
       // }
     } else {
-      assert(cur_bounded_vars.count(id->name) &&
+      assert(cur_bounded_vars.count(iv_name) &&
              "can not find the bounded name.");
-      assert((cur_bounded_vars[id->name].size() == iv_bounds.Dims()) &&
+      assert((cur_bounded_vars[iv_name].size() == iv_sizes.Dims()) &&
              "can not find the bounded name.");
       size_t i = 0;
-      for (auto name : cur_bounded_vars[id->name]) {
+      for (auto name : cur_bounded_vars[iv_name]) {
         fs << this->indent;
         fs << "for (auto " << name << " = 0; ";
-        fs << name << " < " << ReplaceDynDimName(STR(iv_bounds.ValueAt(0))) << "; ";
+        fs << name << " < " << ReplaceDynDimName(STR(iv_sizes.ValueAt(0))) << "; ";
         fs << name << "++) {\n";
         // fs << this->indent << "for_(" << name << ", "
-        //    << ReplaceDynDimName(STR(iv_bounds.ValueAt(i))) << ", "
+        //    << ReplaceDynDimName(STR(iv_sizes.ValueAt(i))) << ", "
         //    << 1 /* TODO(albert): need fix, unit stride is hardcoded for now*/
         //    << ", [&](auto iv_" << name << ") {\n";
         std::string scoped_var = InScopeName(name);

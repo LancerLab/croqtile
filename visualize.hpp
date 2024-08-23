@@ -363,6 +363,7 @@ struct Visualizer : public VisitorWithSymTab {
   bool Visit(AST::Call &) override { return true; }
   bool Visit(AST::Select &) override { return true; }
   bool Visit(AST::Return &) override { return true; }
+  bool Visit(AST::LoopRange &) override { return true; }
   bool Visit(AST::ForeachBlock &) override { return true; }
   bool Visit(AST::FunctionDecl &) override { return true; }
   bool Visit(AST::ChoreoFunction &) override { return true; }
@@ -429,7 +430,7 @@ struct Visualizer : public VisitorWithSymTab {
       auto ty = GetSymbolType(id->name);
       if (auto bivs = dyn_cast<BoundedITupleType>(ty)) {
         bool parallel = (!bivs->GetNote().empty());
-        auto vlist = bivs->GetBounds().Value();
+        auto vlist = bivs->GetUpperBounds().Value();
         for (size_t i = 0; i < vlist.size(); ++i) {
           if (auto pint = dyn_cast<int>(&vlist[i])) {
             bounds.push_back(*pint);

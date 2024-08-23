@@ -400,6 +400,10 @@ public:
     TraceEachVisit(n);
     return true;
   }
+  bool Visit(AST::LoopRange &n) {
+    TraceEachVisit(n);
+    return true;
+  }
   bool Visit(AST::ForeachBlock &n) {
     TraceEachVisit(n);
     return true;

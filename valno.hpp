@@ -186,7 +186,7 @@ class ShapeInference : public Visitor {
 
   std::string cur_fn;
   // when values are consumed instead of generated
-  bool gen_multi_values = true;
+  bool gen_values = true;
 
   bool allow_named_dim = false;  // named dimension (mdspan param only)
 
@@ -231,6 +231,7 @@ class ShapeInference : public Visitor {
     } else if (isa<AST::ForeachBlock>(&n)) {
       static size_t count = 0;
       vn.EnterScope("foreach_" + std::to_string(count++));
+      gen_values = false; // disable valno on range expressions
     } else if (auto* b = dyn_cast<AST::MultiDimSpans>(&n)) {
       if (b->ref_name != "") {
         auto n = SSTab().NameInScopeOrNull(b->ref_name);
@@ -250,7 +251,7 @@ class ShapeInference : public Visitor {
         vn.SetListReference(n.value());
       }
     } else if (isa<AST::Wait>(&n) || isa<AST::Call>(&n)) {
-      gen_multi_values = false;
+      gen_values = false;
     } else if (isa<AST::Parameter>(&n)) {
       allow_named_dim = true;
     }
@@ -259,13 +260,14 @@ class ShapeInference : public Visitor {
 
   virtual bool AfterVisit(AST::Node& n) override {
     if (isa<AST::Program>(&n) || isa<AST::ChoreoFunction>(&n) ||
-        isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n) ||
-        isa<AST::ForeachBlock>(&n)) {
+        isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n)) {
+      vn.LeaveScope();
+    } else if (isa<AST::ForeachBlock>(&n)) {
       vn.LeaveScope();
     } else if (isa<AST::MultiDimSpans>(&n) || isa<AST::IntTuple>(&n)) {
       vn.ResetListReference();
     } else if (isa<AST::Wait>(&n) || isa<AST::Call>(&n)) {
-      gen_multi_values = true;
+      gen_values = true;
     } else if (isa<AST::Parameter>(&n)) {
       allow_named_dim = false;
     }
@@ -280,7 +282,7 @@ class ShapeInference : public Visitor {
 
   bool Visit(AST::MultiValues& n) {
     if (cannot_proceed) return true;
-    if (gen_multi_values) {
+    if (gen_values) {
       int valNo = vn.GenerateValueNumberForNode(n);
       cur_vn = valNo;
     } else
@@ -546,6 +548,8 @@ class ShapeInference : public Visitor {
     __TRACE_EACH_VISIT__;
 
     if (cannot_proceed) return true;
+
+    if (!gen_values) return false;
 
     if (SSTab().IsDeclared(n.name)) {
       // it is a reference
@@ -978,8 +982,18 @@ class ShapeInference : public Visitor {
     return true;
   };
 
+  bool Visit(AST::LoopRange& n) {
+    __TRACE_EACH_VISIT__;
+
+    if (cannot_proceed) return true;
+
+    return true;
+  };
+
   bool Visit(AST::ForeachBlock& n) {
     if (trace_visit) os << n.TypeNameString() << "\n";
+
+    gen_values = true; // allow generate values for statements
 
     if (cannot_proceed) return true;
 

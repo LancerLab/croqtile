@@ -56,6 +56,7 @@ struct ShapeDynamics : public VisitorWithSymTab {
   bool Visit(AST::Call &) { return true; }
   bool Visit(AST::Select &) { return true; }
   bool Visit(AST::Return &) { return true; }
+  bool Visit(AST::LoopRange &) { return true; }
   bool Visit(AST::ForeachBlock &) { return true; }
   bool Visit(AST::FunctionDecl &) { return true; }
   bool Visit(AST::ChoreoFunction &) { return true; }

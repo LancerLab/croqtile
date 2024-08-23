@@ -161,9 +161,14 @@ void Call::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
+void LoopRange::accept(Choreo::Visitor& v) {
+  iv->accept(v);
+  v.Visit(*this);
+}
+
 void ForeachBlock::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
-  ivs->accept(v);
+  ranges->accept(v);
   v.Visit(*this);
   stmts->accept(v);
   v.AfterVisit(*this);

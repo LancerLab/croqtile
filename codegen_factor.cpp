@@ -197,8 +197,8 @@ fi
     assert(!loop_vars.empty());
     loop_vars.pop_back();
 
-    for (auto id : f->ivs->AllValues()) {
-      auto name = cast<AST::Identifier>(id)->name;
+    for (auto rng : f->getRanges()) {
+      auto name = cast<AST::LoopRange>(rng)->IVName();
       int dec_by = 1;
       bool multiple_bounds = cur_bounded_vars.count(name);
       if (multiple_bounds) dec_by = cur_bounded_vars[name].size();
@@ -751,6 +751,11 @@ bool FactorCodeGen::Visit(AST::Return &returnNode) {
   return true;
 }
 
+bool FactorCodeGen::Visit(AST::LoopRange &n) {
+  __TRACE_EACH_VISIT__(n)
+  return true;
+}
+
 // CLEAN
 bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
   __TRACE_EACH_VISIT__(forNode)
@@ -759,15 +764,16 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
   // auto l2_tile_idx = itervars->ValueAt(0);
   // auto l1_tile_idx = itervars->ValueAt(1);
   //
-  auto itervars = forNode.getIterationVars();
-  for (size_t idx = 0; idx != itervars->Count(); ++idx) {
+  auto ranges = forNode.getRanges();
+  for (size_t idx = 0; idx != ranges.size(); ++idx) {
     // TODO(albert): support non-unit stride in loop
     std::ostringstream _os;
-    auto id = cast<AST::Identifier>(itervars->ValueAt(idx));
+    auto loop_range = cast<AST::LoopRange>(ranges[idx]);
+    auto iv_name = loop_range->IVName();
 
     // get the lower/upper and stride for spanned iter var
-    auto iv_type = this->GetSymbolType(id->name);
-    auto iv_bounds = cast<BoundedITupleType>(iv_type)->GetBounds();
+    auto iv_type = this->GetSymbolType(iv_name);
+    auto iv_sizes = cast<BoundedITupleType>(iv_type)->GetSizes();
 
     // NOTES: foreach block ranges between [0, UB),
     // it always use one integer indicating the UB
@@ -777,38 +783,49 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
     /*
     A: with index={m,n} in [1,2] { foreach m {} }
     B: with index in [2] { foreach index {} }
-    if (iv_type->Dims() == 1 && !cur_bounded_vars.count(id->name)): A
-    if (iv_type->Dims() == 1 && cur_bounded_vars.count(id->name)):  B
+    if (iv_type->Dims() == 1 && !cur_bounded_vars.count(iv_name)): A
+    if (iv_type->Dims() == 1 && cur_bounded_vars.count(iv_name)):  B
     */
-    if (iv_type->Dims() == 1 && !cur_bounded_vars.count(id->name)) {
-      fs << this->indent << "for_(" << id->name;
-      if (forNode.lb_offset)
-        fs << " + (" << forNode.lb_offset << ")";
-      fs << ", " << ReplaceDynDimName(STR(iv_bounds.ValueAt(0)));
-      if (forNode.ub_offset)
-        fs << " + (" << forNode.ub_offset << ")";
-      fs << ", "
-         << 1 /* TODO(albert): need fix, unit stride is hardcoded for now*/
-         << ", [&](auto iv_" << id->name << ") {\n";
+    if (iv_type->Dims() == 1 && !cur_bounded_vars.count(iv_name)) {
+      fs << this->indent << "for_(" << iv_name;
+      if (IsValidBound(loop_range->lbound))
+        fs << " (" << loop_range->lbound << ")";
+      fs << ", " << ReplaceDynDimName(STR(iv_sizes.ValueAt(0)));
+      if (IsValidBound(loop_range->ubound))
+        fs << " + (" << loop_range->ubound << ")";
+      fs << ", ";
+      if (IsValidStride(loop_range->stride))
+        fs << loop_range->stride;
+      else
+        fs << 1;
+      fs << ", [&](auto iv_" << iv_name << ") {\n";
       incrementIndent();
-      loop_vars.back().insert(id->name);
-      for (auto bind : bind_info.GetBinds(InScopeName(id->name))) {
+      loop_vars.back().insert(iv_name);
+      for (auto bind : bind_info.GetBinds(InScopeName(iv_name))) {
         auto bname = SSTab().UnScopedName(bind);
         loop_vars.back().insert(bname);
         fs << indent << "auto iv_" << SSTab().UnScopedName(bind) << " = iv_"
-           << id->name << ";\n";
+           << iv_name << ";\n";
       }
     } else {
-      assert(cur_bounded_vars.count(id->name) &&
+      assert(cur_bounded_vars.count(iv_name) &&
              "can not find the bounded name.");
-      assert((cur_bounded_vars[id->name].size() == iv_bounds.Dims()) &&
+      assert((cur_bounded_vars[iv_name].size() == iv_sizes.Dims()) &&
              "can not find the bounded name.");
       size_t i = 0;
-      for (auto name : cur_bounded_vars[id->name]) {
-        fs << this->indent << "for_(" << name << ", "
-           << ReplaceDynDimName(STR(iv_bounds.ValueAt(i))) << ", "
-           << 1 /* TODO(albert): need fix, unit stride is hardcoded for now*/
-           << ", [&](auto iv_" << name << ") {\n";
+      for (auto name : cur_bounded_vars[iv_name]) {
+        fs << this->indent << "for_(" << name << ", ";
+        if (IsValidBound(loop_range->lbound))
+          fs << " (" << loop_range->lbound << ")";
+        fs << ReplaceDynDimName(STR(iv_sizes.ValueAt(i))) << ", ";
+        if (IsValidBound(loop_range->ubound))
+          fs << " + (" << loop_range->ubound << ")";
+        fs << ", ";
+        if (IsValidStride(loop_range->stride))
+          fs << loop_range->stride;
+        else
+          fs << 1;
+        fs << ", [&](auto iv_" << name << ") {\n";
         std::string scoped_var = InScopeName(name);
         loop_vars.back().insert(name);
         incrementIndent();

@@ -734,6 +734,11 @@ bool TypeInference::Visit(AST::Return &n) {
   return true;
 }
 
+bool TypeInference::Visit(AST::LoopRange &n) {
+  __TRACE_EACH_VISIT__(n)
+  return true;
+}
+
 bool TypeInference::Visit(AST::ForeachBlock &n) {
   __TRACE_EACH_VISIT__(n)
   return true;

@@ -636,7 +636,7 @@ int ValueNumbering::GenerateValueNumberForNode(AST::Node& n) {
   std::string signature = GenerateNodeSignature(n);
   if (signature == "")
     Error(n.LOC(),
-          "failed to generate signature for nession `" + AST::STR(n) + "'.");
+          "failed to generate signature for expression `" + AST::STR(n) + "'.");
 
   // Duplicated computation: different expression encounters the same signature
   if (HasValueNumberOfSignature(signature))

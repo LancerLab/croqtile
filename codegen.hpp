@@ -145,6 +145,7 @@ struct FactorCodeGen : public CodeGenerator {
   bool Visit(AST::Call &) override;
   bool Visit(AST::Select &) override;
   bool Visit(AST::Return &) override;
+  bool Visit(AST::LoopRange &) override;
   bool Visit(AST::ForeachBlock &) override;
   bool Visit(AST::FunctionDecl &) override;
   bool Visit(AST::ChoreoFunction &) override;
@@ -188,6 +189,7 @@ struct TopsccCodeGen : public CodeGenerator {
   bool Visit(AST::Call &) override { return true; };
   bool Visit(AST::Select &) override { return true; };
   bool Visit(AST::Return &) override { return true; };
+  bool Visit(AST::LoopRange &) override { return true; };
   bool Visit(AST::ForeachBlock &) override { return true; };
   bool Visit(AST::FunctionDecl &) override { return true; };
   bool Visit(AST::ChoreoFunction &) override { return true; };
@@ -281,6 +283,7 @@ struct CUDACodeGen : public CodeGenerator {
   bool Visit(AST::DataType &) override;
   bool Visit(AST::DMA &) override;
   bool Visit(AST::Expr &) override;
+  bool Visit(AST::LoopRange &) override;
   bool Visit(AST::ForeachBlock &) override;
   bool Visit(AST::FunctionDecl &) override;
   bool Visit(AST::Identifier &) override;

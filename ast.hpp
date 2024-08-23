@@ -775,31 +775,31 @@ struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
   ParallelBy(const location& l, const std::string v, int b)
       : Node(l), biv(v), bound(b) {}
 
-  ParallelBy(const location &l, const ptr<MultiValues> &id_l,
-             const ptr<MultiValues> &iv_l, const ptr<MultiNodes> &ss)
+  ParallelBy(const location& l, const ptr<MultiValues>& id_l,
+             const ptr<MultiValues>& iv_l, const ptr<MultiNodes>& ss)
       : Node(l), id_list(id_l), iv_list(iv_l), stmts(ss) {
     auto id = id_l->ValueAt(0);
-    auto *identifier = dyn_cast<Identifier>(id);
+    auto* identifier = dyn_cast<Identifier>(id);
     assert(identifier != nullptr);
     auto iv = iv_l->ValueAt(0);
-    auto *num = dyn_cast<IntLiteral>(iv);
+    auto* num = dyn_cast<IntLiteral>(iv);
     assert(num != nullptr);
     biv = identifier->name;
     bound = num->value;
     symtab.AddSymbol(biv, MakeBoundedIntegerType(bound));
-    if (id_l->Count() > 1) 
+    if (id_l->Count() > 1)
       stmts = ConstructParallelByRecursively(stmts, 1, id_list, iv_list);
   }
 
-  ptr<MultiNodes> ConstructParallelByRecursively(const ptr<MultiNodes> &ss,
+  ptr<MultiNodes> ConstructParallelByRecursively(const ptr<MultiNodes>& ss,
                                                  size_t idx,
-                                                 const ptr<MultiValues> &id_l,
-                                                 const ptr<MultiValues> &iv_l) {
+                                                 const ptr<MultiValues>& id_l,
+                                                 const ptr<MultiValues>& iv_l) {
     auto id = id_l->ValueAt(idx);
-    auto *identifier = dyn_cast<Identifier>(id);
+    auto* identifier = dyn_cast<Identifier>(id);
     assert(identifier != nullptr);
     auto iv = iv_l->ValueAt(idx);
-    auto *num = dyn_cast<IntLiteral>(iv);
+    auto* num = dyn_cast<IntLiteral>(iv);
     assert(num != nullptr);
     symtab.AddSymbol(identifier->name, MakeBoundedIntegerType(num->value));
     auto pb = Make<ParallelBy>(id->loc, identifier->name, num->value);
@@ -957,7 +957,6 @@ struct Select : public Node, public TypeIDProvider<Select> {
   __UDT_TYPE_INFO__
 };
 
-
 struct DMA : public Node, public TypeIDProvider<DMA> {
   std::string operation;
   std::string future;
@@ -982,33 +981,32 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
         from(f),
         to(t),
         config(c) {
-          chained = false;
-          chain_to = "";
-          chain_from = "";
-          if (auto tptr = dyn_cast<AST::Select>(t)) {
-            tptr->inDMA = true;
-            tptr->future = future + "_buffer";
-          }
-        }
+    chained = false;
+    chain_to = "";
+    chain_from = "";
+    if (auto tptr = dyn_cast<AST::Select>(t)) {
+      tptr->inDMA = true;
+      tptr->future = future + "_buffer";
+    }
+  }
 
   explicit DMA(const location& l, const std::string& o, const std::string& r,
-               const std::string& chained_from,
-               const ptr<Node>& f, const ptr<Node>& t, bool a,
-               const ptr<DMAConfig>& c = nullptr)
+               const std::string& chained_from, const ptr<Node>& f,
+               const ptr<Node>& t, bool a, const ptr<DMAConfig>& c = nullptr)
       : Node(l, MakeDummyFutureType(a)),
         operation(o),
         future(r),
         async(a),
         from(f),
         to(t),
-        config(c){
-          chained = true;
-          chain_from = chained_from;
-          if (auto tptr = dyn_cast<AST::Select>(t)) {
-            tptr->inDMA = true;
-            tptr->future = future + "_buffer";
-          }
-        }
+        config(c) {
+    chained = true;
+    chain_from = chained_from;
+    if (auto tptr = dyn_cast<AST::Select>(t)) {
+      tptr->inDMA = true;
+      tptr->future = future + "_buffer";
+    }
+  }
 
   std::string FromSymbol() const { return cast<ChunkAt>(from)->RefSymbol(); }
 
@@ -1091,43 +1089,62 @@ struct Call : public Node, public TypeIDProvider<Call> {
   __UDT_TYPE_INFO__
 };
 
+struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
+  ptr<Identifier> iv;  // induction variable
+  int lbound = GetInvalidBound();
+  int ubound = GetInvalidBound();
+  int stride = GetInvalidStride();
+
+  LoopRange(const location& l, const ptr<Identifier> i)
+      : Node(l), iv(i) {}  // the bounds are yet to be inferenced
+  LoopRange(const location& l, const ptr<Identifier> i, int lb, int ub,
+            int s = 1)
+      : Node(l), iv(i), lbound(lb), ubound(ub), stride(s) {}
+
+  const std::string IVName() const { return iv->name; }
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << "\n" << prefix << "`- Iteration variables: " << iv->name;
+
+    if (!IsValidBound(lbound) && !IsValidBound(ubound) &&
+        !IsValidStride(stride))
+      return;
+
+    os << "\n" << prefix << "`- Loop Control: (";
+    os << (IsValidBound(lbound) ? std::to_string(lbound) : std::string("?"))
+       << ":";
+    os << (IsValidBound(ubound) ? std::to_string(ubound) : std::string("?"))
+       << ":";
+    os << (IsValidStride(stride) ? std::to_string(stride) : std::string("?"))
+       << ")";
+  }
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__
+};
+
 struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
-  ptr<MultiValues> ivs;
+  ptr<MultiValues> ranges;
   ptr<MultiNodes> stmts;
-  // for now, lb_offset >= 0, ub_offset <= 0
-  int lb_offset = 0;
-  int ub_offset = 0;
 
   explicit ForeachBlock(const location& l, const ptr<MultiValues>& i,
                         const ptr<MultiNodes>& s)
-      : Node(l), ivs(i), stmts(s) {
+      : Node(l), ranges(i), stmts(s) {
     assert(i != nullptr && "missing iteration variables for the statement.");
-  }
-
-  explicit ForeachBlock(const location& l, const ptr<Node>& i,
-                        const ptr<MultiNodes>& s, const int lb_o, const int ub_o)
-      : Node(l), stmts(s), lb_offset(lb_o), ub_offset(-1 * ub_o) {
-    assert(i != nullptr && "missing iteration variables for the statement.");
-    ivs = Make<MultiValues>(i->LOC());
-    ivs->Append(i);
   }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Foreach Block:";
-    os << "\n" << prefix << " `- Iteration variables: ";
-    ivs->Print(os);
-    if (ivs->Count() == 1) {
-      if (lb_offset != 0)
-        os << "\n" << prefix << "      (lower bound offset is " << lb_offset << ")";
-      if (ub_offset != 0)
-        os << "\n" << prefix << "      (upper bound offset is " << ub_offset << ")";
-    }
+    ranges->Print(os, prefix + " ");
     if (stmts) {
       stmts->Print(os, prefix + " ");
     }
   }
 
-  ptr<MultiValues> getIterationVars() const { return ivs; }
+  ptr<MultiValues> getRangeNodes() const { return ranges; }
+  const std::vector<ptr<Node>>& getRanges() const {
+    return ranges->AllValues();
+  }
 
   void accept(Visitor&) override;
 

@@ -52,6 +52,7 @@ struct TypeChecker : public VisitorWithSymTab {
   bool Visit(AST::Call &) override;
   bool Visit(AST::Select &) override;
   bool Visit(AST::Return &) override;
+  bool Visit(AST::LoopRange &) override;
   bool Visit(AST::ForeachBlock &) override;
   bool Visit(AST::FunctionDecl &) override;
   bool Visit(AST::ChoreoFunction &) override;

@@ -71,28 +71,28 @@ __co__ int with_foreach(int b, f32 [36, 27, 128] input) {
 // CHECK:       `-  = {m} in [ 3 ]
 // CHECK:       (with statements)
 // CHECK:       `- Foreach Block:
-// CHECK:        `- Iteration variables: idxm
+// CHECK:        `- Iteration variables: idx
+// CHECK:        `- Iteration variables: m
 // CHECK:        `- DMA.copy.async
 // CHECK:          `- future: f
 // CHECK:          `- from: input.ChunkAt(p, idx, m)
 // CHECK:          `- to: local
-// CHECK:        `- Assign: sum =  (sum + index(0)) 
+// CHECK:        `- Assign: sum =  (sum + index(0))
 // CHECK:        `- WAIT: f
 // CHECK:        `- Call: cfunction
-// CHECK:          `- with arguements:  (dataof f) 
+// CHECK:          `- with arguements:  (dataof f)
 // CHECK:   `- With Block:
 // CHECK:     (within constraints)
 // CHECK:     `-  = {m} in [ 3 ]
 // CHECK:     (with statements)
 // CHECK:     `- Foreach Block:
 // CHECK:      `- Iteration variables: m
-// CHECK:           (lower bound offset is 1)
-// CHECK:           (upper bound offset is -1)
+// CHECK:      `- Loop Control: (1:-1:1)
 // CHECK:     `- Foreach Block:
 // CHECK:      `- Iteration variables: m
-// CHECK:           (lower bound offset is 2)
+// CHECK:      `- Loop Control: (2:?:1)
 // CHECK:     `- Foreach Block:
 // CHECK:      `- Iteration variables: m
-// CHECK:           (upper bound offset is -2)
+// CHECK:      `- Loop Control: (?:-2:1)
 // CHECK:     `- Foreach Block:
 // CHECK:      `- Iteration variables: m

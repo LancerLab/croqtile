@@ -208,7 +208,7 @@ struct Normalizer : public Visitor {
           n.with->LOC(), n.with->name + "__elem__" + std::to_string(i)));
       auto bity = cast<BoundedITupleType>(wty);
       if (bity->HasValidBound())
-        mval->ValueAt(i)->SetType(MakeBoundedIntegerType(bity->GetBound(i)));
+        mval->ValueAt(i)->SetType(MakeBoundedIntegerType(bity->GetUpperBound(i)));
       else
         mval->ValueAt(i)->SetType(MakeUnknownBoundedIntegerType());
     }
@@ -230,6 +230,7 @@ struct Normalizer : public Visitor {
   bool Visit(AST::Call &) override { return true; }
   bool Visit(AST::Select &) override { return true; }
   bool Visit(AST::Return &) override { return true; }
+  bool Visit(AST::LoopRange &) override { return true; }
   bool Visit(AST::ForeachBlock &) override { return true; }
   bool Visit(AST::FunctionDecl &) override { return true; }
   bool Visit(AST::ChoreoFunction &) override { return true; }

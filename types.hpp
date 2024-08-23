@@ -275,29 +275,29 @@ inline constexpr size_t GetInvalidUnsigned() {
   return __internal::INVALID_UNSIGNED;
 }
 inline constexpr int GetInvalidSigned() { return __internal::INVALID_SIGNED; }
-inline constexpr int GetInvalidValueNumber() {
-  return __internal::INVALID_SIGNED;
-}
 inline constexpr int GetUnKnownInteger() { return __internal::UNKNOWN_SIGNED; }
-inline constexpr size_t GetInvalidRank() {
-  return __internal::INVALID_UNSIGNED;
-}
 
 inline constexpr bool IsValidUnsigned(size_t v) {
-  return v != __internal::INVALID_UNSIGNED;
+  return v != GetInvalidUnsigned();
 }
-inline constexpr bool IsValidSigned(int v) {
-  return v != __internal::INVALID_SIGNED;
-}
-inline constexpr bool IsValidValueNumber(int v) {
-  return v != __internal::INVALID_SIGNED;
-}
+inline constexpr bool IsValidSigned(int v) { return v != GetInvalidSigned(); }
 inline constexpr bool IsUnKnownInteger(int v) {
-  return v == __internal::UNKNOWN_SIGNED;
+  return v == GetUnKnownInteger();
 }
-inline constexpr bool IsValidRank(size_t v) {
-  return v != __internal::INVALID_UNSIGNED;
+
+inline constexpr size_t GetInvalidRank() { return GetInvalidUnsigned(); }
+inline constexpr int GetInvalidValueNumber() { return GetInvalidSigned(); }
+inline constexpr int GetInvalidBound() { return GetInvalidSigned(); }
+inline constexpr int GetInvalidStride() { return GetInvalidSigned(); }
+
+inline constexpr bool IsValidRank(size_t v) { return v != GetInvalidRank(); }
+inline constexpr bool IsValidValueNumber(int v) {
+  return v != GetInvalidValueNumber();
 }
+inline constexpr bool IsValidBound(int v) { return v != GetInvalidBound(); }
+inline constexpr bool IsValidStride(int v) { return v != GetInvalidStride(); }
+
+// ------------------------------------------------------------------------- //
 
 using ValueExpr = std::string;
 using ValueItem = std::variant<int, ValueExpr>;
@@ -504,7 +504,8 @@ inline void PrintValueList(const ValueList& vl, std::ostream& os,
 }
 
 inline void PrintValueListAccumulator(const ValueList& vl, std::ostream& os,
-                           const char* lb = "[", const char* rb = "]") {
+                                      const char* lb = "[",
+                                      const char* rb = "]") {
   auto print_variant = [&os](const ValueItem& vle) {
     if (vle.index() == 0)
       os << std::get<0>(vle);
@@ -522,6 +523,8 @@ inline void PrintValueListAccumulator(const ValueList& vl, std::ostream& os,
   if (rb) os << rb;
 }
 
+using IntegerList = std::vector<int>;
+
 struct Shape {
   static ValueListRepo values;  // value numbers
 
@@ -538,6 +541,12 @@ struct Shape {
                        // The type must be deduced for use
 
   Shape(size_t n) : dim_count(n) {}
+  // init a shape with n-'v's
+  Shape(size_t n, const ValueItem& v) : dim_count(n) {
+    ValueList vl(n);
+    std::fill(vl.begin(), vl.end(), v);
+    val_no = values.Insert(vl);
+  }
   Shape(const ValueList& v) { val_no = values.Insert(v); }
   // could be inconsistently sized, but only be verified with sema checker
   Shape(size_t n, const ValueList& v) : dim_count(n) {
@@ -553,6 +562,7 @@ struct Shape {
   }
   constexpr Shape& operator=(const Shape&) = default;
 
+  size_t DimCount() const { return dim_count; }
   size_t Dims() const { return dim_count; }  // TODO: remove this interface
   size_t Rank() const { return dim_count; }
 
@@ -592,8 +602,8 @@ struct Shape {
     return *cast<int>(const_cast<ValueItem*>(&vi));
   }
 
-  std::optional<std::vector<int>> GetIntList() const {
-    std::vector<int> int_list;
+  std::optional<IntegerList> GetIntList() const {
+    IntegerList int_list;
     for (auto v : Value()) {
       if (auto pint = dyn_cast<int>(&v))
         int_list.push_back(*pint);
@@ -615,9 +625,8 @@ struct Shape {
   std::unordered_map<int, ValueExpr> GetDynamicDims() const {
     std::unordered_map<int, ValueExpr> res;
     size_t i = 0;
-    for (auto & v : Value()) {
-      if (!isa<int>(&v))
-        res.emplace(i, *cast<ValueExpr>(&v));
+    for (auto& v : Value()) {
+      if (!isa<int>(&v)) res.emplace(i, *cast<ValueExpr>(&v));
       ++i;
     }
     return res;
@@ -646,7 +655,7 @@ struct Shape {
     return int_list;
   }
 
-  std::vector<int> IntList() const {
+  IntegerList IntList() const {
     auto ilist = GetIntList();
     if (!ilist) choreo_unreachable("fail to get an integer list.");
     return *ilist;
@@ -715,6 +724,19 @@ struct Shape {
 inline bool operator==(const Shape& lhs, const Shape& rhs) {
   return lhs.IsValid() && rhs.IsValid() && (lhs.Dims() == rhs.Dims()) &&
          isValueListEqual(lhs.Value(), rhs.Value());
+}
+
+using MultiBounds = Shape;  // using a shape as a multi-bound
+
+inline MultiBounds operator-(const MultiBounds& lhs, const MultiBounds& rhs) {
+  if (!lhs.IsValid() || !rhs.IsValid())
+    choreo_unreachable("unexpected to substract invalid shapes.");
+
+  ValueList vl;
+  for (size_t idx = 0; idx < lhs.Rank(); ++idx)
+    vl.push_back(lhs.ValueAt(idx) - rhs.ValueAt(idx));
+
+  return {vl.size(), vl};
 }
 
 //
@@ -1064,21 +1086,34 @@ struct BoundedType : public Type {
 
 struct BoundedIntegerType final : public BoundedType,
                                   public TypeIDProvider<BoundedIntegerType> {
-  ValueItem bound = GetInvalidValueItem();
+  ValueItem lbound = GetInvalidValueItem();
+  ValueItem ubound = GetInvalidValueItem();
+  int stride = GetInvalidStride();
 
   BoundedIntegerType() : BoundedType(TypeCategory::BOUNDED_INT, "") {}
-  BoundedIntegerType(const ValueItem& expr, const std::string& note = "")
-      : BoundedType(TypeCategory::BOUNDED_INT, note), bound(expr) {}
+  BoundedIntegerType(const ValueItem& lexpr, const ValueItem& uexpr, int s = 1,
+                     const std::string& note = "")
+      : BoundedType(TypeCategory::BOUNDED_INT, note),
+        lbound(lexpr),
+        ubound(uexpr),
+        stride(s) {}
 
   size_t Dims() const override { return 1; }
   bool IsComplete() const override { return true; }
   bool HasSufficientInfo() const { return HasValidBound(); }
-  bool HasValidBound() const override { return IsValidValueItem(bound); }
-  ValueItem GetBound() const { return bound; }
+  bool HasValidBound() const override {
+    return IsValidValueItem(lbound) && IsValidValueItem(ubound) &&
+           IsValidStride(stride);
+  }
+  ValueItem GetLowerBound() const { return lbound; }
+  ValueItem GetUpperBound() const { return ubound; }
+  ValueItem GetStride() const { return ubound; }
 
   bool operator==(const Type& ty) const override {
     if (isa<BoundedIntegerType>(&ty)) return false;
-    return ((BoundedIntegerType&)ty).bound == bound;
+    auto bty = (BoundedIntegerType&)ty;
+    return (bty.lbound == lbound) && (bty.ubound == ubound) &&
+           (bty.stride == stride);
   }
 
   bool ApprxEqual(const Type& ty) const override {
@@ -1090,8 +1125,7 @@ struct BoundedIntegerType final : public BoundedType,
     if (HasValidBound())
       os << "int->[unknown]";
     else
-      std::visit([this, &os](const auto& v) { os << "int->[0, " << v << ")"; },
-                 bound);
+      os << "int->[" << STR(lbound) << "," << STR(ubound) << "]:" << stride;
   }
 
   const std::string Name() const override { return "bounded-integer"; }
@@ -1101,21 +1135,50 @@ struct BoundedIntegerType final : public BoundedType,
 
 struct BoundedITupleType final : public BoundedType,
                                  public TypeIDProvider<BoundedITupleType> {
-  Shape bounds;
-  BoundedITupleType(const Shape& s, const std::string& n = "")
-      : BoundedType(TypeCategory::BOUNDED_ITUPLE, n), bounds(s) {}
+  MultiBounds lbounds;
+  MultiBounds ubounds;
+  IntegerList strides;
 
-  size_t Dims() const override { return bounds.Dims(); }
+  BoundedITupleType(const MultiBounds& l, const MultiBounds& u,
+                    const IntegerList s, const std::string& n = "")
+      : BoundedType(TypeCategory::BOUNDED_ITUPLE, n),
+        lbounds(l),
+        ubounds(u),
+        strides(s) {
+    if (lbounds.IsValid())
+      assert((lbounds.DimCount() == ubounds.DimCount()) &&
+             (lbounds.DimCount() == strides.size()) &&
+             "expecting a valid bound.");
+    else
+      assert(!ubounds.IsValid() && strides.empty() && "expecting an invalid bound.");
+  }
+
+  size_t Dims() const override { return ubounds.Dims(); }
   bool IsComplete() const override { return true; }
-  bool HasSufficientInfo() const { return bounds.IsValid(); }
-  Shape GetBounds() const { return bounds; }
-  const ValueItem& GetBound(size_t idx) const { return bounds.ValueAt(idx); }
-  bool HasValidBound() const override { return bounds.IsValid(); }
+  bool HasSufficientInfo() const { return ubounds.IsValid(); }
+  const MultiBounds GetLowerBounds() const { return lbounds; }
+  const MultiBounds GetUpperBounds() const { return ubounds; }
+  const Shape GetSizes() const { return ubounds - lbounds; }
+  IntegerList GetStrides() const { return strides; }
+  const ValueItem& GetUpperBound(size_t idx) const {
+    return ubounds.ValueAt(idx);
+  }
+  const ValueItem& GetLowerBound(size_t idx) const {
+    return lbounds.ValueAt(idx);
+  }
+  int GetStride(size_t idx) const { return strides[idx]; }
+  bool IsPlain(size_t idx) const { return (lbounds.ValueAt(idx) == ValueItem(0)) && (strides[idx] == 1); }
+  bool HasValidBound() const override {
+    return lbounds.IsValid() && ubounds.IsValid() && !strides.empty() &&
+           (lbounds.DimCount() == ubounds.DimCount()) &&
+           (lbounds.DimCount() == strides.size());
+  }
 
   bool operator==(const Type& ty) const override {
     if (!isa<BoundedITupleType>(&ty)) return false;
     auto& t = (BoundedITupleType&)ty;
-    return t.bounds == bounds;
+    return (t.lbounds == lbounds) && (t.ubounds == ubounds) &&
+           (t.strides == strides);
   }
 
   bool ApprxEqual(const Type& ty) const override {
@@ -1125,7 +1188,7 @@ struct BoundedITupleType final : public BoundedType,
   }
 
   void Print(std::ostream& os) const override {
-    if (!bounds.IsRanked()) {
+    if (!ubounds.IsRanked()) {
       os << "{invalid}";
       return;
     }
@@ -1133,7 +1196,27 @@ struct BoundedITupleType final : public BoundedType,
     os << "{int";
     for (size_t i = 1; i < Dims(); ++i) os << ",int";
     os << "}->";
-    bounds.Print(os);
+    bool plain = true;
+    for (size_t i = 1; i < Dims(); ++i) {
+      if (!IsPlain(i)) {
+        plain = false;
+        break;
+      }
+    }
+
+    if (plain) {
+      os << STR(ubounds);
+      return;
+    }
+
+    os << "{[" << STR(lbounds.ValueAt(0)) << "," << STR(ubounds.ValueAt(0))
+      << ")";
+
+    for (size_t i = 1; i < Dims(); ++i) {
+      os << ", [" << STR(lbounds.ValueAt(i)) << "," << STR(ubounds.ValueAt(i))
+          << "):" << strides[i];
+    }
+    os << "}";
   }
 
   const std::string Name() const override { return "bounded-ituple"; }
@@ -1351,20 +1434,39 @@ inline ptr<SpannedType> MakeShapedSpannedType(const Shape& s,
 }
 
 inline ptr<BoundedIntegerType> MakeBoundedIntegerType(const ValueItem& ub) {
-  return std::make_shared<BoundedIntegerType>(ub);
+  return std::make_shared<BoundedIntegerType>(0, ub);
 }
 
 inline ptr<BoundedIntegerType> MakeUnknownBoundedIntegerType() {
   return std::make_shared<BoundedIntegerType>();
 }
 
-inline ptr<BoundedITupleType> MakeBoundedITupleType(const Shape& v,
+inline ptr<BoundedITupleType> MakeBoundedITupleType(const MultiBounds& ub,
                                                     const std::string& n = "") {
-  return std::make_shared<BoundedITupleType>(v, n);
+  MultiBounds lb(ub.DimCount(), 0);
+  IntegerList s(ub.DimCount());
+  std::fill(s.begin(), s.end(), 1);
+  return std::make_shared<BoundedITupleType>(lb, ub, s, n);
+}
+
+inline ptr<BoundedITupleType> MakeBoundedITupleType(const MultiBounds& lb,
+                                                    const MultiBounds& ub,
+                                                    const std::string& n = "") {
+  IntegerList s(ub.DimCount());
+  std::fill(s.begin(), s.end(), 1);
+  return std::make_shared<BoundedITupleType>(lb, ub, s, n);
+}
+
+inline ptr<BoundedITupleType> MakeBoundedITupleType(const MultiBounds& lb,
+                                                    const MultiBounds& ub,
+                                                    const IntegerList& il,
+                                                    const std::string& n = "") {
+  return std::make_shared<BoundedITupleType>(lb, ub, il, n);
 }
 
 inline ptr<BoundedITupleType> MakeUninitBoundedITupleType() {
-  return std::make_shared<BoundedITupleType>(GenUninitShape(), "");
+  return std::make_shared<BoundedITupleType>(GenUninitShape(), GenUninitShape(),
+                                             IntegerList(), "");
 }
 
 inline ptr<FutureType> MakeFutureType(const ptr<SpannedType>& v, bool async) {

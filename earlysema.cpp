@@ -923,10 +923,16 @@ bool EarlySemantics::Visit(AST::Return& n) {
   return true;
 }
 
+bool EarlySemantics::Visit(AST::LoopRange& n) {
+  __TRACE_EACH_VISIT__(n)
+
+  return true;
+}
+
 bool EarlySemantics::Visit(AST::ForeachBlock& n) {
   __TRACE_EACH_VISIT__(n)
-  for (auto & i : n.ivs->AllValues()) {
-    if (auto id = dyn_cast<AST::Identifier>(i)) {
+  for (auto & i : n.getRanges()) {
+    if (auto id = dyn_cast<AST::LoopRange>(i)->iv) {
       auto ity = NodeType(*id);
       if (!(IsBoundedType(ity))) {
         Error(n.LOC(), "expecting a bounded type for iteration variable '" + id->name + "' but got '" + PSTR(ity) + "'.");
