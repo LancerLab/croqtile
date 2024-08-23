@@ -11,6 +11,7 @@
 #include "codegen.hpp"
 #include "cuda_script.inc"
 #include "types.hpp"
+#include "codegen_cuda_types.hpp"
 
 #ifndef __CHOREO_CUDA_DIR__
 #error "missing macro definition of __CHOREO_CUDA_DIR__"
@@ -85,7 +86,7 @@ bool CUDACodeGen::BeforeVisitImpl(AST::Node &n) {
     auto out_size = GetByteSizeExprOf(*out_type);
     std::string ret_string = "void";
     if (!out_size.empty()) {
-      ret_string = cuda_type_stringify(*out_type) + "*";
+      ret_string = stringify(*out_type) + "*";
       void_return = false;
     } else {
       void_return = true;
@@ -96,7 +97,7 @@ bool CUDACodeGen::BeforeVisitImpl(AST::Node &n) {
     bool need_delimiter = false;
     for (auto value : c->f_decl.params->values) {
       if (need_delimiter) fs<< ", ";
-      fs << cuda_type_str(value->type->getBaseType());
+      fs << stringify(value->type->getBaseType());
       if (value->type->mdspan_type != nullptr) fs << "*";
       fs << " ";
       value->sym->Print(fs);
@@ -113,7 +114,7 @@ bool CUDACodeGen::BeforeVisitImpl(AST::Node &n) {
     // f32 [4096, 4096] lhs ==> float* lhs
     for (auto value : c->f_decl.params->values) {
       if (need_delimiter) fs<< ", ";
-      fs << cuda_type_str(value->type->getBaseType());
+      fs << stringify(value->type->getBaseType());
       if (value->type->mdspan_type != nullptr) fs << "*";
       fs << " ";
       value->sym->Print(fs);
@@ -362,12 +363,12 @@ bool CUDACodeGen::Visit(AST::NamedVariableDecl &node) {
     auto base_type = Choreo::BaseType(sty->f_type);
     std::ostringstream _os;
     if (storage_type == Choreo::Storage::SHARED) {
-      _os << cuda_storage_str(storage_type) << " ";
-      _os << cuda_type_str(base_type) << " ";
+      _os << stringify(storage_type) << " ";
+      _os << stringify(base_type) << " ";
       _os << sym << ReplaceRuntimeNames(CUDASIZE(sty->GetShape()), "", false) << ";\n";
       fs << indent << _os.str();
     } else if (storage_type == Choreo::Storage::GLOBAL) {
-      _os << cuda_type_str(base_type);
+      _os << stringify(base_type);
       _os << "* ";
       _os << sym;
       _os << ";\n";
@@ -442,7 +443,7 @@ bool CUDACodeGen::Visit(AST::ParallelBy &by) {
   for (unsigned i = 0; i < cur_params->size(); ++i) {
     if (need_delimiter) fs << ", ";
     auto value = (*cur_params)[i];
-    // fs << cuda_type_str(value->type->getBaseType());
+    // fs << stringify(value->type->getBaseType());
     // if (value->type->mdspan_type != nullptr) fs << "*";
     // fs << " ";
     value->sym->Print(fs);
@@ -466,7 +467,7 @@ bool CUDACodeGen::Visit(AST::ParallelBy &by) {
   for (unsigned i = 0; i < cur_params->size(); ++i) {
     if (need_delimiter) fs << ", ";
     auto value = (*cur_params)[i];
-    fs << cuda_type_str(value->type->getBaseType());
+    fs << stringify(value->type->getBaseType());
     if (value->type->mdspan_type != nullptr) fs << "*";
     fs << " ";
     value->sym->Print(fs);
@@ -630,8 +631,8 @@ bool CUDACodeGen::Visit(AST::DMA &d) {
     };
     // buffer in another stream
     alloc_in_fs << alloc_indent;
-    alloc_in_fs<< cuda_storage_str(mem_node->Get()) << " ";
-    alloc_in_fs << cuda_type_str(sty->ElementType()) << " ";
+    alloc_in_fs<< stringify(mem_node->Get()) << " ";
+    alloc_in_fs << stringify(sty->ElementType()) << " ";
     alloc_in_fs << dst_buffer_name;
     alloc_in_fs << CUDASIZE(sty->GetShape());
     alloc_in_fs << ";\n";
@@ -949,12 +950,12 @@ bool CUDACodeGen::Visit(AST::FunctionDecl &d) {
     std::string type_string;
     if (auto sty = dyn_cast<SpannedType>(param->GetType())) {
       // define spanned type
-      type_string = "DRAMType(" + cuda_type_str(sty->ElementType()) + ", " +
+      type_string = "DRAMType(" + stringify(sty->ElementType()) + ", " +
                     ReplaceRuntimeNames(LSTR(sty->GetShape()), "", false) + ")";
       cuda_symbols.AddSymbol(pname, type_name, type_string);
     } else {
       type_string =
-          "DRAMType(" + cuda_type_str(param->type->getBaseType()) + ", (1))";
+          "DRAMType(" + stringify(param->type->getBaseType()) + ", (1))";
       cuda_symbols.AddSymbol(pname, type_name, type_string);
     }
     // fs << indent << "auto " << type_name << " = " << type_string << ";\n";
@@ -963,7 +964,7 @@ bool CUDACodeGen::Visit(AST::FunctionDecl &d) {
   if (auto rty = dyn_cast<SpannedType>(fty.out_ty)) {
     std::string name = "output";
     std::string type_name = "output_type";
-    auto type_string = "DRAMType(" + cuda_type_str(rty->ElementType()) + ", " +
+    auto type_string = "DRAMType(" + stringify(rty->ElementType()) + ", " +
                        ReplaceRuntimeNames(LSTR(rty->GetShape()), "", false);
 
     // handle dynamic-typed output when necessary. Generate code snippet like:
@@ -995,7 +996,7 @@ bool CUDACodeGen::Visit(AST::FunctionDecl &d) {
     auto name = "output";
     auto type_name = "output_type";
     auto type_string =
-        "DRAMType(" + cuda_type_str(TC2BT(fty.out_ty->Category())) + ", (1));";
+        "DRAMType(" + stringify(TC2BT(fty.out_ty->Category())) + ", (1));";
     cuda_symbols.AddSymbol(name, type_name, type_string);
     // fs << indent << "auto " << type_name << " = " << type_string << "\n";
   }

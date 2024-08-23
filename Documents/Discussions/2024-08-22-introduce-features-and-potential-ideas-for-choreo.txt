@@ -1,0 +1,26 @@
+1. minimise prior knowledge in coding routines
+2. avoid hassle address/offset/stride calculation
+3. minimise prior knowledge on hardware execution model/conceptual model/memory model
+4. minimise prior knowledge on hardware's performance-critical factors
+5. maximise static analysis and check, on HW resource constraints, on shape constraints, on less performant patterns
+6. use constraint syntax to guide user's coding (compiler/syntax guided coding style)
+7. less expressiveness + constrainted syntax + automatic generation on some patterns = easy coding w.o. compromise performance
+8. data tile-level view: coarse-grained view on HW, minimise fine-grained knowledge on HW threads/warps/workitems/runtime scheduling/scoreboards mechanisms
+8. data tile-level view: natural to human thoughts, focus on how to make data manipulation
+10. data tile-level view: leave performance-critical thread config to automation
+11. potential to extand to more heterogeneous/hierarchical levels, by covering MPI, make inter-dev / intra-dev / inter cluster / inter cores / per cores implicit without thinking burden.
+12. potential to maximise resources usage: can make static allocation and manage the resource virtually/statically/deterministically. match with static analysis on resource usage.
+13. potential to extand to graph execution: choreo functions can be invoked/chained?, can generate cuda.graph
+
+
+research idea:
+1. rule-based kernel codegen using choreo, less code, portable between HWs, even performance to rooftop, beat triton (chenpeng)
+1.5. do 1 with LP (fernando proposed)
+2. kernel tuning solution
+3. choreo kernel for AI++ workloads (stencil, ..., qiqi)
+4. MPI.... / DCEx
+4. HPC workloads, with choroe.graph (qiqi)
+5. choreo DMA orchestration: considering bank organisation, memory hierarchy, resource conflicts, ...
+6. do 5 with polyhedral
+7. resource allocation opt in choreo design.
+

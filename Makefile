@@ -35,7 +35,7 @@ all: $(TARGET)
 test: $(TARGET) standalone_test
 	$(LIT) tests
 
-$(TARGET): scanner.yy.o parser.tab.o choreo_main.o codegen_factor.o codegen_cuda.o earlysema.o typeinfer.o typecheck.o ast.o types.o valno.o
+$(TARGET): scanner.yy.o parser.tab.o choreo_main.o codegen_factor.o codegen_cuda.o earlysema.o typeinfer.o typecheck.o ast.o types.o codegen_cuda_types.o valno.o
 	$(CC) $(CFLAGS) $^ -o $(TARGET)
 
 scanner.yy.cc: $(LEX_SRC)
@@ -44,10 +44,10 @@ scanner.yy.cc: $(LEX_SRC)
 parser.tab.cc parser.tab.hh location.hh: $(PARSER_SRC)
 	$(BISON) $(BISON_FLAGS) $(PARSER_SRC)
 
-%.o : %.cc types.hpp aux.hpp ast.hpp scanner.hpp symtab.hpp parser.tab.hh location.hh
+%.o : %.cc types.hpp aux.hpp ast.hpp codegen_cuda_types.hpp scanner.hpp symtab.hpp parser.tab.hh location.hh
 	$(CC) $(CFLAGS) $< -c -o $@
 
-%.o : %.cpp $(HEADER_FILES) location.hh
+%.o : %.cpp $(HEADER_FILES) location.hh codegen_cuda_types.hpp
 	$(CC) $(CFLAGS) $< -c -o $@
 
 choreo_header.inc : utils/choreo.h
