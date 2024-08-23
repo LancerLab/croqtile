@@ -146,7 +146,8 @@ bool TypeInference::SetAsCurrentType(AST::Node &nd, const std::string &n) {
   // complement the storage information when exists
   if (auto st = dyn_cast<SpannedType>(cur_type))
     if (auto n = dyn_cast<AST::NamedVariableDecl>(&nd))
-      st->SetStorage(n->mem->st);
+      if (n->mem)
+        st->SetStorage(n->mem->st);
 
   // The type is successfully inferred, set the node
   nd.SetType(cur_type);
@@ -498,6 +499,11 @@ bool TypeInference::Visit(AST::Expr &n) {
                (isa<MDSpanType>(pty_lhs) && isa<IntegerType>(pty_rhs))) {
       n.SetType(MakeMDSpanType(n.s));
       cur_type = n.GetType();
+    } else if (isa<BoundedITupleType>(pty_lhs) && isa<IntegerType>(pty_rhs)) {
+      n.SetType(pty_lhs);
+      cur_type = n.GetType();
+      // TODO(wsj) result type is?
+      // bounded integer, lb and ub changed!
     } else if (*pty_lhs != *pty_rhs) {
       Error(n.LOC(), "The operands of the expression cannot undergo '" + n.op +
                          "' operation.");
@@ -652,6 +658,15 @@ bool TypeInference::Visit(AST::Call &n) {
 
 bool TypeInference::Visit(AST::Select &n) {
   __TRACE_EACH_VISIT__(n)
+  auto& val = n.span_expr_list->AllValues()[0];
+  auto sty = dyn_cast<SpannedType>(val->GetType());
+  assert(sty);
+  auto fmty = sty->ElementType();
+  auto sto = sty->GetStorage();
+  dma_mem = sto;
+  dma_fmty = fmty;
+  n.SetType(MakeSpannedType(fmty, sty->GetShape(), sto));
+  cur_type = n.GetType();
   return true;
 }
 

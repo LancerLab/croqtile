@@ -237,6 +237,30 @@ bool FactorCodeGen::Visit(AST::NamedTypeDecl &) { return true; }
 //   CLEAN
 bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
   __TRACE_EACH_VISIT__(node)
+  if (auto s = dyn_cast<AST::Select>(node.init_expr)) {
+    assert(!s->inDMA);
+    size_t val_count = s->span_expr_list->Count();
+    assert(val_count >= 2);
+    fs << this->indent << "auto " << node.name_str << " = ";
+    for (size_t i = 0; i < val_count - 1; i++) {
+      std::string select_factor_str = PSTR(s->select_factor);
+      for (auto &loop_var : loop_vars.back()) {
+        size_t pos = 0;
+        while ((pos = select_factor_str.find(loop_var, pos)) !=
+               std::string::npos) {
+          select_factor_str.replace(pos, loop_var.length(), "iv_" + loop_var);
+          pos += loop_var.length() + 3;
+        }
+      }
+      fs << "select_(" << select_factor_str << "== " << i << ", "
+         << PSTR(s->span_expr_list->ValueAt(i))
+         << (i < val_count - 1 ? ", " : "");
+    }
+    fs << PSTR(s->span_expr_list->AllValues().back())
+       << std::string(val_count - 1, ')') << ";\n";
+    return true;
+  }
+
   // TODO(albert): 'a.span' will be replace to the type-decl related to 'a'
   // TODO(albert): refine this function with TYPE_STR new API
   auto nty = node.GetType();
@@ -465,9 +489,11 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   auto dst_sto = Storage::DEFAULT;
   if (isa<AST::Memory>(d.to))
     dst_sto = cast<AST::Memory>(d.to)->Get();
-  else if (isa<AST::Select>(d.to))
-    // TODO(albert): get mem level from selects operands
-    dst_sto = Storage::LOCAL;
+  else if (auto sel = dyn_cast<AST::Select>(d.to)) {
+    auto sty = dyn_cast<SpannedType>(sel->GetType());
+    assert(sty);
+    dst_sto = sty->GetStorage();
+  }
   else
     dst_sto = GetSpannedType(*d.to)->GetStorage();
   // auto dst_sto = (isa<AST::Memory>(d.to)) ? cast<AST::Memory>(d.to)->Get()
@@ -577,9 +603,12 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
 
   if (isa<AST::Memory>(d.to) || isa<AST::Select>(d.to))
     chunkat_node = d.from;
-  else if (cast<AST::ChunkAt>(d.to)->positions)
-    chunkat_node = d.to;
-  else
+  else if (auto c = cast<AST::ChunkAt>(d.to)) {
+    if (!c->positions) // xxx.chunkat() => identifier
+      chunkat_node = d.from;
+    else
+      chunkat_node = d.to;
+  } else
     choreo_unreachable("factor: unsupported chunkat.");
 
   fs << indent << dma_op << "(" << future_name << ", " << src_buffer_name
@@ -690,17 +719,29 @@ bool FactorCodeGen::Visit(AST::Call &c) {
 
 bool FactorCodeGen::Visit(AST::Select &c) {
   __TRACE_EACH_VISIT__(c)
-  size_t val_count = c.val_list->Count();
+  if (!c.inDMA) // z = select(...);
+    return true;
+  // z = dma.copy xxx => select(...)
+  size_t val_count = c.span_expr_list->Count();
   // if val_count == 1, pingpong is meaningless? ( TODO: maybe assert when
   // earlysema)
   assert(val_count >= 2);
   fs << this->indent << "auto " << c.future << " = ";
   for (size_t i = 0; i < val_count - 1; i++) {
-    fs << "select_(" << STR(c.select_factor) << "== " << i << ", "
-       << STR(c.val_list->ValueAt(i)) << (i < val_count - 1 ? ", " : "");
+    std::string select_factor_str = PSTR(c.select_factor);
+    for (auto &loop_var : loop_vars.back()) {
+      size_t pos = 0;
+      while ((pos = select_factor_str.find(loop_var, pos)) !=
+             std::string::npos) {
+        select_factor_str.replace(pos, loop_var.length(), "iv_" + loop_var);
+        pos += loop_var.length() + 3;
+      }
+    }
+    fs << "select_(" << select_factor_str << "== " << i << ", "
+       << PSTR(c.span_expr_list->ValueAt(i)) << (i < val_count - 1 ? ", " : "");
   }
-  fs << STR(c.val_list->AllValues().back()) << std::string(val_count - 1, ')')
-     << ";\n";
+  fs << PSTR(c.span_expr_list->AllValues().back())
+     << std::string(val_count - 1, ')') << ";\n";
   return true;
 }
 
@@ -740,8 +781,13 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
     if (iv_type->Dims() == 1 && cur_bounded_vars.count(id->name)):  B
     */
     if (iv_type->Dims() == 1 && !cur_bounded_vars.count(id->name)) {
-      fs << this->indent << "for_(" << id->name << ", "
-         << ReplaceDynDimName(STR(iv_bounds.ValueAt(0))) << ", "
+      fs << this->indent << "for_(" << id->name;
+      if (forNode.lb_offset)
+        fs << " + (" << forNode.lb_offset << ")";
+      fs << ", " << ReplaceDynDimName(STR(iv_bounds.ValueAt(0)));
+      if (forNode.ub_offset)
+        fs << " + (" << forNode.ub_offset << ")";
+      fs << ", "
          << 1 /* TODO(albert): need fix, unit stride is hardcoded for now*/
          << ", [&](auto iv_" << id->name << ") {\n";
       incrementIndent();

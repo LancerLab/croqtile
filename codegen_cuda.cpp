@@ -606,9 +606,11 @@ bool CUDACodeGen::Visit(AST::DMA &d) {
   auto dst_sto = Storage::DEFAULT;
   if (isa<AST::Memory>(d.to))
     dst_sto = cast<AST::Memory>(d.to)->Get();
-  else if (isa<AST::Select>(d.to))
-    // TODO(albert): get mem level from selects operands
-    dst_sto = Storage::LOCAL;
+  else if (auto sel = dyn_cast<AST::Select>(d.to)) {
+    auto sty = dyn_cast<SpannedType>(sel->GetType());
+    assert(sty);
+    dst_sto = sty->GetStorage();
+  }
   else
     dst_sto = GetSpannedType(*d.to)->GetStorage();
   // auto dst_sto = (isa<AST::Memory>(d.to)) ? cast<AST::Memory>(d.to)->Get()

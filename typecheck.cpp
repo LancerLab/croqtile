@@ -131,6 +131,31 @@ bool TypeChecker::Visit(AST::Call& n) {
 }
 bool TypeChecker::Visit(AST::Select& n) {
   __TRACE_EACH_VISIT__(n)
+  auto expr_list = n.span_expr_list;
+  auto expr0 = expr_list->ValueAt(0);
+  auto sty0 = dyn_cast<SpannedType>(expr0->GetType());
+  for (auto expr : expr_list->AllValues()) {
+    auto ty = expr->GetType();
+    if (sty0) {
+      auto sty = dyn_cast<SpannedType>(ty);
+      assert(sty);
+      if (!(sty->GetShape() == sty0->GetShape())) {
+        ++error_count;
+        Error(expr->LOC(), "Expecting " + PSTR(expr) +
+                               " is the same shape as " + PSTR(expr0) + " (" +
+                               STR(sty->GetShape()) + " vs. " +
+                               STR(sty0->GetShape()) + ").");
+      }
+      if (sty->GetStorage() != sty0->GetStorage()) {
+        ++error_count;
+        Error(expr->LOC(), "Expecting " + PSTR(expr) +
+                               " is the same storage type as " + PSTR(expr0) + " (" +
+                               STR(sty->GetStorage()) + " vs. " +
+                               STR(sty0->GetStorage()) + ").");
+      }
+    }
+  }
+
   return true;
 }
 bool TypeChecker::Visit(AST::Return& n) {

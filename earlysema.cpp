@@ -876,7 +876,6 @@ bool EarlySemantics::Visit(AST::Call& n) {
 bool EarlySemantics::Visit(AST::Select &n) {
   __TRACE_EACH_VISIT__(n)
 
-  n.select_factor->accept(*this);
   // TODO(wsj) isa<IntegerType>(rty)?
   if (!isa<BoundedIntegerType>(NodeType(*n.select_factor))) {
     Error(n.LOC(), "expecting `" + PSTR(n.select_factor) +
@@ -887,10 +886,13 @@ bool EarlySemantics::Visit(AST::Select &n) {
   // TODO(wsj) assert bound <= span_val_list.count ?
 
   // check value types in val_list are the same
-  assert(n.val_list->Count() > 0);
-  const auto &v0 = n.val_list->AllValues()[0];
+  assert(n.span_expr_list->Count() > 0);
+  const auto &v0 = n.span_expr_list->AllValues()[0];
   auto v0ty = NodeType(*v0);
-  for (auto &v : n.val_list->AllValues()) {
+  assert(isa<SpannedType>(v0ty) &&
+         "For now, select only support spanned type variables!");
+  for (auto &v : n.span_expr_list->AllValues()) {
+    assert(isa<SpannedType>(NodeType(*v)));
     // TODO: need shape checking at typecheck
     if (auto sty = dyn_cast<SpannedType>(NodeType(*v))) {
       if (!sty->ApprxEqual(*v0ty)) {
