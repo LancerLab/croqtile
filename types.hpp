@@ -380,6 +380,11 @@ inline std::string ValueItemAsString(const ValueItem& vi) {
   return *cast<ValueExpr>(&vi);
 }
 
+template <typename T>
+inline T GetValueAt(ValueList vlist, int idx) {
+  return *(std::get_if<T>(&vlist[idx]));
+};
+
 // some operations
 inline ValueItem operator+(const ValueItem& vi1, const ValueItem& vi2) {
   if (!isa<int>(&vi1) || !isa<int>(&vi2))
@@ -996,17 +1001,6 @@ struct MDSpanType : public Type, public TypeIDProvider<MDSpanType> {
     if (value.IsRanked()) os << Dims();
     os << ">";
     if (value.IsRanked()) os << " " << STR(value);
-  }
-
-  std::string EmitTo(Target target) const override {
-    std::ostringstream _os;
-    // _os << "mdspan";
-    if (value.IsValid()) {
-      // value.Print(_os);
-      // TODO(albert): for readibility, consider change stringify to emit
-      _os << value.EmitTo(target);
-    }
-    return _os.str();
   }
 
   const std::string Name() const override { return "mdspan"; }

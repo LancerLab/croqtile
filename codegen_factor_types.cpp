@@ -1,87 +1,87 @@
-#include "codegen_cuda_types.hpp"
+#include "codegen_factor_types.hpp"
 
 using namespace Choreo;
 
-namespace Choreo::CUDA {
+namespace Choreo::Factor {
 
-std::string stringify(const CudaType& type) {
+std::string stringify(const FactorType& type) {
   switch (type) {
-    case CudaType::I32: 
+    case FactorType::I32: 
       return "int32_t";
       break;
-    case CudaType::U32: 
+    case FactorType::U32: 
       return "uint32_t";
       break;
-    case CudaType::I16: 
+    case FactorType::I16: 
       return "int16_t";
       break;
-    case CudaType::U16: 
+    case FactorType::U16: 
       return "uint16_t";
       break;
-    case CudaType::I8: 
+    case FactorType::I8: 
       return "int8_t";
       break;
-    case CudaType::U8: 
+    case FactorType::U8: 
       return "uint8_t";
       break;
-    case CudaType::F32: 
+    case FactorType::F32: 
       return "float";
       break;
-    case CudaType::F16: 
+    case FactorType::F16: 
       return "half";
       break;
-    case CudaType::BF16: 
+    case FactorType::BF16: 
       return "__nv_bfloat16";
       break;
-    case CudaType::BOOL:
+    case FactorType::BOOL:
       return "bool";
       break;
-    case CudaType::F64: 
+    case FactorType::F64: 
       return "double";
       break;
-    case CudaType::VOID: 
+    case FactorType::VOID: 
       return "void";
       break;
     default:
-      choreo_unreachable("This CudaType is not supported.");
+      choreo_unreachable("This FactorType is not supported.");
   }
 }
 
-CudaType fromBaseType(BaseType type) {
+FactorType fromBaseType(BaseType type) {
   switch (type) {
     case BaseType::F32:
-      return CudaType::F32;
+      return FactorType::F32;
       break;
     case BaseType::F16:
-      return CudaType::F16;
+      return FactorType::F16;
       break;
     case BaseType::BF16:
-      return CudaType::BF16;
+      return FactorType::BF16;
       break;
     case BaseType::U32:
-      return CudaType::U32;
+      return FactorType::U32;
       break;
     case BaseType::S32:
-      return CudaType::I32;
+      return FactorType::I32;
       break;
     case BaseType::U16:
-      return CudaType::U16;
+      return FactorType::U16;
       break;
     case BaseType::S16:
-      return CudaType::I16;
+      return FactorType::I16;
       break;
     case BaseType::U8:
-      return CudaType::U8;
+      return FactorType::U8;
       break;
     case BaseType::S8:
-      return CudaType::I8;
+      return FactorType::I8;
       break;
     // should it be passed in?
     case BaseType::INT:
-      return CudaType::I32;
+      return FactorType::I32;
       break;
     case BaseType::BOOL:
-      return CudaType::BOOL;
+      return FactorType::BOOL;
       break;
     default:
       choreo_unreachable("BaseType '" + STR(type) + "' is not supported.");
@@ -89,38 +89,62 @@ CudaType fromBaseType(BaseType type) {
 }
 
 std::string stringify(const BaseType& type) {
-  CudaType cudatype = fromBaseType(type);
-  return stringify(cudatype);
+  switch (type) {
+    case BaseType::F32:
+      return "FloatType(32)";
+      break;
+    case BaseType::F16:
+      return "FloatType(16)";
+      break;
+    case BaseType::BF16:
+      return "BFloatType(16)";
+      break;
+    case BaseType::U32:
+    case BaseType::S32:
+      return "IntType(32)";
+      break;
+    case BaseType::U16:
+    case BaseType::S16:
+      return "IntType(16)";
+      break;
+    case BaseType::U8:
+    case BaseType::S8:
+      return "IntType(8)";
+      break;
+    // should it be passed in?
+    case BaseType::INT:
+      return "IntType(32)";
+      break;
+    case BaseType::BOOL:
+      return "BoolType(32)";
+      break;
+    default:
+      choreo_unreachable("Type '" + STR(type) + "' is not supported.");
+  }
 }
 
 std::string stringify(const FundamentalType& t) {
   switch (t) {
     case FundamentalType::F32:
-      return "float";
+      return "FloatType(32)";
       break;
     case FundamentalType::F16:
-      return "half";
+      return "FloatType(16)";
       break;
     case FundamentalType::BF16:
-      return "__nv_bfloat16";
+      return "BFloatType(16)";
       break;
     case FundamentalType::U32:
-      return "uint32_t";
-      break;
     case FundamentalType::S32:
-      return "int32_t";
+      return "IntType(32)";
       break;
     case FundamentalType::U16:
-      return "uint16_t";
-      break;
     case FundamentalType::S16:
-      return "int16_t";
+      return "IntType(16)";
       break;
     case FundamentalType::U8:
-      return "uint8_t";
-      break;
     case FundamentalType::S8:
-      return "int8_t";
+      return "IntType(8)";
       break;
     default:
       choreo_unreachable("Type '" + STR(t) + "' is not supported.");
@@ -142,18 +166,18 @@ std::string stringify(const Type& ty) {
 }
 
   
-std::string stringify(const CudaMemSpec& mspec) {
+std::string stringify(const FactorMemSpec& mspec) {
   switch (mspec) {
-    case CudaMemSpec::GLOBAL: return "__device__";
-    case CudaMemSpec::SHARED: return "__shared__";
-    case CudaMemSpec::LOCAL: return "";
+    case FactorMemSpec::GLOBAL: return "DRAMType";
+    case FactorMemSpec::SHARED: return "SRAMType";
+    case FactorMemSpec::LOCAL: return "L1Type";
+    default:
+      choreo_unreachable();
   }
-  assert(false && "Unknown memlevel\n");
-  return "";
 }
 
 std::string stringify(const Storage& sto) {
-  auto mspec = static_cast<CudaMemSpec>(static_cast<int>(sto));
+  auto mspec = static_cast<FactorMemSpec>(static_cast<int>(sto));
   return stringify(mspec);
 }
 
@@ -177,5 +201,5 @@ std::string stringify(const ValueList &vl) {
   return oss.str();
 }
 
-} // namespace Choreo::CUDA
+} // namespace Choreo::Factor
 

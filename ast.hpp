@@ -62,15 +62,6 @@ struct Node {
     pty->Print(os);
   };
 
-  virtual std::string EmitTo(
-      const std::string& prefix = {},
-      Choreo::Target target = Choreo::Target::Factor) const {
-    std::ostringstream _os;
-    _os << prefix;
-    _os << pty->EmitTo(target);
-    return _os.str();
-  };
-
   virtual void accept(Visitor&) = 0;
 
   // for runtime type disambiguition

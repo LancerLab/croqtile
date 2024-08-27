@@ -9,6 +9,7 @@
 #include "ast.hpp"
 #include "choreo_header.inc"
 #include "codegen.hpp"
+#include "codegen_factor_types.hpp"
 #include "factor_script.inc"
 #include "types.hpp"
 
@@ -19,28 +20,10 @@
 using namespace Choreo;
 using namespace Choreo::Factor;
 
-#define __TRACE_EACH_VISIT__(d)       \
-  if (trace_visit) {                  \
-    os << d.TypeNameString() << ": "; \
-    os << "\n";                       \
-  }
-
 bool FactorCodeGen::ContainsLoopVar(const std::string &iv) const {
   for (auto &loop_var : loop_vars)
     if (loop_var.count(iv)) return true;
   return false;
-}
-
-std::string Shape::EmitTo(Target target) const {
-  (void)target;
-  std::ostringstream _os;
-  if (!IsValidValueNumber(val_no))
-    _os << "{}";
-  else {
-    assert(values.Exists(val_no) && "bad value number.");
-    Factor::EmitFactorValueList(Value(), _os);
-  }
-  return _os.str();
 }
 
 static StringifyTable factor_symbols;
@@ -271,8 +254,8 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
       fs << indent << "auto " << sym << " = alloc_("
          << factor_symbols.GetTypeName(sym) << ");\n";
     } else {
-      std::string storage_type = factor_storage_str(sty->GetStorage());
-      std::string base_type = factor_typestr(Choreo::BaseType(sty->f_type));
+      std::string storage_type = stringify(sty->GetStorage());
+      std::string base_type = stringify(Choreo::BaseType(sty->f_type));
       std::ostringstream _os;
       _os << "auto " << sym << " = alloc_(" << storage_type << "(" << base_type
           << "," << ReplaceRuntimeNames(LSTR(sty->GetShape()), "", false) << ")"
@@ -516,7 +499,7 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
     // buffer in another stream
     alloc_in_fs << alloc_indent << "auto " << dst_buffer_name << " = alloc_("
                 << sto2alloc.at(mem_node->Get()) << "("
-                << factor_typestr(sty->ElementType()) << ","
+                << stringify(sty->ElementType()) << ","
                 << ReplaceRuntimeNames(LSTR(dst_shape), "", false) << "));\n";
   }
 
@@ -879,12 +862,12 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
     std::string type_string;
     if (auto sty = dyn_cast<SpannedType>(param->GetType())) {
       // define spanned type
-      type_string = "DRAMType(" + factor_typestr(sty->ElementType()) + ", " +
+      type_string = "DRAMType(" + stringify(sty->ElementType()) + ", " +
                     ReplaceRuntimeNames(LSTR(sty->GetShape()), "", false) + ")";
       factor_symbols.AddSymbol(pname, type_name, type_string);
     } else {
       type_string =
-          "DRAMType(" + factor_typestr(param->type->getBaseType()) + ", (1))";
+          "DRAMType(" + stringify(param->type->getBaseType()) + ", (1))";
       factor_symbols.AddSymbol(pname, type_name, type_string);
     }
     fs << indent << "auto " << type_name << " = " << type_string << ";\n";
@@ -893,7 +876,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
   if (auto rty = dyn_cast<SpannedType>(fty.out_ty)) {
     std::string name = "output";
     std::string type_name = "output_type";
-    auto type_string = "DRAMType(" + factor_typestr(rty->ElementType()) + ", " +
+    auto type_string = "DRAMType(" + stringify(rty->ElementType()) + ", " +
                        ReplaceRuntimeNames(LSTR(rty->GetShape()), "", false);
 
     // handle dynamic-typed output when necessary. Generate code snippet like:
@@ -928,7 +911,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
     auto name = "output";
     auto type_name = "output_type";
     auto type_string =
-        "DRAMType(" + factor_typestr(TC2BT(fty.out_ty->Category())) + ", (1));";
+        "DRAMType(" + stringify(TC2BT(fty.out_ty->Category())) + ", (1));";
     factor_symbols.AddSymbol(name, type_name, type_string);
     fs << indent << "auto " << type_name << " = " << type_string << "\n";
   }

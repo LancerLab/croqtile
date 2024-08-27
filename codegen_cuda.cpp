@@ -20,30 +20,12 @@
 using namespace Choreo;
 using namespace Choreo::CUDA;
 
-#define __TRACE_EACH_VISIT__(d)       \
-  if (trace_visit) {                  \
-    os << d.TypeNameString() << ": "; \
-    os << "\n";                       \
-  }
-
 bool CUDACodeGen::ContainsLoopVar(const std::string &iv) const {
   for (auto &loop_var : loop_vars)
     if (loop_var.count(iv)) return true;
   return false;
 }
 
-// TODO(albert) rename to EmitTo and extract to common file
-std::string CUDACodeGen::EmitTo(Target target) {
-  (void)target;
-  // std::ostringstream _os;
-  // if (!IsValidValueNumber(val_no))
-  //   _os << "{}";
-  // else {
-  //   assert(values.Exists(val_no) && "bad value number.");
-  //   CUDA::EmitCUDAValueList(Value(), _os);
-  // }
-  // return _os.str();
-}
 
 static StringifyTable cuda_symbols;
 
