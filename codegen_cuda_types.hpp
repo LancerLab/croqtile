@@ -1,5 +1,5 @@
-#ifndef CODEGEN_CUDA_TYPES_H_
-#define CODEGEN_CUDA_TYPES_H_
+#ifndef __CHOREO_CODEGEN_CUDA_TYPES_HPP__
+#define __CHOREO_CODEGEN_CUDA_TYPES_HPP__
 
 #include <string>
 #include <type_traits>
@@ -49,4 +49,4 @@ std::string stringify(const ValueList &vl);
 
 } // namespace Choreo
 
-#endif // CODEGEN_CUDA_TYPES_H_
+#endif // __CHOREO_CODEGEN_CUDA_TYPES_HPP__

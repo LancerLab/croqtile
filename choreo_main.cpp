@@ -4,6 +4,8 @@
 
 #include "ast.hpp"
 #include "codegen.hpp"
+#include "codegen_cuda.hpp"
+#include "codegen_factor.hpp"
 #include "normalize.hpp"
 #include "dynshape.hpp"
 #include "earlysema.hpp"
@@ -149,12 +151,12 @@ int main(int argc, char* argv[]) {
       if (mem_usage_checker.HasError()) return 1;
       if (stop_after.GetValue() == "mucheck") return 0;
 
-      FactorCodeGen codegen(std::cout, sc.SymTab(), mem_usage_checker.GetRtMemUsageInfo());
+      Choreo::Factor::FactorCodeGen codegen(std::cout, sc.SymTab(), mem_usage_checker.GetRtMemUsageInfo());
       root.accept(codegen);
       break;
     }
     case Target::CUDA: {
-      CUDACodeGen codegen(std::cout, sc.SymTab());
+      Choreo::CUDA::CUDACodeGen codegen(std::cout, sc.SymTab());
       root.accept(codegen);
       break;
     }
