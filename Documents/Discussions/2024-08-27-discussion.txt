@@ -1,0 +1,44 @@
+1. A-B buffering/prefetching
+
+with a in [...] {
+  f32 [...] lb0, lb1;
+  f0 = dma.copy.async data.chunkat(a) => lb0;
+  foreach a (1:-1) {
+    f1 = dma.copy.async data.chunkat(a) => select(a % 2, lb0, lb1);
+    wait f0;
+    call kernel(f0.data);
+    f0 = f1;
+  }
+}
+
+2. triple buffers example:
+
+with a in [...] {
+  f32 [...] lb0, lb1, lb2;
+  f0 = dma.copy.async data.chunkat(a(0)) => lb0;
+  f1 = dma.copy.async data.chunkat(a(1)) => lb1;
+
+  foreach a (2:-2) {
+    f2 = dma.copy.async data.chunkat(a) => select(((a + 2) % 3), lb0, lb1, lb2);
+    wait f0;
+    call kernel(f0.data);
+    f0 = f1;
+    f1 = f2;
+  }
+}
+
+3. DMA chaining example:
+
+fs = dma.copy data.chunkat(...) => shared;
+
+with a in [...] {
+  f32 [...] lb0, lb1;
+  f0 = dma.copy.async data.chunkat(fs.data) => lb0 after fs;
+
+  foreach a (1:-1) {
+    f1 = dma.copy.async data.chunkat(a) => select(((a + 1) % 2), lb0, lb1) after fs;
+    wait f0;
+    call kernel(f0.data);
+    f0 = f1;
+  }
+}
