@@ -12,38 +12,28 @@ using namespace Choreo;
 namespace Choreo {
 
 namespace Factor {
-// enums and types declare
-//
-enum class FactorType {
-  I32,
-  U32,
-  I16,
-  U16,
-  I8,
-  U8,
-  F32,
-  F16,
-  BF16,
-  F64,
-  BOOL,
-  VOID,
-};
 
-// Memory specifier for CUDA
-enum class FactorMemSpec {
-  GLOBAL = (int)Choreo::Storage::GLOBAL,
-  SHARED = (int)Choreo::Storage::SHARED,
-  LOCAL = (int)Choreo::Storage::LOCAL,
-};
-
-// utils funcs for stringfify cudatypes
-std::string stringify(const FactorType& type);
+// we need util functions to stringify target related string for codegen
+// thus we need new utilities (not STR/PSTR)
 std::string stringify(const BaseType& type);
 std::string stringify(const FundamentalType& t);
 std::string stringify(const Type& ty); // this is abstract type, must use ref
-std::string stringify(const FactorMemSpec& mspec);
 std::string stringify(const Storage& mspec);
 std::string stringify(const ValueList &vl);
+
+// safe version for pointers
+// we still use stringify name for simplification
+template <typename T>
+inline static std::string stringify(T* pt) {
+  if (!pt) return "invalid";
+  return stringify(*pt);
+}
+
+template <typename T>
+inline static std::string stringify(const ptr<T>& pt) {
+  if (!pt) return "invalid";
+  return stringify(*pt);
+}
 
 } // namespace Factor 
 

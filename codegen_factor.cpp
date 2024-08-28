@@ -51,13 +51,12 @@ using namespace factor;
 )";
     fs << "void " << current_fn << "() {\n";
     this->incrementIndent();
-    fs << indent << "include_(\"" << backpatch_filename << "\");\n";
+    fs << indent;
+    fs << "include_(\"" << backpatch_filename << "\");\n";
   } else if (isa<AST::ParallelBy>(&n)) {
     parallel_level++;
-    // this->incrementIndent();
   } else if (isa<AST::ForeachBlock>(&n)) {
     loop_vars.push_back({});
-    // this->incrementIndent();
   }
   return 0;
 }
@@ -160,9 +159,16 @@ fi
     current_fn = "__choreo_" + entry_fn;
     auto fty = cast<FunctionType>(f->GetType());
     auto &out_type = fty->out_ty;
+    // TODO:need refactor
     auto out_size = GetByteSizeExprOf(*out_type);
-    fs << "}\n\nMODULE_REGISTER(\"lib" << current_fn << "\", " << current_fn
+    fs << "}\n\n";
+
+    fs << "MODULE_REGISTER(\"lib" 
+       << current_fn << "\", " 
+       << current_fn
        << ");";  // end the factor function definition
+
+    // TODO:need refactor
     if (auto sty = dyn_cast<SpannedType>(out_type)) {
       OutputScript(fty, f->name, GetBaseTypeStringOf(*out_type), out_size,
                    sty->GetShape());

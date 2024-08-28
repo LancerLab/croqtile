@@ -4,161 +4,60 @@ using namespace Choreo;
 
 namespace Choreo::Factor {
 
-std::string stringify(const FactorType& type) {
-  switch (type) {
-    case FactorType::I32: 
-      return "int32_t";
-      break;
-    case FactorType::U32: 
-      return "uint32_t";
-      break;
-    case FactorType::I16: 
-      return "int16_t";
-      break;
-    case FactorType::U16: 
-      return "uint16_t";
-      break;
-    case FactorType::I8: 
-      return "int8_t";
-      break;
-    case FactorType::U8: 
-      return "uint8_t";
-      break;
-    case FactorType::F32: 
-      return "float";
-      break;
-    case FactorType::F16: 
-      return "half";
-      break;
-    case FactorType::BF16: 
-      return "__nv_bfloat16";
-      break;
-    case FactorType::BOOL:
-      return "bool";
-      break;
-    case FactorType::F64: 
-      return "double";
-      break;
-    case FactorType::VOID: 
-      return "void";
-      break;
-    default:
-      choreo_unreachable("This FactorType is not supported.");
-  }
+namespace __internal__ {
+
+inline static std::string ToString(BaseType dataType) {
+  static const std::unordered_map<BaseType, std::string> enumToString = {
+      {BaseType::F32, "FloatType(32)"},
+      {BaseType::F16, "FloatType(16)"},
+      {BaseType::BF16, "BFloatType(16)"},
+      {BaseType::U32, "IntType(32)"},
+      {BaseType::S32, "IntType(32)"},
+      {BaseType::U16, "IntType(16)"},
+      {BaseType::S16, "IntType(16)"},
+      {BaseType::U8, "IntType(8)"},
+      {BaseType::S8, "IntType(8)"},
+      {BaseType::INT, "IntType(32)"},
+      {BaseType::BOOL, "BoolType(32)"},
+  };
+
+  auto it = enumToString.find(dataType);
+  assert(it != enumToString.end() && "unsupported type.");
+
+  return it->second;
 }
 
-FactorType fromBaseType(BaseType type) {
-  switch (type) {
-    case BaseType::F32:
-      return FactorType::F32;
-      break;
-    case BaseType::F16:
-      return FactorType::F16;
-      break;
-    case BaseType::BF16:
-      return FactorType::BF16;
-      break;
-    case BaseType::U32:
-      return FactorType::U32;
-      break;
-    case BaseType::S32:
-      return FactorType::I32;
-      break;
-    case BaseType::U16:
-      return FactorType::U16;
-      break;
-    case BaseType::S16:
-      return FactorType::I16;
-      break;
-    case BaseType::U8:
-      return FactorType::U8;
-      break;
-    case BaseType::S8:
-      return FactorType::I8;
-      break;
-    // should it be passed in?
-    case BaseType::INT:
-      return FactorType::I32;
-      break;
-    case BaseType::BOOL:
-      return FactorType::BOOL;
-      break;
-    default:
-      choreo_unreachable("BaseType '" + STR(type) + "' is not supported.");
-  }
+inline static std::string ToString(Storage st) {
+  static const std::unordered_map<Storage, std::string> enumToString = {
+      {Storage::LOCAL, "L1Type"},     
+      {Storage::GLOBAL, "DRAMType"},
+      {Storage::SHARED, "SRAMType"},
+  };
+
+  auto it = enumToString.find(st);
+  assert(it != enumToString.end() && "unsupported type.");
+
+  return it->second;
 }
 
-std::string stringify(const BaseType& type) {
-  switch (type) {
-    case BaseType::F32:
-      return "FloatType(32)";
-      break;
-    case BaseType::F16:
-      return "FloatType(16)";
-      break;
-    case BaseType::BF16:
-      return "BFloatType(16)";
-      break;
-    case BaseType::U32:
-    case BaseType::S32:
-      return "IntType(32)";
-      break;
-    case BaseType::U16:
-    case BaseType::S16:
-      return "IntType(16)";
-      break;
-    case BaseType::U8:
-    case BaseType::S8:
-      return "IntType(8)";
-      break;
-    // should it be passed in?
-    case BaseType::INT:
-      return "IntType(32)";
-      break;
-    case BaseType::BOOL:
-      return "BoolType(32)";
-      break;
-    default:
-      choreo_unreachable("Type '" + STR(type) + "' is not supported.");
-  }
-}
+}  // end namespace __internal__
 
 std::string stringify(const FundamentalType& t) {
-  switch (t) {
-    case FundamentalType::F32:
-      return "FloatType(32)";
-      break;
-    case FundamentalType::F16:
-      return "FloatType(16)";
-      break;
-    case FundamentalType::BF16:
-      return "BFloatType(16)";
-      break;
-    case FundamentalType::U32:
-    case FundamentalType::S32:
-      return "IntType(32)";
-      break;
-    case FundamentalType::U16:
-    case FundamentalType::S16:
-      return "IntType(16)";
-      break;
-    case FundamentalType::U8:
-    case FundamentalType::S8:
-      return "IntType(8)";
-      break;
-    default:
-      choreo_unreachable("Type '" + STR(t) + "' is not supported.");
-  }
+  return __internal__::ToString((BaseType)t);
+}
+
+std::string stringify(const BaseType& t) {
+  return __internal__::ToString(t);
 }
 
 std::string stringify(const Type& ty) {
   if (isa<VoidType>(&ty)) return "void";
   if (isa<IntegerType>(&ty))
-    return "int";
+    return "IntType(32)";
   else if (isa<BooleanType>(&ty))
-    return "bool";
+    return "BoolType(32)";
   else if (isa<BoundedIntegerType>(&ty))
-    return "int";
+    return "IntType(32)";
   else if (auto t = dyn_cast<SpannedType>(&ty))
     return stringify(t->f_type);
   choreo_unreachable(STR(ty) + " does not imply runtime storage.");
@@ -166,19 +65,8 @@ std::string stringify(const Type& ty) {
 }
 
   
-std::string stringify(const FactorMemSpec& mspec) {
-  switch (mspec) {
-    case FactorMemSpec::GLOBAL: return "DRAMType";
-    case FactorMemSpec::SHARED: return "SRAMType";
-    case FactorMemSpec::LOCAL: return "L1Type";
-    default:
-      choreo_unreachable();
-  }
-}
-
 std::string stringify(const Storage& sto) {
-  auto mspec = static_cast<FactorMemSpec>(static_cast<int>(sto));
-  return stringify(mspec);
+  return __internal__::ToString(sto);
 }
 
 std::string stringify(const ValueList &vl) {
