@@ -26,7 +26,6 @@ bool FactorCodeGen::ContainsLoopVar(const std::string &iv) const {
   return false;
 }
 
-static StringifyTable factor_symbols;
 
 bool FactorCodeGen::BeforeVisitImpl(AST::Node &n) {
   __TRACE_EACH_VISIT__(n)
@@ -160,7 +159,7 @@ fi
     auto fty = cast<FunctionType>(f->GetType());
     auto &out_type = fty->out_ty;
     // TODO:need refactor
-    auto out_size = GetByteSizeExprOf(*out_type);
+    auto out_size_expr = SizeExprOf(*out_type);
     fs << "}\n\n";
 
     fs << "MODULE_REGISTER(\"lib" 
@@ -170,10 +169,10 @@ fi
 
     // TODO:need refactor
     if (auto sty = dyn_cast<SpannedType>(out_type)) {
-      OutputScript(fty, f->name, GetBaseTypeStringOf(*out_type), out_size,
+      OutputScript(fty, f->name, STR(GetBaseType(*out_type)), out_size_expr,
                    sty->GetShape());
     } else
-      OutputScript(fty, f->name, GetBaseTypeStringOf(*out_type), out_size,
+      OutputScript(fty, f->name, STR(GetBaseType(*out_type)), out_size_expr,
                    Shape() /*invalid shape*/);
     ResetBuffers();
   } else if (isa<AST::ParallelBy>(&n)) {
@@ -1020,7 +1019,7 @@ ToSpanned(const std::vector<U> &v, std::initializer_list<int> && shape) {
 
 void FactorCodeGen::EmitHostFuncBody(std::ostream &os, const Type &ty,
                                      const std::string &f_n,
-                                     const std::string &out_size,
+                                     const std::string &out_size_expr,
                                      const std::string &out_type,
                                      const Shape &out_shape) {
   assert(isa<FunctionType>(&ty) && "unexpected type.");
@@ -1060,9 +1059,9 @@ void FactorCodeGen::EmitHostFuncBody(std::ostream &os, const Type &ty,
   os << "  void * device_inputs[] = {" << DelimitedString(device_mems)
      << "};\n\n";
 
-  std::string size_string = ReplaceRuntimeNames(out_size);
+  std::string size_string = ReplaceRuntimeNames(out_size_expr);
 
-  if (!out_size.empty()) {
+  if (!out_size_expr.empty()) {
     os << "  void * out_mem = nullptr;\n";
     os << "  CHECK(topsMalloc(&out_mem, " << size_string << "));\n";
     os << "  void *device_outputs[] = {out_mem};\n";
@@ -1119,7 +1118,7 @@ void FactorCodeGen::EmitHostFuncBody(std::ostream &os, const Type &ty,
     shape_string = ReplaceRuntimeNames(LSTR(out_shape));
   }
 
-  if (!out_size.empty()) {
+  if (!out_size_expr.empty()) {
     os << "  auto res = choreo::make_spandata<" << out_type << ", " << out_rank
        << ">(" << shape_string << ");\n";
     os << "  // Copy output data from device to host\n";
@@ -1258,14 +1257,14 @@ void FactorCodeGen::EmitRuntimeMemUsageCheck(std::ostream &os, const Type &ty) {
 }
 
 void FactorCodeGen::EmitHostFuncDecl(std::ostream &os, const Type &ty,
-                                     const std::string &n, bool decl_only) {
+                                     const std::string &name, bool decl_only) {
   assert(isa<FunctionType>(&ty) && "unexpected type.");
   auto &fty = *cast<FunctionType>(&ty);
   assert(host_params.size() == fty.in_tys.size() &&
          "inconsistent parameter count.");
 
   // emit the return type
-  os << HostTypeString(*fty.out_ty, true) << " " << n << "(";
+  os << HostTypeStringify(*fty.out_ty, true) << " " << name << "(";
 
   if (fty.in_tys.size() > 0) {
     if (!decl_only) {
@@ -1275,7 +1274,7 @@ void FactorCodeGen::EmitHostFuncDecl(std::ostream &os, const Type &ty,
       } else
         param_map.push_back(std::make_pair(host_params[0], "1"));
     }
-    os << HostTypeString(*fty.in_tys[0]) << " " << host_params[0];
+    os << HostTypeStringify(*fty.in_tys[0]) << " " << host_params[0];
     for (size_t i = 1; i < fty.in_tys.size(); ++i) {
       if (!decl_only) {
         if (auto sty = dyn_cast<SpannedType>(fty.in_tys[i])) {
@@ -1284,26 +1283,26 @@ void FactorCodeGen::EmitHostFuncDecl(std::ostream &os, const Type &ty,
         } else
           param_map.push_back(std::make_pair(host_params[i], "1"));
       }
-      os << ", " << HostTypeString(*fty.in_tys[i]) << " " << host_params[i];
+      os << ", " << HostTypeStringify(*fty.in_tys[i]) << " " << host_params[i];
     }
   }
   os << ")" << ((decl_only) ? ";\n" : " ");
 }
 
-void FactorCodeGen::OutputScript(FunctionType *fty, const std::string &n,
+void FactorCodeGen::OutputScript(FunctionType *fty, const std::string &name,
                                  const std::string &out_type,
-                                 const std::string &out_size,
+                                 const std::string &out_size_expr,
                                  const Shape &out_shape) {
   // a temporal path for the compilation process
   build_path = create_unique_path();
-  std::string build_prefix = build_path + "/__choreo_" + n;
+  std::string build_prefix = build_path + "/__choreo_" + name;
 
   std::string kernel_fn = build_prefix + "_micro_kernel.cpp";
   std::string factor_fn = build_prefix + "_factor.cpp";
   std::string factor_bfn =
       build_path + "/${gcu_target_string}_lib" + current_fn + ".o";
   host_fn = build_prefix + "_host.cpp";
-  target_fn = "__choreo_" + n;
+  target_fn = "__choreo_" + name;
 
   // Generate the host code
   std::string user_code = hs.str();
@@ -1312,50 +1311,23 @@ void FactorCodeGen::OutputScript(FunctionType *fty, const std::string &n,
   EmitHostHead(hs);
   if (!user_code.empty()) {
     // user code needs the choreo function decal for call
-    EmitHostFuncDecl(hs, *fty, n, true);
+    EmitHostFuncDecl(hs, *fty, name, true);
     hs << user_code;
   }
-  EmitHostFuncDecl(hs, *fty, n);
-  EmitHostFuncBody(hs, *fty, factor_bfn, out_size, out_type, out_shape);
+  EmitHostFuncDecl(hs, *fty, name);
+  EmitHostFuncBody(hs, *fty, factor_bfn, out_size_expr, out_type, out_shape);
 
   // backpatch the factor bin filename
   std::string factor_src = fs.str();
   if (!alloc_in_fs.str().empty())
     factor_src.insert(alloc_pos, alloc_in_fs.str());
-  ReplaceInString(factor_src, std::string("$$out$$"), output_v);
-  ReplaceInString(factor_src, std::string(backpatch_filename), kernel_fn);
+  ReplaceInString(&factor_src, std::string("$$out$$"), output_v);
+  ReplaceInString(&factor_src, std::string(backpatch_filename), kernel_fn);
 
   // Now generate the script
   os << "#!/usr/bin/env bash\n\n";
   os << "# This is the choreo generated bash script to compile factor code\n";
 
-//   os << R"script(
-//   # check the device
-//   # TODO: improve the target check with more solid code
-//   GCU_DEVICE_STR="$(lspci | grep Enflame | head -1)"
-//   echo $GCU_DEVICE_STR
-//   if [[ "${GCU_DEVICE_STR}" == *"S60G"* ]]; then
-//     gcu_arch=gcu300
-//     gcu_resource=1c12s
-//     gcu_target_string="scorpio_${gcu_resource}"
-//   elif [[ "${GCU_DEVICE_STR}" == *"c035"* ]]; then
-//     gcu_arch=gcu300
-//     gcu_resource=1c12s
-//     gcu_target_string="scorpio_${gcu_resource}"
-//     export TOPS_VISIBLE_DEVICES=1
-//   elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then
-//     gcu_arch=gcu210
-//     gcu_resource=2c24s
-//     gcu_target_string="dorado_2c"
-//   elif [[ "$(lspci | grep Tencent)" != "" ]]; then
-//     gcu_arch=gcu210
-//     gcu_resource=2c24s
-//     gcu_target_string="dorado_2c"
-//   else
-//     echo "can not determine the GCU device type."
-//     exit 1
-//   fi
-// )script";
   os << "\n# step 0: set up the environment\n";
   os << "rm -fr " << build_path << "\n";
   os << "mkdir -p " << build_path << "\n";

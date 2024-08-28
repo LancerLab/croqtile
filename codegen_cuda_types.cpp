@@ -88,5 +88,22 @@ std::string stringify(const ValueList &vl) {
   return oss.str();
 }
 
+// >> [4096, 4096]
+std::string stringify(const Shape& s) {
+  std::ostringstream oss;
+  s.PrintAsListSquared(oss);
+  return oss.str();
+}
+
+// >> [4096 * 4096]
+std::string size_expr_of(const Shape& s) {
+  std::ostringstream oss;
+  oss << "[";
+  s.PrintSizeExpr(oss);
+  oss << "]";
+  return oss.str();
+}
+
+
 } // namespace Choreo::CUDA
 

@@ -1,7 +1,8 @@
-#ifndef __CHOREO_CODEGEN_HPP__
-#define __CHOREO_CODEGEN_HPP__
+#ifndef CHOREO_CODEGEN_HPP_
+#define CHOREO_CODEGEN_HPP_
 
 #include <thread>
+#include <string>
 
 #include "valbind.hpp"
 #include "visitor.hpp"
@@ -62,20 +63,20 @@ inline static std::string create_unique_path() {
   return path;
 }
 
-inline static void ReplaceInString(std::string &str, const std::string &from,
+inline static void ReplaceInString(std::string* pstr, const std::string &from,
                                    const std::string &to) {
   if (from.empty()) return;
 
   size_t startPos = 0;
-  while ((startPos = str.find(from, startPos)) != std::string::npos) {
-    str.replace(startPos, from.length(), to);
+  while ((startPos = pstr->find(from, startPos)) != std::string::npos) {
+    pstr->replace(startPos, from.length(), to);
     startPos += to.length();  // In case 'to' contains 'from', like replacing
                               // 'x' with 'yx'
   }
 }
 
 
-static inline std::string HostTypeString(const Choreo::Type &ty,
+static inline std::string HostTypeStringify(const Choreo::Type &ty,
                                          bool is_ret = false) {
   if (isa<VoidType>(&ty))
     return "void";
@@ -98,4 +99,4 @@ static inline std::string HostTypeString(const Choreo::Type &ty,
 
 }  // end namespace Choreo
 
-#endif  // __CHOREO_CODEGEN_HPP__
+#endif // CHOREO_CODEGEN_HPP_

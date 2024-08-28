@@ -27,7 +27,6 @@ bool CUDACodeGen::ContainsLoopVar(const std::string &iv) const {
 }
 
 
-static StringifyTable cuda_symbols;
 
 
 bool CUDACodeGen::BeforeVisitImpl(AST::Node &n) {
@@ -65,9 +64,9 @@ bool CUDACodeGen::BeforeVisitImpl(AST::Node &n) {
 
     auto fty = cast<FunctionType>(c->GetType());
     auto &out_type = fty->out_ty;
-    auto out_size = GetByteSizeExprOf(*out_type);
+    auto out_size_expr = SizeExprOf(*out_type);
     std::string ret_string = "void";
-    if (!out_size.empty()) {
+    if (!out_size_expr.empty()) {
       ret_string = stringify(*out_type) + "*";
       void_return = false;
     } else {
@@ -276,18 +275,18 @@ fi
     auto fty = cast<FunctionType>(fnode->GetType());
     auto &out_type = fty->out_ty;
     auto &in_type = fty->in_tys[0];
-    auto in_size = GetByteSizeExprOf(*in_type);
-    auto out_size = GetByteSizeExprOf(*out_type);
+    auto in_size_expr = SizeExprOf(*in_type);
+    auto out_size_expr = SizeExprOf(*out_type);
     if (!host_enclosed)
       fs << "} // end of choreo-cuda dataflow program\n";
 
     if (auto sty = dyn_cast<SpannedType>(out_type)) {
       assert(sty != nullptr && "Size of the result type should be positive integer\n");
-      OutputScript(fty, fnode->name, GetBaseTypeStringOf(*out_type), out_size,
+      OutputScript(fty, fnode->name, STR(GetBaseType(*out_type)), out_size_expr,
                    sty->GetShape());
     } else if (auto sty = dyn_cast<SpannedType>(in_type)) {
       assert(sty != nullptr && "Size of the input type should be positive integer\n");
-      OutputScript(fty, fnode->name, GetBaseTypeStringOf(*in_type), in_size,
+      OutputScript(fty, fnode->name, STR(GetBaseType(*in_type)), in_size_expr,
                    sty->GetShape());
     } else {
       assert(false && "return value is ambiguous to infer");
@@ -347,7 +346,7 @@ bool CUDACodeGen::Visit(AST::NamedVariableDecl &node) {
     if (storage_type == Choreo::Storage::SHARED) {
       _os << stringify(storage_type) << " ";
       _os << stringify(base_type) << " ";
-      _os << sym << ReplaceRuntimeNames(CUDASIZE(sty->GetShape()), "", false) << ";\n";
+      _os << sym << ReplaceRuntimeNames(size_expr_of(sty->GetShape()), "", false) << ";\n";
       fs << indent << _os.str();
     } else if (storage_type == Choreo::Storage::GLOBAL) {
       _os << stringify(base_type);
@@ -616,7 +615,7 @@ bool CUDACodeGen::Visit(AST::DMA &d) {
     alloc_in_fs<< stringify(mem_node->Get()) << " ";
     alloc_in_fs << stringify(sty->ElementType()) << " ";
     alloc_in_fs << dst_buffer_name;
-    alloc_in_fs << CUDASIZE(sty->GetShape());
+    alloc_in_fs << size_expr_of(sty->GetShape());
     alloc_in_fs << ";\n";
   }
 
@@ -1006,7 +1005,7 @@ bool CUDACodeGen::Visit(AST::ChoreoFunction &node) {
   // current_fn = "__choreo_" + entry_fn + "_host";
   // auto fty = cast<FunctionType>(node.GetType());
   // auto &out_type = fty->out_ty;
-  // auto out_size = GetByteSizeExprOf(*out_type);
+  // auto out_size_expr = GetByteSizeExprOf(*out_type);
   return true; 
 }
 
@@ -1118,7 +1117,7 @@ void CUDACodeGen::EmitHostTail(std::ostream &os) {
 void CUDACodeGen::EmitHostFuncBody(std::ostream &os, 
                                    const Type &ty,
                                    const std::string &f_n,
-                                   const std::string &out_size,
+                                   const std::string &out_size_expr,
                                    const std::string &out_type,
                                    const Shape &out_shape) {
   assert(isa<FunctionType>(&ty) && "unexpected type.");
@@ -1162,7 +1161,7 @@ void CUDACodeGen::EmitHostFuncBody(std::ostream &os,
   os << "  float * device_inputs[] = {" << DelimitedString(device_mems)
      << "};\n\n";
 
-  std::string size_string = ReplaceRuntimeNames(out_size);
+  std::string size_string = ReplaceRuntimeNames(out_size_expr);
 
   if (void_return) {
     os << "\n  run_kernel(0, hp0.shape()[0], hp1.shape()[1], hp0.shape()[1], alpha, beta, " << DelimitedString(device_mems) << ", cublas_handle);\n";
@@ -1327,7 +1326,7 @@ void CUDACodeGen::EmitHostFuncDecl(std::ostream &os, const Type &ty,
          "inconsistent parameter count.");
 
   // emit the return type
-  os << HostTypeString(*fty.out_ty, true) << " " << n << "(";
+  os << HostTypeStringify(*fty.out_ty, true) << " " << n << "(";
 
   if (fty.in_tys.size() > 0) {
     if (!decl_only) {
@@ -1337,7 +1336,7 @@ void CUDACodeGen::EmitHostFuncDecl(std::ostream &os, const Type &ty,
       } else
         param_map.push_back(std::make_pair(host_params[0], "1"));
     }
-    os << HostTypeString(*fty.in_tys[0]) << " " << host_params[0];
+    os << HostTypeStringify(*fty.in_tys[0]) << " " << host_params[0];
     for (size_t i = 1; i < fty.in_tys.size(); ++i) {
       if (!decl_only) {
         if (auto sty = dyn_cast<SpannedType>(fty.in_tys[i])) {
@@ -1346,7 +1345,7 @@ void CUDACodeGen::EmitHostFuncDecl(std::ostream &os, const Type &ty,
         } else
           param_map.push_back(std::make_pair(host_params[i], "1"));
       }
-      os << ", " << HostTypeString(*fty.in_tys[i]) << " " << host_params[i];
+      os << ", " << HostTypeStringify(*fty.in_tys[i]) << " " << host_params[i];
     }
   }
   os << ")" << ((decl_only) ? ";\n" : " ");
@@ -1354,7 +1353,7 @@ void CUDACodeGen::EmitHostFuncDecl(std::ostream &os, const Type &ty,
 
 void CUDACodeGen::OutputScript(FunctionType *fty, const std::string &n,
                                  const std::string &out_type,
-                                 const std::string &out_size,
+                                 const std::string &out_size_expr,
                                  const Shape &out_shape) {
   // a temporal path for the compilation process
   build_path = create_unique_path();
@@ -1379,15 +1378,15 @@ void CUDACodeGen::OutputScript(FunctionType *fty, const std::string &n,
     hs << user_code;
   }
   EmitHostFuncDecl(hs, *fty, n);
-  EmitHostFuncBody(hs, *fty, cuda_bfn, out_size, out_type, out_shape);
+  EmitHostFuncBody(hs, *fty, cuda_bfn, out_size_expr, out_type, out_shape);
   EmitHostTail(hs);
   //
   // // backpatch the cuda bin filename
   std::string cuda_src = fs.str();
   if (!alloc_in_fs.str().empty())
     cuda_src.insert(alloc_pos, alloc_in_fs.str());
-  ReplaceInString(cuda_src, std::string("$$out$$"), output_v);
-  ReplaceInString(cuda_src, std::string(backpatch_filename), kernel_fn);
+  ReplaceInString(&cuda_src, std::string("$$out$$"), output_v);
+  ReplaceInString(&cuda_src, std::string(backpatch_filename), kernel_fn);
 
   // Now generate the script
   os << "#!/usr/bin/env bash\n\n";

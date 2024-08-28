@@ -1,10 +1,15 @@
-#ifndef __CHOREO_CODEGEN_FACTOR_HPP__
-#define __CHOREO_CODEGEN_FACTOR_HPP__
+#ifndef CHOREO_CODEGEN_FACTOR_HPP_
+#define CHOREO_CODEGEN_FACTOR_HPP_
 
 #include <filesystem>
 #include <iostream>
 #include <sstream>
+#include <string>
 #include <thread>
+#include <map>
+#include <vector>
+#include <utility>
+#include <unordered_set>
 
 #include "ast.hpp"
 #include "choreo_header.inc"
@@ -17,26 +22,11 @@ namespace Choreo {
 namespace Factor {
 
 struct FactorCodeGen : public CodeGenerator {
-  // TODO: should the pointer be replaced?
+ private:
   std::string current_fn = "";
   std::string entry_fn = "";
   std::string indent = "";
-  std::vector<AST::ptr<AST::Parameter>> *cur_params = nullptr;
-  AST::ptr<AST::DataType> current_output = nullptr;
-  std::map<std::string, std::vector<std::string>> cur_bounded_vars;
-
   std::string bin_fn;  // temporal filename of factor binary
-  int parallel_factor = 1;
-
- // TODO merge with is_dest_passing_style
-  bool void_return = false;
-
-  ValBind::BindInfo<std::string> bind_info;
-
-  std::vector<std::unordered_set<std::string>> loop_vars;  // the loop variables
-  bool ContainsLoopVar(const std::string &) const;
-
- private:
   // buffer the kernel code
   std::ostringstream ks;
   // buffer the factor code
@@ -45,26 +35,31 @@ struct FactorCodeGen : public CodeGenerator {
   std::ostringstream hs;
   std::string host_fn;
   std::string target_fn;
-
   std::string build_path;
   // buffer of "alloc" statements in factor code
   std::ostringstream alloc_in_fs;
   std::string::size_type alloc_pos;
   std::string alloc_indent;
-
   // output variable name
   std::string output_v;
 
-  // name suffix of factor function parameters
+  bool void_return = false;
+  int parallel_factor = 1;
   size_t sp_count = 0;
-
   int parallel_level = 0;
-
   bool dyn_shaped = false;
-
-  std::vector<RtMemUsageCheckInfo> rt_mem_usage_check_list;
-
   bool trace_visit = false;  // for debugging purpose only
+
+  ValBind::BindInfo<std::string> bind_info;
+  std::vector<AST::ptr<AST::Parameter>> *cur_params = nullptr;
+  AST::ptr<AST::DataType> current_output = nullptr;
+  std::map<std::string, std::vector<std::string>> cur_bounded_vars;
+  std::vector<std::unordered_set<std::string>> loop_vars;  // the loop variables
+  std::vector<RtMemUsageCheckInfo> rt_mem_usage_check_list;
+  // runtime host parameter names
+  std::vector<std::string> host_params;
+  // parameters: the name (of factor data) and associated size expression
+  std::vector<std::pair<std::string, std::string>> param_map;
 
   // mapping from a symbolic shape dimensions to the associated runtime name
   std::map<std::string, std::string>
@@ -73,25 +68,7 @@ struct FactorCodeGen : public CodeGenerator {
       rts_pidx;  // shape index in parameter list for the runtime shape name
   std::map<std::string, size_t>
       rts_nidx;  // dim index in shape for the runtime shape name
-
-  // runtime host parameter names
-  std::vector<std::string> host_params;
-  // parameters: the name (of factor data) and associated size expression
-  std::vector<std::pair<std::string, std::string>> param_map;
-
-  void EmitHostHead(std::ostream &);
-  void EmitHostFuncDecl(std::ostream &, const Type &, const std::string &,
-                        bool = false);
-  void EmitRuntimeCheck(std::ostream &, const Type &);
-  void EmitRuntimeMemUsageCheck(std::ostream &, const Type &);
-  void EmitHostFuncBody(std::ostream &, const Type &, const std::string &fname,
-                        const std::string &o_sz, const std::string &o_ty,
-                        const Shape &s);
-
-  std::string GenHostParamName() { return "hp" + std::to_string(sp_count++); }
-  std::string ReplaceRuntimeNames(const std::string &, const std::string & = "",
-                                  bool host_code = true);
-  std::string ReplaceDynDimName(const std::string &);
+  StringifyTable factor_symbols;
 
  public:
   FactorCodeGen(std::ostream &os, const ptr<SymbolTable> &symtab)
@@ -147,6 +124,22 @@ struct FactorCodeGen : public CodeGenerator {
   bool Visit(AST::CppSourceCode &) override;
   bool Visit(AST::Program &) override;
 
+ private:
+  bool ContainsLoopVar(const std::string &) const;
+
+  void EmitHostHead(std::ostream &);
+  void EmitHostFuncDecl(std::ostream &, const Type &, const std::string &,
+                        bool = false);
+  void EmitRuntimeCheck(std::ostream &, const Type &);
+  void EmitRuntimeMemUsageCheck(std::ostream &, const Type &);
+  void EmitHostFuncBody(std::ostream &, const Type &, const std::string &fname,
+                        const std::string &o_sz, const std::string &o_ty,
+                        const Shape &s);
+
+  std::string GenHostParamName() { return "hp" + std::to_string(sp_count++); }
+  std::string ReplaceRuntimeNames(const std::string &, const std::string & = "",
+                                  bool host_code = true);
+  std::string ReplaceDynDimName(const std::string &);
   // common utils
   void incrementIndent() { this->indent += "  "; }
 
@@ -160,4 +153,4 @@ struct FactorCodeGen : public CodeGenerator {
 
 }  // end namespace Choreo
 
-#endif // __CHOREO_CODEGEN_FACTOR_HPP__
+#endif // CHOREO_CODEGEN_FACTOR_HPP_

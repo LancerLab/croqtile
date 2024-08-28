@@ -12,4 +12,7 @@ demo/__*
 __*
 tests/standalone/*.test
 
+# ignore scripts as gen'd object
+*.sh
+
 !tools/Makefile

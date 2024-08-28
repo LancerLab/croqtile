@@ -1,5 +1,5 @@
-#ifndef __CHOREO_CODEGEN_TOPSCC_HPP__
-#define __CHOREO_CODEGEN_TOPSCC_HPP__
+#ifndef CHOREO_CODEGEN_TOPSCC_HPP_
+#define CHOREO_CODEGEN_TOPSCC_HPP_
 
 #include <filesystem>
 #include <iostream>
@@ -57,4 +57,4 @@ struct TopsccCodeGen : public CodeGenerator {
 
 }  // end namespace Choreo
 
-#endif // __CHOREO_CODEGEN_TOPSCC_HPP__
+#endif // CHOREO_CODEGEN_TOPSCC_HPP_

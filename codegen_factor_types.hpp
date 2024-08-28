@@ -1,5 +1,5 @@
-#ifndef __CHOREO_CODEGEN_FACTOR_TYPES_HPP__
-#define __CHOREO_CODEGEN_FACTOR_TYPES_HPP__
+#ifndef CHOREO_CODEGEN_FACTOR_TYPES_HPP_
+#define CHOREO_CODEGEN_FACTOR_TYPES_HPP_
 
 #include <string>
 #include <type_traits>
@@ -39,4 +39,4 @@ inline static std::string stringify(const ptr<T>& pt) {
 
 } // namespace Choreo
 
-#endif // __CHOREO_CODEGEN_FACTOR_TYPES_HPP__
+#endif // CHOREO_CODEGEN_FACTOR_TYPES_HPP_

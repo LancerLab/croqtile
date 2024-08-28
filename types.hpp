@@ -92,7 +92,7 @@ inline BaseType TC2BT(TypeCategory tc) {
   return BaseType::UNKNOWN;
 }
 
-inline static size_t GetByteSizeOf(FundamentalType ft) {
+inline static size_t SizeOf(FundamentalType ft) {
   switch (ft) {
     case FundamentalType::F32:
     case FundamentalType::U32:
@@ -508,7 +508,7 @@ inline void PrintValueList(const ValueList& vl, std::ostream& os,
   if (rb) os << rb;
 }
 
-inline void PrintValueListAccumulator(const ValueList& vl, std::ostream& os,
+inline void PrintValueListSizeExpr(const ValueList& vl, std::ostream& os,
                                       const char* lb = "[",
                                       const char* rb = "]") {
   auto print_variant = [&os](const ValueItem& vle) {
@@ -686,7 +686,7 @@ struct Shape {
   }
 
   // os << [4096, 4096]
-  void PrintAsCUDAShape(std::ostream& os) const {
+  void PrintAsListSquared(std::ostream& os) const {
     if (!IsValidValueNumber(val_no)) {
       os << "[]";
     } else {
@@ -696,12 +696,12 @@ struct Shape {
   }
 
   // os << [4096 * 4096]
-  void PrintAsCUDASize(std::ostream& os) const {
+  void PrintSizeExpr(std::ostream& os) const {
     if (!IsValidValueNumber(val_no)) {
-      os << "[]";
+      os << "";
     } else {
       assert(values.Exists(val_no) && "invalid value number.");
-      PrintValueListAccumulator(Value(), os);
+      PrintValueListSizeExpr(Value(), os, nullptr, nullptr);
     }
   }
 
@@ -803,20 +803,6 @@ inline std::string STR(const ValueItem& vi) {
 inline std::string LSTR(const Shape& s) {
   std::ostringstream oss;
   s.PrintAsList(oss);
-  return oss.str();
-}
-
-// >> [4096, 4096]
-inline std::string CUDASHAPE(const Shape& s) {
-  std::ostringstream oss;
-  s.PrintAsCUDAShape(oss);
-  return oss.str();
-}
-
-// >> [4096, 4096]
-inline std::string CUDASIZE(const Shape& s) {
-  std::ostringstream oss;
-  s.PrintAsCUDASize(oss);
   return oss.str();
 }
 
@@ -1046,11 +1032,11 @@ struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
     return GetShape().IsDynamic();
   }
 
-  size_t ByteSize() const { return GetByteSizeOf(f_type) * GetShape().Size(); }
+  size_t ByteSize() const { return SizeOf(f_type) * GetShape().Size(); }
   std::string ByteSizeExpression() const {
     if (RuntimeShaped())
       return GetShape().GetSizeExpression() + " * " +
-             std::to_string(GetByteSizeOf(f_type));
+             std::to_string(SizeOf(f_type));
     else
       return std::to_string(ByteSize());
   }
@@ -1307,7 +1293,7 @@ inline bool operator==(const Type& t1, const Type& t2) {
 }
 #endif
 
-inline size_t GetByteSizeOf(const Type& ty) {
+inline size_t SizeOf(const Type& ty) {
   if (isa<VoidType>(&ty)) return 0;
   if (isa<IntegerType>(&ty))
     return 4;
@@ -1321,7 +1307,8 @@ inline size_t GetByteSizeOf(const Type& ty) {
   return 0;
 }
 
-inline std::string GetByteSizeExprOf(const Type& ty) {
+// This util might be useful to keep symbolic form till runtime
+inline std::string SizeExprOf(const Type& ty) {
   if (isa<VoidType>(&ty)) return {};
   if (isa<IntegerType>(&ty))
     return "4";
@@ -1335,18 +1322,17 @@ inline std::string GetByteSizeExprOf(const Type& ty) {
   return {};
 }
 
-inline std::string GetBaseTypeStringOf(const Type& ty) {
-  if (isa<VoidType>(&ty)) return "void";
+inline BaseType GetBaseType(const Type& ty) {
+  if (isa<VoidType>(&ty)) return BaseType::VOID;
   if (isa<IntegerType>(&ty))
-    return "int";
+    return BaseType::INT;
   else if (isa<BooleanType>(&ty))
-    return "bool";
+    return BaseType::BOOL;
   else if (isa<BoundedIntegerType>(&ty))
-    return "int";
+    return BaseType::INT;
   else if (auto t = dyn_cast<SpannedType>(&ty))
-    return STR(t->f_type);
+    return (BaseType)t->f_type;
   choreo_unreachable(STR(ty) + " does not imply runtime storage.");
-  return 0;
 }
 
 inline bool IsScalarType(const ptr<Type>& ty) {
