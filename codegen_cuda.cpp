@@ -1126,9 +1126,9 @@ void CUDACodeGen::EmitHostFuncBody(std::ostream &os,
   os << "\n  cudaEventRecord(beg);\n";
   // os << "\n  run_kernel(1, hp0.shape()[0], hp1.shape()[1], hp0.shape()[1], alpha, " << DelimitedString(device_mems) << ", beta, out_mem_choreo, cublas_handle);\n";
   if (void_return) {
-    os << "\n  __choreo_sgemm_host(" << DelimitedString(device_mems) << ");\n";
+    os << "\n  " << target_fn << "_host(" << DelimitedString(device_mems) << ");\n";
   } else {
-    os << "\n  auto out_mem_choreo = __choreo_sgemm_host(" << DelimitedString(device_mems) << ");\n";
+    os << "\n  auto out_mem_choreo = " << target_fn << "_host(" << DelimitedString(device_mems) << ");\n";
   }
   os << "  CUDACheck(cudaDeviceSynchronize());\n";
   os << R"(

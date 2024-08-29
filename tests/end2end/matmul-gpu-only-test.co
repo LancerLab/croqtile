@@ -1,4 +1,4 @@
-// RUN: choreo -t cuda %s > %s.test && bash %s.test --execute | FileCheck --match-full-lines %s
+// RUN: choreo -t cuda %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
 #include "choreo_cuda.h"
 
 // extern "C" void kernel(int * lhs, int * rhs, int * out, int m, int k, int n) {

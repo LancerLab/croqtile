@@ -1,4 +1,4 @@
-// RUN: choreo -t factor %s > %s.test && bash %s.test --execute | FileCheck --match-full-lines %s
+// RUN: choreo -t factor %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
 #include "choreo.h"
 #include <chrono>
 

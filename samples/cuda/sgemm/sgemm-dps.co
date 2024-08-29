@@ -29,7 +29,7 @@ __device__ void fill_zero_elementwise(float* data) {
 } /// end of kernel decl
 
 // __co__ f32 [4096, 4096] sgemm(f32 [4096, 4096] lhs, f32 [4096, 4096] rhs, f32 [4096, 4096] output) { /// device program
-__co__ void sgemm(f32 [4096, 4096] lhs, f32 [4096, 4096] rhs, f32 [4096, 4096] output) { /// device program
+__co__ void gpu_matmul(f32 [4096, 4096] lhs, f32 [4096, 4096] rhs, f32 [4096, 4096] output) { /// device program
   parallel p by 128 {  // p is bid_x
     parallel q by 128 { // q is bid_y
       with index = {m_tile_times_p, n_tile_times_q, k_tile} in [1, 1, 128] {  // decl your tiled spans
@@ -98,7 +98,7 @@ int main() { /// host program
   auto rhs_data = choreo::make_spanview<2>((float*)b, {k, n});
   auto out_data = choreo::make_spanview<2>((float*)c, {m, n});
 
-  sgemm(lhs_data, rhs_data, out_data);
+  gpu_matmul(lhs_data, rhs_data, out_data);
   // auto res = sgemm(lhs_data, rhs_data);
 
   return 0;
