@@ -22,6 +22,22 @@ if ! which not.sh &>/dev/null; then
     exit 1
 fi
 
+# check device availability
+is_gpu_available=0
+if command -v nvidia-smi &> /dev/null; then
+  if nvidia-smi > /dev/null 2>&1; then
+    echo "GPU is available."
+    is_gpu_available=1
+  fi
+fi
+
+is_gcu_available=0
+if [[ "$(lspci | grep Enflame | head -1)" != "" ]]; then
+  echo "GCU is available."
+  is_gcu_available=1
+fi
+
+
 echo "---------------------------------------"
 echo "        Choreo SimpleLit - v0.1"
 echo "---------------------------------------"
@@ -64,7 +80,17 @@ execute_command() {
 # Check if the argument is a valid file or directory
 if [ -d "$1" ]; then
     # Directory: Fill the array with .co files from the directory
-    files_array=($(find "$1" -type f -name '*.co'))
+    files_array=($(find "$1" -type f -name '*.co' | grep -v 'only'))
+    if [ $is_gpu_available -eq 1 ]; then
+        files_array+=($(find "$1" -type f -name '*.co' | grep 'gpu-only'))
+    fi
+    if [ $is_gcu_available -eq 1 ]; then
+        files_array+=($(find "$1" -type f -name '*.co' | grep 'gcu-only'))
+    fi
+    # verbose all tests files
+    # for file in "${files_array[@]}"; do
+    #     echo "$file"
+    # done
 elif [ -f "$1" ]; then
     # File: Fill the array with the single file
     files_array=("$1")

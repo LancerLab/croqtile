@@ -1273,7 +1273,7 @@ void FactorCodeGen::OutputScript(FunctionType *fty, const std::string &name,
   std::string kernel_fn = build_prefix + "_micro_kernel.cpp";
   std::string factor_fn = build_prefix + "_factor.cpp";
   std::string factor_bfn =
-      build_path + "/_lib" + current_fn + ".o";
+      build_path + "/${gcu target string}_lib" + current_fn + ".o";
   host_fn = build_prefix + "_host.cpp";
   target_fn = "__choreo_" + name;
 
