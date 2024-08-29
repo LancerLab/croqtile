@@ -1592,7 +1592,7 @@ int main() { /// host program
         // assert(ref == res[i][j]);
       }
   // std::cout << "Test Passed\n" << std::endl;
-  std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
   std::cout << "\nTest Passed\n";
+  std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
 }
 // CHECK: Test Passed

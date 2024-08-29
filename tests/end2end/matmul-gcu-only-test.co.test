@@ -9,6 +9,7 @@
   # check the device
   # TODO: improve the target check with more solid code
   GCU_DEVICE_STR="$(lspci | grep Enflame | head -1)"
+  GCU_DEVICE_STR_BACKUP="$(lspci | grep Tencent)"
   echo $GCU_DEVICE_STR
   if [[ "${GCU_DEVICE_STR}" == *"S60G"* ]]; then
     gcu_arch=gcu300
@@ -23,7 +24,7 @@
     gcu_arch=gcu210
     gcu_resource=2c24s
     gcu_target_string="dorado_2c"
-  elif [[ "$(lspci | grep Tencent)" != "" ]]; then
+  elif [[ "${GCU_DEVICE_STR_BACKUP}" != "" ]]; then
     gcu_arch=gcu210
     gcu_resource=2c24s
     gcu_target_string="dorado_2c"
@@ -33,9 +34,9 @@
   fi
 
 # step 0: set up the environment
-rm -fr /tmp/1724917046225405090_139740689119040
-mkdir -p /tmp/1724917046225405090_139740689119040
-cat <<'EOF' > /tmp/1724917046225405090_139740689119040/factor_script.sh
+rm -fr /tmp/1724918360746740117_1
+mkdir -p /tmp/1724918360746740117_1
+cat <<'EOF' > /tmp/1724918360746740117_1/factor_script.sh
 #!/usr/bin/env bash
 
 set -e
@@ -81,8 +82,8 @@ LD_LIBRARY_PATH=${TOPS_LIB_PATH} ./${BIN_TARGET}
 
 
 EOF
-chmod +x /tmp/1724917046225405090_139740689119040/factor_script.sh
-cat <<'EOF' > /tmp/1724917046225405090_139740689119040/choreo.h
+chmod +x /tmp/1724918360746740117_1/factor_script.sh
+cat <<'EOF' > /tmp/1724918360746740117_1/choreo.h
 #ifndef __CHOREO_H__
 #define __CHOREO_H__
 
@@ -525,7 +526,7 @@ EOF
 
 
 # step 1: write the kernel source code into a temp file
-kernel_src=/tmp/1724917046225405090_139740689119040/__choreo_ele_add_micro_kernel.cpp
+kernel_src=/tmp/1724918360746740117_1/__choreo_ele_add_micro_kernel.cpp
 cat <<'EOF' > ${kernel_src}
  /// kernel program
 extern "C" void kernel(int * lhs, int * rhs, int * out) {
@@ -2014,7 +2015,7 @@ dot_general_fp32(int lhs_addr, int rhs_addr,
 EOF
 
 # step 2: write the factor source code into a temp file
-factor_src=/tmp/1724917046225405090_139740689119040/__choreo_ele_add_factor.cpp
+factor_src=/tmp/1724918360746740117_1/__choreo_ele_add_factor.cpp
 cat <<'EOF' > ${factor_src}
 #include <vector>
 
@@ -2022,7 +2023,7 @@ cat <<'EOF' > ${factor_src}
 
 using namespace factor;
 void __choreo_ele_add() {
-  include_("/tmp/1724917046225405090_139740689119040/__choreo_ele_add_micro_kernel.cpp");
+  include_("/tmp/1724918360746740117_1/__choreo_ele_add_micro_kernel.cpp");
   auto lhs_type = DRAMType(IntType(32), {512, 1024});
   auto rhs_type = DRAMType(IntType(32), {1024, 1024});
   auto output_type = DRAMType(IntType(32), {512, 1024});
@@ -2109,10 +2110,10 @@ EOF
 
 
 # step 3: set the factor binary file name
-factor_bin=/tmp/1724917046225405090_139740689119040/${gcu target string}_lib__choreo_ele_add.o
+factor_bin=/tmp/1724918360746740117_1/${gcu_target_string}_lib__choreo_ele_add.o
 
 # step 4: generate the host source
-host_src=/tmp/1724917046225405090_139740689119040/__choreo_ele_add_host.cpp
+host_src=/tmp/1724918360746740117_1/__choreo_ele_add_host.cpp
 echo "#include \""${gcu_target_string}"_lib__choreo_ele_add.h\"" > ${host_src}
 cat <<'EOF' >> ${host_src}
 // RUN: choreo -t factor %s > %s.test && bash %s.test --execute | FileCheck --match-full-lines %s
@@ -2249,7 +2250,7 @@ choreo::spanned_data<choreo::s32, 2> ele_add(const choreo::spanned_view<choreo::
 
   std::vector<char> binary;
   // Read bin file and store to a vector
-  std::ifstream ifs("/tmp/1724917046225405090_139740689119040/${gcu target string}_lib__choreo_ele_add.o", std::ios::binary);
+  std::ifstream ifs("/tmp/1724918360746740117_1/${gcu_target_string}_lib__choreo_ele_add.o", std::ios::binary);
   std::copy(std::istreambuf_iterator<char>(ifs),
             std::istreambuf_iterator<char>(), std::back_inserter(binary));
   ifs.close();
@@ -2329,8 +2330,10 @@ int main() { /// host program
         // assert(ref == res[i][j]);
       }
   // std::cout << "Test Passed\n" << std::endl;
+  std::cout << "\nTest Passed\n";
   std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
 }
+// CHECK: Test Passed
 
 EOF
 
@@ -2358,7 +2361,7 @@ fi
 if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then
   export FACTOR_INSTALL=/root/choreo/tools
 # JIT compile and execute
-/tmp/1724917046225405090_139740689119040/factor_script.sh ${factor_src} ${factor_bin} ${host_src} ${target} ${gcu_arch} ${gcu_resource}
+/tmp/1724918360746740117_1/factor_script.sh ${factor_src} ${factor_bin} ${host_src} ${target} ${gcu_arch} ${gcu_resource}
 elif [ "$1" == "--statistics" ]; then
   echo ">>>> Line of Code without Choreo"
   wc -l ${factor_src} ${host_src} ${kernel_src}

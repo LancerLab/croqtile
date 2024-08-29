@@ -32,7 +32,9 @@ if command -v nvidia-smi &> /dev/null; then
 fi
 
 is_gcu_available=0
-if [[ "$(lspci | grep Enflame | head -1)" != "" ]]; then
+GCU_DEVICE_STR="$(lspci | grep Enflame | head -1)"
+GCU_DEVICE_STR_BACKUP="$(lspci | grep Tencent)"
+if [ "${GCU_DEVICE_STR}" != "" ] || [ "${GCU_DEVICE_STR_BACKUP}" != "" ]; then
   echo "GCU is available."
   is_gcu_available=1
 fi

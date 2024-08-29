@@ -1273,7 +1273,7 @@ void FactorCodeGen::OutputScript(FunctionType *fty, const std::string &name,
   std::string kernel_fn = build_prefix + "_micro_kernel.cpp";
   std::string factor_fn = build_prefix + "_factor.cpp";
   std::string factor_bfn =
-      build_path + "/${gcu target string}_lib" + current_fn + ".o";
+      build_path + "/${gcu_target_string}_lib" + current_fn + ".o";
   host_fn = build_prefix + "_host.cpp";
   target_fn = "__choreo_" + name;
 
@@ -1312,6 +1312,7 @@ void FactorCodeGen::OutputScript(FunctionType *fty, const std::string &name,
   # check the device
   # TODO: improve the target check with more solid code
   GCU_DEVICE_STR="$(lspci | grep Enflame | head -1)"
+  GCU_DEVICE_STR_BACKUP="$(lspci | grep Tencent)"
   echo $GCU_DEVICE_STR
   if [[ "${GCU_DEVICE_STR}" == *"S60G"* ]]; then
     gcu_arch=gcu300
@@ -1326,7 +1327,7 @@ void FactorCodeGen::OutputScript(FunctionType *fty, const std::string &name,
     gcu_arch=gcu210
     gcu_resource=2c24s
     gcu_target_string="dorado_2c"
-  elif [[ "$(lspci | grep Tencent)" != "" ]]; then
+  elif [[ "${GCU_DEVICE_STR_BACKUP}" != "" ]]; then
     gcu_arch=gcu210
     gcu_resource=2c24s
     gcu_target_string="dorado_2c"
