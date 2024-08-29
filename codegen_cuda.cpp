@@ -147,88 +147,6 @@ fi
     os << R"(
 if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then
 )";
-    os << R"script(
-  CUDA_CC="sm_35"
-  CUDA_ARCH="compute_35"
-
-# TODO, device id
-  GPU_CC=$(nvidia-smi --id=0 --query-gpu=compute_cap --format=csv,noheader)
-
-  case "${GPU_CC}" in
-      3.0)
-          CUDA_ARCH="compute_30"
-          CUDA_CC="sm_30"
-          ;;
-      3.5)
-          CUDA_ARCH="compute_35"
-          CUDA_CC="sm_35"
-          ;;
-      3.7)
-          CUDA_ARCH="compute_37"
-          CUDA_CC="sm_37"
-          ;;
-      5.0)
-          CUDA_ARCH="compute_50"
-          CUDA_CC="sm_50"
-          ;;
-      5.2)
-          CUDA_ARCH="compute_52"
-          CUDA_CC="sm_52"
-          ;;
-      5.3)
-          CUDA_ARCH="compute_53"
-          CUDA_CC="sm_53"
-          ;;
-      6.0)
-          CUDA_ARCH="compute_60"
-          CUDA_CC="sm_60"
-          ;;
-      6.1)
-          CUDA_ARCH="compute_61"
-          CUDA_CC="sm_61"
-          ;;
-      6.2)
-          CUDA_ARCH="compute_62"
-          CUDA_CC="sm_62"
-          ;;
-      7.0)
-          CUDA_ARCH="compute_70"
-          CUDA_CC="sm_70"
-          ;;
-      7.2)
-          CUDA_ARCH="compute_72"
-          CUDA_CC="sm_72"
-          ;;
-      7.5)
-          CUDA_ARCH="compute_75"
-          CUDA_CC="sm_75"
-          ;;
-      8.0)
-          CUDA_ARCH="compute_80"
-          CUDA_CC="sm_80"
-          ;;
-      8.6)
-          CUDA_ARCH="compute_86"
-          CUDA_CC="sm_86"
-          ;;
-      8.9)
-          CUDA_ARCH="compute_89"
-          CUDA_CC="sm_89"
-          ;;
-      9.0)
-          CUDA_ARCH="compute_90"
-          CUDA_CC="sm_90"
-          ;;
-      *)
-          echo "Unsupported GPU compute capability: ${GPU_CC}"
-          exit 1
-          ;;
-  esac
-
-  echo "CUDA_ARCH: ${CUDA_ARCH}"
-  echo "CUDA_CC: ${CUDA_CC}"
-
-)script";
     os << "  export CUDA_INSTALL=" << STRINGIZE(__CHOREO_cuda_DIR__)
        << "\n  # JIT compile and execute\n";
     if (dyn_shaped) os << "VIEW_CONFIG=1 ENABLE_DYNSHAPE=1 ";
@@ -1391,6 +1309,91 @@ void CUDACodeGen::OutputScript(FunctionType *fty, const std::string &n,
   // Now generate the script
   os << "#!/usr/bin/env bash\n\n";
   os << "# This is the choreo generated bash script to compile cuda code\n";
+  os << R"script(
+  CUDA_CC="sm_86"
+  CUDA_ARCH="compute_86"
+
+)script";
+  if (!cross_compile)
+    os << R"script(
+  
+  GPU_CC=$(nvidia-smi --id=0 --query-gpu=compute_cap --format=csv,noheader)
+
+  case "${GPU_CC}" in
+      3.0)
+          CUDA_ARCH="compute_30"
+          CUDA_CC="sm_30"
+          ;;
+      3.5)
+          CUDA_ARCH="compute_35"
+          CUDA_CC="sm_35"
+          ;;
+      3.7)
+          CUDA_ARCH="compute_37"
+          CUDA_CC="sm_37"
+          ;;
+      5.0)
+          CUDA_ARCH="compute_50"
+          CUDA_CC="sm_50"
+          ;;
+      5.2)
+          CUDA_ARCH="compute_52"
+          CUDA_CC="sm_52"
+          ;;
+      5.3)
+          CUDA_ARCH="compute_53"
+          CUDA_CC="sm_53"
+          ;;
+      6.0)
+          CUDA_ARCH="compute_60"
+          CUDA_CC="sm_60"
+          ;;
+      6.1)
+          CUDA_ARCH="compute_61"
+          CUDA_CC="sm_61"
+          ;;
+      6.2)
+          CUDA_ARCH="compute_62"
+          CUDA_CC="sm_62"
+          ;;
+      7.0)
+          CUDA_ARCH="compute_70"
+          CUDA_CC="sm_70"
+          ;;
+      7.2)
+          CUDA_ARCH="compute_72"
+          CUDA_CC="sm_72"
+          ;;
+      7.5)
+          CUDA_ARCH="compute_75"
+          CUDA_CC="sm_75"
+          ;;
+      8.0)
+          CUDA_ARCH="compute_80"
+          CUDA_CC="sm_80"
+          ;;
+      8.6)
+          CUDA_ARCH="compute_86"
+          CUDA_CC="sm_86"
+          ;;
+      8.9)
+          CUDA_ARCH="compute_89"
+          CUDA_CC="sm_89"
+          ;;
+      9.0)
+          CUDA_ARCH="compute_90"
+          CUDA_CC="sm_90"
+          ;;
+      *)
+          echo "Unsupported GPU compute capability: ${GPU_CC}"
+          exit 1
+          ;;
+  esac
+
+  echo "CUDA_ARCH: ${CUDA_ARCH}"
+  echo "CUDA_CC: ${CUDA_CC}"
+
+)script";
   os << "\n# step 0: set up the environment\n";
   os << "rm -fr " << build_path << "\n";
   os << "mkdir -p " << build_path << "\n";

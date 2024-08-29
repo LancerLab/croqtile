@@ -66,7 +66,7 @@ bool FactorCodeGen::AfterVisitImpl(AST::Node &n) {
   if (isa<AST::Program>(&n)) {
     os << "\n# step 4: generate the host source\n";
     os << "host_src=" << host_fn << "\n";
-    os << "echo \"#include \\\"${gcu_target_string}_lib" << current_fn
+    os << "echo \"#include \\\"\"${gcu_target_string}\"_lib" << current_fn
        << ".h\\\"\" > ${host_src}\n";
     os << "cat <<'EOF' >> ${host_src}\n";
     os << hs.str() << "\nEOF\n\n";
@@ -94,33 +94,6 @@ fi
     os << R"(
 if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then
 )";
-    os << R"script(
-  # check the device
-  # TODO: improve the target check with more solid code
-  GCU_DEVICE_STR="$(lspci | grep Enflame | head -1)"
-  echo $GCU_DEVICE_STR
-  if [[ "${GCU_DEVICE_STR}" == *"S60G"* ]]; then
-    gcu_arch=gcu300
-    gcu_resource=1c12s
-    gcu_target_string="scorpio_${gcu_resource}"
-  elif [[ "${GCU_DEVICE_STR}" == *"c035"* ]]; then
-    gcu_arch=gcu300
-    gcu_resource=1c12s
-    gcu_target_string="scorpio_${gcu_resource}"
-    export TOPS_VISIBLE_DEVICES=1
-  elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then
-    gcu_arch=gcu210
-    gcu_resource=2c24s
-    gcu_target_string="dorado_2c"
-  elif [[ "$(lspci | grep Tencent)" != "" ]]; then
-    gcu_arch=gcu210
-    gcu_resource=2c24s
-    gcu_target_string="dorado_2c"
-  else
-    echo "can not determine the GCU device type."
-    exit 1
-  fi
-)script";
     os << "  export FACTOR_INSTALL=" << STRINGIZE(__CHOREO_FACTOR_DIR__)
        << "\n# JIT compile and execute\n";
     if (dyn_shaped) os << "VIEW_CONFIG=1 ENABLE_DYNSHAPE=1 ";
@@ -1300,7 +1273,7 @@ void FactorCodeGen::OutputScript(FunctionType *fty, const std::string &name,
   std::string kernel_fn = build_prefix + "_micro_kernel.cpp";
   std::string factor_fn = build_prefix + "_factor.cpp";
   std::string factor_bfn =
-      build_path + "/${gcu_target_string}_lib" + current_fn + ".o";
+      build_path + "/_lib" + current_fn + ".o";
   host_fn = build_prefix + "_host.cpp";
   target_fn = "__choreo_" + name;
 
@@ -1327,6 +1300,41 @@ void FactorCodeGen::OutputScript(FunctionType *fty, const std::string &name,
   // Now generate the script
   os << "#!/usr/bin/env bash\n\n";
   os << "# This is the choreo generated bash script to compile factor code\n";
+  // check for gcu_target_string first
+  //
+  os << R"script(
+  gcu_arch=gcu210
+  gcu_resource=2c24s
+  gcu_target_string="dorado_2c"
+)script";
+  if (!cross_compile)
+    os << R"script(
+  # check the device
+  # TODO: improve the target check with more solid code
+  GCU_DEVICE_STR="$(lspci | grep Enflame | head -1)"
+  echo $GCU_DEVICE_STR
+  if [[ "${GCU_DEVICE_STR}" == *"S60G"* ]]; then
+    gcu_arch=gcu300
+    gcu_resource=1c12s
+    gcu_target_string="scorpio_${gcu_resource}"
+  elif [[ "${GCU_DEVICE_STR}" == *"c035"* ]]; then
+    gcu_arch=gcu300
+    gcu_resource=1c12s
+    gcu_target_string="scorpio_${gcu_resource}"
+    export TOPS_VISIBLE_DEVICES=1
+  elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then
+    gcu_arch=gcu210
+    gcu_resource=2c24s
+    gcu_target_string="dorado_2c"
+  elif [[ "$(lspci | grep Tencent)" != "" ]]; then
+    gcu_arch=gcu210
+    gcu_resource=2c24s
+    gcu_target_string="dorado_2c"
+  else
+    echo "can not determine the GCU device type."
+    exit 1
+  fi
+)script";
 
   os << "\n# step 0: set up the environment\n";
   os << "rm -fr " << build_path << "\n";

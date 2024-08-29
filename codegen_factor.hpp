@@ -49,6 +49,7 @@ struct FactorCodeGen : public CodeGenerator {
   int parallel_level = 0;
   bool dyn_shaped = false;
   bool trace_visit = false;  // for debugging purpose only
+  bool cross_compile = false;
 
   ValBind::BindInfo<std::string> bind_info;
   std::vector<AST::ptr<AST::Parameter>> *cur_params = nullptr;
@@ -71,12 +72,12 @@ struct FactorCodeGen : public CodeGenerator {
   StringifyTable factor_symbols;
 
  public:
-  FactorCodeGen(std::ostream &os, const ptr<SymbolTable> &symtab)
-      : CodeGenerator(os, symtab), trace_visit(std::getenv("TRACE_CODEGEN")) {}
+  FactorCodeGen(std::ostream &os, const ptr<SymbolTable> &symtab, bool cross_compile)
+      : CodeGenerator(os, symtab), trace_visit(std::getenv("TRACE_CODEGEN")), cross_compile(cross_compile) {}
   FactorCodeGen(std::ostream &os, const ptr<SymbolTable> &symtab,
-                const std::vector<RtMemUsageCheckInfo> &list)
+                const std::vector<RtMemUsageCheckInfo> &list, bool cross_compile)
       : CodeGenerator(os, symtab), rt_mem_usage_check_list(list),
-        trace_visit(std::getenv("TRACE_CODEGEN")) {}
+        trace_visit(std::getenv("TRACE_CODEGEN")), cross_compile(cross_compile) {}
 
   void ResetBuffers() {
     ks.clear();

@@ -53,6 +53,7 @@ private:
   int parallel_level = 0;
   bool dyn_shaped = false;
   bool trace_visit = false;
+  bool cross_compile = false;
 
   std::vector<AST::ptr<AST::Parameter>> *cur_params = nullptr;
   AST::ptr<AST::DataType> current_output = nullptr;
@@ -74,8 +75,8 @@ private:
   StringifyTable cuda_symbols;
 
  public:
-  CUDACodeGen(std::ostream &os, const ptr<SymbolTable> &symtab)
-      : CodeGenerator(os, symtab), trace_visit(std::getenv("TRACE_CODEGEN")) {}
+  CUDACodeGen(std::ostream &os, const ptr<SymbolTable> &symtab, bool cross_compile)
+      : CodeGenerator(os, symtab), trace_visit(std::getenv("TRACE_CODEGEN")), cross_compile(cross_compile) {}
   void ResetBuffers() {
     ks.clear();
     fs.clear();

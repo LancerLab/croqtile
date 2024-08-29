@@ -36,6 +36,7 @@ int main(int argc, char* argv[]) {
   Option<std::string> stop_after("--stop-after", "-sa", "", true);
   Option<std::string> arch("--architecture", "-arch", "gcu300", true);
   Option<bool> debug_on("--debug", "-d", false, false);
+  Option<bool> cross_compile("--cross-compile", "-cc", false, false);
   Option<bool> dump_ast("--dump-ast", "-e", false, false);
   Option<bool> print_vn("--print-valno", "-v", false, false);
   Option<bool> inf_type("--infer-types", "-i", false, false);
@@ -151,12 +152,12 @@ int main(int argc, char* argv[]) {
       if (mem_usage_checker.HasError()) return 1;
       if (stop_after.GetValue() == "mucheck") return 0;
 
-      Choreo::Factor::FactorCodeGen codegen(std::cout, sc.SymTab(), mem_usage_checker.GetRtMemUsageInfo());
+      Choreo::Factor::FactorCodeGen codegen(std::cout, sc.SymTab(), mem_usage_checker.GetRtMemUsageInfo(), cross_compile);
       root.accept(codegen);
       break;
     }
     case Target::CUDA: {
-      Choreo::CUDA::CUDACodeGen codegen(std::cout, sc.SymTab());
+      Choreo::CUDA::CUDACodeGen codegen(std::cout, sc.SymTab(), cross_compile);
       root.accept(codegen);
       break;
     }
