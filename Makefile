@@ -3,7 +3,7 @@ SHELL:=/bin/bash
 WORK_DIR:=$(PWD)
 TOOLCHAIN_DIR=$(WORK_DIR)/tools
 
-FTP_SERVER:=172.16.11.50
+FTP_SERVER:=172.16.11.18
 
 # Targets
 TARGET = choreo
