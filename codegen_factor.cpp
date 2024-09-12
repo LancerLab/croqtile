@@ -750,7 +750,7 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
     if (iv_type->Dims() == 1 && !cur_bounded_vars.count(iv_name)) {
       fs << this->indent << "for_(" << iv_name;
       if (IsValidBound(loop_range->lbound))
-        fs << " (" << loop_range->lbound << ")";
+        fs << " + (" << loop_range->lbound << ")";
       fs << ", " << ReplaceDynDimName(STR(iv_sizes.ValueAt(0)));
       if (IsValidBound(loop_range->ubound))
         fs << " + (" << loop_range->ubound << ")";
@@ -775,10 +775,10 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
              "can not find the bounded name.");
       size_t i = 0;
       for (auto name : cur_bounded_vars[iv_name]) {
-        fs << this->indent << "for_(" << name << ", ";
+        fs << this->indent << "for_(" << name;
         if (IsValidBound(loop_range->lbound))
-          fs << " (" << loop_range->lbound << ")";
-        fs << ReplaceDynDimName(STR(iv_sizes.ValueAt(i))) << ", ";
+          fs << " + (" << loop_range->lbound << ")";
+        fs << ", " << ReplaceDynDimName(STR(iv_sizes.ValueAt(i)));
         if (IsValidBound(loop_range->ubound))
           fs << " + (" << loop_range->ubound << ")";
         fs << ", ";
@@ -1327,6 +1327,7 @@ void FactorCodeGen::OutputScript(FunctionType *fty, const std::string &name,
     gcu_arch=gcu210
     gcu_resource=2c24s
     gcu_target_string="dorado_2c"
+    export TOPS_VISIBLE_DEVICES=1
   elif [[ "${GCU_DEVICE_STR_BACKUP}" != "" ]]; then
     gcu_arch=gcu210
     gcu_resource=2c24s
