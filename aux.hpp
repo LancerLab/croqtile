@@ -113,4 +113,9 @@ inline std::string RemoveSuffix(const std::string& str,
     return str;
 }
 
+#define TRACE(X)                                                               \
+  do {                                                                         \
+    if (trace) { X; }                                                          \
+  } while (false)
+
 #endif  // __CHOREO_AUX_HPP__

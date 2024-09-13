@@ -5,14 +5,6 @@
 #include "visitor.hpp"
 #include <iomanip>
 
-// LLVM style macro.
-#define TRACE(X)                                                               \
-  do {                                                                         \
-    if (trace) {                                                               \
-      X;                                                                       \
-    }                                                                          \
-  } while (false)
-
 namespace Choreo {
 
 // tuple<runtime memory usages, code location, corresponding storage limit>
