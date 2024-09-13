@@ -520,7 +520,7 @@ class ShapeInference : public Visitor {
     vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(n.name), cur_vn);
 
     return true;
-  };
+  }
 
   bool Visit(AST::IntIndex& n) {
     __TRACE_EACH_VISIT__;
@@ -528,7 +528,7 @@ class ShapeInference : public Visitor {
     if (cannot_proceed) return true;
 
     return true;
-  };
+  }
 
   bool Visit(AST::DataType& n) {
     __TRACE_EACH_VISIT__;
