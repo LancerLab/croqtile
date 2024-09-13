@@ -452,6 +452,9 @@ named_spanned_decls
     : named_spanned_decls COMMA IDENTIFIER {
         const auto& node = std::dynamic_pointer_cast<AST::NamedVariableDecl>($1->values[0]);
         symtab.AddSymbol($3, node->GetType());
+        // TODO: multiple AST::NamedVariableDecl share the same spanned_type node!
+        // In some cases, this can lead to errors.
+        // may be need to add copy constructor for AST::DataType?
         $1->Append(AST::Make<AST::NamedVariableDecl>(@3, $3, node->type, node->mem));
         $$ = $1;
       }

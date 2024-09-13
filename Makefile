@@ -36,14 +36,17 @@ CLN_DIR = $(SYMBOLIC_DIR)/cln-1.3.7
 GINAC_TAR = $(SYMBOLIC_DIR)/ginac-1.8.7.tar.bz2
 GINAC_DIR = $(SYMBOLIC_DIR)/ginac-1.8.7
 
+SYMBOLIC_LIB_FLAGS = -L$(CLN_DIR)/install/lib -lcln -L$(GINAC_DIR)/install/lib -lginac -Wl,-rpath -Wl,$(GINAC_DIR)/install/lib
+SYMBOLIC_INCLUDE_FLAGS = -I$(CLN_DIR)/install/include -I$(GINAC_DIR)/install/include
+
 # Build rules
 all: $(TARGET)
 
 test: $(TARGET) standalone_test
 	$(LIT) tests
 
-$(TARGET): scanner.yy.o parser.tab.o choreo_main.o codegen_factor.o codegen_cuda.o codegen_topscc.o earlysema.o typeinfer.o typecheck.o ast.o types.o codegen_factor_types.o codegen_cuda_types.o valno.o
-	$(CC) $(CFLAGS) $^ -o $(TARGET)
+$(TARGET): scanner.yy.o parser.tab.o choreo_main.o codegen_factor.o codegen_cuda.o codegen_topscc.o earlysema.o typeinfer.o typecheck.o ast.o types.o codegen_factor_types.o codegen_cuda_types.o valno.o sym_replace.o
+	$(CC) $(CFLAGS) $^ $(SYMBOLIC_LIB_FLAGS) -o $(TARGET)
 
 scanner.yy.cc: $(LEX_SRC)
 	$(FLEX) -o $@ $(LEX_SRC)
@@ -55,7 +58,7 @@ parser.tab.cc parser.tab.hh location.hh: $(PARSER_SRC)
 	$(CC) $(CFLAGS) $< -c -o $@
 
 %.o : %.cpp $(HEADER_FILES) location.hh codegen_cuda_types.hpp codegen_factor_types.hpp
-	$(CC) $(CFLAGS) $< -c -o $@
+	$(CC) $(CFLAGS) $(SYMBOLIC_INCLUDE_FLAGS) $< -c  -o $@
 
 choreo_header.inc : utils/choreo.h
 	echo "#ifndef __CHOREO_RUNTIME_HEADER_H__" > $@

@@ -20,6 +20,7 @@
 #include "types.hpp"
 #include "valno.hpp"
 #include "visualize.hpp"
+#include "sym_replace.hpp"
 
 using namespace Choreo;
 
@@ -45,6 +46,7 @@ int main(int argc, char* argv[]) {
   Option<bool> gen_none("--no-codegen", "-s", false, false);
   Option<bool> del_comm("--remove-comments", "-n", false, false);
   Option<bool> mem_usag("--memory-usage-check", "-muc", false, false);
+  Option<bool> sym_repl("--print-sym-replace", "-sr", false, false);
 
   // parse all the options
   OptionRegistry& r = OptionRegistry::GetInstance();
@@ -98,6 +100,10 @@ int main(int argc, char* argv[]) {
   root.accept(ds);
 
   if (stop_after.GetValue() == "norm") return 0;
+
+  SymReplace sr(nullptr, sym_repl.GetValue(), std::cout);
+  root.accept(sr);
+  if (stop_after.GetValue() == "symreplace") return 0;
 
   // perform shape inference of mdspans, future, etc.
   ShapeInference si(print_vn);

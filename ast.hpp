@@ -243,6 +243,7 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
   const ptr<Node>& GetL() const { return value_l; }
   const ptr<Expr>& GetC() const { return value_c; }
   Form GetForm() const { return t; }
+  void SetForm(const Form& form) { t = form; }
   void SetR(const ptr<Node>& r) {
     assert(r);
     value_r = r;
@@ -281,6 +282,31 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
     assert(value_c);
     assert(value_l);
     assert(value_r);
+  }
+
+  // copy constructor for reconstructing expr in SymReplace pass
+  // TODO(wsj): loc?
+  explicit Expr(const Expr& e) : Node(e.LOC()) {
+    if (e.IsReference()) {
+      op = "ref";
+      value_r = e.GetR();
+      t = Reference;
+    } else if (e.IsUnary()) {
+      op = e.op;
+      value_r = e.GetR();
+      t = Unary;
+    } else if (e.IsBinary()) {
+      op = e.op;
+      value_l = e.value_l;
+      value_r = e.value_r;
+      t = Binary;
+    } else if (e.IsTernary()) {
+      op = e.op;
+      value_c = e.value_c;
+      value_l = e.value_l;
+      value_r = e.value_r;
+      t = Ternary;
+    }
   }
 
   ptr<Node> GetReference() {
@@ -526,6 +552,9 @@ struct IntIndex : public Node, public TypeIDProvider<IntIndex> {
   explicit IntIndex(const location& l, const ptr<Node>& v)
       : Node(l), value(v) {}
 
+  // TODO(wsj): loc?
+  explicit IntIndex(const IntIndex& ii) : Node(ii.LOC()), value(ii.value) {}
+
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix << "(";
     value->Print(os);
@@ -680,6 +709,7 @@ struct Identifier : public Node, public TypeIDProvider<Identifier> {
   Identifier(const location& l,
              const std::string& n = SymbolTable::GetAnonName())
       : Node(l), name(n) {}
+  Identifier(const Identifier& id) : Node(id.LOC()), name(id.name) {}
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix << name;
   }
