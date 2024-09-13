@@ -29,6 +29,13 @@ CFLAGS = -std=c++17 -Wall -Wextra -g -D__CHOREO_FACTOR_DIR__="$(TOOLCHAIN_DIR)" 
 GTEST_DIR = extern/gtest
 GTEST_LIBS = $(GTEST_DIR)/libgtest.a $(GTEST_DIR)/libgtest_main.a
 
+# For GiNaC
+SYMBOLIC_DIR = $(WORK_DIR)/extern/ginac
+CLN_TAR = $(SYMBOLIC_DIR)/cln-1.3.7.tar.bz2
+CLN_DIR = $(SYMBOLIC_DIR)/cln-1.3.7
+GINAC_TAR = $(SYMBOLIC_DIR)/ginac-1.8.7.tar.bz2
+GINAC_DIR = $(SYMBOLIC_DIR)/ginac-1.8.7
+
 # Build rules
 all: $(TARGET)
 
@@ -133,7 +140,7 @@ setup-choreo-kit: check-choreo-kit
 	  $(MAKE) install-choreo-kit; \
 	fi;
 
-setup: setup-choreo-kit
+setup: setup-choreo-kit ginac-setup
 	git submodule update --init --recursive;\
 
 setup-gcu2: setup
@@ -155,3 +162,14 @@ gcu2-kmd:
 gcu3-kmd:
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu3-kmd FTP_SERVER=$(FTP_SERVER)
 
+cln-setup: $(CLN_TAR)
+	tar -xvf $(CLN_TAR) -C $(SYMBOLIC_DIR); \
+	cd $(CLN_DIR); \
+	./configure --prefix=$(CLN_DIR)/install; \
+	$(MAKE) -j && $(MAKE) install
+
+ginac-setup: $(GINAC_TAR) cln-setup
+	tar -xvf $(GINAC_TAR) -C $(SYMBOLIC_DIR); \
+	cd $(GINAC_DIR); \
+	PKG_CONFIG_PATH=$(CLN_DIR) ./configure --prefix=$(GINAC_DIR)/install; \
+	$(MAKE) -j && $(MAKE) install
