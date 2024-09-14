@@ -17,7 +17,7 @@ __co__ s32 mdspan<3> ele_add(s32 [144, 100, 100] a, s32 [144, 100, 100] b) {
     // kernel function begin
     with index = {x, y} in [10, 10] {  // totally 100 chunks
      foreach x {
-      foreach y { 
+      foreach y(1:-3:2) { 
         f1 = dma.copy.async a.chunkat(p, x, y) => local; // new_size {a(0)/6, a(1)/10, a(2)/10}
         f2 = dma.copy.async b.chunkat(p, x, y) => local;
         wait f1, f2;
@@ -62,7 +62,7 @@ int bar(int a[], int b[]) {
 // CHECK: var_ y(IntType(32));
 // CHECK: y = 0;
 // CHECK: for_(x, 10, 1, [&](auto iv_x) {{.*}}
-// CHECK:   for_(y, 10, 1, [&](auto iv_y) {{.*}}
+// CHECK:   for_(y + (1), 10 + (-3), 2, [&](auto iv_y) {{.*}}
 // CHECK: async_load_(f1, args[0], f1_buffer, {Value(24)*thread_id,Value(10)*iv_x,Value(10)*iv_y});
 // CHECK: async_load_(f2, args[1], f2_buffer, {Value(24)*thread_id,Value(10)*iv_x,Value(10)*iv_y});
 // CHECK: wait_dma_(f1);

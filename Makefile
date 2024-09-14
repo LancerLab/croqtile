@@ -29,14 +29,24 @@ CFLAGS = -std=c++17 -Wall -Wextra -g -D__CHOREO_FACTOR_DIR__="$(TOOLCHAIN_DIR)" 
 GTEST_DIR = extern/gtest
 GTEST_LIBS = $(GTEST_DIR)/libgtest.a $(GTEST_DIR)/libgtest_main.a
 
+# For GiNaC
+SYMBOLIC_DIR = $(WORK_DIR)/extern/ginac
+CLN_TAR = $(SYMBOLIC_DIR)/cln-1.3.7.tar.bz2
+CLN_DIR = $(SYMBOLIC_DIR)/cln-1.3.7
+GINAC_TAR = $(SYMBOLIC_DIR)/ginac-1.8.7.tar.bz2
+GINAC_DIR = $(SYMBOLIC_DIR)/ginac-1.8.7
+
+SYMBOLIC_LIB_FLAGS = -L$(CLN_DIR)/install/lib -lcln -L$(GINAC_DIR)/install/lib -lginac -Wl,-rpath -Wl,$(GINAC_DIR)/install/lib
+SYMBOLIC_INCLUDE_FLAGS = -I$(CLN_DIR)/install/include -I$(GINAC_DIR)/install/include
+
 # Build rules
 all: $(TARGET)
 
 test: $(TARGET) standalone_test
 	$(LIT) tests
 
-$(TARGET): scanner.yy.o parser.tab.o choreo_main.o codegen_factor.o codegen_cuda.o codegen_topscc.o earlysema.o typeinfer.o typecheck.o ast.o types.o codegen_factor_types.o codegen_cuda_types.o valno.o
-	$(CC) $(CFLAGS) $^ -o $(TARGET)
+$(TARGET): scanner.yy.o parser.tab.o choreo_main.o codegen_factor.o codegen_cuda.o codegen_topscc.o earlysema.o typeinfer.o typecheck.o ast.o types.o codegen_factor_types.o codegen_cuda_types.o valno.o sym_replace.o
+	$(CC) $(CFLAGS) $^ $(SYMBOLIC_LIB_FLAGS) -o $(TARGET)
 
 scanner.yy.cc: $(LEX_SRC)
 	$(FLEX) -o $@ $(LEX_SRC)
@@ -48,7 +58,7 @@ parser.tab.cc parser.tab.hh location.hh: $(PARSER_SRC)
 	$(CC) $(CFLAGS) $< -c -o $@
 
 %.o : %.cpp $(HEADER_FILES) location.hh codegen_cuda_types.hpp codegen_factor_types.hpp
-	$(CC) $(CFLAGS) $< -c -o $@
+	$(CC) $(CFLAGS) $(SYMBOLIC_INCLUDE_FLAGS) $< -c  -o $@
 
 choreo_header.inc : utils/choreo.h
 	echo "#ifndef __CHOREO_RUNTIME_HEADER_H__" > $@
@@ -133,7 +143,7 @@ setup-choreo-kit: check-choreo-kit
 	  $(MAKE) install-choreo-kit; \
 	fi;
 
-setup: setup-choreo-kit
+setup: setup-choreo-kit ginac-setup
 	git submodule update --init --recursive;\
 
 setup-gcu2: setup
@@ -155,3 +165,14 @@ gcu2-kmd:
 gcu3-kmd:
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu3-kmd FTP_SERVER=$(FTP_SERVER)
 
+cln-setup: $(CLN_TAR)
+	tar -xvf $(CLN_TAR) -C $(SYMBOLIC_DIR); \
+	cd $(CLN_DIR); \
+	./configure --prefix=$(CLN_DIR)/install; \
+	$(MAKE) -j && $(MAKE) install
+
+ginac-setup: $(GINAC_TAR) cln-setup
+	tar -xvf $(GINAC_TAR) -C $(SYMBOLIC_DIR); \
+	cd $(GINAC_DIR); \
+	PKG_CONFIG_PATH=$(CLN_DIR) ./configure --prefix=$(GINAC_DIR)/install; \
+	$(MAKE) -j && $(MAKE) install
