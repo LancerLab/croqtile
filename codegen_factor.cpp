@@ -381,6 +381,8 @@ bool FactorCodeGen::Visit(AST::Memory &n) {
   return true;
 }
 
+bool FactorCodeGen::Visit(AST::SpanAs &) { return true; }
+
 // CLEAN
 bool FactorCodeGen::Visit(AST::DMA &d) {
   __TRACE_EACH_VISIT__(d)

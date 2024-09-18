@@ -50,6 +50,7 @@ struct ShapeDynamics : public VisitorWithSymTab {
   bool Visit(AST::WithIn &) { return true; }
   bool Visit(AST::WithBlock &) { return true; }
   bool Visit(AST::Memory &) { return true; }
+  bool Visit(AST::SpanAs &) { return true; }
   bool Visit(AST::DMA &) { return true; }
   bool Visit(AST::ChunkAt &) { return true; }
   bool Visit(AST::Wait &) { return true; }

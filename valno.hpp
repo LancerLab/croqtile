@@ -793,6 +793,12 @@ class ShapeInference : public Visitor {
     return true;
   };
 
+  bool Visit(AST::SpanAs& n) {
+    __TRACE_EACH_VISIT__;
+    assert(false && "TODO: span as.");
+    return true;
+  };
+
   bool Visit(AST::DMA& n) {
     __TRACE_EACH_VISIT__;
 

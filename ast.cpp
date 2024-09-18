@@ -54,6 +54,17 @@ void IntTuple::accept(Choreo::Visitor& v) {
   v.Visit(*this);
 }
 
+void SpanAs::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+
+  id->accept(v);
+  nid->accept(v);
+  list->accept(v);
+  v.Visit(*this);
+
+  v.AfterVisit(*this);
+}
+
 void Assignment::accept(Choreo::Visitor& v) {
   value->accept(v);
   v.Visit(*this);

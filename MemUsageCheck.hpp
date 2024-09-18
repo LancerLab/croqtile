@@ -342,6 +342,10 @@ public:
     TraceEachVisit(n);
     return true;
   }
+  bool Visit(AST::SpanAs &n) {
+    TraceEachVisit(n);
+    return true;
+  }
   bool Visit(AST::DMA &d) {
     TraceEachVisit(d);
     // mem alloc happends here

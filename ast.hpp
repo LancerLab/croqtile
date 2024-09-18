@@ -457,6 +457,50 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
   __UDT_TYPE_INFO__
 };
 
+struct SpanAs : public Node, public TypeIDProvider<SpanAs> {
+  ptr<Identifier> id = nullptr;
+  ptr<Identifier> nid = nullptr;
+  ptr<Node> list = nullptr;
+
+  explicit SpanAs(const location& l, const ptr<Identifier>& n,
+                  const ptr<Identifier>& nn, const ptr<Node>& lst)
+      : Node(l, MakeUninitMDSpanType()), id(n), nid(nn), list(lst) {
+    assert(list && "Unexpected: span list is not provided");
+  }
+
+  explicit SpanAs(const location& l, const ptr<Identifier>& n,
+                  const ptr<Node>& lst)
+      : SpanAs(l, n, Make<Identifier>(l), lst) {
+    assert(list && "Unexpected: span list is not provided");
+  }
+
+  void SetTypeDetail(const Shape& s) {
+    assert(typeof<SpannedType>(this) && "Incorrect type for mdspan.");
+    cast<MDSpanType>(GetType())->SetShape(s);
+  }
+
+  const Shape GetTypeDetail() {
+    assert(typeof<SpannedType>(this) && "Incorrect type for mdspan.");
+    return cast<MDSpanType>(GetType())->GetShape();
+  }
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    assert(id && "no original span is specified.");
+    assert(nid && "no new span is specified.");
+    assert(list && "no span_as is specified.");
+
+    os << PSTR(nid) << "(" << PSTR(id) << ".span_as[";
+    list->Print(os, " ");
+    os << " ])";
+
+    (void)prefix;
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__
+};
+
 struct NamedTypeDecl : public Node, public TypeIDProvider<NamedTypeDecl> {
   const std::string name_str;
   const std::string init_str;
@@ -927,11 +971,16 @@ struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
 
 struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
   ptr<Identifier> data;
+  ptr<SpanAs> sa = nullptr;  // for span_as expression
   ptr<MultiValues> positions = nullptr;
 
   ChunkAt(const location& l, const ptr<Identifier>& d,
           const ptr<MultiValues>& p = nullptr)
-      : Node(l), data(d), positions(p) {}
+      : Node(l), data(d), sa(nullptr), positions(p) {}
+
+  ChunkAt(const location& l, const ptr<SpanAs>& s,
+          const ptr<MultiValues>& p = nullptr)
+      : Node(l), data(s->nid), sa(s), positions(p) {}
 
   std::string RefSymbol() const {
     assert(data && "ref data is not set.");
@@ -939,12 +988,12 @@ struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
   }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    if (!positions) {
-      os << STR(data);
-      return;
-    }
+    if (sa)
+      os << PSTR(sa);
+    else
+      os << PSTR(data);
 
-    os << STR(data) << ".ChunkAt(" << STR(positions) << ")";
+    if (positions) os << ".ChunkAt(" << STR(positions) << ")";
 
     (void)prefix;
   }

@@ -46,6 +46,7 @@ struct TypeChecker : public VisitorWithSymTab {
   bool Visit(AST::WithIn &) override;
   bool Visit(AST::WithBlock &) override;
   bool Visit(AST::Memory &) override;
+  bool Visit(AST::SpanAs &) override;
   bool Visit(AST::DMA &) override;
   bool Visit(AST::ChunkAt &) override;
   bool Visit(AST::Wait &) override;

@@ -448,6 +448,14 @@ public:
     return true;
   };
 
+  bool Visit(AST::SpanAs& n) override {
+    __TRACE_EACH_VISIT__;
+
+    if (cannot_proceed) return true;
+
+    return true;
+  };
+
   bool Visit(AST::DMA& n) override {
     __TRACE_EACH_VISIT__;
 

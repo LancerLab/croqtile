@@ -528,6 +528,12 @@ bool TypeInference::Visit(AST::IntTuple &n) {
   return true;
 }
 
+bool TypeInference::Visit(AST::SpanAs &n) {
+  __TRACE_EACH_VISIT__(n)
+  assert(false && "TODO: type inference of spanas.");
+  return true;
+}
+
 bool TypeInference::Visit(AST::DMA &n) {
   __TRACE_EACH_VISIT__(n)
 

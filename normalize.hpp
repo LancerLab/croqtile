@@ -224,6 +224,7 @@ struct Normalizer : public Visitor {
 
   bool Visit(AST::WithBlock &) override { return true; }
   bool Visit(AST::Memory &) override { return true; }
+  bool Visit(AST::SpanAs &) override { return true; }
   bool Visit(AST::DMA &) override { return true; }
   bool Visit(AST::ChunkAt &) override { return true; }
   bool Visit(AST::Wait &) override { return true; }

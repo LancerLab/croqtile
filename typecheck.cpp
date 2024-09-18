@@ -111,6 +111,10 @@ bool TypeChecker::Visit(AST::Memory& n) {
   __TRACE_EACH_VISIT__(n)
   return true;
 }
+bool TypeChecker::Visit(AST::SpanAs& n) {
+  __TRACE_EACH_VISIT__(n)
+  return true;
+}
 bool TypeChecker::Visit(AST::DMA& n) {
   __TRACE_EACH_VISIT__(n)
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;

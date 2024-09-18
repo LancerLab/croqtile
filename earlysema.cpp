@@ -708,6 +708,17 @@ bool EarlySemantics::Visit(AST::Memory& n) {
   return true;
 }
 
+bool EarlySemantics::Visit(AST::SpanAs& n) {
+  __TRACE_EACH_VISIT__(n)
+  if (!isa<MDSpanType>(NodeType(*n.id)))
+    Error(n.LOC(), "span-as operation operates on a non-mdspan type.");
+  if (!isa<MDSpanType>(NodeType(*n.list)))
+    Error(n.LOC(), "span-as operation expects a mdspan parameter.");
+
+  // TODO: set the proper type
+  return true;
+}
+
 bool EarlySemantics::Visit(AST::DMA& n) {
   __TRACE_EACH_VISIT__(n)
 

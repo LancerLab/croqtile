@@ -39,6 +39,7 @@ struct Visitor {
   virtual bool Visit(AST::WithIn&) = 0;
   virtual bool Visit(AST::WithBlock&) = 0;
   virtual bool Visit(AST::Memory&) = 0;
+  virtual bool Visit(AST::SpanAs&) = 0;
   virtual bool Visit(AST::DMA&) = 0;
   virtual bool Visit(AST::ChunkAt&) = 0;
   virtual bool Visit(AST::Wait&) = 0;

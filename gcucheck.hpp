@@ -210,6 +210,10 @@ struct GCUCheck : public VisitorWithSymTab {
     TraceEachVisit(n);
     return true;
   }
+  bool Visit(AST::SpanAs &n) {
+    TraceEachVisit(n);
+    return true;
+  }
   bool Visit(AST::DMA &n) {
     TraceEachVisit(n);
     // The user does not have to explicitly claim a global memory that requires

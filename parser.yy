@@ -139,7 +139,7 @@ void choreo_info(const char *message) {
 %token <Choreo::Storage> LOCAL SHARED GLOBAL
 %token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT BOOL VOID
 // builtin operations
-%token <std::string> DMA COPY SLICE PAD ASYNC FNSPAN FNDATA CHUNKAT WAIT CALL AUTO SELECT
+%token <std::string> DMA COPY SLICE PAD ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT WAIT CALL AUTO SELECT
 // control related
 %token <std::string> IF ELSE PARA BY WITH IN FOREACH RET WHERE
 %token <std::string> TRUE FALSE
@@ -678,6 +678,8 @@ s_expr
       }
     ;
 
+    ;
+
 span_expr
     : span_expr PLUS  direct_ituple_val { $$ = AST::Make<AST::Expr>(@1, "+", $1, $3); }
     | span_expr MINUS direct_ituple_val { $$ = AST::Make<AST::Expr>(@1, "-", $1, $3); }
@@ -864,6 +866,10 @@ chunkat_expr
       }
     | IDENTIFIER FNDATA CHUNKAT LPAREN id_list RPAREN {
         $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $5);
+      }
+    | IDENTIFIER FNSPANAS LPAREN LBRAKT value_list RBRAKT RPAREN CHUNKAT LPAREN id_list RPAREN {
+        // note: normalize will hoist span_as
+        $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::SpanAs>(@1, AST::Make<AST::Identifier>(@1,$1), $5), $10);
       }
     /*| IDENTIFIER CHUNKAT LPAREN value_list RPAREN {
         $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $4);

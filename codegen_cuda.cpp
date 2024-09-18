@@ -436,11 +436,18 @@ bool CUDACodeGen::Visit(AST::WithIn &n) {
   return true;
 };
 
-bool CUDACodeGen::Visit(AST::WithBlock &) { return true; }
+bool CUDACodeGen::Visit(AST::WithBlock &n) {
+  __TRACE_EACH_VISIT__(n)
+  return true;
+}
 
 bool CUDACodeGen::Visit(AST::Memory &n) {
   __TRACE_EACH_VISIT__(n)
-  (void)n;
+  return true;
+}
+
+bool CUDACodeGen::Visit(AST::SpanAs &n) {
+  __TRACE_EACH_VISIT__(n)
   return true;
 }
 

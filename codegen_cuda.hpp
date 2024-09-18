@@ -98,6 +98,7 @@ private:
   bool Visit(AST::ChunkAt &) override;
   bool Visit(AST::CppSourceCode &) override;
   bool Visit(AST::DataType &) override;
+  bool Visit(AST::SpanAs &) override;
   bool Visit(AST::DMA &) override;
   bool Visit(AST::Expr &) override;
   bool Visit(AST::LoopRange &) override;

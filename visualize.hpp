@@ -337,6 +337,7 @@ struct Visualizer : public VisitorWithSymTab {
   bool Visit(AST::WithIn &) override { return true; }
   bool Visit(AST::WithBlock &) override { return true; }
   bool Visit(AST::Memory &) override { return true; }
+  bool Visit(AST::SpanAs&) override { return true; }
 
   bool Visit(AST::DMA &n) override {
     start_x = 0;
