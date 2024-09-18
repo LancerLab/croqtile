@@ -1148,32 +1148,44 @@ void FactorCodeGen::EmitRuntimeCheck(std::ostream &os, const Type &ty) {
   // check if the input shape is as declared in choreo
   if (fty.in_tys.size() == 0) return;
 
-  if (auto sty = dyn_cast<SpannedType>(fty.in_tys[0])) {
-    auto name = host_params[0];
-    size_t count = 0;
-    for (auto vi : sty->GetShape().Value()) {
-      if (auto vale = dyn_cast<int>(&vi)) {
-        auto elem_name = name + ".shape()[" + std::to_string(count) + "]";
-        os << "  choreo::runtime_check(" << elem_name << " == " << *vale;
-        os << ", \"shape inconstant on 1st parameter (dim: " << count
-           << ").\");\n";
-      }
-      count++;
-    }
-  }
-  for (size_t i = 1; i < fty.in_tys.size(); ++i) {
+  struct Entry {
+    size_t para_ordinal;
+    size_t dim;
+    std::string elem_name;
+  };
+  std::map<ValueExpr, std::vector<Entry>> ve_entries_map;
+
+  for (size_t i = 0; i < fty.in_tys.size(); ++i) {
     auto name = host_params[i];
     if (auto sty = dyn_cast<SpannedType>(fty.in_tys[i])) {
       size_t count = 0;
       for (auto vi : sty->GetShape().Value()) {
+        auto elem_name = name + ".shape()[" + std::to_string(count) + "]";
         if (auto vale = dyn_cast<int>(&vi)) {
-          auto elem_name = name + ".shape()[" + std::to_string(count) + "]";
           os << "  choreo::runtime_check(" << elem_name << " == " << *vale;
-          os << ", \"shape inconstant on " << i + 1
-             << "th parameter (dim: " << count << ").\");\n";
+          os << ", \"shape inconsistent on the " << Ordinal(i + 1)
+             << " parameter (dim: " << count << ").\");\n";
+        } else if (auto vale = dyn_cast<ValueExpr>(&vi)) {
+          ve_entries_map[*vale].push_back({i+1, count, elem_name});
         }
         count++;
       }
+    }
+  }
+
+  // check if the named dims meet the constraint
+  // eg. __co__ void foo(f32 [M, N] a, f32 [N, K] b)
+  // then a.shape()[1] should be equal to b.shape()[0]
+  for (auto& [_, entries] : ve_entries_map) {
+    for (size_t i = 1; i < entries.size(); ++i) {
+      auto& entry0 = entries[i - 1];
+      auto& entry1 = entries[i];
+      os << "  choreo::runtime_check(" << entry0.elem_name
+         << " == " << entry1.elem_name;
+      os << ", \"The shapes of the " << Ordinal(entry0.para_ordinal)
+         << " parameter (dim: " << entry0.dim << ") and the "
+         << Ordinal(entry1.para_ordinal) << " parameter (dim: " << entry1.dim
+         << ") are inconsistent.\");\n";
     }
   }
 }
