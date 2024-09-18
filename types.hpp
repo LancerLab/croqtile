@@ -627,11 +627,11 @@ struct Shape {
   }
 
   // retrieve the dimensions that are dynamic
-  std::unordered_map<int, ValueExpr> GetDynamicDims() const {
-    std::unordered_map<int, ValueExpr> res;
+  std::vector<std::pair<int, ValueExpr>> GetDynamicDims() const {
+    std::vector<std::pair<int, ValueExpr>> res;
     size_t i = 0;
     for (auto& v : Value()) {
-      if (!isa<int>(&v)) res.emplace(i, *cast<ValueExpr>(&v));
+      if (!isa<int>(&v)) res.emplace_back(i, *cast<ValueExpr>(&v));
       ++i;
     }
     return res;

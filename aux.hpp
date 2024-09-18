@@ -113,6 +113,14 @@ inline std::string RemoveSuffix(const std::string& str,
     return str;
 }
 
+inline std::string Ordinal(int n) {
+  assert(n >= 0);
+  static const char *suffixes[] = {"th", "st", "nd", "rd"};
+  int v = n % 100;
+  int index = (v >= 11 && v <= 13) ? 0 : std::min(v % 10, 4);
+  return std::to_string(n) + suffixes[index];
+}
+
 #define TRACE(X)                                                               \
   do {                                                                         \
     if (trace) { X; }                                                          \
