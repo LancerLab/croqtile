@@ -163,7 +163,7 @@ fi
       int dec_by = 1;
       bool multiple_bounds = cur_bounded_vars.count(name);
       if (multiple_bounds) dec_by = cur_bounded_vars[name].size();
-      for (int i = 0; i < dec_by; ++i) {
+      for (int i = dec_by - 1; i >= 0; --i) {
         decrementIndent();
         fs << indent << "}); // end of choreo-foreach block";
         if (multiple_bounds) fs << " on '" << cur_bounded_vars[name][i] << "'";
@@ -866,16 +866,14 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
     if (!dyn_dims.empty()) {
       dyn_shaped = true;
       type_name.clear();
-      size_t i = 0;
       for (auto &ddim : dyn_dims) {
-        auto ddim_name = name + "_rt_dim" + std::to_string(i);
+        auto ddim_name = name + "_rt_dim" + std::to_string(ddim.first);
         dss << indent << "  auto " << ddim_name << " = "
             << ReplaceDynDimName(ddim.second) << ";\n";
         if (type_name.size() == 0)
           type_name += ddim_name;
         else
-          type_name = ddim_name + ", " + type_name;
-        ++i;
+          type_name += ", " + ddim_name;
       }
       type_name = "{" + type_name + "}, output_type";
     }

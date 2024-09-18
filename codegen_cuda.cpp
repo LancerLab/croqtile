@@ -226,7 +226,7 @@ fi
       int dec_by = 1;
       bool multiple_bounds = cur_bounded_vars.count(name);
       if (multiple_bounds) dec_by = cur_bounded_vars[name].size();
-      for (int i = 0; i < dec_by; ++i) {
+      for (int i = dec_by - 1; i >= 0; --i) {
         decrementIndent();
         fs << indent << "} // end of choreo-foreach block";
         if (multiple_bounds) fs << " on '" << cur_bounded_vars[name][i] << "'";
@@ -882,7 +882,7 @@ bool CUDACodeGen::Visit(AST::FunctionDecl &d) {
       type_name = "{";
       size_t i = 0;
       for (auto &ddim : dyn_dims) {
-        auto ddim_name = name + "_rt_dim" + std::to_string(i);
+        auto ddim_name = name + "_rt_dim" + std::to_string(ddim.first);
         dss << "auto " << ddim_name << " = " << ReplaceDynDimName(ddim.second)
             << ";\n";
         type_name += ddim_name;

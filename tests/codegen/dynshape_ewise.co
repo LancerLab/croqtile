@@ -1,4 +1,4 @@
-// RUN: choreo %s | FileCheck %s
+// RUN: choreo %s | FileCheck --match-full-lines %s
 
 #include "choreo.h"
 
@@ -32,38 +32,39 @@ __co__ auto ele_add(s32 [6, ?, 128] lhs, s32 [6, ?, 128] rhs) {
   } // can use python styling
   return output;
 }
-// CHECK:	auto lhs_type = DRAMType(IntType(32), {6, -1, 128}));
-// CHECK:  auto rhs_type = DRAMType(IntType(32), {6, -1, 128}));
-// CHECK:  auto output_type = DRAMType(IntType(32), {6, -1, 128});
+// CHECK: auto lhs_type = DRAMType(IntType(32), {6, -1, 128});
+// CHECK: auto rhs_type = DRAMType(IntType(32), {6, -1, 128});
+// CHECK: auto output_type = DRAMType(IntType(32), {6, -1, 128});
 // CHECK:    auto lhs_load_buffer = alloc_(L1Type(IntType(32),{6, 2, 32}));
 // CHECK:    auto rhs_load_buffer = alloc_(L1Type(IntType(32),{6, 2, 32}));
 // CHECK:    auto l1_out = alloc_(L1Type(IntType(32),{6, 2, 32}));
-// CHECK:    for_(0, 1, 1, [&](auto q) {
-// CHECK:      for_(0, 1, 1, [&](auto x) {
-// CHECK:        for_(0, 1, 1, [&](auto y) {
-// CHECK:          async_load_(lhs_load, args[0], lhs_load_buffer, {Value(6)*thread_id, Value(2)*x, Value(32)*y});
-// CHECK:          async_load_(rhs_load, args[1], rhs_load_buffer, {Value(6)*thread_id, Value(2)*z, Value(32)*b});
+// CHECK:    for_(q, 1, 1, [&](auto iv_q) {
+// CHECK:      for_(x, dim_(args[0], 1)/2-0, 1, [&](auto iv_x) {
+// CHECK:        auto iv_z = iv_x;
+// CHECK:        for_(y, 4, 1, [&](auto iv_y) {
+// CHECK:          async_load_(lhs_load, args[0], lhs_load_buffer, {Value(6)*iv_q,Value(2)*iv_x,Value(32)*iv_y});
+// CHECK:          async_load_(rhs_load, args[1], rhs_load_buffer, {Value(6)*iv_q,Value(2)*iv_z,Value(32)*iv_y});
 // CHECK:          wait_dma_(lhs_load);
 // CHECK:          wait_dma_(rhs_load);
 // CHECK:          call_("kernel", {lhs_load_buffer.addr_(),rhs_load_buffer.addr_(),l1_out.addr_(),384});
-// CHECK:          async_store_(out_store, l1_out, results[0], {Value(6)*thread_id, Value(2)*x, Value(32)*y});
+// CHECK:          async_store_(out_store, l1_out, output, {Value(6)*iv_q,Value(2)*iv_x,Value(32)*iv_y});
 // CHECK:          wait_dma_(out_store);
-// CHECK:         }); // end of choreo-foreach block on 'q'
-// CHECK:       }); // end of choreo-foreach block on 'x'
-// CHECK:     }); // end of choreo-foreach block on 'y'
+// CHECK:         }); // end of choreo-foreach block on 'y'.
+// CHECK:       }); // end of choreo-foreach block on 'x'.
+// CHECK:     }); // end of choreo-foreach block on 'q'.
 
-// CHECK:  choreo::runtime_check(sp0.shape()[0] == 6, "shape inconstant on 1st parameter (dim: 0).");
-// CHECK:  choreo::runtime_check(sp0.shape()[2] == 128, "shape inconstant on 1st parameter (dim: 2).");
-// CHECK:  choreo::runtime_check(sp1.shape()[0] == 6, "shape inconstant on 2th parameter (dim: 0).");
-// CHECK:  choreo::runtime_check(sp1.shape()[2] == 128, "shape inconstant on 2th parameter (dim: 2).");
-// CHECK:  CHECK(topsMalloc(&in_mem0, 6 * sp0.shape()[1] * 128 * 4));
-// CHECK:  CHECK(topsMemcpy(in_mem0, reinterpret_cast<void *>(sp0.data), 6 * sp0.shape()[1] * 128 * 4, topsMemcpyHostToDevice));
-// CHECK:  CHECK(topsMalloc(&in_mem1, 6 * sp1.shape()[1] * 128 * 4));
-// CHECK:  CHECK(topsMemcpy(in_mem1, reinterpret_cast<void *>(sp1.data), 6 * sp1.shape()[1] * 128 * 4, topsMemcpyHostToDevice));
-// CHECK:  CHECK(topsMalloc(&out_mem, 6 * sp0.shape()[1] * 128 * 4));
-// CHECK:  auto res = choreo::make_spandata<s32, 3>({6, sp0.shape()[1], 128});
+// CHECK:  choreo::runtime_check(hp0.shape()[0] == 6, "shape inconsistent on the 1st parameter (dim: 0).");
+// CHECK:  choreo::runtime_check(hp0.shape()[2] == 128, "shape inconsistent on the 1st parameter (dim: 2).");
+// CHECK:  choreo::runtime_check(hp1.shape()[0] == 6, "shape inconsistent on the 2nd parameter (dim: 0).");
+// CHECK:  choreo::runtime_check(hp1.shape()[2] == 128, "shape inconsistent on the 2nd parameter (dim: 2).");
+// CHECK:  CHECK(topsMalloc(&in_mem0, 6 * hp0.shape()[1] * 128 * 4));
+// CHECK:  CHECK(topsMemcpy(in_mem0, reinterpret_cast<void *>(hp0.data()), 6 * hp0.shape()[1] * 128 * 4, topsMemcpyHostToDevice));
+// CHECK:  CHECK(topsMalloc(&in_mem1, 6 * hp1.shape()[1] * 128 * 4));
+// CHECK:  CHECK(topsMemcpy(in_mem1, reinterpret_cast<void *>(hp1.data()), 6 * hp1.shape()[1] * 128 * 4, topsMemcpyHostToDevice));
+// CHECK:  CHECK(topsMalloc(&out_mem, 6 * hp0.shape()[1] * 128 * 4));
+// CHECK:  auto res = choreo::make_spandata<s32, 3>({6, hp0.shape()[1], 128});
 // CHECK:  CHECK(topsMemcpy(reinterpret_cast<void *>(res.data()), out_mem,
-// CHECK:                  6 * sp0.shape()[1] * 128 * 4, topsMemcpyDeviceToHost));
+// CHECK:                  6 * hp0.shape()[1] * 128 * 4, topsMemcpyDeviceToHost));
 
 // __co__ auto ele_add2(s32 [6, ?, 128] lhs, s32 [6, ?, 128] rhs) {
 //   s32[lhs.span] output;
