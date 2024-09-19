@@ -451,10 +451,11 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
       // keep working
     } else {
       if (isa<MDSpanType>(n.init_expr->GetType())) {
-        Error(n.LOC(), "use ':' instead of '=' to define the \"" + STR(*n.init_expr->GetType()) + "\" type variable.");
+        Error(n.LOC(), "use ':' instead of '=' to define the \"" +
+                           STR(*n.init_expr->GetType()) + "\" type variable.");
         error_count++;
         if (trace_visit)
-            os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
+          os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
         // keep working
       }
       // sometimes the parser can not decide the type. We need to figure out
@@ -580,7 +581,8 @@ bool EarlySemantics::Visit(AST::Identifier& n) {
   if (in_decl) {
     if (allow_named_dim) {
       if (!SSTab().DeclaredInScope(n.name))
-        SSTab().DefineSymbol(n.name, MakeIntegerType()); // named dim is integer
+        SSTab().DefineSymbol(n.name,
+                             MakeIntegerType());  // named dim is integer
     } else
       ReportErrorWhenViolateODR(n.LOC(), n.name, __FILE__, __LINE__);
   } else
@@ -710,10 +712,18 @@ bool EarlySemantics::Visit(AST::Memory& n) {
 
 bool EarlySemantics::Visit(AST::SpanAs& n) {
   __TRACE_EACH_VISIT__(n)
-  if (!isa<MDSpanType>(NodeType(*n.id)))
+  auto sty = dyn_cast<SpannedType>(NodeType(*n.id));
+
+  if (!sty) {
     Error(n.LOC(), "span-as operation operates on a non-mdspan type.");
-  if (!isa<MDSpanType>(NodeType(*n.list)))
-    Error(n.LOC(), "span-as operation expects a mdspan parameter.");
+    error_count++;
+    return false;
+  }
+
+  auto asty = MakeRankedSpannedType(n.list->Count(), (BaseType)sty->f_type,
+                                    sty->m_type);
+  SSTab().DefineSymbol(n.nid->name, asty);
+  n.SetType(asty);
 
   // TODO: set the proper type
   return true;
@@ -794,6 +804,8 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
 
   n.data->accept(*this);
   auto nty = NodeType(*n.data);
+  if (n.sa) nty = NodeType(*n.sa);
+
   if (!isa<SpannedType>(nty) && !isa<FutureType>(nty)) {
     Error(n.LOC(),
           "expecting '" + n.data->name + "` of a spanned data or future type.");
@@ -884,7 +896,7 @@ bool EarlySemantics::Visit(AST::Call& n) {
   return true;
 }
 
-bool EarlySemantics::Visit(AST::Select &n) {
+bool EarlySemantics::Visit(AST::Select& n) {
   __TRACE_EACH_VISIT__(n)
 
   // TODO(wsj) isa<IntegerType>(rty)?
@@ -898,22 +910,21 @@ bool EarlySemantics::Visit(AST::Select &n) {
 
   // check value types in val_list are the same
   assert(n.span_expr_list->Count() > 0);
-  const auto &v0 = n.span_expr_list->AllValues()[0];
+  const auto& v0 = n.span_expr_list->AllValues()[0];
   auto v0ty = NodeType(*v0);
   assert(isa<SpannedType>(v0ty) &&
          "For now, select only support spanned type variables!");
-  for (auto &v : n.span_expr_list->AllValues()) {
+  for (auto& v : n.span_expr_list->AllValues()) {
     assert(isa<SpannedType>(NodeType(*v)));
     // TODO: need shape checking at typecheck
     if (auto sty = dyn_cast<SpannedType>(NodeType(*v))) {
       if (!sty->ApprxEqual(*v0ty)) {
-        Error(v->LOC(), "expecting `" + PSTR(v) +
-                           "` is the same type as `" + PSTR(v0) + "`.");
+        Error(v->LOC(), "expecting `" + PSTR(v) + "` is the same type as `" +
+                            PSTR(v0) + "`.");
         error_count++;
       }
     } else {
-      Error(v->LOC(),
-            "expecting `" + PSTR(v) + "` to be spanned type.");
+      Error(v->LOC(), "expecting `" + PSTR(v) + "` to be spanned type.");
       error_count++;
     }
   }
@@ -942,11 +953,12 @@ bool EarlySemantics::Visit(AST::LoopRange& n) {
 
 bool EarlySemantics::Visit(AST::ForeachBlock& n) {
   __TRACE_EACH_VISIT__(n)
-  for (auto & i : n.getRanges()) {
+  for (auto& i : n.getRanges()) {
     if (auto id = dyn_cast<AST::LoopRange>(i)->iv) {
       auto ity = NodeType(*id);
       if (!(IsBoundedType(ity))) {
-        Error(n.LOC(), "expecting a bounded type for iteration variable '" + id->name + "' but got '" + PSTR(ity) + "'.");
+        Error(n.LOC(), "expecting a bounded type for iteration variable '" +
+                           id->name + "' but got '" + PSTR(ity) + "'.");
         error_count++;
       }
     } else {

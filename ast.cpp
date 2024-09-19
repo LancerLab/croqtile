@@ -5,6 +5,8 @@ namespace Choreo {
 namespace AST {
 
 void MultiNodes::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+
   for (auto& sub : values) sub->accept(v);
   v.Visit(*this);
 }
@@ -58,7 +60,7 @@ void SpanAs::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
 
   id->accept(v);
-  nid->accept(v);
+//  nid->accept(v);
   list->accept(v);
   v.Visit(*this);
 
@@ -137,12 +139,16 @@ void WithBlock::accept(Choreo::Visitor& v) {
 void Memory::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
 void DMA::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
   from->accept(v);
   to->accept(v);
   v.Visit(*this);
 }
 
 void ChunkAt::accept(Choreo::Visitor& v) {
+  // handle span_as
+  if (sa)
+    sa->accept(v);
   // note: visit the positions inside
   v.Visit(*this);
 }

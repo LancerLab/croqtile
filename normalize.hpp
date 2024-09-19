@@ -29,6 +29,11 @@ struct Normalizer : public Visitor {
   }
   void ResetListReference() { list_ref = nullptr; }
 
+  // for node hoisting
+  AST::MultiNodes *cur_mnodes = nullptr;
+  int cur_dma_index = -1;
+  std::vector<std::pair<int, ptr<AST::Node>>> mnodes_insertions;
+
   std::string GetInternalValueString() { return "$" + std::to_string(count++); }
 
  public:
@@ -60,6 +65,11 @@ struct Normalizer : public Visitor {
       handle_parameter = true;
       old = AST::STR(*p->type);
       changed = false;
+    } else if (auto m = dyn_cast<AST::MultiNodes>(&n)) {
+      cur_mnodes = m;
+    } else if (auto d = dyn_cast<AST::DMA>(&n)) {
+      cur_dma_index = cur_mnodes->GetIndex(d);
+      assert(cur_dma_index != -1 && "unexpected node index.");
     }
     return true;
   }
@@ -83,7 +93,25 @@ struct Normalizer : public Visitor {
     return true;
   }
 
-  bool Visit(AST::MultiNodes &) override { return true; }
+  bool Visit(AST::MultiNodes &n) override {
+    // assert(cur_mnodes == &n);
+
+    // insert the node at the given place
+    for (auto item : mnodes_insertions) {
+      auto sa = cast<AST::SpanAs>(item.second);
+      auto assign =
+          AST::Make<AST::Assignment>(sa->LOC(), sa->nid->name, item.second);
+      if (trace)
+        os << "Hoisted span_as: " << PSTR(assign) << "\n";
+      n.values.insert(n.values.begin() + item.first, assign);
+    }
+
+    cur_mnodes = nullptr;
+    cur_dma_index = -1;
+    mnodes_insertions.clear();
+
+    return true;
+  }
 
   bool Visit(AST::MultiValues &n) override {
     if (list_ref) {  // desugar the list reference
@@ -208,7 +236,8 @@ struct Normalizer : public Visitor {
           n.with->LOC(), n.with->name + "__elem__" + std::to_string(i)));
       auto bity = cast<BoundedITupleType>(wty);
       if (bity->HasValidBound())
-        mval->ValueAt(i)->SetType(MakeBoundedIntegerType(bity->GetUpperBound(i)));
+        mval->ValueAt(i)->SetType(
+            MakeBoundedIntegerType(bity->GetUpperBound(i)));
       else
         mval->ValueAt(i)->SetType(MakeUnknownBoundedIntegerType());
     }
@@ -226,7 +255,16 @@ struct Normalizer : public Visitor {
   bool Visit(AST::Memory &) override { return true; }
   bool Visit(AST::SpanAs &) override { return true; }
   bool Visit(AST::DMA &) override { return true; }
-  bool Visit(AST::ChunkAt &) override { return true; }
+  bool Visit(AST::ChunkAt &n) override {
+    if (n.sa) {
+      assert(cur_dma_index != -1);
+      // hoist the span_as to multinodes
+      int index = cur_dma_index + mnodes_insertions.size();
+      mnodes_insertions.emplace_back(std::make_pair(index, n.sa));
+      n.sa.reset();
+    }
+    return true;
+  }
   bool Visit(AST::Wait &) override { return true; }
   bool Visit(AST::Call &) override { return true; }
   bool Visit(AST::Select &) override { return true; }

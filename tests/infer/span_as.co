@@ -1,0 +1,31 @@
+// RUN: TRACE_NORM= choreo -sa norm %s | FileCheck --match-full-lines %s
+// RUN: choreo -i %s | FileCheck --check-prefix=CHKINF --match-full-lines %s
+
+__co__ auto span_as(s32 [32, 18, 9] a) {
+  f32 [a.span] b;
+  parallel p by 3 {
+   with index = {x, y} in [4, 4] {
+     foreach index {
+       dma.copy a.span_as([16, 9, 36]).chunkat(x, p, y) => local;
+       dma.copy b.span_as([144, 36]).chunkat(p, p) => local;
+     }
+   }
+  }
+}
+
+// CHECK: Hoisted span_as:
+// CHECK: `- Assign: anon_0 = a.span_as[ 16 9 36 ]
+// CHECK: Hoisted span_as:
+// CHECK: `- Assign: anon_1 = b.span_as[ 144 36 ]
+
+// CHKINF: Parameter: ::span_as::a, Type: s32 mdspan<3> [32, 18, 9]
+// CHKINF: Symbol:    ::span_as::b, Type: global f32 mdspan<3> [32, 18, 9]
+// CHKINF: Bounded:   ::span_as::paraby_0::p, Type: {int}->[3]
+// CHKINF: Bounded:   ::span_as::paraby_0::within_0::index, Type: {int,int}->[4, 4]
+// CHKINF: Bounded:   ::span_as::paraby_0::within_0::x, Type: {int}->[4]
+// CHKINF: Bounded:   ::span_as::paraby_0::within_0::y, Type: {int}->[4]
+// CHKINF: Symbol:    ::span_as::paraby_0::within_0::foreach_0::anon_0, Type: s32 mdspan<3> [16, 9, 36]
+// CHKINF: Future:    ::span_as::paraby_0::within_0::foreach_0::(anon), Type: sync=>local s32 mdspan<3> [4, 3, 9]
+// CHKINF: Symbol:    ::span_as::paraby_0::within_0::foreach_0::anon_1, Type: global f32 mdspan<2> [144, 36]
+// CHKINF: Future:    ::span_as::paraby_0::within_0::foreach_0::(anon), Type: sync=>local f32 mdspan<2> [48, 12]
+// CHKINF: Function:  ::span_as, Type: void (*)(s32 mdspan<3> [32, 18, 9])

@@ -231,7 +231,7 @@ class ShapeInference : public Visitor {
     } else if (isa<AST::ForeachBlock>(&n)) {
       static size_t count = 0;
       vn.EnterScope("foreach_" + std::to_string(count++));
-      gen_values = false; // disable valno on range expressions
+      gen_values = false;  // disable valno on range expressions
     } else if (auto* b = dyn_cast<AST::MultiDimSpans>(&n)) {
       if (b->ref_name != "") {
         auto n = SSTab().NameInScopeOrNull(b->ref_name);
@@ -301,7 +301,7 @@ class ShapeInference : public Visitor {
 
   bool Visit(AST::Boolean& n) {
     __TRACE_EACH_VISIT__;
-    
+
     if (cannot_proceed) return true;
     int valNo = vn.GenerateValueNumberForNode(n);
     cur_vn = valNo;
@@ -441,7 +441,7 @@ class ShapeInference : public Visitor {
       assert(!n.mem);
       s = sty->GetStorage();
     }
-    
+
     if (n.mem) s = n.mem->st;
 
     if (n.init_expr && !isa<AST::Select>(n.init_expr)) {
@@ -566,10 +566,11 @@ class ShapeInference : public Visitor {
              "value number has not been generated.");
       cur_vn = vn.GetValueNumberOfSignature(SSTab().InScopeName(name));
     } else {
-      if (allow_named_dim) { // for named dims in parameters
+      if (allow_named_dim) {  // for named dims in parameters
         if (!SSTab().DeclaredInScope(n.name)) {
           SSTab().DefineSymbol(n.name, MakeIntegerType());
-          cur_vn = vn.GenerateValueNumberFromSignature(SSTab().InScopeName(n.name));
+          cur_vn =
+              vn.GenerateValueNumberFromSignature(SSTab().InScopeName(n.name));
         } else {
           cur_vn = vn.GetValueNumberOfSignature(SSTab().InScopeName(n.name));
         }
@@ -583,7 +584,6 @@ class ShapeInference : public Visitor {
       }
       // sometime we need value a symbol (symbolic value)
       cur_vn = vn.GenerateValueNumberForNode(n);
-
     }
 
     return true;
@@ -736,7 +736,7 @@ class ShapeInference : public Visitor {
             "unable to apply shape inference for function '" + cur_fn + "'.");
       return false;
     }
-    
+
     auto GenSignatureAndDoValno = [this, &vn_sig, &n](int valno, size_t index) {
       if (UnknownVN(valno)) return;  // do not associate it with vn of "?"
       if (n.with) {
@@ -760,7 +760,8 @@ class ShapeInference : public Visitor {
         // TODO(wsj): deal with expression contains bounded integers
       }
     };
-    if (CountElementsInSignature(vn_sig) == 1) // support `with idx={m} in [xx] {}`
+    if (CountElementsInSignature(vn_sig) ==
+        1)  // support `with idx={m} in [xx] {}`
       GenSignatureAndDoValno(vn.GetValueNumberOfSignature(vn_sig), 0);
     else
       ProcessValueNumberString(vn_sig, GenSignatureAndDoValno);
@@ -795,9 +796,28 @@ class ShapeInference : public Visitor {
 
   bool Visit(AST::SpanAs& n) {
     __TRACE_EACH_VISIT__;
-    assert(false && "TODO: span as.");
+    assert(ValidVN(cur_vn) && "failed to get the list value.");
+
+    auto sty = SSTab().LookupSymbol(n.id->name);
+
+    if (!isa<SpannedType>(sty)) {
+      Error(n.LOC(), "internal error: span_as operates on non-spanned type.");
+      return false;
+    }
+
+    vn.AssociateSignatureWithValueNumber(
+        SSTab().ScopedName(n.nid->name + ".span"), cur_vn);
+
+    auto shape = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
+    auto stty = cast<SpannedType>(sty);
+    auto nty = MakeSpannedType(stty->ElementType(), shape, stty->GetStorage());
+
+    SSTab().DefineSymbol(n.nid->name, nty);
+    SSTab().DefineSymbol(n.nid->name + ".span", nty->s_type);
+    n.SetType(nty);
+
     return true;
-  };
+  }
 
   bool Visit(AST::DMA& n) {
     __TRACE_EACH_VISIT__;
@@ -906,7 +926,7 @@ class ShapeInference : public Visitor {
         /*
         single: sig of idx is const_128
           with idx in [128] {
-            foreach idx { 
+            foreach idx {
               ... input.chunkat(idx) => ...
             }
           }
@@ -999,7 +1019,7 @@ class ShapeInference : public Visitor {
   bool Visit(AST::ForeachBlock& n) {
     if (trace_visit) os << n.TypeNameString() << "\n";
 
-    gen_values = true; // allow generate values for statements
+    gen_values = true;  // allow generate values for statements
 
     if (cannot_proceed) return true;
 

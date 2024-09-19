@@ -296,7 +296,7 @@ bool TypeInference::Visit(AST::Assignment &n) {
     Error(n.LOC(), "fail to deduce type of `" + n.name + "'.");
     error_count++;
   } else {
-    auto ty = n.value->GetType();
+    auto ty = NodeType(*n.value);
     AssignSymbolWithType(n.LOC(), n.name, ty);
 
     if (Dump) {
@@ -530,7 +530,16 @@ bool TypeInference::Visit(AST::IntTuple &n) {
 
 bool TypeInference::Visit(AST::SpanAs &n) {
   __TRACE_EACH_VISIT__(n)
-  assert(false && "TODO: type inference of spanas.");
+
+  if (!isa<SpannedType>(NodeType(*n.id).get())) {
+    Error(n.LOC(), "fail to infer the type of `" + STR(n.id) + "'.");
+    error_count++;
+    return false;
+  }
+
+  // is this required? assign the target id (not defined yet) with a type
+  n.nid->SetType(NodeType(n));
+
   return true;
 }
 

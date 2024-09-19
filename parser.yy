@@ -153,8 +153,9 @@ void choreo_info(const char *message) {
 %nterm <Choreo::BaseType> fundamental_type
 %nterm <AST::ptr<AST::CppSourceCode>> pass_by host_code
 %nterm <AST::ptr<AST::Memory>> storage_qual
+%nterm <AST::ptr<AST::SpanAs>> span_as
 %nterm <AST::ptr<AST::Node>> foreach_block general_val simple_int span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt index_or_value range_expr if_else_block optional_scalar_init param_mdspan_val chunkat_or_storage_or_select
-%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause else_block named_spanned_decls
+%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause else_block multi_decls named_spanned_decl
 %nterm <AST::ptr<AST::MultiValues>> index_value_list value_list param_mdspan_list range_exprs iv_list id_list with_matchers passables span_expr_list
 %nterm <AST::ptr<AST::Expr>> s_expr span_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
@@ -312,6 +313,7 @@ general_val
     | unnamed_mdspan_decl { $$ = $1; }
     | unnamed_ituple_decl { $$ = $1; }
     | bool_literal { $$ = $1; }
+    | span_as { $$ = $1; }
     ;
 
 simple_int
@@ -362,7 +364,12 @@ parameter
 statements
     : /* no statement */ { $$ = AST::Make<AST::MultiNodes>(loc); }
     | statements statement {
-        $1->Append($2);
+        if (auto mstmts = dyn_cast<AST::MultiNodes>($2)) {
+          for (auto stmt : mstmts->AllSubs())
+            $1->Append(stmt); // append multi-satements
+        } else
+          $1->Append($2);
+
         $$ = $1;
       }
     | statements SEMCOL { $$ = $1; }
@@ -421,15 +428,17 @@ declarations
         $$ = AST::Make<AST::MultiNodes>(@1);
         $$->Append($1);
       }
-    | named_spanned_decls {
-        $$ = $1;
-      }
+    | multi_decls { $$ = $1; }
     ;
 
 declaration
     : named_mdspan_decl  { $$ = $1; }
     | named_ituple_decl  { $$ = $1; }
     | named_scalar_decl  { $$ = $1; }
+    ;
+
+multi_decls
+    : named_spanned_decl { $$ = $1; }
     ;
 
 named_scalar_decl
@@ -448,20 +457,14 @@ optional_scalar_init
     | ASSIGN s_expr  { $$ = $2; }
     ;
 
-named_spanned_decls
-    : named_spanned_decls COMMA IDENTIFIER {
-        const auto& node = std::dynamic_pointer_cast<AST::NamedVariableDecl>($1->values[0]);
-        symtab.AddSymbol($3, node->GetType());
-        // TODO: multiple AST::NamedVariableDecl share the same spanned_type node!
-        // In some cases, this can lead to errors.
-        // may be need to add copy constructor for AST::DataType?
-        $1->Append(AST::Make<AST::NamedVariableDecl>(@3, $3, node->type, node->mem));
-        $$ = $1;
-      }
-    | storage_qual spanned_type IDENTIFIER {
-        symtab.AddSymbol($3, $2->GetType());
+named_spanned_decl
+    : storage_qual spanned_type id_list {
         $$ = AST::Make<AST::MultiNodes>(@1);
-        $$->Append(AST::Make<AST::NamedVariableDecl>(@3, $3, $2, $1));
+        for (auto id : $3->AllValues()) {
+          auto name = cast<AST::Identifier>(id)->name;
+          symtab.AddSymbol(name, $2->GetType());
+          $$->Append(AST::Make<AST::NamedVariableDecl>(@3, name, $2, $1));
+        }
       }
     ;
 
@@ -860,6 +863,12 @@ chunkat_or_storage_or_select
     | select_expr  { $$ = $1; }
     ;
 
+span_as
+    : IDENTIFIER FNSPANAS LPAREN LBRAKT value_list RBRAKT RPAREN {
+        $$ = AST::Make<AST::SpanAs>(@1, AST::Make<AST::Identifier>(@1,$1), $5);
+      }
+    ;
+
 chunkat_expr
     : IDENTIFIER CHUNKAT LPAREN id_list RPAREN {
         $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $4);
@@ -867,9 +876,9 @@ chunkat_expr
     | IDENTIFIER FNDATA CHUNKAT LPAREN id_list RPAREN {
         $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $5);
       }
-    | IDENTIFIER FNSPANAS LPAREN LBRAKT value_list RBRAKT RPAREN CHUNKAT LPAREN id_list RPAREN {
+    | span_as CHUNKAT LPAREN id_list RPAREN {
         // note: normalize will hoist span_as
-        $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::SpanAs>(@1, AST::Make<AST::Identifier>(@1,$1), $5), $10);
+        $$ = AST::Make<AST::ChunkAt>($1->LOC(), $1, $4);
       }
     /*| IDENTIFIER CHUNKAT LPAREN value_list RPAREN {
         $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $4);

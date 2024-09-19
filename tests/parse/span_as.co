@@ -1,21 +1,29 @@
 // RUN: choreo -e %s | FileCheck --match-full-lines %s
 
-__co__ int span_as(s32 [32, 18, 9] a) {
+__co__ auto span_as(s32 [32, 18, 9] a) {
   f32 [a.span] b;
   parallel p by 2 {
      dma.copy a.span_as([16, 9, 36]).chunkat(p, p, p) => local;
-//     ns_b = b.span_as([96, 9, 6]);
-//     dma.copy ns_b.chunkat(p, p, p) => local;
+     dma.copy a.span_as([144, 36]).chunkat(p, p) => local;
+     c = b.span_as([7, 8, 1, 9]);
+     dma.copy c.chunkat(p, p, p, p) => local;
   }
 }
 
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: span_as
-// CHECK:  `- Return type: int
+// CHECK:  `- Return type: unknown
 // CHECK:  `- Parameters
 // CHECK:    `-  type: s32 [ 32 18 9 ], symbol: a
 // CHECK:  `- Var Decl (f32 [ a.span ], default): b
 // CHECK:  `- Parallelization:  index symbol: p, bound [0, 2)
 // CHECK:   `- DMA.copy
-// CHECK:     `- from: anon_0(a.span_as[ 16 9 36 ]).ChunkAt(p, p, p)
+// CHECK:     `- from: a.span_as[ 16 9 36 ].ChunkAt(p, p, p)
+// CHECK:     `- to: local
+// CHECK:   `- DMA.copy
+// CHECK:     `- from: a.span_as[ 144 36 ].ChunkAt(p, p)
+// CHECK:     `- to: local
+// CHECK:   `- Var Decl (unknown): c = b.span_as[ 7 8 1 9 ]
+// CHECK:   `- DMA.copy
+// CHECK:     `- from: c.ChunkAt(p, p, p, p)
 // CHECK:     `- to: local

@@ -118,6 +118,15 @@ struct MultiNodes : public Node, public TypeIDProvider<MultiNodes> {
 
   std::vector<ptr<Node>> AllSubs() { return values; }
 
+  // retrieve the index if the element is inside the MultiNodes
+  int GetIndex(Node *n) const {
+    for (size_t i = 0; i < values.size(); ++i) {
+      if (values[i].get() == n)
+        return i;
+    }
+    return -1;
+  }
+
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     if (delimiter != "" && values.size() > 1) {
       auto i = values.begin();
@@ -460,16 +469,16 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
 struct SpanAs : public Node, public TypeIDProvider<SpanAs> {
   ptr<Identifier> id = nullptr;
   ptr<Identifier> nid = nullptr;
-  ptr<Node> list = nullptr;
+  ptr<MultiValues> list = nullptr;
 
   explicit SpanAs(const location& l, const ptr<Identifier>& n,
-                  const ptr<Identifier>& nn, const ptr<Node>& lst)
+                  const ptr<Identifier>& nn, const ptr<MultiValues>& lst)
       : Node(l, MakeUninitMDSpanType()), id(n), nid(nn), list(lst) {
     assert(list && "Unexpected: span list is not provided");
   }
 
   explicit SpanAs(const location& l, const ptr<Identifier>& n,
-                  const ptr<Node>& lst)
+                  const ptr<MultiValues>& lst)
       : SpanAs(l, n, Make<Identifier>(l), lst) {
     assert(list && "Unexpected: span list is not provided");
   }
@@ -489,9 +498,9 @@ struct SpanAs : public Node, public TypeIDProvider<SpanAs> {
     assert(nid && "no new span is specified.");
     assert(list && "no span_as is specified.");
 
-    os << PSTR(nid) << "(" << PSTR(id) << ".span_as[";
+    os << PSTR(id) << ".span_as[";
     list->Print(os, " ");
-    os << " ])";
+    os << " ]";
 
     (void)prefix;
   }
