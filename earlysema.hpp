@@ -38,25 +38,6 @@ struct EarlySemantics : public Visitor {
                                  const char *, int,
                                  const ptr<Type> & = MakeUnknownType());
 
-  ptr<Type> NodeType(AST::Node &n) {
-    if (auto id = dyn_cast<AST::Identifier>(&n))
-      return SSTab().LookupSymbol(id->name);
-    else if (auto expr = dyn_cast<AST::Expr>(&n)) {
-      if (auto ref = expr->GetReference()) {
-        if (auto id = dyn_cast<AST::Identifier>(ref))
-          return SSTab().LookupSymbol(id->name);
-      } else if (expr->op == "dataof") {
-        if (auto ref = cast<AST::Expr>(expr->GetR())->GetReference()) {
-          auto id = cast<AST::Identifier>(ref);
-          if (!SSTab().LookupSymbol(id->name))  // make sure the symbol exists
-            return nullptr;
-          return SSTab().LookupSymbol(id->name + ".data");
-        }
-      }
-    }
-    return n.GetType();
-  }
-
   void SetNodeType(AST::Node &n, const ptr<Type> &ty) {
     n.SetType(ty);
     if (trace_visit)

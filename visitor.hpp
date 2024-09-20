@@ -70,6 +70,27 @@ struct Visitor {
     return nullptr;
   }
 
+ protected:
+  virtual ptr<Type> NodeType(AST::Node &n) {
+    if (auto id = dyn_cast<AST::Identifier>(&n))
+      return GetSymbolType(id->name);
+    else if (auto expr = dyn_cast<AST::Expr>(&n)) {
+      if (auto ref = expr->GetReference()) {
+        if (auto id = dyn_cast<AST::Identifier>(ref))
+          return GetSymbolType(id->name);
+      } else if (expr->op == "dataof") {
+        if (auto ref = cast<AST::Expr>(expr->GetR())->GetReference()) {
+          auto id = cast<AST::Identifier>(ref);
+          if (!GetSymbolType(id->name))  // make sure the symbol exists
+            return nullptr;
+          return GetSymbolType(id->name + ".data");
+        }
+      }
+    }
+    return n.GetType();
+  }
+
+public:
   static bool shell_supports_colors() {
     const char* term = getenv("TERM");
     return term &&
@@ -78,6 +99,11 @@ struct Visitor {
 
   static bool should_use_colors() {
     return isatty(fileno(stdout)) && shell_supports_colors();
+  }
+
+ public:
+  virtual ptr<Type> GetSymbolType(const std::string& n) {
+    return SSTab().LookupSymbol(n);
   }
 
  public:
@@ -114,41 +140,12 @@ struct Visitor {
   }
 };
 
-// This accepts static symbol table and provide symbol lookup capability
-struct VisitorWithSymTab : public Visitor {
+// A visitor with simple symbol auto scoping functionality
+struct VisitorWithScope: public Visitor {
  protected:
   // for the derived classes
   virtual bool BeforeVisitImpl(AST::Node& n) = 0;
   virtual bool AfterVisitImpl(AST::Node& n) = 0;
-
-  virtual std::string InScopeName(const std::string& sym) {
-    auto removeLastLevel = [](const std::string& input) -> std::string {
-      size_t lastPos = input.rfind("::");
-      if (lastPos == std::string::npos)
-        return input;  // No "::" found, return the original string
-      // Find the second-to-last "::" by searching up to the last found position
-      size_t secondLastPos = input.rfind("::", lastPos - 1);
-      if (secondLastPos == std::string::npos) return input;
-      return input.substr(0,
-                          secondLastPos + 2);  // Include the "::" in the result
-    };
-    std::string scope_name = SSTab().ScopeName();
-    while (true) {
-      std::string scoped_name = scope_name + sym;
-      if (SymTab()->Exists(scoped_name)) return scoped_name;
-      std::string stripped_scope = removeLastLevel(scope_name);
-      if (stripped_scope == scope_name) break;
-      scope_name = stripped_scope;
-    }
-
-    choreo_unreachable("unable to find symbol `" + sym +
-                       "' in the symbol table.");
-    return "";
-  }
-
-  virtual ptr<Type> GetSymbolType(const std::string& n) {
-    return SymTab()->GetSymbol(InScopeName(n))->GetType();
-  }
 
   // special to within: map 'with' to its 'with-matchers'
   std::unordered_map<std::string, std::vector<std::string>> within_map;
@@ -199,7 +196,47 @@ struct VisitorWithSymTab : public Visitor {
   }
 
  public:
-  VisitorWithSymTab(const ptr<SymbolTable>& s_tab) : Visitor(s_tab) { Reset(); }
+  VisitorWithScope(const ptr<SymbolTable>& s_tab) : Visitor(s_tab) { Reset(); }
+  ~VisitorWithScope() {}
+};
+
+// This accepts static symbol table and provide symbol lookup capability
+// Caution: must be used when symbol table does not change.
+struct VisitorWithSymTab : public VisitorWithScope {
+ protected:
+  virtual std::string InScopeName(const std::string& sym) {
+    auto removeLastLevel = [](const std::string& input) -> std::string {
+      size_t lastPos = input.rfind("::");
+      if (lastPos == std::string::npos)
+        return input;  // No "::" found, return the original string
+      // Find the second-to-last "::" by searching up to the last found position
+      size_t secondLastPos = input.rfind("::", lastPos - 1);
+      if (secondLastPos == std::string::npos) return input;
+      return input.substr(0,
+                          secondLastPos + 2);  // Include the "::" in the result
+    };
+    std::string scope_name = SSTab().ScopeName();
+    while (true) {
+      std::string scoped_name = scope_name + sym;
+      if (SymTab()->Exists(scoped_name)) return scoped_name;
+      std::string stripped_scope = removeLastLevel(scope_name);
+      if (stripped_scope == scope_name) break;
+      scope_name = stripped_scope;
+    }
+
+    choreo_unreachable("unable to find symbol `" + sym +
+                       "' in the symbol table.");
+    return "";
+  }
+
+ public:
+  // use the immutable symbol table directly
+  ptr<Type> GetSymbolType(const std::string& n) override {
+    return SymTab()->GetSymbol(InScopeName(n))->GetType();
+  }
+
+ public:
+  VisitorWithSymTab(const ptr<SymbolTable>& s_tab) : VisitorWithScope(s_tab) {}
   ~VisitorWithSymTab() {}
 };
 

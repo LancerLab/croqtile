@@ -1,6 +1,6 @@
-#include <sstream>
-
 #include "sym_replace.hpp"
+
+#include <sstream>
 
 using namespace Choreo;
 
@@ -14,7 +14,7 @@ inline std::string ExSTR(const SymReplace::SymExpr& sym_expr) {
   return oss.str();
 }
 
-} // end of anonymous namespace
+}  // end of anonymous namespace
 
 bool SymReplace::InsertNameSymbolMap(std::string name, const Symbol& sym) {
   assert(!name_symbol_map.count(name));
@@ -23,8 +23,8 @@ bool SymReplace::InsertNameSymbolMap(std::string name, const Symbol& sym) {
   return true;
 }
 
-const SymReplace::Symbol&
-SymReplace::GetSymbolFromName(std::string name) const {
+const SymReplace::Symbol& SymReplace::GetSymbolFromName(
+    std::string name) const {
   assert(name_symbol_map.count(name));
   return name_symbol_map.at(name);
 }
@@ -38,8 +38,8 @@ bool SymReplace::InsertNameSymExprMap(std::string sname,
   return true;
 }
 
-const SymReplace::SymExpr&
-SymReplace::GetSymExprFromName(std::string name) const {
+const SymReplace::SymExpr& SymReplace::GetSymExprFromName(
+    std::string name) const {
   assert(name_sym_expr_map.count(name));
   return name_sym_expr_map.at(name);
 }
@@ -67,8 +67,8 @@ bool SymReplace::InsertSymValnoSymExprMap(SymValno sym_valno,
   return true;
 }
 
-const SymReplace::SymExpr&
-SymReplace::GetSymExprFromSymValno(SymValno sym_valno) const {
+const SymReplace::SymExpr& SymReplace::GetSymExprFromSymValno(
+    SymValno sym_valno) const {
   assert(sym_valno_sym_expr_map.count(sym_valno));
   return sym_valno_sym_expr_map.at(sym_valno);
 }
@@ -117,8 +117,10 @@ void SymReplace::InitializeNode(ptr<AST::Node> n) {
       } else if (isa<AST::MultiDimSpans>(r)) {
         // concat is here.
       } else if (isa<AST::Boolean>(r)) {
+      } else if (isa<AST::SpanAs>(r)) {
       } else {
-        choreo_unreachable("The operator " + e->op + " is not supported in SymReplace yet.");
+        choreo_unreachable("The operator " + e->op +
+                           " is not supported in SymReplace yet.");
       }
     } else if (e->op == "ubound") {
       auto id = dyn_cast<AST::Identifier>(r);
@@ -135,8 +137,9 @@ void SymReplace::InitializeNode(ptr<AST::Node> n) {
       else if (isa<AST::Identifier>(ii->value))
         name += nd2sn.at(ii->value);
       else
-        choreo_unreachable("The node type of the value of AST::IntIndex is not "
-                           "supported in SymReplace yet.");
+        choreo_unreachable(
+            "The node type of the value of AST::IntIndex is not "
+            "supported in SymReplace yet.");
       name += ")";
       InsertNdSnSymMap(n, name, false);
     } else {
@@ -149,6 +152,7 @@ void SymReplace::InitializeNode(ptr<AST::Node> n) {
   } else if (isa<AST::IntTuple>(n)) {
   } else if (isa<AST::MultiDimSpans>(n)) {
   } else if (isa<AST::IntIndex>(n)) {
+  } else if (isa<AST::SpanAs>(n)) {
   } else if (auto b = dyn_cast<AST::Boolean>(n)) {
     InsertNdSnSymMap(n, b->value, false);
   } else {
@@ -159,17 +163,15 @@ void SymReplace::InitializeNode(ptr<AST::Node> n) {
 
 SymReplace::SymValno SymReplace::GetValidSymValno(const SymExpr& sym_expr) {
   for (auto& [sv, se] : sym_valno_sym_expr_map)
-    if (IsEqualSymExpr(sym_expr, se))
-      return sv;
+    if (IsEqualSymExpr(sym_expr, se)) return sv;
   auto expaneded_sym_expr = sym_expr.expand();
   InsertSymValnoSymExprMap(sym_valno, expaneded_sym_expr);
   ++sym_valno;
   return sym_valno - 1;
 }
 
-SymReplace::SymExpr
-SymReplace::StringifyOpFromSymExpr(ptr<AST::Node> n, const std::string& op,
-                                   const SymExpr& sym_expr_r) {
+SymReplace::SymExpr SymReplace::StringifyOpFromSymExpr(
+    ptr<AST::Node> n, const std::string& op, const SymExpr& sym_expr_r) {
   std::string symbol_name;
   // calling expand before STR is necessary!
   // so that the new symbol is in canonical format.
@@ -189,10 +191,9 @@ SymReplace::StringifyOpFromSymExpr(ptr<AST::Node> n, const std::string& op,
   return SymExpr(GetSymbolFromName(symbol_name));
 }
 
-SymReplace::SymExpr
-SymReplace::StringifyOpFromSymExpr(ptr<AST::Node> n, const SymExpr& sym_expr_l,
-                                   const std::string& op,
-                                   const SymExpr& sym_expr_r) {
+SymReplace::SymExpr SymReplace::StringifyOpFromSymExpr(
+    ptr<AST::Node> n, const SymExpr& sym_expr_l, const std::string& op,
+    const SymExpr& sym_expr_r) {
   std::string symbol_name;
   std::string sym_expr_l_str = ExSTR(sym_expr_l.expand());
   std::string sym_expr_r_str = ExSTR(sym_expr_r.expand());
@@ -201,10 +202,9 @@ SymReplace::StringifyOpFromSymExpr(ptr<AST::Node> n, const SymExpr& sym_expr_l,
   return SymExpr(GetSymbolFromName(symbol_name));
 }
 
-SymReplace::SymExpr
-SymReplace::StringifyOpFromSymExpr(ptr<AST::Node> n, const std::string& op,
-                                   const SymExpr& sym_expr_l,
-                                   const SymExpr& sym_expr_r) {
+SymReplace::SymExpr SymReplace::StringifyOpFromSymExpr(
+    ptr<AST::Node> n, const std::string& op, const SymExpr& sym_expr_l,
+    const SymExpr& sym_expr_r) {
   std::string symbol_name;
   std::string sym_expr_l_str = ExSTR(sym_expr_l.expand());
   std::string sym_expr_r_str = ExSTR(sym_expr_r.expand());
@@ -246,6 +246,23 @@ void SymReplace::SymbolizeExprNode(ptr<AST::Node> n) {
 
   SymReplace::SymExpr res;
 
+  auto dottedNames = [this](std::string& n, const AST::MultiValues& mvs) {
+    for (auto v : mvs.AllValues()) {
+      if (isa<AST::Expr>(v))
+        n += ExSTR(GetSymExprFromSymValno(GetSymValnoFromExpr(v)).expand());
+      else {
+        assert(nd2sn.count(v));
+        n += nd2sn.at(v);
+      }
+      n += ",";
+    }
+  };
+
+  auto getSymEx = [this](const std::string& n) {
+    if (name_sym_expr_map.count(n)) return GetSymExprFromName(n);
+    return SymExpr(GetSymbolFromName(n));
+  };
+
   if (e->IsReference()) {
     if (isa<AST::Identifier>(R)) {
       assert(nd2sn.count(R));
@@ -257,54 +274,41 @@ void SymReplace::SymbolizeExprNode(ptr<AST::Node> n) {
       res = SymReplace::SymExpr(num->Val());
     } else if (auto it = dyn_cast<AST::IntTuple>(R)) {
       std::string sname = "{";
-      for (auto value : it->GetValues()->AllValues()) {
-        if (isa<AST::Expr>(value)) {
-          sname += ExSTR(
-              GetSymExprFromSymValno(GetSymValnoFromExpr(value)).expand());
-        } else {
-          assert(nd2sn.count(value));
-          sname += nd2sn.at(value);
-        }
-        sname += ",";
-      }
+      dottedNames(sname, *it->GetValues());
       sname.back() = '}';
       InsertNdSnSymMap(n, sname, false);
       InsertNdSnSymMap(R, sname, false);
-      if (name_sym_expr_map.count(sname))
-        res = GetSymExprFromName(sname);
-      else
-        res = SymExpr(GetSymbolFromName(sname));
+      res = getSymEx(sname);
+    } else if (auto sa = dyn_cast<AST::SpanAs>(R)) {
+      auto mvs = cast<AST::MultiValues>(sa->list);
+      std::string sname = sa->nid->name + ".span_as[";
+      dottedNames(sname, *mvs);
+      sname.back() = ']';
+      InsertNdSnSymMap(n, sname, false);
+      InsertNdSnSymMap(R, sname, false);
+      res = getSymEx(sname);
     } else if (auto mds = dyn_cast<AST::MultiDimSpans>(R)) {
       if (mds->list == nullptr) {
-        choreo_unreachable("The list of AST::MultiDimSpans here should not be "
-                           "nullptr in SymReplace pass!");
+        choreo_unreachable(
+            "The list of AST::MultiDimSpans here should not be "
+            "nullptr in SymReplace pass!");
       } else {
-        if (auto mv = dyn_cast<AST::MultiValues>(mds->list)) {
+        if (auto mvs = dyn_cast<AST::MultiValues>(mds->list)) {
           std::string sname = "[";
-          for (auto value : mv->AllValues()) {
-            if (isa<AST::Expr>(value)) {
-              sname += ExSTR(
-                  GetSymExprFromSymValno(GetSymValnoFromExpr(value)).expand());
-            } else {
-              assert(nd2sn.count(value));
-              sname += nd2sn.at(value);
-            }
-            sname += ",";
-          }
+          dottedNames(sname, *mvs);
           sname.back() = ']';
           InsertNdSnSymMap(n, sname, false);
           InsertNdSnSymMap(R, sname, false);
-          if (name_sym_expr_map.count(sname))
-            res = GetSymExprFromName(sname);
-          else
-            res = SymExpr(GetSymbolFromName(sname));
+          res = getSymEx(sname);
         } else if (auto expr = dyn_cast<AST::Expr>(mds->list)) {
+          (void)expr;
           // TODO: currently ignore concat op in mdspan.
           InsertExprSymValnoMap(n, 0);
           return;
         }
       }
     } else if (auto b = dyn_cast<AST::Boolean>(R)) {
+      (void)b;
       res = SymExpr(GetSymbolFromName(nd2sn.at(R)));
     } else {
       choreo_unreachable("The operator " + e->op +
@@ -426,15 +430,15 @@ void SymReplace::EquivalentlyReplaceExprNodes() {
     }
 
     TRACE(
-      if (should_use_colors()) {
-        os << cyan << pass_name << " " << blue << "REPLACE " << reset
-           << PSTR(orig_node) << blue << " WITH " << reset << PSTR(new_node)
-           << "\n";
-      } else {
-        os << pass_name << " " << "REPLACE " << PSTR(orig_node) << " WITH "
-           << PSTR(new_node) << "\n";
-      }
-    );
+        if (should_use_colors()) {
+          os << cyan << pass_name << " " << blue << "REPLACE " << reset
+             << PSTR(orig_node) << blue << " WITH " << reset << PSTR(new_node)
+             << "\n";
+        } else {
+          os << pass_name << " "
+             << "REPLACE " << PSTR(orig_node) << " WITH " << PSTR(new_node)
+             << "\n";
+        });
 
     auto C = new_expr->GetC();
     auto L = new_expr->GetL();
@@ -446,6 +450,8 @@ void SymReplace::EquivalentlyReplaceExprNodes() {
       orig_expr->SetR(AST::Make<AST::Expr>(*e));
     else if (auto id = dyn_cast<AST::Identifier>(R))
       orig_expr->SetR(AST::Make<AST::Identifier>(*id));
+    else if (auto sa = dyn_cast<AST::SpanAs>(R))
+      orig_expr->SetR(AST::Make<AST::SpanAs>(*sa));
     else
       choreo_unreachable("The node of type " + PSTR(R->GetType()) +
                          " is not supported in SymReplace yet.");
@@ -479,6 +485,6 @@ void SymReplace::EquivalentlyReplaceExprNodes() {
 }
 
 const char* SymReplace::cyan = "\033[33m";
-const char *SymReplace::blue = "\033[34m";
+const char* SymReplace::blue = "\033[34m";
 const char* SymReplace::reset = "\033[0m";
 const char* SymReplace::pass_name = "[SymReplace]";

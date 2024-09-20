@@ -483,6 +483,12 @@ struct SpanAs : public Node, public TypeIDProvider<SpanAs> {
     assert(list && "Unexpected: span list is not provided");
   }
 
+  // allow copy construction
+  explicit SpanAs(const SpanAs & sa)
+      : SpanAs(sa.LOC(), sa.id, sa.nid, sa.list) {
+    assert(list && "Unexpected: span list is not provided");
+  }
+
   void SetTypeDetail(const Shape& s) {
     assert(typeof<SpannedType>(this) && "Incorrect type for mdspan.");
     cast<MDSpanType>(GetType())->SetShape(s);

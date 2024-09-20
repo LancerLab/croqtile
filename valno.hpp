@@ -514,7 +514,13 @@ class ShapeInference : public Visitor {
     }
 
     // this is the un-type-annotated declaration
-    SSTab().DefineSymbol(n.name, n.value->GetType());
+    auto nty = n.value->GetType();
+    SSTab().DefineSymbol(n.name, nty);
+    if (auto san = dyn_cast<AST::SpanAs>(n.value)) {
+      assert((n.name == san->nid->name) && "inconsistent span_as variable name.");
+      SSTab().DefineSymbol(san->nid->name + ".span", cast<SpannedType>(nty)->s_type);
+      return true;
+    }
 
     assert(ValidVN(cur_vn) && "expected a valid current value number.");
     vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(n.name), cur_vn);
@@ -812,8 +818,6 @@ class ShapeInference : public Visitor {
     auto stty = cast<SpannedType>(sty);
     auto nty = MakeSpannedType(stty->ElementType(), shape, stty->GetStorage());
 
-    SSTab().DefineSymbol(n.nid->name, nty);
-    SSTab().DefineSymbol(n.nid->name + ".span", nty->s_type);
     n.SetType(nty);
 
     return true;

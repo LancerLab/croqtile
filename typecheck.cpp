@@ -57,11 +57,21 @@ bool TypeChecker::Visit(AST::IntTuple& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
+
 bool TypeChecker::Visit(AST::Assignment& n) {
   __TRACE_EACH_VISIT__(n)
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
+  if (!ReportUnknownSymbol(n.name, n.LOC(), __FILE__, __LINE__)) return false;
+
+  if (*GetSymbolType(n.name) != *n.value->GetType()) {
+    Error(n.LOC(), "inconsistent types are found in the assignment.");
+    error_count++;
+    return false;
+  }
+
   return true;
 }
+
 bool TypeChecker::Visit(AST::IntIndex& n) {
   __TRACE_EACH_VISIT__(n)
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
@@ -75,11 +85,7 @@ bool TypeChecker::Visit(AST::DataType& n) {
 bool TypeChecker::Visit(AST::Identifier& n) {
   __TRACE_EACH_VISIT__(n)
   if (PrefixedWith(n.name, "$")) return true;  // do not check internal symbols
-  if (isa<UnknownType>(GetSymbolType(n.name))) {
-    ++error_count;
-    Error(n.LOC(), "failed to get/infer the type of " + n.name + ".");
-    return false;
-  }
+  if (!ReportUnknownSymbol(n.name, n.LOC(), __FILE__, __LINE__)) return false;
   return true;
 }
 bool TypeChecker::Visit(AST::Parameter& n) {
@@ -111,10 +117,49 @@ bool TypeChecker::Visit(AST::Memory& n) {
   __TRACE_EACH_VISIT__(n)
   return true;
 }
+
 bool TypeChecker::Visit(AST::SpanAs& n) {
   __TRACE_EACH_VISIT__(n)
+
+  if (!ReportUnknownSymbol(n.id->name, n.LOC(), __FILE__, __LINE__))
+    return false;
+
+  if (!(isa<SpannedType>(GetSymbolType(n.id->name)))) {
+    Error(n.LOC(), "Expect symbol `" + n.id->name + "' to be a spanned type.");
+    error_count++;
+    return false;
+  }
+
+  if (!(AST::typeof<SpannedType>(&n))) {
+    Error(n.LOC(), "Invalid type of span_as expression.");
+    error_count++;
+    return false;
+  }
+
+  auto sty = cast<SpannedType>(GetSymbolType(n.id->name));
+  auto nty = cast<SpannedType>(NodeType(n));
+
+  if (sty->ElementType() != nty->ElementType()) {
+    Error(n.LOC(), "Inconsistent element type: (" + STR(nty->ElementType()) +
+                       " = span_as(" + STR(sty->ElementType()) + ".");
+    error_count++;
+    return false;
+  }
+
+  if (!sty->RuntimeShaped() && !nty->RuntimeShaped()) {
+    // check if the shape size are same
+    if (sty->ShapeSize() != nty->ShapeSize()) {
+      Error(n.LOC(), "Inconsistent mdspan size: " + n.id->name + "(" +
+                         STR(sty->ShapeSize()) + ") = spanas (" + n.nid->name +
+                         "(" + STR(nty->ShapeSize()) + ")).");
+      error_count++;
+      return false;
+    }
+  }
+
   return true;
 }
+
 bool TypeChecker::Visit(AST::DMA& n) {
   __TRACE_EACH_VISIT__(n)
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
@@ -153,8 +198,8 @@ bool TypeChecker::Visit(AST::Select& n) {
       if (sty->GetStorage() != sty0->GetStorage()) {
         ++error_count;
         Error(expr->LOC(), "Expecting " + PSTR(expr) +
-                               " is the same storage type as " + PSTR(expr0) + " (" +
-                               STR(sty->GetStorage()) + " vs. " +
+                               " is the same storage type as " + PSTR(expr0) +
+                               " (" + STR(sty->GetStorage()) + " vs. " +
                                STR(sty0->GetStorage()) + ").");
       }
     }
@@ -191,10 +236,22 @@ bool TypeChecker::Visit(AST::Program& n) {
   return true;
 }
 
-bool TypeChecker::ReportUnknown(AST::Node& n, const char* file, int line) {
-  if (AST::typeof<UnknownType>(&n)) {
+bool TypeChecker::ReportUnknownSymbol(const std::string& name,
+                                      const location& loc, const char* file,
+                                      int line) {
+  if (isa<UnknownType>(GetSymbolType(name))) {
     ++error_count;
-    Error(n.LOC(), "failed to get/infer the type.");
+    Error(loc, "failed to obtain the type of " + name + ".");
+    if (trace_visit) os << file << ":" << line << "\n";
+    return false;
+  }
+  return true;
+}
+
+bool TypeChecker::ReportUnknown(AST::Node& n, const char* file, int line) {
+  if (isa<UnknownType>(NodeType(n))) {
+    ++error_count;
+    Error(n.LOC(), "failed to obtain the type.");
     if (trace_visit) os << file << ":" << line << ", " << AST::STR(n) << "\n";
     return false;
   }

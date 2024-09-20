@@ -164,6 +164,9 @@ inline static std::string GetStringFrom(Storage st) {
 
 }  // end namespace __internal__
 
+inline static std::string STR(size_t sz) {
+  return std::to_string(sz);
+}
 inline static std::string STR(BaseType bt) {
   return __internal__::GetStringFrom(bt);
 }
@@ -1032,7 +1035,10 @@ struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
     return GetShape().IsDynamic();
   }
 
+  // use these interface when the shape is NOT runtime-shaped
+  size_t ShapeSize() const { return GetShape().Size(); }
   size_t ByteSize() const { return SizeOf(f_type) * GetShape().Size(); }
+
   std::string ByteSizeExpression() const {
     if (RuntimeShaped())
       return GetShape().GetSizeExpression() + " * " +

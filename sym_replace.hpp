@@ -35,7 +35,7 @@ namespace sym_replace {
 // Symbolize all expression nodes.  For expression nodes with the same symbolic
 // meaning, they are replaced with a unified form to facilitate value numbering
 // and shape infering.
-class SymReplace : public VisitorWithSymTab {
+class SymReplace : public VisitorWithScope {
 private:
   static const char* cyan;
   static const char* blue;
@@ -46,6 +46,7 @@ public:
   using SymExpr = GiNaC::ex;
   using Symbol = GiNaC::symbol;
   using SymValno = size_t;
+
 public:
   bool trace = false;
   std::ostream& os;
@@ -55,7 +56,7 @@ public:
   size_t error_count = 0;
 
   explicit SymReplace(const ptr<SymbolTable> s_tab, bool t, std::ostream& o)
-      : VisitorWithSymTab(s_tab), trace(t), os(o),
+      : VisitorWithScope(s_tab), trace(t), os(o),
         trace_visit(std::getenv("TRACE_SYMREPL")) {}
 
   bool HasError() {

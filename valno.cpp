@@ -568,6 +568,8 @@ std::string ValueNumbering::GenerateNodeSignature(AST::Node& node,
     return GenerateNodeSignature(*(it->GetValues()));
   } else if (auto* mds = dyn_cast<AST::MultiDimSpans>(&node)) {
     return GenerateNodeSignature(*(mds->list));
+  } else if (auto* sa = dyn_cast<AST::SpanAs>(&node)) {
+    return GenerateNodeSignature(*(sa->list));
   } else if (auto* b = dyn_cast<AST::ParamList>(&node)) {
     std::string signature;
     if (b->values.size() > 0) {

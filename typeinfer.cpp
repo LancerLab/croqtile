@@ -146,8 +146,7 @@ bool TypeInference::SetAsCurrentType(AST::Node &nd, const std::string &n) {
   // complement the storage information when exists
   if (auto st = dyn_cast<SpannedType>(cur_type))
     if (auto n = dyn_cast<AST::NamedVariableDecl>(&nd))
-      if (n->mem)
-        st->SetStorage(n->mem->st);
+      if (n->mem) st->SetStorage(n->mem->st);
 
   // The type is successfully inferred, set the node
   nd.SetType(cur_type);
@@ -292,18 +291,22 @@ bool TypeInference::Visit(AST::Assignment &n) {
     Error(n.LOC(), "current choreo does not support symbol re-assignment.");
     error_count++;
   }
-  if (isa<UnknownType>(n.value->GetType())) {
+
+  if (isa<UnknownType>(NodeType(*n.value))) {
     Error(n.LOC(), "fail to deduce type of `" + n.name + "'.");
     error_count++;
-  } else {
-    auto ty = NodeType(*n.value);
-    AssignSymbolWithType(n.LOC(), n.name, ty);
-
-    if (Dump) {
-      os << "Symbol:    " << SSTab().InScopeName(n.name)
-         << ", Type: " << PSTR(ty) << "\n";
-    }
+    return false;
   }
+
+  auto ty = NodeType(*n.value);
+  AssignSymbolWithType(n.LOC(), n.name, ty);
+  n.SetType(ty);
+
+  if (Dump) {
+    os << "Symbol:    " << SSTab().InScopeName(n.name) << ", Type: " << PSTR(ty)
+       << "\n";
+  }
+
   return true;
 }
 
@@ -455,8 +458,9 @@ bool TypeInference::Visit(AST::Expr &n) {
         return true;
       }
       if (!((n.op == "/") || (n.op == "%") || (n.op == "cdiv"))) {
-        Error(n.LOC(), "The operands of the div/mod expression cannot undergo '" +
-                           n.op + "' operation.");
+        Error(n.LOC(),
+              "The operands of the div/mod expression cannot undergo '" + n.op +
+                  "' operation.");
         error_count++;
         return false;
       } else if (pty_lhs->Dims() == pty_rhs->Dims()) {
@@ -537,8 +541,15 @@ bool TypeInference::Visit(AST::SpanAs &n) {
     return false;
   }
 
+  // mutate default to be global
+  auto nty = cast<SpannedType>(NodeType(n));
+  if (nty->m_type == Storage::DEFAULT)
+    n.SetType(MakeSpannedType(nty->f_type, nty->GetShape(), Storage::GLOBAL));
+
   // is this required? assign the target id (not defined yet) with a type
   n.nid->SetType(NodeType(n));
+
+  cur_type = NodeType(n);
 
   return true;
 }
@@ -673,7 +684,7 @@ bool TypeInference::Visit(AST::Call &n) {
 
 bool TypeInference::Visit(AST::Select &n) {
   __TRACE_EACH_VISIT__(n)
-  auto& val = n.span_expr_list->AllValues()[0];
+  auto &val = n.span_expr_list->AllValues()[0];
   auto sty = dyn_cast<SpannedType>(val->GetType());
   assert(sty);
   auto fmty = sty->ElementType();

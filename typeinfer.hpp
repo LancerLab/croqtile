@@ -33,25 +33,6 @@ struct TypeInference : public Visitor {
   bool ModifySymbolType(const location &, const std::string &,
                         const ptr<Type> &);
 
-  ptr<Type> NodeType(AST::Node &n) {
-    if (auto id = dyn_cast<AST::Identifier>(&n))
-      return SSTab().LookupSymbol(id->name);
-    else if (auto expr = dyn_cast<AST::Expr>(&n)) {
-      if (auto ref = expr->GetReference()) {
-        if (auto id = dyn_cast<AST::Identifier>(ref))
-          return SSTab().LookupSymbol(id->name);
-      } else if (expr->op == "dataof") {
-        if (auto ref = cast<AST::Expr>(expr->GetR())->GetReference()) {
-          auto id = cast<AST::Identifier>(ref);
-          if (!SSTab().LookupSymbol(id->name))  // make sure the symbol exists
-            return nullptr;
-          return SSTab().LookupSymbol(id->name + ".data");
-        }
-      }
-    }
-    return n.GetType();
-  }
-
  public:
   TypeInference(bool d, std::ostream &o = std::cout,
                 const ptr<SymbolTable> s_tab = std::make_shared<SymbolTable>())
