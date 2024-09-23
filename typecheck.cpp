@@ -63,7 +63,7 @@ bool TypeChecker::Visit(AST::Assignment& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   if (!ReportUnknownSymbol(n.name, n.LOC(), __FILE__, __LINE__)) return false;
 
-  if (*GetSymbolType(n.name) != *n.value->GetType()) {
+  if (*GetSymbolType(n.name) != *NodeType(*n.value)) {
     Error(n.LOC(), "inconsistent types are found in the assignment.");
     error_count++;
     return false;

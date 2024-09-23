@@ -140,8 +140,10 @@ void Memory::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
 void DMA::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
-  from->accept(v);
-  to->accept(v);
+  if (operation != ".none") {
+    from->accept(v);
+    to->accept(v);
+  }
   v.Visit(*this);
 }
 

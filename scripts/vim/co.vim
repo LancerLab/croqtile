@@ -10,11 +10,11 @@ syntax clear
 runtime! syntax/cpp.vim
 
 " Define custom syntax elements
-syntax keyword coKeyword chunkAt mdspan with parallel ituple by in foreach shared local global where
+syntax keyword coKeyword chunkAt mdspan with parallel ituple by in foreach shared local global where after
 syntax match coType "\<\(f32\|f16\|bf16\|u32\|s32\|u16\|s16\|u8\|s8\)\>"
 syntax match coAttribute "\(__co__\|__cok__\)"
-syntax match coOperator "\(=>\|#\|cdiv\)"
-syntax match coFunction "\(\<wait\>\|\<call\>\|\<dma\.\(reshape\|copy\|slice\|deslice\|pad\)\>\(\.async\)\?\)"
+syntax match coOperator "\(=>\|#\|cdiv\|#\)"
+syntax match coFunction "\(\<wait\>\|\<call\>\|\<\.span_as\>\|\<\.chunk_at\>\|\<select\>\|\<dma\.\(none\|copy\|transp\|pad\)\>\(\.async\)\?\)"
 
 highlight coOperator guifg=cyan ctermfg=cyan gui=bold
 

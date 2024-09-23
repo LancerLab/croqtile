@@ -9,7 +9,7 @@ __co__ void dma_test(int b, f32 [36, 27, 128] input) {
         f = dma.pad.async<{1, 1}, {0, 0}, {1, 0}, 1> input.chunkat(p, index) => local;
         f1 = dma.pad<{0, 0, 0}, {0, 1, 2}, {1, 0, 3}, 0> input.chunkat(p, index) => local;
         sum = sum + index(0);
-        wait f;
+        wait f, f1;
         call cfunction(f.data, f1.data);
       }
     }
@@ -42,16 +42,18 @@ __co__ void dma_test(int b, f32 [36, 27, 128] input) {
 // CHECK:        `- from: input.ChunkAt(p, index)
 // CHECK:        `- to: local
 // CHECK:      `- Assign: sum =  (sum + index(0))
-// CHECK:      `- WAIT: f
+// CHECK:      `- WAIT: f, f1
 // CHECK:      `- Call: cfunction
 // CHECK:        `- with arguements:  (dataof f)  (dataof f1)
 
 __co__ void dma_test1(f32 [36, 27, 128] input) {
    f32 [9, 3, 8] dst;
-   with index in [5, 6] {
-     dma.copy input.chunkat(p, index) => dst;
-     f = dma.copy dst => local;
-     dma.copy f.data => dst;
+   parallel p by 6 {
+     with index in [5, 6] {
+       dma.copy input.chunkat(p, index) => dst;
+       f = dma.copy dst => local;
+       dma.copy f.data => dst;
+     }
    }
    return dst;
 }
@@ -76,4 +78,69 @@ __co__ void dma_test1(f32 [36, 27, 128] input) {
 // CHECK:    `- DMA.copy
 // CHECK:      `- from: f
 // CHECK:      `- to: dst
+// CHECK:  `- Return: dst
+
+__co__ void dma_test2(f32 [27, 128] input) {
+   with index in [5, 6] {
+     f0 = dma.none;  // dummy dma
+     foreach index {
+        wait f0;
+        f0 = dma.copy input.chunkat(index) => local;
+     }
+   }
+   return dst;
+}
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: dma_test2
+// CHECK:  `- Return type: void
+// CHECK:  `- Parameters
+// CHECK:    `-  type: f32 [ 27 128 ], symbol: input
+// CHECK:  `- With Block:
+// CHECK:    (within constraints)
+// CHECK:    `- index in [ 5 6 ]
+// CHECK:    (with statements)
+// CHECK:    `- DMA.none
+// CHECK:    `- Foreach Block:
+// CHECK:     `- Iteration variables: index
+// CHECK:     `- WAIT: f0
+// CHECK:     `- DMA.copy
+// CHECK:       `- future: f0
+// CHECK:       `- from: input.ChunkAt(index)
+// CHECK:       `- to: local
+// CHECK:  `- Return: dst
+
+__co__ void dma_test3(f32 [36, 27, 128] input) {
+   f32 [9, 3, 8] dst;
+   with index in [5, 6] {
+     foreach index {
+        f0 = dma.transp<{0, 2, 1}> input.chunkat(p, index) => local;
+        f1 = dma.transp.async<{1, 2, 0}> input.chunkat(p, index) => local;
+        wait f1;
+     }
+   }
+   return dst;
+}
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: dma_test3
+// CHECK:  `- Return type: void
+// CHECK:  `- Parameters
+// CHECK:    `-  type: f32 [ 36 27 128 ], symbol: input
+// CHECK:  `- Var Decl (f32 [ 9 3 8 ], default): dst
+// CHECK:  `- With Block:
+// CHECK:    (within constraints)
+// CHECK:    `- index in [ 5 6 ]
+// CHECK:    (with statements)
+// CHECK:    `- Foreach Block:
+// CHECK:     `- Iteration variables: index
+// CHECK:     `- DMA.transp
+// CHECK:       `- future: f0
+// CHECK:       `- from: input.ChunkAt(p, index)
+// CHECK:       `- to: local
+// CHECK:     `- DMA.transp.async
+// CHECK:       `- future: f1
+// CHECK:       `- from: input.ChunkAt(p, index)
+// CHECK:       `- to: local
+// CHECK:     `- WAIT: f1
 // CHECK:  `- Return: dst

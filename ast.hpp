@@ -1052,9 +1052,9 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
   std::string chain_from;
   // SYMBOL string of its chained DMA B, direction is A->B
   std::string chain_to;
-  ptr<Node> from;
-  ptr<Node> to;
-  ptr<DMAConfig> config;
+  ptr<Node> from = nullptr;
+  ptr<Node> to = nullptr;
+  ptr<DMAConfig> config = nullptr;
 
   explicit DMA(const location& l, const std::string& o, const std::string& r,
                const ptr<Node>& f, const ptr<Node>& t, bool a,
@@ -1093,6 +1093,12 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
     }
   }
 
+  // The dummy dma
+  explicit DMA(const location& l, const std::string& f)
+      : Node(l, MakeDummyFutureType(true)), operation(".none"),
+        future(f), async(true) {
+  }
+
   std::string FromSymbol() const { return cast<ChunkAt>(from)->RefSymbol(); }
 
   std::string ToSymbol() const {
@@ -1103,11 +1109,17 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
   void SetConfig(const ptr<DMAConfig>& cfg) { config = cfg; }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    if (operation == ".none") {
+       os << "\n" << prefix << "`- DMA" << operation;
+       return;
+    }
+
     os << "\n" << prefix << "`- DMA" << operation << ((async) ? ".async" : "");
     if (config) os << "\n" << prefix << "  `- config: " << STR(*config);
     if (!future.empty()) os << "\n" << prefix << "  `- future: " << future;
     os << "\n" << prefix << "  `- from: " << STR(from);
     os << "\n" << prefix << "  `- to: " << STR(to);
+
     if (chained) {
       if (chain_to != "")
         os << "\n" << prefix << "  `- chained to: " << chain_to;

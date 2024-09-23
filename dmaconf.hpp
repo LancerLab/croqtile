@@ -63,6 +63,16 @@ struct PadConfig final : public DMAConfig, public TypeIDProvider<PadConfig> {
   __UDT_TYPE_INFO__
 };
 
+struct TransposeConfig final : public DMAConfig,
+                               public TypeIDProvider<TransposeConfig> {
+  std::vector<size_t> dim_values;
+  const std::string Name() const { return "transpose"; }
+  void Print(std::ostream &os) const override {
+    os << "transpose: dims{" << DelimitedString(dim_values) << "}";
+  };
+  __UDT_TYPE_INFO__
+};
+
 inline std::string STR(const DMAConfig &dc) {
   std::ostringstream oss;
   dc.Print(oss);

@@ -288,8 +288,18 @@ bool TypeInference::Visit(AST::NamedTypeDecl &n) {
 bool TypeInference::Visit(AST::Assignment &n) {
   __TRACE_EACH_VISIT__(n)
   if (SSTab().IsDeclared(n.name)) {
-    Error(n.LOC(), "current choreo does not support symbol re-assignment.");
-    error_count++;
+    if (!isa<FutureType>(NodeType(*n.value))) {
+      Error(n.LOC(),
+            "current choreo does not support symbol re-assignment except for "
+            "future type.");
+      error_count++;
+      n.SetType(MakeUnknownType());
+      return false;
+    } else {
+      // no type inference is necessary
+      n.SetType(NodeType(*n.value));
+      return true;
+    }
   }
 
   if (isa<UnknownType>(NodeType(*n.value))) {

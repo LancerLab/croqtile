@@ -139,7 +139,7 @@ void choreo_info(const char *message) {
 %token <Choreo::Storage> LOCAL SHARED GLOBAL
 %token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT BOOL VOID
 // builtin operations
-%token <std::string> DMA COPY SLICE PAD ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT WAIT CALL AUTO SELECT
+%token <std::string> DMA COPY SLICE PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT WAIT CALL AUTO SELECT
 // control related
 %token <std::string> IF ELSE PARA BY WITH IN FOREACH RET WHERE
 %token <std::string> TRUE FALSE
@@ -829,12 +829,16 @@ dma_stmt
     | DMA dma_operation sync_type dma_config chunkat_expr TRANS chunkat_or_storage_or_select CHAIN IDENTIFIER {
         $$ = AST::Make<AST::DMA>(@1, $2, "", $9, $5, $7, $3, $4);
       }
+    | IDENTIFIER ASSIGN DMA NONE {
+        $$ = AST::Make<AST::DMA>(@1, $1);
+      }
     ;
 
 dma_operation
-    : COPY   { $$ = $1; }
-    | SLICE  { $$ = $1; }
-    | PAD    { $$ = $1; }
+    : COPY      { $$ = $1; }
+    | SLICE     { $$ = $1; }
+    | PAD       { $$ = $1; }
+    | TRANSPOSE { $$ = $1; }
     ;
 
 dma_config
@@ -849,6 +853,11 @@ dma_config
         pc->SetPadValue($14);
         $$ = pc;
       }
+    | LT LBRACE iv_list RBRACE GT {
+        auto pc = std::make_shared<TransposeConfig>();
+        for (auto high : $3->values)
+          pc->dim_values.push_back(cast<AST::IntLiteral>(high)->Val());
+    }
     | /* Empty for no config */ { $$ = nullptr; }
     ;
 
