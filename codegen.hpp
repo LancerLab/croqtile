@@ -1,22 +1,14 @@
 #ifndef CHOREO_CODEGEN_HPP_
 #define CHOREO_CODEGEN_HPP_
 
-#include <thread>
 #include <string>
+#include <thread>
 
+#include "MemUsageCheck.hpp"
 #include "valbind.hpp"
 #include "visitor.hpp"
-#include "MemUsageCheck.hpp"
 
 namespace Choreo {
-
-// utility macros define here
-#define __TRACE_EACH_VISIT__(d)       \
-  if (trace_visit) {                  \
-    os << d.TypeNameString() << ": "; \
-    os << "\n";                       \
-  }
-
 
 // Codegenerators for targets
 struct CodeGenerator : public VisitorWithSymTab {
@@ -26,13 +18,13 @@ struct CodeGenerator : public VisitorWithSymTab {
   bool BeforeVisitImpl(AST::Node &) override { return true; }
   bool AfterVisitImpl(AST::Node &) override { return true; }
 
-  CodeGenerator(std::ostream &o, const ptr<SymbolTable> &symtab)
-      : VisitorWithSymTab(symtab), os(o) {
+  CodeGenerator(const std::string &n, std::ostream &o,
+                const ptr<SymbolTable> &symtab)
+      : VisitorWithSymTab(n, symtab), os(o) {
     if (symtab == nullptr)
       choreo_unreachable("symbol table must be initialized.");
   }
 };
-
 
 /////////////////////////////////////////////////////////////
 ///  Util functions shared between targets
@@ -41,7 +33,6 @@ struct CodeGenerator : public VisitorWithSymTab {
 inline constexpr const char *backpatch_filename =
     "__choreo_kernel_file_name_that_will_be_back_patched_soon_ok_enough_i_am_"
     "bored__";
-
 
 inline static std::string create_unique_path() {
   // Get a high-resolution timestamp
@@ -63,7 +54,7 @@ inline static std::string create_unique_path() {
   return path;
 }
 
-inline static void ReplaceInString(std::string* pstr, const std::string &from,
+inline static void ReplaceInString(std::string *pstr, const std::string &from,
                                    const std::string &to) {
   if (from.empty()) return;
 
@@ -75,9 +66,8 @@ inline static void ReplaceInString(std::string* pstr, const std::string &from,
   }
 }
 
-
 static inline std::string HostTypeStringify(const Choreo::Type &ty,
-                                         bool is_ret = false) {
+                                            bool is_ret = false) {
   if (isa<VoidType>(&ty))
     return "void";
   else if (isa<IntegerType>(&ty))
@@ -96,7 +86,6 @@ static inline std::string HostTypeStringify(const Choreo::Type &ty,
   return "";
 }
 
-
 }  // end namespace Choreo
 
-#endif // CHOREO_CODEGEN_HPP_
+#endif  // CHOREO_CODEGEN_HPP_

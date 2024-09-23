@@ -57,8 +57,22 @@ struct Visitor {
   // scoped variable handling
   ScopedSymbolTable scoped_symtab;
 
+ protected:
+  std::string name;
+  bool trace_visit;
+  static std::unordered_set<std::string> AllVisitors;
+
  public:
-  Visitor(const ptr<SymbolTable>& s_tab = nullptr) : scoped_symtab(s_tab) {}
+  Visitor(const std::string& n, const ptr<SymbolTable>& s_tab = nullptr)
+      : scoped_symtab(s_tab), name(n) {
+    transform(name.begin(), name.end(), name.begin(), ::toupper);
+    trace_visit =
+        std::getenv("TRACE") &&
+        std::string(std::getenv("TRACE")).find(name) != std::string::npos;
+
+    if (AllVisitors.count(name))
+      choreo_unreachable("found visitor with same name: \"" + n + "\".");
+  }
   virtual ~Visitor() {}
 
   // simple reference to the symbol table
@@ -70,8 +84,10 @@ struct Visitor {
     return nullptr;
   }
 
+  virtual const std::string& GetName() { return name; }
+
  protected:
-  virtual ptr<Type> NodeType(AST::Node &n) {
+  virtual ptr<Type> NodeType(AST::Node& n) {
     if (auto id = dyn_cast<AST::Identifier>(&n))
       return GetSymbolType(id->name);
     else if (auto expr = dyn_cast<AST::Expr>(&n)) {
@@ -90,7 +106,7 @@ struct Visitor {
     return n.GetType();
   }
 
-public:
+ public:
   static bool shell_supports_colors() {
     const char* term = getenv("TERM");
     return term &&
@@ -141,7 +157,7 @@ public:
 };
 
 // A visitor with simple symbol auto scoping functionality
-struct VisitorWithScope: public Visitor {
+struct VisitorWithScope : public Visitor {
  protected:
   // for the derived classes
   virtual bool BeforeVisitImpl(AST::Node& n) = 0;
@@ -196,7 +212,10 @@ struct VisitorWithScope: public Visitor {
   }
 
  public:
-  VisitorWithScope(const ptr<SymbolTable>& s_tab) : Visitor(s_tab) { Reset(); }
+  VisitorWithScope(const std::string& n, const ptr<SymbolTable>& s_tab)
+      : Visitor(n, s_tab) {
+    Reset();
+  }
   ~VisitorWithScope() {}
 };
 
@@ -236,7 +255,8 @@ struct VisitorWithSymTab : public VisitorWithScope {
   }
 
  public:
-  VisitorWithSymTab(const ptr<SymbolTable>& s_tab) : VisitorWithScope(s_tab) {}
+  VisitorWithSymTab(const std::string& n, const ptr<SymbolTable>& s_tab)
+      : VisitorWithScope(n, s_tab) {}
   ~VisitorWithSymTab() {}
 };
 

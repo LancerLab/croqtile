@@ -130,7 +130,6 @@ blank [ \t\r]
   "false"    return Choreo::Parser::make_FALSE(yytext, loc);
   "dma"      return Choreo::Parser::make_DMA(yytext, loc);
   ".copy"    return Choreo::Parser::make_COPY(yytext, loc);
-  ".slice"   return Choreo::Parser::make_SLICE(yytext, loc);
   ".transp"  return Choreo::Parser::make_TRANSPOSE(yytext, loc);
   ".pad"     return Choreo::Parser::make_PAD(yytext, loc);
   ".none"    return Choreo::Parser::make_NONE(yytext, loc);

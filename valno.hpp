@@ -193,13 +193,12 @@ class ShapeInference : public Visitor {
  private:
   std::ostream& os;
   // for debugging purpose only
-  bool trace_visit = false;
   bool cannot_proceed = false;
   size_t error_count = 0;
 
  public:
   ShapeInference(bool t = false, std::ostream& o = std::cout)
-      : vn(this, t, o), os(o), trace_visit(std::getenv("TRACE_VALNO")) {}
+      : Visitor("valno"), vn(this, t, o), os(o) {}
 
  public:
   void PrintValueNumbers(std::ostream& os) {

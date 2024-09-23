@@ -39,7 +39,7 @@ struct Normalizer : public Visitor {
  public:
   // it does not require a symbol table
   Normalizer(std::ostream &o)
-      : Visitor(nullptr), os(o), trace(std::getenv("TRACE_NORM")) {}
+      : Visitor("norm"), os(o), trace(std::getenv("TRACE_NORM")) {}
 
   bool BeforeVisit(AST::Node &n) override {
     if (auto *b = dyn_cast<AST::MultiDimSpans>(&n)) {

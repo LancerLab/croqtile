@@ -139,7 +139,7 @@ void choreo_info(const char *message) {
 %token <Choreo::Storage> LOCAL SHARED GLOBAL
 %token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT BOOL VOID
 // builtin operations
-%token <std::string> DMA COPY SLICE PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT WAIT CALL AUTO SELECT
+%token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT WAIT CALL AUTO SELECT
 // control related
 %token <std::string> IF ELSE PARA BY WITH IN FOREACH RET WHERE
 %token <std::string> TRUE FALSE
@@ -836,7 +836,6 @@ dma_stmt
 
 dma_operation
     : COPY      { $$ = $1; }
-    | SLICE     { $$ = $1; }
     | PAD       { $$ = $1; }
     | TRANSPOSE { $$ = $1; }
     ;

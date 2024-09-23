@@ -14,7 +14,6 @@ namespace Choreo {
 struct ShapeDynamics : public VisitorWithSymTab {
  private:
   std::ostream &os;
-  bool trace_visit = false;  // for debugging purpose only
   size_t error_count = 0;
 
   std::unordered_map<std::string, AST::Parameter *> cur_params;
@@ -25,9 +24,7 @@ struct ShapeDynamics : public VisitorWithSymTab {
 
  public:
   ShapeDynamics(const ptr<SymbolTable> s_tab, std::ostream &o = std::cout)
-      : VisitorWithSymTab(s_tab),
-        os(o),
-        trace_visit(std::getenv("TRACE_DYNSHAPE")) {}
+      : VisitorWithSymTab("dynshape", s_tab), os(o) {}
   ~ShapeDynamics() {}
 
   bool Visit(AST::MultiNodes &) { return true; }

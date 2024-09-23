@@ -12,7 +12,6 @@ namespace Choreo {
 struct EarlySemantics : public Visitor {
  private:
   std::ostream &os;
-  bool trace_visit = false;  // for debugging purpose only
   size_t error_count = 0;
 
  private:
@@ -45,8 +44,7 @@ struct EarlySemantics : public Visitor {
   }
 
  public:
-  EarlySemantics(std::ostream &o = std::cout)
-      : os(o), trace_visit(std::getenv("TRACE_SEMA")) {}
+  EarlySemantics(std::ostream &o = std::cout) : Visitor("sema"), os(o) {}
   ~EarlySemantics() {}
 
   bool Visit(AST::MultiNodes &) override;

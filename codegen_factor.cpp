@@ -17,6 +17,13 @@
 #error "missing macro definition of __CHOREO_FACTOR_DIR__"
 #endif
 
+// utility macros define here
+#define __TRACE_EACH_VISIT__(d)       \
+  if (trace_visit) {                  \
+    os << d.TypeNameString() << ": "; \
+    os << "\n";                       \
+  }
+
 using namespace Choreo;
 using namespace Choreo::Factor;
 

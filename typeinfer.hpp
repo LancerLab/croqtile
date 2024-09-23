@@ -12,7 +12,6 @@ struct TypeInference : public Visitor {
  private:
   bool Dump = false;
   std::ostream &os;
-  bool trace_visit = false;  // for debugging purpose only
   size_t error_count = 0;
 
  private:
@@ -36,10 +35,7 @@ struct TypeInference : public Visitor {
  public:
   TypeInference(bool d, std::ostream &o = std::cout,
                 const ptr<SymbolTable> s_tab = std::make_shared<SymbolTable>())
-      : Visitor(s_tab),
-        Dump(d),
-        os(o),
-        trace_visit(std::getenv("TRACE_INFER")) {}
+      : Visitor("infer", s_tab), Dump(d), os(o) {}
 
   bool Visit(AST::MultiNodes &) override;
   bool Visit(AST::MultiValues &) override;

@@ -17,7 +17,6 @@ struct MemUsageCheck : public VisitorWithSymTab {
 private:
   bool trace;
   std::ostream &os;
-  bool trace_visit = false; // for debugging purpose only
   size_t error_count = 0;
 
   // map from storage type to a integer
@@ -191,8 +190,7 @@ private:
 public:
   MemUsageCheck(const ptr<SymbolTable> s_tab, Target t, std::string arch,
                 bool trace = false, std::ostream &o = std::cout)
-      : VisitorWithSymTab(s_tab), trace(trace), os(o),
-        trace_visit(std::getenv("TRACE_MEM")) {
+      : VisitorWithSymTab("mem", s_tab), trace(trace), os(o) {
     if (t == Target::Factor) {
       valid_storage_type = {Storage::LOCAL, Storage::SHARED, Storage::GLOBAL};
       // initialize with ct_tot_mem_usage

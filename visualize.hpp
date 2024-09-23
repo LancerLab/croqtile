@@ -304,7 +304,7 @@ struct Visualizer : public VisitorWithSymTab {
  public:
   Visualizer(const ptr<SymbolTable> s_tab, std::ostream &o = std::cout,
              bool d = false)
-      : VisitorWithSymTab(s_tab),
+      : VisitorWithSymTab("visual", s_tab),
         os(o),
         debug(d),
         parallel_factor(1),

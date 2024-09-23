@@ -36,7 +36,6 @@ class WorkingList {
 struct GCUCheck : public VisitorWithSymTab {
  private:
   std::ostream &os;
-  bool trace_visit = false;  // for debugging purpose only
   size_t error_count = 0;
 
   std::unordered_map<std::string, AST::Parameter *> cur_params;
@@ -79,9 +78,7 @@ struct GCUCheck : public VisitorWithSymTab {
 
  public:
   GCUCheck(const ptr<SymbolTable> s_tab, std::ostream &o = std::cout)
-      : VisitorWithSymTab(s_tab),
-        os(o),
-        trace_visit(std::getenv("TRACE_GCU")) {}
+      : VisitorWithSymTab("gcu", s_tab), os(o) {}
   ~GCUCheck() {}
 
   bool Visit(AST::MultiNodes &n) {

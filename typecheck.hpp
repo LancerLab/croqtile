@@ -10,7 +10,6 @@ namespace Choreo {
 struct TypeChecker : public VisitorWithSymTab {
  private:
   std::ostream &os;
-  bool trace_visit = false;  // for debugging purpose only
   size_t error_count = 0;
 
  private:
@@ -23,9 +22,7 @@ struct TypeChecker : public VisitorWithSymTab {
 
  public:
   TypeChecker(const ptr<SymbolTable> s_tab, std::ostream &o = std::cout)
-      : VisitorWithSymTab(s_tab),
-        os(o),
-        trace_visit(std::getenv("TRACE_CHECK")) {}
+      : VisitorWithSymTab("check", s_tab), os(o){}
   ~TypeChecker() {}
 
   bool Visit(AST::MultiNodes &) override;

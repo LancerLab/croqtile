@@ -52,7 +52,6 @@ private:
   size_t sp_count = 0;
   int parallel_level = 0;
   bool dyn_shaped = false;
-  bool trace_visit = false;
   bool cross_compile = false;
 
   std::vector<AST::ptr<AST::Parameter>> *cur_params = nullptr;
@@ -76,7 +75,7 @@ private:
 
  public:
   CUDACodeGen(std::ostream &os, const ptr<SymbolTable> &symtab, bool cross_compile)
-      : CodeGenerator(os, symtab), trace_visit(std::getenv("TRACE_CODEGEN")), cross_compile(cross_compile) {}
+      : CodeGenerator("codegen", os, symtab), cross_compile(cross_compile) {}
   void ResetBuffers() {
     ks.clear();
     fs.clear();

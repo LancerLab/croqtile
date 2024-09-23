@@ -45,7 +45,7 @@ all: $(TARGET)
 test: $(TARGET) standalone_test
 	$(LIT) tests
 
-$(TARGET): scanner.yy.o parser.tab.o choreo_main.o codegen_factor.o codegen_cuda.o codegen_topscc.o earlysema.o typeinfer.o typecheck.o ast.o types.o codegen_factor_types.o codegen_cuda_types.o valno.o sym_replace.o
+$(TARGET): scanner.yy.o parser.tab.o choreo_main.o codegen_factor.o codegen_cuda.o codegen_topscc.o earlysema.o typeinfer.o typecheck.o ast.o types.o codegen_factor_types.o codegen_cuda_types.o valno.o visitor.o sym_replace.o
 	$(CC) $(CFLAGS) $^ $(SYMBOLIC_LIB_FLAGS) -o $(TARGET)
 
 scanner.yy.cc: $(LEX_SRC)

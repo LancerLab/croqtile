@@ -732,6 +732,13 @@ bool EarlySemantics::Visit(AST::SpanAs& n) {
 bool EarlySemantics::Visit(AST::DMA& n) {
   __TRACE_EACH_VISIT__(n)
 
+  if (n.operation == ".none") { // skip the place holder
+    assert(!n.future.empty());
+    ReportErrorWhenViolateODR(n.LOC(), n.future, __FILE__, __LINE__,
+                              MakeDummyFutureType(true));
+    return true;
+  }
+
   SpannedType* sty = nullptr;
   if (auto fty = dyn_cast<FutureType>(NodeType(*n.from)))
     sty = fty->GetSpannedType().get();

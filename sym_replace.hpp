@@ -25,12 +25,14 @@ namespace sym_replace {
 
 } // end namespace sym_replace
 
+#ifndef __TRACE_EACH_VISIT__
 #define __TRACE_EACH_VISIT__                                                   \
   if (trace_visit) {                                                           \
     os << n.TypeNameString() << ": ";                                          \
     n.Print(os);                                                               \
     os << "\n";                                                                \
   }
+#endif
 
 // Symbolize all expression nodes.  For expression nodes with the same symbolic
 // meaning, they are replaced with a unified form to facilitate value numbering
@@ -51,13 +53,11 @@ public:
   bool trace = false;
   std::ostream& os;
   // for debugging purpose only
-  bool trace_visit = false;
   bool cannot_proceed = false;
   size_t error_count = 0;
 
   explicit SymReplace(const ptr<SymbolTable> s_tab, bool t, std::ostream& o)
-      : VisitorWithScope(s_tab), trace(t), os(o),
-        trace_visit(std::getenv("TRACE_SYMREPL")) {}
+      : VisitorWithScope("symrepl", s_tab), trace(t), os(o) {}
 
   bool HasError() {
     if (error_count)
