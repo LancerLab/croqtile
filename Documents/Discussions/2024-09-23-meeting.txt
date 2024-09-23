@@ -1,0 +1,39 @@
+1. span_as:
+       dma.copy a.span_as([16, 9, 36]).chunkat(x, p, y) => local;
+       anon0 = a.span_as(...);
+       dma.copy anon0..chunkat(x, p, y) => local;
+       dma.copy b.span_as([144, 36]).chunkat(p, p) => local;
+
+DMA semantics:
+1. from/to: contiguous memory.
+2. chunkat: result in non-contiguous memory.
+
+further support:
+dma.copy a.span_as(a.span[(1)/2, (2)/2, (3)*4]).chunkat(x, p, y) => local;
+
+2. future reassignment
+      of = dma.none; // dummy DMA
+      foreach x, y(1:-1) {
+        wait of;
+        ...
+        of = dma.copy.async l_out => output.chunkat(p, x, y); // rewrite dummy DMA 
+
+        lfA = lfB;  // assign DMA
+        rfA = rfB;
+
+3. cancel support of slice/deslice, instead,
+
+slice: span_as in dma lhs
+deslice: span_as in dma rhs
+
+CUDA support both slice and deslice.
+
+Task:
+Garfee: A-B buffering
+Jay: span_as, example case
+
+TODO:
+1. transpose: inference, check, target check/codegen
+2. PAD: target parameter check.
+
+Discussion Meeting: resched to 2024-10-12
