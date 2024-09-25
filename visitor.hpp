@@ -44,6 +44,7 @@ struct Visitor {
   virtual bool Visit(AST::ChunkAt&) = 0;
   virtual bool Visit(AST::Wait&) = 0;
   virtual bool Visit(AST::Call&) = 0;
+  virtual bool Visit(AST::Swap&) = 0;
   virtual bool Visit(AST::Select&) = 0;
   virtual bool Visit(AST::Return&) = 0;
   virtual bool Visit(AST::LoopRange&) = 0;

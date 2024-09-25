@@ -9,6 +9,11 @@
 #include "types.hpp"
 #include "visitor.hpp"
 
+#define __TRACE_NORM_VISIT__(n)       \
+  if (trace_visit) {                  \
+    os << n.TypeNameString() << ": " << STR(n) << "\n"; \
+  }
+
 namespace Choreo {
 
 struct Normalizer : public Visitor {
@@ -30,7 +35,7 @@ struct Normalizer : public Visitor {
   void ResetListReference() { list_ref = nullptr; }
 
   // for node hoisting
-  AST::MultiNodes *cur_mnodes = nullptr;
+  std::stack<AST::MultiNodes *> multi_nodes;
   int cur_dma_index = -1;
   std::vector<std::pair<int, ptr<AST::Node>>> mnodes_insertions;
 
@@ -42,6 +47,8 @@ struct Normalizer : public Visitor {
       : Visitor("norm"), os(o), trace(std::getenv("TRACE_NORM")) {}
 
   bool BeforeVisit(AST::Node &n) override {
+    if (trace_visit) os << "before visiting " << n.TypeNameString() << "\n";
+
     if (auto *b = dyn_cast<AST::MultiDimSpans>(&n)) {
       if (b->ref_name != "") {
         SetListReference(n.LOC(), b->ref_name);
@@ -66,15 +73,17 @@ struct Normalizer : public Visitor {
       old = AST::STR(*p->type);
       changed = false;
     } else if (auto m = dyn_cast<AST::MultiNodes>(&n)) {
-      cur_mnodes = m;
+      multi_nodes.push(m);
     } else if (auto d = dyn_cast<AST::DMA>(&n)) {
-      cur_dma_index = cur_mnodes->GetIndex(d);
+      cur_dma_index = multi_nodes.top()->GetIndex(d);
       assert(cur_dma_index != -1 && "unexpected node index.");
     }
     return true;
   }
 
   bool AfterVisit(AST::Node &n) override {
+    if (trace_visit) os << "after visiting " << n.TypeNameString() << "\n";
+
     if (auto *b = dyn_cast<AST::MultiDimSpans>(&n)) {
       ResetListReference();
       b->ref_name = "";  // no reference is required
@@ -94,7 +103,7 @@ struct Normalizer : public Visitor {
   }
 
   bool Visit(AST::MultiNodes &n) override {
-    // assert(cur_mnodes == &n);
+    __TRACE_NORM_VISIT__(n)
 
     // insert the node at the given place
     for (auto item : mnodes_insertions) {
@@ -106,7 +115,7 @@ struct Normalizer : public Visitor {
       n.values.insert(n.values.begin() + item.first, assign);
     }
 
-    cur_mnodes = nullptr;
+    multi_nodes.pop();
     cur_dma_index = -1;
     mnodes_insertions.clear();
 
@@ -114,6 +123,7 @@ struct Normalizer : public Visitor {
   }
 
   bool Visit(AST::MultiValues &n) override {
+    __TRACE_NORM_VISIT__(n)
     if (list_ref) {  // desugar the list reference
       for (size_t i = 0; i < n.values.size(); ++i) {
         if (auto expr = dyn_cast<AST::Expr>(n.values[i])) {
@@ -159,6 +169,7 @@ struct Normalizer : public Visitor {
   bool Visit(AST::IntLiteral &) override { return true; }
   bool Visit(AST::Boolean &) override { return true; }
   bool Visit(AST::Expr &n) override {
+    __TRACE_NORM_VISIT__(n)
     if (list_ref) {  // could be with syntax sugar
       auto Apply = [this](AST::Expr *expr) -> ptr<AST::Expr> {
         if (!expr) return nullptr;
@@ -199,6 +210,7 @@ struct Normalizer : public Visitor {
   bool Visit(AST::MultiDimSpans &) override { return true; }
   bool Visit(AST::NamedTypeDecl &) override { return true; }
   bool Visit(AST::NamedVariableDecl &n) override {
+    __TRACE_NORM_VISIT__(n)
     if (n.mem && (n.mem->Get() == Storage::DEFAULT)) {
       // Should this be set by target?
       n.mem->Set(Storage::GLOBAL);
@@ -220,6 +232,7 @@ struct Normalizer : public Visitor {
   bool Visit(AST::WhereBind &) override { return true; }
 
   bool Visit(AST::WithIn &n) override {
+    __TRACE_NORM_VISIT__(n)
     if (n.with_matchers) return true;
     assert(n.with && "must have with statement.");
 
@@ -256,6 +269,7 @@ struct Normalizer : public Visitor {
   bool Visit(AST::SpanAs &) override { return true; }
   bool Visit(AST::DMA &) override { return true; }
   bool Visit(AST::ChunkAt &n) override {
+    __TRACE_NORM_VISIT__(n)
     if (n.sa) {
       assert(cur_dma_index != -1);
       // hoist the span_as to multinodes
@@ -267,6 +281,7 @@ struct Normalizer : public Visitor {
   }
   bool Visit(AST::Wait &) override { return true; }
   bool Visit(AST::Call &) override { return true; }
+  bool Visit(AST::Swap &) override { return true; }
   bool Visit(AST::Select &) override { return true; }
   bool Visit(AST::Return &) override { return true; }
   bool Visit(AST::LoopRange &) override { return true; }
@@ -282,4 +297,5 @@ struct Normalizer : public Visitor {
 
 }  // end namespace Choreo
 
+#undef __TRACE_NORM_VISIT__
 #endif  // __CHOREO_NORMALIZATION_HPP__

@@ -32,58 +32,57 @@ __co__ void foo(f32 [2, 3, 4] d, int e) {
 // VALNO:   Alias "#0,#1,#2(1)" -> #1
 // VALNO:   New VN #6: 'index_const_2'
 // VALNO:   Alias "#0,#1,#2(2)" -> #2
-// VALNO:   New VN #7: '::foo::d'
 // VALNO:   Alias "::foo::d.span" -> #3
-// VALNO:   New VN #8: '::foo::e'
+// VALNO:   New VN #7: '::foo::e'
 // VALNO:   Alias "::foo::f" -> #2
-// VALNO:   New VN #9: 'const_5'
-// VALNO:   New VN #10: 'const_1'
+// VALNO:   New VN #8: 'const_5'
+// VALNO:   New VN #9: 'const_1'
 // VALNO:   <Simplify> 'dimof:#3:#6 / ref:#1' to 'const_1'
 // VALNO:   <Simplify> 'dimof:#3:#6 / ref:#1' to 'const_1'
-// VALNO:   New VN #11: '#9,#10,#10'
-// VALNO:   Alias "#9,#10,#10(0)" -> #9
-// VALNO:   Alias "#9,#10,#10(1)" -> #10
-// VALNO:   Alias "#9,#10,#10(2)" -> #10
+// VALNO:   New VN #10: '#8,#9,#9'
+// VALNO:   Alias "#8,#9,#9(0)" -> #8
+// VALNO:   Alias "#8,#9,#9(1)" -> #9
+// VALNO:   Alias "#8,#9,#9(2)" -> #9
 // VALNO:   <Simplify> 'dimof:#3:#6 / ref:#1' to 'const_1'
-// VALNO:   Alias "::foo::a" -> #11
-// VALNO:   New VN #12: '+:#8:#10'
-// VALNO:   New VN #13: 'const_7'
-// VALNO:   <Simplify> 'ref:#13 * ref:#1' to 'const_21'
-// VALNO:   New VN #14: 'const_21'
-// VALNO:   <Simplify> '*:#13:#1 - ref:#10' to 'const_20'
-// VALNO:   New VN #15: 'const_20'
-// VALNO:   New VN #16: '#10,#12,#15'
-// VALNO:   Alias "#10,#12,#15(0)" -> #10
-// VALNO:   Alias "#10,#12,#15(1)" -> #12
-// VALNO:   Alias "#10,#12,#15(2)" -> #15
-// VALNO:   Alias "::foo::b" -> #16
-// VALNO:   New VN #17: 'const_0'
-// VALNO:   New VN #18: '+:#12:#2'
-// VALNO:   New VN #19: '#9,#18,#2'
-// VALNO:   Alias "#9,#18,#2(0)" -> #9
-// VALNO:   Alias "#9,#18,#2(1)" -> #18
-// VALNO:   Alias "#9,#18,#2(2)" -> #2
-// VALNO:   Alias "::foo::c" -> #19
+// VALNO:   Alias "::foo::a" -> #10
+// VALNO:   New VN #11: '+:#7:#9'
+// VALNO:   New VN #12: 'const_7'
+// VALNO:   <Simplify> 'ref:#12 * ref:#1' to 'const_21'
+// VALNO:   New VN #13: 'const_21'
+// VALNO:   <Simplify> '*:#12:#1 - ref:#9' to 'const_20'
+// VALNO:   New VN #14: 'const_20'
+// VALNO:   New VN #15: '#9,#11,#14'
+// VALNO:   Alias "#9,#11,#14(0)" -> #9
+// VALNO:   Alias "#9,#11,#14(1)" -> #11
+// VALNO:   Alias "#9,#11,#14(2)" -> #14
+// VALNO:   Alias "::foo::b" -> #15
+// VALNO:   New VN #16: 'const_0'
+// VALNO:   New VN #17: '+:#11:#2'
+// VALNO:   New VN #18: '#8,#17,#2'
+// VALNO:   Alias "#8,#17,#2(0)" -> #8
+// VALNO:   Alias "#8,#17,#2(1)" -> #17
+// VALNO:   Alias "#8,#17,#2(2)" -> #2
+// VALNO:   Alias "::foo::c" -> #18
 // VALNO:   scope-2 {
-// VALNO:    New VN #20: 'const_6'
-// VALNO:    Alias "::foo::paraby_0::@p" -> #20
-// VALNO:    New VN #21: 'const_25'
-// VALNO:    New VN #22: '#21,#10,#8'
-// VALNO:    Alias "#21,#10,#8(0)" -> #21
-// VALNO:    Alias "#21,#10,#8(1)" -> #10
-// VALNO:    Alias "#21,#10,#8(2)" -> #8
-// VALNO:    Alias "::foo::paraby_0::a" -> #22
+// VALNO:    New VN #19: 'const_6'
+// VALNO:    Alias "::foo::paraby_0::@p" -> #19
+// VALNO:    New VN #20: 'const_25'
+// VALNO:    New VN #21: '#20,#9,#7'
+// VALNO:    Alias "#20,#9,#7(0)" -> #20
+// VALNO:    Alias "#20,#9,#7(1)" -> #9
+// VALNO:    Alias "#20,#9,#7(2)" -> #7
+// VALNO:    Alias "::foo::paraby_0::a" -> #21
 // VALNO:    scope-3 {
 // VALNO:     Alias "::foo::paraby_0::within_0::@g" -> #1
-// VALNO:     <Simplify> 'dimof:#22:#4 / ref:#9' to 'const_5'
-// VALNO:     <Simplify> 'ref:#1 + dimof:#16:#6' to 'const_23'
-// VALNO:     New VN #23: 'const_23'
-// VALNO:     <Simplify> 'dimof:#22:#4 / ref:#9' to 'const_5'
-// VALNO:     New VN #24: '#9,#23'
-// VALNO:     Alias "#9,#23(0)" -> #9
-// VALNO:     Alias "#9,#23(1)" -> #23
-// VALNO:     <Simplify> 'dimof:#22:#4 / ref:#9' to 'const_5'
-// VALNO:     Alias "::foo::paraby_0::within_0::b" -> #24
+// VALNO:     <Simplify> 'dimof:#21:#4 / ref:#8' to 'const_5'
+// VALNO:     <Simplify> 'ref:#1 + dimof:#15:#6' to 'const_23'
+// VALNO:     New VN #22: 'const_23'
+// VALNO:     <Simplify> 'dimof:#21:#4 / ref:#8' to 'const_5'
+// VALNO:     New VN #23: '#8,#22'
+// VALNO:     Alias "#8,#22(0)" -> #8
+// VALNO:     Alias "#8,#22(1)" -> #22
+// VALNO:     <Simplify> 'dimof:#21:#4 / ref:#8' to 'const_5'
+// VALNO:     Alias "::foo::paraby_0::within_0::b" -> #23
 // VALNO:    } // end scope-3
 // VALNO:   } // end scope-2
 // VALNO:  } // end scope-1

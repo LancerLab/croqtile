@@ -457,6 +457,12 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
         if (trace_visit)
           os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
         // keep working
+      } else if (isa<PlaceHolderType>(n.init_expr->GetType())) {
+        Error(n.LOC(), "can not initialize vairable `" + n.name_str +
+                           "' with a placeholder.");
+        error_count++;
+        if (trace_visit)
+          os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
       }
       // sometimes the parser can not decide the type. We need to figure out
       // from the initialization expression
@@ -519,7 +525,8 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
   auto vty = SSTab().LookupSymbol(n.name);  // variable type
   auto ety = NodeType(*n.value);            // assignment expression type
   // ituples/mdspan/spanned can not be assigned after initialization
-  if (isa<ITupleType>(ety) || isa<MDSpanType>(ety) || isa<SpannedType>(ety)) {
+  if (isa<ITupleType>(ety) || isa<MDSpanType>(ety) || isa<SpannedType>(ety) ||
+      isa<PlaceHolderType>(ety)) {
     if (vty->ApprxEqual(*ety))
       Error(n.LOC(), "`" + n.name + "' of type '" + vty->Name() +
                          "' can not be re-assigned.");
@@ -545,7 +552,7 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
   // For now, we have to keep the single assignment
   {
     Error(n.LOC(), "current compiler does not support re-assignment of '" +
-                       ety->Name() + "'.");
+                       vty->Name() + "'.");
     ++error_count;
     if (trace_visit)
       os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
@@ -732,10 +739,14 @@ bool EarlySemantics::Visit(AST::SpanAs& n) {
 bool EarlySemantics::Visit(AST::DMA& n) {
   __TRACE_EACH_VISIT__(n)
 
-  if (n.operation == ".none") { // skip the place holder
+  if (n.operation == ".none") {  // skip the place holder
     assert(!n.future.empty());
     ReportErrorWhenViolateODR(n.LOC(), n.future, __FILE__, __LINE__,
-                              MakeDummyFutureType(true));
+                              MakePlaceHolderFutureType());
+    ReportErrorWhenViolateODR(n.LOC(), n.future + ".span", __FILE__, __LINE__,
+                              MakePlaceHolderMDSpanType());
+    ReportErrorWhenViolateODR(n.LOC(), n.future + ".data", __FILE__, __LINE__,
+                              MakePlaceHolderSpannedType());
     return true;
   }
 
@@ -752,19 +763,29 @@ bool EarlySemantics::Visit(AST::DMA& n) {
     size_t rank = sty->Dims();
     assert(IsValidRank(rank));
 
-    ReportErrorWhenViolateODR(n.LOC(), n.future + ".span", __FILE__, __LINE__,
-                              MakeRankedMDSpanType(rank));
     Storage sto = Storage::NONE;
     if (auto m = dyn_cast<AST::Memory>(n.to))
       sto = m->Get();
     else
       sto = tty->GetStorage();
 
-    auto spanned_ty = MakeRankedSpannedType(rank, sty->ElementType(), sto);
-    ReportErrorWhenViolateODR(n.LOC(), n.future + ".data", __FILE__, __LINE__,
-                              spanned_ty);
-    ReportErrorWhenViolateODR(n.LOC(), n.future, __FILE__, __LINE__,
-                              MakeFutureType(spanned_ty, n.async));
+    // rewrite the placeholder type
+    if (SSTab().IsDeclared(n.future)) {
+      ReportErrorWhenUseBeforeDefine(n.LOC(), n.future + ".span");
+      ReportErrorWhenUseBeforeDefine(n.LOC(), n.future + ".data");
+      SSTab().ModifySymbolType(n.future + ".span", MakeRankedMDSpanType(rank));
+      auto spanned_ty = MakeRankedSpannedType(rank, sty->ElementType(), sto);
+      SSTab().ModifySymbolType(n.future + ".data", spanned_ty);
+      SSTab().ModifySymbolType(n.future, MakeFutureType(spanned_ty, n.async));
+    } else {
+      ReportErrorWhenViolateODR(n.LOC(), n.future + ".span", __FILE__, __LINE__,
+                                MakeRankedMDSpanType(rank));
+      auto spanned_ty = MakeRankedSpannedType(rank, sty->ElementType(), sto);
+      ReportErrorWhenViolateODR(n.LOC(), n.future + ".data", __FILE__, __LINE__,
+                                spanned_ty);
+      ReportErrorWhenViolateODR(n.LOC(), n.future, __FILE__, __LINE__,
+                                MakeFutureType(spanned_ty, n.async));
+    }
   } else {
     if (n.async) {
       Error(n.LOC(), "forbid to associated async dma without a named future.");
@@ -868,6 +889,13 @@ bool EarlySemantics::Visit(AST::Wait& n) {
               "non-async future '" + id->name + "` can not be waited.");
         error_count++;
       }
+      continue;
+    } else if (auto pty = dyn_cast<PlaceHolderType>(ty)) {
+      if (pty->Category() != TypeCategory::FUTURE) {
+        Error(n.LOC(), "'" + id->name + "` of type \"" + PSTR(ty) +
+                           "\" can not be waited.");
+        error_count++;
+      }
     } else {
       Error(n.LOC(), "'" + id->name + "` of type \"" + PSTR(ty) +
                          "\" can not be waited.");
@@ -900,6 +928,28 @@ bool EarlySemantics::Visit(AST::Call& n) {
       error_count++;
     }
   }
+  return true;
+}
+
+bool EarlySemantics::Visit(AST::Swap& n) {
+  __TRACE_EACH_VISIT__(n)
+  auto lty = NodeType(*n.lhs);
+  auto rty = NodeType(*n.rhs);
+
+  if (!isa<FutureType>(lty)) {
+    Error(n.LOC(), "only support swapping of 'future'. (" + n.lhs->name + ": " +
+                       PSTR(lty) + ").");
+    error_count++;
+    return false;
+  }
+
+  if (!lty->ApprxEqual(*rty)) {
+    Error(n.LOC(), "swapping data of different types (" + PSTR(lty) + " vs. " +
+                       PSTR(rty));
+    error_count++;
+    return false;
+  }
+
   return true;
 }
 

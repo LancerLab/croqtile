@@ -22,7 +22,7 @@ struct TypeChecker : public VisitorWithSymTab {
 
  public:
   TypeChecker(const ptr<SymbolTable> s_tab, std::ostream &o = std::cout)
-      : VisitorWithSymTab("check", s_tab), os(o){}
+      : VisitorWithSymTab("check", s_tab), os(o) {}
   ~TypeChecker() {}
 
   bool Visit(AST::MultiNodes &) override;
@@ -50,6 +50,7 @@ struct TypeChecker : public VisitorWithSymTab {
   bool Visit(AST::ChunkAt &) override;
   bool Visit(AST::Wait &) override;
   bool Visit(AST::Call &) override;
+  bool Visit(AST::Swap &) override;
   bool Visit(AST::Select &) override;
   bool Visit(AST::Return &) override;
   bool Visit(AST::LoopRange &) override;

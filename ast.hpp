@@ -1095,7 +1095,7 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
 
   // The dummy dma
   explicit DMA(const location& l, const std::string& f)
-      : Node(l, MakeDummyFutureType(true)), operation(".none"),
+      : Node(l, MakePlaceHolderFutureType()), operation(".none"),
         future(f), async(true) {
   }
 
@@ -1180,6 +1180,21 @@ struct Call : public Node, public TypeIDProvider<Call> {
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Call: " << STR(*function);
     os << "\n" << prefix << "  `- with arguements: " << STR(*arguments);
+  }
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__
+};
+
+struct Swap : public Node, public TypeIDProvider<Swap> {
+  ptr<Identifier> lhs = nullptr;
+  ptr<Identifier> rhs = nullptr;
+
+  Swap(const location& loc, const ptr<Identifier>& l, const ptr<Identifier>& r)
+      : Node(loc), lhs(l), rhs(r) {}
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << "\n" << prefix << "`- Swap: " << PSTR(lhs) << ", " << PSTR(rhs);
   }
   void accept(Visitor&) override;
 

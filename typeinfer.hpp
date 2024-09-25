@@ -62,6 +62,7 @@ struct TypeInference : public Visitor {
   bool Visit(AST::ChunkAt &) override;
   bool Visit(AST::Wait &) override;
   bool Visit(AST::Call &) override;
+  bool Visit(AST::Swap &) override;
   bool Visit(AST::Select &) override;
   bool Visit(AST::Return &) override;
   bool Visit(AST::LoopRange &) override;

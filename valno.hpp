@@ -86,6 +86,11 @@ class ValueNumbering {
 
   // It binds a expression sigature with an existing value number.
   void AssociateSignatureWithValueNumber(const std::string& sig, int valno);
+  void AssociateSignatureWithInvalidValueNumber(const std::string& sig);
+  // rebind/modify the value number.
+  // Caution: only used for scenario where the value number hass not been
+  // determined yet.
+  void RebindSignatureWithValueNumber(const std::string& sig, int valno);
 
   std::optional<std::string> TryToSimplifyNodeSignature(AST::Node& node);
 
@@ -235,9 +240,8 @@ class ShapeInference : public Visitor {
       if (b->ref_name != "") {
         auto n = SSTab().NameInScopeOrNull(b->ref_name);
         if (!n)
-          choreo_unreachable(
-              ("variable `" + b->ref_name + "' is not found in scopes.")
-                  .c_str());
+          choreo_unreachable("variable `" + b->ref_name +
+                             "' is not found in scopes.");
         vn.SetListReference(n.value());
       }
     } else if (auto* b = dyn_cast<AST::IntTuple>(&n)) {
@@ -249,7 +253,7 @@ class ShapeInference : public Visitor {
                   .c_str());
         vn.SetListReference(n.value());
       }
-    } else if (isa<AST::Wait>(&n) || isa<AST::Call>(&n)) {
+    } else if (isa<AST::Wait>(&n) || isa<AST::Call>(&n) || isa<AST::Swap>(&n)) {
       gen_values = false;
     } else if (isa<AST::Parameter>(&n)) {
       allow_named_dim = true;
@@ -265,7 +269,7 @@ class ShapeInference : public Visitor {
       vn.LeaveScope();
     } else if (isa<AST::MultiDimSpans>(&n) || isa<AST::IntTuple>(&n)) {
       vn.ResetListReference();
-    } else if (isa<AST::Wait>(&n) || isa<AST::Call>(&n)) {
+    } else if (isa<AST::Wait>(&n) || isa<AST::Call>(&n) || isa<AST::Swap>(&n)) {
       gen_values = true;
     } else if (isa<AST::Parameter>(&n)) {
       allow_named_dim = false;
@@ -516,8 +520,10 @@ class ShapeInference : public Visitor {
     auto nty = n.value->GetType();
     SSTab().DefineSymbol(n.name, nty);
     if (auto san = dyn_cast<AST::SpanAs>(n.value)) {
-      assert((n.name == san->nid->name) && "inconsistent span_as variable name.");
-      SSTab().DefineSymbol(san->nid->name + ".span", cast<SpannedType>(nty)->s_type);
+      assert((n.name == san->nid->name) &&
+             "inconsistent span_as variable name.");
+      SSTab().DefineSymbol(san->nid->name + ".span",
+                           cast<SpannedType>(nty)->s_type);
       return true;
     }
 
@@ -560,6 +566,7 @@ class ShapeInference : public Visitor {
       // it is a reference
       auto name = n.name;
       auto pty = SSTab().LookupSymbol(name);
+      // only care about symbol associated to values
       if (isa<SpannedType>(pty) || isa<FutureType>(pty)) {
         name += ".span";
         assert(SSTab().IsDeclared(name) && "span symbol is not declared.");
@@ -567,8 +574,9 @@ class ShapeInference : public Visitor {
         name = "@" + name;
         assert(SSTab().IsDeclared(name) && "ubound symbol is not declared.");
       }
-      assert(vn.HasValueNumberOfSignature(SSTab().InScopeName(name)) &&
-             "value number has not been generated.");
+      if (!vn.HasValueNumberOfSignature(SSTab().InScopeName(name)))
+        choreo_unreachable("value number of `" + SSTab().InScopeName(name) +
+                           "' has not been generated.");
       cur_vn = vn.GetValueNumberOfSignature(SSTab().InScopeName(name));
     } else {
       if (allow_named_dim) {  // for named dims in parameters
@@ -587,8 +595,10 @@ class ShapeInference : public Visitor {
         error_count++;
         return false;
       }
+
       // sometime we need value a symbol (symbolic value)
-      cur_vn = vn.GenerateValueNumberForNode(n);
+      // TODO: improve it - only generate valno for integer types
+      if (!ValidVN(cur_mdspan_vn)) cur_vn = vn.GenerateValueNumberForNode(n);
     }
 
     return true;
@@ -626,6 +636,7 @@ class ShapeInference : public Visitor {
         return false;
       }
 
+      InvalidateVN(cur_mdspan_vn);
       InvalidateVN(cur_vn);
 
       if (n.sym) {
@@ -639,9 +650,13 @@ class ShapeInference : public Visitor {
     }
 
     if (n.sym && n.type->isScalar()) {
+      assert(!ValidVN(cur_mdspan_vn) && "unexpected current mdspan value.");
+
       // get the value number and make it defined
       vn.GetValueNumberOfSignature(SSTab().ScopedName(n.sym->name));
       if (n.sym) SSTab().DefineSymbol(n.sym->name, n.GetType());
+
+      InvalidateVN(cur_vn);
       return true;
     }
 
@@ -827,6 +842,16 @@ class ShapeInference : public Visitor {
 
     if (cannot_proceed) return true;
 
+    if (n.operation == ".none") {
+      assert(!n.future.empty() && "unexpected: the future is empty.");
+      SSTab().DefineSymbol(n.future, MakePlaceHolderFutureType());
+      SSTab().DefineSymbol(n.future + ".span", MakePlaceHolderMDSpanType());
+      vn.AssociateSignatureWithInvalidValueNumber(
+          SSTab().ScopedName(n.future + ".span"));
+      InvalidateVN(cur_vn);
+      return true;
+    }
+
     assert(ValidVN(cur_vn) &&
            "unexpected current value number for shape inference of dma.");
 
@@ -854,7 +879,20 @@ class ShapeInference : public Visitor {
     auto s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
     n.SetType(MakeShapedFutureType(s, n.async));
 
-    if (!n.future.empty()) {
+    if (n.future.empty()) {
+      InvalidateVN(cur_vn);
+      return true;
+    }
+
+    if (SSTab().IsDeclared(n.future)) {
+      assert(
+          cast<PlaceHolderType>(SSTab().LookupSymbol(n.future))->Category() ==
+          TypeCategory::FUTURE);
+      vn.RebindSignatureWithValueNumber(SSTab().InScopeName(n.future) + ".span",
+                                        cur_vn);
+      SSTab().ModifySymbolType(n.future, n.GetType());
+      SSTab().ModifySymbolType(n.future + ".span", MakeMDSpanType(s));
+    } else {
       std::string f_span = n.future + ".span";
       vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(f_span), cur_vn);
       SSTab().DefineSymbol(n.future, n.GetType());
@@ -862,9 +900,8 @@ class ShapeInference : public Visitor {
     }
 
     InvalidateVN(cur_vn);
-
     return true;
-  };
+  }
 
   bool Visit(AST::ChunkAt& n) {
     __TRACE_EACH_VISIT__;
@@ -984,6 +1021,14 @@ class ShapeInference : public Visitor {
   }
 
   bool Visit(AST::Call& n) {
+    __TRACE_EACH_VISIT__;
+
+    if (cannot_proceed) return true;
+
+    return true;
+  };
+
+  bool Visit(AST::Swap& n) {
     __TRACE_EACH_VISIT__;
 
     if (cannot_proceed) return true;

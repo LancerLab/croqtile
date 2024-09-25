@@ -35,62 +35,61 @@ __co__ auto ele_add(s32 [6, ?, 128] lhs, s32 [6, ?, 128] rhs) {
 // VALNO:    Alias "#0,#1,#2(1)" -> #1
 // VALNO:    New VN #6: 'index_const_2'
 // VALNO:    Alias "#0,#1,#2(2)" -> #2
-// VALNO:    New VN #7: '::ele_add::lhs'
 // VALNO:    Alias "::ele_add::lhs.span" -> #3
-// VALNO:    New VN #8: '::ele_add::$1'
-// VALNO:    New VN #9: '#0,#8,#2'
-// VALNO:    Alias "#0,#8,#2(0)" -> #0
-// VALNO:    Alias "#0,#8,#2(1)" -> #8
-// VALNO:    Alias "#0,#8,#2(2)" -> #2
-// VALNO:    New VN #10: '::ele_add::rhs'
-// VALNO:    Alias "::ele_add::rhs.span" -> #9
+// VALNO:    New VN #7: '::ele_add::$1'
+// VALNO:    New VN #8: '#0,#7,#2'
+// VALNO:    Alias "#0,#7,#2(0)" -> #0
+// VALNO:    Alias "#0,#7,#2(1)" -> #7
+// VALNO:    Alias "#0,#7,#2(2)" -> #2
+// VALNO:    Alias "::ele_add::rhs.span" -> #8
 // VALNO:    Alias "::ele_add::output.span" -> #3
 // VALNO:    scope-2 {
 // VALNO:     Alias "::ele_add::paraby_0::@p" -> #0
 // VALNO:     scope-3 {
-// VALNO:      New VN #11: 'const_2'
-// VALNO:      New VN #12: 'const_32'
-// VALNO:      New VN #13: '#0,#11,#12'
-// VALNO:      Alias "#0,#11,#12(0)" -> #0
-// VALNO:      Alias "#0,#11,#12(1)" -> #11
-// VALNO:      Alias "#0,#11,#12(2)" -> #12
-// VALNO:      New VN #14: 'const_1'
-// VALNO:      New VN #15: '/:#1:#11'
-// VALNO:      New VN #16: 'const_4'
-// VALNO:      New VN #17: '#14,#15,#16'
-// VALNO:      Alias "::ele_add::paraby_0::within_0::@idx0(0)" -> #14
-// VALNO:      Alias "::ele_add::paraby_0::within_0::@q" -> #14
-// VALNO:      Alias "::ele_add::paraby_0::within_0::@idx0(1)" -> #15
-// VALNO:      Alias "::ele_add::paraby_0::within_0::@x" -> #15
-// VALNO:      Alias "::ele_add::paraby_0::within_0::@idx0(2)" -> #16
-// VALNO:      Alias "::ele_add::paraby_0::within_0::@y" -> #16
-// VALNO:      Alias "::ele_add::paraby_0::within_0::@idx0" -> #17
-// VALNO:      Alias "#0,#11,#12(0)" -> #0
-// VALNO:      Alias "#0,#11,#12(1)" -> #11
-// VALNO:      Alias "#0,#11,#12(2)" -> #12
-// VALNO:      New VN #18: '/:#8:#11'
-// VALNO:      New VN #19: '#14,#18,#16'
-// VALNO:      Alias "::ele_add::paraby_0::within_0::@idx1(0)" -> #14
-// VALNO:      Alias "::ele_add::paraby_0::within_0::@w" -> #14
-// VALNO:      Alias "::ele_add::paraby_0::within_0::@idx1(1)" -> #18
-// VALNO:      Alias "::ele_add::paraby_0::within_0::@z" -> #18
-// VALNO:      Alias "::ele_add::paraby_0::within_0::@idx1(2)" -> #16
-// VALNO:      Alias "::ele_add::paraby_0::within_0::@b" -> #16
-// VALNO:      Alias "::ele_add::paraby_0::within_0::@idx1" -> #19
+// VALNO:      New VN #9: 'const_2'
+// VALNO:      New VN #10: 'const_32'
+// VALNO:      New VN #11: '#0,#9,#10'
+// VALNO:      Alias "#0,#9,#10(0)" -> #0
+// VALNO:      Alias "#0,#9,#10(1)" -> #9
+// VALNO:      Alias "#0,#9,#10(2)" -> #10
+// VALNO:      New VN #12: 'const_1'
+// VALNO:      New VN #13: '/:#1:#9'
+// VALNO:      New VN #14: 'const_4'
+// VALNO:      New VN #15: '#12,#13,#14'
+// VALNO:      Alias "::ele_add::paraby_0::within_0::@idx0(0)" -> #12
+// VALNO:      Alias "::ele_add::paraby_0::within_0::@q" -> #12
+// VALNO:      Alias "::ele_add::paraby_0::within_0::@idx0(1)" -> #13
+// VALNO:      Alias "::ele_add::paraby_0::within_0::@x" -> #13
+// VALNO:      Alias "::ele_add::paraby_0::within_0::@idx0(2)" -> #14
+// VALNO:      Alias "::ele_add::paraby_0::within_0::@y" -> #14
+// VALNO:      Alias "::ele_add::paraby_0::within_0::@idx0" -> #15
+// VALNO:      Alias "#0,#9,#10(0)" -> #0
+// VALNO:      Alias "#0,#9,#10(1)" -> #9
+// VALNO:      Alias "#0,#9,#10(2)" -> #10
+// VALNO:      New VN #16: '/:#7:#9'
+// VALNO:      New VN #17: '#12,#16,#14'
+// VALNO:      Alias "::ele_add::paraby_0::within_0::@idx1(0)" -> #12
+// VALNO:      Alias "::ele_add::paraby_0::within_0::@w" -> #12
+// VALNO:      Alias "::ele_add::paraby_0::within_0::@idx1(1)" -> #16
+// VALNO:      Alias "::ele_add::paraby_0::within_0::@z" -> #16
+// VALNO:      Alias "::ele_add::paraby_0::within_0::@idx1(2)" -> #14
+// VALNO:      Alias "::ele_add::paraby_0::within_0::@b" -> #14
+// VALNO:      Alias "::ele_add::paraby_0::within_0::@idx1" -> #17
+// VALNO:      <Bind> VN #13 <-> VN #16
 // VALNO:      scope-4 {
 // VALNO:       <Simplify> 'const_6 / const_1 to 'const_6'
-// VALNO:       <Simplify> '::ele_add::$0 / /:#1:#11 to 'const_2'
+// VALNO:       <Simplify> '::ele_add::$0 / /:#1:#9 to 'const_2'
 // VALNO:       <Simplify> 'const_128 / const_4 to 'const_32'
-// VALNO:       Alias "::ele_add::paraby_0::within_0::foreach_0::lhs_load.span" -> #13
+// VALNO:       Alias "::ele_add::paraby_0::within_0::foreach_0::lhs_load.span" -> #11
 // VALNO:       <Simplify> 'const_6 / const_1 to 'const_6'
-// VALNO:       <Simplify> '::ele_add::$1 / /:#8:#11 to 'const_2'
+// VALNO:       <Simplify> '::ele_add::$1 / /:#7:#9 to 'const_2'
 // VALNO:       <Simplify> 'const_128 / const_4 to 'const_32'
-// VALNO:       Alias "::ele_add::paraby_0::within_0::foreach_0::rhs_load.span" -> #13
-// VALNO:       Alias "::ele_add::paraby_0::within_0::foreach_0::l1_out.span" -> #13
+// VALNO:       Alias "::ele_add::paraby_0::within_0::foreach_0::rhs_load.span" -> #11
+// VALNO:       Alias "::ele_add::paraby_0::within_0::foreach_0::l1_out.span" -> #11
 // VALNO:       <Simplify> 'const_6 / const_1 to 'const_6'
-// VALNO:       <Simplify> '::ele_add::$0 / /:#1:#11 to 'const_2'
+// VALNO:       <Simplify> '::ele_add::$0 / /:#1:#9 to 'const_2'
 // VALNO:       <Simplify> 'const_128 / const_4 to 'const_32'
-// VALNO:       Alias "::ele_add::paraby_0::within_0::foreach_0::out_store.span" -> #13
+// VALNO:       Alias "::ele_add::paraby_0::within_0::foreach_0::out_store.span" -> #11
 // VALNO:      } // end scope-4
 // VALNO:     } // end scope-3
 // VALNO:    } // end scope-2

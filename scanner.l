@@ -138,7 +138,8 @@ blank [ \t\r]
   ".span_as" return Choreo::Parser::make_FNSPANAS(yytext, loc);
   ".data"    return Choreo::Parser::make_FNDATA(yytext, loc);
   ".chunkat" return Choreo::Parser::make_CHUNKAT(yytext, loc);
-  "=>"       return Choreo::Parser::make_TRANS  (loc);
+  "=>"       return Choreo::Parser::make_TRANS(loc);
+  "swap"     return Choreo::Parser::make_SWAP(yytext, loc);
   "if"       return Choreo::Parser::make_IF(yytext, loc);
   "else"     return Choreo::Parser::make_ELSE(yytext, loc);
   "parallel" return Choreo::Parser::make_PARA(yytext, loc);

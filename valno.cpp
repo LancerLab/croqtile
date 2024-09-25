@@ -107,6 +107,33 @@ void ValueNumbering::AssociateSignatureWithValueNumber(const std::string& sig,
     os << ScopeIndent() << "Alias \"" << sig << "\" -> #" << valno << "\n";
 }
 
+void ValueNumbering::AssociateSignatureWithInvalidValueNumber(
+    const std::string& sig) {
+  assert(!expressionValueNumbers.back().count(sig) && "signature exists.");
+  expressionValueNumbers.back()[sig] = GetInvalidValueNumber();
+
+  if (trace) os << ScopeIndent() << "Alias \"" << sig << "\" -> #<invalid>\n";
+}
+
+void ValueNumbering::RebindSignatureWithValueNumber(const std::string& sig,
+                                                    int valno) {
+  bool changed = false;
+  for (auto evn = expressionValueNumbers.rbegin();
+       evn != expressionValueNumbers.rend(); ++evn) {
+    if (!evn->count(sig)) continue;
+
+    assert(!ValidVN((*evn)[sig]) &&
+           "expecting rebind of an invalid value number.");
+    (*evn)[sig] = valno;
+    if (!changed && trace)
+      os << ScopeIndent() << "Alias(Rebind) \"" << sig << "\" -> #" << valno
+         << "\n";
+    changed = true;
+  }
+
+  if (!changed) choreo_unreachable("failed to rebind valno for `" + sig + "'.");
+}
+
 std::string ValueNumbering::SignBinaryCompositeValues(const location& loc,
                                                       const std::string& op,
                                                       const std::string& l_sig,
@@ -357,9 +384,9 @@ std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
             {"?",
              [this, &n]() -> std::optional<std::string> {
                const auto& cond = n->GetC();
-               auto res_cond = TryToSimplifyBinary(cond->LOC(), cond->op,
-                                              GetSignatureForNode(*cond->GetL()),
-                                              GetSignatureForNode(*cond->GetR()));
+               auto res_cond = TryToSimplifyBinary(
+                   cond->LOC(), cond->op, GetSignatureForNode(*cond->GetL()),
+                   GetSignatureForNode(*cond->GetR()));
                if (res_cond) {
                  std::string res;
                  if (res_cond == "true")
@@ -403,50 +430,50 @@ std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
              }},
             {"==",
              [this, &n]() -> std::optional<std::string> {
-               auto res = TryToSimplifyBinary(n->LOC(), "==",
-                                              GetSignatureForNode(*n->GetL()),
-                                              GetSignatureForNode(*n->GetR()));
+               auto res = TryToSimplifyBinary(
+                   n->LOC(), "==", GetSignatureForNode(*n->GetL()),
+                   GetSignatureForNode(*n->GetR()));
                if (res && trace)
                  os << ScopeIndent() << "<Simplify> '"
-                    << GenerateNodeSignature(*n->GetL(), false) << " == "
-                    << GenerateNodeSignature(*n->GetR(), false) << "' to '"
-                    << res.value() << "'\n";
+                    << GenerateNodeSignature(*n->GetL(), false)
+                    << " == " << GenerateNodeSignature(*n->GetR(), false)
+                    << "' to '" << res.value() << "'\n";
                return res;
              }},
             {"!=",
              [this, &n]() -> std::optional<std::string> {
-               auto res = TryToSimplifyBinary(n->LOC(), "!=",
-                                              GetSignatureForNode(*n->GetL()),
-                                              GetSignatureForNode(*n->GetR()));
+               auto res = TryToSimplifyBinary(
+                   n->LOC(), "!=", GetSignatureForNode(*n->GetL()),
+                   GetSignatureForNode(*n->GetR()));
                if (res && trace)
                  os << ScopeIndent() << "<Simplify> '"
-                    << GenerateNodeSignature(*n->GetL(), false) << " != "
-                    << GenerateNodeSignature(*n->GetR(), false) << "' to '"
-                    << res.value() << "'\n";
+                    << GenerateNodeSignature(*n->GetL(), false)
+                    << " != " << GenerateNodeSignature(*n->GetR(), false)
+                    << "' to '" << res.value() << "'\n";
                return res;
              }},
             {"<=",
              [this, &n]() -> std::optional<std::string> {
-               auto res = TryToSimplifyBinary(n->LOC(), "<=",
-                                              GetSignatureForNode(*n->GetL()),
-                                              GetSignatureForNode(*n->GetR()));
+               auto res = TryToSimplifyBinary(
+                   n->LOC(), "<=", GetSignatureForNode(*n->GetL()),
+                   GetSignatureForNode(*n->GetR()));
                if (res && trace)
                  os << ScopeIndent() << "<Simplify> '"
-                    << GenerateNodeSignature(*n->GetL(), false) << " <= "
-                    << GenerateNodeSignature(*n->GetR(), false) << "' to '"
-                    << res.value() << "'\n";
+                    << GenerateNodeSignature(*n->GetL(), false)
+                    << " <= " << GenerateNodeSignature(*n->GetR(), false)
+                    << "' to '" << res.value() << "'\n";
                return res;
              }},
             {">=",
              [this, &n]() -> std::optional<std::string> {
-               auto res = TryToSimplifyBinary(n->LOC(), ">=",
-                                              GetSignatureForNode(*n->GetL()),
-                                              GetSignatureForNode(*n->GetR()));
+               auto res = TryToSimplifyBinary(
+                   n->LOC(), ">=", GetSignatureForNode(*n->GetL()),
+                   GetSignatureForNode(*n->GetR()));
                if (res && trace)
                  os << ScopeIndent() << "<Simplify> '"
-                    << GenerateNodeSignature(*n->GetL(), false) << " >= "
-                    << GenerateNodeSignature(*n->GetR(), false) << "' to '"
-                    << res.value() << "'\n";
+                    << GenerateNodeSignature(*n->GetL(), false)
+                    << " >= " << GenerateNodeSignature(*n->GetR(), false)
+                    << "' to '" << res.value() << "'\n";
                return res;
              }},
             {"dataof",

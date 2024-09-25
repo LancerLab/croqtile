@@ -386,6 +386,10 @@ public:
     TraceEachVisit(n);
     return true;
   }
+  bool Visit(AST::Swap &n) {
+    TraceEachVisit(n);
+    return true;
+  }
   bool Visit(AST::Select &n) {
     TraceEachVisit(n);
     return true;

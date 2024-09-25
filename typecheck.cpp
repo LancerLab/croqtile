@@ -178,6 +178,21 @@ bool TypeChecker::Visit(AST::Call& n) {
   __TRACE_EACH_VISIT__(n)
   return true;
 }
+
+bool TypeChecker::Visit(AST::Swap& n) {
+  __TRACE_EACH_VISIT__(n)
+  auto lty = NodeType(*n.lhs);
+  auto rty = NodeType(*n.rhs);
+
+  if (*lty != *rty) {
+    Error(n.LOC(), "swapping data of different types (" + PSTR(lty) + " vs. " +
+                       PSTR(rty));
+    error_count++;
+  }
+
+  return true;
+}
+
 bool TypeChecker::Visit(AST::Select& n) {
   __TRACE_EACH_VISIT__(n)
   auto expr_list = n.span_expr_list;

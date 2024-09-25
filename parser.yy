@@ -139,7 +139,7 @@ void choreo_info(const char *message) {
 %token <Choreo::Storage> LOCAL SHARED GLOBAL
 %token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT BOOL VOID
 // builtin operations
-%token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT WAIT CALL AUTO SELECT
+%token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT WAIT CALL AUTO SELECT SWAP
 // control related
 %token <std::string> IF ELSE PARA BY WITH IN FOREACH RET WHERE
 %token <std::string> TRUE FALSE
@@ -154,7 +154,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::CppSourceCode>> pass_by host_code
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::SpanAs>> span_as
-%nterm <AST::ptr<AST::Node>> foreach_block general_val simple_int span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt index_or_value range_expr if_else_block optional_scalar_init param_mdspan_val chunkat_or_storage_or_select
+%nterm <AST::ptr<AST::Node>> foreach_block general_val simple_int span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt swap_stmt index_or_value range_expr if_else_block optional_scalar_init param_mdspan_val chunkat_or_storage_or_select
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause else_block multi_decls named_spanned_decl
 %nterm <AST::ptr<AST::MultiValues>> index_value_list value_list param_mdspan_list range_exprs iv_list id_list with_matchers passables span_expr_list
 %nterm <AST::ptr<AST::Expr>> s_expr span_expr
@@ -381,6 +381,7 @@ statement
     | dma_stmt     SEMCOL { $$ = $1; }
     | wait_stmt    SEMCOL { $$ = $1; }
     | call_stmt    SEMCOL { $$ = $1; }
+    | swap_stmt    SEMCOL { $$ = $1; }
     | return_stmt  SEMCOL { $$ = $1; }
     | paraby_block        { $$ = $1; }
     | within_block        { $$ = $1; }
@@ -599,6 +600,7 @@ storage_qual
 
 assignment
     : IDENTIFIER ASSIGN s_expr {
+        // note: the symbol is not scoped. therefore, an assignment could result in initialization
         if (!symtab.Exists($1)) {
           // since the symbol is not defined, it is a declaration without type annotation
           symtab.AddSymbol($1, MakeUnknownType());
@@ -830,6 +832,7 @@ dma_stmt
         $$ = AST::Make<AST::DMA>(@1, $2, "", $9, $5, $7, $3, $4);
       }
     | IDENTIFIER ASSIGN DMA NONE {
+        symtab.AddSymbol($1, MakePlaceHolderFutureType());
         $$ = AST::Make<AST::DMA>(@1, $1);
       }
     ;
@@ -967,6 +970,13 @@ call_stmt
     : CALL IDENTIFIER LPAREN passables RPAREN {
         $$ = AST::Make<AST::Call>(@1,
                 AST::Make<AST::Identifier>(@2, $2), $4);
+      }
+    ;
+
+swap_stmt
+    : SWAP LPAREN IDENTIFIER COMMA IDENTIFIER RPAREN {
+        $$ = AST::Make<AST::Swap>(@1,
+                AST::Make<AST::Identifier>(@3, $3), AST::Make<AST::Identifier>(@5, $5));
       }
     ;
 

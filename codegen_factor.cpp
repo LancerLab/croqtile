@@ -687,6 +687,13 @@ bool FactorCodeGen::Visit(AST::Call &c) {
   return true;
 }
 
+bool FactorCodeGen::Visit(AST::Swap &n) {
+  __TRACE_EACH_VISIT__(n)
+
+  // TODO
+  return true;
+}
+
 bool FactorCodeGen::Visit(AST::Select &c) {
   __TRACE_EACH_VISIT__(c)
   if (!c.inDMA) // z = select(...);

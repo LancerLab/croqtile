@@ -574,6 +574,14 @@ bool TypeInference::Visit(AST::DMA &n) {
     return false;
   }
 
+  if (n.operation == ".none") {
+    n.SetType(MakePlaceHolderFutureType());
+    AssignSymbolWithType(n.LOC(), n.future + ".span", MakePlaceHolderMDSpanType());
+    AssignSymbolWithType(n.LOC(), n.future + ".data", MakePlaceHolderSpannedType());
+    AssignSymbolWithType(n.LOC(), n.future, MakePlaceHolderFutureType());
+    return true;
+  }
+
   // update the future type. fill info including storage, fundanmental type
   auto fty = cast<FutureType>(n.GetType());
   auto sty = MakeSpannedType(dma_fmty, fty->GetShape(), dma_mem);
@@ -581,9 +589,15 @@ bool TypeInference::Visit(AST::DMA &n) {
   n.SetType(nty);
 
   if (!n.future.empty()) {
-    AssignSymbolWithType(n.LOC(), n.future + ".span", sty->GetMDSpanType());
-    AssignSymbolWithType(n.LOC(), n.future + ".data", sty);
-    AssignSymbolWithType(n.LOC(), n.future, nty);
+    if (SSTab().IsDeclared(n.future)) {
+      ModifySymbolType(n.LOC(), n.future + ".span", sty->GetMDSpanType());
+      ModifySymbolType(n.LOC(), n.future + ".data", sty);
+      ModifySymbolType(n.LOC(), n.future, nty);
+    } else {
+      AssignSymbolWithType(n.LOC(), n.future + ".span", sty->GetMDSpanType());
+      AssignSymbolWithType(n.LOC(), n.future + ".data", sty);
+      AssignSymbolWithType(n.LOC(), n.future, nty);
+    }
   }
 
   if (Dump) {
@@ -688,6 +702,11 @@ bool TypeInference::Visit(AST::Wait &n) {
 }
 
 bool TypeInference::Visit(AST::Call &n) {
+  __TRACE_EACH_VISIT__(n)
+  return true;
+}
+
+bool TypeInference::Visit(AST::Swap &n) {
   __TRACE_EACH_VISIT__(n)
   return true;
 }

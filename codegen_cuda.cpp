@@ -740,6 +740,13 @@ bool CUDACodeGen::Visit(AST::Call &c) {
   return true;
 }
 
+bool CUDACodeGen::Visit(AST::Swap &n) {
+  __TRACE_EACH_VISIT__(n)
+
+  // TODO
+  return true;
+}
+
 bool CUDACodeGen::Visit(AST::Select &c) {
   __TRACE_EACH_VISIT__(c)
   // size_t val_count = c.val_list->Count();

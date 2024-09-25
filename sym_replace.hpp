@@ -491,6 +491,14 @@ public:
     return true;
   };
 
+  bool Visit(AST::Swap& n) override {
+    __TRACE_EACH_VISIT__;
+
+    if (cannot_proceed) return true;
+
+    return true;
+  };
+
   bool Visit(AST::Select& n) override {
     __TRACE_EACH_VISIT__;
 

@@ -38,6 +38,38 @@ enum class TypeCategory {
   UNKNOWN,
 };
 
+inline static std::string STR(TypeCategory tc) {
+  switch (tc) {
+    case TypeCategory::INT:
+      return "INT";
+    case TypeCategory::BOOL:
+      return "BOOL";
+    case TypeCategory::INDEX:
+      return "INDEX";
+    case TypeCategory::ITUPLE:
+      return "ITUPLE";
+    case TypeCategory::PARTIAL:
+      return "PARTIAL";
+    case TypeCategory::SPANNED:
+      return "SPANNED";
+    case TypeCategory::BOUNDED_INT:
+      return "BOUNDED_INT";
+    case TypeCategory::BOUNDED_ITUPLE:
+      return "BOUNDED_ITUPLE";
+    case TypeCategory::VOID:
+      return "VOID";
+    case TypeCategory::FUTURE:
+      return "FUTURE";
+    case TypeCategory::FUNCTION:
+      return "FUNCTION";
+    case TypeCategory::UNKNOWN:
+      return "UNKNOWN";
+    default:
+      choreo_unreachable("unsupported type category.");
+  }
+  return "";
+}
+
 // BaseType, FundamentalType, and ScalarType
 // if the type needs deduction, mark it as 'UNKNOWN'
 enum class BaseType {
@@ -164,9 +196,7 @@ inline static std::string GetStringFrom(Storage st) {
 
 }  // end namespace __internal__
 
-inline static std::string STR(size_t sz) {
-  return std::to_string(sz);
-}
+inline static std::string STR(size_t sz) { return std::to_string(sz); }
 inline static std::string STR(BaseType bt) {
   return __internal__::GetStringFrom(bt);
 }
@@ -512,8 +542,7 @@ inline void PrintValueList(const ValueList& vl, std::ostream& os,
 }
 
 inline void PrintValueListSizeExpr(const ValueList& vl, std::ostream& os,
-                                      const char* lb = "[",
-                                      const char* rb = "]") {
+                                   const char* lb = "[", const char* rb = "]") {
   auto print_variant = [&os](const ValueItem& vle) {
     if (vle.index() == 0)
       os << std::get<0>(vle);
@@ -862,6 +891,26 @@ struct ScalarType : public Type {
   // can not have instance
 };
 
+struct PlaceHolderType final : public Type,
+                               public TypeIDProvider<PlaceHolderType> {
+  PlaceHolderType(TypeCategory t) : Type(t) {}
+  size_t Dims() const override { return 0; }
+  bool IsComplete() const { return false; }
+  void Print(std::ostream& os) const override {
+    os << "placeholder<" << STR(Category()) << ">";
+  }
+  const std::string Name() const override { return "place_holder"; }
+  bool HasSufficientInfo() const { return false; }
+
+  bool operator==(const Type&) const override { return false; }
+  // tolarate im-precise comparison
+  bool ApprxEqual(const Type& t) const override {
+    return t.Category() == Category();
+  }
+
+  __UDT_TYPE_INFO__
+};
+
 struct IntegerType : public ScalarType, public TypeIDProvider<IntegerType> {
   IntegerType() : ScalarType(TypeCategory::INT) {}
   bool IsComplete() const override { return true; }
@@ -976,6 +1025,9 @@ struct MDSpanType : public Type, public TypeIDProvider<MDSpanType> {
   }
 
   bool ApprxEqual(const Type& ty) const override {
+    if (auto pty = dyn_cast<PlaceHolderType>(&ty))
+      return pty->ApprxEqual(*this);
+
     if (auto sty = dyn_cast<MDSpanType>(&ty)) {
       if (!value.IsRanked() || !sty->value.IsRanked())
         return true;  // it is ok when the shape is unknown
@@ -1022,6 +1074,9 @@ struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
   }
 
   bool ApprxEqual(const Type& ty) const override {
+    if (auto pty = dyn_cast<PlaceHolderType>(&ty))
+      return pty->ApprxEqual(*this);
+
     if (!isa<SpannedType>(&ty)) return false;
     auto& t = (SpannedType&)ty;
     return t.f_type == f_type && t.s_type->ApprxEqual(*s_type);
@@ -1136,7 +1191,8 @@ struct BoundedITupleType final : public BoundedType,
              (lbounds.DimCount() == strides.size()) &&
              "expecting a valid bound.");
     else
-      assert(!ubounds.IsValid() && strides.empty() && "expecting an invalid bound.");
+      assert(!ubounds.IsValid() && strides.empty() &&
+             "expecting an invalid bound.");
   }
 
   size_t Dims() const override { return ubounds.Dims(); }
@@ -1153,7 +1209,9 @@ struct BoundedITupleType final : public BoundedType,
     return lbounds.ValueAt(idx);
   }
   int GetStride(size_t idx) const { return strides[idx]; }
-  bool IsPlain(size_t idx) const { return (lbounds.ValueAt(idx) == ValueItem(0)) && (strides[idx] == 1); }
+  bool IsPlain(size_t idx) const {
+    return (lbounds.ValueAt(idx) == ValueItem(0)) && (strides[idx] == 1);
+  }
   bool HasValidBound() const override {
     return lbounds.IsValid() && ubounds.IsValid() && !strides.empty() &&
            (lbounds.DimCount() == ubounds.DimCount()) &&
@@ -1196,11 +1254,11 @@ struct BoundedITupleType final : public BoundedType,
     }
 
     os << "{[" << STR(lbounds.ValueAt(0)) << "," << STR(ubounds.ValueAt(0))
-      << ")";
+       << ")";
 
     for (size_t i = 1; i < Dims(); ++i) {
       os << ", [" << STR(lbounds.ValueAt(i)) << "," << STR(ubounds.ValueAt(i))
-          << "):" << strides[i];
+         << "):" << strides[i];
     }
     os << "}";
   }
@@ -1215,7 +1273,7 @@ struct FutureType : public Type, public TypeIDProvider<FutureType> {
       nullptr;  // the spanned data associated with the future
   bool async;
 
-  FutureType(const ptr<SpannedType>& s, bool a)
+  explicit FutureType(const ptr<SpannedType>& s, bool a)
       : Type(TypeCategory::FUTURE), psty(s), async(a) {}
   bool IsComplete() const override { return true; }
   bool HasSufficientInfo() const { return psty->HasSufficientInfo(); }
@@ -1233,6 +1291,9 @@ struct FutureType : public Type, public TypeIDProvider<FutureType> {
   }
 
   bool ApprxEqual(const Type& ty) const override {
+    if (auto pty = dyn_cast<PlaceHolderType>(&ty))
+      return pty->ApprxEqual(*this);
+
     if (auto fty = dyn_cast<FutureType>(&ty))
       return (fty->async == async) && (fty->psty->ApprxEqual(*psty));
     else
@@ -1469,6 +1530,18 @@ inline ptr<FutureType> MakeShapedFutureType(const Shape& v, bool async) {
 
 inline ptr<FutureType> MakeDummyFutureType(bool async) {
   return std::make_shared<FutureType>(MakeDummySpannedType(), async);
+}
+
+inline ptr<PlaceHolderType> MakePlaceHolderMDSpanType() {
+  return std::make_shared<PlaceHolderType>(TypeCategory::PARTIAL);
+}
+
+inline ptr<PlaceHolderType> MakePlaceHolderSpannedType() {
+  return std::make_shared<PlaceHolderType>(TypeCategory::SPANNED);
+}
+
+inline ptr<PlaceHolderType> MakePlaceHolderFutureType() {
+  return std::make_shared<PlaceHolderType>(TypeCategory::FUTURE);
 }
 
 inline ptr<FunctionType> MakeFunctionType(const ptr<Type> ot,
