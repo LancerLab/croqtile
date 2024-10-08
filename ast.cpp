@@ -157,7 +157,7 @@ void ChunkAt::accept(Choreo::Visitor& v) {
 
 void Select::accept(Choreo::Visitor& v) {
   select_factor->accept(v);
-  span_expr_list->accept(v);
+  expr_list->accept(v);
   v.Visit(*this);
 }
 

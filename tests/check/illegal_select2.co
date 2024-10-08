@@ -13,8 +13,10 @@ __co__ auto illegal_select(f32 [128, 128] i) {
           local f32 [i_shared.span / tile_factor_local] i_local0;
           local f32 [4, 4] i_local6;
           with idx = {p_tile, q_tile} in [1, 4] {
+            i_local_s1 = dma.copy.async i_shared.chunkat(q_tile, q_tile) => local;
             i_local_s2 = dma.copy.async i_shared.chunkat(p_tile, q_tile) => select(q_tile % 2, i_local0, i_shared0) after i_shared;
             i_local_s3 = dma.copy.async i_shared.chunkat(p_tile, q_tile) => select(q_tile % 2, i_local0, i_local6) after i_shared;
+            f = select (#x_tile / #q, i_local_s1, i_local_s2);
           }
         }
       }
@@ -22,8 +24,9 @@ __co__ auto illegal_select(f32 [128, 128] i) {
   }
 }
 
-// CHECK: Expecting i_shared0 is the same storage type as i_local0 (shared vs. local).
-// CHECK: error: Expecting i_local6 is the same shape as i_local0 ([4, 4] vs. [4, 2]).
+// CHECK: i_shared0(shared f32 mdspan<2> [4, 2]) vs. i_shared0(local f32 mdspan<2> [4, 2]).
+// CHECK: i_local6(local f32 mdspan<2> [4, 4]) vs. i_local6(local f32 mdspan<2> [4, 2]).
+// CHECK: i_local_s2(async=>local f32 mdspan<2> [4, 2]) vs. i_local_s2(async=>local f32 mdspan<2> [1, 2]).
 // CHECK-NOT: error:
-// CHECK: Totally 2 errors have been detected.
+// CHECK: Totally 3 errors have been detected.
 

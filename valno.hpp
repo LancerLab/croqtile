@@ -439,10 +439,10 @@ class ShapeInference : public Visitor {
 
     Storage s = Storage::NONE;
     if (auto sel = dyn_cast<AST::Select>(n.init_expr)) {
-      auto sty = dyn_cast<SpannedType>(sel->GetType());
-      assert(sty);
-      assert(!n.mem);
-      s = sty->GetStorage();
+      if (auto sty = dyn_cast<SpannedType>(sel->GetType())) {
+        assert(!n.mem);
+        s = sty->GetStorage();
+      }
     }
 
     if (n.mem) s = n.mem->st;
@@ -1041,9 +1041,22 @@ class ShapeInference : public Visitor {
 
     if (cannot_proceed) return true;
 
-    cur_vn = vn.GenerateValueNumberForNode(n);
-    assert(isa<SpannedType>(n.GetType()));
-    cur_mdspan_vn = cur_vn;
+    if (isa<SpannedType>(NodeType(n))) {
+      cur_mdspan_vn = vn.GenerateValueNumberForNode(n);
+      if (n.inDMA)
+        cur_vn = cur_mdspan_vn;
+      else
+        InvalidateVN(cur_vn); // used for variable def
+    } else if (isa<FutureType>(NodeType(n))) {
+      if (auto id = AST::GetName(*n.expr_list->ValueAt(0))) {
+        auto n = SSTab().NameInScopeOrNull(*id + ".span");
+        assert(n);
+        cur_mdspan_vn = vn.GetValueNumberOfSignature(n.value());
+        InvalidateVN(cur_vn);
+      } else
+        choreo_unreachable("expect an idenfiter.");
+    } else
+      choreo_unreachable("unsupported type.");
 
     return true;
   };

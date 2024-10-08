@@ -13,6 +13,7 @@ __co__ auto select_parse(f32 [128, 128] i) {
           with idx = {p_tile, q_tile} in [1, 4] {
             i_local = dma.copy.async i_shared.chunkat(p_tile, q_tile) => select(q_tile % 4, i_local0, i_local1, i_local2, i_local3) after i_shared;
             i_local2 = dma.copy.async i_shared.chunkat(p_tile, q_tile) => select(q_tile % 2, i_local0, i_local1) after i_shared;
+            f = select(1, i_local, i_local2);
           }
         }
       }
@@ -20,13 +21,14 @@ __co__ auto select_parse(f32 [128, 128] i) {
   }
 }
 
-CHECK:        `- DMA.copy.async
-CHECK:          `- future: i_local
-CHECK:          `- from: i_shared.ChunkAt(p_tile, q_tile)
-CHECK:          `- to: select( (q_tile % 4) , i_local0, i_local1, i_local2, i_local3)
-CHECK:          `- chained from: i_shared
-CHECK:        `- DMA.copy.async
-CHECK:          `- future: i_local2
-CHECK:          `- from: i_shared.ChunkAt(p_tile, q_tile)
-CHECK:          `- to: select( (q_tile % 2) , i_local0, i_local1)
-CHECK:          `- chained from: i_shared
+// CHECK:        `- DMA.copy.async
+// CHECK:          `- future: i_local
+// CHECK:          `- from: i_shared.ChunkAt(p_tile, q_tile)
+// CHECK:          `- to: select( (q_tile % 4) , i_local0, i_local1, i_local2, i_local3)
+// CHECK:          `- chained from: i_shared
+// CHECK:        `- DMA.copy.async
+// CHECK:          `- future: i_local2
+// CHECK:          `- from: i_shared.ChunkAt(p_tile, q_tile)
+// CHECK:          `- to: select( (q_tile % 2) , i_local0, i_local1)
+// CHECK:          `- chained from: i_shared
+// CHECK:        `- Var Decl (unknown): f = select(1, i_local, i_local2)

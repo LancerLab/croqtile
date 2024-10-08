@@ -283,12 +283,35 @@ T* cast(U* n) {
     abort();
   }
 }
+
 template <typename T, typename U>
 T* cast(const ptr<U>& n) {
   if (isa<T>(n))
     return (T*)(n.get());
   else {
     std::cerr << "type cast failure for incompatibility.\n";
+    abort();
+  }
+}
+
+// for debug purpose only
+template <typename T, typename U>
+T* cast_dbg(U* n) {
+  if (isa<T>(n))
+    return (T*)n;
+  else {
+    std::cerr << "type cast failure for incompatibility: "
+              << n->TypeNameString() << ".\n";
+    abort();
+  }
+}
+template <typename T, typename U>
+T* cast_dbg(const ptr<U>& n) {
+  if (isa<T>(n))
+    return (T*)(n.get());
+  else {
+    std::cerr << "type cast failure for incompatibility: "
+              << n->TypeNameString() << ".\n";
     abort();
   }
 }
@@ -1070,7 +1093,7 @@ struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
   bool operator==(const Type& ty) const override {
     if (!isa<SpannedType>(&ty)) return false;
     auto& t = (SpannedType&)ty;
-    return t.f_type == f_type && *t.s_type == *s_type;
+    return t.f_type == f_type && *t.s_type == *s_type && t.m_type == m_type;
   }
 
   bool ApprxEqual(const Type& ty) const override {
@@ -1079,6 +1102,7 @@ struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
 
     if (!isa<SpannedType>(&ty)) return false;
     auto& t = (SpannedType&)ty;
+    // should the equivalence of storage be checked?
     return t.f_type == f_type && t.s_type->ApprxEqual(*s_type);
   }
 

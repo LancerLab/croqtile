@@ -1022,18 +1022,18 @@ struct Select : public Node, public TypeIDProvider<Select> {
   std::string future;
   ptr<Expr> select_factor = nullptr;
   int bound;
-  ptr<MultiValues> span_expr_list = nullptr;
+  ptr<MultiValues> expr_list = nullptr;
   bool inDMA = false;
 
   Select(const location& l, const ptr<Expr>& sf,
          const ptr<MultiValues>& list = nullptr)
-      : Node(l), select_factor(sf), span_expr_list(list) {}
+      : Node(l), select_factor(sf), expr_list(list) {}
 
   // TODO(wsj)
   // x = select(IntLiteral, a, b, c)
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << "select(" << STR(select_factor) << ", " << STR(span_expr_list) << ")";
+    os << "select(" << STR(select_factor) << ", " << STR(expr_list) << ")";
     (void)prefix;
   }
 
@@ -1329,6 +1329,16 @@ struct Program : public Node, public TypeIDProvider<Program> {
 
   __UDT_TYPE_INFO__
 };
+
+inline std::optional<std::string> GetName(const Node & n) {
+  if (auto id = dyn_cast<AST::Identifier>(&n))
+    return id->name;
+  else if (auto exp = dyn_cast<AST::Expr>(&n)) {
+    if (auto id = exp->GetSymbol())
+      return id->name;
+  }
+  return nullptr;
+}
 
 }  // end of namespace AST
 

@@ -464,8 +464,8 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
         if (trace_visit)
           os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
       }
-      // sometimes the parser can not decide the type. We need to figure out
-      // from the initialization expression
+      // Sometimes the parser can not decide the type. Figure it out via the
+      // initialization expression
       SetNodeType(*n.type, n.init_expr->GetType());
     }
   }
@@ -485,6 +485,11 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
   if (auto ty = dyn_cast<SpannedType>(n.type->GetType())) {
     ReportErrorWhenViolateODR(n.LOC(), n.name_str + ".span", __FILE__, __LINE__,
                               ty->GetMDSpanType());
+  } else if (auto ty = dyn_cast<FutureType>(n.type->GetType())) {
+    ReportErrorWhenViolateODR(n.LOC(), n.name_str + ".span", __FILE__, __LINE__,
+                              MakeRankedMDSpanType(ty->Dims()));
+    ReportErrorWhenViolateODR(n.LOC(), n.name_str + ".data", __FILE__, __LINE__,
+                              MakeRankedSpannedType(ty->Dims()));
   }
   return true;
 }
@@ -499,8 +504,8 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
   __TRACE_EACH_VISIT__(n)
   // SSTab().Dump();
   if (!SSTab().DeclaredInScope(n.name)) {
-    // It is a definition instead of assignment. parsing fails to distiguish
-    // them
+    // This is a definition rather than an assignment. The parser fails to make
+    // it correct
     auto sty = NodeType(*n.value);
     assert((sty && !isa<UnknownType>(sty)) &&
            "internal error: failed to find the type.");
@@ -516,8 +521,12 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
     if (auto ty = dyn_cast<SpannedType>(sty)) {
       ReportErrorWhenViolateODR(n.LOC(), n.name + ".span", __FILE__, __LINE__,
                                 MakeRankedMDSpanType(ty->Dims()));
-      if (trace_visit)
-        os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
+    }
+    if (auto ty = dyn_cast<FutureType>(sty)) {
+      ReportErrorWhenViolateODR(n.LOC(), n.name + ".span", __FILE__, __LINE__,
+                                MakeRankedMDSpanType(ty->Dims()));
+      ReportErrorWhenViolateODR(n.LOC(), n.name + ".data", __FILE__, __LINE__,
+                                MakeRankedSpannedType(ty->Dims()));
     }
     return true;
   }
@@ -956,37 +965,41 @@ bool EarlySemantics::Visit(AST::Swap& n) {
 bool EarlySemantics::Visit(AST::Select& n) {
   __TRACE_EACH_VISIT__(n)
 
+  size_t ec = error_count;
+
   // TODO(wsj) isa<IntegerType>(rty)?
-  if (!isa<BoundedIntegerType>(NodeType(*n.select_factor))) {
-    Error(n.LOC(), "expecting `" + PSTR(n.select_factor) +
-                       "` be a bounded integer type.");
+  if (!isa<BoundedIntegerType>(NodeType(*n.select_factor)) &&
+      !isa<IntegerType>(NodeType(*n.select_factor))) {
+    Error(n.LOC(), "expect `" + PSTR(n.select_factor) +
+                       "` to be a (bounded) integer type.");
     error_count++;
   }
 
   // TODO(wsj) assert bound <= span_val_list.count ?
 
   // check value types in val_list are the same
-  assert(n.span_expr_list->Count() > 0);
-  const auto& v0 = n.span_expr_list->AllValues()[0];
+  assert(n.expr_list->Count() > 0);
+  const auto& v0 = n.expr_list->AllValues()[0];
   auto v0ty = NodeType(*v0);
-  assert(isa<SpannedType>(v0ty) &&
-         "For now, select only support spanned type variables!");
-  for (auto& v : n.span_expr_list->AllValues()) {
-    assert(isa<SpannedType>(NodeType(*v)));
-    // TODO: need shape checking at typecheck
-    if (auto sty = dyn_cast<SpannedType>(NodeType(*v))) {
-      if (!sty->ApprxEqual(*v0ty)) {
-        Error(v->LOC(), "expecting `" + PSTR(v) + "` is the same type as `" +
-                            PSTR(v0) + "`.");
-        error_count++;
-      }
-    } else {
-      Error(v->LOC(), "expecting `" + PSTR(v) + "` to be spanned type.");
+
+  if (!isa<FutureType>(v0ty) && !isa<SpannedType>(v0ty)) {
+    Error(v0->LOC(),
+          "expect `" + PSTR(v0ty) + "` to be a future/spanned type.");
+    error_count++;
+    return ec == error_count;
+  }
+
+  for (auto& v : n.expr_list->AllValues()) {
+    auto nty = NodeType(*v);
+    if (!nty->ApprxEqual(*v0ty)) {
+      Error(v->LOC(), "expect `" + PSTR(v) + "`(" + PSTR(nty) +
+                          ") to be the same type as `" + PSTR(v0) + "`(" +
+                          PSTR(v0ty) + ").");
       error_count++;
     }
   }
 
-  SetNodeType(n, NodeType(*v0));
+  SetNodeType(n, v0ty);
 
   return true;
 }

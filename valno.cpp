@@ -610,7 +610,7 @@ std::string ValueNumbering::GenerateNodeSignature(AST::Node& node,
     return "index_" + GenerateNodeSignature(*n->value);
   } else if (auto* s = dyn_cast<AST::Select>(&node)) {
     // only care about span
-    auto vn = GetValueNumberForNode(*s->span_expr_list->ValueAt(0));
+    auto vn = GetValueNumberForNode(*s->expr_list->ValueAt(0));
     return GetSignatureFromValueNumber(vn);
   }
 

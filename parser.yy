@@ -902,6 +902,9 @@ select_expr
     : SELECT LPAREN s_expr COMMA span_expr_list RPAREN {
         $$ = AST::Make<AST::Select>(@1, $3, $5);
       }
+    | SELECT LPAREN s_expr COMMA id_list RPAREN {
+        $$ = AST::Make<AST::Select>(@1, $3, $5);
+      }
 
 iv_list
     : iv_list COMMA NUM {

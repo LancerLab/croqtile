@@ -24,6 +24,9 @@ __co__ void foo() {
         foreach m, n, k {
           d1 = dma.copy.async a.chunkat(m, n) => select(k % 2, x, y);
 // INFER: Future:    ::foo::paraby_0::paraby_1::within_1::foreach_3::d1, Type: async=>local f32 mdspan<2> [16, 32]
+          d2 = dma.copy.async a.chunkat(m, n) => local;
+          f = select(1, d1, d2);
+// INFER: Future:    ::foo::paraby_0::paraby_1::within_1::foreach_3::f, Type: async=>local f32 mdspan<2> [16, 32]
         }
       }
     }

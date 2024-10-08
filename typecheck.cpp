@@ -195,33 +195,29 @@ bool TypeChecker::Visit(AST::Swap& n) {
 
 bool TypeChecker::Visit(AST::Select& n) {
   __TRACE_EACH_VISIT__(n)
-  auto expr_list = n.span_expr_list;
+  size_t ec = error_count;
+  auto expr_list = n.expr_list;
   auto expr0 = expr_list->ValueAt(0);
-  auto sty0 = dyn_cast<SpannedType>(expr0->GetType());
-  for (auto expr : expr_list->AllValues()) {
-    auto ty = expr->GetType();
-    if (sty0) {
-      auto sty = dyn_cast<SpannedType>(ty);
-      assert(sty);
-      if (!(sty->GetShape() == sty0->GetShape())) {
-        ++error_count;
-        Error(expr->LOC(), "Expecting " + PSTR(expr) +
-                               " is the same shape as " + PSTR(expr0) + " (" +
-                               STR(sty->GetShape()) + " vs. " +
-                               STR(sty0->GetShape()) + ").");
-      }
-      if (sty->GetStorage() != sty0->GetStorage()) {
-        ++error_count;
-        Error(expr->LOC(), "Expecting " + PSTR(expr) +
-                               " is the same storage type as " + PSTR(expr0) +
-                               " (" + STR(sty->GetStorage()) + " vs. " +
-                               STR(sty0->GetStorage()) + ").");
-      }
-    }
+  if (!isa<FutureType>(NodeType(*expr0)) &&
+      !isa<SpannedType>(NodeType(*expr0))) {
+    ++error_count;
+    Error(expr0->LOC(),
+          "Expect " + PSTR(expr0) + " to be a future/spanned type.");
+    return false;
   }
 
-  return true;
+  for (auto expr : expr_list->AllValues()) {
+    if (*NodeType(*expr) == *NodeType(*expr0)) continue;
+
+    ++error_count;
+    Error(expr->LOC(), "Type mismatch inside SELECT: " + PSTR(expr) + "(" +
+                           TYPE_STR(expr) + ") vs. " + PSTR(expr) + "(" +
+                           TYPE_STR(expr0) + ").");
+  }
+
+  return ec == error_count;
 }
+
 bool TypeChecker::Visit(AST::Return& n) {
   __TRACE_EACH_VISIT__(n)
   return true;

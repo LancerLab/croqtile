@@ -207,7 +207,7 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
   __TRACE_EACH_VISIT__(node)
   if (auto s = dyn_cast<AST::Select>(node.init_expr)) {
     assert(!s->inDMA);
-    size_t val_count = s->span_expr_list->Count();
+    size_t val_count = s->expr_list->Count();
     assert(val_count >= 2);
     fs << this->indent << "auto " << node.name_str << " = ";
     for (size_t i = 0; i < val_count - 1; i++) {
@@ -221,10 +221,10 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
         }
       }
       fs << "select_(" << select_factor_str << "== " << i << ", "
-         << PSTR(s->span_expr_list->ValueAt(i))
+         << PSTR(s->expr_list->ValueAt(i))
          << (i < val_count - 1 ? ", " : "");
     }
-    fs << PSTR(s->span_expr_list->AllValues().back())
+    fs << PSTR(s->expr_list->AllValues().back())
        << std::string(val_count - 1, ')') << ";\n";
     return true;
   }
@@ -393,6 +393,11 @@ bool FactorCodeGen::Visit(AST::SpanAs &) { return true; }
 // CLEAN
 bool FactorCodeGen::Visit(AST::DMA &d) {
   __TRACE_EACH_VISIT__(d)
+
+  // do not emit code for the placeholder
+  if (isa<PlaceHolderType>(NodeType(d)))
+    return true;
+
   // handle .to  in AST::Memory
   assert((isa<AST::ChunkAt>(d.from)) && "Unexpected type for DMA's source.");
   assert((isa<AST::Memory>(d.to) || isa<AST::ChunkAt>(d.to) ||
@@ -699,7 +704,7 @@ bool FactorCodeGen::Visit(AST::Select &c) {
   if (!c.inDMA) // z = select(...);
     return true;
   // z = dma.copy xxx => select(...)
-  size_t val_count = c.span_expr_list->Count();
+  size_t val_count = c.expr_list->Count();
   // if val_count == 1, pingpong is meaningless? ( TODO: maybe assert when
   // earlysema)
   assert(val_count >= 2);
@@ -715,9 +720,9 @@ bool FactorCodeGen::Visit(AST::Select &c) {
       }
     }
     fs << "select_(" << select_factor_str << "== " << i << ", "
-       << PSTR(c.span_expr_list->ValueAt(i)) << (i < val_count - 1 ? ", " : "");
+       << PSTR(c.expr_list->ValueAt(i)) << (i < val_count - 1 ? ", " : "");
   }
-  fs << PSTR(c.span_expr_list->AllValues().back())
+  fs << PSTR(c.expr_list->AllValues().back())
      << std::string(val_count - 1, ')') << ";\n";
   return true;
 }

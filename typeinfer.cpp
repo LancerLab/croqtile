@@ -235,12 +235,22 @@ bool TypeInference::Visit(AST::NamedVariableDecl &n) {
 
   AssignSymbolWithType(n.LOC(), n.name_str, n.GetType());
 
-  if (AST::typeof<SpannedType>(&n))
+  if (AST::typeof<SpannedType>(&n)) {
     AssignSymbolWithType(n.LOC(), n.name_str + ".span",
                          cast<SpannedType>(n.GetType())->GetMDSpanType());
+  }
+
+  if (AST::typeof<FutureType>(&n)) {
+    AssignSymbolWithType(n.LOC(), n.name_str + ".data",
+                         cast<FutureType>(n.GetType())->GetSpannedType());
+    AssignSymbolWithType(
+        n.LOC(), n.name_str + ".span",
+        cast<FutureType>(n.GetType())->GetSpannedType()->GetMDSpanType());
+  }
 
   if (Dump) {
-    os << "Symbol:    " << SSTab().InScopeName(n.name_str)
+    os << ((AST::typeof<FutureType>(&n)) ? "Future" : "Symbol");
+    os << ":    " << SSTab().InScopeName(n.name_str)
        << ", Type: " << AST::TYPE_STR(n);
     os << "\n";
   }
@@ -311,6 +321,12 @@ bool TypeInference::Visit(AST::Assignment &n) {
   auto ty = NodeType(*n.value);
   AssignSymbolWithType(n.LOC(), n.name, ty);
   n.SetType(ty);
+
+  if (auto fty = dyn_cast<FutureType>(ty)) {
+    AssignSymbolWithType(n.LOC(), n.name + ".data", fty->GetSpannedType());
+    AssignSymbolWithType(n.LOC(), n.name + ".span",
+                         fty->GetSpannedType()->GetMDSpanType());
+  }
 
   if (Dump) {
     os << "Symbol:    " << SSTab().InScopeName(n.name) << ", Type: " << PSTR(ty)
@@ -576,8 +592,10 @@ bool TypeInference::Visit(AST::DMA &n) {
 
   if (n.operation == ".none") {
     n.SetType(MakePlaceHolderFutureType());
-    AssignSymbolWithType(n.LOC(), n.future + ".span", MakePlaceHolderMDSpanType());
-    AssignSymbolWithType(n.LOC(), n.future + ".data", MakePlaceHolderSpannedType());
+    AssignSymbolWithType(n.LOC(), n.future + ".span",
+                         MakePlaceHolderMDSpanType());
+    AssignSymbolWithType(n.LOC(), n.future + ".data",
+                         MakePlaceHolderSpannedType());
     AssignSymbolWithType(n.LOC(), n.future, MakePlaceHolderFutureType());
     return true;
   }
@@ -713,7 +731,13 @@ bool TypeInference::Visit(AST::Swap &n) {
 
 bool TypeInference::Visit(AST::Select &n) {
   __TRACE_EACH_VISIT__(n)
-  auto &val = n.span_expr_list->AllValues()[0];
+  auto &val = n.expr_list->AllValues()[0];
+  if (isa<FutureType>(NodeType(*val))) {
+    n.SetType(val->GetType());
+    cur_type = n.GetType();
+    return true;
+  }
+
   auto sty = dyn_cast<SpannedType>(val->GetType());
   assert(sty);
   auto fmty = sty->ElementType();
@@ -762,9 +786,16 @@ bool TypeInference::Visit(AST::Return &n) {
       // already has sufficient info, make a comparison to avoid inconsistent
       // return type
       if (rty->HasSufficientInfo() && !rty->RuntimeShaped()) {
-        if (*rty != *tty) {
+        if (*rty->GetMDSpanType() != *tty->GetMDSpanType() ||
+            rty->ElementType() != tty->ElementType()) {
           Error(n.LOC(),
                 "return type inconsistant: " + STR(*rty) + " vs. " + STR(*tty));
+          error_count++;
+          return false;
+        } else if (tty->m_type != Storage::DEFAULT &&
+                   tty->m_type != Storage::GLOBAL) {
+          Error(n.LOC(),
+                "can not return type with non-default/global storage.");
           error_count++;
           return false;
         }
