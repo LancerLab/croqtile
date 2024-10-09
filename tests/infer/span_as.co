@@ -13,9 +13,9 @@ __co__ auto span_as(s32 [32, 18, 9] a) {
   }
 }
 
-// CHECK: Hoisted span_as:
+// CHECK: Hoisted:
 // CHECK: `- Assign: anon_0 = a.span_as[ 16 9 36 ]
-// CHECK: Hoisted span_as:
+// CHECK: Hoisted:
 // CHECK: `- Assign: anon_1 = b.span_as[ 144 36 ]
 
 // CHKINF: Parameter: ::span_as::a, Type: s32 mdspan<3> [32, 18, 9]

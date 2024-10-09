@@ -5,12 +5,14 @@
 // in later visiting passes.
 
 #include <iostream>
+#include <tuple>
 
+#include "symtab.hpp"
 #include "types.hpp"
 #include "visitor.hpp"
 
-#define __TRACE_NORM_VISIT__(n)       \
-  if (trace_visit) {                  \
+#define __TRACE_NORM_VISIT__(n)                         \
+  if (trace_visit) {                                    \
     os << n.TypeNameString() << ": " << STR(n) << "\n"; \
   }
 
@@ -37,7 +39,7 @@ struct Normalizer : public Visitor {
   // for node hoisting
   std::stack<AST::MultiNodes *> multi_nodes;
   int cur_dma_index = -1;
-  std::vector<std::pair<int, ptr<AST::Node>>> mnodes_insertions;
+  std::vector<std::tuple<int, ptr<AST::Node>, std::string>> mnodes_insertions;
 
   std::string GetInternalValueString() { return "$" + std::to_string(count++); }
 
@@ -107,12 +109,13 @@ struct Normalizer : public Visitor {
 
     // insert the node at the given place
     for (auto item : mnodes_insertions) {
-      auto sa = cast<AST::SpanAs>(item.second);
-      auto assign =
-          AST::Make<AST::Assignment>(sa->LOC(), sa->nid->name, item.second);
-      if (trace)
-        os << "Hoisted span_as: " << PSTR(assign) << "\n";
-      n.values.insert(n.values.begin() + item.first, assign);
+      auto &index = std::get<0>(item);
+      auto &pnode = std::get<1>(item);
+      auto &name = std::get<2>(item);
+
+      auto assign = AST::Make<AST::Assignment>(pnode->LOC(), name, pnode);
+      n.values.insert(n.values.begin() + index, assign);
+      if (trace) os << "Hoisted: " << PSTR(assign) << "\n";
     }
 
     multi_nodes.pop();
@@ -274,8 +277,36 @@ struct Normalizer : public Visitor {
       assert(cur_dma_index != -1);
       // hoist the span_as to multinodes
       int index = cur_dma_index + mnodes_insertions.size();
-      mnodes_insertions.emplace_back(std::make_pair(index, n.sa));
+      mnodes_insertions.emplace_back(
+          std::make_tuple(index, n.sa, n.sa->nid->name));
       n.sa.reset();
+    }
+
+    // hoist any arith inside of chunkat positions
+    if (n.positions) {
+      std::vector<std::pair<int, ptr<AST::Node>>> repls;
+      int i = -1;
+      for (auto &v : n.positions->AllValues()) {
+        ++i;
+        auto expr = cast<AST::Expr>(v);
+        if (expr->GetSymbol()) {  // replace expr reference to be id
+          repls.emplace_back(i, expr->GetReference());
+          continue;
+        }
+        int index = cur_dma_index + mnodes_insertions.size();
+        auto nname = SymbolTable::GetAnonName();
+        mnodes_insertions.emplace_back(std::make_tuple(index, expr, nname));
+        repls.emplace_back(i, AST::Make<AST::Identifier>(v->LOC(), nname));
+      }
+      for (auto &repl : repls) {
+        if (trace)
+          os << "replace " << PSTR(n.positions->ValueAt(repl.first))
+             << " with ";
+
+        n.positions->values[repl.first] = repl.second;
+
+        if (trace) os << PSTR(n.positions->ValueAt(repl.first)) << ".\n";
+      }
     }
     return true;
   }

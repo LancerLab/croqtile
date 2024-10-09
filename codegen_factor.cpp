@@ -258,7 +258,7 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
       fs << indent << "memset_(" << sym << "_init, " << sym << ", 0);\n";
     }
   } else {
-    choreo_unreachable("non-spanned is not yet supported.");
+    choreo_unreachable("non-spanned (" + PSTR(nty) + ") is not yet supported.");
     // TODO(albert): handle anon case
     fs << this->indent;
     fs << "auto " << node.name_str << " = alloc_(?";

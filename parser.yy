@@ -145,7 +145,7 @@ void choreo_info(const char *message) {
 %token <std::string> TRUE FALSE
 
 // non-terminals
-%nterm <std::string> dma_operation
+%nterm <std::string> dma_operation data_id
 %nterm <ptr<DMAConfig>> dma_config
 %nterm <bool> sync_type
 %nterm <int> int_or_null
@@ -683,8 +683,6 @@ s_expr
       }
     ;
 
-    ;
-
 span_expr
     : span_expr PLUS  direct_ituple_val { $$ = AST::Make<AST::Expr>(@1, "+", $1, $3); }
     | span_expr MINUS direct_ituple_val { $$ = AST::Make<AST::Expr>(@1, "-", $1, $3); }
@@ -693,6 +691,7 @@ span_expr
     | span_expr PECET direct_ituple_val { $$ = AST::Make<AST::Expr>(@1, "%", $1, $3); }
     | span_val { $$ = AST::Make<AST::Expr>(@1, $1); }
     ;
+
 
 span_expr_list
     : span_expr_list COMMA span_expr {
@@ -874,6 +873,11 @@ chunkat_or_storage_or_select
     | select_expr  { $$ = $1; }
     ;
 
+data_id
+    : IDENTIFIER { $$ = $1; }
+    | IDENTIFIER FNDATA { $$ = $1; /* ignore '.data' */ }
+    ;
+
 span_as
     : IDENTIFIER FNSPANAS LPAREN LBRAKT value_list RBRAKT RPAREN {
         $$ = AST::Make<AST::SpanAs>(@1, AST::Make<AST::Identifier>(@1,$1), $5);
@@ -881,21 +885,16 @@ span_as
     ;
 
 chunkat_expr
-    : IDENTIFIER CHUNKAT LPAREN id_list RPAREN {
+    : data_id CHUNKAT LPAREN value_list RPAREN {
+        $4->SetDelimiter(", ");
         $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $4);
       }
-    | IDENTIFIER FNDATA CHUNKAT LPAREN id_list RPAREN {
-        $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $5);
-      }
-    | span_as CHUNKAT LPAREN id_list RPAREN {
+    | span_as CHUNKAT LPAREN value_list RPAREN {
         // note: normalize will hoist span_as
+        $4->SetDelimiter(", ");
         $$ = AST::Make<AST::ChunkAt>($1->LOC(), $1, $4);
       }
-    /*| IDENTIFIER CHUNKAT LPAREN value_list RPAREN {
-        $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $4);
-      }*/
-    | IDENTIFIER { $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1)); }
-    | IDENTIFIER FNDATA { $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1)); }
+    | data_id { $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1)); }
     ;
 
 select_expr
