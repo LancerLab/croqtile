@@ -172,6 +172,7 @@ int main(int argc, char* argv[]) {
       Choreo::Factor::FactorCodeGen codegen(
           std::cout, sc.SymTab(), mem_usage_checker.GetRtMemUsageInfo(),
           cross_compile);
+      if (prt_pass) std::cout << "|- " << codegen.GetName() << "\n";
       root.accept(codegen);
       break;
     }
