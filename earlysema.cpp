@@ -200,6 +200,11 @@ bool EarlySemantics::Visit(AST::Expr& n) {
                            " vs. " + PSTR(rty) + ").");
         return false;
       }
+      if (isa<BoundedIntegerType>(lty) && isa<BoundedIntegerType>(rty)) {
+        SetNodeType(n, lty);
+      } else {
+        // TODO
+      }
     } else if ((isa<BoundedIntegerType>(lty) && isa<IntegerType>(rty)) ||
                (isa<BoundedIntegerType>(rty) && isa<IntegerType>(lty))) {
       // this is promissing, simply allow it
