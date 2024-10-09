@@ -1,0 +1,99 @@
+// RUN: choreo %s | FileCheck --match-full-lines %s
+
+__co__ s32 [N, M, K] ele_add(s32 [N, M, K] lhs, s32 [N, M, K] rhs) {
+  s32[lhs.span] output;
+
+  parallel p by 1 {
+    with index = {q, x, y, xx} in [N, K, M, N*K] / {4, 8, 1, 16} {
+      foreach q {
+        foreach x {
+          foreach y { 
+            lhs_load = dma.copy.async lhs.span_as([N, K, M]).chunkat(q, x, y) => local;
+            rhs_load = dma.copy.async rhs.span_as([N, K, M]).chunkat(q, x, y) => local;
+            wait lhs_load, rhs_load;
+
+            local s32[lhs_load.span] l1_out;
+            
+            call kernel(lhs_load.data, rhs_load.data, l1_out, |lhs_load.span|);
+
+            out_store = dma.copy.async l1_out => output.span_as([N, K, M]).chunkat(q, x, y);
+            wait out_store;
+          }
+        }
+      }
+      foreach xx, y {
+        lhs_load2 = dma.copy lhs.span_as([N*K, M]).chunkat(xx, y) => local;
+      }
+    }
+  }
+
+  return output;
+}
+
+// CHECK: void __choreo_ele_add() {
+// CHECK:   auto lhs_type = DRAMType(IntType(32), {-1, -1, -1});
+// CHECK:   auto rhs_type = DRAMType(IntType(32), {-1, -1, -1});
+// CHECK:   auto output_type = DRAMType(IntType(32), {-1, -1, -1});
+// CHECK:   // choreo-factor dataflow function
+// CHECK:   D(host_func_)("__choreo_ele_add", {lhs_type, rhs_type, StreamType()}, [&](auto args) {
+// CHECK:     auto output_rt_dim0 = dim_(args[0], 0);
+// CHECK:     auto output_rt_dim1 = dim_(args[0], 1);
+// CHECK:     auto output_rt_dim2 = dim_(args[0], 2);
+// CHECK:     auto __choreo_nd_ref_K = dim_(args[0], 2);
+// CHECK:     auto __choreo_nd_ref_M = dim_(args[0], 1);
+// CHECK:     auto __choreo_nd_ref_N = dim_(args[0], 0);
+// CHECK:     auto output = alloc_({output_rt_dim0, output_rt_dim1, output_rt_dim2}, output_type);
+// CHECK:     Dim3 grid_dim(1);
+// CHECK:     Dim3 block_dim(1);
+// CHECK:     auto ts = launch_kernel_("__choreo_ele_add_parallel", grid_dim, block_dim, args.back(), {args[0], args[1]}, {output});
+// CHECK:     return std::vector<Value>{output};
+// CHECK:   }, true); // end of choreo-factor dataflow program
+// CHECK:   D(func_)("__choreo_ele_add_parallel", {lhs_type, rhs_type}, {output_type}, [&](auto args, auto results) {
+// CHECK:     auto & output = results[0];
+// CHECK:     auto thread_id = thread_id_();
+// CHECK:     auto block_id = block_id_();
+// CHECK:     auto __choreo_nd_ref_K = dim_(args[0], 2);
+// CHECK:     auto __choreo_nd_ref_M = dim_(args[0], 1);
+// CHECK:     auto __choreo_nd_ref_N = dim_(args[0], 0);
+// CHECK:     auto lhs_load_buffer = alloc_(L1Type(IntType(32),{4, 8, 1}));
+// CHECK:     auto lhs_load = alloc_dma_(SDMAType());
+// CHECK:     auto rhs_load_buffer = alloc_(L1Type(IntType(32),{4, 8, 1}));
+// CHECK:     auto rhs_load = alloc_dma_(SDMAType());
+// CHECK:     auto l1_out = alloc_(L1Type(IntType(32),{4, 8, 1}));
+// CHECK:     auto out_store = alloc_dma_(SDMAType());
+// CHECK:     auto lhs_load2_buffer = alloc_(L1Type(IntType(32),{16, 1}));
+// CHECK:     auto lhs_load2 = alloc_dma_(SDMAType());
+// CHECK:     var_ q(IntType(32));
+// CHECK:     q = 0;
+// CHECK:     var_ x(IntType(32));
+// CHECK:     x = 0;
+// CHECK:     var_ y(IntType(32));
+// CHECK:     y = 0;
+// CHECK:     var_ xx(IntType(32));
+// CHECK:     xx = 0;
+// CHECK:     for_(q, dim_(args[0], 0)/4-0, 1, [&](auto iv_q) {
+// CHECK:       for_(x, dim_(args[0], 2)/8-0, 1, [&](auto iv_x) {
+// CHECK:         for_(y, dim_(args[0], 1)/1-0, 1, [&](auto iv_y) {
+// CHECK:           auto anon_0 = bitcast_(DRAMType(IntType(32), {-1, -1, -1}), args[0], {__choreo_nd_ref_N, __choreo_nd_ref_K, __choreo_nd_ref_M});
+// CHECK:           async_load_(lhs_load, anon_0, lhs_load_buffer, {Value(4)*iv_q,Value(8)*iv_x,Value(1)*iv_y});
+// CHECK:           auto anon_1 = bitcast_(DRAMType(IntType(32), {-1, -1, -1}), args[1], {__choreo_nd_ref_N, __choreo_nd_ref_K, __choreo_nd_ref_M});
+// CHECK:           async_load_(rhs_load, anon_1, rhs_load_buffer, {Value(4)*iv_q,Value(8)*iv_x,Value(1)*iv_y});
+// CHECK:           wait_dma_(lhs_load);
+// CHECK:           wait_dma_(rhs_load);
+// CHECK:           auto l1_out_init = alloc_dma_(SDMAType());
+// CHECK:           memset_(l1_out_init, l1_out, 0);
+// CHECK:           call_("kernel", {lhs_load_buffer.addr_(),rhs_load_buffer.addr_(),l1_out.addr_(),32});
+// CHECK:           auto anon_2 = bitcast_(DRAMType(IntType(32), {-1, -1, -1}), args[2], {__choreo_nd_ref_N, __choreo_nd_ref_K, __choreo_nd_ref_M});
+// CHECK:           async_store_(out_store, l1_out, anon_2, {Value(4)*iv_q,Value(8)*iv_x,Value(1)*iv_y});
+// CHECK:           wait_dma_(out_store);
+// CHECK:         }); // end of choreo-foreach block.
+// CHECK:       }); // end of choreo-foreach block.
+// CHECK:     }); // end of choreo-foreach block.
+// CHECK:     for_(xx, dim_(args[0], 0)*dim_(args[0], 2)/16-0, 1, [&](auto iv_xx) {
+// CHECK:       for_(y, dim_(args[0], 1)/1-0, 1, [&](auto iv_y) {
+// CHECK:         auto anon_3 = bitcast_(DRAMType(IntType(32), {-1, -1}), args[0], { (__choreo_nd_ref_N * __choreo_nd_ref_K) , __choreo_nd_ref_M});
+// CHECK:         async_load_(lhs_load2, anon_3, lhs_load2_buffer, {Value(16)*iv_xx,Value(1)*iv_y});
+// CHECK:         wait_dma_(lhs_load2);
+// CHECK:       }); // end of choreo-foreach block.
+// CHECK:     }); // end of choreo-foreach block.
+// CHECK:   }); // end of choreo-factor kernel function

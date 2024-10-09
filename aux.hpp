@@ -9,6 +9,7 @@
 #include <optional>
 #include <sstream>
 #include <vector>
+#include <regex>
 
 #if 0
 [[noreturn]] inline void choreo_unreachable_impl(
@@ -114,11 +115,26 @@ inline std::string RemoveSuffix(const std::string& str,
 }
 
 inline std::string Ordinal(int n) {
-  assert(n >= 0);
-  static const char *suffixes[] = {"th", "st", "nd", "rd"};
+  assert(n > 0);
+  static const char *suffixes[] = {"th", "st", "nd", "rd", "th"};
   int v = n % 100;
   int index = (v >= 11 && v <= 13) ? 0 : std::min(v % 10, 4);
   return std::to_string(n) + suffixes[index];
+}
+
+inline std::string RegexReplaceAll(const std::string& input,
+                                   const std::string& pattern,
+                                   const std::string& replacement) {
+  std::regex regex_pattern(pattern);
+  return std::regex_replace(input, regex_pattern, replacement);
+}
+
+inline std::string SearchPattern(const std::string& input,
+                                 const std::string& pattern) {
+  std::regex re(pattern);
+  std::smatch match;
+  if (std::regex_search(input, match, re)) return match.str();
+  return ""; // or throw an exception if no match is found
 }
 
 #define TRACE(X)                                                               \
