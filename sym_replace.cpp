@@ -126,7 +126,7 @@ void SymReplace::InitializeNode(ptr<AST::Node> n) {
       auto id = dyn_cast<AST::Identifier>(r);
       assert(id);
       InsertNdSnSymMap(r, id->name);
-    } else if (e->op == "dimof") {
+    } else if (e->op == "dimof" || e->op == "getith") {
       // TODO(wsj): corresponding to testcase foo5::y3
       ptr<AST::Node>& dim = r;
       auto ii = dyn_cast<AST::IntIndex>(dim);

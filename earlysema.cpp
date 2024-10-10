@@ -140,7 +140,13 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       error_count++;
       return false;
     }
-    SetNodeType(n, MakeIntegerType());
+    if (isa<BoundedIntegerType>(lty)) {
+      // disambiguite subscription into bounded ituple and getith of bounded integer
+      n.op = "getith";
+      cast<AST::IntIndex>(n.GetR())->UseBracket();
+      SetNodeType(n, lty);
+    } else
+      SetNodeType(n, MakeIntegerType());
   } else if (n.op == "ubound") {
     auto ty = NodeType(*n.GetR());
     if (!IsBoundedType(ty)) {

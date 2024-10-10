@@ -1,0 +1,34 @@
+// RUN: choreo -e %s | FileCheck %s
+
+__co__ int getith(int a, f32 [3, 4] input) {
+  ndims : [3, a];
+  int sum = 0;
+  parallel p by 6 { 
+    with index = {x, y} in ndims {
+      sum = sum + index(0);
+      dma.copy input.chunkat(x(-1), y) => local;
+      sum = sum + y(-2);
+      sum = sum + index(1)(-2);
+    }
+  }
+}
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: getith
+// CHECK:  `- Return type: int
+// CHECK:  `- Parameters
+// CHECK:    `-  type: int, symbol: a
+// CHECK:    `-  type: f32 [ 3 4 ], symbol: input
+// CHECK:  `- Type Decl: ndims - [ 3 a ]
+// CHECK:  `- Var Decl (int): sum = 0
+// CHECK:  `- Parallelization:  index symbol: p, bound [0, 6)
+// CHECK:   `- With Block:
+// CHECK:     (within constraints)
+// CHECK:     `- index = {x, y} in ndims
+// CHECK:     (with statements)
+// CHECK:     `- Assign: sum =  (sum + index(0))
+// CHECK:     `- DMA.copy
+// CHECK:       `- from: input.ChunkAt(x(-1), y)
+// CHECK:       `- to: local
+// CHECK:     `- Assign: sum =  (sum + y(-2))
+// CHECK:     `- Assign: sum =  (sum + index(1)(-2))

@@ -119,10 +119,9 @@ struct MultiNodes : public Node, public TypeIDProvider<MultiNodes> {
   std::vector<ptr<Node>> AllSubs() { return values; }
 
   // retrieve the index if the element is inside the MultiNodes
-  int GetIndex(Node *n) const {
+  int GetIndex(Node* n) const {
     for (size_t i = 0; i < values.size(); ++i) {
-      if (values[i].get() == n)
-        return i;
+      if (values[i].get() == n) return i;
     }
     return -1;
   }
@@ -349,7 +348,7 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
 
     assert(op.size() > 0 && "must have an operand.");
 
-    if (op == "dimof") {
+    if (op == "dimof" || op == "getith") {
       value_l->Print(os, prefix);
       value_r->Print(os);
       return;
@@ -484,8 +483,7 @@ struct SpanAs : public Node, public TypeIDProvider<SpanAs> {
   }
 
   // allow copy construction
-  explicit SpanAs(const SpanAs & sa)
-      : SpanAs(sa.LOC(), sa.id, sa.nid, sa.list) {
+  explicit SpanAs(const SpanAs& sa) : SpanAs(sa.LOC(), sa.id, sa.nid, sa.list) {
     assert(list && "Unexpected: span list is not provided");
   }
 
@@ -611,13 +609,14 @@ struct IntIndex : public Node, public TypeIDProvider<IntIndex> {
   explicit IntIndex(const location& l, const ptr<Node>& v)
       : Node(l), value(v) {}
 
+  char lb = '(';
+  char rb = ')';
+
   // TODO(wsj): loc?
   explicit IntIndex(const IntIndex& ii) : Node(ii.LOC()), value(ii.value) {}
-
+  void UseBracket() { lb = '['; rb = ']'; }
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << prefix << "(";
-    value->Print(os);
-    os << ")";
+    os << prefix << lb << STR(value) << rb;
   }
 
   void accept(Visitor&) override;
@@ -1095,9 +1094,10 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
 
   // The dummy dma
   explicit DMA(const location& l, const std::string& f)
-      : Node(l, MakePlaceHolderFutureType()), operation(".none"),
-        future(f), async(true) {
-  }
+      : Node(l, MakePlaceHolderFutureType()),
+        operation(".none"),
+        future(f),
+        async(true) {}
 
   std::string FromSymbol() const { return cast<ChunkAt>(from)->RefSymbol(); }
 
@@ -1110,8 +1110,8 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     if (operation == ".none") {
-       os << "\n" << prefix << "`- DMA" << operation;
-       return;
+      os << "\n" << prefix << "`- DMA" << operation;
+      return;
     }
 
     os << "\n" << prefix << "`- DMA" << operation << ((async) ? ".async" : "");
@@ -1330,12 +1330,11 @@ struct Program : public Node, public TypeIDProvider<Program> {
   __UDT_TYPE_INFO__
 };
 
-inline std::optional<std::string> GetName(const Node & n) {
+inline std::optional<std::string> GetName(const Node& n) {
   if (auto id = dyn_cast<AST::Identifier>(&n))
     return id->name;
   else if (auto exp = dyn_cast<AST::Expr>(&n)) {
-    if (auto id = exp->GetSymbol())
-      return id->name;
+    if (auto id = exp->GetSymbol()) return id->name;
   }
   return nullptr;
 }

@@ -132,6 +132,7 @@ void choreo_info(const char *message) {
 %token END 0 "end of file"
 %token <char> CHAR
 %token <int> NUM
+%token <double> FLOAT
 %token <std::string> HOST_CODE KERNEL_CODE
 %token <std::string> IDENTIFIER ATTR_CO
 // type related
@@ -148,15 +149,15 @@ void choreo_info(const char *message) {
 %nterm <std::string> dma_operation data_id
 %nterm <ptr<DMAConfig>> dma_config
 %nterm <bool> sync_type
-%nterm <int> int_or_null
+%nterm <int> index index_or_none
 %nterm <Choreo::Storage> storage
 %nterm <Choreo::BaseType> fundamental_type
 %nterm <AST::ptr<AST::CppSourceCode>> pass_by host_code
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::SpanAs>> span_as
-%nterm <AST::ptr<AST::Node>> foreach_block general_val simple_int span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt swap_stmt index_or_value range_expr if_else_block optional_scalar_init param_mdspan_val chunkat_or_storage_or_select
+%nterm <AST::ptr<AST::Node>> foreach_block general_val general_index span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt swap_stmt expr_or_qes range_expr if_else_block optional_scalar_init param_mdspan_val chunkat_or_storage_or_select
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause else_block multi_decls named_spanned_decl
-%nterm <AST::ptr<AST::MultiValues>> index_value_list value_list param_mdspan_list range_exprs iv_list id_list with_matchers passables span_expr_list
+%nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list param_mdspan_list range_exprs iv_list id_list with_matchers passables span_expr_list
 %nterm <AST::ptr<AST::Expr>> s_expr span_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
@@ -166,7 +167,6 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::NamedTypeDecl>> named_mdspan_decl
 %nterm <AST::ptr<AST::NamedVariableDecl>> named_ituple_decl named_scalar_decl
 %nterm <AST::ptr<AST::IntTuple>> unnamed_ituple_decl sugar_unnamed_ituple_decl sugarless_unnamed_ituple_decl
-%nterm <AST::ptr<AST::IntIndex>> s_index
 %nterm <AST::ptr<AST::WithBlock>> within_block
 %nterm <AST::ptr<AST::WithIn>> within
 %nterm <AST::ptr<AST::WhereBind>> where_bind
@@ -316,8 +316,8 @@ general_val
     | span_as { $$ = $1; }
     ;
 
-simple_int
-    : NUM { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
+general_index
+    : index { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
     | IDENTIFIER {
         if (!symtab.Exists($1))
           Parser::error(@1,
@@ -329,7 +329,7 @@ simple_int
                             + ") of a integer type.");
 
         $$ = AST::Make<AST::Identifier>(@1, $1);
-    	}
+      }
     ;
 
 bool_literal
@@ -469,23 +469,17 @@ named_spanned_decl
       }
     ;
 
-s_index
-    : LPAREN simple_int RPAREN {
-        $$ = AST::Make<AST::IntIndex>(@2, $2);
-      }
-    ;
-
-index_or_value
+expr_or_qes
     : s_expr      { $$ = $1; }
     | QES         { $$ = AST::Make<AST::IntLiteral>(@1); }
     ; // do not allow non-element
 
-index_value_list
-    : index_value_list COMMA index_or_value {
+value_or_qes_list
+    : value_or_qes_list COMMA expr_or_qes {
         $1->Append($3);
         $$ = $1;
       }
-    | index_or_value {
+    | expr_or_qes {
         $$ = AST::Make<AST::MultiValues>(@1);
         $$->Append($1);
       }
@@ -507,12 +501,12 @@ value_list
 
 unnamed_mdspan_decl
     : IDENTIFIER FNSPAN LBRAKT { parsing_prefixed_list = true; }
-      index_value_list RBRAKT {
+      value_or_qes_list RBRAKT {
         $$ = AST::Make<AST::MultiDimSpans>(@1, $1, $5);
         parsing_prefixed_list = false;
       }
     | IDENTIFIER LBRAKT { parsing_prefixed_list = true; }
-      index_value_list RBRAKT {
+      value_or_qes_list RBRAKT {
         $$ = AST::Make<AST::MultiDimSpans>(@1, $1, $4);
         parsing_prefixed_list = false;
       }
@@ -549,7 +543,7 @@ unnamed_ituple_decl
 
 sugar_unnamed_ituple_decl
     : IDENTIFIER LBRACE { parsing_prefixed_list = true; }
-      index_value_list RBRACE {
+      value_or_qes_list RBRACE {
         // anchor
         if (!symtab.Exists($1))
           Parser::error(@1, "The symbol '" + $1 + "` has not been defined.");
@@ -677,7 +671,9 @@ s_expr
     | s_expr GE s_expr { $$ = AST::Make<AST::Expr>(@1, ">=", $1, $3); }
     | general_val      { $$ = AST::Make<AST::Expr>(@1, $1); }
     | PIPE s_expr PIPE { $$ = AST::Make<AST::Expr>(@1, "sizeof", $2); }
-    | s_expr s_index   { $$ = AST::Make<AST::Expr>(@1, "dimof", $1, $2); }
+    | s_expr LPAREN general_index RPAREN {
+        $$ = AST::Make<AST::Expr>(@1, "dimof", $1, AST::Make<AST::IntIndex>(@3, $3));
+      }
     | UBOUND IDENTIFIER {
         $$ = AST::Make<AST::Expr>(@1, "ubound", AST::Make<AST::Identifier>(@2, $2));
       }
@@ -799,18 +795,22 @@ range_exprs
       }
     ; /* do not allow the empty ivs */
 
-int_or_null
+index
     : NUM { $$ = $1; }
     | MINUS NUM { $$ = -$2; }
+    ;
+
+index_or_none
+    : index { $$ = $1; }
     | /*nothing*/ { $$ = GetInvalidBound(); }
     ;
 
 range_expr
     : IDENTIFIER { $$ = AST::Make<AST::LoopRange>(@1, AST::Make<AST::Identifier>(@1, $1)); }
-    | IDENTIFIER LPAREN int_or_null COL int_or_null RPAREN {
+    | IDENTIFIER LPAREN index_or_none COL index_or_none RPAREN {
         $$ = AST::Make<AST::LoopRange>(@1, AST::Make<AST::Identifier>(@1, $1), $3, $5);
       }
-    | IDENTIFIER LPAREN int_or_null COL int_or_null COL int_or_null RPAREN {
+    | IDENTIFIER LPAREN index_or_none COL index_or_none COL index_or_none RPAREN {
         $$ = AST::Make<AST::LoopRange>(@1, AST::Make<AST::Identifier>(@1, $1), $3, $5, $7);
       }
     ;
