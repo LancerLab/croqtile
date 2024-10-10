@@ -1,0 +1,108 @@
+#include "choreo.h"
+#include <random>
+
+/*
+http://wiki.enflame.cn/display/AUS/indim4_split0_outdim4_split0_perm102
+
+Memory Hierarchy
+  D2C Linear copy [1, 2, 3]
+  C2C transpose [1, 0, 2]
+  C2D deslice [1]
+
+input_shape_d = {a, b, c, d, e};
+input_reshape_d = {a, b, c * d, e};
+input_shape_c = {1, b, c * d, e};
+input_reshape_c = {b, c * d, e};
+output_shape_c = {c * d, b, e};
+output_reshape_c = {c, 1, d * b, e};
+output_reshape_d = {c, a, d * b, e};
+output_shape_d = {c, a, d, b, e};
+*/
+
+__cok__ { /// kernel program
+  extern "C" void kernel_transpose(int* input, int* output, int b_bound,
+                                   int c_bound, int d_bound, int e_bound) {
+    for (int b = 0; b < b_bound; ++b)
+      for (int c = 0; c < c_bound; ++c)
+        for (int d = 0; d < d_bound; ++d)
+          for (int e = 0; e < e_bound; ++e) {
+            int i_idx = b * (c_bound * d_bound * e_bound) +
+                        c * (d_bound * e_bound) + d * e_bound + e;
+            int o_idx = c * (d_bound * b_bound * e_bound) +
+                        d * (b_bound * e_bound) + b * e_bound + e;
+            output[o_idx] = input[i_idx];
+          }
+  }
+} /// end of kernel decl
+
+// ok
+// s32 [A, B, C, D, E] input
+__co__ auto transpose(s32 [4, 2, 4, 8, 2] input) {
+  s32[input.span[(2), (0), (3), (1), (4)]] output;
+  // s32[C, A, D, B, E] output;
+
+  parallel p by 1 {
+    with index = {a, b, c, d, e} in input.span[(0), 1, 1, 1, 1] {
+      foreach index {
+        input_shape_c = dma.copy.async input.span_as([4, 2, 32, 2]).chunkat(a, b, c*d, e) => local;
+        wait input_shape_c;
+        
+        // [c, 1, d*b, e]
+        local s32[4, 1, 16, 2] l1_out;
+        // cannot: `y = x.span_as(); call xx(y, ...)`
+        // so `1` is explicitly declared in the mdspan of l1_out
+
+        // replace `call` with `dma.transpose` later.
+        call kernel_transpose(input_shape_c.data, l1_out, 2, 4, 8, 2);
+
+        out_store = dma.copy.async l1_out => output.span_as([4, 4, 16, 2]).chunkat(c, a, d*b, e);
+        wait out_store;
+      }
+    }
+  }
+  return output;
+}
+
+int main() { /// host program
+
+  #define aa 4
+  #define bb 2
+  #define cc 4
+  #define dd 8
+  #define ee 2
+
+  std::mt19937 mt(std::random_device{}());
+
+  choreo::s32 x[aa][bb][cc][dd][ee] = {0};
+  std::vector<int> bounds = {aa, bb, cc, dd, ee};
+  int i = 0;
+  for (size_t a = 0; a < bounds[0]; ++a)
+    for (size_t b = 0; b < bounds[1]; ++b)
+      for (size_t c = 0; c < bounds[2]; ++c)
+        for (size_t d = 0; d < bounds[3]; ++d)
+          for (size_t e = 0; e < bounds[4]; ++e) {
+            x[a][b][c][d][e] = mt() % 10;
+          }
+
+  // abcde => cadbe
+  auto res = transpose(choreo::make_spanview<5, choreo::s32>((int*)x, {aa, bb, cc, dd, ee}));
+
+  for (int j=0; j<5; j++) {
+    std::cout << "res.shape()[" << j << "] = " << res.shape()[j] << "\n";
+  }
+
+  // verfication
+  for (size_t a = 0; a < bounds[0]; ++a)
+    for (size_t b = 0; b < bounds[1]; ++b)
+      for (size_t c = 0; c < bounds[2]; ++c)
+        for (size_t d = 0; d < bounds[3]; ++d)
+          for (size_t e = 0; e < bounds[4]; ++e) {
+            std::cout << a << ", " << b << ", " << c << ", " << d << ", " << e
+                      << "\n";
+            std::cout << "\tx: " << x[a][b][c][d][e]
+                      << "\n\tres: " << res[c][a][d][b][e] << "\n";
+            assert(x[a][b][c][d][e] == res[c][a][d][b][e]);
+          }
+
+  std::cout << "Test Passed\n" << std::endl;
+}
