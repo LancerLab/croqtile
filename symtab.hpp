@@ -195,9 +195,9 @@ class ScopedSymbolTable {
     return false;
   }
 
-  ptr<Type> LookupSymbol(const std::string& n) {
+  ptr<Type> LookupSymbol(const std::string& n) const {
     for (auto it = scoped_symtab.rbegin(); it != scoped_symtab.rend(); ++it) {
-      if (it->count(n)) return (*it)[n];
+      if (it->count(n)) return it->at(n);
     }
     return nullptr;
   }

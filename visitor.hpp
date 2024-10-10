@@ -54,7 +54,7 @@ struct Visitor {
   virtual bool Visit(AST::CppSourceCode&) = 0;
   virtual bool Visit(AST::Program&) = 0;
 
- private:
+ protected:
   // scoped variable handling
   ScopedSymbolTable scoped_symtab;
 
@@ -87,8 +87,8 @@ struct Visitor {
 
   virtual const std::string& GetName() { return name; }
 
- protected:
-  virtual ptr<Type> NodeType(AST::Node& n) {
+ public:
+  virtual ptr<Type> NodeType(const AST::Node& n) const {
     if (auto id = dyn_cast<AST::Identifier>(&n))
       return GetSymbolType(id->name);
     else if (auto expr = dyn_cast<AST::Expr>(&n)) {
@@ -119,8 +119,8 @@ struct Visitor {
   }
 
  public:
-  virtual ptr<Type> GetSymbolType(const std::string& n) {
-    return SSTab().LookupSymbol(n);
+  virtual ptr<Type> GetSymbolType(const std::string& n) const {
+    return scoped_symtab.LookupSymbol(n);
   }
 
  public:
@@ -224,7 +224,7 @@ struct VisitorWithScope : public Visitor {
 // Caution: must be used when symbol table does not change.
 struct VisitorWithSymTab : public VisitorWithScope {
  protected:
-  virtual std::string InScopeName(const std::string& sym) {
+  virtual std::string InScopeName(const std::string& sym) const {
     auto removeLastLevel = [](const std::string& input) -> std::string {
       size_t lastPos = input.rfind("::");
       if (lastPos == std::string::npos)
@@ -235,7 +235,7 @@ struct VisitorWithSymTab : public VisitorWithScope {
       return input.substr(0,
                           secondLastPos + 2);  // Include the "::" in the result
     };
-    std::string scope_name = SSTab().ScopeName();
+    std::string scope_name = scoped_symtab.ScopeName();
     while (true) {
       std::string scoped_name = scope_name + sym;
       if (SymTab()->Exists(scoped_name)) return scoped_name;
@@ -251,7 +251,7 @@ struct VisitorWithSymTab : public VisitorWithScope {
 
  public:
   // use the immutable symbol table directly
-  ptr<Type> GetSymbolType(const std::string& n) override {
+  ptr<Type> GetSymbolType(const std::string& n) const override {
     return SymTab()->GetSymbol(InScopeName(n))->GetType();
   }
 

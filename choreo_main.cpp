@@ -40,6 +40,7 @@ int main(int argc, char* argv[]) {
   Option<bool> cross_compile("--cross-compile", "-cc", false, false);
   Option<bool> dump_ast("--dump-ast", "-e", false, false);
   Option<bool> print_vn("--print-valno", "-v", false, false);
+  Option<bool> prt_norm("--print-normalize", "-z", false, false);
   Option<bool> inf_type("--infer-types", "-i", false, false);
   Option<bool> dump_sym("--dump-symbol", "-l", false, false);
   Option<bool> visualiz("--visualize", "-u", false, false);
@@ -100,7 +101,7 @@ int main(int argc, char* argv[]) {
   if (stop_after.GetValue() == sv.GetName()) return 0;
 
   // minor AST change: desugar for canonicalized AST
-  Normalizer ds(std::cout);
+  Normalizer ds(std::cout, prt_norm);
   if (prt_pass) std::cout << "|- " << ds.GetName() << "\n";
   root.accept(ds);
   if (stop_after.GetValue() == "norm") return 0;

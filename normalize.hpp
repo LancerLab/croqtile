@@ -45,8 +45,8 @@ struct Normalizer : public Visitor {
 
  public:
   // it does not require a symbol table
-  Normalizer(std::ostream &o)
-      : Visitor("norm"), os(o), trace(std::getenv("TRACE_NORM")) {}
+  Normalizer(std::ostream &o, bool t = false)
+      : Visitor("norm"), os(o), trace(t) {}
 
   bool BeforeVisit(AST::Node &n) override {
     if (trace_visit) os << "before visiting " << n.TypeNameString() << "\n";
@@ -289,10 +289,28 @@ struct Normalizer : public Visitor {
       for (auto &v : n.positions->AllValues()) {
         ++i;
         auto expr = cast<AST::Expr>(v);
-        if (expr->GetSymbol()) {  // replace expr reference to be id
+        if (expr->GetSymbol()) {
+          // replace expr reference by the id node
           repls.emplace_back(i, expr->GetReference());
           continue;
+        } else if (expr->op == "getith") {
+          // 'getith' must be kept.
+          if (auto lexpr = dyn_cast<AST::Expr>(expr->GetL())) {
+            if (!lexpr->GetSymbol()) {
+              // hoist the non-getith part
+              int index = cur_dma_index + mnodes_insertions.size();
+              auto nname = SymbolTable::GetAnonName();
+              mnodes_insertions.emplace_back(
+                  std::make_tuple(index, expr->GetL(), nname));
+              if (trace) os << "replace " << PSTR(expr->GetL()) << " with ";
+              expr->SetL(AST::Make<AST::Identifier>(v->LOC(), nname));
+              if (trace) os << PSTR(expr->GetL()) << ".\n";
+            }
+          }
+          continue;
         }
+
+        // else, hoist the arith out
         int index = cur_dma_index + mnodes_insertions.size();
         auto nname = SymbolTable::GetAnonName();
         mnodes_insertions.emplace_back(std::make_tuple(index, v, nname));

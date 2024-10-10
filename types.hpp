@@ -1434,6 +1434,12 @@ inline bool IsBoundedType(const ptr<Type>& ty) {
   return isa<BoundedIntegerType>(ty) || isa<BoundedITupleType>(ty);
 }
 
+inline bool IsActualBoundedIntegerType(const ptr<Type>& ty) {
+  if (isa<BoundedIntegerType>(ty)) return true;
+  if (auto bi = dyn_cast<BoundedITupleType>(ty)) return bi->Dims() == 1;
+  return false;
+}
+
 // utility functions to generate types
 // Note: should always use utility functions
 inline Shape GenUninitShape() { return Shape(); }

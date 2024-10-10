@@ -130,6 +130,9 @@ class ValueNumbering {
 
   int GetOrInsertValueNumberFromSignature(const std::string& signature);
 
+  // Symbol names related to the value numbering
+  const std::string VNSymbolName(const AST::Identifier&) const;
+
   // Retrieve the signature from a value number. About when fails.
   std::string GetSignatureFromValueNumber(int vn) {
     if (vn == UnknownValue()) return "?";
@@ -188,6 +191,7 @@ class ShapeInference : public Visitor {
 
   int cur_vn = GetInvalidValueNumber();
   int cur_mdspan_vn = GetInvalidValueNumber();
+  int cur_ub_vn = GetInvalidValueNumber();
 
   std::string cur_fn;
   // when values are consumed instead of generated
@@ -512,13 +516,14 @@ class ShapeInference : public Visitor {
 
     if (cannot_proceed) return true;
 
-    if (SSTab().IsDeclared(n.name)) {
-      return true;
-    }
+    if (SSTab().IsDeclared(n.name)) return true;
 
     // this is the un-type-annotated declaration
     auto nty = n.value->GetType();
     SSTab().DefineSymbol(n.name, nty);
+    if (IsActualBoundedIntegerType(nty))
+      SSTab().DefineSymbol("@" + n.name, MakeIntegerType());
+
     if (auto san = dyn_cast<AST::SpanAs>(n.value)) {
       assert((n.name == san->nid->name) &&
              "inconsistent span_as variable name.");
@@ -527,8 +532,11 @@ class ShapeInference : public Visitor {
       return true;
     }
 
+    auto name = n.name;
+    if (IsActualBoundedIntegerType(nty)) name = "@" + name;
+
     assert(ValidVN(cur_vn) && "expected a valid current value number.");
-    vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(n.name), cur_vn);
+    vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(name), cur_vn);
 
     return true;
   }
@@ -1046,7 +1054,7 @@ class ShapeInference : public Visitor {
       if (n.inDMA)
         cur_vn = cur_mdspan_vn;
       else
-        InvalidateVN(cur_vn); // used for variable def
+        InvalidateVN(cur_vn);  // used for variable def
     } else if (isa<FutureType>(NodeType(n))) {
       if (auto id = AST::GetName(*n.expr_list->ValueAt(0))) {
         auto n = SSTab().NameInScopeOrNull(*id + ".span");

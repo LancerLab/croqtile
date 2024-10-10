@@ -45,6 +45,17 @@ std::vector<int> GetOperandsValNo(const std::string& input) {
 
 }  // namespace
 
+const std::string ValueNumbering::VNSymbolName(const AST::Identifier & id) const {
+  auto sig = id.name;
+  auto pty = visitor->NodeType(id);
+  if (isa<SpannedType>(pty) || isa<FutureType>(pty)) {
+    sig += ".span";  // only cares about value inside the mdspan
+  } else if (IsBoundedType(pty)) {
+    sig = "@" + sig; // only cares about the upper bound
+  }
+  return sig;
+}
+
 void ValueNumbering::EnterScope(const std::string& name) {
   std::string indent = ScopeIndent();
   visitor->SSTab().EnterScope(name);
@@ -545,7 +556,8 @@ std::string ValueNumbering::GenerateNodeSignature(AST::Node& node,
   } else if (auto* n = dyn_cast<AST::Boolean>(&node)) {
     return n->value;
   } else if (auto* v = dyn_cast<AST::Identifier>(&node)) {
-    if (auto name_in_scope = visitor->SSTab().NameInScopeOrNull(v->name)) {
+    auto sname = VNSymbolName(*v);
+    if (auto name_in_scope = visitor->SSTab().NameInScopeOrNull(sname)) {
       if (HasValueNumberOfSignature(*name_in_scope)) return *name_in_scope;
       // error: the name exists but does not have a value number
       Error(node.LOC(), "symbol `" + *name_in_scope +
@@ -553,7 +565,7 @@ std::string ValueNumbering::GenerateNodeSignature(AST::Node& node,
       choreo_unreachable();
     }
     // or else, it is a new name definition
-    return visitor->SSTab().ScopedName(v->name);
+    return visitor->SSTab().ScopedName(sname);
   } else if (auto* b = dyn_cast<AST::Expr>(&node)) {
     auto signature = b->op;
 
@@ -631,6 +643,11 @@ bool ValueNumbering::HasValueNumberForNode(AST::Node& n) {
   return HasValueNumberOfSignature(signature);
 }
 
+// Note:
+// the valno related to a node could either be:
+//   1. integer value of the expression
+//   2. associated span value of the expression
+//   3. associated upper bound value of the expression
 int ValueNumbering::GetValueNumberForNode(AST::Node& n) {
   // if it is an visited/numbered node
   if (nodeValueNumbers.back().count(&n)) return (nodeValueNumbers.back())[&n];
@@ -639,17 +656,12 @@ int ValueNumbering::GetValueNumberForNode(AST::Node& n) {
   // TODO(wsj) reference with bounded var and spanned var
   if (auto id = dyn_cast<AST::Identifier>(&n)) {
     // Must consider about the scope of any identifier reference
-    auto name = id->name;
-    auto pty = visitor->SSTab().LookupSymbol(name);
-    if (isa<SpannedType>(pty) || isa<FutureType>(pty)) {
-      name += ".span";
-    } else if (isa<BoundedITupleType>(pty)) {
-      name = "@" + name;
-    }
-    if (auto name_in_scope = visitor->SSTab().NameInScopeOrNull(name))
+    auto sname = VNSymbolName(*id);
+    auto pty = visitor->NodeType(n);
+    if (auto name_in_scope = visitor->SSTab().NameInScopeOrNull(sname))
       return GetValueNumberOfSignature(*name_in_scope);
     else
-      choreo_unreachable("symbol `" + id->name + "` with name: " + name +
+      choreo_unreachable("symbol `" + id->name + "` with name: " + sname +
                          " is not valued.");
   }
 
