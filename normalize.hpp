@@ -295,7 +295,7 @@ struct Normalizer : public Visitor {
         }
         int index = cur_dma_index + mnodes_insertions.size();
         auto nname = SymbolTable::GetAnonName();
-        mnodes_insertions.emplace_back(std::make_tuple(index, expr, nname));
+        mnodes_insertions.emplace_back(std::make_tuple(index, v, nname));
         repls.emplace_back(i, AST::Make<AST::Identifier>(v->LOC(), nname));
       }
       for (auto &repl : repls) {

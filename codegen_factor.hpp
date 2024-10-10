@@ -43,6 +43,8 @@ struct FactorCodeGen : public CodeGenerator {
   // output variable name
   std::string output_v;
 
+  const std::string named_dim_ref_prefix = "__choreo_nd_ref_";
+
   bool void_return = false;
   int parallel_factor = 1;
   size_t sp_count = 0;
@@ -68,6 +70,7 @@ struct FactorCodeGen : public CodeGenerator {
       rts_pidx;  // shape index in parameter list for the runtime shape name
   std::map<std::string, size_t>
       rts_nidx;  // dim index in shape for the runtime shape name
+  std::map<std::string, std::string> idnm_rts; // name in .co to symbolic name
   StringifyTable factor_symbols;
 
  public:
@@ -142,6 +145,7 @@ struct FactorCodeGen : public CodeGenerator {
   std::string ReplaceRuntimeNames(const std::string &, const std::string & = "",
                                   bool host_code = true);
   std::string ReplaceDynDimName(const std::string &);
+  std::optional<std::string> ReplaceDynDimRef(const std::string &);
   // common utils
   void incrementIndent() { this->indent += "  "; }
 

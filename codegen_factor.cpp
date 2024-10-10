@@ -44,6 +44,7 @@ bool FactorCodeGen::BeforeVisitImpl(AST::Node &n) {
     rts_nmap.clear();
     rts_pidx.clear();
     rts_nidx.clear();
+    idnm_rts.clear();
     host_params.clear();
     indent.clear();
     entry_fn = c->name;
@@ -238,6 +239,52 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
     if (factor_symbols.Exists(sym)) {
       fs << indent << "auto " << sym << " = alloc_("
          << factor_symbols.GetTypeName(sym) << ");\n";
+    } else if (auto e = dyn_cast<AST::Expr>(node.init_expr);
+               e && isa<AST::SpanAs>(e->GetR())) {
+      assert(e->IsReference());
+      auto sa = dyn_cast<AST::SpanAs>(e->GetR());
+      int arg_idx = factor_symbols.GetSymbolIndex(sa->id->name);
+      std::string buffer_name =
+          arg_idx < 0 ? sa->id->name : "args[" + std::to_string(arg_idx) + "]";
+      auto sty = dyn_cast<SpannedType>(node.GetType());
+      assert(sty);
+      std::string storage_type = stringify(sty->GetStorage());
+      std::string base_type = stringify(Choreo::BaseType(sty->f_type));
+      fs << indent << "auto " << sym << " = bitcast_(" << storage_type << "("
+         << base_type << ", {";
+
+      // TODO(wsj): has_dynamic is hard to decide. Maybe still need to implement
+      // span_as as mdspan?
+      bool all_intLiteral_shape = true;
+      for (auto value : sa->list->AllValues()) {
+        auto value_expr = dyn_cast<AST::Expr>(value);
+        if (!(value_expr->IsReference() &&
+              isa<AST::IntLiteral>(value_expr->GetReference()))) {
+          all_intLiteral_shape = false;
+          break;
+        }
+      }
+      std::string orig_delimiter = sa->list->delimiter;
+      sa->list->SetDelimiter(", ");
+      if (all_intLiteral_shape) {
+        fs << PSTR(sa->list) << "}), " << buffer_name << ");\n";
+      } else {
+        for (size_t i = 0; i < sa->list->Count(); ++i)
+          fs << (i != 0 ? ", " : "") << "-1";
+        fs << "}), " << buffer_name << ", {";
+        for (size_t i = 0; i < sa->list->Count(); ++i) {
+          auto value = sa->list->ValueAt(i);
+          auto value_expr = dyn_cast<AST::Expr>(value);
+          auto expr_str = PSTR(value_expr);
+          for (auto& [id_name, _] : idnm_rts) {
+            expr_str = RegexReplaceAll(expr_str, "\\b" + id_name + "\\b",
+                                       named_dim_ref_prefix + id_name);
+          }
+          fs << (i != 0 ? ", " : "") << expr_str;
+        }
+        fs << "});\n";
+        sa->list->SetDelimiter(orig_delimiter);
+      }
     } else {
       std::string storage_type = stringify(sty->GetStorage());
       std::string base_type = stringify(Choreo::BaseType(sty->f_type));
@@ -269,7 +316,53 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
 }
 
 bool FactorCodeGen::Visit(AST::IntTuple &) { return true; }
-bool FactorCodeGen::Visit(AST::Assignment &) { return true; }
+bool FactorCodeGen::Visit(AST::Assignment &node) {
+  if (auto sa = dyn_cast<AST::SpanAs>(node.value)) {
+    int arg_idx = factor_symbols.GetSymbolIndex(sa->id->name);
+    std::string buffer_name =
+        arg_idx < 0 ? sa->id->name : "args[" + std::to_string(arg_idx) + "]";
+    auto sty = dyn_cast<SpannedType>(node.GetType());
+    assert(sty);
+    std::string storage_type = stringify(sty->GetStorage());
+    std::string base_type = stringify(Choreo::BaseType(sty->f_type));
+    fs << indent << "auto " << node.name << " = bitcast_(" << storage_type
+       << "(" << base_type << ", {";
+
+    // TODO(wsj): has_dynamic is hard to decide. Maybe still need to implement
+    // span_as as mdspan?
+    bool all_intLiteral_shape = true;
+    for (auto value : sa->list->AllValues()) {
+      auto value_expr = dyn_cast<AST::Expr>(value);
+      if (!(value_expr->IsReference() &&
+            isa<AST::IntLiteral>(value_expr->GetReference()))) {
+        all_intLiteral_shape = false;
+        break;
+      }
+    }
+    std::string orig_delimiter = sa->list->delimiter;
+    sa->list->SetDelimiter(", ");
+    if (all_intLiteral_shape) {
+      fs << PSTR(sa->list) << "}), " << buffer_name << ");\n";
+    } else {
+      for (size_t i = 0; i < sa->list->Count(); ++i)
+        fs << (i != 0 ? ", " : "") << "-1";
+      fs << "}), " << buffer_name << ", {";
+      for (size_t i = 0; i < sa->list->Count(); ++i) {
+        auto value = sa->list->ValueAt(i);
+        auto value_expr = dyn_cast<AST::Expr>(value);
+        auto expr_str = PSTR(value_expr);
+        for (auto& [id_name, _] : idnm_rts) {
+          expr_str = RegexReplaceAll(expr_str, "\\b" + id_name + "\\b",
+                                     named_dim_ref_prefix + id_name);
+        }
+        fs << (i != 0 ? ", " : "") << expr_str;
+      }
+      fs << "});\n";
+      sa->list->SetDelimiter(orig_delimiter);
+    }
+  }
+  return true;
+}
 bool FactorCodeGen::Visit(AST::IntIndex &) { return true; }
 bool FactorCodeGen::Visit(AST::DataType &) { return true; }
 
@@ -328,6 +421,11 @@ bool FactorCodeGen::Visit(AST::ParallelBy &by) {
   if (!void_return) fs << indent << "auto & $$out$$ = results[0];\n";
   fs << this->indent << "auto thread_id = thread_id_();\n";
   fs << this->indent << "auto block_id = block_id_();\n";
+  // dynamic-shape alias reference
+  for (auto& [id_name, sym_name] : idnm_rts) {
+    fs << indent << "auto " << named_dim_ref_prefix << id_name << " = "
+       << ReplaceDynDimName(sym_name) << ";\n";
+  }
   alloc_pos = fs.str().size();
   alloc_indent = indent;
 
@@ -830,9 +928,11 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
   auto ty = d.GetType();
   assert(isa<FunctionType>(ty) && "unexpected type.");
   auto &fty = *cast<FunctionType>(ty);
+  std::string func_name = d.name;
 
-  auto MapRuntimeShapeNames = [this](SpannedType *sty, const std::string &name,
-                                     size_t p_index) {
+  auto MapRuntimeShapeNames = [this, &func_name](SpannedType *sty,
+                                                 const std::string& name,
+                                                 size_t p_index) {
     size_t count = 0;
     for (auto vi : sty->GetShape().Value()) {
       if (auto vale = dyn_cast<ValueExpr>(&vi)) {
@@ -840,6 +940,8 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
         rts_nmap.emplace(*vale, elem_name);
         rts_pidx.emplace(*vale, p_index);
         rts_nidx.emplace(*vale, count);
+        assert(PrefixedWith(*vale, "::" + func_name + "::"));
+        idnm_rts.emplace(vale->substr(2 + func_name.size() + 2), *vale);
       }
       count++;
     }
@@ -920,6 +1022,12 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
   for (auto &param : *cur_params) fs << param->sym->name + "_type, ";
 
   fs << "StreamType()}, [&](auto args) {\n";
+
+  // dynamic-shape alias reference
+  for (auto& [id_name, sym_name] : idnm_rts) {
+    dss << indent << "  auto " << named_dim_ref_prefix << id_name << " = "
+        << ReplaceDynDimName(sym_name) << ";\n";
+  }
 
   this->incrementIndent();
   fs << dss.str();  // dynamic-shape specific
@@ -1157,6 +1265,18 @@ std::string FactorCodeGen::ReplaceDynDimName(const std::string &e) {
     }
   }
   return expr;
+}
+
+std::optional<std::string> FactorCodeGen::ReplaceDynDimRef(
+    const std::string& e) {
+  for (auto& [id_name, sym_name] : idnm_rts) {
+    // match str begins with "::", thus "\\b" appears only in the suffix.
+    auto replaced =
+        RegexReplaceAll(e, sym_name + "\\b", named_dim_ref_prefix + id_name);
+    if (replaced != e)
+      return replaced;
+  }
+  return std::nullopt;
 }
 
 void FactorCodeGen::EmitRuntimeCheck(std::ostream &os, const Type &ty) {
