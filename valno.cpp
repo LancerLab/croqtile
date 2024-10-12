@@ -325,26 +325,21 @@ std::optional<std::string> ValueNumbering::SignBoundedOperation(
         IsActualBoundedIntegerType(rhs.GetType())) {
       auto lbound = GetSingleUpperBound(lhs.GetType());
       auto rbound = GetSingleUpperBound(rhs.GetType());
-      if (isa<int>(&lbound) && isa<int>(&rbound))
-        res = "const_" + ValueItemAsString(lbound + rbound);
-      else if (!isa<int>(&lbound) && isa<int>(&rbound)) {
-        auto lvn =
-            GetOrInsertValueNumberFromSignature(ValueItemAsString(lbound));
-        auto rvn = GetOrInsertValueNumberFromSignature(
-            "const_" + ValueItemAsString(rbound));
-        res = "*:#" + std::to_string(lvn) + ":#" + std::to_string(rvn);
-      } else if (isa<int>(&lbound) && !isa<int>(&rbound)) {
-        auto lvn = GetOrInsertValueNumberFromSignature(
-            "const_" + ValueItemAsString(lbound));
-        auto rvn =
-            GetOrInsertValueNumberFromSignature(ValueItemAsString(rbound));
-        res = "*:#" + std::to_string(lvn) + ":#" + std::to_string(rvn);
-      } else {
-        auto lvn =
-            GetOrInsertValueNumberFromSignature(ValueItemAsString(lbound));
-        auto rvn =
-            GetOrInsertValueNumberFromSignature(ValueItemAsString(rbound));
-        res = "*:#" + std::to_string(lvn) + ":#" + std::to_string(rvn);
+      auto lsig = ValueItemAsString(lbound);
+      auto rsig = ValueItemAsString(rbound);
+      if (isa<int>(&lbound))
+        lsig = "const_" + lsig;
+      else
+        lsig = SignatureOfSymbol(visitor->SSTab().InScopeName("@" + lsig));
+      if (isa<int>(&rbound))
+        rsig = "const_" + rsig;
+      else
+        rsig = SignatureOfSymbol(visitor->SSTab().InScopeName("@" + rsig));
+      res = TryToSimplifyBinary(loc, op, lsig, rsig, verbose);
+      if (!res) {
+        auto lvn = GetOrInsertValueNumberFromSignature(lsig);
+        auto rvn = GetOrInsertValueNumberFromSignature(rsig);
+        res = op + ":#" + std::to_string(lvn) + ":#" + std::to_string(rvn);
       }
     } else
       choreo_unreachable("operation is not permitted.");
@@ -361,8 +356,8 @@ std::optional<std::string> ValueNumbering::GenerateSpecialNodeSignature(
     const AST::Node& node) {
   if (auto* n = dyn_cast<AST::Expr>(&node))
     if (n->op == "+" || n->op == "-" || n->op == "*") {
-      if (IsBoundedType(n->GetL()->GetType()) ||
-          IsBoundedType(n->GetR()->GetType())) {
+      if (isa<BoundedType>(n->GetL()->GetType()) ||
+          isa<BoundedType>(n->GetR()->GetType())) {
         return SignBoundedOperation(n->LOC(), n->op, *n->GetL(), *n->GetR(),
                                     trace);
       }

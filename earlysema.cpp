@@ -140,8 +140,9 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       error_count++;
       return false;
     }
-    if (isa<BoundedIntegerType>(lty)) {
-      // disambiguite subscription into bounded ituple and getith of bounded integer
+    if (isa<BoundedType>(lty)) {
+      // disambiguite subscription into bounded ituple and getith of bounded
+      // integer
       n.op = "getith";
       cast<AST::IntIndex>(n.GetR())->UseBracket();
       SetNodeType(n, lty);
@@ -193,28 +194,47 @@ bool EarlySemantics::Visit(AST::Expr& n) {
         SetNodeType(n, lty);
       } else
         SetNodeType(n, MakeUninitBoundedITupleType());
-    } else if ((isa<BoundedITupleType>(lty) && isa<BoundedIntegerType>(rty)) ||
-               (isa<BoundedIntegerType>(lty) && isa<BoundedITupleType>(rty)) ||
-               (isa<BoundedIntegerType>(lty) && isa<BoundedIntegerType>(rty))) {
+    } else if ((isa<BoundedType>(lty) && isa<BoundedType>(rty))) {
       // allow only * operator for catesian products on two bounded-vars
-      // currently, only support boundedituple * boundedint or boundedint *
-      // boundedint os << STR(n.GetL()) << "lty = " << PSTR(lty) << "; rty = "
-      // << PSTR(rty);
       if ((n.op != "*")) {
         Error(n.LOC(), "in operation \"" + n.op +
                            "\": unable to apply to the types (" + PSTR(lty) +
                            " vs. " + PSTR(rty) + ").");
         return false;
       }
-      if (isa<BoundedIntegerType>(lty) && isa<BoundedIntegerType>(rty)) {
-        SetNodeType(n, lty);
+      if (IsActualBoundedIntegerType(lty) && IsActualBoundedIntegerType(rty)) {
+        SetNodeType(n, MakeBoundedITupleType(Shape(
+                           1, cast<BoundedType>(lty)->GetUpperBound() +
+                                  cast<BoundedType>(lty)->GetUpperBound())));
       } else {
         // TODO
+        Error(n.LOC(), "in operation \"" + n.op +
+                           "\": unable to apply to the types (" + PSTR(lty) +
+                           " vs. " + PSTR(rty) + ").");
+        return false;
       }
-    } else if ((isa<BoundedIntegerType>(lty) && isa<IntegerType>(rty)) ||
-               (isa<BoundedIntegerType>(rty) && isa<IntegerType>(lty))) {
+    } else if ((IsActualBoundedIntegerType(lty) && isa<IntegerType>(rty)) ||
+               (IsActualBoundedIntegerType(rty) && isa<IntegerType>(lty))) {
       // this is promissing, simply allow it
-      SetNodeType(n, MakeUnknownBoundedIntegerType());
+      if (IsActualBoundedIntegerType(lty))
+        if (cast<AST::Expr>(n.GetL())->op == "getith") {
+          Error(n.LOC(),
+                "in operation \"" + n.op +
+                    "\": unable to apply to the getith bounded variable (" +
+                    PSTR(n.GetL()) + ").");
+          return false;
+        } else
+          SetNodeType(n, lty);
+      else {
+        if (cast<AST::Expr>(n.GetR())->op == "getith") {
+          Error(n.LOC(),
+                "in operation \"" + n.op +
+                    "\": unable to apply to the 'getith' bounded variable (" +
+                    PSTR(n.GetR()) + ").");
+          return false;
+        } else
+          SetNodeType(n, rty);
+      }
     } else if ((isa<BoundedITupleType>(lty) && isa<ITupleType>(rty)) ||
                (isa<BoundedITupleType>(rty) && isa<ITupleType>(lty))) {
       if (lty->Dims() != rty->Dims()) {
@@ -873,8 +893,8 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
     for (auto& v : n.positions->AllValues()) {
       auto ty = NodeType(*v);
       if (!IsBoundedType(ty)) {
-        Error(n.LOC(),
-              "expecting '" + v->TypeNameString() + "` be a bounded type.");
+        Error(n.LOC(), "expecting '" + PSTR(v) +
+                           "` be a bounded type (but got " + PSTR(ty) + ").");
         error_count++;
       }
       r_count += ty->Dims();

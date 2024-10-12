@@ -33,7 +33,6 @@ bool FactorCodeGen::ContainsLoopVar(const std::string &iv) const {
   return false;
 }
 
-
 bool FactorCodeGen::BeforeVisitImpl(AST::Node &n) {
   __TRACE_EACH_VISIT__(n)
   if (isa<AST::Program>(&n)) {
@@ -143,9 +142,7 @@ fi
     auto out_size_expr = SizeExprOf(*out_type);
     fs << "}\n\n";
 
-    fs << "MODULE_REGISTER(\"lib" 
-       << current_fn << "\", " 
-       << current_fn
+    fs << "MODULE_REGISTER(\"lib" << current_fn << "\", " << current_fn
        << ");";  // end the factor function definition
 
     // TODO:need refactor
@@ -222,8 +219,7 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
         }
       }
       fs << "select_(" << select_factor_str << "== " << i << ", "
-         << PSTR(s->expr_list->ValueAt(i))
-         << (i < val_count - 1 ? ", " : "");
+         << PSTR(s->expr_list->ValueAt(i)) << (i < val_count - 1 ? ", " : "");
     }
     fs << PSTR(s->expr_list->AllValues().back())
        << std::string(val_count - 1, ')') << ";\n";
@@ -276,7 +272,7 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
           auto value = sa->list->ValueAt(i);
           auto value_expr = dyn_cast<AST::Expr>(value);
           auto expr_str = PSTR(value_expr);
-          for (auto& [id_name, _] : idnm_rts) {
+          for (auto &[id_name, _] : idnm_rts) {
             expr_str = RegexReplaceAll(expr_str, "\\b" + id_name + "\\b",
                                        named_dim_ref_prefix + id_name);
           }
@@ -351,7 +347,7 @@ bool FactorCodeGen::Visit(AST::Assignment &node) {
         auto value = sa->list->ValueAt(i);
         auto value_expr = dyn_cast<AST::Expr>(value);
         auto expr_str = PSTR(value_expr);
-        for (auto& [id_name, _] : idnm_rts) {
+        for (auto &[id_name, _] : idnm_rts) {
           expr_str = RegexReplaceAll(expr_str, "\\b" + id_name + "\\b",
                                      named_dim_ref_prefix + id_name);
         }
@@ -422,7 +418,7 @@ bool FactorCodeGen::Visit(AST::ParallelBy &by) {
   fs << this->indent << "auto thread_id = thread_id_();\n";
   fs << this->indent << "auto block_id = block_id_();\n";
   // dynamic-shape alias reference
-  for (auto& [id_name, sym_name] : idnm_rts) {
+  for (auto &[id_name, sym_name] : idnm_rts) {
     fs << indent << "auto " << named_dim_ref_prefix << id_name << " = "
        << ReplaceDynDimName(sym_name) << ";\n";
   }
@@ -493,8 +489,7 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   __TRACE_EACH_VISIT__(d)
 
   // do not emit code for the placeholder
-  if (isa<PlaceHolderType>(NodeType(d)))
-    return true;
+  if (isa<PlaceHolderType>(NodeType(d))) return true;
 
   // handle .to  in AST::Memory
   assert((isa<AST::ChunkAt>(d.from)) && "Unexpected type for DMA's source.");
@@ -566,8 +561,7 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
     auto sty = dyn_cast<SpannedType>(sel->GetType());
     assert(sty);
     dst_sto = sty->GetStorage();
-  }
-  else
+  } else
     dst_sto = GetSpannedType(*d.to)->GetStorage();
   // auto dst_sto = (isa<AST::Memory>(d.to)) ? cast<AST::Memory>(d.to)->Get()
   //                                         :
@@ -607,20 +601,31 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
     std::ostringstream offss;
     size_t dim_cursor = 0;
     for (auto &bv : ca->positions->AllValues()) {
-      auto bvn = cast<AST::Identifier>(bv)->name;
-      if (auto bity = dyn_cast<BoundedITupleType>(bv->GetType())) {
+      AST::Identifier *bvid = dyn_cast<AST::Identifier>(bv);
+      if (!bvid)
+        bvid = cast<AST::Expr>(cast<AST::Expr>(bv)->GetL())->GetSymbol();
+      assert(bvid && "failed to obtain the identifier.");
+      auto bvn = bvid->name;
+      auto bity = bv->GetType();
+      if (IsBoundedType(bity)) {
         for (size_t it_idx = 0; it_idx < bity->Dims(); ++it_idx) {
-          std::string iv_str;
-          if (within_map.count(bvn))  // with-matcher existed
-            iv_str = within_map[bvn][it_idx];
-          else
-            iv_str = bvn;
+          auto MapName = [this, &it_idx](const std::string &bvn) {
+            std::string name;
+            if (within_map.count(bvn))  // with-matcher existed
+              name = within_map[bvn][it_idx];
+            else
+              name = bvn;
 
-          // prefix iteration variable
-          if (ContainsLoopVar(iv_str)) iv_str = "iv_" + iv_str;
+            // prefix iteration variable
+            if (ContainsLoopVar(name)) name = "iv_" + name;
+            return name;
+          };
+
+          std::string iv_str = MapName(bvn);
 
           // special handling for the parallel tiling factor
-          auto l = RemovePrefixOrNull("pv:", bity->GetNote());
+          auto l =
+              RemovePrefixOrNull("pv:", cast_dbg<BoundedType>(bity)->GetNote());
           if (l.has_value()) {
             // is marked as parallel whose level is decided by target check
             if (*l == "0")
@@ -629,6 +634,18 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
               iv_str = "block_id";
             else
               choreo_unreachable("invalid type note.");
+          }
+
+          if (auto expr = dyn_cast<AST::Expr>(bv)) {
+            assert(IsActualBoundedIntegerType(expr->GetType()));
+            if (auto ii = dyn_cast<AST::IntIndex>(expr->GetR())) {
+              auto r_str = MapName(PSTR(ii->value));
+              iv_str = "(" + iv_str + " +  (" + r_str + "))";
+            } else if (IsActualBoundedIntegerType(expr->GetR()->GetType())) {
+              auto r_str = MapName(PSTR(expr->GetR()));
+              iv_str = "(" + iv_str + " " + expr->op + " " + r_str + ")";
+            } else
+              choreo_unreachable("unsupported expression inside chunkat.");
           }
 
           offss << "Value(" << RSTR(shape.ValueAt(dim_cursor)) << ")*"
@@ -677,7 +694,7 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   if (isa<AST::Memory>(d.to) || isa<AST::Select>(d.to))
     chunkat_node = d.from;
   else if (auto c = cast<AST::ChunkAt>(d.to)) {
-    if (!c->positions) // xxx.chunkat() => identifier
+    if (!c->positions)  // xxx.chunkat() => identifier
       chunkat_node = d.from;
     else
       chunkat_node = d.to;
@@ -799,7 +816,7 @@ bool FactorCodeGen::Visit(AST::Swap &n) {
 
 bool FactorCodeGen::Visit(AST::Select &c) {
   __TRACE_EACH_VISIT__(c)
-  if (!c.inDMA) // z = select(...);
+  if (!c.inDMA)  // z = select(...);
     return true;
   // z = dma.copy xxx => select(...)
   size_t val_count = c.expr_list->Count();
@@ -820,8 +837,8 @@ bool FactorCodeGen::Visit(AST::Select &c) {
     fs << "select_(" << select_factor_str << "== " << i << ", "
        << PSTR(c.expr_list->ValueAt(i)) << (i < val_count - 1 ? ", " : "");
   }
-  fs << PSTR(c.expr_list->AllValues().back())
-     << std::string(val_count - 1, ')') << ";\n";
+  fs << PSTR(c.expr_list->AllValues().back()) << std::string(val_count - 1, ')')
+     << ";\n";
   return true;
 }
 
@@ -931,7 +948,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
   std::string func_name = d.name;
 
   auto MapRuntimeShapeNames = [this, &func_name](SpannedType *sty,
-                                                 const std::string& name,
+                                                 const std::string &name,
                                                  size_t p_index) {
     size_t count = 0;
     for (auto vi : sty->GetShape().Value()) {
@@ -1024,7 +1041,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
   fs << "StreamType()}, [&](auto args) {\n";
 
   // dynamic-shape alias reference
-  for (auto& [id_name, sym_name] : idnm_rts) {
+  for (auto &[id_name, sym_name] : idnm_rts) {
     dss << indent << "  auto " << named_dim_ref_prefix << id_name << " = "
         << ReplaceDynDimName(sym_name) << ";\n";
   }
@@ -1268,13 +1285,12 @@ std::string FactorCodeGen::ReplaceDynDimName(const std::string &e) {
 }
 
 std::optional<std::string> FactorCodeGen::ReplaceDynDimRef(
-    const std::string& e) {
-  for (auto& [id_name, sym_name] : idnm_rts) {
+    const std::string &e) {
+  for (auto &[id_name, sym_name] : idnm_rts) {
     // match str begins with "::", thus "\\b" appears only in the suffix.
     auto replaced =
         RegexReplaceAll(e, sym_name + "\\b", named_dim_ref_prefix + id_name);
-    if (replaced != e)
-      return replaced;
+    if (replaced != e) return replaced;
   }
   return std::nullopt;
 }
@@ -1307,7 +1323,7 @@ void FactorCodeGen::EmitRuntimeCheck(std::ostream &os, const Type &ty) {
           os << ", \"shape inconsistent on the " << Ordinal(i + 1)
              << " parameter (dim: " << count << ").\");\n";
         } else if (auto vale = dyn_cast<ValueExpr>(&vi)) {
-          ve_entries_map[*vale].push_back({i+1, count, elem_name});
+          ve_entries_map[*vale].push_back({i + 1, count, elem_name});
         }
         count++;
       }
@@ -1317,10 +1333,10 @@ void FactorCodeGen::EmitRuntimeCheck(std::ostream &os, const Type &ty) {
   // check if the named dims meet the constraint
   // eg. __co__ void foo(f32 [M, N] a, f32 [N, K] b)
   // then a.shape()[1] should be equal to b.shape()[0]
-  for (auto& [_, entries] : ve_entries_map) {
+  for (auto &[_, entries] : ve_entries_map) {
     for (size_t i = 1; i < entries.size(); ++i) {
-      auto& entry0 = entries[i - 1];
-      auto& entry1 = entries[i];
+      auto &entry0 = entries[i - 1];
+      auto &entry1 = entries[i];
       os << "  choreo::runtime_check(" << entry0.elem_name
          << " == " << entry1.elem_name;
       os << ", \"The shapes of the " << Ordinal(entry0.para_ordinal)
@@ -1339,8 +1355,7 @@ void FactorCodeGen::EmitRuntimeMemUsageCheck(std::ostream &os, const Type &ty) {
          "internal error when dealing with the host parameter size.");
 
   // check if the input shape is as declared in choreo
-  if (fty.in_tys.size() == 0)
-    return;
+  if (fty.in_tys.size() == 0) return;
 
   // there should be runtime memory usage check
   if (!rt_mem_usage_check_list.empty())

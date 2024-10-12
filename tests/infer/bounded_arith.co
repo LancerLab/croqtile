@@ -1,0 +1,34 @@
+// RUN: choreo -i %s | FileCheck --match-full-lines %s
+// RUN: choreo -v %s | FileCheck --check-prefix=CHKVALNO --match-full-lines %s
+
+// device program
+__co__ void bounded_arith(s32 [180, 27, 12] a) {
+  parallel p by 6 {
+    with index = {x, y} in [10, 9] {
+      foreach index {
+        dma.copy a.chunkat(x, y(1), p(-2)) => local;
+        dma.copy a.chunkat(x * y, y + 1, p(-1)) => local;
+//        dma.copy a.chunkat(5 + x * p, 1 - y, p) => local;
+      }
+    }
+  }
+}
+
+// CHKVALNO:      Alias "::bounded_arith::paraby_0::within_0::@y" -> #9
+// CHKVALNO:       <Bounded> 'x * y' ubound: 'const_90'
+// CHKVALNO:       New VN #15: 'const_90'
+// CHKVALNO:       Alias "::bounded_arith::paraby_0::within_0::foreach_0::@anon_0" -> #15
+// CHKVALNO:       <Bounded> 'y + 1' ubound: 'const_9'
+// CHKVALNO:       Alias "::bounded_arith::paraby_0::within_0::foreach_0::@anon_1" -> #9
+
+
+// CHECK: Parameter: ::bounded_arith::a, Type: s32 mdspan<3> [180, 27, 12]
+// CHECK: Bounded:   ::bounded_arith::paraby_0::p, Type: {int}->[6]
+// CHECK: Bounded:   ::bounded_arith::paraby_0::within_0::index, Type: {int,int}->[10, 9]
+// CHECK: Bounded:   ::bounded_arith::paraby_0::within_0::x, Type: {int}->[10]
+// CHECK: Bounded:   ::bounded_arith::paraby_0::within_0::y, Type: {int}->[9]
+// CHECK: Future:    ::bounded_arith::paraby_0::within_0::foreach_0::(anon), Type: sync=>local s32 mdspan<3> [18, 3, 2]
+// CHECK: Symbol:    ::bounded_arith::paraby_0::within_0::foreach_0::anon_0, Type: {int}->[90]
+// CHECK: Symbol:    ::bounded_arith::paraby_0::within_0::foreach_0::anon_1, Type: {int}->[9]
+// CHECK: Future:    ::bounded_arith::paraby_0::within_0::foreach_0::(anon), Type: sync=>local s32 mdspan<3> [2, 3, 2]
+// CHECK: Function:  ::bounded_arith, Type: void (*)(s32 mdspan<3> [180, 27, 12])

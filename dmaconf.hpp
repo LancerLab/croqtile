@@ -6,24 +6,23 @@
 namespace Choreo {
 
 struct DMAConfig {
-  virtual const std::string TypeNameString() const = 0;
-  virtual uint64_t RuntimeID() const { return 0xDEADBEEFULL; }
-  static uint64_t TypeID() { return 0xDEADBEEFULL; }
   virtual const std::string Name() const = 0;
   virtual void Print(std::ostream &) const = 0;
+
+  __UDT_TYPE_INFO_BASE__(none);
 };
 
 struct CopyConfig final : public DMAConfig, public TypeIDProvider<CopyConfig> {
   const std::string Name() const { return "copy"; }
   void Print(std::ostream &) const override{};
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(DMAConfig, CopyConfig)
 };
 
 struct SliceConfig final : public DMAConfig,
                            public TypeIDProvider<SliceConfig> {
   const std::string Name() const { return "slice"; }
   void Print(std::ostream &) const override{};
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(DMAConfig, SliceConfig)
 };
 
 struct PadConfig final : public DMAConfig, public TypeIDProvider<PadConfig> {
@@ -60,7 +59,7 @@ struct PadConfig final : public DMAConfig, public TypeIDProvider<PadConfig> {
        << "}, value: " << value.v;
   }
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(DMAConfig, PadConfig)
 };
 
 struct TransposeConfig final : public DMAConfig,
@@ -70,7 +69,7 @@ struct TransposeConfig final : public DMAConfig,
   void Print(std::ostream &os) const override {
     os << "transpose: dims{" << DelimitedString(dim_values) << "}";
   };
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(DMAConfig, TransposeConfig)
 };
 
 inline std::string STR(const DMAConfig &dc) {

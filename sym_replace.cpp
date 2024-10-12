@@ -131,7 +131,7 @@ void SymReplace::InitializeNode(ptr<AST::Node> n) {
       ptr<AST::Node>& dim = r;
       auto ii = dyn_cast<AST::IntIndex>(dim);
       assert(ii);
-      std::string name = nd2sn.at(l) + "(";
+      std::string name = nd2sn.at(l) + ((e->op == "getith") ? "[" : "(");
       if (auto num = dyn_cast<AST::IntLiteral>(ii->value))
         name += std::to_string(num->value);
       else if (isa<AST::Identifier>(ii->value))
@@ -140,7 +140,7 @@ void SymReplace::InitializeNode(ptr<AST::Node> n) {
         choreo_unreachable(
             "The node type of the value of AST::IntIndex is not "
             "supported in SymReplace yet.");
-      name += ")";
+      name += ((e->op == "getith") ? "]" : ")");
       InsertNdSnSymMap(n, name, false);
     } else {
     }
@@ -334,7 +334,7 @@ void SymReplace::SymbolizeExprNode(ptr<AST::Node> n) {
                          " is not supported in SymReplace yet.");
     }
   } else if (e->IsBinary()) {
-    if (op == "dimof") {
+    if (op == "dimof" || op == "getith") {
       // Handle special cases: the operand of n is not AST::Expr.
       auto ii = dyn_cast<AST::IntIndex>(R);
       assert(ii);

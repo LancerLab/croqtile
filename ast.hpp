@@ -65,9 +65,7 @@ struct Node {
   virtual void accept(Visitor&) = 0;
 
   // for runtime type disambiguition
-  virtual const std::string TypeNameString() const = 0;
-  virtual uint64_t RuntimeID() const { return 0ULL; }
-  static uint64_t TypeID() { return 0ULL; }
+  __UDT_TYPE_INFO_BASE__(node)
 };
 
 // utility functions
@@ -143,7 +141,7 @@ struct MultiNodes : public Node, public TypeIDProvider<MultiNodes> {
 
   void accept(Visitor& visitor) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, MultiNodes)
 };
 
 struct MultiValues : public Node, public TypeIDProvider<MultiValues> {
@@ -198,7 +196,7 @@ struct MultiValues : public Node, public TypeIDProvider<MultiValues> {
 
   void accept(Visitor& visitor) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, MultiValues)
 };
 
 struct Boolean : public Node, public TypeIDProvider<Boolean> {
@@ -212,7 +210,7 @@ struct Boolean : public Node, public TypeIDProvider<Boolean> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, Boolean)
 };
 
 struct IntLiteral : public Node, public TypeIDProvider<IntLiteral> {
@@ -231,7 +229,7 @@ struct IntLiteral : public Node, public TypeIDProvider<IntLiteral> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, IntLiteral)
 };
 
 struct Expr : public Node, public TypeIDProvider<Expr> {
@@ -381,7 +379,7 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, Expr)
 };
 
 // Represents both dimensions and s like {3, 4, 5} or {1, 2, 1}
@@ -462,7 +460,7 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, MultiDimSpans)
 };
 
 struct SpanAs : public Node, public TypeIDProvider<SpanAs> {
@@ -511,7 +509,7 @@ struct SpanAs : public Node, public TypeIDProvider<SpanAs> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, SpanAs)
 };
 
 struct NamedTypeDecl : public Node, public TypeIDProvider<NamedTypeDecl> {
@@ -542,7 +540,7 @@ struct NamedTypeDecl : public Node, public TypeIDProvider<NamedTypeDecl> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, NamedTypeDecl)
 };
 
 struct Memory : public Node, public TypeIDProvider<Memory> {
@@ -560,7 +558,7 @@ struct Memory : public Node, public TypeIDProvider<Memory> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, Memory)
 };
 
 // Represents declarations like: ituple t = {3, 4, 5};
@@ -583,7 +581,7 @@ struct IntTuple : public Node, public TypeIDProvider<IntTuple> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, IntTuple)
 };
 
 struct Assignment : public Node, public TypeIDProvider<Assignment> {
@@ -601,7 +599,7 @@ struct Assignment : public Node, public TypeIDProvider<Assignment> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, Assignment)
 };
 
 struct IntIndex : public Node, public TypeIDProvider<IntIndex> {
@@ -624,7 +622,7 @@ struct IntIndex : public Node, public TypeIDProvider<IntIndex> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, IntIndex)
 };
 
 // A data type could either be
@@ -725,7 +723,7 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
   }
 
  public:
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, DataType)
 };
 
 struct NamedVariableDecl : public Node,
@@ -762,7 +760,7 @@ struct NamedVariableDecl : public Node,
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, NamedVariableDecl)
 };
 
 struct Identifier : public Node, public TypeIDProvider<Identifier> {
@@ -777,7 +775,7 @@ struct Identifier : public Node, public TypeIDProvider<Identifier> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, Identifier)
 };
 
 struct Parameter : public Node, public TypeIDProvider<Parameter> {
@@ -800,7 +798,7 @@ struct Parameter : public Node, public TypeIDProvider<Parameter> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, Parameter)
 };
 
 struct ParamList : public Node, public TypeIDProvider<ParamList> {
@@ -816,7 +814,7 @@ struct ParamList : public Node, public TypeIDProvider<ParamList> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, ParamList)
 };
 
 struct IfElse : public Node, public TypeIDProvider<IfElse> {
@@ -844,7 +842,7 @@ struct IfElse : public Node, public TypeIDProvider<IfElse> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, IfElse)
 };
 
 struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
@@ -905,7 +903,7 @@ struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, ParallelBy)
 };
 
 // `require_bind` parsing "idx_1 <-> idx_2"
@@ -922,7 +920,7 @@ struct WhereBind : public Node, public TypeIDProvider<WhereBind> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, WhereBind)
 };
 
 struct WithIn : public Node, public TypeIDProvider<WithIn> {
@@ -953,7 +951,7 @@ struct WithIn : public Node, public TypeIDProvider<WithIn> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, WithIn)
 };
 
 struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
@@ -983,7 +981,7 @@ struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, WithBlock)
 };
 
 struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
@@ -1017,7 +1015,7 @@ struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, ChunkAt)
 };
 
 struct Select : public Node, public TypeIDProvider<Select> {
@@ -1041,7 +1039,7 @@ struct Select : public Node, public TypeIDProvider<Select> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, Select)
 };
 
 struct DMA : public Node, public TypeIDProvider<DMA> {
@@ -1137,7 +1135,7 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, DMA)
 };
 
 struct Wait : public Node, public TypeIDProvider<Wait> {
@@ -1151,7 +1149,7 @@ struct Wait : public Node, public TypeIDProvider<Wait> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, Wait)
 };
 
 struct Return : public Node, public TypeIDProvider<Return> {
@@ -1170,7 +1168,7 @@ struct Return : public Node, public TypeIDProvider<Return> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, Return)
 };
 
 struct Call : public Node, public TypeIDProvider<Call> {
@@ -1186,7 +1184,7 @@ struct Call : public Node, public TypeIDProvider<Call> {
   }
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, Call)
 };
 
 struct Swap : public Node, public TypeIDProvider<Swap> {
@@ -1201,7 +1199,7 @@ struct Swap : public Node, public TypeIDProvider<Swap> {
   }
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, Swap)
 };
 
 struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
@@ -1235,7 +1233,7 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   }
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, LoopRange)
 };
 
 struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
@@ -1263,7 +1261,7 @@ struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, ForeachBlock)
 };
 
 struct FunctionDecl : public Node, public TypeIDProvider<FunctionDecl> {
@@ -1281,7 +1279,7 @@ struct FunctionDecl : public Node, public TypeIDProvider<FunctionDecl> {
   }
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, FunctionDecl)
 };
 
 struct ChoreoFunction : public Node, public TypeIDProvider<ChoreoFunction> {
@@ -1298,7 +1296,7 @@ struct ChoreoFunction : public Node, public TypeIDProvider<ChoreoFunction> {
   }
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, ChoreoFunction)
 };
 
 struct CppSourceCode : public Node, public TypeIDProvider<CppSourceCode> {
@@ -1314,7 +1312,7 @@ struct CppSourceCode : public Node, public TypeIDProvider<CppSourceCode> {
   std::string GetCode() { return code; }
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, CppSourceCode)
 };
 
 // Top-level program structure
@@ -1330,16 +1328,17 @@ struct Program : public Node, public TypeIDProvider<Program> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Node, Program)
 };
 
+// utility
 inline std::optional<std::string> GetName(const Node& n) {
   if (auto id = dyn_cast<AST::Identifier>(&n))
     return id->name;
   else if (auto exp = dyn_cast<AST::Expr>(&n)) {
     if (auto id = exp->GetSymbol()) return id->name;
   }
-  return nullptr;
+  return std::nullopt;
 }
 
 }  // end of namespace AST

@@ -229,17 +229,28 @@ int TypeIDProvider<T>::__unique_id;
 
 // User defined type that utilize isa/cast/dyn_cast must place the macro inside
 // its class definition
-#define __UDT_TYPE_INFO__                                       \
-  const std::string TypeNameString() const override {                 \
-    std::string name = __PRETTY_FUNCTION__;                     \
-    std::regex prefix_regex("^.*Choreo::");                     \
-    name = std::regex_replace(name, prefix_regex, "");          \
-    std::regex suffix_regex("::TypeNameString.*$");             \
-    name = std::regex_replace(name, suffix_regex, "");          \
-    return name;                                                \
-  }                                                             \
-  static uint64_t TypeID() { return (uint64_t)(&__unique_id); } \
-  uint64_t RuntimeID() const override { return (uint64_t)(&__unique_id); }
+//
+#define __UDT_TYPE_INFO__(PTYPE, TTYPE)                                 \
+  const std::string TypeNameString() const override {                   \
+    std::string name = __PRETTY_FUNCTION__;                             \
+    std::regex prefix_regex("^.*Choreo::");                             \
+    name = std::regex_replace(name, prefix_regex, "");                  \
+    std::regex suffix_regex("::TypeNameString.*$");                     \
+    name = std::regex_replace(name, suffix_regex, "");                  \
+    return name;                                                        \
+  }                                                                     \
+  static uint64_t TypeID() {                                            \
+    return (uint64_t) & (TypeIDProvider<TTYPE>::__unique_id);           \
+  }                                                                     \
+  bool IsType(uint64_t ty) const override {                             \
+    return (ty == (uint64_t) & (TypeIDProvider<TTYPE>::__unique_id)) || \
+           PTYPE::IsType(ty);                                           \
+  }
+
+#define __UDT_TYPE_INFO_BASE__(NAME)                                 \
+  virtual const std::string TypeNameString() const { return #NAME; } \
+  static uint64_t TypeID() { return 0xDEADBEEFULL; }                 \
+  virtual bool IsType(uint64_t ty) const { return ty == 0xDEADBEEFULL; }
 
 // LLVM-style type utility functions
 //
@@ -251,12 +262,15 @@ int TypeIDProvider<T>::__unique_id;
 template <typename T, typename U>
 bool isa(U* n) {
   if (!n) return false;
-  return T::TypeID() == n->RuntimeID();
+  return n->IsType(T::TypeID());
 }
 template <typename T, typename U>
 bool isa(const ptr<U>& n) {
   if (!n) return false;
-  return T::TypeID() == n->RuntimeID();
+  //  std::cout << "id: " << (uint64_t)(&TypeIDProvider<U>::__unique_id) << ",
+  //  tid:" << U::TypeID() << ": " << n->TypeNameString() << ", tid: " <<
+  //  T::TypeID() << "\n";
+  return n->IsType(T::TypeID());
 }
 
 template <typename T, typename U>
@@ -823,10 +837,7 @@ struct Type {
   }
 
   // for runtime type disambiguition
-  virtual const std::string TypeNameString() const = 0;
-  virtual uint64_t RuntimeID() const { return 0xDEADBEEFULL; }
-  static uint64_t TypeID() { return 0xDEADBEEFULL; }
-  // forbidden to have instance
+  __UDT_TYPE_INFO_BASE__(notype)
 };
 
 inline bool operator!=(const Type& t1, const Type& t2) {
@@ -888,7 +899,7 @@ struct VoidType final : public Type, public TypeIDProvider<VoidType> {
   bool operator==(const Type& ty) const override { return isa<VoidType>(&ty); }
   bool ApprxEqual(const Type& ty) const override { return isa<VoidType>(&ty); }
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Type, VoidType)
 };
 
 // The type is unknown. It requires type inference
@@ -904,14 +915,7 @@ struct UnknownType final : public Type, public TypeIDProvider<UnknownType> {
   bool operator==(const Type&) const override { return false; }
   bool ApprxEqual(const Type&) const override { return false; }
 
-  __UDT_TYPE_INFO__
-};
-
-struct ScalarType : public Type {
-  ScalarType(TypeCategory t) : Type(t) {}
-  size_t Dims() const override { return 1; }
-  bool IsComplete() const override { return true; }
-  // can not have instance
+  __UDT_TYPE_INFO__(Type, UnknownType)
 };
 
 struct PlaceHolderType final : public Type,
@@ -931,7 +935,16 @@ struct PlaceHolderType final : public Type,
     return t.Category() == Category();
   }
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Type, PlaceHolderType)
+};
+
+struct ScalarType : public Type, public TypeIDProvider<ScalarType> {
+  ScalarType(TypeCategory t) : Type(t) {}
+  size_t Dims() const override { return 1; }
+  bool IsComplete() const override { return true; }
+  // can not have instance
+
+  __UDT_TYPE_INFO__(Type, ScalarType)
 };
 
 struct IntegerType : public ScalarType, public TypeIDProvider<IntegerType> {
@@ -945,7 +958,7 @@ struct IntegerType : public ScalarType, public TypeIDProvider<IntegerType> {
   }
   bool ApprxEqual(const Type& ty) const override { return operator==(ty); }
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(ScalarType, IntegerType)
 };
 
 struct BooleanType final : public ScalarType,
@@ -961,7 +974,7 @@ struct BooleanType final : public ScalarType,
   bool ApprxEqual(const Type& ty) const override {
     return isa<BooleanType>(&ty);
   }
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(ScalarType, BooleanType)
 };
 
 struct IndexType : public Type, public TypeIDProvider<IndexType> {
@@ -975,7 +988,7 @@ struct IndexType : public Type, public TypeIDProvider<IndexType> {
   bool operator==(const Type& ty) const override { return isa<IndexType>(&ty); }
   bool ApprxEqual(const Type& ty) const override { return isa<IndexType>(&ty); }
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Type, IndexType)
 };
 
 // ITuple is a dimensioned type
@@ -1022,7 +1035,7 @@ struct ITupleType : public Type, public TypeIDProvider<ITupleType> {
     return false;
   }
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Type, ITupleType)
 };
 
 struct MDSpanType : public Type, public TypeIDProvider<MDSpanType> {
@@ -1069,7 +1082,7 @@ struct MDSpanType : public Type, public TypeIDProvider<MDSpanType> {
 
   const std::string Name() const override { return "mdspan"; }
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Type, MDSpanType)
 };
 
 struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
@@ -1138,15 +1151,18 @@ struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
 
   const std::string Name() const override { return "spanned"; }
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Type, SpannedType)
 };
 
-struct BoundedType : public Type {
+struct BoundedType : public Type, public TypeIDProvider<BoundedType> {
   std::string note = "";  // some annotation to make
   BoundedType(TypeCategory tc, const std::string& n) : Type(tc), note(n) {}
   virtual bool HasValidBound() const = 0;
   virtual std::string GetNote() const { return note; };
   virtual void AppendNote(const std::string& n) { note += n; };
+  virtual const ValueItem& GetUpperBound() const = 0;
+
+  __UDT_TYPE_INFO__(Type, BoundedType)
 };
 
 struct BoundedIntegerType final : public BoundedType,
@@ -1171,7 +1187,7 @@ struct BoundedIntegerType final : public BoundedType,
            IsValidStride(stride);
   }
   ValueItem GetLowerBound() const { return lbound; }
-  ValueItem GetUpperBound() const { return ubound; }
+  const ValueItem& GetUpperBound() const override { return ubound; }
   ValueItem GetStride() const { return ubound; }
 
   bool operator==(const Type& ty) const override {
@@ -1195,7 +1211,7 @@ struct BoundedIntegerType final : public BoundedType,
 
   const std::string Name() const override { return "bounded-integer"; }
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(BoundedType, BoundedIntegerType)
 };
 
 struct BoundedITupleType final : public BoundedType,
@@ -1226,6 +1242,7 @@ struct BoundedITupleType final : public BoundedType,
   const MultiBounds GetUpperBounds() const { return ubounds; }
   const Shape GetSizes() const { return ubounds - lbounds; }
   IntegerList GetStrides() const { return strides; }
+  const ValueItem& GetUpperBound() const override { return ubounds.ValueAt(0); }
   const ValueItem& GetUpperBound(size_t idx) const {
     return ubounds.ValueAt(idx);
   }
@@ -1289,7 +1306,7 @@ struct BoundedITupleType final : public BoundedType,
 
   const std::string Name() const override { return "bounded-ituple"; }
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(BoundedType, BoundedITupleType)
 };
 
 struct FutureType : public Type, public TypeIDProvider<FutureType> {
@@ -1332,7 +1349,7 @@ struct FutureType : public Type, public TypeIDProvider<FutureType> {
     psty->Print(os);
   }
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Type, FutureType)
 };
 
 struct FunctionType : public Type, public TypeIDProvider<FunctionType> {
@@ -1375,7 +1392,7 @@ struct FunctionType : public Type, public TypeIDProvider<FunctionType> {
   }
   const std::string Name() const override { return "function"; }
 
-  __UDT_TYPE_INFO__
+  __UDT_TYPE_INFO__(Type, FunctionType)
 };
 
 #if 0
@@ -1426,29 +1443,20 @@ inline BaseType GetBaseType(const Type& ty) {
   choreo_unreachable(STR(ty) + " does not imply runtime storage.");
 }
 
-inline bool IsScalarType(const ptr<Type>& ty) {
-  return isa<IntegerType>(ty) && isa<BooleanType>(ty);
-}
+inline bool IsScalarType(const ptr<Type>& ty) { return isa<ScalarType>(ty); }
 
-inline bool IsBoundedType(const ptr<Type>& ty) {
-  return isa<BoundedIntegerType>(ty) || isa<BoundedITupleType>(ty);
-}
+inline bool IsBoundedType(const ptr<Type>& ty) { return isa<BoundedType>(ty); }
 
 inline bool IsActualBoundedIntegerType(const ptr<Type>& ty) {
-  if (isa<BoundedIntegerType>(ty)) return true;
-  if (auto bi = dyn_cast<BoundedITupleType>(ty)) return bi->Dims() == 1;
+  if (auto bty = dyn_cast<BoundedType>(ty)) return bty->Dims() == 1;
   return false;
 }
 
-inline ValueItem GetSingleUpperBound(const ptr<Type>& ty) {
+inline const ValueItem& GetSingleUpperBound(const ptr<Type>& ty) {
   if (!IsActualBoundedIntegerType(ty))
-    choreo_unreachable("can not get the single upper bound for a " + PSTR(ty) + " type.");
-  if (auto bit = dyn_cast<BoundedIntegerType>(ty))
-    return bit->GetUpperBound();
-  else if (auto bit = dyn_cast<BoundedITupleType>(ty))
-    return bit->GetUpperBound(0);
-  else
-    choreo_unreachable("unexpected type.");
+    choreo_unreachable("can not get the single upper bound for a " + PSTR(ty) +
+                       " type.");
+  return cast<BoundedType>(ty)->GetUpperBound();
 }
 
 // utility functions to generate types
