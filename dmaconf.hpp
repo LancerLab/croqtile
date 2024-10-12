@@ -6,7 +6,7 @@
 namespace Choreo {
 
 struct DMAConfig {
-  virtual const std::string TypeNameString() = 0;
+  virtual const std::string TypeNameString() const = 0;
   virtual uint64_t RuntimeID() const { return 0xDEADBEEFULL; }
   static uint64_t TypeID() { return 0xDEADBEEFULL; }
   virtual const std::string Name() const = 0;

@@ -230,7 +230,7 @@ int TypeIDProvider<T>::__unique_id;
 // User defined type that utilize isa/cast/dyn_cast must place the macro inside
 // its class definition
 #define __UDT_TYPE_INFO__                                       \
-  const std::string TypeNameString() override {                 \
+  const std::string TypeNameString() const override {                 \
     std::string name = __PRETTY_FUNCTION__;                     \
     std::regex prefix_regex("^.*Choreo::");                     \
     name = std::regex_replace(name, prefix_regex, "");          \
@@ -823,7 +823,7 @@ struct Type {
   }
 
   // for runtime type disambiguition
-  virtual const std::string TypeNameString() = 0;
+  virtual const std::string TypeNameString() const = 0;
   virtual uint64_t RuntimeID() const { return 0xDEADBEEFULL; }
   static uint64_t TypeID() { return 0xDEADBEEFULL; }
   // forbidden to have instance
@@ -1438,6 +1438,17 @@ inline bool IsActualBoundedIntegerType(const ptr<Type>& ty) {
   if (isa<BoundedIntegerType>(ty)) return true;
   if (auto bi = dyn_cast<BoundedITupleType>(ty)) return bi->Dims() == 1;
   return false;
+}
+
+inline ValueItem GetSingleUpperBound(const ptr<Type>& ty) {
+  if (!IsActualBoundedIntegerType(ty))
+    choreo_unreachable("can not get the single upper bound for a " + PSTR(ty) + " type.");
+  if (auto bit = dyn_cast<BoundedIntegerType>(ty))
+    return bit->GetUpperBound();
+  else if (auto bit = dyn_cast<BoundedITupleType>(ty))
+    return bit->GetUpperBound(0);
+  else
+    choreo_unreachable("unexpected type.");
 }
 
 // utility functions to generate types

@@ -64,7 +64,7 @@ class ValueNumbering {
   std::vector<std::unordered_map<int, std::string>> valueNumberExpressions;
   ValBind::BindInfo<int> bind_info;
 
-  std::vector<std::unordered_map<AST::Node*, int>>
+  std::vector<std::unordered_map<const AST::Node*, int>>
       nodeValueNumbers;  // cache to direct map node to value number
 
   int nextValueNumber = 0;
@@ -92,20 +92,23 @@ class ValueNumbering {
   // determined yet.
   void RebindSignatureWithValueNumber(const std::string& sig, int valno);
 
-  std::optional<std::string> TryToSimplifyNodeSignature(AST::Node& node);
+  std::optional<std::string> TryToSimplifyNodeSignature(const AST::Node& node);
 
   // Generate the signature for a node, simplify the signature when optimiz flag
   // is set.
-  std::string GenerateNodeSignature(AST::Node& node, bool optimiz = true);
+  std::string GenerateNodeSignature(const AST::Node& node, bool optimiz = true);
+
+  // special for bounded variables
+  std::optional<std::string> GenerateSpecialNodeSignature(const AST::Node&);
 
   // Directly get the value number. Abort when it fails.
-  int GetValueNumberForNode(AST::Node&);
+  int GetValueNumberForNode(const AST::Node&);
 
   // Generate the new value number. Abort when the value number exists.
-  int GenerateValueNumberForNode(AST::Node&);
+  int GenerateValueNumberForNode(const AST::Node&);
 
   // Check if the value number exists for the node
-  bool HasValueNumberForNode(AST::Node&);
+  bool HasValueNumberForNode(const AST::Node&);
 
   // Directly get the value number from a signature. Abort when it fails.
   int GetValueNumberOfSignature(const std::string&);
@@ -147,7 +150,7 @@ class ValueNumbering {
     return GetSignatureFromValueNumber(GetValueNumberOfSignature(sym));
   }
 
-  std::string GetSignatureForNode(AST::Node& n) {
+  std::string GetSignatureForNode(const AST::Node& n) {
     return GetSignatureFromValueNumber(GetValueNumberForNode(n));
   }
 
@@ -160,6 +163,12 @@ class ValueNumbering {
            << "\n";
     }
   }
+
+  std::optional<std::string> SignBoundedOperation(const location&,
+                                                  const std::string&,
+                                                  const AST::Node&,
+                                                  const AST::Node&,
+                                                  bool verbose);
 
   std::optional<std::string> TryToSimplifyBinary(const location&,
                                                  const std::string&,
@@ -959,7 +968,13 @@ class ShapeInference : public Visitor {
       };
 
       for (auto pos : n.positions->values) {
-        auto biv = cast<AST::Identifier>(pos.get());
+        AST::Identifier* biv = dyn_cast<AST::Identifier>(pos);
+        if (!biv) {
+          auto expr = cast<AST::Expr>(pos);
+          assert(expr->op == "getith");
+          biv = cast<AST::Expr>(expr->GetL())->GetSymbol();
+        }
+        assert(biv && "failed to obtain the identifier.");
         auto bound_name = SSTab().InScopeName("@" + biv->name);
         int bound_vn = vn.GetValueNumberOfSignature(bound_name);
         std::string bound_sn = vn.GetSignatureFromValueNumber(bound_vn);

@@ -45,13 +45,14 @@ std::vector<int> GetOperandsValNo(const std::string& input) {
 
 }  // namespace
 
-const std::string ValueNumbering::VNSymbolName(const AST::Identifier & id) const {
+const std::string ValueNumbering::VNSymbolName(
+    const AST::Identifier& id) const {
   auto sig = id.name;
   auto pty = visitor->NodeType(id);
   if (isa<SpannedType>(pty) || isa<FutureType>(pty)) {
     sig += ".span";  // only cares about value inside the mdspan
   } else if (IsBoundedType(pty)) {
-    sig = "@" + sig; // only cares about the upper bound
+    sig = "@" + sig;  // only cares about the upper bound
   }
   return sig;
 }
@@ -300,8 +301,78 @@ std::optional<std::string> ValueNumbering::TryToSimplifyBinary(
   return std::nullopt;
 }
 
+std::optional<std::string> ValueNumbering::SignBoundedOperation(
+    const location& loc, const std::string& op, const AST::Node& lhs,
+    const AST::Node& rhs, bool verbose) {
+  std::optional<std::string> res;
+  if (op == "+" || op == "-") {
+    if (isa<BoundedIntegerType>(lhs.GetType()) &&
+        (isa<IntegerType>(rhs.GetType())))
+      res = GetSignatureForNode(lhs);
+    else if (isa<BoundedIntegerType>(rhs.GetType()) &&
+             (isa<IntegerType>(lhs.GetType())))
+      res = GetSignatureForNode(rhs);
+    else if (isa<BoundedITupleType>(lhs.GetType()) &&
+             (isa<ITupleType>(rhs.GetType())))
+      res = GetSignatureForNode(lhs);
+    else if (isa<BoundedITupleType>(rhs.GetType()) &&
+             (isa<ITupleType>(lhs.GetType())))
+      res = GetSignatureForNode(rhs);
+    else
+      choreo_unreachable("operation is not permitted.");
+  } else if (op == "*") {
+    if (IsActualBoundedIntegerType(lhs.GetType()) &&
+        IsActualBoundedIntegerType(rhs.GetType())) {
+      auto lbound = GetSingleUpperBound(lhs.GetType());
+      auto rbound = GetSingleUpperBound(rhs.GetType());
+      if (isa<int>(&lbound) && isa<int>(&rbound))
+        res = "const_" + ValueItemAsString(lbound + rbound);
+      else if (!isa<int>(&lbound) && isa<int>(&rbound)) {
+        auto lvn =
+            GetOrInsertValueNumberFromSignature(ValueItemAsString(lbound));
+        auto rvn = GetOrInsertValueNumberFromSignature(
+            "const_" + ValueItemAsString(rbound));
+        res = "*:#" + std::to_string(lvn) + ":#" + std::to_string(rvn);
+      } else if (isa<int>(&lbound) && !isa<int>(&rbound)) {
+        auto lvn = GetOrInsertValueNumberFromSignature(
+            "const_" + ValueItemAsString(lbound));
+        auto rvn =
+            GetOrInsertValueNumberFromSignature(ValueItemAsString(rbound));
+        res = "*:#" + std::to_string(lvn) + ":#" + std::to_string(rvn);
+      } else {
+        auto lvn =
+            GetOrInsertValueNumberFromSignature(ValueItemAsString(lbound));
+        auto rvn =
+            GetOrInsertValueNumberFromSignature(ValueItemAsString(rbound));
+        res = "*:#" + std::to_string(lvn) + ":#" + std::to_string(rvn);
+      }
+    } else
+      choreo_unreachable("operation is not permitted.");
+  } else
+    choreo_unreachable("operation is not supported for bounded variables.");
+
+  if (trace && verbose)
+    os << ScopeIndent() << "<Bounded> '" << STR(lhs) << " " << op << " "
+       << STR(rhs) << "' ubound: '" << *res << "'\n";
+  return res;
+}
+
+std::optional<std::string> ValueNumbering::GenerateSpecialNodeSignature(
+    const AST::Node& node) {
+  if (auto* n = dyn_cast<AST::Expr>(&node))
+    if (n->op == "+" || n->op == "-" || n->op == "*") {
+      if (IsBoundedType(n->GetL()->GetType()) ||
+          IsBoundedType(n->GetR()->GetType())) {
+        return SignBoundedOperation(n->LOC(), n->op, *n->GetL(), *n->GetR(),
+                                    trace);
+      }
+    }
+
+  return std::nullopt;
+}
+
 std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
-    AST::Node& node) {
+    const AST::Node& node) {
   if (isa<AST::Identifier>(&node)) {
     return std::nullopt;
   } else if (auto* n = dyn_cast<AST::Expr>(&node)) {
@@ -313,6 +384,7 @@ std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
                auto res = TryToSimplifyBinary(n->LOC(), "+",
                                               GetSignatureForNode(*n->GetL()),
                                               GetSignatureForNode(*n->GetR()));
+
                if (res && trace)
                  os << ScopeIndent() << "<Simplify> '"
                     << GenerateNodeSignature(*n->GetL(), false) << " + "
@@ -325,6 +397,7 @@ std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
                auto res = TryToSimplifyBinary(n->LOC(), "-",
                                               GetSignatureForNode(*n->GetL()),
                                               GetSignatureForNode(*n->GetR()));
+
                if (res && trace)
                  os << ScopeIndent() << "<Simplify> '"
                     << GenerateNodeSignature(*n->GetL(), false) << " - "
@@ -543,8 +616,11 @@ std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
   return std::nullopt;
 }
 
-std::string ValueNumbering::GenerateNodeSignature(AST::Node& node,
+std::string ValueNumbering::GenerateNodeSignature(const AST::Node& node,
                                                   bool optimiz) {
+  // handle bounded variables
+  if (auto ssig = GenerateSpecialNodeSignature(node)) return *ssig;
+
   if (optimiz) {
     auto sns = TryToSimplifyNodeSignature(node);
     if (sns) return *sns;
@@ -633,7 +709,7 @@ std::string ValueNumbering::GenerateNodeSignature(AST::Node& node,
   return "";  // invalid value
 }
 
-bool ValueNumbering::HasValueNumberForNode(AST::Node& n) {
+bool ValueNumbering::HasValueNumberForNode(const AST::Node& n) {
   // the node has been visited before
   if (nodeValueNumbers.back().count(&n)) return true;
 
@@ -648,7 +724,7 @@ bool ValueNumbering::HasValueNumberForNode(AST::Node& n) {
 //   1. integer value of the expression
 //   2. associated span value of the expression
 //   3. associated upper bound value of the expression
-int ValueNumbering::GetValueNumberForNode(AST::Node& n) {
+int ValueNumbering::GetValueNumberForNode(const AST::Node& n) {
   // if it is an visited/numbered node
   if (nodeValueNumbers.back().count(&n)) return (nodeValueNumbers.back())[&n];
 
@@ -673,7 +749,7 @@ int ValueNumbering::GetValueNumberForNode(AST::Node& n) {
   return GetValueNumberOfSignature(signature);
 }
 
-int ValueNumbering::GenerateValueNumberForNode(AST::Node& n) {
+int ValueNumbering::GenerateValueNumberForNode(const AST::Node& n) {
   std::string signature = GenerateNodeSignature(n);
   if (signature == "")
     Error(n.LOC(),

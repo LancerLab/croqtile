@@ -65,7 +65,7 @@ struct Node {
   virtual void accept(Visitor&) = 0;
 
   // for runtime type disambiguition
-  virtual const std::string TypeNameString() = 0;
+  virtual const std::string TypeNameString() const = 0;
   virtual uint64_t RuntimeID() const { return 0ULL; }
   static uint64_t TypeID() { return 0ULL; }
 };
@@ -614,7 +614,10 @@ struct IntIndex : public Node, public TypeIDProvider<IntIndex> {
 
   // TODO(wsj): loc?
   explicit IntIndex(const IntIndex& ii) : Node(ii.LOC()), value(ii.value) {}
-  void UseBracket() { lb = '['; rb = ']'; }
+  void UseBracket() {
+    lb = '[';
+    rb = ']';
+  }
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix << lb << STR(value) << rb;
   }
