@@ -822,7 +822,7 @@ struct Type {
   virtual size_t Dims() const = 0;
   virtual bool IsComplete() const = 0;  // it is a partial or compelete type
   // is the information enough for semantic check and code generation
-  virtual bool HasSufficientInfo() const { return true; }
+  virtual bool HasSufficientInfo() const { return false; }
   virtual bool operator==(const Type& t) const = 0;
   // in-precise comparison without considering the shape detail.
   // used in early semantics
@@ -927,7 +927,7 @@ struct PlaceHolderType final : public Type,
     os << "placeholder<" << STR(Category()) << ">";
   }
   const std::string Name() const override { return "place_holder"; }
-  bool HasSufficientInfo() const { return false; }
+  bool HasSufficientInfo() const { return true; }
 
   bool operator==(const Type&) const override { return false; }
   // tolarate im-precise comparison
@@ -942,6 +942,7 @@ struct ScalarType : public Type, public TypeIDProvider<ScalarType> {
   ScalarType(TypeCategory t) : Type(t) {}
   size_t Dims() const override { return 1; }
   bool IsComplete() const override { return true; }
+  bool HasSufficientInfo() const override { return true; }
   // can not have instance
 
   __UDT_TYPE_INFO__(Type, ScalarType)
@@ -949,7 +950,6 @@ struct ScalarType : public Type, public TypeIDProvider<ScalarType> {
 
 struct IntegerType : public ScalarType, public TypeIDProvider<IntegerType> {
   IntegerType() : ScalarType(TypeCategory::INT) {}
-  bool IsComplete() const override { return true; }
   void Print(std::ostream& os) const override { os << "int"; }
   const std::string Name() const override { return "integer"; }
 
@@ -964,7 +964,6 @@ struct IntegerType : public ScalarType, public TypeIDProvider<IntegerType> {
 struct BooleanType final : public ScalarType,
                            public TypeIDProvider<BooleanType> {
   BooleanType() : ScalarType(TypeCategory::BOOL) {}
-  bool IsComplete() const override { return true; }
   void Print(std::ostream& os) const override { os << "bool"; }
   const std::string Name() const override { return "boolean"; }
 

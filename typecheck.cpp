@@ -79,7 +79,8 @@ bool TypeChecker::Visit(AST::IntIndex& n) {
 }
 bool TypeChecker::Visit(AST::DataType& n) {
   __TRACE_EACH_VISIT__(n)
-  if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
+  // TODO: figure out if we could check SufficientInfo
+  if (!ReportUnknown(n, __FILE__, __LINE__, true)) return false;
   return true;
 }
 bool TypeChecker::Visit(AST::Identifier& n) {
@@ -259,13 +260,24 @@ bool TypeChecker::ReportUnknownSymbol(const std::string& name,
   return true;
 }
 
-bool TypeChecker::ReportUnknown(AST::Node& n, const char* file, int line) {
+bool TypeChecker::ReportUnknown(AST::Node& n, const char* file, int line,
+                                bool ignore_detail) {
   if (isa<UnknownType>(NodeType(n))) {
     ++error_count;
-    Error(n.LOC(), "failed to obtain the type.");
-    if (trace_visit) os << file << ":" << line << ", " << AST::STR(n) << "\n";
+    Error(n.LOC(), "failed to obtain a type.");
+    if (trace_visit) os << file << ":" << line << ", " << STR(n) << "\n";
     return false;
   }
+
+  if (!ignore_detail && !NodeType(n)->HasSufficientInfo()) {
+    ++error_count;
+    Error(n.LOC(), "failed to obtain a type with sufficient info.");
+    if (trace_visit)
+      os << file << ":" << line << ", " << STR(n) << "(" << PSTR(NodeType(n))
+         << ")\n";
+    return false;
+  }
+
   return true;
 }
 
