@@ -325,6 +325,12 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
     return dyn_cast<Identifier>(value_r);
   }
 
+  IntLiteral* GetInt() {
+    if (t != Reference) return nullptr;
+    return dyn_cast<IntLiteral>(value_r);
+  }
+
+
   bool IsUnary() const { return t == Unary; }
   bool IsBinary() const { return t == Binary; }
   bool IsTernary() const { return t == Ternary; }
@@ -334,6 +340,14 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
     if (!IsBinary()) return false;
     if ((op == "+") || (op == "-") || (op == "*") || (op == "/") ||
         (op == "%") || (op == "cdiv"))
+      return true;
+    return false;
+  }
+
+  bool IsLogical() const {
+    if ((op == "||") || (op == "&&") || (op == "!") || (op == "<") ||
+        (op == "<=") || (op == "==") || (op == ">") || (op == ">=") ||
+        (op == "!="))
       return true;
     return false;
   }
@@ -612,10 +626,18 @@ struct IntIndex : public Node, public TypeIDProvider<IntIndex> {
 
   // TODO(wsj): loc?
   explicit IntIndex(const IntIndex& ii) : Node(ii.LOC()), value(ii.value) {}
+
   void UseBracket() {
     lb = '[';
     rb = ']';
   }
+
+  bool IsNegative() const {
+    if (auto il = dyn_cast<IntLiteral>(value))
+      return il->Val() < 0;
+    return false;
+  }
+
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix << lb << STR(value) << rb;
   }

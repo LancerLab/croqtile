@@ -3,13 +3,13 @@
 
 #include <filesystem>
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <thread>
-#include <map>
-#include <vector>
-#include <utility>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
 #include "ast.hpp"
 #include "choreo_header.inc"
@@ -70,16 +70,19 @@ struct FactorCodeGen : public CodeGenerator {
       rts_pidx;  // shape index in parameter list for the runtime shape name
   std::map<std::string, size_t>
       rts_nidx;  // dim index in shape for the runtime shape name
-  std::map<std::string, std::string> idnm_rts; // name in .co to symbolic name
+  std::map<std::string, std::string> idnm_rts;  // name in .co to symbolic name
   StringifyTable factor_symbols;
 
  public:
-  FactorCodeGen(std::ostream &os, const ptr<SymbolTable> &symtab, bool cross_compile)
+  FactorCodeGen(std::ostream &os, const ptr<SymbolTable> &symtab,
+                bool cross_compile)
       : CodeGenerator("codegen", os, symtab), cross_compile(cross_compile) {}
   FactorCodeGen(std::ostream &os, const ptr<SymbolTable> &symtab,
-                const std::vector<RtMemUsageCheckInfo> &list, bool cross_compile)
-      : CodeGenerator("codegen", os, symtab), rt_mem_usage_check_list(list),
-        cross_compile(cross_compile) {}
+                const std::vector<RtMemUsageCheckInfo> &list,
+                bool cross_compile)
+      : CodeGenerator("codegen", os, symtab),
+        cross_compile(cross_compile),
+        rt_mem_usage_check_list(list) {}
 
   void ResetBuffers() {
     ks.clear();
@@ -141,6 +144,7 @@ struct FactorCodeGen : public CodeGenerator {
                         const std::string &o_sz, const std::string &o_ty,
                         const Shape &s);
 
+  const std::string ExprSTR(AST::ptr<AST::Node>) const;
   std::string GenHostParamName() { return "hp" + std::to_string(sp_count++); }
   std::string ReplaceRuntimeNames(const std::string &, const std::string & = "",
                                   bool host_code = true);
@@ -159,4 +163,4 @@ struct FactorCodeGen : public CodeGenerator {
 
 }  // end namespace Choreo
 
-#endif // CHOREO_CODEGEN_FACTOR_HPP_
+#endif  // CHOREO_CODEGEN_FACTOR_HPP_

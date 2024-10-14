@@ -1,0 +1,18 @@
+// RUN: choreo %s | FileCheck %s
+
+// device program
+__co__ void bounded(s32 [180, 27, 12] a) {
+  parallel p by 6 {
+    with index = {x, y} in [10, 9] {
+      foreach index {
+        dma.copy a.chunkat(x * y, y + 1, p) => local;
+      }
+      dma.copy a.chunkat(x, y(1), p(-1)) => local;
+    }
+  }
+}
+
+// CHECK:         auto anon_0 = ((iv_x)*(iv_y));
+// CHECK:         auto anon_1 = ((iv_y)+(Value(1)));
+// CHECK:         async_load_(__choreo_anon_fut__0, args[0], __choreo_anon_fut__0_buffer, {Value(2)*anon_0,Value(3)*anon_1,Value(2)*thread_id});
+// CHECK:     async_load_(__choreo_anon_fut__1, args[0], __choreo_anon_fut__1_buffer, {Value(18)*x,Value(3)*(Value(1)),Value(2)*(6+(Value(-1)))});

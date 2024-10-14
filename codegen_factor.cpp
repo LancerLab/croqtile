@@ -27,6 +27,13 @@
 using namespace Choreo;
 using namespace Choreo::Factor;
 
+inline const std::string ValueSTR(const ValueItem &vi) {
+  if (auto i = dyn_cast<int>(&vi))
+    return "Value(" + std::to_string(*i) + ")";
+  else
+    return STR(vi);
+}
+
 bool FactorCodeGen::ContainsLoopVar(const std::string &iv) const {
   for (auto &loop_var : loop_vars)
     if (loop_var.count(iv)) return true;
@@ -356,6 +363,9 @@ bool FactorCodeGen::Visit(AST::Assignment &node) {
       fs << "});\n";
       sa->list->SetDelimiter(orig_delimiter);
     }
+  } else if (isa<BoundedType>(NodeType(node))) {
+    fs << indent << "auto " << node.name << " = " << ExprSTR(node.value)
+       << ";\n";
   }
   return true;
 }
@@ -601,59 +611,34 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
     std::ostringstream offss;
     size_t dim_cursor = 0;
     for (auto &bv : ca->positions->AllValues()) {
-      AST::Identifier *bvid = dyn_cast<AST::Identifier>(bv);
-      if (!bvid)
-        bvid = cast<AST::Expr>(cast<AST::Expr>(bv)->GetL())->GetSymbol();
-      assert(bvid && "failed to obtain the identifier.");
-      auto bvn = bvid->name;
-      auto bity = bv->GetType();
-      if (IsBoundedType(bity)) {
-        for (size_t it_idx = 0; it_idx < bity->Dims(); ++it_idx) {
-          auto MapName = [this, &it_idx](const std::string &bvn) {
-            std::string name;
-            if (within_map.count(bvn))  // with-matcher existed
-              name = within_map[bvn][it_idx];
-            else
-              name = bvn;
-
-            // prefix iteration variable
-            if (ContainsLoopVar(name)) name = "iv_" + name;
-            return name;
-          };
-
-          std::string iv_str = MapName(bvn);
-
-          // special handling for the parallel tiling factor
-          auto l =
-              RemovePrefixOrNull("pv:", cast_dbg<BoundedType>(bity)->GetNote());
-          if (l.has_value()) {
-            // is marked as parallel whose level is decided by target check
-            if (*l == "0")
-              iv_str = "thread_id";
-            else if (*l == "1")
-              iv_str = "block_id";
-            else
-              choreo_unreachable("invalid type note.");
-          }
-
-          if (auto expr = dyn_cast<AST::Expr>(bv)) {
-            assert(IsActualBoundedIntegerType(expr->GetType()));
-            if (auto ii = dyn_cast<AST::IntIndex>(expr->GetR())) {
-              auto r_str = MapName(PSTR(ii->value));
-              iv_str = "(" + iv_str + " +  (" + r_str + "))";
-            } else if (IsActualBoundedIntegerType(expr->GetR()->GetType())) {
-              auto r_str = MapName(PSTR(expr->GetR()));
-              iv_str = "(" + iv_str + " " + expr->op + " " + r_str + ")";
-            } else
-              choreo_unreachable("unsupported expression inside chunkat.");
-          }
-
+      // It could either be identifier or a 'getith' expr
+      if (auto id = dyn_cast<AST::Identifier>(bv)) {
+        auto bvn = id->name;
+        auto ty = cast_dbg<BoundedType>(NodeType(*id));
+        // iterate over single bounded variables
+        for (size_t it_idx = 0; it_idx < ty->Dims(); ++it_idx) {
+          std::string name;
+          if (within_map.count(bvn))  // with-matcher existed
+            name = within_map[bvn][it_idx];
+          else
+            name = bvn;
+          auto iv_str = ExprSTR(AST::Make<AST::Identifier>(id->LOC(), name));
           offss << "Value(" << RSTR(shape.ValueAt(dim_cursor)) << ")*"
                 << iv_str;
           if (++dim_cursor < rank) offss << ",";
         }
+      } else if (auto gi_exp = dyn_cast<AST::Expr>(bv)) {
+        auto id = cast_dbg<AST::Expr>(gi_exp->GetL())->GetSymbol();
+        auto ty = cast_dbg<BoundedType>(NodeType(*id));
+        assert((ty->Dims() == 1) &&
+               "Bounded ituple has not been supported yet.");
+        assert((within_map.count(id->name) == 0) &&
+               "Bounded ituple has not been supported yet.");
+        auto iv_str = ExprSTR(bv);
+        offss << "Value(" << RSTR(shape.ValueAt(dim_cursor)) << ")*" << iv_str;
+        if (++dim_cursor < rank) offss << ",";
       } else
-        choreo_unreachable("unsupported type.");
+        choreo_unreachable("unsupported chunkat expressions.");
     }
     return "{" + offss.str() + "}";
   };
@@ -1525,4 +1510,66 @@ void FactorCodeGen::OutputScript(FunctionType *fty, const std::string &name,
 
   os << "\n# step 3: set the factor binary file name\n";
   os << "factor_bin=" << factor_bfn << "\n";
+}
+
+const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
+  std::ostringstream oss;
+
+  if (auto id = dyn_cast<AST::Identifier>(e)) {
+    auto ty = NodeType(*id);
+    if (ContainsLoopVar(id->name))
+      oss << "iv_" << id->name;
+    else if (isa<BoundedType>(ty) &&
+             PrefixedWith(cast<BoundedType>(ty)->GetNote(), "pv")) {
+      auto l = RemovePrefixOrNull("pv:", cast<BoundedType>(ty)->GetNote());
+      assert(l.has_value());
+      // is marked as parallel whose level is decided by target check
+      if (*l == "0")
+        oss << "thread_id";
+      else if (*l == "1")
+        oss << "block_id";
+      else
+        choreo_unreachable("invalid bounded type note.");
+    } else
+      oss << id->name;
+  } else if (auto il = dyn_cast<AST::IntLiteral>(e)) {
+    oss << "Value(" << il->value << ")";
+  } else if (auto ii = dyn_cast<AST::IntIndex>(e)) {
+    return ExprSTR(ii->value);
+  } else if (auto expr = dyn_cast<AST::Expr>(e)) {
+    if (expr->GetInt()) {
+      return ExprSTR(expr->GetReference());
+    } else if (expr->GetSymbol()) {
+      return ExprSTR(expr->GetReference());
+    } else if (expr->IsUnary()) {
+      if (expr->op == "!") {
+        oss << "!(" << ExprSTR(expr->GetR()) << ")";
+      } else if (expr->op == "ubound") {
+        auto rty = cast<BoundedType>(expr->GetR()->GetType());
+        if (rty->Dims() == 1)
+          oss << "(" << ValueSTR(rty->GetUpperBound()) << ")";
+      } else
+        choreo_unreachable("Unsupported choreo expression.");
+    } else if (expr->op == "cdiv") {
+      oss << "((" << ExprSTR(expr->GetL()) << ")+(" << ExprSTR(expr->GetR())
+          << " - Value(1))/(" << ExprSTR(expr->GetR()) << ")";
+    } else if (expr->op == "getith") {
+      auto lty = cast<BoundedType>(NodeType(*expr->GetL()));
+      if (cast<AST::IntIndex>(expr->GetR())->IsNegative()) {
+        oss << "(" << ValueSTR(lty->GetUpperBound()) << "+("
+            << ExprSTR(expr->GetR()) << "))";
+      } else
+        oss << "(" << ExprSTR(expr->GetR()) << ")";
+    } else if (expr->IsArith() || expr->IsLogical()) {
+      oss << "((" << ExprSTR(expr->GetL()) << ")" << expr->op << "("
+          << ExprSTR(expr->GetR()) << "))";
+    } else if (expr->IsTernary()) {
+      oss << "(" << ExprSTR(expr->GetC()) << ") ? (" << ExprSTR(expr->GetL())
+          << ") : (" << ExprSTR(expr->GetR()) << ")";
+    } else
+      choreo_unreachable("unsupported expression '" + expr->op + "'.");
+  } else
+    choreo_unreachable("unsupported expression '" + expr->op + "'.");
+
+  return oss.str();
 }
