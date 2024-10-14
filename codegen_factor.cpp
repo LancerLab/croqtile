@@ -216,17 +216,10 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
     assert(val_count >= 2);
     fs << this->indent << "auto " << node.name_str << " = ";
     for (size_t i = 0; i < val_count - 1; i++) {
-      std::string select_factor_str = PSTR(s->select_factor);
-      for (auto &loop_var : loop_vars.back()) {
-        size_t pos = 0;
-        while ((pos = select_factor_str.find(loop_var, pos)) !=
-               std::string::npos) {
-          select_factor_str.replace(pos, loop_var.length(), "iv_" + loop_var);
-          pos += loop_var.length() + 3;
-        }
-      }
+      std::string select_factor_str = ExprSTR(s->select_factor);
       fs << "select_(" << select_factor_str << "== " << i << ", "
-         << PSTR(s->expr_list->ValueAt(i)) << (i < val_count - 1 ? ", " : "");
+         << ExprSTR(s->expr_list->ValueAt(i))
+         << (i < val_count - 1 ? ", " : "");
     }
     fs << PSTR(s->expr_list->AllValues().back())
        << std::string(val_count - 1, ')') << ";\n";
@@ -614,7 +607,7 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
       // It could either be identifier or a 'getith' expr
       if (auto id = dyn_cast<AST::Identifier>(bv)) {
         auto bvn = id->name;
-        auto ty = cast_dbg<BoundedType>(NodeType(*id));
+        auto ty = cast<BoundedType>(NodeType(*id));
         // iterate over single bounded variables
         for (size_t it_idx = 0; it_idx < ty->Dims(); ++it_idx) {
           std::string name;
@@ -628,8 +621,8 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
           if (++dim_cursor < rank) offss << ",";
         }
       } else if (auto gi_exp = dyn_cast<AST::Expr>(bv)) {
-        auto id = cast_dbg<AST::Expr>(gi_exp->GetL())->GetSymbol();
-        auto ty = cast_dbg<BoundedType>(NodeType(*id));
+        auto id = cast<AST::Expr>(gi_exp->GetL())->GetSymbol();
+        auto ty = cast<BoundedType>(NodeType(*id));
         assert((ty->Dims() == 1) &&
                "Bounded ituple has not been supported yet.");
         assert((within_map.count(id->name) == 0) &&
@@ -1545,14 +1538,13 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
       if (expr->op == "!") {
         oss << "!(" << ExprSTR(expr->GetR()) << ")";
       } else if (expr->op == "ubound") {
-        auto rty = cast<BoundedType>(expr->GetR()->GetType());
-        if (rty->Dims() == 1)
-          oss << "(" << ValueSTR(rty->GetUpperBound()) << ")";
+        auto rty = cast<BoundedType>(NodeType(*expr->GetR()));
+        if (rty->Dims() == 1) oss << ValueSTR(rty->GetUpperBound());
       } else
         choreo_unreachable("Unsupported choreo expression.");
     } else if (expr->op == "cdiv") {
       oss << "((" << ExprSTR(expr->GetL()) << ")+(" << ExprSTR(expr->GetR())
-          << " - Value(1))/(" << ExprSTR(expr->GetR()) << ")";
+          << "-Value(1))/(" << ExprSTR(expr->GetR()) << ")";
     } else if (expr->op == "getith") {
       auto lty = cast<BoundedType>(NodeType(*expr->GetL()));
       if (cast<AST::IntIndex>(expr->GetR())->IsNegative()) {

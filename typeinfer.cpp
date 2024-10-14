@@ -149,7 +149,7 @@ bool TypeInference::SetAsCurrentType(AST::Node &nd, const std::string &n) {
       if (n->mem) st->SetStorage(n->mem->st);
 
   // The type is successfully inferred, set the node
-  nd.SetType(cur_type);
+  nd.SetType(ShadowTypeStorage(cur_type));
 
   return true;
 }
@@ -318,7 +318,8 @@ bool TypeInference::Visit(AST::Assignment &n) {
     return false;
   }
 
-  auto ty = NodeType(*n.value);
+  auto ty = ShadowTypeStorage(NodeType(*n.value));
+
   AssignSymbolWithType(n.LOC(), n.name, ty);
   n.SetType(ty);
 
@@ -338,6 +339,7 @@ bool TypeInference::Visit(AST::Assignment &n) {
 
 bool TypeInference::Visit(AST::IntIndex &n) {
   __TRACE_EACH_VISIT__(n)
+  n.SetType(MakeIntegerType());
   return true;
 }
 
@@ -534,12 +536,15 @@ bool TypeInference::Visit(AST::Expr &n) {
       cur_type = n.GetType();
       // TODO(wsj) result type is?
       // bounded integer, lb and ub changed!
-    } else if (isa<BoundedITupleType>(pty_lhs) && isa<BoundedITupleType>(pty_rhs)) {
+    } else if (isa<BoundedITupleType>(pty_lhs) &&
+               isa<BoundedITupleType>(pty_rhs)) {
       // to support `chunkat(x, y*z)`
       auto bitt_lhs = cast<BoundedITupleType>(pty_lhs);
       auto bitt_rhs = cast<BoundedITupleType>(pty_rhs);
-      // bounded integer in within will be transformed to bounded ituple in valno.hpp
-      assert(bitt_lhs->Dims() == 1 && bitt_rhs->Dims() == 1 && "for now only support multiplication of one dim bounded ituples.");
+      // bounded integer in within will be transformed to bounded ituple in
+      // valno.hpp
+      assert(bitt_lhs->Dims() == 1 && bitt_rhs->Dims() == 1 &&
+             "for now only support multiplication of one dim bounded ituples.");
       auto ub = bitt_lhs->GetUpperBound(0) * bitt_rhs->GetUpperBound(0);
       n.SetType(MakeBoundedITupleType(Shape(1, ub)));
       cur_type = n.GetType();

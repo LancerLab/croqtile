@@ -548,7 +548,8 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
         os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
       return false;
     }
-    ReportErrorWhenViolateODR(n.LOC(), n.name, __FILE__, __LINE__, sty);
+    ReportErrorWhenViolateODR(n.LOC(), n.name, __FILE__, __LINE__,
+                              ShadowTypeStorage(sty));
     if (auto ty = dyn_cast<SpannedType>(sty)) {
       ReportErrorWhenViolateODR(n.LOC(), n.name + ".span", __FILE__, __LINE__,
                                 MakeRankedMDSpanType(ty->Dims()));
@@ -557,7 +558,7 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
       ReportErrorWhenViolateODR(n.LOC(), n.name + ".span", __FILE__, __LINE__,
                                 MakeRankedMDSpanType(ty->Dims()));
       ReportErrorWhenViolateODR(n.LOC(), n.name + ".data", __FILE__, __LINE__,
-                                MakeRankedSpannedType(ty->Dims()));
+                                ShadowTypeStorage(ty->GetSpannedType()));
     }
     return true;
   }
@@ -1030,7 +1031,7 @@ bool EarlySemantics::Visit(AST::Select& n) {
     }
   }
 
-  SetNodeType(n, v0ty);
+  SetNodeType(n, ShadowTypeStorage(v0ty));
 
   return true;
 }

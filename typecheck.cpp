@@ -75,6 +75,11 @@ bool TypeChecker::Visit(AST::Assignment& n) {
 bool TypeChecker::Visit(AST::IntIndex& n) {
   __TRACE_EACH_VISIT__(n)
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
+  if (!isa<IntegerType>(n.value->GetType())) {
+    Error(n.LOC(), "Expect `" + PSTR(n.value) + "' to be a integer type.");
+    error_count++;
+    return false;
+  }
   return true;
 }
 bool TypeChecker::Visit(AST::DataType& n) {
@@ -212,7 +217,7 @@ bool TypeChecker::Visit(AST::Select& n) {
 
     ++error_count;
     Error(expr->LOC(), "Type mismatch inside SELECT: " + PSTR(expr) + "(" +
-                           TYPE_STR(expr) + ") vs. " + PSTR(expr) + "(" +
+                           TYPE_STR(expr) + ") vs. " + PSTR(expr0) + "(" +
                            TYPE_STR(expr0) + ").");
   }
 

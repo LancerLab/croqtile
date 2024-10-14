@@ -103,6 +103,20 @@ enum class FundamentalType {
 
 enum class Storage { LOCAL, SHARED, GLOBAL, DEFAULT, NONE };
 
+inline static bool Compatible(const Storage& a, const Storage& b) {
+  if (a == Storage::DEFAULT || a == Storage::GLOBAL)
+    return (b == Storage::DEFAULT || b == Storage::GLOBAL);
+  else
+    return a == b;
+}
+
+inline static Storage ProjectStorage(const Storage& a) {
+  if (a == Storage::DEFAULT)
+    return Storage::GLOBAL;
+  else
+    return a;
+}
+
 enum Attribute : uint16_t {
   ATT_NONE = 0,
   ATT_SHADOW_TO_GLOBAL = 1,  // shadow the host memory to global
@@ -1105,7 +1119,8 @@ struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
   bool operator==(const Type& ty) const override {
     if (!isa<SpannedType>(&ty)) return false;
     auto& t = (SpannedType&)ty;
-    return t.f_type == f_type && *t.s_type == *s_type && t.m_type == m_type;
+    return t.f_type == f_type && *t.s_type == *s_type &&
+           Compatible(t.m_type, m_type);
   }
 
   bool ApprxEqual(const Type& ty) const override {
@@ -1595,6 +1610,20 @@ inline ptr<PlaceHolderType> MakePlaceHolderFutureType() {
 inline ptr<FunctionType> MakeFunctionType(const ptr<Type> ot,
                                           const std::vector<ptr<Type>>& its) {
   return std::make_shared<FunctionType>(ot, its);
+}
+
+// map default to global
+inline static ptr<Type> ShadowTypeStorage(ptr<Type> ty) {
+  if (auto sty = dyn_cast<SpannedType>(ty))
+    return MakeSpannedType(sty->ElementType(), sty->GetShape(),
+                           ProjectStorage(sty->GetStorage()));
+  else if (auto fty = dyn_cast<FutureType>(ty)) {
+    auto sty = fty->GetSpannedType();
+    return MakeFutureType(MakeSpannedType(sty->ElementType(), sty->GetShape(),
+                                          ProjectStorage(sty->GetStorage())),
+                          fty->IsAsync());
+  } else
+    return ty;
 }
 
 }  // end namespace Choreo
