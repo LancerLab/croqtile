@@ -200,7 +200,6 @@ class ShapeInference : public Visitor {
 
   int cur_vn = GetInvalidValueNumber();
   int cur_mdspan_vn = GetInvalidValueNumber();
-  int cur_ub_vn = GetInvalidValueNumber();
 
   std::string cur_fn;
   // when values are consumed instead of generated

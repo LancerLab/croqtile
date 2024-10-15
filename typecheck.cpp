@@ -202,6 +202,14 @@ bool TypeChecker::Visit(AST::Swap& n) {
 bool TypeChecker::Visit(AST::Select& n) {
   __TRACE_EACH_VISIT__(n)
   size_t ec = error_count;
+
+  if (!isa<IntegerType>(NodeType(*n.select_factor))) {
+    ++error_count;
+    Error(n.select_factor->LOC(), "Expect " + PSTR(n.select_factor) +
+                                      " to be an integer type but got " +
+                                      PSTR(NodeType(*n.select_factor)) + ".");
+  }
+
   auto expr_list = n.expr_list;
   auto expr0 = expr_list->ValueAt(0);
   if (!isa<FutureType>(NodeType(*expr0)) &&

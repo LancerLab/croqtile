@@ -963,9 +963,19 @@ struct ScalarType : public Type, public TypeIDProvider<ScalarType> {
 };
 
 struct IntegerType : public ScalarType, public TypeIDProvider<IntegerType> {
+  ValueItem value = GetInvalidValueItem();  // optional value expression
   IntegerType() : ScalarType(TypeCategory::INT) {}
-  void Print(std::ostream& os) const override { os << "int"; }
+  IntegerType(const ValueItem& vi) : ScalarType(TypeCategory::INT), value(vi) {}
+  void Print(std::ostream& os) const override {
+    os << "int" << (IsValidValueItem(value) ? (" [" + STR(value) + "]") : "");
+  }
   const std::string Name() const override { return "integer"; }
+  std::optional<ValueItem> GetValidExpression() const {
+    if (IsValidValueItem(value))
+      return value;
+    else
+      return std::nullopt;
+  }
 
   bool operator==(const Type& ty) const override {
     return isa<IntegerType>(&ty);
@@ -1466,6 +1476,11 @@ inline bool IsActualBoundedIntegerType(const ptr<Type>& ty) {
   return false;
 }
 
+inline bool CanYieldAnInteger(const ptr<Type>& ty) {
+  return isa<ScalarType>(ty) || IsActualBoundedIntegerType(ty) ||
+         (isa<ITupleType>(ty) && ty->Dims() == 1);
+}
+
 inline const ValueItem& GetSingleUpperBound(const ptr<Type>& ty) {
   if (!IsActualBoundedIntegerType(ty))
     choreo_unreachable("can not get the single upper bound for a " + PSTR(ty) +
@@ -1485,6 +1500,14 @@ inline ptr<UnknownType> MakeUnknownType() {
 
 inline ptr<IntegerType> MakeIntegerType() {
   return std::make_shared<IntegerType>();
+}
+
+inline ptr<IntegerType> MakeIntegerType(const Shape& s) {
+  if (s.IsValid()) {
+    assert(s.Rank() == 1);
+    return std::make_shared<IntegerType>(s.ValueAt(0));
+  }
+  return MakeIntegerType();
 }
 
 inline ptr<BooleanType> MakeBooleanType() {

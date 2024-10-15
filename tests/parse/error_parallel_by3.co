@@ -1,4 +1,4 @@
-// RUN: not choreo %s 2>&1 | FileCheck %s
+// RUN: not choreo %s -sa SEMA 2>&1 | FileCheck %s
 
 __co__ void i_parallel_by3() {
   parallel {p} by [6, 128] {

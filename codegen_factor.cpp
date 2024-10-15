@@ -216,7 +216,14 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
     assert(val_count >= 2);
     fs << this->indent << "auto " << node.name_str << " = ";
     for (size_t i = 0; i < val_count - 1; i++) {
-      std::string select_factor_str = ExprSTR(s->select_factor);
+      std::string select_factor_str;
+      auto factor = cast<IntegerType>(s->select_factor->GetType());
+      if (auto expr = factor->GetValidExpression())
+        select_factor_str = STR(
+            expr.value());  // use the expression simplified by value numbering
+      else
+        select_factor_str = ExprSTR(s->select_factor);
+
       fs << "select_(" << select_factor_str << "== " << i << ", "
          << ExprSTR(s->expr_list->ValueAt(i))
          << (i < val_count - 1 ? ", " : "");
@@ -300,6 +307,8 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
       // generate "memset_()" action to initiate each alloc_memory with value 0
       fs << indent << "memset_(" << sym << "_init, " << sym << ", 0);\n";
     }
+  } else if (auto ity = dyn_cast<IntegerType>(nty)) {
+    // simply ignore the generation of such simple integers
   } else {
     choreo_unreachable("non-spanned (" + PSTR(nty) + ") is not yet supported.");
     // TODO(albert): handle anon case
@@ -803,7 +812,13 @@ bool FactorCodeGen::Visit(AST::Select &c) {
   assert(val_count >= 2);
   fs << this->indent << "auto " << c.future << " = ";
   for (size_t i = 0; i < val_count - 1; i++) {
-    std::string select_factor_str = PSTR(c.select_factor);
+    std::string select_factor_str;
+    auto factor = cast<IntegerType>(c.select_factor->GetType());
+    if (auto expr = factor->GetValidExpression())
+      select_factor_str =
+          STR(*expr);  // use the expression simplified by value numbering
+    else
+      select_factor_str = ExprSTR(c.select_factor);
     for (auto &loop_var : loop_vars.back()) {
       size_t pos = 0;
       while ((pos = select_factor_str.find(loop_var, pos)) !=

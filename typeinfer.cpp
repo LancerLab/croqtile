@@ -745,6 +745,12 @@ bool TypeInference::Visit(AST::Swap &n) {
 
 bool TypeInference::Visit(AST::Select &n) {
   __TRACE_EACH_VISIT__(n)
+
+  if (CanYieldAnInteger(NodeType(*n.select_factor))) {
+    // normalize the shape
+    n.select_factor->SetType(MakeIntegerType(n.select_factor->s));
+  }
+
   auto &val = n.expr_list->AllValues()[0];
   if (isa<FutureType>(NodeType(*val))) {
     n.SetType(val->GetType());
