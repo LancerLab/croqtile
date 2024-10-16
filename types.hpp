@@ -1222,7 +1222,7 @@ struct BoundedIntegerType final : public BoundedType,
   ValueItem GetStride() const { return ubound; }
 
   bool operator==(const Type& ty) const override {
-    if (isa<BoundedIntegerType>(&ty)) return false;
+    if (!isa<BoundedIntegerType>(&ty)) return false;
     auto bty = (BoundedIntegerType&)ty;
     return (bty.lbound == lbound) && (bty.ubound == ubound) &&
            (bty.stride == stride);

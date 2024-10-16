@@ -67,7 +67,7 @@ struct GCUCheck : public VisitorWithSymTab {
 
       parallel_level--;
       assert(parallel_level >= 0 && "Unexpected parallel level");
-      max_parallel_level = 0;
+      if (parallel_level == 0) max_parallel_level = 0;
     }
     return true;
   }
