@@ -43,6 +43,6 @@ __co__ void hoist_bounded(f32 [3, 4, 5] b) {
 }
 
 // CHECK: replace x with x.
-// CHECK: replace  (y + 1)  with anon_2.
+// CHECK: replace  (y + 1)  with __choreo_ca_anon_2.
 // CHECK: Hoisted:
-// CHECK: `- Assign: anon_2 =  (y + 1)
+// CHECK: `- Assign: __choreo_ca_anon_2 =  (y + 1)
