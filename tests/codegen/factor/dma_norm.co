@@ -1,0 +1,34 @@
+// RUN: choreo %s -ln | FileCheck %s
+
+// device program
+__co__ void dma_norm(f16 [180, 27, 12] a) {
+  parallel p by 6 {
+    local f16 [18, 3, 2] b;
+    local f16 [18, 3, 2] c;
+    with index = {x, y} in [10, 9] {
+      foreach index {
+        f = dma.copy.async a.chunkat(x, y, p) => local;
+        dma.copy a.chunkat(x, y, p) => select(x % 3, b, c);
+        wait f;
+      }
+      local f16 [18, 3, 2] buffer;
+      dma.copy a.chunkat(x, y, p) => buffer;
+    }
+  }
+}
+
+// CHECK: Hoisted:
+// CHECK-NEXT: `- Var Decl (): anon_1, type: local f16 mdspan<3> [18, 3, 2]
+// CHECK:     auto b = alloc_(L1Type(FloatType(16),{18, 3, 2}));
+// CHECK:     auto c = alloc_(L1Type(FloatType(16),{18, 3, 2}));
+// CHECK:     auto anon_1 = alloc_(L1Type(FloatType(16),{18, 3, 2}));
+// CHECK:     auto f = alloc_dma_(SDMAType());
+// CHECK:     auto __choreo_anon_fut__0 = alloc_dma_(SDMAType());
+// CHECK:     auto buffer = alloc_(L1Type(FloatType(16),{18, 3, 2}));
+// CHECK:     auto __choreo_anon_fut__1 = alloc_dma_(SDMAType());
+// CHECK:         async_load_(f, args[0], anon_1, {Value(18)*iv_x,Value(3)*iv_y,Value(2)*thread_id});
+// CHECK:         auto anon_0 = select_(1 == 0, b, c);
+// CHECK:         async_load_(__choreo_anon_fut__0, args[0], anon_0, {Value(18)*iv_x,Value(3)*iv_y,Value(2)*thread_id});
+// CHECK:         wait_dma_(__choreo_anon_fut__0);
+// CHECK:     async_load_(__choreo_anon_fut__1, args[0], buffer, {Value(18)*x,Value(3)*y,Value(2)*thread_id});
+// CHECK:     wait_dma_(__choreo_anon_fut__1);

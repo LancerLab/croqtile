@@ -35,18 +35,18 @@ __co__ auto ele_add(s32 [6, ?, 128] lhs, s32 [6, ?, 128] rhs) {
 // CHECK: auto lhs_type = DRAMType(IntType(32), {6, -1, 128});
 // CHECK: auto rhs_type = DRAMType(IntType(32), {6, -1, 128});
 // CHECK: auto output_type = DRAMType(IntType(32), {6, -1, 128});
-// CHECK:    auto lhs_load_buffer = alloc_(L1Type(IntType(32),{6, 2, 32}));
-// CHECK:    auto rhs_load_buffer = alloc_(L1Type(IntType(32),{6, 2, 32}));
+// CHECK:    auto anon_0 = alloc_(L1Type(IntType(32),{6, 2, 32}));
+// CHECK:    auto anon_1 = alloc_(L1Type(IntType(32),{6, 2, 32}));
 // CHECK:    auto l1_out = alloc_(L1Type(IntType(32),{6, 2, 32}));
 // CHECK:    for_(q, 1, 1, [&](auto iv_q) {
 // CHECK:      for_(x, dim_(args[0], 1)/2-0, 1, [&](auto iv_x) {
 // CHECK:        auto iv_z = iv_x;
 // CHECK:        for_(y, 4, 1, [&](auto iv_y) {
-// CHECK:          async_load_(lhs_load, args[0], lhs_load_buffer, {Value(6)*iv_q,Value(2)*iv_x,Value(32)*iv_y});
-// CHECK:          async_load_(rhs_load, args[1], rhs_load_buffer, {Value(6)*iv_q,Value(2)*iv_z,Value(32)*iv_y});
+// CHECK:          async_load_(lhs_load, args[0], anon_0, {Value(6)*iv_q,Value(2)*iv_x,Value(32)*iv_y});
+// CHECK:          async_load_(rhs_load, args[1], anon_1, {Value(6)*iv_q,Value(2)*iv_z,Value(32)*iv_y});
 // CHECK:          wait_dma_(lhs_load);
 // CHECK:          wait_dma_(rhs_load);
-// CHECK:          call_("kernel", {lhs_load_buffer.addr_(),rhs_load_buffer.addr_(),l1_out.addr_(),384});
+// CHECK:          call_("kernel", {anon_0.addr_(),anon_1.addr_(),l1_out.addr_(),384});
 // CHECK:          async_store_(out_store, l1_out, output, {Value(6)*iv_q,Value(2)*iv_x,Value(32)*iv_y});
 // CHECK:          wait_dma_(out_store);
 // CHECK:         }); // end of choreo-foreach block on 'y'.

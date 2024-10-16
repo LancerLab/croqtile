@@ -70,6 +70,10 @@ using namespace factor;
     parallel_level++;
   } else if (isa<AST::ForeachBlock>(&n)) {
     loop_vars.push_back({});
+  } else if (auto dma = dyn_cast<AST::DMA>(&n)) {
+    // associate a future with its buffer
+    if (!dma->future.empty())
+      fut_buf.emplace(dma->future, cast<AST::ChunkAt>(dma->to)->RefSymbol());
   }
   return 0;
 }
@@ -307,7 +311,7 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
       // generate "memset_()" action to initiate each alloc_memory with value 0
       fs << indent << "memset_(" << sym << "_init, " << sym << ", 0);\n";
     }
-  } else if (auto ity = dyn_cast<IntegerType>(nty)) {
+  } else if (isa<IntegerType>(nty)) {
     // simply ignore the generation of such simple integers
   } else {
     choreo_unreachable("non-spanned (" + PSTR(nty) + ") is not yet supported.");
@@ -365,7 +369,8 @@ bool FactorCodeGen::Visit(AST::Assignment &node) {
       fs << "});\n";
       sa->list->SetDelimiter(orig_delimiter);
     }
-  } else if (isa<BoundedType>(NodeType(node))) {
+  } else if (isa<BoundedType>(NodeType(node)) ||
+             isa<SpannedType>(NodeType(node))) {
     fs << indent << "auto " << node.name << " = " << ExprSTR(node.value)
        << ";\n";
   }
@@ -543,47 +548,23 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
     future_name = "__choreo_anon_fut__" + std::to_string(future_count++);
   }
 
+  assert(isa<AST::ChunkAt>(d.to));
   // cook a valid dst buffer name
-  // note: for select, we also use the future_name + "_buffer" as handle name.
-  auto dst_buffer_name = (isa<AST::ChunkAt>(d.to))
-                             ? STR(cast<AST::ChunkAt>(d.to)->data)
-                             : future_name + "_buffer";
-  // if to node is AST::SELECT, use its future name, otherwise keep default one
-  // dst_buffer_name = (isa<AST::Select>(d.to))
-  //                            ? STR(cast<AST::Select>(d.to)->future)
-  //                            : future_name + "_buffer";
 
-  std::string src_node_name = STR(cast<AST::ChunkAt>(d.from)->data);
-  assert(!src_node_name.empty() && "expect a named future/span in chunkat.");
-  // use source symbol as the buffer name
-  // lhs_load => lhs_load_buffer used by user of lhs_load
-  std::string src_buffer_name = src_node_name;
-  if (isa<FutureType>(GetSymbolType(
-          RemoveSuffix(cast<AST::ChunkAt>(d.from)->data->name, ".data"))))
-    src_buffer_name = src_node_name + "_buffer";
+  auto dst_buffer_name = cast<AST::ChunkAt>(d.to)->RefSymbol();
+  auto src_buffer_name = cast<AST::ChunkAt>(d.from)->RefSymbol();
 
   auto sty = GetSpannedType(*d.from);  // source spanned type
+  auto tty = GetSpannedType(*d.to);    // source spanned type
   size_t rank = sty->Dims();
-  auto dst_shape = ty->GetShape();
+  //  auto dst_shape = ty->GetShape();
   auto src_sto = sty->GetStorage();
-  auto dst_sto = Storage::DEFAULT;
-  if (isa<AST::Memory>(d.to))
-    dst_sto = cast<AST::Memory>(d.to)->Get();
-  else if (auto sel = dyn_cast<AST::Select>(d.to)) {
-    auto sty = dyn_cast<SpannedType>(sel->GetType());
-    assert(sty);
-    dst_sto = sty->GetStorage();
-  } else
-    dst_sto = GetSpannedType(*d.to)->GetStorage();
-  // auto dst_sto = (isa<AST::Memory>(d.to)) ? cast<AST::Memory>(d.to)->Get()
-  //                                         :
-  //                                         GetSpannedType(*d.to)->GetStorage();
-  // dst_sto = (isa<AST::Select>(d.to)) ? Storage::LOCAL
-  //                                         :
-  //                                         GetSpannedType(*d.to)->GetStorage();
+  auto dst_sto = tty->GetStorage();
+
   int src_level = MemLevel(src_sto);
   int dst_level = MemLevel(dst_sto);
 
+#if 0
   // allocate storage for DMA destination when it is not explicitly stated.
   if (auto mem_node = dyn_cast<AST::Memory>(d.to)) {
     // support
@@ -598,6 +579,7 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
                 << stringify(sty->ElementType()) << ","
                 << ReplaceRuntimeNames(LSTR(dst_shape), "", false) << "));\n";
   }
+#endif
 
   auto GenerateOffsetString = [this, &GetSpannedType](AST::Node &n) {
     auto sty = GetSpannedType(n);
@@ -646,7 +628,7 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   };
 
   // factor_symbols.Print(fs);
-  int arg_idx = factor_symbols.GetSymbolIndex(src_node_name);
+  int arg_idx = factor_symbols.GetSymbolIndex(src_buffer_name);
   src_buffer_name =
       arg_idx < 0 ? src_buffer_name : "args[" + std::to_string(arg_idx) + "]";
 
@@ -777,8 +759,7 @@ bool FactorCodeGen::Visit(AST::Call &c) {
 #endif
           fs << shape.GetSizeExpression();
         } else if (arg->op == "dataof") {
-          fs << STR(arg->GetR()) << "_buffer"
-             << ".addr_()";
+          fs << ExprSTR(args->AllValues()[index]) << ".addr_()";
         }
         break;
       default:
@@ -803,14 +784,14 @@ bool FactorCodeGen::Visit(AST::Swap &n) {
 
 bool FactorCodeGen::Visit(AST::Select &c) {
   __TRACE_EACH_VISIT__(c)
-  if (!c.inDMA)  // z = select(...);
-    return true;
+  assert(!c.inDMA);
+#if 0
   // z = dma.copy xxx => select(...)
   size_t val_count = c.expr_list->Count();
   // if val_count == 1, pingpong is meaningless? ( TODO: maybe assert when
   // earlysema)
   assert(val_count >= 2);
-  fs << this->indent << "auto " << c.future << " = ";
+  fs << this->indent << "auto " << c.rname << " = ";
   for (size_t i = 0; i < val_count - 1; i++) {
     std::string select_factor_str;
     auto factor = cast<IntegerType>(c.select_factor->GetType());
@@ -832,6 +813,7 @@ bool FactorCodeGen::Visit(AST::Select &c) {
   }
   fs << PSTR(c.expr_list->AllValues().back()) << std::string(val_count - 1, ')')
      << ";\n";
+#endif
   return true;
 }
 
@@ -1555,6 +1537,17 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
       } else if (expr->op == "ubound") {
         auto rty = cast<BoundedType>(NodeType(*expr->GetR()));
         if (rty->Dims() == 1) oss << ValueSTR(rty->GetUpperBound());
+      } else if (expr->op == "dataof") {
+        assert(isa<FutureType>(expr->GetR()->GetType()) &&
+               "expect a future operand.");
+        if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol()) {
+          if (fut_buf.count(id->name))
+            oss << fut_buf.at(id->name);
+          else
+            choreo_unreachable("Future '" + id->name +
+                               "' is not associated with a buffer.");
+        } else
+          choreo_unreachable("Can not retrive name of the future.");
       } else
         choreo_unreachable("Unsupported choreo expression.");
     } else if (expr->op == "cdiv") {
@@ -1575,6 +1568,24 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
           << ") : (" << ExprSTR(expr->GetR()) << ")";
     } else
       choreo_unreachable("unsupported expression '" + expr->op + "'.");
+  } else if (auto sl = dyn_cast<AST::Select>(e)) {
+    size_t val_count = sl->expr_list->Count();
+    // if val_count == 1, pingpong is meaningless? ( TODO: maybe assert when
+    // earlysema)
+    assert(val_count >= 2);
+    for (size_t i = 0; i < val_count - 1; i++) {
+      std::string select_factor_str;
+      auto factor = cast<IntegerType>(sl->select_factor->GetType());
+      if (auto expr = factor->GetValidExpression())
+        select_factor_str =
+            STR(*expr);  // use the expression simplified by value numbering
+      else
+        select_factor_str = ExprSTR(sl->select_factor);
+      oss << "select_(" << select_factor_str << " == " << i << ", "
+          << PSTR(sl->expr_list->ValueAt(i)) << (i < val_count - 1 ? ", " : "");
+    }
+    oss << PSTR(sl->expr_list->AllValues().back())
+        << std::string(val_count - 1, ')');
   } else
     choreo_unreachable("unsupported expression '" + expr->op + "'.");
 

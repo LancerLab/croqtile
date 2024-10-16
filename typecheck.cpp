@@ -63,7 +63,8 @@ bool TypeChecker::Visit(AST::Assignment& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   if (!ReportUnknownSymbol(n.name, n.LOC(), __FILE__, __LINE__)) return false;
 
-  if (*GetSymbolType(n.name) != *NodeType(*n.value)) {
+  if ((*GetSymbolType(n.name) != *NodeType(*n.value)) ||
+      (*NodeType(n) != *NodeType(*n.value))) {
     Error(n.LOC(), "inconsistent types are found in the assignment.");
     error_count++;
     return false;
@@ -169,6 +170,42 @@ bool TypeChecker::Visit(AST::SpanAs& n) {
 bool TypeChecker::Visit(AST::DMA& n) {
   __TRACE_EACH_VISIT__(n)
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
+
+  bool IsDummy = (n.operation == ".none");
+  auto ty = n.GetType();
+
+  if (!isa<FutureType>(ty)) {
+    Error(n.LOC(), "Expect the DMA to produce a FutureType, but got '" +
+                       PSTR(n.GetType()) + "'.");
+    error_count++;
+  }
+
+  if ((IsDummy || cast<FutureType>(ty)->IsAsync()) && n.future.empty()) {
+    Error(n.LOC(), "A dummy/async DMA must be named.");
+    error_count++;
+  }
+
+  if (!isa<AST::ChunkAt>(n.from) || !isa<SpannedType>(n.from->GetType())) {
+    Error(n.LOC(),
+          "The 'from' of DMA is not as expected: " + n.from->TypeNameString() +
+              "(" + PSTR(n.from->GetType()) + ").");
+    error_count++;
+  }
+
+  if (!isa<AST::ChunkAt>(n.to) || !isa<SpannedType>(n.to->GetType())) {
+    Error(n.LOC(),
+          "The 'to' of DMA is not as expected: " + n.to->TypeNameString() +
+              "(" + PSTR(n.from->GetType()) + ").");
+    error_count++;
+  }
+
+  if (!(cast<SpannedType>(n.from->GetType())->DataEqual(*n.to->GetType()))) {
+    Error(n.LOC(), "Type inconsistent between DMA 'from'(" +
+                       PSTR(n.from->GetType()) + ") and 'to'(" +
+                       PSTR(n.to->GetType()) + ").");
+    error_count++;
+  }
+
   return true;
 }
 bool TypeChecker::Visit(AST::ChunkAt& n) {

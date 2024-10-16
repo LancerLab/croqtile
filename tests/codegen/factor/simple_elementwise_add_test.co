@@ -51,9 +51,9 @@ int bar(int a[], int b[]) {
 // CHECK: auto ts = launch_kernel_("__choreo_ele_add_parallel", grid_dim, block_dim, args.back(), {args[0], args[1]}, {global_buffer});
 // CHECK: return std::vector<Value>{global_buffer};
 // CHECK: auto thread_id = thread_id_();
-// CHECK: auto f1_buffer = alloc_(L1Type(IntType(32),{24, 10, 10}));
+// CHECK: auto anon_0 = alloc_(L1Type(IntType(32),{24, 10, 10}));
 // CHECK: auto f1 = alloc_dma_(SDMAType());
-// CHECK: auto f2_buffer = alloc_(L1Type(IntType(32),{24, 10, 10}));
+// CHECK: auto anon_1 = alloc_(L1Type(IntType(32),{24, 10, 10}));
 // CHECK: auto f2 = alloc_dma_(SDMAType());
 // CHECK: auto local_buffer = alloc_(L1Type(IntType(32),{24, 10, 10}));
 // CHECK: auto f3 = alloc_dma_(SDMAType());
@@ -63,10 +63,10 @@ int bar(int a[], int b[]) {
 // CHECK: y = 0;
 // CHECK: for_(x, 10, 1, [&](auto iv_x) {{.*}}
 // CHECK:   for_(y + (1), 10 + (-3), 2, [&](auto iv_y) {{.*}}
-// CHECK: async_load_(f1, args[0], f1_buffer, {Value(24)*thread_id,Value(10)*iv_x,Value(10)*iv_y});
-// CHECK: async_load_(f2, args[1], f2_buffer, {Value(24)*thread_id,Value(10)*iv_x,Value(10)*iv_y});
+// CHECK: async_load_(f1, args[0], anon_0, {Value(24)*thread_id,Value(10)*iv_x,Value(10)*iv_y});
+// CHECK: async_load_(f2, args[1], anon_1, {Value(24)*thread_id,Value(10)*iv_x,Value(10)*iv_y});
 // CHECK: wait_dma_(f1);
 // CHECK: wait_dma_(f2);
-// CHECK: call_("kernel", {f1_buffer.addr_(),f2_buffer.addr_(),local_buffer.addr_(),2400});
+// CHECK: call_("kernel", {anon_0.addr_(),anon_1.addr_(),local_buffer.addr_(),2400});
 // CHECK: async_store_(f3, local_buffer, global_buffer, {Value(24)*thread_id,Value(10)*iv_x,Value(10)*iv_y});
 // CHECK: wait_dma_(f3);

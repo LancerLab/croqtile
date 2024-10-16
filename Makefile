@@ -57,7 +57,7 @@ parser.tab.cc parser.tab.hh location.hh: $(PARSER_SRC)
 %.o : %.cc types.hpp aux.hpp ast.hpp codegen_factor_types.hpp codegen_cuda_types.hpp scanner.hpp symtab.hpp parser.tab.hh location.hh
 	$(CC) $(CFLAGS) $< -c -o $@
 
-%.o : %.cpp $(HEADER_FILES) location.hh codegen_cuda_types.hpp codegen_factor_types.hpp
+%.o : %.cpp $(HEADER_FILES) location.hh
 	$(CC) $(CFLAGS) $(SYMBOLIC_INCLUDE_FLAGS) $< -c  -o $@
 
 choreo_header.inc : utils/choreo.h

@@ -1133,6 +1133,13 @@ struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
            Compatible(t.m_type, m_type);
   }
 
+  // sometimes it requires to ignore the memory
+  bool DataEqual(const Type& ty) const {
+    if (!isa<SpannedType>(&ty)) return false;
+    auto& t = (SpannedType&)ty;
+    return t.f_type == f_type && *t.s_type == *s_type;
+  }
+
   bool ApprxEqual(const Type& ty) const override {
     if (auto pty = dyn_cast<PlaceHolderType>(&ty))
       return pty->ApprxEqual(*this);
@@ -1636,7 +1643,7 @@ inline ptr<FunctionType> MakeFunctionType(const ptr<Type> ot,
 }
 
 // map default to global
-inline static ptr<Type> ShadowTypeStorage(ptr<Type> ty) {
+inline static ptr<Type> ShadowTypeStorage(const ptr<Type>& ty) {
   if (auto sty = dyn_cast<SpannedType>(ty))
     return MakeSpannedType(sty->ElementType(), sty->GetShape(),
                            ProjectStorage(sty->GetStorage()));
@@ -1647,6 +1654,15 @@ inline static ptr<Type> ShadowTypeStorage(ptr<Type> ty) {
                           fty->IsAsync());
   } else
     return ty;
+}
+
+inline static SpannedType* GetSpannedType(const ptr<Type>& ty) {
+  if (auto fty = dyn_cast<FutureType>(ty))
+    return fty->GetSpannedType().get();
+  else if (auto sty = dyn_cast<SpannedType>(ty))
+    return sty;
+  else
+    return nullptr;
 }
 
 }  // end namespace Choreo

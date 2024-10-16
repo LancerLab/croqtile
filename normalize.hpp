@@ -37,9 +37,11 @@ struct Normalizer : public Visitor {
   void ResetListReference() { list_ref = nullptr; }
 
   // for node hoisting
+  using NodeInsertInfo =
+      std::vector<std::tuple<int, ptr<AST::Node>, std::string>>;
   std::stack<AST::MultiNodes *> multi_nodes;
   int cur_dma_index = -1;
-  std::vector<std::tuple<int, ptr<AST::Node>, std::string>> mnodes_insertions;
+  std::map<AST::MultiNodes *, NodeInsertInfo> mnodes_insertions;
 
   std::string GetInternalValueString() { return "$" + std::to_string(count++); }
 
@@ -108,7 +110,8 @@ struct Normalizer : public Visitor {
     __TRACE_NORM_VISIT__(n)
 
     // insert the node at the given place
-    for (auto item : mnodes_insertions) {
+    assert(&n == multi_nodes.top());
+    for (auto item : mnodes_insertions[multi_nodes.top()]) {
       auto &index = std::get<0>(item);
       auto &pnode = std::get<1>(item);
       auto &name = std::get<2>(item);
@@ -118,9 +121,9 @@ struct Normalizer : public Visitor {
       if (trace) os << "Hoisted: " << PSTR(assign) << "\n";
     }
 
+    mnodes_insertions.erase(&n);
     multi_nodes.pop();
     cur_dma_index = -1;
-    mnodes_insertions.clear();
 
     return true;
   }
@@ -270,14 +273,31 @@ struct Normalizer : public Visitor {
   bool Visit(AST::WithBlock &) override { return true; }
   bool Visit(AST::Memory &) override { return true; }
   bool Visit(AST::SpanAs &) override { return true; }
-  bool Visit(AST::DMA &) override { return true; }
+
+  bool Visit(AST::DMA &n) override {
+    if (n.operation == ".none") return true;
+    if (!isa<AST::Select>(n.to)) return true;
+
+    auto anon_sym = SymbolTable::GetAnonName();
+    assert(cur_dma_index != -1);
+    // hoist the span_as to multinodes
+    int index = cur_dma_index + mnodes_insertions[multi_nodes.top()].size();
+    cast<AST::Select>(n.to)->inDMA = false;
+    mnodes_insertions[multi_nodes.top()].emplace_back(
+        std::make_tuple(index, n.to, anon_sym));
+
+    n.to = AST::Make<AST::ChunkAt>(
+        n.to->LOC(), AST::Make<AST::Identifier>(n.to->LOC(), anon_sym));
+    return true;
+  }
+
   bool Visit(AST::ChunkAt &n) override {
     __TRACE_NORM_VISIT__(n)
     if (n.sa) {
       assert(cur_dma_index != -1);
       // hoist the span_as to multinodes
-      int index = cur_dma_index + mnodes_insertions.size();
-      mnodes_insertions.emplace_back(
+      int index = cur_dma_index + mnodes_insertions[multi_nodes.top()].size();
+      mnodes_insertions[multi_nodes.top()].emplace_back(
           std::make_tuple(index, n.sa, n.sa->nid->name));
       n.sa.reset();
     }
@@ -298,9 +318,10 @@ struct Normalizer : public Visitor {
           if (auto lexpr = dyn_cast<AST::Expr>(expr->GetL())) {
             if (!lexpr->GetSymbol()) {
               // hoist the non-getith part
-              int index = cur_dma_index + mnodes_insertions.size();
+              int index =
+                  cur_dma_index + mnodes_insertions[multi_nodes.top()].size();
               auto nname = SymbolTable::GetAnonName();
-              mnodes_insertions.emplace_back(
+              mnodes_insertions[multi_nodes.top()].emplace_back(
                   std::make_tuple(index, expr->GetL(), nname));
               if (trace) os << "replace " << PSTR(expr->GetL()) << " with ";
               expr->SetL(AST::Make<AST::Identifier>(v->LOC(), nname));
@@ -311,9 +332,10 @@ struct Normalizer : public Visitor {
         }
 
         // else, hoist the arith out
-        int index = cur_dma_index + mnodes_insertions.size();
+        int index = cur_dma_index + mnodes_insertions[multi_nodes.top()].size();
         auto nname = SymbolTable::GetAnonName();
-        mnodes_insertions.emplace_back(std::make_tuple(index, v, nname));
+        mnodes_insertions[multi_nodes.top()].emplace_back(
+            std::make_tuple(index, v, nname));
         repls.emplace_back(i, AST::Make<AST::Identifier>(v->LOC(), nname));
       }
       for (auto &repl : repls) {
@@ -339,9 +361,6 @@ struct Normalizer : public Visitor {
   bool Visit(AST::ChoreoFunction &) override { return true; }
   bool Visit(AST::CppSourceCode &) override { return true; }
   bool Visit(AST::Program &) override { return true; }
-
- private:
-  bool SetCurrentType(AST::Node &, const std::string &);
 };
 
 }  // end namespace Choreo

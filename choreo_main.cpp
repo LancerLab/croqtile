@@ -11,11 +11,13 @@
 #include "earlysema.hpp"
 #include "enums.hpp"
 #include "gcucheck.hpp"
+#include "latenorm.hpp"
 #include "normalize.hpp"
 #include "options.hpp"
 #include "scanner.hpp"
 #include "sym_replace.hpp"
 #include "symtab.hpp"
+#include "ttrans_factor.hpp"
 #include "typecheck.hpp"
 #include "typeinfer.hpp"
 #include "types.hpp"
@@ -34,7 +36,7 @@ using namespace Choreo;
 int main(int argc, char* argv[]) {
   Option<std::string> output("--output", "-o", "", true);
   Option<std::string> target("--target", "-t", "factor", true);
-  Option<std::string> stop_after("--stop-after", "-sa", "", true);
+  Option<std::string> abend_after("--stop-after", "-sa", "", true);
   Option<std::string> arch("--architecture", "-arch", "gcu300", true);
   Option<bool> debug_on("--debug", "-d", false, false);
   Option<bool> cross_compile("--cross-compile", "-cc", false, false);
@@ -42,6 +44,7 @@ int main(int argc, char* argv[]) {
   Option<bool> print_vn("--print-valno", "-v", false, false);
   Option<bool> prt_norm("--print-normalize", "-z", false, false);
   Option<bool> inf_type("--infer-types", "-i", false, false);
+  Option<bool> print_ln("--print-latenorm", "-ln", false, false);
   Option<bool> dump_sym("--dump-symbol", "-l", false, false);
   Option<bool> visualiz("--visualize", "-u", false, false);
   Option<bool> gen_none("--no-codegen", "-s", false, false);
@@ -93,57 +96,67 @@ int main(int argc, char* argv[]) {
     return 0;
   }
 
+  std::string stop_after = abend_after.GetValue();
+  transform(stop_after.begin(), stop_after.end(), stop_after.begin(),
+            ::toupper);
+
   // apply early semantics check without knowing type details
   EarlySemantics sv;
   if (prt_pass) std::cout << "|- " << sv.GetName() << "\n";
   root.accept(sv);
   if (sv.HasError()) return 1;
-  if (stop_after.GetValue() == sv.GetName()) return 0;
+  if (stop_after == sv.GetName()) return 0;
 
   // minor AST change: desugar for canonicalized AST
   Normalizer ds(std::cout, prt_norm);
   if (prt_pass) std::cout << "|- " << ds.GetName() << "\n";
   root.accept(ds);
-  if (stop_after.GetValue() == "norm") return 0;
+  if (stop_after == ds.GetName()) return 0;
 
   SymReplace sr(nullptr, sym_repl.GetValue(), std::cout);
   if (prt_pass) std::cout << "|- " << sr.GetName() << "\n";
   root.accept(sr);
-  if (stop_after.GetValue() == "symreplace") return 0;
+  if (stop_after == sr.GetName()) return 0;
 
   // perform shape inference of mdspans, future, etc.
   ShapeInference si(print_vn);
   if (prt_pass) std::cout << "|- " << si.GetName() << "\n";
   root.accept(si);
   if (si.HasError()) return 1;
-  if (stop_after.GetValue() == "shapeinfer") return 0;
+  if (stop_after == si.GetName()) return 0;
 
   // inference all the unknown types - decls
   TypeInference ti(inf_type);
   if (prt_pass) std::cout << "|- " << ti.GetName() << "\n";
   root.accept(ti);
   if (ti.HasError()) return 1;
-  if (inf_type || print_vn || (stop_after.GetValue() == "typeinf")) return 0;
+  if (inf_type || print_vn || (stop_after == ti.GetName())) return 0;
+
+  // late normalize
+  LateNorm ln(ti.SymTab(), std::cout, print_ln);
+  if (prt_pass) std::cout << "|- " << si.GetName() << "\n";
+  root.accept(ln);
+  if (stop_after == ln.GetName()) return 0;
 
   // debug: dump the symbol table
-  if (std::getenv("DUMP_SYMTAB") || dump_sym) ti.SymTab()->Print(std::cout);
+  if (std::getenv("DUMP_SYMTAB") || dump_sym) ln.SymTab()->Print(std::cout);
 
   if (std::getenv("VISUALIZE") || visualiz) {
-    Visualizer vl(ti.SymTab());
+    Visualizer vl(ln.SymTab());
     if (prt_pass) std::cout << "|- " << vl.GetName() << "\n";
     root.accept(vl);
     return 0;
   }
 
   // apply the type check
-  TypeChecker sc(ti.SymTab());
+  TypeChecker sc(ln.SymTab());
   if (prt_pass) std::cout << "|- " << sc.GetName() << "\n";
   root.accept(sc);
   if (sc.HasError()) return 1;
-  if (gen_none || (stop_after.GetValue() == "recheck")) return 0;
+  if (gen_none || (stop_after == sc.GetName())) return 0;
 
   // collect information for dynamic/runtime shape handling
-  ShapeDynamics sds(ti.SymTab());
+  ShapeDynamics sds(sc.SymTab());
   if (prt_pass) std::cout << "|- " << sds.GetName() << "\n";
   root.accept(sds);
   if (sds.HasError()) return 1;
@@ -159,7 +172,15 @@ int main(int argc, char* argv[]) {
       if (prt_pass) std::cout << "|- " << gcu_checker.GetName() << "\n";
       root.accept(gcu_checker);
       if (gcu_checker.HasError()) return 1;
-      if (stop_after.GetValue() == "gcucheck") return 0;
+      if (stop_after == gcu_checker.GetName()) return 0;
+
+#if 0
+      FactorTrans trans(sc.SymTab());
+      if (prt_pass) std::cout << "|- " << trans.GetName() << "\n";
+      root.accept(trans);
+      if (trans.HasError()) return 1;
+      if (stop_after == trans.GetName()) return 0;
+#endif
 
       assert(arch.GetValue().size() >= 3 &&
              arch.GetValue().substr(0, 3) == "gcu");
@@ -168,7 +189,7 @@ int main(int argc, char* argv[]) {
       if (prt_pass) std::cout << "|- " << mem_usage_checker.GetName() << "\n";
       root.accept(mem_usage_checker);
       if (mem_usage_checker.HasError()) return 1;
-      if (stop_after.GetValue() == "mucheck") return 0;
+      if (stop_after == mem_usage_checker.GetName()) return 0;
 
       Choreo::Factor::FactorCodeGen codegen(
           std::cout, sc.SymTab(), mem_usage_checker.GetRtMemUsageInfo(),

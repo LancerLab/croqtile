@@ -529,19 +529,26 @@ class ShapeInference : public Visitor {
     // this is the un-type-annotated declaration
     auto nty = n.value->GetType();
     SSTab().DefineSymbol(n.name, nty);
+
     if (IsActualBoundedIntegerType(nty))
       SSTab().DefineSymbol("@" + n.name, MakeIntegerType());
 
-    if (auto san = dyn_cast<AST::SpanAs>(n.value)) {
+    if (auto san = dyn_cast<AST::SpanAs>(n.value))
       assert((n.name == san->nid->name) &&
              "inconsistent span_as variable name.");
-      SSTab().DefineSymbol(san->nid->name + ".span",
-                           cast<SpannedType>(nty)->s_type);
-      return true;
-    }
 
     auto name = n.name;
-    if (IsActualBoundedIntegerType(nty)) name = "@" + name;
+    if (IsActualBoundedIntegerType(nty))
+      name = "@" + name;
+    else if (auto sty = GetSpannedType(nty)) {
+      SSTab().DefineSymbol(n.name + ".span", sty->GetMDSpanType());
+      name += ".span";
+      assert(ValidVN(cur_mdspan_vn) &&
+             "expected a valid current value number.");
+      vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(name),
+                                           cur_mdspan_vn);
+      return true;
+    }
 
     assert(ValidVN(cur_vn) && "expected a valid current value number.");
     vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(name), cur_vn);
@@ -844,6 +851,8 @@ class ShapeInference : public Visitor {
     vn.AssociateSignatureWithValueNumber(
         SSTab().ScopedName(n.nid->name + ".span"), cur_vn);
 
+    cur_mdspan_vn = cur_vn;
+
     auto shape = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
     auto stty = cast<SpannedType>(sty);
     auto nty = MakeSpannedType(stty->ElementType(), shape, stty->GetStorage());
@@ -1063,12 +1072,10 @@ class ShapeInference : public Visitor {
 
     if (cannot_proceed) return true;
 
+    assert(!n.inDMA);
     if (isa<SpannedType>(NodeType(n))) {
       cur_mdspan_vn = vn.GenerateValueNumberForNode(n);
-      if (n.inDMA)
-        cur_vn = cur_mdspan_vn;
-      else
-        InvalidateVN(cur_vn);  // used for variable def
+      InvalidateVN(cur_vn);  // used for variable def
     } else if (isa<FutureType>(NodeType(n))) {
       if (auto id = AST::GetName(*n.expr_list->ValueAt(0))) {
         auto n = SSTab().NameInScopeOrNull(*id + ".span");

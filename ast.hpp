@@ -71,11 +71,11 @@ struct Node {
 // utility functions
 template <typename T>
 bool typeof(const Node* n) {
-  return isa<T>(n->GetType().get());
+  return isa<T>(n->GetType());
 }
 template <typename T>
 bool typeof(const ptr<Node>& n) {
-  return isa<T>(n->GetType().get());
+  return isa<T>(n->GetType());
 }
 
 inline std::string STR(const AST::Node& n) {
@@ -149,7 +149,13 @@ struct MultiValues : public Node, public TypeIDProvider<MultiValues> {
   std::string delimiter;
 
   explicit MultiValues(const location& l, std::string d = "")
-      : Node(l), delimiter(d){};
+      : Node(l), delimiter(d) {}
+
+  template <typename... T>
+  explicit MultiValues(const location& l, std::string d, T... args)
+      : Node(l), delimiter(d) {
+    (Append(args), ...);
+  }
 
   void Append(const ptr<Node>& m) {
     assert(m != nullptr && "Unexpected: null pointer.");
@@ -329,7 +335,6 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
     if (t != Reference) return nullptr;
     return dyn_cast<IntLiteral>(value_r);
   }
-
 
   bool IsUnary() const { return t == Unary; }
   bool IsBinary() const { return t == Binary; }
@@ -601,7 +606,8 @@ struct IntTuple : public Node, public TypeIDProvider<IntTuple> {
 struct Assignment : public Node, public TypeIDProvider<Assignment> {
   std::string name;
   ptr<Node> value;
-  explicit Assignment(const location& l, std::string& n, const ptr<Node>& v)
+  explicit Assignment(const location& l, const std::string& n,
+                      const ptr<Node>& v)
       : Node(l), name(n), value(v) {
     assert(n.size() > 0 && "invalid assignment to the un-named value.");
   }
@@ -633,8 +639,7 @@ struct IntIndex : public Node, public TypeIDProvider<IntIndex> {
   }
 
   bool IsNegative() const {
-    if (auto il = dyn_cast<IntLiteral>(value))
-      return il->Val() < 0;
+    if (auto il = dyn_cast<IntLiteral>(value)) return il->Val() < 0;
     return false;
   }
 
@@ -757,18 +762,17 @@ struct NamedVariableDecl : public Node,
   const ptr<Node> init_expr = nullptr;  // associated initializer
 
   explicit NamedVariableDecl(const location& l, const std::string& n,
-                             const ptr<DataType>& t,
+                             const ptr<DataType>& t = nullptr,
                              const ptr<Memory>& s = nullptr,
                              const ptr<Node>& v = nullptr,
                              const std::string& d = "=")
       : Node(l), name_str(n), init_str(d), mem(s), type(t), init_expr(v) {
     assert(name_str.size() > 0 && "Invalid name string.");
-    assert(type && "Invalid type.");
   }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Var Decl (";
-    type->Print(os);
+    if (type) type->Print(os);
     if (mem) {
       os << ", ";
       mem->Print(os);
@@ -1021,7 +1025,7 @@ struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
 
   std::string RefSymbol() const {
     assert(data && "ref data is not set.");
-    return data->name;
+    return RemoveSuffix(data->name, ".data");
   }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
@@ -1041,7 +1045,7 @@ struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
 };
 
 struct Select : public Node, public TypeIDProvider<Select> {
-  std::string future;
+  std::string rname;
   ptr<Expr> select_factor = nullptr;
   int bound;
   ptr<MultiValues> expr_list = nullptr;
@@ -1091,10 +1095,7 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
     chained = false;
     chain_to = "";
     chain_from = "";
-    if (auto tptr = dyn_cast<AST::Select>(t)) {
-      tptr->inDMA = true;
-      tptr->future = future + "_buffer";
-    }
+    if (auto tptr = dyn_cast<AST::Select>(t)) tptr->inDMA = true;
   }
 
   explicit DMA(const location& l, const std::string& o, const std::string& r,
@@ -1109,10 +1110,7 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
         config(c) {
     chained = true;
     chain_from = chained_from;
-    if (auto tptr = dyn_cast<AST::Select>(t)) {
-      tptr->inDMA = true;
-      tptr->future = future + "_buffer";
-    }
+    if (auto tptr = dyn_cast<AST::Select>(t)) tptr->inDMA = true;
   }
 
   // The dummy dma

@@ -71,6 +71,10 @@ struct FactorCodeGen : public CodeGenerator {
   std::map<std::string, size_t>
       rts_nidx;  // dim index in shape for the runtime shape name
   std::map<std::string, std::string> idnm_rts;  // name in .co to symbolic name
+
+  std::map<std::string, std::string>
+      fut_buf;  // map a future to its associated buffer
+
   StringifyTable factor_symbols;
 
  public:

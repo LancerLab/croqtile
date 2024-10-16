@@ -220,7 +220,7 @@ bool TypeInference::Visit(AST::Identifier &n) {
 bool TypeInference::Visit(AST::NamedVariableDecl &n) {
   __TRACE_EACH_VISIT__(n)
 
-  if (!SetAsCurrentType(n, n.name_str)) {
+  if (cur_type && !SetAsCurrentType(n, n.name_str)) {
     cur_type.reset();
     return false;
   }
@@ -304,10 +304,12 @@ bool TypeInference::Visit(AST::Assignment &n) {
             "future type.");
       error_count++;
       n.SetType(MakeUnknownType());
+      cur_type.reset();
       return false;
     } else {
       // no type inference is necessary
       n.SetType(NodeType(*n.value));
+      cur_type.reset();
       return true;
     }
   }
@@ -315,6 +317,7 @@ bool TypeInference::Visit(AST::Assignment &n) {
   if (isa<UnknownType>(NodeType(*n.value))) {
     Error(n.LOC(), "fail to deduce type of `" + n.name + "'.");
     error_count++;
+    cur_type.reset();
     return false;
   }
 
@@ -334,6 +337,7 @@ bool TypeInference::Visit(AST::Assignment &n) {
        << "\n";
   }
 
+  cur_type.reset();
   return true;
 }
 
@@ -582,14 +586,15 @@ bool TypeInference::Visit(AST::SpanAs &n) {
   }
 
   // mutate default to be global
-  auto nty = cast<SpannedType>(NodeType(n));
-  if (nty->m_type == Storage::DEFAULT)
-    n.SetType(MakeSpannedType(nty->f_type, nty->GetShape(), Storage::GLOBAL));
+  auto nty = NodeType(n);
+  auto sty = cast<SpannedType>(nty);
+  if (sty->m_type == Storage::DEFAULT)
+    n.SetType(MakeSpannedType(sty->f_type, sty->GetShape(), Storage::GLOBAL));
 
   // is this required? assign the target id (not defined yet) with a type
-  n.nid->SetType(NodeType(n));
+  n.nid->SetType(nty);
 
-  cur_type = NodeType(n);
+  cur_type = nty;
 
   return true;
 }
@@ -847,6 +852,7 @@ bool TypeInference::Visit(AST::LoopRange &n) {
 
 bool TypeInference::Visit(AST::ForeachBlock &n) {
   __TRACE_EACH_VISIT__(n)
+  cur_type.reset();  // no current type to annotate the stmts inside
   return true;
 }
 bool TypeInference::Visit(AST::ChoreoFunction &n) {
