@@ -175,7 +175,7 @@ int main(int argc, char* argv[]) {
       if (stop_after == gcu_checker.GetName()) return 0;
 
 #if 0
-      FactorTrans trans(sc.SymTab());
+      FactorTrans trans(sc.SymTab(), sds.FBInfo());
       if (prt_pass) std::cout << "|- " << trans.GetName() << "\n";
       root.accept(trans);
       if (trans.HasError()) return 1;
@@ -193,7 +193,7 @@ int main(int argc, char* argv[]) {
 
       Choreo::Factor::FactorCodeGen codegen(
           std::cout, sc.SymTab(), mem_usage_checker.GetRtMemUsageInfo(),
-          cross_compile);
+          sds.FBInfo(), cross_compile);
       if (prt_pass) std::cout << "|- " << codegen.GetName() << "\n";
       root.accept(codegen);
       break;

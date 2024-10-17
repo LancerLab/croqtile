@@ -70,10 +70,6 @@ using namespace factor;
     parallel_level++;
   } else if (isa<AST::ForeachBlock>(&n)) {
     loop_vars.push_back({});
-  } else if (auto dma = dyn_cast<AST::DMA>(&n)) {
-    // associate a future with its buffer
-    if (!dma->future.empty())
-      fut_buf.emplace(dma->future, cast<AST::ChunkAt>(dma->to)->RefSymbol());
   }
   return 0;
 }
@@ -145,8 +141,6 @@ fi
 )script";
 
   } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
-    entry_fn = f->name;
-    current_fn = "__choreo_" + entry_fn;
     auto fty = cast<FunctionType>(f->GetType());
     auto &out_type = fty->out_ty;
     // TODO:need refactor
@@ -1541,8 +1535,8 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
         assert(isa<FutureType>(expr->GetR()->GetType()) &&
                "expect a future operand.");
         if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol()) {
-          if (fut_buf.count(id->name))
-            oss << fut_buf.at(id->name);
+          if (fut_buf->at(entry_fn).count(id->name))
+            oss << fut_buf->at(entry_fn).at(id->name);
           else
             choreo_unreachable("Future '" + id->name +
                                "' is not associated with a buffer.");

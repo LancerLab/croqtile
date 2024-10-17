@@ -10,6 +10,11 @@
 
 namespace Choreo {
 
+// map a future to its associated buffer. The maps are indexed by the choreo
+// function names
+using FutureBufferMap =
+    std::map<std::string, std::map<std::string, std::string>>;
+
 // Codegenerators for targets
 struct CodeGenerator : public VisitorWithSymTab {
   std::ostream &os;

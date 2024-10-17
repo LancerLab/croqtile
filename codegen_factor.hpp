@@ -72,21 +72,23 @@ struct FactorCodeGen : public CodeGenerator {
       rts_nidx;  // dim index in shape for the runtime shape name
   std::map<std::string, std::string> idnm_rts;  // name in .co to symbolic name
 
-  std::map<std::string, std::string>
-      fut_buf;  // map a future to its associated buffer
+  ptr<FutureBufferMap> fut_buf;  // map a future to its associated buffer
 
   StringifyTable factor_symbols;
 
  public:
   FactorCodeGen(std::ostream &os, const ptr<SymbolTable> &symtab,
-                bool cross_compile)
-      : CodeGenerator("codegen", os, symtab), cross_compile(cross_compile) {}
-  FactorCodeGen(std::ostream &os, const ptr<SymbolTable> &symtab,
-                const std::vector<RtMemUsageCheckInfo> &list,
-                bool cross_compile)
+                const ptr<FutureBufferMap> &fb, bool cross_compile)
       : CodeGenerator("codegen", os, symtab),
         cross_compile(cross_compile),
-        rt_mem_usage_check_list(list) {}
+        fut_buf(fb) {}
+  FactorCodeGen(std::ostream &os, const ptr<SymbolTable> &symtab,
+                const std::vector<RtMemUsageCheckInfo> &list,
+                const ptr<FutureBufferMap> &fb, bool cross_compile)
+      : CodeGenerator("codegen", os, symtab),
+        cross_compile(cross_compile),
+        rt_mem_usage_check_list(list),
+        fut_buf(fb) {}
 
   void ResetBuffers() {
     ks.clear();

@@ -3,13 +3,9 @@
 
 // This apply the type check and symbol table generation
 
-#include "visitor.hpp"
+#include "codegen.hpp"
 
 namespace Choreo {
-
-  struct RuntimeShapeInfo {
-
-  };
 
 struct ShapeDynamics : public VisitorWithSymTab {
  private:
@@ -18,14 +14,37 @@ struct ShapeDynamics : public VisitorWithSymTab {
 
   std::unordered_map<std::string, AST::Parameter *> cur_params;
 
+  std::string fname;
+  ptr<FutureBufferMap> fut_buf = nullptr;
+
  private:
-  bool BeforeVisitImpl(AST::Node &) { return true; }
-  bool AfterVisitImpl(AST::Node &) { return true; }
+  bool BeforeVisitImpl(AST::Node &n) {
+    if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
+      assert(fut_buf->count(f->name) == 0);
+      fut_buf->insert({f->name, {}});
+      fname = f->name;
+    } else if (auto dma = dyn_cast<AST::DMA>(&n)) {
+      // associate a future with its buffer
+      if (!dma->future.empty())
+        (*fut_buf)[fname].emplace(dma->future, cast<AST::ChunkAt>(dma->to)->RefSymbol());
+    }
+    return true;
+  }
+  bool AfterVisitImpl(AST::Node &n) {
+    if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
+      fname = "";
+    }
+    return true;
+  }
 
  public:
   ShapeDynamics(const ptr<SymbolTable> s_tab, std::ostream &o = std::cout)
-      : VisitorWithSymTab("dynshape", s_tab), os(o) {}
+      : VisitorWithSymTab("dynshape", s_tab), os(o) {
+    fut_buf = std::make_shared<FutureBufferMap>();
+  }
   ~ShapeDynamics() {}
+
+  const ptr<FutureBufferMap> FBInfo() { return fut_buf; }
 
   bool Visit(AST::MultiNodes &) { return true; }
   bool Visit(AST::MultiValues &) { return true; }
