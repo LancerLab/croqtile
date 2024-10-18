@@ -30,6 +30,8 @@ inline static std::string SymbolOfSameScope(const std::string &scopedName,
 }
 
 struct FactorTrans : public VisitorWithSymTab {
+  // actually it forces to write two passes into a single visitor
+  // TODO: should we make them two different passes?
   enum class Kind { T_NONE, T_SWAP, T_SELECT };
 
  private:
@@ -69,6 +71,7 @@ struct FactorTrans : public VisitorWithSymTab {
     TraceEachVisit(n, "Before ");
     if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
       fname = f->name;
+      //      std::cout << "BEFORE: " << STR(n) << "\n";
     } else if (auto f = dyn_cast<AST::ForeachBlock>(&n)) {
       if (kind == Kind::T_SWAP) {
         for (auto &stmt : f->stmts->AllSubs())
@@ -77,6 +80,7 @@ struct FactorTrans : public VisitorWithSymTab {
     } else if (auto m = dyn_cast<AST::MultiNodes>(&n)) {
       if (kind == Kind::T_SELECT) {
         multi_nodes.push(m);
+        cur_node_index = -1;
       }
     } else if (auto d = dyn_cast<AST::NamedVariableDecl>(&n)) {
       if (kind == Kind::T_SELECT) {
@@ -97,6 +101,7 @@ struct FactorTrans : public VisitorWithSymTab {
     TraceEachVisit(n, "After ");
     if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
       fname = "";
+      //      std::cout << "AFTER: " << STR(n) << "\n";
     } else if (auto f = dyn_cast<AST::ForeachBlock>(&n)) {
       if (kind == Kind::T_SWAP) {
         cur_swaps.clear();
@@ -133,9 +138,8 @@ struct FactorTrans : public VisitorWithSymTab {
 
       n.values.insert(n.values.begin() + index, pnode);
       SymTab()->AddSymbol(SSTab().ScopedName(sname), pnode->GetType());
-      if (trace_visit)
-        os << "Hoisted: " << PSTR(pnode) << ", type: " << PSTR(pnode->GetType())
-           << "\n";
+      VST_DEBUG(os << "Hoisted: " << PSTR(pnode)
+                   << ", type: " << PSTR(pnode->GetType()) << "\n");
     }
 
     mnodes_insertions.erase(&n);
@@ -144,10 +148,32 @@ struct FactorTrans : public VisitorWithSymTab {
 
     return true;
   }
+
   bool Visit(AST::MultiValues &) { return true; }
   bool Visit(AST::IntLiteral &) { return true; }
   bool Visit(AST::Boolean &) { return true; }
-  bool Visit(AST::Expr &) { return true; }
+
+  bool Visit(AST::Expr &n) {
+    TraceEachVisit(n);
+    if (kind == Kind::T_NONE) return true;
+    if (n.op != "dataof") return true;
+
+    auto id = dyn_cast<AST::Expr>(n.GetR())->GetSymbol();
+    if (!id) return true;
+
+    if (!fut_buf->at(fname).count(id->name)) return true;
+
+    VST_DEBUG(os << "Replace: " << STR(n) << "\nWith: ");
+
+    n.op = "ref";
+    n.SetForm(AST::Expr::Reference);
+    id->name = fut_buf->at(fname)[id->name];
+
+    VST_DEBUG(os << STR(n) << "\n");
+
+    return true;
+  }
+
   bool Visit(AST::MultiDimSpans &) { return true; }
   bool Visit(AST::NamedTypeDecl &n) { return true; }
 
@@ -178,13 +204,14 @@ struct FactorTrans : public VisitorWithSymTab {
     auto buf_select =
         AST::Make<AST::Select>(n.LOC(), sel->select_factor, buffer_list);
     buf_select->SetType(bty);
-
     auto buf_name = SymbolTable::GetAnonName();
+    auto buf_assign = AST::Make<AST::Assignment>(n.LOC(), buf_name, buf_select);
+
     fut_buf->at(fname)[n.name_str] = buf_name;
     assert(cur_node_index != -1);
     int index = cur_node_index + mnodes_insertions[multi_nodes.top()].size();
     mnodes_insertions[multi_nodes.top()].emplace_back(
-        std::make_tuple(index, buf_select, buf_name));
+        std::make_tuple(index, buf_assign, buf_name));
 
     return true;
   }

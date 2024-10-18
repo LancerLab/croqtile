@@ -1558,9 +1558,9 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
       } else
         oss << "(" << ExprSTR(expr->GetR()) << ")";
     } else if (expr->IsArith() || expr->IsLogical()) {
-      auto& l = expr->GetL();
-      auto& r = expr->GetR();
-      auto& op = expr->op;
+      auto &l = expr->GetL();
+      auto &r = expr->GetR();
+      auto &op = expr->op;
       if (!bounded_arith_in_chunkat) {
         oss << "((" << ExprSTR(l) << ")" << op << "(" << ExprSTR(r) << "))";
       } else if (op == "*" && IsActualBoundedIntegerType(l->GetType()) &&

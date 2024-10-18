@@ -206,6 +206,7 @@ struct VisitorWithScope : public Visitor {
  public:
   bool BeforeVisit(AST::Node& n) final {
     if (isa<AST::Program>(&n)) {
+      Reset();
       SSTab().EnterScope("");  // global scope
     } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
       SSTab().EnterScope(f->name);
@@ -229,9 +230,12 @@ struct VisitorWithScope : public Visitor {
 
   bool AfterVisit(AST::Node& n) final {
     AfterVisitImpl(n);  // derived class to customize
-    if (isa<AST::Program>(&n) || isa<AST::ChoreoFunction>(&n) ||
-        isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n) ||
-        isa<AST::ForeachBlock>(&n)) {
+    if (isa<AST::Program>(&n)) {
+      Reset();
+      SSTab().LeaveScope();
+      assert(SSTab().ScopeDepth() == 0 && "internal error: scope is not zero.");
+    } else if (isa<AST::ChoreoFunction>(&n) || isa<AST::ParallelBy>(&n) ||
+               isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n)) {
       SSTab().LeaveScope();
     }
     return true;
