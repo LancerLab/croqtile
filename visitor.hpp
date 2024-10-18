@@ -13,6 +13,14 @@
 
 namespace Choreo {
 
+// Debug macro used for all Visitors
+#define VST_DEBUG(X)        \
+  do {                      \
+    if (DebugIsEnabled()) { \
+      X;                    \
+    }                       \
+  } while (false)
+
 struct Visitor {
   // virtual bool Visit(AST::Node&) = 0;
   virtual bool BeforeVisit(AST::Node&) { return true; }
@@ -60,20 +68,37 @@ struct Visitor {
 
  protected:
   std::string name;
-  bool trace_visit;
+  bool trace_visit = false;
+  bool debug_visit = false;
   static std::unordered_set<std::string> AllVisitors;
+
+  bool DebugIsEnabled() const { return debug_visit; }
 
  public:
   Visitor(const std::string& n, const ptr<SymbolTable>& s_tab = nullptr)
-      : scoped_symtab(s_tab), name(n) {
-    transform(name.begin(), name.end(), name.begin(), ::toupper);
-    trace_visit =
-        std::getenv("TRACE") &&
-        std::string(std::getenv("TRACE")).find(name) != std::string::npos;
+      : scoped_symtab(s_tab), name(ToUpper(n)) {
+    if (name.empty()) choreo_unreachable("a visitor must be named.");
 
     if (AllVisitors.count(name))
       choreo_unreachable("found visitor with same name: \"" + n + "\".");
+
+    // to be deprecated. currently it is only used for quick debug
+    if (std::getenv("TRACE")) {
+      auto trace = ToUpper(std::string(std::getenv("TRACE")));
+      if (trace.find(name) != std::string::npos) trace_visit = true;
+    }
+
+    if (std::getenv("CHOREO_TRACE_VISIT")) {
+      auto trace = ToUpper(std::string(std::getenv("CHOREO_TRACE_TRACE")));
+      if (trace.find(name) != std::string::npos) trace_visit = true;
+    }
+
+    if (std::getenv("CHOREO_DEBUG_VISITOR")) {
+      auto debug = ToUpper(std::string(std::getenv("CHOREO_DEBUG_VISITOR")));
+      if (debug.find(name) != std::string::npos) debug_visit = true;
+    }
   }
+
   virtual ~Visitor() {}
 
   // simple reference to the symbol table
@@ -213,7 +238,8 @@ struct VisitorWithScope : public Visitor {
   }
 
  public:
-  VisitorWithScope(const std::string& n, const ptr<SymbolTable>& s_tab)
+  VisitorWithScope(const std::string& n,
+                   const ptr<SymbolTable>& s_tab = nullptr)
       : Visitor(n, s_tab) {
     Reset();
   }

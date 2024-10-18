@@ -44,11 +44,15 @@ void NamedTypeDecl::accept(Choreo::Visitor& v) {
 }
 
 void NamedVariableDecl::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+
   if (mem) mem->accept(v);
   if (type) type->accept(v);
   if (init_expr) init_expr->accept(v);
 
   v.Visit(*this);
+
+  v.AfterVisit(*this);
 }
 
 void IntTuple::accept(Choreo::Visitor& v) {
@@ -60,7 +64,7 @@ void SpanAs::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
 
   id->accept(v);
-//  nid->accept(v);
+  //  nid->accept(v);
   list->accept(v);
   v.Visit(*this);
 
@@ -68,8 +72,12 @@ void SpanAs::accept(Choreo::Visitor& v) {
 }
 
 void Assignment::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+
   value->accept(v);
   v.Visit(*this);
+
+  v.AfterVisit(*this);
 }
 
 void IntIndex::accept(Choreo::Visitor& v) {
@@ -149,8 +157,7 @@ void DMA::accept(Choreo::Visitor& v) {
 
 void ChunkAt::accept(Choreo::Visitor& v) {
   // handle span_as
-  if (sa)
-    sa->accept(v);
+  if (sa) sa->accept(v);
   // note: visit the positions inside
   v.Visit(*this);
 }

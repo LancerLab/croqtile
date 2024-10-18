@@ -25,13 +25,14 @@ struct ShapeDynamics : public VisitorWithSymTab {
       fname = f->name;
     } else if (auto dma = dyn_cast<AST::DMA>(&n)) {
       // associate a future with its buffer
-      if (!dma->future.empty())
-        (*fut_buf)[fname].emplace(dma->future, cast<AST::ChunkAt>(dma->to)->RefSymbol());
+      if (!dma->future.empty() && (dma->operation != ".none"))
+        (*fut_buf)[fname].emplace(dma->future,
+                                  cast<AST::ChunkAt>(dma->to)->RefSymbol());
     }
     return true;
   }
   bool AfterVisitImpl(AST::Node &n) {
-    if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
+    if (isa<AST::ChoreoFunction>(&n)) {
       fname = "";
     }
     return true;

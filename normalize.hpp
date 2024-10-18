@@ -21,7 +21,6 @@ namespace Choreo {
 struct Normalizer : public Visitor {
  private:
   std::ostream &os;
-  bool trace = false;
 
  private:
   bool changed = false;
@@ -47,8 +46,7 @@ struct Normalizer : public Visitor {
 
  public:
   // it does not require a symbol table
-  Normalizer(std::ostream &o, bool t = false)
-      : Visitor("norm"), os(o), trace(t) {}
+  Normalizer(std::ostream &o) : Visitor("norm"), os(o) {}
 
   bool BeforeVisit(AST::Node &n) override {
     if (trace_visit) os << "before visiting " << n.TypeNameString() << "\n";
@@ -95,9 +93,8 @@ struct Normalizer : public Visitor {
       ResetListReference();
     } else if (auto p = dyn_cast<AST::Parameter>(&n)) {
       handle_parameter = false;
-      if (changed && trace)
-        os << "Name dims of `" << STR(*p->sym) << "': " << old << " ---> "
-           << STR(*p->type) << "\n";
+      VST_DEBUG(if (changed) os << "Name dims of `" << STR(*p->sym) << "': "
+                                << old << " ---> " << STR(*p->type) << "\n");
       old.clear();
       changed = false;
     } else if (isa<AST::ChoreoFunction>(&n)) {
@@ -105,7 +102,6 @@ struct Normalizer : public Visitor {
     }
     return true;
   }
-
   bool Visit(AST::MultiNodes &n) override {
     __TRACE_NORM_VISIT__(n)
 
@@ -118,7 +114,7 @@ struct Normalizer : public Visitor {
 
       auto assign = AST::Make<AST::Assignment>(pnode->LOC(), name, pnode);
       n.values.insert(n.values.begin() + index, assign);
-      if (trace) os << "Hoisted: " << PSTR(assign) << "\n";
+      VST_DEBUG(os << "Hoisted: " << PSTR(assign) << "\n");
     }
 
     mnodes_insertions.erase(&n);
@@ -138,9 +134,8 @@ struct Normalizer : public Visitor {
               // apply desugaring a {(0), 1} -> {a(0), 1}
               auto new_expr =
                   AST::Make<AST::Expr>(expr->LOC(), "dimof", list_ref, ref);
-              if (trace)
-                os << "Desugar ref: " << STR(*expr) << " ---> "
-                   << STR(*new_expr) << "\n";
+              VST_DEBUG(os << "Desugar ref: " << STR(*expr) << " ---> "
+                           << STR(*new_expr) << "\n");
               n.values[i] = new_expr;
             }
           }
@@ -155,14 +150,6 @@ struct Normalizer : public Visitor {
           auto new_il =
               AST::Make<AST::Identifier>(il->LOC(), GetInternalValueString());
 
-#if 0
-          if (trace) {
-            il->Print(os);
-            os << " --->";
-            new_il->Print(os);
-            os << "\n";
-          }
-#endif
           changed = true;
           n.values[i] = new_il;
         }
@@ -185,13 +172,8 @@ struct Normalizer : public Visitor {
           // apply desugaring a {(0), 1} -> {a(0), 1}
           auto ret = AST::Make<AST::Expr>(expr->LOC(), "dimof", list_ref, ref);
 
-          if (trace) {
-            os << "Desugaring expression node: ";
-            expr->Print(os);
-            os << " --->";
-            ret->Print(os);
-            os << "\n";
-          }
+          VST_DEBUG(os << "Desugaring expression node: "; expr->Print(os);
+                    os << " --->"; ret->Print(os); os << "\n";);
 
           changed = true;
 
@@ -221,8 +203,8 @@ struct Normalizer : public Visitor {
       // Should this be set by target?
       n.mem->Set(Storage::GLOBAL);
 
-      if (trace)
-        os << "Place storage of '" << n.name_str << "': DEFAULT ---> GLOBAL\n";
+      VST_DEBUG(os << "Place storage of '" << n.name_str
+                   << "': DEFAULT ---> GLOBAL\n");
     }
 
     return true;
@@ -263,9 +245,8 @@ struct Normalizer : public Visitor {
 
     n.with_matchers = mval;
 
-    if (trace)
-      os << "Generate with-matchers for '" << n.with->name << "': " << STR(mval)
-         << "\n";
+    VST_DEBUG(os << "Generate with-matchers for '" << n.with->name
+                 << "': " << STR(mval) << "\n");
 
     return true;
   }
@@ -323,9 +304,9 @@ struct Normalizer : public Visitor {
               auto nname = SymbolTable::GetAnonName();
               mnodes_insertions[multi_nodes.top()].emplace_back(
                   std::make_tuple(index, expr->GetL(), nname));
-              if (trace) os << "replace " << PSTR(expr->GetL()) << " with ";
+              VST_DEBUG(os << "replace " << PSTR(expr->GetL()) << " with ");
               expr->SetL(AST::Make<AST::Identifier>(v->LOC(), nname));
-              if (trace) os << PSTR(expr->GetL()) << ".\n";
+              VST_DEBUG(os << PSTR(expr->GetL()) << ".\n");
             }
           }
           continue;
@@ -339,13 +320,12 @@ struct Normalizer : public Visitor {
         repls.emplace_back(i, AST::Make<AST::Identifier>(v->LOC(), nname));
       }
       for (auto &repl : repls) {
-        if (trace)
-          os << "replace " << PSTR(n.positions->ValueAt(repl.first))
-             << " with ";
+        VST_DEBUG(os << "replace " << PSTR(n.positions->ValueAt(repl.first))
+                     << " with ");
 
         n.positions->values[repl.first] = repl.second;
 
-        if (trace) os << PSTR(n.positions->ValueAt(repl.first)) << ".\n";
+        VST_DEBUG(os << PSTR(n.positions->ValueAt(repl.first)) << ".\n");
       }
     }
     return true;

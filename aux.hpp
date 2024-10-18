@@ -7,9 +7,9 @@
 #include <cassert>
 #include <iostream>
 #include <optional>
+#include <regex>
 #include <sstream>
 #include <vector>
-#include <regex>
 
 #if 0
 [[noreturn]] inline void choreo_unreachable_impl(
@@ -48,8 +48,8 @@
   choreo_unreachable_impl(__FILE__, __LINE__ __VA_OPT__(, ) __VA_ARGS__)
 
 template <typename T>
-inline std::string DelimitedString(const std::vector<T> &v,
-                                   std::string delimiter = ", ") {
+inline static std::string DelimitedString(const std::vector<T>& v,
+                                          std::string delimiter = ", ") {
   std::ostringstream iss;
   if (v.size() > 0) {
     iss << v[0];
@@ -64,8 +64,8 @@ inline std::string DelimitedString(const std::vector<T> &v,
 }
 
 // split `input` to a vector
-inline std::vector<std::string>
-SplitStringByDelimiter(std::string input, std::string delimiter = ",") {
+inline static std::vector<std::string> SplitStringByDelimiter(
+    std::string input, std::string delimiter = ",") {
   std::vector<std::string> tokens;
   size_t pos = 0;
   while ((pos = input.find(delimiter)) != std::string::npos) {
@@ -84,19 +84,21 @@ SplitStringByDelimiter(std::string input, std::string delimiter = ",") {
 }
 
 // Function to check if 'str' starts with 'prefix'
-inline bool PrefixedWith(const std::string& str, const std::string& prefix) {
+inline static bool PrefixedWith(const std::string& str,
+                                const std::string& prefix) {
   if (prefix.size() > str.size()) return false;
   return str.compare(0, prefix.size(), prefix) == 0;
 }
 
 // Function to check if 'str' ends with 'suffix'
-inline bool SuffixedWith(const std::string& str, const std::string& suffix) {
+inline static bool SuffixedWith(const std::string& str,
+                                const std::string& suffix) {
   if (suffix.size() > str.size()) return false;
   return str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
-inline std::optional<std::string> RemovePrefixOrNull(const std::string& prefix,
-                                                     const std::string& str) {
+inline static std::optional<std::string> RemovePrefixOrNull(
+    const std::string& prefix, const std::string& str) {
   if (str.find(prefix) == 0)  // Check if 'prefix' is at the beginning
     return str.substr(prefix.length());  // Return the substring after 'prefix'
   else
@@ -105,8 +107,8 @@ inline std::optional<std::string> RemovePrefixOrNull(const std::string& prefix,
 }
 
 // remove suffix
-inline std::string RemoveSuffix(const std::string& str,
-                                const std::string& suffix) {
+inline static std::string RemoveSuffix(const std::string& str,
+                                       const std::string& suffix) {
   if (suffix.size() > str.size()) return str;
   if (str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0)
     return str.substr(0, str.size() - suffix.size());
@@ -114,32 +116,33 @@ inline std::string RemoveSuffix(const std::string& str,
     return str;
 }
 
-inline std::string Ordinal(int n) {
+inline static std::string Ordinal(int n) {
   assert(n > 0);
-  static const char *suffixes[] = {"th", "st", "nd", "rd", "th"};
+  static const char* suffixes[] = {"th", "st", "nd", "rd", "th"};
   int v = n % 100;
   int index = (v >= 11 && v <= 13) ? 0 : std::min(v % 10, 4);
   return std::to_string(n) + suffixes[index];
 }
 
-inline std::string RegexReplaceAll(const std::string& input,
-                                   const std::string& pattern,
-                                   const std::string& replacement) {
+inline static std::string RegexReplaceAll(const std::string& input,
+                                          const std::string& pattern,
+                                          const std::string& replacement) {
   std::regex regex_pattern(pattern);
   return std::regex_replace(input, regex_pattern, replacement);
 }
 
-inline std::string SearchPattern(const std::string& input,
-                                 const std::string& pattern) {
+inline static std::string SearchPattern(const std::string& input,
+                                        const std::string& pattern) {
   std::regex re(pattern);
   std::smatch match;
   if (std::regex_search(input, match, re)) return match.str();
-  return ""; // or throw an exception if no match is found
+  return "";  // or throw an exception if no match is found
 }
 
-#define TRACE(X)                                                               \
-  do {                                                                         \
-    if (trace) { X; }                                                          \
-  } while (false)
+inline static const std::string ToUpper(const std::string& s) {
+  std::string r(s.size(), '\0');
+  transform(s.begin(), s.end(), r.begin(), ::toupper);
+  return r;
+}
 
 #endif  // __CHOREO_AUX_HPP__

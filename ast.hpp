@@ -1360,6 +1360,15 @@ inline std::optional<std::string> GetName(const Node& n) {
   }
   return std::nullopt;
 }
+inline Identifier* GetIdentifier(const Node& n) {
+  if (auto id = dyn_cast<AST::Identifier>(&n))
+    return id;
+  else if (auto expr = dyn_cast<AST::Expr>(&n))
+    return expr->GetSymbol();
+  else
+    return nullptr;
+}
+inline std::string NodeName(const Node& n) { return n.TypeNameString(); }
 
 }  // end of namespace AST
 

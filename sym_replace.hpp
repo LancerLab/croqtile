@@ -8,56 +8,54 @@
 #include <string>
 
 #include "ast.hpp"
+#include "extern/ginac/ginac-1.8.7/install/include/ginac/ginac.h"
 #include "symtab.hpp"
 #include "types.hpp"
 #include "visitor.hpp"
-
-#include "extern/ginac/ginac-1.8.7/install/include/ginac/ginac.h"
 
 namespace Choreo {
 
 namespace sym_replace {
 
-#define DEBUG(X)                                                               \
-  do {                                                                         \
-    if (0) { X; }                                                              \
+#define SR_DEBUG(X) \
+  do {              \
+    if (0) {        \
+      X;            \
+    }               \
   } while (false)
 
-} // end namespace sym_replace
-
-#ifndef __TRACE_EACH_VISIT__
-#define __TRACE_EACH_VISIT__                                                   \
-  if (trace_visit) {                                                           \
-    os << n.TypeNameString() << ": ";                                          \
-    n.Print(os);                                                               \
-    os << "\n";                                                                \
-  }
-#endif
+}  // end namespace sym_replace
 
 // Symbolize all expression nodes.  For expression nodes with the same symbolic
 // meaning, they are replaced with a unified form to facilitate value numbering
 // and shape infering.
 class SymReplace : public VisitorWithScope {
-private:
+ private:
   static const char* cyan;
   static const char* blue;
   static const char* reset;
   static const char* pass_name;
 
-public:
+  void TraceEachVisit(const AST::Node& n, bool show_node = false) const {
+    if (trace_visit) {
+      os << n.TypeNameString();
+      if (show_node) os << ": " << STR(n);
+      os << "\n";
+    }
+  }
+
+ public:
   using SymExpr = GiNaC::ex;
   using Symbol = GiNaC::symbol;
   using SymValno = size_t;
 
-public:
-  bool trace = false;
+ public:
   std::ostream& os;
   // for debugging purpose only
   bool cannot_proceed = false;
   size_t error_count = 0;
 
-  explicit SymReplace(const ptr<SymbolTable> s_tab, bool t, std::ostream& o)
-      : VisitorWithScope("symrepl", s_tab), trace(t), os(o) {}
+  explicit SymReplace(std::ostream& o) : VisitorWithScope("symrepl"), os(o) {}
 
   bool HasError() {
     if (error_count)
@@ -155,78 +153,69 @@ public:
   void SymbolizeExprNode(ptr<AST::Node> n);
 
   inline void AnalyseThenOptimizeExpr(ptr<AST::Node> n) {
-    DEBUG(os << "AnalyseThenOptimizeExpr: " << PSTR(n) << "\n");
+    SR_DEBUG(os << "AnalyseThenOptimizeExpr: " << PSTR(n) << "\n");
     expr_nodes.push_back(n);
     InitializeNode(n);
     SymbolizeExprNode(n);
   }
 
   inline void DumpTermimalExprs() const {
-    DEBUG(
-      os << "Terminal Expr Nodes:\n";
-      for (auto& n : expr_nodes)
-        os << "\t" << PSTR(n) << "\n";
-    );
+    SR_DEBUG(os << "Terminal Expr Nodes:\n"; for (auto& n
+                                                  : expr_nodes) os
+                                             << "\t" << PSTR(n) << "\n";);
   }
 
   inline void DumpNameSymbolMap() const {
-    DEBUG(
-      os << "Name Symbol Map:\n";
-      for (auto& [name, sym] : name_symbol_map)
-        os << "\t" << name << " " << sym << "\n";
-    );
+    SR_DEBUG(os << "Name Symbol Map:\n"; for (auto& [name, sym]
+                                              : name_symbol_map) os
+                                         << "\t" << name << " " << sym
+                                         << "\n";);
   }
 
   inline void DumpNameSymExprMap() const {
-    DEBUG(
-      os << "Name SymExpr Map:\n";
-      for (auto& [name, sym_expr] : name_sym_expr_map)
-        os << "\t" << name << " " << sym_expr << "\n";
-    );
+    SR_DEBUG(os << "Name SymExpr Map:\n"; for (auto& [name, sym_expr]
+                                               : name_sym_expr_map) os
+                                          << "\t" << name << " " << sym_expr
+                                          << "\n";);
   }
 
   inline void DumpExprSymValnoMap() const {
-    DEBUG(
-      os << "Expr SymbolValno Map:\n";
-      for (auto& [expr, sym_valno] : expr_sym_valno_map)
-        os << "\t" << PSTR(expr) << " " << sym_valno << "\n";
-    );
+    SR_DEBUG(os << "Expr SymbolValno Map:\n"; for (auto& [expr, sym_valno]
+                                                   : expr_sym_valno_map) os
+                                              << "\t" << PSTR(expr) << " "
+                                              << sym_valno << "\n";);
   }
 
   inline void DumpSymValnoSymExprMap() const {
-    DEBUG(
-      os << "SymValno SymExpr Map:\n";
-      for (auto& [sym_valno, sym_expr] : sym_valno_sym_expr_map)
-        os << "\t" << sym_valno << " " << sym_expr << "\n";
-    );
+    SR_DEBUG(os << "SymValno SymExpr Map:\n"; for (auto& [sym_valno, sym_expr]
+                                                   : sym_valno_sym_expr_map) os
+                                              << "\t" << sym_valno << " "
+                                              << sym_expr << "\n";);
   }
 
   inline void DumpExprNodesWithSymExprAndSymValno() const {
-    DEBUG(
-      os << "ExprNodes With SymExpr And SymValno:\n";
-      for (auto& expr : expr_nodes) {
-        auto sym_valno = GetSymValnoFromExpr(expr);
-        os << "\t" << PSTR(expr);
-        os << "\n\t\t\t\t" << sym_valno << " == ";
-        if (sym_valno != 0)
-          os << GetSymExprFromSymValno(sym_valno);
-        else
-          os << "NONE";
-        os << "\n";
-      }
-    );
+    SR_DEBUG(os << "ExprNodes With SymExpr And SymValno:\n";
+             for (auto& expr
+                  : expr_nodes) {
+               auto sym_valno = GetSymValnoFromExpr(expr);
+               os << "\t" << PSTR(expr);
+               os << "\n\t\t\t\t" << sym_valno << " == ";
+               if (sym_valno != 0)
+                 os << GetSymExprFromSymValno(sym_valno);
+               else
+                 os << "NONE";
+               os << "\n";
+             });
   }
 
   // use symbolic information to replace expr nodes equivalently.
   void EquivalentlyReplaceExprNodes();
 
-public:
+ public:
   bool BeforeVisitImpl(AST::Node& n) override {
-    DEBUG(
-      if (auto cf = dyn_cast<AST::ChoreoFunction>(&n))
-        os << "symbolic replacing starts for function "
-           << cf->name << "\n";
-    );
+    SR_DEBUG(if (auto cf = dyn_cast<AST::ChoreoFunction>(&n)) os
+                 << "symbolic replacing starts for function " << cf->name
+                 << "\n";);
     return true;
   }
   bool AfterVisitImpl(AST::Node& n) override {
@@ -243,9 +232,9 @@ public:
     return true;
   }
 
-public:
+ public:
   bool Visit(AST::MultiNodes& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -253,7 +242,7 @@ public:
   }
 
   bool Visit(AST::MultiValues& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -268,7 +257,7 @@ public:
   }
 
   bool Visit(AST::IntLiteral& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -276,7 +265,7 @@ public:
   }
 
   bool Visit(AST::Boolean& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -284,7 +273,7 @@ public:
   }
 
   bool Visit(AST::Expr& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -292,7 +281,7 @@ public:
   }
 
   bool Visit(AST::MultiDimSpans& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -300,7 +289,7 @@ public:
   }
 
   bool Visit(AST::NamedTypeDecl& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -315,7 +304,7 @@ public:
   }
 
   bool Visit(AST::NamedVariableDecl& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -337,7 +326,7 @@ public:
   }
 
   bool Visit(AST::IntTuple& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -345,21 +334,20 @@ public:
   }
 
   bool Visit(AST::Assignment& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
     if (!SSTab().IsDeclared(n.name))
       SSTab().DefineSymbol(n.name, n.value->GetType());
 
-    if (isa<AST::Expr>(n.value))
-      AnalyseThenOptimizeExpr(n.value);
+    if (isa<AST::Expr>(n.value)) AnalyseThenOptimizeExpr(n.value);
 
     return true;
   };
 
   bool Visit(AST::IntIndex& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -367,7 +355,7 @@ public:
   };
 
   bool Visit(AST::DataType& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -375,7 +363,7 @@ public:
   }
 
   bool Visit(AST::Identifier& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -387,7 +375,7 @@ public:
   }
 
   bool Visit(AST::Parameter& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -395,7 +383,7 @@ public:
   }
 
   bool Visit(AST::ParamList& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -403,7 +391,7 @@ public:
   };
 
   bool Visit(AST::ParallelBy& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -415,7 +403,7 @@ public:
   };
 
   bool Visit(AST::WhereBind& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -423,7 +411,7 @@ public:
   }
 
   bool Visit(AST::WithIn& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -434,7 +422,7 @@ public:
   }
 
   bool Visit(AST::WithBlock& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -442,7 +430,7 @@ public:
   };
 
   bool Visit(AST::Memory& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -450,7 +438,7 @@ public:
   };
 
   bool Visit(AST::SpanAs& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -458,7 +446,7 @@ public:
   };
 
   bool Visit(AST::DMA& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -468,7 +456,7 @@ public:
   }
 
   bool Visit(AST::ChunkAt& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -476,7 +464,7 @@ public:
   }
 
   bool Visit(AST::Wait& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -484,7 +472,7 @@ public:
   }
 
   bool Visit(AST::Call& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -492,7 +480,7 @@ public:
   };
 
   bool Visit(AST::Swap& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -500,7 +488,7 @@ public:
   };
 
   bool Visit(AST::Select& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -508,7 +496,7 @@ public:
   };
 
   bool Visit(AST::Return& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -516,7 +504,7 @@ public:
   };
 
   bool Visit(AST::LoopRange& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -524,7 +512,7 @@ public:
   }
 
   bool Visit(AST::ForeachBlock& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -532,19 +520,18 @@ public:
   };
 
   bool Visit(AST::FunctionDecl& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
     for (ptr<AST::Parameter> p : n.params->values)
-      if (p->HasSymbol())
-        InsertNdSnSymMap(p->sym, p->sym->name);
+      if (p->HasSymbol()) InsertNdSnSymMap(p->sym, p->sym->name);
 
     return true;
   };
 
   bool Visit(AST::ChoreoFunction& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -552,14 +539,14 @@ public:
   }
 
   bool Visit(AST::CppSourceCode& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
     return true;
   };
   bool Visit(AST::Program& n) override {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -567,6 +554,6 @@ public:
   };
 };
 
-} // end namespace Choreo
+}  // end namespace Choreo
 
-#endif // __CHOREO_SYMREPLACE_HPP__
+#endif  // __CHOREO_SYMREPLACE_HPP__

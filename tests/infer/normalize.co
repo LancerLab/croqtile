@@ -1,4 +1,4 @@
-// RUN: choreo -z -sa norm %s | FileCheck --match-full-lines %s
+// RUN: choreo -dv norm -sa norm %s | FileCheck --match-full-lines %s
 
 __co__ void foo(f32 [2, 3, 4] d, int e, bool, f32 mdspan<2> a) {
   c : a [(0), (1)];

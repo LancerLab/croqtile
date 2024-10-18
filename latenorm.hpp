@@ -10,17 +10,11 @@
 #include "types.hpp"
 #include "visitor.hpp"
 
-#define __TRACE_LATENORM_VISIT__(n)                     \
-  if (trace_visit) {                                    \
-    os << n.TypeNameString() << ": " << STR(n) << "\n"; \
-  }
-
 namespace Choreo {
 
 struct LateNorm : public VisitorWithSymTab {
  private:
   std::ostream &os;
-  bool trace = false;
 
  private:
   bool changed = false;
@@ -32,10 +26,16 @@ struct LateNorm : public VisitorWithSymTab {
   int cur_dma_index = -1;
   std::map<AST::MultiNodes *, NodeInsertInfo> mnodes_insertions;
 
+  void TraceEachVisit(const AST::Node &n) {
+    if (trace_visit) {
+      os << n.TypeNameString() << ": " << STR(n) << "\n";
+    }
+  }
+
  public:
   // it does not require a symbol table
-  LateNorm(const ptr<SymbolTable> &s_tab, std::ostream &o, bool t = false)
-      : VisitorWithSymTab("latenorm", s_tab), os(o), trace(t) {}
+  LateNorm(const ptr<SymbolTable> &s_tab, std::ostream &o)
+      : VisitorWithSymTab("latenorm", s_tab), os(o) {}
 
   bool BeforeVisitImpl(AST::Node &n) override {
     if (trace_visit) os << "before visiting " << n.TypeNameString() << "\n";
@@ -56,7 +56,7 @@ struct LateNorm : public VisitorWithSymTab {
   }
 
   bool Visit(AST::MultiNodes &n) override {
-    __TRACE_LATENORM_VISIT__(n)
+    TraceEachVisit(n);
 
     // insert the node at the given place
     assert(&n == multi_nodes.top());
@@ -67,9 +67,8 @@ struct LateNorm : public VisitorWithSymTab {
 
       n.values.insert(n.values.begin() + index, pnode);
       SymTab()->AddSymbol(SSTab().ScopedName(sname), pnode->GetType());
-      if (trace)
-        os << "Hoisted: " << PSTR(pnode) << ", type: " << PSTR(pnode->GetType())
-           << "\n";
+      VST_DEBUG(os << "Hoisted: " << PSTR(pnode)
+                   << ", type: " << PSTR(pnode->GetType()) << "\n");
     }
 
     mnodes_insertions.erase(&n);
@@ -101,7 +100,7 @@ struct LateNorm : public VisitorWithSymTab {
   bool Visit(AST::SpanAs &) override { return true; }
 
   bool Visit(AST::DMA &n) override {
-    __TRACE_LATENORM_VISIT__(n)
+    TraceEachVisit(n);
 
     if (n.operation == ".none") return true;
     if (!isa<AST::Memory>(n.to)) return true;
@@ -120,13 +119,13 @@ struct LateNorm : public VisitorWithSymTab {
     auto var = AST::Make<AST::NamedVariableDecl>(n.to->LOC(), anon_sym);
     var->SetType(sty);
 
-    if (trace) os << "Replace: " << STR(n) << "\n";
+    VST_DEBUG(os << "Replace: " << STR(n) << "\n");
 
     n.to = AST::Make<AST::ChunkAt>(
         n.to->LOC(), AST::Make<AST::Identifier>(n.to->LOC(), anon_sym));
     n.to->SetType(sty);
 
-    if (trace) os << "with: " << STR(n) << ".\n";
+    VST_DEBUG(os << "with: " << STR(n) << ".\n");
 
     assert(cur_dma_index != -1);
     int index = cur_dma_index + mnodes_insertions[multi_nodes.top()].size();
@@ -136,7 +135,7 @@ struct LateNorm : public VisitorWithSymTab {
     return true;
   }
 
-  bool Visit(AST::ChunkAt &n) override { return true; }
+  bool Visit(AST::ChunkAt &) override { return true; }
   bool Visit(AST::Wait &) override { return true; }
   bool Visit(AST::Call &) override { return true; }
   bool Visit(AST::Swap &) override { return true; }
@@ -152,5 +151,4 @@ struct LateNorm : public VisitorWithSymTab {
 
 }  // end namespace Choreo
 
-#undef __TRACE_LATENORM_VISIT__
 #endif  // __CHOREO_LATE_NORM_HPP__

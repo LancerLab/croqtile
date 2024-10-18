@@ -1,4 +1,4 @@
-// RUN: choreo -z -sa norm %s | FileCheck --match-full-lines %s
+// RUN: choreo -dv norm -sa norm %s | FileCheck --match-full-lines %s
 // RUN: choreo -i %s | FileCheck --check-prefix=CHKINF --match-full-lines %s
 
 __co__ auto span_as(s32 [32, 18, 9] a) {

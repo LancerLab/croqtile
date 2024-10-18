@@ -34,22 +34,20 @@ using namespace AST;
 using namespace Choreo;
 
 int main(int argc, char* argv[]) {
+  Option<std::string> arch("--architecture", "-arch", "gcu300", true);
   Option<std::string> output("--output", "-o", "", true);
   Option<std::string> target("--target", "-t", "factor", true);
   Option<std::string> abend_after("--stop-after", "-sa", "", true);
-  Option<std::string> arch("--architecture", "-arch", "gcu300", true);
+  Option<std::string> debug_visit("--debug-visit", "-dv", "", true);
   Option<bool> debug_on("--debug", "-d", false, false);
   Option<bool> cross_compile("--cross-compile", "-cc", false, false);
   Option<bool> dump_ast("--dump-ast", "-e", false, false);
   Option<bool> print_vn("--print-valno", "-v", false, false);
-  Option<bool> prt_norm("--print-normalize", "-z", false, false);
   Option<bool> inf_type("--infer-types", "-i", false, false);
-  Option<bool> print_ln("--print-latenorm", "-ln", false, false);
   Option<bool> dump_sym("--dump-symbol", "-l", false, false);
   Option<bool> visualiz("--visualize", "-u", false, false);
   Option<bool> gen_none("--no-codegen", "-s", false, false);
   Option<bool> del_comm("--remove-comments", "-n", false, false);
-  Option<bool> mem_usag("--memory-usage-check", "-muc", false, false);
   Option<bool> sym_repl("--print-sym-replace", "-sr", false, false);
   Option<bool> prt_pass("--show-passes", "-sp", false, false);
 
@@ -60,6 +58,9 @@ int main(int argc, char* argv[]) {
     exit(1);
   }
   r.SetOutputStream(output.GetValue());
+
+  if (!debug_visit.GetValue().empty())
+    setenv("CHOREO_DEBUG_VISITOR", debug_visit.GetValue().c_str(), 1);
 
   if (dump_ast) {
     if (gen_none)
@@ -96,9 +97,7 @@ int main(int argc, char* argv[]) {
     return 0;
   }
 
-  std::string stop_after = abend_after.GetValue();
-  transform(stop_after.begin(), stop_after.end(), stop_after.begin(),
-            ::toupper);
+  std::string stop_after = ToUpper(abend_after.GetValue());
 
   // apply early semantics check without knowing type details
   EarlySemantics sv;
@@ -108,12 +107,12 @@ int main(int argc, char* argv[]) {
   if (stop_after == sv.GetName()) return 0;
 
   // minor AST change: desugar for canonicalized AST
-  Normalizer ds(std::cout, prt_norm);
+  Normalizer ds(std::cout);
   if (prt_pass) std::cout << "|- " << ds.GetName() << "\n";
   root.accept(ds);
   if (stop_after == ds.GetName()) return 0;
 
-  SymReplace sr(nullptr, sym_repl.GetValue(), std::cout);
+  SymReplace sr(std::cout);
   if (prt_pass) std::cout << "|- " << sr.GetName() << "\n";
   root.accept(sr);
   if (stop_after == sr.GetName()) return 0;
@@ -133,7 +132,7 @@ int main(int argc, char* argv[]) {
   if (inf_type || print_vn || (stop_after == ti.GetName())) return 0;
 
   // late normalize
-  LateNorm ln(ti.SymTab(), std::cout, print_ln);
+  LateNorm ln(ti.SymTab(), std::cout);
   if (prt_pass) std::cout << "|- " << si.GetName() << "\n";
   root.accept(ln);
   if (stop_after == ln.GetName()) return 0;
@@ -174,18 +173,19 @@ int main(int argc, char* argv[]) {
       if (gcu_checker.HasError()) return 1;
       if (stop_after == gcu_checker.GetName()) return 0;
 
-#if 0
       FactorTrans trans(sc.SymTab(), sds.FBInfo());
       if (prt_pass) std::cout << "|- " << trans.GetName() << "\n";
+      trans.SetKind(FactorTrans::Kind::T_SELECT);
+      root.accept(trans);
+      trans.SetKind(FactorTrans::Kind::T_SWAP);
       root.accept(trans);
       if (trans.HasError()) return 1;
       if (stop_after == trans.GetName()) return 0;
-#endif
 
       assert(arch.GetValue().size() >= 3 &&
              arch.GetValue().substr(0, 3) == "gcu");
       MemUsageCheck mem_usage_checker(sc.SymTab(), Target::Factor,
-                                      arch.GetValue(), mem_usag ? true : false);
+                                      arch.GetValue());
       if (prt_pass) std::cout << "|- " << mem_usage_checker.GetName() << "\n";
       root.accept(mem_usage_checker);
       if (mem_usage_checker.HasError()) return 1;

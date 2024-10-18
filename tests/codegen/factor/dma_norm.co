@@ -1,4 +1,4 @@
-// RUN: choreo %s -ln | FileCheck %s
+// RUN: choreo %s -dv latenorm | FileCheck %s
 
 // device program
 __co__ void dma_norm(f16 [180, 27, 12] a) {
@@ -17,6 +17,8 @@ __co__ void dma_norm(f16 [180, 27, 12] a) {
   }
 }
 
+// CHECK: Hoisted:
+// CHECK-NEXT: `- Assign: anon_0 = select( (x % 3) , b, c)
 // CHECK: Hoisted:
 // CHECK-NEXT: `- Var Decl (): anon_1, type: local f16 mdspan<3> [18, 3, 2]
 // CHECK:     auto b = alloc_(L1Type(FloatType(16),{18, 3, 2}));

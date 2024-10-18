@@ -174,13 +174,28 @@ bool TypeChecker::Visit(AST::DMA& n) {
   bool IsDummy = (n.operation == ".none");
   auto ty = n.GetType();
 
+  if (IsDummy) {
+    if (n.future.empty()) {
+      Error(n.LOC(), "A dummy/async DMA must be named.");
+      error_count++;
+      return false;
+    }
+    if (!isa<PlaceHolderType>(ty) ||
+        (cast<PlaceHolderType>(ty)->Category() != TypeCategory::FUTURE)) {
+      Error(n.LOC(), "Expect a placeholder type but got '" + PSTR(ty) + "'.");
+      error_count++;
+      return false;
+    }
+    return true;
+  }
+
   if (!isa<FutureType>(ty)) {
     Error(n.LOC(), "Expect the DMA to produce a FutureType, but got '" +
                        PSTR(n.GetType()) + "'.");
     error_count++;
   }
 
-  if ((IsDummy || cast<FutureType>(ty)->IsAsync()) && n.future.empty()) {
+  if (cast<FutureType>(ty)->IsAsync() && n.future.empty()) {
     Error(n.LOC(), "A dummy/async DMA must be named.");
     error_count++;
   }
