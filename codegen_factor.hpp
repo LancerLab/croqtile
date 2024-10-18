@@ -52,6 +52,11 @@ struct FactorCodeGen : public CodeGenerator {
   bool dyn_shaped = false;
   bool cross_compile = false;
 
+  // whether the computation of bounded vars in chunkat is currently being
+  // processed. It is used to distinguish the computation of bounded vars in
+  // different scenarios.
+  bool bounded_arith_in_chunkat = false;
+
   ValBind::BindInfo<std::string> bind_info;
   std::vector<AST::ptr<AST::Parameter>> *cur_params = nullptr;
   AST::ptr<AST::DataType> current_output = nullptr;

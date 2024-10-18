@@ -365,8 +365,11 @@ bool FactorCodeGen::Visit(AST::Assignment &node) {
     }
   } else if (isa<BoundedType>(NodeType(node)) ||
              isa<SpannedType>(NodeType(node))) {
+    if (PrefixedWith(node.name, "__choreo_ca_"))
+      bounded_arith_in_chunkat = true;
     fs << indent << "auto " << node.name << " = " << ExprSTR(node.value)
        << ";\n";
+    bounded_arith_in_chunkat = false;
   }
   return true;
 }
@@ -1555,8 +1558,18 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
       } else
         oss << "(" << ExprSTR(expr->GetR()) << ")";
     } else if (expr->IsArith() || expr->IsLogical()) {
-      oss << "((" << ExprSTR(expr->GetL()) << ")" << expr->op << "("
-          << ExprSTR(expr->GetR()) << "))";
+      auto& l = expr->GetL();
+      auto& r = expr->GetR();
+      auto& op = expr->op;
+      if (!bounded_arith_in_chunkat) {
+        oss << "((" << ExprSTR(l) << ")" << op << "(" << ExprSTR(r) << "))";
+      } else if (op == "*" && IsActualBoundedIntegerType(l->GetType()) &&
+                 IsActualBoundedIntegerType(r->GetType())) {
+        auto rty = cast<BoundedType>(NodeType(*r));
+        assert(rty->Dims() == 1);
+        oss << "((" << ExprSTR(l) << ")*(" << ValueSTR(rty->GetUpperBound())
+            << ")+(" << ExprSTR(r) << "))";
+      }
     } else if (expr->IsTernary()) {
       oss << "(" << ExprSTR(expr->GetC()) << ") ? (" << ExprSTR(expr->GetL())
           << ") : (" << ExprSTR(expr->GetR()) << ")";

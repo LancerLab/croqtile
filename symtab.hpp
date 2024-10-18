@@ -107,6 +107,18 @@ class StringifyTable {
   }
 
   int GetSymbolIndex(const std::string& emittable) {
+    /*
+    TODO: hardcode now
+    if `emittable` == output, should not replace it with args[]
+    eg. f = dma.copy.async output.chunkat(p, y, x) => local;
+    should generate
+      async_load_(f, output, f_buffer, {...});
+    rather than
+      async_load_(f, args[...], f_buffer, {...});
+    Examples of practical applications:
+      d = dma.copy.async l1_out => output.span_as([4, 3, 64]).chunkat(a,b,c);
+    */
+    if (emittable == "output") return -1;
     int syms_num = syms.size();
     for (int idx = 0; idx < syms_num; idx++) {
       if (emittable == syms[idx]) return idx;
