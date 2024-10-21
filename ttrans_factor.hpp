@@ -42,6 +42,7 @@ struct FactorTrans : public VisitorWithSymTab {
   // For SWAP codegen
   std::string fname;
   ptr<FutureBufferMap> fut_buf;  // map a future to its associated buffer
+  std::stack<bool> replace_swap_names;
 
   std::vector<AST::Swap *> cur_swaps;
   std::unordered_map<AST::Swap *, std::unordered_map<std::string, std::string>>
@@ -76,6 +77,7 @@ struct FactorTrans : public VisitorWithSymTab {
       if (kind == Kind::T_SWAP) {
         for (auto &stmt : f->stmts->AllSubs())
           if (auto swap = dyn_cast<AST::Swap>(stmt)) cur_swaps.push_back(swap);
+        replace_swap_names.push(true);
       }
     } else if (auto m = dyn_cast<AST::MultiNodes>(&n)) {
       if (kind == Kind::T_SELECT) {
@@ -92,6 +94,12 @@ struct FactorTrans : public VisitorWithSymTab {
         cur_node_index = multi_nodes.top()->GetIndex(d);
         assert(cur_node_index != -1 && "unexpected node index.");
       }
+    } else if (auto m = dyn_cast<AST::Select>(&n)) {
+      if (kind == Kind::T_SWAP) {
+        if (m->GetNote() == "gen") {
+          replace_swap_names.push(false);
+        }
+      }
     }
 
     return true;
@@ -101,12 +109,21 @@ struct FactorTrans : public VisitorWithSymTab {
     TraceEachVisit(n, "After ");
     if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
       fname = "";
-      //      std::cout << "AFTER: " << STR(n) << "\n";
+      // std::cout << "AFTER: - " << f->name << "\n" << STR(n) << "\n";
     } else if (auto f = dyn_cast<AST::ForeachBlock>(&n)) {
       if (kind == Kind::T_SWAP) {
         cur_swaps.clear();
         swap_pre.clear();
         swap_post.clear();
+        assert(!replace_swap_names.empty());
+        replace_swap_names.pop();
+      }
+    } else if (auto m = dyn_cast<AST::Select>(&n)) {
+      if (kind == Kind::T_SWAP) {
+        if (m->GetNote() == "gen") {
+          assert(!replace_swap_names.empty());
+          replace_swap_names.pop();
+        }
       }
     }
     return true;
@@ -155,6 +172,7 @@ struct FactorTrans : public VisitorWithSymTab {
 
   bool Visit(AST::Expr &n) {
     TraceEachVisit(n);
+
     if (kind == Kind::T_NONE) return true;
     if (n.op != "dataof") return true;
 
@@ -206,6 +224,7 @@ struct FactorTrans : public VisitorWithSymTab {
     buf_select->SetType(bty);
     auto buf_name = SymbolTable::GetAnonName();
     auto buf_assign = AST::Make<AST::Assignment>(n.LOC(), buf_name, buf_select);
+    buf_assign->SetType(bty);
 
     fut_buf->at(fname)[n.name_str] = buf_name;
     assert(cur_node_index != -1);
@@ -249,16 +268,25 @@ struct FactorTrans : public VisitorWithSymTab {
     SymTab()->AddSymbol(SymbolOfSameScope(InScopeName(n.name), buf_name), bty);
     auto buf_assign = AST::Make<AST::Assignment>(n.LOC(), buf_name, buf_select);
     buf_assign->SetType(bty);
+    buf_select->SetType(bty);
 
     fut_buf->at(fname)[n.name] = buf_name;
-
-    //    std::cout << PSTR(buf_assign) << "\n";
 
     return true;
   }
   bool Visit(AST::IntIndex &) { return true; }
   bool Visit(AST::DataType &) { return true; }
-  bool Visit(AST::Identifier &n) { return true; }
+
+  bool Visit(AST::Identifier &n) {
+    TraceEachVisit(n);
+
+    if (replace_swap_names.empty()) return true;
+
+    if (replace_swap_names.top()) n.name = NameToReplace(n.name);
+
+    return true;
+  }
+
   bool Visit(AST::Parameter &) { return true; }
   bool Visit(AST::ParamList &) { return true; }
   bool Visit(AST::ParallelBy &) { return true; }
@@ -267,11 +295,24 @@ struct FactorTrans : public VisitorWithSymTab {
   bool Visit(AST::WithBlock &) { return true; }
   bool Visit(AST::Memory &) { return true; }
   bool Visit(AST::SpanAs &) { return true; }
-  bool Visit(AST::DMA &) { return true; }
+
+  bool Visit(AST::DMA &n) {
+    TraceEachVisit(n);
+
+    if (kind != Kind::T_SWAP) return true;
+    if (!AST::typeof<FutureType>(&n)) return true;
+
+    if (!n.future.empty()) n.future = NameToReplace(n.future);
+
+    return true;
+  }
+
   bool Visit(AST::ChunkAt &) { return true; }
+
   bool Visit(AST::Wait &) { return true; }
   bool Visit(AST::Call &) { return true; }
   bool Visit(AST::Swap &n) {
+    TraceEachVisit(n);
     if (kind != Kind::T_SWAP) return true;
     if (swap_pre.count(&n)) swap_pre.erase(&n);
     return true;
@@ -281,12 +322,10 @@ struct FactorTrans : public VisitorWithSymTab {
   bool Visit(AST::LoopRange &) { return true; }
 
   bool Visit(AST::ForeachBlock &n) {
-    if (trace_visit) os << n.TypeNameString() << "\n";
+    TraceEachVisit(n);
 
     if (kind != Kind::T_SWAP) return true;
-
     if (cur_swaps.empty()) return true;
-
     if (n.ranges->Count() > 1)
       choreo_unreachable("swapping inside multi-bounds is yet to support.");
 
@@ -311,14 +350,20 @@ struct FactorTrans : public VisitorWithSymTab {
       auto fty = cast<FutureType>(sty);
       auto lname = swap->lhs->name;
       auto rname = swap->rhs->name;
-      auto lr_list =
-          AST::Make<AST::MultiValues>(n.LOC(), ", ", swap->lhs, swap->rhs);
-      auto rl_list =
-          AST::Make<AST::MultiValues>(n.LOC(), ", ", swap->rhs, swap->lhs);
+      auto lr_list = AST::Make<AST::MultiValues>(
+          n.LOC(), ", ",
+          AST::Make<AST::Identifier>(swap->lhs->LOC(), swap->lhs->name),
+          AST::Make<AST::Identifier>(swap->rhs->LOC(), swap->rhs->name));
+      auto rl_list = AST::Make<AST::MultiValues>(
+          n.LOC(), ", ",
+          AST::Make<AST::Identifier>(swap->rhs->LOC(), swap->rhs->name),
+          AST::Make<AST::Identifier>(swap->lhs->LOC(), swap->lhs->name));
       auto true_on_lhs = AST::Make<AST::Select>(n.LOC(), Condition, lr_list);
       auto true_on_rhs = AST::Make<AST::Select>(n.LOC(), Condition, rl_list);
       true_on_lhs->SetType(sty);
       true_on_rhs->SetType(sty);
+      true_on_lhs->SetNote("gen");
+      true_on_rhs->SetNote("gen");
       auto lbs = AST::Make<AST::Assignment>(n.LOC(), lname + SWAP_SFX_PRE,
                                             true_on_lhs);
       auto las = AST::Make<AST::Assignment>(n.LOC(), lname + SWAP_SFX_POS,
@@ -327,6 +372,7 @@ struct FactorTrans : public VisitorWithSymTab {
                                             true_on_rhs);
       auto ras = AST::Make<AST::Assignment>(n.LOC(), rname + SWAP_SFX_POS,
                                             true_on_lhs);
+      // mark it as generated
       lbs->SetType(sty);
       las->SetType(sty);
       rbs->SetType(sty);
@@ -347,14 +393,16 @@ struct FactorTrans : public VisitorWithSymTab {
           AST::Make<AST::Select>(n.LOC(), Condition, rl_buf_list);
       true_on_lbuf->SetType(fty->GetSpannedType());
       true_on_rbuf->SetType(fty->GetSpannedType());
+      true_on_lbuf->SetNote("gen");
+      true_on_rbuf->SetNote("gen");
       auto lbs_buf = AST::Make<AST::Assignment>(
-          n.LOC(), lbuf_name + SWAP_SFX_PRE, true_on_lbuf);
+          n.LOC(), lbuf_name + "_buf_" + SWAP_SFX_PRE, true_on_lbuf);
       auto las_buf = AST::Make<AST::Assignment>(
-          n.LOC(), lbuf_name + SWAP_SFX_POS, true_on_rbuf);
+          n.LOC(), lbuf_name + "_buf_" + SWAP_SFX_POS, true_on_rbuf);
       auto rbs_buf = AST::Make<AST::Assignment>(
-          n.LOC(), rbuf_name + SWAP_SFX_PRE, true_on_rbuf);
+          n.LOC(), rbuf_name + "_buf_" + SWAP_SFX_PRE, true_on_rbuf);
       auto ras_buf = AST::Make<AST::Assignment>(
-          n.LOC(), rbuf_name + SWAP_SFX_POS, true_on_lbuf);
+          n.LOC(), rbuf_name + "_buf_" + SWAP_SFX_POS, true_on_lbuf);
       lbs_buf->SetType(fty->GetSpannedType());
       las_buf->SetType(fty->GetSpannedType());
       rbs_buf->SetType(fty->GetSpannedType());
@@ -377,20 +425,24 @@ struct FactorTrans : public VisitorWithSymTab {
       SymTab()->AddSymbol(InScopeName(lname) + SWAP_SFX_POS, sty);
       SymTab()->AddSymbol(InScopeName(rname) + SWAP_SFX_POS, sty);
 
-      SymTab()->AddSymbol(InScopeName(lbuf_name) + SWAP_SFX_PRE,
+      SymTab()->AddSymbol(InScopeName(lbuf_name) + "_buf_" + SWAP_SFX_PRE,
                           fty->GetSpannedType());
-      SymTab()->AddSymbol(InScopeName(rbuf_name) + SWAP_SFX_PRE,
+      SymTab()->AddSymbol(InScopeName(rbuf_name) + "_buf_" + SWAP_SFX_PRE,
                           fty->GetSpannedType());
-      SymTab()->AddSymbol(InScopeName(lbuf_name) + SWAP_SFX_POS,
+      SymTab()->AddSymbol(InScopeName(lbuf_name) + "_buf_" + SWAP_SFX_POS,
                           fty->GetSpannedType());
-      SymTab()->AddSymbol(InScopeName(rbuf_name) + SWAP_SFX_POS,
+      SymTab()->AddSymbol(InScopeName(rbuf_name) + "_buf_" + SWAP_SFX_POS,
                           fty->GetSpannedType());
 
       // modify the future buffer map
-      fut_buf->at(fname)[lname + SWAP_SFX_PRE] = lbuf_name + SWAP_SFX_PRE;
-      fut_buf->at(fname)[rname + SWAP_SFX_PRE] = rbuf_name + SWAP_SFX_PRE;
-      fut_buf->at(fname)[lname + SWAP_SFX_POS] = lbuf_name + SWAP_SFX_POS;
-      fut_buf->at(fname)[rname + SWAP_SFX_POS] = rbuf_name + SWAP_SFX_POS;
+      fut_buf->at(fname)[lname + SWAP_SFX_PRE] =
+          lbuf_name + "_buf_" + SWAP_SFX_PRE;
+      fut_buf->at(fname)[rname + SWAP_SFX_PRE] =
+          rbuf_name + "_buf_" + SWAP_SFX_PRE;
+      fut_buf->at(fname)[lname + SWAP_SFX_POS] =
+          lbuf_name + "_buf_" + SWAP_SFX_POS;
+      fut_buf->at(fname)[rname + SWAP_SFX_POS] =
+          rbuf_name + "_buf_" + SWAP_SFX_POS;
 
       // Add it into the new stmts
       new_stmts.push_back(lbs);

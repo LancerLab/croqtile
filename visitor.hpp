@@ -24,7 +24,20 @@ namespace Choreo {
 struct Visitor {
   // virtual bool Visit(AST::Node&) = 0;
   virtual bool BeforeVisit(AST::Node&) { return true; }
-  virtual bool AfterVisit(AST::Node&) { return true; }
+  virtual bool AfterVisit(AST::Node& n) {
+    if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {  // by function print
+      const char* Sep = "*******************";
+      if (print_after) {
+        std::cout << "\n"
+                  << Sep << " After " << name << ": " << f->name << " (Begin) "
+                  << Sep << "\n"
+                  << STR(n) << "\n"
+                  << Sep << " After " << name << ": " << f->name << " (End) "
+                  << Sep << "\n";
+      }
+    }
+    return true;
+  }
 
   // For any visitor, it should implement all the necessary steps
   virtual bool Visit(AST::MultiNodes&) = 0;
@@ -70,6 +83,9 @@ struct Visitor {
   std::string name;
   bool trace_visit = false;
   bool debug_visit = false;
+  bool print_ahead = false;
+  bool print_after = false;
+
   static std::unordered_set<std::string> AllVisitors;
 
   bool DebugIsEnabled() const { return debug_visit; }
@@ -96,6 +112,18 @@ struct Visitor {
     if (std::getenv("CHOREO_DEBUG_VISITOR")) {
       auto debug = ToUpper(std::string(std::getenv("CHOREO_DEBUG_VISITOR")));
       if (debug.find(name) != std::string::npos) debug_visit = true;
+    }
+
+    if (std::getenv("CHOREO_PRINT_BEFORE")) {
+      auto before = ToUpper(std::string(std::getenv("CHOREO_PRINT_BEFORE")));
+      if (before.find("ALLPASSES") != std::string::npos) print_after = true;
+      if (before.find(name) != std::string::npos) print_ahead = true;
+    }
+
+    if (std::getenv("CHOREO_PRINT_AFTER")) {
+      auto after = ToUpper(std::string(std::getenv("CHOREO_PRINT_AFTER")));
+      if (after.find("ALLPASSES") != std::string::npos) print_after = true;
+      if (after.find(name) != std::string::npos) print_after = true;
     }
   }
 
@@ -238,6 +266,8 @@ struct VisitorWithScope : public Visitor {
                isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n)) {
       SSTab().LeaveScope();
     }
+
+    Visitor::AfterVisit(n);
     return true;
   }
 
@@ -259,7 +289,8 @@ struct VisitorWithSymTab : public VisitorWithScope {
       size_t lastPos = input.rfind("::");
       if (lastPos == std::string::npos)
         return input;  // No "::" found, return the original string
-      // Find the second-to-last "::" by searching up to the last found position
+      // Find the second-to-last "::" by searching up to the last found
+      // position
       size_t secondLastPos = input.rfind("::", lastPos - 1);
       if (secondLastPos == std::string::npos) return input;
       return input.substr(0,

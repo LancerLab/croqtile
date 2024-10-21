@@ -286,6 +286,8 @@ class ShapeInference : public Visitor {
     } else if (isa<AST::Parameter>(&n)) {
       allow_named_dim = false;
     }
+
+    Visitor::AfterVisit(n);
     return true;
   }
 

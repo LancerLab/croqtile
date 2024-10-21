@@ -613,8 +613,7 @@ struct Assignment : public Node, public TypeIDProvider<Assignment> {
   }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << "\n" << prefix << "`- Assign: " << name << " = ";
-    value->Print(os);
+    os << "\n" << prefix << "`- Assign: " << name << " = " << PSTR(value);
   }
 
   void accept(Visitor&) override;
@@ -758,7 +757,7 @@ struct NamedVariableDecl : public Node,
   const std::string name_str;
   const std::string init_str;
   const ptr<Memory> mem = nullptr;  // storage location
-  const ptr<DataType> type = nullptr;
+  ptr<DataType> type = nullptr;
   const ptr<Node> init_expr = nullptr;  // associated initializer
 
   explicit NamedVariableDecl(const location& l, const std::string& n,
@@ -1050,6 +1049,7 @@ struct Select : public Node, public TypeIDProvider<Select> {
   int bound;
   ptr<MultiValues> expr_list = nullptr;
   bool inDMA = false;
+  std::string note = "";
 
   Select(const location& l, const ptr<Expr>& sf,
          const ptr<MultiValues>& list = nullptr)
@@ -1057,6 +1057,9 @@ struct Select : public Node, public TypeIDProvider<Select> {
 
   // TODO(wsj)
   // x = select(IntLiteral, a, b, c)
+
+  const std::string GetNote() const { return note; }
+  void SetNote(const std::string& n) { note = n; }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "select(" << STR(select_factor) << ", " << STR(expr_list) << ")";

@@ -18,12 +18,6 @@
 #endif
 
 // utility macros define here
-#define __TRACE_EACH_VISIT__(d)       \
-  if (trace_visit) {                  \
-    os << d.TypeNameString() << ": "; \
-    os << "\n";                       \
-  }
-
 using namespace Choreo;
 using namespace Choreo::Factor;
 
@@ -41,7 +35,7 @@ bool FactorCodeGen::ContainsLoopVar(const std::string &iv) const {
 }
 
 bool FactorCodeGen::BeforeVisitImpl(AST::Node &n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   if (isa<AST::Program>(&n)) {
     //    print_fixed_header(os);
   } else if (auto c = dyn_cast<AST::ChoreoFunction>(&n)) {
@@ -76,7 +70,7 @@ using namespace factor;
 
 // CLEAN
 bool FactorCodeGen::AfterVisitImpl(AST::Node &n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   if (isa<AST::Program>(&n)) {
     os << "\n# step 4: generate the host source\n";
     os << "host_src=" << host_fn << "\n";
@@ -207,7 +201,7 @@ bool FactorCodeGen::Visit(AST::NamedTypeDecl &) { return true; }
 //   NamedVariableDecl
 //   CLEAN
 bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
-  __TRACE_EACH_VISIT__(node)
+  TraceEachVisit(node);
   if (auto s = dyn_cast<AST::Select>(node.init_expr)) {
     assert(!s->inDMA);
     size_t val_count = s->expr_list->Count();
@@ -364,39 +358,38 @@ bool FactorCodeGen::Visit(AST::Assignment &node) {
       sa->list->SetDelimiter(orig_delimiter);
     }
   } else if (isa<BoundedType>(NodeType(node)) ||
-             isa<SpannedType>(NodeType(node))) {
-    if (PrefixedWith(node.name, "__choreo_ca_"))
-      bounded_arith_in_chunkat = true;
+             isa<SpannedType>(NodeType(node)) ||
+             isa<FutureType>(NodeType(node))) {
     fs << indent << "auto " << node.name << " = " << ExprSTR(node.value)
        << ";\n";
-    bounded_arith_in_chunkat = false;
   }
+
   return true;
 }
 bool FactorCodeGen::Visit(AST::IntIndex &) { return true; }
 bool FactorCodeGen::Visit(AST::DataType &) { return true; }
 
 bool FactorCodeGen::Visit(AST::Identifier &n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   (void)n;
   return true;
 }
 
 bool FactorCodeGen::Visit(AST::Parameter &p) {
-  __TRACE_EACH_VISIT__(p)
+  TraceEachVisit(p);
   (void)p;
   return true;
 }
 
 bool FactorCodeGen::Visit(AST::ParamList &pl) {
-  __TRACE_EACH_VISIT__(pl)
+  TraceEachVisit(pl);
   cur_params = &pl.values;
   return true;
 }
 
 // CLEAN
 bool FactorCodeGen::Visit(AST::ParallelBy &by) {
-  __TRACE_EACH_VISIT__(by)
+  TraceEachVisit(by);
   parallel_factor *= by.bound;
   if (parallel_level > 1) {
     return true;
@@ -443,7 +436,7 @@ bool FactorCodeGen::Visit(AST::ParallelBy &by) {
 }
 
 bool FactorCodeGen::Visit(AST::WhereBind &n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   // establish the binding
   auto lid = cast<AST::Identifier>(n.lhs);
   auto rid = cast<AST::Identifier>(n.rhs);
@@ -467,7 +460,7 @@ bool FactorCodeGen::Visit(AST::WhereBind &n) {
 
 // CLEAN
 bool FactorCodeGen::Visit(AST::WithIn &n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   assert(n.with_matchers && "expect matcher to be exist.");
 
   // associate with to the matcher.
@@ -491,7 +484,7 @@ bool FactorCodeGen::Visit(AST::WithIn &n) {
 bool FactorCodeGen::Visit(AST::WithBlock &) { return true; }
 
 bool FactorCodeGen::Visit(AST::Memory &n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   (void)n;
   return true;
 }
@@ -500,7 +493,7 @@ bool FactorCodeGen::Visit(AST::SpanAs &) { return true; }
 
 // CLEAN
 bool FactorCodeGen::Visit(AST::DMA &d) {
-  __TRACE_EACH_VISIT__(d)
+  TraceEachVisit(d);
 
   // do not emit code for the placeholder
   if (isa<PlaceHolderType>(NodeType(d))) return true;
@@ -707,7 +700,7 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
 bool FactorCodeGen::Visit(AST::ChunkAt &) { return true; }
 
 bool FactorCodeGen::Visit(AST::Wait &w) {
-  __TRACE_EACH_VISIT__(w)
+  TraceEachVisit(w);
   auto dmas = w.targets;
   assert(dmas && "Invalid wait target!");
 
@@ -720,7 +713,7 @@ bool FactorCodeGen::Visit(AST::Wait &w) {
 
 // CLEAN
 bool FactorCodeGen::Visit(AST::Call &c) {
-  __TRACE_EACH_VISIT__(c)
+  TraceEachVisit(c);
   fs << this->indent << "call_(\"";
   fs << STR(*c.function);
   fs << "\", {";
@@ -773,14 +766,14 @@ bool FactorCodeGen::Visit(AST::Call &c) {
 }
 
 bool FactorCodeGen::Visit(AST::Swap &n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
 
   // TODO
   return true;
 }
 
 bool FactorCodeGen::Visit(AST::Select &c) {
-  __TRACE_EACH_VISIT__(c)
+  TraceEachVisit(c);
   assert(!c.inDMA);
 #if 0
   // z = dma.copy xxx => select(...)
@@ -815,19 +808,19 @@ bool FactorCodeGen::Visit(AST::Select &c) {
 }
 
 bool FactorCodeGen::Visit(AST::Return &returnNode) {
-  __TRACE_EACH_VISIT__(returnNode)
+  TraceEachVisit(returnNode);
   if (returnNode.value) output_v = STR(*returnNode.value);
   return true;
 }
 
 bool FactorCodeGen::Visit(AST::LoopRange &n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   return true;
 }
 
 // CLEAN
 bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
-  __TRACE_EACH_VISIT__(forNode)
+  TraceEachVisit(forNode);
   // auto ty = this->GetSymbolType("l2_tile");
   // ty->Print(os);
   // auto l2_tile_idx = itervars->ValueAt(0);
@@ -913,7 +906,7 @@ bool FactorCodeGen::Visit(AST::ForeachBlock &forNode) {
 
 // CLEAN
 bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
-  __TRACE_EACH_VISIT__(d)
+  TraceEachVisit(d);
   auto ty = d.GetType();
   assert(isa<FunctionType>(ty) && "unexpected type.");
   auto &fty = *cast<FunctionType>(ty);
@@ -1027,7 +1020,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl &d) {
 bool FactorCodeGen::Visit(AST::ChoreoFunction &) { return true; }
 
 bool FactorCodeGen::Visit(AST::CppSourceCode &n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   if (n.host) {
     hs << n.GetCode();
   } else {
@@ -1561,15 +1554,15 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
       auto &l = expr->GetL();
       auto &r = expr->GetR();
       auto &op = expr->op;
-      if (!bounded_arith_in_chunkat) {
-        oss << "((" << ExprSTR(l) << ")" << op << "(" << ExprSTR(r) << "))";
-      } else if (op == "*" && IsActualBoundedIntegerType(l->GetType()) &&
-                 IsActualBoundedIntegerType(r->GetType())) {
+      // handle bounded variable times
+      if (op == "*" && IsActualBoundedIntegerType(l->GetType()) &&
+          IsActualBoundedIntegerType(r->GetType())) {
         auto rty = cast<BoundedType>(NodeType(*r));
         assert(rty->Dims() == 1);
         oss << "((" << ExprSTR(l) << ")*(" << ValueSTR(rty->GetUpperBound())
             << ")+(" << ExprSTR(r) << "))";
-      }
+      } else
+        oss << "((" << ExprSTR(l) << ")" << op << "(" << ExprSTR(r) << "))";
     } else if (expr->IsTernary()) {
       oss << "(" << ExprSTR(expr->GetC()) << ") ? (" << ExprSTR(expr->GetL())
           << ") : (" << ExprSTR(expr->GetR()) << ")";

@@ -153,6 +153,7 @@ void DMA::accept(Choreo::Visitor& v) {
     to->accept(v);
   }
   v.Visit(*this);
+  v.AfterVisit(*this);
 }
 
 void ChunkAt::accept(Choreo::Visitor& v) {
@@ -163,9 +164,11 @@ void ChunkAt::accept(Choreo::Visitor& v) {
 }
 
 void Select::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
   select_factor->accept(v);
   expr_list->accept(v);
   v.Visit(*this);
+  v.AfterVisit(*this);
 }
 
 void Wait::accept(Choreo::Visitor& v) {

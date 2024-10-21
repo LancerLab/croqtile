@@ -29,6 +29,15 @@ struct CodeGenerator : public VisitorWithSymTab {
     if (symtab == nullptr)
       choreo_unreachable("symbol table must be initialized.");
   }
+
+  virtual void TraceEachVisit(AST::Node &n, bool detail = false,
+                              const std::string &m = "") const {
+    if (!trace_visit) return;
+    if (detail)
+      os << m << STR(n) << "\n";
+    else
+      os << m << n.TypeNameString() << "\n";
+  }
 };
 
 /////////////////////////////////////////////////////////////

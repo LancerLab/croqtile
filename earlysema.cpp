@@ -72,6 +72,8 @@ bool EarlySemantics::AfterVisit(AST::Node& n) {
     in_decl = false;
     allow_named_dim = false;
   }
+
+  Visitor::AfterVisit(n);
   return true;
 }
 

@@ -62,6 +62,8 @@ bool TypeInference::AfterVisit(AST::Node &n) {
   } else if (isa<AST::Parameter>(&n)) {
     allow_named_dim = false;
   }
+
+  Visitor::AfterVisit(n);
   return true;
 }
 
