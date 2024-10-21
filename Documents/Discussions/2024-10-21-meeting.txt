@@ -1,0 +1,77 @@
+1. normalize of chunkat
+
+  f = dma ... chunkat(expr, expr1, a[expr2]) => ...
+
+is transformed to be:
+
+  id = expr;
+  id1 = expr1;
+  val = expr2;
+  f = dma ... chunkat(id, id1, a[val]) => ...
+
+2. normalize of buffer:
+
+  f = dma ... => local;
+  f1 = dma ... => select(...);
+
+is transformed to be:
+
+  f32 [...] anon_0;
+  anon_1 = select(...);
+  f = dma ... => anon_0;
+  f1 = dma ... => anon_1;
+
+3. future-buffer 1-1 mapping and dataof simplification:
+
+  f0 = ... => buf0;
+  f1 = ... => buf1;
+  ...
+  call kernel(f0.data, f1.data, ...);
+
+The mapping is collected by traversing the statement. The code then transformed to be:
+
+  f0 = ... => buf0;
+  f1 = ... => buf1;
+  ...
+  call kernel(buf0, buf0, ...);
+
+4. Associated buffer selection of future selection:
+
+  f = select(f1, f2);
+  call kernel(f.data, ...);
+
+a buffer selection is then generated:
+
+  b = select(f1.data, f2.data);
+  f = select(f1, f2);
+  call kernel(b, ...);
+
+5. parallel by and memory hierarchy:
+
+  parallel p in 1 {
+     shared f16 [..] a;
+    parallel q in 6 {
+     dma ... => local;
+
+is too restrictive, now allows:
+
+
+  parallel p in 1 {
+    parallel q in 6 {
+     shared f16 [..] a;
+
+Need to adjust the target check.
+
+6. bounded variable concatenation/conjuction
+
+Assume 'a' and 'b' are bounded variables, then the binary operation:
+
+   a # b
+
+means:
+  - ubound: #a * #b
+  - value: a * #b + b
+
+Need to make the operation right.
+
+7. Next discussion meeting: 2024-10-30
