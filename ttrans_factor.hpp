@@ -107,10 +107,10 @@ struct FactorTrans : public VisitorWithSymTab {
 
   bool AfterVisitImpl(AST::Node &n) {
     TraceEachVisit(n, "After ");
-    if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
+    if (isa<AST::ChoreoFunction>(&n)) {
       fname = "";
       // std::cout << "AFTER: - " << f->name << "\n" << STR(n) << "\n";
-    } else if (auto f = dyn_cast<AST::ForeachBlock>(&n)) {
+    } else if (isa<AST::ForeachBlock>(&n)) {
       if (kind == Kind::T_SWAP) {
         cur_swaps.clear();
         swap_pre.clear();
@@ -193,7 +193,7 @@ struct FactorTrans : public VisitorWithSymTab {
   }
 
   bool Visit(AST::MultiDimSpans &) { return true; }
-  bool Visit(AST::NamedTypeDecl &n) { return true; }
+  bool Visit(AST::NamedTypeDecl &) { return true; }
 
   bool Visit(AST::NamedVariableDecl &n) {
     TraceEachVisit(n);
@@ -302,12 +302,25 @@ struct FactorTrans : public VisitorWithSymTab {
     if (kind != Kind::T_SWAP) return true;
     if (!AST::typeof<FutureType>(&n)) return true;
 
-    if (!n.future.empty()) n.future = NameToReplace(n.future);
+    if (!n.future.empty()) {
+      auto fut = n.future;
+      n.future = NameToReplace(fut);
+      if (fut != n.future) n.SetNote("use-fut");
+    }
 
     return true;
   }
 
-  bool Visit(AST::ChunkAt &) { return true; }
+  bool Visit(AST::ChunkAt &n) {
+    TraceEachVisit(n);
+
+    if (kind != Kind::T_SWAP) return true;
+
+    auto data_name = n.data->name;
+    n.data->name = NameToReplace(data_name);
+
+    return true;
+  }
 
   bool Visit(AST::Wait &) { return true; }
   bool Visit(AST::Call &) { return true; }
@@ -334,11 +347,24 @@ struct FactorTrans : public VisitorWithSymTab {
     auto lbound = cast<AST::LoopRange>(ranges[0])->lbound;
     if (!IsValidBound(lbound)) lbound = 0;
 
+    // ((iv - lb) % 2 + 2) % 2
     auto Condition = AST::Make<AST::Expr>(
         n.LOC(), "%",
+        AST::Make<AST::Expr>(
+            n.LOC(), "+",
+            AST::Make<AST::Expr>(
+                n.LOC(), "%",
+                AST::Make<AST::Expr>(
+                    n.LOC(), "-", AST::Make<AST::Identifier>(n.LOC(), iv_name),
+                    AST::Make<AST::Expr>(
+                        n.LOC(),
+                        AST::Make<AST::IntLiteral>(n.LOC(), lbound)) /*end -*/),
+                AST::Make<AST::Expr>(
+                    n.LOC(), AST::Make<AST::IntLiteral>(n.LOC(), 2)) /*end %*/),
+            AST::Make<AST::Expr>(
+                n.LOC(), AST::Make<AST::IntLiteral>(n.LOC(), 2)) /*end +*/),
         AST::Make<AST::Expr>(n.LOC(),
-                             AST::Make<AST::Identifier>(n.LOC(), iv_name)),
-        AST::Make<AST::Expr>(n.LOC(), AST::Make<AST::IntLiteral>(n.LOC(), 2)));
+                             AST::Make<AST::IntLiteral>(n.LOC(), 2)) /*end %*/);
     Condition->SetType(MakeIntegerType());
 
     std::vector<ptr<AST::Node>> new_stmts;
@@ -346,8 +372,9 @@ struct FactorTrans : public VisitorWithSymTab {
     // NOTE: must take care of the symbols and associated types
     for (auto swap : cur_swaps) {
       // generate selections on futures
-      auto sty = NodeType(*swap->lhs);
-      auto fty = cast<FutureType>(sty);
+      auto nty = NodeType(*swap->lhs);
+      auto fty = cast<FutureType>(nty);
+      auto sty = fty->GetSpannedType();
       auto lname = swap->lhs->name;
       auto rname = swap->rhs->name;
       auto lr_list = AST::Make<AST::MultiValues>(
@@ -360,8 +387,8 @@ struct FactorTrans : public VisitorWithSymTab {
           AST::Make<AST::Identifier>(swap->lhs->LOC(), swap->lhs->name));
       auto true_on_lhs = AST::Make<AST::Select>(n.LOC(), Condition, lr_list);
       auto true_on_rhs = AST::Make<AST::Select>(n.LOC(), Condition, rl_list);
-      true_on_lhs->SetType(sty);
-      true_on_rhs->SetType(sty);
+      true_on_lhs->SetType(nty);
+      true_on_rhs->SetType(nty);
       true_on_lhs->SetNote("gen");
       true_on_rhs->SetNote("gen");
       auto lbs = AST::Make<AST::Assignment>(n.LOC(), lname + SWAP_SFX_PRE,
@@ -373,10 +400,10 @@ struct FactorTrans : public VisitorWithSymTab {
       auto ras = AST::Make<AST::Assignment>(n.LOC(), rname + SWAP_SFX_POS,
                                             true_on_lhs);
       // mark it as generated
-      lbs->SetType(sty);
-      las->SetType(sty);
-      rbs->SetType(sty);
-      ras->SetType(sty);
+      lbs->SetType(nty);
+      las->SetType(nty);
+      rbs->SetType(nty);
+      ras->SetType(nty);
 
       // now generate the buffer (associated with future) selections
       auto lbuf_name = fut_buf->at(fname)[swap->lhs->name];
@@ -391,22 +418,22 @@ struct FactorTrans : public VisitorWithSymTab {
           AST::Make<AST::Select>(n.LOC(), Condition, lr_buf_list);
       auto true_on_rbuf =
           AST::Make<AST::Select>(n.LOC(), Condition, rl_buf_list);
-      true_on_lbuf->SetType(fty->GetSpannedType());
-      true_on_rbuf->SetType(fty->GetSpannedType());
+      true_on_lbuf->SetType(sty);
+      true_on_rbuf->SetType(sty);
       true_on_lbuf->SetNote("gen");
       true_on_rbuf->SetNote("gen");
       auto lbs_buf = AST::Make<AST::Assignment>(
-          n.LOC(), lbuf_name + "_buf_" + SWAP_SFX_PRE, true_on_lbuf);
+          n.LOC(), lbuf_name + SWAP_SFX_PRE, true_on_lbuf);
       auto las_buf = AST::Make<AST::Assignment>(
-          n.LOC(), lbuf_name + "_buf_" + SWAP_SFX_POS, true_on_rbuf);
+          n.LOC(), lbuf_name + SWAP_SFX_POS, true_on_rbuf);
       auto rbs_buf = AST::Make<AST::Assignment>(
-          n.LOC(), rbuf_name + "_buf_" + SWAP_SFX_PRE, true_on_rbuf);
+          n.LOC(), rbuf_name + SWAP_SFX_PRE, true_on_rbuf);
       auto ras_buf = AST::Make<AST::Assignment>(
-          n.LOC(), rbuf_name + "_buf_" + SWAP_SFX_POS, true_on_lbuf);
-      lbs_buf->SetType(fty->GetSpannedType());
-      las_buf->SetType(fty->GetSpannedType());
-      rbs_buf->SetType(fty->GetSpannedType());
-      ras_buf->SetType(fty->GetSpannedType());
+          n.LOC(), rbuf_name + SWAP_SFX_POS, true_on_lbuf);
+      lbs_buf->SetType(sty);
+      las_buf->SetType(sty);
+      rbs_buf->SetType(sty);
+      ras_buf->SetType(sty);
 
       // record the name mapping
       swap_pre[swap].emplace(lname, lname + SWAP_SFX_PRE);
@@ -419,30 +446,22 @@ struct FactorTrans : public VisitorWithSymTab {
       swap_post[swap].emplace(lbuf_name, lbuf_name + SWAP_SFX_POS);
       swap_post[swap].emplace(rbuf_name, rbuf_name + SWAP_SFX_POS);
 
-      // modify the symbol table.
-      SymTab()->AddSymbol(InScopeName(lname) + SWAP_SFX_PRE, sty);
-      SymTab()->AddSymbol(InScopeName(rname) + SWAP_SFX_PRE, sty);
-      SymTab()->AddSymbol(InScopeName(lname) + SWAP_SFX_POS, sty);
-      SymTab()->AddSymbol(InScopeName(rname) + SWAP_SFX_POS, sty);
+      // modify the symbol table
+      SymTab()->AddSymbol(InScopeName(lname) + SWAP_SFX_PRE, nty);
+      SymTab()->AddSymbol(InScopeName(rname) + SWAP_SFX_PRE, nty);
+      SymTab()->AddSymbol(InScopeName(lname) + SWAP_SFX_POS, nty);
+      SymTab()->AddSymbol(InScopeName(rname) + SWAP_SFX_POS, nty);
 
-      SymTab()->AddSymbol(InScopeName(lbuf_name) + "_buf_" + SWAP_SFX_PRE,
-                          fty->GetSpannedType());
-      SymTab()->AddSymbol(InScopeName(rbuf_name) + "_buf_" + SWAP_SFX_PRE,
-                          fty->GetSpannedType());
-      SymTab()->AddSymbol(InScopeName(lbuf_name) + "_buf_" + SWAP_SFX_POS,
-                          fty->GetSpannedType());
-      SymTab()->AddSymbol(InScopeName(rbuf_name) + "_buf_" + SWAP_SFX_POS,
-                          fty->GetSpannedType());
+      SymTab()->AddSymbol(InScopeName(lbuf_name) + SWAP_SFX_PRE, sty);
+      SymTab()->AddSymbol(InScopeName(rbuf_name) + SWAP_SFX_PRE, sty);
+      SymTab()->AddSymbol(InScopeName(lbuf_name) + SWAP_SFX_POS, sty);
+      SymTab()->AddSymbol(InScopeName(rbuf_name) + SWAP_SFX_POS, sty);
 
       // modify the future buffer map
-      fut_buf->at(fname)[lname + SWAP_SFX_PRE] =
-          lbuf_name + "_buf_" + SWAP_SFX_PRE;
-      fut_buf->at(fname)[rname + SWAP_SFX_PRE] =
-          rbuf_name + "_buf_" + SWAP_SFX_PRE;
-      fut_buf->at(fname)[lname + SWAP_SFX_POS] =
-          lbuf_name + "_buf_" + SWAP_SFX_POS;
-      fut_buf->at(fname)[rname + SWAP_SFX_POS] =
-          rbuf_name + "_buf_" + SWAP_SFX_POS;
+      fut_buf->at(fname)[lname + SWAP_SFX_PRE] = lbuf_name + SWAP_SFX_PRE;
+      fut_buf->at(fname)[rname + SWAP_SFX_PRE] = rbuf_name + SWAP_SFX_PRE;
+      fut_buf->at(fname)[lname + SWAP_SFX_POS] = lbuf_name + SWAP_SFX_POS;
+      fut_buf->at(fname)[rname + SWAP_SFX_POS] = rbuf_name + SWAP_SFX_POS;
 
       // Add it into the new stmts
       new_stmts.push_back(lbs);
@@ -466,7 +485,7 @@ struct FactorTrans : public VisitorWithSymTab {
   bool Visit(AST::FunctionDecl &) { return true; }
   bool Visit(AST::ChoreoFunction &) { return true; }
   bool Visit(AST::CppSourceCode &) { return true; }
-  bool Visit(AST::Program &n) { return true; }
+  bool Visit(AST::Program &) { return true; }
 
   bool HasError() { return false; }
 };

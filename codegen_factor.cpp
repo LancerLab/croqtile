@@ -292,12 +292,14 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl &node) {
       else
         alloc_in_fs << "    " << _os.str();
 
+#if 0
       fs << indent << "auto " << sym << "_init = alloc_dma_("
          << ((storage_type == "L1Type") ? "SDMAType()" : "CDMAType()")
          << ");\n";
 
       // generate "memset_()" action to initiate each alloc_memory with value 0
       fs << indent << "memset_(" << sym << "_init, " << sym << ", 0);\n";
+#endif
     }
   } else if (isa<IntegerType>(nty)) {
     // simply ignore the generation of such simple integers
@@ -496,7 +498,16 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
   TraceEachVisit(d);
 
   // do not emit code for the placeholder
-  if (isa<PlaceHolderType>(NodeType(d))) return true;
+  if (auto ph = dyn_cast<PlaceHolderType>(NodeType(d))) {
+    assert(ph->Category() == TypeCategory::FUTURE);
+    // TODO: optimize when it should be SDMA
+    auto fty = cast<FutureType>(GetSymbolType(d.future));
+    auto dma_str = "CDMA";
+    if (fty->GetSpannedType()->GetStorage() == Storage::LOCAL) dma_str = "SDMA";
+    alloc_in_fs << alloc_indent << "auto " << d.future << " = alloc_dma_("
+                << dma_str << "Type());\n";
+    return true;
+  }
 
   // handle .to  in AST::Memory
   assert((isa<AST::ChunkAt>(d.from)) && "Unexpected type for DMA's source.");
@@ -633,13 +644,15 @@ bool FactorCodeGen::Visit(AST::DMA &d) {
 
   // buffer the allocation in another stream
   // if use pipeline-mode, make all cdma with shared_ annotation
-  if (d.chained == true && ((d.chain_to != "" && src_level > dst_level) ||
-                            (d.chain_from != "" && src_level < dst_level)))
-    alloc_in_fs << alloc_indent << "auto " << future_name << " = alloc_dma_("
-                << DMATypeString(src_level, dst_level) << "()).shared_();\n";
-  else
-    alloc_in_fs << alloc_indent << "auto " << future_name << " = alloc_dma_("
-                << DMATypeString(src_level, dst_level) << "());\n";
+  if (d.GetNote() != "use-fut") {
+    if (d.chained == true && ((d.chain_to != "" && src_level > dst_level) ||
+                              (d.chain_from != "" && src_level < dst_level)))
+      alloc_in_fs << alloc_indent << "auto " << future_name << " = alloc_dma_("
+                  << DMATypeString(src_level, dst_level) << "()).shared_();\n";
+    else
+      alloc_in_fs << alloc_indent << "auto " << future_name << " = alloc_dma_("
+                  << DMATypeString(src_level, dst_level) << "());\n";
+  }
 
   // decide the dma operation
   std::string dma_op = "";

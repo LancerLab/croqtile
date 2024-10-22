@@ -1,0 +1,72 @@
+// RUN: choreo -t factor %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
+#include "choreo.h"
+
+__cok__ { /// kernel program
+extern "C" void kernel(int * a, int * b, int * c, int n) {
+  for (int i = 0; i < n; ++i)
+    c[i] = a[i] + b[i];
+}
+} /// end of kernel decl
+
+__co__ s32 [6, 17, 128] ele_add(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) { /// device program
+  s32[lhs.span] output;
+
+  parallel p by 6 {
+    with index = {x, y} in [17, 4] {
+      local s32 [rhs.span / {#p, #x, #y}] l_out; 
+      foreach x {
+        // first bunch
+        lfA = dma.copy.async lhs.chunkat(p, x, y) => local;
+        rfA = dma.copy.async rhs.chunkat(p, x, y) => local;
+        // dummy DMA used for A-B buffering
+        lfB = dma.none;
+        rfB = dma.none;
+        foreach y(1:) {
+          lfB = dma.copy.async lhs.chunkat(p, x, y) => local;
+          rfB = dma.copy.async rhs.chunkat(p, x, y) => local;
+          wait lfA, rfA;
+
+          call kernel(lfA.data, rfA.data, l_out, |lfB.span|);
+
+          dma.copy l_out => output.chunkat(p, x, y - 1); // can use defined vars
+
+          swap(lfA, lfB);
+          swap(rfA, rfB);
+        }
+        lf = select(#y % 2, lfB, lfA);
+        rf = select(#y % 2, rfB, rfA);
+        wait lf, rf;
+        call kernel(lf.data, rf.data, l_out, |lfB.span|);
+        dma.copy l_out => output.chunkat(p, x, y(-1));
+      }
+    }
+  }
+
+  return output;
+}
+
+int main() { /// host program
+  choreo::s32 a[6][17][128] = {0};
+  choreo::s32 b[6][17][128] = {0};
+  std::fill_n(&a[0][0][0], sizeof(a) / sizeof(a[0][0][0]), 1);
+  std::fill_n(&b[0][0][0], sizeof(b) / sizeof(b[0][0][0]), 2);
+
+  auto res
+    = ele_add(choreo::make_spanview<3, choreo::s32>((int*)a, {6, 17, 128}),
+              choreo::make_spanview<3, choreo::s32>((int*)b, {6, 17, 128}));
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k) {
+        if (a[i][j][k] + b[i][j][k] != res[i][j][k]) {
+          std::cout << "[" << i << ", " << j << ", " << k << "] ";
+          std::cout << "a: " << a[i][j][k] << ", b: " << b[i][j][k] << ", res: " << res[i][j][k] << "\n";
+          assert(a[i][j][k] + b[i][j][k] == res[i][j][k]);
+        }
+      }
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK: Test Passed

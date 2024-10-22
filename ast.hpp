@@ -39,6 +39,7 @@ class DataType;
 struct Node {
   location loc;
   ptr<Type> pty = MakeUnknownType();
+  std::string note;
 
   Node(const location& l, const ptr<Type>& p = MakeUnknownType())
       : loc(l), pty(p) {}
@@ -52,6 +53,9 @@ struct Node {
   virtual ~Node() = default;
 
   virtual std::string getRefName() const { return ""; }
+
+  virtual const std::string GetNote() const { return note; }
+  virtual void SetNote(const std::string& n) { note = n; }
 
   virtual void Print(std::ostream& os,
                      const std::string& prefix = {}) const = 0;
@@ -1049,7 +1053,6 @@ struct Select : public Node, public TypeIDProvider<Select> {
   int bound;
   ptr<MultiValues> expr_list = nullptr;
   bool inDMA = false;
-  std::string note = "";
 
   Select(const location& l, const ptr<Expr>& sf,
          const ptr<MultiValues>& list = nullptr)
@@ -1057,9 +1060,6 @@ struct Select : public Node, public TypeIDProvider<Select> {
 
   // TODO(wsj)
   // x = select(IntLiteral, a, b, c)
-
-  const std::string GetNote() const { return note; }
-  void SetNote(const std::string& n) { note = n; }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "select(" << STR(select_factor) << ", " << STR(expr_list) << ")";
@@ -1135,6 +1135,7 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     if (operation == ".none") {
       os << "\n" << prefix << "`- DMA" << operation;
+      if (!future.empty()) os << "\n" << prefix << "  `- future: " << future;
       return;
     }
 

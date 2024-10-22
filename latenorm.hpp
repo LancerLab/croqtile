@@ -113,9 +113,11 @@ struct LateNorm : public VisitorWithSymTab {
     auto sty = MakeSpannedType(fty->ElementType(), shape,
                                cast<AST::Memory>(n.to)->Get());
 
+    auto BUFFER_SUFFIX = "__buf__";  // hope user not name buffer this way
     // Note: Later passes only cares about the type. So it is possible to ignore
     // the syntax struct 'DataType'.
-    auto anon_sym = SymbolTable::GetAnonName();
+    auto anon_sym = (n.future.empty()) ? SymbolTable::GetAnonName()
+                                       : n.future + BUFFER_SUFFIX;
     auto var = AST::Make<AST::NamedVariableDecl>(n.to->LOC(), anon_sym);
     var->SetType(sty);
 
