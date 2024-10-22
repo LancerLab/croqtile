@@ -314,7 +314,7 @@ struct Normalizer : public Visitor {
 
         // else, hoist the arith out
         int index = cur_dma_index + mnodes_insertions[multi_nodes.top()].size();
-        auto nname = "__choreo_ca_" + SymbolTable::GetAnonName();
+        auto nname = SymbolTable::GetAnonName();
         mnodes_insertions[multi_nodes.top()].emplace_back(
             std::make_tuple(index, v, nname));
         repls.emplace_back(i, AST::Make<AST::Identifier>(v->LOC(), nname));
