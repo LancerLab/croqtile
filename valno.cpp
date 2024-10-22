@@ -265,6 +265,9 @@ std::optional<std::string> ValueNumbering::TryToSimplifyBinary(
       }
       res += std::to_string((std::stoi(*l_cv) + std::stoi(*r_cv) - 1) /
                             std::stoi(*r_cv));
+    } else if (op == "#") {
+      // calculate the upper bound result
+      res += std::to_string(std::stoi(*l_cv) * std::stoi(*r_cv));
     } else {
       Error(loc,
             "simplification of operation `" + op + "' is not yet supported.");
@@ -320,7 +323,7 @@ std::optional<std::string> ValueNumbering::SignBoundedOperation(
       res = GetSignatureForNode(rhs);
     else
       choreo_unreachable("operation is not permitted.");
-  } else if (op == "*") {
+  } else if (op == "#") {
     if (IsActualBoundedIntegerType(lhs.GetType()) &&
         IsActualBoundedIntegerType(rhs.GetType())) {
       auto lbound = GetSingleUpperBound(lhs.GetType());
@@ -355,7 +358,7 @@ std::optional<std::string> ValueNumbering::SignBoundedOperation(
 std::optional<std::string> ValueNumbering::GenerateSpecialNodeSignature(
     const AST::Node& node) {
   if (auto* n = dyn_cast<AST::Expr>(&node))
-    if (n->op == "+" || n->op == "-" || n->op == "*") {
+    if (n->op == "+" || n->op == "-" || n->op == "#") {
       if (isa<BoundedType>(n->GetL()->GetType()) ||
           isa<BoundedType>(n->GetR()->GetType())) {
         return SignBoundedOperation(n->LOC(), n->op, *n->GetL(), *n->GetR(),
@@ -444,6 +447,18 @@ std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
                if (res && trace)
                  os << ScopeIndent() << "<Simplify> '"
                     << GenerateNodeSignature(*n->GetL(), false) << " cdiv "
+                    << GenerateNodeSignature(*n->GetR(), false) << "' to '"
+                    << res.value() << "'\n";
+               return res;
+             }},
+            {"#",
+             [this, &n]() -> std::optional<std::string> {
+               auto res = TryToSimplifyBinary(n->LOC(), "#",
+                                              GetSignatureForNode(*n->GetL()),
+                                              GetSignatureForNode(*n->GetR()));
+               if (res && trace)
+                 os << ScopeIndent() << "<Simplify> '"
+                    << GenerateNodeSignature(*n->GetL(), false) << " # "
                     << GenerateNodeSignature(*n->GetR(), false) << "' to '"
                     << res.value() << "'\n";
                return res;

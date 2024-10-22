@@ -185,7 +185,7 @@ void choreo_info(const char *message) {
 %nonassoc LT GT LE GE EQ NE
 %left PLUS MINUS
 %left STAR SLASH PECET
-%nonassoc UBOUND
+%left UBOUND
 %nonassoc LPAREN RPAREN
 //%left HOST_CODE
 
@@ -635,6 +635,7 @@ s_expr
     | CDIV LPAREN s_expr COMMA s_expr RPAREN { $$ = AST::Make<AST::Expr>(@1, "cdiv", $3, $5); }
     | s_expr OR s_expr { $$ = AST::Make<AST::Expr>(@1, "||", $1, $3); }
     | s_expr AND s_expr { $$ = AST::Make<AST::Expr>(@1, "&&", $1, $3); }
+    | s_expr UBOUND s_expr {$$ = AST::Make<AST::Expr>(@1, "#", $1, $3); }
     | NOT s_expr { $$ = AST::Make<AST::Expr>(@1, "!", $2); }
     | LPAREN s_expr RPAREN {
         // Does String "(0)" represent an indexing operation or an arithmetic operation

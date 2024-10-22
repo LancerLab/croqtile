@@ -44,7 +44,7 @@ __co__ auto transpose(s32 [4, 2, 4, 8, 2] input) {
   parallel p by 1 {
     with index = {a, b, c, d, e} in input.span[(0), 1, 1, 1, 1] {
       foreach index {
-        input_shape_c = dma.copy.async input.span_as([4, 2, 32, 2]).chunkat(a, b, c*d, e) => local;
+        input_shape_c = dma.copy.async input.span_as([4, 2, 32, 2]).chunkat(a, b, c#d, e) => local;
         wait input_shape_c;
         
         // [c, 1, d*b, e]
@@ -55,7 +55,7 @@ __co__ auto transpose(s32 [4, 2, 4, 8, 2] input) {
         // replace `call` with `dma.transpose` later.
         call kernel_transpose(input_shape_c.data, l1_out, 2, 4, 8, 2);
 
-        out_store = dma.copy.async l1_out => output.span_as([4, 4, 16, 2]).chunkat(c, a, d*b, e);
+        out_store = dma.copy.async l1_out => output.span_as([4, 4, 16, 2]).chunkat(c, a, d#b, e);
         wait out_store;
       }
     }

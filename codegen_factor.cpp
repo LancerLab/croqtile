@@ -1568,7 +1568,7 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
       auto &r = expr->GetR();
       auto &op = expr->op;
       // handle bounded variable times
-      if (op == "*" && IsActualBoundedIntegerType(l->GetType()) &&
+      if (op == "#" && IsActualBoundedIntegerType(l->GetType()) &&
           IsActualBoundedIntegerType(r->GetType())) {
         auto rty = cast<BoundedType>(NodeType(*r));
         assert(rty->Dims() == 1);

@@ -5,7 +5,7 @@ __co__ void bounded(s32 [180, 27, 12] a) {
   parallel p by 6 {
     with index = {x, y} in [10, 9] {
       foreach index {
-        dma.copy a.chunkat(x * y, y + 1, p) => local;
+        dma.copy a.chunkat(x # y, y + 1, p) => local;
       }
       dma.copy a.chunkat(x, y(1), p(-1)) => local;
     }

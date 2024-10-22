@@ -544,16 +544,18 @@ bool TypeInference::Visit(AST::Expr &n) {
       // bounded integer, lb and ub changed!
     } else if (isa<BoundedITupleType>(pty_lhs) &&
                isa<BoundedITupleType>(pty_rhs)) {
-      // to support `chunkat(x, y*z)`
-      auto bitt_lhs = cast<BoundedITupleType>(pty_lhs);
-      auto bitt_rhs = cast<BoundedITupleType>(pty_rhs);
-      // bounded integer in within will be transformed to bounded ituple in
-      // valno.hpp
-      assert(bitt_lhs->Dims() == 1 && bitt_rhs->Dims() == 1 &&
-             "for now only support multiplication of one dim bounded ituples.");
-      auto ub = bitt_lhs->GetUpperBound(0) * bitt_rhs->GetUpperBound(0);
-      n.SetType(MakeBoundedITupleType(Shape(1, ub)));
-      cur_type = n.GetType();
+      // to support `chunkat(x, y#z)`
+      if (n.op == "#") {
+        auto bitt_lhs = cast<BoundedITupleType>(pty_lhs);
+        auto bitt_rhs = cast<BoundedITupleType>(pty_rhs);
+        // bounded integer in within will be transformed to bounded ituple in
+        // valno.hpp
+        assert(bitt_lhs->Dims() == 1 && bitt_rhs->Dims() == 1 &&
+              "for now only support multiplication of one dim bounded ituples.");
+        auto ub = bitt_lhs->GetUpperBound(0) * bitt_rhs->GetUpperBound(0);
+        n.SetType(MakeBoundedITupleType(Shape(1, ub)));
+        cur_type = n.GetType();
+      }
     } else if (*pty_lhs != *pty_rhs) {
       Error(n.LOC(), "The operands of the expression cannot undergo '" + n.op +
                          "' operation.");

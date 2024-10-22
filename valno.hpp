@@ -360,7 +360,7 @@ class ShapeInference : public Visitor {
     if (AST::typeof<MDSpanType>(&n)) {
       cur_mdspan_vn = cur_vn;
       //      InvalidateVN(cur_vn);
-    } else if (n.op == "*") {
+    } else if (n.op == "#") {
       if (IsActualBoundedIntegerType(n.GetL()->GetType()) &&
           IsActualBoundedIntegerType(n.GetR()->GetType())) {
         assert(n.s.DimCount() == 1);

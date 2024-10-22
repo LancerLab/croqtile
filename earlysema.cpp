@@ -197,24 +197,10 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       } else
         SetNodeType(n, MakeUninitBoundedITupleType());
     } else if ((isa<BoundedType>(lty) && isa<BoundedType>(rty))) {
-      // allow only * operator for catesian products on two bounded-vars
-      if ((n.op != "*")) {
-        Error(n.LOC(), "in operation \"" + n.op +
-                           "\": unable to apply to the types (" + PSTR(lty) +
-                           " vs. " + PSTR(rty) + ").");
-        return false;
-      }
-      if (IsActualBoundedIntegerType(lty) && IsActualBoundedIntegerType(rty)) {
-        SetNodeType(n, MakeBoundedITupleType(Shape(
-                           1, cast<BoundedType>(lty)->GetUpperBound() +
-                                  cast<BoundedType>(lty)->GetUpperBound())));
-      } else {
-        // TODO
-        Error(n.LOC(), "in operation \"" + n.op +
-                           "\": unable to apply to the types (" + PSTR(lty) +
-                           " vs. " + PSTR(rty) + ").");
-        return false;
-      }
+      Error(n.LOC(), "in operation \"" + n.op +
+                         "\": unable to apply to the types (" + PSTR(lty) +
+                         " vs. " + PSTR(rty) + ").");
+      return false;
     } else if ((IsActualBoundedIntegerType(lty) && isa<IntegerType>(rty)) ||
                (IsActualBoundedIntegerType(rty) && isa<IntegerType>(lty))) {
       // this is promissing, simply allow it
@@ -295,6 +281,22 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       return false;
     } else
       SetNodeType(n, lty);
+  } else if (n.op == "#") {
+    // allow only # operator for catesian products on two bounded-vars
+    // a # b => a * (#b) + b
+    auto lty = NodeType(*n.GetL());
+    auto rty = NodeType(*n.GetR());
+    if (IsActualBoundedIntegerType(lty) && IsActualBoundedIntegerType(rty)) {
+      SetNodeType(n, MakeBoundedITupleType(Shape(
+                         1, cast<BoundedType>(lty)->GetUpperBound() *
+                                cast<BoundedType>(rty)->GetUpperBound())));
+    } else {
+      // TODO: computation of multi-dim bounded vars is not supported yet.
+      Error(n.LOC(), "in operation \"" + n.op +
+                         "\": unable to apply to the types (" + PSTR(lty) +
+                         " vs. " + PSTR(rty) + ").");
+      return false;
+    }
   } else if ((n.op == "<") || (n.op == ">") || (n.op == "==") ||
              (n.op == "!=") || (n.op == "<=") || (n.op == ">=")) {
     auto lty = NodeType(*n.GetL());
