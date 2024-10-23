@@ -261,7 +261,7 @@ struct Normalizer : public Visitor {
 
     auto anon_sym = SymbolTable::GetAnonName();
     assert(cur_dma_index != -1);
-    // hoist the span_as to multinodes
+    // hoist the select to multinodes
     int index = cur_dma_index + mnodes_insertions[multi_nodes.top()].size();
     cast<AST::Select>(n.to)->inDMA = false;
     mnodes_insertions[multi_nodes.top()].emplace_back(
