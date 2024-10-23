@@ -139,6 +139,7 @@ blank       [ \t\r]
   ".span"    return Choreo::Parser::make_FNSPAN(yytext, loc);
   ".span_as" return Choreo::Parser::make_FNSPANAS(yytext, loc);
   ".data"    return Choreo::Parser::make_FNDATA(yytext, loc);
+  ".data.span_as" return Choreo::Parser::make_FNDATASPANAS(yytext, loc);
   ".chunkat" return Choreo::Parser::make_CHUNKAT(yytext, loc);
   "=>"       return Choreo::Parser::make_TRANS(loc);
   "swap"     return Choreo::Parser::make_SWAP(yytext, loc);
@@ -161,7 +162,7 @@ blank       [ \t\r]
   "/"        return Choreo::Parser::make_SLASH  (loc);
   "%"        return Choreo::Parser::make_PECET  (loc);
   "cdiv"     return Choreo::Parser::make_CDIV   (loc);
-  "after"     return Choreo::Parser::make_CHAIN   (loc);
+  "after"    return Choreo::Parser::make_CHAIN   (loc);
   "="        return Choreo::Parser::make_ASSIGN (loc);
   "<"        return Choreo::Parser::make_LT     (loc);
   ">"        return Choreo::Parser::make_GT     (loc);

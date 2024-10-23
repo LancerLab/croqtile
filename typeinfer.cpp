@@ -544,16 +544,18 @@ bool TypeInference::Visit(AST::Expr &n) {
       // bounded integer, lb and ub changed!
     } else if (isa<BoundedITupleType>(pty_lhs) &&
                isa<BoundedITupleType>(pty_rhs)) {
-      // to support `chunkat(x, y*z)`
-      auto bitt_lhs = cast<BoundedITupleType>(pty_lhs);
-      auto bitt_rhs = cast<BoundedITupleType>(pty_rhs);
-      // bounded integer in within will be transformed to bounded ituple in
-      // valno.hpp
-      assert(bitt_lhs->Dims() == 1 && bitt_rhs->Dims() == 1 &&
-             "for now only support multiplication of one dim bounded ituples.");
-      auto ub = bitt_lhs->GetUpperBound(0) * bitt_rhs->GetUpperBound(0);
-      n.SetType(MakeBoundedITupleType(Shape(1, ub)));
-      cur_type = n.GetType();
+      // to support `chunkat(x, y#z)`
+      if (n.op == "#") {
+        auto bitt_lhs = cast<BoundedITupleType>(pty_lhs);
+        auto bitt_rhs = cast<BoundedITupleType>(pty_rhs);
+        // bounded integer in within will be transformed to bounded ituple in
+        // valno.hpp
+        assert(bitt_lhs->Dims() == 1 && bitt_rhs->Dims() == 1 &&
+              "for now only support multiplication of one dim bounded ituples.");
+        auto ub = bitt_lhs->GetUpperBound(0) * bitt_rhs->GetUpperBound(0);
+        n.SetType(MakeBoundedITupleType(Shape(1, ub)));
+        cur_type = n.GetType();
+      }
     } else if (*pty_lhs != *pty_rhs) {
       Error(n.LOC(), "The operands of the expression cannot undergo '" + n.op +
                          "' operation.");
@@ -581,22 +583,32 @@ bool TypeInference::Visit(AST::IntTuple &n) {
 bool TypeInference::Visit(AST::SpanAs &n) {
   __TRACE_EACH_VISIT__(n)
 
-  if (!isa<SpannedType>(NodeType(*n.id).get())) {
+  auto ity = NodeType(*n.id).get();
+  if (!isa<SpannedType>(ity) && !isa<FutureType>(ity)) {
     Error(n.LOC(), "fail to infer the type of `" + STR(n.id) + "'.");
     error_count++;
     return false;
   }
 
-  // mutate default to be global
   auto nty = NodeType(n);
   auto sty = cast<SpannedType>(nty);
-  if (sty->m_type == Storage::DEFAULT)
-    n.SetType(MakeSpannedType(sty->f_type, sty->GetShape(), Storage::GLOBAL));
 
-  // is this required? assign the target id (not defined yet) with a type
-  n.nid->SetType(nty);
-
-  cur_type = nty;
+  if (isa<SpannedType>(ity)) {
+    // mutate default to be global
+    if (sty->m_type == Storage::DEFAULT)
+      n.SetType(MakeSpannedType(sty->f_type, sty->GetShape(), Storage::GLOBAL));
+    // is this required? assign the target id (not defined yet) with a type
+    n.nid->SetType(nty);
+    cur_type = nty;
+  } else {
+    auto fty = GetSymbolType(n.id->LOC(), n.id->name + ".data");
+    auto fsty = cast<SpannedType>(fty);
+    if (sty->m_type == Storage::DEFAULT)
+      n.SetType(
+          MakeSpannedType(sty->f_type, sty->GetShape(), fsty->GetStorage()));
+    n.nid->SetType(n.GetType());
+    cur_type = n.GetType();
+  }
 
   return true;
 }

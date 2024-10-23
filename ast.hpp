@@ -348,7 +348,7 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
   bool IsArith() const {
     if (!IsBinary()) return false;
     if ((op == "+") || (op == "-") || (op == "*") || (op == "/") ||
-        (op == "%") || (op == "cdiv"))
+        (op == "%") || (op == "cdiv") || (op == "#"))
       return true;
     return false;
   }
@@ -895,7 +895,6 @@ struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
     assert(num != nullptr);
     biv = identifier->name;
     bound = num->value;
-    symtab.AddSymbol(biv, MakeBoundedIntegerType(bound));
     if (id_l->Count() > 1)
       stmts = ConstructParallelByRecursively(stmts, 1, id_list, iv_list);
   }
@@ -910,7 +909,6 @@ struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
     auto iv = iv_l->ValueAt(idx);
     auto* num = dyn_cast<IntLiteral>(iv);
     assert(num != nullptr);
-    symtab.AddSymbol(identifier->name, MakeBoundedIntegerType(num->value));
     auto pb = Make<ParallelBy>(id->loc, identifier->name, num->value);
     if (idx == id_l->Count() - 1)
       pb->stmts = ss;

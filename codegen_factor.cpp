@@ -318,8 +318,12 @@ bool FactorCodeGen::Visit(AST::IntTuple &) { return true; }
 bool FactorCodeGen::Visit(AST::Assignment &node) {
   if (auto sa = dyn_cast<AST::SpanAs>(node.value)) {
     int arg_idx = factor_symbols.GetSymbolIndex(sa->id->name);
-    std::string buffer_name =
-        arg_idx < 0 ? sa->id->name : "args[" + std::to_string(arg_idx) + "]";
+    std::string buffer_name = sa->id->name;
+    if (auto fty = dyn_cast<FutureType>(GetSymbolType(sa->id->name))) {
+      assert(fut_buf->at(entry_fn).count(sa->id->name));
+      buffer_name = fut_buf->at(entry_fn).at(sa->id->name);
+    }
+    if (arg_idx >= 0) buffer_name = "args[" + std::to_string(arg_idx) + "]";
     auto sty = dyn_cast<SpannedType>(node.GetType());
     assert(sty);
     std::string storage_type = stringify(sty->GetStorage());
@@ -1568,7 +1572,7 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
       auto &r = expr->GetR();
       auto &op = expr->op;
       // handle bounded variable times
-      if (op == "*" && IsActualBoundedIntegerType(l->GetType()) &&
+      if (op == "#" && IsActualBoundedIntegerType(l->GetType()) &&
           IsActualBoundedIntegerType(r->GetType())) {
         auto rty = cast<BoundedType>(NodeType(*r));
         assert(rty->Dims() == 1);

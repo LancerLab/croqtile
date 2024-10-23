@@ -140,7 +140,7 @@ void choreo_info(const char *message) {
 %token <Choreo::Storage> LOCAL SHARED GLOBAL
 %token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT BOOL VOID
 // builtin operations
-%token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT WAIT CALL AUTO SELECT SWAP
+%token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT WAIT CALL AUTO SELECT SWAP FNDATASPANAS
 // control related
 %token <std::string> IF ELSE PARA BY WITH IN FOREACH RET WHERE
 %token <std::string> TRUE FALSE
@@ -185,7 +185,7 @@ void choreo_info(const char *message) {
 %nonassoc LT GT LE GE EQ NE
 %left PLUS MINUS
 %left STAR SLASH PECET
-%nonassoc UBOUND
+%left UBOUND
 %nonassoc LPAREN RPAREN
 //%left HOST_CODE
 
@@ -401,15 +401,19 @@ paraby_block
         $$ = AST::Make<AST::ParallelBy>(@1, $2, $4);
         $$->stmts = $7;
       }
-    | PARA LBRACE id_list RBRACE BY LBRAKT iv_list RBRAKT LBRACE statements RBRACE {
-        // symbols are added in ast.hpp
+    | PARA LBRACE id_list RBRACE BY LBRAKT iv_list RBRAKT {
         if ($3->Count() != $7->Count())
           Parser::error(@3, "The number of arguments in parallel statements "
-                         "should be consistent.");
-        $$ = AST::Make<AST::ParallelBy>(@1, $3, $7, $10);
-        // workaround: init stmts like next line doesn't work.
-        // in ast.hpp, ->stmts is nullptr. Why?
-        // $$->stmts = $10;
+                        "should be consistent.");
+        int idx = 0;
+        for (auto id : $3->AllValues()) {
+          auto name = cast<AST::Identifier>(id)->name;
+          auto bound = cast<AST::IntLiteral>($7->ValueAt(idx));
+          symtab.AddSymbol(name, MakeBoundedIntegerType(bound->value));
+          ++idx;
+        }
+      } LBRACE statements RBRACE {
+        $$ = AST::Make<AST::ParallelBy>(@1, $3, $7, $11);
       }
     ;
 
@@ -635,6 +639,7 @@ s_expr
     | CDIV LPAREN s_expr COMMA s_expr RPAREN { $$ = AST::Make<AST::Expr>(@1, "cdiv", $3, $5); }
     | s_expr OR s_expr { $$ = AST::Make<AST::Expr>(@1, "||", $1, $3); }
     | s_expr AND s_expr { $$ = AST::Make<AST::Expr>(@1, "&&", $1, $3); }
+    | s_expr UBOUND s_expr {$$ = AST::Make<AST::Expr>(@1, "#", $1, $3); }
     | NOT s_expr { $$ = AST::Make<AST::Expr>(@1, "!", $2); }
     | LPAREN s_expr RPAREN {
         // Does String "(0)" represent an indexing operation or an arithmetic operation
@@ -882,6 +887,9 @@ span_as
     : IDENTIFIER FNSPANAS LPAREN LBRAKT value_list RBRAKT RPAREN {
         $$ = AST::Make<AST::SpanAs>(@1, AST::Make<AST::Identifier>(@1,$1), $5);
       }
+    | IDENTIFIER FNDATASPANAS LPAREN LBRAKT value_list RBRAKT RPAREN {
+        $$ = AST::Make<AST::SpanAs>(@1, AST::Make<AST::Identifier>(@1,$1), $5);
+      }
     ;
 
 chunkat_expr
@@ -895,6 +903,7 @@ chunkat_expr
         $$ = AST::Make<AST::ChunkAt>($1->LOC(), $1, $4);
       }
     | data_id { $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1)); }
+    | span_as { $$ = AST::Make<AST::ChunkAt>(@1, $1); }
     ;
 
 select_expr

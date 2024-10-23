@@ -131,7 +131,9 @@ bool TypeChecker::Visit(AST::SpanAs& n) {
   if (!ReportUnknownSymbol(n.id->name, n.LOC(), __FILE__, __LINE__))
     return false;
 
-  if (!(isa<SpannedType>(GetSymbolType(n.id->name)))) {
+  auto ity = GetSymbolType(n.id->name);
+
+  if (!(isa<SpannedType>(ity) || isa<FutureType>(ity))) {
     Error(n.LOC(), "Expect symbol `" + n.id->name + "' to be a spanned type.");
     error_count++;
     return false;
@@ -143,7 +145,12 @@ bool TypeChecker::Visit(AST::SpanAs& n) {
     return false;
   }
 
-  auto sty = cast<SpannedType>(GetSymbolType(n.id->name));
+  SpannedType *sty = nullptr;
+  if (auto fty = dyn_cast<FutureType>(ity))
+    sty = fty->GetSpannedType().get();
+  else
+    sty = cast<SpannedType>(ity);
+
   auto nty = cast<SpannedType>(NodeType(n));
 
   if (sty->ElementType() != nty->ElementType()) {

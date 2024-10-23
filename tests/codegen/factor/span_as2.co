@@ -1,0 +1,74 @@
+// RUN: choreo %s | FileCheck --match-full-lines %s
+
+//                    s32 [a,   b,   c] input
+__co__ auto transpose(s32 [64, 256, 32] input) {
+  s32[input.span[(0), (2), (1)]] output;
+  //          s32[a,   c,   b] output;
+
+  parallel p by 1 {
+    with index = {a, bb, b3, b4, c} in [64, 1, 1, 1, 1] {
+      foreach index {
+
+        input_shape_c_dma = dma.copy.async input.span_as([64, 16, 512]).chunkat(a#bb, b3, b4#c) => shared;
+        shared s32[32, 16, 16] output_reshape_c;
+
+        parallel q by 1 {
+          tmp_shape_s = dma.copy.async input_shape_c_dma.span_as([16, 512]).chunkat(b3, b4#c) => local after input_shape_c_dma;
+          wait tmp_shape_s;
+          local s32[512, 16] tmp_shape_s_2;
+          call kernel_transpose_10(tmp_shape_s.data, tmp_shape_s_2, 16, 512);
+
+          local s32[32, 16, 16] tmp_shape_s_3;
+          call kernel_transpose_120(tmp_shape_s_2, tmp_shape_s_3, 16, 32, 16);
+
+          out_store_c = dma.copy.async tmp_shape_s_3 => output_reshape_c.chunkat(c, b3, b4);
+          wait out_store_c;
+        }
+        out_store = dma.copy.async output_reshape_c => output.span_as([2048, 16, 16]).chunkat(a#c, bb#b3, b4);
+        wait out_store;
+      }
+    }
+  }
+  return output;
+}
+// CHECK:     auto input_shape_c_dma__buf__ = alloc_(SRAMType(IntType(32),{1, 16, 512}));
+// CHECK:     auto input_shape_c_dma = alloc_dma_(CDMAType()).shared_();
+// CHECK:     auto output_reshape_c = alloc_(SRAMType(IntType(32),{32, 16, 16}));
+// CHECK:     auto tmp_shape_s__buf__ = alloc_(L1Type(IntType(32),{16, 512}));
+// CHECK:     auto tmp_shape_s = alloc_dma_(SDMAType());
+// CHECK:     auto tmp_shape_s_2 = alloc_(L1Type(IntType(32),{512, 16}));
+// CHECK:     auto tmp_shape_s_3 = alloc_(L1Type(IntType(32),{32, 16, 16}));
+// CHECK:     auto out_store_c = alloc_dma_(SDMAType());
+// CHECK:     auto out_store = alloc_dma_(CDMAType());
+// CHECK:     var_ a(IntType(32));
+// CHECK:     a = 0;
+// CHECK:     var_ bb(IntType(32));
+// CHECK:     bb = 0;
+// CHECK:     var_ b3(IntType(32));
+// CHECK:     b3 = 0;
+// CHECK:     var_ b4(IntType(32));
+// CHECK:     b4 = 0;
+// CHECK:     var_ c(IntType(32));
+// CHECK:     c = 0;
+// CHECK:     for_(a, 64, 1, [&](auto iv_a) {
+// CHECK:       for_(bb, 1, 1, [&](auto iv_bb) {
+// CHECK:         for_(b3, 1, 1, [&](auto iv_b3) {
+// CHECK:           for_(b4, 1, 1, [&](auto iv_b4) {
+// CHECK:             for_(c, 1, 1, [&](auto iv_c) {
+// CHECK:               auto anon_0 = bitcast_(DRAMType(IntType(32), {64, 16, 512}), args[0]);
+// CHECK:               auto anon_3 = ((iv_a)*(Value(1))+(iv_bb));
+// CHECK:               auto anon_4 = ((iv_b4)*(Value(1))+(iv_c));
+// CHECK:               async_load_(input_shape_c_dma, anon_0, input_shape_c_dma__buf__, {Value(1)*anon_3,Value(16)*iv_b3,Value(512)*anon_4}).multi_notify_(tmp_shape_s);
+// CHECK:               auto anon_1 = bitcast_(SRAMType(IntType(32), {16, 512}), input_shape_c_dma__buf__);
+// CHECK:               auto anon_5 = ((iv_b4)*(Value(1))+(iv_c));
+// CHECK:               async_load_(tmp_shape_s, anon_1, tmp_shape_s__buf__, {Value(16)*iv_b3,Value(512)*anon_5}).wait_on_(input_shape_c_dma);
+// CHECK:               wait_dma_(tmp_shape_s);
+// CHECK:               call_("kernel_transpose_10", {tmp_shape_s__buf__.addr_(),tmp_shape_s_2.addr_(),16,512});
+// CHECK:               call_("kernel_transpose_120", {tmp_shape_s_2.addr_(),tmp_shape_s_3.addr_(),16,32,16});
+// CHECK:               async_store_(out_store_c, tmp_shape_s_3, output_reshape_c, {Value(32)*iv_c,Value(16)*iv_b3,Value(16)*iv_b4});
+// CHECK:               wait_dma_(out_store_c);
+// CHECK:             auto anon_2 = bitcast_(DRAMType(IntType(32), {2048, 16, 16}), output);
+// CHECK:             auto anon_6 = ((iv_a)*(Value(1))+(iv_c));
+// CHECK:             auto anon_7 = ((iv_bb)*(Value(1))+(iv_b3));
+// CHECK:             async_store_(out_store, output_reshape_c, anon_2, {Value(32)*anon_6,Value(16)*anon_7,Value(16)*iv_b4});
+// CHECK:             wait_dma_(out_store);
