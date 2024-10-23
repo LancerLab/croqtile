@@ -583,22 +583,32 @@ bool TypeInference::Visit(AST::IntTuple &n) {
 bool TypeInference::Visit(AST::SpanAs &n) {
   __TRACE_EACH_VISIT__(n)
 
-  if (!isa<SpannedType>(NodeType(*n.id).get())) {
+  auto ity = NodeType(*n.id).get();
+  if (!isa<SpannedType>(ity) && !isa<FutureType>(ity)) {
     Error(n.LOC(), "fail to infer the type of `" + STR(n.id) + "'.");
     error_count++;
     return false;
   }
 
-  // mutate default to be global
   auto nty = NodeType(n);
   auto sty = cast<SpannedType>(nty);
-  if (sty->m_type == Storage::DEFAULT)
-    n.SetType(MakeSpannedType(sty->f_type, sty->GetShape(), Storage::GLOBAL));
 
-  // is this required? assign the target id (not defined yet) with a type
-  n.nid->SetType(nty);
-
-  cur_type = nty;
+  if (isa<SpannedType>(ity)) {
+    // mutate default to be global
+    if (sty->m_type == Storage::DEFAULT)
+      n.SetType(MakeSpannedType(sty->f_type, sty->GetShape(), Storage::GLOBAL));
+    // is this required? assign the target id (not defined yet) with a type
+    n.nid->SetType(nty);
+    cur_type = nty;
+  } else {
+    auto fty = GetSymbolType(n.id->LOC(), n.id->name + ".data");
+    auto fsty = cast<SpannedType>(fty);
+    if (sty->m_type == Storage::DEFAULT)
+      n.SetType(
+          MakeSpannedType(sty->f_type, sty->GetShape(), fsty->GetStorage()));
+    n.nid->SetType(n.GetType());
+    cur_type = n.GetType();
+  }
 
   return true;
 }

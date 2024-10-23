@@ -849,7 +849,14 @@ class ShapeInference : public Visitor {
     __TRACE_EACH_VISIT__;
     assert(ValidVN(cur_vn) && "failed to get the list value.");
 
-    auto sty = SSTab().LookupSymbol(n.id->name);
+    auto pty = SSTab().LookupSymbol(n.id->name);
+    assert((isa<SpannedType>(pty) || isa<FutureType>(pty)) &&
+           "unexpected data type.");
+    SpannedType *sty = nullptr;
+    if (auto fty = dyn_cast<FutureType>(pty))
+      sty = fty->GetSpannedType().get();
+    else
+      sty = cast<SpannedType>(pty);
 
     if (!isa<SpannedType>(sty)) {
       Error(n.LOC(), "internal error: span_as operates on non-spanned type.");
@@ -862,8 +869,7 @@ class ShapeInference : public Visitor {
     cur_mdspan_vn = cur_vn;
 
     auto shape = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
-    auto stty = cast<SpannedType>(sty);
-    auto nty = MakeSpannedType(stty->ElementType(), shape, stty->GetStorage());
+    auto nty = MakeSpannedType(sty->ElementType(), shape, sty->GetStorage());
 
     n.SetType(nty);
 

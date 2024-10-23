@@ -764,7 +764,13 @@ bool EarlySemantics::Visit(AST::Memory& n) {
 
 bool EarlySemantics::Visit(AST::SpanAs& n) {
   __TRACE_EACH_VISIT__(n)
-  auto sty = dyn_cast<SpannedType>(NodeType(*n.id));
+
+  auto nty = NodeType(*n.id);
+  SpannedType* sty = nullptr;
+  if (auto fty = dyn_cast<FutureType>(nty))
+    sty = fty->GetSpannedType().get();
+  else
+    sty = dyn_cast<SpannedType>(nty);
 
   if (!sty) {
     Error(n.LOC(), "span-as operation operates on a non-mdspan type.");
