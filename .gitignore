@@ -12,6 +12,7 @@ demo/*.fb
 demo/__*
 __*
 tests/standalone/*.test
+tests/standalone/*.cutest
 
 # ignore scripts as gen'd object
 *.sh

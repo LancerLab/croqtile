@@ -1,6 +1,9 @@
 # Variables
 CXX = g++
+NV_CXX = nvcc
 CXXFLAGS = -Wall -g -std=c++17
+CUDA_SYS_INCLUDES="-I/usr/local/cuda/include"
+NV_FLAGS = -gencode arch=compute_86,code=sm_86 -rdc=true -lcublas $(CUDA_SYS_INCLUDES)
 GTEST_DIR = ../../extern/gtest/
 GTEST_LIBS = $(GTEST_DIR)/libgtest.a $(GTEST_DIR)/libgtest_main.a
 HEADER_FILES :=  $(shell find ../.. -name '*.hpp') ../../utils/choreo.h
@@ -10,8 +13,11 @@ SOURCES = $(wildcard *.cpp)
 OBJECTS = $(SOURCES:.cpp=.o)
 TARGETS = $(SOURCES:.cpp=.test)
 
+NV_SOURCES = $(wildcard *.cu)
+NV_TARGETS = $(NV_SOURCES:.cu=.cutest)
+
 # Main target
-all: $(TARGETS)
+all: $(TARGETS) $(NV_TARGETS)
 
 # Google Test build targets
 $(GTEST_DIR)/libgtest.a: $(GTEST_DIR)/googletest/src/gtest-all.cc
@@ -29,12 +35,16 @@ $(GTEST_DIR)/libgtest_main.a: $(GTEST_DIR)/googletest/src/gtest_main.cc
 %.o: %.cpp $(HEADER_FILES)
 	$(CXX) $(CXXFLAGS) -I../../ -I$(GTEST_DIR)/googletest/include/ -c $< -o $@
 
+%.cutest: %.cu $(GTEST_LIBS)
+	$(NV_CXX) ${NV_FLAGS} -I../../ -I$(GTEST_DIR)/googletest/include/ -L../../ -L$(GTEST_DIR) -lgtest_main -lgtest -o $@ $< -lpthread
+
 # Clean up
 clean:
-	rm -f $(TARGET) $(OBJECTS) $(TARGETS) $(GTEST_DIR)/*.o $(GTEST_LIBS)
+	rm -f $(TARGET) $(OBJECTS) $(NV_TARGET) $(TARGETS) $(GTEST_DIR)/*.o $(GTEST_LIBS)
 
 # Additional rules
-test: $(TARGETS)
+test: $(TARGETS) $(NV_TARGETS)
 	@for test in $(TARGETS); do ./$${test}; done;
+	@for nv_test in $(NV_TARGETS); do ./$${nv_test}; done;
 
 .PHONY: all clean test
