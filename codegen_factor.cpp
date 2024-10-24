@@ -680,6 +680,9 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
        << DelimitedString(pcfg->pad_low) << "}, {"
        << DelimitedString(pcfg->pad_high) << "}, {"
        << DelimitedString(pcfg->pad_mid) << "}, " << pcfg->value.v;
+  } else if (auto tcfg = dyn_cast<TransposeConfig>(d.config)) {
+    auto& layout = tcfg->dim_values;
+    fs << ", {" << DelimitedString(layout) << "}";
   }
 
   if (d.chained == false) {

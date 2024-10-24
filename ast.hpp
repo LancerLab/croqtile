@@ -228,6 +228,9 @@ struct IntLiteral : public Node, public TypeIDProvider<IntLiteral> {
   IntLiteral(const location& l, int v = GetUnKnownInteger())
       : Node(l, MakeIntegerType()), value(v) {}
 
+  // allow copy construction
+  explicit IntLiteral(const IntLiteral& il) : IntLiteral(il.LOC(), il.value) {}
+
   int Val() const { return value; }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {

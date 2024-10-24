@@ -1,0 +1,42 @@
+// RUN: choreo %s | FileCheck %s --match-full-lines
+
+__co__ auto dma_transp(s32 [8, 2, 3, 2, 4, 2] input) {
+  s32[input.span[(3), (5), (0), (1), (2), (4)]] output;
+  parallel p by 1 {
+    with index = {a4, a5, b, c, d} in [3, 1, 1, 1, 1] {
+      foreach index {
+        input_shape_c = dma.copy.async input.span_as([3, 16, 16]).chunkat(a4, a5, b#c#d) => local;
+        wait input_shape_c;
+        local s32[2, 2, 16, 4] output_shape_c;
+        dma.transp<{1, 3, 0, 2}> input_shape_c.span_as([16, 2, 4, 2]) => output_shape_c;
+        out_store = dma.copy.async output_shape_c.span_as([4, 1, 64]) => output.span_as([4, 3, 64]).chunkat(b#d, a4, a5#c);
+        wait out_store;
+      }
+    }
+  }
+  return output;
+}
+
+// CHECK:    auto input_shape_c__buf__ = alloc_(L1Type(IntType(32),{1, 16, 16}));
+// CHECK:    auto input_shape_c = alloc_dma_(SDMAType());
+// CHECK:    auto output_shape_c = alloc_(L1Type(IntType(32),{2, 2, 16, 4}));
+// CHECK:    auto __choreo_anon_fut__0 = alloc_dma_(SDMAType());
+// CHECK:    auto out_store = alloc_dma_(SDMAType());
+// CHECK:    for_(a4, 3, 1, [&](auto iv_a4) {
+// CHECK:      for_(a5, 1, 1, [&](auto iv_a5) {
+// CHECK:        for_(b, 1, 1, [&](auto iv_b) {
+// CHECK:          for_(c, 1, 1, [&](auto iv_c) {
+// CHECK:            for_(d, 1, 1, [&](auto iv_d) {
+// CHECK:              auto anon_0 = bitcast_(DRAMType(IntType(32), {3, 16, 16}), args[0]);
+// CHECK:              auto anon_4 = ((((iv_b)*(Value(1))+(iv_c)))*(Value(1))+(iv_d));
+// CHECK:              async_load_(input_shape_c, anon_0, input_shape_c__buf__, {Value(1)*iv_a4,Value(16)*iv_a5,Value(16)*anon_4});
+// CHECK:              wait_dma_(input_shape_c);
+// CHECK:              auto anon_1 = bitcast_(L1Type(IntType(32), {16, 2, 4, 2}), input_shape_c__buf__);
+// CHECK:              async_load_(__choreo_anon_fut__0, anon_1, output_shape_c, {0, 0, 0, 0}, {1, 3, 0, 2});
+// CHECK:              wait_dma_(__choreo_anon_fut__0);
+// CHECK:              auto anon_2 = bitcast_(L1Type(IntType(32), {4, 1, 64}), output_shape_c);
+// CHECK:              auto anon_3 = bitcast_(DRAMType(IntType(32), {4, 3, 64}), output);
+// CHECK:              auto anon_5 = ((iv_b)*(Value(1))+(iv_d));
+// CHECK:              auto anon_6 = ((iv_a5)*(Value(1))+(iv_c));
+// CHECK:              async_store_(out_store, anon_2, anon_3, {Value(4)*anon_5,Value(1)*iv_a4,Value(64)*anon_6});
+// CHECK:              wait_dma_(out_store);

@@ -904,6 +904,17 @@ public:
           n.LOC(), "+", vn.GetSignatureFromValueNumber(cur_vn), sig);
       // update the cur_vn
       cur_vn = vn.GetOrInsertValueNumberFromSignature(add_sig);
+    } else if (auto tcfg = dyn_cast<TransposeConfig>(n.config)) {
+      // gen new vn if and only if n.to is AST::Memory
+      if (isa<AST::Memory>(n.to)) {
+        auto& dim_values = tcfg->dim_values;
+        auto orig_sig = vn.GetSignatureFromValueNumber(cur_vn);
+        auto shape_components = SplitStringByDelimiter(orig_sig);
+        auto sig = shape_components[dim_values[0]];
+        for (size_t i = 1; i < dim_values.size(); ++i)
+          sig += "," + shape_components[dim_values[i]];
+        cur_vn = vn.GetOrInsertValueNumberFromSignature(sig);
+      }
     }
 
     // annotate the shape on AST for later type inference
