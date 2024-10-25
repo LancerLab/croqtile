@@ -14,6 +14,7 @@
 #include "utils/catz/index.h"
 #include "utils/catz/coord.h"
 #include "utils/catz/trait.h"
+#include "utils/catz/matrix.h"
 
 using namespace catz;
 
@@ -248,3 +249,110 @@ TEST_F(CatzIRTest, CoordCeilTest) {
   SCHECK(coord3.rows() == 1);
   SCHECK(coord3.cols() == 1);
 }
+
+TEST_CUDA_F(CatzIRTest, MatrixCreateTest) {
+  float data[12];
+  auto shape = make_coord(3, 4);
+  auto matrix = make_matrix(data, shape);
+
+  SCHECK(shape.rows() == 3);
+  SCHECK(matrix.shape.rows() == 3);
+  SCHECK(matrix.stride.rows() == 4);
+  SCHECK(matrix.shape.isStatic() == true);
+  SCHECK(matrix.stride.isStatic() == true);
+}
+
+TEST_CUDA_F(CatzIRTest, MatrixCreateDynTest) {
+  float data[12];
+  auto shape = make_coord_dyn(3, 4);
+  auto matrix = make_matrix(data, shape);
+
+  assert(shape.rows() == 3);
+  assert(matrix.shape.rows() == 3);
+  assert(matrix.stride.rows() == 4);
+  SCHECK(matrix.shape.isStatic() == false);
+  SCHECK(matrix.stride.isStatic() == false);
+}
+
+TEST_F(CatzIRTest, MatrixTileTest) {
+  const int M_TILE = 26;
+  const int K_TILE = 32;
+  const int M_REG = 13;
+  const int K_REG = 4;
+  float lhs_data[M_TILE * K_TILE] = {0.0};
+  auto _shape = make_coord(26, 32);
+  auto _tile_shape = make_coord(13, 4);
+  auto _mat = make_matrix(lhs_data, _shape);
+  auto _tiled_mat = _mat.tile(make_coord_dyn(3, 0), _tile_shape);
+
+  SCHECK(_tiled_mat.shape.rows() == 13);
+  SCHECK(_tiled_mat.shape.cols() == 4);
+  SCHECK(_tiled_mat.stride.rows() == 32);
+  SCHECK(_tiled_mat.stride.cols() == 1);
+  SCHECK_FALSE(_tiled_mat.stride.cols() == 2);
+}
+
+TEST_CUDA_F(CatzIRTest, MatrixTileCUDATest) {
+  const int M_TILE = 26;
+  const int K_TILE = 32;
+  const int M_REG = 13;
+  const int K_REG = 4;
+  float lhs_data[M_TILE * K_TILE] = {0.0};
+  auto _shape = make_coord(26, 32);
+  auto _tile_shape = make_coord(13, 4);
+  auto _mat = make_matrix(lhs_data, _shape);
+  auto _tiled_mat = _mat.tile(make_coord_dyn(3, 0), _tile_shape);
+
+  SCHECK(_tiled_mat.shape.rows() == 13);
+  SCHECK(_tiled_mat.shape.cols() == 4);
+  SCHECK(_tiled_mat.stride.rows() == 32);
+  SCHECK(_tiled_mat.stride.cols() == 1);
+  SCHECK_FALSE(_tiled_mat.stride.cols() == 2);
+}
+
+TEST_F(CatzIRTest, MatrixDistTest) {
+  const int M_TILE = 26;
+  const int K_TILE = 32;
+  const int M_REG = 13;
+  const int K_REG = 4;
+  float lhs_data[M_TILE * K_TILE] = {0.0};
+  auto _shape = make_coord(26, 32);
+  auto _tile_shape = make_coord(13, 4);
+  auto _mat = make_matrix(lhs_data, _shape);
+  auto _tiled_mat = _mat.tile(make_coord_dyn(0, 0), _tile_shape);
+  for (int i = 0; i < 13; i++)
+    for (int j = 0; j < 4; j++)
+      _tiled_mat.dist_to(make_coord_dyn(i, j)) = 0.131;
+
+  SCHECK(_tiled_mat.shape.rows() == 13);
+  SCHECK(_tiled_mat.shape.cols() == 4);
+  SCHECK(_tiled_mat.stride.rows() == 32);
+  SCHECK(_tiled_mat.stride.cols() == 1);
+  SCHECK_FALSE(_tiled_mat.stride.cols() == 2);
+
+  CHECK(_tiled_mat.data[0] == 0.131f);
+  CHECK(_tiled_mat.data[3] == 0.131f);
+  CHECK(_tiled_mat.data[32] == 0.131f);
+}
+
+TEST_CUDA_F(CatzIRTest, MatrixDistCUDATest) {
+  const int M_TILE = 26;
+  const int K_TILE = 32;
+  const int M_REG = 13;
+  const int K_REG = 4;
+  float lhs_data[M_TILE * K_TILE] = {0.0};
+  auto _shape = make_coord(26, 32);
+  auto _tile_shape = make_coord(13, 4);
+  auto _mat = make_matrix(lhs_data, _shape);
+  auto _tiled_mat = _mat.tile(make_coord_dyn(3, 0), _tile_shape);
+  for (int i = 0; i < 13; i++)
+    for (int j = 0; j < 4; j++)
+      _tiled_mat.dist_to(make_coord_dyn(i, j)) = 0.131;
+
+  SCHECK(_tiled_mat.shape.rows() == 13);
+  SCHECK(_tiled_mat.shape.cols() == 4);
+  SCHECK(_tiled_mat.stride.rows() == 32);
+  SCHECK(_tiled_mat.stride.cols() == 1);
+  SCHECK_FALSE(_tiled_mat.stride.cols() == 2);
+}
+

@@ -16,19 +16,18 @@
     cudaDeviceSynchronize();                                                   \                                                                                                       
   } while (0)                                                                                                                                                                          
                                                                                                                                                                                        
-#define TEST_CUDA_CASE(kernel_name, case_name, tags)                           \                                                                                                       
-  __global__ void CUDA_KERNEL_NAME(kernel_name)();                             \                                                                                                       
-  TEST_CASE(case_name, tags) {                                                 \                                                                                                       
-    CUDA_KERNEL_NAME(kernel_name)<<<1, 1>>>();                                 \                                                                                                       
+#define TEST_CUDA_F(group_name, case_name)                           \                                                                                                       
+  __global__ void CUDA_KERNEL_NAME(case_name)();                             \                                                                                                       
+  TEST_F(group_name, case_name) {                                                 \                                                                                                       
+    CUDA_KERNEL_NAME(case_name)<<<1, 1>>>();                                 \                                                                                                       
     CUDA_CHECK_ERROR();                                                        \                                                                                                       
   }                                                                            \                                                                                                       
-  __global__ void CUDA_KERNEL_NAME(kernel_name)()                                                                                                                                      
+  __global__ void CUDA_KERNEL_NAME(case_name)()                                                                                                                                      
                                                                                                                                                                                        
-#define TEST_CUDA_CASE_WITH_THREADS(kernel_name, num_of_threads, case_name,    \                                                                                                       
-                                    tags)                                      \                                                                                                       
-  __global__ void CUDA_KERNEL_NAME(kernel_name)();                             \                                                                                                       
-  TEST_CASE(case_name, tags) {                                                 \                                                                                                       
-    CUDA_KERNEL_NAME(kernel_name)<<<1, num_of_threads>>>();                    \                                                                                                       
+#define TEST_CUDA_F_THREADS(group_name, case_name, num_of_threads)                                      \                                                                                                       
+  __global__ void CUDA_KERNEL_NAME(case_name)();                             \                                                                                                       
+  TEST_CASE(group_name, case_name) {                                                 \                                                                                                       
+    CUDA_KERNEL_NAME(case_name)<<<1, num_of_threads>>>();                    \                                                                                                       
     CUDA_CHECK_ERROR();                                                        \                                                                                                       
   }                                                                            \                                                                                                       
-  __global__ void CUDA_KERNEL_NAME(kernel_name)()
+  __global__ void CUDA_KERNEL_NAME(case_name)()

@@ -3,7 +3,7 @@ CXX = g++
 NV_CXX = nvcc
 CXXFLAGS = -Wall -g -std=c++17
 CUDA_SYS_INCLUDES="-I/usr/local/cuda/include"
-NV_FLAGS = -gencode arch=compute_86,code=sm_86 -rdc=true -lcublas $(CUDA_SYS_INCLUDES)
+NV_FLAGS = -gencode arch=compute_86,code=sm_86 -rdc=true -lcublas $(CUDA_SYS_INCLUDES) --expt-relaxed-constexpr
 GTEST_DIR = ../../extern/gtest/
 GTEST_LIBS = $(GTEST_DIR)/libgtest.a $(GTEST_DIR)/libgtest_main.a
 HEADER_FILES :=  $(shell find ../.. -name '*.hpp') ../../utils/choreo.h

@@ -100,7 +100,7 @@ fi
 echo "Compile ${BIN_TARGET}"
 # LD_LIBRARY_PATH=${TOPS_LIB_PATH} ${TOPS_BIN_PATH}/topsfc ${KERNEL_SRC} -gcu-arch=${GCU_ARCH} -resource=${GCU_RESOURCE} -gen-dir=${FACTOR_DIR} -I${TOPS_INC_PATH} -L${TOPS_LIB_PATH} --host-link-options="-L${TOPS_LIB_PATH}"
 # LD_LIBRARY_PATH=${TOPS_LIB_PATH} ${TOPS_BIN_PATH}/topsfc ${HOST_SRC} ${FACTOR_OBJ} -I${FACTOR_DIR} ${TOPS_LINK_ARG} -o ${BIN_TARGET} -I${TOPS_INC_PATH} -L${TOPS_LIB_PATH} --host-link-options="-L${TOPS_LIB_PATH}"
-nvcc ${CUDA_INCLUDES} -o ${BIN_TARGET} ${HOST_SRC} -gencode arch=${CUDA_ARCH},code=${CUDA_CC} -rdc=true -lcublas
+nvcc ${CUDA_INCLUDES} -o ${BIN_TARGET} ${HOST_SRC} -gencode arch=${CUDA_ARCH},code=${CUDA_CC} -rdc=true -lcublas --expt-relaxed-constexpr
 
 echo "Run Demo"
 ./${BIN_TARGET}
