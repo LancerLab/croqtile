@@ -13,31 +13,29 @@
 namespace Choreo {
 
 struct LateNorm : public VisitorWithSymTab {
- private:
-  std::ostream &os;
+private:
+  std::ostream& os;
 
- private:
+private:
   bool changed = false;
 
   // for node hoisting
   using NodeInsertInfo =
       std::vector<std::tuple<int, ptr<AST::Node>, std::string>>;
-  std::stack<AST::MultiNodes *> multi_nodes;
+  std::stack<AST::MultiNodes*> multi_nodes;
   int cur_dma_index = -1;
-  std::map<AST::MultiNodes *, NodeInsertInfo> mnodes_insertions;
+  std::map<AST::MultiNodes*, NodeInsertInfo> mnodes_insertions;
 
-  void TraceEachVisit(const AST::Node &n) {
-    if (trace_visit) {
-      os << n.TypeNameString() << ": " << STR(n) << "\n";
-    }
+  void TraceEachVisit(const AST::Node& n) {
+    if (trace_visit) { os << n.TypeNameString() << ": " << STR(n) << "\n"; }
   }
 
- public:
+public:
   // it does not require a symbol table
-  LateNorm(const ptr<SymbolTable> &s_tab, std::ostream &o)
+  LateNorm(const ptr<SymbolTable>& s_tab, std::ostream& o)
       : VisitorWithSymTab("latenorm", s_tab), os(o) {}
 
-  bool BeforeVisitImpl(AST::Node &n) override {
+  bool BeforeVisitImpl(AST::Node& n) override {
     if (trace_visit) os << "before visiting " << n.TypeNameString() << "\n";
 
     if (auto m = dyn_cast<AST::MultiNodes>(&n)) {
@@ -50,20 +48,20 @@ struct LateNorm : public VisitorWithSymTab {
     return true;
   }
 
-  bool AfterVisitImpl(AST::Node &n) override {
+  bool AfterVisitImpl(AST::Node& n) override {
     if (trace_visit) os << "after visiting " << n.TypeNameString() << "\n";
     return true;
   }
 
-  bool Visit(AST::MultiNodes &n) override {
+  bool Visit(AST::MultiNodes& n) override {
     TraceEachVisit(n);
 
     // insert the node at the given place
     assert(&n == multi_nodes.top());
     for (auto item : mnodes_insertions[&n]) {
-      auto &index = std::get<0>(item);
-      auto &pnode = std::get<1>(item);
-      auto &sname = std::get<2>(item);
+      auto& index = std::get<0>(item);
+      auto& pnode = std::get<1>(item);
+      auto& sname = std::get<2>(item);
 
       n.values.insert(n.values.begin() + index, pnode);
       SymTab()->AddSymbol(SSTab().ScopedName(sname), pnode->GetType());
@@ -78,28 +76,28 @@ struct LateNorm : public VisitorWithSymTab {
     return true;
   }
 
-  bool Visit(AST::MultiValues &) override { return true; }
-  bool Visit(AST::IntLiteral &) override { return true; }
-  bool Visit(AST::Boolean &) override { return true; }
-  bool Visit(AST::Expr &) override { return true; }
-  bool Visit(AST::MultiDimSpans &) override { return true; }
-  bool Visit(AST::NamedTypeDecl &) override { return true; }
-  bool Visit(AST::NamedVariableDecl &) override { return true; }
-  bool Visit(AST::IntTuple &) override { return true; }
-  bool Visit(AST::Assignment &) override { return true; }
-  bool Visit(AST::IntIndex &) override { return true; }
-  bool Visit(AST::DataType &) override { return true; }
-  bool Visit(AST::Identifier &) override { return true; }
-  bool Visit(AST::Parameter &) override { return true; }
-  bool Visit(AST::ParamList &) override { return true; }
-  bool Visit(AST::ParallelBy &) override { return true; }
-  bool Visit(AST::WhereBind &) override { return true; }
-  bool Visit(AST::WithIn &) override { return true; }
-  bool Visit(AST::WithBlock &) override { return true; }
-  bool Visit(AST::Memory &) override { return true; }
-  bool Visit(AST::SpanAs &) override { return true; }
+  bool Visit(AST::MultiValues&) override { return true; }
+  bool Visit(AST::IntLiteral&) override { return true; }
+  bool Visit(AST::Boolean&) override { return true; }
+  bool Visit(AST::Expr&) override { return true; }
+  bool Visit(AST::MultiDimSpans&) override { return true; }
+  bool Visit(AST::NamedTypeDecl&) override { return true; }
+  bool Visit(AST::NamedVariableDecl&) override { return true; }
+  bool Visit(AST::IntTuple&) override { return true; }
+  bool Visit(AST::Assignment&) override { return true; }
+  bool Visit(AST::IntIndex&) override { return true; }
+  bool Visit(AST::DataType&) override { return true; }
+  bool Visit(AST::Identifier&) override { return true; }
+  bool Visit(AST::Parameter&) override { return true; }
+  bool Visit(AST::ParamList&) override { return true; }
+  bool Visit(AST::ParallelBy&) override { return true; }
+  bool Visit(AST::WhereBind&) override { return true; }
+  bool Visit(AST::WithIn&) override { return true; }
+  bool Visit(AST::WithBlock&) override { return true; }
+  bool Visit(AST::Memory&) override { return true; }
+  bool Visit(AST::SpanAs&) override { return true; }
 
-  bool Visit(AST::DMA &n) override {
+  bool Visit(AST::DMA& n) override {
     TraceEachVisit(n);
 
     if (n.operation == ".none") return true;
@@ -113,7 +111,7 @@ struct LateNorm : public VisitorWithSymTab {
     auto sty = MakeSpannedType(fty->ElementType(), shape,
                                cast<AST::Memory>(n.to)->Get());
 
-    auto BUFFER_SUFFIX = "__buf__";  // hope user not name buffer this way
+    auto BUFFER_SUFFIX = "__buf__"; // hope user not name buffer this way
     // Note: Later passes only cares about the type. So it is possible to ignore
     // the syntax struct 'DataType'.
     auto anon_sym = (n.future.empty()) ? SymbolTable::GetAnonName()
@@ -137,20 +135,20 @@ struct LateNorm : public VisitorWithSymTab {
     return true;
   }
 
-  bool Visit(AST::ChunkAt &) override { return true; }
-  bool Visit(AST::Wait &) override { return true; }
-  bool Visit(AST::Call &) override { return true; }
-  bool Visit(AST::Swap &) override { return true; }
-  bool Visit(AST::Select &) override { return true; }
-  bool Visit(AST::Return &) override { return true; }
-  bool Visit(AST::LoopRange &) override { return true; }
-  bool Visit(AST::ForeachBlock &) override { return true; }
-  bool Visit(AST::FunctionDecl &) override { return true; }
-  bool Visit(AST::ChoreoFunction &) override { return true; }
-  bool Visit(AST::CppSourceCode &) override { return true; }
-  bool Visit(AST::Program &) override { return true; }
+  bool Visit(AST::ChunkAt&) override { return true; }
+  bool Visit(AST::Wait&) override { return true; }
+  bool Visit(AST::Call&) override { return true; }
+  bool Visit(AST::Swap&) override { return true; }
+  bool Visit(AST::Select&) override { return true; }
+  bool Visit(AST::Return&) override { return true; }
+  bool Visit(AST::LoopRange&) override { return true; }
+  bool Visit(AST::ForeachBlock&) override { return true; }
+  bool Visit(AST::FunctionDecl&) override { return true; }
+  bool Visit(AST::ChoreoFunction&) override { return true; }
+  bool Visit(AST::CppSourceCode&) override { return true; }
+  bool Visit(AST::Program&) override { return true; }
 };
 
-}  // end namespace Choreo
+} // end namespace Choreo
 
-#endif  // __CHOREO_LATE_NORM_HPP__
+#endif // __CHOREO_LATE_NORM_HPP__

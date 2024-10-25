@@ -11,8 +11,7 @@ std::vector<int> CollectValueNumbers(const std::string& input) {
 
   for (auto i = begin; i != end; ++i) {
     std::smatch match = *i;
-    std::string matchStr =
-        match.str(1);  // Capture the number part of the match
+    std::string matchStr = match.str(1); // Capture the number part of the match
     res.push_back(std::stoi(matchStr));
   }
   return res;
@@ -43,16 +42,16 @@ std::vector<int> GetOperandsValNo(const std::string& input) {
   return operands;
 }
 
-}  // namespace
+} // namespace
 
-const std::string ValueNumbering::VNSymbolName(
-    const AST::Identifier& id) const {
+const std::string
+ValueNumbering::VNSymbolName(const AST::Identifier& id) const {
   auto sig = id.name;
   auto pty = visitor->NodeType(id);
   if (isa<SpannedType>(pty) || isa<FutureType>(pty)) {
-    sig += ".span";  // only cares about value inside the mdspan
+    sig += ".span"; // only cares about value inside the mdspan
   } else if (IsBoundedType(pty)) {
-    sig = "@" + sig;  // only cares about the upper bound
+    sig = "@" + sig; // only cares about the upper bound
   }
   return sig;
 }
@@ -214,9 +213,10 @@ std::string ValueNumbering::SignBinaryCompositeValues(const location& loc,
   return oss.str();
 }
 
-std::optional<std::string> ValueNumbering::TryToSimplifyBinary(
-    const location& loc, const std::string& op, const std::string& lhs,
-    const std::string& rhs, bool verbose) {
+std::optional<std::string>
+ValueNumbering::TryToSimplifyBinary(const location& loc, const std::string& op,
+                                    const std::string& lhs,
+                                    const std::string& rhs, bool verbose) {
   if (op == "concat") return std::nullopt;
   auto l_cv = RemovePrefixOrNull("const_", lhs);
   auto r_cv = RemovePrefixOrNull("const_", rhs);
@@ -283,7 +283,7 @@ std::optional<std::string> ValueNumbering::TryToSimplifyBinary(
   if ((op == "/") && !PrefixedWith(lhs, "#") /*not multiple values*/) {
     int rvn = GetValueNumberOfSignature(rhs);
     auto bind_set = GetBindSet(rvn);
-    bind_set.insert(rvn);  // always add self
+    bind_set.insert(rvn); // always add self
     for (auto div_vn : bind_set) {
       auto sig = GetSignatureFromValueNumber(div_vn);
       if (!PrefixedWith(rhs, "/:")) continue;
@@ -304,9 +304,10 @@ std::optional<std::string> ValueNumbering::TryToSimplifyBinary(
   return std::nullopt;
 }
 
-std::optional<std::string> ValueNumbering::SignBoundedOperation(
-    const location& loc, const std::string& op, const AST::Node& lhs,
-    const AST::Node& rhs, bool verbose) {
+std::optional<std::string>
+ValueNumbering::SignBoundedOperation(const location& loc, const std::string& op,
+                                     const AST::Node& lhs, const AST::Node& rhs,
+                                     bool verbose) {
   std::optional<std::string> res;
   if (op == "+" || op == "-") {
     if (isa<BoundedIntegerType>(lhs.GetType()) &&
@@ -355,8 +356,8 @@ std::optional<std::string> ValueNumbering::SignBoundedOperation(
   return res;
 }
 
-std::optional<std::string> ValueNumbering::GenerateSpecialNodeSignature(
-    const AST::Node& node) {
+std::optional<std::string>
+ValueNumbering::GenerateSpecialNodeSignature(const AST::Node& node) {
   if (auto* n = dyn_cast<AST::Expr>(&node))
     if (n->op == "+" || n->op == "-" || n->op == "#") {
       if (isa<BoundedType>(n->GetL()->GetType()) ||
@@ -369,8 +370,8 @@ std::optional<std::string> ValueNumbering::GenerateSpecialNodeSignature(
   return std::nullopt;
 }
 
-std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
-    const AST::Node& node) {
+std::optional<std::string>
+ValueNumbering::TryToSimplifyNodeSignature(const AST::Node& node) {
   if (isa<AST::Identifier>(&node)) {
     return std::nullopt;
   } else if (auto* n = dyn_cast<AST::Expr>(&node)) {
@@ -586,7 +587,7 @@ std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
                } else
                  choreo_unreachable("upper bound expression is unexpected.");
              }},
-            {"dimof",  // calculate the dim of a given mdspan index
+            {"dimof", // calculate the dim of a given mdspan index
              [this, &n]() -> std::optional<std::string> {
                std::string base_sig;
                if (IsBoundedType(n->GetL()->GetType())) {
@@ -601,7 +602,7 @@ std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
                assert(cv && "indexing of mdspan can not be evaluated.");
                return base_sig + "(" + *cv + ")";
              }},
-            {"ref",  // it is a reference to another node
+            {"ref", // it is a reference to another node
              [this, &n]() -> std::optional<std::string> {
                auto expr = GetSignatureForNode(*n->GetR());
 
@@ -617,10 +618,10 @@ std::optional<std::string> ValueNumbering::TryToSimplifyNodeSignature(
     // Try to simplify immediately
     auto it = alg_simp.find(n->op);
     if (it != alg_simp.end())
-      return it->second();  // Execute the lambda function if found
+      return it->second(); // Execute the lambda function if found
     else {
-      choreo_unreachable(("No handler for operation `" + n->op + "'")
-                             .c_str());  // Default case
+      choreo_unreachable(
+          ("No handler for operation `" + n->op + "'").c_str()); // Default case
     }
   }
   return std::nullopt;
@@ -716,7 +717,7 @@ std::string ValueNumbering::GenerateNodeSignature(const AST::Node& node,
     Warning(node.LOC(), "invalid signature for expression `" + AST::STR(node) +
                             "': " + node.TypeNameString() + ".");
 
-  return "";  // invalid value
+  return ""; // invalid value
 }
 
 bool ValueNumbering::HasValueNumberForNode(const AST::Node& n) {
@@ -785,7 +786,7 @@ int ValueNumbering::GetValueNumberOfSignature(const std::string& signature) {
   // Check if this expression has been encountered before
   auto it = expressionValueNumbers.back().find(signature);
   if (it != expressionValueNumbers.back().end())
-    return it->second;  // Return existing value number
+    return it->second; // Return existing value number
 
   choreo_unreachable("failed to get value number of signature \"" + signature +
                      "\".");
@@ -806,7 +807,7 @@ bool ValueNumbering::HasValueNumberOfSignature(const std::string& signature) {
   // Check if this expression has been encountered before
   auto it = expressionValueNumbers.back().find(signature);
   if (it != expressionValueNumbers.back().end())
-    return true;  // Return existing value number
+    return true; // Return existing value number
 
   return false;
 }

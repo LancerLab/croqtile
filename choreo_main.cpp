@@ -80,7 +80,7 @@ int main(int argc, char* argv[]) {
 
   if (debug_on) {
     std::cout << "Choreo: Debug of parsing is switched on." << std::endl;
-    p.set_debug_level(1);  // Enable Bison debugging
+    p.set_debug_level(1); // Enable Bison debugging
     Scanner::SetDebug();
   }
 
@@ -165,57 +165,57 @@ int main(int argc, char* argv[]) {
   if (target.GetValue() == "cuda") tgt = Choreo::Target::CUDA;
 
   switch (tgt) {
-    case Target::Factor: {
-      // apply the gcu specific checking
-      GCUCheck gcu_checker(sc.SymTab());
-      if (prt_pass) std::cout << "|- " << gcu_checker.GetName() << "\n";
-      root.accept(gcu_checker);
-      if (gcu_checker.HasError()) return 1;
-      if (stop_after == gcu_checker.GetName()) return 0;
+  case Target::Factor: {
+    // apply the gcu specific checking
+    GCUCheck gcu_checker(sc.SymTab());
+    if (prt_pass) std::cout << "|- " << gcu_checker.GetName() << "\n";
+    root.accept(gcu_checker);
+    if (gcu_checker.HasError()) return 1;
+    if (stop_after == gcu_checker.GetName()) return 0;
 
-      FactorTrans trans(sc.SymTab(), sds.FBInfo());
-      if (prt_pass) std::cout << "|- " << trans.GetName() << "\n";
-      trans.SetKind(FactorTrans::Kind::T_SELECT);
-      root.accept(trans);
-      trans.SetKind(FactorTrans::Kind::T_SWAP);
-      root.accept(trans);
-      if (trans.HasError()) return 1;
-      if (stop_after == trans.GetName()) return 0;
+    FactorTrans trans(sc.SymTab(), sds.FBInfo());
+    if (prt_pass) std::cout << "|- " << trans.GetName() << "\n";
+    trans.SetKind(FactorTrans::Kind::T_SELECT);
+    root.accept(trans);
+    trans.SetKind(FactorTrans::Kind::T_SWAP);
+    root.accept(trans);
+    if (trans.HasError()) return 1;
+    if (stop_after == trans.GetName()) return 0;
 
-      assert(arch.GetValue().size() >= 3 &&
-             arch.GetValue().substr(0, 3) == "gcu");
-      MemUsageCheck mem_usage_checker(sc.SymTab(), Target::Factor,
-                                      arch.GetValue());
-      if (prt_pass) std::cout << "|- " << mem_usage_checker.GetName() << "\n";
-      root.accept(mem_usage_checker);
-      if (mem_usage_checker.HasError()) return 1;
-      if (stop_after == mem_usage_checker.GetName()) return 0;
+    assert(arch.GetValue().size() >= 3 &&
+           arch.GetValue().substr(0, 3) == "gcu");
+    MemUsageCheck mem_usage_checker(sc.SymTab(), Target::Factor,
+                                    arch.GetValue());
+    if (prt_pass) std::cout << "|- " << mem_usage_checker.GetName() << "\n";
+    root.accept(mem_usage_checker);
+    if (mem_usage_checker.HasError()) return 1;
+    if (stop_after == mem_usage_checker.GetName()) return 0;
 
-      Choreo::Factor::FactorCodeGen codegen(
-          std::cout, sc.SymTab(), mem_usage_checker.GetRtMemUsageInfo(),
-          sds.FBInfo(), cross_compile);
-      if (prt_pass) std::cout << "|- " << codegen.GetName() << "\n";
-      root.accept(codegen);
-      break;
-    }
-    case Target::CUDA: {
-      Choreo::CUDA::CUDACodeGen codegen(std::cout, sc.SymTab(), cross_compile);
-      if (prt_pass) std::cout << "|- " << codegen.GetName() << "\n";
-      root.accept(codegen);
-      break;
-    }
-    case Target::Topscc: {
-      std::cerr << "Target '" << target.GetValue()
-                << "' has not been supported yet.\n";
-      return 1;
-    }
-    case Target::Unknown: {
-      std::cerr << "Invalid target: '" << target.GetValue() << "'\n";
-      return 1;
-    }
-    default:
-      std::cerr << "Invalid target: '" << target.GetValue() << "'\n";
-      return 1;
+    Choreo::Factor::FactorCodeGen codegen(std::cout, sc.SymTab(),
+                                          mem_usage_checker.GetRtMemUsageInfo(),
+                                          sds.FBInfo(), cross_compile);
+    if (prt_pass) std::cout << "|- " << codegen.GetName() << "\n";
+    root.accept(codegen);
+    break;
+  }
+  case Target::CUDA: {
+    Choreo::CUDA::CUDACodeGen codegen(std::cout, sc.SymTab(), cross_compile);
+    if (prt_pass) std::cout << "|- " << codegen.GetName() << "\n";
+    root.accept(codegen);
+    break;
+  }
+  case Target::Topscc: {
+    std::cerr << "Target '" << target.GetValue()
+              << "' has not been supported yet.\n";
+    return 1;
+  }
+  case Target::Unknown: {
+    std::cerr << "Invalid target: '" << target.GetValue() << "'\n";
+    return 1;
+  }
+  default:
+    std::cerr << "Invalid target: '" << target.GetValue() << "'\n";
+    return 1;
   }
 
   return 0;

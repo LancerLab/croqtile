@@ -9,39 +9,36 @@
 #include "ast.hpp"
 #include "choreo_cuda_header.inc"
 #include "codegen.hpp"
+#include "codegen_cuda_types.hpp"
 #include "cuda_script.inc"
 #include "types.hpp"
-#include "codegen_cuda_types.hpp"
 
 #ifndef __CHOREO_CUDA_DIR__
 #error "missing macro definition of __CHOREO_CUDA_DIR__"
 #endif
 
 // utility macros define here
-#define __TRACE_EACH_VISIT__(d)       \
-  if (trace_visit) {                  \
-    os << d.TypeNameString() << ": "; \
-    os << "\n";                       \
+#define __TRACE_EACH_VISIT__(d)                                                \
+  if (trace_visit) {                                                           \
+    os << d.TypeNameString() << ": ";                                          \
+    os << "\n";                                                                \
   }
 
 using namespace Choreo;
 using namespace Choreo::CUDA;
 
-bool CUDACodeGen::ContainsLoopVar(const std::string &iv) const {
-  for (auto &loop_var : loop_vars)
+bool CUDACodeGen::ContainsLoopVar(const std::string& iv) const {
+  for (auto& loop_var : loop_vars)
     if (loop_var.count(iv)) return true;
   return false;
 }
 
-
-
-
-bool CUDACodeGen::BeforeVisitImpl(AST::Node &n) {
+bool CUDACodeGen::BeforeVisitImpl(AST::Node& n) {
   __TRACE_EACH_VISIT__(n)
   if (isa<AST::Program>(&n)) {
     //    print_fixed_header(os);
   } else if (auto c = dyn_cast<AST::ChoreoFunction>(&n)) {
-    sp_count = 0;  // reset the count of stub parameter
+    sp_count = 0; // reset the count of stub parameter
     param_map.clear();
     rts_nmap.clear();
     rts_pidx.clear();
@@ -70,7 +67,7 @@ bool CUDACodeGen::BeforeVisitImpl(AST::Node &n) {
 )";
 
     auto fty = cast<FunctionType>(c->GetType());
-    auto &out_type = fty->out_ty;
+    auto& out_type = fty->out_ty;
     auto out_size_expr = SizeExprOf(*out_type);
     std::string ret_string = "void";
     if (!out_size_expr.empty()) {
@@ -80,11 +77,13 @@ bool CUDACodeGen::BeforeVisitImpl(AST::Node &n) {
       void_return = true;
     }
     this->return_string = ret_string;
-    fs << this->indent << "__global__ void "<< " " << current_fn << "_parallel(";
-    // fs << this->indent << "__global__ " << this->return_string << " " << current_fn << "_parallel(";
+    fs << this->indent << "__global__ void "
+       << " " << current_fn << "_parallel(";
+    // fs << this->indent << "__global__ " << this->return_string << " " <<
+    // current_fn << "_parallel(";
     bool need_delimiter = false;
     for (auto value : c->f_decl.params->values) {
-      if (need_delimiter) fs<< ", ";
+      if (need_delimiter) fs << ", ";
       fs << stringify(value->type->getBaseType());
       if (value->type->mdspan_type != nullptr) fs << "*";
       fs << " ";
@@ -92,8 +91,7 @@ bool CUDACodeGen::BeforeVisitImpl(AST::Node &n) {
       need_delimiter = true;
     }
     // TODO: resolve HC add output
-    if(!void_return) 
-      fs << ", float* output";
+    if (!void_return) fs << ", float* output";
     fs << ");\n\n";
 
     // TODO(albert): to add host params
@@ -101,7 +99,7 @@ bool CUDACodeGen::BeforeVisitImpl(AST::Node &n) {
     need_delimiter = false;
     // f32 [4096, 4096] lhs ==> float* lhs
     for (auto value : c->f_decl.params->values) {
-      if (need_delimiter) fs<< ", ";
+      if (need_delimiter) fs << ", ";
       fs << stringify(value->type->getBaseType());
       if (value->type->mdspan_type != nullptr) fs << "*";
       fs << " ";
@@ -120,14 +118,13 @@ bool CUDACodeGen::BeforeVisitImpl(AST::Node &n) {
 }
 
 // CLEAN
-bool CUDACodeGen::AfterVisitImpl(AST::Node &n) {
+bool CUDACodeGen::AfterVisitImpl(AST::Node& n) {
   __TRACE_EACH_VISIT__(n)
   if (isa<AST::Program>(&n)) {
     os << "\n# step 4: generate the host source\n";
     os << "host_src=" << host_fn << "\n";
     os << "cat <<'EOF' >> ${host_src}\n";
-    os << hs.str()
-       << "\nEOF\n\n";
+    os << hs.str() << "\nEOF\n\n";
 
     os << "\n# step 5: JIT compile and execute\n";
     os << "target=" << target_fn << "\n";
@@ -154,8 +151,8 @@ fi
     os << R"(
 if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then
 )";
-    os << "  export CUDA_INSTALL=" << STRINGIZE(__CHOREO_cuda_DIR__)
-       << "\n  # JIT compile and execute\n";
+    os << "  export CUDA_INSTALL="
+       << STRINGIZE(__CHOREO_cuda_DIR__) << "\n  # JIT compile and execute\n";
     if (dyn_shaped) os << "VIEW_CONFIG=1 ENABLE_DYNSHAPE=1 ";
     os << "  ${cuda_script} ${build_path} ${host_src} ${target}\n";
     os << R"script(
@@ -198,19 +195,20 @@ fi
     entry_fn = fnode->name;
     current_fn = "__choreo_" + entry_fn;
     auto fty = cast<FunctionType>(fnode->GetType());
-    auto &out_type = fty->out_ty;
-    auto &in_type = fty->in_tys[0];
+    auto& out_type = fty->out_ty;
+    auto& in_type = fty->in_tys[0];
     auto in_size_expr = SizeExprOf(*in_type);
     auto out_size_expr = SizeExprOf(*out_type);
-    if (!host_enclosed)
-      fs << "} // end of choreo-cuda dataflow program\n";
+    if (!host_enclosed) fs << "} // end of choreo-cuda dataflow program\n";
 
     if (auto sty = dyn_cast<SpannedType>(out_type)) {
-      assert(sty != nullptr && "Size of the result type should be positive integer\n");
+      assert(sty != nullptr &&
+             "Size of the result type should be positive integer\n");
       OutputScript(fty, fnode->name, STR(GetBaseType(*out_type)), out_size_expr,
                    sty->GetShape());
     } else if (auto sty = dyn_cast<SpannedType>(in_type)) {
-      assert(sty != nullptr && "Size of the input type should be positive integer\n");
+      assert(sty != nullptr &&
+             "Size of the input type should be positive integer\n");
       OutputScript(fty, fnode->name, STR(GetBaseType(*in_type)), in_size_expr,
                    sty->GetShape());
     } else {
@@ -247,19 +245,19 @@ fi
         cur_bounded_vars.erase(w->with->name);
       }
     }
-  } 
+  }
   return 0;
 }
 
-bool CUDACodeGen::Visit(AST::MultiNodes &) { return true; }
-bool CUDACodeGen::Visit(AST::MultiValues &) { return true; }
-bool CUDACodeGen::Visit(AST::IntLiteral &) { return true; };
-bool CUDACodeGen::Visit(AST::Boolean &) { return true; };
-bool CUDACodeGen::Visit(AST::Expr &) { return true; };
-bool CUDACodeGen::Visit(AST::MultiDimSpans &) { return true; };
-bool CUDACodeGen::Visit(AST::NamedTypeDecl &) { return true; };
+bool CUDACodeGen::Visit(AST::MultiNodes&) { return true; }
+bool CUDACodeGen::Visit(AST::MultiValues&) { return true; }
+bool CUDACodeGen::Visit(AST::IntLiteral&) { return true; };
+bool CUDACodeGen::Visit(AST::Boolean&) { return true; };
+bool CUDACodeGen::Visit(AST::Expr&) { return true; };
+bool CUDACodeGen::Visit(AST::MultiDimSpans&) { return true; };
+bool CUDACodeGen::Visit(AST::NamedTypeDecl&) { return true; };
 
-bool CUDACodeGen::Visit(AST::NamedVariableDecl &node) {
+bool CUDACodeGen::Visit(AST::NamedVariableDecl& node) {
   __TRACE_EACH_VISIT__(node)
   auto nty = node.GetType();
   auto sym = node.name_str;
@@ -271,7 +269,9 @@ bool CUDACodeGen::Visit(AST::NamedVariableDecl &node) {
     if (storage_type == Choreo::Storage::SHARED) {
       _os << stringify(storage_type) << " ";
       _os << stringify(base_type) << " ";
-      _os << sym << ReplaceRuntimeNames(size_expr_of(sty->GetShape()), "", false) << ";\n";
+      _os << sym
+          << ReplaceRuntimeNames(size_expr_of(sty->GetShape()), "", false)
+          << ";\n";
       fs << indent << _os.str();
     } else if (storage_type == Choreo::Storage::GLOBAL) {
       _os << stringify(base_type);
@@ -287,7 +287,8 @@ bool CUDACodeGen::Visit(AST::NamedVariableDecl &node) {
       _os << ");\n";
       fs << indent << _os.str();
     } else {
-      assert(false && "other level of vars are not supported in choreo::cuda, you can only use global and shared explicitly now\n");
+      assert(false && "other level of vars are not supported in choreo::cuda, "
+                      "you can only use global and shared explicitly now\n");
     }
   } else {
     choreo_unreachable("non-spanned is not yet supported.");
@@ -297,24 +298,24 @@ bool CUDACodeGen::Visit(AST::NamedVariableDecl &node) {
   }
   return true;
 };
-bool CUDACodeGen::Visit(AST::IntTuple &) { return true; };
-bool CUDACodeGen::Visit(AST::Assignment &) { return true; };
-bool CUDACodeGen::Visit(AST::IntIndex &) { return true; };
-bool CUDACodeGen::Visit(AST::DataType &) { return true; };
+bool CUDACodeGen::Visit(AST::IntTuple&) { return true; };
+bool CUDACodeGen::Visit(AST::Assignment&) { return true; };
+bool CUDACodeGen::Visit(AST::IntIndex&) { return true; };
+bool CUDACodeGen::Visit(AST::DataType&) { return true; };
 
-bool CUDACodeGen::Visit(AST::Identifier &n) {
+bool CUDACodeGen::Visit(AST::Identifier& n) {
   __TRACE_EACH_VISIT__(n)
   (void)n;
   return true;
 }
 
-bool CUDACodeGen::Visit(AST::Parameter &n) {
+bool CUDACodeGen::Visit(AST::Parameter& n) {
   __TRACE_EACH_VISIT__(n)
   (void)n;
   return true;
 }
 
-bool CUDACodeGen::Visit(AST::ParamList &n) {
+bool CUDACodeGen::Visit(AST::ParamList& n) {
   __TRACE_EACH_VISIT__(n)
   cur_params = &n.values;
   return true;
@@ -322,29 +323,27 @@ bool CUDACodeGen::Visit(AST::ParamList &n) {
 
 // CLEAN
 // TODO(albert): revolsve HC in p/q => blockid
-bool CUDACodeGen::Visit(AST::ParallelBy &by) {
+bool CUDACodeGen::Visit(AST::ParallelBy& by) {
   __TRACE_EACH_VISIT__(by)
   parallel_cuda *= by.bound;
-  if (parallel_level > 1) {
-    return true;
-  }
-  // emit 
+  if (parallel_level > 1) { return true; }
+  // emit
   // dim3 blockDim
   // dim3 gridDim
-  // func_parallel<<<gridDim, blockDim>>>(arg0, arg1, arg2, ...) 
+  // func_parallel<<<gridDim, blockDim>>>(arg0, arg1, arg2, ...)
   fs << this->indent << "dim3 blockDim(32, 32);\n";
   // TODO(albert): resolve HC
   // fs << this->indent << "dim3 blockDim(" << by.bound << ");\n";
   // fs << this->indent << "dim3 blockDim(16, 16);\n";
 
-  // TODO(albert): HC, here uses 1536 magic number, which is the max threads in active
-  // for Ampere GA104 architecture, we should use a HW property to describe this occupacy
-  // consideration.
+  // TODO(albert): HC, here uses 1536 magic number, which is the max threads in
+  // active for Ampere GA104 architecture, we should use a HW property to
+  // describe this occupacy consideration.
   fs << this->indent << "dim3 gridDim(128, 128);\n";
   // TODO(albert): CEIL_DIV(M, 128), CEIL_DIV(N, 128)
   // fs << this->indent << "dim3 gridDim(256, 256);\n";
-  fs << this->indent << current_fn
-     << "_parallel" << "<<<gridDim, blockDim>>>(";
+  fs << this->indent << current_fn << "_parallel"
+     << "<<<gridDim, blockDim>>>(";
   bool need_delimiter = false;
   for (unsigned i = 0; i < cur_params->size(); ++i) {
     if (need_delimiter) fs << ", ";
@@ -356,9 +355,8 @@ bool CUDACodeGen::Visit(AST::ParallelBy &by) {
     need_delimiter = true;
   }
   // TODO: resolve HC add output
-  if(!void_return) 
-    fs << ", output";
-  fs << ");\n";  // "$$out$$" : magic string for output, will be replaced later
+  if (!void_return) fs << ", output";
+  fs << ");\n"; // "$$out$$" : magic string for output, will be replaced later
   this->decrementIndent();
   fs << ((void_return) ? "" : "return output;\n");
   fs << "} // end of choreo-cuda dataflow program\n";
@@ -367,8 +365,10 @@ bool CUDACodeGen::Visit(AST::ParallelBy &by) {
   fs << "\n";
 
   // emit __global__ void func_parallel(arg0, arg1, arg2, ...) {
-  fs << this->indent << "__global__ void " << " " << current_fn << "_parallel(";
-  // fs << this->indent << "__global__ " << this->return_string << " " << current_fn << "_parallel(";
+  fs << this->indent << "__global__ void "
+     << " " << current_fn << "_parallel(";
+  // fs << this->indent << "__global__ " << this->return_string << " " <<
+  // current_fn << "_parallel(";
   need_delimiter = false;
   for (unsigned i = 0; i < cur_params->size(); ++i) {
     if (need_delimiter) fs << ", ";
@@ -380,8 +380,7 @@ bool CUDACodeGen::Visit(AST::ParallelBy &by) {
     need_delimiter = true;
   }
   // TODO: resolve HC add output
-  if(!void_return) 
-    fs << ", float* output";
+  if (!void_return) fs << ", float* output";
   fs << ") {\n";
   this->incrementIndent();
   // generate a reference name of the output
@@ -399,7 +398,7 @@ bool CUDACodeGen::Visit(AST::ParallelBy &by) {
   return true;
 }
 
-bool CUDACodeGen::Visit(AST::WhereBind &n) {
+bool CUDACodeGen::Visit(AST::WhereBind& n) {
   __TRACE_EACH_VISIT__(n)
   // auto lid = cast<AST::Identifier>(n.lhs);
   // auto rid = cast<AST::Identifier>(n.rhs);
@@ -422,7 +421,7 @@ bool CUDACodeGen::Visit(AST::WhereBind &n) {
 }
 
 // CLEAN
-bool CUDACodeGen::Visit(AST::WithIn &n) {
+bool CUDACodeGen::Visit(AST::WithIn& n) {
   __TRACE_EACH_VISIT__(n)
   assert(n.with_matchers && "expect matcher to be exist.");
 
@@ -443,31 +442,32 @@ bool CUDACodeGen::Visit(AST::WithIn &n) {
   return true;
 };
 
-bool CUDACodeGen::Visit(AST::WithBlock &n) {
+bool CUDACodeGen::Visit(AST::WithBlock& n) {
   __TRACE_EACH_VISIT__(n)
   return true;
 }
 
-bool CUDACodeGen::Visit(AST::Memory &n) {
+bool CUDACodeGen::Visit(AST::Memory& n) {
   __TRACE_EACH_VISIT__(n)
   return true;
 }
 
-bool CUDACodeGen::Visit(AST::SpanAs &n) {
+bool CUDACodeGen::Visit(AST::SpanAs& n) {
   __TRACE_EACH_VISIT__(n)
   return true;
 }
 
 // CLEAN
-bool CUDACodeGen::Visit(AST::DMA &d) {
+bool CUDACodeGen::Visit(AST::DMA& d) {
   __TRACE_EACH_VISIT__(d)
   // handle .to  in AST::Memory
   assert((isa<AST::ChunkAt>(d.from)) && "Unexpected type for DMA's source.");
-  assert((isa<AST::Memory>(d.to) || isa<AST::ChunkAt>(d.to) || isa<AST::Select>(d.to)) &&
+  assert((isa<AST::Memory>(d.to) || isa<AST::ChunkAt>(d.to) ||
+          isa<AST::Select>(d.to)) &&
          "Unexpected type for DMA's destination.");
 
   // retrieve the spanned type from a chunkat
-  auto GetSpannedType = [this](AST::Node &ca) -> SpannedType * {
+  auto GetSpannedType = [this](AST::Node& ca) -> SpannedType* {
     auto sty = ca.GetType();
     if (auto fty = dyn_cast<FutureType>(sty))
       return fty->GetSpannedType().get();
@@ -477,16 +477,11 @@ bool CUDACodeGen::Visit(AST::DMA &d) {
 
   auto MemLevel = [](Storage s) -> int {
     switch (s) {
-      case Storage::LOCAL:
-        return 0;
-      case Storage::SHARED:
-        return 1;
-      case Storage::GLOBAL:
-      case Storage::DEFAULT:
-        return 2;
-      default:
-        choreo_unreachable("Unexpected storage type.");
-        return -1;
+    case Storage::LOCAL: return 0;
+    case Storage::SHARED: return 1;
+    case Storage::GLOBAL:
+    case Storage::DEFAULT: return 2;
+    default: choreo_unreachable("Unexpected storage type."); return -1;
     }
   };
 
@@ -513,7 +508,7 @@ bool CUDACodeGen::Visit(AST::DMA &d) {
           RemoveSuffix(cast<AST::ChunkAt>(d.from)->data->name, ".data"))))
     src_buffer_name = src_node_name + "_buffer";
 
-  auto sty = GetSpannedType(*d.from);  // source spanned type
+  auto sty = GetSpannedType(*d.from); // source spanned type
   size_t rank = sty->Dims();
   auto dst_shape = ty->GetShape();
   auto src_sto = sty->GetStorage();
@@ -524,13 +519,14 @@ bool CUDACodeGen::Visit(AST::DMA &d) {
     auto sty = dyn_cast<SpannedType>(sel->GetType());
     assert(sty);
     dst_sto = sty->GetStorage();
-  }
-  else
+  } else
     dst_sto = GetSpannedType(*d.to)->GetStorage();
   // auto dst_sto = (isa<AST::Memory>(d.to)) ? cast<AST::Memory>(d.to)->Get()
-  //                                         : GetSpannedType(*d.to)->GetStorage();
+  //                                         :
+  //                                         GetSpannedType(*d.to)->GetStorage();
   // dst_sto = (isa<AST::Select>(d.to)) ? Storage::LOCAL
-  //                                         : GetSpannedType(*d.to)->GetStorage();
+  //                                         :
+  //                                         GetSpannedType(*d.to)->GetStorage();
   int src_level = MemLevel(src_sto);
   int dst_level = MemLevel(dst_sto);
 
@@ -544,14 +540,14 @@ bool CUDACodeGen::Visit(AST::DMA &d) {
     };
     // buffer in another stream
     alloc_in_fs << alloc_indent;
-    alloc_in_fs<< stringify(mem_node->Get()) << " ";
+    alloc_in_fs << stringify(mem_node->Get()) << " ";
     alloc_in_fs << stringify(sty->ElementType()) << " ";
     alloc_in_fs << dst_buffer_name;
     alloc_in_fs << size_expr_of(sty->GetShape());
     alloc_in_fs << ";\n";
   }
 
-  auto GenerateOffsetString = [this, &GetSpannedType](AST::Node &n) {
+  auto GenerateOffsetString = [this, &GetSpannedType](AST::Node& n) {
     auto sty = GetSpannedType(n);
     auto shape = sty->GetShape();
     size_t rank = sty->Dims();
@@ -564,12 +560,12 @@ bool CUDACodeGen::Visit(AST::DMA &d) {
 
     std::ostringstream offss;
     size_t dim_cursor = 0;
-    for (auto &bv : ca->positions->AllValues()) {
+    for (auto& bv : ca->positions->AllValues()) {
       auto bvn = cast<AST::Identifier>(bv)->name;
       if (auto bity = dyn_cast<BoundedITupleType>(bv->GetType())) {
         for (size_t it_idx = 0; it_idx < bity->Dims(); ++it_idx) {
           std::string iv_str;
-          if (within_map.count(bvn))  // with-matcher existed
+          if (within_map.count(bvn)) // with-matcher existed
             iv_str = within_map[bvn][it_idx];
           else
             iv_str = bvn;
@@ -589,8 +585,7 @@ bool CUDACodeGen::Visit(AST::DMA &d) {
               choreo_unreachable("invalid type note.");
           }
 
-          offss << RSTR(shape.ValueAt(dim_cursor)) << "*"
-                << iv_str;
+          offss << RSTR(shape.ValueAt(dim_cursor)) << "*" << iv_str;
 
           // add offset conversion
           if (auto ca = cast<AST::ChunkAt>(&n))
@@ -605,7 +600,6 @@ bool CUDACodeGen::Visit(AST::DMA &d) {
     return "[tid_y*32+tid_x+" + offss.str() + "]";
   };
 
-
   // decide the dma allocation type
   auto DMATypeString = [](int src_lvl, int dst_lvl) {
     if ((src_lvl == 2 && dst_lvl == 2) || (src_lvl == 2 && dst_lvl == 1) ||
@@ -617,7 +611,7 @@ bool CUDACodeGen::Visit(AST::DMA &d) {
 
   // buffer the allocation in another stream
   // if use pipeline-mode, make all cdma with shared_ annotation
-  // if (d.chained == true && 
+  // if (d.chained == true &&
   //     ((d.chain_to != "" && src_level > dst_level) ||
   //     (d.chain_from != "" && src_level < dst_level)))
   //   alloc_in_fs << alloc_indent << "auto " << future_name << " = alloc_dma_("
@@ -639,7 +633,7 @@ bool CUDACodeGen::Visit(AST::DMA &d) {
   if (isa<AST::Memory>(d.to) || isa<AST::Select>(d.to))
     chunkat_node = d.from;
   else if (cast<AST::ChunkAt>(d.to)->positions)
-      chunkat_node = d.to;
+    chunkat_node = d.to;
   else
     choreo_unreachable("cuda: unsupported chunkat.");
 
@@ -660,19 +654,18 @@ bool CUDACodeGen::Visit(AST::DMA &d) {
     fs << src_buffer_name;
     fs << "[tid_y*32 + tid_x]";
     fs << ";\n";
-
   }
 
   return true;
 }
 
-bool CUDACodeGen::Visit(AST::ChunkAt &n) { 
+bool CUDACodeGen::Visit(AST::ChunkAt& n) {
   __TRACE_EACH_VISIT__(n)
-  return true; 
+  return true;
 }
 
 // TODO(albert): change to async memcpy afterwards
-bool CUDACodeGen::Visit(AST::Wait &w) {
+bool CUDACodeGen::Visit(AST::Wait& w) {
   __TRACE_EACH_VISIT__(w)
   // auto dmas = w.targets;
   // assert(dmas && "Invalid wait target!");
@@ -685,7 +678,7 @@ bool CUDACodeGen::Visit(AST::Wait &w) {
 }
 
 // CLEAN
-bool CUDACodeGen::Visit(AST::Call &c) {
+bool CUDACodeGen::Visit(AST::Call& c) {
   __TRACE_EACH_VISIT__(c)
   fs << this->indent;
   fs << STR(*c.function);
@@ -697,21 +690,19 @@ bool CUDACodeGen::Visit(AST::Call &c) {
     auto arg = dyn_cast<AST::Expr>(args->AllValues()[index]);
     assert(arg && "Invalid kernel call arg!");
     switch (arg->GetForm()) {
-      case AST::Expr::Reference:
-        try {
-          std::stoi(STR(arg->GetR()));
-          fs << STR(arg->GetR());
-        } catch (const std::invalid_argument &e) {
-          fs << STR(arg->GetR());
-        }
-        break;
-      case AST::Expr::Unary:
-        if (arg->op == "sizeof") {
-          auto var = STR(arg->GetR()).substr(0, STR(arg->GetR()).find('.'));
-          assert(dyn_cast<FutureType>(this->GetSymbolType(var)) &&
-                 "Unexpected !!!");
-          auto ty_ptr = cast<FutureType>(this->GetSymbolType(var));
-          auto shape = ty_ptr->GetShape();
+    case AST::Expr::Reference:
+      try {
+        std::stoi(STR(arg->GetR()));
+        fs << STR(arg->GetR());
+      } catch (const std::invalid_argument& e) { fs << STR(arg->GetR()); }
+      break;
+    case AST::Expr::Unary:
+      if (arg->op == "sizeof") {
+        auto var = STR(arg->GetR()).substr(0, STR(arg->GetR()).find('.'));
+        assert(dyn_cast<FutureType>(this->GetSymbolType(var)) &&
+               "Unexpected !!!");
+        auto ty_ptr = cast<FutureType>(this->GetSymbolType(var));
+        auto shape = ty_ptr->GetShape();
 #if 0
           auto shapes = shape.Value();
           auto dim = shape.values.values[0];
@@ -720,15 +711,15 @@ bool CUDACodeGen::Visit(AST::Call &c) {
             size = size * (*(std::get_if<int>(&shapes[dim_cursor++])));
           fs << std::to_string(size);
 #endif
-          fs << shape.GetSizeExpression();
-        } else if (arg->op == "dataof") {
-          fs << STR(arg->GetR()) << "_buffer";
-        }
-        break;
-      default:
-        choreo_unreachable("unhandled expression type: " +
-                           std::to_string((int)(arg->GetForm())) + ".");
-        break;
+        fs << shape.GetSizeExpression();
+      } else if (arg->op == "dataof") {
+        fs << STR(arg->GetR()) << "_buffer";
+      }
+      break;
+    default:
+      choreo_unreachable("unhandled expression type: " +
+                         std::to_string((int)(arg->GetForm())) + ".");
+      break;
     }
     index++;
     if (index < arg_num) fs << ",";
@@ -740,39 +731,40 @@ bool CUDACodeGen::Visit(AST::Call &c) {
   return true;
 }
 
-bool CUDACodeGen::Visit(AST::Swap &n) {
+bool CUDACodeGen::Visit(AST::Swap& n) {
   __TRACE_EACH_VISIT__(n)
 
   // TODO
   return true;
 }
 
-bool CUDACodeGen::Visit(AST::Select &c) {
+bool CUDACodeGen::Visit(AST::Select& c) {
   __TRACE_EACH_VISIT__(c)
   // size_t val_count = c.val_list->Count();
-  // // if val_count == 1, pingpong is meaningless? ( TODO: maybe assert when earlysema)
-  // assert(val_count >= 2);
-  // fs << this->indent << "auto " << c.future << " = ";
-  // for (size_t i = 0; i < val_count - 1; i++) {
-  //   fs << "select_(" << STR(c.select_cuda) << "== " << i << ", " << STR(c.val_list->ValueAt(i)) << (i < val_count-1 ? ", " : "");
+  // // if val_count == 1, pingpong is meaningless? ( TODO: maybe assert when
+  // earlysema) assert(val_count >= 2); fs << this->indent << "auto " <<
+  // c.future << " = "; for (size_t i = 0; i < val_count - 1; i++) {
+  //   fs << "select_(" << STR(c.select_cuda) << "== " << i << ", " <<
+  //   STR(c.val_list->ValueAt(i)) << (i < val_count-1 ? ", " : "");
   // }
-  // fs << STR(c.val_list->AllValues().back()) << std::string(val_count-1, ')') << ";\n";
+  // fs << STR(c.val_list->AllValues().back()) << std::string(val_count-1, ')')
+  // << ";\n";
   return true;
 }
 
-bool CUDACodeGen::Visit(AST::Return &returnNode) {
+bool CUDACodeGen::Visit(AST::Return& returnNode) {
   __TRACE_EACH_VISIT__(returnNode)
   // if (returnNode.value) output_v = STR(*returnNode.value);
   return true;
 }
 
-bool CUDACodeGen::Visit(AST::LoopRange &n) {
+bool CUDACodeGen::Visit(AST::LoopRange& n) {
   __TRACE_EACH_VISIT__(n)
   return true;
 }
 
 // CLEAN
-bool CUDACodeGen::Visit(AST::ForeachBlock &forNode) {
+bool CUDACodeGen::Visit(AST::ForeachBlock& forNode) {
   __TRACE_EACH_VISIT__(forNode)
   auto ranges = forNode.getRanges();
   for (size_t idx = 0; idx != ranges.size(); ++idx) {
@@ -797,7 +789,8 @@ bool CUDACodeGen::Visit(AST::ForeachBlock &forNode) {
       auto var_name = iv_name;
       fs << this->indent;
       fs << "for (auto " << var_name << " = 0; ";
-      fs << var_name << " < " << ReplaceDynDimName(STR(iv_sizes.ValueAt(0))) << "; ";
+      fs << var_name << " < " << ReplaceDynDimName(STR(iv_sizes.ValueAt(0)))
+         << "; ";
       fs << var_name << "++) {\n";
       incrementIndent();
       loop_vars.back().insert(iv_name);
@@ -816,7 +809,8 @@ bool CUDACodeGen::Visit(AST::ForeachBlock &forNode) {
       for (auto name : cur_bounded_vars[iv_name]) {
         fs << this->indent;
         fs << "for (auto " << name << " = 0; ";
-        fs << name << " < " << ReplaceDynDimName(STR(iv_sizes.ValueAt(0))) << "; ";
+        fs << name << " < " << ReplaceDynDimName(STR(iv_sizes.ValueAt(0)))
+           << "; ";
         fs << name << "++) {\n";
         // fs << this->indent << "for_(" << name << ", "
         //    << ReplaceDynDimName(STR(iv_sizes.ValueAt(i))) << ", "
@@ -839,13 +833,13 @@ bool CUDACodeGen::Visit(AST::ForeachBlock &forNode) {
 }
 
 // CLEAN
-bool CUDACodeGen::Visit(AST::FunctionDecl &d) {
+bool CUDACodeGen::Visit(AST::FunctionDecl& d) {
   __TRACE_EACH_VISIT__(d)
   auto ty = d.GetType();
   assert(isa<FunctionType>(ty) && "unexpected type.");
-  auto &fty = *cast<FunctionType>(ty);
+  auto& fty = *cast<FunctionType>(ty);
 
-  auto MapRuntimeShapeNames = [this](SpannedType *sty, const std::string &name,
+  auto MapRuntimeShapeNames = [this](SpannedType* sty, const std::string& name,
                                      size_t p_index) {
     size_t count = 0;
     for (auto vi : sty->GetShape().Value()) {
@@ -868,8 +862,8 @@ bool CUDACodeGen::Visit(AST::FunctionDecl &d) {
       MapRuntimeShapeNames(sty, n, i);
   }
 
-  std::ostringstream dss;  // for the shape string
-  for (auto &param : *cur_params) {
+  std::ostringstream dss; // for the shape string
+  for (auto& param : *cur_params) {
     auto pname = param->sym->name;
     std::string type_name = pname + "_type";
     std::string type_string;
@@ -897,12 +891,12 @@ bool CUDACodeGen::Visit(AST::FunctionDecl &d) {
     //   auto output_rt_dim0 = dim_(args[0], 1);
     //   auto output = alloc_({output_rt_dim0}, output_type);
     //
-    const auto &dyn_dims = rty->GetShape().GetDynamicDims();
+    const auto& dyn_dims = rty->GetShape().GetDynamicDims();
     if (!dyn_dims.empty()) {
       dyn_shaped = true;
       type_name = "{";
       size_t i = 0;
-      for (auto &ddim : dyn_dims) {
+      for (auto& ddim : dyn_dims) {
         auto ddim_name = name + "_rt_dim" + std::to_string(ddim.first);
         dss << "auto " << ddim_name << " = " << ReplaceDynDimName(ddim.second)
             << ";\n";
@@ -939,16 +933,16 @@ bool CUDACodeGen::Visit(AST::FunctionDecl &d) {
   return true;
 }
 
-bool CUDACodeGen::Visit(AST::ChoreoFunction &node) { 
+bool CUDACodeGen::Visit(AST::ChoreoFunction& node) {
   // entry_fn = node.name;
   // current_fn = "__choreo_" + entry_fn + "_host";
   // auto fty = cast<FunctionType>(node.GetType());
   // auto &out_type = fty->out_ty;
   // auto out_size_expr = GetByteSizeExprOf(*out_type);
-  return true; 
+  return true;
 }
 
-bool CUDACodeGen::Visit(AST::CppSourceCode &n) {
+bool CUDACodeGen::Visit(AST::CppSourceCode& n) {
   __TRACE_EACH_VISIT__(n)
   if (n.host) {
     hs << n.GetCode();
@@ -958,9 +952,9 @@ bool CUDACodeGen::Visit(AST::CppSourceCode &n) {
   return true;
 }
 
-bool CUDACodeGen::Visit(AST::Program &) { return true; }
+bool CUDACodeGen::Visit(AST::Program&) { return true; }
 
-void CUDACodeGen::EmitHostHead(std::ostream &os) {
+void CUDACodeGen::EmitHostHead(std::ostream& os) {
   os <<
       R"(// choreo header
 #include <cstdio>
@@ -1027,7 +1021,7 @@ ToSpanned(const std::vector<U> &v, std::initializer_list<int> && shape) {
 )";
 }
 
-void CUDACodeGen::EmitHostTail(std::ostream &os) {
+void CUDACodeGen::EmitHostTail(std::ostream& os) {
   // compare results
   os << R"(
   unsigned long flops = 2 * hp0.shape()[0] * hp1.shape()[1] * hp0.shape()[1];
@@ -1053,18 +1047,17 @@ void CUDACodeGen::EmitHostTail(std::ostream &os) {
   os << "}\n";
 }
 
-void CUDACodeGen::EmitHostFuncBody(std::ostream &os, 
-                                   const Type &ty,
-                                   const std::string &f_n,
-                                   const std::string &out_size_expr,
-                                   const std::string &out_type,
-                                   const Shape &out_shape) {
+void CUDACodeGen::EmitHostFuncBody(std::ostream& os, const Type& ty,
+                                   const std::string& f_n,
+                                   const std::string& out_size_expr,
+                                   const std::string& out_type,
+                                   const Shape& out_shape) {
   assert(isa<FunctionType>(&ty) && "unexpected type.");
-  auto &fty = *cast<FunctionType>(&ty);
+  auto& fty = *cast<FunctionType>(&ty);
 
   // TODO
   // 1. make alpha and beta into arguments
-  // 3. 
+  // 3.
   os << "{\n";
   EmitRuntimeCheck(os, ty);
   os << R"(
@@ -1088,13 +1081,12 @@ void CUDACodeGen::EmitHostFuncBody(std::ostream &os,
 
   // phase 2: allocate device memory and copy
   std::vector<std::string> device_mems;
-  for (auto &p : param_map) {
+  for (auto& p : param_map) {
     auto mem_name = "in_mem" + std::to_string(device_mems.size());
     os << "  float *" << mem_name << " = nullptr;\n";
     os << "  CHECK(cudaMalloc(&" << mem_name << ", " << p.second << "));\n";
-    os << "  CHECK(cudaMemcpy(" << mem_name << ", "
-       << p.first << ".data(), " << p.second
-       << ", cudaMemcpyHostToDevice));\n";
+    os << "  CHECK(cudaMemcpy(" << mem_name << ", " << p.first << ".data(), "
+       << p.second << ", cudaMemcpyHostToDevice));\n";
     device_mems.push_back(mem_name);
   }
   os << "  float * device_inputs[] = {" << DelimitedString(device_mems)
@@ -1103,7 +1095,9 @@ void CUDACodeGen::EmitHostFuncBody(std::ostream &os,
   std::string size_string = ReplaceRuntimeNames(out_size_expr);
 
   if (void_return) {
-    os << "\n  run_kernel(0, hp0.shape()[0], hp1.shape()[1], hp0.shape()[1], alpha, beta, " << DelimitedString(device_mems) << ", cublas_handle);\n";
+    os << "\n  run_kernel(0, hp0.shape()[0], hp1.shape()[1], hp0.shape()[1], "
+          "alpha, beta, "
+       << DelimitedString(device_mems) << ", cublas_handle);\n";
   } else {
     // os << "  float * out_mem_choreo = nullptr;\n";
     // os << "  CHECK(cudaMalloc(&out_mem_choreo, " << size_string << "));\n";
@@ -1111,10 +1105,12 @@ void CUDACodeGen::EmitHostFuncBody(std::ostream &os,
     // os << "  // result for cublas ref\n";
     os << "  float * out_mem_cublas = nullptr;\n";
     os << "  CHECK(cudaMalloc(&out_mem_cublas, " << size_string << "));\n";
-    os << "\n  run_kernel(0, hp0.shape()[0], hp1.shape()[1], hp0.shape()[1], alpha, beta, " << DelimitedString(device_mems) << ", out_mem_cublas, cublas_handle);\n";
+    os << "\n  run_kernel(0, hp0.shape()[0], hp1.shape()[1], hp0.shape()[1], "
+          "alpha, beta, "
+       << DelimitedString(device_mems) << ", out_mem_cublas, cublas_handle);\n";
   }
 
-  std::vector<std::string> inputs;  // cuda input paramters
+  std::vector<std::string> inputs; // cuda input paramters
 
   // go ref impl with cublas
   os << "  CUDACheck(cudaDeviceSynchronize());\n";
@@ -1125,31 +1121,35 @@ void CUDACodeGen::EmitHostFuncBody(std::ostream &os,
     shape_string = ReplaceRuntimeNames(LSTR(out_shape));
   }
   if (void_return) {
-    os << "  auto res_cublas = choreo::make_spandata<" << out_type << ", " << out_rank
-       << ">(" << shape_string << ");\n";
+    os << "  auto res_cublas = choreo::make_spandata<" << out_type << ", "
+       << out_rank << ">(" << shape_string << ");\n";
     os << "  // Copy output data from device to host\n";
     // TODO(albert): use has_output as hint
     // os << "  CUDACheck(cudaMemcpy(res_cublas.data(), out_mem_cublas,\n";
-    os << "  CUDACheck(cudaMemcpy(res_cublas.data(), " << device_mems[2] << ", ";
-    os << size_string
-       << ", cudaMemcpyDeviceToHost));\n";
+    os << "  CUDACheck(cudaMemcpy(res_cublas.data(), " << device_mems[2]
+       << ", ";
+    os << size_string << ", cudaMemcpyDeviceToHost));\n";
   } else {
-    os << "  auto res_cublas = choreo::make_spandata<" << out_type << ", " << out_rank
-       << ">(" << shape_string << ");\n";
+    os << "  auto res_cublas = choreo::make_spandata<" << out_type << ", "
+       << out_rank << ">(" << shape_string << ");\n";
     os << "  // Copy output data from device to host\n";
-    os << "  CUDACheck(cudaMemcpy(res_cublas.data(), out_mem_cublas" << ", ";
-    os << size_string
-       << ", cudaMemcpyDeviceToHost));\n";
+    os << "  CUDACheck(cudaMemcpy(res_cublas.data(), out_mem_cublas"
+       << ", ";
+    os << size_string << ", cudaMemcpyDeviceToHost));\n";
   }
 
   // go our impl
   // TODO(albert) cleanup HC, make size and alpha/beta into interface arguments
   os << "\n  cudaEventRecord(beg);\n";
-  // os << "\n  run_kernel(1, hp0.shape()[0], hp1.shape()[1], hp0.shape()[1], alpha, " << DelimitedString(device_mems) << ", beta, out_mem_choreo, cublas_handle);\n";
+  // os << "\n  run_kernel(1, hp0.shape()[0], hp1.shape()[1], hp0.shape()[1],
+  // alpha, " << DelimitedString(device_mems) << ", beta, out_mem_choreo,
+  // cublas_handle);\n";
   if (void_return) {
-    os << "\n  " << target_fn << "_host(" << DelimitedString(device_mems) << ");\n";
+    os << "\n  " << target_fn << "_host(" << DelimitedString(device_mems)
+       << ");\n";
   } else {
-    os << "\n  auto out_mem_choreo = " << target_fn << "_host(" << DelimitedString(device_mems) << ");\n";
+    os << "\n  auto out_mem_choreo = " << target_fn << "_host("
+       << DelimitedString(device_mems) << ");\n";
   }
   os << "  CUDACheck(cudaDeviceSynchronize());\n";
   os << R"(
@@ -1160,27 +1160,26 @@ void CUDACodeGen::EmitHostFuncBody(std::ostream &os,
   elapsed_time /= 1000.; // Convert to seconds
   )";
   if (void_return) {
-    os << "auto res_choreo = choreo::make_spandata<" << out_type << ", " << out_rank
-       << ">(" << shape_string << ");\n";
+    os << "auto res_choreo = choreo::make_spandata<" << out_type << ", "
+       << out_rank << ">(" << shape_string << ");\n";
     os << "  // Copy output data from device to host\n";
     // os << "  CUDACheck(cudaMemcpy(res_choreo.data(), out_mem_choreo,\n";
-    os << "  CUDACheck(cudaMemcpy(res_choreo.data(), " << device_mems[2] << ", ";
-    os << size_string
-       << ", cudaMemcpyDeviceToHost));\n";
+    os << "  CUDACheck(cudaMemcpy(res_choreo.data(), " << device_mems[2]
+       << ", ";
+    os << size_string << ", cudaMemcpyDeviceToHost));\n";
   } else {
-    os << "auto res_choreo = choreo::make_spandata<" << out_type << ", " << out_rank
-       << ">(" << shape_string << ");\n";
+    os << "auto res_choreo = choreo::make_spandata<" << out_type << ", "
+       << out_rank << ">(" << shape_string << ");\n";
     os << "  // Copy output data from device to host\n";
-    os << "  CUDACheck(cudaMemcpy(res_choreo.data(), out_mem_choreo" << ", ";
-    os << size_string
-       << ", cudaMemcpyDeviceToHost));\n";
+    os << "  CUDACheck(cudaMemcpy(res_choreo.data(), out_mem_choreo"
+       << ", ";
+    os << size_string << ", cudaMemcpyDeviceToHost));\n";
   }
-
 
   // phase 4: Free up the resources
   os << "  // Free up the resources\n";
   os << "  cublasDestroy(cublas_handle);\n";
-  for (auto &p : device_mems) os << "  cudaFree(" << p << ");\n";
+  for (auto& p : device_mems) os << "  cudaFree(" << p << ");\n";
   // TODO(albert): use has-out as hint
   if (!void_return) {
     os << "  cudaFree(out_mem_choreo);\n";
@@ -1188,11 +1187,11 @@ void CUDACodeGen::EmitHostFuncBody(std::ostream &os,
   }
 }
 
-std::string CUDACodeGen::ReplaceRuntimeNames(const std::string &e,
-                                               const std::string &prefix,
-                                               bool host_code) {
+std::string CUDACodeGen::ReplaceRuntimeNames(const std::string& e,
+                                             const std::string& prefix,
+                                             bool host_code) {
   std::string expr = e;
-  for (auto &s : rts_nmap) {
+  for (auto& s : rts_nmap) {
     size_t pos = 0;
     while ((pos = expr.find(s.first, pos)) != std::string::npos) {
       if (host_code)
@@ -1204,9 +1203,9 @@ std::string CUDACodeGen::ReplaceRuntimeNames(const std::string &e,
   return expr;
 }
 
-std::string CUDACodeGen::ReplaceDynDimName(const std::string &e) {
+std::string CUDACodeGen::ReplaceDynDimName(const std::string& e) {
   std::string expr = e;
-  for (auto &s : rts_nidx) {
+  for (auto& s : rts_nidx) {
     size_t pos = 0;
     while ((pos = expr.find(s.first, pos)) != std::string::npos) {
       std::string dim_value = "dim_(args[" + std::to_string(rts_pidx[s.first]) +
@@ -1217,9 +1216,9 @@ std::string CUDACodeGen::ReplaceDynDimName(const std::string &e) {
   return expr;
 }
 
-void CUDACodeGen::EmitRuntimeCheck(std::ostream &os, const Type &ty) {
+void CUDACodeGen::EmitRuntimeCheck(std::ostream& os, const Type& ty) {
   assert(isa<FunctionType>(&ty) && "unexpected type.");
-  auto &fty = *cast<FunctionType>(&ty);
+  auto& fty = *cast<FunctionType>(&ty);
 
   assert(fty.in_tys.size() == host_params.size() &&
          "internal error when dealing with the host parameter size.");
@@ -1245,7 +1244,7 @@ void CUDACodeGen::EmitRuntimeCheck(std::ostream &os, const Type &ty) {
           os << ", \"shape inconsistent on the " << Ordinal(i + 1)
              << " parameter (dim: " << count << ").\");\n";
         } else if (auto vale = dyn_cast<ValueExpr>(&vi)) {
-          ve_entries_map[*vale].push_back({i+1, count, elem_name});
+          ve_entries_map[*vale].push_back({i + 1, count, elem_name});
         }
         count++;
       }
@@ -1269,10 +1268,10 @@ void CUDACodeGen::EmitRuntimeCheck(std::ostream &os, const Type &ty) {
   }
 }
 
-void CUDACodeGen::EmitHostFuncDecl(std::ostream &os, const Type &ty,
-                                     const std::string &n, bool decl_only) {
+void CUDACodeGen::EmitHostFuncDecl(std::ostream& os, const Type& ty,
+                                   const std::string& n, bool decl_only) {
   assert(isa<FunctionType>(&ty) && "unexpected type.");
-  auto &fty = *cast<FunctionType>(&ty);
+  auto& fty = *cast<FunctionType>(&ty);
   assert(host_params.size() == fty.in_tys.size() &&
          "inconsistent parameter count.");
 
@@ -1302,10 +1301,10 @@ void CUDACodeGen::EmitHostFuncDecl(std::ostream &os, const Type &ty,
   os << ")" << ((decl_only) ? ";\n" : " ");
 }
 
-void CUDACodeGen::OutputScript(FunctionType *fty, const std::string &n,
-                                 const std::string &out_type,
-                                 const std::string &out_size_expr,
-                                 const Shape &out_shape) {
+void CUDACodeGen::OutputScript(FunctionType* fty, const std::string& n,
+                               const std::string& out_type,
+                               const std::string& out_size_expr,
+                               const Shape& out_shape) {
   // a temporal path for the compilation process
   build_path = create_unique_path();
   std::string build_prefix = build_path + "/__choreo_" + n;
@@ -1334,8 +1333,7 @@ void CUDACodeGen::OutputScript(FunctionType *fty, const std::string &n,
   //
   // // backpatch the cuda bin filename
   std::string cuda_src = fs.str();
-  if (!alloc_in_fs.str().empty())
-    cuda_src.insert(alloc_pos, alloc_in_fs.str());
+  if (!alloc_in_fs.str().empty()) cuda_src.insert(alloc_pos, alloc_in_fs.str());
   ReplaceInString(&cuda_src, std::string("$$out$$"), output_v);
   ReplaceInString(&cuda_src, std::string(backpatch_filename), kernel_fn);
 

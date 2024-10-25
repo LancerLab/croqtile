@@ -248,13 +248,13 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
 
   std::string op;
 
- private:
+private:
   ptr<Expr> value_c = nullptr;
   ptr<Node> value_l = nullptr;
   ptr<Node> value_r = nullptr;
   Form t;
 
- public:
+public:
   const ptr<Node>& GetR() const { return value_r; }
   const ptr<Node>& GetL() const { return value_l; }
   const ptr<Expr>& GetC() const { return value_c; }
@@ -275,8 +275,8 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
     value_c = c;
   }
 
- public:
-  Shape s;  // to pass information between shape inference & type inference
+public:
+  Shape s; // to pass information between shape inference & type inference
 
   explicit Expr(const location& l, const ptr<Node>& v)
       : Node(l), op("ref"), value_r(v), t(Reference) {
@@ -377,25 +377,23 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
 
     os << " (";
     switch (t) {
-      case Unary:
-        os << op << " ";
-        value_r->Print(os);
-        break;
-      case Binary:
-        value_l->Print(os);
-        os << " " << op << " ";
-        value_r->Print(os);
-        break;
-      case Ternary:
-        value_c->Print(os);
-        os << " ? ";
-        value_l->Print(os);
-        os << " : ";
-        value_r->Print(os);
-        break;
-      default:
-        choreo_unreachable("unhandled expression type.");
-        break;
+    case Unary:
+      os << op << " ";
+      value_r->Print(os);
+      break;
+    case Binary:
+      value_l->Print(os);
+      os << " " << op << " ";
+      value_r->Print(os);
+      break;
+    case Ternary:
+      value_c->Print(os);
+      os << " ? ";
+      value_l->Print(os);
+      os << " : ";
+      value_r->Print(os);
+      break;
+    default: choreo_unreachable("unhandled expression type."); break;
     }
     os << ") ";
   }
@@ -407,16 +405,14 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
 
 // Represents both dimensions and s like {3, 4, 5} or {1, 2, 1}
 struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
-  std::string ref_name;            // syntax suger, could be empty
-  ptr<Node> list;                  // null if the span is dynamically valued
-  size_t rank = GetInvalidRank();  // dynamic value with known dimension count
+  std::string ref_name;           // syntax suger, could be empty
+  ptr<Node> list;                 // null if the span is dynamically valued
+  size_t rank = GetInvalidRank(); // dynamic value with known dimension count
 
   // If the mdspan is known
   explicit MultiDimSpans(const location& l, const std::string& n,
                          const ptr<Node>& lst)
-      : Node(l, MakeUninitMDSpanType()),
-        ref_name(n),
-        list(lst),
+      : Node(l, MakeUninitMDSpanType()), ref_name(n), list(lst),
         rank(GetInvalidRank()) {
     assert(list && "Unexpected: span list is not provided");
   }
@@ -463,9 +459,7 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
 
   std::string getRefName() const override {
     std::ostringstream oss;
-    if (list) {
-      list->Print(oss, "");
-    }
+    if (list) { list->Print(oss, ""); }
     return oss.str();
   }
 
@@ -538,8 +532,8 @@ struct SpanAs : public Node, public TypeIDProvider<SpanAs> {
 struct NamedTypeDecl : public Node, public TypeIDProvider<NamedTypeDecl> {
   const std::string name_str;
   const std::string init_str;
-  const ptr<Node> init_expr;       // associated init_expr
-  size_t rank = GetInvalidRank();  // rank annotation only
+  const ptr<Node> init_expr;      // associated init_expr
+  size_t rank = GetInvalidRank(); // rank annotation only
 
   explicit NamedTypeDecl(const location& l, const std::string& n,
                          const ptr<Node>& v, const std::string& d = "-")
@@ -586,7 +580,7 @@ struct Memory : public Node, public TypeIDProvider<Memory> {
 
 // Represents declarations like: ituple t = {3, 4, 5};
 struct IntTuple : public Node, public TypeIDProvider<IntTuple> {
-  std::string ref_name;  // could be anonymous
+  std::string ref_name; // could be anonymous
   ptr<MultiValues> vlist;
 
   explicit IntTuple(const location& l, const std::string& n,
@@ -663,10 +657,10 @@ struct IntIndex : public Node, public TypeIDProvider<IntIndex> {
 //
 struct DataType : public Node, public TypeIDProvider<DataType> {
   BaseType base_type;
-  size_t rank = GetInvalidRank();  // for annotated ituple only
+  size_t rank = GetInvalidRank(); // for annotated ituple only
   ptr<Node> mdspan_type = nullptr;
 
- public:
+public:
   explicit DataType(const location& l, BaseType t)
       : Node(l), base_type(t), mdspan_type(nullptr) {
     InitSemaType();
@@ -710,49 +704,41 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
 
   void accept(Visitor&) override;
 
- private:
+private:
   ptr<Type> InitSemaType() {
     switch (base_type) {
-      case BaseType::INT:
-        SetType(MakeIntegerType());
-        break;
-      case BaseType::BOOL:
-        SetType(MakeBooleanType());
-        break;
-      case BaseType::F32:
-      case BaseType::F16:
-      case BaseType::BF16:
-      case BaseType::U32:
-      case BaseType::S32:
-      case BaseType::U16:
-      case BaseType::S16:
-      case BaseType::U8:
-      case BaseType::S8:
-        assert(mdspan_type != nullptr && "Expecting a valid mdspan.");
-        SetType(MakeSpannedType(base_type,
-                                GenUninitShape()));  // need type inference
-        break;
-      case BaseType::ITUPLE:
-        if (!IsValidRank(rank))
-          SetType(MakeUninitITupleType());  // type inference to deduce the dim
-                                            // count
-        else
-          SetType(MakeITupleType(rank));
-        break;
-      case BaseType::UNKNOWN:
-        SetType(MakeUnknownType());  // need type inference
-        break;
-      case BaseType::VOID:
-        SetType(MakeVoidType());
-        break;
-      default:
-        choreo_unreachable("Unexpected BaseType.");
-        break;
+    case BaseType::INT: SetType(MakeIntegerType()); break;
+    case BaseType::BOOL: SetType(MakeBooleanType()); break;
+    case BaseType::F32:
+    case BaseType::F16:
+    case BaseType::BF16:
+    case BaseType::U32:
+    case BaseType::S32:
+    case BaseType::U16:
+    case BaseType::S16:
+    case BaseType::U8:
+    case BaseType::S8:
+      assert(mdspan_type != nullptr && "Expecting a valid mdspan.");
+      SetType(MakeSpannedType(base_type,
+                              GenUninitShape())); // need type inference
+      break;
+    case BaseType::ITUPLE:
+      if (!IsValidRank(rank))
+        SetType(MakeUninitITupleType()); // type inference to deduce the dim
+                                         // count
+      else
+        SetType(MakeITupleType(rank));
+      break;
+    case BaseType::UNKNOWN:
+      SetType(MakeUnknownType()); // need type inference
+      break;
+    case BaseType::VOID: SetType(MakeVoidType()); break;
+    default: choreo_unreachable("Unexpected BaseType."); break;
     }
     return nullptr;
   }
 
- public:
+public:
   __UDT_TYPE_INFO__(Node, DataType)
 };
 
@@ -760,9 +746,9 @@ struct NamedVariableDecl : public Node,
                            public TypeIDProvider<NamedVariableDecl> {
   const std::string name_str;
   const std::string init_str;
-  const ptr<Memory> mem = nullptr;  // storage location
+  const ptr<Memory> mem = nullptr; // storage location
   ptr<DataType> type = nullptr;
-  const ptr<Node> init_expr = nullptr;  // associated initializer
+  const ptr<Node> init_expr = nullptr; // associated initializer
 
   explicit NamedVariableDecl(const location& l, const std::string& n,
                              const ptr<DataType>& t = nullptr,
@@ -849,7 +835,7 @@ struct ParamList : public Node, public TypeIDProvider<ParamList> {
 struct IfElse : public Node, public TypeIDProvider<IfElse> {
   ptr<Node> cond;
   ptr<MultiNodes> if_stmts;
-  ptr<MultiNodes> else_stmts;  // optional requirements
+  ptr<MultiNodes> else_stmts; // optional requirements
 
   IfElse(const location& l, const ptr<Node>& c, const ptr<MultiNodes>& if_s)
       : Node(l), cond(c), if_stmts(if_s) {}
@@ -951,7 +937,7 @@ struct WhereBind : public Node, public TypeIDProvider<WhereBind> {
 };
 
 struct WithIn : public Node, public TypeIDProvider<WithIn> {
-  ptr<Identifier> with;  // either with or with_matcher
+  ptr<Identifier> with; // either with or with_matcher
   ptr<Node> in;
   ptr<MultiValues> with_matchers;
 
@@ -983,8 +969,8 @@ struct WithIn : public Node, public TypeIDProvider<WithIn> {
 
 struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
   ptr<MultiNodes> withins;
-  ptr<MultiNodes> reqs;   // optional requirements
-  ptr<MultiNodes> stmts;  // may be empty
+  ptr<MultiNodes> reqs;  // optional requirements
+  ptr<MultiNodes> stmts; // may be empty
 
   explicit WithBlock(const location& l) : Node(l) {}
 
@@ -1013,7 +999,7 @@ struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
 
 struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
   ptr<Identifier> data;
-  ptr<SpanAs> sa = nullptr;  // for span_as expression
+  ptr<SpanAs> sa = nullptr; // for span_as expression
   ptr<MultiValues> positions = nullptr;
 
   ChunkAt(const location& l, const ptr<Identifier>& d,
@@ -1086,13 +1072,8 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
   explicit DMA(const location& l, const std::string& o, const std::string& r,
                const ptr<Node>& f, const ptr<Node>& t, bool a,
                const ptr<DMAConfig>& c = nullptr)
-      : Node(l, MakeDummyFutureType(a)),
-        operation(o),
-        future(r),
-        async(a),
-        from(f),
-        to(t),
-        config(c) {
+      : Node(l, MakeDummyFutureType(a)), operation(o), future(r), async(a),
+        from(f), to(t), config(c) {
     chained = false;
     chain_to = "";
     chain_from = "";
@@ -1102,13 +1083,8 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
   explicit DMA(const location& l, const std::string& o, const std::string& r,
                const std::string& chained_from, const ptr<Node>& f,
                const ptr<Node>& t, bool a, const ptr<DMAConfig>& c = nullptr)
-      : Node(l, MakeDummyFutureType(a)),
-        operation(o),
-        future(r),
-        async(a),
-        from(f),
-        to(t),
-        config(c) {
+      : Node(l, MakeDummyFutureType(a)), operation(o), future(r), async(a),
+        from(f), to(t), config(c) {
     chained = true;
     chain_from = chained_from;
     if (auto tptr = dyn_cast<AST::Select>(t)) tptr->inDMA = true;
@@ -1116,9 +1092,7 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
 
   // The dummy dma
   explicit DMA(const location& l, const std::string& f)
-      : Node(l, MakePlaceHolderFutureType()),
-        operation(".none"),
-        future(f),
+      : Node(l, MakePlaceHolderFutureType()), operation(".none"), future(f),
         async(true) {}
 
   std::string FromSymbol() const { return cast<ChunkAt>(from)->RefSymbol(); }
@@ -1225,13 +1199,13 @@ struct Swap : public Node, public TypeIDProvider<Swap> {
 };
 
 struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
-  ptr<Identifier> iv;  // induction variable
+  ptr<Identifier> iv; // induction variable
   int lbound = GetInvalidBound();
   int ubound = GetInvalidBound();
   int stride = GetInvalidStride();
 
   LoopRange(const location& l, const ptr<Identifier> i)
-      : Node(l), iv(i) {}  // the bounds are yet to be inferenced
+      : Node(l), iv(i) {} // the bounds are yet to be inferenced
   LoopRange(const location& l, const ptr<Identifier> i, int lb, int ub,
             int s = 1)
       : Node(l), iv(i), lbound(lb), ubound(ub), stride(s) {}
@@ -1271,9 +1245,7 @@ struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Foreach Block:";
     ranges->Print(os, prefix + " ");
-    if (stmts) {
-      stmts->Print(os, prefix + " ");
-    }
+    if (stmts) { stmts->Print(os, prefix + " "); }
   }
 
   ptr<MultiValues> getRangeNodes() const { return ranges; }
@@ -1323,7 +1295,7 @@ struct ChoreoFunction : public Node, public TypeIDProvider<ChoreoFunction> {
 
 struct CppSourceCode : public Node, public TypeIDProvider<CppSourceCode> {
   std::string code;
-  bool host;  // host or kernel
+  bool host; // host or kernel
   CppSourceCode(const location& l, const std::string& c, bool h = true)
       : Node(l), code(c), host(h) {}
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
@@ -1372,8 +1344,8 @@ inline Identifier* GetIdentifier(const Node& n) {
 }
 inline std::string NodeName(const Node& n) { return n.TypeNameString(); }
 
-}  // end of namespace AST
+} // end of namespace AST
 
-}  // end of namespace Choreo
+} // end of namespace Choreo
 
-#endif  // __CHOREO_AST_HPP__
+#endif // __CHOREO_AST_HPP__

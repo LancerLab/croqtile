@@ -2,15 +2,15 @@
 
 using namespace Choreo;
 
-#define __TRACE_EACH_VISIT__(n)       \
-  if (trace_visit) {                  \
-    os << n.TypeNameString() << ": "; \
-    os << "\n";                       \
+#define __TRACE_EACH_VISIT__(n)                                                \
+  if (trace_visit) {                                                           \
+    os << n.TypeNameString() << ": ";                                          \
+    os << "\n";                                                                \
   }
 
 bool EarlySemantics::BeforeVisit(AST::Node& n) {
   if (isa<AST::Program>(&n)) {
-    SSTab().EnterScope("");  // global scope
+    SSTab().EnterScope(""); // global scope
   } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
     SSTab().EnterScope(f->name);
     requires_return = false;
@@ -31,7 +31,7 @@ bool EarlySemantics::BeforeVisit(AST::Node& n) {
 
   if (isa<AST::Parameter>(&n)) {
     in_decl = true;
-    allow_named_dim = true;  // tolerate repeated symbols inside mdspan params
+    allow_named_dim = true; // tolerate repeated symbols inside mdspan params
   }
 
   return true;
@@ -326,7 +326,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     SetNodeType(n, MakeBooleanType());
   } else if (n.op == "!") {
     auto rty = NodeType(*n.GetR());
-    if (!isa<BooleanType>(rty)) {  // TODO: will we allow integer?
+    if (!isa<BooleanType>(rty)) { // TODO: will we allow integer?
       Error(n.LOC(), "in operation \"" + n.op +
                          "\": unable to apply to the type (" + PSTR(rty) +
                          ").");
@@ -382,7 +382,7 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
             wl.back() = v;
           else
             wl.push_back(v);
-          wl.push_back(nullptr);  // accepting new values
+          wl.push_back(nullptr); // accepting new values
           continue;
         }
 
@@ -396,7 +396,7 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
 
       if (wl.back() == nullptr) wl.pop_back();
 
-      if (wl.size() > 1) {  // mdspan inside
+      if (wl.size() > 1) { // mdspan inside
         ptr<AST::Node> last = wl[0];
         for (size_t i = 1; i < wl.size(); ++i) {
           auto concat =
@@ -407,7 +407,7 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
           os << "Transform: " << PSTR(n.list) << " to be " << PSTR(last)
              << "\n";
         n.list = last;
-        n.list->accept(*this);  // go evaluate the concatanation
+        n.list->accept(*this); // go evaluate the concatanation
       }
     }
   }
@@ -567,8 +567,8 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
     return true;
   }
 
-  auto vty = SSTab().LookupSymbol(n.name);  // variable type
-  auto ety = NodeType(*n.value);            // assignment expression type
+  auto vty = SSTab().LookupSymbol(n.name); // variable type
+  auto ety = NodeType(*n.value);           // assignment expression type
   // ituples/mdspan/spanned can not be assigned after initialization
   if (isa<ITupleType>(ety) || isa<MDSpanType>(ety) || isa<SpannedType>(ety) ||
       isa<PlaceHolderType>(ety)) {
@@ -616,7 +616,7 @@ bool EarlySemantics::Visit(AST::IntIndex& n) {
 bool EarlySemantics::Visit(AST::DataType& n) {
   __TRACE_EACH_VISIT__(n)
 
-  allow_named_dim = false;  // no duplicated symbol is allowed except for mdspan
+  allow_named_dim = false; // no duplicated symbol is allowed except for mdspan
 
   // sema type has been generated at construction ast. refine with dims
   if (isa<SpannedType>(n.GetType())) {
@@ -634,7 +634,7 @@ bool EarlySemantics::Visit(AST::Identifier& n) {
     if (allow_named_dim) {
       if (!SSTab().DeclaredInScope(n.name))
         SSTab().DefineSymbol(n.name,
-                             MakeIntegerType());  // named dim is integer
+                             MakeIntegerType()); // named dim is integer
     } else
       ReportErrorWhenViolateODR(n.LOC(), n.name, __FILE__, __LINE__);
   } else
@@ -715,7 +715,7 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
 
   // infer the type of bounded variable
   if (n.with) {
-    n.with->accept(*this);  // make the symbol be defined
+    n.with->accept(*this); // make the symbol be defined
     with_syms.insert(n.with->name);
     auto wty = MakeBoundedITupleType(Shape(cast<MDSpanType>(ity)->Dims()));
     SSTab().ModifySymbolType(n.with->name, wty);
@@ -723,7 +723,7 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
   }
 
   if (n.with_matchers) {
-    n.with_matchers->accept(*this);  // make the symbol be defined
+    n.with_matchers->accept(*this); // make the symbol be defined
     for (auto v : n.with_matchers->AllValues()) {
       // only id are accepted in with-matcher
       if (!isa<AST::Identifier>(v)) {
@@ -790,7 +790,7 @@ bool EarlySemantics::Visit(AST::SpanAs& n) {
 bool EarlySemantics::Visit(AST::DMA& n) {
   __TRACE_EACH_VISIT__(n)
 
-  if (n.operation == ".none") {  // skip the place holder
+  if (n.operation == ".none") { // skip the place holder
     assert(!n.future.empty());
     ReportErrorWhenViolateODR(n.LOC(), n.future, __FILE__, __LINE__,
                               MakePlaceHolderFutureType());
@@ -1130,7 +1130,7 @@ bool EarlySemantics::ReportErrorWhenViolateODR(const location& loc,
     if (trace_visit) os << "Error in " << file << ", line: " << line << ".\n";
     return false;
   }
-  SSTab().DefineSymbol(name, type);  // TODO: improve the type
+  SSTab().DefineSymbol(name, type); // TODO: improve the type
   return true;
 }
 

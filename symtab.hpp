@@ -11,9 +11,9 @@
 namespace Choreo {
 
 class Symbol {
- public:
-  std::string name;  // The identifier's name
-  ptr<Type> type;    // type associated
+public:
+  std::string name; // The identifier's name
+  ptr<Type> type;   // type associated
 
   // Constructor
   explicit Symbol(const std::string& n, const ptr<Type>& t) : name(n), type(t) {
@@ -30,10 +30,10 @@ class Symbol {
 };
 
 class SymbolTable {
- private:
+private:
   std::unordered_map<std::string, Symbol> table;
 
- public:
+public:
   // Add a symbol to the symbol table
   void AddSymbol(const std::string& name, const ptr<Type>& ty) {
     table.emplace(name, Symbol{name, ty});
@@ -53,7 +53,7 @@ class SymbolTable {
 
   void Reset() { table.clear(); }
 
- public:
+public:
   static std::string GetAnonName() {
     return "anon_" + std::to_string(anonymous_count++);
   }
@@ -75,12 +75,12 @@ class SymbolTable {
 // currently, we need this for working-around on emit refered ids/types/vars
 // however, some objects are not printable in Factor form.
 class StringifyTable {
- private:
+private:
   std::unordered_map<std::string, std::string> type_string_table;
   std::unordered_map<std::string, std::string> type_sym_table;
   std::vector<std::string> syms;
 
- public:
+public:
   // Add a symbol to the symbol table
   // emittable = 'a'
   // type_symbol = 'a_type'
@@ -148,13 +148,13 @@ class StringifyTable {
 // This is the scoped symbol table
 class ScopedSymbolTable {
   std::vector<std::unordered_map<std::string, ptr<Type>>>
-      scoped_symtab;                     // k: symbol name, v: type
-  std::vector<std::string> scope_names;  // k: scope-index, v: scope-name
+      scoped_symtab;                    // k: symbol name, v: type
+  std::vector<std::string> scope_names; // k: scope-index, v: scope-name
 
   // global symbol table: set it when required
   ptr<SymbolTable> symtab = nullptr;
 
- public:
+public:
   ScopedSymbolTable(const ptr<SymbolTable>& s_tab = nullptr) : symtab(s_tab) {}
 
   // produce the global symbol table
@@ -163,13 +163,13 @@ class ScopedSymbolTable {
   size_t ScopeDepth() const { return scoped_symtab.size(); }
 
   void EnterScope(const std::string& name = "") {
-    scoped_symtab.emplace_back();  // Push a new scope
+    scoped_symtab.emplace_back(); // Push a new scope
     scope_names.emplace_back(name);
   }
 
   void LeaveScope() {
     if (!scoped_symtab.empty()) {
-      scoped_symtab.pop_back();  // Pop the last scope
+      scoped_symtab.pop_back(); // Pop the last scope
       scope_names.pop_back();
     }
   }
@@ -183,9 +183,9 @@ class ScopedSymbolTable {
     // Iterate in reverse order to simulate stack behavior
     for (auto it = scoped_symtab.rbegin(); it != scoped_symtab.rend(); ++it) {
       if (it->count(sym_name))
-        return true;  // Found sym_name in the current or an enclosing scope
+        return true; // Found sym_name in the current or an enclosing scope
     }
-    return false;  // sym_name not found in any scope
+    return false; // sym_name not found in any scope
   }
 
   bool DefineSymbol(const std::string& n, const ptr<Type> ty) {
@@ -228,15 +228,15 @@ class ScopedSymbolTable {
     return false;
   }
 
- public:
+public:
   // utility functions
   std::string UnScopedName(const std::string& name) const {
     size_t pos = name.find_last_of(':');
     if (pos != std::string::npos) {
       // If found, return the substring after the last ":"
-      return name.substr(pos + 1);  // skip the ":"
+      return name.substr(pos + 1); // skip the ":"
     }
-    return name;  // Return the original string if ":" is not found
+    return name; // Return the original string if ":" is not found
   }
 
   // get the current scope name
@@ -292,6 +292,6 @@ class ScopedSymbolTable {
   }
 };
 
-}  // end of namespace Choreo
+} // end of namespace Choreo
 
-#endif  // __CHOREO_SYMTAB_H__
+#endif // __CHOREO_SYMTAB_H__

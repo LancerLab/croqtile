@@ -4,4 +4,4 @@ namespace Choreo {
 
 ValueListRepo Shape::values;
 
-}  // end namespace Choreo
+} // end namespace Choreo

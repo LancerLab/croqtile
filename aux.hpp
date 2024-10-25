@@ -20,9 +20,9 @@
 }
 #endif
 
-[[noreturn]] inline void choreo_unreachable_impl(
-    const char* file, int line,
-    const std::string& msg = "Unreachable code reached") {
+[[noreturn]] inline void
+choreo_unreachable_impl(const char* file, int line,
+                        const std::string& msg = "Unreachable code reached") {
   std::cerr << file << ":" << line << ": Assertion failed: ";
   std::cerr << msg << std::endl;
   std::abort();
@@ -44,7 +44,7 @@
 #endif
 
 // Macro that captures the file and line
-#define choreo_unreachable(...) \
+#define choreo_unreachable(...)                                                \
   choreo_unreachable_impl(__FILE__, __LINE__ __VA_OPT__(, ) __VA_ARGS__)
 
 template <typename T>
@@ -64,8 +64,8 @@ inline static std::string DelimitedString(const std::vector<T>& v,
 }
 
 // split `input` to a vector
-inline static std::vector<std::string> SplitStringByDelimiter(
-    std::string input, std::string delimiter = ",") {
+inline static std::vector<std::string>
+SplitStringByDelimiter(std::string input, std::string delimiter = ",") {
   std::vector<std::string> tokens;
   size_t pos = 0;
   while ((pos = input.find(delimiter)) != std::string::npos) {
@@ -97,13 +97,13 @@ inline static bool SuffixedWith(const std::string& str,
   return str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
-inline static std::optional<std::string> RemovePrefixOrNull(
-    const std::string& prefix, const std::string& str) {
-  if (str.find(prefix) == 0)  // Check if 'prefix' is at the beginning
-    return str.substr(prefix.length());  // Return the substring after 'prefix'
+inline static std::optional<std::string>
+RemovePrefixOrNull(const std::string& prefix, const std::string& str) {
+  if (str.find(prefix) == 0)            // Check if 'prefix' is at the beginning
+    return str.substr(prefix.length()); // Return the substring after 'prefix'
   else
-    return std::nullopt;  // Return an empty string if 'prefix' is not at the
-                          // beginning
+    return std::nullopt; // Return an empty string if 'prefix' is not at the
+                         // beginning
 }
 
 // remove suffix
@@ -136,7 +136,7 @@ inline static std::string SearchPattern(const std::string& input,
   std::regex re(pattern);
   std::smatch match;
   if (std::regex_search(input, match, re)) return match.str();
-  return "";  // or throw an exception if no match is found
+  return ""; // or throw an exception if no match is found
 }
 
 inline static const std::string ToUpper(const std::string& s) {
@@ -145,4 +145,4 @@ inline static const std::string ToUpper(const std::string& s) {
   return r;
 }
 
-#endif  // __CHOREO_AUX_HPP__
+#endif // __CHOREO_AUX_HPP__

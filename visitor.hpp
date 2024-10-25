@@ -14,18 +14,16 @@
 namespace Choreo {
 
 // Debug macro used for all Visitors
-#define VST_DEBUG(X)        \
-  do {                      \
-    if (DebugIsEnabled()) { \
-      X;                    \
-    }                       \
+#define VST_DEBUG(X)                                                           \
+  do {                                                                         \
+    if (DebugIsEnabled()) { X; }                                               \
   } while (false)
 
 struct Visitor {
   // virtual bool Visit(AST::Node&) = 0;
   virtual bool BeforeVisit(AST::Node&) { return true; }
   virtual bool AfterVisit(AST::Node& n) {
-    if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {  // by function print
+    if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) { // by function print
       const char* Sep = "*******************";
       if (print_after) {
         std::cout << "\n"
@@ -75,11 +73,11 @@ struct Visitor {
   virtual bool Visit(AST::CppSourceCode&) = 0;
   virtual bool Visit(AST::Program&) = 0;
 
- protected:
+protected:
   // scoped variable handling
   ScopedSymbolTable scoped_symtab;
 
- protected:
+protected:
   std::string name;
   bool trace_visit = false;
   bool debug_visit = false;
@@ -90,7 +88,7 @@ struct Visitor {
 
   bool DebugIsEnabled() const { return debug_visit; }
 
- public:
+public:
   Visitor(const std::string& n, const ptr<SymbolTable>& s_tab = nullptr)
       : scoped_symtab(s_tab), name(ToUpper(n)) {
     if (name.empty()) choreo_unreachable("a visitor must be named.");
@@ -140,7 +138,7 @@ struct Visitor {
 
   virtual const std::string& GetName() { return name; }
 
- public:
+public:
   virtual ptr<Type> NodeType(const AST::Node& n) const {
     if (auto id = dyn_cast<AST::Identifier>(&n))
       return GetSymbolType(id->name);
@@ -151,7 +149,7 @@ struct Visitor {
       } else if (expr->op == "dataof") {
         if (auto ref = cast<AST::Expr>(expr->GetR())->GetReference()) {
           auto id = cast<AST::Identifier>(ref);
-          if (!GetSymbolType(id->name))  // make sure the symbol exists
+          if (!GetSymbolType(id->name)) // make sure the symbol exists
             return nullptr;
           return GetSymbolType(id->name + ".data");
         }
@@ -160,7 +158,7 @@ struct Visitor {
     return n.GetType();
   }
 
- public:
+public:
   static bool shell_supports_colors() {
     const char* term = getenv("TERM");
     return term &&
@@ -171,12 +169,12 @@ struct Visitor {
     return isatty(fileno(stdout)) && shell_supports_colors();
   }
 
- public:
+public:
   virtual ptr<Type> GetSymbolType(const std::string& n) const {
     return scoped_symtab.LookupSymbol(n);
   }
 
- public:
+public:
   void Error(const location& loc, const std::string& message) {
     static const char* red = "\033[31m";
     static const char* reset = "\033[0m";
@@ -212,7 +210,7 @@ struct Visitor {
 
 // A visitor with simple symbol auto scoping functionality
 struct VisitorWithScope : public Visitor {
- protected:
+protected:
   // for the derived classes
   virtual bool BeforeVisitImpl(AST::Node& n) = 0;
   virtual bool AfterVisitImpl(AST::Node& n) = 0;
@@ -220,10 +218,10 @@ struct VisitorWithScope : public Visitor {
   // special to within: map 'with' to its 'with-matchers'
   std::unordered_map<std::string, std::vector<std::string>> within_map;
 
- private:
-  int pb_count = 0;  // counting for parallel_by
-  int wi_count = 0;  // counting for with_in
-  int fe_count = 0;  // counting for foreach
+private:
+  int pb_count = 0; // counting for parallel_by
+  int wi_count = 0; // counting for with_in
+  int fe_count = 0; // counting for foreach
 
   void Reset() {
     pb_count = 0;
@@ -231,11 +229,11 @@ struct VisitorWithScope : public Visitor {
     fe_count = 0;
   }
 
- public:
+public:
   bool BeforeVisit(AST::Node& n) final {
     if (isa<AST::Program>(&n)) {
       Reset();
-      SSTab().EnterScope("");  // global scope
+      SSTab().EnterScope(""); // global scope
     } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
       SSTab().EnterScope(f->name);
     } else if (isa<AST::ParallelBy>(&n)) {
@@ -252,12 +250,12 @@ struct VisitorWithScope : public Visitor {
         within_map.emplace(w->with->name, matchers);
       }
     }
-    BeforeVisitImpl(n);  // derived class to customize
+    BeforeVisitImpl(n); // derived class to customize
     return true;
   }
 
   bool AfterVisit(AST::Node& n) final {
-    AfterVisitImpl(n);  // derived class to customize
+    AfterVisitImpl(n); // derived class to customize
     if (isa<AST::Program>(&n)) {
       Reset();
       SSTab().LeaveScope();
@@ -271,7 +269,7 @@ struct VisitorWithScope : public Visitor {
     return true;
   }
 
- public:
+public:
   VisitorWithScope(const std::string& n,
                    const ptr<SymbolTable>& s_tab = nullptr)
       : Visitor(n, s_tab) {
@@ -283,18 +281,18 @@ struct VisitorWithScope : public Visitor {
 // This accepts static symbol table and provide symbol lookup capability
 // Caution: must be used when symbol table does not change.
 struct VisitorWithSymTab : public VisitorWithScope {
- protected:
+protected:
   virtual std::string InScopeName(const std::string& sym) const {
     auto removeLastLevel = [](const std::string& input) -> std::string {
       size_t lastPos = input.rfind("::");
       if (lastPos == std::string::npos)
-        return input;  // No "::" found, return the original string
+        return input; // No "::" found, return the original string
       // Find the second-to-last "::" by searching up to the last found
       // position
       size_t secondLastPos = input.rfind("::", lastPos - 1);
       if (secondLastPos == std::string::npos) return input;
       return input.substr(0,
-                          secondLastPos + 2);  // Include the "::" in the result
+                          secondLastPos + 2); // Include the "::" in the result
     };
     std::string scope_name = scoped_symtab.ScopeName();
     while (true) {
@@ -310,18 +308,18 @@ struct VisitorWithSymTab : public VisitorWithScope {
     return "";
   }
 
- public:
+public:
   // use the immutable symbol table directly
   ptr<Type> GetSymbolType(const std::string& n) const override {
     return SymTab()->GetSymbol(InScopeName(n))->GetType();
   }
 
- public:
+public:
   VisitorWithSymTab(const std::string& n, const ptr<SymbolTable>& s_tab)
       : VisitorWithScope(n, s_tab) {}
   ~VisitorWithSymTab() {}
 };
 
-}  // end namespace Choreo
+} // end namespace Choreo
 
-#endif  // __CHOREO_VISITOR_HPP__
+#endif // __CHOREO_VISITOR_HPP__

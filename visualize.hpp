@@ -23,14 +23,14 @@ struct Polyhedron {
   std::vector<size_t> sizes;
   std::string color;
 
-  Polyhedron(const std::vector<int> &p, const std::vector<size_t> &s,
-             const std::string &c = "Red")
+  Polyhedron(const std::vector<int>& p, const std::vector<size_t>& s,
+             const std::string& c = "Red")
       : points(p), sizes(s), color(c) {}
 };
 
 struct ShapePolyhedron {
- private:
-  std::ostream &os;
+private:
+  std::ostream& os;
   bool debug = false;
 
   std::vector<Polyhedron> polyhedrons;
@@ -42,8 +42,8 @@ struct ShapePolyhedron {
 
   int text_scale = 1;
 
- public:
-  ShapePolyhedron(const std::string &e, std::ostream &o = std::cout,
+public:
+  ShapePolyhedron(const std::string& e, std::ostream& o = std::cout,
                   bool d = false)
       : os(o), debug(d), expr(e) {}
 
@@ -56,14 +56,14 @@ struct ShapePolyhedron {
   std::vector<int> MaxPoints() { return maximums; }
   std::vector<int> MinPoints() { return maximums; }
 
-  void SetAxesLabels(const std::vector<std::string> &axes) {
+  void SetAxesLabels(const std::vector<std::string>& axes) {
     axes_labels = axes;
   }
 
   void SetTextScale(int ts) { text_scale = ts; }
 
-  void Create(std::vector<int> &p, std::vector<size_t> &s, std::vector<int> &b,
-              std::set<int> &pb, size_t index, std::vector<int> &currentPos,
+  void Create(std::vector<int>& p, std::vector<size_t>& s, std::vector<int>& b,
+              std::set<int>& pb, size_t index, std::vector<int>& currentPos,
               int colorIndex) {
     if (index == b.size()) {
       polyhedrons.emplace_back(currentPos, s, pov_colors[colorIndex]);
@@ -71,9 +71,7 @@ struct ShapePolyhedron {
       // to a list
       if (debug) {
         os << "Created Polyhedron with position: ";
-        for (int i : currentPos) {
-          os << i << " ";
-        }
+        for (int i : currentPos) { os << i << " "; }
         os << "(";
         for (auto i : s) os << i << " ";
         os << ")";
@@ -97,22 +95,22 @@ struct ShapePolyhedron {
 
   // Create multiple polyhedrons from position 'p', each with size 's', and
   // repeating multi-dimensional with bound 'b'
-  void Create(std::vector<int> &p, std::vector<size_t> &s, std::vector<int> &b,
-              std::set<int> &pb) {
+  void Create(std::vector<int>& p, std::vector<size_t>& s, std::vector<int>& b,
+              std::set<int>& pb) {
     std::vector<int> currentPos(b.size(), 0);
     maximums.resize(b.size(), std::numeric_limits<int>::min());
     minimums.resize(b.size(), std::numeric_limits<int>::max());
     Create(p, s, b, pb, 0, currentPos, 0);
   }
 
-  void RenderToPov(std::ostream &pov) {
+  void RenderToPov(std::ostream& pov) {
     if (debug) {
       os << "min: [" << minimums[0] << ", " << minimums[1] << ", "
          << minimums[2] << "]\n";
       os << "max: [" << maximums[0] << ", " << maximums[1] << ", "
          << maximums[2] << "]\n";
     }
-    for (const auto &polyhedron : polyhedrons) {
+    for (const auto& polyhedron : polyhedrons) {
       int x2 = polyhedron.points[0] + polyhedron.sizes[0] * 0.9;
       int y2 = polyhedron.points[1] + polyhedron.sizes[1] * 0.9;
       int z2 = polyhedron.points[2] + polyhedron.sizes[2] * 0.9;
@@ -142,7 +140,7 @@ struct ShapePolyhedron {
     for (size_t i = 0; i < axis_max.size(); ++i)
       if (axis_max[i] < 10) axis_max[i] = 30;
 
-    auto CreateAxis = [&axis_max, &pov, this](const std::string &name,
+    auto CreateAxis = [&axis_max, &pov, this](const std::string& name,
                                               size_t index) {
       pov << "// " << name << " Axis\n";
       pov << "union {\n";
@@ -225,14 +223,15 @@ struct DMAPolyhedron {
   std::unique_ptr<ShapePolyhedron> from;
   std::unique_ptr<ShapePolyhedron> to;
 
-  std::string fname;  // future name
+  std::string fname; // future name
   std::string expr;
-  std::ostream &os;
+  std::ostream& os;
 
- public:
-  DMAPolyhedron(const std::string &n, const std::string &e, std::ostream &o) : fname(n), expr(e), os(o) {}
+public:
+  DMAPolyhedron(const std::string& n, const std::string& e, std::ostream& o)
+      : fname(n), expr(e), os(o) {}
 
- public:
+public:
   void GeneratePov() {
     auto filename = fname + ".pov";
     std::replace(filename.begin(), filename.end(), ':', '_');
@@ -289,59 +288,56 @@ struct DMAPolyhedron {
 };
 
 struct Visualizer : public VisitorWithSymTab {
- private:
-  std::ostream &os;
+private:
+  std::ostream& os;
   std::vector<std::unique_ptr<DMAPolyhedron>> dma_polyhedrons;
   bool debug = false;
 
- private:
+private:
   int parallel_factor = 1;
 
- private:
+private:
   int start_x = 0;
   int start_y = 0;
 
- public:
-  Visualizer(const ptr<SymbolTable> s_tab, std::ostream &o = std::cout,
+public:
+  Visualizer(const ptr<SymbolTable> s_tab, std::ostream& o = std::cout,
              bool d = false)
-      : VisitorWithSymTab("visual", s_tab),
-        os(o),
-        debug(d),
-        parallel_factor(1),
-        start_x(0),
-        start_y(0) {}
+      : VisitorWithSymTab("visual", s_tab), os(o), debug(d), parallel_factor(1),
+        start_x(0), start_y(0) {}
   ~Visualizer() {}
 
   // derived class must call this to incorporate with symbol table
 
-  bool Visit(AST::MultiNodes &) override { return true; }
-  bool Visit(AST::MultiValues &) override { return true; }
-  bool Visit(AST::IntLiteral &) override { return true; }
-  bool Visit(AST::Boolean &) override { return true; }
-  bool Visit(AST::Expr &) override { return true; }
-  bool Visit(AST::MultiDimSpans &) override { return true; }
-  bool Visit(AST::NamedTypeDecl &) override { return true; }
-  bool Visit(AST::NamedVariableDecl &) override { return true; }
-  bool Visit(AST::IntTuple &) override { return true; }
-  bool Visit(AST::Assignment &) override { return true; }
-  bool Visit(AST::IntIndex &) override { return true; }
-  bool Visit(AST::DataType &) override { return true; }
-  bool Visit(AST::Identifier &) override { return true; }
-  bool Visit(AST::Parameter &) override { return true; }
-  bool Visit(AST::ParamList &) override { return true; }
-  bool Visit(AST::ParallelBy &pb) override {
+  bool Visit(AST::MultiNodes&) override { return true; }
+  bool Visit(AST::MultiValues&) override { return true; }
+  bool Visit(AST::IntLiteral&) override { return true; }
+  bool Visit(AST::Boolean&) override { return true; }
+  bool Visit(AST::Expr&) override { return true; }
+  bool Visit(AST::MultiDimSpans&) override { return true; }
+  bool Visit(AST::NamedTypeDecl&) override { return true; }
+  bool Visit(AST::NamedVariableDecl&) override { return true; }
+  bool Visit(AST::IntTuple&) override { return true; }
+  bool Visit(AST::Assignment&) override { return true; }
+  bool Visit(AST::IntIndex&) override { return true; }
+  bool Visit(AST::DataType&) override { return true; }
+  bool Visit(AST::Identifier&) override { return true; }
+  bool Visit(AST::Parameter&) override { return true; }
+  bool Visit(AST::ParamList&) override { return true; }
+  bool Visit(AST::ParallelBy& pb) override {
     parallel_factor *= pb.bound;
     return true;
   }
-  bool Visit(AST::WhereBind &) override { return true; }
-  bool Visit(AST::WithIn &) override { return true; }
-  bool Visit(AST::WithBlock &) override { return true; }
-  bool Visit(AST::Memory &) override { return true; }
+  bool Visit(AST::WhereBind&) override { return true; }
+  bool Visit(AST::WithIn&) override { return true; }
+  bool Visit(AST::WithBlock&) override { return true; }
+  bool Visit(AST::Memory&) override { return true; }
   bool Visit(AST::SpanAs&) override { return true; }
 
-  bool Visit(AST::DMA &n) override {
+  bool Visit(AST::DMA& n) override {
     start_x = 0;
-    auto dp = std::make_unique<DMAPolyhedron>(InScopeName(n.future), n.SourceString(), os);
+    auto dp = std::make_unique<DMAPolyhedron>(InScopeName(n.future),
+                                              n.SourceString(), os);
     auto caf = cast<AST::ChunkAt>(n.from);
     if (auto sp = HandleChunkAt(*caf, parallel_factor))
       dp->from = std::move(sp);
@@ -359,37 +355,37 @@ struct Visualizer : public VisitorWithSymTab {
     return true;
   }
 
-  bool Visit(AST::ChunkAt &) override { return true; }
-  bool Visit(AST::Wait &) override { return true; }
-  bool Visit(AST::Call &) override { return true; }
-  bool Visit(AST::Swap &) override { return true; }
-  bool Visit(AST::Select &) override { return true; }
-  bool Visit(AST::Return &) override { return true; }
-  bool Visit(AST::LoopRange &) override { return true; }
-  bool Visit(AST::ForeachBlock &) override { return true; }
-  bool Visit(AST::FunctionDecl &) override { return true; }
-  bool Visit(AST::ChoreoFunction &) override { return true; }
-  bool Visit(AST::CppSourceCode &) override { return true; }
-  bool Visit(AST::Program &) override { return true; }
+  bool Visit(AST::ChunkAt&) override { return true; }
+  bool Visit(AST::Wait&) override { return true; }
+  bool Visit(AST::Call&) override { return true; }
+  bool Visit(AST::Swap&) override { return true; }
+  bool Visit(AST::Select&) override { return true; }
+  bool Visit(AST::Return&) override { return true; }
+  bool Visit(AST::LoopRange&) override { return true; }
+  bool Visit(AST::ForeachBlock&) override { return true; }
+  bool Visit(AST::FunctionDecl&) override { return true; }
+  bool Visit(AST::ChoreoFunction&) override { return true; }
+  bool Visit(AST::CppSourceCode&) override { return true; }
+  bool Visit(AST::Program&) override { return true; }
 
- public:
-  bool BeforeVisitImpl(AST::Node &) override { return true; }
-  bool AfterVisitImpl(AST::Node &n) override {
+public:
+  bool BeforeVisitImpl(AST::Node&) override { return true; }
+  bool AfterVisitImpl(AST::Node& n) override {
     if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       parallel_factor /= pb->bound;
       return true;
     }
     if (!isa<AST::Program>(&n)) return true;
 
-    for (auto &dp : dma_polyhedrons) dp->GeneratePov();
+    for (auto& dp : dma_polyhedrons) dp->GeneratePov();
 
     return true;
   }
 
- private:
+private:
   constexpr static size_t p_dim = 1;
 
-  std::unique_ptr<ShapePolyhedron> HandleChunkAt(AST::ChunkAt &ca,
+  std::unique_ptr<ShapePolyhedron> HandleChunkAt(AST::ChunkAt& ca,
                                                  int parallel_count = 1) {
     std::string data_name = ca.data->name;
     std::string expr = AST::STR(ca);
@@ -422,10 +418,10 @@ struct Visualizer : public VisitorWithSymTab {
       return sp;
     }
 
-    std::vector<int> bounds;  // specify the repeating count for each dimension
-    std::vector<std::string> bv_names;  // the name of the bounded variable
+    std::vector<int> bounds; // specify the repeating count for each dimension
+    std::vector<std::string> bv_names; // the name of the bounded variable
     std::set<int>
-        parallel_bounds;  // specify which dimension is executed in parallel
+        parallel_bounds; // specify which dimension is executed in parallel
     for (auto pos : ca.positions->values) {
       auto id = dyn_cast<AST::Identifier>(pos);
       assert(id && "node other than identifier is not handled.");
@@ -485,7 +481,7 @@ struct Visualizer : public VisitorWithSymTab {
     return sp;
   }
 
-  std::unique_ptr<ShapePolyhedron> HandleImplicit(AST::Memory &s, Shape shape,
+  std::unique_ptr<ShapePolyhedron> HandleImplicit(AST::Memory& s, Shape shape,
                                                   int parallel_count = 1) {
     std::string mem = STR(s.st);
 
@@ -512,6 +508,6 @@ struct Visualizer : public VisitorWithSymTab {
   }
 };
 
-}  // end namespace Choreo
+} // end namespace Choreo
 
-#endif  // __CHOREO_VISUALIZE_DMA_HPP__
+#endif // __CHOREO_VISUALIZE_DMA_HPP__

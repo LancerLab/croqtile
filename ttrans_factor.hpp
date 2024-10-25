@@ -12,11 +12,11 @@
 
 namespace Choreo {
 
-constexpr const char *SWAP_SFX_PRE = "_pre_swap__";
-constexpr const char *SWAP_SFX_POS = "_post_swap__";
+constexpr const char* SWAP_SFX_PRE = "_pre_swap__";
+constexpr const char* SWAP_SFX_POS = "_post_swap__";
 
-inline static std::string SymbolOfSameScope(const std::string &scopedName,
-                                            const std::string &newSymbol) {
+inline static std::string SymbolOfSameScope(const std::string& scopedName,
+                                            const std::string& newSymbol) {
   // Find the last occurrence of "::"
   size_t pos = scopedName.rfind("::");
 
@@ -34,48 +34,48 @@ struct FactorTrans : public VisitorWithSymTab {
   // TODO: should we make them two different passes?
   enum class Kind { T_NONE, T_SWAP, T_SELECT };
 
- private:
-  std::ostream &os;
+private:
+  std::ostream& os;
   size_t error_count = 0;
   Kind kind = Kind::T_NONE;
 
   // For SWAP codegen
   std::string fname;
-  ptr<FutureBufferMap> fut_buf;  // map a future to its associated buffer
+  ptr<FutureBufferMap> fut_buf; // map a future to its associated buffer
   std::stack<bool> replace_swap_names;
 
-  std::vector<AST::Swap *> cur_swaps;
-  std::unordered_map<AST::Swap *, std::unordered_map<std::string, std::string>>
+  std::vector<AST::Swap*> cur_swaps;
+  std::unordered_map<AST::Swap*, std::unordered_map<std::string, std::string>>
       swap_pre;
-  std::unordered_map<AST::Swap *, std::unordered_map<std::string, std::string>>
+  std::unordered_map<AST::Swap*, std::unordered_map<std::string, std::string>>
       swap_post;
 
-  const std::string NameToReplace(const std::string &name) const {
-    for (auto &item : swap_pre) {
+  const std::string NameToReplace(const std::string& name) const {
+    for (auto& item : swap_pre) {
       if (item.second.count(name)) return item.second.at(name);
     }
-    for (auto &item : swap_post) {
+    for (auto& item : swap_post) {
       if (item.second.count(name)) return item.second.at(name);
     }
-    return name;  // no replacement
+    return name; // no replacement
   }
 
   // for SELECT codegen
   using NodeInsertInfo =
       std::vector<std::tuple<int, ptr<AST::Node>, std::string>>;
-  std::stack<AST::MultiNodes *> multi_nodes;
+  std::stack<AST::MultiNodes*> multi_nodes;
   int cur_node_index = -1;
-  std::map<AST::MultiNodes *, NodeInsertInfo> mnodes_insertions;
+  std::map<AST::MultiNodes*, NodeInsertInfo> mnodes_insertions;
 
- private:
-  bool BeforeVisitImpl(AST::Node &n) {
+private:
+  bool BeforeVisitImpl(AST::Node& n) {
     TraceEachVisit(n, "Before ");
     if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
       fname = f->name;
       //      std::cout << "BEFORE: " << STR(n) << "\n";
     } else if (auto f = dyn_cast<AST::ForeachBlock>(&n)) {
       if (kind == Kind::T_SWAP) {
-        for (auto &stmt : f->stmts->AllSubs())
+        for (auto& stmt : f->stmts->AllSubs())
           if (auto swap = dyn_cast<AST::Swap>(stmt)) cur_swaps.push_back(swap);
         replace_swap_names.push(true);
       }
@@ -96,16 +96,14 @@ struct FactorTrans : public VisitorWithSymTab {
       }
     } else if (auto m = dyn_cast<AST::Select>(&n)) {
       if (kind == Kind::T_SWAP) {
-        if (m->GetNote() == "gen") {
-          replace_swap_names.push(false);
-        }
+        if (m->GetNote() == "gen") { replace_swap_names.push(false); }
       }
     }
 
     return true;
   }
 
-  bool AfterVisitImpl(AST::Node &n) {
+  bool AfterVisitImpl(AST::Node& n) {
     TraceEachVisit(n, "After ");
     if (isa<AST::ChoreoFunction>(&n)) {
       fname = "";
@@ -129,19 +127,19 @@ struct FactorTrans : public VisitorWithSymTab {
     return true;
   }
 
- public:
-  FactorTrans(const ptr<SymbolTable> s_tab, const ptr<FutureBufferMap> &fb,
-              std::ostream &o = std::cout)
+public:
+  FactorTrans(const ptr<SymbolTable> s_tab, const ptr<FutureBufferMap>& fb,
+              std::ostream& o = std::cout)
       : VisitorWithSymTab("ftran", s_tab), os(o), fut_buf(fb) {}
   ~FactorTrans() {}
 
   void SetKind(Kind k) { kind = k; }
 
-  void TraceEachVisit(AST::Node &n, const std::string &m = "") const {
+  void TraceEachVisit(AST::Node& n, const std::string& m = "") const {
     if (trace_visit) os << m << n.TypeNameString() << "\n";
   }
 
-  bool Visit(AST::MultiNodes &n) {
+  bool Visit(AST::MultiNodes& n) {
     TraceEachVisit(n);
 
     if (kind != Kind::T_SELECT) return true;
@@ -149,9 +147,9 @@ struct FactorTrans : public VisitorWithSymTab {
     // insert the node at the given place
     assert(&n == multi_nodes.top());
     for (auto item : mnodes_insertions[&n]) {
-      auto &index = std::get<0>(item);
-      auto &pnode = std::get<1>(item);
-      auto &sname = std::get<2>(item);
+      auto& index = std::get<0>(item);
+      auto& pnode = std::get<1>(item);
+      auto& sname = std::get<2>(item);
 
       n.values.insert(n.values.begin() + index, pnode);
       SymTab()->AddSymbol(SSTab().ScopedName(sname), pnode->GetType());
@@ -166,11 +164,11 @@ struct FactorTrans : public VisitorWithSymTab {
     return true;
   }
 
-  bool Visit(AST::MultiValues &) { return true; }
-  bool Visit(AST::IntLiteral &) { return true; }
-  bool Visit(AST::Boolean &) { return true; }
+  bool Visit(AST::MultiValues&) { return true; }
+  bool Visit(AST::IntLiteral&) { return true; }
+  bool Visit(AST::Boolean&) { return true; }
 
-  bool Visit(AST::Expr &n) {
+  bool Visit(AST::Expr& n) {
     TraceEachVisit(n);
 
     if (kind == Kind::T_NONE) return true;
@@ -192,10 +190,10 @@ struct FactorTrans : public VisitorWithSymTab {
     return true;
   }
 
-  bool Visit(AST::MultiDimSpans &) { return true; }
-  bool Visit(AST::NamedTypeDecl &) { return true; }
+  bool Visit(AST::MultiDimSpans&) { return true; }
+  bool Visit(AST::NamedTypeDecl&) { return true; }
 
-  bool Visit(AST::NamedVariableDecl &n) {
+  bool Visit(AST::NamedVariableDecl& n) {
     TraceEachVisit(n);
 
     if (kind != Kind::T_SELECT) return true;
@@ -210,7 +208,7 @@ struct FactorTrans : public VisitorWithSymTab {
     auto sel = cast<AST::Select>(n.init_expr);
     auto buffer_list = AST::Make<AST::MultiValues>(n.LOC(), ", ");
     auto bty = cast<FutureType>(n.GetType())->GetSpannedType();
-    for (auto &fid : sel->expr_list->AllValues()) {
+    for (auto& fid : sel->expr_list->AllValues()) {
       assert(GetIdentifier(*fid) && "expecting an identifier");
       auto fut_name = GetIdentifier(*fid)->name;
       assert(fut_buf->at(fname).count(fut_name));
@@ -235,9 +233,9 @@ struct FactorTrans : public VisitorWithSymTab {
     return true;
   }
 
-  bool Visit(AST::IntTuple &) { return true; }
+  bool Visit(AST::IntTuple&) { return true; }
 
-  bool Visit(AST::Assignment &n) {
+  bool Visit(AST::Assignment& n) {
     TraceEachVisit(n);
 
     if (kind != Kind::T_SELECT) return true;
@@ -253,7 +251,7 @@ struct FactorTrans : public VisitorWithSymTab {
 
     auto buffer_list = AST::Make<AST::MultiValues>(n.LOC(), ", ");
     auto bty = cast<FutureType>(n.GetType())->GetSpannedType();
-    for (auto &fid : sel->expr_list->AllValues()) {
+    for (auto& fid : sel->expr_list->AllValues()) {
       assert(GetIdentifier(*fid) && "expecting an identifier");
       auto fut_name = GetIdentifier(*fid)->name;
       assert(fut_buf->at(fname).count(fut_name));
@@ -274,10 +272,10 @@ struct FactorTrans : public VisitorWithSymTab {
 
     return true;
   }
-  bool Visit(AST::IntIndex &) { return true; }
-  bool Visit(AST::DataType &) { return true; }
+  bool Visit(AST::IntIndex&) { return true; }
+  bool Visit(AST::DataType&) { return true; }
 
-  bool Visit(AST::Identifier &n) {
+  bool Visit(AST::Identifier& n) {
     TraceEachVisit(n);
 
     if (replace_swap_names.empty()) return true;
@@ -287,16 +285,16 @@ struct FactorTrans : public VisitorWithSymTab {
     return true;
   }
 
-  bool Visit(AST::Parameter &) { return true; }
-  bool Visit(AST::ParamList &) { return true; }
-  bool Visit(AST::ParallelBy &) { return true; }
-  bool Visit(AST::WhereBind &) { return true; }
-  bool Visit(AST::WithIn &) { return true; }
-  bool Visit(AST::WithBlock &) { return true; }
-  bool Visit(AST::Memory &) { return true; }
-  bool Visit(AST::SpanAs &) { return true; }
+  bool Visit(AST::Parameter&) { return true; }
+  bool Visit(AST::ParamList&) { return true; }
+  bool Visit(AST::ParallelBy&) { return true; }
+  bool Visit(AST::WhereBind&) { return true; }
+  bool Visit(AST::WithIn&) { return true; }
+  bool Visit(AST::WithBlock&) { return true; }
+  bool Visit(AST::Memory&) { return true; }
+  bool Visit(AST::SpanAs&) { return true; }
 
-  bool Visit(AST::DMA &n) {
+  bool Visit(AST::DMA& n) {
     TraceEachVisit(n);
 
     if (kind != Kind::T_SWAP) return true;
@@ -311,7 +309,7 @@ struct FactorTrans : public VisitorWithSymTab {
     return true;
   }
 
-  bool Visit(AST::ChunkAt &n) {
+  bool Visit(AST::ChunkAt& n) {
     TraceEachVisit(n);
 
     if (kind != Kind::T_SWAP) return true;
@@ -322,19 +320,19 @@ struct FactorTrans : public VisitorWithSymTab {
     return true;
   }
 
-  bool Visit(AST::Wait &) { return true; }
-  bool Visit(AST::Call &) { return true; }
-  bool Visit(AST::Swap &n) {
+  bool Visit(AST::Wait&) { return true; }
+  bool Visit(AST::Call&) { return true; }
+  bool Visit(AST::Swap& n) {
     TraceEachVisit(n);
     if (kind != Kind::T_SWAP) return true;
     if (swap_pre.count(&n)) swap_pre.erase(&n);
     return true;
   }
-  bool Visit(AST::Select &) { return true; }
-  bool Visit(AST::Return &) { return true; }
-  bool Visit(AST::LoopRange &) { return true; }
+  bool Visit(AST::Select&) { return true; }
+  bool Visit(AST::Return&) { return true; }
+  bool Visit(AST::LoopRange&) { return true; }
 
-  bool Visit(AST::ForeachBlock &n) {
+  bool Visit(AST::ForeachBlock& n) {
     TraceEachVisit(n);
 
     if (kind != Kind::T_SWAP) return true;
@@ -342,7 +340,7 @@ struct FactorTrans : public VisitorWithSymTab {
     if (n.ranges->Count() > 1)
       choreo_unreachable("swapping inside multi-bounds is yet to support.");
 
-    auto &ranges = n.getRanges();
+    auto& ranges = n.getRanges();
     auto iv_name = cast<AST::LoopRange>(ranges[0])->iv->name;
     auto lbound = cast<AST::LoopRange>(ranges[0])->lbound;
     if (!IsValidBound(lbound)) lbound = 0;
@@ -482,14 +480,14 @@ struct FactorTrans : public VisitorWithSymTab {
     return true;
   }
 
-  bool Visit(AST::FunctionDecl &) { return true; }
-  bool Visit(AST::ChoreoFunction &) { return true; }
-  bool Visit(AST::CppSourceCode &) { return true; }
-  bool Visit(AST::Program &) { return true; }
+  bool Visit(AST::FunctionDecl&) { return true; }
+  bool Visit(AST::ChoreoFunction&) { return true; }
+  bool Visit(AST::CppSourceCode&) { return true; }
+  bool Visit(AST::Program&) { return true; }
 
   bool HasError() { return false; }
 };
 
-}  // end namespace Choreo
+} // end namespace Choreo
 
-#endif  // __CHOREO_FACTOR_TRANS_HPP__
+#endif // __CHOREO_FACTOR_TRANS_HPP__

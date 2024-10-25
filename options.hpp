@@ -14,21 +14,21 @@
 namespace Choreo {
 
 class OptionBase {
- public:
+public:
   virtual ~OptionBase() {}
   virtual bool Parse(int argc, char** argv, int& currentArg) = 0;
 };
 
 template <typename T>
 class Option : public OptionBase {
- private:
-  std::string name;   // option name
-  std::string alias;  // name alias
+private:
+  std::string name;  // option name
+  std::string alias; // name alias
   T value;
   T default_value;
-  bool requires_arg;  // if it requires arguments
+  bool requires_arg; // if it requires arguments
 
- public:
+public:
   Option(const std::string&, const std::string&, const T&, bool = false);
 
   bool Parse(int argc, char** argv, int& currentArg) override;
@@ -41,10 +41,10 @@ class Option : public OptionBase {
 };
 
 class OptionRegistry {
- private:
+private:
   std::map<std::string, OptionBase*> options;
 
- private:
+private:
   // input & output stream
   std::istream* input_stream = nullptr;
   std::ostream* output_stream = nullptr;
@@ -53,7 +53,7 @@ class OptionRegistry {
   std::ifstream input_file_stream;
   std::ofstream output_file_stream;
 
- public:
+public:
   static OptionRegistry& GetInstance() {
     static OptionRegistry instance;
     return instance;
@@ -121,10 +121,7 @@ class OptionRegistry {
 template <typename T>
 inline Option<T>::Option(const std::string& name, const std::string& alias,
                          const T& default_val, bool req)
-    : name(name),
-      alias(alias),
-      value(default_val),
-      default_value(default_val),
+    : name(name), alias(alias), value(default_val), default_value(default_val),
       requires_arg(req) {
   OptionRegistry::GetInstance().RegisterOption(name, this);
   OptionRegistry::GetInstance().RegisterOption(alias, this);
@@ -136,7 +133,7 @@ inline bool Option<T>::Parse(int argc, char** argv, int& currentArg) {
   if (requires_arg) {
     if (currentArg + 1 < argc) {
       std::istringstream iss(argv[++currentArg]);
-      iss >> value;  // Handle parsing according to type T
+      iss >> value; // Handle parsing according to type T
       return true;
     } else {
       std::cerr << "Option " << name << " requires an argument." << std::endl;
@@ -179,11 +176,11 @@ bool Option<bool>::Parse(int argc, char** argv, int& currentArg) {
       return false;
     }
   } else
-    value = true;  // set the option on
+    value = true; // set the option on
 
   return true;
 }
 
-}  // end namespace Choreo
+} // end namespace Choreo
 
-#endif  // __CHOREO_OPTIONS_HPP__
+#endif // __CHOREO_OPTIONS_HPP__

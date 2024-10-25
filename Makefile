@@ -102,6 +102,9 @@ lines:
 	echo "source files:"; wc -l *.cpp *.yy *.l *.hpp Makefile utils/*.h; \
 	echo "test files"; wc -l $$(find tests/ -type f |grep -v "\.test")
 
+format:
+	clang-format -i -Werror *.cpp *.hpp utils/*.h tests/standalone/*.cu
+
 standalone_test: $(TARGET)
 	cd tests/standalone/ && $(MAKE) test
 

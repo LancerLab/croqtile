@@ -240,6 +240,6 @@ void Program::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
-}  // end of namespace AST
+} // end of namespace AST
 
-}  // end of namespace Choreo
+} // end of namespace Choreo

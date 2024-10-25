@@ -8,16 +8,11 @@ namespace __internal__ {
 
 inline static std::string ToString(BaseType dataType) {
   static const std::unordered_map<BaseType, std::string> enumToString = {
-      {BaseType::F32, "float"},
-      {BaseType::F16, "half"},
-      {BaseType::BF16, "__nv_bfloat16"},
-      {BaseType::U32, "uint32_t"},
-      {BaseType::S32, "int32_t"},
-      {BaseType::U16, "uint16_t"},
-      {BaseType::S16, "int16_t"},
-      {BaseType::U8, "uint8_t"},
-      {BaseType::S8, "int8_t"},
-      {BaseType::INT, "int32_t"},
+      {BaseType::F32, "float"},          {BaseType::F16, "half"},
+      {BaseType::BF16, "__nv_bfloat16"}, {BaseType::U32, "uint32_t"},
+      {BaseType::S32, "int32_t"},        {BaseType::U16, "uint16_t"},
+      {BaseType::S16, "int16_t"},        {BaseType::U8, "uint8_t"},
+      {BaseType::S8, "int8_t"},          {BaseType::INT, "int32_t"},
       {BaseType::BOOL, "bool"},
   };
 
@@ -29,7 +24,7 @@ inline static std::string ToString(BaseType dataType) {
 
 inline static std::string ToString(Storage st) {
   static const std::unordered_map<Storage, std::string> enumToString = {
-      {Storage::LOCAL, "__local__"},     
+      {Storage::LOCAL, "__local__"},
       {Storage::GLOBAL, "__device__"},
       {Storage::SHARED, "__shared__"},
   };
@@ -40,7 +35,7 @@ inline static std::string ToString(Storage st) {
   return it->second;
 }
 
-}  // end namespace __internal__
+} // end namespace __internal__
 
 std::string stringify(const BaseType& type) {
   return __internal__::ToString(type);
@@ -63,14 +58,14 @@ std::string stringify(const Type& ty) {
   choreo_unreachable(STR(ty) + " does not imply runtime storage.");
   return 0;
 }
-  
+
 std::string stringify(const Storage& sto) {
   return __internal__::ToString(sto);
 }
 
-std::string stringify(const ValueList &vl) {
+std::string stringify(const ValueList& vl) {
   std::ostringstream oss;
-  auto print_variant = [&oss](const ValueItem &vle) {
+  auto print_variant = [&oss](const ValueItem& vle) {
     if (vle.index() == 0)
       oss << std::get<0>(vle);
     else
@@ -104,6 +99,4 @@ std::string size_expr_of(const Shape& s) {
   return oss.str();
 }
 
-
 } // namespace Choreo::CUDA
-

@@ -2,9 +2,9 @@
 #define __CHOREO_ENUMS_HPP__
 
 namespace Choreo {
-  
+
 enum class Target { Unknown, Factor, Topscc, CUDA };
 
-}  // end namespace Choreo
+} // end namespace Choreo
 
-#endif  // __CHOREO_ENUMS_HPP__
+#endif // __CHOREO_ENUMS_HPP__

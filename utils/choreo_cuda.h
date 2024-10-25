@@ -1,22 +1,21 @@
 #ifndef __CHOREO_CUDA_H__
 #define __CHOREO_CUDA_H__
 
-#include <cstdint>           // For fixed-width integer types
-#include <initializer_list>  // for std::initializer_list
-#include <iostream>          // report error
-#include <memory>
+#include <cmath>
+#include <cstdint> // For fixed-width integer types
+#include <cstdio>
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
 #include <fstream>
+#include <initializer_list> // for std::initializer_list
+#include <iomanip>
+#include <iostream> // report error
+#include <memory>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
-#include <cmath>
-#include <cstdio>
-#include <fstream>
-#include <iomanip>
 
 #include "__choreo_cuda_kernel.cuh"
 
@@ -26,9 +25,7 @@ namespace cuda {
 
 #define CEIL_DIV(M, N) (((M) + (N)-1) / (N))
 
-
 const std::string errLogFile = "matrixValidationFailure.txt";
-
 
 float get_sec() {
   struct timeval time;
@@ -36,9 +33,9 @@ float get_sec() {
   return (1e6 * time.tv_sec + time.tv_usec);
 }
 
-float cpu_elapsed_time(float &beg, float &end) { return 1.0e-6 * (end - beg); }
+float cpu_elapsed_time(float& beg, float& end) { return 1.0e-6 * (end - beg); }
 
-void cudaCheck(cudaError_t error, const char *file, int line) {
+void cudaCheck(cudaError_t error, const char* file, int line) {
   if (error != cudaSuccess) {
     printf("[CUDA ERROR] at file %s:%d:\n%s\n", file, line,
            cudaGetErrorString(error));
@@ -78,7 +75,7 @@ void CudaDeviceInfo() {
          props.multiProcessorCount, props.warpSize);
 };
 
-void randomize_matrix(float *mat, int N) {
+void randomize_matrix(float* mat, int N) {
   // NOTICE: Use gettimeofday instead of srand((unsigned)time(NULL)); the time
   // precision is too low and the same random number is generated.
   struct timeval time {};
@@ -91,27 +88,22 @@ void randomize_matrix(float *mat, int N) {
   }
 }
 
-void range_init_matrix(float *mat, int N) {
-  for (int i = 0; i < N; i++) {
-    mat[i] = i;
-  }
+void range_init_matrix(float* mat, int N) {
+  for (int i = 0; i < N; i++) { mat[i] = i; }
 }
 
-void zero_init_matrix(float *mat, int N) {
-  for (int i = 0; i < N; i++) {
-    mat[i] = 0.0;
-  }
+void zero_init_matrix(float* mat, int N) {
+  for (int i = 0; i < N; i++) { mat[i] = 0.0; }
 }
 
-void copy_matrix(const float *src, float *dest, int N) {
+void copy_matrix(const float* src, float* dest, int N) {
   int i;
-  for (i = 0; src + i && dest + i && i < N; i++)
-    *(dest + i) = *(src + i);
+  for (i = 0; src + i && dest + i && i < N; i++) *(dest + i) = *(src + i);
   if (i != N)
     printf("copy failed at %d while there are %d elements in total.\n", i, N);
 }
 
-void print_matrix(const float *A, int M, int N, std::ofstream &fs) {
+void print_matrix(const float* A, int M, int N, std::ofstream& fs) {
   int i;
   fs << std::setprecision(2)
      << std::fixed; // Set floating-point precision and fixed notation
@@ -122,14 +114,13 @@ void print_matrix(const float *A, int M, int N, std::ofstream &fs) {
     else
       fs << std::setw(5) << A[i] << ", ";
     if ((i + 1) % N == 0) {
-      if (i + 1 < M * N)
-        fs << ";\n";
+      if (i + 1 < M * N) fs << ";\n";
     }
   }
   fs << "]\n";
 }
 
-bool verify_matrix(float *matRef, float *matOut, int N) {
+bool verify_matrix(float* matRef, float* matOut, int N) {
   double diff = 0.0;
   int i;
   for (i = 0; i < N; i++) {
@@ -149,7 +140,7 @@ int div_ceil(int numerator, int denominator) {
 }
 
 void runCublasFP32(cublasHandle_t handle, int M, int N, int K, float alpha,
-                   float *A, float *B, float beta, float *C) {
+                   float* A, float* B, float beta, float* C) {
   // cuBLAS uses column-major order. So we change the order of our row-major A &
   // B, since (B^T*A^T)^T = (A*B)
   // This runs cuBLAS in full fp32 mode
@@ -159,16 +150,15 @@ void runCublasFP32(cublasHandle_t handle, int M, int N, int K, float alpha,
                CUBLAS_GEMM_DEFAULT_TENSOR_OP);
 }
 
-void run_kernel(int kernel_id, int M, int N, int K, float alpha, float beta, float *A,
-                float *B, float *C, cublasHandle_t handle) {
+void run_kernel(int kernel_id, int M, int N, int K, float alpha, float beta,
+                float* A, float* B, float* C, cublasHandle_t handle) {
   if (kernel_id != 0)
     assert(false);
   else
     runCublasFP32(handle, M, N, K, alpha, A, B, beta, C);
 }
 
-}  // end namespace cuda
-
+} // end namespace cuda
 
 inline void choreo_assert(bool p, const char* msg, const char* file = __FILE__,
                           int line = __LINE__) {
@@ -194,18 +184,18 @@ template <typename T, size_t N>
 class SimpleArray {
   static_assert(N > 0, "can not create 0-dim array");
 
- public:
+public:
   // Constructor for brace-initialization
   SimpleArray(std::initializer_list<T> init) {
     std::size_t count = 0;
     for (auto& value : init) {
-      if (count >= N) break;  // Avoid exceeding the array size
+      if (count >= N) break; // Avoid exceeding the array size
       data[count++] = value;
     }
   }
 
-  SimpleArray(const SimpleArray &) = default;
-  SimpleArray& operator=(const SimpleArray &) = default;
+  SimpleArray(const SimpleArray&) = default;
+  SimpleArray& operator=(const SimpleArray&) = default;
   ~SimpleArray() = default;
 
   // Returns the element at specified index
@@ -224,7 +214,7 @@ class SimpleArray {
   T* end() { return data + N; }
   const T* end() const { return data + N; }
 
- private:
+private:
   T data[N];
 };
 
@@ -240,15 +230,14 @@ inline static bool operator==(const SimpleArray<T, N>& l,
   }
 }
 
-}  // end anonymous namespace
+} // end anonymous namespace
 
 template <int Rank>
 using mdspan = SimpleArray<size_t, Rank>;
 
-template<size_t N>
-inline std::ostream& operator<<(std::ostream& os, const mdspan<N> &s) {
-  for (size_t i = 0; i < N; ++i)
-    os << s[i] << " ";
+template <size_t N>
+inline std::ostream& operator<<(std::ostream& os, const mdspan<N>& s) {
+  for (size_t i = 0; i < N; ++i) os << s[i] << " ";
   return os;
 }
 
@@ -268,13 +257,13 @@ class ArrayProxy {
   const mdspan<N>* dims;
   size_t offset;
 
- public:
+public:
   ArrayProxy(T* arr, const mdspan<N>& dimensions, size_t off)
       : data(arr), dims(&dimensions), offset(off) {}
 
   template <size_t M = N>
   typename std::enable_if<(M == 1),
-                          T&>::type  // make sure to return the reference type
+                          T&>::type // make sure to return the reference type
   operator[](int index) {
     choreo_assert(index >= 0, "Index out of bounds", __FILE__, __LINE__);
     choreo_assert((size_t)index < (*dims)[0], "Index out of bounds", __FILE__,
@@ -285,8 +274,8 @@ class ArrayProxy {
   }
 
   template <size_t M = N>
-  typename std::enable_if<(M > 1), ArrayProxy<T, N - 1>>::type operator[](
-      int index) {
+  typename std::enable_if<(M > 1), ArrayProxy<T, N - 1>>::type
+  operator[](int index) {
     choreo_assert(index >= 0, "Index out of bounds", __FILE__, __LINE__);
     choreo_assert((size_t)index < (*dims)[0], "Index out of bounds", __FILE__,
                   __LINE__);
@@ -299,7 +288,7 @@ class ArrayProxy {
   }
 };
 
-}  // end anonymous namespace
+} // end anonymous namespace
 
 // A 'spanned_view' is a memview of data. It is ranked, but no necessary to have
 // compile-time dimensions
@@ -309,7 +298,7 @@ class spanned_view {
   T* ptr = nullptr;
   const mdspan<Rank> dims;
 
- public:
+public:
   explicit spanned_view(T* d, const mdspan<Rank>& s) : ptr(d), dims(s) {}
 
   constexpr size_t rank() const { return Rank; }
@@ -323,7 +312,7 @@ class spanned_view {
   // allow multi-dim-style access, be like: a[1][3]
   template <size_t M = Rank>
   typename std::enable_if<(M == 1),
-                          T&>::type  // make sure to return the reference type
+                          T&>::type // make sure to return the reference type
   operator[](int index) {
     choreo_assert(index >= 0, "Index out of bounds", __FILE__, __LINE__);
     choreo_assert((size_t)index < dims[0], "Index out of bounds", __FILE__,
@@ -332,8 +321,8 @@ class spanned_view {
   }
 
   template <size_t M = Rank>
-  typename std::enable_if<(M > 1), ArrayProxy<T, Rank - 1>>::type operator[](
-      int index) {
+  typename std::enable_if<(M > 1), ArrayProxy<T, Rank - 1>>::type
+  operator[](int index) {
     choreo_assert(index >= 0, "Index out of bounds", __FILE__, __LINE__);
     choreo_assert((size_t)index < dims[M - 1], "Index out of bounds", __FILE__,
                   __LINE__);
@@ -355,14 +344,14 @@ class spanned_view {
 // A 'spanned_data' is similar to 'spanned_view' but manage memory
 template <typename T, size_t Rank>
 class spanned_data {
-  std::unique_ptr<T[]> ptr = nullptr;  // this is used as the output
+  std::unique_ptr<T[]> ptr = nullptr; // this is used as the output
   mdspan<Rank> dims;
 
- public:
+public:
   explicit spanned_data(std::unique_ptr<T[]>&& d, const mdspan<Rank>& s)
       : ptr(std::move(d)), dims(s) {}
 
-  spanned_data(const spanned_data&) = delete;  // move only
+  spanned_data(const spanned_data&) = delete; // move only
   spanned_data& operator=(const spanned_data&) = delete;
 
   spanned_data(spanned_data&& sd) : ptr(std::move(sd.ptr)), dims(sd.dims) {}
@@ -377,7 +366,7 @@ class spanned_data {
   // allow multi-dim-style access, be like: a[1][3]
   template <size_t M = Rank>
   typename std::enable_if<(M == 1),
-                          T&>::type  // make sure to return the reference type
+                          T&>::type // make sure to return the reference type
   operator[](int index) {
     choreo_assert(index >= 0, "Index out of bounds", __FILE__, __LINE__);
     choreo_assert((size_t)index < dims[0], "Index out of bounds", __FILE__,
@@ -386,8 +375,8 @@ class spanned_data {
   }
 
   template <size_t M = Rank>
-  typename std::enable_if<(M > 1), ArrayProxy<T, Rank - 1>>::type operator[](
-      int index) {
+  typename std::enable_if<(M > 1), ArrayProxy<T, Rank - 1>>::type
+  operator[](int index) {
     choreo_assert(index >= 0, "Index out of bounds", __FILE__, __LINE__);
     choreo_assert((size_t)index < dims[M - 1], "Index out of bounds", __FILE__,
                   __LINE__);
@@ -456,10 +445,10 @@ using f32 = float;
 #ifndef NATIVE_FP16_SUPPORT
 // this fp16 accepts literal initialization, but without arith support
 class fp16 {
- private:
-  uint16_t bits;  // Storage for the half-precision bits
+private:
+  uint16_t bits; // Storage for the half-precision bits
 
- public:
+public:
   // Default constructor
   fp16() : bits(0) {}
 
@@ -487,8 +476,8 @@ class fp16 {
     // correctly In practice, use a library or a fully implemented conversion
     // function
     int32_t fltInt32 = *((int32_t*)&value);
-    int32_t t1 = (fltInt32 & 0x7FFFFFFF) >> 13;  // Non-sign bits
-    int32_t t2 = (fltInt32 & 0x80000000) >> 16;  // Sign bit
+    int32_t t1 = (fltInt32 & 0x7FFFFFFF) >> 13; // Non-sign bits
+    int32_t t2 = (fltInt32 & 0x80000000) >> 16; // Sign bit
     int32_t t3 = ((fltInt32 & 0x7F800000) >> 13) - (112 << 10);
 
     int32_t t4 = std::max(0, std::min(t3, (1 << 10) - 1));
@@ -500,8 +489,8 @@ class fp16 {
     // Simplified conversion: this does not handle rounding, infinities, or NaNs
     // correctly In practice, use a library or a fully implemented conversion
     // function
-    int32_t t1 = (bits & 0x7FFF) << 13;  // Non-sign bits
-    int32_t t2 = (bits & 0x8000) << 16;  // Sign bit
+    int32_t t1 = (bits & 0x7FFF) << 13; // Non-sign bits
+    int32_t t2 = (bits & 0x8000) << 16; // Sign bit
     int32_t t3 = ((bits & 0x7C00) << 13) + (112 << 23);
 
     int32_t fltInt32 = t2 | t3 | t1;
@@ -513,14 +502,14 @@ class fp16 {
 };
 #else
 using f16 = __fp16;
-#endif  // NATIVE_FP16_SUPPORT
+#endif // NATIVE_FP16_SUPPORT
 
 #ifndef NATIVE_BF16_SUPPORT
 class bf16 {
- private:
-  uint16_t bits;  // Storage for the half-precision bits
+private:
+  uint16_t bits; // Storage for the half-precision bits
 
- public:
+public:
   // Default constructor
   bf16() : bits(0) {}
 
@@ -573,7 +562,7 @@ using bf16 = __bf16;
 using bf16 = __bf16;
 #endif
 #endif
-#endif  // NATIVE_BF16_SUPPORT
+#endif // NATIVE_BF16_SUPPORT
 
 #ifndef BF16_SUPPORTED
 //#error \
@@ -581,15 +570,15 @@ using bf16 = __bf16;
 #endif
 
 // Unsigned integer types
-using u32 = uint32_t;  // 32-bit unsigned integer
-using u16 = uint16_t;  // 16-bit unsigned integer
-using u8 = uint8_t;    // 8-bit unsigned integer
+using u32 = uint32_t; // 32-bit unsigned integer
+using u16 = uint16_t; // 16-bit unsigned integer
+using u8 = uint8_t;   // 8-bit unsigned integer
 
 // Signed integer types
-using s32 = int32_t;  // 32-bit signed integer
-using s16 = int16_t;  // 16-bit signed integer
-using s8 = int8_t;    // 8-bit signed integer
+using s32 = int32_t; // 32-bit signed integer
+using s16 = int16_t; // 16-bit signed integer
+using s8 = int8_t;   // 8-bit signed integer
 
-}  // end namespace choreo
+} // end namespace choreo
 
-#endif  // __CHOREO_CUDA_H__
+#endif // __CHOREO_CUDA_H__

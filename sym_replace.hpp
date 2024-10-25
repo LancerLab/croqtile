@@ -17,20 +17,18 @@ namespace Choreo {
 
 namespace sym_replace {
 
-#define SR_DEBUG(X) \
-  do {              \
-    if (0) {        \
-      X;            \
-    }               \
+#define SR_DEBUG(X)                                                            \
+  do {                                                                         \
+    if (0) { X; }                                                              \
   } while (false)
 
-}  // end namespace sym_replace
+} // end namespace sym_replace
 
 // Symbolize all expression nodes.  For expression nodes with the same symbolic
 // meaning, they are replaced with a unified form to facilitate value numbering
 // and shape infering.
 class SymReplace : public VisitorWithScope {
- private:
+private:
   static const char* cyan;
   static const char* blue;
   static const char* reset;
@@ -44,12 +42,12 @@ class SymReplace : public VisitorWithScope {
     }
   }
 
- public:
+public:
   using SymExpr = GiNaC::ex;
   using Symbol = GiNaC::symbol;
   using SymValno = size_t;
 
- public:
+public:
   std::ostream& os;
   // for debugging purpose only
   bool cannot_proceed = false;
@@ -211,7 +209,7 @@ class SymReplace : public VisitorWithScope {
   // use symbolic information to replace expr nodes equivalently.
   void EquivalentlyReplaceExprNodes();
 
- public:
+public:
   bool BeforeVisitImpl(AST::Node& n) override {
     SR_DEBUG(if (auto cf = dyn_cast<AST::ChoreoFunction>(&n)) os
                  << "symbolic replacing starts for function " << cf->name
@@ -232,7 +230,7 @@ class SymReplace : public VisitorWithScope {
     return true;
   }
 
- public:
+public:
   bool Visit(AST::MultiNodes& n) override {
     TraceEachVisit(n);
 
@@ -554,6 +552,6 @@ class SymReplace : public VisitorWithScope {
   };
 };
 
-}  // end namespace Choreo
+} // end namespace Choreo
 
-#endif  // __CHOREO_SYMREPLACE_HPP__
+#endif // __CHOREO_SYMREPLACE_HPP__

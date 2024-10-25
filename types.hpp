@@ -40,32 +40,19 @@ enum class TypeCategory {
 
 inline static std::string STR(TypeCategory tc) {
   switch (tc) {
-    case TypeCategory::INT:
-      return "INT";
-    case TypeCategory::BOOL:
-      return "BOOL";
-    case TypeCategory::INDEX:
-      return "INDEX";
-    case TypeCategory::ITUPLE:
-      return "ITUPLE";
-    case TypeCategory::PARTIAL:
-      return "PARTIAL";
-    case TypeCategory::SPANNED:
-      return "SPANNED";
-    case TypeCategory::BOUNDED_INT:
-      return "BOUNDED_INT";
-    case TypeCategory::BOUNDED_ITUPLE:
-      return "BOUNDED_ITUPLE";
-    case TypeCategory::VOID:
-      return "VOID";
-    case TypeCategory::FUTURE:
-      return "FUTURE";
-    case TypeCategory::FUNCTION:
-      return "FUNCTION";
-    case TypeCategory::UNKNOWN:
-      return "UNKNOWN";
-    default:
-      choreo_unreachable("unsupported type category.");
+  case TypeCategory::INT: return "INT";
+  case TypeCategory::BOOL: return "BOOL";
+  case TypeCategory::INDEX: return "INDEX";
+  case TypeCategory::ITUPLE: return "ITUPLE";
+  case TypeCategory::PARTIAL: return "PARTIAL";
+  case TypeCategory::SPANNED: return "SPANNED";
+  case TypeCategory::BOUNDED_INT: return "BOUNDED_INT";
+  case TypeCategory::BOUNDED_ITUPLE: return "BOUNDED_ITUPLE";
+  case TypeCategory::VOID: return "VOID";
+  case TypeCategory::FUTURE: return "FUTURE";
+  case TypeCategory::FUNCTION: return "FUNCTION";
+  case TypeCategory::UNKNOWN: return "UNKNOWN";
+  default: choreo_unreachable("unsupported type category.");
   }
   return "";
 }
@@ -119,20 +106,16 @@ inline static Storage ProjectStorage(const Storage& a) {
 
 enum Attribute : uint16_t {
   ATT_NONE = 0,
-  ATT_SHADOW_TO_GLOBAL = 1,  // shadow the host memory to global
+  ATT_SHADOW_TO_GLOBAL = 1, // shadow the host memory to global
 };
 
 inline BaseType TC2BT(TypeCategory tc) {
   switch (tc) {
-    case TypeCategory::INT:
-      return BaseType::INT;
-    case TypeCategory::BOOL:
-      return BaseType::BOOL;
-    case TypeCategory::VOID:
-      return BaseType::VOID;
-    default:
-      choreo_unreachable(
-          "unsupported mapping from type category to base type.");
+  case TypeCategory::INT: return BaseType::INT;
+  case TypeCategory::BOOL: return BaseType::BOOL;
+  case TypeCategory::VOID: return BaseType::VOID;
+  default:
+    choreo_unreachable("unsupported mapping from type category to base type.");
   }
 
   return BaseType::UNKNOWN;
@@ -140,20 +123,16 @@ inline BaseType TC2BT(TypeCategory tc) {
 
 inline static size_t SizeOf(FundamentalType ft) {
   switch (ft) {
-    case FundamentalType::F32:
-    case FundamentalType::U32:
-    case FundamentalType::S32:
-      return 4;
-    case FundamentalType::F16:
-    case FundamentalType::BF16:
-    case FundamentalType::U16:
-    case FundamentalType::S16:
-      return 2;
-    case FundamentalType::U8:
-    case FundamentalType::S8:
-      return 1;
-    default:
-      choreo_unreachable("fundamental type is not supported.");
+  case FundamentalType::F32:
+  case FundamentalType::U32:
+  case FundamentalType::S32: return 4;
+  case FundamentalType::F16:
+  case FundamentalType::BF16:
+  case FundamentalType::U16:
+  case FundamentalType::S16: return 2;
+  case FundamentalType::U8:
+  case FundamentalType::S8: return 1;
+  default: choreo_unreachable("fundamental type is not supported.");
   }
   return 0;
 }
@@ -208,7 +187,7 @@ inline static std::string GetStringFrom(Storage st) {
   return it->second;
 }
 
-}  // end namespace __internal__
+} // end namespace __internal__
 
 inline static std::string STR(size_t sz) { return std::to_string(sz); }
 inline static std::string STR(BaseType bt) {
@@ -244,26 +223,26 @@ int TypeIDProvider<T>::__unique_id;
 // User defined type that utilize isa/cast/dyn_cast must place the macro inside
 // its class definition
 //
-#define __UDT_TYPE_INFO__(PTYPE, TTYPE)                                 \
-  const std::string TypeNameString() const override {                   \
-    std::string name = __PRETTY_FUNCTION__;                             \
-    std::regex prefix_regex("^.*Choreo::");                             \
-    name = std::regex_replace(name, prefix_regex, "");                  \
-    std::regex suffix_regex("::TypeNameString.*$");                     \
-    name = std::regex_replace(name, suffix_regex, "");                  \
-    return name;                                                        \
-  }                                                                     \
-  static uint64_t TypeID() {                                            \
-    return (uint64_t) & (TypeIDProvider<TTYPE>::__unique_id);           \
-  }                                                                     \
-  bool IsType(uint64_t ty) const override {                             \
-    return (ty == (uint64_t) & (TypeIDProvider<TTYPE>::__unique_id)) || \
-           PTYPE::IsType(ty);                                           \
+#define __UDT_TYPE_INFO__(PTYPE, TTYPE)                                        \
+  const std::string TypeNameString() const override {                          \
+    std::string name = __PRETTY_FUNCTION__;                                    \
+    std::regex prefix_regex("^.*Choreo::");                                    \
+    name = std::regex_replace(name, prefix_regex, "");                         \
+    std::regex suffix_regex("::TypeNameString.*$");                            \
+    name = std::regex_replace(name, suffix_regex, "");                         \
+    return name;                                                               \
+  }                                                                            \
+  static uint64_t TypeID() {                                                   \
+    return (uint64_t) & (TypeIDProvider<TTYPE>::__unique_id);                  \
+  }                                                                            \
+  bool IsType(uint64_t ty) const override {                                    \
+    return (ty == (uint64_t) & (TypeIDProvider<TTYPE>::__unique_id)) ||        \
+           PTYPE::IsType(ty);                                                  \
   }
 
-#define __UDT_TYPE_INFO_BASE__(NAME)                                 \
-  virtual const std::string TypeNameString() const { return #NAME; } \
-  static uint64_t TypeID() { return 0xDEADBEEFULL; }                 \
+#define __UDT_TYPE_INFO_BASE__(NAME)                                           \
+  virtual const std::string TypeNameString() const { return #NAME; }           \
+  static uint64_t TypeID() { return 0xDEADBEEFULL; }                           \
   virtual bool IsType(uint64_t ty) const { return ty == 0xDEADBEEFULL; }
 
 // LLVM-style type utility functions
@@ -352,8 +331,8 @@ namespace __internal {
 static constexpr size_t INVALID_UNSIGNED = std::numeric_limits<size_t>::max();
 static constexpr int INVALID_SIGNED = std::numeric_limits<int>::max();
 static constexpr int UNKNOWN_SIGNED =
-    std::numeric_limits<int>::min();  // represent literal value '?' only
-}  // namespace __internal
+    std::numeric_limits<int>::min(); // represent literal value '?' only
+} // namespace __internal
 
 inline constexpr size_t GetInvalidUnsigned() {
   return __internal::INVALID_UNSIGNED;
@@ -447,7 +426,7 @@ struct ValueItemHasher {
             return ValueExprHasher{}(arg);
           } else {
             static_assert(always_false<void>, "Unhandled type in variant");
-            return 0;  // This line should theoretically never be reached.
+            return 0; // This line should theoretically never be reached.
           }
         },
         var);
@@ -512,19 +491,19 @@ struct ValueListHasher {
 };
 
 inline bool IsValueItemEqual(const ValueItem& a, const ValueItem& b) {
-  if (a.index() != b.index()) return false;  // Different types
+  if (a.index() != b.index()) return false; // Different types
 
   return a == b;
 }
 
 // Function to compare two ValueList
 inline bool isValueListEqual(const ValueList& a, const ValueList& b) {
-  if (a.size() != b.size()) return false;  // Different sizes
+  if (a.size() != b.size()) return false; // Different sizes
 
   for (size_t i = 0; i < a.size(); ++i)
-    if (!IsValueItemEqual(a[i], b[i])) return false;  // Found a mismatch
+    if (!IsValueItemEqual(a[i], b[i])) return false; // Found a mismatch
 
-  return true;  // All elements match
+  return true; // All elements match
 }
 
 // Stores all the value lists. It generates unique value number for each list.
@@ -614,19 +593,19 @@ inline void PrintValueListSizeExpr(const ValueList& vl, std::ostream& os,
 using IntegerList = std::vector<int>;
 
 struct Shape {
-  static ValueListRepo values;  // value numbers
+  static ValueListRepo values; // value numbers
 
   size_t val_no = GetInvalidValueNumber();
   size_t dim_count =
-      GetInvalidRank();  // dim_count is used when no value appears
+      GetInvalidRank(); // dim_count is used when no value appears
 
   void Invalidate() {
     val_no = GetInvalidUnsigned();
     dim_count = GetInvalidRank();
   }
 
-  explicit Shape() {}  // this initialize an invalid Shape
-                       // The type must be deduced for use
+  explicit Shape() {} // this initialize an invalid Shape
+                      // The type must be deduced for use
 
   Shape(size_t n) : dim_count(n) {}
   // init a shape with n-'v's
@@ -651,7 +630,7 @@ struct Shape {
   constexpr Shape& operator=(const Shape&) = default;
 
   size_t DimCount() const { return dim_count; }
-  size_t Dims() const { return dim_count; }  // TODO: remove this interface
+  size_t Dims() const { return dim_count; } // TODO: remove this interface
   size_t Rank() const { return dim_count; }
 
   void Update() { dim_count = values[val_no].size(); }
@@ -704,8 +683,8 @@ struct Shape {
   bool IsDynamic() const {
     for (auto v : Value())
       if (!isa<int>(&v))
-        return true;  // a symbolic value represents that the value is decided
-                      // at runtime
+        return true; // a symbolic value represents that the value is decided
+                     // at runtime
     return false;
   }
 
@@ -814,7 +793,7 @@ inline bool operator==(const Shape& lhs, const Shape& rhs) {
          isValueListEqual(lhs.Value(), rhs.Value());
 }
 
-using MultiBounds = Shape;  // using a shape as a multi-bound
+using MultiBounds = Shape; // using a shape as a multi-bound
 
 inline MultiBounds operator-(const MultiBounds& lhs, const MultiBounds& rhs) {
   if (!lhs.IsValid() || !rhs.IsValid())
@@ -834,7 +813,7 @@ struct Type {
 
   virtual TypeCategory Category() const { return tc; }
   virtual size_t Dims() const = 0;
-  virtual bool IsComplete() const = 0;  // it is a partial or compelete type
+  virtual bool IsComplete() const = 0; // it is a partial or compelete type
   // is the information enough for semantic check and code generation
   virtual bool HasSufficientInfo() const { return false; }
   virtual bool operator==(const Type& t) const = 0;
@@ -963,7 +942,7 @@ struct ScalarType : public Type, public TypeIDProvider<ScalarType> {
 };
 
 struct IntegerType : public ScalarType, public TypeIDProvider<IntegerType> {
-  ValueItem value = GetInvalidValueItem();  // optional value expression
+  ValueItem value = GetInvalidValueItem(); // optional value expression
   IntegerType() : ScalarType(TypeCategory::INT) {}
   IntegerType(const ValueItem& vi) : ScalarType(TypeCategory::INT), value(vi) {}
   void Print(std::ostream& os) const override {
@@ -1019,8 +998,8 @@ struct ITupleType : public Type, public TypeIDProvider<ITupleType> {
   size_t dim_count = GetInvalidRank();
 
   explicit ITupleType()
-      : Type(TypeCategory::ITUPLE) {}  // this initialize an invalid ITupleType
-                                       // The Type must be deduced for use
+      : Type(TypeCategory::ITUPLE) {} // this initialize an invalid ITupleType
+                                      // The Type must be deduced for use
 
   bool HasSufficientInfo() const { return IsValidRank(dim_count); }
 
@@ -1089,7 +1068,7 @@ struct MDSpanType : public Type, public TypeIDProvider<MDSpanType> {
 
     if (auto sty = dyn_cast<MDSpanType>(&ty)) {
       if (!value.IsRanked() || !sty->value.IsRanked())
-        return true;  // it is ok when the shape is unknown
+        return true; // it is ok when the shape is unknown
       else
         return ty.Dims() == Dims();
     }
@@ -1186,7 +1165,7 @@ struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
 };
 
 struct BoundedType : public Type, public TypeIDProvider<BoundedType> {
-  std::string note = "";  // some annotation to make
+  std::string note = ""; // some annotation to make
   BoundedType(TypeCategory tc, const std::string& n) : Type(tc), note(n) {}
   virtual bool HasValidBound() const = 0;
   virtual std::string GetNote() const { return note; };
@@ -1205,10 +1184,8 @@ struct BoundedIntegerType final : public BoundedType,
   BoundedIntegerType() : BoundedType(TypeCategory::BOUNDED_INT, "") {}
   BoundedIntegerType(const ValueItem& lexpr, const ValueItem& uexpr, int s = 1,
                      const std::string& note = "")
-      : BoundedType(TypeCategory::BOUNDED_INT, note),
-        lbound(lexpr),
-        ubound(uexpr),
-        stride(s) {}
+      : BoundedType(TypeCategory::BOUNDED_INT, note), lbound(lexpr),
+        ubound(uexpr), stride(s) {}
 
   size_t Dims() const override { return 1; }
   bool IsComplete() const override { return true; }
@@ -1253,9 +1230,7 @@ struct BoundedITupleType final : public BoundedType,
 
   BoundedITupleType(const MultiBounds& l, const MultiBounds& u,
                     const IntegerList s, const std::string& n = "")
-      : BoundedType(TypeCategory::BOUNDED_ITUPLE, n),
-        lbounds(l),
-        ubounds(u),
+      : BoundedType(TypeCategory::BOUNDED_ITUPLE, n), lbounds(l), ubounds(u),
         strides(s) {
     if (lbounds.IsValid())
       assert((lbounds.DimCount() == ubounds.DimCount()) &&
@@ -1342,7 +1317,7 @@ struct BoundedITupleType final : public BoundedType,
 
 struct FutureType : public Type, public TypeIDProvider<FutureType> {
   ptr<SpannedType> psty =
-      nullptr;  // the spanned data associated with the future
+      nullptr; // the spanned data associated with the future
   bool async;
 
   explicit FutureType(const ptr<SpannedType>& s, bool a)
@@ -1665,6 +1640,6 @@ inline static SpannedType* GetSpannedType(const ptr<Type>& ty) {
     return nullptr;
 }
 
-}  // end namespace Choreo
+} // end namespace Choreo
 
-#endif  // __CHOREO_TYPES_H__
+#endif // __CHOREO_TYPES_H__

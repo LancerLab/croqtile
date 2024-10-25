@@ -17,21 +17,21 @@ using FutureBufferMap =
 
 // Codegenerators for targets
 struct CodeGenerator : public VisitorWithSymTab {
-  std::ostream &os;
+  std::ostream& os;
 
   // some default method for the derived classes that do not want to override.
-  bool BeforeVisitImpl(AST::Node &) override { return true; }
-  bool AfterVisitImpl(AST::Node &) override { return true; }
+  bool BeforeVisitImpl(AST::Node&) override { return true; }
+  bool AfterVisitImpl(AST::Node&) override { return true; }
 
-  CodeGenerator(const std::string &n, std::ostream &o,
-                const ptr<SymbolTable> &symtab)
+  CodeGenerator(const std::string& n, std::ostream& o,
+                const ptr<SymbolTable>& symtab)
       : VisitorWithSymTab(n, symtab), os(o) {
     if (symtab == nullptr)
       choreo_unreachable("symbol table must be initialized.");
   }
 
-  virtual void TraceEachVisit(AST::Node &n, bool detail = false,
-                              const std::string &m = "") const {
+  virtual void TraceEachVisit(AST::Node& n, bool detail = false,
+                              const std::string& m = "") const {
     if (!trace_visit) return;
     if (detail)
       os << m << STR(n) << "\n";
@@ -44,7 +44,7 @@ struct CodeGenerator : public VisitorWithSymTab {
 ///  Util functions shared between targets
 /////////////////////////////////////////////////////////////
 
-inline constexpr const char *backpatch_filename =
+inline constexpr const char* backpatch_filename =
     "__choreo_kernel_file_name_that_will_be_back_patched_soon_ok_enough_i_am_"
     "bored__";
 
@@ -68,19 +68,19 @@ inline static std::string create_unique_path() {
   return path;
 }
 
-inline static void ReplaceInString(std::string *pstr, const std::string &from,
-                                   const std::string &to) {
+inline static void ReplaceInString(std::string* pstr, const std::string& from,
+                                   const std::string& to) {
   if (from.empty()) return;
 
   size_t startPos = 0;
   while ((startPos = pstr->find(from, startPos)) != std::string::npos) {
     pstr->replace(startPos, from.length(), to);
-    startPos += to.length();  // In case 'to' contains 'from', like replacing
-                              // 'x' with 'yx'
+    startPos += to.length(); // In case 'to' contains 'from', like replacing
+                             // 'x' with 'yx'
   }
 }
 
-static inline std::string HostTypeStringify(const Choreo::Type &ty,
+static inline std::string HostTypeStringify(const Choreo::Type& ty,
                                             bool is_ret = false) {
   if (isa<VoidType>(&ty))
     return "void";
@@ -89,10 +89,10 @@ static inline std::string HostTypeStringify(const Choreo::Type &ty,
   else if (isa<BooleanType>(&ty))
     return "bool";
   else if (auto sty = dyn_cast<SpannedType>(&ty)) {
-    if (is_ret)  // return by value
+    if (is_ret) // return by value
       return "choreo::spanned_data<choreo::" + STR(sty->f_type) + ", " +
              std::to_string(sty->Dims()) + ">";
-    else  // pass by reference
+    else // pass by reference
       return "const choreo::spanned_view<choreo::" + STR(sty->f_type) + ", " +
              std::to_string(sty->Dims()) + "> &";
   }
@@ -100,6 +100,6 @@ static inline std::string HostTypeStringify(const Choreo::Type &ty,
   return "";
 }
 
-}  // end namespace Choreo
+} // end namespace Choreo
 
-#endif  // CHOREO_CODEGEN_HPP_
+#endif // CHOREO_CODEGEN_HPP_

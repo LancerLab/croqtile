@@ -40,8 +40,8 @@
  */
 #if !defined(yyFlexLexerOnce)
 #undef yyFlexLexer
-#define yyFlexLexer \
-  Choreo_FlexLexer  // the trick with prefix; no namespace here :(
+#define yyFlexLexer                                                            \
+  Choreo_FlexLexer // the trick with prefix; no namespace here :(
 #include <FlexLexer.h>
 #endif
 
@@ -54,7 +54,7 @@
 #include <cstring>
 #include <unistd.h>
 
-#include "parser.tab.hh"  // this is needed for symbol_type
+#include "parser.tab.hh" // this is needed for symbol_type
 
 namespace Choreo {
 
@@ -63,13 +63,13 @@ namespace Choreo {
 // class Interpreter;
 
 class Scanner : public yyFlexLexer {
- public:
+public:
   //      Scanner(Interpreter &driver) : m_driver(driver) {}
   Scanner() {}
   virtual ~Scanner() {}
   virtual Parser::symbol_type get_next_token();
 
- public:
+public:
   static void Debug(std::string s);
   static void SetDebug(bool d = true) { debug = d; }
   static void SetRemoveComments() { keep_comments = false; };
@@ -81,10 +81,10 @@ class Scanner : public yyFlexLexer {
     std::cerr << "error: ";
     if (should_use_colors()) std::cerr << reset;
     std::cerr << error_message << std::endl;
-    std::exit(EXIT_FAILURE);  // Terminate the program immediately
+    std::exit(EXIT_FAILURE); // Terminate the program immediately
   }
 
- private:
+private:
   static bool debug;
   static bool keep_comments;
 
@@ -105,6 +105,6 @@ class Scanner : public yyFlexLexer {
   //    Interpreter &m_driver;
 };
 
-}  // namespace Choreo
+} // namespace Choreo
 
-#endif  // __CHOREO_SCANNER_H__
+#endif // __CHOREO_SCANNER_H__

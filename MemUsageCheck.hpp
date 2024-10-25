@@ -15,8 +15,8 @@ typedef std::tuple<std::vector<std::string>, location, size_t>
 
 // checking compile-time and runtime memory usage
 struct MemUsageCheck : public VisitorWithSymTab {
- private:
-  std::ostream &os;
+private:
+  std::ostream& os;
   size_t error_count = 0;
 
   // map from storage type to a integer
@@ -42,8 +42,8 @@ struct MemUsageCheck : public VisitorWithSymTab {
   MemUsageMap mem_usage_limit;
   std::unordered_set<Storage> valid_storage_type;
 
- private:
-  bool BeforeVisitImpl(AST::Node &n) {
+private:
+  bool BeforeVisitImpl(AST::Node& n) {
     if (isa<AST::Program>(&n) || isa<AST::ChoreoFunction>(&n) ||
         isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n) ||
         isa<AST::ForeachBlock>(&n)) {
@@ -54,7 +54,7 @@ struct MemUsageCheck : public VisitorWithSymTab {
     return true;
   }
 
-  bool AfterVisitImpl(AST::Node &n) {
+  bool AfterVisitImpl(AST::Node& n) {
     if (isa<AST::Program>(&n) || isa<AST::ChoreoFunction>(&n) ||
         isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n) ||
         isa<AST::ForeachBlock>(&n)) {
@@ -81,20 +81,20 @@ struct MemUsageCheck : public VisitorWithSymTab {
     return true;
   }
 
-  void TraceEachVisit(AST::Node &n, std::string sup = "") {
+  void TraceEachVisit(AST::Node& n, std::string sup = "") {
     if (trace_visit) os << n.TypeNameString() << sup << "\n";
   }
 
   void RestoreMemUsage() {
     // restore ct mem usage
-    for (const auto &[sto, mem_used_in_scop] : ct_mem_usage_list.top()) {
+    for (const auto& [sto, mem_used_in_scop] : ct_mem_usage_list.top()) {
       ct_tot_mem_usage[sto] -= mem_used_in_scop;
       ct_mem_alloc_inst_set[sto].pop();
     }
     ct_mem_usage_list.pop();
 
     // restore rt mem usage
-    for (const auto &[sto, rt_mem_used_in_scop] : rt_mem_usage_list.top()) {
+    for (const auto& [sto, rt_mem_used_in_scop] : rt_mem_usage_list.top()) {
       for (size_t i = rt_mem_used_in_scop.size(); i > 0; i--)
         rt_tot_mem_usage[sto].pop_back();
       // no inst tracing when dealing with rt usage check yet
@@ -103,8 +103,8 @@ struct MemUsageCheck : public VisitorWithSymTab {
   }
 
   // Check whether the ct memory usage at each level exceeds limits
-  void CheckCtMemUsage(AST::Node &n) {
-    for (const auto &sto : valid_storage_type) {
+  void CheckCtMemUsage(AST::Node& n) {
+    for (const auto& sto : valid_storage_type) {
       if (ct_tot_mem_usage[sto] > mem_usage_limit[sto]) {
         // get the variables which lead to out of bound
         std::ostringstream oss;
@@ -130,14 +130,14 @@ struct MemUsageCheck : public VisitorWithSymTab {
 
   // Update the maximum ct memory usage for each storage level
   void UpdateCtMaxMemUsage() {
-    for (const auto &[sto, usage] : ct_tot_mem_usage)
+    for (const auto& [sto, usage] : ct_tot_mem_usage)
       if (ct_max_mem_usage[sto] < usage) ct_max_mem_usage[sto] = usage;
   }
 
   // Return the detail memory usage of the given map
-  std::string GetMemUsageMapDetail(MemUsageMap &m) {
+  std::string GetMemUsageMapDetail(MemUsageMap& m) {
     std::ostringstream oss;
-    for (const auto &[sto, usage] : m) {
+    for (const auto& [sto, usage] : m) {
       oss << "\t" << std::setw(6) << __internal__::GetStringFrom(sto) << "("
           << std::setw(3) << std::setfill(' ') << GetCtMemOccupancyRate(sto)
           << "):\t\t"
@@ -170,7 +170,7 @@ struct MemUsageCheck : public VisitorWithSymTab {
     // ct memory usage is always a single integer
     res.push_back(std::to_string(ct_tot_mem_usage[sto]));
     // rt memory usage may contain several expressions
-    for (const auto &usage : rt_tot_mem_usage[sto]) res.push_back(usage);
+    for (const auto& usage : rt_tot_mem_usage[sto]) res.push_back(usage);
     return res;
   }
 
@@ -184,33 +184,33 @@ struct MemUsageCheck : public VisitorWithSymTab {
     return oss.str();
   }
 
- public:
+public:
   MemUsageCheck(const ptr<SymbolTable> s_tab, Target t, std::string arch,
-                std::ostream &o = std::cout)
+                std::ostream& o = std::cout)
       : VisitorWithSymTab("mem", s_tab), os(o) {
     if (t == Target::Factor) {
       valid_storage_type = {Storage::LOCAL, Storage::SHARED, Storage::GLOBAL};
       // initialize with ct_tot_mem_usage
-      for (const auto &sto : valid_storage_type) ct_tot_mem_usage[sto] = 0;
+      for (const auto& sto : valid_storage_type) ct_tot_mem_usage[sto] = 0;
       // initialize max memory we can allocate in byte
       if (arch == "gcu300") {
         // The values obtained through testing on c035
         // TODO: All is different with Scorpio (1 Die) in the link below
         // TODO: is S60G same with c035?
-        mem_usage_limit[Storage::LOCAL] = (size_t)1.5 * 1024 * 1024;  // 1.5MB
-        mem_usage_limit[Storage::SHARED] = (size_t)24 * 1024 * 1024;  // 24MB
+        mem_usage_limit[Storage::LOCAL] = (size_t)1.5 * 1024 * 1024; // 1.5MB
+        mem_usage_limit[Storage::SHARED] = (size_t)24 * 1024 * 1024; // 24MB
         mem_usage_limit[Storage::GLOBAL] =
-            (size_t)4 * 1024 * 1024 * 1024;  // 4GB
+            (size_t)4 * 1024 * 1024 * 1024; // 4GB
       } else if (arch == "gcu210") {
         // The values obtained through testing on I20
         /* TODO:
         L3 (gobal) is different with Dorado (3VG per Cluster) in
         http://wiki.enflame.cn/display/~james.zhu/Enflame+GCU+Programming+Model#EnflameGCUProgrammingModel-get_memory_space
         */
-        mem_usage_limit[Storage::LOCAL] = (size_t)0xfc000;            // 1008KB
-        mem_usage_limit[Storage::SHARED] = (size_t)24 * 1024 * 1024;  // 24MB
+        mem_usage_limit[Storage::LOCAL] = (size_t)0xfc000;           // 1008KB
+        mem_usage_limit[Storage::SHARED] = (size_t)24 * 1024 * 1024; // 24MB
         mem_usage_limit[Storage::GLOBAL] =
-            (size_t)4 * 1024 * 1024 * 1024;  // 4GB
+            (size_t)4 * 1024 * 1024 * 1024; // 4GB
       } else {
         choreo_unreachable("unsupported gcu architecture " + arch +
                            " in memory usage check.");
@@ -229,35 +229,35 @@ struct MemUsageCheck : public VisitorWithSymTab {
   // do codegen for rt memory usage checking
   auto GetRtMemUsageInfo() { return rt_mem_usage_check_list; }
 
-  bool Visit(AST::MultiNodes &n) {
+  bool Visit(AST::MultiNodes& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::MultiValues &n) {
+  bool Visit(AST::MultiValues& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::IntLiteral &n) {
+  bool Visit(AST::IntLiteral& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Boolean &n) {
+  bool Visit(AST::Boolean& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Expr &n) {
+  bool Visit(AST::Expr& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::MultiDimSpans &n) {
+  bool Visit(AST::MultiDimSpans& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::NamedTypeDecl &n) {
+  bool Visit(AST::NamedTypeDecl& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::NamedVariableDecl &n) {
+  bool Visit(AST::NamedVariableDecl& n) {
     TraceEachVisit(n);
     // mem alloc may happends here
     auto ty = GetSymbolType(n.name_str);
@@ -287,59 +287,59 @@ struct MemUsageCheck : public VisitorWithSymTab {
     }
     return true;
   }
-  bool Visit(AST::IntTuple &n) {
+  bool Visit(AST::IntTuple& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Assignment &n) {
+  bool Visit(AST::Assignment& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::IntIndex &n) {
+  bool Visit(AST::IntIndex& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::DataType &n) {
+  bool Visit(AST::DataType& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Identifier &n) {
+  bool Visit(AST::Identifier& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Parameter &n) {
+  bool Visit(AST::Parameter& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::ParamList &n) {
+  bool Visit(AST::ParamList& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::ParallelBy &n) {
+  bool Visit(AST::ParallelBy& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::WhereBind &n) {
+  bool Visit(AST::WhereBind& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::WithIn &n) {
+  bool Visit(AST::WithIn& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::WithBlock &n) {
+  bool Visit(AST::WithBlock& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Memory &n) {
+  bool Visit(AST::Memory& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::SpanAs &n) {
+  bool Visit(AST::SpanAs& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::DMA &d) {
+  bool Visit(AST::DMA& d) {
     TraceEachVisit(d);
     // mem alloc happends here
     if (isa<AST::Memory>(d.to)) {
@@ -370,39 +370,39 @@ struct MemUsageCheck : public VisitorWithSymTab {
     }
     return true;
   }
-  bool Visit(AST::ChunkAt &n) {
+  bool Visit(AST::ChunkAt& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Wait &n) {
+  bool Visit(AST::Wait& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Call &n) {
+  bool Visit(AST::Call& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Swap &n) {
+  bool Visit(AST::Swap& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Select &n) {
+  bool Visit(AST::Select& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Return &n) {
+  bool Visit(AST::Return& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::LoopRange &n) {
+  bool Visit(AST::LoopRange& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::ForeachBlock &n) {
+  bool Visit(AST::ForeachBlock& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::FunctionDecl &n) {
+  bool Visit(AST::FunctionDecl& n) {
     TraceEachVisit(n);
     // special handling
     // Because AST::FunctionDecl.accept doesn't call BeforeVisit)
@@ -411,7 +411,7 @@ struct MemUsageCheck : public VisitorWithSymTab {
 
     int param_idx = 0;
     Storage func_param_sto = Storage::GLOBAL;
-    for (const auto &p : n.params->values) {
+    for (const auto& p : n.params->values) {
       if (auto sty = dyn_cast<SpannedType>(p->GetType())) {
         std::string name = "::" + n.name + "::";
         name +=
@@ -453,15 +453,15 @@ struct MemUsageCheck : public VisitorWithSymTab {
                  << GetMemUsageMapDetail(ct_tot_mem_usage));
     return true;
   }
-  bool Visit(AST::ChoreoFunction &n) {
+  bool Visit(AST::ChoreoFunction& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::CppSourceCode &n) {
+  bool Visit(AST::CppSourceCode& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Program &n) {
+  bool Visit(AST::Program& n) {
     TraceEachVisit(n);
     return true;
   }
@@ -473,6 +473,6 @@ struct MemUsageCheck : public VisitorWithSymTab {
   }
 };
 
-}  // end namespace Choreo
+} // end namespace Choreo
 
-#endif  // __CHOREO_MEMORY_USAGE_CHECK_HPP__
+#endif // __CHOREO_MEMORY_USAGE_CHECK_HPP__

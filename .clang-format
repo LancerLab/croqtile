@@ -1,0 +1,13 @@
+BasedOnStyle: LLVM
+AlwaysBreakTemplateDeclarations: Yes
+IndentWidth: 2
+ColumnLimit: 80
+BraceWrapping:
+  AfterControlStatement: false  
+AllowShortIfStatementsOnASingleLine: true
+AllowShortBlocksOnASingleLine: Always 
+AllowShortLoopsOnASingleLine: true 
+AllowShortFunctionsOnASingleLine: true
+AllowShortCaseLabelsOnASingleLine: true 
+DerivePointerAlignment: false
+PointerAlignment: Left

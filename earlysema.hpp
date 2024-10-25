@@ -10,81 +10,81 @@
 namespace Choreo {
 
 struct EarlySemantics : public Visitor {
- private:
-  std::ostream &os;
+private:
+  std::ostream& os;
   size_t error_count = 0;
 
- private:
+private:
   bool in_decl =
-      false;  // we need context to judge if it is declaration or reference
-  bool allow_named_dim = false;  // tolerate same symbols (mdspan param only)
+      false; // we need context to judge if it is declaration or reference
+  bool allow_named_dim = false; // tolerate same symbols (mdspan param only)
 
   bool requires_return =
-      false;  // only void function does not require return value
+      false; // only void function does not require return value
   bool found_return = false;
   bool return_deduction = false;
   int parallel_level = 0;
 
   std::unordered_set<std::string>
-      with_syms;  // symbol defined in with-in statement
+      with_syms; // symbol defined in with-in statement
 
- private:
-  bool BeforeVisit(AST::Node &) override;
-  bool AfterVisit(AST::Node &) override;
+private:
+  bool BeforeVisit(AST::Node&) override;
+  bool AfterVisit(AST::Node&) override;
 
-  bool ReportErrorWhenUseBeforeDefine(const location &, const std::string &);
-  bool ReportErrorWhenViolateODR(const location &, const std::string &,
-                                 const char *, int,
-                                 const ptr<Type> & = MakeUnknownType());
+  bool ReportErrorWhenUseBeforeDefine(const location&, const std::string&);
+  bool ReportErrorWhenViolateODR(const location&, const std::string&,
+                                 const char*, int,
+                                 const ptr<Type>& = MakeUnknownType());
 
-  void SetNodeType(AST::Node &n, const ptr<Type> &ty) {
+  void SetNodeType(AST::Node& n, const ptr<Type>& ty) {
     n.SetType(ty);
     if (trace_visit)
       os << "Set type of " << STR(n) << " as " << STR(*n.GetType()) << "\n";
   }
 
- public:
-  EarlySemantics(std::ostream &o = std::cout) : Visitor("sema"), os(o) {}
+public:
+  EarlySemantics(std::ostream& o = std::cout) : Visitor("sema"), os(o) {}
   ~EarlySemantics() {}
 
-  bool Visit(AST::MultiNodes &) override;
-  bool Visit(AST::MultiValues &) override;
-  bool Visit(AST::IntLiteral &) override;
-  bool Visit(AST::Boolean &) override;
-  bool Visit(AST::Expr &) override;
-  bool Visit(AST::MultiDimSpans &) override;
-  bool Visit(AST::NamedTypeDecl &) override;
-  bool Visit(AST::NamedVariableDecl &) override;
-  bool Visit(AST::IntTuple &) override;
-  bool Visit(AST::Assignment &) override;
-  bool Visit(AST::IntIndex &) override;
-  bool Visit(AST::DataType &) override;
-  bool Visit(AST::Identifier &) override;
-  bool Visit(AST::Parameter &) override;
-  bool Visit(AST::ParamList &) override;
-  bool Visit(AST::ParallelBy &) override;
-  bool Visit(AST::WhereBind &) override;
-  bool Visit(AST::WithIn &) override;
-  bool Visit(AST::WithBlock &) override;
-  bool Visit(AST::Memory &) override;
-  bool Visit(AST::SpanAs &) override;
-  bool Visit(AST::DMA &) override;
-  bool Visit(AST::ChunkAt &) override;
-  bool Visit(AST::Wait &) override;
-  bool Visit(AST::Call &) override;
-  bool Visit(AST::Swap &) override;
-  bool Visit(AST::Select &) override;
-  bool Visit(AST::Return &) override;
-  bool Visit(AST::LoopRange &) override;
-  bool Visit(AST::ForeachBlock &) override;
-  bool Visit(AST::FunctionDecl &) override;
-  bool Visit(AST::ChoreoFunction &) override;
-  bool Visit(AST::CppSourceCode &) override;
-  bool Visit(AST::Program &) override;
+  bool Visit(AST::MultiNodes&) override;
+  bool Visit(AST::MultiValues&) override;
+  bool Visit(AST::IntLiteral&) override;
+  bool Visit(AST::Boolean&) override;
+  bool Visit(AST::Expr&) override;
+  bool Visit(AST::MultiDimSpans&) override;
+  bool Visit(AST::NamedTypeDecl&) override;
+  bool Visit(AST::NamedVariableDecl&) override;
+  bool Visit(AST::IntTuple&) override;
+  bool Visit(AST::Assignment&) override;
+  bool Visit(AST::IntIndex&) override;
+  bool Visit(AST::DataType&) override;
+  bool Visit(AST::Identifier&) override;
+  bool Visit(AST::Parameter&) override;
+  bool Visit(AST::ParamList&) override;
+  bool Visit(AST::ParallelBy&) override;
+  bool Visit(AST::WhereBind&) override;
+  bool Visit(AST::WithIn&) override;
+  bool Visit(AST::WithBlock&) override;
+  bool Visit(AST::Memory&) override;
+  bool Visit(AST::SpanAs&) override;
+  bool Visit(AST::DMA&) override;
+  bool Visit(AST::ChunkAt&) override;
+  bool Visit(AST::Wait&) override;
+  bool Visit(AST::Call&) override;
+  bool Visit(AST::Swap&) override;
+  bool Visit(AST::Select&) override;
+  bool Visit(AST::Return&) override;
+  bool Visit(AST::LoopRange&) override;
+  bool Visit(AST::ForeachBlock&) override;
+  bool Visit(AST::FunctionDecl&) override;
+  bool Visit(AST::ChoreoFunction&) override;
+  bool Visit(AST::CppSourceCode&) override;
+  bool Visit(AST::Program&) override;
 
   bool HasError();
 };
 
-}  // end namespace Choreo
+} // end namespace Choreo
 
-#endif  // __CHOREO_EARLY_SEMANTICS_CHECK_HPP__
+#endif // __CHOREO_EARLY_SEMANTICS_CHECK_HPP__

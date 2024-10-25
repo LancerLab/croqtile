@@ -4,10 +4,10 @@
 
 using namespace Choreo;
 
-#define __TRACE_EACH_VISIT__(n)       \
-  if (trace_visit) {                  \
-    os << n.TypeNameString() << ": "; \
-    os << "\n";                       \
+#define __TRACE_EACH_VISIT__(n)                                                \
+  if (trace_visit) {                                                           \
+    os << n.TypeNameString() << ": ";                                          \
+    os << "\n";                                                                \
   }
 
 bool TypeChecker::BeforeVisitImpl(AST::Node&) { return true; }
@@ -91,7 +91,7 @@ bool TypeChecker::Visit(AST::DataType& n) {
 }
 bool TypeChecker::Visit(AST::Identifier& n) {
   __TRACE_EACH_VISIT__(n)
-  if (PrefixedWith(n.name, "$")) return true;  // do not check internal symbols
+  if (PrefixedWith(n.name, "$")) return true; // do not check internal symbols
   if (!ReportUnknownSymbol(n.name, n.LOC(), __FILE__, __LINE__)) return false;
   return true;
 }
@@ -145,7 +145,7 @@ bool TypeChecker::Visit(AST::SpanAs& n) {
     return false;
   }
 
-  SpannedType *sty = nullptr;
+  SpannedType* sty = nullptr;
   if (auto fty = dyn_cast<FutureType>(ity))
     sty = fty->GetSpannedType().get();
   else

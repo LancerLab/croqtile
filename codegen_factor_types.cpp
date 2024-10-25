@@ -8,16 +8,11 @@ namespace __internal__ {
 
 inline static std::string ToString(BaseType dataType) {
   static const std::unordered_map<BaseType, std::string> enumToString = {
-      {BaseType::F32, "FloatType(32)"},
-      {BaseType::F16, "FloatType(16)"},
-      {BaseType::BF16, "BFloatType(16)"},
-      {BaseType::U32, "IntType(32)"},
-      {BaseType::S32, "IntType(32)"},
-      {BaseType::U16, "IntType(16)"},
-      {BaseType::S16, "IntType(16)"},
-      {BaseType::U8, "IntType(8)"},
-      {BaseType::S8, "IntType(8)"},
-      {BaseType::INT, "IntType(32)"},
+      {BaseType::F32, "FloatType(32)"},   {BaseType::F16, "FloatType(16)"},
+      {BaseType::BF16, "BFloatType(16)"}, {BaseType::U32, "IntType(32)"},
+      {BaseType::S32, "IntType(32)"},     {BaseType::U16, "IntType(16)"},
+      {BaseType::S16, "IntType(16)"},     {BaseType::U8, "IntType(8)"},
+      {BaseType::S8, "IntType(8)"},       {BaseType::INT, "IntType(32)"},
       {BaseType::BOOL, "BoolType(32)"},
   };
 
@@ -29,7 +24,7 @@ inline static std::string ToString(BaseType dataType) {
 
 inline static std::string ToString(Storage st) {
   static const std::unordered_map<Storage, std::string> enumToString = {
-      {Storage::LOCAL, "L1Type"},     
+      {Storage::LOCAL, "L1Type"},
       {Storage::GLOBAL, "DRAMType"},
       {Storage::SHARED, "SRAMType"},
   };
@@ -40,15 +35,13 @@ inline static std::string ToString(Storage st) {
   return it->second;
 }
 
-}  // end namespace __internal__
+} // end namespace __internal__
 
 std::string stringify(const FundamentalType& t) {
   return __internal__::ToString((BaseType)t);
 }
 
-std::string stringify(const BaseType& t) {
-  return __internal__::ToString(t);
-}
+std::string stringify(const BaseType& t) { return __internal__::ToString(t); }
 
 std::string stringify(const Type& ty) {
   if (isa<VoidType>(&ty)) return "void";
@@ -64,14 +57,13 @@ std::string stringify(const Type& ty) {
   return 0;
 }
 
-  
 std::string stringify(const Storage& sto) {
   return __internal__::ToString(sto);
 }
 
-std::string stringify(const ValueList &vl) {
+std::string stringify(const ValueList& vl) {
   std::ostringstream oss;
-  auto print_variant = [&oss](const ValueItem &vle) {
+  auto print_variant = [&oss](const ValueItem& vle) {
     if (vle.index() == 0)
       oss << std::get<0>(vle);
     else
@@ -90,4 +82,3 @@ std::string stringify(const ValueList &vl) {
 }
 
 } // namespace Choreo::Factor
-

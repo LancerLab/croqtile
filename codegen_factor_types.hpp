@@ -6,7 +6,6 @@
 
 #include "types.hpp"
 
-
 using namespace Choreo;
 
 namespace Choreo {
@@ -19,7 +18,7 @@ std::string stringify(const BaseType& type);
 std::string stringify(const FundamentalType& t);
 std::string stringify(const Type& ty); // this is abstract type, must use ref
 std::string stringify(const Storage& mspec);
-std::string stringify(const ValueList &vl);
+std::string stringify(const ValueList& vl);
 
 // safe version for pointers
 // we still use stringify name for simplification
@@ -35,7 +34,7 @@ inline static std::string stringify(const ptr<T>& pt) {
   return stringify(*pt);
 }
 
-} // namespace Factor 
+} // namespace Factor
 
 } // namespace Choreo
 

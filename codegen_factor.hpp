@@ -22,11 +22,11 @@ namespace Choreo {
 namespace Factor {
 
 struct FactorCodeGen : public CodeGenerator {
- private:
+private:
   std::string current_fn = "";
   std::string entry_fn = "";
   std::string indent = "";
-  std::string bin_fn;  // temporal filename of factor binary
+  std::string bin_fn; // temporal filename of factor binary
   // buffer the kernel code
   std::ostringstream ks;
   // buffer the factor code
@@ -53,10 +53,10 @@ struct FactorCodeGen : public CodeGenerator {
   bool cross_compile = false;
 
   ValBind::BindInfo<std::string> bind_info;
-  std::vector<AST::ptr<AST::Parameter>> *cur_params = nullptr;
+  std::vector<AST::ptr<AST::Parameter>>* cur_params = nullptr;
   AST::ptr<AST::DataType> current_output = nullptr;
   std::map<std::string, std::vector<std::string>> cur_bounded_vars;
-  std::vector<std::unordered_set<std::string>> loop_vars;  // the loop variables
+  std::vector<std::unordered_set<std::string>> loop_vars; // the loop variables
   std::vector<RtMemUsageCheckInfo> rt_mem_usage_check_list;
   // runtime host parameter names
   std::vector<std::string> host_params;
@@ -65,30 +65,27 @@ struct FactorCodeGen : public CodeGenerator {
 
   // mapping from a symbolic shape dimensions to the associated runtime name
   std::map<std::string, std::string>
-      rts_nmap;  // symbolic name to the runtime name
+      rts_nmap; // symbolic name to the runtime name
   std::map<std::string, size_t>
-      rts_pidx;  // shape index in parameter list for the runtime shape name
+      rts_pidx; // shape index in parameter list for the runtime shape name
   std::map<std::string, size_t>
-      rts_nidx;  // dim index in shape for the runtime shape name
-  std::map<std::string, std::string> idnm_rts;  // name in .co to symbolic name
+      rts_nidx; // dim index in shape for the runtime shape name
+  std::map<std::string, std::string> idnm_rts; // name in .co to symbolic name
 
-  ptr<FutureBufferMap> fut_buf;  // map a future to its associated buffer
+  ptr<FutureBufferMap> fut_buf; // map a future to its associated buffer
 
   StringifyTable factor_symbols;
 
- public:
-  FactorCodeGen(std::ostream &os, const ptr<SymbolTable> &symtab,
-                const ptr<FutureBufferMap> &fb, bool cross_compile)
-      : CodeGenerator("codegen", os, symtab),
-        cross_compile(cross_compile),
+public:
+  FactorCodeGen(std::ostream& os, const ptr<SymbolTable>& symtab,
+                const ptr<FutureBufferMap>& fb, bool cross_compile)
+      : CodeGenerator("codegen", os, symtab), cross_compile(cross_compile),
         fut_buf(fb) {}
-  FactorCodeGen(std::ostream &os, const ptr<SymbolTable> &symtab,
-                const std::vector<RtMemUsageCheckInfo> &list,
-                const ptr<FutureBufferMap> &fb, bool cross_compile)
-      : CodeGenerator("codegen", os, symtab),
-        cross_compile(cross_compile),
-        rt_mem_usage_check_list(list),
-        fut_buf(fb) {}
+  FactorCodeGen(std::ostream& os, const ptr<SymbolTable>& symtab,
+                const std::vector<RtMemUsageCheckInfo>& list,
+                const ptr<FutureBufferMap>& fb, bool cross_compile)
+      : CodeGenerator("codegen", os, symtab), cross_compile(cross_compile),
+        rt_mem_usage_check_list(list), fut_buf(fb) {}
 
   void ResetBuffers() {
     ks.clear();
@@ -96,66 +93,66 @@ struct FactorCodeGen : public CodeGenerator {
     hs.clear();
   }
 
-  void OutputScript(FunctionType *, const std::string &, const std::string &,
-                    const std::string &, const Shape &);
+  void OutputScript(FunctionType*, const std::string&, const std::string&,
+                    const std::string&, const Shape&);
 
-  bool BeforeVisitImpl(AST::Node &) override;
-  bool AfterVisitImpl(AST::Node &) override;
+  bool BeforeVisitImpl(AST::Node&) override;
+  bool AfterVisitImpl(AST::Node&) override;
 
   // bool Visit(AST::Node&) override;
-  bool Visit(AST::MultiNodes &) override;
-  bool Visit(AST::MultiValues &) override;
-  bool Visit(AST::IntLiteral &) override;
-  bool Visit(AST::Boolean &) override;
-  bool Visit(AST::Expr &) override;
-  bool Visit(AST::MultiDimSpans &) override;
-  bool Visit(AST::NamedTypeDecl &) override;
-  bool Visit(AST::NamedVariableDecl &) override;
-  bool Visit(AST::IntTuple &) override;
-  bool Visit(AST::Assignment &) override;
-  bool Visit(AST::IntIndex &) override;
-  bool Visit(AST::DataType &) override;
-  bool Visit(AST::Identifier &) override;
-  bool Visit(AST::Parameter &) override;
-  bool Visit(AST::ParamList &) override;
-  bool Visit(AST::ParallelBy &) override;
-  bool Visit(AST::WhereBind &) override;
-  bool Visit(AST::WithIn &) override;
-  bool Visit(AST::WithBlock &) override;
-  bool Visit(AST::Memory &) override;
-  bool Visit(AST::SpanAs &) override;
-  bool Visit(AST::DMA &) override;
-  bool Visit(AST::ChunkAt &) override;
-  bool Visit(AST::Wait &) override;
-  bool Visit(AST::Call &) override;
-  bool Visit(AST::Swap &) override;
-  bool Visit(AST::Select &) override;
-  bool Visit(AST::Return &) override;
-  bool Visit(AST::LoopRange &) override;
-  bool Visit(AST::ForeachBlock &) override;
-  bool Visit(AST::FunctionDecl &) override;
-  bool Visit(AST::ChoreoFunction &) override;
-  bool Visit(AST::CppSourceCode &) override;
-  bool Visit(AST::Program &) override;
+  bool Visit(AST::MultiNodes&) override;
+  bool Visit(AST::MultiValues&) override;
+  bool Visit(AST::IntLiteral&) override;
+  bool Visit(AST::Boolean&) override;
+  bool Visit(AST::Expr&) override;
+  bool Visit(AST::MultiDimSpans&) override;
+  bool Visit(AST::NamedTypeDecl&) override;
+  bool Visit(AST::NamedVariableDecl&) override;
+  bool Visit(AST::IntTuple&) override;
+  bool Visit(AST::Assignment&) override;
+  bool Visit(AST::IntIndex&) override;
+  bool Visit(AST::DataType&) override;
+  bool Visit(AST::Identifier&) override;
+  bool Visit(AST::Parameter&) override;
+  bool Visit(AST::ParamList&) override;
+  bool Visit(AST::ParallelBy&) override;
+  bool Visit(AST::WhereBind&) override;
+  bool Visit(AST::WithIn&) override;
+  bool Visit(AST::WithBlock&) override;
+  bool Visit(AST::Memory&) override;
+  bool Visit(AST::SpanAs&) override;
+  bool Visit(AST::DMA&) override;
+  bool Visit(AST::ChunkAt&) override;
+  bool Visit(AST::Wait&) override;
+  bool Visit(AST::Call&) override;
+  bool Visit(AST::Swap&) override;
+  bool Visit(AST::Select&) override;
+  bool Visit(AST::Return&) override;
+  bool Visit(AST::LoopRange&) override;
+  bool Visit(AST::ForeachBlock&) override;
+  bool Visit(AST::FunctionDecl&) override;
+  bool Visit(AST::ChoreoFunction&) override;
+  bool Visit(AST::CppSourceCode&) override;
+  bool Visit(AST::Program&) override;
 
- private:
-  bool ContainsLoopVar(const std::string &) const;
+private:
+  bool ContainsLoopVar(const std::string&) const;
 
-  void EmitHostHead(std::ostream &);
-  void EmitHostFuncDecl(std::ostream &, const Type &, const std::string &,
+  void EmitHostHead(std::ostream&);
+  void EmitHostFuncDecl(std::ostream&, const Type&, const std::string&,
                         bool = false);
-  void EmitRuntimeCheck(std::ostream &, const Type &);
-  void EmitRuntimeMemUsageCheck(std::ostream &, const Type &);
-  void EmitHostFuncBody(std::ostream &, const Type &, const std::string &fname,
-                        const std::string &o_sz, const std::string &o_ty,
-                        const Shape &s);
+  void EmitRuntimeCheck(std::ostream&, const Type&);
+  void EmitRuntimeMemUsageCheck(std::ostream&, const Type&);
+  void EmitHostFuncBody(std::ostream&, const Type&, const std::string& fname,
+                        const std::string& o_sz, const std::string& o_ty,
+                        const Shape& s);
 
   const std::string ExprSTR(AST::ptr<AST::Node>) const;
   std::string GenHostParamName() { return "hp" + std::to_string(sp_count++); }
-  std::string ReplaceRuntimeNames(const std::string &, const std::string & = "",
+  std::string ReplaceRuntimeNames(const std::string&, const std::string& = "",
                                   bool host_code = true);
-  std::string ReplaceDynDimName(const std::string &);
-  std::optional<std::string> ReplaceDynDimRef(const std::string &);
+  std::string ReplaceDynDimName(const std::string&);
+  std::optional<std::string> ReplaceDynDimRef(const std::string&);
   // common utils
   void incrementIndent() { this->indent += "  "; }
 
@@ -165,8 +162,8 @@ struct FactorCodeGen : public CodeGenerator {
   }
 };
 
-}  // end namespace Factor
+} // end namespace Factor
 
-}  // end namespace Choreo
+} // end namespace Choreo
 
-#endif  // CHOREO_CODEGEN_FACTOR_HPP_
+#endif // CHOREO_CODEGEN_FACTOR_HPP_

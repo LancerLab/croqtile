@@ -11,26 +11,24 @@
 #include "types.hpp"
 #include "visitor.hpp"
 
-#define __TRACE_NORM_VISIT__(n)                         \
-  if (trace_visit) {                                    \
-    os << n.TypeNameString() << ": " << STR(n) << "\n"; \
-  }
+#define __TRACE_NORM_VISIT__(n)                                                \
+  if (trace_visit) { os << n.TypeNameString() << ": " << STR(n) << "\n"; }
 
 namespace Choreo {
 
 struct Normalizer : public Visitor {
- private:
-  std::ostream &os;
+private:
+  std::ostream& os;
 
- private:
+private:
   bool changed = false;
 
   std::string old;
-  size_t count = 0;  // name suffix of runtime int values
+  size_t count = 0; // name suffix of runtime int values
 
   bool handle_parameter = false;
   ptr<AST::Expr> list_ref = nullptr;
-  void SetListReference(const location &l, const std::string &r) {
+  void SetListReference(const location& l, const std::string& r) {
     list_ref = AST::Make<AST::Expr>(l, AST::Make<AST::Identifier>(l, r));
   }
   void ResetListReference() { list_ref = nullptr; }
@@ -38,20 +36,20 @@ struct Normalizer : public Visitor {
   // for node hoisting
   using NodeInsertInfo =
       std::vector<std::tuple<int, ptr<AST::Node>, std::string>>;
-  std::stack<AST::MultiNodes *> multi_nodes;
+  std::stack<AST::MultiNodes*> multi_nodes;
   int cur_dma_index = -1;
-  std::map<AST::MultiNodes *, NodeInsertInfo> mnodes_insertions;
+  std::map<AST::MultiNodes*, NodeInsertInfo> mnodes_insertions;
 
   std::string GetInternalValueString() { return "$" + std::to_string(count++); }
 
- public:
+public:
   // it does not require a symbol table
-  Normalizer(std::ostream &o) : Visitor("norm"), os(o) {}
+  Normalizer(std::ostream& o) : Visitor("norm"), os(o) {}
 
-  bool BeforeVisit(AST::Node &n) override {
+  bool BeforeVisit(AST::Node& n) override {
     if (trace_visit) os << "before visiting " << n.TypeNameString() << "\n";
 
-    if (auto *b = dyn_cast<AST::MultiDimSpans>(&n)) {
+    if (auto* b = dyn_cast<AST::MultiDimSpans>(&n)) {
       if (b->ref_name != "") {
         SetListReference(n.LOC(), b->ref_name);
         return true;
@@ -68,7 +66,7 @@ struct Normalizer : public Visitor {
         mvals->Append(AST::Make<AST::IntLiteral>(n.LOC()));
       b->list = mvals;
       changed = true;
-    } else if (auto *b = dyn_cast<AST::IntTuple>(&n)) {
+    } else if (auto* b = dyn_cast<AST::IntTuple>(&n)) {
       if (b->ref_name != "") SetListReference(n.LOC(), b->ref_name);
     } else if (auto p = dyn_cast<AST::Parameter>(&n)) {
       handle_parameter = true;
@@ -83,12 +81,12 @@ struct Normalizer : public Visitor {
     return true;
   }
 
-  bool AfterVisit(AST::Node &n) override {
+  bool AfterVisit(AST::Node& n) override {
     if (trace_visit) os << "after visiting " << n.TypeNameString() << "\n";
 
-    if (auto *b = dyn_cast<AST::MultiDimSpans>(&n)) {
+    if (auto* b = dyn_cast<AST::MultiDimSpans>(&n)) {
       ResetListReference();
-      b->ref_name = "";  // no reference is required
+      b->ref_name = ""; // no reference is required
     } else if (isa<AST::IntTuple>(&n)) {
       ResetListReference();
     } else if (auto p = dyn_cast<AST::Parameter>(&n)) {
@@ -102,15 +100,15 @@ struct Normalizer : public Visitor {
     }
     return true;
   }
-  bool Visit(AST::MultiNodes &n) override {
+  bool Visit(AST::MultiNodes& n) override {
     __TRACE_NORM_VISIT__(n)
 
     // insert the node at the given place
     assert(&n == multi_nodes.top());
     for (auto item : mnodes_insertions[multi_nodes.top()]) {
-      auto &index = std::get<0>(item);
-      auto &pnode = std::get<1>(item);
-      auto &name = std::get<2>(item);
+      auto& index = std::get<0>(item);
+      auto& pnode = std::get<1>(item);
+      auto& name = std::get<2>(item);
 
       auto assign = AST::Make<AST::Assignment>(pnode->LOC(), name, pnode);
       n.values.insert(n.values.begin() + index, assign);
@@ -124,9 +122,9 @@ struct Normalizer : public Visitor {
     return true;
   }
 
-  bool Visit(AST::MultiValues &n) override {
+  bool Visit(AST::MultiValues& n) override {
     __TRACE_NORM_VISIT__(n)
-    if (list_ref) {  // desugar the list reference
+    if (list_ref) { // desugar the list reference
       for (size_t i = 0; i < n.values.size(); ++i) {
         if (auto expr = dyn_cast<AST::Expr>(n.values[i])) {
           if (auto ref = expr->GetReference()) {
@@ -143,7 +141,7 @@ struct Normalizer : public Visitor {
       }
     }
 
-    if (handle_parameter) {  // make runtime values of "?" to be named
+    if (handle_parameter) { // make runtime values of "?" to be named
       for (size_t i = 0; i < n.values.size(); ++i) {
         if (auto il = dyn_cast<AST::IntLiteral>(n.values[i])) {
           if (!IsUnKnownInteger(il->value)) continue;
@@ -159,12 +157,12 @@ struct Normalizer : public Visitor {
     return true;
   }
 
-  bool Visit(AST::IntLiteral &) override { return true; }
-  bool Visit(AST::Boolean &) override { return true; }
-  bool Visit(AST::Expr &n) override {
+  bool Visit(AST::IntLiteral&) override { return true; }
+  bool Visit(AST::Boolean&) override { return true; }
+  bool Visit(AST::Expr& n) override {
     __TRACE_NORM_VISIT__(n)
-    if (list_ref) {  // could be with syntax sugar
-      auto Apply = [this](AST::Expr *expr) -> ptr<AST::Expr> {
+    if (list_ref) { // could be with syntax sugar
+      auto Apply = [this](AST::Expr* expr) -> ptr<AST::Expr> {
         if (!expr) return nullptr;
         if (auto ref = expr->GetReference()) {
           if (!isa<AST::IntIndex>(ref.get())) return nullptr;
@@ -195,9 +193,9 @@ struct Normalizer : public Visitor {
     return true;
   }
 
-  bool Visit(AST::MultiDimSpans &) override { return true; }
-  bool Visit(AST::NamedTypeDecl &) override { return true; }
-  bool Visit(AST::NamedVariableDecl &n) override {
+  bool Visit(AST::MultiDimSpans&) override { return true; }
+  bool Visit(AST::NamedTypeDecl&) override { return true; }
+  bool Visit(AST::NamedVariableDecl& n) override {
     __TRACE_NORM_VISIT__(n)
     if (n.mem && (n.mem->Get() == Storage::DEFAULT)) {
       // Should this be set by target?
@@ -209,17 +207,17 @@ struct Normalizer : public Visitor {
 
     return true;
   }
-  bool Visit(AST::IntTuple &) override { return true; }
-  bool Visit(AST::Assignment &) override { return true; }
-  bool Visit(AST::IntIndex &) override { return true; }
-  bool Visit(AST::DataType &) override { return true; }
-  bool Visit(AST::Identifier &) override { return true; }
-  bool Visit(AST::Parameter &) override { return true; }
-  bool Visit(AST::ParamList &) override { return true; }
-  bool Visit(AST::ParallelBy &) override { return true; }
-  bool Visit(AST::WhereBind &) override { return true; }
+  bool Visit(AST::IntTuple&) override { return true; }
+  bool Visit(AST::Assignment&) override { return true; }
+  bool Visit(AST::IntIndex&) override { return true; }
+  bool Visit(AST::DataType&) override { return true; }
+  bool Visit(AST::Identifier&) override { return true; }
+  bool Visit(AST::Parameter&) override { return true; }
+  bool Visit(AST::ParamList&) override { return true; }
+  bool Visit(AST::ParallelBy&) override { return true; }
+  bool Visit(AST::WhereBind&) override { return true; }
 
-  bool Visit(AST::WithIn &n) override {
+  bool Visit(AST::WithIn& n) override {
     __TRACE_NORM_VISIT__(n)
     if (n.with_matchers) return true;
     assert(n.with && "must have with statement.");
@@ -251,11 +249,11 @@ struct Normalizer : public Visitor {
     return true;
   }
 
-  bool Visit(AST::WithBlock &) override { return true; }
-  bool Visit(AST::Memory &) override { return true; }
-  bool Visit(AST::SpanAs &) override { return true; }
+  bool Visit(AST::WithBlock&) override { return true; }
+  bool Visit(AST::Memory&) override { return true; }
+  bool Visit(AST::SpanAs&) override { return true; }
 
-  bool Visit(AST::DMA &n) override {
+  bool Visit(AST::DMA& n) override {
     if (n.operation == ".none") return true;
     if (!isa<AST::Select>(n.to)) return true;
 
@@ -272,7 +270,7 @@ struct Normalizer : public Visitor {
     return true;
   }
 
-  bool Visit(AST::ChunkAt &n) override {
+  bool Visit(AST::ChunkAt& n) override {
     __TRACE_NORM_VISIT__(n)
     if (n.sa) {
       assert(cur_dma_index != -1);
@@ -287,7 +285,7 @@ struct Normalizer : public Visitor {
     if (n.positions) {
       std::vector<std::pair<int, ptr<AST::Node>>> repls;
       int i = -1;
-      for (auto &v : n.positions->AllValues()) {
+      for (auto& v : n.positions->AllValues()) {
         ++i;
         auto expr = cast<AST::Expr>(v);
         if (expr->GetSymbol()) {
@@ -319,7 +317,7 @@ struct Normalizer : public Visitor {
             std::make_tuple(index, v, nname));
         repls.emplace_back(i, AST::Make<AST::Identifier>(v->LOC(), nname));
       }
-      for (auto &repl : repls) {
+      for (auto& repl : repls) {
         VST_DEBUG(os << "replace " << PSTR(n.positions->ValueAt(repl.first))
                      << " with ");
 
@@ -330,20 +328,20 @@ struct Normalizer : public Visitor {
     }
     return true;
   }
-  bool Visit(AST::Wait &) override { return true; }
-  bool Visit(AST::Call &) override { return true; }
-  bool Visit(AST::Swap &) override { return true; }
-  bool Visit(AST::Select &) override { return true; }
-  bool Visit(AST::Return &) override { return true; }
-  bool Visit(AST::LoopRange &) override { return true; }
-  bool Visit(AST::ForeachBlock &) override { return true; }
-  bool Visit(AST::FunctionDecl &) override { return true; }
-  bool Visit(AST::ChoreoFunction &) override { return true; }
-  bool Visit(AST::CppSourceCode &) override { return true; }
-  bool Visit(AST::Program &) override { return true; }
+  bool Visit(AST::Wait&) override { return true; }
+  bool Visit(AST::Call&) override { return true; }
+  bool Visit(AST::Swap&) override { return true; }
+  bool Visit(AST::Select&) override { return true; }
+  bool Visit(AST::Return&) override { return true; }
+  bool Visit(AST::LoopRange&) override { return true; }
+  bool Visit(AST::ForeachBlock&) override { return true; }
+  bool Visit(AST::FunctionDecl&) override { return true; }
+  bool Visit(AST::ChoreoFunction&) override { return true; }
+  bool Visit(AST::CppSourceCode&) override { return true; }
+  bool Visit(AST::Program&) override { return true; }
 };
 
-}  // end namespace Choreo
+} // end namespace Choreo
 
 #undef __TRACE_NORM_VISIT__
-#endif  // __CHOREO_NORMALIZATION_HPP__
+#endif // __CHOREO_NORMALIZATION_HPP__

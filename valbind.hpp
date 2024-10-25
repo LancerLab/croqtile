@@ -29,10 +29,10 @@ namespace ValBind {
 
 template <typename T>
 class Binds {
- public:
+public:
   using Set = std::unordered_set<T>;
   // Add a bind relationship between a and b
-  void AddBind(const T &a, const T &b) {
+  void AddBind(const T& a, const T& b) {
     // Find or create bind sets for a and b
     auto set_a = GetOrCreateSet(a);
     auto set_b = GetOrCreateSet(b);
@@ -49,7 +49,7 @@ class Binds {
   }
 
   // Get the bind set for a given value
-  const Set &GetBinds(const T &value) const {
+  const Set& GetBinds(const T& value) const {
     static Set ret;
     ret = GetSet(value);
     ret.erase(value);
@@ -57,7 +57,7 @@ class Binds {
   }
 
   // Get the bind set for a given value
-  const Set &GetSet(const T &value) const {
+  const Set& GetSet(const T& value) const {
     auto it = bind_map.find(value);
     if (it != bind_map.end()) {
       return *(it->second);
@@ -70,33 +70,31 @@ class Binds {
   void Clear() { bind_map.clear(); }
 
   // Print all bind sets for debugging
-  void Print(std::ostream &os) const {
-    std::unordered_set<const std::unordered_set<int> *> printed;
-    for (const auto &pair : bind_map) {
+  void Print(std::ostream& os) const {
+    std::unordered_set<const std::unordered_set<int>*> printed;
+    for (const auto& pair : bind_map) {
       if (printed.insert(pair.second).second) {
         os << "{ ";
-        for (int val : *(pair.second)) {
-          os << val << " ";
-        }
+        for (int val : *(pair.second)) { os << val << " "; }
         os << "}\n";
       }
     }
   }
 
- private:
+private:
   // Helper to get or create a bind set
-  std::shared_ptr<Set> GetOrCreateSet(const T &value) {
+  std::shared_ptr<Set> GetOrCreateSet(const T& value) {
     auto it = bind_map.find(value);
     if (it == bind_map.end()) {
       bind_map[value] = std::make_shared<Set>();
-      bind_map[value]->emplace(value);  // always bind to itself
+      bind_map[value]->emplace(value); // always bind to itself
     }
     return bind_map[value];
   }
 
   // Helper to merge two bind sets
-  void MergeSets(std::shared_ptr<Set> &set_a, std::shared_ptr<Set> &set_b) {
-    for (const T &value : *set_b) {
+  void MergeSets(std::shared_ptr<Set>& set_a, std::shared_ptr<Set>& set_b) {
+    for (const T& value : *set_b) {
       set_a->insert(value);
       bind_map[value] = set_a;
     }
@@ -108,31 +106,31 @@ class Binds {
 
 template <typename T>
 class BindInfo {
- public:
+public:
   // Add an alias relationship between a and b
-  void AddBind(const T &a, const T &b) { bind_sets.AddBind(a, b); }
+  void AddBind(const T& a, const T& b) { bind_sets.AddBind(a, b); }
 
   // Get the alias set for a given value
-  const typename Binds<T>::Set &GetBinds(const T &value) const {
+  const typename Binds<T>::Set& GetBinds(const T& value) const {
     return bind_sets.GetBinds(value);
   }
 
   // Get the alias set for a given value
-  const typename Binds<T>::Set &GetSet(const T &value) const {
+  const typename Binds<T>::Set& GetSet(const T& value) const {
     return bind_sets.GetSet(value);
   }
 
   // Print all alias sets for debugging
-  void PrintBinds(std::ostream &os) const { bind_sets.Print(os); }
+  void PrintBinds(std::ostream& os) const { bind_sets.Print(os); }
 
   void Clear() { bind_sets.Clear(); }
 
- private:
+private:
   Binds<T> bind_sets;
 };
 
-}  // end namespace ValBind
+} // end namespace ValBind
 
-}  // end namespace Choreo
+} // end namespace Choreo
 
-#endif  // __CHOREO_VALUE_BINDS_HPP__
+#endif // __CHOREO_VALUE_BINDS_HPP__

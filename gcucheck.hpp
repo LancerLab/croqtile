@@ -3,23 +3,21 @@
 
 // This apply the GCU target specific check and information annotation
 
-#include "visitor.hpp"
 #include "ast.hpp"
+#include "visitor.hpp"
 
 namespace Choreo {
 
 class WorkingList {
- private:
+private:
   std::unordered_map<std::string, AST::DMA*> string_to_dma;
 
- public:
+public:
   // Add a symbol to the symbol table
   // emittable = 'a'
   // type_symbol = 'a_type'
   // emitted = 'DRAMType(FloatType(32), {1, 2})'
-  void AddDMA(AST::DMA& dma) {
-    string_to_dma.emplace(dma.future, &dma);
-  }
+  void AddDMA(AST::DMA& dma) { string_to_dma.emplace(dma.future, &dma); }
 
   // Retrieve typename of a symbol
   AST::DMA* GetDMA(const std::string& mnemonic) {
@@ -28,24 +26,22 @@ class WorkingList {
     return nullptr;
   }
 
-  void Reset() {
-    string_to_dma.clear();
-  }
+  void Reset() { string_to_dma.clear(); }
 };
 
 struct GCUCheck : public VisitorWithSymTab {
- private:
-  std::ostream &os;
+private:
+  std::ostream& os;
   size_t error_count = 0;
 
-  std::unordered_map<std::string, AST::Parameter *> cur_params;
+  std::unordered_map<std::string, AST::Parameter*> cur_params;
   WorkingList workinglist;
   int parallel_level = 0;
   int max_parallel_level = 0;
   int local_level = 0;
 
- private:
-  bool BeforeVisitImpl(AST::Node &n) {
+private:
+  bool BeforeVisitImpl(AST::Node& n) {
     TraceEachVisit(n, "(pre)");
     if (isa<AST::ChoreoFunction>(&n)) {
       local_level = 0;
@@ -58,7 +54,7 @@ struct GCUCheck : public VisitorWithSymTab {
     return true;
   }
 
-  bool AfterVisitImpl(AST::Node &n) {
+  bool AfterVisitImpl(AST::Node& n) {
     TraceEachVisit(n, "(post)");
     if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       auto pty = cast<BoundedITupleType>(GetSymbolType(pb->biv));
@@ -72,146 +68,146 @@ struct GCUCheck : public VisitorWithSymTab {
     return true;
   }
 
-  void TraceEachVisit(AST::Node &n, std::string sup = "") {
+  void TraceEachVisit(AST::Node& n, std::string sup = "") {
     if (trace_visit) os << n.TypeNameString() << sup << "\n";
   }
 
- public:
-  GCUCheck(const ptr<SymbolTable> s_tab, std::ostream &o = std::cout)
+public:
+  GCUCheck(const ptr<SymbolTable> s_tab, std::ostream& o = std::cout)
       : VisitorWithSymTab("gcu", s_tab), os(o) {}
   ~GCUCheck() {}
 
-  bool Visit(AST::MultiNodes &n) {
+  bool Visit(AST::MultiNodes& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::MultiValues &n) {
+  bool Visit(AST::MultiValues& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::IntLiteral &n) {
+  bool Visit(AST::IntLiteral& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Boolean &n) {
+  bool Visit(AST::Boolean& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Expr &n) {
+  bool Visit(AST::Expr& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::MultiDimSpans &n) {
+  bool Visit(AST::MultiDimSpans& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::NamedTypeDecl &n) {
+  bool Visit(AST::NamedTypeDecl& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::NamedVariableDecl &n) {
+  bool Visit(AST::NamedVariableDecl& n) {
     TraceEachVisit(n);
     auto ty = GetSymbolType(n.name_str);
     if (!isa<SpannedType>(ty)) return true;
     auto st = cast<SpannedType>(ty)->GetStorage();
     switch (st) {
-      case Storage::GLOBAL:
-        if (parallel_level != 0) {
-          Error(n.LOC(), "global variable '" + n.name_str +
-                             "` mustn't be declared inside parallel-by.");
-          error_count++;
-        }
-        break;
-      case Storage::SHARED:
-        if (parallel_level != 1) {
-          Error(n.LOC(),
-                "shared variable '" + n.name_str +
-                    "` must be declared inside single level of parallel-by.");
-          error_count++;
-        } else if (local_level == 1) {
-          Error(n.LOC(), "shared variable '" + n.name_str +
-                             "` mustn't be declared within the same level of "
-                             "parallel-by as local variables.");
-          error_count++;
-        } else if (local_level == 0)
-          local_level = 2;
-        break;
-      case Storage::LOCAL:
-        if (parallel_level == 0) {
-          Error(n.LOC(), "local variable '" + n.name_str +
-                             "` must be declared inside parallel-by.");
-          error_count++;
-        } else if (local_level != 0 && parallel_level != local_level) {
-          Error(n.LOC(), "local variable '" + n.name_str +
-                             "` must be declared inside a level of parallel-by "
-                             "that is identical to other local variables and "
-                             "different with shared variables.");
-          error_count++;
-        } else if (local_level == 0)
-          local_level = parallel_level;
-        break;
-      default:
-        Error(n.LOC(), "can not declare variable '" + n.name_str + "` as " +
-                           STR(st) + " inside choreo function.");
+    case Storage::GLOBAL:
+      if (parallel_level != 0) {
+        Error(n.LOC(), "global variable '" + n.name_str +
+                           "` mustn't be declared inside parallel-by.");
         error_count++;
-        break;
+      }
+      break;
+    case Storage::SHARED:
+      if (parallel_level != 1) {
+        Error(n.LOC(),
+              "shared variable '" + n.name_str +
+                  "` must be declared inside single level of parallel-by.");
+        error_count++;
+      } else if (local_level == 1) {
+        Error(n.LOC(), "shared variable '" + n.name_str +
+                           "` mustn't be declared within the same level of "
+                           "parallel-by as local variables.");
+        error_count++;
+      } else if (local_level == 0)
+        local_level = 2;
+      break;
+    case Storage::LOCAL:
+      if (parallel_level == 0) {
+        Error(n.LOC(), "local variable '" + n.name_str +
+                           "` must be declared inside parallel-by.");
+        error_count++;
+      } else if (local_level != 0 && parallel_level != local_level) {
+        Error(n.LOC(), "local variable '" + n.name_str +
+                           "` must be declared inside a level of parallel-by "
+                           "that is identical to other local variables and "
+                           "different with shared variables.");
+        error_count++;
+      } else if (local_level == 0)
+        local_level = parallel_level;
+      break;
+    default:
+      Error(n.LOC(), "can not declare variable '" + n.name_str + "` as " +
+                         STR(st) + " inside choreo function.");
+      error_count++;
+      break;
     }
     return true;
   }
-  bool Visit(AST::IntTuple &n) {
+  bool Visit(AST::IntTuple& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Assignment &n) {
+  bool Visit(AST::Assignment& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::IntIndex &n) {
+  bool Visit(AST::IntIndex& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::DataType &n) {
+  bool Visit(AST::DataType& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Identifier &n) {
+  bool Visit(AST::Identifier& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Parameter &n) {
+  bool Visit(AST::Parameter& n) {
     TraceEachVisit(n);
     if (n.sym) cur_params.emplace(InScopeName(n.sym->name), &n);
     return true;
   }
-  bool Visit(AST::ParamList &n) {
+  bool Visit(AST::ParamList& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::ParallelBy &n) {
+  bool Visit(AST::ParallelBy& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::WhereBind &n) {
+  bool Visit(AST::WhereBind& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::WithIn &n) {
+  bool Visit(AST::WithIn& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::WithBlock &n) {
+  bool Visit(AST::WithBlock& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Memory &n) {
+  bool Visit(AST::Memory& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::SpanAs &n) {
+  bool Visit(AST::SpanAs& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::DMA &n) {
+  bool Visit(AST::DMA& n) {
     TraceEachVisit(n);
     // The user does not have to explicitly claim a global memory that requires
     // direct copy from host to device. Here Choreo judge if a spanned memory is
@@ -224,12 +220,13 @@ struct GCUCheck : public VisitorWithSymTab {
     // handle chained info, filling the DMA chain.
     if (n.chained) {
       auto _chain_from_ptr = workinglist.GetDMA(n.chain_from);
-      assert(_chain_from_ptr != nullptr && "after primitive chained to non-exist future id\n");
+      assert(_chain_from_ptr != nullptr &&
+             "after primitive chained to non-exist future id\n");
       _chain_from_ptr->chained = true;
       _chain_from_ptr->chain_to = n.future;
     }
 
-    SpannedType *sty = nullptr;
+    SpannedType* sty = nullptr;
     if (auto fty = dyn_cast<FutureType>(GetSymbolType(f_name)))
       sty = fty->GetSpannedType().get();
     else
@@ -243,15 +240,14 @@ struct GCUCheck : public VisitorWithSymTab {
 
     auto annotate_by_storage = [this, &f_name](Storage st) {
       switch (st) {
-        case Storage::GLOBAL:
-        case Storage::SHARED:
-        case Storage::LOCAL: {
-          auto p = cur_params[InScopeName(f_name)];
-          p->attr = ATT_SHADOW_TO_GLOBAL;
-          break;
-        }
-        default:
-          break;
+      case Storage::GLOBAL:
+      case Storage::SHARED:
+      case Storage::LOCAL: {
+        auto p = cur_params[InScopeName(f_name)];
+        p->attr = ATT_SHADOW_TO_GLOBAL;
+        break;
+      }
+      default: break;
       }
     };
     if (auto to = dyn_cast<AST::ChunkAt>(n.to))
@@ -262,51 +258,51 @@ struct GCUCheck : public VisitorWithSymTab {
 
     return true;
   }
-  bool Visit(AST::ChunkAt &n) {
+  bool Visit(AST::ChunkAt& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Wait &n) {
+  bool Visit(AST::Wait& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Call &n) {
+  bool Visit(AST::Call& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Swap &n) {
+  bool Visit(AST::Swap& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Select &n) {
+  bool Visit(AST::Select& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Return &n) {
+  bool Visit(AST::Return& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::LoopRange &n) {
+  bool Visit(AST::LoopRange& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::ForeachBlock &n) {
+  bool Visit(AST::ForeachBlock& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::FunctionDecl &n) {
+  bool Visit(AST::FunctionDecl& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::ChoreoFunction &n) {
+  bool Visit(AST::ChoreoFunction& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::CppSourceCode &n) {
+  bool Visit(AST::CppSourceCode& n) {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Program &n) {
+  bool Visit(AST::Program& n) {
     TraceEachVisit(n);
     return true;
   }
@@ -318,6 +314,6 @@ struct GCUCheck : public VisitorWithSymTab {
   }
 };
 
-}  // end namespace Choreo
+} // end namespace Choreo
 
-#endif  // __CHOREO_GCU_CHECK_INFO_HPP__
+#endif // __CHOREO_GCU_CHECK_INFO_HPP__

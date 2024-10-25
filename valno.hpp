@@ -48,24 +48,24 @@ inline std::optional<std::string> GetNthElement(const std::string& input,
 }
 
 inline int CountElementsInSignature(const std::string& input) {
-  if (input.empty()) return 0;  // Return 0 if the string is empty
+  if (input.empty()) return 0; // Return 0 if the string is empty
   int count = 1;
   for (char c : input) {
-    if (c == ',') ++count;  // Increment for each comma found
+    if (c == ',') ++count; // Increment for each comma found
   }
   return count;
 }
 
 class ShapeInference;
 class ValueNumbering {
- private:
+private:
   ShapeInference* visitor;
   std::vector<std::unordered_map<std::string, int>> expressionValueNumbers;
   std::vector<std::unordered_map<int, std::string>> valueNumberExpressions;
   ValBind::BindInfo<int> bind_info;
 
   std::vector<std::unordered_map<const AST::Node*, int>>
-      nodeValueNumbers;  // cache to direct map node to value number
+      nodeValueNumbers; // cache to direct map node to value number
 
   int nextValueNumber = 0;
 
@@ -74,7 +74,7 @@ class ValueNumbering {
 
   std::optional<std::string> ref = std::nullopt;
 
- public:
+public:
   explicit ValueNumbering(ShapeInference* v, bool t, std::ostream& o)
       : visitor(v), trace(t), os(o) {}
 
@@ -164,38 +164,34 @@ class ValueNumbering {
     }
   }
 
-  std::optional<std::string> SignBoundedOperation(const location&,
-                                                  const std::string&,
-                                                  const AST::Node&,
-                                                  const AST::Node&,
-                                                  bool verbose);
+  std::optional<std::string>
+  SignBoundedOperation(const location&, const std::string&, const AST::Node&,
+                       const AST::Node&, bool verbose);
 
-  std::optional<std::string> TryToSimplifyBinary(const location&,
-                                                 const std::string&,
-                                                 const std::string&,
-                                                 const std::string&,
-                                                 bool = false);
+  std::optional<std::string>
+  TryToSimplifyBinary(const location&, const std::string&, const std::string&,
+                      const std::string&, bool = false);
 
   std::string SignBinaryCompositeValues(const location&, const std::string&,
                                         const std::string&, const std::string&,
                                         bool = false);
 
- private:
+private:
   std::string ScopeIndent();
 
   void Error(const location& loc, const std::string& message);
   void Warning(const location& loc, const std::string& message);
 };
 
-#define __TRACE_EACH_VISIT__          \
-  if (trace_visit) {                  \
-    os << n.TypeNameString() << ": "; \
-    n.Print(os);                      \
-    os << "\n";                       \
+#define __TRACE_EACH_VISIT__                                                   \
+  if (trace_visit) {                                                           \
+    os << n.TypeNameString() << ": ";                                          \
+    n.Print(os);                                                               \
+    os << "\n";                                                                \
   }
 
 class ShapeInference : public Visitor {
- private:
+private:
   ValueNumbering vn;
 
   int cur_vn = GetInvalidValueNumber();
@@ -205,19 +201,19 @@ class ShapeInference : public Visitor {
   // when values are consumed instead of generated
   bool gen_values = true;
 
-  bool allow_named_dim = false;  // named dimension (mdspan param only)
+  bool allow_named_dim = false; // named dimension (mdspan param only)
 
- private:
+private:
   std::ostream& os;
   // for debugging purpose only
   bool cannot_proceed = false;
   size_t error_count = 0;
 
- public:
+public:
   ShapeInference(bool t = false, std::ostream& o = std::cout)
       : Visitor("valno"), vn(this, t, o), os(o) {}
 
- public:
+public:
   void PrintValueNumbers(std::ostream& os) {
     os << "value numbers for choreo code:\n";
     vn.Print(os);
@@ -230,14 +226,14 @@ class ShapeInference : public Visitor {
     return error_count != 0;
   }
 
- public:
+public:
   virtual bool BeforeVisit(AST::Node& n) override {
     if (isa<AST::Program>(&n)) {
-      vn.EnterScope("");  // global scope
+      vn.EnterScope(""); // global scope
     } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
       vn.EnterScope(f->name);
       cur_fn = f->name;
-      cannot_proceed = false;  // recover state when starting a new function
+      cannot_proceed = false; // recover state when starting a new function
     } else if (isa<AST::ParallelBy>(&n)) {
       static size_t count = 0;
       vn.EnterScope("paraby_" + std::to_string(count++));
@@ -247,7 +243,7 @@ class ShapeInference : public Visitor {
     } else if (isa<AST::ForeachBlock>(&n)) {
       static size_t count = 0;
       vn.EnterScope("foreach_" + std::to_string(count++));
-      gen_values = false;  // disable valno on range expressions
+      gen_values = false; // disable valno on range expressions
     } else if (auto* b = dyn_cast<AST::MultiDimSpans>(&n)) {
       if (b->ref_name != "") {
         auto n = SSTab().NameInScopeOrNull(b->ref_name);
@@ -291,7 +287,7 @@ class ShapeInference : public Visitor {
     return true;
   }
 
- public:
+public:
   bool Visit(AST::MultiNodes&) {
     if (cannot_proceed) return true;
     return true;
@@ -348,7 +344,7 @@ class ShapeInference : public Visitor {
         }
       }
     } else if (n.op == "dataof") {
-      InvalidateVN(cur_vn);  // a spanned data does not have a value number
+      InvalidateVN(cur_vn); // a spanned data does not have a value number
       return true;
     }
 
@@ -386,7 +382,7 @@ class ShapeInference : public Visitor {
         ProcessValueNumberString(
             vn_sig, [this, &vn_sig](int valno, size_t index) {
               if (UnknownVN(valno))
-                return;  // do not associate it with vn of "?"
+                return; // do not associate it with vn of "?"
               vn.GetOrInsertValueNumberFromSignature("index_const_" +
                                                      std::to_string(index));
               auto elem_sig = vn_sig + "(" + std::to_string(index) + ")";
@@ -420,7 +416,7 @@ class ShapeInference : public Visitor {
       cur_mdspan_vn = vn.GetOrInsertValueNumberFromSignature(unknown_spans);
       n.SetTypeDetail(GenShapeFromSignature(unknown_spans));
     } else {
-      SetUnknownVN(cur_mdspan_vn);  // failed to deduce the type detail
+      SetUnknownVN(cur_mdspan_vn); // failed to deduce the type detail
     }
 
     InvalidateVN(cur_vn);
@@ -440,7 +436,7 @@ class ShapeInference : public Visitor {
       vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(n.name_str),
                                            cur_mdspan_vn);
 
-      InvalidateVN(cur_mdspan_vn);  // comsumes the mdspan
+      InvalidateVN(cur_mdspan_vn); // comsumes the mdspan
     }
     return true;
   }
@@ -516,14 +512,14 @@ class ShapeInference : public Visitor {
       // set alias expressions with proper value numbers
       ProcessValueNumberString(
           vn_sig, [this, &vn_sig](int valno, size_t index) {
-            if (UnknownVN(valno)) return;  // do not associate it with vn of "?"
+            if (UnknownVN(valno)) return; // do not associate it with vn of "?"
             vn.GetOrInsertValueNumberFromSignature("index_const_" +
                                                    std::to_string(index));
             vn.AssociateSignatureWithValueNumber(
                 vn_sig + "(" + std::to_string(index) + ")", valno);
           });
     }
-    InvalidateVN(cur_vn);  // Currently cut off value numbering
+    InvalidateVN(cur_vn); // Currently cut off value numbering
     return true;
   }
 
@@ -579,9 +575,7 @@ class ShapeInference : public Visitor {
 
     if (cannot_proceed) return true;
 
-    if (ValidVN(cur_mdspan_vn)) {
-      cur_vn = cur_mdspan_vn;
-    }
+    if (ValidVN(cur_mdspan_vn)) { cur_vn = cur_mdspan_vn; }
 
     return true;
   }
@@ -610,7 +604,7 @@ class ShapeInference : public Visitor {
                            "' has not been generated.");
       cur_vn = vn.GetValueNumberOfSignature(SSTab().InScopeName(name));
     } else {
-      if (allow_named_dim) {  // for named dims in parameters
+      if (allow_named_dim) { // for named dims in parameters
         if (!SSTab().DeclaredInScope(n.name)) {
           SSTab().DefineSymbol(n.name, MakeIntegerType());
           cur_vn =
@@ -710,7 +704,7 @@ class ShapeInference : public Visitor {
     std::string bound = "const_" + std::to_string(n.bound);
     int valno = vn.GetOrInsertValueNumberFromSignature(bound);
     std::string iv_name =
-        SSTab().ScopedName("@" + n.biv);  // upper-bound of bounded variable
+        SSTab().ScopedName("@" + n.biv); // upper-bound of bounded variable
     vn.AssociateSignatureWithValueNumber(iv_name, valno);
     Shape s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(valno));
     n.SetType(MakeBoundedITupleType(s, "pv"));
@@ -773,9 +767,7 @@ class ShapeInference : public Visitor {
     ProcessValueNumberString(
         vn_sig, [this, &vn_sig, &n, &found_zero](int valno, size_t) {
           auto sig = vn.GetSignatureFromValueNumber(valno);
-          if (sig == "const_0") {
-            found_zero = true;
-          }
+          if (sig == "const_0") { found_zero = true; }
         });
     if (found_zero) {
       Error(
@@ -789,7 +781,7 @@ class ShapeInference : public Visitor {
     }
 
     auto GenSignatureAndDoValno = [this, &vn_sig, &n](int valno, size_t index) {
-      if (UnknownVN(valno)) return;  // do not associate it with vn of "?"
+      if (UnknownVN(valno)) return; // do not associate it with vn of "?"
       if (n.with) {
         std::string name = SSTab().ScopedName("@" + n.with->name) + "(" +
                            std::to_string(index) + ")";
@@ -812,7 +804,7 @@ class ShapeInference : public Visitor {
       }
     };
     if (CountElementsInSignature(vn_sig) ==
-        1)  // support `with idx={m} in [xx] {}`
+        1) // support `with idx={m} in [xx] {}`
       GenSignatureAndDoValno(vn.GetValueNumberOfSignature(vn_sig), 0);
     else
       ProcessValueNumberString(vn_sig, GenSignatureAndDoValno);
@@ -852,7 +844,7 @@ class ShapeInference : public Visitor {
     auto pty = SSTab().LookupSymbol(n.id->name);
     assert((isa<SpannedType>(pty) || isa<FutureType>(pty)) &&
            "unexpected data type.");
-    SpannedType *sty = nullptr;
+    SpannedType* sty = nullptr;
     if (auto fty = dyn_cast<FutureType>(pty))
       sty = fty->GetSpannedType().get();
     else
@@ -935,7 +927,7 @@ class ShapeInference : public Visitor {
       std::string f_span = n.future + ".span";
       vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(f_span), cur_vn);
       SSTab().DefineSymbol(n.future, n.GetType());
-      SSTab().DefineSymbol(f_span, MakeMDSpanType(s));  // implicit symbol
+      SSTab().DefineSymbol(f_span, MakeMDSpanType(s)); // implicit symbol
     }
 
     InvalidateVN(cur_vn);
@@ -969,9 +961,9 @@ class ShapeInference : public Visitor {
       int dim_count = CountElementsInSignature(data_sig);
       int dim_index = 0;
 
-      std::string fs_signature;  // signature of the future.span
-      auto AppendSignature = [this, &fs_signature, &n, &dim_index, dim_count](
-                                 int dividend_vn, int divisor_vn) {
+      std::string fs_signature; // signature of the future.span
+      auto AppendSignature = [this, &fs_signature, &n, &dim_index,
+                              dim_count](int dividend_vn, int divisor_vn) {
         // the signature without optimiz
         std::string res_sig = "/:#" + std::to_string(dividend_vn) + ":#" +
                               std::to_string(divisor_vn);
@@ -1089,7 +1081,7 @@ class ShapeInference : public Visitor {
     assert(!n.inDMA);
     if (isa<SpannedType>(NodeType(n))) {
       cur_mdspan_vn = vn.GenerateValueNumberForNode(n);
-      InvalidateVN(cur_vn);  // used for variable def
+      InvalidateVN(cur_vn); // used for variable def
     } else if (isa<FutureType>(NodeType(n))) {
       if (auto id = AST::GetName(*n.expr_list->ValueAt(0))) {
         auto n = SSTab().NameInScopeOrNull(*id + ".span");
@@ -1123,7 +1115,7 @@ class ShapeInference : public Visitor {
   bool Visit(AST::ForeachBlock& n) {
     if (trace_visit) os << n.TypeNameString() << "\n";
 
-    gen_values = true;  // allow generate values for statements
+    gen_values = true; // allow generate values for statements
 
     if (cannot_proceed) return true;
 
@@ -1161,7 +1153,7 @@ class ShapeInference : public Visitor {
     return true;
   };
 
- private:
+private:
   // Given a multi-value signature, process each value
   void ProcessValueNumberString(const std::string& input,
                                 std::function<void(int, size_t)> lambda) {
@@ -1173,7 +1165,7 @@ class ShapeInference : public Visitor {
     for (auto i = begin; i != end; ++i, ++matchIndex) {
       std::smatch match = *i;
       std::string matchStr =
-          match.str(1);  // Capture the number part of the match
+          match.str(1); // Capture the number part of the match
       int number = std::stoi(matchStr);
 
       // Call the passed lambda function with the extracted string and its index
@@ -1234,6 +1226,6 @@ class ShapeInference : public Visitor {
   }
 };
 
-}  // end namespace Choreo
+} // end namespace Choreo
 
-#endif  // __CHOREO_VALUE_NUMBERING_HPP__
+#endif // __CHOREO_VALUE_NUMBERING_HPP__
