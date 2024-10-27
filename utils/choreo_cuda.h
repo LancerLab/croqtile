@@ -23,7 +23,7 @@ namespace choreo {
 
 namespace cuda {
 
-#define CEIL_DIV(M, N) (((M) + (N)-1) / (N))
+#define CEIL_DIV(M, N) (((M) + (N) - 1) / (N))
 
 const std::string errLogFile = "matrixValidationFailure.txt";
 
@@ -78,7 +78,7 @@ void CudaDeviceInfo() {
 void randomize_matrix(float* mat, int N) {
   // NOTICE: Use gettimeofday instead of srand((unsigned)time(NULL)); the time
   // precision is too low and the same random number is generated.
-  struct timeval time {};
+  struct timeval time{};
   gettimeofday(&time, nullptr);
   srand(time.tv_usec);
   for (int i = 0; i < N; i++) {

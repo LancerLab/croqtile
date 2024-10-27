@@ -233,10 +233,10 @@ int TypeIDProvider<T>::__unique_id;
     return name;                                                               \
   }                                                                            \
   static uint64_t TypeID() {                                                   \
-    return (uint64_t) & (TypeIDProvider<TTYPE>::__unique_id);                  \
+    return (uint64_t)&(TypeIDProvider<TTYPE>::__unique_id);                    \
   }                                                                            \
   bool IsType(uint64_t ty) const override {                                    \
-    return (ty == (uint64_t) & (TypeIDProvider<TTYPE>::__unique_id)) ||        \
+    return (ty == (uint64_t)&(TypeIDProvider<TTYPE>::__unique_id)) ||          \
            PTYPE::IsType(ty);                                                  \
   }
 

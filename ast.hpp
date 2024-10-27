@@ -107,7 +107,7 @@ struct MultiNodes : public Node, public TypeIDProvider<MultiNodes> {
   std::string delimiter;
 
   explicit MultiNodes(const location& l, std::string d = "")
-      : Node(l), delimiter(d){};
+      : Node(l), delimiter(d) {};
 
   void Append(const ptr<Node>& m) {
     assert(m != nullptr && "Unexpected: null pointer.");

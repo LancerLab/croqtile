@@ -25,6 +25,9 @@ HEADER_FILES :=  $(shell find . -name '*.hpp') choreo_header.inc choreo_cuda_hea
 CC = g++
 CFLAGS = -std=c++17 -Wall -Wextra -g -D__CHOREO_FACTOR_DIR__="$(TOOLCHAIN_DIR)" -D__CHOREO_CUDA_DIR__="$(TOOLCHAIN_DIR)" -D__CHOREO_TOPSCC_DIR__="$(TOOLCHAIN_DIR)"
 
+# fix version of clang-format
+CLANG_FORMAT:=$(WORK_DIR)/extern/clang-format-19-1-2
+
 # For gtest
 GTEST_DIR = extern/gtest
 GTEST_LIBS = $(GTEST_DIR)/libgtest.a $(GTEST_DIR)/libgtest_main.a
@@ -103,7 +106,7 @@ lines:
 	echo "test files"; wc -l $$(find tests/ -type f |grep -v "\.test")
 
 format:
-	clang-format -i -Werror *.cpp *.hpp utils/*.h tests/standalone/*.cu
+	$(CLANG_FORMAT) -i -Werror *.cpp *.hpp utils/*.h tests/standalone/*.cu
 
 standalone_test: $(TARGET)
 	cd tests/standalone/ && $(MAKE) test

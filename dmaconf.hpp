@@ -14,14 +14,14 @@ struct DMAConfig {
 
 struct CopyConfig final : public DMAConfig, public TypeIDProvider<CopyConfig> {
   const std::string Name() const { return "copy"; }
-  void Print(std::ostream&) const override{};
+  void Print(std::ostream&) const override {};
   __UDT_TYPE_INFO__(DMAConfig, CopyConfig)
 };
 
 struct SliceConfig final : public DMAConfig,
                            public TypeIDProvider<SliceConfig> {
   const std::string Name() const { return "slice"; }
-  void Print(std::ostream&) const override{};
+  void Print(std::ostream&) const override {};
   __UDT_TYPE_INFO__(DMAConfig, SliceConfig)
 };
 

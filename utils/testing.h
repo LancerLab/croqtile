@@ -1,4 +1,4 @@
-
+// clang-format off
 #define CHECK(cond) ASSERT_TRUE(cond)
 #define CHECK_FALSE(cond) ASSERT_FALSE(cond)
 #define SCHECK(cond)                                                           \
@@ -55,3 +55,4 @@
   \                                                                                                       
   __global__ void                                                                                            \
   CUDA_KERNEL_NAME(case_name)()
+// clang-format on
