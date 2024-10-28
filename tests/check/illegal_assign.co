@@ -6,7 +6,7 @@ __co__ void illegal_reassign_int() {
   parallel i0 by 6 {} // ok. 'i0' is a bounded integer
   with i0 in [4] {}  // ok. 'i0' is a bounded integer
 }
-// CHECK: error: current compiler does not support re-assignment of 'integer'.
+// CHECK: error: INTEGER re-assignment (i0) is not supported.
 // CHECK-NOT: error:{{.*}}i0{{.*}}
 
 __co__ void illegal_reassign_bool() {
@@ -19,22 +19,22 @@ __co__ void illegal_reassign_bool() {
   ba = bc;       // not allow for current simple valno
   bc = 1;        // not allow
 }
-// CHECK: error: current compiler does not support re-assignment of 'boolean'.
+// CHECK: error: BOOLEAN re-assignment (ba) is not supported.
 // CHECK-NOT: error:{{.*}}ba{{.*}}
 // CHECK: error: `bb' is declared as "bool" but initialized as "int".
-// CHECK: error: current compiler does not support re-assignment of 'boolean'.
-// CHECK: error: `bc' of type 'bool' is assigned as int.
+// CHECK: error: BOOLEAN re-assignment (ba) is not supported.
+// CHECK: error: `bc' of type "bool" can not be re-assigned as "int".
 
 __co__ void illegal_reassign_ituple() {
   ita = {3, 4};
   ita = {5, 6};  // error: reassign
   itb = {4};
   parallel p by 6 {
-    itb = {2, 32, 78};  // ok. "itb" is in another scope
+    itb = {2, 32, 78};  // ok. 'itb' is in another scope
   }
-  with ita in [7, 8] {}  // ok. "ita" is in another scope
+  with ita in [7, 8] {}  // ok. 'ita' is in another scope
 }
-// CHECK: error: `ita' of type 'ituple' can not be re-assigned.
+// CHECK: error: ITUPLE re-assignment (ita) is not supported.
 // CHECK-NOT: error:{{.*}}itb{{.*}}
 // CHECK-NOT: error:{{.*}}ita{{.*}}
 
@@ -42,7 +42,7 @@ __co__ void illegal_reassign_span() {
   mdsa : [3, 4];
   mdsa : [5, 6];           // error: redefine
   mdsa = [7, 8];           // error: re-assignment
-  parallel mdsa by 6 {     // ok. "mdsa" is a bounded integer
+  parallel mdsa by 6 {     // ok. 'mdsa' is a bounded integer
     mdsa : [4, 56, 78];    // fail. conflict with parallel by
     mdsa = [4, 56, 78];    // fail. conflict with parallel by
   }
@@ -59,22 +59,22 @@ __co__ void illegal_reassign_span() {
   with b in [7, 8] {
     mdsb : [4, 56, 78];
     with c in [3, 3] {
-       mdsb : [3, 3];    // ok. "mdsa" is in another scope
+       mdsb : [3, 3];    // ok. 'mdsa' is in another scope
        mdsb = [3, 3];    // error: re-assgin
     }
   }
 }
 
 // CHECK: error: symbol `mdsa' has been declared already.
-// CHECK: error: `mdsa' of type 'mdspan' can not be re-assigned.
+// CHECK: error: MDSPAN re-assignment (mdsa) is not supported.
 // CHECK: error: symbol `mdsa' has been declared already.
-// CHECK: error: `mdsa' of type '{int}->[]' can not be re-assigned as 'mdspan<3> []'.
+// CHECK: error: `mdsa' of type "{int}->[]" can not be re-assigned as "mdspan<3> []".
 // CHECK: error: `mdsg' is declared as "mdspan<>" but initialized as "int".
 // CHECK: error: symbol `mdsg' has been declared already.
-// CHECK: error: `mdsg' of type 'mdspan<2> []' is assigned as int.
+// CHECK: error: `mdsg' of type "mdspan<2> []" can not be re-assigned as "int".
 // CHECK: error: `mdsf' is declared as "mdspan<>" but initialized as "ituple<4>".
 // CHECK: error: symbol `mdsf' has been declared already.
-// CHECK: error: `mdsf' of type 'mdspan<2> []' can not be re-assigned as 'ituple<4>'.
-// CHECK: error: `mdsb' of type 'mdspan' can not be re-assigned.
+// CHECK: error: `mdsf' of type "mdspan<2> []" can not be re-assigned as "ituple<4>".
+// CHECK: error: MDSPAN re-assignment (mdsb) is not supported.
 
 // CHECK: Totally 17 errors have been detected

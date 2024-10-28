@@ -1,20 +1,20 @@
 // RUN: not choreo %s 2>&1 | FileCheck %s
 
 __co__ auto placeholder(f32 [24, 17, 128] a) {
-   f = dma.none;
+   f = dma.any;
    parallel p by 8 {
      with index = {x, y} in [17, 4] {
-       f1 = dma.none;
-       f2 = f;   // illegal assignment of dma.none
-       f3 = dma.none;
-       f4 = dma.none;
+       f1 = dma.any;
+       f2 = f;   // illegal assignment of dma.any
+       f3 = dma.any;
+       f4 = dma.any;
        foreach x, y(1: -1) {
-          f5 = dma.none;
+          f5 = dma.any;
           f = dma.copy.async a.chunkat(p, x, y) => local;
           f1 = dma.copy a.chunkat(p, x, y) => local;
           f3 = dma.copy.async a.chunkat(p, x, y) => local;
           f5 = dma.copy.async a.chunkat(p, x, y) => local;
-          swap(f4, f);  // can not swap placeholder
+          swap(f4, f);
           swap(f1, f3); // async vs sync
           swap(f5, f);  // ok.
        }
@@ -28,5 +28,4 @@ __co__ auto placeholder(f32 [24, 17, 128] a) {
 }
 
 // CHECK: can not initialize vairable `f2' with a placeholder.
-// CHECK: only support swapping of 'future'. (f4: placeholder<FUTURE>).
 // CHECK: swapping data of different types (sync=>local f32 mdspan<3> [] vs. async=>local f32 mdspan<3> []

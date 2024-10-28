@@ -100,7 +100,7 @@ public:
   bool Visit(AST::DMA& n) override {
     TraceEachVisit(n);
 
-    if (n.operation == ".none") return true;
+    if (n.operation == ".any") return true;
     if (!isa<AST::Memory>(n.to)) return true;
 
     // hoist the anonymous memory "=> local"

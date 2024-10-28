@@ -2,12 +2,6 @@
 
 using namespace Choreo;
 
-#define __TRACE_EACH_VISIT__(n)                                                \
-  if (trace_visit) {                                                           \
-    os << n.TypeNameString() << ": ";                                          \
-    os << "\n";                                                                \
-  }
-
 bool EarlySemantics::BeforeVisit(AST::Node& n) {
   if (isa<AST::Program>(&n)) {
     SSTab().EnterScope(""); // global scope
@@ -49,7 +43,7 @@ bool EarlySemantics::AfterVisit(AST::Node& n) {
       // maybe this can be moved to type inference
       if (!found_return && f->f_decl.ret_type->IsUnknown()) {
         f->f_decl.ret_type->base_type = BaseType::VOID;
-        f->f_decl.ret_type->SetType(MakeVoidType());
+        SetNodeType(*f->f_decl.ret_type, MakeVoidType());
       }
       // anything is ok
     } else if (requires_return && !found_return) {
@@ -78,29 +72,29 @@ bool EarlySemantics::AfterVisit(AST::Node& n) {
 }
 
 bool EarlySemantics::Visit(AST::MultiNodes& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   return true;
 }
 
 bool EarlySemantics::Visit(AST::MultiValues& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   return true;
 }
 
 bool EarlySemantics::Visit(AST::IntLiteral& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   SetNodeType(n, MakeIntegerType());
   return true;
 }
 
 bool EarlySemantics::Visit(AST::Boolean& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   SetNodeType(n, MakeBooleanType());
   return true;
 }
 
 bool EarlySemantics::Visit(AST::Expr& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   if (auto ref = n.GetReference()) {
     auto rty = NodeType(*ref);
     assert(!isa<UnknownType>(rty) && "reference type is unknown.");
@@ -367,7 +361,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
 }
 
 bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   size_t rank = GetInvalidRank();
 
   // transform [a.span, b.span] to be an expr of concat(a.span, b.span)
@@ -403,7 +397,7 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
               AST::Make<AST::Expr>(last->LOC(), "concat", last, wl[i]);
           last = concat;
         }
-        if (trace_visit)
+        if (debug_visit)
           os << "Transform: " << PSTR(n.list) << " to be " << PSTR(last)
              << "\n";
         n.list = last;
@@ -419,8 +413,8 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
         auto ty = NodeType(*v);
         if (!isa<IntegerType>(ty) && !isa<MDSpanType>(ty) &&
             !isa<ITupleType>(ty)) {
-          Error(v->LOC(), "unexpected data type '" + PSTR(v->GetType()) +
-                              "' is found in mdspan.");
+          Error(v->LOC(),
+                "unexpected data type '" + PSTR(ty) + "' is found in mdspan.");
           error_count++;
         }
       }
@@ -449,7 +443,7 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
                            std::to_string(n.Rank()) + ".");
       Warning(n.LOC(),
               "assume the mdspan as a rank of " + std::to_string(rank) + ".");
-      if (trace_visit)
+      if (debug_visit)
         os << "Warning in " << __FILE__ << ", line: " << __LINE__ << ".\n";
       n.SetRank(rank);
     }
@@ -460,7 +454,7 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
 }
 
 bool EarlySemantics::Visit(AST::NamedTypeDecl& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   assert(n.init_expr && "missing init expr.");
   auto ety = NodeType(*n.init_expr);
   auto nty = (IsValidRank(n.rank)) ? MakeRankedMDSpanType(n.rank)
@@ -478,65 +472,77 @@ bool EarlySemantics::Visit(AST::NamedTypeDecl& n) {
 }
 
 bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
-  __TRACE_EACH_VISIT__(n)
-  if (isa<UnknownType>(n.type->GetType())) {
-    if (!n.init_expr) {
+  TraceEachVisit(n);
+
+  ptr<Type> tty = nullptr;
+  ptr<Type> ety = nullptr;
+  if (n.type) tty = n.type->GetType();
+  if (n.init_expr) {
+    ety = n.init_expr->GetType();
+    assert(!isa<UnknownType>(ety) && "no type for an init expression.");
+  }
+
+  if (!ety) {
+    // in this case, the type is deduced from type annotation
+    if (isa<UnknownType>(tty)) {
       Error(n.LOC(), "unable to deduce the type of `" + n.name_str + "'.");
       error_count++;
-      // keep working
-    } else {
-      if (isa<MDSpanType>(n.init_expr->GetType())) {
-        Error(n.LOC(), "use ':' instead of '=' to define the \"" +
-                           STR(*n.init_expr->GetType()) + "\" type variable.");
-        error_count++;
-        if (trace_visit)
-          os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
-        // keep working
-      } else if (isa<PlaceHolderType>(n.init_expr->GetType())) {
-        Error(n.LOC(), "can not initialize vairable `" + n.name_str +
-                           "' with a placeholder.");
-        error_count++;
-        if (trace_visit)
-          os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
-      }
-      // Sometimes the parser can not decide the type. Figure it out via the
-      // initialization expression
-      SetNodeType(*n.type, n.init_expr->GetType());
+      return false;
     }
+    ReportErrorWhenViolateODR(n.LOC(), n.name_str, __FILE__, __LINE__, tty);
+    SetNodeType(n, tty);
+  } else {
+    // in this case, the type is deduced from initialize expression
+    if (isa<MDSpanType>(ety)) {
+      Error(n.LOC(), "use ':' instead of '=' to define the \"" + PSTR(ety) +
+                         "\" type variable.");
+      error_count++;
+      if (debug_visit)
+        os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
+      // keep working
+    } else if (isa<PlaceHolderType>(ety)) {
+      Error(n.LOC(), "can not initialize vairable `" + n.name_str +
+                         "' with a placeholder.");
+      error_count++;
+      if (debug_visit)
+        os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
+    }
+    // check for type consistency between annotation and init expr.
+    if (!isa<UnknownType>(tty) && !tty->ApprxEqual(*ety)) {
+      Error(n.LOC(), "`" + n.name_str + "' is declared as \"" +
+                         PSTR(n.type->GetType()) + "\" but initialized as \"" +
+                         PSTR(n.init_expr->GetType()) + "\".");
+      error_count++;
+      // keep working
+    }
+    ReportErrorWhenViolateODR(n.LOC(), n.name_str, __FILE__, __LINE__, ety);
+    SetNodeType(n, ety);
+    // also set the type of type annotation
+    if (tty && isa<UnknownType>(tty)) SetNodeType(*n.type, ety);
   }
 
-  // check for type consistency between annotation and init expr.
-  if (n.init_expr &&
-      (!n.type->GetType()->ApprxEqual(*n.init_expr->GetType()))) {
-    Error(n.LOC(), "`" + n.name_str + "' is declared as \"" +
-                       PSTR(n.type->GetType()) + "\" but initialized as \"" +
-                       PSTR(n.init_expr->GetType()) + "\".");
-    error_count++;
-    // keep working
-  }
-
-  ReportErrorWhenViolateODR(n.LOC(), n.name_str, __FILE__, __LINE__,
-                            n.type->GetType());
-  if (auto ty = dyn_cast<SpannedType>(n.type->GetType())) {
+  // now handle the associated symbol
+  if (auto ty = dyn_cast<SpannedType>(n.GetType())) {
     ReportErrorWhenViolateODR(n.LOC(), n.name_str + ".span", __FILE__, __LINE__,
                               ty->GetMDSpanType());
-  } else if (auto ty = dyn_cast<FutureType>(n.type->GetType())) {
+  } else if (auto ty = dyn_cast<FutureType>(n.GetType())) {
     ReportErrorWhenViolateODR(n.LOC(), n.name_str + ".span", __FILE__, __LINE__,
                               MakeRankedMDSpanType(ty->Dims()));
     ReportErrorWhenViolateODR(n.LOC(), n.name_str + ".data", __FILE__, __LINE__,
                               MakeRankedSpannedType(ty->Dims()));
   }
+
   return true;
 }
 
 bool EarlySemantics::Visit(AST::IntTuple& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   SetNodeType(n, MakeITupleType(n.GetValues()->Count()));
   return true;
 }
 
 bool EarlySemantics::Visit(AST::Assignment& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   // SSTab().Dump();
   if (!SSTab().DeclaredInScope(n.name)) {
     // This is a definition rather than an assignment. The parser fails to make
@@ -548,7 +554,7 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
       Error(n.LOC(),
             "use ':' to define the \"" + STR(*sty) + "\" type variable.");
       ++error_count;
-      if (trace_visit)
+      if (debug_visit)
         os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
       return false;
     }
@@ -569,37 +575,38 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
 
   auto vty = SSTab().LookupSymbol(n.name); // variable type
   auto ety = NodeType(*n.value);           // assignment expression type
-  // ituples/mdspan/spanned can not be assigned after initialization
-  if (isa<ITupleType>(ety) || isa<MDSpanType>(ety) || isa<SpannedType>(ety) ||
-      isa<PlaceHolderType>(ety)) {
-    if (vty->ApprxEqual(*ety))
-      Error(n.LOC(), "`" + n.name + "' of type '" + vty->Name() +
-                         "' can not be re-assigned.");
-    else
-      Error(n.LOC(), "`" + n.name + "' of type '" + STR(*vty) +
-                         "' can not be re-assigned as '" + STR(*ety) + "'.");
-    ++error_count;
-    if (trace_visit)
-      os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
-    return false;
-  }
 
-  // check for type consistent
-  if (!vty->ApprxEqual(*ety)) {
-    Error(n.LOC(), "`" + n.name + "' of type '" + STR(*vty) +
-                       "' is assigned as " + STR(*ety) + ".");
-    ++error_count;
-    if (trace_visit)
-      os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
-    return false;
+  // placeholder can be reassigned
+  if (isa<PlaceHolderType>(vty)) {
+    assert(GeneralFutureType(vty));
+
+    // check for type consistent
+    if (!vty->ApprxEqual(*ety)) {
+      Error(n.LOC(), "`" + n.name + "' of type '" + STR(*vty) +
+                         "' is assigned as " + STR(*ety) + ".");
+      ++error_count;
+      if (debug_visit)
+        os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
+      return false;
+    }
+
+    if (isa<FutureType>(ety)) {
+      ModifySymbolType(n.name, ety);
+      ModifySymbolType(n.name + ".span", MakeRankedMDSpanType(ety->Dims()));
+    } else
+      choreo_unreachable("Expect a future type but got '" + PSTR(ety) + "'.");
   }
 
   // For now, we have to keep the single assignment
   {
-    Error(n.LOC(), "current compiler does not support re-assignment of '" +
-                       vty->Name() + "'.");
+    if (vty->ApprxEqual(*ety))
+      Error(n.LOC(), ToUpper(vty->Name()) + " re-assignment (" + n.name +
+                         ") is not supported.");
+    else
+      Error(n.LOC(), "`" + n.name + "' of type \"" + STR(*vty) +
+                         "\" can not be re-assigned as \"" + STR(*ety) + "\".");
     ++error_count;
-    if (trace_visit)
+    if (debug_visit)
       os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
     return false;
   }
@@ -608,13 +615,13 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
 }
 
 bool EarlySemantics::Visit(AST::IntIndex& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   SetNodeType(n, MakeIndexType());
   return true;
 }
 
 bool EarlySemantics::Visit(AST::DataType& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
 
   allow_named_dim = false; // no duplicated symbol is allowed except for mdspan
 
@@ -629,7 +636,7 @@ bool EarlySemantics::Visit(AST::DataType& n) {
 }
 
 bool EarlySemantics::Visit(AST::Identifier& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   if (in_decl) {
     if (allow_named_dim) {
       if (!SSTab().DeclaredInScope(n.name))
@@ -643,9 +650,9 @@ bool EarlySemantics::Visit(AST::Identifier& n) {
 }
 
 bool EarlySemantics::Visit(AST::Parameter& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   if (n.sym) {
-    SSTab().ModifySymbolType(n.sym->name, n.type->GetType());
+    ModifySymbolType(n.sym->name, n.type->GetType());
     if (auto ty = dyn_cast<SpannedType>(n.type->GetType())) {
       SSTab().DefineSymbol(n.sym->name + ".span", ty->GetMDSpanType());
     }
@@ -654,19 +661,19 @@ bool EarlySemantics::Visit(AST::Parameter& n) {
 }
 
 bool EarlySemantics::Visit(AST::ParamList& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   return true;
 }
 
 bool EarlySemantics::Visit(AST::ParallelBy& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   ReportErrorWhenViolateODR(n.LOC(), n.biv, __FILE__, __LINE__,
                             MakeBoundedITupleType(Shape(1), "pv"));
   return true;
 }
 
 bool EarlySemantics::Visit(AST::WhereBind& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   if (!isa<AST::Identifier>(n.lhs)) {
     Error(n.lhs->LOC(), "expecting an indentifier.");
     error_count++;
@@ -693,7 +700,7 @@ bool EarlySemantics::Visit(AST::WhereBind& n) {
 }
 
 bool EarlySemantics::Visit(AST::WithIn& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   in_decl = true;
 
   auto ity = NodeType(*n.in);
@@ -718,8 +725,8 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
     n.with->accept(*this); // make the symbol be defined
     with_syms.insert(n.with->name);
     auto wty = MakeBoundedITupleType(Shape(cast<MDSpanType>(ity)->Dims()));
-    SSTab().ModifySymbolType(n.with->name, wty);
-    n.with->SetType(wty);
+    ModifySymbolType(n.with->name, wty);
+    SetNodeType(*n.with, wty);
   }
 
   if (n.with_matchers) {
@@ -739,13 +746,14 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
       }
       with_syms.insert(sname);
       auto mty = MakeBoundedIntegerType(sname);
-      SSTab().ModifySymbolType(sname, mty);
-      v->SetType(mty);
+      ModifySymbolType(sname, mty);
+      SetNodeType(*v, mty);
     }
     if (n.with)
-      n.with_matchers->SetType(n.with->GetType());
+      SetNodeType(*n.with_matchers, n.with->GetType());
     else
-      n.with_matchers->SetType(MakeBoundedITupleType(n.with_matchers->Count()));
+      SetNodeType(*n.with_matchers,
+                  MakeBoundedITupleType(n.with_matchers->Count()));
   }
   in_decl = false;
 
@@ -753,17 +761,17 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
 }
 
 bool EarlySemantics::Visit(AST::WithBlock& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   return true;
 }
 
 bool EarlySemantics::Visit(AST::Memory& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   return true;
 }
 
 bool EarlySemantics::Visit(AST::SpanAs& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
 
   auto nty = NodeType(*n.id);
   SpannedType* sty = nullptr;
@@ -781,16 +789,16 @@ bool EarlySemantics::Visit(AST::SpanAs& n) {
   auto asty = MakeRankedSpannedType(n.list->Count(), (BaseType)sty->f_type,
                                     sty->m_type);
   SSTab().DefineSymbol(n.nid->name, asty);
-  n.SetType(asty);
+  SetNodeType(n, asty);
 
   // TODO: set the proper type
   return true;
 }
 
 bool EarlySemantics::Visit(AST::DMA& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
 
-  if (n.operation == ".none") { // skip the place holder
+  if (n.operation == ".any") { // skip the place holder
     assert(!n.future.empty());
     ReportErrorWhenViolateODR(n.LOC(), n.future, __FILE__, __LINE__,
                               MakePlaceHolderFutureType());
@@ -824,10 +832,10 @@ bool EarlySemantics::Visit(AST::DMA& n) {
     if (SSTab().IsDeclared(n.future)) {
       ReportErrorWhenUseBeforeDefine(n.LOC(), n.future + ".span");
       ReportErrorWhenUseBeforeDefine(n.LOC(), n.future + ".data");
-      SSTab().ModifySymbolType(n.future + ".span", MakeRankedMDSpanType(rank));
+      ModifySymbolType(n.future + ".span", MakeRankedMDSpanType(rank));
       auto spanned_ty = MakeRankedSpannedType(rank, sty->ElementType(), sto);
-      SSTab().ModifySymbolType(n.future + ".data", spanned_ty);
-      SSTab().ModifySymbolType(n.future, MakeFutureType(spanned_ty, n.async));
+      ModifySymbolType(n.future + ".data", spanned_ty);
+      ModifySymbolType(n.future, MakeFutureType(spanned_ty, n.async));
     } else {
       ReportErrorWhenViolateODR(n.LOC(), n.future + ".span", __FILE__, __LINE__,
                                 MakeRankedMDSpanType(rank));
@@ -908,7 +916,7 @@ bool EarlySemantics::Visit(AST::DMA& n) {
 }
 
 bool EarlySemantics::Visit(AST::ChunkAt& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
 
   n.data->accept(*this);
   auto nty = NodeType(*n.data);
@@ -938,7 +946,7 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
         error_count++;
       }
       r_count += ty->Dims();
-      v->SetType(ty);
+      SetNodeType(*v, ty);
     }
     // report error when the ranks do not match
     if (rank != r_count) {
@@ -955,7 +963,7 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
 }
 
 bool EarlySemantics::Visit(AST::Wait& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
 
   for (auto& v : n.targets->AllValues()) {
     auto id = dyn_cast<AST::Identifier>(v);
@@ -986,7 +994,7 @@ bool EarlySemantics::Visit(AST::Wait& n) {
 }
 
 bool EarlySemantics::Visit(AST::Call& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
 
   if (parallel_level == 0) {
     Error(n.LOC(),
@@ -1012,11 +1020,12 @@ bool EarlySemantics::Visit(AST::Call& n) {
 }
 
 bool EarlySemantics::Visit(AST::Swap& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   auto lty = NodeType(*n.lhs);
   auto rty = NodeType(*n.rhs);
 
-  if (!isa<FutureType>(lty)) {
+  if (!isa<FutureType>(lty) &&
+      !(isa<PlaceHolderType>(lty) && lty->Category() == TypeCategory::FUTURE)) {
     Error(n.LOC(), "only support swapping of 'future'. (" + n.lhs->name + ": " +
                        PSTR(lty) + ").");
     error_count++;
@@ -1030,11 +1039,34 @@ bool EarlySemantics::Visit(AST::Swap& n) {
     return false;
   }
 
+  // fill up the type of a placeholder
+  if ((isa<PlaceHolderType>(lty) && lty->Category() == TypeCategory::FUTURE) &&
+      (isa<FutureType>(rty))) {
+    auto lname = AST::GetName(*n.lhs);
+    assert(lname.has_value());
+    ModifySymbolType(*lname, rty);
+    ModifySymbolType(*lname + ".span", MakeRankedMDSpanType(rty->Dims()));
+  } else if ((isa<PlaceHolderType>(rty) &&
+              rty->Category() == TypeCategory::FUTURE) &&
+             (isa<FutureType>(lty))) {
+    auto rname = AST::GetName(*n.rhs);
+    assert(rname.has_value());
+    ModifySymbolType(*rname, lty);
+    ModifySymbolType(*rname + ".span", MakeRankedMDSpanType(lty->Dims()));
+  } else if ((isa<PlaceHolderType>(rty) &&
+              rty->Category() == TypeCategory::FUTURE) &&
+             (isa<PlaceHolderType>(lty) &&
+              lty->Category() == TypeCategory::FUTURE)) {
+    Error(n.LOC(), "not supported: swap the placeholders of futures.");
+    error_count++;
+    return false;
+  }
+
   return true;
 }
 
 bool EarlySemantics::Visit(AST::Select& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
 
   size_t ec = error_count;
 
@@ -1053,13 +1085,14 @@ bool EarlySemantics::Visit(AST::Select& n) {
   const auto& v0 = n.expr_list->AllValues()[0];
   auto v0ty = NodeType(*v0);
 
-  if (!isa<FutureType>(v0ty) && !isa<SpannedType>(v0ty)) {
+  if (!GeneralFutureType(v0ty) && !isa<SpannedType>(v0ty)) {
     Error(v0->LOC(),
           "expect `" + PSTR(v0ty) + "` to be a future/spanned type.");
     error_count++;
     return ec == error_count;
   }
 
+  ptr<Type> sel_fty = nullptr;
   for (auto& v : n.expr_list->AllValues()) {
     auto nty = NodeType(*v);
     if (!nty->ApprxEqual(*v0ty)) {
@@ -1068,15 +1101,29 @@ bool EarlySemantics::Visit(AST::Select& n) {
                           PSTR(v0ty) + ").");
       error_count++;
     }
+
+    if (isa<FutureType>(nty)) sel_fty = nty;
   }
 
-  SetNodeType(n, ShadowTypeStorage(v0ty));
+  if (sel_fty) {
+    auto rank = cast<FutureType>(sel_fty)->Dims();
+    // some elements could be placeholders, propagate the type
+    for (auto& v : n.expr_list->AllValues()) {
+      SetNodeType(*v, sel_fty);
+      if (auto name = AST::GetName(*v)) {
+        ModifySymbolType(*name, sel_fty);
+        ModifySymbolType(*name + ".span", MakeRankedMDSpanType(rank));
+      }
+    }
+  }
+
+  SetNodeType(n, ShadowTypeStorage(NodeType(*n.expr_list->AllValues()[0])));
 
   return true;
 }
 
 bool EarlySemantics::Visit(AST::Return& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   found_return = true;
   if (parallel_level != 0) {
     Error(n.LOC(), "unable to return inside the parallel-by block(s).");
@@ -1087,13 +1134,13 @@ bool EarlySemantics::Visit(AST::Return& n) {
 }
 
 bool EarlySemantics::Visit(AST::LoopRange& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
 
   return true;
 }
 
 bool EarlySemantics::Visit(AST::ForeachBlock& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   for (auto& i : n.getRanges()) {
     if (auto id = dyn_cast<AST::LoopRange>(i)->iv) {
       auto ity = NodeType(*id);
@@ -1114,7 +1161,7 @@ bool EarlySemantics::Visit(AST::ForeachBlock& n) {
 }
 
 bool EarlySemantics::Visit(AST::FunctionDecl& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
 
   if (n.ret_type->IsVoid())
     requires_return = false;
@@ -1127,15 +1174,15 @@ bool EarlySemantics::Visit(AST::FunctionDecl& n) {
 }
 
 bool EarlySemantics::Visit(AST::ChoreoFunction& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   return true;
 }
 bool EarlySemantics::Visit(AST::CppSourceCode& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   return true;
 }
 bool EarlySemantics::Visit(AST::Program& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   return true;
 }
 
@@ -1156,10 +1203,12 @@ bool EarlySemantics::ReportErrorWhenViolateODR(const location& loc,
   if (SSTab().DeclaredInScope(name)) {
     Error(loc, "symbol `" + name + "' has been declared already.");
     ++error_count;
-    if (trace_visit) os << "Error in " << file << ", line: " << line << ".\n";
+    if (debug_visit) os << "Error in " << file << ", line: " << line << ".\n";
     return false;
   }
   SSTab().DefineSymbol(name, type); // TODO: improve the type
+  if (debug_visit)
+    os << "Define Symbol '" << name << "' as: " << PSTR(type) << ".\n";
   return true;
 }
 

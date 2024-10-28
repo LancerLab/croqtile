@@ -1640,6 +1640,11 @@ inline static SpannedType* GetSpannedType(const ptr<Type>& ty) {
     return nullptr;
 }
 
+inline static bool GeneralFutureType(const ptr<Type>& ty) {
+  if (!ty) return false;
+  return ty->Category() == TypeCategory::FUTURE;
+}
+
 } // end namespace Choreo
 
 #endif // __CHOREO_TYPES_H__

@@ -48,7 +48,7 @@ const std::string
 ValueNumbering::VNSymbolName(const AST::Identifier& id) const {
   auto sig = id.name;
   auto pty = visitor->NodeType(id);
-  if (isa<SpannedType>(pty) || isa<FutureType>(pty)) {
+  if (isa<SpannedType>(pty) || GeneralFutureType(pty)) {
     sig += ".span"; // only cares about value inside the mdspan
   } else if (IsBoundedType(pty)) {
     sig = "@" + sig; // only cares about the upper bound
@@ -60,18 +60,9 @@ void ValueNumbering::EnterScope(const std::string& name) {
   std::string indent = ScopeIndent();
   visitor->SSTab().EnterScope(name);
 
-  if (expressionValueNumbers.empty()) {
-    expressionValueNumbers.push_back({});
-    nodeValueNumbers.push_back({});
-  } else {
-    expressionValueNumbers.push_back(expressionValueNumbers.back());
-    nodeValueNumbers.push_back(nodeValueNumbers.back());
-  }
-
-  if (valueNumberExpressions.empty())
-    valueNumberExpressions.push_back({});
-  else
-    valueNumberExpressions.push_back(valueNumberExpressions.back());
+  expressionValueNumbers.push_back({});
+  valueNumberExpressions.push_back({});
+  nodeValueNumbers.push_back({});
 
   if (trace)
     if (visitor->SSTab().ScopeDepth() > 1)
@@ -103,16 +94,12 @@ void ValueNumbering::LeaveScope() {
 // carefully.
 void ValueNumbering::AssociateSignatureWithValueNumber(const std::string& sig,
                                                        int valno) {
-  if (expressionValueNumbers.back().count(sig)) {
-    // signature exists
-    assert((expressionValueNumbers.back()[sig] == valno) &&
+  assert(InternalHasValNoExpr(valno) && "invalid value number is provided.");
+  if (InternalHasExprValNo(sig))
+    assert((InternalGetExprValNo(sig) == valno) &&
            "must associate signature with different value number.");
-  }
 
-  assert(valueNumberExpressions.back().count(valno) &&
-         "invalid value number provided.");
-
-  expressionValueNumbers.back()[sig] = valno;
+  InternalUpdateExprValNo(sig, valno);
 
   if (trace)
     os << ScopeIndent() << "Alias \"" << sig << "\" -> #" << valno << "\n";
@@ -120,8 +107,9 @@ void ValueNumbering::AssociateSignatureWithValueNumber(const std::string& sig,
 
 void ValueNumbering::AssociateSignatureWithInvalidValueNumber(
     const std::string& sig) {
-  assert(!expressionValueNumbers.back().count(sig) && "signature exists.");
-  expressionValueNumbers.back()[sig] = GetInvalidValueNumber();
+  assert(!InternalHasExprValNo(sig) && "signature does exists.");
+
+  InternalUpdateExprValNo(sig, GetInvalidValueNumber());
 
   if (trace) os << ScopeIndent() << "Alias \"" << sig << "\" -> #<invalid>\n";
 }
@@ -722,7 +710,7 @@ std::string ValueNumbering::GenerateNodeSignature(const AST::Node& node,
 
 bool ValueNumbering::HasValueNumberForNode(const AST::Node& n) {
   // the node has been visited before
-  if (nodeValueNumbers.back().count(&n)) return true;
+  if (InternalHasNodeValNo(&n)) return true;
 
   std::string signature = GenerateNodeSignature(n);
   if (signature == "") return false;
@@ -737,7 +725,7 @@ bool ValueNumbering::HasValueNumberForNode(const AST::Node& n) {
 //   3. associated upper bound value of the expression
 int ValueNumbering::GetValueNumberForNode(const AST::Node& n) {
   // if it is an visited/numbered node
-  if (nodeValueNumbers.back().count(&n)) return (nodeValueNumbers.back())[&n];
+  if (InternalHasNodeValNo(&n)) return InternalGetNodeValNo(&n);
 
   // workaround
   // TODO(wsj) reference with bounded var and spanned var
@@ -773,7 +761,8 @@ int ValueNumbering::GenerateValueNumberForNode(const AST::Node& n) {
   int valNo = GenerateValueNumberFromSignature(signature);
 
   // cache the value number
-  nodeValueNumbers.back().emplace(&n, valNo);
+  assert(!InternalHasNodeValNo(&n));
+  InternalUpdateNodeValNo(&n, valNo);
 
   return valNo;
 }
@@ -784,9 +773,8 @@ int ValueNumbering::GetValueNumberOfSignature(const std::string& signature) {
   if (signature == "?") return UnknownValue();
 
   // Check if this expression has been encountered before
-  auto it = expressionValueNumbers.back().find(signature);
-  if (it != expressionValueNumbers.back().end())
-    return it->second; // Return existing value number
+  if (InternalHasExprValNo(signature))
+    return InternalGetExprValNo(signature); // Return existing value number
 
   choreo_unreachable("failed to get value number of signature \"" + signature +
                      "\".");
@@ -804,10 +792,13 @@ void ValueNumbering::BindValueNumbers(int vn0, int vn1) {
 }
 
 bool ValueNumbering::HasValueNumberOfSignature(const std::string& signature) {
-  // Check if this expression has been encountered before
-  auto it = expressionValueNumbers.back().find(signature);
-  if (it != expressionValueNumbers.back().end())
-    return true; // Return existing value number
+  return InternalHasExprValNo(signature);
+}
+
+bool ValueNumbering::HasValidValueNumberOfSignature(
+    const std::string& signature) {
+  if (InternalHasExprValNo(signature))
+    return ValidVN(InternalGetExprValNo(signature));
 
   return false;
 }
@@ -827,8 +818,9 @@ int ValueNumbering::GenerateValueNumberFromSignature(
     choreo_unreachable("signature \"" + signature + "\" has already existed.");
 
   int valNo = nextValueNumber++;
-  expressionValueNumbers.back()[signature] = valNo;
-  valueNumberExpressions.back()[valNo] = signature;
+
+  InternalUpdateExprValNo(signature, valNo);
+  InternalUpdateValNoExpr(valNo, signature);
 
   if (trace)
     os << ScopeIndent() << "New VN #" << valNo << ": '" << signature << "'\n";

@@ -67,6 +67,94 @@ private:
   std::vector<std::unordered_map<const AST::Node*, int>>
       nodeValueNumbers; // cache to direct map node to value number
 
+  bool InternalHasExprValNo(const std::string& expr) {
+    for (auto expr_valno = expressionValueNumbers.rbegin();
+         expr_valno != expressionValueNumbers.rend(); expr_valno++) {
+      if (!expr_valno->count(expr)) continue;
+      return true;
+    }
+    return false;
+  }
+
+  int InternalGetExprValNo(const std::string& expr) {
+    for (auto expr_valno = expressionValueNumbers.rbegin();
+         expr_valno != expressionValueNumbers.rend(); expr_valno++) {
+      if (!expr_valno->count(expr)) continue;
+      return (*expr_valno)[expr];
+    }
+    choreo_unreachable("can not find valno of expression : " + expr + ".");
+  }
+
+  void InternalUpdateExprValNo(const std::string& expr, int val_no) {
+    for (auto expr_valno = expressionValueNumbers.rbegin();
+         expr_valno != expressionValueNumbers.rend(); expr_valno++) {
+      if (!expr_valno->count(expr)) continue;
+      (*expr_valno)[expr] = val_no;
+      return;
+    }
+    assert(!expressionValueNumbers.empty() &&
+           "empty expression value number map.");
+    expressionValueNumbers.back()[expr] = val_no;
+  }
+
+  bool InternalHasValNoExpr(int vn) {
+    for (auto valno_expr = valueNumberExpressions.rbegin();
+         valno_expr != valueNumberExpressions.rend(); valno_expr++) {
+      if (!valno_expr->count(vn)) continue;
+      return true;
+    }
+    return false;
+  }
+
+  const std::string& InternalGetValNoExpr(int vn) {
+    for (auto valno_expr = valueNumberExpressions.rbegin();
+         valno_expr != valueNumberExpressions.rend(); valno_expr++) {
+      if (!valno_expr->count(vn)) continue;
+      return (*valno_expr)[vn];
+    }
+    choreo_unreachable(
+        "can not find expression of valno: " + std::to_string(vn) + ".");
+  }
+
+  void InternalUpdateValNoExpr(int vn, const std::string& expr) {
+    for (auto valno_expr = valueNumberExpressions.rbegin();
+         valno_expr != valueNumberExpressions.rend(); valno_expr++) {
+      if (!valno_expr->count(vn)) continue;
+      (*valno_expr)[vn] = expr;
+    }
+    assert(!valueNumberExpressions.empty() &&
+           "empty value number expression map.");
+    valueNumberExpressions.back()[vn] = expr;
+  }
+
+  bool InternalHasNodeValNo(const AST::Node* node) {
+    for (auto node_valno = nodeValueNumbers.rbegin();
+         node_valno != nodeValueNumbers.rend(); node_valno++) {
+      if (!node_valno->count(node)) continue;
+      return true;
+    }
+    return false;
+  }
+
+  int InternalGetNodeValNo(const AST::Node* node) {
+    for (auto node_valno = nodeValueNumbers.rbegin();
+         node_valno != nodeValueNumbers.rend(); node_valno++) {
+      if (!node_valno->count(node)) continue;
+      return (*node_valno)[node];
+    }
+    choreo_unreachable("can not find valno of node: " + PSTR(node) + ".");
+  }
+
+  void InternalUpdateNodeValNo(const AST::Node* node, int vn) {
+    for (auto node_valno = nodeValueNumbers.rbegin();
+         node_valno != nodeValueNumbers.rend(); node_valno++) {
+      if (!node_valno->count(node)) continue;
+      (*node_valno)[node] = vn;
+    }
+    assert(!nodeValueNumbers.empty() && "empty node value number map.");
+    nodeValueNumbers.back()[node] = vn;
+  }
+
   int nextValueNumber = 0;
 
   bool trace = false;
@@ -131,6 +219,9 @@ public:
   // Check if the value number exists for the signature
   bool HasValueNumberOfSignature(const std::string&);
 
+  // Check if the value number exists and is valid for the signature
+  bool HasValidValueNumberOfSignature(const std::string&);
+
   int GetOrInsertValueNumberFromSignature(const std::string& signature);
 
   // Symbol names related to the value numbering
@@ -140,10 +231,10 @@ public:
   std::string GetSignatureFromValueNumber(int vn) {
     if (vn == UnknownValue()) return "?";
 
-    if (valueNumberExpressions.back().count(vn) == 0)
+    if (!InternalHasValNoExpr(vn))
       choreo_unreachable("value number " + std::to_string(vn) +
                          " does not exists in the value number table.");
-    return (valueNumberExpressions.back())[vn];
+    return InternalGetValNoExpr(vn);
   }
 
   std::string SignatureOfSymbol(std::string sym) {
@@ -183,13 +274,6 @@ private:
   void Warning(const location& loc, const std::string& message);
 };
 
-#define __TRACE_EACH_VISIT__                                                   \
-  if (trace_visit) {                                                           \
-    os << n.TypeNameString() << ": ";                                          \
-    n.Print(os);                                                               \
-    os << "\n";                                                                \
-  }
-
 class ShapeInference : public Visitor {
 private:
   ValueNumbering vn;
@@ -208,6 +292,15 @@ private:
   // for debugging purpose only
   bool cannot_proceed = false;
   size_t error_count = 0;
+
+  void TraceEachVisit(AST::Node& n, bool detail = false,
+                      const std::string& m = "") const {
+    if (!trace_visit) return;
+    if (detail)
+      os << m << STR(n) << "\n";
+    else
+      os << m << n.TypeNameString() << "\n";
+  }
 
 public:
   ShapeInference(bool t = false, std::ostream& o = std::cout)
@@ -228,6 +321,7 @@ public:
 
 public:
   virtual bool BeforeVisit(AST::Node& n) override {
+    TraceEachVisit(n, false, "before ");
     if (isa<AST::Program>(&n)) {
       vn.EnterScope(""); // global scope
     } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
@@ -261,7 +355,8 @@ public:
                   .c_str());
         vn.SetListReference(n.value());
       }
-    } else if (isa<AST::Wait>(&n) || isa<AST::Call>(&n) || isa<AST::Swap>(&n)) {
+    } else if (isa<AST::Wait>(&n) || isa<AST::Call>(&n) || isa<AST::Swap>(&n) ||
+               isa<AST::Select>(&n)) {
       gen_values = false;
     } else if (isa<AST::Parameter>(&n)) {
       allow_named_dim = true;
@@ -270,6 +365,7 @@ public:
   }
 
   virtual bool AfterVisit(AST::Node& n) override {
+    TraceEachVisit(n, false, "after ");
     if (isa<AST::Program>(&n) || isa<AST::ChoreoFunction>(&n) ||
         isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n)) {
       vn.LeaveScope();
@@ -277,7 +373,8 @@ public:
       vn.LeaveScope();
     } else if (isa<AST::MultiDimSpans>(&n) || isa<AST::IntTuple>(&n)) {
       vn.ResetListReference();
-    } else if (isa<AST::Wait>(&n) || isa<AST::Call>(&n) || isa<AST::Swap>(&n)) {
+    } else if (isa<AST::Wait>(&n) || isa<AST::Call>(&n) || isa<AST::Swap>(&n) ||
+               isa<AST::Select>(&n)) {
       gen_values = true;
     } else if (isa<AST::Parameter>(&n)) {
       allow_named_dim = false;
@@ -288,12 +385,14 @@ public:
   }
 
 public:
-  bool Visit(AST::MultiNodes&) {
+  bool Visit(AST::MultiNodes& n) {
+    TraceEachVisit(n);
     if (cannot_proceed) return true;
     return true;
   }
 
   bool Visit(AST::MultiValues& n) {
+    TraceEachVisit(n);
     if (cannot_proceed) return true;
     if (gen_values) {
       int valNo = vn.GenerateValueNumberForNode(n);
@@ -304,7 +403,7 @@ public:
   }
 
   bool Visit(AST::IntLiteral& n) {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
     int valNo = vn.GenerateValueNumberForNode(n);
@@ -313,7 +412,7 @@ public:
   }
 
   bool Visit(AST::Boolean& n) {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
     int valNo = vn.GenerateValueNumberForNode(n);
@@ -322,26 +421,24 @@ public:
   }
 
   bool Visit(AST::Expr& n) {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
-    if (auto ref = n.GetReference()) {
-      if (auto id = dyn_cast<AST::Identifier>(ref)) {
-        if (SSTab().IsDeclared(id->name)) {
-          if (vn.HasValueNumberOfSignature(SSTab().InScopeName(id->name))) {
-            cur_vn =
-                vn.GetValueNumberOfSignature(SSTab().InScopeName(id->name));
-            auto pty = SSTab().LookupSymbol(id->name);
-            if (isa<MDSpanType>(pty)) {
-              cur_mdspan_vn = cur_vn;
-              InvalidateVN(cur_vn);
-            }
-          } else {
-            // no value number is obtained
+    if (auto id = n.GetSymbol()) {
+      auto name = vn.VNSymbolName(*id);
+      //      std::cout << "vn symbol name: " << name << "\n";
+      if (SSTab().IsDeclared(name)) {
+        if (vn.HasValueNumberOfSignature(SSTab().InScopeName(name))) {
+          cur_vn = vn.GetValueNumberOfSignature(SSTab().InScopeName(name));
+          if (isa<MDSpanType>(SSTab().LookupSymbol(name))) {
+            cur_mdspan_vn = cur_vn;
             InvalidateVN(cur_vn);
           }
-          return true;
+        } else {
+          // no value number is obtained
+          InvalidateVN(cur_vn);
         }
+        return true;
       }
     } else if (n.op == "dataof") {
       InvalidateVN(cur_vn); // a spanned data does not have a value number
@@ -368,7 +465,7 @@ public:
   }
 
   bool Visit(AST::MultiDimSpans& n) {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -424,7 +521,7 @@ public:
   }
 
   bool Visit(AST::NamedTypeDecl& n) {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -442,7 +539,7 @@ public:
   }
 
   bool Visit(AST::NamedVariableDecl& n) {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -498,7 +595,7 @@ public:
   }
 
   bool Visit(AST::IntTuple& n) {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -524,7 +621,7 @@ public:
   }
 
   bool Visit(AST::Assignment& n) {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -561,7 +658,7 @@ public:
   }
 
   bool Visit(AST::IntIndex& n) {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -569,7 +666,7 @@ public:
   }
 
   bool Visit(AST::DataType& n) {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     allow_named_dim = false;
 
@@ -581,56 +678,48 @@ public:
   }
 
   bool Visit(AST::Identifier& n) {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
     if (!gen_values) return false;
 
-    if (SSTab().IsDeclared(n.name)) {
+    auto name = vn.VNSymbolName(n);
+    if (SSTab().IsDeclared(name)) {
       // it is a reference
-      auto name = n.name;
-      auto pty = SSTab().LookupSymbol(name);
-      // only care about symbol associated to values
-      if (isa<SpannedType>(pty) || isa<FutureType>(pty)) {
-        name += ".span";
-        assert(SSTab().IsDeclared(name) && "span symbol is not declared.");
-      } else if (isa<BoundedITupleType>(pty)) {
-        name = "@" + name;
-        assert(SSTab().IsDeclared(name) && "ubound symbol is not declared.");
-      }
       if (!vn.HasValueNumberOfSignature(SSTab().InScopeName(name)))
         choreo_unreachable("value number of `" + SSTab().InScopeName(name) +
                            "' has not been generated.");
       cur_vn = vn.GetValueNumberOfSignature(SSTab().InScopeName(name));
-    } else {
-      if (allow_named_dim) { // for named dims in parameters
-        if (!SSTab().DeclaredInScope(n.name)) {
-          SSTab().DefineSymbol(n.name, MakeIntegerType());
-          cur_vn =
-              vn.GenerateValueNumberFromSignature(SSTab().InScopeName(n.name));
-        } else {
-          cur_vn = vn.GetValueNumberOfSignature(SSTab().InScopeName(n.name));
-        }
-        return true;
-      }
-
-      if (vn.HasValueNumberForNode(n)) {
-        Error(n.LOC(), "value number has been generated for `" + n.name + "'.");
-        error_count++;
-        return false;
-      }
-
-      // sometime we need value a symbol (symbolic value)
-      // TODO: improve it - only generate valno for integer types
-      if (!ValidVN(cur_mdspan_vn)) cur_vn = vn.GenerateValueNumberForNode(n);
+      return true;
     }
+
+    if (allow_named_dim) { // for named dims in parameters
+      if (!SSTab().DeclaredInScope(n.name)) {
+        SSTab().DefineSymbol(n.name, MakeIntegerType());
+        cur_vn =
+            vn.GenerateValueNumberFromSignature(SSTab().InScopeName(n.name));
+      } else {
+        cur_vn = vn.GetValueNumberOfSignature(SSTab().InScopeName(n.name));
+      }
+      return true;
+    }
+
+    if (vn.HasValueNumberForNode(n)) {
+      Error(n.LOC(), "value number has been generated for `" + n.name + "'.");
+      error_count++;
+      return false;
+    }
+
+    // sometime we need value a symbol (symbolic value)
+    // TODO: improve it - only generate valno for integer types
+    if (!ValidVN(cur_mdspan_vn)) cur_vn = vn.GenerateValueNumberForNode(n);
 
     return true;
   }
 
   bool Visit(AST::Parameter& n) {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -689,7 +778,7 @@ public:
   }
 
   bool Visit(AST::ParamList& n) {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -697,7 +786,7 @@ public:
   };
 
   bool Visit(AST::ParallelBy& n) {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -714,7 +803,7 @@ public:
   };
 
   bool Visit(AST::WhereBind& n) {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -739,7 +828,7 @@ public:
   }
 
   bool Visit(AST::WithIn& n) {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -822,7 +911,7 @@ public:
   }
 
   bool Visit(AST::WithBlock& n) {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -830,7 +919,7 @@ public:
   };
 
   bool Visit(AST::Memory& n) {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -838,7 +927,7 @@ public:
   };
 
   bool Visit(AST::SpanAs& n) {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
     assert(ValidVN(cur_vn) && "failed to get the list value.");
 
     auto pty = SSTab().LookupSymbol(n.id->name);
@@ -869,11 +958,11 @@ public:
   }
 
   bool Visit(AST::DMA& n) {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
-    if (n.operation == ".none") {
+    if (n.operation == ".any") {
       assert(!n.future.empty() && "unexpected: the future is empty.");
       SSTab().DefineSymbol(n.future, MakePlaceHolderFutureType());
       SSTab().DefineSymbol(n.future + ".span", MakePlaceHolderMDSpanType());
@@ -946,7 +1035,7 @@ public:
   }
 
   bool Visit(AST::ChunkAt& n) {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -1061,7 +1150,7 @@ public:
   }
 
   bool Visit(AST::Wait& n) {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -1069,7 +1158,7 @@ public:
   }
 
   bool Visit(AST::Call& n) {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -1077,15 +1166,44 @@ public:
   };
 
   bool Visit(AST::Swap& n) {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
+
+    if (!GeneralFutureType(NodeType(*n.lhs))) return true;
+    assert(GeneralFutureType(NodeType(*n.rhs)));
+
+    auto lname = AST::GetName(*n.lhs);
+    auto rname = AST::GetName(*n.rhs);
+    assert(lname.has_value());
+    assert(rname.has_value());
+
+    auto ln = SSTab().InScopeName(*lname) + ".span";
+    auto rn = SSTab().InScopeName(*rname) + ".span";
+
+    auto lty = NodeType(*n.lhs);
+    auto rty = NodeType(*n.rhs);
+
+    if (isa<FutureType>(lty) && isa<PlaceHolderType>(rty)) {
+      if (!vn.HasValidValueNumberOfSignature(rn)) {
+        assert(vn.HasValidValueNumberOfSignature(ln) &&
+               "both operand does not have valid value number.");
+        vn.RebindSignatureWithValueNumber(rn, vn.GetValueNumberOfSignature(ln));
+      }
+    } else if (isa<FutureType>(rty) && isa<PlaceHolderType>(lty)) {
+      if (!vn.HasValidValueNumberOfSignature(ln)) {
+        assert(vn.HasValidValueNumberOfSignature(rn) &&
+               "both operand does not have valid value number.");
+        vn.RebindSignatureWithValueNumber(ln, vn.GetValueNumberOfSignature(rn));
+      }
+    }
+    assert(!(isa<PlaceHolderType>(rty) && isa<PlaceHolderType>(lty)));
 
     return true;
   };
 
   bool Visit(AST::Select& n) {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -1093,14 +1211,41 @@ public:
     if (isa<SpannedType>(NodeType(n))) {
       cur_mdspan_vn = vn.GenerateValueNumberForNode(n);
       InvalidateVN(cur_vn); // used for variable def
-    } else if (isa<FutureType>(NodeType(n))) {
-      if (auto id = AST::GetName(*n.expr_list->ValueAt(0))) {
-        auto n = SSTab().NameInScopeOrNull(*id + ".span");
-        assert(n);
-        cur_mdspan_vn = vn.GetValueNumberOfSignature(n.value());
-        InvalidateVN(cur_vn);
-      } else
-        choreo_unreachable("expect an idenfiter.");
+    } else if (GeneralFutureType(NodeType(n))) {
+      cur_mdspan_vn = GetInvalidValueNumber();
+
+      ptr<Type> valid_ty = nullptr;
+      for (auto& v : n.expr_list->AllValues()) {
+        if (auto id = AST::GetIdentifier(*v)) {
+          cur_mdspan_vn = vn.GetValueNumberOfSignature(
+              SSTab().InScopeName(vn.VNSymbolName(*id)));
+          if (ValidVN(cur_mdspan_vn)) {
+            valid_ty = v->GetType();
+            break;
+          }
+        } else
+          choreo_unreachable("expect an identifier.\n");
+      }
+
+      if (!ValidVN(cur_mdspan_vn)) {
+        Error(n.LOC(),
+              "no valid value number is found for a select expression.");
+        error_count++;
+        cannot_proceed = true;
+        return false;
+      }
+
+      for (auto& v : n.expr_list->AllValues()) {
+        if (isa<PlaceHolderType>(v->GetType())) v->SetType(valid_ty);
+        if (auto id = AST::GetIdentifier(*v)) {
+          auto symbol = SSTab().InScopeName(vn.VNSymbolName(*id));
+          // the VN is considered to be identical if none exist
+          if (!ValidVN(vn.GetValueNumberOfSignature(symbol)))
+            vn.RebindSignatureWithValueNumber(symbol, cur_mdspan_vn);
+        }
+      }
+
+      InvalidateVN(cur_vn);
     } else
       choreo_unreachable("unsupported type.");
 
@@ -1108,7 +1253,7 @@ public:
   };
 
   bool Visit(AST::Return& n) {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -1116,7 +1261,7 @@ public:
   };
 
   bool Visit(AST::LoopRange& n) {
-    __TRACE_EACH_VISIT__;
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -1124,7 +1269,7 @@ public:
   };
 
   bool Visit(AST::ForeachBlock& n) {
-    if (trace_visit) os << n.TypeNameString() << "\n";
+    TraceEachVisit(n);
 
     gen_values = true; // allow generate values for statements
 
@@ -1134,7 +1279,7 @@ public:
   };
 
   bool Visit(AST::FunctionDecl& n) {
-    if (trace_visit) os << n.TypeNameString() << "\n";
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -1142,7 +1287,7 @@ public:
   };
 
   bool Visit(AST::ChoreoFunction& n) {
-    if (trace_visit) os << n.TypeNameString() << "\n";
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
@@ -1150,14 +1295,15 @@ public:
   }
 
   bool Visit(AST::CppSourceCode& n) {
-    if (trace_visit) os << n.TypeNameString() << "\n";
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
     return true;
   };
+
   bool Visit(AST::Program& n) {
-    if (trace_visit) os << n.TypeNameString() << "\n";
+    TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 

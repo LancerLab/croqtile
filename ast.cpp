@@ -148,7 +148,7 @@ void Memory::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
 void DMA::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
-  if (operation != ".none") {
+  if (operation != ".any") {
     from->accept(v);
     to->accept(v);
   }

@@ -25,7 +25,7 @@ private:
       fname = f->name;
     } else if (auto dma = dyn_cast<AST::DMA>(&n)) {
       // associate a future with its buffer
-      if (!dma->future.empty() && (dma->operation != ".none"))
+      if (!dma->future.empty() && (dma->operation != ".any"))
         (*fut_buf)[fname].emplace(dma->future,
                                   cast<AST::ChunkAt>(dma->to)->RefSymbol());
     }

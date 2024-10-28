@@ -319,7 +319,7 @@ bool FactorCodeGen::Visit(AST::Assignment& node) {
   if (auto sa = dyn_cast<AST::SpanAs>(node.value)) {
     int arg_idx = factor_symbols.GetSymbolIndex(sa->id->name);
     std::string buffer_name = sa->id->name;
-    if (auto fty = dyn_cast<FutureType>(GetSymbolType(sa->id->name))) {
+    if (isa<FutureType>(GetSymbolType(sa->id->name))) {
       assert(fut_buf->at(entry_fn).count(sa->id->name));
       buffer_name = fut_buf->at(entry_fn).at(sa->id->name);
     }

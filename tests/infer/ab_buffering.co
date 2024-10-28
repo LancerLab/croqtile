@@ -14,9 +14,9 @@ __co__ auto ab_buffer(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) { /// device p
       rfA = dma.copy.async rhs.chunkat(p, index) => rbufA;
 
       // dummy DMA used for A-B buffering
-      lfB = dma.none;
-      rfB = dma.none;
-      of = dma.none;
+      lfB = dma.any;
+      rfB = dma.any;
+      of = dma.any;
 
       foreach x, y(1:-1) {
         lfB = dma.copy.async lhs.chunkat(p, x, y) => select(y % 2, lbufA, lbufB);

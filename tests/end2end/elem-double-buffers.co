@@ -19,8 +19,8 @@ __co__ s32 [6, 17, 128] ele_add(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) { //
         lfA = dma.copy.async lhs.chunkat(p, x, y) => local;
         rfA = dma.copy.async rhs.chunkat(p, x, y) => local;
         // dummy DMA used for A-B buffering
-        lfB = dma.none;
-        rfB = dma.none;
+        lfB = dma.any;
+        rfB = dma.any;
         foreach y(1:) {
           lfB = dma.copy.async lhs.chunkat(p, x, y) => local;
           rfB = dma.copy.async rhs.chunkat(p, x, y) => local;

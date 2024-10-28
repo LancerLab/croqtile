@@ -143,15 +143,24 @@ public:
     if (auto id = dyn_cast<AST::Identifier>(&n))
       return GetSymbolType(id->name);
     else if (auto expr = dyn_cast<AST::Expr>(&n)) {
-      if (auto ref = expr->GetReference()) {
-        if (auto id = dyn_cast<AST::Identifier>(ref))
-          return GetSymbolType(id->name);
+      if (auto id = expr->GetSymbol()) {
+        return GetSymbolType(id->name);
       } else if (expr->op == "dataof") {
-        if (auto ref = cast<AST::Expr>(expr->GetR())->GetReference()) {
-          auto id = cast<AST::Identifier>(ref);
-          if (!GetSymbolType(id->name)) // make sure the symbol exists
+        if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol()) {
+          if (!GetSymbolType(id->name)) {
+            // choreo_unreachable("\"dataof\" operation refers undefined symbol
+            // '" +  id->name + "'.");
             return nullptr;
+          }
           return GetSymbolType(id->name + ".data");
+        }
+      } else if (expr->op == "spanof") {
+        if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol()) {
+          if (!GetSymbolType(id->name)) // make sure the symbol exists
+            choreo_unreachable(
+                "\"spanof\" operation refers undefined symbol '" + id->name +
+                "'.");
+          return GetSymbolType(id->name + ".span");
         }
       }
     }

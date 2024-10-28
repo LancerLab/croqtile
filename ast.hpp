@@ -749,8 +749,8 @@ struct NamedVariableDecl : public Node,
                            public TypeIDProvider<NamedVariableDecl> {
   const std::string name_str;
   const std::string init_str;
-  const ptr<Memory> mem = nullptr; // storage location
-  ptr<DataType> type = nullptr;
+  const ptr<Memory> mem = nullptr;     // storage location
+  ptr<DataType> type = nullptr;        // type annotation
   const ptr<Node> init_expr = nullptr; // associated initializer
 
   explicit NamedVariableDecl(const location& l, const std::string& n,
@@ -1095,7 +1095,7 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
 
   // The dummy dma
   explicit DMA(const location& l, const std::string& f)
-      : Node(l, MakePlaceHolderFutureType()), operation(".none"), future(f),
+      : Node(l, MakePlaceHolderFutureType()), operation(".any"), future(f),
         async(true) {}
 
   std::string FromSymbol() const { return cast<ChunkAt>(from)->RefSymbol(); }
@@ -1108,7 +1108,7 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
   void SetConfig(const ptr<DMAConfig>& cfg) { config = cfg; }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    if (operation == ".none") {
+    if (operation == ".any") {
       os << "\n" << prefix << "`- DMA" << operation;
       if (!future.empty()) os << "\n" << prefix << "  `- future: " << future;
       return;
@@ -1328,7 +1328,7 @@ struct Program : public Node, public TypeIDProvider<Program> {
   __UDT_TYPE_INFO__(Node, Program)
 };
 
-// utility
+// utility functions
 inline std::optional<std::string> GetName(const Node& n) {
   if (auto id = dyn_cast<AST::Identifier>(&n))
     return id->name;
@@ -1337,6 +1337,7 @@ inline std::optional<std::string> GetName(const Node& n) {
   }
   return std::nullopt;
 }
+
 inline Identifier* GetIdentifier(const Node& n) {
   if (auto id = dyn_cast<AST::Identifier>(&n))
     return id;
@@ -1345,6 +1346,7 @@ inline Identifier* GetIdentifier(const Node& n) {
   else
     return nullptr;
 }
+
 inline std::string NodeName(const Node& n) { return n.TypeNameString(); }
 
 } // end of namespace AST

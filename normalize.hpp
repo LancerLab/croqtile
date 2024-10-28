@@ -254,7 +254,7 @@ public:
   bool Visit(AST::SpanAs&) override { return true; }
 
   bool Visit(AST::DMA& n) override {
-    if (n.operation == ".none") return true;
+    if (n.operation == ".any") return true;
     if (!isa<AST::Select>(n.to)) return true;
 
     auto anon_sym = SymbolTable::GetAnonName();

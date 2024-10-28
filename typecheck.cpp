@@ -178,7 +178,7 @@ bool TypeChecker::Visit(AST::DMA& n) {
   __TRACE_EACH_VISIT__(n)
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
 
-  bool IsDummy = (n.operation == ".none");
+  bool IsDummy = (n.operation == ".any");
   auto ty = n.GetType();
 
   if (IsDummy) {

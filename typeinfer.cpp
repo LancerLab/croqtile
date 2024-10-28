@@ -624,7 +624,7 @@ bool TypeInference::Visit(AST::DMA& n) {
     return false;
   }
 
-  if (n.operation == ".none") {
+  if (n.operation == ".any") {
     n.SetType(MakePlaceHolderFutureType());
     AssignSymbolWithType(n.LOC(), n.future + ".span",
                          MakePlaceHolderMDSpanType());

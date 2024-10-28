@@ -134,7 +134,7 @@ blank       [ \t\r]
   ".copy"    return Choreo::Parser::make_COPY(yytext, loc);
   ".transp"  return Choreo::Parser::make_TRANSPOSE(yytext, loc);
   ".pad"     return Choreo::Parser::make_PAD(yytext, loc);
-  ".none"    return Choreo::Parser::make_NONE(yytext, loc);
+  ".any"     return Choreo::Parser::make_NONE(yytext, loc);
   ".async"   return Choreo::Parser::make_ASYNC(yytext, loc);
   ".span"    return Choreo::Parser::make_FNSPAN(yytext, loc);
   ".span_as" return Choreo::Parser::make_FNSPANAS(yytext, loc);

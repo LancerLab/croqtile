@@ -39,12 +39,28 @@ private:
 
   void SetNodeType(AST::Node& n, const ptr<Type>& ty) {
     n.SetType(ty);
-    if (trace_visit)
-      os << "Set type of " << STR(n) << " as " << STR(*n.GetType()) << "\n";
+    if (debug_visit)
+      os << "Set type of " << STR(n) << " as " << PSTR(n.GetType()) << "\n";
+  }
+  void ModifySymbolType(const std::string& n, const ptr<Type>& ty) {
+    SSTab().ModifySymbolType(n, ty);
+    if (debug_visit)
+      os << "Modify type of " << STR(n) << " as " << PSTR(ty) << "\n";
+  }
+
+  virtual void TraceEachVisit(AST::Node& n, bool detail = false,
+                              const std::string& m = "") const {
+    if (!trace_visit) return;
+    if (detail)
+      os << m << STR(n) << "\n";
+    else
+      os << m << n.TypeNameString() << "\n";
   }
 
 public:
-  EarlySemantics(std::ostream& o = std::cout) : Visitor("sema"), os(o) {}
+  EarlySemantics(std::ostream& o = std::cout) : Visitor("sema"), os(o) {
+    if (trace_visit) debug_visit = true; // force debug when tracing
+  }
   ~EarlySemantics() {}
 
   bool Visit(AST::MultiNodes&) override;

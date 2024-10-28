@@ -15,6 +15,7 @@ TARGETS = $(SOURCES:.cpp=.test)
 
 NV_SOURCES = $(wildcard *.cu)
 NV_TARGETS = $(NV_SOURCES:.cu=.cutest)
+NV_TARGETS =
 
 # Main target
 all: $(TARGETS) $(NV_TARGETS)
