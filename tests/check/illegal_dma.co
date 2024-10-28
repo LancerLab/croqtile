@@ -17,10 +17,25 @@ __co__ void illegal_pad(f32 [1, 2, 3] src) {
   dma.pad<{1, 0}, {1, 0}, {0, 0}, 2> src => local;
 }
 
+__co__ void illegal_transp(s32 [2, 16] src) {
+  // the errors are reported when SEMA
+  s32[2, 16] dst0;
+  s32[16, 2] dst1;
+  dma.transp<{1, 0, 2}> src => dst0;
+  dma.transp<{2, 0}> src => dst0;
+  dma.transp<{1}> src => dst0;
+}
+
 // CHECK: error: The DMA statement contains a rank mismatch: the 'from' and 'to' arrays have inconsistent dimensions.
 // CHECK: error: The DMA statement contains a rank mismatch: the 'from' and 'to' arrays have inconsistent dimensions.
 // CHECK: error: The DMA statement contains a type mismatch: the element types of the 'from'(f32) and 'to'(f16) arrays are inconsistent.
 // CHECK: error: The DMA statement contains a rank mismatch: the 'from' and 'to' arrays have inconsistent dimensions.
 // CHECK: error: The DMA statement contains a rank mismatch: the paddings have inconsistent ranks.
 // CHECK: error: The rank of the data to transfer is inconsistent with the DMA padding settings
-// CHECK: Totally 6 errors have been detected.
+// CHECK: error: The DMA statement contains a rank mismatch: the 'transpose layout' and 'from' arrays have inconsistent dimensions.
+// CHECK: error: The DMA statement contains a rank mismatch: the 'transpose layout' and 'to' arrays have inconsistent dimensions.
+// CHECK: error: The DMA statement contains an error: the transpose layout is invalid.
+// CHECK: error: The DMA statement contains a rank mismatch: the 'transpose layout' and 'from' arrays have inconsistent dimensions.
+// CHECK: error: The DMA statement contains a rank mismatch: the 'transpose layout' and 'to' arrays have inconsistent dimensions.
+// CHECK: error: The DMA statement contains an error: the transpose layout is invalid.
+// CHECK: Totally 12 errors have been detected.

@@ -871,10 +871,39 @@ bool EarlySemantics::Visit(AST::DMA& n) {
     } else if (NodeType(*n.from)->Dims() != pcfg->pad_high.size()) {
       Error(n.LOC(),
             "The rank of the data to transfer is inconsistent with the DMA "
-            "padding settings");
+            "padding settings.");
       error_count++;
     }
   }
+
+  // dma.transp specific check
+  if (auto tcfg = dyn_cast<TransposeConfig>(n.config)) {
+    auto dim_values = tcfg->dim_values;
+    if (dim_values.size() != sty->Dims()) {
+      Error(n.LOC(),
+            "The DMA statement contains a rank mismatch: the 'transpose "
+            "layout' and 'from' arrays have inconsistent dimensions.");
+      error_count++;
+    }
+    if (!isa<AST::Memory>(n.to)) {
+      if (dim_values.size() != sty->Dims()) {
+        Error(n.LOC(),
+              "The DMA statement contains a rank mismatch: the 'transpose "
+              "layout' and 'to' arrays have inconsistent dimensions.");
+        error_count++;
+      }
+    }
+    std::sort(dim_values.begin(), dim_values.end());
+    for (size_t i = 0; i < dim_values.size(); ++i) {
+      if (dim_values[i] != i) {
+        Error(n.LOC(), "The DMA statement contains an error: the transpose "
+                       "layout is invalid.");
+        error_count++;
+        break;
+      }
+    }
+  }
+
   return true;
 }
 

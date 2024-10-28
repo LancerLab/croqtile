@@ -860,9 +860,10 @@ dma_config
         $$ = pc;
       }
     | LT LBRACE iv_list RBRACE GT {
-        auto pc = std::make_shared<TransposeConfig>();
-        for (auto high : $3->values)
-          pc->dim_values.push_back(cast<AST::IntLiteral>(high)->Val());
+        auto tc = std::make_shared<TransposeConfig>();
+        for (auto value : $3->values)
+          tc->dim_values.push_back(cast<AST::IntLiteral>(value)->Val());
+        $$ = tc;
     }
     | /* Empty for no config */ { $$ = nullptr; }
     ;

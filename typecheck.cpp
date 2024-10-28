@@ -221,10 +221,39 @@ bool TypeChecker::Visit(AST::DMA& n) {
     error_count++;
   }
 
-  if (!(cast<SpannedType>(n.from->GetType())->DataEqual(*n.to->GetType()))) {
-    Error(n.LOC(), "Type inconsistent between DMA 'from'(" +
-                       PSTR(n.from->GetType()) + ") and 'to'(" +
-                       PSTR(n.to->GetType()) + ").");
+  auto& fty = n.from->GetType();
+  auto& tty = n.to->GetType();
+
+  if (n.operation == ".transp") {
+    // no transposed shape need to be generated
+    // do DataEqual() manually
+    auto tc = cast<TransposeConfig>(n.config);
+    auto sfty = cast<SpannedType>(fty);
+    auto stty = cast<SpannedType>(tty);
+    auto f_shape = sfty->GetShape();
+    auto t_shape = stty->GetShape();
+    if (sfty->f_type != stty->f_type ||
+        f_shape.DimCount() != t_shape.DimCount()) {
+      Error(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
+                         ") with " + PSTR(tc) + " and 'to'(" + PSTR(tty) +
+                         ").");
+      error_count++;
+    } else {
+      auto& dim_values = tc->dim_values;
+      for (size_t i = 0; i < dim_values.size(); ++i) {
+        if (!IsValueItemEqual(f_shape.ValueAt(dim_values[i]),
+                              t_shape.ValueAt(i))) {
+          Error(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
+                             ") with " + PSTR(tc) + " and 'to'(" + PSTR(tty) +
+                             ").");
+          error_count++;
+          break;
+        }
+      }
+    }
+  } else if (!(cast<SpannedType>(fty)->DataEqual(*tty))) {
+    Error(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
+                       ") and 'to'(" + PSTR(tty) + ").");
     error_count++;
   }
 

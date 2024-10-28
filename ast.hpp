@@ -107,7 +107,7 @@ struct MultiNodes : public Node, public TypeIDProvider<MultiNodes> {
   std::string delimiter;
 
   explicit MultiNodes(const location& l, std::string d = "")
-      : Node(l), delimiter(d){};
+      : Node(l), delimiter(d) {};
 
   void Append(const ptr<Node>& m) {
     assert(m != nullptr && "Unexpected: null pointer.");
@@ -227,6 +227,9 @@ struct IntLiteral : public Node, public TypeIDProvider<IntLiteral> {
   int value;
   IntLiteral(const location& l, int v = GetUnKnownInteger())
       : Node(l, MakeIntegerType()), value(v) {}
+
+  // allow copy construction
+  explicit IntLiteral(const IntLiteral& il) : IntLiteral(il.LOC(), il.value) {}
 
   int Val() const { return value; }
 

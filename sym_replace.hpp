@@ -158,43 +158,37 @@ public:
   }
 
   inline void DumpTermimalExprs() const {
-    SR_DEBUG(os << "Terminal Expr Nodes:\n"; for (auto& n
-                                                  : expr_nodes) os
-                                             << "\t" << PSTR(n) << "\n";);
+    SR_DEBUG(os << "Terminal Expr Nodes:\n";
+             for (auto& n : expr_nodes) os << "\t" << PSTR(n) << "\n";);
   }
 
   inline void DumpNameSymbolMap() const {
-    SR_DEBUG(os << "Name Symbol Map:\n"; for (auto& [name, sym]
-                                              : name_symbol_map) os
-                                         << "\t" << name << " " << sym
-                                         << "\n";);
+    SR_DEBUG(os << "Name Symbol Map:\n";
+             for (auto& [name, sym] : name_symbol_map) os << "\t" << name << " "
+                                                          << sym << "\n";);
   }
 
   inline void DumpNameSymExprMap() const {
-    SR_DEBUG(os << "Name SymExpr Map:\n"; for (auto& [name, sym_expr]
-                                               : name_sym_expr_map) os
-                                          << "\t" << name << " " << sym_expr
-                                          << "\n";);
+    SR_DEBUG(os << "Name SymExpr Map:\n";
+             for (auto& [name, sym_expr] : name_sym_expr_map) os
+             << "\t" << name << " " << sym_expr << "\n";);
   }
 
   inline void DumpExprSymValnoMap() const {
-    SR_DEBUG(os << "Expr SymbolValno Map:\n"; for (auto& [expr, sym_valno]
-                                                   : expr_sym_valno_map) os
-                                              << "\t" << PSTR(expr) << " "
-                                              << sym_valno << "\n";);
+    SR_DEBUG(os << "Expr SymbolValno Map:\n";
+             for (auto& [expr, sym_valno] : expr_sym_valno_map) os
+             << "\t" << PSTR(expr) << " " << sym_valno << "\n";);
   }
 
   inline void DumpSymValnoSymExprMap() const {
-    SR_DEBUG(os << "SymValno SymExpr Map:\n"; for (auto& [sym_valno, sym_expr]
-                                                   : sym_valno_sym_expr_map) os
-                                              << "\t" << sym_valno << " "
-                                              << sym_expr << "\n";);
+    SR_DEBUG(os << "SymValno SymExpr Map:\n";
+             for (auto& [sym_valno, sym_expr] : sym_valno_sym_expr_map) os
+             << "\t" << sym_valno << " " << sym_expr << "\n";);
   }
 
   inline void DumpExprNodesWithSymExprAndSymValno() const {
     SR_DEBUG(os << "ExprNodes With SymExpr And SymValno:\n";
-             for (auto& expr
-                  : expr_nodes) {
+             for (auto& expr : expr_nodes) {
                auto sym_valno = GetSymValnoFromExpr(expr);
                os << "\t" << PSTR(expr);
                os << "\n\t\t\t\t" << sym_valno << " == ";
