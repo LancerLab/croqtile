@@ -399,9 +399,20 @@ bool FactorCodeGen::Visit(AST::ParamList& pl) {
 bool FactorCodeGen::Visit(AST::ParallelBy& by) {
   TraceEachVisit(by);
   parallel_factor *= by.bound;
+  if (parallel_level == 1)
+    pb_bound0 = by.bound;
+  else if (parallel_level == 2)
+    pb_bound1 = by.bound;
+  else
+    choreo_unreachable("parallel_level is invalid!");
   if (parallel_level > 1) { return true; }
-  fs << this->indent << "Dim3 grid_dim(1);\n";
-  fs << this->indent << "Dim3 block_dim(" << by.bound << ");\n";
+  // only one `parallel by`
+  if (pb_bound1 == -1) {
+    pb_bound1 = pb_bound0;
+    pb_bound0 = 1;
+  }
+  fs << this->indent << "Dim3 grid_dim(" << "$$pb_bound0$$" << ");\n";
+  fs << this->indent << "Dim3 block_dim(" << "$$pb_bound1$$" << ");\n";
   fs << this->indent << "auto ts = launch_kernel_(\"" << current_fn
      << "_parallel\", grid_dim, block_dim, args.back(), {";
   if (cur_params->size() > 0) {
@@ -1441,6 +1452,10 @@ void FactorCodeGen::OutputScript(FunctionType* fty, const std::string& name,
   if (!alloc_in_fs.str().empty())
     factor_src.insert(alloc_pos, alloc_in_fs.str());
   ReplaceInString(&factor_src, std::string("$$out$$"), output_v);
+  ReplaceInString(&factor_src, std::string("$$pb_bound0$$"),
+                  std::to_string(pb_bound0));
+  ReplaceInString(&factor_src, std::string("$$pb_bound1$$"),
+                  std::to_string(pb_bound1));
   ReplaceInString(&factor_src, std::string(backpatch_filename), kernel_fn);
 
   // Now generate the script
