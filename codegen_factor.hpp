@@ -43,6 +43,10 @@ private:
   // output variable name
   std::string output_v;
 
+  // AST::ParallelBy bound
+  int pb_bound0 = -1;
+  int pb_bound1 = -1;
+
   const std::string named_dim_ref_prefix = "__choreo_nd_ref_";
 
   bool void_return = false;
