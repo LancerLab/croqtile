@@ -292,14 +292,16 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl& node) {
       else
         alloc_in_fs << "    " << _os.str();
 
-#if 0
-      fs << indent << "auto " << sym << "_init = alloc_dma_("
-         << ((storage_type == "L1Type") ? "SDMAType()" : "CDMAType()")
-         << ");\n";
+      if (node.init_value) {
+        // generate "memset_()" action when span-initializer exists
+        fs << indent << "auto " << sym << "_init = alloc_dma_("
+           << ((storage_type == "L1Type") ? "SDMAType()" : "CDMAType()")
+           << ");\n";
 
-      // generate "memset_()" action to initiate each alloc_memory with value 0
-      fs << indent << "memset_(" << sym << "_init, " << sym << ", 0);\n";
-#endif
+        // generate "memset_()" action to initiate each alloc_memory with value
+        // 0
+        fs << indent << "memset_(" << sym << "_init, " << sym << ", 0);\n";
+      }
     }
   } else if (isa<IntegerType>(nty)) {
     // simply ignore the generation of such simple integers

@@ -471,6 +471,12 @@ named_spanned_decl
           $$->Append(AST::Make<AST::NamedVariableDecl>(@3, name, $2, $1));
         }
       }
+    | storage_qual spanned_type IDENTIFIER LBRACE NUM RBRACE {
+        $$ = AST::Make<AST::MultiNodes>(@1);
+        symtab.AddSymbol($3, $2->GetType());
+        $$->Append(AST::Make<AST::NamedVariableDecl>(@3, $3, $2, $1, nullptr,
+                                                     AST::Make<AST::IntLiteral>(@5, $5)));
+      }
     ;
 
 expr_or_qes

@@ -749,16 +749,27 @@ struct NamedVariableDecl : public Node,
                            public TypeIDProvider<NamedVariableDecl> {
   const std::string name_str;
   const std::string init_str;
-  const ptr<Memory> mem = nullptr;     // storage location
-  ptr<DataType> type = nullptr;        // type annotation
-  const ptr<Node> init_expr = nullptr; // associated initializer
+  const ptr<Memory> mem = nullptr;            // storage location
+  ptr<DataType> type = nullptr;               // type annotation
+  const ptr<Node> init_expr = nullptr;        // associated initializer
+  const ptr<IntLiteral> init_value = nullptr; // associated initial value
 
   explicit NamedVariableDecl(const location& l, const std::string& n,
                              const ptr<DataType>& t = nullptr,
                              const ptr<Memory>& s = nullptr,
-                             const ptr<Node>& v = nullptr,
+                             const ptr<Node>& i = nullptr,
+                             const ptr<IntLiteral>& v = nullptr,
                              const std::string& d = "=")
-      : Node(l), name_str(n), init_str(d), mem(s), type(t), init_expr(v) {
+      : Node(l), name_str(n), init_str(d), mem(s), type(t), init_expr(i),
+        init_value(v) {
+
+    if (init_expr)
+      assert(!init_value && "initial value can not be set when initialization "
+                            "expression is specified.");
+    else if (init_value)
+      assert(!init_expr && "initialization expression can not be set when init "
+                           "value is specified.");
+
     assert(name_str.size() > 0 && "Invalid name string.");
   }
 
@@ -770,10 +781,10 @@ struct NamedVariableDecl : public Node,
       mem->Print(os);
     }
     os << "): " << name_str;
-    if (init_expr) {
-      os << " " << init_str << " ";
-      init_expr->Print(os);
-    }
+    if (init_expr)
+      os << " " << init_str << " " << PSTR(init_expr);
+    else if (init_value)
+      os << " " << init_str << " {" << PSTR(init_value) << "}";
   }
 
   void accept(Visitor&) override;

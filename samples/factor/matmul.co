@@ -28,7 +28,7 @@ __co__ s32 [512, 1024] ele_add(s32 [512, 1024] lhs, s32 [1024, 1024] rhs) { /// 
           // m_tile_size : #output.span(0)/#m_tile
           // n_tile_size : #output.span(1)/#n_tile
           // local s32[m_tile_size, n_tile_size] l2_out; // alternative: s32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
-          local s32[8, 128] l1_out; // alternative: s32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
+          local s32[8, 128] l1_out {0}; // alternative: s32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
           foreach k_tile {
             // chunkat can support bounded_var algebra.
             lhs_load = dma.copy.async lhs.chunkat(m_tile, k_tile) => local; // tiling_factor: {6, 17, 4}, new_size {lhs(0)/6, lhs(1)/17, lhs(2)/4}
