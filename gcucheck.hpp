@@ -124,13 +124,14 @@ public:
               "shared variable '" + n.name_str +
                   "` must be declared inside single level of parallel-by.");
         error_count++;
-      } else if (local_level == 1) {
+      } else if (local_level == 1 && parallel_level == 2) {
+        // if parallel_level == 1, allow
+        // eg. parallel p by 6 { shared; local; }
         Error(n.LOC(), "shared variable '" + n.name_str +
                            "` mustn't be declared within the same level of "
                            "parallel-by as local variables.");
         error_count++;
-      } else if (local_level == 0)
-        local_level = 2;
+      }
       break;
     case Storage::LOCAL:
       if (parallel_level == 0) {
@@ -140,8 +141,7 @@ public:
       } else if (local_level != 0 && parallel_level != local_level) {
         Error(n.LOC(), "local variable '" + n.name_str +
                            "` must be declared inside a level of parallel-by "
-                           "that is identical to other local variables and "
-                           "different with shared variables.");
+                           "that is identical to other local variables.");
         error_count++;
       } else if (local_level == 0)
         local_level = parallel_level;
