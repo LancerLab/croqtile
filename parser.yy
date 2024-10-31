@@ -17,6 +17,12 @@
 
 namespace Choreo { class Scanner; }
 
+struct SymbolWithInitVal {
+  std::string name;
+  int init_val;
+  SymbolWithInitVal(const std::string & n, int i) : name(n), init_val(i) {}
+};
+
 }
 
 %code top {
@@ -150,6 +156,8 @@ void choreo_info(const char *message) {
 %nterm <ptr<DMAConfig>> dma_config
 %nterm <bool> sync_type
 %nterm <int> index index_or_none
+%nterm <ptr<SymbolWithInitVal>> id_with_init
+%nterm <ptr<std::vector<ptr<SymbolWithInitVal>>>> ids_with_inits
 %nterm <Choreo::Storage> storage
 %nterm <Choreo::BaseType> fundamental_type
 %nterm <AST::ptr<AST::CppSourceCode>> pass_by host_code
@@ -471,11 +479,28 @@ named_spanned_decl
           $$->Append(AST::Make<AST::NamedVariableDecl>(@3, name, $2, $1));
         }
       }
-    | storage_qual spanned_type IDENTIFIER LBRACE NUM RBRACE {
+    | storage_qual spanned_type ids_with_inits {
         $$ = AST::Make<AST::MultiNodes>(@1);
-        symtab.AddSymbol($3, $2->GetType());
-        $$->Append(AST::Make<AST::NamedVariableDecl>(@3, $3, $2, $1, nullptr,
-                                                     AST::Make<AST::IntLiteral>(@5, $5)));
+        for (auto val : *$3) {
+          symtab.AddSymbol(val->name, $2->GetType());
+          $$->Append(AST::Make<AST::NamedVariableDecl>(
+            @3, val->name, $2, $1, nullptr,
+            AST::Make<AST::IntLiteral>(@3, val->init_val)));
+        }
+      }
+    ;
+
+ids_with_inits
+    : id_with_init  { $$ = std::make_shared<std::vector<ptr<SymbolWithInitVal>>>(); $$->push_back($1); }
+    | ids_with_inits COMMA id_with_init {
+        $1->push_back($3);
+        $$ = $1;
+      }
+    ;
+
+id_with_init
+    : IDENTIFIER LBRACE NUM RBRACE {
+        $$ = std::make_shared<SymbolWithInitVal>($1, $3);
       }
     ;
 

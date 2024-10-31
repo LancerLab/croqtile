@@ -14,7 +14,7 @@ private:
 
   std::unordered_map<std::string, AST::Parameter*> cur_params;
 
-  std::string fname;
+  std::string fname; // current function name
   ptr<FutureBufferMap> fut_buf = nullptr;
 
 private:
@@ -24,10 +24,13 @@ private:
       fut_buf->insert({f->name, {}});
       fname = f->name;
     } else if (auto dma = dyn_cast<AST::DMA>(&n)) {
-      // associate a future with its buffer
-      if (!dma->future.empty() && (dma->operation != ".any"))
-        (*fut_buf)[fname].emplace(dma->future,
-                                  cast<AST::ChunkAt>(dma->to)->RefSymbol());
+      // associate a future with its only buffer
+      if (!dma->future.empty() && (dma->operation != ".any")) {
+        auto buf_name = cast<AST::ChunkAt>(dma->to)->RefSymbol();
+        (*fut_buf)[fname].emplace(dma->future, buf_name);
+        VST_DEBUG(os << "associate " << dma->future << " with " << buf_name
+                     << "\n");
+      }
     }
     return true;
   }

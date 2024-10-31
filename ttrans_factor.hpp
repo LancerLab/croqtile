@@ -40,7 +40,7 @@ private:
   Kind kind = Kind::T_NONE;
 
   // For SWAP codegen
-  std::string fname;
+  std::string fname;            // current function name
   ptr<FutureBufferMap> fut_buf; // map a future to its associated buffer
   std::stack<bool> replace_swap_names;
 
@@ -51,12 +51,11 @@ private:
       swap_post;
 
   const std::string NameToReplace(const std::string& name) const {
-    for (auto& item : swap_pre) {
+    for (auto& item : swap_pre)
       if (item.second.count(name)) return item.second.at(name);
-    }
-    for (auto& item : swap_post) {
+    for (auto& item : swap_post)
       if (item.second.count(name)) return item.second.at(name);
-    }
+
     return name; // no replacement
   }
 
@@ -107,7 +106,6 @@ private:
     TraceEachVisit(n, "After ");
     if (isa<AST::ChoreoFunction>(&n)) {
       fname = "";
-      // std::cout << "AFTER: - " << f->name << "\n" << STR(n) << "\n";
     } else if (isa<AST::ForeachBlock>(&n)) {
       if (kind == Kind::T_SWAP) {
         cur_swaps.clear();
@@ -314,8 +312,12 @@ public:
 
     if (kind != Kind::T_SWAP) return true;
 
-    auto data_name = n.data->name;
+    auto data_name = n.RefSymbol();
     n.data->name = NameToReplace(data_name);
+
+    // also replace future with the corresponding buffer
+    if (fut_buf->at(fname).count(n.data->name))
+      n.data->name = fut_buf->at(fname)[n.data->name];
 
     return true;
   }

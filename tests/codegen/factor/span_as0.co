@@ -54,7 +54,7 @@ __co__ auto span_as0(f32 [32, 18, 9] a) {
 // CHECK:        async_load_(b_local, anon_4, b_local__buf__, {Value(48)*thread_id,Value(12)*thread_id});
 // CHECK:        wait_dma_(b_local);
 // CHECK:        auto anon_5 = bitcast_(DRAMType(FloatType(32), {16, 9, 36}), o);
-// CHECK:        async_store_(o_store, a_local, anon_5, {Value(4)*iv_x,Value(3)*thread_id,Value(9)*iv_y});
+// CHECK:        async_store_(o_store, a_local__buf__, anon_5, {Value(4)*iv_x,Value(3)*thread_id,Value(9)*iv_y});
 // CHECK:      }); // end of choreo-foreach block on 'y'.
 // CHECK:    }); // end of choreo-foreach block on 'x'.
 // CHECK:  }); // end of choreo-factor kernel function

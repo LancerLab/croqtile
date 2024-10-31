@@ -1511,14 +1511,14 @@ dot_general_fp32(int lhs_addr, int rhs_addr,
 //   256x256x4 loads and stores from out
 //   => 12 loads and 4 store per result
 
-__co__ s32 [512, 1024] ele_add(s32 [512, 1024] lhs, s32 [1024, 1024] rhs) { /// device program
+__co__ s32 [512, 1024] matmul(s32 [512, 1024] lhs, s32 [1024, 1024] rhs) { /// device program
   s32[lhs.span(0), rhs.span(1)] output; // use same shape as lhs
 
   parallel p by 1 {  // p is sip_index
     with index = {m_tile, k_tile, n_tile} in [1, 1, 1] {  // decl your tiled spans
       foreach m_tile { // alternative: foreach index, index.x, index.y
         foreach n_tile {
-          shared s32[512, 1024] l2_out; // alternative: s32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
+          shared s32[512, 1024] l2_out {0}; // alternative: s32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
           foreach k_tile {
             lhs_load = dma.copy.async lhs.chunkat(m_tile, k_tile) => shared; // tiling_factor: {6, 17, 4}, new_size {lhs(0)/6, lhs(1)/17, lhs(2)/4}
             rhs_load = dma.copy.async rhs.chunkat(k_tile, n_tile) => shared; // no explicit decl the target buffer, but can refer by <FutureType>.data
@@ -1567,8 +1567,7 @@ int main() { /// host program
 
   auto start = std::chrono::high_resolution_clock::now();
 
-  auto res
-    = ele_add(lhs_data, rhs_data);
+  auto res = matmal(lhs_data, rhs_data);
 
   auto end = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);

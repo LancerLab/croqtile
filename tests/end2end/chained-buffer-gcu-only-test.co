@@ -1,5 +1,5 @@
+// RUN: choreo -t factor %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
 #include "choreo.h"
-#include <chrono>
 
 // extern "C" void kernel(int * lhs, int * rhs, int * out, int m, int k, int n) {
 __cok__ { /// kernel program
@@ -20,37 +20,6 @@ extern "C" void kernel(int * lhs, int * rhs, int * out) {
   }
 }
 
-extern "C" void  __attribute__((no_mem_alias_in_tar, loop_iterator_less_than_1024))
-fake_kernel(int* lhs_addr_ptr, int* rhs_addr_ptr,
-                int M, int K, int N, int reduce_index, int reduce_cnt,
-                int* out_addr_ptr) {
-  int lhs_addr = reinterpret_cast<int>(lhs_addr_ptr);
-  int rhs_addr = reinterpret_cast<int>(rhs_addr_ptr);
-  int out_addr = reinterpret_cast<int>(out_addr_ptr);
-  int vmem_lhs_addr = (lhs_addr >> 6);
-  int vmem_rhs_addr = (rhs_addr >> 6);
-  int vmem_output_addr = (out_addr >> 6);
-  int* lhs = reinterpret_cast<int*>(lhs_addr);
-  int* rhs = reinterpret_cast<int*>(rhs_addr);
-  int* out = reinterpret_cast<int*>(out_addr);
-  // for (int m = 0; m < M; ++m) {
-  //   for (int no = 0; no < N; ++no) {
-  //     out_addr_ptr[m*N + no] = rhs_addr_ptr;
-  //     // out_addr_ptr[m*N + no] = vmem_output_addr;
-  //   }
-  // }
-  for (int m = 0; m < M; ++m) {
-    for (int no = 0; no < N/16; ++no) {
-      for (int ko = 0; ko < K/16; ++ko) {
-        // FIT VMM action
-        for (int ki = 0; ki < 16; ++ki)
-          for (int ni = 0; ni < 16; ++ni)
-            out[m*N + no*16 + ni] += lhs[m*K + ko*16 + ki]*rhs[ko*16*N + ki*N + no*16 + ni];
-        // out[i*n + j] = lhs[i*k+z] + rhs[z*n+j];
-      }
-    }
-  }
-}
 
 extern "C" void dot_general_kernel_lhs_parallel_no_transpose(int* lhs_addr_ptr,
                                                             int* rhs_addr_ptr,
@@ -1511,46 +1480,40 @@ dot_general_fp32(int lhs_addr, int rhs_addr,
 //   256x256x4 loads and stores from out
 //   => 12 loads and 4 store per result
 
-__co__ s32 [512, 1024] ele_add(s32 [512, 1024] lhs, s32 [1024, 1024] rhs) { /// device program
+__co__ s32 [512, 1024] matmul(s32 [512, 1024] lhs, s32 [1024, 1024] rhs) { /// device program
   s32[lhs.span(0), rhs.span(1)] output; // use same shape as lhs
 
-  parallel p by 1 {  // p is sip_index
-    with index = {m_tile, k_tile, n_tile} in [1, 1, 1] {  // decl your tiled spans
-      foreach m_tile { // alternative: foreach index, index.x, index.y
-        foreach n_tile {
-          shared s32[512, 1024] l2_out; // alternative: s32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
-          foreach k_tile {
-            lhs_load = dma.copy.async lhs.chunkat(m_tile, k_tile) => shared; // tiling_factor: {6, 17, 4}, new_size {lhs(0)/6, lhs(1)/17, lhs(2)/4}
-            rhs_load = dma.copy.async rhs.chunkat(k_tile, n_tile) => shared; // no explicit decl the target buffer, but can refer by <FutureType>.data
+  parallel p by 1 {
+    with index = {m_tile, k_tile, n_tile} in [1, 1, 1] {
+      foreach m_tile, n_tile {
+        shared s32[512, 1024] l2_out;
+        foreach k_tile {
+          lhs_load = dma.copy.async lhs.chunkat(m_tile, k_tile) => shared;
+          rhs_load = dma.copy.async rhs.chunkat(k_tile, n_tile) => shared;
 
-            parallel q by 1 {
-              with index = {m_tile_s, k_tile_s, n_tile_s} in [4, 4, 8] {
-                local s32 [128, 256] lhs_load_s_buffer_0 {0}, lhs_load_s_buffer_1 {0};
-                local s32 [256, 128] rhs_load_s_buffer_0 {0}, rhs_load_s_buffer_1 {0};
-                foreach m_tile_s {
-                  foreach n_tile_s {
-                    foreach k_tile_s{
-                      // CHANGE 2: add after primitive to chain up paired DMAs
-                      lhs_load_s = dma.copy.async lhs_load.data.chunkat(m_tile_s, k_tile_s) => select(k_tile_s % 2, lhs_load_s_buffer_0, lhs_load_s_buffer_1) after lhs_load;
-                      rhs_load_s = dma.copy.async rhs_load.data.chunkat(k_tile_s, n_tile_s) => select(k_tile_s % 2, rhs_load_s_buffer_0, rhs_load_s_buffer_1) after rhs_load;
-                      out_load_s = dma.copy.async l2_out.chunkat(m_tile_s, n_tile_s) => local;
-                      wait out_load_s;
-                      // CHANGE 1: NO WAIT
-                      // wait lhs_load_s, rhs_load_s, out_load_s;
-                      call dot_general_fp32(lhs_load_s.data, rhs_load_s.data, 256, 256, 256, 0, 8, out_load_s.data); // |span| calculate the total size of span.
-                      out_store_s = dma.copy.async out_load_s.data => l2_out.chunkat(m_tile_s, n_tile_s); // can use defined vars
-                      // CHANGE 1: NO WAIT
-                      // wait out_store_s;
-                    }
-                  }
-                }
+          parallel q by 1 {
+            with index = {m_tile_s, k_tile_s, n_tile_s} in [4, 4, 8] {
+              local s32 [128, 256] lhs_load_s_buffer_0 {0}, lhs_load_s_buffer_1 {0};
+              local s32 [256, 128] rhs_load_s_buffer_0 {0}, rhs_load_s_buffer_1 {0};
+              foreach index {
+                // CHANGE 2: add after primitive to chain up paired DMAs
+                lhs_load_s = dma.copy.async lhs_load.data.chunkat(m_tile_s, k_tile_s) => select(k_tile_s % 2, lhs_load_s_buffer_0, lhs_load_s_buffer_1) after lhs_load;
+                rhs_load_s = dma.copy.async rhs_load.data.chunkat(k_tile_s, n_tile_s) => select(k_tile_s % 2, rhs_load_s_buffer_0, rhs_load_s_buffer_1) after rhs_load;
+                out_load_s = dma.copy.async l2_out.chunkat(m_tile_s, n_tile_s) => local;
+                wait out_load_s;
+                // CHANGE 1: NO WAIT
+                // wait lhs_load_s, rhs_load_s, out_load_s;
+                call dot_general_fp32(lhs_load_s.data, rhs_load_s.data, 256, 256, 256, 0, 8, out_load_s.data);
+                out_store_s = dma.copy.async out_load_s.data => l2_out.chunkat(m_tile_s, n_tile_s); // can use defined vars
+                // CHANGE 1: NO WAIT
+                // wait out_store_s;
               }
             }
-            // CHANGE 2: add after primitive to chain up paired DMAs
-            out_store = dma.copy.async l2_out => output.chunkat(m_tile, n_tile) after out_store_s; // can use defined vars
-            // CHANGE 1: NO WAIT
-            // wait out_store;
           }
+        // CHANGE 2: add after primitive to chain up paired DMAs
+        out_store = dma.copy.async l2_out => output.chunkat(m_tile, n_tile) after out_store_s; // can use defined vars
+        // CHANGE 1: NO WAIT
+        // wait out_store;
         }
       }
     }
@@ -1559,37 +1522,15 @@ __co__ s32 [512, 1024] ele_add(s32 [512, 1024] lhs, s32 [1024, 1024] rhs) { /// 
 }
 
 int main() { /// host program
-  choreo::s32 a[512][1024] = {0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::s32 b[512][512] = {0};
-  choreo::s32 b[1024][1024] = {0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::s32 b[512][512] = {0};
+  choreo::s32 a[512][1024] = {0};
+  choreo::s32 b[1024][1024] = {0};
   std::fill_n(&a[0][0], sizeof(a) / sizeof(a[0][0]), 1);
   std::fill_n(&b[0][0], sizeof(b) / sizeof(b[0][0]), 1);
   auto lhs_data = choreo::make_spanview<2, choreo::s32>((int*)a, {512, 1024});
   auto rhs_data = choreo::make_spanview<2, choreo::s32>((int*)b, {1024, 1024});
 
-  auto start = std::chrono::high_resolution_clock::now();
+  auto res = matmul(lhs_data, rhs_data);
 
-  auto res
-    = ele_add(lhs_data, rhs_data);
-
-  auto end = std::chrono::high_resolution_clock::now();
-  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-
-  std::cout << res.shape()[0] << std::endl;
-  std::cout << res.shape()[1] << std::endl;
-
-  // verfication
-  for (size_t i = 0; i < res.shape()[0]; ++i)
-    for (size_t j = 0; j < res.shape()[1]; ++j) {
-        // std::cout << "i: " << i << ", j: " << j << "\n";
-        // std::cout << "res: " << res[i][j] << "\n";
-        int ref = 0;
-        for (size_t k = 0; k < lhs_data.shape()[1]; ++k) {
-          ref += a[i][k]*b[k][j];
-
-        }
-        // std::cout << "ref: " << ref << std::endl;
-        // assert(ref == res[i][j]);
-      }
-  // std::cout << "Test Passed\n" << std::endl;
-  std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
+  std::cout << "Test Executed\n" << std::endl;
 }
+// CHECK: Test Executed

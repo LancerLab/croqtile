@@ -89,7 +89,8 @@ then
 else
   EDITOR=less
 fi
-if [ "$#" -ne 1 ]; then
+
+show_usage() {
     echo "    Usage: $0 | --execute           -> compile and execute choreo in factor
                     | --statistics        -> show Line Of Code (LOC) statistic compare between kernel code boosted w./w.o. Choreo
                     | --show-kernel       -> show the generated inner kernel code
@@ -97,7 +98,7 @@ if [ "$#" -ne 1 ]; then
                     | --show-host         -> show the generated host side boilerplates
                     | --show-choreo       -> show the choreo source code"
     exit 1
-fi
+}
 )";
     os << R"(
 if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then
@@ -124,13 +125,7 @@ elif [ "$1" == "--show-tileflow" ]; then
 elif [ "$1" == "--show-choreo" ]; then
   ${EDITOR} ~/choreo/demo/elementwise_add.co
 else
-    echo "    Usage: $0 | --execute           -> compile and execute choreo in factor
-                    | --statistics        -> show Line Of Code (LOC) statistic compare between kernel code boosted w./w.o. Choreo
-                    | --show-kernel       -> show the generated inner kernel code
-                    | --show-tileflow     -> show the generated tileflow code scheduled by choreo
-                    | --show-host         -> show the generated host side boilerplates
-                    | --show-choreo       -> show the choreo source code"
-    exit 1
+  show_usage
 fi
 )script";
 

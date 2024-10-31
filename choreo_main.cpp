@@ -38,7 +38,10 @@ int main(int argc, char* argv[]) {
   Option<std::string> output("--output", "-o", "", true);
   Option<std::string> target("--target", "-t", "factor", true);
   Option<std::string> abend_after("--stop-after", "-sa", "", true);
+  Option<std::string> trace_visit("--trace-visit", "-tv", "", true);
   Option<std::string> debug_visit("--debug-visit", "-dv", "", true);
+  Option<std::string> print_ahead("--print-before", "-pb", "", true);
+  Option<std::string> print_after("--print-after", "-pa", "", true);
   Option<bool> debug_on("--debug", "-d", false, false);
   Option<bool> cross_compile("--cross-compile", "-cc", false, false);
   Option<bool> dump_ast("--dump-ast", "-e", false, false);
@@ -59,8 +62,17 @@ int main(int argc, char* argv[]) {
   }
   r.SetOutputStream(output.GetValue());
 
+  if (!trace_visit.GetValue().empty())
+    setenv("CHOREO_TRACE_VISITOR", ToUpper(trace_visit.GetValue()).c_str(), 1);
+
   if (!debug_visit.GetValue().empty())
-    setenv("CHOREO_DEBUG_VISITOR", debug_visit.GetValue().c_str(), 1);
+    setenv("CHOREO_DEBUG_VISITOR", ToUpper(debug_visit.GetValue()).c_str(), 1);
+
+  if (!print_ahead.GetValue().empty())
+    setenv("CHOREO_PRINT_BEFORE", ToUpper(print_ahead.GetValue()).c_str(), 1);
+
+  if (!print_after.GetValue().empty())
+    setenv("CHOREO_PRINT_AFTER", ToUpper(print_after.GetValue()).c_str(), 1);
 
   if (dump_ast) {
     if (gen_none)
