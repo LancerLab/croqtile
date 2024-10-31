@@ -1,0 +1,66 @@
+// RUN: choreo -t cuda %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
+#include "choreo_cuda.h"
+
+__cok__ { /// kernel program
+
+// template <const int M, const int N, const int K, const int THD_Y,
+//           const int THD_X>
+inline __device__ void matmul_kernel_specialised(float *lhs, float *rhs,
+                                               float *out) {
+  constexpr int M = 64;
+  constexpr int N = 64;
+  constexpr int K = 32;
+  constexpr int THD_Y = 16;
+  constexpr int THD_X = 16;
+  for (int k = 0; k < K; k++)
+#pragma unroll
+    for (int m = 0; m < CEIL_DIV(M, THD_Y); m++)
+#pragma unroll
+      for (int n = 0; n < CEIL_DIV(N, THD_X); n++)
+        out[m * THD_Y * N + n * THD_X] +=
+            lhs[m * THD_Y * K + threadIdx.y * K + k] *
+            rhs[k * N + THD_X * n + threadIdx.x];
+  __syncthreads();
+  return;
+}
+
+} /// end of kernel decl
+
+
+__co__ void gpu_matmul(f32 [4096, 4096] lhs, f32 [4096, 4096] rhs, f32 [4096, 4096] output) { 
+  // p -> bid_x, q -> bid_y
+  // p: m gm to sm, q: n gm to sm
+  parallel {p, q} by [64, 64] {
+    with index = {m_tile, n_tile, k_tile} in [4, 4, 128] { 
+      shared f32[lhs.span(0)/#p, rhs.span(1)/#q] l2_out; // alternative: f32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
+      foreach k_tile {
+        lhs_load = dma.copy lhs.chunkat(p, k_tile) => shared; // tiling_factor: {6, 17, 4}, new_size {lhs(0)/6, lhs(1)/17, lhs(2)/4}
+        rhs_load = dma.copy rhs.chunkat(k_tile, q) => shared; // no explicit decl the target buffer, but can refer by <FutureType>.data
+        // TODO(catz): support template'd kernel
+        call matmul_kernel_specialised(lhs_load.data, rhs_load.data, l2_out);
+      }
+      out_store = dma.copy l2_out => output.chunkat(p, q); // can use defined vars
+    } // can use python styling
+  }
+}
+
+
+int main() { /// host program
+  unsigned long m, n, k;
+  m = 4096;
+  n = 4096;
+  k = 4096;
+
+  float* a = (float *)malloc(sizeof(float) * m * k);
+  float* b = (float *)malloc(sizeof(float) * k * n);
+  float* c = (float *)malloc(sizeof(float) * m * n);
+  auto lhs_data = choreo::make_spanview<2>((float*)a, {m, k});
+  auto rhs_data = choreo::make_spanview<2>((float*)b, {k, n});
+  auto out_data = choreo::make_spanview<2>((float*)c, {m, n});
+
+  gpu_matmul(lhs_data, rhs_data, out_data);
+
+  return 0;
+}
+
+// CHECK: Compute Correct with Cublas 

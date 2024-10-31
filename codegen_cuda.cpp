@@ -315,7 +315,6 @@ bool CUDACodeGen::Visit(AST::NamedVariableDecl& node) {
       _os << sty->GetShape().GetSizeExpression();
       // TODO sort all size function together
       _os << "*4";
-      _os << " = {0.}";
       _os << ");\n";
       fs << indent << _os.str();
 
@@ -375,9 +374,14 @@ bool CUDACodeGen::Visit(AST::ParallelBy& by) {
   // describe this occupacy consideration.
   fs << this->indent << "dim3 gridDim(";
   // TODO(albert): impl begin/end/next for support auto val : by.iv_list
-  fs << STR(by.iv_list->ValueAt(0));
-  for (auto idx = 1; idx < by.iv_list->Count(); idx++)
-    fs << ", " << STR(by.iv_list->ValueAt(idx));
+  if(by.iv_list) {
+    bool need_delimiter = false;
+    for (auto idx = 0; idx < by.iv_list->Count(); idx++) {
+      if (need_delimiter) fs << ", ";
+      fs << STR(by.iv_list->ValueAt(idx));
+      need_delimiter = true;
+    }
+  } else fs << STR(by.bound);
   fs << ");\n";
 
   fs << this->indent << "dim3 blockDim(16, 16);\n";
@@ -437,9 +441,13 @@ bool CUDACodeGen::Visit(AST::ParallelBy& by) {
   builtins[1] = "blockIdx.y";
   builtins[2] = "blockIdx.z";
 
-  for (auto idx = 0; idx < by.id_list->Count(); idx++)
-    fs << this->indent << "auto " << STR(by.id_list->ValueAt(idx))
-       << " = IndexDyn(" << builtins[idx] << ");\n";
+  if (by.id_list)
+    for (auto idx = 0; idx < by.id_list->Count(); idx++)
+      fs << this->indent << "auto " << STR(by.id_list->ValueAt(idx))
+         << " = IndexDyn(" << builtins[idx] << ");\n";
+  else 
+      fs << this->indent << "auto " << STR(by.biv)
+         << " = IndexDyn(" << builtins[0] << ");\n";
 
   fs << this->indent << "auto tid_x = IndexDyn(threadIdx.x);\n";
   fs << this->indent << "auto tid_y = IndexDyn(threadIdx.y);\n";

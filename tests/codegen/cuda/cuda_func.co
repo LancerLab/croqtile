@@ -17,9 +17,8 @@ __co__ void sgemm(f32 [4096, 4096] lhs, f32 [4096, 4096] rhs, f32 [4096, 4096] o
   }
 }
 
-// CHECK: #define FETCH_FLOAT4(pointer) (reinterpret_cast<float4*>(&(pointer))[0])
 // CHECK: void __choreo_sgemm_host(float* lhs, float* rhs, float* output) {
-// CHECK: __choreo_sgemm_host_parallel<<<gridDim, blockDim>>>(lhs, rhs, output);
+// CHECK: __choreo_sgemm_parallel<<<gridDim, blockDim>>>(lhs, rhs, output);
 // CHECK: } // end of choreo-cuda dataflow program
-// CHECK: __global__ void __choreo_sgemm_host_parallel(float* lhs, float* rhs, float* output) {
+// CHECK: __global__ void __choreo_sgemm_parallel(float* lhs, float* rhs, float* output) {
 // CHECK: } // end of choreo-cuda kernel function 

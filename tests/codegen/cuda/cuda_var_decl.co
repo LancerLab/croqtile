@@ -7,6 +7,6 @@ __co__ auto foobar(f32 [32] a, int, bool b, f16 [?]) {
   return 1;
 }
 
-// CHECK: __shared__ float var_shared[1024 * 1024];
+// CHECK: MAKE_SHARED_MATRIX(var_shared, make_coord(1024, 1024), float);
 // CHECK: cudaMalloc(&var_global_implicit, 1048576*4);
 // CHECK: cudaMalloc(&var_global_explicit, 1048576*4);
