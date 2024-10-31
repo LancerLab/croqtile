@@ -20,10 +20,7 @@
 #include "__choreo_cuda_kernel.cuh"
 
 namespace choreo {
-
 namespace cuda {
-
-#define CEIL_DIV(M, N) (((M) + (N) - 1) / (N))
 
 const std::string errLogFile = "matrixValidationFailure.txt";
 

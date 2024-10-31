@@ -4,6 +4,7 @@
 #include <string>
 #include <type_traits>
 
+#include "ast.hpp"
 #include "types.hpp"
 
 using namespace Choreo;
@@ -21,6 +22,9 @@ std::string stringify(const Storage& mspec);
 std::string stringify(const ValueList& vl);
 std::string stringify(const Shape& sp);
 
+// utils for stringify AST NODES
+std::string stringify(const AST::MultiDimSpans& sp);
+
 // safe version for pointers
 // we still use stringify name for simplification
 template <typename T>
@@ -33,6 +37,12 @@ template <typename T>
 inline static std::string stringify(const ptr<T>& pt) {
   if (!pt) return "invalid";
   return stringify(*pt);
+}
+
+template <>
+std::string stringify(const ptr<AST::Node>& pt) {
+  if (auto pt_new = cast<AST::MultiDimSpans>(pt)) return stringify(*pt_new);
+  return "invalid";
 }
 
 std::string size_expr_of(const Shape& sp);

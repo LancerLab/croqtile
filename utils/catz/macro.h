@@ -4,12 +4,9 @@
 namespace catz {
 
 // KERNEL UTILS
+#define OFFSET(row, col, ld) ((row)*(ld)+(col))
+#define FETCH_FLOAT4(pointer) (reinterpret_cast<float4*>(&(pointer))[0])
 #define CEIL_DIV(dividend, divisor) (((dividend) + (divisor)-1) / (divisor))
-
-#define MAKE_SHARED(matrixVar, size, type)                                     \
-  __shared__ type matrixVar##_data[size];                                      \
-  MatrixDyn<type> matrixVar =                                                  \
-      MatrixDyn<type>(matrixVar##_data, CoordDyn(1, size))
 
 // TODO: impl volume
 // TODO: Matrix own.
@@ -25,19 +22,6 @@ namespace catz {
   __shared__ type matrixVar##_data[size_x * size_y];                           \
   MatrixDyn<type> matrixVar =                                                  \
       MatrixDyn<type>(matrixVar##_data, CoordDyn(size_x, size_y))
-
-// TODO: consider to mute
-#define make_shared_matrix(matrixVar, size_x, size_y, type)                    \
-  __shared__ type matrixVar##_data[size_x * size_y];                           \
-  auto matrixVar = make_matrix(matrixVar##_data, make_coord_dyn(size_x, size_y))
-
-// #define MAKE_SHARED(matrixVar, size, type)                                     \
-//   __shared__ type matrixVar##_data[size];                                      \
-//   Matrix<type> matrixVar = Matrix<type>(matrixVar##_data, CoordDyn(1, size))
-//
-// #define MAKE_SHARED(matrixVar, size_x, size_y, type) \
-//   __shared__ type matrixVar##_data[size_x * size_y]; \ Matrix<type> matrixVar
-//   = Matrix<type>(matrixVar##_data, CoordDyn(size_x, size_y))
 
 // TEST UTILS
 // static check at compile time

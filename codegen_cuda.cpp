@@ -46,7 +46,7 @@ bool CUDACodeGen::BeforeVisitImpl(AST::Node& n) {
     host_params.clear();
     indent.clear();
     entry_fn = c->name;
-    current_fn = "__choreo_" + entry_fn + "_host";
+    current_fn = "__choreo_" + entry_fn;
     fs << R"(
 #pragma once
 
@@ -55,14 +55,18 @@ bool CUDACodeGen::BeforeVisitImpl(AST::Node& n) {
 #include <cstdlib>
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
+#include "catz/macro.h"
+#include "catz/trait.h"
+#include "catz/index.h"
+#include "catz/coord.h"
+#include "catz/matrix.h"
+#include "catz/cuda_utils.h"
 #include "choreo_cuda.h"
+
 )";
     fs << "#include \"" << backpatch_filename << "\"\n";
+    fs << "using namespace catz;\n";
     fs << R"(
-
-#define CEIL_DIV(M, N) (((M) + (N)-1) / (N))
-#define OFFSET(row, col, ld) ((row)*(ld)+(col))
-#define FETCH_FLOAT4(pointer) (reinterpret_cast<float4*>(&(pointer))[0])
 
 )";
 
@@ -78,7 +82,8 @@ bool CUDACodeGen::BeforeVisitImpl(AST::Node& n) {
     }
     this->return_string = ret_string;
     fs << this->indent << "__global__ void "
-       << " " << current_fn << "_parallel(";
+       << " "
+       << "__choreo_" << entry_fn << "_parallel(";
     // fs << this->indent << "__global__ " << this->return_string << " " <<
     // current_fn << "_parallel(";
     bool need_delimiter = false;
@@ -95,7 +100,7 @@ bool CUDACodeGen::BeforeVisitImpl(AST::Node& n) {
     fs << ");\n\n";
 
     // TODO(albert): to add host params
-    fs << this->indent << this->return_string << " " << current_fn << "(";
+    fs << this->indent << this->return_string << " " << current_fn << "_host(";
     need_delimiter = false;
     // f32 [4096, 4096] lhs ==> float* lhs
     for (auto value : c->f_decl.params->values) {
@@ -130,6 +135,7 @@ bool CUDACodeGen::AfterVisitImpl(AST::Node& n) {
     os << "target=" << target_fn << "\n";
     os << "build_path=" << build_path << "\n";
     os << "cuda_script=" << build_path << "/cuda_script.sh\n";
+    os << "cp -r utils/catz/ " << build_path << "\n";
     os << R"(
 if command -v nvim &> /dev/null
 then
@@ -261,18 +267,43 @@ bool CUDACodeGen::Visit(AST::NamedVariableDecl& node) {
   __TRACE_EACH_VISIT__(node)
   auto nty = node.GetType();
   auto sym = node.name_str;
+  auto sym_buf = sym + "_data__";
   if (auto sty = dyn_cast<SpannedType>(nty)) {
     assert(isa<SpannedType>(GetSymbolType(sym)) && "Inconsistent types!");
     auto storage_type = sty->GetStorage();
     auto base_type = Choreo::BaseType(sty->f_type);
     std::ostringstream _os;
     if (storage_type == Choreo::Storage::SHARED) {
-      _os << stringify(storage_type) << " ";
-      _os << stringify(base_type) << " ";
-      _os << sym
-          << ReplaceRuntimeNames(size_expr_of(sty->GetShape()), "", false)
-          << ";\n";
-      fs << indent << _os.str();
+
+      // decl Matrix
+      fs << this->indent << "MAKE_SHARED_MATRIX(" << sym << ", make_coord("
+         << ReplaceRuntimeNames(stringify(sty->GetShape()), "", false)
+         << "), float);\n";
+
+    } else if (storage_type == Choreo::Storage::LOCAL) {
+      // _os << stringify(storage_type) << " ";
+      // _os << stringify(base_type) << " ";
+      // _os << sym_buf
+      //     << ReplaceRuntimeNames(size_expr_of(sty->GetShape()), "", false)
+      //     // TODO(catz): support all dtypes
+      //     << " = {0.}"
+      //     << ";\n";
+      // fs << indent << _os.str();
+      //
+      // // decl Matrix
+      // fs << this->indent
+      //    << "auto "
+      //    << sym
+      //    << " = make_matrix("
+      //    << sym_buf
+      //    << ", make_coord("
+      //    << ReplaceRuntimeNames(stringify(sty->GetShape()), "", false)
+      //    << "));\n";
+
+      // NOTE: use Catz API
+      fs << this->indent << "MAKE_LOCAL_MATRIX(" << sym << ", make_coord("
+         << ReplaceRuntimeNames(stringify(sty->GetShape()), "", false)
+         << "), float);\n";
     } else if (storage_type == Choreo::Storage::GLOBAL) {
       _os << stringify(base_type);
       _os << "* ";
@@ -284,17 +315,20 @@ bool CUDACodeGen::Visit(AST::NamedVariableDecl& node) {
       _os << sty->GetShape().GetSizeExpression();
       // TODO sort all size function together
       _os << "*4";
+      _os << " = {0.}";
       _os << ");\n";
       fs << indent << _os.str();
+
+      fs << this->indent << "auto " << sym << " = make_matrix(" << sym_buf
+         << ", make_coord("
+         << ReplaceRuntimeNames(stringify(sty->GetShape()), "", false)
+         << "));\n";
     } else {
       assert(false && "other level of vars are not supported in choreo::cuda, "
                       "you can only use global and shared explicitly now\n");
     }
   } else {
     choreo_unreachable("non-spanned is not yet supported.");
-    // fs << this->indent;
-    // fs << "auto " << node.name_str << " = alloc_(?";
-    // fs << ");\n";
   }
   return true;
 };
@@ -331,17 +365,29 @@ bool CUDACodeGen::Visit(AST::ParallelBy& by) {
   // dim3 blockDim
   // dim3 gridDim
   // func_parallel<<<gridDim, blockDim>>>(arg0, arg1, arg2, ...)
-  fs << this->indent << "dim3 blockDim(32, 32);\n";
   // TODO(albert): resolve HC
   // fs << this->indent << "dim3 blockDim(" << by.bound << ");\n";
   // fs << this->indent << "dim3 blockDim(16, 16);\n";
+  // auto val0 = by.iv_list->ValueAt(0);
 
   // TODO(albert): HC, here uses 1536 magic number, which is the max threads in
   // active for Ampere GA104 architecture, we should use a HW property to
   // describe this occupacy consideration.
-  fs << this->indent << "dim3 gridDim(128, 128);\n";
-  // TODO(albert): CEIL_DIV(M, 128), CEIL_DIV(N, 128)
-  // fs << this->indent << "dim3 gridDim(256, 256);\n";
+  fs << this->indent << "dim3 gridDim(";
+  // TODO(albert): impl begin/end/next for support auto val : by.iv_list
+  fs << STR(by.iv_list->ValueAt(0));
+  for (auto idx = 1; idx < by.iv_list->Count(); idx++)
+    fs << ", " << STR(by.iv_list->ValueAt(idx));
+  fs << ");\n";
+
+  fs << this->indent << "dim3 blockDim(16, 16);\n";
+
+  fs << this->indent << "cudaFuncSetAttribute(\n"
+     << this->indent << "    " << current_fn << "_parallel,\n"
+     << this->indent << "    "
+     << "cudaFuncAttributePreferredSharedMemoryCarveout,\n"
+     << this->indent << "    " << "cudaSharedmemCarveoutMaxShared);\n";
+
   fs << this->indent << current_fn << "_parallel"
      << "<<<gridDim, blockDim>>>(";
   bool need_delimiter = false;
@@ -383,15 +429,32 @@ bool CUDACodeGen::Visit(AST::ParallelBy& by) {
   if (!void_return) fs << ", float* output";
   fs << ") {\n";
   this->incrementIndent();
-  // generate a reference name of the output
-  // if (!void_return) fs << indent << "auto & $$out$$ = results[0];\n";
-  fs << this->indent << "auto q = blockIdx.x;\n";
-  fs << this->indent << "auto p = blockIdx.y;\n";
-  fs << this->indent << "auto bid_z = blockIdx.z;\n";
-  fs << this->indent << "auto tid_x = threadIdx.x;\n";
-  fs << this->indent << "auto tid_y = threadIdx.y;\n";
-  fs << this->indent << "auto tid_z = threadIdx.z;\n";
   fs << "\n";
+
+  // built-in vars
+  char* builtins[3];
+  builtins[0] = "blockIdx.x";
+  builtins[1] = "blockIdx.y";
+  builtins[2] = "blockIdx.z";
+
+  for (auto idx = 0; idx < by.id_list->Count(); idx++)
+    fs << this->indent << "auto " << STR(by.id_list->ValueAt(idx))
+       << " = IndexDyn(" << builtins[idx] << ");\n";
+
+  fs << this->indent << "auto tid_x = IndexDyn(threadIdx.x);\n";
+  fs << this->indent << "auto tid_y = IndexDyn(threadIdx.y);\n";
+  fs << this->indent << "auto tid_z = IndexDyn(threadIdx.z);\n";
+
+  // decl for args matrices
+  // << auto lhs_mat = make_matrix(lhs, make_coord(4096, 4096)); >>
+  // TODO(catz): impl iters
+  for (unsigned i = 0; i < cur_params->size(); ++i) {
+    auto value = (*cur_params)[i];
+    fs << this->indent << "auto " << STR(value->sym) << "_mat"
+       << " = make_matrix(" << STR(value->sym) << ", make_coord("
+       << stringify(value->type->mdspan_type) << "));\n";
+  }
+
   alloc_pos = fs.str().size();
   alloc_indent = indent;
 
@@ -532,13 +595,11 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
 
   // allocate storage for DMA destination when it is not explicitly stated.
   if (auto mem_node = dyn_cast<AST::Memory>(d.to)) {
-    // support
     static std::map<Storage, std::string> sto2alloc = {
         {Storage::LOCAL, "L1Type"},
         {Storage::SHARED, "SRAMType"},
         {Storage::GLOBAL, "DRAMType"},
     };
-    // buffer in another stream
     alloc_in_fs << alloc_indent;
     alloc_in_fs << stringify(mem_node->Get()) << " ";
     alloc_in_fs << stringify(sty->ElementType()) << " ";
@@ -547,6 +608,53 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
     alloc_in_fs << ";\n";
   }
 
+  auto GetTileVarAsCoord = [this, &GetSpannedType](AST::Node& n) {
+    auto sty = GetSpannedType(n);
+    auto shape = sty->GetShape();
+    size_t rank = sty->Dims();
+
+    auto ca = cast<AST::ChunkAt>(&n);
+    if (!ca->positions) {
+      // symbol only, the offset is a multi-dim-zeros
+      return "[" + DelimitedString(std::vector<size_t>(rank, 0)) + "]";
+    }
+
+    std::ostringstream offss;
+    size_t dim_cursor = 0;
+    for (auto& bv : ca->positions->AllValues()) {
+      auto bvn = cast<AST::Identifier>(bv)->name;
+      if (auto bity = dyn_cast<BoundedITupleType>(bv->GetType())) {
+        for (size_t it_idx = 0; it_idx < bity->Dims(); ++it_idx) {
+          std::string iv_str;
+          if (within_map.count(bvn)) // with-matcher existed
+            iv_str = within_map[bvn][it_idx];
+          else
+            iv_str = bvn;
+
+          // prefix iteration variable
+          // if (ContainsLoopVar(iv_str)) iv_str = "iv_" + iv_str;
+
+          // special handling for the parallel tiling cuda
+          auto l = RemovePrefixOrNull("pv:", bity->GetNote());
+          if (l.has_value()) {
+            // is marked as parallel whose level is decided by target check
+            if (*l == "0")
+              iv_str = "thread_id";
+            else if (*l == "1")
+              iv_str = "block_id";
+            else
+              choreo_unreachable("invalid type note.");
+          }
+
+          offss << iv_str;
+
+          if (++dim_cursor < rank) offss << ", ";
+        }
+      } else
+        choreo_unreachable("unsupported type.");
+    }
+    return "Coord(" + offss.str() + ")";
+  };
   auto GenerateOffsetString = [this, &GetSpannedType](AST::Node& n) {
     auto sty = GetSpannedType(n);
     auto shape = sty->GetShape();
@@ -609,19 +717,6 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
       return "SDMAType";
   };
 
-  // buffer the allocation in another stream
-  // if use pipeline-mode, make all cdma with shared_ annotation
-  // if (d.chained == true &&
-  //     ((d.chain_to != "" && src_level > dst_level) ||
-  //     (d.chain_from != "" && src_level < dst_level)))
-  //   alloc_in_fs << alloc_indent << "auto " << future_name << " = alloc_dma_("
-  //             << DMATypeString(src_level, dst_level) << "()).shared_();\n";
-  // else
-  //   alloc_in_fs << alloc_indent << "auto " << future_name << " = alloc_dma_("
-  //             << DMATypeString(src_level, dst_level) << "());\n";
-
-  // decide the dma operation
-  // std::string dma_op = "";
   bool is_load = true;
   if (src_level >= dst_level)
     is_load = true;
@@ -632,28 +727,98 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
 
   if (isa<AST::Memory>(d.to) || isa<AST::Select>(d.to))
     chunkat_node = d.from;
-  else if (cast<AST::ChunkAt>(d.to)->positions)
-    chunkat_node = d.to;
-  else
+  else if (auto c = cast<AST::ChunkAt>(d.to)) {
+    if (!c->positions) // xxx.chunkat() => identifier
+      chunkat_node = d.from;
+    else
+      chunkat_node = d.to;
+  } else
     choreo_unreachable("cuda: unsupported chunkat.");
 
   // TODO(albert): resolve HC
   if (is_load) {
+    // outer loop from SM-TO-LOCAL
     fs << indent;
-    fs << dst_buffer_name;
-    fs << "[tid_y*32 + tid_x]";
-    fs << " = ";
-    fs << src_buffer_name;
-    fs << GenerateOffsetString(*chunkat_node);
-    fs << ";\n";
+    auto iv_row_name = "iv_row_" + dst_buffer_name;
+    fs << "for (auto " << iv_row_name << " = I(0); ";
+    fs << iv_row_name << " < "
+       << "make_index<" << STR(sty->GetShape().ValueAt(0) / 16) << ">()"
+       << "; ";
+    fs << "++" << iv_row_name << ") {\n";
+
+    // inner loop from SM-TO-LOCAL
+    fs << indent << "  ";
+    auto iv_col_name = "iv_col_" + dst_buffer_name;
+    fs << "for (auto " << iv_col_name << " = I(0); ";
+    fs << iv_col_name << " < "
+       << "make_index<" << STR(sty->GetShape().ValueAt(1) / 16) << ">()"
+       << "; ";
+    fs << "++" << iv_col_name << ") {\n";
+
+    // data transfer
+    fs << indent << "    ";
+    fs << dst_buffer_name << "\n";
+    fs << indent << "      ";
+    fs << ".tile(Coord(" << iv_row_name << ", " << iv_col_name << "), ";
+    fs << "make_coord(16, 16))\n";
+    fs << indent << "      ";
+    fs << ".dist_to(Coord(tid_y, tid_x))\n";
+    fs << indent << "    ";
+    fs << "= ";
+    fs << src_buffer_name << "_mat";
+    fs << ".tile(";
+    fs << GetTileVarAsCoord(*chunkat_node);
+    fs << ", make_coord(" << stringify(sty->GetShape()) << "))\n";
+    fs << indent << "      ";
+    fs << ".tile(Coord(" << iv_row_name << ", " << iv_col_name << "), ";
+    fs << "make_coord(16, 16))\n";
+    fs << indent << "      ";
+    fs << ".dist_to(Coord(tid_y, tid_x));\n";
+
+    fs << indent << "  }\n";
+    fs << indent << "}\n";
+    fs << indent << "__syncthreads();\n";
   } else {
     fs << indent;
-    fs << dst_buffer_name;
-    fs << GenerateOffsetString(*chunkat_node);
-    fs << " = ";
-    fs << src_buffer_name;
-    fs << "[tid_y*32 + tid_x]";
-    fs << ";\n";
+    auto iv_row_name = "iv_row_" + dst_buffer_name;
+    fs << "for (auto " << iv_row_name << " = I(0); ";
+    fs << iv_row_name << " < "
+       << "make_index<" << STR(sty->GetShape().ValueAt(0) / 16) << ">()"
+       << "; ";
+    fs << "++" << iv_row_name << ") {\n";
+
+    // inner loop from SM-TO-LOCAL
+    fs << indent << "  ";
+    auto iv_col_name = "iv_col_" + dst_buffer_name;
+    fs << "for (auto " << iv_col_name << " = I(0); ";
+    fs << iv_col_name << " < "
+       << "make_index<" << STR(sty->GetShape().ValueAt(1) / 16) << ">()"
+       << "; ";
+    fs << "++" << iv_col_name << ") {\n";
+
+    fs << indent << "    ";
+    fs << dst_buffer_name << "_mat";
+    fs << ".tile(";
+    fs << GetTileVarAsCoord(*chunkat_node);
+    fs << ", make_coord(" << stringify(sty->GetShape()) << "))\n";
+    fs << indent << "      ";
+    fs << ".tile(Coord(" << iv_row_name << ", " << iv_col_name << "), ";
+    fs << "make_coord(16, 16))\n";
+    fs << indent << "      ";
+    fs << ".dist_to(Coord(tid_y, tid_x))\n";
+    fs << indent << "    ";
+    fs << "= ";
+
+    fs << src_buffer_name << "\n";
+    fs << indent << "      ";
+    fs << ".tile(Coord(" << iv_row_name << ", " << iv_col_name << "), ";
+    fs << "make_coord(16, 16))\n";
+    fs << indent << "      ";
+    fs << ".dist_to(Coord(tid_y, tid_x));\n";
+
+    fs << indent << "  }\n";
+    fs << indent << "}\n";
+    fs << indent << "__syncthreads();\n";
   }
 
   return true;
@@ -695,6 +860,7 @@ bool CUDACodeGen::Visit(AST::Call& c) {
         std::stoi(STR(arg->GetR()));
         fs << STR(arg->GetR());
       } catch (const std::invalid_argument& e) { fs << STR(arg->GetR()); }
+      fs << ".data";
       break;
     case AST::Expr::Unary:
       if (arg->op == "sizeof") {
@@ -713,7 +879,7 @@ bool CUDACodeGen::Visit(AST::Call& c) {
 #endif
         fs << shape.GetSizeExpression();
       } else if (arg->op == "dataof") {
-        fs << STR(arg->GetR()) << "_buffer";
+        fs << STR(arg->GetR()) << "__buf__.data";
       }
       break;
     default:
@@ -788,10 +954,12 @@ bool CUDACodeGen::Visit(AST::ForeachBlock& forNode) {
       //    << ", [&](auto iv_" << iv_name << ") {\n";
       auto var_name = iv_name;
       fs << this->indent;
-      fs << "for (auto " << var_name << " = 0; ";
-      fs << var_name << " < " << ReplaceDynDimName(STR(iv_sizes.ValueAt(0)))
+      fs << "for (auto " << var_name << " = I(0); ";
+      fs << var_name << " < "
+         << "make_index<" << ReplaceDynDimName(STR(iv_sizes.ValueAt(0)))
+         << ">()"
          << "; ";
-      fs << var_name << "++) {\n";
+      fs << "++" << var_name << ") {\n";
       incrementIndent();
       loop_vars.back().insert(iv_name);
       // for (auto bind : bind_info.GetBinds(InScopeName(iv_name))) {
@@ -809,9 +977,11 @@ bool CUDACodeGen::Visit(AST::ForeachBlock& forNode) {
       for (auto name : cur_bounded_vars[iv_name]) {
         fs << this->indent;
         fs << "for (auto " << name << " = 0; ";
-        fs << name << " < " << ReplaceDynDimName(STR(iv_sizes.ValueAt(0)))
+        fs << name << " < "
+           << "make_index<" << ReplaceDynDimName(STR(iv_sizes.ValueAt(0)))
+           << ">()"
            << "; ";
-        fs << name << "++) {\n";
+        fs << "++" << name << ") {\n";
         // fs << this->indent << "for_(" << name << ", "
         //    << ReplaceDynDimName(STR(iv_sizes.ValueAt(i))) << ", "
         //    << 1 /* TODO(albert): need fix, unit stride is hardcoded for now*/

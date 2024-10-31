@@ -86,7 +86,7 @@ std::string stringify(const ValueList& vl) {
 // >> [4096, 4096]
 std::string stringify(const Shape& s) {
   std::ostringstream oss;
-  s.PrintAsListSquared(oss);
+  s.PrintPlain(oss);
   return oss.str();
 }
 
@@ -96,6 +96,12 @@ std::string size_expr_of(const Shape& s) {
   oss << "[";
   s.PrintSizeExpr(oss);
   oss << "]";
+  return oss.str();
+}
+
+std::string stringify(const AST::MultiDimSpans& span) {
+  std::ostringstream oss;
+  cast<AST::MultiValues>(span.list)->InlinePrint(oss);
   return oss.str();
 }
 
