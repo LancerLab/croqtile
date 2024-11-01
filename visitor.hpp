@@ -102,8 +102,8 @@ public:
       if (trace.find(name) != std::string::npos) trace_visit = true;
     }
 
-    if (std::getenv("CHOREO_TRACE_VISIT")) {
-      auto trace = ToUpper(std::string(std::getenv("CHOREO_TRACE_TRACE")));
+    if (std::getenv("CHOREO_TRACE_VISITOR")) {
+      auto trace = ToUpper(std::string(std::getenv("CHOREO_TRACE_VISITOR")));
       if (trace.find(name) != std::string::npos) trace_visit = true;
     }
 

@@ -588,6 +588,11 @@ ValueNumbering::TryToSimplifyNodeSignature(const AST::Node& node) {
                auto cv = RemovePrefixOrNull("index_const_",
                                             GetSignatureForNode(*n->GetR()));
                assert(cv && "indexing of mdspan can not be evaluated.");
+               assert((std::stoi(*cv) < CountElementsInSignature(base_sig)) &&
+                      "out of bound in 'dimof'.");
+
+               if (CountElementsInSignature(base_sig) == 1) return base_sig;
+
                return base_sig + "(" + *cv + ")";
              }},
             {"ref", // it is a reference to another node
