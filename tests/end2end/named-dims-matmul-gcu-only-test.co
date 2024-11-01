@@ -1,4 +1,4 @@
-// REQUIRES: TARGET-GCUALL
+// REQUIRES: TARGET-GCUALL DYNAMIC-SHAPE
 // RUN: choreo -t factor %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
 #include "choreo.h"
 
@@ -15,13 +15,17 @@ extern "C" void kernel(int * lhs, int * rhs, int * out) {
 }
 } /// end of kernel decl
 
-__co__ s32 [256, 512] ele_add(s32 [256, 512] lhs, s32 [512, 512] rhs) {
+__co__ auto matmul_named_dims(s32 [M, K] lhs, s32 [K, N] rhs) {
   s32[lhs.span(0), rhs.span(1)] output;
 
+  int m = 4;
+  int n = 64;
+  int k = 512;
+
   parallel p by 1 {
-    with index = {m_tile, k_tile, n_tile} in [64, 1, 8] {  // decl your tiled spans
+    with tilings = {m_tile, k_tile, n_tile} in [M/m, K/k, N/n] {  // decl your tiled spans
       foreach m_tile, n_tile {
-        local s32[4, 64] l1_out {0};
+        local s32 [m, n] l1_out {0};
         foreach k_tile {
           lhs_load = dma.copy lhs.chunkat(m_tile, k_tile) => local;
           rhs_load = dma.copy rhs.chunkat(k_tile, n_tile) => local;
@@ -43,7 +47,7 @@ int main() { /// host program
   auto lhs_data = choreo::make_spanview<2, choreo::s32>((int*)a, {256, 512});
   auto rhs_data = choreo::make_spanview<2, choreo::s32>((int*)b, {512, 512});
 
-  auto res = ele_add(lhs_data, rhs_data);
+  auto res = matmul_named_dims(lhs_data, rhs_data);
 
   std::cout << res.shape()[0] << std::endl;
   std::cout << res.shape()[1] << std::endl;

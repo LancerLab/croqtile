@@ -374,14 +374,15 @@ bool CUDACodeGen::Visit(AST::ParallelBy& by) {
   // describe this occupacy consideration.
   fs << this->indent << "dim3 gridDim(";
   // TODO(albert): impl begin/end/next for support auto val : by.iv_list
-  if(by.iv_list) {
+  if (by.iv_list) {
     bool need_delimiter = false;
-    for (auto idx = 0; idx < by.iv_list->Count(); idx++) {
+    for (size_t idx = 0; idx < by.iv_list->Count(); idx++) {
       if (need_delimiter) fs << ", ";
       fs << STR(by.iv_list->ValueAt(idx));
       need_delimiter = true;
     }
-  } else fs << STR(by.bound);
+  } else
+    fs << STR(by.bound);
   fs << ");\n";
 
   fs << this->indent << "dim3 blockDim(16, 16);\n";
@@ -436,18 +437,18 @@ bool CUDACodeGen::Visit(AST::ParallelBy& by) {
   fs << "\n";
 
   // built-in vars
-  char* builtins[3];
+  const char* builtins[3];
   builtins[0] = "blockIdx.x";
   builtins[1] = "blockIdx.y";
   builtins[2] = "blockIdx.z";
 
   if (by.id_list)
-    for (auto idx = 0; idx < by.id_list->Count(); idx++)
+    for (size_t idx = 0; idx < by.id_list->Count(); idx++)
       fs << this->indent << "auto " << STR(by.id_list->ValueAt(idx))
          << " = IndexDyn(" << builtins[idx] << ");\n";
-  else 
-      fs << this->indent << "auto " << STR(by.biv)
-         << " = IndexDyn(" << builtins[0] << ");\n";
+  else
+    fs << this->indent << "auto " << STR(by.biv) << " = IndexDyn("
+       << builtins[0] << ");\n";
 
   fs << this->indent << "auto tid_x = IndexDyn(threadIdx.x);\n";
   fs << this->indent << "auto tid_y = IndexDyn(threadIdx.y);\n";
@@ -580,8 +581,8 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
     src_buffer_name = src_node_name + "_buffer";
 
   auto sty = GetSpannedType(*d.from); // source spanned type
-  size_t rank = sty->Dims();
-  auto dst_shape = ty->GetShape();
+  // size_t rank = sty->Dims();
+  // auto dst_shape = ty->GetShape();
   auto src_sto = sty->GetStorage();
   auto dst_sto = Storage::DEFAULT;
   if (isa<AST::Memory>(d.to))
@@ -618,7 +619,7 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
 
   auto GetTileVarAsCoord = [this, &GetSpannedType](AST::Node& n) {
     auto sty = GetSpannedType(n);
-    auto shape = sty->GetShape();
+    // auto shape = sty->GetShape();
     size_t rank = sty->Dims();
 
     auto ca = cast<AST::ChunkAt>(&n);
@@ -704,10 +705,10 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
           offss << RSTR(shape.ValueAt(dim_cursor)) << "*" << iv_str;
 
           // add offset conversion
-          if (auto ca = cast<AST::ChunkAt>(&n))
-            // offss << "*" << STR(ca->data) << ".span(" << it_idx << ")";
-            // TODO(albert): fix it HC
-            offss << "*4096";
+          if (auto ca = cast<AST::ChunkAt>(&n)) (void)ca;
+          // offss << "*" << STR(ca->data) << ".span(" << it_idx << ")";
+          // TODO(albert): fix it HC
+          offss << "*4096";
           if (++dim_cursor < rank) offss << "+";
         }
       } else
@@ -715,6 +716,7 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
     }
     return "[tid_y*32+tid_x+" + offss.str() + "]";
   };
+  (void)GenerateOffsetString;
 
   // decide the dma allocation type
   auto DMATypeString = [](int src_lvl, int dst_lvl) {
@@ -724,6 +726,7 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
     else
       return "SDMAType";
   };
+  (void)DMATypeString;
 
   bool is_load = true;
   if (src_level >= dst_level)
@@ -1111,7 +1114,7 @@ bool CUDACodeGen::Visit(AST::FunctionDecl& d) {
   return true;
 }
 
-bool CUDACodeGen::Visit(AST::ChoreoFunction& node) {
+bool CUDACodeGen::Visit(AST::ChoreoFunction&) {
   // entry_fn = node.name;
   // current_fn = "__choreo_" + entry_fn + "_host";
   // auto fty = cast<FunctionType>(node.GetType());
@@ -1231,7 +1234,8 @@ void CUDACodeGen::EmitHostFuncBody(std::ostream& os, const Type& ty,
                                    const std::string& out_type,
                                    const Shape& out_shape) {
   assert(isa<FunctionType>(&ty) && "unexpected type.");
-  auto& fty = *cast<FunctionType>(&ty);
+  (void)f_n;
+  // auto& fty = *cast<FunctionType>(&ty);
 
   // TODO
   // 1. make alpha and beta into arguments
