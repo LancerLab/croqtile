@@ -561,7 +561,7 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
   auto src_buffer_name = cast<AST::ChunkAt>(d.from)->RefSymbol();
 
   auto sty = GetSpannedType(*d.from); // source spanned type
-  auto tty = GetSpannedType(*d.to);   // source spanned type
+  auto tty = GetSpannedType(*d.to);   // dest spanned type
   size_t rank = sty->Dims();
   //  auto dst_shape = ty->GetShape();
   auto src_sto = sty->GetStorage();
@@ -755,11 +755,19 @@ bool FactorCodeGen::Visit(AST::Call& c) {
       break;
     case AST::Expr::Unary:
       if (arg->op == "sizeof") {
-        auto var = STR(arg->GetR()).substr(0, STR(arg->GetR()).find('.'));
-        assert(dyn_cast<FutureType>(this->GetSymbolType(var)) &&
-               "Unexpected !!!");
-        auto ty_ptr = cast<FutureType>(this->GetSymbolType(var));
-        auto shape = ty_ptr->GetShape();
+        auto var = RemoveSuffix(STR(arg->GetR()), ".span");
+        Shape shape;
+        const auto& ty = this->GetSymbolType(var);
+        if (auto fty = dyn_cast<FutureType>(ty))
+          shape = fty->GetShape();
+        else if (auto mdsty = dyn_cast<MDSpanType>(ty))
+          shape = mdsty->GetShape();
+        else if (auto sty = dyn_cast<SpannedType>(ty))
+          shape = sty->GetShape();
+        else
+          choreo_unreachable("Can only use sizeof operator for future.span, "
+                             "mdspan and buffer.span!");
+
 #if 0
           auto shapes = shape.Value();
           auto dim = shape.values.values[0];
@@ -1272,12 +1280,12 @@ std::string FactorCodeGen::ReplaceDynDimName(const std::string& e) {
 
 std::optional<std::string>
 FactorCodeGen::ReplaceDynDimRef(const std::string& e) {
-  for (auto& [id_name, sym_name] : idnm_rts) {
-    // match str begins with "::", thus "\\b" appears only in the suffix.
-    auto replaced =
-        RegexReplaceAll(e, sym_name + "\\b", named_dim_ref_prefix + id_name);
-    if (replaced != e) return replaced;
-  }
+  std::string replaced = e;
+  // match str begins with "::", thus "\\b" appears only in the suffix.
+  for (auto& [id_name, sym_name] : idnm_rts)
+    replaced = RegexReplaceAll(replaced, sym_name + "\\b",
+                               named_dim_ref_prefix + id_name);
+  if (replaced != e) return replaced;
   return std::nullopt;
 }
 
@@ -1358,17 +1366,8 @@ void FactorCodeGen::EmitRuntimeMemUsageCheck(std::ostream& os, const Type& ty) {
       }
       // `used` is runtime memory usage
       auto operands = SplitStringByDelimiter(used, "*");
-      for (auto& o : operands) {
-        if (o.find(":") != std::string::npos) {
-          // `o` is dynamic dim. Should replace it with host name
-          for (auto& [sig, name] : rts_nmap) {
-            for (size_t p = o.find(sig); p != std::string::npos;
-                 p = o.find(sig)) {
-              o.replace(p, sig.size(), name);
-            }
-          }
-        }
-      }
+      // `o` is dynamic dim. Should replace it with host name
+      for (auto& o : operands) o = ReplaceRuntimeNames(o, "", true);
       // add (size_t) to avoid integer overflow
       used_ss << (used_ss.str().back() == ')' ? "" : " + ") << "(size_t)"
               << DelimitedString(operands, "*");

@@ -705,10 +705,10 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
           offss << RSTR(shape.ValueAt(dim_cursor)) << "*" << iv_str;
 
           // add offset conversion
-          if (auto ca = cast<AST::ChunkAt>(&n)) (void)ca;
-          // offss << "*" << STR(ca->data) << ".span(" << it_idx << ")";
           // TODO(albert): fix it HC
-          offss << "*4096";
+          if (auto ca = cast<AST::ChunkAt>(&n)) offss << "*4096";
+          // offss << "*" << STR(ca->data) << ".span(" << it_idx << ")";
+
           if (++dim_cursor < rank) offss << "+";
         }
       } else
