@@ -176,7 +176,7 @@ public:
   typename std::enable_if<(M > 1), ArrayProxy<T, Rank - 1>>::type
   operator[](int index) {
     choreo_assert(index >= 0, "Index out of bounds", __FILE__, __LINE__);
-    choreo_assert((size_t)index < dims[M - 1], "Index out of bounds", __FILE__,
+    choreo_assert((size_t)index < dims[0], "Index out of bounds", __FILE__,
                   __LINE__);
     const auto& sub_dims =
         *reinterpret_cast<const mdspan<Rank - 1>*>(&(dims[1]));
