@@ -31,6 +31,13 @@ private:
   ptr<Type> GetSymbolType(const location&, const std::string&);
   bool ModifySymbolType(const location&, const std::string&, const ptr<Type>&);
 
+  void TraceEachVisit(const AST::Node& n) {
+    if (trace_visit) {
+      os << n.TypeNameString() << ": ";
+      os << "\n";
+    }
+  }
+
 public:
   TypeInference(bool d, std::ostream& o = std::cout,
                 const ptr<SymbolTable> s_tab = std::make_shared<SymbolTable>())

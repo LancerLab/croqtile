@@ -426,7 +426,6 @@ public:
     if (cannot_proceed) return true;
     if (auto id = n.GetSymbol()) {
       auto name = vn.VNSymbolName(*id);
-      //      std::cout << "vn symbol name: " << name << "\n";
       if (SSTab().IsDeclared(name)) {
         if (vn.HasValueNumberOfSignature(SSTab().InScopeName(name))) {
           cur_vn = vn.GetValueNumberOfSignature(SSTab().InScopeName(name));
@@ -661,6 +660,8 @@ public:
     TraceEachVisit(n);
 
     if (cannot_proceed) return true;
+
+    cur_vn = vn.GenerateValueNumberForNode(n);
 
     return true;
   }

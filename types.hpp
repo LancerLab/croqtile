@@ -1640,6 +1640,17 @@ inline static SpannedType* GetSpannedType(const ptr<Type>& ty) {
     return nullptr;
 }
 
+inline static Shape GetShape(const ptr<Type>& ty) {
+  if (auto mty = dyn_cast<MDSpanType>(ty))
+    return mty->GetShape();
+  else if (auto sty = dyn_cast<SpannedType>(ty))
+    return sty->GetShape();
+  else if (auto fty = dyn_cast<FutureType>(ty))
+    return fty->GetShape();
+
+  return Shape(); // avoid warning
+}
+
 inline static bool GeneralFutureType(const ptr<Type>& ty) {
   if (!ty) return false;
   return ty->Category() == TypeCategory::FUTURE;
