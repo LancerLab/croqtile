@@ -82,6 +82,7 @@ check_device_features() {
     if nvidia-smi > /dev/null 2>&1; then
       echo "GPU is available."
       is_gpu_available=1
+      return
     fi
   fi
 
@@ -234,10 +235,12 @@ for file in "${files_array[@]}"; do
       fi
 
     elif [ $is_gpu_available -eq 1 ]; then
-      if [ "$test_target" != "gpu" ]; then
-        echo "SKIP($test_target): ${file}"
-        num_skiped=$(($num_skiped + 1));
-        continue; #simply skip the unmatched target
+      if [ ! -z "$test_target" ] ; then
+        if [ "$test_target" != "gpu" ]; then
+          echo "SKIP($test_target): ${file}"
+          num_skiped=$(($num_skiped + 1));
+          continue; #simply skip the unmatched target
+        fi
       fi
     fi
 

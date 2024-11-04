@@ -277,8 +277,8 @@ bool CUDACodeGen::Visit(AST::NamedVariableDecl& node) {
 
       // decl Matrix
       fs << this->indent << "MAKE_SHARED_MATRIX(" << sym << ", make_coord("
-         << ReplaceRuntimeNames(stringify(sty->GetShape()), "", false)
-         << "), float);\n";
+         << ReplaceRuntimeNames(stringify(sty->GetShape()), "", false) << "), "
+         << stringify(base_type) << ");\n";
 
     } else if (storage_type == Choreo::Storage::LOCAL) {
       // _os << stringify(storage_type) << " ";
@@ -302,8 +302,8 @@ bool CUDACodeGen::Visit(AST::NamedVariableDecl& node) {
 
       // NOTE: use Catz API
       fs << this->indent << "MAKE_LOCAL_MATRIX(" << sym << ", make_coord("
-         << ReplaceRuntimeNames(stringify(sty->GetShape()), "", false)
-         << "), float);\n";
+         << ReplaceRuntimeNames(stringify(sty->GetShape()), "", false) << "), "
+         << stringify(base_type) << ");\n";
     } else if (storage_type == Choreo::Storage::GLOBAL) {
       _os << stringify(base_type);
       _os << "* ";
@@ -366,7 +366,6 @@ bool CUDACodeGen::Visit(AST::ParallelBy& by) {
   // func_parallel<<<gridDim, blockDim>>>(arg0, arg1, arg2, ...)
   // TODO(albert): resolve HC
   // fs << this->indent << "dim3 blockDim(" << by.bound << ");\n";
-  // fs << this->indent << "dim3 blockDim(16, 16);\n";
   // auto val0 = by.iv_list->ValueAt(0);
 
   // TODO(albert): HC, here uses 1536 magic number, which is the max threads in
@@ -385,7 +384,7 @@ bool CUDACodeGen::Visit(AST::ParallelBy& by) {
     fs << STR(by.bound);
   fs << ");\n";
 
-  fs << this->indent << "dim3 blockDim(16, 16);\n";
+  fs << this->indent << "dim3 blockDim(256);\n";
 
   fs << this->indent << "cudaFuncSetAttribute(\n"
      << this->indent << "    " << current_fn << "_parallel,\n"
@@ -753,7 +752,7 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
     auto iv_row_name = "iv_row_" + dst_buffer_name;
     fs << "for (auto " << iv_row_name << " = I(0); ";
     fs << iv_row_name << " < "
-       << "make_index<" << STR(sty->GetShape().ValueAt(0) / 16) << ">()"
+       << "make_index<" << STR(sty->GetShape().ValueAt(0) / (256 / 32)) << ">()"
        << "; ";
     fs << "++" << iv_row_name << ") {\n";
 
@@ -762,7 +761,7 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
     auto iv_col_name = "iv_col_" + dst_buffer_name;
     fs << "for (auto " << iv_col_name << " = I(0); ";
     fs << iv_col_name << " < "
-       << "make_index<" << STR(sty->GetShape().ValueAt(1) / 16) << ">()"
+       << "make_index<" << STR(sty->GetShape().ValueAt(1) / 32) << ">()"
        << "; ";
     fs << "++" << iv_col_name << ") {\n";
 
@@ -771,7 +770,7 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
     fs << dst_buffer_name << "\n";
     fs << indent << "      ";
     fs << ".tile(Coord(" << iv_row_name << ", " << iv_col_name << "), ";
-    fs << "make_coord(16, 16))\n";
+    fs << "make_coord(256/32, 32))\n";
     fs << indent << "      ";
     fs << ".dist_to(Coord(tid_y, tid_x))\n";
     fs << indent << "    ";
@@ -782,7 +781,7 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
     fs << ", make_coord(" << stringify(sty->GetShape()) << "))\n";
     fs << indent << "      ";
     fs << ".tile(Coord(" << iv_row_name << ", " << iv_col_name << "), ";
-    fs << "make_coord(16, 16))\n";
+    fs << "make_coord(256/32, 32))\n";
     fs << indent << "      ";
     fs << ".dist_to(Coord(tid_y, tid_x));\n";
 
@@ -794,7 +793,7 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
     auto iv_row_name = "iv_row_" + dst_buffer_name;
     fs << "for (auto " << iv_row_name << " = I(0); ";
     fs << iv_row_name << " < "
-       << "make_index<" << STR(sty->GetShape().ValueAt(0) / 16) << ">()"
+       << "make_index<" << STR(sty->GetShape().ValueAt(0) / (256 / 32)) << ">()"
        << "; ";
     fs << "++" << iv_row_name << ") {\n";
 
@@ -803,7 +802,7 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
     auto iv_col_name = "iv_col_" + dst_buffer_name;
     fs << "for (auto " << iv_col_name << " = I(0); ";
     fs << iv_col_name << " < "
-       << "make_index<" << STR(sty->GetShape().ValueAt(1) / 16) << ">()"
+       << "make_index<" << STR(sty->GetShape().ValueAt(1) / 32) << ">()"
        << "; ";
     fs << "++" << iv_col_name << ") {\n";
 
@@ -814,7 +813,7 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
     fs << ", make_coord(" << stringify(sty->GetShape()) << "))\n";
     fs << indent << "      ";
     fs << ".tile(Coord(" << iv_row_name << ", " << iv_col_name << "), ";
-    fs << "make_coord(16, 16))\n";
+    fs << "make_coord(256/32, 32))\n";
     fs << indent << "      ";
     fs << ".dist_to(Coord(tid_y, tid_x))\n";
     fs << indent << "    ";
@@ -823,7 +822,7 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
     fs << src_buffer_name << "\n";
     fs << indent << "      ";
     fs << ".tile(Coord(" << iv_row_name << ", " << iv_col_name << "), ";
-    fs << "make_coord(16, 16))\n";
+    fs << "make_coord(256/32, 32))\n";
     fs << indent << "      ";
     fs << ".dist_to(Coord(tid_y, tid_x));\n";
 

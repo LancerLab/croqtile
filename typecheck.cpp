@@ -251,7 +251,8 @@ bool TypeChecker::Visit(AST::DMA& n) {
         }
       }
     }
-  } else if (!(cast<SpannedType>(fty)->DataEqual(*tty))) {
+  } else if (!(cast<SpannedType>(fty)->DataEqual(*tty)) &&
+             !allow_auto_threading) {
     Error(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
                        ") and 'to'(" + PSTR(tty) + ").");
     error_count++;

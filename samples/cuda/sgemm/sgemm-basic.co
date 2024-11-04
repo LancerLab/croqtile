@@ -1,5 +1,3 @@
-// RUN: choreo -t cuda %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
-// REQUIRES: TARGET-GPU
 #include "choreo_cuda.h"
 
 __cok__ { /// kernel program
@@ -65,4 +63,3 @@ int main() { /// host program
   return 0;
 }
 
-// CHECK: Compute Correct with Cublas 

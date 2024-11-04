@@ -111,8 +111,12 @@ int main(int argc, char* argv[]) {
 
   std::string stop_after = ToUpper(abend_after.GetValue());
 
+  auto tgt = Choreo::Target::Unknown;
+  if (target.GetValue() == "factor") tgt = Choreo::Target::Factor;
+  if (target.GetValue() == "cuda") tgt = Choreo::Target::CUDA;
+
   // apply early semantics check without knowing type details
-  EarlySemantics sv;
+  EarlySemantics sv(std::cout, tgt);
   if (prt_pass) std::cout << "|- " << sv.GetName() << "\n";
   root.accept(sv);
   if (sv.HasError()) return 1;
@@ -160,7 +164,7 @@ int main(int argc, char* argv[]) {
   }
 
   // apply the type check
-  TypeChecker sc(ln.SymTab());
+  TypeChecker sc(ln.SymTab(), std::cout, tgt);
   if (prt_pass) std::cout << "|- " << sc.GetName() << "\n";
   root.accept(sc);
   if (sc.HasError()) return 1;
@@ -171,10 +175,6 @@ int main(int argc, char* argv[]) {
   if (prt_pass) std::cout << "|- " << sds.GetName() << "\n";
   root.accept(sds);
   if (sds.HasError()) return 1;
-
-  auto tgt = Choreo::Target::Unknown;
-  if (target.GetValue() == "factor") tgt = Choreo::Target::Factor;
-  if (target.GetValue() == "cuda") tgt = Choreo::Target::CUDA;
 
   switch (tgt) {
   case Target::Factor: {

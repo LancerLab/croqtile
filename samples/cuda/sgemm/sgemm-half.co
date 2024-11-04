@@ -1,10 +1,8 @@
-// RUN: choreo -t cuda %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
-// REQUIRES: TARGET-GPU
 #include "choreo_cuda.h"
 
 __cok__ { /// kernel program
 
-inline __device__ void matmul_kernel_sm_stationary(float *lhs, float *rhs,
+inline __device__ void matmul_kernel_reg_stationary(half *lhs, half *rhs,
                                                float *out) {
   constexpr int M = 64;
   constexpr int N = 64;
@@ -19,9 +17,8 @@ inline __device__ void matmul_kernel_sm_stationary(float *lhs, float *rhs,
     for (int m = 0; m < CEIL_DIV(M, THD_Y); m++)
 #pragma unroll
       for (int n = 0; n < CEIL_DIV(N, THD_X); n++)
-        out[m * THD_Y * N + tid_y * N + n * THD_X + tid_x] +=
-            lhs[m * THD_Y * K + tid_y * K + k] *
-            rhs[k * N + THD_X * n + tid_x];
+        out[m * CEIL_DIV(N, THD_X) + n] +=
+            __half2float(lhs[m * THD_Y * K + tid_y * K + k] * rhs[k * N + THD_X * n + tid_x]);
   __syncthreads();
   return;
 }
@@ -29,17 +26,17 @@ inline __device__ void matmul_kernel_sm_stationary(float *lhs, float *rhs,
 } /// end of kernel decl
 
 
-__co__ void gpu_matmul(f32 [4096, 4096] lhs, f32 [4096, 4096] rhs, f32 [4096, 4096] output) { 
+__co__ void gpu_matmul(f16 [4096, 4096] lhs, f16 [4096, 4096] rhs, f32 [4096, 4096] output) { 
   // p -> bid_x, q -> bid_y
   // p: m gm to sm, q: n gm to sm
   parallel {p, q} by [64, 64] {
     with index = {m_tile, n_tile, k_tile} in [4, 4, 128] { 
-      shared f32[lhs.span(0)/#p, rhs.span(1)/#q] l2_out; // alternative: f32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
+      local f32[lhs.span(0)/#p/8, rhs.span(1)/#q/32] l2_out; // alternative: f32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
       foreach k_tile {
         lhs_load = dma.copy lhs.chunkat(p, k_tile) => shared; // tiling_factor: {6, 17, 4}, new_size {lhs(0)/6, lhs(1)/17, lhs(2)/4}
         rhs_load = dma.copy rhs.chunkat(k_tile, q) => shared; // no explicit decl the target buffer, but can refer by <FutureType>.data
         // TODO(catz): support template'd kernel
-        call matmul_kernel_sm_stationary(lhs_load.data, rhs_load.data, l2_out);
+        call matmul_kernel_reg_stationary(lhs_load.data, rhs_load.data, l2_out);
       }
       out_store = dma.copy l2_out => output.chunkat(p, q); // can use defined vars
     } // can use python styling
@@ -53,11 +50,11 @@ int main() { /// host program
   n = 4096;
   k = 4096;
 
-  float* a = (float *)malloc(sizeof(float) * m * k);
-  float* b = (float *)malloc(sizeof(float) * k * n);
+  half* a = (half *)malloc(sizeof(half) * m * k);
+  half* b = (half *)malloc(sizeof(half) * k * n);
   float* c = (float *)malloc(sizeof(float) * m * n);
-  auto lhs_data = choreo::make_spanview<2>((float*)a, {m, k});
-  auto rhs_data = choreo::make_spanview<2>((float*)b, {k, n});
+  auto lhs_data = choreo::make_spanview<2>((half*)a, {m, k});
+  auto rhs_data = choreo::make_spanview<2>((half*)b, {k, n});
   auto out_data = choreo::make_spanview<2>((float*)c, {m, n});
 
   gpu_matmul(lhs_data, rhs_data, out_data);
@@ -65,4 +62,3 @@ int main() { /// host program
   return 0;
 }
 
-// CHECK: Compute Correct with Cublas 

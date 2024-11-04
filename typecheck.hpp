@@ -11,6 +11,7 @@ struct TypeChecker : public VisitorWithSymTab {
 private:
   std::ostream& os;
   size_t error_count = 0;
+  bool allow_auto_threading = false;
 
 private:
   bool BeforeVisitImpl(AST::Node&) override;
@@ -21,8 +22,11 @@ private:
                            int);
 
 public:
-  TypeChecker(const ptr<SymbolTable> s_tab, std::ostream& o = std::cout)
-      : VisitorWithSymTab("check", s_tab), os(o) {}
+  TypeChecker(const ptr<SymbolTable> s_tab, std::ostream& o = std::cout,
+              const Choreo::Target& tgt = Choreo::Target::Factor)
+      : VisitorWithSymTab("check", s_tab), os(o) {
+    if (tgt == Choreo::Target::CUDA) allow_auto_threading = true;
+  }
   ~TypeChecker() {}
 
   bool Visit(AST::MultiNodes&) override;

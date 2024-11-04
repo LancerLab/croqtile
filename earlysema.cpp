@@ -853,7 +853,7 @@ bool EarlySemantics::Visit(AST::DMA& n) {
   }
 
   if (!isa<AST::Memory>(n.to)) {
-    if (sty->Dims() != tty->Dims()) {
+    if (sty->Dims() != tty->Dims() && !allow_auto_threading) {
       Error(n.LOC(),
             "The DMA statement contains a rank mismatch: the 'from' and 'to' "
             "arrays have inconsistent dimensions.");

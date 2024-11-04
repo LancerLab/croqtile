@@ -24,6 +24,7 @@ private:
   bool found_return = false;
   bool return_deduction = false;
   int parallel_level = 0;
+  bool allow_auto_threading = false;
 
   std::unordered_set<std::string>
       with_syms; // symbol defined in with-in statement
@@ -58,8 +59,11 @@ private:
   }
 
 public:
-  EarlySemantics(std::ostream& o = std::cout) : Visitor("sema"), os(o) {
+  EarlySemantics(std::ostream& o = std::cout,
+                 const Choreo::Target& tgt = Choreo::Target::Factor)
+      : Visitor("sema"), os(o) {
     if (trace_visit) debug_visit = true; // force debug when tracing
+    if (tgt == Choreo::Target::CUDA) allow_auto_threading = true;
   }
   ~EarlySemantics() {}
 

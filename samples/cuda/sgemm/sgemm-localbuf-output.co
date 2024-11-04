@@ -2,23 +2,23 @@
 
 __cok__ { /// kernel program
 
-// template <const int M, const int N, const int K, const int THD_Y,
-//           const int THD_X>
-inline __device__ void matmul_kernel_specialised(float *lhs, float *rhs,
+inline __device__ void matmul_kernel_reg_stationary(float *lhs, float *rhs,
                                                float *out) {
   constexpr int M = 64;
   constexpr int N = 64;
   constexpr int K = 32;
   constexpr int THD_Y = 16;
   constexpr int THD_X = 16;
+  int tid = threadIdx.y * blockDim.x + threadIdx.x;
+  int tid_y = tid / 32;
+  int tid_x = tid % 32;
   for (int k = 0; k < K; k++)
 #pragma unroll
     for (int m = 0; m < CEIL_DIV(M, THD_Y); m++)
 #pragma unroll
       for (int n = 0; n < CEIL_DIV(N, THD_X); n++)
-        out[m * THD_Y * N + n * THD_X] +=
-            lhs[m * THD_Y * K + threadIdx.y * K + k] *
-            rhs[k * N + THD_X * n + threadIdx.x];
+        out[m * CEIL_DIV(N, THD_X) + n] +=
+            lhs[m * THD_Y * K + tid_y * K + k] * rhs[k * N + THD_X * n + tid_x];
   __syncthreads();
   return;
 }
@@ -31,12 +31,12 @@ __co__ void gpu_matmul(f32 [4096, 4096] lhs, f32 [4096, 4096] rhs, f32 [4096, 40
   // p: m gm to sm, q: n gm to sm
   parallel {p, q} by [64, 64] {
     with index = {m_tile, n_tile, k_tile} in [4, 4, 128] { 
-      shared f32[lhs.span(0)/#p, rhs.span(1)/#q] l2_out; // alternative: f32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
+      local f32[lhs.span(0)/#p/8, rhs.span(1)/#q/32] l2_out; // alternative: f32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
       foreach k_tile {
         lhs_load = dma.copy lhs.chunkat(p, k_tile) => shared; // tiling_factor: {6, 17, 4}, new_size {lhs(0)/6, lhs(1)/17, lhs(2)/4}
         rhs_load = dma.copy rhs.chunkat(k_tile, q) => shared; // no explicit decl the target buffer, but can refer by <FutureType>.data
         // TODO(catz): support template'd kernel
-        call matmul_kernel_specialised(lhs_load.data, rhs_load.data, l2_out);
+        call matmul_kernel_reg_stationary(lhs_load.data, rhs_load.data, l2_out);
       }
       out_store = dma.copy l2_out => output.chunkat(p, q); // can use defined vars
     } // can use python styling
@@ -53,6 +53,8 @@ int main() { /// host program
   float* a = (float *)malloc(sizeof(float) * m * k);
   float* b = (float *)malloc(sizeof(float) * k * n);
   float* c = (float *)malloc(sizeof(float) * m * n);
+  memset(a, 0.76, sizeof(float) * m * k);
+  memset(b, 3.0, sizeof(float) * k * n);
   auto lhs_data = choreo::make_spanview<2>((float*)a, {m, k});
   auto rhs_data = choreo::make_spanview<2>((float*)b, {k, n});
   auto out_data = choreo::make_spanview<2>((float*)c, {m, n});
