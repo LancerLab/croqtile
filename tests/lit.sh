@@ -28,15 +28,18 @@ echo "        Choreo SimpleLit - v0.1"
 echo "---------------------------------------"
 echo ""
 
-failed_commands=()
-num_passed=0
+reproduce_commands=()
 num_tested=0
+num_passed=0
+num_failed=0
+num_uepass=0
 num_xfails=0
 num_skiped=0
 
 test_target=
 requires_dynamic_shape=0
 expect_fail=
+expect_skip=
 
 # Function to fill the target-specific variables
 check_requirement() {
@@ -47,6 +50,7 @@ check_requirement() {
   requires_dynamic_shape=0
   test_target=
   expect_fail=
+  expect_skip=
   if [ "${tgt}" == "GCU400" ]; then
     [ ! -z "$test_target" ] && echo "Test target has been set to ${test_target}"
     test_target=gcu400
@@ -70,6 +74,7 @@ check_requirement() {
   [ ! -z "${dynshape}" ] && requires_dynamic_shape=1;
 
   expect_fail=$(grep "^\/\/" $file |grep "XFAIL:" | sed 's/.*XFAIL://')
+  expect_skip=$(grep "^\/\/" $file |grep "SKIP:")
 }
 
 gcu_arch=
@@ -130,11 +135,32 @@ execute_command() {
     eval "$command" 2>/dev/null
 
     if [[ $? -eq 0 ]]; then
-      num_passed=$(($num_passed + 1));
-      echo "PASS: $file ($count of $total)"
+      if [ "$expect_fail" == "*\**" ]; then
+        num_uepass=$(($num_uepass + 1));
+        reproduce_commands+=("$command");
+        echo "UNEXPECTD PASS: $file ($count of $total)"
+      elif [[ ! -z "${expect_fail}" ]] &&
+           [[ "$(toupper ${expect_fail})" ==  *"$(toupper ${gcu_arch})"* ]]; then
+        num_uepass=$(($num_uepass + 1));
+        reproduce_commands+=("$command");
+        echo "UNEXPECTD PASS: $file ($count of $total)"
+      else
+        num_passed=$(($num_passed + 1));
+        echo "PASS: $file ($count of $total)"
+      fi
     else
-      failed_commands+=("$command");
-      echo "FAIL: $file ($count of $total)"
+      if [ "$expect_fail" == "*\**" ]; then
+        num_xfails=$(($num_xfails + 1));
+        echo "XFAIL: $file ($count of $total)"
+      elif [[ ! -z "${expect_fail}" ]] &&
+           [[ "$(toupper ${expect_fail})" ==  *"$(toupper ${gcu_arch})"* ]]; then
+        num_xfails=$(($num_xfails + 1));
+        echo "XFAIL: $file ($count of $total)"
+      else
+        num_failed=$(($num_failed + 1));
+        reproduce_commands+=("$command");
+        echo "FAIL: $file ($count of $total)"
+      fi
     fi
 }
 
@@ -175,17 +201,18 @@ showresult() {
   echo "Tested:  $num_tested"
   echo "Passed:  $num_passed"
 
-  if [[ $num_passed -ne $num_tested ]]; then
-    echo "Failed:  $(($num_tested - $num_passed))"
-    echo ""
-  fi
-
-  [ ${num_xfails} -ne 0 ] && echo "XFails: $num_xfails"
   [ ${num_skiped} -ne 0 ] && echo "Skipped: $num_skiped"
+  [ ${num_failed} -ne 0 ] && echo "Failed:  $num_failed"
+  [ ${num_xfails} -ne 0 ] && echo "Expected Failures: $num_xfails"
+  [ ${num_uepass} -ne 0 ] && echo "Unexpected Passes: $num_uepass"
 
-  if [[ $num_passed -ne $num_tested ]]; then
+  local succed=$(($num_passed + $num_xfails))
+  local failed=$(($num_failed + $num_uepass))
+
+  if [[ $failed -ne 0 ]]; then
+    echo ""
     echo "Commands to reproduce failures:"
-    for com in "${failed_commands[@]}"; do
+    for com in "${reproduce_commands[@]}"; do
       echo $com;
     done
   fi
@@ -198,15 +225,19 @@ on_ctrl_c() {
 
 trap on_ctrl_c SIGINT
 
+toupper() {
+    echo "$1" | tr '[:lower:]' '[:upper:]'
+}
+
 # Iterate over the array
 for file in "${files_array[@]}"; do
     # check requirement specified by the file
     check_requirement $file
 
-    if [ "$expect_fail" == "*\**" ]; then
-      echo "XFAIL: $file"
-      num_xfails=$(($num_xfails + 1));
-      continue
+    if [ ! -z "$expect_skip" ]; then
+      echo "SKIP:  $file"
+      num_skiped=$(($num_skiped + 1));
+			continue
     fi
 
     if [ $is_gcu_available -eq 1 ]; then
