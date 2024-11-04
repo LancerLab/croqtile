@@ -149,9 +149,10 @@ fi
     ResetBuffers();
   } else if (isa<AST::ParallelBy>(&n)) {
     parallel_level--;
-    this->decrementIndent();
-    if (parallel_level == 0)
+    if (parallel_level == 0) {
+      this->decrementIndent();
       fs << this->indent << "}); // end of choreo-factor kernel function\n";
+    }
   } else if (auto f = dyn_cast<AST::ForeachBlock>(&n)) {
     // erase the loop variables
     assert(!loop_vars.empty());
@@ -401,11 +402,7 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
   else
     choreo_unreachable("parallel_level is invalid!");
   if (parallel_level > 1) { return true; }
-  // only one `parallel by`
-  if (pb_bound1 == -1) {
-    pb_bound1 = pb_bound0;
-    pb_bound0 = 1;
-  }
+
   fs << this->indent << "Dim3 grid_dim(" << "$$pb_bound0$$" << ");\n";
   fs << this->indent << "Dim3 block_dim(" << "$$pb_bound1$$" << ");\n";
   fs << this->indent << "auto ts = launch_kernel_(\"" << current_fn
@@ -1446,6 +1443,11 @@ void FactorCodeGen::OutputScript(FunctionType* fty, const std::string& name,
   if (!alloc_in_fs.str().empty())
     factor_src.insert(alloc_pos, alloc_in_fs.str());
   ReplaceInString(&factor_src, std::string("$$out$$"), output_v);
+  // only one `parallel by`
+  if (pb_bound1 == -1) {
+    pb_bound1 = pb_bound0;
+    pb_bound0 = 1;
+  }
   ReplaceInString(&factor_src, std::string("$$pb_bound0$$"),
                   std::to_string(pb_bound0));
   ReplaceInString(&factor_src, std::string("$$pb_bound1$$"),

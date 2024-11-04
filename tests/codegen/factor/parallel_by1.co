@@ -1,0 +1,23 @@
+// RUN: choreo %s | FileCheck --match-full-lines %s
+
+__co__ void foo1() {
+  parallel {p} by [4] {
+    shared s32[1] s;
+    local f16[4] l;
+  }
+}
+
+// CHECK:  // choreo-factor dataflow function
+// CHECK:  D(host_func_)("__choreo_foo1", {StreamType()}, [&](auto args) {
+// CHECK:    Dim3 grid_dim(1);
+// CHECK:    Dim3 block_dim(4);
+// CHECK:    auto ts = launch_kernel_("__choreo_foo1_parallel", grid_dim, block_dim, args.back(), {}, {});
+// CHECK:    return std::vector<Value>{};
+// CHECK:  }, true); // end of choreo-factor dataflow program
+
+// CHECK:  D(func_)("__choreo_foo1_parallel", {}, {}, [&](auto args, auto results) {
+// CHECK:    auto thread_id = thread_id_();
+// CHECK:    auto block_id = block_id_();
+// CHECK:    auto s = alloc_(SRAMType(IntType(32),{1}));
+// CHECK:    auto l = alloc_(L1Type(FloatType(16),{4}));
+// CHECK:  }); // end of choreo-factor kernel function
