@@ -1,0 +1,25 @@
+1. Intro of multiple functionality:
+* --print-after/before
+* VST_DEBUG();
+* REQUIRES/SKIP/XFAIL (lit)
+
+2. foreach issue
+
+3. CUDA backend issues:
+
+3.1 about the thread dimensions:
+parallel {grid.x, grid.y, grid.z} in {...},
+         {block.x, block.y, block.z} in {...} {
+}
+
+order: {x, y, z} (follow CUDA style)
+
+3.2 support double CHUNKAT:
+
+dma.copy a.chunkat(grid.x, grid.y).chunkat(block.x, block.y) = local
+
+3.3 support F16/BF16
+
+4. How to push forward the trial version.
+- Test driven: explore the auto test generations.
+- Internal use: add in more people ahead of trial.
