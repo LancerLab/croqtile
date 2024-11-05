@@ -158,23 +158,27 @@ fi
     assert(!loop_vars.empty());
     loop_vars.pop_back();
 
-    for (auto rng : f->getRanges()) {
-      auto name = cast<AST::LoopRange>(rng)->IVName();
+    const auto& range_nodes = f->getRangeNodes();
+    for (int j = range_nodes->Count() - 1; j >= 0; --j) {
+      auto name = cast<AST::LoopRange>(range_nodes->ValueAt(j))->IVName();
       int dec_by = 1;
-      bool multiple_bounds = cur_bounded_vars.count(name);
-      if (multiple_bounds) dec_by = cur_bounded_vars[name].size();
+      bool multiple_bounds = !cur_bounded_vars[name].empty();
+      if (multiple_bounds) dec_by = cur_bounded_vars[name].top().size();
       for (int i = dec_by - 1; i >= 0; --i) {
         decrementIndent();
-        fs << indent << "}); // end of choreo-foreach block";
-        if (multiple_bounds) fs << " on '" << cur_bounded_vars[name][i] << "'";
-        fs << ".\n";
+        fs << indent << "}); // end of choreo-foreach block on '";
+        if (multiple_bounds)
+          fs << cur_bounded_vars[name].top()[i];
+        else
+          fs << name;
+        fs << "'.\n";
       }
     }
   } else if (auto wb = dyn_cast<AST::WithBlock>(&n)) {
     for (auto wi : wb->withins->AllSubs()) {
       auto w = cast<AST::WithIn>(wi);
       if (w->with && w->with_matchers) {
-        cur_bounded_vars.erase(w->with->name);
+        cur_bounded_vars[w->with->name].pop();
       }
     }
   }
@@ -453,10 +457,10 @@ bool FactorCodeGen::Visit(AST::WhereBind& n) {
                     SSTab().ScopedName(rid->name));
 
   // also adds the value binding for the with-matchers
-  if (cur_bounded_vars.count(lid->name)) {
-    assert(cur_bounded_vars.count(rid->name));
-    auto lbvs = cur_bounded_vars[lid->name];
-    auto rbvs = cur_bounded_vars[rid->name];
+  if (!cur_bounded_vars[lid->name].empty()) {
+    assert(!cur_bounded_vars[rid->name].empty());
+    auto& lbvs = cur_bounded_vars[lid->name].top();
+    auto& rbvs = cur_bounded_vars[rid->name].top();
     assert(lbvs.size() == rbvs.size());
 
     for (size_t i = 0; i < lbvs.size(); ++i) {
@@ -478,7 +482,7 @@ bool FactorCodeGen::Visit(AST::WithIn& n) {
     for (auto mn : n.with_matchers->AllValues()) {
       matchers.push_back(cast<AST::Identifier>(mn)->name);
     }
-    cur_bounded_vars.emplace(n.with->name, matchers);
+    cur_bounded_vars[n.with->name].push(matchers);
   }
 
   for (auto mn : n.with_matchers->AllValues()) {
@@ -871,10 +875,10 @@ bool FactorCodeGen::Visit(AST::ForeachBlock& forNode) {
     /*
     A: with index={m,n} in [1,2] { foreach m {} }
     B: with index in [2] { foreach index {} }
-    if (iv_type->Dims() == 1 && !cur_bounded_vars.count(iv_name)): A
-    if (iv_type->Dims() == 1 && cur_bounded_vars.count(iv_name)):  B
+    if (iv_type->Dims() == 1 && cur_bounded_vars[iv_name].empty()): A
+    if (iv_type->Dims() == 1 && !cur_bounded_vars[iv_name].empty()):  B
     */
-    if (iv_type->Dims() == 1 && !cur_bounded_vars.count(iv_name)) {
+    if (iv_type->Dims() == 1 && cur_bounded_vars[iv_name].empty()) {
       fs << this->indent << "for_(" << iv_name;
       if (IsValidBound(loop_range->lbound))
         fs << " + (" << loop_range->lbound << ")";
@@ -896,12 +900,12 @@ bool FactorCodeGen::Visit(AST::ForeachBlock& forNode) {
            << iv_name << ";\n";
       }
     } else {
-      assert(cur_bounded_vars.count(iv_name) &&
+      assert(!cur_bounded_vars[iv_name].empty() &&
              "can not find the bounded name.");
-      assert((cur_bounded_vars[iv_name].size() == iv_sizes.Dims()) &&
+      assert((cur_bounded_vars[iv_name].top().size() == iv_sizes.Dims()) &&
              "can not find the bounded name.");
       size_t i = 0;
-      for (auto name : cur_bounded_vars[iv_name]) {
+      for (auto name : cur_bounded_vars[iv_name].top()) {
         fs << this->indent << "for_(" << name;
         if (IsValidBound(loop_range->lbound))
           fs << " + (" << loop_range->lbound << ")";
