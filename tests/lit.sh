@@ -99,7 +99,7 @@ check_device_features() {
   fi
   if [[ "${GCU_DEVICE_STR}" == *"S60G"* ]]; then
     gcu_arch=gcu400
-  elif [[ "${GCU_DEVICE_STR}" == *"c035"* ]]; then
+  elif [[ "${GCU_DEVICE_STR}" == *"c035"* ]] || [[ "${GCU_DEVICE_STR}" == *"S60"* ]]; then
     gcu_arch=gcu300
     is_dynshape_supported=1
   elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then

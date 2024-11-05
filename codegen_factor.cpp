@@ -1398,6 +1398,10 @@ void FactorCodeGen::OutputScript(FunctionType* fty, const std::string& name,
     gcu_resource=1c12s
     gcu_target_string="scorpio_${gcu_resource}"
     export TOPS_VISIBLE_DEVICES=1
+  elif [[ "${GCU_DEVICE_STR}" == *"S60"* ]]; then
+    gcu_arch=gcu300
+    gcu_resource=1c12s
+    gcu_target_string="scorpio_${gcu_resource}"
   elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then
     gcu_arch=gcu210
     gcu_resource=2c24s
