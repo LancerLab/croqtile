@@ -71,7 +71,6 @@ private:
     TraceEachVisit(n, "Before ");
     if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
       fname = f->name;
-      //      std::cout << "BEFORE: " << STR(n) << "\n";
     } else if (auto f = dyn_cast<AST::ForeachBlock>(&n)) {
       if (kind == Kind::T_SWAP) {
         for (auto& stmt : f->stmts->AllSubs())
@@ -175,13 +174,14 @@ public:
     auto id = dyn_cast<AST::Expr>(n.GetR())->GetSymbol();
     if (!id) return true;
 
-    if (!fut_buf->at(fname).count(id->name)) return true;
+    auto fut_name = id->name;
+    if (!fut_buf->at(fname).count(fut_name)) return true;
 
     VST_DEBUG(os << "Replace: " << STR(n) << "\nWith: ");
 
-    n.op = "ref";
-    n.SetForm(AST::Expr::Reference);
-    id->name = fut_buf->at(fname)[id->name];
+    auto rexp = cast<AST::Expr>(n.GetR());
+    n.OverWrite(*rexp);
+    n.GetSymbol()->name = fut_buf->at(fname)[fut_name];
 
     VST_DEBUG(os << STR(n) << "\n");
 
@@ -270,6 +270,7 @@ public:
 
     return true;
   }
+
   bool Visit(AST::IntIndex&) { return true; }
   bool Visit(AST::DataType&) { return true; }
 
@@ -478,7 +479,6 @@ public:
     n.stmts->values.insert(n.stmts->values.begin(), new_stmts.begin(),
                            new_stmts.end());
 
-    //    std::cout << PSTR(n.stmts) << "\n";
     return true;
   }
 

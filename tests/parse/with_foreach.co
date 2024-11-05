@@ -61,7 +61,7 @@ __co__ int with_foreach(int b, f32 [36, 27, 128] input) {
 // CHECK:      `- Assign: sum =  (sum + index(0))
 // CHECK:      `- WAIT: f
 // CHECK:      `- Call: cfunction
-// CHECK:        `- with arguements: (dataof f)
+// CHECK:        `- with arguments: (dataof f)
 // CHECK:   `- With Block:
 // CHECK:     (within constraints)
 // CHECK:     `- idx in [ 6 ]
@@ -80,7 +80,7 @@ __co__ int with_foreach(int b, f32 [36, 27, 128] input) {
 // CHECK:        `- Assign: sum =  (sum + index(0))
 // CHECK:        `- WAIT: f
 // CHECK:        `- Call: cfunction
-// CHECK:          `- with arguements:  (dataof f)
+// CHECK:          `- with arguments:  (dataof f)
 // CHECK:   `- With Block:
 // CHECK:     (within constraints)
 // CHECK:     `-  = {m} in [ 3 ]

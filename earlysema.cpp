@@ -3,6 +3,7 @@
 using namespace Choreo;
 
 bool EarlySemantics::BeforeVisit(AST::Node& n) {
+  Visitor::BeforeVisit(n);
   if (isa<AST::Program>(&n)) {
     SSTab().EnterScope(""); // global scope
   } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {

@@ -462,14 +462,13 @@ void SymReplace::EquivalentlyReplaceExprNodes() {
       choreo_unreachable("The node of type " + PSTR(R->GetType()) +
                          " is not supported in SymReplace yet.");
 
-    orig_expr->SetForm(new_expr->GetForm());
-
     if (new_expr->IsUnary()) {
       orig_expr->SetL(nullptr);
     } else if (new_expr->IsBinary()) {
       if (auto ii = dyn_cast<AST::IntIndex>(L)) {
         orig_expr->SetL(AST::Make<AST::IntIndex>(*ii));
       } else if (auto e = dyn_cast<AST::Expr>(L)) {
+        std::cout << "expr: " << PSTR(e) << "\n";
         orig_expr->SetL(AST::Make<AST::Expr>(*e));
       } else {
         choreo_unreachable("The node of type " + PSTR(L->GetType()) +
@@ -487,6 +486,7 @@ void SymReplace::EquivalentlyReplaceExprNodes() {
       }
     }
     orig_expr->op = new_expr->op;
+    orig_expr->SetForm(new_expr->GetForm());
   }
 }
 

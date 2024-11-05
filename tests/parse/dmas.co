@@ -44,7 +44,7 @@ __co__ void dma_test(int b, f32 [36, 27, 128] input) {
 // CHECK:      `- Assign: sum =  (sum + index(0))
 // CHECK:      `- WAIT: f, f1
 // CHECK:      `- Call: cfunction
-// CHECK:        `- with arguements:  (dataof f)  (dataof f1)
+// CHECK:        `- with arguments:  (dataof f) , (dataof f1)
 
 __co__ void dma_test1(f32 [36, 27, 128] input) {
    f32 [9, 3, 8] dst;

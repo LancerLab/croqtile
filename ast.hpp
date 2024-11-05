@@ -262,19 +262,28 @@ public:
   const ptr<Node>& GetL() const { return value_l; }
   const ptr<Expr>& GetC() const { return value_c; }
   Form GetForm() const { return t; }
-  void SetForm(const Form& form) { t = form; }
+  void SetForm(const Form& form) {
+    // the form must be set after operand
+    if (form == Reference)
+      assert(!isa<Expr>(value_r));
+    else if (form == Unary)
+      assert(value_r);
+    else if (form == Binary)
+      assert(value_r && value_l);
+    else if (form == Ternary)
+      assert(value_r && value_l && value_c);
+    t = form;
+  }
   void SetR(const ptr<Node>& r) {
     assert(r);
     value_r = r;
   }
   void SetL(const ptr<Node>& l) {
     assert(l);
-    assert((t == Binary) || (t == Ternary));
     value_l = l;
   }
   void SetC(const ptr<Expr>& c) {
     assert(c);
-    assert((t == Ternary));
     value_c = c;
   }
 
@@ -283,11 +292,12 @@ public:
 
   explicit Expr(const location& l, const ptr<Node>& v)
       : Node(l), op("ref"), value_r(v), t(Reference) {
-    assert(value_r);
+    assert(value_r && "null node is provided.");
+    assert(!isa<Expr>(v) && "can not reference an expression.");
   }
   explicit Expr(const location& l, const std::string& o, const ptr<Node>& v2)
       : Node(l), op(o), value_r(v2), t(Unary) {
-    assert(value_r);
+    assert(value_r && "null node is provided.");
   }
   explicit Expr(const location& l, const std::string& o, const ptr<Node>& v1,
                 const ptr<Node>& v2)
@@ -305,26 +315,28 @@ public:
 
   // copy constructor for reconstructing expr in SymReplace pass
   // TODO(wsj): loc?
-  explicit Expr(const Expr& e) : Node(e.LOC()) {
+  explicit Expr(const Expr& e) : Node(e.LOC()) { OverWrite(e); }
+
+  void OverWrite(const Expr& e) {
     if (e.IsReference()) {
       op = "ref";
-      value_r = e.GetR();
-      t = Reference;
+      SetR(e.GetR());
+      SetForm(Reference);
     } else if (e.IsUnary()) {
       op = e.op;
-      value_r = e.GetR();
-      t = Unary;
+      SetR(e.GetR());
+      SetForm(Unary);
     } else if (e.IsBinary()) {
       op = e.op;
-      value_l = e.value_l;
-      value_r = e.value_r;
-      t = Binary;
+      SetL(e.GetL());
+      SetR(e.GetR());
+      SetForm(Binary);
     } else if (e.IsTernary()) {
       op = e.op;
-      value_c = e.value_c;
-      value_l = e.value_l;
-      value_r = e.value_r;
-      t = Ternary;
+      SetC(e.GetC());
+      SetL(e.GetL());
+      SetR(e.GetR());
+      SetForm(Ternary);
     }
   }
 
@@ -1190,7 +1202,7 @@ struct Call : public Node, public TypeIDProvider<Call> {
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Call: " << STR(*function);
-    os << "\n" << prefix << "  `- with arguements: " << STR(*arguments);
+    os << "\n" << prefix << "  `- with arguments: " << STR(*arguments);
   }
   void accept(Visitor&) override;
 
@@ -1359,6 +1371,11 @@ inline Identifier* GetIdentifier(const Node& n) {
 }
 
 inline std::string NodeName(const Node& n) { return n.TypeNameString(); }
+
+// symbol reference specific expr
+inline ptr<Expr> MakeIdExpr(const location& l, const std::string& n) {
+  return Make<Expr>(l, Make<Identifier>(l, n));
+}
 
 } // end of namespace AST
 

@@ -322,6 +322,8 @@ public:
 public:
   virtual bool BeforeVisit(AST::Node& n) override {
     TraceEachVisit(n, false, "before ");
+    Visitor::BeforeVisit(n);
+
     if (isa<AST::Program>(&n)) {
       vn.EnterScope(""); // global scope
     } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
@@ -1162,6 +1164,16 @@ public:
     TraceEachVisit(n);
 
     if (cannot_proceed) return true;
+
+    // value the scalars
+    for (auto& s : n.arguments->AllValues()) {
+      if (isa<IntegerType>(NodeType(*s))) {
+        auto expr = cast<AST::Expr>(s);
+        expr->s = GenShapeFromSignature(vn.GetSignatureForNode(*s));
+        VST_DEBUG(os << "Shape for " << PSTR(s) << ": " << STR(expr->s)
+                     << "\n");
+      }
+    }
 
     return true;
   };

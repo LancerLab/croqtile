@@ -63,8 +63,8 @@ __co__ auto transpose(s32 [64, 256, 32] input) {
 // CHECK:               auto anon_5 = ((iv_b4)*(Value(1))+(iv_c));
 // CHECK:               async_load_(tmp_shape_s, anon_1, tmp_shape_s__buf__, {Value(16)*iv_b3,Value(512)*anon_5}).wait_on_(input_shape_c_dma);
 // CHECK:               wait_dma_(tmp_shape_s);
-// CHECK:               call_("kernel_transpose_10", {tmp_shape_s__buf__.addr_(),tmp_shape_s_2.addr_(),16,512});
-// CHECK:               call_("kernel_transpose_120", {tmp_shape_s_2.addr_(),tmp_shape_s_3.addr_(),16,32,16});
+// CHECK:               call_("kernel_transpose_10", {tmp_shape_s__buf__.addr_(),tmp_shape_s_2.addr_(),Value(16),Value(512)});
+// CHECK:               call_("kernel_transpose_120", {tmp_shape_s_2.addr_(),tmp_shape_s_3.addr_(),Value(16),Value(32),Value(16)});
 // CHECK:               async_store_(out_store_c, tmp_shape_s_3, output_reshape_c, {Value(32)*iv_c,Value(16)*iv_b3,Value(16)*iv_b4});
 // CHECK:               wait_dma_(out_store_c);
 // CHECK:             auto anon_2 = bitcast_(DRAMType(IntType(32), {2048, 16, 16}), output);

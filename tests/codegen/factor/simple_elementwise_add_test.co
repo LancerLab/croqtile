@@ -67,6 +67,6 @@ int bar(int a[], int b[]) {
 // CHECK: async_load_(f2, args[1], f2__buf__, {Value(24)*thread_id,Value(10)*iv_x,Value(10)*iv_y});
 // CHECK: wait_dma_(f1);
 // CHECK: wait_dma_(f2);
-// CHECK: call_("kernel", {f1__buf__.addr_(),f2__buf__.addr_(),local_buffer.addr_(),2400});
+// CHECK: call_("kernel", {f1__buf__.addr_(),f2__buf__.addr_(),local_buffer.addr_(),Value(2400)});
 // CHECK: async_store_(f3, local_buffer, global_buffer, {Value(24)*thread_id,Value(10)*iv_x,Value(10)*iv_y});
 // CHECK: wait_dma_(f3);

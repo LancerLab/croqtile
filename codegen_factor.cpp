@@ -298,8 +298,9 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl& node) {
         fs << indent << "memset_(" << sym << "_init, " << sym << ", 0);\n";
       }
     }
-  } else if (isa<IntegerType>(nty)) {
-    // simply ignore the generation of such simple integers
+  } else if (isa<IntegerType>(nty) || isa<ITupleType>(nty)) {
+    // simply ignore the generation of integers since valno has propagate the
+    // values on the use sites
   } else {
     choreo_unreachable("non-spanned (" + PSTR(nty) + ") is not yet supported.");
     // TODO(albert): handle anon case
@@ -570,23 +571,6 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
   int src_level = MemLevel(src_sto);
   int dst_level = MemLevel(dst_sto);
 
-#if 0
-  // allocate storage for DMA destination when it is not explicitly stated.
-  if (auto mem_node = dyn_cast<AST::Memory>(d.to)) {
-    // support
-    static std::map<Storage, std::string> sto2alloc = {
-        {Storage::LOCAL, "L1Type"},
-        {Storage::SHARED, "SRAMType"},
-        {Storage::GLOBAL, "DRAMType"},
-    };
-    // buffer in another stream
-    alloc_in_fs << alloc_indent << "auto " << dst_buffer_name << " = alloc_("
-                << sto2alloc.at(mem_node->Get()) << "("
-                << stringify(sty->ElementType()) << ","
-                << ReplaceRuntimeNames(LSTR(dst_shape), "", false) << "));\n";
-  }
-#endif
-
   auto GenerateOffsetString = [this, &GetSpannedType](AST::Node& n) {
     auto sty = GetSpannedType(n);
     auto shape = sty->GetShape();
@@ -741,53 +725,12 @@ bool FactorCodeGen::Visit(AST::Call& c) {
   auto args = c.arguments;
   assert(args && "Invalid kernel call args!");
   int arg_num = args->AllValues().size();
-  for (int index = 0; index < arg_num;) {
-    auto arg = dyn_cast<AST::Expr>(args->AllValues()[index]);
+  for (int index = 0; index < arg_num; ++index) {
+    auto arg = dyn_cast<AST::Expr>(args->ValueAt(index));
     assert(arg && "Invalid kernel call arg!");
-    switch (arg->GetForm()) {
-    case AST::Expr::Reference:
-      try {
-        std::stoi(STR(arg->GetR()));
-        fs << STR(arg->GetR());
-      } catch (const std::invalid_argument& e) {
-        fs << STR(arg->GetR()) << ".addr_()";
-      }
-      break;
-    case AST::Expr::Unary:
-      if (arg->op == "sizeof") {
-        auto var = RemoveSuffix(STR(arg->GetR()), ".span");
-        Shape shape;
-        const auto& ty = this->GetSymbolType(var);
-        if (auto fty = dyn_cast<FutureType>(ty))
-          shape = fty->GetShape();
-        else if (auto mdsty = dyn_cast<MDSpanType>(ty))
-          shape = mdsty->GetShape();
-        else if (auto sty = dyn_cast<SpannedType>(ty))
-          shape = sty->GetShape();
-        else
-          choreo_unreachable("Can only use sizeof operator for future.span, "
-                             "mdspan and buffer.span!");
-
-#if 0
-          auto shapes = shape.Value();
-          auto dim = shape.values.values[0];
-          int dim_sz = shape.Dims(), size = 1;
-          for (int dim_cursor = 0; dim_cursor < dim_sz;)
-            size = size * (*(std::get_if<int>(&shapes[dim_cursor++])));
-          fs << std::to_string(size);
-#endif
-        fs << shape.GetSizeExpression();
-      } else if (arg->op == "dataof") {
-        fs << ExprSTR(args->AllValues()[index]) << ".addr_()";
-      }
-      break;
-    default:
-      choreo_unreachable("unhandled expression type: " +
-                         std::to_string((int)(arg->GetForm())) + ".");
-      break;
-    }
-    index++;
-    if (index < arg_num) fs << ",";
+    fs << ExprSTR(args->AllValues()[index]);
+    if (isa<SpannedType>(NodeType(*arg))) fs << ".addr_()";
+    if (index < arg_num - 1) fs << ",";
   }
   fs << "});\n";
 
@@ -804,35 +747,6 @@ bool FactorCodeGen::Visit(AST::Swap& n) {
 bool FactorCodeGen::Visit(AST::Select& c) {
   TraceEachVisit(c);
   assert(!c.inDMA);
-#if 0
-  // z = dma.copy xxx => select(...)
-  size_t val_count = c.expr_list->Count();
-  // if val_count == 1, pingpong is meaningless? ( TODO: maybe assert when
-  // earlysema)
-  assert(val_count >= 2);
-  fs << this->indent << "auto " << c.rname << " = ";
-  for (size_t i = 0; i < val_count - 1; i++) {
-    std::string select_factor_str;
-    auto factor = cast<IntegerType>(c.select_factor->GetType());
-    if (auto expr = factor->GetValidExpression())
-      select_factor_str =
-          STR(*expr);  // use the expression simplified by value numbering
-    else
-      select_factor_str = ExprSTR(c.select_factor);
-    for (auto &loop_var : loop_vars.back()) {
-      size_t pos = 0;
-      while ((pos = select_factor_str.find(loop_var, pos)) !=
-             std::string::npos) {
-        select_factor_str.replace(pos, loop_var.length(), "iv_" + loop_var);
-        pos += loop_var.length() + 3;
-      }
-    }
-    fs << "select_(" << select_factor_str << "== " << i << ", "
-       << PSTR(c.expr_list->ValueAt(i)) << (i < val_count - 1 ? ", " : "");
-  }
-  fs << PSTR(c.expr_list->AllValues().back()) << std::string(val_count - 1, ')')
-     << ";\n";
-#endif
   return true;
 }
 
@@ -1482,7 +1396,6 @@ void FactorCodeGen::OutputScript(FunctionType* fty, const std::string& name,
     gcu_arch=gcu210
     gcu_resource=2c24s
     gcu_target_string="dorado_2c"
-    export TOPS_VISIBLE_DEVICES=1
   elif [[ "${GCU_DEVICE_STR_BACKUP}" != "" ]]; then
     gcu_arch=gcu210
     gcu_resource=2c24s
@@ -1541,10 +1454,20 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
   } else if (auto ii = dyn_cast<AST::IntIndex>(e)) {
     return ExprSTR(ii->value);
   } else if (auto expr = dyn_cast<AST::Expr>(e)) {
-    if (expr->GetInt()) {
-      return ExprSTR(expr->GetReference());
-    } else if (expr->GetSymbol()) {
-      return ExprSTR(expr->GetReference());
+    if (isa<IntegerType>(NodeType(*e)) && (expr->s.IsValid())) {
+      // prefer to use the deduced value when possible
+      assert(expr->s.DimCount() == 1 && "A 1-dimensional value is expected.");
+      return "Value(" + STR(expr->s.ValueAt(0)) + ")";
+    }
+    if (expr->IsReference()) {
+      if (expr->GetInt())
+        return ExprSTR(expr->GetReference());
+      else if (expr->GetSymbol())
+        return ExprSTR(expr->GetReference());
+      else if (isa<AST::Expr>(NodeType(*expr->GetR()))) // should this happen?
+        return ExprSTR(expr->GetR());
+      else
+        choreo_unreachable("Unsupported reference: " + PSTR(expr));
     } else if (expr->IsUnary()) {
       if (expr->op == "!") {
         oss << "!(" << ExprSTR(expr->GetR()) << ")";
@@ -1562,40 +1485,49 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
                                "' is not associated with a buffer.");
         } else
           choreo_unreachable("Can not retrive name of the future.");
+      } else if (expr->op == "sizeof") {
+        auto var = RemoveSuffix(*AST::GetName(*expr->GetR()), ".span");
+        auto shape = GetShape(GetSymbolType(var));
+        assert(shape.IsValid() && "Invalid shape is found");
+        oss << shape.GetSizeExpression();
       } else
         choreo_unreachable("Unsupported choreo expression.");
-    } else if (expr->op == "cdiv") {
-      oss << "((" << ExprSTR(expr->GetL()) << ")+(" << ExprSTR(expr->GetR())
-          << "-Value(1))/(" << ExprSTR(expr->GetR()) << ")";
-    } else if (expr->op == "getith") {
-      auto lty = cast<BoundedType>(NodeType(*expr->GetL()));
-      if (cast<AST::IntIndex>(expr->GetR())->IsNegative()) {
-        oss << "(" << ValueSTR(lty->GetUpperBound()) << "+("
-            << ExprSTR(expr->GetR()) << "))";
-      } else
-        oss << "(" << ExprSTR(expr->GetR()) << ")";
-    } else if (expr->IsArith() || expr->IsLogical()) {
-      auto& l = expr->GetL();
-      auto& r = expr->GetR();
-      auto& op = expr->op;
-      // handle bounded variable times
-      if (op == "#" && IsActualBoundedIntegerType(l->GetType()) &&
-          IsActualBoundedIntegerType(r->GetType())) {
-        auto rty = cast<BoundedType>(NodeType(*r));
-        assert(rty->Dims() == 1);
-        oss << "((" << ExprSTR(l) << ")*(" << ValueSTR(rty->GetUpperBound())
-            << ")+(" << ExprSTR(r) << "))";
-      } else
-        oss << "((" << ExprSTR(l) << ")" << op << "(" << ExprSTR(r) << "))";
+    } else if (expr->IsBinary()) {
+      if (expr->op == "cdiv") {
+        std::string one = "Value(1)";
+        oss << "((" << ExprSTR(expr->GetL()) << ")+(" << ExprSTR(expr->GetR())
+            << "-" << one << ")/(" << ExprSTR(expr->GetR()) << ")";
+      } else if (expr->op == "getith") {
+        auto lty = cast<BoundedType>(NodeType(*expr->GetL()));
+        if (cast<AST::IntIndex>(expr->GetR())->IsNegative()) {
+          oss << "(" << ValueSTR(lty->GetUpperBound()) << "+("
+              << ExprSTR(expr->GetR()) << "))";
+        } else
+          oss << "(" << ExprSTR(expr->GetR()) << ")";
+      } else if (expr->IsArith() || expr->IsLogical()) {
+        auto& l = expr->GetL();
+        auto& r = expr->GetR();
+        auto& op = expr->op;
+        // handle bounded variable times
+        if (op == "#" && IsActualBoundedIntegerType(l->GetType()) &&
+            IsActualBoundedIntegerType(r->GetType())) {
+          auto rty = cast<BoundedType>(NodeType(*r));
+          assert(rty->Dims() == 1);
+          oss << "((" << ExprSTR(l) << ")*(" << ValueSTR(rty->GetUpperBound())
+              << ")+(" << ExprSTR(r) << "))";
+        } else
+          oss << "((" << ExprSTR(l) << ")" << op << "(" << ExprSTR(r) << "))";
+      }
     } else if (expr->IsTernary()) {
       oss << "(" << ExprSTR(expr->GetC()) << ") ? (" << ExprSTR(expr->GetL())
           << ") : (" << ExprSTR(expr->GetR()) << ")";
     } else
-      choreo_unreachable("unsupported expression '" + expr->op + "'.");
+      choreo_unreachable("unsupported expression '" + expr->op +
+                         "': " + PSTR(expr) + ".");
   } else if (auto sl = dyn_cast<AST::Select>(e)) {
     size_t val_count = sl->expr_list->Count();
-    // if val_count == 1, pingpong is meaningless? ( TODO: maybe assert when
-    // earlysema)
+    // if val_count == 1, pingpong is meaningless?
+    // (TODO: maybe assert when earlysema)
     assert(val_count >= 2);
     for (size_t i = 0; i < val_count - 1; i++) {
       std::string select_factor_str;

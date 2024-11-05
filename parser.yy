@@ -969,10 +969,10 @@ id_list
 
 passables
     : /* Empty */ {
-        $$ = AST::Make<AST::MultiValues>(loc);
+        $$ = AST::Make<AST::MultiValues>(loc, ", ");
       }
     | passable {
-        $$ = AST::Make<AST::MultiValues>(@1);
+        $$ = AST::Make<AST::MultiValues>(@1, ", ");
         $$->Append($1);
       }
     | passables COMMA passable {

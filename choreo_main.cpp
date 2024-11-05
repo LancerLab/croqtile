@@ -42,6 +42,8 @@ int main(int argc, char* argv[]) {
   Option<std::string> debug_visit("--debug-visit", "-dv", "", true);
   Option<std::string> print_ahead("--print-before", "-pb", "", true);
   Option<std::string> print_after("--print-after", "-pa", "", true);
+  Option<bool> print_ahead_all("--print-before-all", "-pba", false, false);
+  Option<bool> print_after_all("--print-after-all", "-paa", false, false);
   Option<bool> debug_on("--debug", "-d", false, false);
   Option<bool> cross_compile("--cross-compile", "-cc", false, false);
   Option<bool> dump_ast("--dump-ast", "-e", false, false);
@@ -71,8 +73,12 @@ int main(int argc, char* argv[]) {
   if (!print_ahead.GetValue().empty())
     setenv("CHOREO_PRINT_BEFORE", ToUpper(print_ahead.GetValue()).c_str(), 1);
 
+  if (print_ahead_all) setenv("CHOREO_PRINT_BEFORE", "ALLPASSES", 1);
+
   if (!print_after.GetValue().empty())
     setenv("CHOREO_PRINT_AFTER", ToUpper(print_after.GetValue()).c_str(), 1);
+
+  if (print_after_all) setenv("CHOREO_PRINT_AFTER", "ALLPASSES", 1);
 
   if (dump_ast) {
     if (gen_none)

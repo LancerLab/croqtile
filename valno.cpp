@@ -566,8 +566,8 @@ ValueNumbering::TryToSimplifyNodeSignature(const AST::Node& node) {
             {"sizeof",
              [this, &n]() -> std::optional<std::string> {
                auto s = GetShape(visitor->NodeType(*n->GetR()));
-               if (s.IsValid() && s.Dims() == 1)
-                 return "const_" + STR(s.ValueAt(0));
+               if (s.IsValid() && !s.IsDynamic())
+                 return "const_" + s.GetSizeExpression();
                // TODO: associate span.size valno with any span in value
                // numbering
                return std::nullopt;

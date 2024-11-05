@@ -80,7 +80,7 @@ __co__ s32 [N, M, K] ele_add(s32 [N, M, K] lhs, s32 [N, M, K] rhs) {
 // CHECK:           async_load_(rhs_load, anon_1, rhs_load__buf__, {Value(4)*iv_q,Value(8)*iv_x,Value(1)*iv_y});
 // CHECK:           wait_dma_(lhs_load);
 // CHECK:           wait_dma_(rhs_load);
-// CHECK:           call_("kernel", {lhs_load__buf__.addr_(),rhs_load__buf__.addr_(),l1_out.addr_(),32});
+// CHECK:           call_("kernel", {lhs_load__buf__.addr_(),rhs_load__buf__.addr_(),l1_out.addr_(),Value(32)});
 // CHECK:           auto anon_2 = bitcast_(DRAMType(IntType(32), {-1, -1, -1}), output, {__choreo_nd_ref_N, __choreo_nd_ref_K, __choreo_nd_ref_M});
 // CHECK:           async_store_(out_store, l1_out, anon_2, {Value(4)*iv_q,Value(8)*iv_x,Value(1)*iv_y});
 // CHECK:           wait_dma_(out_store);

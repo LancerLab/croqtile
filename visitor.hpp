@@ -21,7 +21,21 @@ namespace Choreo {
 
 struct Visitor {
   // virtual bool Visit(AST::Node&) = 0;
-  virtual bool BeforeVisit(AST::Node&) { return true; }
+  virtual bool BeforeVisit(AST::Node& n) {
+    if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) { // by function print
+      const char* Sep = "*******************";
+      if (print_ahead) {
+        std::cout << "\n"
+                  << Sep << " Before " << name << ": " << f->name << " (Begin) "
+                  << Sep << "\n"
+                  << STR(n) << "\n"
+                  << Sep << " Before " << name << ": " << f->name << " (End) "
+                  << Sep << "\n";
+      }
+    }
+    return true;
+  }
+
   virtual bool AfterVisit(AST::Node& n) {
     if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) { // by function print
       const char* Sep = "*******************";
@@ -114,7 +128,7 @@ public:
 
     if (std::getenv("CHOREO_PRINT_BEFORE")) {
       auto before = ToUpper(std::string(std::getenv("CHOREO_PRINT_BEFORE")));
-      if (before.find("ALLPASSES") != std::string::npos) print_after = true;
+      if (before.find("ALLPASSES") != std::string::npos) print_ahead = true;
       if (before.find(name) != std::string::npos) print_ahead = true;
     }
 
@@ -240,6 +254,7 @@ private:
 
 public:
   bool BeforeVisit(AST::Node& n) final {
+    Visitor::BeforeVisit(n);
     if (isa<AST::Program>(&n)) {
       Reset();
       SSTab().EnterScope(""); // global scope

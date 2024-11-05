@@ -14,4 +14,4 @@ __co__ void bounded(s32 [12, 4, 16] a) {
   }
 }
 
-// CHECK: call_("kernel", {f__buf__.addr_(),768,16,1,8});
+// CHECK: call_("kernel", {f__buf__.addr_(),Value(768),Value(16),Value(1),Value(8)});
