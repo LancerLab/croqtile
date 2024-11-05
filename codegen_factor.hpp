@@ -59,7 +59,7 @@ private:
   ValBind::BindInfo<std::string> bind_info;
   std::vector<AST::ptr<AST::Parameter>>* cur_params = nullptr;
   AST::ptr<AST::DataType> current_output = nullptr;
-  std::map<std::string, std::vector<std::string>> cur_bounded_vars;
+  std::map<std::string, std::stack<std::vector<std::string>>> cur_bounded_vars;
   std::vector<std::unordered_set<std::string>> loop_vars; // the loop variables
   std::vector<RtMemUsageCheckInfo> rt_mem_usage_check_list;
   // runtime host parameter names

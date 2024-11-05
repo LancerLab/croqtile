@@ -84,14 +84,14 @@ __co__ s32 [N, M, K] ele_add(s32 [N, M, K] lhs, s32 [N, M, K] rhs) {
 // CHECK:           auto anon_2 = bitcast_(DRAMType(IntType(32), {-1, -1, -1}), output, {__choreo_nd_ref_N, __choreo_nd_ref_K, __choreo_nd_ref_M});
 // CHECK:           async_store_(out_store, l1_out, anon_2, {Value(4)*iv_q,Value(8)*iv_x,Value(1)*iv_y});
 // CHECK:           wait_dma_(out_store);
-// CHECK:         }); // end of choreo-foreach block.
-// CHECK:       }); // end of choreo-foreach block.
-// CHECK:     }); // end of choreo-foreach block.
+// CHECK:         }); // end of choreo-foreach block on 'y'.
+// CHECK:       }); // end of choreo-foreach block on 'x'.
+// CHECK:     }); // end of choreo-foreach block on 'q'.
 // CHECK:     for_(xx, dim_(args[0], 0)*dim_(args[0], 2)/16-0, 1, [&](auto iv_xx) {
 // CHECK:       for_(y, dim_(args[0], 1)/1-0, 1, [&](auto iv_y) {
 // CHECK:         auto anon_3 = bitcast_(DRAMType(IntType(32), {-1, -1}), args[0], { (__choreo_nd_ref_N * __choreo_nd_ref_K) , __choreo_nd_ref_M});
 // CHECK:         async_load_(lhs_load2, anon_3, lhs_load2__buf__, {Value(16)*iv_xx,Value(1)*iv_y});
 // CHECK:         wait_dma_(lhs_load2);
-// CHECK:       }); // end of choreo-foreach block.
-// CHECK:     }); // end of choreo-foreach block.
+// CHECK:       }); // end of choreo-foreach block on 'y'.
+// CHECK:     }); // end of choreo-foreach block on 'xx'.
 // CHECK:   }); // end of choreo-factor kernel function
