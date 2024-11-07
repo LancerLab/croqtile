@@ -1,14 +1,20 @@
 # 定义 CI/CD 流水线的阶段
 stages:
-  - gpu-test
+  - gputest
+
 
 # Test 阶段：需要 GPU 支持的测试，运行 `make test` 来执行测试
-test:
-  stage: test
+gputest:
+  stage: gputest
   script:
     - echo "Running tests with GPU..."
-    - make setup && make test  # 假设 `make test` 用于运行测试
+    - make ci-gpu-test  # 假设 `make test` 用于运行测试
   tags:
-    - GPU
+    - GPU  # 在 GPU 机器上运行作业
   only:
-    - main 
+    - main  # 仅在 `main` 分支上执行该作业
+
+cache:
+  paths:
+    - venv/  # 缓存虚拟环境
+    - .cache/pip/  # 缓存 pip 下载的包
