@@ -1,0 +1,38 @@
+# 定义 CI/CD 流水线的阶段
+stages:
+  - setup
+  - build
+  - test
+
+# Setup 阶段：运行 `make setup` 来设置项目
+setup:
+  stage: setup
+  script:
+    - echo "Setting up the project..."
+    - make setup  # 假设 `make setup` 用于初始化项目环境
+  tags:
+    - GPU  # 使用注册时指定的标签来匹配 Runner（这里的 'shell' 可以是其他设备标签）
+  only:
+    - main  # 仅在 `main` 分支上执行该作业
+
+# Build 阶段：运行 `make` 来构建项目
+build:
+  stage: build
+  script:
+    - echo "Building the project..."
+    - make -j16 # 执行构建任务
+  tags:
+    - GPU  # 使用注册时指定的标签来匹配 Runner（这里的 'shell' 可以是其他设备标签）
+  only:
+    - main  # 仅在 `main` 分支上执行该作业
+
+# Test 阶段：需要 GPU 支持的测试，运行 `make test` 来执行测试
+test:
+  stage: test
+  script:
+    - echo "Running tests with GPU..."
+    - make test  # 假设 `make test` 用于运行测试
+  tags:
+    - GPU
+  only:
+    - main 
