@@ -936,12 +936,8 @@ public:
     auto pty = SSTab().LookupSymbol(n.id->name);
     assert((isa<SpannedType>(pty) || isa<FutureType>(pty)) &&
            "unexpected data type.");
-    SpannedType* sty = nullptr;
-    if (auto fty = dyn_cast<FutureType>(pty))
-      sty = fty->GetSpannedType().get();
-    else
-      sty = cast<SpannedType>(pty);
 
+    auto sty = GetSpannedType(pty);
     if (!isa<SpannedType>(sty)) {
       Error(n.LOC(), "internal error: span_as operates on non-spanned type.");
       return false;
@@ -1049,11 +1045,7 @@ public:
            "unexpected data type.");
 
     auto span_name = RemoveSuffix(n.data->name, ".data") + ".span";
-    SpannedType* sty = nullptr;
-    if (auto fty = dyn_cast<FutureType>(pty)) {
-      sty = fty->GetSpannedType().get();
-    } else
-      sty = cast<SpannedType>(pty);
+    auto sty = GetSpannedType(pty);
 
     if (!n.positions) {
       // it is just a symbol reference
@@ -1085,7 +1077,7 @@ public:
       };
 
       for (auto pos : n.positions->values) {
-        AST::Identifier* biv = dyn_cast<AST::Identifier>(pos);
+        auto biv = dyn_cast<AST::Identifier>(pos);
         if (!biv) {
           auto expr = cast<AST::Expr>(pos);
           assert(expr->op == "getith");

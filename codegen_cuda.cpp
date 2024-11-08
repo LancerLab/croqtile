@@ -541,15 +541,6 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
           isa<AST::Select>(d.to)) &&
          "Unexpected type for DMA's destination.");
 
-  // retrieve the spanned type from a chunkat
-  auto GetSpannedType = [this](AST::Node& ca) -> SpannedType* {
-    auto sty = ca.GetType();
-    if (auto fty = dyn_cast<FutureType>(sty))
-      return fty->GetSpannedType().get();
-    else
-      return cast<SpannedType>(sty);
-  };
-
   auto MemLevel = [](Storage s) -> int {
     switch (s) {
     case Storage::LOCAL: return 0;
@@ -583,7 +574,7 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
           RemoveSuffix(cast<AST::ChunkAt>(d.from)->data->name, ".data"))))
     src_buffer_name = src_node_name + "_buffer";
 
-  auto sty = GetSpannedType(*d.from); // source spanned type
+  auto sty = GetSpannedType(NodeType(*d.from)); // source spanned type
   // size_t rank = sty->Dims();
   // auto dst_shape = ty->GetShape();
   auto src_sto = sty->GetStorage();
@@ -595,13 +586,7 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
     assert(sty);
     dst_sto = sty->GetStorage();
   } else
-    dst_sto = GetSpannedType(*d.to)->GetStorage();
-  // auto dst_sto = (isa<AST::Memory>(d.to)) ? cast<AST::Memory>(d.to)->Get()
-  //                                         :
-  //                                         GetSpannedType(*d.to)->GetStorage();
-  // dst_sto = (isa<AST::Select>(d.to)) ? Storage::LOCAL
-  //                                         :
-  //                                         GetSpannedType(*d.to)->GetStorage();
+    dst_sto = GetSpannedType(NodeType(*d.to))->GetStorage();
   int src_level = MemLevel(src_sto);
   int dst_level = MemLevel(dst_sto);
 
@@ -620,8 +605,8 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
     alloc_in_fs << ";\n";
   }
 
-  auto GetTileVarAsCoord = [this, &GetSpannedType](AST::Node& n) {
-    auto sty = GetSpannedType(n);
+  auto GetTileVarAsCoord = [this](AST::Node& n) {
+    auto sty = GetSpannedType(NodeType(n));
     // auto shape = sty->GetShape();
     size_t rank = sty->Dims();
 
@@ -667,8 +652,8 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
     }
     return "Coord(" + offss.str() + ")";
   };
-  auto GenerateOffsetString = [this, &GetSpannedType](AST::Node& n) {
-    auto sty = GetSpannedType(n);
+  auto GenerateOffsetString = [this](AST::Node& n) {
+    auto sty = GetSpannedType(NodeType(n));
     auto shape = sty->GetShape();
     size_t rank = sty->Dims();
 
@@ -1026,7 +1011,7 @@ bool CUDACodeGen::Visit(AST::FunctionDecl& d) {
   assert(isa<FunctionType>(ty) && "unexpected type.");
   auto& fty = *cast<FunctionType>(ty);
 
-  auto MapRuntimeShapeNames = [this](SpannedType* sty, const std::string& name,
+  auto MapRuntimeShapeNames = [this](const ptr<SpannedType> & sty, const std::string& name,
                                      size_t p_index) {
     size_t count = 0;
     for (auto vi : sty->GetShape().Value()) {
@@ -1489,7 +1474,7 @@ void CUDACodeGen::EmitHostFuncDecl(std::ostream& os, const Type& ty,
   os << ")" << ((decl_only) ? ";\n" : " ");
 }
 
-void CUDACodeGen::OutputScript(FunctionType* fty, const std::string& n,
+void CUDACodeGen::OutputScript(const ptr<FunctionType>& fty, const std::string& n,
                                const std::string& out_type,
                                const std::string& out_size_expr,
                                const Shape& out_shape) {

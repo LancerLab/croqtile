@@ -226,11 +226,7 @@ public:
       _chain_from_ptr->chain_to = n.future;
     }
 
-    SpannedType* sty = nullptr;
-    if (auto fty = dyn_cast<FutureType>(GetSymbolType(f_name)))
-      sty = fty->GetSpannedType().get();
-    else
-      sty = cast<SpannedType>(GetSymbolType(f_name));
+    auto sty = GetSpannedType(GetSymbolType(f_name));
 
     // storage level must be specified
     if (sty->GetStorage() == Storage::NONE) return false;

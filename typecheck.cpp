@@ -145,12 +145,7 @@ bool TypeChecker::Visit(AST::SpanAs& n) {
     return false;
   }
 
-  SpannedType* sty = nullptr;
-  if (auto fty = dyn_cast<FutureType>(ity))
-    sty = fty->GetSpannedType().get();
-  else
-    sty = cast<SpannedType>(ity);
-
+  auto sty = GetSpannedType(ity);
   auto nty = cast<SpannedType>(NodeType(n));
 
   if (sty->ElementType() != nty->ElementType()) {

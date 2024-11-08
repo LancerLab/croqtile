@@ -97,7 +97,7 @@ public:
     hs.clear();
   }
 
-  void OutputScript(FunctionType*, const std::string&, const std::string&,
+  void OutputScript(const ptr<FunctionType>&, const std::string&, const std::string&,
                     const std::string&, const Shape&);
 
   bool BeforeVisitImpl(AST::Node&) override;

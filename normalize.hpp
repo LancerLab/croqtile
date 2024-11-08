@@ -162,7 +162,7 @@ public:
   bool Visit(AST::Expr& n) override {
     __TRACE_NORM_VISIT__(n)
     if (list_ref) { // could be with syntax sugar
-      auto Apply = [this](AST::Expr* expr) -> ptr<AST::Expr> {
+      auto Apply = [this](const ptr<AST::Expr>& expr) -> ptr<AST::Expr> {
         if (!expr) return nullptr;
         if (auto ref = expr->GetReference()) {
           if (!isa<AST::IntIndex>(ref.get())) return nullptr;
@@ -180,7 +180,7 @@ public:
         return nullptr;
       };
 
-      if (auto new_value = Apply(n.GetC().get())) n.SetC(new_value);
+      if (auto new_value = Apply(n.GetC())) n.SetC(new_value);
       if (auto lv = dyn_cast<AST::Expr>(n.GetL()))
         if (auto new_value = Apply(lv)) n.SetL(new_value);
       if (auto rv = dyn_cast<AST::Expr>(n.GetR())) {

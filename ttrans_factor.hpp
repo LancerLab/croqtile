@@ -74,7 +74,7 @@ private:
     } else if (auto f = dyn_cast<AST::ForeachBlock>(&n)) {
       if (kind == Kind::T_SWAP) {
         for (auto& stmt : f->stmts->AllSubs())
-          if (auto swap = dyn_cast<AST::Swap>(stmt)) cur_swaps.push_back(swap);
+          if (auto swap = dyn_cast<AST::Swap>(stmt)) cur_swaps.push_back(swap.get());
         replace_swap_names.push(true);
       }
     } else if (auto m = dyn_cast<AST::MultiNodes>(&n)) {

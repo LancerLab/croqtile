@@ -85,7 +85,7 @@ public:
 
   bool BeforeVisitImpl(AST::Node&) override;
   bool AfterVisitImpl(AST::Node&) override;
-  void OutputScript(FunctionType*, const std::string&, const std::string&,
+  void OutputScript(const ptr<FunctionType>&, const std::string&, const std::string&,
                     const std::string&, const Shape&);
 
   bool Visit(AST::Assignment&) override;

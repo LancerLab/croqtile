@@ -527,15 +527,6 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
           isa<AST::Select>(d.to)) &&
          "Unexpected type for DMA's destination.");
 
-  // retrieve the spanned type from a chunkat
-  auto GetSpannedType = [this](AST::Node& ca) -> SpannedType* {
-    auto sty = ca.GetType();
-    if (auto fty = dyn_cast<FutureType>(sty))
-      return fty->GetSpannedType().get();
-    else
-      return cast<SpannedType>(sty);
-  };
-
   auto MemLevel = [](Storage s) -> int {
     switch (s) {
     case Storage::LOCAL: return 0;
@@ -562,8 +553,8 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
   auto dst_buffer_name = cast<AST::ChunkAt>(d.to)->RefSymbol();
   auto src_buffer_name = cast<AST::ChunkAt>(d.from)->RefSymbol();
 
-  auto sty = GetSpannedType(*d.from); // source spanned type
-  auto tty = GetSpannedType(*d.to);   // dest spanned type
+  auto sty = GetSpannedType(NodeType(*d.from)); // source spanned type
+  auto tty = GetSpannedType(NodeType(*d.to));   // dest spanned type
   size_t rank = sty->Dims();
   //  auto dst_shape = ty->GetShape();
   auto src_sto = sty->GetStorage();
@@ -572,8 +563,8 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
   int src_level = MemLevel(src_sto);
   int dst_level = MemLevel(dst_sto);
 
-  auto GenerateOffsetString = [this, &GetSpannedType](AST::Node& n) {
-    auto sty = GetSpannedType(n);
+  auto GenerateOffsetString = [this](AST::Node& n) {
+    auto sty = GetSpannedType(NodeType(n));
     auto shape = sty->GetShape();
     size_t rank = sty->Dims();
 
@@ -856,7 +847,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
   auto& fty = *cast<FunctionType>(ty);
   std::string func_name = d.name;
 
-  auto MapRuntimeShapeNames = [this, &func_name](SpannedType* sty,
+  auto MapRuntimeShapeNames = [this, &func_name](const ptr<SpannedType>& sty,
                                                  const std::string& name,
                                                  size_t p_index) {
     size_t count = 0;
@@ -1328,7 +1319,7 @@ void FactorCodeGen::EmitHostFuncDecl(std::ostream& os, const Type& ty,
   os << ")" << ((decl_only) ? ";\n" : " ");
 }
 
-void FactorCodeGen::OutputScript(FunctionType* fty, const std::string& name,
+void FactorCodeGen::OutputScript(const ptr<FunctionType>& fty, const std::string& name,
                                  const std::string& out_type,
                                  const std::string& out_size_expr,
                                  const Shape& out_shape) {

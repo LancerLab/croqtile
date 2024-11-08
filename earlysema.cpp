@@ -774,13 +774,7 @@ bool EarlySemantics::Visit(AST::Memory& n) {
 bool EarlySemantics::Visit(AST::SpanAs& n) {
   TraceEachVisit(n);
 
-  auto nty = NodeType(*n.id);
-  SpannedType* sty = nullptr;
-  if (auto fty = dyn_cast<FutureType>(nty))
-    sty = fty->GetSpannedType().get();
-  else
-    sty = dyn_cast<SpannedType>(nty);
-
+  auto sty = GetSpannedType(NodeType(*n.id));
   if (!sty) {
     Error(n.LOC(), "span-as operation operates on a non-mdspan type.");
     error_count++;
@@ -810,13 +804,9 @@ bool EarlySemantics::Visit(AST::DMA& n) {
     return true;
   }
 
-  SpannedType* sty = nullptr;
-  if (auto fty = dyn_cast<FutureType>(NodeType(*n.from)))
-    sty = fty->GetSpannedType().get();
-  else
-    sty = cast<SpannedType>(NodeType(*n.from));
+  auto sty = GetSpannedType(NodeType(*n.from));
 
-  SpannedType* tty = nullptr;
+  ptr<SpannedType> tty = nullptr;
   if (!isa<AST::Memory>(n.to)) tty = cast<SpannedType>(NodeType(*n.to));
 
   if (!n.future.empty()) {
@@ -929,11 +919,7 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
     error_count++;
   }
 
-  SpannedType* sty = nullptr;
-  if (auto fty = dyn_cast<FutureType>(nty))
-    sty = fty->GetSpannedType().get();
-  else
-    sty = cast<SpannedType>(nty);
+  auto sty = GetSpannedType(nty);
 
   if (n.positions) {
     n.positions->accept(*this);

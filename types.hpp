@@ -260,9 +260,6 @@ bool isa(U* n) {
 template <typename T, typename U>
 bool isa(const ptr<U>& n) {
   if (!n) return false;
-  //  std::cout << "id: " << (uint64_t)(&TypeIDProvider<U>::__unique_id) << ",
-  //  tid:" << U::TypeID() << ": " << n->TypeNameString() << ", tid: " <<
-  //  T::TypeID() << "\n";
   return n->IsType(T::TypeID());
 }
 
@@ -274,9 +271,9 @@ T* dyn_cast(U* n) {
     return nullptr;
 }
 template <typename T, typename U>
-T* dyn_cast(const ptr<U>& n) {
+ptr<T> dyn_cast(const ptr<U>& n) {
   if (isa<T>(n))
-    return (T*)(n.get());
+    return std::static_pointer_cast<T>(n);
   else
     return nullptr;
 }
@@ -292,9 +289,9 @@ T* cast(U* n) {
 }
 
 template <typename T, typename U>
-T* cast(const ptr<U>& n) {
+ptr<T> cast(const ptr<U>& n) {
   if (isa<T>(n))
-    return (T*)(n.get());
+    return std::static_pointer_cast<T>(n);
   else {
     std::cerr << "type cast failure for incompatibility.\n";
     abort();
@@ -313,9 +310,9 @@ T* cast_dbg(U* n) {
   }
 }
 template <typename T, typename U>
-T* cast_dbg(const ptr<U>& n) {
+ptr<T> cast_dbg(const ptr<U>& n) {
   if (isa<T>(n))
-    return (T*)(n.get());
+    return std::static_pointer_cast<T>(n);
   else {
     std::cerr << "type cast failure for incompatibility: "
               << n->TypeNameString() << ".\n";
@@ -1631,9 +1628,9 @@ inline static ptr<Type> ShadowTypeStorage(const ptr<Type>& ty) {
     return ty;
 }
 
-inline static SpannedType* GetSpannedType(const ptr<Type>& ty) {
+inline static ptr<SpannedType> GetSpannedType(const ptr<Type>& ty) {
   if (auto fty = dyn_cast<FutureType>(ty))
-    return fty->GetSpannedType().get();
+    return fty->GetSpannedType();
   else if (auto sty = dyn_cast<SpannedType>(ty))
     return sty;
   else

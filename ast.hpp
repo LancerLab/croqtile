@@ -345,12 +345,12 @@ public:
     return nullptr;
   }
 
-  Identifier* GetSymbol() {
+  ptr<Identifier> GetSymbol() {
     if (t != Reference) return nullptr;
     return dyn_cast<Identifier>(value_r);
   }
 
-  IntLiteral* GetInt() {
+  ptr<IntLiteral> GetInt() {
     if (t != Reference) return nullptr;
     return dyn_cast<IntLiteral>(value_r);
   }
@@ -619,6 +619,7 @@ struct IntTuple : public Node, public TypeIDProvider<IntTuple> {
 struct Assignment : public Node, public TypeIDProvider<Assignment> {
   std::string name;
   ptr<Node> value;
+
   explicit Assignment(const location& l, const std::string& n,
                       const ptr<Node>& v)
       : Node(l), name(n), value(v) {
@@ -900,11 +901,9 @@ struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
              const ptr<MultiValues>& iv_l, const ptr<MultiNodes>& ss)
       : Node(l), id_list(id_l), iv_list(iv_l), stmts(ss) {
     auto id = id_l->ValueAt(0);
-    auto* identifier = dyn_cast<Identifier>(id);
-    assert(identifier != nullptr);
+    auto identifier = cast<Identifier>(id);
     auto iv = iv_l->ValueAt(0);
-    auto* num = dyn_cast<IntLiteral>(iv);
-    assert(num != nullptr);
+    auto num = cast<IntLiteral>(iv);
     biv = identifier->name;
     bound = num->value;
     if (id_l->Count() > 1)
@@ -916,11 +915,9 @@ struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
                                                  const ptr<MultiValues>& id_l,
                                                  const ptr<MultiValues>& iv_l) {
     auto id = id_l->ValueAt(idx);
-    auto* identifier = dyn_cast<Identifier>(id);
-    assert(identifier != nullptr);
+    auto identifier = cast<Identifier>(id);
     auto iv = iv_l->ValueAt(idx);
-    auto* num = dyn_cast<IntLiteral>(iv);
-    assert(num != nullptr);
+    auto num = cast<IntLiteral>(iv);
     auto pb = Make<ParallelBy>(id->loc, identifier->name, num->value);
     if (idx == id_l->Count() - 1)
       pb->stmts = ss;
@@ -1365,7 +1362,7 @@ inline Identifier* GetIdentifier(const Node& n) {
   if (auto id = dyn_cast<AST::Identifier>(&n))
     return id;
   else if (auto expr = dyn_cast<AST::Expr>(&n))
-    return expr->GetSymbol();
+    return expr->GetSymbol().get();
   else
     return nullptr;
 }
