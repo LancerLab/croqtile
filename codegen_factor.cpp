@@ -1319,7 +1319,8 @@ void FactorCodeGen::EmitHostFuncDecl(std::ostream& os, const Type& ty,
   os << ")" << ((decl_only) ? ";\n" : " ");
 }
 
-void FactorCodeGen::OutputScript(const ptr<FunctionType>& fty, const std::string& name,
+void FactorCodeGen::OutputScript(const ptr<FunctionType>& fty,
+                                 const std::string& name,
                                  const std::string& out_type,
                                  const std::string& out_size_expr,
                                  const Shape& out_shape) {

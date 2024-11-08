@@ -4,62 +4,56 @@
 
 using namespace Choreo;
 
-#define __TRACE_EACH_VISIT__(n)                                                \
-  if (trace_visit) {                                                           \
-    os << n.TypeNameString() << ": ";                                          \
-    os << "\n";                                                                \
-  }
-
 bool TypeChecker::BeforeVisitImpl(AST::Node&) { return true; }
 
 bool TypeChecker::AfterVisitImpl(AST::Node&) { return true; }
 
 bool TypeChecker::Visit(AST::MultiNodes& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   return true;
 }
 bool TypeChecker::Visit(AST::MultiValues& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   return true;
 }
 bool TypeChecker::Visit(AST::IntLiteral& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
 bool TypeChecker::Visit(AST::Boolean& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
 bool TypeChecker::Visit(AST::Expr& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
 bool TypeChecker::Visit(AST::MultiDimSpans& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
 bool TypeChecker::Visit(AST::NamedTypeDecl& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
 bool TypeChecker::Visit(AST::NamedVariableDecl& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
 bool TypeChecker::Visit(AST::IntTuple& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
 
 bool TypeChecker::Visit(AST::Assignment& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   if (!ReportUnknownSymbol(n.name, n.LOC(), __FILE__, __LINE__)) return false;
 
@@ -74,7 +68,7 @@ bool TypeChecker::Visit(AST::Assignment& n) {
 }
 
 bool TypeChecker::Visit(AST::IntIndex& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   if (!isa<IntegerType>(n.value->GetType())) {
     Error(n.LOC(), "Expect `" + PSTR(n.value) + "' to be a integer type.");
@@ -84,49 +78,49 @@ bool TypeChecker::Visit(AST::IntIndex& n) {
   return true;
 }
 bool TypeChecker::Visit(AST::DataType& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   // TODO: figure out if we could check SufficientInfo
   if (!ReportUnknown(n, __FILE__, __LINE__, true)) return false;
   return true;
 }
 bool TypeChecker::Visit(AST::Identifier& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   if (PrefixedWith(n.name, "$")) return true; // do not check internal symbols
   if (!ReportUnknownSymbol(n.name, n.LOC(), __FILE__, __LINE__)) return false;
   return true;
 }
 bool TypeChecker::Visit(AST::Parameter& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
 bool TypeChecker::Visit(AST::ParamList& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   return true;
 }
 bool TypeChecker::Visit(AST::ParallelBy& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   return true;
 }
 bool TypeChecker::Visit(AST::WhereBind& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   return true;
 }
 bool TypeChecker::Visit(AST::WithIn& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   return true;
 }
 bool TypeChecker::Visit(AST::WithBlock& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   return true;
 }
 bool TypeChecker::Visit(AST::Memory& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   return true;
 }
 
 bool TypeChecker::Visit(AST::SpanAs& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
 
   if (!ReportUnknownSymbol(n.id->name, n.LOC(), __FILE__, __LINE__))
     return false;
@@ -170,8 +164,7 @@ bool TypeChecker::Visit(AST::SpanAs& n) {
 }
 
 bool TypeChecker::Visit(AST::DMA& n) {
-  __TRACE_EACH_VISIT__(n)
-  if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
+  TraceEachVisit(n);
 
   bool IsDummy = (n.operation == ".any");
   auto ty = n.GetType();
@@ -190,6 +183,8 @@ bool TypeChecker::Visit(AST::DMA& n) {
     }
     return true;
   }
+
+  if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
 
   if (!isa<FutureType>(ty)) {
     Error(n.LOC(), "Expect the DMA to produce a FutureType, but got '" +
@@ -246,7 +241,7 @@ bool TypeChecker::Visit(AST::DMA& n) {
         }
       }
     }
-  } else if (!(cast<SpannedType>(fty)->DataEqual(*tty)) &&
+  } else if (!(cast<SpannedType>(fty)->LogicalEqual(*tty)) &&
              !allow_auto_threading) {
     Error(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
                        ") and 'to'(" + PSTR(tty) + ").");
@@ -256,21 +251,21 @@ bool TypeChecker::Visit(AST::DMA& n) {
   return true;
 }
 bool TypeChecker::Visit(AST::ChunkAt& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
 bool TypeChecker::Visit(AST::Wait& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   return true;
 }
 bool TypeChecker::Visit(AST::Call& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   return true;
 }
 
 bool TypeChecker::Visit(AST::Swap& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   auto lty = NodeType(*n.lhs);
   auto rty = NodeType(*n.rhs);
 
@@ -284,7 +279,7 @@ bool TypeChecker::Visit(AST::Swap& n) {
 }
 
 bool TypeChecker::Visit(AST::Select& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   size_t ec = error_count;
 
   if (!isa<IntegerType>(NodeType(*n.select_factor))) {
@@ -317,31 +312,31 @@ bool TypeChecker::Visit(AST::Select& n) {
 }
 
 bool TypeChecker::Visit(AST::Return& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   return true;
 }
 bool TypeChecker::Visit(AST::LoopRange& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   return true;
 }
 bool TypeChecker::Visit(AST::ForeachBlock& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   return true;
 }
 bool TypeChecker::Visit(AST::FunctionDecl& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   return true;
 }
 bool TypeChecker::Visit(AST::ChoreoFunction& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   return true;
 }
 bool TypeChecker::Visit(AST::CppSourceCode& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   return true;
 }
 bool TypeChecker::Visit(AST::Program& n) {
-  __TRACE_EACH_VISIT__(n)
+  TraceEachVisit(n);
   return true;
 }
 
@@ -351,7 +346,7 @@ bool TypeChecker::ReportUnknownSymbol(const std::string& name,
   if (isa<UnknownType>(GetSymbolType(name))) {
     ++error_count;
     Error(loc, "failed to obtain the type of " + name + ".");
-    if (trace_visit) os << file << ":" << line << "\n";
+    if (debug_visit) os << file << ":" << line << "\n";
     return false;
   }
   return true;
@@ -362,14 +357,14 @@ bool TypeChecker::ReportUnknown(AST::Node& n, const char* file, int line,
   if (isa<UnknownType>(NodeType(n))) {
     ++error_count;
     Error(n.LOC(), "failed to obtain a type.");
-    if (trace_visit) os << file << ":" << line << ", " << STR(n) << "\n";
+    if (debug_visit) os << file << ":" << line << ", " << STR(n) << "\n";
     return false;
   }
 
   if (!ignore_detail && !NodeType(n)->HasSufficientInfo()) {
     ++error_count;
     Error(n.LOC(), "failed to obtain a type with sufficient info.");
-    if (trace_visit)
+    if (debug_visit)
       os << file << ":" << line << ", " << STR(n) << "(" << PSTR(NodeType(n))
          << ")\n";
     return false;

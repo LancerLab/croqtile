@@ -20,6 +20,14 @@ private:
   bool ReportUnknown(AST::Node&, const char*, int, bool = false);
   bool ReportUnknownSymbol(const std::string&, const location&, const char*,
                            int);
+  void TraceEachVisit(AST::Node& n, bool detail = false,
+                      const std::string& m = "") const {
+    if (!trace_visit) return;
+    if (detail)
+      os << m << STR(n) << "\n";
+    else
+      os << m << n.TypeNameString() << "\n";
+  }
 
 public:
   TypeChecker(const ptr<SymbolTable> s_tab, std::ostream& o = std::cout,

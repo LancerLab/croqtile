@@ -661,6 +661,10 @@ struct Shape {
     return values[val_no].at(index);
   }
 
+  bool SameRankAs(const Shape& s) const {
+    return IsRanked() && s.IsRanked() && (Rank() == s.Rank());
+  }
+
   int NthInteger(size_t index) const {
     const ValueItem& vi = Value().at(index);
     return *cast<int>(const_cast<ValueItem*>(&vi));
@@ -814,6 +818,8 @@ struct Type {
   // is the information enough for semantic check and code generation
   virtual bool HasSufficientInfo() const { return false; }
   virtual bool operator==(const Type& t) const = 0;
+  // sometimes it requires to ignore the memory for type's comparison
+  virtual bool LogicalEqual(const Type& t) const { return operator==(t); }
   // in-precise comparison without considering the shape detail.
   // used in early semantics
   virtual bool ApprxEqual(const Type& t) const = 0;
@@ -917,7 +923,7 @@ struct PlaceHolderType final : public Type,
     os << "placeholder<" << STR(Category()) << ">";
   }
   const std::string Name() const override { return "place_holder"; }
-  bool HasSufficientInfo() const { return true; }
+  bool HasSufficientInfo() const { return false; }
 
   bool operator==(const Type&) const override { return false; }
   // tolarate im-precise comparison
@@ -1056,7 +1062,11 @@ struct MDSpanType : public Type, public TypeIDProvider<MDSpanType> {
 
   bool operator==(const Type& ty) const override {
     if (!isa<MDSpanType>(&ty)) return false;
-    return ((const MDSpanType&)ty).value == value;
+    auto& mty = ((const MDSpanType&)ty);
+    // Must consider the condition whn shapes are not accurately decided
+    // (only the dim-count is available)
+    return (mty.value == value) || (!mty.value.IsValid() && !value.IsValid() &&
+                                    mty.value.SameRankAs(value));
   }
 
   bool ApprxEqual(const Type& ty) const override {
@@ -1109,8 +1119,8 @@ struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
            Compatible(t.m_type, m_type);
   }
 
-  // sometimes it requires to ignore the memory
-  bool DataEqual(const Type& ty) const {
+  // Ignore the memory
+  bool LogicalEqual(const Type& ty) const {
     if (!isa<SpannedType>(&ty)) return false;
     auto& t = (SpannedType&)ty;
     return t.f_type == f_type && *t.s_type == *s_type;
@@ -1330,6 +1340,13 @@ struct FutureType : public Type, public TypeIDProvider<FutureType> {
   bool operator==(const Type& ty) const override {
     if (auto fty = dyn_cast<FutureType>(&ty))
       return (fty->async == async) && (*fty->psty == *psty);
+    else
+      return false;
+  }
+
+  bool LogicalEqual(const Type& ty) const override {
+    if (auto fty = dyn_cast<FutureType>(&ty))
+      return (fty->async == async) && fty->psty->LogicalEqual(*psty);
     else
       return false;
   }

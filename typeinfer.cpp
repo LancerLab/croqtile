@@ -123,7 +123,7 @@ bool TypeInference::SetAsCurrentType(AST::Node& nd, const std::string& n) {
   const auto ty = nd.GetType();
   if (ty->HasSufficientInfo()) {
     // already has a type with sufficient info, check for consistence.
-    if (cur_type->HasSufficientInfo() && !(*cur_type == *ty)) {
+    if (cur_type->HasSufficientInfo() && !(cur_type->LogicalEqual(*ty))) {
       Error(nd.LOC(), "can not infer the type of `" + n + "'.");
       error_count++;
       return false;
@@ -133,7 +133,7 @@ bool TypeInference::SetAsCurrentType(AST::Node& nd, const std::string& n) {
 
   // Or else we need to set the type with current
   // Check for inference failures
-  if (isa<UnknownType>(cur_type.get())) {
+  if (isa<UnknownType>(cur_type)) {
     Error(nd.LOC(), "can not infer the type of `" + n + "'.");
     error_count++;
     return false;
@@ -404,7 +404,7 @@ bool TypeInference::Visit(AST::MultiDimSpans& n) {
 bool TypeInference::Visit(AST::Expr& n) {
   TraceEachVisit(n);
   if (auto ref = n.GetReference()) {
-    if (auto id = dyn_cast<AST::Identifier>(ref.get())) {
+    if (auto id = dyn_cast<AST::Identifier>(ref)) {
       if (auto pty = GetSymbolType(n.LOC(), id->name)) {
         // special handling of the span-of spanned type
         if (SuffixedWith(id->name, ".span")) {
@@ -420,9 +420,9 @@ bool TypeInference::Visit(AST::Expr& n) {
     }
 
     // must have de-sugared early
-    assert(!isa<AST::IntIndex>(ref.get()));
+    assert(!isa<AST::IntIndex>(ref));
 
-    if (AST::typeof<UnknownType>(ref.get())) {
+    if (AST::typeof<UnknownType>(ref)) {
       Error(n.LOC(), "unable to infer the type of expression.");
       error_count++;
       return false;
@@ -579,7 +579,7 @@ bool TypeInference::Visit(AST::IntTuple& n) {
 bool TypeInference::Visit(AST::SpanAs& n) {
   TraceEachVisit(n);
 
-  auto ity = NodeType(*n.id).get();
+  auto ity = NodeType(*n.id);
   if (!isa<SpannedType>(ity) && !isa<FutureType>(ity)) {
     Error(n.LOC(), "fail to infer the type of `" + STR(n.id) + "'.");
     error_count++;
@@ -679,7 +679,7 @@ bool TypeInference::Visit(AST::WithIn& n) {
 
   if (n.with_matchers) {
     for (auto pid : n.with_matchers->values) {
-      auto id = cast<AST::Identifier>(pid.get());
+      auto id = cast<AST::Identifier>(pid);
       AssignSymbolWithType(n.LOC(), id->name, id->GetType());
     }
   }

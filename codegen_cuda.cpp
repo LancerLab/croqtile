@@ -1011,8 +1011,8 @@ bool CUDACodeGen::Visit(AST::FunctionDecl& d) {
   assert(isa<FunctionType>(ty) && "unexpected type.");
   auto& fty = *cast<FunctionType>(ty);
 
-  auto MapRuntimeShapeNames = [this](const ptr<SpannedType> & sty, const std::string& name,
-                                     size_t p_index) {
+  auto MapRuntimeShapeNames = [this](const ptr<SpannedType>& sty,
+                                     const std::string& name, size_t p_index) {
     size_t count = 0;
     for (auto vi : sty->GetShape().Value()) {
       if (auto vale = dyn_cast<ValueExpr>(&vi)) {
@@ -1474,7 +1474,8 @@ void CUDACodeGen::EmitHostFuncDecl(std::ostream& os, const Type& ty,
   os << ")" << ((decl_only) ? ";\n" : " ");
 }
 
-void CUDACodeGen::OutputScript(const ptr<FunctionType>& fty, const std::string& n,
+void CUDACodeGen::OutputScript(const ptr<FunctionType>& fty,
+                               const std::string& n,
                                const std::string& out_type,
                                const std::string& out_size_expr,
                                const Shape& out_shape) {
