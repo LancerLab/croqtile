@@ -86,6 +86,7 @@ enum class FundamentalType {
   S32 = (int)BaseType::S32,
   S16 = (int)BaseType::S16,
   S8 = (int)BaseType::S8,
+  UND = (int)BaseType::UNKNOWN,
 };
 
 enum class Storage { LOCAL, SHARED, GLOBAL, DEFAULT, NONE };
@@ -1546,18 +1547,18 @@ inline ptr<SpannedType> MakeSpannedType(BaseType ft, const Shape& v,
 // all the values are fake. it is used only to indicate a spanned type without
 // the shape detail
 inline ptr<SpannedType> MakeDummySpannedType() {
-  return MakeSpannedType(BaseType::S32, GenUninitShape(), Storage::DEFAULT);
+  return MakeSpannedType(BaseType::UNKNOWN, GenUninitShape(), Storage::DEFAULT);
 }
 
 inline ptr<SpannedType> MakeRankedSpannedType(size_t n,
-                                              BaseType bt = BaseType::S32,
+                                              BaseType bt = BaseType::UNKNOWN,
                                               Storage sto = Storage::DEFAULT) {
   // only care about the rank of span
   return MakeSpannedType(bt, Shape(n), sto);
 }
 
 inline ptr<SpannedType> MakeShapedSpannedType(const Shape& s,
-                                              BaseType bt = BaseType::S32) {
+                                              BaseType bt = BaseType::UNKNOWN) {
   // only care about the precise shape
   return MakeSpannedType(bt, s, Storage::DEFAULT);
 }

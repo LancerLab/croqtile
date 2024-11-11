@@ -590,19 +590,13 @@ bool TypeInference::Visit(AST::SpanAs& n) {
   auto sty = cast<SpannedType>(nty);
 
   if (isa<SpannedType>(ity)) {
-    // mutate default to be global
-    if (sty->m_type == Storage::DEFAULT)
-      n.SetType(MakeSpannedType(sty->f_type, sty->GetShape(), Storage::GLOBAL));
-    // is this required? assign the target id (not defined yet) with a type
-    n.nid->SetType(nty);
+    n.nid->SetType(ShadowTypeStorage(sty));
     cur_type = nty;
   } else {
-    auto fty = GetSymbolType(n.id->LOC(), n.id->name + ".data");
-    auto fsty = cast<SpannedType>(fty);
-    if (sty->m_type == Storage::DEFAULT)
-      n.SetType(
-          MakeSpannedType(sty->f_type, sty->GetShape(), fsty->GetStorage()));
-    n.nid->SetType(n.GetType());
+    auto fty =
+        cast<SpannedType>(GetSymbolType(n.id->LOC(), n.id->name + ".data"));
+    n.SetType(ShadowTypeStorage(
+        MakeSpannedType(fty->f_type, sty->GetShape(), fty->GetStorage())));
     cur_type = n.GetType();
   }
 
