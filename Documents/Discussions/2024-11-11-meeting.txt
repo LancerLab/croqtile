@@ -1,0 +1,3 @@
+Issue:
+- Reject bounded variable multiplication, i.e.: chunkat(a * 64, ...) => ...;
+- multiple __co__ functions support, multiple parallel.
