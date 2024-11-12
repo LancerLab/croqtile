@@ -153,9 +153,17 @@ class ScopedSymbolTable {
 
   // global symbol table: set it when required
   ptr<SymbolTable> symtab = nullptr;
+  bool manage_symtab = false;
 
 public:
-  ScopedSymbolTable(const ptr<SymbolTable>& s_tab = nullptr) : symtab(s_tab) {}
+  ScopedSymbolTable(const ptr<SymbolTable>& s_tab) : symtab(s_tab) {
+    if (symtab == nullptr) {
+      symtab = std::make_shared<SymbolTable>();
+      manage_symtab = true;
+    }
+  }
+
+  ~ScopedSymbolTable() {}
 
   // produce the global symbol table
   const ptr<SymbolTable>& GlobalSymbolTable() const { return symtab; }
@@ -198,6 +206,7 @@ public:
     if (scoped_symtab.back().count(n) == 0) {
       // Insert into the current (top) scope and global symtab
       scoped_symtab.back().emplace(n, ty);
+      // synchronize the record inside global symtab
       if (symtab) symtab->AddSymbol(InScopeName(n), ty);
 
       return true;
@@ -226,6 +235,44 @@ public:
       }
     }
     return false;
+  }
+
+  // Suppose the symbol provided is scoped, e.g., "::foo::bar::..."
+  // Note: requires symbol to have a valid scope
+  bool ModifyScopedSymbolType(const std::string& n, const ptr<Type>& ty) {
+    assert(symtab && "requires symbol table exist.");
+    assert(PrefixedWith(n, "::") && "symbol must be prefixed with ::");
+
+    if (!symtab->Exists(n)) return false;
+
+    // try to strip the scope names and find the symbol
+    auto symbol = n.substr(2);
+    size_t scope_index = 1;
+    while (scope_index < scope_names.size()) {
+      auto pos = symbol.find_first_of("::");
+      if (pos == std::string::npos) {
+        // symbols' scope are stripped
+        break;
+      }
+      auto sname = symbol.substr(0, pos);
+
+      if (sname != scope_names.at(scope_index)) {
+        choreo_unreachable("unexpected symbol with un-matched scope.");
+      }
+
+      symbol = symbol.substr(pos + 2);
+      ++scope_index;
+    }
+
+    auto& sstab = scoped_symtab[scope_index - 1];
+    if (!sstab.count(symbol))
+      return false; // the symbol does not appears in this scope
+
+    // update both the scoped symbol type and global symbol type
+    sstab[symbol] = ty;
+    symtab->GetSymbol(n)->SetType(ty);
+
+    return true;
   }
 
 public:

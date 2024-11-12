@@ -899,7 +899,7 @@ bool CUDACodeGen::Visit(AST::Call& c) {
   return true;
 }
 
-bool CUDACodeGen::Visit(AST::Swap& n) {
+bool CUDACodeGen::Visit(AST::Rotate& n) {
   __TRACE_EACH_VISIT__(n)
 
   // TODO

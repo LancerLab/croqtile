@@ -143,6 +143,7 @@ blank       [ \t\r]
   ".chunkat" return Choreo::Parser::make_CHUNKAT(yytext, loc);
   "=>"       return Choreo::Parser::make_TRANS(loc);
   "swap"     return Choreo::Parser::make_SWAP(yytext, loc);
+  "rotate"   return Choreo::Parser::make_ROTATE(yytext, loc);
   "if"       return Choreo::Parser::make_IF(yytext, loc);
   "else"     return Choreo::Parser::make_ELSE(yytext, loc);
   "parallel" return Choreo::Parser::make_PARA(yytext, loc);

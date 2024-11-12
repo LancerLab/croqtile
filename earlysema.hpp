@@ -5,14 +5,17 @@
 
 #include <unordered_set>
 
+#include "typeresolve.hpp"
 #include "visitor.hpp"
 
 namespace Choreo {
 
-struct EarlySemantics : public Visitor {
+struct EarlySemantics : public VisitorWithScope {
 private:
   std::ostream& os;
   size_t error_count = 0;
+
+  TypeConstraints type_equals{this};
 
 private:
   bool in_decl =
@@ -30,8 +33,8 @@ private:
       with_syms; // symbol defined in with-in statement
 
 private:
-  bool BeforeVisit(AST::Node&) override;
-  bool AfterVisit(AST::Node&) override;
+  bool BeforeVisitImpl(AST::Node&) override;
+  bool AfterVisitImpl(AST::Node&) override;
 
   bool ReportErrorWhenUseBeforeDefine(const location&, const std::string&);
   bool ReportErrorWhenViolateODR(const location&, const std::string&,
@@ -61,9 +64,10 @@ private:
 public:
   EarlySemantics(std::ostream& o = std::cout,
                  const Choreo::Target& tgt = Choreo::Target::Factor)
-      : Visitor("sema"), os(o) {
+      : VisitorWithScope("sema"), os(o) {
     if (trace_visit) debug_visit = true; // force debug when tracing
     if (tgt == Choreo::Target::CUDA) allow_auto_threading = true;
+    if (debug_visit) type_equals.SetDebug(true);
   }
   ~EarlySemantics() {}
 
@@ -92,7 +96,7 @@ public:
   bool Visit(AST::ChunkAt&) override;
   bool Visit(AST::Wait&) override;
   bool Visit(AST::Call&) override;
-  bool Visit(AST::Swap&) override;
+  bool Visit(AST::Rotate&) override;
   bool Visit(AST::Select&) override;
   bool Visit(AST::Return&) override;
   bool Visit(AST::LoopRange&) override;

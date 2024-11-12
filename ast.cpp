@@ -190,10 +190,9 @@ void Call::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
-void Swap::accept(Choreo::Visitor& v) {
+void Rotate::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
-  lhs->accept(v);
-  rhs->accept(v);
+  ids->accept(v);
   v.Visit(*this);
   v.AfterVisit(*this);
 }

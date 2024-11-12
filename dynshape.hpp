@@ -73,7 +73,7 @@ public:
   bool Visit(AST::ChunkAt&) { return true; }
   bool Visit(AST::Wait&) { return true; }
   bool Visit(AST::Call&) { return true; }
-  bool Visit(AST::Swap&) { return true; }
+  bool Visit(AST::Rotate&) { return true; }
   bool Visit(AST::Select&) { return true; }
   bool Visit(AST::Return&) { return true; }
   bool Visit(AST::LoopRange&) { return true; }

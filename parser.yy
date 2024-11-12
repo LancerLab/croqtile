@@ -146,7 +146,7 @@ void choreo_info(const char *message) {
 %token <Choreo::Storage> LOCAL SHARED GLOBAL
 %token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT BOOL VOID
 // builtin operations
-%token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT WAIT CALL AUTO SELECT SWAP FNDATASPANAS
+%token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT WAIT CALL AUTO SELECT SWAP ROTATE FNDATASPANAS
 // control related
 %token <std::string> IF ELSE PARA BY WITH IN FOREACH RET WHERE
 %token <std::string> TRUE FALSE
@@ -1015,9 +1015,15 @@ call_stmt
     ;
 
 swap_stmt
-    : SWAP LPAREN IDENTIFIER COMMA IDENTIFIER RPAREN {
-        $$ = AST::Make<AST::Swap>(@1,
-                AST::Make<AST::Identifier>(@3, $3), AST::Make<AST::Identifier>(@5, $5));
+    : SWAP LPAREN id_list RPAREN {
+        if ($3->Count() != 2)
+          Parser::error(@3, "Builtin function 'swap' accept exact two parameters.");
+        $$ = AST::Make<AST::Rotate>(@1, $3);
+      }
+    | ROTATE LPAREN id_list RPAREN {
+        if ($3->Count() < 2)
+          Parser::error(@3, "Builtin function 'rotate' accept two or more parameters.");
+        $$ = AST::Make<AST::Rotate>(@1, $3);
       }
     ;
 

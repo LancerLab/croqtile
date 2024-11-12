@@ -382,7 +382,7 @@ public:
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Swap& n) {
+  bool Visit(AST::Rotate& n) {
     TraceEachVisit(n);
     return true;
   }

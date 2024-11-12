@@ -49,7 +49,8 @@ ValueNumbering::VNSymbolName(const AST::Identifier& id) const {
   auto sig = id.name;
   auto pty = visitor->NodeType(id);
   if (isa<SpannedType>(pty) || GeneralFutureType(pty)) {
-    sig += ".span"; // only cares about value inside the mdspan
+    sig = RemoveSuffix(sig, ".span") +
+          ".span"; // only cares about value inside the mdspan
   } else if (IsBoundedType(pty)) {
     sig = "@" + sig; // only cares about the upper bound
   }
@@ -58,7 +59,6 @@ ValueNumbering::VNSymbolName(const AST::Identifier& id) const {
 
 void ValueNumbering::EnterScope(const std::string& name) {
   std::string indent = ScopeIndent();
-  visitor->SSTab().EnterScope(name);
 
   expressionValueNumbers.push_back({});
   valueNumberExpressions.push_back({});
@@ -73,7 +73,6 @@ void ValueNumbering::LeaveScope() {
   if (visitor->SSTab().ScopeDepth() <= 1) return;
 
   std::string sname = std::to_string(visitor->SSTab().ScopeDepth() - 1);
-  visitor->SSTab().LeaveScope();
 
   assert(!expressionValueNumbers.empty() && !valueNumberExpressions.empty());
 

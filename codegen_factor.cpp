@@ -729,7 +729,7 @@ bool FactorCodeGen::Visit(AST::Call& c) {
   return true;
 }
 
-bool FactorCodeGen::Visit(AST::Swap& n) {
+bool FactorCodeGen::Visit(AST::Rotate& n) {
   TraceEachVisit(n);
 
   // TODO

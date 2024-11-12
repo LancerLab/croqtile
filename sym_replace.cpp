@@ -468,7 +468,6 @@ void SymReplace::EquivalentlyReplaceExprNodes() {
       if (auto ii = dyn_cast<AST::IntIndex>(L)) {
         orig_expr->SetL(AST::Make<AST::IntIndex>(*ii));
       } else if (auto e = dyn_cast<AST::Expr>(L)) {
-        std::cout << "expr: " << PSTR(e) << "\n";
         orig_expr->SetL(AST::Make<AST::Expr>(*e));
       } else {
         choreo_unreachable("The node of type " + PSTR(L->GetType()) +

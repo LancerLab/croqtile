@@ -471,7 +471,7 @@ public:
     return true;
   };
 
-  bool Visit(AST::Swap& n) override {
+  bool Visit(AST::Rotate& n) override {
     TraceEachVisit(n);
 
     if (cannot_proceed) return true;

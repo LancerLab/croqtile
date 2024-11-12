@@ -11,6 +11,7 @@ bool TypeInference::BeforeVisit(AST::Node& n) {
   Visitor::BeforeVisit(n);
   if (isa<AST::Program>(&n)) {
     SSTab().EnterScope(""); // global scope
+    type_equals.Reset();
   } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
     AssignSymbolWithType(n.LOC(), f->name,
                          MakeUnknownType()); // the type will be modified after
@@ -120,15 +121,23 @@ bool TypeInference::ModifySymbolType(const location& loc,
 }
 
 bool TypeInference::SetAsCurrentType(AST::Node& nd, const std::string& n) {
-  const auto ty = nd.GetType();
-  if (ty->HasSufficientInfo()) {
+  const auto nty = nd.GetType();
+  if (nty->HasSufficientInfo()) {
     // already has a type with sufficient info, check for consistence.
-    if (cur_type->HasSufficientInfo() && !(cur_type->LogicalEqual(*ty))) {
-      Error(nd.LOC(), "can not infer the type of `" + n + "'.");
-      error_count++;
-      return false;
-    } else
-      return true;
+    if (cur_type->HasSufficientInfo()) {
+      if (BetterQuality(cur_type, nty)) {
+        nd.SetType(ShadowTypeStorage(cur_type));
+        return true;
+      } else {
+        assert(!BetterQuality(nty, cur_type) &&
+               "the inference type should be better qualified.");
+        if (!(cur_type->LogicalEqual(*nty))) {
+          Error(nd.LOC(), "can not infer the type of `" + n + "'.");
+          error_count++;
+          return false;
+        }
+      }
+    }
   }
 
   // Or else we need to set the type with current
@@ -230,25 +239,25 @@ bool TypeInference::Visit(AST::NamedVariableDecl& n) {
     return false;
   }
 
-  AssignSymbolWithType(n.LOC(), n.name_str, n.GetType());
+  auto nty = NodeType(n);
+  AssignSymbolWithType(n.LOC(), n.name_str, nty);
 
   if (AST::typeof<SpannedType>(&n)) {
     AssignSymbolWithType(n.LOC(), n.name_str + ".span",
-                         cast<SpannedType>(n.GetType())->GetMDSpanType());
+                         cast<SpannedType>(nty)->GetMDSpanType());
   }
 
   if (AST::typeof<FutureType>(&n)) {
     AssignSymbolWithType(n.LOC(), n.name_str + ".data",
-                         cast<FutureType>(n.GetType())->GetSpannedType());
+                         cast<FutureType>(nty)->GetSpannedType());
     AssignSymbolWithType(
         n.LOC(), n.name_str + ".span",
-        cast<FutureType>(n.GetType())->GetSpannedType()->GetMDSpanType());
+        cast<FutureType>(nty)->GetSpannedType()->GetMDSpanType());
   }
 
   if (Dump) {
     os << ((AST::typeof<FutureType>(&n)) ? "Future" : "Symbol");
-    os << ":    " << SSTab().InScopeName(n.name_str)
-       << ", Type: " << AST::TYPE_STR(n);
+    os << ":    " << SSTab().InScopeName(n.name_str) << ", Type: " << PSTR(nty);
     os << "\n";
   }
 
@@ -745,8 +754,17 @@ bool TypeInference::Visit(AST::Call& n) {
   return true;
 }
 
-bool TypeInference::Visit(AST::Swap& n) {
+bool TypeInference::Visit(AST::Rotate& n) {
   TraceEachVisit(n);
+
+  auto ty = type_equals.ResolveEqualFutures(*n.ids);
+
+  if (!ty) {
+    Error(n.LOC(), "Failed to deduce types inside ROTATE.");
+    error_count++;
+    return false;
+  }
+
   return true;
 }
 
@@ -758,21 +776,20 @@ bool TypeInference::Visit(AST::Select& n) {
     n.select_factor->SetType(MakeIntegerType(n.select_factor->s));
   }
 
-  auto& val = n.expr_list->AllValues()[0];
-  if (isa<FutureType>(NodeType(*val))) {
-    n.SetType(val->GetType());
-    cur_type = n.GetType();
+  if (cur_type = type_equals.ResolveEqualFutures(*n.expr_list)) {
+    n.SetType(cur_type);
     return true;
   }
 
-  auto sty = dyn_cast<SpannedType>(val->GetType());
+  // TODO: inference type
+  auto val = n.expr_list->ValueAt(0);
+  auto sty = dyn_cast<SpannedType>(NodeType(*val));
   assert(sty);
-  auto fmty = sty->ElementType();
-  auto sto = sty->GetStorage();
-  dma_mem = sto;
-  dma_fmty = fmty;
-  n.SetType(MakeSpannedType(fmty, sty->GetShape(), sto));
+  dma_mem = sty->GetStorage();
+  dma_fmty = sty->ElementType();
+  n.SetType(MakeSpannedType(dma_fmty, sty->GetShape(), dma_mem));
   cur_type = n.GetType();
+
   return true;
 }
 

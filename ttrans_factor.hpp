@@ -44,10 +44,10 @@ private:
   ptr<FutureBufferMap> fut_buf; // map a future to its associated buffer
   std::stack<bool> replace_swap_names;
 
-  std::vector<AST::Swap*> cur_swaps;
-  std::unordered_map<AST::Swap*, std::unordered_map<std::string, std::string>>
+  std::vector<AST::Rotate*> cur_swaps;
+  std::unordered_map<AST::Rotate*, std::unordered_map<std::string, std::string>>
       swap_pre;
-  std::unordered_map<AST::Swap*, std::unordered_map<std::string, std::string>>
+  std::unordered_map<AST::Rotate*, std::unordered_map<std::string, std::string>>
       swap_post;
 
   const std::string NameToReplace(const std::string& name) const {
@@ -74,7 +74,7 @@ private:
     } else if (auto f = dyn_cast<AST::ForeachBlock>(&n)) {
       if (kind == Kind::T_SWAP) {
         for (auto& stmt : f->stmts->AllSubs())
-          if (auto swap = dyn_cast<AST::Swap>(stmt))
+          if (auto swap = dyn_cast<AST::Rotate>(stmt))
             cur_swaps.push_back(swap.get());
         replace_swap_names.push(true);
       }
@@ -326,7 +326,7 @@ public:
 
   bool Visit(AST::Wait&) { return true; }
   bool Visit(AST::Call&) { return true; }
-  bool Visit(AST::Swap& n) {
+  bool Visit(AST::Rotate& n) {
     TraceEachVisit(n);
     if (kind != Kind::T_SWAP) return true;
     if (swap_pre.count(&n)) swap_pre.erase(&n);
@@ -374,19 +374,21 @@ public:
     // NOTE: must take care of the symbols and associated types
     for (auto swap : cur_swaps) {
       // generate selections on futures
-      auto nty = NodeType(*swap->lhs);
+      auto nty = NodeType(*swap->ValueAt(0));
       auto fty = cast<FutureType>(nty);
       auto sty = fty->GetSpannedType();
-      auto lname = swap->lhs->name;
-      auto rname = swap->rhs->name;
+      auto lname = swap->IdAt(0)->name;
+      auto rname = swap->IdAt(1)->name;
       auto lr_list = AST::Make<AST::MultiValues>(
           n.LOC(), ", ",
-          AST::Make<AST::Identifier>(swap->lhs->LOC(), swap->lhs->name),
-          AST::Make<AST::Identifier>(swap->rhs->LOC(), swap->rhs->name));
+          AST::Make<AST::Identifier>(swap->IdAt(0)->LOC(), swap->IdAt(0)->name),
+          AST::Make<AST::Identifier>(swap->IdAt(1)->LOC(),
+                                     swap->IdAt(1)->name));
       auto rl_list = AST::Make<AST::MultiValues>(
           n.LOC(), ", ",
-          AST::Make<AST::Identifier>(swap->rhs->LOC(), swap->rhs->name),
-          AST::Make<AST::Identifier>(swap->lhs->LOC(), swap->lhs->name));
+          AST::Make<AST::Identifier>(swap->IdAt(1)->LOC(), swap->IdAt(1)->name),
+          AST::Make<AST::Identifier>(swap->IdAt(0)->LOC(),
+                                     swap->IdAt(0)->name));
       auto true_on_lhs = AST::Make<AST::Select>(n.LOC(), Condition, lr_list);
       auto true_on_rhs = AST::Make<AST::Select>(n.LOC(), Condition, rl_list);
       true_on_lhs->SetType(nty);
@@ -408,8 +410,8 @@ public:
       ras->SetType(nty);
 
       // now generate the buffer (associated with future) selections
-      auto lbuf_name = fut_buf->at(fname)[swap->lhs->name];
-      auto rbuf_name = fut_buf->at(fname)[swap->rhs->name];
+      auto lbuf_name = fut_buf->at(fname)[swap->IdAt(0)->name];
+      auto rbuf_name = fut_buf->at(fname)[swap->IdAt(1)->name];
       auto lbuf_id = AST::Make<AST::Identifier>(n.LOC(), lbuf_name);
       auto rbuf_id = AST::Make<AST::Identifier>(n.LOC(), rbuf_name);
       auto lr_buf_list =

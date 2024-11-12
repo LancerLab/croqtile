@@ -3,6 +3,7 @@
 
 #include <iostream>
 
+#include "typeresolve.hpp"
 #include "types.hpp"
 #include "visitor.hpp"
 
@@ -13,6 +14,8 @@ private:
   bool Dump = false;
   std::ostream& os;
   size_t error_count = 0;
+
+  TypeConstraints type_equals{this};
 
 private:
   ptr<Type> cur_type = nullptr;
@@ -41,7 +44,9 @@ private:
 public:
   TypeInference(bool d, std::ostream& o = std::cout,
                 const ptr<SymbolTable> s_tab = std::make_shared<SymbolTable>())
-      : Visitor("infer", s_tab), Dump(d), os(o) {}
+      : Visitor("infer", s_tab), Dump(d), os(o) {
+    type_equals.SetTypeReport(true);
+  }
 
   bool Visit(AST::MultiNodes&) override;
   bool Visit(AST::MultiValues&) override;
@@ -68,7 +73,7 @@ public:
   bool Visit(AST::ChunkAt&) override;
   bool Visit(AST::Wait&) override;
   bool Visit(AST::Call&) override;
-  bool Visit(AST::Swap&) override;
+  bool Visit(AST::Rotate&) override;
   bool Visit(AST::Select&) override;
   bool Visit(AST::Return&) override;
   bool Visit(AST::LoopRange&) override;

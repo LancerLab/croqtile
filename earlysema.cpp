@@ -2,26 +2,16 @@
 
 using namespace Choreo;
 
-bool EarlySemantics::BeforeVisit(AST::Node& n) {
-  Visitor::BeforeVisit(n);
+bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
   if (isa<AST::Program>(&n)) {
-    SSTab().EnterScope(""); // global scope
-  } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
-    SSTab().EnterScope(f->name);
+    type_equals.Reset();
+  } else if (isa<AST::ChoreoFunction>(&n)) {
     requires_return = false;
     return_deduction = false;
     found_return = false;
     parallel_level = 0;
   } else if (isa<AST::ParallelBy>(&n)) {
-    static size_t count = 0;
-    SSTab().EnterScope("paraby_" + std::to_string(count++));
     parallel_level++;
-  } else if (isa<AST::WithBlock>(&n)) {
-    static size_t count = 0;
-    SSTab().EnterScope("within_" + std::to_string(count++));
-  } else if (isa<AST::ForeachBlock>(&n)) {
-    static size_t count = 0;
-    SSTab().EnterScope("foreach_" + std::to_string(count++));
   }
 
   if (isa<AST::Parameter>(&n)) {
@@ -32,13 +22,7 @@ bool EarlySemantics::BeforeVisit(AST::Node& n) {
   return true;
 }
 
-bool EarlySemantics::AfterVisit(AST::Node& n) {
-  if (isa<AST::Program>(&n) || isa<AST::ChoreoFunction>(&n) ||
-      isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n) ||
-      isa<AST::ForeachBlock>(&n)) {
-    SSTab().LeaveScope();
-  }
-
+bool EarlySemantics::AfterVisitImpl(AST::Node& n) {
   if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
     if (return_deduction) {
       // maybe this can be moved to type inference
@@ -68,7 +52,6 @@ bool EarlySemantics::AfterVisit(AST::Node& n) {
     allow_named_dim = false;
   }
 
-  Visitor::AfterVisit(n);
   return true;
 }
 
@@ -501,7 +484,10 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
       if (debug_visit)
         os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
       // keep working
-    } else if (isa<PlaceHolderType>(ety)) {
+    } else if (isa<PlaceHolderType>(ety) && n.init_expr &&
+               isa<AST::Expr>(n.init_expr) &&
+               cast<AST::Expr>(n.init_expr)->GetSymbol()) {
+      // forbid to directly initialize a placeholder with a placeholder
       Error(n.LOC(), "can not initialize vairable `" + n.name_str +
                          "' with a placeholder.");
       error_count++;
@@ -544,7 +530,7 @@ bool EarlySemantics::Visit(AST::IntTuple& n) {
 
 bool EarlySemantics::Visit(AST::Assignment& n) {
   TraceEachVisit(n);
-  // SSTab().Dump();
+
   if (!SSTab().DeclaredInScope(n.name)) {
     // This is a definition rather than an assignment. The parser fails to make
     // it correct
@@ -1006,47 +992,45 @@ bool EarlySemantics::Visit(AST::Call& n) {
   return true;
 }
 
-bool EarlySemantics::Visit(AST::Swap& n) {
+bool EarlySemantics::Visit(AST::Rotate& n) {
   TraceEachVisit(n);
-  auto lty = NodeType(*n.lhs);
-  auto rty = NodeType(*n.rhs);
 
-  if (!isa<FutureType>(lty) &&
-      !(isa<PlaceHolderType>(lty) && lty->Category() == TypeCategory::FUTURE)) {
-    Error(n.LOC(), "only support swapping of 'future'. (" + n.lhs->name + ": " +
-                       PSTR(lty) + ").");
-    error_count++;
-    return false;
+  ptr<Type> lty = nullptr;
+  for (size_t index = 0; index < n.ids->Count(); ++index) {
+    auto cty = NodeType(*n.ValueAt(index));
+    if (!GeneralFutureType(*cty)) {
+      Error(n.LOC(), "only support swapping of 'future'. (" +
+                         n.IdAt(index)->name + ": " + PSTR(lty) + ").");
+      error_count++;
+      return false;
+    }
+    if (index < 1) continue;
+    lty = NodeType(*n.ValueAt(index - 1));
+
+    if (!lty->ApprxEqual(*cty)) {
+      Error(n.LOC(), "rotate/swap data of different types (" + PSTR(lty) +
+                         " vs. " + PSTR(cty));
+      error_count++;
+      return false;
+    }
   }
 
-  if (!lty->ApprxEqual(*rty)) {
-    Error(n.LOC(), "swapping data of different types (" + PSTR(lty) + " vs. " +
-                       PSTR(rty));
-    error_count++;
-    return false;
-  }
+  auto fty = type_equals.ResolveEqualFutures(*n.ids);
 
-  // fill up the type of a placeholder
-  if ((isa<PlaceHolderType>(lty) && lty->Category() == TypeCategory::FUTURE) &&
-      (isa<FutureType>(rty))) {
-    auto lname = AST::GetName(*n.lhs);
-    assert(lname.has_value());
-    ModifySymbolType(*lname, rty);
-    ModifySymbolType(*lname + ".span", MakeRankedMDSpanType(rty->Dims()));
-  } else if ((isa<PlaceHolderType>(rty) &&
-              rty->Category() == TypeCategory::FUTURE) &&
-             (isa<FutureType>(lty))) {
-    auto rname = AST::GetName(*n.rhs);
-    assert(rname.has_value());
-    ModifySymbolType(*rname, lty);
-    ModifySymbolType(*rname + ".span", MakeRankedMDSpanType(lty->Dims()));
-  } else if ((isa<PlaceHolderType>(rty) &&
-              rty->Category() == TypeCategory::FUTURE) &&
-             (isa<PlaceHolderType>(lty) &&
-              lty->Category() == TypeCategory::FUTURE)) {
-    Error(n.LOC(), "not supported: swap the placeholders of futures.");
+  if (!fty) {
+    Error(n.LOC(), "Fail to resolve types for swap/rotate.");
     error_count++;
     return false;
+  } else if (isa<PlaceHolderType>(fty))
+    return true; // do not apply placeholders
+
+  // add the missing ".span" type
+  for (size_t index = 0; index < n.ids->Count(); ++index) {
+    if (isa<PlaceHolderType>(NodeType(*n.ValueAt(index)))) {
+      auto lname = AST::GetName(*n.ValueAt(index));
+      assert(lname.has_value());
+      ModifySymbolType(*lname + ".span", MakeRankedMDSpanType(fty->Dims()));
+    }
   }
 
   return true;

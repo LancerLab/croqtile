@@ -8,6 +8,7 @@
 #include <unordered_map>
 
 #include "ast.hpp"
+#include "typeresolve.hpp"
 #include "types.hpp"
 #include "valbind.hpp"
 #include "visitor.hpp"
@@ -274,11 +275,14 @@ private:
   void Warning(const location& loc, const std::string& message);
 };
 
-class ShapeInference : public Visitor {
+class ShapeInference : public VisitorWithScope {
 private:
   ValueNumbering vn;
 
+  // valno rendered from current ast node
   int cur_vn = GetInvalidValueNumber();
+
+  // implicit valno of spanned-type with ".span" annotation
   int cur_mdspan_vn = GetInvalidValueNumber();
 
   std::string cur_fn;
@@ -286,6 +290,8 @@ private:
   bool gen_values = true;
 
   bool allow_named_dim = false; // named dimension (mdspan param only)
+
+  TypeConstraints type_equals{this};
 
 private:
   std::ostream& os;
@@ -304,7 +310,9 @@ private:
 
 public:
   ShapeInference(bool t = false, std::ostream& o = std::cout)
-      : Visitor("valno"), vn(this, t, o), os(o) {}
+      : VisitorWithScope("valno"), vn(this, t, o), os(o) {
+    type_equals.SetDebug(debug_visit);
+  }
 
 public:
   void PrintValueNumbers(std::ostream& os) {
@@ -320,9 +328,8 @@ public:
   }
 
 public:
-  virtual bool BeforeVisit(AST::Node& n) override {
+  virtual bool BeforeVisitImpl(AST::Node& n) override {
     TraceEachVisit(n, false, "before ");
-    Visitor::BeforeVisit(n);
 
     if (isa<AST::Program>(&n)) {
       vn.EnterScope(""); // global scope
@@ -357,8 +364,8 @@ public:
                   .c_str());
         vn.SetListReference(n.value());
       }
-    } else if (isa<AST::Wait>(&n) || isa<AST::Call>(&n) || isa<AST::Swap>(&n) ||
-               isa<AST::Select>(&n)) {
+    } else if (isa<AST::Wait>(&n) || isa<AST::Call>(&n) ||
+               isa<AST::Rotate>(&n) || isa<AST::Select>(&n)) {
       gen_values = false;
     } else if (isa<AST::Parameter>(&n)) {
       allow_named_dim = true;
@@ -366,7 +373,7 @@ public:
     return true;
   }
 
-  virtual bool AfterVisit(AST::Node& n) override {
+  virtual bool AfterVisitImpl(AST::Node& n) override {
     TraceEachVisit(n, false, "after ");
     if (isa<AST::Program>(&n) || isa<AST::ChoreoFunction>(&n) ||
         isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n)) {
@@ -375,14 +382,13 @@ public:
       vn.LeaveScope();
     } else if (isa<AST::MultiDimSpans>(&n) || isa<AST::IntTuple>(&n)) {
       vn.ResetListReference();
-    } else if (isa<AST::Wait>(&n) || isa<AST::Call>(&n) || isa<AST::Swap>(&n) ||
-               isa<AST::Select>(&n)) {
+    } else if (isa<AST::Wait>(&n) || isa<AST::Call>(&n) ||
+               isa<AST::Rotate>(&n) || isa<AST::Select>(&n)) {
       gen_values = true;
     } else if (isa<AST::Parameter>(&n)) {
       allow_named_dim = false;
     }
 
-    Visitor::AfterVisit(n);
     return true;
   }
 
@@ -551,46 +557,57 @@ public:
       return false;
     }
 
-    Storage s = Storage::NONE;
+    Storage sto = Storage::NONE;
     if (auto sel = dyn_cast<AST::Select>(n.init_expr)) {
       if (auto sty = dyn_cast<SpannedType>(sel->GetType())) {
         assert(!n.mem);
-        s = sty->GetStorage();
+        sto = sty->GetStorage();
       }
     }
 
-    if (n.mem) s = n.mem->st;
+    if (n.mem) sto = n.mem->st;
 
-    if (n.init_expr && !isa<AST::Select>(n.init_expr)) {
-      // ituple, int, bool: get the value number from the init_expr
-      // init_expr of select need using cur_mdspan_cn
-      assert(ValidVN(cur_vn) && "expected a valid current value number.");
-      vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(n.name_str),
-                                           cur_vn);
-      SSTab().DefineSymbol(n.name_str, n.init_expr->GetType());
-      InvalidateVN(cur_vn);
+    ptr<Type> nty = nullptr;
+    if (n.init_expr) {
+      nty = n.init_expr->GetType();
+      if (GetSpannedType(NodeType(*n.init_expr))) {
+        assert(ValidVN(cur_mdspan_vn) && "expecting a valid mdspan valno.");
+        vn.AssociateSignatureWithValueNumber(
+            SSTab().ScopedName(n.name_str + ".span"), cur_mdspan_vn);
+      } else {
+        if (!isa<PlaceHolderType>(nty)) {
+          assert(ValidVN(cur_vn) &&
+                 "cur_mdspan_vn and cur_vn must be exclusive.");
+          vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(n.name_str),
+                                               cur_vn);
+        }
+      }
     } else {
-      assert(n.type && "missed type annotation.");
+      // obtain the types from declaration
       if (ValidVN(cur_mdspan_vn)) {
-        // TODO: IS THIS USEFUL?
-        // spanned: only value number the ".span"
         vn.AssociateSignatureWithValueNumber(
             SSTab().ScopedName(n.name_str + ".span"), cur_mdspan_vn);
         auto mds_value = GenShapeFromSignature(
             vn.GetSignatureFromValueNumber(cur_mdspan_vn));
-        SSTab().DefineSymbol(n.name_str,
-                             MakeSpannedType(n.type->base_type, mds_value, s));
-        SSTab().DefineSymbol(n.name_str + ".span", MakeMDSpanType(mds_value));
-        InvalidateVN(cur_mdspan_vn);
+        nty = MakeSpannedType(n.type->base_type, mds_value, sto);
       } else if (ValidVN(cur_vn)) {
-        // TODO: used for all?
         vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(n.name_str),
                                              cur_vn);
-        SSTab().DefineSymbol(n.name_str, n.GetType());
-        InvalidateVN(cur_vn);
+        nty = NodeType(*n.type);
       } else
-        choreo_unreachable();
+        nty = NodeType(*n.type);
     }
+
+    // fill-up the symbol table
+    assert(nty);
+    SSTab().DefineSymbol(n.name_str, nty);
+    n.SetType(nty);
+
+    if (isa<FutureType>(n.GetType()) || isa<SpannedType>(n.GetType()))
+      SSTab().DefineSymbol(n.name_str + ".span", GetSpannedType(n.GetType()));
+
+    InvalidateVN(cur_mdspan_vn); // stop propagation
+    InvalidateVN(cur_vn);
 
     return true;
   }
@@ -632,24 +649,24 @@ public:
     auto nty = n.value->GetType();
     SSTab().DefineSymbol(n.name, nty);
 
-    if (IsActualBoundedIntegerType(nty))
-      SSTab().DefineSymbol("@" + n.name, MakeIntegerType());
-
     if (auto san = dyn_cast<AST::SpanAs>(n.value))
       assert((n.name == san->nid->name) &&
              "inconsistent span_as variable name.");
 
     auto name = n.name;
-    if (IsActualBoundedIntegerType(nty))
-      name = "@" + name;
-    else if (auto sty = GetSpannedType(nty)) {
-      SSTab().DefineSymbol(n.name + ".span", sty->GetMDSpanType());
+    if (auto sty = GetSpannedType(nty)) {
       name += ".span";
+      SSTab().DefineSymbol(name, sty->GetMDSpanType());
       assert(ValidVN(cur_mdspan_vn) &&
              "expected a valid current value number.");
       vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(name),
                                            cur_mdspan_vn);
       return true;
+    }
+
+    if (IsActualBoundedIntegerType(nty)) {
+      name = "@" + name;
+      SSTab().DefineSymbol(name, MakeIntegerType());
     }
 
     assert(ValidVN(cur_vn) && "expected a valid current value number.");
@@ -938,7 +955,7 @@ public:
            "unexpected data type.");
 
     auto sty = GetSpannedType(pty);
-    if (!isa<SpannedType>(sty)) {
+    if (!sty) {
       Error(n.LOC(), "internal error: span_as operates on non-spanned type.");
       return false;
     }
@@ -1170,39 +1187,33 @@ public:
     return true;
   };
 
-  bool Visit(AST::Swap& n) {
+  bool Visit(AST::Rotate& n) {
     TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
-    if (!GeneralFutureType(NodeType(*n.lhs))) return true;
-    assert(GeneralFutureType(NodeType(*n.rhs)));
+    auto rty = type_equals.ResolveEqualFutures(*n.ids, true);
 
-    auto lname = AST::GetName(*n.lhs);
-    auto rname = AST::GetName(*n.rhs);
-    assert(lname.has_value());
-    assert(rname.has_value());
-
-    auto ln = SSTab().InScopeName(*lname) + ".span";
-    auto rn = SSTab().InScopeName(*rname) + ".span";
-
-    auto lty = NodeType(*n.lhs);
-    auto rty = NodeType(*n.rhs);
-
-    if (isa<FutureType>(lty) && isa<PlaceHolderType>(rty)) {
-      if (!vn.HasValidValueNumberOfSignature(rn)) {
-        assert(vn.HasValidValueNumberOfSignature(ln) &&
-               "both operand does not have valid value number.");
-        vn.RebindSignatureWithValueNumber(rn, vn.GetValueNumberOfSignature(ln));
-      }
-    } else if (isa<FutureType>(rty) && isa<PlaceHolderType>(lty)) {
-      if (!vn.HasValidValueNumberOfSignature(ln)) {
-        assert(vn.HasValidValueNumberOfSignature(rn) &&
-               "both operand does not have valid value number.");
-        vn.RebindSignatureWithValueNumber(ln, vn.GetValueNumberOfSignature(rn));
-      }
+    if (!rty) {
+      Error(n.LOC(), "Failed to resolve future types.");
+      error_count++;
+      return false;
     }
-    assert(!(isa<PlaceHolderType>(rty) && isa<PlaceHolderType>(lty)));
+
+    // do not care about placeholders
+    if (isa<PlaceHolderType>(rty)) return true;
+
+    int valno = GetOnlyValueNumberFromMultiValues(*n.ids);
+
+    if (!ValidVN(valno)) {
+      Error(n.LOC(), "failed to find a valid value number inside ROTATE.");
+      error_count++;
+      cannot_proceed = true;
+      return false;
+    }
+
+    // now update the valnos
+    UpdateValueNumberForMultiValues(*n.ids, valno);
 
     return true;
   };
@@ -1217,40 +1228,30 @@ public:
       cur_mdspan_vn = vn.GenerateValueNumberForNode(n);
       InvalidateVN(cur_vn); // used for variable def
     } else if (GeneralFutureType(NodeType(n))) {
-      cur_mdspan_vn = GetInvalidValueNumber();
+      InvalidateVN(cur_vn);
 
-      ptr<Type> valid_ty = nullptr;
-      for (auto& v : n.expr_list->AllValues()) {
-        if (auto id = AST::GetIdentifier(*v)) {
-          cur_mdspan_vn = vn.GetValueNumberOfSignature(
-              SSTab().InScopeName(vn.VNSymbolName(*id)));
-          if (ValidVN(cur_mdspan_vn)) {
-            valid_ty = v->GetType();
-            break;
-          }
-        } else
-          choreo_unreachable("expect an identifier.\n");
+      auto fty = type_equals.ResolveEqualFutures(*n.expr_list, true);
+      if (!fty) {
+        Error(n.LOC(), "Failed to resolve future types.");
+        error_count++;
+        return false;
       }
+      n.SetType(fty);
 
+      if (isa<PlaceHolderType>(fty)) return true;
+
+      cur_mdspan_vn = GetOnlyValueNumberFromMultiValues(*n.expr_list);
       if (!ValidVN(cur_mdspan_vn)) {
         Error(n.LOC(),
-              "no valid value number is found for a select expression.");
+              "no valid value number is found for a SELECT expression.");
         error_count++;
         cannot_proceed = true;
         return false;
       }
 
-      for (auto& v : n.expr_list->AllValues()) {
-        if (isa<PlaceHolderType>(v->GetType())) v->SetType(valid_ty);
-        if (auto id = AST::GetIdentifier(*v)) {
-          auto symbol = SSTab().InScopeName(vn.VNSymbolName(*id));
-          // the VN is considered to be identical if none exist
-          if (!ValidVN(vn.GetValueNumberOfSignature(symbol)))
-            vn.RebindSignatureWithValueNumber(symbol, cur_mdspan_vn);
-        }
-      }
+      // now update the valnos
+      UpdateValueNumberForMultiValues(*n.expr_list, cur_mdspan_vn);
 
-      InvalidateVN(cur_vn);
     } else
       choreo_unreachable("unsupported type.");
 
@@ -1385,6 +1386,54 @@ private:
 
     // this is a symbol
     return sig;
+  }
+
+  int GetOnlyValueNumberFromMultiValues(const AST::MultiValues& mv) {
+    int valno = GetInvalidValueNumber();
+    for (auto& v : mv.AllValues()) {
+      auto id = AST::GetIdentifier(*v);
+      if (!id) choreo_unreachable("expect an identifier.\n");
+      auto ln = SSTab().InScopeName(vn.VNSymbolName(*id));
+
+      if (!ValidVN(valno)) {
+        valno = vn.GetValueNumberOfSignature(ln);
+        continue;
+      }
+
+      // Check for consistence between different values
+      if (vn.HasValidValueNumberOfSignature(ln)) {
+        if (valno != vn.GetValueNumberOfSignature(ln)) {
+// currently some equivalence cannot be detected, drop the check
+#if 0
+          Error(mv.LOC(), "value number does not match.");
+          cannot_proceed = true;
+          return GetInvalidValueNumber();
+#endif
+        }
+      }
+    }
+    return valno;
+  }
+
+  void UpdateValueNumberForMultiValues(const AST::MultiValues& mv, int valno) {
+    for (auto& v : mv.AllValues()) {
+      if (auto id = AST::GetIdentifier(*v)) {
+        auto symbol = SSTab().InScopeName(vn.VNSymbolName(*id));
+        // the VN is considered to be identical if none exist
+        if (!ValidVN(vn.GetValueNumberOfSignature(symbol))) {
+          vn.RebindSignatureWithValueNumber(symbol, valno);
+          auto equals = type_equals.GetEquals(SSTab().InScopeName(id->name));
+          for (auto& e : equals.value().get()) {
+            auto asym = e + ".span";
+            if (!vn.HasValidValueNumberOfSignature(asym))
+              vn.RebindSignatureWithValueNumber(asym, valno);
+            else
+              assert(valno == vn.GetValueNumberOfSignature(asym));
+          }
+        }
+      } else
+        choreo_unreachable("expect an identifier.");
+    }
   }
 };
 

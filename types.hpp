@@ -654,16 +654,16 @@ struct Shape {
     return values[val_no];
   }
 
+  bool SameRankAs(const Shape& s) const {
+    return IsRanked() && s.IsRanked() && (Rank() == s.Rank());
+  }
+
   const ValueItem& ValueAt(size_t index) const {
     if (!IsValid()) choreo_unreachable("the shape is not accessible.");
     if (index > dim_count)
       choreo_unreachable("index '" + std::to_string(index) +
                          "' exceeds rank: " + std::to_string(dim_count) + ".");
     return values[val_no].at(index);
-  }
-
-  bool SameRankAs(const Shape& s) const {
-    return IsRanked() && s.IsRanked() && (Rank() == s.Rank());
   }
 
   int NthInteger(size_t index) const {
@@ -816,7 +816,9 @@ struct Type {
   virtual TypeCategory Category() const { return tc; }
   virtual size_t Dims() const = 0;
   virtual bool IsComplete() const = 0; // it is a partial or compelete type
-  // is the information enough for semantic check and code generation
+  // Types with/without sufficient info is of the same type. However, a type
+  // with sufficient info is higher ranked. In type-inference, a type without
+  // sufficient info should promoted to the one with sufficient info.
   virtual bool HasSufficientInfo() const { return false; }
   virtual bool operator==(const Type& t) const = 0;
   // sometimes it requires to ignore the memory for type's comparison
@@ -1121,7 +1123,7 @@ struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
   }
 
   // Ignore the memory
-  bool LogicalEqual(const Type& ty) const {
+  bool LogicalEqual(const Type& ty) const override {
     if (!isa<SpannedType>(&ty)) return false;
     auto& t = (SpannedType&)ty;
     return t.f_type == f_type && *t.s_type == *s_type;
@@ -1416,12 +1418,6 @@ struct FunctionType : public Type, public TypeIDProvider<FunctionType> {
   __UDT_TYPE_INFO__(Type, FunctionType)
 };
 
-#if 0
-inline bool operator==(const Type& t1, const Type& t2) {
-  return t1.operator==(t2);
-}
-#endif
-
 inline size_t SizeOf(const Type& ty) {
   if (isa<VoidType>(&ty)) return 0;
   if (isa<IntegerType>(&ty))
@@ -1666,9 +1662,30 @@ inline static Shape GetShape(const ptr<Type>& ty) {
   return Shape(); // avoid warning
 }
 
+inline static bool GeneralFutureType(const Type& ty) {
+  return ty.Category() == TypeCategory::FUTURE;
+}
+
 inline static bool GeneralFutureType(const ptr<Type>& ty) {
   if (!ty) return false;
-  return ty->Category() == TypeCategory::FUTURE;
+  return GeneralFutureType(*ty);
+}
+
+// if type a has better quality than type b
+inline bool BetterQuality(const ptr<Type>& a, const ptr<Type>& b) {
+  if (a->HasSufficientInfo() && !b->HasSufficientInfo()) return true;
+
+  auto a_sty = GetSpannedType(a);
+  auto b_sty = GetSpannedType(b);
+  if (a_sty && b_sty &&
+      ((b_sty->ElementType() == BaseType::UNKNOWN) &&
+       (a_sty->ElementType() != BaseType::UNKNOWN)))
+    return a_sty->GetShape() == b_sty->GetShape();
+
+  if (!a->ApprxEqual(*b)) return false;
+  if (*a == *b) return false;
+
+  return false;
 }
 
 } // end namespace Choreo

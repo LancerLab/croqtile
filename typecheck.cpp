@@ -264,17 +264,23 @@ bool TypeChecker::Visit(AST::Call& n) {
   return true;
 }
 
-bool TypeChecker::Visit(AST::Swap& n) {
+bool TypeChecker::Visit(AST::Rotate& n) {
   TraceEachVisit(n);
-  auto lty = NodeType(*n.lhs);
-  auto rty = NodeType(*n.rhs);
-
-  if (*lty != *rty) {
-    Error(n.LOC(), "swapping data of different types (" + PSTR(lty) + " vs. " +
-                       PSTR(rty));
-    error_count++;
+  size_t index = 0;
+  for (auto s : n.ids->AllValues()) {
+    if (index == 0) {
+      index++;
+      continue;
+    }
+    auto lty = NodeType(*n.ids->ValueAt(index - 1));
+    auto rty = NodeType(*n.ids->ValueAt(index));
+    if (*lty != *rty) {
+      Error(n.LOC(), "swapping data of different types (" + PSTR(lty) +
+                         " vs. " + PSTR(rty));
+      error_count++;
+    }
+    index++;
   }
-
   return true;
 }
 

@@ -1206,19 +1206,26 @@ struct Call : public Node, public TypeIDProvider<Call> {
   __UDT_TYPE_INFO__(Node, Call)
 };
 
-struct Swap : public Node, public TypeIDProvider<Swap> {
-  ptr<Identifier> lhs = nullptr;
-  ptr<Identifier> rhs = nullptr;
+struct Rotate : public Node, public TypeIDProvider<Rotate> {
+  ptr<MultiValues> ids;
 
-  Swap(const location& loc, const ptr<Identifier>& l, const ptr<Identifier>& r)
-      : Node(loc), lhs(l), rhs(r) {}
+  Rotate(const location& loc, const ptr<MultiValues>& v) : Node(loc), ids(v) {
+    ids->SetDelimiter(", ");
+  }
+
+  ptr<Node> ValueAt(int index) { return ids->ValueAt(index); }
+  ptr<Identifier> IdAt(int index) {
+    return cast<Identifier>(ids->ValueAt(index));
+  }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << "\n" << prefix << "`- Swap: " << PSTR(lhs) << ", " << PSTR(rhs);
+    os << "\n"
+       << prefix << "`- " << ((ids->Count() == 2) ? "Swap: " : "Rotate: ")
+       << PSTR(ids);
   }
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__(Node, Swap)
+  __UDT_TYPE_INFO__(Node, Rotate)
 };
 
 struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
@@ -1348,7 +1355,9 @@ struct Program : public Node, public TypeIDProvider<Program> {
   __UDT_TYPE_INFO__(Node, Program)
 };
 
-// utility functions
+//---------------------------------------------------------------------------//
+// Utility Functions
+//---------------------------------------------------------------------------//
 inline std::optional<std::string> GetName(const Node& n) {
   if (auto id = dyn_cast<AST::Identifier>(&n))
     return id->name;

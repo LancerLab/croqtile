@@ -14,7 +14,7 @@ __co__ auto placeholder(f32 [24, 17, 128] a) {
           swap(f5, f1);
        }
        swap(f4, f3);  // ok.
-       f32 [f1.span] data;
+       local f32 [f1.span] data;
        call kernel(|f.span|, |f1.span|, |f3.span|, |f4.span|, data);
      }
    }
