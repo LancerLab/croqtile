@@ -45,7 +45,7 @@ public:
   TypeInference(bool d, std::ostream& o = std::cout,
                 const ptr<SymbolTable> s_tab = std::make_shared<SymbolTable>())
       : Visitor("infer", s_tab), Dump(d), os(o) {
-    type_equals.SetTypeReport(true);
+    type_equals.SetTypeReport(Dump);
   }
 
   bool Visit(AST::MultiNodes&) override;
