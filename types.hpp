@@ -1651,6 +1651,17 @@ inline static ptr<SpannedType> GetSpannedType(const ptr<Type>& ty) {
     return nullptr;
 }
 
+inline static ptr<MDSpanType> GetMDSpanType(const ptr<Type>& ty) {
+  if (auto fty = dyn_cast<FutureType>(ty))
+    return fty->GetSpannedType()->GetMDSpanType();
+  else if (auto sty = dyn_cast<SpannedType>(ty))
+    return sty->GetMDSpanType();
+  else if (auto mty = dyn_cast<MDSpanType>(ty))
+    return mty;
+  else
+    return nullptr;
+}
+
 inline static Shape GetShape(const ptr<Type>& ty) {
   if (auto mty = dyn_cast<MDSpanType>(ty))
     return mty->GetShape();

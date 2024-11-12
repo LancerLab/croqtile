@@ -170,8 +170,8 @@ public:
           // apply desugaring a {(0), 1} -> {a(0), 1}
           auto ret = AST::Make<AST::Expr>(expr->LOC(), "dimof", list_ref, ref);
 
-          VST_DEBUG(os << "Desugaring expression node: "; expr->Print(os);
-                    os << " --->"; ret->Print(os); os << "\n";);
+          VST_DEBUG(os << "Desugaring expression node: " << PSTR(expr)
+                       << " --->" << PSTR(ret) << "\n";);
 
           changed = true;
 
@@ -188,6 +188,14 @@ public:
       }
 
       return true;
+    }
+
+    if (n.op == "sizeof" && isa<SpannedType>(n.GetR())) {
+      auto id = cast<AST::Expr>(n.GetR())->GetSymbol();
+      assert(!SuffixedWith(id->name, ".span"));
+      VST_DEBUG(os << "Desugaring sizeof: " << id->name << " ->");
+      id->name += ".span";
+      VST_DEBUG(os << id->name << ".\n");
     }
 
     return true;

@@ -155,8 +155,14 @@ int main(int argc, char* argv[]) {
 
   // late normalize
   LateNorm ln(ti.SymTab(), std::cout);
-  if (prt_pass) std::cout << "|- " << si.GetName() << "\n";
+  if (prt_pass) std::cout << "|- " << ln.GetName() << "\n";
   root.accept(ln);
+  BufferInfoCollect bic(ln.SymTab());
+  if (prt_pass) std::cout << "|- " << bic.GetName() << "\n";
+  root.accept(bic);
+  BufferGenerate bg(ln.SymTab(), bic.FBInfo());
+  if (prt_pass) std::cout << "|- " << bg.GetName() << "\n";
+  root.accept(bg);
   if (stop_after == ln.GetName()) return 0;
 
   // debug: dump the symbol table
@@ -191,7 +197,7 @@ int main(int argc, char* argv[]) {
     if (gcu_checker.HasError()) return 1;
     if (stop_after == gcu_checker.GetName()) return 0;
 
-    FactorTrans trans(sc.SymTab(), sds.FBInfo());
+    FactorTrans trans(sc.SymTab(), bg.FBInfo());
     if (prt_pass) std::cout << "|- " << trans.GetName() << "\n";
     trans.SetKind(FactorTrans::Kind::T_SELECT);
     root.accept(trans);
@@ -211,7 +217,7 @@ int main(int argc, char* argv[]) {
 
     Choreo::Factor::FactorCodeGen codegen(std::cout, sc.SymTab(),
                                           mem_usage_checker.GetRtMemUsageInfo(),
-                                          sds.FBInfo(), cross_compile);
+                                          bg.FBInfo(), cross_compile);
     if (prt_pass) std::cout << "|- " << codegen.GetName() << "\n";
     root.accept(codegen);
     break;

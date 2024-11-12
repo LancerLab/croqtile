@@ -95,7 +95,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     SetNodeType(n, MakeDummySpannedType());
   } else if (n.op == "sizeof") {
     auto ty = NodeType(*n.GetR());
-    if (!isa<MDSpanType>(ty)) {
+    if (!GetMDSpanType(ty)) {
       Error(n.LOC(), "in operation \"" + n.op +
                          "\": expecting a mdspan type but got `" + PSTR(ty) +
                          "'.");

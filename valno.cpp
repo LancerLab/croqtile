@@ -57,7 +57,7 @@ ValueNumbering::VNSymbolName(const AST::Identifier& id) const {
   return sig;
 }
 
-void ValueNumbering::EnterScope(const std::string& name) {
+void ValueNumbering::EnterScope() {
   std::string indent = ScopeIndent();
 
   expressionValueNumbers.push_back({});
@@ -560,7 +560,8 @@ ValueNumbering::TryToSimplifyNodeSignature(const AST::Node& node) {
              }},
             {"dataof",
              [this, &n]() -> std::optional<std::string> {
-               return std::nullopt; /*TODO*/
+               // care about the span the data has
+               return GetSignatureForNode(*n->GetR());
              }},
             {"sizeof",
              [this, &n]() -> std::optional<std::string> {

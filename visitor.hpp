@@ -309,8 +309,10 @@ protected:
   virtual std::string InScopeName(const std::string& sym) const {
     auto removeLastLevel = [](const std::string& input) -> std::string {
       size_t lastPos = input.rfind("::");
-      if (lastPos == std::string::npos)
+      if (lastPos == std::string::npos) {
         return input; // No "::" found, return the original string
+      }
+
       // Find the second-to-last "::" by searching up to the last found
       // position
       size_t secondLastPos = input.rfind("::", lastPos - 1);

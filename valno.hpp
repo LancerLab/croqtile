@@ -167,7 +167,7 @@ public:
   explicit ValueNumbering(ShapeInference* v, bool t, std::ostream& o)
       : visitor(v), trace(t), os(o) {}
 
-  void EnterScope(const std::string&);
+  void EnterScope();
   void LeaveScope();
 
   void SetListReference(const std::string& r) { ref = r; }
@@ -332,20 +332,17 @@ public:
     TraceEachVisit(n, false, "before ");
 
     if (isa<AST::Program>(&n)) {
-      vn.EnterScope(""); // global scope
+      vn.EnterScope(); // global scope
     } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
-      vn.EnterScope(f->name);
+      vn.EnterScope();
       cur_fn = f->name;
       cannot_proceed = false; // recover state when starting a new function
     } else if (isa<AST::ParallelBy>(&n)) {
-      static size_t count = 0;
-      vn.EnterScope("paraby_" + std::to_string(count++));
+      vn.EnterScope();
     } else if (isa<AST::WithBlock>(&n)) {
-      static size_t count = 0;
-      vn.EnterScope("within_" + std::to_string(count++));
+      vn.EnterScope();
     } else if (isa<AST::ForeachBlock>(&n)) {
-      static size_t count = 0;
-      vn.EnterScope("foreach_" + std::to_string(count++));
+      vn.EnterScope();
       gen_values = false; // disable valno on range expressions
     } else if (auto* b = dyn_cast<AST::MultiDimSpans>(&n)) {
       if (b->ref_name != "") {
