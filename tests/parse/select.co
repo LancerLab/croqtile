@@ -32,3 +32,9 @@ __co__ auto select_parse(f32 [128, 128] i) {
 // CHECK:          `- to: select( (q_tile % 2) , i_local0, i_local1)
 // CHECK:          `- chained from: i_shared
 // CHECK:        `- Var Decl (unknown): f = select(1, i_local, i_local2)
+
+__co__ auto select2(f32 [128, 128] a, f16 [M, N] b) {
+  c = select(0, a, b);
+}
+
+// CHECK:  `- Var Decl (unknown): c = select(0, a, b)

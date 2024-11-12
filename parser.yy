@@ -165,8 +165,8 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::SpanAs>> span_as
 %nterm <AST::ptr<AST::Node>> foreach_block general_val general_index span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt swap_stmt expr_or_qes range_expr if_else_block optional_scalar_init param_mdspan_val chunkat_or_storage_or_select
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause else_block multi_decls named_spanned_decl
-%nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list param_mdspan_list range_exprs iv_list id_list with_matchers passables span_expr_list
-%nterm <AST::ptr<AST::Expr>> s_expr span_expr
+%nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list param_mdspan_list range_exprs iv_list id_list with_matchers passables future_data_list
+%nterm <AST::ptr<AST::Expr>> s_expr span_expr id_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
 %nterm <AST::ptr<AST::Parameter>> parameter
@@ -724,13 +724,19 @@ span_expr
     | span_val { $$ = AST::Make<AST::Expr>(@1, $1); }
     ;
 
+id_expr
+    : IDENTIFIER { $$ = AST::MakeIdExpr(@1, $1); }
+    | IDENTIFIER FNDATA {
+        $$ = AST::Make<AST::Expr>(@1, "dataof", AST::MakeIdExpr(@1, $1));
+      }
+    ;
 
-span_expr_list
-    : span_expr_list COMMA span_expr {
+future_data_list
+    : future_data_list COMMA id_expr {
         $1->Append($3);
         $$ = $1;
       }
-    | span_expr {
+    | id_expr {
         $$ = AST::Make<AST::MultiValues>(@1);
         $$->SetDelimiter(", ");
         $$->Append($1);
@@ -939,7 +945,7 @@ chunkat_expr
     ;
 
 select_expr
-    : SELECT LPAREN s_expr COMMA span_expr_list RPAREN {
+    : SELECT LPAREN s_expr COMMA future_data_list RPAREN {
         $$ = AST::Make<AST::Select>(@1, $3, $5);
       }
     ;
