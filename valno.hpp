@@ -1070,6 +1070,12 @@ public:
       int dim_count = CountElementsInSignature(data_sig);
       int dim_index = 0;
 
+      // we only expect signature in multi-sig format
+      if ((dim_count == 1) && (!PrefixedWith(data_sig, "#"))) {
+        data_sig = "#" + std::to_string(vn.GetValueNumberOfSignature(
+                             SSTab().InScopeName(span_name)));
+      }
+
       std::string fs_signature; // signature of the future.span
       auto AppendSignature = [this, &fs_signature, &n, &dim_index,
                               dim_count](int dividend_vn, int divisor_vn) {

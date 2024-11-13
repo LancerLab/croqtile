@@ -266,24 +266,36 @@ ValueNumbering::TryToSimplifyBinary(const location& loc, const std::string& op,
     return res;
   }
 
-  // useful simplification: a/(a/b) = b
-  if ((op == "/") && !PrefixedWith(lhs, "#") /*not multiple values*/) {
-    int rvn = GetValueNumberOfSignature(rhs);
-    auto bind_set = GetBindSet(rvn);
-    bind_set.insert(rvn); // always add self
-    for (auto div_vn : bind_set) {
-      auto sig = GetSignatureFromValueNumber(div_vn);
-      if (!PrefixedWith(rhs, "/:")) continue;
-      auto div = GetOperandsValNo(sig);
-      assert(div.size() == 2);
-      if (GetValueNumberOfSignature(lhs) == div[0]) {
-        auto res = GetSignatureFromValueNumber(div[1]);
+  if (op == "/") {
+    // a/a == 1
+    if (GetValueNumberOfSignature(lhs) == GetValueNumberOfSignature(rhs)) {
+      std::string res = "const_1";
+      if (trace && verbose)
+        os << ScopeIndent() << "<Simplify> '" << lhs << " " << op << " " << rhs
+           << " to '" << res << "'\n";
+      return res;
+    }
+    // a/1 = a
+    if (rhs == "const_1") return lhs;
+    // useful simplification: a/(a/b) = b
+    if (!PrefixedWith(lhs, "#") /*not multiple values*/) {
+      int rvn = GetValueNumberOfSignature(rhs);
+      auto bind_set = GetBindSet(rvn);
+      bind_set.insert(rvn); // always add self
+      for (auto div_vn : bind_set) {
+        auto sig = GetSignatureFromValueNumber(div_vn);
+        if (!PrefixedWith(rhs, "/:")) continue;
+        auto div = GetOperandsValNo(sig);
+        assert(div.size() == 2);
+        if (GetValueNumberOfSignature(lhs) == div[0]) {
+          auto res = GetSignatureFromValueNumber(div[1]);
 
-        if (trace && verbose)
-          os << ScopeIndent() << "<Simplify> '" << lhs << " " << op << " "
-             << rhs << " to '" << res << "'\n";
+          if (trace && verbose)
+            os << ScopeIndent() << "<Simplify> '" << lhs << " " << op << " "
+               << rhs << " to '" << res << "'\n";
 
-        return res;
+          return res;
+        }
       }
     }
   }
@@ -815,6 +827,13 @@ bool ValueNumbering::HasValidValueNumberOfSignature(
 
 int ValueNumbering::GetOrInsertValueNumberFromSignature(
     const std::string& signature) {
+  if (PrefixedWith(signature, "#") &&
+      (CountElementsInSignature(signature) == 1)) {
+    // works for input like "#1"
+    auto res = RemovePrefixOrNull("#", signature);
+    assert(res);
+    return std::stoi(res.value());
+  }
   if (HasValueNumberOfSignature(signature))
     return GetValueNumberOfSignature(signature);
   return GenerateValueNumberFromSignature(signature);

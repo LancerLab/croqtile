@@ -109,7 +109,8 @@ public:
     TraceEachVisit(n);
     auto ty = GetSymbolType(n.name_str);
     if (!isa<SpannedType>(ty)) return true;
-    auto st = cast<SpannedType>(ty)->GetStorage();
+    auto sty = cast<SpannedType>(ty);
+    auto st = sty->GetStorage();
     switch (st) {
     case Storage::GLOBAL:
       if (parallel_level != 0) {
@@ -132,6 +133,12 @@ public:
                            "parallel-by as local variables.");
         error_count++;
       }
+      if (sty->RuntimeShaped()) {
+        Error(n.LOC(), "GCU forbids shared variable '" + n.name_str +
+                           "` to be dynamically shaped (by " +
+                           STR(sty->GetShape()) + ").");
+        error_count++;
+      }
       break;
     case Storage::LOCAL:
       if (parallel_level == 0) {
@@ -145,6 +152,12 @@ public:
         error_count++;
       } else if (local_level == 0)
         local_level = parallel_level;
+      if (sty->RuntimeShaped()) {
+        Error(n.LOC(), "GCU forbids local variable '" + n.name_str +
+                           "` to be dynamically shaped (by " +
+                           STR(sty->GetShape()) + ").");
+        error_count++;
+      }
       break;
     default:
       Error(n.LOC(), "can not declare variable '" + n.name_str + "` as " +
