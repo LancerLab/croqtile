@@ -26,7 +26,7 @@ private:
   std::string alias; // name alias
   T value;
   T default_value;
-  bool requires_arg; // if it requires arguments
+  bool requires_arg; // if it requires extra argument
 
 public:
   Option(const std::string&, const std::string&, const T&, bool = false);
@@ -71,8 +71,11 @@ public:
     bool stdin_as_input = true;
     for (int i = 1; i < argc; ++i) {
       std::string arg = argv[i];
-      if (options.count(arg)) {
-        if (!options[arg]->Parse(argc, argv, i)) return false;
+      auto option = arg;
+      if (auto pos = option.find("="); pos != std::string::npos)
+        option = arg.substr(0, pos);
+      if (options.count(option)) {
+        if (!options[option]->Parse(argc, argv, i)) return false;
       } else {
         if (!input_filename.empty()) {
           std::cerr << "set input file twice: '" << input_filename << "' and '"
@@ -129,16 +132,15 @@ inline Option<T>::Option(const std::string& name, const std::string& alias,
 
 template <typename T>
 inline bool Option<T>::Parse(int argc, char** argv, int& currentArg) {
-  // be like: -o ab.o
+  // be like: -o ab.o, requires an extra parameter
   if (requires_arg) {
     if (currentArg + 1 < argc) {
       std::istringstream iss(argv[++currentArg]);
       iss >> value; // Handle parsing according to type T
       return true;
-    } else {
-      std::cerr << "Option " << name << " requires an argument." << std::endl;
-      return false;
     }
+    std::cerr << "Option " << name << " requires an argument." << std::endl;
+    return false;
   }
 
   std::string arg = argv[currentArg];

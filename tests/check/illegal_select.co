@@ -1,4 +1,4 @@
-// RUN: not choreo -sa check %s 2>&1 | FileCheck %s
+// RUN: not choreo -sa=check %s 2>&1 | FileCheck %s
 
 __co__ auto illegal_select(f32 [128, 128] i) {
   tile_factor : [32, 16];

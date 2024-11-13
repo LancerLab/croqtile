@@ -1,4 +1,4 @@
-// RUN: choreo %s -dv latenorm | FileCheck %s
+// RUN: choreo %s -dv=latenorm | FileCheck %s
 
 // device program
 __co__ void dma_norm(f16 [180, 27, 12] a) {

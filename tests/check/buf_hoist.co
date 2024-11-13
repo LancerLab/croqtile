@@ -1,4 +1,4 @@
-// RUN: choreo %s --debug-visit bufgen -sa latenorm 2>&1 | FileCheck %s
+// RUN: choreo %s --debug-visit=bufgen -sa=latenorm 2>&1 | FileCheck %s
 
 __co__ s32 [6, 17, 128] ele_add(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) {
   s32[lhs.span] output;

@@ -34,27 +34,27 @@ using namespace AST;
 using namespace Choreo;
 
 int main(int argc, char* argv[]) {
-  Option<std::string> arch("--architecture", "-arch", "gcu300", true);
+  Option<std::string> arch("--architecture", "-arch", "gcu300");
   Option<std::string> output("--output", "-o", "", true);
   Option<std::string> target("--target", "-t", "factor", true);
-  Option<std::string> abend_after("--stop-after", "-sa", "", true);
-  Option<std::string> trace_visit("--trace-visit", "-tv", "", true);
-  Option<std::string> debug_visit("--debug-visit", "-dv", "", true);
-  Option<std::string> print_ahead("--print-before", "-pb", "", true);
-  Option<std::string> print_after("--print-after", "-pa", "", true);
-  Option<bool> print_ahead_all("--print-before-all", "-pba", false, false);
-  Option<bool> print_after_all("--print-after-all", "-paa", false, false);
-  Option<bool> debug_on("--debug", "-d", false, false);
-  Option<bool> cross_compile("--cross-compile", "-cc", false, false);
-  Option<bool> dump_ast("--dump-ast", "-e", false, false);
-  Option<bool> print_vn("--print-valno", "-v", false, false);
-  Option<bool> inf_type("--infer-types", "-i", false, false);
-  Option<bool> dump_sym("--dump-symbol", "-l", false, false);
-  Option<bool> visualiz("--visualize", "-u", false, false);
-  Option<bool> gen_none("--no-codegen", "-s", false, false);
-  Option<bool> del_comm("--remove-comments", "-n", false, false);
-  Option<bool> sym_repl("--print-sym-replace", "-sr", false, false);
-  Option<bool> prt_pass("--show-passes", "-sp", false, false);
+  Option<std::string> abend_after("--stop-after", "-sa", "");
+  Option<std::string> trace_visit("--trace-visit", "-tv", "");
+  Option<std::string> debug_visit("--debug-visit", "-dv", "");
+  Option<std::string> print_ahead("--print-before", "-pb", "");
+  Option<std::string> print_after("--print-after", "-pa", "");
+  Option<bool> print_ahead_all("--print-before-all", "-pba", false);
+  Option<bool> print_after_all("--print-after-all", "-paa", false);
+  Option<bool> debug_on("--debug", "-d", false);
+  Option<bool> cross_compile("--cross-compile", "-cc", false);
+  Option<bool> dump_ast("--dump-ast", "-e", false);
+  Option<bool> print_vn("--print-valno", "-v", false);
+  Option<bool> inf_type("--infer-types", "-i", false);
+  Option<bool> dump_sym("--dump-symbol", "-l", false);
+  Option<bool> visualiz("--visualize", "-u", false);
+  Option<bool> gen_none("--no-codegen", "-s", false);
+  Option<bool> del_comm("--remove-comments", "-n", false);
+  Option<bool> sym_repl("--print-sym-replace", "-sr", false);
+  Option<bool> prt_pass("--show-passes", "-sp", false);
 
   // parse all the options
   OptionRegistry& r = OptionRegistry::GetInstance();

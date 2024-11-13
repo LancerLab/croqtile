@@ -1,4 +1,4 @@
-// RUN: not choreo -sa check1 %s 2>&1 | FileCheck %s
+// RUN: not choreo -sa=check %s 2>&1 | FileCheck %s
 
 __co__ auto illegal_ituple1() {
   ituple it1 = [7, 8];
