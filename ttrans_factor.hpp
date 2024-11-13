@@ -210,10 +210,6 @@ public:
     for (auto& fid : sel->expr_list->AllValues()) {
       assert(GetIdentifier(*fid) && "expecting an identifier");
       auto fut_name = GetIdentifier(*fid)->name;
-      std::cout << "future name: " << fut_name << "\n";
-      for (auto& item : fut_buf->at(fname)) {
-        std::cout << "item: " << item.first << ", val: " << item.second << "\n";
-      }
       assert(fut_buf->at(fname).count(fut_name));
       auto buf_name = fut_buf->at(fname)[fut_name];
       auto bid = AST::Make<AST::Identifier>(fid->LOC(), buf_name);
