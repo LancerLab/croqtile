@@ -18,21 +18,21 @@ gcu2test:
   stage: check-in-tests
   script:
     - echo "Running tests with GCU2..."
-    - make ci-gpu-test  # 假设 `make test` 用于运行测试
+    - make ci-gcu2-test  # 假设 `make test` 用于运行测试
   tags:
     - GCU2  # 在 GPU 机器上运行作业
   only:
     - main  # 仅在 `main` 分支上执行该作业
 
-#gcu3test:
-#  stage: check-in-tests
-#  script:
-#    - echo "Running tests with GCU3 S60..."
-#    - make ci-gpu-test  # 假设 `make test` 用于运行测试
-#  tags:
-#    - GCU3  # 在 GPU 机器上运行作业
-#  only:
-#    - main  # 仅在 `main` 分支上执行该作业
+gcu3test:
+  stage: check-in-tests
+  script:
+    - echo "Running tests with GCU3 S60..."
+    - make ci-gcu3-test  # 假设 `make test` 用于运行测试
+  tags:
+    - GCU3  # 在 GPU 机器上运行作业
+  only:
+    - main  # 仅在 `main` 分支上执行该作业
 
 cache:
   paths:
