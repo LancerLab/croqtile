@@ -328,9 +328,9 @@ public:
     size_t count = 0;
     std::string indent = "";
     for (auto it = scoped_symtab.rbegin(); it != scoped_symtab.rend(); ++it) {
-      outs() << indent << "<" << scope_names[count] << ">\n";
+      dbgs() << indent << "<" << scope_names[count] << ">\n";
       for (auto item : *it) {
-        outs() << indent << " - sym: " << item.first
+        dbgs() << indent << " - sym: " << item.first
                << ", type: " << STR(*item.second) << "\n";
       }
       ++count;

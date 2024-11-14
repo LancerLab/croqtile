@@ -37,7 +37,6 @@ bool FactorCodeGen::ContainsLoopVar(const std::string& iv) const {
 bool FactorCodeGen::BeforeVisitImpl(AST::Node& n) {
   TraceEachVisit(n);
   if (isa<AST::Program>(&n)) {
-    //    print_fixed_header(os);
   } else if (auto c = dyn_cast<AST::ChoreoFunction>(&n)) {
     sp_count = 0; // reset the count of stub parameter
     param_map.clear();
@@ -72,17 +71,17 @@ using namespace factor;
 bool FactorCodeGen::AfterVisitImpl(AST::Node& n) {
   TraceEachVisit(n);
   if (isa<AST::Program>(&n)) {
-    os << "\n# step 4: generate the host source\n";
-    os << "host_src=" << host_fn << "\n";
-    os << "echo \"#include \\\"\"${gcu_target_string}\"_lib" << current_fn
-       << ".h\\\"\" > ${host_src}\n";
-    os << "cat <<'EOF' >> ${host_src}\n";
-    os << hs.str() << "\nEOF\n\n";
+    outs() << "\n# step 4: generate the host source\n";
+    outs() << "host_src=" << host_fn << "\n";
+    outs() << "echo \"#include \\\"\"${gcu_target_string}\"_lib" << current_fn
+           << ".h\\\"\" > ${host_src}\n";
+    outs() << "cat <<'EOF' >> ${host_src}\n";
+    outs() << hs.str() << "\nEOF\n\n";
 
-    os << "\n# step 5: JIT compile and execute\n";
-    os << "# TODO: enable workflow of AOT compilation\n";
-    os << "target=" << target_fn << "\n";
-    os << R"(
+    outs() << "\n# step 5: JIT compile and execute\n";
+    outs() << "# TODO: enable workflow of AOT compilation\n";
+    outs() << "target=" << target_fn << "\n";
+    outs() << R"(
 if command -v nvim &> /dev/null
 then
   EDITOR=nvim
@@ -100,16 +99,18 @@ show_usage() {
     exit 1
 }
 )";
-    os << R"(
+    outs() << R"(
 if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then
 )";
-    os << "  export FACTOR_INSTALL="
-       << STRINGIZE(__CHOREO_FACTOR_DIR__) << "\n# JIT compile and execute\n";
-    if (dyn_shaped) os << "VIEW_CONFIG=1 ENABLE_DYNSHAPE=1 ";
-    os << build_path
-       << "/factor_script.sh ${factor_src} ${factor_bin} ${host_src} ${target} "
-          "${gcu_arch} ${gcu_resource}";
-    os << R"script(
+    outs() << "  export FACTOR_INSTALL="
+           << STRINGIZE(__CHOREO_FACTOR_DIR__)
+                        << "\n# JIT compile and execute\n";
+    if (dyn_shaped) outs() << "VIEW_CONFIG=1 ENABLE_DYNSHAPE=1 ";
+    outs() << build_path
+           << "/factor_script.sh ${factor_src} ${factor_bin} ${host_src} "
+              "${target} "
+              "${gcu_arch} ${gcu_resource}";
+    outs() << R"script(
 elif [ "$1" == "--statistics" ]; then
   echo ">>>> Line of Code without Choreo"
   wc -l ${factor_src} ${host_src} ${kernel_src}
@@ -1405,17 +1406,18 @@ void FactorCodeGen::OutputScript(const ptr<FunctionType>& fty,
   ReplaceInString(&factor_src, std::string(backpatch_filename), kernel_fn);
 
   // Now generate the script
-  os << "#!/usr/bin/env bash\n\n";
-  os << "# This is the choreo generated bash script to compile factor code\n";
+  outs() << "#!/usr/bin/env bash\n\n";
+  outs()
+      << "# This is the choreo generated bash script to compile factor code\n";
   // check for gcu_target_string first
   //
-  os << R"script(
+  outs() << R"script(
   gcu_arch=gcu210
   gcu_resource=2c24s
   gcu_target_string="dorado_2c"
 )script";
   if (!cross_compile)
-    os << R"script(
+    outs() << R"script(
   # check the device
   # TODO: improve the target check with more solid code
   GCU_DEVICE_STR="$(lspci | grep Enflame | head -1)"
@@ -1448,27 +1450,27 @@ void FactorCodeGen::OutputScript(const ptr<FunctionType>& fty,
   fi
 )script";
 
-  os << "\n# step 0: set up the environment\n";
-  os << "rm -fr " << build_path << "\n";
-  os << "mkdir -p " << build_path << "\n";
-  os << "cat <<'EOF' > " << build_path << "/factor_script.sh\n";
-  os << __factor_script_as_string << "\nEOF\n";
-  os << "chmod +x " << build_path << "/factor_script.sh\n";
-  os << "cat <<'EOF' > " << build_path << "/choreo.h\n";
-  os << __choreo_header_as_string << "\nEOF\n\n";
+  outs() << "\n# step 0: set up the environment\n";
+  outs() << "rm -fr " << build_path << "\n";
+  outs() << "mkdir -p " << build_path << "\n";
+  outs() << "cat <<'EOF' > " << build_path << "/factor_script.sh\n";
+  outs() << __factor_script_as_string << "\nEOF\n";
+  outs() << "chmod +x " << build_path << "/factor_script.sh\n";
+  outs() << "cat <<'EOF' > " << build_path << "/choreo.h\n";
+  outs() << __choreo_header_as_string << "\nEOF\n\n";
 
-  os << "\n# step 1: write the kernel source code into a temp file\n";
-  os << "kernel_src=" << kernel_fn << "\n";
-  os << "cat <<'EOF' > ${kernel_src}\n";
-  os << ks.str() << "\nEOF\n";
+  outs() << "\n# step 1: write the kernel source code into a temp file\n";
+  outs() << "kernel_src=" << kernel_fn << "\n";
+  outs() << "cat <<'EOF' > ${kernel_src}\n";
+  outs() << ks.str() << "\nEOF\n";
 
-  os << "\n# step 2: write the factor source code into a temp file\n";
-  os << "factor_src=" << factor_fn << "\n";
-  os << "cat <<'EOF' > ${factor_src}\n";
-  os << factor_src << "\nEOF\n\n";
+  outs() << "\n# step 2: write the factor source code into a temp file\n";
+  outs() << "factor_src=" << factor_fn << "\n";
+  outs() << "cat <<'EOF' > ${factor_src}\n";
+  outs() << factor_src << "\nEOF\n\n";
 
-  os << "\n# step 3: set the factor binary file name\n";
-  os << "factor_bin=" << factor_bfn << "\n";
+  outs() << "\n# step 3: set the factor binary file name\n";
+  outs() << "factor_bin=" << factor_bfn << "\n";
 }
 
 const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {

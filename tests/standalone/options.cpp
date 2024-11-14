@@ -2,7 +2,7 @@
 #include <fcntl.h>
 #include <fstream>
 #include <gtest/gtest.h>
-#include "options.hpp"
+#include "io.hpp"
 
 using namespace Choreo;
 

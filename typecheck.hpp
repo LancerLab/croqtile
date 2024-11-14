@@ -9,8 +9,6 @@ namespace Choreo {
 
 struct TypeChecker : public VisitorWithSymTab {
 private:
-  std::ostream& os;
-  size_t error_count = 0;
   bool allow_auto_threading = false;
 
 private:
@@ -24,15 +22,15 @@ private:
                       const std::string& m = "") const {
     if (!trace_visit) return;
     if (detail)
-      os << m << STR(n) << "\n";
+      dbgs() << m << STR(n) << "\n";
     else
-      os << m << n.TypeNameString() << "\n";
+      dbgs() << m << n.TypeNameString() << "\n";
   }
 
 public:
-  TypeChecker(const ptr<SymbolTable> s_tab, std::ostream& o = outs(),
+  TypeChecker(const ptr<SymbolTable> s_tab,
               const Choreo::Target& tgt = Choreo::Target::Factor)
-      : VisitorWithSymTab("check", s_tab), os(o) {
+      : VisitorWithSymTab("check", s_tab) {
     if (tgt == Choreo::Target::CUDA) allow_auto_threading = true;
   }
   ~TypeChecker() {}
@@ -72,7 +70,7 @@ public:
   bool Visit(AST::CppSourceCode&) override;
   bool Visit(AST::Program&) override;
 
-  bool HasError();
+  bool HasError() override;
 };
 
 } // end namespace Choreo

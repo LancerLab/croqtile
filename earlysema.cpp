@@ -382,8 +382,8 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
           last = concat;
         }
         if (debug_visit)
-          os << "Transform: " << PSTR(n.list) << " to be " << PSTR(last)
-             << "\n";
+          dbgs() << "Transform: " << PSTR(n.list) << " to be " << PSTR(last)
+                 << "\n";
         n.list = last;
         n.list->accept(*this); // go evaluate the concatanation
       }
@@ -428,7 +428,7 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
       Warning(n.LOC(),
               "assume the mdspan as a rank of " + std::to_string(rank) + ".");
       if (debug_visit)
-        os << "Warning in " << __FILE__ << ", line: " << __LINE__ << ".\n";
+        dbgs() << "Warning in " << __FILE__ << ", line: " << __LINE__ << ".\n";
       n.SetRank(rank);
     }
   }
@@ -482,7 +482,7 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
                          "\" type variable.");
       error_count++;
       if (debug_visit)
-        os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
+        dbgs() << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
       // keep working
     } else if (isa<PlaceHolderType>(ety) && n.init_expr &&
                isa<AST::Expr>(n.init_expr) &&
@@ -492,7 +492,7 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
                          "' with a placeholder.");
       error_count++;
       if (debug_visit)
-        os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
+        dbgs() << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
     }
     // check for type consistency between annotation and init expr.
     if (!isa<UnknownType>(tty) && !tty->ApprxEqual(*ety)) {
@@ -542,7 +542,7 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
             "use ':' to define the \"" + STR(*sty) + "\" type variable.");
       ++error_count;
       if (debug_visit)
-        os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
+        dbgs() << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
       return false;
     }
     ReportErrorWhenViolateODR(n.LOC(), n.name, __FILE__, __LINE__,
@@ -573,7 +573,7 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
                          "' is assigned as " + STR(*ety) + ".");
       ++error_count;
       if (debug_visit)
-        os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
+        dbgs() << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
       return false;
     }
 
@@ -594,7 +594,7 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
                          "\" can not be re-assigned as \"" + STR(*ety) + "\".");
     ++error_count;
     if (debug_visit)
-      os << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
+      dbgs() << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
     return false;
   }
 
@@ -1174,18 +1174,19 @@ bool EarlySemantics::ReportErrorWhenViolateODR(const location& loc,
   if (SSTab().DeclaredInScope(name)) {
     Error(loc, "symbol `" + name + "' has been declared already.");
     ++error_count;
-    if (debug_visit) os << "Error in " << file << ", line: " << line << ".\n";
+    if (debug_visit)
+      dbgs() << "Error in " << file << ", line: " << line << ".\n";
     return false;
   }
   SSTab().DefineSymbol(name, type); // TODO: improve the type
   if (debug_visit)
-    os << "Define Symbol '" << name << "' as: " << PSTR(type) << ".\n";
+    dbgs() << "Define Symbol '" << name << "' as: " << PSTR(type) << ".\n";
   return true;
 }
 
 bool EarlySemantics::HasError() {
   if (error_count > 0) {
-    os << "Totally " << error_count << " errors have been detected.\n";
+    dbgs() << "Totally " << error_count << " errors have been detected.\n";
     return true;
   }
   return false;

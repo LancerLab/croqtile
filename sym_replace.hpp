@@ -36,9 +36,9 @@ private:
 
   void TraceEachVisit(const AST::Node& n, bool show_node = false) const {
     if (trace_visit) {
-      os << n.TypeNameString();
-      if (show_node) os << ": " << STR(n);
-      os << "\n";
+      dbgs() << n.TypeNameString();
+      if (show_node) dbgs() << ": " << STR(n);
+      dbgs() << "\n";
     }
   }
 
@@ -48,16 +48,14 @@ public:
   using SymValno = size_t;
 
 public:
-  std::ostream& os;
   // for debugging purpose only
   bool cannot_proceed = false;
-  size_t error_count = 0;
 
-  explicit SymReplace(std::ostream& o) : VisitorWithScope("symrepl"), os(o) {}
+  explicit SymReplace() : VisitorWithScope("symrepl") {}
 
-  bool HasError() {
+  bool HasError() override {
     if (error_count)
-      os << "Totally " << error_count << " errors have been detected.\n";
+      dbgs() << "Totally " << error_count << " errors have been detected.\n";
     return error_count != 0;
   }
 
@@ -151,52 +149,52 @@ public:
   void SymbolizeExprNode(ptr<AST::Node> n);
 
   inline void AnalyseThenOptimizeExpr(ptr<AST::Node> n) {
-    SR_DEBUG(os << "AnalyseThenOptimizeExpr: " << PSTR(n) << "\n");
+    SR_DEBUG(dbgs() << "AnalyseThenOptimizeExpr: " << PSTR(n) << "\n");
     expr_nodes.push_back(n);
     InitializeNode(n);
     SymbolizeExprNode(n);
   }
 
   inline void DumpTermimalExprs() const {
-    SR_DEBUG(os << "Terminal Expr Nodes:\n";
-             for (auto& n : expr_nodes) os << "\t" << PSTR(n) << "\n";);
+    SR_DEBUG(dbgs() << "Terminal Expr Nodes:\n";
+             for (auto& n : expr_nodes) dbgs() << "\t" << PSTR(n) << "\n";);
   }
 
   inline void DumpNameSymbolMap() const {
-    SR_DEBUG(os << "Name Symbol Map:\n";
-             for (auto& [name, sym] : name_symbol_map) os << "\t" << name << " "
-                                                          << sym << "\n";);
+    SR_DEBUG(dbgs() << "Name Symbol Map:\n";
+             for (auto& [name, sym] : name_symbol_map) dbgs()
+             << "\t" << name << " " << sym << "\n";);
   }
 
   inline void DumpNameSymExprMap() const {
-    SR_DEBUG(os << "Name SymExpr Map:\n";
-             for (auto& [name, sym_expr] : name_sym_expr_map) os
+    SR_DEBUG(dbgs() << "Name SymExpr Map:\n";
+             for (auto& [name, sym_expr] : name_sym_expr_map) dbgs()
              << "\t" << name << " " << sym_expr << "\n";);
   }
 
   inline void DumpExprSymValnoMap() const {
-    SR_DEBUG(os << "Expr SymbolValno Map:\n";
-             for (auto& [expr, sym_valno] : expr_sym_valno_map) os
+    SR_DEBUG(dbgs() << "Expr SymbolValno Map:\n";
+             for (auto& [expr, sym_valno] : expr_sym_valno_map) dbgs()
              << "\t" << PSTR(expr) << " " << sym_valno << "\n";);
   }
 
   inline void DumpSymValnoSymExprMap() const {
-    SR_DEBUG(os << "SymValno SymExpr Map:\n";
-             for (auto& [sym_valno, sym_expr] : sym_valno_sym_expr_map) os
+    SR_DEBUG(dbgs() << "SymValno SymExpr Map:\n";
+             for (auto& [sym_valno, sym_expr] : sym_valno_sym_expr_map) dbgs()
              << "\t" << sym_valno << " " << sym_expr << "\n";);
   }
 
   inline void DumpExprNodesWithSymExprAndSymValno() const {
-    SR_DEBUG(os << "ExprNodes With SymExpr And SymValno:\n";
+    SR_DEBUG(dbgs() << "ExprNodes With SymExpr And SymValno:\n";
              for (auto& expr : expr_nodes) {
                auto sym_valno = GetSymValnoFromExpr(expr);
-               os << "\t" << PSTR(expr);
-               os << "\n\t\t\t\t" << sym_valno << " == ";
+               dbgs() << "\t" << PSTR(expr);
+               dbgs() << "\n\t\t\t\t" << sym_valno << " == ";
                if (sym_valno != 0)
-                 os << GetSymExprFromSymValno(sym_valno);
+                 dbgs() << GetSymExprFromSymValno(sym_valno);
                else
-                 os << "NONE";
-               os << "\n";
+                 dbgs() << "NONE";
+               dbgs() << "\n";
              });
   }
 
@@ -205,7 +203,7 @@ public:
 
 public:
   bool BeforeVisitImpl(AST::Node& n) override {
-    SR_DEBUG(if (auto cf = dyn_cast<AST::ChoreoFunction>(&n)) os
+    SR_DEBUG(if (auto cf = dyn_cast<AST::ChoreoFunction>(&n)) dbgs()
                  << "symbolic replacing starts for function " << cf->name
                  << "\n";);
     return true;
@@ -336,7 +334,7 @@ public:
     if (isa<AST::Expr>(n.value)) AnalyseThenOptimizeExpr(n.value);
 
     return true;
-  };
+  }
 
   bool Visit(AST::IntIndex& n) override {
     TraceEachVisit(n);
@@ -344,7 +342,7 @@ public:
     if (cannot_proceed) return true;
 
     return true;
-  };
+  }
 
   bool Visit(AST::DataType& n) override {
     TraceEachVisit(n);
@@ -380,7 +378,7 @@ public:
     if (cannot_proceed) return true;
 
     return true;
-  };
+  }
 
   bool Visit(AST::ParallelBy& n) override {
     TraceEachVisit(n);
@@ -392,7 +390,7 @@ public:
     SSTab().DefineSymbol(n.biv, n.GetType());
 
     return true;
-  };
+  }
 
   bool Visit(AST::WhereBind& n) override {
     TraceEachVisit(n);
@@ -419,7 +417,7 @@ public:
     if (cannot_proceed) return true;
 
     return true;
-  };
+  }
 
   bool Visit(AST::Memory& n) override {
     TraceEachVisit(n);
@@ -427,7 +425,7 @@ public:
     if (cannot_proceed) return true;
 
     return true;
-  };
+  }
 
   bool Visit(AST::SpanAs& n) override {
     TraceEachVisit(n);
@@ -435,7 +433,7 @@ public:
     if (cannot_proceed) return true;
 
     return true;
-  };
+  }
 
   bool Visit(AST::DMA& n) override {
     TraceEachVisit(n);
@@ -469,7 +467,7 @@ public:
     if (cannot_proceed) return true;
 
     return true;
-  };
+  }
 
   bool Visit(AST::Rotate& n) override {
     TraceEachVisit(n);
@@ -477,7 +475,7 @@ public:
     if (cannot_proceed) return true;
 
     return true;
-  };
+  }
 
   bool Visit(AST::Select& n) override {
     TraceEachVisit(n);
@@ -485,7 +483,7 @@ public:
     if (cannot_proceed) return true;
 
     return true;
-  };
+  }
 
   bool Visit(AST::Return& n) override {
     TraceEachVisit(n);
@@ -493,7 +491,7 @@ public:
     if (cannot_proceed) return true;
 
     return true;
-  };
+  }
 
   bool Visit(AST::LoopRange& n) override {
     TraceEachVisit(n);
@@ -509,7 +507,7 @@ public:
     if (cannot_proceed) return true;
 
     return true;
-  };
+  }
 
   bool Visit(AST::FunctionDecl& n) override {
     TraceEachVisit(n);
@@ -520,7 +518,7 @@ public:
       if (p->HasSymbol()) InsertNdSnSymMap(p->sym, p->sym->name);
 
     return true;
-  };
+  }
 
   bool Visit(AST::ChoreoFunction& n) override {
     TraceEachVisit(n);
@@ -536,14 +534,15 @@ public:
     if (cannot_proceed) return true;
 
     return true;
-  };
+  }
+
   bool Visit(AST::Program& n) override {
     TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
     return true;
-  };
+  }
 };
 
 } // end namespace Choreo

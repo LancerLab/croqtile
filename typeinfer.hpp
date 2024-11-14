@@ -12,9 +12,6 @@ namespace Choreo {
 struct TypeInference : public Visitor {
 private:
   bool Dump = false;
-  std::ostream& os;
-  size_t error_count = 0;
-
   TypeConstraints type_equals{this};
 
 private:
@@ -36,15 +33,13 @@ private:
 
   void TraceEachVisit(const AST::Node& n) {
     if (trace_visit) {
-      os << n.TypeNameString() << ": ";
-      os << "\n";
+      dbgs() << n.TypeNameString() << ": ";
+      dbgs() << "\n";
     }
   }
 
 public:
-  TypeInference(bool d, std::ostream& o = outs(),
-                const ptr<SymbolTable> s_tab = std::make_shared<SymbolTable>())
-      : Visitor("infer", s_tab), Dump(d), os(o) {
+  TypeInference(bool d) : Visitor("infer"), Dump(d) {
     type_equals.SetTypeReport(Dump);
   }
 
@@ -82,9 +77,9 @@ public:
   bool Visit(AST::ChoreoFunction&) override;
   bool Visit(AST::CppSourceCode&) override;
   bool Visit(AST::Program&) override;
-  bool HasError() {
+  bool HasError() override {
     if (error_count)
-      os << "Totally " << error_count << " errors have been detected.\n";
+      dbgs() << "Totally " << error_count << " errors have been detected.\n";
     return error_count != 0;
   }
 

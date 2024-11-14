@@ -12,9 +12,6 @@ namespace Choreo {
 
 struct EarlySemantics : public VisitorWithScope {
 private:
-  std::ostream& os;
-  size_t error_count = 0;
-
   TypeConstraints type_equals{this};
 
 private:
@@ -44,27 +41,26 @@ private:
   void SetNodeType(AST::Node& n, const ptr<Type>& ty) {
     n.SetType(ty);
     if (debug_visit)
-      os << "Set type of " << STR(n) << " as " << PSTR(n.GetType()) << "\n";
+      dbgs() << "Set type of " << STR(n) << " as " << PSTR(n.GetType()) << "\n";
   }
   void ModifySymbolType(const std::string& n, const ptr<Type>& ty) {
     SSTab().ModifySymbolType(n, ty);
     if (debug_visit)
-      os << "Modify type of " << STR(n) << " as " << PSTR(ty) << "\n";
+      dbgs() << "Modify type of " << STR(n) << " as " << PSTR(ty) << "\n";
   }
 
   virtual void TraceEachVisit(AST::Node& n, bool detail = false,
                               const std::string& m = "") const {
     if (!trace_visit) return;
     if (detail)
-      os << m << STR(n) << "\n";
+      dbgs() << m << STR(n) << "\n";
     else
-      os << m << n.TypeNameString() << "\n";
+      dbgs() << m << n.TypeNameString() << "\n";
   }
 
 public:
-  EarlySemantics(std::ostream& o = outs(),
-                 const Choreo::Target& tgt = Choreo::Target::Factor)
-      : VisitorWithScope("sema"), os(o) {
+  EarlySemantics(const Choreo::Target& tgt = Choreo::Target::Factor)
+      : VisitorWithScope("sema") {
     if (trace_visit) debug_visit = true; // force debug when tracing
     if (tgt == Choreo::Target::CUDA) allow_auto_threading = true;
     if (debug_visit) type_equals.SetDebug(true);
@@ -106,7 +102,7 @@ public:
   bool Visit(AST::CppSourceCode&) override;
   bool Visit(AST::Program&) override;
 
-  bool HasError();
+  bool HasError() override;
 };
 
 } // end namespace Choreo

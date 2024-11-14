@@ -12,14 +12,11 @@
 #include "visitor.hpp"
 
 #define __TRACE_NORM_VISIT__(n)                                                \
-  if (trace_visit) { os << n.TypeNameString() << ": " << STR(n) << "\n"; }
+  if (trace_visit) { dbgs() << n.TypeNameString() << ": " << STR(n) << "\n"; }
 
 namespace Choreo {
 
 struct Normalizer : public Visitor {
-private:
-  std::ostream& os;
-
 private:
   bool changed = false;
 
@@ -44,10 +41,10 @@ private:
 
 public:
   // it does not require a symbol table
-  Normalizer(std::ostream& o) : Visitor("norm"), os(o) {}
+  Normalizer() : Visitor("norm") {}
 
   bool BeforeVisit(AST::Node& n) override {
-    if (trace_visit) os << "before visiting " << n.TypeNameString() << "\n";
+    if (trace_visit) dbgs() << "before visiting " << n.TypeNameString() << "\n";
 
     if (auto* b = dyn_cast<AST::MultiDimSpans>(&n)) {
       if (b->ref_name != "") {
@@ -82,7 +79,7 @@ public:
   }
 
   bool AfterVisit(AST::Node& n) override {
-    if (trace_visit) os << "after visiting " << n.TypeNameString() << "\n";
+    if (trace_visit) dbgs() << "after visiting " << n.TypeNameString() << "\n";
 
     if (auto* b = dyn_cast<AST::MultiDimSpans>(&n)) {
       ResetListReference();
@@ -91,8 +88,9 @@ public:
       ResetListReference();
     } else if (auto p = dyn_cast<AST::Parameter>(&n)) {
       handle_parameter = false;
-      VST_DEBUG(if (changed) os << "Name dims of `" << STR(*p->sym) << "': "
-                                << old << " ---> " << STR(*p->type) << "\n");
+      VST_DEBUG(if (changed) dbgs()
+                << "Name dims of `" << STR(*p->sym) << "': " << old << " ---> "
+                << STR(*p->type) << "\n");
       old.clear();
       changed = false;
     } else if (isa<AST::ChoreoFunction>(&n)) {
@@ -112,7 +110,7 @@ public:
 
       auto assign = AST::Make<AST::Assignment>(pnode->LOC(), name, pnode);
       n.values.insert(n.values.begin() + index, assign);
-      VST_DEBUG(os << "Hoisted: " << PSTR(assign) << "\n");
+      VST_DEBUG(dbgs() << "Hoisted: " << PSTR(assign) << "\n");
     }
 
     mnodes_insertions.erase(&n);
@@ -132,8 +130,8 @@ public:
               // apply desugaring a {(0), 1} -> {a(0), 1}
               auto new_expr =
                   AST::Make<AST::Expr>(expr->LOC(), "dimof", list_ref, ref);
-              VST_DEBUG(os << "Desugar ref: " << STR(*expr) << " ---> "
-                           << STR(*new_expr) << "\n");
+              VST_DEBUG(dbgs() << "Desugar ref: " << STR(*expr) << " ---> "
+                               << STR(*new_expr) << "\n");
               n.values[i] = new_expr;
             }
           }
@@ -170,8 +168,8 @@ public:
           // apply desugaring a {(0), 1} -> {a(0), 1}
           auto ret = AST::Make<AST::Expr>(expr->LOC(), "dimof", list_ref, ref);
 
-          VST_DEBUG(os << "Desugaring expression node: " << PSTR(expr)
-                       << " --->" << PSTR(ret) << "\n";);
+          VST_DEBUG(dbgs() << "Desugaring expression node: " << PSTR(expr)
+                           << " --->" << PSTR(ret) << "\n";);
 
           changed = true;
 
@@ -193,9 +191,9 @@ public:
     if (n.op == "sizeof" && isa<SpannedType>(n.GetR())) {
       auto id = cast<AST::Expr>(n.GetR())->GetSymbol();
       assert(!SuffixedWith(id->name, ".span"));
-      VST_DEBUG(os << "Desugaring sizeof: " << id->name << " ->");
+      VST_DEBUG(dbgs() << "Desugaring sizeof: " << id->name << " ->");
       id->name += ".span";
-      VST_DEBUG(os << id->name << ".\n");
+      VST_DEBUG(dbgs() << id->name << ".\n");
     }
 
     return true;
@@ -209,8 +207,8 @@ public:
       // Should this be set by target?
       n.mem->Set(Storage::GLOBAL);
 
-      VST_DEBUG(os << "Place storage of '" << n.name_str
-                   << "': DEFAULT ---> GLOBAL\n");
+      VST_DEBUG(dbgs() << "Place storage of '" << n.name_str
+                       << "': DEFAULT ---> GLOBAL\n");
     }
 
     return true;
@@ -251,8 +249,8 @@ public:
 
     n.with_matchers = mval;
 
-    VST_DEBUG(os << "Generate with-matchers for '" << n.with->name
-                 << "': " << STR(mval) << "\n");
+    VST_DEBUG(dbgs() << "Generate with-matchers for '" << n.with->name
+                     << "': " << STR(mval) << "\n");
 
     return true;
   }
@@ -310,9 +308,9 @@ public:
               auto nname = SymbolTable::GetAnonName();
               mnodes_insertions[multi_nodes.top()].emplace_back(
                   std::make_tuple(index, expr->GetL(), nname));
-              VST_DEBUG(os << "replace " << PSTR(expr->GetL()) << " with ");
+              VST_DEBUG(dbgs() << "replace " << PSTR(expr->GetL()) << " with ");
               expr->SetL(AST::Make<AST::Identifier>(v->LOC(), nname));
-              VST_DEBUG(os << PSTR(expr->GetL()) << ".\n");
+              VST_DEBUG(dbgs() << PSTR(expr->GetL()) << ".\n");
             }
           }
           continue;
@@ -326,12 +324,12 @@ public:
         repls.emplace_back(i, AST::Make<AST::Identifier>(v->LOC(), nname));
       }
       for (auto& repl : repls) {
-        VST_DEBUG(os << "replace " << PSTR(n.positions->ValueAt(repl.first))
-                     << " with ");
+        VST_DEBUG(dbgs() << "replace " << PSTR(n.positions->ValueAt(repl.first))
+                         << " with ");
 
         n.positions->values[repl.first] = repl.second;
 
-        VST_DEBUG(os << PSTR(n.positions->ValueAt(repl.first)) << ".\n");
+        VST_DEBUG(dbgs() << PSTR(n.positions->ValueAt(repl.first)) << ".\n");
       }
     }
     return true;

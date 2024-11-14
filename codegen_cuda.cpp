@@ -20,8 +20,8 @@
 // utility macros define here
 #define __TRACE_EACH_VISIT__(d)                                                \
   if (trace_visit) {                                                           \
-    os << d.TypeNameString() << ": ";                                          \
-    os << "\n";                                                                \
+    dbgs() << d.TypeNameString() << ": ";                                      \
+    dbgs() << "\n";                                                            \
   }
 
 using namespace Choreo;
@@ -126,17 +126,17 @@ bool CUDACodeGen::BeforeVisitImpl(AST::Node& n) {
 bool CUDACodeGen::AfterVisitImpl(AST::Node& n) {
   __TRACE_EACH_VISIT__(n)
   if (isa<AST::Program>(&n)) {
-    os << "\n# step 4: generate the host source\n";
-    os << "host_src=" << host_fn << "\n";
-    os << "cat <<'EOF' >> ${host_src}\n";
-    os << hs.str() << "\nEOF\n\n";
+    outs() << "\n# step 4: generate the host source\n";
+    outs() << "host_src=" << host_fn << "\n";
+    outs() << "cat <<'EOF' >> ${host_src}\n";
+    outs() << hs.str() << "\nEOF\n\n";
 
-    os << "\n# step 5: JIT compile and execute\n";
-    os << "target=" << target_fn << "\n";
-    os << "build_path=" << build_path << "\n";
-    os << "cuda_script=" << build_path << "/cuda_script.sh\n";
-    os << "cp -r utils/catz/ " << build_path << "\n";
-    os << R"(
+    outs() << "\n# step 5: JIT compile and execute\n";
+    outs() << "target=" << target_fn << "\n";
+    outs() << "build_path=" << build_path << "\n";
+    outs() << "cuda_script=" << build_path << "/cuda_script.sh\n";
+    outs() << "cp -r utils/catz/ " << build_path << "\n";
+    outs() << R"(
 if command -v nvim &> /dev/null
 then
   EDITOR=nvim
@@ -154,20 +154,21 @@ if [ "$#" -ne 1 ]; then
     exit 1
 fi
 )";
-    os << R"(
+    outs() << R"(
 if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then
 )";
-    os << "  export CUDA_INSTALL="
-       << STRINGIZE(__CHOREO_cuda_DIR__) << "\n  # JIT compile and execute\n";
-    if (dyn_shaped) os << "VIEW_CONFIG=1 ENABLE_DYNSHAPE=1 ";
-    os << "  ${cuda_script} ${build_path} ${host_src} ${target}\n";
-    os << R"script(
+    outs() << "  export CUDA_INSTALL="
+           << STRINGIZE(__CHOREO_cuda_DIR__)
+                        << "\n  # JIT compile and execute\n";
+    if (dyn_shaped) outs() << "VIEW_CONFIG=1 ENABLE_DYNSHAPE=1 ";
+    outs() << "  ${cuda_script} ${build_path} ${host_src} ${target}\n";
+    outs() << R"script(
 elif [ "$1" == "--profiling" ]; then
 	mkdir -p __profiling_tmp__
 	ncu --set basic --export __profiling_tmp__/${target} --force-overwrite ./${target}
 	ncu --import __profiling_tmp__/${target}.ncu-rep --page details
     )script";
-    os << R"script(
+    outs() << R"script(
 elif [ "$1" == "--list-sources" ]; then
   tree ${build_path} -L 1
 elif [ "$1" == "--statistics" ]; then
@@ -1512,15 +1513,15 @@ void CUDACodeGen::OutputScript(const ptr<FunctionType>& fty,
   ReplaceInString(&cuda_src, std::string(backpatch_filename), kernel_fn);
 
   // Now generate the script
-  os << "#!/usr/bin/env bash\n\n";
-  os << "# This is the choreo generated bash script to compile cuda code\n";
-  os << R"script(
+  outs() << "#!/usr/bin/env bash\n\n";
+  outs() << "# This is the choreo generated bash script to compile cuda code\n";
+  outs() << R"script(
   CUDA_CC="sm_86"
   CUDA_ARCH="compute_86"
 
 )script";
   if (!cross_compile)
-    os << R"script(
+    outs() << R"script(
   
   GPU_CC=$(nvidia-smi --id=0 --query-gpu=compute_cap --format=csv,noheader)
 
@@ -1599,29 +1600,29 @@ void CUDACodeGen::OutputScript(const ptr<FunctionType>& fty,
   echo "CUDA_CC: ${CUDA_CC}"
 
 )script";
-  os << "\n# step 0: set up the environment\n";
-  os << "rm -fr " << build_path << "\n";
-  os << "mkdir -p " << build_path << "\n";
+  outs() << "\n# step 0: set up the environment\n";
+  outs() << "rm -fr " << build_path << "\n";
+  outs() << "mkdir -p " << build_path << "\n";
 
   // no need to gen run shell, since cuda compile is simple enough to handle
-  os << "cat <<'EOF' > " << build_path << "/cuda_script.sh\n";
-  os << __cuda_script_as_string << "\nEOF\n";
-  os << "chmod +x " << build_path << "/cuda_script.sh\n";
+  outs() << "cat <<'EOF' > " << build_path << "/cuda_script.sh\n";
+  outs() << __cuda_script_as_string << "\nEOF\n";
+  outs() << "chmod +x " << build_path << "/cuda_script.sh\n";
 
-  os << "cat <<'EOF' > " << build_path << "/choreo_cuda.h\n";
-  os << __choreo_header_as_string << "\nEOF\n\n";
+  outs() << "cat <<'EOF' > " << build_path << "/choreo_cuda.h\n";
+  outs() << __choreo_header_as_string << "\nEOF\n\n";
 
   // TODO(albert): support INLINED ASM FOR CUDA
-  os << "\n# step 1: write the kernel source code into a temp file\n";
-  os << "kernel_src=" << kernel_fn << "\n";
-  os << "cat <<'EOF' > ${kernel_src}\n";
-  os << ks.str() << "\nEOF\n";
+  outs() << "\n# step 1: write the kernel source code into a temp file\n";
+  outs() << "kernel_src=" << kernel_fn << "\n";
+  outs() << "cat <<'EOF' > ${kernel_src}\n";
+  outs() << ks.str() << "\nEOF\n";
 
-  os << "\n# step 2: write the cuda source code into a temp file\n";
-  os << "cuda_src=" << cuda_fn << "\n";
-  os << "cat <<'EOF' > ${cuda_src}\n";
-  os << cuda_src << "\nEOF\n\n";
+  outs() << "\n# step 2: write the cuda source code into a temp file\n";
+  outs() << "cuda_src=" << cuda_fn << "\n";
+  outs() << "cat <<'EOF' > ${cuda_src}\n";
+  outs() << cuda_src << "\nEOF\n\n";
 
-  os << "\n# step 3: set the cuda binary file name\n";
-  os << "cuda_bin=" << cuda_bfn << "\n";
+  outs() << "\n# step 3: set the cuda binary file name\n";
+  outs() << "cuda_bin=" << cuda_bfn << "\n";
 }

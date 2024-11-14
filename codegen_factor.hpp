@@ -83,11 +83,11 @@ private:
   StringifyTable factor_symbols;
 
 public:
-  FactorCodeGen(std::ostream& os, const ptr<SymbolTable>& symtab,
+  FactorCodeGen(const ptr<SymbolTable>& symtab,
                 const std::vector<RtMemUsageCheckInfo>& list,
                 const ptr<FutureBufferMap>& fb, const ptr<CodeGenInfo>& ci,
                 bool cross_compile)
-      : CodeGenerator("codegen", os, symtab), cross_compile(cross_compile),
+      : CodeGenerator("codegen", symtab), cross_compile(cross_compile),
         rt_mem_usage_check_list(list), fut_buf(fb), cgi(ci) {}
 
   void ResetBuffers() {

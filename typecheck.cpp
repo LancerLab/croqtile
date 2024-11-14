@@ -1,7 +1,5 @@
 #include "typecheck.hpp"
 
-#include "aux.hpp"
-
 using namespace Choreo;
 
 bool TypeChecker::BeforeVisitImpl(AST::Node&) { return true; }
@@ -352,7 +350,7 @@ bool TypeChecker::ReportUnknownSymbol(const std::string& name,
   if (isa<UnknownType>(GetSymbolType(name))) {
     ++error_count;
     Error(loc, "failed to obtain the type of " + name + ".");
-    if (debug_visit) os << file << ":" << line << "\n";
+    if (debug_visit) dbgs() << file << ":" << line << "\n";
     return false;
   }
   return true;
@@ -363,7 +361,7 @@ bool TypeChecker::ReportUnknown(AST::Node& n, const char* file, int line,
   if (isa<UnknownType>(NodeType(n))) {
     ++error_count;
     Error(n.LOC(), "failed to obtain a type.");
-    if (debug_visit) os << file << ":" << line << ", " << STR(n) << "\n";
+    if (debug_visit) dbgs() << file << ":" << line << ", " << STR(n) << "\n";
     return false;
   }
 
@@ -371,8 +369,8 @@ bool TypeChecker::ReportUnknown(AST::Node& n, const char* file, int line,
     ++error_count;
     Error(n.LOC(), "failed to obtain a type with sufficient info.");
     if (debug_visit)
-      os << file << ":" << line << ", " << STR(n) << "(" << PSTR(NodeType(n))
-         << ")\n";
+      dbgs() << file << ":" << line << ", " << STR(n) << "("
+             << PSTR(NodeType(n)) << ")\n";
     return false;
   }
 
@@ -381,7 +379,7 @@ bool TypeChecker::ReportUnknown(AST::Node& n, const char* file, int line,
 
 bool TypeChecker::HasError() {
   if (error_count) {
-    os << "Totally " << error_count << " errors have been detected.\n";
+    dbgs() << "Totally " << error_count << " errors have been detected.\n";
     return true;
   }
   return false;

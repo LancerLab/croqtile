@@ -16,9 +16,6 @@ using RtMemUsageCheckInfo =
 // checking compile-time and runtime memory usage
 struct MemUsageCheck : public VisitorWithSymTab {
 private:
-  std::ostream& os;
-  size_t error_count = 0;
-
   // map from storage type to a integer
   typedef std::map<Storage, size_t> MemUsageMap;
 
@@ -60,10 +57,10 @@ private:
         isa<AST::ForeachBlock>(&n)) {
       UpdateCtMaxMemUsage();
       CheckCtMemUsage(n);
-      VST_DEBUG(os << "[MemUsage] "
-                   << "Total compile-time mem used before leaving scope "
-                   << SSTab().ScopeName() << "\n"
-                   << GetMemUsageMapDetail(ct_tot_mem_usage));
+      VST_DEBUG(dbgs() << "[MemUsage] "
+                       << "Total compile-time mem used before leaving scope "
+                       << SSTab().ScopeName() << "\n"
+                       << GetMemUsageMapDetail(ct_tot_mem_usage));
       RestoreMemUsage();
     }
 
@@ -72,17 +69,18 @@ private:
 
     // the program is exiting, show the maximum ct mem usage
     if (isa<AST::Program>(&n)) {
-      VST_DEBUG(os << "[MemUsage] "
-                   << "The maximum memory usages at compile time for each level"
-                      "(Not at the same time):\n"
-                   << GetMemUsageMapDetail(ct_max_mem_usage));
+      VST_DEBUG(
+          dbgs() << "[MemUsage] "
+                 << "The maximum memory usages at compile time for each level"
+                    "(Not at the same time):\n"
+                 << GetMemUsageMapDetail(ct_max_mem_usage));
       assert(ct_mem_usage_list.empty() && rt_mem_usage_list.empty());
     }
     return true;
   }
 
   void TraceEachVisit(AST::Node& n, std::string sup = "") {
-    if (trace_visit) os << n.TypeNameString() << sup << "\n";
+    if (trace_visit) dbgs() << n.TypeNameString() << sup << "\n";
   }
 
   void RestoreMemUsage() {
@@ -185,9 +183,8 @@ private:
   }
 
 public:
-  MemUsageCheck(const ptr<SymbolTable> s_tab, Target t, std::string arch,
-                std::ostream& o = outs())
-      : VisitorWithSymTab("mucheck", s_tab), os(o) {
+  MemUsageCheck(const ptr<SymbolTable> s_tab, Target t, std::string arch)
+      : VisitorWithSymTab("muchk", s_tab) {
     if (t == Target::Factor) {
       valid_storage_type = {Storage::LOCAL, Storage::SHARED, Storage::GLOBAL};
       // initialize with ct_tot_mem_usage
@@ -219,9 +216,10 @@ public:
     } else {
       choreo_unreachable("unsupported target in memory usage check.");
     }
-    VST_DEBUG(os << "[MemUsage] "
-                 << "Memory usage limit of architecture " << arch << " is:\n"
-                 << GetMemUsageMapDetail(mem_usage_limit));
+    VST_DEBUG(dbgs() << "[MemUsage] "
+                     << "Memory usage limit of architecture " << arch
+                     << " is:\n"
+                     << GetMemUsageMapDetail(mem_usage_limit));
   }
   ~MemUsageCheck() {}
 
@@ -268,9 +266,9 @@ public:
            "Only support Storage types in `valid_storage_type`!");
     if (sty->RuntimeShaped()) {
       // runtime usage
-      VST_DEBUG(os << "[MemUsage] " << __internal__::GetStringFrom(sto) << " `"
-                   << SSTab().ScopedName(n.name_str)
-                   << "` need : " << sty->ByteSizeExpression() << " bytes.\n");
+      VST_DEBUG(dbgs() << "[MemUsage] " << __internal__::GetStringFrom(sto)
+                       << " `" << SSTab().ScopedName(n.name_str) << "` need : "
+                       << sty->ByteSizeExpression() << " bytes.\n");
       rt_mem_usage_list.top()[sto].push_back(sty->ByteSizeExpression());
       rt_tot_mem_usage[sto].push_back(sty->ByteSizeExpression());
       rt_mem_usage_check_list.push_back(
@@ -278,9 +276,9 @@ public:
     } else {
       // compile time usage
       auto size = sty->ByteSize();
-      VST_DEBUG(os << "[MemUsage] " << __internal__::GetStringFrom(sto) << " `"
-                   << SSTab().ScopedName(n.name_str) << "` need " << size
-                   << " bytes" << SizeForHuman(size) << ".\n");
+      VST_DEBUG(dbgs() << "[MemUsage] " << __internal__::GetStringFrom(sto)
+                       << " `" << SSTab().ScopedName(n.name_str) << "` need "
+                       << size << " bytes" << SizeForHuman(size) << ".\n");
       ct_mem_usage_list.top()[sto] += size;
       ct_tot_mem_usage[sto] += size;
       ct_mem_alloc_inst_set[sto].push(SSTab().ScopedName(n.name_str));
@@ -349,9 +347,10 @@ public:
              "Only support Storage types in `valid_storage_type`!");
       auto sty = dyn_cast<FutureType>(d.GetType())->GetSpannedType().get();
       if (sty->RuntimeShaped()) {
-        VST_DEBUG(os << "[MemUsage] " << __internal__::GetStringFrom(dst_sto)
-                     << " `" << SSTab().ScopedName(d.future) << "` need : "
-                     << sty->ByteSizeExpression() << " bytes.\n");
+        VST_DEBUG(dbgs() << "[MemUsage] "
+                         << __internal__::GetStringFrom(dst_sto) << " `"
+                         << SSTab().ScopedName(d.future) << "` need : "
+                         << sty->ByteSizeExpression() << " bytes.\n");
         rt_mem_usage_list.top()[dst_sto].push_back(sty->ByteSizeExpression());
         rt_tot_mem_usage[dst_sto].push_back(sty->ByteSizeExpression());
         rt_mem_usage_check_list.push_back(std::make_tuple(
@@ -360,10 +359,10 @@ public:
         auto dst_size = sty->ByteSize();
         assert(valid_storage_type.count(dst_sto) &&
                "Only support Storage types in `valid_storage_type`!");
-        VST_DEBUG(os << "[MemUsage] " << __internal__::GetStringFrom(dst_sto)
-                     << " `" << SSTab().ScopedName(d.future) << "` need "
-                     << dst_size << " bytes" << SizeForHuman(dst_size)
-                     << ".\n");
+        VST_DEBUG(
+            dbgs() << "[MemUsage] " << __internal__::GetStringFrom(dst_sto)
+                   << " `" << SSTab().ScopedName(d.future) << "` need "
+                   << dst_size << " bytes" << SizeForHuman(dst_size) << ".\n");
         ct_mem_usage_list.top()[dst_sto] += dst_size;
         ct_tot_mem_usage[dst_sto] += dst_size;
         ct_mem_alloc_inst_set[dst_sto].push(SSTab().ScopedName(d.future));
@@ -424,11 +423,11 @@ public:
           rt_mem_usage_check_list.push_back(
               std::make_tuple(SumUpCtRtUsage(func_param_sto), p->LOC(),
                               mem_usage_limit[func_param_sto]));
-          VST_DEBUG(os << "[MemUsage] "
-                       << "Function parameter `" << name << "`("
-                       << __internal__::GetStringFrom(func_param_sto)
-                       << ") need " << sty->ByteSizeExpression()
-                       << " bytes.\n");
+          VST_DEBUG(dbgs() << "[MemUsage] "
+                           << "Function parameter `" << name << "`("
+                           << __internal__::GetStringFrom(func_param_sto)
+                           << ") need " << sty->ByteSizeExpression()
+                           << " bytes.\n");
         } else {
           ct_mem_usage_list.top()[func_param_sto] += sty->ByteSize();
           ct_tot_mem_usage[func_param_sto] += sty->ByteSize();
@@ -436,10 +435,10 @@ public:
           p->Print(oss);
           ct_mem_alloc_inst_set[func_param_sto].push("parameter of function " +
                                                      n.name + ": " + oss.str());
-          VST_DEBUG(os << "[MemUsage] "
-                       << "Function parameter `" << name << "`("
-                       << __internal__::GetStringFrom(func_param_sto)
-                       << ") need " << sty->ByteSize() << " bytes.\n");
+          VST_DEBUG(dbgs() << "[MemUsage] "
+                           << "Function parameter `" << name << "`("
+                           << __internal__::GetStringFrom(func_param_sto)
+                           << ") need " << sty->ByteSize() << " bytes.\n");
         }
       }
       param_idx++;
@@ -448,10 +447,10 @@ public:
     // Because AST::FunctionDecl.accept doesn't call AfterVisit
     UpdateCtMaxMemUsage();
     CheckCtMemUsage(n);
-    VST_DEBUG(os << "[MemUsage] "
-                 << "Total compile-time mem used of parameters of function "
-                 << n.name << ":\n"
-                 << GetMemUsageMapDetail(ct_tot_mem_usage));
+    VST_DEBUG(dbgs() << "[MemUsage] "
+                     << "Total compile-time mem used of parameters of function "
+                     << n.name << ":\n"
+                     << GetMemUsageMapDetail(ct_tot_mem_usage));
     return true;
   }
   bool Visit(AST::ChoreoFunction& n) {
@@ -467,9 +466,9 @@ public:
     return true;
   }
 
-  bool HasError() {
+  bool HasError() override {
     if (error_count)
-      os << "Totally " << error_count << " errors have been detected.\n";
+      dbgs() << "Totally " << error_count << " errors have been detected.\n";
     return error_count != 0;
   }
 };

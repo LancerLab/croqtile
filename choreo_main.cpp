@@ -1,7 +1,3 @@
-#include <getopt.h>
-
-#include <cstdlib>
-
 #include "MemUsageCheck.hpp"
 #include "ast.hpp"
 #include "codegen.hpp"
@@ -23,6 +19,8 @@
 #include "types.hpp"
 #include "valno.hpp"
 #include "visualize.hpp"
+#include <cstdlib>
+#include <getopt.h>
 
 using namespace Choreo;
 
@@ -44,14 +42,14 @@ int main(int argc, char* argv[]) {
   Option<std::string> print_after("--print-after", "-pa", "");
   Option<bool> print_ahead_all("--print-before-all", "-pba", false);
   Option<bool> print_after_all("--print-after-all", "-paa", false);
-  Option<bool> debug_on("--debug", "-d", false);
   Option<bool> cross_compile("--cross-compile", "-cc", false);
+  Option<bool> debug_on("--debug", "-d", false);
   Option<bool> dump_ast("--dump-ast", "-e", false);
   Option<bool> print_vn("--print-valno", "-v", false);
   Option<bool> inf_type("--infer-types", "-i", false);
   Option<bool> dump_sym("--dump-symbol", "-l", false);
   Option<bool> visualiz("--visualize", "-u", false);
-  Option<bool> gen_none("--no-codegen", "-s", false);
+  Option<bool> ncodegen("--no-codegen", "-s", false);
   Option<bool> del_comm("--remove-comments", "-n", false);
   Option<bool> sym_repl("--print-sym-replace", "-sr", false);
   Option<bool> prt_pass("--show-passes", "-sp", false);
@@ -80,8 +78,14 @@ int main(int argc, char* argv[]) {
 
   if (print_after_all) setenv("CHOREO_PRINT_AFTER", "ALLPASSES", 1);
 
+  if (prt_pass) setenv("CHOREO_PRINT_PASSES", "", 1);
+
+  if (!abend_after.GetValue().empty())
+    setenv("CHOREO_STOP_AFTER_PASS", ToUpper(abend_after.GetValue()).c_str(),
+           1);
+
   if (dump_ast) {
-    if (gen_none)
+    if (ncodegen)
       errs()
           << "Warning: Semantic check is ignored since dumping AST is required."
           << std::endl;
@@ -90,142 +94,113 @@ int main(int argc, char* argv[]) {
   std::string filename = r.GetInputFileName();
   loc.begin.filename = loc.end.filename = &filename;
 
-  if (prt_pass) outs() << "|- " << filename << "\n";
+  if (prt_pass) dbgs() << "|- " << filename << "\n";
 
   Scanner s;
   s.yyrestart(r.GetInputStream());
   Parser p(s);
 
   if (debug_on) {
-    outs() << "Choreo: Debug of parsing is switched on." << std::endl;
+    dbgs() << "Choreo: Debug of parsing is switched on." << std::endl;
     p.set_debug_level(1); // Enable Bison debugging
     Scanner::SetDebug();
   }
 
   if (del_comm) Scanner::SetRemoveComments();
 
-  if (prt_pass) outs() << "|- parse program into AST.\n";
+  if (prt_pass) dbgs() << "|- parse program into AST.\n";
   if (p.parse() != 0) {
     errs() << "Parsing failed due to syntax errors." << std::endl;
     return 1;
   }
 
   if (dump_ast) {
-    root.Print(outs());
+    root.Print(dbgs());
     return 0;
   }
-
-  std::string stop_after = ToUpper(abend_after.GetValue());
 
   auto tgt = Choreo::Target::Unknown;
   if (target.GetValue() == "factor") tgt = Choreo::Target::Factor;
   if (target.GetValue() == "cuda") tgt = Choreo::Target::CUDA;
 
   // apply early semantics check without knowing type details
-  EarlySemantics sv(outs(), tgt);
-  if (prt_pass) outs() << "|- " << sv.GetName() << "\n";
-  root.accept(sv);
-  if (sv.HasError()) return 1;
-  if (stop_after == sv.GetName()) return 0;
+  EarlySemantics sv(tgt);
+  if (!sv.RunProgram(root)) return sv.Status();
 
   // minor AST change: desugar for canonicalized AST
-  Normalizer ds(outs());
-  if (prt_pass) outs() << "|- " << ds.GetName() << "\n";
-  root.accept(ds);
-  if (stop_after == ds.GetName()) return 0;
+  Normalizer ds;
+  if (!ds.RunProgram(root)) return ds.Status();
 
-  SymReplace sr(outs());
-  if (prt_pass) outs() << "|- " << sr.GetName() << "\n";
-  root.accept(sr);
-  if (stop_after == sr.GetName()) return 0;
+  SymReplace sr;
+  if (!sr.RunProgram(root)) return sr.Status();
 
   // perform shape inference of mdspans, future, etc.
   ShapeInference si(print_vn);
-  if (prt_pass) outs() << "|- " << si.GetName() << "\n";
-  root.accept(si);
-  if (si.HasError()) return 1;
-  if (stop_after == si.GetName()) return 0;
+  if (!si.RunProgram(root)) return si.Status();
 
   // inference all the unknown types - decls
   TypeInference ti(inf_type);
-  if (prt_pass) outs() << "|- " << ti.GetName() << "\n";
-  root.accept(ti);
-  if (ti.HasError()) return 1;
-  if (inf_type || print_vn || (stop_after == ti.GetName())) return 0;
+  if (!ti.RunProgram(root)) return ti.Status();
+  if (inf_type || print_vn) return 0;
 
   // late normalize
-  LateNorm ln(ti.SymTab(), outs());
-  if (prt_pass) outs() << "|- " << ln.GetName() << "\n";
-  root.accept(ln);
+  LateNorm ln(ti.SymTab());
+  if (!ln.RunProgram(root)) return ln.Status();
+
   BufferInfoCollect bic(ln.SymTab());
-  if (prt_pass) outs() << "|- " << bic.GetName() << "\n";
-  root.accept(bic);
+  if (!bic.RunProgram(root)) return bic.Status();
+
   BufferGenerate bg(ln.SymTab(), bic.FBInfo());
-  if (prt_pass) outs() << "|- " << bg.GetName() << "\n";
-  root.accept(bg);
-  if (stop_after == ln.GetName()) return 0;
+  if (!bg.RunProgram(root)) return bg.Status();
 
   // debug: dump the symbol table
-  if (std::getenv("DUMP_SYMTAB") || dump_sym) ln.SymTab()->Print(outs());
+  if (std::getenv("DUMP_SYMTAB") || dump_sym) bg.SymTab()->Print(dbgs());
 
   if (std::getenv("VISUALIZE") || visualiz) {
-    Visualizer vl(ln.SymTab());
-    if (prt_pass) outs() << "|- " << vl.GetName() << "\n";
-    root.accept(vl);
+    Visualizer vl(bg.SymTab());
+    if (!vl.RunProgram(root)) return vl.Status();
     return 0;
   }
 
   // apply the type check
-  TypeChecker sc(ln.SymTab(), outs(), tgt);
-  if (prt_pass) outs() << "|- " << sc.GetName() << "\n";
-  root.accept(sc);
-  if (sc.HasError()) return 1;
-  if (gen_none || (stop_after == sc.GetName())) return 0;
+  TypeChecker sc(bg.SymTab(), tgt);
+  if (!sc.RunProgram(root)) return sc.Status();
+
+  // --------- Following passes generate codes -------- //
+
+  if (ncodegen) return 0; // do not generate code
 
   // collect information for codegen
   CodegenPrepare cgp(sc.SymTab());
-  if (prt_pass) outs() << "|- " << cgp.GetName() << "\n";
-  root.accept(cgp);
-  if (cgp.HasError()) return 1;
+  if (!cgp.RunProgram(root)) return cgp.Status();
 
   switch (tgt) {
   case Target::Factor: {
     // apply the gcu specific checking
     GCUCheck gcu_checker(sc.SymTab());
-    if (prt_pass) outs() << "|- " << gcu_checker.GetName() << "\n";
-    root.accept(gcu_checker);
-    if (gcu_checker.HasError()) return 1;
-    if (stop_after == gcu_checker.GetName()) return 0;
+    if (!gcu_checker.RunProgram(root)) return gcu_checker.Status();
 
     FactorTrans trans(sc.SymTab(), bg.FBInfo());
-    if (prt_pass) outs() << "|- " << trans.GetName() << "\n";
     trans.SetKind(FactorTrans::Kind::T_SELECT);
-    root.accept(trans);
+    if (!trans.RunProgram(root)) return trans.Status();
     trans.SetKind(FactorTrans::Kind::T_SWAP);
-    root.accept(trans);
-    if (trans.HasError()) return 1;
-    if (stop_after == trans.GetName()) return 0;
+    if (!trans.RunProgram(root)) return trans.Status();
 
     assert(arch.GetValue().size() >= 3 &&
            arch.GetValue().substr(0, 3) == "gcu");
     MemUsageCheck mem_usage_checker(sc.SymTab(), Target::Factor,
                                     arch.GetValue());
-    if (prt_pass) outs() << "|- " << mem_usage_checker.GetName() << "\n";
-    root.accept(mem_usage_checker);
-    if (mem_usage_checker.HasError()) return 1;
-    if (stop_after == mem_usage_checker.GetName()) return 0;
+    if (!mem_usage_checker.RunProgram(root)) return mem_usage_checker.Status();
 
     Choreo::Factor::FactorCodeGen codegen(
-        outs(), sc.SymTab(), mem_usage_checker.GetRtMemUsageInfo(), bg.FBInfo(),
+        sc.SymTab(), mem_usage_checker.GetRtMemUsageInfo(), bg.FBInfo(),
         cgp.GetASTInfo(), cross_compile);
-    if (prt_pass) outs() << "|- " << codegen.GetName() << "\n";
-    root.accept(codegen);
+    if (!codegen.RunProgram(root)) return codegen.Status();
     break;
   }
   case Target::CUDA: {
-    Choreo::CUDA::CUDACodeGen codegen(outs(), sc.SymTab(), cross_compile);
-    if (prt_pass) outs() << "|- " << codegen.GetName() << "\n";
-    root.accept(codegen);
+    Choreo::CUDA::CUDACodeGen codegen(sc.SymTab(), cross_compile);
+    if (!codegen.RunProgram(root)) return codegen.Status();
     break;
   }
   case Target::Topscc: {

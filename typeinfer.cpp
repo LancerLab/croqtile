@@ -56,8 +56,8 @@ bool TypeInference::AfterVisit(AST::Node& n) {
       f->SetType(sym_ty);
     }
     if (Dump)
-      os << "Function:  " << SSTab().InScopeName(f->name)
-         << ", Type: " << AST::TYPE_STR(*f) << "\n";
+      dbgs() << "Function:  " << SSTab().InScopeName(f->name)
+             << ", Type: " << AST::TYPE_STR(*f) << "\n";
   } else if (isa<AST::DMA>(&n)) {
     dma_fmty = BaseType::UNKNOWN;
     dma_mem = Storage::NONE;
@@ -79,7 +79,7 @@ bool TypeInference::AssignSymbolWithType(const location& loc,
   }
 
   if (trace_visit)
-    os << "Assign symbol `" << sym << "` with type: " << STR(*ty) << "\n";
+    dbgs() << "Assign symbol `" << sym << "` with type: " << STR(*ty) << "\n";
 
   return true;
 }
@@ -115,7 +115,7 @@ bool TypeInference::ModifySymbolType(const location& loc,
   }
 
   if (trace_visit)
-    os << "Modify symbol `" << name << "` with type: " << STR(*ty) << "\n";
+    dbgs() << "Modify symbol `" << name << "` with type: " << STR(*ty) << "\n";
 
   return true;
 }
@@ -256,9 +256,10 @@ bool TypeInference::Visit(AST::NamedVariableDecl& n) {
   }
 
   if (Dump) {
-    os << ((AST::typeof<FutureType>(&n)) ? "Future" : "Symbol");
-    os << ":    " << SSTab().InScopeName(n.name_str) << ", Type: " << PSTR(nty);
-    os << "\n";
+    dbgs() << ((AST::typeof<FutureType>(&n)) ? "Future" : "Symbol");
+    dbgs() << ":    " << SSTab().InScopeName(n.name_str)
+           << ", Type: " << PSTR(nty);
+    dbgs() << "\n";
   }
 
   return true;
@@ -294,8 +295,8 @@ bool TypeInference::Visit(AST::NamedTypeDecl& n) {
   AssignSymbolWithType(n.LOC(), n.name_str, n.GetType());
 
   if (Dump) {
-    os << "Partial:   " << SSTab().InScopeName(n.name_str)
-       << ", Type: " << AST::TYPE_STR(n) << "\n";
+    dbgs() << "Partial:   " << SSTab().InScopeName(n.name_str)
+           << ", Type: " << AST::TYPE_STR(n) << "\n";
   }
   return true;
 }
@@ -339,8 +340,8 @@ bool TypeInference::Visit(AST::Assignment& n) {
   }
 
   if (Dump) {
-    os << "Symbol:    " << SSTab().InScopeName(n.name) << ", Type: " << PSTR(ty)
-       << "\n";
+    dbgs() << "Symbol:    " << SSTab().InScopeName(n.name)
+           << ", Type: " << PSTR(ty) << "\n";
   }
 
   cur_type.reset();
@@ -387,12 +388,12 @@ bool TypeInference::Visit(AST::Parameter& p) {
   cur_param_types.push_back(p.GetType());
 
   if (Dump) {
-    os << "Parameter: ";
+    dbgs() << "Parameter: ";
     if (p.HasSymbol())
-      os << SSTab().InScopeName(p.sym->name);
+      dbgs() << SSTab().InScopeName(p.sym->name);
     else
-      os << "(unnamed)";
-    os << ", Type: " << AST::TYPE_STR(p) << "\n";
+      dbgs() << "(unnamed)";
+    dbgs() << ", Type: " << AST::TYPE_STR(p) << "\n";
   }
 
   cur_type.reset();
@@ -651,10 +652,10 @@ bool TypeInference::Visit(AST::DMA& n) {
   }
 
   if (Dump) {
-    os << "Future:    "
-       << ((n.future.empty()) ? SSTab().ScopeName() + "(anon)"
-                              : SSTab().InScopeName(n.future))
-       << ", Type: " << AST::TYPE_STR(n) << "\n";
+    dbgs() << "Future:    "
+           << ((n.future.empty()) ? SSTab().ScopeName() + "(anon)"
+                                  : SSTab().InScopeName(n.future))
+           << ", Type: " << AST::TYPE_STR(n) << "\n";
   }
 
   cur_type.reset();
@@ -665,8 +666,8 @@ bool TypeInference::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
   AssignSymbolWithType(n.LOC(), n.biv, n.GetType());
   if (Dump) {
-    os << "Bounded:   " << SSTab().InScopeName(n.biv)
-       << ", Type: " << AST::TYPE_STR(n) << "\n";
+    dbgs() << "Bounded:   " << SSTab().InScopeName(n.biv)
+           << ", Type: " << AST::TYPE_STR(n) << "\n";
   }
   return true;
 }
@@ -689,15 +690,15 @@ bool TypeInference::Visit(AST::WithIn& n) {
 
   if (Dump) {
     if (n.with) {
-      os << "Bounded:   ";
-      os << SSTab().InScopeName(n.with->name)
-         << ", Type: " << AST::TYPE_STR(*n.with) << "\n";
+      dbgs() << "Bounded:   ";
+      dbgs() << SSTab().InScopeName(n.with->name)
+             << ", Type: " << AST::TYPE_STR(*n.with) << "\n";
     }
     if (n.with_matchers) {
       for (auto pid : n.with_matchers->values) {
         auto id = cast<AST::Identifier>(pid);
-        os << "Bounded:   " << SSTab().InScopeName(id->name)
-           << ", Type: " << AST::TYPE_STR(*id) << "\n";
+        dbgs() << "Bounded:   " << SSTab().InScopeName(id->name)
+               << ", Type: " << AST::TYPE_STR(*id) << "\n";
       }
     }
   }

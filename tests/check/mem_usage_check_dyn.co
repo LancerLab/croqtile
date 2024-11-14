@@ -1,4 +1,4 @@
-// RUN: choreo -dv=mucheck -sa=mucheck %s | FileCheck %s
+// RUN: choreo -dv=muchk -sa=muchk %s | FileCheck %s
 
 #include "choreo.h"
 

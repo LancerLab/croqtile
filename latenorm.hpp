@@ -14,9 +14,6 @@ namespace Choreo {
 
 struct LateNorm : public VisitorWithSymTab {
 private:
-  std::ostream& os;
-
-private:
   bool changed = false;
 
   // for node hoisting
@@ -27,16 +24,16 @@ private:
   std::map<AST::MultiNodes*, NodeInsertInfo> mnodes_insertions;
 
   void TraceEachVisit(const AST::Node& n) {
-    if (trace_visit) { os << n.TypeNameString() << ": " << STR(n) << "\n"; }
+    if (trace_visit) { dbgs() << n.TypeNameString() << ": " << STR(n) << "\n"; }
   }
 
 public:
   // it does not require a symbol table
-  LateNorm(const ptr<SymbolTable>& s_tab, std::ostream& o)
-      : VisitorWithSymTab("latenorm", s_tab), os(o) {}
+  LateNorm(const ptr<SymbolTable>& s_tab)
+      : VisitorWithSymTab("latenorm", s_tab) {}
 
   bool BeforeVisitImpl(AST::Node& n) override {
-    if (trace_visit) os << "before visiting " << n.TypeNameString() << "\n";
+    if (trace_visit) dbgs() << "before visiting " << n.TypeNameString() << "\n";
 
     if (auto m = dyn_cast<AST::MultiNodes>(&n)) {
       multi_nodes.push(m);
@@ -49,7 +46,7 @@ public:
   }
 
   bool AfterVisitImpl(AST::Node& n) override {
-    if (trace_visit) os << "after visiting " << n.TypeNameString() << "\n";
+    if (trace_visit) dbgs() << "after visiting " << n.TypeNameString() << "\n";
     return true;
   }
 
@@ -65,8 +62,8 @@ public:
 
       n.values.insert(n.values.begin() + index, pnode);
       SymTab()->AddSymbol(SSTab().ScopedName(sname), pnode->GetType());
-      VST_DEBUG(os << "Hoisted: " << PSTR(pnode)
-                   << ", type: " << PSTR(pnode->GetType()) << "\n");
+      VST_DEBUG(dbgs() << "Hoisted: " << PSTR(pnode)
+                       << ", type: " << PSTR(pnode->GetType()) << "\n");
     }
 
     mnodes_insertions.erase(&n);
@@ -119,13 +116,13 @@ public:
     auto var = AST::Make<AST::NamedVariableDecl>(n.to->LOC(), anon_sym);
     var->SetType(sty);
 
-    VST_DEBUG(os << "Replace: " << STR(n) << "\n");
+    VST_DEBUG(dbgs() << "Replace: " << STR(n) << "\n");
 
     n.to = AST::Make<AST::ChunkAt>(
         n.to->LOC(), AST::Make<AST::Identifier>(n.to->LOC(), anon_sym));
     n.to->SetType(sty);
 
-    VST_DEBUG(os << "with: " << STR(n) << ".\n");
+    VST_DEBUG(dbgs() << "with: " << STR(n) << ".\n");
 
     assert(cur_dma_index != -1);
     int index = cur_dma_index + mnodes_insertions[multi_nodes.top()].size();
@@ -151,9 +148,6 @@ public:
 
 struct BufferInfoCollect : public VisitorWithSymTab {
 private:
-  std::ostream& os;
-  size_t error_count = 0;
-
   std::string fname; // current function name
   ptr<FutureBufferMap> fut_buf = nullptr;
 
@@ -168,8 +162,8 @@ private:
       if (!dma->future.empty() && (dma->operation != ".any")) {
         auto buf_name = cast<AST::ChunkAt>(dma->to)->RefSymbol();
         (*fut_buf)[fname].emplace(dma->future, buf_name);
-        VST_DEBUG(os << "associate " << dma->future << " with " << buf_name
-                     << "\n");
+        VST_DEBUG(dbgs() << "associate " << dma->future << " with " << buf_name
+                         << "\n");
       }
     }
     return true;
@@ -180,12 +174,12 @@ private:
   }
 
   void TraceEachVisit(const AST::Node& n) {
-    if (trace_visit) { os << n.TypeNameString() << ": " << STR(n) << "\n"; }
+    if (trace_visit) { dbgs() << n.TypeNameString() << ": " << STR(n) << "\n"; }
   }
 
 public:
-  BufferInfoCollect(const ptr<SymbolTable> s_tab, std::ostream& o = outs())
-      : VisitorWithSymTab("bicol", s_tab), os(o) {
+  BufferInfoCollect(const ptr<SymbolTable> s_tab)
+      : VisitorWithSymTab("bicol", s_tab) {
     fut_buf = std::make_shared<FutureBufferMap>();
   }
   ~BufferInfoCollect() {}
@@ -226,15 +220,10 @@ public:
   bool Visit(AST::ChoreoFunction&) { return true; }
   bool Visit(AST::CppSourceCode&) { return true; }
   bool Visit(AST::Program&) { return true; }
-
-  bool HasError() { return false; }
 };
 
 struct BufferGenerate : public VisitorWithSymTab {
 private:
-  std::ostream& os;
-  size_t error_count = 0;
-
   std::string fname; // current function name
   ptr<FutureBufferMap> fut_buf = nullptr;
 
@@ -273,13 +262,12 @@ private:
   }
 
   void TraceEachVisit(const AST::Node& n) {
-    if (trace_visit) { os << n.TypeNameString() << ": " << STR(n) << "\n"; }
+    if (trace_visit) { dbgs() << n.TypeNameString() << ": " << STR(n) << "\n"; }
   }
 
 public:
-  BufferGenerate(const ptr<SymbolTable> s_tab, const ptr<FutureBufferMap>& fb,
-                 std::ostream& o = outs())
-      : VisitorWithSymTab("bufgen", s_tab), os(o), fut_buf(fb) {}
+  BufferGenerate(const ptr<SymbolTable> s_tab, const ptr<FutureBufferMap>& fb)
+      : VisitorWithSymTab("bufgen", s_tab), fut_buf(fb) {}
   ~BufferGenerate() {}
 
   const ptr<FutureBufferMap> FBInfo() { return fut_buf; }
@@ -296,8 +284,8 @@ public:
 
       n.values.insert(n.values.begin() + index, pnode);
       SymTab()->AddSymbol(SSTab().ScopedName(sname), pnode->GetType());
-      VST_DEBUG(os << "Hoisted: " << PSTR(pnode)
-                   << ", type: " << PSTR(pnode->GetType()) << "\n");
+      VST_DEBUG(dbgs() << "Hoisted: " << PSTR(pnode)
+                       << ", type: " << PSTR(pnode->GetType()) << "\n");
     }
 
     mnodes_insertions.erase(&n);
@@ -355,8 +343,8 @@ public:
           mnodes_insertions[multi_nodes.top()].emplace_back(
               std::make_tuple(index, var, anon_sym));
         }
-        VST_DEBUG(os << "MapBuffer: " << buf_name << " -> " << anon_sym
-                     << "\n");
+        VST_DEBUG(dbgs() << "MapBuffer: " << buf_name << " -> " << anon_sym
+                         << "\n");
         (*fut_buf)[fname][buf_name] = anon_sym;
       }
     }
@@ -375,8 +363,6 @@ public:
   bool Visit(AST::ChoreoFunction&) { return true; }
   bool Visit(AST::CppSourceCode&) { return true; }
   bool Visit(AST::Program&) { return true; }
-
-  bool HasError() { return false; }
 };
 
 } // end namespace Choreo

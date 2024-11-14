@@ -202,5 +202,5 @@ int yywrap() {
 
 bool Choreo::Scanner::debug = false;
 bool Choreo::Scanner::keep_comments = true;
-void Choreo::Scanner::Debug(std::string s) { if (debug) std::cout << "[scanner] " << s << std::endl; }
+void Choreo::Scanner::Debug(std::string s) { if (debug) dbgs() << "[scanner] " << s << std::endl; }
 

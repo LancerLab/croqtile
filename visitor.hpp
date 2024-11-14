@@ -20,17 +20,17 @@ namespace Choreo {
   } while (false)
 
 struct Visitor {
-  // virtual bool Visit(AST::Node&) = 0;
+  static constexpr const char* SprT = "*******************";
+  static constexpr const char* NewL = "\n";
+
   virtual bool BeforeVisit(AST::Node& n) {
-    if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) { // by function print
-      const char* Sep = "*******************";
+    if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) { // per-function print
       if (print_ahead) {
-        outs() << "\n"
-               << Sep << " Before " << name << ": " << f->name << " (Begin) "
-               << Sep << "\n";
-        outs() << STR(n) << "\n";
-        outs() << Sep << " Before " << name << ": " << f->name << " (End) "
-               << Sep << "\n";
+        dbgs() << NewL << SprT << " Before " << name << ": " << f->name
+               << " (Begin) " << SprT << NewL;
+        dbgs() << STR(n) << NewL;
+        dbgs() << SprT << " Before " << name << ": " << f->name << " (End) "
+               << SprT << NewL;
       }
     }
     return true;
@@ -38,14 +38,12 @@ struct Visitor {
 
   virtual bool AfterVisit(AST::Node& n) {
     if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) { // by function print
-      const char* Sep = "*******************";
       if (print_after) {
-        outs() << "\n"
-               << Sep << " After " << name << ": " << f->name << " (Begin) "
-               << Sep << "\n";
-        outs() << STR(n) << "\n";
-        outs() << Sep << " After " << name << ": " << f->name << " (End) "
-               << Sep << "\n";
+        dbgs() << NewL << SprT << " After " << name << ": " << f->name
+               << " (Begin) " << SprT << NewL;
+        dbgs() << STR(n) << NewL;
+        dbgs() << SprT << " After " << name << ": " << f->name << " (End) "
+               << SprT << NewL;
       }
     }
     return true;
@@ -97,6 +95,9 @@ protected:
   bool debug_visit = false;
   bool print_ahead = false;
   bool print_after = false;
+  bool abend_after = false;
+  bool prt_visitor = false;
+  size_t error_count = 0;
 
   static std::unordered_set<std::string> AllVisitors;
 
@@ -137,6 +138,13 @@ public:
       if (after.find("ALLPASSES") != std::string::npos) print_after = true;
       if (after.find(name) != std::string::npos) print_after = true;
     }
+
+    if (std::getenv("CHOREO_STOP_AFTER_PASS")) {
+      auto abend = ToUpper(std::string(std::getenv("CHOREO_STOP_AFTER_PASS")));
+      if (abend.find(name) != std::string::npos) abend_after = true;
+    }
+
+    if (std::getenv("CHOREO_PRINT_PASSES")) prt_visitor = true;
   }
 
   virtual ~Visitor() {}
@@ -151,6 +159,21 @@ public:
   }
 
   virtual const std::string& GetName() { return name; }
+
+  virtual bool RunProgram(AST::Node& root) {
+    if (!isa<AST::Program>(&root)) {
+      Error(root.LOC(), "Not running a choreo program.");
+      return false;
+    }
+
+    if (prt_visitor) dbgs() << "|- " << GetName() << NewL;
+
+    root.accept(*this);
+
+    if (HasError() || abend_after) return false;
+
+    return true;
+  }
 
 public:
   virtual ptr<Type> NodeType(const AST::Node& n) const {
@@ -218,6 +241,9 @@ public:
   void Note(const location& loc, const std::string& message) {
     errs() << loc << ": note: " << message << std::endl;
   }
+
+  virtual int Status() { return error_count; }
+  virtual bool HasError() { return error_count != 0; }
 };
 
 // A visitor with simple symbol auto scoping functionality
@@ -263,8 +289,7 @@ public:
         within_map.emplace(w->with->name, matchers);
       }
     }
-    BeforeVisitImpl(n); // derived class to customize
-    return true;
+    return BeforeVisitImpl(n); // derived class to customize
   }
 
   bool AfterVisit(AST::Node& n) final {
@@ -278,8 +303,7 @@ public:
       SSTab().LeaveScope();
     }
 
-    Visitor::AfterVisit(n);
-    return true;
+    return Visitor::AfterVisit(n);
   }
 
 public:

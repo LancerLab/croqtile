@@ -30,7 +30,6 @@ struct Polyhedron {
 
 struct ShapePolyhedron {
 private:
-  std::ostream& os;
   bool debug = false;
 
   std::vector<Polyhedron> polyhedrons;
@@ -43,9 +42,7 @@ private:
   int text_scale = 1;
 
 public:
-  ShapePolyhedron(const std::string& e, std::ostream& o = outs(),
-                  bool d = false)
-      : os(o), debug(d), expr(e) {}
+  ShapePolyhedron(const std::string& e, bool d = false) : debug(d), expr(e) {}
 
   int MaxPointValue() {
     int max = std::numeric_limits<int>::min();
@@ -70,12 +67,12 @@ public:
       // Here you can do something with the created polyhedron, like adding it
       // to a list
       if (debug) {
-        os << "Created Polyhedron with position: ";
-        for (int i : currentPos) { os << i << " "; }
-        os << "(";
-        for (auto i : s) os << i << " ";
-        os << ")";
-        os << std::endl;
+        dbgs() << "Created Polyhedron with position: ";
+        for (int i : currentPos) { dbgs() << i << " "; }
+        dbgs() << "(";
+        for (auto i : s) dbgs() << i << " ";
+        dbgs() << ")";
+        dbgs() << std::endl;
       }
       return;
     }
@@ -105,10 +102,10 @@ public:
 
   void RenderToPov(std::ostream& pov) {
     if (debug) {
-      os << "min: [" << minimums[0] << ", " << minimums[1] << ", "
-         << minimums[2] << "]\n";
-      os << "max: [" << maximums[0] << ", " << maximums[1] << ", "
-         << maximums[2] << "]\n";
+      dbgs() << "min: [" << minimums[0] << ", " << minimums[1] << ", "
+             << minimums[2] << "]\n";
+      dbgs() << "max: [" << maximums[0] << ", " << maximums[1] << ", "
+             << maximums[2] << "]\n";
     }
     for (const auto& polyhedron : polyhedrons) {
       int x2 = polyhedron.points[0] + polyhedron.sizes[0] * 0.9;
@@ -225,11 +222,10 @@ struct DMAPolyhedron {
 
   std::string fname; // future name
   std::string expr;
-  std::ostream& os;
 
 public:
-  DMAPolyhedron(const std::string& n, const std::string& e, std::ostream& o)
-      : fname(n), expr(e), os(o) {}
+  DMAPolyhedron(const std::string& n, const std::string& e)
+      : fname(n), expr(e) {}
 
 public:
   void GeneratePov() {
@@ -283,15 +279,13 @@ public:
     pov << "    pigment {color Brown}\n";
     pov << "  }\n";
 
-    os << "Generated POV: " << filename << "\n";
+    dbgs() << "Generated POV: " << filename << "\n";
   }
 };
 
 struct Visualizer : public VisitorWithSymTab {
 private:
-  std::ostream& os;
   std::vector<std::unique_ptr<DMAPolyhedron>> dma_polyhedrons;
-  bool debug = false;
 
 private:
   int parallel_factor = 1;
@@ -301,10 +295,9 @@ private:
   int start_y = 0;
 
 public:
-  Visualizer(const ptr<SymbolTable> s_tab, std::ostream& o = outs(),
-             bool d = false)
-      : VisitorWithSymTab("visual", s_tab), os(o), debug(d), parallel_factor(1),
-        start_x(0), start_y(0) {}
+  Visualizer(const ptr<SymbolTable> s_tab)
+      : VisitorWithSymTab("visual", s_tab), parallel_factor(1), start_x(0),
+        start_y(0) {}
   ~Visualizer() {}
 
   // derived class must call this to incorporate with symbol table
@@ -337,7 +330,7 @@ public:
   bool Visit(AST::DMA& n) override {
     start_x = 0;
     auto dp = std::make_unique<DMAPolyhedron>(InScopeName(n.future),
-                                              n.SourceString(), os);
+                                              n.SourceString());
     auto caf = cast<AST::ChunkAt>(n.from);
     if (auto sp = HandleChunkAt(*caf, parallel_factor))
       dp->from = std::move(sp);
@@ -413,7 +406,7 @@ private:
       std::set<int> parallel_bounds;
       parallel_bounds.insert(p_dim);
 
-      auto sp = std::make_unique<ShapePolyhedron>(expr, os);
+      auto sp = std::make_unique<ShapePolyhedron>(expr, debug_visit);
       sp->Create(positions, data_sizes, bounds, parallel_bounds);
       return sp;
     }
@@ -445,7 +438,7 @@ private:
           if (parallel) parallel_bounds.insert(bounds.size() - 1);
         }
       } else {
-        os << STR(*ty) << " is not expected.\n";
+        dbgs() << STR(*ty) << " is not expected.\n";
         choreo_unreachable("unable to handle the type.");
       }
     }
@@ -467,15 +460,15 @@ private:
       return nullptr;
     }
 
-    if (debug) {
-      os << "data shape: " << STR(data_shape) << "\n";
-      os << "block shape: " << STR(block_shape) << "\n";
-      os << "tiling factors: [ ";
-      for (auto b : bounds) os << b << " ";
-      os << "]\n";
+    if (debug_visit) {
+      dbgs() << "data shape: " << STR(data_shape) << "\n";
+      dbgs() << "block shape: " << STR(block_shape) << "\n";
+      dbgs() << "tiling factors: [ ";
+      for (auto b : bounds) dbgs() << b << " ";
+      dbgs() << "]\n";
     }
 
-    auto sp = std::make_unique<ShapePolyhedron>(expr, os);
+    auto sp = std::make_unique<ShapePolyhedron>(expr, debug_visit);
     sp->Create(positions, *psizes, bounds, parallel_bounds);
     sp->SetAxesLabels(bv_names);
     return sp;
@@ -502,7 +495,7 @@ private:
     std::set<int> parallel_bounds;
     parallel_bounds.insert(p_dim);
 
-    auto sp = std::make_unique<ShapePolyhedron>(mem, os);
+    auto sp = std::make_unique<ShapePolyhedron>(mem, debug_visit);
     sp->Create(positions, sizes, bounds, parallel_bounds);
     return sp;
   }

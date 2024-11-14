@@ -13,6 +13,10 @@
 
 namespace Choreo {
 
+// forward declartions
+std::ostream& errs();
+std::ostream& dbgs();
+
 class OptionBase {
 public:
   virtual ~OptionBase() {}
@@ -96,7 +100,7 @@ public:
 
   std::ostream& GetOutputStream() {
     if (output_stream) return *output_stream;
-    return outs();
+    return std::cout; // directly output to stdout
   }
 
   std::istream& GetInputStream() {
@@ -160,7 +164,7 @@ inline bool Option<T>::Parse(int argc, char** argv, int& currentArg) {
 
 // Specialization for boolean type to handle "true" and "false" strings
 template <>
-bool Option<bool>::Parse(int argc, char** argv, int& currentArg) {
+inline bool Option<bool>::Parse(int argc, char** argv, int& currentArg) {
   assert(currentArg < argc &&
          "current argument index exceeds the total count.");
   std::string arg = argv[currentArg];

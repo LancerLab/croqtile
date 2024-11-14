@@ -15,8 +15,8 @@
 #include <variant>
 #include <vector>
 
-#include "aux.hpp"
 #include "enums.hpp"
+#include "io.hpp"
 
 namespace Choreo {
 

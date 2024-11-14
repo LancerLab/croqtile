@@ -22,7 +22,6 @@ namespace Choreo {
 namespace CUDA {
 
 struct CUDACodeGen : public CodeGenerator {
-
 private:
   std::string current_fn = "";
   std::string entry_fn = "";
@@ -74,9 +73,8 @@ private:
   StringifyTable cuda_symbols;
 
 public:
-  CUDACodeGen(std::ostream& os, const ptr<SymbolTable>& symtab,
-              bool cross_compile)
-      : CodeGenerator("codegen", os, symtab), cross_compile(cross_compile) {}
+  CUDACodeGen(const ptr<SymbolTable>& symtab, bool cross_compile)
+      : CodeGenerator("codegen", symtab), cross_compile(cross_compile) {}
   void ResetBuffers() {
     ks.clear();
     fs.clear();

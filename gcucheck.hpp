@@ -31,9 +31,6 @@ public:
 
 struct GCUCheck : public VisitorWithSymTab {
 private:
-  std::ostream& os;
-  size_t error_count = 0;
-
   std::unordered_map<std::string, AST::Parameter*> cur_params;
   WorkingList workinglist;
   int parallel_level = 0;
@@ -69,12 +66,11 @@ private:
   }
 
   void TraceEachVisit(AST::Node& n, std::string sup = "") {
-    if (trace_visit) os << n.TypeNameString() << sup << "\n";
+    if (trace_visit) dbgs() << n.TypeNameString() << sup << "\n";
   }
 
 public:
-  GCUCheck(const ptr<SymbolTable> s_tab, std::ostream& o = outs())
-      : VisitorWithSymTab("gcu", s_tab), os(o) {}
+  GCUCheck(const ptr<SymbolTable> s_tab) : VisitorWithSymTab("gcu", s_tab) {}
   ~GCUCheck() {}
 
   bool Visit(AST::MultiNodes& n) {
@@ -316,9 +312,9 @@ public:
     return true;
   }
 
-  bool HasError() {
+  bool HasError() override {
     if (error_count)
-      os << "Totally " << error_count << " errors have been detected.\n";
+      dbgs() << "Totally " << error_count << " errors have been detected.\n";
     return error_count != 0;
   }
 };

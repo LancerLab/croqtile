@@ -159,13 +159,11 @@ private:
   int nextValueNumber = 0;
 
   bool trace = false;
-  std::ostream& os;
 
   std::optional<std::string> ref = std::nullopt;
 
 public:
-  explicit ValueNumbering(ShapeInference* v, bool t, std::ostream& o)
-      : visitor(v), trace(t), os(o) {}
+  explicit ValueNumbering(ShapeInference* v, bool t) : visitor(v), trace(t) {}
 
   void EnterScope();
   void LeaveScope();
@@ -294,23 +292,20 @@ private:
   TypeConstraints type_equals{this};
 
 private:
-  std::ostream& os;
   // for debugging purpose only
   bool cannot_proceed = false;
-  size_t error_count = 0;
 
   void TraceEachVisit(AST::Node& n, bool detail = false,
                       const std::string& m = "") const {
     if (!trace_visit) return;
     if (detail)
-      os << m << STR(n) << "\n";
+      dbgs() << m << STR(n) << "\n";
     else
-      os << m << n.TypeNameString() << "\n";
+      dbgs() << m << n.TypeNameString() << "\n";
   }
 
 public:
-  ShapeInference(bool t = false, std::ostream& o = outs())
-      : VisitorWithScope("valno"), vn(this, t, o), os(o) {
+  ShapeInference(bool t = false) : VisitorWithScope("valno"), vn(this, t) {
     type_equals.SetDebug(debug_visit);
   }
 
@@ -321,9 +316,9 @@ public:
     os << "\n";
   }
 
-  bool HasError() {
+  bool HasError() override {
     if (error_count)
-      os << "Totally " << error_count << " errors have been detected.\n";
+      dbgs() << "Totally " << error_count << " errors have been detected.\n";
     return error_count != 0;
   }
 
@@ -1182,8 +1177,8 @@ public:
       if (isa<IntegerType>(NodeType(*s))) {
         auto expr = cast<AST::Expr>(s);
         expr->s = GenShapeFromSignature(vn.GetSignatureForNode(*s));
-        VST_DEBUG(os << "Shape for " << PSTR(s) << ": " << STR(expr->s)
-                     << "\n");
+        VST_DEBUG(dbgs() << "Shape for " << PSTR(s) << ": " << STR(expr->s)
+                         << "\n");
       }
     }
 

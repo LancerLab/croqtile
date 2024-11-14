@@ -35,8 +35,6 @@ struct FactorTrans : public VisitorWithSymTab {
   enum class Kind { T_NONE, T_SWAP, T_SELECT };
 
 private:
-  std::ostream& os;
-  size_t error_count = 0;
   Kind kind = Kind::T_NONE;
 
   // For SWAP codegen
@@ -126,15 +124,14 @@ private:
   }
 
 public:
-  FactorTrans(const ptr<SymbolTable> s_tab, const ptr<FutureBufferMap>& fb,
-              std::ostream& o = outs())
-      : VisitorWithSymTab("ftran", s_tab), os(o), fut_buf(fb) {}
+  FactorTrans(const ptr<SymbolTable> s_tab, const ptr<FutureBufferMap>& fb)
+      : VisitorWithSymTab("ftran", s_tab), fut_buf(fb) {}
   ~FactorTrans() {}
 
   void SetKind(Kind k) { kind = k; }
 
   void TraceEachVisit(AST::Node& n, const std::string& m = "") const {
-    if (trace_visit) os << m << n.TypeNameString() << "\n";
+    if (trace_visit) dbgs() << m << n.TypeNameString() << "\n";
   }
 
   bool Visit(AST::MultiNodes& n) {
@@ -151,8 +148,8 @@ public:
 
       n.values.insert(n.values.begin() + index, pnode);
       SymTab()->AddSymbol(SSTab().ScopedName(sname), pnode->GetType());
-      VST_DEBUG(os << "Hoisted: " << PSTR(pnode)
-                   << ", type: " << PSTR(pnode->GetType()) << "\n");
+      VST_DEBUG(dbgs() << "Hoisted: " << PSTR(pnode)
+                       << ", type: " << PSTR(pnode->GetType()) << "\n");
     }
 
     mnodes_insertions.erase(&n);
@@ -178,13 +175,13 @@ public:
     auto fut_name = id->name;
     if (!fut_buf->at(fname).count(fut_name)) return true;
 
-    VST_DEBUG(os << "Replace: " << STR(n) << "\nWith: ");
+    VST_DEBUG(dbgs() << "Replace: " << STR(n) << "\nWith: ");
 
     auto rexp = cast<AST::Expr>(n.GetR());
     n.OverWrite(*rexp);
     n.GetSymbol()->name = fut_buf->at(fname)[fut_name];
 
-    VST_DEBUG(os << STR(n) << "\n");
+    VST_DEBUG(dbgs() << STR(n) << "\n");
 
     return true;
   }
@@ -489,8 +486,6 @@ public:
   bool Visit(AST::ChoreoFunction&) { return true; }
   bool Visit(AST::CppSourceCode&) { return true; }
   bool Visit(AST::Program&) { return true; }
-
-  bool HasError() { return false; }
 };
 
 } // end namespace Choreo

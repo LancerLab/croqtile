@@ -66,7 +66,8 @@ void ValueNumbering::EnterScope() {
 
   if (trace)
     if (visitor->SSTab().ScopeDepth() > 1)
-      os << indent << "scope-" << visitor->SSTab().ScopeDepth() - 1 << " {\n";
+      dbgs() << indent << "scope-" << visitor->SSTab().ScopeDepth() - 1
+             << " {\n";
 }
 
 void ValueNumbering::LeaveScope() {
@@ -86,7 +87,7 @@ void ValueNumbering::LeaveScope() {
     bind_info.Clear();
   }
 
-  if (trace) os << ScopeIndent() << "} // end scope-" << sname << "\n";
+  if (trace) dbgs() << ScopeIndent() << "} // end scope-" << sname << "\n";
 }
 
 // It binds a expression sigature with an existing value number.  use it
@@ -101,7 +102,7 @@ void ValueNumbering::AssociateSignatureWithValueNumber(const std::string& sig,
   InternalUpdateExprValNo(sig, valno);
 
   if (trace)
-    os << ScopeIndent() << "Alias \"" << sig << "\" -> #" << valno << "\n";
+    dbgs() << ScopeIndent() << "Alias \"" << sig << "\" -> #" << valno << "\n";
 }
 
 void ValueNumbering::AssociateSignatureWithInvalidValueNumber(
@@ -110,7 +111,8 @@ void ValueNumbering::AssociateSignatureWithInvalidValueNumber(
 
   InternalUpdateExprValNo(sig, GetInvalidValueNumber());
 
-  if (trace) os << ScopeIndent() << "Alias \"" << sig << "\" -> #<invalid>\n";
+  if (trace)
+    dbgs() << ScopeIndent() << "Alias \"" << sig << "\" -> #<invalid>\n";
 }
 
 void ValueNumbering::RebindSignatureWithValueNumber(const std::string& sig,
@@ -124,8 +126,8 @@ void ValueNumbering::RebindSignatureWithValueNumber(const std::string& sig,
            "expecting rebind of an invalid value number.");
     (*evn)[sig] = valno;
     if (!changed && trace)
-      os << ScopeIndent() << "Alias(Rebind) \"" << sig << "\" -> #" << valno
-         << "\n";
+      dbgs() << ScopeIndent() << "Alias(Rebind) \"" << sig << "\" -> #" << valno
+             << "\n";
     changed = true;
   }
 
@@ -218,16 +220,16 @@ ValueNumbering::TryToSimplifyBinary(const location& loc, const std::string& op,
     else if (op == "/") {
       int div_end = std::stoi(*r_cv);
       if (div_end == 0) {
-        os << ScopeIndent() << "<ERROR> divide by zero: " << lhs << " / " << rhs
-           << "\n";
+        dbgs() << ScopeIndent() << "<ERROR> divide by zero: " << lhs << " / "
+               << rhs << "\n";
         choreo_unreachable("divide by zero is found in shape evaluation.");
       }
       res += std::to_string(std::stoi(*l_cv) / div_end);
     } else if (op == "%") {
       int div_end = std::stoi(*r_cv);
       if (div_end == 0) {
-        os << ScopeIndent() << "<ERROR> divide by zero: " << lhs << " / " << rhs
-           << "\n";
+        dbgs() << ScopeIndent() << "<ERROR> divide by zero: " << lhs << " / "
+               << rhs << "\n";
         choreo_unreachable("divide by zero is found in shape evaluation.");
       }
       res += std::to_string(std::stoi(*l_cv) % std::stoi(*r_cv));
@@ -246,8 +248,8 @@ ValueNumbering::TryToSimplifyBinary(const location& loc, const std::string& op,
     } else if (op == "cdiv") {
       int div_end = std::stoi(*r_cv);
       if (div_end == 0) {
-        os << ScopeIndent() << "<ERROR> divide by zero: " << lhs << " / " << rhs
-           << "\n";
+        dbgs() << ScopeIndent() << "<ERROR> divide by zero: " << lhs << " / "
+               << rhs << "\n";
         choreo_unreachable("divide by zero is found in shape evaluation.");
       }
       res += std::to_string((std::stoi(*l_cv) + std::stoi(*r_cv) - 1) /
@@ -261,8 +263,8 @@ ValueNumbering::TryToSimplifyBinary(const location& loc, const std::string& op,
       return std::nullopt;
     }
     if (trace && verbose)
-      os << ScopeIndent() << "<Simplify> '" << lhs << " " << op << " " << rhs
-         << " to '" << res << "'\n";
+      dbgs() << ScopeIndent() << "<Simplify> '" << lhs << " " << op << " "
+             << rhs << " to '" << res << "'\n";
     return res;
   }
 
@@ -271,8 +273,8 @@ ValueNumbering::TryToSimplifyBinary(const location& loc, const std::string& op,
     if (GetValueNumberOfSignature(lhs) == GetValueNumberOfSignature(rhs)) {
       std::string res = "const_1";
       if (trace && verbose)
-        os << ScopeIndent() << "<Simplify> '" << lhs << " " << op << " " << rhs
-           << " to '" << res << "'\n";
+        dbgs() << ScopeIndent() << "<Simplify> '" << lhs << " " << op << " "
+               << rhs << " to '" << res << "'\n";
       return res;
     }
     // a/1 = a
@@ -291,8 +293,8 @@ ValueNumbering::TryToSimplifyBinary(const location& loc, const std::string& op,
           auto res = GetSignatureFromValueNumber(div[1]);
 
           if (trace && verbose)
-            os << ScopeIndent() << "<Simplify> '" << lhs << " " << op << " "
-               << rhs << " to '" << res << "'\n";
+            dbgs() << ScopeIndent() << "<Simplify> '" << lhs << " " << op << " "
+                   << rhs << " to '" << res << "'\n";
 
           return res;
         }
@@ -350,8 +352,8 @@ ValueNumbering::SignBoundedOperation(const location& loc, const std::string& op,
     choreo_unreachable("operation is not supported for bounded variables.");
 
   if (trace && verbose)
-    os << ScopeIndent() << "<Bounded> '" << STR(lhs) << " " << op << " "
-       << STR(rhs) << "' ubound: '" << *res << "'\n";
+    dbgs() << ScopeIndent() << "<Bounded> '" << STR(lhs) << " " << op << " "
+           << STR(rhs) << "' ubound: '" << *res << "'\n";
   return res;
 }
 
@@ -384,10 +386,10 @@ ValueNumbering::TryToSimplifyNodeSignature(const AST::Node& node) {
                                               GetSignatureForNode(*n->GetR()));
 
                if (res && trace)
-                 os << ScopeIndent() << "<Simplify> '"
-                    << GenerateNodeSignature(*n->GetL(), false) << " + "
-                    << GenerateNodeSignature(*n->GetR(), false) << "' to '"
-                    << res.value() << "'\n";
+                 dbgs() << ScopeIndent() << "<Simplify> '"
+                        << GenerateNodeSignature(*n->GetL(), false) << " + "
+                        << GenerateNodeSignature(*n->GetR(), false) << "' to '"
+                        << res.value() << "'\n";
                return res;
              }},
             {"-",
@@ -397,10 +399,10 @@ ValueNumbering::TryToSimplifyNodeSignature(const AST::Node& node) {
                                               GetSignatureForNode(*n->GetR()));
 
                if (res && trace)
-                 os << ScopeIndent() << "<Simplify> '"
-                    << GenerateNodeSignature(*n->GetL(), false) << " - "
-                    << GenerateNodeSignature(*n->GetR(), false) << "' to '"
-                    << res.value() << "'\n";
+                 dbgs() << ScopeIndent() << "<Simplify> '"
+                        << GenerateNodeSignature(*n->GetL(), false) << " - "
+                        << GenerateNodeSignature(*n->GetR(), false) << "' to '"
+                        << res.value() << "'\n";
                return res;
              }},
             {"*",
@@ -409,10 +411,10 @@ ValueNumbering::TryToSimplifyNodeSignature(const AST::Node& node) {
                                               GetSignatureForNode(*n->GetL()),
                                               GetSignatureForNode(*n->GetR()));
                if (res && trace)
-                 os << ScopeIndent() << "<Simplify> '"
-                    << GenerateNodeSignature(*n->GetL(), false) << " * "
-                    << GenerateNodeSignature(*n->GetR(), false) << "' to '"
-                    << res.value() << "'\n";
+                 dbgs() << ScopeIndent() << "<Simplify> '"
+                        << GenerateNodeSignature(*n->GetL(), false) << " * "
+                        << GenerateNodeSignature(*n->GetR(), false) << "' to '"
+                        << res.value() << "'\n";
                return res;
              }},
             {"/",
@@ -421,10 +423,10 @@ ValueNumbering::TryToSimplifyNodeSignature(const AST::Node& node) {
                                               GetSignatureForNode(*n->GetL()),
                                               GetSignatureForNode(*n->GetR()));
                if (res && trace)
-                 os << ScopeIndent() << "<Simplify> '"
-                    << GenerateNodeSignature(*n->GetL(), false) << " / "
-                    << GenerateNodeSignature(*n->GetR(), false) << "' to '"
-                    << res.value() << "'\n";
+                 dbgs() << ScopeIndent() << "<Simplify> '"
+                        << GenerateNodeSignature(*n->GetL(), false) << " / "
+                        << GenerateNodeSignature(*n->GetR(), false) << "' to '"
+                        << res.value() << "'\n";
                return res;
              }},
             {"%",
@@ -433,10 +435,10 @@ ValueNumbering::TryToSimplifyNodeSignature(const AST::Node& node) {
                                               GetSignatureForNode(*n->GetL()),
                                               GetSignatureForNode(*n->GetR()));
                if (res && trace)
-                 os << ScopeIndent() << "<Simplify> '"
-                    << GenerateNodeSignature(*n->GetL(), false) << " % "
-                    << GenerateNodeSignature(*n->GetR(), false) << "' to '"
-                    << res.value() << "'\n";
+                 dbgs() << ScopeIndent() << "<Simplify> '"
+                        << GenerateNodeSignature(*n->GetL(), false) << " % "
+                        << GenerateNodeSignature(*n->GetR(), false) << "' to '"
+                        << res.value() << "'\n";
                return res;
              }},
             {"cdiv",
@@ -445,10 +447,10 @@ ValueNumbering::TryToSimplifyNodeSignature(const AST::Node& node) {
                                               GetSignatureForNode(*n->GetL()),
                                               GetSignatureForNode(*n->GetR()));
                if (res && trace)
-                 os << ScopeIndent() << "<Simplify> '"
-                    << GenerateNodeSignature(*n->GetL(), false) << " cdiv "
-                    << GenerateNodeSignature(*n->GetR(), false) << "' to '"
-                    << res.value() << "'\n";
+                 dbgs() << ScopeIndent() << "<Simplify> '"
+                        << GenerateNodeSignature(*n->GetL(), false) << " cdiv "
+                        << GenerateNodeSignature(*n->GetR(), false) << "' to '"
+                        << res.value() << "'\n";
                return res;
              }},
             {"#",
@@ -457,10 +459,10 @@ ValueNumbering::TryToSimplifyNodeSignature(const AST::Node& node) {
                                               GetSignatureForNode(*n->GetL()),
                                               GetSignatureForNode(*n->GetR()));
                if (res && trace)
-                 os << ScopeIndent() << "<Simplify> '"
-                    << GenerateNodeSignature(*n->GetL(), false) << " # "
-                    << GenerateNodeSignature(*n->GetR(), false) << "' to '"
-                    << res.value() << "'\n";
+                 dbgs() << ScopeIndent() << "<Simplify> '"
+                        << GenerateNodeSignature(*n->GetL(), false) << " # "
+                        << GenerateNodeSignature(*n->GetR(), false) << "' to '"
+                        << res.value() << "'\n";
                return res;
              }},
             {"||",
@@ -488,11 +490,11 @@ ValueNumbering::TryToSimplifyNodeSignature(const AST::Node& node) {
                  else
                    res = GetSignatureForNode(*n->GetR());
                  if (trace) {
-                   os << ScopeIndent() << "<Simplify> '"
-                      << GenerateNodeSignature(*n->GetC(), false) << " ? "
-                      << GenerateNodeSignature(*n->GetL(), false) << " : "
-                      << GenerateNodeSignature(*n->GetR(), false) << "' to '"
-                      << res << "'\n";
+                   dbgs() << ScopeIndent() << "<Simplify> '"
+                          << GenerateNodeSignature(*n->GetC(), false) << " ? "
+                          << GenerateNodeSignature(*n->GetL(), false) << " : "
+                          << GenerateNodeSignature(*n->GetR(), false)
+                          << "' to '" << res << "'\n";
                  }
                  return res;
                }
@@ -504,10 +506,10 @@ ValueNumbering::TryToSimplifyNodeSignature(const AST::Node& node) {
                                               GetSignatureForNode(*n->GetL()),
                                               GetSignatureForNode(*n->GetR()));
                if (res && trace)
-                 os << ScopeIndent() << "<Simplify> '"
-                    << GenerateNodeSignature(*n->GetL(), false) << " < "
-                    << GenerateNodeSignature(*n->GetR(), false) << "' to '"
-                    << res.value() << "'\n";
+                 dbgs() << ScopeIndent() << "<Simplify> '"
+                        << GenerateNodeSignature(*n->GetL(), false) << " < "
+                        << GenerateNodeSignature(*n->GetR(), false) << "' to '"
+                        << res.value() << "'\n";
                return res;
              }},
             {">",
@@ -516,10 +518,10 @@ ValueNumbering::TryToSimplifyNodeSignature(const AST::Node& node) {
                                               GetSignatureForNode(*n->GetL()),
                                               GetSignatureForNode(*n->GetR()));
                if (res && trace)
-                 os << ScopeIndent() << "<Simplify> '"
-                    << GenerateNodeSignature(*n->GetL(), false) << " > "
-                    << GenerateNodeSignature(*n->GetR(), false) << "' to '"
-                    << res.value() << "'\n";
+                 dbgs() << ScopeIndent() << "<Simplify> '"
+                        << GenerateNodeSignature(*n->GetL(), false) << " > "
+                        << GenerateNodeSignature(*n->GetR(), false) << "' to '"
+                        << res.value() << "'\n";
                return res;
              }},
             {"==",
@@ -528,10 +530,10 @@ ValueNumbering::TryToSimplifyNodeSignature(const AST::Node& node) {
                    n->LOC(), "==", GetSignatureForNode(*n->GetL()),
                    GetSignatureForNode(*n->GetR()));
                if (res && trace)
-                 os << ScopeIndent() << "<Simplify> '"
-                    << GenerateNodeSignature(*n->GetL(), false)
-                    << " == " << GenerateNodeSignature(*n->GetR(), false)
-                    << "' to '" << res.value() << "'\n";
+                 dbgs() << ScopeIndent() << "<Simplify> '"
+                        << GenerateNodeSignature(*n->GetL(), false)
+                        << " == " << GenerateNodeSignature(*n->GetR(), false)
+                        << "' to '" << res.value() << "'\n";
                return res;
              }},
             {"!=",
@@ -540,10 +542,10 @@ ValueNumbering::TryToSimplifyNodeSignature(const AST::Node& node) {
                    n->LOC(), "!=", GetSignatureForNode(*n->GetL()),
                    GetSignatureForNode(*n->GetR()));
                if (res && trace)
-                 os << ScopeIndent() << "<Simplify> '"
-                    << GenerateNodeSignature(*n->GetL(), false)
-                    << " != " << GenerateNodeSignature(*n->GetR(), false)
-                    << "' to '" << res.value() << "'\n";
+                 dbgs() << ScopeIndent() << "<Simplify> '"
+                        << GenerateNodeSignature(*n->GetL(), false)
+                        << " != " << GenerateNodeSignature(*n->GetR(), false)
+                        << "' to '" << res.value() << "'\n";
                return res;
              }},
             {"<=",
@@ -552,10 +554,10 @@ ValueNumbering::TryToSimplifyNodeSignature(const AST::Node& node) {
                    n->LOC(), "<=", GetSignatureForNode(*n->GetL()),
                    GetSignatureForNode(*n->GetR()));
                if (res && trace)
-                 os << ScopeIndent() << "<Simplify> '"
-                    << GenerateNodeSignature(*n->GetL(), false)
-                    << " <= " << GenerateNodeSignature(*n->GetR(), false)
-                    << "' to '" << res.value() << "'\n";
+                 dbgs() << ScopeIndent() << "<Simplify> '"
+                        << GenerateNodeSignature(*n->GetL(), false)
+                        << " <= " << GenerateNodeSignature(*n->GetR(), false)
+                        << "' to '" << res.value() << "'\n";
                return res;
              }},
             {">=",
@@ -564,10 +566,10 @@ ValueNumbering::TryToSimplifyNodeSignature(const AST::Node& node) {
                    n->LOC(), ">=", GetSignatureForNode(*n->GetL()),
                    GetSignatureForNode(*n->GetR()));
                if (res && trace)
-                 os << ScopeIndent() << "<Simplify> '"
-                    << GenerateNodeSignature(*n->GetL(), false)
-                    << " >= " << GenerateNodeSignature(*n->GetR(), false)
-                    << "' to '" << res.value() << "'\n";
+                 dbgs() << ScopeIndent() << "<Simplify> '"
+                        << GenerateNodeSignature(*n->GetL(), false)
+                        << " >= " << GenerateNodeSignature(*n->GetR(), false)
+                        << "' to '" << res.value() << "'\n";
                return res;
              }},
             {"dataof",
@@ -810,7 +812,8 @@ void ValueNumbering::BindValueNumbers(int vn0, int vn1) {
   AddBind(vn0, vn1);
 
   if (trace)
-    os << ScopeIndent() << "<Bind> VN #" << vn0 << " <-> VN #" << vn1 << "\n";
+    dbgs() << ScopeIndent() << "<Bind> VN #" << vn0 << " <-> VN #" << vn1
+           << "\n";
 }
 
 bool ValueNumbering::HasValueNumberOfSignature(const std::string& signature) {
@@ -852,7 +855,8 @@ int ValueNumbering::GenerateValueNumberFromSignature(
   InternalUpdateValNoExpr(valNo, signature);
 
   if (trace)
-    os << ScopeIndent() << "New VN #" << valNo << ": '" << signature << "'\n";
+    dbgs() << ScopeIndent() << "New VN #" << valNo << ": '" << signature
+           << "'\n";
 
   return valNo;
 }
@@ -866,6 +870,7 @@ std::string ValueNumbering::ScopeIndent() {
 void ValueNumbering::Error(const location& loc, const std::string& message) {
   visitor->Error(loc, message);
 }
+
 void ValueNumbering::Warning(const location& loc, const std::string& message) {
   visitor->Warning(loc, message);
 }

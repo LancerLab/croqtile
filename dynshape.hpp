@@ -9,8 +9,6 @@ namespace Choreo {
 
 struct CodegenPrepare : public CodeGenerator {
 private:
-  size_t error_count = 0;
-
   ptr<CodeGenInfo> cgi;
   std::string fname; // current function name
 
@@ -24,11 +22,11 @@ private:
   }
   bool AfterVisitImpl(AST::Node& n) {
     if (isa<AST::ChoreoFunction>(&n)) {
-      VST_DEBUG(os << "Symbols in " << fname << ":\n");
+      VST_DEBUG(dbgs() << "Symbols in " << fname << ":\n");
       VST_DEBUG(for (auto& item : cgi->storages[fname]) {
-        os << " |- " << item.name << ", ty: " << PSTR(item.type)
-           << ", is_return: " << item.is_return << ", index: " << item.p_index
-           << "\n";
+        dbgs() << " |- " << item.name << ", ty: " << PSTR(item.type)
+               << ", is_return: " << item.is_return
+               << ", index: " << item.p_index << "\n";
       });
       fname = "";
     }
@@ -36,8 +34,8 @@ private:
   }
 
 public:
-  CodegenPrepare(const ptr<SymbolTable> s_tab, std::ostream& o = outs())
-      : CodeGenerator("prepare", o, s_tab) {
+  CodegenPrepare(const ptr<SymbolTable> s_tab)
+      : CodeGenerator("prepare", s_tab) {
     cgi = std::make_shared<CodeGenInfo>();
   }
   ~CodegenPrepare() {}
@@ -106,8 +104,6 @@ public:
   bool Visit(AST::ChoreoFunction&) { return true; }
   bool Visit(AST::CppSourceCode&) { return true; }
   bool Visit(AST::Program&) { return true; }
-
-  bool HasError() { return false; }
 };
 
 } // end namespace Choreo

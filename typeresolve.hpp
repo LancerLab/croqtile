@@ -15,10 +15,9 @@ class TypeConstraints {
 
   bool debug = false;
   bool report_type = false;
-  std::ostream& os;
 
 public:
-  TypeConstraints(Visitor* v, std::ostream& o = outs()) : visitor(v), os(o) {}
+  TypeConstraints(Visitor* v) : visitor(v) {}
 
   void SetDebug(bool d) { debug = d; }
   void SetTypeReport(bool r) { report_type = r; }
@@ -36,7 +35,8 @@ public:
     equals[b].push_back(a);
 
     if (debug)
-      os << "[RType] Add equality between '" << a << "' and '" << b << "'\n";
+      dbgs() << "[RType] Add equality between '" << a << "' and '" << b
+             << "'\n";
   }
 
   std::optional<std::reference_wrapper<const std::vector<std::string>>>
@@ -63,19 +63,19 @@ public:
                  "expect type to have same category.");
           visitor->SSTab().ModifyScopedSymbolType(e, ty);
           if (debug)
-            os << "[RType] Set the type of '" << e << "' to be " << PSTR(ty)
-               << "\n";
+            dbgs() << "[RType] Set the type of '" << e << "' to be " << PSTR(ty)
+                   << "\n";
           if (auto pty = GetSpannedType(ty)) {
             visitor->SSTab().ModifyScopedSymbolType(e + ".span",
                                                     pty->GetMDSpanType());
             if (debug)
-              os << "[RType] Set the type of '" << e + ".span" << "' to be "
-                 << PSTR(pty->GetMDSpanType()) << "\n";
+              dbgs() << "[RType] Set the type of '" << e + ".span" << "' to be "
+                     << PSTR(pty->GetMDSpanType()) << "\n";
             if (auto fty = dyn_cast<FutureType>(ty)) {
               visitor->SSTab().ModifyScopedSymbolType(e + ".data", pty);
               if (debug)
-                os << "[RType] Set the type of '" << e + ".data" << "' to be "
-                   << PSTR(pty) << "\n";
+                dbgs() << "[RType] Set the type of '" << e + ".data"
+                       << "' to be " << PSTR(pty) << "\n";
             }
           }
           if (report_type) ReportSymbolType(e, ty);
@@ -83,19 +83,19 @@ public:
           assert(ty->ApprxEqual(*sty));
           visitor->SSTab().ModifyScopedSymbolType(e, ty);
           if (debug)
-            os << "[RType] Set the type of '" << e << "' to be " << PSTR(ty)
-               << "\n";
+            dbgs() << "[RType] Set the type of '" << e << "' to be " << PSTR(ty)
+                   << "\n";
           if (auto pty = GetSpannedType(ty)) {
             visitor->SSTab().ModifyScopedSymbolType(e + ".span",
                                                     pty->GetMDSpanType());
             if (debug)
-              os << "[RType] Set the type of '" << e + ".span" << "' to be "
-                 << PSTR(pty->GetMDSpanType()) << "\n";
+              dbgs() << "[RType] Set the type of '" << e + ".span" << "' to be "
+                     << PSTR(pty->GetMDSpanType()) << "\n";
             if (auto fty = dyn_cast<FutureType>(ty)) {
               visitor->SSTab().ModifyScopedSymbolType(e + ".data", pty);
               if (debug)
-                os << "[RType] Set the type of '" << e + ".data" << "' to be "
-                   << PSTR(pty) << "\n";
+                dbgs() << "[RType] Set the type of '" << e + ".data"
+                       << "' to be " << PSTR(pty) << "\n";
             }
           }
           if (report_type) ReportSymbolType(e, ty);
@@ -183,7 +183,7 @@ public:
                  visitor->SSTab().InScopeName(cid->name));
       }
     }
-    if (debug) os << "[RType] Get only future type: " << PSTR(fty) << ".\n";
+    if (debug) dbgs() << "[RType] Get only future type: " << PSTR(fty) << ".\n";
     return fty;
   }
 
@@ -213,10 +213,10 @@ public:
 
   void ReportSymbolType(const std::string& name, const ptr<Type>& ty) {
     if (isa<SpannedType>(ty))
-      os << "Symbol:    ";
+      dbgs() << "Symbol:    ";
     else if (isa<FutureType>(ty))
-      os << "Future:    ";
-    os << name << ", Type: " << PSTR(ty) << "\n";
+      dbgs() << "Future:    ";
+    dbgs() << name << ", Type: " << PSTR(ty) << "\n";
   }
 };
 

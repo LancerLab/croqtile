@@ -18,7 +18,8 @@ inline std::string ExSTR(const SymReplace::SymExpr& sym_expr) {
 
 bool SymReplace::InsertNameSymbolMap(std::string name, const Symbol& sym) {
   assert(!name_symbol_map.count(name));
-  SR_DEBUG(os << "insert name symbol map: " << name << " === " << sym << "\n");
+  SR_DEBUG(dbgs() << "insert name symbol map: " << name << " === " << sym
+                  << "\n");
   name_symbol_map.emplace(name, sym);
   return true;
 }
@@ -32,8 +33,8 @@ SymReplace::GetSymbolFromName(std::string name) const {
 bool SymReplace::InsertNameSymExprMap(std::string sname,
                                       const SymExpr& sym_expr) {
   assert(!name_sym_expr_map.count(sname));
-  SR_DEBUG(os << "insert name symbol expr map: " << sname << " === " << sym_expr
-              << "\n");
+  SR_DEBUG(dbgs() << "insert name symbol expr map: " << sname
+                  << " === " << sym_expr << "\n");
   name_sym_expr_map.emplace(sname, sym_expr);
   return true;
 }
@@ -48,8 +49,8 @@ bool SymReplace::InsertExprSymValnoMap(ptr<AST::Node> n,
                                        const SymValno sym_valno) {
   assert(!expr_sym_valno_map.count(n));
   expr_sym_valno_map.emplace(n, sym_valno);
-  SR_DEBUG(os << "insert expr with symvalno: [" << PSTR(n) << ", " << sym_valno
-              << "]\n");
+  SR_DEBUG(dbgs() << "insert expr with symvalno: [" << PSTR(n) << ", "
+                  << sym_valno << "]\n");
   return true;
 }
 
@@ -62,8 +63,8 @@ bool SymReplace::InsertSymValnoSymExprMap(SymValno sym_valno,
                                           const SymExpr& sym_expr) {
   if (sym_valno_sym_expr_map.count(sym_valno)) return false;
   sym_valno_sym_expr_map.emplace(sym_valno, sym_expr);
-  SR_DEBUG(os << "insert symvalno wtih symexpr: [" << sym_valno << ", "
-              << sym_expr << "]\n");
+  SR_DEBUG(dbgs() << "insert symvalno wtih symexpr: [" << sym_valno << ", "
+                  << sym_expr << "]\n");
   return true;
 }
 
@@ -75,8 +76,8 @@ SymReplace::GetSymExprFromSymValno(SymValno sym_valno) const {
 
 void SymReplace::InsertNdSnSymMap(ptr<AST::Node> n, const std::string& name,
                                   bool should_scoped /* = true */) {
-  SR_DEBUG(os << "trying to add nd2sn: " << PSTR(n) << " with " << name
-              << "\n");
+  SR_DEBUG(dbgs() << "trying to add nd2sn: " << PSTR(n) << " with " << name
+                  << "\n");
   std::string res_name;
   if (should_scoped) {
     if (SSTab().IsDeclared(name))
@@ -91,13 +92,14 @@ void SymReplace::InsertNdSnSymMap(ptr<AST::Node> n, const std::string& name,
     Symbol sym(res_name, res_name);
     InsertNameSymbolMap(res_name, sym);
   }
-  SR_DEBUG(os << "add nd2sn: " << PSTR(n) << " with " << nd2sn.at(n) << "\n");
+  SR_DEBUG(dbgs() << "add nd2sn: " << PSTR(n) << " with " << nd2sn.at(n)
+                  << "\n");
 }
 
 void SymReplace::InitializeNode(ptr<AST::Node> n) {
   if (n == nullptr) return;
 
-  SR_DEBUG(os << "Now initialize node: " << PSTR(n) << "\n");
+  SR_DEBUG(dbgs() << "Now initialize node: " << PSTR(n) << "\n");
   if (auto e = dyn_cast<AST::Expr>(n)) {
     InitializeNode(e->GetC());
     InitializeNode(e->GetL());
@@ -232,11 +234,11 @@ SymReplace::SymExpr SymReplace::StringifyOpFromSymExpr(
 
 void SymReplace::SymbolizeExprNode(ptr<AST::Node> n) {
   if (n == nullptr) return;
-  SR_DEBUG(os << "Now symblize for node: " << PSTR(n)
-              << " with addr: " << n.get() << "\n");
+  SR_DEBUG(dbgs() << "Now symblize for node: " << PSTR(n)
+                  << " with addr: " << n.get() << "\n");
   auto e = dyn_cast<AST::Expr>(n);
   if (!e) return;
-  SR_DEBUG(os << "\tthe node is expr!\n");
+  SR_DEBUG(dbgs() << "\tthe node is expr!\n");
 
   auto C = e->GetC();
   auto L = e->GetL();
@@ -391,7 +393,7 @@ void SymReplace::SymbolizeExprNode(ptr<AST::Node> n) {
     choreo_unreachable("The form of expr " + PSTR(e) +
                        " is not supported in SymReplace yet.");
   }
-  SR_DEBUG(os << "res symbolic expr is " << res << "\n");
+  SR_DEBUG(dbgs() << "res symbolic expr is " << res << "\n");
   // TODO(wsj): workaround! `named_spanned_decls` in parser.yy leads to insert
   // the node into expr_sym_valno_map repeatedly! Some other
   // situations(tests/parse/spanned_decl.co) may lead to the same result.
@@ -402,7 +404,7 @@ void SymReplace::SymbolizeExprNode(ptr<AST::Node> n) {
   }
   InsertExprSymValnoMap(n, GetValidSymValno(res));
   InsertSymValnoSymExprMap(GetSymValnoFromExpr(n), res);
-  SR_DEBUG(os << "symbolize for node " << PSTR(n) << " is done\n");
+  SR_DEBUG(dbgs() << "symbolize for node " << PSTR(n) << " is done\n");
 }
 
 void SymReplace::EquivalentlyReplaceExprNodes() {
@@ -435,13 +437,13 @@ void SymReplace::EquivalentlyReplaceExprNodes() {
 
     VST_DEBUG(
         if (should_use_colors()) {
-          os << cyan << pass_name << " " << blue << "REPLACE " << reset
-             << PSTR(orig_node) << blue << " WITH " << reset << PSTR(new_node)
-             << "\n";
+          dbgs() << cyan << pass_name << " " << blue << "REPLACE " << reset
+                 << PSTR(orig_node) << blue << " WITH " << reset
+                 << PSTR(new_node) << "\n";
         } else {
-          os << pass_name << " "
-             << "REPLACE " << PSTR(orig_node) << " WITH " << PSTR(new_node)
-             << "\n";
+          dbgs() << pass_name << " "
+                 << "REPLACE " << PSTR(orig_node) << " WITH " << PSTR(new_node)
+                 << "\n";
         });
 
     auto C = new_expr->GetC();

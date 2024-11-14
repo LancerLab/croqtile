@@ -30,15 +30,12 @@ struct CodeGenInfo {
 
 // Codegenerators for targets
 struct CodeGenerator : public VisitorWithSymTab {
-  std::ostream& os;
-
   // some default method for the derived classes that do not want to override.
   bool BeforeVisitImpl(AST::Node&) override { return true; }
   bool AfterVisitImpl(AST::Node&) override { return true; }
 
-  CodeGenerator(const std::string& n, std::ostream& o,
-                const ptr<SymbolTable>& symtab)
-      : VisitorWithSymTab(n, symtab), os(o) {
+  CodeGenerator(const std::string& n, const ptr<SymbolTable>& symtab)
+      : VisitorWithSymTab(n, symtab) {
     if (symtab == nullptr)
       choreo_unreachable("symbol table must be initialized.");
   }
@@ -47,9 +44,9 @@ struct CodeGenerator : public VisitorWithSymTab {
                               const std::string& m = "") const {
     if (!trace_visit) return;
     if (detail)
-      os << m << STR(n) << "\n";
+      dbgs() << m << STR(n) << "\n";
     else
-      os << m << n.TypeNameString() << "\n";
+      dbgs() << m << n.TypeNameString() << "\n";
   }
 };
 
