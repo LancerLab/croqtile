@@ -1,0 +1,86 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -t factor %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
+
+#include "choreo.h"
+#include <chrono>
+#include <random>
+#include <algorithm>
+
+__cok__ { /// kernel program
+
+extern "C" void relu_kernel(int* input, int* out) {
+  constexpr int m = 256;
+  constexpr int n = 256;
+  for (int i = 0; i < m; ++i) {
+    for (int j = 0; j < n; ++j) {
+      out[i*n+j] = input[i*n+j] > 0 ? input[i*n+j] : 0;
+    }
+  }
+}
+
+} /// end of kernel decl
+
+
+__co__ s32 [512, 1024] relu(s32 [512, 1024] input) { /// device program
+  s32[input.span(0), input.span(1)] output; // use same shape as input
+
+  parallel p by 2 {  // p is sip_index
+    with index = {n_tile} in [1] {  // decl your tiled spans
+      foreach n_tile {
+        shared s32[input.span(0)/#p, input.span(1)/#n_tile] l2_out;
+        input_load = dma.copy.async input.chunkat(p, n_tile) => shared;
+        wait input_load;
+        parallel q by 1 {
+          with index = {m_tile_s, n_tile_s} in [2, 4] {
+            foreach m_tile_s {
+              foreach n_tile_s {
+                input_load_s = dma.copy.async input_load.data.chunkat(m_tile_s, n_tile_s) => local;
+                out_load_s = dma.copy.async l2_out.chunkat(m_tile_s, n_tile_s) => local;
+                wait input_load_s, out_load_s;
+                call relu_kernel(input_load_s.data, out_load_s.data); // |span| calculate the total size of span.
+                out_store_s = dma.copy.async out_load_s.data => l2_out.chunkat(m_tile_s, n_tile_s); // can use defined vars
+                wait out_store_s;
+              }
+            }
+          }
+        }
+        out_store = dma.copy.async l2_out => output.chunkat(p, n_tile); // can use defined vars
+        wait out_store;
+      }
+    }
+  } // can use python styling
+  return output;
+}
+
+
+int main() { /// host program
+  choreo::s32 a[512][1024] = {0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::s32 b[512][512] = {0};
+
+  auto input_data = choreo::make_spanview<2, choreo::s32>((int*)a, {512, 1024});
+  input_data.fill_random(-10, 10);
+
+  auto start = std::chrono::high_resolution_clock::now();
+
+  auto res
+    = relu(input_data);
+
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
+  std::cout << res.shape()[0] << std::endl;
+  std::cout << res.shape()[1] << std::endl;
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+        std::cout << "i: " << i << ", j: " << j << "\n";
+        std::cout << "res: " << res[i][j] << "\n";
+        int ref = input_data[i][j] > 0? input_data[i][j] : 0;
+
+        std::cout << "ref: " << ref << std::endl;
+        assert(ref == res[i][j]);
+      }
+  std::cout << "Test Passed\n" << std::endl;
+  std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
+}
+// CHECK: Test Passed
