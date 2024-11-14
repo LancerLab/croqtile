@@ -127,7 +127,7 @@ private:
 
 public:
   FactorTrans(const ptr<SymbolTable> s_tab, const ptr<FutureBufferMap>& fb,
-              std::ostream& o = std::cout)
+              std::ostream& o = outs())
       : VisitorWithSymTab("ftran", s_tab), os(o), fut_buf(fb) {}
   ~FactorTrans() {}
 

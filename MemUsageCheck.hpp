@@ -186,7 +186,7 @@ private:
 
 public:
   MemUsageCheck(const ptr<SymbolTable> s_tab, Target t, std::string arch,
-                std::ostream& o = std::cout)
+                std::ostream& o = outs())
       : VisitorWithSymTab("mucheck", s_tab), os(o) {
     if (t == Target::Factor) {
       valid_storage_type = {Storage::LOCAL, Storage::SHARED, Storage::GLOBAL};

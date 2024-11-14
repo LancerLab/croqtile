@@ -43,7 +43,7 @@ private:
   int text_scale = 1;
 
 public:
-  ShapePolyhedron(const std::string& e, std::ostream& o = std::cout,
+  ShapePolyhedron(const std::string& e, std::ostream& o = outs(),
                   bool d = false)
       : os(o), debug(d), expr(e) {}
 
@@ -301,7 +301,7 @@ private:
   int start_y = 0;
 
 public:
-  Visualizer(const ptr<SymbolTable> s_tab, std::ostream& o = std::cout,
+  Visualizer(const ptr<SymbolTable> s_tab, std::ostream& o = outs(),
              bool d = false)
       : VisitorWithSymTab("visual", s_tab), os(o), debug(d), parallel_factor(1),
         start_x(0), start_y(0) {}

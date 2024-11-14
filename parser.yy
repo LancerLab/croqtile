@@ -45,8 +45,9 @@ extern location loc;
 extern AST::Program root;
 extern Choreo::SymbolTable symtab;
 
-const char* red = "\033[31m";
-const char* reset = "\033[0m";
+const char* color_red = "\033[31m";
+const char* color_reset = "\033[0m";
+const char* color_green = "\033[32m";
 
 static inline bool shell_supports_colors() {
 	const char* term = getenv("TERM");
@@ -81,14 +82,10 @@ extern int yylex();
 
 void choreo_info(const char *message) {
     // fprintf(stderr, "Error: %s\n", s);
-  const char* GREEN = "\033[32m";
-  if (should_use_colors())
-      std::cerr << GREEN;
-  std::cerr << "Info: ";
-  if (should_use_colors())
-      std::cerr << reset;
-  std::cerr << message << std::endl;
-  std::cerr << "Info location: " << ::loc << std::endl;
+  errs() << ((should_use_colors()) ? color_green : "") << "Info: "
+         << ((should_use_colors()) ? color_reset : "");
+  errs() << message << "\n";
+  errs() << "Info location: " << ::loc << "\n";
 }
 %}
 
@@ -1038,11 +1035,8 @@ swap_stmt
 
 // Bison expects us to provide implementation - otherwise linker complains
 void Parser::error(const location &loc , const std::string &message) {
-  std::cerr << loc << ": ";
-  if (should_use_colors())
-      std::cerr << red;
-  std::cerr << "error: ";
-  if (should_use_colors())
-      std::cerr << reset;
-  std::cerr << message << std::endl;
+  errs() << loc << ": ";
+  errs() << ((should_use_colors()) ? color_red : "") << "error: "
+         << ((should_use_colors()) ? color_reset : "");
+  errs() << message << "\n";
 }

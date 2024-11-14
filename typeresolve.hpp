@@ -18,8 +18,7 @@ class TypeConstraints {
   std::ostream& os;
 
 public:
-  TypeConstraints(Visitor* v, std::ostream& o = std::cout)
-      : visitor(v), os(o) {}
+  TypeConstraints(Visitor* v, std::ostream& o = outs()) : visitor(v), os(o) {}
 
   void SetDebug(bool d) { debug = d; }
   void SetTypeReport(bool r) { report_type = r; }

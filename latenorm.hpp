@@ -184,7 +184,7 @@ private:
   }
 
 public:
-  BufferInfoCollect(const ptr<SymbolTable> s_tab, std::ostream& o = std::cout)
+  BufferInfoCollect(const ptr<SymbolTable> s_tab, std::ostream& o = outs())
       : VisitorWithSymTab("bicol", s_tab), os(o) {
     fut_buf = std::make_shared<FutureBufferMap>();
   }
@@ -278,7 +278,7 @@ private:
 
 public:
   BufferGenerate(const ptr<SymbolTable> s_tab, const ptr<FutureBufferMap>& fb,
-                 std::ostream& o = std::cout)
+                 std::ostream& o = outs())
       : VisitorWithSymTab("bufgen", s_tab), os(o), fut_buf(fb) {}
   ~BufferGenerate() {}
 

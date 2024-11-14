@@ -36,7 +36,7 @@ private:
   }
 
 public:
-  CodegenPrepare(const ptr<SymbolTable> s_tab, std::ostream& o = std::cout)
+  CodegenPrepare(const ptr<SymbolTable> s_tab, std::ostream& o = outs())
       : CodeGenerator("prepare", o, s_tab) {
     cgi = std::make_shared<CodeGenInfo>();
   }

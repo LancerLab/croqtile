@@ -309,7 +309,7 @@ private:
   }
 
 public:
-  ShapeInference(bool t = false, std::ostream& o = std::cout)
+  ShapeInference(bool t = false, std::ostream& o = outs())
       : VisitorWithScope("valno"), vn(this, t, o), os(o) {
     type_equals.SetDebug(debug_visit);
   }

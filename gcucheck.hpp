@@ -73,7 +73,7 @@ private:
   }
 
 public:
-  GCUCheck(const ptr<SymbolTable> s_tab, std::ostream& o = std::cout)
+  GCUCheck(const ptr<SymbolTable> s_tab, std::ostream& o = outs())
       : VisitorWithSymTab("gcu", s_tab), os(o) {}
   ~GCUCheck() {}
 

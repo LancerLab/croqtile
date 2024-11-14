@@ -61,7 +61,7 @@ public:
 
   void RegisterOption(const std::string& name, OptionBase* option) {
     if (options.count(name)) {
-      std::cerr << "option '" << name << "' has been registered twice.\n";
+      errs() << "option '" << name << "' has been registered twice.\n";
       abort();
     }
     options[name] = option;
@@ -78,8 +78,8 @@ public:
         if (!options[option]->Parse(argc, argv, i)) return false;
       } else {
         if (!input_filename.empty()) {
-          std::cerr << "set input file twice: '" << input_filename << "' and '"
-                    << arg << "'.\n";
+          errs() << "set input file twice: '" << input_filename << "' and '"
+                 << arg << "'.\n";
           return false;
         }
         input_filename = arg;
@@ -96,7 +96,7 @@ public:
 
   std::ostream& GetOutputStream() {
     if (output_stream) return *output_stream;
-    return std::cout;
+    return outs();
   }
 
   std::istream& GetInputStream() {
@@ -139,7 +139,7 @@ inline bool Option<T>::Parse(int argc, char** argv, int& currentArg) {
       iss >> value; // Handle parsing according to type T
       return true;
     }
-    std::cerr << "Option " << name << " requires an argument." << std::endl;
+    errs() << "Option " << name << " requires an argument." << std::endl;
     return false;
   }
 
@@ -174,7 +174,7 @@ bool Option<bool>::Parse(int argc, char** argv, int& currentArg) {
     else if (lowerValue == "false")
       value = false;
     else {
-      std::cerr << "Invalid value for boolean option: " << value << std::endl;
+      errs() << "Invalid value for boolean option: " << value << std::endl;
       return false;
     }
   } else

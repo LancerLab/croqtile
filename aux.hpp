@@ -145,4 +145,7 @@ inline static const std::string ToUpper(const std::string& s) {
   return r;
 }
 
+inline std::ostream& outs() { return std::cout; }
+inline std::ostream& errs() { return std::cerr; }
+
 #endif // __CHOREO_AUX_HPP__

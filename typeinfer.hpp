@@ -42,7 +42,7 @@ private:
   }
 
 public:
-  TypeInference(bool d, std::ostream& o = std::cout,
+  TypeInference(bool d, std::ostream& o = outs(),
                 const ptr<SymbolTable> s_tab = std::make_shared<SymbolTable>())
       : Visitor("infer", s_tab), Dump(d), os(o) {
     type_equals.SetTypeReport(Dump);

@@ -25,12 +25,12 @@ struct Visitor {
     if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) { // by function print
       const char* Sep = "*******************";
       if (print_ahead) {
-        std::cout << "\n"
-                  << Sep << " Before " << name << ": " << f->name << " (Begin) "
-                  << Sep << "\n"
-                  << STR(n) << "\n"
-                  << Sep << " Before " << name << ": " << f->name << " (End) "
-                  << Sep << "\n";
+        outs() << "\n"
+               << Sep << " Before " << name << ": " << f->name << " (Begin) "
+               << Sep << "\n";
+        outs() << STR(n) << "\n";
+        outs() << Sep << " Before " << name << ": " << f->name << " (End) "
+               << Sep << "\n";
       }
     }
     return true;
@@ -40,12 +40,12 @@ struct Visitor {
     if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) { // by function print
       const char* Sep = "*******************";
       if (print_after) {
-        std::cout << "\n"
-                  << Sep << " After " << name << ": " << f->name << " (Begin) "
-                  << Sep << "\n"
-                  << STR(n) << "\n"
-                  << Sep << " After " << name << ": " << f->name << " (End) "
-                  << Sep << "\n";
+        outs() << "\n"
+               << Sep << " After " << name << ": " << f->name << " (Begin) "
+               << Sep << "\n";
+        outs() << STR(n) << "\n";
+        outs() << Sep << " After " << name << ": " << f->name << " (End) "
+               << Sep << "\n";
       }
     }
     return true;
@@ -197,37 +197,26 @@ public:
     return scoped_symtab.LookupSymbol(n);
   }
 
+private:
+  static constexpr const char* color_red = "\033[31m";
+  static constexpr const char* color_yellow = "\033[33m";
+  static constexpr const char* color_reset = "\033[0m";
+
 public:
   void Error(const location& loc, const std::string& message) {
-    static const char* red = "\033[31m";
-    static const char* reset = "\033[0m";
-
-    std::cerr << loc << ": ";
-
-    if (should_use_colors())
-      std::cerr << red << "error: " << reset;
-    else
-      std::cerr << "error: ";
-
-    std::cerr << message << std::endl;
+    errs() << loc << ": " << ((should_use_colors()) ? color_red : "")
+           << "error: " << ((should_use_colors()) ? color_reset : "");
+    errs() << message << "\n";
   }
 
   void Warning(const location& loc, const std::string& message) {
-    static const char* yellow = "\033[33m";
-    static const char* reset = "\033[0m";
-
-    std::cerr << loc << ": ";
-
-    if (should_use_colors())
-      std::cerr << yellow << "warning: " << reset;
-    else
-      std::cerr << "warning: ";
-
-    std::cerr << message << std::endl;
+    errs() << loc << ": " << ((should_use_colors()) ? color_yellow : "")
+           << "warning: " << ((should_use_colors()) ? color_reset : "");
+    errs() << message << "\n";
   }
 
   void Note(const location& loc, const std::string& message) {
-    std::cerr << loc << ": note: " << message << std::endl;
+    errs() << loc << ": note: " << message << std::endl;
   }
 };
 

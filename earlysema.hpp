@@ -62,7 +62,7 @@ private:
   }
 
 public:
-  EarlySemantics(std::ostream& o = std::cout,
+  EarlySemantics(std::ostream& o = outs(),
                  const Choreo::Target& tgt = Choreo::Target::Factor)
       : VisitorWithScope("sema"), os(o) {
     if (trace_visit) debug_visit = true; // force debug when tracing

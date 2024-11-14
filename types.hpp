@@ -284,7 +284,7 @@ T* cast(U* n) {
   if (isa<T>(n))
     return (T*)n;
   else {
-    std::cerr << "type cast failure for incompatibility.\n";
+    errs() << "type cast failure for incompatibility.\n";
     abort();
   }
 }
@@ -294,7 +294,7 @@ ptr<T> cast(const ptr<U>& n) {
   if (isa<T>(n))
     return std::static_pointer_cast<T>(n);
   else {
-    std::cerr << "type cast failure for incompatibility.\n";
+    errs() << "type cast failure for incompatibility.\n";
     abort();
   }
 }
@@ -305,8 +305,8 @@ T* cast_dbg(U* n) {
   if (isa<T>(n))
     return (T*)n;
   else {
-    std::cerr << "type cast failure for incompatibility: "
-              << n->TypeNameString() << ".\n";
+    errs() << "type cast failure for incompatibility: " << n->TypeNameString()
+           << ".\n";
     abort();
   }
 }
@@ -315,8 +315,8 @@ ptr<T> cast_dbg(const ptr<U>& n) {
   if (isa<T>(n))
     return std::static_pointer_cast<T>(n);
   else {
-    std::cerr << "type cast failure for incompatibility: "
-              << n->TypeNameString() << ".\n";
+    errs() << "type cast failure for incompatibility: " << n->TypeNameString()
+           << ".\n";
     abort();
   }
 }

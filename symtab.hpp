@@ -328,10 +328,10 @@ public:
     size_t count = 0;
     std::string indent = "";
     for (auto it = scoped_symtab.rbegin(); it != scoped_symtab.rend(); ++it) {
-      std::cout << indent << "<" << scope_names[count] << ">\n";
+      outs() << indent << "<" << scope_names[count] << ">\n";
       for (auto item : *it) {
-        std::cout << indent << " - sym: " << item.first
-                  << ", type: " << STR(*item.second) << "\n";
+        outs() << indent << " - sym: " << item.first
+               << ", type: " << STR(*item.second) << "\n";
       }
       ++count;
       indent = indent + " ";

@@ -76,11 +76,10 @@ public:
   static bool KeepComments() { return keep_comments; };
 
   void Error(const location& loc, const std::string& error_message) {
-    std::cerr << loc << ": ";
-    if (should_use_colors()) std::cerr << red;
-    std::cerr << "error: ";
-    if (should_use_colors()) std::cerr << reset;
-    std::cerr << error_message << std::endl;
+    errs() << loc << ": ";
+    errs() << ((should_use_colors()) ? color_red : "")
+           << "error: " << ((should_use_colors()) ? color_reset : "");
+    errs() << error_message << std::endl;
     std::exit(EXIT_FAILURE); // Terminate the program immediately
   }
 
@@ -88,8 +87,8 @@ private:
   static bool debug;
   static bool keep_comments;
 
-  const char* red = "\033[31m";
-  const char* reset = "\033[0m";
+  const char* color_red = "\033[31m";
+  const char* color_reset = "\033[0m";
 
   static bool shell_supports_colors() {
     const char* term = getenv("TERM");

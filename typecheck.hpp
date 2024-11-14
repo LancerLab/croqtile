@@ -30,7 +30,7 @@ private:
   }
 
 public:
-  TypeChecker(const ptr<SymbolTable> s_tab, std::ostream& o = std::cout,
+  TypeChecker(const ptr<SymbolTable> s_tab, std::ostream& o = outs(),
               const Choreo::Target& tgt = Choreo::Target::Factor)
       : VisitorWithSymTab("check", s_tab), os(o) {
     if (tgt == Choreo::Target::CUDA) allow_auto_threading = true;
