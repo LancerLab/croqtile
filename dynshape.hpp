@@ -1,5 +1,5 @@
-#ifndef __CHOREO_DYNAMIC_SHAPE_INFO_HPP__
-#define __CHOREO_DYNAMIC_SHAPE_INFO_HPP__
+#ifndef __CHOREO_CODEGEN_PREPARE_HPP__
+#define __CHOREO_CODEGEN_PREPARE_HPP__
 
 // This apply the type check and symbol table generation
 
@@ -7,46 +7,42 @@
 
 namespace Choreo {
 
-struct ShapeDynamics : public VisitorWithSymTab {
+struct CodegenPrepare : public CodeGenerator {
 private:
-  std::ostream& os;
   size_t error_count = 0;
 
-  std::unordered_map<std::string, AST::Parameter*> cur_params;
-
+  ptr<CodeGenInfo> cgi;
   std::string fname; // current function name
-  ptr<FutureBufferMap> fut_buf = nullptr;
 
 private:
   bool BeforeVisitImpl(AST::Node& n) {
     if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
-      assert(fut_buf->count(f->name) == 0);
-      fut_buf->insert({f->name, {}});
       fname = f->name;
-    } else if (auto dma = dyn_cast<AST::DMA>(&n)) {
-      // associate a future with its only buffer
-      if (!dma->future.empty() && (dma->operation != ".any")) {
-        auto buf_name = cast<AST::ChunkAt>(dma->to)->RefSymbol();
-        (*fut_buf)[fname].emplace(dma->future, buf_name);
-        VST_DEBUG(os << "associate " << dma->future << " with " << buf_name
-                     << "\n");
-      }
+      cgi->storages[fname] = {};
     }
     return true;
   }
   bool AfterVisitImpl(AST::Node& n) {
-    if (isa<AST::ChoreoFunction>(&n)) { fname = ""; }
+    if (isa<AST::ChoreoFunction>(&n)) {
+      VST_DEBUG(os << "Symbols in " << fname << ":\n");
+      VST_DEBUG(for (auto& item : cgi->storages[fname]) {
+        os << " |- " << item.name << ", ty: " << PSTR(item.type)
+           << ", is_return: " << item.is_return << ", index: " << item.p_index
+           << "\n";
+      });
+      fname = "";
+    }
     return true;
   }
 
 public:
-  ShapeDynamics(const ptr<SymbolTable> s_tab, std::ostream& o = std::cout)
-      : VisitorWithSymTab("dynshape", s_tab), os(o) {
-    fut_buf = std::make_shared<FutureBufferMap>();
+  CodegenPrepare(const ptr<SymbolTable> s_tab, std::ostream& o = std::cout)
+      : CodeGenerator("prepare", o, s_tab) {
+    cgi = std::make_shared<CodeGenInfo>();
   }
-  ~ShapeDynamics() {}
+  ~CodegenPrepare() {}
 
-  const ptr<FutureBufferMap> FBInfo() { return fut_buf; }
+  const ptr<CodeGenInfo> GetASTInfo() { return cgi; }
 
   bool Visit(AST::MultiNodes&) { return true; }
   bool Visit(AST::MultiValues&) { return true; }
@@ -55,14 +51,33 @@ public:
   bool Visit(AST::Expr&) { return true; }
   bool Visit(AST::MultiDimSpans&) { return true; }
   bool Visit(AST::NamedTypeDecl&) { return true; }
-  bool Visit(AST::NamedVariableDecl&) { return true; }
+  bool Visit(AST::NamedVariableDecl& n) override {
+    auto name = n.name_str;
+    cgi->storages[fname].push_back(
+        {InScopeName(name), GetSymbolType(name), false, -1});
+    return true;
+  }
   bool Visit(AST::IntTuple&) { return true; }
-  bool Visit(AST::Assignment&) { return true; }
+  bool Visit(AST::Assignment& n) override {
+    auto name = n.name;
+    if (!SSTab().IsDeclared(name) && !isa<AST::SpanAs>(n.value)) {
+      cgi->storages[fname].push_back(
+          {InScopeName(name), GetSymbolType(name), false, -1});
+    }
+    return true;
+  }
   bool Visit(AST::IntIndex&) { return true; }
   bool Visit(AST::DataType&) { return true; }
   bool Visit(AST::Identifier&) { return true; }
   bool Visit(AST::Parameter&) { return true; }
-  bool Visit(AST::ParamList&) { return true; }
+  bool Visit(AST::ParamList& n) {
+    int index = 0;
+    for (auto param : n.values) {
+      cgi->storages[fname].push_back(
+          {InScopeName(param->sym->name), param->GetType(), false, index++});
+    }
+    return true;
+  }
   bool Visit(AST::ParallelBy&) { return true; }
   bool Visit(AST::WhereBind&) { return true; }
   bool Visit(AST::WithIn&) { return true; }
@@ -75,7 +90,16 @@ public:
   bool Visit(AST::Call&) { return true; }
   bool Visit(AST::Rotate&) { return true; }
   bool Visit(AST::Select&) { return true; }
-  bool Visit(AST::Return&) { return true; }
+
+  bool Visit(AST::Return& n) override {
+    auto id = GetIdentifier(*n.value);
+    if (!id) return true;
+
+    for (auto& item : cgi->storages[fname]) {
+      if (item.name == InScopeName(id->name)) { item.is_return = true; }
+    }
+    return true;
+  }
   bool Visit(AST::LoopRange&) { return true; }
   bool Visit(AST::ForeachBlock&) { return true; }
   bool Visit(AST::FunctionDecl&) { return true; }
@@ -88,4 +112,4 @@ public:
 
 } // end namespace Choreo
 
-#endif // __CHOREO_DYNAMIC_SHAPE_INFO_HPP__
+#endif // __CHOREO_CODEGEN_PREPARE_HPP__

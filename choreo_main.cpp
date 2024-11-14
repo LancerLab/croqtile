@@ -182,11 +182,11 @@ int main(int argc, char* argv[]) {
   if (sc.HasError()) return 1;
   if (gen_none || (stop_after == sc.GetName())) return 0;
 
-  // collect information for dynamic/runtime shape handling
-  ShapeDynamics sds(sc.SymTab());
-  if (prt_pass) std::cout << "|- " << sds.GetName() << "\n";
-  root.accept(sds);
-  if (sds.HasError()) return 1;
+  // collect information for codegen
+  CodegenPrepare cgp(sc.SymTab());
+  if (prt_pass) std::cout << "|- " << cgp.GetName() << "\n";
+  root.accept(cgp);
+  if (cgp.HasError()) return 1;
 
   switch (tgt) {
   case Target::Factor: {
@@ -215,9 +215,9 @@ int main(int argc, char* argv[]) {
     if (mem_usage_checker.HasError()) return 1;
     if (stop_after == mem_usage_checker.GetName()) return 0;
 
-    Choreo::Factor::FactorCodeGen codegen(std::cout, sc.SymTab(),
-                                          mem_usage_checker.GetRtMemUsageInfo(),
-                                          bg.FBInfo(), cross_compile);
+    Choreo::Factor::FactorCodeGen codegen(
+        std::cout, sc.SymTab(), mem_usage_checker.GetRtMemUsageInfo(),
+        bg.FBInfo(), cgp.GetASTInfo(), cross_compile);
     if (prt_pass) std::cout << "|- " << codegen.GetName() << "\n";
     root.accept(codegen);
     break;

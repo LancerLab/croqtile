@@ -1,0 +1,34 @@
+// RUN: choreo %s | FileCheck %s
+__co__ s32 [6, 17, 128] globals_pass(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) { /// device program
+  s32 [lhs.span] output;
+
+  s32 [lhs.span] f1;
+
+  parallel p by 6 {
+    dma.copy lhs => output;
+    dma.copy rhs => f1;
+  }
+
+  return output;
+}
+
+// CHECK:   auto lhs_type = DRAMType(IntType(32), {6, 17, 128});
+// CHECK:   auto rhs_type = DRAMType(IntType(32), {6, 17, 128});
+// CHECK:   auto f1_type = DRAMType(IntType(32), {6, 17, 128});
+// CHECK:   auto output_type = DRAMType(IntType(32), {6, 17, 128});
+// CHECK:   D(host_func_)("__choreo_ele_add", {lhs_type, rhs_type, StreamType()}, [&](auto args) {
+// CHECK:     auto output = alloc_(output_type);
+// CHECK:     auto f1 = alloc_(f1_type);
+// CHECK:     auto ts = launch_kernel_("__choreo_globals_pass_parallel", grid_dim, block_dim, args.back(), {args[0], args[1], f1}, {output});
+// CHECK:     return std::vector<Value>{output};
+// CHECK:   }, true);
+// CHECK:   D(func_)("__choreo_ele_add_parallel", {lhs_type, rhs_type, f1_type}, {output_type}, [&](auto args, auto results) {
+// CHECK:     auto & f1 = args[2];
+// CHECK:     auto & output = results[0];
+// CHECK:     auto __choreo_anon_fut__0 = alloc_dma_(CDMAType());
+// CHECK:     auto __choreo_anon_fut__1 = alloc_dma_(CDMAType());
+// CHECK:     async_load_(__choreo_anon_fut__0, args[0], output, {0, 0, 0});
+// CHECK:     wait_dma_(__choreo_anon_fut__0);
+// CHECK:     async_load_(__choreo_anon_fut__1, args[1], f1, {0, 0, 0});
+// CHECK:     wait_dma_(__choreo_anon_fut__1);
+// CHECK:   }); // end of choreo-factor kernel function

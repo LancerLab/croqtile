@@ -277,7 +277,7 @@ public:
 
 public:
   // utility functions
-  std::string UnScopedName(const std::string& name) const {
+  const std::string UnScopedName(const std::string& name) const {
     size_t pos = name.find_last_of(':');
     if (pos != std::string::npos) {
       // If found, return the substring after the last ":"

@@ -57,7 +57,6 @@ private:
   bool cross_compile = false;
 
   ValBind::BindInfo<std::string> bind_info;
-  std::vector<AST::ptr<AST::Parameter>>* cur_params = nullptr;
   AST::ptr<AST::DataType> current_output = nullptr;
   std::map<std::string, std::stack<std::vector<std::string>>> cur_bounded_vars;
   std::vector<std::unordered_set<std::string>> loop_vars; // the loop variables
@@ -76,20 +75,20 @@ private:
       rts_nidx; // dim index in shape for the runtime shape name
   std::map<std::string, std::string> idnm_rts; // name in .co to symbolic name
 
+  size_t launch_params_size = 0;
+
   ptr<FutureBufferMap> fut_buf; // map a future to its associated buffer
+  ptr<CodeGenInfo> cgi;
 
   StringifyTable factor_symbols;
 
 public:
   FactorCodeGen(std::ostream& os, const ptr<SymbolTable>& symtab,
-                const ptr<FutureBufferMap>& fb, bool cross_compile)
-      : CodeGenerator("codegen", os, symtab), cross_compile(cross_compile),
-        fut_buf(fb) {}
-  FactorCodeGen(std::ostream& os, const ptr<SymbolTable>& symtab,
                 const std::vector<RtMemUsageCheckInfo>& list,
-                const ptr<FutureBufferMap>& fb, bool cross_compile)
+                const ptr<FutureBufferMap>& fb, const ptr<CodeGenInfo>& ci,
+                bool cross_compile)
       : CodeGenerator("codegen", os, symtab), cross_compile(cross_compile),
-        rt_mem_usage_check_list(list), fut_buf(fb) {}
+        rt_mem_usage_check_list(list), fut_buf(fb), cgi(ci) {}
 
   void ResetBuffers() {
     ks.clear();
@@ -163,6 +162,13 @@ private:
   void decrementIndent() {
     if (this->indent.size() >= 2)
       this->indent = this->indent.substr(0, this->indent.size() - 2);
+  }
+
+  int GetArgumentIndex(const std::string& pname) const {
+    for (auto& item : cgi->storages.at(entry_fn)) {
+      if (item.name == pname) return item.p_index;
+    }
+    return -1;
   }
 };
 

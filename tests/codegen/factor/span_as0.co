@@ -20,20 +20,34 @@ __co__ auto span_as0(f32 [32, 18, 9] a) {
   }
 }
 
+// CHECK:   auto a_type = DRAMType(FloatType(32), {32, 18, 9});
+// CHECK:   auto c_type = DRAMType(FloatType(32), {288, 18});
+// CHECK:   auto d_type = DRAMType(FloatType(32), {576, 1, 3, 3});
+// CHECK:   auto m_type = DRAMType(IntType(32), {1, 2, 3});
+// CHECK:   auto n_type = DRAMType(IntType(32), {6});
+// CHECK:   auto b_type = DRAMType(FloatType(32), {32, 18, 9});
+// CHECK:   auto o_type = DRAMType(FloatType(32), {32, 18, 9});
+
 // CHECK:  D(host_func_)("__choreo_span_as0", {a_type, StreamType()}, [&](auto args) {
 // CHECK:    auto c = bitcast_(DRAMType(FloatType(32), {288, 18}), args[0]);
 // CHECK:    auto d = bitcast_(DRAMType(FloatType(32), {576, 1, 3, 3}), args[0]);
-// CHECK:    auto m = alloc_(DRAMType(IntType(32),{1, 2, 3}));
+// CHECK:    auto m = alloc_(m_type);
 // CHECK:    auto n = bitcast_(DRAMType(IntType(32), {6}), m);
-// CHECK:    auto b = alloc_(DRAMType(FloatType(32),{32, 18, 9}));
-// CHECK:    auto o = alloc_(DRAMType(FloatType(32),{32, 18, 9}));
+// CHECK:    auto b = alloc_(b_type);
+// CHECK:    auto o = alloc_(o_type);
 // CHECK:    Dim3 grid_dim(1);
 // CHECK:    Dim3 block_dim(3);
-// CHECK:    auto ts = launch_kernel_("__choreo_span_as0_parallel", grid_dim, block_dim, args.back(), {args[0]}, {});
+// CHECK:    auto ts = launch_kernel_("__choreo_span_as0_parallel", grid_dim, block_dim, args.back(), {args[0], c, d, m, n, b, o}, {});
 // CHECK:    return std::vector<Value>{};
 // CHECK:  }, true); // end of choreo-factor dataflow program
 
-// CHECK:  D(func_)("__choreo_span_as0_parallel", {a_type}, {}, [&](auto args, auto results) {
+// CHECK:  D(func_)("__choreo_span_as0_parallel", {a_type, c_type, d_type, m_type, n_type, b_type, o_type}, {}, [&](auto args, auto results) {
+// CHECK:    auto & c = args[1];
+// CHECK:    auto & d = args[2];
+// CHECK:    auto & m = args[3];
+// CHECK:    auto & n = args[4];
+// CHECK:    auto & b = args[5];
+// CHECK:    auto & o = args[6];
 // CHECK:    auto thread_id = thread_id_();
 // CHECK:    auto block_id = block_id_();
 // CHECK:    auto a_local__buf__ = alloc_(L1Type(FloatType(32),{4, 3, 9}));
@@ -50,10 +64,10 @@ __co__ auto span_as0(f32 [32, 18, 9] a) {
 // CHECK:        auto anon_3 = bitcast_(DRAMType(FloatType(32), {16, 9, 36}), args[0]);
 // CHECK:        async_load_(a_local, anon_3, a_local__buf__, {Value(4)*iv_x,Value(3)*thread_id,Value(9)*iv_y});
 // CHECK:        wait_dma_(a_local);
-// CHECK:        auto anon_4 = bitcast_(DRAMType(FloatType(32), {144, 36}), b);
+// CHECK:        auto anon_4 = bitcast_(DRAMType(FloatType(32), {144, 36}), args[5]);
 // CHECK:        async_load_(b_local, anon_4, b_local__buf__, {Value(48)*thread_id,Value(12)*thread_id});
 // CHECK:        wait_dma_(b_local);
-// CHECK:        auto anon_5 = bitcast_(DRAMType(FloatType(32), {16, 9, 36}), o);
+// CHECK:        auto anon_5 = bitcast_(DRAMType(FloatType(32), {16, 9, 36}), args[6]);
 // CHECK:        async_store_(o_store, a_local__buf__, anon_5, {Value(4)*iv_x,Value(3)*thread_id,Value(9)*iv_y});
 // CHECK:      }); // end of choreo-foreach block on 'y'.
 // CHECK:    }); // end of choreo-foreach block on 'x'.

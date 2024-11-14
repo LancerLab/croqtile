@@ -306,7 +306,7 @@ public:
 // Caution: must be used when symbol table does not change.
 struct VisitorWithSymTab : public VisitorWithScope {
 protected:
-  virtual std::string InScopeName(const std::string& sym) const {
+  virtual const std::string InScopeName(const std::string& sym) const {
     auto removeLastLevel = [](const std::string& input) -> std::string {
       size_t lastPos = input.rfind("::");
       if (lastPos == std::string::npos) {
@@ -334,6 +334,10 @@ protected:
     return "";
   }
 
+  virtual const std::string UnScopedName(const std::string& name) const {
+    return scoped_symtab.UnScopedName(name);
+  }
+
 public:
   // use the immutable symbol table directly
   ptr<Type> GetSymbolType(const std::string& n) const override {
@@ -344,6 +348,42 @@ public:
   VisitorWithSymTab(const std::string& n, const ptr<SymbolTable>& s_tab)
       : VisitorWithScope(n, s_tab) {}
   ~VisitorWithSymTab() {}
+
+  // provide default
+  virtual bool Visit(AST::MultiNodes&) override { return true; };
+  virtual bool Visit(AST::MultiValues&) override { return true; };
+  virtual bool Visit(AST::IntLiteral&) override { return true; };
+  virtual bool Visit(AST::Boolean&) override { return true; };
+  virtual bool Visit(AST::Expr&) override { return true; };
+  virtual bool Visit(AST::MultiDimSpans&) override { return true; };
+  virtual bool Visit(AST::NamedTypeDecl&) override { return true; };
+  virtual bool Visit(AST::NamedVariableDecl&) override { return true; };
+  virtual bool Visit(AST::IntTuple&) override { return true; };
+  virtual bool Visit(AST::Assignment&) override { return true; };
+  virtual bool Visit(AST::IntIndex&) override { return true; };
+  virtual bool Visit(AST::DataType&) override { return true; };
+  virtual bool Visit(AST::Identifier&) override { return true; };
+  virtual bool Visit(AST::Parameter&) override { return true; };
+  virtual bool Visit(AST::ParamList&) override { return true; };
+  virtual bool Visit(AST::ParallelBy&) override { return true; };
+  virtual bool Visit(AST::WhereBind&) override { return true; };
+  virtual bool Visit(AST::WithIn&) override { return true; };
+  virtual bool Visit(AST::WithBlock&) override { return true; };
+  virtual bool Visit(AST::Memory&) override { return true; };
+  virtual bool Visit(AST::SpanAs&) override { return true; };
+  virtual bool Visit(AST::DMA&) override { return true; };
+  virtual bool Visit(AST::ChunkAt&) override { return true; };
+  virtual bool Visit(AST::Wait&) override { return true; };
+  virtual bool Visit(AST::Call&) override { return true; };
+  virtual bool Visit(AST::Rotate&) override { return true; };
+  virtual bool Visit(AST::Select&) override { return true; };
+  virtual bool Visit(AST::Return&) override { return true; };
+  virtual bool Visit(AST::LoopRange&) override { return true; };
+  virtual bool Visit(AST::ForeachBlock&) override { return true; };
+  virtual bool Visit(AST::FunctionDecl&) override { return true; };
+  virtual bool Visit(AST::ChoreoFunction&) override { return true; };
+  virtual bool Visit(AST::CppSourceCode&) override { return true; };
+  virtual bool Visit(AST::Program&) override { return true; };
 };
 
 } // end namespace Choreo

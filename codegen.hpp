@@ -15,6 +15,19 @@ namespace Choreo {
 using FutureBufferMap =
     std::map<std::string, std::map<std::string, std::string>>;
 
+struct SymbolDetail {
+  std::string name;
+  ptr<Type> type = nullptr;
+  bool is_return = false;
+  int p_index = -1; // index of parameter
+};
+
+using SymbolDetails = std::map<std::string, std::vector<SymbolDetail>>;
+
+struct CodeGenInfo {
+  SymbolDetails storages;
+};
+
 // Codegenerators for targets
 struct CodeGenerator : public VisitorWithSymTab {
   std::ostream& os;

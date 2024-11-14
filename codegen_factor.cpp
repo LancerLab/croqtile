@@ -202,11 +202,15 @@ bool FactorCodeGen::Visit(AST::NamedTypeDecl&) { return true; }
 //   CLEAN
 bool FactorCodeGen::Visit(AST::NamedVariableDecl& node) {
   TraceEachVisit(node);
+
+  auto nty = NodeType(node);
+  auto sym = node.name_str;
+
   if (auto s = dyn_cast<AST::Select>(node.init_expr)) {
     assert(!s->inDMA);
     size_t val_count = s->expr_list->Count();
     assert(val_count >= 2);
-    fs << this->indent << "auto " << node.name_str << " = ";
+    fs << this->indent << "auto " << sym << " = ";
     for (size_t i = 0; i < val_count - 1; i++) {
       std::string select_factor_str;
       auto factor = cast<IntegerType>(s->select_factor->GetType());
@@ -222,23 +226,20 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl& node) {
     }
     fs << PSTR(s->expr_list->AllValues().back())
        << std::string(val_count - 1, ')') << ";\n";
+
     return true;
   }
 
   // TODO(albert): 'a.span' will be replace to the type-decl related to 'a'
   // TODO(albert): refine this function with TYPE_STR new API
-  auto nty = node.GetType();
-  auto sym = node.name_str;
   if (auto sty = dyn_cast<SpannedType>(nty)) {
     assert(isa<SpannedType>(GetSymbolType(sym)) && "Inconsistent types!");
-    if (factor_symbols.Exists(sym)) {
-      fs << indent << "auto " << sym << " = alloc_("
-         << factor_symbols.GetTypeName(sym) << ");\n";
-    } else if (auto e = dyn_cast<AST::Expr>(node.init_expr);
-               e && isa<AST::SpanAs>(e->GetR())) {
+    // handle the spanas declaration first
+    if (auto e = dyn_cast<AST::Expr>(node.init_expr);
+        e && isa<AST::SpanAs>(e->GetR())) {
       assert(e->IsReference());
       auto sa = dyn_cast<AST::SpanAs>(e->GetR());
-      int arg_idx = factor_symbols.GetSymbolIndex(sa->id->name);
+      int arg_idx = GetArgumentIndex(InScopeName(sa->id->name));
       std::string buffer_name =
           arg_idx < 0 ? sa->id->name : "args[" + std::to_string(arg_idx) + "]";
       auto sty = dyn_cast<SpannedType>(node.GetType());
@@ -280,9 +281,12 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl& node) {
         fs << "});\n";
         sa->list->SetDelimiter(orig_delimiter);
       }
+    } else if (factor_symbols.Exists(sym)) {
+      fs << indent << "auto " << sym << " = alloc_("
+         << factor_symbols.GetTypeName(sym) << ");\n";
     } else {
       std::string storage_type = stringify(sty->GetStorage());
-      std::string base_type = stringify(Choreo::BaseType(sty->f_type));
+      std::string base_type = stringify(sty->ElementType());
       std::ostringstream _os;
       _os << "auto " << sym << " = alloc_(" << storage_type << "(" << base_type
           << "," << ReplaceRuntimeNames(LSTR(sty->GetShape()), "", false) << ")"
@@ -318,6 +322,7 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl& node) {
 }
 
 bool FactorCodeGen::Visit(AST::IntTuple&) { return true; }
+
 bool FactorCodeGen::Visit(AST::Assignment& node) {
   if (auto sa = dyn_cast<AST::SpanAs>(node.value)) {
     int arg_idx = factor_symbols.GetSymbolIndex(sa->id->name);
@@ -327,12 +332,10 @@ bool FactorCodeGen::Visit(AST::Assignment& node) {
       buffer_name = fut_buf->at(entry_fn).at(sa->id->name);
     }
     if (arg_idx >= 0) buffer_name = "args[" + std::to_string(arg_idx) + "]";
-    auto sty = dyn_cast<SpannedType>(node.GetType());
-    assert(sty);
-    std::string storage_type = stringify(sty->GetStorage());
-    std::string base_type = stringify(Choreo::BaseType(sty->f_type));
-    fs << indent << "auto " << node.name << " = bitcast_(" << storage_type
-       << "(" << base_type << ", {";
+    auto sty = cast<SpannedType>(node.GetType());
+    fs << indent << "auto " << node.name << " = bitcast_("
+       << stringify(sty->GetStorage()) << "(" << stringify(sty->ElementType())
+       << ", {";
 
     // TODO(wsj): has_dynamic is hard to decide. Maybe still need to implement
     // span_as as mdspan?
@@ -392,7 +395,6 @@ bool FactorCodeGen::Visit(AST::Parameter& p) {
 
 bool FactorCodeGen::Visit(AST::ParamList& pl) {
   TraceEachVisit(pl);
-  cur_params = &pl.values;
   return true;
 }
 
@@ -412,9 +414,17 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
   fs << this->indent << "Dim3 block_dim(" << "$$pb_bound1$$" << ");\n";
   fs << this->indent << "auto ts = launch_kernel_(\"" << current_fn
      << "_parallel\", grid_dim, block_dim, args.back(), {";
-  if (cur_params->size() > 0) {
-    fs << "args[0]";
-    for (size_t i = 1; i < cur_params->size(); ++i) fs << ", args[" << i << "]";
+  size_t index = 0;
+  for (auto& item : cgi->storages[entry_fn]) {
+    if (item.is_return) continue;
+    if (item.p_index != -1)
+      fs << ((index++ > 0) ? ", " : "") << "args[" << item.p_index << "]";
+    else if (auto sty = dyn_cast<SpannedType>(item.type)) {
+      if (sty->GetStorage() != Storage::GLOBAL &&
+          sty->GetStorage() != Storage::DEFAULT)
+        continue;
+      fs << ((index++ > 0) ? ", " : "") << UnScopedName(item.name);
+    }
   }
   fs << "}, {" << ((void_return) ? "" : "$$out$$")
      << "});\n"; // "$$out$$" : magic string for output, will be replaced later
@@ -426,14 +436,38 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
 
   fs << this->indent << "\n";
   fs << this->indent << "D(func_)(\"" << current_fn << "_parallel\", {";
-  if (cur_params->size() > 0) {
-    fs << (*cur_params)[0]->sym->name << "_type";
-    for (unsigned i = 1; i < cur_params->size(); ++i)
-      fs << ", " << (*cur_params)[i]->sym->name << "_type";
+  index = 0;
+  for (auto& item : cgi->storages[entry_fn]) {
+    if (item.is_return) continue;
+    if (item.p_index != -1)
+      fs << ((index++ > 0) ? ", " : "") << UnScopedName(item.name) << "_type";
+    else if (auto sty = dyn_cast<SpannedType>(item.type)) {
+      if (sty->GetStorage() != Storage::GLOBAL &&
+          sty->GetStorage() != Storage::DEFAULT)
+        continue;
+      fs << ((index++ > 0) ? ", " : "") << UnScopedName(item.name) << "_type";
+    }
   }
   fs << "}, {" << ((void_return) ? "" : "output_type")
      << "}, [&](auto args, auto results) {\n";
   this->incrementIndent();
+
+  // some global symbols needs to be referenced
+  index = 0;
+  for (auto& item : cgi->storages[entry_fn]) {
+    if (item.is_return) continue;
+    if (item.p_index != -1) {
+      index++;
+      continue;
+    } else if (auto sty = dyn_cast<SpannedType>(item.type)) {
+      if (sty->GetStorage() != Storage::GLOBAL &&
+          sty->GetStorage() != Storage::DEFAULT)
+        continue;
+      fs << this->indent << "auto & " << UnScopedName(item.name) << " = args["
+         << index++ << "];\n";
+    }
+  }
+
   // generate a reference name of the output
   if (!void_return) fs << indent << "auto & $$out$$ = results[0];\n";
   fs << this->indent << "auto thread_id = thread_id_();\n";
@@ -874,21 +908,24 @@ bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
   }
 
   std::ostringstream dss; // for the shape string
-  for (auto& param : *cur_params) {
-    auto pname = param->sym->name;
-    std::string type_name = pname + "_type";
+  for (auto& item : cgi->storages[entry_fn]) {
+    if (item.is_return) continue; // output is handled later
+    std::string type_name = UnScopedName(item.name) + "_type";
     std::string type_string;
-    if (auto sty = dyn_cast<SpannedType>(param->GetType())) {
+    if (auto sty = dyn_cast<SpannedType>(item.type)) {
+      if (sty->GetStorage() != Storage::GLOBAL &&
+          sty->GetStorage() != Storage::DEFAULT)
+        continue; // only globals/defaults are passed for launch
       // define spanned type
       type_string = "DRAMType(" + stringify(sty->ElementType()) + ", " +
                     ReplaceRuntimeNames(LSTR(sty->GetShape()), "", false) + ")";
-      factor_symbols.AddSymbol(pname, type_name, type_string);
-    } else {
-      type_string =
-          "DRAMType(" + stringify(param->type->getBaseType()) + ", (1))";
-      factor_symbols.AddSymbol(pname, type_name, type_string);
+      factor_symbols.AddSymbol(UnScopedName(item.name), type_name, type_string);
+    } else if (isa<ScalarType>(item.type)) {
+      type_string = "DRAMType(" + stringify(item.type) + ", (1))";
+      factor_symbols.AddSymbol(UnScopedName(item.name), type_name, type_string);
     }
-    fs << indent << "auto " << type_name << " = " << type_string << ";\n";
+    if (!type_string.empty())
+      fs << indent << "auto " << type_name << " = " << type_string << ";\n";
   }
 
   if (auto rty = dyn_cast<SpannedType>(fty.out_ty)) {
@@ -936,7 +973,10 @@ bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
   fs << this->indent << "// choreo-factor dataflow function\n";
   fs << this->indent << "D(host_func_)(\"" << current_fn << "\", {";
 
-  for (auto& param : *cur_params) fs << param->sym->name + "_type, ";
+  for (auto& item : cgi->storages[entry_fn]) {
+    if (item.p_index == -1) continue; // only parameters are passed
+    fs << UnScopedName(item.name) + "_type, ";
+  }
 
   fs << "StreamType()}, [&](auto args) {\n";
 

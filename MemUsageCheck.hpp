@@ -10,8 +10,8 @@ namespace Choreo {
 
 // tuple<runtime memory usages, code location, corresponding storage limit>
 // to insert runtime memory usage check in codegen
-typedef std::tuple<std::vector<std::string>, location, size_t>
-    RtMemUsageCheckInfo;
+using RtMemUsageCheckInfo =
+    std::tuple<std::vector<std::string>, location, size_t>;
 
 // checking compile-time and runtime memory usage
 struct MemUsageCheck : public VisitorWithSymTab {
@@ -285,6 +285,7 @@ public:
       ct_tot_mem_usage[sto] += size;
       ct_mem_alloc_inst_set[sto].push(SSTab().ScopedName(n.name_str));
     }
+
     return true;
   }
   bool Visit(AST::IntTuple& n) {
