@@ -1,7 +1,5 @@
 #include "choreo.h"
 #include <chrono>
-#include <random>
-#include <algorithm>
 
 __cok__ { /// kernel program
 
@@ -51,15 +49,10 @@ __co__ f32 [512, 1024] relu(f32 [512, 1024] input) { /// device program
 
 
 int main() { /// host program
-  choreo::f32 a[512][1024] = {0.0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::f32 b[512][512] = {0};
-
-  // TODO: move to choreo utils
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_real_distribution<float> rand_func(-1.0f, 1.0f);
-  std::generate_n(&a[0][0], sizeof(a) / sizeof(a[0][0]), [&]() { return rand_func(gen); });
+  choreo::f32 a[512][1024]; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::f32 b[512][512] = {0};
 
   auto input_data = choreo::make_spanview<2, choreo::f32>((float*)a, {512, 1024});
+  input_data.fill_random(-1.0, 1.0);
 
   auto start = std::chrono::high_resolution_clock::now();
 

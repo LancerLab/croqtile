@@ -9,6 +9,8 @@
 #include <initializer_list> // for std::initializer_list
 #include <iostream>         // report error
 #include <memory>
+#include <random>
+#include <algorithm>
 
 namespace choreo {
 
@@ -66,8 +68,34 @@ public:
   T* end() { return data + N; }
   const T* end() const { return data + N; }
 
+  void fill_random() {
+    fill_random(data, std::is_floating_point<T>());
+  }
+
 private:
   T data[N];
+
+  template <typename U>
+  typename std::enable_if<std::is_floating_point<U>::value>::type
+  fill_random(U (&array)[N], std::true_type) {
+      std::random_device rd;
+      std::mt19937 gen(rd());
+      std::uniform_real_distribution<U> rand_func(-1.0, 1.0); // 浮点数范围 [-1.0, 1.0)
+
+      std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
+  }
+
+  // 如果 T 是整数类型，使用 std::uniform_int_distribution
+  template <typename U>
+  typename std::enable_if<std::is_integral<U>::value>::type
+  fill_random(U (&array)[N], std::false_type) {
+      std::random_device rd;
+      std::mt19937 gen(rd());
+      std::uniform_int_distribution<U> rand_func(-100, 100); // 整数范围 [-100, 100]
+
+      std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
+  }
+
 };
 
 template <typename T, size_t N, size_t M>
@@ -190,6 +218,32 @@ public:
       if (l.ptr[i] != r.ptr[i]) return false;
 
     return true;
+  }
+
+  void fill_random(T lb, T ub) {
+    fill_random(this->data(), this->size(), std::is_floating_point<T>(), lb, ub);
+  }
+
+private:
+  template <typename U>
+  typename std::enable_if<std::is_floating_point<U>::value>::type
+  fill_random(U* array, size_t N, std::true_type, U lb, U ub) {
+      std::random_device rd;
+      std::mt19937 gen(rd());
+      std::uniform_real_distribution<U> rand_func(lb, ub); // 浮点数范围 [-1.0, 1.0)
+
+      std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
+  }
+
+  // 如果 T 是整数类型，使用 std::uniform_int_distribution
+  template <typename U>
+  typename std::enable_if<std::is_integral<U>::value>::type
+  fill_random(U* array, size_t N, std::false_type, U lb, U ub) {
+      std::random_device rd;
+      std::mt19937 gen(rd());
+      std::uniform_int_distribution<U> rand_func(lb, ub); // 整数范围 [-100, 100]
+
+      std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
   }
 };
 
