@@ -38,16 +38,9 @@ bool FactorCodeGen::BeforeVisitImpl(AST::Node& n) {
   TraceEachVisit(n);
   if (isa<AST::Program>(&n)) {
   } else if (auto c = dyn_cast<AST::ChoreoFunction>(&n)) {
-    sp_count = 0; // reset the count of stub parameter
-    param_map.clear();
-    rts_nmap.clear();
-    rts_pidx.clear();
-    rts_nidx.clear();
-    idnm_rts.clear();
-    host_params.clear();
-    indent.clear();
-    entry_fn = c->name;
-    current_fn = "__choreo_" + entry_fn;
+    ClearFunctionStat();
+    fname = c->name;
+    factor_fname = "__choreo_" + fname;
     // declare a factor function with proper name
     fs << R"(#include <vector>
 
@@ -55,7 +48,7 @@ bool FactorCodeGen::BeforeVisitImpl(AST::Node& n) {
 
 using namespace factor;
 )";
-    fs << "void " << current_fn << "() {\n";
+    fs << "void " << factor_fname << "() {\n";
     this->incrementIndent();
     fs << indent;
     fs << "include_(\"" << backpatch_filename << "\");\n";
@@ -72,15 +65,15 @@ bool FactorCodeGen::AfterVisitImpl(AST::Node& n) {
   TraceEachVisit(n);
   if (isa<AST::Program>(&n)) {
     outs() << "\n# step 4: generate the host source\n";
-    outs() << "host_src=" << host_fn << "\n";
-    outs() << "echo \"#include \\\"\"${gcu_target_string}\"_lib" << current_fn
+    outs() << "host_src=" << host_filename << "\n";
+    outs() << "echo \"#include \\\"\"${gcu_target_string}\"_lib" << factor_fname
            << ".h\\\"\" > ${host_src}\n";
     outs() << "cat <<'EOF' >> ${host_src}\n";
     outs() << hs.str() << "\nEOF\n\n";
 
     outs() << "\n# step 5: JIT compile and execute\n";
     outs() << "# TODO: enable workflow of AOT compilation\n";
-    outs() << "target=" << target_fn << "\n";
+    outs() << "factor_function=" << factor_fname << "\n";
     outs() << R"(
 if command -v nvim &> /dev/null
 then
@@ -108,7 +101,7 @@ if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then
     if (dyn_shaped) outs() << "VIEW_CONFIG=1 ENABLE_DYNSHAPE=1 ";
     outs() << build_path
            << "/factor_script.sh ${factor_src} ${factor_bin} ${host_src} "
-              "${target} "
+              "${factor_function} "
               "${gcu_arch} ${gcu_resource}";
     outs() << R"script(
 elif [ "$1" == "--statistics" ]; then
@@ -137,15 +130,15 @@ fi
     auto out_size_expr = SizeExprOf(*out_type);
     fs << "}\n\n";
 
-    fs << "MODULE_REGISTER(\"lib" << current_fn << "\", " << current_fn
+    fs << "MODULE_REGISTER(\"lib" << factor_fname << "\", " << factor_fname
        << ");"; // end the factor function definition
 
     // TODO:need refactor
     if (auto sty = dyn_cast<SpannedType>(out_type)) {
-      OutputScript(fty, f->name, STR(GetBaseType(*out_type)), out_size_expr,
+      OutputScript(fty, STR(GetBaseType(*out_type)), out_size_expr,
                    sty->GetShape());
     } else
-      OutputScript(fty, f->name, STR(GetBaseType(*out_type)), out_size_expr,
+      OutputScript(fty, STR(GetBaseType(*out_type)), out_size_expr,
                    Shape() /*invalid shape*/);
     ResetBuffers();
   } else if (isa<AST::ParallelBy>(&n)) {
@@ -329,8 +322,8 @@ bool FactorCodeGen::Visit(AST::Assignment& node) {
     int arg_idx = factor_symbols.GetSymbolIndex(sa->id->name);
     std::string buffer_name = sa->id->name;
     if (isa<FutureType>(GetSymbolType(sa->id->name))) {
-      assert(fut_buf->at(entry_fn).count(sa->id->name));
-      buffer_name = fut_buf->at(entry_fn).at(sa->id->name);
+      assert(fut_buf->at(fname).count(sa->id->name));
+      buffer_name = fut_buf->at(fname).at(sa->id->name);
     }
     if (arg_idx >= 0) buffer_name = "args[" + std::to_string(arg_idx) + "]";
     auto sty = cast<SpannedType>(node.GetType());
@@ -402,21 +395,16 @@ bool FactorCodeGen::Visit(AST::ParamList& pl) {
 // CLEAN
 bool FactorCodeGen::Visit(AST::ParallelBy& by) {
   TraceEachVisit(by);
-  parallel_factor *= by.bound;
-  if (parallel_level == 1)
-    pb_bound0 = by.bound;
-  else if (parallel_level == 2)
-    pb_bound1 = by.bound;
-  else
-    choreo_unreachable("parallel_level is invalid!");
   if (parallel_level > 1) { return true; }
 
-  fs << this->indent << "Dim3 grid_dim(" << "$$pb_bound0$$" << ");\n";
-  fs << this->indent << "Dim3 block_dim(" << "$$pb_bound1$$" << ");\n";
-  fs << this->indent << "auto ts = launch_kernel_(\"" << current_fn
+  fs << this->indent << "Dim3 grid_dim(" << cgi->launches[fname].grid_dim_x
+     << ");\n";
+  fs << this->indent << "Dim3 block_dim(" << cgi->launches[fname].block_dim_x
+     << ");\n";
+  fs << this->indent << "auto ts = launch_kernel_(\"" << factor_fname
      << "_parallel\", grid_dim, block_dim, args.back(), {";
   size_t index = 0;
-  for (auto& item : cgi->storages[entry_fn]) {
+  for (auto& item : cgi->storages[fname]) {
     if (item.is_return) continue;
     if (item.p_index != -1)
       fs << ((index++ > 0) ? ", " : "") << "args[" << item.p_index << "]";
@@ -427,18 +415,18 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
       fs << ((index++ > 0) ? ", " : "") << UnScopedName(item.name);
     }
   }
-  fs << "}, {" << ((void_return) ? "" : "$$out$$")
-     << "});\n"; // "$$out$$" : magic string for output, will be replaced later
+  fs << "}, {" << ((void_return) ? "" : UnScopedName(cgi->returns[fname]))
+     << "});\n";
   fs << this->indent << "return std::vector<Value>{"
-     << ((void_return) ? "" : "$$out$$") << "};\n";
+     << ((void_return) ? "" : UnScopedName(cgi->returns[fname])) << "};\n";
   this->decrementIndent();
   fs << this->indent << "}, true); // end of choreo-factor dataflow program\n";
   fs << "\n";
 
   fs << this->indent << "\n";
-  fs << this->indent << "D(func_)(\"" << current_fn << "_parallel\", {";
+  fs << this->indent << "D(func_)(\"" << factor_fname << "_parallel\", {";
   index = 0;
-  for (auto& item : cgi->storages[entry_fn]) {
+  for (auto& item : cgi->storages[fname]) {
     if (item.is_return) continue;
     if (item.p_index != -1)
       fs << ((index++ > 0) ? ", " : "") << UnScopedName(item.name) << "_type";
@@ -455,7 +443,7 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
 
   // some global symbols needs to be referenced
   index = 0;
-  for (auto& item : cgi->storages[entry_fn]) {
+  for (auto& item : cgi->storages[fname]) {
     if (item.is_return) continue;
     if (item.p_index != -1) {
       index++;
@@ -470,7 +458,9 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
   }
 
   // generate a reference name of the output
-  if (!void_return) fs << indent << "auto & $$out$$ = results[0];\n";
+  if (!void_return)
+    fs << indent << "auto & " << UnScopedName(cgi->returns[fname])
+       << " = results[0];\n";
   fs << this->indent << "auto thread_id = thread_id_();\n";
   fs << this->indent << "auto block_id = block_id_();\n";
   // dynamic-shape alias reference
@@ -779,7 +769,6 @@ bool FactorCodeGen::Visit(AST::Select& c) {
 
 bool FactorCodeGen::Visit(AST::Return& returnNode) {
   TraceEachVisit(returnNode);
-  if (returnNode.value) output_v = STR(*returnNode.value);
   return true;
 }
 
@@ -909,7 +898,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
   }
 
   std::ostringstream dss; // for the shape string
-  for (auto& item : cgi->storages[entry_fn]) {
+  for (auto& item : cgi->storages[fname]) {
     if (item.is_return) continue; // output is handled later
     std::string type_name = UnScopedName(item.name) + "_type";
     std::string type_string;
@@ -972,9 +961,9 @@ bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
 
   fs << "\n";
   fs << this->indent << "// choreo-factor dataflow function\n";
-  fs << this->indent << "D(host_func_)(\"" << current_fn << "\", {";
+  fs << this->indent << "D(host_func_)(\"" << factor_fname << "\", {";
 
-  for (auto& item : cgi->storages[entry_fn]) {
+  for (auto& item : cgi->storages[fname]) {
     if (item.p_index == -1) continue; // only parameters are passed
     fs << UnScopedName(item.name) + "_type, ";
   }
@@ -997,11 +986,12 @@ bool FactorCodeGen::Visit(AST::ChoreoFunction&) { return true; }
 
 bool FactorCodeGen::Visit(AST::CppSourceCode& n) {
   TraceEachVisit(n);
-  if (n.host) {
+
+  if (n.host)
     hs << n.GetCode();
-  } else {
+  else
     ks << n.GetCode();
-  }
+
   return true;
 }
 
@@ -1076,7 +1066,7 @@ ToSpanned(const std::vector<U> &v, std::initializer_list<int> && shape) {
 }
 
 void FactorCodeGen::EmitHostFuncBody(std::ostream& os, const Type& ty,
-                                     const std::string& f_n,
+                                     const std::string& bin_filename,
                                      const std::string& out_size_expr,
                                      const std::string& out_type,
                                      const Shape& out_shape) {
@@ -1085,13 +1075,15 @@ void FactorCodeGen::EmitHostFuncBody(std::ostream& os, const Type& ty,
 
   // phase 1: create tops executable from a file
   os << "{\n";
+
   EmitRuntimeCheck(os, ty);
   EmitRuntimeMemUsageCheck(os, ty);
+
   os << R"(
   std::vector<char> binary;
   // Read bin file and store to a vector
 )";
-  os << "  std::ifstream ifs(\"" << f_n << "\", std::ios::binary);";
+  os << "  std::ifstream ifs(\"" << bin_filename << "\", std::ios::binary);";
   os << R"(
   std::copy(std::istreambuf_iterator<char>(ifs),
             std::istreambuf_iterator<char>(), std::back_inserter(binary));
@@ -1106,13 +1098,13 @@ void FactorCodeGen::EmitHostFuncBody(std::ostream& os, const Type& ty,
   // phase 2: allocate device memory and copy
   std::vector<std::string> device_mems;
   for (auto& p : param_map) {
-    auto mem_name = "in_mem" + std::to_string(device_mems.size());
-    os << "  void *" << mem_name << " = nullptr;\n";
-    os << "  CHECK(topsMalloc(&" << mem_name << ", " << p.second << "));\n";
-    os << "  CHECK(topsMemcpy(" << mem_name << ", reinterpret_cast<void *>("
+    auto buffer_name = "in_mem" + std::to_string(device_mems.size());
+    os << "  void *" << buffer_name << " = nullptr;\n";
+    os << "  CHECK(topsMalloc(&" << buffer_name << ", " << p.second << "));\n";
+    os << "  CHECK(topsMemcpy(" << buffer_name << ", reinterpret_cast<void *>("
        << p.first << ".data()), " << p.second
        << ", topsMemcpyHostToDevice));\n";
-    device_mems.push_back(mem_name);
+    device_mems.push_back(buffer_name);
   }
   os << "  void * device_inputs[] = {" << DelimitedString(device_mems)
      << "};\n\n";
@@ -1164,7 +1156,7 @@ void FactorCodeGen::EmitHostFuncBody(std::ostream& os, const Type& ty,
   }
 
   // phase 3: Execute the executable and fetch the output
-  os << "\n  " << current_fn << "(";
+  os << "\n  " << factor_fname << "(";
   for (auto& in : inputs) os << "&" << in << ", ";
   os << "stream" << ((void_return) ? "" : ", &output") << ");\n";
   os << "  CHECK(topsStreamSynchronize(stream));\n";
@@ -1300,7 +1292,8 @@ void FactorCodeGen::EmitRuntimeMemUsageCheck(std::ostream& os, const Type& ty) {
 
   // there should be runtime memory usage check
   if (!rt_mem_usage_check_list.empty())
-    os << "\n  // Check if the runtime memory usage will exceed the limit\n";
+    os << "\n  // Check if the runtime memory usage exceeds the defined "
+          "limits.\n";
 
   for (const auto& [useds, loc, limit] : rt_mem_usage_check_list) {
     std::ostringstream used_ss;
@@ -1327,7 +1320,7 @@ void FactorCodeGen::EmitRuntimeMemUsageCheck(std::ostream& os, const Type& ty) {
   }
 }
 
-void FactorCodeGen::EmitHostFuncDecl(std::ostream& os, const Type& ty,
+void FactorCodeGen::EmitHostFuncDecl(std::ostringstream& oss, const Type& ty,
                                      const std::string& name, bool decl_only) {
   assert(isa<FunctionType>(&ty) && "unexpected type.");
   auto& fty = *cast<FunctionType>(&ty);
@@ -1335,7 +1328,7 @@ void FactorCodeGen::EmitHostFuncDecl(std::ostream& os, const Type& ty,
          "inconsistent parameter count.");
 
   // emit the return type
-  os << HostTypeStringify(*fty.out_ty, true) << " " << name << "(";
+  oss << HostTypeStringify(*fty.out_ty, true) << " " << name << "(";
 
   if (fty.in_tys.size() > 0) {
     if (!decl_only) {
@@ -1345,7 +1338,7 @@ void FactorCodeGen::EmitHostFuncDecl(std::ostream& os, const Type& ty,
       } else
         param_map.push_back(std::make_pair(host_params[0], "1"));
     }
-    os << HostTypeStringify(*fty.in_tys[0]) << " " << host_params[0];
+    oss << HostTypeStringify(*fty.in_tys[0]) << " " << host_params[0];
     for (size_t i = 1; i < fty.in_tys.size(); ++i) {
       if (!decl_only) {
         if (auto sty = dyn_cast<SpannedType>(fty.in_tys[i])) {
@@ -1354,55 +1347,47 @@ void FactorCodeGen::EmitHostFuncDecl(std::ostream& os, const Type& ty,
         } else
           param_map.push_back(std::make_pair(host_params[i], "1"));
       }
-      os << ", " << HostTypeStringify(*fty.in_tys[i]) << " " << host_params[i];
+      oss << ", " << HostTypeStringify(*fty.in_tys[i]) << " " << host_params[i];
     }
   }
-  os << ")" << ((decl_only) ? ";\n" : " ");
+  oss << ")" << ((decl_only) ? ";\n" : " ");
+
+  if (decl_only && debug_visit)
+    VST_DEBUG(dbgs() << "Host function prototype:\n" << oss.str());
 }
 
 void FactorCodeGen::OutputScript(const ptr<FunctionType>& fty,
-                                 const std::string& name,
                                  const std::string& out_type,
                                  const std::string& out_size_expr,
                                  const Shape& out_shape) {
   // a temporal path for the compilation process
   build_path = create_unique_path();
-  std::string build_prefix = build_path + "/__choreo_" + name;
+  std::string build_prefix = build_path + "/__choreo_" + fname;
 
   std::string kernel_fn = build_prefix + "_micro_kernel.cpp";
   std::string factor_fn = build_prefix + "_factor.cpp";
   std::string factor_bfn =
-      build_path + "/${gcu_target_string}_lib" + current_fn + ".o";
-  host_fn = build_prefix + "_host.cpp";
-  target_fn = "__choreo_" + name;
+      build_path + "/${gcu_target_string}_lib" + factor_fname + ".o";
+  host_filename = build_prefix + "_host.cpp";
 
   // Generate the host code
   std::string user_code = hs.str();
   hs.clear();
 
+  // emit the fixed header
   EmitHostHead(hs);
   if (!user_code.empty()) {
-    // user code needs the choreo function decal for call
-    EmitHostFuncDecl(hs, *fty, name, true);
+    // The user code requires the choreo function be fwd-decalared for its call
+    EmitHostFuncDecl(hs, *fty, fname, true);
     hs << user_code;
   }
-  EmitHostFuncDecl(hs, *fty, name);
+  EmitHostFuncDecl(hs, *fty, fname);
   EmitHostFuncBody(hs, *fty, factor_bfn, out_size_expr, out_type, out_shape);
 
   // backpatch the factor bin filename
   std::string factor_src = fs.str();
   if (!alloc_in_fs.str().empty())
     factor_src.insert(alloc_pos, alloc_in_fs.str());
-  ReplaceInString(&factor_src, std::string("$$out$$"), output_v);
-  // only one `parallel by`
-  if (pb_bound1 == -1) {
-    pb_bound1 = pb_bound0;
-    pb_bound0 = 1;
-  }
-  ReplaceInString(&factor_src, std::string("$$pb_bound0$$"),
-                  std::to_string(pb_bound0));
-  ReplaceInString(&factor_src, std::string("$$pb_bound1$$"),
-                  std::to_string(pb_bound1));
   ReplaceInString(&factor_src, std::string(backpatch_filename), kernel_fn);
 
   // Now generate the script
@@ -1522,8 +1507,8 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
         assert(isa<FutureType>(expr->GetR()->GetType()) &&
                "expect a future operand.");
         if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol()) {
-          if (fut_buf->at(entry_fn).count(id->name))
-            oss << fut_buf->at(entry_fn).at(id->name);
+          if (fut_buf->at(fname).count(id->name))
+            oss << fut_buf->at(fname).at(id->name);
           else
             choreo_unreachable("Future '" + id->name +
                                "' is not associated with a buffer.");

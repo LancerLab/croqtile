@@ -12,11 +12,26 @@ private:
   ptr<CodeGenInfo> cgi;
   std::string fname; // current function name
 
+  int parallel_level = 0;
+
 private:
   bool BeforeVisitImpl(AST::Node& n) {
     if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
       fname = f->name;
       cgi->storages[fname] = {};
+      cgi->launches[fname] = {};
+      parallel_level = 0;
+    } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+      parallel_level++;
+      if (parallel_level == 1)
+        cgi->launches[fname].block_dim_x = pb->bound;
+      else if (parallel_level == 2) {
+        cgi->launches[fname].grid_dim_x = cgi->launches[fname].block_dim_x;
+        cgi->launches[fname].block_dim_x = pb->bound;
+      } else
+        choreo_unreachable("The parallel-by level " +
+                           std::to_string(parallel_level) +
+                           " is not supported.");
     }
     return true;
   }
@@ -29,6 +44,10 @@ private:
                << ", index: " << item.p_index << "\n";
       });
       fname = "";
+    } else if (isa<AST::ParallelBy>(&n)) {
+      parallel_level--;
+      VST_DEBUG(dbgs() << "Grid Dims: " << cgi->launches[fname].grid_dim_x);
+      VST_DEBUG(dbgs() << "Block Dims: " << cgi->launches[fname].block_dim_x);
     }
     return true;
   }
@@ -93,9 +112,11 @@ public:
     auto id = GetIdentifier(*n.value);
     if (!id) return true;
 
-    for (auto& item : cgi->storages[fname]) {
+    for (auto& item : cgi->storages[fname])
       if (item.name == InScopeName(id->name)) { item.is_return = true; }
-    }
+
+    cgi->returns[fname] = InScopeName(id->name);
+
     return true;
   }
   bool Visit(AST::LoopRange&) { return true; }

@@ -23,41 +23,34 @@ namespace Factor {
 
 struct FactorCodeGen : public CodeGenerator {
 private:
-  std::string current_fn = "";
-  std::string entry_fn = "";
-  std::string indent = "";
-  std::string bin_fn; // temporal filename of factor binary
-  // buffer the kernel code
-  std::ostringstream ks;
-  // buffer the factor code
-  std::ostringstream fs;
-  // buffer the host code
-  std::ostringstream hs;
-  std::string host_fn;
-  std::string target_fn;
-  std::string build_path;
+  std::string factor_fname; // choreo-factor function name
+  std::string fname; // function name in source code, also the C++ function of
+                     // choreo entry
+
+  std::string indent;
+
+  std::ostringstream
+      ks; // buffer stream of the kernel code (__cok__, user provided)
+  std::ostringstream fs; // buffer stream of the factor code (generated)
+  std::ostringstream hs; // buffer stream of the host code (user provided)
+
+  std::string host_filename;
+  std::string build_path; // path for the script to build factor code
+
   // buffer of "alloc" statements in factor code
   std::ostringstream alloc_in_fs;
   std::string::size_type alloc_pos;
   std::string alloc_indent;
-  // output variable name
-  std::string output_v;
-
-  // AST::ParallelBy bound
-  int pb_bound0 = -1;
-  int pb_bound1 = -1;
 
   const std::string named_dim_ref_prefix = "__choreo_nd_ref_";
 
   bool void_return = false;
-  int parallel_factor = 1;
   size_t sp_count = 0;
   int parallel_level = 0;
   bool dyn_shaped = false;
   bool cross_compile = false;
 
   ValBind::BindInfo<std::string> bind_info;
-  AST::ptr<AST::DataType> current_output = nullptr;
   std::map<std::string, std::stack<std::vector<std::string>>> cur_bounded_vars;
   std::vector<std::unordered_set<std::string>> loop_vars; // the loop variables
   std::vector<RtMemUsageCheckInfo> rt_mem_usage_check_list;
@@ -74,8 +67,6 @@ private:
   std::map<std::string, size_t>
       rts_nidx; // dim index in shape for the runtime shape name
   std::map<std::string, std::string> idnm_rts; // name in .co to symbolic name
-
-  size_t launch_params_size = 0;
 
   ptr<FutureBufferMap> fut_buf; // map a future to its associated buffer
   ptr<CodeGenInfo> cgi;
@@ -97,7 +88,7 @@ public:
   }
 
   void OutputScript(const ptr<FunctionType>&, const std::string&,
-                    const std::string&, const std::string&, const Shape&);
+                    const std::string&, const Shape&);
 
   bool BeforeVisitImpl(AST::Node&) override;
   bool AfterVisitImpl(AST::Node&) override;
@@ -142,7 +133,7 @@ private:
   bool ContainsLoopVar(const std::string&) const;
 
   void EmitHostHead(std::ostream&);
-  void EmitHostFuncDecl(std::ostream&, const Type&, const std::string&,
+  void EmitHostFuncDecl(std::ostringstream&, const Type&, const std::string&,
                         bool = false);
   void EmitRuntimeCheck(std::ostream&, const Type&);
   void EmitRuntimeMemUsageCheck(std::ostream&, const Type&);
@@ -165,10 +156,21 @@ private:
   }
 
   int GetArgumentIndex(const std::string& pname) const {
-    for (auto& item : cgi->storages.at(entry_fn)) {
+    for (auto& item : cgi->storages.at(fname)) {
       if (item.name == pname) return item.p_index;
     }
     return -1;
+  }
+
+  void ClearFunctionStat() {
+    sp_count = 0; // reset the count of stub parameter
+    param_map.clear();
+    rts_nmap.clear();
+    rts_pidx.clear();
+    rts_nidx.clear();
+    idnm_rts.clear();
+    host_params.clear();
+    indent.clear();
   }
 };
 

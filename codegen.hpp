@@ -22,10 +22,23 @@ struct SymbolDetail {
   int p_index = -1; // index of parameter
 };
 
+struct LaunchConfig {
+  size_t grid_dim_z = 1;
+  size_t grid_dim_y = 1;
+  size_t grid_dim_x = 1;
+  size_t block_dim_z = 1;
+  size_t block_dim_y = 1;
+  size_t block_dim_x = 1;
+};
+
 using SymbolDetails = std::map<std::string, std::vector<SymbolDetail>>;
+using LaunchDetails = std::map<std::string, LaunchConfig>;
+using ReturnSymbols = std::map<std::string, std::string>;
 
 struct CodeGenInfo {
   SymbolDetails storages;
+  LaunchDetails launches;
+  ReturnSymbols returns;
 };
 
 // Codegenerators for targets
@@ -102,7 +115,7 @@ static inline std::string HostTypeStringify(const Choreo::Type& ty,
     if (is_ret) // return by value
       return "choreo::spanned_data<choreo::" + STR(sty->f_type) + ", " +
              std::to_string(sty->Dims()) + ">";
-    else // pass by reference
+    else // pass in by reference
       return "const choreo::spanned_view<choreo::" + STR(sty->f_type) + ", " +
              std::to_string(sty->Dims()) + "> &";
   }
