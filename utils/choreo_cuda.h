@@ -16,6 +16,8 @@
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
+#include <algorithm>
+#include <random>
 
 #include "__choreo_cuda_kernel.cuh"
 
@@ -211,8 +213,33 @@ public:
   T* end() { return data + N; }
   const T* end() const { return data + N; }
 
+  void fill_random() { fill_random(data, std::is_floating_point<T>()); }
+
 private:
   T data[N];
+
+  template <typename U>
+  typename std::enable_if<std::is_floating_point<U>::value>::type
+  fill_random(U (&array)[N], std::true_type) {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<U> rand_func(-1.0,
+                                                1.0); // 浮点数范围 [-1.0, 1.0)
+
+    std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
+  }
+
+  // 如果 T 是整数类型，使用 std::uniform_int_distribution
+  template <typename U>
+  typename std::enable_if<std::is_integral<U>::value>::type
+  fill_random(U (&array)[N], std::false_type) {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<U> rand_func(-100,
+                                               100); // 整数范围 [-100, 100]
+
+    std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
+  }
 };
 
 template <typename T, size_t N, size_t M>
@@ -287,6 +314,155 @@ public:
 
 } // end anonymous namespace
 
+// Floating-point types
+using f32 = float;
+
+#ifndef NATIVE_F16_SUPPORT
+// this f16 accepts literal initialization, but without arith support
+class f16 {
+private:
+  uint16_t bits; // Storage for the half-precision bits
+
+public:
+  // Default constructor
+  f16() : bits(0) {}
+
+  // Constructor for conversion from float
+  f16(float value) { bits = floatToHalfBits(value); }
+
+  // Constructor for conversion from double
+  f16(double value) { bits = floatToHalfBits(static_cast<float>(value)); }
+
+  // Implicit conversion from float
+  f16& operator=(float value) {
+    bits = floatToHalfBits(value);
+    return *this;
+  }
+
+  // Implicit conversion from double
+  f16& operator=(double value) {
+    bits = floatToHalfBits(static_cast<float>(value));
+    return *this;
+  }
+
+  bool operator==(f16 value) {
+    return halfBitsToFloat(bits) == value.toFloat();
+  }
+
+  // Function to convert float to half precision bits (naive and placeholder)
+  static uint16_t floatToHalfBits(float value) {
+    // Simplified conversion: this does not handle rounding, infinities, or NaNs
+    // correctly In practice, use a library or a fully implemented conversion
+    // function
+    int32_t fltInt32 = *((int32_t*)&value);
+    int32_t t1 = (fltInt32 & 0x7FFFFFFF) >> 13; // Non-sign bits
+    int32_t t2 = (fltInt32 & 0x80000000) >> 16; // Sign bit
+    int32_t t3 = ((fltInt32 & 0x7F800000) >> 13) - (112 << 10);
+
+    int32_t t4 = std::max(0, std::min(t3, (1 << 10) - 1));
+    return (t2 | t4 | t1);
+  }
+
+  // Function to convert half precision bits to float (naive and placeholder)
+  static float halfBitsToFloat(uint16_t bits) {
+    // Simplified conversion: this does not handle rounding, infinities, or NaNs
+    // correctly In practice, use a library or a fully implemented conversion
+    // function
+    int32_t t1 = (bits & 0x7FFF) << 13; // Non-sign bits
+    int32_t t2 = (bits & 0x8000) << 16; // Sign bit
+    int32_t t3 = ((bits & 0x7C00) << 13) + (112 << 23);
+
+    int32_t fltInt32 = t2 | t3 | t1;
+    return *((float*)&fltInt32);
+  }
+
+  // Method to get the float value from the f16 object
+  float toFloat() const { return halfBitsToFloat(bits); }
+};
+#else
+using f16 = __fp16;
+#endif // NATIVE_F16_SUPPORT
+
+#ifndef NATIVE_BF16_SUPPORT
+class bf16 {
+private:
+  uint16_t bits; // Storage for the half-precision bits
+
+public:
+  // Default constructor
+  bf16() : bits(0) {}
+
+  // Constructor for conversion from float
+  bf16(float value) { bits = floatToHalfBits(value); }
+
+  // Constructor for conversion from double
+  bf16(double value) { bits = floatToHalfBits(static_cast<float>(value)); }
+
+  // Implicit conversion from float
+  bf16& operator=(float value) {
+    bits = floatToHalfBits(value);
+    return *this;
+  }
+
+  // Implicit conversion from double
+  bf16& operator=(double value) {
+    bits = floatToHalfBits(static_cast<float>(value));
+    return *this;
+  }
+
+  bool operator==(bf16 value) {
+    return halfBitsToFloat(bits) == value.toFloat();
+  }
+
+  // Function to convert float to half precision bits (naive and placeholder)
+  static uint16_t floatToHalfBits(float value) {
+    // Simplified conversion: this does not handle rounding, infinities, or NaNs
+    // correctly In practice, use a library or a fully implemented conversion
+    // function
+    int32_t fltInt32 = *((int32_t*)&value);
+    return (fltInt32 & 0xFFFF0000) >> 16;
+  }
+
+  // Function to convert half precision bits to float (naive and placeholder)
+  static float halfBitsToFloat(uint16_t bits) {
+    int32_t fltInt32 = ((uint32_t)bits) << 16;
+    return *((float*)&fltInt32);
+  }
+
+  // Method to get the float value from the bf16 object
+  float toFloat() const { return halfBitsToFloat(bits); }
+};
+#else
+// Check for __bf16 support
+#if defined(__clang__)
+#if __clang_major__ >= 11
+#define BF16_SUPPORTED 1
+using bf16 = __bf16;
+#endif
+#elif defined(__GNUC__)
+#if __GNUC__ >= 11
+#define BF16_SUPPORTED 1
+using bf16 = __bf16;
+#endif
+#endif
+#endif // NATIVE_BF16_SUPPORT
+
+#ifndef BF16_SUPPORTED
+//#error \
+//    "Compiler does not support __bf16. Please use a compiler that supports __bf16 or define a fallback type."
+#endif
+
+
+// Unsigned integer types
+using u32 = uint32_t; // 32-bit unsigned integer
+using u16 = uint16_t; // 16-bit unsigned integer
+using u8 = uint8_t;   // 8-bit unsigned integer
+
+// Signed integer types
+using s32 = int32_t; // 32-bit signed integer
+using s16 = int16_t; // 16-bit signed integer
+using s8 = int8_t;   // 8-bit signed integer
+
 // A 'spanned_view' is a memview of data. It is ranked, but no necessary to have
 // compile-time dimensions
 template <typename T, size_t Rank>
@@ -321,7 +497,7 @@ public:
   typename std::enable_if<(M > 1), ArrayProxy<T, Rank - 1>>::type
   operator[](int index) {
     choreo_assert(index >= 0, "Index out of bounds", __FILE__, __LINE__);
-    choreo_assert((size_t)index < dims[M - 1], "Index out of bounds", __FILE__,
+    choreo_assert((size_t)index < dims[0], "Index out of bounds", __FILE__,
                   __LINE__);
     const auto& sub_dims =
         *reinterpret_cast<const mdspan<Rank - 1>*>(&(dims[1]));
@@ -337,14 +513,21 @@ public:
     return true;
   }
 
-  void fill_random(T lb = T(-2), T ub = T(2)) {
-    fill_random(this->data(), this->size(), std::is_floating_point<T>());
+  void fill_random(T lb, T ub) {
+    fill_random(this->data(), this->size(), lb, ub);
+  }
+
+  template <typename U>
+  typename std::enable_if<std::is_same<U, f16>::value || std::is_same<U, bf16>::value>::type
+  fill_random(float lb, float ub) {
+    fill_random(this->data(), this->size(), lb, ub);
   }
 
 private:
+  // f32
   template <typename U>
-  typename std::enable_if<std::is_floating_point<U>::value>::type
-  fill_random(U* array, size_t N, std::true_type, U lb, U ub) {
+  typename std::enable_if<std::is_same<U, float>::value>::type
+  fill_random(U* array, size_t N, U lb, U ub) {
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<U> rand_func(lb,
@@ -353,10 +536,34 @@ private:
     std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
   }
 
+  // f16/bf16
+  template <typename U>
+  typename std::enable_if<std::is_same<U, f16>::value || std::is_same<U, bf16>::value>::type
+  fill_random(U* array, size_t N, U lb, U ub) {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<float> rand_func(lb.toFloat(),
+                                                ub.toFloat()); // 浮点数范围 [-1.0, 1.0)
+
+    std::generate_n(&array[0], N, [&]() { return U(rand_func(gen)); });
+  }
+
+  // f16/bf16 with float lb/ub
+  template <typename U>
+  typename std::enable_if<std::is_same<U, f16>::value || std::is_same<U, bf16>::value>::type
+  fill_random(U* array, size_t N, float lb, float ub) {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<float> rand_func(lb, ub);
+
+    std::generate_n(&array[0], N, [&]() { return U(rand_func(gen)); });
+  }
+
+  // s32/u32 ...
   // 如果 T 是整数类型，使用 std::uniform_int_distribution
   template <typename U>
   typename std::enable_if<std::is_integral<U>::value>::type
-  fill_random(U* array, size_t N, std::false_type, U lb, U ub) {
+  fill_random(U* array, size_t N, U lb, U ub) {
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_int_distribution<U> rand_func(lb, ub); // 整数范围 [-100, 100]
@@ -402,7 +609,7 @@ public:
   typename std::enable_if<(M > 1), ArrayProxy<T, Rank - 1>>::type
   operator[](int index) {
     choreo_assert(index >= 0, "Index out of bounds", __FILE__, __LINE__);
-    choreo_assert((size_t)index < dims[M - 1], "Index out of bounds", __FILE__,
+    choreo_assert((size_t)index < dims[0], "Index out of bounds", __FILE__,
                   __LINE__);
     const auto& sub_dims =
         *reinterpret_cast<const mdspan<Rank - 1>*>(&(dims[1]));
@@ -463,145 +670,6 @@ auto copy_as_spanned(T* ptr, std::initializer_list<size_t> init) {
   return res;
 }
 
-// Floating-point types
-using f32 = float;
-
-#ifndef NATIVE_FP16_SUPPORT
-// this fp16 accepts literal initialization, but without arith support
-class fp16 {
-private:
-  uint16_t bits; // Storage for the half-precision bits
-
-public:
-  // Default constructor
-  fp16() : bits(0) {}
-
-  // Constructor for conversion from float
-  fp16(float value) { bits = floatToHalfBits(value); }
-
-  // Constructor for conversion from double
-  fp16(double value) { bits = floatToHalfBits(static_cast<float>(value)); }
-
-  // Implicit conversion from float
-  fp16& operator=(float value) {
-    bits = floatToHalfBits(value);
-    return *this;
-  }
-
-  // Implicit conversion from double
-  fp16& operator=(double value) {
-    bits = floatToHalfBits(static_cast<float>(value));
-    return *this;
-  }
-
-  // Function to convert float to half precision bits (naive and placeholder)
-  static uint16_t floatToHalfBits(float value) {
-    // Simplified conversion: this does not handle rounding, infinities, or NaNs
-    // correctly In practice, use a library or a fully implemented conversion
-    // function
-    int32_t fltInt32 = *((int32_t*)&value);
-    int32_t t1 = (fltInt32 & 0x7FFFFFFF) >> 13; // Non-sign bits
-    int32_t t2 = (fltInt32 & 0x80000000) >> 16; // Sign bit
-    int32_t t3 = ((fltInt32 & 0x7F800000) >> 13) - (112 << 10);
-
-    int32_t t4 = std::max(0, std::min(t3, (1 << 10) - 1));
-    return (t2 | t4 | t1);
-  }
-
-  // Function to convert half precision bits to float (naive and placeholder)
-  static float halfBitsToFloat(uint16_t bits) {
-    // Simplified conversion: this does not handle rounding, infinities, or NaNs
-    // correctly In practice, use a library or a fully implemented conversion
-    // function
-    int32_t t1 = (bits & 0x7FFF) << 13; // Non-sign bits
-    int32_t t2 = (bits & 0x8000) << 16; // Sign bit
-    int32_t t3 = ((bits & 0x7C00) << 13) + (112 << 23);
-
-    int32_t fltInt32 = t2 | t3 | t1;
-    return *((float*)&fltInt32);
-  }
-
-  // Method to get the float value from the fp16 object
-  float toFloat() const { return halfBitsToFloat(bits); }
-};
-#else
-using f16 = __fp16;
-#endif // NATIVE_FP16_SUPPORT
-
-#ifndef NATIVE_BF16_SUPPORT
-class bf16 {
-private:
-  uint16_t bits; // Storage for the half-precision bits
-
-public:
-  // Default constructor
-  bf16() : bits(0) {}
-
-  // Constructor for conversion from float
-  bf16(float value) { bits = floatToHalfBits(value); }
-
-  // Constructor for conversion from double
-  bf16(double value) { bits = floatToHalfBits(static_cast<float>(value)); }
-
-  // Implicit conversion from float
-  bf16& operator=(float value) {
-    bits = floatToHalfBits(value);
-    return *this;
-  }
-
-  // Implicit conversion from double
-  bf16& operator=(double value) {
-    bits = floatToHalfBits(static_cast<float>(value));
-    return *this;
-  }
-
-  // Function to convert float to half precision bits (naive and placeholder)
-  static uint16_t floatToHalfBits(float value) {
-    // Simplified conversion: this does not handle rounding, infinities, or NaNs
-    // correctly In practice, use a library or a fully implemented conversion
-    // function
-    int32_t fltInt32 = *((int32_t*)&value);
-    return (fltInt32 & 0xFFFF0000) >> 16;
-  }
-
-  // Function to convert half precision bits to float (naive and placeholder)
-  static float halfBitsToFloat(uint16_t bits) {
-    int32_t fltInt32 = ((uint32_t)bits) << 16;
-    return *((float*)&fltInt32);
-  }
-
-  // Method to get the float value from the bf16 object
-  float toFloat() const { return halfBitsToFloat(bits); }
-};
-#else
-// Check for __bf16 support
-#if defined(__clang__)
-#if __clang_major__ >= 11
-#define BF16_SUPPORTED 1
-using bf16 = __bf16;
-#endif
-#elif defined(__GNUC__)
-#if __GNUC__ >= 11
-#define BF16_SUPPORTED 1
-using bf16 = __bf16;
-#endif
-#endif
-#endif // NATIVE_BF16_SUPPORT
-
-#ifndef BF16_SUPPORTED
-//#error \
-//    "Compiler does not support __bf16. Please use a compiler that supports __bf16 or define a fallback type."
-#endif
-
-// Unsigned integer types
-using u32 = uint32_t; // 32-bit unsigned integer
-using u16 = uint16_t; // 16-bit unsigned integer
-using u8 = uint8_t;   // 8-bit unsigned integer
-
-// Signed integer types
-using s32 = int32_t; // 32-bit signed integer
-using s16 = int16_t; // 16-bit signed integer
-using s8 = int8_t;   // 8-bit signed integer
 
 } // end namespace choreo
 

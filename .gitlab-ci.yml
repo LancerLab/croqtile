@@ -8,7 +8,7 @@ gputest:
   stage: check-in-tests
   script:
     - echo "Running tests with GPU..."
-    - make ci-gpu-test -j4  # 假设 `make test` 用于运行测试
+    - make ci-gpu-test  # 假设 `make test` 用于运行测试
   tags:
     - GPU  # 在 GPU 机器上运行作业
   only:
@@ -19,7 +19,7 @@ gcu2test:
   stage: check-in-tests
   script:
     - echo "Running tests with GCU2..."
-    - make ci-gcu2-test -j4 # 假设 `make test` 用于运行测试
+    - make ci-gcu2-test # 假设 `make test` 用于运行测试
   tags:
     - GCU2  # 在 GPU 机器上运行作业
   only:
@@ -30,7 +30,7 @@ gcu3test:
   stage: check-in-tests
   script:
     - echo "Running tests with GCU3 S60..."
-    - make ci-gcu3-test -j4 # 假设 `make test` 用于运行测试
+    - make ci-gcu3-test # 假设 `make test` 用于运行测试
   tags:
     - GCU3  # 在 GPU 机器上运行作业
   only:
