@@ -21,6 +21,19 @@ namespace Choreo {
 
 namespace Factor {
 
+// The example illustrates the a dimension detail:
+//
+// - 'hp0.shape()[1]' is the host dimension name of 2nd dim of hp0's shape
+// - 'hp0' is the first host parameter, therefore its 'param_index == 0'
+// - it refers the 2nd dim, so the 'dim_index == 1'
+//
+struct DimensionDetail {
+  std::string hd_name; // host dimension name of a shape.
+  size_t param_index;  // index of the parameter that gives the shape with the
+                       // dimension
+  size_t dim_index;    // dimension index inside a shape
+};
+
 struct FactorCodeGen : public CodeGenerator {
 private:
   std::string factor_fname; // choreo-factor function name
@@ -29,25 +42,27 @@ private:
 
   std::string indent;
 
-  std::ostringstream
-      ks; // buffer stream of the kernel code (__cok__, user provided)
+  // ochestrate multiple streams
+  std::ostringstream ks; // buffer stream of the kernel code (user provided)
   std::ostringstream fs; // buffer stream of the factor code (generated)
   std::ostringstream hs; // buffer stream of the host code (user provided)
+  std::ostringstream alloc_in_fs; // buffer "alloc" statements in factor code
 
-  std::string host_filename;
-  std::string build_path; // path for the script to build factor code
-
-  // buffer of "alloc" statements in factor code
-  std::ostringstream alloc_in_fs;
   std::string::size_type alloc_pos;
   std::string alloc_indent;
+
+  // backend (factor) compile environment related
+  std::string host_filename;
+  std::string build_path; // path for the script to build factor code
+  bool compile_with_dynshape =
+      false; // if factor compile requires dynshape support
 
   const std::string named_dim_ref_prefix = "__choreo_nd_ref_";
 
   bool void_return = false;
-  size_t sp_count = 0;
+  size_t hp_count = 0; // host parameter count
+
   int parallel_level = 0;
-  bool dyn_shaped = false;
   bool cross_compile = false;
 
   ValBind::BindInfo<std::string> bind_info;
@@ -59,13 +74,8 @@ private:
   // parameters: the name (of factor data) and associated size expression
   std::vector<std::pair<std::string, std::string>> param_map;
 
-  // mapping from a symbolic shape dimensions to the associated runtime name
-  std::map<std::string, std::string>
-      rts_nmap; // symbolic name to the runtime name
-  std::map<std::string, size_t>
-      rts_pidx; // shape index in parameter list for the runtime shape name
-  std::map<std::string, size_t>
-      rts_nidx; // dim index in shape for the runtime shape name
+  // map from a symbolic shape dimension to the associated runtime name
+  std::map<std::string, DimensionDetail> dims_info;
   std::map<std::string, std::string> idnm_rts; // name in .co to symbolic name
 
   ptr<FutureBufferMap> fut_buf; // map a future to its associated buffer
@@ -80,12 +90,6 @@ public:
                 bool cross_compile)
       : CodeGenerator("codegen", symtab), cross_compile(cross_compile),
         rt_mem_usage_check_list(list), fut_buf(fb), cgi(ci) {}
-
-  void ResetBuffers() {
-    ks.clear();
-    fs.clear();
-    hs.clear();
-  }
 
   void OutputScript(const ptr<FunctionType>&, const std::string&,
                     const std::string&, const Shape&);
@@ -142,28 +146,32 @@ private:
                         const Shape& s);
 
   const std::string ExprSTR(AST::ptr<AST::Node>) const;
-  std::string GenHostParamName() { return "hp" + std::to_string(sp_count++); }
+  std::string GenHostParamName() { return "hp" + std::to_string(hp_count++); }
   std::string ReplaceRuntimeNames(const std::string&, const std::string& = "",
                                   bool host_code = true);
-  std::string ReplaceDynDimName(const std::string&);
+  std::string ReplaceFactorDynDimName(const std::string&);
   std::optional<std::string> ReplaceDynDimRef(const std::string&);
-  // common utils
-  void incrementIndent() { this->indent += "  "; }
 
-  void decrementIndent() {
+  // common utils
+  void IncrementIndent() { this->indent += "  "; }
+  void DecrementIndent() {
     if (this->indent.size() >= 2)
       this->indent = this->indent.substr(0, this->indent.size() - 2);
   }
 
-  void ClearFunctionStat() {
-    sp_count = 0; // reset the count of stub parameter
+  void ClearFunctionStates() {
+    hp_count = 0; // reset the count of stub parameter
     param_map.clear();
-    rts_nmap.clear();
-    rts_pidx.clear();
-    rts_nidx.clear();
+    dims_info.clear();
     idnm_rts.clear();
     host_params.clear();
     indent.clear();
+
+    // Reset buffers;
+    ks.clear();
+    fs.clear();
+    hs.clear();
+    alloc_in_fs.clear();
   }
 };
 

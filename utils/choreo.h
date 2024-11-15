@@ -307,7 +307,6 @@ using bf16 = __bf16;
 //    "Compiler does not support __bf16. Please use a compiler that supports __bf16 or define a fallback type."
 #endif
 
-
 // Unsigned integer types
 using u32 = uint32_t; // 32-bit unsigned integer
 using u16 = uint16_t; // 16-bit unsigned integer
@@ -373,7 +372,8 @@ public:
   }
 
   template <typename U>
-  typename std::enable_if<std::is_same<U, f16>::value || std::is_same<U, bf16>::value>::type
+  typename std::enable_if<std::is_same<U, f16>::value ||
+                          std::is_same<U, bf16>::value>::type
   fill_random(float lb, float ub) {
     fill_random(this->data(), this->size(), lb, ub);
   }
@@ -393,19 +393,22 @@ private:
 
   // f16/bf16
   template <typename U>
-  typename std::enable_if<std::is_same<U, f16>::value || std::is_same<U, bf16>::value>::type
+  typename std::enable_if<std::is_same<U, f16>::value ||
+                          std::is_same<U, bf16>::value>::type
   fill_random(U* array, size_t N, U lb, U ub) {
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_real_distribution<float> rand_func(lb.toFloat(),
-                                                ub.toFloat()); // 浮点数范围 [-1.0, 1.0)
+    std::uniform_real_distribution<float> rand_func(
+        lb.toFloat(),
+        ub.toFloat()); // 浮点数范围 [-1.0, 1.0)
 
     std::generate_n(&array[0], N, [&]() { return U(rand_func(gen)); });
   }
 
   // f16/bf16 with float lb/ub
   template <typename U>
-  typename std::enable_if<std::is_same<U, f16>::value || std::is_same<U, bf16>::value>::type
+  typename std::enable_if<std::is_same<U, f16>::value ||
+                          std::is_same<U, bf16>::value>::type
   fill_random(U* array, size_t N, float lb, float ub) {
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -524,7 +527,6 @@ auto copy_as_spanned(T* ptr, std::initializer_list<size_t> init) {
                 __FILE__, __LINE__);
   return res;
 }
-
 
 } // end namespace choreo
 
