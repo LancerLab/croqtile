@@ -1,3 +1,6 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -t factor %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
+
 #include "choreo.h"
 #include <algorithm>
 #include <cfloat>
@@ -52,12 +55,12 @@ __co__ f32[256, 512] math_product_attention(f32[256, 512] lhs,
           local f32[4, 32] l1_out{0};
           foreach
             k_tile {
-              lhs_load = dma.copy lhs.chunkat(m_tile, k_tile) = > local;
-              rhs_load = dma.copy rhs.chunkat(k_tile, n_tile) = > local;
+              lhs_load = dma.copy lhs.chunkat(m_tile, k_tile) => local;
+              rhs_load = dma.copy rhs.chunkat(k_tile, n_tile) => local;
 
               call matmul_kernel(lhs_load.data, rhs_load.data, l1_out, 4, 512,
                                  32);
-              dma.copy l1_out = > l2_out.chunkat(m_tile, n_tile);
+              dma.copy l1_out => l2_out.chunkat(m_tile, n_tile);
             }
         }
     }
@@ -67,13 +70,13 @@ __co__ f32[256, 512] math_product_attention(f32[256, 512] lhs,
           local f32[64, 256] local_output;
 
           // Use DMA to load tile data into local memory
-          local_input = dma.copy l2_out.chunkat(m_tile1, n_tile1) = > local;
+          local_input = dma.copy l2_out.chunkat(m_tile1, n_tile1) => local;
 
           // Call the softmax kernel function
           call softmax_kernel(local_input.data, local_output, 64, 256);
 
           // Copy the result back to global memory
-          dma.copy local_output = > l2_out.chunkat(m_tile1, n_tile1);
+          dma.copy local_output => l2_out.chunkat(m_tile1, n_tile1);
         }
     }
     with index = {m_tile2, k_tile2,
@@ -83,12 +86,12 @@ __co__ f32[256, 512] math_product_attention(f32[256, 512] lhs,
           local f32[4, 64] l1_out_v{0};
           foreach
             k_tile2 {
-              lhs_load_v = dma.copy l2_out.chunkat(m_tile2, k_tile2) = > local;
-              rhs_load_v = dma.copy v.chunkat(k_tile2, n_tile2) = > local;
+              lhs_load_v = dma.copy l2_out.chunkat(m_tile2, k_tile2) => local;
+              rhs_load_v = dma.copy v.chunkat(k_tile2, n_tile2) => local;
 
               call matmul_kernel(lhs_load_v.data, rhs_load_v.data, l1_out_v, 4,
                                  256, 64);
-              dma.copy l1_out_v = > output.chunkat(m_tile2, n_tile2);
+              dma.copy l1_out_v => output.chunkat(m_tile2, n_tile2);
             }
         }
     }
@@ -204,10 +207,12 @@ int main() {
   }
 
   if (match) {
-    std::cout << "Attention Test Passed" << std::endl;
+    std::cout << "Attention Test Passed\n" << std::endl;
   } else {
-    std::cout << "Attention Test Failed" << std::endl;
+    std::cout << "Attention Test Failed\n" << std::endl;
   }
 
   return 0;
 }
+// CHECK: Attention Test Passed
+
