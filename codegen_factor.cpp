@@ -281,12 +281,18 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl& node) {
     } else {
       std::string storage_type = stringify(sty->GetStorage());
       std::string base_type = stringify(sty->ElementType());
-      std::ostringstream _os;
+      std::ostringstream _os, _os_shared;
       _os << "auto " << sym << " = alloc_(" << storage_type << "(" << base_type
           << "," << ReplaceRuntimeNames(LSTR(sty->GetShape()), "", false) << ")"
           << ");\n";
+      _os_shared << "auto " << sym << " = alloc_(" << storage_type << "(" << base_type
+          << "," << ReplaceRuntimeNames(LSTR(sty->GetShape()), "", false) << ")"
+          << ").shared_(SharedType::kBlockShared);\n";
       if (storage_type == "DRAMType")
         fs << indent << _os.str();
+      else if (storage_type == "SRAMType") {
+        alloc_in_fs << "    " << _os_shared.str();
+      }
       else
         alloc_in_fs << "    " << _os.str();
 

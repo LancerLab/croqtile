@@ -25,17 +25,15 @@ __co__ f32 [512, 1024] relu(f32 [512, 1024] input) { /// device program
         shared f32[input.span(0)/#p, input.span(1)/#n_tile] l2_out;
         input_load = dma.copy.async input.chunkat(p, n_tile) => shared;
         wait input_load;
-        parallel q by 1 {
-          with index = {m_tile_s, n_tile_s} in [2, 4] {
-            foreach m_tile_s {
-              foreach n_tile_s {
-                input_load_s = dma.copy.async input_load.data.chunkat(m_tile_s, n_tile_s) => local;
-                out_load_s = dma.copy.async l2_out.chunkat(m_tile_s, n_tile_s) => local;
-                wait input_load_s, out_load_s;
-                call relu_kernel(input_load_s.data, out_load_s.data); // |span| calculate the total size of span.
-                out_store_s = dma.copy.async out_load_s.data => l2_out.chunkat(m_tile_s, n_tile_s); // can use defined vars
-                wait out_store_s;
-              }
+        parallel q by 2 {
+          with index = {n_tile_s} in [4] {
+            foreach n_tile_s {
+              input_load_s = dma.copy.async input_load.data.chunkat(q, n_tile_s) => local;
+              out_load_s = dma.copy.async l2_out.chunkat(q, n_tile_s) => local;
+              wait input_load_s, out_load_s;
+              call relu_kernel(input_load_s.data, out_load_s.data); // |span| calculate the total size of span.
+              out_store_s = dma.copy.async out_load_s.data => l2_out.chunkat(q, n_tile_s); // can use defined vars
+              wait out_store_s;
             }
           }
         }
