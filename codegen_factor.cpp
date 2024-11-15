@@ -276,8 +276,12 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl& node) {
         sa->list->SetDelimiter(orig_delimiter);
       }
     } else if (factor_symbols.Exists(sym)) {
-      fs << indent << "auto " << sym << " = alloc_("
-         << factor_symbols.GetTypeName(sym) << ");\n";
+      if (factor_symbols.GetTypeName(sym) == "SRAMType")
+        fs << indent << "auto " << sym << " = alloc_("
+          << factor_symbols.GetTypeName(sym) << ").shared_(SharedType::kBlockShared);\n";
+      else
+        fs << indent << "auto " << sym << " = alloc_("
+          << factor_symbols.GetTypeName(sym) << ");\n";
     } else {
       std::string storage_type = stringify(sty->GetStorage());
       std::string base_type = stringify(sty->ElementType());

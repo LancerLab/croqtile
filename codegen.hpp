@@ -4,7 +4,7 @@
 #include <string>
 #include <thread>
 
-#include "MemUsageCheck.hpp"
+#include "memcheck.hpp"
 #include "valbind.hpp"
 #include "visitor.hpp"
 

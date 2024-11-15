@@ -18,6 +18,6 @@ __co__ void foo0() {
 // CHECK:  D(func_)("__choreo_foo0_parallel", {}, {}, [&](auto args, auto results) {
 // CHECK:    auto thread_id = thread_id_();
 // CHECK:    auto block_id = block_id_();
-// CHECK:    auto s = alloc_(SRAMType(IntType(32),{1}));
+// CHECK:    auto s = alloc_(SRAMType(IntType(32),{1})).shared_(SharedType::kBlockShared);
 // CHECK:    auto l = alloc_(L1Type(FloatType(16),{4}));
 // CHECK:  }); // end of choreo-factor kernel function
