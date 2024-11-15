@@ -13,6 +13,7 @@ gputest:
     - GPU  # 在 GPU 机器上运行作业
   only:
     - main  # 仅在 `main` 分支上执行该作业
+    - merge_requests
 
 gcu2test:
   stage: check-in-tests
@@ -23,6 +24,7 @@ gcu2test:
     - GCU2  # 在 GPU 机器上运行作业
   only:
     - main  # 仅在 `main` 分支上执行该作业
+    - merge_requests
 
 gcu3test:
   stage: check-in-tests
@@ -33,6 +35,7 @@ gcu3test:
     - GCU3  # 在 GPU 机器上运行作业
   only:
     - main  # 仅在 `main` 分支上执行该作业
+    - merge_requests
 
 cache:
   paths:
