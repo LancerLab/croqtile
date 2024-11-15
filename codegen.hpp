@@ -22,6 +22,8 @@ struct SymbolDetail {
   int p_index = -1; // index of parameter
 };
 
+inline bool IsParameter(const SymbolDetail& sd) { return sd.p_index != -1; }
+
 struct LaunchConfig {
   size_t grid_dim_z = 1;
   size_t grid_dim_y = 1;
@@ -39,6 +41,46 @@ struct CodeGenInfo {
   SymbolDetails storages;
   LaunchDetails launches;
   ReturnSymbols returns;
+
+  // argument's index by its scoped name
+  int GetArgumentIndex(const std::string& fname,
+                       const std::string& pname) const {
+    if (!PrefixedWith(pname, "::"))
+      choreo_unreachable("Not a in-scope symbol name (" + pname + ").");
+
+    for (auto& item : storages.at(fname))
+      if (item.name == pname) return item.p_index;
+
+    return -1;
+  }
+
+  std::vector<SymbolDetail> GetParameters(const std::string& fname) const {
+    std::vector<SymbolDetail> res;
+    for (auto& item : storages.at(fname)) {
+      if (item.p_index != -1) res.push_back(item);
+    }
+    return res;
+  }
+
+  std::vector<SymbolDetail> GetGlobals(const std::string& fname,
+                                       bool ignore_return = false) const {
+    std::vector<SymbolDetail> res;
+    for (auto& item : storages.at(fname)) {
+      if (ignore_return && item.is_return) continue;
+
+      if (item.p_index != -1) {
+        res.push_back(item);
+        continue;
+      }
+
+      if (auto sty = dyn_cast<SpannedType>(item.type))
+        if ((sty->GetStorage() == Storage::GLOBAL) ||
+            (sty->GetStorage() ==
+             Storage::DEFAULT /* default is mapped as global */))
+          res.push_back(item);
+    }
+    return res;
+  }
 };
 
 // Codegenerators for targets

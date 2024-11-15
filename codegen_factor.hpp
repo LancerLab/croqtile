@@ -155,13 +155,6 @@ private:
       this->indent = this->indent.substr(0, this->indent.size() - 2);
   }
 
-  int GetArgumentIndex(const std::string& pname) const {
-    for (auto& item : cgi->storages.at(fname)) {
-      if (item.name == pname) return item.p_index;
-    }
-    return -1;
-  }
-
   void ClearFunctionStat() {
     sp_count = 0; // reset the count of stub parameter
     param_map.clear();

@@ -317,6 +317,17 @@ bool TypeChecker::Visit(AST::Select& n) {
 
 bool TypeChecker::Visit(AST::Return& n) {
   TraceEachVisit(n);
+
+  if (n.value) {
+    auto vty = NodeType(*n.value);
+    if (!(isa<SpannedType>(vty) || isa<ScalarType>(vty))) {
+      Error(n.LOC(),
+            "returning value with type '" + PSTR(vty) + "' is not supproted.");
+      error_count++;
+      return false;
+    }
+  }
+
   return true;
 }
 bool TypeChecker::Visit(AST::LoopRange& n) {
