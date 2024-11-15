@@ -6,7 +6,7 @@
 #include "utils/choreo.h"
 
 // Test the compilation
-void foo(choreo::f32* a, choreo::fp16* b) {
+void foo(choreo::f32* a, choreo::f16* b) {
   choreo::spanned_view<choreo::f32, 2> spanned_a(a, {1, 2});
   auto spanned_d = choreo::copy_as_spanned<3>(b, {4, 7, 8});
 }

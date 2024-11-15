@@ -3,13 +3,11 @@
 
 #include "choreo.h"
 #include <chrono>
-#include <random>
-#include <algorithm>
 
 __cok__ { /// kernel program
 
 extern "C" void relu_kernel(float* input, float* out) {
-  constexpr int m = 256;
+  constexpr int m = 128;
   constexpr int n = 256;
   for (int i = 0; i < m; ++i) {
     for (int j = 0; j < n; ++j) {
@@ -18,29 +16,35 @@ extern "C" void relu_kernel(float* input, float* out) {
   }
 }
 
+extern "C" void identity(float* input, float* out) {
+  constexpr int m = 128;
+  constexpr int n = 256;
+  for (int i = 0; i < m; ++i) {
+    for (int j = 0; j < n; ++j) {
+      out[i*n+j] = input[i*n+j];
+    }
+  }
+}
+
 } /// end of kernel decl
 
 
-__co__ f32 [512, 1024] relu(f32 [512, 1024] input) { /// device program
-  f32[input.span(0), input.span(1)] output; // use same shape as input
+__co__ f16 [512, 1024] relu(f16 [512, 1024] input) { /// device program
+  f16[input.span(0), input.span(1)] output; // use same shape as input
 
   parallel p by 2 {  // p is sip_index
     with index = {n_tile} in [1] {  // decl your tiled spans
       foreach n_tile {
-        shared f32[input.span(0)/#p, input.span(1)/#n_tile] l2_out;
+        shared f16[input.span(0)/#p, input.span(1)/#n_tile] l2_out;
         input_load = dma.copy.async input.chunkat(p, n_tile) => shared;
         wait input_load;
-        parallel q by 1 {
+        parallel q by 2 {
           with index = {m_tile_s, n_tile_s} in [2, 4] {
-            foreach m_tile_s {
-              foreach n_tile_s {
-                input_load_s = dma.copy.async input_load.data.chunkat(m_tile_s, n_tile_s) => local;
-                out_load_s = dma.copy.async l2_out.chunkat(m_tile_s, n_tile_s) => local;
-                wait input_load_s, out_load_s;
-                call relu_kernel(input_load_s.data, out_load_s.data); // |span| calculate the total size of span.
-                out_store_s = dma.copy.async out_load_s.data => l2_out.chunkat(m_tile_s, n_tile_s); // can use defined vars
-                wait out_store_s;
-              }
+            local f16[l2_out.span(0)/#m_tile_s, l2_out.span(1)/#n_tile_s] l2_out_local;
+            foreach n_tile_s {
+              input_load_s = dma.copy input_load.data.chunkat(q, n_tile_s) => local;
+              call identity(input_load_s.data, l2_out_local); // |span| calculate the total size of span.
+              out_store_s = dma.copy l2_out_local => l2_out.chunkat(q, n_tile_s); // can use defined vars
             }
           }
         }
@@ -54,9 +58,9 @@ __co__ f32 [512, 1024] relu(f32 [512, 1024] input) { /// device program
 
 
 int main() { /// host program
-  choreo::f32 a[512][1024] = {0.0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::f32 b[512][512] = {0};
+  choreo::f16 a[512][1024]; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::f16 b[512][512] = {0};
 
-  auto input_data = choreo::make_spanview<2, choreo::f32>((float*)a, {512, 1024});
+  auto input_data = choreo::make_spanview<2, choreo::f16>((choreo::f16*)a, {512, 1024});
   input_data.fill_random(-1.0, 1.0);
 
   auto start = std::chrono::high_resolution_clock::now();
@@ -75,7 +79,8 @@ int main() { /// host program
     for (size_t j = 0; j < res.shape()[1]; ++j) {
         // std::cout << "i: " << i << ", j: " << j << "\n";
         // std::cout << "res: " << res[i][j] << "\n";
-        float ref = input_data[i][j] > 0? input_data[i][j] : 0;
+        // float ref = input_data[i][j] > 0? input_data[i][j] : 0;
+        choreo::f16 ref = input_data[i][j];
 
         // std::cout << "ref: " << ref << std::endl;
         assert(ref == res[i][j]);

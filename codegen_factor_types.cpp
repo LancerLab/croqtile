@@ -9,7 +9,7 @@ namespace __internal__ {
 inline static std::string ToString(BaseType dataType) {
   static const std::unordered_map<BaseType, std::string> enumToString = {
       {BaseType::F32, "FloatType(32)"},   {BaseType::F16, "FloatType(16)"},
-      {BaseType::BF16, "BFloatType(16)"}, {BaseType::U32, "IntType(32)"},
+      {BaseType::BF16, "BFloatType()"}, {BaseType::U32, "IntType(32)"},
       {BaseType::S32, "IntType(32)"},     {BaseType::U16, "IntType(16)"},
       {BaseType::S16, "IntType(16)"},     {BaseType::U8, "IntType(8)"},
       {BaseType::S8, "IntType(8)"},       {BaseType::INT, "IntType(32)"},
