@@ -345,22 +345,23 @@ private:
   template <typename U>
   typename std::enable_if<std::is_floating_point<U>::value>::type
   fill_random(U* array, size_t N, std::true_type, U lb, U ub) {
-      std::random_device rd;
-      std::mt19937 gen(rd());
-      std::uniform_real_distribution<U> rand_func(lb, ub); // 浮点数范围 [-1.0, 1.0)
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<U> rand_func(lb,
+                                                ub); // 浮点数范围 [-1.0, 1.0)
 
-      std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
+    std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
   }
 
   // 如果 T 是整数类型，使用 std::uniform_int_distribution
   template <typename U>
   typename std::enable_if<std::is_integral<U>::value>::type
   fill_random(U* array, size_t N, std::false_type, U lb, U ub) {
-      std::random_device rd;
-      std::mt19937 gen(rd());
-      std::uniform_int_distribution<U> rand_func(lb, ub); // 整数范围 [-100, 100]
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<U> rand_func(lb, ub); // 整数范围 [-100, 100]
 
-      std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
+    std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
   }
 };
 
