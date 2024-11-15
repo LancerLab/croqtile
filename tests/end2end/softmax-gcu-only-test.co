@@ -1,3 +1,6 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -t factor %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
+
 #include "choreo.h"
 #include <algorithm>
 #include <cmath>
@@ -37,13 +40,13 @@ __co__ auto softmax(f32[256, 512] input) {
           local f32[64, 512] local_output;
 
           // Use DMA to load tile data into local memory
-          local_input = dma.copy input.chunkat(m_tile, n_tile) = > local;
+          local_input = dma.copy input.chunkat(m_tile, n_tile) => local;
 
           // Call the softmax kernel function
           call kernel(local_input.data, local_output, 64, 512);
 
           // Copy the result back to global memory
-          dma.copy local_output = > output.chunkat(m_tile, n_tile);
+          dma.copy local_output => output.chunkat(m_tile, n_tile);
         }
     }
   }
@@ -100,8 +103,9 @@ int main() {
   }
 #endif
   if (match) {
-    std::cout << "Softmax Test Passed" << std::endl;
+    std::cout << "Softmax Test Passed\n" << std::endl;
   } else {
-    std::cout << "Softmax Test Failed" << std::endl;
+    std::cout << "Softmax Test Failed\n" << std::endl;
   }
 }
+// CHECK: Softmax Test Passed
