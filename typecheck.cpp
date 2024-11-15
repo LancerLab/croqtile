@@ -1,4 +1,5 @@
 #include "typecheck.hpp"
+#include "types.hpp"
 
 using namespace Choreo;
 
@@ -214,7 +215,7 @@ bool TypeChecker::Visit(AST::DMA& n) {
 
   if (n.operation == ".transp") {
     // no transposed shape need to be generated
-    // do DataEqual() manually
+    // do LogicalEqual() manually
     auto tc = cast<TransposeConfig>(n.config);
     auto sfty = cast<SpannedType>(fty);
     auto stty = cast<SpannedType>(tty);
@@ -233,6 +234,34 @@ bool TypeChecker::Visit(AST::DMA& n) {
                               t_shape.ValueAt(i))) {
           Error(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
                              ") with " + PSTR(tc) + " and 'to'(" + PSTR(tty) +
+                             ").");
+          error_count++;
+          break;
+        }
+      }
+    }
+  } else if (n.operation == ".pad") {
+    // no padded shape need to be generated
+    // do LogicalEqual() manually
+    auto pc = cast<PadConfig>(n.config);
+    auto sfty = cast<SpannedType>(fty);
+    auto stty = cast<SpannedType>(tty);
+    auto f_shape = sfty->GetShape();
+    auto t_shape = stty->GetShape();
+    if (sfty->f_type != stty->f_type ||
+        f_shape.DimCount() != t_shape.DimCount()) {
+      Error(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
+                         ") with " + PSTR(pc) + " and 'to'(" + PSTR(tty) +
+                         ").");
+      error_count++;
+    } else {
+      size_t dim_count = f_shape.DimCount();
+      for (size_t i = 0; i < dim_count; ++i) {
+        size_t pad_length = pc->pad_high[i] + pc->pad_low[i] + pc->pad_mid[i];
+        if (!IsValueItemEqual(f_shape.ValueAt(i) + ValueItem{pad_length},
+                              t_shape.ValueAt(i))) {
+          Error(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
+                             ") with " + PSTR(pc) + " and 'to'(" + PSTR(tty) +
                              ").");
           error_count++;
           break;
