@@ -1193,13 +1193,19 @@ struct Return : public Node, public TypeIDProvider<Return> {
 struct Call : public Node, public TypeIDProvider<Call> {
   ptr<Node> function;
   ptr<MultiValues> arguments;
+  ptr<MultiValues> template_params;
 
   Call(const location& l, const ptr<Node>& f, const ptr<MultiValues>& a)
-      : Node(l), function(f), arguments(a) {}
+      : Node(l), function(f), arguments(a), template_params(nullptr) {}
+
+  Call(const location& l, const ptr<Node>& f, const ptr<MultiValues>& a, const ptr<MultiValues>& b)
+      : Node(l), function(f), arguments(a), template_params(b) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Call: " << STR(*function);
     os << "\n" << prefix << "  `- with arguments: " << STR(*arguments);
+    if (template_params)
+      os << "\n" << prefix << "  `- with template parameters: " << STR(*template_params);
   }
   void accept(Visitor&) override;
 

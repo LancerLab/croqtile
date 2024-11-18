@@ -160,10 +160,10 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::CppSourceCode>> pass_by host_code
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::SpanAs>> span_as
-%nterm <AST::ptr<AST::Node>> foreach_block general_val general_index span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt swap_stmt expr_or_qes range_expr if_else_block optional_scalar_init param_mdspan_val chunkat_or_storage_or_select
+%nterm <AST::ptr<AST::Node>> foreach_block general_val template_val general_index span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt swap_stmt expr_or_qes range_expr if_else_block optional_scalar_init param_mdspan_val chunkat_or_storage_or_select
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause else_block multi_decls named_spanned_decl
-%nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list param_mdspan_list range_exprs iv_list id_list with_matchers passables future_data_list
-%nterm <AST::ptr<AST::Expr>> s_expr span_expr id_expr
+%nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers passables future_data_list template_params
+%nterm <AST::ptr<AST::Expr>> s_expr template_value_expr span_expr id_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
 %nterm <AST::ptr<AST::Parameter>> parameter
@@ -185,9 +185,10 @@ void choreo_info(const char *message) {
 %right ASSIGN
 %right QES COL
 %left OR
+%left GT LT
 %left AND
 %right NOT
-%nonassoc LT GT LE GE EQ NE
+%nonassoc LE GE EQ NE
 %left PLUS MINUS
 %left STAR SLASH PECET
 %left UBOUND
@@ -528,6 +529,52 @@ value_list
     | s_expr {
         $$ = AST::Make<AST::MultiValues>(@1);
         $$->Append($1);
+      }
+    ;
+
+template_val
+    : NUM { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
+    | IDENTIFIER {
+        if (!symtab.Exists($1))
+          Parser::error(@1,
+            "The symbol `" + $1 + "' has not been defined.");
+
+        $$ = AST::Make<AST::Identifier>(@1, $1);
+      }
+    ;
+
+
+template_value_expr
+    : template_val      { $$ = AST::Make<AST::Expr>(@1, $1); }
+    | UBOUND IDENTIFIER {
+        $$ = AST::Make<AST::Expr>(@1, "ubound", AST::Make<AST::Identifier>(@2, $2));
+      }
+    | template_value_expr PLUS template_value_expr { $$ = AST::Make<AST::Expr>(@1, "+", $1, $3); }
+    | template_value_expr MINUS template_value_expr { $$ = AST::Make<AST::Expr>(@1, "-", $1, $3); }
+    | template_value_expr STAR template_value_expr { $$ = AST::Make<AST::Expr>(@1, "*", $1, $3); }
+    | template_value_expr SLASH template_value_expr { $$ = AST::Make<AST::Expr>(@1, "/", $1, $3); }
+    | template_value_expr PECET template_value_expr { $$ = AST::Make<AST::Expr>(@1, "%", $1, $3); }
+    | CDIV LPAREN template_value_expr COMMA template_value_expr RPAREN { $$ = AST::Make<AST::Expr>(@1, "cdiv", $3, $5); }
+    | template_value_expr UBOUND template_value_expr {$$ = AST::Make<AST::Expr>(@1, "#", $1, $3); }
+    ;
+
+template_value_list
+    : /* Empty list */ {
+        $$ = AST::Make<AST::MultiValues>(loc);
+      }
+    | template_value_list COMMA template_value_expr {
+        $1->Append($3);
+        $$ = $1;
+      }
+    | template_value_expr {
+        $$ = AST::Make<AST::MultiValues>(@1);
+        $$->Append($1);
+      }
+    ;
+
+template_params
+    : LT template_value_list GT {
+        $$ = $2;
       }
     ;
 
@@ -1014,6 +1061,10 @@ call_stmt
     : CALL IDENTIFIER LPAREN passables RPAREN {
         $$ = AST::Make<AST::Call>(@1,
                 AST::Make<AST::Identifier>(@2, $2), $4);
+      }
+    | CALL IDENTIFIER template_params LPAREN passables RPAREN {
+        $$ = AST::Make<AST::Call>(@1,
+                AST::Make<AST::Identifier>(@2, $2), $5, $3);
       }
     ;
 
