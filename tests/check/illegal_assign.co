@@ -68,7 +68,7 @@ __co__ void illegal_reassign_span() {
 // CHECK: error: symbol `mdsa' has been declared already.
 // CHECK: error: MDSPAN re-assignment (mdsa) is not supported.
 // CHECK: error: symbol `mdsa' has been declared already.
-// CHECK: error: `mdsa' of type "{int}->[]" can not be re-assigned as "mdspan<3> []".
+// CHECK: error: `mdsa' of type "{int}->[mdsa]" can not be re-assigned as "mdspan<3> []".
 // CHECK: error: `mdsg' is declared as "mdspan<>" but initialized as "int".
 // CHECK: error: symbol `mdsg' has been declared already.
 // CHECK: error: `mdsg' of type "mdspan<2> []" can not be re-assigned as "int".

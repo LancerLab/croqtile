@@ -256,9 +256,15 @@ bool TypeChecker::Visit(AST::DMA& n) {
       error_count++;
     } else {
       size_t dim_count = f_shape.DimCount();
+      auto clampLongToInt = [](long value) {
+        return static_cast<int>(std::clamp(
+            value, static_cast<long>(std::numeric_limits<int>::min()),
+            static_cast<long>(std::numeric_limits<int>::max())));
+      };
       for (size_t i = 0; i < dim_count; ++i) {
         size_t pad_length = pc->pad_high[i] + pc->pad_low[i] + pc->pad_mid[i];
-        if (!IsValueItemEqual(f_shape.ValueAt(i) + ValueItem{pad_length},
+        if (!IsValueItemEqual(f_shape.ValueAt(i) +
+                                  ValueItem(clampLongToInt(pad_length)),
                               t_shape.ValueAt(i))) {
           Error(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
                              ") with " + PSTR(pc) + " and 'to'(" + PSTR(tty) +
