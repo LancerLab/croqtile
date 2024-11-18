@@ -16,13 +16,24 @@ using FutureBufferMap =
     std::map<std::string, std::map<std::string, std::string>>;
 
 struct SymbolDetail {
+  // information from choreo code
   std::string name;
   ptr<Type> type = nullptr;
   bool is_return = false;
-  int p_index = -1; // index of parameter
-};
+  int p_index = -1; // index of parameter in choreo function decl
 
-inline bool IsParameter(const SymbolDetail& sd) { return sd.p_index != -1; }
+  // information used for codegen
+  std::string host_name;   // mapped host name
+  std::string device_name; // mapped device name
+  int d_index = -1;        // index of symbol in device function parameter list
+
+  SymbolDetail(const std::string& n, const ptr<Type>& t, bool ret = false,
+               int index = -1)
+      : name(n), type(t), is_return(ret), p_index(index) {}
+
+  bool IsParameter() const { return p_index != -1; }
+  bool IsReturn() const { return is_return; }
+};
 
 struct LaunchConfig {
   size_t grid_dim_z = 1;
@@ -37,10 +48,57 @@ using SymbolDetails = std::map<std::string, std::vector<SymbolDetail>>;
 using LaunchDetails = std::map<std::string, LaunchConfig>;
 using ReturnSymbols = std::map<std::string, std::string>;
 
+enum PassedOrDeclaredSymbolKind : int {
+  PDSYM_NONE = 0,
+  PDSYM_PARAMETERS_ONLY = 0x1, // only the paramters declared
+  PDSYM_ALLOC_IN_DEVICE =
+      0x2, // must be allocated device storage and be passed from host to device
+  PDSYM_NO_RETURN = 0x4,   // simply without symbols that is the return value
+  PDSYM_RETURN_ONLY = 0x8, // only the symbol of return statement
+};
+
 struct CodeGenInfo {
-  SymbolDetails storages;
+private:
+  SymbolDetails all_syms;
   LaunchDetails launches;
   ReturnSymbols returns;
+
+  size_t param_count = 0;
+
+public:
+  const std::vector<SymbolDetail>&
+  GetFunctionSymbols(const std::string& fname) const {
+    return all_syms.at(fname);
+  }
+  std::vector<SymbolDetail>& GetFunctionSymbols(const std::string& fname) {
+    return all_syms[fname];
+  }
+
+  const LaunchConfig& GetFunctionLaunch(const std::string& fname) const {
+    return launches.at(fname);
+  }
+  LaunchConfig& GetFunctionLaunch(const std::string& fname) {
+    return launches[fname];
+  }
+
+  const std::string& GetReturnSymbol(const std::string& fname) const {
+    return returns.at(fname);
+  }
+
+  void AddSymbolDetail(const std::string fname, const SymbolDetail& sd) {
+    if (!all_syms.count(fname))
+      all_syms[fname] = {sd};
+    else
+      all_syms[fname].emplace_back(sd);
+  }
+
+  void SetLaunchDetail(const std::string fname, const LaunchConfig& lc) {
+    launches[fname] = lc;
+  }
+
+  void SetReturnSymbol(const std::string fname, const std::string& rs) {
+    returns[fname] = rs;
+  }
 
   // argument's index by its scoped name
   int GetArgumentIndex(const std::string& fname,
@@ -48,38 +106,86 @@ struct CodeGenInfo {
     if (!PrefixedWith(pname, "::"))
       choreo_unreachable("Not a in-scope symbol name (" + pname + ").");
 
-    for (auto& item : storages.at(fname))
+    for (auto& item : all_syms.at(fname))
       if (item.name == pname) return item.p_index;
 
     return -1;
   }
 
-  std::vector<SymbolDetail> GetParameters(const std::string& fname) const {
-    std::vector<SymbolDetail> res;
-    for (auto& item : storages.at(fname)) {
-      if (item.p_index != -1) res.push_back(item);
-    }
-    return res;
+  size_t ParameterCount(const std::string& fname) const {
+    size_t param_count = 0;
+    for (auto& item : all_syms.at(fname))
+      if (item.IsParameter()) param_count++;
+    return param_count;
   }
 
-  std::vector<SymbolDetail> GetGlobals(const std::string& fname,
-                                       bool ignore_return = false) const {
-    std::vector<SymbolDetail> res;
-    for (auto& item : storages.at(fname)) {
-      if (ignore_return && item.is_return) continue;
+  // Get symbols with global storage
+  bool IsPassedOrDeclaredSymbols(const SymbolDetail& sd,
+                                 int gsk = PDSYM_NONE) const {
+    // no filter-outs
+    if (gsk == PDSYM_NONE) return true;
 
-      if (item.p_index != -1) {
-        res.push_back(item);
-        continue;
-      }
-
-      if (auto sty = dyn_cast<SpannedType>(item.type))
-        if ((sty->GetStorage() == Storage::GLOBAL) ||
-            (sty->GetStorage() ==
-             Storage::DEFAULT /* default is mapped as global */))
-          res.push_back(item);
+    if (sd.IsReturn()) {
+      if (gsk & PDSYM_NO_RETURN) return false;
+      if (gsk & PDSYM_RETURN_ONLY) return true;
+      if (gsk & PDSYM_ALLOC_IN_DEVICE) return true;
+      // PDSYM_PARAMETERS_ONLY: pass-by: need further check
     }
-    return res;
+
+    if (gsk & PDSYM_RETURN_ONLY) return false;
+
+    // Parameters are passed to device. And host code should map and alloc the
+    // device storage to shadow them.
+    if (sd.IsParameter()) {
+      if (gsk & PDSYM_PARAMETERS_ONLY) return true;
+      if (gsk & PDSYM_ALLOC_IN_DEVICE) return true;
+      // PDSYM_NO_RETURN: pass-by
+    }
+
+    if (gsk & PDSYM_PARAMETERS_ONLY) return false;
+
+    auto sty = dyn_cast<SpannedType>(sd.type);
+    if (sty && ((sty->GetStorage() == Storage::GLOBAL) ||
+                (sty->GetStorage() ==
+                 Storage::DEFAULT /* default is mapped as global */))) {
+      if (gsk & PDSYM_ALLOC_IN_DEVICE) return true;
+      // PDSYM_NO_RETURN: pass-by
+    }
+
+    if (gsk & PDSYM_ALLOC_IN_DEVICE) return false;
+
+    // no more filters
+    return true;
+  }
+
+  // ranges
+  FilterRange<SymbolDetail> GetParameters(const std::string& fname) {
+    return FilterRange<SymbolDetail>(
+        this->all_syms[fname], [this](const SymbolDetail& sd) {
+          return this->IsPassedOrDeclaredSymbols(sd, PDSYM_PARAMETERS_ONLY);
+        });
+  }
+
+  FilterRange<SymbolDetail> GetDevicePassIns(const std::string& fname) {
+    return FilterRange<SymbolDetail>(
+        this->all_syms[fname], [this](const SymbolDetail& sd) {
+          return this->IsPassedOrDeclaredSymbols(sd, PDSYM_NO_RETURN |
+                                                         PDSYM_ALLOC_IN_DEVICE);
+        });
+  }
+
+  FilterRange<SymbolDetail> GetAllocatables(const std::string& fname) {
+    return FilterRange<SymbolDetail>(
+        this->all_syms[fname], [this](const SymbolDetail& sd) {
+          return this->IsPassedOrDeclaredSymbols(sd, PDSYM_ALLOC_IN_DEVICE);
+        });
+  }
+
+  SymbolDetail GetReturn(const std::string& fname) const {
+    assert(all_syms.count(fname) != 0);
+    assert(returns.count(fname) != 0);
+    for (auto& item : all_syms.at(fname))
+      if (item.name == returns.at(fname)) return item;
   }
 };
 

@@ -18,16 +18,15 @@ private:
   bool BeforeVisitImpl(AST::Node& n) {
     if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
       fname = f->name;
-      cgi->storages[fname] = {};
-      cgi->launches[fname] = {};
       parallel_level = 0;
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       parallel_level++;
       if (parallel_level == 1)
-        cgi->launches[fname].block_dim_x = pb->bound;
+        cgi->GetFunctionLaunch(fname).block_dim_x = pb->bound;
       else if (parallel_level == 2) {
-        cgi->launches[fname].grid_dim_x = cgi->launches[fname].block_dim_x;
-        cgi->launches[fname].block_dim_x = pb->bound;
+        cgi->GetFunctionLaunch(fname).grid_dim_x =
+            cgi->GetFunctionLaunch(fname).block_dim_x;
+        cgi->GetFunctionLaunch(fname).block_dim_x = pb->bound;
       } else
         choreo_unreachable("The parallel-by level " +
                            std::to_string(parallel_level) +
@@ -38,7 +37,7 @@ private:
   bool AfterVisitImpl(AST::Node& n) {
     if (isa<AST::ChoreoFunction>(&n)) {
       VST_DEBUG(dbgs() << "Symbols in " << fname << ":\n");
-      VST_DEBUG(for (auto& item : cgi->storages[fname]) {
+      VST_DEBUG(for (auto& item : cgi->GetFunctionSymbols(fname)) {
         dbgs() << " |- " << item.name << ", ty: " << PSTR(item.type)
                << ", is_return: " << item.is_return
                << ", index: " << item.p_index << "\n";
@@ -46,8 +45,10 @@ private:
       fname = "";
     } else if (isa<AST::ParallelBy>(&n)) {
       parallel_level--;
-      VST_DEBUG(dbgs() << "Grid Dims: " << cgi->launches[fname].grid_dim_x);
-      VST_DEBUG(dbgs() << "Block Dims: " << cgi->launches[fname].block_dim_x);
+      VST_DEBUG(dbgs() << "Grid Dims: "
+                       << cgi->GetFunctionLaunch(fname).grid_dim_x);
+      VST_DEBUG(dbgs() << "Block Dims: "
+                       << cgi->GetFunctionLaunch(fname).block_dim_x);
     }
     return true;
   }
@@ -70,16 +71,14 @@ public:
   bool Visit(AST::NamedTypeDecl&) { return true; }
   bool Visit(AST::NamedVariableDecl& n) override {
     auto name = n.name_str;
-    cgi->storages[fname].push_back(
-        {InScopeName(name), GetSymbolType(name), false, -1});
+    cgi->AddSymbolDetail(fname, {InScopeName(name), GetSymbolType(name)});
     return true;
   }
   bool Visit(AST::IntTuple&) { return true; }
   bool Visit(AST::Assignment& n) override {
     auto name = n.name;
     if (!SSTab().IsDeclared(name) && !isa<AST::SpanAs>(n.value)) {
-      cgi->storages[fname].push_back(
-          {InScopeName(name), GetSymbolType(name), false, -1});
+      cgi->AddSymbolDetail(fname, {InScopeName(name), GetSymbolType(name)});
     }
     return true;
   }
@@ -90,8 +89,8 @@ public:
   bool Visit(AST::ParamList& n) {
     int index = 0;
     for (auto param : n.values) {
-      cgi->storages[fname].push_back(
-          {InScopeName(param->sym->name), param->GetType(), false, index++});
+      cgi->AddSymbolDetail(fname, {InScopeName(param->sym->name),
+                                   param->GetType(), false, index++});
     }
     return true;
   }
@@ -112,10 +111,10 @@ public:
     auto id = GetIdentifier(*n.value);
     if (!id) return true;
 
-    for (auto& item : cgi->storages[fname])
+    for (auto& item : cgi->GetFunctionSymbols(fname))
       if (item.name == InScopeName(id->name)) { item.is_return = true; }
 
-    cgi->returns[fname] = InScopeName(id->name);
+    cgi->SetReturnSymbol(fname, InScopeName(id->name));
 
     return true;
   }

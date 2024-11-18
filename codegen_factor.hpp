@@ -91,8 +91,7 @@ public:
       : CodeGenerator("codegen", symtab), cross_compile(cross_compile),
         rt_mem_usage_check_list(list), fut_buf(fb), cgi(ci) {}
 
-  void OutputScript(const ptr<FunctionType>&, const std::string&,
-                    const std::string&, const Shape&);
+  void OutputScript(const ptr<FunctionType>&);
 
   bool BeforeVisitImpl(AST::Node&) override;
   bool AfterVisitImpl(AST::Node&) override;
@@ -139,11 +138,10 @@ private:
   void EmitHostHead(std::ostream&);
   void EmitHostFuncDecl(std::ostringstream&, const Type&, const std::string&,
                         bool = false);
-  void EmitRuntimeCheck(std::ostream&, const Type&);
-  void EmitRuntimeMemUsageCheck(std::ostream&, const Type&);
-  void EmitHostFuncBody(std::ostream&, const Type&, const std::string& fname,
-                        const std::string& o_sz, const std::string& o_ty,
-                        const Shape& s);
+  void EmitRuntimeCheck(std::ostream&);
+  void EmitRuntimeMemUsageCheck(std::ostream&);
+  void EmitHostFuncBody(std::ostream&, const FunctionType&,
+                        const std::string& fname);
 
   const std::string ExprSTR(AST::ptr<AST::Node>) const;
   std::string GenHostParamName() { return "hp" + std::to_string(hp_count++); }

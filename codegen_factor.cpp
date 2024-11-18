@@ -36,11 +36,12 @@ bool FactorCodeGen::ContainsLoopVar(const std::string& iv) const {
 
 bool FactorCodeGen::BeforeVisitImpl(AST::Node& n) {
   TraceEachVisit(n);
-  if (isa<AST::Program>(&n)) {
-  } else if (auto c = dyn_cast<AST::ChoreoFunction>(&n)) {
+
+  if (auto c = dyn_cast<AST::ChoreoFunction>(&n)) {
     ClearFunctionStates();
     fname = c->name;
     factor_fname = "__choreo_" + fname;
+
     // declare a factor function with proper name
     fs << R"(#include <vector>
 
@@ -57,6 +58,7 @@ using namespace factor;
   } else if (isa<AST::ForeachBlock>(&n)) {
     loop_vars.push_back({});
   }
+
   return 0;
 }
 
@@ -64,6 +66,8 @@ using namespace factor;
 bool FactorCodeGen::AfterVisitImpl(AST::Node& n) {
   TraceEachVisit(n);
   if (isa<AST::Program>(&n)) {
+    if (HasError()) return false; // do not generate code when error happens
+
     outs() << "\n# step 4: generate the host source\n";
     outs() << "host_src=" << host_filename << "\n";
     outs() << "echo \"#include \\\"\"${gcu_target_string}\"_lib" << factor_fname
@@ -125,21 +129,12 @@ fi
 
   } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
     auto fty = cast<FunctionType>(f->GetType());
-    auto& out_type = fty->out_ty;
-    // TODO:need refactor
-    auto out_size_expr = SizeExprOf(*out_type);
     fs << "}\n\n";
 
     fs << "MODULE_REGISTER(\"lib" << factor_fname << "\", " << factor_fname
        << ");"; // end the factor function definition
 
-    // TODO:need refactor
-    if (auto sty = dyn_cast<SpannedType>(out_type)) {
-      OutputScript(fty, STR(GetBaseType(*out_type)), out_size_expr,
-                   sty->GetShape());
-    } else
-      OutputScript(fty, STR(GetBaseType(*out_type)), out_size_expr,
-                   Shape() /*invalid shape*/);
+    OutputScript(fty);
   } else if (isa<AST::ParallelBy>(&n)) {
     parallel_level--;
     if (parallel_level == 0) {
@@ -407,59 +402,114 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
   TraceEachVisit(by);
   if (parallel_level > 1) { return true; }
 
-  fs << this->indent << "Dim3 grid_dim(" << cgi->launches[fname].grid_dim_x
-     << ");\n";
-  fs << this->indent << "Dim3 block_dim(" << cgi->launches[fname].block_dim_x
-     << ");\n";
-  fs << this->indent << "auto ts = launch_kernel_(\"" << factor_fname
-     << "_parallel\", grid_dim, block_dim, args.back(), {";
-  size_t index = 0;
-  for (auto& item : cgi->GetGlobals(fname, true)) {
-    fs << ((index++ > 0) ? ", " : "");
-    if (IsParameter(item))
-      fs << "args[" << item.p_index << "]";
-    else
-      fs << UnScopedName(item.name);
+  fs << this->indent << "Dim3 grid_dim("
+     << cgi->GetFunctionLaunch(fname).grid_dim_x << ");\n";
+  fs << this->indent << "Dim3 block_dim("
+     << cgi->GetFunctionLaunch(fname).block_dim_x << ");\n";
+
+  // [Factor-host] LaunchKernel statement:
+  // symbols which are passed to the device are listed as launch parameters
+  {
+    std::ostringstream launch;
+    launch << this->indent << "auto ts = launch_kernel_(\"" << factor_fname
+           << "_parallel\", grid_dim, block_dim, args.back(), {";
+    size_t index = 0;
+    for (auto& item : cgi->GetDevicePassIns(fname)) {
+      if (item.IsParameter()) assert(item.p_index == (int)index);
+      item.device_name = UnScopedName(item.name);
+      item.d_index = index;
+      launch << ((index++ > 0) ? ", " : "")
+             << (item.IsParameter()
+                     ? ("args[" + std::to_string(item.p_index) + "]")
+                     : item.device_name);
+    }
+    launch << "}, {"
+           << ((void_return) ? "" : UnScopedName(cgi->GetReturnSymbol(fname)))
+           << "});\n";
+
+    if (debug_visit)
+      VST_DEBUG(dbgs() << "[Factor Host] Launch Kernel:\n" << launch.str());
+    fs << launch.str();
   }
-  fs << "}, {" << ((void_return) ? "" : UnScopedName(cgi->returns[fname]))
-     << "});\n";
-  fs << this->indent << "return std::vector<Value>{"
-     << ((void_return) ? "" : UnScopedName(cgi->returns[fname])) << "};\n";
+
+  // [Factor-host] Return statement
+  {
+    std::ostringstream ret;
+    ret << this->indent << "return std::vector<Value>{"
+        << ((void_return) ? "" : UnScopedName(cgi->GetReturnSymbol(fname)))
+        << "};\n";
+    if (debug_visit)
+      VST_DEBUG(dbgs() << "[Factor Host] Return:\n" << ret.str());
+    fs << ret.str();
+  }
+
   this->DecrementIndent();
-  fs << this->indent << "}, true); // end of choreo-factor dataflow program\n";
-  fs << "\n";
+  fs << this->indent
+     << "}, true); // end of choreo-factor dataflow program\n\n";
 
-  fs << this->indent << "\n";
-  fs << this->indent << "D(func_)(\"" << factor_fname << "_parallel\", {";
+  // [Factor-device] Device function declaration
+  {
+    std::ostringstream dfun;
+    {
+      dfun << this->indent << "D(func_)(\"" << factor_fname << "_parallel\", ";
 
-  index = 0;
-  for (auto& item : cgi->GetGlobals(fname, true))
-    fs << ((index++ > 0) ? ", " : "") << UnScopedName(item.name) << "_type";
+      // input arguments of factor device function
+      dfun << "{";
+      size_t index = 0;
+      for (auto& item : cgi->GetDevicePassIns(fname))
+        dfun << ((index++ > 0) ? ", " : "") << UnScopedName(item.name)
+             << "_type";
+      dfun << "}, ";
 
-  fs << "}, {" << ((void_return) ? "" : "output_type")
-     << "}, [&](auto args, auto results) {\n";
+      // output argument
+      dfun << "{" << ((void_return) ? "" : "output_type") << "},";
+
+      // fixed parameter list
+      dfun << " [&](auto args, auto results)";
+
+      if (debug_visit)
+        VST_DEBUG(dbgs() << "[Factor Device] Kernel Declaration:\n"
+                         << dfun.str() << "\n");
+
+      fs << dfun.str();
+    }
+  }
+
+  fs << " {\n";
   this->IncrementIndent();
 
-  // some global symbols needs to be referenced
-  index = 0;
-  for (auto& item : cgi->GetGlobals(fname, true)) {
-    if (!IsParameter(item))
-      fs << this->indent << "auto & " << UnScopedName(item.name) << " = args["
-         << index << "];\n";
-    index++;
+  // [Factor Device] A fixed pattern: name the parameters and handle dynamic
+  // shapes
+  {
+    std::ostringstream drefs;
+    // Generate references to global symbols
+    for (auto& item : cgi->GetDevicePassIns(fname)) {
+      drefs << this->indent << "auto & " << UnScopedName(item.name)
+            << " = args[" << item.d_index << "];\n";
+    }
+
+    // generate a reference name of the output
+    if (!void_return)
+      drefs << indent << "auto & " << UnScopedName(cgi->GetReturnSymbol(fname))
+            << " = results[0];\n";
+
+    // fixed, thread/block ids
+    drefs << this->indent << "auto thread_id = thread_id_();\n";
+    drefs << this->indent << "auto block_id = block_id_();\n";
+
+    // dynamic-shape alias reference
+    for (auto& [id_name, sym_name] : idnm_rts) {
+      drefs << indent << "auto " << named_dim_ref_prefix << id_name << " = "
+            << ReplaceFactorDynDimName(sym_name) << ";\n";
+    }
+    if (debug_visit)
+      VST_DEBUG(dbgs() << "[Factor Device] Reference Symbols:\n"
+                       << drefs.str() << "\n");
+
+    fs << drefs.str();
   }
 
-  // generate a reference name of the output
-  if (!void_return)
-    fs << indent << "auto & " << UnScopedName(cgi->returns[fname])
-       << " = results[0];\n";
-  fs << this->indent << "auto thread_id = thread_id_();\n";
-  fs << this->indent << "auto block_id = block_id_();\n";
-  // dynamic-shape alias reference
-  for (auto& [id_name, sym_name] : idnm_rts) {
-    fs << indent << "auto " << named_dim_ref_prefix << id_name << " = "
-       << ReplaceFactorDynDimName(sym_name) << ";\n";
-  }
+  // record the position since some codes requires declaration in function scope
   alloc_pos = fs.str().size();
   alloc_indent = indent;
 
@@ -857,9 +907,11 @@ bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
       if (auto vale = dyn_cast<ValueExpr>(&vi)) { // the dimension is symbolic
         assert(PrefixedWith(*vale, "::" + fname + "::") &&
                "unexpected symbol name.");
+
         auto dim_name = hp_name + ".shape()[" + std::to_string(dim_index) + "]";
         if (dims_info.count(*vale) == 0)
           dims_info[*vale] = {dim_name, hp_index, dim_index};
+
         idnm_rts.emplace(UnScopedName(*vale), *vale);
       }
       dim_index++;
@@ -868,16 +920,17 @@ bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
 
   // decide the host parameter names, and map the runtime shape dimensions
   // to the real host code name
-  size_t hp_index = 0;
+  size_t host_pindex = 0;
   for (auto& item : cgi->GetParameters(fname)) {
-    host_params.push_back(GenHostParamName());
+    assert((int)host_pindex == item.p_index);
+    item.host_name = GenHostParamName();
     if (auto sty = dyn_cast<SpannedType>(item.type))
-      MapRuntimeShapeNames(sty, host_params.back(), hp_index);
-    hp_index++;
+      MapRuntimeShapeNames(sty, item.host_name, host_pindex);
+    host_pindex++;
   }
 
   std::ostringstream dss; // for the shape string
-  for (auto& item : cgi->GetGlobals(fname, true)) {
+  for (auto& item : cgi->GetDevicePassIns(fname)) {
     std::string type_name = UnScopedName(item.name) + "_type";
     std::string type_string;
     if (auto sty = dyn_cast<SpannedType>(item.type)) {
@@ -1055,19 +1108,15 @@ ToSpanned(const std::vector<U> &v, std::initializer_list<int> && shape) {
 )";
 }
 
-void FactorCodeGen::EmitHostFuncBody(std::ostream& os, const Type& ty,
-                                     const std::string& bin_filename,
-                                     const std::string& out_size_expr,
-                                     const std::string& out_type,
-                                     const Shape& out_shape) {
-  assert(isa<FunctionType>(&ty) && "unexpected type.");
-  auto& fty = *cast<FunctionType>(&ty);
-
+void FactorCodeGen::EmitHostFuncBody(std::ostream& os, const FunctionType& fty,
+                                     const std::string& bin_filename) {
+  auto rty = fty.out_ty;
+  auto out_size_expr = SizeExprOf(*rty);
   // phase 1: create tops executable from a file
   os << "{\n";
 
-  EmitRuntimeCheck(os, ty);
-  EmitRuntimeMemUsageCheck(os, ty);
+  EmitRuntimeCheck(os);
+  EmitRuntimeMemUsageCheck(os);
 
   os << R"(
   std::vector<char> binary;
@@ -1130,12 +1179,13 @@ void FactorCodeGen::EmitHostFuncBody(std::ostream& os, const Type& ty,
     inputs.push_back("input" + std::to_string(i));
   }
 
+  tss << "  std::vector<int64_t> out_shape = {";
   if (auto rty = dyn_cast<SpannedType>(fty.out_ty)) {
-    tss << "  std::vector<int64_t> out_shape = {" << RSTR(rty->GetShape())
-        << "};\n";
+    tss << RSTR(rty->GetShape());
   } else if (!isa<VoidType>(fty.out_ty)) {
-    tss << "  std::vector<int64_t> out_shape = {1};\n";
+    tss << "1";
   }
+  tss << "};\n";
   os << ReplaceRuntimeNames(tss.str(), "(int64_t)");
 
   if (!void_return) {
@@ -1153,14 +1203,14 @@ void FactorCodeGen::EmitHostFuncBody(std::ostream& os, const Type& ty,
 
   size_t out_rank = 1;
   std::string shape_string = "{1}";
-  if (out_shape.IsValid()) {
-    out_rank = out_shape.Dims();
-    shape_string = ReplaceRuntimeNames(LSTR(out_shape));
+  if (auto rty = dyn_cast<SpannedType>(fty.out_ty)) {
+    out_rank = rty->Dims();
+    shape_string = ReplaceRuntimeNames(LSTR(rty->GetShape()));
   }
 
   if (!out_size_expr.empty()) {
-    os << "  auto res = choreo::make_spandata<" << out_type << ", " << out_rank
-       << ">(" << shape_string << ");\n";
+    os << "  auto res = choreo::make_spandata<" << STR(GetBaseType(*rty))
+       << ", " << out_rank << ">(" << shape_string << ");\n";
     os << "  // Copy output data from device to host\n";
     os << "  CHECK(topsMemcpy(reinterpret_cast<void *>(res.data()), out_mem,\n";
     os << "                  " << size_string
@@ -1219,15 +1269,9 @@ FactorCodeGen::ReplaceDynDimRef(const std::string& e) {
   return std::nullopt;
 }
 
-void FactorCodeGen::EmitRuntimeCheck(std::ostream& os, const Type& ty) {
-  assert(isa<FunctionType>(&ty) && "unexpected type.");
-  auto& fty = *cast<FunctionType>(&ty);
-
-  assert(fty.in_tys.size() <= host_params.size() &&
-         "internal error when dealing with the host parameter size.");
-
+void FactorCodeGen::EmitRuntimeCheck(std::ostream& os) {
   // check if the input shape is as declared in choreo
-  if (host_params.size() == 0) return;
+  if (cgi->ParameterCount(fname) == 0) return;
 
   struct Entry {
     size_t para_ordinal;
@@ -1236,22 +1280,26 @@ void FactorCodeGen::EmitRuntimeCheck(std::ostream& os, const Type& ty) {
   };
   std::map<ValueExpr, std::vector<Entry>> ve_entries_map;
 
-  for (size_t i = 0; i < fty.in_tys.size(); ++i) {
-    auto name = host_params[i];
-    if (auto sty = dyn_cast<SpannedType>(fty.in_tys[i])) {
-      size_t count = 0;
+  size_t host_pindex = 0;
+  for (auto& item : cgi->GetParameters(fname)) {
+    assert((int)host_pindex == item.p_index);
+    auto name = item.host_name;
+    if (auto sty = dyn_cast<SpannedType>(item.type)) {
+      size_t dim_count = 0;
       for (auto vi : sty->GetShape().Value()) {
-        auto elem_name = name + ".shape()[" + std::to_string(count) + "]";
+        auto elem_name = name + ".shape()[" + std::to_string(dim_count) + "]";
         if (auto vale = dyn_cast<int>(&vi)) {
           os << "  choreo::runtime_check(" << elem_name << " == " << *vale;
-          os << ", \"shape inconsistent on the " << Ordinal(i + 1)
-             << " parameter (dim: " << count << ").\");\n";
+          os << ", \"shape inconsistent on the " << Ordinal(host_pindex + 1)
+             << " parameter (dim: " << dim_count << ").\");\n";
         } else if (auto vale = dyn_cast<ValueExpr>(&vi)) {
-          ve_entries_map[*vale].push_back({i + 1, count, elem_name});
+          ve_entries_map[*vale].push_back(
+              {host_pindex + 1, dim_count, elem_name});
         }
-        count++;
+        dim_count++;
       }
     }
+    host_pindex++;
   }
 
   // check if the named dims meet the constraint
@@ -1271,12 +1319,9 @@ void FactorCodeGen::EmitRuntimeCheck(std::ostream& os, const Type& ty) {
   }
 }
 
-void FactorCodeGen::EmitRuntimeMemUsageCheck(std::ostream& os, const Type& ty) {
-  assert(isa<FunctionType>(&ty) && "unexpected type.");
-  auto& fty = *cast<FunctionType>(&ty);
-
+void FactorCodeGen::EmitRuntimeMemUsageCheck(std::ostream& os) {
   // check if the input shape is as declared in choreo
-  if (host_params.size() == 0) return;
+  if (cgi->ParameterCount(fname) == 0) return;
 
   // there should be runtime memory usage check
   if (!rt_mem_usage_check_list.empty())
@@ -1312,31 +1357,23 @@ void FactorCodeGen::EmitHostFuncDecl(std::ostringstream& oss, const Type& ty,
                                      const std::string& name, bool decl_only) {
   assert(isa<FunctionType>(&ty) && "unexpected type.");
   auto& fty = *cast<FunctionType>(&ty);
-  assert(host_params.size() >= fty.in_tys.size() &&
-         "inconsistent parameter count.");
 
   // emit the return type
   oss << HostTypeStringify(*fty.out_ty, true) << " " << name << "(";
 
-  if (fty.in_tys.size() > 0) {
+  size_t host_pindex = 0;
+  for (auto& item : cgi->GetParameters(fname)) {
+    assert((int)host_pindex == item.p_index);
     if (!decl_only) {
-      if (auto sty = dyn_cast<SpannedType>(fty.in_tys[0])) {
+      if (auto sty = dyn_cast<SpannedType>(item.type)) {
         param_map.push_back(std::make_pair(
-            host_params[0], ReplaceRuntimeNames(sty->ByteSizeExpression())));
+            item.host_name, ReplaceRuntimeNames(sty->ByteSizeExpression())));
       } else
-        param_map.push_back(std::make_pair(host_params[0], "1"));
+        param_map.push_back(std::make_pair(item.host_name, "1"));
     }
-    oss << HostTypeStringify(*fty.in_tys[0]) << " " << host_params[0];
-    for (size_t i = 1; i < fty.in_tys.size(); ++i) {
-      if (!decl_only) {
-        if (auto sty = dyn_cast<SpannedType>(fty.in_tys[i])) {
-          param_map.push_back(std::make_pair(
-              host_params[i], ReplaceRuntimeNames(sty->ByteSizeExpression())));
-        } else
-          param_map.push_back(std::make_pair(host_params[i], "1"));
-      }
-      oss << ", " << HostTypeStringify(*fty.in_tys[i]) << " " << host_params[i];
-    }
+    oss << ((host_pindex == 0) ? "" : ", ") << HostTypeStringify(*item.type)
+        << " " << item.host_name;
+    ++host_pindex;
   }
   oss << ")" << ((decl_only) ? ";\n" : " ");
 
@@ -1344,10 +1381,8 @@ void FactorCodeGen::EmitHostFuncDecl(std::ostringstream& oss, const Type& ty,
     VST_DEBUG(dbgs() << "Host function prototype:\n" << oss.str());
 }
 
-void FactorCodeGen::OutputScript(const ptr<FunctionType>& fty,
-                                 const std::string& out_type,
-                                 const std::string& out_size_expr,
-                                 const Shape& out_shape) {
+void FactorCodeGen::OutputScript(const ptr<FunctionType>& fty) {
+
   // a temporal path for the compilation process
   build_path = create_unique_path();
   std::string build_prefix = build_path + "/__choreo_" + fname;
@@ -1364,13 +1399,15 @@ void FactorCodeGen::OutputScript(const ptr<FunctionType>& fty,
 
   // emit the fixed header
   EmitHostHead(hs);
+
   if (!user_code.empty()) {
     // The user code requires the choreo function be fwd-decalared for its call
     EmitHostFuncDecl(hs, *fty, fname, true);
     hs << user_code;
   }
+
   EmitHostFuncDecl(hs, *fty, fname);
-  EmitHostFuncBody(hs, *fty, factor_bfn, out_size_expr, out_type, out_shape);
+  EmitHostFuncBody(hs, *fty, factor_bfn);
 
   // backpatch the factor bin filename
   std::string factor_src = fs.str();

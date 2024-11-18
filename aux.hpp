@@ -145,4 +145,55 @@ inline static const std::string ToUpper(const std::string& s) {
   return r;
 }
 
+// A range class since we lack c++20 range
+template <typename T>
+class FilterRange {
+private:
+  std::vector<T>& vec;
+  std::function<bool(const T&)> predicate;
+
+public:
+  // Constructor
+  FilterRange(std::vector<T>& vec, std::function<bool(const T&)> pred)
+      : vec(vec), predicate(pred) {}
+
+  // Iterator class
+  class Iterator {
+  private:
+    typename std::vector<T>::iterator current;
+    typename std::vector<T>::iterator end;
+    std::function<bool(const T&)> predicate;
+
+    void skip_to_next_valid() {
+      while (current != end && !predicate(*current)) { ++current; }
+    }
+
+  public:
+    Iterator(typename std::vector<T>::iterator current,
+             typename std::vector<T>::iterator end,
+             std::function<bool(const T&)> pred)
+        : current(current), end(end), predicate(pred) {
+      skip_to_next_valid();
+    }
+
+    Iterator& operator++() {
+      ++current;
+      skip_to_next_valid();
+      return *this;
+    }
+
+    T& operator*() { return *current; }
+    T* operator->() { return &(*current); }
+
+    bool operator==(const Iterator& other) const {
+      return current == other.current;
+    }
+    bool operator!=(const Iterator& other) const { return !(*this == other); }
+  };
+
+  // Begin and End functions
+  Iterator begin() { return Iterator(vec.begin(), vec.end(), predicate); }
+  Iterator end() { return Iterator(vec.end(), vec.end(), predicate); }
+};
+
 #endif // __CHOREO_AUX_HPP__

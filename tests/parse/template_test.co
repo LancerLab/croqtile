@@ -7,10 +7,10 @@ void hello() { printf("hello choreo\n"); }
 
 // choreo tileflow program
 __co__ void co_hello() {
-  parallel p by 1 { 
-    call hello<1, 2>(); 
-    call hello<#p, 2>(); 
-    call hello<4*#p, 2*#p>(); 
+  parallel p by 1 {
+    call hello<1, 2>();
+    call hello<#p, 2>();
+    call hello<4*#p, 2*#p>();
   }
 }
 
