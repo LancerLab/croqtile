@@ -5,10 +5,12 @@
 // TODO(ALBERT): replace this test with elementwise_add.co after VN bug fixed
 #include <iostream>
 
+__cok__ {
 // kernel program
-void kernel(int * a, int * b, int * c, int n) {
+extern "C" void kernel(int * a, int * b, int * c, int n) {
   for (int i = 0; i < n; ++i)
     c[i] = a[i] + b[i];
+}
 }
 
 // test function decl

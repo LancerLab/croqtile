@@ -1,0 +1,68 @@
+// RUN: choreo %s | FileCheck --match-full-lines %s
+// RUN: choreo %s | FileCheck --check-prefix=CNT %s
+
+#include <queue>
+void helper_func(int& cnt) {}
+
+__cok__ {
+extern "C" void kernel(int *input, int *output, int n) {
+  for (int i = 0; i < n; ++i) output[i] = input[i] + 1;
+}
+}
+
+#include <unordered_map>
+void foo0() {}
+
+__co__ auto bar(s32[128] input) {
+  s32[128] output;
+  parallel p by 1 {
+    input_local = dma.copy input => local;
+    output_local = dma.copy output => local;
+    call kernel(input_local.data, output_local.data, |input_local|);
+    dma.copy output_local => output;
+  }
+  return output;
+}
+
+#include <unordered_set>
+void foo1() {}
+
+int main() {
+  choreo::s32 input[128];
+  auto input_data = choreo::make_spanview<1, choreo::s32>((choreo::s32*)input, {128});
+  input_data.fill_random(-10, 10);
+  auto res = bar(input_data);
+  std::cout << res.shape()[0] << std::endl;
+  for (int i = 0; i < res.shape()[0]; ++i)
+    assert(res[i] == input[i] + 1);
+  return 0;
+}
+
+void foo2() {}
+
+// CHECK: extern "C" void kernel(int *input, int n) {
+// CHECK:   for (int i = 0; i < n; ++i) input[i] = i;
+// CHECK: }
+
+// CHECK:   D(host_func_)("__choreo_bar", {input_type, StreamType()}, [&](auto args) {
+// CHECK:   D(func_)("__choreo_bar_parallel", {}, {output_type}, [&](auto args, auto results) {
+
+// CHECK: #include <queue>
+// CHECK-NEXT: void helper_func(int& cnt) {}
+
+// CHECK: #include <unordered_map>
+// CHECK-NEXT: void foo0() {}
+
+// CHECK: #include <unordered_set>
+// CHECK-NEXT: void foo1() {}
+
+// CHECK: int main() {
+
+// CHECK: void foo2() {}
+
+// CNT-NOT: {{^}}void foo{{[0-9]}}() {}
+// CNT-COUNT-1: {{^}}extern "C" void kernel(int *input, int n)
+// CNT-COUNT-1: {{^}}void helper_func(int& cnt) {}
+// CNT-COUNT-2: {{^}}void foo{{[0-9]}}() {}
+// CNT-COUNT-1: {{^}}int main() {
+// CNT-COUNT-1: {{^}}void foo{{[0-9]}}() {}

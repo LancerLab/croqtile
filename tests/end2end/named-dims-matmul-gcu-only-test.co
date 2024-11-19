@@ -42,11 +42,11 @@ __co__ auto matmul_named_dims(s32 [M, K] lhs, s32 [K, N] rhs) {
 int main() { /// host program
   choreo::s32 a[256][512] = {0};
   choreo::s32 b[512][512] = {0};
-  std::fill_n(&a[0][0], sizeof(a) / sizeof(a[0][0]), 1);
-  std::fill_n(&b[0][0], sizeof(b) / sizeof(b[0][0]), 1);
   auto lhs_data = choreo::make_spanview<2, choreo::s32>((int*)a, {256, 512});
   auto rhs_data = choreo::make_spanview<2, choreo::s32>((int*)b, {512, 512});
-
+  lhs_data.fill_random(-10, 10);
+  rhs_data.fill_random(-10, 10);
+  
   auto res = matmul_named_dims(lhs_data, rhs_data);
 
   std::cout << res.shape()[0] << std::endl;

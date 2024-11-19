@@ -166,8 +166,11 @@ private:
     indent.clear();
 
     // Reset buffers;
+    ks.str("");
     ks.clear();
+    fs.str("");
     fs.clear();
+    hs.str("");
     hs.clear();
     alloc_in_fs.clear();
   }
