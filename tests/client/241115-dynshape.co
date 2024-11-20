@@ -1,0 +1,43 @@
+// REQUIRES: TARGET-GCUALL DYNAMIC-SHAPE
+// RUN: choreo %s | FileCheck %s --match-full-lines
+
+__cok__ {
+
+extern "C" void matmul_kernel(void *lhs, void * rhs, void* out) {}
+}
+__co__ f16[MM, NN] matmul(f16[MM, KK] lhs, f16 [KK, NN] rhs) {
+  f16 [MM, NN] out;
+
+  int m_sz = 8;
+  int n_sz = 128;
+  int k_sz = 1024;
+
+  parallel p by 1 {
+    with tiling = {m_tile, n_tile, k_tile} in [MM / m_sz, NN /n_sz, KK / k_sz] {
+      foreach m_tile, n_tile {
+        foreach k_tile {
+          local f16[m_sz, n_sz] out_local;
+          lhs_load = dma.copy lhs.chunkat(m_tile, k_tile) => local;
+          rhs_load = dma.copy rhs.chunkat(k_tile, n_tile) => local;
+          call matmul_kernel(lhs_load.data, rhs_load.data, out_local, m_sz, n_sz, k_sz);
+          dma.copy out_local => out.chunkat(m_tile, n_tile);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+int main() {
+  constexpr int m = 1024;
+  constexpr int n = 256;
+  constexpr int k = 2048;
+
+  choreo::f16 lhs[m * k];
+  choreo::f16 rhs[k * n];
+
+  auto res = matmul(choreo::make_spanview<2, choreo::f16>(lhs, {m, k}), choreo::make_spanview<2, choreo::f16>(rhs, {k, n}));
+  std::cout << "Run Complete.\n";
+}
+
+// CHECK: Run Complete

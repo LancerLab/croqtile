@@ -1068,14 +1068,6 @@ bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
   fs << " {\n";
   this->IncrementIndent();
 
-  // dynamic-shape alias reference
-  for (auto& [id_name, sym_name] : idnm_rts) {
-    dss << indent << "auto " << named_dim_ref_prefix << id_name << " = "
-        << ReplaceFactorDynDimName(sym_name) << ";\n";
-  }
-
-  fs << dss.str(); // dynamic-shape specific
-
   // [Factor Host] Generate reference symbols to parameters
   {
     std::ostringstream rfs;
@@ -1087,6 +1079,14 @@ bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
                        << rfs.str() << "\n");
     fs << rfs.str();
   }
+
+  // dynamic-shape alias reference
+  for (auto& [id_name, sym_name] : idnm_rts) {
+    dss << indent << "auto " << named_dim_ref_prefix << id_name << " = "
+        << ReplaceFactorDynDimName(sym_name) << ";\n";
+  }
+
+  fs << dss.str(); // dynamic-shape specific
 
   return true;
 }
