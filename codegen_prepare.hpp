@@ -71,14 +71,17 @@ public:
   bool Visit(AST::NamedTypeDecl&) { return true; }
   bool Visit(AST::NamedVariableDecl& n) override {
     auto name = n.name_str;
-    cgi->AddSymbolDetail(fname, {InScopeName(name), GetSymbolType(name)});
+    bool ref = (n.GetNote().find("ref") != std::string::npos);
+    cgi->AddSymbolDetail(fname, {InScopeName(name), GetSymbolType(name), ref});
     return true;
   }
   bool Visit(AST::IntTuple&) { return true; }
   bool Visit(AST::Assignment& n) override {
     auto name = n.name;
+    bool ref = (n.GetNote().find("ref") != std::string::npos);
     if (!SSTab().IsDeclared(name) && !isa<AST::SpanAs>(n.value)) {
-      cgi->AddSymbolDetail(fname, {InScopeName(name), GetSymbolType(name)});
+      cgi->AddSymbolDetail(fname,
+                           {InScopeName(name), GetSymbolType(name), ref});
     }
     return true;
   }
@@ -112,7 +115,7 @@ public:
     if (!id) return true;
 
     for (auto& item : cgi->GetFunctionSymbols(fname))
-      if (item.name == InScopeName(id->name)) { item.is_return = true; }
+      if (item.name == InScopeName(id->name)) { item.SetAsReturn(); }
 
     cgi->SetReturnSymbol(fname, InScopeName(id->name));
 

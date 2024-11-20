@@ -27,7 +27,7 @@ __co__ auto dma_transp(s32 [8, 2, 3, 2, 4, 2] input) {
 // CHECK:        for_(b, 1, 1, [&](auto iv_b) {
 // CHECK:          for_(c, 1, 1, [&](auto iv_c) {
 // CHECK:            for_(d, 1, 1, [&](auto iv_d) {
-// CHECK:              auto anon_0 = bitcast_(DRAMType(IntType(32), {3, 16, 16}), args[0]);
+// CHECK:              auto anon_0 = bitcast_(DRAMType(IntType(32), {3, 16, 16}), input);
 // CHECK:              auto anon_4 = ((((iv_b)*(Value(1))+(iv_c)))*(Value(1))+(iv_d));
 // CHECK:              async_load_(input_shape_c, anon_0, input_shape_c__buf__, {Value(1)*iv_a4,Value(16)*iv_a5,Value(16)*anon_4});
 // CHECK:              wait_dma_(input_shape_c);

@@ -42,8 +42,8 @@ __co__ auto ele_add(s32 [6, ?, 128] lhs, s32 [6, ?, 128] rhs) {
 // CHECK:      for_(x, dim_(args[0], 1)/2-0, 1, [&](auto iv_x) {
 // CHECK:        auto iv_z = iv_x;
 // CHECK:        for_(y, 4, 1, [&](auto iv_y) {
-// CHECK:          async_load_(lhs_load, args[0], lhs_load__buf__, {Value(6)*iv_q,Value(2)*iv_x,Value(32)*iv_y});
-// CHECK:          async_load_(rhs_load, args[1], rhs_load__buf__, {Value(6)*iv_q,Value(2)*iv_z,Value(32)*iv_y});
+// CHECK:          async_load_(lhs_load, lhs, lhs_load__buf__, {Value(6)*iv_q,Value(2)*iv_x,Value(32)*iv_y});
+// CHECK:          async_load_(rhs_load, rhs, rhs_load__buf__, {Value(6)*iv_q,Value(2)*iv_z,Value(32)*iv_y});
 // CHECK:          wait_dma_(lhs_load);
 // CHECK:          wait_dma_(rhs_load);
 // CHECK:          call_("kernel", {lhs_load__buf__.addr_(),rhs_load__buf__.addr_(),l1_out.addr_(),Value(384)});

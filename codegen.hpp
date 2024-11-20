@@ -20,6 +20,7 @@ struct SymbolDetail {
   std::string name;
   ptr<Type> type = nullptr;
   bool is_return = false;
+  bool is_reference = false;
   int p_index = -1; // index of parameter in choreo function decl
 
   // information used for codegen
@@ -27,12 +28,20 @@ struct SymbolDetail {
   std::string device_name; // mapped device name
   int d_index = -1;        // index of symbol in device function parameter list
 
-  SymbolDetail(const std::string& n, const ptr<Type>& t, bool ret = false,
-               int index = -1)
-      : name(n), type(t), is_return(ret), p_index(index) {}
+  std::string h_name; // some target like factor requires host function names
+  int h_index = -1;   // some target like factor requires host function indices
+
+  SymbolDetail(const std::string& n, const ptr<Type>& t, bool ref = false,
+               int index = -1, bool ret = false)
+      : name(n), type(t), is_return(ret), is_reference(ref), p_index(index) {
+    assert((!(IsParameter() && IsReference())) &&
+           "Parameters are not references.");
+  }
 
   bool IsParameter() const { return p_index != -1; }
   bool IsReturn() const { return is_return; }
+  bool IsReference() const { return is_reference; }
+  void SetAsReturn() { is_return = true; }
 };
 
 struct LaunchConfig {
@@ -51,10 +60,10 @@ using ReturnSymbols = std::map<std::string, std::string>;
 enum PassedOrDeclaredSymbolKind : int {
   PDSYM_NONE = 0,
   PDSYM_PARAMETERS_ONLY = 0x1, // only the paramters declared
-  PDSYM_ALLOC_IN_DEVICE =
-      0x2, // must be allocated device storage and be passed from host to device
+  PDSYM_ALLOC_IN_DEVICE = 0x2, // must be allocated with a device storage
   PDSYM_NO_RETURN = 0x4,   // simply without symbols that is the return value
   PDSYM_RETURN_ONLY = 0x8, // only the symbol of return statement
+  PDSYM_WITH_REFERENCE = 0x10, // with reference symbols
 };
 
 struct CodeGenInfo {
@@ -81,8 +90,17 @@ public:
     return launches[fname];
   }
 
+  bool HasReturnSymbol(const std::string& fname) const {
+    return returns.count(fname);
+  }
+
   const std::string& GetReturnSymbol(const std::string& fname) const {
     return returns.at(fname);
+  }
+
+  bool IsReturnSymbol(const std::string& fname, const std::string& sym) const {
+    if (HasReturnSymbol(fname)) return GetReturnSymbol(fname) == sym;
+    return false;
   }
 
   void AddSymbolDetail(const std::string fname, const SymbolDetail& sd) {
@@ -122,6 +140,9 @@ public:
   // Get symbols with global storage
   bool IsPassedOrDeclaredSymbols(const SymbolDetail& sd,
                                  int gsk = PDSYM_NONE) const {
+    assert(!((gsk & PDSYM_RETURN_ONLY) && (gsk & PDSYM_NO_RETURN)) &&
+           "return or not?");
+
     // no filter-outs
     if (gsk == PDSYM_NONE) return true;
 
@@ -130,6 +151,7 @@ public:
       if (gsk & PDSYM_RETURN_ONLY) return true;
       if (gsk & PDSYM_ALLOC_IN_DEVICE) return true;
       // PDSYM_PARAMETERS_ONLY: pass-by: need further check
+      // PDSYM_WITH_REFERENCE: pass-by: need further check
     }
 
     if (gsk & PDSYM_RETURN_ONLY) return false;
@@ -138,8 +160,10 @@ public:
     // device storage to shadow them.
     if (sd.IsParameter()) {
       if (gsk & PDSYM_PARAMETERS_ONLY) return true;
+      // parameter should be mapped storage in device
       if (gsk & PDSYM_ALLOC_IN_DEVICE) return true;
       // PDSYM_NO_RETURN: pass-by
+      // PDSYM_WITH_REFERENCE: pass-by
     }
 
     if (gsk & PDSYM_PARAMETERS_ONLY) return false;
@@ -148,7 +172,14 @@ public:
     if (sty && ((sty->GetStorage() == Storage::GLOBAL) ||
                 (sty->GetStorage() ==
                  Storage::DEFAULT /* default is mapped as global */))) {
-      if (gsk & PDSYM_ALLOC_IN_DEVICE) return true;
+      if (gsk & PDSYM_ALLOC_IN_DEVICE) {
+        if (sd.IsReference()) {
+          // reference should not be assigned
+          if (gsk & PDSYM_WITH_REFERENCE) return true;
+          return false;
+        }
+        return true;
+      }
       // PDSYM_NO_RETURN: pass-by
     }
 
@@ -170,14 +201,24 @@ public:
     return FilterRange<SymbolDetail>(
         this->all_syms[fname], [this](const SymbolDetail& sd) {
           return this->IsPassedOrDeclaredSymbols(sd, PDSYM_NO_RETURN |
-                                                         PDSYM_ALLOC_IN_DEVICE);
+                                                         PDSYM_ALLOC_IN_DEVICE |
+                                                         PDSYM_WITH_REFERENCE);
         });
   }
 
-  FilterRange<SymbolDetail> GetAllocatables(const std::string& fname) {
+  FilterRange<SymbolDetail> GetDeviceAllocatables(const std::string& fname) {
     return FilterRange<SymbolDetail>(
         this->all_syms[fname], [this](const SymbolDetail& sd) {
           return this->IsPassedOrDeclaredSymbols(sd, PDSYM_ALLOC_IN_DEVICE);
+        });
+  }
+
+  // without return
+  FilterRange<SymbolDetail> GetDeviceAllocIns(const std::string& fname) {
+    return FilterRange<SymbolDetail>(
+        this->all_syms[fname], [this](const SymbolDetail& sd) {
+          return this->IsPassedOrDeclaredSymbols(sd, PDSYM_NO_RETURN |
+                                                         PDSYM_ALLOC_IN_DEVICE);
         });
   }
 

@@ -55,7 +55,7 @@ __co__ auto transpose(s32 [64, 256, 32] input) {
 // CHECK:         for_(b3, 1, 1, [&](auto iv_b3) {
 // CHECK:           for_(b4, 1, 1, [&](auto iv_b4) {
 // CHECK:             for_(c, 1, 1, [&](auto iv_c) {
-// CHECK:               auto anon_0 = bitcast_(DRAMType(IntType(32), {64, 16, 512}), args[0]);
+// CHECK:               auto anon_0 = bitcast_(DRAMType(IntType(32), {64, 16, 512}), input);
 // CHECK:               auto anon_3 = ((iv_a)*(Value(1))+(iv_bb));
 // CHECK:               auto anon_4 = ((iv_b4)*(Value(1))+(iv_c));
 // CHECK:               async_load_(input_shape_c_dma, anon_0, input_shape_c_dma__buf__, {Value(1)*anon_3,Value(16)*iv_b3,Value(512)*anon_4}).multi_notify_(tmp_shape_s);

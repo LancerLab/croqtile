@@ -54,7 +54,7 @@ struct Node {
 
   virtual std::string getRefName() const { return ""; }
 
-  virtual const std::string GetNote() const { return note; }
+  virtual const std::string& GetNote() const { return note; }
   virtual void SetNote(const std::string& n) { note = n; }
 
   virtual void Print(std::ostream& os,
@@ -1198,14 +1198,17 @@ struct Call : public Node, public TypeIDProvider<Call> {
   Call(const location& l, const ptr<Node>& f, const ptr<MultiValues>& a)
       : Node(l), function(f), arguments(a), template_params(nullptr) {}
 
-  Call(const location& l, const ptr<Node>& f, const ptr<MultiValues>& a, const ptr<MultiValues>& b)
+  Call(const location& l, const ptr<Node>& f, const ptr<MultiValues>& a,
+       const ptr<MultiValues>& b)
       : Node(l), function(f), arguments(a), template_params(b) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Call: " << STR(*function);
     os << "\n" << prefix << "  `- with arguments: " << STR(*arguments);
     if (template_params)
-      os << "\n" << prefix << "  `- with template parameters: " << STR(*template_params);
+      os << "\n"
+         << prefix
+         << "  `- with template parameters: " << STR(*template_params);
   }
   void accept(Visitor&) override;
 
@@ -1380,6 +1383,11 @@ inline Identifier* GetIdentifier(const Node& n) {
     return expr->GetSymbol().get();
   else
     return nullptr;
+}
+
+inline ptr<Node> Ref(const ptr<Node>& n) {
+  if (auto expr = dyn_cast<Expr>(n)) return expr->GetReference();
+  return n;
 }
 
 inline std::string NodeName(const Node& n) { return n.TypeNameString(); }

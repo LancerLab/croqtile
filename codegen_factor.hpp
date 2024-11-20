@@ -136,8 +136,8 @@ private:
   bool ContainsLoopVar(const std::string&) const;
 
   void EmitHostHead(std::ostream&);
-  void EmitHostFuncDecl(std::ostringstream&, const Type&, const std::string&,
-                        bool = false);
+  void EmitHostFuncDecl(std::ostringstream&, const FunctionType&,
+                        const std::string&);
   void EmitRuntimeCheck(std::ostream&);
   void EmitRuntimeMemUsageCheck(std::ostream&);
   void EmitHostFuncBody(std::ostream&, const FunctionType&,
@@ -170,6 +170,20 @@ private:
     fs.clear();
     hs.clear();
     alloc_in_fs.clear();
+  }
+
+  // in factor, there exists choreo-host/factor-host/factor-device functions.
+  // There wrappers make the parameter clear.
+  FilterRange<SymbolDetail> GetChoreoParameters() {
+    return cgi->GetParameters(fname);
+  }
+
+  FilterRange<SymbolDetail> GetFactorHostInParams() {
+    return cgi->GetDeviceAllocIns(fname);
+  }
+
+  FilterRange<SymbolDetail> GetFactorDeviceInParams() {
+    return cgi->GetDevicePassIns(fname);
   }
 };
 

@@ -226,6 +226,10 @@ bool TypeInference::Visit(AST::Identifier& n) {
 bool TypeInference::Visit(AST::NamedVariableDecl& n) {
   TraceEachVisit(n);
 
+  if (n.init_expr && (isa<AST::Select>(AST::Ref(n.init_expr)) ||
+                      isa<AST::SpanAs>(AST::Ref(n.init_expr))))
+    n.SetNote("ref");
+
   if (cur_type && !SetAsCurrentType(n, n.name_str)) {
     cur_type.reset();
     return false;
@@ -304,6 +308,10 @@ bool TypeInference::Visit(AST::NamedTypeDecl& n) {
 // ituple override operator "=" for definition
 bool TypeInference::Visit(AST::Assignment& n) {
   TraceEachVisit(n);
+
+  if (n.value && (isa<AST::Select>(n.value) || isa<AST::SpanAs>(n.value)))
+    n.SetNote("ref");
+
   if (SSTab().IsDeclared(n.name)) {
     if (!isa<FutureType>(NodeType(*n.value))) {
       Error(n.LOC(),
