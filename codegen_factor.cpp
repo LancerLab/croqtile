@@ -792,7 +792,8 @@ bool FactorCodeGen::Visit(AST::Call& c) {
   if (!use_kernel_template)
     fs << this->indent << "call_(\"" << STR(*c.function) << "\", {";
   else
-    fs << this->indent << "call_(\"" << STR(*c.function) << "_template_wrapper" << "\", {";
+    fs << this->indent << "call_(\"" << STR(*c.function) << "_template_wrapper"
+       << "\", {";
   size_t arg_num = c.arguments->Count();
   for (size_t index = 0; index < arg_num; ++index) {
     auto arg = c.arguments->ValueAt(index);
@@ -807,7 +808,8 @@ bool FactorCodeGen::Visit(AST::Call& c) {
     ks << "extern \"C\" void " << STR(*c.function) << "_template_wrapper(";
     for (size_t index = 0; index < arg_num; ++index) {
       auto arg = c.arguments->ValueAt(index);
-      ks << KernelTypeStringify(cast<SpannedType>(arg->GetType())->f_type) << "* ";
+      ks << KernelTypeStringify(cast<SpannedType>(arg->GetType())->f_type)
+         << "* ";
       ks << "arg" << index;
       if (index < arg_num - 1) ks << ", ";
     }
@@ -819,8 +821,7 @@ bool FactorCodeGen::Visit(AST::Call& c) {
     ks << "(";
     bool need_delimiter = false;
     for (size_t index = 0; index < arg_num; ++index) {
-      if (need_delimiter)
-        ks << ", ";
+      if (need_delimiter) ks << ", ";
       need_delimiter = true;
       ks << "arg" << index;
     }

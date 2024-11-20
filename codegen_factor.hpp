@@ -86,8 +86,8 @@ public:
                 const ptr<FutureBufferMap>& fb, const ptr<CodeGenInfo>& ci,
                 bool cross_compile, bool use_kernel_template)
       : CodeGenerator("codegen", symtab), cross_compile(cross_compile),
-        use_kernel_template(use_kernel_template),
-        rt_mem_usage_check_list(list), fut_buf(fb), cgi(ci) {}
+        use_kernel_template(use_kernel_template), rt_mem_usage_check_list(list),
+        fut_buf(fb), cgi(ci) {}
 
   void OutputScript(const ptr<FunctionType>&);
 

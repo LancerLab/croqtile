@@ -277,7 +277,7 @@ for file in "${files_array[@]}"; do
     fi
 
     # Read the file and search for lines starting with "// RUN:"
-    run_num=$(grep "RUN:" $file | wc -l)
+    run_num=$(grep "\<RUN\>:" $file | wc -l)
     run_count=0
     while IFS= read -r line; do
         if [[ $line =~ ^//[[:blank:]]*RUN:[[:blank:]]*(.+) ]]; then

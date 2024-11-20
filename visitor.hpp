@@ -313,13 +313,21 @@ public:
     Reset();
   }
   ~VisitorWithScope() {}
+
+  virtual const std::string InScopeName(const std::string& sym) const {
+    return scoped_symtab.InScopeName(sym);
+  }
+
+  virtual const std::string UnScopedName(const std::string& name) const {
+    return scoped_symtab.UnScopedName(name);
+  }
 };
 
 // This accepts static symbol table and provide symbol lookup capability
 // Caution: must be used when symbol table does not change.
 struct VisitorWithSymTab : public VisitorWithScope {
 protected:
-  virtual const std::string InScopeName(const std::string& sym) const {
+  const std::string InScopeName(const std::string& sym) const final {
     auto removeLastLevel = [](const std::string& input) -> std::string {
       size_t lastPos = input.rfind("::");
       if (lastPos == std::string::npos) {
@@ -347,7 +355,7 @@ protected:
     return "";
   }
 
-  virtual const std::string UnScopedName(const std::string& name) const {
+  const std::string UnScopedName(const std::string& name) const override {
     return scoped_symtab.UnScopedName(name);
   }
 

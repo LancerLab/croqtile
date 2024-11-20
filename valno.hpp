@@ -440,6 +440,17 @@ public:
         return true;
       }
     } else if (n.op == "dataof") {
+      // fill the mdspan type of this node
+      auto id = cast<AST::Expr>(n.GetR())->GetSymbol();
+      assert(!SuffixedWith(id->name, ".span"));
+      auto name = id->name + ".span";
+      assert(SSTab().IsDeclared(name));
+      cur_mdspan_vn = vn.GetValueNumberOfSignature(InScopeName(name));
+      assert(ValidVN(cur_mdspan_vn));
+      n.s =
+          GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_mdspan_vn));
+      VST_DEBUG(dbgs() << "[ExprShape] Shape for " << STR(n) << ": " << STR(n.s)
+                       << "\n");
       InvalidateVN(cur_vn); // a spanned data does not have a value number
       return true;
     }
@@ -1177,8 +1188,8 @@ public:
       if (isa<IntegerType>(NodeType(*s))) {
         auto expr = cast<AST::Expr>(s);
         expr->s = GenShapeFromSignature(vn.GetSignatureForNode(*s));
-        VST_DEBUG(dbgs() << "Shape for " << PSTR(s) << ": " << STR(expr->s)
-                         << "\n");
+        VST_DEBUG(dbgs() << "[ExprShape] Shape for " << PSTR(s) << ": "
+                         << STR(expr->s) << "\n");
       }
     }
 
@@ -1222,7 +1233,23 @@ public:
     if (cannot_proceed) return true;
 
     assert(!n.inDMA);
-    if (isa<SpannedType>(NodeType(n))) {
+    if (auto sty = dyn_cast<SpannedType>(NodeType(n))) {
+      auto s0 = cast<AST::Expr>(n.expr_list->ValueAt(0));
+      auto s0ty = NodeType(*s0);
+      if (s0ty && s0ty->HasSufficientInfo())
+        n.SetType(s0ty);
+      else {
+        // handle dataof expr (TODO: any better idea?)
+        if (!s0->s.IsValid()) {
+          Error(n.LOC(), "Failed to decide the type of Select." + STR(n) +
+                             ", type0: " + PSTR(s0ty));
+          error_count++;
+          return false;
+        }
+        auto nty = MakeSpannedType(sty->f_type, s0->s, sty->GetStorage());
+        n.SetType(nty);
+      }
+
       cur_mdspan_vn = vn.GenerateValueNumberForNode(n);
       InvalidateVN(cur_vn); // used for variable def
     } else if (GeneralFutureType(NodeType(n))) {
@@ -1235,7 +1262,6 @@ public:
         return false;
       }
       n.SetType(fty);
-
       if (isa<PlaceHolderType>(fty)) return true;
 
       cur_mdspan_vn = GetOnlyValueNumberFromMultiValues(*n.expr_list);
@@ -1249,7 +1275,6 @@ public:
 
       // now update the valnos
       UpdateValueNumberForMultiValues(*n.expr_list, cur_mdspan_vn);
-
     } else
       choreo_unreachable("unsupported type.");
 
