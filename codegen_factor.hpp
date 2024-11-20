@@ -64,6 +64,7 @@ private:
 
   int parallel_level = 0;
   bool cross_compile = false;
+  bool use_kernel_template = false;
 
   ValBind::BindInfo<std::string> bind_info;
   std::map<std::string, std::stack<std::vector<std::string>>> cur_bounded_vars;
@@ -87,8 +88,9 @@ public:
   FactorCodeGen(const ptr<SymbolTable>& symtab,
                 const std::vector<RtMemUsageCheckInfo>& list,
                 const ptr<FutureBufferMap>& fb, const ptr<CodeGenInfo>& ci,
-                bool cross_compile)
+                bool cross_compile, bool use_kernel_template)
       : CodeGenerator("codegen", symtab), cross_compile(cross_compile),
+        use_kernel_template(use_kernel_template),
         rt_mem_usage_check_list(list), fut_buf(fb), cgi(ci) {}
 
   void OutputScript(const ptr<FunctionType>&);

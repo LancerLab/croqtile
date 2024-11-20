@@ -53,6 +53,7 @@ int main(int argc, char* argv[]) {
   Option<bool> del_comm("--remove-comments", "-n", false);
   Option<bool> sym_repl("--print-sym-replace", "-sr", false);
   Option<bool> prt_pass("--show-passes", "-sp", false);
+  Option<bool> use_kernel_template("--use_kernel_template", "-kt", false);
 
   // parse all the options
   OptionRegistry& r = OptionRegistry::GetInstance();
@@ -194,7 +195,7 @@ int main(int argc, char* argv[]) {
 
     Choreo::Factor::FactorCodeGen codegen(
         sc.SymTab(), mem_usage_checker.GetRtMemUsageInfo(), bg.FBInfo(),
-        cgp.GetASTInfo(), cross_compile);
+        cgp.GetASTInfo(), cross_compile, use_kernel_template);
     if (!codegen.RunProgram(root)) return codegen.Status();
     break;
   }

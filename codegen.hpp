@@ -312,6 +312,20 @@ static inline std::string HostTypeStringify(const Choreo::Type& ty,
   return "";
 }
 
+static inline std::string KernelTypeStringify(const Choreo::FundamentalType& type) {
+  switch (type) {
+    case Choreo::FundamentalType::F32: return "float";
+    case Choreo::FundamentalType::U32: return "unsigned int";
+    case Choreo::FundamentalType::U16: return "uint16_t";
+    case Choreo::FundamentalType::U8: return "uint8_t";
+    case Choreo::FundamentalType::S32: return "int";
+    case Choreo::FundamentalType::S16: return "int16_t";
+    case Choreo::FundamentalType::S8: return "int8_t";
+    default:
+      choreo_unreachable("unsupported kernel function type.");
+  }
+}
+
 } // end namespace Choreo
 
 #endif // CHOREO_CODEGEN_HPP_

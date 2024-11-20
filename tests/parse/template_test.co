@@ -19,6 +19,6 @@ int main() {
   return co_hello();
 }
 
-// CHECK:  `- with template parameters: 12
-// CHECK:  `- with template parameters:  (ubound p) 2
-// CHECK:  `- with template parameters:  (4 *  (ubound p) )  (2 *  (ubound p) )
+// CHECK:  `- with template parameters: 1, 2
+// CHECK:  `- with template parameters:  (ubound p) , 2
+// CHECK:  `- with template parameters:  (4 *  (ubound p) ) ,  (2 *  (ubound p) )

@@ -785,7 +785,10 @@ bool FactorCodeGen::Visit(AST::Call& c) {
 
   assert(c.arguments && "Invalid kernel call args!");
 
-  fs << this->indent << "call_(\"" << STR(*c.function) << "\", {";
+  if (!use_kernel_template)
+    fs << this->indent << "call_(\"" << STR(*c.function) << "\", {";
+  else
+    fs << this->indent << "call_(\"" << STR(*c.function) << "_template_wrapper" << "\", {";
   size_t arg_num = c.arguments->Count();
   for (size_t index = 0; index < arg_num; ++index) {
     auto arg = c.arguments->ValueAt(index);
@@ -794,6 +797,32 @@ bool FactorCodeGen::Visit(AST::Call& c) {
     if (index < arg_num - 1) fs << ",";
   }
   fs << "});\n";
+
+  if (use_kernel_template) {
+    // handle kernel template wrapper
+    ks << "extern \"C\" void " << STR(*c.function) << "_template_wrapper(";
+    for (size_t index = 0; index < arg_num; ++index) {
+      auto arg = c.arguments->ValueAt(index);
+      ks << KernelTypeStringify(cast<SpannedType>(arg->GetType())->f_type) << "* ";
+      ks << "arg" << index;
+      if (index < arg_num - 1) ks << ", ";
+    }
+
+    ks << ") {\n";
+    ks << "  " << STR(*c.function);
+    // c.template_params->SetDelimiter(", ");
+    ks << "<" << STR(*c.template_params) << ">";
+    ks << "(";
+    bool need_delimiter = false;
+    for (size_t index = 0; index < arg_num; ++index) {
+      if (need_delimiter)
+        ks << ", ";
+      need_delimiter = true;
+      ks << "arg" << index;
+    }
+    ks << ");\n";
+    ks << "}\n";
+  }
 
   return true;
 }

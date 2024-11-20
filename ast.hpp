@@ -1198,9 +1198,11 @@ struct Call : public Node, public TypeIDProvider<Call> {
   Call(const location& l, const ptr<Node>& f, const ptr<MultiValues>& a)
       : Node(l), function(f), arguments(a), template_params(nullptr) {}
 
-  Call(const location& l, const ptr<Node>& f, const ptr<MultiValues>& a,
-       const ptr<MultiValues>& b)
-      : Node(l), function(f), arguments(a), template_params(b) {}
+  Call(const location& l, const ptr<Node>& f, const ptr<MultiValues>& a, const ptr<MultiValues>& b)
+      : Node(l), function(f), arguments(a), template_params(b) {
+    arguments->SetDelimiter(", ");
+    template_params->SetDelimiter(", ");
+  }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Call: " << STR(*function);
