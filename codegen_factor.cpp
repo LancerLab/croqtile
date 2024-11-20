@@ -189,6 +189,7 @@ fi
         cur_bounded_vars[w->with->name].pop();
       }
     }
+    fs << indent << "} // end of with-in: " << n.LOC() << "\n";
   }
   return 0;
 }
@@ -569,6 +570,9 @@ bool FactorCodeGen::Visit(AST::WhereBind& n) {
 bool FactorCodeGen::Visit(AST::WithIn& n) {
   TraceEachVisit(n);
   assert(n.with_matchers && "expect matcher to be exist.");
+
+  // make with-in scopes be isolated
+  fs << indent << "{ // start of with-in: " << n.LOC() << "\n";
 
   // associate with to the matcher.
   if (n.with && n.with_matchers) {
