@@ -1,3 +1,4 @@
+// REQUIRES: TARGET-GCUALL
 // RUN: choreo %s | FileCheck %s
 // RUN: choreo -t factor %s -o %s.result && bash %s.result --execute | FileCheck --check-prefix=CHKRUN --match-full-lines %s
 
