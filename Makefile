@@ -46,20 +46,16 @@ SYMBOLIC_INCLUDE_FLAGS = -I$(CLN_DIR)/install/include -I$(GINAC_DIR)/install/inc
 all: $(TARGET)
 
 test: $(TARGET)
-	$(LIT) tests
-	$(MAKE) standalone_test
+	$(LIT) tests && $(MAKE) standalone_test
 
 ci-gpu-test: setup $(TARGET)
-	$(LIT) tests
-	$(MAKE) standalone_test
+	$(LIT) tests && $(MAKE) standalone_test
 
 ci-gcu2-test: setup-gcu2 $(TARGET)
-	$(LIT) tests
-	$(MAKE) standalone_test
+	$(LIT) tests && $(MAKE) standalone_test
 
 ci-gcu3-test: setup-gcu3 $(TARGET)
-	$(LIT) tests
-	$(MAKE) standalone_test
+	$(LIT) tests && $(MAKE) standalone_test
 
 $(TARGET): scanner.yy.o parser.tab.o choreo_main.o codegen_factor.o codegen_cuda.o codegen_topscc.o earlysema.o typeinfer.o typecheck.o ast.o types.o codegen_factor_types.o codegen_cuda_types.o valno.o visitor.o sym_replace.o
 	$(CC) $(CFLAGS) $^ $(SYMBOLIC_LIB_FLAGS) -o $(TARGET)

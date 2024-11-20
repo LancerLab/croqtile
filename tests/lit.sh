@@ -215,6 +215,7 @@ showresult() {
     for com in "${reproduce_commands[@]}"; do
       echo $com;
     done
+    return ${failed}
   fi
 }
 
