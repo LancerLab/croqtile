@@ -1523,16 +1523,30 @@ __co__ s32 [512, 1024] matmul(s32 [512, 1024] lhs, s32 [1024, 1024] rhs) { /// d
   return output;
 }
 
+choreo::s32 a[512][1024] = {0};
+choreo::s32 b[1024][1024] = {0};
+choreo::s32 res_host[512][1024] = {0};
+
 int main() { /// host program
-  choreo::s32 a[512][1024] = {0};
-  choreo::s32 b[1024][1024] = {0};
-  std::fill_n(&a[0][0], sizeof(a) / sizeof(a[0][0]), 1);
-  std::fill_n(&b[0][0], sizeof(b) / sizeof(b[0][0]), 1);
   auto lhs_data = choreo::make_spanview<2, choreo::s32>((int*)a, {512, 1024});
   auto rhs_data = choreo::make_spanview<2, choreo::s32>((int*)b, {1024, 1024});
+  lhs_data.fill_random(-10, 10);
+  rhs_data.fill_random(-10, 10);
 
-  auto res = matmul(lhs_data, rhs_data);
+  auto res_device = matmul(lhs_data, rhs_data);
 
-  std::cout << "Test Executed\n" << std::endl;
+  // cpu matmal
+  for (int i=0; i<512; ++i)
+    for (int j=0; j<1024; ++j)
+      for (int k=0; k<1024; ++k)
+        res_host[i][j] += a[i][k] * b[k][j];
+
+  std::cout << "Tests only executed (not validated)\n" << std::endl;
+
+//   for (int i=0; i<512; ++i)
+//     for (int j=0; j<1024; ++j)
+//       assert(res_host[i][j] == res_device[i][j]);
+
+//   std::cout << "Test Passed\n" << std::endl;
 }
-// CHECK: Test Executed
+// CHECK: Tests only executed (not validated)

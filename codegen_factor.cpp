@@ -1462,6 +1462,9 @@ void FactorCodeGen::OutputScript(const ptr<FunctionType>& fty) {
 
   // Generate the host code
   std::string user_code = hs.str();
+  // Reset the string to be empty
+  hs.str("");
+  // Clear any error flags that may be set
   hs.clear();
 
   // emit the fixed header

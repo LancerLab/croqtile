@@ -265,9 +265,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
     if (IsActualBoundedIntegerType(lty) && IsActualBoundedIntegerType(rty)) {
-      SetNodeType(n, MakeBoundedITupleType(Shape(
-                         1, cast<BoundedType>(lty)->GetUpperBound() *
-                                cast<BoundedType>(rty)->GetUpperBound())));
+      SetNodeType(n, MakeBoundedITupleType(Shape(1)));
     } else {
       // TODO: computation of multi-dim bounded vars is not supported yet.
       Error(n.LOC(), "in operation \"" + n.op +
@@ -655,7 +653,7 @@ bool EarlySemantics::Visit(AST::ParamList& n) {
 bool EarlySemantics::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
   ReportErrorWhenViolateODR(n.LOC(), n.biv, __FILE__, __LINE__,
-                            MakeBoundedITupleType(Shape(1), "pv"));
+                            MakeBoundedITupleType(Shape(1, n.biv), "pv"));
   return true;
 }
 
