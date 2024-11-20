@@ -76,12 +76,10 @@ public:
   CUDACodeGen(const ptr<SymbolTable>& symtab, bool cross_compile)
       : CodeGenerator("codegen", symtab), cross_compile(cross_compile) {}
   void ResetBuffers() {
-    ks.str("");
-    ks.clear();
-    fs.str("");
-    fs.clear();
-    hs.str("");
-    hs.clear();
+    // TODO: should use .str("") to reset ostringstream
+    // ks.clear();
+    // fs.clear();
+    // hs.clear();
   }
 
   bool BeforeVisitImpl(AST::Node&) override;

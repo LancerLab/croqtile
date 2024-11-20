@@ -13,7 +13,6 @@ __co__ int foo(f32 [32] d, int) { return 1;}
 __co__ auto bar() {}
 
 // CHECK:    void __choreo_bar() {
-// CHECK:      auto d_type = DRAMType(FloatType(32), {32});
 // CHECK:      D(host_func_)("__choreo_bar", {StreamType()}, [&](auto args){{.*}}
 // CHECK:    }
 
