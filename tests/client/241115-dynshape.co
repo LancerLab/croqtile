@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GCUALL DYNAMIC-SHAPE
-// RUN: choreo %s | FileCheck %s --match-full-lines
+// RUN: choreo -t factor %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
 
 __cok__ {
 
@@ -40,4 +40,4 @@ int main() {
   std::cout << "Run Complete.\n";
 }
 
-// CHECK: Run Complete
+// CHECK: Run Complete.
