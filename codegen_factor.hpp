@@ -70,10 +70,6 @@ private:
   std::map<std::string, std::stack<std::vector<std::string>>> cur_bounded_vars;
   std::vector<std::unordered_set<std::string>> loop_vars; // the loop variables
   std::vector<RtMemUsageCheckInfo> rt_mem_usage_check_list;
-  // runtime host parameter names
-  std::vector<std::string> host_params;
-  // parameters: the name (of factor data) and associated size expression
-  std::vector<std::pair<std::string, std::string>> param_map;
 
   // map from a symbolic shape dimension to the associated runtime name
   std::map<std::string, DimensionDetail> dims_info;
@@ -159,21 +155,16 @@ private:
       this->indent = this->indent.substr(0, this->indent.size() - 2);
   }
 
-  void ClearFunctionStates() {
+  // TODO: determine what to clear!
+  void ClearChoreoFunctionStates() {
     hp_count = 0; // reset the count of stub parameter
-    param_map.clear();
     dims_info.clear();
     idnm_rts.clear();
-    host_params.clear();
     indent.clear();
 
     // Reset buffers;
-    ks.str("");
-    ks.clear();
     fs.str("");
     fs.clear();
-    hs.str("");
-    hs.clear();
     alloc_in_fs.clear();
   }
 

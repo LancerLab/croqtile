@@ -40,12 +40,12 @@ int main() {
 
 void foo2() {}
 
-// CHECK: extern "C" void kernel(int *input, int n) {
-// CHECK:   for (int i = 0; i < n; ++i) input[i] = i;
+// CHECK: extern "C" void kernel(int *input, int *output, int n) {
+// CHECK:   for (int i = 0; i < n; ++i) output[i] = input[i] + 1;
 // CHECK: }
 
 // CHECK:   D(host_func_)("__choreo_bar", {input_type, StreamType()}, [&](auto args) {
-// CHECK:   D(func_)("__choreo_bar_parallel", {}, {output_type}, [&](auto args, auto results) {
+// CHECK:   D(func_)("__choreo_bar_parallel", {input_type}, {output_type}, [&](auto args, auto results) {
 
 // CHECK: #include <queue>
 // CHECK-NEXT: void helper_func(int& cnt) {}
@@ -61,7 +61,7 @@ void foo2() {}
 // CHECK: void foo2() {}
 
 // CNT-NOT: {{^}}void foo{{[0-9]}}() {}
-// CNT-COUNT-1: {{^}}extern "C" void kernel(int *input, int n)
+// CNT-COUNT-1: {{^}}extern "C" void kernel(int *input, int *output, int n)
 // CNT-COUNT-1: {{^}}void helper_func(int& cnt) {}
 // CNT-COUNT-2: {{^}}void foo{{[0-9]}}() {}
 // CNT-COUNT-1: {{^}}int main() {

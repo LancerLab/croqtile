@@ -58,7 +58,7 @@ bool FactorCodeGen::BeforeVisitImpl(AST::Node& n) {
   TraceEachVisit(n);
 
   if (auto c = dyn_cast<AST::ChoreoFunction>(&n)) {
-    ClearFunctionStates();
+    ClearChoreoFunctionStates();
     fname = c->name;
     factor_fname = "__choreo_" + fname;
 
@@ -1534,7 +1534,7 @@ void FactorCodeGen::OutputScript(const ptr<FunctionType>& fty) {
   echo $GCU_DEVICE_STR
   if [[ "${GCU_DEVICE_STR}" == *"S60G"* ]]; then
     gcu_arch=gcu300
-    gcu_resource=1c12s
+    gcu_resource=2c24s
     gcu_target_string="scorpio_${gcu_resource}"
   elif [[ "${GCU_DEVICE_STR}" == *"c035"* ]]; then
     gcu_arch=gcu300
@@ -1543,7 +1543,7 @@ void FactorCodeGen::OutputScript(const ptr<FunctionType>& fty) {
     export TOPS_VISIBLE_DEVICES=1
   elif [[ "${GCU_DEVICE_STR}" == *"S60"* ]]; then
     gcu_arch=gcu300
-    gcu_resource=1c12s
+    gcu_resource=2c24s
     gcu_target_string="scorpio_${gcu_resource}"
   elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then
     gcu_arch=gcu210
