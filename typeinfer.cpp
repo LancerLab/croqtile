@@ -7,26 +7,18 @@
 
 using namespace Choreo;
 
-bool TypeInference::BeforeVisit(AST::Node& n) {
+bool TypeInference::BeforeBeforeVisit(AST::Node& n) {
+  if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
+    // the type will be modified after parameters/return are processed
+    AssignSymbolWithType(n.LOC(), f->name, MakeUnknownType());
+  }
+  return true;
+}
+
+bool TypeInference::BeforeVisitImpl(AST::Node& n) {
   Visitor::BeforeVisit(n);
   if (isa<AST::Program>(&n)) {
-    SSTab().EnterScope(""); // global scope
     type_equals.Reset();
-  } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
-    AssignSymbolWithType(n.LOC(), f->name,
-                         MakeUnknownType()); // the type will be modified after
-                                             // parameters/return are processed
-    SSTab().EnterScope(f->name);
-    cur_func_name = f->name;
-  } else if (isa<AST::ParallelBy>(&n)) {
-    static size_t count = 0;
-    SSTab().EnterScope("paraby_" + std::to_string(count++));
-  } else if (isa<AST::WithBlock>(&n)) {
-    static size_t count = 0;
-    SSTab().EnterScope("within_" + std::to_string(count++));
-  } else if (isa<AST::ForeachBlock>(&n)) {
-    static size_t count = 0;
-    SSTab().EnterScope("foreach_" + std::to_string(count++));
   } else if (isa<AST::DMA>(&n)) {
     dma_fmty = BaseType::UNKNOWN;
     dma_mem = Storage::NONE;
@@ -36,14 +28,8 @@ bool TypeInference::BeforeVisit(AST::Node& n) {
   return true;
 }
 
-bool TypeInference::AfterVisit(AST::Node& n) {
-  if (isa<AST::Program>(&n) || isa<AST::ChoreoFunction>(&n) ||
-      isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n) ||
-      isa<AST::ForeachBlock>(&n)) {
-    SSTab().LeaveScope();
-  }
+bool TypeInference::AfterVisitImpl(AST::Node& n) {
   if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
-    cur_func_name = "";
     auto sym_ty = GetSymbolType(f->LOC(), f->name);
     assert(!isa<UnknownType>(sym_ty) && "symbol type is not deduced.");
 
@@ -55,9 +41,10 @@ bool TypeInference::AfterVisit(AST::Node& n) {
       f->f_decl.SetType(sym_ty);
       f->SetType(sym_ty);
     }
-    if (Dump)
+    if (Dump) {
       dbgs() << "Function:  " << SSTab().InScopeName(f->name)
              << ", Type: " << AST::TYPE_STR(*f) << "\n";
+    }
   } else if (isa<AST::DMA>(&n)) {
     dma_fmty = BaseType::UNKNOWN;
     dma_mem = Storage::NONE;
@@ -78,8 +65,8 @@ bool TypeInference::AssignSymbolWithType(const location& loc,
     return false;
   }
 
-  if (trace_visit)
-    dbgs() << "Assign symbol `" << sym << "` with type: " << STR(*ty) << "\n";
+  VST_DEBUG(dbgs() << "Assign symbol `" << sym << "` with type: " << STR(*ty)
+                   << "\n");
 
   return true;
 }
@@ -114,8 +101,8 @@ bool TypeInference::ModifySymbolType(const location& loc,
     return false;
   }
 
-  if (trace_visit)
-    dbgs() << "Modify symbol `" << name << "` with type: " << STR(*ty) << "\n";
+  VST_DEBUG(dbgs() << "Modify symbol `" << name << "` with type: " << STR(*ty)
+                   << "\n");
 
   return true;
 }
@@ -218,7 +205,7 @@ bool TypeInference::Visit(AST::Identifier& n) {
 
   // for named dims in parameters
   if (allow_named_dim && !SSTab().DeclaredInScope(n.name))
-    SSTab().DefineSymbol(n.name, MakeIntegerType());
+    AssignSymbolWithType(n.LOC(), n.name, MakeIntegerType());
 
   return true;
 }
@@ -261,8 +248,7 @@ bool TypeInference::Visit(AST::NamedVariableDecl& n) {
 
   if (Dump) {
     dbgs() << ((AST::typeof<FutureType>(&n)) ? "Future" : "Symbol");
-    dbgs() << ":    " << SSTab().InScopeName(n.name_str)
-           << ", Type: " << PSTR(nty);
+    dbgs() << ":    " << InScopeName(n.name_str) << ", Type: " << PSTR(nty);
     dbgs() << "\n";
   }
 
@@ -299,7 +285,7 @@ bool TypeInference::Visit(AST::NamedTypeDecl& n) {
   AssignSymbolWithType(n.LOC(), n.name_str, n.GetType());
 
   if (Dump) {
-    dbgs() << "Partial:   " << SSTab().InScopeName(n.name_str)
+    dbgs() << "Partial:   " << InScopeName(n.name_str)
            << ", Type: " << AST::TYPE_STR(n) << "\n";
   }
   return true;
@@ -348,8 +334,8 @@ bool TypeInference::Visit(AST::Assignment& n) {
   }
 
   if (Dump) {
-    dbgs() << "Symbol:    " << SSTab().InScopeName(n.name)
-           << ", Type: " << PSTR(ty) << "\n";
+    dbgs() << "Symbol:    " << InScopeName(n.name) << ", Type: " << PSTR(ty)
+           << "\n";
   }
 
   cur_type.reset();
@@ -398,7 +384,7 @@ bool TypeInference::Visit(AST::Parameter& p) {
   if (Dump) {
     dbgs() << "Parameter: ";
     if (p.HasSymbol())
-      dbgs() << SSTab().InScopeName(p.sym->name);
+      dbgs() << InScopeName(p.sym->name);
     else
       dbgs() << "(unnamed)";
     dbgs() << ", Type: " << AST::TYPE_STR(p) << "\n";
@@ -662,7 +648,7 @@ bool TypeInference::Visit(AST::DMA& n) {
   if (Dump) {
     dbgs() << "Future:    "
            << ((n.future.empty()) ? SSTab().ScopeName() + "(anon)"
-                                  : SSTab().InScopeName(n.future))
+                                  : InScopeName(n.future))
            << ", Type: " << AST::TYPE_STR(n) << "\n";
   }
 
@@ -674,7 +660,7 @@ bool TypeInference::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
   AssignSymbolWithType(n.LOC(), n.biv, n.GetType());
   if (Dump) {
-    dbgs() << "Bounded:   " << SSTab().InScopeName(n.biv)
+    dbgs() << "Bounded:   " << InScopeName(n.biv)
            << ", Type: " << AST::TYPE_STR(n) << "\n";
   }
   return true;
@@ -699,13 +685,13 @@ bool TypeInference::Visit(AST::WithIn& n) {
   if (Dump) {
     if (n.with) {
       dbgs() << "Bounded:   ";
-      dbgs() << SSTab().InScopeName(n.with->name)
+      dbgs() << InScopeName(n.with->name)
              << ", Type: " << AST::TYPE_STR(*n.with) << "\n";
     }
     if (n.with_matchers) {
       for (auto pid : n.with_matchers->values) {
         auto id = cast<AST::Identifier>(pid);
-        dbgs() << "Bounded:   " << SSTab().InScopeName(id->name)
+        dbgs() << "Bounded:   " << InScopeName(id->name)
                << ", Type: " << AST::TYPE_STR(*id) << "\n";
       }
     }
@@ -819,7 +805,7 @@ bool TypeInference::Visit(AST::Return& n) {
     return false;
   }
 
-  auto ty = GetSymbolType(n.LOC(), cur_func_name);
+  auto ty = GetSymbolType(n.LOC(), fname);
   if (auto fty = dyn_cast<FunctionType>(ty)) {
     if (auto rty = dyn_cast<SpannedType>(fty->out_ty)) {
       auto tty = cast<SpannedType>(vty);
@@ -855,19 +841,16 @@ bool TypeInference::Visit(AST::Return& n) {
       } else {
         // supplement information, note global should be mapped back
         auto nty = MakeSpannedType(tty->ElementType(), tty->GetShape());
-        ModifySymbolType(n.LOC(), cur_func_name,
-                         MakeFunctionType(nty, fty->in_tys));
+        ModifySymbolType(n.LOC(), fname, MakeFunctionType(nty, fty->in_tys));
       }
     } else if (isa<UnknownType>(fty->out_ty)) {
       // the type must be inferenced
       if (auto tty = dyn_cast<SpannedType>(vty)) {
         // global should be mapped back
         auto nty = MakeSpannedType(tty->ElementType(), tty->GetShape());
-        ModifySymbolType(n.LOC(), cur_func_name,
-                         MakeFunctionType(nty, fty->in_tys));
+        ModifySymbolType(n.LOC(), fname, MakeFunctionType(nty, fty->in_tys));
       } else
-        ModifySymbolType(n.LOC(), cur_func_name,
-                         MakeFunctionType(vty, fty->in_tys));
+        ModifySymbolType(n.LOC(), fname, MakeFunctionType(vty, fty->in_tys));
     }
   }
   return true;

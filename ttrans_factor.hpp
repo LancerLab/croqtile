@@ -38,8 +38,6 @@ private:
   Kind kind = Kind::T_NONE;
 
   // For SWAP codegen
-  std::string fname;            // current function name
-  ptr<FutureBufferMap> fut_buf; // map a future to its associated buffer
   std::stack<bool> replace_swap_names;
 
   std::vector<AST::Rotate*> cur_swaps;
@@ -48,27 +46,67 @@ private:
   std::unordered_map<AST::Rotate*, std::unordered_map<std::string, std::string>>
       swap_post;
 
-  const std::string NameToReplace(const std::string& name) const {
-    for (auto& item : swap_pre)
-      if (item.second.count(name)) return item.second.at(name);
-    for (auto& item : swap_post)
-      if (item.second.count(name)) return item.second.at(name);
+  void AddSwapPre(AST::Rotate* swap, const std::string& old,
+                  const std::string& pre) {
+    swap_pre[swap].emplace(old, pre);
+    VST_DEBUG(dbgs() << "[SwapPre] " << PSTR(swap) << ": " << old << " -> "
+                     << pre << "\n");
+  }
 
-    return name; // no replacement
+  void AddSwapPost(AST::Rotate* swap, const std::string& old,
+                   const std::string& post) {
+    swap_post[swap].emplace(old, post);
+    VST_DEBUG(dbgs() << "[SwapPost] " << PSTR(swap) << ": " << old << " -> "
+                     << post << "\n");
+  }
+
+  const std::string NameToReplace(const std::string& name,
+                                  const AST::Node& n) const {
+    assert(!PrefixedWith(name, "::") && "expect a un-scoped name");
+
+    auto res = name;
+    auto sname = InScopeName(name);
+    for (auto& item : swap_pre)
+      if (item.second.count(sname)) {
+        res = UnScopedName(item.second.at(sname));
+        break;
+      }
+
+    if (res == name) {
+      for (auto& item : swap_post)
+        if (item.second.count(sname)) {
+          res = UnScopedName(item.second.at(name));
+          break;
+        }
+    }
+
+    if (res != name)
+      VST_DEBUG(dbgs() << "Replace '" << name << "' to be '" << res << "' in "
+                       << STR(n) << ".\n");
+
+    return res;
   }
 
   // for SELECT codegen
-  using NodeInsertInfo =
-      std::vector<std::tuple<int, ptr<AST::Node>, std::string>>;
+  struct BufferInsertionInfo {
+    int index = -1;
+    ptr<AST::Node> node = nullptr;
+    std::string sname; // buffer name
+    std::string fname; // corresponding future name
+  };
+  using BufferInsertInfo = std::vector<BufferInsertionInfo>;
   std::stack<AST::MultiNodes*> multi_nodes;
   int cur_node_index = -1;
-  std::map<AST::MultiNodes*, NodeInsertInfo> mnodes_insertions;
+  std::map<AST::MultiNodes*, BufferInsertInfo> mnodes_insertions;
+
+  FutureBufferInfo& FBInfo() { return CCtx().GetFutureBufferInfo(fname); }
 
 private:
   bool BeforeVisitImpl(AST::Node& n) {
     TraceEachVisit(n, "Before ");
-    if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
-      fname = f->name;
+    if (isa<AST::ChoreoFunction>(&n)) {
+      VST_DEBUG(dbgs() << "Before " << GetName() << " - " << STR(FBInfo())
+                       << "\n");
     } else if (auto f = dyn_cast<AST::ForeachBlock>(&n)) {
       if (kind == Kind::T_SWAP) {
         for (auto& stmt : f->stmts->AllSubs())
@@ -103,7 +141,8 @@ private:
   bool AfterVisitImpl(AST::Node& n) {
     TraceEachVisit(n, "After ");
     if (isa<AST::ChoreoFunction>(&n)) {
-      fname = "";
+      VST_DEBUG(dbgs() << "After " << GetName() << " - " << STR(FBInfo())
+                       << "\n");
     } else if (isa<AST::ForeachBlock>(&n)) {
       if (kind == Kind::T_SWAP) {
         cur_swaps.clear();
@@ -124,8 +163,8 @@ private:
   }
 
 public:
-  FactorTrans(const ptr<SymbolTable> s_tab, const ptr<FutureBufferMap>& fb)
-      : VisitorWithSymTab("ftran", s_tab), fut_buf(fb) {}
+  FactorTrans(const ptr<SymbolTable> s_tab)
+      : VisitorWithSymTab("ftran", s_tab) {}
   ~FactorTrans() {}
 
   void SetKind(Kind k) { kind = k; }
@@ -142,14 +181,14 @@ public:
     // insert the node at the given place
     assert(&n == multi_nodes.top());
     for (auto item : mnodes_insertions[&n]) {
-      auto& index = std::get<0>(item);
-      auto& pnode = std::get<1>(item);
-      auto& sname = std::get<2>(item);
-
-      n.values.insert(n.values.begin() + index, pnode);
-      SymTab()->AddSymbol(SSTab().ScopedName(sname), pnode->GetType());
-      VST_DEBUG(dbgs() << "Hoisted: " << PSTR(pnode)
-                       << ", type: " << PSTR(pnode->GetType()) << "\n");
+      n.values.insert(n.values.begin() + item.index, item.node);
+      auto sname = SSTab().ScopedName(item.sname);
+      SymTab()->AddSymbol(sname, item.node->GetType());
+      VST_DEBUG(dbgs() << "Hoisted: " << PSTR(item.node)
+                       << ", type: " << PSTR(item.node->GetType()) << "\n");
+      FBInfo()[item.fname].buffer = sname;
+      VST_DEBUG(dbgs() << "Updated: " << STR(*FBInfo().find(item.fname))
+                       << "\n");
     }
 
     mnodes_insertions.erase(&n);
@@ -172,14 +211,14 @@ public:
     auto id = dyn_cast<AST::Expr>(n.GetR())->GetSymbol();
     if (!id) return true;
 
-    auto fut_name = id->name;
-    if (!fut_buf->at(fname).count(fut_name)) return true;
+    auto fut_name = InScopeName(id->name);
+    if (!FBInfo().count(fut_name)) return true;
 
     VST_DEBUG(dbgs() << "Replace: " << STR(n) << "\nWith: ");
 
     auto rexp = cast<AST::Expr>(n.GetR());
     n.OverWrite(*rexp);
-    n.GetSymbol()->name = fut_buf->at(fname)[fut_name];
+    n.GetSymbol()->name = UnScopedName(FBInfo()[fut_name].buffer);
 
     VST_DEBUG(dbgs() << STR(n) << "\n");
 
@@ -206,9 +245,9 @@ public:
     auto bty = cast<FutureType>(n.GetType())->GetSpannedType();
     for (auto& fid : sel->expr_list->AllValues()) {
       assert(GetIdentifier(*fid) && "expecting an identifier");
-      auto fut_name = GetIdentifier(*fid)->name;
-      assert(fut_buf->at(fname).count(fut_name));
-      auto buf_name = fut_buf->at(fname)[fut_name];
+      auto fut_name = InScopeName(GetIdentifier(*fid)->name);
+      assert(FBInfo().count(fut_name));
+      auto buf_name = UnScopedName(FBInfo()[fut_name].buffer);
       auto bid = AST::Make<AST::Identifier>(fid->LOC(), buf_name);
       bid->SetType(bty);
       buffer_list->Append(bid);
@@ -220,11 +259,13 @@ public:
     auto buf_assign = AST::Make<AST::Assignment>(n.LOC(), buf_name, buf_select);
     buf_assign->SetType(bty);
 
-    fut_buf->at(fname)[n.name_str] = buf_name;
+    // we do not know which scope the new buffer symbol laid. modify the map
+    // latter
+
     assert(cur_node_index != -1);
     int index = cur_node_index + mnodes_insertions[multi_nodes.top()].size();
-    mnodes_insertions[multi_nodes.top()].emplace_back(
-        std::make_tuple(index, buf_assign, buf_name));
+    mnodes_insertions[multi_nodes.top()].push_back(
+        {index, buf_assign, buf_name, InScopeName(n.name_str)});
 
     return true;
   }
@@ -249,22 +290,24 @@ public:
     auto bty = cast<FutureType>(n.GetType())->GetSpannedType();
     for (auto& fid : sel->expr_list->AllValues()) {
       assert(GetIdentifier(*fid) && "expecting an identifier");
-      auto fut_name = GetIdentifier(*fid)->name;
-      assert(fut_buf->at(fname).count(fut_name));
-      auto buf_name = fut_buf->at(fname)[fut_name];
-      auto bid = AST::Make<AST::Identifier>(fid->LOC(), buf_name);
+      auto fut_name = InScopeName(GetIdentifier(*fid)->name);
+      assert(FBInfo().count(fut_name));
+      auto buf_name = FBInfo()[fut_name].buffer;
+      auto bid = AST::Make<AST::Identifier>(fid->LOC(), UnScopedName(buf_name));
       bid->SetType(bty);
       buffer_list->Append(bid);
     }
     auto buf_select =
         AST::Make<AST::Select>(n.LOC(), sel->select_factor, buffer_list);
     auto buf_name = SymbolTable::GetAnonName();
-    SymTab()->AddSymbol(SymbolOfSameScope(InScopeName(n.name), buf_name), bty);
+    SymTab()->AddSymbol(GetScope(n.name) + buf_name, bty);
     auto buf_assign = AST::Make<AST::Assignment>(n.LOC(), buf_name, buf_select);
     buf_assign->SetType(bty);
     buf_select->SetType(bty);
 
-    fut_buf->at(fname)[n.name] = buf_name;
+    FBInfo()[InScopeName(n.name)].buffer = InScopeName(buf_name);
+    VST_DEBUG(dbgs() << "Updated: " << STR(*FBInfo().find(InScopeName(n.name)))
+                     << "\n");
 
     return true;
   }
@@ -277,7 +320,7 @@ public:
 
     if (replace_swap_names.empty()) return true;
 
-    if (replace_swap_names.top()) n.name = NameToReplace(n.name);
+    if (replace_swap_names.top()) { n.name = NameToReplace(n.name, n); }
 
     return true;
   }
@@ -299,7 +342,7 @@ public:
 
     if (!n.future.empty()) {
       auto fut = n.future;
-      n.future = NameToReplace(fut);
+      n.future = NameToReplace(fut, n);
       if (fut != n.future) n.SetNote("use-fut");
     }
 
@@ -312,11 +355,12 @@ public:
     if (kind != Kind::T_SWAP) return true;
 
     auto data_name = n.RefSymbol();
-    n.data->name = NameToReplace(data_name);
+    n.data->name = NameToReplace(data_name, n);
 
+    auto sname = InScopeName(n.data->name);
     // also replace future with the corresponding buffer
-    if (fut_buf->at(fname).count(n.data->name))
-      n.data->name = fut_buf->at(fname)[n.data->name];
+    if (FBInfo().count(sname))
+      n.data->name = UnScopedName(FBInfo()[sname].buffer);
 
     return true;
   }
@@ -374,8 +418,8 @@ public:
       auto nty = NodeType(*swap->ValueAt(0));
       auto fty = cast<FutureType>(nty);
       auto sty = fty->GetSpannedType();
-      auto lname = swap->IdAt(0)->name;
-      auto rname = swap->IdAt(1)->name;
+      auto lname = InScopeName(swap->IdAt(0)->name);
+      auto rname = InScopeName(swap->IdAt(1)->name);
       auto lr_list = AST::Make<AST::MultiValues>(
           n.LOC(), ", ",
           AST::Make<AST::Identifier>(swap->IdAt(0)->LOC(), swap->IdAt(0)->name),
@@ -392,14 +436,14 @@ public:
       true_on_rhs->SetType(nty);
       true_on_lhs->SetNote("gen");
       true_on_rhs->SetNote("gen");
-      auto lbs = AST::Make<AST::Assignment>(n.LOC(), lname + SWAP_SFX_PRE,
-                                            true_on_lhs);
-      auto las = AST::Make<AST::Assignment>(n.LOC(), lname + SWAP_SFX_POS,
-                                            true_on_rhs);
-      auto rbs = AST::Make<AST::Assignment>(n.LOC(), rname + SWAP_SFX_PRE,
-                                            true_on_rhs);
-      auto ras = AST::Make<AST::Assignment>(n.LOC(), rname + SWAP_SFX_POS,
-                                            true_on_lhs);
+      auto lbs = AST::Make<AST::Assignment>(
+          n.LOC(), UnScopedName(lname + SWAP_SFX_PRE), true_on_lhs);
+      auto las = AST::Make<AST::Assignment>(
+          n.LOC(), UnScopedName(lname + SWAP_SFX_POS), true_on_rhs);
+      auto rbs = AST::Make<AST::Assignment>(
+          n.LOC(), UnScopedName(rname + SWAP_SFX_PRE), true_on_rhs);
+      auto ras = AST::Make<AST::Assignment>(
+          n.LOC(), UnScopedName(rname + SWAP_SFX_POS), true_on_lhs);
       // mark it as generated
       lbs->SetType(nty);
       las->SetType(nty);
@@ -407,10 +451,14 @@ public:
       ras->SetType(nty);
 
       // now generate the buffer (associated with future) selections
-      auto lbuf_name = fut_buf->at(fname)[swap->IdAt(0)->name];
-      auto rbuf_name = fut_buf->at(fname)[swap->IdAt(1)->name];
-      auto lbuf_id = AST::Make<AST::Identifier>(n.LOC(), lbuf_name);
-      auto rbuf_id = AST::Make<AST::Identifier>(n.LOC(), rbuf_name);
+      auto lbuf_name = FBInfo()[lname].buffer;
+      auto rbuf_name = FBInfo()[rname].buffer;
+      assert(!lbuf_name.empty());
+      assert(!rbuf_name.empty());
+      auto lbuf_id =
+          AST::Make<AST::Identifier>(n.LOC(), UnScopedName(lbuf_name));
+      auto rbuf_id =
+          AST::Make<AST::Identifier>(n.LOC(), UnScopedName(rbuf_name));
       auto lr_buf_list =
           AST::Make<AST::MultiValues>(n.LOC(), ", ", lbuf_id, rbuf_id);
       auto rl_buf_list =
@@ -424,45 +472,54 @@ public:
       true_on_lbuf->SetNote("gen");
       true_on_rbuf->SetNote("gen");
       auto lbs_buf = AST::Make<AST::Assignment>(
-          n.LOC(), lbuf_name + SWAP_SFX_PRE, true_on_lbuf);
+          n.LOC(), UnScopedName(lbuf_name + SWAP_SFX_PRE), true_on_lbuf);
       auto las_buf = AST::Make<AST::Assignment>(
-          n.LOC(), lbuf_name + SWAP_SFX_POS, true_on_rbuf);
+          n.LOC(), UnScopedName(lbuf_name + SWAP_SFX_POS), true_on_rbuf);
       auto rbs_buf = AST::Make<AST::Assignment>(
-          n.LOC(), rbuf_name + SWAP_SFX_PRE, true_on_rbuf);
+          n.LOC(), UnScopedName(rbuf_name + SWAP_SFX_PRE), true_on_rbuf);
       auto ras_buf = AST::Make<AST::Assignment>(
-          n.LOC(), rbuf_name + SWAP_SFX_POS, true_on_lbuf);
+          n.LOC(), UnScopedName(rbuf_name + SWAP_SFX_POS), true_on_lbuf);
       lbs_buf->SetType(sty);
       las_buf->SetType(sty);
       rbs_buf->SetType(sty);
       ras_buf->SetType(sty);
 
       // record the name mapping
-      swap_pre[swap].emplace(lname, lname + SWAP_SFX_PRE);
-      swap_pre[swap].emplace(rname, rname + SWAP_SFX_PRE);
-      swap_post[swap].emplace(lname, lname + SWAP_SFX_POS);
-      swap_post[swap].emplace(rname, rname + SWAP_SFX_POS);
+      AddSwapPre(swap, lname, lname + SWAP_SFX_PRE);
+      AddSwapPre(swap, rname, rname + SWAP_SFX_PRE);
+      AddSwapPost(swap, lname, lname + SWAP_SFX_POS);
+      AddSwapPost(swap, rname, rname + SWAP_SFX_POS);
 
-      swap_pre[swap].emplace(lbuf_name, lbuf_name + SWAP_SFX_PRE);
-      swap_pre[swap].emplace(rbuf_name, rbuf_name + SWAP_SFX_PRE);
-      swap_post[swap].emplace(lbuf_name, lbuf_name + SWAP_SFX_POS);
-      swap_post[swap].emplace(rbuf_name, rbuf_name + SWAP_SFX_POS);
+      AddSwapPre(swap, lbuf_name, lbuf_name + SWAP_SFX_PRE);
+      AddSwapPre(swap, rbuf_name, rbuf_name + SWAP_SFX_PRE);
+      AddSwapPost(swap, lbuf_name, lbuf_name + SWAP_SFX_POS);
+      AddSwapPost(swap, rbuf_name, rbuf_name + SWAP_SFX_POS);
 
       // modify the symbol table
-      SymTab()->AddSymbol(InScopeName(lname) + SWAP_SFX_PRE, nty);
-      SymTab()->AddSymbol(InScopeName(rname) + SWAP_SFX_PRE, nty);
-      SymTab()->AddSymbol(InScopeName(lname) + SWAP_SFX_POS, nty);
-      SymTab()->AddSymbol(InScopeName(rname) + SWAP_SFX_POS, nty);
+      SymTab()->AddSymbol(lname + SWAP_SFX_PRE, nty);
+      SymTab()->AddSymbol(rname + SWAP_SFX_PRE, nty);
+      SymTab()->AddSymbol(lname + SWAP_SFX_POS, nty);
+      SymTab()->AddSymbol(rname + SWAP_SFX_POS, nty);
 
-      SymTab()->AddSymbol(InScopeName(lbuf_name) + SWAP_SFX_PRE, sty);
-      SymTab()->AddSymbol(InScopeName(rbuf_name) + SWAP_SFX_PRE, sty);
-      SymTab()->AddSymbol(InScopeName(lbuf_name) + SWAP_SFX_POS, sty);
-      SymTab()->AddSymbol(InScopeName(rbuf_name) + SWAP_SFX_POS, sty);
+      SymTab()->AddSymbol(lbuf_name + SWAP_SFX_PRE, sty);
+      SymTab()->AddSymbol(rbuf_name + SWAP_SFX_PRE, sty);
+      SymTab()->AddSymbol(lbuf_name + SWAP_SFX_POS, sty);
+      SymTab()->AddSymbol(rbuf_name + SWAP_SFX_POS, sty);
 
       // modify the future buffer map
-      fut_buf->at(fname)[lname + SWAP_SFX_PRE] = lbuf_name + SWAP_SFX_PRE;
-      fut_buf->at(fname)[rname + SWAP_SFX_PRE] = rbuf_name + SWAP_SFX_PRE;
-      fut_buf->at(fname)[lname + SWAP_SFX_POS] = lbuf_name + SWAP_SFX_POS;
-      fut_buf->at(fname)[rname + SWAP_SFX_POS] = rbuf_name + SWAP_SFX_POS;
+      FBInfo()[lname + SWAP_SFX_PRE].buffer = lbuf_name + SWAP_SFX_PRE;
+      FBInfo()[rname + SWAP_SFX_PRE].buffer = rbuf_name + SWAP_SFX_PRE;
+      FBInfo()[lname + SWAP_SFX_POS].buffer = lbuf_name + SWAP_SFX_POS;
+      FBInfo()[rname + SWAP_SFX_POS].buffer = rbuf_name + SWAP_SFX_POS;
+
+      VST_DEBUG(dbgs() << "Updated: "
+                       << STR(*FBInfo().find(lname + SWAP_SFX_PRE)) << "\n");
+      VST_DEBUG(dbgs() << "Updated: "
+                       << STR(*FBInfo().find(rname + SWAP_SFX_PRE)) << "\n");
+      VST_DEBUG(dbgs() << "Updated: "
+                       << STR(*FBInfo().find(lname + SWAP_SFX_POS)) << "\n");
+      VST_DEBUG(dbgs() << "Updated: "
+                       << STR(*FBInfo().find(rname + SWAP_SFX_POS)) << "\n");
 
       // Add it into the new stmts
       new_stmts.push_back(lbs);
@@ -486,6 +543,29 @@ public:
   bool Visit(AST::ChoreoFunction&) { return true; }
   bool Visit(AST::CppSourceCode&) { return true; }
   bool Visit(AST::Program&) { return true; }
+
+  bool RunOnProgram(AST::Node& root) override {
+    if (!isa<AST::Program>(&root)) {
+      Error(root.LOC(), "Not running a choreo program.");
+      return false;
+    }
+
+    if (prt_visitor) dbgs() << "|- " << GetName() << NewL;
+
+    if (prt_visitor) dbgs() << " |- TransformSelect" << NewL;
+    SetKind(FactorTrans::Kind::T_SELECT);
+    root.accept(*this);
+    if (HasError()) return false;
+
+    if (prt_visitor) dbgs() << " |- TransformSwap" << NewL;
+    SetKind(FactorTrans::Kind::T_SWAP);
+    root.accept(*this);
+    if (HasError()) return false;
+
+    if (abend_after) return false;
+
+    return true;
+  }
 };
 
 } // end namespace Choreo

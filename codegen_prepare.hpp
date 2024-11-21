@@ -10,14 +10,11 @@ namespace Choreo {
 struct CodegenPrepare : public CodeGenerator {
 private:
   ptr<CodeGenInfo> cgi;
-  std::string fname; // current function name
-
   int parallel_level = 0;
 
 private:
   bool BeforeVisitImpl(AST::Node& n) {
-    if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
-      fname = f->name;
+    if (isa<AST::ChoreoFunction>(&n)) {
       parallel_level = 0;
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       parallel_level++;
@@ -42,7 +39,6 @@ private:
                << ", is_return: " << item.is_return
                << ", index: " << item.p_index << "\n";
       });
-      fname = "";
     } else if (isa<AST::ParallelBy>(&n)) {
       parallel_level--;
       VST_DEBUG(dbgs() << "Grid Dims: "

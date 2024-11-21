@@ -220,16 +220,16 @@ struct DMAPolyhedron {
   std::unique_ptr<ShapePolyhedron> from;
   std::unique_ptr<ShapePolyhedron> to;
 
-  std::string fname; // future name
+  std::string futname; // future name
   std::string expr;
 
 public:
   DMAPolyhedron(const std::string& n, const std::string& e)
-      : fname(n), expr(e) {}
+      : futname(n), expr(e) {}
 
 public:
   void GeneratePov() {
-    auto filename = fname + ".pov";
+    auto filename = futname + ".pov";
     std::replace(filename.begin(), filename.end(), ':', '_');
     std::ofstream pov{filename};
 

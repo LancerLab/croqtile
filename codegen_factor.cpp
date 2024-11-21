@@ -57,9 +57,8 @@ bool FactorCodeGen::ContainsLoopVar(const std::string& iv) const {
 bool FactorCodeGen::BeforeVisitImpl(AST::Node& n) {
   TraceEachVisit(n);
 
-  if (auto c = dyn_cast<AST::ChoreoFunction>(&n)) {
+  if (isa<AST::ChoreoFunction>(&n)) {
     ClearChoreoFunctionStates();
-    fname = c->name;
     factor_fname = "__choreo_" + fname;
 
     // declare a factor function with proper name
@@ -337,8 +336,8 @@ bool FactorCodeGen::Visit(AST::Assignment& node) {
     int arg_idx = factor_symbols.GetSymbolIndex(sa->id->name);
     std::string buffer_name = sa->id->name;
     if (isa<FutureType>(GetSymbolType(sa->id->name))) {
-      assert(fut_buf->at(fname).count(sa->id->name));
-      buffer_name = fut_buf->at(fname).at(sa->id->name);
+      assert(FBInfo().count(InScopeName(sa->id->name)));
+      buffer_name = UnScopedName(FBInfo().at(InScopeName(sa->id->name)).buffer);
     }
     if (arg_idx >= 0) buffer_name = "args[" + std::to_string(arg_idx) + "]";
     auto sty = cast<SpannedType>(node.GetType());
@@ -1611,8 +1610,8 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
         assert(isa<FutureType>(expr->GetR()->GetType()) &&
                "expect a future operand.");
         if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol()) {
-          if (fut_buf->at(fname).count(id->name))
-            oss << fut_buf->at(fname).at(id->name);
+          if (FBInfo().count(InScopeName(id->name)))
+            oss << UnScopedName(FBInfo().at(InScopeName(id->name)).buffer);
           else
             choreo_unreachable("Future '" + id->name +
                                "' is not associated with a buffer.");

@@ -195,7 +195,7 @@ public:
         // TODO: All is different with Scorpio (1 Die) in the link below
         // TODO: is S60G same with c035?
         mem_usage_limit[Storage::LOCAL] = (size_t)(1.5 * 1024 * 1024); // 1.5MB
-        mem_usage_limit[Storage::SHARED] = (size_t)24 * 1024 * 1024; // 24MB
+        mem_usage_limit[Storage::SHARED] = (size_t)24 * 1024 * 1024;   // 24MB
         mem_usage_limit[Storage::GLOBAL] =
             (size_t)4 * 1024 * 1024 * 1024; // 4GB
       } else if (arch == "gcu210") {

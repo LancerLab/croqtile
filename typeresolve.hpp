@@ -11,13 +11,13 @@ namespace Choreo {
 // simple type constraints collector and resolver
 class TypeConstraints {
   std::map<std::string, std::vector<std::string>> equals;
-  Visitor* visitor = nullptr;
+  VisitorWithScope* visitor = nullptr;
 
   bool debug = false;
   bool report_type = false;
 
 public:
-  TypeConstraints(Visitor* v) : visitor(v) {}
+  TypeConstraints(VisitorWithScope* v) : visitor(v) {}
 
   void SetDebug(bool d) { debug = d; }
   void SetTypeReport(bool r) { report_type = r; }
@@ -49,6 +49,7 @@ public:
 
   bool ResolveType(const std::string& n, const ptr<Type>& ty, const location& l,
                    bool report_error = true) {
+    assert(PrefixedWith(n, "::"));
     assert(!isa<PlaceHolderType>(ty) &&
            "can not resolve type to be place holder");
     auto equals = GetEquals(n);
@@ -76,6 +77,10 @@ public:
               if (debug)
                 dbgs() << "[RType] Set the type of '" << e + ".data"
                        << "' to be " << PSTR(pty) << "\n";
+              auto& buf_info =
+                  CCtx().GetFutureBufferInfo(visitor->CurrentFunctionName());
+              buf_info[n].from_kind = buf_info[e].from_kind;
+              buf_info[n].to_kind = buf_info[e].to_kind;
             }
           }
           if (report_type) ReportSymbolType(e, ty);
@@ -96,6 +101,10 @@ public:
               if (debug)
                 dbgs() << "[RType] Set the type of '" << e + ".data"
                        << "' to be " << PSTR(pty) << "\n";
+              auto& buf_info =
+                  CCtx().GetFutureBufferInfo(visitor->CurrentFunctionName());
+              buf_info[n].from_kind = buf_info[e].from_kind;
+              buf_info[n].to_kind = buf_info[e].to_kind;
             }
           }
           if (report_type) ReportSymbolType(e, ty);

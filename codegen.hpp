@@ -10,11 +10,6 @@
 
 namespace Choreo {
 
-// map a future to its associated buffer. The maps are indexed by the choreo
-// function names
-using FutureBufferMap =
-    std::map<std::string, std::map<std::string, std::string>>;
-
 struct SymbolDetail {
   // information from choreo code
   std::string name;

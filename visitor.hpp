@@ -1,11 +1,10 @@
 #ifndef __CHOREO_VISITOR_HPP__
 #define __CHOREO_VISITOR_HPP__
 
-#include <unistd.h>
-
 #include <cstring>
 #include <iostream>
 #include <optional>
+#include <unistd.h>
 #include <unordered_set>
 
 #include "ast.hpp"
@@ -44,6 +43,12 @@ struct Visitor {
         dbgs() << STR(n) << NewL;
         dbgs() << SprT << " After " << name << ": " << f->name << " (End) "
                << SprT << NewL;
+      }
+      if (dsyms_after) {
+        dbgs() << NewL << SprT << " Symbol Table Dump (After " << name << ") "
+               << SprT << NewL;
+        if (SymTab()) SymTab()->Print(dbgs());
+        dbgs() << SprT << SprT << NewL;
       }
     }
     return true;
@@ -95,6 +100,7 @@ protected:
   bool debug_visit = false;
   bool print_ahead = false;
   bool print_after = false;
+  bool dsyms_after = false;
   bool abend_after = false;
   bool prt_visitor = false;
   size_t error_count = 0;
@@ -139,6 +145,11 @@ public:
       if (after.find(name) != std::string::npos) print_after = true;
     }
 
+    if (std::getenv("CHOREO_DUMP_SYMTAB_AFTER")) {
+      auto dump = ToUpper(std::string(std::getenv("CHOREO_DUMP_SYMTAB_AFTER")));
+      if (dump.find(name) != std::string::npos) dsyms_after = true;
+    }
+
     if (std::getenv("CHOREO_STOP_AFTER_PASS")) {
       auto abend = ToUpper(std::string(std::getenv("CHOREO_STOP_AFTER_PASS")));
       if (abend.find(name) != std::string::npos) abend_after = true;
@@ -160,7 +171,7 @@ public:
 
   virtual const std::string& GetName() { return name; }
 
-  virtual bool RunProgram(AST::Node& root) {
+  virtual bool RunOnProgram(AST::Node& root) {
     if (!isa<AST::Program>(&root)) {
       Error(root.LOC(), "Not running a choreo program.");
       return false;
@@ -253,8 +264,13 @@ protected:
   virtual bool BeforeVisitImpl(AST::Node& n) = 0;
   virtual bool AfterVisitImpl(AST::Node& n) = 0;
 
+  // Tricky: sometimes it requires action before entering the scope
+  virtual bool BeforeBeforeVisit(AST::Node&) { return true; }
+
   // special to within: map 'with' to its 'with-matchers'
   std::unordered_map<std::string, std::vector<std::string>> within_map;
+
+  std::string fname; // current function name
 
 private:
   int pb_count = 0; // counting for parallel_by
@@ -269,12 +285,14 @@ private:
 
 public:
   bool BeforeVisit(AST::Node& n) final {
+    BeforeBeforeVisit(n);
     Visitor::BeforeVisit(n);
     if (isa<AST::Program>(&n)) {
       Reset();
       SSTab().EnterScope(""); // global scope
     } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
       SSTab().EnterScope(f->name);
+      fname = f->name;
     } else if (isa<AST::ParallelBy>(&n)) {
       SSTab().EnterScope("paraby_" + std::to_string(pb_count++));
     } else if (isa<AST::WithBlock>(&n)) {
@@ -298,13 +316,18 @@ public:
       Reset();
       SSTab().LeaveScope();
       assert(SSTab().ScopeDepth() == 0 && "internal error: scope is not zero.");
-    } else if (isa<AST::ChoreoFunction>(&n) || isa<AST::ParallelBy>(&n) ||
-               isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n)) {
+    } else if (isa<AST::ChoreoFunction>(&n)) {
+      fname = "";
+      SSTab().LeaveScope();
+    } else if (isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n) ||
+               isa<AST::ForeachBlock>(&n)) {
       SSTab().LeaveScope();
     }
 
     return Visitor::AfterVisit(n);
   }
+
+  const std::string& CurrentFunctionName() const { return fname; }
 
 public:
   VisitorWithScope(const std::string& n,
@@ -320,6 +343,10 @@ public:
 
   virtual const std::string UnScopedName(const std::string& name) const {
     return scoped_symtab.UnScopedName(name);
+  }
+
+  virtual const std::string GetScope(const std::string& name) const {
+    return scoped_symtab.GetScope(name);
   }
 };
 
@@ -371,40 +398,40 @@ public:
   ~VisitorWithSymTab() {}
 
   // provide default
-  virtual bool Visit(AST::MultiNodes&) override { return true; };
-  virtual bool Visit(AST::MultiValues&) override { return true; };
-  virtual bool Visit(AST::IntLiteral&) override { return true; };
-  virtual bool Visit(AST::Boolean&) override { return true; };
-  virtual bool Visit(AST::Expr&) override { return true; };
-  virtual bool Visit(AST::MultiDimSpans&) override { return true; };
-  virtual bool Visit(AST::NamedTypeDecl&) override { return true; };
-  virtual bool Visit(AST::NamedVariableDecl&) override { return true; };
-  virtual bool Visit(AST::IntTuple&) override { return true; };
-  virtual bool Visit(AST::Assignment&) override { return true; };
-  virtual bool Visit(AST::IntIndex&) override { return true; };
-  virtual bool Visit(AST::DataType&) override { return true; };
-  virtual bool Visit(AST::Identifier&) override { return true; };
-  virtual bool Visit(AST::Parameter&) override { return true; };
-  virtual bool Visit(AST::ParamList&) override { return true; };
-  virtual bool Visit(AST::ParallelBy&) override { return true; };
-  virtual bool Visit(AST::WhereBind&) override { return true; };
-  virtual bool Visit(AST::WithIn&) override { return true; };
-  virtual bool Visit(AST::WithBlock&) override { return true; };
-  virtual bool Visit(AST::Memory&) override { return true; };
-  virtual bool Visit(AST::SpanAs&) override { return true; };
-  virtual bool Visit(AST::DMA&) override { return true; };
-  virtual bool Visit(AST::ChunkAt&) override { return true; };
-  virtual bool Visit(AST::Wait&) override { return true; };
-  virtual bool Visit(AST::Call&) override { return true; };
-  virtual bool Visit(AST::Rotate&) override { return true; };
-  virtual bool Visit(AST::Select&) override { return true; };
-  virtual bool Visit(AST::Return&) override { return true; };
-  virtual bool Visit(AST::LoopRange&) override { return true; };
-  virtual bool Visit(AST::ForeachBlock&) override { return true; };
-  virtual bool Visit(AST::FunctionDecl&) override { return true; };
-  virtual bool Visit(AST::ChoreoFunction&) override { return true; };
-  virtual bool Visit(AST::CppSourceCode&) override { return true; };
-  virtual bool Visit(AST::Program&) override { return true; };
+  bool Visit(AST::MultiNodes&) override { return true; };
+  bool Visit(AST::MultiValues&) override { return true; };
+  bool Visit(AST::IntLiteral&) override { return true; };
+  bool Visit(AST::Boolean&) override { return true; };
+  bool Visit(AST::Expr&) override { return true; };
+  bool Visit(AST::MultiDimSpans&) override { return true; };
+  bool Visit(AST::NamedTypeDecl&) override { return true; };
+  bool Visit(AST::NamedVariableDecl&) override { return true; };
+  bool Visit(AST::IntTuple&) override { return true; };
+  bool Visit(AST::Assignment&) override { return true; };
+  bool Visit(AST::IntIndex&) override { return true; };
+  bool Visit(AST::DataType&) override { return true; };
+  bool Visit(AST::Identifier&) override { return true; };
+  bool Visit(AST::Parameter&) override { return true; };
+  bool Visit(AST::ParamList&) override { return true; };
+  bool Visit(AST::ParallelBy&) override { return true; };
+  bool Visit(AST::WhereBind&) override { return true; };
+  bool Visit(AST::WithIn&) override { return true; };
+  bool Visit(AST::WithBlock&) override { return true; };
+  bool Visit(AST::Memory&) override { return true; };
+  bool Visit(AST::SpanAs&) override { return true; };
+  bool Visit(AST::DMA&) override { return true; };
+  bool Visit(AST::ChunkAt&) override { return true; };
+  bool Visit(AST::Wait&) override { return true; };
+  bool Visit(AST::Call&) override { return true; };
+  bool Visit(AST::Rotate&) override { return true; };
+  bool Visit(AST::Select&) override { return true; };
+  bool Visit(AST::Return&) override { return true; };
+  bool Visit(AST::LoopRange&) override { return true; };
+  bool Visit(AST::ForeachBlock&) override { return true; };
+  bool Visit(AST::FunctionDecl&) override { return true; };
+  bool Visit(AST::ChoreoFunction&) override { return true; };
+  bool Visit(AST::CppSourceCode&) override { return true; };
+  bool Visit(AST::Program&) override { return true; };
 };
 
 } // end namespace Choreo

@@ -37,9 +37,6 @@ struct DimensionDetail {
 struct FactorCodeGen : public CodeGenerator {
 private:
   std::string factor_fname; // choreo-factor function name
-  std::string fname; // function name in source code, also the C++ function of
-                     // choreo entry
-
   std::string indent;
 
   // ochestrate multiple streams
@@ -75,19 +72,22 @@ private:
   std::map<std::string, DimensionDetail> dims_info;
   std::map<std::string, std::string> idnm_rts; // name in .co to symbolic name
 
-  ptr<FutureBufferMap> fut_buf; // map a future to its associated buffer
   ptr<CodeGenInfo> cgi;
 
   StringifyTable factor_symbols;
 
+  const FutureBufferInfo& FBInfo() const {
+    return CCtx().GetFutureBufferInfo(fname);
+  }
+
 public:
   FactorCodeGen(const ptr<SymbolTable>& symtab,
                 const std::vector<RtMemUsageCheckInfo>& list,
-                const ptr<FutureBufferMap>& fb, const ptr<CodeGenInfo>& ci,
-                bool cross_compile, bool use_kernel_template)
+                const ptr<CodeGenInfo>& ci, bool cross_compile,
+                bool use_kernel_template)
       : CodeGenerator("codegen", symtab), cross_compile(cross_compile),
         use_kernel_template(use_kernel_template), rt_mem_usage_check_list(list),
-        fut_buf(fb), cgi(ci) {}
+        cgi(ci) {}
 
   void OutputScript(const ptr<FunctionType>&);
 

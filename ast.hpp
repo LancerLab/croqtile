@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "aux.hpp"
+#include "context.hpp"
 #include "dmaconf.hpp"
 #include "enums.hpp"
 #include "location.hh"
@@ -1037,6 +1038,8 @@ struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
     assert(data && "ref data is not set.");
     return RemoveSuffix(data->name, ".data");
   }
+
+  bool SymbolicBufferName() { return !positions; }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     if (sa)

@@ -209,6 +209,10 @@ public:
       // synchronize the record inside global symtab
       if (symtab) symtab->AddSymbol(InScopeName(n), ty);
 
+      if (CCtx().DebugSymTab())
+        dbgs() << "Add Symbol: " << InScopeName(n) << ", type: " << PSTR(ty)
+               << "\n";
+
       return true;
     }
 
@@ -230,6 +234,10 @@ public:
         if (symtab) {
           auto sym = symtab->GetSymbol(InScopeName(n));
           sym->SetType(ty);
+
+          if (CCtx().DebugSymTab())
+            dbgs() << "Modify Symbol: " << InScopeName(n)
+                   << ", type: " << PSTR(ty) << "\n";
         }
         return true;
       }
@@ -299,8 +307,17 @@ public:
     return ScopeName() + name;
   }
 
-  // If the name is defined in scopes, return the scoped name
-  std::string InScopeName(const std::string& name) const {
+  const std::string GetScope(const std::string& name) const {
+    if (PrefixedWith(name, "::")) {
+      auto pos = name.find_last_of(":");
+      if (pos != std::string::npos) return name.substr(0, pos + 1);
+    } else if (auto n = NameInScopeOrNull(name))
+      return GetScope(*n);
+
+    return name;
+  }
+
+  const std::string InScopeName(const std::string& name) const {
     auto n = NameInScopeOrNull(name);
     if (!n) choreo_unreachable("symbol `" + name + "' is not found in scope");
     return *n;

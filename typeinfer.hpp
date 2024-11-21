@@ -9,22 +9,22 @@
 
 namespace Choreo {
 
-struct TypeInference : public Visitor {
+struct TypeInference : public VisitorWithScope {
 private:
+  TypeConstraints type_equals;
   bool Dump = false;
-  TypeConstraints type_equals{this};
 
 private:
   ptr<Type> cur_type = nullptr;
   std::vector<ptr<Type>> cur_param_types;
   Shape cur_mdspan_value;
-  std::string cur_func_name; // current function name
   BaseType dma_fmty = BaseType::UNKNOWN;
   Storage dma_mem = Storage::NONE;
   bool allow_named_dim = false; // named dimensions (mdspan param only)
 
-  bool BeforeVisit(AST::Node&) override;
-  bool AfterVisit(AST::Node&) override;
+  bool BeforeBeforeVisit(AST::Node&) override;
+  bool BeforeVisitImpl(AST::Node&) override;
+  bool AfterVisitImpl(AST::Node&) override;
 
   bool AssignSymbolWithType(const location&, const std::string&,
                             const ptr<Type>&);
@@ -39,7 +39,8 @@ private:
   }
 
 public:
-  TypeInference(bool d) : Visitor("infer"), Dump(d) {
+  TypeInference(bool d)
+      : VisitorWithScope("infer"), type_equals(this), Dump(d) {
     type_equals.SetTypeReport(Dump);
   }
 

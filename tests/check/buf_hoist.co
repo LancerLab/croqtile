@@ -13,26 +13,23 @@ __co__ s32 [6, 17, 128] ele_add(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) {
         // dummy DMA used for A-B buffering
         lfB = dma.any;
         rfB = dma.any;
-        ofA = dma.any;
-        ofB = dma.any;
+        of = dma.any;
         foreach y(1:) {
           lfB = dma.copy.async lhs.chunkat(p, x, y) => local;
           rfB = dma.copy.async rhs.chunkat(p, x, y) => local;
-          wait lfA, rfA, ofA;
+          wait lfA, rfA, of;
 
           l_out = select(y % 2, lfB.data, lfA.data);
           call kernel(lfA.data, rfA.data, l_out, |l_out|);
 
-          ofB = dma.copy.async l_out => output.chunkat(p, x, y - 1);
+          of = dma.copy.async l_out => output.chunkat(p, x, y - 1);
 
           swap(lfA, lfB);
           swap(rfA, rfB);
-          swap(ofA, ofB);
         }
         lf = select(#y % 2, lfB, lfA);
         rf = select(#y % 2, rfB, rfA);
-        of = select(#y % 2, ofA, ofB);
-        wait lf, rf;
+        wait lf, rf, of;
         call kernel(lf.data, rf.data, of.data, |of.span|);
         dma.copy of.data => output.chunkat(p, x, y(-1));
       }
@@ -43,4 +40,4 @@ __co__ s32 [6, 17, 128] ele_add(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) {
 }
 
 // CHECK: Hoisted:
-// CHECK: `- Var Decl (): ofA__buf__, type: global s32 mdspan<3> [1, 1, 32]
+// CHECK: `- Var Decl (): of__buf__, type: global s32 mdspan<3> [1, 1, 32]

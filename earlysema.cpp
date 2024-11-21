@@ -6,6 +6,8 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
   if (isa<AST::Program>(&n)) {
     type_equals.Reset();
   } else if (isa<AST::ChoreoFunction>(&n)) {
+    VST_DEBUG(dbgs() << "Before " << GetName() << " - " << STR(FBInfo())
+                     << "\n");
     requires_return = false;
     return_deduction = false;
     found_return = false;
@@ -24,6 +26,8 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
 
 bool EarlySemantics::AfterVisitImpl(AST::Node& n) {
   if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
+    VST_DEBUG(dbgs() << "After " << GetName() << " - " << STR(FBInfo())
+                     << "\n");
     if (return_deduction) {
       // maybe this can be moved to type inference
       if (!found_return && f->f_decl.ret_type->IsUnknown()) {
@@ -820,6 +824,21 @@ bool EarlySemantics::Visit(AST::DMA& n) {
       ReportErrorWhenViolateODR(n.LOC(), n.future, __FILE__, __LINE__,
                                 MakeFutureType(spanned_ty, n.async));
     }
+
+    // set the buffer kind
+    auto from_kind = (cast<AST::ChunkAt>(n.from)->SymbolicBufferName())
+                         ? DOK_SYMBOL
+                         : DOK_CHUNK;
+    auto to_kind = DOK_UNKNOWN;
+    if (!isa<AST::ChunkAt>(n.to))
+      to_kind = DOK_SYMBOL;
+    else
+      to_kind = (cast<AST::ChunkAt>(n.to)->SymbolicBufferName()) ? DOK_SYMBOL
+                                                                 : DOK_CHUNK;
+    auto to_sym = n.ToSymbol();
+    if (!to_sym.empty()) to_sym = InScopeName(to_sym);
+    CCtx().GetFutureBufferInfo(fname).emplace(
+        InScopeName(n.future), DMABufferInfo{to_sym, from_kind, to_kind});
   } else {
     if (n.async) {
       Error(n.LOC(), "forbid to associated async dma without a named future.");
@@ -995,13 +1014,26 @@ bool EarlySemantics::Visit(AST::Rotate& n) {
 
   ptr<Type> lty = nullptr;
   for (size_t index = 0; index < n.ids->Count(); ++index) {
-    auto cty = NodeType(*n.ValueAt(index));
+    auto pnode = n.ValueAt(index);
+    auto cname = cast<AST::Identifier>(pnode)->name;
+    auto cty = NodeType(*pnode);
     if (!GeneralFutureType(*cty)) {
       Error(n.LOC(), "only support swapping of 'future'. (" +
                          n.IdAt(index)->name + ": " + PSTR(lty) + ").");
       error_count++;
       return false;
     }
+
+    // Avoid to swap a 'chunkat' target where no explicit buffer symbol is
+    // associated.
+    if (CCtx().GetFutureBufferInfo(fname)[InScopeName(cname)].to_kind ==
+        DOK_CHUNK) {
+      Error(n.LOC(), "rotate/swap a 'future' referring a buffer chunk has not "
+                     "been supported yet.");
+      error_count++;
+      return false;
+    }
+
     if (index < 1) continue;
     lty = NodeType(*n.ValueAt(index - 1));
 
