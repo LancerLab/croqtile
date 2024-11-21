@@ -1496,10 +1496,11 @@ void FactorCodeGen::OutputScript(const ptr<FunctionType>& fty) {
 
   // Generate the host code
   std::string user_code = hs.str();
-  // Reset the string to be empty
-  hs.str("");
-  // Clear any error flags that may be set
-  hs.clear();
+
+  // if user defines macro such as `#define NATIVE_F16_SUPPORT 1`
+  // the macro must come before `#include "choreo.h"`
+  // to enable comditional compilation.
+  // so append the host head to user_code.
 
   // emit the fixed header
   EmitHostHead(hs);
@@ -1507,7 +1508,7 @@ void FactorCodeGen::OutputScript(const ptr<FunctionType>& fty) {
   if (!user_code.empty()) {
     // The user code requires the choreo function be fwd-decalared for its call
     EmitHostFuncDecl(hs, *fty, fname);
-    hs << ";\n" << user_code;
+    hs << ";\n";
   }
 
   EmitHostFuncDecl(hs, *fty, fname);
