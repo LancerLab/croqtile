@@ -250,45 +250,31 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl& node) {
       int arg_idx = cgi->GetArgumentIndex(fname, InScopeName(sa->id->name));
       std::string buffer_name =
           arg_idx < 0 ? sa->id->name : "args[" + std::to_string(arg_idx) + "]";
-      auto sty = dyn_cast<SpannedType>(node.GetType());
-      assert(sty);
       std::string storage_type = stringify(sty->GetStorage());
       std::string base_type = stringify(Choreo::BaseType(sty->f_type));
       fs << indent << "auto " << sym << " = bitcast_(" << storage_type << "("
-         << base_type << ", {";
+         << base_type << ", ";
 
-      // TODO(wsj): has_dynamic is hard to decide. Maybe still need to implement
-      // span_as as mdspan?
-      bool all_intLiteral_shape = true;
-      for (auto value : sa->list->AllValues()) {
-        auto value_expr = dyn_cast<AST::Expr>(value);
-        if (!(value_expr->IsReference() &&
-              isa<AST::IntLiteral>(value_expr->GetReference()))) {
-          all_intLiteral_shape = false;
-          break;
-        }
-      }
-      std::string orig_delimiter = sa->list->delimiter;
-      sa->list->SetDelimiter(", ");
-      if (all_intLiteral_shape) {
-        fs << PSTR(sa->list) << "}), " << buffer_name << ");\n";
-      } else {
+      auto shape = sty->GetShape();
+      if (shape.IsDynamic()) {
+        fs << "{";
         for (size_t i = 0; i < sa->list->Count(); ++i)
           fs << (i != 0 ? ", " : "") << "-1";
         fs << "}), " << buffer_name << ", {";
         for (size_t i = 0; i < sa->list->Count(); ++i) {
           auto value = sa->list->ValueAt(i);
-          auto value_expr = dyn_cast<AST::Expr>(value);
-          auto expr_str = PSTR(value_expr);
-          for (auto& [id_name, _] : idnm_rts) {
+          // TODO: how to utilize shape info
+          auto expr_str = PSTR(cast<AST::Expr>(value));
+          for (auto& [id_name, _] : idnm_rts)
             expr_str = RegexReplaceAll(expr_str, "\\b" + id_name + "\\b",
                                        named_dim_ref_prefix + id_name);
-          }
           fs << (i != 0 ? ", " : "") << expr_str;
         }
-        fs << "});\n";
-        sa->list->SetDelimiter(orig_delimiter);
+        fs << "}";
+      } else {
+        fs << LSTR(sty->GetShape()) << "), " << buffer_name;
       }
+      fs << ");\n";
     } else if (factor_symbols.Exists(InScopeName(sym))) {
       // factor weird behavior: only the output needs alloc
       if (MemLevel(sty->GetStorage()) < 2 ||
@@ -358,40 +344,28 @@ bool FactorCodeGen::Visit(AST::Assignment& node) {
     auto sty = cast<SpannedType>(node.GetType());
     fs << indent << "auto " << node.name << " = bitcast_("
        << stringify(sty->GetStorage()) << "(" << stringify(sty->ElementType())
-       << ", {";
+       << ", ";
 
-    // TODO(wsj): has_dynamic is hard to decide. Maybe still need to implement
-    // span_as as mdspan?
-    bool all_intLiteral_shape = true;
-    for (auto value : sa->list->AllValues()) {
-      auto value_expr = dyn_cast<AST::Expr>(value);
-      if (!(value_expr->IsReference() &&
-            isa<AST::IntLiteral>(value_expr->GetReference()))) {
-        all_intLiteral_shape = false;
-        break;
-      }
-    }
-    std::string orig_delimiter = sa->list->delimiter;
-    sa->list->SetDelimiter(", ");
-    if (all_intLiteral_shape) {
-      fs << PSTR(sa->list) << "}), " << buffer_name << ");\n";
-    } else {
+    auto shape = sty->GetShape();
+    if (shape.IsDynamic()) {
+      fs << "{";
       for (size_t i = 0; i < sa->list->Count(); ++i)
         fs << (i != 0 ? ", " : "") << "-1";
       fs << "}), " << buffer_name << ", {";
       for (size_t i = 0; i < sa->list->Count(); ++i) {
         auto value = sa->list->ValueAt(i);
-        auto value_expr = dyn_cast<AST::Expr>(value);
-        auto expr_str = PSTR(value_expr);
-        for (auto& [id_name, _] : idnm_rts) {
+        // TODO: how to utilize shape info
+        auto expr_str = PSTR(cast<AST::Expr>(value));
+        for (auto& [id_name, _] : idnm_rts)
           expr_str = RegexReplaceAll(expr_str, "\\b" + id_name + "\\b",
                                      named_dim_ref_prefix + id_name);
-        }
         fs << (i != 0 ? ", " : "") << expr_str;
       }
-      fs << "});\n";
-      sa->list->SetDelimiter(orig_delimiter);
+      fs << "}";
+    } else {
+      fs << LSTR(sty->GetShape()) << "), " << buffer_name;
     }
+    fs << ");\n";
   } else if (isa<BoundedType>(NodeType(node)) ||
              isa<SpannedType>(NodeType(node)) ||
              isa<FutureType>(NodeType(node))) {
