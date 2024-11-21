@@ -541,6 +541,7 @@ template_val
 
         $$ = AST::Make<AST::Identifier>(@1, $1);
       }
+    | IDENTIFIER FNSPAN { $$ = AST::Make<AST::Identifier>(@1, $1 + $2); }
     ;
 
 
@@ -556,6 +557,9 @@ template_value_expr
     | template_value_expr PECET template_value_expr { $$ = AST::Make<AST::Expr>(@1, "%", $1, $3); }
     | CDIV LPAREN template_value_expr COMMA template_value_expr RPAREN { $$ = AST::Make<AST::Expr>(@1, "cdiv", $3, $5); }
     | template_value_expr UBOUND template_value_expr {$$ = AST::Make<AST::Expr>(@1, "#", $1, $3); }
+    | template_value_expr LPAREN general_index RPAREN {
+        $$ = AST::Make<AST::Expr>(@1, "dimof", $1, AST::Make<AST::IntIndex>(@3, $3));
+      }
     ;
 
 template_value_list

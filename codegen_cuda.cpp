@@ -850,6 +850,8 @@ bool CUDACodeGen::Visit(AST::Call& c) {
   __TRACE_EACH_VISIT__(c)
   fs << this->indent;
   fs << STR(*c.function);
+  if (c.template_params != nullptr)
+    fs << "<" << STR(c.template_params) << ">";
   fs << "(";
   auto args = c.arguments;
   assert(args && "Invalid kernel call args!");
