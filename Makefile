@@ -6,7 +6,9 @@ TOOLCHAIN_DIR=$(WORK_DIR)/tools
 FTP_SERVER:=172.16.11.18
 
 # Targets
-TARGET = choreo
+CHOREO_BIN = choreo
+COPP_BIN = copp
+TARGET = $(CHOREO_BIN) $(COPP_BIN)
 LEX_SRC = scanner.l
 PARSER_SRC = parser.yy
 #BISON_FLAGS = --language=c++ --skeleton=lalr1.cc -t -d  # Generates both parser.tab.c and parser.tab.h
@@ -57,8 +59,8 @@ ci-gcu2-test: setup-gcu2 $(TARGET)
 ci-gcu3-test: setup-gcu3 $(TARGET)
 	$(LIT) tests && $(MAKE) standalone_test
 
-$(TARGET): scanner.yy.o parser.tab.o choreo_main.o codegen_factor.o codegen_cuda.o codegen_topscc.o earlysema.o typeinfer.o typecheck.o ast.o types.o codegen_factor_types.o codegen_cuda_types.o valno.o visitor.o sym_replace.o
-	$(CC) $(CFLAGS) $^ $(SYMBOLIC_LIB_FLAGS) -o $(TARGET)
+$(CHOREO_BIN): scanner.yy.o parser.tab.o choreo_main.o codegen_factor.o codegen_cuda.o codegen_topscc.o earlysema.o typeinfer.o typecheck.o ast.o types.o codegen_factor_types.o codegen_cuda_types.o valno.o visitor.o sym_replace.o
+	$(CC) $(CFLAGS) $^ $(SYMBOLIC_LIB_FLAGS) -o $@
 
 scanner.yy.cc: $(LEX_SRC)
 	$(FLEX) -o $@ $(LEX_SRC)
@@ -71,6 +73,9 @@ parser.tab.cc parser.tab.hh location.hh: $(PARSER_SRC)
 
 %.o : %.cpp $(HEADER_FILES) location.hh
 	$(CC) $(CFLAGS) $(SYMBOLIC_INCLUDE_FLAGS) $< -c  -o $@
+
+copp: utils/choreo_preprocess.cpp $(HEADER_FILES)
+	$(CC) $(CFLAGS) $< -I$(WORK_DIR) -o $@
 
 choreo_header.inc : utils/choreo.h
 	echo "#ifndef __CHOREO_RUNTIME_HEADER_H__" > $@

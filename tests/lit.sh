@@ -17,6 +17,11 @@ if ! which choreo &>/dev/null; then
     exit 1
 fi
 
+if ! which copp &>/dev/null; then
+    echo "Error: copp is not found in PATH."
+    exit 1
+fi
+
 if ! which not.sh &>/dev/null; then
     echo "Error: choreo is not found in PATH."
     exit 1
@@ -125,6 +130,7 @@ execute_command() {
 
     # Replace 'gcc' and 'FileCheck' with their absolute paths
     command=${command//choreo/"$(which choreo)"}
+    command=${command//copp/"$(which copp)"}
     command=${command//FileCheck/"$(which FileCheck)"}
     local not_command=$(which not.sh | sed 's/[&/\]/\\&/g')
     command=$(echo "$command" | sed "s/\bnot \(.*\)/${not_command} \1/")

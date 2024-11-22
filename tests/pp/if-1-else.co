@@ -1,0 +1,18 @@
+// RUN: copp %s | grep -v "\<CHECK\>" | FileCheck %s
+
+__co__ int foo(f32 d[]) {
+   must show 0
+#if 1
+   must show 1
+#else
+   should not show up
+#endif
+   must show 2
+}
+
+// CHECK: must show 0
+// CHECK-NOT: should not show up
+// CHECK: must show 1
+// CHECK: must show 2
+// CHECK: }
+// CHECK-NOT: must

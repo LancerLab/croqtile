@@ -10,6 +10,7 @@
 #include "memcheck.hpp"
 #include "normalize.hpp"
 #include "options.hpp"
+#include "preprocess.hpp"
 #include "scanner.hpp"
 #include "sym_replace.hpp"
 #include "symtab.hpp"
@@ -54,6 +55,8 @@ int main(int argc, char* argv[]) {
   Option<bool> del_comm("--remove-comments", "-n", false);
   Option<bool> sym_repl("--print-sym-replace", "-sr", false);
   Option<bool> prt_pass("--show-passes", "-sp", false);
+  Option<bool> no_pp("--no-preprocess", "-npp", false);
+  Option<bool> pp_only("--preprocess-only", "-E", false);
   Option<bool> use_kernel_template("--use_kernel_template", "-kt", false);
 
   // parse all the options
@@ -102,8 +105,20 @@ int main(int argc, char* argv[]) {
 
   if (prt_pass) dbgs() << "|- " << filename << "\n";
 
+  // Apply the preprocessing
+  std::stringstream pps;
+  if (!no_pp) {
+    if (prt_pass) dbgs() << "|- preprocess only the choreo program\n";
+    SimplePreprocessor spp;
+    if (pp_only) {
+      spp.process(r.GetInputStream(), r.GetOutputStream());
+      return 0;
+    } else
+      spp.process(r.GetInputStream(), pps);
+  }
+
   Scanner s;
-  s.yyrestart(r.GetInputStream());
+  s.yyrestart((no_pp) ? r.GetInputStream() : pps);
   Parser p(s);
 
   if (debug_on) {

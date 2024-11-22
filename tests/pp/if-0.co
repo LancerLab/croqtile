@@ -1,0 +1,16 @@
+// RUN: choreo -E %s | grep -v "\<CHECK\>" | FileCheck --match-full-lines %s
+
+// device program
+__co__ int foo(f32 d[]) {
+   must show 0
+#if 0
+   should not show up
+#endif
+   must show 1
+}
+must show 2
+
+// CHECK: must show 0
+// CHECK-NOT: should not show up
+// CHECK: must show 1
+// CHECK: must show 2
