@@ -794,7 +794,7 @@ bool FactorCodeGen::Visit(AST::Call& c) {
       ks << "<";
       bool need_delimiter = false;
       for (int i = 0; i < c.template_params->Count(); ++i) {
-        if (need_delimiter) fs << ", ";
+        if (need_delimiter) ks << ", ";
         need_delimiter = true;
         ks << STR(cast<AST::Expr>(c.template_params->ValueAt(i))->compile_time_signature);
       }
