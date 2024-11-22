@@ -33,7 +33,7 @@ __co__ f32 [512, 1024] relu(f32 [512, 1024] input) { /// device program
               input_load_s = dma.copy.async input_load.data.chunkat(q, n_tile_s) => local;
               out_load_s = dma.copy.async l2_out.chunkat(q, n_tile_s) => local;
               wait input_load_s, out_load_s;
-              call relu_kernel<128, 256>(input_load_s.data, out_load_s.data); // |span| calculate the total size of span.
+              call relu_kernel<input.span(0)/#p/#q, input.span(1)/#n_tile_s>(input_load_s.data, out_load_s.data); // |span| calculate the total size of span.
               out_store_s = dma.copy.async out_load_s.data => l2_out.chunkat(q, n_tile_s); // can use defined vars
               wait out_store_s;
             }

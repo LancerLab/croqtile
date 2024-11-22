@@ -12,6 +12,7 @@
 #include "codegen_cuda_types.hpp"
 #include "cuda_script.inc"
 #include "types.hpp"
+#include "valno.hpp"
 
 #ifndef __CHOREO_CUDA_DIR__
 #error "missing macro definition of __CHOREO_CUDA_DIR__"
@@ -850,7 +851,16 @@ bool CUDACodeGen::Visit(AST::Call& c) {
   __TRACE_EACH_VISIT__(c)
   fs << this->indent;
   fs << STR(*c.function);
-  if (c.template_params != nullptr) fs << "<" << STR(c.template_params) << ">";
+  if (c.template_params != nullptr) {
+    fs << "<";
+    bool need_delimiter = false;
+    for (int i = 0; i < c.template_params->Count(); ++i) {
+      if (need_delimiter) fs << ", ";
+      need_delimiter = true;
+      fs << STR(cast<AST::Expr>(c.template_params->ValueAt(i))->compile_time_signature);
+    }
+    fs << ">";
+  }
   fs << "(";
   auto args = c.arguments;
   assert(args && "Invalid kernel call args!");

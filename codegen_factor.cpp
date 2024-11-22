@@ -790,7 +790,16 @@ bool FactorCodeGen::Visit(AST::Call& c) {
     ks << ") {\n";
     ks << "  " << STR(*c.function);
     // c.template_params->SetDelimiter(", ");
-    ks << "<" << STR(*c.template_params) << ">";
+    if (c.template_params != nullptr) {
+      ks << "<";
+      bool need_delimiter = false;
+      for (int i = 0; i < c.template_params->Count(); ++i) {
+        if (need_delimiter) fs << ", ";
+        need_delimiter = true;
+        ks << STR(cast<AST::Expr>(c.template_params->ValueAt(i))->compile_time_signature);
+      }
+      ks << ">";
+    }
     ks << "(";
     bool need_delimiter = false;
     for (size_t index = 0; index < arg_num; ++index) {

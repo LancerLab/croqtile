@@ -38,7 +38,7 @@ __co__ void gpu_matmul(f32 [4096, 4096] lhs, f32 [4096, 4096] rhs, f32 [4096, 40
         lhs_load = dma.copy lhs.chunkat(p, k_tile) => shared; // tiling_factor: {6, 17, 4}, new_size {lhs(0)/6, lhs(1)/17, lhs(2)/4}
         rhs_load = dma.copy rhs.chunkat(k_tile, q) => shared; // no explicit decl the target buffer, but can refer by <FutureType>.data
         // TODO(catz): support template'd kernel
-        call matmul_kernel_sm_stationary<64, 64, 32, 16, 16>(lhs_load.data, rhs_load.data, l2_out);
+        call matmul_kernel_sm_stationary<128/2, output.span(1)/#q, 32, 16, 16>(lhs_load.data, rhs_load.data, l2_out);
       }
       out_store = dma.copy l2_out => output.chunkat(p, q); // can use defined vars
     } // can use python styling

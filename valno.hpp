@@ -459,6 +459,8 @@ public:
     // type inference
     cur_vn = vn.GenerateValueNumberForNode(n);
     n.s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
+    auto cv = RemovePrefixOrNull("const_", vn.GetSignatureFromValueNumber(cur_vn));
+    if (cv) n.compile_time_signature = *cv;
 
     if (AST::typeof<MDSpanType>(&n)) {
       cur_mdspan_vn = cur_vn;
