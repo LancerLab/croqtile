@@ -837,7 +837,7 @@ bool EarlySemantics::Visit(AST::DMA& n) {
                                                                  : DOK_CHUNK;
     auto to_sym = n.ToSymbol();
     if (!to_sym.empty()) to_sym = InScopeName(to_sym);
-    CCtx().GetFutureBufferInfo(fname).emplace(
+    FCtx(fname).GetFutureBufferInfo().emplace(
         InScopeName(n.future), DMABufferInfo{to_sym, from_kind, to_kind});
   } else {
     if (n.async) {
@@ -1026,7 +1026,7 @@ bool EarlySemantics::Visit(AST::Rotate& n) {
 
     // Avoid to swap a 'chunkat' target where no explicit buffer symbol is
     // associated.
-    if (CCtx().GetFutureBufferInfo(fname)[InScopeName(cname)].to_kind ==
+    if (FCtx(fname).GetFutureBufferInfo()[InScopeName(cname)].to_kind ==
         DOK_CHUNK) {
       Error(n.LOC(), "rotate/swap a 'future' referring a buffer chunk has not "
                      "been supported yet.");

@@ -51,18 +51,30 @@ inline const std::string STR(const FutureBufferInfo& fbi) {
 
 using FutureBufferMap = std::map<std::string, FutureBufferInfo>;
 
+// per-function context
+class FunctionContext {
+  FutureBufferInfo fbi;
+
+public:
+  FutureBufferInfo& GetFutureBufferInfo() { return fbi; }
+};
+
 // per-compilation context
 class CompilationContext {
   bool debug_symtab = false;
-  FutureBufferMap fb_map;
+  std::map<std::string, FunctionContext> function_contexts;
 
 public:
-  FutureBufferInfo& GetFutureBufferInfo(const std::string fname) {
-    return fb_map[fname];
-  }
-
   bool DebugSymTab() const { return debug_symtab; }
 
+  FunctionContext& GetFunctionContext(const std::string fname) {
+    return function_contexts[fname];
+  }
+  const FunctionContext& GetFunctionContext(const std::string fname) const {
+    return function_contexts.at(fname);
+  }
+
+public:
   static CompilationContext& GetInstance() {
     static CompilationContext instance;
     return instance;
@@ -70,6 +82,9 @@ public:
 };
 
 inline CompilationContext& CCtx() { return CompilationContext::GetInstance(); }
+inline FunctionContext& FCtx(const std::string& fname) {
+  return CCtx().GetFunctionContext(fname);
+}
 
 } // end namespace Choreo
 #endif //__CHOREO_SYMBOL_INFO_HPP__

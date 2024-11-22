@@ -29,7 +29,7 @@ private:
   std::unordered_set<std::string>
       with_syms; // symbol defined in with-in statement
 
-  FutureBufferInfo& FBInfo() { return CCtx().GetFutureBufferInfo(fname); }
+  FutureBufferInfo& FBInfo() { return FCtx(fname).GetFutureBufferInfo(); }
 
 private:
   bool BeforeVisitImpl(AST::Node&) override;

@@ -99,7 +99,7 @@ private:
   int cur_node_index = -1;
   std::map<AST::MultiNodes*, BufferInsertInfo> mnodes_insertions;
 
-  FutureBufferInfo& FBInfo() { return CCtx().GetFutureBufferInfo(fname); }
+  FutureBufferInfo& FBInfo() { return FCtx(fname).GetFutureBufferInfo(); }
 
 private:
   bool BeforeVisitImpl(AST::Node& n) {

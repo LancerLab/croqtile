@@ -60,7 +60,7 @@ int main(int argc, char* argv[]) {
   Option<bool> use_kernel_template("--use_kernel_template", "-kt", false);
 
   // parse all the options
-  OptionRegistry& r = OptionRegistry::GetInstance();
+  auto& r = OptionRegistry::GetInstance();
   if (!r.Parse(argc, argv)) {
     errs() << "Usage: " << argv[0] << " <filename>\n";
     exit(1);

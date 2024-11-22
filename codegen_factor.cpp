@@ -89,14 +89,14 @@ bool FactorCodeGen::AfterVisitImpl(AST::Node& n) {
 
     outs() << "\n# step 4: generate the host source\n";
     outs() << "host_src=" << host_filename << "\n";
-    outs() << "echo \"#include \\\"\"${gcu_target_string}\"_lib" << factor_fname
+    outs() << "echo \"#include \\\"\"${gcu_target_string}\"_lib" << factor_pname
            << ".h\\\"\" > ${host_src}\n";
     outs() << "cat <<'EOF' >> ${host_src}\n";
     outs() << hs.str() << "\nEOF\n\n";
 
     outs() << "\n# step 5: JIT compile and execute\n";
     outs() << "# TODO: enable workflow of AOT compilation\n";
-    outs() << "factor_function=" << factor_fname << "\n";
+    outs() << "factor_function=" << factor_pname << "\n";
     outs() << R"(
 if command -v nvim &> /dev/null
 then
@@ -150,7 +150,7 @@ fi
     auto fty = cast<FunctionType>(f->GetType());
     fs << "}\n\n";
 
-    fs << "MODULE_REGISTER(\"lib" << factor_fname << "\", " << factor_fname
+    fs << "MODULE_REGISTER(\"lib" << factor_pname << "\", " << factor_fname
        << ");"; // end the factor function definition
 
     OutputScript(fty);
@@ -1468,12 +1468,12 @@ void FactorCodeGen::OutputScript(const ptr<FunctionType>& fty) {
 
   // a temporal path for the compilation process
   build_path = create_unique_path();
-  std::string build_prefix = build_path + "/__choreo_" + fname;
+  std::string build_prefix = build_path + "/__choreo_" + factor_pname;
 
   std::string kernel_fn = build_prefix + "_micro_kernel.cpp";
   std::string factor_fn = build_prefix + "_factor.cpp";
   std::string factor_bfn =
-      build_path + "/${gcu_target_string}_lib" + factor_fname + ".o";
+      build_path + "/${gcu_target_string}_lib" + factor_pname + ".o";
   host_filename = build_prefix + "_host.cpp";
 
   // Generate the host code

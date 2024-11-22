@@ -16,6 +16,10 @@ class TypeConstraints {
   bool debug = false;
   bool report_type = false;
 
+  FutureBufferInfo& FBInfo() {
+    return FCtx(visitor->CurrentFunctionName()).GetFutureBufferInfo();
+  }
+
 public:
   TypeConstraints(VisitorWithScope* v) : visitor(v) {}
 
@@ -77,10 +81,8 @@ public:
               if (debug)
                 dbgs() << "[RType] Set the type of '" << e + ".data"
                        << "' to be " << PSTR(pty) << "\n";
-              auto& buf_info =
-                  CCtx().GetFutureBufferInfo(visitor->CurrentFunctionName());
-              buf_info[n].from_kind = buf_info[e].from_kind;
-              buf_info[n].to_kind = buf_info[e].to_kind;
+              FBInfo()[n].from_kind = FBInfo()[e].from_kind;
+              FBInfo()[n].to_kind = FBInfo()[e].to_kind;
             }
           }
           if (report_type) ReportSymbolType(e, ty);
@@ -101,10 +103,8 @@ public:
               if (debug)
                 dbgs() << "[RType] Set the type of '" << e + ".data"
                        << "' to be " << PSTR(pty) << "\n";
-              auto& buf_info =
-                  CCtx().GetFutureBufferInfo(visitor->CurrentFunctionName());
-              buf_info[n].from_kind = buf_info[e].from_kind;
-              buf_info[n].to_kind = buf_info[e].to_kind;
+              FBInfo()[n].from_kind = FBInfo()[e].from_kind;
+              FBInfo()[n].to_kind = FBInfo()[e].to_kind;
             }
           }
           if (report_type) ReportSymbolType(e, ty);

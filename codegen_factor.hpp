@@ -36,6 +36,7 @@ struct DimensionDetail {
 
 struct FactorCodeGen : public CodeGenerator {
 private:
+  std::string factor_pname; // choreo-factor program name
   std::string factor_fname; // choreo-factor function name
   std::string indent;
 
@@ -77,7 +78,7 @@ private:
   StringifyTable factor_symbols;
 
   const FutureBufferInfo& FBInfo() const {
-    return CCtx().GetFutureBufferInfo(fname);
+    return FCtx(fname).GetFutureBufferInfo();
   }
 
 public:
@@ -87,7 +88,12 @@ public:
                 bool use_kernel_template)
       : CodeGenerator("codegen", symtab), cross_compile(cross_compile),
         use_kernel_template(use_kernel_template), rt_mem_usage_check_list(list),
-        cgi(ci) {}
+        cgi(ci) {
+    factor_pname =
+        "__choreo_" +
+        RemoveDirectoryPrefix(RemoveSuffix(
+            OptionRegistry::GetInstance().GetInputFileName(), ".co"));
+  }
 
   void OutputScript(const ptr<FunctionType>&);
 

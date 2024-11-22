@@ -31,7 +31,7 @@ protected:
   AST::MultiNodes* cur_pb_mn = nullptr;
   std::map<AST::MultiNodes*, BufferInsertInfo> mnodes_insertions;
 
-  FutureBufferInfo& FBInfo() { return CCtx().GetFutureBufferInfo(fname); }
+  FutureBufferInfo& FBInfo() { return FCtx(fname).GetFutureBufferInfo(); }
 
   const std::string ProperBufferName(const std::string name) {
     auto BUFFER_SUFFIX =
