@@ -293,23 +293,23 @@ public:
   Shape s; // to pass information between shape inference & type inference
 
   explicit Expr(const location& l, const ptr<Node>& v)
-      : Node(l), op("ref"), value_r(v), t(Reference), compile_time_signature("") {
+      : Node(l), op("ref"), value_r(v), t(Reference) {
     assert(value_r && "null node is provided.");
     assert(!isa<Expr>(v) && "can not reference an expression.");
   }
   explicit Expr(const location& l, const std::string& o, const ptr<Node>& v2)
-      : Node(l), op(o), value_r(v2), t(Unary), compile_time_signature("") {
+      : Node(l), op(o), value_r(v2), t(Unary) {
     assert(value_r && "null node is provided.");
   }
   explicit Expr(const location& l, const std::string& o, const ptr<Node>& v1,
                 const ptr<Node>& v2)
-      : Node(l), op(o), value_l(v1), value_r(v2), t(Binary), compile_time_signature("") {
+      : Node(l), op(o), value_l(v1), value_r(v2), t(Binary) {
     assert(value_l);
     assert(value_r);
   }
   explicit Expr(const location& l, const std::string& o, const ptr<Expr>& c,
                 const ptr<Node>& v1, const ptr<Node>& v2)
-      : Node(l), op(o), value_c(c), value_l(v1), value_r(v2), t(Ternary), compile_time_signature("") {
+      : Node(l), op(o), value_c(c), value_l(v1), value_r(v2), t(Ternary) {
     assert(value_c);
     assert(value_l);
     assert(value_r);

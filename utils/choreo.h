@@ -78,20 +78,21 @@ private:
   fill_random(U (&array)[N], std::true_type) {
     std::random_device rd;
     std::mt19937 gen(rd());
+    // floating-point range [-1.0, 1.0)
     std::uniform_real_distribution<U> rand_func(-1.0,
-                                                1.0); // 浮点数范围 [-1.0, 1.0)
+                                                1.0); // range [-1.0, 1.0)
 
     std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
   }
 
-  // 如果 T 是整数类型，使用 std::uniform_int_distribution
+  // if T is integer, use std::uniform_int_distribution
   template <typename U>
   typename std::enable_if<std::is_integral<U>::value>::type
   fill_random(U (&array)[N], std::false_type) {
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_int_distribution<U> rand_func(-100,
-                                               100); // 整数范围 [-100, 100]
+    // integers range [-100, 100]
+    std::uniform_int_distribution<U> rand_func(-100, 100);
 
     std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
   }

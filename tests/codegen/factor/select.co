@@ -11,5 +11,5 @@ __co__ void bar(f32 [100, 10] b) {
   }
 }
 
-// CHECK:     auto d = select_(0== 0, b, c);
-// CHECK:     auto f = select_(5== 0, b, select_(5== 1, c, z));
+// CHECK:     auto d = select_(Value(0)== Value(0), b, c);
+// CHECK:     auto f = select_(Value(5)== Value(0), b, select_(Value(5)== Value(1), c, z));

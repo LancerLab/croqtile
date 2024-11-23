@@ -18,9 +18,8 @@ __co__ int para_with(int b) {
 // CHECK:  `- Type Decl: ndims - [ 3 b ]
 // CHECK:  `- Var Decl (int): sum = 0
 // CHECK:  `- Parallelization:  index symbol: p, bound [0, 6)
-// CHECK:   `- WithBinding:
+// CHECK:   `- With Block:
 // CHECK:     (within constraints)
 // CHECK:     `- index in ndims
-// CHECK:     (where clause)
 // CHECK:     (with statements)
 // CHECK:     `- Assign: sum =  (sum + index(0))

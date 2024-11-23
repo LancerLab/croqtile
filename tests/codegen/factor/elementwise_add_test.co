@@ -42,7 +42,7 @@ __co__ f32 mdspan[12, 1024] ele_add(s32 [12, 1024] a, s32 [12, 1024] b) {
     // CHECK: Dim3 grid_dim(1);
     // CHECK: Dim3 block_dim(6);
 
-    // kernel function begin
+    // device function begin
     // TODO(albert): support this -> with index in l1_span {  // totally 100 chunks
     with index = {l2_tile, l1_tile} in [1, 8] {  // totally 100 chunks
       // TODO(albert): support two other style
@@ -95,7 +95,7 @@ __co__ f32 mdspan[12, 1024] ele_add(s32 [12, 1024] a, s32 [12, 1024] b) {
         // wait output_cdma;
       }
     }
-    // end kernel function
+    // end device function
   }
 
   return output;

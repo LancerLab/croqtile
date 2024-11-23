@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GCUALL
-// RUN: choreo -t factor %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
+// RUN: choreo -t factor -f16n %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
 
 #include <chrono>
 #include <cmath>
@@ -9,8 +9,6 @@
 #include <random>
 #include <sstream>
 #include <string>
-#define NATIVE_F16_SUPPORT 1
-#include "choreo.h"
 
 #define MATM 16
 #define MATN 16

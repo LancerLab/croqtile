@@ -288,6 +288,9 @@ public:
     if (prt_visitor) dbgs() << "|- " << GetName() << NewL;
 
     DummyBufferGen bg(SymTab());
+    bg.SetTraceVisit(trace_visit);
+    bg.SetDebugVisit(debug_visit);
+
     if (prt_visitor) dbgs() << " |- " << bg.GetName() << NewL;
     root.accept(bg);
     if (HasError()) return false;
@@ -298,6 +301,9 @@ public:
 
     // after the transformations, recollect the future-buffer info
     BufferInfoCollect bic(SymTab());
+    bic.SetTraceVisit(trace_visit);
+    bic.SetDebugVisit(debug_visit);
+
     if (prt_visitor) dbgs() << " |- " << bic.GetName() << NewL;
     root.accept(bic);
     if (HasError()) return false;

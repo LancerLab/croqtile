@@ -1,4 +1,4 @@
-// RUN: choreo %s -dv=latenorm | FileCheck %s
+// RUN: choreo %s -dv=norm,latenorm | FileCheck %s
 
 // device program
 __co__ void dma_norm(f16 [180, 27, 12] a) {
@@ -28,9 +28,9 @@ __co__ void dma_norm(f16 [180, 27, 12] a) {
 // CHECK:     auto __choreo_anon_fut__0 = alloc_dma_(SDMAType());
 // CHECK:     auto buffer = alloc_(L1Type(FloatType(16),{18, 3, 2}));
 // CHECK:     auto __choreo_anon_fut__1 = alloc_dma_(SDMAType());
-// CHECK:         async_load_(f, args[0], f__buf__, {Value(18)*iv_x,Value(3)*iv_y,Value(2)*thread_id});
-// CHECK:         auto anon_0 = select_(1 == 0, b, c);
-// CHECK:         async_load_(__choreo_anon_fut__0, args[0], anon_0, {Value(18)*iv_x,Value(3)*iv_y,Value(2)*thread_id});
+// CHECK:         async_load_(f, a, f__buf__, {Value(18)*iv_x,Value(3)*iv_y,Value(2)*thread_id});
+// CHECK:         auto anon_0 = select_(Value(1) == Value(0), b, c);
+// CHECK:         async_load_(__choreo_anon_fut__0, a, anon_0, {Value(18)*iv_x,Value(3)*iv_y,Value(2)*thread_id});
 // CHECK:         wait_dma_(__choreo_anon_fut__0);
-// CHECK:     async_load_(__choreo_anon_fut__1, args[0], buffer, {Value(18)*x,Value(3)*y,Value(2)*thread_id});
+// CHECK:     async_load_(__choreo_anon_fut__1, a, buffer, {Value(18)*x,Value(3)*y,Value(2)*thread_id});
 // CHECK:     wait_dma_(__choreo_anon_fut__1);

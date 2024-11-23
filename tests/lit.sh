@@ -128,8 +128,10 @@ execute_command() {
     # Replace %s with the filename
     command=${command//%s/"$file"}
 
-    # Replace 'gcc' and 'FileCheck' with their absolute paths
-    command=${command//choreo/"$(which choreo)"}
+    # Replace 'choreo', 'copp' and 'FileCheck' with their absolute paths
+    # Note: It must uses '-n' to remove comments inside host code.
+    #       Or else FileCheck will check the line of "// CHECK:"
+    command=${command//choreo/"$(which choreo) -n"}
     command=${command//copp/"$(which copp)"}
     command=${command//FileCheck/"$(which FileCheck)"}
     local not_command=$(which not.sh | sed 's/[&/\]/\\&/g')

@@ -1,4 +1,4 @@
-// RUN: choreo %s --debug-visit=bufgen -sa=bufgen 2>&1 | FileCheck %s
+// RUN: choreo %s --debug-visit=latenorm -sa=latenorm 2>&1 | FileCheck %s
 
 __co__ s32 [6, 17, 128] ele_add(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) {
   s32[lhs.span] output;
@@ -40,4 +40,10 @@ __co__ s32 [6, 17, 128] ele_add(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) {
 }
 
 // CHECK: Hoisted:
-// CHECK: `- Var Decl (): of__buf__, type: global s32 mdspan<3> [1, 1, 32]
+// CHECK: `- Var Decl (): lfB__buf__, type: local s32 mdspan<3> [1, 1, 32]
+// CHECK: Hoisted:
+// CHECK: `- Var Decl (): rfB__buf__, type: local s32 mdspan<3> [1, 1, 32]
+// CHECK: Hoisted:
+// CHECK: `- Var Decl (): lfA__buf__, type: local s32 mdspan<3> [1, 1, 32]
+// CHECK: Hoisted:
+// CHECK: `- Var Decl (): rfA__buf__, type: local s32 mdspan<3> [1, 1, 32]

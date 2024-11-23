@@ -36,7 +36,7 @@ __co__ auto span_as0(f32 [32, 18, 9] a) {
 // CHECK:    Dim3 block_dim(3);
 // CHECK:    auto ts = launch_kernel_("__choreo_span_as0_parallel", grid_dim, block_dim, args.back(), {args[0], c, d, args[1], n, args[2], args[3]}, {});
 // CHECK:    return std::vector<Value>{};
-// CHECK:  }, true); // end of choreo-factor dataflow program
+// CHECK:  }, true); // end of choreo-factor host program
 
 // CHECK:  D(func_)("__choreo_span_as0_parallel", {a_type, c_type, d_type, m_type, n_type, b_type, o_type}, {}, [&](auto args, auto results) {
 // CHECK:    auto & a = args[0];
@@ -69,4 +69,4 @@ __co__ auto span_as0(f32 [32, 18, 9] a) {
 // CHECK:        async_store_(o_store, a_local__buf__, anon_5, {Value(4)*iv_x,Value(3)*thread_id,Value(9)*iv_y});
 // CHECK:      }); // end of choreo-foreach block on 'y'.
 // CHECK:    }); // end of choreo-foreach block on 'x'.
-// CHECK:  }); // end of choreo-factor kernel function
+// CHECK:  }); // end of choreo-factor device function

@@ -25,13 +25,13 @@ __co__ auto matmul(s32 [M, K] lhs, s32 [K, N] rhs) {
 // CHECK:     for_(m_tile, dim_(args[0], 0)/8-0, 1, [&](auto iv_m_tile) {
 // CHECK:       for_(n_tile, dim_(args[1], 1)/128-0, 1, [&](auto iv_n_tile) {
 // CHECK:         for_(k_tile, dim_(args[0], 1)/1024-0, 1, [&](auto iv_k_tile) {
-// CHECK:           async_load_(lhs_load, args[0], lhs_load__buf__, {Value(8)*iv_m_tile,Value(1024)*iv_k_tile});
+// CHECK:           async_load_(lhs_load, lhs, lhs_load__buf__, {Value(8)*iv_m_tile,Value(1024)*iv_k_tile});
 // CHECK:           wait_dma_(lhs_load);
-// CHECK:           async_load_(rhs_load, args[1], rhs_load__buf__, {Value(1024)*iv_k_tile,Value(128)*iv_n_tile});
+// CHECK:           async_load_(rhs_load, rhs, rhs_load__buf__, {Value(1024)*iv_k_tile,Value(128)*iv_n_tile});
 // CHECK:           wait_dma_(rhs_load);
 // CHECK:           call_("kernel", {lhs_load__buf__.addr_(),rhs_load__buf__.addr_(),local_out.addr_(),Value(8),Value(1024),Value(128)});
 // CHECK:           async_store_(__choreo_anon_fut__0, local_out, output, {Value(8)*iv_m_tile,Value(128)*iv_n_tile});
 // CHECK:           wait_dma_(__choreo_anon_fut__0);
-// CHECK:         }); // end of choreo-foreach block.
-// CHECK:       }); // end of choreo-foreach block.
-// CHECK:     }); // end of choreo-foreach block.
+// CHECK:         }); // end of choreo-foreach block on 'k_tile'.
+// CHECK:       }); // end of choreo-foreach block on 'n_tile'.
+// CHECK:     }); // end of choreo-foreach block on 'm_tile'.

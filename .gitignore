@@ -6,6 +6,7 @@
 tests/*co.test
 tools/*
 choreo
+copp
 sgemm-ref
 demo/*.bin
 demo/*.fb

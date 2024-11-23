@@ -16,7 +16,7 @@ __co__ s32 mdspan<3> ele_add(s32 [144, 100, 100] a, s32 [144, 100, 100] b) {
   s32[a.span] global_buffer;
 
   parallel p by 6 {  // p is sip_index
-    // kernel function begin
+    // device function begin
     with index = {x, y} in [10, 10] {  // totally 100 chunks
      foreach x {
       foreach y(1:-3:2) { 
@@ -35,7 +35,7 @@ __co__ s32 mdspan<3> ele_add(s32 [144, 100, 100] a, s32 [144, 100, 100] b) {
       }
      }
     }
-    // end kernel function
+    // end device function
   }
 
   return global_buffer;

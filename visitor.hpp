@@ -120,45 +120,48 @@ public:
     // to be deprecated. currently it is only used for quick debug
     if (std::getenv("TRACE")) {
       auto trace = ToUpper(std::string(std::getenv("TRACE")));
-      if (trace.find(name) != std::string::npos) trace_visit = true;
+      if (ContainsExact(trace, name)) trace_visit = true;
     }
 
     if (std::getenv("CHOREO_TRACE_VISITOR")) {
       auto trace = ToUpper(std::string(std::getenv("CHOREO_TRACE_VISITOR")));
-      if (trace.find(name) != std::string::npos) trace_visit = true;
+      if (ContainsExact(trace, name)) trace_visit = true;
     }
 
     if (std::getenv("CHOREO_DEBUG_VISITOR")) {
       auto debug = ToUpper(std::string(std::getenv("CHOREO_DEBUG_VISITOR")));
-      if (debug.find(name) != std::string::npos) debug_visit = true;
+      if (ContainsExact(debug, name)) debug_visit = true;
     }
 
     if (std::getenv("CHOREO_PRINT_BEFORE")) {
       auto before = ToUpper(std::string(std::getenv("CHOREO_PRINT_BEFORE")));
-      if (before.find("ALLPASSES") != std::string::npos) print_ahead = true;
-      if (before.find(name) != std::string::npos) print_ahead = true;
+      if (ContainsExact(before, "ALLPASSES")) print_ahead = true;
+      if (ContainsExact(before, name)) print_ahead = true;
     }
 
     if (std::getenv("CHOREO_PRINT_AFTER")) {
       auto after = ToUpper(std::string(std::getenv("CHOREO_PRINT_AFTER")));
-      if (after.find("ALLPASSES") != std::string::npos) print_after = true;
-      if (after.find(name) != std::string::npos) print_after = true;
+      if (ContainsExact(after, "ALLPASSES")) print_after = true;
+      if (ContainsExact(after, name)) print_after = true;
     }
 
     if (std::getenv("CHOREO_DUMP_SYMTAB_AFTER")) {
       auto dump = ToUpper(std::string(std::getenv("CHOREO_DUMP_SYMTAB_AFTER")));
-      if (dump.find(name) != std::string::npos) dsyms_after = true;
+      if (ContainsExact(dump, name)) dsyms_after = true;
     }
 
     if (std::getenv("CHOREO_STOP_AFTER_PASS")) {
       auto abend = ToUpper(std::string(std::getenv("CHOREO_STOP_AFTER_PASS")));
-      if (abend.find(name) != std::string::npos) abend_after = true;
+      if (ContainsExact(abend, name)) abend_after = true;
     }
 
     if (std::getenv("CHOREO_PRINT_PASSES")) prt_visitor = true;
   }
 
   virtual ~Visitor() {}
+
+  virtual void SetTraceVisit(bool t) { trace_visit = t; }
+  virtual void SetDebugVisit(bool d) { debug_visit = d; }
 
   // simple reference to the symbol table
   virtual ScopedSymbolTable& SSTab() { return scoped_symtab; }

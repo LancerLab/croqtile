@@ -1,5 +1,5 @@
-#ifndef CHOREO_CODEGEN_FACTOR_HPP_
-#define CHOREO_CODEGEN_FACTOR_HPP_
+#ifndef __CHOREO_CODEGEN_FACTOR_HPP__
+#define __CHOREO_CODEGEN_FACTOR_HPP__
 
 #include <filesystem>
 #include <iostream>
@@ -36,22 +36,31 @@ struct DimensionDetail {
 
 struct FactorCodeGen : public CodeGenerator {
 private:
-  std::string factor_pname; // choreo-factor program name
-  std::string factor_fname; // choreo-factor function name
+  std::string factor_pname;               // choreo-factor program name
+  std::string factor_fname;               // choreo-factor function name
+  std::vector<std::string> factor_fnames; // all choreo-factor functions
   std::string indent;
 
+  using FunctionStream = std::map<std::string, std::ostringstream>;
   // ochestrate multiple streams
+  std::ostringstream ds; // buffer stream of the forward declarations
   std::ostringstream ks; // buffer stream of the kernel code (user provided)
   std::ostringstream fs; // buffer stream of the factor code (generated)
-  std::ostringstream hs; // buffer stream of the host code (user provided)
+  std::ostringstream hs; // buffer stream of the host code
+  std::ostringstream cs; // buffer stream of the user host code
   std::ostringstream alloc_in_fs; // buffer "alloc" statements in factor code
+  std::string host_code;
+  std::string factor_code;
 
   std::string::size_type alloc_pos;
   std::string alloc_indent;
 
   // backend (factor) compile environment related
-  std::string host_filename;
-  std::string build_path; // path for the script to build factor code
+  std::string build_path;      // path for the script to build factor code
+  std::string host_cpp_name;   // choreo entry and user host function
+  std::string kernel_cpp_name; // __cok__ function as a cpp file
+  std::string factor_cpp_name; // __co__ translated to factor code
+  std::string factor_bin_name; // compiled factor binary
   bool compile_with_dynshape =
       false; // if factor compile requires dynshape support
 
@@ -63,6 +72,7 @@ private:
   int parallel_level = 0;
   bool cross_compile = false;
   bool use_kernel_template = false;
+  bool factor_host_unbraced = false;
 
   ValBind::BindInfo<std::string> bind_info;
   std::map<std::string, std::stack<std::vector<std::string>>> cur_bounded_vars;
@@ -95,64 +105,43 @@ public:
             OptionRegistry::GetInstance().GetInputFileName(), ".co"));
   }
 
-  void OutputScript(const ptr<FunctionType>&);
-
   bool BeforeVisitImpl(AST::Node&) override;
   bool AfterVisitImpl(AST::Node&) override;
 
-  // bool Visit(AST::Node&) override;
-  bool Visit(AST::MultiNodes&) override;
-  bool Visit(AST::MultiValues&) override;
-  bool Visit(AST::IntLiteral&) override;
-  bool Visit(AST::Boolean&) override;
-  bool Visit(AST::Expr&) override;
-  bool Visit(AST::MultiDimSpans&) override;
-  bool Visit(AST::NamedTypeDecl&) override;
   bool Visit(AST::NamedVariableDecl&) override;
-  bool Visit(AST::IntTuple&) override;
   bool Visit(AST::Assignment&) override;
-  bool Visit(AST::IntIndex&) override;
-  bool Visit(AST::DataType&) override;
-  bool Visit(AST::Identifier&) override;
-  bool Visit(AST::Parameter&) override;
-  bool Visit(AST::ParamList&) override;
   bool Visit(AST::ParallelBy&) override;
   bool Visit(AST::WhereBind&) override;
   bool Visit(AST::WithIn&) override;
-  bool Visit(AST::WithBlock&) override;
-  bool Visit(AST::Memory&) override;
-  bool Visit(AST::SpanAs&) override;
   bool Visit(AST::DMA&) override;
-  bool Visit(AST::ChunkAt&) override;
   bool Visit(AST::Wait&) override;
   bool Visit(AST::Call&) override;
-  bool Visit(AST::Rotate&) override;
   bool Visit(AST::Select&) override;
-  bool Visit(AST::Return&) override;
-  bool Visit(AST::LoopRange&) override;
   bool Visit(AST::ForeachBlock&) override;
   bool Visit(AST::FunctionDecl&) override;
-  bool Visit(AST::ChoreoFunction&) override;
   bool Visit(AST::CppSourceCode&) override;
-  bool Visit(AST::Program&) override;
 
 private:
   bool ContainsLoopVar(const std::string&) const;
 
-  void EmitHostHead(std::ostream&);
+  void EmitScript();
+
+  void EmitFixedHostHead();
+  void EmitFixedFactorHead();
   void EmitHostFuncDecl(std::ostringstream&, const FunctionType&,
                         const std::string&);
-  void EmitRuntimeCheck(std::ostream&);
-  void EmitRuntimeMemUsageCheck(std::ostream&);
-  void EmitHostFuncBody(std::ostream&, const FunctionType&,
-                        const std::string& fname);
+  void EmitHostRuntimeCheck(std::ostream&);
+  void EmitHostRuntimeMemUsageCheck(std::ostream&);
+  void EmitHostFunction(std::ostream&, const FunctionType&);
 
   const std::string ExprSTR(AST::ptr<AST::Node>) const;
   std::string GenHostParamName() { return "hp" + std::to_string(hp_count++); }
-  std::string ReplaceRuntimeNames(const std::string&, const std::string& = "",
-                                  bool host_code = true);
+  const std::string ReplaceRuntimeNames(const std::string&,
+                                        const std::string& = "",
+                                        bool host_code = true) const;
   std::string ReplaceFactorDynDimName(const std::string&);
   std::optional<std::string> ReplaceDynDimRef(const std::string&);
+  const std::string ValueSTR(const ValueItem&) const;
 
   // common utils
   void IncrementIndent() { this->indent += "  "; }
@@ -164,6 +153,7 @@ private:
   // TODO: determine what to clear!
   void ClearChoreoFunctionStates() {
     hp_count = 0; // reset the count of stub parameter
+    factor_host_unbraced = true;
     dims_info.clear();
     idnm_rts.clear();
     indent.clear();
@@ -193,4 +183,4 @@ private:
 
 } // end namespace Choreo
 
-#endif // CHOREO_CODEGEN_FACTOR_HPP_
+#endif // __CHOREO_CODEGEN_FACTOR_HPP__

@@ -21,12 +21,7 @@
 using namespace Choreo;
 using namespace Choreo::Factor;
 
-inline const std::string ValueSTR(const ValueItem& vi) {
-  if (auto i = dyn_cast<int>(&vi))
-    return "Value(" + std::to_string(*i) + ")";
-  else
-    return STR(vi);
-}
+static Option<bool> native_f16("--native-f16", "-f16n", false);
 
 inline const std::string FineName(const std::string& input) {
   std::string result = input;
@@ -57,21 +52,29 @@ bool FactorCodeGen::ContainsLoopVar(const std::string& iv) const {
 bool FactorCodeGen::BeforeVisitImpl(AST::Node& n) {
   TraceEachVisit(n);
 
-  if (isa<AST::ChoreoFunction>(&n)) {
+  if (isa<AST::Program>(&n)) {
+    // decide the factor build environment
+    build_path = create_unique_path();
+    std::string build_prefix = build_path + "/__choreo_" + factor_pname;
+
+    kernel_cpp_name = build_prefix + "_micro_kernel.cpp";
+    factor_cpp_name = build_prefix + "_factor.cpp";
+    factor_bin_name =
+        build_path + "/${gcu_target_string}_lib" + factor_pname + ".o";
+    host_cpp_name = build_prefix + "_host.cpp";
+
+    // emit the fixed host header and factor header to their streams
+    EmitFixedHostHead();
+    EmitFixedFactorHead();
+  } else if (isa<AST::ChoreoFunction>(&n)) {
     ClearChoreoFunctionStates();
     factor_fname = "__choreo_" + fname;
+    factor_fnames.push_back(factor_fname);
 
-    // declare a factor function with proper name
-    fs << R"(#include <vector>
-
-#include "gcu/factor/factor.h"
-
-using namespace factor;
-)";
     fs << "void " << factor_fname << "() {\n";
     this->IncrementIndent();
-    fs << indent;
-    fs << "include_(\"" << backpatch_filename << "\");\n";
+    // include the kernel source file
+    fs << this->indent << "include_(\"" << kernel_cpp_name << "\");\n";
   } else if (isa<AST::ParallelBy>(&n)) {
     parallel_level++;
   } else if (isa<AST::ForeachBlock>(&n)) {
@@ -86,79 +89,47 @@ bool FactorCodeGen::AfterVisitImpl(AST::Node& n) {
   TraceEachVisit(n);
   if (isa<AST::Program>(&n)) {
     if (HasError()) return false; // do not generate code when error happens
-
-    outs() << "\n# step 4: generate the host source\n";
-    outs() << "host_src=" << host_filename << "\n";
-    outs() << "echo \"#include \\\"\"${gcu_target_string}\"_lib" << factor_pname
-           << ".h\\\"\" > ${host_src}\n";
-    outs() << "cat <<'EOF' >> ${host_src}\n";
-    outs() << hs.str() << "\nEOF\n\n";
-
-    outs() << "\n# step 5: JIT compile and execute\n";
-    outs() << "# TODO: enable workflow of AOT compilation\n";
-    outs() << "factor_function=" << factor_pname << "\n";
-    outs() << R"(
-if command -v nvim &> /dev/null
-then
-  EDITOR=nvim
-else
-  EDITOR=less
-fi
-
-show_usage() {
-    echo "    Usage: $0 | --execute           -> compile and execute choreo in factor
-                    | --statistics        -> show Line Of Code (LOC) statistic compare between kernel code boosted w./w.o. Choreo
-                    | --show-kernel       -> show the generated inner kernel code
-                    | --show-tileflow     -> show the generated tileflow code scheduled by choreo
-                    | --show-host         -> show the generated host side boilerplates
-                    | --show-choreo       -> show the choreo source code"
-    exit 1
-}
-)";
-    outs() << R"(
-if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then
-)";
-    outs() << "  export FACTOR_INSTALL="
-           << STRINGIZE(__CHOREO_FACTOR_DIR__)
-                        << "\n# JIT compile and execute\n";
-    if (compile_with_dynshape) outs() << "VIEW_CONFIG=1 ENABLE_DYNSHAPE=1 ";
-    outs() << build_path
-           << "/factor_script.sh ${factor_src} ${factor_bin} ${host_src} "
-              "${factor_function} "
-              "${gcu_arch} ${gcu_resource}";
-    outs() << R"script(
-elif [ "$1" == "--statistics" ]; then
-  echo ">>>> Line of Code without Choreo"
-  wc -l ${factor_src} ${host_src} ${kernel_src}
-  echo ">>>> Line of Code with Choreo"
-  wc -l ~/choreo/demo/elementwise_add.co
-  # grep -v '^ *//' ~/choreo/demo/elementwise_add.co | wc -l
-elif [ "$1" == "--show-kernel" ]; then
-  ${EDITOR} ${kernel_src}
-elif [ "$1" == "--show-host" ]; then
-  ${EDITOR} ${host_src}
-elif [ "$1" == "--show-tileflow" ]; then
-  ${EDITOR} ${factor_src}
-elif [ "$1" == "--show-choreo" ]; then
-  ${EDITOR} ~/choreo/demo/elementwise_add.co
-else
-  show_usage
-fi
-)script";
-
+    for (auto& name : factor_fnames) {
+      // register factor functions
+      std::ostringstream oss;
+      oss << "MODULE_REGISTER(\"lib" << factor_pname << "\", " << name
+          << ");\n";
+      factor_code += oss.str();
+    }
+    host_code += ds.str() + cs.str() + hs.str();
+    EmitScript();
   } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
     auto fty = cast<FunctionType>(f->GetType());
-    fs << "}\n\n";
 
-    fs << "MODULE_REGISTER(\"lib" << factor_pname << "\", " << factor_fname
-       << ");"; // end the factor function definition
+    // choreo-host function:
+    // The user code may require the choreo function be fwd-decalared for its
+    // call
+    EmitHostFuncDecl(ds, *fty, fname);
+    ds << "; // foward-declaration of choreo-host\n";
 
-    OutputScript(fty);
+    EmitHostFunction(hs, *fty);
+
+    if (factor_host_unbraced) {
+      this->DecrementIndent();
+      fs << this->indent
+         << "}, true); // end of choreo-factor host program\n\n";
+    }
+
+    // choreo-factor function handling
+    fs << "} // end of " << factor_fname << "\n\n";
+
+    // some backpatching of factor alloc statement
+    std::string factor_function_code = fs.str();
+    if (!alloc_in_fs.str().empty())
+      factor_function_code.insert(alloc_pos, alloc_in_fs.str());
+
+    // append the function code to factor source code
+    factor_code += factor_function_code;
   } else if (isa<AST::ParallelBy>(&n)) {
     parallel_level--;
     if (parallel_level == 0) {
       this->DecrementIndent();
-      fs << this->indent << "}); // end of choreo-factor kernel function\n";
+      fs << this->indent << "}); // end of choreo-factor device function\n";
     }
   } else if (auto f = dyn_cast<AST::ForeachBlock>(&n)) {
     // erase the loop variables
@@ -193,14 +164,6 @@ fi
   return 0;
 }
 
-bool FactorCodeGen::Visit(AST::MultiNodes&) { return true; }
-bool FactorCodeGen::Visit(AST::MultiValues&) { return true; }
-bool FactorCodeGen::Visit(AST::IntLiteral&) { return true; }
-bool FactorCodeGen::Visit(AST::Boolean&) { return true; }
-bool FactorCodeGen::Visit(AST::Expr&) { return true; }
-bool FactorCodeGen::Visit(AST::MultiDimSpans&) { return true; }
-bool FactorCodeGen::Visit(AST::NamedTypeDecl&) { return true; }
-
 // handle stmts like:
 //   f32 [a.span] g_buffer;
 //   local f32[f1.span] l_buffer;
@@ -220,15 +183,7 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl& node) {
     assert(val_count >= 2);
     fs << this->indent << "auto " << sym << " = ";
     for (size_t i = 0; i < val_count - 1; i++) {
-      std::string select_factor_str;
-      auto factor = cast<IntegerType>(s->select_factor->GetType());
-      if (auto expr = factor->GetValidExpression())
-        select_factor_str = STR(
-            expr.value()); // use the expression simplified by value numbering
-      else
-        select_factor_str = ExprSTR(s->select_factor);
-
-      fs << "select_(" << select_factor_str << "== " << i << ", "
+      fs << "select_(" << ExprSTR(s->select_factor) << "== Value(" << i << "), "
          << ExprSTR(s->expr_list->ValueAt(i))
          << (i < val_count - 1 ? ", " : "");
     }
@@ -329,8 +284,6 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl& node) {
   return true;
 }
 
-bool FactorCodeGen::Visit(AST::IntTuple&) { return true; }
-
 bool FactorCodeGen::Visit(AST::Assignment& node) {
   if (auto sa = dyn_cast<AST::SpanAs>(node.value)) {
     int arg_idx = factor_symbols.GetSymbolIndex(sa->id->name);
@@ -372,25 +325,6 @@ bool FactorCodeGen::Visit(AST::Assignment& node) {
        << ";\n";
   }
 
-  return true;
-}
-bool FactorCodeGen::Visit(AST::IntIndex&) { return true; }
-bool FactorCodeGen::Visit(AST::DataType&) { return true; }
-
-bool FactorCodeGen::Visit(AST::Identifier& n) {
-  TraceEachVisit(n);
-  (void)n;
-  return true;
-}
-
-bool FactorCodeGen::Visit(AST::Parameter& p) {
-  TraceEachVisit(p);
-  (void)p;
-  return true;
-}
-
-bool FactorCodeGen::Visit(AST::ParamList& pl) {
-  TraceEachVisit(pl);
   return true;
 }
 
@@ -440,8 +374,8 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
   }
 
   this->DecrementIndent();
-  fs << this->indent
-     << "}, true); // end of choreo-factor dataflow program\n\n";
+  fs << this->indent << "}, true); // end of choreo-factor host program\n\n";
+  factor_host_unbraced = false;
 
   // [Factor Device] Function declaration
   {
@@ -564,16 +498,6 @@ bool FactorCodeGen::Visit(AST::WithIn& n) {
 
   return true;
 };
-
-bool FactorCodeGen::Visit(AST::WithBlock&) { return true; }
-
-bool FactorCodeGen::Visit(AST::Memory& n) {
-  TraceEachVisit(n);
-  (void)n;
-  return true;
-}
-
-bool FactorCodeGen::Visit(AST::SpanAs&) { return true; }
 
 bool FactorCodeGen::Visit(AST::DMA& d) {
   TraceEachVisit(d);
@@ -743,8 +667,6 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
   return true;
 }
 
-bool FactorCodeGen::Visit(AST::ChunkAt&) { return true; }
-
 bool FactorCodeGen::Visit(AST::Wait& w) {
   TraceEachVisit(w);
   auto dmas = w.targets;
@@ -793,10 +715,11 @@ bool FactorCodeGen::Visit(AST::Call& c) {
     if (c.template_params != nullptr) {
       ks << "<";
       bool need_delimiter = false;
-      for (int i = 0; i < c.template_params->Count(); ++i) {
+      for (size_t i = 0; i < c.template_params->Count(); ++i) {
         if (need_delimiter) ks << ", ";
         need_delimiter = true;
-        ks << STR(cast<AST::Expr>(c.template_params->ValueAt(i))->compile_time_signature);
+        ks << STR(cast<AST::Expr>(c.template_params->ValueAt(i))
+                      ->compile_time_signature);
       }
       ks << ">";
     }
@@ -814,29 +737,12 @@ bool FactorCodeGen::Visit(AST::Call& c) {
   return true;
 }
 
-bool FactorCodeGen::Visit(AST::Rotate& n) {
-  TraceEachVisit(n);
-
-  return true;
-}
-
 bool FactorCodeGen::Visit(AST::Select& c) {
   TraceEachVisit(c);
   assert(!c.inDMA);
   return true;
 }
 
-bool FactorCodeGen::Visit(AST::Return& returnNode) {
-  TraceEachVisit(returnNode);
-  return true;
-}
-
-bool FactorCodeGen::Visit(AST::LoopRange& n) {
-  TraceEachVisit(n);
-  return true;
-}
-
-// CLEAN
 bool FactorCodeGen::Visit(AST::ForeachBlock& forNode) {
   TraceEachVisit(forNode);
   // auto ty = this->GetSymbolType("l2_tile");
@@ -922,7 +828,6 @@ bool FactorCodeGen::Visit(AST::ForeachBlock& forNode) {
   return true;
 }
 
-// CLEAN
 bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
   TraceEachVisit(d);
 
@@ -1107,23 +1012,31 @@ bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
   return true;
 }
 
-bool FactorCodeGen::Visit(AST::ChoreoFunction&) { return true; }
-
 bool FactorCodeGen::Visit(AST::CppSourceCode& n) {
   TraceEachVisit(n);
 
   if (n.host)
-    hs << n.GetCode();
+    cs << n.GetCode();
   else
     ks << n.GetCode();
 
   return true;
 }
 
-bool FactorCodeGen::Visit(AST::Program&) { return true; }
+void FactorCodeGen::EmitFixedFactorHead() {
+  std::ostringstream oss;
+  oss << R"(#include <vector>
 
-void FactorCodeGen::EmitHostHead(std::ostream& os) {
-  os <<
+#include "gcu/factor/factor.h"
+
+using namespace factor;
+)";
+  factor_code = oss.str(); // reset factor code
+}
+
+void FactorCodeGen::EmitFixedHostHead() {
+  std::ostringstream oss;
+  oss <<
       R"(
 #include <fstream>
 #include <iostream>
@@ -1135,8 +1048,10 @@ void FactorCodeGen::EmitHostHead(std::ostream& os) {
 #include "tops/tops_ext.h"
 #include "tops/tops_runtime.h"
 
-// choreo header
-#include "choreo.h"
+// include the choreo header\n";
+)";
+  if (native_f16) oss << "#define NATIVE_F16_SUPPORT\n";
+  oss << R"(#include "choreo.h"
 
 using namespace choreo;
 
@@ -1188,23 +1103,30 @@ ToSpanned(const std::vector<U> &v, std::initializer_list<int> && shape) {
 
 } // end anonymous namespace
 )";
+  host_code = oss.str(); // reset the host code
 }
 
-void FactorCodeGen::EmitHostFuncBody(std::ostream& os, const FunctionType& fty,
-                                     const std::string& bin_filename) {
+void FactorCodeGen::EmitHostFunction(std::ostream& os,
+                                     const FunctionType& fty) {
   auto rty = fty.out_ty;
   auto out_size_expr = SizeExprOf(*rty);
-  // phase 1: create tops executable from a file
+
+  // host phase 0: Function declaration
+  std::ostringstream fns;
+  EmitHostFuncDecl(fns, fty, fname);
+  os << fns.str();
+
+  // host phase 1: create tops executable from a file
   os << " {\n";
 
-  EmitRuntimeCheck(os);
-  EmitRuntimeMemUsageCheck(os);
+  EmitHostRuntimeCheck(os);
+  EmitHostRuntimeMemUsageCheck(os);
 
   os << R"(
   std::vector<char> binary;
   // Read bin file and store to a vector
 )";
-  os << "  std::ifstream ifs(\"" << bin_filename << "\", std::ios::binary);";
+  os << "  std::ifstream ifs(\"" << factor_bin_name << "\", std::ios::binary);";
   os << R"(
   std::copy(std::istreambuf_iterator<char>(ifs),
             std::istreambuf_iterator<char>(), std::back_inserter(binary));
@@ -1216,7 +1138,7 @@ void FactorCodeGen::EmitHostFuncBody(std::ostream& os, const FunctionType& fty,
 
 )";
 
-  // phase 2: allocate device memory and copy
+  // host phase 2: allocate device memory and copy
   std::vector<std::string> device_mems;
   for (auto& item : GetFactorHostInParams()) {
     auto buffer_name = "in_mem" + std::to_string(device_mems.size());
@@ -1286,7 +1208,7 @@ void FactorCodeGen::EmitHostFuncBody(std::ostream& os, const FunctionType& fty,
        << ".get(), out_shape);\n";
   }
 
-  // phase 3: Execute the executable and fetch the output
+  // host phase 3: Execute the executable and fetch the output
   os << "\n  " << factor_fname << "(";
   for (auto& in : inputs) os << "&" << in << ", ";
   os << "stream" << ((void_return) ? "" : ", &output") << ");\n";
@@ -1319,9 +1241,9 @@ void FactorCodeGen::EmitHostFuncBody(std::ostream& os, const FunctionType& fty,
   os << "}\n";
 }
 
-std::string FactorCodeGen::ReplaceRuntimeNames(const std::string& e,
-                                               const std::string& prefix,
-                                               bool host_code) {
+const std::string FactorCodeGen::ReplaceRuntimeNames(const std::string& e,
+                                                     const std::string& prefix,
+                                                     bool host_code) const {
   std::string expr = e;
   for (auto& s : dims_info) {
     size_t pos = 0;
@@ -1360,7 +1282,7 @@ FactorCodeGen::ReplaceDynDimRef(const std::string& e) {
   return std::nullopt;
 }
 
-void FactorCodeGen::EmitRuntimeCheck(std::ostream& os) {
+void FactorCodeGen::EmitHostRuntimeCheck(std::ostream& os) {
   // check if the input shape is as declared in choreo
   if (cgi->ParameterCount(fname) == 0) return;
 
@@ -1410,7 +1332,7 @@ void FactorCodeGen::EmitRuntimeCheck(std::ostream& os) {
   }
 }
 
-void FactorCodeGen::EmitRuntimeMemUsageCheck(std::ostream& os) {
+void FactorCodeGen::EmitHostRuntimeMemUsageCheck(std::ostream& os) {
   // check if the input shape is as declared in choreo
   if (cgi->ParameterCount(fname) == 0) return;
 
@@ -1464,110 +1386,11 @@ void FactorCodeGen::EmitHostFuncDecl(std::ostringstream& oss,
     VST_DEBUG(dbgs() << "Host function prototype:\n" << oss.str());
 }
 
-void FactorCodeGen::OutputScript(const ptr<FunctionType>& fty) {
-
-  // a temporal path for the compilation process
-  build_path = create_unique_path();
-  std::string build_prefix = build_path + "/__choreo_" + factor_pname;
-
-  std::string kernel_fn = build_prefix + "_micro_kernel.cpp";
-  std::string factor_fn = build_prefix + "_factor.cpp";
-  std::string factor_bfn =
-      build_path + "/${gcu_target_string}_lib" + factor_pname + ".o";
-  host_filename = build_prefix + "_host.cpp";
-
-  // Generate the host code
-  std::string user_code = hs.str();
-
-  // if user defines macro such as `#define NATIVE_F16_SUPPORT 1`
-  // the macro must come before `#include "choreo.h"`
-  // to enable comditional compilation.
-  // so append the host head to user_code.
-
-  // emit the fixed header
-  EmitHostHead(hs);
-
-  if (!user_code.empty()) {
-    // The user code requires the choreo function be fwd-decalared for its call
-    EmitHostFuncDecl(hs, *fty, fname);
-    hs << ";\n";
-  }
-
-  EmitHostFuncDecl(hs, *fty, fname);
-  EmitHostFuncBody(hs, *fty, factor_bfn);
-
-  // backpatch the factor bin filename
-  std::string factor_src = fs.str();
-  if (!alloc_in_fs.str().empty())
-    factor_src.insert(alloc_pos, alloc_in_fs.str());
-  ReplaceInString(&factor_src, std::string(backpatch_filename), kernel_fn);
-
-  // Now generate the script
-  outs() << "#!/usr/bin/env bash\n\n";
-  outs()
-      << "# This is the choreo generated bash script to compile factor code\n";
-  // check for gcu_target_string first
-  //
-  outs() << R"script(
-  gcu_arch=gcu210
-  gcu_resource=2c24s
-  gcu_target_string="dorado_2c"
-)script";
-  if (!cross_compile)
-    outs() << R"script(
-  # check the device
-  # TODO: improve the target check with more solid code
-  GCU_DEVICE_STR="$(lspci | grep Enflame | head -1)"
-  GCU_DEVICE_STR_BACKUP="$(lspci | grep Tencent)"
-  echo $GCU_DEVICE_STR
-  if [[ "${GCU_DEVICE_STR}" == *"S60G"* ]]; then
-    gcu_arch=gcu300
-    gcu_resource=2c24s
-    gcu_target_string="scorpio_${gcu_resource}"
-  elif [[ "${GCU_DEVICE_STR}" == *"c035"* ]]; then
-    gcu_arch=gcu300
-    gcu_resource=1c12s
-    gcu_target_string="scorpio_${gcu_resource}"
-    export TOPS_VISIBLE_DEVICES=1
-  elif [[ "${GCU_DEVICE_STR}" == *"S60"* ]]; then
-    gcu_arch=gcu300
-    gcu_resource=2c24s
-    gcu_target_string="scorpio_${gcu_resource}"
-  elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then
-    gcu_arch=gcu210
-    gcu_resource=2c24s
-    gcu_target_string="dorado_2c"
-  elif [[ "${GCU_DEVICE_STR_BACKUP}" != "" ]]; then
-    gcu_arch=gcu210
-    gcu_resource=2c24s
-    gcu_target_string="dorado_2c"
+const std::string FactorCodeGen::ValueSTR(const ValueItem& vi) const {
+  if (auto i = dyn_cast<int>(&vi))
+    return "Value(" + std::to_string(*i) + ")";
   else
-    echo "can not determine the GCU device type."
-    exit 1
-  fi
-)script";
-
-  outs() << "\n# step 0: set up the environment\n";
-  outs() << "rm -fr " << build_path << "\n";
-  outs() << "mkdir -p " << build_path << "\n";
-  outs() << "cat <<'EOF' > " << build_path << "/factor_script.sh\n";
-  outs() << __factor_script_as_string << "\nEOF\n";
-  outs() << "chmod +x " << build_path << "/factor_script.sh\n";
-  outs() << "cat <<'EOF' > " << build_path << "/choreo.h\n";
-  outs() << __choreo_header_as_string << "\nEOF\n\n";
-
-  outs() << "\n# step 1: write the kernel source code into a temp file\n";
-  outs() << "kernel_src=" << kernel_fn << "\n";
-  outs() << "cat <<'EOF' > ${kernel_src}\n";
-  outs() << ks.str() << "\nEOF\n";
-
-  outs() << "\n# step 2: write the factor source code into a temp file\n";
-  outs() << "factor_src=" << factor_fn << "\n";
-  outs() << "cat <<'EOF' > ${factor_src}\n";
-  outs() << factor_src << "\nEOF\n\n";
-
-  outs() << "\n# step 3: set the factor binary file name\n";
-  outs() << "factor_bin=" << factor_bfn << "\n";
+    return ReplaceRuntimeNames(STR(vi), "", false);
 }
 
 const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
@@ -1595,7 +1418,8 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
   } else if (auto ii = dyn_cast<AST::IntIndex>(e)) {
     return ExprSTR(ii->value);
   } else if (auto expr = dyn_cast<AST::Expr>(e)) {
-    if (isa<IntegerType>(NodeType(*e)) && (expr->s.IsValid())) {
+    if (isa<IntegerType>(NodeType(*e)) && (expr->s.IsValid()) &&
+        (!expr->s.IsDynamic())) {
       // prefer to use the deduced value when possible
       assert(expr->s.DimCount() == 1 && "A 1-dimensional value is expected.");
       return "Value(" + STR(expr->s.ValueAt(0)) + ")";
@@ -1614,7 +1438,7 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
         oss << "!(" << ExprSTR(expr->GetR()) << ")";
       } else if (expr->op == "ubound") {
         auto rty = cast<BoundedType>(NodeType(*expr->GetR()));
-        if (rty->Dims() == 1) oss << ValueSTR(rty->GetUpperBound());
+        if (rty->Dims() == 1) { oss << ValueSTR(rty->GetUpperBound()); }
       } else if (expr->op == "dataof") {
         assert(isa<FutureType>(expr->GetR()->GetType()) &&
                "expect a future operand.");
@@ -1671,15 +1495,9 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
     // (TODO: maybe assert when earlysema)
     assert(val_count >= 2);
     for (size_t i = 0; i < val_count - 1; i++) {
-      std::string select_factor_str;
-      auto factor = cast<IntegerType>(sl->select_factor->GetType());
-      if (auto expr = factor->GetValidExpression())
-        select_factor_str =
-            STR(*expr); // use the expression simplified by value numbering
-      else
-        select_factor_str = ExprSTR(sl->select_factor);
-      oss << "select_(" << select_factor_str << " == " << i << ", "
-          << PSTR(sl->expr_list->ValueAt(i)) << (i < val_count - 1 ? ", " : "");
+      oss << "select_(" << ExprSTR(sl->select_factor) << " == Value(" << i
+          << "), " << PSTR(sl->expr_list->ValueAt(i))
+          << (i < val_count - 1 ? ", " : "");
     }
     oss << PSTR(sl->expr_list->AllValues().back())
         << std::string(val_count - 1, ')');
@@ -1687,4 +1505,130 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
     choreo_unreachable("unsupported expression '" + expr->op + "'.");
 
   return oss.str();
+}
+
+void FactorCodeGen::EmitScript() {
+  // Now generate the script
+  outs() << "#!/usr/bin/env bash\n\n";
+  outs()
+      << "# This is the choreo generated bash script to compile factor code\n";
+
+  // check for gcu_target_string first
+  outs() << R"script(
+  gcu_arch=gcu210
+  gcu_resource=2c24s
+  gcu_target_string="dorado_2c"
+)script";
+  if (!cross_compile)
+    outs() << R"script(
+  # check the device
+  # TODO: improve the target check with more solid code
+  GCU_DEVICE_STR="$(lspci | grep Enflame | head -1)"
+  GCU_DEVICE_STR_BACKUP="$(lspci | grep Tencent)"
+  echo $GCU_DEVICE_STR
+  if [[ "${GCU_DEVICE_STR}" == *"S60G"* ]]; then
+    gcu_arch=gcu300
+    gcu_resource=2c24s
+    gcu_target_string="scorpio_${gcu_resource}"
+  elif [[ "${GCU_DEVICE_STR}" == *"c035"* ]]; then
+    gcu_arch=gcu300
+    gcu_resource=1c12s
+    gcu_target_string="scorpio_${gcu_resource}"
+    export TOPS_VISIBLE_DEVICES=1
+  elif [[ "${GCU_DEVICE_STR}" == *"S60"* ]]; then
+    gcu_arch=gcu300
+    gcu_resource=2c24s
+    gcu_target_string="scorpio_${gcu_resource}"
+  elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then
+    gcu_arch=gcu210
+    gcu_resource=2c24s
+    gcu_target_string="dorado_2c"
+  elif [[ "${GCU_DEVICE_STR_BACKUP}" != "" ]]; then
+    gcu_arch=gcu210
+    gcu_resource=2c24s
+    gcu_target_string="dorado_2c"
+  else
+    echo "can not determine the GCU device type."
+    exit 1
+  fi
+)script";
+
+  outs() << "\n# step 0: set up the environment\n";
+  outs() << "rm -fr " << build_path << "\n";
+  outs() << "mkdir -p " << build_path << "\n";
+  outs() << "cat <<'EOF' > " << build_path << "/factor_script.sh\n";
+  outs() << __factor_script_as_string << "\nEOF\n";
+  outs() << "chmod +x " << build_path << "/factor_script.sh\n";
+  outs() << "cat <<'EOF' > " << build_path << "/choreo.h\n";
+  outs() << __choreo_header_as_string << "\nEOF\n\n";
+
+  outs() << "\n# step 1: write the kernel source code into a temp file\n";
+  outs() << "kernel_src=" << kernel_cpp_name << "\n";
+  outs() << "cat <<'EOF' > ${kernel_src}\n";
+  outs() << ks.str() << "\nEOF\n";
+
+  outs() << "\n# step 2: write the factor source code into a temp file\n";
+  outs() << "factor_src=" << factor_cpp_name << "\n";
+  outs() << "cat <<'EOF' > ${factor_src}\n";
+  outs() << factor_code << "\nEOF\n\n";
+
+  outs() << "\n# step 3: set the factor binary file name\n";
+  outs() << "factor_bin=" << factor_bin_name << "\n";
+
+  outs() << "\n# step 4: generate the host source\n";
+  outs() << "host_src=" << host_cpp_name << "\n";
+  outs() << "echo \"#include \\\"\"${gcu_target_string}\"_lib" << factor_pname
+         << ".h\\\"\" > ${host_src}\n";
+  outs() << "cat <<'EOF' >> ${host_src}\n";
+  outs() << host_code << "\nEOF\n\n";
+
+  outs() << "\n# step 5: JIT compile and execute\n";
+  outs() << "# TODO: enable workflow of AOT compilation\n";
+  outs() << "factor_function=" << factor_pname << "\n";
+  outs() << R"(
+if command -v nvim &> /dev/null
+then
+  EDITOR=nvim
+else
+  EDITOR=less
+fi
+
+show_usage() {
+    echo "    Usage: $0 | --execute           -> compile and execute choreo in factor
+                    | --statistics        -> show Line Of Code (LOC) statistic compare between kernel code boosted w./w.o. Choreo
+                    | --show-kernel       -> show the generated inner kernel code
+                    | --show-tileflow     -> show the generated tileflow code scheduled by choreo
+                    | --show-host         -> show the generated host side boilerplates
+                    | --show-choreo       -> show the choreo source code"
+    exit 1
+}
+)";
+  outs() << R"(
+if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then
+)";
+  outs() << "  export FACTOR_INSTALL="
+         << STRINGIZE(__CHOREO_FACTOR_DIR__) << "\n";
+  outs() << "# JIT compile and execute\n";
+  if (compile_with_dynshape) outs() << "VIEW_CONFIG=1 ENABLE_DYNSHAPE=1 ";
+  outs() << build_path << "/factor_script.sh ${factor_src} ${factor_bin} ";
+  outs() << "${host_src} ${factor_function} ${gcu_arch} ${gcu_resource}";
+  outs() << R"script(
+elif [ "$1" == "--statistics" ]; then
+  echo ">>>> Line of Code without Choreo"
+  wc -l ${factor_src} ${host_src} ${kernel_src}
+  echo ">>>> Line of Code with Choreo"
+  wc -l ~/choreo/demo/elementwise_add.co
+  # grep -v '^ *//' ~/choreo/demo/elementwise_add.co | wc -l
+elif [ "$1" == "--show-kernel" ]; then
+  ${EDITOR} ${kernel_src}
+elif [ "$1" == "--show-host" ]; then
+  ${EDITOR} ${host_src}
+elif [ "$1" == "--show-tileflow" ]; then
+  ${EDITOR} ${factor_src}
+elif [ "$1" == "--show-choreo" ]; then
+  ${EDITOR} ~/choreo/demo/elementwise_add.co
+else
+  show_usage
+fi
+)script";
 }

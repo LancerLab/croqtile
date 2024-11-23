@@ -259,9 +259,8 @@ public:
     auto buf_assign = AST::Make<AST::Assignment>(n.LOC(), buf_name, buf_select);
     buf_assign->SetType(bty);
 
-    // we do not know which scope the new buffer symbol laid. modify the map
-    // latter
-
+    // The scope of the newly created buffer symbol is unknown. The map will be
+    // modified later to reflect this.
     assert(cur_node_index != -1);
     int index = cur_node_index + mnodes_insertions[multi_nodes.top()].size();
     mnodes_insertions[multi_nodes.top()].push_back(

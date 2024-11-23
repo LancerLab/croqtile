@@ -124,6 +124,12 @@ inline static std::string Ordinal(int n) {
   return std::to_string(n) + suffixes[index];
 }
 
+inline static bool ContainsExact(const std::string& str,
+                                 const std::string& pattern) {
+  std::regex wordBoundaryPattern("\\b" + pattern + "\\b");
+  return std::regex_search(str, wordBoundaryPattern);
+}
+
 inline static std::string RegexReplaceAll(const std::string& input,
                                           const std::string& pattern,
                                           const std::string& replacement) {

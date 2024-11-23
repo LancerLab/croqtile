@@ -854,10 +854,11 @@ bool CUDACodeGen::Visit(AST::Call& c) {
   if (c.template_params != nullptr) {
     fs << "<";
     bool need_delimiter = false;
-    for (int i = 0; i < c.template_params->Count(); ++i) {
+    for (size_t i = 0; i < c.template_params->Count(); ++i) {
       if (need_delimiter) fs << ", ";
       need_delimiter = true;
-      fs << STR(cast<AST::Expr>(c.template_params->ValueAt(i))->compile_time_signature);
+      fs << STR(cast<AST::Expr>(c.template_params->ValueAt(i))
+                    ->compile_time_signature);
     }
     fs << ">";
   }

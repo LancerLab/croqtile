@@ -116,7 +116,7 @@ public:
   }
 
   void SetOutputStream(const std::string& filename) {
-    if (!filename.empty()) {
+    if (!filename.empty() && filename != "-") {
       output_file_stream.open(filename);
       output_stream = &output_file_stream;
     }

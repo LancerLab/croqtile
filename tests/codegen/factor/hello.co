@@ -1,4 +1,4 @@
-// RUN: choreo %s | FileCheck --match-full-lines %s
+// RUN: choreo %s -o - |grep -v "\<CHECK\>:" | FileCheck --match-full-lines %s
 
 __cok__ { // kernel program
 void hello() { printf("hello choreo\n"); }
@@ -18,9 +18,7 @@ int main() {
 // CHECK:  void __choreo_co_hello() {
 // CHECK: #include "choreo.h"
 // CHECK: void co_hello() {
-// CHECK:    {{.*}}topsCreateExecutable{{.*}}
 // CHECK:    {{.*}}topsStreamCreate{{.*}}
-// CHECK:    {{.*}}topsLaunchExecutableV2{{.*}}
+// CHECK:     __choreo_co_hello(stream);
 // CHECK:    {{.*}}topsStreamSynchronize{{.*}}
 // CHECK:    {{.*}}topsStreamDestroy{{.*}}
-// CHECK:    {{.*}}topsDestroyExecutable{{.*}}
