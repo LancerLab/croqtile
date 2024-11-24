@@ -1493,7 +1493,7 @@ void CUDACodeGen::OutputScript(const ptr<FunctionType>& fty,
                                const std::string& out_size_expr,
                                const Shape& out_shape) {
   // a temporal path for the compilation process
-  build_path = create_unique_path();
+  build_path = CreateUniquePath();
   std::string build_prefix = build_path + "/__choreo_" + n;
   std::string build_prefix_anonymous = build_path + "/__choreo";
 

@@ -54,7 +54,7 @@ bool FactorCodeGen::BeforeVisitImpl(AST::Node& n) {
 
   if (isa<AST::Program>(&n)) {
     // decide the factor build environment
-    build_path = create_unique_path();
+    build_path = CreateUniquePath();
     std::string build_prefix = build_path + "/__choreo_" + factor_pname;
 
     kernel_cpp_name = build_prefix + "_micro_kernel.cpp";
@@ -67,7 +67,7 @@ bool FactorCodeGen::BeforeVisitImpl(AST::Node& n) {
     EmitFixedHostHead();
     EmitFixedFactorHead();
   } else if (isa<AST::ChoreoFunction>(&n)) {
-    ClearChoreoFunctionStates();
+    ResetChoreoFunctionStates();
     factor_fname = "__choreo_" + fname;
     factor_fnames.push_back(factor_fname);
 
@@ -109,13 +109,16 @@ bool FactorCodeGen::AfterVisitImpl(AST::Node& n) {
 
     EmitHostFunction(hs, *fty);
 
+    // choreo-factor function handling
     if (factor_host_unbraced) {
       this->DecrementIndent();
+      // factor requires a fake return
+      if (void_return) fs << this->indent << "  return std::vector<Value>{};\n";
+
       fs << this->indent
          << "}, true); // end of choreo-factor host program\n\n";
     }
 
-    // choreo-factor function handling
     fs << "} // end of " << factor_fname << "\n\n";
 
     // some backpatching of factor alloc statement
@@ -365,8 +368,9 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
   // [Factor-host] Return statement
   {
     std::ostringstream ret;
+    // note: factor code always requires a return statement
     ret << this->indent << "return std::vector<Value>{"
-        << ((void_return) ? "" : UnScopedName(cgi->GetReturnSymbol(fname)))
+        << ((!void_return) ? UnScopedName(cgi->GetReturnSymbol(fname)) : "")
         << "};\n";
     if (debug_visit)
       VST_DEBUG(dbgs() << "[Factor Host] Return:\n" << ret.str());
@@ -1012,6 +1016,16 @@ bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
   return true;
 }
 
+bool FactorCodeGen::Visit(AST::Return& n) {
+  TraceEachVisit(n);
+
+  if (factor_host_unbraced)
+    fs << this->indent << "return std::vector<Value>{" << ExprSTR(n.value)
+       << "};\n";
+
+  return true;
+}
+
 bool FactorCodeGen::Visit(AST::CppSourceCode& n) {
   TraceEachVisit(n);
 
@@ -1161,7 +1175,7 @@ void FactorCodeGen::EmitHostFunction(std::ostream& os,
 
   std::string size_string = ReplaceRuntimeNames(out_size_expr);
 
-  if (!out_size_expr.empty()) {
+  if (!void_return) {
     os << "  void * out_mem = nullptr;\n";
     os << "  CHECK(topsMalloc(&out_mem, " << size_string << "));\n";
     os << "  void *device_outputs[] = {out_mem};\n";
@@ -1233,11 +1247,11 @@ void FactorCodeGen::EmitHostFunction(std::ostream& os,
   // phase 4: Free up the resources
   os << "  // Free up the resources\n";
   for (auto& p : device_mems) os << "  topsFree(" << p << ");\n";
-  os << "  topsFree(out_mem);\n\n";
+  if (!void_return) os << "  topsFree(out_mem);\n\n";
   os << "  // TODO: figure out why stream destroying crash some "
         "applications.\n";
   os << "  // topsStreamDestroy(stream);\n";
-  os << "  return res;\n";
+  if (!void_return) os << "  return res;\n";
   os << "}\n";
 }
 

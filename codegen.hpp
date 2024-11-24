@@ -251,11 +251,7 @@ struct CodeGenerator : public VisitorWithSymTab {
 ///  Util functions shared between targets
 /////////////////////////////////////////////////////////////
 
-inline constexpr const char* backpatch_filename =
-    "__choreo_kernel_file_name_that_will_be_back_patched_soon_ok_enough_i_am_"
-    "bored__";
-
-inline static std::string create_unique_path() {
+inline static std::string CreateUniquePath() {
   // Get a high-resolution timestamp
   auto now = std::chrono::high_resolution_clock::now();
   auto duration = now.time_since_epoch();

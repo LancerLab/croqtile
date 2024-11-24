@@ -11,12 +11,9 @@
 #include "types.hpp"
 #include "visitor.hpp"
 
-#define __TRACE_NORM_VISIT__(n)                                                \
-  if (trace_visit) { dbgs() << n.TypeNameString() << ": " << STR(n) << "\n"; }
-
 namespace Choreo {
 
-struct Normalizer : public Visitor {
+struct Normalizer : public VisitorWithScope {
 private:
   bool changed = false;
 
@@ -34,16 +31,20 @@ private:
   using NodeInsertInfo =
       std::vector<std::tuple<int, ptr<AST::Node>, std::string>>;
   std::stack<AST::MultiNodes*> multi_nodes;
-  int cur_dma_index = -1;
+  int cur_node_index = -1;
   std::map<AST::MultiNodes*, NodeInsertInfo> mnodes_insertions;
 
   std::string GetInternalValueString() { return "$" + std::to_string(count++); }
 
+  void TraceEachVisit(const AST::Node& n) {
+    if (trace_visit) { dbgs() << n.TypeNameString() << ": " << STR(n) << "\n"; }
+  }
+
 public:
   // it does not require a symbol table
-  Normalizer() : Visitor("norm") {}
+  Normalizer() : VisitorWithScope("norm") {}
 
-  bool BeforeVisit(AST::Node& n) override {
+  bool BeforeVisitImpl(AST::Node& n) override {
     if (trace_visit) dbgs() << "before visiting " << n.TypeNameString() << "\n";
 
     if (auto* b = dyn_cast<AST::MultiDimSpans>(&n)) {
@@ -72,13 +73,16 @@ public:
     } else if (auto m = dyn_cast<AST::MultiNodes>(&n)) {
       multi_nodes.push(m);
     } else if (auto d = dyn_cast<AST::DMA>(&n)) {
-      cur_dma_index = multi_nodes.top()->GetIndex(d);
-      assert(cur_dma_index != -1 && "unexpected node index.");
+      cur_node_index = multi_nodes.top()->GetIndex(d);
+      assert(cur_node_index != -1 && "unexpected node index.");
+    } else if (auto d = dyn_cast<AST::Return>(&n)) {
+      cur_node_index = multi_nodes.top()->GetIndex(d);
+      assert(cur_node_index != -1 && "unexpected node index.");
     }
     return true;
   }
 
-  bool AfterVisit(AST::Node& n) override {
+  bool AfterVisitImpl(AST::Node& n) override {
     if (trace_visit) dbgs() << "after visiting " << n.TypeNameString() << "\n";
 
     if (auto* b = dyn_cast<AST::MultiDimSpans>(&n)) {
@@ -95,11 +99,14 @@ public:
       changed = false;
     } else if (isa<AST::ChoreoFunction>(&n)) {
       count = 0;
+    } else if (auto d = dyn_cast<AST::Return>(&n)) {
+      cur_node_index = -1;
     }
     return true;
   }
+
   bool Visit(AST::MultiNodes& n) override {
-    __TRACE_NORM_VISIT__(n)
+    TraceEachVisit(n);
 
     // insert the node at the given place
     assert(&n == multi_nodes.top());
@@ -115,13 +122,13 @@ public:
 
     mnodes_insertions.erase(&n);
     multi_nodes.pop();
-    cur_dma_index = -1;
+    cur_node_index = -1;
 
     return true;
   }
 
   bool Visit(AST::MultiValues& n) override {
-    __TRACE_NORM_VISIT__(n)
+    TraceEachVisit(n);
     if (list_ref) { // desugar the list reference
       for (size_t i = 0; i < n.values.size(); ++i) {
         if (auto expr = dyn_cast<AST::Expr>(n.values[i])) {
@@ -158,7 +165,7 @@ public:
   bool Visit(AST::IntLiteral&) override { return true; }
   bool Visit(AST::Boolean&) override { return true; }
   bool Visit(AST::Expr& n) override {
-    __TRACE_NORM_VISIT__(n)
+    TraceEachVisit(n);
     if (list_ref) { // could be with syntax sugar
       auto Apply = [this](const ptr<AST::Expr>& expr) -> ptr<AST::Expr> {
         if (!expr) return nullptr;
@@ -202,7 +209,7 @@ public:
   bool Visit(AST::MultiDimSpans&) override { return true; }
   bool Visit(AST::NamedTypeDecl&) override { return true; }
   bool Visit(AST::NamedVariableDecl& n) override {
-    __TRACE_NORM_VISIT__(n)
+    TraceEachVisit(n);
     if (n.mem && (n.mem->Get() == Storage::DEFAULT)) {
       // Should this be set by target?
       n.mem->Set(Storage::GLOBAL);
@@ -224,7 +231,7 @@ public:
   bool Visit(AST::WhereBind&) override { return true; }
 
   bool Visit(AST::WithIn& n) override {
-    __TRACE_NORM_VISIT__(n)
+    TraceEachVisit(n);
     if (n.with_matchers) return true;
     assert(n.with && "must have with statement.");
 
@@ -264,9 +271,9 @@ public:
     if (!isa<AST::Select>(n.to)) return true;
 
     auto anon_sym = SymbolTable::GetAnonName();
-    assert(cur_dma_index != -1);
+    assert(cur_node_index != -1);
     // hoist the select to multinodes
-    int index = cur_dma_index + mnodes_insertions[multi_nodes.top()].size();
+    int index = cur_node_index + mnodes_insertions[multi_nodes.top()].size();
     cast<AST::Select>(n.to)->inDMA = false;
     mnodes_insertions[multi_nodes.top()].emplace_back(
         std::make_tuple(index, n.to, anon_sym));
@@ -277,11 +284,11 @@ public:
   }
 
   bool Visit(AST::ChunkAt& n) override {
-    __TRACE_NORM_VISIT__(n)
+    TraceEachVisit(n);
     if (n.sa) {
-      assert(cur_dma_index != -1);
+      assert(cur_node_index != -1);
       // hoist the span_as to multinodes
-      int index = cur_dma_index + mnodes_insertions[multi_nodes.top()].size();
+      int index = cur_node_index + mnodes_insertions[multi_nodes.top()].size();
       mnodes_insertions[multi_nodes.top()].emplace_back(
           std::make_tuple(index, n.sa, n.sa->nid->name));
       n.sa.reset();
@@ -304,7 +311,7 @@ public:
             if (!lexpr->GetSymbol()) {
               // hoist the non-getith part
               int index =
-                  cur_dma_index + mnodes_insertions[multi_nodes.top()].size();
+                  cur_node_index + mnodes_insertions[multi_nodes.top()].size();
               auto nname = SymbolTable::GetAnonName();
               mnodes_insertions[multi_nodes.top()].emplace_back(
                   std::make_tuple(index, expr->GetL(), nname));
@@ -317,7 +324,8 @@ public:
         }
 
         // else, hoist the arith out
-        int index = cur_dma_index + mnodes_insertions[multi_nodes.top()].size();
+        int index =
+            cur_node_index + mnodes_insertions[multi_nodes.top()].size();
         auto nname = SymbolTable::GetAnonName();
         mnodes_insertions[multi_nodes.top()].emplace_back(
             std::make_tuple(index, v, nname));
@@ -338,7 +346,28 @@ public:
   bool Visit(AST::Call&) override { return true; }
   bool Visit(AST::Rotate&) override { return true; }
   bool Visit(AST::Select&) override { return true; }
-  bool Visit(AST::Return&) override { return true; }
+  bool Visit(AST::Return& n) override {
+    TraceEachVisit(n);
+
+#if 0
+    if (AST::GetIdentifier(*n.value)) return true;
+
+    // non-identifier are normalized
+    auto anon_sym = SymbolTable::GetAnonName();
+    assert(cur_node_index != -1);
+    int index = cur_node_index + mnodes_insertions[multi_nodes.top()].size();
+    mnodes_insertions[multi_nodes.top()].emplace_back(
+        std::make_tuple(index, n.value, anon_sym));
+
+    auto vty = NodeType(*n.value);
+
+    VST_DEBUG(dbgs() << "[Norm] Replace " << STR(n) << "\n to be:\n");
+    n.value = AST::Make<AST::Identifier>(n.value->LOC(), anon_sym);
+    VST_DEBUG(dbgs() << STR(n) << "\n");
+#endif
+
+    return true;
+  }
   bool Visit(AST::LoopRange&) override { return true; }
   bool Visit(AST::ForeachBlock&) override { return true; }
   bool Visit(AST::FunctionDecl&) override { return true; }
@@ -349,5 +378,4 @@ public:
 
 } // end namespace Choreo
 
-#undef __TRACE_NORM_VISIT__
 #endif // __CHOREO_NORMALIZATION_HPP__

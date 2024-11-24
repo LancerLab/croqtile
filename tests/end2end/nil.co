@@ -1,0 +1,10 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -t factor %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
+__co__ void nil() {}
+
+int main() {
+  nil();
+  std::cout << "Run Complete.\n";
+}
+
+// CHECK: Run Complete.

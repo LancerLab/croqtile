@@ -179,8 +179,10 @@ void Wait::accept(Choreo::Visitor& v) {
 }
 
 void Return::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
   if (value) value->accept(v);
   v.Visit(*this);
+  v.AfterVisit(*this);
 }
 
 void Call::accept(Choreo::Visitor& v) {

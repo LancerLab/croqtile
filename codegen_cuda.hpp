@@ -21,6 +21,10 @@ namespace Choreo {
 
 namespace CUDA {
 
+inline constexpr const char* backpatch_filename =
+    "__choreo_kernel_file_name_that_will_be_back_patched_soon_ok_enough_i_am_"
+    "bored__";
+
 struct CUDACodeGen : public CodeGenerator {
 private:
   std::string current_fn = "";

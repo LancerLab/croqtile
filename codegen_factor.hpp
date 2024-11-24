@@ -91,6 +91,9 @@ private:
     return FCtx(fname).GetFutureBufferInfo();
   }
 
+  size_t factor_host_arity = 0;
+  size_t factor_device_arity = 0;
+
 public:
   FactorCodeGen(const ptr<SymbolTable>& symtab,
                 const std::vector<RtMemUsageCheckInfo>& list,
@@ -120,6 +123,7 @@ public:
   bool Visit(AST::ForeachBlock&) override;
   bool Visit(AST::FunctionDecl&) override;
   bool Visit(AST::CppSourceCode&) override;
+  bool Visit(AST::Return&) override;
 
 private:
   bool ContainsLoopVar(const std::string&) const;
@@ -151,7 +155,7 @@ private:
   }
 
   // TODO: determine what to clear!
-  void ClearChoreoFunctionStates() {
+  void ResetChoreoFunctionStates() {
     hp_count = 0; // reset the count of stub parameter
     factor_host_unbraced = true;
     dims_info.clear();
@@ -162,6 +166,18 @@ private:
     fs.str("");
     fs.clear();
     alloc_in_fs.clear();
+
+    // recalculate the arities
+    factor_host_arity = 0;
+    factor_device_arity = 0;
+    for (auto& item : GetFactorHostInParams()) {
+      (void)item;
+      factor_host_arity++;
+    }
+    for (auto& item : GetFactorDeviceInParams()) {
+      (void)item;
+      factor_device_arity++;
+    }
   }
 
   // in factor, there exists choreo-host/factor-host/factor-device functions.
@@ -177,6 +193,9 @@ private:
   FilterRange<SymbolDetail> GetFactorDeviceInParams() {
     return cgi->GetDevicePassIns(fname);
   }
+
+  size_t GetFactorHostInArity() { return factor_host_arity; }
+  size_t GetFactorDeviceInArity() { return factor_device_arity; }
 };
 
 } // end namespace Factor
