@@ -463,9 +463,15 @@ public:
     // type inference
     cur_vn = vn.GenerateValueNumberForNode(n);
     n.s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
-    auto cv =
-        RemovePrefixOrNull("const_", vn.GetSignatureFromValueNumber(cur_vn));
-    if (cv) n.compile_time_signature = *cv;
+
+    if (ConvertibleToInt(NodeType(n))) {
+      assert(n.s.DimCount() == 1);
+      if (!n.s.IsDynamic()) {
+        n.opt_vals.int_expr = n.s.ValueAt(0);
+        VST_DEBUG(dbgs() << "[ExprVal] " << STR(n) << ": "
+                         << STR(n.s.ValueAt(0)) << "\n");
+      }
+    }
 
     if (AST::typeof<MDSpanType>(&n)) {
       cur_mdspan_vn = cur_vn;
@@ -620,7 +626,7 @@ public:
       assert(shape.DimCount() == 1);
       VST_DEBUG(dbgs() << "[SymVal] " << InScopeName(name) << ": "
                        << STR(shape.ValueAt(0)) << "\n");
-      SymVal(InScopeName(name)).int_val = shape.ValueAt(0);
+      SymVal(InScopeName(name)).int_expr = shape.ValueAt(0);
     }
 
     if (isa<FutureType>(n.GetType()) || isa<SpannedType>(n.GetType()))
@@ -698,7 +704,7 @@ public:
       assert(shape.DimCount() == 1);
       VST_DEBUG(dbgs() << "[SymVal] " << SSTab().ScopedName(name) << ": "
                        << STR(shape.ValueAt(0)) << "\n");
-      SymVal(SSTab().ScopedName(name)).int_val = shape.ValueAt(0);
+      SymVal(SSTab().ScopedName(name)).int_expr = shape.ValueAt(0);
     }
 
     return true;
@@ -1216,6 +1222,10 @@ public:
         expr->s = GenShapeFromSignature(vn.GetSignatureForNode(*s));
         VST_DEBUG(dbgs() << "[ExprShape] Shape for " << PSTR(s) << ": "
                          << STR(expr->s) << "\n");
+        assert(expr->s.DimCount() == 1);
+        expr->opt_vals.int_expr = expr->s.ValueAt(0);
+        VST_DEBUG(dbgs() << "[ExprVal] Value for " << PSTR(expr) << ": "
+                         << STR(expr->s.ValueAt(0)) << "\n");
       }
     }
 

@@ -187,7 +187,7 @@ void Return::accept(Choreo::Visitor& v) {
 
 void Call::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
-  if (template_params) template_params->accept(v);
+  if (template_args) template_args->accept(v);
   arguments->accept(v);
   v.Visit(*this);
   v.AfterVisit(*this);

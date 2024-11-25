@@ -715,15 +715,14 @@ bool FactorCodeGen::Visit(AST::Call& c) {
 
     ks << ") {\n";
     ks << "  " << STR(*c.function);
-    // c.template_params->SetDelimiter(", ");
-    if (c.template_params != nullptr) {
+    // c.template_args->SetDelimiter(", ");
+    if (c.template_args != nullptr) {
       ks << "<";
       bool need_delimiter = false;
-      for (size_t i = 0; i < c.template_params->Count(); ++i) {
+      for (size_t i = 0; i < c.template_args->Count(); ++i) {
         if (need_delimiter) ks << ", ";
         need_delimiter = true;
-        ks << STR(cast<AST::Expr>(c.template_params->ValueAt(i))
-                      ->compile_time_signature);
+        ks << ExprSTR(c.template_args->ValueAt(i), false);
       }
       ks << ">";
     }
@@ -1418,7 +1417,8 @@ const std::string FactorCodeGen::ValueSTR(const ValueItem& vi) const {
     return ReplaceRuntimeNames(STR(vi), "", false);
 }
 
-const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
+const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
+                                         bool factor_value) const {
   std::ostringstream oss;
 
   if (auto id = dyn_cast<AST::Identifier>(e)) {
@@ -1439,15 +1439,21 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
     } else
       oss << id->name;
   } else if (auto il = dyn_cast<AST::IntLiteral>(e)) {
-    oss << "Value(" << il->value << ")";
+    oss << ((factor_value) ? "Value" : "") << "(" << il->value << ")";
   } else if (auto ii = dyn_cast<AST::IntIndex>(e)) {
     return ExprSTR(ii->value);
   } else if (auto expr = dyn_cast<AST::Expr>(e)) {
-    if (isa<IntegerType>(NodeType(*e)) && (expr->s.IsValid()) &&
-        (!expr->s.IsDynamic())) {
-      // prefer to use the deduced value when possible
-      assert(expr->s.DimCount() == 1 && "A 1-dimensional value is expected.");
-      return "Value(" + STR(expr->s.ValueAt(0)) + ")";
+    if (ConvertibleToInt(NodeType(*e))) {
+      if (IsValidValueItem(expr->opt_vals.int_expr)) {
+        // prefer to use the deduced value when possible
+        return std::string((factor_value) ? "Value" : "") + "(" +
+               STR(expr->opt_vals.int_expr) + ")";
+      } else if (expr->s.IsValid() && !expr->s.IsDynamic()) {
+        // TODO: do we need this?
+        assert(expr->s.DimCount() == 1 && "A 1-dimensional value is expected.");
+        return std::string((factor_value) ? "Value" : "") + "(" +
+               STR(expr->s.ValueAt(0)) + ")";
+      }
     }
     if (expr->IsReference()) {
       if (expr->GetInt())
@@ -1485,6 +1491,7 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
     } else if (expr->IsBinary()) {
       if (expr->op == "cdiv") {
         std::string one = "Value(1)";
+        if (!factor_value) one = "1";
         oss << "((" << ExprSTR(expr->GetL()) << ")+(" << ExprSTR(expr->GetR())
             << "-" << one << ")/(" << ExprSTR(expr->GetR()) << ")";
       } else if (expr->op == "getith") {
@@ -1520,8 +1527,9 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
     // (TODO: maybe assert when earlysema)
     assert(val_count >= 2);
     for (size_t i = 0; i < val_count - 1; i++) {
-      oss << "select_(" << ExprSTR(sl->select_factor) << " == Value(" << i
-          << "), " << PSTR(sl->expr_list->ValueAt(i))
+      oss << "select_(" << ExprSTR(sl->select_factor) << " == ";
+      oss << ((factor_value) ? "Value" : "") << "(" << i << ")";
+      oss << ", " << PSTR(sl->expr_list->ValueAt(i))
           << (i < val_count - 1 ? ", " : "");
     }
     oss << PSTR(sl->expr_list->AllValues().back())

@@ -250,7 +250,7 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
   enum Form { Unary, Binary, Ternary, Reference };
 
   std::string op;
-  std::string compile_time_signature;
+  OptimizedValues opt_vals;
 
 private:
   ptr<Expr> value_c = nullptr;
@@ -1194,25 +1194,24 @@ struct Return : public Node, public TypeIDProvider<Return> {
 struct Call : public Node, public TypeIDProvider<Call> {
   ptr<Node> function;
   ptr<MultiValues> arguments;
-  ptr<MultiValues> template_params;
+  ptr<MultiValues> template_args;
 
   Call(const location& l, const ptr<Node>& f, const ptr<MultiValues>& a)
-      : Node(l), function(f), arguments(a), template_params(nullptr) {}
+      : Node(l), function(f), arguments(a), template_args(nullptr) {}
 
   Call(const location& l, const ptr<Node>& f, const ptr<MultiValues>& a,
        const ptr<MultiValues>& b)
-      : Node(l), function(f), arguments(a), template_params(b) {
+      : Node(l), function(f), arguments(a), template_args(b) {
     arguments->SetDelimiter(", ");
-    template_params->SetDelimiter(", ");
+    template_args->SetDelimiter(", ");
   }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Call: " << STR(*function);
     os << "\n" << prefix << "  `- with arguments: " << STR(*arguments);
-    if (template_params)
+    if (template_args)
       os << "\n"
-         << prefix
-         << "  `- with template parameters: " << STR(*template_params);
+         << prefix << "  `- with template parameters: " << STR(*template_args);
   }
   void accept(Visitor&) override;
 

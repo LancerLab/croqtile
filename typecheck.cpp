@@ -294,6 +294,32 @@ bool TypeChecker::Visit(AST::Wait& n) {
 }
 bool TypeChecker::Visit(AST::Call& n) {
   TraceEachVisit(n);
+
+  if (n.template_args) {
+    size_t count = 0;
+    for (auto& v : n.template_args->AllValues()) {
+      count++;
+      auto ty = NodeType(*v);
+      // must be a scalar type
+      if (!CanYieldAnInteger(ty)) {
+        Error(n.LOC(),
+              "(" + std::to_string(count) + "th) template argument of type '" +
+                  PSTR(ty) +
+                  "` can not be used to instantiate the kernel function.");
+        error_count++;
+      }
+      auto val_expr = cast<AST::Expr>(v)->opt_vals.int_expr;
+      // fail if the template argument can not be evaluated as a compile-time
+      // constant
+      if (!IsValidValueItem(val_expr) || !isa<int>(&val_expr)) {
+        Error(n.LOC(), "(" + std::to_string(count) +
+                           "th) template argument of type '" + PSTR(ty) +
+                           "` can not be evaluated at choreo compile time.");
+        error_count++;
+      }
+    }
+  }
+
   return true;
 }
 

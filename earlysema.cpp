@@ -1006,6 +1006,23 @@ bool EarlySemantics::Visit(AST::Call& n) {
       error_count++;
     }
   }
+
+  if (n.template_args) {
+    size_t count = 0;
+    for (auto& v : n.template_args->AllValues()) {
+      count++;
+      auto ty = NodeType(*v);
+      // must be a scalar type
+      if (!ConvertibleToInt(ty)) {
+        Error(n.LOC(),
+              "(" + std::to_string(count) + "th) template argument of type '" +
+                  PSTR(ty) +
+                  "` can not be used to instantiate the kernel function.");
+        error_count++;
+      }
+    }
+  }
+
   return true;
 }
 

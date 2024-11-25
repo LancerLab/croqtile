@@ -851,14 +851,14 @@ bool CUDACodeGen::Visit(AST::Call& c) {
   __TRACE_EACH_VISIT__(c)
   fs << this->indent;
   fs << STR(*c.function);
-  if (c.template_params != nullptr) {
+  if (c.template_args != nullptr) {
     fs << "<";
     bool need_delimiter = false;
-    for (size_t i = 0; i < c.template_params->Count(); ++i) {
+    for (size_t i = 0; i < c.template_args->Count(); ++i) {
       if (need_delimiter) fs << ", ";
       need_delimiter = true;
-      fs << STR(cast<AST::Expr>(c.template_params->ValueAt(i))
-                    ->compile_time_signature);
+      fs << STR(
+          cast<AST::Expr>(c.template_args->ValueAt(i))->opt_vals.int_expr);
     }
     fs << ">";
   }

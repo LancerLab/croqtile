@@ -139,7 +139,7 @@ private:
   void EmitHostRuntimeMemUsageCheck(std::ostream&);
   void EmitHostFunction(std::ostream&);
 
-  const std::string ExprSTR(AST::ptr<AST::Node>) const;
+  const std::string ExprSTR(AST::ptr<AST::Node>, bool = true) const;
   std::string GenHostParamName() { return "hp" + std::to_string(hp_count++); }
   const std::string ReplaceRuntimeNames(const std::string&,
                                         const std::string& = "",

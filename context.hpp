@@ -90,8 +90,8 @@ inline const std::string STR(const FutureBufferInfo& fbi) {
 }
 
 struct OptimizedValues {
-  ValueItem int_val = GetInvalidValueItem();
-  ValueItem size_val = GetInvalidValueItem();
+  ValueItem int_expr = GetInvalidValueItem();
+  ValueItem size_expr = GetInvalidValueItem();
 };
 
 // per-function context

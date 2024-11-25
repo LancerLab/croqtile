@@ -1201,6 +1201,10 @@ inline bool CanYieldAnInteger(const ptr<Type>& ty) {
          (isa<ITupleType>(ty) && ty->Dims() == 1);
 }
 
+inline bool ConvertibleToInt(const ptr<Type>& ty) {
+  return isa<ScalarType>(ty) || (isa<ITupleType>(ty) && ty->Dims() == 1);
+}
+
 inline const ValueItem& GetSingleUpperBound(const ptr<Type>& ty) {
   if (!IsActualBoundedIntegerType(ty))
     choreo_unreachable("can not get the single upper bound for a " + PSTR(ty) +
