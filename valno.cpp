@@ -302,6 +302,40 @@ ValueNumbering::TryToSimplifyBinary(const location& loc, const std::string& op,
     }
   }
 
+  if (op == "-") {
+    // a-a == 1
+    if (GetValueNumberOfSignature(lhs) == GetValueNumberOfSignature(rhs)) {
+      std::string res = "const_0";
+      if (trace && verbose)
+        dbgs() << ScopeIndent() << "<Simplify> '" << lhs << " " << op << " "
+               << rhs << " to '" << res << "'\n";
+      return res;
+    }
+  }
+
+  if (op == "+") {
+    // useful simplification: a-b+b = a
+    if (!PrefixedWith(rhs, "#") /*not multiple values*/) {
+      int lvn = GetValueNumberOfSignature(lhs);
+      auto bind_set = GetBindSet(lvn);
+      bind_set.insert(lvn); // always add self
+      for (auto minus_vn : bind_set) {
+        auto sig = GetSignatureFromValueNumber(minus_vn);
+        if (!PrefixedWith(lhs, "-:")) continue;
+        auto minus = GetOperandsValNo(sig);
+        assert(minus.size() == 2);
+        if (GetValueNumberOfSignature(rhs) == minus[1]) {
+          auto res = GetSignatureFromValueNumber(minus[0]);
+
+          if (trace && verbose)
+            dbgs() << ScopeIndent() << "<Simplify> '" << lhs << " " << op << " "
+                   << rhs << " to '" << res << "'\n";
+
+          return res;
+        }
+      }
+    }
+  }
   return std::nullopt;
 }
 

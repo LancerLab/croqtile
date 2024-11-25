@@ -3,6 +3,7 @@
 
 // shared global context for a compilation process
 
+#include "symvals.hpp"
 #include <iostream>
 #include <map>
 #include <sstream>
@@ -88,14 +89,27 @@ inline const std::string STR(const FutureBufferInfo& fbi) {
   return oss.str();
 }
 
-using FutureBufferMap = std::map<std::string, FutureBufferInfo>;
+struct OptimizedValues {
+  ValueItem int_val = GetInvalidValueItem();
+  ValueItem size_val = GetInvalidValueItem();
+};
 
 // per-function context
 class FunctionContext {
   FutureBufferInfo fbi;
+  std::map<std::string, OptimizedValues> sym_values;
 
 public:
   FutureBufferInfo& GetFutureBufferInfo() { return fbi; }
+  OptimizedValues& GetSymbolValues(const std::string& sym) {
+    return sym_values[sym];
+  }
+  const OptimizedValues& GetSymbolValues(const std::string& sym) const {
+    return sym_values.at(sym);
+  }
+  bool HasSymbolValues(const std::string& sym) const {
+    return sym_values.count(sym);
+  }
 };
 
 // per-compilation context

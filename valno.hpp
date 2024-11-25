@@ -291,6 +291,10 @@ private:
 
   TypeConstraints type_equals{this};
 
+  OptimizedValues& SymVal(const std::string sym) {
+    return FCtx(fname).GetSymbolValues(sym);
+  }
+
 private:
   // for debugging purpose only
   bool cannot_proceed = false;
@@ -538,12 +542,13 @@ public:
 
     if (cannot_proceed) return true;
 
+    auto name = n.name_str;
     if (n.init_expr) {
       assert(ValidVN(cur_mdspan_vn) &&
              "invalid value number for the named type.");
-      SSTab().DefineSymbol(n.name_str, n.GetType());
+      SSTab().DefineSymbol(name, n.GetType());
 
-      vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(n.name_str),
+      vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(name),
                                            cur_mdspan_vn);
 
       InvalidateVN(cur_mdspan_vn); // comsumes the mdspan
@@ -556,9 +561,10 @@ public:
 
     if (cannot_proceed) return true;
 
-    if (SSTab().DeclaredInScope(n.name_str)) {
-      Error(n.LOC(), "ODR violation: symbol `" + n.name_str +
-                         "' has been declared already.");
+    auto name = n.name_str;
+    if (SSTab().DeclaredInScope(name)) {
+      Error(n.LOC(),
+            "ODR violation: symbol `" + name + "' has been declared already.");
       error_count++;
       return false;
     }
@@ -578,27 +584,26 @@ public:
       nty = n.init_expr->GetType();
       if (GetSpannedType(NodeType(*n.init_expr))) {
         assert(ValidVN(cur_mdspan_vn) && "expecting a valid mdspan valno.");
-        vn.AssociateSignatureWithValueNumber(
-            SSTab().ScopedName(n.name_str + ".span"), cur_mdspan_vn);
+        vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(name + ".span"),
+                                             cur_mdspan_vn);
       } else {
         if (!isa<PlaceHolderType>(nty)) {
           assert(ValidVN(cur_vn) &&
                  "cur_mdspan_vn and cur_vn must be exclusive.");
-          vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(n.name_str),
+          vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(name),
                                                cur_vn);
         }
       }
     } else {
       // obtain the types from declaration
       if (ValidVN(cur_mdspan_vn)) {
-        vn.AssociateSignatureWithValueNumber(
-            SSTab().ScopedName(n.name_str + ".span"), cur_mdspan_vn);
+        vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(name + ".span"),
+                                             cur_mdspan_vn);
         auto mds_value = GenShapeFromSignature(
             vn.GetSignatureFromValueNumber(cur_mdspan_vn));
         nty = MakeSpannedType(n.type->base_type, mds_value, sto);
       } else if (ValidVN(cur_vn)) {
-        vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(n.name_str),
-                                             cur_vn);
+        vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(name), cur_vn);
         nty = NodeType(*n.type);
       } else
         nty = NodeType(*n.type);
@@ -606,11 +611,20 @@ public:
 
     // fill-up the symbol table
     assert(nty);
-    SSTab().DefineSymbol(n.name_str, nty);
+    SSTab().DefineSymbol(name, nty);
     n.SetType(nty);
 
+    if (isa<IntegerType>(nty) && ValidVN(cur_vn)) {
+      auto shape =
+          GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
+      assert(shape.DimCount() == 1);
+      VST_DEBUG(dbgs() << "[SymVal] " << InScopeName(name) << ": "
+                       << STR(shape.ValueAt(0)) << "\n");
+      SymVal(InScopeName(name)).int_val = shape.ValueAt(0);
+    }
+
     if (isa<FutureType>(n.GetType()) || isa<SpannedType>(n.GetType()))
-      SSTab().DefineSymbol(n.name_str + ".span", GetSpannedType(n.GetType()));
+      SSTab().DefineSymbol(name + ".span", GetSpannedType(n.GetType()));
 
     InvalidateVN(cur_mdspan_vn); // stop propagation
     InvalidateVN(cur_vn);
@@ -677,6 +691,15 @@ public:
 
     assert(ValidVN(cur_vn) && "expected a valid current value number.");
     vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(name), cur_vn);
+
+    if (isa<IntegerType>(nty) && ValidVN(cur_vn)) {
+      auto shape =
+          GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
+      assert(shape.DimCount() == 1);
+      VST_DEBUG(dbgs() << "[SymVal] " << SSTab().ScopedName(name) << ": "
+                       << STR(shape.ValueAt(0)) << "\n");
+      SymVal(SSTab().ScopedName(name)).int_val = shape.ValueAt(0);
+    }
 
     return true;
   }

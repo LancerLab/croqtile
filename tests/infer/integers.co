@@ -1,0 +1,19 @@
+// RUN: choreo --debug-visit=valno -sa=check %s | FileCheck %s
+
+__co__ void add() {
+   a = 1 + 2;
+   b = 1;
+   c = a + b;
+}
+
+// CHECK: [SymVal] ::add::a: 3
+// CHECK: [SymVal] ::add::b: 1
+// CHECK: [SymVal] ::add::c: 4
+
+__co__ void sym_add(int b) {
+   a = 1 * 2 - b;
+   c = a + b;
+}
+
+// CHECK: [SymVal] ::sym_add::a: 2-::sym_add::b
+// CHECK: [SymVal] ::sym_add::c: 2
