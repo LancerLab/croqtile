@@ -1,0 +1,13 @@
+Preprocesser issues:
+1. "#define " in a ".co" choices:
+   -> __co__ & host
+   -> __co__ & __cok__ & host
+
+2. "#define " in a "__cok__" choices:
+   -> __cok__ only
+   -> __co__ & __cok__ & host
+   
+Issues:
+- codegen of select(#p % == 2, a, b);
+- outer foreach: foreach { parallel by {} }
+- with-scope issues.
