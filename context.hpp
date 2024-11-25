@@ -9,6 +9,45 @@
 
 namespace Choreo {
 
+// The target languages
+enum class CompileTarget {
+  Unknown,
+  Factor,
+  Topscc,
+  CUDA,
+};
+
+inline static const std::string STR(CompileTarget ct) {
+  switch (ct) {
+  case CompileTarget::Unknown: return "Unknown";
+  case CompileTarget::Factor: return "Factor";
+  case CompileTarget::Topscc: return "Topscc";
+  case CompileTarget::CUDA: return "CUDA";
+  default: choreo_unreachable("Unsupported operand kind.");
+  }
+  return "";
+}
+
+enum class TargetArch {
+  Unknown,
+  GCU20,
+  GCU21,
+  GCU3,
+  GPU,
+};
+
+inline static const std::string STR(TargetArch ta) {
+  switch (ta) {
+  case TargetArch::Unknown: return "Unknown";
+  case TargetArch::GCU20: return "GCU200";
+  case TargetArch::GCU21: return "GCU210";
+  case TargetArch::GCU3: return "GCU300";
+  case TargetArch::GPU: return "GPU";
+  default: choreo_unreachable("Unsupported operand kind.");
+  }
+  return "";
+}
+
 enum DMABufferKind {
   DOK_UNKNOWN,
   DOK_SYMBOL,
@@ -63,6 +102,8 @@ public:
 class CompilationContext {
   bool debug_symtab = false;
   std::map<std::string, FunctionContext> function_contexts;
+  CompileTarget compile_target = CompileTarget::Unknown;
+  TargetArch arch = TargetArch::Unknown;
 
 public:
   bool DebugSymTab() const { return debug_symtab; }
@@ -73,6 +114,12 @@ public:
   const FunctionContext& GetFunctionContext(const std::string fname) const {
     return function_contexts.at(fname);
   }
+
+  CompileTarget GetTarget() const { return compile_target; }
+  void SetTarget(CompileTarget ct) { compile_target = ct; }
+
+  TargetArch GetArch() const { return arch; }
+  void SetArch(TargetArch ta) { arch = ta; }
 
 public:
   static CompilationContext& GetInstance() {

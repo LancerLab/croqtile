@@ -15,7 +15,8 @@
 #include <variant>
 #include <vector>
 
-#include "enums.hpp"
+#include "aux.hpp"
+#include "context.hpp"
 #include "io.hpp"
 
 namespace Choreo {
@@ -787,7 +788,7 @@ struct Shape {
     }
   }
 
-  std::string EmitTo(Target target) const;
+  std::string EmitTo(CompileTarget target) const;
 };
 
 inline bool operator==(const Shape& lhs, const Shape& rhs) {
@@ -831,7 +832,7 @@ struct Type {
   virtual const std::string Name() const = 0;
 
   // codegen util for emitting target's code in string format
-  virtual std::string EmitTo(Target) const {
+  virtual std::string EmitTo(CompileTarget) const {
     assert(false && "Emit stringify not impled for this type");
   }
 

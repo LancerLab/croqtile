@@ -28,10 +28,9 @@ private:
   }
 
 public:
-  TypeChecker(const ptr<SymbolTable> s_tab,
-              const Choreo::Target& tgt = Choreo::Target::Factor)
+  TypeChecker(const ptr<SymbolTable> s_tab)
       : VisitorWithSymTab("check", s_tab) {
-    if (tgt == Choreo::Target::CUDA) allow_auto_threading = true;
+    if (CCtx().GetTarget() == CompileTarget::CUDA) allow_auto_threading = true;
   }
   ~TypeChecker() {}
 

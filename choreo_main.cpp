@@ -4,7 +4,6 @@
 #include "codegen_factor.hpp"
 #include "codegen_prepare.hpp"
 #include "earlysema.hpp"
-#include "enums.hpp"
 #include "gcucheck.hpp"
 #include "latenorm.hpp"
 #include "memcheck.hpp"
@@ -33,9 +32,10 @@ using namespace AST;
 using namespace Choreo;
 
 int main(int argc, char* argv[]) {
+  Option<std::string> target("--target", "-t", "factor", true);
   Option<std::string> arch("--architecture", "-arch", "gcu300");
   Option<std::string> output("--output", "-o", "", true);
-  Option<std::string> target("--target", "-t", "factor", true);
+
   Option<std::string> abend_after("--stop-after", "-sa", "");
   Option<std::string> trace_visit("--trace-visit", "-tv", "");
   Option<std::string> debug_visit("--debug-visit", "-dv", "");
@@ -66,6 +66,34 @@ int main(int argc, char* argv[]) {
     exit(1);
   }
   r.SetOutputStream(output.GetValue());
+
+  // set the compilation targets
+  if (ToUpper(target.GetValue()) == "FACTOR")
+    CCtx().SetTarget(CompileTarget::Factor);
+  else if (ToUpper(target.GetValue()) == "TOPSCC")
+    CCtx().SetTarget(CompileTarget::Topscc);
+  else if (ToUpper(target.GetValue()) == "CUDA")
+    CCtx().SetTarget(CompileTarget::CUDA);
+  else {
+    errs() << "Compile Target '" << target.GetValue()
+           << "' is invalid. Compilation abort.\n";
+    exit(1);
+  }
+
+  // set the arch to compile
+  if (ToUpper(arch.GetValue()) == "GCU200")
+    CCtx().SetArch(TargetArch::GCU20);
+  else if (ToUpper(arch.GetValue()) == "GCU210")
+    CCtx().SetArch(TargetArch::GCU21);
+  else if (ToUpper(arch.GetValue()) == "GCU300")
+    CCtx().SetArch(TargetArch::GCU3);
+  else if (ToUpper(arch.GetValue()) == "GPU")
+    CCtx().SetArch(TargetArch::GPU);
+  else {
+    errs() << "Arch '" << arch.GetValue()
+           << "' is invalid. Compilation abort.\n";
+    exit(1);
+  }
 
   if (!trace_visit.GetValue().empty())
     setenv("CHOREO_TRACE_VISITOR", ToUpper(trace_visit.GetValue()).c_str(), 1);
@@ -140,12 +168,8 @@ int main(int argc, char* argv[]) {
     return 0;
   }
 
-  auto tgt = Choreo::Target::Unknown;
-  if (target.GetValue() == "factor") tgt = Choreo::Target::Factor;
-  if (target.GetValue() == "cuda") tgt = Choreo::Target::CUDA;
-
   // apply early semantics check without knowing type details
-  EarlySemantics sv(tgt);
+  EarlySemantics sv;
   if (!sv.RunOnProgram(root)) return sv.Status();
 
   // minor AST change: desugar for canonicalized AST
@@ -178,7 +202,7 @@ int main(int argc, char* argv[]) {
   }
 
   // apply the type check
-  TypeChecker sc(ln.SymTab(), tgt);
+  TypeChecker sc(ln.SymTab());
   if (!sc.RunOnProgram(root)) return sc.Status();
 
   // --------- Following passes generate codes -------- //
@@ -189,8 +213,8 @@ int main(int argc, char* argv[]) {
   CodegenPrepare cgp(sc.SymTab());
   if (!cgp.RunOnProgram(root)) return cgp.Status();
 
-  switch (tgt) {
-  case Target::Factor: {
+  switch (CCtx().GetTarget()) {
+  case CompileTarget::Factor: {
     // apply the gcu specific checking
     GCUCheck gcu_checker(sc.SymTab());
     if (!gcu_checker.RunOnProgram(root)) return gcu_checker.Status();
@@ -198,10 +222,7 @@ int main(int argc, char* argv[]) {
     FactorTrans trans(sc.SymTab());
     if (!trans.RunOnProgram(root)) return trans.Status();
 
-    assert(arch.GetValue().size() >= 3 &&
-           arch.GetValue().substr(0, 3) == "gcu");
-    MemUsageCheck mem_usage_checker(sc.SymTab(), Target::Factor,
-                                    arch.GetValue());
+    MemUsageCheck mem_usage_checker(sc.SymTab());
     if (!mem_usage_checker.RunOnProgram(root))
       return mem_usage_checker.Status();
 
@@ -211,18 +232,14 @@ int main(int argc, char* argv[]) {
     if (!codegen.RunOnProgram(root)) return codegen.Status();
     break;
   }
-  case Target::CUDA: {
+  case CompileTarget::CUDA: {
     Choreo::CUDA::CUDACodeGen codegen(sc.SymTab(), cross_compile);
     if (!codegen.RunOnProgram(root)) return codegen.Status();
     break;
   }
-  case Target::Topscc: {
+  case CompileTarget::Topscc: {
     errs() << "Target '" << target.GetValue()
            << "' has not been supported yet.\n";
-    return 1;
-  }
-  case Target::Unknown: {
-    errs() << "Invalid target: '" << target.GetValue() << "'\n";
     return 1;
   }
   default:

@@ -99,7 +99,7 @@ public:
       changed = false;
     } else if (isa<AST::ChoreoFunction>(&n)) {
       count = 0;
-    } else if (auto d = dyn_cast<AST::Return>(&n)) {
+    } else if (isa<AST::Return>(&n)) {
       cur_node_index = -1;
     }
     return true;
@@ -113,11 +113,10 @@ public:
     for (auto item : mnodes_insertions[multi_nodes.top()]) {
       auto& index = std::get<0>(item);
       auto& pnode = std::get<1>(item);
-      auto& name = std::get<2>(item);
+      // auto& name = std::get<2>(item);
 
-      auto assign = AST::Make<AST::Assignment>(pnode->LOC(), name, pnode);
-      n.values.insert(n.values.begin() + index, assign);
-      VST_DEBUG(dbgs() << "Hoisted: " << PSTR(assign) << "\n");
+      n.values.insert(n.values.begin() + index, pnode);
+      VST_DEBUG(dbgs() << "Hoisted: " << PSTR(pnode) << "\n");
     }
 
     mnodes_insertions.erase(&n);
@@ -275,8 +274,9 @@ public:
     // hoist the select to multinodes
     int index = cur_node_index + mnodes_insertions[multi_nodes.top()].size();
     cast<AST::Select>(n.to)->inDMA = false;
+    auto assign = AST::Make<AST::Assignment>(n.to->LOC(), anon_sym, n.to);
     mnodes_insertions[multi_nodes.top()].emplace_back(
-        std::make_tuple(index, n.to, anon_sym));
+        std::make_tuple(index, assign, anon_sym));
 
     n.to = AST::Make<AST::ChunkAt>(
         n.to->LOC(), AST::Make<AST::Identifier>(n.to->LOC(), anon_sym));
@@ -289,8 +289,10 @@ public:
       assert(cur_node_index != -1);
       // hoist the span_as to multinodes
       int index = cur_node_index + mnodes_insertions[multi_nodes.top()].size();
+      auto assign =
+          AST::Make<AST::Assignment>(n.sa->LOC(), n.sa->nid->name, n.sa);
       mnodes_insertions[multi_nodes.top()].emplace_back(
-          std::make_tuple(index, n.sa, n.sa->nid->name));
+          std::make_tuple(index, assign, n.sa->nid->name));
       n.sa.reset();
     }
 
@@ -313,8 +315,10 @@ public:
               int index =
                   cur_node_index + mnodes_insertions[multi_nodes.top()].size();
               auto nname = SymbolTable::GetAnonName();
+              auto assign = AST::Make<AST::Assignment>(expr->GetL()->LOC(),
+                                                       nname, expr->GetL());
               mnodes_insertions[multi_nodes.top()].emplace_back(
-                  std::make_tuple(index, expr->GetL(), nname));
+                  std::make_tuple(index, assign, nname));
               VST_DEBUG(dbgs() << "replace " << PSTR(expr->GetL()) << " with ");
               expr->SetL(AST::Make<AST::Identifier>(v->LOC(), nname));
               VST_DEBUG(dbgs() << PSTR(expr->GetL()) << ".\n");
@@ -327,8 +331,9 @@ public:
         int index =
             cur_node_index + mnodes_insertions[multi_nodes.top()].size();
         auto nname = SymbolTable::GetAnonName();
+        auto assign = AST::Make<AST::Assignment>(v->LOC(), nname, v);
         mnodes_insertions[multi_nodes.top()].emplace_back(
-            std::make_tuple(index, v, nname));
+            std::make_tuple(index, assign, nname));
         repls.emplace_back(i, AST::Make<AST::Identifier>(v->LOC(), nname));
       }
       for (auto& repl : repls) {
@@ -349,21 +354,41 @@ public:
   bool Visit(AST::Return& n) override {
     TraceEachVisit(n);
 
-#if 0
     if (AST::GetIdentifier(*n.value)) return true;
 
-    // non-identifier are normalized
-    auto anon_sym = SymbolTable::GetAnonName();
-    assert(cur_node_index != -1);
-    int index = cur_node_index + mnodes_insertions[multi_nodes.top()].size();
-    mnodes_insertions[multi_nodes.top()].emplace_back(
-        std::make_tuple(index, n.value, anon_sym));
+#if 0
+    if (CCtx().GetTarget() != CompileTarget::Factor) return true;
 
+    // non-identifier may be normalized
     auto vty = NodeType(*n.value);
 
-    VST_DEBUG(dbgs() << "[Norm] Replace " << STR(n) << "\n to be:\n");
-    n.value = AST::Make<AST::Identifier>(n.value->LOC(), anon_sym);
-    VST_DEBUG(dbgs() << STR(n) << "\n");
+    // tricky: we must convert a integer to be 'f32 [1] ...' for a factor return value;
+    if (isa<IntegerType>(vty)) {
+      auto expr = cast<AST::Expr>(n.value);
+      if (auto il = expr->GetInt()) {
+      auto & loc = n.value->LOC();
+      auto anon_sym = SymbolTable::GetAnonName();
+
+      // compose the named variable decl with intial value
+      auto mv = AST::Make<AST::MultiValues>(loc, ",");
+      mv->Append(AST::MakeIntExpr(loc, 1));
+      auto mds = AST::Make<AST::MultiDimSpans>(loc, "", mv, 1);
+      auto dt = AST::Make<AST::DataType>(loc, BaseType::F32);
+      auto sto = AST::Make<AST::Memory>(loc, Storage::GLOBAL);
+      auto nv = AST::Make<AST::NamedVariableDecl>(loc, anon_sym, dt, sto, nullptr, il);
+
+      assert(cur_node_index != -1);
+      int index = cur_node_index + mnodes_insertions[multi_nodes.top()].size();
+      mnodes_insertions[multi_nodes.top()].emplace_back(
+          std::make_tuple(index, nv, anon_sym));
+
+      // replace return value now
+      VST_DEBUG(dbgs() << "[Norm] Replace " << STR(n) << "\n to be:\n");
+      n.value = AST::MakeIdExpr(n.value->LOC(), anon_sym);
+      VST_DEBUG(dbgs() << STR(n) << "\n");
+      } else
+    } else 
+      assert(isa<SpannedType>(vty) && "not a passable type.");
 #endif
 
     return true;

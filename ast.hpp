@@ -10,7 +10,6 @@
 #include "aux.hpp"
 #include "context.hpp"
 #include "dmaconf.hpp"
-#include "enums.hpp"
 #include "location.hh"
 #include "symtab.hpp"
 
@@ -1402,6 +1401,11 @@ inline std::string NodeName(const Node& n) { return n.TypeNameString(); }
 // symbol reference specific expr
 inline ptr<Expr> MakeIdExpr(const location& l, const std::string& n) {
   return Make<Expr>(l, Make<Identifier>(l, n));
+}
+
+// symbol reference specific expr
+inline ptr<Expr> MakeIntExpr(const location& l, int val) {
+  return Make<Expr>(l, Make<IntLiteral>(l, val));
 }
 
 } // end of namespace AST

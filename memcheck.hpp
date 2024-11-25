@@ -4,6 +4,7 @@
 #include <iomanip>
 
 #include "ast.hpp"
+#include "context.hpp"
 #include "visitor.hpp"
 
 namespace Choreo {
@@ -183,14 +184,14 @@ private:
   }
 
 public:
-  MemUsageCheck(const ptr<SymbolTable> s_tab, Target t, std::string arch)
+  MemUsageCheck(const ptr<SymbolTable> s_tab)
       : VisitorWithSymTab("muchk", s_tab) {
-    if (t == Target::Factor) {
+    if (CCtx().GetTarget() == CompileTarget::Factor) {
       valid_storage_type = {Storage::LOCAL, Storage::SHARED, Storage::GLOBAL};
       // initialize with ct_tot_mem_usage
       for (const auto& sto : valid_storage_type) ct_tot_mem_usage[sto] = 0;
       // initialize max memory we can allocate in byte
-      if (arch == "gcu300") {
+      if (CCtx().GetArch() == TargetArch::GCU3) {
         // The values obtained through testing on c035
         // TODO: All is different with Scorpio (1 Die) in the link below
         // TODO: is S60G same with c035?
@@ -198,7 +199,7 @@ public:
         mem_usage_limit[Storage::SHARED] = (size_t)24 * 1024 * 1024;   // 24MB
         mem_usage_limit[Storage::GLOBAL] =
             (size_t)4 * 1024 * 1024 * 1024; // 4GB
-      } else if (arch == "gcu210") {
+      } else if (CCtx().GetArch() == TargetArch::GCU21) {
         // The values obtained through testing on I20
         /* TODO:
         L3 (gobal) is different with Dorado (3VG per Cluster) in
@@ -209,16 +210,15 @@ public:
         mem_usage_limit[Storage::GLOBAL] =
             (size_t)4 * 1024 * 1024 * 1024; // 4GB
       } else {
-        choreo_unreachable("unsupported gcu architecture " + arch +
-                           " in memory usage check.");
+        choreo_unreachable("unsupported gcu architecture " +
+                           STR(CCtx().GetArch()) + " in memory usage check.");
       }
-
     } else {
       choreo_unreachable("unsupported target in memory usage check.");
     }
     VST_DEBUG(dbgs() << "[MemUsage] "
-                     << "Memory usage limit of architecture " << arch
-                     << " is:\n"
+                     << "Memory usage limit of architecture "
+                     << STR(CCtx().GetArch()) << " is:\n"
                      << GetMemUsageMapDetail(mem_usage_limit));
   }
   ~MemUsageCheck() {}

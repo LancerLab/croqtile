@@ -61,11 +61,11 @@ private:
   }
 
 public:
-  EarlySemantics(const Choreo::Target& tgt = Choreo::Target::Factor)
-      : VisitorWithScope("sema") {
+  EarlySemantics() : VisitorWithScope("sema") {
     if (trace_visit) debug_visit = true; // force debug when tracing
-    if (tgt == Choreo::Target::CUDA) allow_auto_threading = true;
     if (debug_visit) type_equals.SetDebug(true);
+    if (CCtx().GetTarget() == Choreo::CompileTarget::CUDA)
+      allow_auto_threading = true;
   }
   ~EarlySemantics() {}
 
