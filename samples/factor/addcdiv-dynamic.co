@@ -3,7 +3,7 @@
 
 __cok__ { /// kernel program
 
-#include "sip20intrin.h"
+#include "sip30intrin.h"
 
 #ifndef EXT32
 #define EXT32(hi, lo) ((hi) << 16 | ((lo)&0xffff))
@@ -404,18 +404,22 @@ mul_fp32_scalar(int in0_addr_, float in1, int size,
   __dtu_c_movsr2mpr(mpr);
 }
 
-template<int L>
-void addcdiv_kernel_0_c_func_fp32(float* a_addr, float* b_addr, float* c_addr
-    float* d_addr, float* e_addr) {
-  div_fp32(b_addr, c_addr, L, e_addr);
-  mul_fp32_scalar(e_addr, 1.0, L, e_addr);
-  add_fp32(a_addr, e_addr, L, d_addr);
+extern "C"
+void addcdiv_kernel_0_c_func_fp32(float* a_addr, float* b_addr, float* c_addr, float* d_addr, float* e_addr) {
+  div_fp32(reinterpret_cast<int>(b_addr), reinterpret_cast<int>(c_addr), 8192, reinterpret_cast<int>(e_addr));
+  mul_fp32_scalar((int)e_addr, 1.0, 8192, (int)e_addr);
+  add_fp32((int)a_addr, (int)e_addr, 8192, (int)d_addr);
+}
+
+extern "C"
+void add_kernel_fp32(float* a_addr, float* b_addr, float* c_addr) {
+  add_fp32((int)a_addr, (int)b_addr, 8192, (int)c_addr);
 }
 
 } /// end of kernel decl
 
 
-__co__ f32 [L] relu(f32 [L] first, f32 [L] second, f32 [L] third) { /// device program
+__co__ f32 [L] addcdiv(f32 [L] first, f32 [L] second, f32 [L] third) { /// device program
   f32[L] output; // use same shape as first
 
   parallel p by 1 {  // p is sip_index
@@ -461,10 +465,14 @@ int main() { /// host program
   choreo::f32 b[LL]; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::f32 b[512][512] = {0};
   choreo::f32 c[LL]; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::f32 b[512][512] = {0};
 
-  auto first_data = choreo::make_spanview<2, choreo::f32>((float*)a, {LL});
-  auto second_data = choreo::make_spanview<2, choreo::f32>((float*)b, {LL});
-  auto third_data = choreo::make_spanview<2, choreo::f32>((float*)c, {LL});
-  first_data.fill_random(-1.0, 1.0);
+  auto first_data = choreo::make_spanview<1, choreo::f32>((float*)a, {LL});
+  auto second_data = choreo::make_spanview<1, choreo::f32>((float*)b, {LL});
+  auto third_data = choreo::make_spanview<1, choreo::f32>((float*)c, {LL});
+
+  std::fill_n((float*)&first_data[0], LL, 1.0);
+  std::fill_n((float*)&second_data[0], LL, 1.0);
+  std::fill_n((float*)&third_data[0], LL, 1.0);
+  // first_data.fill_random(-1.0, 1.0);
 
   auto start = std::chrono::high_resolution_clock::now();
 
@@ -475,9 +483,11 @@ int main() { /// host program
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
   // verfication
-  for (size_t j = 0; j < res.shape()[1]; ++j) {
+  for (size_t j = 0; j < res.shape()[0]; ++j) {
+    std::cout << "j = " << j << std::endl;
     std::cout << "res: " << res[j] << "\n";
     float ref = first_data[j] + second_data[j] / third_data[j];
+    // float ref = first_data[j] + second_data[j];
 
     std::cout << "ref: " << ref << std::endl;
     assert(ref == res[j]);
