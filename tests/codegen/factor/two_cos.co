@@ -12,9 +12,9 @@ __co__ auto b(bf16 [3, 4, 5] arg) {
 void foo() {
   a();
 
-  choreo::bf16 a[60];
+  choreo::bf16 c[60];
 
-  auto input_data = choreo::make_spanview<2, choreo::bf16>((choreo::bf16*)a, {3, 4, 5});
+  auto input_data = choreo::make_spanview<2, choreo::bf16>((choreo::bf16*)c, {3, 4, 5});
   auto res = b(input_data);
 }
 

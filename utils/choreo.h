@@ -508,7 +508,7 @@ template <typename T, size_t Rank>
 spanned_data<T, Rank> make_spandata(std::initializer_list<size_t> init) {
   size_t size = 1;
   for (auto& value : init) size *= value;
-  choreo_assert(size > 1, "error: invalid size.", __FILE__, __LINE__);
+  choreo_assert(size > 0, "error: invalid size.", __FILE__, __LINE__);
 
   return spanned_data<T, Rank>(std::make_unique<T[]>(size),
                                make_mdspan<Rank>(init));
@@ -519,7 +519,7 @@ template <size_t Rank, typename T>
 auto copy_as_spanned(T* ptr, std::initializer_list<size_t> init) {
   size_t size = 1;
   for (auto& value : init) size *= value;
-  choreo_assert(size > 1, "error: invalid size.", __FILE__, __LINE__);
+  choreo_assert(size > 0, "error: invalid size.", __FILE__, __LINE__);
 
   auto parr = std::make_unique<T[]>(size);
   std::copy(ptr, ptr + size, parr.get());

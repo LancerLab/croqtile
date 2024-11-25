@@ -74,6 +74,8 @@ private:
   bool use_kernel_template = false;
   bool factor_host_unbraced = false;
 
+  ptr<FunctionType> fty = nullptr;
+
   ValBind::BindInfo<std::string> bind_info;
   std::map<std::string, std::stack<std::vector<std::string>>> cur_bounded_vars;
   std::vector<std::unordered_set<std::string>> loop_vars; // the loop variables
@@ -132,11 +134,10 @@ private:
 
   void EmitFixedHostHead();
   void EmitFixedFactorHead();
-  void EmitHostFuncDecl(std::ostringstream&, const FunctionType&,
-                        const std::string&);
+  void EmitHostFuncDecl(std::ostringstream&, const std::string&);
   void EmitHostRuntimeCheck(std::ostream&);
   void EmitHostRuntimeMemUsageCheck(std::ostream&);
-  void EmitHostFunction(std::ostream&, const FunctionType&);
+  void EmitHostFunction(std::ostream&);
 
   const std::string ExprSTR(AST::ptr<AST::Node>) const;
   std::string GenHostParamName() { return "hp" + std::to_string(hp_count++); }
@@ -178,6 +179,8 @@ private:
       (void)item;
       factor_device_arity++;
     }
+    fty = nullptr;
+    void_return = false;
   }
 
   // in factor, there exists choreo-host/factor-host/factor-device functions.
@@ -196,7 +199,10 @@ private:
 
   size_t GetFactorHostInArity() { return factor_host_arity; }
   size_t GetFactorDeviceInArity() { return factor_device_arity; }
-};
+
+  std::optional<std::string> GetChoreoHostReturnTypeString() const;
+
+}; // end FactorCodeGen
 
 } // end namespace Factor
 

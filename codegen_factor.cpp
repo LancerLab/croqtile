@@ -71,6 +71,8 @@ bool FactorCodeGen::BeforeVisitImpl(AST::Node& n) {
     factor_fname = "__choreo_" + fname;
     factor_fnames.push_back(factor_fname);
 
+    fty = cast<FunctionType>(GetSymbolType(fname));
+
     fs << "void " << factor_fname << "() {\n";
     this->IncrementIndent();
     // include the kernel source file
@@ -98,16 +100,14 @@ bool FactorCodeGen::AfterVisitImpl(AST::Node& n) {
     }
     host_code += ds.str() + cs.str() + hs.str();
     EmitScript();
-  } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
-    auto fty = cast<FunctionType>(f->GetType());
-
+  } else if (isa<AST::ChoreoFunction>(&n)) {
     // choreo-host function:
     // The user code may require the choreo function be fwd-decalared for its
     // call
-    EmitHostFuncDecl(ds, *fty, fname);
+    EmitHostFuncDecl(ds, fname);
     ds << "; // foward-declaration of choreo-host\n";
 
-    EmitHostFunction(hs, *fty);
+    EmitHostFunction(hs);
 
     // choreo-factor function handling
     if (factor_host_unbraced) {
@@ -838,8 +838,6 @@ bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
   assert(d.name == fname && "incosistent in function names.");
   assert(isa<FunctionType>(d.GetType()) && "unexpected type.");
 
-  auto& fty = *cast<FunctionType>(d.GetType());
-
   auto MapRuntimeShapeNames = [this](const ptr<SpannedType>& sty,
                                      const std::string& hp_name,
                                      size_t hp_index) {
@@ -918,10 +916,10 @@ bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
   if (debug_visit) VST_DEBUG(dbgs() << "[Factor Decls] Output Types:\n");
 
   std::ostringstream dss; // for the shape string
-  if (isa<VoidType>(fty.out_ty)) {
+  if (isa<VoidType>(fty->out_ty)) {
     void_return = true;
     if (debug_visit) VST_DEBUG(dbgs() << "VOID\n");
-  } else if (auto rty = dyn_cast<SpannedType>(fty.out_ty)) {
+  } else if (auto rty = dyn_cast<SpannedType>(fty->out_ty)) {
     auto name = cgi->GetReturnSymbol(fname);
     std::string type_name = "output_type";
     auto type_string = "DRAMType(" + stringify(rty->ElementType()) + ", " +
@@ -961,7 +959,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
         (cgi->HasReturnSymbol(fname)) ? cgi->GetReturnSymbol(fname) : "output";
     auto type_name = "output_type";
     auto type_string =
-        "DRAMType(" + stringify(TC2BT(fty.out_ty->Category())) + ", (1))";
+        "DRAMType(" + stringify(TC2BT(fty->out_ty->Category())) + ", (1))";
     fs << indent << "auto " << type_name << " = " << type_string << ";\n";
     factor_symbols.AddSymbol(name, type_name, type_string);
 
@@ -1120,14 +1118,13 @@ ToSpanned(const std::vector<U> &v, std::initializer_list<int> && shape) {
   host_code = oss.str(); // reset the host code
 }
 
-void FactorCodeGen::EmitHostFunction(std::ostream& os,
-                                     const FunctionType& fty) {
-  auto rty = fty.out_ty;
+void FactorCodeGen::EmitHostFunction(std::ostream& os) {
+  auto rty = fty->out_ty;
   auto out_size_expr = SizeExprOf(*rty);
 
   // host phase 0: Function declaration
   std::ostringstream fns;
-  EmitHostFuncDecl(fns, fty, fname);
+  EmitHostFuncDecl(fns, fname);
   os << fns.str();
 
   // host phase 1: create tops executable from a file
@@ -1207,9 +1204,9 @@ void FactorCodeGen::EmitHostFunction(std::ostream& os,
   }
 
   tss << "  std::vector<int64_t> out_shape = {";
-  if (auto rty = dyn_cast<SpannedType>(fty.out_ty)) {
+  if (auto rty = dyn_cast<SpannedType>(fty->out_ty)) {
     tss << RSTR(rty->GetShape());
-  } else if (!isa<VoidType>(fty.out_ty)) {
+  } else if (!isa<VoidType>(fty->out_ty)) {
     tss << "1";
   }
   tss << "};\n";
@@ -1230,7 +1227,7 @@ void FactorCodeGen::EmitHostFunction(std::ostream& os,
 
   size_t out_rank = 1;
   std::string shape_string = "{1}";
-  if (auto rty = dyn_cast<SpannedType>(fty.out_ty)) {
+  if (auto rty = dyn_cast<SpannedType>(fty->out_ty)) {
     out_rank = rty->Dims();
     shape_string = ReplaceRuntimeNames(LSTR(rty->GetShape()));
   }
@@ -1251,7 +1248,9 @@ void FactorCodeGen::EmitHostFunction(std::ostream& os,
   os << "  // TODO: figure out why stream destroying crash some "
         "applications.\n";
   os << "  // topsStreamDestroy(stream);\n";
-  if (!void_return) os << "  return res;\n";
+  if (!void_return)
+    os << "  return res"
+       << (GetChoreoHostReturnTypeString().has_value() ? "[0]" : "") << ";\n";
   os << "}\n";
 }
 
@@ -1380,11 +1379,23 @@ void FactorCodeGen::EmitHostRuntimeMemUsageCheck(std::ostream& os) {
   }
 }
 
+std::optional<std::string>
+FactorCodeGen::GetChoreoHostReturnTypeString() const {
+  if (!void_return && cgi->HasReturnSymbol(fname)) {
+    auto& item = cgi->GetReturnDetail(fname);
+    if (item.rty_str != "$") return item.rty_str;
+  }
+  return {};
+}
+
 void FactorCodeGen::EmitHostFuncDecl(std::ostringstream& oss,
-                                     const FunctionType& fty,
                                      const std::string& name) {
-  // emit the return type
-  oss << HostTypeStringify(*fty.out_ty, true) << " " << name << "(";
+  auto rts = GetChoreoHostReturnTypeString();
+  if (rts.has_value())
+    oss << *rts;
+  else
+    oss << HostTypeStringify(*fty->out_ty, true);
+  oss << " " << name << "(";
 
   // emit the parameters
   size_t host_pindex = 0;

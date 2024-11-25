@@ -36,7 +36,8 @@ private:
       VST_DEBUG(dbgs() << "Symbols in " << fname << ":\n");
       VST_DEBUG(for (auto& item : cgi->GetFunctionSymbols(fname)) {
         dbgs() << " |- " << item.name << ", ty: " << PSTR(item.type)
-               << ", is_return: " << item.is_return
+               << ", is_return: "
+               << (item.rty_str.empty() ? "no" : "yes(" + item.rty_str + ")")
                << ", index: " << item.p_index << "\n";
       });
     } else if (isa<AST::ParallelBy>(&n)) {
@@ -109,9 +110,15 @@ public:
   bool Visit(AST::Return& n) override {
     auto id = GetIdentifier(*n.value);
     if (!id) return true;
-
-    for (auto& item : cgi->GetFunctionSymbols(fname))
-      if (item.name == InScopeName(id->name)) { item.SetAsReturn(); }
+    for (auto& item : cgi->GetFunctionSymbols(fname)) {
+      if (item.name == InScopeName(id->name)) {
+        auto rty_str = RemovePrefixOrNull("host-type:", n.GetNote());
+        if (rty_str.has_value())
+          item.SetAsReturn(STR(rty_str.value()));
+        else
+          item.SetAsReturn("$");
+      }
+    }
 
     cgi->SetReturnSymbol(fname, InScopeName(id->name));
 

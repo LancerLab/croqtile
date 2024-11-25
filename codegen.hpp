@@ -14,7 +14,7 @@ struct SymbolDetail {
   // information from choreo code
   std::string name;
   ptr<Type> type = nullptr;
-  bool is_return = false;
+  std::string rty_str;
   bool is_reference = false;
   int p_index = -1; // index of parameter in choreo function decl
 
@@ -27,16 +27,19 @@ struct SymbolDetail {
   int h_index = -1;   // some target like factor requires host function indices
 
   SymbolDetail(const std::string& n, const ptr<Type>& t, bool ref = false,
-               int index = -1, bool ret = false)
-      : name(n), type(t), is_return(ret), is_reference(ref), p_index(index) {
+               int index = -1, const std::string& ret = "")
+      : name(n), type(t), rty_str(ret), is_reference(ref), p_index(index) {
     assert((!(IsParameter() && IsReference())) &&
            "Parameters are not references.");
   }
 
   bool IsParameter() const { return p_index != -1; }
-  bool IsReturn() const { return is_return; }
+  bool IsReturn() const { return !rty_str.empty(); }
   bool IsReference() const { return is_reference; }
-  void SetAsReturn() { is_return = true; }
+  void SetAsReturn(const std::string& t) {
+    assert(!t.empty());
+    rty_str = t;
+  }
 };
 
 struct LaunchConfig {
@@ -217,11 +220,12 @@ public:
         });
   }
 
-  SymbolDetail GetReturn(const std::string& fname) const {
+  const SymbolDetail& GetReturnDetail(const std::string& fname) const {
     assert(all_syms.count(fname) != 0);
     assert(returns.count(fname) != 0);
     for (auto& item : all_syms.at(fname))
       if (item.name == returns.at(fname)) return item;
+    return all_syms.at(fname).at(0);
   }
 };
 

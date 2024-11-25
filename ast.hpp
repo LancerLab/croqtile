@@ -1182,10 +1182,8 @@ struct Return : public Node, public TypeIDProvider<Return> {
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Return: ";
-    if (!value)
-      os << "void";
-    else
-      value->Print(os);
+    os << ((!value) ? "void" : STR(value));
+    if (!note.empty()) os << " (" << note << ")";
   }
 
   void accept(Visitor&) override;

@@ -356,40 +356,43 @@ public:
 
     if (AST::GetIdentifier(*n.value)) return true;
 
-#if 0
     if (CCtx().GetTarget() != CompileTarget::Factor) return true;
 
     // non-identifier may be normalized
     auto vty = NodeType(*n.value);
 
-    // tricky: we must convert a integer to be 'f32 [1] ...' for a factor return value;
+    // tricky: we must convert a integer to be 's32 [1] ...' for a factor return
+    // value;
     if (isa<IntegerType>(vty)) {
       auto expr = cast<AST::Expr>(n.value);
       if (auto il = expr->GetInt()) {
-      auto & loc = n.value->LOC();
-      auto anon_sym = SymbolTable::GetAnonName();
+        auto& loc = n.value->LOC();
+        auto anon_sym = SymbolTable::GetAnonName();
 
-      // compose the named variable decl with intial value
-      auto mv = AST::Make<AST::MultiValues>(loc, ",");
-      mv->Append(AST::MakeIntExpr(loc, 1));
-      auto mds = AST::Make<AST::MultiDimSpans>(loc, "", mv, 1);
-      auto dt = AST::Make<AST::DataType>(loc, BaseType::F32);
-      auto sto = AST::Make<AST::Memory>(loc, Storage::GLOBAL);
-      auto nv = AST::Make<AST::NamedVariableDecl>(loc, anon_sym, dt, sto, nullptr, il);
+        // compose the named variable decl with intial value
+        auto mv = AST::Make<AST::MultiValues>(loc, ",");
+        mv->Append(AST::MakeIntExpr(loc, 1));
+        auto mds = AST::Make<AST::MultiDimSpans>(loc, "", mv, 1);
+        auto dt = AST::Make<AST::DataType>(loc, BaseType::S32, mds);
+        auto sto = AST::Make<AST::Memory>(loc, Storage::GLOBAL);
+        auto nv = AST::Make<AST::NamedVariableDecl>(loc, anon_sym, dt, sto,
+                                                    nullptr, il);
 
-      assert(cur_node_index != -1);
-      int index = cur_node_index + mnodes_insertions[multi_nodes.top()].size();
-      mnodes_insertions[multi_nodes.top()].emplace_back(
-          std::make_tuple(index, nv, anon_sym));
+        assert(cur_node_index != -1);
+        int index =
+            cur_node_index + mnodes_insertions[multi_nodes.top()].size();
+        mnodes_insertions[multi_nodes.top()].emplace_back(
+            std::make_tuple(index, nv, anon_sym));
 
-      // replace return value now
-      VST_DEBUG(dbgs() << "[Norm] Replace " << STR(n) << "\n to be:\n");
-      n.value = AST::MakeIdExpr(n.value->LOC(), anon_sym);
-      VST_DEBUG(dbgs() << STR(n) << "\n");
-      } else
-    } else 
-      assert(isa<SpannedType>(vty) && "not a passable type.");
-#endif
+        // replace return value now
+        VST_DEBUG(dbgs() << "[Norm] Replace " << STR(n) << "\n to be:\n");
+        n.value = AST::MakeIdExpr(n.value->LOC(), anon_sym);
+        VST_DEBUG(dbgs() << STR(n) << "\n");
+
+        // In host, its return type is still 'int'
+        n.SetNote("host-type:int");
+      }
+    }
 
     return true;
   }
