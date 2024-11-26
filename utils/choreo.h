@@ -205,31 +205,67 @@ public:
     return halfBitsToFloat(bits) == value.toFloat();
   }
 
-  // Function to convert float to half precision bits (naive and placeholder)
+  // Function to convert float to half precision bits
+  // Refer to https://en.wikipedia.org/wiki/Half-precision_floating-point_format
+  //    and https://en.wikipedia.org/wiki/Single-precision_floating-point_format
   static uint16_t floatToHalfBits(float value) {
-    // Simplified conversion: this does not handle rounding, infinities, or NaNs
-    // correctly In practice, use a library or a fully implemented conversion
-    // function
-    int32_t fltInt32 = *((int32_t*)&value);
-    int32_t t1 = (fltInt32 & 0x7FFFFFFF) >> 13; // Non-sign bits
-    int32_t t2 = (fltInt32 & 0x80000000) >> 16; // Sign bit
-    int32_t t3 = ((fltInt32 & 0x7F800000) >> 13) - (112 << 10);
+    uint32_t fltInt32 = *reinterpret_cast<uint32_t*>(&value);
+    uint32_t sign = (fltInt32 >> 31) & 0x1;
+    uint32_t exponent = ((fltInt32 >> 23) & 0xFF); // 8-bit exponent
+    uint32_t fraction = fltInt32 & 0x7FFFFF;       // 23-bit freaction
+    uint16_t resultBits = 0;
 
-    int32_t t4 = std::max(0, std::min(t3, (1 << 10) - 1));
-    return (t2 | t4 | t1);
+    if (exponent == 0x0 && fraction == 0x0) { // Zero
+      return sign << 15;
+    }
+    if (exponent == 0x0 && fraction != 0x0) { // Subnormal for float32
+      // Subnormal float32 is all zero in float16
+      return sign << 15;
+    }
+    if (exponent == 0xFF && fraction == 0x0) { // Infinity
+      return (sign << 15) | (0x1F << 10);
+    }
+    if (exponent - 0x70 > 0x0 && exponent - 0x70 < 0x1F) { // Normalized value
+      // Only exponent within [-14, 15] could be convert to normalized float16
+      // Otherwise it will be inf
+      // Why 0x70(112)? 112 = 127 - 15
+      return (sign << 15) | (((exponent - 0x70) & 0x1F) << 10) |
+             ((fraction & 0x7FE000) >> 13);
+    } else { // Rest cases are all NaN.
+      // This strategy is not quite appropriate and needs improvement.
+      auto nanFraction = (fraction & 0x7FE000) >> 13;
+      if (nanFraction == 0) { nanFraction += 1; }
+      return (sign << 15) | (0x1F << 10) | nanFraction;
+    }
+    return resultBits;
   }
 
-  // Function to convert half precision bits to float (naive and placeholder)
-  static float halfBitsToFloat(uint16_t bits) {
-    // Simplified conversion: this does not handle rounding, infinities, or NaNs
-    // correctly In practice, use a library or a fully implemented conversion
-    // function
-    int32_t t1 = (bits & 0x7FFF) << 13; // Non-sign bits
-    int32_t t2 = (bits & 0x8000) << 16; // Sign bit
-    int32_t t3 = ((bits & 0x7C00) << 13) + (112 << 23);
+  // Function to convert half precision bits to float
+  // Refer to https://en.wikipedia.org/wiki/Half-precision_floating-point_format
+  //    and https://en.wikipedia.org/wiki/Single-precision_floating-point_format
+  static float halfBitsToFloat(uint16_t fltInt16) {
+    uint32_t sign = (fltInt16 >> 15) & 0x1;
+    uint32_t exponent = ((fltInt16 >> 10) & 0x1F); // 5-bit exponent
+    uint32_t fraction = fltInt16 & 0x3FF;          // 10-bit fraction
+    uint32_t resultBits = 0;
 
-    int32_t fltInt32 = t2 | t3 | t1;
-    return *((float*)&fltInt32);
+    if (exponent == 0x0 && fraction == 0x0) { // Zero
+      resultBits = sign << 31;
+    }
+    if (exponent == 0x0 && fraction != 0x0) { // Subnormal for float16
+      // Subnormal float16 is noramlized in float32.
+      // Why 0x89(137)? 137 = 127 + 23 - 13
+      // Why (fraction - 1)? Minus the implicit "1" from normalized
+      resultBits = (sign << 31) | (0x89) << 23 | ((fraction - 1) << 13);
+    }
+    if (exponent > 0x0 && exponent < 0x1F) { // Normalized value
+      // Why 112? 112 = 127 - 15
+      resultBits = (sign << 31) | (exponent + 112) << 23 | (fraction << 13);
+    }
+    if (exponent == 0x1F && fraction != 0) { // Infinity or NaN
+      resultBits = (sign << 31) | 0x7F800000 | (fraction << 13);
+    }
+    return *reinterpret_cast<float*>(&resultBits);
   }
 
   // Method to get the float value from the f16 object
@@ -400,8 +436,14 @@ private:
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<float> rand_func(
+#ifdef NATIVE_F16_SUPPORT
+        static_cast<float>(lb),
+        static_cast<float>(ub)
+#else
         lb.toFloat(),
-        ub.toFloat()); // 浮点数范围 [-1.0, 1.0)
+        ub.toFloat()
+#endif
+    ); // 浮点数范围 [-1.0, 1.0)
 
     std::generate_n(&array[0], N, [&]() { return U(rand_func(gen)); });
   }
