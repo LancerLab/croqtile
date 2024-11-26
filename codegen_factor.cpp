@@ -121,12 +121,26 @@ bool FactorCodeGen::AfterVisitImpl(AST::Node& n) {
 
     fs << "} // end of " << factor_fname << "\n\n";
 
-    // some backpatching of factor alloc statement
-    std::string factor_function_code = fs.str();
-    if (!alloc_in_fs.str().empty())
-      factor_function_code.insert(alloc_pos, alloc_in_fs.str());
+    // std::string placeholder = fs.str();
+    // while (!alloc_fs_stack.empty()) {
+    //   std::cout << "anchor" << std::endl;
+    //   std::cout << alloc_fs_stack.size() << std::endl;
+    //   std::cout << alloc_indent_stack.size() << std::endl;
+    //   std::cout << alloc_pos_stack.size() << std::endl;
+    //   std::cout << alloc_fs_stack.top().str() << std::endl;
+    //   std::cout << alloc_indent_stack.top() << std::endl;
+    //   std::cout << alloc_pos_stack.top() << std::endl;
+    //   if (!alloc_fs_stack.top().str().empty())
+    //     placeholder.insert(alloc_pos_stack.top(), alloc_fs_stack.top().str());
+    //   alloc_fs_stack.pop();
+    //   alloc_pos_stack.pop();
+    //   alloc_indent_stack.pop();
+    // }
+    // fs.str("");
+    // fs << placeholder;
 
     // append the function code to factor source code
+    std::string factor_function_code = fs.str();
     factor_code += factor_function_code;
   } else if (isa<AST::ParallelBy>(&n)) {
     parallel_level--;
@@ -134,6 +148,24 @@ bool FactorCodeGen::AfterVisitImpl(AST::Node& n) {
       this->DecrementIndent();
       fs << this->indent << "}); // end of choreo-factor device function\n";
     }
+
+    std::string placeholder = fs.str();
+    if (!alloc_fs_stack.empty()) {
+      // std::cout << "anchor" << std::endl;
+      // std::cout << alloc_fs_stack.size() << std::endl;
+      // std::cout << alloc_indent_stack.size() << std::endl;
+      // std::cout << alloc_pos_stack.size() << std::endl;
+      // std::cout << alloc_fs_stack.top().str() << std::endl;
+      // std::cout << alloc_indent_stack.top() << std::endl;
+      // std::cout << alloc_pos_stack.top() << std::endl;
+      if (!alloc_fs_stack.top().str().empty())
+        placeholder.insert(alloc_pos_stack.top(), alloc_fs_stack.top().str());
+      alloc_fs_stack.pop();
+      alloc_pos_stack.pop();
+      alloc_indent_stack.pop();
+    }
+    fs.str("");
+    fs << placeholder;
   } else if (auto f = dyn_cast<AST::ForeachBlock>(&n)) {
     // erase the loop variables
     assert(!loop_vars.empty());
@@ -156,6 +188,25 @@ bool FactorCodeGen::AfterVisitImpl(AST::Node& n) {
       }
     }
   } else if (auto wb = dyn_cast<AST::WithBlock>(&n)) {
+    // handle allocations of this within block
+    std::string placeholder = fs.str();
+    if (!alloc_fs_stack.empty()) {
+      // std::cout << "anchor" << std::endl;
+      // std::cout << alloc_fs_stack.size() << std::endl;
+      // std::cout << alloc_indent_stack.size() << std::endl;
+      // std::cout << alloc_pos_stack.size() << std::endl;
+      // std::cout << alloc_fs_stack.top().str() << std::endl;
+      // std::cout << alloc_indent_stack.top() << std::endl;
+      // std::cout << alloc_pos_stack.top() << std::endl;
+      if (!alloc_fs_stack.top().str().empty())
+        placeholder.insert(alloc_pos_stack.top(), alloc_fs_stack.top().str());
+      alloc_fs_stack.pop();
+      alloc_pos_stack.pop();
+      alloc_indent_stack.pop();
+    }
+    fs.str("");
+    fs << placeholder;
+
     for (auto wi : wb->withins->AllSubs()) {
       auto w = cast<AST::WithIn>(wi);
       if (w->with && w->with_matchers) {
@@ -258,9 +309,9 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl& node) {
       if (storage_type == "DRAMType")
         fs << indent << _os.str();
       else if (storage_type == "SRAMType") {
-        alloc_in_fs << "    " << _os_shared.str();
+        alloc_fs_stack.top() << alloc_indent_stack.top() << _os_shared.str();
       } else
-        alloc_in_fs << "    " << _os.str();
+        alloc_fs_stack.top() << alloc_indent_stack.top() << _os.str();
 
       if (node.init_value) {
         // generate "memset_()" action when span-initializer exists
@@ -447,9 +498,11 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
     fs << drefs.str();
   }
 
-  // record the position since some codes requires declaration in function scope
-  alloc_pos = fs.str().size();
-  alloc_indent = indent;
+  // handle allocation stmts for global vars
+  alloc_pos_stack.push(fs.str().size());
+  alloc_indent_stack.push(indent);
+  alloc_fs_stack.push(std::ostringstream());
+
 
   return true;
 }
@@ -484,6 +537,10 @@ bool FactorCodeGen::Visit(AST::WithIn& n) {
 
   // make with-in scopes be isolated
   fs << indent << "{ // start of with-in: " << n.LOC() << "\n";
+  // record the position since some codes requires declaration in function scope
+  alloc_pos_stack.push(fs.str().size());
+  alloc_indent_stack.push(indent);
+  alloc_fs_stack.push(std::ostringstream());
 
   // associate with to the matcher.
   if (n.with && n.with_matchers) {
@@ -512,7 +569,7 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
     auto fty = cast<FutureType>(GetSymbolType(d.future));
     auto gcu_dma = "CDMA";
     if (GetSpannedType(fty)->GetStorage() == Storage::LOCAL) gcu_dma = "SDMA";
-    alloc_in_fs << alloc_indent << "auto " << d.future << " = alloc_dma_("
+    alloc_fs_stack.top() << alloc_indent_stack.top()<< "auto " << d.future << " = alloc_dma_("
                 << gcu_dma << "Type());\n";
     return true;
   }
@@ -605,11 +662,24 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
   if (d.GetNote() != "use-fut") {
     if (d.chained == true && ((d.chain_to != "" && src_level > dst_level) ||
                               (d.chain_from != "" && src_level < dst_level)))
-      alloc_in_fs << alloc_indent << "auto " << future_name << " = alloc_dma_("
+      alloc_fs_stack.top() << alloc_indent_stack.top()<< "auto " << future_name << " = alloc_dma_("
                   << DMATypeString(src_level, dst_level) << "()).shared_();\n";
-    else
-      alloc_in_fs << alloc_indent << "auto " << future_name << " = alloc_dma_("
+    else if (d.chained == true) {
+      // hoist sdma for chained usage, to avoid use before definition
+      std::ostringstream fs_tmp = std::move(alloc_fs_stack.top());
+      std::string ind_tmp = alloc_indent_stack.top();
+      alloc_fs_stack.pop();
+      alloc_indent_stack.pop();
+      alloc_fs_stack.top() << alloc_indent_stack.top() << "auto " << future_name << " = alloc_dma_("
                   << DMATypeString(src_level, dst_level) << "());\n";
+      alloc_fs_stack.push(std::move(fs_tmp));
+      alloc_indent_stack.push(ind_tmp);
+
+    } else {
+      alloc_fs_stack.top() << alloc_indent_stack.top() << "auto " << future_name << " = alloc_dma_("
+                  << DMATypeString(src_level, dst_level) << "());\n";
+
+    }
   }
 
   // decide the dma operation

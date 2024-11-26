@@ -52,8 +52,11 @@ private:
   std::string host_code;
   std::string factor_code;
 
-  std::string::size_type alloc_pos;
-  std::string alloc_indent;
+  // std::string::size_type alloc_pos;
+  // std::string alloc_indent;
+  std::stack<std::ostringstream> alloc_fs_stack;
+  std::stack<int> alloc_pos_stack;
+  std::stack<std::string> alloc_indent_stack;
 
   // backend (factor) compile environment related
   std::string build_path;      // path for the script to build factor code

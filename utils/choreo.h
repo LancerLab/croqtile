@@ -203,10 +203,9 @@ public:
   }
 
   bool operator==(f16 value) {
-    if (std::isnan(value.toFloat())) {
-      return std::isnan(halfBitsToFloat(bits));
-    }
-    return halfBitsToFloat(bits) == value.toFloat();
+    auto valueF = value.toFloat();
+    if (std::isnan(valueF)) { return std::isnan(halfBitsToFloat(bits)); }
+    return halfBitsToFloat(bits) == valueF;
   }
 
   // Function to convert float to half precision bits
@@ -427,7 +426,7 @@ private:
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<U> rand_func(lb,
-                                                ub); // 浮点数范围 [-1.0, 1.0)
+                                                ub); // [-1.0, 1.0)
 
     std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
   }
@@ -447,7 +446,7 @@ private:
         lb.toFloat(),
         ub.toFloat()
 #endif
-    ); // 浮点数范围 [-1.0, 1.0)
+    ); // [-1.0, 1.0)
 
     std::generate_n(&array[0], N, [&]() { return U(rand_func(gen)); });
   }
@@ -465,13 +464,13 @@ private:
   }
 
   // s32/u32 ...
-  // 如果 T 是整数类型，使用 std::uniform_int_distribution
+  // if T is integer，utilize std::uniform_int_distribution
   template <typename U>
   typename std::enable_if<std::is_integral<U>::value>::type
   fill_random(U* array, size_t N, U lb, U ub) {
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_int_distribution<U> rand_func(lb, ub); // 整数范围 [-100, 100]
+    std::uniform_int_distribution<U> rand_func(lb, ub); // [-100, 100]
 
     std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
   }
