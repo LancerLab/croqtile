@@ -464,36 +464,39 @@ __co__ f32 [L] addcdiv(f32 [L] first, f32 [L] second, f32 [L] third) { /// devic
         swap(second_load_A, second_load_B);
         swap(third_load_A, third_load_B);
       }
-      // #c_tile(-1) SHOULD be last var of range 0-to-L/8192 => 0-12 => 11 
+      // NOTE: #c_tile(-1) SHOULD be last var of range 0-to-L/8192 => 0-12 => 11 
+      // c_tile is not bounded to a literal, but a expr with int-compile-time-value,
+      // this value is not simplified to visible by its user
+
       first_load_tail = select(#c_tile % 2, first_load_B, first_load_A);
       second_load_tail = select(#c_tile % 2, second_load_B, second_load_A);
       third_load_tail = select(#c_tile % 2, third_load_B, third_load_A);
       wait first_load_tail, second_load_tail, third_load_tail;
       parallel q by 1 {
-        // BUG: cannot same naming
+        // NOTE: cannot same naming
         local f32[8192] out_s_tail;
         local f32[8192] tmp_tail;
         with index = {s_tile} in [1] {
           foreach s_tile {
-            // BUG: cannot naming same
-            first_load_s_tail = dma.copy.async first_load_tail.data.chunkat(s_tile) => local;
+            // NOTE: cannot naming same
+            first_load_s = dma.copy.async first_load_tail.data.chunkat(s_tile) => local;
             second_load_s_tail = dma.copy.async second_load_tail.data.chunkat(s_tile) => local;
             third_load_s_tail = dma.copy.async third_load_tail.data.chunkat(s_tile) => local;
-            wait first_load_s_tail, second_load_s_tail, third_load_s_tail;
+            wait first_load_s, second_load_s_tail, third_load_s_tail;
             call addcdiv_kernel_0_c_func_fp32(
-                first_load_s_tail.data, 
+                first_load_s.data, 
                 second_load_s_tail.data, 
                 third_load_s_tail.data, 
                 out_s_tail,
                 tmp_tail);
-            // BUG: dito
+            // NOTE: dito
             out_store_s_tail = dma.copy.async out_s_tail => out.chunkat(s_tile); // can use defined vars
             wait out_store_s_tail;
           }
         }
       }
-      // BUG: DITO
-      // BUG: c_tile(-1) evals to wrong value
+      // NOTE: DITO
+      // NOTE: c_tile(-1) evals to wrong value
       out_store_tail = dma.copy.async out => output.chunkat(c_tile(-1)); // can use defined vars
       wait out_store_tail;
     }
