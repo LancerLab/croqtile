@@ -664,9 +664,22 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
                               (d.chain_from != "" && src_level < dst_level)))
       alloc_fs_stack.top() << alloc_indent_stack.top()<< "auto " << future_name << " = alloc_dma_("
                   << DMATypeString(src_level, dst_level) << "()).shared_();\n";
-    else
-      alloc_fs_stack.top() << alloc_indent_stack.top()<< "auto " << future_name << " = alloc_dma_("
+    else if (d.chained == true) {
+      // hoist sdma for chained usage, to avoid use before definition
+      std::ostringstream fs_tmp = std::move(alloc_fs_stack.top());
+      std::string ind_tmp = alloc_indent_stack.top();
+      alloc_fs_stack.pop();
+      alloc_indent_stack.pop();
+      alloc_fs_stack.top() << alloc_indent_stack.top() << "auto " << future_name << " = alloc_dma_("
                   << DMATypeString(src_level, dst_level) << "());\n";
+      alloc_fs_stack.push(std::move(fs_tmp));
+      alloc_indent_stack.push(ind_tmp);
+
+    } else {
+      alloc_fs_stack.top() << alloc_indent_stack.top() << "auto " << future_name << " = alloc_dma_("
+                  << DMATypeString(src_level, dst_level) << "());\n";
+
+    }
   }
 
   // decide the dma operation

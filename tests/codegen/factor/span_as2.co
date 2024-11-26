@@ -31,12 +31,12 @@ __co__ auto transpose(s32 [64, 256, 32] input) {
   }
   return output;
 }
+// CHECK:     auto tmp_shape_s = alloc_dma_(SDMAType());
 // CHECK:     auto out_store = alloc_dma_(CDMAType());
 // CHECK:     auto input_shape_c_dma__buf__ = alloc_(SRAMType(IntType(32),{1, 16, 512})).shared_(SharedType::kBlockShared);
 // CHECK:     auto input_shape_c_dma = alloc_dma_(CDMAType()).shared_();
 // CHECK:     auto output_reshape_c = alloc_(SRAMType(IntType(32),{32, 16, 16})).shared_(SharedType::kBlockShared);
 // CHECK:     auto tmp_shape_s__buf__ = alloc_(L1Type(IntType(32),{16, 512}));
-// CHECK:     auto tmp_shape_s = alloc_dma_(SDMAType());
 // CHECK:     auto tmp_shape_s_2 = alloc_(L1Type(IntType(32),{512, 16}));
 // CHECK:     auto tmp_shape_s_3 = alloc_(L1Type(IntType(32),{32, 16, 16}));
 // CHECK:     auto out_store_c = alloc_dma_(SDMAType());
