@@ -6,6 +6,7 @@
 #endif
 
 #include <algorithm>
+#include <cmath>            // For fp16
 #include <cstdint>          // For fixed-width integer types
 #include <initializer_list> // for std::initializer_list
 #include <iostream>         // report error
@@ -202,6 +203,9 @@ public:
   }
 
   bool operator==(f16 value) {
+    if (std::isnan(value.toFloat())) {
+      return std::isnan(halfBitsToFloat(bits));
+    }
     return halfBitsToFloat(bits) == value.toFloat();
   }
 
