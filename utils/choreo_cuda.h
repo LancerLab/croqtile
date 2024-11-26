@@ -224,19 +224,19 @@ private:
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<U> rand_func(-1.0,
-                                                1.0); // 浮点数范围 [-1.0, 1.0)
+                                                1.0); // [-1.0, 1.0)
 
     std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
   }
 
-  // 如果 T 是整数类型，使用 std::uniform_int_distribution
+  // if T is integer，utilize std::uniform_int_distribution
   template <typename U>
   typename std::enable_if<std::is_integral<U>::value>::type
   fill_random(U (&array)[N], std::false_type) {
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_int_distribution<U> rand_func(-100,
-                                               100); // 整数范围 [-100, 100]
+                                               100); // [-100, 100]
 
     std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
   }
@@ -531,7 +531,7 @@ private:
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<U> rand_func(lb,
-                                                ub); // 浮点数范围 [-1.0, 1.0)
+                                                ub); // [-1.0, 1.0)
 
     std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
   }
@@ -545,7 +545,7 @@ private:
     std::mt19937 gen(rd());
     std::uniform_real_distribution<float> rand_func(
         lb.toFloat(),
-        ub.toFloat()); // 浮点数范围 [-1.0, 1.0)
+        ub.toFloat()); // [-1.0, 1.0)
 
     std::generate_n(&array[0], N, [&]() { return U(rand_func(gen)); });
   }
@@ -563,13 +563,13 @@ private:
   }
 
   // s32/u32 ...
-  // 如果 T 是整数类型，使用 std::uniform_int_distribution
+  // If T is integer, utilize std::uniform_int_distribution
   template <typename U>
   typename std::enable_if<std::is_integral<U>::value>::type
   fill_random(U* array, size_t N, U lb, U ub) {
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_int_distribution<U> rand_func(lb, ub); // 整数范围 [-100, 100]
+    std::uniform_int_distribution<U> rand_func(lb, ub); // [-100, 100]
 
     std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
   }
