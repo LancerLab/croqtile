@@ -998,8 +998,7 @@ bool EarlySemantics::Visit(AST::Call& n) {
     count++;
     auto ty = NodeType(*v);
     // must be a callable type
-    if (!isa<SpannedType>(ty) && !isa<IntegerType>(ty) &&
-        !isa<BooleanType>(ty)) {
+    if (!CanYieldAnInteger(ty) && !isa<SpannedType>(ty)) {
       Error(n.LOC(), "(" + std::to_string(count) + "th) argument of type '" +
                          PSTR(ty) +
                          "` can not be passed to the kernel function.");

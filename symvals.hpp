@@ -1,12 +1,12 @@
 #ifndef __CHOREO_SYMBOL_VALUES_H__
 #define __CHOREO_SYMBOL_VALUES_H__
 
+#include <limits>
 #include <sstream>
 #include <string>
 #include <unordered_map>
 #include <variant>
 #include <vector>
-#include <limits>
 
 namespace Choreo {
 

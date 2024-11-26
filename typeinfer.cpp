@@ -213,6 +213,7 @@ bool TypeInference::Visit(AST::Identifier& n) {
 bool TypeInference::Visit(AST::NamedVariableDecl& n) {
   TraceEachVisit(n);
 
+  // annotate it should not take storage
   if (n.init_expr && (isa<AST::Select>(AST::Ref(n.init_expr)) ||
                       isa<AST::SpanAs>(AST::Ref(n.init_expr))))
     n.SetNote("ref");
@@ -556,6 +557,10 @@ bool TypeInference::Visit(AST::Expr& n) {
         n.SetType(MakeBoundedITupleType(Shape(1, ub)));
         cur_type = n.GetType();
       }
+    } else if (n.IsArith() && CanYieldAnInteger(pty_lhs) &&
+               CanYieldAnInteger(pty_rhs)) {
+      // it is ok to make compatiable types to do arith
+      n.SetType(MakeIntegerType());
     } else if (*pty_lhs != *pty_rhs) {
       Error(n.LOC(), "The operands of the expression cannot undergo '" + n.op +
                          "' operation.");

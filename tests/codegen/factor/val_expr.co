@@ -1,0 +1,25 @@
+// RUN: choreo -kt %s | FileCheck %s
+
+__co__ void foo() {
+  int i = 3;
+  it = {7, 6, 5};
+  parallel p by 2 {
+    with {a} in [7] {
+      b = #a + i + it(0);
+      call bar(i);
+      call foobar(b);
+      foreach a {
+         c = a + b;
+         call fish<it(1) + b>(c);
+      }
+    }
+  }
+}
+
+// CHECK: extern "C" void fish_template_wrapper(int* arg0) {
+// CHECK:   fish<(23)>(arg0);
+// CHECK: }
+
+// CHECK:     call_("bar", {Value(3)});
+// CHECK:     call_("foobar", {Value(17)});
+// CHECK:       call_("fish_template_wrapper", {((iv_a)+(Value(17)))});

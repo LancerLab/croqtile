@@ -273,7 +273,7 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl& node) {
         fs << indent << "memset_(" << sym << "_init, " << sym << ", 0);\n";
       }
     }
-  } else if (isa<IntegerType>(nty) || isa<ITupleType>(nty)) {
+  } else if (CanYieldAnInteger(nty) || isa<ITupleType>(nty)) {
     // simply ignore the generation of integers since valno has propagate the
     // values on the use sites
   } else {
@@ -688,7 +688,7 @@ bool FactorCodeGen::Visit(AST::Call& c) {
 
   assert(c.arguments && "Invalid kernel call args!");
 
-  if (!use_kernel_template)
+  if (!use_kernel_template || !c.template_args)
     fs << this->indent << "call_(\"" << STR(*c.function) << "\", {";
   else
     fs << this->indent << "call_(\"" << STR(*c.function) << "_template_wrapper"
@@ -702,13 +702,14 @@ bool FactorCodeGen::Visit(AST::Call& c) {
   }
   fs << "});\n";
 
-  if (use_kernel_template) {
+  if (use_kernel_template && c.template_args) {
     // handle kernel template wrapper
     ks << "extern \"C\" void " << STR(*c.function) << "_template_wrapper(";
     for (size_t index = 0; index < arg_num; ++index) {
       auto arg = c.arguments->ValueAt(index);
-      ks << KernelTypeStringify(cast<SpannedType>(arg->GetType())->f_type)
-         << "* ";
+      auto ft = GetUnderlyingType(arg->GetType());
+      assert(ft != BaseType::UNKNOWN);
+      ks << KernelTypeStringify(ft) << "* ";
       ks << "arg" << index;
       if (index < arg_num - 1) ks << ", ";
     }
@@ -1443,16 +1444,20 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
   } else if (auto ii = dyn_cast<AST::IntIndex>(e)) {
     return ExprSTR(ii->value);
   } else if (auto expr = dyn_cast<AST::Expr>(e)) {
+    // utilize the optimize value whenever possible
+    if (auto sym = expr->GetSymbol()) {
+      auto sname = InScopeName(sym->name);
+      if (FCtx(fname).HasSymbolValues(sname)) {
+        auto svs = FCtx(fname).GetSymbolValues(sname);
+        if (IsValidValueItem(svs.int_expr))
+          return std::string((factor_value) ? "Value" : "") + "(" +
+                 STR(svs.int_expr) + ")";
+      }
+    }
     if (ConvertibleToInt(NodeType(*e))) {
       if (IsValidValueItem(expr->opt_vals.int_expr)) {
-        // prefer to use the deduced value when possible
         return std::string((factor_value) ? "Value" : "") + "(" +
                STR(expr->opt_vals.int_expr) + ")";
-      } else if (expr->s.IsValid() && !expr->s.IsDynamic()) {
-        // TODO: do we need this?
-        assert(expr->s.DimCount() == 1 && "A 1-dimensional value is expected.");
-        return std::string((factor_value) ? "Value" : "") + "(" +
-               STR(expr->s.ValueAt(0)) + ")";
       }
     }
     if (expr->IsReference()) {

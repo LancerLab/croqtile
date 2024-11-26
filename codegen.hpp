@@ -307,17 +307,19 @@ static inline std::string HostTypeStringify(const Choreo::Type& ty,
   return "";
 }
 
-static inline std::string
-KernelTypeStringify(const Choreo::FundamentalType& type) {
+static inline std::string KernelTypeStringify(const Choreo::BaseType& type) {
   switch (type) {
-  case Choreo::FundamentalType::F32: return "float";
-  case Choreo::FundamentalType::U32: return "unsigned int";
-  case Choreo::FundamentalType::U16: return "uint16_t";
-  case Choreo::FundamentalType::U8: return "uint8_t";
-  case Choreo::FundamentalType::S32: return "int";
-  case Choreo::FundamentalType::S16: return "int16_t";
-  case Choreo::FundamentalType::S8: return "int8_t";
-  default: choreo_unreachable("unsupported kernel function type.");
+  case Choreo::BaseType::F32: return "float";
+  case Choreo::BaseType::U32: return "unsigned int";
+  case Choreo::BaseType::U16: return "uint16_t";
+  case Choreo::BaseType::U8: return "uint8_t";
+  case Choreo::BaseType::S32: return "int";
+  case Choreo::BaseType::S16: return "int16_t";
+  case Choreo::BaseType::S8: return "int8_t";
+  case Choreo::BaseType::INT: return "int";
+  case Choreo::BaseType::BOOL: return "bool";
+  default:
+    choreo_unreachable("unsupported kernel function type: " + STR(type) + ".");
   }
 }
 

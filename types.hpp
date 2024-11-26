@@ -674,6 +674,8 @@ struct ScalarType : public Type, public TypeIDProvider<ScalarType> {
   __UDT_TYPE_INFO__(Type, ScalarType)
 };
 
+inline bool ConvertibleToInt(const Type& ty);
+
 struct IntegerType : public ScalarType, public TypeIDProvider<IntegerType> {
   ValueItem value = GetInvalidValueItem(); // optional value expression
   IntegerType() : ScalarType(TypeCategory::INT) {}
@@ -693,6 +695,10 @@ struct IntegerType : public ScalarType, public TypeIDProvider<IntegerType> {
     return isa<IntegerType>(&ty);
   }
   bool ApprxEqual(const Type& ty) const override { return operator==(ty); }
+
+  bool LogicalEqual(const Type& ty) const override {
+    return ConvertibleToInt(ty);
+  }
 
   __UDT_TYPE_INFO__(ScalarType, IntegerType)
 };
@@ -768,6 +774,13 @@ struct ITupleType : public Type, public TypeIDProvider<ITupleType> {
         return true;
     }
     return false;
+  }
+
+  bool LogicalEqual(const Type& ty) const override {
+    if (ConvertibleToInt(*this))
+      return ConvertibleToInt(ty);
+    else
+      return operator==(ty);
   }
 
   __UDT_TYPE_INFO__(Type, ITupleType)
@@ -1205,6 +1218,10 @@ inline bool ConvertibleToInt(const ptr<Type>& ty) {
   return isa<ScalarType>(ty) || (isa<ITupleType>(ty) && ty->Dims() == 1);
 }
 
+inline bool ConvertibleToInt(const Type& ty) {
+  return isa<ScalarType>(&ty) || (isa<ITupleType>(&ty) && ty.Dims() == 1);
+}
+
 inline const ValueItem& GetSingleUpperBound(const ptr<Type>& ty) {
   if (!IsActualBoundedIntegerType(ty))
     choreo_unreachable("can not get the single upper bound for a " + PSTR(ty) +
@@ -1428,6 +1445,17 @@ inline bool BetterQuality(const ptr<Type>& a, const ptr<Type>& b) {
   if (*a == *b) return false;
 
   return false;
+}
+
+inline static BaseType GetUnderlyingType(const ptr<Type>& ty) {
+  if (isa<ScalarType>(ty))
+    return TC2BT(ty->Category());
+  else if (auto sty = GetSpannedType(ty))
+    return sty->ElementType();
+  else if (isa<ITupleType>(ty) &&
+           ty->Dims() == 1) // special handling of ituple with dim-1
+    return BaseType::INT;
+  return BaseType::UNKNOWN;
 }
 
 } // end namespace Choreo
