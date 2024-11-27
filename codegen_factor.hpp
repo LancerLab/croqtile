@@ -134,6 +134,7 @@ private:
   bool ContainsLoopVar(const std::string&) const;
 
   void EmitScript();
+  void EmitFactorSource();
 
   void EmitFixedHostHead();
   void EmitFixedFactorHead();

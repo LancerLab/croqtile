@@ -37,7 +37,7 @@ void generate_elements(T* d) {
 }
 
 class HeaderTest : public ::testing::Test {
- protected:
+protected:
   std::string temp_filename;
   int tempfile_desc;
 
@@ -48,12 +48,12 @@ class HeaderTest : public ::testing::Test {
       perror("Error creating temporary file");
       exit(EXIT_FAILURE);
     }
-    temp_filename = temp_template;  // Update filename
+    temp_filename = temp_template; // Update filename
   }
 
   virtual void TearDown() {
-    close(tempfile_desc);           // Close file descriptor
-    remove(temp_filename.c_str());  // Delete file
+    close(tempfile_desc);          // Close file descriptor
+    remove(temp_filename.c_str()); // Delete file
   }
 
   void createFileWithContent(const std::string& filename,

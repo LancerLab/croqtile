@@ -151,6 +151,12 @@ inline static const std::string ToUpper(const std::string& s) {
   return r;
 }
 
+inline static const std::string ToLower(const std::string& s) {
+  std::string r(s.size(), '\0');
+  transform(s.begin(), s.end(), r.begin(), ::tolower);
+  return r;
+}
+
 inline const std::string RemoveDirectoryPrefix(const std::string& path) {
   size_t pos = path.find_last_of("/\\");
   if (pos == std::string::npos) { return path; }

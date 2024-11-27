@@ -31,39 +31,80 @@ SymbolTable symtab;
 using namespace AST;
 using namespace Choreo;
 
-int main(int argc, char* argv[]) {
-  Option<std::string> target("--target", "-t", "factor", true);
-  Option<std::string> arch("--architecture", "-arch", "gcu300");
-  Option<std::string> output("--output", "-o", "", true);
+Option<std::string> target(
+    OptionKind::User, "--target", "-t", "factor",
+    "Set the compilation target. The 'platform' includes <factor|topscc|cuda>.",
+    "--target=<platform>", true);
+Option<std::string> arch(OptionKind::User, "-arch", "", "gcu300",
+                         "Set the architecture to execute the binary code.");
+Option<std::string> output(OptionKind::User, "-o", "", "",
+                           "Place the output into <file>.", "-o <file>", true);
 
-  Option<std::string> abend_after("--stop-after", "-sa", "");
-  Option<std::string> trace_visit("--trace-visit", "-tv", "");
-  Option<std::string> debug_visit("--debug-visit", "-dv", "");
-  Option<std::string> print_ahead("--print-before", "-pb", "");
-  Option<std::string> print_after("--print-after", "-pa", "");
-  Option<std::string> dsyms_after("--dump-symbol-after", "-ds", "");
-  Option<bool> print_ahead_all("--print-before-all", "-pba", false);
-  Option<bool> print_after_all("--print-after-all", "-paa", false);
-  Option<bool> cross_compile("--cross-compile", "-cc", false);
-  Option<bool> debug_on("--debug", "-d", false);
-  Option<bool> dump_ast("--dump-ast", "-e", false);
-  Option<bool> print_vn("--print-valno", "-v", false);
-  Option<bool> inf_type("--infer-types", "-i", false);
-  Option<bool> dump_sym("--dump-symbol", "-l", false);
-  Option<bool> visualiz("--visualize", "-u", false);
-  Option<bool> ncodegen("--no-codegen", "-s", false);
-  Option<bool> del_comm("--remove-comments", "-n", false);
-  Option<bool> sym_repl("--print-sym-replace", "-sr", false);
-  Option<bool> prt_pass("--show-passes", "-sp", false);
-  Option<bool> no_pp("--no-preprocess", "-npp", false);
-  Option<bool> pp_only("--preprocess-only", "-E", false);
-  Option<bool> use_kernel_template("--use_kernel_template", "-kt", false);
+Option<bool>
+    emit_source(OptionKind::User, "-es", "", false,
+                "Emit target source file without target source compilation.");
+Option<bool>
+    del_comm(OptionKind::User, "--remove-comments", "-n", false,
+             "Remove all comments in non-choreo code. (Useful for FileCheck)");
+Option<bool> inf_type(OptionKind::User, "--infer-types", "-i", false,
+                      "Show the result of type inference.");
+Option<bool> pp_only(OptionKind::User, "-E", "", false,
+                     "Preprocess only; do not compile.");
+Option<bool> no_pp(OptionKind::Hidden, "--no-preprocess", "-npp", false,
+                   "Donnot invoke Choreo Proprocessor to compile.");
+Option<bool> use_kernel_template(
+    OptionKind::Hidden, "--use_kernel_template", "-kt", false,
+    "(Experimental) Allow choreo code to instantiate C++ template functions.");
+Option<bool>
+    native_f16(OptionKind::User, "--native-f16", "-f16n", false,
+               "Utilize native f16 type when target platform support.");
+
+Option<std::string> abend_after(OptionKind::Hidden, "--stop-after", "-sa", "",
+                                "Stop compilation after the visit pass.",
+                                "--stop-after=<pass-name>");
+Option<std::string> trace_visit(
+    OptionKind::Hidden, "--trace-visit", "-tv", "",
+    "Enable tracing of node visits during AST traversal by the visit pass.");
+Option<std::string>
+    debug_visit(OptionKind::Hidden, "--debug-visit", "-dv", "",
+                "Enable debugging during AST traversal by the visit pass.");
+Option<std::string> print_ahead(OptionKind::Hidden, "--print-before", "-pb", "",
+                                "Print AST ahead of the visit pass.");
+Option<std::string> print_after(OptionKind::Hidden, "--print-after", "-pa", "",
+                                "Print AST after the visit pass.");
+Option<std::string> dsyms_after(OptionKind::Hidden, "--dump-symbol-after",
+                                "-ds", "",
+                                "Dump the symbol table after the visit pass.");
+Option<bool> print_ahead_all(OptionKind::Hidden, "--print-before-all", "-pba",
+                             false, "Print AST ahead of all the visit passes.");
+Option<bool> print_after_all(OptionKind::Hidden, "--print-after-all", "-paa",
+                             false, "Print AST after all the visit passes.");
+Option<bool> cross_compile(OptionKind::Hidden, "--cross-compile", "-cc",
+                           false); // useful?
+Option<bool> debug_on(OptionKind::Hidden, "--debug", "-d", false,
+                      "Enable Debugging of all the visit passes.");
+Option<bool> dump_ast(OptionKind::User, "--dump-ast", "-e", false,
+                      "Dump the Abstract Syntax Tree (AST) after parsing.");
+Option<bool> print_vn(OptionKind::Hidden, "--print-valno", "-v", false,
+                      "Trace the value numbering process.");
+Option<bool> dump_sym(OptionKind::Hidden, "--dump-symbol", "-l", false,
+                      "Dump the symbol table after LATENORM.");
+Option<bool> visualiz(OptionKind::Hidden, "--visualize", "-u", false,
+                      "Visualize the data movement of DMAs.");
+Option<bool> ncodegen(OptionKind::Hidden, "--no-codegen", "-s", false,
+                      "Do not generate Code.");
+Option<bool> sym_repl(OptionKind::Hidden, "--print-sym-replace", "-sr", false,
+                      "Trace the symbol replace process.");
+Option<bool> prt_pass(OptionKind::Hidden, "--show-passes", "-sp", false,
+                      "Show the visit pass pipeline.");
+
+int main(int argc, char* argv[]) {
 
   // parse all the options
   auto& r = OptionRegistry::GetInstance();
   if (!r.Parse(argc, argv)) {
-    errs() << "Usage: " << argv[0] << " <filename>\n";
-    exit(1);
+    if (!r.Message().empty()) errs() << r.Message() << "\n";
+    exit(r.ReturnCode());
   }
   r.SetOutputStream(output.GetValue());
 

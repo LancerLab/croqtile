@@ -5,14 +5,14 @@
 using namespace Choreo;
 
 int main(int argc, char* argv[]) {
-  Option<std::string> output("--output", "-o", "", true);
+  Option<std::string> output(OptionKind::User, "--output", "-o", "", "Place the output into <file>.", "-o <file>", true);
   // parse all the options
   OptionRegistry& r = OptionRegistry::GetInstance();
   if (!r.Parse(argc, argv)) {
-    errs() << "Usage: " << argv[0] << " <filename>\n";
-    exit(1);
+    if (!r.Message().empty())
+      errs() << r.Message() << "\n";
+    exit(r.ReturnCode());
   }
-
   r.SetOutputStream(output.GetValue());
 
   SimplePreprocessor pp;

@@ -21,7 +21,8 @@
 using namespace Choreo;
 using namespace Choreo::Factor;
 
-static Option<bool> native_f16("--native-f16", "-f16n", false);
+extern Option<bool> native_f16;
+extern Option<bool> emit_source;
 
 inline const std::string FineName(const std::string& input) {
   std::string result = input;
@@ -86,7 +87,6 @@ bool FactorCodeGen::BeforeVisitImpl(AST::Node& n) {
   return 0;
 }
 
-// CLEAN
 bool FactorCodeGen::AfterVisitImpl(AST::Node& n) {
   TraceEachVisit(n);
   if (isa<AST::Program>(&n)) {
@@ -99,7 +99,10 @@ bool FactorCodeGen::AfterVisitImpl(AST::Node& n) {
       factor_code += oss.str();
     }
     host_code += ds.str() + cs.str() + hs.str();
-    EmitScript();
+    if (emit_source)
+      EmitFactorSource();
+    else
+      EmitScript();
   } else if (isa<AST::ChoreoFunction>(&n)) {
     // choreo-host function:
     // The user code may require the choreo function be fwd-decalared for its
@@ -131,7 +134,8 @@ bool FactorCodeGen::AfterVisitImpl(AST::Node& n) {
     //   std::cout << alloc_indent_stack.top() << std::endl;
     //   std::cout << alloc_pos_stack.top() << std::endl;
     //   if (!alloc_fs_stack.top().str().empty())
-    //     placeholder.insert(alloc_pos_stack.top(), alloc_fs_stack.top().str());
+    //     placeholder.insert(alloc_pos_stack.top(),
+    //     alloc_fs_stack.top().str());
     //   alloc_fs_stack.pop();
     //   alloc_pos_stack.pop();
     //   alloc_indent_stack.pop();
@@ -503,7 +507,6 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
   alloc_indent_stack.push(indent);
   alloc_fs_stack.push(std::ostringstream());
 
-
   return true;
 }
 
@@ -569,8 +572,8 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
     auto fty = cast<FutureType>(GetSymbolType(d.future));
     auto gcu_dma = "CDMA";
     if (GetSpannedType(fty)->GetStorage() == Storage::LOCAL) gcu_dma = "SDMA";
-    alloc_fs_stack.top() << alloc_indent_stack.top()<< "auto " << d.future << " = alloc_dma_("
-                << gcu_dma << "Type());\n";
+    alloc_fs_stack.top() << alloc_indent_stack.top() << "auto " << d.future
+                         << " = alloc_dma_(" << gcu_dma << "Type());\n";
     return true;
   }
 
@@ -1739,4 +1742,64 @@ else
   show_usage
 fi
 )script";
+}
+
+namespace {
+inline static std::string AppendNameAheadOfSuffix(const std::string& filename,
+                                                  const std::string& name) {
+  size_t dotPos = filename.find_last_of('.');
+
+  if (dotPos == std::string::npos || dotPos == 0)
+    return filename + name; // Append name if no extension exists
+
+  // Split the filename into the base name and extension
+  std::string baseName = filename.substr(0, dotPos);
+  std::string extension = filename.substr(dotPos);
+
+  return baseName + name + extension;
+}
+
+} // end anonymous namespace
+
+void FactorCodeGen::EmitFactorSource() {
+  auto ifname = OptionRegistry::GetInstance().GetInputFileName();
+
+  outs() << "// ------------------------------------------------------- //\n";
+  outs() << "// Choreo generated HOST code (factor) for: \n";
+  outs() << "//\n";
+  outs() << "//   " << ifname << "\n";
+  outs() << "// ------------------------------------------------------- //\n\n";
+  outs() << __choreo_header_as_string << "\n";
+  outs() << factor_code << "\n\n";
+  outs() << host_code << "\n";
+
+  if (!ks.str().empty()) {
+    if (OptionRegistry::GetInstance().StdoutAsOutput()) {
+      outs()
+          << "// ------------------------------------------------------- //\n";
+      outs() << "// Choreo generated DEVICE code (factor) for: \n";
+      outs() << "//\n";
+      outs() << "//   " << ifname << "\n";
+      outs() << "// ------------------------------------------------------- "
+                "//\n\n";
+      outs() << ks.str() << "\n\n";
+    } else {
+      auto ofname = OptionRegistry::GetInstance().GetOutputFileName();
+      auto kernel_filename = AppendNameAheadOfSuffix(
+          ofname, "_" + ToLower(STR(CCtx().GetTarget())) + "_" +
+                      ToLower(STR(CCtx().GetArch())) + "_device_kernel");
+      std::ofstream knls(kernel_filename);
+      knls << "// ------------------------------------------------------- //\n";
+      knls << "// Choreo generated DEVICE code (factor) for: \n";
+      knls << "//\n";
+      knls << "//   " << ifname << "\n";
+      knls << "// ------------------------------------------------------- "
+              "//\n\n";
+      knls << ks.str() << "\n\n";
+      dbgs() << "[Info] Compiler 'factor' requires multiple inputs for further "
+                "compilation:\n";
+      dbgs() << " - host code: " << ofname << "\n";
+      dbgs() << " - device code: " << kernel_filename << "\n";
+    }
+  }
 }

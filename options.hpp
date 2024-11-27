@@ -3,9 +3,11 @@
 
 #include <algorithm>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <map>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <string>
 
@@ -17,10 +19,18 @@ namespace Choreo {
 std::ostream& errs();
 std::ostream& dbgs();
 
+enum class OptionKind {
+  User = 0,
+  Hidden = 1,
+};
+
 class OptionBase {
 public:
+  OptionKind kind = OptionKind::User;
+  OptionBase(OptionKind ok) : kind(ok) {}
   virtual ~OptionBase() {}
   virtual bool Parse(int argc, char** argv, int& currentArg) = 0;
+  virtual const std::string Description() const = 0;
 };
 
 template <typename T>
@@ -30,10 +40,13 @@ private:
   std::string alias; // name alias
   T value;
   T default_value;
-  bool requires_arg; // if it requires extra argument
+  std::string description; // explaination of this option
+  std::string option_desc; // for descrbing the option, if needed
+  bool requires_arg;       // if it requires extra argument
 
 public:
-  Option(const std::string&, const std::string&, const T&, bool = false);
+  Option(OptionKind, const std::string&, const std::string&, const T&,
+         const std::string& = "", const std::string& = "", bool = false);
 
   bool Parse(int argc, char** argv, int& currentArg) override;
 
@@ -42,6 +55,8 @@ public:
   // sugar: conversion and assignment operations
   operator T() const { return value; }
   void operator=(const T& v) { value = v; }
+
+  const std::string Description() const override;
 };
 
 class OptionRegistry {
@@ -54,13 +69,42 @@ private:
   std::ostream* output_stream = nullptr;
 
   std::string input_filename;
+  std::string output_filename;
   std::ifstream input_file_stream;
   std::ofstream output_file_stream;
 
+  bool stdout_as_output = false;
+  bool stdin_as_input = false;
+
+  std::ostringstream ess;
+  int ret_code = 0;
+
 public:
+  const std::string GetOutputFileName() const { return output_filename; }
+  const std::string GetInputFileName() const { return input_filename; }
+
+  bool StdoutAsOutput() const { return stdout_as_output; }
+  bool StdinAsInput() const { return stdin_as_input; }
+
   static OptionRegistry& GetInstance() {
     static OptionRegistry instance;
     return instance;
+  }
+
+  void Reset() {
+    input_stream = nullptr;
+    output_stream = nullptr;
+
+    input_filename.clear();
+    output_filename.clear();
+    input_file_stream.close();
+    output_file_stream.close();
+
+    stdout_as_output = false;
+    stdin_as_input = false;
+
+    ess.str("");
+    ret_code = 0;
   }
 
   void RegisterOption(const std::string& name, OptionBase* option) {
@@ -72,34 +116,54 @@ public:
   }
 
   bool Parse(int argc, char** argv) {
-    bool stdin_as_input = true;
+    Reset();
     for (int i = 1; i < argc; ++i) {
       std::string arg = argv[i];
       auto option = arg;
       if (auto pos = option.find("="); pos != std::string::npos)
         option = arg.substr(0, pos);
+      if (option == "--help" || option == "-H") {
+        Help(OptionKind::User);
+        return false;
+      } else if (option == "--help-hidden") {
+        Help(OptionKind::Hidden);
+        return false;
+      }
       if (options.count(option)) {
         if (!options[option]->Parse(argc, argv, i)) return false;
       } else {
         if (!input_filename.empty()) {
-          errs() << "set input file twice: '" << input_filename << "' and '"
-                 << arg << "'.\n";
+          ess << "error: set input file twice: '" << input_filename << "' and '"
+              << arg << "'.";
+          ret_code = 1;
           return false;
-        }
-        input_filename = arg;
-        stdin_as_input = false;
+        } else
+          input_filename = arg;
+        if (input_filename == "-") stdin_as_input = true;
       }
     }
 
-    if (stdin_as_input)
-      assert(input_filename.empty() &&
-             "can not set input as both stdin and file.\n");
+    if (stdin_as_input && !input_filename.empty()) {
+      ess << "error: can not set input as both stdin and file.";
+      ret_code = 1;
+      return false;
+    }
+
+    if (!stdin_as_input && input_filename.empty()) {
+      ess << "error: no input file.";
+      ret_code = 1;
+      return false;
+    }
 
     return true;
   }
 
+  const std::string Message() { return ess.str(); }
+  int ReturnCode() { return ret_code; }
+
   std::ostream& GetOutputStream() {
     if (output_stream) return *output_stream;
+    stdout_as_output = true;
     return std::cout; // directly output to stdout
   }
 
@@ -117,21 +181,63 @@ public:
 
   void SetOutputStream(const std::string& filename) {
     if (!filename.empty() && filename != "-") {
+      output_filename = filename;
       output_file_stream.open(filename);
       output_stream = &output_file_stream;
     }
   }
 
   std::string GetInputFileName() { return input_filename; }
+
+public:
+  void Help(OptionKind ok) {
+    std::cout << "Usage: choreo [options] file...\n";
+    std::cout << "Options:\n";
+    std::cout << "  " << std::setw(26) << std::left << "--help"
+              << "Display this information.\n";
+    std::cout << "  " << std::setw(26) << std::left << "--help-hidden"
+              << "Display hidden options.\n";
+
+    std::set<OptionBase*> visited;
+    for (auto& opt_item : options) {
+      auto* option = opt_item.second;
+
+      // since alias name is also registered, avoid the duplicated printing
+      if (visited.count(option)) continue;
+      visited.insert(option);
+
+      if ((int)option->kind <= (int)ok) {
+        auto desc = option->Description();
+        if (!desc.empty()) std::cout << desc << "\n";
+      }
+    }
+    std::cout << "\n";
+    ret_code = 0;
+  }
 };
 
 template <typename T>
-inline Option<T>::Option(const std::string& name, const std::string& alias,
-                         const T& default_val, bool req)
-    : name(name), alias(alias), value(default_val), default_value(default_val),
+inline const std::string Option<T>::Description() const {
+  std::ostringstream oss;
+  oss << "  " << std::setw(26) << std::left;
+  if (!alias.empty())
+    oss << alias + "/" + ((option_desc.empty()) ? name : option_desc);
+  else
+    oss << ((option_desc.empty()) ? name : option_desc);
+  oss << description;
+  return oss.str();
+}
+
+template <typename T>
+inline Option<T>::Option(OptionKind ok, const std::string& name,
+                         const std::string& alias, const T& default_val,
+                         const std::string& desc, const std::string& opt_d,
+                         bool req)
+    : OptionBase(ok), name(name), alias(alias), value(default_val),
+      default_value(default_val), description(desc), option_desc(opt_d),
       requires_arg(req) {
   OptionRegistry::GetInstance().RegisterOption(name, this);
-  OptionRegistry::GetInstance().RegisterOption(alias, this);
+  if (!alias.empty()) OptionRegistry::GetInstance().RegisterOption(alias, this);
 }
 
 template <typename T>
