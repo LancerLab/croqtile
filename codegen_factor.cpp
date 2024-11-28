@@ -155,7 +155,7 @@ bool FactorCodeGen::AfterVisitImpl(AST::Node& n) {
 
     std::string placeholder = fs.str();
     if (!alloc_fs_stack.empty()) {
-      // std::cout << "anchor" << std::endl;
+      // std::cout << "exit parallelby" << std::endl;
       // std::cout << alloc_fs_stack.size() << std::endl;
       // std::cout << alloc_indent_stack.size() << std::endl;
       // std::cout << alloc_pos_stack.size() << std::endl;
@@ -195,7 +195,7 @@ bool FactorCodeGen::AfterVisitImpl(AST::Node& n) {
     // handle allocations of this within block
     std::string placeholder = fs.str();
     if (!alloc_fs_stack.empty()) {
-      // std::cout << "anchor" << std::endl;
+      // std::cout << "exit within" << std::endl;
       // std::cout << alloc_fs_stack.size() << std::endl;
       // std::cout << alloc_indent_stack.size() << std::endl;
       // std::cout << alloc_pos_stack.size() << std::endl;
@@ -389,7 +389,20 @@ bool FactorCodeGen::Visit(AST::Assignment& node) {
 // CLEAN
 bool FactorCodeGen::Visit(AST::ParallelBy& by) {
   TraceEachVisit(by);
-  if (parallel_level > 1) { return true; }
+  if (parallel_level > 1) { 
+    // handle allocation stmts for global vars
+    alloc_pos_stack.push(fs.str().size());
+    alloc_indent_stack.push(indent);
+    alloc_fs_stack.push(std::ostringstream());
+    // std::cout << "enter parallelly" << std::endl;
+    // std::cout << alloc_fs_stack.size() << std::endl;
+    // std::cout << alloc_indent_stack.size() << std::endl;
+    // std::cout << alloc_pos_stack.size() << std::endl;
+    // std::cout << alloc_fs_stack.top().str() << std::endl;
+    // std::cout << alloc_indent_stack.top() << std::endl;
+    // std::cout << alloc_pos_stack.top() << std::endl;
+    return true; 
+  }
 
   fs << this->indent << "Dim3 grid_dim("
      << cgi->GetFunctionLaunch(fname).grid_dim_x << ");\n";
@@ -506,6 +519,13 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
   alloc_pos_stack.push(fs.str().size());
   alloc_indent_stack.push(indent);
   alloc_fs_stack.push(std::ostringstream());
+  // std::cout << "enter parallelly" << std::endl;
+  // std::cout << alloc_fs_stack.size() << std::endl;
+  // std::cout << alloc_indent_stack.size() << std::endl;
+  // std::cout << alloc_pos_stack.size() << std::endl;
+  // std::cout << alloc_fs_stack.top().str() << std::endl;
+  // std::cout << alloc_indent_stack.top() << std::endl;
+  // std::cout << alloc_pos_stack.top() << std::endl;
 
   return true;
 }
@@ -544,6 +564,13 @@ bool FactorCodeGen::Visit(AST::WithIn& n) {
   alloc_pos_stack.push(fs.str().size());
   alloc_indent_stack.push(indent);
   alloc_fs_stack.push(std::ostringstream());
+  // std::cout << "enter WithIn" << std::endl;
+  // std::cout << alloc_fs_stack.size() << std::endl;
+  // std::cout << alloc_indent_stack.size() << std::endl;
+  // std::cout << alloc_pos_stack.size() << std::endl;
+  // std::cout << alloc_fs_stack.top().str() << std::endl;
+  // std::cout << alloc_indent_stack.top() << std::endl;
+  // std::cout << alloc_pos_stack.top() << std::endl;
 
   // associate with to the matcher.
   if (n.with && n.with_matchers) {
@@ -1346,7 +1373,7 @@ const std::string FactorCodeGen::ReplaceRuntimeNames(const std::string& e,
   return expr;
 }
 
-std::string FactorCodeGen::ReplaceFactorDynDimName(const std::string& e) {
+const std::string FactorCodeGen::ReplaceFactorDynDimName(const std::string& e) const {
   std::string expr = e;
   for (auto& s : dims_info) {
     size_t pos = 0;
@@ -1487,11 +1514,15 @@ void FactorCodeGen::EmitHostFuncDecl(std::ostringstream& oss,
     VST_DEBUG(dbgs() << "Host function prototype:\n" << oss.str());
 }
 
-const std::string FactorCodeGen::ValueSTR(const ValueItem& vi) const {
-  if (auto i = dyn_cast<int>(&vi))
+const std::string FactorCodeGen::ValueSTR(const ValueItem& vi, bool factor_value=true) const {
+  if (auto i = dyn_cast<int>(&vi)) {
     return "Value(" + std::to_string(*i) + ")";
-  else
+  } else if (factor_value) {
+    // not int => this is a dynamic var or var bounded by dynamic var.
+    return ReplaceFactorDynDimName(STR(vi));
+  } else {
     return ReplaceRuntimeNames(STR(vi), "", false);
+  }
 }
 
 const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
@@ -1550,7 +1581,10 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
         oss << "!(" << ExprSTR(expr->GetR()) << ")";
       } else if (expr->op == "ubound") {
         auto rty = cast<BoundedType>(NodeType(*expr->GetR()));
-        if (rty->Dims() == 1) { oss << ValueSTR(rty->GetUpperBound()); }
+        // anchor
+        if (rty->Dims() == 1) { 
+          oss << ValueSTR(rty->GetUpperBound(), true); 
+        }
       } else if (expr->op == "dataof") {
         assert(isa<FutureType>(expr->GetR()->GetType()) &&
                "expect a future operand.");
@@ -1578,7 +1612,9 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       } else if (expr->op == "getith") {
         auto lty = cast<BoundedType>(NodeType(*expr->GetL()));
         if (cast<AST::IntIndex>(expr->GetR())->IsNegative()) {
-          oss << "(" << ValueSTR(lty->GetUpperBound()) << "+("
+          oss << "(";
+          oss << ValueSTR(lty->GetUpperBound(), true);
+          oss << "+("
               << ExprSTR(expr->GetR()) << "))";
         } else
           oss << "(" << ExprSTR(expr->GetR()) << ")";
@@ -1608,7 +1644,7 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
     // (TODO: maybe assert when earlysema)
     assert(val_count >= 2);
     for (size_t i = 0; i < val_count - 1; i++) {
-      oss << "select_(" << ExprSTR(sl->select_factor) << " == ";
+      oss << "select_(" << ExprSTR(sl->select_factor, true) << " == ";
       oss << ((factor_value) ? "Value" : "") << "(" << i << ")";
       oss << ", " << PSTR(sl->expr_list->ValueAt(i))
           << (i < val_count - 1 ? ", " : "");

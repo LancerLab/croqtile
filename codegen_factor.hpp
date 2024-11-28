@@ -148,9 +148,9 @@ private:
   const std::string ReplaceRuntimeNames(const std::string&,
                                         const std::string& = "",
                                         bool host_code = true) const;
-  std::string ReplaceFactorDynDimName(const std::string&);
+  const std::string ReplaceFactorDynDimName(const std::string&) const;
   std::optional<std::string> ReplaceDynDimRef(const std::string&);
-  const std::string ValueSTR(const ValueItem&) const;
+  const std::string ValueSTR(const ValueItem&, bool factor_value) const;
 
   // common utils
   void IncrementIndent() { this->indent += "  "; }
