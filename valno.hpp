@@ -1081,6 +1081,21 @@ public:
       SSTab().DefineSymbol(f_span, MakeMDSpanType(s)); // implicit symbol
     }
 
+    auto vn_sig = vn.GetSignatureFromValueNumber(cur_vn);
+    // set alias expressions with proper value numbers
+    if (CountElementsInSignature(vn_sig) > 1) {
+      ProcessValueNumberString(
+          vn_sig, [this, &vn_sig](int valno, size_t index) {
+            if (UnknownVN(valno)) return; // do not associate it with vn of "?"
+            vn.GetOrInsertValueNumberFromSignature("index_const_" +
+                                                   std::to_string(index));
+            auto elem_sig = vn_sig + "(" + std::to_string(index) + ")";
+            if (!vn.HasValueNumberOfSignature(elem_sig))
+              vn.AssociateSignatureWithValueNumber(
+                  vn_sig + "(" + std::to_string(index) + ")", valno);
+          });
+    }
+
     InvalidateVN(cur_vn);
     return true;
   }
