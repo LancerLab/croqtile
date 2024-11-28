@@ -15,8 +15,9 @@ int main(int argc, char* argv[]) {
   }
   r.SetOutputStream(output.GetValue());
 
-  SimplePreprocessor pp;
-  pp.process(r.GetInputStream(), r.GetOutputStream());
+  SimplePreprocessor pp(r.GetOutputStream());
+  if (!pp.Process(r.GetInputStream()))
+    return 1;
 
   return 0;
 }

@@ -1,0 +1,527 @@
+// RUN: choreo %s -o - | FileCheck %s
+__cok__ {
+union vector_type {
+  v64i8 i8;
+  v32f16 f16;
+  v32bf16 bf16;
+  v32i16 i16;
+  v16i32 i32;
+  v16f32 f32;
+};
+#ifndef EXT32
+#define EXT32(hi, lo) ((hi) << 16 | ((lo)&0xffff))
+#endif
+#ifndef ADDR2VEC
+#define ADDR2VEC(addr) (addr >> 6)
+#endif
+
+#define OFFSET_STRIDE_0 0x00010001
+
+extern "C" void rgb2gray_kernel_fp32_fp32(int in_addr, int output_addr, int num, int is_rgb) {
+  union vector_type in0_00, in0_10, in0_20, in0_30,
+                    in0_01, in0_11, in0_21, in0_31,
+                    in0_02, in0_12, in0_22, in0_32;
+  union vector_type in1_00, in1_10, in1_20, in1_30,
+                    in1_01, in1_11, in1_21, in1_31,
+                    in1_02, in1_12, in1_22, in1_32;
+  smr_t smr0;
+  v16f32 lhs_vr, zero_vr;
+  va16f32x4 qacc0, qacc1;
+  va16f32 vacc0, vacc1, vacc2, vacc3, vacc4, vacc5, vacc6, vacc7;
+
+  // int in_addr = reinterpret_cast<int>(input_param->addr);
+  // int output_addr = reinterpret_cast<int>(output_param->addr);
+
+  int in_f_base_addr = in_addr >> 6;
+  int in_s_base_addr = (in_addr + num * 4) >> 6;
+  int in_t_base_addr = (in_addr + 2 * num * 4) >> 6;
+  int output_base_addr = output_addr >> 6;
+  // is rgb
+  int coeff_0 = 0x3DE978D4;  // 0.114f  b
+  int coeff_1 = 0x3F1645A1;  // 0.587f  g
+  int coeff_2 = 0x3E991687;  // 0.299f  r
+  if (is_rgb == 1) {
+    int mid = coeff_2;
+    coeff_2 = coeff_0;
+    coeff_0 = mid;
+  }
+  int url_batch = 8;
+  int output_bacth_stride = url_batch + 1;
+  int div = num / (url_batch * 32);
+  int res = num % (url_batch * 32);
+  int loop_time = res == 0 ? div : (div + 1);
+
+  in_f_base_addr = EXT32(in_f_base_addr + url_batch, in_f_base_addr);
+  tar_t in_f_tar = __dtu_s_movsr2targ(in_f_base_addr);
+  tar_t in_f_offset = __dtu_s_movsr2tari(OFFSET_STRIDE_0, in_f_tar);
+  tar_t in_f_offset_1 = __dtu_s_movsr2tari(
+      EXT32(output_bacth_stride, output_bacth_stride), in_f_tar);
+  // secound
+  in_s_base_addr = EXT32(in_s_base_addr + url_batch, in_s_base_addr);
+  tar_t in_s_tar = __dtu_s_movsr2targ(in_s_base_addr);
+  tar_t in_s_offset = __dtu_s_movsr2tari(OFFSET_STRIDE_0, in_s_tar);
+  tar_t in_s_offset_1 = __dtu_s_movsr2tari(
+      EXT32(output_bacth_stride, output_bacth_stride), in_s_tar);
+
+  // three
+  in_t_base_addr = EXT32(in_t_base_addr + url_batch, in_t_base_addr);
+  tar_t in_t_tar = __dtu_s_movsr2targ(in_t_base_addr);
+  tar_t in_t_offset = __dtu_s_movsr2tari(OFFSET_STRIDE_0, in_t_tar);
+  tar_t in_t_offset_1 = __dtu_s_movsr2tari(
+      EXT32(output_bacth_stride, output_bacth_stride), in_t_tar);
+
+  // output
+  output_base_addr = EXT32(output_base_addr + url_batch, output_base_addr);
+  tar_t output_tar = __dtu_s_movsr2targ(output_base_addr);
+  tar_t output_offset0 = __dtu_s_movsr2tari(OFFSET_STRIDE_0, output_tar);
+  tar_t output_offset1 = __dtu_s_movsr2tari(
+      EXT32(output_bacth_stride, output_bacth_stride), output_tar);
+
+  __dtu_c_movsr2vab_m_s1(0);
+  __dtu_c_movsr2vab_m_d(0);
+  __dtu_c_movsr2vab_lv_s(0);
+  __dtu_c_movsr2vab_m_s2(0);
+  __dtu_c_movsr2vab_l_d(0);
+  __dtu_c_movsr2naccovr(0x10001);
+  __dtu_c_movsr2vmm_raw(0x0);
+  __dtu_c_movsr2vmm_vsel_ovr(0);
+
+  lhs_vr = __dtu_v_vclr_vr();
+  zero_vr = __dtu_v_vclr_vr();
+  lhs_vr = __dtu_v_movr2vr_lsb(lhs_vr, coeff_2);
+  lhs_vr = __dtu_l_movsfti_l_b(lhs_vr, 4);
+  lhs_vr = __dtu_v_movr2vr_lsb(lhs_vr, coeff_1);
+  lhs_vr = __dtu_l_movsfti_l_b(lhs_vr, 4);
+  lhs_vr = __dtu_v_movr2vr_lsb(lhs_vr, coeff_0);
+  lhs_vr = __dtu_l_movsfti_l_b(lhs_vr, 4);
+  qacc0 = __dtu_l_vclr_qa();
+  qacc1 = __dtu_l_vclr_qa();
+
+  in0_00.i8 = __dtu_s_tvld_itar(in_f_tar, in_f_offset);
+  in0_01.i8 = __dtu_s_tvld_itar(in_s_tar, in_s_offset);
+  in0_02.i8 = __dtu_s_tvld_itar(in_t_tar, in_t_offset);
+
+  in0_10.i8 = __dtu_s_tvld_itar(in_f_tar, in_f_offset);
+  in0_11.i8 = __dtu_s_tvld_itar(in_s_tar, in_s_offset);
+  in0_12.i8 = __dtu_s_tvld_itar(in_t_tar, in_t_offset);
+
+  in0_20.i8 = __dtu_s_tvld_itar(in_f_tar, in_f_offset);
+  in0_21.i8 = __dtu_s_tvld_itar(in_s_tar, in_s_offset);
+  in0_22.i8 = __dtu_s_tvld_itar(in_t_tar, in_t_offset);
+
+  in0_30.i8 = __dtu_s_tvld_itar(in_f_tar, in_f_offset);
+  in0_31.i8 = __dtu_s_tvld_itar(in_s_tar, in_s_offset);
+  in0_32.i8 = __dtu_s_tvld_itar(in_t_tar, in_t_offset);
+
+  in1_00.i8 = __dtu_s_tvld_itar(in_f_tar, in_f_offset);
+  in1_01.i8 = __dtu_s_tvld_itar(in_s_tar, in_s_offset);
+  in1_02.i8 = __dtu_s_tvld_itar(in_t_tar, in_t_offset);
+
+  in1_10.i8 = __dtu_s_tvld_itar(in_f_tar, in_f_offset);
+  in1_11.i8 = __dtu_s_tvld_itar(in_s_tar, in_s_offset);
+  in1_12.i8 = __dtu_s_tvld_itar(in_t_tar, in_t_offset);
+
+  in1_20.i8 = __dtu_s_tvld_itar(in_f_tar, in_f_offset);
+  in1_21.i8 = __dtu_s_tvld_itar(in_s_tar, in_s_offset);
+  in1_22.i8 = __dtu_s_tvld_itar(in_t_tar, in_t_offset);
+
+  in1_30.i8 = __dtu_s_tvld_itar(in_f_tar, in_f_offset_1);
+  in1_31.i8 = __dtu_s_tvld_itar(in_s_tar, in_s_offset_1);
+  in1_32.i8 = __dtu_s_tvld_itar(in_t_tar, in_t_offset_1);
+
+  smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, zero_vr, 0);
+  smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in0_00.f32, 1);
+  smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in0_01.f32, 2);
+  smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in0_02.f32, 3);
+  smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, zero_vr, 4);
+  smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in0_10.f32, 5);
+  smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in0_11.f32, 6);
+  smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in0_12.f32, 7);
+  smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, zero_vr, 8);
+  smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in0_20.f32, 9);
+  smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in0_21.f32, 10);
+  smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in0_22.f32, 11);
+  smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, zero_vr, 12);
+  smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in0_30.f32, 13);
+  smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in0_31.f32, 14);
+  smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in0_32.f32, 15);
+
+  qacc0 = __dtu_m_vmm_mode8_f_nacc_vs0(qacc0, lhs_vr, smr0);
+
+  in0_00.i8 = __dtu_s_tvld_itar(in_f_tar, in_f_offset);
+  in0_01.i8 = __dtu_s_tvld_itar(in_s_tar, in_s_offset);
+  in0_02.i8 = __dtu_s_tvld_itar(in_t_tar, in_t_offset);
+
+  in0_10.i8 = __dtu_s_tvld_itar(in_f_tar, in_f_offset);
+  in0_11.i8 = __dtu_s_tvld_itar(in_s_tar, in_s_offset);
+  in0_12.i8 = __dtu_s_tvld_itar(in_t_tar, in_t_offset);
+
+  in0_20.i8 = __dtu_s_tvld_itar(in_f_tar, in_f_offset);
+  in0_21.i8 = __dtu_s_tvld_itar(in_s_tar, in_s_offset);
+  in0_22.i8 = __dtu_s_tvld_itar(in_t_tar, in_t_offset);
+
+  in0_30.i8 = __dtu_s_tvld_itar(in_f_tar, in_f_offset);
+  in0_31.i8 = __dtu_s_tvld_itar(in_s_tar, in_s_offset);
+  in0_32.i8 = __dtu_s_tvld_itar(in_t_tar, in_t_offset);
+
+  smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in1_00.f32, 1);
+  smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in1_01.f32, 2);
+  smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in1_02.f32, 3);
+  smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in1_10.f32, 5);
+  smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in1_11.f32, 6);
+  smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in1_12.f32, 7);
+  smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in1_20.f32, 9);
+  smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in1_21.f32, 10);
+  smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in1_22.f32, 11);
+  smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in1_30.f32, 13);
+  smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in1_31.f32, 14);
+  smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in1_32.f32, 15);
+
+  qacc1 = __dtu_m_vmm_mode8_f_nacc_vs0(qacc1, lhs_vr, smr0);
+
+  in1_00.i8 = __dtu_s_tvld_itar(in_f_tar, in_f_offset);
+  in1_01.i8 = __dtu_s_tvld_itar(in_s_tar, in_s_offset);
+  in1_02.i8 = __dtu_s_tvld_itar(in_t_tar, in_t_offset);
+
+  in1_10.i8 = __dtu_s_tvld_itar(in_f_tar, in_f_offset);
+  in1_11.i8 = __dtu_s_tvld_itar(in_s_tar, in_s_offset);
+  in1_12.i8 = __dtu_s_tvld_itar(in_t_tar, in_t_offset);
+
+  in1_20.i8 = __dtu_s_tvld_itar(in_f_tar, in_f_offset);
+  in1_21.i8 = __dtu_s_tvld_itar(in_s_tar, in_s_offset);
+  in1_22.i8 = __dtu_s_tvld_itar(in_t_tar, in_t_offset);
+
+  in1_30.i8 = __dtu_s_tvld_itar(in_f_tar, in_f_offset_1);
+  in1_31.i8 = __dtu_s_tvld_itar(in_s_tar, in_s_offset_1);
+  in1_32.i8 = __dtu_s_tvld_itar(in_t_tar, in_t_offset_1);
+
+#pragma clang loop unroll(disable)
+  for (int val = 0; val < loop_time - 1; val++) {
+    vacc0 = __dtu_extractqa2va(qacc0, 0);
+    vacc1 = __dtu_extractqa2va(qacc0, 1);
+    vacc2 = __dtu_extractqa2va(qacc0, 2);
+    vacc3 = __dtu_extractqa2va(qacc0, 3);
+
+    smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in0_00.f32, 1);
+    smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in0_01.f32, 2);
+    smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in0_02.f32, 3);
+    smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in0_10.f32, 5);
+    smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in0_11.f32, 6);
+    smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in0_12.f32, 7);
+    smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in0_20.f32, 9);
+    smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in0_21.f32, 10);
+    smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in0_22.f32, 11);
+    smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in0_30.f32, 13);
+    smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in0_31.f32, 14);
+    smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in0_32.f32, 15);
+    qacc0 = __dtu_m_vmm_mode8_f_nacc_vs0(qacc0, lhs_vr, smr0);
+
+    __dtu_l_tvsta_w(vacc0, output_tar, output_offset0);
+    __dtu_l_tvsta_w(vacc1, output_tar, output_offset0);
+    __dtu_l_tvsta_w(vacc2, output_tar, output_offset0);
+    __dtu_l_tvsta_w(vacc3, output_tar, output_offset0);
+
+    in0_00.i8 = __dtu_s_tvld_itar(in_f_tar, in_f_offset);
+    in0_01.i8 = __dtu_s_tvld_itar(in_s_tar, in_s_offset);
+    in0_02.i8 = __dtu_s_tvld_itar(in_t_tar, in_t_offset);
+
+    in0_10.i8 = __dtu_s_tvld_itar(in_f_tar, in_f_offset);
+    in0_11.i8 = __dtu_s_tvld_itar(in_s_tar, in_s_offset);
+    in0_12.i8 = __dtu_s_tvld_itar(in_t_tar, in_t_offset);
+
+    in0_20.i8 = __dtu_s_tvld_itar(in_f_tar, in_f_offset);
+    in0_21.i8 = __dtu_s_tvld_itar(in_s_tar, in_s_offset);
+    in0_22.i8 = __dtu_s_tvld_itar(in_t_tar, in_t_offset);
+
+    in0_30.i8 = __dtu_s_tvld_itar(in_f_tar, in_f_offset);
+    in0_31.i8 = __dtu_s_tvld_itar(in_s_tar, in_s_offset);
+    in0_32.i8 = __dtu_s_tvld_itar(in_t_tar, in_t_offset);
+
+    vacc4 = __dtu_extractqa2va(qacc1, 0);
+    vacc5 = __dtu_extractqa2va(qacc1, 1);
+    vacc6 = __dtu_extractqa2va(qacc1, 2);
+    vacc7 = __dtu_extractqa2va(qacc1, 3);
+
+    smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in1_00.f32, 1);
+    smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in1_01.f32, 2);
+    smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in1_02.f32, 3);
+    smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in1_10.f32, 5);
+    smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in1_11.f32, 6);
+    smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in1_12.f32, 7);
+    smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in1_20.f32, 9);
+    smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in1_21.f32, 10);
+    smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in1_22.f32, 11);
+    smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in1_30.f32, 13);
+    smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in1_31.f32, 14);
+    smr0 = __dtu_m_ldsmr_mode8_f_row(smr0, in1_32.f32, 15);
+    qacc1 = __dtu_m_vmm_mode8_f_nacc_vs0(qacc1, lhs_vr, smr0);
+
+    __dtu_l_tvsta_w(vacc4, output_tar, output_offset0);
+    __dtu_l_tvsta_w(vacc5, output_tar, output_offset0);
+    __dtu_l_tvsta_w(vacc6, output_tar, output_offset0);
+    __dtu_l_tvsta_w(vacc7, output_tar, output_offset1);
+
+    in1_00.i8 = __dtu_s_tvld_itar(in_f_tar, in_f_offset);
+    in1_01.i8 = __dtu_s_tvld_itar(in_s_tar, in_s_offset);
+    in1_02.i8 = __dtu_s_tvld_itar(in_t_tar, in_t_offset);
+
+    in1_10.i8 = __dtu_s_tvld_itar(in_f_tar, in_f_offset);
+    in1_11.i8 = __dtu_s_tvld_itar(in_s_tar, in_s_offset);
+    in1_12.i8 = __dtu_s_tvld_itar(in_t_tar, in_t_offset);
+
+    in1_20.i8 = __dtu_s_tvld_itar(in_f_tar, in_f_offset);
+    in1_21.i8 = __dtu_s_tvld_itar(in_s_tar, in_s_offset);
+    in1_22.i8 = __dtu_s_tvld_itar(in_t_tar, in_t_offset);
+
+    in1_30.i8 = __dtu_s_tvld_itar(in_f_tar, in_f_offset_1);
+    in1_31.i8 = __dtu_s_tvld_itar(in_s_tar, in_s_offset_1);
+    in1_32.i8 = __dtu_s_tvld_itar(in_t_tar, in_t_offset_1);
+  }
+  vacc0 = __dtu_extractqa2va(qacc0, 0);
+  vacc1 = __dtu_extractqa2va(qacc0, 1);
+  vacc2 = __dtu_extractqa2va(qacc0, 2);
+  vacc3 = __dtu_extractqa2va(qacc0, 3);
+  vacc4 = __dtu_extractqa2va(qacc1, 0);
+  vacc5 = __dtu_extractqa2va(qacc1, 1);
+  vacc6 = __dtu_extractqa2va(qacc1, 2);
+  vacc7 = __dtu_extractqa2va(qacc1, 3);
+  __dtu_l_tvsta_w(vacc0, output_tar, output_offset0);
+  __dtu_l_tvsta_w(vacc1, output_tar, output_offset0);
+  __dtu_l_tvsta_w(vacc2, output_tar, output_offset0);
+  __dtu_l_tvsta_w(vacc3, output_tar, output_offset0);
+  __dtu_l_tvsta_w(vacc4, output_tar, output_offset0);
+  __dtu_l_tvsta_w(vacc5, output_tar, output_offset0);
+  __dtu_l_tvsta_w(vacc6, output_tar, output_offset0);
+  __dtu_l_tvsta_w(vacc7, output_tar, output_offset1);
+}
+}
+
+// is_rgb = 1
+// C is always 3
+// __co__ auto rgb2gray(f32 [N, 3, H, W] input) {
+//   f32 [N, H, W] out;
+//   // parallel p by 1 {
+//     // 16、512 是根据 硬件参数 以及 ？ 计算得到的
+//     // 在 co 中能做到吗？
+//     parallel q by 4 {
+//       with index={n, c, h, w} in [N, 3, H, W]/{#q, 3, 16, 512} {
+//         foreach index {
+//           input_L2 = dma.copy.async input.chunkat(q#n, c, h, w) => shared;
+//           wait input_L2;
+//           shared f32 [input_L2.span(0), input_L2.span(2), input_L2.span(3)] out_L2;
+          
+//           input_L1 = dma.copy input_L2 => local;
+//           local f32 [out_L2.span] out_L1;
+//           call rgb2gray_kernel_fp32_fp32(input_L1.data, out_L1, |out_L1|, 1);
+//           dma.copy out_L1 => out_L2;
+//           dma.copy out_L2 => out.chunkat(q#n, h, w);
+//         }
+//       }
+//     }
+//   // }
+//   return out;
+// }
+
+__co__ auto rgb2gray(f32 [N, 3, H, W] input) {
+  f32 [N, H, W] out;
+  // parallel p by 1 {
+    parallel q by 6 {
+      with index={n, c, h, w} in [N, 3, H, W]/{#q, 3, 16, 512} {
+      // with index={n, c, h, w} in [N, 3, H, W]/{#q, 3, 16, w_t} {
+        foreach index {
+          // input_L111 = dma.copy.async input.chunkat(q, c, h, w) => local;
+          // input_L1 = dma.copy.async input.chunkat(q#n, c, h, w) => local;
+          // wait input_L1;
+          // local f32 [input_L1.span(0), input_L1.span(2), input_L1.span(3)] out_L1;
+          // call rgb2gray_kernel_fp32_fp32(input_L1.data, out_L1, |out_L1|, 1);
+          // dma.copy out_L1 => out.chunkat(q#n, h, w);
+        }
+      }
+    }
+  // }
+  return out;
+}
+
+#include <algorithm>
+#include "choreo.h"
+
+#define PRINT(x) std::cout << ">>> " << #x << " = " << (x) << std::endl;
+
+
+#define AlignUp(x, y)   (((x) + (y) - 1) / (y) * (y))
+#define AlignDown(x, y) ((x) / (y) * (y))
+#define CeilDiv(x, y)   ((x) + (y) - 1) / (y)
+
+#define TOPS_VECTOR_LENGTH 128 // for GCU 300 only
+#define PINGPONG 2
+constexpr int VDMEM_SIZE = 0x100000;
+constexpr int TILE_SIZE = VDMEM_SIZE / (sizeof(float) * 4 * PINGPONG);
+
+constexpr int N = 18;
+constexpr int C = 3;
+constexpr int H = 256;
+constexpr int W = 512;
+
+
+// NCHW
+float input[N][C][H][W];
+float res_cpu[N][H][W];
+
+void rgb2gray_cpu() {
+  for (int i = 0; i < N; ++i) {
+    for (int j = 0; j < H; ++j) {
+      for (int k = 0; k < W; ++k) {
+        res_cpu[i][j][k] = 0.299 * input[i][0][j][k] + 
+          0.587 * input[i][1][j][k] + 0.114 * input[i][2][j][k];
+      }
+    }
+  }
+}
+
+//TODO: dma header missing
+// find -name "dma_utils.h"
+// /home/wsj/topsop/topsop/lib/kernel/factor_kernel/utils/dma_utils.h
+
+#if 1
+#define __gcu300__
+#else
+#define __gcu210__
+#endif
+
+#ifdef __gcu300__
+int CSB_SIZE = (size_t)24 * 1024 * 1024;
+int SIP_NUM = 12;
+int SIP_SIZE = (size_t)(1.5 * 1024 * 1024);
+int ALIGB_SIZE = 128;
+#else
+#endif
+
+
+int main() {
+  if (CSB_SIZE < (SIP_NUM * SIP_SIZE)) {
+    SIP_SIZE = CSB_SIZE / SIP_NUM;
+  }
+
+  // s32
+  int IN_BPE = 4;
+  int OUT_BPE = 4;
+  int INPUT_BIT_NUM = IN_BPE * 8;
+  int OUTPUT_BIT_NUM = OUT_BPE * 8;
+  int VR_2_BITNUM = ALIGB_SIZE * 8;
+  int NUM_PER_VR = INPUT_BIT_NUM > OUTPUT_BIT_NUM
+                            ? (VR_2_BITNUM / OUTPUT_BIT_NUM)
+                            : (VR_2_BITNUM / INPUT_BIT_NUM);
+  int is_rgb = 1;
+
+  int32_t SIP_MAX_NUM = SIP_SIZE;
+  SIP_MAX_NUM /= 2; // pingpong
+  SIP_MAX_NUM /= 3 * INPUT_BIT_NUM + OUTPUT_BIT_NUM;
+  int32_t DMA_DIM_SIZE_MAX = 1 << 16;
+  int32_t USE_SIP_MAX_NUM = SIP_MAX_NUM > DMA_DIM_SIZE_MAX
+                                ? (DMA_DIM_SIZE_MAX - 1)
+                                : SIP_MAX_NUM;
+
+  int32_t CSX_MAX_NUM = CSB_SIZE / SIP_NUM;
+  CSX_MAX_NUM /= 2;
+  CSX_MAX_NUM /= 3 * INPUT_BIT_NUM + OUTPUT_BIT_NUM;
+
+  int32_t RANK = 4; // only support 4d
+
+  // slice_shape
+  // 1, 3, 16, w_align_num
+
+  int32_t w_align_num = W;
+
+  if (w_align_num > USE_SIP_MAX_NUM)
+    w_align_num = USE_SIP_MAX_NUM;
+  if (w_align_num % NUM_PER_VR)
+    w_align_num = (w_align_num / NUM_PER_VR) * NUM_PER_VR;
+  if (w_align_num == 0)
+    w_align_num = NUM_PER_VR;
+
+  int32_t total_nhw_num = N * H * W;
+  int32_t total_hw_num = H * W;
+  int32_t slice_nhw_nums = 1 * 16 * w_align_num;
+  int32_t zero = 0;
+  int32_t init_repeat_idx = 0;
+  int32_t max_csb_elements = 1;
+  int32_t repeat_per_n = 1;
+  int32_t init_per_n = 0;
+  int32_t d2c_repeat_num = 1;
+
+
+  PRINT(VR_2_BITNUM); // 1024
+  PRINT(NUM_PER_VR);  // 32
+  PRINT(SIP_MAX_NUM); // 6144
+  PRINT(USE_SIP_MAX_NUM); // 6144
+  PRINT(CSX_MAX_NUM); // 8192
+  PRINT(w_align_num); // 512
+
+  PRINT(USE_SIP_MAX_NUM/w_align_num);
+
+  slice_nhw_nums = 1 * 16 * w_align_num;
+  int32_t slice_hw_nums = slice_nhw_nums;
+  int32_t slice_repeat_times = total_hw_num / slice_nhw_nums;
+
+  if (total_hw_num % slice_nhw_nums != 0)
+    slice_repeat_times = slice_repeat_times + 1;
+
+  int32_t slice_hw_repeat_times = slice_repeat_times;
+  slice_repeat_times *= N;
+  int32_t slice_last_idx = slice_repeat_times - 1;
+
+  int32_t tmp_value, tmp1_value;
+
+  tmp_value = slice_repeat_times % SIP_NUM;
+  tmp1_value = slice_repeat_times / SIP_NUM;
+  int32_t sip_repeat_times[SIP_NUM];
+  for (int32_t i = 0; i < SIP_NUM; ++i) {
+    tmp_value = tmp_value - 1;
+    if (tmp_value >= zero)
+      sip_repeat_times[i] = tmp1_value + 1;
+    else
+      sip_repeat_times[i] = tmp1_value;
+  }
+
+  // sip_repeat_num = sip_repeat_times(_sip_id);
+  // for_(0, _sip_id, 1,
+  //     [&](auto r_idx) { init_repeat_idx += sip_repeat_times({r_idx}); });
+
+  // tmp_value = init_repeat_idx % slice_hw_repeat_times;
+
+  PRINT(slice_nhw_nums); // 8192
+  PRINT(slice_hw_nums);  // 8192
+  PRINT(slice_repeat_times); // 64
+  PRINT(slice_hw_repeat_times); // 16
+  PRINT(slice_last_idx); // 63
+
+  auto input_span = choreo::make_spanview<4, choreo::f32>((choreo::f32*)input, {N, C, H, W});
+  input_span.fill_random(0, 1);
+
+  // auto res = rgb2gray(input_span, 1, 1, 512);
+  auto res = rgb2gray(input_span);
+
+  // cpu 实现
+  rgb2gray_cpu();
+
+  // 比较
+  for (int i = 0; i < N; ++i) {
+    for (int j = 0; j < H; ++j) {
+      for (int k = 0; k < W; ++k) {
+        if (std::abs(res[i][j][k] - res_cpu[i][j][k]) > 1e-5) {
+          std::cout << "ERROR! i=" << i << " j=" << j << " k=" << k << std::endl;
+          std::cout << "res=" << res[i][j][k] << " res_cpu=" << res_cpu[i][j][k] << std::endl;
+          std::cout << "diff=" << res[i][j][k] - res_cpu[i][j][k] << std::endl;
+          std::cout << "input=" << input[i][0][j][k] << " " << input[i][1][j][k] << " " << input[i][2][j][k] << std::endl;
+          assert(false);
+        }
+      }
+    }
+  }
+
+  std::cout << "SUCCESS!" << std::endl;
+
+  return 0;
+}
+
+// CHECK: #define PRINT(x) std::cout << ">>> " << #x << " = " << (x) << std::endl;

@@ -31,12 +31,14 @@ SymbolTable symtab;
 using namespace AST;
 using namespace Choreo;
 
+// Major available options
 Option<std::string> target(
     OptionKind::User, "--target", "-t", "factor",
     "Set the compilation target. The 'platform' includes <factor|topscc|cuda>.",
     "--target=<platform>", true);
 Option<std::string> arch(OptionKind::User, "-arch", "", "gcu300",
-                         "Set the architecture to execute the binary code.");
+                         "Set the architecture to execute the binary code.",
+                         "-arch=<processor>");
 Option<std::string> output(OptionKind::User, "-o", "", "",
                            "Place the output into <file>.", "-o <file>", true);
 
@@ -61,20 +63,25 @@ Option<bool>
 
 Option<std::string> abend_after(OptionKind::Hidden, "--stop-after", "-sa", "",
                                 "Stop compilation after the visit pass.",
-                                "--stop-after=<pass-name>");
+                                "--stop-after=<pass>");
 Option<std::string> trace_visit(
     OptionKind::Hidden, "--trace-visit", "-tv", "",
-    "Enable tracing of node visits during AST traversal by the visit pass.");
+    "Enable tracing of node visits during AST traversal by the visit pass.",
+    "--trace-visit=<pass>");
 Option<std::string>
     debug_visit(OptionKind::Hidden, "--debug-visit", "-dv", "",
-                "Enable debugging during AST traversal by the visit pass.");
+                "Enable debugging during AST traversal by the visit pass.",
+                "--debug-visit=<pass>");
 Option<std::string> print_ahead(OptionKind::Hidden, "--print-before", "-pb", "",
-                                "Print AST ahead of the visit pass.");
+                                "Print AST ahead of the visit pass.",
+                                "--print-before=<pass>");
 Option<std::string> print_after(OptionKind::Hidden, "--print-after", "-pa", "",
-                                "Print AST after the visit pass.");
+                                "Print AST after the visit pass.",
+                                "--print-after=<pass>");
 Option<std::string> dsyms_after(OptionKind::Hidden, "--dump-symbol-after",
                                 "-ds", "",
-                                "Dump the symbol table after the visit pass.");
+                                "Dump the symbol table after the visit pass.",
+                                "--dump-symbol-after=<pass>");
 Option<bool> print_ahead_all(OptionKind::Hidden, "--print-before-all", "-pba",
                              false, "Print AST ahead of all the visit passes.");
 Option<bool> print_after_all(OptionKind::Hidden, "--print-after-all", "-paa",
@@ -99,7 +106,6 @@ Option<bool> prt_pass(OptionKind::Hidden, "--show-passes", "-sp", false,
                       "Show the visit pass pipeline.");
 
 int main(int argc, char* argv[]) {
-
   // parse all the options
   auto& r = OptionRegistry::GetInstance();
   if (!r.Parse(argc, argv)) {
@@ -178,12 +184,14 @@ int main(int argc, char* argv[]) {
   std::stringstream pps;
   if (!no_pp) {
     if (prt_pass) dbgs() << "|- preprocess only the choreo program\n";
-    SimplePreprocessor spp;
     if (pp_only) {
-      spp.process(r.GetInputStream(), r.GetOutputStream());
+      SimplePreprocessor spp(r.GetOutputStream());
+      if (!spp.Process(r.GetInputStream())) return 1;
       return 0;
-    } else
-      spp.process(r.GetInputStream(), pps);
+    } else {
+      SimplePreprocessor spp(pps);
+      if (!spp.Process(r.GetInputStream())) return 1;
+    }
   }
 
   Scanner s;

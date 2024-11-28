@@ -5,11 +5,11 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <unordered_map>
 #include <memory>
 #include <set>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 
 #include "aux.hpp"
 
@@ -35,7 +35,7 @@ public:
   virtual const std::string GetAlias() const = 0;
 
 public:
-  virtual void SetError(const std::string &) = 0;
+  virtual void SetError(const std::string&) = 0;
   virtual const std::string GetError() const = 0;
 };
 
@@ -72,7 +72,7 @@ private:
   std::string err;
 
 public:
-  void SetError(const std::string &e) override {err = e;} 
+  void SetError(const std::string& e) override { err = e; }
   const std::string GetError() const override { return err; }
 };
 
@@ -134,10 +134,10 @@ public:
 
   void UnRegisterOption(const std::string& name) {
     if (options.count(name)) {
-      auto * option = options.at(name);
+      auto* option = options.at(name);
       if (option->GetAlias() != "") {
-         auto alias = option->GetAlias();
-         options.erase(alias);
+        auto alias = option->GetAlias();
+        options.erase(alias);
       }
       options.erase(name);
     }
@@ -223,9 +223,14 @@ public:
     std::cout << "  " << std::setw(26) << std::left << "--help-hidden"
               << "Display hidden options.\n";
 
+    // apply
+    std::vector<std::string> keys;
+    for (auto& opt_item : options) keys.push_back(opt_item.first);
+    std::sort(keys.begin(), keys.end());
+
     std::set<OptionBase*> visited;
-    for (auto& opt_item : options) {
-      auto* option = opt_item.second;
+    for (auto& name : keys) {
+      auto* option = options.at(name);
 
       // since alias name is also registered, avoid the duplicated printing
       if (visited.count(option)) continue;
@@ -244,15 +249,20 @@ public:
 template <typename T>
 inline const std::string Option<T>::Description() const {
   std::ostringstream oss;
-  std::string option_desc;
+
+  std::string opt_desc;
   if (!alias.empty())
-    option_desc = alias + "/" + ((option_desc.empty()) ? name : option_desc);
+    opt_desc = alias + "/" + ((option_desc.empty()) ? name : option_desc);
   else
-    option_desc = (option_desc.empty()) ? name : option_desc;
-  oss << "  " << std::setw(26) << std::left << option_desc;
-  if (option_desc.size() <= 26)
+    opt_desc = (option_desc.empty()) ? name : option_desc;
+  oss << "  " << std::setw(26) << std::left << opt_desc;
+
+  // add a new line if it is lengthy
+  if (opt_desc.size() <= 26)
     oss << description;
-  oss << "                             " << description;
+  else
+    oss << "\n                             " << description;
+
   return oss.str();
 }
 
@@ -267,7 +277,6 @@ inline Option<T>::Option(OptionKind ok, const std::string& name,
   OptionRegistry::GetInstance().RegisterOption(name, this);
   if (!alias.empty()) OptionRegistry::GetInstance().RegisterOption(alias, this);
 }
-
 
 template <typename T>
 inline Option<T>::~Option() {

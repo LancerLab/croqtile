@@ -389,7 +389,7 @@ bool FactorCodeGen::Visit(AST::Assignment& node) {
 // CLEAN
 bool FactorCodeGen::Visit(AST::ParallelBy& by) {
   TraceEachVisit(by);
-  if (parallel_level > 1) { 
+  if (parallel_level > 1) {
     // handle allocation stmts for global vars
     alloc_pos_stack.push(fs.str().size());
     alloc_indent_stack.push(indent);
@@ -401,7 +401,7 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
     // std::cout << alloc_fs_stack.top().str() << std::endl;
     // std::cout << alloc_indent_stack.top() << std::endl;
     // std::cout << alloc_pos_stack.top() << std::endl;
-    return true; 
+    return true;
   }
 
   fs << this->indent << "Dim3 grid_dim("
@@ -1373,7 +1373,8 @@ const std::string FactorCodeGen::ReplaceRuntimeNames(const std::string& e,
   return expr;
 }
 
-const std::string FactorCodeGen::ReplaceFactorDynDimName(const std::string& e) const {
+const std::string
+FactorCodeGen::ReplaceFactorDynDimName(const std::string& e) const {
   std::string expr = e;
   for (auto& s : dims_info) {
     size_t pos = 0;
@@ -1514,7 +1515,8 @@ void FactorCodeGen::EmitHostFuncDecl(std::ostringstream& oss,
     VST_DEBUG(dbgs() << "Host function prototype:\n" << oss.str());
 }
 
-const std::string FactorCodeGen::ValueSTR(const ValueItem& vi, bool factor_value=true) const {
+const std::string FactorCodeGen::ValueSTR(const ValueItem& vi,
+                                          bool factor_value = true) const {
   if (auto i = dyn_cast<int>(&vi)) {
     return "Value(" + std::to_string(*i) + ")";
   } else if (factor_value) {
@@ -1582,9 +1584,7 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       } else if (expr->op == "ubound") {
         auto rty = cast<BoundedType>(NodeType(*expr->GetR()));
         // anchor
-        if (rty->Dims() == 1) { 
-          oss << ValueSTR(rty->GetUpperBound(), true); 
-        }
+        if (rty->Dims() == 1) { oss << ValueSTR(rty->GetUpperBound(), true); }
       } else if (expr->op == "dataof") {
         assert(isa<FutureType>(expr->GetR()->GetType()) &&
                "expect a future operand.");
@@ -1614,8 +1614,7 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
         if (cast<AST::IntIndex>(expr->GetR())->IsNegative()) {
           oss << "(";
           oss << ValueSTR(lty->GetUpperBound(), true);
-          oss << "+("
-              << ExprSTR(expr->GetR()) << "))";
+          oss << "+(" << ExprSTR(expr->GetR()) << "))";
         } else
           oss << "(" << ExprSTR(expr->GetR()) << ")";
       } else if (expr->IsArith() || expr->IsLogical()) {

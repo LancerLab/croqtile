@@ -44,7 +44,7 @@ public:
   SimpleArray(std::initializer_list<T> init) {
     std::size_t num_elements = init.size();
     if (num_elements == 1) {
-      std::fill(data, data+N, *init.begin());
+      std::fill(data, data + N, *init.begin());
     } else {
       for (size_t i = 0; i < num_elements && i < N; ++i)
         data[i] = *(init.begin() + i);
@@ -409,9 +409,7 @@ public:
     return true;
   }
 
-  void fill(T value) { 
-    std::fill_n(this->data(), this->size(), value);
-  }
+  void fill(T value) { std::fill_n(this->data(), this->size(), value); }
 
   void fill_random(T lb, T ub) {
     fill_random(this->data(), this->size(), lb, ub);
