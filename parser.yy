@@ -17,10 +17,11 @@
 
 namespace Choreo { class Scanner; }
 
+template<typename T>
 struct SymbolWithInitVal {
   std::string name;
-  int init_val;
-  SymbolWithInitVal(const std::string & n, int i) : name(n), init_val(i) {}
+  T init_val;
+  SymbolWithInitVal(const std::string & n, T i) : name(n), init_val(i) {}
 };
 
 }
@@ -153,8 +154,10 @@ void choreo_info(const char *message) {
 %nterm <ptr<DMAConfig>> dma_config
 %nterm <bool> sync_type
 %nterm <int> index index_or_none
-%nterm <ptr<SymbolWithInitVal>> id_with_init
-%nterm <ptr<std::vector<ptr<SymbolWithInitVal>>>> ids_with_inits
+%nterm <ptr<SymbolWithInitVal<int>>> id_with_init_ty_int
+%nterm <ptr<SymbolWithInitVal<float>>> id_with_init_ty_float
+%nterm <ptr<std::vector<ptr<SymbolWithInitVal<int>>>>> ids_with_inits_ty_int
+%nterm <ptr<std::vector<ptr<SymbolWithInitVal<float>>>>> ids_with_inits_ty_float
 %nterm <Choreo::Storage> storage
 %nterm <Choreo::BaseType> fundamental_type
 %nterm <AST::ptr<AST::CppSourceCode>> pass_by host_code
@@ -477,7 +480,16 @@ named_spanned_decl
           $$->Append(AST::Make<AST::NamedVariableDecl>(@3, name, $2, $1));
         }
       }
-    | storage_qual spanned_type ids_with_inits {
+    | storage_qual spanned_type ids_with_inits_ty_int {
+        $$ = AST::Make<AST::MultiNodes>(@1);
+        for (auto val : *$3) {
+          symtab.AddSymbol(val->name, $2->GetType());
+          $$->Append(AST::Make<AST::NamedVariableDecl>(
+            @3, val->name, $2, $1, nullptr,
+            AST::Make<AST::IntLiteral>(@3, val->init_val)));
+        }
+      }
+    | storage_qual spanned_type ids_with_inits_ty_float {
         $$ = AST::Make<AST::MultiNodes>(@1);
         for (auto val : *$3) {
           symtab.AddSymbol(val->name, $2->GetType());
@@ -488,17 +500,36 @@ named_spanned_decl
       }
     ;
 
-ids_with_inits
-    : id_with_init  { $$ = std::make_shared<std::vector<ptr<SymbolWithInitVal>>>(); $$->push_back($1); }
-    | ids_with_inits COMMA id_with_init {
+ids_with_inits_ty_int
+    : id_with_init_ty_int  { $$ = std::make_shared<std::vector<ptr<SymbolWithInitVal<int>>>>(); $$->push_back($1); }
+    | ids_with_inits_ty_int COMMA id_with_init_ty_int {
         $1->push_back($3);
         $$ = $1;
       }
     ;
 
-id_with_init
+ids_with_inits_ty_float
+    : id_with_init_ty_float  { $$ = std::make_shared<std::vector<ptr<SymbolWithInitVal<float>>>>(); $$->push_back($1); }
+    | ids_with_inits_ty_float COMMA id_with_init_ty_float {
+        $1->push_back($3);
+        $$ = $1;
+      }
+    ;
+
+id_with_init_ty_int
     : IDENTIFIER LBRACE NUM RBRACE {
-        $$ = std::make_shared<SymbolWithInitVal>($1, $3);
+        $$ = std::make_shared<SymbolWithInitVal<int>>($1, $3);
+      }
+    | IDENTIFIER LBRACE MINUS NUM RBRACE {
+        $$ = std::make_shared<SymbolWithInitVal<int>>($1, 0-$4);
+      }
+    ;
+id_with_init_ty_float
+    : IDENTIFIER LBRACE FLOAT RBRACE {
+        $$ = std::make_shared<SymbolWithInitVal<float>>($1, $3);
+      }
+    | IDENTIFIER LBRACE MINUS FLOAT RBRACE {
+        $$ = std::make_shared<SymbolWithInitVal<float>>($1, 0.0-$4);
       }
     ;
 

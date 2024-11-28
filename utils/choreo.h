@@ -42,10 +42,12 @@ class SimpleArray {
 public:
   // Constructor for brace-initialization
   SimpleArray(std::initializer_list<T> init) {
-    std::size_t count = 0;
-    for (auto& value : init) {
-      if (count >= N) break; // Avoid exceeding the array size
-      data[count++] = value;
+    std::size_t num_elements = init.size();
+    if (num_elements == 1) {
+      std::fill(data, data+N, *init.begin());
+    } else {
+      for (auto i = 0; i < num_elements && i < N; ++i)
+        data[i] = *(init.begin() + i);
     }
   }
 
@@ -405,6 +407,10 @@ public:
       if (l.ptr[i] != r.ptr[i]) return false;
 
     return true;
+  }
+
+  void fill(T value) { 
+    std::fill_n(this->data(), this->size(), value);
   }
 
   void fill_random(T lb, T ub) {
