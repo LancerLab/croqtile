@@ -7,6 +7,7 @@ NV_FLAGS = -gencode arch=compute_86,code=sm_86 -rdc=true -lcublas $(CUDA_SYS_INC
 GTEST_DIR = ../../extern/gtest/
 GTEST_LIBS = $(GTEST_DIR)/libgtest.a $(GTEST_DIR)/libgtest_main.a
 HEADER_FILES :=  $(shell find ../.. -name '*.hpp') ../../utils/choreo.h
+CHOREO_HEADERS :=  $(shell find ../../ -name '*.hpp')
 
 # Your application's files
 SOURCES = $(wildcard *.cpp)
@@ -29,8 +30,11 @@ $(GTEST_DIR)/libgtest_main.a: $(GTEST_DIR)/googletest/src/gtest_main.cc
 	$(CXX) $(CXXFLAGS) -I$(GTEST_DIR)/googletest/include -I$(GTEST_DIR)/googletest -pthread -c $< -o $(GTEST_DIR)/gtest_main.o
 	ar -rv $@ $(GTEST_DIR)/gtest_main.o
 
-%.test: %.o $(GTEST_LIBS)
-	$(CXX) $(CXXFLAGS) -L../../ -L$(GTEST_DIR) -lgtest_main -lgtest -o $@ $< -pthread
+choreo_options.o : ../../options.cpp $(CHOREO_HEADERS)
+	$(CC) -std=c++17 $(CFLAGS) $< -c  -o $@
+
+%.test: %.o choreo_options.o $(GTEST_LIBS)
+	$(CXX) $(CXXFLAGS) -L../../ -L$(GTEST_DIR) choreo_options.o -lgtest_main -lgtest -o $@ $< -pthread
 
 # Pattern rule for object files
 %.o: %.cpp $(HEADER_FILES)

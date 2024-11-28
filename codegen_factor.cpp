@@ -665,23 +665,26 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
   if (d.GetNote() != "use-fut") {
     if (d.chained == true && ((d.chain_to != "" && src_level > dst_level) ||
                               (d.chain_from != "" && src_level < dst_level)))
-      alloc_fs_stack.top() << alloc_indent_stack.top()<< "auto " << future_name << " = alloc_dma_("
-                  << DMATypeString(src_level, dst_level) << "()).shared_();\n";
+      alloc_fs_stack.top() << alloc_indent_stack.top() << "auto " << future_name
+                           << " = alloc_dma_("
+                           << DMATypeString(src_level, dst_level)
+                           << "()).shared_();\n";
     else if (d.chained == true) {
       // hoist sdma for chained usage, to avoid use before definition
       std::ostringstream fs_tmp = std::move(alloc_fs_stack.top());
       std::string ind_tmp = alloc_indent_stack.top();
       alloc_fs_stack.pop();
       alloc_indent_stack.pop();
-      alloc_fs_stack.top() << alloc_indent_stack.top() << "auto " << future_name << " = alloc_dma_("
-                  << DMATypeString(src_level, dst_level) << "());\n";
+      alloc_fs_stack.top() << alloc_indent_stack.top() << "auto " << future_name
+                           << " = alloc_dma_("
+                           << DMATypeString(src_level, dst_level) << "());\n";
       alloc_fs_stack.push(std::move(fs_tmp));
       alloc_indent_stack.push(ind_tmp);
 
     } else {
-      alloc_fs_stack.top() << alloc_indent_stack.top() << "auto " << future_name << " = alloc_dma_("
-                  << DMATypeString(src_level, dst_level) << "());\n";
-
+      alloc_fs_stack.top() << alloc_indent_stack.top() << "auto " << future_name
+                           << " = alloc_dma_("
+                           << DMATypeString(src_level, dst_level) << "());\n";
     }
   }
 

@@ -41,12 +41,12 @@ TEST_F(OptionTest, CorrectlyWritesToOutputFile) {
                                  "Place the output into <file>.", "-o <file>",
                                  true);
 
-  const char* argv[] = {"program", "--output", temp_filename.c_str(), "abc"};
+  const char* argv[] = {"program", "--output", temp_filename.c_str(), "-"};
   int argc = sizeof(argv) / sizeof(argv[0]);
 
   ASSERT_TRUE(registry.Parse(argc, const_cast<char**>(argv)));
   ASSERT_EQ(temp_filename, outputPath.GetValue());
-  ASSERT_EQ(registry.StdinAsInput(), false);
+  ASSERT_EQ(registry.StdinAsInput(), true);
 
   createFileWithContent(temp_filename, "Test output content");
 
@@ -61,7 +61,7 @@ TEST_F(OptionTest, CorrectlyWritesToOutputFile) {
 TEST_F(OptionTest, HandlesMissingArguments) {
   OptionRegistry& registry = OptionRegistry::GetInstance();
   Option<std::string> criticalOption(OptionKind::User, "--critical", "-c", "",
-                                     "", "", true);
+                                     "a", "b", true);
 
   const char* argv[] = {"program", "--critical"};
   int argc = sizeof(argv) / sizeof(argv[0]);
@@ -70,14 +70,14 @@ TEST_F(OptionTest, HandlesMissingArguments) {
 }
 
 TEST_F(OptionTest, DescriptionPrint) {
+  OptionRegistry& registry = OptionRegistry::GetInstance();
   Option<std::string> whatOption(OptionKind::User, "--what", "-w", "",
                                  "I don't know what it is.", "", true);
-  OptionRegistry& registry = OptionRegistry::GetInstance();
 
   const char* argv[] = {"program", "--help"};
   int argc = sizeof(argv) / sizeof(argv[0]);
 
   ASSERT_EQ(registry.Parse(argc, const_cast<char**>(argv)), false);
-  ASSERT_EQ(registry.Message(), "");
+  ASSERT_EQ(registry.Message(), std::string(""));
   ASSERT_EQ(registry.ReturnCode(), 0);
 }
