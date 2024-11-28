@@ -46,7 +46,7 @@ public:
     if (num_elements == 1) {
       std::fill(data, data+N, *init.begin());
     } else {
-      for (auto i = 0; i < num_elements && i < N; ++i)
+      for (size_t i = 0; i < num_elements && i < N; ++i)
         data[i] = *(init.begin() + i);
     }
   }

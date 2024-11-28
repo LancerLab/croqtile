@@ -30,11 +30,8 @@ $(GTEST_DIR)/libgtest_main.a: $(GTEST_DIR)/googletest/src/gtest_main.cc
 	$(CXX) $(CXXFLAGS) -I$(GTEST_DIR)/googletest/include -I$(GTEST_DIR)/googletest -pthread -c $< -o $(GTEST_DIR)/gtest_main.o
 	ar -rv $@ $(GTEST_DIR)/gtest_main.o
 
-choreo_options.o : ../../options.cpp $(CHOREO_HEADERS)
-	$(CC) -std=c++17 $(CFLAGS) $< -c  -o $@
-
-%.test: %.o choreo_options.o $(GTEST_LIBS)
-	$(CXX) $(CXXFLAGS) -L../../ -L$(GTEST_DIR) choreo_options.o -lgtest_main -lgtest -o $@ $< -pthread
+%.test: %.o $(GTEST_LIBS)
+	$(CXX) $(CXXFLAGS) -L../../ -L$(GTEST_DIR) -lgtest_main -lgtest -o $@ $< -pthread
 
 # Pattern rule for object files
 %.o: %.cpp $(HEADER_FILES)

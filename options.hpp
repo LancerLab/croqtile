@@ -5,12 +5,11 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <unordered_map>
 #include <memory>
-#include <mutex>
 #include <set>
 #include <sstream>
 #include <string>
-#include <unordered_map>
 
 #include "aux.hpp"
 
@@ -36,7 +35,7 @@ public:
   virtual const std::string GetAlias() const = 0;
 
 public:
-  virtual void SetError(const std::string&) = 0;
+  virtual void SetError(const std::string &) = 0;
   virtual const std::string GetError() const = 0;
 };
 
@@ -73,7 +72,7 @@ private:
   std::string err;
 
 public:
-  void SetError(const std::string& e) override { err = e; }
+  void SetError(const std::string &e) override {err = e;} 
   const std::string GetError() const override { return err; }
 };
 
@@ -97,11 +96,6 @@ private:
   std::ostringstream ess;
   int ret_code = 0;
 
-private:
-  static std::unique_ptr<OptionRegistry> instance;
-  static std::once_flag initFlag;
-  static std::mutex regMutex;
-
 public:
   const std::string GetOutputFileName() const { return output_filename; }
   const std::string GetInputFileName() const { return input_filename; }
@@ -110,8 +104,8 @@ public:
   bool StdinAsInput() const { return stdin_as_input; }
 
   static OptionRegistry& GetInstance() {
-    std::call_once(initFlag, []() { instance.reset(new OptionRegistry); });
-    return *instance;
+    static OptionRegistry instance;
+    return instance;
   }
 
   void Reset() {
@@ -131,7 +125,6 @@ public:
   }
 
   void RegisterOption(const std::string& name, OptionBase* option) {
-    std::scoped_lock lock(regMutex);
     if (options.count(name)) {
       errs() << "option '" << name << "' has been registered twice.\n";
       abort();
@@ -141,10 +134,10 @@ public:
 
   void UnRegisterOption(const std::string& name) {
     if (options.count(name)) {
-      auto* option = options.at(name);
+      auto * option = options.at(name);
       if (option->GetAlias() != "") {
-        auto alias = option->GetAlias();
-        options.erase(alias);
+         auto alias = option->GetAlias();
+         options.erase(alias);
       }
       options.erase(name);
     }
@@ -257,7 +250,8 @@ inline const std::string Option<T>::Description() const {
   else
     option_desc = (option_desc.empty()) ? name : option_desc;
   oss << "  " << std::setw(26) << std::left << option_desc;
-  if (option_desc.size() <= 26) oss << description;
+  if (option_desc.size() <= 26)
+    oss << description;
   oss << "                             " << description;
   return oss.str();
 }
@@ -273,6 +267,7 @@ inline Option<T>::Option(OptionKind ok, const std::string& name,
   OptionRegistry::GetInstance().RegisterOption(name, this);
   if (!alias.empty()) OptionRegistry::GetInstance().RegisterOption(alias, this);
 }
+
 
 template <typename T>
 inline Option<T>::~Option() {
