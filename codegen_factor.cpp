@@ -389,20 +389,7 @@ bool FactorCodeGen::Visit(AST::Assignment& node) {
 // CLEAN
 bool FactorCodeGen::Visit(AST::ParallelBy& by) {
   TraceEachVisit(by);
-  if (parallel_level > 1) {
-    // handle allocation stmts for global vars
-    alloc_pos_stack.push(fs.str().size());
-    alloc_indent_stack.push(indent);
-    alloc_fs_stack.push(std::ostringstream());
-    // std::cout << "enter parallelly" << std::endl;
-    // std::cout << alloc_fs_stack.size() << std::endl;
-    // std::cout << alloc_indent_stack.size() << std::endl;
-    // std::cout << alloc_pos_stack.size() << std::endl;
-    // std::cout << alloc_fs_stack.top().str() << std::endl;
-    // std::cout << alloc_indent_stack.top() << std::endl;
-    // std::cout << alloc_pos_stack.top() << std::endl;
-    return true;
-  }
+  if (parallel_level > 1) { return true; }
 
   fs << this->indent << "Dim3 grid_dim("
      << cgi->GetFunctionLaunch(fname).grid_dim_x << ");\n";
