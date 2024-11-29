@@ -15,11 +15,14 @@
 namespace Choreo {
 
 Option<bool>
-    applyDefinesInCO(OptionKind::Hidden, "--apply-defines-in-co", "", true,
+    applyDefinesInCO(OptionKind::Internal, "--apply-defines-in-co", "", true,
                      "Apply #define macros inside of Choreo Function.");
 Option<bool>
-    applyDefinesInCOK(OptionKind::Hidden, "--apply-defines-in-cok", "", true,
+    applyDefinesInCOK(OptionKind::Internal, "--apply-defines-in-cok", "", true,
                       "Apply #define macros inside of Choreo Function.");
+
+Option<bool> debugPP(OptionKind::Internal, "--debug-pp", "", false,
+                     "Debug the preprocessor.");
 
 class SimplePreprocessor {
 private:
@@ -50,8 +53,10 @@ private:
   bool c_skip = false;
   size_t line_num = 0;
 
+  bool debug = false;
+
 public:
-  SimplePreprocessor(std::ostream& o) : output(o) {}
+  SimplePreprocessor(std::ostream& o) : output(o), debug(debugPP) {}
 
 private:
   std::string SubstituteGlobalDefines(const std::string& line) {
@@ -77,10 +82,7 @@ private:
   }
 
 private:
-  std::optional<std::string> HandleCComments(const std::string& line) {
-    // Still in skipping. Do not work with it.
-    if (c_skip) return {};
-
+  const std::string HandleCComments(const std::string& line) {
     std::string work_string = line;
     std::string result_line;
     while (!work_string.empty()) {
@@ -95,7 +97,7 @@ private:
       } else {
         auto pos = std::string::npos;
         if (pos = work_string.find("/*"); pos != std::string::npos) {
-          result_line += work_string.substr(0, pos + 2);
+          result_line += work_string.substr(0, pos);
           work_string = work_string.substr(pos + 2);
         } else {
           result_line += work_string;
@@ -108,17 +110,20 @@ private:
   }
 
   void HandleOneUserLine(const std::string& line) {
+    if (debug) dbgs() << "[U] " << line << " [U]\n";
+
     assert(kernel_brace_count == 0 && "expect no kernel brace in host code.");
     assert(choreo_brace_count == 0 && "expect no kernel brace.");
 
+    bool skip_line = c_skip;
     // Strip any comments to avoid incorrect analysis of braces
     auto rline = std::regex_replace(line, std::regex("//.*"), "");
-    auto pline = HandleCComments(rline);
-    if (c_skip) {
+    auto aline = HandleCComments(rline);
+    if (skip_line && aline.empty()) {
+      if (debug) dbgs() << " - skipped\n";
       output << line << '\n';
       return;
     }
-    auto aline = *pline;
 
     auto bline = std::regex_replace(line, std::regex("^\\s+|\\s+$"), "");
     bool cur_cond = uc_condition_stack.empty() || uc_condition_stack.top();
@@ -212,17 +217,18 @@ private:
 
       auto c_pos = sline.find_first_of('{');
       if (c_pos != std::string::npos) {
-        auto co_decl = sline.substr(0, c_pos);
+        auto b_pos = sline.find("__co__ ");
+        auto co_decl = sline.substr(b_pos, c_pos - b_pos);
         auto co_code = sline.substr(c_pos);
 
         // Output the function declaration. Append any leading C comment. C
         // comments in the middle of decl are ignored
-        if (auto pos = sline.find("__co__ "))
-          output << sline.substr(0, pos) << co_decl;
+        if (auto pos = line.find("__co__ "))
+          output << line.substr(0, pos) << co_decl;
         else
           output << co_decl;
 
-        HandleOneChoreoLine(co_code);
+        HandleOneChoreoLine(co_code, false);
       } else
         output << line << '\n'; // output the original line
 
@@ -231,25 +237,27 @@ private:
 
     // Check if entering a '__cok__' partition
     if (sline.find("__cok__ ") != std::string::npos) {
+      if (choreo_brace_count) {
+        errs() << "copp: in line " << line_num
+               << ": error: '__cok__' code inside '__co__' function is "
+                  "illegal.\n";
+        abort();
+      }
       code_partition = CP_KERNEL;
       auto k_pos = sline.find_first_of('{');
       if (k_pos != std::string::npos) {
-        if (choreo_brace_count) {
-          errs() << "copp: in line " << line_num
-                 << ": error: '__cok__' code inside '__co__' function is "
-                    "illegal.\n";
-          abort();
-        }
         auto kernel_decl = sline.substr(0, k_pos);
-        auto kernel_code = sline.substr(k_pos);
+        // put the best effort to get the original line
+        auto kline = line.substr(line.find("__cok__ "));
+        auto kernel_code = kline.substr(kline.find("{"));
 
         // Output the __cok__. Append any leading C comment.
-        if (auto pos = sline.find("__cok__ "))
-          output << sline.substr(0, pos) << kernel_decl;
+        if (auto pos = line.find("__cok__ "))
+          output << line.substr(0, pos) << kernel_decl;
         else
           output << kernel_decl;
 
-        HandleOneKernelLine(kernel_code);
+        HandleOneKernelLine(kernel_code, false);
       } else
         output << line << '\n'; // output the original line
 
@@ -259,17 +267,24 @@ private:
     output << line << '\n';
   }
 
-  void HandleOneKernelLine(const std::string& line) {
+  void HandleOneKernelLine(const std::string& line,
+                           bool handle_comment = true) {
+    if (debug) dbgs() << "[K] " << line << " [K]\n";
+
     assert(code_partition == CP_KERNEL);
 
-    // Strip any comments to avoid incorrect analysis of braces
-    auto rline = std::regex_replace(line, std::regex("//.*$"), "");
-    auto pline = HandleCComments(rline);
-    if (c_skip) {
-      output << line << '\n';
-      return;
+    auto aline = line;
+    if (handle_comment) {
+      bool skip_line = c_skip;
+      // Strip any comments to avoid incorrect analysis of braces
+      auto rline = std::regex_replace(line, std::regex("//.*$"), "");
+      aline = HandleCComments(rline);
+      if (skip_line && aline.empty()) {
+        if (debug) dbgs() << " - comment\n";
+        output << line << '\n';
+        return;
+      }
     }
-    auto aline = *pline;
 
     size_t end_pos = aline.size();
     for (size_t i = 0; i < aline.size(); ++i) {
@@ -299,15 +314,23 @@ private:
     HandleOneUserLine(aline.substr(end_pos + 1));
   }
 
-  void HandleOneChoreoLine(const std::string& line) {
+  void HandleOneChoreoLine(const std::string& line,
+                           bool handle_comment = true) {
+    if (debug) dbgs() << "[C] " << line << " [C]\n";
+
     assert(code_partition == CP_CHOREO);
 
-    // Strip white spaces and "//" leading comments
-    auto rline = std::regex_replace(line, std::regex("//.*"), "");
-    auto pline = HandleCComments(rline);
-    if (!pline.has_value()) return;
-
-    auto aline = *pline;
+    auto aline = line;
+    if (handle_comment) {
+      auto skip_line = c_skip;
+      // Strip white spaces and "//" leading comments
+      auto rline = std::regex_replace(line, std::regex("//.*"), "");
+      aline = HandleCComments(rline);
+      if (skip_line && aline.empty()) {
+        if (debug) dbgs() << " - skipped\n";
+        return;
+      }
+    }
 
     auto bline = std::regex_replace(line, std::regex("^\\s+|\\s+$"), "");
     bool cur_cond = co_condition_stack.empty() || co_condition_stack.top();
@@ -374,34 +397,37 @@ private:
         co_skip_stack.pop();
       }
     } else if (!co_skip_line) {
-      size_t co_code_start = 0;
-      size_t co_code_end = aline.size();
+      size_t co_start = 0;
+      size_t co_end = aline.size();
       for (size_t i = 0; i < aline.size(); ++i) {
         char c = aline[i];
         if (c == '{') {
           choreo_brace_count++;
           if (choreo_brace_count == 1) {
             // just entered
-            co_code_start = i;
+            co_start = i;
             localDefines = globalDefines;
           }
         } else if (c == '}') {
           choreo_brace_count--;
-          if (choreo_brace_count == 0) { co_code_end = i; }
+          if (choreo_brace_count == 0) {
+            co_end = i;
+            break; // the followed code are not choreo code
+          }
         }
       }
 
-      if ((co_code_end == aline.size()) && (choreo_brace_count == 0)) {
+      if ((co_end == aline.size()) && (choreo_brace_count == 0)) {
         // has not entered the choreo code region
         output << line << '\n';
         return;
       }
 
-      auto co_code = aline.substr(co_code_start, co_code_end);
+      auto co_code = aline.substr(co_start, co_end - co_start);
       auto sline = SubstituteLocalDefines(co_code);
 
       // output the choreo code
-      output << aline.substr(0, co_code_start) << sline;
+      output << aline.substr(0, co_start) << sline;
 
       if (choreo_brace_count == 0) {
         // there could be host code followed
@@ -409,7 +435,7 @@ private:
         code_partition = CP_USER;
         localDefines.clear(); // Clear local defines
         HandleOneUserLine(aline.substr(
-            co_code_end +
+            co_end +
             1)); // note user's C comments in this line is also stripped
       } else
         output << '\n';

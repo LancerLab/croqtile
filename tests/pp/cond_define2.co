@@ -1,0 +1,43 @@
+// RUN: choreo -n -E %s | grep -v "\<CHECK\>" | FileCheck --match-full-lines %s
+
+   show me value ABC
+#if BBC
+#define ABC 301
+#else
+#define ABC 302
+   show me value ABC
+__co__ int foo(f32 d[]) {
+  #if 0
+    #define ABC 303
+  #endif
+   show me value ABC
+  #if 1
+    #define ABC 304
+  #else
+    #define ABC 305
+   show me value ABC
+  #endif
+   show me value ABC
+}
+#endif
+   show me value ABC
+
+// CHECK: show me value ABC
+// CHECK: #if BBC
+// CHECK: #define ABC 301
+// CHECK: #else
+// CHECK: #define ABC 302
+// CHECK: show me value ABC
+// CHECK-NOT:   #if 0
+// CHECK-NOT:     #define ABC 303
+// CHECK-NOT:   #endif
+// CHECK: show me value 302
+// CHECK-NOT:   #if 1
+// CHECK-NOT:     #define ABC 304
+// CHECK-NOT:   #else
+// CHECK-NOT:     #define ABC 304
+// CHECK-NOT: show me value 305
+// CHECK-NOT:   #endif
+// CHECK: show me value 304
+// CHECK: #endif
+// CHECK: show me value ABC

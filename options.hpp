@@ -22,6 +22,7 @@ std::ostream& dbgs();
 enum class OptionKind {
   User = 0,
   Hidden = 1,
+  Internal = 2,
 };
 
 class OptionBase {
