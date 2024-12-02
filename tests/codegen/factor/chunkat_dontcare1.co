@@ -1,4 +1,4 @@
-// RUN: choreo %s | FileCheck --match-full-lines %s
+// RUN: choreo -gs %s | FileCheck --match-full-lines %s
 
 __co__ auto chunkat_dontcare(s32 [4, 8, 16] i) {
   s32 [i.span] o;
