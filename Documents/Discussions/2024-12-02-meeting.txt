@@ -1,0 +1,21 @@
+1. tail handling
+
+__co__ foo(int N) {
+  parallel q by 6 {...}
+  parallel q by N % 6 {...}
+}
+
+alternative:
+
+__co__ foo(f32 [N] a) {
+  f32 [ceil_div(N, 6) * 6] gbuffer;
+  dma.pad<...> a => gbuffer;
+  parallel q by 6 {...}
+}
+
+2. "_" is reserved for symbol name.
+
+3. issues:
+- not used 'dma.any' is not reported
+- "not-existed inputfile" is not checked
+- chunckat does not runtime-check for 0-values.
