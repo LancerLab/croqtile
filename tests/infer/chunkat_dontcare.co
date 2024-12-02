@@ -1,0 +1,52 @@
+// RUN: choreo -dv=norm -sa=norm %s | FileCheck --match-full-lines %s
+// RUN: choreo -i %s | FileCheck --check-prefix=INFER --match-full-lines %s
+
+__co__ auto chunkat_dontcare(s32 [4, 8, 16] i) {
+  s32 [i.span] o;
+  parallel p by 4 {
+    l0 = dma.copy i => local;
+    // l1 = dma.copy i.chunkat(_, _, _) => local;
+    with {t0} in [2] {
+      foreach t0 {
+        l2 = dma.copy i.chunkat(t0, _, _) => local;
+        l3 = dma.copy i.chunkat(_, t0, _) => local;
+        l4 = dma.copy i.chunkat(_, t0, t0) => local;
+        l5 = dma.copy i.chunkat(_, t0, _) => local;
+        dma.copy l5 => o.chunkat(_, t0, _);
+      }
+    }
+  }
+}
+
+// CHECK: Place storage of 'o': DEFAULT ---> GLOBAL
+// CHECK: Wrap the `with in` at tests/infer/chunkat_dontcare.co:9.1-8.
+// CHECK: Generate with-matchers for '__choreo_zero': __choreo_zero__elem__0
+// CHECK: replace t0 with t0.
+// CHECK: replace __choreo_zero with __choreo_zero.
+// CHECK: replace __choreo_zero with __choreo_zero.
+// CHECK: replace __choreo_zero with __choreo_zero.
+// CHECK: replace t0 with t0.
+// CHECK: replace __choreo_zero with __choreo_zero.
+// CHECK: replace __choreo_zero with __choreo_zero.
+// CHECK: replace t0 with t0.
+// CHECK: replace t0 with t0.
+// CHECK: replace __choreo_zero with __choreo_zero.
+// CHECK: replace t0 with t0.
+// CHECK: replace __choreo_zero with __choreo_zero.
+// CHECK: replace __choreo_zero with __choreo_zero.
+// CHECK: replace t0 with t0.
+// CHECK: replace __choreo_zero with __choreo_zero.
+
+// INFER: Parameter: ::chunkat_dontcare::i, Type: s32 mdspan<3> [4, 8, 16]
+// INFER: Symbol:    ::chunkat_dontcare::o, Type: global s32 mdspan<3> [4, 8, 16]
+// INFER: Bounded:   ::chunkat_dontcare::paraby_0::p, Type: {int}->[4]
+// INFER: Future:    ::chunkat_dontcare::paraby_0::l0, Type: sync=>local s32 mdspan<3> [4, 8, 16]
+// INFER: Bounded:   ::chunkat_dontcare::paraby_0::within_0::t0, Type: {int}->[2]
+// INFER: Bounded:   ::chunkat_dontcare::paraby_0::within_0::within_1::__choreo_zero, Type: {int}->[1]
+// INFER: Bounded:   ::chunkat_dontcare::paraby_0::within_0::within_1::__choreo_zero__elem__0, Type: {int}->[1]
+// INFER: Future:    ::chunkat_dontcare::paraby_0::within_0::within_1::foreach_0::foreach_1::l2, Type: sync=>local s32 mdspan<3> [2, 8, 16]
+// INFER: Future:    ::chunkat_dontcare::paraby_0::within_0::within_1::foreach_0::foreach_1::l3, Type: sync=>local s32 mdspan<3> [4, 4, 16]
+// INFER: Future:    ::chunkat_dontcare::paraby_0::within_0::within_1::foreach_0::foreach_1::l4, Type: sync=>local s32 mdspan<3> [4, 4, 8]
+// INFER: Future:    ::chunkat_dontcare::paraby_0::within_0::within_1::foreach_0::foreach_1::l5, Type: sync=>local s32 mdspan<3> [4, 4, 16]
+// INFER: Future:    ::chunkat_dontcare::paraby_0::within_0::within_1::foreach_0::foreach_1::(anon), Type: sync=>global s32 mdspan<3> [4, 4, 16]
+// INFER: Function:  ::chunkat_dontcare, Type: void (*)(s32 mdspan<3> [4, 8, 16])

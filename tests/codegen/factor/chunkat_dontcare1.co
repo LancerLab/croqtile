@@ -1,0 +1,59 @@
+// RUN: choreo %s | FileCheck --match-full-lines %s
+
+__co__ auto chunkat_dontcare(s32 [4, 8, 16] i) {
+  s32 [i.span] o;
+  parallel p by 4 {
+    l0 = dma.copy i => local;
+    with {t0} in [2] {
+      foreach t0 {
+        l2 = dma.copy i.chunkat(t0, _, _) => local;
+        l3 = dma.copy i.chunkat(_, t0, _) => local;
+        l4 = dma.copy i.chunkat(_, t0, t0) => local;
+        l5 = dma.copy i.chunkat(_, t0, _) => local;
+        dma.copy l5 => o.chunkat(_, t0, _);
+      }
+    }
+  }
+}
+
+// CHECK:  D(func_)("__choreo_chunkat_dontcare_parallel", {i_type, o_type}, {}, [&](auto args, auto results) {
+// CHECK:    auto & i = args[0];
+// CHECK:    auto & o = args[1];
+// CHECK:    auto thread_id = thread_id_();
+// CHECK:    auto block_id = block_id_();
+// CHECK:    auto l0__buf__ = alloc_(L1Type(IntType(32),{4, 8, 16}));
+// CHECK:    auto l0 = alloc_dma_(SDMAType());
+// CHECK:    async_load_(l0, i, l0__buf__, {0, 0, 0});
+// CHECK:    wait_dma_(l0);
+// CHECK:    { // start of with-in: tests/codegen/factor/chunkat_dontcare1.co:7.1-10
+// CHECK:    var_ t0(IntType(32));
+// CHECK:    t0 = 0;
+// CHECK:    { // start of with-in: tests/codegen/factor/chunkat_dontcare1.co:7.1-20
+// CHECK:    auto l2__buf__ = alloc_(L1Type(IntType(32),{2, 8, 16}));
+// CHECK:    auto l2 = alloc_dma_(SDMAType());
+// CHECK:    auto l3__buf__ = alloc_(L1Type(IntType(32),{4, 4, 16}));
+// CHECK:    auto l3 = alloc_dma_(SDMAType());
+// CHECK:    auto l4__buf__ = alloc_(L1Type(IntType(32),{4, 4, 8}));
+// CHECK:    auto l4 = alloc_dma_(SDMAType());
+// CHECK:    auto l5__buf__ = alloc_(L1Type(IntType(32),{4, 4, 16}));
+// CHECK:    auto l5 = alloc_dma_(SDMAType());
+// CHECK:    auto __choreo_anon_fut__0 = alloc_dma_(SDMAType());
+// CHECK:    var_ __choreo_zero__elem__0(IntType(32));
+// CHECK:    __choreo_zero__elem__0 = 0;
+// CHECK:    for_(__choreo_zero__elem__0, 1, 1, [&](auto iv___choreo_zero__elem__0) {
+// CHECK:      for_(t0, 2, 1, [&](auto iv_t0) {
+// CHECK:        async_load_(l2, i, l2__buf__, {Value(2)*iv_t0,Value(8)*iv___choreo_zero__elem__0,Value(16)*iv___choreo_zero__elem__0});
+// CHECK:        wait_dma_(l2);
+// CHECK:        async_load_(l3, i, l3__buf__, {Value(4)*iv___choreo_zero__elem__0,Value(4)*iv_t0,Value(16)*iv___choreo_zero__elem__0});
+// CHECK:        wait_dma_(l3);
+// CHECK:        async_load_(l4, i, l4__buf__, {Value(4)*iv___choreo_zero__elem__0,Value(4)*iv_t0,Value(8)*iv_t0});
+// CHECK:        wait_dma_(l4);
+// CHECK:        async_load_(l5, i, l5__buf__, {Value(4)*iv___choreo_zero__elem__0,Value(4)*iv_t0,Value(16)*iv___choreo_zero__elem__0});
+// CHECK:        wait_dma_(l5);
+// CHECK:        async_store_(__choreo_anon_fut__0, l5__buf__, o, {Value(4)*iv___choreo_zero__elem__0,Value(4)*iv_t0,Value(16)*iv___choreo_zero__elem__0});
+// CHECK:        wait_dma_(__choreo_anon_fut__0);
+// CHECK:      }); // end of choreo-foreach block on 't0'.
+// CHECK:    }); // end of choreo-foreach block on '__choreo_zero__elem__0'.
+// CHECK:    } // end of with-in: tests/codegen/factor/chunkat_dontcare1.co:7.1-20
+// CHECK:    } // end of with-in: tests/codegen/factor/chunkat_dontcare1.co:7.1-8
+// CHECK:  }); // end of choreo-factor device function
