@@ -20,6 +20,7 @@
 #include "valno.hpp"
 #include "visualize.hpp"
 #include <cstdlib>
+#include <filesystem>
 #include <getopt.h>
 
 using namespace Choreo;
@@ -35,7 +36,7 @@ using namespace Choreo;
 Option<std::string> target(
     OptionKind::User, "--target", "-t", "factor",
     "Set the compilation target. The 'platform' includes <factor|topscc|cuda>.",
-    "--target=<platform>", true);
+    "--target <platform>", true);
 Option<std::string> arch(OptionKind::User, "-arch", "", "gcu300",
                          "Set the architecture to execute the binary code.",
                          "-arch=<processor>");
@@ -193,11 +194,17 @@ int main(int argc, char* argv[]) {
   if (dump_ast) {
     if (ncodegen)
       errs()
-          << "Warning: Semantic check is ignored since dumping AST is required."
+          << "warning: Semantic check is ignored since dumping AST is required."
           << std::endl;
   }
 
   std::string filename = r.GetInputFileName();
+  if (!std::filesystem::exists(filename)) {
+    errs() << "error: The input file '" << filename << "' does not exist."
+           << std::endl;
+    return 1;
+  }
+
   loc.begin.filename = loc.end.filename = &filename;
 
   if (prt_pass) dbgs() << "|- " << filename << "\n";

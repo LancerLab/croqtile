@@ -323,7 +323,7 @@ public:
 
   bool Visit(AST::ChunkAt& n) override {
     TraceEachVisit(n);
-    
+
     if (n.positions) {
       for (auto& v : n.positions->AllValues()) {
         auto expr = cast<AST::Expr>(v);
