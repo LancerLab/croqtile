@@ -14,11 +14,11 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
     parallel_level = 0;
   } else if (isa<AST::ParallelBy>(&n)) {
     parallel_level++;
-  }
-
-  if (isa<AST::Parameter>(&n)) {
+  } else if (isa<AST::Parameter>(&n)) {
     in_decl = true;
     allow_named_dim = true; // tolerate repeated symbols inside mdspan params
+  } else if (isa<AST::WithBlock>(&n)) {
+    contians_dontcare = false;
   }
 
   return true;
@@ -49,9 +49,11 @@ bool EarlySemantics::AfterVisitImpl(AST::Node& n) {
     parallel_level--;
   } else if (isa<AST::WithBlock>(&n)) {
     with_syms.clear();
-  }
-
-  if (isa<AST::Parameter>(&n)) {
+    if (contians_dontcare) {
+      n.note += ", contians_dontcare";
+      contians_dontcare = false;
+    }
+  } else if (isa<AST::Parameter>(&n)) {
     in_decl = false;
     allow_named_dim = false;
   }
@@ -633,8 +635,14 @@ bool EarlySemantics::Visit(AST::Identifier& n) {
                              MakeIntegerType()); // named dim is integer
     } else
       ReportErrorWhenViolateODR(n.LOC(), n.name, __FILE__, __LINE__);
-  } else
+  } else {
+    if (n.name == "__choreo_zero" && !SSTab().DeclaredInScope(n.name)) {
+      auto bit = MakeBoundedIntegerType(1);
+      SSTab().DefineSymbol(n.name, bit);
+      SSTab().DefineSymbol("@" + n.name, MakeIntegerType());
+    }
     ReportErrorWhenUseBeforeDefine(n.LOC(), n.name);
+  }
   return true;
 }
 
@@ -911,6 +919,19 @@ bool EarlySemantics::Visit(AST::DMA& n) {
 
 bool EarlySemantics::Visit(AST::ChunkAt& n) {
   TraceEachVisit(n);
+
+  if (n.positions) {
+    for (auto& v : n.positions->AllValues()) {
+      auto expr = cast<AST::Expr>(v);
+      if (expr->IsReference()) {
+        if (auto id = dyn_cast<AST::Identifier>(expr->GetReference());
+            PrefixedWith(id->name, "__choreo_dontcare")) {
+          id->name = "__choreo_zero";
+          contians_dontcare = true;
+        }
+      }
+    }
+  }
 
   n.data->accept(*this);
   auto nty = NodeType(*n.data);

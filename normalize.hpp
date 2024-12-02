@@ -20,6 +20,9 @@ private:
   std::string old;
   size_t count = 0; // name suffix of runtime int values
 
+  // if there is dontcare in chunkat, should be true.
+  bool dontcare_handled = false;
+
   bool handle_parameter = false;
   ptr<AST::Expr> list_ref = nullptr;
   void SetListReference(const location& l, const std::string& r) {
@@ -78,6 +81,41 @@ public:
     } else if (auto d = dyn_cast<AST::Return>(&n)) {
       cur_node_index = multi_nodes.top()->GetIndex(d);
       assert(cur_node_index != -1 && "unexpected node index.");
+    } else if (auto wb = dyn_cast<AST::WithBlock>(&n)) {
+      if (wb->note == "gen_by_norm") return true;
+      dontcare_handled = false;
+      if (n.note.find("contians_dontcare") == std::string::npos) return true;
+      auto loc = wb->withins->LOC();
+      auto added_with_block = AST::Make<AST::WithBlock>(loc);
+      auto added_within = AST::Make<AST::WithIn>(
+          loc, AST::Make<AST::Identifier>(loc, "__choreo_zero"),
+          AST::Make<AST::Expr>(
+              loc, AST::Make<AST::MultiDimSpans>(
+                       loc, "",
+                       AST::Make<AST::MultiValues>(
+                           loc, ", ",
+                           AST::Make<AST::Expr>(
+                               loc, AST::Make<AST::IntLiteral>(loc, 1))))));
+      added_within->with->SetType(MakeBoundedITupleType(Shape(1, 1)));
+      auto added_withins = AST::Make<AST::MultiNodes>(loc);
+      added_withins->Append(added_within);
+      added_with_block->withins = added_withins;
+      auto added_ranges = AST::Make<AST::MultiValues>(loc);
+      added_ranges->Append(AST::Make<AST::LoopRange>(
+          loc, AST::Make<AST::Identifier>(loc, "__choreo_zero")));
+      auto added_foreachblock =
+          AST::Make<AST::ForeachBlock>(loc, added_ranges, wb->stmts);
+      auto added_stmts = AST::Make<AST::MultiNodes>(loc);
+      added_stmts->Append(added_foreachblock);
+      added_with_block->stmts = added_stmts;
+      added_with_block->note = "gen_by_norm";
+      auto res = AST::Make<AST::MultiNodes>(loc);
+      res->Append(added_with_block);
+      wb->stmts = res;
+      changed = true;
+      dontcare_handled = true;
+      // using `with {__choreo_zero} in [1] { foreach __choreo_zero {  } }
+      VST_DEBUG(dbgs() << "Wrap the `with in` at " << n.LOC() << ".\n");
     }
     return true;
   }
@@ -285,6 +323,18 @@ public:
 
   bool Visit(AST::ChunkAt& n) override {
     TraceEachVisit(n);
+    
+    if (n.positions) {
+      for (auto& v : n.positions->AllValues()) {
+        auto expr = cast<AST::Expr>(v);
+        if (auto ref = expr->GetSymbol())
+          if (ref->name == "__choreo_zero")
+            if (!dontcare_handled)
+              Error(n.LOC(),
+                    "`chunkat` with `_` can only be used inside `with in`.");
+      }
+    }
+
     if (n.sa) {
       assert(cur_node_index != -1);
       // hoist the span_as to multinodes

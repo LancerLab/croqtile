@@ -300,9 +300,7 @@ ValueNumbering::TryToSimplifyBinary(const location& loc, const std::string& op,
         }
       }
     }
-  }
-
-  if (op == "-") {
+  } else if (op == "-") {
     // a-a == 1
     if (GetValueNumberOfSignature(lhs) == GetValueNumberOfSignature(rhs)) {
       std::string res = "const_0";
@@ -311,9 +309,7 @@ ValueNumbering::TryToSimplifyBinary(const location& loc, const std::string& op,
                << rhs << " to '" << res << "'\n";
       return res;
     }
-  }
-
-  if (op == "+") {
+  } else if (op == "+") {
     // useful simplification: a-b+b = a
     if (!PrefixedWith(rhs, "#") /*not multiple values*/) {
       int lvn = GetValueNumberOfSignature(lhs);
@@ -326,6 +322,32 @@ ValueNumbering::TryToSimplifyBinary(const location& loc, const std::string& op,
         assert(minus.size() == 2);
         if (GetValueNumberOfSignature(rhs) == minus[1]) {
           auto res = GetSignatureFromValueNumber(minus[0]);
+
+          if (trace && verbose)
+            dbgs() << ScopeIndent() << "<Simplify> '" << lhs << " " << op << " "
+                   << rhs << " to '" << res << "'\n";
+
+          return res;
+        }
+      }
+    }
+  } else if (op == "#") {
+    // suppose `a` and `b` are bounded vars
+    // `#a` is 4, `#b` is `N/#a` where `N` is dynamic dim
+    // if `xx.chunkat(a#b)`, then the result shape should be 1
+    // that is, N / (#a * #b) = N / N = 1
+    // so, `a#b` should be simplified to a bounded var whose ubound is `N`
+    if (!PrefixedWith(lhs, "#") /*not multiple values*/) {
+      int rvn = GetValueNumberOfSignature(rhs);
+      auto bind_set = GetBindSet(rvn);
+      bind_set.insert(rvn); // always add self
+      for (auto div_vn : bind_set) {
+        auto sig = GetSignatureFromValueNumber(div_vn);
+        if (!PrefixedWith(rhs, "/:")) continue;
+        auto div = GetOperandsValNo(sig);
+        assert(div.size() == 2);
+        if (GetValueNumberOfSignature(lhs) == div[1]) {
+          auto res = GetSignatureFromValueNumber(div[0]);
 
           if (trace && verbose)
             dbgs() << ScopeIndent() << "<Simplify> '" << lhs << " " << op << " "

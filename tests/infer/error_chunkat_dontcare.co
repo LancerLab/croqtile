@@ -1,0 +1,19 @@
+// RUN: not choreo -sa=norm %s 2>&1 | FileCheck --match-full-lines %s
+
+__co__ auto chunkat_dontcare(s32 [4, 8, 16] i) {
+  s32 [i.span] o;
+  parallel p by 4 {
+    l0 = dma.copy i => local;
+    l1 = dma.copy i.chunkat(_, _, _) => local;
+    // with {t0} in [2] {
+    //   foreach t0 {
+    //     l2 = dma.copy i.chunkat(t0, _, _) => local;
+    //     dma.copy l2 => o.chunkat(_, t0, _);
+    //   }
+    // }
+  }
+}
+
+// CHECK: tests/infer/error_chunkat_dontcare.co:7.1-19: error: `chunkat` with `_` can only be used inside `with in`.
+// CHECK: tests/infer/error_chunkat_dontcare.co:7.1-19: error: `chunkat` with `_` can only be used inside `with in`.
+// CHECK: tests/infer/error_chunkat_dontcare.co:7.1-19: error: `chunkat` with `_` can only be used inside `with in`.
