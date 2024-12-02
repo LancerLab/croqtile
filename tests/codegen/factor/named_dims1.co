@@ -1,4 +1,4 @@
-// RUN: choreo %s | FileCheck %s
+// RUN: choreo -gs  %s | FileCheck %s
 
 __co__ auto matmul(s32 [M, K] lhs, s32 [K, N] rhs) {
   s32[lhs.span(0), rhs.span(1)] output;

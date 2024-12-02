@@ -45,6 +45,12 @@ Option<std::string> output(OptionKind::User, "-o", "", "",
 Option<bool>
     emit_source(OptionKind::User, "-es", "", false,
                 "Emit target source file without target source compilation.");
+Option<bool> compile_only(
+    OptionKind::User, "-c", "", false,
+    "Compile choreo code and the generated target code; Without linking.");
+Option<bool> generate_script(OptionKind::User, "-gs", "", false,
+                             "Generate target script.");
+
 Option<bool>
     del_comm(OptionKind::User, "--remove-comments", "-n", false,
              "Remove all comments in non-choreo code. (Useful for FileCheck)");
@@ -104,6 +110,8 @@ Option<bool> sym_repl(OptionKind::Hidden, "--print-sym-replace", "-sr", false,
                       "Trace the symbol replace process.");
 Option<bool> prt_pass(OptionKind::Hidden, "--show-passes", "-sp", false,
                       "Show the visit pass pipeline.");
+Option<bool> save_temps(OptionKind::Hidden, "--save-temps", "", false,
+                        "Save the temporal files.");
 
 int main(int argc, char* argv[]) {
   // parse all the options
@@ -112,7 +120,6 @@ int main(int argc, char* argv[]) {
     if (!r.Message().empty()) errs() << r.Message() << "\n";
     exit(r.ReturnCode());
   }
-  r.SetOutputStream(output.GetValue());
 
   // set the compilation targets
   if (ToUpper(target.GetValue()) == "FACTOR")
@@ -141,6 +148,21 @@ int main(int argc, char* argv[]) {
            << "' is invalid. Compilation abort.\n";
     exit(1);
   }
+
+  if (pp_only)
+    CCtx().SetOutputKind(OutputKind::PreProcessedCode);
+  else if (emit_source)
+    CCtx().SetOutputKind(OutputKind::TargetSourceCode);
+  else if (compile_only) {
+    CCtx().SetOutputKind(OutputKind::TargetModule);
+    if (output.GetValue().empty()) output = "a.o"; // default module name
+  } else if (generate_script)
+    CCtx().SetOutputKind(OutputKind::ShellScript);
+  else {
+    CCtx().SetOutputKind(OutputKind::TargetExecutable);
+    if (output.GetValue().empty()) output = "a.out"; // default exe name
+  }
+  r.SetOutputStream(output.GetValue());
 
   if (!trace_visit.GetValue().empty())
     setenv("CHOREO_TRACE_VISITOR", ToUpper(trace_visit.GetValue()).c_str(), 1);
@@ -183,8 +205,8 @@ int main(int argc, char* argv[]) {
   // Apply the preprocessing
   std::stringstream pps;
   if (!no_pp) {
-    if (prt_pass) dbgs() << "|- preprocess only the choreo program\n";
-    if (pp_only) {
+    if (prt_pass) dbgs() << "|- preprocess the choreo program\n";
+    if (CCtx().GetOutputKind() == OutputKind::PreProcessedCode) {
       SimplePreprocessor spp(r.GetOutputStream());
       if (!spp.Process(r.GetInputStream())) return 1;
       return 0;

@@ -1,4 +1,4 @@
-// RUN: choreo -t cuda %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
+// RUN: choreo -gs -t cuda %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
 // REQUIRES: TARGET-GPU
 #include "choreo_cuda.h"
 

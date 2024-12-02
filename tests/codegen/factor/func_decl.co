@@ -1,4 +1,4 @@
-// RUN: choreo %s | FileCheck --match-full-lines %s
+// RUN: choreo -gs  %s | FileCheck --match-full-lines %s
 
 __co__ int foo(f32 [32] d, int) { return 1;}
 

@@ -1,4 +1,4 @@
-// RUN: choreo %s | FileCheck %s --match-full-lines
+// RUN: choreo -gs  %s | FileCheck %s --match-full-lines
 
 __co__ auto dma_transp(s32 [8, 2, 3, 2, 4, 2] input) {
   s32[input.span[(3), (5), (0), (1), (2), (4)]] output;

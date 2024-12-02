@@ -1,4 +1,4 @@
-// RUN: choreo -n -t cuda %s | FileCheck --match-full-lines %s
+// RUN: choreo -gs  -n -t cuda %s | FileCheck --match-full-lines %s
 
 __co__ auto foobar(f32 [32] a, int, bool b, f16 [?]) { 
   shared f32 [1024, 1024] var_shared;

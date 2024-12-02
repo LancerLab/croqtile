@@ -49,6 +49,28 @@ inline static const std::string STR(TargetArch ta) {
   return "";
 }
 
+enum class OutputKind {
+  PreProcessedCode,
+  TargetSourceCode,
+  TargetModule,
+  TargetAssembly,
+  TargetExecutable,
+  ShellScript,
+};
+
+inline static const std::string STR(OutputKind ok) {
+  switch (ok) {
+  case OutputKind::PreProcessedCode: return "PreProcessedCode";
+  case OutputKind::TargetSourceCode: return "TargetSourceCode";
+  case OutputKind::TargetModule: return "TargetModule";
+  case OutputKind::TargetAssembly: return "TargetAssembly";
+  case OutputKind::TargetExecutable: return "TargetExecutable";
+  case OutputKind::ShellScript: return "ShellScript";
+  default: choreo_unreachable("Unsupported output kind.");
+  }
+  return "";
+}
+
 enum DMABufferKind {
   DOK_UNKNOWN,
   DOK_SYMBOL,
@@ -118,6 +140,7 @@ class CompilationContext {
   std::map<std::string, FunctionContext> function_contexts;
   CompileTarget compile_target = CompileTarget::Unknown;
   TargetArch arch = TargetArch::Unknown;
+  OutputKind out_kind = OutputKind::TargetExecutable;
 
 public:
   bool DebugSymTab() const { return debug_symtab; }
@@ -134,6 +157,9 @@ public:
 
   TargetArch GetArch() const { return arch; }
   void SetArch(TargetArch ta) { arch = ta; }
+
+  OutputKind GetOutputKind() { return out_kind; }
+  void SetOutputKind(OutputKind ok) { out_kind = ok; }
 
 public:
   static CompilationContext& GetInstance() {

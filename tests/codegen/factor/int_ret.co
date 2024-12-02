@@ -1,4 +1,4 @@
-// RUN: choreo %s | FileCheck %s --match-full-lines
+// RUN: choreo -gs  %s | FileCheck %s --match-full-lines
 __co__ auto int_ret() { return 3; }
 
 int main() {

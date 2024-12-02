@@ -63,7 +63,7 @@ private:
   std::string host_cpp_name;   // choreo entry and user host function
   std::string kernel_cpp_name; // __cok__ function as a cpp file
   std::string factor_cpp_name; // __co__ translated to factor code
-  std::string factor_bin_name; // compiled factor binary
+  std::string topsfc_lib_name; // library name required for 'topsfc' compile
   bool compile_with_dynshape =
       false; // if factor compile requires dynshape support
 
@@ -133,8 +133,9 @@ public:
 private:
   bool ContainsLoopVar(const std::string&) const;
 
-  void EmitScript();
+  void EmitScript(std::ostream&);
   void EmitFactorSource();
+  bool ExecuteScript(const std::string&, const std::string&);
 
   void EmitFixedHostHead();
   void EmitFixedFactorHead();

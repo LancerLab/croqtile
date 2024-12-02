@@ -1,4 +1,4 @@
-// RUN: choreo %s | FileCheck --match-full-lines %s
+// RUN: choreo -gs  %s | FileCheck --match-full-lines %s
 
 __co__ void foo3() {
   parallel {p, q} by [2, 6] {

@@ -1,4 +1,4 @@
-// RUN: choreo %s -o - | FileCheck %s
+// RUN: choreo -gs  -gs %s -o - | FileCheck %s
 __cok__ {
 union vector_type {
   v64i8 i8;

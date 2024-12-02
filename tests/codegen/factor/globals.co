@@ -1,4 +1,4 @@
-// RUN: choreo %s | FileCheck %s
+// RUN: choreo -gs  %s | FileCheck %s
 __co__ s32 [6, 17, 128] globals_pass(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) { /// device program
   s32 [lhs.span] output;
 

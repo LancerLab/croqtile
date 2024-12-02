@@ -1,5 +1,5 @@
-// RUN: choreo -i %s | FileCheck --match-full-lines %s
-// RUN: choreo %s 2>&1 | FileCheck --check-prefix=CHKERR %s
+// RUN: choreo -gs  -gs -i %s | FileCheck --match-full-lines %s
+// RUN: choreo -gs  -gs %s 2>&1 | FileCheck --check-prefix=CHKERR %s
 
 __co__ f32 [M] softmax(f32 [M, N] input,int TILE_M) {
   f32[input.span(0)] output;

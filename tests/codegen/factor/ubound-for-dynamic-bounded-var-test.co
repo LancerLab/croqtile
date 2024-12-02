@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GCUALL DYNAMIC-SHAPE
-// RUN: choreo -t factor -kt %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
+// RUN: choreo -gs  -t factor -kt %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
 
 #include "choreo.h"
 

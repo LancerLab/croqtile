@@ -1,5 +1,5 @@
-// RUN: choreo %s | FileCheck --match-full-lines %s
-// RUN: choreo %s | FileCheck --check-prefix=CNT %s
+// RUN: choreo -gs  %s | FileCheck --match-full-lines %s
+// RUN: choreo -gs  %s | FileCheck --check-prefix=CNT %s
 
 #include <queue>
 void helper_func(int& cnt) {}

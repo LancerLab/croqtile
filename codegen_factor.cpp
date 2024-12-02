@@ -22,7 +22,7 @@ using namespace Choreo;
 using namespace Choreo::Factor;
 
 extern Option<bool> native_f16;
-extern Option<bool> emit_source;
+extern Option<std::string> output;
 
 inline const std::string FineName(const std::string& input) {
   std::string result = input;
@@ -60,7 +60,7 @@ bool FactorCodeGen::BeforeVisitImpl(AST::Node& n) {
 
     kernel_cpp_name = build_prefix + "_micro_kernel.cpp";
     factor_cpp_name = build_prefix + "_factor.cpp";
-    factor_bin_name =
+    topsfc_lib_name =
         build_path + "/${gcu_target_string}_lib" + factor_pname + ".o";
     host_cpp_name = build_prefix + "_host.cpp";
 
@@ -99,10 +99,27 @@ bool FactorCodeGen::AfterVisitImpl(AST::Node& n) {
       factor_code += oss.str();
     }
     host_code += ds.str() + cs.str() + hs.str();
-    if (emit_source)
-      EmitFactorSource();
-    else
-      EmitScript();
+
+    switch (CCtx().GetOutputKind()) {
+    case OutputKind::TargetSourceCode: EmitFactorSource(); break;
+    case OutputKind::TargetModule:
+      choreo_unreachable("factor target module is yet to support.");
+      break;
+    case OutputKind::TargetExecutable: {
+      std::ofstream tmpfs("./temp.sh");
+      EmitScript(tmpfs);
+      tmpfs.close();
+      if (!ExecuteScript("./temp.sh", "--compile-binary")) {
+        Error(n.LOC(), "failed to compile program.");
+        error_count++;
+      }
+      break;
+    }
+    case OutputKind::ShellScript: EmitScript(outs()); break;
+    default:
+      choreo_unreachable("outputkind: " + STR(CCtx().GetOutputKind()) +
+                         " is not supported.");
+    }
   } else if (isa<AST::ChoreoFunction>(&n)) {
     // choreo-host function:
     // The user code may require the choreo function be fwd-decalared for its
@@ -1250,7 +1267,7 @@ void FactorCodeGen::EmitHostFunction(std::ostream& os) {
   std::vector<char> binary;
   // Read bin file and store to a vector
 )";
-  os << "  std::ifstream ifs(\"" << factor_bin_name << "\", std::ios::binary);";
+  os << "  std::ifstream ifs(\"" << topsfc_lib_name << "\", std::ios::binary);";
   os << R"(
   std::copy(std::istreambuf_iterator<char>(ifs),
             std::istreambuf_iterator<char>(), std::back_inserter(binary));
@@ -1666,20 +1683,19 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
   return oss.str();
 }
 
-void FactorCodeGen::EmitScript() {
+void FactorCodeGen::EmitScript(std::ostream& ss) {
   // Now generate the script
-  outs() << "#!/usr/bin/env bash\n\n";
-  outs()
-      << "# This is the choreo generated bash script to compile factor code\n";
+  ss << "#!/usr/bin/env bash\n\n";
+  ss << "# This is the choreo generated bash script to compile factor code\n";
 
-  // check for gcu_target_string first
-  outs() << R"script(
+  // JIT: check for gcu_target_string first
+  ss << R"script(
   gcu_arch=gcu210
   gcu_resource=2c24s
   gcu_target_string="dorado_2c"
 )script";
   if (!cross_compile)
-    outs() << R"script(
+    ss << R"script(
   # check the device
   # TODO: improve the target check with more solid code
   GCU_DEVICE_STR="$(lspci | grep Enflame | head -1)"
@@ -1712,80 +1728,79 @@ void FactorCodeGen::EmitScript() {
   fi
 )script";
 
-  outs() << "\n# step 0: set up the environment\n";
-  outs() << "rm -fr " << build_path << "\n";
-  outs() << "mkdir -p " << build_path << "\n";
-  outs() << "cat <<'EOF' > " << build_path << "/factor_script.sh\n";
-  outs() << __factor_script_as_string << "\nEOF\n";
-  outs() << "chmod +x " << build_path << "/factor_script.sh\n";
-  outs() << "cat <<'EOF' > " << build_path << "/choreo.h\n";
-  outs() << __choreo_header_as_string << "\nEOF\n\n";
+  ss << "\n# step 0: set up the environment\n";
+  ss << "rm -fr " << build_path << "\n";
+  ss << "mkdir -p " << build_path << "\n";
+  ss << "cat <<'EOF' > " << build_path << "/factor_script.sh\n";
+  ss << __factor_script_as_string << "\nEOF\n";
+  ss << "chmod +x " << build_path << "/factor_script.sh\n";
+  ss << "cat <<'EOF' > " << build_path << "/choreo.h\n";
+  ss << __choreo_header_as_string << "\nEOF\n\n";
 
-  outs() << "\n# step 1: write the kernel source code into a temp file\n";
-  outs() << "kernel_src=" << kernel_cpp_name << "\n";
-  outs() << "cat <<'EOF' > ${kernel_src}\n";
-  outs() << ks.str() << "\nEOF\n";
+  ss << "\n# step 1: write the kernel source code into a temp file\n";
+  ss << "kernel_src=" << kernel_cpp_name << "\n";
+  ss << "cat <<'EOF' > ${kernel_src}\n";
+  ss << ks.str() << "\nEOF\n";
 
-  outs() << "\n# step 2: write the factor source code into a temp file\n";
-  outs() << "factor_src=" << factor_cpp_name << "\n";
-  outs() << "cat <<'EOF' > ${factor_src}\n";
-  outs() << factor_code << "\nEOF\n\n";
+  ss << "\n# step 2: write the factor source code into a temp file\n";
+  ss << "factor_src=" << factor_cpp_name << "\n";
+  ss << "cat <<'EOF' > ${factor_src}\n";
+  ss << factor_code << "\nEOF\n\n";
 
-  outs() << "\n# step 3: set the factor binary file name\n";
-  outs() << "factor_bin=" << factor_bin_name << "\n";
+  ss << "\n# step 3: set the factor binary file name\n";
+  ss << "factor_bin=" << topsfc_lib_name << "\n";
 
-  outs() << "\n# step 4: generate the host source\n";
-  outs() << "host_src=" << host_cpp_name << "\n";
-  outs() << "echo \"#include \\\"\"${gcu_target_string}\"_lib" << factor_pname
-         << ".h\\\"\" > ${host_src}\n";
-  outs() << "cat <<'EOF' >> ${host_src}\n";
-  outs() << host_code << "\nEOF\n\n";
+  ss << "\n# step 4: generate the host source\n";
+  ss << "host_src=" << host_cpp_name << "\n";
+  ss << "echo \"#include \\\"\"${gcu_target_string}\"_lib" << factor_pname
+     << ".h\\\"\" > ${host_src}\n";
+  ss << "cat <<'EOF' >> ${host_src}\n";
+  ss << host_code << "\nEOF\n\n";
 
-  outs() << "\n# step 5: JIT compile and execute\n";
-  outs() << "# TODO: enable workflow of AOT compilation\n";
-  outs() << "factor_function=" << factor_pname << "\n";
-  outs() << R"(
+  ss << "\n# step 5: JIT compile and execute\n";
+  ss << "# TODO: enable workflow of AOT compilation\n";
+  ss << R"(
 if command -v nvim &> /dev/null
 then
   EDITOR=nvim
 else
   EDITOR=less
 fi
-
+set -x 
 show_usage() {
     echo "    Usage: $0 | --execute           -> compile and execute choreo in factor
-                    | --statistics        -> show Line Of Code (LOC) statistic compare between kernel code boosted w./w.o. Choreo
+                    | --compile-binary    -> compile the binary code 
                     | --show-kernel       -> show the generated inner kernel code
                     | --show-tileflow     -> show the generated tileflow code scheduled by choreo
-                    | --show-host         -> show the generated host side boilerplates
-                    | --show-choreo       -> show the choreo source code"
+                    | --show-host         -> show the generated host side boilerplates"
     exit 1
 }
 )";
-  outs() << R"(
-if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then
+  ss << R"(
+if [ "$1" == "--execute" ] || [ "$#" -eq 0 ] || [ "$1" == "--compile-binary" ]; then
+  script_flags=$1
+  if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then script_flags="--compile-execute"; fi
 )";
-  outs() << "  export FACTOR_INSTALL="
-         << STRINGIZE(__CHOREO_FACTOR_DIR__) << "\n";
-  outs() << "# JIT compile and execute\n";
-  if (compile_with_dynshape) outs() << "VIEW_CONFIG=1 ENABLE_DYNSHAPE=1 ";
-  outs() << build_path << "/factor_script.sh ${factor_src} ${factor_bin} ";
-  outs() << "${host_src} ${factor_function} ${gcu_arch} ${gcu_resource}";
-  outs() << R"script(
-elif [ "$1" == "--statistics" ]; then
-  echo ">>>> Line of Code without Choreo"
-  wc -l ${factor_src} ${host_src} ${kernel_src}
-  echo ">>>> Line of Code with Choreo"
-  wc -l ~/choreo/demo/elementwise_add.co
-  # grep -v '^ *//' ~/choreo/demo/elementwise_add.co | wc -l
+  ss << "  export FACTOR_INSTALL=" << STRINGIZE(__CHOREO_FACTOR_DIR__) << "\n";
+  ss << "  # JIT compile and execute\n";
+  if (compile_with_dynshape) ss << "VIEW_CONFIG=1 ENABLE_DYNSHAPE=1 ";
+  ss << " bash " << build_path << "/factor_script.sh";
+  ss << " ${script_flags} ${factor_src} ${factor_bin} ${host_src} ";
+  switch (CCtx().GetOutputKind()) {
+  case OutputKind::ShellScript: ss << factor_pname; break;
+  case OutputKind::TargetModule: ss << std::string(output); break;
+  case OutputKind::TargetExecutable: ss << std::string(output); break;
+  default:
+    choreo_unreachable(
+        "unsupported outputkind: " + STR(CCtx().GetOutputKind()) + ".");
+  }
+  ss << R"script( ${gcu_arch} ${gcu_resource}
 elif [ "$1" == "--show-kernel" ]; then
   ${EDITOR} ${kernel_src}
 elif [ "$1" == "--show-host" ]; then
   ${EDITOR} ${host_src}
 elif [ "$1" == "--show-tileflow" ]; then
   ${EDITOR} ${factor_src}
-elif [ "$1" == "--show-choreo" ]; then
-  ${EDITOR} ~/choreo/demo/elementwise_add.co
 else
   show_usage
 fi
@@ -1850,4 +1865,22 @@ void FactorCodeGen::EmitFactorSource() {
       dbgs() << " - device code: " << kernel_filename << "\n";
     }
   }
+}
+
+bool FactorCodeGen::ExecuteScript(const std::string& filename,
+                                  const std::string& option) {
+  // Make the script executable
+  std::string makeExecutableCmd = "chmod +x " + std::string(filename);
+  if (system(makeExecutableCmd.c_str()) != 0) {
+    VST_DEBUG(errs() << "Could not make the script executable.\n");
+    return false;
+  }
+
+  // Execute the bash script
+  std::string executeCmd = "bash " + filename + " " + option;
+  if (system(executeCmd.c_str()) != 0) {
+    VST_DEBUG(errs() << "Failed to execute the script.\n");
+    return false;
+  }
+  return true;
 }

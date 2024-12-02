@@ -1,4 +1,4 @@
-// RUN: choreo -n -t cuda %s | FileCheck --match-full-lines %s
+// RUN: choreo -gs  -n -t cuda %s | FileCheck --match-full-lines %s
 
 __co__ void sgemm(f32 [4096, 4096] lhs, f32 [4096, 4096] rhs, f32 [4096, 4096] output) { /// device program
   parallel p by 128 {  // p is sip_index

@@ -1,4 +1,4 @@
-// RUN: choreo %s | FileCheck --match-full-lines %s
+// RUN: choreo -gs  %s | FileCheck --match-full-lines %s
 
 __co__ s32 [N, M, K] ele_add(s32 [N, M, K] lhs, s32 [N, M, K] rhs) {
   s32[lhs.span] output;

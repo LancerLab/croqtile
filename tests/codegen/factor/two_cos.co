@@ -1,4 +1,4 @@
-// RUN: choreo %s | FileCheck %s
+// RUN: choreo -gs  %s | FileCheck %s
 
 __co__ void a() {
   parallel p by 1 {

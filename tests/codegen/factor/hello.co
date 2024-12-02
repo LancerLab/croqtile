@@ -1,4 +1,4 @@
-// RUN: choreo %s -o - |grep -v "\<CHECK\>:" | FileCheck --match-full-lines %s
+// RUN: choreo -gs  %s -o - |grep -v "\<CHECK\>:" | FileCheck --match-full-lines %s
 
 __cok__ { // kernel program
 void hello() { printf("hello choreo\n"); }

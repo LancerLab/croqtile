@@ -1,4 +1,4 @@
-// RUN: choreo %s | FileCheck --match-full-lines %s
+// RUN: choreo -gs  %s | FileCheck --match-full-lines %s
 
 __co__ void bar(f32 [100, 10] b) {
   f32 [b.span] c;
