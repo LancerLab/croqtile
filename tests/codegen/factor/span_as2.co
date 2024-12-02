@@ -31,15 +31,11 @@ __co__ auto transpose(s32 [64, 256, 32] input) {
   }
   return output;
 }
-// CHECK:     auto tmp_shape_s = alloc_dma_(SDMAType());
-// CHECK:     auto out_store = alloc_dma_(CDMAType());
 // CHECK:     auto input_shape_c_dma__buf__ = alloc_(SRAMType(IntType(32),{1, 16, 512})).shared_(SharedType::kBlockShared);
 // CHECK:     auto input_shape_c_dma = alloc_dma_(CDMAType()).shared_();
 // CHECK:     auto output_reshape_c = alloc_(SRAMType(IntType(32),{32, 16, 16})).shared_(SharedType::kBlockShared);
-// CHECK:     auto tmp_shape_s__buf__ = alloc_(L1Type(IntType(32),{16, 512}));
-// CHECK:     auto tmp_shape_s_2 = alloc_(L1Type(IntType(32),{512, 16}));
-// CHECK:     auto tmp_shape_s_3 = alloc_(L1Type(IntType(32),{32, 16, 16}));
-// CHECK:     auto out_store_c = alloc_dma_(SDMAType());
+// CHECK:     auto tmp_shape_s = alloc_dma_(SDMAType());
+// CHECK:     auto out_store = alloc_dma_(CDMAType());
 // CHECK:     var_ a(IntType(32));
 // CHECK:     a = 0;
 // CHECK:     var_ bb(IntType(32));
@@ -59,6 +55,10 @@ __co__ auto transpose(s32 [64, 256, 32] input) {
 // CHECK:               auto anon_3 = ((iv_a)*(Value(1))+(iv_bb));
 // CHECK:               auto anon_4 = ((iv_b4)*(Value(1))+(iv_c));
 // CHECK:               async_load_(input_shape_c_dma, anon_0, input_shape_c_dma__buf__, {Value(1)*anon_3,Value(16)*iv_b3,Value(512)*anon_4}).multi_notify_(tmp_shape_s);
+// CHECK:               auto tmp_shape_s__buf__ = alloc_(L1Type(IntType(32),{16, 512}));
+// CHECK:               auto tmp_shape_s_2 = alloc_(L1Type(IntType(32),{512, 16}));
+// CHECK:               auto tmp_shape_s_3 = alloc_(L1Type(IntType(32),{32, 16, 16}));
+// CHECK:               auto out_store_c = alloc_dma_(SDMAType());
 // CHECK:               auto anon_1 = bitcast_(SRAMType(IntType(32), {16, 512}), input_shape_c_dma__buf__);
 // CHECK:               auto anon_5 = ((iv_b4)*(Value(1))+(iv_c));
 // CHECK:               async_load_(tmp_shape_s, anon_1, tmp_shape_s__buf__, {Value(16)*iv_b3,Value(512)*anon_5}).wait_on_(input_shape_c_dma);

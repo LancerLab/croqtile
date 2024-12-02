@@ -389,7 +389,19 @@ bool FactorCodeGen::Visit(AST::Assignment& node) {
 // CLEAN
 bool FactorCodeGen::Visit(AST::ParallelBy& by) {
   TraceEachVisit(by);
-  if (parallel_level > 1) { return true; }
+  if (parallel_level > 1) { 
+    alloc_pos_stack.push(fs.str().size());
+    alloc_indent_stack.push(indent);
+    alloc_fs_stack.push(std::ostringstream());
+    // std::cout << "enter inner parallelly" << std::endl;
+    // std::cout << alloc_fs_stack.size() << std::endl;
+    // std::cout << alloc_indent_stack.size() << std::endl;
+    // std::cout << alloc_pos_stack.size() << std::endl;
+    // std::cout << alloc_fs_stack.top().str() << std::endl;
+    // std::cout << alloc_indent_stack.top() << std::endl;
+    // std::cout << alloc_pos_stack.top() << std::endl;
+    return true; 
+  }
 
   fs << this->indent << "Dim3 grid_dim("
      << cgi->GetFunctionLaunch(fname).grid_dim_x << ");\n";
@@ -685,16 +697,27 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
                            << "()).shared_();\n";
     else if (d.chained == true) {
       // hoist sdma for chained usage, to avoid use before definition
-      std::ostringstream fs_tmp = std::move(alloc_fs_stack.top());
-      std::string ind_tmp = alloc_indent_stack.top();
+      std::stack<std::ostringstream> fs_container;
+      std::stack<std::string> indent_container;
+      fs_container.push(std::move(alloc_fs_stack.top()));
+      indent_container.push(alloc_indent_stack.top());
       alloc_fs_stack.pop();
       alloc_indent_stack.pop();
+      while (alloc_fs_stack.top().str().empty()) {
+        fs_container.push(std::move(alloc_fs_stack.top()));
+        indent_container.push(alloc_indent_stack.top());
+        alloc_fs_stack.pop();
+        alloc_indent_stack.pop();
+      }
       alloc_fs_stack.top() << alloc_indent_stack.top() << "auto " << future_name
                            << " = alloc_dma_("
                            << DMATypeString(src_level, dst_level) << "());\n";
-      alloc_fs_stack.push(std::move(fs_tmp));
-      alloc_indent_stack.push(ind_tmp);
-
+      while (!fs_container.empty()) {
+        alloc_fs_stack.push(std::move(fs_container.top()));
+        alloc_indent_stack.push(indent_container.top());
+        fs_container.pop();
+        indent_container.pop();
+      }
     } else {
       alloc_fs_stack.top() << alloc_indent_stack.top() << "auto " << future_name
                            << " = alloc_dma_("
