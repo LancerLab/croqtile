@@ -13,6 +13,7 @@ gputest:
     - GPU  # 在 GPU 机器上运行作业
   only:
     - main  # 仅在 `main` 分支上执行该作业
+    - release/alpha
     - merge_requests
 
 gcu2test:
@@ -24,6 +25,7 @@ gcu2test:
     - GCU2  # 在 GPU 机器上运行作业
   only:
     - main  # 仅在 `main` 分支上执行该作业
+    - release/alpha
     - merge_requests
 
 gcu3test:
@@ -35,6 +37,7 @@ gcu3test:
     - GCU3  # 在 GPU 机器上运行作业
   only:
     - main  # 仅在 `main` 分支上执行该作业
+    - release/alpha
     - merge_requests
 
 cache:
