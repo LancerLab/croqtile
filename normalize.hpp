@@ -20,9 +20,6 @@ private:
   std::string old;
   size_t count = 0; // name suffix of runtime int values
 
-  // if there is dontcare in chunkat, should be true.
-  bool dontcare_handled = false;
-
   bool handle_parameter = false;
   ptr<AST::Expr> list_ref = nullptr;
   void SetListReference(const location& l, const std::string& r) {
@@ -83,12 +80,11 @@ public:
       assert(cur_node_index != -1 && "unexpected node index.");
     } else if (auto wb = dyn_cast<AST::WithBlock>(&n)) {
       if (wb->note == "gen_by_norm") return true;
-      dontcare_handled = false;
-      if (n.note.find("contians_dontcare") == std::string::npos) return true;
+      if (n.note.find("contains_tile_one") == std::string::npos) return true;
       auto loc = wb->withins->LOC();
       auto added_with_block = AST::Make<AST::WithBlock>(loc);
       auto added_within = AST::Make<AST::WithIn>(
-          loc, AST::Make<AST::Identifier>(loc, "__choreo_zero"),
+          loc, AST::Make<AST::Identifier>(loc, "__choreo_tile_one"),
           AST::Make<AST::Expr>(
               loc, AST::Make<AST::MultiDimSpans>(
                        loc, "",
@@ -102,7 +98,7 @@ public:
       added_with_block->withins = added_withins;
       auto added_ranges = AST::Make<AST::MultiValues>(loc);
       added_ranges->Append(AST::Make<AST::LoopRange>(
-          loc, AST::Make<AST::Identifier>(loc, "__choreo_zero")));
+          loc, AST::Make<AST::Identifier>(loc, "__choreo_tile_one")));
       auto added_foreachblock =
           AST::Make<AST::ForeachBlock>(loc, added_ranges, wb->stmts);
       auto added_stmts = AST::Make<AST::MultiNodes>(loc);
@@ -113,8 +109,7 @@ public:
       res->Append(added_with_block);
       wb->stmts = res;
       changed = true;
-      dontcare_handled = true;
-      // using `with {__choreo_zero} in [1] { foreach __choreo_zero {  } }
+      // `with {__choreo_tile_one} in [1] { foreach __choreo_tile_one {  } }
       VST_DEBUG(dbgs() << "Wrap the `with in` at " << n.LOC() << ".\n");
     }
     return true;
@@ -323,17 +318,6 @@ public:
 
   bool Visit(AST::ChunkAt& n) override {
     TraceEachVisit(n);
-
-    if (n.positions) {
-      for (auto& v : n.positions->AllValues()) {
-        auto expr = cast<AST::Expr>(v);
-        if (auto ref = expr->GetSymbol())
-          if (ref->name == "__choreo_zero")
-            if (!dontcare_handled)
-              Error(n.LOC(),
-                    "`chunkat` with `_` can only be used inside `with in`.");
-      }
-    }
 
     if (n.sa) {
       assert(cur_node_index != -1);

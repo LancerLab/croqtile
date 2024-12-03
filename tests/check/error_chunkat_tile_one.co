@@ -1,0 +1,17 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ auto chunkat_tile_one(s32 [16] i) {
+  s32 [i.span] o;
+  parallel p by 4 {
+    with {_} in [4] {
+      foreach _ {
+        l2 = dma.copy i.chunkat(_) => local;
+        dma.copy l2 => o.chunkat(_);
+      }
+    }
+  }
+}
+
+// CHECK: error: _ is not allowed as a with variable. Can only be used in chunkat.
+// CHECK: error: _ is not allowed as an iteration variable.
+// CHECK: Totally 2 errors have been detected.
