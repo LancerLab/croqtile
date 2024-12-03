@@ -88,6 +88,9 @@ private:
   std::map<std::string, DimensionDetail> dims_info;
   std::map<std::string, std::string> idnm_rts; // name in .co to symbolic name
 
+  // mdspan of within
+  std::vector<std::pair<std::string, location>> within_mdspan;
+
   ptr<CodeGenInfo> cgi;
 
   StringifyTable factor_symbols;

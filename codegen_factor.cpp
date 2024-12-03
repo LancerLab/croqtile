@@ -603,6 +603,9 @@ bool FactorCodeGen::Visit(AST::WithIn& n) {
     fs << indent << mname << " = 0;\n";
   }
 
+  if (auto shape = GetShape(NodeType(*n.in)); shape.IsDynamic())
+    within_mdspan.emplace_back(STR(GetShape(NodeType(*n.in))), n.LOC());
+
   return true;
 };
 
@@ -1472,6 +1475,22 @@ void FactorCodeGen::EmitHostRuntimeCheck(std::ostream& os) {
          << " parameter (dim: " << entry0.dim << ") and the "
          << Ordinal(entry1.para_ordinal) << " parameter (dim: " << entry1.dim
          << ") are inconsistent.\");\n";
+    }
+  }
+
+  // check if the mdspan of within is zero
+  if (!within_mdspan.empty())
+    os << "\n  // Check if the mdspan of within is zero.\n";
+  for (auto& [mds, loc] : within_mdspan) {
+    auto mds_vals = SplitStringByDelimiter(mds.substr(1, mds.size() - 2), ", ");
+    int idx = 1;
+    for (auto& mds_val : mds_vals) {
+      os << "  choreo::runtime_check(" << ReplaceRuntimeNames(mds_val)
+         << " != " << 0;
+      os << ", \"zero is detected for the " << Ordinal(idx)
+         << " dim of the mdspan inside the with-in statement, " << loc
+         << "\");\n";
+      idx++;
     }
   }
 }
