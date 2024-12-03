@@ -20,8 +20,8 @@
 #include "valno.hpp"
 #include "visualize.hpp"
 #include <cstdlib>
-#include <filesystem>
 #include <getopt.h>
+#include <sys/stat.h>
 
 using namespace Choreo;
 
@@ -114,6 +114,12 @@ Option<bool> prt_pass(OptionKind::Hidden, "--show-passes", "-sp", false,
 Option<bool> save_temps(OptionKind::Hidden, "--save-temps", "", false,
                         "Save the temporal files.");
 
+// Some system missed c++17 filesystem support. Use POSIX instead
+inline bool file_exists(const std::string& filename) {
+  struct stat buffer;
+  return (stat(filename.c_str(), &buffer) == 0);
+}
+
 int main(int argc, char* argv[]) {
   // parse all the options
   auto& r = OptionRegistry::GetInstance();
@@ -199,7 +205,7 @@ int main(int argc, char* argv[]) {
   }
 
   std::string filename = r.GetInputFileName();
-  if (!std::filesystem::exists(filename)) {
+  if (!file_exists(filename)) {
     errs() << "error: The input file '" << filename << "' does not exist."
            << std::endl;
     return 1;
