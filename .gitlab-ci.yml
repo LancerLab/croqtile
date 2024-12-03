@@ -1,18 +1,17 @@
-# 定义 CI/CD 流水线的阶段
 stages:
   - check-in-tests
+  - doc-gen
 
 
-# Test 阶段：需要 GPU 支持的测试，运行 `make test` 来执行测试
 gputest:
   stage: check-in-tests
   script:
     - echo "Running tests with GPU..."
-    - make ci-gpu-test  # 假设 `make test` 用于运行测试
+    - make ci-gpu-test
   tags:
-    - GPU  # 在 GPU 机器上运行作业
+    - GPU
   only:
-    - main  # 仅在 `main` 分支上执行该作业
+    - main
     - release/alpha
     - merge_requests
 
@@ -20,11 +19,11 @@ gcu2test:
   stage: check-in-tests
   script:
     - echo "Running tests with GCU2..."
-    - make ci-gcu2-test # 假设 `make test` 用于运行测试
+    - make ci-gcu2-test
   tags:
-    - GCU2  # 在 GPU 机器上运行作业
+    - GCU2
   only:
-    - main  # 仅在 `main` 分支上执行该作业
+    - main
     - release/alpha
     - merge_requests
 
@@ -32,15 +31,24 @@ gcu3test:
   stage: check-in-tests
   script:
     - echo "Running tests with GCU3 S60..."
-    - make ci-gcu3-test # 假设 `make test` 用于运行测试
+    - make ci-gcu3-test
   tags:
-    - GCU3  # 在 GPU 机器上运行作业
+    - GCU3
   only:
-    - main  # 仅在 `main` 分支上执行该作业
+    - main 
     - release/alpha
     - merge_requests
 
+generate_docs:
+  stage: doc-gen
+  tags:
+    - DOC
+  script:
+    - echo "Setting up environment for documentation generation ..."
+    - python3.8 -m pip install mkdocs mkdocs-material mkdocs-markdownextradata-plugin 
+    - make serve-doc
+
 cache:
   paths:
-    - venv/  # 缓存虚拟环境
-    - .cache/pip/  # 缓存 pip 下载的包
+    - venv/ 
+    - .cache/pip/
