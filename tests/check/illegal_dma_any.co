@@ -1,0 +1,29 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ auto rgb2gray(f32 [N, 3, H, W] input) {
+  f32 [N, H, W] out;
+  parallel q by 6 {
+    with index={n, h, w} in [N, H, W]/{#q, 16, 512} {
+      foreach n, h {
+        input_L1_A = dma.copy.async input.chunkat(q#n, _, h, w) => local;
+        input_L1_B = dma.any;
+        dma_never_used = dma.any;
+        local f32 [input_L1_A.span(0), input_L1_A.span(2), input_L1_A.span(3)] out_L1;
+        foreach w(1:) {
+          input_L1_B = dma.copy.async input.chunkat(q#n, _, h, w) => local;
+          wait input_L1_A;
+          call rgb2gray_kernel_fp32_fp32(input_L1_A.data, out_L1, |out_L1|, 1);
+          dma.copy out_L1 => out.chunkat(q#n, h, w - 1);
+          swap(input_L1_A, input_L1_B);
+        }
+        input_L1 = select(#w % 2, input_L1_B, input_L1_A);
+        wait input_L1;
+        call rgb2gray_kernel_fp32_fp32(input_L1.data, out_L1, |out_L1|, 1);
+        dma.copy out_L1 => out.chunkat(q#n, h, w(-1));
+      }
+    }
+  }
+  return out;
+}
+
+// CHECK: error: dma.any 'dma_never_used' is defined but never used!
