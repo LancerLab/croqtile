@@ -211,7 +211,7 @@ with x in [10] {
 }
 ```
 
-### The 'inbound' Operation
+### The 'upper-bound' Operation
 
 ### Async Operation: the DMA Statement
 Execept for parallel execution, Choreo allows one fixed form of async operation: the DMA statement.
