@@ -1,0 +1,24 @@
+site_name: Choreo Tutorials
+site_url: http://127.0.0.1:8000
+
+theme:
+  name: material 
+
+markdown_extensions:
+  - toc:
+      permalink: true
+
+
+docs_dir: Documents/Tutorials 
+
+nav:
+  - Home: index.md
+  - What is Choreo: what-is-choreo.md
+  - A Whirlwind Tour to Operator Samples:
+    - Element-wise Add: element-wise-sample.md
+  - A Whirlwind Tour to Optimisation Patterns: 
+    - Asynchoronous DMA transfer patterns with Choreo: async-dma-patterns.md
+    - Multi-buffering Patterns with Choreo: mutli-buffering-patterns.md
+  - Advanced Topics:
+    - Syntax Design of Choreo: syntax-design-of-choreo.md
+

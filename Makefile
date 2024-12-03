@@ -196,3 +196,22 @@ ginac-setup: $(GINAC_TAR) cln-setup
 	cd $(GINAC_DIR); \
 	PKG_CONFIG_PATH=$(CLN_DIR) ./configure --prefix=$(GINAC_DIR)/install; \
 	$(MAKE) -j && $(MAKE) install
+
+# utils to serve Choreo Documents
+MKDOCS_CMD = mkdocs serve --dev-addr=0.0.0.0:8000
+
+serve-doc: stop-doc start-doc
+
+stop-doc:
+	@echo "Stopping existing mkdocs serve processes..."
+	@ps aux | grep 'mkdocs serve' | grep -v grep | awk '{print $$2}' | xargs -r kill
+	@echo "Old mkdocs serve processes stopped."
+
+start-doc:
+	@echo "Starting mkdocs serve in the background..."
+	nohup $(MKDOCS_CMD) &>/dev/null & 
+
+status-doc:
+	@echo "Checking mkdocs serve process..."
+	@ps aux | grep 'mkdocs serve' | grep -v grep || echo "No mkdocs serve process is running."
+

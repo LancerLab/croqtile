@@ -3,6 +3,7 @@
 *.hh
 *.o
 *.inc
+*.out
 tests/*co.test
 tools/*
 choreo
