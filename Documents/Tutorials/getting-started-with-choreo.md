@@ -70,3 +70,23 @@ Furthermore, in development scenarios, Choreo can generate scripts (using the -g
 
 Lastly, options _--help_ and _--help-hidden_ are avaiable for listing the full option set. Programmers and users can check the list to find their appropriate usage.
 
+here is a example output of `--help`:
+
+```shell
+// --help
+Usage: choreo [options] file...
+Options:
+  --help                    Display this information.
+  --help-hidden             Display hidden options.
+  -e/--dump-ast             Dump the Abstract Syntax Tree (AST) after parsing.
+  -i/--infer-types          Show the result of type inference.
+  -f16n/--native-f16        Utilize native f16 type when target platform support.
+  -n/--remove-comments      Remove all comments in non-choreo code. (Useful for FileCheck)
+  -t/--target <platform>    Set the compilation target. The 'platform' includes <factor|topscc|cuda>.
+  -E                        Preprocess only; do not compile.
+  -arch=<processor>         Set the architecture to execute the binary code.
+  -c                        Compile choreo code and the generated target code; Without linking.
+  -es                       Emit target source file without target source compilation.
+  -gs                       Generate target script.
+  -o <file>                 Place the output into <file>.
+```

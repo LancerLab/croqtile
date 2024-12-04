@@ -13,6 +13,7 @@ docs_dir: Documents/Tutorials
 
 nav:
   - Home: index.md
+  - Getting Started with Choreo: getting-started-with-choreo.md
   - What is Choreo: what-is-choreo.md
   - Basics of Choreo Program:
     - Choreo Program Structure: choreo-program-structure.md
@@ -22,11 +23,15 @@ nav:
       - DMA in Choreo: dma-in-choreo.md
       - Call Statements in Choreo: call-in-choreo.md
       - Parallelism in Choreo: parallel-in-choreo.md
+      - Macro Utility in Choreo: macro-in-choreo.md
   - A Whirlwind Tour to Optimisation Patterns: 
-    - Tileflow Manipulations: Tiling, Distribute and Fuse
+    - Tileflow Optimisations: tileflow-opt.md
     - Asynchoronous DMA transfer patterns with Choreo: async-dma-patterns.md
     - Multi-buffering Patterns with Choreo: mutli-buffering-patterns.md
-  - Operator Samples uses Choreo: operator-samples.md
-  - Advanced Topics:
+  - Reference Palette on Operators: operator-samples.md
+  - Design Rationales:
     - Syntax Design of Choreo: syntax-design-of-choreo.md
+    - Design of Symbolic Evaluation System: symbolic-evaluation.md
+    - Dynaminism Support with Symbolic Representation: dynamic-design.md
+  - Contributing to Choreo: contribute.md
 

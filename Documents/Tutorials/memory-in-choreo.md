@@ -52,14 +52,6 @@ If you want to place data in a different memory space (shared or local), you nee
 local f32 [10, 10] d0;     // Small data, local to the thread
 shared f16 [ndims] d1;     // Intermediate data, shared between threads in a block
 ```
-## Benefits of Storage Qualifiers
-Using storage qualifiers effectively can significantly improve performance by reducing memory latency and optimizing memory access patterns. Here's a breakdown of the key benefits:
-
-- Optimized Memory Access: By explicitly controlling where data is stored, you can take advantage of faster access times offered by shared or local memory. For example, shared memory is much faster than global memory, making it ideal for storing frequently accessed intermediate data in parallel algorithms.
-
-- Efficient Resource Utilization: Different memory spaces (local, shared, global) have different sizes and access speeds. By using storage qualifiers, you can distribute your data intelligently across these spaces, making sure each memory region is used in the most efficient way possible.
-- Minimized Memory Bottlenecks: When working with large datasets, placing the right type of data in the right memory space reduces memory contention and improves the overall performance of your application. For example, placing small, frequently accessed data in local memory reduces the chances of memory bottlenecks that could occur if the data were placed in slower global memory.
-- Parallelism and Scalability: In parallel computing environments (such as GPUs), efficient use of shared and local memory is crucial for maximizing throughput. Shared memory allows for fast communication between threads within a block, while local memory ensures that each thread can work on its private data quickly.
 ### Example Code: Using Storage Qualifiers
 To better understand how storage qualifiers work, consider the following code example:
 ```cpp

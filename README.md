@@ -40,9 +40,6 @@ programmers can view the data movement using Choreo's visualization capability. 
 
 This is helpful for programmers escpecially for novices as visualization gives clear projection about the tiling behavior. Or else, programmers have to visualize in their mind, which is more error-prone.
 
-# Build Choreo for Use
-Consult the [Build Choreo From Source Code and Compile Choreo Program](./Documents/build_choreo_for_use.md) document for information on building Choreo and the detailed usage.
+# Documentation for Reference
+Consult the [Choreo Documentation and Tutorials](http://10.31.50.149:8000/) document for information on building Choreo and the detailed usage.
 
-
-# Getting Started with Choreo Programming
-The document [Getting Started with Choreo Programming](http://10.31.50.149:8000/) demonstrates the basic concept required to program with Choreo.

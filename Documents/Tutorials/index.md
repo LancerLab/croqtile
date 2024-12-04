@@ -1,4 +1,4 @@
-## Choreo User Tutorial: A ease-to-use DSL for DMA Orchestration in kernel programming
+# Choreo: A ease-to-use DSL for DMA Orchestration in kernel programming
 
 Welcome to the Choreo tutorial! In this guide, we will introduce you to **Choreo**, a specialised **Domain-Specific Language (DSL)** designed to simplify the orchestration of **DMA (Direct Memory Access) data transfers** incorporating seamlessly with other kernel programming models, such as **Topscc**, **Factor**. Whether you're a developer looking to accelerate data movement within your system, or a researcher exploring efficient memory management techniques, this tutorial will help you understand the core features of Choreo and how to use it in your kernel programming projects.
 

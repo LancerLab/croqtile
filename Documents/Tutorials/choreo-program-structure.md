@@ -1,6 +1,22 @@
-## Choreo Program Structure
 
 A typical **Choreo** program is composed of three main parts, each serving a specific purpose and allowing for efficient data orchestration and parallel computation. These components can be integrated into a single program, making it easier to manage the flow of data and execution. Let's dive deeper into each part and its role within a Choreo program.
+
+Here is a typical skeleton of Choreo program:
+```cpp
+// some C++ code
+__cok__ void kernel_function(...args...) {
+  // kernel code in intrinsics/tcle/primo++
+}
+
+__co__ void choreo_function() {
+  // choreo code
+}
+
+// another C++ code
+void foo() {
+  choreo_function();
+}
+```
 
 **Host Program**: The **Host Program** serves as the central control unit of the Choreo program. Written in standard **C++**, the host program is responsible for managing the overall flow, including data preparation, kernel launches, and synchronization with the target device (e.g., CPU, GPU, or accelerator). The host program coordinates the execution of kernels and the orchestration of data movement between the CPU and the device.
 
@@ -10,7 +26,8 @@ A typical **Choreo** program is composed of three main parts, each serving a spe
 
 Notably, **Choreo** programs integrate all three parts—**Host Program**, **Kernel Program**, and **Choreo Function**—into a single source file. This design simplifies the coding process by reducing the mental overhead required to manage multiple files simutaneously and jump back and forth during coding. By keeping all parts of the program in one place, Choreo encourages a compact and cohesive code structure. The feasibility of this organization relies on the overall brevity of the program, where the **lines of code (LOC)** are significantly reduced. This is achieved by making Choreo programs highly information-dense, enabling developers to express complex operations with minimal code. In subsequent chapters, we will gradually introduce these design characteristics and demonstrate how Choreo achieves both simplicity and expressiveness through its unique abstractions.
 
-### Host Program
+
+## Host Program
 
 The **host program** is the entry point of the Choreo program. It is typically written in standard C++ and serves as the control center for launching kernel programs and managing data transfers. A simple host program looks like this:
 
@@ -89,7 +106,7 @@ for (size_t i = 0; i < res.shape()[0]; ++i)
 
 The host programs are embedded DSL with **C/C++** and are thus designed to work seamlessly with other C/C++ programming models. They can be compiled as standard C++ functions and assembled into libraries, enabling developers to use the rich functionality of Choreo alongside regular C++ code. The core difference between standard C++ and Choreo is the provided utilities, which enable you to integrate Choreo elements like special types and memory management abstractions into your code.
 
-### **Kernel Program (`__cok__`)**
+## Kernel Program (`__cok__`)
 
 The **kernel program** defines the computational logic that will be executed on the target device (e.g., GPU, CPU). This part of the code is wrapped within the `__cok__` block, and it contains the actual computation. The kernel is designed to operate on input data, process it in parallel, and produce the output.
 
@@ -118,7 +135,7 @@ Choreo’s kernel programming model allows for different backends to be used. Fo
 
 The `__cok__` block wraps the kernel logic and is executed in parallel on the target device.
 
-### **Choreo Function (`__co__`)**
+## Choreo Function (`__co__`)
 
 The **Choreo function** is where the **data orchestration** happens. It manages the movement of data between the host and the target device and ensures that data is copied correctly across different memory spaces. This part of the program defines **data flows** and **synchronization** between devices.
 
