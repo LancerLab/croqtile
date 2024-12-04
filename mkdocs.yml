@@ -14,8 +14,10 @@ docs_dir: Documents/Tutorials
 nav:
   - Home: index.md
   - What is Choreo: what-is-choreo.md
-  - A Whirlwind Tour to Operator Samples:
-    - Element-wise Add: element-wise-sample.md
+  - Basics of Choreo Program:
+    - Choreo Program Structure: choreo-program-structure.md
+    - Abstractions and Syntax in Choreo Function:
+      - Shape in Choreo: shape-in-choreo.md
   - A Whirlwind Tour to Optimisation Patterns: 
     - Asynchoronous DMA transfer patterns with Choreo: async-dma-patterns.md
     - Multi-buffering Patterns with Choreo: mutli-buffering-patterns.md
