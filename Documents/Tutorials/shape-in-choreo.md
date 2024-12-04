@@ -114,13 +114,13 @@ If you were using `?` or `-1`, expressing the same relationships would require c
 
 One of the significant benefits of symbolic dimensions is that they can help with **compile-time optimizations**. Since Choreo allows symbolic dimensions to be evaluated at compile time, it can potentially optimize memory layouts and kernel execution plans based on these dimensions. This can result in more efficient code generation and better performance compared to using `?` or `-1`, which may require runtime evaluation and dynamic memory allocation, hindering optimization opportunities.
 
-### Data/Memory in Choreo
+### Data in Choreo
 
-In Choreo, **data** and **memory management** are tightly integrated with the shape system. To efficiently manage data in high-performance environments, Choreo uses **composite types** that combine fundamental types and shapes (mdspan). This allows for precise control over multi-dimensional data, which is particularly important for performance-sensitive applications like machine learning and scientific computing.
+In Choreo, **data**  are tightly integrated with the shape system. To efficiently manage data in high-performance environments, Choreo uses **composite types** that combine fundamental types and shapes (mdspan). This allows for precise control over multi-dimensional data, which is particularly important for performance-sensitive applications like machine learning and scientific computing.
 
 #### 1. Type of Data
 
-In Choreo, **types** of data/memory or so-called **data types** are composed of two parts: the **fundamental type** and the **mdspan** (multi-dimensional span). A **spanned type** is a **composite type**, consisting of a fundamental type (e.g., `f32` for floating-point numbers) and an `mdspan` that describes the shape of the data.
+In Choreo, **types** of data or so-called **data types** are composed of two parts: the **fundamental type** and the **mdspan** (multi-dimensional span). A **spanned type** is a **composite type**, consisting of a fundamental type (e.g., `f32` for floating-point numbers) and an `mdspan` that describes the shape of the data.
 
 Neither the fundamental type nor the mdspan alone can represent complete data with storage; together, however, they form a **partial type** that provides more control over data representation.
 

@@ -17,8 +17,13 @@ nav:
   - Basics of Choreo Program:
     - Choreo Program Structure: choreo-program-structure.md
     - Abstractions and Syntax in Choreo Function:
-      - Shape in Choreo: shape-in-choreo.md
+      - Shape/Data in Choreo: shape-in-choreo.md
+      - Memory in Choreo: memory-in-choreo.md
+      - DMA in Choreo: dma-in-choreo.md
+      - Call Statements in Choreo: call-in-choreo.md
+      - Parallelism in Choreo: parallel-in-choreo.md
   - A Whirlwind Tour to Optimisation Patterns: 
+    - Tileflow Manipulations: Tiling, Distribute and Fuse
     - Asynchoronous DMA transfer patterns with Choreo: async-dma-patterns.md
     - Multi-buffering Patterns with Choreo: mutli-buffering-patterns.md
   - Advanced Topics:
