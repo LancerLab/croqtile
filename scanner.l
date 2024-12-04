@@ -23,7 +23,6 @@
 static int scope = 0;
 
 extern Choreo::location loc;
-extern bool parsing_chunkat_value_list;
 
 void update_location(const char *text) {
   const char* it = text;
@@ -189,9 +188,7 @@ blank       [ \t\r]
                return Choreo::Parser::make_RBRACE(loc);
              }
   "|"        { return Choreo::Parser::make_PIPE(loc); }
-  {id}       { if (strcmp(yytext, "_") == 0 && parsing_chunkat_value_list && !symtab.Exists("_"))
-                 return Choreo::Parser::make_DONTCARE (loc);
-               return Choreo::Parser::make_IDENTIFIER(yytext, loc); }
+  {id}       { return Choreo::Parser::make_IDENTIFIER(yytext, loc); }
   .          { return Choreo::Parser::make_CHAR(yytext[0], loc); } // Any other single character within the function
 
 } // state <CO_FUNC>

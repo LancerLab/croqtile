@@ -174,8 +174,15 @@ public:
       auto& buf_info = FBInfo()[future_name];
       if (buf_info.buffer.empty()) {
         // the buffer does not exist
-        auto sty = GetSpannedType(GetSymbolType(n.future));
-
+        auto sym_type = GetSymbolType(n.future);
+        if (isa<PlaceHolderType>(sym_type)) {
+          Error(n.LOC(),
+                "dma.any '" + n.future + "' is defined but never used!");
+          error_count++;
+          return false;
+        }
+        auto sty = GetSpannedType(sym_type);
+        assert(sty);
         auto anon_sym = ProperBufferName(n.future);
         // Note: Later passes only cares about the type. So it is possible to
         // ignore the syntax struct 'DataType'.
@@ -293,12 +300,11 @@ public:
 
     if (prt_visitor) dbgs() << " |- " << bg.GetName() << NewL;
     root.accept(bg);
-    if (HasError()) return false;
+    if (bg.HasError()) return false;
 
     if (prt_visitor) dbgs() << " |- " << GetName() << NewL;
     root.accept(*this);
-    if (HasError()) return false;
-
+    if (this->HasError()) return false;
     // after the transformations, recollect the future-buffer info
     BufferInfoCollect bic(SymTab());
     bic.SetTraceVisit(trace_visit);
@@ -306,7 +312,7 @@ public:
 
     if (prt_visitor) dbgs() << " |- " << bic.GetName() << NewL;
     root.accept(bic);
-    if (HasError()) return false;
+    if (bic.HasError()) return false;
 
     if (abend_after) return false;
 

@@ -18,7 +18,8 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
     in_decl = true;
     allow_named_dim = true; // tolerate repeated symbols inside mdspan params
   } else if (isa<AST::WithBlock>(&n)) {
-    contians_dontcare = false;
+    with_depth++;
+    if (with_depth == 1) contains_tile_one = false;
   }
 
   return true;
@@ -49,10 +50,11 @@ bool EarlySemantics::AfterVisitImpl(AST::Node& n) {
     parallel_level--;
   } else if (isa<AST::WithBlock>(&n)) {
     with_syms.clear();
-    if (contians_dontcare) {
-      n.note += ", contians_dontcare";
-      contians_dontcare = false;
+    if (contains_tile_one && with_depth == 1) {
+      n.note += "contains_tile_one, ";
+      contains_tile_one = false;
     }
+    with_depth--;
   } else if (isa<AST::Parameter>(&n)) {
     in_decl = false;
     allow_named_dim = false;
@@ -636,7 +638,8 @@ bool EarlySemantics::Visit(AST::Identifier& n) {
     } else
       ReportErrorWhenViolateODR(n.LOC(), n.name, __FILE__, __LINE__);
   } else {
-    if (n.name == "__choreo_zero" && !SSTab().DeclaredInScope(n.name)) {
+    // to avoid the expected error
+    if (n.name == "__choreo_tile_one" && !SSTab().DeclaredInScope(n.name)) {
       auto bit = MakeBoundedIntegerType(1);
       SSTab().DefineSymbol(n.name, bit);
       SSTab().DefineSymbol("@" + n.name, MakeIntegerType());
@@ -715,6 +718,23 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
               std::to_string(n.with_matchers->Count()) + ") and mdspan rank(" +
               std::to_string(cast<MDSpanType>(ity)->Dims()) + ").");
     error_count++;
+  }
+
+  if (n.with && n.with->name == "_") {
+    Error(n.LOC(),
+          "_ is not allowed as a with variable. Can only be used in chunkat.");
+    error_count++;
+  }
+
+  if (n.with_matchers) {
+    for (auto v : n.with_matchers->AllValues()) {
+      if (auto id = dyn_cast<AST::Identifier>(v); id->name == "_") {
+        Error(v->LOC(), "_ is not allowed as a with variable. Can only be used "
+                        "in chunkat.");
+        error_count++;
+        continue;
+      }
+    }
   }
 
   // infer the type of bounded variable
@@ -922,12 +942,17 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
 
   if (n.positions) {
     for (auto& v : n.positions->AllValues()) {
-      auto expr = cast<AST::Expr>(v);
-      if (expr->IsReference()) {
+      if (auto expr = cast<AST::Expr>(v); expr->IsReference()) {
         if (auto id = dyn_cast<AST::Identifier>(expr->GetReference());
-            PrefixedWith(id->name, "__choreo_dontcare")) {
-          id->name = "__choreo_zero";
-          contians_dontcare = true;
+            id->name == "_") {
+          if (with_depth == 0) {
+            Error(n.LOC(),
+                  "`chunkat` with `_` can only be used inside `with in`.");
+            error_count++;
+            break;
+          }
+          id->name = "__choreo_tile_one";
+          contains_tile_one = true;
         }
       }
     }
@@ -1192,6 +1217,11 @@ bool EarlySemantics::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
   for (auto& i : n.getRanges()) {
     if (auto id = dyn_cast<AST::LoopRange>(i)->iv) {
+      if (id->name == "_") {
+        Error(n.LOC(), "_ is not allowed as an iteration variable.");
+        error_count++;
+        continue;
+      }
       auto ity = NodeType(*id);
       if (!(IsBoundedType(ity))) {
         Error(n.LOC(), "expecting a bounded type for iteration variable '" +

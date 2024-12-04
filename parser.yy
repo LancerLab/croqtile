@@ -81,7 +81,6 @@ static bool parsing_prefixed_list = false;
 #include <stdio.h>
 extern int yylex();
 
-unsigned int DONT_CARE_IDX = 0;
 bool parsing_chunkat_value_list = false;
 
 void choreo_info(const char *message) {
@@ -169,7 +168,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::SpanAs>> span_as
 %nterm <AST::ptr<AST::Node>> foreach_block general_val template_val general_index span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt swap_stmt expr_or_qes range_expr if_else_block optional_scalar_init param_mdspan_val chunkat_or_storage_or_select
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause else_block multi_decls named_spanned_decl
-%nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list value_dnc_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers passables future_data_list template_params
+%nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers passables future_data_list template_params
 %nterm <AST::ptr<AST::Expr>> s_expr template_value_expr span_expr id_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
@@ -317,8 +316,9 @@ general_val
     : NUM { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
     | IDENTIFIER {
         if (!symtab.Exists($1))
-          Parser::error(@1,
-            "The symbol `" + $1 + "' has not been defined.");
+          if (!parsing_chunkat_value_list && $1 != "_")
+            Parser::error(@1,
+              "The symbol `" + $1 + "' has not been defined.");
 
         $$ = AST::Make<AST::Identifier>(@1, $1);
       }
@@ -564,36 +564,6 @@ value_list
     | s_expr {
         $$ = AST::Make<AST::MultiValues>(@1);
         $$->Append($1);
-      }
-    ;
-
-value_dnc_list
-    : /* Empty list */ {
-        $$ = AST::Make<AST::MultiValues>(loc);
-      }
-    | value_dnc_list COMMA s_expr {
-        $1->Append($3);
-        $$ = $1;
-      }
-    | value_dnc_list COMMA DONTCARE {
-        std::string name = "__choreo_dontcare_";
-        name += std::to_string(DONT_CARE_IDX);
-        symtab.AddSymbol(name, MakeBoundedIntegerType(1));
-        $1->Append(AST::Make<AST::Expr>(@3, AST::Make<AST::Identifier>(@3, name)));
-        DONT_CARE_IDX += 1;
-        $$ = $1;
-      }
-    | s_expr {
-        $$ = AST::Make<AST::MultiValues>(@1);
-        $$->Append($1);
-      }
-    | DONTCARE {
-        std::string name = "__choreo_dontcare_";
-        name += std::to_string(DONT_CARE_IDX);
-        symtab.AddSymbol(name, MakeBoundedIntegerType(1));
-        $$ = AST::Make<AST::MultiValues>(@1);
-        $$->Append(AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, name)));
-        DONT_CARE_IDX += 1;
       }
     ;
 
@@ -1046,14 +1016,14 @@ span_as
 chunkat_expr
     : data_id CHUNKAT LPAREN {
         parsing_chunkat_value_list = true;
-      } value_dnc_list RPAREN {
+      } value_list RPAREN {
         $5->SetDelimiter(", ");
         $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $5);
         parsing_chunkat_value_list = false;
       }
     | span_as CHUNKAT LPAREN  {
         parsing_chunkat_value_list = true;
-      } value_dnc_list RPAREN {
+      } value_list RPAREN {
         // note: normalize will hoist span_as
         $5->SetDelimiter(", ");
         $$ = AST::Make<AST::ChunkAt>($1->LOC(), $1, $5);
