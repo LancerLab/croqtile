@@ -9,7 +9,7 @@ markdown_extensions:
       permalink: true
 
 
-docs_dir: Documents/Tutorials 
+docs_dir: Documents/Documentation 
 
 nav:
   - Home: index.md
@@ -31,7 +31,7 @@ nav:
   - Reference Palette on Operators: operator-samples.md
   - Design Rationales:
     - Syntax Design of Choreo: syntax-design-of-choreo.md
-    - Design of Symbolic Evaluation System: symbolic-evaluation.md
+    - Design of Symbolic Evaluation System: value-numbering.md
     - Dynaminism Support with Symbolic Representation: dynamic-design.md
   - Contributing to Choreo: contribute.md
 
