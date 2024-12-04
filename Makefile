@@ -22,7 +22,7 @@ TEST_TARGETS := $(TEST_FILES:.co=.test)
 #$(info TEST_TARGETS is $(TEST_TARGETS))
 
 # headers
-HEADER_FILES :=  $(shell find . -name '*.hpp') choreo_header.inc choreo_cuda_header.inc factor_script.inc cuda_script.inc
+HEADER_FILES :=  $(shell find lib/ -name '*.hpp') choreo_header.inc choreo_cuda_header.inc factor_script.inc cuda_script.inc
 
 CC = g++
 CFLAGS = -std=c++17 -Wall -Wextra -g -D__CHOREO_FACTOR_DIR__="$(TOOLCHAIN_DIR)" -D__CHOREO_CUDA_DIR__="$(TOOLCHAIN_DIR)" -D__CHOREO_TOPSCC_DIR__="$(TOOLCHAIN_DIR)"
@@ -59,8 +59,8 @@ ci-gcu2-test: setup-gcu2 $(TARGET)
 ci-gcu3-test: setup-gcu3 $(TARGET)
 	$(LIT) tests && $(MAKE) standalone_test
 
-$(CHOREO_BIN): scanner.yy.o parser.tab.o choreo_main.o codegen_factor.o codegen_cuda.o codegen_topscc.o earlysema.o typeinfer.o typecheck.o ast.o types.o codegen_factor_types.o codegen_cuda_types.o valno.o visitor.o sym_replace.o
-	$(CC) $(CFLAGS) $^ $(SYMBOLIC_LIB_FLAGS) -o $@
+$(CHOREO_BIN): utils/choreo_main.cpp scanner.yy.o parser.tab.o codegen_factor.o codegen_cuda.o codegen_topscc.o earlysema.o typeinfer.o typecheck.o ast.o types.o codegen_factor_types.o codegen_cuda_types.o valno.o visitor.o sym_replace.o
+	$(CC) $(CFLAGS) $^ -I$(WORK_DIR) -I$(WORK_DIR)/lib $(SYMBOLIC_INCLUDE_FLAGS) $(SYMBOLIC_LIB_FLAGS) -o $@
 
 scanner.yy.cc: $(LEX_SRC)
 	$(FLEX) -o $@ $(LEX_SRC)
@@ -68,14 +68,14 @@ scanner.yy.cc: $(LEX_SRC)
 parser.tab.cc parser.tab.hh location.hh: $(PARSER_SRC)
 	$(BISON) $(BISON_FLAGS) $(PARSER_SRC)
 
-%.o : %.cc types.hpp aux.hpp ast.hpp codegen_factor_types.hpp codegen_cuda_types.hpp scanner.hpp symtab.hpp parser.tab.hh location.hh
-	$(CC) $(CFLAGS) $< -c -o $@
+%.o : %.cc $(HEADER_FILES) parser.tab.hh location.hh
+	$(CC) -I$(WORK_DIR) -I$(WORK_DIR)/lib $(CFLAGS) $< -c -o $@
 
-%.o : %.cpp $(HEADER_FILES) location.hh
-	$(CC) $(CFLAGS) $(SYMBOLIC_INCLUDE_FLAGS) $< -c  -o $@
+%.o : lib/%.cpp $(HEADER_FILES) location.hh
+	$(CC) -I$(WORK_DIR) -I$(WORK_DIR)/lib $(CFLAGS) $(SYMBOLIC_INCLUDE_FLAGS) $< -c  -o $@
 
 copp: utils/choreo_preprocess.cpp $(HEADER_FILES)
-	$(CC) $(CFLAGS) $< -I$(WORK_DIR) -o $@
+	$(CC) $(CFLAGS) $< -I$(WORK_DIR) -I$(WORK_DIR)/lib -o $@
 
 choreo_header.inc : utils/choreo.h
 	echo "#ifndef __CHOREO_RUNTIME_HEADER_H__" > $@

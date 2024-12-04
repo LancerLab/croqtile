@@ -4,10 +4,12 @@ NV_CXX = nvcc
 CXXFLAGS = -Wall -g -std=c++17
 CUDA_SYS_INCLUDES="-I/usr/local/cuda/include"
 NV_FLAGS = -gencode arch=compute_86,code=sm_86 -rdc=true -lcublas $(CUDA_SYS_INCLUDES) --expt-relaxed-constexpr
-GTEST_DIR = ../../extern/gtest/
+
+ROOT=../../
+GTEST_DIR = $(ROOT)/extern/gtest/
 GTEST_LIBS = $(GTEST_DIR)/libgtest.a $(GTEST_DIR)/libgtest_main.a
-HEADER_FILES :=  $(shell find ../.. -name '*.hpp') ../../utils/choreo.h
-CHOREO_HEADERS :=  $(shell find ../../ -name '*.hpp')
+HEADER_FILES :=  $(shell find $(ROOT)/lib -name '*.hpp') $(ROOT)/utils/choreo.h
+CHOREO_HEADERS :=  $(shell find $(ROOT)/lib -name '*.hpp')
 
 # Your application's files
 SOURCES = $(wildcard *.cpp)
@@ -31,14 +33,14 @@ $(GTEST_DIR)/libgtest_main.a: $(GTEST_DIR)/googletest/src/gtest_main.cc
 	ar -rv $@ $(GTEST_DIR)/gtest_main.o
 
 %.test: %.o $(GTEST_LIBS)
-	$(CXX) $(CXXFLAGS) -L../../ -L$(GTEST_DIR) -lgtest_main -lgtest -o $@ $< -pthread
+	$(CXX) $(CXXFLAGS) -I$(ROOT)/ -I$(ROOT)/lib -L$(ROOT) -L$(GTEST_DIR) -lgtest_main -lgtest -o $@ $< -pthread
 
 # Pattern rule for object files
 %.o: %.cpp $(HEADER_FILES)
-	$(CXX) $(CXXFLAGS) -I../../ -I$(GTEST_DIR)/googletest/include/ -c $< -o $@
+	$(CXX) $(CXXFLAGS) -I$(ROOT)/ -I$(ROOT)/lib -I$(GTEST_DIR)/googletest/include/ -c $< -o $@
 
 %.cutest: %.cu $(GTEST_LIBS)
-	$(NV_CXX) ${NV_FLAGS} -I../../ -I$(GTEST_DIR)/googletest/include/ -L../../ -L$(GTEST_DIR) -lgtest_main -lgtest -o $@ $< -lpthread
+	$(NV_CXX) ${NV_FLAGS} -I$(ROOT)/ -I$(ROOT)/lib -I$(GTEST_DIR)/googletest/include/ -L../../ -L$(GTEST_DIR) -lgtest_main -lgtest -o $@ $< -lpthread
 
 # Clean up
 clean:
