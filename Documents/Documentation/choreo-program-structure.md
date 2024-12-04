@@ -4,9 +4,11 @@ A typical **Choreo** program is composed of three main parts, each serving a spe
 Here is a typical skeleton of Choreo program:
 ```cpp
 // some C++ code
-__cok__ void kernel_function(...args...) {
-  // kernel code in intrinsics/tcle/primo++
-}
+__cok__ {
+  void kernel_function(...args...) {
+    // kernel code in intrinsics/tcle/primo++
+  }
+} // end of __cok__
 
 __co__ void choreo_function() {
   // choreo code
@@ -18,11 +20,17 @@ void foo() {
 }
 ```
 
-**Host Program**: The **Host Program** serves as the central control unit of the Choreo program. Written in standard **C++**, the host program is responsible for managing the overall flow, including data preparation, kernel launches, and synchronization with the target device (e.g., CPU, GPU, or accelerator). The host program coordinates the execution of kernels and the orchestration of data movement between the CPU and the device.
+**Host Program**: The **Host Program** typically serves as the caller to the Choreo program. Written in standard C++, the host program runs on the CPU and is responsible for managing the overall flow of the application. Its tasks include: 
+Preparing data for Choreo functions;
+Invoking Choreo functions;
+Obtaining and handling return values from Choreo functions.
+In cases where the target platform supports the _Single Source Programming Model_ such as **Topscc**, **CUDA**, etc, the host program may also include the _computation kernels_ (see below).
 
-**Kernel Program**: In Choreo, kernels are often written in a structured form, wrapped in the `__cok__` block. The **Kernel Program** defines the inner-most kernel code executed on the target device. It is responsible for processing the data in parallel, leveraging the full computational power of the target hardware, such as using `2d intructions`. Specifically, you can use arbitrary programming tools (other than choreo) to write this part of code as long as this is supported by Choreo to collaborate with. Currently, Choreo supports kernel code written in **Intrinsics**, **Tcle**, and will support **Primo++** later on.
+**Kernel Program (Optional)**: For targets like *factor* (OpenCL like), which only support _Seperate Programming Model_, the host and device code must be compiled separately. In Choreo, this typically requires wrapping the **Kernel Program** the in the `__cok__` block in choreo. The *kernel program* defines the "computation-intensive" operations executed on the target device. It is responsible for processing data in parallel, leveraging the full computational power of the target hardware. This includes exploiting capabilities such as SIMD instructions, specialized function units, or even hardware matrix engines. 
 
-**Choreo Function (Tileflow Program)**: The **Choreo Function** (also called the Tileflow Program) is the heart of the Choreo programming model. It is responsible for orchestrating the movement and computation of data between the host and the kernel, ensuring that data is processed in manageable chunks (tiles) and moved efficiently between different memory spaces. In essence, the Choreo function provides a high-level abstraction that simplifies the process of orchestrating data flow and parallel computation, making it easier for developers to write high-performance applications.
+You can use arbitrary programming tools (other than Choreo) to write this part of code, as long as this is supported by Choreo for collaboration. Currently, Choreo supports _kernel programs_ utilizing **Intrinsics**/built-ins, **TCLE**, with plans to support **Primo++** in the future.
+
+**Choreo Function (Tileflow Program)**: The **Choreo Function** (also called the Tileflow Program) is the heart of Choreo-C++ programs. It is responsible for orchestrating the movement and computation of data between the host and the kernel, ensuring that data is processed in manageable chunks (tiles) and moved efficiently between different memory spaces. In essence, the Choreo function provides a high-level abstraction that simplifies the process of orchestrating data flow and parallel computation, making it easier for developers to write high-performance applications. In addtion, the _Choreo Function_ also manages the workflow of heteregeneous program implicitly, including works like kernel launches, synchronization with the target device (e.g., CPU, GPU, or accelerator), and data movement between the CPU and the device.
 
 Notably, **Choreo** programs integrate all three parts—**Host Program**, **Kernel Program**, and **Choreo Function**—into a single source file. This design simplifies the coding process by reducing the mental overhead required to manage multiple files simutaneously and jump back and forth during coding. By keeping all parts of the program in one place, Choreo encourages a compact and cohesive code structure. The feasibility of this organization relies on the overall brevity of the program, where the **lines of code (LOC)** are significantly reduced. This is achieved by making Choreo programs highly information-dense, enabling developers to express complex operations with minimal code. In subsequent chapters, we will gradually introduce these design characteristics and demonstrate how Choreo achieves both simplicity and expressiveness through its unique abstractions.
 
