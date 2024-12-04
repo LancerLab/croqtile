@@ -45,4 +45,4 @@ Consult the [Build Choreo From Source Code and Compile Choreo Program](./Documen
 
 
 # Getting Started with Choreo Programming
-The document [Getting Started with Choreo Programming](./Documents/getting_started_with_choreo.md) demonstrates the basic concept required to program with Choreo.
+The document [Getting Started with Choreo Programming](http://10.31.50.149:8000/) demonstrates the basic concept required to program with Choreo.
