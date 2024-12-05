@@ -253,16 +253,16 @@ inline const std::string Option<T>::Description() const {
 
   std::string opt_desc;
   if (!alias.empty())
-    opt_desc = alias + "/" + ((option_desc.empty()) ? name : option_desc);
+    opt_desc = alias + ", " + ((option_desc.empty()) ? name : option_desc);
   else
     opt_desc = (option_desc.empty()) ? name : option_desc;
   oss << "  " << std::setw(26) << std::left << opt_desc;
 
   // add a new line if it is lengthy
-  if (opt_desc.size() <= 26)
+  if (opt_desc.size() < 26)
     oss << description;
   else
-    oss << "\n                             " << description;
+    oss << "\n                            " << description;
 
   return oss.str();
 }
