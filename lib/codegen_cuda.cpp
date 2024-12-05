@@ -622,6 +622,11 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
     size_t dim_cursor = 0;
     for (auto& bv : ca->positions->AllValues()) {
       auto bvn = cast<AST::Identifier>(bv)->name;
+      if (bvn == "__choreo_tile_one") {
+        offss << "I(0)";
+        if (++dim_cursor < rank) offss << ", ";
+        continue;
+      }
       if (auto bity = dyn_cast<BoundedITupleType>(bv->GetType())) {
         for (size_t it_idx = 0; it_idx < bity->Dims(); ++it_idx) {
           std::string iv_str;

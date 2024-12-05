@@ -37,11 +37,6 @@ __co__ auto chunkat_tile_one4(s32 [N, M, 64] i, f32[16] oo) {
 // CHECK:    auto __choreo_nd_ref_M = dim_(args[0], 1);
 // CHECK:    auto __choreo_nd_ref_N = dim_(args[0], 0);
 // CHECK:    { // start of with-in: tests/codegen/factor/chunkat_tile_one4.co:7.1-10
-// CHECK:    var_ t0(IntType(32));
-// CHECK:    t0 = 0;
-// CHECK:    var_ t1(IntType(32));
-// CHECK:    t1 = 0;
-// CHECK:    { // start of with-in: tests/codegen/factor/chunkat_tile_one4.co:7.1-35
 // CHECK:    auto i_s__buf__ = alloc_(SRAMType(IntType(32),{256, 128, 64})).shared_(SharedType::kBlockShared);
 // CHECK:    auto i_s = alloc_dma_(CDMAType());
 // CHECK:    auto o_s = alloc_(SRAMType(IntType(32),{256, 128, 64})).shared_(SharedType::kBlockShared);
@@ -50,34 +45,33 @@ __co__ auto chunkat_tile_one4(s32 [N, M, 64] i, f32[16] oo) {
 // CHECK:    auto xxx = alloc_dma_(CDMAType());
 // CHECK:    auto xxxx__buf__ = alloc_(SRAMType(IntType(32),{5, 6})).shared_(SharedType::kBlockShared);
 // CHECK:    auto xxxx = alloc_dma_(CDMAType());
-// CHECK:    var_ __choreo_tile_one__elem__0(IntType(32));
-// CHECK:    __choreo_tile_one__elem__0 = 0;
-// CHECK:    for_(__choreo_tile_one__elem__0, 1, 1, [&](auto iv___choreo_tile_one__elem__0) {
-// CHECK:      for_(t0, dim_(args[0], 0)/256-0, 1, [&](auto iv_t0) {
-// CHECK:        async_load_(i_s, i, i_s__buf__, {Value(256)*iv_t0,Value(128)*t1,Value(64)*iv___choreo_tile_one__elem__0});
-// CHECK:        wait_dma_(i_s);
-// CHECK:        { // start of with-in: tests/codegen/factor/chunkat_tile_one4.co:12.1-16
-// CHECK:        auto i_l__buf__ = alloc_(L1Type(IntType(32),{4, 128, 64}));
-// CHECK:        auto i_l = alloc_dma_(SDMAType());
-// CHECK:        auto o_l = alloc_(L1Type(IntType(32),{4, 128, 64}));
-// CHECK:        auto __choreo_anon_fut__0 = alloc_dma_(SDMAType());
-// CHECK:        var_ t2(IntType(32));
-// CHECK:        t2 = 0;
-// CHECK:        for_(t2, 64, 1, [&](auto iv_t2) {
-// CHECK:          async_load_(i_l, i_s__buf__, i_l__buf__, {Value(4)*iv_t2,Value(128)*iv___choreo_tile_one__elem__0,Value(64)*iv___choreo_tile_one__elem__0});
-// CHECK:          wait_dma_(i_l);
-// CHECK:          async_store_(__choreo_anon_fut__0, o_l, o_s, {Value(4)*iv_t2,Value(128)*iv___choreo_tile_one__elem__0,Value(64)*iv___choreo_tile_one__elem__0});
-// CHECK:          wait_dma_(__choreo_anon_fut__0);
-// CHECK:        }); // end of choreo-foreach block on 't2'.
-// CHECK:        } // end of with-in: tests/codegen/factor/chunkat_tile_one4.co:12.1-14
-// CHECK:        async_store_(__choreo_anon_fut__1, o_s, o, {Value(256)*iv_t0,Value(128)*t1,Value(64)*iv___choreo_tile_one__elem__0});
-// CHECK:        wait_dma_(__choreo_anon_fut__1);
-// CHECK:      }); // end of choreo-foreach block on 't0'.
-// CHECK:      async_load_(xxx, _, xxx__buf__, {Value(5)*iv___choreo_tile_one__elem__0,Value(6)*iv___choreo_tile_one__elem__0});
-// CHECK:      wait_dma_(xxx);
-// CHECK:      async_load_(xxxx, _, xxxx__buf__, {0, 0});
-// CHECK:      wait_dma_(xxxx);
-// CHECK:    }); // end of choreo-foreach block on '__choreo_tile_one__elem__0'.
-// CHECK:    } // end of with-in: tests/codegen/factor/chunkat_tile_one4.co:7.1-35
+// CHECK:    var_ t0(IntType(32));
+// CHECK:    t0 = 0;
+// CHECK:    var_ t1(IntType(32));
+// CHECK:    t1 = 0;
+// CHECK:    for_(t0, dim_(args[0], 0)/256-0, 1, [&](auto iv_t0) {
+// CHECK:      async_load_(i_s, i, i_s__buf__, {Value(256)*iv_t0,Value(128)*t1,0});
+// CHECK:      wait_dma_(i_s);
+// CHECK:      { // start of with-in: tests/codegen/factor/chunkat_tile_one4.co:12.1-16
+// CHECK:      auto i_l__buf__ = alloc_(L1Type(IntType(32),{4, 128, 64}));
+// CHECK:      auto i_l = alloc_dma_(SDMAType());
+// CHECK:      auto o_l = alloc_(L1Type(IntType(32),{4, 128, 64}));
+// CHECK:      auto __choreo_anon_fut__0 = alloc_dma_(SDMAType());
+// CHECK:      var_ t2(IntType(32));
+// CHECK:      t2 = 0;
+// CHECK:      for_(t2, 64, 1, [&](auto iv_t2) {
+// CHECK:        async_load_(i_l, i_s__buf__, i_l__buf__, {Value(4)*iv_t2,0,0});
+// CHECK:        wait_dma_(i_l);
+// CHECK:        async_store_(__choreo_anon_fut__0, o_l, o_s, {Value(4)*iv_t2,0,0});
+// CHECK:        wait_dma_(__choreo_anon_fut__0);
+// CHECK:      }); // end of choreo-foreach block on 't2'.
+// CHECK:      } // end of with-in: tests/codegen/factor/chunkat_tile_one4.co:12.1-14
+// CHECK:      async_store_(__choreo_anon_fut__1, o_s, o, {Value(256)*iv_t0,Value(128)*t1,0});
+// CHECK:      wait_dma_(__choreo_anon_fut__1);
+// CHECK:    }); // end of choreo-foreach block on 't0'.
+// CHECK:    async_load_(xxx, _, xxx__buf__, {0,0});
+// CHECK:    wait_dma_(xxx);
+// CHECK:    async_load_(xxxx, _, xxxx__buf__, {0, 0});
+// CHECK:    wait_dma_(xxxx);
 // CHECK:    } // end of with-in: tests/codegen/factor/chunkat_tile_one4.co:7.1-8
 // CHECK:  }); // end of choreo-factor device function

@@ -25,8 +25,6 @@ private:
   bool return_deduction = false;
   int parallel_level = 0;
   bool allow_auto_threading = false;
-  bool contains_tile_one = false;
-  unsigned int with_depth = 0;
 
   std::unordered_set<std::string>
       with_syms; // symbol defined in with-in statement

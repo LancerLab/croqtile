@@ -17,9 +17,6 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
   } else if (isa<AST::Parameter>(&n)) {
     in_decl = true;
     allow_named_dim = true; // tolerate repeated symbols inside mdspan params
-  } else if (isa<AST::WithBlock>(&n)) {
-    with_depth++;
-    if (with_depth == 1) contains_tile_one = false;
   }
 
   return true;
@@ -50,11 +47,6 @@ bool EarlySemantics::AfterVisitImpl(AST::Node& n) {
     parallel_level--;
   } else if (isa<AST::WithBlock>(&n)) {
     with_syms.clear();
-    if (contains_tile_one && with_depth == 1) {
-      n.note += "contains_tile_one, ";
-      contains_tile_one = false;
-    }
-    with_depth--;
   } else if (isa<AST::Parameter>(&n)) {
     in_decl = false;
     allow_named_dim = false;
@@ -945,14 +937,7 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
       if (auto expr = cast<AST::Expr>(v); expr->IsReference()) {
         if (auto id = dyn_cast<AST::Identifier>(expr->GetReference());
             id->name == "_") {
-          if (with_depth == 0) {
-            Error(n.LOC(),
-                  "`chunkat` with `_` can only be used inside `with in`.");
-            error_count++;
-            break;
-          }
           id->name = "__choreo_tile_one";
-          contains_tile_one = true;
         }
       }
     }

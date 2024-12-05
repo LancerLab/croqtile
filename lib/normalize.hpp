@@ -78,39 +78,6 @@ public:
     } else if (auto d = dyn_cast<AST::Return>(&n)) {
       cur_node_index = multi_nodes.top()->GetIndex(d);
       assert(cur_node_index != -1 && "unexpected node index.");
-    } else if (auto wb = dyn_cast<AST::WithBlock>(&n)) {
-      if (wb->note == "gen_by_norm") return true;
-      if (n.note.find("contains_tile_one") == std::string::npos) return true;
-      auto loc = wb->withins->LOC();
-      auto added_with_block = AST::Make<AST::WithBlock>(loc);
-      auto added_within = AST::Make<AST::WithIn>(
-          loc, AST::Make<AST::Identifier>(loc, "__choreo_tile_one"),
-          AST::Make<AST::Expr>(
-              loc, AST::Make<AST::MultiDimSpans>(
-                       loc, "",
-                       AST::Make<AST::MultiValues>(
-                           loc, ", ",
-                           AST::Make<AST::Expr>(
-                               loc, AST::Make<AST::IntLiteral>(loc, 1))))));
-      added_within->with->SetType(MakeBoundedITupleType(Shape(1, 1)));
-      auto added_withins = AST::Make<AST::MultiNodes>(loc);
-      added_withins->Append(added_within);
-      added_with_block->withins = added_withins;
-      auto added_ranges = AST::Make<AST::MultiValues>(loc);
-      added_ranges->Append(AST::Make<AST::LoopRange>(
-          loc, AST::Make<AST::Identifier>(loc, "__choreo_tile_one")));
-      auto added_foreachblock =
-          AST::Make<AST::ForeachBlock>(loc, added_ranges, wb->stmts);
-      auto added_stmts = AST::Make<AST::MultiNodes>(loc);
-      added_stmts->Append(added_foreachblock);
-      added_with_block->stmts = added_stmts;
-      added_with_block->note = "gen_by_norm";
-      auto res = AST::Make<AST::MultiNodes>(loc);
-      res->Append(added_with_block);
-      wb->stmts = res;
-      changed = true;
-      // `with {__choreo_tile_one} in [1] { foreach __choreo_tile_one {  } }
-      VST_DEBUG(dbgs() << "Wrap the `with in` at " << n.LOC() << ".\n");
     }
     return true;
   }
