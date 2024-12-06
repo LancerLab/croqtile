@@ -1,0 +1,15 @@
+/* custom_highlight.css */
+.highlight .attribute {
+  color: #ff5733; /* Attribute color */
+  font-weight: bold;
+}
+
+.highlight .cotype {
+  color: #33ccff; /* Type color */
+  font-style: italic;
+}
+
+.highlight .operation {
+  color: #ffcc00; /* Operation color */
+  font-weight: bold;
+}
