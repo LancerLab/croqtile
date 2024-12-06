@@ -41,15 +41,15 @@ In choreo function `ele_add`, there are two input parameters: 'lhs' and 'rhs', b
 
 The implementation divides data movements and computations into three stages, including:
 
- - the **prologue**(line 8-10). It (pre-)load the first chunk of data. In this example, buffer A is pre-loaded with data.
+ - the **prologue**(line 8-11). It (pre-)load the first chunk of data. In this example, buffer A is pre-loaded with data.
  - the **body**(line 12-20). It processes the data pre-loaded in last iteration or in prologue, and pre-load the data for next iteration.
  - and the **epilogue**(line 21-25). It processes the last data chunk only.
 
 In the code, futures 'lfB' and 'rfB' are declared as dummies. These dummy futures serve as placeholders and are replaced by DMA statements at lines 13-14. The reason for declaring dummy futures is that the futures ('lfB' and 'rfB') of the DMA invoked in the body stage are used in the epilogue stage (lines 21-22). However, from a lexical scope perspective, defining futures inside the foreach-block (lines 12-20) would not extend their lifetime to their last uses. Therefore, it is necessary to declare 'lfB' and 'rfB' early.
 
-The **swap** statements at lines 18-19 exchange futures to ensure the **wait** statement at line 15 functions correctly. Note that only futures with identical DMA operations can be swapped. Additionally, the iteration range of the *foreach* statement at line 12 is adjusted. The expression foreach y(1:) means the loop over the *bounded variable* 'y' starts from the second value up to the upper bound. In line 17, the *chunkat* expression is also tuned. The expression y - 1 results in the current value of 'y' minus 1, setting up the body stage to work properly with the prologue stage. This adjustment is necessary because the iteration count must be reduced by 1, and the pre-load operation should fetch the 'next' chunk while computation is conducted on the 'current' chunk of data. Alternatively, you can use foreach y(:-1) and adjust the chunkat expression of the pre-load statements at lines 13-14 to achieve the same effect.
+The **swap** statements at lines 18-19 exchange futures to ensure the **wait** statement at line 15 functions correctly. Note that only futures with identical DMA operations can be swapped. Additionally, the iteration range of the *foreach* statement at line 12 is adjusted. `foreach y(1:)` means the loop over the *bounded variable* 'y' starts from the second value up to the upper bound. In line 17, the *chunkat* expression is also tuned. `y - 1` results in the current value of 'y' minus 1, setting up the body stage to work properly with the prologue stage. This adjustment is necessary because the iteration count must be reduced by 1, and the pre-load operation should fetch the 'next' chunk while computation is conducted on the 'current' chunk of data. Alternatively, you can use `foreach y(:-1)` and adjust the chunkat expression of the pre-load statements at lines 13-14 to achieve the same effect.
 
-In line 25, the expression 'y(-1)' retrieves the 'last value' of 'y' within its bound.
+In line 25, the expression `y(-1)` retrieves the 'last value' of 'y' within its bound.
 
 Note that the **select** expressions in line 21-22 handle both odd and even upper-bound cases for the bounded variable 'y'. In either case, it obtains the future of the last chunk.
 

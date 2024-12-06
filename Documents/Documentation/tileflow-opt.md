@@ -1,6 +1,9 @@
 # Tiling Optimisation in Choreo
 
-In this section, we will extend our discussion on tiling optimization in Choreo by examining a practical example of matrix multiplication (`matmul`) on a device program. This example demonstrates how Choreo’s tiling and memory management mechanisms work together to optimize matrix operations, including how DMA (Direct Memory Access) is leveraged for efficient data movement.
+In this section, we will extend our discussion on tiling optimization in Choreo by examining some practical examples.
+
+## Example 1: `matmul`
+The first example is matrix multiplication on a device program. This example demonstrates how Choreo’s tiling and memory management mechanisms work together to optimize matrix operations, including how DMA (Direct Memory Access) is leveraged for efficient data movement.
 
 ---
 
@@ -52,9 +55,7 @@ __co__ s32 [512, 1024] matmul(s32 [512, 1024] lhs, s32 [1024, 1024] rhs) {
 ```
 ---
 
-### Discussion and Breakdown of Example
-
-### Memory Tiling with `chunkat` (Part 1)
+### Memory Tiling with `chunkat`
 
 In the matrix multiplication example, **memory tiling** is achieved using the `chunkat` method, which slices the input matrices `lhs` (left-hand side) and `rhs` (right-hand side) into smaller chunks to be processed in parallel.
 
@@ -68,27 +69,52 @@ In the matrix multiplication example, **memory tiling** is achieved using the `c
 - The variables `m_tile`, `k_tile`, and `n_tile` are **bounded variables**. They are defined in the context of `parallel-by` and `with-in` constructs, which define the iteration space for the tiling.
 - These bounded variables allow the chunks to be computed in parallel, where each thread works on a different slice of the matrix. This parallelization enables efficient computation of matrix multiplications across multiple threads.
 
+
+## Example 2: rgb2gray
+The second example is the RGB to Grayscale conversion algorithm. The algorithm converts a color (RGB) image to a grayscale image using a weighted average method. This example shows how physical parallelism work together with virtual parallelism.
+
 ---
+### Example Code
 
-### Compose Two Bounded Variables for Tiling with `#` (Part 2)
+```choreo
+__co__ auto rgb2gray(f32 [N, 3, H, W] input) {
+  f32 [N, H, W] out;
+  parallel q by 6 {
+    with index={n, h, w} in [N, H, W]/{#q, 16, 512} {
+      foreach n, h, w {
+        // _ means no tiling
+        input_L1_A = dma.copy input.chunkat(q#n, _, h, w) => local;
+        dims : input_L1_A.span[(0), (2), (3)];
+        local f32 [dims] out_L1;
+        call rgb2gray_kernel_fp32_fp32(input_L1_A.data, out_L1, |out_L1|, 1);
+        dma.copy out_L1 => out.chunkat(q#n, h, w);
+      }
+    }
+  }
+  return out;
+}
+```
+---
+### Compose Two Bounded Variables for Tiling with `#`
 
-In the example, there is a need to tile the matrices in a manner that involves **two dimensions**. This is where the **`#` operator** comes into play, allowing the program to compute the **Cartesian product** of two bounded variables and **fuse the loops**.
+In the example above, there is a need to tile the matrices in a manner that involves **two bounded variables**. This is where the **`#` operator** comes into play, allowing the program to compute the **Cartesian product** of two bounded variables (**not commutative**).
 
 ##### The `#` Operator:
 
-- In the inner block, the code defines the tiling parameters with two bounded variables: `m_tile_s`, `k_tile_s`, and `n_tile_s`, which are bounded in a 4x4x8 grid. These bounds represent the tiling dimensions for each matrix slice.
-- The `m_tile_s # n_tile_s` notation effectively **fuses two loops** (over `m_tile_s` and `n_tile_s`) into one logical loop that processes both dimensions together in one tile.
-- This tiling strategy optimizes **data locality** by combining the `m_tile` and `n_tile` indices into a single loop, improving memory access patterns and reducing the number of iterations required.
+- The code defines the tiling parameters with four bounded variables: `q`, `n`, `h`, and `w`, whose upper bounders are `6`, `N/6`, `H/16`, and `W/512`.
+- Suppose `N` is 18, `q` represents physical thread index. We want each thread to process data that is contiguous in the first dimension. That is, the first thread handles input[0~2][xxx], the second thread handles input[3~5][xxx], and so on.
+- `q # n` will result in a new bounded variable implicitly, whose upper bound is `N`: bound of `q` multiply bound of `n`.
+- For every data move, the stride of each dimension is 1, 3, 16, 512. In the last dimension, the index is `w`. In the first dimension, the index is `q * (bound of n) + n`. 
+
 
 ##### Why this is Important:
 
-- The combination of `m_tile_s` and `n_tile_s` into a single tile ensures that both dimensions are handled simultaneously, reducing the number of iterations and improving **cache utilization**.
+- The combination of `q` and `n` ensures that physical and virtual parallelism can work together efficiently.
 - This helps optimize **memory access patterns**, especially when working with large matrices, where efficient memory use is crucial.
 - Choreo’s approach here is more aligned with **physical memory hierarchies** (e.g., local/shared memory on GPUs or accelerators). Unlike higher-level loop scheduling techniques like in TVM, which abstract away the actual data movement, Choreo explicitly links **virtual loops** to **physical DMA operations**. This results in more efficient data movement and computation.
 
----
 
-### Virtual Parallelism and Physical DMA Mapping (Part 3)
+## Virtual Parallelism and Physical DMA Mapping
 
 In traditional systems like **TVM** (Tensor Virtual Machine), scheduling and loop transformations are abstracted to optimize computation. For example, a typical **TVM schedule** for a matrix multiplication operation might look like the following:
 

@@ -23,7 +23,7 @@ In Choreo, **storage qualifiers** annotate the memory allocation and specify whi
 global f32 [100, 200] matrix;
 ```
 
-### 2. shared
+### 2. `shared`
 The shared memory space is typically used for fast, high-throughput access by processing units within a single compute node (e.g., threads in a GPU block or a CPU core).
 Data stored in shared memory is generally smaller in size than global memory but offers much faster access times. It's ideal for storing intermediate data, which needs to be accessed frequently during computation, but is not shared across different compute units.
 Shared memory allows for efficient data transfer within compute units and can be crucial for optimizing algorithms like matrix multiplication, where intermediate results are reused multiple times.
@@ -32,7 +32,7 @@ Example:
 shared f32 [10, 10] tile_data;
 ```
 
-### 3. local
+### 3. `local`
 Local memory is the smallest and fastest memory space, typically used for storing very small data that only needs to be accessed by a specific thread or computation unit.
 It is particularly useful when each thread requires a small amount of data, such as scalar values or small arrays that do not need to be shared with other threads.
 Local memory is often used in parallel computing scenarios where data needs to be private to each thread and accessed very quickly, but it is not meant for large datasets.

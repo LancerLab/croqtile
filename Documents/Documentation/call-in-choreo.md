@@ -40,7 +40,8 @@ In this case, lhs_load is a future handle (from a previous dma operation), and .
 ### Kernel templates in Choreo
 Choreo provides powerful support for kernel function templates, which allows for highly flexible and efficient execution on different hardware backends, even with backends that does not support template call (such as **Factor**).
 
-Template Parameters and Requirements
+#### Template Parameters and Requirements
+
 When defining a kernel function, you can use template parameters to enable specialization based on the data shape, dimensions, or other factors. The template parameters in Choreo can be expressions, and the kernel can be specialized based on these parameters at compile-time. This flexibility can significantly reduce code complexity and enhance optimization.
 
 Example Kernel Definition:

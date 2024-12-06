@@ -29,17 +29,17 @@ Choreo introduces four fundamental type categories: scalar-type, spanned-type, i
 - **Scalar Type**. It is designed to fullfil the requirement of program control. It consist of *Integer Type* and *Boolean Type*.
 - **Spanned Type**. It represents the data type (normally the tensor) for computation. Apart from referencing the raw data, a *spanned type* also associates data with a shape representing by multi-dimensional ranges. The 'multi-dimensional ranges' is named 'mdspan'. It is useful for tiling, etc, which is introduced soon.
 - **Integer Tuple (I-Tuple) Type**. It represents a group of integer values. A common usage of *i-tuple* is to introduce the bound of multi-dimensional data.
-- **Bounded (Integer/ITuple) Type**. This is the special type that is used to simplify data (sub-zone) reference. And it works with loop construct to iterately process data.
+- **Bounded (Integer/ITuple) Type**. This is the special type that is used to simplify data (sub-zone) reference. And it works with loop construct to iteratively process data.
 
 Among the four type categories, *scalar* and *ituple* could be well accepted consider it maps to elements of existing general purpose programming languages. However, the *spanned type*, and *bounded type* are specific to the domain. The following sections will show the detail.
 
 ### Scalar Types
-As described, Scalar types in Choreo includes the *Integer Type* and *Boolean Type*. The *Integer Type* is similar to C++ type 'int' or 'int32_t'. It is an signed value which takes 32-bits, ranging from -2^31 ~ 2^31 - 1. The below code illustrates its usage for defining the data and function declaration.
+As described, Scalar types in Choreo includes the *Integer Type* and *Boolean Type*. The *Integer Type* is similar to C++ type 'int' or 'int32_t'. It is an signed value which takes 32-bits, ranging from $-2^{31}$ to $2^{31}-1$. The below code illustrates its usage for defining the data and function declaration.
 ```
 int a;
 __co__ int foo(int b);
 ```
-Operations like integer arithmetics, shift and logical operation are all supported. And the syntax is indential to C++ builtin operations.
+Operations like integer arithmetics, shift and logical operation are all supported. And the syntax is identical to C++ builtin operations.
 In Choreo, we neither provide equivalence of unsigned scalar integers, nor equivalence of 8-bits, 16-bits, 64-bits scalar integers. This design is simply motivated by the fact: these types are not essential for program control purposes. And normally a 32-bits signed integer can fulfill such work.
 
 The *Boolean Type* in Choreo is similar to C++ type 'bool'. The operations on top of Boolean, and conversion between Integers, are identical to these of C++.
@@ -140,26 +140,33 @@ tiling_factor = {3, 2};
 spn : sp / tiling_factor;   // spn is defined as [2, 4];
 
 ```
-In Choreo, mdspan can be defined with such **Tuple-Span Operations". The supported operations includes:
+In Choreo, mdspan can be defined with such **Tuple-Span Operations**. The supported operations includes:
 
-- *mdspan* / *i-tuple*
-- *mdspan* + *i-tuple*
-- *mdspan* % *i-tuple*
-- *mdspan* * *i-tuple*
-- *mdspan* - *i-tuple*
+- *mdspan* $/$ *i-tuple*
+- *mdspan* $+$ *i-tuple*
+- *mdspan* $\%$ *i-tuple*
+- *mdspan* $*$ *i-tuple*
+- *mdspan* $-$ *i-tuple*
 
 Essentially, these operations can be achieved through mdspan *dimension-wise* definition. However, *tuple-span operations* aid programmers in writing more readable code. This is also the objective that Choreo aims to achieve.
 
 ### Bounded Types
-Bounded types consists of **Bounded Scalar** and **Bounded ITuple**. Bounded Scalar takes a range of [0, ub], where is the 'ub' represents its upper bound. Therefore, if an integer 'p' is set as bounded, it should also be associated with a specific upper bound. To establish such associations, programmers must code explicitly inside the *Control Structures* of 'parallel-by' and 'with-in', which will be introduced later.
+Bounded types consists of **Bounded Scalar** and **Bounded ITuple**. Bounded Scalar takes a range of [0, ub), where 'ub' represents its upper bound. Therefore, if an integer 'p' is set as bounded, it should also be associated with a specific upper bound. To establish such associations, programmers must code explicitly inside the *Control Structures* of 'parallel-by' and 'with-in', which will be introduced later.
 
 Similarly, since *ITuple* is a group of *Integer*s, it can also be associated with a group of bounds. Specifically, in Choreo, the *Bounded ITuple* is associated with a *mdspan* value, where a group of upper bounds are settled. In later sections, we shall illustrate the detailed syntax.
 
+
+
 ## Control Structures
+<!-- 
 Choreo follows C++ to involve 'if-else' blocks to handle branches inside programs. However, it has significant difference with C++ on parallelization, loop, etc.
+-->
+
+Choreo has significant difference with C++ on parallelization, loop, etc.
+
 
 ### Parallel Region: the 'parallel-by' Block
-In systems like CPU, it allows of asynchonized thread to realize the parallel execution. However, in Choreo, it employs the Single Instruction Multiple Data (SPMD) model as it way to realize parallelization. This is similar to some OpenMP parallel directive, and some parallel programming language like OpenCL/CUDA.
+In systems like CPU, it allows of asynchronous thread to realize the parallel execution. However, in Choreo, it employs the Single Instruction Multiple Data (SPMD) model as it way to realize parallelization. This is similar to some OpenMP parallel directive, and some parallel programming language like OpenCL/CUDA.
 
 However, the syntax of constructing a parallel region is quite different. It employs the C-style bracket and encloses the code for parallel execution within the 'parallel-by' block.
 
@@ -180,7 +187,7 @@ with index in [10, 10] {
   // index is ituple with 2 elements
 }
 ```
-Here, 'index' is a *i-tuple* with 2 elements. Sometimes programmers perfer that the 2 elements being named. This is possible by using the below syntax.
+Here, 'index' is a *i-tuple* with 2 elements. Sometimes programmers prefer that the 2 elements being named. This is possible by using the below syntax.
 ```
 with {x, y} in [10, 10] {...}
 ```
@@ -190,15 +197,15 @@ with index = {x, y} in [10, 10] {...}
 ```
 We name 'index' as a **bounded ituple** in such scenarios.
 
-You may think 'with-in' statement is similar to 'parallel-by'. However, it is not true. One significant difference is 'with-in' statement does not have implication for parallelism. The code block inside 'with-in' statement is sequentially executed. It does nothing more than creating the *bounded-ituple*.
+While 'with-in' may seem like 'parallel-by', it operates differently. One significant difference is 'with-in' statement does not have implication for parallelism. The code block inside 'with-in' statement is sequentially executed. It does nothing more than creating the *bounded-ituple*.
 
-Neverthless, programmers could append a 'where' clause. For example,
+In addition, programmers could append a 'where' clause. For example,
 ```
 with {m, n} in [M, N], {n_p, k} in [N_P, K] where n_p <-> n {
   // matmul implements with m,n,K. n_p is no long useful.
 }
 ```
-The code snippet requires 'n' and 'n_p' to have an identical value in all iterations. Thus inside the 'with-in' block, it is possible to replace'n' whenever 'n_p' is required, or the opposite. Such a facility is useful to program many AI kernels. Programmers should use operation '<->' to establishs such relations.
+The code snippet requires 'n' and 'n_p' to have an identical value in all iterations. Thus inside the 'with-in' block, it is possible to replace'n' whenever 'n_p' is required, or the opposite. Such a facility is useful to program many AI kernels. Programmers should use operation '<->' to establish such relations.
 
 ### The 'foreach' Block
 Once the *bounded-ituple* is defined by the 'with-in' clause, programmers can loop over the bounded-ituples/bounded-integers. In Choreo, this is simple.
@@ -214,7 +221,7 @@ with x in [10] {
 ### The 'upper-bound' Operation
 
 ### Async Operation: the DMA Statement
-Execept for parallel execution, Choreo allows one fixed form of async operation: the DMA statement.
+Except for parallel execution, Choreo allows one fixed form of async operation: the DMA statement.
 
 Conceptually, a DMA statement is executed asynchronously with the SPMD code. It works quite similar to CPU async thread, except its behavior is limited by the DMA configuration. (CPU allows to program the async thread as will)
 
@@ -222,7 +229,7 @@ The below code showcases one basic DMA statement.
 ```
 global f32 [10] g_data;
 local f32 [10] l_data;
-f = dma.copy g_data => l_data;
+f = dma.copy.async g_data => l_data;
 // ... async operations
 wait f;         // explicit wait
 ```
@@ -232,19 +239,18 @@ At times, programmers may find it tedious to explicitly define temporal data. Ch
 ```
 global f32 [10] data;
 f = dma.copy data => local;
-wait f;
 ... f.data;  // retrieve the 'local' data from the future
 ```
-Here, we do not need to specify the exact target location where the DMA transfers data. Instead, we only specify the destination memory type. This is advantageous in many scenarios. Programmers often prefer to avoid dealing with scratchpad memory (SPM) management. In this code, the local memory allocation is left to the compiler. And to retrieve the transferred data, we simply invoke the 'data' member function of 'future'.
+Here, we do not need to specify the exact target location where the DMA transfers data. Instead, we only specify the destination memory type. This is advantageous in many scenarios. Programmers often prefer to avoid dealing with scratchpad memory (SPM) management. In this code, the local memory allocation is left to the compiler. And to retrieve the transferred data, we simply invoke the 'data' member function of 'future'. Besides, the dma operation is not marked with '.async', so the wait operation on 'f' is not needed and cannot be performed.
 
 DMA operations entail intricate details that demand careful programming. Programmers should refer to the DMA manual to make informed decisions for their code. Nonetheless, Choreo compiler provides plenty of static and runtime checks to assist programmers in avoiding potential errors in this aspect.
 
-### Bounded-ituple/integer and 'chunkat' Opertion
+### Bounded-ituple/integer and 'chunkat' Operation
 'chunkat' is an operation performed on spanned data. It creates a new *mdspan* over the existing data. Thus in certain systems, it is referred to as 'subview'. However, as 'chunkat' accepts bounded-ituple and bounded-integer as parameters, it is named differently in Choreo.
 ```
 global f32 [6, 10, 100] data;
 parallel p by 6 {
-  with index = [x, y] in [10, 10] {
+  with index = {x, y} in [10, 10] {
     // for every data move, the stride into 'data' is
     //    stride = p*1000 + x * 100 + y * 10
     //
@@ -253,7 +259,7 @@ parallel p by 6 {
   }
 }
 ```
-The above example showcases one typical usage of 'chunkat'. Here we have a spanned data with its type is 'f32 [6, 10, 100]'. The chuckat operation receive two parameter, *integer* 'p' and *ituple* 'index', it assumes to divide the data into 6 * 10 * 10 pieces, which is the size of associated ranges relating to 'p' and 'index'. Then 1 piece is fetched for transference to the local data. That is 10 elements of data, which is consecutive considering it is the quotient is 10 for the least significant dimension.
+The above example showcases one typical usage of 'chunkat'. Here we have a spanned data with its type is 'f32 [6, 10, 100]'. The chunkat operation receive two parameter, *integer* 'p' and *ituple* 'index', it assumes to divide the data into 6 * 10 * 10 pieces, which is the size of associated ranges relating to 'p' and 'index'. One data segment is fetched and transferred to local storage, containing 10 consecutive elements along the least significant dimension.
 
 
 ## Function Calls and Call Choreo Function
@@ -271,7 +277,7 @@ __co__ void foo() {
 In the above example, program calls the existing C++ function 'bar' using Choreo keyword 'call', which is intuitive.
 
 ## Parameters Passing between Choreo and C++ Function
-Passing arguments to Choreo or opposite requires inclusion of Choreo header file: choreo.h. Normally, programmers combine the raw C++ pointer and associated dimensions info to construct Choreo spanned data. The below code domenstrate how it works.
+Passing arguments to Choreo or opposite requires inclusion of Choreo header file: choreo.h. Normally, programmers combine the raw C++ pointer and associated dimensions info to construct Choreo spanned data. The below code demonstrate how it works.
 
 ```
 #include "choreo.h"
@@ -280,17 +286,17 @@ void bar(const float* data, unsigned size) {}
 
 __co__ void foo(f32 mdspan<2> d) {
   parallel p by 6 {
-    call bar(d.data, |d|);     // Call the C++ function
+    call bar(d, |d|);     // Call the C++ function
   }
 }
 
 void foobar(float* a) {
-  foo(choreo::make_spanned<2>(a, {1, 2}));
+  foo(choreo::make_spanview<2>(a, {1, 2}));
 }
 ```
-In the example, we make use of choreo utility function (template) 'make_spanned' to make the spanned data. And in Choreo function 'foo', the parameter 'f32 mdspan<2>' is the correspondance entity. To get the raw pointer of the spanned data, simply use 'data' operation over the spanned parameter. And operation '|d|' obtains the total size of the spanned data 'd'. These are used for calling C++ function 'bar'.
+In the example, we make use of choreo utility function (template) 'make_spanview' to wrap the data, which does not invoke copy. And in Choreo function 'foo', the parameter 'f32 mdspan<2>' is the corresponding entity. Because the data is implicitly cast, you can simply use 'd' as the first parameter of C++ function 'bar'. And operation '|d|' obtains the total size of the spanned data 'd'. These are used for calling C++ function 'bar'.
 
-Similarly, *Scalar Type* data can also be passed from/to Choreo function. Neverthless, ituple is only used inside Choreo function.
+Similarly, *Scalar Type* data can also be passed from/to Choreo function. Nevertheless, ituple is only used inside Choreo function.
 
 ## Summary
 Choreo introduces a novel approach to SPMD programming. It favors C++-style coding and is embedded within C++. However, its primary focus is on alleviating the burden of low-level programming details, particularly those related to data manipulation across various memory layers through DMA operations. At times, it is also referred to as the dataflow programming DSL. We developed this tool to support the daily task of constructing high-performance kernels. Our aim is to enable programmers to focus less on the intricacies of language construction and more on higher-level conceptual thinking.

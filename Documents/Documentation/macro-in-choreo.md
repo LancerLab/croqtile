@@ -17,7 +17,7 @@ void foo() {
 }
 
 ```
-In the above code snippet, the inputs of choreo function 'matmul' are not dynamically shaped since the choreo pre-processor substituate 'M', 'N', 'K' to be the values of '256', '32', '64' ahead of choreo compilation. The benefit of passing host macros into choreo code is obvious. The data used in host code can be easily made consistent with the user choreo function.
+In the above code snippet, the inputs of choreo function 'matmul' are not dynamically shaped since the choreo pre-processor substitute 'M', 'N', 'K' to be the values of '256', '32', '64' ahead of choreo compilation. The benefit of passing host macros into choreo code is obvious. The data used in host code can be easily made consistent with the user choreo function.
 
 However, till now choreo only support 'simple' valued macros. Code like:
 ```cpp
@@ -25,7 +25,7 @@ However, till now choreo only support 'simple' valued macros. Code like:
 ```
 is not supported by choreo preprocessor.
 
-In addition, choreo support C-style comments, either '/*...*/' or '//...', leveraging the capability choreo preprocessor has provided. Moreover, C preprocessing directives including '#if/#ifdef/#ifndef/#else/#endif' are also supported by choreo preprocessor. Code snippet in the below showcases the usage.
+In addition, choreo support C-style comments, either `/*...*/` or `//...`, leveraging the capability choreo preprocessor has provided. Moreover, C preprocessing directives including `#if`/`#ifdef`/`#ifndef`/`#else`/`#endif` are also supported by choreo preprocessor. Code snippet in the below showcases the usage.
 
 ```choreo
 #define PATH0
@@ -45,6 +45,6 @@ __co__ foo() {
 // ...
 #endif
 ```
-In this way, it also make host and choreo code be controled within the same preprocess method.
+In this way, it also make host and choreo code be controlled within the same preprocess method.
 
 Note that, the capability of choreo preprocessor is still enhancing. But it is likely that we would not implement full C preprocessing support. Choreo would not pick up existing C features unless people find it is necessary.

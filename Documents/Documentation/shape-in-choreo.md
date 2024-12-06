@@ -135,13 +135,13 @@ Here is how you define a composite type in Choreo:
 ```choreo
 mdspan sp : [M, N]; // Symbolic dimensions 
 f32 [10, 10] d0; // 2D array with fixed shape 
-f16 [ndims] d1; // Array where ndims is a symbolic value
+f16 [ndim] d1; // Array where ndim is a symbolic value
 ```
 
 In this example:
 
 - `f32 [10, 10] d0` defines a 2D array of `f32` elements with a fixed shape.
-- `f16 [ndims] d1` defines a 1D array where the number of elements depends on the symbolic value `ndims`.
+- `f16 [ndim] d1` defines a 1D array where the number of elements depends on the symbolic value `ndim`.
 
 Such a design allows for **flexible** and **efficient** management of multi-dimensional data while maintaining type safety and clarity.
 
@@ -150,13 +150,15 @@ Such a design allows for **flexible** and **efficient** management of multi-dime
 To define data for computation in Choreo, you must fully specify both the fundamental type and the shape. This ensures that data types are well-structured and optimized for performance.
 
 ```choreo
-ndims : [20, 15]; f32 [10, 10] d0; f16 [ndims] d1; // Uses symbolic dimension `ndims`
+ndims : [20, M, N];
+f32 [10, 10] d0;
+f16 [ndims] d1; // Uses the defined mdspan as dimension
 ```
 
 In this case:
 
 - `d0` is a 2D array of `f32` elements.
-- `d1` is a 1D array of `f16` elements, with the number of elements determined by the symbolic dimension `ndims`.
+- `d1` is a 3D array of `f16` elements, with dimension [20, M, N].
 
 Choreo supports multiple fundamental types, including:
 

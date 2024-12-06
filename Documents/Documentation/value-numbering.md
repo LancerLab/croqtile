@@ -25,7 +25,7 @@ With such a definition, we may translate the indexing operations, e.g. "a(0)", r
 
 # Implementations
 ## From Expressions to Value Numbers
-In current implement, the value numbering process in a synatx-directed way. It traverse the Abstract Syntax Tree nodes and generate value numbers when the node contains an expression.
+In current implement, the value numbering process in a syntax-directed way. It traverse the Abstract Syntax Tree nodes and generate value numbers when the node contains an expression.
 
 The method of generating value numbers is simple. For each expression, it takes the expression as the input, and returns corresponding value number.
 
@@ -34,12 +34,12 @@ More specifically, it:
 * If the signature has already existed, return the associated value number by looking up the value number table.
 * Or else, it associates the signature with a new value number in the value number table, and return it.
 
-Notebly, for simplicity, current signature is an string of expression. This can be improved by hashing later (like most value numbering process does).
+Notably, for simplicity, current signature is an string of expression. This can be improved by hashing later (like most value numbering process does).
 
 In addition, to handle the symbol definition and symbol reference, it follows the below rules:
 
 * When an expression is to initialize a symbol (variable or partial type), the symbol is assign the same value number of the expression. More specifically, it associate the signature of the *scoped* symbol name with the value number in the value number table.
-* When an expression references a symbol, it looks up its corresponding sigature in the value number table, and return it.
+* When an expression references a symbol, it looks up its corresponding signature in the value number table, and return it.
 
 Note the symbol must use its *scoped name* for signature generation, since identical names are allowed to be defined in different scope.
 
@@ -70,7 +70,7 @@ The signature of #2 now represents a constant, which implies the algebraic simpl
 ## From Value Numbers to Expression
 After value numbering and simplification, each expression is associated with its simplified value number. In Choreo, this is important step for the shape inference process of the mdspan type.
 
-The *mdspan* type is a partial type that defines count of fundamental-typed elements. And in programming, together with a fundanmental type, e.g, it decides the memory size an *spanned* object takes.
+The *mdspan* type is a partial type that defines count of fundamental-typed elements. And in programming, together with a fundamental type, e.g, it decides the memory size an *spanned* object takes.
 
 The shape detail of *mdspan* could be runtime decided. However, in many scenario, the shape is possible to be fully evaluated to fixed numbers at compile time. In such a scenario, static memory allocation can also be triggered at compile time to best utilize the system memory. Or else, the it requires to generate code to calculate the shapes.
 
