@@ -20,12 +20,12 @@ With this code, programmers can effortlessly create a shape with a tiling factor
 This code transfers a data chunk with specified tiling factors to a storage location named 'shared' via DMA. The explicit tiling in the code is easy to maintain, and the complexities of DMA configurations, index calculations, and storage management are handled implicitly by the Choreo compiler. The design allows programmers to concentrate on high-level strategies for building high-performance kernels.
 
 ### Code Safety
-Another primary design goal of Choreo is to **ensure code safety** by catching errors at compile-time or as early as possible at runtime. To achieve this, Choreo employs **compile-time checks** and **runtime-check** based on the shapes and rules inferred from the *tileflow code*.
+Another primary design goal of Choreo is to **ensure code safety** by catching errors at compile-time or as early as possible at runtime. To achieve this, Choreo employs **compile-time checks** and instruments **runtime-check** based on the shapes and rules inferred from the *tileflow code*.
 
 Bugs related to DMA are typically challenging to diagnose. However, with Choreo's safety checks, programmers can significantly reduce debugging efforts, thereby shortening the overall development cycle.
 
 ### Dynamic/Symbolic Shapes
-Dynamic shape support is crucial for building many ML kernels. Choreo support and enhance the support via **symbolic shapes**, The symbolic shapes are determined at runtime but can still be checked statically or dynamically. The programmers can use it easily like the below code:
+Dynamic shape support is crucial for building many ML kernels. Choreo enhances the dynamic shape support via the **symbolic shapes**. Programmers can utilize the feature easily like the below code:
 
 ```
 __co__ auto matmul(f32 [M, K] lhs, f32 [N, K] rhs) { ... }
