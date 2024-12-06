@@ -5,11 +5,6 @@ Traditionally, programming DMA has focused on hardware configuration rather than
 
 To address these challenges, Choreo is designed to simplify DMA programming by introducing a novel paradigm called **'TileFlow' programming**. It has already shown significant improvement on productivity, safety, and adaptibility over existing design, and is proven effective for building **high-performance machine learnig kernels** on heterogeneous hardware.
 
-## Source-to-Source and End-to-End
-In the current implementation, Choreo performs **source-to-source translation** to convert *choreo-c++* programs into vendor-supported C++ language code and APIs (such as Factor, Topscc, and CUDA).
-
-Beside the translation, Choreo also integrates lower-level compiler in its compilation process. This makes Choreo appears as an **end-to-end compiler** when the vendor-provided device-level C++ compiler is properly configured.
-
 ## Features
 ### Productivity
 One of the standout features of Choreo by design is its ability of **mind-set saving** in **data tiling** tasks. This is achieved by introducing domain specific types, which simplify data shape manipulation to a level comparable to *Python*. For instance: 
