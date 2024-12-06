@@ -43,7 +43,11 @@ assist in setting up the GCU-3.x compiler, runtime, and hardware driver.
 
 
 ## Compile Choreo-C++ Program
-Once Choreo is built, developers can compile Choreo-C++ programs into various output forms, including:
+In the current implementation, Choreo performs **source-to-source translation** to convert *choreo-c++* programs into vendor-supported C++ language code and APIs (such as Factor, Topscc, and CUDA).
+
+However, since Choreo integrates lower-level compiler in its compilation process, it appears as an **end-to-end compiler** when the vendor-provided device-level C++ compiler is properly configured.
+
+Therefore, Once Choreo is built, developers can compile Choreo-C++ programs into various output forms, including:
 
 - Target source code
 - Target object module
