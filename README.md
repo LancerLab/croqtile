@@ -1,40 +1,45 @@
-# Choreo - An eDSL for TileFlow Programming
-Choreo is a low-level embedded Domain Specific Language (eDSL) specifically engineered to program data movement entities like DMAs, which traditionally focus on hardware configuration rather than the data itself. This language facilitates the programming of data flow across a hardware’s memory hierarchy, where at each level, data is partitioned into smaller chunks that are positioned closer to the processing elements. By making data tiling and flowing more manageable, Choreo pioneers the 'TileFlow' programming paradigm. This new approach aims to significantly streamline the engineering tasks involved, particularly for professionals developing AI operations on specific hardware.
+# Choreo - The C++ DSL for TileFlow Programming
+Choreo is a low-level Embedded Domain Specific Language (EDSL) for C++ specifically engineered to program data movement entities like DMAs, which traditionally focus on hardware configuration rather than the data itself. This language facilitates the programming of data flow across a hardware’s memory hierarchy, where at each level, data is partitioned into smaller chunks that are positioned closer to the processing elements. By making data tiling and flowing more manageable, Choreo pioneers the 'TileFlow' programming paradigm. This new approach aims to significantly streamline the engineering tasks involved, particularly for professionals developing AI operations on specific hardware.
 
 ## Choreo and Device-Level C++
-Choreo has close relationship to the device-level C++ programming, which is usually provided by the hardware vendor. In current implementation, Choreo performs source-to-source translation to convert *choreo-c++* programs to vendor-supported(like factor, topscc) C++ language entities and APIs. Despite of turning higher level abstraction of *TileFlow* functions into corresponding low level C++API calls, Choreo also glues the kernels, the host program into executables. Consequently, using Choreo compiler is easy when the vendor-provided device-level C++ compiler is properly configured.
+Choreo has close relationship to the device-level C++ programming, which is usually provided by the hardware vendor. In current implementation, Choreo performs source-to-source translation to convert *choreo-c++* programs to vendor-supported (like factor, topscc, CUDA) C++ language entities and APIs. Despite of turning higher level abstraction of *TileFlow* functions into corresponding low level C++API calls, Choreo also glues the kernels, the host code into executables. Consequently, using Choreo compiler is easy when the vendor-provided device-level C++ compiler is properly configured.
 
 ## Features
 ### Productivity
-One of the attempting feature of Choreo by design is the **improve productivity**. Specifically, it is about **the mind-set saving** when dealing with **data tiling** work. This is done by introducing programming entities including *mdspan*/*ituple*, which makes the manipulation of data shapes as easy as if it is in *Python*-level. For example:
-```
+One of the standout features of Choreo by Design is its ability to **enhance productivity**, particularly through the **mind-set saving** in **data tiling** tasks. This is achieved by introducing programming entities such as *mdspan*/*ituple*, which simplify data shape manipulation to a level comparable to *Python*. For instance: For example:
+```cpp
 __co__ f32 mdspan<2> my_function(f32 [8, 4, 12] d) {
     block_shape : d.span { (0)/ 2, (1)/ 4, 1, (2)};
 }
 ```
-Programmers can easily make a shape with a tiling factor of {2, 4, 1} from data 'd''s shape. In addition, the programmer adds one dimension to the tiled 'block_shape'. All these work are done in one line of code. It saves mind-set since neither the trivial computation is necessarily done by human, nor tidious C++ programming is required.
+With this code, programmers can effortlessly create a shape with a tiling factor of {2, 4, 1} from data 'd' and even add an extra dimension to the tiled 'block_shape', all in a single line. Additionally, programmers can describe a DMA operation within a single line of code:
+```cpp
+  dma.copy input.chunkat(tiling_factors) => shared;
+```
+This code transfers a data chunk with specified tiling factors to a storage location named 'shared' via DMA. The explicit tiling in the code is easy to maintain, and the complexities of DMA configurations, index calculations, and storage management are handled by the Choreo compiler. This allows programmers to concentrate on high-level strategies for building high-performance kernels.
 
-There are still many different designs to improve productivity, including tiling control, loop control, parallelization control, etc. Choreo tries to provide feasible and simple abstractions to make it as simple as possible.
+For more productivity-enhancing designs and features, please refer to our tutorials.
 
 
-### Program Safety
-One of the primary design goals of Choreo is to ensure code safety by catching errors at compile-time rather than at runtime. To achieve this, Choreo introduces **compile-time checks**. This feature includes domain-specific types that are associated with corresponding shapes. These shaped types, along with other programming entities, are checked statically. This allows programmers to identify and address code issues as early as possible during the development process.
+### Code Safety
+Another primary design goals of Choreo is to **ensure code safety** by catching errors at compile-time or as early as possible at runtime. To achieve this, Choreo employs **compile-time checks** and **runtime-check** based on the shapes and rules inferred from the Choreo code.
+
+Bugs related to DMA are typically challenging to diagnose. However, with Choreo's safety checks, programmers can significantly reduce debugging efforts, thereby shortening the overall development cycle.
 
 ### Dynamic/Symbolic Shapes
-Choreo now supports dynamic shapes, a feature essential for machine learning kernels. To facilitate this, the input parameters of Choreo could be made **symbolic**, as shown in the example below:
+Choreo could be the first programming languages to support **symbolic shape dimensions**, where the values are determined at runtime but can still be checked statically or dynamically. This dynamic capability is crucial for building many machine learning kernels. The example below illustrates this feature:
 
 ```
 __co__ auto matmul(f32 [M, K] lhs, f32 [N, K] rhs) { ... }
 ```
-This feature introduces a natural way to program shaped inputs, such as tensors. Furthermore, Choreo generates runtime assertions for these dynamic shapes by leveraging the relationships (e.g., dimensional equivalence) inferred from the code. This enhancement increases the safety of runtime code and eliminates the need for many trivial explicit assertions, reducing boilerplate code.
-
+This feature introduces a natural way to program shaped inputs, such as tensors. Additionally, for enhanced code safety, Choreo generates assertions by leveraging the relationships (e.g., dimensional equivalence) inferred from the code. This eliminates the need for many trivial, explicitly programmed assertions, thereby reducing boilerplate code.
 
 ### Visualization
-Another prominent feature of Choreo is its **analytic and visualization functionality**. For example, for a DMA statement
+**Analytic and visualization** is another compelling feature of Choreo, designed to help newcomers understand DMA behaviors. For instance, consider the following DMA statement:
 
 `f1 = dma.copy a.chunkat(p, x, y) => local;`
 
-programmers can view the data movement using Choreo's visualization capability. The result is like the image shows:
+With Choreo's visualization capability, programmers can observe the data movement resulting from this statement. The visualization might look something like this:
 
 ![visualizing the DMA statement](./images/simple_dma.png)
 
