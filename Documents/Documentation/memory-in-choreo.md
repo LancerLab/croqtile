@@ -19,7 +19,7 @@ In Choreo, **storage qualifiers** annotate the memory allocation and specify whi
 - Global memory is suitable for storing large datasets that need to be shared across multiple processing units or components, such as matrices in deep learning applications or large scientific datasets.
 
 **Example:**
-```cpp
+```choreo
 global f32 [100, 200] matrix;
 ```
 
@@ -28,7 +28,7 @@ The shared memory space is typically used for fast, high-throughput access by pr
 Data stored in shared memory is generally smaller in size than global memory but offers much faster access times. It's ideal for storing intermediate data, which needs to be accessed frequently during computation, but is not shared across different compute units.
 Shared memory allows for efficient data transfer within compute units and can be crucial for optimizing algorithms like matrix multiplication, where intermediate results are reused multiple times.
 Example:
-```cpp
+```choreo
 shared f32 [10, 10] tile_data;
 ```
 
@@ -37,24 +37,24 @@ Local memory is the smallest and fastest memory space, typically used for storin
 It is particularly useful when each thread requires a small amount of data, such as scalar values or small arrays that do not need to be shared with other threads.
 Local memory is often used in parallel computing scenarios where data needs to be private to each thread and accessed very quickly, but it is not meant for large datasets.
 Example:
-```cpp
+```choreo
 local f16 [5] thread_local_data;
 ```
 ## Default Behavior and Usage
 By default, when a storage qualifier is not specified, the data is considered to be in global memory. This default behavior simplifies memory management for users who do not need to explicitly define where their data should be stored, but it also means that accessing such data could incur higher latency, especially when working with large arrays or parallel processing units.
 
 For example, the following code defines an array d0 without any storage qualifier, implying it resides in global memory:
-```cpp
+```choreo
 f32 [100, 100] d0;
 ```
 If you want to place data in a different memory space (shared or local), you need to specify the appropriate storage qualifier. For example, the following code places the matrix d0 in local memory, and the matrix d1 in shared memory:
-```cpp
+```choreo
 local f32 [10, 10] d0;     // Small data, local to the thread
 shared f16 [ndims] d1;     // Intermediate data, shared between threads in a block
 ```
 ### Example Code: Using Storage Qualifiers
 To better understand how storage qualifiers work, consider the following code example:
-```cpp
+```choreo
 ndims : [20, 15];
 local f32 [10, 10] d0;        // Local memory for thread-specific data
 shared f16 [ndims] d1;        // Shared memory for intermediate data across threads

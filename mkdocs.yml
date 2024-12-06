@@ -2,14 +2,30 @@ site_name: Choreo Tutorials
 site_url: http://127.0.0.1:8000
 
 theme:
-  name: material 
+  name: material
+  features:
+    - navigation.instant
+    - navigation.top
+    - search.highlight
+    - content.code.annotate
+
+docs_dir: Documents/Documentation
+
+extra_javascript:
+  - assets/js/highlight.min.js
+  - assets/js/choreo.js
+  - assets/js/bash.min.js
+
+extra_css:
+  - assets/css/github-dark.min.css
+  - assets/css/choreo.css
 
 markdown_extensions:
+  - codehilite:
+      guess_lang: false
+      css_class: highlight
   - toc:
       permalink: true
-
-
-docs_dir: Documents/Documentation 
 
 nav:
   - Home: index.md
@@ -23,11 +39,11 @@ nav:
       - DMA in Choreo: dma-in-choreo.md
       - Call Statements in Choreo: call-in-choreo.md
       - Parallelism in Choreo: parallel-in-choreo.md
-      - Macro Utility in Choreo: macro-in-choreo.md
-  - A Whirlwind Tour to Optimisation Patterns: 
+      - Macro and Preprocessing: macro-in-choreo.md
+  - A Whirlwind Tour to Optimisation Patterns:
     - Tileflow Optimisations: tileflow-opt.md
     - Asynchoronous DMA transfer patterns with Choreo: async-dma-patterns.md
-    - Multi-buffering Patterns with Choreo: mutli-buffering-patterns.md
+    - Multi-buffering Patterns with Choreo: multi-buffering-patterns.md
   - Reference Palette on Operators: operator-samples.md
   - Design Rationales:
     - Syntax Design of Choreo: syntax-design-of-choreo.md

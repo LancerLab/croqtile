@@ -2,7 +2,7 @@
 A typical **Choreo** program is composed of three main parts, each serving a specific purpose and allowing for efficient data orchestration and parallel computation. These components can be integrated into a single program, making it easier to manage the flow of data and execution. Let's dive deeper into each part and its role within a Choreo program.
 
 Here is a typical skeleton of Choreo program:
-```cpp
+```choreo
 // some C++ code
 __cok__ {
   void kernel_function(...args...) {
@@ -39,7 +39,7 @@ Notably, **Choreo** programs integrate all three parts—**Host Program**, **Ker
 
 The **host program** is the entry point of the Choreo program. It is typically written in standard C++ and serves as the control center for launching kernel programs and managing data transfers. A simple host program looks like this:
 
-```cpp
+```choreo
 int main() {
   // Define data arrays
   choreo::s32 a[6][17][128] = {0};
@@ -120,7 +120,7 @@ The **kernel program** defines the computational logic that will be executed on 
 
 Example kernel program inside `__cok__`:
 
-```cpp
+```choreo
 __cok__ { /// Kernel program 
 
 extern "C" void kernel(int * a, int * b, int * c, int n) { 
@@ -149,7 +149,7 @@ The **Choreo function** is where the **data orchestration** happens. It manages 
 
 Here is a minimal example and corresponding explainations:
 
-```cpp
+```choreo
 __co__ s32 [6, 17, 128] ele_add(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) {  /// Device program
   s32[lhs.span] output; // Use same shape as lhs
   

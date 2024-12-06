@@ -4,7 +4,7 @@ In Choreo, the `call` statement is used to invoke kernel functions defined withi
 
 The general syntax for a `call` statement in Choreo is:
 
-```cpp
+```choreo
 call krn-func-name <template-args> (arguments);
 ```
 
@@ -23,7 +23,7 @@ call krn-func-name <template-args> (arguments);
 - These arguments can be of primitive types (such as integers or floating-point values), or they can be **data types** (which represent memory references or views into data).
   
 In the example call:
-```cpp
+```choreo
 call matmul_kernel_sm_stationary<output.span(0)/#p, output.span(1)/#q, 32, 16, 16>(lhs_load.data, rhs_load.data, l2_out);
 ```
 where `lhs_load.data`, `rhs_load.data`, and `l2_out` are the arguments passed into the kernel. These are references to data stored in memory, and each of them must resolve to a data type (not a future handle).
@@ -32,7 +32,7 @@ where `lhs_load.data`, `rhs_load.data`, and `l2_out` are the arguments passed in
 Basically, kernel function can takes primitive types (s32 as int32_t, u32 as unsigned int, and so on), and data types in Choreo.
 If one of the arguments involves a future handle, the syntax to extract the underlying data would be:
 Instead of passing a future handle directly to the kernel, use .data to access the data contained in the future.
-```cpp
+```choreo
 lhs_load.data
 ```
 In this case, lhs_load is a future handle (from a previous dma operation), and .data is used to access the actual data that the kernel will operate on.
@@ -44,7 +44,7 @@ Template Parameters and Requirements
 When defining a kernel function, you can use template parameters to enable specialization based on the data shape, dimensions, or other factors. The template parameters in Choreo can be expressions, and the kernel can be specialized based on these parameters at compile-time. This flexibility can significantly reduce code complexity and enhance optimization.
 
 Example Kernel Definition:
-```cpp
+```choreo
 template <typename T, int P, int Q, int M, int N, int K>
 void matmul_kernel_sm_stationary(T* lhs, T* rhs, T* output) {
     // Kernel logic for matrix multiplication
@@ -68,7 +68,7 @@ To enable Choreo's template parameter functionality, you need to use the `-kt` c
 
 When the `-kt` option is enabled, the kernel function should be written in standard C++ template form, without the extern "C" linkage specification.
 
-```cpp
+```choreo
 int M = 32;
 int N = 16;
 call matmul_kernel_sm_stationary<output.span(0)/#M, output.span(1)/#N, 64, 16, 16>(lhs_load.data, rhs_load.data, l2_out);

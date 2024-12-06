@@ -10,7 +10,7 @@ In Choreo, shapes are defined using the `mdspan` keyword, which can represent mu
 
 For example:
 
-```cpp
+```choreo
 mdspan sp : [7, 8]; // Defines a 2D shape with dimensions [7, 8]
 ```
 
@@ -22,7 +22,7 @@ Once a shape is defined using `mdspan`, you can manipulate it using various oper
 
 For example, you can derive a new shape from an existing one:
 
-```cpp
+```choreo
 mdspan sp : [M, N]; // Initial shape 
 mdspan spn : sp [1, M / 2, N / 4]; // Derived shape, [1, M/2, N/4]
 ```
@@ -43,7 +43,7 @@ One of the key features of Choreo’s shape system is the ability to define **sy
 
 For instance:
 
-```cpp
+```choreo
 int M = 6, N = 8; // Runtime values 
 __co__ func(int M, int N) {
     mdspan sp : [M, N]; // Define a 2D shape with symbolic dimensions M and N
@@ -67,7 +67,7 @@ Using symbolic dimensions like `M` and `N` explicitly in the shape definition ma
 
 For example, if a program uses `?` for dynamic dimensions, it's unclear whether it represents an uninitialized value, a wildcard dimension, or something else. This can lead to confusion when trying to reason about the program. In contrast, symbolic dimensions are explicit and show exactly how the shape is determined:
 
-```cpp
+```choreo
 // Using symbolic dimensions 
 mdspan sp : [M, N]; 
 mdspan spn : sp [1, M / 2, N / 4]; 
@@ -85,7 +85,7 @@ One of the major benefits of symbolic dimensions in Choreo is that they are **ty
 
 For example, using `?` or `-1` as dynamic dimensions in other systems often leads to runtime checks for consistency, such as verifying that the dimensions are properly initialized before use. These checks can introduce overhead and make the program harder to optimize. In contrast, symbolic dimensions allow Choreo to **check constraints at compile-time**, ensuring that shape expressions are valid before execution:
 
-```cpp
+```choreo
 mdspan sp : [M, N]; 
 // M and N are symbolic dimensions 
 
@@ -103,7 +103,7 @@ In contrast, using `?` or `-1` often leads to brittle code, where developers nee
 
 For example, you can easily express relationships between dimensions using symbolic variables:
 
-```cpp
+```choreo
 mdspan sp : [M, N]; // Symbolic dimensions 
 mdspan spn : sp [1, M / 2, N / 4]; // Derived shape based on symbolic expressions
 ```
@@ -132,7 +132,7 @@ The **mdspan** type allows you to manipulate the shape of data independently fro
 
 Here is how you define a composite type in Choreo:
 
-```cpp
+```choreo
 mdspan sp : [M, N]; // Symbolic dimensions 
 f32 [10, 10] d0; // 2D array with fixed shape 
 f16 [ndims] d1; // Array where ndims is a symbolic value
@@ -149,7 +149,7 @@ Such a design allows for **flexible** and **efficient** management of multi-dime
 
 To define data for computation in Choreo, you must fully specify both the fundamental type and the shape. This ensures that data types are well-structured and optimized for performance.
 
-```cpp
+```choreo
 ndims : [20, 15]; f32 [10, 10] d0; f16 [ndims] d1; // Uses symbolic dimension `ndims`
 ```
 

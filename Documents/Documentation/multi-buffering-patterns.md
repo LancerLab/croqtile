@@ -1,45 +1,49 @@
-# Multi-Buffering Optimization with Choreo 
+# Multi-Buffering Optimization with Choreo
 
-To aggressively optimize the high-performance computation kernels, one effective method is to overlap computation with DMA (Direct Memory Access) data movement. This approach, known as *multi-buffering optimization*, typically requires programmers to manage multiple buffers.
+To aggressively optimize the high-performance computation kernels, one effective method is to overlap computation with DMA (Direct Memory Access) data movement. This approach, known as **multi-buffering optimization**, typically requires programmers to manage multiple buffers.
 
-In Choreo, this method requires two key programming primitives: the 'dummy' future **dma.any**, and the **swap/rotate** function. Here is an example:
+In Choreo, this method requires two key programming primitives: the 'dummy' future **dma.any**, and the **swap/rotate** function. Let's illustrate by an example:
 
+```choreo
+__co__ s32 [6, 17, 128] ele_add(s32 [6, 17, 128] lhs,
+                                s32 [6, 17, 128] rhs) {
+  s32[lhs.span] output;
+  parallel p by 6 {
+    with index = {x, y} in [17, 4] {
+      local s32 [rhs.span / {#p, #x, #y}] l_out;
+      foreach x { // first bunch
+        lfA = dma.copy.async lhs.chunkat(p, x, y) => local;
+        rfA = dma.copy.async rhs.chunkat(p, x, y) => local;
+        lfB = dma.any;  // dummy DMA used for multi-buffering
+        rfB = dma.any;
+        foreach y(1:) {
+          lfB = dma.copy.async lhs.chunkat(p, x, y) => local;
+          rfB = dma.copy.async rhs.chunkat(p, x, y) => local;
+          wait lfA, rfA;  // wait another bunch
+          call kernel(lfA.data, rfA.data, l_out, |lfB.span|);
+          dma.copy l_out => output.chunkat(p, x, y - 1);
+          swap(lfA, lfB); // exchange futures
+          swap(rfA, rfB);
+        }
+        lf = select(#y % 2, lfB, lfA);
+        rf = select(#y % 2, rfB, rfA);
+        wait lf, rf;  // handle the last bunch
+        call kernel(lf.data, rf.data, l_out, |lfB.span|);
+        dma.copy l_out => output.chunkat(p, x, y(-1));
+      }
+    }
+  }
+  return output;
+}
 ```
-1  __co__ s32 [6, 17, 128] ele_add(s32 [6, 17, 128] lhs,
-2                                  s32 [6, 17, 128] rhs) {
-3    s32[lhs.span] output;
-4    parallel p by 6 {
-5      with index = {x, y} in [17, 4] {
-6        local s32 [rhs.span / {#p, #x, #y}] l_out; 
-7        foreach x { // first bunch
-8          lfA = dma.copy.async lhs.chunkat(p, x, y) => local;
-9          rfA = dma.copy.async rhs.chunkat(p, x, y) => local;
-10         lfB = dma.any;  // dummy DMA used for multi-buffering
-11         rfB = dma.any;
-12         foreach y(1:) {
-13           lfB = dma.copy.async lhs.chunkat(p, x, y) => local;
-14           rfB = dma.copy.async rhs.chunkat(p, x, y) => local;
-15           wait lfA, rfA;  // wait another bunch
-16           call kernel(lfA.data, rfA.data, l_out, |lfB.span|);
-17           dma.copy l_out => output.chunkat(p, x, y - 1);
-18           swap(lfA, lfB); // exchange futures
-19           swap(rfA, rfB);
-20         }
-21         lf = select(#y % 2, lfB, lfA);
-22         rf = select(#y % 2, rfB, rfA);
-23         wait lf, rf;  // handle the last bunch
-24         call kernel(lf.data, rf.data, l_out, |lfB.span|);
-25         dma.copy l_out => output.chunkat(p, x, y(-1));
-26       }
-27     }
-28   }
-29   return output;
-30 }
-```
 
-In choreo function `ele_add`, there are two input parameters, both double-buffered in local storage. We refer to these buffers as 'A' and 'B'. While buffer A is used for computation, buffer B is filled with data via a DMA operation. Once the kernel function completes computation on buffer A, the roles of A and B are swapped: A becomes the buffer for loading the next data chunk, and B becomes the buffer for computation. This process iterates until all data chunks are consumed. 
+In choreo function `ele_add`, there are two input parameters: 'lhs' and 'rhs', both double-buffered in local storage. We refer to these buffers as 'A' and 'B'. While buffer A is used for computation, buffer B is filled with data via a DMA operation. Once the kernel function completes computation on buffer A, the roles of A and B are swapped: A becomes the buffer for loading the next data chunk, and B becomes the buffer for computation. This process iterates until all data chunks are consumed.
 
-The implementation divides data movements and computations into three stages: the **prologue**(line 8-10), the **body**(line 12-20), and the **epilogue**(line 21-25). In the prologue, buffer A is pre-loaded with data. In the epilogue, the last chunk of data is obtained for computation.
+The implementation divides data movements and computations into three stages, including:
+
+ - the **prologue**(line 8-10). It (pre-)load the first chunk of data. In this example, buffer A is pre-loaded with data.
+ - the **body**(line 12-20). It processes the data pre-loaded in last iteration or in prologue, and pre-load the data for next iteration.
+ - and the **epilogue**(line 21-25). It processes the last data chunk only.
 
 In the code, futures 'lfB' and 'rfB' are declared as dummies. These dummy futures serve as placeholders and are replaced by DMA statements at lines 13-14. The reason for declaring dummy futures is that the futures ('lfB' and 'rfB') of the DMA invoked in the body stage are used in the epilogue stage (lines 21-22). However, from a lexical scope perspective, defining futures inside the foreach-block (lines 12-20) would not extend their lifetime to their last uses. Therefore, it is necessary to declare 'lfB' and 'rfB' early.
 

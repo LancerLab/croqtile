@@ -59,7 +59,7 @@ choreo your_program.co
 This command generates an _a.out_ executable file. The _-o <filename>_ option can be used to specify the output filename when needed. Compiler options like _-c_ and _-S_ work similarly to those in C++ compilers, provided they are supported by the target platform.
 
 The _-t <platform>_ option allows you to specify the target platform for the compilation. Additionally, the _-es_ option generates target source code without performing the compilation. For instance:
-```
+```bash
 choreo -t cude your_program.co -es -o cuda_source.co
 ```
 This command produces CUDA C++ source code, which can be useful for specific development tasks.
@@ -72,7 +72,7 @@ Lastly, options _--help_ and _--help-hidden_ are avaiable for listing the full o
 
 here is a example output of `--help`:
 
-```shell
+```bash
 // --help
 Usage: choreo [options] file...
 Options:

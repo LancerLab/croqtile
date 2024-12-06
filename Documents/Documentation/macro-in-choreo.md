@@ -1,7 +1,7 @@
 # Macros and Preprocessing in Choreo
 Choreo allows simple C/C++ macros be effective both for host code and for choreo code. One essential preprocessor capability choreo has provided is to pass the value of value-based macros defined in host code into the choreo function.
 
-```
+```choreo
 #define M 256
 #define N 32
 #define K 64
@@ -20,14 +20,14 @@ void foo() {
 In the above code snippet, the inputs of choreo function 'matmul' are not dynamically shaped since the choreo pre-processor substituate 'M', 'N', 'K' to be the values of '256', '32', '64' ahead of choreo compilation. The benefit of passing host macros into choreo code is obvious. The data used in host code can be easily made consistent with the user choreo function.
 
 However, till now choreo only support 'simple' valued macros. Code like:
-```
+```cpp
 #define MAX(a, b) (((a) > (b)) ? (a) : (b))
 ```
 is not supported by choreo preprocessor.
 
 In addition, choreo support C-style comments, either '/*...*/' or '//...', leveraging the capability choreo preprocessor has provided. Moreover, C preprocessing directives including '#if/#ifdef/#ifndef/#else/#endif' are also supported by choreo preprocessor. Code snippet in the below showcases the usage.
 
-```
+```choreo
 #define PATH0
 // some host code
 __co__ foo() {

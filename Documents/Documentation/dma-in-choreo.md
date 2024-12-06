@@ -5,7 +5,7 @@ In Choreo, Direct Memory Access (DMA) operations are designed to manage data tra
 ## DMA Operations in Choreo
 A typical DMA operation in Choreo follows this structure:
 
-```cpp
+```choreo
 future = dma-op src-operand => dst-operand;
 ```
 Where:
@@ -24,7 +24,7 @@ DMA operations in Choreo can be synchronous or asynchronous, each providing diff
 ### Synchronous DMA Operations
 In a synchronous DMA operation, the program execution will block until the DMA operation is completed. For example:
 
-```cpp
+```choreo
 load = dma.copy rhs.chunkat(k_tile, q) => shared;
 ```
 Here, the program will pause until the data is fully transferred from rhs.chunkat(k_tile, q) to shared memory. The program cannot proceed until the copy operation completes. This type of DMA operation is simple and predictable but may lead to performance bottlenecks in applications that require overlapping computation with data transfers.
@@ -32,12 +32,12 @@ Here, the program will pause until the data is fully transferred from rhs.chunka
 ### Asynchronous DMA Operations
 An asynchronous DMA operation, on the other hand, does not block the program. The program continues executing while the data transfer happens in the background. When the transfer is finished, a future object is returned to track the operation's completion. For example:
 
-```cpp
+```choreo
 load = dma.copy.async rhs.chunkat(k_tile, q) => shared;
 ```
 In this case, the program continues execution without waiting for the data transfer to complete. The load object represents a future, which holds the status of the DMA operation. To ensure the data is available before further operations, you need to explicitly wait for the future:
 
-```cpp
+```choreo
 wait load;
 ```
 This wait operation blocks the program until the DMA operation completes. The key point here is that the initial dma.copy.async operation is non-blocking, but wait load will block the program execution until the DMA operation is finished.
@@ -45,7 +45,7 @@ This wait operation blocks the program until the DMA operation completes. The ke
 ### Full Non-Blocking DMA Mode (Chain Mode in Choreo)
 In Choreo, it's possible to perform a full non-blocking DMA by chaining multiple asynchronous DMA operations and using event-based notifications with after. This enables complete non-blocking execution, where one DMA operation is triggered only after the completion of a prior one. Here’s an example of such a setup:
 
-```cpp
+```choreo
 out_store = dma.copy.async l2_out => output.chunkat(m_tile, n_tile) after out_store_s;
 ```
 In this example:

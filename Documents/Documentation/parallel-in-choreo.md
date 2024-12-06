@@ -24,7 +24,7 @@ The **`parallel-by`** block in Choreo is designed to express parallel execution 
 
 The basic syntax of a `parallel-by` block looks like this:
 
-```cpp
+```choreo
 parallel p by 6 {
   // SPMD code
 }
@@ -64,7 +64,7 @@ with index in [10, 10] {
 - **[10, 10]**: Defines the range of indices for the i-tuple, meaning the index will have 2 elements, both ranging from 0 to 9.
 
 You can also name the elements of the i-tuple for clarity:
-```cpp
+```choreo
 with {x, y} in [10, 10] {
   // x and y are now explicitly named elements of the i-tuple
 }
@@ -72,7 +72,7 @@ with {x, y} in [10, 10] {
 ```
 
 Alternatively, you can give the entire i-tuple a name and refer to its elements by name:
-```cpp
+```choreo
 with index = {x, y} in [10, 10] {
   // x and y can be used within the block
 }
@@ -81,7 +81,7 @@ with index = {x, y} in [10, 10] {
 #### `where` clause for loop constraints
 You can append a where clause to impose constraints between indices, which can be useful in cases where certain indices need to have specific relationships.
 
-```cpp
+```choreo
 with {m, n} in [M, N], {n_p, k} in [N_P, K] 
 where n_p <-> n {
   // matmul implements with m, n, K. n_p is no longer useful.
@@ -102,7 +102,7 @@ Once the i-tuple is defined in a with-in block, you can use the foreach block to
 In this case, the foreach block will iterate over each element of the index x in the range [0, 9] and execute the corresponding code for each value of x.
 
 Example:
-```cpp
+```choreo
 with x in [10] {
   foreach x {
     // do something with each x
