@@ -60,17 +60,17 @@ This command generates an _a.out_ executable file. The _-o <filename>_ option ca
 
 The _-t <platform>_ option allows you to specify the target platform for the compilation. Additionally, the _-es_ option generates target source code without performing the compilation. For instance:
 ```bash
-choreo -t cude your_program.co -es -o cuda_source.co
+choreo -t cuda your_program.co -es -o cuda_source.co
 ```
 This command produces CUDA C++ source code, which can be useful for specific development tasks.
 
 Notably, Choreo includes the _-E_ option to support Choreo-only preprocessing. The Choreo preprocessor handles simple macros and preprocessor directives such as #if, #ifdef, #ifndef, #else, and #endif, enabling Choreo functions to be integrated with other C++ code. The _-E_ option outputs the preprocessed code, for example, removing code within #if 0 and #endif directives inside Choreo functions.
 
-Furthermore, in development scenarios, Choreo can generate scripts (using the -gs option) to drive further low-level compilation and execution. This facilitates the development process, as many scripts are integrated for easy debugging.
+Furthermore, in development scenarios, Choreo can generate scripts (using the _-gs_ option) to drive further low-level compilation and execution. This facilitates the development process, as many scripts are integrated for easy debugging.
 
-Lastly, options _--help_ and _--help-hidden_ are avaiable for listing the full option set. Programmers and users can check the list to find their appropriate usage.
+Lastly, options _--help_ and _--help-hidden_ are available for listing the full option set. Programmers and users can check the list to find their appropriate usage.
 
-here is a example output of `--help`:
+Here is a example output of `--help`:
 
 ```bash
 // --help

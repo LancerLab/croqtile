@@ -18,7 +18,7 @@ Let’s explore both approaches in more detail.
 
 ## `parallel-by`: Physical Parallelism Abstraction
 
-The **`parallel-by`** block in Choreo is designed to express parallel execution in a manner that reflects physical parallelism on hardware. It uses the **Single Instruction, Multiple Data (SPMD)** model, which is common in high-performance computing scenarios like OpenMP, CUDA, or OpenCL. This model allows multiple threads to execute the same instruction on different pieces of data simultaneously.
+The **`parallel-by`** block in Choreo is designed to express parallel execution in a manner that reflects physical parallelism on hardware. It uses the **Single Program, Multiple Data (SPMD)** model, which is common in high-performance computing scenarios like OpenMP, CUDA, or OpenCL. This model allows multiple threads to execute the same instruction on different pieces of data simultaneously.
 
 ### Syntax of `parallel-by`
 
@@ -42,7 +42,7 @@ In this example:
 - **Bounded Integer**: The variable `p` in the example above is a bounded integer, meaning it has a defined range of values (from 0 to 5 in this case). This bounded nature is crucial because certain operations, such as `chunkat`, depend on knowing the range of values for proper computation.
 - **Asynchronous Execution**: While `parallel-by` allows for asynchronous execution of threads, the threads themselves are synchronized within the block, meaning that the code runs concurrently but may have dependencies that need to be managed through synchronization primitives or other mechanisms.
   
-In summary, `parallel-by` directly maps to physical parallelism, and the `p` variable functions as an index, similar to a thread index in CUDA or OpenMP. It provides a way to explicitly define parallel regions that correspond to the hardware’s physical execution threads.
+In summary, `parallel-by` directly maps to physical parallelism, and the `p` variable serves as an index, similar to a thread index in CUDA or OpenMP. It provides a way to explicitly define parallel regions that correspond to the hardware’s physical execution threads.
 
 ### `with-in` + `foreach`: Virtual Parallelism Abstraction
 

@@ -26,9 +26,6 @@ __co__ auto chunkat_tile_one(s32 [4, 8, 16] i) {
 // CHECK:    async_load_(l0, i, l0__buf__, {0, 0, 0});
 // CHECK:    wait_dma_(l0);
 // CHECK:    { // start of with-in: tests/codegen/factor/chunkat_tile_one1.co:7.1-10
-// CHECK:    var_ t0(IntType(32));
-// CHECK:    t0 = 0;
-// CHECK:    { // start of with-in: tests/codegen/factor/chunkat_tile_one1.co:7.1-20
 // CHECK:    auto l2__buf__ = alloc_(L1Type(IntType(32),{2, 8, 16}));
 // CHECK:    auto l2 = alloc_dma_(SDMAType());
 // CHECK:    auto l3__buf__ = alloc_(L1Type(IntType(32),{4, 4, 16}));
@@ -38,22 +35,19 @@ __co__ auto chunkat_tile_one(s32 [4, 8, 16] i) {
 // CHECK:    auto l5__buf__ = alloc_(L1Type(IntType(32),{4, 4, 16}));
 // CHECK:    auto l5 = alloc_dma_(SDMAType());
 // CHECK:    auto __choreo_anon_fut__0 = alloc_dma_(SDMAType());
-// CHECK:    var_ __choreo_tile_one__elem__0(IntType(32));
-// CHECK:    __choreo_tile_one__elem__0 = 0;
-// CHECK:    for_(__choreo_tile_one__elem__0, 1, 1, [&](auto iv___choreo_tile_one__elem__0) {
-// CHECK:      for_(t0, 2, 1, [&](auto iv_t0) {
-// CHECK:        async_load_(l2, i, l2__buf__, {Value(2)*iv_t0,Value(8)*iv___choreo_tile_one__elem__0,Value(16)*iv___choreo_tile_one__elem__0});
-// CHECK:        wait_dma_(l2);
-// CHECK:        async_load_(l3, i, l3__buf__, {Value(4)*iv___choreo_tile_one__elem__0,Value(4)*iv_t0,Value(16)*iv___choreo_tile_one__elem__0});
-// CHECK:        wait_dma_(l3);
-// CHECK:        async_load_(l4, i, l4__buf__, {Value(4)*iv___choreo_tile_one__elem__0,Value(4)*iv_t0,Value(8)*iv_t0});
-// CHECK:        wait_dma_(l4);
-// CHECK:        async_load_(l5, i, l5__buf__, {Value(4)*iv___choreo_tile_one__elem__0,Value(4)*iv_t0,Value(16)*iv___choreo_tile_one__elem__0});
-// CHECK:        wait_dma_(l5);
-// CHECK:        async_store_(__choreo_anon_fut__0, l5__buf__, o, {Value(4)*iv___choreo_tile_one__elem__0,Value(4)*iv_t0,Value(16)*iv___choreo_tile_one__elem__0});
-// CHECK:        wait_dma_(__choreo_anon_fut__0);
-// CHECK:      }); // end of choreo-foreach block on 't0'.
-// CHECK:    }); // end of choreo-foreach block on '__choreo_tile_one__elem__0'.
-// CHECK:    } // end of with-in: tests/codegen/factor/chunkat_tile_one1.co:7.1-20
+// CHECK:    var_ t0(IntType(32));
+// CHECK:    t0 = 0;
+// CHECK:    for_(t0, 2, 1, [&](auto iv_t0) {
+// CHECK:      async_load_(l2, i, l2__buf__, {Value(2)*iv_t0,0,0});
+// CHECK:      wait_dma_(l2);
+// CHECK:      async_load_(l3, i, l3__buf__, {0,Value(4)*iv_t0,0});
+// CHECK:      wait_dma_(l3);
+// CHECK:      async_load_(l4, i, l4__buf__, {0,Value(4)*iv_t0,Value(8)*iv_t0});
+// CHECK:      wait_dma_(l4);
+// CHECK:      async_load_(l5, i, l5__buf__, {0,Value(4)*iv_t0,0});
+// CHECK:      wait_dma_(l5);
+// CHECK:      async_store_(__choreo_anon_fut__0, l5__buf__, o, {0,Value(4)*iv_t0,0});
+// CHECK:      wait_dma_(__choreo_anon_fut__0);
+// CHECK:    }); // end of choreo-foreach block on 't0'.
 // CHECK:    } // end of with-in: tests/codegen/factor/chunkat_tile_one1.co:7.1-8
 // CHECK:  }); // end of choreo-factor device function

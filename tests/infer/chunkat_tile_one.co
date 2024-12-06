@@ -1,4 +1,3 @@
-// RUN: choreo -dv=norm -sa=norm %s | FileCheck --match-full-lines %s
 // RUN: choreo -i %s | FileCheck --check-prefix=INFER --match-full-lines %s
 
 __co__ auto chunkat_dontcare(s32 [4, 8, 16] i) {
@@ -18,19 +17,14 @@ __co__ auto chunkat_dontcare(s32 [4, 8, 16] i) {
   }
 }
 
-// CHECK: Wrap the `with in` at tests/infer/chunkat_tile_one.co:9.1-8.
-// CHECK: Generate with-matchers for '__choreo_tile_one': __choreo_tile_one__elem__0
-
 // INFER: Parameter: ::chunkat_dontcare::i, Type: s32 mdspan<3> [4, 8, 16]
 // INFER: Symbol:    ::chunkat_dontcare::o, Type: global s32 mdspan<3> [4, 8, 16]
 // INFER: Bounded:   ::chunkat_dontcare::paraby_0::p, Type: {int}->[4]
 // INFER: Future:    ::chunkat_dontcare::paraby_0::l0, Type: sync=>local s32 mdspan<3> [4, 8, 16]
 // INFER: Bounded:   ::chunkat_dontcare::paraby_0::within_0::t0, Type: {int}->[2]
-// INFER: Bounded:   ::chunkat_dontcare::paraby_0::within_0::within_1::__choreo_tile_one, Type: {int}->[1]
-// INFER: Bounded:   ::chunkat_dontcare::paraby_0::within_0::within_1::__choreo_tile_one__elem__0, Type: {int}->[1]
-// INFER: Future:    ::chunkat_dontcare::paraby_0::within_0::within_1::foreach_0::foreach_1::l2, Type: sync=>local s32 mdspan<3> [2, 8, 16]
-// INFER: Future:    ::chunkat_dontcare::paraby_0::within_0::within_1::foreach_0::foreach_1::l3, Type: sync=>local s32 mdspan<3> [4, 4, 16]
-// INFER: Future:    ::chunkat_dontcare::paraby_0::within_0::within_1::foreach_0::foreach_1::l4, Type: sync=>local s32 mdspan<3> [4, 4, 8]
-// INFER: Future:    ::chunkat_dontcare::paraby_0::within_0::within_1::foreach_0::foreach_1::l5, Type: sync=>local s32 mdspan<3> [4, 4, 16]
-// INFER: Future:    ::chunkat_dontcare::paraby_0::within_0::within_1::foreach_0::foreach_1::(anon), Type: sync=>global s32 mdspan<3> [4, 4, 16]
+// INFER: Future:    ::chunkat_dontcare::paraby_0::within_0::foreach_0::l2, Type: sync=>local s32 mdspan<3> [2, 8, 16]
+// INFER: Future:    ::chunkat_dontcare::paraby_0::within_0::foreach_0::l3, Type: sync=>local s32 mdspan<3> [4, 4, 16]
+// INFER: Future:    ::chunkat_dontcare::paraby_0::within_0::foreach_0::l4, Type: sync=>local s32 mdspan<3> [4, 4, 8]
+// INFER: Future:    ::chunkat_dontcare::paraby_0::within_0::foreach_0::l5, Type: sync=>local s32 mdspan<3> [4, 4, 16]
+// INFER: Future:    ::chunkat_dontcare::paraby_0::within_0::foreach_0::(anon), Type: sync=>global s32 mdspan<3> [4, 4, 16]
 // INFER: Function:  ::chunkat_dontcare, Type: void (*)(s32 mdspan<3> [4, 8, 16])

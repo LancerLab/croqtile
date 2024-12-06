@@ -663,19 +663,23 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
       // It could either be identifier or a 'getith' expr
       if (auto id = dyn_cast<AST::Identifier>(bv)) {
         auto bvn = id->name;
-        auto ty = cast<BoundedType>(NodeType(*id));
-        // iterate over single bounded variables
-        for (size_t it_idx = 0; it_idx < ty->Dims(); ++it_idx) {
-          std::string name;
-          if (within_map.count(bvn)) // with-matcher existed
-            name = within_map[bvn][it_idx];
-          else
-            name = bvn;
-          auto iv_str = ExprSTR(AST::Make<AST::Identifier>(id->LOC(), name));
-          offss << "Value(" << RSTR(shape.ValueAt(dim_cursor)) << ")*"
-                << iv_str;
-          if (++dim_cursor < rank) offss << ",";
+        if (bvn == "__choreo_tile_one") {
+          offss << "0";
+        } else {
+          auto ty = cast<BoundedType>(NodeType(*id));
+          // iterate over single bounded variables
+          for (size_t it_idx = 0; it_idx < ty->Dims(); ++it_idx) {
+            std::string name;
+            if (within_map.count(bvn)) // with-matcher existed
+              name = within_map[bvn][it_idx];
+            else
+              name = bvn;
+            auto iv_str = ExprSTR(AST::Make<AST::Identifier>(id->LOC(), name));
+            offss << "Value(" << RSTR(shape.ValueAt(dim_cursor)) << ")*"
+                  << iv_str;
+          }
         }
+        if (++dim_cursor < rank) offss << ",";
       } else if (auto gi_exp = dyn_cast<AST::Expr>(bv)) {
         auto id = cast<AST::Expr>(gi_exp->GetL())->GetSymbol();
         auto ty = cast<BoundedType>(NodeType(*id));

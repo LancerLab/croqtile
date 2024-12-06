@@ -1,6 +1,6 @@
 # DMA in Choreo
 
-In Choreo, Direct Memory Access (DMA) operations are designed to manage data transfers between various memory regions, such as from host memory to device memory or between different memory hierarchies. DMA operations in Choreo are triggered using the dma keyword, followed by the specific operation type (e.g., dma.copy, dma.fill, dma.move). These operations play a key role in optimizing memory access and are essential for achieving high performance in parallel computing environments.
+In Choreo, Direct Memory Access (DMA) operations are designed to manage data transfers between various memory regions, such as from host memory to device memory or between different memory hierarchies. DMA operations in Choreo are triggered using the dma keyword, followed by the specific operation type (e.g., dma.copy, dma.pad, dma.transp). These operations play a key role in optimizing memory access and are essential for achieving high performance in parallel computing environments.
 
 ## DMA Operations in Choreo
 A typical DMA operation in Choreo follows this structure:
@@ -10,7 +10,7 @@ future = dma-op src-operand => dst-operand;
 ```
 Where:
 
-- `dma-op`: The DMA operation type, such as dma.copy, dma.fill, or dma.move, specifies the type of data transfer operation (e.g., copying data, filling memory, or moving data).
+- `dma-op`: The DMA operation type, such as dma.copy, dma.pad, or dma.transp, specifies the type of data transfer operation (e.g., copying data, padding data, or transposing data).
 
 - `src-operand`: The source operand can be an identifier (a variable or array) or a chunkat (a slice or chunk of a memory block). It refers to the memory from which data will be transferred.
 
@@ -27,7 +27,7 @@ In a synchronous DMA operation, the program execution will block until the DMA o
 ```choreo
 load = dma.copy rhs.chunkat(k_tile, q) => shared;
 ```
-Here, the program will pause until the data is fully transferred from rhs.chunkat(k_tile, q) to shared memory. The program cannot proceed until the copy operation completes. This type of DMA operation is simple and predictable but may lead to performance bottlenecks in applications that require overlapping computation with data transfers.
+Here, the program will pause until the data is fully transferred from `rhs.chunkat(k_tile, q)` to shared memory. The program cannot proceed until the copy operation completes. This type of DMA operation is simple and predictable but may lead to performance bottlenecks in applications that require overlapping computation with data transfers.
 
 ### Asynchronous DMA Operations
 An asynchronous DMA operation, on the other hand, does not block the program. The program continues executing while the data transfer happens in the background. When the transfer is finished, a future object is returned to track the operation's completion. For example:

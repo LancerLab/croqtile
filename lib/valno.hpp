@@ -1157,6 +1157,18 @@ public:
           biv = cast<AST::Expr>(expr->GetL())->GetSymbol();
         }
         assert(biv && "failed to obtain the identifier.");
+        if (biv->name == "__choreo_tile_one")
+          if (!SSTab().DeclaredInScope("__choreo_tile_one")) {
+            std::string one = "const_1";
+            int valno = vn.GetOrInsertValueNumberFromSignature(one);
+            std::string iv_name = SSTab().ScopedName("@" + biv->name);
+            vn.AssociateSignatureWithValueNumber(iv_name, valno);
+            Shape s =
+                GenShapeFromSignature(vn.GetSignatureFromValueNumber(valno));
+            pos->SetType(MakeBoundedITupleType(s));
+            SSTab().DefineSymbol("@" + biv->name, MakeMDSpanType(s));
+            SSTab().DefineSymbol(biv->name, n.GetType());
+          }
         auto bound_name = SSTab().InScopeName("@" + biv->name);
         int bound_vn = vn.GetValueNumberOfSignature(bound_name);
         std::string bound_sn = vn.GetSignatureFromValueNumber(bound_vn);
