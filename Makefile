@@ -120,7 +120,7 @@ lines:
 	echo "test files"; wc -l $$(find tests/ -type f |grep -v "\.test")
 
 format:
-	$(CLANG_FORMAT) -i -Werror *.cpp *.hpp utils/*.h tests/standalone/*.cu tests/standalone/*.cpp
+	$(CLANG_FORMAT) -i -Werror lib/*.cpp lib/*.hpp utils/*.h tests/standalone/*.cu tests/standalone/*.cpp
 
 standalone_test: $(TARGET)
 	cd tests/standalone/ && $(MAKE) test
