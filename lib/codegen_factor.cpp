@@ -1503,6 +1503,10 @@ void FactorCodeGen::EmitHostRuntimeMemUsageCheck(std::ostream& os) {
   // check if the input shape is as declared in choreo
   if (cgi->ParameterCount(fname) == 0) return;
 
+  if (!rt_mem_usage_check_lists.count(fname)) return;
+
+  auto rt_mem_usage_check_list = rt_mem_usage_check_lists.at(fname);
+
   // there should be runtime memory usage check
   if (!rt_mem_usage_check_list.empty())
     os << "\n  // Check if the runtime memory usage exceeds the defined "

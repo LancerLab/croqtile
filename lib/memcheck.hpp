@@ -36,15 +36,16 @@ private:
   // only runtime usages are recorded
   std::map<Storage, std::vector<std::string>> rt_tot_mem_usage;
   std::vector<RtMemUsageCheckInfo> rt_mem_usage_check_list;
+  std::map<std::string, std::vector<RtMemUsageCheckInfo>>
+      rt_mem_usage_check_lists;
 
   MemUsageMap mem_usage_limit;
   std::unordered_set<Storage> valid_storage_type;
 
 private:
   bool BeforeVisitImpl(AST::Node& n) {
-    if (isa<AST::Program>(&n) || isa<AST::ChoreoFunction>(&n) ||
-        isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n) ||
-        isa<AST::ForeachBlock>(&n)) {
+    if (isa<AST::ChoreoFunction>(&n) || isa<AST::ParallelBy>(&n) ||
+        isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n)) {
       // generate the map of current ast node that corresponding to the scope
       ct_mem_usage_list.push(std::map<Storage, size_t>{});
       rt_mem_usage_list.push(std::map<Storage, std::vector<std::string>>{});
@@ -53,9 +54,8 @@ private:
   }
 
   bool AfterVisitImpl(AST::Node& n) {
-    if (isa<AST::Program>(&n) || isa<AST::ChoreoFunction>(&n) ||
-        isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n) ||
-        isa<AST::ForeachBlock>(&n)) {
+    if (isa<AST::ChoreoFunction>(&n) || isa<AST::ParallelBy>(&n) ||
+        isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n)) {
       UpdateCtMaxMemUsage();
       CheckCtMemUsage(n);
       VST_DEBUG(dbgs() << "[MemUsage] "
@@ -65,17 +65,17 @@ private:
       RestoreMemUsage();
     }
 
-    // special handling for AS::FunctionDecl
-    if (isa<AST::ChoreoFunction>(&n)) RestoreMemUsage();
-
     // the program is exiting, show the maximum ct mem usage
-    if (isa<AST::Program>(&n)) {
+    if (auto cf = dyn_cast<AST::ChoreoFunction>(&n)) {
+      RestoreMemUsage();
       VST_DEBUG(
           dbgs() << "[MemUsage] "
                  << "The maximum memory usages at compile time for each level"
                     "(Not at the same time):\n"
                  << GetMemUsageMapDetail(ct_max_mem_usage));
       assert(ct_mem_usage_list.empty() && rt_mem_usage_list.empty());
+      rt_mem_usage_check_lists[cf->name] = rt_mem_usage_check_list;
+      rt_mem_usage_check_list.clear();
     }
     return true;
   }
@@ -223,9 +223,9 @@ public:
   }
   ~MemUsageCheck() {}
 
-  // return rt_mem_usage_check_list to
-  // do codegen for rt memory usage checking
-  auto GetRtMemUsageInfo() { return rt_mem_usage_check_list; }
+  // return rt_mem_usage_check_lists to
+  // do codegen for rt memory usage checking of each co func
+  auto GetRtMemUsageInfo() { return rt_mem_usage_check_lists; }
 
   bool Visit(AST::MultiNodes& n) {
     TraceEachVisit(n);

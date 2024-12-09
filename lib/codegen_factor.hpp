@@ -82,7 +82,8 @@ private:
   ValBind::BindInfo<std::string> bind_info;
   std::map<std::string, std::stack<std::vector<std::string>>> cur_bounded_vars;
   std::vector<std::unordered_set<std::string>> loop_vars; // the loop variables
-  std::vector<RtMemUsageCheckInfo> rt_mem_usage_check_list;
+  std::map<std::string, std::vector<RtMemUsageCheckInfo>>
+      rt_mem_usage_check_lists;
 
   // map from a symbolic shape dimension to the associated runtime name
   std::map<std::string, DimensionDetail> dims_info;
@@ -103,13 +104,13 @@ private:
   size_t factor_device_arity = 0;
 
 public:
-  FactorCodeGen(const ptr<SymbolTable>& symtab,
-                const std::vector<RtMemUsageCheckInfo>& list,
-                const ptr<CodeGenInfo>& ci, bool cross_compile,
-                bool use_kernel_template)
+  FactorCodeGen(
+      const ptr<SymbolTable>& symtab,
+      const std::map<std::string, std::vector<RtMemUsageCheckInfo>>& lists,
+      const ptr<CodeGenInfo>& ci, bool cross_compile, bool use_kernel_template)
       : CodeGenerator("codegen", symtab), cross_compile(cross_compile),
-        use_kernel_template(use_kernel_template), rt_mem_usage_check_list(list),
-        cgi(ci) {
+        use_kernel_template(use_kernel_template),
+        rt_mem_usage_check_lists(lists), cgi(ci) {
     factor_pname =
         "__choreo_" +
         RemoveDirectoryPrefix(RemoveSuffix(
@@ -170,6 +171,7 @@ private:
     dims_info.clear();
     idnm_rts.clear();
     indent.clear();
+    within_mdspan.clear();
 
     // Reset buffers;
     fs.str("");
