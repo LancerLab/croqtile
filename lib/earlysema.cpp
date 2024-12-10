@@ -431,6 +431,16 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
     }
   }
 
+  // check if the int literals are valid
+  if (auto mvals = dyn_cast<AST::MultiValues>(n.list))
+    for (auto& v : mvals->AllValues())
+      if (auto il = dyn_cast<AST::IntLiteral>(v))
+        if (il->value <= 0 && il->value != GetUnKnownInteger()) {
+          Error(v->LOC(), "The mdspan size \"" + std::to_string(il->value) +
+                              "\" is invalid!");
+          error_count++;
+        }
+
   SetNodeType(n, MakeRankedMDSpanType(rank));
   return true;
 }

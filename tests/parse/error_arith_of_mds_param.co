@@ -1,0 +1,15 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ void foo (f32[5-10, 5-5, 3/4, 10/5-3, 10%2] a) {}
+
+__co__ void bar (f32[5+(3-10), 3/(3-4), (3-6)*(4-8)] b) {}
+
+
+// CHECK: error: The mdspan size "-5" is invalid!
+// CHECK: error: The mdspan size "0" is invalid!
+// CHECK: error: The mdspan size "0" is invalid!
+// CHECK: error: The mdspan size "-1" is invalid!
+// CHECK: error: The mdspan size "0" is invalid!
+// CHECK: error: The mdspan size "-2" is invalid!
+// CHECK: error: The mdspan size "-3" is invalid!
+// CHECK: Totally 7 errors have been detected.
