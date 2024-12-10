@@ -184,16 +184,16 @@ int main() {
 // CHECK:     auto & output = results[0];
 
 // CHECK:   void *in_mem0 = nullptr;
-// CHECK:   CHECK(topsMalloc(&in_mem0, 524288));
-// CHECK:   CHECK(topsMemcpy(in_mem0, reinterpret_cast<void *>(hp0.data()), 524288, topsMemcpyHostToDevice));
+// CHECK:   CHECK(topsMalloc(&in_mem0, 524288ULL));
+// CHECK:   CHECK(topsMemcpy(in_mem0, reinterpret_cast<void *>(hp0.data()), 524288ULL, topsMemcpyHostToDevice));
 // CHECK:   void *in_mem1 = nullptr;
-// CHECK:   CHECK(topsMalloc(&in_mem1, 524288));
-// CHECK:   CHECK(topsMemcpy(in_mem1, reinterpret_cast<void *>(hp1.data()), 524288, topsMemcpyHostToDevice));
+// CHECK:   CHECK(topsMalloc(&in_mem1, 524288ULL));
+// CHECK:   CHECK(topsMemcpy(in_mem1, reinterpret_cast<void *>(hp1.data()), 524288ULL, topsMemcpyHostToDevice));
 // CHECK:   void *in_mem2 = nullptr;
-// CHECK:   CHECK(topsMalloc(&in_mem2, 524288));
-// CHECK:   CHECK(topsMemcpy(in_mem2, reinterpret_cast<void *>(hp2.data()), 524288, topsMemcpyHostToDevice));
+// CHECK:   CHECK(topsMalloc(&in_mem2, 524288ULL));
+// CHECK:   CHECK(topsMemcpy(in_mem2, reinterpret_cast<void *>(hp2.data()), 524288ULL, topsMemcpyHostToDevice));
 // CHECK:   void *in_mem3 = nullptr;
-// CHECK:   CHECK(topsMalloc(&in_mem3, 262144));
+// CHECK:   CHECK(topsMalloc(&in_mem3, 262144ULL));
 // CHECK-NOT:   topsMemcpy(in_mem3
 
 // CHECK:   void * out_mem = nullptr;

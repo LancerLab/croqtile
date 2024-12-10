@@ -942,16 +942,11 @@ bool EarlySemantics::Visit(AST::DMA& n) {
 bool EarlySemantics::Visit(AST::ChunkAt& n) {
   TraceEachVisit(n);
 
-  if (n.positions) {
-    for (auto& v : n.positions->AllValues()) {
-      if (auto expr = cast<AST::Expr>(v); expr->IsReference()) {
-        if (auto id = dyn_cast<AST::Identifier>(expr->GetReference());
-            id->name == "_") {
-          id->name = "__choreo_tile_one";
-        }
-      }
-    }
-  }
+  if (n.positions)
+    for (auto& v : n.positions->AllValues())
+      if (auto expr = cast<AST::Expr>(v); expr->IsReference())
+        if (auto id = dyn_cast<AST::Identifier>(expr->GetReference()))
+          if (id->name == "_") id->name = "__choreo_tile_one";
 
   n.data->accept(*this);
   auto nty = NodeType(*n.data);

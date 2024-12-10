@@ -124,8 +124,10 @@ struct ValueItemHasher {
   }
 };
 
-inline std::string ValueItemAsString(const ValueItem& vi) {
-  if (auto pint = dyn_cast<int>(&vi)) return std::to_string(*pint);
+inline std::string ValueItemAsString(const ValueItem& vi,
+                                     bool ULL_suffix = false) {
+  if (auto pint = dyn_cast<int>(&vi))
+    return std::to_string(*pint) + (ULL_suffix ? "ULL" : "");
   return *cast<ValueExpr>(&vi);
 }
 

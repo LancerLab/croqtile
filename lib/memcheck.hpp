@@ -12,7 +12,7 @@ namespace Choreo {
 // tuple<runtime memory usages, code location, corresponding storage limit>
 // to insert runtime memory usage check in codegen
 using RtMemUsageCheckInfo =
-    std::tuple<std::vector<std::string>, location, size_t>;
+    std::tuple<std::vector<std::string>, location, size_t, Storage>;
 
 // checking compile-time and runtime memory usage
 struct MemUsageCheck : public VisitorWithSymTab {
@@ -266,13 +266,14 @@ public:
            "Only support Storage types in `valid_storage_type`!");
     if (sty->RuntimeShaped()) {
       // runtime usage
+      std::string byte_size = sty->ByteSizeExpression(true);
       VST_DEBUG(dbgs() << "[MemUsage] " << __internal__::GetStringFrom(sto)
                        << " `" << SSTab().ScopedName(n.name_str) << "` need : "
-                       << sty->ByteSizeExpression() << " bytes.\n");
-      rt_mem_usage_list.top()[sto].push_back(sty->ByteSizeExpression());
-      rt_tot_mem_usage[sto].push_back(sty->ByteSizeExpression());
-      rt_mem_usage_check_list.push_back(
-          std::make_tuple(SumUpCtRtUsage(sto), n.LOC(), mem_usage_limit[sto]));
+                       << sty->ByteSizeExpression(false) << " bytes.\n");
+      rt_mem_usage_list.top()[sto].push_back(byte_size);
+      rt_tot_mem_usage[sto].push_back(byte_size);
+      rt_mem_usage_check_list.push_back(std::make_tuple(
+          SumUpCtRtUsage(sto), n.LOC(), mem_usage_limit[sto], sto));
     } else {
       // compile time usage
       auto size = sty->ByteSize();
@@ -347,14 +348,16 @@ public:
              "Only support Storage types in `valid_storage_type`!");
       auto sty = dyn_cast<FutureType>(d.GetType())->GetSpannedType().get();
       if (sty->RuntimeShaped()) {
+        std::string byte_size = sty->ByteSizeExpression(true);
         VST_DEBUG(dbgs() << "[MemUsage] "
                          << __internal__::GetStringFrom(dst_sto) << " `"
                          << SSTab().ScopedName(d.future) << "` need : "
-                         << sty->ByteSizeExpression() << " bytes.\n");
-        rt_mem_usage_list.top()[dst_sto].push_back(sty->ByteSizeExpression());
-        rt_tot_mem_usage[dst_sto].push_back(sty->ByteSizeExpression());
-        rt_mem_usage_check_list.push_back(std::make_tuple(
-            SumUpCtRtUsage(dst_sto), d.LOC(), mem_usage_limit[dst_sto]));
+                         << sty->ByteSizeExpression(false) << " bytes.\n");
+        rt_mem_usage_list.top()[dst_sto].push_back(byte_size);
+        rt_tot_mem_usage[dst_sto].push_back(byte_size);
+        rt_mem_usage_check_list.push_back(
+            std::make_tuple(SumUpCtRtUsage(dst_sto), d.LOC(),
+                            mem_usage_limit[dst_sto], dst_sto));
       } else {
         auto dst_size = sty->ByteSize();
         assert(valid_storage_type.count(dst_sto) &&
@@ -417,16 +420,16 @@ public:
         name +=
             (p->HasSymbol() ? p->sym->name : ("#" + std::to_string(param_idx)));
         if (sty->RuntimeShaped()) {
-          rt_mem_usage_list.top()[func_param_sto].push_back(
-              sty->ByteSizeExpression());
-          rt_tot_mem_usage[func_param_sto].push_back(sty->ByteSizeExpression());
+          std::string byte_size = sty->ByteSizeExpression(true);
+          rt_mem_usage_list.top()[func_param_sto].push_back(byte_size);
+          rt_tot_mem_usage[func_param_sto].push_back(byte_size);
           rt_mem_usage_check_list.push_back(
               std::make_tuple(SumUpCtRtUsage(func_param_sto), p->LOC(),
-                              mem_usage_limit[func_param_sto]));
+                              mem_usage_limit[func_param_sto], func_param_sto));
           VST_DEBUG(dbgs() << "[MemUsage] "
                            << "Function parameter `" << name << "`("
                            << __internal__::GetStringFrom(func_param_sto)
-                           << ") need " << sty->ByteSizeExpression()
+                           << ") need " << sty->ByteSizeExpression(false)
                            << " bytes.\n");
         } else {
           ct_mem_usage_list.top()[func_param_sto] += sty->ByteSize();
