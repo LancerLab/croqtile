@@ -431,6 +431,16 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
     }
   }
 
+  // check if the int literals are valid
+  if (auto mvals = dyn_cast<AST::MultiValues>(n.list))
+    for (auto& v : mvals->AllValues())
+      if (auto il = dyn_cast<AST::IntLiteral>(v))
+        if (il->value <= 0 && il->value != GetUnKnownInteger()) {
+          Error(v->LOC(), "The mdspan size \"" + std::to_string(il->value) +
+                              "\" is invalid!");
+          error_count++;
+        }
+
   SetNodeType(n, MakeRankedMDSpanType(rank));
   return true;
 }
@@ -932,16 +942,11 @@ bool EarlySemantics::Visit(AST::DMA& n) {
 bool EarlySemantics::Visit(AST::ChunkAt& n) {
   TraceEachVisit(n);
 
-  if (n.positions) {
-    for (auto& v : n.positions->AllValues()) {
-      if (auto expr = cast<AST::Expr>(v); expr->IsReference()) {
-        if (auto id = dyn_cast<AST::Identifier>(expr->GetReference());
-            id->name == "_") {
-          id->name = "__choreo_tile_one";
-        }
-      }
-    }
-  }
+  if (n.positions)
+    for (auto& v : n.positions->AllValues())
+      if (auto expr = cast<AST::Expr>(v); expr->IsReference())
+        if (auto id = dyn_cast<AST::Identifier>(expr->GetReference()))
+          if (id->name == "_") id->name = "__choreo_tile_one";
 
   n.data->accept(*this);
   auto nty = NodeType(*n.data);

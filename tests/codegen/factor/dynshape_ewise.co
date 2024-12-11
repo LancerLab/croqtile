@@ -57,14 +57,14 @@ __co__ auto ele_add(s32 [6, ?, 128] lhs, s32 [6, ?, 128] rhs) {
 // CHECK:  choreo::runtime_check(hp0.shape()[2] == 128, "shape inconsistent on the 1st parameter (dim: 2).");
 // CHECK:  choreo::runtime_check(hp1.shape()[0] == 6, "shape inconsistent on the 2nd parameter (dim: 0).");
 // CHECK:  choreo::runtime_check(hp1.shape()[2] == 128, "shape inconsistent on the 2nd parameter (dim: 2).");
-// CHECK:  CHECK(topsMalloc(&in_mem0, 6 * hp0.shape()[1] * 128 * 4));
-// CHECK:  CHECK(topsMemcpy(in_mem0, reinterpret_cast<void *>(hp0.data()), 6 * hp0.shape()[1] * 128 * 4, topsMemcpyHostToDevice));
-// CHECK:  CHECK(topsMalloc(&in_mem1, 6 * hp1.shape()[1] * 128 * 4));
-// CHECK:  CHECK(topsMemcpy(in_mem1, reinterpret_cast<void *>(hp1.data()), 6 * hp1.shape()[1] * 128 * 4, topsMemcpyHostToDevice));
-// CHECK:  CHECK(topsMalloc(&out_mem, 6 * hp0.shape()[1] * 128 * 4));
+// CHECK:  CHECK(topsMalloc(&in_mem0, ((6ULL) * (hp0.shape()[1]) * (128ULL)) * 4));
+// CHECK:  CHECK(topsMemcpy(in_mem0, reinterpret_cast<void *>(hp0.data()), ((6ULL) * (hp0.shape()[1]) * (128ULL)) * 4, topsMemcpyHostToDevice));
+// CHECK:  CHECK(topsMalloc(&in_mem1, ((6ULL) * (hp1.shape()[1]) * (128ULL)) * 4));
+// CHECK:  CHECK(topsMemcpy(in_mem1, reinterpret_cast<void *>(hp1.data()), ((6ULL) * (hp1.shape()[1]) * (128ULL)) * 4, topsMemcpyHostToDevice));
+// CHECK:  CHECK(topsMalloc(&out_mem, ((6) * (hp0.shape()[1]) * (128)) * 4));
 // CHECK:  auto res = choreo::make_spandata<s32, 3>({6, hp0.shape()[1], 128});
 // CHECK:  CHECK(topsMemcpy(reinterpret_cast<void *>(res.data()), out_mem,
-// CHECK:                  6 * hp0.shape()[1] * 128 * 4, topsMemcpyDeviceToHost));
+// CHECK:                  ((6) * (hp0.shape()[1]) * (128)) * 4, topsMemcpyDeviceToHost));
 
 // __co__ auto ele_add2(s32 [6, ?, 128] lhs, s32 [6, ?, 128] rhs) {
 //   s32[lhs.span] output;

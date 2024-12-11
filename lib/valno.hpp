@@ -475,6 +475,9 @@ public:
 
     if (AST::typeof<MDSpanType>(&n)) {
       cur_mdspan_vn = cur_vn;
+      cast<MDSpanType>(n.GetType())
+          ->SetShape(GenShapeFromSignature(
+              vn.GetSignatureFromValueNumber(cur_mdspan_vn)));
       //      InvalidateVN(cur_vn);
     } else if (n.op == "#") {
       if (IsActualBoundedIntegerType(n.GetL()->GetType()) &&

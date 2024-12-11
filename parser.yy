@@ -166,6 +166,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::CppSourceCode>> pass_by host_code
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::SpanAs>> span_as
+%nterm <AST::ptr<AST::IntLiteral>> num_expr
 %nterm <AST::ptr<AST::Node>> foreach_block general_val template_val general_index span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt swap_stmt expr_or_qes range_expr if_else_block optional_scalar_init param_mdspan_val chunkat_or_storage_or_select
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause else_block multi_decls named_spanned_decl
 %nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers passables future_data_list template_params
@@ -272,14 +273,23 @@ param_mdspan_list
     ;
 
 param_mdspan_val
-    : NUM   { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
-    | QES   { $$ = AST::Make<AST::IntLiteral>(@1); }
+    : QES   { $$ = AST::Make<AST::IntLiteral>(@1); }
+    | num_expr { $$ = $1; }
     | IDENTIFIER {
         $$ = AST::Make<AST::Identifier>(@1, $1);
         if (!symtab.Exists($1)) // allows same dim name
           symtab.AddSymbol($1, MakeIntegerType());
       }
     ;
+
+num_expr
+    : NUM   { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
+    | num_expr PLUS num_expr { $$ = AST::Make<AST::IntLiteral>(@1, $1->value + $3->value); }
+    | num_expr MINUS num_expr { $$ = AST::Make<AST::IntLiteral>(@1, $1->value - $3->value); }
+    | num_expr STAR num_expr { $$ = AST::Make<AST::IntLiteral>(@1, $1->value * $3->value); }
+    | num_expr SLASH num_expr { $$ = AST::Make<AST::IntLiteral>(@1, $1->value / $3->value); }
+    | num_expr PECET num_expr { $$ = AST::Make<AST::IntLiteral>(@1, $1->value % $3->value); }
+    | LPAREN num_expr RPAREN { $$ = AST::Make<AST::IntLiteral>(@1, $2->value);}
 
 void_type
     : VOID  { $$ = AST::Make<AST::DataType>(@1, $1); }

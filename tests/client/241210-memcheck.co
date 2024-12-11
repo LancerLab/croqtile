@@ -1,0 +1,71 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -gs -t factor %s -o %s.result && bash %s.result --execute 2>&1 | FileCheck %s
+#include "choreo.h"
+
+__cok__ { /// kernel program
+extern "C" void kernel(int * a, int * b, int * c, int n) {
+  for (int i = 0; i < n; ++i)
+    c[i] = a[i] + b[i];
+}
+} /// end of kernel decl
+
+__co__ s32 [6, 17, 128] ele_add(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs, s32 [100000, 100000, K] temp) { /// device program
+  s32[lhs.span] output; // use same shape as lhs
+
+  parallel p by 6 {  // p is sip_index
+    with index = {x, y} in [17, 4] {  // decl your tiled spans
+      foreach x { // alternative: foreach index, index.x, index.y
+        foreach y { 
+          lhs_load = dma.copy.async lhs.chunkat(p, x, y) => local; // tiling_factor: {6, 17, 4}, new_size {lhs(0)/6, lhs(1)/17, lhs(2)/4}
+          rhs_load = dma.copy.async rhs.chunkat(p, x, y) => local; // no explicit decl the target buffer, but can refer by <FutureType>.data
+          wait lhs_load, rhs_load;
+
+          local s32[lhs_load.span] l1_out; // alternative: s32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
+          
+          call kernel(lhs_load.data, rhs_load.data, l1_out, |lhs_load.span|); // |span| calculate the total size of span.
+
+          out_store = dma.copy.async l1_out => output.chunkat(p, x, y); // can use defined vars
+          wait out_store;
+        }
+      }
+    }
+  } // can use python styling
+  return output;
+}
+
+#define N 100000
+#define M 100000
+#define K 1
+
+choreo::s32 gg[N][M][K];
+
+int main() { /// host program
+  choreo::s32 a[6][17][128] = {0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge
+  choreo::s32 b[6][17][128] = {0};
+  std::fill_n(&a[0][0][0], sizeof(a) / sizeof(a[0][0][0]), 1);
+  std::fill_n(&b[0][0][0], sizeof(b) / sizeof(b[0][0][0]), 2);
+
+  auto res
+    = ele_add(choreo::make_spanview<3, choreo::s32>((int*)a, {6, 17, 128}),
+              choreo::make_spanview<3, choreo::s32>((int*)b, {6, 17, 128}),
+              choreo::make_spanview<3, choreo::s32>((int*)gg, {N, M, K}));
+  std::cout << res.shape()[0] << std::endl;
+  std::cout << res.shape()[1] << std::endl;
+  std::cout << res.shape()[2] << std::endl;
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k) {
+        std::cout << "i: " << i << ", j: " << j << ", k: " << k << "\n";
+        std::cout << "a: " << a[i][j][k] << ", b: " << b[i][j][k] << ", res: " << res[i][j][k] << "\n";
+        if (a[i][j][k] + b[i][j][k] != res[i][j][k]) {
+          assert(a[i][j][k] + b[i][j][k] == res[i][j][k]);
+        }
+      }
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+
+// CHECK: choreo runtime check failed: total memory usage at global level (compile time and runtime) should not exceed 4294967296 bytes, happends at

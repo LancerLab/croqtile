@@ -12,7 +12,7 @@ namespace Choreo {
 // tuple<runtime memory usages, code location, corresponding storage limit>
 // to insert runtime memory usage check in codegen
 using RtMemUsageCheckInfo =
-    std::tuple<std::vector<std::string>, location, size_t>;
+    std::tuple<std::vector<std::string>, location, size_t, Storage>;
 
 // checking compile-time and runtime memory usage
 struct MemUsageCheck : public VisitorWithSymTab {
@@ -36,15 +36,16 @@ private:
   // only runtime usages are recorded
   std::map<Storage, std::vector<std::string>> rt_tot_mem_usage;
   std::vector<RtMemUsageCheckInfo> rt_mem_usage_check_list;
+  std::map<std::string, std::vector<RtMemUsageCheckInfo>>
+      rt_mem_usage_check_lists;
 
   MemUsageMap mem_usage_limit;
   std::unordered_set<Storage> valid_storage_type;
 
 private:
   bool BeforeVisitImpl(AST::Node& n) {
-    if (isa<AST::Program>(&n) || isa<AST::ChoreoFunction>(&n) ||
-        isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n) ||
-        isa<AST::ForeachBlock>(&n)) {
+    if (isa<AST::ChoreoFunction>(&n) || isa<AST::ParallelBy>(&n) ||
+        isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n)) {
       // generate the map of current ast node that corresponding to the scope
       ct_mem_usage_list.push(std::map<Storage, size_t>{});
       rt_mem_usage_list.push(std::map<Storage, std::vector<std::string>>{});
@@ -53,9 +54,8 @@ private:
   }
 
   bool AfterVisitImpl(AST::Node& n) {
-    if (isa<AST::Program>(&n) || isa<AST::ChoreoFunction>(&n) ||
-        isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n) ||
-        isa<AST::ForeachBlock>(&n)) {
+    if (isa<AST::ChoreoFunction>(&n) || isa<AST::ParallelBy>(&n) ||
+        isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n)) {
       UpdateCtMaxMemUsage();
       CheckCtMemUsage(n);
       VST_DEBUG(dbgs() << "[MemUsage] "
@@ -65,17 +65,17 @@ private:
       RestoreMemUsage();
     }
 
-    // special handling for AS::FunctionDecl
-    if (isa<AST::ChoreoFunction>(&n)) RestoreMemUsage();
-
     // the program is exiting, show the maximum ct mem usage
-    if (isa<AST::Program>(&n)) {
+    if (auto cf = dyn_cast<AST::ChoreoFunction>(&n)) {
+      RestoreMemUsage();
       VST_DEBUG(
           dbgs() << "[MemUsage] "
                  << "The maximum memory usages at compile time for each level"
                     "(Not at the same time):\n"
                  << GetMemUsageMapDetail(ct_max_mem_usage));
       assert(ct_mem_usage_list.empty() && rt_mem_usage_list.empty());
+      rt_mem_usage_check_lists[cf->name] = rt_mem_usage_check_list;
+      rt_mem_usage_check_list.clear();
     }
     return true;
   }
@@ -223,9 +223,9 @@ public:
   }
   ~MemUsageCheck() {}
 
-  // return rt_mem_usage_check_list to
-  // do codegen for rt memory usage checking
-  auto GetRtMemUsageInfo() { return rt_mem_usage_check_list; }
+  // return rt_mem_usage_check_lists to
+  // do codegen for rt memory usage checking of each co func
+  auto GetRtMemUsageInfo() { return rt_mem_usage_check_lists; }
 
   bool Visit(AST::MultiNodes& n) {
     TraceEachVisit(n);
@@ -266,13 +266,14 @@ public:
            "Only support Storage types in `valid_storage_type`!");
     if (sty->RuntimeShaped()) {
       // runtime usage
+      std::string byte_size = sty->ByteSizeExpression(true);
       VST_DEBUG(dbgs() << "[MemUsage] " << __internal__::GetStringFrom(sto)
                        << " `" << SSTab().ScopedName(n.name_str) << "` need : "
-                       << sty->ByteSizeExpression() << " bytes.\n");
-      rt_mem_usage_list.top()[sto].push_back(sty->ByteSizeExpression());
-      rt_tot_mem_usage[sto].push_back(sty->ByteSizeExpression());
-      rt_mem_usage_check_list.push_back(
-          std::make_tuple(SumUpCtRtUsage(sto), n.LOC(), mem_usage_limit[sto]));
+                       << sty->ByteSizeExpression(false) << " bytes.\n");
+      rt_mem_usage_list.top()[sto].push_back(byte_size);
+      rt_tot_mem_usage[sto].push_back(byte_size);
+      rt_mem_usage_check_list.push_back(std::make_tuple(
+          SumUpCtRtUsage(sto), n.LOC(), mem_usage_limit[sto], sto));
     } else {
       // compile time usage
       auto size = sty->ByteSize();
@@ -347,14 +348,16 @@ public:
              "Only support Storage types in `valid_storage_type`!");
       auto sty = dyn_cast<FutureType>(d.GetType())->GetSpannedType().get();
       if (sty->RuntimeShaped()) {
+        std::string byte_size = sty->ByteSizeExpression(true);
         VST_DEBUG(dbgs() << "[MemUsage] "
                          << __internal__::GetStringFrom(dst_sto) << " `"
                          << SSTab().ScopedName(d.future) << "` need : "
-                         << sty->ByteSizeExpression() << " bytes.\n");
-        rt_mem_usage_list.top()[dst_sto].push_back(sty->ByteSizeExpression());
-        rt_tot_mem_usage[dst_sto].push_back(sty->ByteSizeExpression());
-        rt_mem_usage_check_list.push_back(std::make_tuple(
-            SumUpCtRtUsage(dst_sto), d.LOC(), mem_usage_limit[dst_sto]));
+                         << sty->ByteSizeExpression(false) << " bytes.\n");
+        rt_mem_usage_list.top()[dst_sto].push_back(byte_size);
+        rt_tot_mem_usage[dst_sto].push_back(byte_size);
+        rt_mem_usage_check_list.push_back(
+            std::make_tuple(SumUpCtRtUsage(dst_sto), d.LOC(),
+                            mem_usage_limit[dst_sto], dst_sto));
       } else {
         auto dst_size = sty->ByteSize();
         assert(valid_storage_type.count(dst_sto) &&
@@ -417,16 +420,16 @@ public:
         name +=
             (p->HasSymbol() ? p->sym->name : ("#" + std::to_string(param_idx)));
         if (sty->RuntimeShaped()) {
-          rt_mem_usage_list.top()[func_param_sto].push_back(
-              sty->ByteSizeExpression());
-          rt_tot_mem_usage[func_param_sto].push_back(sty->ByteSizeExpression());
+          std::string byte_size = sty->ByteSizeExpression(true);
+          rt_mem_usage_list.top()[func_param_sto].push_back(byte_size);
+          rt_tot_mem_usage[func_param_sto].push_back(byte_size);
           rt_mem_usage_check_list.push_back(
               std::make_tuple(SumUpCtRtUsage(func_param_sto), p->LOC(),
-                              mem_usage_limit[func_param_sto]));
+                              mem_usage_limit[func_param_sto], func_param_sto));
           VST_DEBUG(dbgs() << "[MemUsage] "
                            << "Function parameter `" << name << "`("
                            << __internal__::GetStringFrom(func_param_sto)
-                           << ") need " << sty->ByteSizeExpression()
+                           << ") need " << sty->ByteSizeExpression(false)
                            << " bytes.\n");
         } else {
           ct_mem_usage_list.top()[func_param_sto] += sty->ByteSize();

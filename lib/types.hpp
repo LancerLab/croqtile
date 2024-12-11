@@ -430,14 +430,14 @@ struct Shape {
     return res;
   }
 
-  std::string GetSizeExpression() const {
-    if (!IsDynamic()) return std::to_string(Size());
+  std::string GetSizeExpression(bool ULL_suffix = false) const {
+    if (!IsDynamic()) return std::to_string(Size()) + (ULL_suffix ? "ULL" : "");
 
     assert(!Value().empty() && "no values inside the shape.");
     std::string res;
-    res = ValueItemAsString(Value()[0]);
+    res = "(" + ValueItemAsString(Value()[0], ULL_suffix) + ")";
     for (size_t i = 1; i < Value().size(); ++i)
-      res += " * " + ValueItemAsString(Value()[i]);
+      res += " * (" + ValueItemAsString(Value()[i], ULL_suffix) + ")";
     return res;
   }
 
@@ -891,12 +891,12 @@ struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
   size_t ShapeSize() const { return GetShape().Size(); }
   size_t ByteSize() const { return SizeOf(f_type) * GetShape().Size(); }
 
-  std::string ByteSizeExpression() const {
+  std::string ByteSizeExpression(bool ULL_suffix = false) const {
     if (RuntimeShaped())
-      return GetShape().GetSizeExpression() + " * " +
+      return "(" + GetShape().GetSizeExpression(ULL_suffix) + ") * " +
              std::to_string(SizeOf(f_type));
     else
-      return std::to_string(ByteSize());
+      return std::to_string(ByteSize()) + (ULL_suffix ? "ULL" : "");
   }
 
   void SetStorage(Storage s) { m_type = s; }

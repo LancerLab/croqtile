@@ -398,8 +398,8 @@ void SymReplace::SymbolizeExprNode(ptr<AST::Node> n) {
   // the node into expr_sym_valno_map repeatedly! Some other
   // situations(tests/parse/spanned_decl.co) may lead to the same result.
   if (expr_sym_valno_map.count(n)) {
-    Warning(n->LOC(), "WORKAROUND: RETURN due to repeatedly inserting node " +
-                          PSTR(n) + " into expr_sym_valno_map.");
+    SR_DEBUG(dbgs() << "WORKAROUND: RETURN due to repeatedly inserting node " +
+                           PSTR(n) + " into expr_sym_valno_map.");
     return;
   }
   InsertExprSymValnoMap(n, GetValidSymValno(res));

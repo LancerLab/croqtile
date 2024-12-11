@@ -1292,7 +1292,7 @@ void FactorCodeGen::EmitHostFunction(std::ostream& os) {
     auto buffer_name = "in_mem" + std::to_string(device_mems.size());
     std::string size_expr_str = "1";
     if (auto sty = dyn_cast<SpannedType>(item.type))
-      size_expr_str = ReplaceRuntimeNames(sty->ByteSizeExpression());
+      size_expr_str = ReplaceRuntimeNames(sty->ByteSizeExpression(true));
 
     os << "  void *" << buffer_name << " = nullptr;\n";
     os << "  CHECK(topsMalloc(&" << buffer_name << ", " << size_expr_str
@@ -1307,6 +1307,7 @@ void FactorCodeGen::EmitHostFunction(std::ostream& os) {
   os << "  void * device_inputs[] = {" << DelimitedString(device_mems)
      << "};\n\n";
 
+  // TODO: ULL suffix
   std::string size_string = ReplaceRuntimeNames(out_size_expr);
 
   if (!void_return) {
@@ -1503,12 +1504,16 @@ void FactorCodeGen::EmitHostRuntimeMemUsageCheck(std::ostream& os) {
   // check if the input shape is as declared in choreo
   if (cgi->ParameterCount(fname) == 0) return;
 
+  if (!rt_mem_usage_check_lists.count(fname)) return;
+
+  auto rt_mem_usage_check_list = rt_mem_usage_check_lists.at(fname);
+
   // there should be runtime memory usage check
   if (!rt_mem_usage_check_list.empty())
     os << "\n  // Check if the runtime memory usage exceeds the defined "
           "limits.\n";
 
-  for (const auto& [useds, loc, limit] : rt_mem_usage_check_list) {
+  for (const auto& [useds, loc, limit, sto] : rt_mem_usage_check_list) {
     std::ostringstream used_ss;
     used_ss << "  choreo::runtime_check((size_t)";
     for (auto& used : useds) {
@@ -1521,14 +1526,14 @@ void FactorCodeGen::EmitHostRuntimeMemUsageCheck(std::ostream& os) {
       auto operands = SplitStringByDelimiter(used, "*");
       // `o` is dynamic dim. Should replace it with host name
       for (auto& o : operands) o = ReplaceRuntimeNames(o, "", true);
-      // add (size_t) to avoid integer overflow
-      used_ss << (used_ss.str().back() == ')' ? "" : " + ") << "(size_t)"
+      used_ss << (used_ss.str().back() == ')' ? "" : " + ")
               << DelimitedString(operands, "*");
     }
-    used_ss << " <= (size_t)" << limit
-            << ", \"total memory usage(compile time and runtime) "
-               "should not exceed limit, happends at "
-            << loc << "\");\n";
+    used_ss << " <= (size_t)" << limit << ", \"total memory usage at "
+            << __internal__::GetStringFrom(sto)
+            << " level (compile time and runtime) "
+               "should not exceed "
+            << limit << " bytes, happends at " << loc << "\");\n";
     os << used_ss.str();
   }
 }
