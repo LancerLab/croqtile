@@ -24,26 +24,6 @@ using namespace Choreo::Factor;
 extern Option<bool> native_f16;
 extern Option<std::string> output;
 
-inline const std::string FineName(const std::string& input) {
-  std::string result = input;
-
-  // Replace all occurrences of '$' with '_'
-  std::replace(result.begin(), result.end(), '$', '_');
-
-  return result;
-}
-
-inline int MemLevel(Storage s) {
-  switch (s) {
-  case Storage::LOCAL: return 0;
-  case Storage::SHARED: return 1;
-  case Storage::GLOBAL:
-  case Storage::DEFAULT: return 2;
-  default: choreo_unreachable("Unexpected storage type."); return -1;
-  }
-  return -1;
-}
-
 bool FactorCodeGen::ContainsLoopVar(const std::string& iv) const {
   for (auto& loop_var : loop_vars)
     if (loop_var.count(iv)) return true;

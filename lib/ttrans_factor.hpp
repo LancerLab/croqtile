@@ -163,8 +163,7 @@ private:
   }
 
 public:
-  FactorTrans(const ptr<SymbolTable> s_tab)
-      : VisitorWithSymTab("ftran", s_tab) {}
+  FactorTrans() : VisitorWithSymTab("ftran", CCtx().GetGlobalSymbolTable()) {}
   ~FactorTrans() {}
 
   void SetKind(Kind k) { kind = k; }

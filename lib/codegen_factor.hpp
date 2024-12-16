@@ -105,11 +105,10 @@ private:
 
 public:
   FactorCodeGen(
-      const ptr<SymbolTable>& symtab,
       const std::map<std::string, std::vector<RtMemUsageCheckInfo>>& lists,
       const ptr<CodeGenInfo>& ci, bool cross_compile, bool use_kernel_template)
-      : CodeGenerator("codegen", symtab), cross_compile(cross_compile),
-        use_kernel_template(use_kernel_template),
+      : CodeGenerator("codegen", CCtx().GetGlobalSymbolTable()),
+        cross_compile(cross_compile), use_kernel_template(use_kernel_template),
         rt_mem_usage_check_lists(lists), cgi(ci) {
     factor_pname =
         "__choreo_" +

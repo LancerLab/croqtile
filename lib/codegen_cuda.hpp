@@ -77,8 +77,9 @@ private:
   StringifyTable cuda_symbols;
 
 public:
-  CUDACodeGen(const ptr<SymbolTable>& symtab, bool cross_compile)
-      : CodeGenerator("codegen", symtab), cross_compile(cross_compile) {}
+  CUDACodeGen(bool cross_compile)
+      : CodeGenerator("codegen", CCtx().GetGlobalSymbolTable()),
+        cross_compile(cross_compile) {}
   void ResetBuffers() {
     // TODO: should use .str("") to reset ostringstream
     // ks.clear();

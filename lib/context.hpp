@@ -6,6 +6,7 @@
 #include "symvals.hpp"
 #include <iostream>
 #include <map>
+#include <memory>
 #include <sstream>
 
 namespace Choreo {
@@ -134,16 +135,30 @@ public:
   }
 };
 
+class SymbolTable;
+
 // per-compilation context
 class CompilationContext {
+private:
   bool debug_symtab = false;
   std::map<std::string, FunctionContext> function_contexts;
   CompileTarget compile_target = CompileTarget::Unknown;
   TargetArch arch = TargetArch::Unknown;
   OutputKind out_kind = OutputKind::TargetExecutable;
 
+private:
+  std::shared_ptr<SymbolTable> sym_tab = nullptr; // global symbol table
+
 public:
   bool DebugSymTab() const { return debug_symtab; }
+
+  void SetGlobalSymbolTable(const std::shared_ptr<SymbolTable>& st) {
+    sym_tab = st;
+  }
+  std::shared_ptr<SymbolTable>& GetGlobalSymbolTable() {
+    if (!sym_tab) choreo_unreachable("global symbol table is invalid.");
+    return sym_tab;
+  }
 
   FunctionContext& GetFunctionContext(const std::string fname) {
     return function_contexts[fname];

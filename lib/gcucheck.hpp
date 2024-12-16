@@ -70,7 +70,7 @@ private:
   }
 
 public:
-  GCUCheck(const ptr<SymbolTable> s_tab) : VisitorWithSymTab("gcu", s_tab) {}
+  GCUCheck() : VisitorWithSymTab("gcu", CCtx().GetGlobalSymbolTable()) {}
   ~GCUCheck() {}
 
   bool Visit(AST::MultiNodes& n) {

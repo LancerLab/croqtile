@@ -17,7 +17,16 @@ namespace Choreo {
 namespace Topscc {
 
 struct TopsccCodeGen : public CodeGenerator {
-  // bool Visit(AST::Node&) override;
+  std::string compile_dir; // directory for compilation work
+
+  TopsccCodeGen() : CodeGenerator("codegen", CCtx().GetGlobalSymbolTable()) {
+    compile_dir = "__choreo_" +
+                  RemoveDirectoryPrefix(RemoveSuffix(
+                      OptionRegistry::GetInstance().GetInputFileName(), ".co"));
+  }
+
+  bool BeforeVisitImpl(AST::Node&) override;
+  bool AfterVisitImpl(AST::Node&) override;
 
   bool Visit(AST::MultiNodes&) override { return true; };
   bool Visit(AST::MultiValues&) override { return true; };

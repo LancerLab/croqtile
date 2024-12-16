@@ -276,17 +276,20 @@ int main(int argc, char* argv[]) {
   LateNorm ln(ti.SymTab());
   if (!ln.RunOnProgram(root)) return ln.Status();
 
+  CCtx().SetGlobalSymbolTable(ln.SymTab());
+
   // debug: dump the symbol table
-  if (std::getenv("DUMP_SYMTAB") || dump_sym) ln.SymTab()->Print(dbgs());
+  if (std::getenv("DUMP_SYMTAB") || dump_sym)
+    CCtx().GetGlobalSymbolTable()->Print(dbgs());
 
   if (std::getenv("VISUALIZE") || visualiz) {
-    Visualizer vl(ln.SymTab());
+    Visualizer vl;
     if (!vl.RunOnProgram(root)) return vl.Status();
     return 0;
   }
 
   // apply the type check
-  TypeChecker sc(ln.SymTab());
+  TypeChecker sc;
   if (!sc.RunOnProgram(root)) return sc.Status();
 
   // --------- Following passes generate codes -------- //
@@ -294,30 +297,30 @@ int main(int argc, char* argv[]) {
   if (ncodegen) return 0; // do not generate code
 
   // collect information for codegen
-  CodegenPrepare cgp(sc.SymTab());
+  CodegenPrepare cgp;
   if (!cgp.RunOnProgram(root)) return cgp.Status();
 
   switch (CCtx().GetTarget()) {
   case CompileTarget::Factor: {
     // apply the gcu specific checking
-    GCUCheck gcu_checker(sc.SymTab());
+    GCUCheck gcu_checker;
     if (!gcu_checker.RunOnProgram(root)) return gcu_checker.Status();
 
-    FactorTrans trans(sc.SymTab());
+    FactorTrans trans;
     if (!trans.RunOnProgram(root)) return trans.Status();
 
-    MemUsageCheck mem_usage_checker(sc.SymTab());
+    MemUsageCheck mem_usage_checker;
     if (!mem_usage_checker.RunOnProgram(root))
       return mem_usage_checker.Status();
 
     Choreo::Factor::FactorCodeGen codegen(
-        sc.SymTab(), mem_usage_checker.GetRtMemUsageInfo(), cgp.GetASTInfo(),
+        mem_usage_checker.GetRtMemUsageInfo(), cgp.GetASTInfo(),
         cross_compile, use_kernel_template);
     if (!codegen.RunOnProgram(root)) return codegen.Status();
     break;
   }
   case CompileTarget::CUDA: {
-    Choreo::CUDA::CUDACodeGen codegen(sc.SymTab(), cross_compile);
+    Choreo::CUDA::CUDACodeGen codegen(cross_compile);
     if (!codegen.RunOnProgram(root)) return codegen.Status();
     break;
   }

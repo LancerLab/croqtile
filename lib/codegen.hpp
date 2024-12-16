@@ -323,6 +323,26 @@ static inline std::string KernelTypeStringify(const Choreo::BaseType& type) {
   }
 }
 
+inline const std::string FineName(const std::string& input) {
+  std::string result = input;
+
+  // Replace all occurrences of '$' with '_'
+  std::replace(result.begin(), result.end(), '$', '_');
+
+  return result;
+}
+
+inline int MemLevel(Storage s) {
+  switch (s) {
+  case Storage::LOCAL: return 0;
+  case Storage::SHARED: return 1;
+  case Storage::GLOBAL:
+  case Storage::DEFAULT: return 2;
+  default: choreo_unreachable("Unexpected storage type."); return -1;
+  }
+  return -1;
+}
+
 } // end namespace Choreo
 
 #endif // CHOREO_CODEGEN_HPP_

@@ -51,8 +51,7 @@ private:
   }
 
 public:
-  CodegenPrepare(const ptr<SymbolTable> s_tab)
-      : CodeGenerator("prepare", s_tab) {
+  CodegenPrepare() : CodeGenerator("prepare", CCtx().GetGlobalSymbolTable()) {
     cgi = std::make_shared<CodeGenInfo>();
   }
   ~CodegenPrepare() {}

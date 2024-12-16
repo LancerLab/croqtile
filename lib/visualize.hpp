@@ -295,9 +295,9 @@ private:
   int start_y = 0;
 
 public:
-  Visualizer(const ptr<SymbolTable> s_tab)
-      : VisitorWithSymTab("visual", s_tab), parallel_factor(1), start_x(0),
-        start_y(0) {}
+  Visualizer()
+      : VisitorWithSymTab("visual", CCtx().GetGlobalSymbolTable()),
+        parallel_factor(1), start_x(0), start_y(0) {}
   ~Visualizer() {}
 
   // derived class must call this to incorporate with symbol table

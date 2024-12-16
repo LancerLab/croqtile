@@ -18,3 +18,16 @@
 
 using namespace Choreo;
 using namespace Choreo::Topscc;
+
+extern Option<std::string> output;
+
+bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
+  TraceEachVisit(n);
+
+  return 0;
+}
+
+bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
+  TraceEachVisit(n);
+  return 0;
+}

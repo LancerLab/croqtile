@@ -28,8 +28,7 @@ private:
   }
 
 public:
-  TypeChecker(const ptr<SymbolTable> s_tab)
-      : VisitorWithSymTab("check", s_tab) {
+  TypeChecker() : VisitorWithSymTab("check", CCtx().GetGlobalSymbolTable()) {
     if (CCtx().GetTarget() == CompileTarget::CUDA) allow_auto_threading = true;
   }
   ~TypeChecker() {}
