@@ -141,6 +141,7 @@ blank       [ \t\r]
   ".data"    return Choreo::Parser::make_FNDATA(yytext, loc);
   ".data.span_as" return Choreo::Parser::make_FNDATASPANAS(yytext, loc);
   ".chunkat" return Choreo::Parser::make_CHUNKAT(yytext, loc);
+  ".chunk_inbound" return Choreo::Parser::make_CHUNKINBOUND(yytext, loc);
   "=>"       return Choreo::Parser::make_TRANS(loc);
   "swap"     return Choreo::Parser::make_SWAP(yytext, loc);
   "rotate"   return Choreo::Parser::make_ROTATE(yytext, loc);
@@ -151,11 +152,13 @@ blank       [ \t\r]
   "with"     return Choreo::Parser::make_WITH(yytext, loc);
   "in"       return Choreo::Parser::make_IN(yytext, loc);
   "foreach"  return Choreo::Parser::make_FOREACH(yytext, loc);
+  "incr"     return Choreo::Parser::make_INCR(yytext, loc);
   "wait"     return Choreo::Parser::make_WAIT(yytext, loc);
   "call"     return Choreo::Parser::make_CALL(yytext, loc);
   "select"   return Choreo::Parser::make_SELECT(yytext, loc);
   "return"   return Choreo::Parser::make_RET(yytext, loc);
   "where"    return Choreo::Parser::make_WHERE(yytext, loc);
+  "while"    return Choreo::Parser::make_WHILE(yytext, loc);
   "<->"      return Choreo::Parser::make_BIND   (loc);
   "-"        return Choreo::Parser::make_MINUS  (loc);
   "+"        return Choreo::Parser::make_PLUS   (loc);

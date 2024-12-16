@@ -213,6 +213,15 @@ void ForeachBlock::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
+void IncrementBlock::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+  bvs->accept(v);
+  pred->accept(v);
+  v.Visit(*this);
+  stmts->accept(v);
+  v.AfterVisit(*this);
+}
+
 void FunctionDecl::accept(Choreo::Visitor& v) {
   params->accept(v);
   ret_type->accept(v);

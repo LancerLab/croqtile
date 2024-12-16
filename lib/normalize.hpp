@@ -399,6 +399,7 @@ public:
   }
   bool Visit(AST::LoopRange&) override { return true; }
   bool Visit(AST::ForeachBlock&) override { return true; }
+  bool Visit(AST::IncrementBlock&) override { return true; }
   bool Visit(AST::FunctionDecl&) override { return true; }
   bool Visit(AST::ChoreoFunction&) override { return true; }
   bool Visit(AST::CppSourceCode&) override { return true; }

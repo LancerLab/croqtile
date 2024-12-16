@@ -979,7 +979,8 @@ struct WithIn : public Node, public TypeIDProvider<WithIn> {
     os << prefix << "`- ";
     if (with) os << with->name;
     if (with_matchers) {
-      os << " = {";
+      if (with) os << " = ";
+      os << "{";
       with_matchers->InlinePrint(os);
       os << "}";
     }
@@ -1298,6 +1299,36 @@ struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
   void accept(Visitor&) override;
 
   __UDT_TYPE_INFO__(Node, ForeachBlock)
+};
+
+struct IncrementBlock : public Node, public TypeIDProvider<IncrementBlock> {
+  ptr<MultiValues> bvs;
+  ptr<Node> pred;
+  ptr<MultiNodes> stmts;
+
+  explicit IncrementBlock(const location& l, const ptr<MultiValues>& i,
+                          const ptr<Node>& p, const ptr<MultiNodes>& s)
+      : Node(l), bvs(i), pred(p), stmts(s) {
+    assert(i != nullptr && "missing iteration variables for the statement.");
+    assert(p != nullptr && "missing predication for the increment block.");
+  }
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << "\n" << prefix << "`- Increment Block:";
+    os << "\n" << prefix << " `- Iteration variables: " << STR(bvs);
+    os << "\n" << prefix << " `- Predicate: " << STR(pred);
+    if (stmts) { stmts->Print(os, prefix + " "); }
+  }
+
+  void accept(Visitor&) override;
+
+  const std::vector<ptr<Node>>& GetIterationVars() const {
+    return bvs->AllValues();
+  }
+
+  const ptr<Node>& GetPredicate() const { return pred; }
+
+  __UDT_TYPE_INFO__(Node, IncrementBlock)
 };
 
 struct FunctionDecl : public Node, public TypeIDProvider<FunctionDecl> {

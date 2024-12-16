@@ -1229,6 +1229,31 @@ bool EarlySemantics::Visit(AST::ForeachBlock& n) {
   return true;
 }
 
+bool EarlySemantics::Visit(AST::IncrementBlock& n) {
+  TraceEachVisit(n);
+  for (auto& iv : n.GetIterationVars()) {
+    auto ity = NodeType(*iv);
+    if (!(IsBoundedType(ity))) {
+      Error(n.LOC(), "expect a bounded type but got '" + PSTR(ity) + "'.");
+      error_count++;
+    }
+    if (auto id = AST::GetIdentifier(*iv)) {
+      if (id->name == "_") {
+        Error(n.LOC(), "_ is not allowed as an iteration variable.");
+        error_count++;
+      }
+    }
+  }
+
+  auto pty = NodeType(*n.GetPredicate());
+  if (!isa<BooleanType>(pty)) {
+    Error(n.LOC(),
+          "expect the a boolean-typed predicate but got '" + PSTR(pty) + "'.");
+    error_count++;
+  }
+
+  return true;
+}
 bool EarlySemantics::Visit(AST::FunctionDecl& n) {
   TraceEachVisit(n);
 

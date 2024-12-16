@@ -9,8 +9,9 @@ FTP_SERVER:=172.16.11.18
 CHOREO_BIN = choreo
 COPP_BIN = copp
 TARGET = $(CHOREO_BIN) $(COPP_BIN)
-LEX_SRC = scanner.l
-PARSER_SRC = parser.yy
+SRC_DIR = $(WORK_DIR)/lib
+LEX_SRC = $(SRC_DIR)/scanner.l
+PARSER_SRC = $(SRC_DIR)/parser.yy
 #BISON_FLAGS = --language=c++ --skeleton=lalr1.cc -t -d  # Generates both parser.tab.c and parser.tab.h
 #BISON_FLAGS = --report=all -t -d  # Generates both parser.tab.cpp and parser.tab.h
 BISON_FLAGS = -t -d  # Generates both parser.tab.cpp and parser.tab.h
@@ -22,7 +23,7 @@ TEST_TARGETS := $(TEST_FILES:.co=.test)
 #$(info TEST_TARGETS is $(TEST_TARGETS))
 
 # headers
-HEADER_FILES :=  $(shell find lib/ -name '*.hpp') choreo_header.inc choreo_cuda_header.inc factor_script.inc cuda_script.inc
+HEADER_FILES :=  $(shell find $(SRC_DIR) -name '*.hpp') choreo_header.inc choreo_cuda_header.inc factor_script.inc cuda_script.inc
 
 CC = g++
 CFLAGS = -std=c++17 -Wall -Wextra -g -D__CHOREO_FACTOR_DIR__="$(TOOLCHAIN_DIR)" -D__CHOREO_CUDA_DIR__="$(TOOLCHAIN_DIR)" -D__CHOREO_TOPSCC_DIR__="$(TOOLCHAIN_DIR)"
@@ -60,7 +61,7 @@ ci-gcu3-test: setup-gcu3 $(TARGET)
 	$(LIT) tests && $(MAKE) standalone_test
 
 $(CHOREO_BIN): utils/choreo_main.cpp scanner.yy.o parser.tab.o codegen_factor.o codegen_cuda.o codegen_topscc.o earlysema.o typeinfer.o typecheck.o ast.o types.o codegen_factor_types.o codegen_cuda_types.o valno.o visitor.o sym_replace.o
-	$(CC) $(CFLAGS) $^ -I$(WORK_DIR) -I$(WORK_DIR)/lib $(SYMBOLIC_INCLUDE_FLAGS) $(SYMBOLIC_LIB_FLAGS) -o $@
+	$(CC) $(CFLAGS) $^ -I$(WORK_DIR) -I$(SRC_DIR) $(SYMBOLIC_INCLUDE_FLAGS) $(SYMBOLIC_LIB_FLAGS) -o $@
 
 scanner.yy.cc: $(LEX_SRC)
 	$(FLEX) -o $@ $(LEX_SRC)
@@ -69,13 +70,13 @@ parser.tab.cc parser.tab.hh location.hh: $(PARSER_SRC)
 	$(BISON) $(BISON_FLAGS) $(PARSER_SRC)
 
 %.o : %.cc $(HEADER_FILES) parser.tab.hh location.hh
-	$(CC) -I$(WORK_DIR) -I$(WORK_DIR)/lib $(CFLAGS) $< -c -o $@
+	$(CC) -I$(WORK_DIR) -I$(SRC_DIR) $(CFLAGS) $< -c -o $@
 
-%.o : lib/%.cpp $(HEADER_FILES) location.hh
-	$(CC) -I$(WORK_DIR) -I$(WORK_DIR)/lib $(CFLAGS) $(SYMBOLIC_INCLUDE_FLAGS) $< -c  -o $@
+%.o : $(SRC_DIR)/%.cpp $(HEADER_FILES) location.hh
+	$(CC) -I$(WORK_DIR) -I$(SRC_DIR) $(CFLAGS) $(SYMBOLIC_INCLUDE_FLAGS) $< -c  -o $@
 
 copp: utils/choreo_preprocess.cpp $(HEADER_FILES)
-	$(CC) $(CFLAGS) $< -I$(WORK_DIR) -I$(WORK_DIR)/lib -o $@
+	$(CC) $(CFLAGS) $< -I$(WORK_DIR) -I$(SRC_DIR) -o $@
 
 choreo_header.inc : utils/choreo.h
 	echo "#ifndef __CHOREO_RUNTIME_HEADER_H__" > $@
@@ -120,7 +121,7 @@ lines:
 	echo "test files"; wc -l $$(find tests/ -type f |grep -v "\.test")
 
 format:
-	$(CLANG_FORMAT) -i -Werror lib/*.cpp lib/*.hpp utils/*.h tests/standalone/*.cu tests/standalone/*.cpp
+	$(CLANG_FORMAT) -i -Werror $(SRC_DIR)/*.cpp $(SRC_DIR)/*.hpp utils/*.h tests/standalone/*.cu tests/standalone/*.cpp
 
 standalone_test: $(TARGET)
 	cd tests/standalone/ && $(MAKE) test

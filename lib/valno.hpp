@@ -340,7 +340,7 @@ public:
       vn.EnterScope();
     } else if (isa<AST::WithBlock>(&n)) {
       vn.EnterScope();
-    } else if (isa<AST::ForeachBlock>(&n)) {
+    } else if (isa<AST::ForeachBlock>(&n) || isa<AST::IncrementBlock>(&n)) {
       vn.EnterScope();
       gen_values = false; // disable valno on range expressions
     } else if (auto* b = dyn_cast<AST::MultiDimSpans>(&n)) {
@@ -374,7 +374,7 @@ public:
     if (isa<AST::Program>(&n) || isa<AST::ChoreoFunction>(&n) ||
         isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n)) {
       vn.LeaveScope();
-    } else if (isa<AST::ForeachBlock>(&n)) {
+    } else if (isa<AST::ForeachBlock>(&n) || isa<AST::IncrementBlock>(&n)) {
       vn.LeaveScope();
     } else if (isa<AST::MultiDimSpans>(&n) || isa<AST::IntTuple>(&n)) {
       vn.ResetListReference();
@@ -1364,6 +1364,16 @@ public:
   };
 
   bool Visit(AST::ForeachBlock& n) {
+    TraceEachVisit(n);
+
+    gen_values = true; // allow generate values for statements
+
+    if (cannot_proceed) return true;
+
+    return true;
+  };
+
+  bool Visit(AST::IncrementBlock& n) {
     TraceEachVisit(n);
 
     gen_values = true; // allow generate values for statements

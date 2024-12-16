@@ -147,9 +147,9 @@ void choreo_info(const char *message) {
 %token <Choreo::Storage> LOCAL SHARED GLOBAL
 %token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT BOOL VOID
 // builtin operations
-%token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT WAIT CALL AUTO SELECT SWAP ROTATE FNDATASPANAS
+%token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT WAIT CALL AUTO SELECT SWAP ROTATE FNDATASPANAS CHUNKINBOUND
 // control related
-%token <std::string> IF ELSE PARA BY WITH IN FOREACH RET WHERE
+%token <std::string> IF ELSE PARA BY WITH IN FOREACH INCR RET WHERE WHILE
 %token <std::string> TRUE FALSE
 
 // non-terminals
@@ -167,7 +167,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::SpanAs>> span_as
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
-%nterm <AST::ptr<AST::Node>> foreach_block general_val template_val general_index span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt swap_stmt expr_or_qes range_expr if_else_block optional_scalar_init param_mdspan_val chunkat_or_storage_or_select
+%nterm <AST::ptr<AST::Node>> foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt swap_stmt expr_or_qes range_expr if_else_block optional_scalar_init param_mdspan_val chunkat_or_storage_or_select pred
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause else_block multi_decls named_spanned_decl
 %nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers passables future_data_list template_params
 %nterm <AST::ptr<AST::Expr>> s_expr template_value_expr span_expr id_expr
@@ -360,6 +360,19 @@ bool_literal
     | FALSE { $$ = AST::Make<AST::Boolean>(@1, std::string("false")); }
     ;
 
+pred
+    : bool_literal { $$ = $1; }
+    | data_id CHUNKINBOUND LPAREN {
+        parsing_chunkat_value_list = true;
+      } value_list RPAREN {
+        // note: normalize will hoist span_as
+        $5->SetDelimiter(", ");
+        $$ = AST::Make<AST::Expr>(@1, "inbound",
+                 AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $5));
+        parsing_chunkat_value_list = false;
+      }
+    ;
+
 parameter_list
     : /* Empty */ {
         $$ = AST::Make<AST::ParamList>(loc);
@@ -410,6 +423,7 @@ statement
     | within_block        { $$ = $1; }
     | if_else_block       { $$ = $1; }
     | foreach_block       { $$ = $1; }
+    | increment_block { $$ = $1; }
     ;
 
 return_stmt
@@ -919,6 +933,12 @@ foreach_block
       }
     ;
 
+increment_block
+    : INCR id_list WHILE pred LBRACE statements RBRACE {
+        $$ = AST::Make<AST::IncrementBlock>(@1, $2, $4, $6);
+      }
+    ;
+
 range_exprs
     : range_exprs COMMA range_expr  {
         $1->Append($3);
@@ -1036,7 +1056,7 @@ chunkat_expr
       } value_list RPAREN {
         // note: normalize will hoist span_as
         $5->SetDelimiter(", ");
-        $$ = AST::Make<AST::ChunkAt>($1->LOC(), $1, $5);
+        $$ = AST::Make<AST::ChunkAt>(@1, $1, $5);
         parsing_chunkat_value_list = false;
       }
     | data_id { $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1)); }

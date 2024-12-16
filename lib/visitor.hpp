@@ -85,6 +85,7 @@ struct Visitor {
   virtual bool Visit(AST::Return&) = 0;
   virtual bool Visit(AST::LoopRange&) = 0;
   virtual bool Visit(AST::ForeachBlock&) = 0;
+  virtual bool Visit(AST::IncrementBlock&) = 0;
   virtual bool Visit(AST::FunctionDecl&) = 0;
   virtual bool Visit(AST::ChoreoFunction&) = 0;
   virtual bool Visit(AST::CppSourceCode&) = 0;
@@ -302,6 +303,8 @@ public:
       SSTab().EnterScope("within_" + std::to_string(wi_count++));
     } else if (isa<AST::ForeachBlock>(&n)) {
       SSTab().EnterScope("foreach_" + std::to_string(fe_count++));
+    } else if (isa<AST::IncrementBlock>(&n)) {
+      SSTab().EnterScope("increment_" + std::to_string(fe_count++));
     } else if (auto w = dyn_cast<AST::WithIn>(&n)) {
       if (w->with && w->with_matchers) {
         std::vector<std::string> matchers;
@@ -323,7 +326,7 @@ public:
       fname = "";
       SSTab().LeaveScope();
     } else if (isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n) ||
-               isa<AST::ForeachBlock>(&n)) {
+               isa<AST::ForeachBlock>(&n) || isa<AST::IncrementBlock>(&n)) {
       SSTab().LeaveScope();
     }
 
@@ -431,6 +434,7 @@ public:
   bool Visit(AST::Return&) override { return true; };
   bool Visit(AST::LoopRange&) override { return true; };
   bool Visit(AST::ForeachBlock&) override { return true; };
+  bool Visit(AST::IncrementBlock&) override { return true; };
   bool Visit(AST::FunctionDecl&) override { return true; };
   bool Visit(AST::ChoreoFunction&) override { return true; };
   bool Visit(AST::CppSourceCode&) override { return true; };

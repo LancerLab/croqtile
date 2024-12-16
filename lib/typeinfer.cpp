@@ -871,6 +871,13 @@ bool TypeInference::Visit(AST::ForeachBlock& n) {
   cur_type.reset(); // no current type to annotate the stmts inside
   return true;
 }
+
+bool TypeInference::Visit(AST::IncrementBlock& n) {
+  TraceEachVisit(n);
+  cur_type.reset(); // no current type to annotate the stmts inside
+  return true;
+}
+
 bool TypeInference::Visit(AST::ChoreoFunction& n) {
   TraceEachVisit(n);
   return true;
