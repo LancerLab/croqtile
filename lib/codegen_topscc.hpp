@@ -33,10 +33,64 @@ enum CodeSegment {
   CS_CO,
 };
 
+inline const char* NameBaseType(BaseType ft) {
+  switch (ft) {
+  case BaseType::F32: return "float";
+  case BaseType::F16: return "__fp16";
+  case BaseType::BF16: return "__bf16";
+  case BaseType::U32: return "unsigned int";
+  case BaseType::U16: return "unsigned short";
+  case BaseType::U8: return "unsigned char";
+  case BaseType::S32: return "int";
+  case BaseType::S16: return "short";
+  case BaseType::S8: return "char";
+  default: choreo_unreachable("unsupported base-type.");
+  }
+  return "";
+}
+
+// map choreo symbols to the generated host, device names
+class ScopedSymbolMap {
+  using SymbolMap = std::unordered_map<std::string, std::string>;
+  std::vector<SymbolMap> host_map;
+  std::vector<SymbolMap> device_map;
+
+public:
+  void EnterScope() {
+    host_map.push_back({});
+    device_map.push_back({});
+  }
+  void LeaveScope() {
+    host_map.pop_back();
+    device_map.pop_back();
+  }
+  void MapHostSymbol(const std::string& csym, const std::string& name) {
+    assert(!host_map.back().count(csym) && "symbol existed");
+    host_map.back()[csym] = name;
+  }
+  void MapDeviceSymbol(const std::string& csym, const std::string& name) {
+    assert(!device_map.back().count(csym) && "symbol existed");
+    device_map.back()[csym] = name;
+  }
+
+  const std::string HostName(const std::string& csym) const {
+    for (auto mapit = host_map.rbegin(); mapit != host_map.rend(); ++mapit)
+      if (mapit->count(csym)) return (*mapit).at(csym);
+    return csym;
+  }
+
+  const std::string DeviceName(const std::string& csym) const {
+    for (auto mapit = device_map.rbegin(); mapit != device_map.rend(); ++mapit)
+      if (mapit->count(csym)) return (*mapit).at(csym);
+    return csym;
+  }
+};
+
 struct TopsccCodeGen : public CodeGenerator {
 private:
   std::map<std::string, std::vector<RtMemUsageCheckInfo>> muc;
   ptr<CodeGenInfo> cgi;
+  ScopedSymbolMap ssm;
 
 public:
   TopsccCodeGen(
@@ -57,7 +111,6 @@ public:
   bool Visit(AST::Expr&) override { return true; };
   bool Visit(AST::MultiDimSpans&) override { return true; };
   bool Visit(AST::NamedTypeDecl&) override { return true; };
-  bool Visit(AST::NamedVariableDecl&) override { return true; };
   bool Visit(AST::IntTuple&) override { return true; };
   bool Visit(AST::Assignment&) override { return true; };
   bool Visit(AST::IntIndex&) override { return true; };
@@ -76,14 +129,15 @@ public:
   bool Visit(AST::Call&) override { return true; };
   bool Visit(AST::Rotate&) override { return true; };
   bool Visit(AST::Select&) override { return true; };
-  bool Visit(AST::Return&) override { return true; };
   bool Visit(AST::LoopRange&) override { return true; };
   bool Visit(AST::ForeachBlock&) override { return true; };
   bool Visit(AST::Program&) override { return true; };
 
+  bool Visit(AST::NamedVariableDecl&) override;
   bool Visit(AST::CppSourceCode& n) override;
   bool Visit(AST::ChoreoFunction&) override;
   bool Visit(AST::FunctionDecl&) override;
+  bool Visit(AST::Return&) override;
 
 private:
   CodeSegment cs = CS_UNKNOWN;
@@ -151,6 +205,27 @@ private:
   FilterRange<SymbolDetail> GetChoreoFuncIns() {
     return cgi->GetParameters(fname);
   }
+
+  const FutureBufferInfo& FBInfo() const {
+    return FCtx(fname).GetFutureBufferInfo();
+  }
+
+  bool IsChoreoInput(const std::string& sname) {
+    assert(PrefixedWith(sname, "::") && "expect a scoped name.");
+    for (auto& item : GetChoreoFuncIns())
+      if (sname == item.name) return true;
+    return false;
+  }
+
+  bool IsChoreoOutput(const std::string& sname) {
+    assert(PrefixedWith(sname, "::") && "expect a scoped name.");
+    return cgi->IsReturnSymbol(fname, sname);
+  }
+
+  bool NeedDeviceFunc() const { return cgi->HasParallelBy(fname); }
+
+  const std::string ValueSTR(const ValueItem& vi) const;
+  const std::string ExprSTR(AST::ptr<AST::Node>, bool is_host = true) const;
 };
 
 } // namespace Topscc

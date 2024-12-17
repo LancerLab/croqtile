@@ -1,0 +1,31 @@
+// RUN: choreo -t topscc -es %s -o - | FileCheck %s
+__co__ auto foo(int a, int b) {
+  return a + 1 + b / 2;
+}
+
+// CHECK: void foo(int hp0, int hp1)
+// CHECK:   return ((((hp0)+((1))))+(((hp1)/((2)))));
+
+__co__ auto bar(bf16 [1] a) {
+  return a;
+}
+
+// CHECK: choreo::spanned_data<choreo::bf16, 1> bar(const choreo::spanned_view<choreo::bf16, 1> & hp0)
+// CHECK:   return hp0;
+
+__co__ auto foo1() {
+  int a = 3;
+  return a;
+}
+
+// CHECK: int foo1()
+// CHECK:   return (3);
+
+__co__ auto bar1() {
+  s8[3,2] a;
+  return a;
+}
+
+// CHECK: choreo::spanned_data<choreo::s8, 2> bar1()
+// CHECK:   auto a = choreo::make_spandata<char, 2>({3, 2});
+// CHECK:   return a;

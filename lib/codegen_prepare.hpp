@@ -16,6 +16,7 @@ private:
   bool BeforeVisitImpl(AST::Node& n) {
     if (isa<AST::ChoreoFunction>(&n)) {
       parallel_level = 0;
+      cgi->GetFunctionTrait(fname).has_parallelby = false;
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       parallel_level++;
       if (parallel_level == 1)
@@ -93,7 +94,10 @@ public:
     }
     return true;
   }
-  bool Visit(AST::ParallelBy&) { return true; }
+  bool Visit(AST::ParallelBy&) {
+    cgi->GetFunctionTrait(fname).has_parallelby = true;
+    return true;
+  }
   bool Visit(AST::WhereBind&) { return true; }
   bool Visit(AST::WithIn&) { return true; }
   bool Visit(AST::WithBlock&) { return true; }

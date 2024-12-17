@@ -12,10 +12,6 @@
 // #include "topscc_script.inc"
 #include "types.hpp"
 
-#ifndef __CHOREO_TOPSCC_DIR__
-#error "missing macro definition of __CHOREO_TOPSCC_DIR__"
-#endif
-
 using namespace Choreo;
 using namespace Choreo::Topscc;
 
@@ -29,10 +25,12 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
     // emit the fixed headers
     EmitFixedHostHead();
     EmitFixedDeviceHead();
+    ssm.EnterScope();
   } else if (isa<AST::ChoreoFunction>(&n)) {
     ResetChoreoFunctionStates();
     device_fn = "__choreo_device_" + fname;
     fty = cast<FunctionType>(GetSymbolType(fname));
+    ssm.EnterScope();
   } else if (isa<AST::ParallelBy>(&n)) {
     parallel_level++;
   }
@@ -43,6 +41,7 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
   TraceEachVisit(n);
 
   if (isa<AST::Program>(&n)) {
+    ssm.LeaveScope();
     code_segments.back() = ds.str() + "\n" + hs.str();
     switch (CCtx().GetOutputKind()) {
     case OutputKind::TargetSourceCode: EmitSource(); break;
@@ -62,6 +61,7 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
                          " is not supported.");
     }
   } else if (isa<AST::ChoreoFunction>(&n)) {
+    ssm.LeaveScope();
   } else if (isa<AST::ParallelBy>(&n)) {
     parallel_level--;
   }
@@ -96,10 +96,11 @@ using namespace choreo;
 
 void TopsccCodeGen::EmitFixedDeviceHead() {}
 
-bool TopsccCodeGen::Visit(AST::FunctionDecl& d) {
-  TraceEachVisit(d);
-  assert(d.name == fname && "incosistent in function names.");
-  assert(isa<FunctionType>(d.GetType()) && "unexpected type.");
+bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
+  TraceEachVisit(n);
+
+  assert(n.name == fname && "incosistent in function names.");
+  assert(isa<FunctionType>(n.GetType()) && "unexpected type.");
 
   auto HandleSymbolicDimensions = [this](const ptr<SpannedType>& sty,
                                          const std::string& hp_name,
@@ -132,6 +133,7 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& d) {
     if (item.IsParameter()) {
       assert((int)host_pindex == item.p_index);
       item.host_name = GenHostParamName();
+      ssm.MapHostSymbol(item.name, item.host_name);
       if (auto sty = dyn_cast<SpannedType>(item.type))
         HandleSymbolicDimensions(sty, item.host_name, host_pindex);
     } else
@@ -152,18 +154,97 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& d) {
 
   hs << " {\n";
   IncrHostIndent();
-  ds << " {\n";
-  IncrDeviceIndent();
+  if (NeedDeviceFunc()) {
+    ds << " {\n";
+    IncrDeviceIndent();
+  }
 
   return true;
 }
 
 bool TopsccCodeGen::Visit(AST::ChoreoFunction& n) {
-  DecrHostIndent();
-  DecrDeviceIndent();
-  hs << "\n}\n";
-  ds << "\n}\n";
+  TraceEachVisit(n);
 
+  DecrHostIndent();
+  hs << "}\n\n";
+
+  if (NeedDeviceFunc()) {
+    DecrDeviceIndent();
+    ds << "}\n\n";
+  }
+
+  return true;
+}
+
+bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
+  TraceEachVisit(n);
+
+  auto nty = NodeType(n);
+  auto sym = n.name_str;
+
+  if (auto sty = dyn_cast<SpannedType>(nty)) {
+    // globals are declared in host, while shareds/locals are declared in device
+    auto shape = sty->GetShape();
+    auto bts = NameBaseType(sty->ElementType());
+    if (sty->GetStorage() == Storage::GLOBAL) {
+      if (!IsChoreoOutput(InScopeName(sym))) {
+        if (!n.init_value)
+          hs << h_indent << bts << " * " << sym << "__device = (" << bts
+             << "*)topsMalloc(" << SizeExprOf(*sty) << ");\n";
+        else {
+          // support simple int literal initialization
+          hs << h_indent << bts << " " << sym << "__init[" << SizeExprOf(*sty)
+             << "];\n";
+          hs << h_indent << "memset(" << sym << "__init, " << PSTR(n.init_value)
+             << ", sizeof(" << sym << "__init));\n";
+          hs << h_indent << bts << " * " << sym << "__device = (" << bts
+             << "*)topsMalloc(" << SizeExprOf(*sty) << ");\n";
+          hs << h_indent << "topsMemcpy(" << sym << "__init, " << sym
+             << "__device, " << SizeExprOf(*sty)
+             << ", topsMemcpyHostToDevice);\n";
+        }
+      } else {
+        hs << h_indent << "auto " << sym << " = choreo::make_spandata<" << bts
+           << ", " << shape.Rank() << ">(" << LSTR(shape) << ");\n";
+        hs << h_indent << bts << " * " << sym << "__device = (" << bts
+           << "*)topsMalloc(" << SizeExprOf(*sty) << ");\n";
+      }
+      ssm.MapHostSymbol(InScopeName(sym) + "__device", sym + "__device");
+      ssm.MapHostSymbol(InScopeName(sym), sym);
+    } else if (sty->GetStorage() == Storage::SHARED) {
+    } else if (sty->GetStorage() == Storage::LOCAL) {
+    } else
+      choreo_unreachable("unsupported storage type.");
+  }
+
+  return true;
+}
+
+bool TopsccCodeGen::Visit(AST::Return& n) {
+  TraceEachVisit(n);
+
+  auto vty = NodeType(*n.value);
+  if (isa<ScalarType>(vty)) {
+    hs << h_indent << "return " << ExprSTR(n.value, true) << ";\n";
+    return true;
+  } else if (auto id = AST::GetIdentifier(*n.value)) {
+    auto sym = id->name;
+    if (IsChoreoInput(InScopeName(sym))) {
+      // return the parameter
+      hs << h_indent << "return " << ExprSTR(n.value, true) << ";\n";
+      return true;
+    } else if (IsChoreoOutput(InScopeName(sym))) {
+      if (auto sty = dyn_cast<SpannedType>(GetSymbolType(sym))) {
+        // return the global storage, must map back
+        hs << h_indent << "topsMemcpy(" << sym << "__device, " << sym << ", "
+           << sty->GetShape().GetSizeExpression()
+           << ", topsMemcpyDeviceToHost);\n";
+      }
+    }
+  }
+
+  assert(isa<SpannedType>(vty) && "expect a spanned data.");
+  hs << h_indent << "return " << ExprSTR(n.value, true) << ";\n";
   return true;
 }
 
@@ -178,6 +259,7 @@ bool TopsccCodeGen::Visit(AST::CppSourceCode& n) {
 
   return true;
 }
+
 void TopsccCodeGen::EmitHostFuncDecl(std::ostringstream& oss) {
   // handle the return type
   if (!void_return && cgi->HasReturnSymbol(fname)) {
@@ -203,22 +285,6 @@ void TopsccCodeGen::EmitHostFuncDecl(std::ostringstream& oss) {
   VST_DEBUG(dbgs() << "Host function prototype:\n" << oss.str());
 }
 
-inline const char* NameBaseType(BaseType ft) {
-  switch (ft) {
-  case BaseType::F32: return "float";
-  case BaseType::F16: return "__fp16";
-  case BaseType::BF16: return "__bf16";
-  case BaseType::U32: return "unsigned int";
-  case BaseType::U16: return "unsigned short";
-  case BaseType::U8: return "unsigned char";
-  case BaseType::S32: return "int";
-  case BaseType::S16: return "short";
-  case BaseType::S8: return "char";
-  default: choreo_unreachable("unsupported base-type.");
-  }
-  return "";
-}
-
 static inline const std::string
 DeviceParamTypeStringify(const Choreo::Type& ty) {
   if (isa<VoidType>(&ty))
@@ -235,6 +301,9 @@ DeviceParamTypeStringify(const Choreo::Type& ty) {
 }
 
 void TopsccCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
+  // do not generate device function unless parallel-by exists
+  if (!NeedDeviceFunc()) return;
+
   oss << "__global__ void " << device_fn << "(";
 
   size_t index = 0;
@@ -253,4 +322,153 @@ void TopsccCodeGen::EmitSource() {
   auto ifname = OptionRegistry::GetInstance().GetInputFileName();
 
   for (auto& code : code_segments) outs() << code << "\n";
+}
+
+// TODO: eliminate the need of the value replacement?
+const std::string TopsccCodeGen::ValueSTR(const ValueItem& vi) const {
+#if 0
+  if (auto i = dyn_cast<int>(&vi)) {
+    return std::to_string(*i);
+  } else if (factor_value) {
+    // not int => this is a dynamic var or var bounded by dynamic var.
+    return ReplaceFactorDynDimName(STR(vi));
+  } else {
+    return ReplaceRuntimeNames(STR(vi), "", false);
+  }
+#endif
+  return STR(vi);
+}
+
+const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
+                                         bool is_host) const {
+  std::ostringstream oss;
+
+  if (auto id = dyn_cast<AST::Identifier>(e)) {
+    auto ty = NodeType(*id);
+#if 0
+    if (ContainsLoopVar(id->name))
+      oss << "iv_" << id->name;
+    else
+#endif
+    if (isa<BoundedType>(ty) &&
+        PrefixedWith(cast<BoundedType>(ty)->GetNote(), "pv")) {
+      auto l = RemovePrefixOrNull("pv:", cast<BoundedType>(ty)->GetNote());
+      assert(l.has_value());
+      // is marked as parallel whose level is decided by target check
+      if (*l == "0")
+        oss << "__tops_tid_x()";
+      else if (*l == "1")
+        oss << "__tops_bid_x()";
+      else
+        choreo_unreachable("invalid bounded type note.");
+    } else
+      oss << ((is_host) ? ssm.HostName(InScopeName(id->name))
+                        : ssm.DeviceName(InScopeName(id->name)));
+  } else if (auto il = dyn_cast<AST::IntLiteral>(e)) {
+    oss << "(" << il->value << ")";
+  } else if (auto ii = dyn_cast<AST::IntIndex>(e)) {
+    return ExprSTR(ii->value, is_host);
+  } else if (auto expr = dyn_cast<AST::Expr>(e)) {
+    // utilize the optimize value whenever possible
+    if (auto sym = expr->GetSymbol()) {
+      auto sname = InScopeName(sym->name);
+      if (FCtx(fname).HasSymbolValues(sname)) {
+        auto svs = FCtx(fname).GetSymbolValues(sname);
+        if (IsValidValueItem(svs.int_expr))
+          return "(" + STR(svs.int_expr) + ")";
+      }
+    }
+    if (ConvertibleToInt(NodeType(*e))) {
+      if (IsValidValueItem(expr->opt_vals.int_expr)) {
+        return "(" + STR(expr->opt_vals.int_expr) + ")";
+      }
+    }
+    if (expr->IsReference()) {
+      if (expr->GetInt())
+        return ExprSTR(expr->GetReference(), is_host);
+      else if (expr->GetSymbol())
+        return ExprSTR(expr->GetReference(), is_host);
+      else if (isa<AST::Expr>(NodeType(*expr->GetR()))) // should this happen?
+        return ExprSTR(expr->GetR(), is_host);
+      else
+        choreo_unreachable("Unsupported reference: " + PSTR(expr));
+    } else if (expr->IsUnary()) {
+      if (expr->op == "!") {
+        oss << "!(" << ExprSTR(expr->GetR(), is_host) << ")";
+      } else if (expr->op == "ubound") {
+        auto rty = cast<BoundedType>(NodeType(*expr->GetR()));
+        // anchor
+        if (rty->Dims() == 1) { oss << ValueSTR(rty->GetUpperBound()); }
+      } else if (expr->op == "dataof") {
+        assert(isa<FutureType>(expr->GetR()->GetType()) &&
+               "expect a future operand.");
+        if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol()) {
+          if (FBInfo().count(InScopeName(id->name)))
+            oss << UnScopedName(FBInfo().at(InScopeName(id->name)).buffer);
+          else
+            choreo_unreachable("Future '" + id->name +
+                               "' is not associated with a buffer.");
+        } else
+          choreo_unreachable("Can not retrive name of the future.");
+      } else if (expr->op == "sizeof") {
+        auto var = RemoveSuffix(*AST::GetName(*expr->GetR()), ".span");
+        auto shape = GetShape(GetSymbolType(var));
+        assert(shape.IsValid() && "Invalid shape is found");
+        oss << shape.GetSizeExpression();
+      } else
+        choreo_unreachable("Unsupported choreo expression.");
+    } else if (expr->IsBinary()) {
+      if (expr->op == "cdiv") {
+        std::string one = "1";
+        oss << "((" << ExprSTR(expr->GetL(), is_host) << ")+("
+            << ExprSTR(expr->GetR(), is_host) << "-" << one << ")/("
+            << ExprSTR(expr->GetR(), is_host) << ")";
+      } else if (expr->op == "getith") {
+        auto lty = cast<BoundedType>(NodeType(*expr->GetL()));
+        if (cast<AST::IntIndex>(expr->GetR())->IsNegative()) {
+          oss << "(";
+          oss << ValueSTR(lty->GetUpperBound());
+          oss << "+(" << ExprSTR(expr->GetR(), is_host) << "))";
+        } else
+          oss << "(" << ExprSTR(expr->GetR(), is_host) << ")";
+      } else if (expr->IsArith() || expr->IsLogical()) {
+        auto& l = expr->GetL();
+        auto& r = expr->GetR();
+        auto& op = expr->op;
+        // handle bounded variable times
+        if (op == "#" && IsActualBoundedIntegerType(l->GetType()) &&
+            IsActualBoundedIntegerType(r->GetType())) {
+          auto rty = cast<BoundedType>(NodeType(*r));
+          assert(rty->Dims() == 1);
+          oss << "((" << ExprSTR(l, is_host) << ")*("
+              << ValueSTR(rty->GetUpperBound()) << ")+(" << ExprSTR(r, is_host)
+              << "))";
+        } else
+          oss << "((" << ExprSTR(l, is_host) << ")" << op << "("
+              << ExprSTR(r, is_host) << "))";
+      }
+    } else if (expr->IsTernary()) {
+      oss << "(" << ExprSTR(expr->GetC(), is_host) << ") ? ("
+          << ExprSTR(expr->GetL(), is_host) << ") : ("
+          << ExprSTR(expr->GetR(), is_host) << ")";
+    } else
+      choreo_unreachable("unsupported expression '" + expr->op +
+                         "': " + PSTR(expr) + ".");
+  } else if (auto sl = dyn_cast<AST::Select>(e)) {
+    size_t val_count = sl->expr_list->Count();
+    // if val_count == 1, pingpong is meaningless?
+    // (TODO: maybe assert when earlysema)
+    assert(val_count >= 2);
+    for (size_t i = 0; i < val_count - 1; i++) {
+      oss << "select_(" << ExprSTR(sl->select_factor, is_host) << " == ";
+      oss << "(" << i << ")";
+      oss << ", " << PSTR(sl->expr_list->ValueAt(i))
+          << (i < val_count - 1 ? ", " : "");
+    }
+    oss << PSTR(sl->expr_list->AllValues().back())
+        << std::string(val_count - 1, ')');
+  } else
+    choreo_unreachable("unsupported expression '" + expr->op + "'.");
+
+  return oss.str();
 }

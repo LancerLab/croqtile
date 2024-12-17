@@ -51,9 +51,14 @@ struct LaunchConfig {
   size_t block_dim_x = 1;
 };
 
+struct OtherTrait {
+  bool has_parallelby = false;
+};
+
 using SymbolDetails = std::map<std::string, std::vector<SymbolDetail>>;
 using LaunchDetails = std::map<std::string, LaunchConfig>;
 using ReturnSymbols = std::map<std::string, std::string>;
+using FunctionTraits = std::map<std::string, OtherTrait>;
 
 enum PassedOrDeclaredSymbolKind : int {
   PDSYM_NONE = 0,
@@ -69,6 +74,7 @@ private:
   SymbolDetails all_syms;
   LaunchDetails launches;
   ReturnSymbols returns;
+  FunctionTraits traits;
 
   size_t param_count = 0;
 
@@ -86,6 +92,17 @@ public:
   }
   LaunchConfig& GetFunctionLaunch(const std::string& fname) {
     return launches[fname];
+  }
+
+  const OtherTrait& GetFunctionTrait(const std::string& fname) const {
+    return traits.at(fname);
+  }
+  OtherTrait& GetFunctionTrait(const std::string& fname) {
+    return traits[fname];
+  }
+
+  bool HasParallelBy(const std::string& fname) const {
+    return GetFunctionTrait(fname).has_parallelby;
   }
 
   bool HasReturnSymbol(const std::string& fname) const {

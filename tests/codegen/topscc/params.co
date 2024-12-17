@@ -1,7 +1,8 @@
 // RUN: choreo -t topscc -es %s -o - | FileCheck %s
-__co__ auto foo(int a, f32 [1, 2] b) {}
+__co__ auto foo(int a, f32 [1, 2] b) { parallel p by 1 {}}
 
 __co__ auto bar(bf16 [1] a, s8[2] b, u16[3] c, f16 [2] d, s32 [1] e, s16 [3] f, u8 [7] g, u32 [1, 2] i, bool) {
+  parallel p by 1 {} // ensure device code be generated
   return a;
 }
 
