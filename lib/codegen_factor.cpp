@@ -33,7 +33,7 @@ bool FactorCodeGen::ContainsLoopVar(const std::string& iv) const {
 }
 
 bool FactorCodeGen::BeforeVisitImpl(AST::Node& n) {
-  TraceEachVisit(n);
+  if (trace_visit) dbgs() << "Before visiting " << n.TypeNameString() << "\n";
 
   if (isa<AST::Program>(&n)) {
     // decide the factor build environment
@@ -70,7 +70,8 @@ bool FactorCodeGen::BeforeVisitImpl(AST::Node& n) {
 }
 
 bool FactorCodeGen::AfterVisitImpl(AST::Node& n) {
-  TraceEachVisit(n);
+  if (trace_visit) dbgs() << "After visiting " << n.TypeNameString() << "\n";
+
   if (isa<AST::Program>(&n)) {
     if (HasError()) return false; // do not generate code when error happens
     for (auto& name : factor_fnames) {

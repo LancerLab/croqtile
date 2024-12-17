@@ -19,7 +19,7 @@ extern Option<bool> native_f16;
 extern Option<std::string> output;
 
 bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
-  TraceEachVisit(n);
+  if (trace_visit) dbgs() << "Before visiting " << n.TypeNameString() << "\n";
 
   if (isa<AST::Program>(&n)) {
     // emit the fixed headers
@@ -38,7 +38,7 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
 }
 
 bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
-  TraceEachVisit(n);
+  if (trace_visit) dbgs() << "After visiting " << n.TypeNameString() << "\n";
 
   if (isa<AST::Program>(&n)) {
     ssm.LeaveScope();
@@ -157,6 +157,23 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
   if (NeedDeviceFunc()) {
     ds << " {\n";
     IncrDeviceIndent();
+
+    // map the choreo input to device memory
+    for (auto& item : GetChoreoFuncIns()) {
+      if (auto sty = dyn_cast<SpannedType>(item.type)) {
+        auto sym = UnScopedName(item.name);
+        // globals are declared in host, while shareds/locals are declared in
+        // device
+        auto shape = sty->GetShape();
+        auto bts = NameBaseType(sty->ElementType());
+        hs << h_indent << bts << " * " << sym << "__device = (" << bts
+           << "*)topsMalloc(" << SizeExprOf(*sty) << ");\n";
+        hs << h_indent << "topsMemcpy(" << ssm.HostName(item.name)
+           << ".data(), " << sym << "__device, " << SizeExprOf(*sty)
+           << ", topsMemcpyHostToDevice);\n";
+        ssm.MapHostSymbol(item.name + "__device", sym + "__device");
+      }
+    }
   }
 
   return true;
@@ -212,10 +229,39 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       ssm.MapHostSymbol(InScopeName(sym) + "__device", sym + "__device");
       ssm.MapHostSymbol(InScopeName(sym), sym);
     } else if (sty->GetStorage() == Storage::SHARED) {
+      if (!IsChoreoOutput(InScopeName(sym))) {
+        ds << d_indent << "__shared__ " << bts << " " << sym << "["
+           << SizeExprOf(*sty) << "];\n";
+        ssm.MapDeviceSymbol(InScopeName(sym), sym);
+      }
     } else if (sty->GetStorage() == Storage::LOCAL) {
+      if (!IsChoreoOutput(InScopeName(sym))) {
+        ds << d_indent << "__local__ " << bts << " " << sym << "["
+           << SizeExprOf(*sty) << "];\n";
+        ssm.MapDeviceSymbol(InScopeName(sym), sym);
+      }
     } else
       choreo_unreachable("unsupported storage type.");
   }
+
+  return true;
+}
+
+bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
+  TraceEachVisit(n);
+
+  if (parallel_level != 1) return true;
+
+  hs << h_indent << device_fn << "<<<" << ">>>(";
+
+  size_t i = 0;
+  for (auto& item : GetDeviceFuncIns()) {
+    auto sname = item.name;
+    if (isa<SpannedType>(item.type)) sname += "__device";
+    hs << ssm.HostName(sname) << ((i++ == 0) ? ", " : "");
+  }
+
+  hs << ");\n";
 
   return true;
 }

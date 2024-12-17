@@ -1,0 +1,23 @@
+// RUN: choreo -t topscc -es %s -o - | FileCheck %s
+__co__ auto foo(int a, f32 [1, 2] b) {
+  f16 [b.span] g_data;
+  parallel p by 1 {
+    shared u8 [g_data.span] s_data;
+    parallel q by 1 {
+      local s16 [s_data.span] l_data;
+    }
+  }
+  return g_data;
+}
+
+// CHECK: __global__ void __choreo_device_foo(int a, float * b)
+// CHECK:   __shared__ unsigned char s_data[2];
+// CHECK:   __local__ short l_data[4];
+
+// CHECK: choreo::spanned_data<choreo::f16, 2> foo(int hp0, const choreo::spanned_view<choreo::f32, 2> & hp1)
+// CHECK:   float * b__device = (float*)topsMalloc(8);
+// CHECK:   topsMemcpy(hp1.data(), b__device, 8, topsMemcpyHostToDevice);
+// CHECK:   auto g_data = choreo::make_spandata<__fp16, 2>({1, 2});
+// CHECK:   __fp16 * g_data__device = (__fp16*)topsMalloc(4);
+// CHECK:   topsMemcpy(g_data__device, g_data, 2, topsMemcpyDeviceToHost);
+// CHECK:   return g_data;

@@ -118,7 +118,6 @@ public:
   bool Visit(AST::Identifier&) override { return true; };
   bool Visit(AST::Parameter&) override { return true; };
   bool Visit(AST::ParamList&) override { return true; };
-  bool Visit(AST::ParallelBy&) override { return true; };
   bool Visit(AST::WhereBind&) override { return true; };
   bool Visit(AST::WithIn&) override { return true; };
   bool Visit(AST::WithBlock&) override { return true; };
@@ -133,6 +132,7 @@ public:
   bool Visit(AST::ForeachBlock&) override { return true; };
   bool Visit(AST::Program&) override { return true; };
 
+  bool Visit(AST::ParallelBy&) override;
   bool Visit(AST::NamedVariableDecl&) override;
   bool Visit(AST::CppSourceCode& n) override;
   bool Visit(AST::ChoreoFunction&) override;
