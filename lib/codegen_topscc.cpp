@@ -33,6 +33,15 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
     ssm.EnterScope();
   } else if (isa<AST::ParallelBy>(&n)) {
     parallel_level++;
+  } else if (isa<AST::WithBlock>(&n)) {
+    ds << d_indent << "{\n";
+    IncrDeviceIndent();
+  } else if (isa<AST::ForeachBlock>(&n)) {
+    ds << d_indent << "{\n";
+    IncrDeviceIndent();
+  } else if (isa<AST::IncrementBlock>(&n)) {
+    ds << d_indent << "{\n";
+    IncrDeviceIndent();
   }
   return 0;
 }
@@ -64,6 +73,15 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
     ssm.LeaveScope();
   } else if (isa<AST::ParallelBy>(&n)) {
     parallel_level--;
+  } else if (isa<AST::WithBlock>(&n)) {
+    DecrDeviceIndent();
+    ds << d_indent << "}\n";
+  } else if (isa<AST::ForeachBlock>(&n)) {
+    DecrDeviceIndent();
+    ds << d_indent << "}\n";
+  } else if (isa<AST::IncrementBlock>(&n)) {
+    DecrDeviceIndent();
+    ds << d_indent << "}\n";
   }
   return 0;
 }
@@ -134,6 +152,7 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
       assert((int)host_pindex == item.p_index);
       item.host_name = GenHostParamName();
       ssm.MapHostSymbol(item.name, item.host_name);
+      ssm.MapDeviceSymbol(item.name, UnScopedName(item.name));
       if (auto sty = dyn_cast<SpannedType>(item.type))
         HandleSymbolicDimensions(sty, item.host_name, host_pindex);
     } else
@@ -228,6 +247,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       }
       ssm.MapHostSymbol(InScopeName(sym) + "__device", sym + "__device");
       ssm.MapHostSymbol(InScopeName(sym), sym);
+      ssm.MapDeviceSymbol(InScopeName(sym), sym);
     } else if (sty->GetStorage() == Storage::SHARED) {
       if (!IsChoreoOutput(InScopeName(sym))) {
         ds << d_indent << "__shared__ " << bts << " " << sym << "["
@@ -264,7 +284,7 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
   for (auto& item : GetDeviceFuncIns()) {
     auto sname = item.name;
     if (isa<SpannedType>(item.type)) sname += "__device";
-    hs << ssm.HostName(sname) << ((i++ == 0) ? ", " : "");
+    hs << ((i++ == 0) ? "" : ", ") << ssm.HostName(sname);
   }
 
   hs << ");\n";
@@ -272,6 +292,79 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
   return true;
 }
 
+inline const char* TopsMdsStorage(Storage st) {
+  switch (st) {
+  case Storage::DEFAULT:
+  case Storage::GLOBAL: return "tops::Global";
+  case Storage::SHARED: return "tops::Shared";
+  case Storage::LOCAL: return "tops::Private";
+  default: choreo_unreachable("storage type is not supported.");
+  }
+  return "";
+}
+
+inline const std::string GetDTEContextName() {
+  static unsigned i = 0;
+  return "ctx" + std::to_string(i++);
+}
+
+bool TopsccCodeGen::Visit(AST::DMA& n) {
+  TraceEachVisit(n);
+
+  auto nty = NodeType(n);
+  if (auto ph = dyn_cast<PlaceHolderType>(nty)) {
+    assert(ph->Category() == TypeCategory::FUTURE);
+    // TODO
+    choreo_unreachable("placeholder is yet to support.");
+    return true;
+  }
+
+  assert(isa<AST::ChunkAt>(n.from) && "Unexpected type for DMA's source.");
+  assert(isa<AST::ChunkAt>(n.to) && "Unexpected type for DMA's destination.");
+
+  auto fty = dyn_cast<FutureType>(nty);
+  assert(fty && "Invalid type of DMA statement!");
+
+  // claim the date transfer engine
+  auto dte_ctx = GetDTEContextName();
+  ds << d_indent << "tops_dte_ctx_t " << dte_ctx << ";\n";
+  ds << d_indent << "tops::dte_scope s(" << dte_ctx << ");\n";
+
+  auto f_ca = cast<AST::ChunkAt>(n.from);
+  auto t_ca = cast<AST::ChunkAt>(n.to);
+  auto f_sym = f_ca->data->name;
+  auto t_sym = t_ca->data->name;
+  auto f_nm = ssm.DeviceName(InScopeName(f_sym));
+  auto t_nm = ssm.DeviceName(InScopeName(t_sym));
+  auto f_sty = GetSpannedType(GetSymbolType(f_sym));
+  auto t_sty = GetSpannedType(GetSymbolType(t_sym));
+
+  assert(f_sty && "can not retrieve data from 'from'.");
+  assert(t_sty && "can not retrieve data from 'to'.");
+
+  // claim the mdspan
+  ds << d_indent << "tops::mdspan __mds_" << f_nm << "("
+     << TopsMdsStorage(f_sty->GetStorage()) << ", " << f_nm << ", "
+     << RSTR(f_sty->GetShape()) << ");\n";
+  ds << d_indent << "tops::mdspan __mds_" << t_nm << "("
+     << TopsMdsStorage(t_sty->GetStorage()) << ", " << t_nm << ", "
+     << RSTR(t_sty->GetShape()) << ");\n";
+
+  if (f_ca->positions == nullptr) {
+    // no chunkat
+    assert(t_ca->positions == nullptr);
+    ds << d_indent << "tops::memcpy(" << dte_ctx << ", __mds_" << t_nm
+       << ", __mds_" << f_nm << ");\n";
+  } else {
+    ds << d_indent << "tops::slice(" << dte_ctx << ", __mds_" << t_nm
+       << ", __mds_" << f_nm << ", ";
+    size_t i = 0;
+    for (auto& p : f_ca->positions->AllValues())
+      ds << ((i++ == 0) ? "" : ", ") << ExprSTR(p, false);
+    ds << ");\n";
+  }
+  return true;
+}
 bool TopsccCodeGen::Visit(AST::Return& n) {
   TraceEachVisit(n);
 
@@ -288,8 +381,8 @@ bool TopsccCodeGen::Visit(AST::Return& n) {
     } else if (IsChoreoOutput(InScopeName(sym))) {
       if (auto sty = dyn_cast<SpannedType>(GetSymbolType(sym))) {
         // return the global storage, must map back
-        hs << h_indent << "topsMemcpy(" << sym << "__device, " << sym << ", "
-           << sty->GetShape().GetSizeExpression()
+        hs << h_indent << "topsMemcpy(" << sym << "__device, " << sym
+           << ".data(), " << sty->GetShape().GetSizeExpression()
            << ", topsMemcpyDeviceToHost);\n";
       }
     }
@@ -360,7 +453,6 @@ void TopsccCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
 
   size_t index = 0;
   for (auto& item : GetDeviceFuncIns()) {
-    //    assert(item.d_index == (int)index);
     oss << ((index++ > 0) ? ", " : "");
     oss << DeviceParamTypeStringify(*item.type) << " ";
     oss << UnScopedName(item.name);
@@ -397,11 +489,6 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
 
   if (auto id = dyn_cast<AST::Identifier>(e)) {
     auto ty = NodeType(*id);
-#if 0
-    if (ContainsLoopVar(id->name))
-      oss << "iv_" << id->name;
-    else
-#endif
     if (isa<BoundedType>(ty) &&
         PrefixedWith(cast<BoundedType>(ty)->GetNote(), "pv")) {
       auto l = RemovePrefixOrNull("pv:", cast<BoundedType>(ty)->GetNote());

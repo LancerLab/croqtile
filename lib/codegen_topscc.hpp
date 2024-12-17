@@ -122,7 +122,6 @@ public:
   bool Visit(AST::WithIn&) override { return true; };
   bool Visit(AST::WithBlock&) override { return true; };
   bool Visit(AST::Memory&) override { return true; };
-  bool Visit(AST::DMA&) override { return true; };
   bool Visit(AST::ChunkAt&) override { return true; };
   bool Visit(AST::Wait&) override { return true; };
   bool Visit(AST::Call&) override { return true; };
@@ -133,6 +132,7 @@ public:
   bool Visit(AST::Program&) override { return true; };
 
   bool Visit(AST::ParallelBy&) override;
+  bool Visit(AST::DMA&) override;
   bool Visit(AST::NamedVariableDecl&) override;
   bool Visit(AST::CppSourceCode& n) override;
   bool Visit(AST::ChoreoFunction&) override;
@@ -199,7 +199,7 @@ private:
   }
 
   FilterRange<SymbolDetail> GetDeviceFuncIns() {
-    return cgi->GetDevicePassIns(fname);
+    return cgi->GetDeviceAllocatables(fname);
   }
 
   FilterRange<SymbolDetail> GetChoreoFuncIns() {

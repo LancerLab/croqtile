@@ -10,7 +10,7 @@ __co__ auto foo(int a, f32 [1, 2] b) {
   return g_data;
 }
 
-// CHECK: __global__ void __choreo_device_foo(int a, float * b)
+// CHECK: __global__ void __choreo_device_foo(int a, float * b, __fp16 * g_data)
 // CHECK:   __shared__ unsigned char s_data[2];
 // CHECK:   __local__ short l_data[4];
 
@@ -21,6 +21,6 @@ __co__ auto foo(int a, f32 [1, 2] b) {
 // CHECK:   __fp16 * g_data__device = (__fp16*)topsMalloc(4);
 // CHECK:   dim3 __foo_gdims(2, 1, 1);
 // CHECK:   dim3 __foo_bdims(3, 1, 1);
-// CHECK:   __choreo_device_foo<<<__foo_gdims, __foo_bdims>>>(hp0, b__device);
-// CHECK:   topsMemcpy(g_data__device, g_data, 2, topsMemcpyDeviceToHost);
+// CHECK:   __choreo_device_foo<<<__foo_gdims, __foo_bdims>>>(hp0, b__device, g_data__device);
+// CHECK:   topsMemcpy(g_data__device, g_data.data(), 2, topsMemcpyDeviceToHost);
 // CHECK:   return g_data;

@@ -329,6 +329,10 @@ int main(int argc, char* argv[]) {
     errs() << "Target '" << target.GetValue()
            << "' has not been supported yet.\n";
 
+    // apply the gcu specific checking
+    GCUCheck gcu_checker;
+    if (!gcu_checker.RunOnProgram(root)) return gcu_checker.Status();
+
     MemUsageCheck muc;
     if (!muc.RunOnProgram(root))
       return muc.Status();
