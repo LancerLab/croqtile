@@ -100,6 +100,9 @@ private:
 public:
   const std::string GetOutputFileName() const { return output_filename; }
   const std::string GetInputFileName() const { return input_filename; }
+  const std::string GetInputName() const {
+    return RemoveDirectoryPrefix(RemoveSuffix(input_filename, ".co"));
+  }
 
   bool StdoutAsOutput() const { return stdout_as_output; }
   bool StdinAsInput() const { return stdin_as_input; }

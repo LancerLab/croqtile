@@ -23,6 +23,8 @@ using namespace Choreo::Factor;
 
 extern Option<bool> native_f16;
 extern Option<std::string> output;
+extern Option<bool> cross_compile;
+extern Option<bool> use_kernel_template;
 
 bool FactorCodeGen::ContainsLoopVar(const std::string& iv) const {
   for (auto& loop_var : loop_vars)

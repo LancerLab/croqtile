@@ -73,8 +73,6 @@ private:
   size_t hp_count = 0; // host parameter count
 
   int parallel_level = 0;
-  bool cross_compile = false;
-  bool use_kernel_template = false;
   bool factor_host_unbraced = false;
 
   ptr<FunctionType> fty = nullptr;
@@ -106,14 +104,10 @@ private:
 public:
   FactorCodeGen(
       const std::map<std::string, std::vector<RtMemUsageCheckInfo>>& lists,
-      const ptr<CodeGenInfo>& ci, bool cross_compile, bool use_kernel_template)
+      const ptr<CodeGenInfo>& ci)
       : CodeGenerator("codegen", CCtx().GetGlobalSymbolTable()),
-        cross_compile(cross_compile), use_kernel_template(use_kernel_template),
         rt_mem_usage_check_lists(lists), cgi(ci) {
-    factor_pname =
-        "__choreo_" +
-        RemoveDirectoryPrefix(RemoveSuffix(
-            OptionRegistry::GetInstance().GetInputFileName(), ".co"));
+    factor_pname = "__choreo_" + OptionRegistry::GetInstance().GetInputName();
   }
 
   bool BeforeVisitImpl(AST::Node&) override;

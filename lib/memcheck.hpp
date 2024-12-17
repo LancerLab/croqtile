@@ -185,7 +185,8 @@ private:
 
 public:
   MemUsageCheck() : VisitorWithSymTab("muchk", CCtx().GetGlobalSymbolTable()) {
-    if (CCtx().GetTarget() == CompileTarget::Factor) {
+    if ((CCtx().GetTarget() == CompileTarget::Factor) ||
+        (CCtx().GetTarget() == CompileTarget::Topscc)) {
       valid_storage_type = {Storage::LOCAL, Storage::SHARED, Storage::GLOBAL};
       // initialize with ct_tot_mem_usage
       for (const auto& sto : valid_storage_type) ct_tot_mem_usage[sto] = 0;

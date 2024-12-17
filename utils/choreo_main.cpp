@@ -2,6 +2,7 @@
 #include "codegen.hpp"
 #include "codegen_cuda.hpp"
 #include "codegen_factor.hpp"
+#include "codegen_topscc.hpp"
 #include "codegen_prepare.hpp"
 #include "earlysema.hpp"
 #include "gcucheck.hpp"
@@ -314,8 +315,7 @@ int main(int argc, char* argv[]) {
       return mem_usage_checker.Status();
 
     Choreo::Factor::FactorCodeGen codegen(
-        mem_usage_checker.GetRtMemUsageInfo(), cgp.GetASTInfo(),
-        cross_compile, use_kernel_template);
+        mem_usage_checker.GetRtMemUsageInfo(), cgp.GetASTInfo());
     if (!codegen.RunOnProgram(root)) return codegen.Status();
     break;
   }
@@ -325,8 +325,17 @@ int main(int argc, char* argv[]) {
     break;
   }
   case CompileTarget::Topscc: {
+    // remove it when topscc is ready
     errs() << "Target '" << target.GetValue()
            << "' has not been supported yet.\n";
+
+    MemUsageCheck muc;
+    if (!muc.RunOnProgram(root))
+      return muc.Status();
+
+    Choreo::Topscc::TopsccCodeGen codegen(
+        muc.GetRtMemUsageInfo(), cgp.GetASTInfo());
+    if (!codegen.RunOnProgram(root)) return codegen.Status();
     return 1;
   }
   default:
