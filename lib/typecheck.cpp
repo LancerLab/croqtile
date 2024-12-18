@@ -3,9 +3,21 @@
 
 using namespace Choreo;
 
-bool TypeChecker::BeforeVisitImpl(AST::Node&) { return true; }
+bool TypeChecker::BeforeVisitImpl(AST::Node& n) {
+  if (isa<AST::ChoreoFunction>(&n)) pending_futures.clear();
+  return true;
+}
 
-bool TypeChecker::AfterVisitImpl(AST::Node&) { return true; }
+bool TypeChecker::AfterVisitImpl(AST::Node& n) {
+  if (isa<AST::ChoreoFunction>(&n)) {
+    if (!pending_futures.empty()) {
+      Error(n.LOC(), "some futures are not explicitly waited: " +
+                         DelimitedString(pending_futures) + ".");
+      error_count++;
+    }
+  }
+  return true;
+}
 
 bool TypeChecker::Visit(AST::MultiNodes& n) {
   TraceEachVisit(n);
@@ -196,6 +208,10 @@ bool TypeChecker::Visit(AST::DMA& n) {
     error_count++;
   }
 
+  if (!n.future.empty() && cast<FutureType>(ty)->IsAsync())
+    pending_futures.insert(InScopeName(n.future));
+  if (!n.chain_from.empty()) pending_futures.erase(InScopeName(n.chain_from));
+
   if (!isa<AST::ChunkAt>(n.from) || !isa<SpannedType>(n.from->GetType())) {
     Error(n.LOC(),
           "The 'from' of DMA is not as expected: " + n.from->TypeNameString() +
@@ -283,15 +299,29 @@ bool TypeChecker::Visit(AST::DMA& n) {
 
   return true;
 }
+
 bool TypeChecker::Visit(AST::ChunkAt& n) {
   TraceEachVisit(n);
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
+
 bool TypeChecker::Visit(AST::Wait& n) {
   TraceEachVisit(n);
+
+  for (auto& f : n.GetFutures()) {
+    auto fty = NodeType(*f);
+    if (!isa<FutureType>(fty)) {
+      Error(n.LOC(),
+            "Wait for a non-future type " + PSTR(f) + "(" + PSTR(fty) + ").");
+      error_count++;
+    } else if (auto id = AST::GetIdentifier(*f))
+      pending_futures.erase(InScopeName(id->name));
+  }
+
   return true;
 }
+
 bool TypeChecker::Visit(AST::Call& n) {
   TraceEachVisit(n);
 
@@ -327,6 +357,9 @@ bool TypeChecker::Visit(AST::Rotate& n) {
   TraceEachVisit(n);
   size_t index = 0;
   for (auto s : n.ids->AllValues()) {
+    if (auto id = AST::GetIdentifier(*s))
+      pending_futures.erase(InScopeName(id->name));
+
     if (index == 0) {
       index++;
       continue;

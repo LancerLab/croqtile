@@ -37,6 +37,7 @@ __co__ f16[16, 16] copy(f16[16, 16] lhs, f16[16, 16] rhs) {
           local f16[tile(0), tile(1)] out_local{0};
           lhs_load = dma.copy.async lhs.chunkat(m_tile, k_tile) => local;
           rhs_load = dma.copy.async rhs.chunkat(k_tile, n_tile) => local;
+          wait lhs_load, rhs_load;
           call copy_kernel(lhs_load.data, rhs_load.data, out_local, tile(0), tile(1), tile(2));
           dma.copy out_local => out.chunkat(m_tile, n_tile);
         }

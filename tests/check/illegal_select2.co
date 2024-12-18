@@ -17,6 +17,7 @@ __co__ auto illegal_select(f32 [128, 128] i) {
             i_local_s2 = dma.copy.async i_shared.chunkat(p_tile, q_tile) => select(q_tile % 2, i_local0, i_shared0) after i_shared;
             i_local_s3 = dma.copy.async i_shared.chunkat(p_tile, q_tile) => select(q_tile % 2, i_local0, i_local6) after i_shared;
             f = select (#x_tile / #q, i_local_s1, i_local_s2);
+            wait i_local_s1, i_local_s2, i_local_s3;
           }
         }
       }

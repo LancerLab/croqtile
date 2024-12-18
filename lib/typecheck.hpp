@@ -11,6 +11,9 @@ struct TypeChecker : public VisitorWithSymTab {
 private:
   bool allow_auto_threading = false;
 
+  std::set<std::string> pending_futures; // a simple check to detect futures
+                                         // that are never be waited
+
 private:
   bool BeforeVisitImpl(AST::Node&) override;
   bool AfterVisitImpl(AST::Node&) override;

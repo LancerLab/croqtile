@@ -14,7 +14,7 @@ __co__ auto span_as0(f32 [32, 18, 9] a) {
       foreach index {
         a_local = dma.copy a.span_as([ 16, 9, 36 ]).chunkat(x, p, y) => local;
         b_local = dma.copy b.span_as([ 144, 36 ]).chunkat(p, p) => local;
-        o_store = dma.copy.async a_local => o.span_as([ 16, 9, 36 ]).chunkat(x, p, y);
+        o_store = dma.copy a_local => o.span_as([ 16, 9, 36 ]).chunkat(x, p, y);
       }
     }
   }

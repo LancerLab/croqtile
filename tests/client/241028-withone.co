@@ -19,6 +19,7 @@ __co__ f32[512, 512] vector_mul(f32[512] lhs, f32[512] rhs) {
     rhs_share = dma.copy.async rhs.chunkat(p) => shared;
     local f32[lhs_share.span(0), rhs_share.span(0)] l2_out;
     with index = {lhs_tile, rhs_tile} in[128, 128] {
+      wait lhs_share, rhs_share;
       foreach
         lhs_tile {
           foreach

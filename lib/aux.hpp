@@ -47,20 +47,25 @@ choreo_unreachable_impl(const char* file, int line,
 #define choreo_unreachable(...)                                                \
   choreo_unreachable_impl(__FILE__, __LINE__ __VA_OPT__(, ) __VA_ARGS__)
 
-template <typename T>
-inline static std::string DelimitedString(const std::vector<T>& v,
+template <typename Container>
+inline static std::string DelimitedString(const Container& container,
                                           std::string delimiter = ", ") {
-  std::ostringstream iss;
-  if (v.size() > 0) {
-    iss << v[0];
-    for (size_t i = 1; i < v.size(); ++i) {
-      if constexpr (std::is_same_v<T, std::string>)
-        iss << delimiter << v[i];
-      else
-        iss << delimiter << std::to_string(v[i]);
-    }
+  std::ostringstream oss;
+  auto it = container.begin();
+  if (it != container.end()) {
+    if constexpr (std::is_same_v<typename Container::value_type, std::string>)
+      oss << *it;
+    else
+      oss << std::to_string(*it);
+    ++it;
   }
-  return iss.str();
+  for (; it != container.end(); ++it) {
+    if constexpr (std::is_same_v<typename Container::value_type, std::string>)
+      oss << delimiter << *it;
+    else
+      oss << delimiter << std::to_string(*it);
+  }
+  return oss.str();
 }
 
 // split `input` to a vector

@@ -1,0 +1,15 @@
+// RUN: not choreo %s 2>&1| FileCheck %s
+
+__co__ void foo(s8 [1, 2] input) {
+  f = dma.copy.async input => local;
+  f0 = dma.any;
+  f1 = dma.any;
+  parallel p by 1 {
+    f1 = dma.copy.async input => local;
+    f2 = dma.copy.async input => local;
+    swap(f0, f1);
+  }
+}
+
+// CHECK: error: some futures are not explicitly waited: ::foo::f, ::foo::paraby_0::f2.
+// CHECK: Totally 1 errors have been detected.
