@@ -918,7 +918,7 @@ bool FactorCodeGen::Visit(AST::ForeachBlock& forNode) {
     } else {
       assert(!cur_bounded_vars[iv_name].empty() &&
              "can not find the bounded name.");
-      assert((cur_bounded_vars[iv_name].top().size() == iv_sizes.Dims()) &&
+      assert((cur_bounded_vars[iv_name].top().size() == iv_sizes.Rank()) &&
              "can not find the bounded name.");
       size_t i = 0;
       for (auto name : cur_bounded_vars[iv_name].top()) {

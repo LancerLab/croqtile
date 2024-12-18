@@ -357,7 +357,6 @@ struct Shape {
   constexpr Shape& operator=(const Shape&) = default;
 
   size_t DimCount() const { return dim_count; }
-  size_t Dims() const { return dim_count; } // TODO: remove this interface
   size_t Rank() const { return dim_count; }
 
   void Update() { dim_count = values[val_no].size(); }
@@ -518,7 +517,7 @@ struct Shape {
 };
 
 inline bool operator==(const Shape& lhs, const Shape& rhs) {
-  return lhs.IsValid() && rhs.IsValid() && (lhs.Dims() == rhs.Dims()) &&
+  return lhs.IsValid() && rhs.IsValid() && (lhs.Rank() == rhs.Rank()) &&
          isValueListEqual(lhs.Value(), rhs.Value());
 }
 
@@ -794,7 +793,7 @@ struct MDSpanType : public Type, public TypeIDProvider<MDSpanType> {
   void SetShape(const Shape& v) { value = v; }
   const Shape GetShape() { return value; }
 
-  size_t Dims() const override { return value.Dims(); }
+  size_t Dims() const override { return value.Rank(); }
 
   // MDSpanType is an incomplete/partial type
   bool IsComplete() const override { return false; }
@@ -991,7 +990,7 @@ struct BoundedITupleType final : public BoundedType,
              "expecting an invalid bound.");
   }
 
-  size_t Dims() const override { return ubounds.Dims(); }
+  size_t Dims() const override { return ubounds.Rank(); }
   bool IsComplete() const override { return true; }
   bool HasSufficientInfo() const { return ubounds.IsValid(); }
   const MultiBounds GetLowerBounds() const { return lbounds; }

@@ -528,7 +528,7 @@ public:
                     std::to_string(n.Rank()) + ".");
 #endif
       } else
-        n.SetRank(vl.Dims());
+        n.SetRank(vl.Rank());
 
       // pass the value number over
       cur_mdspan_vn = cur_vn;

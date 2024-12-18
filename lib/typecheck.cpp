@@ -237,8 +237,7 @@ bool TypeChecker::Visit(AST::DMA& n) {
     auto stty = cast<SpannedType>(tty);
     auto f_shape = sfty->GetShape();
     auto t_shape = stty->GetShape();
-    if (sfty->f_type != stty->f_type ||
-        f_shape.DimCount() != t_shape.DimCount()) {
+    if (sfty->f_type != stty->f_type || !f_shape.SameRankAs(t_shape)) {
       Error(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
                          ") with " + PSTR(tc) + " and 'to'(" + PSTR(tty) +
                          ").");
@@ -264,8 +263,7 @@ bool TypeChecker::Visit(AST::DMA& n) {
     auto stty = cast<SpannedType>(tty);
     auto f_shape = sfty->GetShape();
     auto t_shape = stty->GetShape();
-    if (sfty->f_type != stty->f_type ||
-        f_shape.DimCount() != t_shape.DimCount()) {
+    if (sfty->f_type != stty->f_type || !f_shape.SameRankAs(t_shape)) {
       Error(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
                          ") with " + PSTR(pc) + " and 'to'(" + PSTR(tty) +
                          ").");

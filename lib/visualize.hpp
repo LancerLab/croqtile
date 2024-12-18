@@ -401,7 +401,7 @@ private:
       // use whole data as a single chunk
 
       // dimension 1 is repeated parallel_count times
-      std::vector<int> bounds(data_shape.Dims(), 1);
+      std::vector<int> bounds(data_shape.Rank(), 1);
       bounds[p_dim] = parallel_count;
       std::set<int> parallel_bounds;
       parallel_bounds.insert(p_dim);
@@ -445,11 +445,11 @@ private:
     // this calculate the tiled blocks
     Shape block_shape = cast<SpannedType>(ca.GetType())->GetShape();
 
-    assert(block_shape.Dims() > 1 && "unexpected shape dimensions.");
-    assert(block_shape.Dims() == bounds.size() &&
+    assert(block_shape.Rank() > 1 && "unexpected shape dimensions.");
+    assert(block_shape.Rank() == bounds.size() &&
            "inconsistence between shape bounds and tiling");
 
-    if (block_shape.Dims() > 3) {
+    if (block_shape.Rank() > 3) {
       Warning(ca.LOC(), "unable to visualize tensors with high dimensions.");
       return nullptr;
     }
@@ -490,7 +490,7 @@ private:
     start_x += sizes[0] * axis_scale[0] + label_distance + 100;
 
     // the dimension representing parallelism is repeated parallel_count times
-    std::vector<int> bounds(shape.Dims(), 1);
+    std::vector<int> bounds(shape.Rank(), 1);
     bounds[p_dim] = parallel_count;
     std::set<int> parallel_bounds;
     parallel_bounds.insert(p_dim);
