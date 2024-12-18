@@ -326,10 +326,10 @@ int main(int argc, char* argv[]) {
   }
   case CompileTarget::Topscc: {
     // remove it when topscc is ready
-    errs() << "Target '" << target.GetValue()
-           << "' has not been supported yet.\n";
+    errs() << "Experimental: support of '" << target.GetValue()
+           << "' is under construction.\n";
 
-    // apply the gcu specific checking
+    // apply GCU specific checks
     GCUCheck gcu_checker;
     if (!gcu_checker.RunOnProgram(root)) return gcu_checker.Status();
 

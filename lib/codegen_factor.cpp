@@ -1178,7 +1178,7 @@ void FactorCodeGen::EmitFixedHostHead() {
 #include "tops/tops_ext.h"
 #include "tops/tops_runtime.h"
 
-// include the choreo header\n";
+// include the choreo header;
 )";
   if (native_f16) oss << "#define NATIVE_F16_SUPPORT\n";
   oss << R"(#include "choreo.h"

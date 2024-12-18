@@ -7,10 +7,13 @@
 #include <thread>
 
 #include "ast.hpp"
-// #include "choreo_topscc_header.inc"
+#include "choreo_header.inc"
 #include "codegen.hpp"
-// #include "topscc_script.inc"
 #include "types.hpp"
+
+#ifndef __CHOREO_TOPSCC_DIR__
+#error "missing macro definition of __CHOREO_TOPSCC_DIR__"
+#endif
 
 using namespace Choreo;
 using namespace Choreo::Topscc;
@@ -51,7 +54,6 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
 
   if (isa<AST::Program>(&n)) {
     ssm.LeaveScope();
-    code_segments.back() = ds.str() + "\n" + hs.str();
     switch (CCtx().GetOutputKind()) {
     case OutputKind::TargetSourceCode: EmitSource(); break;
     case OutputKind::TargetModule:
@@ -62,7 +64,7 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
       break;
     }
     case OutputKind::ShellScript: {
-      choreo_unreachable("topscc target script is yet to support.");
+      EmitScript();
       break;
     }
     default:
@@ -71,6 +73,9 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
     }
   } else if (isa<AST::ChoreoFunction>(&n)) {
     ssm.LeaveScope();
+    code_segments.back() += ds.str() + hs.str();
+    ds.str(""); // reset the streams
+    hs.str("");
   } else if (isa<AST::ParallelBy>(&n)) {
     parallel_level--;
   } else if (isa<AST::WithBlock>(&n)) {
@@ -107,14 +112,13 @@ void TopsccCodeGen::EmitFixedHostHead() {
 #include "tops/tops_ext.h"
 #include "tops/tops_runtime.h"
 
-// include the choreo header\n";
+// include the choreo header;
 )";
   if (native_f16) oss << "#define NATIVE_F16_SUPPORT\n";
   oss << R"(#include "choreo.h"
 
 using namespace choreo;
 
-} // end anonymous namespace
 )";
   code_segments.push_back(oss.str()); // reset the host code
 }
@@ -187,16 +191,18 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
     // map the choreo input to device memory
     for (auto& item : GetChoreoFuncIns()) {
       if (auto sty = dyn_cast<SpannedType>(item.type)) {
+        // Only the globals are declared in host. The shareds/locals are
+        // declared in device
         auto sym = UnScopedName(item.name);
-        // globals are declared in host, while shareds/locals are declared in
-        // device
         auto bts = NameBaseType(sty->ElementType());
-        hs << h_indent << bts << " * " << sym << "__device = (" << bts
-           << "*)topsMalloc(" << SizeExprOf(*sty) << ");\n";
+        auto buf_sym = sym + "__device";
+        hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
+        hs << h_indent << "topsMalloc(&" << buf_sym << ", " << SizeExprOf(*sty)
+           << "*sizeof(" << bts << "));\n";
         hs << h_indent << "topsMemcpy(" << ssm.HostName(item.name)
-           << ".data(), " << sym << "__device, " << SizeExprOf(*sty)
+           << ".data(), " << buf_sym << ", " << SizeExprOf(*sty)
            << ", topsMemcpyHostToDevice);\n";
-        ssm.MapHostSymbol(item.name + "__device", sym + "__device");
+        ssm.MapHostSymbol(item.name + "__device", buf_sym);
       }
     }
   }
@@ -229,18 +235,21 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
     auto shape = sty->GetShape();
     auto bts = NameBaseType(sty->ElementType());
     if (sty->GetStorage() == Storage::GLOBAL) {
+      auto buf_sym = sym + "__device";
       if (!IsChoreoOutput(InScopeName(sym))) {
-        if (!n.init_value)
-          hs << h_indent << bts << " * " << sym << "__device = (" << bts
-             << "*)topsMalloc(" << SizeExprOf(*sty) << ");\n";
-        else {
+        if (!n.init_value) {
+          hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
+          hs << h_indent << "topsMalloc(&" << buf_sym << ", "
+             << SizeExprOf(*sty) << "*sizeof(" << bts << "));\n";
+        } else {
           // support simple int literal initialization
           hs << h_indent << bts << " " << sym << "__init[" << SizeExprOf(*sty)
              << "];\n";
           hs << h_indent << "memset(" << sym << "__init, " << PSTR(n.init_value)
              << ", sizeof(" << sym << "__init));\n";
-          hs << h_indent << bts << " * " << sym << "__device = (" << bts
-             << "*)topsMalloc(" << SizeExprOf(*sty) << ");\n";
+          hs << h_indent << bts << " * " << buf_sym << "= nullptr;\n";
+          hs << h_indent << "topsMalloc(&" << buf_sym << ", "
+             << SizeExprOf(*sty) << "*sizeof(" << bts << "));\n";
           hs << h_indent << "topsMemcpy(" << sym << "__init, " << sym
              << "__device, " << SizeExprOf(*sty)
              << ", topsMemcpyHostToDevice);\n";
@@ -248,10 +257,11 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       } else {
         hs << h_indent << "auto " << sym << " = choreo::make_spandata<" << bts
            << ", " << shape.Rank() << ">(" << LSTR(shape) << ");\n";
-        hs << h_indent << bts << " * " << sym << "__device = (" << bts
-           << "*)topsMalloc(" << SizeExprOf(*sty) << ");\n";
+        hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
+        hs << h_indent << "topsMalloc(&" << buf_sym << ", " << SizeExprOf(*sty)
+           << "*sizeof(" << bts << "));\n";
       }
-      ssm.MapHostSymbol(InScopeName(sym) + "__device", sym + "__device");
+      ssm.MapHostSymbol(InScopeName(sym) + "__device", buf_sym);
       ssm.MapHostSymbol(InScopeName(sym), sym);
       ssm.MapDeviceSymbol(InScopeName(sym), sym);
     } else if (sty->GetStorage() == Storage::SHARED) {
@@ -335,7 +345,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   // claim the date transfer engine
   auto dte_ctx = GetDTEContextName();
   ds << d_indent << "tops_dte_ctx_t " << dte_ctx << ";\n";
-  ds << d_indent << "tops::dte_scope s(" << dte_ctx << ");\n";
+  ds << d_indent << "tops::dte_scope s_" << dte_ctx << "(" << dte_ctx << ");\n";
 
   auto f_ca = cast<AST::ChunkAt>(n.from);
   auto t_ca = cast<AST::ChunkAt>(n.to);
@@ -366,24 +376,28 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
            << "tops::memcpy" << (fty->IsAsync() ? "_async" : "") << "("
            << dte_ctx << ", __mds_" << t_nm << ", __mds_" << f_nm << ");\n";
       } else {
+        ds << d_indent << "int __deslice_offset_" << t_nm << "[] = {";
+        size_t i = 0;
+        for (auto& p : t_ca->positions->AllValues())
+          ds << ((i++ == 0) ? "" : ", ") << "(int)" << ExprSTR(p, false);
+        ds << "};\n";
         ds << d_indent
            << (fty->IsAsync() ? ("tops::event " + n.future + " = ") : "")
            << "tops::deslice" << (fty->IsAsync() ? "_async" : "") << "("
-           << dte_ctx << ", __mds_" << t_nm << ", __mds_" << f_nm << ", ";
-        size_t i = 0;
-        for (auto& p : t_ca->positions->AllValues())
-          ds << ((i++ == 0) ? "" : ", ") << ExprSTR(p, false);
-        ds << ");\n";
+           << dte_ctx << ", __mds_" << t_nm << ", __mds_" << f_nm
+           << ", __deslice_offset_" << t_nm << ");\n";
       }
     } else {
+      ds << d_indent << "int __slice_offset_" << f_nm << "[] = {";
+      size_t i = 0;
+      for (auto& p : f_ca->positions->AllValues())
+        ds << ((i++ == 0) ? "" : ", ") << "(int)" << ExprSTR(p, false);
+      ds << "};\n";
       ds << d_indent
          << (fty->IsAsync() ? ("tops::event " + n.future + " = ") : "")
          << "tops::slice" << (fty->IsAsync() ? "_async" : "") << "(" << dte_ctx
-         << ", __mds_" << t_nm << ", __mds_" << f_nm << ", ";
-      size_t i = 0;
-      for (auto& p : f_ca->positions->AllValues())
-        ds << ((i++ == 0) ? "" : ", ") << ExprSTR(p, false);
-      ds << ");\n";
+         << ", __mds_" << t_nm << ", __mds_" << f_nm << ", __slice_offset_"
+         << f_nm << ");\n";
     }
   } else if (n.operation == ".pad") {
     auto pad_config = cast<PadConfig>(n.GetConfig());
@@ -435,7 +449,9 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
   // emit template arguments
   if (n.template_args) {
     ds << "<";
-    for (auto& ta : n.template_args->AllValues()) ds << ExprSTR(ta);
+    size_t i = 0;
+    for (auto& ta : n.template_args->AllValues())
+      ds << ((i++ == 0) ? "" : ", ") << ExprSTR(ta, false);
     ds << ">";
   }
 
@@ -595,9 +611,83 @@ void TopsccCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
 }
 
 void TopsccCodeGen::EmitSource() {
-  auto ifname = OptionRegistry::GetInstance().GetInputFileName();
-
   for (auto& code : code_segments) outs() << code << "\n";
+}
+
+void TopsccCodeGen::EmitScript() {
+  auto filename = RemoveDirectoryPrefix(
+      RemoveSuffix(OptionRegistry::GetInstance().GetInputFileName(), ".co"));
+  outs() << "#!/usr/bin/env bash\n\n";
+  outs() << "# This is the choreo generated bash script to compile factor "
+            "code\n\n";
+
+  outs() << "TOPSCC_INSTALL=" << STRINGIZE(__CHOREO_TOPSCC_DIR__) << "\n";
+  outs() << "TOPSCC=${TOPSCC_INSTALL}/bin/topscc\n";
+  outs() << "TOPSCC_LIB=${TOPSCC_INSTALL}/lib\n\n";
+
+  auto build_path = CreateUniquePath();
+  auto cc_file = build_path + "/__choreo_topscc_" + filename + ".cpp";
+  auto exe_file = build_path + "/__choreo_topscc_" + filename + ".exe";
+  auto fb_file = build_path + "/__choreo_topscc_" + filename + ".fb";
+  outs() << "rm -fr " << build_path << "\n";
+  outs() << "mkdir -p " << build_path << "\n\n";
+
+  // place the choreo header
+  outs() << "cat <<'EOF' > " << build_path << "/choreo.h\n";
+  outs() << __choreo_header_as_string << "\nEOF\n\n";
+
+  outs() << "cat <<'EOF' > " << cc_file << "\n";
+  for (auto& code : code_segments) outs() << code << "\n";
+  outs() << "\nEOF\n\n";
+
+  // JIT: detect the environment
+  outs() << R"script(
+# check the device just-in-time
+# TODO: improve the target check with more solid code
+GCU_DEVICE_STR="$(lspci | grep Enflame | head -1)"
+echo $GCU_DEVICE_STR
+if [[ "${GCU_DEVICE_STR}" == *"S60G"* ]]; then
+  gcu_arch=gcu300
+elif [[ "${GCU_DEVICE_STR}" == *"c035"* ]]; then
+  gcu_arch=gcu300
+  export TOPS_VISIBLE_DEVICES=1
+elif [[ "${GCU_DEVICE_STR}" == *"S60"* ]]; then
+  gcu_arch=gcu300
+elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then
+  gcu_arch=gcu210
+elif [[ "$(lspci | grep Tencent)" != "" ]]; then
+  gcu_arch=gcu210
+else
+  echo "can not determine the GCU device type."
+  exit 1
+fi
+)script";
+
+  outs() << R"script(
+show_usage() {
+  echo "  Usage: $0 | --execute           -> compile and execute choreo in factor"
+  echo "                | --compile-binary    -> compile and generate the binary code"
+  echo "                | --compile-fatbin    -> compile and generate the fatbin"
+  exit 1
+}
+
+# compile, execute
+)script";
+
+  outs() << R"(export CFLAGS="-arch ${gcu_arch} -std=c++17 -ltops -lm")";
+  outs() << "\nexport LD_LIBRARY_PATH=${TOPSCC_LIB}:${LD_LIBRARY_PATH}\n\n";
+  outs() << R"(if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then)";
+  outs() << "\n  ${TOPSCC} ${CFLAGS} " << cc_file << " -o " << exe_file;
+  outs() << "\n  " << exe_file << "\n";
+  outs() << R"(elif [ "$1" == "--compile-binary" ]; then)";
+  outs() << "\n  ${TOPSCC} -c ${CFLAGS} " << cc_file << " -o " << exe_file
+         << "\n";
+  outs() << R"(elif [ "$1" == "--compile-fatbin" ]; then)";
+  // TODO: figure out the option
+  outs() << "\n  ${TOPSCC} -c ${CFLAGS} " << cc_file << " -o " << fb_file
+         << "\n";
+  outs() << "else show_usage\n";
+  outs() << "fi";
 }
 
 // TODO: eliminate the need of the value replacement?

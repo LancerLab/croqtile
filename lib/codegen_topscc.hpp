@@ -171,6 +171,7 @@ private:
   void EmitDeviceFuncDecl(std::ostringstream&);
 
   void EmitSource();
+  void EmitScript();
 
 private:
   void IncrHostIndent() { h_indent += "  "; }
