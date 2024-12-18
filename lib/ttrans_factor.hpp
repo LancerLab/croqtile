@@ -383,7 +383,7 @@ public:
     if (n.ranges->Count() > 1)
       choreo_unreachable("swapping inside multi-bounds is yet to support.");
 
-    auto& ranges = n.getRanges();
+    auto& ranges = n.GetRanges();
     auto iv_name = cast<AST::LoopRange>(ranges[0])->iv->name;
     auto lbound = cast<AST::LoopRange>(ranges[0])->lbound;
     if (!IsValidBound(lbound)) lbound = 0;

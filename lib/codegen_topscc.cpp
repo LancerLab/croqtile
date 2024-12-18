@@ -34,13 +34,13 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
   } else if (isa<AST::ParallelBy>(&n)) {
     parallel_level++;
   } else if (isa<AST::WithBlock>(&n)) {
+    ds << d_indent << "// with-in: " << n.LOC() << "\n";
     ds << d_indent << "{\n";
     IncrDeviceIndent();
   } else if (isa<AST::ForeachBlock>(&n)) {
-    ds << d_indent << "{\n";
-    IncrDeviceIndent();
+    ds << d_indent << "// foreach: " << n.LOC() << "\n";
   } else if (isa<AST::IncrementBlock>(&n)) {
-    ds << d_indent << "{\n";
+    ds << d_indent << "// incr: " << n.LOC() << "\n";
     IncrDeviceIndent();
   }
   return 0;
@@ -76,12 +76,19 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
   } else if (isa<AST::WithBlock>(&n)) {
     DecrDeviceIndent();
     ds << d_indent << "}\n";
-  } else if (isa<AST::ForeachBlock>(&n)) {
-    DecrDeviceIndent();
-    ds << d_indent << "}\n";
+  } else if (auto fb = dyn_cast<AST::ForeachBlock>(&n)) {
+    const auto& ranges = fb->GetRangeNodes();
+    for (int j = ranges->Count() - 1; j >= 0; --j) {
+      auto rng = cast<AST::LoopRange>(ranges->ValueAt(j));
+      auto cname = rng->IVName();
+      for (auto iv_name : within_map.at(InScopeName(cname))) {
+        DecrDeviceIndent();
+        ds << d_indent << "} // " << UnScopedName(iv_name) << "\n";
+      }
+    }
   } else if (isa<AST::IncrementBlock>(&n)) {
     DecrDeviceIndent();
-    ds << d_indent << "}\n";
+    ds << d_indent << "} // end of incr: " << n.LOC() << "\n";
   }
   return 0;
 }
@@ -365,6 +372,56 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   }
   return true;
 }
+
+bool TopsccCodeGen::Visit(AST::WithIn& n) {
+  TraceEachVisit(n);
+
+  ssm.MapDeviceSymbol(InScopeName(n.with->name), "__iv_" + n.with->name);
+
+  for (auto& v : n.GetMatchers()) {
+    auto id = cast<AST::Identifier>(v);
+    ssm.MapDeviceSymbol(InScopeName(id->name), "__iv_" + id->name);
+    ds << d_indent << "int __iv_" << id->name << " = 0;\n";
+  }
+
+  return true;
+}
+
+bool TopsccCodeGen::Visit(AST::WhereBind& n) {
+  TraceEachVisit(n);
+
+  // TODO
+  choreo_unreachable("where bind is yet to support.");
+
+  return true;
+}
+
+bool TopsccCodeGen::Visit(AST::WithBlock& n) {
+  TraceEachVisit(n);
+  // anything required?
+  return true;
+}
+
+bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
+  TraceEachVisit(n);
+
+  const auto& ranges = n.GetRangeNodes();
+  for (int j = ranges->Count() - 1; j >= 0; --j) {
+    auto rng = cast<AST::LoopRange>(ranges->ValueAt(j));
+    auto cname = rng->IVName();
+    for (auto iv_name : within_map.at(InScopeName(cname))) {
+      auto iv_ty = GetSymbolType(UnScopedName(iv_name));
+      assert(IsActualBoundedIntegerType(iv_ty));
+      auto iv_bty = cast<BoundedType>(iv_ty);
+      ds << d_indent << "for (; " << ssm.DeviceName(iv_name) << " < "
+         << STR(iv_bty->GetUpperBound()) << "; ++" << ssm.DeviceName(iv_name)
+         << ") {\n";
+      IncrDeviceIndent();
+    }
+  }
+  return true;
+}
+
 bool TopsccCodeGen::Visit(AST::Return& n) {
   TraceEachVisit(n);
 
@@ -500,9 +557,14 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
         oss << "__tops_bid_x()";
       else
         choreo_unreachable("invalid bounded type note.");
+    } else if (within_map.count(InScopeName(id->name)) && !is_host) {
+      size_t i = 0;
+      for (auto iv_name : within_map.at(InScopeName(id->name)))
+        oss << ((i++ == 0) ? "" : ", ")
+            << UnScopedName(ssm.DeviceName(iv_name));
     } else
-      oss << ((is_host) ? ssm.HostName(InScopeName(id->name))
-                        : ssm.DeviceName(InScopeName(id->name)));
+      oss << UnScopedName(((is_host) ? ssm.HostName(InScopeName(id->name))
+                                     : ssm.DeviceName(InScopeName(id->name))));
   } else if (auto il = dyn_cast<AST::IntLiteral>(e)) {
     oss << "(" << il->value << ")";
   } else if (auto ii = dyn_cast<AST::IntIndex>(e)) {

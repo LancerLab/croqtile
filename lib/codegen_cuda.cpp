@@ -234,7 +234,7 @@ fi
     assert(!loop_vars.empty());
     loop_vars.pop_back();
 
-    const auto& range_nodes = f->getRangeNodes();
+    const auto& range_nodes = f->GetRangeNodes();
     for (int j = range_nodes->Count() - 1; j >= 0; --j) {
       auto name = cast<AST::LoopRange>(range_nodes->ValueAt(j))->IVName();
       int dec_by = 1;
@@ -630,8 +630,8 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
       if (auto bity = dyn_cast<BoundedITupleType>(bv->GetType())) {
         for (size_t it_idx = 0; it_idx < bity->Dims(); ++it_idx) {
           std::string iv_str;
-          if (within_map.count(bvn)) // with-matcher existed
-            iv_str = within_map[bvn][it_idx];
+          if (within_map.count(InScopeName(bvn))) // with-matcher existed
+            iv_str = UnScopedName(within_map[InScopeName(bvn)][it_idx]);
           else
             iv_str = bvn;
 
@@ -677,8 +677,8 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
       if (auto bity = dyn_cast<BoundedITupleType>(bv->GetType())) {
         for (size_t it_idx = 0; it_idx < bity->Dims(); ++it_idx) {
           std::string iv_str;
-          if (within_map.count(bvn)) // with-matcher existed
-            iv_str = within_map[bvn][it_idx];
+          if (within_map.count(InScopeName(bvn))) // with-matcher existed
+            iv_str = UnScopedName(within_map[InScopeName(bvn)][it_idx]);
           else
             iv_str = bvn;
 
@@ -952,7 +952,7 @@ bool CUDACodeGen::Visit(AST::LoopRange& n) {
 // CLEAN
 bool CUDACodeGen::Visit(AST::ForeachBlock& forNode) {
   __TRACE_EACH_VISIT__(forNode)
-  auto ranges = forNode.getRanges();
+  auto ranges = forNode.GetRanges();
   for (size_t idx = 0; idx != ranges.size(); ++idx) {
     // TODO(albert): support non-unit stride in loop
     std::ostringstream _os;

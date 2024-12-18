@@ -975,6 +975,9 @@ struct WithIn : public Node, public TypeIDProvider<WithIn> {
          ptr<MultiValues> m)
       : Node(l), with(w), in(i), with_matchers(m) {}
 
+  const std::vector<ptr<Node>>& GetMatchers() const {
+    return with_matchers->AllValues();
+  }
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix << "`- ";
     if (with) os << with->name;
@@ -1291,8 +1294,8 @@ struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
     if (stmts) { stmts->Print(os, prefix + " "); }
   }
 
-  ptr<MultiValues> getRangeNodes() const { return ranges; }
-  const std::vector<ptr<Node>>& getRanges() const {
+  ptr<MultiValues> GetRangeNodes() const { return ranges; }
+  const std::vector<ptr<Node>>& GetRanges() const {
     return ranges->AllValues();
   }
 

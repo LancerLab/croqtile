@@ -175,7 +175,7 @@ bool FactorCodeGen::AfterVisitImpl(AST::Node& n) {
     assert(!loop_vars.empty());
     loop_vars.pop_back();
 
-    const auto& range_nodes = f->getRangeNodes();
+    const auto& range_nodes = f->GetRangeNodes();
     for (int j = range_nodes->Count() - 1; j >= 0; --j) {
       auto name = cast<AST::LoopRange>(range_nodes->ValueAt(j))->IVName();
       int dec_by = 1;
@@ -653,8 +653,8 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
           // iterate over single bounded variables
           for (size_t it_idx = 0; it_idx < ty->Dims(); ++it_idx) {
             std::string name;
-            if (within_map.count(bvn)) // with-matcher existed
-              name = within_map[bvn][it_idx];
+            if (within_map.count(InScopeName(bvn))) // with-matcher existed
+              name = UnScopedName(within_map[InScopeName(bvn)][it_idx]);
             else
               name = bvn;
             auto iv_str = ExprSTR(AST::Make<AST::Identifier>(id->LOC(), name));
@@ -667,8 +667,6 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
         auto id = cast<AST::Expr>(gi_exp->GetL())->GetSymbol();
         auto ty = cast<BoundedType>(NodeType(*id));
         assert((ty->Dims() == 1) &&
-               "Bounded ituple has not been supported yet.");
-        assert((within_map.count(id->name) == 0) &&
                "Bounded ituple has not been supported yet.");
         auto iv_str = ExprSTR(bv);
         offss << "Value(" << RSTR(shape.ValueAt(dim_cursor)) << ")*" << iv_str;
@@ -874,7 +872,7 @@ bool FactorCodeGen::Visit(AST::ForeachBlock& forNode) {
   // auto l2_tile_idx = itervars->ValueAt(0);
   // auto l1_tile_idx = itervars->ValueAt(1);
   //
-  auto ranges = forNode.getRanges();
+  auto ranges = forNode.GetRanges();
   for (size_t idx = 0; idx != ranges.size(); ++idx) {
     // TODO(albert): support non-unit stride in loop
     std::ostringstream _os;

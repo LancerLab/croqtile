@@ -306,11 +306,22 @@ public:
     } else if (isa<AST::IncrementBlock>(&n)) {
       SSTab().EnterScope("increment_" + std::to_string(fe_count++));
     } else if (auto w = dyn_cast<AST::WithIn>(&n)) {
-      if (w->with && w->with_matchers) {
+      std::string scope_name = scoped_symtab.ScopeName();
+      if (w->with) {
         std::vector<std::string> matchers;
-        for (auto v : w->with_matchers->AllValues())
-          matchers.push_back(cast<AST::Identifier>(v)->name);
-        within_map.emplace(w->with->name, matchers);
+        if (w->with_matchers) {
+          for (auto v : w->GetMatchers())
+            matchers.push_back(scope_name + cast<AST::Identifier>(v)->name);
+        } else
+          matchers.push_back(scope_name + w->with->name); // only map to itself
+        within_map.emplace(scope_name + w->with->name, matchers);
+      }
+      if (w->with_matchers) {
+        for (auto v : w->GetMatchers()) {
+          auto sname = scope_name + cast<AST::Identifier>(v)->name;
+          within_map.emplace(
+              sname, std::vector<std::string>{sname}); // always map to itself
+        }
       }
     }
     return BeforeVisitImpl(n); // derived class to customize

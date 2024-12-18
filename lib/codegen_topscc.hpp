@@ -118,9 +118,6 @@ public:
   bool Visit(AST::Identifier&) override { return true; };
   bool Visit(AST::Parameter&) override { return true; };
   bool Visit(AST::ParamList&) override { return true; };
-  bool Visit(AST::WhereBind&) override { return true; };
-  bool Visit(AST::WithIn&) override { return true; };
-  bool Visit(AST::WithBlock&) override { return true; };
   bool Visit(AST::Memory&) override { return true; };
   bool Visit(AST::ChunkAt&) override { return true; };
   bool Visit(AST::Wait&) override { return true; };
@@ -128,9 +125,12 @@ public:
   bool Visit(AST::Rotate&) override { return true; };
   bool Visit(AST::Select&) override { return true; };
   bool Visit(AST::LoopRange&) override { return true; };
-  bool Visit(AST::ForeachBlock&) override { return true; };
   bool Visit(AST::Program&) override { return true; };
 
+  bool Visit(AST::WithIn&) override;
+  bool Visit(AST::WhereBind&) override;
+  bool Visit(AST::WithBlock&) override;
+  bool Visit(AST::ForeachBlock&) override;
   bool Visit(AST::ParallelBy&) override;
   bool Visit(AST::DMA&) override;
   bool Visit(AST::NamedVariableDecl&) override;

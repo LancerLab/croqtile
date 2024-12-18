@@ -1205,7 +1205,7 @@ bool EarlySemantics::Visit(AST::LoopRange& n) {
 
 bool EarlySemantics::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
-  for (auto& i : n.getRanges()) {
+  for (auto& i : n.GetRanges()) {
     if (auto id = dyn_cast<AST::LoopRange>(i)->iv) {
       if (id->name == "_") {
         Error(n.LOC(), "_ is not allowed as an iteration variable.");
