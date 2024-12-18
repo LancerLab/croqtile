@@ -1479,6 +1479,14 @@ void FactorCodeGen::EmitHostRuntimeCheck(std::ostream& os) {
       idx++;
     }
   }
+
+  os << "\n";
+
+  for (const auto& rc : FCtx(fname).GetRtChecks()) {
+    os << "  choreo::runtime_check(" << ReplaceRuntimeNames(rc.lhs) << " "
+       << rc.op << " " << rc.rhs << ", \"" << rc.message << ", " << rc.loc
+       << "\");\n";
+  }
 }
 
 void FactorCodeGen::EmitHostRuntimeMemUsageCheck(std::ostream& os) {

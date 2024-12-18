@@ -1,10 +1,11 @@
-#ifndef __CHOREO_SYMBOL_INFO_HPP__
-#define __CHOREO_SYMBOL_INFO_HPP__
+#ifndef __CHOREO_CONTEXT_HPP__
+#define __CHOREO_CONTEXT_HPP__
 
 // shared global context for a compilation process
 
+#include "location.hh"
 #include "symvals.hpp"
-#include <iostream>
+#include "types.hpp"
 #include <map>
 #include <memory>
 #include <sstream>
@@ -117,10 +118,21 @@ struct OptimizedValues {
   ValueItem size_expr = GetInvalidValueItem();
 };
 
+struct RuntimeCheckEntry {
+  std::string lhs;
+  std::string rhs;
+  std::string op;
+
+  location loc;
+  std::string message;
+  std::map<std::string, std::string> notes;
+};
+
 // per-function context
 class FunctionContext {
   FutureBufferInfo fbi;
   std::map<std::string, OptimizedValues> sym_values;
+  std::vector<RuntimeCheckEntry> rt_checks;
 
 public:
   FutureBufferInfo& GetFutureBufferInfo() { return fbi; }
@@ -133,6 +145,8 @@ public:
   bool HasSymbolValues(const std::string& sym) const {
     return sym_values.count(sym);
   }
+  void AppendRtCheck(RuntimeCheckEntry rc) { rt_checks.push_back(rc); }
+  std::vector<RuntimeCheckEntry>& GetRtChecks() { return rt_checks; }
 };
 
 class SymbolTable;
@@ -176,6 +190,27 @@ public:
   OutputKind GetOutputKind() { return out_kind; }
   void SetOutputKind(OutputKind ok) { out_kind = ok; }
 
+  size_t GetMemCapacity(Storage sto) const {
+    switch (arch) {
+    case TargetArch::GCU21:
+      switch (sto) {
+      case Storage::LOCAL: return 1008ull * 1024;             // 1008KB
+      case Storage::SHARED: return 24ull * 1024 * 1024;       // 24MB
+      case Storage::GLOBAL: return 4ull * 1024 * 1024 * 1024; // 4GB
+      default: choreo_unreachable("Unsupported mem level.");
+      }
+    case TargetArch::GCU3:
+      switch (sto) {
+      case Storage::LOCAL: return 1.5 * 1024 * 1024;          // 1.5MB
+      case Storage::SHARED: return 24ull * 1024 * 1024;       // 24MB
+      case Storage::GLOBAL: return 4ull * 1024 * 1024 * 1024; // 4GB
+      default: choreo_unreachable("Unsupported mem level.");
+      }
+    default: choreo_unreachable("Unsupported target.");
+    }
+    return 0;
+  }
+
 public:
   static CompilationContext& GetInstance() {
     static CompilationContext instance;
@@ -189,4 +224,4 @@ inline FunctionContext& FCtx(const std::string& fname) {
 }
 
 } // end namespace Choreo
-#endif //__CHOREO_SYMBOL_INFO_HPP__
+#endif //__CHOREO_CONTEXT_HPP__

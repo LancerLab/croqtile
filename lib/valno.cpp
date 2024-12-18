@@ -150,24 +150,26 @@ std::string ValueNumbering::SignBinaryCompositeValues(const location& loc,
     return GetSignature(l_sig) + "," + GetSignature(r_sig);
   }
 
-  assert((CountElementsInSignature(l_sig) > 1) ||
-         (CountElementsInSignature(r_sig) > 1));
-
   std::string lhs, rhs;
   // specially handle ituple/mdspan + integer: broadcast integer
-  if (CountElementsInSignature(l_sig) == 1) {
-    int elem_count = CountElementsInSignature(r_sig);
-    assert(elem_count > 1);
+
+  auto l_elem_cnt = CountElementsInSignature(l_sig);
+  auto r_elem_cnt = CountElementsInSignature(r_sig);
+
+  if (l_elem_cnt == 1 && r_elem_cnt == 1) {
+    int l_valno = GetValueNumberOfSignature(l_sig);
+    lhs = "#" + std::to_string(l_valno);
+    int r_valno = GetValueNumberOfSignature(r_sig);
+    rhs = "#" + std::to_string(r_valno);
+  } else if (l_elem_cnt == 1 && r_elem_cnt > 1) {
     int valno = GetValueNumberOfSignature(l_sig);
     lhs = "#" + std::to_string(valno);
-    for (int i = 1; i < elem_count; ++i) lhs += ",#" + std::to_string(valno);
+    for (int i = 1; i < r_elem_cnt; ++i) lhs += ",#" + std::to_string(valno);
     rhs = r_sig;
-  } else if (CountElementsInSignature(r_sig) == 1) {
-    int elem_count = CountElementsInSignature(l_sig);
-    assert(elem_count > 1);
+  } else if (l_elem_cnt > 1 && r_elem_cnt == 1) {
     int valno = GetValueNumberOfSignature(r_sig);
     rhs = "#" + std::to_string(valno);
-    for (int i = 1; i < elem_count; ++i) rhs += ",#" + std::to_string(valno);
+    for (int i = 1; i < l_elem_cnt; ++i) rhs += ",#" + std::to_string(valno);
     lhs = l_sig;
   } else {
     lhs = l_sig;

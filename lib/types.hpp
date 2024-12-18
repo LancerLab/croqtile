@@ -10,6 +10,12 @@
 #include <optional>
 #include <regex>
 
+// to avoid definition error
+namespace Choreo {
+enum class Storage { LOCAL, SHARED, GLOBAL, DEFAULT, NONE };
+enum class CompileTarget;
+} // namespace Choreo
+
 #include "aux.hpp"
 #include "context.hpp"
 #include "io.hpp"
@@ -84,8 +90,6 @@ enum class FundamentalType {
   S8 = (int)BaseType::S8,
   UND = (int)BaseType::UNKNOWN,
 };
-
-enum class Storage { LOCAL, SHARED, GLOBAL, DEFAULT, NONE };
 
 inline static bool Compatible(const Storage& a, const Storage& b) {
   if (a == Storage::DEFAULT || a == Storage::GLOBAL)
