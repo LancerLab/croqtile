@@ -190,7 +190,6 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
         auto sym = UnScopedName(item.name);
         // globals are declared in host, while shareds/locals are declared in
         // device
-        auto shape = sty->GetShape();
         auto bts = NameBaseType(sty->ElementType());
         hs << h_indent << bts << " * " << sym << "__device = (" << bts
            << "*)topsMalloc(" << SizeExprOf(*sty) << ");\n";
@@ -331,6 +330,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
 
   auto fty = dyn_cast<FutureType>(nty);
   assert(fty && "Invalid type of DMA statement!");
+  if (fty->IsAsync()) assert(!n.future.empty());
 
   // claim the date transfer engine
   auto dte_ctx = GetDTEContextName();
@@ -357,19 +357,94 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
      << TopsMdsStorage(t_sty->GetStorage()) << ", " << t_nm << ", "
      << RSTR(t_sty->GetShape()) << ");\n";
 
-  if (f_ca->positions == nullptr) {
-    // no chunkat
-    assert(t_ca->positions == nullptr);
-    ds << d_indent << "tops::memcpy(" << dte_ctx << ", __mds_" << t_nm
-       << ", __mds_" << f_nm << ");\n";
-  } else {
-    ds << d_indent << "tops::slice(" << dte_ctx << ", __mds_" << t_nm
-       << ", __mds_" << f_nm << ", ";
-    size_t i = 0;
-    for (auto& p : f_ca->positions->AllValues())
-      ds << ((i++ == 0) ? "" : ", ") << ExprSTR(p, false);
-    ds << ");\n";
+  if (n.operation == ".copy") {
+    if (f_ca->positions == nullptr) {
+      if (t_ca->positions == nullptr) {
+        // no chunkat
+        ds << d_indent
+           << (fty->IsAsync() ? ("tops::event " + n.future + " = ") : "")
+           << "tops::memcpy" << (fty->IsAsync() ? "_async" : "") << "("
+           << dte_ctx << ", __mds_" << t_nm << ", __mds_" << f_nm << ");\n";
+      } else {
+        ds << d_indent
+           << (fty->IsAsync() ? ("tops::event " + n.future + " = ") : "")
+           << "tops::deslice" << (fty->IsAsync() ? "_async" : "") << "("
+           << dte_ctx << ", __mds_" << t_nm << ", __mds_" << f_nm << ", ";
+        size_t i = 0;
+        for (auto& p : t_ca->positions->AllValues())
+          ds << ((i++ == 0) ? "" : ", ") << ExprSTR(p, false);
+        ds << ");\n";
+      }
+    } else {
+      ds << d_indent
+         << (fty->IsAsync() ? ("tops::event " + n.future + " = ") : "")
+         << "tops::slice" << (fty->IsAsync() ? "_async" : "") << "(" << dte_ctx
+         << ", __mds_" << t_nm << ", __mds_" << f_nm << ", ";
+      size_t i = 0;
+      for (auto& p : f_ca->positions->AllValues())
+        ds << ((i++ == 0) ? "" : ", ") << ExprSTR(p, false);
+      ds << ");\n";
+    }
+  } else if (n.operation == ".pad") {
+    auto pad_config = cast<PadConfig>(n.GetConfig());
+    ds << d_indent << "int __pad_high_" << f_nm << "[] = {"
+       << DelimitedString(pad_config->pad_high) << "};\n";
+    ds << d_indent << "int __pad_low_" << f_nm << "[] = {"
+       << DelimitedString(pad_config->pad_low) << "};\n";
+    ds << d_indent << "int __pad_mid_" << f_nm << "[] = {"
+       << DelimitedString(pad_config->pad_mid) << "};\n";
+    if (f_ca->positions == nullptr) {
+      ds << d_indent
+         << (fty->IsAsync() ? ("tops::event " + n.future + " = ") : "")
+         << "tops::pad" << (fty->IsAsync() ? "_async" : "") << "(" << dte_ctx
+         << ", __mds_" << t_nm << ", __mds_" << f_nm << ", __pad_low_" << f_nm
+         << ", __pad_high_" << f_nm << ", __pad_mid_" << f_nm << ", "
+         << pad_config->value.v << ");\n";
+    } else {
+      assert(false && "unsupported");
+      // TODO: shall we support slice_pad?
+    }
+  } else if (n.operation == ".transp") {
+    auto transp_config = cast<TransposeConfig>(n.GetConfig());
+    ds << d_indent << "int __transpose_layout_" << f_nm << "[] = {"
+       << DelimitedString(transp_config->dim_values) << "};\n";
+    ds << d_indent
+       << (fty->IsAsync() ? ("tops::event " + n.future + " = ") : "")
+       << "tops::transpose" << (fty->IsAsync() ? "_async" : "") << "("
+       << dte_ctx << ", __mds_" << t_nm << ", __mds_" << f_nm
+       << ", __transpose_layout_" << f_nm << ");\n";
   }
+
+  return true;
+}
+
+bool TopsccCodeGen::Visit(AST::Wait& n) {
+  TraceEachVisit(n);
+
+  for (auto& f : n.GetFutures())
+    ds << d_indent << "tops::wait(" << ExprSTR(f, false) << ");\n";
+
+  return true;
+}
+
+bool TopsccCodeGen::Visit(AST::Call& n) {
+  TraceEachVisit(n);
+
+  ds << d_indent << n.function->name;
+
+  // emit template arguments
+  if (n.template_args) {
+    ds << "<";
+    for (auto& ta : n.template_args->AllValues()) ds << ExprSTR(ta);
+    ds << ">";
+  }
+
+  ds << "(";
+  size_t i = 0;
+  for (auto& a : n.GetArguments())
+    ds << ((i++ == 0) ? "" : ", ") << ExprSTR(a, false);
+  ds << ");\n";
+
   return true;
 }
 

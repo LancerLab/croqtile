@@ -1,0 +1,49 @@
+// RUN: choreo -t topscc -es %s -o - | FileCheck %s
+__co__ auto foo(f32 [32, 4] a) {
+  f32 [a.span + {1, 1}] data;
+  parallel p by 2 {
+    shared f32 [a.span] b;
+    local f32 [a.span] c;
+    dma.copy a => b;
+    f0 = dma.copy.async b => c;
+    local f32 [a.span + {1, 1}] d;
+    wait f0; 
+    f1 = dma.pad.async<{1,1}, {0,0}, {0,0}, 0> c => d;
+    dma.transp<1,0> c => local;
+    wait f1;
+  }
+  return data;
+}
+
+// CHECK: __global__ void __choreo_device_foo(float * a, float * data) {
+// CHECK:   __shared__ float b[512];
+// CHECK:   __local__ float c[512];
+// CHECK:   tops_dte_ctx_t ctx0;
+// CHECK:   tops::dte_scope s(ctx0);
+// CHECK:   tops::mdspan __mds_a(tops::Global, a, 32, 4);
+// CHECK:   tops::mdspan __mds_b(tops::Shared, b, 32, 4);
+// CHECK:   tops::memcpy(ctx0, __mds_b, __mds_a);
+// CHECK:   tops_dte_ctx_t ctx1;
+// CHECK:   tops::dte_scope s(ctx1);
+// CHECK:   tops::mdspan __mds_b(tops::Shared, b, 32, 4);
+// CHECK:   tops::mdspan __mds_c(tops::Private, c, 32, 4);
+// CHECK:   tops::event f0 = tops::memcpy_async(ctx1, __mds_c, __mds_b);
+// CHECK:   __local__ float d[660];
+// CHECK:   tops::wait(f0);
+// CHECK:   tops_dte_ctx_t ctx2;
+// CHECK:   tops::dte_scope s(ctx2);
+// CHECK:   tops::mdspan __mds_c(tops::Private, c, 32, 4);
+// CHECK:   tops::mdspan __mds_d(tops::Private, d, 33, 5);
+// CHECK:   int __pad_high_c[] = {1, 1};
+// CHECK:   int __pad_low_c[] = {0, 0};
+// CHECK:   int __pad_mid_c[] = {0, 0};
+// CHECK:   tops::event f1 = tops::pad_async(ctx2, __mds_d, __mds_c, __pad_low_c, __pad_high_c, __pad_mid_c, 0);
+// CHECK:   __local__ float anon_0[512];
+// CHECK:   tops_dte_ctx_t ctx3;
+// CHECK:   tops::dte_scope s(ctx3);
+// CHECK:   tops::mdspan __mds_c(tops::Private, c, 32, 4);
+// CHECK:   tops::mdspan __mds_anon_0(tops::Private, anon_0, 4, 32);
+// CHECK:   int __transpose_layout_c[] = {1, 0};
+// CHECK:   tops::transpose(ctx3, __mds_anon_0, __mds_c, __transpose_layout_c);
+// CHECK:   tops::wait(f1);
+// CHECK: }

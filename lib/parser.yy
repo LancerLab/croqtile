@@ -1009,9 +1009,9 @@ dma_config
         pc->SetPadValue($14);
         $$ = pc;
       }
-    | LT LBRACE iv_list RBRACE GT {
+    | LT iv_list GT {
         auto tc = std::make_shared<TransposeConfig>();
-        for (auto value : $3->values)
+        for (auto value : $2->values)
           tc->dim_values.push_back(cast<AST::IntLiteral>(value)->Val());
         $$ = tc;
     }

@@ -978,6 +978,7 @@ struct WithIn : public Node, public TypeIDProvider<WithIn> {
   const std::vector<ptr<Node>>& GetMatchers() const {
     return with_matchers->AllValues();
   }
+
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix << "`- ";
     if (with) os << with->name;
@@ -1133,6 +1134,7 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
   }
 
   void SetConfig(const ptr<DMAConfig>& cfg) { config = cfg; }
+  const ptr<DMAConfig>& GetConfig() const { return config; }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     if (operation == ".any") {
@@ -1173,6 +1175,10 @@ struct Wait : public Node, public TypeIDProvider<Wait> {
     os << "\n" << prefix << "`- WAIT: " << AST::STR(*targets);
   }
 
+  const std::vector<ptr<Node>>& GetFutures() const {
+    return targets->AllValues();
+  }
+
   void accept(Visitor&) override;
 
   __UDT_TYPE_INFO__(Node, Wait)
@@ -1196,18 +1202,22 @@ struct Return : public Node, public TypeIDProvider<Return> {
 };
 
 struct Call : public Node, public TypeIDProvider<Call> {
-  ptr<Node> function;
+  ptr<Identifier> function;
   ptr<MultiValues> arguments;
   ptr<MultiValues> template_args;
 
-  Call(const location& l, const ptr<Node>& f, const ptr<MultiValues>& a)
+  Call(const location& l, const ptr<Identifier>& f, const ptr<MultiValues>& a)
       : Node(l), function(f), arguments(a), template_args(nullptr) {}
 
-  Call(const location& l, const ptr<Node>& f, const ptr<MultiValues>& a,
+  Call(const location& l, const ptr<Identifier>& f, const ptr<MultiValues>& a,
        const ptr<MultiValues>& b)
       : Node(l), function(f), arguments(a), template_args(b) {
     arguments->SetDelimiter(", ");
     template_args->SetDelimiter(", ");
+  }
+
+  const std::vector<ptr<Node>>& GetArguments() const {
+    return arguments->AllValues();
   }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {

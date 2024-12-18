@@ -36,7 +36,7 @@ __co__ auto transpose(s32 [4, 2, 4, 8, 2, 4] input) {
         wait input_shape_c;
         local s32[8, 8, 4] output_shape_c;
         // [a*b, d, f] => [d, a*b, f]
-        dma.transp<{1, 0, 2}> input_shape_c.span_as([8, 8, 4]) => output_shape_c;
+        dma.transp<1, 0, 2> input_shape_c.span_as([8, 8, 4]) => output_shape_c;
         out_store = dma.copy.async output_shape_c.span_as([1, 8, 4, 1, 8]) => output.span_as([4, 8, 4, 2, 8]).chunkat(c, d, a, e, b#f);
         wait out_store;
       }

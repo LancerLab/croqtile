@@ -893,9 +893,14 @@ bool EarlySemantics::Visit(AST::DMA& n) {
   }
 
   // dma.pad specific check
-  if (auto pcfg = dyn_cast<PadConfig>(n.config)) {
-    if (!((pcfg->pad_high.size() == pcfg->pad_low.size()) &&
-          (pcfg->pad_low.size() == pcfg->pad_mid.size()))) {
+  if (n.operation == ".pad") {
+    auto pcfg = dyn_cast<PadConfig>(n.config);
+    if (!pcfg) {
+      Error(n.LOC(), "The DMA PAD config is incorrect. The correct form: "
+                     "dma.pad(.async)<{pad_highs}, {pad_lows}, {pad_mids}>.");
+      error_count++;
+    } else if (!((pcfg->pad_high.size() == pcfg->pad_low.size()) &&
+                 (pcfg->pad_low.size() == pcfg->pad_mid.size()))) {
       Error(n.LOC(),
             "The DMA statement contains a rank mismatch: the paddings have "
             "inconsistent ranks.");
@@ -909,29 +914,36 @@ bool EarlySemantics::Visit(AST::DMA& n) {
   }
 
   // dma.transp specific check
-  if (auto tcfg = dyn_cast<TransposeConfig>(n.config)) {
-    auto dim_values = tcfg->dim_values;
-    if (dim_values.size() != sty->Dims()) {
-      Error(n.LOC(),
-            "The DMA statement contains a rank mismatch: the 'transpose "
-            "layout' and 'from' arrays have inconsistent dimensions.");
+  if (n.operation == ".transp") {
+    auto tcfg = dyn_cast<TransposeConfig>(n.config);
+    if (!tcfg) {
+      Error(n.LOC(), "The DMA TRANSPOSE config is incorrect. The correct form: "
+                     "dma.transp(.async)<{dim0, dim1, ...}>");
       error_count++;
-    }
-    if (!isa<AST::Memory>(n.to)) {
+    } else {
+      auto dim_values = tcfg->dim_values;
       if (dim_values.size() != sty->Dims()) {
         Error(n.LOC(),
               "The DMA statement contains a rank mismatch: the 'transpose "
-              "layout' and 'to' arrays have inconsistent dimensions.");
+              "layout' and 'from' arrays have inconsistent dimensions.");
         error_count++;
       }
-    }
-    std::sort(dim_values.begin(), dim_values.end());
-    for (size_t i = 0; i < dim_values.size(); ++i) {
-      if (dim_values[i] != i) {
-        Error(n.LOC(), "The DMA statement contains an error: the transpose "
-                       "layout is invalid.");
-        error_count++;
-        break;
+      if (!isa<AST::Memory>(n.to)) {
+        if (dim_values.size() != sty->Dims()) {
+          Error(n.LOC(),
+                "The DMA statement contains a rank mismatch: the 'transpose "
+                "layout' and 'to' arrays have inconsistent dimensions.");
+          error_count++;
+        }
+      }
+      std::sort(dim_values.begin(), dim_values.end());
+      for (size_t i = 0; i < dim_values.size(); ++i) {
+        if (dim_values[i] != i) {
+          Error(n.LOC(), "The DMA statement contains an error: the transpose "
+                         "layout is invalid.");
+          error_count++;
+          break;
+        }
       }
     }
   }

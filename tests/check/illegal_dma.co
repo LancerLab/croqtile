@@ -21,9 +21,9 @@ __co__ void illegal_transp(s32 [2, 16] src) {
   // the errors are reported when SEMA
   s32[2, 16] dst0;
   s32[16, 2] dst1;
-  dma.transp<{1, 0, 2}> src => dst0;
-  dma.transp<{2, 0}> src => dst0;
-  dma.transp<{1}> src => dst0;
+  dma.transp<1, 0, 2> src => dst0;
+  dma.transp<2, 0> src => dst0;
+  dma.transp<1> src => dst0;
 }
 
 // CHECK: error: The DMA statement contains a rank mismatch: the 'from' and 'to' arrays have inconsistent dimensions.
