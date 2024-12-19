@@ -460,6 +460,8 @@ void SymReplace::EquivalentlyReplaceExprNodes() {
       orig_expr->SetR(AST::Make<AST::SpanAs>(*sa));
     else if (auto il = dyn_cast<AST::IntLiteral>(R))
       orig_expr->SetR(AST::Make<AST::IntLiteral>(*il));
+    else if (auto b = dyn_cast<AST::Boolean>(R))
+      orig_expr->SetR(AST::Make<AST::Boolean>(*b));
     else
       choreo_unreachable("The node of type " + PSTR(R->GetType()) +
                          " is not supported in SymReplace yet.");

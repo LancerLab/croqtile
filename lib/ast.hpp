@@ -211,8 +211,9 @@ struct MultiValues : public Node, public TypeIDProvider<MultiValues> {
 
 struct Boolean : public Node, public TypeIDProvider<Boolean> {
   std::string value;
-  Boolean(const location& l, std::string v)
+  explicit Boolean(const location& l, std::string v)
       : Node(l, MakeBooleanType()), value(v) {}
+  explicit Boolean(const Boolean& b) : Node(b.LOC()) { value = b.value; }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << prefix << value;
