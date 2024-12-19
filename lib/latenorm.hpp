@@ -12,6 +12,28 @@
 
 namespace Choreo {
 
+class WorkingList {
+private:
+  std::unordered_map<std::string, AST::DMA*> string_to_dma;
+
+public:
+  // Add a symbol to the symbol table
+  // emittable = 'a'
+  // type_symbol = 'a_type'
+  // emitted = 'DRAMType(FloatType(32), {1, 2})'
+  void AddDMA(AST::DMA& dma) { string_to_dma.emplace(dma.future, &dma); }
+
+  // Retrieve typename of a symbol
+  AST::DMA* GetDMA(const std::string& mnemonic) {
+    if (string_to_dma.find(mnemonic) != string_to_dma.end())
+      return string_to_dma.at(mnemonic);
+    return nullptr;
+  }
+
+  void Reset() { string_to_dma.clear(); }
+};
+
+
 // Auxillary structures for buffer generation
 struct BufferInsertionInfo {
   int index = -1;
@@ -29,6 +51,7 @@ protected:
   int cur_dma_index = -1;
   int cur_pb_index = -1;
   AST::MultiNodes* cur_pb_mn = nullptr;
+  WorkingList workinglist;
   std::map<AST::MultiNodes*, BufferInsertInfo> mnodes_insertions;
 
   FutureBufferInfo& FBInfo() { return FCtx(fname).GetFutureBufferInfo(); }
@@ -237,6 +260,16 @@ public:
 
   bool Visit(AST::DMA& n) override {
     TraceEachVisit(n);
+
+    // handle chained info, filling the DMA chain.
+    workinglist.AddDMA(n);
+    if (n.chained == true && !n.chain_from.empty()) {
+      auto _chain_from_ptr = workinglist.GetDMA(n.chain_from);
+      assert(_chain_from_ptr != nullptr &&
+              "after primitive chained to non-exist future id\n");
+      _chain_from_ptr->chained = true;
+      _chain_from_ptr->chain_to = n.future;
+    }
 
     // update "=>local/shared/global", and generate buffer if necessary
     if (n.operation == ".any") return true;
