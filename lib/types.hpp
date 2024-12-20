@@ -10,6 +10,12 @@
 #include <optional>
 #include <regex>
 
+// to avoid definition error
+namespace Choreo {
+enum class Storage { LOCAL, SHARED, GLOBAL, DEFAULT, NONE };
+enum class CompileTarget;
+} // namespace Choreo
+
 #include "aux.hpp"
 #include "context.hpp"
 #include "io.hpp"
@@ -84,8 +90,6 @@ enum class FundamentalType {
   S8 = (int)BaseType::S8,
   UND = (int)BaseType::UNKNOWN,
 };
-
-enum class Storage { LOCAL, SHARED, GLOBAL, DEFAULT, NONE };
 
 inline static bool Compatible(const Storage& a, const Storage& b) {
   if (a == Storage::DEFAULT || a == Storage::GLOBAL)
@@ -357,7 +361,6 @@ struct Shape {
   constexpr Shape& operator=(const Shape&) = default;
 
   size_t DimCount() const { return dim_count; }
-  size_t Dims() const { return dim_count; } // TODO: remove this interface
   size_t Rank() const { return dim_count; }
 
   void Update() { dim_count = values[val_no].size(); }
@@ -518,7 +521,7 @@ struct Shape {
 };
 
 inline bool operator==(const Shape& lhs, const Shape& rhs) {
-  return lhs.IsValid() && rhs.IsValid() && (lhs.Dims() == rhs.Dims()) &&
+  return lhs.IsValid() && rhs.IsValid() && (lhs.Rank() == rhs.Rank()) &&
          isValueListEqual(lhs.Value(), rhs.Value());
 }
 
@@ -794,7 +797,7 @@ struct MDSpanType : public Type, public TypeIDProvider<MDSpanType> {
   void SetShape(const Shape& v) { value = v; }
   const Shape GetShape() { return value; }
 
-  size_t Dims() const override { return value.Dims(); }
+  size_t Dims() const override { return value.Rank(); }
 
   // MDSpanType is an incomplete/partial type
   bool IsComplete() const override { return false; }
@@ -991,7 +994,7 @@ struct BoundedITupleType final : public BoundedType,
              "expecting an invalid bound.");
   }
 
-  size_t Dims() const override { return ubounds.Dims(); }
+  size_t Dims() const override { return ubounds.Rank(); }
   bool IsComplete() const override { return true; }
   bool HasSufficientInfo() const { return ubounds.IsValid(); }
   const MultiBounds GetLowerBounds() const { return lbounds; }

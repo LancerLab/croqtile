@@ -918,7 +918,7 @@ bool FactorCodeGen::Visit(AST::ForeachBlock& forNode) {
     } else {
       assert(!cur_bounded_vars[iv_name].empty() &&
              "can not find the bounded name.");
-      assert((cur_bounded_vars[iv_name].top().size() == iv_sizes.Dims()) &&
+      assert((cur_bounded_vars[iv_name].top().size() == iv_sizes.Rank()) &&
              "can not find the bounded name.");
       size_t i = 0;
       for (auto name : cur_bounded_vars[iv_name].top()) {
@@ -1478,6 +1478,14 @@ void FactorCodeGen::EmitHostRuntimeCheck(std::ostream& os) {
          << "\");\n";
       idx++;
     }
+  }
+
+  os << "\n";
+
+  for (const auto& rc : FCtx(fname).GetRtChecks()) {
+    os << "  choreo::runtime_check(" << ReplaceRuntimeNames(rc.lhs) << " "
+       << rc.op << " " << rc.rhs << ", \"" << rc.message << ", " << rc.loc
+       << "\");\n";
   }
 }
 

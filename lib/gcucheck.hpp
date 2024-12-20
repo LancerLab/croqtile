@@ -16,7 +16,7 @@ private:
   int local_level = 0;
 
 private:
-  bool BeforeVisitImpl(AST::Node& n) {
+  bool BeforeVisitImpl(AST::Node& n) override {
     TraceEachVisit(n, "(pre)");
     if (isa<AST::ChoreoFunction>(&n)) {
       local_level = 0;
@@ -29,7 +29,7 @@ private:
     return true;
   }
 
-  bool AfterVisitImpl(AST::Node& n) {
+  bool AfterVisitImpl(AST::Node& n) override {
     TraceEachVisit(n, "(post)");
     if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       auto pty = cast<BoundedITupleType>(GetSymbolType(pb->biv));
@@ -51,35 +51,35 @@ public:
   GCUCheck() : VisitorWithSymTab("gcu", CCtx().GetGlobalSymbolTable()) {}
   ~GCUCheck() {}
 
-  bool Visit(AST::MultiNodes& n) {
+  bool Visit(AST::MultiNodes& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::MultiValues& n) {
+  bool Visit(AST::MultiValues& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::IntLiteral& n) {
+  bool Visit(AST::IntLiteral& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Boolean& n) {
+  bool Visit(AST::Boolean& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Expr& n) {
+  bool Visit(AST::Expr& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::MultiDimSpans& n) {
+  bool Visit(AST::MultiDimSpans& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::NamedTypeDecl& n) {
+  bool Visit(AST::NamedTypeDecl& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::NamedVariableDecl& n) {
+  bool Visit(AST::NamedVariableDecl& n) override {
     TraceEachVisit(n);
     auto ty = GetSymbolType(n.name_str);
     if (!isa<SpannedType>(ty)) return true;
@@ -141,60 +141,60 @@ public:
     }
     return true;
   }
-  bool Visit(AST::IntTuple& n) {
+  bool Visit(AST::IntTuple& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Assignment& n) {
+  bool Visit(AST::Assignment& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::IntIndex& n) {
+  bool Visit(AST::IntIndex& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::DataType& n) {
+  bool Visit(AST::DataType& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Identifier& n) {
+  bool Visit(AST::Identifier& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Parameter& n) {
+  bool Visit(AST::Parameter& n) override {
     TraceEachVisit(n);
     if (n.sym) cur_params.emplace(InScopeName(n.sym->name), &n);
     return true;
   }
-  bool Visit(AST::ParamList& n) {
+  bool Visit(AST::ParamList& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::ParallelBy& n) {
+  bool Visit(AST::ParallelBy& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::WhereBind& n) {
+  bool Visit(AST::WhereBind& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::WithIn& n) {
+  bool Visit(AST::WithIn& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::WithBlock& n) {
+  bool Visit(AST::WithBlock& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Memory& n) {
+  bool Visit(AST::Memory& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::SpanAs& n) {
+  bool Visit(AST::SpanAs& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::DMA& n) {
+  bool Visit(AST::DMA& n) override {
     TraceEachVisit(n);
     // The user does not have to explicitly claim a global memory that requires
     // direct copy from host to device. Here Choreo judge if a spanned memory is
@@ -230,51 +230,51 @@ public:
 
     return true;
   }
-  bool Visit(AST::ChunkAt& n) {
+  bool Visit(AST::ChunkAt& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Wait& n) {
+  bool Visit(AST::Wait& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Call& n) {
+  bool Visit(AST::Call& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Rotate& n) {
+  bool Visit(AST::Rotate& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Select& n) {
+  bool Visit(AST::Select& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Return& n) {
+  bool Visit(AST::Return& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::LoopRange& n) {
+  bool Visit(AST::LoopRange& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::ForeachBlock& n) {
+  bool Visit(AST::ForeachBlock& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::FunctionDecl& n) {
+  bool Visit(AST::FunctionDecl& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::ChoreoFunction& n) {
+  bool Visit(AST::ChoreoFunction& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::CppSourceCode& n) {
+  bool Visit(AST::CppSourceCode& n) override {
     TraceEachVisit(n);
     return true;
   }
-  bool Visit(AST::Program& n) {
+  bool Visit(AST::Program& n) override {
     TraceEachVisit(n);
     return true;
   }

@@ -528,7 +528,7 @@ public:
                     std::to_string(n.Rank()) + ".");
 #endif
       } else
-        n.SetRank(vl.Dims());
+        n.SetRank(vl.Rank());
 
       // pass the value number over
       cur_mdspan_vn = cur_vn;
@@ -1040,9 +1040,14 @@ public:
         std::string cv = "const_" + std::to_string(n);
         return "#" + std::to_string(vn.GetOrInsertValueNumberFromSignature(cv));
       };
-      std::string sig = ElementSignature(all_pads[0]);
-      for (size_t i = 1; i < size; ++i)
-        sig += ",#" + ElementSignature(all_pads[i]);
+      std::string sig;
+      if (size > 1) {
+        sig = ElementSignature(all_pads[0]);
+        for (size_t i = 1; i < size; ++i)
+          sig += "," + ElementSignature(all_pads[i]);
+      } else {
+        sig = "const_" + std::to_string(all_pads[0]);
+      }
       std::string add_sig = vn.SignBinaryCompositeValues(
           n.LOC(), "+", vn.GetSignatureFromValueNumber(cur_vn), sig);
       // update the cur_vn
@@ -1116,6 +1121,19 @@ public:
 
     auto span_name = RemoveSuffix(n.data->name, ".data") + ".span";
     auto sty = GetSpannedType(pty);
+
+    // if positions is all `__choreo_tile_one`, set positions to nullptr
+    if (n.positions) {
+      bool all_tile_one = true;
+      for (auto pos : n.positions->values) {
+        auto biv = dyn_cast<AST::Identifier>(pos);
+        if (biv == nullptr || biv->name != "__choreo_tile_one") {
+          all_tile_one = false;
+          break;
+        }
+      }
+      if (all_tile_one) n.positions = nullptr;
+    }
 
     if (!n.positions) {
       // it is just a symbol reference
@@ -1430,7 +1448,8 @@ private:
           match.str(1); // Capture the number part of the match
       int number = std::stoi(matchStr);
 
-      // Call the passed lambda function with the extracted string and its index
+      // Call the passed lambda function with the extracted string and its
+      // index
       lambda(number, matchIndex);
     }
   }
