@@ -12,7 +12,7 @@ __co__ auto foo(int a, f32 [1, 2] b) {
 
 // CHECK: __global__ void __choreo_device_foo(int a, float * b, __fp16 * g_data) {
 // CHECK:   __shared__ unsigned char s_data[2];
-// CHECK:   __local__ short l_data[4];
+// CHECK:   __local__ short l_data[2];
 // CHECK: }
 
 // CHECK: choreo::spanned_data<choreo::f16, 2> foo(int hp0, const choreo::spanned_view<choreo::f32, 2> & hp1) {

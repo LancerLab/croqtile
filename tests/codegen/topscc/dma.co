@@ -16,8 +16,8 @@ __co__ auto foo(f32 [32, 4] a) {
 }
 
 // CHECK: __global__ void __choreo_device_foo(float * a, float * data) {
-// CHECK:   __shared__ float b[512];
-// CHECK:   __local__ float c[512];
+// CHECK:   __shared__ float b[128];
+// CHECK:   __local__ float c[128];
 // CHECK:   tops_dte_ctx_t ctx0;
 // CHECK:   tops::dte_scope s_ctx0(ctx0);
 // CHECK:   tops::mdspan __mds_a(tops::Global, a, 32, 4);
@@ -28,7 +28,7 @@ __co__ auto foo(f32 [32, 4] a) {
 // CHECK:   tops::mdspan __mds_b(tops::Shared, b, 32, 4);
 // CHECK:   tops::mdspan __mds_c(tops::Private, c, 32, 4);
 // CHECK:   tops::event f0 = tops::memcpy_async(ctx1, __mds_c, __mds_b);
-// CHECK:   __local__ float d[660];
+// CHECK:   __local__ float d[165];
 // CHECK:   tops::wait(f0);
 // CHECK:   tops_dte_ctx_t ctx2;
 // CHECK:   tops::dte_scope s_ctx2(ctx2);
@@ -38,7 +38,7 @@ __co__ auto foo(f32 [32, 4] a) {
 // CHECK:   int __pad_low_c[] = {0, 0};
 // CHECK:   int __pad_mid_c[] = {0, 0};
 // CHECK:   tops::event f1 = tops::pad_async(ctx2, __mds_d, __mds_c, __pad_low_c, __pad_high_c, __pad_mid_c, 0);
-// CHECK:   __local__ float anon_0[512];
+// CHECK:   __local__ float anon_0[128];
 // CHECK:   tops_dte_ctx_t ctx3;
 // CHECK:   tops::dte_scope s_ctx3(ctx3);
 // CHECK:   tops::mdspan __mds_c(tops::Private, c, 32, 4);

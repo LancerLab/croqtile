@@ -894,7 +894,14 @@ struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
   size_t ShapeSize() const { return GetShape().Size(); }
   size_t ByteSize() const { return SizeOf(f_type) * GetShape().Size(); }
 
-  std::string ByteSizeExpression(bool ULL_suffix = false) const {
+  const std::string ShapeSizeExpression(bool ULL_suffix = false) const {
+    if (RuntimeShaped())
+      return "(" + GetShape().GetSizeExpression(ULL_suffix) + ")";
+    else
+      return std::to_string(ShapeSize()) + (ULL_suffix ? "ULL" : "");
+  }
+
+  const std::string ByteSizeExpression(bool ULL_suffix = false) const {
     if (RuntimeShaped())
       return "(" + GetShape().GetSizeExpression(ULL_suffix) + ") * " +
              std::to_string(SizeOf(f_type));
@@ -1186,6 +1193,15 @@ inline std::string SizeExprOf(const Type& ty) {
     return "4";
   else if (auto t = dyn_cast<SpannedType>(&ty))
     return t->ByteSizeExpression();
+  choreo_unreachable(STR(ty) + " does not imply runtime storage.");
+  return {};
+}
+
+inline std::string ElemCountExprOf(const Type& ty) {
+  if (isa<ScalarType>(&ty))
+    return "1";
+  else if (auto t = dyn_cast<SpannedType>(&ty))
+    return t->ShapeSizeExpression();
   choreo_unreachable(STR(ty) + " does not imply runtime storage.");
   return {};
 }

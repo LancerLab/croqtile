@@ -35,6 +35,8 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
     fty = cast<FunctionType>(GetSymbolType(fname));
     ssm.EnterScope();
   } else if (isa<AST::ParallelBy>(&n)) {
+    if (parallel_level == 0)
+      ds << d_indent << "// parallel-by: " << n.LOC() << "\n";
     parallel_level++;
   } else if (isa<AST::WithBlock>(&n)) {
     ds << d_indent << "// with-in: " << n.LOC() << "\n";
@@ -243,8 +245,8 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
              << SizeExprOf(*sty) << ");\n";
         } else {
           // support simple int literal initialization
-          hs << h_indent << bts << " " << sym << "__init[" << SizeExprOf(*sty)
-             << "];\n";
+          hs << h_indent << bts << " " << sym << "__init["
+             << ElemCountExprOf(*sty) << "];\n";
           hs << h_indent << "memset(" << sym << "__init, " << PSTR(n.init_value)
              << ", sizeof(" << sym << "__init));\n";
           hs << h_indent << bts << " * " << buf_sym << "= nullptr;\n";
@@ -267,13 +269,13 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
     } else if (sty->GetStorage() == Storage::SHARED) {
       if (!IsChoreoOutput(InScopeName(sym))) {
         ds << d_indent << "__shared__ " << bts << " " << sym << "["
-           << SizeExprOf(*sty) << "];\n";
+           << ElemCountExprOf(*sty) << "];\n";
         ssm.MapDeviceSymbol(InScopeName(sym), sym);
       }
     } else if (sty->GetStorage() == Storage::LOCAL) {
       if (!IsChoreoOutput(InScopeName(sym))) {
         ds << d_indent << "__local__ " << bts << " " << sym << "["
-           << SizeExprOf(*sty) << "];\n";
+           << ElemCountExprOf(*sty) << "];\n";
         ssm.MapDeviceSymbol(InScopeName(sym), sym);
       }
     } else
@@ -359,7 +361,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   assert(f_sty && "can not retrieve data from 'from'.");
   assert(t_sty && "can not retrieve data from 'to'.");
 
-  // claim the mdspan
+  // claim the mdspans
   ds << d_indent << "tops::mdspan __mds_" << f_nm << "("
      << TopsMdsStorage(f_sty->GetStorage()) << ", " << f_nm << ", "
      << RSTR(f_sty->GetShape()) << ");\n";
@@ -378,8 +380,13 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       } else {
         ds << d_indent << "int __deslice_offset_" << t_nm << "[] = {";
         size_t i = 0;
-        for (auto& p : t_ca->positions->AllValues())
-          ds << ((i++ == 0) ? "" : ", ") << "(int)" << ExprSTR(p, false);
+        auto shape = f_sty->GetShape();
+        for (auto& p : t_ca->positions->AllValues()) {
+          if (i != 0) ds << ", ";
+          ds << "(int)(" << ExprSTR(p, false) << " * " << STR(shape.ValueAt(i))
+             << ")";
+          ++i;
+        }
         ds << "};\n";
         ds << d_indent
            << (fty->IsAsync() ? ("tops::event " + n.future + " = ") : "")
@@ -390,8 +397,13 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     } else {
       ds << d_indent << "int __slice_offset_" << f_nm << "[] = {";
       size_t i = 0;
-      for (auto& p : f_ca->positions->AllValues())
-        ds << ((i++ == 0) ? "" : ", ") << "(int)" << ExprSTR(p, false);
+      auto shape = t_sty->GetShape();
+      for (auto& p : f_ca->positions->AllValues()) {
+        if (i != 0) ds << ", ";
+        ds << "(int)(" << ExprSTR(p, false) << " * " << STR(shape.ValueAt(i))
+           << ")";
+        ++i;
+      }
       ds << "};\n";
       ds << d_indent
          << (fty->IsAsync() ? ("tops::event " + n.future + " = ") : "")
@@ -504,7 +516,9 @@ bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
       auto iv_ty = GetSymbolType(UnScopedName(iv_name));
       assert(IsActualBoundedIntegerType(iv_ty));
       auto iv_bty = cast<BoundedType>(iv_ty);
-      ds << d_indent << "for (; " << ssm.DeviceName(iv_name) << " < "
+      ds << d_indent << "for (" << ssm.DeviceName(iv_name) << " = "
+         << (IsValidBound(rng->lbound) ? ("(" + STR(rng->lbound) + ")") : "0")
+         << "; " << ssm.DeviceName(iv_name) << " < "
          << STR(iv_bty->GetUpperBound()) << "; ++" << ssm.DeviceName(iv_name)
          << ") {\n";
       IncrDeviceIndent();
