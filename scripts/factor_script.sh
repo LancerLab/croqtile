@@ -24,7 +24,7 @@ ACTION=$1
 shift 1
 
 KERNEL_SRC=$1
-FACTOR_OBJ=$2
+TOPSFC_LIB=$2
 HOST_SRC=$3
 ELF_MODULE=$4
 GCU_ARCH=$5
@@ -35,7 +35,7 @@ if [ "$#" -ne 6 ]; then
   exit 1
 fi
 
-FACTOR_DIR=$(dirname ${FACTOR_OBJ})
+FACTOR_DIR=$(dirname ${TOPSFC_LIB})
 
 if [ "${ACTION}" == "--compile-library" ]; then
   echo "Compile ${ELF_MODULE}"
@@ -43,10 +43,10 @@ if [ "${ACTION}" == "--compile-library" ]; then
 elif [ "${ACTION}" == "--compile-binary" ] || [ ${ACTION} == "--compile-execute" ]; then
   echo "Compile ${ELF_MODULE}"
   LD_LIBRARY_PATH=${TOPS_LIB_PATH} ${TOPS_BIN_PATH}/topsfc ${KERNEL_SRC} -gcu-arch=${GCU_ARCH} -resource=${GCU_RESOURCE} -gen-dir=${FACTOR_DIR} -I${TOPS_INC_PATH} -L${TOPS_LIB_PATH} --host-link-options="-L${TOPS_LIB_PATH}"
-  LD_LIBRARY_PATH=${TOPS_LIB_PATH} ${TOPS_BIN_PATH}/topsfc ${HOST_SRC} ${FACTOR_OBJ} -I${FACTOR_DIR} ${TOPS_LINK_ARG} -o ${ELF_MODULE} -I${TOPS_INC_PATH} -L${TOPS_LIB_PATH} --host-link-options="-L${TOPS_LIB_PATH}"
+  LD_LIBRARY_PATH=${TOPS_LIB_PATH} ${TOPS_BIN_PATH}/topsfc ${HOST_SRC} ${TOPSFC_LIB} -I${FACTOR_DIR} ${TOPS_LINK_ARG} -o ${ELF_MODULE} -I${TOPS_INC_PATH} -L${TOPS_LIB_PATH} --host-link-options="-L${TOPS_LIB_PATH}"
 fi
 
 if [ ${ACTION} == "--compile-execute" ]; then
   echo "Execute the binary"
-  LD_LIBRARY_PATH=${TOPS_LIB_PATH} ./${ELF_MODULE}
+  LD_LIBRARY_PATH=${TOPS_LIB_PATH} ${ELF_MODULE}
 fi

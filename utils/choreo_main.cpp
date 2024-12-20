@@ -340,7 +340,7 @@ int main(int argc, char* argv[]) {
     Choreo::Topscc::TopsccCodeGen codegen(
         muc.GetRtMemUsageInfo(), cgp.GetASTInfo());
     if (!codegen.RunOnProgram(root)) return codegen.Status();
-    return 1;
+    break;
   }
   default:
     errs() << "Invalid target: '" << target.GetValue() << "'\n";

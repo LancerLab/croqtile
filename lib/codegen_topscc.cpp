@@ -46,7 +46,7 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
     ds << d_indent << "// incr: " << n.LOC() << "\n";
     IncrDeviceIndent();
   }
-  return 0;
+  return true;
 }
 
 bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
@@ -95,7 +95,7 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
     DecrDeviceIndent();
     ds << d_indent << "} // end of incr: " << n.LOC() << "\n";
   }
-  return 0;
+  return true;
 }
 
 void TopsccCodeGen::EmitFixedHostHead() {

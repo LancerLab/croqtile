@@ -1699,42 +1699,42 @@ void FactorCodeGen::EmitScript(std::ostream& ss) {
 
   // JIT: check for gcu_target_string first
   ss << R"script(
-  gcu_arch=gcu210
-  gcu_resource=2c24s
-  gcu_target_string="dorado_2c"
+gcu_arch=gcu210
+gcu_resource=2c24s
+gcu_target_string="dorado_2c"
 )script";
   if (!cross_compile)
     ss << R"script(
-  # check the device
-  # TODO: improve the target check with more solid code
-  GCU_DEVICE_STR="$(lspci | grep Enflame | head -1)"
-  GCU_DEVICE_STR_BACKUP="$(lspci | grep Tencent)"
-  echo $GCU_DEVICE_STR
-  if [[ "${GCU_DEVICE_STR}" == *"S60G"* ]]; then
-    gcu_arch=gcu300
-    gcu_resource=2c24s
-    gcu_target_string="scorpio_${gcu_resource}"
-  elif [[ "${GCU_DEVICE_STR}" == *"c035"* ]]; then
-    gcu_arch=gcu300
-    gcu_resource=1c12s
-    gcu_target_string="scorpio_${gcu_resource}"
-    export TOPS_VISIBLE_DEVICES=1
-  elif [[ "${GCU_DEVICE_STR}" == *"S60"* ]]; then
-    gcu_arch=gcu300
-    gcu_resource=2c24s
-    gcu_target_string="scorpio_${gcu_resource}"
-  elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then
-    gcu_arch=gcu210
-    gcu_resource=2c24s
-    gcu_target_string="dorado_2c"
-  elif [[ "${GCU_DEVICE_STR_BACKUP}" != "" ]]; then
-    gcu_arch=gcu210
-    gcu_resource=2c24s
-    gcu_target_string="dorado_2c"
-  else
-    echo "can not determine the GCU device type."
-    exit 1
-  fi
+# check the device
+# TODO: improve the target check with more solid code
+GCU_DEVICE_STR="$(lspci | grep Enflame | head -1)"
+GCU_DEVICE_STR_BACKUP="$(lspci | grep Tencent)"
+echo $GCU_DEVICE_STR
+if [[ "${GCU_DEVICE_STR}" == *"S60G"* ]]; then
+  gcu_arch=gcu300
+  gcu_resource=2c24s
+  gcu_target_string="scorpio_${gcu_resource}"
+elif [[ "${GCU_DEVICE_STR}" == *"c035"* ]]; then
+  gcu_arch=gcu300
+  gcu_resource=1c12s
+  gcu_target_string="scorpio_${gcu_resource}"
+  export TOPS_VISIBLE_DEVICES=1
+elif [[ "${GCU_DEVICE_STR}" == *"S60"* ]]; then
+  gcu_arch=gcu300
+  gcu_resource=2c24s
+  gcu_target_string="scorpio_${gcu_resource}"
+elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then
+  gcu_arch=gcu210
+  gcu_resource=2c24s
+  gcu_target_string="dorado_2c"
+elif [[ "${GCU_DEVICE_STR_BACKUP}" != "" ]]; then
+  gcu_arch=gcu210
+  gcu_resource=2c24s
+  gcu_target_string="dorado_2c"
+else
+  echo "can not determine the GCU device type."
+  exit 1
+fi
 )script";
 
   ss << "\n# step 0: set up the environment\n";
@@ -1757,7 +1757,7 @@ void FactorCodeGen::EmitScript(std::ostream& ss) {
   ss << factor_code << "\nEOF\n\n";
 
   ss << "\n# step 3: set the factor binary file name\n";
-  ss << "factor_bin=" << topsfc_lib_name << "\n";
+  ss << "topsfc_lib=" << topsfc_lib_name << "\n";
 
   ss << "\n# step 4: generate the host source\n";
   ss << "host_src=" << host_cpp_name << "\n";
@@ -1794,9 +1794,9 @@ if [ "$1" == "--execute" ] || [ "$#" -eq 0 ] || [ "$1" == "--compile-binary" ]; 
   ss << "  # JIT compile and execute\n";
   if (compile_with_dynshape) ss << "VIEW_CONFIG=1 ENABLE_DYNSHAPE=1 ";
   ss << " bash " << build_path << "/factor_script.sh";
-  ss << " ${script_flags} ${factor_src} ${factor_bin} ${host_src} ";
+  ss << " ${script_flags} ${factor_src} ${topsfc_lib} ${host_src} ";
   switch (CCtx().GetOutputKind()) {
-  case OutputKind::ShellScript: ss << factor_pname; break;
+  case OutputKind::ShellScript: ss << build_path + "/" + factor_pname; break;
   case OutputKind::TargetModule: ss << std::string(output); break;
   case OutputKind::TargetExecutable: ss << std::string(output); break;
   default:
