@@ -24,6 +24,7 @@ private:
   bool found_return = false;
   bool return_deduction = false;
   int parallel_level = 0;
+  std::vector<int> parallel_levels;
   bool allow_auto_threading = false;
 
   std::unordered_set<std::string>

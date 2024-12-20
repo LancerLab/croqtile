@@ -14,6 +14,7 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
     parallel_level = 0;
   } else if (isa<AST::ParallelBy>(&n)) {
     parallel_level++;
+    parallel_levels.push_back(parallel_level);
   } else if (isa<AST::Parameter>(&n)) {
     in_decl = true;
     allow_named_dim = true; // tolerate repeated symbols inside mdspan params
@@ -671,6 +672,18 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
   ReportErrorWhenViolateODR(n.LOC(), n.biv, __FILE__, __LINE__,
                             MakeBoundedITupleType(Shape(1, n.biv), "pv"));
+  /*
+  parallel p by x {
+    parallel q by y {}
+    parallel q by z {} // should be treated as ERROR!
+  }
+  */
+  if (auto size = parallel_levels.size(); size >= 2)
+    if (parallel_levels[size - 1] == parallel_levels[size - 2] &&
+        parallel_levels.back() == 2) {
+      Error(n.LOC(), "Multiple inner parallels are not allowed!");
+      error_count++;
+    }
   return true;
 }
 

@@ -57,6 +57,7 @@ struct OtherTrait {
 
 using SymbolDetails = std::map<std::string, std::vector<SymbolDetail>>;
 using LaunchDetails = std::map<std::string, LaunchConfig>;
+using FactorLaunchDetails = std::map<std::string, std::vector<LaunchConfig>>;
 using ReturnSymbols = std::map<std::string, std::string>;
 using FunctionTraits = std::map<std::string, OtherTrait>;
 
@@ -73,6 +74,7 @@ struct CodeGenInfo {
 private:
   SymbolDetails all_syms;
   LaunchDetails launches;
+  FactorLaunchDetails factor_launches;
   ReturnSymbols returns;
   FunctionTraits traits;
 
@@ -92,6 +94,16 @@ public:
   }
   LaunchConfig& GetFunctionLaunch(const std::string& fname) {
     return launches[fname];
+  }
+
+  const std::vector<LaunchConfig>&
+  GetFactorFunctionLaunches(const std::string& fname) const {
+    return factor_launches.at(fname);
+  }
+
+  std::vector<LaunchConfig>&
+  GetFactorFunctionLaunches(const std::string& fname) {
+    return factor_launches[fname];
   }
 
   const OtherTrait& GetFunctionTrait(const std::string& fname) const {
@@ -127,6 +139,15 @@ public:
 
   void SetLaunchDetail(const std::string fname, const LaunchConfig& lc) {
     launches[fname] = lc;
+  }
+
+  void SetFactorLaunchDetail(const std::string fname, const LaunchConfig& lc) {
+    factor_launches[fname].push_back(lc);
+  }
+
+  void SetFactorLaunchDetails(const std::string fname,
+                              const std::vector<LaunchConfig>& lcs) {
+    factor_launches[fname] = lcs;
   }
 
   void SetReturnSymbol(const std::string fname, const std::string& rs) {

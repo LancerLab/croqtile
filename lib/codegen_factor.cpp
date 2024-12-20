@@ -409,56 +409,73 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
     return true;
   }
 
-  fs << this->indent << "Dim3 grid_dim("
-     << cgi->GetFunctionLaunch(fname).grid_dim_x << ");\n";
-  fs << this->indent << "Dim3 block_dim("
-     << cgi->GetFunctionLaunch(fname).block_dim_x << ");\n";
+  assert(by.note.length() >= 3);
+  auto cur_pb_idx_str = SplitStringByDelimiter(by.note, ", ")[0];
 
-  // [Factor host] LaunchKernel statement:
-  // symbols which are passed to the device are listed as launch parameters
-  {
-    std::ostringstream launch;
-    launch << this->indent << "auto ts = launch_kernel_(\"" << factor_fname
-           << "_parallel\", grid_dim, block_dim, args.back(), {";
-    size_t index = 0;
-    for (auto& item : GetFactorDeviceInParams()) {
-      assert(item.d_index == (int)index);
-      launch << ((index++ > 0) ? ", " : "");
-      if (!item.h_name.empty())
-        launch << item.h_name;
-      else
-        launch << item.device_name;
+  // generate all launch configs when entered the first Parallel node
+  if (cur_pb_idx_str == "0") {
+    int pb_idx = 0;
+    for (auto& lc : cgi->GetFactorFunctionLaunches(fname)) {
+      auto pb_idx_str = pb_idx == 0 ? "" : "_" + std::to_string(pb_idx);
+      fs << this->indent << "Dim3 grid_dim" << pb_idx_str << "("
+         << lc.grid_dim_x << ");\n";
+      fs << this->indent << "Dim3 block_dim" << pb_idx_str << "("
+         << lc.block_dim_x << ");\n";
+
+      // [Factor host] LaunchKernel statement:
+      // symbols which are passed to the device are listed as launch parameters
+      {
+        std::ostringstream launch;
+        launch << this->indent << "auto ts" << pb_idx_str
+               << " = launch_kernel_(\"" << factor_fname
+               << "_parallel" + pb_idx_str + "\", grid_dim" << pb_idx_str
+               << ", block_dim" << pb_idx_str << ", args.back(), {";
+        size_t index = 0;
+        for (auto& item : GetFactorDeviceInParams()) {
+          assert(item.d_index == (int)index);
+          launch << ((index++ > 0) ? ", " : "");
+          if (!item.h_name.empty())
+            launch << item.h_name;
+          else
+            launch << item.device_name;
+        }
+        launch << "}, {"
+               << ((void_return) ? ""
+                                 : UnScopedName(cgi->GetReturnSymbol(fname)))
+               << "});\n";
+
+        if (debug_visit)
+          VST_DEBUG(dbgs() << "[Factor Host] Launch Kernel:\n" << launch.str());
+        fs << launch.str();
+      }
+
+      ++pb_idx;
     }
-    launch << "}, {"
-           << ((void_return) ? "" : UnScopedName(cgi->GetReturnSymbol(fname)))
-           << "});\n";
 
-    if (debug_visit)
-      VST_DEBUG(dbgs() << "[Factor Host] Launch Kernel:\n" << launch.str());
-    fs << launch.str();
+    // [Factor-host] Return statement
+    {
+      std::ostringstream ret;
+      // note: factor code always requires a return statement
+      ret << this->indent << "return std::vector<Value>{"
+          << ((!void_return) ? UnScopedName(cgi->GetReturnSymbol(fname)) : "")
+          << "};\n";
+      if (debug_visit)
+        VST_DEBUG(dbgs() << "[Factor Host] Return:\n" << ret.str());
+      fs << ret.str();
+    }
+
+    this->DecrementIndent();
+    fs << this->indent << "}, true); // end of choreo-factor host program\n\n";
+    factor_host_unbraced = false;
   }
-
-  // [Factor-host] Return statement
-  {
-    std::ostringstream ret;
-    // note: factor code always requires a return statement
-    ret << this->indent << "return std::vector<Value>{"
-        << ((!void_return) ? UnScopedName(cgi->GetReturnSymbol(fname)) : "")
-        << "};\n";
-    if (debug_visit)
-      VST_DEBUG(dbgs() << "[Factor Host] Return:\n" << ret.str());
-    fs << ret.str();
-  }
-
-  this->DecrementIndent();
-  fs << this->indent << "}, true); // end of choreo-factor host program\n\n";
-  factor_host_unbraced = false;
 
   // [Factor Device] Function declaration
   {
     std::ostringstream dfun;
     {
-      dfun << this->indent << "D(func_)(\"" << factor_fname << "_parallel\", ";
+
+      dfun << this->indent << "D(func_)(\"" << factor_fname << "_parallel"
+           << (cur_pb_idx_str == "0" ? "" : "_" + cur_pb_idx_str) << "\", ";
 
       // input arguments of factor device function
       dfun << "{";
