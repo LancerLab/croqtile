@@ -21,6 +21,27 @@ using namespace Choreo::Topscc;
 extern Option<bool> native_f16;
 extern Option<std::string> output;
 
+namespace {
+
+inline const char* TopsMdsStorage(Storage st) {
+  switch (st) {
+  case Storage::DEFAULT:
+  case Storage::GLOBAL: return "tops::Global";
+  case Storage::SHARED: return "tops::Shared";
+  case Storage::LOCAL: return "tops::Private";
+  default: choreo_unreachable("storage type is not supported.");
+  }
+  return "";
+}
+
+inline const std::string GetDTEContextName() {
+  static unsigned i = 0;
+  return "ctx" + std::to_string(i++);
+}
+
+} // anony namespace
+
+
 bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
   if (trace_visit) dbgs() << "Before visiting " << n.TypeNameString() << "\n";
 
@@ -205,8 +226,20 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
            << ssm.HostName(item.name) << ".data(), " << SizeExprOf(*sty)
            << ", topsMemcpyHostToDevice);\n";
         ssm.MapHostSymbol(item.name + "__device", buf_sym);
+
       }
     }
+
+    for (auto& item : GetDeviceFuncIns()) {
+      // handle inputs mdspan decls
+      auto sym = UnScopedName(item.name);
+      if (auto sty = dyn_cast<SpannedType>(item.type)) {
+        ds << d_indent << "tops::mdspan __mds_" << sym << "("
+          << TopsMdsStorage(sty->GetStorage()) << ", " << sym << ", "
+          << RSTR(sty->GetShape()) << ");\n";
+      }
+    }
+
   }
 
   return true;
@@ -270,12 +303,18 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       if (!IsChoreoOutput(InScopeName(sym))) {
         ds << d_indent << "__shared__ " << bts << " " << sym << "["
            << ElemCountExprOf(*sty) << "];\n";
+        ds << d_indent << "tops::mdspan __mds_" << sym << "("
+          << TopsMdsStorage(sty->GetStorage()) << ", " << sym << ", "
+          << RSTR(sty->GetShape()) << ");\n";
         ssm.MapDeviceSymbol(InScopeName(sym), sym);
       }
     } else if (sty->GetStorage() == Storage::LOCAL) {
       if (!IsChoreoOutput(InScopeName(sym))) {
         ds << d_indent << "__local__ " << bts << " " << sym << "["
            << ElemCountExprOf(*sty) << "];\n";
+        ds << d_indent << "tops::mdspan __mds_" << sym << "("
+          << TopsMdsStorage(sty->GetStorage()) << ", " << sym << ", "
+          << RSTR(sty->GetShape()) << ");\n";
         ssm.MapDeviceSymbol(InScopeName(sym), sym);
       }
     } else
@@ -310,22 +349,6 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
   return true;
 }
 
-inline const char* TopsMdsStorage(Storage st) {
-  switch (st) {
-  case Storage::DEFAULT:
-  case Storage::GLOBAL: return "tops::Global";
-  case Storage::SHARED: return "tops::Shared";
-  case Storage::LOCAL: return "tops::Private";
-  default: choreo_unreachable("storage type is not supported.");
-  }
-  return "";
-}
-
-inline const std::string GetDTEContextName() {
-  static unsigned i = 0;
-  return "ctx" + std::to_string(i++);
-}
-
 bool TopsccCodeGen::Visit(AST::DMA& n) {
   TraceEachVisit(n);
 
@@ -353,21 +376,25 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   auto t_ca = cast<AST::ChunkAt>(n.to);
   auto f_sym = f_ca->data->name;
   auto t_sym = t_ca->data->name;
-  auto f_nm = ssm.DeviceName(InScopeName(f_sym));
-  auto t_nm = ssm.DeviceName(InScopeName(t_sym));
   auto f_sty = GetSpannedType(GetSymbolType(f_sym));
   auto t_sty = GetSpannedType(GetSymbolType(t_sym));
+
+  std::string f_nm = "";
+  std::string f_mds_name = "";
+  const std::string temp_str = f_sym + "__buf__";
+  if (!ssm.DeviceNameOrNull(temp_str).empty())
+    f_nm = ssm.DeviceName(temp_str);
+  else
+    f_nm = ssm.DeviceName(InScopeName(f_sym));
+  f_mds_name = GetMdsName(f_nm);
+
+  auto t_nm = ssm.DeviceName(InScopeName(t_sym));
+  auto t_mds_name = GetMdsName(t_nm);
 
   assert(f_sty && "can not retrieve data from 'from'.");
   assert(t_sty && "can not retrieve data from 'to'.");
 
-  // claim the mdspans
-  ds << d_indent << "tops::mdspan __mds_" << f_nm << "("
-     << TopsMdsStorage(f_sty->GetStorage()) << ", " << f_nm << ", "
-     << RSTR(f_sty->GetShape()) << ");\n";
-  ds << d_indent << "tops::mdspan __mds_" << t_nm << "("
-     << TopsMdsStorage(t_sty->GetStorage()) << ", " << t_nm << ", "
-     << RSTR(t_sty->GetShape()) << ");\n";
+  ssm.MapDeviceSymbol(t_nm, t_nm);
 
   if (n.operation == ".copy") {
     if (f_ca->positions == nullptr) {
@@ -376,7 +403,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         ds << d_indent
            << (fty->IsAsync() ? ("tops::event " + n.future + " = ") : "")
            << "tops::memcpy" << (fty->IsAsync() ? "_async" : "") << "("
-           << dte_ctx << ", __mds_" << t_nm << ", __mds_" << f_nm << ");\n";
+           << dte_ctx << ", " << t_mds_name << ", " << f_mds_name << ");\n";
       } else {
         ds << d_indent << "int __deslice_offset_" << t_nm << "[] = {";
         size_t i = 0;
@@ -391,7 +418,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         ds << d_indent
            << (fty->IsAsync() ? ("tops::event " + n.future + " = ") : "")
            << "tops::deslice" << (fty->IsAsync() ? "_async" : "") << "("
-           << dte_ctx << ", __mds_" << t_nm << ", __mds_" << f_nm
+           << dte_ctx << ", " << t_mds_name << ", " << f_mds_name
            << ", __deslice_offset_" << t_nm << ");\n";
       }
     } else {
@@ -408,7 +435,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       ds << d_indent
          << (fty->IsAsync() ? ("tops::event " + n.future + " = ") : "")
          << "tops::slice" << (fty->IsAsync() ? "_async" : "") << "(" << dte_ctx
-         << ", __mds_" << t_nm << ", __mds_" << f_nm << ", __slice_offset_"
+         << ", " << t_mds_name << ", " << f_mds_name << ", __slice_offset_"
          << f_nm << ");\n";
     }
   } else if (n.operation == ".pad") {
@@ -437,7 +464,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     ds << d_indent
        << (fty->IsAsync() ? ("tops::event " + n.future + " = ") : "")
        << "tops::transpose" << (fty->IsAsync() ? "_async" : "") << "("
-       << dte_ctx << ", __mds_" << t_nm << ", __mds_" << f_nm
+       << dte_ctx << ", " << t_mds_name << ", " << f_mds_name
        << ", __transpose_layout_" << f_nm << ");\n";
   }
 

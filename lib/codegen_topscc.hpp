@@ -12,6 +12,8 @@
 // #include "topscc_script.inc"
 #include "types.hpp"
 
+using namespace Choreo;
+
 namespace Choreo {
 
 namespace Topscc {
@@ -83,6 +85,12 @@ public:
     for (auto mapit = device_map.rbegin(); mapit != device_map.rend(); ++mapit)
       if (mapit->count(csym)) return (*mapit).at(csym);
     return csym;
+  }
+
+  const std::string DeviceNameOrNull(const std::string& csym) const {
+    for (auto mapit = device_map.rbegin(); mapit != device_map.rend(); ++mapit)
+      if (mapit->count(csym)) return (*mapit).at(csym);
+    return "";
   }
 };
 
@@ -205,6 +213,14 @@ private:
 
   FilterRange<SymbolDetail> GetChoreoFuncIns() {
     return cgi->GetParameters(fname);
+  }
+
+  const std::string GetMdsName(const std::string& csym) const {
+    const std::string& BUF_PREFIX = "__mds_";
+    if (UnScopedName(csym).find(BUF_PREFIX) != std::string::npos)
+      return UnScopedName(csym);
+    else
+      return BUF_PREFIX + UnScopedName(csym);
   }
 
   const FutureBufferInfo& FBInfo() const {
