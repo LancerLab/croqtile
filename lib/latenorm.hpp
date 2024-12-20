@@ -33,7 +33,6 @@ public:
   void Reset() { string_to_dma.clear(); }
 };
 
-
 // Auxillary structures for buffer generation
 struct BufferInsertionInfo {
   int index = -1;
@@ -266,7 +265,7 @@ public:
     if (n.chained == true && !n.chain_from.empty()) {
       auto _chain_from_ptr = workinglist.GetDMA(n.chain_from);
       assert(_chain_from_ptr != nullptr &&
-              "after primitive chained to non-exist future id\n");
+             "after primitive chained to non-exist future id\n");
       _chain_from_ptr->chained = true;
       _chain_from_ptr->chain_to = n.future;
     }

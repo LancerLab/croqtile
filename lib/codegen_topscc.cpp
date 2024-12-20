@@ -93,7 +93,7 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
     }
   } else if (isa<AST::IncrementBlock>(&n)) {
     DecrDeviceIndent();
-    ds << d_indent << "} // end of incr: " << n.LOC() << "\n";
+    ds << d_indent << "}\n";
   }
   return true;
 }
@@ -198,9 +198,9 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
         auto buf_sym = sym + "__device";
         hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
         hs << h_indent << "topsMalloc(&" << buf_sym << ", " << SizeExprOf(*sty)
-           << "*sizeof(" << bts << "));\n";
-        hs << h_indent << "topsMemcpy(" << ssm.HostName(item.name)
-           << ".data(), " << buf_sym << ", " << SizeExprOf(*sty)
+           << ");\n";
+        hs << h_indent << "topsMemcpy(" << buf_sym << ", "
+           << ssm.HostName(item.name) << ".data(), " << SizeExprOf(*sty)
            << ", topsMemcpyHostToDevice);\n";
         ssm.MapHostSymbol(item.name + "__device", buf_sym);
       }
@@ -240,7 +240,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
         if (!n.init_value) {
           hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
           hs << h_indent << "topsMalloc(&" << buf_sym << ", "
-             << SizeExprOf(*sty) << "*sizeof(" << bts << "));\n";
+             << SizeExprOf(*sty) << ");\n";
         } else {
           // support simple int literal initialization
           hs << h_indent << bts << " " << sym << "__init[" << SizeExprOf(*sty)
@@ -249,9 +249,9 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
              << ", sizeof(" << sym << "__init));\n";
           hs << h_indent << bts << " * " << buf_sym << "= nullptr;\n";
           hs << h_indent << "topsMalloc(&" << buf_sym << ", "
-             << SizeExprOf(*sty) << "*sizeof(" << bts << "));\n";
-          hs << h_indent << "topsMemcpy(" << sym << "__init, " << sym
-             << "__device, " << SizeExprOf(*sty)
+             << SizeExprOf(*sty) << ");\n";
+          hs << h_indent << "topsMemcpy(" << sym << "__device, " << sym
+             << "__init, " << SizeExprOf(*sty)
              << ", topsMemcpyHostToDevice);\n";
         }
       } else {
@@ -259,7 +259,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
            << ", " << shape.Rank() << ">(" << LSTR(shape) << ");\n";
         hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
         hs << h_indent << "topsMalloc(&" << buf_sym << ", " << SizeExprOf(*sty)
-           << "*sizeof(" << bts << "));\n";
+           << ");\n";
       }
       ssm.MapHostSymbol(InScopeName(sym) + "__device", buf_sym);
       ssm.MapHostSymbol(InScopeName(sym), sym);
@@ -529,8 +529,8 @@ bool TopsccCodeGen::Visit(AST::Return& n) {
     } else if (IsChoreoOutput(InScopeName(sym))) {
       if (auto sty = dyn_cast<SpannedType>(GetSymbolType(sym))) {
         // return the global storage, must map back
-        hs << h_indent << "topsMemcpy(" << sym << "__device, " << sym
-           << ".data(), " << sty->GetShape().GetSizeExpression()
+        hs << h_indent << "topsMemcpy(" << sym << ".data(), " << sym
+           << "__device, " << SizeExprOf(*sty)
            << ", topsMemcpyDeviceToHost);\n";
       }
     }
