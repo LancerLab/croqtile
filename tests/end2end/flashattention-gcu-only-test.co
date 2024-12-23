@@ -1,5 +1,6 @@
 // REQUIRES: TARGET-GCUALL
-// RUN: choreo -gs -t factor %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
+// RUN: choreo -gs -t factor %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+// RUN: choreo -gs -t topscc %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
 
 #include "choreo.h"
 #include <algorithm>
@@ -10,7 +11,7 @@
 
 __cok__ { /// kernel program
 
-  extern "C" void matmul_kernel(float *lhs, float *rhs, float *out, int m,
+__co_device__  extern "C" void matmul_kernel(float *lhs, float *rhs, float *out, int m,
                                 int k, int n) {
     for (int i = 0; i < m; ++i)
       for (int j = 0; j < n; ++j)
@@ -18,7 +19,7 @@ __cok__ { /// kernel program
           out[i * n + j] += lhs[i * k + z] * rhs[z * n + j];
   }
 
-  extern "C" void softmax_kernel(float *input, float *output, int m, int n) {
+__co_device__  extern "C" void softmax_kernel(float *input, float *output, int m, int n) {
     for (int i = 0; i < m; ++i) {
       float max_val = input[i * n] / 22.627417;
       // Find the maximum value in the current row (to avoid numerical overflow)
@@ -38,7 +39,7 @@ __cok__ { /// kernel program
         output[i * n + j] /= sum;
     }
   }
-extern "C" void matmul_kernel_ext(float *lhs, float *rhs, float *out, float *max_row_values, int m, int k, int n) {
+__co_device__ extern "C" void matmul_kernel_ext(float *lhs, float *rhs, float *out, float *max_row_values, int m, int k, int n) {
     for (int i = 0; i < m; ++i) {
         float max_val = -100; // Initialize with the smallest possible value
         for (int j = 0; j < n; ++j) {
@@ -55,7 +56,7 @@ extern "C" void matmul_kernel_ext(float *lhs, float *rhs, float *out, float *max
         max_row_values[i] = max_val;
     }
 }
-  extern "C" void softmax_kernel_ext(float *input, float *output, float *max_row_values, int m, int n) {
+__co_device__  extern "C" void softmax_kernel_ext(float *input, float *output, float *max_row_values, int m, int n) {
     for (int i = 0; i < m; ++i) {
       float sum = 0.0f;
       // Compute the exp of each element and accumulate it in sum
@@ -70,7 +71,7 @@ extern "C" void matmul_kernel_ext(float *lhs, float *rhs, float *out, float *max
     }
   }
 #include <float.h>
-  extern "C" void flash_attention_kernel(float *Q, float *K, float *V, float *O,
+__co_device__  extern "C" void flash_attention_kernel(float *Q, float *K, float *V, float *O,
                             int seq_len, int embedding_dim, float *maxi) {
     // Define the maximum sequence length
     #define MAX_SEQ_LEN 1024

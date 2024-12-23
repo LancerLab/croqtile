@@ -51,8 +51,8 @@ __co__ auto bar(f16 [128, 4, 14, 69] a) {
 // CHECK:         tops::mdspan __mds_anon_0(tops::Private, anon_0, 16, 1, 0);
 // CHECK:         tops_dte_ctx_t ctx0;
 // CHECK:         tops::dte_scope s_ctx0(ctx0);
-// CHECK:         int __slice_offset_a[] = {(int)(__tops_tid_x() * 16), (int)(__iv_x, __iv_y * 1)};
-// CHECK:         tops::slice(ctx0, __mds_anon_0, __mds_a, __slice_offset_a);
+// CHECK:         int __slice_offset__a_2_anon_0[] = {(int)(__tops_tid_x() * 16), (int)(__iv_x, __iv_y * 1)};
+// CHECK:         tops::slice(ctx0, __mds_anon_0, __mds_a, __slice_offset__a_2_anon_0);
 // CHECK:       } // x
 // CHECK:     } // y
 // CHECK:   }
@@ -79,8 +79,8 @@ __co__ auto bar(f16 [128, 4, 14, 69] a) {
 // CHECK:         tops::mdspan __mds_anon_1(tops::Private, anon_1, 64, 32, 0, 4);
 // CHECK:         tops_dte_ctx_t ctx1;
 // CHECK:         tops::dte_scope s_ctx1(ctx1);
-// CHECK:         int __slice_offset_a[] = {(int)(__iv_index__elem__0, __iv_index__elem__1 * 64), (int)(__tops_bid_x() * 32), (int)(__tops_tid_x() * 0)};
-// CHECK:         tops::slice(ctx1, __mds_anon_1, __mds_a, __slice_offset_a);
+// CHECK:         int __slice_offset__a_2_anon_1[] = {(int)(__iv_index__elem__0, __iv_index__elem__1 * 64), (int)(__tops_bid_x() * 32), (int)(__tops_tid_x() * 0)};
+// CHECK:         tops::slice(ctx1, __mds_anon_1, __mds_a, __slice_offset__a_2_anon_1);
 // CHECK:       }
 // CHECK:     }
 // CHECK:   }

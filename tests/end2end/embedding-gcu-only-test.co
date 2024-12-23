@@ -4,7 +4,7 @@
 
 // extern "C" void embedding_kernel(float * weights, int * indices, float * out, int vocab_size, int embed_dim, int seq_len) {
 __cok__ { /// kernel program
-extern "C" void embedding_kernel(float * weights, int * indices, float * out) {
+__co_device__ extern "C" void embedding_kernel(float * weights, int * indices, float * out) {
   int vocab_size = 512;
   int embed_dim = 128;
   int seq_len = 32;

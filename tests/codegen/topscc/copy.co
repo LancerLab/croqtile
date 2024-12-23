@@ -15,13 +15,12 @@ __co__ auto foo(f32 [32, 4] a) {
 // CHECK:   tops_dte_ctx_t ctx0;
 // CHECK:   tops::dte_scope s_ctx0(ctx0);
 // CHECK:   tops::memcpy(ctx0, __mds_data, __mds_a);
-// CHECK:   // parallel-by: tests/codegen/topscc/copy.co:5.1-10
 // CHECK:   __local__ float anon_0[32];
 // CHECK:   tops::mdspan __mds_anon_0(tops::Private, anon_0, 16, 2);
 // CHECK:   tops_dte_ctx_t ctx1;
 // CHECK:   tops::dte_scope s_ctx1(ctx1);
-// CHECK:   int __slice_offset_data[] = {(int)(__tops_tid_x() * 16), (int)(__tops_tid_x() * 2)};
-// CHECK:   tops::slice(ctx1, __mds_anon_0, __mds_data, __slice_offset_data);
+// CHECK:   int __slice_offset__data_2_anon_0[] = {(int)(__tops_tid_x() * 16), (int)(__tops_tid_x() * 2)};
+// CHECK:   tops::slice(ctx1, __mds_anon_0, __mds_data, __slice_offset__data_2_anon_0);
 // CHECK: }
  
 // CHECK: choreo::spanned_data<choreo::f32, 2> foo(const choreo::spanned_view<choreo::f32, 2> & hp0) {

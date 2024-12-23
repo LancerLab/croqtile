@@ -49,6 +49,12 @@ bool FactorCodeGen::BeforeVisitImpl(AST::Node& n) {
     // emit the fixed host header and factor header to their streams
     EmitFixedHostHead();
     EmitFixedFactorHead();
+
+    // some special kernel defs
+    ks << "#define __co_device__ \n";
+    ks << "static int inline __addr2int__(void* v) {\n";
+    ks << "  return (int)v;\n";
+    ks << "}\n";
   } else if (isa<AST::ChoreoFunction>(&n)) {
     ResetChoreoFunctionStates();
     factor_fname = "__choreo_" + fname;

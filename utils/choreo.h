@@ -603,12 +603,9 @@ auto copy_as_spanned(T* ptr, std::initializer_list<size_t> init) {
 // target specific defintions
 #ifdef __TOPSCC__
 #define __co_device__ __device__
-static int inline __addr2int__(void* v) {
+__device__ static int inline __addr2int__(void* v) {
   return static_cast<int>(reinterpret_cast<long long>(v));
 }
-#else
-#define __co_device__
-static int inline __addr2int__(void* v) { return static_cast<int>(v); }
 #endif
 
 } // end namespace choreo

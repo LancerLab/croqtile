@@ -418,7 +418,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
            << "tops::memcpy" << (fty->IsAsync() ? "_async" : "") << "("
            << dte_ctx << ", " << t_mds_name << ", " << f_mds_name << ");\n";
       } else {
-        ds << d_indent << "int __deslice_offset_" << t_nm << "[] = {";
+        auto off_name = "__deslice_offset__" + t_nm + "_2_" + f_nm;
+        ds << d_indent << "int " << off_name << "[] = {";
         size_t i = 0;
         auto shape = f_sty->GetShape();
         for (auto& p : t_ca->positions->AllValues()) {
@@ -431,11 +432,12 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         ds << d_indent
            << (fty->IsAsync() ? ("tops::event " + n.future + " = ") : "")
            << "tops::deslice" << (fty->IsAsync() ? "_async" : "") << "("
-           << dte_ctx << ", " << t_mds_name << ", " << f_mds_name
-           << ", __deslice_offset_" << t_nm << ");\n";
+           << dte_ctx << ", " << t_mds_name << ", " << f_mds_name << ", "
+           << off_name << ");\n";
       }
     } else {
-      ds << d_indent << "int __slice_offset_" << f_nm << "[] = {";
+      auto off_name = "__slice_offset__" + f_nm + "_2_" + t_nm;
+      ds << d_indent << "int " << off_name << "[] = {";
       size_t i = 0;
       auto shape = t_sty->GetShape();
       for (auto& p : f_ca->positions->AllValues()) {
@@ -448,8 +450,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       ds << d_indent
          << (fty->IsAsync() ? ("tops::event " + n.future + " = ") : "")
          << "tops::slice" << (fty->IsAsync() ? "_async" : "") << "(" << dte_ctx
-         << ", " << t_mds_name << ", " << f_mds_name << ", __slice_offset_"
-         << f_nm << ");\n";
+         << ", " << t_mds_name << ", " << f_mds_name << ", " << off_name
+         << ");\n";
     }
   } else if (n.operation == ".pad") {
     auto pad_config = cast<PadConfig>(n.GetConfig());
