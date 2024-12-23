@@ -13,14 +13,6 @@ __cok__ { /// kernel program
 #define EXT32(hi, lo) ((hi) << 16 | ((lo)&0xffff))
 #endif
 
-#ifdef __TOPSCC__
-#define __co_device__ __device__
-#define __addr2int__(v) static_cast<int>(reinterpret_cast<long long>(v))
-#else
-#define __co_device__
-#define __addr2int__(v) ((int)(v))
-#endif
-
 // topsop/atomic_op/src/legacy/basic_operation/add_fp32.cc
 __co_device__ extern "C" void add_fp32(int in0_addr_, int in1_addr_, int size,
                          int out_addr_) {

@@ -226,7 +226,7 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
         // Only the globals are declared in host. The shareds/locals are
         // declared in device
         auto sym = UnScopedName(item.name);
-        auto bts = NameBaseType(sty->ElementType());
+        std::string bts = NameBaseType(sty->ElementType());
         auto buf_sym = sym + "__device";
         hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
         hs << h_indent << "topsMalloc(&" << buf_sym << ", "
@@ -275,7 +275,8 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
   if (auto sty = dyn_cast<SpannedType>(nty)) {
     // globals are declared in host, while shareds/locals are declared in device
     auto shape = sty->GetShape();
-    auto bts = NameBaseType(sty->ElementType());
+    std::string bts{NameBaseType(sty->ElementType())};
+
     if (sty->GetStorage() == Storage::GLOBAL) {
       auto buf_sym = sym + "__device";
       if (!IsChoreoOutput(InScopeName(sym))) {
@@ -639,9 +640,9 @@ DeviceParamTypeStringify(const Choreo::Type& ty) {
     return "int";
   else if (isa<BooleanType>(&ty))
     return "bool";
-  else if (auto sty = dyn_cast<SpannedType>(&ty))
+  else if (auto sty = dyn_cast<SpannedType>(&ty)) {
     return std::string(NameBaseType(sty->ElementType())) + " *";
-  else
+  } else
     choreo_unreachable("unsupported host function type.");
   return "";
 }

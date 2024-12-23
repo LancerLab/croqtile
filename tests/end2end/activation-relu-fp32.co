@@ -1,5 +1,6 @@
 // REQUIRES: TARGET-GCUALL
-// RUN: choreo -gs -t factor %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
+// RUN: choreo -gs -t factor %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+// RUN: choreo -gs -t topscc %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
 
 #include "choreo.h"
 #include <chrono>
@@ -8,7 +9,7 @@
 
 __cok__ { /// kernel program
 
-extern "C" void relu_kernel(float* input, float* out) {
+__co_device__ extern "C" void relu_kernel(float* input, float* out) {
   constexpr int m = 256;
   constexpr int n = 256;
   for (int i = 0; i < m; ++i) {

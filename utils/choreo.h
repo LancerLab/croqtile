@@ -176,6 +176,11 @@ public:
 // Floating-point types
 using f32 = float;
 
+#ifdef __TOPSCC__
+#define NATIVE_F16_SUPPORT
+#define NATIVE_BF16_SUPPORT
+#endif
+
 #ifndef NATIVE_F16_SUPPORT
 // this f16 accepts literal initialization, but without arith support
 class f16 {
@@ -435,15 +440,32 @@ private:
     std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
   }
 
-  // f16/bf16
+  // f16
   template <typename U>
-  typename std::enable_if<std::is_same<U, f16>::value ||
-                          std::is_same<U, bf16>::value>::type
+  typename std::enable_if<std::is_same<U, f16>::value>::type
   fill_random(U* array, size_t N, U lb, U ub) {
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<float> rand_func(
 #ifdef NATIVE_F16_SUPPORT
+        static_cast<float>(lb),
+        static_cast<float>(ub)
+#else
+        lb.toFloat(),
+        ub.toFloat()
+#endif
+    ); // [-1.0, 1.0)
+    std::generate_n(&array[0], N, [&]() { return U(rand_func(gen)); });
+  }
+
+  // bf16
+  template <typename U>
+  typename std::enable_if<std::is_same<U, bf16>::value>::type
+  fill_random(U* array, size_t N, U lb, U ub) {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<float> rand_func(
+#ifdef NATIVE_BF16_SUPPORT
         static_cast<float>(lb),
         static_cast<float>(ub)
 #else
@@ -577,6 +599,17 @@ auto copy_as_spanned(T* ptr, std::initializer_list<size_t> init) {
                 __FILE__, __LINE__);
   return res;
 }
+
+// target specific defintions
+#ifdef __TOPSCC__
+#define __co_device__ __device__
+static int inline __addr2int__(void* v) {
+  return static_cast<int>(reinterpret_cast<long long>(v));
+}
+#else
+#define __co_device__
+static int inline __addr2int__(void* v) { return static_cast<int>(v); }
+#endif
 
 } // end namespace choreo
 

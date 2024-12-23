@@ -7,9 +7,7 @@
 #include <thread>
 
 #include "ast.hpp"
-// #include "choreo_topscc_header.inc"
 #include "codegen.hpp"
-// #include "topscc_script.inc"
 #include "types.hpp"
 
 using namespace Choreo;
