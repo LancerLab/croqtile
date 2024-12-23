@@ -1,5 +1,6 @@
 // REQUIRES: TARGET-GCU300
-// RUN: choreo -gs -t factor %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
+// RUN: choreo -gs -t factor %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+// RUN: choreo -gs -t topscc %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
 
 #include "choreo.h"
 #include <chrono>
@@ -12,8 +13,16 @@ __cok__ { /// kernel program
 #define EXT32(hi, lo) ((hi) << 16 | ((lo)&0xffff))
 #endif
 
+#ifdef __TOPSCC__
+#define __co_device__ __device__
+#define __addr2int__(v) static_cast<int>(reinterpret_cast<long long>(v))
+#else
+#define __co_device__
+#define __addr2int__(v) ((int)(v))
+#endif
+
 // topsop/atomic_op/src/legacy/basic_operation/add_fp32.cc
-extern "C" void add_fp32(int in0_addr_, int in1_addr_, int size,
+__co_device__ extern "C" void add_fp32(int in0_addr_, int in1_addr_, int size,
                          int out_addr_) {
   volatile int operands_addr0_tar = reinterpret_cast<int>(in0_addr_ >> 6);
   volatile int operands_addr1_tar = reinterpret_cast<int>(in1_addr_ >> 6);
@@ -148,7 +157,7 @@ extern "C" void add_fp32(int in0_addr_, int in1_addr_, int size,
 }
 
 // topsop/atomic_op/src/legacy/basic_operation/div_fp32.cc
-extern "C" void __attribute__((disable_dtu_instr_sched))
+__co_device__ extern "C" void __attribute__((disable_dtu_instr_sched))
 div_fp32(int in0_addr_, int in1_addr_, int size,
                          int out_addr_) {
   volatile int operands_addr0_tar = reinterpret_cast<int>(in0_addr_ >> 6);
@@ -296,7 +305,7 @@ div_fp32(int in0_addr_, int in1_addr_, int size,
 }
 
 // topsop/atomic_op/src/legacy/basic_operation/mul_fp32_scalar.cc
-extern "C" void __attribute__((disable_dtu_instr_sched))
+__co_device__ extern "C" void __attribute__((disable_dtu_instr_sched))
 mul_fp32_scalar(int in0_addr_, float in1, int size,
                          int out_addr_) {
   volatile int operands_addr0_tar = reinterpret_cast<int>(in0_addr_ >> 6);
@@ -407,16 +416,16 @@ mul_fp32_scalar(int in0_addr_, float in1, int size,
   __dtu_c_movsr2mpr(mpr);
 }
 
-extern "C"
+__co_device__ extern "C"
 void addcdiv_kernel_0_c_func_fp32(float* a_addr, float* b_addr, float* c_addr, float* d_addr, float* e_addr) {
-  div_fp32(reinterpret_cast<int>(b_addr), reinterpret_cast<int>(c_addr), 8192, reinterpret_cast<int>(e_addr));
-  mul_fp32_scalar((int)e_addr, 1.0, 8192, (int)e_addr);
-  add_fp32((int)a_addr, (int)e_addr, 8192, (int)d_addr);
+  div_fp32(__addr2int__(b_addr), __addr2int__(c_addr), 8192, __addr2int__(e_addr));
+  mul_fp32_scalar(__addr2int__(e_addr), 1.0, 8192, __addr2int__(e_addr));
+  add_fp32(__addr2int__(a_addr), __addr2int__(e_addr), 8192, __addr2int__(d_addr));
 }
 
-extern "C"
+__co_device__ extern "C"
 void add_kernel_fp32(float* a_addr, float* b_addr, float* c_addr) {
-  add_fp32((int)a_addr, (int)b_addr, 8192, (int)c_addr);
+  add_fp32(__addr2int__(a_addr), __addr2int__(b_addr), 8192, __addr2int__(c_addr));
 }
 
 } /// end of kernel decl

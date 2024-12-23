@@ -1099,10 +1099,10 @@ extern "C" void topk_merge_stage2_index(int input_addr,
 
 
 __co__ void topk(
-    f32 [A, B, C] input, 
-    s32 k, 
-    s32 axis, 
-    f32 alpha, 
+    f32 [A, B, C] input,
+    s32 k,
+    s32 axis,
+    f32 alpha,
     f32 beta,
     s32 output_value,
     s32 output_index

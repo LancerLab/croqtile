@@ -39,8 +39,7 @@ inline const std::string GetDTEContextName() {
   return "ctx" + std::to_string(i++);
 }
 
-} // anony namespace
-
+} // namespace
 
 bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
   if (trace_visit) dbgs() << "Before visiting " << n.TypeNameString() << "\n";
@@ -166,8 +165,6 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
         auto dim_expr = hp_name + ".shape()[" + std::to_string(dim_index) + "]";
         if (symbolic_dimensions.count(*vale) == 0)
           symbolic_dimensions[*vale] = {dim_expr, hp_index, dim_index};
-
-        //        idnm_rts.emplace(FineName(UnScopedName(*vale)), *vale);
       }
       dim_index++;
     }
@@ -203,13 +200,25 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
   }
 
   EmitHostFuncDecl(hs);
-  EmitDeviceFuncDecl(ds);
 
   hs << " {\n";
   IncrHostIndent();
+
+  // name the symbolic dimensions
+  for (auto item : symbolic_dimensions) {
+    hs << h_indent << "unsigned " << UnScopedName(item.first) << " = "
+       << item.second.hsd_expr << ";\n";
+    ssm.MapHostSymbol(item.first, UnScopedName(item.first));
+  }
+
+  // do not generate device function unless parallel-by exists
   if (NeedDeviceFunc()) {
+    EmitDeviceFuncDecl(ds);
     ds << " {\n";
     IncrDeviceIndent();
+
+    for (auto item : symbolic_dimensions)
+      ssm.MapDeviceSymbol(item.first, UnScopedName(item.first));
 
     // map the choreo input to device memory
     for (auto& item : GetChoreoFuncIns()) {
@@ -220,13 +229,12 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
         auto bts = NameBaseType(sty->ElementType());
         auto buf_sym = sym + "__device";
         hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
-        hs << h_indent << "topsMalloc(&" << buf_sym << ", " << SizeExprOf(*sty)
-           << ");\n";
+        hs << h_indent << "topsMalloc(&" << buf_sym << ", "
+           << UnScopedSizeExpr(*sty) << ");\n";
         hs << h_indent << "topsMemcpy(" << buf_sym << ", "
-           << ssm.HostName(item.name) << ".data(), " << SizeExprOf(*sty)
+           << ssm.HostName(item.name) << ".data(), " << UnScopedSizeExpr(*sty)
            << ", topsMemcpyHostToDevice);\n";
         ssm.MapHostSymbol(item.name + "__device", buf_sym);
-
       }
     }
 
@@ -235,11 +243,10 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
       auto sym = UnScopedName(item.name);
       if (auto sty = dyn_cast<SpannedType>(item.type)) {
         ds << d_indent << "tops::mdspan __mds_" << sym << "("
-          << TopsMdsStorage(sty->GetStorage()) << ", " << sym << ", "
-          << RSTR(sty->GetShape()) << ");\n";
+           << TopsMdsStorage(sty->GetStorage()) << ", " << sym << ", "
+           << UnScopedExpr(RSTR(sty->GetShape())) << ");\n";
       }
     }
-
   }
 
   return true;
@@ -275,7 +282,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
         if (!n.init_value) {
           hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
           hs << h_indent << "topsMalloc(&" << buf_sym << ", "
-             << SizeExprOf(*sty) << ");\n";
+             << UnScopedSizeExpr(*sty) << ");\n";
         } else {
           // support simple int literal initialization
           hs << h_indent << bts << " " << sym << "__init["
@@ -284,17 +291,18 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
              << ", sizeof(" << sym << "__init));\n";
           hs << h_indent << bts << " * " << buf_sym << "= nullptr;\n";
           hs << h_indent << "topsMalloc(&" << buf_sym << ", "
-             << SizeExprOf(*sty) << ");\n";
+             << UnScopedSizeExpr(*sty) << ");\n";
           hs << h_indent << "topsMemcpy(" << sym << "__device, " << sym
-             << "__init, " << SizeExprOf(*sty)
+             << "__init, " << UnScopedSizeExpr(*sty)
              << ", topsMemcpyHostToDevice);\n";
         }
       } else {
         hs << h_indent << "auto " << sym << " = choreo::make_spandata<" << bts
-           << ", " << shape.Rank() << ">(" << LSTR(shape) << ");\n";
+           << ", " << shape.Rank() << ">({" << UnScopedExpr(RSTR(shape))
+           << "});\n";
         hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
-        hs << h_indent << "topsMalloc(&" << buf_sym << ", " << SizeExprOf(*sty)
-           << ");\n";
+        hs << h_indent << "topsMalloc(&" << buf_sym << ", "
+           << UnScopedSizeExpr(*sty) << ");\n";
       }
       ssm.MapHostSymbol(InScopeName(sym) + "__device", buf_sym);
       ssm.MapHostSymbol(InScopeName(sym), sym);
@@ -304,8 +312,8 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
         ds << d_indent << "__shared__ " << bts << " " << sym << "["
            << ElemCountExprOf(*sty) << "];\n";
         ds << d_indent << "tops::mdspan __mds_" << sym << "("
-          << TopsMdsStorage(sty->GetStorage()) << ", " << sym << ", "
-          << RSTR(sty->GetShape()) << ");\n";
+           << TopsMdsStorage(sty->GetStorage()) << ", " << sym << ", "
+           << RSTR(sty->GetShape()) << ");\n";
         ssm.MapDeviceSymbol(InScopeName(sym), sym);
       }
     } else if (sty->GetStorage() == Storage::LOCAL) {
@@ -313,8 +321,8 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
         ds << d_indent << "__local__ " << bts << " " << sym << "["
            << ElemCountExprOf(*sty) << "];\n";
         ds << d_indent << "tops::mdspan __mds_" << sym << "("
-          << TopsMdsStorage(sty->GetStorage()) << ", " << sym << ", "
-          << RSTR(sty->GetShape()) << ");\n";
+           << TopsMdsStorage(sty->GetStorage()) << ", " << sym << ", "
+           << RSTR(sty->GetShape()) << ");\n";
         ssm.MapDeviceSymbol(InScopeName(sym), sym);
       }
     } else
@@ -342,6 +350,10 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
     auto sname = item.name;
     if (isa<SpannedType>(item.type)) sname += "__device";
     hs << ((i++ == 0) ? "" : ", ") << ssm.HostName(sname);
+  }
+  for (auto item : symbolic_dimensions) {
+    hs << ((i++ > 0) ? ", " : "");
+    hs << UnScopedName(item.first);
   }
 
   hs << ");\n";
@@ -546,8 +558,8 @@ bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
       ds << d_indent << "for (" << ssm.DeviceName(iv_name) << " = "
          << (IsValidBound(rng->lbound) ? ("(" + STR(rng->lbound) + ")") : "0")
          << "; " << ssm.DeviceName(iv_name) << " < "
-         << STR(iv_bty->GetUpperBound()) << "; ++" << ssm.DeviceName(iv_name)
-         << ") {\n";
+         << UnScopedExpr(STR(iv_bty->GetUpperBound())) << "; ++"
+         << ssm.DeviceName(iv_name) << ") {\n";
       IncrDeviceIndent();
     }
   }
@@ -571,7 +583,7 @@ bool TopsccCodeGen::Visit(AST::Return& n) {
       if (auto sty = dyn_cast<SpannedType>(GetSymbolType(sym))) {
         // return the global storage, must map back
         hs << h_indent << "topsMemcpy(" << sym << ".data(), " << sym
-           << "__device, " << SizeExprOf(*sty)
+           << "__device, " << UnScopedSizeExpr(*sty)
            << ", topsMemcpyDeviceToHost);\n";
       }
     }
@@ -635,9 +647,6 @@ DeviceParamTypeStringify(const Choreo::Type& ty) {
 }
 
 void TopsccCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
-  // do not generate device function unless parallel-by exists
-  if (!NeedDeviceFunc()) return;
-
   oss << "__global__ void " << device_fn << "(";
 
   size_t index = 0;
@@ -646,6 +655,12 @@ void TopsccCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
     oss << DeviceParamTypeStringify(*item.type) << " ";
     oss << UnScopedName(item.name);
   }
+
+  for (auto item : symbolic_dimensions) {
+    oss << ((index++ > 0) ? ", unsigned " : "unsigned ");
+    oss << UnScopedName(item.first);
+  }
+
   oss << ")";
 
   VST_DEBUG(dbgs() << "Device function prototype:\n" << oss.str());

@@ -360,6 +360,50 @@ inline int MemLevel(Storage s) {
   return -1;
 }
 
+namespace {
+
+inline const std::string UnScopedExpr(const std::string& input) {
+  // Regular expression to match scoped names
+  std::regex scopedNameRegex(
+      R"((::[a-zA-Z_][a-zA-Z0-9_]*)(::[a-zA-Z_][a-zA-Z0-9_]*)*)");
+
+  // Output string
+  std::string output;
+  std::sregex_iterator it(input.begin(), input.end(), scopedNameRegex);
+  std::sregex_iterator end;
+
+  size_t lastPos = 0;
+
+  // Iterate through all matches
+  for (; it != end; ++it) {
+    const std::smatch& match = *it;
+    size_t matchPos = match.position();
+    size_t matchLen = match.length();
+
+    // Append the part of the input before the current match
+    output += input.substr(lastPos, matchPos - lastPos);
+
+    // Extract the last part of the scoped name
+    std::string scopedName = match.str();
+    size_t lastColon = scopedName.find_last_of("::");
+    output += scopedName.substr(lastColon + 1);
+
+    // Update the last processed position
+    lastPos = matchPos + matchLen;
+  }
+
+  // Append the remaining part of the input after the last match
+  output += input.substr(lastPos);
+
+  return output;
+}
+
+inline const std::string UnScopedSizeExpr(const Type& ty) {
+  return UnScopedExpr(SizeExprOf(ty));
+}
+
+} // end anonymous namespace
+
 } // end namespace Choreo
 
 #endif // CHOREO_CODEGEN_HPP_
