@@ -1,5 +1,6 @@
 // REQUIRES: TARGET-GCUALL
-// RUN: choreo -gs -t factor %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
+// RUN: choreo -gs -t factor %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+// RUN: choreo -gs -t topscc %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
 
 #include "choreo.h"
 #include <algorithm>
@@ -9,7 +10,7 @@
 
 __cok__ {
   // Kernel function: performs Softmax computation
-  extern "C" void kernel(float *input, float *output, int m, int n) {
+__co_device__  extern "C" void kernel(float *input, float *output, int m, int n) {
     for (int i = 0; i < m; ++i) {
       float max_val = input[i * n];
       // Find the maximum value in the current row (to avoid numerical overflow)
