@@ -170,7 +170,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::Node>> foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt swap_stmt expr_or_qes range_expr if_else_block optional_scalar_init param_mdspan_val chunkat_or_storage_or_select pred
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause else_block multi_decls named_spanned_decl
 %nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers passables future_data_list template_params
-%nterm <AST::ptr<AST::Expr>> s_expr template_value_expr span_expr id_expr
+%nterm <AST::ptr<AST::Expr>> s_expr template_value_expr span_expr id_expr bound_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
 %nterm <AST::ptr<AST::Parameter>> parameter
@@ -960,12 +960,18 @@ index_or_none
     | /*nothing*/ { $$ = GetInvalidBound(); }
     ;
 
+bound_expr
+    : s_expr { $$ = $1; }
+    | MINUS NUM { $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::IntLiteral>(@1, -$2)); }
+    | /*nothing*/ { $$ = nullptr; }
+    ;
+
 range_expr
     : IDENTIFIER { $$ = AST::Make<AST::LoopRange>(@1, AST::Make<AST::Identifier>(@1, $1)); }
-    | IDENTIFIER LPAREN index_or_none COL index_or_none RPAREN {
+    | IDENTIFIER LPAREN bound_expr COL bound_expr RPAREN {
         $$ = AST::Make<AST::LoopRange>(@1, AST::Make<AST::Identifier>(@1, $1), $3, $5);
       }
-    | IDENTIFIER LPAREN index_or_none COL index_or_none COL index_or_none RPAREN {
+    | IDENTIFIER LPAREN bound_expr COL bound_expr COL index_or_none RPAREN {
         $$ = AST::Make<AST::LoopRange>(@1, AST::Make<AST::Identifier>(@1, $1), $3, $5, $7);
       }
     ;

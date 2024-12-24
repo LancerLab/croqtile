@@ -1258,14 +1258,15 @@ struct Rotate : public Node, public TypeIDProvider<Rotate> {
 
 struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   ptr<Identifier> iv; // induction variable
-  int lbound = GetInvalidBound();
-  int ubound = GetInvalidBound();
+  // both will be normalized to Identifier which ref to anon_x
+  ptr<Node> lbound = nullptr;
+  ptr<Node> ubound = nullptr;
   int stride = GetInvalidStride();
 
   LoopRange(const location& l, const ptr<Identifier> i)
       : Node(l), iv(i) {} // the bounds are yet to be inferenced
-  LoopRange(const location& l, const ptr<Identifier> i, int lb, int ub,
-            int s = 1)
+  LoopRange(const location& l, const ptr<Identifier> i, const ptr<Expr> lb,
+            const ptr<Expr> ub, int s = 1)
       : Node(l), iv(i), lbound(lb), ubound(ub), stride(s) {}
 
   const std::string IVName() const { return iv->name; }
@@ -1273,15 +1274,11 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Iteration variables: " << iv->name;
 
-    if (!IsValidBound(lbound) && !IsValidBound(ubound) &&
-        !IsValidStride(stride))
-      return;
+    if (!lbound && !ubound && !IsValidStride(stride)) return;
 
     os << "\n" << prefix << "`- Loop Control: (";
-    os << (IsValidBound(lbound) ? std::to_string(lbound) : std::string("?"))
-       << ":";
-    os << (IsValidBound(ubound) ? std::to_string(ubound) : std::string("?"))
-       << ":";
+    os << (lbound ? PSTR(lbound) : std::string("?")) << ":";
+    os << (ubound ? PSTR(ubound) : std::string("?")) << ":";
     os << (IsValidStride(stride) ? std::to_string(stride) : std::string("?"))
        << ")";
   }

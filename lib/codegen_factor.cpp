@@ -384,7 +384,9 @@ bool FactorCodeGen::Visit(AST::Assignment& node) {
     fs << ");\n";
   } else if (isa<BoundedType>(NodeType(node)) ||
              isa<SpannedType>(NodeType(node)) ||
-             isa<FutureType>(NodeType(node))) {
+             isa<FutureType>(NodeType(node)) ||
+             isa<IntegerType>(NodeType(node)) ||
+             isa<ITupleType>(NodeType(node))) {
     fs << indent << "auto " << node.name << " = " << ExprSTR(node.value)
        << ";\n";
   }
@@ -919,11 +921,14 @@ bool FactorCodeGen::Visit(AST::ForeachBlock& forNode) {
     */
     if (iv_type->Dims() == 1 && cur_bounded_vars[iv_name].empty()) {
       fs << this->indent << "for_(" << iv_name;
-      if (IsValidBound(loop_range->lbound))
-        fs << " + (" << loop_range->lbound << ")";
-      fs << ", " << ReplaceFactorDynDimName(STR(iv_sizes.ValueAt(0)));
-      if (IsValidBound(loop_range->ubound))
-        fs << " + (" << loop_range->ubound << ")";
+      if (loop_range->lbound)
+        fs << " + (" << ExprSTR(loop_range->lbound) << ")";
+      fs << ", ";
+      // put offset before ubound to avoid type cast error
+      if (loop_range->ubound) {
+        fs << "(" << ExprSTR(loop_range->ubound) << ") + ";
+      }
+      fs << ReplaceFactorDynDimName(STR(iv_sizes.ValueAt(0)));
       fs << ", ";
       if (IsValidStride(loop_range->stride))
         fs << loop_range->stride;
@@ -946,11 +951,13 @@ bool FactorCodeGen::Visit(AST::ForeachBlock& forNode) {
       size_t i = 0;
       for (auto name : cur_bounded_vars[iv_name].top()) {
         fs << this->indent << "for_(" << name;
-        if (IsValidBound(loop_range->lbound))
-          fs << " + (" << loop_range->lbound << ")";
-        fs << ", " << ReplaceFactorDynDimName(STR(iv_sizes.ValueAt(i)));
-        if (IsValidBound(loop_range->ubound))
-          fs << " + (" << loop_range->ubound << ")";
+        if (loop_range->lbound)
+          fs << " + (" << ExprSTR(loop_range->lbound) << ")";
+        fs << ", ";
+        if (loop_range->ubound) {
+          fs << "(" << ExprSTR(loop_range->ubound) << ") + ";
+        }
+        fs << ReplaceFactorDynDimName(STR(iv_sizes.ValueAt(i)));
         fs << ", ";
         if (IsValidStride(loop_range->stride))
           fs << loop_range->stride;
@@ -1428,7 +1435,7 @@ FactorCodeGen::ReplaceFactorDynDimName(const std::string& e) const {
 }
 
 std::optional<std::string>
-FactorCodeGen::ReplaceDynDimRef(const std::string& e) {
+FactorCodeGen::ReplaceDynDimRef(const std::string& e) const {
   std::string replaced = e;
   // match str begins with "::", thus "\\b" appears only in the suffix.
   for (auto& [id_name, sym_name] : idnm_rts)
@@ -1596,6 +1603,14 @@ const std::string FactorCodeGen::ValueSTR(const ValueItem& vi,
 
 const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
                                          bool factor_value) const {
+  // If `factor_value` is true, wrap the str: "Value(str)"
+  auto WrapWithValue = [&](const auto& str) -> std::string {
+    std::ostringstream oss;
+    oss << str;
+    if (factor_value) return "Value(" + oss.str() + ")";
+    return oss.str();
+  };
+
   std::ostringstream oss;
 
   if (auto id = dyn_cast<AST::Identifier>(e)) {
@@ -1613,10 +1628,11 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
         oss << "block_id";
       else
         choreo_unreachable("invalid bounded type note.");
-    } else
+    } else {
       oss << id->name;
+    }
   } else if (auto il = dyn_cast<AST::IntLiteral>(e)) {
-    oss << ((factor_value) ? "Value" : "") << "(" << il->value << ")";
+    oss << WrapWithValue(il->value);
   } else if (auto ii = dyn_cast<AST::IntIndex>(e)) {
     return ExprSTR(ii->value);
   } else if (auto expr = dyn_cast<AST::Expr>(e)) {
@@ -1626,15 +1642,14 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       if (FCtx(fname).HasSymbolValues(sname)) {
         auto svs = FCtx(fname).GetSymbolValues(sname);
         if (IsValidValueItem(svs.int_expr))
-          return std::string((factor_value) ? "Value" : "") + "(" +
-                 STR(svs.int_expr) + ")";
+          return WrapWithValue(STR(svs.int_expr));
       }
+      if (auto res = ReplaceDynDimRef(sname); res.has_value())
+        return res.value();
     }
     if (ConvertibleToInt(NodeType(*e))) {
-      if (IsValidValueItem(expr->opt_vals.int_expr)) {
-        return std::string((factor_value) ? "Value" : "") + "(" +
-               STR(expr->opt_vals.int_expr) + ")";
-      }
+      if (IsValidValueItem(expr->opt_vals.int_expr))
+        return WrapWithValue(STR(expr->opt_vals.int_expr));
     }
     if (expr->IsReference()) {
       if (expr->GetInt())
@@ -1667,15 +1682,16 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
         auto var = RemoveSuffix(*AST::GetName(*expr->GetR()), ".span");
         auto shape = GetShape(GetSymbolType(var));
         assert(shape.IsValid() && "Invalid shape is found");
-        oss << shape.GetSizeExpression();
+        oss << WrapWithValue(shape.GetSizeExpression());
       } else
         choreo_unreachable("Unsupported choreo expression.");
     } else if (expr->IsBinary()) {
       if (expr->op == "cdiv") {
         std::string one = "Value(1)";
         if (!factor_value) one = "1";
-        oss << "((" << ExprSTR(expr->GetL()) << ")+(" << ExprSTR(expr->GetR())
-            << "-" << one << ")/(" << ExprSTR(expr->GetR()) << ")";
+        oss << "(" << ExprSTR(expr->GetL()) << ")+" << "("
+            << ExprSTR(expr->GetR()) << "-" << one << ")/("
+            << ExprSTR(expr->GetR()) << ")";
       } else if (expr->op == "getith") {
         auto lty = cast<BoundedType>(NodeType(*expr->GetL()));
         if (cast<AST::IntIndex>(expr->GetR())->IsNegative()) {
@@ -1697,6 +1713,19 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
               << ")+(" << ExprSTR(r) << "))";
         } else
           oss << "((" << ExprSTR(l) << ")" << op << "(" << ExprSTR(r) << "))";
+      } else if (expr->op == "dimof") {
+        assert(expr->s.Rank() == 1);
+        auto val = expr->s.ValueAt(0);
+        auto str = ValueItemAsString(val);
+        if (expr->s.IsDynamic()) {
+          auto res = ReplaceDynDimRef(str);
+          oss << (res.has_value() ? res.value() : str);
+        } else {
+          oss << WrapWithValue(str);
+        }
+      } else {
+        choreo_unreachable("The op " + expr->op +
+                           " in codegen(factor) is not supported yet.");
       }
     } else if (expr->IsTernary()) {
       oss << "(" << ExprSTR(expr->GetC()) << ") ? (" << ExprSTR(expr->GetL())
@@ -1711,7 +1740,7 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
     assert(val_count >= 2);
     for (size_t i = 0; i < val_count - 1; i++) {
       oss << "select_(" << ExprSTR(sl->select_factor, true) << " == ";
-      oss << ((factor_value) ? "Value" : "") << "(" << i << ")";
+      oss << WrapWithValue(i);
       oss << ", " << PSTR(sl->expr_list->ValueAt(i))
           << (i < val_count - 1 ? ", " : "");
     }

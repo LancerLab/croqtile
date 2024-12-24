@@ -147,7 +147,7 @@ private:
                                         const std::string& = "",
                                         bool host_code = true) const;
   const std::string ReplaceFactorDynDimName(const std::string&) const;
-  std::optional<std::string> ReplaceDynDimRef(const std::string&);
+  std::optional<std::string> ReplaceDynDimRef(const std::string&) const;
   const std::string ValueSTR(const ValueItem&, bool factor_value) const;
 
   // common utils
