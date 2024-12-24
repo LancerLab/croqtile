@@ -80,15 +80,10 @@ private:
   ValBind::BindInfo<std::string> bind_info;
   std::map<std::string, std::stack<std::vector<std::string>>> cur_bounded_vars;
   std::vector<std::unordered_set<std::string>> loop_vars; // the loop variables
-  std::map<std::string, std::vector<RtMemUsageCheckInfo>>
-      rt_mem_usage_check_lists;
 
   // map from a symbolic shape dimension to the associated runtime name
   std::map<std::string, DimensionDetail> dims_info;
   std::map<std::string, std::string> idnm_rts; // name in .co to symbolic name
-
-  // mdspan of within
-  std::vector<std::pair<std::string, location>> within_mdspan;
 
   ptr<CodeGenInfo> cgi;
 
@@ -102,11 +97,8 @@ private:
   size_t factor_device_arity = 0;
 
 public:
-  FactorCodeGen(
-      const std::map<std::string, std::vector<RtMemUsageCheckInfo>>& lists,
-      const ptr<CodeGenInfo>& ci)
-      : CodeGenerator("codegen", CCtx().GetGlobalSymbolTable()),
-        rt_mem_usage_check_lists(lists), cgi(ci) {
+  FactorCodeGen(const ptr<CodeGenInfo>& ci)
+      : CodeGenerator("codegen", CCtx().GetGlobalSymbolTable()), cgi(ci) {
     factor_pname = "__choreo_" + OptionRegistry::GetInstance().GetInputName();
   }
 
@@ -164,7 +156,6 @@ private:
     dims_info.clear();
     idnm_rts.clear();
     indent.clear();
-    within_mdspan.clear();
 
     // Reset buffers;
     fs.str("");

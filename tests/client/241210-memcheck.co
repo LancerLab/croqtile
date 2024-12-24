@@ -68,4 +68,4 @@ int main() { /// host program
 }
 
 
-// CHECK: choreo runtime check failed: total memory usage at global level (compile time and runtime) should not exceed 4294967296 bytes, happends at
+// CHECK: choreo runtime check failed: total memory usage at global level (compile time and runtime) should not exceed 4294967296 bytes,

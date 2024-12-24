@@ -54,7 +54,7 @@ private:
     } else {
       auto vi_str = ValueItemAsString(s.ValueAt(idx), true);
       FCtx(cur_fname).AppendRtCheck(
-          {vi_str, std::to_string(limit) + "ULL", op, loc, message, {}});
+          {vi_str, op, std::to_string(limit) + "ULL", loc, message, {}});
     }
   }
 
@@ -181,8 +181,8 @@ public:
         std::string bs = f_sty->ByteSizeExpression(true);
         FCtx(cur_fname).AppendRtCheck(
             {bs,
-             std::to_string(1ULL << 32) + "ULL",
              "<",
+             std::to_string(1ULL << 32) + "ULL",
              n.LOC(),
              "The size of data transferred by DMA cannot exceed 2^32",
              {}});

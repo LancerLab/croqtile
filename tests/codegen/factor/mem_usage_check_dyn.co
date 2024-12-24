@@ -33,7 +33,6 @@ __co__ auto ele_add(s32 [6, ?, 128] lhs, s32 [6, ?, 128] rhs) {
   return output;
 }
 
-// CHECK:  // Check if the runtime memory usage exceeds the defined limits.
 // CHECK:  choreo::runtime_check((size_t)0 + ((6ULL)*(hp0.shape()[1])*(128ULL))*4 <= (size_t)4294967296, "total memory usage at global level (compile time and runtime) should not exceed 4294967296 bytes, 
 // CHECK:  choreo::runtime_check((size_t)0 + ((6ULL)*(hp0.shape()[1])*(128ULL))*4 + ((6ULL)*(hp1.shape()[1])*(128ULL))*4 <= (size_t)4294967296
 // CHECK:  choreo::runtime_check((size_t)0 + ((6ULL)*(hp0.shape()[1])*(128ULL))*4 + ((6ULL)*(hp1.shape()[1])*(128ULL))*4 + ((6ULL)*(hp0.shape()[1])*(128ULL))*4 <= (size_t)4294967296

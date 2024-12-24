@@ -611,9 +611,6 @@ bool FactorCodeGen::Visit(AST::WithIn& n) {
     fs << indent << mname << " = 0;\n";
   }
 
-  if (auto shape = GetShape(NodeType(*n.in)); shape.IsDynamic())
-    within_mdspan.emplace_back(STR(GetShape(NodeType(*n.in))), n.LOC());
-
   return true;
 };
 
@@ -1279,7 +1276,6 @@ void FactorCodeGen::EmitHostFunction(std::ostream& os) {
   os << " {\n";
 
   EmitHostRuntimeCheck(os);
-  EmitHostRuntimeMemUsageCheck(os);
 
   os << R"(
   std::vector<char> binary;
@@ -1494,66 +1490,12 @@ void FactorCodeGen::EmitHostRuntimeCheck(std::ostream& os) {
     }
   }
 
-  // check if the mdspan of within is zero
-  if (!within_mdspan.empty())
-    os << "\n  // Check if the mdspan of within is zero.\n";
-  for (auto& [mds, loc] : within_mdspan) {
-    auto mds_vals = SplitStringByDelimiter(mds.substr(1, mds.size() - 2), ", ");
-    int idx = 1;
-    for (auto& mds_val : mds_vals) {
-      os << "  choreo::runtime_check(" << ReplaceRuntimeNames(mds_val)
-         << " != " << 0;
-      os << ", \"zero is detected for the " << Ordinal(idx)
-         << " dim of the mdspan inside the with-in statement, " << loc
-         << "\");\n";
-      idx++;
-    }
-  }
-
   os << "\n";
 
   for (const auto& rc : FCtx(fname).GetRtChecks()) {
     os << "  choreo::runtime_check(" << ReplaceRuntimeNames(rc.lhs) << " "
        << rc.op << " " << rc.rhs << ", \"" << rc.message << ", " << rc.loc
        << "\");\n";
-  }
-}
-
-void FactorCodeGen::EmitHostRuntimeMemUsageCheck(std::ostream& os) {
-  // check if the input shape is as declared in choreo
-  if (cgi->ParameterCount(fname) == 0) return;
-
-  if (!rt_mem_usage_check_lists.count(fname)) return;
-
-  auto rt_mem_usage_check_list = rt_mem_usage_check_lists.at(fname);
-
-  // there should be runtime memory usage check
-  if (!rt_mem_usage_check_list.empty())
-    os << "\n  // Check if the runtime memory usage exceeds the defined "
-          "limits.\n";
-
-  for (const auto& [useds, loc, limit, sto] : rt_mem_usage_check_list) {
-    std::ostringstream used_ss;
-    used_ss << "  choreo::runtime_check((size_t)";
-    for (auto& used : useds) {
-      if (used.find(":") == std::string::npos) {
-        // `used` is compile time memory usage
-        used_ss << (used_ss.str().back() == ')' ? "" : " + ") << used;
-        continue;
-      }
-      // `used` is runtime memory usage
-      auto operands = SplitStringByDelimiter(used, "*");
-      // `o` is dynamic dim. Should replace it with host name
-      for (auto& o : operands) o = ReplaceRuntimeNames(o, "", true);
-      used_ss << (used_ss.str().back() == ')' ? "" : " + ")
-              << DelimitedString(operands, "*");
-    }
-    used_ss << " <= (size_t)" << limit << ", \"total memory usage at "
-            << __internal__::GetStringFrom(sto)
-            << " level (compile time and runtime) "
-               "should not exceed "
-            << limit << " bytes, happends at " << loc << "\");\n";
-    os << used_ss.str();
   }
 }
 

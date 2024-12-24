@@ -120,8 +120,8 @@ struct OptimizedValues {
 
 struct RuntimeCheckEntry {
   std::string lhs;
-  std::string rhs;
   std::string op;
+  std::string rhs;
 
   location loc;
   std::string message;
@@ -206,7 +206,7 @@ public:
       case Storage::GLOBAL: return 4ull * 1024 * 1024 * 1024; // 4GB
       default: choreo_unreachable("Unsupported mem level.");
       }
-    default: choreo_unreachable("Unsupported target.");
+    default: choreo_unreachable("Unsupported target arch.");
     }
     return 0;
   }
