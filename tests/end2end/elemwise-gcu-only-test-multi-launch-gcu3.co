@@ -1,0 +1,85 @@
+// REQUIRES: TARGET-GCU300
+// RUN: choreo -gs -t factor %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+#include "choreo.h"
+
+__cok__ {
+extern "C" void kernel(int * a, int * b, int * c, int n) {
+  for (int i = 0; i < n; ++i)
+    c[i] = a[i] + b[i];
+}
+}
+
+#define pf0 6
+__co__ s32 [N, 17, 128] ele_add(s32 [N, 17, 128] lhs, s32 [N, 17, 128] rhs) {
+  s32[lhs.span] output;
+
+  parallel p by pf0 {
+    with index = {n, x, y} in [N/#p, 17, 4] {
+      foreach index {
+        lhs_load = dma.copy.async lhs.chunkat(p#n, x, y) => local;
+        rhs_load = dma.copy.async rhs.chunkat(p#n, x, y) => local;
+        wait lhs_load, rhs_load;
+
+        local s32[lhs_load.span] l1_out;
+
+        call kernel(lhs_load.data, rhs_load.data, l1_out, |lhs_load.span|);
+
+        out_store = dma.copy.async l1_out => output.chunkat(p#n, x, y);
+        wait out_store;
+      }
+    }
+  }
+
+  parallel p by 1 {
+    with index = {rm, x, y} in [N, 17, 4] {
+      // foreach rm(lhs.span(0)/pf0*pf0:) {
+      foreach rm(N/pf0*pf0:) {
+        foreach x, y {
+          lhs_load = dma.copy.async lhs.chunkat(rm, x, y) => local;
+          rhs_load = dma.copy.async rhs.chunkat(rm, x, y) => local;
+          wait lhs_load, rhs_load;
+
+          local s32[lhs_load.span] l1_out;
+
+          call kernel(lhs_load.data, rhs_load.data, l1_out, |lhs_load.span|);
+
+          out_store = dma.copy.async l1_out => output.chunkat(rm, x, y);
+          wait out_store;
+        }
+      }
+    }
+  }
+  return output;
+}
+
+#define NN 15
+
+int main() {
+  choreo::s32 a[NN][17][128] = {0};
+  choreo::s32 b[NN][17][128] = {0};
+  
+  auto a_data = choreo::make_spanview<3, choreo::s32>((int*)a, {NN, 17, 128});
+  auto b_data = choreo::make_spanview<3, choreo::s32>((int*)b, {NN, 17, 128});
+  a_data.fill_random(-10, 10);
+  b_data.fill_random(-10, 10);
+
+  auto res = ele_add(a_data, b_data);
+  std::cout << res.shape()[0] << std::endl;
+  std::cout << res.shape()[1] << std::endl;
+  std::cout << res.shape()[2] << std::endl;
+
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k) {
+        // std::cout << "i: " << i << ", j: " << j << ", k: " << k << "\n";
+        // std::cout << "a: " << a[i][j][k] << ", b: " << b[i][j][k] << ", res: " << res[i][j][k] << "\n";
+        if (a[i][j][k] + b[i][j][k] != res[i][j][k]) {
+          assert(a[i][j][k] + b[i][j][k] == res[i][j][k]);
+        }
+      }
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK: Test Passed

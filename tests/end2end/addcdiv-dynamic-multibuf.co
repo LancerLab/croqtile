@@ -441,7 +441,6 @@ __co__ f32 [L] addcdiv(f32 [L] first, f32 [L] second, f32 [L] third) { /// devic
         third_load_B = dma.copy.async third.chunkat(c_tile) => shared;
 
         wait first_load_A, second_load_A, third_load_A;
-        parallel q by 1 {
           local f32[8192] out_s;
           local f32[8192] tmp;
           with index = {s_tile} in [1] {
@@ -460,7 +459,6 @@ __co__ f32 [L] addcdiv(f32 [L] first, f32 [L] second, f32 [L] third) { /// devic
               wait out_store_s;
             }
           }
-        }
         out_store = dma.copy.async out => output.chunkat(c_tile-1); // can use defined vars
         wait out_store;
         swap(first_load_A, first_load_B);
@@ -475,7 +473,6 @@ __co__ f32 [L] addcdiv(f32 [L] first, f32 [L] second, f32 [L] third) { /// devic
       second_load_tail = select(#c_tile % 2, second_load_B, second_load_A);
       third_load_tail = select(#c_tile % 2, third_load_B, third_load_A);
       wait first_load_tail, second_load_tail, third_load_tail;
-      parallel q by 1 {
         // NOTE: cannot same naming
         local f32[8192] out_s_tail;
         local f32[8192] tmp_tail;
@@ -497,7 +494,6 @@ __co__ f32 [L] addcdiv(f32 [L] first, f32 [L] second, f32 [L] third) { /// devic
             wait out_store_s_tail;
           }
         }
-      }
       // NOTE: DITO
       // NOTE: c_tile(-1) evals to wrong value
       out_store_tail = dma.copy.async out => output.chunkat(c_tile(-1)); // can use defined vars
