@@ -209,11 +209,57 @@ public:
     return *this;
   }
 
-  bool operator==(f16 value) {
-    auto valueF = value.toFloat();
-    if (std::isnan(valueF)) { return std::isnan(halfBitsToFloat(bits)); }
-    return halfBitsToFloat(bits) == valueF;
+  template <typename T>
+  bool operator==(T value) {
+    if constexpr (std::is_same<T, f16>::value) {
+      auto valueF = value.toFloat();
+      if (std::isnan(valueF)) {
+        return std::isnan(halfBitsToFloat(bits));
+      }
+      return halfBitsToFloat(bits) == valueF;
+    } else {
+      auto valueF = static_cast<float>(value);
+      if (std::isnan(valueF)) {
+        return std::isnan(halfBitsToFloat(bits));
+      }
+      return halfBitsToFloat(bits) == valueF;
+    }
   }
+  
+  template <typename T>
+  bool operator>(T value) {
+    if constexpr (std::is_same<T, f16>::value) {
+      auto valueF = value.toFloat();
+      if (std::isnan(valueF)) {
+        return std::isnan(halfBitsToFloat(bits));
+      }
+      return halfBitsToFloat(bits) > valueF;
+    } else {
+      auto valueF = static_cast<float>(value);
+      if (std::isnan(valueF)) {
+        return std::isnan(halfBitsToFloat(bits));
+      }
+      return halfBitsToFloat(bits) > valueF;
+    }
+  }
+  
+  template <typename T>
+  bool operator<(T value) {
+    if constexpr (std::is_same<T, f16>::value) {
+      auto valueF = value.toFloat();
+      if (std::isnan(valueF)) {
+        return std::isnan(halfBitsToFloat(bits));
+      }
+      return halfBitsToFloat(bits) < valueF;
+    } else {
+      auto valueF = static_cast<float>(value);
+      if (std::isnan(valueF)) {
+        return std::isnan(halfBitsToFloat(bits));
+      }
+      return halfBitsToFloat(bits) < valueF;
+    }
+  }
+
 
   // Function to convert float to half precision bits
   // Refer to https://en.wikipedia.org/wiki/Half-precision_floating-point_format
@@ -312,8 +358,63 @@ public:
     return *this;
   }
 
-  bool operator==(bf16 value) {
-    return halfBitsToFloat(bits) == value.toFloat();
+  bool operator==(double value) {
+    auto valueF = static_cast<float>(value);
+    if (std::isnan(valueF)) {
+      return std::isnan(halfBitsToFloat(bits));
+    }
+    return halfBitsToFloat(bits) == valueF;
+  }
+
+  template <typename T>
+  bool operator==(T value) {
+    if constexpr (std::is_same<T, bf16>::value) {
+      auto valueF = value.toFloat();
+      if (std::isnan(valueF)) {
+        return std::isnan(halfBitsToFloat(bits));
+      }
+      return halfBitsToFloat(bits) == valueF;
+    } else {
+      auto valueF = static_cast<float>(value);
+      if (std::isnan(valueF)) {
+        return std::isnan(halfBitsToFloat(bits));
+      }
+      return halfBitsToFloat(bits) == valueF;
+    }
+  }
+  
+  template <typename T>
+  bool operator>(T value) {
+    if constexpr (std::is_same<T, bf16>::value) {
+      auto valueF = value.toFloat();
+      if (std::isnan(valueF)) {
+        return std::isnan(halfBitsToFloat(bits));
+      }
+      return halfBitsToFloat(bits) > valueF;
+    } else {
+      auto valueF = static_cast<float>(value);
+      if (std::isnan(valueF)) {
+        return std::isnan(halfBitsToFloat(bits));
+      }
+      return halfBitsToFloat(bits) > valueF;
+    }
+  }
+  
+  template <typename T>
+  bool operator<(T value) {
+    if constexpr (std::is_same<T, bf16>::value) {
+      auto valueF = value.toFloat();
+      if (std::isnan(valueF)) {
+        return std::isnan(halfBitsToFloat(bits));
+      }
+      return halfBitsToFloat(bits) < valueF;
+    } else {
+      auto valueF = static_cast<float>(value);
+      if (std::isnan(valueF)) {
+        return std::isnan(halfBitsToFloat(bits));
+      }
+      return halfBitsToFloat(bits) < valueF;
+    }
   }
 
   // Function to convert float to half precision bits (naive and placeholder)

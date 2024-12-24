@@ -19,6 +19,7 @@ using namespace Choreo;
 using namespace Choreo::Topscc;
 
 extern Option<bool> native_f16;
+extern Option<bool> native_bf16;
 extern Option<std::string> output;
 
 namespace {
@@ -137,6 +138,7 @@ void TopsccCodeGen::EmitFixedHostHead() {
 // include the choreo header;
 )";
   if (native_f16) oss << "#define NATIVE_F16_SUPPORT\n";
+  if (native_bf16) oss << "#define NATIVE_BF16_SUPPORT\n";
   oss << R"(#include "choreo.h"
 
 using namespace choreo;

@@ -70,6 +70,10 @@ Option<bool>
     native_f16(OptionKind::User, "--native-f16", "-f16n", false,
                "Utilize native f16 type when target platform support.");
 
+Option<bool>
+    native_bf16(OptionKind::User, "--native-bf16", "-bf16n", false,
+               "Utilize native bf16 type when target platform support.");
+
 Option<std::string> abend_after(OptionKind::Hidden, "--stop-after", "-sa", "",
                                 "Stop compilation after the visit pass.",
                                 "--stop-after=<pass>");

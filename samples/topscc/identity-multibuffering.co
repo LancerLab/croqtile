@@ -1,0 +1,151 @@
+#include "choreo.h"
+#include <chrono>
+
+__cok__ { /// kernel program
+
+extern "C" void relu_kernel(float* input, float* out) {
+  constexpr int m = 256;
+  constexpr int n = 256;
+  for (int i = 0; i < m; ++i) {
+    for (int j = 0; j < n; ++j) {
+      out[i*n+j] = input[i*n+j] > 0.0f ? input[i*n+j] : 0.0f;
+    }
+  }
+}
+
+} /// end of kernel decl
+
+
+//  __co__ f32 [L] addcdiv(f32 [L] first, f32 [L] second, f32 [L] third) { /// device program
+//    f32[L] output; // use same shape as first
+// 
+//    parallel p by 1 {  // p is sip_index
+//      shared f32[8192] out;
+//      with index = {c_tile} in [L/8192] {  // decl your tiled spans
+//        first_load_A = dma.copy.async first.chunkat(c_tile) => shared;
+//        first_load_B = dma.any;
+// 
+//        foreach c_tile(1:) {
+//          first_load_B = dma.copy.async first.chunkat(c_tile) => shared;
+// 
+//          wait first_load_A, second_load_A, third_load_A;
+//          parallel q by 1 {
+//            local f32[8192] out_s;
+//            local f32[8192] tmp;
+//            with index = {s_tile} in [1] {
+//              foreach s_tile {
+//                first_load_s = dma.copy.async first_load_A.data.chunkat(s_tile) => local;
+//                wait first_load_s;
+//                out_store_s = dma.copy.async out_s => out.chunkat(s_tile); // can use defined vars
+//                wait out_store_s;
+//              }
+//            }
+//          }
+//          out_store = dma.copy.async out => output.chunkat(c_tile-1); // can use defined vars
+//          wait out_store;
+//          swap(first_load_A, first_load_B);
+//        }
+//        // NOTE: #c_tile(-1) SHOULD be last var of range 0-to-L/8192 => 0-12 => 11 
+//        // c_tile is not bounded to a literal, but a expr with int-compile-time-value,
+//        // this value is not simplified to visible by its user
+// 
+//        first_load_tail = select(#c_tile % 2, first_load_B, first_load_A);
+//        wait first_load_tail;
+//        parallel q by 1 {
+//          // NOTE: cannot same naming
+//          local f32[8192] out_s_tail;
+//          local f32[8192] tmp_tail;
+//          with index = {s_tile} in [1] {
+//            foreach s_tile {
+//              // NOTE: cannot naming same
+//              first_load_s = dma.copy.async first_load_tail.data.chunkat(s_tile) => local;
+//              wait first_load_s;
+//              out_store_s_tail = dma.copy.async out_s_tail => out.chunkat(s_tile); // can use defined vars
+//              wait out_store_s_tail;
+//            }
+//          }
+//        }
+//        // NOTE: DITO
+//        // NOTE: c_tile(-1) evals to wrong value
+//        out_store_tail = dma.copy.async out => output.chunkat(c_tile(-1)); // can use defined vars
+//        wait out_store_tail;
+//      }
+//    } // can use python styling
+//    return output;
+//  }
+
+__co__ f32 [10240] identity(f32 [10240] input) { /// device program
+  f32[10240] output; // use same shape as input
+
+  parallel p by 1 {  // p is sip_index
+    shared f32[1024] l2_out;
+    with index={l_tile} in [output.span(0)/l2_out.span(0)] {
+      input_load_A = dma.copy.async input.chunkat(l_tile) => shared;
+      input_load_B = dma.any;
+
+      // handle multi-buffer loop body; iter iv from 1 to N; handle iv-1's buffer
+      foreach l_tile(1:) {
+        input_load_B = dma.copy.async input.chunkat(l_tile) => shared;
+        wait input_load_A;
+        parallel q by 1 {
+          with index2={l_tile_s} in [16] {
+            foreach l_tile_s {
+              input_load_s = dma.copy.async input_load_A.data.chunkat(l_tile_s) => local;
+              wait input_load_s;
+              out_store_s = dma.copy.async input_load_s.data => l2_out.chunkat(l_tile_s);
+              wait out_store_s;
+            }
+          }
+        }
+        out_store = dma.copy.async l2_out => output.chunkat(l_tile); // can use defined vars
+        wait out_store;
+        swap(input_load_A, input_load_B);
+      }
+
+      // handle tail
+      // input_load_tail = select(#l_tile % 2, input_load_B, input_load_A);
+      // wait input_load_A;
+      // parallel q by 1 {
+      //   with index2={l_tile_s} in [16] {
+      //     foreach l_tile_s {
+      //       input_load_s = dma.copy.async input_load_tail.data.chunkat(l_tile_s) => local;
+      //       wait input_load_s;
+      //       out_store_s = dma.copy.async input_load_s.data => l2_out.chunkat(l_tile_s);
+      //       wait out_store_s;
+      //     }
+      //   }
+      // }
+    }
+  } // can use python styling
+  return output;
+}
+
+
+int main() { /// host program
+  choreo::f32 a[1024*10]; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::f32 b[512][512] = {0};
+
+  auto input_data = choreo::make_spanview<1, choreo::f32>((float*)a, {1024*10});
+  input_data.fill_random(-1.0, 1.0);
+
+  auto start = std::chrono::high_resolution_clock::now();
+
+  auto res
+    = identity(input_data);
+
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
+  std::cout << res.shape()[0] << std::endl;
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i) {
+      std::cout << "i: " << i << "\n";
+      std::cout << "res: " << res[i] << "\n";
+      float ref = input_data[i];
+
+      std::cout << "ref: " << ref << std::endl;
+      assert(ref == res[i]);
+  }
+  std::cout << "Test Passed\n" << std::endl;
+  std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
+}
