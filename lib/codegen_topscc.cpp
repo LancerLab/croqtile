@@ -335,6 +335,20 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
   return true;
 }
 
+bool TopsccCodeGen::Visit(AST::Assignment& node) {
+  if (isa<BoundedType>(NodeType(node)) ||
+      isa<SpannedType>(NodeType(node)) ||
+      isa<FutureType>(NodeType(node))) {
+    ds << d_indent 
+       << "auto " << node.name 
+       << " = " << ExprSTR(node.value)
+       << ";\n";
+  } else 
+    errs() << "Assignment Node unprocessed, not supported NodeType\n";
+
+  return true;
+}
+
 bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
 
@@ -824,7 +838,6 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
         oss << "!(" << ExprSTR(expr->GetR(), is_host) << ")";
       } else if (expr->op == "ubound") {
         auto rty = cast<BoundedType>(NodeType(*expr->GetR()));
-        // anchor
         if (rty->Dims() == 1) { oss << ValueSTR(rty->GetUpperBound()); }
       } else if (expr->op == "dataof") {
         assert(isa<FutureType>(expr->GetR()->GetType()) &&
@@ -868,7 +881,7 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
           auto rty = cast<BoundedType>(NodeType(*r));
           assert(rty->Dims() == 1);
           oss << "((" << ExprSTR(l, is_host) << ")*("
-              << ValueSTR(rty->GetUpperBound()) << ")+(" << ExprSTR(r, is_host)
+              << ValueSTR(rty->GetUpperBound()) << ")+(" << ExprSTR(r, false)
               << "))";
         } else
           oss << "((" << ExprSTR(l, is_host) << ")" << op << "("

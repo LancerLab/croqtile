@@ -118,7 +118,6 @@ public:
   bool Visit(AST::MultiDimSpans&) override { return true; };
   bool Visit(AST::NamedTypeDecl&) override { return true; };
   bool Visit(AST::IntTuple&) override { return true; };
-  bool Visit(AST::Assignment&) override { return true; };
   bool Visit(AST::IntIndex&) override { return true; };
   bool Visit(AST::DataType&) override { return true; };
   bool Visit(AST::Identifier&) override { return true; };
@@ -135,6 +134,7 @@ public:
   bool Visit(AST::WhereBind&) override;
   bool Visit(AST::WithBlock&) override;
   bool Visit(AST::ForeachBlock&) override;
+  bool Visit(AST::Assignment&) override;
   bool Visit(AST::ParallelBy&) override;
   bool Visit(AST::DMA&) override;
   bool Visit(AST::Wait&) override;
