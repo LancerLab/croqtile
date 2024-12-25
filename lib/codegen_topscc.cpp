@@ -46,6 +46,7 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
   if (trace_visit) dbgs() << "Before visiting " << n.TypeNameString() << "\n";
 
   if (isa<AST::Program>(&n)) {
+    VST_DEBUG(dbgs() << STR(FBInfo()) << "\n");
     // emit the fixed headers
     EmitFixedHostHead();
     EmitFixedDeviceHead();
@@ -318,6 +319,8 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
            << TopsMdsStorage(sty->GetStorage()) << ", " << sym << ", "
            << RSTR(sty->GetShape()) << ");\n";
         ssm.MapDeviceSymbol(InScopeName(sym), sym);
+        ssm.MapDeviceSymbol(GetScope(InScopeName(sym)) + "__mds_" + sym,
+                            "__mds_" + sym);
       }
     } else if (sty->GetStorage() == Storage::LOCAL) {
       if (!IsChoreoOutput(InScopeName(sym))) {
@@ -327,6 +330,8 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
            << TopsMdsStorage(sty->GetStorage()) << ", " << sym << ", "
            << RSTR(sty->GetShape()) << ");\n";
         ssm.MapDeviceSymbol(InScopeName(sym), sym);
+        ssm.MapDeviceSymbol(GetScope(InScopeName(sym)) + "__mds_" + sym,
+                            "__mds_" + sym);
       }
     } else
       choreo_unreachable("unsupported storage type.");
@@ -381,25 +386,37 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
 bool TopsccCodeGen::Visit(AST::DMA& n) {
   TraceEachVisit(n);
 
+  auto claimContext = [this, &n]() {
+    // claim the date transfer engine
+    auto dte_ctx = GetDTEContextName();
+    ds << d_indent << "tops_dte_ctx_t " << dte_ctx << ";\n";
+    ds << d_indent << "tops::dte_scope s_" << dte_ctx << "(" << dte_ctx
+       << ");\n";
+
+    return dte_ctx;
+  };
+
   auto nty = NodeType(n);
   if (auto ph = dyn_cast<PlaceHolderType>(nty)) {
     assert(ph->Category() == TypeCategory::FUTURE);
-    // TODO
-    choreo_unreachable("placeholder is yet to support.");
+    claimed_dte.emplace(InScopeName(n.future), claimContext());
+    ds << d_indent << "tops::event " + n.future + ";\n"; // declarative event
+    ssm.MapDeviceSymbol(InScopeName(n.future), n.future);
     return true;
   }
 
   assert(isa<AST::ChunkAt>(n.from) && "Unexpected type for DMA's source.");
   assert(isa<AST::ChunkAt>(n.to) && "Unexpected type for DMA's destination.");
 
+  std::string dte_ctx;
+  if (n.future.empty() || !claimed_dte.count(InScopeName(n.future)))
+    dte_ctx = claimContext();
+  else
+    dte_ctx = claimed_dte.at(InScopeName(n.future));
+
   auto fty = dyn_cast<FutureType>(nty);
   assert(fty && "Invalid type of DMA statement!");
   if (fty->IsAsync()) assert(!n.future.empty());
-
-  // claim the date transfer engine
-  auto dte_ctx = GetDTEContextName();
-  ds << d_indent << "tops_dte_ctx_t " << dte_ctx << ";\n";
-  ds << d_indent << "tops::dte_scope s_" << dte_ctx << "(" << dte_ctx << ");\n";
 
   auto f_ca = cast<AST::ChunkAt>(n.from);
   auto t_ca = cast<AST::ChunkAt>(n.to);
@@ -410,10 +427,11 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
 
   std::string f_nm = "";
   std::string f_mds_name = "";
-  const std::string temp_str = f_sym + "__buf__";
-  if (!ssm.DeviceNameOrNull(temp_str).empty())
-    f_nm = ssm.DeviceName(temp_str);
-  else
+  if (isa<FutureType>(GetSymbolType(f_sym))) {
+    // fetch corresponding buffer name of the future
+    std::string buf_name = FBInfo().at(InScopeName(f_sym)).buffer;
+    f_nm = ssm.DeviceName(buf_name);
+  } else
     f_nm = ssm.DeviceName(InScopeName(f_sym));
   f_mds_name = GetMdsName(f_nm);
 
@@ -423,15 +441,17 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   assert(f_sty && "can not retrieve data from 'from'.");
   assert(t_sty && "can not retrieve data from 'to'.");
 
-  ssm.MapDeviceSymbol(t_nm, t_nm);
-
   if (n.operation == ".copy") {
     if (f_ca->positions == nullptr) {
       if (t_ca->positions == nullptr) {
         // no chunkat
         ds << d_indent
-           << (fty->IsAsync() ? ("tops::event " + n.future + " = ") : "")
-           << "tops::memcpy" << (fty->IsAsync() ? "_async" : "") << "("
+           << (fty->IsAsync() ? ((!claimed_dte.count(InScopeName(n.future))
+                                      ? "tops::event "
+                                      : "") +
+                                 n.future + " = ")
+                              : "");
+        ds << "tops::memcpy" << (fty->IsAsync() ? "_async" : "") << "("
            << dte_ctx << ", " << t_mds_name << ", " << f_mds_name << ");\n";
       } else {
         auto off_name = "__deslice_offset__" + t_nm + "_2_" + f_nm;
@@ -446,8 +466,12 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         }
         ds << "};\n";
         ds << d_indent
-           << (fty->IsAsync() ? ("tops::event " + n.future + " = ") : "")
-           << "tops::deslice" << (fty->IsAsync() ? "_async" : "") << "("
+           << (fty->IsAsync() ? ((!claimed_dte.count(InScopeName(n.future))
+                                      ? "tops::event "
+                                      : "") +
+                                 n.future + " = ")
+                              : "");
+        ds << "tops::deslice" << (fty->IsAsync() ? "_async" : "") << "("
            << dte_ctx << ", " << t_mds_name << ", " << f_mds_name << ", "
            << off_name << ");\n";
       }
@@ -464,8 +488,12 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       }
       ds << "};\n";
       ds << d_indent
-         << (fty->IsAsync() ? ("tops::event " + n.future + " = ") : "")
-         << "tops::slice" << (fty->IsAsync() ? "_async" : "") << "(" << dte_ctx
+         << (fty->IsAsync()
+                 ? ((!claimed_dte.count(InScopeName(n.future)) ? "tops::event "
+                                                               : "") +
+                    n.future + " = ")
+                 : "");
+      ds << "tops::slice" << (fty->IsAsync() ? "_async" : "") << "(" << dte_ctx
          << ", " << t_mds_name << ", " << f_mds_name << ", " << off_name
          << ");\n";
     }
@@ -479,8 +507,12 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
        << DelimitedString(pad_config->pad_mid) << "};\n";
     if (f_ca->positions == nullptr) {
       ds << d_indent
-         << (fty->IsAsync() ? ("tops::event " + n.future + " = ") : "")
-         << "tops::pad" << (fty->IsAsync() ? "_async" : "") << "(" << dte_ctx
+         << (fty->IsAsync()
+                 ? ((!claimed_dte.count(InScopeName(n.future)) ? "tops::event "
+                                                               : "") +
+                    n.future + " = ")
+                 : "");
+      ds << "tops::pad" << (fty->IsAsync() ? "_async" : "") << "(" << dte_ctx
          << ", __mds_" << t_nm << ", __mds_" << f_nm << ", __pad_low_" << f_nm
          << ", __pad_high_" << f_nm << ", __pad_mid_" << f_nm << ", "
          << pad_config->value.v << ");\n";
@@ -493,10 +525,19 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     ds << d_indent << "int __transpose_layout_" << f_nm << "[] = {"
        << DelimitedString(transp_config->dim_values) << "};\n";
     ds << d_indent
-       << (fty->IsAsync() ? ("tops::event " + n.future + " = ") : "")
-       << "tops::transpose" << (fty->IsAsync() ? "_async" : "") << "("
+       << (fty->IsAsync()
+               ? ((!claimed_dte.count(InScopeName(n.future)) ? "tops::event "
+                                                             : "") +
+                  n.future + " = ")
+               : "");
+    ds << "tops::transpose" << (fty->IsAsync() ? "_async" : "") << "("
        << dte_ctx << ", " << t_mds_name << ", " << f_mds_name
        << ", __transpose_layout_" << f_nm << ");\n";
+  }
+
+  if (!n.future.empty() && !claimed_dte.count(InScopeName(n.future))) {
+    claimed_dte.emplace(InScopeName(n.future), dte_ctx);
+    ssm.MapDeviceSymbol(InScopeName(n.future), n.future);
   }
 
   return true;

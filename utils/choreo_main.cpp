@@ -16,6 +16,7 @@
 #include "sym_replace.hpp"
 #include "symtab.hpp"
 #include "ttrans_factor.hpp"
+#include "ttrans_topscc.hpp"
 #include "typecheck.hpp"
 #include "typeinfer.hpp"
 #include "types.hpp"
@@ -340,6 +341,9 @@ int main(int argc, char* argv[]) {
     // apply GCU specific checks
     GCUCheck gcu_checker;
     if (!gcu_checker.RunOnProgram(root)) return gcu_checker.Status();
+
+    TopsccTrans trans;
+    if (!trans.RunOnProgram(root)) return trans.Status();
 
     MemUsageCheck muc;
     if (!muc.RunOnProgram(root))

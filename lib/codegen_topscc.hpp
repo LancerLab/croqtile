@@ -69,6 +69,7 @@ public:
     host_map.back()[csym] = name;
   }
   void MapDeviceSymbol(const std::string& csym, const std::string& name) {
+    assert(PrefixedWith(csym, "::") && "expect a scoped name.");
     assert(!device_map.back().count(csym) && "symbol existed");
     device_map.back()[csym] = name;
   }
@@ -169,6 +170,8 @@ private:
   std::ostringstream ds; // device stream
   std::ostringstream hs; // host stream
 
+  std::map<std::string, std::string> claimed_dte;
+
 private:
   void EmitFixedHostHead();
   void EmitFixedDeviceHead();
@@ -197,6 +200,7 @@ private:
   void ResetChoreoFunctionStates() {
     host_param_count = 0; // reset the count of host parameter
     symbolic_dimensions.clear();
+    claimed_dte.clear();
     fty = nullptr;
     void_return = false;
   }

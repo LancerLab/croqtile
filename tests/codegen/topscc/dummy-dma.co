@@ -1,0 +1,17 @@
+// RUN: choreo -t topscc -es %s -o - | FileCheck %s
+
+__co__ auto foo(f32 [32, 4] a, s8 [1] b, int c) {
+  parallel p by 1 {
+    d = dma.any;
+    with tiling in [8, 2] {
+      d = dma.copy a.chunkat(tiling) => local;
+    }
+  }
+}
+
+// CHECK:   tops_dte_ctx_t ctx0;
+// CHECK:   tops::dte_scope s_ctx0(ctx0);
+// CHECK:   tops::event d;
+// CHECK:   {
+// CHECK:     tops::slice(ctx0, __mds_d__buf__, __mds_a, __slice_offset__a_2_d__buf__);
+// CHECK:   }

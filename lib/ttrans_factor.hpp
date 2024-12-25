@@ -172,7 +172,7 @@ public:
     if (trace_visit) dbgs() << m << n.TypeNameString() << "\n";
   }
 
-  bool Visit(AST::MultiNodes& n) {
+  bool Visit(AST::MultiNodes& n) override {
     TraceEachVisit(n);
 
     if (kind != Kind::T_SELECT) return true;
