@@ -677,12 +677,21 @@ auto copy_as_spanned(T* ptr, std::initializer_list<size_t> init) {
 // target specific defintions
 #ifdef __TOPSCC__
 
+// For tops API check: abend on failures
+static __attribute__((always_inline)) inline void abend_false(bool p) {
+  if (!p) std::abort();
+}
+
+static __attribute__((always_inline)) inline void abend_true(bool p) {
+  if (p) std::abort();
+}
+
 #define __co_device__ __device__
 __device__ static int inline __addr2int__(void* v) {
   return static_cast<int>(reinterpret_cast<long long>(v));
 }
 
-// --- light-weight choreo-topscc device runtime library --- //
+// --- light-weight choreo-topscc device library --- //
 
 // choreo device future
 struct future {
@@ -724,6 +733,7 @@ struct future {
     waited = f.waited;
     line = f.line;
     column = f.column;
+    return *this;
   }
   __device__ future(const future& f) {
     e = f.e;

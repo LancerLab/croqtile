@@ -335,8 +335,7 @@ int main(int argc, char* argv[]) {
   }
   case CompileTarget::Topscc: {
     // remove it when topscc is ready
-    errs() << "Experimental: support of '" << target.GetValue()
-           << "' is under construction.\n";
+    errs() << "NOTE: target '" << target.GetValue() << "' is experimental.\n";
 
     // apply GCU specific checks
     GCUCheck gcu_checker;

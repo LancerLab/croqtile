@@ -126,7 +126,6 @@ public:
   bool Visit(AST::ParamList&) override { return true; };
   bool Visit(AST::Memory&) override { return true; };
   bool Visit(AST::ChunkAt&) override { return true; };
-  bool Visit(AST::Rotate&) override { return true; };
   bool Visit(AST::Select&) override { return true; };
   bool Visit(AST::LoopRange&) override { return true; };
   bool Visit(AST::Program&) override { return true; };
@@ -139,6 +138,7 @@ public:
   bool Visit(AST::ParallelBy&) override;
   bool Visit(AST::DMA&) override;
   bool Visit(AST::Wait&) override;
+  bool Visit(AST::Rotate&) override;
   bool Visit(AST::Call&) override;
   bool Visit(AST::NamedVariableDecl&) override;
   bool Visit(AST::CppSourceCode& n) override;

@@ -232,11 +232,11 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
         std::string bts = NameBaseType(sty->ElementType());
         auto buf_sym = sym + "__device";
         hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
-        hs << h_indent << "topsMalloc(&" << buf_sym << ", "
-           << UnScopedSizeExpr(*sty) << ");\n";
-        hs << h_indent << "topsMemcpy(" << buf_sym << ", "
+        hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym << ", "
+           << UnScopedSizeExpr(*sty) << "));\n";
+        hs << h_indent << "choreo::abend_true(topsMemcpy(" << buf_sym << ", "
            << ssm.HostName(item.name) << ".data(), " << UnScopedSizeExpr(*sty)
-           << ", topsMemcpyHostToDevice);\n";
+           << ", topsMemcpyHostToDevice));\n";
         ssm.MapHostSymbol(item.name + "__device", buf_sym);
       }
     }
@@ -285,8 +285,8 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       if (!IsChoreoOutput(InScopeName(sym))) {
         if (!n.init_value) {
           hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
-          hs << h_indent << "topsMalloc(&" << buf_sym << ", "
-             << UnScopedSizeExpr(*sty) << ");\n";
+          hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym << ", "
+             << UnScopedSizeExpr(*sty) << "));\n";
         } else {
           // support simple int literal initialization
           hs << h_indent << bts << " " << sym << "__init["
@@ -294,19 +294,19 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
           hs << h_indent << "memset(" << sym << "__init, " << PSTR(n.init_value)
              << ", sizeof(" << sym << "__init));\n";
           hs << h_indent << bts << " * " << buf_sym << "= nullptr;\n";
-          hs << h_indent << "topsMalloc(&" << buf_sym << ", "
-             << UnScopedSizeExpr(*sty) << ");\n";
-          hs << h_indent << "topsMemcpy(" << sym << "__device, " << sym
-             << "__init, " << UnScopedSizeExpr(*sty)
-             << ", topsMemcpyHostToDevice);\n";
+          hs << h_indent << "choreo::abend_true(topsMalloc((&" << buf_sym
+             << ", " << UnScopedSizeExpr(*sty) << "));\n";
+          hs << h_indent << "choreo::abend_true(topsMemcpy(" << sym
+             << "__device, " << sym << "__init, " << UnScopedSizeExpr(*sty)
+             << ", topsMemcpyHostToDevice));\n";
         }
       } else {
         hs << h_indent << "auto " << sym << " = choreo::make_spandata<" << bts
            << ", " << shape.Rank() << ">({" << UnScopedExpr(RSTR(shape))
            << "});\n";
         hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
-        hs << h_indent << "topsMalloc(&" << buf_sym << ", "
-           << UnScopedSizeExpr(*sty) << ");\n";
+        hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym << ", "
+           << UnScopedSizeExpr(*sty) << "));\n";
       }
       ssm.MapHostSymbol(InScopeName(sym) + "__device", buf_sym);
       ssm.MapHostSymbol(InScopeName(sym), sym);
@@ -572,6 +572,21 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   return true;
 }
 
+bool TopsccCodeGen::Visit(AST::Rotate& n) {
+  TraceEachVisit(n);
+  ds << d_indent << "choreo::rotate(";
+  int i = 0;
+  for (auto& id : n.GetIds()) {
+    assert(isa<FutureType>(NodeType(*id)) &&
+           "only rotating futures are supported.");
+    if (i++ > 0) ds << ", ";
+    ds << ExprSTR(id, false);
+  }
+  ds << ");\n";
+
+  return true;
+}
+
 bool TopsccCodeGen::Visit(AST::Wait& n) {
   TraceEachVisit(n);
 
@@ -673,9 +688,9 @@ bool TopsccCodeGen::Visit(AST::Return& n) {
     } else if (IsChoreoOutput(InScopeName(sym))) {
       if (auto sty = dyn_cast<SpannedType>(GetSymbolType(sym))) {
         // return the global storage, must map back
-        hs << h_indent << "topsMemcpy(" << sym << ".data(), " << sym
-           << "__device, " << UnScopedSizeExpr(*sty)
-           << ", topsMemcpyDeviceToHost);\n";
+        hs << h_indent << "choreo::abend_true(topsMemcpy(" << sym << ".data(), "
+           << sym << "__device, " << UnScopedSizeExpr(*sty)
+           << ", topsMemcpyDeviceToHost));\n";
       }
     }
   }

@@ -1244,6 +1244,7 @@ struct Rotate : public Node, public TypeIDProvider<Rotate> {
   ptr<Identifier> IdAt(int index) {
     return cast<Identifier>(ids->ValueAt(index));
   }
+  const std::vector<ptr<Node>>& GetIds() const { return ids->AllValues(); }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n"

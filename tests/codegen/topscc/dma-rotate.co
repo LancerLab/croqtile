@@ -1,0 +1,11 @@
+// RUN: choreo -t topscc -es %s -o - | FileCheck %s
+
+__co__ void dma_swap(f32 [3, 2] a, f32 [3, 2] b) {
+  parallel p by 1 {
+    f1 = dma.copy a => local;
+    f2 = dma.copy b => local;
+    swap(f1, f2);
+  }
+}
+
+// CHECK:   choreo::rotate(f1, f2);
