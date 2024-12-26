@@ -213,53 +213,40 @@ public:
   bool operator==(T value) {
     if constexpr (std::is_same<T, f16>::value) {
       auto valueF = value.toFloat();
-      if (std::isnan(valueF)) {
-        return std::isnan(halfBitsToFloat(bits));
-      }
+      if (std::isnan(valueF)) { return std::isnan(halfBitsToFloat(bits)); }
       return halfBitsToFloat(bits) == valueF;
     } else {
       auto valueF = static_cast<float>(value);
-      if (std::isnan(valueF)) {
-        return std::isnan(halfBitsToFloat(bits));
-      }
+      if (std::isnan(valueF)) { return std::isnan(halfBitsToFloat(bits)); }
       return halfBitsToFloat(bits) == valueF;
     }
   }
-  
+
   template <typename T>
   bool operator>(T value) {
     if constexpr (std::is_same<T, f16>::value) {
       auto valueF = value.toFloat();
-      if (std::isnan(valueF)) {
-        return std::isnan(halfBitsToFloat(bits));
-      }
+      if (std::isnan(valueF)) { return std::isnan(halfBitsToFloat(bits)); }
       return halfBitsToFloat(bits) > valueF;
     } else {
       auto valueF = static_cast<float>(value);
-      if (std::isnan(valueF)) {
-        return std::isnan(halfBitsToFloat(bits));
-      }
+      if (std::isnan(valueF)) { return std::isnan(halfBitsToFloat(bits)); }
       return halfBitsToFloat(bits) > valueF;
     }
   }
-  
+
   template <typename T>
   bool operator<(T value) {
     if constexpr (std::is_same<T, f16>::value) {
       auto valueF = value.toFloat();
-      if (std::isnan(valueF)) {
-        return std::isnan(halfBitsToFloat(bits));
-      }
+      if (std::isnan(valueF)) { return std::isnan(halfBitsToFloat(bits)); }
       return halfBitsToFloat(bits) < valueF;
     } else {
       auto valueF = static_cast<float>(value);
-      if (std::isnan(valueF)) {
-        return std::isnan(halfBitsToFloat(bits));
-      }
+      if (std::isnan(valueF)) { return std::isnan(halfBitsToFloat(bits)); }
       return halfBitsToFloat(bits) < valueF;
     }
   }
-
 
   // Function to convert float to half precision bits
   // Refer to https://en.wikipedia.org/wiki/Half-precision_floating-point_format
@@ -360,9 +347,7 @@ public:
 
   bool operator==(double value) {
     auto valueF = static_cast<float>(value);
-    if (std::isnan(valueF)) {
-      return std::isnan(halfBitsToFloat(bits));
-    }
+    if (std::isnan(valueF)) { return std::isnan(halfBitsToFloat(bits)); }
     return halfBitsToFloat(bits) == valueF;
   }
 
@@ -370,49 +355,37 @@ public:
   bool operator==(T value) {
     if constexpr (std::is_same<T, bf16>::value) {
       auto valueF = value.toFloat();
-      if (std::isnan(valueF)) {
-        return std::isnan(halfBitsToFloat(bits));
-      }
+      if (std::isnan(valueF)) { return std::isnan(halfBitsToFloat(bits)); }
       return halfBitsToFloat(bits) == valueF;
     } else {
       auto valueF = static_cast<float>(value);
-      if (std::isnan(valueF)) {
-        return std::isnan(halfBitsToFloat(bits));
-      }
+      if (std::isnan(valueF)) { return std::isnan(halfBitsToFloat(bits)); }
       return halfBitsToFloat(bits) == valueF;
     }
   }
-  
+
   template <typename T>
   bool operator>(T value) {
     if constexpr (std::is_same<T, bf16>::value) {
       auto valueF = value.toFloat();
-      if (std::isnan(valueF)) {
-        return std::isnan(halfBitsToFloat(bits));
-      }
+      if (std::isnan(valueF)) { return std::isnan(halfBitsToFloat(bits)); }
       return halfBitsToFloat(bits) > valueF;
     } else {
       auto valueF = static_cast<float>(value);
-      if (std::isnan(valueF)) {
-        return std::isnan(halfBitsToFloat(bits));
-      }
+      if (std::isnan(valueF)) { return std::isnan(halfBitsToFloat(bits)); }
       return halfBitsToFloat(bits) > valueF;
     }
   }
-  
+
   template <typename T>
   bool operator<(T value) {
     if constexpr (std::is_same<T, bf16>::value) {
       auto valueF = value.toFloat();
-      if (std::isnan(valueF)) {
-        return std::isnan(halfBitsToFloat(bits));
-      }
+      if (std::isnan(valueF)) { return std::isnan(halfBitsToFloat(bits)); }
       return halfBitsToFloat(bits) < valueF;
     } else {
       auto valueF = static_cast<float>(value);
-      if (std::isnan(valueF)) {
-        return std::isnan(halfBitsToFloat(bits));
-      }
+      if (std::isnan(valueF)) { return std::isnan(halfBitsToFloat(bits)); }
       return halfBitsToFloat(bits) < valueF;
     }
   }
@@ -703,10 +676,102 @@ auto copy_as_spanned(T* ptr, std::initializer_list<size_t> init) {
 
 // target specific defintions
 #ifdef __TOPSCC__
+
 #define __co_device__ __device__
 __device__ static int inline __addr2int__(void* v) {
   return static_cast<int>(reinterpret_cast<long long>(v));
 }
+
+// --- light-weight choreo-topscc device runtime library --- //
+
+// choreo device future
+struct future {
+  tops::event* e = nullptr;
+  void* d = nullptr;
+
+  // for runtime check purpose
+  bool waited = true;
+  const char* name = nullptr;
+  // source code locations
+  unsigned line = 0;
+  unsigned column = 0;
+
+  __device__ future(const char* n, unsigned l, unsigned c)
+      : e(nullptr), d(nullptr), waited(true), name(n), line(l), column(c) {}
+
+  __device__ void set_event(tops::event& ev) {
+    e = &ev;
+    waited = false;
+  }
+  __device__ tops::event& event() { return *e; }
+  __device__ void set_data(void* data) { d = data; }
+  __device__ void set_waited() { waited = true; }
+  __device__ void* data() {
+    assert(!d && "future is not associated with a data");
+    if (!waited) {
+      // TODO: requires krt %s support
+      // printf("[choreo-rt] Error is detected: line %u:%u: future `%s' is not
+      // waited before using.\n", line, column, name);
+      printf("[choreo-rt] Error is detected: line %u:%u: future is not waited "
+             "before using.\n",
+             line, column);
+    }
+    return d;
+  }
+  __device__ future& operator=(const future& f) {
+    e = f.e;
+    d = f.d;
+    waited = f.waited;
+    line = f.line;
+    column = f.column;
+  }
+  __device__ future(const future& f) {
+    e = f.e;
+    d = f.d;
+    waited = f.waited;
+    line = f.line;
+    column = f.column;
+  }
+  __device__ ~future() {
+    if (!waited) {
+      // TODO: requires krt %s support
+      // printf("[choreo-rt] Error is detected: line %u:%u: future `%s' is
+      // never waited.\n", line, column, name);
+      printf("[choreo-rt] Error is detected: line %u:%u: future is never "
+             "waited.\n",
+             line, column);
+    }
+  }
+};
+
+template <typename T>
+struct is_future : std::false_type {};
+template <>
+struct is_future<future> : std::true_type {};
+
+template <typename T, typename... Rest>
+__device__ void inline LeftRotateFutures(T& first, T& second, Rest&... rest) {
+  static_assert(is_future<T>::value,
+                "All arguments must be of type choreo::future");
+  static_assert((is_future<Rest>::value && ...),
+                "All arguments must be of type choreo::future");
+
+  // swap the pointers
+  future tmp(second);
+  second = first;
+  first = tmp;
+
+  if constexpr (sizeof...(rest) > 0) LeftRotateFutures(second, rest...);
+}
+
+__device__ inline void swap(future& a, future& b) { LeftRotateFutures(a, b); }
+
+template <typename... Futures>
+__device__ inline void rotate(Futures&... f) {
+  static_assert(sizeof...(f) > 1, "rotate futures less than 1.");
+  LeftRotateFutures(f...);
+}
+
 #endif
 
 } // end namespace choreo
