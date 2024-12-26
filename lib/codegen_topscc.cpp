@@ -240,16 +240,6 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
         ssm.MapHostSymbol(item.name + "__device", buf_sym);
       }
     }
-
-    for (auto& item : GetDeviceFuncIns()) {
-      // handle inputs mdspan decls
-      auto sym = UnScopedName(item.name);
-      if (auto sty = dyn_cast<SpannedType>(item.type)) {
-        ds << d_indent << "tops::mdspan __mds_" << sym << "("
-           << TopsMdsStorage(sty->GetStorage()) << ", " << sym << ", "
-           << UnScopedExpr(RSTR(sty->GetShape())) << ");\n";
-      }
-    }
   }
 
   return true;
@@ -274,6 +264,28 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
 
   auto nty = NodeType(n);
   auto sym = n.name_str;
+
+  if (auto s = dyn_cast<AST::Select>(n.init_expr)) {
+    assert(!s->inDMA);
+    size_t val_count = s->expr_list->Count();
+    assert(val_count >= 2);
+    std::string array_sym = sym + "_select_array__";
+    if (isa<FutureType>(NodeType(*s))) {
+      ds << d_indent << "future * " << array_sym << "[] = {";
+      for (size_t i = 0; i < val_count; i++) {
+        if (i > 0) ds << ", ";
+        ds << "&" << ExprSTR(s->expr_list->ValueAt(i));
+      }
+      ds << "};\n";
+      // make symbol a reference
+      ds << d_indent << "future & " << sym << " = *" << array_sym << "["
+         << ExprSTR(s->select_factor) << "];\n";
+    } else
+      choreo_unreachable("select of " + PSTR(NodeType(*s)) +
+                         " is yet to implement.");
+
+    return true;
+  }
 
   if (auto sty = dyn_cast<SpannedType>(nty)) {
     // globals are declared in host, while shareds/locals are declared in device
@@ -315,23 +327,13 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       if (!IsChoreoOutput(InScopeName(sym))) {
         ds << d_indent << "__shared__ " << bts << " " << sym << "["
            << ElemCountExprOf(*sty) << "];\n";
-        ds << d_indent << "tops::mdspan __mds_" << sym << "("
-           << TopsMdsStorage(sty->GetStorage()) << ", " << sym << ", "
-           << RSTR(sty->GetShape()) << ");\n";
         ssm.MapDeviceSymbol(InScopeName(sym), sym);
-        ssm.MapDeviceSymbol(GetScope(InScopeName(sym)) + "__mds_" + sym,
-                            "__mds_" + sym);
       }
     } else if (sty->GetStorage() == Storage::LOCAL) {
       if (!IsChoreoOutput(InScopeName(sym))) {
         ds << d_indent << "__local__ " << bts << " " << sym << "["
            << ElemCountExprOf(*sty) << "];\n";
-        ds << d_indent << "tops::mdspan __mds_" << sym << "("
-           << TopsMdsStorage(sty->GetStorage()) << ", " << sym << ", "
-           << RSTR(sty->GetShape()) << ");\n";
         ssm.MapDeviceSymbol(InScopeName(sym), sym);
-        ssm.MapDeviceSymbol(GetScope(InScopeName(sym)) + "__mds_" + sym,
-                            "__mds_" + sym);
       }
     } else
       choreo_unreachable("unsupported storage type.");
@@ -340,13 +342,48 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
   return true;
 }
 
-bool TopsccCodeGen::Visit(AST::Assignment& node) {
-  if (isa<BoundedType>(NodeType(node)) || isa<SpannedType>(NodeType(node)) ||
-      isa<FutureType>(NodeType(node))) {
-    ds << d_indent << "auto " << node.name << " = " << ExprSTR(node.value)
-       << ";\n";
+bool TopsccCodeGen::Visit(AST::Assignment& n) {
+  TraceEachVisit(n);
+
+  auto nty = NodeType(n);
+
+  if (auto s = dyn_cast<AST::Select>(n.value)) {
+    assert(!s->inDMA);
+    size_t val_count = s->expr_list->Count();
+    assert(val_count >= 2);
+    std::string array_sym = n.name + "_select_array__";
+    if (isa<FutureType>(nty)) {
+      ds << d_indent << "future * " << array_sym << "[] = {";
+      for (size_t i = 0; i < val_count; i++) {
+        if (i > 0) ds << ", ";
+        ds << "&" << ExprSTR(s->expr_list->ValueAt(i));
+      }
+      ds << "};\n";
+      // make symbol a reference
+      ds << d_indent << "future & " << n.name << " = *" << array_sym << "["
+         << ExprSTR(s->select_factor) << "];\n";
+    } else if (auto sty = dyn_cast<SpannedType>(nty)) {
+      auto bts = NameBaseType(sty->ElementType());
+      ds << d_indent << bts << " * " << array_sym << "[] = {";
+      for (size_t i = 0; i < val_count; i++) {
+        if (i > 0) ds << ", ";
+        ds << ExprSTR(s->expr_list->ValueAt(i));
+      }
+      ds << "};\n";
+      // make symbol a reference
+      ds << d_indent << bts << " & " << n.name << " = *" << array_sym << "["
+         << ExprSTR(s->select_factor) << "];\n";
+    } else
+      choreo_unreachable("select of " + PSTR(NodeType(*s)) +
+                         " is yet to implement.");
+
+    return true;
+  }
+
+  if (isa<BoundedType>(nty) || isa<SpannedType>(nty) || isa<FutureType>(nty)) {
+    ds << d_indent << "auto " << n.name << " = " << ExprSTR(n.value) << ";\n";
   } else
-    errs() << "Assignment Node unprocessed, not supported NodeType\n";
+    errs() << "Assignment n unprocessed, not supported nType\n";
 
   return true;
 }
@@ -399,6 +436,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     ds << d_indent << "choreo::future " << n.future << "(\"" << n.future
        << "\", " << n.LOC().begin.line << ", " << n.LOC().begin.column
        << ");\n"; // declarative future
+    ds << d_indent << "tops::event " << n.future << "__event__;\n";
     claimed_dte.emplace(InScopeName(n.future), claimContext());
     ssm.MapDeviceSymbol(InScopeName(n.future), n.future);
     return true;
@@ -424,27 +462,42 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   auto f_sty = GetSpannedType(GetSymbolType(f_sym));
   auto t_sty = GetSpannedType(GetSymbolType(t_sym));
 
-  std::string f_nm = "";
-  if (isa<FutureType>(GetSymbolType(f_sym))) {
-    // fetch corresponding buffer name of the future
-    std::string buf_name = FBInfo().at(InScopeName(f_sym)).buffer;
-    f_nm = ssm.DeviceName(buf_name);
-  } else
-    f_nm = ssm.DeviceName(InScopeName(f_sym));
-  auto f_mds_name = GetMdsName(f_nm);
-
-  auto t_nm = ssm.DeviceName(InScopeName(t_sym));
-  auto t_mds_name = GetMdsName(t_nm);
-
   assert(f_sty && "can not retrieve data from 'from'.");
   assert(t_sty && "can not retrieve data from 'to'.");
 
+  auto GetBufferExpr = [this](const std::string& sym) {
+    std::string buf_expr = "";
+    if (isa<FutureType>(GetSymbolType(sym))) {
+      std::string buf_name = InScopeName(sym) + ".data";
+      buf_expr = ssm.DeviceName(buf_name);
+    } else
+      buf_expr = ssm.DeviceName(InScopeName(sym));
+    return buf_expr;
+  };
+  auto GetMDSName = [this](const std::string& buf_expr,
+                           const ptr<SpannedType>& sty) {
+    static int mds_cnt = 0;
+    auto mds_name = "__mds" + std::to_string(mds_cnt++) + "_" +
+                    RemoveSuffix(buf_expr, ".data()");
+    std::string bts{NameBaseType(sty->ElementType())};
+    ds << d_indent << "tops::mdspan " << mds_name << "("
+       << TopsMdsStorage(sty->GetStorage()) << ", (" << bts << "*)" << buf_expr
+       << ", " << UnScopedExpr(RSTR(sty->GetShape())) << ");\n";
+    return mds_name;
+  };
+
+  std::string f_buf_expr = GetBufferExpr(f_sym);
+  std::string t_buf_expr = GetBufferExpr(t_sym);
+  auto f_mds_name = GetMDSName(f_buf_expr, f_sty);
+  auto t_mds_name = GetMDSName(t_buf_expr, t_sty);
+
   std::string event_name;
-  if (!n.future.empty() && !claimed_dte.count(InScopeName(n.future))) {
-    ds << d_indent << "choreo::future " << n.future << "(\"" << n.future
-       << "\", " << n.LOC().begin.line << ", " << n.LOC().begin.column
-       << ");\n";
+  if (!n.future.empty()) {
     event_name = n.future + "__event__";
+    if (!claimed_dte.count(InScopeName(n.future)))
+      ds << d_indent << "choreo::future " << n.future << "(\"" << n.future
+         << "\", " << n.LOC().begin.line << ", " << n.LOC().begin.column
+         << ");\n";
   }
 
   if (n.operation == ".copy") {
@@ -459,10 +512,12 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         if (!n.future.empty()) {
           if (fty->IsAsync())
             ds << d_indent << n.future << ".set_event(" << event_name << ");\n";
-          ds << d_indent << n.future << ".set_data(" << f_nm << ");\n";
+          ds << d_indent << n.future << ".set_data(" << f_buf_expr << ");\n";
         }
       } else {
-        auto off_name = "__deslice_offset__" + t_nm + "_2_" + f_nm;
+        static int ds_cnt = 0;
+        auto off_name = "__deslice_offset" + std::to_string(ds_cnt++) + "__" +
+                        t_sym + "_2_" + f_sym;
         std::ostringstream offset;
         { // calculate the offsets
           size_t i = 0;
@@ -491,7 +546,9 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         }
       }
     } else {
-      auto off_name = "__slice_offset__" + f_nm + "_2_" + t_nm;
+      static int s_cnt = 0;
+      auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
+                      f_sym + "_2_" + t_sym;
       std::ostringstream offset;
       { // calculate the offsets
         size_t i = 0;
@@ -514,29 +571,30 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       if (!n.future.empty()) {
         if (fty->IsAsync())
           ds << d_indent << n.future << ".set_event(" << event_name << ");\n";
-        ds << d_indent << n.future << ".set_data(" << t_nm << ");\n";
+        ds << d_indent << n.future << ".set_data(" << t_buf_expr << ");\n";
       }
     }
   } else if (n.operation == ".pad") {
     auto pad_config = cast<PadConfig>(n.GetConfig());
-    ds << d_indent << "int __pad_high_" << f_nm << "[] = {"
+    ds << d_indent << "int __pad_high_" << f_buf_expr << "[] = {"
        << DelimitedString(pad_config->pad_high) << "};\n";
-    ds << d_indent << "int __pad_low_" << f_nm << "[] = {"
+    ds << d_indent << "int __pad_low_" << f_buf_expr << "[] = {"
        << DelimitedString(pad_config->pad_low) << "};\n";
-    ds << d_indent << "int __pad_mid_" << f_nm << "[] = {"
+    ds << d_indent << "int __pad_mid_" << f_buf_expr << "[] = {"
        << DelimitedString(pad_config->pad_mid) << "};\n";
     if (f_ca->positions == nullptr) {
       ds << d_indent
          << (fty->IsAsync() ? "tops::event " + event_name + " = " : "");
       ds << "tops::pad" << (fty->IsAsync() ? "_async" : "") << "(" << dte_ctx
-         << ", __mds_" << t_nm << ", __mds_" << f_nm << ", __pad_low_" << f_nm
-         << ", __pad_high_" << f_nm << ", __pad_mid_" << f_nm << ", "
-         << pad_config->value.v << ");\n";
+         << ", __mds_" << t_buf_expr << ", __mds_" << f_buf_expr
+         << ", __pad_low_" << f_buf_expr << ", __pad_high_" << f_buf_expr
+         << ", __pad_mid_" << f_buf_expr << ", " << pad_config->value.v
+         << ");\n";
       // set the device future
       if (!n.future.empty()) {
         if (fty->IsAsync())
           ds << d_indent << n.future << ".set_event(" << event_name << ");\n";
-        ds << d_indent << n.future << ".set_data(" << t_nm << ");\n";
+        ds << d_indent << n.future << ".set_data(" << t_buf_expr << ");\n";
       }
     } else {
       assert(false && "unsupported");
@@ -544,19 +602,19 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     }
   } else if (n.operation == ".transp") {
     auto transp_config = cast<TransposeConfig>(n.GetConfig());
-    ds << d_indent << "int __transpose_layout_" << f_nm << "[] = {"
+    ds << d_indent << "int __transpose_layout_" << f_buf_expr << "[] = {"
        << DelimitedString(transp_config->dim_values) << "};\n";
     if (f_ca->positions == nullptr) {
       ds << d_indent
          << (fty->IsAsync() ? "tops::event " + event_name + " = " : "");
       ds << "tops::transpose" << (fty->IsAsync() ? "_async" : "") << "("
          << dte_ctx << ", " << t_mds_name << ", " << f_mds_name
-         << ", __transpose_layout_" << f_nm << ");\n";
+         << ", __transpose_layout_" << f_buf_expr << ");\n";
       // set the device future
       if (!n.future.empty()) {
         if (fty->IsAsync())
           ds << d_indent << n.future << ".set_event(" << event_name << ");\n";
-        ds << d_indent << n.future << ".set_data(" << t_nm << ");\n";
+        ds << d_indent << n.future << ".set_data(" << t_buf_expr << ");\n";
       }
     } else {
       assert(false && "unsupported");
@@ -567,6 +625,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   if (!n.future.empty() && !claimed_dte.count(InScopeName(n.future))) {
     claimed_dte.emplace(InScopeName(n.future), dte_ctx);
     ssm.MapDeviceSymbol(InScopeName(n.future), n.future);
+    ssm.MapDeviceSymbol(InScopeName(n.future) + ".data", n.future + ".data()");
   }
 
   return true;
@@ -590,10 +649,8 @@ bool TopsccCodeGen::Visit(AST::Rotate& n) {
 bool TopsccCodeGen::Visit(AST::Wait& n) {
   TraceEachVisit(n);
 
-  for (auto& f : n.GetFutures()) {
-    ds << d_indent << "tops::wait(" << ExprSTR(f, false) << ".event());\n";
-    ds << d_indent << ExprSTR(f, false) << ".set_waited();\n";
-  }
+  for (auto& f : n.GetFutures())
+    ds << d_indent << ExprSTR(f, false) << ".wait();\n";
 
   return true;
 }
@@ -614,8 +671,14 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
 
   ds << "(";
   size_t i = 0;
-  for (auto& a : n.GetArguments())
-    ds << ((i++ == 0) ? "" : ", ") << ExprSTR(a, false);
+  for (auto& a : n.GetArguments()) {
+    ds << ((i++ == 0) ? "" : ", ");
+    if (auto sty = GetSpannedType(NodeType(*a))) {
+      std::string bts{NameBaseType(sty->ElementType())};
+      ds << "(" << bts << "*)" << ExprSTR(a, false);
+    } else
+      ds << ExprSTR(a, false);
+  }
   ds << ");\n";
 
   return true;
@@ -854,17 +917,7 @@ show_usage() {
 
 // TODO: eliminate the need of the value replacement?
 const std::string TopsccCodeGen::ValueSTR(const ValueItem& vi) const {
-#if 0
-  if (auto i = dyn_cast<int>(&vi)) {
-    return std::to_string(*i);
-  } else if (factor_value) {
-    // not int => this is a dynamic var or var bounded by dynamic var.
-    return ReplaceFactorDynDimName(STR(vi));
-  } else {
-    return ReplaceRuntimeNames(STR(vi), "", false);
-  }
-#endif
-  return STR(vi);
+  return UnScopedExpr(STR(vi));
 }
 
 const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
@@ -929,12 +982,9 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       } else if (expr->op == "dataof") {
         assert(isa<FutureType>(expr->GetR()->GetType()) &&
                "expect a future operand.");
-        if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol()) {
-          if (FBInfo().count(InScopeName(id->name)))
-            oss << UnScopedName(FBInfo().at(InScopeName(id->name)).buffer);
-          else
-            oss << id->name << ".data()"; // leverage the rutime buffer inform
-        } else
+        if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol())
+          oss << id->name << ".data()"; // leverage the rutime buffer inform
+        else
           choreo_unreachable("Can not retrieve name of the future.");
       } else if (expr->op == "sizeof") {
         auto var = RemoveSuffix(*AST::GetName(*expr->GetR()), ".span");
@@ -980,19 +1030,6 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
     } else
       choreo_unreachable("unsupported expression '" + expr->op +
                          "': " + PSTR(expr) + ".");
-  } else if (auto sl = dyn_cast<AST::Select>(e)) {
-    size_t val_count = sl->expr_list->Count();
-    // if val_count == 1, pingpong is meaningless?
-    // (TODO: maybe assert when earlysema)
-    assert(val_count >= 2);
-    for (size_t i = 0; i < val_count - 1; i++) {
-      oss << "select_(" << ExprSTR(sl->select_factor, is_host) << " == ";
-      oss << "(" << i << ")";
-      oss << ", " << PSTR(sl->expr_list->ValueAt(i))
-          << (i < val_count - 1 ? ", " : "");
-    }
-    oss << PSTR(sl->expr_list->AllValues().back())
-        << std::string(val_count - 1, ')');
   } else
     choreo_unreachable("unsupported expression '" + expr->op + "'.");
 

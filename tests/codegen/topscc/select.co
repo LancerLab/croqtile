@@ -1,0 +1,12 @@
+// RUN: choreo -t topscc -es %s -o - | FileCheck %s
+
+__co__ void select_func(f32 [32, 4] a, f32 [32, 4] b) {
+  parallel p by 1 {
+    f = dma.copy a => local;
+    h = dma.copy a => local;
+    c = select(1+1, f, h);
+  }
+}
+
+// CHECK:   future * c_select_array__[] = {&f, &h};
+// CHECK:   future & c = *c_select_array__[(2)];

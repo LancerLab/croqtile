@@ -158,7 +158,6 @@ public:
 
     if (prt_visitor) dbgs() << "|- " << GetName() << NewL;
     root.accept(*this);
-    if (prt_visitor) dbgs() << " |- TransformSwap" << NewL;
 
     if (HasError()) return false;
 

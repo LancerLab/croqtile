@@ -341,8 +341,10 @@ int main(int argc, char* argv[]) {
     GCUCheck gcu_checker;
     if (!gcu_checker.RunOnProgram(root)) return gcu_checker.Status();
 
+#if 0
     TopsccTrans trans;
     if (!trans.RunOnProgram(root)) return trans.Status();
+#endif
 
     MemUsageCheck muc;
     if (!muc.RunOnProgram(root))

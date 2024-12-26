@@ -217,14 +217,6 @@ private:
     return cgi->GetParameters(fname);
   }
 
-  const std::string GetMdsName(const std::string& csym) const {
-    const std::string& BUF_PREFIX = "__mds_";
-    if (UnScopedName(csym).find(BUF_PREFIX) != std::string::npos)
-      return UnScopedName(csym);
-    else
-      return BUF_PREFIX + UnScopedName(csym);
-  }
-
   const FutureBufferInfo& FBInfo() const {
     return FCtx(fname).GetFutureBufferInfo();
   }

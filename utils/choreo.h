@@ -699,25 +699,45 @@ struct future {
   void* d = nullptr;
 
   // for runtime check purpose
-  bool waited = true;
+  enum Status {
+    ST_NONE,
+    ST_TRIGGERED,
+    ST_WAITED,
+  };
+  Status s = ST_NONE;
   const char* name = nullptr;
   // source code locations
   unsigned line = 0;
   unsigned column = 0;
 
   __device__ future(const char* n, unsigned l, unsigned c)
-      : e(nullptr), d(nullptr), waited(true), name(n), line(l), column(c) {}
+      : e(nullptr), d(nullptr), s(ST_NONE), name(n), line(l), column(c) {}
 
   __device__ void set_event(tops::event& ev) {
     e = &ev;
-    waited = false;
+    s = ST_TRIGGERED;
   }
-  __device__ tops::event& event() { return *e; }
   __device__ void set_data(void* data) { d = data; }
-  __device__ void set_waited() { waited = true; }
+  __device__ void set_event_data(tops::event& ev, void* data) {
+    set_event(ev);
+    set_data(data);
+  }
+  __device__ void wait() {
+    if (s == ST_TRIGGERED) {
+      tops::wait(*e);
+      s = ST_WAITED;
+    } else if (s == ST_WAITED) {
+      printf("[choreo-rt] Error is detected: line %u:%u: future is wait "
+             "multiple times.\n",
+             line, column);
+    } else
+      assert(s == ST_NONE); // waiting on not triggered future is acceptable
+  }
+
+  __device__ tops::event& event() { return *e; }
   __device__ void* data() {
-    assert(!d && "future is not associated with a data");
-    if (!waited) {
+    assert(d && "future is not associated with a data");
+    if (s == ST_TRIGGERED) {
       // TODO: requires krt %s support
       // printf("[choreo-rt] Error is detected: line %u:%u: future `%s' is not
       // waited before using.\n", line, column, name);
@@ -727,23 +747,8 @@ struct future {
     }
     return d;
   }
-  __device__ future& operator=(const future& f) {
-    e = f.e;
-    d = f.d;
-    waited = f.waited;
-    line = f.line;
-    column = f.column;
-    return *this;
-  }
-  __device__ future(const future& f) {
-    e = f.e;
-    d = f.d;
-    waited = f.waited;
-    line = f.line;
-    column = f.column;
-  }
   __device__ ~future() {
-    if (!waited) {
+    if (s == ST_TRIGGERED) {
       // TODO: requires krt %s support
       // printf("[choreo-rt] Error is detected: line %u:%u: future `%s' is
       // never waited.\n", line, column, name);
@@ -752,7 +757,30 @@ struct future {
              line, column);
     }
   }
+  __device__ future(const future& f) = delete;
+  __device__ future(future&& f) = delete;
+  __device__ future& operator=(const future& f) = delete;
 };
+
+__device__ static inline void swap(future& a, future& b) {
+  auto e = a.e;
+  auto d = a.d;
+  auto s = a.s;
+  auto l = a.line;
+  auto c = a.column;
+
+  a.e = b.e;
+  a.d = b.d;
+  a.s = b.s;
+  a.line = b.line;
+  a.column = b.column;
+
+  b.e = e;
+  b.d = d;
+  b.s = s;
+  b.line = l;
+  b.column = c;
+}
 
 template <typename T>
 struct is_future : std::false_type {};
@@ -767,14 +795,10 @@ __device__ void inline LeftRotateFutures(T& first, T& second, Rest&... rest) {
                 "All arguments must be of type choreo::future");
 
   // swap the pointers
-  future tmp(second);
-  second = first;
-  first = tmp;
+  swap(first, second);
 
   if constexpr (sizeof...(rest) > 0) LeftRotateFutures(second, rest...);
 }
-
-__device__ inline void swap(future& a, future& b) { LeftRotateFutures(a, b); }
 
 template <typename... Futures>
 __device__ inline void rotate(Futures&... f) {
