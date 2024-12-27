@@ -41,7 +41,10 @@ private:
 
       parallel_level--;
       assert(parallel_level >= 0 && "Unexpected parallel level");
-      if (parallel_level == 0) max_parallel_level = 0;
+      if (parallel_level == 0) {
+        max_parallel_level = 0;
+        local_level = 0;
+      }
     }
     return true;
   }
