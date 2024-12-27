@@ -90,6 +90,10 @@ void choreo_info(const char *message) {
   errs() << message << "\n";
   errs() << "Info location: " << ::loc << "\n";
 }
+
+ptr<AST::MultiNodes> ConstructPBRecursively(size_t idx,
+                                          const ptr<AST::MultiNodes>& ps,
+                                          const ptr<AST::MultiNodes>& stmts);
 %}
 
 // make yylex() expects one parameter of type 'Choreo::Scanner &'
@@ -168,7 +172,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::SpanAs>> span_as
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
 %nterm <AST::ptr<AST::Node>> foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt swap_stmt expr_or_qes range_expr if_else_block optional_scalar_init param_mdspan_val chunkat_or_storage_or_select pred
-%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause else_block multi_decls named_spanned_decl
+%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause else_block multi_decls named_spanned_decl
 %nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers passables future_data_list template_params
 %nterm <AST::ptr<AST::Expr>> s_expr template_value_expr span_expr id_expr bound_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
@@ -432,25 +436,57 @@ return_stmt
     ;
 
 paraby_block
-    : PARA IDENTIFIER BY NUM {
-        symtab.AddSymbol($2, MakeBoundedIntegerType($4));
-      } LBRACE statements RBRACE {
-        $$ = AST::Make<AST::ParallelBy>(@1, $2, $4);
-        $$->stmts = $7;
+    : PARA parabys LBRACE statements RBRACE {
+        $$ = AST::Make<AST::ParallelBy>(@1, cast<AST::MultiNodes>($2->AllSubs()[0]), $4);
+        if ($2->Count() > 1)
+          $$->stmts = ConstructPBRecursively(1, $2, $4);
       }
-    | PARA LBRACE id_list RBRACE BY LBRAKT iv_list RBRAKT {
-        if ($3->Count() != $7->Count())
-          Parser::error(@3, "The number of arguments in parallel statements "
+    ;
+
+parabys
+    : parabys COMMA paraby {
+        $1->Append($3);
+        $$ = $1;
+      }
+    | paraby {
+        $$ = AST::Make<AST::MultiNodes>(@1);
+        $$->Append($1);
+      }
+    ; /* do not allow empty paraby */
+
+paraby
+    : IDENTIFIER BY NUM {
+        symtab.AddSymbol($1, MakeUnknownType());
+        $$ = AST::Make<AST::MultiNodes>(@1);
+        $$->Append(AST::Make<AST::Identifier>(@1, $1));
+        $$->Append(AST::Make<AST::IntLiteral>(@3, $3));
+      }
+    | IDENTIFIER ASSIGN LBRACE id_list RBRACE BY LBRAKT iv_list RBRAKT {
+        if ($4->Count() != $8->Count())
+          Parser::error(@4, "The number of arguments in parallel bound config "
                         "should be consistent.");
-        int idx = 0;
-        for (auto id : $3->AllValues()) {
+        for (auto id : $4->AllValues()) {
           auto name = cast<AST::Identifier>(id)->name;
-          auto bound = cast<AST::IntLiteral>($7->ValueAt(idx));
-          symtab.AddSymbol(name, MakeBoundedIntegerType(bound->value));
-          ++idx;
+          symtab.AddSymbol(name, MakeUnknownType());
         }
-      } LBRACE statements RBRACE {
-        $$ = AST::Make<AST::ParallelBy>(@1, $3, $7, $11);
+        symtab.AddSymbol($1, MakeUnknownType());
+
+        $$ = AST::Make<AST::MultiNodes>(@1);
+        $$->Append(AST::Make<AST::Identifier>(@1, $1));
+        $$->Append($4);
+        $$->Append($8);
+      }
+    | LBRACE id_list RBRACE BY LBRAKT iv_list RBRAKT {
+        if ($2->Count() != $6->Count())
+          Parser::error(@2, "The number of arguments in parallel bound config "
+                        "should be consistent.");
+        for (auto id : $2->AllValues()) {
+          auto name = cast<AST::Identifier>(id)->name;
+          symtab.AddSymbol(name, MakeUnknownType());
+        }
+        $$ = AST::Make<AST::MultiNodes>(@1);
+        $$->Append($2);
+        $$->Append($6);
       }
     ;
 
@@ -1164,6 +1200,19 @@ swap_stmt
 
 %%
 
+
+ptr<AST::MultiNodes> ConstructPBRecursively(size_t idx,
+                                          const ptr<AST::MultiNodes>& ps,
+                                          const ptr<AST::MultiNodes>& stmts) {
+  auto pb = AST::Make<AST::ParallelBy>(ps->LOC(),
+                                       cast<AST::MultiNodes>(ps->AllSubs()[idx]),
+                                       stmts);
+  if (idx < ps->Count() - 1)
+    pb->stmts = ConstructPBRecursively(idx + 1, ps, stmts);
+  auto mn = AST::Make<AST::MultiNodes>(ps->LOC());
+  mn->Append(pb);
+  return mn;
+}
 
 // Bison expects us to provide implementation - otherwise linker complains
 void Parser::error(const location &loc , const std::string &message) {

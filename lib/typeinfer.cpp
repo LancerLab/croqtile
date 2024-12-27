@@ -663,10 +663,22 @@ bool TypeInference::Visit(AST::DMA& n) {
 
 bool TypeInference::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
-  AssignSymbolWithType(n.LOC(), n.biv, n.GetType());
-  if (Dump) {
-    dbgs() << "Bounded:   " << InScopeName(n.biv)
-           << ", Type: " << AST::TYPE_STR(n) << "\n";
+
+  if (n.HasBIV()) {
+    AssignSymbolWithType(n.LOC(), n.biv, n.GetType());
+    if (Dump) {
+      dbgs() << "Bounded:   " << InScopeName(n.biv)
+             << ", Type: " << AST::TYPE_STR(n) << "\n";
+    }
+  }
+
+  for (auto sym : n.iv_symbols->AllValues()) {
+    auto id = cast<AST::Identifier>(sym);
+    AssignSymbolWithType(sym->LOC(), id->name, sym->GetType());
+    if (Dump) {
+      dbgs() << "Bounded:   " << InScopeName(id->name)
+             << ", Type: " << AST::TYPE_STR(sym) << "\n";
+    }
   }
   return true;
 }

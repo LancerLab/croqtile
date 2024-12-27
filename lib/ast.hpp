@@ -891,48 +891,119 @@ struct IfElse : public Node, public TypeIDProvider<IfElse> {
 
 struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
   std::string biv;
-  int bound;
-  ptr<MultiValues> id_list;
-  ptr<MultiValues> iv_list;
+  size_t bound;
+  // components
+  ptr<MultiValues> iv_symbols;
+  ptr<MultiValues> bounds;
+
   ptr<MultiNodes> stmts;
+  // expilicit dimensions count
+  size_t dims;
 
-  ParallelBy(const location& l, const std::string v, int b)
-      : Node(l), biv(v), bound(b) {}
-
-  ParallelBy(const location& l, const ptr<MultiValues>& id_l,
-             const ptr<MultiValues>& iv_l, const ptr<MultiNodes>& ss)
-      : Node(l), id_list(id_l), iv_list(iv_l), stmts(ss) {
-    auto id = id_l->ValueAt(0);
-    auto identifier = cast<Identifier>(id);
-    auto iv = iv_l->ValueAt(0);
-    auto num = cast<IntLiteral>(iv);
-    biv = identifier->name;
-    bound = num->value;
-    if (id_l->Count() > 1)
-      stmts = ConstructParallelByRecursively(stmts, 1, id_list, iv_list);
+  ParallelBy(const location& l, const ptr<MultiNodes>& config,
+             const ptr<MultiNodes>& ss)
+      : Node(l), stmts(ss) {
+    if (config->Count() == 2) {
+      if (isa<Identifier>(config->values[0])) {
+        // parallel p by 2 {}
+        // equivalent to `parallel p={anon} by [2] {}`
+        // implement it in normalization
+        assert(config->Count() == 2 && "unexpected parallel config.");
+        biv = cast<Identifier>(config->values[0])->name;
+        bound = cast<IntLiteral>(config->values[1])->Val();
+        dims = 1;
+      } else if (isa<MultiValues>(config->values[0])) {
+        // parallel {px,py,pz} by [2,3,4] {}
+        assert(isa<MultiValues>(config->values[1]) &&
+               "unexpected parallel config.");
+        iv_symbols = cast<MultiValues>(config->values[0]);
+        bounds = cast<MultiValues>(config->values[1]);
+        dims = iv_symbols->Count();
+      } else {
+        choreo_unreachable("unexpected parallel config.");
+      }
+    } else {
+      assert(config->Count() == 3 && "unexpected parallel config.");
+      assert(isa<Identifier>(config->values[0]) &&
+             "unexpected parallel config.");
+      if (isa<Identifier>(config->values[0])) {
+        // parallel p={px,py,pz} by [2,3,4] {}
+        assert(isa<MultiValues>(config->values[1]) &&
+               "unexpected parallel config.");
+        assert(isa<MultiValues>(config->values[2]) &&
+               "unexpected parallel config.");
+        biv = cast<Identifier>(config->values[0])->name;
+        iv_symbols = cast<MultiValues>(config->values[1]);
+        bounds = cast<MultiValues>(config->values[2]);
+        assert(iv_symbols->Count() == bounds->Count());
+        bound = 1;
+        for (auto b : bounds->AllValues())
+          bound *= cast<AST::IntLiteral>(b)->Val();
+        dims = iv_symbols->Count();
+      } else {
+        choreo_unreachable("unexpected parallel config.");
+      }
+    }
   }
 
-  ptr<MultiNodes> ConstructParallelByRecursively(const ptr<MultiNodes>& ss,
-                                                 size_t idx,
-                                                 const ptr<MultiValues>& id_l,
-                                                 const ptr<MultiValues>& iv_l) {
-    auto id = id_l->ValueAt(idx);
-    auto identifier = cast<Identifier>(id);
-    auto iv = iv_l->ValueAt(idx);
-    auto num = cast<IntLiteral>(iv);
-    auto pb = Make<ParallelBy>(id->loc, identifier->name, num->value);
-    if (idx == id_l->Count() - 1)
-      pb->stmts = ss;
-    else
-      pb->stmts = ConstructParallelByRecursively(ss, idx + 1, id_l, iv_l);
-    auto mn = Make<MultiNodes>(id->loc);
-    mn->Append(pb);
-    return mn;
+#if 0
+  // parallel p by 2 {}
+  ParallelBy(const location& l, const std::string& biv_name, int b,
+             const ptr<MultiNodes>& ss)
+      : Node(l), biv(biv_name), bound(b), stmts(ss) {
+    // equivalent to `parallel p={anon} by [2] {}`
+    // implement it in normalization
+    dims = 1;
+  }
+
+  // parallel {px,py,pz} by [2,3,4] {}
+  ParallelBy(const location& l, const ptr<MultiValues>& is,
+             const ptr<MultiValues>& bs, const ptr<MultiNodes>& ss)
+      : Node(l), iv_symbols(is), bounds(bs), stmts(ss) {
+    assert(iv_symbols->Count() == bounds->Count());
+    dims = is->Count();
+  }
+
+  // parallel p={px,py,pz} by [2,3,4] {}
+  ParallelBy(const location& l, const std::string& biv_name,
+             const ptr<MultiValues>& is, const ptr<MultiValues>& bs,
+             const ptr<MultiNodes>& ss)
+      : Node(l), biv(biv_name), iv_symbols(is), bounds(bs), stmts(ss) {
+    assert(iv_symbols->Count() == bounds->Count());
+    bound = 1;
+    for (auto b : bounds->AllValues()) bound *= cast<AST::IntLiteral>(b)->Val();
+    dims = is->Count();
+  }
+#endif
+
+  bool HasBIV() const { return !biv.empty(); }
+
+  // Get the index symbol and its bound
+  std::pair<ptr<Identifier>, ptr<IntLiteral>> GetIV(size_t idx) const {
+    assert(idx < iv_symbols->Count());
+    return std::make_pair(cast<Identifier>(iv_symbols->ValueAt(idx)),
+                          cast<IntLiteral>(bounds->ValueAt(idx)));
+  }
+
+  std::vector<int> BoundValues() const {
+    std::vector<int> bound_values;
+    for (auto bound : bounds->AllValues())
+      bound_values.push_back(cast<AST::IntLiteral>(bound)->Val());
+    return bound_values;
   }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Parallelization: ";
-    os << " index symbol: " << biv << ", bound [0, " << bound << ")";
+    if (HasBIV())
+      os << " index symbol: " << biv << ", bound [0, " << bound << ")";
+    if (iv_symbols != nullptr) {
+      if (HasBIV()) os << "\n" << prefix << "                    ";
+      os << " index component: {";
+      iv_symbols->InlinePrint(os);
+      os << "}, corresponding ubound: [";
+      bounds->InlinePrint(os);
+      os << "]";
+    }
     if (!stmts)
       os << std::endl;
     else

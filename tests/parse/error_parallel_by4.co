@@ -6,5 +6,5 @@ __co__ void i_parallel_by4() {
   }
 }
 
-// CHECK: error: The number of arguments in parallel statements should be consistent.
+// CHECK: error: The number of arguments in parallel bound config should be consistent.
 // CHECK-NOT: error:

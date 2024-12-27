@@ -670,8 +670,32 @@ bool EarlySemantics::Visit(AST::ParamList& n) {
 
 bool EarlySemantics::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
+
+  if (n.dims > 3) {
+    Error(n.LOC(),
+          "The number of parallel dimensions is limited to 3 (x, y, z).");
+    error_count++;
+  }
+
   ReportErrorWhenViolateODR(n.LOC(), n.biv, __FILE__, __LINE__,
                             MakeBoundedITupleType(Shape(1, n.biv), "pv"));
+  // TODO(wsj): rank of shape?
+  // if p={px,py,pz}, will chunkat(p) be explained as 
+  // chunkat(px,py,pz) or still 
+  // chunkat(p) where ubound of p is #px * #py * #pz, rank of p is 1.
+  // ReportErrorWhenViolateODR(n.LOC(), n.biv, __FILE__, __LINE__,
+  //                           MakeBoundedITupleType(Shape(n.dims, n.biv), "pv"));
+
+  if (n.iv_symbols) {
+    for (auto& sym : n.iv_symbols->AllValues()) {
+      auto sname = cast<AST::Identifier>(sym)->name;
+      auto mty = MakeBoundedITupleType(Shape(1, sname), "p_component");
+      ReportErrorWhenViolateODR(n.LOC(), sname, __FILE__, __LINE__, mty);
+      SetNodeType(*sym, mty);
+    }
+    SetNodeType(*n.bounds, MakeBoundedITupleType(n.bounds->Count()));
+  }
+
   /*
   parallel p by x {
     parallel q by y {}

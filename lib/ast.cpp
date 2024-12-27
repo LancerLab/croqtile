@@ -112,7 +112,11 @@ void IfElse::accept(Choreo::Visitor& v) { (void)v; }
 
 void ParallelBy::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
+
+  if (bounds) bounds->accept(v);
   v.Visit(*this);
+
+  // handle identifier/matcher inside 'parallelby'
 
   stmts->accept(v);
 

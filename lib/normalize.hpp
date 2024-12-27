@@ -229,7 +229,20 @@ public:
   bool Visit(AST::Identifier&) override { return true; }
   bool Visit(AST::Parameter&) override { return true; }
   bool Visit(AST::ParamList&) override { return true; }
-  bool Visit(AST::ParallelBy&) override { return true; }
+  bool Visit(AST::ParallelBy& n) override {
+    if (n.iv_symbols) return true;
+    assert(n.biv != "" && "must have a biv.");
+    n.iv_symbols = AST::Make<AST::MultiValues>(n.LOC(), ", ");
+    n.iv_symbols->Append(
+        AST::Make<AST::Identifier>(n.LOC(), n.biv + "__elem__x"));
+    n.bounds = AST::Make<AST::MultiValues>(n.LOC(), ", ");
+    n.bounds->Append(AST::Make<AST::IntLiteral>(n.LOC(), n.bound));
+    n.iv_symbols->ValueAt(0)->SetType(MakeBoundedITupleType(
+        Shape(n.bound, n.biv + "__elem__x"), "p_component:x"));
+    VST_DEBUG(dbgs() << "Generate iv_symbols in parallelby for '" << n.biv
+                     << "': " << STR(n.iv_symbols) << "\n");
+    return true;
+  }
   bool Visit(AST::WhereBind&) override { return true; }
 
   bool Visit(AST::WithIn& n) override {

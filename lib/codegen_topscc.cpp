@@ -959,6 +959,23 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
         oss << "__tops_bid_x()";
       else
         choreo_unreachable("invalid bounded type note.");
+    } else if (isa<BoundedType>(ty) &&
+               PrefixedWith(cast<BoundedType>(ty)->GetNote(), "p_component")) {
+      auto l =
+          RemovePrefixOrNull("p_component:", cast<BoundedType>(ty)->GetNote());
+      assert(l.has_value());
+      // l should be (x|y|z):(0|1)
+      if (l->length() != 3) choreo_unreachable("invalid bounded type note.");
+      oss << "__tops_";
+      if (l->at(2) == '0')
+        oss << "tid_";
+      else if (l->at(2) == '1')
+        oss << "bid_";
+      else
+        choreo_unreachable("invalid bounded type note.");
+      if (l->at(0) > 'z' || l->at(0) < 'x')
+        choreo_unreachable("invalid bounded type note.");
+      oss << l->at(0) << "()";
     } else if (within_map.count(InScopeName(id->name)) && !is_host) {
       size_t i = 0;
       for (auto iv_name : within_map.at(InScopeName(id->name)))
