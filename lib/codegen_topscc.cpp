@@ -523,10 +523,13 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
           size_t i = 0;
           auto shape = f_sty->GetShape();
           for (auto& p : t_ca->positions->AllValues()) {
-            if (i != 0) offset << ", ";
-            offset << "(int)(" << ExprSTR(p, false) << " * "
-                   << STR(shape.ValueAt(i)) << ")";
-            ++i;
+            auto idx_exprs = SplitStringByDelimiter(ExprSTR(p, false));
+            for (auto i_expr : idx_exprs) {
+              if (i != 0) offset << ", ";
+              offset << "(int)(" << i_expr << " * " << STR(shape.ValueAt(i))
+                     << ")";
+              ++i;
+            }
           }
         }
         ds << d_indent << "int " << off_name << "[] = {" << offset.str()
@@ -554,10 +557,13 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         size_t i = 0;
         auto shape = t_sty->GetShape();
         for (auto& p : f_ca->positions->AllValues()) {
-          if (i != 0) offset << ", ";
-          offset << "(int)(" << ExprSTR(p, false) << " * "
-                 << STR(shape.ValueAt(i)) << ")";
-          ++i;
+          auto idx_exprs = SplitStringByDelimiter(ExprSTR(p, false));
+          for (auto i_expr : idx_exprs) {
+            if (i != 0) offset << ", ";
+            offset << "(int)(" << i_expr << " * " << STR(shape.ValueAt(i))
+                   << ")";
+            ++i;
+          }
         }
       }
       ds << d_indent << "int " << off_name << "[] = {" << offset.str()
