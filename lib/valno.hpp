@@ -1193,47 +1193,50 @@ public:
         auto bound_name = SSTab().InScopeName("@" + biv->name);
         int bound_vn = vn.GetValueNumberOfSignature(bound_name);
         std::string bound_sn = vn.GetSignatureFromValueNumber(bound_vn);
-        auto dim_ith = GetNthElement(data_sig, dim_index);
-        if (!dim_ith) {
-          Error(n.LOC(), "internal error: value number is not obtained.");
-          error_count++;
-          return false;
-        }
 
-        // multiple || single
-        /*
-        single: sig of idx is const_128
-          with idx in [128] {
-            foreach idx {
-              ... input.chunkat(idx) => ...
-            }
+        // get the value number of i-th in multi-dim sigature
+        auto GetDimValNO = [this, &n, &data_sig](int idx) {
+          auto dim_ith = GetNthElement(data_sig, idx);
+          if (!dim_ith) {
+            Error(n.LOC(), "internal error: value number is not obtained.");
+            error_count++;
+            return GetInvalidValueNumber();
           }
-        */
-        assert(dim_ith.value()[0] == '#' ||
-               (dim_ith.value().substr(0, 6) == "const_"));
 
-        int dim_valno = dim_ith.value()[0] == '#'
-                            ? std::stoi(dim_ith.value().substr(1))
-                            : vn.GetValueNumberOfSignature(dim_ith.value());
+          assert(dim_ith.value()[0] == '#' ||
+                 (dim_ith.value().substr(0, 6) == "const_"));
 
+          int dim_valno = dim_ith.value()[0] == '#'
+                              ? std::stoi(dim_ith.value().substr(1))
+                              : vn.GetValueNumberOfSignature(dim_ith.value());
+          return dim_valno;
+        };
+
+        size_t err_cnt = error_count;
         if (CountElementsInSignature(bound_sn) <= 1) {
           // this is a simple bound
-          AppendSignature(dim_valno, bound_vn);
+          AppendSignature(GetDimValNO(dim_index), bound_vn);
+          if (++dim_index > dim_count) {
+            Error(n.LOC(), "dimensions inconsistence is found between `" +
+                               n.data->name + "' and chunkat expression.");
+            error_count++;
+          }
         } else {
           // multiple bounds
-          ProcessValueNumberString(
-              bound_sn,
-              [this, &dim_valno, &AppendSignature](int valno, size_t) {
-                AppendSignature(dim_valno, valno);
-              });
+          ProcessValueNumberString(bound_sn, [this, &GetDimValNO,
+                                              &AppendSignature, &dim_index,
+                                              &dim_count,
+                                              &n](int valno, size_t) {
+            AppendSignature(GetDimValNO(dim_index), valno);
+            if (++dim_index > dim_count) {
+              Error(n.LOC(), "dimensions inconsistence is found between `" +
+                                 n.data->name + "' and chunkat expression.");
+              error_count++;
+            }
+          });
         }
 
-        if (++dim_index > dim_count) {
-          Error(n.LOC(), "dimensions inconsistence is found between `" +
-                             n.data->name + "' and chunkat expression.");
-          error_count++;
-          return false;
-        }
+        if (error_count != err_cnt) return false;
       }
       ca_valno = vn.GetOrInsertValueNumberFromSignature(fs_signature);
     }

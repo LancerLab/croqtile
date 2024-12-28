@@ -44,12 +44,12 @@ __co__ auto bar(f16 [128, 4, 14, 69] a) {
 // CHECK:     int __iv_y = 0;
 // CHECK:     for (__iv_x = 0; __iv_x < 4; ++__iv_x) {
 // CHECK:       for (__iv_y = 0; __iv_y < 9; ++__iv_y) {
-// CHECK:         __local__ float anon_0[0];
+// CHECK:         __local__ float anon_0[48];
 // CHECK:         tops_dte_ctx_t choreo_topscc_ctx0;
 // CHECK:         tops::dte_scope s_choreo_topscc_ctx0(choreo_topscc_ctx0);
 // CHECK:         tops::mdspan __mds0_a(tops::Global, (float*)a, 32, 4, 27);
-// CHECK:         tops::mdspan __mds1_anon_0(tops::Private, (float*)anon_0, 16, 1, 0);
-// CHECK:         int __slice_offset0__a_2_anon_0[] = {(int)(__tops_tid_x() * 16), (int)(__iv_x * 1), (int)(__iv_y * 0)};
+// CHECK:         tops::mdspan __mds1_anon_0(tops::Private, (float*)anon_0, 16, 1, 3);
+// CHECK:         int __slice_offset0__a_2_anon_0[] = {(int)(__tops_tid_x() * 16), (int)(__iv_x * 1), (int)(__iv_y * 3)};
 // CHECK:         tops::slice(choreo_topscc_ctx0, __mds1_anon_0, __mds0_a, __slice_offset0__a_2_anon_0);
 // CHECK:       } // x
 // CHECK:     } // y
@@ -73,12 +73,12 @@ __co__ auto bar(f16 [128, 4, 14, 69] a) {
 // CHECK:     // foreach: tests/codegen/topscc/with-loop.co:17.1-15
 // CHECK:     for (__iv_index__elem__0 = 0; __iv_index__elem__0 < 2; ++__iv_index__elem__0) {
 // CHECK:       for (__iv_index__elem__1 = 0; __iv_index__elem__1 < 4; ++__iv_index__elem__1) {
-// CHECK:         __local__ __fp16 anon_1[0];
+// CHECK:         __local__ __fp16 anon_1[2944];
 // CHECK:         tops_dte_ctx_t choreo_topscc_ctx1;
 // CHECK:         tops::dte_scope s_choreo_topscc_ctx1(choreo_topscc_ctx1);
 // CHECK:         tops::mdspan __mds2_a(tops::Global, (__fp16*)a, 128, 4, 14, 69);
-// CHECK:         tops::mdspan __mds3_anon_1(tops::Private, (__fp16*)anon_1, 64, 32, 0, 4);
-// CHECK:         int __slice_offset1__a_2_anon_1[] = {(int)(__iv_index__elem__0 * 64), (int)(__iv_index__elem__1 * 32), (int)(__tops_bid_x() * 0), (int)(__tops_tid_x() * 4)};
+// CHECK:         tops::mdspan __mds3_anon_1(tops::Private, (__fp16*)anon_1, 64, 1, 2, 23);
+// CHECK:         int __slice_offset1__a_2_anon_1[] = {(int)(__iv_index__elem__0 * 64), (int)(__iv_index__elem__1 * 1), (int)(__tops_bid_x() * 2), (int)(__tops_tid_x() * 23)};
 // CHECK:         tops::slice(choreo_topscc_ctx1, __mds3_anon_1, __mds2_a, __slice_offset1__a_2_anon_1);
 // CHECK:       } // index__elem__0
 // CHECK:     } // index__elem__1

@@ -130,7 +130,7 @@ __co__ void with_foreach(s32 [6, 128] lhs, s32 [128] rhs) {
 // CHECK: Bounded:   ::with_foreach::paraby_0::within_6::index, Type: {int,int}->[128, 32]
 // CHECK: Bounded:   ::with_foreach::paraby_0::within_6::index__elem__0, Type: {int}->[128]
 // CHECK: Bounded:   ::with_foreach::paraby_0::within_6::index__elem__1, Type: {int}->[32]
-// CHECK: Future:    ::with_foreach::paraby_0::within_6::foreach_6::lhs_load, Type: sync=>local s32 mdspan<2> [0, 0]
+// CHECK: Future:    ::with_foreach::paraby_0::within_6::foreach_6::lhs_load, Type: sync=>local s32 mdspan<2> [0, 4]
 // VALNO:   scope-2 {
 // VALNO:    New VN #15: 'const_1'
 // VALNO:    Alias "::with_foreach::paraby_0::@p" -> #15
@@ -147,9 +147,10 @@ __co__ void with_foreach(s32 [6, 128] lhs, s32 [128] rhs) {
 // VALNO:     scope-4 {
 // VALNO:      <Simplify> 'const_6 / const_128 to 'const_0'
 // VALNO:      New VN #18: 'const_0'
-// VALNO:      <Simplify> 'const_6 / const_32 to 'const_0'
-// VALNO:      New VN #19: '#18,#18'
-// VALNO:      Alias "::with_foreach::paraby_0::within_6::foreach_6::lhs_load.span" -> #19
+// VALNO:      <Simplify> 'const_128 / const_32 to 'const_4'
+// VALNO:      New VN #19: 'const_4'
+// VALNO:      New VN #20: '#18,#19'
+// VALNO:      Alias "::with_foreach::paraby_0::within_6::foreach_6::lhs_load.span" -> #20
 // VALNO:     } // end scope-4
 // VALNO:    } // end scope-3
 // VALNO:   } // end scope-2
