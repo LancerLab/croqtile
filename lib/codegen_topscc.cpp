@@ -512,7 +512,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         if (!n.future.empty()) {
           if (fty->IsAsync())
             ds << d_indent << n.future << ".set_event(" << event_name << ");\n";
-          ds << d_indent << n.future << ".set_data(" << f_buf_expr << ");\n";
+          ds << d_indent << n.future << ".set_data(" << t_buf_expr << ");\n";
         }
       } else {
         static int ds_cnt = 0;

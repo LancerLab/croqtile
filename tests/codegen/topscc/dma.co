@@ -30,7 +30,7 @@ __co__ auto foo(f32 [32, 4] a) {
 // CHECK:   choreo::future f0("f0", 8, 1);
 // CHECK:   tops::event f0__event__ = tops::memcpy_async(choreo_topscc_ctx1, __mds3_c, __mds2_b);
 // CHECK:   f0.set_event(f0__event__);
-// CHECK:   f0.set_data(b);
+// CHECK:   f0.set_data(c);
 // CHECK:   __local__ float d[165];
 // CHECK:   f0.wait();
 // CHECK:   tops_dte_ctx_t choreo_topscc_ctx2;
