@@ -73,6 +73,11 @@ public:
     assert(!device_map.back().count(csym) && "symbol existed");
     device_map.back()[csym] = name;
   }
+  // only for specific purpose
+  void RemapDeviceSymbol(const std::string& csym, const std::string& name) {
+    assert(PrefixedWith(csym, "::") && "expect a scoped name.");
+    device_map.back()[csym] = name;
+  }
 
   const std::string HostName(const std::string& csym) const {
     for (auto mapit = host_map.rbegin(); mapit != host_map.rend(); ++mapit)

@@ -381,7 +381,8 @@ bool TopsccCodeGen::Visit(AST::Assignment& n) {
   }
 
   if (isa<BoundedType>(nty) || isa<SpannedType>(nty) || isa<FutureType>(nty)) {
-    ds << d_indent << "auto " << n.name << " = " << ExprSTR(n.value) << ";\n";
+    ds << d_indent << "auto " << n.name << " = " << ExprSTR(n.value, false)
+       << ";\n";
   } else
     errs() << "Assignment n unprocessed, not supported nType\n";
 
@@ -439,6 +440,14 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     ds << d_indent << "tops::event " << n.future << "__event__;\n";
     claimed_dte.emplace(InScopeName(n.future), claimContext());
     ssm.MapDeviceSymbol(InScopeName(n.future), n.future);
+    // must set the buffer
+    auto buf_name = FBInfo().at(InScopeName(n.future)).buffer;
+    ds << d_indent << n.future << ".set_data(" << UnScopedName(buf_name)
+       << ");\n";
+    ssm.MapDeviceSymbol(InScopeName(n.future) + ".data", n.future + ".data()");
+    // make following buffer reference all be indirect
+    // TODO: any better idea than this
+    ssm.RemapDeviceSymbol(buf_name, n.future + ".data()");
     return true;
   }
 
@@ -494,10 +503,13 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   std::string event_name;
   if (!n.future.empty()) {
     event_name = n.future + "__event__";
-    if (!claimed_dte.count(InScopeName(n.future)))
+    if (!claimed_dte.count(InScopeName(n.future))) {
       ds << d_indent << "choreo::future " << n.future << "(\"" << n.future
          << "\", " << n.LOC().begin.line << ", " << n.LOC().begin.column
          << ");\n";
+      if (!((f_ca->positions == nullptr) && (t_ca->positions)))
+        ds << d_indent << n.future << ".set_data(" << t_buf_expr << ");\n";
+    }
   }
 
   if (n.operation == ".copy") {
@@ -512,7 +524,6 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         if (!n.future.empty()) {
           if (fty->IsAsync())
             ds << d_indent << n.future << ".set_event(" << event_name << ");\n";
-          ds << d_indent << n.future << ".set_data(" << t_buf_expr << ");\n";
         }
       } else {
         static int ds_cnt = 0;
@@ -544,8 +555,10 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
           if (fty->IsAsync())
             ds << d_indent << n.future << ".set_event(" << event_name << ");\n";
           std::string bts{NameBaseType(t_sty->ElementType())};
+#if 0
           ds << d_indent << n.future << ".set_data(&" << f_mds_name << ".get<"
              << bts << ">(" << offset.str() << "));\n";
+#endif
         }
       }
     } else {
@@ -577,7 +590,6 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       if (!n.future.empty()) {
         if (fty->IsAsync())
           ds << d_indent << n.future << ".set_event(" << event_name << ");\n";
-        ds << d_indent << n.future << ".set_data(" << t_buf_expr << ");\n";
       }
     }
   } else if (n.operation == ".pad") {
@@ -600,7 +612,6 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       if (!n.future.empty()) {
         if (fty->IsAsync())
           ds << d_indent << n.future << ".set_event(" << event_name << ");\n";
-        ds << d_indent << n.future << ".set_data(" << t_buf_expr << ");\n";
       }
     } else {
       assert(false && "unsupported");
@@ -620,7 +631,6 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       if (!n.future.empty()) {
         if (fty->IsAsync())
           ds << d_indent << n.future << ".set_event(" << event_name << ");\n";
-        ds << d_indent << n.future << ".set_data(" << t_buf_expr << ");\n";
       }
     } else {
       assert(false && "unsupported");
@@ -693,7 +703,10 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
 bool TopsccCodeGen::Visit(AST::WithIn& n) {
   TraceEachVisit(n);
 
-  ssm.MapDeviceSymbol(InScopeName(n.with->name), "__iv_" + n.with->name);
+  if (n.with)
+    ssm.MapDeviceSymbol(InScopeName(n.with->name), "__iv_" + n.with->name);
+
+  assert(n.with_matchers && "expected matchers exist.");
 
   for (auto& v : n.GetMatchers()) {
     auto id = cast<AST::Identifier>(v);
@@ -948,9 +961,10 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       for (auto iv_name : within_map.at(InScopeName(id->name)))
         oss << ((i++ == 0) ? "" : ", ")
             << UnScopedName(ssm.DeviceName(iv_name));
-    } else
+    } else {
       oss << UnScopedName(((is_host) ? ssm.HostName(InScopeName(id->name))
                                      : ssm.DeviceName(InScopeName(id->name))));
+    }
   } else if (auto il = dyn_cast<AST::IntLiteral>(e)) {
     oss << "(" << il->value << ")";
   } else if (auto ii = dyn_cast<AST::IntIndex>(e)) {

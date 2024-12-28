@@ -13,6 +13,9 @@ __co__ auto foo(f32 [32, 4] a, s8 [1] b, int c) {
 // CHECK:   tops::event d__event__;
 // CHECK:   tops_dte_ctx_t choreo_topscc_ctx0;
 // CHECK:   tops::dte_scope s_choreo_topscc_ctx0(choreo_topscc_ctx0);
+// CHECK:   d.set_data(d__buf__);
 // CHECK:   {
-// CHECK:     tops::slice(choreo_topscc_ctx0, __mds1_d__buf__, __mds0_a, __slice_offset0__a_2_d__buf__);
+// CHECK:     tops::mdspan __mds0_a(tops::Global, (float*)a, 32, 4);
+// CHECK:     tops::mdspan __mds1_d(tops::Private, (float*)d.data(), 4, 2);
+// CHECK:     tops::slice(choreo_topscc_ctx0, __mds1_d, __mds0_a, __slice_offset0__a_2_d__buf__);
 // CHECK:   }
