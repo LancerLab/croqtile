@@ -34,10 +34,15 @@ __co__ s32 [6, 17, 128] ele_add(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) { //
           swap(lfA, lfB);
           swap(rfA, rfB);
         }
+#ifdef __TOPSCC__
+        wait lfA, rfA;
+        call kernel(lfA.data, rfA.data, l_out, |lfB.span|);
+#else
         lf = select(#y % 2, lfB, lfA);
         rf = select(#y % 2, rfB, rfA);
         wait lf, rf;
         call kernel(lf.data, rf.data, l_out, |lfB.span|);
+#endif
         dma.copy l_out => output.chunkat(p, x, y(-1));
       }
     }

@@ -721,6 +721,12 @@ struct future {
       : e(nullptr), d(nullptr), s(ST_NONE), name(n), line(l), column(c) {}
 
   __device__ void set_event(tops::event& ev) {
+    if (s == ST_TRIGGERED) {
+      printf("[choreo-rt] Error is detected: future (defined at line %u:%u) "
+             "is triggered on an in-flight event.\n",
+             line, column);
+      abort();
+    }
     e = &ev;
     s = ST_TRIGGERED;
   }

@@ -266,6 +266,54 @@ struct CodeGenerator : public VisitorWithSymTab {
     else
       dbgs() << m << n.TypeNameString() << "\n";
   }
+
+protected:
+  std::vector<std::string> ProbeEnclosedIVs(const std::string& iv,
+                                            AST::ForeachBlock& n) {
+    assert(PrefixedWith(iv, "::") && "requires IV name to be scoped.");
+
+    std::vector<std::string> res;
+    bool ignore = true;
+    for (auto rng : n.GetRanges()) {
+      for (auto iv_name :
+           within_map.at(InScopeName(cast<AST::LoopRange>(rng)->IVName()))) {
+        if (iv_name == iv) {
+          ignore = false;
+          continue;
+        }
+        if (ignore) continue;
+        res.push_back(iv_name);
+      }
+    }
+
+    if (ignore)
+      choreo_unreachable("symbol '" + iv + "' is not found in " + STR(n) + ".");
+
+    // now probe further to find any other foreach/inc
+    std::stack<ptr<AST::MultiNodes>> worklist;
+    worklist.push(n.stmts);
+
+    while (!worklist.empty()) {
+      auto mn = worklist.top();
+      worklist.pop();
+
+      for (auto node : mn->AllSubs()) {
+        if (auto fb = dyn_cast<AST::ForeachBlock>(node)) {
+          for (auto rng : fb->GetRanges()) {
+            for (auto iv_name : within_map.at(
+                     InScopeName(cast<AST::LoopRange>(rng)->IVName())))
+              res.push_back(iv_name);
+          }
+          worklist.push(fb->stmts);
+        } else if (auto ib = dyn_cast<AST::IncrementBlock>(node)) {
+          for (auto iv : ib->GetIterationVars())
+            res.push_back(cast<AST::Identifier>(iv)->name);
+          worklist.push(ib->stmts);
+        }
+      }
+    }
+    return res;
+  }
 };
 
 /////////////////////////////////////////////////////////////

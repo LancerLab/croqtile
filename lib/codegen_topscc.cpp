@@ -749,6 +749,9 @@ bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
          << UnScopedExpr(STR(iv_bty->GetUpperBound())) << "; ++"
          << ssm.DeviceName(iv_name) << ") {\n";
       IncrDeviceIndent();
+      // must reset all the enclosed IVs to be zero
+      for (auto enclosed_iv : ProbeEnclosedIVs(iv_name, n))
+        ds << d_indent << ssm.DeviceName(enclosed_iv) << " = 0;\n";
     }
   }
   return true;

@@ -66,13 +66,16 @@ public:
   bool Visit(AST::Expr&) { return true; }
   bool Visit(AST::MultiDimSpans&) { return true; }
   bool Visit(AST::NamedTypeDecl&) { return true; }
+
   bool Visit(AST::NamedVariableDecl& n) override {
     auto name = n.name_str;
     bool ref = (n.GetNote().find("ref") != std::string::npos);
     cgi->AddSymbolDetail(fname, {InScopeName(name), GetSymbolType(name), ref});
     return true;
   }
+
   bool Visit(AST::IntTuple&) { return true; }
+
   bool Visit(AST::Assignment& n) override {
     auto name = n.name;
     bool ref = (n.GetNote().find("ref") != std::string::npos);
@@ -86,7 +89,8 @@ public:
   bool Visit(AST::DataType&) { return true; }
   bool Visit(AST::Identifier&) { return true; }
   bool Visit(AST::Parameter&) { return true; }
-  bool Visit(AST::ParamList& n) {
+
+  bool Visit(AST::ParamList& n) override {
     int index = 0;
     for (auto param : n.values) {
       cgi->AddSymbolDetail(fname, {InScopeName(param->sym->name),
@@ -94,10 +98,12 @@ public:
     }
     return true;
   }
-  bool Visit(AST::ParallelBy&) {
+
+  bool Visit(AST::ParallelBy&) override {
     cgi->GetFunctionTrait(fname).has_parallelby = true;
     return true;
   }
+
   bool Visit(AST::WhereBind&) { return true; }
   bool Visit(AST::WithIn&) { return true; }
   bool Visit(AST::WithBlock&) { return true; }
@@ -127,8 +133,9 @@ public:
 
     return true;
   }
+
   bool Visit(AST::LoopRange&) { return true; }
-  bool Visit(AST::ForeachBlock&) { return true; }
+  bool Visit(AST::ForeachBlock& n) { return true; }
   bool Visit(AST::FunctionDecl&) { return true; }
   bool Visit(AST::ChoreoFunction&) { return true; }
   bool Visit(AST::CppSourceCode&) { return true; }
