@@ -60,7 +60,7 @@ ci-gcu2-test: setup-gcu2 $(TARGET)
 ci-gcu3-test: setup-gcu3 $(TARGET)
 	$(LIT) tests && $(MAKE) standalone_test
 
-$(CHOREO_BIN): utils/choreo_main.cpp scanner.yy.o parser.tab.o codegen_factor.o codegen_cuda.o codegen_topscc.o earlysema.o typeinfer.o typecheck.o ast.o types.o codegen_factor_types.o codegen_cuda_types.o valno.o visitor.o sym_replace.o
+$(CHOREO_BIN): utils/choreo_main.cpp scanner.yy.o parser.tab.o codegen_factor.o codegen_cuda.o codegen_topscc.o earlysema.o typeinfer.o semacheck.o ast.o types.o codegen_factor_types.o codegen_cuda_types.o valno.o visitor.o sym_replace.o
 	$(CC) $(CFLAGS) $^ -I$(WORK_DIR) -I$(SRC_DIR) $(SYMBOLIC_INCLUDE_FLAGS) $(SYMBOLIC_LIB_FLAGS) -o $@
 
 scanner.yy.cc: $(LEX_SRC)

@@ -7,7 +7,7 @@
 
 namespace Choreo {
 
-struct TypeChecker : public VisitorWithSymTab {
+struct SemaChecker : public VisitorWithSymTab {
 private:
   bool allow_auto_threading = false;
 
@@ -31,10 +31,10 @@ private:
   }
 
 public:
-  TypeChecker() : VisitorWithSymTab("check", CCtx().GetGlobalSymbolTable()) {
+  SemaChecker() : VisitorWithSymTab("check", CCtx().GetGlobalSymbolTable()) {
     if (CCtx().GetTarget() == CompileTarget::CUDA) allow_auto_threading = true;
   }
-  ~TypeChecker() {}
+  ~SemaChecker() {}
 
   bool Visit(AST::MultiNodes&) override;
   bool Visit(AST::MultiValues&) override;

@@ -1,3 +1,4 @@
+// REQUIRES: TARGET-GCUALL
 // RUN: choreo -t topscc %s -gs -o %s.result && bash %s.result | FileCheck %s && rm -f %s.result
 
 __co__ void nowait(f32 [15] input) {
@@ -16,4 +17,4 @@ int main() {
   nowait(choreo::make_spanview(i));
 }
 
-// CHECK: [choreo-rt] Error is detected: future (defined at line 5:1) has been waited multiple times.
+// CHECK: [choreo-rt] Error is detected: future (defined at line 6:1) has been waited multiple times.

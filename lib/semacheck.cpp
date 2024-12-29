@@ -1,14 +1,14 @@
-#include "typecheck.hpp"
+#include "semacheck.hpp"
 #include "types.hpp"
 
 using namespace Choreo;
 
-bool TypeChecker::BeforeVisitImpl(AST::Node& n) {
+bool SemaChecker::BeforeVisitImpl(AST::Node& n) {
   if (isa<AST::ChoreoFunction>(&n)) pending_futures.clear();
   return true;
 }
 
-bool TypeChecker::AfterVisitImpl(AST::Node& n) {
+bool SemaChecker::AfterVisitImpl(AST::Node& n) {
   if (isa<AST::ChoreoFunction>(&n)) {
     if (!pending_futures.empty()) {
       Error(n.LOC(), "some futures are not explicitly waited: " +
@@ -19,51 +19,51 @@ bool TypeChecker::AfterVisitImpl(AST::Node& n) {
   return true;
 }
 
-bool TypeChecker::Visit(AST::MultiNodes& n) {
+bool SemaChecker::Visit(AST::MultiNodes& n) {
   TraceEachVisit(n);
   return true;
 }
-bool TypeChecker::Visit(AST::MultiValues& n) {
+bool SemaChecker::Visit(AST::MultiValues& n) {
   TraceEachVisit(n);
   return true;
 }
-bool TypeChecker::Visit(AST::IntLiteral& n) {
-  TraceEachVisit(n);
-  if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
-  return true;
-}
-bool TypeChecker::Visit(AST::Boolean& n) {
+bool SemaChecker::Visit(AST::IntLiteral& n) {
   TraceEachVisit(n);
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
-bool TypeChecker::Visit(AST::Expr& n) {
+bool SemaChecker::Visit(AST::Boolean& n) {
   TraceEachVisit(n);
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
-bool TypeChecker::Visit(AST::MultiDimSpans& n) {
+bool SemaChecker::Visit(AST::Expr& n) {
   TraceEachVisit(n);
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
-bool TypeChecker::Visit(AST::NamedTypeDecl& n) {
+bool SemaChecker::Visit(AST::MultiDimSpans& n) {
   TraceEachVisit(n);
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
-bool TypeChecker::Visit(AST::NamedVariableDecl& n) {
+bool SemaChecker::Visit(AST::NamedTypeDecl& n) {
   TraceEachVisit(n);
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
-bool TypeChecker::Visit(AST::IntTuple& n) {
+bool SemaChecker::Visit(AST::NamedVariableDecl& n) {
+  TraceEachVisit(n);
+  if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
+  return true;
+}
+bool SemaChecker::Visit(AST::IntTuple& n) {
   TraceEachVisit(n);
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
 
-bool TypeChecker::Visit(AST::Assignment& n) {
+bool SemaChecker::Visit(AST::Assignment& n) {
   TraceEachVisit(n);
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   if (!ReportUnknownSymbol(n.name, n.LOC(), __FILE__, __LINE__)) return false;
@@ -78,7 +78,7 @@ bool TypeChecker::Visit(AST::Assignment& n) {
   return true;
 }
 
-bool TypeChecker::Visit(AST::IntIndex& n) {
+bool SemaChecker::Visit(AST::IntIndex& n) {
   TraceEachVisit(n);
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   if (!isa<IntegerType>(n.value->GetType())) {
@@ -88,49 +88,49 @@ bool TypeChecker::Visit(AST::IntIndex& n) {
   }
   return true;
 }
-bool TypeChecker::Visit(AST::DataType& n) {
+bool SemaChecker::Visit(AST::DataType& n) {
   TraceEachVisit(n);
   // TODO: figure out if we could check SufficientInfo
   if (!ReportUnknown(n, __FILE__, __LINE__, true)) return false;
   return true;
 }
-bool TypeChecker::Visit(AST::Identifier& n) {
+bool SemaChecker::Visit(AST::Identifier& n) {
   TraceEachVisit(n);
   if (PrefixedWith(n.name, "$")) return true; // do not check internal symbols
   if (!ReportUnknownSymbol(n.name, n.LOC(), __FILE__, __LINE__)) return false;
   return true;
 }
-bool TypeChecker::Visit(AST::Parameter& n) {
+bool SemaChecker::Visit(AST::Parameter& n) {
   TraceEachVisit(n);
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
-bool TypeChecker::Visit(AST::ParamList& n) {
+bool SemaChecker::Visit(AST::ParamList& n) {
   TraceEachVisit(n);
   return true;
 }
-bool TypeChecker::Visit(AST::ParallelBy& n) {
+bool SemaChecker::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
   return true;
 }
-bool TypeChecker::Visit(AST::WhereBind& n) {
+bool SemaChecker::Visit(AST::WhereBind& n) {
   TraceEachVisit(n);
   return true;
 }
-bool TypeChecker::Visit(AST::WithIn& n) {
+bool SemaChecker::Visit(AST::WithIn& n) {
   TraceEachVisit(n);
   return true;
 }
-bool TypeChecker::Visit(AST::WithBlock& n) {
+bool SemaChecker::Visit(AST::WithBlock& n) {
   TraceEachVisit(n);
   return true;
 }
-bool TypeChecker::Visit(AST::Memory& n) {
+bool SemaChecker::Visit(AST::Memory& n) {
   TraceEachVisit(n);
   return true;
 }
 
-bool TypeChecker::Visit(AST::SpanAs& n) {
+bool SemaChecker::Visit(AST::SpanAs& n) {
   TraceEachVisit(n);
 
   if (!ReportUnknownSymbol(n.id->name, n.LOC(), __FILE__, __LINE__))
@@ -174,7 +174,7 @@ bool TypeChecker::Visit(AST::SpanAs& n) {
   return true;
 }
 
-bool TypeChecker::Visit(AST::DMA& n) {
+bool SemaChecker::Visit(AST::DMA& n) {
   TraceEachVisit(n);
 
   bool IsDummy = (n.operation == ".any");
@@ -298,13 +298,13 @@ bool TypeChecker::Visit(AST::DMA& n) {
   return true;
 }
 
-bool TypeChecker::Visit(AST::ChunkAt& n) {
+bool SemaChecker::Visit(AST::ChunkAt& n) {
   TraceEachVisit(n);
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
 
-bool TypeChecker::Visit(AST::Wait& n) {
+bool SemaChecker::Visit(AST::Wait& n) {
   TraceEachVisit(n);
 
   for (auto& f : n.GetFutures()) {
@@ -320,7 +320,7 @@ bool TypeChecker::Visit(AST::Wait& n) {
   return true;
 }
 
-bool TypeChecker::Visit(AST::Call& n) {
+bool SemaChecker::Visit(AST::Call& n) {
   TraceEachVisit(n);
 
   if (n.template_args) {
@@ -351,7 +351,7 @@ bool TypeChecker::Visit(AST::Call& n) {
   return true;
 }
 
-bool TypeChecker::Visit(AST::Rotate& n) {
+bool SemaChecker::Visit(AST::Rotate& n) {
   TraceEachVisit(n);
   size_t index = 0;
   for (auto s : n.ids->AllValues()) {
@@ -365,16 +365,29 @@ bool TypeChecker::Visit(AST::Rotate& n) {
     auto lty = NodeType(*n.ids->ValueAt(index - 1));
     auto rty = NodeType(*n.ids->ValueAt(index));
     if (*lty != *rty) {
-      Error(n.LOC(), "swapping data of different types (" + PSTR(lty) +
+      Error(n.LOC(), "swapping values of different types (" + PSTR(lty) +
                          " vs. " + PSTR(rty));
       error_count++;
     }
+
+    auto lid = AST::GetIdentifier(*n.ids->ValueAt(index - 1));
+    auto rid = AST::GetIdentifier(*n.ids->ValueAt(index));
+    assert(lid && rid && "no idendifier is found.");
+    auto l_scope = GetScope(InScopeName(lid->name));
+    auto r_scope = GetScope(InScopeName(rid->name));
+    if (l_scope != r_scope) {
+      Error(n.LOC(),
+            "swapping values defined in different scopes is forbidden (" +
+                InScopeName(lid->name) + " vs. " + InScopeName(rid->name));
+      error_count++;
+    }
+
     index++;
   }
   return true;
 }
 
-bool TypeChecker::Visit(AST::Select& n) {
+bool SemaChecker::Visit(AST::Select& n) {
   TraceEachVisit(n);
   size_t ec = error_count;
 
@@ -410,7 +423,7 @@ bool TypeChecker::Visit(AST::Select& n) {
   return ec == error_count;
 }
 
-bool TypeChecker::Visit(AST::Return& n) {
+bool SemaChecker::Visit(AST::Return& n) {
   TraceEachVisit(n);
 
   if (n.value) {
@@ -425,32 +438,32 @@ bool TypeChecker::Visit(AST::Return& n) {
 
   return true;
 }
-bool TypeChecker::Visit(AST::LoopRange& n) {
+bool SemaChecker::Visit(AST::LoopRange& n) {
   TraceEachVisit(n);
   return true;
 }
-bool TypeChecker::Visit(AST::ForeachBlock& n) {
+bool SemaChecker::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
   return true;
 }
-bool TypeChecker::Visit(AST::FunctionDecl& n) {
+bool SemaChecker::Visit(AST::FunctionDecl& n) {
   TraceEachVisit(n);
   return true;
 }
-bool TypeChecker::Visit(AST::ChoreoFunction& n) {
+bool SemaChecker::Visit(AST::ChoreoFunction& n) {
   TraceEachVisit(n);
   return true;
 }
-bool TypeChecker::Visit(AST::CppSourceCode& n) {
+bool SemaChecker::Visit(AST::CppSourceCode& n) {
   TraceEachVisit(n);
   return true;
 }
-bool TypeChecker::Visit(AST::Program& n) {
+bool SemaChecker::Visit(AST::Program& n) {
   TraceEachVisit(n);
   return true;
 }
 
-bool TypeChecker::ReportUnknownSymbol(const std::string& name,
+bool SemaChecker::ReportUnknownSymbol(const std::string& name,
                                       const location& loc, const char* file,
                                       int line) {
   if (isa<UnknownType>(GetSymbolType(name))) {
@@ -462,7 +475,7 @@ bool TypeChecker::ReportUnknownSymbol(const std::string& name,
   return true;
 }
 
-bool TypeChecker::ReportUnknown(AST::Node& n, const char* file, int line,
+bool SemaChecker::ReportUnknown(AST::Node& n, const char* file, int line,
                                 bool ignore_detail) {
   if (isa<UnknownType>(NodeType(n))) {
     ++error_count;
@@ -483,7 +496,7 @@ bool TypeChecker::ReportUnknown(AST::Node& n, const char* file, int line,
   return true;
 }
 
-bool TypeChecker::HasError() {
+bool SemaChecker::HasError() {
   if (error_count) {
     dbgs() << "Totally " << error_count << " errors have been detected.\n";
     return true;

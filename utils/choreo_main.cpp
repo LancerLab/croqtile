@@ -17,7 +17,7 @@
 #include "symtab.hpp"
 #include "ttrans_factor.hpp"
 #include "ttrans_topscc.hpp"
-#include "typecheck.hpp"
+#include "semacheck.hpp"
 #include "typeinfer.hpp"
 #include "types.hpp"
 #include "valno.hpp"
@@ -295,8 +295,8 @@ int main(int argc, char* argv[]) {
     return 0;
   }
 
-  // apply the type check
-  TypeChecker sc;
+  // apply the semantic check
+  SemaChecker sc;
   if (!sc.RunOnProgram(root)) return sc.Status();
 
   // --------- Following passes generate codes -------- //
