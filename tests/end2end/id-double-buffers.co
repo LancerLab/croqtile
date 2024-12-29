@@ -1,11 +1,11 @@
 // REQUIRES: TARGET-GCUALL
 // RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
 
-__co__ f32 [1024] identity(f32 [1024] input) { /// device program
-  f32[input.span(0)] output; // use same shape as input
+__co__ auto identity(f32 [1024] input) {
+  f32 [input.span(0)] output;
 
-  parallel p by 1 {  // p is sip_index
-    with {i} in [4] {
+  parallel p by 1 {
+    with {i} in [4] { // even iterations
       fa = dma.copy.async input.chunkat(i) => local;
       fb = dma.any;
       foreach i(1:) {
@@ -22,26 +22,117 @@ __co__ f32 [1024] identity(f32 [1024] input) { /// device program
   return output;
 }
 
+__co__ auto identity2(f32 [255] input) {
+  f32 [input.span(0)] output;
+
+  parallel p by 1 {
+    with {i} in [5] {  // odd iterations
+      fa = dma.copy.async input.chunkat(i) => local;
+      fb = dma.any;
+      foreach i(1:) {
+        fb = dma.copy.async input.chunkat(i) => local;
+        wait fa;
+        dma.copy fa.data => output.chunkat(i - 1);
+        swap(fa, fb);
+      }
+      wait fa;
+      dma.copy fa.data => output.chunkat(i(-1));
+    }
+  }
+
+  return output;
+}
+
+__co__ auto identity3(f32 [196] input) {
+  f32 [input.span(0)] output;
+
+  parallel p by 1 {
+    with {i} in [7] { // also buffer the output
+      fa = dma.copy.async input.chunkat(i) => local;
+      fb = dma.any;
+      fc = dma.any;
+      foreach i(1:) {
+        fb = dma.copy.async input.chunkat(i) => local;
+        wait fa, fc;
+        fc = dma.copy.async fa.data => output.chunkat(i - 1);
+        swap(fa, fb);
+      }
+      wait fa, fc;
+      dma.copy fa.data => output.chunkat(i(-1));
+    }
+  }
+
+  return output;
+}
 
 int main() { /// host program
-  choreo::f32 a[1024];
+  {
+    choreo::f32 a[1024];
 
-  auto input_data = choreo::make_spanview<1, choreo::f32>((float*)a, {1024});
-  input_data.fill_random(-1.0, 1.0);
+    auto input_data = choreo::make_spanview<1, choreo::f32>((float*)a, {1024});
+    input_data.fill_random(-1.0, 1.0);
 
-  auto res = identity(input_data);
+    auto res = identity(input_data);
 
-  std::cout << res.shape()[0] << std::endl;
-
-  // verfication
-  for (size_t i = 0; i < res.shape()[0]; ++i) {
-    std::cout << "i: " << i << "\n";
-    std::cout << "res: " << res[i] << "\n";
-    float ref = input_data[i];
-
-    std::cout << "ref: " << ref << std::endl;
-    assert(ref == res[i]);
+    // verfication
+    for (size_t i = 0; i < res.shape()[0]; ++i) {
+      float ref = input_data[i];
+      if (ref != res[i]) {
+        std::cout << "i: " << i << "\n";
+        std::cout << "res: " << res[i] << "\n";
+        std::cout << "ref: " << ref << std::endl;
+        assert(ref == res[i]);
+      }
+    }
+    std::cout << "Test 1 Passed" << std::endl;
   }
-  std::cout << "Test Passed\n" << std::endl;
+
+// CHECK: Test 1 Passed
+
+  {
+    choreo::f32 a[255];
+
+    auto input_data = choreo::make_spanview<1, choreo::f32>((float*)a, {255});
+    input_data.fill_random(-1.0, 1.0);
+
+    auto res = identity2(input_data);
+
+    // verfication
+    for (size_t i = 0; i < res.shape()[0]; ++i) {
+      float ref = input_data[i];
+      if (ref != res[i]) {
+        std::cout << "i: " << i << "\n";
+        std::cout << "res: " << res[i] << "\n";
+        std::cout << "ref: " << ref << std::endl;
+        assert(ref == res[i]);
+      }
+    }
+    std::cout << "Test 2 Passed" << std::endl;
+  }
+
+// CHECK: Test 2 Passed
+
+  {
+    choreo::f32 a[196];
+
+    auto input_data = choreo::make_spanview<1, choreo::f32>((float*)a, {196});
+    input_data.fill_random(-1.0, 1.0);
+
+    auto res = identity3(input_data);
+
+    // verfication
+    for (size_t i = 0; i < res.shape()[0]; ++i) {
+      float ref = input_data[i];
+      if (ref != res[i]) {
+        std::cout << "i: " << i << "\n";
+        std::cout << "res: " << res[i] << "\n";
+        std::cout << "ref: " << ref << std::endl;
+        assert(ref == res[i]);
+      }
+    }
+    std::cout << "Test 3 Passed" << std::endl;
+  }
+
+// CHECK: Test 3 Passed
+
 }
-// CHECK: Test Passed

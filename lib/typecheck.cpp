@@ -396,6 +396,9 @@ bool TypeChecker::Visit(AST::Select& n) {
   }
 
   for (auto expr : expr_list->AllValues()) {
+    if (auto id = AST::GetIdentifier(*expr))
+      pending_futures.erase(InScopeName(id->name)); // can not check statically
+
     if (*NodeType(*expr) == *NodeType(*expr0)) continue;
 
     ++error_count;

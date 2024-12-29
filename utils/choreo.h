@@ -644,6 +644,11 @@ spanned_view<T, Rank> make_spanview(T* ptr,
   return spanned_view<T, Rank>(ptr, make_mdspan<Rank>(init));
 }
 
+template <typename T, size_t N>
+spanned_view<T, 1> make_spanview(T (&arr)[N]) {
+  return spanned_view<T, 1>((T*)arr, {N});
+}
+
 template <typename T, size_t N, size_t M>
 spanned_view<T, 2> make_spanview(T (&arr)[N][M]) {
   return spanned_view<T, 2>((T*)arr, {N, M});
@@ -676,6 +681,8 @@ auto copy_as_spanned(T* ptr, std::initializer_list<size_t> init) {
 
 // target specific defintions
 #ifdef __TOPSCC__
+
+#include <krt/builtins.h>
 
 // For tops API check: abend on failures
 static __attribute__((always_inline)) inline void abend_false(bool p) {
@@ -727,9 +734,11 @@ struct future {
       tops::wait(*e);
       s = ST_WAITED;
     } else if (s == ST_WAITED) {
-      printf("[choreo-rt] Error is detected: line %u:%u: future is wait "
+      printf("[choreo-rt] Error is detected: future (defined at line %u:%u) "
+             "has been waited "
              "multiple times.\n",
              line, column);
+      abort();
     } else
       assert(s == ST_NONE); // waiting on not triggered future is acceptable
   }
@@ -738,23 +747,23 @@ struct future {
   __device__ void* data() {
     assert(d && "future is not associated with a data");
     if (s == ST_TRIGGERED) {
-      // TODO: requires krt %s support
-      // printf("[choreo-rt] Error is detected: line %u:%u: future `%s' is not
-      // waited before using.\n", line, column, name);
-      printf("[choreo-rt] Error is detected: line %u:%u: future is not waited "
+      // TODO: requires krt %s support to print future name
+      printf("[choreo-rt] Error is detected: future (defined at line %u:%u) is "
+             "not waited "
              "before using.\n",
              line, column);
+      abort();
     }
     return d;
   }
   __device__ ~future() {
     if (s == ST_TRIGGERED) {
-      // TODO: requires krt %s support
-      // printf("[choreo-rt] Error is detected: line %u:%u: future `%s' is
-      // never waited.\n", line, column, name);
-      printf("[choreo-rt] Error is detected: line %u:%u: future is never "
+      // TODO: requires krt %s support to print future name
+      printf("[choreo-rt] Error is detected: future (defined at line %u:%u) "
+             "has never been "
              "waited.\n",
              line, column);
+      abort();
     }
   }
   __device__ future(const future& f) = delete;

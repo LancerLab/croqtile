@@ -1,0 +1,19 @@
+// RUN: choreo -t topscc %s -gs -o %s.result && bash %s.result | FileCheck %s && rm -f %s.result
+
+__co__ void nowait(f32 [15] input) {
+  parallel p by 1 {
+    f0 = dma.copy.async input => local;
+    f1 = dma.copy.async input => local;
+    swap(f0, f1);
+    wait f1;
+    swap(f0, f1);
+    wait f0, f1;
+  }
+}
+
+int main() {
+  choreo::f32 i[15];
+  nowait(choreo::make_spanview(i));
+}
+
+// CHECK: [choreo-rt] Error is detected: future (defined at line 5:1) has been waited multiple times.
