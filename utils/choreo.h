@@ -682,7 +682,11 @@ auto copy_as_spanned(T* ptr, std::initializer_list<size_t> init) {
 // target specific defintions
 #ifdef __TOPSCC__
 
+} // end namespace choreo
+
 #include <krt/builtins.h>
+
+namespace choreo {
 
 // For tops API check: abend on failures
 static __attribute__((always_inline)) inline void abend_false(bool p) {
@@ -725,7 +729,7 @@ struct future {
       printf("[choreo-rt] Error is detected: future (defined at line %u:%u) "
              "is triggered on an in-flight event.\n",
              line, column);
-      abort();
+      tops::abort();
     }
     e = &ev;
     s = ST_TRIGGERED;
@@ -744,7 +748,7 @@ struct future {
              "has been waited "
              "multiple times.\n",
              line, column);
-      abort();
+      tops::abort();
     } else
       assert(s == ST_NONE); // waiting on not triggered future is acceptable
   }
@@ -758,7 +762,7 @@ struct future {
              "not waited "
              "before using.\n",
              line, column);
-      abort();
+      tops::abort();
     }
     return d;
   }
@@ -769,7 +773,7 @@ struct future {
              "has never been "
              "waited.\n",
              line, column);
-      abort();
+      tops::abort();
     }
   }
   __device__ future(const future& f) = delete;

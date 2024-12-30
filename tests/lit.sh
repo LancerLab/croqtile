@@ -23,7 +23,7 @@ if ! which copp &>/dev/null; then
 fi
 
 if ! which not.sh &>/dev/null; then
-    echo "Error: choreo is not found in PATH."
+    echo "Error: not.sh is not found in PATH."
     exit 1
 fi
 

@@ -164,8 +164,9 @@ setup-choreo-kit: check-choreo-kit
 	  $(MAKE) install-choreo-kit; \
 	fi;
 
-setup: setup-choreo-kit ginac-setup
+setup: setup-choreo-kit setup-ginac setup-clang-format
 	git submodule update --init --recursive;\
+	ln -sf extern/not.sh tests
 
 setup-gcu2: setup
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu2-kit FTP_SERVER=$(FTP_SERVER)
@@ -186,17 +187,55 @@ gcu2-kmd:
 gcu3-kmd:
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu3-kmd FTP_SERVER=$(FTP_SERVER)
 
-cln-setup: $(CLN_TAR)
+CLN_MD5=fb9dc1a6552dda517ce32d35a6af9105
+CLN_PACKAGE_NAME=cln-1.3.7.tar.bz2
+GINAC_MD5=857fb04d82d40308377afa1bd24c2990
+GINAC_PACKAGE_NAME=ginac-1.8.7.tar.bz2
+CUR_CLN_MD5:=$(shell md5sum $(CLN_TAR) 2>/dev/null| cut -d ' ' -f 1)
+CUR_GINAC_MD5:=$(shell md5sum $(GINAC_TAR) 2>/dev/null| cut -d ' ' -f 1)
+
+download-ginac:
+	mkdir -p $(SYMBOLIC_DIR); \
+	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(CLN_PACKAGE_NAME) -o $(CLN_TAR);\
+	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(GINAC_PACKAGE_NAME) -o $(GINAC_TAR);\
+
+check-ginac:
+	@if [ "$(CUR_CLN_MD5)" != "$(CLN_MD5)"  ] || [ "$(CUR_GINAC_MD5)" != "$(GINAC_MD5)"  ]; then \
+		echo "MD5 hash does not match. Downloading the ginac package..."; \
+		$(MAKE) download-ginac; \
+	else \
+		echo "$(SUPPORT_PKG) MD5 hash matches. No need to download."; \
+	fi;
+
+cln-setup:
 	tar -xvf $(CLN_TAR) -C $(SYMBOLIC_DIR); \
 	cd $(CLN_DIR); \
 	./configure --prefix=$(CLN_DIR)/install; \
 	$(MAKE) -j && $(MAKE) install
 
-ginac-setup: $(GINAC_TAR) cln-setup
+setup-ginac: check-ginac
+	$(MAKE) cln-setup; \
 	tar -xvf $(GINAC_TAR) -C $(SYMBOLIC_DIR); \
 	cd $(GINAC_DIR); \
 	PKG_CONFIG_PATH=$(CLN_DIR) ./configure --prefix=$(GINAC_DIR)/install; \
 	$(MAKE) -j && $(MAKE) install
+
+CFORMAT_MD5=6ee59eba63782b362bc9ba1138911f3a
+CFORMAT_NAME=clang-format-19-1-2
+CUR_CFORMAT_MD5:=$(shell md5sum $(CLANG_FORMAT) 2>/dev/null| cut -d ' ' -f 1)
+
+download-clang-format:
+	curl -u ftp_era:Enflame@321 ftp://$(FTP_SERVER)/\%2fdev/choreo-toolchain/$(CFORMAT_NAME) -o $(CLANG_FORMAT);\
+
+check-clang-format:
+	@if [ "$(CUR_CFORMAT_MD5)" != "$(CFORMAT_MD5)"  ]; then \
+		echo "MD5 hash does not match. Downloading the clang-format..."; \
+		$(MAKE) download-clang-format; \
+	else \
+		echo "$(SUPPORT_PKG) MD5 hash matches. No need to download."; \
+	fi;
+
+setup-clang-format: check-clang-format
 
 # utils to serve Choreo Documents
 MKDOCS_CMD = mkdocs serve --dev-addr=0.0.0.0:8000
@@ -210,7 +249,7 @@ stop-doc:
 
 start-doc:
 	@echo "Starting mkdocs serve in the background..."
-	nohup $(MKDOCS_CMD) &>/dev/null & 
+	nohup $(MKDOCS_CMD) &>/dev/null &
 
 status-doc:
 	@echo "Checking mkdocs serve process..."
