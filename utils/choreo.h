@@ -704,7 +704,7 @@ __device__ static int inline __addr2int__(void* v) {
 
 // --- light-weight choreo-topscc device library --- //
 
-__device__ inline static void __co_abort__() __attribute__((noreturn)) {
+__device__ inline static __attribute__((noreturn)) void __co_abort__() {
 #if __GCU_ARCH__ < 300
   abort();
 #else

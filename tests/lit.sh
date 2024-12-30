@@ -297,6 +297,7 @@ for file in "${files_array[@]}"; do
         elif [[ $line =~ ^//[[:blank:]]*RUN-(.+):[[:blank:]]*(.+) ]]; then
             run_count=$(($run_count + 1))
             run_target="${BASH_REMATCH[1]}"
+            run_target=$(echo "$run_target" | tr '[:upper:]' '[:lower:]')
             if [[ "${run_target}" == "$gcu_arch" ]]; then
               # Extract the command after "RUN:"
               run_command="${BASH_REMATCH[2]}"

@@ -1,14 +1,8 @@
 // REQUIRES: TARGET-GCUALL
-// RUN: choreo -gs -t topscc %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
+// RUN: choreo -gs -t factor %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
+// RUN: choreo -gs -t topscc %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
 
-#include "choreo.h"
 #include <chrono>
-
-__cok__ { /// kernel program
-
-} /// end of kernel decl
-
-
 
 __co__ f32 [10240] identity(f32 [10240] input) { /// device program
   f32[10240] output; // use same shape as input
