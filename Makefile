@@ -236,6 +236,7 @@ check-clang-format:
 	fi;
 
 setup-clang-format: check-clang-format
+	chmod +x $(CLANG_FORMAT)
 
 # utils to serve Choreo Documents
 MKDOCS_CMD = mkdocs serve --dev-addr=0.0.0.0:8000

@@ -2,6 +2,7 @@
 #define __CHOREO_PRE_PROCESS__
 
 #include "aux.hpp"
+#include "context.hpp"
 #include "io.hpp"
 #include <iostream>
 #include <istream>
@@ -56,7 +57,13 @@ private:
   bool debug = false;
 
 public:
-  SimplePreprocessor(std::ostream& o) : output(o), debug(debugPP) {}
+  SimplePreprocessor(std::ostream& o) : output(o), debug(debugPP) {
+    // Replicate the target-specific macros
+    switch (CCtx().GetTarget()) {
+    case CompileTarget::Topscc: globalDefines.emplace("__TOPSCC__", ""); break;
+    default: break;
+    }
+  }
 
 private:
   std::string SubstituteGlobalDefines(const std::string& line) {
