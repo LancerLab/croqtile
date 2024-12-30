@@ -285,7 +285,7 @@ for file in "${files_array[@]}"; do
     fi
 
     # Read the file and search for lines starting with "// RUN:"
-    run_num=$(grep "\<RUN\>:" $file | wc -l)
+    run_num=$(grep -E 'RUN(:|-.*:)' $file | wc -l)
     run_count=0
     while IFS= read -r line; do
         if [[ $line =~ ^//[[:blank:]]*RUN:[[:blank:]]*(.+) ]]; then
@@ -294,6 +294,18 @@ for file in "${files_array[@]}"; do
             run_command="${BASH_REMATCH[1]}"
             # Execute the command with replacements
             execute_command "$file" "$run_command" "$run_count" "$run_num"
+        elif [[ $line =~ ^//[[:blank:]]*RUN-(.+):[[:blank:]]*(.+) ]]; then
+            run_count=$(($run_count + 1))
+            run_target="${BASH_REMATCH[1]}"
+            if [[ "${run_target}" == "$gcu_arch" ]]; then
+              # Extract the command after "RUN:"
+              run_command="${BASH_REMATCH[2]}"
+              # Execute the command with replacements
+              execute_command "$file" "$run_command" "$run_count" "$run_num"
+            else
+              echo "SKIP($run_target): ${file} ($run_count of $run_num)"
+              num_skiped=$(($num_skiped + 1)); #simply skip the unmatched target
+            fi
         fi
     done < "$file"
 done

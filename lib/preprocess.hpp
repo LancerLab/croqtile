@@ -63,6 +63,12 @@ public:
     case CompileTarget::Topscc: globalDefines.emplace("__TOPSCC__", ""); break;
     default: break;
     }
+    switch (CCtx().GetArch()) {
+    case TargetArch::GCU20: globalDefines.emplace("__GCU_ARCH__", "200"); break;
+    case TargetArch::GCU21: globalDefines.emplace("__GCU_ARCH__", "210"); break;
+    case TargetArch::GCU3: globalDefines.emplace("__GCU_ARCH__", "300"); break;
+    default: break;
+    }
   }
 
 private:

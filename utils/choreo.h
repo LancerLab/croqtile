@@ -704,6 +704,14 @@ __device__ static int inline __addr2int__(void* v) {
 
 // --- light-weight choreo-topscc device library --- //
 
+__device__ inline static void __co_abort__() __attribute__((noreturn)) {
+#if __GCU_ARCH__ < 300
+  abort();
+#else
+  tops::abort();
+#endif
+}
+
 // choreo device future
 struct future {
   tops::event* e = nullptr;
@@ -729,7 +737,7 @@ struct future {
       printf("[choreo-rt] Error is detected: future (defined at line %u:%u) "
              "is triggered on an in-flight event.\n",
              line, column);
-      tops::abort();
+      __co_abort__();
     }
     e = &ev;
     s = ST_TRIGGERED;
@@ -748,7 +756,7 @@ struct future {
              "has been waited "
              "multiple times.\n",
              line, column);
-      tops::abort();
+      __co_abort__();
     } else
       assert(s == ST_NONE); // waiting on not triggered future is acceptable
   }
@@ -762,7 +770,7 @@ struct future {
              "not waited "
              "before using.\n",
              line, column);
-      tops::abort();
+      __co_abort__();
     }
     return d;
   }
@@ -773,7 +781,7 @@ struct future {
              "has never been "
              "waited.\n",
              line, column);
-      tops::abort();
+      __co_abort__();
     }
   }
   __device__ future(const future& f) = delete;
