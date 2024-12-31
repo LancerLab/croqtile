@@ -1,5 +1,6 @@
 // REQUIRES: TARGET-GCUALL
-// RUN: choreo -gs -t factor -kt %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
+// RUN: choreo -gs -t factor -kt %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
+// RUN: choreo -gs -t topscc %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
 
 #include "choreo.h"
 #include <chrono>
@@ -7,7 +8,7 @@
 __cok__ { /// kernel program
 
 template<int m, int n>
-void relu_kernel(float* input, float* out) {
+__co_device__ void relu_kernel(float* input, float* out) {
   for (int i = 0; i < m; ++i) {
     for (int j = 0; j < n; ++j) {
       out[i*n+j] = input[i*n+j] > 0.0f ? input[i*n+j] : 0.0f;
