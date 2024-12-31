@@ -1,10 +1,11 @@
 // REQUIRES: TARGET-GCUALL DYNAMIC-SHAPE
-// RUN: choreo -gs -t factor %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
+// RUN: choreo -gs -t factor %s -o %s.factor.result && bash %s.factor.result --execute | FileCheck --match-full-lines %s && rm -f %s.factor.result
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
 #include "choreo.h"
 
 // extern "C" void kernel(int * lhs, int * rhs, int * out, int m, int k, int n) {
 __cok__ { /// kernel program
-extern "C" void kernel(int * lhs, int * rhs, int * out) {
+__co_device__ extern "C" void kernel(int * lhs, int * rhs, int * out) {
   int m = 4;
   int k = 512;
   int n = 64;
