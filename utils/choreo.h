@@ -410,7 +410,10 @@ public:
 };
 #else
 // Check for __bf16 support
-#if defined(__clang__)
+#if defined(__TOPSCC__)
+#define BF16_SUPPORTED 1
+using bf16 = __bf16;
+#elif defined(__clang__)
 #if __clang_major__ >= 11
 #define BF16_SUPPORTED 1
 using bf16 = __bf16;
