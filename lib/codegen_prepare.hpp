@@ -13,26 +13,46 @@ private:
   int parallel_level = 0;
 
 private:
-  bool BeforeVisitImpl(AST::Node& n) {
+  bool BeforeVisitImpl(AST::Node& n) override {
     if (isa<AST::ChoreoFunction>(&n)) {
       parallel_level = 0;
       cgi->GetFunctionTrait(fname).has_parallelby = false;
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       parallel_level++;
-      if (parallel_level == 1)
-        cgi->GetFunctionLaunch(fname).block_dim_x = pb->bound;
-      else if (parallel_level == 2) {
-        cgi->GetFunctionLaunch(fname).grid_dim_x =
-            cgi->GetFunctionLaunch(fname).block_dim_x;
-        cgi->GetFunctionLaunch(fname).block_dim_x = pb->bound;
-      } else
-        choreo_unreachable("The parallel-by level " +
-                           std::to_string(parallel_level) +
-                           " is not supported.");
+      if (CCtx().GetTarget() == CompileTarget::Factor) {
+        // for Factor backend
+        auto& lcs = cgi->GetFactorFunctionLaunches(fname);
+        if (parallel_level == 1) {
+          // represents the index of the current ParallelBy in cgi
+          n.note += std::to_string(lcs.size()) + ", ";
+          lcs.push_back({});
+          lcs.back().SetBlockDims(pb->BoundValues());
+        } else if (parallel_level == 2) {
+          auto& lc = lcs.back();
+          lc.OverwriteGDimsByBDims();
+          lc.ResetBDims();
+          lc.SetBlockDims(pb->BoundValues());
+        } else
+          choreo_unreachable("The parallel-by level " +
+                             std::to_string(parallel_level) +
+                             " is not supported.");
+      } else {
+        auto& lc = cgi->GetFunctionLaunch(fname);
+        if (parallel_level == 1)
+          lc.SetBlockDims(pb->BoundValues());
+        else if (parallel_level == 2) {
+          lc.OverwriteGDimsByBDims();
+          lc.ResetBDims();
+          lc.SetBlockDims(pb->BoundValues());
+        } else
+          choreo_unreachable("The parallel-by level " +
+                             std::to_string(parallel_level) +
+                             " is not supported.");
+      }
     }
     return true;
   }
-  bool AfterVisitImpl(AST::Node& n) {
+  bool AfterVisitImpl(AST::Node& n) override {
     if (isa<AST::ChoreoFunction>(&n)) {
       VST_DEBUG(dbgs() << "Symbols in " << fname << ":\n");
       VST_DEBUG(for (auto& item : cgi->GetFunctionSymbols(fname)) {
@@ -42,11 +62,25 @@ private:
                << ", index: " << item.p_index << "\n";
       });
     } else if (isa<AST::ParallelBy>(&n)) {
-      parallel_level--;
-      VST_DEBUG(dbgs() << "Grid Dims: "
-                       << cgi->GetFunctionLaunch(fname).grid_dim_x);
-      VST_DEBUG(dbgs() << "Block Dims: "
-                       << cgi->GetFunctionLaunch(fname).block_dim_x);
+      if (CCtx().GetTarget() == CompileTarget::Factor) {
+        if (parallel_level == 1) {
+          VST_DEBUG(
+              dbgs() << "\tGrid Dims: "
+                     << cgi->GetFactorFunctionLaunches(fname).back().grid_dim_x
+                     << "\n");
+          VST_DEBUG(
+              dbgs() << "\tBlock Dims: "
+                     << cgi->GetFactorFunctionLaunches(fname).back().block_dim_x
+                     << "\n");
+        }
+        parallel_level--;
+      } else {
+        parallel_level--;
+        VST_DEBUG(dbgs() << "Grid Dims: "
+                         << cgi->GetFunctionLaunch(fname).grid_dim_x);
+        VST_DEBUG(dbgs() << "Block Dims: "
+                         << cgi->GetFunctionLaunch(fname).block_dim_x);
+      }
     }
     return true;
   }

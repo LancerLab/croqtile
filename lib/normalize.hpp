@@ -78,6 +78,9 @@ public:
     } else if (auto d = dyn_cast<AST::Return>(&n)) {
       cur_node_index = multi_nodes.top()->GetIndex(d);
       assert(cur_node_index != -1 && "unexpected node index.");
+    } else if (auto f = dyn_cast<AST::ForeachBlock>(&n)) {
+      cur_node_index = multi_nodes.top()->GetIndex(f);
+      assert(cur_node_index != -1 && "unexpected node index.");
     }
     return true;
   }
@@ -226,7 +229,20 @@ public:
   bool Visit(AST::Identifier&) override { return true; }
   bool Visit(AST::Parameter&) override { return true; }
   bool Visit(AST::ParamList&) override { return true; }
-  bool Visit(AST::ParallelBy&) override { return true; }
+  bool Visit(AST::ParallelBy& n) override {
+    if (n.iv_symbols) return true;
+    assert(n.biv != "" && "must have a biv.");
+    n.iv_symbols = AST::Make<AST::MultiValues>(n.LOC(), ", ");
+    n.iv_symbols->Append(
+        AST::Make<AST::Identifier>(n.LOC(), n.biv + "__elem__x"));
+    n.bounds = AST::Make<AST::MultiValues>(n.LOC(), ", ");
+    n.bounds->Append(AST::Make<AST::IntLiteral>(n.LOC(), n.bound));
+    n.iv_symbols->ValueAt(0)->SetType(MakeBoundedITupleType(
+        Shape(n.bound, n.biv + "__elem__x"), "p_component:x"));
+    VST_DEBUG(dbgs() << "Generate iv_symbols in parallelby for '" << n.biv
+                     << "': " << STR(n.iv_symbols) << "\n");
+    return true;
+  }
   bool Visit(AST::WhereBind&) override { return true; }
 
   bool Visit(AST::WithIn& n) override {
@@ -397,8 +413,68 @@ public:
 
     return true;
   }
-  bool Visit(AST::LoopRange&) override { return true; }
-  bool Visit(AST::ForeachBlock&) override { return true; }
+  bool Visit(AST::LoopRange& n) override { return true; }
+  bool Visit(AST::ForeachBlock& n) override {
+    auto handle_bounds = [this, &n](auto get_bound, auto set_bound) {
+      std::vector<std::pair<int, ptr<AST::Node>>> repls;
+      int i = -1;
+      for (auto& v : n.GetRanges()) {
+        ++i;
+        auto lr = cast<AST::LoopRange>(v);
+        auto& bound = get_bound(lr);
+        if (bound == nullptr) continue;
+
+        auto bound_expr = cast<AST::Expr>(bound);
+        if (bound_expr->GetSymbol()) {
+          repls.emplace_back(i, bound_expr->GetReference());
+          continue;
+        } else if (bound_expr->op == "getith") {
+          if (auto lexpr = dyn_cast<AST::Expr>(bound_expr->GetL())) {
+            if (!lexpr->GetSymbol()) {
+              int index =
+                  cur_node_index + mnodes_insertions[multi_nodes.top()].size();
+              auto nname = SymbolTable::GetAnonName();
+              auto assign = AST::Make<AST::Assignment>(
+                  bound_expr->GetL()->LOC(), nname, bound_expr->GetL());
+              mnodes_insertions[multi_nodes.top()].emplace_back(
+                  std::make_tuple(index, assign, nname));
+              VST_DEBUG(dbgs()
+                        << "replace " << PSTR(bound_expr->GetL()) << " with ");
+              bound_expr->SetL(AST::Make<AST::Identifier>(v->LOC(), nname));
+              VST_DEBUG(dbgs() << PSTR(bound_expr->GetL()) << ".\n");
+            }
+          }
+          continue;
+        }
+
+        int index =
+            cur_node_index + mnodes_insertions[multi_nodes.top()].size();
+        auto nname = SymbolTable::GetAnonName();
+        auto assign = AST::Make<AST::Assignment>(v->LOC(), nname, bound_expr);
+        mnodes_insertions[multi_nodes.top()].emplace_back(
+            std::make_tuple(index, assign, nname));
+        repls.emplace_back(i, AST::Make<AST::Identifier>(v->LOC(), nname));
+      }
+
+      for (auto& repl : repls) {
+        VST_DEBUG(dbgs() << "replace "
+                         << PSTR(n.GetRangeNodes()->ValueAt(repl.first))
+                         << " with ");
+        auto lr = cast<AST::LoopRange>(n.GetRangeNodes()->values[repl.first]);
+        set_bound(lr, repl.second);
+        VST_DEBUG(dbgs() << PSTR(n.GetRangeNodes()->ValueAt(repl.first))
+                         << ".\n");
+      }
+    };
+
+    handle_bounds([](auto lr) -> auto& { return lr->lbound; },
+                  [](auto lr, auto val) { lr->lbound = val; });
+
+    handle_bounds([](auto lr) -> auto& { return lr->ubound; },
+                  [](auto lr, auto val) { lr->ubound = val; });
+
+    return true;
+  }
   bool Visit(AST::IncrementBlock&) override { return true; }
   bool Visit(AST::FunctionDecl&) override { return true; }
   bool Visit(AST::ChoreoFunction&) override { return true; }

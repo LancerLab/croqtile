@@ -359,6 +359,26 @@ ValueNumbering::TryToSimplifyBinary(const location& loc, const std::string& op,
         }
       }
     }
+    if (!PrefixedWith(rhs, "#")) {
+      int lvn = GetValueNumberOfSignature(lhs);
+      auto bind_set = GetBindSet(lvn);
+      bind_set.insert(lvn); // always add self
+      for (auto div_vn : bind_set) {
+        auto sig = GetSignatureFromValueNumber(div_vn);
+        if (!PrefixedWith(lhs, "/:")) continue;
+        auto div = GetOperandsValNo(sig);
+        assert(div.size() == 2);
+        if (GetValueNumberOfSignature(rhs) == div[1]) {
+          auto res = GetSignatureFromValueNumber(div[0]);
+
+          if (trace && verbose)
+            dbgs() << ScopeIndent() << "<Simplify> '" << lhs << " " << op << " "
+                   << rhs << " to '" << res << "'\n";
+
+          return res;
+        }
+      }
+    }
   }
   return std::nullopt;
 }

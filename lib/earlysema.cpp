@@ -14,6 +14,7 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
     parallel_level = 0;
   } else if (isa<AST::ParallelBy>(&n)) {
     parallel_level++;
+    parallel_levels.push_back(parallel_level);
   } else if (isa<AST::Parameter>(&n)) {
     in_decl = true;
     allow_named_dim = true; // tolerate repeated symbols inside mdspan params
@@ -669,8 +670,45 @@ bool EarlySemantics::Visit(AST::ParamList& n) {
 
 bool EarlySemantics::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
+
+  if (n.dims > 3) {
+    Error(n.LOC(),
+          "The number of parallel dimensions is limited to 3 (x, y, z).");
+    error_count++;
+  }
+
   ReportErrorWhenViolateODR(n.LOC(), n.biv, __FILE__, __LINE__,
                             MakeBoundedITupleType(Shape(1, n.biv), "pv"));
+  // TODO(wsj): rank of shape?
+  // if p={px,py,pz}, will chunkat(p) be explained as
+  // chunkat(px,py,pz) or still
+  // chunkat(p) where ubound of p is #px * #py * #pz, rank of p is 1.
+  // ReportErrorWhenViolateODR(n.LOC(), n.biv, __FILE__, __LINE__,
+  //                           MakeBoundedITupleType(Shape(n.dims, n.biv),
+  //                           "pv"));
+
+  if (n.iv_symbols) {
+    for (auto& sym : n.iv_symbols->AllValues()) {
+      auto sname = cast<AST::Identifier>(sym)->name;
+      auto mty = MakeBoundedITupleType(Shape(1, sname), "p_component");
+      ReportErrorWhenViolateODR(n.LOC(), sname, __FILE__, __LINE__, mty);
+      SetNodeType(*sym, mty);
+    }
+    SetNodeType(*n.bounds, MakeBoundedITupleType(n.bounds->Count()));
+  }
+
+  /*
+  parallel p by x {
+    parallel q by y {}
+    parallel q by z {} // should be treated as ERROR!
+  }
+  */
+  if (auto size = parallel_levels.size(); size >= 2)
+    if (parallel_levels[size - 1] == parallel_levels[size - 2] &&
+        parallel_levels.back() == 2) {
+      Error(n.LOC(), "Multiple inner parallels are not allowed!");
+      error_count++;
+    }
   return true;
 }
 

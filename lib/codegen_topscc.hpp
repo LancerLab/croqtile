@@ -100,16 +100,12 @@ public:
 
 struct TopsccCodeGen : public CodeGenerator {
 private:
-  std::map<std::string, std::vector<RtMemUsageCheckInfo>> muc;
   ptr<CodeGenInfo> cgi;
   ScopedSymbolMap ssm;
 
 public:
-  TopsccCodeGen(
-      const std::map<std::string, std::vector<RtMemUsageCheckInfo>>& m,
-      const ptr<CodeGenInfo>& ci)
-      : CodeGenerator("codegen", CCtx().GetGlobalSymbolTable()), muc(m),
-        cgi(ci) {
+  TopsccCodeGen(const ptr<CodeGenInfo>& ci)
+      : CodeGenerator("codegen", CCtx().GetGlobalSymbolTable()), cgi(ci) {
     cu_name = "__choreo_" + OptionRegistry::GetInstance().GetInputName();
     cmp_dir = CreateUniquePath();
   }

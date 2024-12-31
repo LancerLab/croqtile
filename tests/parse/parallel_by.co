@@ -37,7 +37,7 @@ __co__ int parallel_by0() {
 // CHECK:  `- Name: parallel_by0
 // CHECK:  `- Return type: int
 // CHECK:  `- Parameters
-// CHECK:  `- Parallelization:  index symbol: p, bound [0, 6)
+// CHECK:  `- Parallelization:  index component: {p}, corresponding ubound: [6]
 // CHECK:   `- Var Decl (int): a = 100
 
 __co__ int parallel_by1() {
@@ -50,6 +50,60 @@ __co__ int parallel_by1() {
 // CHECK:  `- Name: parallel_by1
 // CHECK:  `- Return type: int
 // CHECK:  `- Parameters
-// CHECK:  `- Parallelization:  index symbol: p, bound [0, 128)
-// CHECK:   `- Parallelization:  index symbol: q, bound [0, 64)
-// CHECK:    `- Var Decl (int): b = 100
+// CHECK:  `- Parallelization:  index component: {p, q}, corresponding ubound: [128, 64]
+// CHECK:   `- Var Decl (int): b = 100
+
+__co__ int parallel_by2() {
+  parallel {p, q, r} by [6, 32, 64] {}
+}
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: parallel_by2
+// CHECK:  `- Return type: int
+// CHECK:  `- Parameters
+// CHECK:  `- Parallelization:  index component: {p, q, r}, corresponding ubound: [6, 32, 64]
+
+__co__ int parallel_by3() {
+  parallel bdim = {x, y, z} by [2, 4, 8] {}
+}
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: parallel_by3
+// CHECK:  `- Return type: int
+// CHECK:  `- Parameters
+// CHECK:  `- Parallelization:  index symbol: bdim, bound [0, 64)
+// CHECK:                       index component: {x, y, z}, corresponding ubound: [2, 4, 8]
+
+__co__ void bar2() {
+  parallel g by 2, b by 12 {
+    local f16[4] l;
+  }
+
+  parallel gdim = {xx, yy, zz} by [2, 6, 3],
+           bdim = {x, y} by [4, 5] {
+    local f16[4] l;
+  }
+
+  parallel g by 4,
+           b = {x, y, z} by [4, 3, 2] {
+    local f16[4] l;
+  }
+}
+
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: bar2
+// CHECK:  `- Return type: void
+// CHECK:  `- Parameters
+// CHECK:  `- Parallelization:  index symbol: g, bound [0, 2)
+// CHECK:   `- Parallelization:  index symbol: b, bound [0, 12)
+// CHECK:    `- Var Decl (f16 [ 4 ], local): l
+// CHECK:  `- Parallelization:  index symbol: gdim, bound [0, 36)
+// CHECK:                       index component: {xx, yy, zz}, corresponding ubound: [2, 6, 3]
+// CHECK:   `- Parallelization:  index symbol: bdim, bound [0, 20)
+// CHECK:                        index component: {x, y}, corresponding ubound: [4, 5]
+// CHECK:    `- Var Decl (f16 [ 4 ], local): l
+// CHECK:  `- Parallelization:  index symbol: g, bound [0, 4)
+// CHECK:   `- Parallelization:  index symbol: b, bound [0, 24)
+// CHECK:                        index component: {x, y, z}, corresponding ubound: [4, 3, 2]
+// CHECK:    `- Var Decl (f16 [ 4 ], local): l

@@ -12,6 +12,43 @@ struct FactorCheck : public VisitorWithSymTab {
 private:
   std::string cur_fname;
 
+  std::map<std::string, std::function<bool(size_t, size_t)>> op_map = {
+      {">", [](size_t l, size_t r) { return l > r; }},
+      {"<", [](size_t l, size_t r) { return l < r; }},
+      {"==", [](size_t l, size_t r) { return l == r; }},
+      {"!=", [](size_t l, size_t r) { return l != r; }},
+      {">=", [](size_t l, size_t r) { return l >= r; }},
+      {"<=", [](size_t l, size_t r) { return l <= r; }},
+  };
+
+  void CheckDimSize(const Shape& s, size_t idx, const std::string& op,
+                    size_t limit, const location& loc) {
+    assert(idx < s.Rank());
+    std::string message = "[FactorCheck] The " + Ordinal(idx + 1) + " dim " +
+                          ValueItemAsString(s.ValueAt(idx)) +
+                          " must satisfy: d " + op + " " +
+                          std::to_string(limit);
+
+    CheckValue(s.ValueAt(idx), op, limit, loc, message);
+  }
+
+  void CheckValue(const ValueItem& vi, const std::string& op, size_t limit,
+                  const location& loc, std::string message = "") {
+    if (message.empty())
+      message = "[FactorCheck] The value " + ValueItemAsString(vi) +
+                " must satisfy: s " + op + " " + std::to_string(limit);
+    if (auto vi_int = dyn_cast<int>(&vi); vi_int && op_map.count(op)) {
+      if (!op_map[op](*vi_int, limit)) {
+        Error(loc, message);
+        error_count++;
+      }
+    } else {
+      auto vi_str = ValueItemAsString(vi, true);
+      FCtx(cur_fname).AppendRtCheck(
+          {vi_str, op, std::to_string(limit) + "ULL", loc, message, {}});
+    }
+  }
+
 private:
   bool BeforeVisitImpl(AST::Node& n) override {
     TraceEachVisit(n, "(pre)");
@@ -26,36 +63,6 @@ private:
 
   void TraceEachVisit(AST::Node& n, std::string sup = "") {
     if (trace_visit) dbgs() << n.TypeNameString() << sup << "\n";
-  }
-
-  void CheckDimSize(const Shape& s, size_t idx, const std::string& op,
-                    size_t limit, const location& loc) {
-    assert(idx < s.Rank());
-    std::string message = "[FactorCheck] The " + Ordinal(idx + 1) + " dim " +
-                          ValueItemAsString(s.ValueAt(idx)) +
-                          " should satisfy: d " + op + " " +
-                          std::to_string(limit);
-
-    std::map<std::string, std::function<bool(size_t, size_t)>> op_map = {
-        {">", [](size_t l, size_t r) { return l > r; }},
-        {"<", [](size_t l, size_t r) { return l < r; }},
-        {"==", [](size_t l, size_t r) { return l == r; }},
-        {"!=", [](size_t l, size_t r) { return l != r; }},
-        {">=", [](size_t l, size_t r) { return l >= r; }},
-        {"<=", [](size_t l, size_t r) { return l <= r; }},
-    };
-
-    if (auto vi_int = dyn_cast<int>(&s.ValueAt(idx));
-        vi_int && op_map.count(op)) {
-      if (!op_map[op](*vi_int, limit)) {
-        Error(loc, message);
-        error_count++;
-      }
-    } else {
-      auto vi_str = ValueItemAsString(s.ValueAt(idx), true);
-      FCtx(cur_fname).AppendRtCheck(
-          {vi_str, std::to_string(limit) + "ULL", op, loc, message, {}});
-    }
   }
 
 public:
@@ -150,11 +157,6 @@ public:
   bool Visit(AST::DMA& n) override {
     TraceEachVisit(n);
 
-    if (CCtx().GetArch() != TargetArch::GCU20 &&
-        CCtx().GetArch() != TargetArch::GCU21)
-      return true;
-    // TODO: GCU3
-
     if (n.operation == ".any") return true;
 
     // http://docs.enflame.cn/sw/manuals/factor_user_guide/TopsFactor_User_Guide.html#dte
@@ -181,8 +183,8 @@ public:
         std::string bs = f_sty->ByteSizeExpression(true);
         FCtx(cur_fname).AppendRtCheck(
             {bs,
-             std::to_string(1ULL << 32) + "ULL",
              "<",
+             std::to_string(1ULL << 32) + "ULL",
              n.LOC(),
              "The size of data transferred by DMA cannot exceed 2^32",
              {}});
@@ -208,276 +210,454 @@ public:
         if (MemLevel(f_sto) < MemLevel(t_sto)) return true;
       return false;
     };
-
-    // linear copy
-    // omitted
-
-    // transpose
-    if (n.operation == ".transp" && IsLinearCopy()) {
+    auto RankLE5 = [&](const std::string& msg) {
       if (f_rank > 5) {
-        Error(n.LOC(), "[FactorCheck] The rank in dma.transp(not slice "
-                       "nor deslice) must be in range [1, 5]");
-        error_count++;
-      }
-      if (f_rank == 5) {
-        CheckDimSize(f_shape, 0, "<", 1 << 24, n.from->LOC());
-        for (size_t idx = 1; idx < f_rank; ++idx)
-          CheckDimSize(f_shape, idx, "<", 1 << 16, n.from->LOC());
-      } else {
-        for (size_t idx = 0; idx < f_rank; ++idx)
-          CheckDimSize(f_shape, idx, "<", 1 << 16, n.from->LOC());
-      }
-
-      if (SizeOf(t_sty->f_type) == 4) {
-        for (size_t idx = 0; idx < t_rank; ++idx) {
-          CheckDimSize(t_shape, idx, ">", 1, n.to->LOC());
-          CheckDimSize(t_shape, idx, "<", (1 << 16) - 32, n.to->LOC());
-        }
-      }
-
-      auto tc = cast<TransposeConfig>(n.config);
-      if (f_rank == 5 && tc->dim_values[0] != 0) {
         Error(n.LOC(),
-              "[FactorCheck] dma.transp(not slice nor deslice) does not "
-              "support 5-dimensional array (if dim is 5, layout[0] must be 0)");
+              "[FactorCheck] The rank in " + msg + " must be in range [1, 5]");
         error_count++;
       }
-    }
+    };
 
-    // pad
-    if (n.operation == ".pad" && IsLinearCopy()) {
-      if (f_rank > 5) {
-        Error(n.LOC(), "[FactorCheck] The rank in dma.pad should "
-                       "be in range [1, 5]");
-        error_count++;
-      }
-      if (f_rank == 5) {
-        CheckDimSize(f_shape, 0, "<", 1 << 24, n.from->LOC());
+    if (CCtx().GetArch() == TargetArch::GCU3) {
+      // linear copy
+      // omitted
+
+      // transpose
+      if (n.operation == ".transp" && IsLinearCopy()) {
+        RankLE5("dma.transp(not slice nor deslice)");
         for (size_t idx = 1; idx < f_rank; ++idx)
-          CheckDimSize(f_shape, idx, "<", 1 << 16, n.from->LOC());
-      } else {
-        for (size_t idx = 0; idx < f_rank; ++idx)
-          CheckDimSize(f_shape, idx, "<", 1 << 16, n.from->LOC());
+          CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
+        for (size_t idx = 1; idx < t_rank; ++idx)
+          CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
+        auto bpe = ValueItem((int)(SizeOf(f_sty->f_type)));
+        auto value = (f_shape.ValueAt(0) * bpe + 127) / 128;
+        CheckValue(value, "<", 1 << 24, n.from->LOC(),
+                   "[FactorCheck] CeilTo128Byte(src_dim0_size * bpe) < 2^24");
+        value = (t_shape.ValueAt(0) * bpe + 127) / 128;
+        CheckValue(value, "<", 1 << 24, n.to->LOC(),
+                   "[FactorCheck] CeilTo128Byte(dst_dim0_size * bpe) < 2^24");
+        for (size_t idx = 1; idx < t_rank; ++idx)
+          value = value * t_shape.ValueAt(idx);
+        CheckValue(value, "<", 1ULL << 32, n.to->LOC(),
+                   "[FactorCheck] CeilTo128Byte(bpe * dst dim0) * dim1 * dim2 "
+                   "* dim3 * dim4 < 4GB");
       }
 
-      // shape of n.to is the same as n.from's
-      // so the check of n.to is omitted
+      // pad
+      if (n.operation == ".pad" && IsLinearCopy()) {
+        RankLE5("dma.pad)");
+        auto pc = cast<PadConfig>(n.config);
+        assert(f_rank == pc->pad_low.size());
 
-      auto pc = cast<PadConfig>(n.config);
-      assert(f_rank == pc->pad_low.size());
-
-      for (auto v : pc->pad_low) {
-        if (v > (1 << 11)) {
-          Error(n.LOC(), "[FactorCheck] The value of padding_low in "
-                         "dma.pad must be in range [0, 2^11]");
-          error_count++;
+        for (auto v : pc->pad_low) {
+          if (v > (1 << 11)) {
+            Error(n.LOC(), "[FactorCheck] The value of padding_low in "
+                           "dma.pad must be in range [0, 2^11]");
+            error_count++;
+          }
         }
-      }
 
-      for (auto v : pc->pad_high) {
-        if (v > (1 << 11)) {
-          Error(n.LOC(), "[FactorCheck] The value of padding_high in "
-                         "dma.pad must be in range [0, 2^11]");
-          error_count++;
+        for (auto v : pc->pad_high) {
+          if (v > (1 << 11)) {
+            Error(n.LOC(), "[FactorCheck] The value of padding_high in "
+                           "dma.pad must be in range [0, 2^11]");
+            error_count++;
+          }
         }
-      }
-      // padding_mid
-      for (size_t idx = 0; idx < f_rank; ++idx) {
-        size_t v = pc->pad_mid[idx];
-        if (idx == f_rank - 1) {
-          if (v != 0) {
+        // padding_mid
+        for (size_t idx = 0; idx < f_rank; ++idx) {
+          size_t v = pc->pad_mid[idx];
+          if (idx == f_rank - 1) {
+            if (v != 0) {
+              Error(n.LOC(),
+                    "[FactorCheck] The value of padding_mid[rank-1] in dma.pad "
+                    "must be 0 (mid padding of dim[rank-1] is not supported by "
+                    "the hardware)");
+              error_count++;
+            }
+          } else if (v > (1 << 10)) {
+            Error(n.LOC(), "[FactorCheck] The value of padding_mid in "
+                           "dma.pad must be in range [0, 2^10]");
+            error_count++;
+          }
+        }
+        if (f_rank == 5) {
+          if (pc->pad_low[0] != 0) {
             Error(n.LOC(),
-                  "[FactorCheck] The value of padding_mid[rank-1] in dma.pad "
-                  "must be 0 (mid padding of dim[rank-1] is not supported by "
-                  "the hardware)");
+                  "[FactorCheck] dma.pad does not support 5-dimensional "
+                  "array (if dim is 5, pad_low[0] must be 0)");
             error_count++;
           }
-        } else if (v > (1 << 10)) {
-          Error(n.LOC(), "[FactorCheck] The value of padding_mid in "
-                         "dma.pad must be in range [0, 2^10]");
-          error_count++;
-        }
-      }
-      if (f_rank == 5) {
-        if (pc->pad_low[0] != 0) {
-          Error(n.LOC(), "[FactorCheck] dma.pad does not support 5-dimensional "
-                         "array (if dim is 5, pad_low[0] must be 0)");
-          error_count++;
-        }
-        if (pc->pad_high[0] != 0) {
-          Error(n.LOC(), "[FactorCheck] dma.pad does not support 5-dimensional "
-                         "array (if dim is 5, pad_high[0] must be 0)");
-          error_count++;
-        }
-        if (pc->pad_mid[0] != 0) {
-          Error(n.LOC(), "[FactorCheck] dma.pad does not support 5-dimensional "
-                         "array (if dim is 5, pad_mid[0] must be 0)");
-          error_count++;
-        }
-      }
-
-      if (pc->value.t != f_sty->f_type) {
-        Error(n.from->LOC(), "[FactorCheck] Data type of pad value is "
-                             "inconsistent with that of data in dma: " +
-                                 STR(pc->value.t) + " vs. " +
-                                 STR(f_sty->f_type));
-        error_count++;
-      }
-    }
-
-    // 根据factor文档 （均不考虑数据搬运方向：L1->L2, L2->L1, ...）
-    // linear copy 指的是整块数据搬运
-    // transpose 指的是对整块数据transp
-    // pad 是对 from 做 padding
-    // slice 是 大块 到 小块
-    // deslice 相反
-    // slice transpose 为 slice, then transp
-    // transpose deslice 为 transp, then deslice
-    // 目前 choreo dma 的 copy 操作,
-
-    // slice
-    if (n.operation == ".copy" && IsSlice()) {
-      if (f_rank > 5) {
-        Error(n.LOC(), "[FactorCheck] The rank in dma.copy(slice) must "
-                       "be in range [1, 5]");
-        error_count++;
-      }
-      for (size_t idx = 0; idx < f_rank; ++idx)
-        CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
-
-      for (size_t idx = 0; idx < t_rank; ++idx)
-        CheckDimSize(t_shape, idx, "<", 1 << 16, n.to->LOC());
-      if (f_rank == 5) {
-        auto first = f_ca->positions->ValueAt(0);
-        auto t = dyn_cast<BoundedITupleType>(first->GetType());
-        assert(t != nullptr);
-        if (isa<int>(&t->ubounds.ValueAt(0))) {
-          if (!IsValueItemEqual(1, t->ubounds.ValueAt(0))) {
-            Error(n.LOC(), "[FactorCheck] dma.copy(slice) does not "
-                           "support 5-dimensional "
-                           "array (if dim is 5, offsets[0] must be 0)");
+          if (pc->pad_high[0] != 0) {
+            Error(n.LOC(),
+                  "[FactorCheck] dma.pad does not support 5-dimensional "
+                  "array (if dim is 5, pad_high[0] must be 0)");
             error_count++;
           }
-        } else {
-          // TODO
-          // Is that the case?
+          if (pc->pad_mid[0] != 0) {
+            Error(n.LOC(),
+                  "[FactorCheck] dma.pad does not support 5-dimensional "
+                  "array (if dim is 5, pad_mid[0] must be 0)");
+            error_count++;
+          }
+        }
+
+        if (pc->value.t != f_sty->f_type) {
+          Error(n.from->LOC(), "[FactorCheck] Data type of pad value is "
+                               "inconsistent with that of data in dma: " +
+                                   STR(pc->value.t) + " vs. " +
+                                   STR(f_sty->f_type));
+          error_count++;
         }
       }
-    }
 
-    // deslice
-    if (n.operation == ".copy" && IsDeslice()) {
-      if (f_rank > 5) {
-        Error(n.LOC(), "[FactorCheck] The rank in dma.copy(deslice) must "
-                       "be in range [1, 5]");
-        error_count++;
+      // slice
+      if (n.operation == ".copy" && IsSlice()) {
+        RankLE5("dma.copy(slice)");
+        for (size_t idx = 0; idx < f_rank; ++idx)
+          CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
+        for (size_t idx = 0; idx < t_rank; ++idx)
+          CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
+        // TODO: offset limitation: [0, 2^24)
+        if (f_rank == 5) {
+          auto first = f_ca->positions->ValueAt(0);
+          auto t = dyn_cast<BoundedITupleType>(first->GetType());
+          assert(t != nullptr);
+          if (isa<int>(&t->ubounds.ValueAt(0))) {
+            if (!IsValueItemEqual(1, t->ubounds.ValueAt(0))) {
+              Error(n.LOC(), "[FactorCheck] dma.copy(slice) does not "
+                             "support 5-dimensional "
+                             "array (if dim is 5, offsets[0] must be 0)");
+              error_count++;
+            }
+          } else {
+            choreo_unreachable("unexpected situation");
+            // TODO
+            // Is that the case?
+          }
+        }
+        // TODO: check for auto padding
       }
-      for (size_t idx = 0; idx < f_rank; ++idx)
-        CheckDimSize(f_shape, idx, "<", 1 << 16, n.from->LOC());
 
-      for (size_t idx = 0; idx < t_rank; ++idx)
-        CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
-    }
-
-    // slice transpose
-    if (n.operation == ".transp" && IsSlice()) {
-      if (f_rank > 5) {
-        Error(n.LOC(), "[FactorCheck] The rank in dma.transp(slice then "
-                       "transpose) must be in range [1, 5]");
-        error_count++;
+      // deslice
+      if (n.operation == ".copy" && IsDeslice()) {
+        RankLE5("dma.copy(deslice)");
+        for (size_t idx = 0; idx < f_rank; ++idx)
+          CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
+        for (size_t idx = 0; idx < t_rank; ++idx)
+          CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
+        // TODO: offset limitation: [0, 2^24)
+        if (t_rank == 5) {
+          auto first = t_ca->positions->ValueAt(4);
+          auto t = dyn_cast<BoundedITupleType>(first->GetType());
+          assert(t != nullptr);
+          if (isa<int>(&t->ubounds.ValueAt(0))) {
+            if (!IsValueItemEqual(1, t->ubounds.ValueAt(0))) {
+              Error(n.LOC(), "[FactorCheck] dma.copy(deslice) does not "
+                             "support 5-dimensional "
+                             "array (if dim is 5, offsets[0] must be 0)");
+              error_count++;
+            }
+          } else {
+            choreo_unreachable("unexpected situation");
+            // TODO
+            // Is that the case?
+          }
+        }
       }
-      if (f_rank == 5) {
-        CheckDimSize(f_shape, 0, "<", 1 << 24, n.from->LOC());
+
+      // slice transpose
+      if (n.operation == ".transp" && IsSlice()) {
+        RankLE5("dma.transp(slice then transpose)");
         for (size_t idx = 1; idx < f_rank; ++idx)
-          CheckDimSize(f_shape, idx, "<", 1 << 16, n.from->LOC());
-      } else {
+          CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
+        for (size_t idx = 1; idx < t_rank; ++idx)
+          CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
+        auto bpe = ValueItem((int)(SizeOf(f_sty->f_type)));
+        auto value = (f_shape.ValueAt(0) * bpe + 127) / 128;
+        CheckValue(value, "<", 1 << 24, n.from->LOC(),
+                   "[FactorCheck] CeilTo128Byte(src_dim0_size * bpe) < 2^24");
+        value = (t_shape.ValueAt(0) * bpe + 127) / 128;
+        CheckValue(value, "<", 1 << 24, n.to->LOC(),
+                   "[FactorCheck] CeilTo128Byte(dst_dim0_size * bpe) < 2^24");
+        for (size_t idx = 1; idx < t_rank; ++idx)
+          value = value * t_shape.ValueAt(idx);
+        CheckValue(value, "<", 1ULL << 32, n.to->LOC(),
+                   "[FactorCheck] CeilTo128Byte(bpe * dst dim0) * dim1 * dim2 "
+                   "* dim3 * dim4 < 4GB");
+      }
+
+      // transpose deslice
+      if (n.operation == ".transp" && IsDeslice()) {
+        RankLE5("dma.transp(transpose then deslice)");
+        for (size_t idx = 1; idx < f_rank; ++idx)
+          CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
+        for (size_t idx = 1; idx < t_rank; ++idx)
+          CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
+        auto bpe = ValueItem((int)(SizeOf(f_sty->f_type)));
+        auto value = (f_shape.ValueAt(0) * bpe + 127) / 128;
+        CheckValue(value, "<", 1 << 24, n.from->LOC(),
+                   "[FactorCheck] CeilTo128Byte(src_dim0_size * bpe) < 2^24");
+        value = (t_shape.ValueAt(0) * bpe + 127) / 128;
+        CheckValue(value, "<", 1 << 24, n.to->LOC(),
+                   "[FactorCheck] CeilTo128Byte(dst_dim0_size * bpe) < 2^24");
+        for (size_t idx = 1; idx < t_rank; ++idx)
+          value = value * t_shape.ValueAt(idx);
+        CheckValue(value, "<", 1ULL << 32, n.to->LOC(),
+                   "[FactorCheck] CeilTo128Byte(bpe * dst dim0) * dim1 * dim2 "
+                   "* dim3 * dim4 < 4GB");
+      }
+
+      return true;
+    }
+
+    if (CCtx().GetArch() == TargetArch::GCU20 ||
+        CCtx().GetArch() == TargetArch::GCU21) {
+      // linear copy
+      // omitted
+
+      // transpose
+      if (n.operation == ".transp" && IsLinearCopy()) {
+        RankLE5("dma.transp(not slice nor deslice)");
+        if (f_rank == 5) {
+          CheckDimSize(f_shape, 0, "<", 1 << 24, n.from->LOC());
+          for (size_t idx = 1; idx < f_rank; ++idx)
+            CheckDimSize(f_shape, idx, "<", 1 << 16, n.from->LOC());
+        } else {
+          for (size_t idx = 0; idx < f_rank; ++idx)
+            CheckDimSize(f_shape, idx, "<", 1 << 16, n.from->LOC());
+        }
+
+        if (SizeOf(t_sty->f_type) == 4) {
+          for (size_t idx = 0; idx < t_rank; ++idx) {
+            CheckDimSize(t_shape, idx, ">", 1, n.to->LOC());
+            CheckDimSize(t_shape, idx, "<", (1 << 16) - 32, n.to->LOC());
+          }
+        }
+
+        auto tc = cast<TransposeConfig>(n.config);
+        if (f_rank == 5 && tc->dim_values[0] != 0) {
+          Error(n.LOC(),
+                "[FactorCheck] dma.transp(not slice nor deslice) does not "
+                "support 5-dimensional array (if dim is 5, layout[0] must be "
+                "0)");
+          error_count++;
+        }
+      }
+
+      // pad
+      if (n.operation == ".pad" && IsLinearCopy()) {
+        RankLE5("dma.pad");
+        if (f_rank == 5) {
+          CheckDimSize(f_shape, 0, "<", 1 << 24, n.from->LOC());
+          for (size_t idx = 1; idx < f_rank; ++idx)
+            CheckDimSize(f_shape, idx, "<", 1 << 16, n.from->LOC());
+        } else {
+          for (size_t idx = 0; idx < f_rank; ++idx)
+            CheckDimSize(f_shape, idx, "<", 1 << 16, n.from->LOC());
+        }
+
+        // shape of n.to is the same as n.from's
+        // so the check of n.to is omitted
+
+        auto pc = cast<PadConfig>(n.config);
+        assert(f_rank == pc->pad_low.size());
+
+        for (auto v : pc->pad_low) {
+          if (v > (1 << 11)) {
+            Error(n.LOC(), "[FactorCheck] The value of padding_low in "
+                           "dma.pad must be in range [0, 2^11]");
+            error_count++;
+          }
+        }
+
+        for (auto v : pc->pad_high) {
+          if (v > (1 << 11)) {
+            Error(n.LOC(), "[FactorCheck] The value of padding_high in "
+                           "dma.pad must be in range [0, 2^11]");
+            error_count++;
+          }
+        }
+        // padding_mid
+        for (size_t idx = 0; idx < f_rank; ++idx) {
+          size_t v = pc->pad_mid[idx];
+          if (idx == f_rank - 1) {
+            if (v != 0) {
+              Error(n.LOC(),
+                    "[FactorCheck] The value of padding_mid[rank-1] in dma.pad "
+                    "must be 0 (mid padding of dim[rank-1] is not supported by "
+                    "the hardware)");
+              error_count++;
+            }
+          } else if (v > (1 << 10)) {
+            Error(n.LOC(), "[FactorCheck] The value of padding_mid in "
+                           "dma.pad must be in range [0, 2^10]");
+            error_count++;
+          }
+        }
+        if (f_rank == 5) {
+          if (pc->pad_low[0] != 0) {
+            Error(n.LOC(),
+                  "[FactorCheck] dma.pad does not support 5-dimensional "
+                  "array (if dim is 5, pad_low[0] must be 0)");
+            error_count++;
+          }
+          if (pc->pad_high[0] != 0) {
+            Error(n.LOC(),
+                  "[FactorCheck] dma.pad does not support 5-dimensional "
+                  "array (if dim is 5, pad_high[0] must be 0)");
+            error_count++;
+          }
+          if (pc->pad_mid[0] != 0) {
+            Error(n.LOC(),
+                  "[FactorCheck] dma.pad does not support 5-dimensional "
+                  "array (if dim is 5, pad_mid[0] must be 0)");
+            error_count++;
+          }
+        }
+
+        if (pc->value.t != f_sty->f_type) {
+          Error(n.from->LOC(), "[FactorCheck] Data type of pad value is "
+                               "inconsistent with that of data in dma: " +
+                                   STR(pc->value.t) + " vs. " +
+                                   STR(f_sty->f_type));
+          error_count++;
+        }
+      }
+
+      // slice
+      if (n.operation == ".copy" && IsSlice()) {
+        RankLE5("dma.copy(slice)");
+        for (size_t idx = 0; idx < f_rank; ++idx)
+          CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
+
+        for (size_t idx = 0; idx < t_rank; ++idx)
+          CheckDimSize(t_shape, idx, "<", 1 << 16, n.to->LOC());
+        if (f_rank == 5) {
+          auto first = f_ca->positions->ValueAt(0);
+          auto t = dyn_cast<BoundedITupleType>(first->GetType());
+          assert(t != nullptr);
+          if (isa<int>(&t->ubounds.ValueAt(0))) {
+            if (!IsValueItemEqual(1, t->ubounds.ValueAt(0))) {
+              Error(n.LOC(), "[FactorCheck] dma.copy(slice) does not "
+                             "support 5-dimensional "
+                             "array (if dim is 5, offsets[0] must be 0)");
+              error_count++;
+            }
+          } else {
+            choreo_unreachable("unexpected situation");
+            // TODO
+            // Is that the case?
+          }
+        }
+      }
+
+      // deslice
+      if (n.operation == ".copy" && IsDeslice()) {
+        RankLE5("dma.copy(deslice)");
         for (size_t idx = 0; idx < f_rank; ++idx)
           CheckDimSize(f_shape, idx, "<", 1 << 16, n.from->LOC());
+
+        for (size_t idx = 0; idx < t_rank; ++idx)
+          CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
       }
 
-      if (SizeOf(t_sty->f_type) == 4) {
-        for (size_t idx = 0; idx < t_rank; ++idx) {
-          CheckDimSize(t_shape, idx, ">", 1, n.to->LOC());
-          CheckDimSize(t_shape, idx, "<", (1 << 16) - 32, n.to->LOC());
-        }
-      }
-
-      if (f_rank == 5) {
-        auto first = f_ca->positions->ValueAt(0);
-        auto t = dyn_cast<BoundedITupleType>(first->GetType());
-        assert(t != nullptr);
-        if (isa<int>(&t->ubounds.ValueAt(0))) {
-          if (!IsValueItemEqual(1, t->ubounds.ValueAt(0))) {
-            Error(n.LOC(), "[FactorCheck] dma.transp(slice then "
-                           "transpose) does not support 5-dimensional "
-                           "array (if dim is 5, offsets[0] must be 0)");
-            error_count++;
-          }
+      // slice transpose
+      if (n.operation == ".transp" && IsSlice()) {
+        RankLE5("dma.transp(slice then transpose)");
+        if (f_rank == 5) {
+          CheckDimSize(f_shape, 0, "<", 1 << 24, n.from->LOC());
+          for (size_t idx = 1; idx < f_rank; ++idx)
+            CheckDimSize(f_shape, idx, "<", 1 << 16, n.from->LOC());
         } else {
-          // TODO
-          // Is that the case?
+          for (size_t idx = 0; idx < f_rank; ++idx)
+            CheckDimSize(f_shape, idx, "<", 1 << 16, n.from->LOC());
+        }
+
+        if (SizeOf(t_sty->f_type) == 4) {
+          for (size_t idx = 0; idx < t_rank; ++idx) {
+            CheckDimSize(t_shape, idx, ">", 1, n.to->LOC());
+            CheckDimSize(t_shape, idx, "<", (1 << 16) - 32, n.to->LOC());
+          }
+        }
+
+        if (f_rank == 5) {
+          auto first = f_ca->positions->ValueAt(0);
+          auto t = dyn_cast<BoundedITupleType>(first->GetType());
+          assert(t != nullptr);
+          if (isa<int>(&t->ubounds.ValueAt(0))) {
+            if (!IsValueItemEqual(1, t->ubounds.ValueAt(0))) {
+              Error(n.LOC(), "[FactorCheck] dma.transp(slice then "
+                             "transpose) does not support 5-dimensional "
+                             "array (if dim is 5, offsets[0] must be 0)");
+              error_count++;
+            }
+          } else {
+            // TODO
+            // Is that the case?
+          }
+        }
+
+        auto tc = cast<TransposeConfig>(n.config);
+        if (f_rank == 5 && tc->dim_values[0] != 0) {
+          Error(n.LOC(), "[FactorCheck] dma.transp(slice then transpose) "
+                         "does not support 5-dimensional "
+                         "array (if dim is 5, layout[0] must be 0)");
+          error_count++;
         }
       }
 
-      auto tc = cast<TransposeConfig>(n.config);
-      if (f_rank == 5 && tc->dim_values[0] != 0) {
-        Error(n.LOC(), "[FactorCheck] dma.transp(slice then transpose) "
-                       "does not support 5-dimensional "
-                       "array (if dim is 5, layout[0] must be 0)");
-        error_count++;
+      // transpose deslice
+      if (n.operation == ".transp" && IsDeslice()) {
+        RankLE5("dma.transp(transpose then deslice)");
+        if (f_rank == 5) {
+          CheckDimSize(f_shape, 0, "<", 1 << 24, n.from->LOC());
+          for (size_t idx = 1; idx < f_rank; ++idx)
+            CheckDimSize(f_shape, idx, "<", 1 << 16, n.from->LOC());
+        } else {
+          for (size_t idx = 0; idx < f_rank; ++idx)
+            CheckDimSize(f_shape, idx, "<", 1 << 16, n.from->LOC());
+        }
+
+        if (SizeOf(t_sty->f_type) == 4) {
+          for (size_t idx = 0; idx < t_rank; ++idx) {
+            CheckDimSize(t_shape, idx, ">", 1, n.to->LOC());
+            CheckDimSize(t_shape, idx, "<", (1 << 16) - 32, n.to->LOC());
+          }
+        }
+
+        if (t_rank == 5) {
+          auto first = t_ca->positions->ValueAt(0);
+          auto t = dyn_cast<BoundedITupleType>(first->GetType());
+          assert(t != nullptr);
+          if (isa<int>(&t->ubounds.ValueAt(0))) {
+            if (!IsValueItemEqual(1, t->ubounds.ValueAt(0))) {
+              Error(n.LOC(), "[FactorCheck] dma.transp(transpose then "
+                             "deslice) does not support 5-dimensional "
+                             "array (if dim is 5, offsets[0] must be 0)");
+              error_count++;
+            }
+          } else {
+            // TODO
+            // Is that the case?
+          }
+        }
+
+        auto tc = cast<TransposeConfig>(n.config);
+        if (t_rank == 5 && tc->dim_values[0] != 0) {
+          Error(n.LOC(), "[FactorCheck] dma.transp(transpose then deslice) "
+                         "does not support 5-dimensional "
+                         "array (if dim is 5, layout[0] must be 0)");
+          error_count++;
+        }
       }
+      return true;
     }
 
-    // transpose deslice
-    if (n.operation == ".transp" && IsDeslice()) {
-      if (f_rank > 5) {
-        Error(n.LOC(), "[FactorCheck] The rank in dma.transp(transpose "
-                       "then deslice) must be in range [1, 5]");
-        error_count++;
-      }
-      if (f_rank == 5) {
-        CheckDimSize(f_shape, 0, "<", 1 << 24, n.from->LOC());
-        for (size_t idx = 1; idx < f_rank; ++idx)
-          CheckDimSize(f_shape, idx, "<", 1 << 16, n.from->LOC());
-      } else {
-        for (size_t idx = 0; idx < f_rank; ++idx)
-          CheckDimSize(f_shape, idx, "<", 1 << 16, n.from->LOC());
-      }
+    choreo_unreachable("Unsupported target architecture: " +
+                       STR(CCtx().GetArch()));
 
-      if (SizeOf(t_sty->f_type) == 4) {
-        for (size_t idx = 0; idx < t_rank; ++idx) {
-          CheckDimSize(t_shape, idx, ">", 1, n.to->LOC());
-          CheckDimSize(t_shape, idx, "<", (1 << 16) - 32, n.to->LOC());
-        }
-      }
-
-      if (t_rank == 5) {
-        auto first = t_ca->positions->ValueAt(0);
-        auto t = dyn_cast<BoundedITupleType>(first->GetType());
-        assert(t != nullptr);
-        if (isa<int>(&t->ubounds.ValueAt(0))) {
-          if (!IsValueItemEqual(1, t->ubounds.ValueAt(0))) {
-            Error(n.LOC(), "[FactorCheck] dma.transp(transpose then "
-                           "deslice) does not support 5-dimensional "
-                           "array (if dim is 5, offsets[0] must be 0)");
-            error_count++;
-          }
-        } else {
-          // TODO
-          // Is that the case?
-        }
-      }
-
-      auto tc = cast<TransposeConfig>(n.config);
-      if (t_rank == 5 && tc->dim_values[0] != 0) {
-        Error(n.LOC(), "[FactorCheck] dma.transp(transpose then deslice) "
-                       "does not support 5-dimensional "
-                       "array (if dim is 5, layout[0] must be 0)");
-        error_count++;
-      }
-    }
-
-    return true;
+    return false;
   }
   bool Visit(AST::ChunkAt& n) override {
     TraceEachVisit(n);

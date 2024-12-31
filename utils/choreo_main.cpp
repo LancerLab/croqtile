@@ -324,7 +324,7 @@ int main(int argc, char* argv[]) {
       return mem_usage_checker.Status();
 
     Choreo::Factor::FactorCodeGen codegen(
-        mem_usage_checker.GetRtMemUsageInfo(), cgp.GetASTInfo());
+        cgp.GetASTInfo());
     if (!codegen.RunOnProgram(root)) return codegen.Status();
     break;
   }
@@ -350,8 +350,7 @@ int main(int argc, char* argv[]) {
     if (!muc.RunOnProgram(root))
       return muc.Status();
 
-    Choreo::Topscc::TopsccCodeGen codegen(
-        muc.GetRtMemUsageInfo(), cgp.GetASTInfo());
+    Choreo::Topscc::TopsccCodeGen codegen(cgp.GetASTInfo());
     if (!codegen.RunOnProgram(root)) return codegen.Status();
     break;
   }

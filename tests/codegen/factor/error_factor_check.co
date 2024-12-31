@@ -12,12 +12,12 @@ __co__ auto foo0(f32 [2,2,3,4,5,6] i, u8 [1024*1024*16,2,2,2,2] i1, f32 [1,1024*
   return o;
 }
 // CHECK: error: [FactorCheck] The rank in dma.transp(not slice nor deslice) must be in range [1, 5]
-// CHECK: error: [FactorCheck] The 1st dim 16777216 should satisfy: d < 16777216
-// CHECK: error: [FactorCheck] The 1st dim 16777216 should satisfy: d < 16777216
+// CHECK: error: [FactorCheck] The 1st dim 16777216 must satisfy: d < 16777216
+// CHECK: error: [FactorCheck] The 1st dim 16777216 must satisfy: d < 16777216
 // CHECK: error: [FactorCheck] dma.transp(not slice nor deslice) does not support 5-dimensional array (if dim is 5, layout[0] must be 0)
-// CHECK: error: [FactorCheck] The 2nd dim 65536 should satisfy: d < 65536
-// CHECK: error: [FactorCheck] The 1st dim 65536 should satisfy: d < 65504
-// CHECK: error: [FactorCheck] The 2nd dim 1 should satisfy: d > 1
+// CHECK: error: [FactorCheck] The 2nd dim 65536 must satisfy: d < 65536
+// CHECK: error: [FactorCheck] The 1st dim 65536 must satisfy: d < 65504
+// CHECK: error: [FactorCheck] The 2nd dim 1 must satisfy: d > 1
 
 // pad
 __co__ auto foo1(s32 [2,2,3,4,5,6] i, s32 [10] i1, s32 [1,1024*64] i2, s32[1024, 1024] i3, s32[1,1,1,1,1] i4) {
@@ -33,9 +33,9 @@ __co__ auto foo1(s32 [2,2,3,4,5,6] i, s32 [10] i1, s32 [1,1024*64] i2, s32[1024,
   }
   return o;
 }
-// CHECK: error: [FactorCheck] The rank in dma.pad should be in range [1, 5]
+// CHECK: error: [FactorCheck] The rank in dma.pad must be in range [1, 5]
 // CHECK: error: [FactorCheck] The value of padding_mid[rank-1] in dma.pad must be 0 (mid padding of dim[rank-1] is not supported by the hardware)
-// CHECK: error: [FactorCheck] The 2nd dim 65536 should satisfy: d < 65536
+// CHECK: error: [FactorCheck] The 2nd dim 65536 must satisfy: d < 65536
 // CHECK: error: [FactorCheck] The value of padding_high in dma.pad must be in range [0, 2^11]
 // CHECK: error: [FactorCheck] The value of padding_low in dma.pad must be in range [0, 2^11]
 // CHECK: error: [FactorCheck] The value of padding_mid in dma.pad must be in range [0, 2^10]
@@ -58,8 +58,8 @@ __co__ auto foo2(s32 [2,2,3,4,5,6] i, s8 [1024*1024*24] i1, s32 [2,3,4,5,6] i2) 
   return o;
 }
 // CHECK: error: [FactorCheck] The rank in dma.copy(slice) must be in range [1, 5]
-// CHECK: error: [FactorCheck] The 1st dim 25165824 should satisfy: d < 16777216
-// CHECK: error: [FactorCheck] The 1st dim 12582912 should satisfy: d < 65536
+// CHECK: error: [FactorCheck] The 1st dim 25165824 must satisfy: d < 16777216
+// CHECK: error: [FactorCheck] The 1st dim 12582912 must satisfy: d < 65536
 // CHECK: error: [FactorCheck] dma.copy(slice) does not support 5-dimensional array (if dim is 5, offsets[0] must be 0)
 
 // deslice
@@ -82,8 +82,8 @@ __co__ auto foo3() {
   return o;
 }
 // CHECK: error: [FactorCheck] The rank in dma.copy(deslice) must be in range [1, 5]
-// CHECK: error: [FactorCheck] The 1st dim 12582912 should satisfy: d < 65536
-// CHECK: error: [FactorCheck] The 1st dim 25165824 should satisfy: d < 16777216
+// CHECK: error: [FactorCheck] The 1st dim 12582912 must satisfy: d < 65536
+// CHECK: error: [FactorCheck] The 1st dim 25165824 must satisfy: d < 16777216
 
 // slice transpose
 __co__ auto foo4(s32 [4,2,3,4,5,2] i, s32 [2*(1024*64-32), 2] i1, s32 [4,3,4,5,6] i2) {
@@ -100,9 +100,9 @@ __co__ auto foo4(s32 [4,2,3,4,5,2] i, s32 [2*(1024*64-32), 2] i1, s32 [4,3,4,5,6
   return o;
 }
 // CHECK: error: [FactorCheck] The rank in dma.transp(slice then transpose) must be in range [1, 5]
-// CHECK: error: [FactorCheck] The 6th dim 1 should satisfy: d > 1
-// CHECK: error: [FactorCheck] The 1st dim 131008 should satisfy: d < 65536
-// CHECK: error: [FactorCheck] The 2nd dim 65504 should satisfy: d < 65504
+// CHECK: error: [FactorCheck] The 6th dim 1 must satisfy: d > 1
+// CHECK: error: [FactorCheck] The 1st dim 131008 must satisfy: d < 65536
+// CHECK: error: [FactorCheck] The 2nd dim 65504 must satisfy: d < 65504
 // CHECK: error: [FactorCheck] dma.transp(slice then transpose) does not support 5-dimensional array (if dim is 5, offsets[0] must be 0)
 // CHECK: error: [FactorCheck] dma.transp(slice then transpose) does not support 5-dimensional array (if dim is 5, layout[0] must be 0)
 
@@ -126,8 +126,8 @@ __co__ auto foo5() {
   return o;
 }
 // CHECK: error: [FactorCheck] The rank in dma.transp(transpose then deslice) must be in range [1, 5]
-// CHECK: error: [FactorCheck] The 1st dim 65504 should satisfy: d < 65504
-// CHECK: error: [FactorCheck] The 2nd dim 1 should satisfy: d > 1
+// CHECK: error: [FactorCheck] The 1st dim 65504 must satisfy: d < 65504
+// CHECK: error: [FactorCheck] The 2nd dim 1 must satisfy: d > 1
 // CHECK: error: [FactorCheck] dma.transp(transpose then deslice) does not support 5-dimensional array (if dim is 5, offsets[0] must be 0)
 // CHECK: error: [FactorCheck] dma.transp(transpose then deslice) does not support 5-dimensional array (if dim is 5, layout[0] must be 0)
 

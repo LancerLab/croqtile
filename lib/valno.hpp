@@ -843,20 +843,40 @@ public:
     return true;
   };
 
-  bool Visit(AST::ParallelBy& n) {
+  bool Visit(AST::ParallelBy& n) override {
     TraceEachVisit(n);
 
     if (cannot_proceed) return true;
 
-    std::string bound = "const_" + std::to_string(n.bound);
-    int valno = vn.GetOrInsertValueNumberFromSignature(bound);
-    std::string iv_name =
-        SSTab().ScopedName("@" + n.biv); // upper-bound of bounded variable
-    vn.AssociateSignatureWithValueNumber(iv_name, valno);
-    Shape s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(valno));
-    n.SetType(MakeBoundedITupleType(s, "pv"));
-    SSTab().DefineSymbol("@" + n.biv, MakeMDSpanType(s));
-    SSTab().DefineSymbol(n.biv, n.GetType());
+    if (n.HasBIV()) {
+      std::string bound = "const_" + std::to_string(n.bound);
+      int valno = vn.GetOrInsertValueNumberFromSignature(bound);
+      std::string iv_name =
+          SSTab().ScopedName("@" + n.biv); // upper-bound of bounded variable
+      vn.AssociateSignatureWithValueNumber(iv_name, valno);
+      Shape s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(valno));
+      n.SetType(MakeBoundedITupleType(s, "pv"));
+      SSTab().DefineSymbol("@" + n.biv, MakeMDSpanType(s));
+      SSTab().DefineSymbol(n.biv, n.GetType());
+    } else {
+      Shape s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
+      n.SetType(MakeBoundedITupleType(s, "pv"));
+    }
+    std::map<size_t, std::string> idx2dim;
+    idx2dim[0] = "x";
+    idx2dim[1] = "y";
+    idx2dim[2] = "z";
+    for (size_t i = 0; i < n.dims; ++i) {
+      const auto& [sym, b] = n.GetIV(i);
+      std::string bound = "const_" + std::to_string(b->value);
+      int valno = vn.GetOrInsertValueNumberFromSignature(bound);
+      std::string iv_name = SSTab().ScopedName("@" + sym->name);
+      vn.AssociateSignatureWithValueNumber(iv_name, valno);
+      Shape s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(valno));
+      sym->SetType(MakeBoundedITupleType(s, "p_component:" + idx2dim[i]));
+      SSTab().DefineSymbol("@" + sym->name, MakeMDSpanType(s));
+      SSTab().DefineSymbol(sym->name, sym->GetType());
+    }
     return true;
   };
 

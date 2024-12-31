@@ -17,7 +17,7 @@ __co__ void foo() {
 }
 
 // CHECK: extern "C" void fish_template_wrapper(int* arg0) {
-// CHECK:   fish<(23)>(arg0);
+// CHECK:   fish<23>(arg0);
 // CHECK: }
 
 // CHECK:     call_("bar", {Value(3)});

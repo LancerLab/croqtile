@@ -119,6 +119,21 @@ bool SemaChecker::Visit(AST::WhereBind& n) {
 }
 bool SemaChecker::Visit(AST::WithIn& n) {
   TraceEachVisit(n);
+  if (auto shape = GetShape(NodeType(*n.in)); shape.IsDynamic()) {
+    std::string mds = STR(shape);
+    auto mds_vals = SplitStringByDelimiter(mds.substr(1, mds.size() - 2), ", ");
+    int idx = 1;
+    for (auto& mds_val : mds_vals) {
+      std::string lhs, op, rhs, message;
+      lhs = mds_val;
+      op = "!=";
+      rhs = "0";
+      message = "zero is detected for the " + Ordinal(idx) +
+                " dim of the mdspan inside the with-in statement",
+      FCtx(fname).AppendRtCheck({lhs, op, rhs, n.LOC(), message, {}});
+      ++idx;
+    }
+  }
   return true;
 }
 bool SemaChecker::Visit(AST::WithBlock& n) {

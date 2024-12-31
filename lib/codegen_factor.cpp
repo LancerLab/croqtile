@@ -384,7 +384,9 @@ bool FactorCodeGen::Visit(AST::Assignment& node) {
     fs << ");\n";
   } else if (isa<BoundedType>(NodeType(node)) ||
              isa<SpannedType>(NodeType(node)) ||
-             isa<FutureType>(NodeType(node))) {
+             isa<FutureType>(NodeType(node)) ||
+             isa<IntegerType>(NodeType(node)) ||
+             isa<ITupleType>(NodeType(node))) {
     fs << indent << "auto " << node.name << " = " << ExprSTR(node.value)
        << ";\n";
   }
@@ -409,56 +411,79 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
     return true;
   }
 
-  fs << this->indent << "Dim3 grid_dim("
-     << cgi->GetFunctionLaunch(fname).grid_dim_x << ");\n";
-  fs << this->indent << "Dim3 block_dim("
-     << cgi->GetFunctionLaunch(fname).block_dim_x << ");\n";
+  assert(by.note.length() >= 3);
+  auto cur_pb_idx_str = SplitStringByDelimiter(by.note, ", ")[0];
 
-  // [Factor host] LaunchKernel statement:
-  // symbols which are passed to the device are listed as launch parameters
-  {
-    std::ostringstream launch;
-    launch << this->indent << "auto ts = launch_kernel_(\"" << factor_fname
-           << "_parallel\", grid_dim, block_dim, args.back(), {";
-    size_t index = 0;
-    for (auto& item : GetFactorDeviceInParams()) {
-      assert(item.d_index == (int)index);
-      launch << ((index++ > 0) ? ", " : "");
-      if (!item.h_name.empty())
-        launch << item.h_name;
-      else
-        launch << item.device_name;
+  // generate all launch configs when entered the first Parallel node
+  if (cur_pb_idx_str == "0") {
+    int pb_idx = 0;
+    for (auto& lc : cgi->GetFactorFunctionLaunches(fname)) {
+      auto pb_idx_str = pb_idx == 0 ? "" : "_" + std::to_string(pb_idx);
+      fs << this->indent << "Dim3 grid_dim" << pb_idx_str << "("
+         << lc.grid_dim_x;
+      if (lc.grid_dim_y > 1) fs << ", " << lc.grid_dim_y;
+      if (lc.grid_dim_z > 1) fs << ", " << lc.grid_dim_z;
+      fs << ");\n";
+      fs << this->indent << "Dim3 block_dim" << pb_idx_str << "("
+         << lc.block_dim_x;
+      if (lc.block_dim_y > 1) fs << ", " << lc.block_dim_y;
+      if (lc.block_dim_z > 1) fs << ", " << lc.block_dim_z;
+      fs << ");\n";
+
+      // [Factor host] LaunchKernel statement:
+      // symbols which are passed to the device are listed as launch parameters
+      {
+        std::ostringstream launch;
+        launch << this->indent << "auto ts" << pb_idx_str
+               << " = launch_kernel_(\"" << factor_fname
+               << "_parallel" + pb_idx_str + "\", grid_dim" << pb_idx_str
+               << ", block_dim" << pb_idx_str << ", args.back(), {";
+        size_t index = 0;
+        for (auto& item : GetFactorDeviceInParams()) {
+          assert(item.d_index == (int)index);
+          launch << ((index++ > 0) ? ", " : "");
+          if (!item.h_name.empty())
+            launch << item.h_name;
+          else
+            launch << item.device_name;
+        }
+        launch << "}, {"
+               << ((void_return) ? ""
+                                 : UnScopedName(cgi->GetReturnSymbol(fname)))
+               << "});\n";
+
+        if (debug_visit)
+          VST_DEBUG(dbgs() << "[Factor Host] Launch Kernel:\n" << launch.str());
+        fs << launch.str();
+      }
+
+      ++pb_idx;
     }
-    launch << "}, {"
-           << ((void_return) ? "" : UnScopedName(cgi->GetReturnSymbol(fname)))
-           << "});\n";
 
-    if (debug_visit)
-      VST_DEBUG(dbgs() << "[Factor Host] Launch Kernel:\n" << launch.str());
-    fs << launch.str();
+    // [Factor-host] Return statement
+    {
+      std::ostringstream ret;
+      // note: factor code always requires a return statement
+      ret << this->indent << "return std::vector<Value>{"
+          << ((!void_return) ? UnScopedName(cgi->GetReturnSymbol(fname)) : "")
+          << "};\n";
+      if (debug_visit)
+        VST_DEBUG(dbgs() << "[Factor Host] Return:\n" << ret.str());
+      fs << ret.str();
+    }
+
+    this->DecrementIndent();
+    fs << this->indent << "}, true); // end of choreo-factor host program\n\n";
+    factor_host_unbraced = false;
   }
-
-  // [Factor-host] Return statement
-  {
-    std::ostringstream ret;
-    // note: factor code always requires a return statement
-    ret << this->indent << "return std::vector<Value>{"
-        << ((!void_return) ? UnScopedName(cgi->GetReturnSymbol(fname)) : "")
-        << "};\n";
-    if (debug_visit)
-      VST_DEBUG(dbgs() << "[Factor Host] Return:\n" << ret.str());
-    fs << ret.str();
-  }
-
-  this->DecrementIndent();
-  fs << this->indent << "}, true); // end of choreo-factor host program\n\n";
-  factor_host_unbraced = false;
 
   // [Factor Device] Function declaration
   {
     std::ostringstream dfun;
     {
-      dfun << this->indent << "D(func_)(\"" << factor_fname << "_parallel\", ";
+
+      dfun << this->indent << "D(func_)(\"" << factor_fname << "_parallel"
+           << (cur_pb_idx_str == "0" ? "" : "_" + cur_pb_idx_str) << "\", ";
 
       // input arguments of factor device function
       dfun << "{";
@@ -591,9 +616,6 @@ bool FactorCodeGen::Visit(AST::WithIn& n) {
     fs << indent << "var_ " << mname << "(IntType(32));\n";
     fs << indent << mname << " = 0;\n";
   }
-
-  if (auto shape = GetShape(NodeType(*n.in)); shape.IsDynamic())
-    within_mdspan.emplace_back(STR(GetShape(NodeType(*n.in))), n.LOC());
 
   return true;
 };
@@ -902,11 +924,14 @@ bool FactorCodeGen::Visit(AST::ForeachBlock& forNode) {
     */
     if (iv_type->Dims() == 1 && cur_bounded_vars[iv_name].empty()) {
       fs << this->indent << "for_(" << iv_name;
-      if (IsValidBound(loop_range->lbound))
-        fs << " + (" << loop_range->lbound << ")";
-      fs << ", " << ReplaceFactorDynDimName(STR(iv_sizes.ValueAt(0)));
-      if (IsValidBound(loop_range->ubound))
-        fs << " + (" << loop_range->ubound << ")";
+      if (loop_range->lbound)
+        fs << " + (" << ExprSTR(loop_range->lbound) << ")";
+      fs << ", ";
+      // put offset before ubound to avoid type cast error
+      if (loop_range->ubound) {
+        fs << "(" << ExprSTR(loop_range->ubound) << ") + ";
+      }
+      fs << ReplaceFactorDynDimName(STR(iv_sizes.ValueAt(0)));
       fs << ", ";
       if (IsValidStride(loop_range->stride))
         fs << loop_range->stride;
@@ -929,11 +954,13 @@ bool FactorCodeGen::Visit(AST::ForeachBlock& forNode) {
       size_t i = 0;
       for (auto name : cur_bounded_vars[iv_name].top()) {
         fs << this->indent << "for_(" << name;
-        if (IsValidBound(loop_range->lbound))
-          fs << " + (" << loop_range->lbound << ")";
-        fs << ", " << ReplaceFactorDynDimName(STR(iv_sizes.ValueAt(i)));
-        if (IsValidBound(loop_range->ubound))
-          fs << " + (" << loop_range->ubound << ")";
+        if (loop_range->lbound)
+          fs << " + (" << ExprSTR(loop_range->lbound) << ")";
+        fs << ", ";
+        if (loop_range->ubound) {
+          fs << "(" << ExprSTR(loop_range->ubound) << ") + ";
+        }
+        fs << ReplaceFactorDynDimName(STR(iv_sizes.ValueAt(i)));
         fs << ", ";
         if (IsValidStride(loop_range->stride))
           fs << loop_range->stride;
@@ -1255,7 +1282,6 @@ void FactorCodeGen::EmitHostFunction(std::ostream& os) {
   os << " {\n";
 
   EmitHostRuntimeCheck(os);
-  EmitHostRuntimeMemUsageCheck(os);
 
   os << R"(
   std::vector<char> binary;
@@ -1411,7 +1437,7 @@ FactorCodeGen::ReplaceFactorDynDimName(const std::string& e) const {
 }
 
 std::optional<std::string>
-FactorCodeGen::ReplaceDynDimRef(const std::string& e) {
+FactorCodeGen::ReplaceDynDimRef(const std::string& e) const {
   std::string replaced = e;
   // match str begins with "::", thus "\\b" appears only in the suffix.
   for (auto& [id_name, sym_name] : idnm_rts)
@@ -1470,66 +1496,12 @@ void FactorCodeGen::EmitHostRuntimeCheck(std::ostream& os) {
     }
   }
 
-  // check if the mdspan of within is zero
-  if (!within_mdspan.empty())
-    os << "\n  // Check if the mdspan of within is zero.\n";
-  for (auto& [mds, loc] : within_mdspan) {
-    auto mds_vals = SplitStringByDelimiter(mds.substr(1, mds.size() - 2), ", ");
-    int idx = 1;
-    for (auto& mds_val : mds_vals) {
-      os << "  choreo::runtime_check(" << ReplaceRuntimeNames(mds_val)
-         << " != " << 0;
-      os << ", \"zero is detected for the " << Ordinal(idx)
-         << " dim of the mdspan inside the with-in statement, " << loc
-         << "\");\n";
-      idx++;
-    }
-  }
-
   os << "\n";
 
   for (const auto& rc : FCtx(fname).GetRtChecks()) {
     os << "  choreo::runtime_check(" << ReplaceRuntimeNames(rc.lhs) << " "
        << rc.op << " " << rc.rhs << ", \"" << rc.message << ", " << rc.loc
        << "\");\n";
-  }
-}
-
-void FactorCodeGen::EmitHostRuntimeMemUsageCheck(std::ostream& os) {
-  // check if the input shape is as declared in choreo
-  if (cgi->ParameterCount(fname) == 0) return;
-
-  if (!rt_mem_usage_check_lists.count(fname)) return;
-
-  auto rt_mem_usage_check_list = rt_mem_usage_check_lists.at(fname);
-
-  // there should be runtime memory usage check
-  if (!rt_mem_usage_check_list.empty())
-    os << "\n  // Check if the runtime memory usage exceeds the defined "
-          "limits.\n";
-
-  for (const auto& [useds, loc, limit, sto] : rt_mem_usage_check_list) {
-    std::ostringstream used_ss;
-    used_ss << "  choreo::runtime_check((size_t)";
-    for (auto& used : useds) {
-      if (used.find(":") == std::string::npos) {
-        // `used` is compile time memory usage
-        used_ss << (used_ss.str().back() == ')' ? "" : " + ") << used;
-        continue;
-      }
-      // `used` is runtime memory usage
-      auto operands = SplitStringByDelimiter(used, "*");
-      // `o` is dynamic dim. Should replace it with host name
-      for (auto& o : operands) o = ReplaceRuntimeNames(o, "", true);
-      used_ss << (used_ss.str().back() == ')' ? "" : " + ")
-              << DelimitedString(operands, "*");
-    }
-    used_ss << " <= (size_t)" << limit << ", \"total memory usage at "
-            << __internal__::GetStringFrom(sto)
-            << " level (compile time and runtime) "
-               "should not exceed "
-            << limit << " bytes, happends at " << loc << "\");\n";
-    os << used_ss.str();
   }
 }
 
@@ -1579,6 +1551,14 @@ const std::string FactorCodeGen::ValueSTR(const ValueItem& vi,
 
 const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
                                          bool factor_value) const {
+  // If `factor_value` is true, wrap the str: "Value(str)"
+  auto WrapWithValue = [&](const auto& str) -> std::string {
+    std::ostringstream oss;
+    oss << str;
+    if (factor_value) return "Value(" + oss.str() + ")";
+    return oss.str();
+  };
+
   std::ostringstream oss;
 
   if (auto id = dyn_cast<AST::Identifier>(e)) {
@@ -1596,10 +1576,11 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
         oss << "block_id";
       else
         choreo_unreachable("invalid bounded type note.");
-    } else
+    } else {
       oss << id->name;
+    }
   } else if (auto il = dyn_cast<AST::IntLiteral>(e)) {
-    oss << ((factor_value) ? "Value" : "") << "(" << il->value << ")";
+    oss << WrapWithValue(il->value);
   } else if (auto ii = dyn_cast<AST::IntIndex>(e)) {
     return ExprSTR(ii->value);
   } else if (auto expr = dyn_cast<AST::Expr>(e)) {
@@ -1609,15 +1590,14 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       if (FCtx(fname).HasSymbolValues(sname)) {
         auto svs = FCtx(fname).GetSymbolValues(sname);
         if (IsValidValueItem(svs.int_expr))
-          return std::string((factor_value) ? "Value" : "") + "(" +
-                 STR(svs.int_expr) + ")";
+          return WrapWithValue(STR(svs.int_expr));
       }
+      if (auto res = ReplaceDynDimRef(sname); res.has_value())
+        return res.value();
     }
     if (ConvertibleToInt(NodeType(*e))) {
-      if (IsValidValueItem(expr->opt_vals.int_expr)) {
-        return std::string((factor_value) ? "Value" : "") + "(" +
-               STR(expr->opt_vals.int_expr) + ")";
-      }
+      if (IsValidValueItem(expr->opt_vals.int_expr))
+        return WrapWithValue(STR(expr->opt_vals.int_expr));
     }
     if (expr->IsReference()) {
       if (expr->GetInt())
@@ -1650,15 +1630,16 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
         auto var = RemoveSuffix(*AST::GetName(*expr->GetR()), ".span");
         auto shape = GetShape(GetSymbolType(var));
         assert(shape.IsValid() && "Invalid shape is found");
-        oss << shape.GetSizeExpression();
+        oss << WrapWithValue(shape.GetSizeExpression());
       } else
         choreo_unreachable("Unsupported choreo expression.");
     } else if (expr->IsBinary()) {
       if (expr->op == "cdiv") {
         std::string one = "Value(1)";
         if (!factor_value) one = "1";
-        oss << "((" << ExprSTR(expr->GetL()) << ")+(" << ExprSTR(expr->GetR())
-            << "-" << one << ")/(" << ExprSTR(expr->GetR()) << ")";
+        oss << "(" << ExprSTR(expr->GetL()) << ")+" << "("
+            << ExprSTR(expr->GetR()) << "-" << one << ")/("
+            << ExprSTR(expr->GetR()) << ")";
       } else if (expr->op == "getith") {
         auto lty = cast<BoundedType>(NodeType(*expr->GetL()));
         if (cast<AST::IntIndex>(expr->GetR())->IsNegative()) {
@@ -1680,6 +1661,19 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
               << ")+(" << ExprSTR(r) << "))";
         } else
           oss << "((" << ExprSTR(l) << ")" << op << "(" << ExprSTR(r) << "))";
+      } else if (expr->op == "dimof") {
+        assert(expr->s.Rank() == 1);
+        auto val = expr->s.ValueAt(0);
+        auto str = ValueItemAsString(val);
+        if (expr->s.IsDynamic()) {
+          auto res = ReplaceDynDimRef(str);
+          oss << (res.has_value() ? res.value() : str);
+        } else {
+          oss << WrapWithValue(str);
+        }
+      } else {
+        choreo_unreachable("The op " + expr->op +
+                           " in codegen(factor) is not supported yet.");
       }
     } else if (expr->IsTernary()) {
       oss << "(" << ExprSTR(expr->GetC()) << ") ? (" << ExprSTR(expr->GetL())
@@ -1694,7 +1688,7 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
     assert(val_count >= 2);
     for (size_t i = 0; i < val_count - 1; i++) {
       oss << "select_(" << ExprSTR(sl->select_factor, true) << " == ";
-      oss << ((factor_value) ? "Value" : "") << "(" << i << ")";
+      oss << WrapWithValue(i);
       oss << ", " << PSTR(sl->expr_list->ValueAt(i))
           << (i < val_count - 1 ? ", " : "");
     }

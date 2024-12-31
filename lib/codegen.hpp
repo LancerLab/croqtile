@@ -49,6 +49,48 @@ struct LaunchConfig {
   size_t block_dim_z = 1;
   size_t block_dim_y = 1;
   size_t block_dim_x = 1;
+
+  // reset the block dimensions to 1
+  void ResetBDims() {
+    block_dim_x = 1;
+    block_dim_y = 1;
+    block_dim_z = 1;
+  }
+
+  // reset the grid dimensions to 1
+  void ResetGDims() {
+    grid_dim_x = 1;
+    grid_dim_y = 1;
+    grid_dim_z = 1;
+  }
+
+  void SetBlockDims(const std::vector<int>& dims) {
+    for (auto dim : dims) assert(dim >= 1 && "Invalid dimension.");
+    ResetBDims();
+    switch (dims.size()) {
+    case 3: block_dim_z = dims[2]; [[fallthrough]];
+    case 2: block_dim_y = dims[1]; [[fallthrough]];
+    case 1: block_dim_x = dims[0]; break;
+    default: choreo_unreachable("The number of dimensions is not supported.");
+    }
+  }
+
+  void SetGridDims(const std::vector<int>& dims) {
+    for (auto dim : dims) assert(dim >= 1 && "Invalid dimension.");
+    ResetGDims();
+    switch (dims.size()) {
+    case 3: grid_dim_z = dims[2]; [[fallthrough]];
+    case 2: grid_dim_y = dims[1]; [[fallthrough]];
+    case 1: grid_dim_x = dims[0]; break;
+    default: choreo_unreachable("The number of dimensions is not supported.");
+    }
+  }
+
+  void OverwriteGDimsByBDims() {
+    grid_dim_x = block_dim_x;
+    grid_dim_y = block_dim_y;
+    grid_dim_z = block_dim_z;
+  };
 };
 
 struct OtherTrait {
@@ -57,6 +99,7 @@ struct OtherTrait {
 
 using SymbolDetails = std::map<std::string, std::vector<SymbolDetail>>;
 using LaunchDetails = std::map<std::string, LaunchConfig>;
+using FactorLaunchDetails = std::map<std::string, std::vector<LaunchConfig>>;
 using ReturnSymbols = std::map<std::string, std::string>;
 using FunctionTraits = std::map<std::string, OtherTrait>;
 
@@ -73,6 +116,7 @@ struct CodeGenInfo {
 private:
   SymbolDetails all_syms;
   LaunchDetails launches;
+  FactorLaunchDetails factor_launches;
   ReturnSymbols returns;
   FunctionTraits traits;
 
@@ -92,6 +136,16 @@ public:
   }
   LaunchConfig& GetFunctionLaunch(const std::string& fname) {
     return launches[fname];
+  }
+
+  const std::vector<LaunchConfig>&
+  GetFactorFunctionLaunches(const std::string& fname) const {
+    return factor_launches.at(fname);
+  }
+
+  std::vector<LaunchConfig>&
+  GetFactorFunctionLaunches(const std::string& fname) {
+    return factor_launches[fname];
   }
 
   const OtherTrait& GetFunctionTrait(const std::string& fname) const {
@@ -127,6 +181,15 @@ public:
 
   void SetLaunchDetail(const std::string fname, const LaunchConfig& lc) {
     launches[fname] = lc;
+  }
+
+  void SetFactorLaunchDetail(const std::string fname, const LaunchConfig& lc) {
+    factor_launches[fname].push_back(lc);
+  }
+
+  void SetFactorLaunchDetails(const std::string fname,
+                              const std::vector<LaunchConfig>& lcs) {
+    factor_launches[fname] = lcs;
   }
 
   void SetReturnSymbol(const std::string fname, const std::string& rs) {
