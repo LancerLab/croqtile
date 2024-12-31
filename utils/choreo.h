@@ -684,6 +684,18 @@ auto copy_as_spanned(T* ptr, std::initializer_list<size_t> init) {
 
 // target specific defintions
 #ifdef __TOPSCC__
+template<typename T>
+__device__ static int inline __addr2int__(T* v) {
+  return static_cast<int>(reinterpret_cast<long long>(v));
+}
+#else
+template<typename T>
+static int inline __addr2int__(T* v) {
+  return (int)v;
+}
+#endif
+
+#ifdef __TOPSCC__
 
 } // end namespace choreo
 
@@ -701,10 +713,6 @@ static __attribute__((always_inline)) inline void abend_true(bool p) {
 }
 
 #define __co_device__ __device__
-__device__ static int inline __addr2int__(void* v) {
-  return static_cast<int>(reinterpret_cast<long long>(v));
-}
-
 // --- light-weight choreo-topscc device library --- //
 
 __device__ inline static __attribute__((noreturn)) void __co_abort__() {

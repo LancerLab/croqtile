@@ -1,5 +1,6 @@
 // REQUIRES: TARGET-GCUALL DYNAMIC-SHAPE
-// RUN: choreo -gs -t factor -kt %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
+// RUN: choreo -gs -t factor -kt %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+// RUN: choreo -gs -t topscc %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
 
 #include "choreo.h"
 #include <chrono>
@@ -13,7 +14,7 @@ __cok__ { /// kernel program
 #endif
 
 // topsop/atomic_op/src/legacy/basic_operation/add_fp32.cc
-extern "C" void add_fp32(int in0_addr_, int in1_addr_, int size,
+__co_device__ extern "C" void add_fp32(int in0_addr_, int in1_addr_, int size,
                          int out_addr_) {
   volatile int operands_addr0_tar = reinterpret_cast<int>(in0_addr_ >> 6);
   volatile int operands_addr1_tar = reinterpret_cast<int>(in1_addr_ >> 6);
@@ -148,7 +149,7 @@ extern "C" void add_fp32(int in0_addr_, int in1_addr_, int size,
 }
 
 // topsop/atomic_op/src/legacy/basic_operation/div_fp32.cc
-extern "C" void __attribute__((disable_dtu_instr_sched))
+__co_device__ extern "C" void __attribute__((disable_dtu_instr_sched))
 div_fp32(int in0_addr_, int in1_addr_, int size,
                          int out_addr_) {
   volatile int operands_addr0_tar = reinterpret_cast<int>(in0_addr_ >> 6);
@@ -242,7 +243,7 @@ div_fp32(int in0_addr_, int in1_addr_, int size,
     vr_rhs_de0 = __dtu_v_vmul_a_f32(vr_rhs_exp0, vr_denorm0);
     vr_rhs_de1 = __dtu_v_vmul_a_f32(vr_rhs_exp1, vr_denorm1);
 
-    
+
     vr_rhs_exp0 = __dtu_v_vsf_f32(vr_manti0, 0);
     vr_rhs_exp1 = __dtu_v_vsf_f32(vr_manti1, 0);
 
@@ -296,7 +297,7 @@ div_fp32(int in0_addr_, int in1_addr_, int size,
 }
 
 // topsop/atomic_op/src/legacy/basic_operation/mul_fp32_scalar.cc
-extern "C" void __attribute__((disable_dtu_instr_sched))
+__co_device__ extern "C" void __attribute__((disable_dtu_instr_sched))
 mul_fp32_scalar(int in0_addr_, float in1, int size,
                          int out_addr_) {
   volatile int operands_addr0_tar = reinterpret_cast<int>(in0_addr_ >> 6);
@@ -408,15 +409,15 @@ mul_fp32_scalar(int in0_addr_, float in1, int size,
 }
 
 extern "C"
-void addcdiv_kernel_0_c_func_fp32(float* a_addr, float* b_addr, float* c_addr, float* d_addr, float* e_addr) {
-  div_fp32(reinterpret_cast<int>(b_addr), reinterpret_cast<int>(c_addr), 8192, reinterpret_cast<int>(e_addr));
-  mul_fp32_scalar((int)e_addr, 1.0, 8192, (int)e_addr);
-  add_fp32((int)a_addr, (int)e_addr, 8192, (int)d_addr);
+__co_device__ void addcdiv_kernel_0_c_func_fp32(float* a_addr, float* b_addr, float* c_addr, float* d_addr, float* e_addr) {
+  div_fp32(__addr2int__(b_addr), __addr2int__(c_addr), 8192, __addr2int__(e_addr));
+  mul_fp32_scalar(__addr2int__(e_addr), 1.0, 8192, __addr2int__(e_addr));
+  add_fp32(__addr2int__(a_addr), __addr2int__(e_addr), 8192, __addr2int__(d_addr));
 }
 
 extern "C"
-void add_kernel_fp32(float* a_addr, float* b_addr, float* c_addr) {
-  add_fp32((int)a_addr, (int)b_addr, 8192, (int)c_addr);
+__co_device__ void add_kernel_fp32(float* a_addr, float* b_addr, float* c_addr) {
+  add_fp32(__addr2int__(a_addr), __addr2int__(b_addr), 8192, __addr2int__(c_addr));
 }
 
 } /// end of kernel decl
@@ -450,9 +451,9 @@ __co__ f32 [L] addcdiv(f32 [L] first, f32 [L] second, f32 [L] third) { /// devic
               third_load_s = dma.copy.async third_load_A.data.chunkat(s_tile) => local;
               wait first_load_s, second_load_s, third_load_s;
               call addcdiv_kernel_0_c_func_fp32(
-                  first_load_s.data, 
-                  second_load_s.data, 
-                  third_load_s.data, 
+                  first_load_s.data,
+                  second_load_s.data,
+                  third_load_s.data,
                   out_s,
                   tmp);
               out_store_s = dma.copy.async out_s => out.chunkat(s_tile); // can use defined vars
@@ -465,30 +466,47 @@ __co__ f32 [L] addcdiv(f32 [L] first, f32 [L] second, f32 [L] third) { /// devic
         swap(second_load_A, second_load_B);
         swap(third_load_A, third_load_B);
       }
-      // NOTE: #c_tile(-1) SHOULD be last var of range 0-to-L/8192 => 0-12 => 11 
+      // NOTE: #c_tile(-1) SHOULD be last var of range 0-to-L/8192 => 0-12 => 11
       // c_tile is not bounded to a literal, but a expr with int-compile-time-value,
       // this value is not simplified to visible by its user
 
+#ifdef __TOPSCC__
+     wait first_load_A, second_load_A, third_load_A;
+#else
       first_load_tail = select(#c_tile % 2, first_load_B, first_load_A);
       second_load_tail = select(#c_tile % 2, second_load_B, second_load_A);
       third_load_tail = select(#c_tile % 2, third_load_B, third_load_A);
       wait first_load_tail, second_load_tail, third_load_tail;
+#endif
         // NOTE: cannot same naming
         local f32[8192] out_s_tail;
         local f32[8192] tmp_tail;
         with index = {s_tile} in [1] {
           foreach s_tile {
             // NOTE: cannot naming same
+#ifdef __TOPSCC__
+            first_load_s = dma.copy.async first_load_A.data.chunkat(s_tile) => local;
+            second_load_s_tail = dma.copy.async second_load_A.data.chunkat(s_tile) => local;
+            third_load_s_tail = dma.copy.async third_load_A.data.chunkat(s_tile) => local;
+            wait first_load_s, second_load_s_tail, third_load_s_tail;
+            call addcdiv_kernel_0_c_func_fp32(
+                first_load_s.data,
+                second_load_s_tail.data,
+                third_load_s_tail.data,
+                out_s_tail,
+                tmp_tail);
+#else
             first_load_s = dma.copy.async first_load_tail.data.chunkat(s_tile) => local;
             second_load_s_tail = dma.copy.async second_load_tail.data.chunkat(s_tile) => local;
             third_load_s_tail = dma.copy.async third_load_tail.data.chunkat(s_tile) => local;
             wait first_load_s, second_load_s_tail, third_load_s_tail;
             call addcdiv_kernel_0_c_func_fp32(
-                first_load_s.data, 
-                second_load_s_tail.data, 
-                third_load_s_tail.data, 
+                first_load_s.data,
+                second_load_s_tail.data,
+                third_load_s_tail.data,
                 out_s_tail,
                 tmp_tail);
+#endif
             // NOTE: dito
             out_store_s_tail = dma.copy.async out_s_tail => out.chunkat(s_tile); // can use defined vars
             wait out_store_s_tail;
