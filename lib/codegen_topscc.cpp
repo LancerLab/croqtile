@@ -744,8 +744,8 @@ bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
       assert(IsActualBoundedIntegerType(iv_ty));
       auto iv_bty = cast<BoundedType>(iv_ty);
       ds << d_indent << "for (" << ssm.DeviceName(iv_name) << " = "
-         << (rng->lbound ? ("(" + ExprSTR(rng->lbound) + ")") : "0")
-         << "; " << ssm.DeviceName(iv_name) << " < "
+         << (rng->lbound ? ("(" + ExprSTR(rng->lbound) + ")") : "0") << "; "
+         << ssm.DeviceName(iv_name) << " < "
          << UnScopedExpr(STR(iv_bty->GetUpperBound())) << "; ++"
          << ssm.DeviceName(iv_name) << ") {\n";
       IncrDeviceIndent();

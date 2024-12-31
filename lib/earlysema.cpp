@@ -680,11 +680,12 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
   ReportErrorWhenViolateODR(n.LOC(), n.biv, __FILE__, __LINE__,
                             MakeBoundedITupleType(Shape(1, n.biv), "pv"));
   // TODO(wsj): rank of shape?
-  // if p={px,py,pz}, will chunkat(p) be explained as 
-  // chunkat(px,py,pz) or still 
+  // if p={px,py,pz}, will chunkat(p) be explained as
+  // chunkat(px,py,pz) or still
   // chunkat(p) where ubound of p is #px * #py * #pz, rank of p is 1.
   // ReportErrorWhenViolateODR(n.LOC(), n.biv, __FILE__, __LINE__,
-  //                           MakeBoundedITupleType(Shape(n.dims, n.biv), "pv"));
+  //                           MakeBoundedITupleType(Shape(n.dims, n.biv),
+  //                           "pv"));
 
   if (n.iv_symbols) {
     for (auto& sym : n.iv_symbols->AllValues()) {
