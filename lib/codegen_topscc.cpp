@@ -395,6 +395,17 @@ bool TopsccCodeGen::Visit(AST::Assignment& n) {
     return true;
   }
 
+  if (auto sa = dyn_cast<AST::SpanAs>(n.value)) {
+    ds << d_indent << "auto * " << n.name << " = ";
+    auto tty = GetSymbolType(sa->id->name);
+    if (isa<FutureType>(tty))
+      ds << sa->id->name << ".data();\n";
+    else
+      ds << sa->id->name << ";\n";
+    ssm.MapDeviceSymbol(InScopeName(n.name), n.name);
+    return true;
+  }
+
   if (isa<BoundedType>(nty) || isa<SpannedType>(nty) || isa<FutureType>(nty) ||
       isa<IntegerType>(nty)) {
     ds << d_indent << "auto " << n.name << " = " << ExprSTR(n.value, false)

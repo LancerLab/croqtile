@@ -684,12 +684,12 @@ auto copy_as_spanned(T* ptr, std::initializer_list<size_t> init) {
 
 // target specific defintions
 #ifdef __TOPSCC__
-template<typename T>
+template <typename T>
 __device__ static int inline __addr2int__(T* v) {
   return static_cast<int>(reinterpret_cast<long long>(v));
 }
 #else
-template<typename T>
+template <typename T>
 static int inline __addr2int__(T* v) {
   return (int)v;
 }
