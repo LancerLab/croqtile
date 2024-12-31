@@ -48,3 +48,15 @@ __co__ foo() {
 In this way, it also make host and choreo code be controlled within the same preprocess method.
 
 Note that, the capability of choreo preprocessor is still enhancing. But it is likely that we would not implement full C preprocessing support. Choreo would not pick up existing C features unless people find it is necessary.
+
+## Difference with C++ pre-processing
+One important notices about choreo preprocessing is that it is triggered much earlier than c++ preprocessing. The workflow of choreo compilation is as shown below:
+
+```
+chore-preprocessing -> choreo compilation -> c/c++ preprocessing -> c/c++ compilation
+```
+
+Though the design target of choreo preprocessing is to make host/device macros work as a whole, but such a workflow makes it possible sometimes different. When you encounter any 'weird' compilation behavior, it worths considering the order of different phases.
+
+To mimic a target native compilation, choreo preprocess also takes the builtin macros from the target. For example, __TOPSCC__ is globally defined at topscc target compilation. And __CUDA__ is globally defined to generate CUDA code.
+Consequently, these macros can be utilized inside choreo functions as well as the host code.
