@@ -1,0 +1,7 @@
+// RUN: choreo -es -t topscc %s -o - | FileCheck %s
+
+__co__ void nil()  {}
+
+// CHECK-NOT: __choreo
+// CHECK: void nil() {
+// CHECK-NEXT: }

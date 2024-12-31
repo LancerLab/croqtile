@@ -1,0 +1,13 @@
+// RUN: choreo -t topscc %s -es -o - | FileCheck %s
+
+__co__ void notile(f16 [32, 17, 6] a) {
+  parallel p by 1 {
+    with index in [3] {
+      dma.copy a.chunkat(p, _, index) => local;
+    }
+  }
+}
+
+// CHECK:     tops::mdspan __mds0_a(tops::Global, (__fp16*)a, 32, 17, 6);
+// CHECK:     tops::mdspan __mds1_anon_0(tops::Private, (__fp16*)anon_0, 32, 17, 2);
+// CHECK:     int __slice_offset0__a_2_anon_0[] = {(int)(__tops_tid_x() * 32), 0, (int)(__iv_index__elem__0 * 2)};

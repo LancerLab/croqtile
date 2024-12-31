@@ -110,9 +110,10 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
     for (int j = ranges->Count() - 1; j >= 0; --j) {
       auto rng = cast<AST::LoopRange>(ranges->ValueAt(j));
       auto cname = rng->IVName();
-      for (auto iv_name : within_map.at(InScopeName(cname))) {
+      auto ivs = within_map.at(InScopeName(cname));
+      for (auto iv_itr = ivs.rbegin(); iv_itr != ivs.rend(); ++iv_itr) {
         DecrDeviceIndent();
-        ds << d_indent << "} // " << UnScopedName(iv_name) << "\n";
+        ds << d_indent << "} // " << UnScopedName(*iv_itr) << "\n";
       }
     }
   } else if (isa<AST::IncrementBlock>(&n)) {
@@ -539,6 +540,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
             auto idx_exprs = SplitStringByDelimiter(ExprSTR(p, false));
             for (auto i_expr : idx_exprs) {
               if (i != 0) offset << ", ";
+              if (i_expr == "__choreo_tile_one") offset << "0";
+              else
               offset << "(int)(" << i_expr << " * " << STR(shape.ValueAt(i))
                      << ")";
               ++i;
@@ -575,6 +578,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
           auto idx_exprs = SplitStringByDelimiter(ExprSTR(p, false));
           for (auto i_expr : idx_exprs) {
             if (i != 0) offset << ", ";
+              if (i_expr == "__choreo_tile_one") offset << "0";
+              else
             offset << "(int)(" << i_expr << " * " << STR(shape.ValueAt(i))
                    << ")";
             ++i;
@@ -737,9 +742,8 @@ bool TopsccCodeGen::Visit(AST::WithBlock& n) {
 bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
 
-  const auto& ranges = n.GetRangeNodes();
-  for (int j = ranges->Count() - 1; j >= 0; --j) {
-    auto rng = cast<AST::LoopRange>(ranges->ValueAt(j));
+  for (auto & rn : n.GetRanges()) {
+    auto rng = cast<AST::LoopRange>(rn);
     auto cname = rng->IVName();
     for (auto iv_name : within_map.at(InScopeName(cname))) {
       auto iv_ty = GetSymbolType(UnScopedName(iv_name));
@@ -949,6 +953,10 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
   std::ostringstream oss;
 
   if (auto id = dyn_cast<AST::Identifier>(e)) {
+    if (id->name == "__choreo_tile_one") {
+      assert(!is_host);
+      return id->name;
+    }
     auto ty = NodeType(*id);
     if (isa<BoundedType>(ty) &&
         PrefixedWith(cast<BoundedType>(ty)->GetNote(), "pv")) {
