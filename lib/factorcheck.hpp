@@ -26,7 +26,7 @@ private:
     assert(idx < s.Rank());
     std::string message = "[FactorCheck] The " + Ordinal(idx + 1) + " dim " +
                           ValueItemAsString(s.ValueAt(idx)) +
-                          " should satisfy: d " + op + " " +
+                          " must satisfy: d " + op + " " +
                           std::to_string(limit);
 
     CheckValue(s.ValueAt(idx), op, limit, loc, message);
@@ -36,7 +36,7 @@ private:
                   const location& loc, std::string message = "") {
     if (message.empty())
       message = "[FactorCheck] The value " + ValueItemAsString(vi) +
-                " should satisfy: s " + op + " " + std::to_string(limit);
+                " must satisfy: s " + op + " " + std::to_string(limit);
     if (auto vi_int = dyn_cast<int>(&vi); vi_int && op_map.count(op)) {
       if (!op_map[op](*vi_int, limit)) {
         Error(loc, message);
@@ -212,8 +212,8 @@ public:
     };
     auto RankLE5 = [&](const std::string& msg) {
       if (f_rank > 5) {
-        Error(n.LOC(), "[FactorCheck] The rank in " + msg +
-                           " should be in range [1, 5]");
+        Error(n.LOC(),
+              "[FactorCheck] The rank in " + msg + " must be in range [1, 5]");
         error_count++;
       }
     };
@@ -229,7 +229,7 @@ public:
           CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
         for (size_t idx = 1; idx < t_rank; ++idx)
           CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
-        size_t bpe = SizeOf(f_sty->f_type);
+        auto bpe = ValueItem((int)(SizeOf(f_sty->f_type)));
         auto value = (f_shape.ValueAt(0) * bpe + 127) / 128;
         CheckValue(value, "<", 1 << 24, n.from->LOC(),
                    "[FactorCheck] CeilTo128Byte(src_dim0_size * bpe) < 2^24");
@@ -347,13 +347,13 @@ public:
         for (size_t idx = 0; idx < t_rank; ++idx)
           CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
         // TODO: offset limitation: [0, 2^24)
-        if (f_rank == 5) {
-          auto first = f_ca->positions->ValueAt(0);
+        if (t_rank == 5) {
+          auto first = t_ca->positions->ValueAt(4);
           auto t = dyn_cast<BoundedITupleType>(first->GetType());
           assert(t != nullptr);
           if (isa<int>(&t->ubounds.ValueAt(0))) {
             if (!IsValueItemEqual(1, t->ubounds.ValueAt(0))) {
-              Error(n.LOC(), "[FactorCheck] dma.copy(slice) does not "
+              Error(n.LOC(), "[FactorCheck] dma.copy(deslice) does not "
                              "support 5-dimensional "
                              "array (if dim is 5, offsets[0] must be 0)");
               error_count++;
@@ -373,7 +373,7 @@ public:
           CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
         for (size_t idx = 1; idx < t_rank; ++idx)
           CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
-        size_t bpe = SizeOf(f_sty->f_type);
+        auto bpe = ValueItem((int)(SizeOf(f_sty->f_type)));
         auto value = (f_shape.ValueAt(0) * bpe + 127) / 128;
         CheckValue(value, "<", 1 << 24, n.from->LOC(),
                    "[FactorCheck] CeilTo128Byte(src_dim0_size * bpe) < 2^24");
@@ -394,7 +394,7 @@ public:
           CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
         for (size_t idx = 1; idx < t_rank; ++idx)
           CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
-        size_t bpe = SizeOf(f_sty->f_type);
+        auto bpe = ValueItem((int)(SizeOf(f_sty->f_type)));
         auto value = (f_shape.ValueAt(0) * bpe + 127) / 128;
         CheckValue(value, "<", 1 << 24, n.from->LOC(),
                    "[FactorCheck] CeilTo128Byte(src_dim0_size * bpe) < 2^24");
