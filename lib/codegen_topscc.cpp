@@ -380,11 +380,13 @@ bool TopsccCodeGen::Visit(AST::Assignment& n) {
     return true;
   }
 
-  if (isa<BoundedType>(nty) || isa<SpannedType>(nty) || isa<FutureType>(nty)) {
+  if (isa<BoundedType>(nty) || isa<SpannedType>(nty) || isa<FutureType>(nty) ||
+      isa<IntegerType>(nty)) {
     ds << d_indent << "auto " << n.name << " = " << ExprSTR(n.value, false)
        << ";\n";
   } else
-    errs() << "Assignment n unprocessed, not supported nType\n";
+    errs() << "Assignment " << STR(n) << " unprocessed, not supported "
+           << PSTR(nty) << "\n";
 
   return true;
 }
