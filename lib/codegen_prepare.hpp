@@ -169,7 +169,7 @@ public:
   }
 
   bool Visit(AST::LoopRange&) { return true; }
-  bool Visit(AST::ForeachBlock& n) { return true; }
+  bool Visit(AST::ForeachBlock&) { return true; }
   bool Visit(AST::FunctionDecl&) { return true; }
   bool Visit(AST::ChoreoFunction&) { return true; }
   bool Visit(AST::CppSourceCode&) { return true; }

@@ -413,7 +413,7 @@ public:
 
     return true;
   }
-  bool Visit(AST::LoopRange& n) override { return true; }
+  bool Visit(AST::LoopRange&) override { return true; }
   bool Visit(AST::ForeachBlock& n) override {
     auto handle_bounds = [this, &n](auto get_bound, auto set_bound) {
       std::vector<std::pair<int, ptr<AST::Node>>> repls;

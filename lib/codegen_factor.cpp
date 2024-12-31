@@ -331,7 +331,8 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl& node) {
 
         // generate "memset_()" action to initiate each alloc_memory with value
         // 0
-        fs << indent << "memset_(" << sym << "_init, " << sym << ", 0);\n";
+        fs << indent << "memset_(" << sym << "_init, " << sym << ", "
+           << ExprSTR(node.init_value, false) << ");\n";
       }
     }
   } else if (CanYieldAnInteger(nty) || isa<ITupleType>(nty)) {

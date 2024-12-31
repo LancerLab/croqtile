@@ -293,6 +293,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
     auto shape = sty->GetShape();
     std::string bts{NameBaseType(sty->ElementType())};
 
+    bool spmem = false; // allocatable scratchpad memory: share, local
     if (sty->GetStorage() == Storage::GLOBAL) {
       auto buf_sym = sym + "__device";
       if (!IsChoreoOutput(InScopeName(sym))) {
@@ -329,15 +330,28 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
         ds << d_indent << "__shared__ " << bts << " " << sym << "["
            << ElemCountExprOf(*sty) << "];\n";
         ssm.MapDeviceSymbol(InScopeName(sym), sym);
+        spmem = true;
       }
     } else if (sty->GetStorage() == Storage::LOCAL) {
       if (!IsChoreoOutput(InScopeName(sym))) {
         ds << d_indent << "__local__ " << bts << " " << sym << "["
            << ElemCountExprOf(*sty) << "];\n";
         ssm.MapDeviceSymbol(InScopeName(sym), sym);
+        spmem = true;
       }
     } else
       choreo_unreachable("unsupported storage type.");
+
+    if (spmem && n.init_value) {
+      ds << d_indent << "tops_dte_ctx_t " << sym << "__init;\n";
+      ds << d_indent << "tops::dte_scope s_" << sym << "__init(" << sym
+         << "__init);\n";
+      ds << d_indent << "tops::memset(" << sym << "__init, tops::mdspan("
+         << TopsMdsStorage(sty->GetStorage()) << ", ("
+         << NameBaseType(sty->ElementType()) << "*)" << sym << ", "
+         << UnScopedExpr(RSTR(sty->GetShape())) << "), "
+         << ExprSTR(n.init_value, false) << ");\n";
+    }
   }
 
   return true;
@@ -540,10 +554,11 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
             auto idx_exprs = SplitStringByDelimiter(ExprSTR(p, false));
             for (auto i_expr : idx_exprs) {
               if (i != 0) offset << ", ";
-              if (i_expr == "__choreo_tile_one") offset << "0";
+              if (i_expr == "__choreo_tile_one")
+                offset << "0";
               else
-              offset << "(int)(" << i_expr << " * " << STR(shape.ValueAt(i))
-                     << ")";
+                offset << "(int)(" << i_expr << " * " << STR(shape.ValueAt(i))
+                       << ")";
               ++i;
             }
           }
@@ -578,10 +593,11 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
           auto idx_exprs = SplitStringByDelimiter(ExprSTR(p, false));
           for (auto i_expr : idx_exprs) {
             if (i != 0) offset << ", ";
-              if (i_expr == "__choreo_tile_one") offset << "0";
-              else
-            offset << "(int)(" << i_expr << " * " << STR(shape.ValueAt(i))
-                   << ")";
+            if (i_expr == "__choreo_tile_one")
+              offset << "0";
+            else
+              offset << "(int)(" << i_expr << " * " << STR(shape.ValueAt(i))
+                     << ")";
             ++i;
           }
         }
@@ -742,7 +758,7 @@ bool TopsccCodeGen::Visit(AST::WithBlock& n) {
 bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
 
-  for (auto & rn : n.GetRanges()) {
+  for (auto& rn : n.GetRanges()) {
     auto rng = cast<AST::LoopRange>(rn);
     auto cname = rng->IVName();
     for (auto iv_name : within_map.at(InScopeName(cname))) {
@@ -996,7 +1012,7 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
                                      : ssm.DeviceName(InScopeName(id->name))));
     }
   } else if (auto il = dyn_cast<AST::IntLiteral>(e)) {
-    oss << "(" << il->value << ")";
+    oss << il->value;
   } else if (auto ii = dyn_cast<AST::IntIndex>(e)) {
     return ExprSTR(ii->value, is_host);
   } else if (auto expr = dyn_cast<AST::Expr>(e)) {
