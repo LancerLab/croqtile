@@ -33,9 +33,9 @@ __co__ auto bar1(f16 [36, 14, 64] a) {
 // CHECK:   __fp16 * a__device = nullptr;
 // CHECK:   choreo::abend_true(topsMalloc(&a__device, 64512));
 // CHECK:   choreo::abend_true(topsMemcpy(a__device, hp0.data(), 64512, topsMemcpyHostToDevice));
-// CHECK:   dim3 __bar1_gdims(2, 3, 1);
-// CHECK:   dim3 __bar1_bdims(7, 1, 1);
-// CHECK:   __choreo_device_bar1<<<__bar1_gdims, __bar1_bdims>>>(a__device);
+// CHECK:   dim3 __bar1_gdims0(2, 3, 1);
+// CHECK:   dim3 __bar1_bdims0(7, 1, 1);
+// CHECK:   __choreo_device_bar1<<<__bar1_gdims0, __bar1_bdims0>>>(a__device);
 // CHECK:   return hp0;
 // CHECK: }
 
@@ -70,8 +70,8 @@ __co__ auto bar2(f16 [4, 36, 14, 64] a) {
 // CHECK:   __fp16 * a__device = nullptr;
 // CHECK:   choreo::abend_true(topsMalloc(&a__device, 258048));
 // CHECK:   choreo::abend_true(topsMemcpy(a__device, hp0.data(), 258048, topsMemcpyHostToDevice));
-// CHECK:   dim3 __bar2_gdims(2, 9, 1);
-// CHECK:   dim3 __bar2_bdims(7, 1, 1);
-// CHECK:   __choreo_device_bar2<<<__bar2_gdims, __bar2_bdims>>>(a__device);
+// CHECK:   dim3 __bar2_gdims0(2, 9, 1);
+// CHECK:   dim3 __bar2_bdims0(7, 1, 1);
+// CHECK:   __choreo_device_bar2<<<__bar2_gdims0, __bar2_bdims0>>>(a__device);
 // CHECK:   return hp0;
 // CHECK: }

@@ -422,13 +422,17 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
 
   if (parallel_level != 1) return true;
 
-  auto& lconfig = cgi->GetFunctionLaunch(fname);
-  hs << h_indent << "dim3 __" << fname << "_gdims(" << lconfig.grid_dim_x
-     << ", " << lconfig.grid_dim_y << ", " << lconfig.grid_dim_z << ");\n";
-  hs << h_indent << "dim3 __" << fname << "_bdims(" << lconfig.block_dim_x
-     << ", " << lconfig.block_dim_y << ", " << lconfig.block_dim_z << ");\n";
-  hs << h_indent << device_fn << "<<<__" << fname << "_gdims, __" << fname
-     << "_bdims>>>(";
+  auto pb_idx = std::stoi(SplitStringByDelimiter(n.note, ", ")[0]);
+
+  auto& lconfig = cgi->GetFunctionLaunches(fname)[pb_idx];
+  hs << h_indent << "dim3 __" << fname << "_gdims" << pb_idx << "("
+     << lconfig.grid_dim_x << ", " << lconfig.grid_dim_y << ", "
+     << lconfig.grid_dim_z << ");\n";
+  hs << h_indent << "dim3 __" << fname << "_bdims" << pb_idx << "("
+     << lconfig.block_dim_x << ", " << lconfig.block_dim_y << ", "
+     << lconfig.block_dim_z << ");\n";
+  hs << h_indent << device_fn << "<<<__" << fname << "_gdims" << pb_idx
+     << ", __" << fname << "_bdims" << pb_idx << ">>>(";
 
   size_t i = 0;
   for (auto& item : GetDeviceFuncIns()) {

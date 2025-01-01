@@ -31,9 +31,9 @@ __co__ auto foo(f32 [32, 4] a) {
 // CHECK:   auto data = choreo::make_spandata<float, 2>({32, 4});
 // CHECK:   float * data__device = nullptr;
 // CHECK:   choreo::abend_true(topsMalloc(&data__device, 512));
-// CHECK:   dim3 __foo_gdims(1, 1, 1);
-// CHECK:   dim3 __foo_bdims(2, 1, 1);
-// CHECK:   __choreo_device_foo<<<__foo_gdims, __foo_bdims>>>(a__device, data__device);
+// CHECK:   dim3 __foo_gdims0(1, 1, 1);
+// CHECK:   dim3 __foo_bdims0(2, 1, 1);
+// CHECK:   __choreo_device_foo<<<__foo_gdims0, __foo_bdims0>>>(a__device, data__device);
 // CHECK:   choreo::abend_true(topsMemcpy(data.data(), data__device, 512, topsMemcpyDeviceToHost));
 // CHECK:   return data;
 // CHECK: }

@@ -1,0 +1,17 @@
+// RUN: choreo -es -t topscc %s -o - | FileCheck %s
+
+__co__ void ml() {
+  parallel p = {x, y, z} by [6, 5, 4], {o, r, s} by [3, 2, 1] {
+  }
+  parallel p = {x, y, z} by [3, 2, 1], q by 7 {
+  }
+}
+
+// CHECK: void ml() {
+// CHECK:   dim3 __ml_gdims0(6, 5, 4);
+// CHECK:   dim3 __ml_bdims0(3, 2, 1);
+// CHECK:   __choreo_device_ml<<<__ml_gdims0, __ml_bdims0>>>();
+// CHECK:   dim3 __ml_gdims1(3, 2, 1);
+// CHECK:   dim3 __ml_bdims1(7, 1, 1);
+// CHECK:   __choreo_device_ml<<<__ml_gdims1, __ml_bdims1>>>();
+// CHECK: }

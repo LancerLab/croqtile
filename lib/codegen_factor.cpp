@@ -418,7 +418,7 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
   // generate all launch configs when entered the first Parallel node
   if (cur_pb_idx_str == "0") {
     int pb_idx = 0;
-    for (auto& lc : cgi->GetFactorFunctionLaunches(fname)) {
+    for (auto& lc : cgi->GetFunctionLaunches(fname)) {
       auto pb_idx_str = pb_idx == 0 ? "" : "_" + std::to_string(pb_idx);
       fs << this->indent << "Dim3 grid_dim" << pb_idx_str << "("
          << lc.grid_dim_x;

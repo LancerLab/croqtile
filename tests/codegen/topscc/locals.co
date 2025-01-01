@@ -22,9 +22,9 @@ __co__ auto foo(int a, f32 [1, 2] b) {
 // CHECK:   auto g_data = choreo::make_spandata<__fp16, 2>({1, 2});
 // CHECK:   __fp16 * g_data__device = nullptr;
 // CHECK:   choreo::abend_true(topsMalloc(&g_data__device, 4));
-// CHECK:   dim3 __foo_gdims(2, 1, 1);
-// CHECK:   dim3 __foo_bdims(3, 1, 1);
-// CHECK:   __choreo_device_foo<<<__foo_gdims, __foo_bdims>>>(hp0, b__device, g_data__device);
+// CHECK:   dim3 __foo_gdims0(2, 1, 1);
+// CHECK:   dim3 __foo_bdims0(3, 1, 1);
+// CHECK:   __choreo_device_foo<<<__foo_gdims0, __foo_bdims0>>>(hp0, b__device, g_data__device);
 // CHECK:   choreo::abend_true(topsMemcpy(g_data.data(), g_data__device, 4, topsMemcpyDeviceToHost));
 // CHECK:   return g_data;
 // CHECK: }
