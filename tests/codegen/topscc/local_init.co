@@ -1,0 +1,23 @@
+// RUN: choreo -t topscc %s -es -o - | FileCheck %s
+__co__ void init() {
+  global f32 [17] a {1};
+  parallel p by 1 {
+    shared f16 [33] b {3};
+    local u8 [78] c {15};
+  }
+}
+
+// CHECK:   __shared__ __fp16 b[33];
+// CHECK:   tops_dte_ctx_t b__init;
+// CHECK:   tops::dte_scope s_b__init(b__init);
+// CHECK:   tops::memset(b__init, tops::mdspan(tops::Shared, (__fp16*)b, 33), 3);
+// CHECK:   __local__ unsigned char c[78];
+// CHECK:   tops_dte_ctx_t c__init;
+// CHECK:   tops::dte_scope s_c__init(c__init);
+// CHECK:   tops::memset(c__init, tops::mdspan(tops::Private, (unsigned char*)c, 78), 15);
+
+// CHECK:   float a__init[17];
+// CHECK:   memset(a__init, 1, sizeof(a__init));
+// CHECK:   float * a__device= nullptr;
+// CHECK:   choreo::abend_true(topsMalloc((&a__device, 68));
+// CHECK:   choreo::abend_true(topsMemcpy(a__device, a__init, 68, topsMemcpyHostToDevice));
