@@ -114,6 +114,7 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
       for (auto iv_itr = ivs.rbegin(); iv_itr != ivs.rend(); ++iv_itr) {
         DecrDeviceIndent();
         ds << d_indent << "} // " << UnScopedName(*iv_itr) << "\n";
+        ds << d_indent << ssm.DeviceName(*iv_itr) << " = 0;\n"; // must reset
       }
     }
   } else if (isa<AST::IncrementBlock>(&n)) {

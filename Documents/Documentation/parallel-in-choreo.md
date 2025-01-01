@@ -1,6 +1,6 @@
-# Parallelism in Choreo
+# Parallelisation and Iterations
 
-In Choreo, parallelism is an essential aspect of performance optimization, and it is handled using two main constructs: **parallel-by** and **with-in + foreach**. These two constructs help Choreo developers express parallel and sequential execution efficiently, enabling better resource utilization on modern hardware.
+Parallelisation and iterations are essential construct in programming laugagues. Parallelisation in choreo follows a Single Programs Multiple Data (SPMD) paradigm, which is abstracted explicitly with the **parallel-by** block. Iterations (loops) is the most utilized method to code sequential code. In choreo, programmers can construct an iteration within the **with-in + foreach** block. These two constructs help Choreo developers express parallel and sequential execution efficiently, enabling better resource utilization on modern hardware.
 
 To understand the parallelism model in Choreo, it’s crucial to first explore the physical architecture of the system on which the code will run. Let’s take **GCU3** (a typical hardware accelerator) as an example, which consists of **clusters** and **SIPs (Single Instruction Processors)** within each cluster. Choreo uses these hardware structures to abstract parallel execution at both the **physical** and **virtual** levels.
 
