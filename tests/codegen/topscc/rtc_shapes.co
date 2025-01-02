@@ -1,0 +1,8 @@
+// RUN: choreo -t topscc %s -es -o - | FileCheck %s
+
+__co__ void foo(f32 [3, 1, 2] input, f16 [27] b) { }
+
+// CHECK:   choreo::runtime_check(hp0.shape()[0] == 3, "shape inconsistent on the 1st parameter (dim: 0).");
+// CHECK:   choreo::runtime_check(hp0.shape()[1] == 1, "shape inconsistent on the 1st parameter (dim: 1).");
+// CHECK:   choreo::runtime_check(hp0.shape()[2] == 2, "shape inconsistent on the 1st parameter (dim: 2).");
+// CHECK:   choreo::runtime_check(hp1.shape()[0] == 27, "shape inconsistent on the 2nd parameter (dim: 0).");
