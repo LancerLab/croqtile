@@ -4,14 +4,19 @@
 
 #include <chrono>
 
-__cok__ { /// kernel program
+__cok__ {
 
 __co_device__ extern "C" void relu_kernel(choreo::f16 * input, choreo::f16 * out) {
   constexpr int m = 128;
   constexpr int n = 256;
   for (int i = 0; i < m; ++i) {
     for (int j = 0; j < n; ++j) {
+#if __GCU_ARCH__ == 210 && !defined(__TOPSCC__)
+// workaround of f16 literals for old factor compiler
+      ((uint16_t*)out)[i*n + j] = ((float)input[i*n + j] > 0.0f) ? ((uint16_t*)input)[i*n + j] : 0;
+#else
       out[i*n + j] = choreo::f16_to_f32(input[i*n + j]) > 0.0f ? input[i*n + j] : choreo::f32_to_f16(0.0f);
+#endif
     }
   }
 }
@@ -68,7 +73,7 @@ int main() { /// host program
     for (size_t j = 0; j < res.shape()[1]; ++j) {
         // std::cout << "i: " << i << ", j: " << j << "\n";
         // std::cout << "res: " << res[i][j].toFloat() << "\n";
-        choreo::f16 ref = input_data[i][j] > 0.0f ? input_data[i][j] : f32_to_f16(0.0f);
+        choreo::f16 ref = (float)input_data[i][j] > 0.0f ? input_data[i][j] : f32_to_f16(0.0f);
 
         // std::cout << "ref: " << ref.toFloat() << std::endl;
         assert(ref == res[i][j]);
