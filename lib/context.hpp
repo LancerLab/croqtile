@@ -159,6 +159,7 @@ private:
   CompileTarget compile_target = CompileTarget::Unknown;
   TargetArch arch = TargetArch::Unknown;
   OutputKind out_kind = OutputKind::TargetExecutable;
+  uint8_t opt_level = 0;
 
 private:
   std::shared_ptr<SymbolTable> sym_tab = nullptr; // global symbol table
@@ -186,6 +187,9 @@ public:
 
   TargetArch GetArch() const { return arch; }
   void SetArch(TargetArch ta) { arch = ta; }
+
+  uint8_t GetOptimizationLevel() const { return opt_level; }
+  void SetOptimizationLevel(uint8_t lv) { opt_level = lv; }
 
   OutputKind GetOutputKind() { return out_kind; }
   void SetOutputKind(OutputKind ok) { out_kind = ok; }

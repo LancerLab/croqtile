@@ -1,11 +1,12 @@
 // REQUIRES: TARGET-GCU300
-// RUN: choreo -gs -t factor %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
+// RUN: choreo -gs -t factor %s -o %s.factor.result && bash %s.factor.result --execute | FileCheck --match-full-lines %s && rm -f %s.factor.result
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
 
 __cok__ {
 #include "tcle.h"
 using namespace tcle;
 
-extern "C" void call_gather_kernel(
+__co_device__ extern "C" void call_gather_kernel(
     int* input, int* index, int* output, int* off_buff, int* para) {
   // TCLE_MAX_VECTOR_LENGTH = 128 in GCU300
   using in_vtype = typename tcle::altivector<int, TCLE_MAX_VECTOR_LENGTH>::VT;
@@ -135,7 +136,7 @@ extern "C" void call_gather_kernel(
   }
 }
 
-extern "C" void call_gather_kernel_2(
+__co_device__ extern "C" void call_gather_kernel_2(
     int* input, int* index, int* output, int* off_buff, int* para) {
   int id_dim0 = para[0];
   int id_dim1 = para[1];
@@ -181,10 +182,14 @@ __co__ auto foo(s32[128] off_buff_L3, s32[102400, 512] input, s32[102400, 512] i
         id_L1 = dma.copy id.chunkat(p#d0, d1) => local;
 
         // 120000µs VS 210000µs
+#ifdef __TOPSCC__
+        call call_gather_kernel_2(
+            input_L1.data, id_L1.data, output_L1, off_buff, para_L1.data);
+#else
+// TODO: not sure why the TOPSCC kernel fails. alignment reqs?
         call call_gather_kernel(
             input_L1.data, id_L1.data, output_L1, off_buff, para_L1.data);
-        // call call_gather_kernel_2(
-        //     input_L1.data, id_L1.data, output_L1, off_buff, para_L1.data);
+#endif
 
         dma.copy output_L1 => output.chunkat(p#d0, d1);
       }
