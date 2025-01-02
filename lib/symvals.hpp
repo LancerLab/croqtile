@@ -136,34 +136,40 @@ inline T GetValueAt(ValueList vlist, int idx) {
   return *(std::get_if<T>(&vlist[idx]));
 };
 
+// If vi is not int, wrap it with "(xxx)".
+inline std::string WrapWithParentheses(const ValueItem& vi) {
+  if (!isa<int>(&vi)) return "(" + ValueItemAsString(vi) + ")";
+  return ValueItemAsString(vi);
+}
+
 // some operations
 inline ValueItem operator+(const ValueItem& vi1, const ValueItem& vi2) {
   if (!isa<int>(&vi1) || !isa<int>(&vi2))
-    return ValueItemAsString(vi1) + "+" + ValueItemAsString(vi2);
+    return WrapWithParentheses(vi1) + "+" + WrapWithParentheses(vi2);
   return *cast<int>(&vi1) + *cast<int>(&vi2);
 }
 
 inline ValueItem operator-(const ValueItem& vi1, const ValueItem& vi2) {
   if (!isa<int>(&vi1) || !isa<int>(&vi2))
-    return ValueItemAsString(vi1) + "-" + ValueItemAsString(vi2);
+    return WrapWithParentheses(vi1) + "-" + WrapWithParentheses(vi2);
   return *cast<int>(&vi1) - *cast<int>(&vi2);
 }
 
 inline ValueItem operator*(const ValueItem& vi1, const ValueItem& vi2) {
   if (!isa<int>(&vi1) || !isa<int>(&vi2))
-    return ValueItemAsString(vi1) + "*" + ValueItemAsString(vi2);
+    return WrapWithParentheses(vi1) + "*" + WrapWithParentheses(vi2);
   return *cast<int>(&vi1) * *cast<int>(&vi2);
 }
 
 inline ValueItem operator/(const ValueItem& vi1, const ValueItem& vi2) {
   if (!isa<int>(&vi1) || !isa<int>(&vi2))
-    return ValueItemAsString(vi1) + "/" + ValueItemAsString(vi2);
+    return WrapWithParentheses(vi1) + "/" + WrapWithParentheses(vi2);
   return *cast<int>(&vi1) / *cast<int>(&vi2);
 }
 
 inline ValueItem operator%(const ValueItem& vi1, const ValueItem& vi2) {
   if (!isa<int>(&vi1) || !isa<int>(&vi2))
-    return ValueItemAsString(vi1) + "%" + ValueItemAsString(vi2);
+    return WrapWithParentheses(vi1) + "%" + WrapWithParentheses(vi2);
   return *cast<int>(&vi1) % *cast<int>(&vi2);
 }
 
