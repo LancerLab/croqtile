@@ -51,10 +51,72 @@ bool FactorCodeGen::BeforeVisitImpl(AST::Node& n) {
     EmitFixedFactorHead();
 
     // some special kernel defs
-    ks << "#define __co_device__ \n";
-    ks << "static int inline __addr2int__(void* v) {\n";
-    ks << "  return (int)v;\n";
-    ks << "}\n";
+    ks << R"(#define __co_device__
+static int inline __addr2int__(void* v) { return (int)v; }
+namespace choreo {
+  using bf16 = __bf16;
+  using f16 = __fp16;
+
+  // workaround to fp16 literal
+  inline static f16 f32_to_f16(float value) {
+    uint32_t fltInt32 = *reinterpret_cast<uint32_t*>(&value);
+    uint32_t sign = (fltInt32 >> 31) & 0x1;
+    uint32_t exponent = ((fltInt32 >> 23) & 0xFF); // 8-bit exponent
+    uint32_t fraction = fltInt32 & 0x7FFFFF;       // 23-bit freaction
+    uint16_t resultBits = 0;
+
+    if (exponent == 0x0 && fraction == 0x0) { // Zero
+      return sign << 15;
+    }
+    if (exponent == 0x0 && fraction != 0x0) { // Subnormal for float32
+      // Subnormal float32 is all zero in float16
+      return sign << 15;
+    }
+    if (exponent == 0xFF && fraction == 0x0) { // Infinity
+      return (sign << 15) | (0x1F << 10);
+    }
+    if (exponent - 0x70 > 0x0 && exponent - 0x70 < 0x1F) { // Normalized value
+      // Only exponent within [-14, 15] could be convert to normalized float16
+      // Otherwise it will be inf
+      // Why 0x70(112)? 112 = 127 - 15
+      return (sign << 15) | (((exponent - 0x70) & 0x1F) << 10) |
+             ((fraction & 0x7FE000) >> 13);
+    } else { // Rest cases are all NaN.
+      // This strategy is not quite appropriate and needs improvement.
+      auto nanFraction = (fraction & 0x7FE000) >> 13;
+      if (nanFraction == 0) { nanFraction += 1; }
+      return (sign << 15) | (0x1F << 10) | nanFraction;
+    }
+    return *((f16*)&resultBits);
+  }
+
+  inline static float f16_to_f32(f16 v) {
+    uint16_t fltInt16 = *((uint16_t*)&v);
+    uint32_t sign = (fltInt16 >> 15) & 0x1;
+    uint32_t exponent = ((fltInt16 >> 10) & 0x1F); // 5-bit exponent
+    uint32_t fraction = fltInt16 & 0x3FF;          // 10-bit fraction
+    uint32_t resultBits = 0;
+
+    if (exponent == 0x0 && fraction == 0x0) { // Zero
+      resultBits = sign << 31;
+    }
+    if (exponent == 0x0 && fraction != 0x0) { // Subnormal for float16
+      // Subnormal float16 is noramlized in float32.
+      // Why 0x89(137)? 137 = 127 + 23 - 13
+      // Why (fraction - 1)? Minus the implicit "1" from normalized
+      resultBits = (sign << 31) | (0x89) << 23 | ((fraction - 1) << 13);
+    }
+    if (exponent > 0x0 && exponent < 0x1F) { // Normalized value
+      // Why 112? 112 = 127 - 15
+      resultBits = (sign << 31) | (exponent + 112) << 23 | (fraction << 13);
+    }
+    if (exponent == 0x1F && fraction != 0) { // Infinity or NaN
+      resultBits = (sign << 31) | 0x7F800000 | (fraction << 13);
+    }
+    return *reinterpret_cast<float*>(&resultBits);
+  }
+} // end namespace choreo
+)";
   } else if (isa<AST::ChoreoFunction>(&n)) {
     ResetChoreoFunctionStates();
     factor_fname = "__choreo_" + fname;
@@ -188,13 +250,11 @@ bool FactorCodeGen::AfterVisitImpl(AST::Node& n) {
       bool multiple_bounds = !cur_bounded_vars[name].empty();
       if (multiple_bounds) dec_by = cur_bounded_vars[name].top().size();
       for (int i = dec_by - 1; i >= 0; --i) {
+        auto bname = (multiple_bounds) ? cur_bounded_vars[name].top()[i] : name;
         DecrementIndent();
-        fs << indent << "}); // end of choreo-foreach block on '";
-        if (multiple_bounds)
-          fs << cur_bounded_vars[name].top()[i];
-        else
-          fs << name;
-        fs << "'.\n";
+        fs << indent << "}); // end of choreo-foreach block on '" << bname
+           << "'.\n";
+        fs << indent << bname << " = 0;\n"; // must reset
       }
     }
   } else if (auto wb = dyn_cast<AST::WithBlock>(&n)) {

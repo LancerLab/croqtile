@@ -66,18 +66,18 @@ __co__ auto bar(f16 [128, 4, 14, 69] a) {
 // CHECK:   return hp0;
 // CHECK: }
 
-// CHECK: __global__ void __choreo_device_bar(__fp16 * a) {
+// CHECK: __global__ void __choreo_device_bar(choreo::f16 * a) {
 // CHECK:   {
 // CHECK:     int __iv_index__elem__0 = 0;
 // CHECK:     int __iv_index__elem__1 = 0;
 // CHECK:     // foreach: tests/codegen/topscc/with-loop.co:17.1-15
 // CHECK:     for (__iv_index__elem__0 = 0; __iv_index__elem__0 < 2; ++__iv_index__elem__0) {
 // CHECK:       for (__iv_index__elem__1 = 0; __iv_index__elem__1 < 4; ++__iv_index__elem__1) {
-// CHECK:         __local__ __fp16 anon_1[2944];
+// CHECK:         __local__ choreo::half anon_1[2944];
 // CHECK:         tops_dte_ctx_t choreo_topscc_ctx1;
 // CHECK:         tops::dte_scope s_choreo_topscc_ctx1(choreo_topscc_ctx1);
-// CHECK:         tops::mdspan __mds2_a(tops::Global, (__fp16*)a, 128, 4, 14, 69);
-// CHECK:         tops::mdspan __mds3_anon_1(tops::Private, (__fp16*)anon_1, 64, 1, 2, 23);
+// CHECK:         tops::mdspan __mds2_a(tops::Global, (choreo::half*)a, 128, 4, 14, 69);
+// CHECK:         tops::mdspan __mds3_anon_1(tops::Private, (choreo::half*)anon_1, 64, 1, 2, 23);
 // CHECK:         int __slice_offset1__a_2_anon_1[] = {(int)(__iv_index__elem__0 * 64), (int)(__iv_index__elem__1 * 1), (int)(__tops_bid_x() * 2), (int)(__tops_tid_x() * 23)};
 // CHECK:         tops::slice(choreo_topscc_ctx1, __mds3_anon_1, __mds2_a, __slice_offset1__a_2_anon_1);
 // CHECK:       } // index__elem__1
@@ -86,7 +86,7 @@ __co__ auto bar(f16 [128, 4, 14, 69] a) {
 // CHECK: }
 
 // CHECK: choreo::spanned_data<choreo::f16, 4> bar(const choreo::spanned_view<choreo::f16, 4> & hp0) {
-// CHECK:   __fp16 * a__device = nullptr;
+// CHECK:   choreo::f16 * a__device = nullptr;
 // CHECK:   choreo::abend_true(topsMalloc(&a__device, 989184));
 // CHECK:   choreo::abend_true(topsMemcpy(a__device, hp0.data(), 989184, topsMemcpyHostToDevice));
 // CHECK:   dim3 __bar_gdims0(7, 1, 1);

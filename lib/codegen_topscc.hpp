@@ -33,11 +33,11 @@ enum CodeSegment {
   CS_CO,
 };
 
-inline const char* NameBaseType(BaseType ft) {
+inline const char* NameBaseType(BaseType ft, bool co_only = true) {
   switch (ft) {
   case BaseType::F32: return "float";
-  case BaseType::F16: return "__fp16";
-  case BaseType::BF16: return "__bf16";
+  case BaseType::F16: return (co_only) ? "choreo::half" : "choreo::f16";
+  case BaseType::BF16: return (co_only) ? "choreo::bfloat16" : "choreo::bf16";
   case BaseType::U32: return "unsigned int";
   case BaseType::U16: return "unsigned short";
   case BaseType::U8: return "unsigned char";

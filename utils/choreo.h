@@ -177,11 +177,95 @@ public:
 using f32 = float;
 
 #ifdef __TOPSCC__
-#define NATIVE_F16_SUPPORT
-#define NATIVE_BF16_SUPPORT
+#define __CHOREO_TARGET_NATIVE_HALF_FLOAT_SUPPORT__
+// #define __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
+#define __co_device__ __device__
+#define __co_host__ __host__
+#define __co_any__ __device__ __host__
+#else
+#define __co_device__
+#define __co_host__
+#define __co_any__
 #endif
 
-#ifndef NATIVE_F16_SUPPORT
+// Function to convert float to half precision bits
+// Refer to https://en.wikipedia.org/wiki/Half-precision_floating-point_format
+//    and https://en.wikipedia.org/wiki/Single-precision_floating-point_format
+template <typename T, typename F>
+__co_any__ inline static T __f32_to_f16(F value) {
+  static_assert(sizeof(F) == 4, "soruce is not a float.");
+  static_assert(sizeof(T) == 2, "target is not a half float.");
+
+  uint32_t fltInt32 = *reinterpret_cast<uint32_t*>(&value);
+  uint32_t sign = (fltInt32 >> 31) & 0x1;
+  uint32_t exponent = ((fltInt32 >> 23) & 0xFF); // 8-bit exponent
+  uint32_t fraction = fltInt32 & 0x7FFFFF;       // 23-bit freaction
+  uint16_t resultBits = 0;
+
+  if (exponent == 0x0 && fraction == 0x0) { // Zero
+    resultBits = sign << 15;
+    return *reinterpret_cast<T*>(&resultBits);
+  }
+  if (exponent == 0x0 && fraction != 0x0) { // Subnormal for float32
+    // Subnormal float32 is all zero in float16
+    resultBits = sign << 15;
+    return *reinterpret_cast<T*>(&resultBits);
+  }
+  if (exponent == 0xFF && fraction == 0x0) { // Infinity
+    resultBits = (sign << 15) | (0x1F << 10);
+    return *reinterpret_cast<T*>(&resultBits);
+  }
+  if (exponent - 0x70 > 0x0 && exponent - 0x70 < 0x1F) { // Normalized value
+    // Only exponent within [-14, 15] could be convert to normalized float16
+    // Otherwise it will be inf
+    // Why 0x70(112)? 112 = 127 - 15
+    resultBits = (sign << 15) | (((exponent - 0x70) & 0x1F) << 10) |
+                 ((fraction & 0x7FE000) >> 13);
+    return *reinterpret_cast<T*>(&resultBits);
+  } else { // Rest cases are all NaN.
+    // This strategy is not quite appropriate and needs improvement.
+    auto nanFraction = (fraction & 0x7FE000) >> 13;
+    if (nanFraction == 0) { nanFraction += 1; }
+    resultBits = (sign << 15) | (0x1F << 10) | nanFraction;
+    return *reinterpret_cast<T*>(&resultBits);
+  }
+  return *reinterpret_cast<T*>(&resultBits);
+}
+
+// Function to convert half precision bits to float
+// Refer to https://en.wikipedia.org/wiki/Half-precision_floating-point_format
+//    and https://en.wikipedia.org/wiki/Single-precision_floating-point_format
+template <typename T, typename F>
+__co_any__ inline static T __f16_to_f32(F value) {
+  static_assert(sizeof(T) == 4, "target is not a float.");
+  static_assert(sizeof(F) == 2, "soruce is not a half float.");
+
+  int16_t fltInt16 = *(int16_t*)&value;
+  uint32_t sign = (fltInt16 >> 15) & 0x1;
+  uint32_t exponent = ((fltInt16 >> 10) & 0x1F); // 5-bit exponent
+  uint32_t fraction = fltInt16 & 0x3FF;          // 10-bit fraction
+  uint32_t resultBits = 0;
+
+  if (exponent == 0x0 && fraction == 0x0) { // Zero
+    resultBits = sign << 31;
+  }
+  if (exponent == 0x0 && fraction != 0x0) { // Subnormal for float16
+    // Subnormal float16 is noramlized in float32.
+    // Why 0x89(137)? 137 = 127 + 23 - 13
+    // Why (fraction - 1)? Minus the implicit "1" from normalized
+    resultBits = (sign << 31) | (0x89) << 23 | ((fraction - 1) << 13);
+  }
+  if (exponent > 0x0 && exponent < 0x1F) { // Normalized value
+    // Why 112? 112 = 127 - 15
+    resultBits = (sign << 31) | (exponent + 112) << 23 | (fraction << 13);
+  }
+  if (exponent == 0x1F && fraction != 0) { // Infinity or NaN
+    resultBits = (sign << 31) | 0x7F800000 | (fraction << 13);
+  }
+  return *reinterpret_cast<T*>(&resultBits);
+}
+
+#ifndef __CHOREO_TARGET_NATIVE_HALF_FLOAT_SUPPORT__
 // this f16 accepts literal initialization, but without arith support
 class f16 {
 private:
@@ -192,136 +276,92 @@ public:
   f16() : bits(0) {}
 
   // Constructor for conversion from float
-  f16(float value) { bits = floatToHalfBits(value); }
+  f16(float value) { bits = __f32_to_f16<uint16_t>(value); }
 
   // Constructor for conversion from double
-  f16(double value) { bits = floatToHalfBits(static_cast<float>(value)); }
+  f16(double value) {
+    bits = __f32_to_f16<uint16_t>(static_cast<float>(value));
+  }
 
   // Implicit conversion from float
   f16& operator=(float value) {
-    bits = floatToHalfBits(value);
+    bits = __f32_to_f16<uint16_t>(value);
     return *this;
   }
 
   // Implicit conversion from double
   f16& operator=(double value) {
-    bits = floatToHalfBits(static_cast<float>(value));
+    bits = __f32_to_f16<uint16_t>(static_cast<float>(value));
     return *this;
   }
 
   template <typename T>
   bool operator==(T value) {
     if constexpr (std::is_same<T, f16>::value) {
-      auto valueF = value.toFloat();
-      if (std::isnan(valueF)) { return std::isnan(halfBitsToFloat(bits)); }
-      return halfBitsToFloat(bits) == valueF;
+      auto valueF = (float)value;
+      if (std::isnan(valueF)) { return std::isnan(__f16_to_f32<float>(bits)); }
+      return __f16_to_f32<float>(bits) == valueF;
     } else {
       auto valueF = static_cast<float>(value);
-      if (std::isnan(valueF)) { return std::isnan(halfBitsToFloat(bits)); }
-      return halfBitsToFloat(bits) == valueF;
+      if (std::isnan(valueF)) { return std::isnan(__f16_to_f32<float>(bits)); }
+      return __f16_to_f32<float>(bits) == valueF;
     }
   }
 
   template <typename T>
   bool operator>(T value) {
     if constexpr (std::is_same<T, f16>::value) {
-      auto valueF = value.toFloat();
-      if (std::isnan(valueF)) { return std::isnan(halfBitsToFloat(bits)); }
-      return halfBitsToFloat(bits) > valueF;
+      auto valueF = (float)value;
+      if (std::isnan(valueF)) { return std::isnan(__f16_to_f32<float>(bits)); }
+      return __f16_to_f32<float>(bits) > valueF;
     } else {
       auto valueF = static_cast<float>(value);
-      if (std::isnan(valueF)) { return std::isnan(halfBitsToFloat(bits)); }
-      return halfBitsToFloat(bits) > valueF;
+      if (std::isnan(valueF)) { return std::isnan(__f16_to_f32<float>(bits)); }
+      return __f16_to_f32<float>(bits) > valueF;
     }
   }
 
   template <typename T>
   bool operator<(T value) {
     if constexpr (std::is_same<T, f16>::value) {
-      auto valueF = value.toFloat();
-      if (std::isnan(valueF)) { return std::isnan(halfBitsToFloat(bits)); }
-      return halfBitsToFloat(bits) < valueF;
+      auto valueF = (float)value;
+      if (std::isnan(valueF)) { return std::isnan(__f16_to_f32<float>(bits)); }
+      return __f16_to_f32<float>(bits) < valueF;
     } else {
       auto valueF = static_cast<float>(value);
-      if (std::isnan(valueF)) { return std::isnan(halfBitsToFloat(bits)); }
-      return halfBitsToFloat(bits) < valueF;
+      if (std::isnan(valueF)) { return std::isnan(__f16_to_f32<float>(bits)); }
+      return __f16_to_f32<float>(bits) < valueF;
     }
-  }
-
-  // Function to convert float to half precision bits
-  // Refer to https://en.wikipedia.org/wiki/Half-precision_floating-point_format
-  //    and https://en.wikipedia.org/wiki/Single-precision_floating-point_format
-  static uint16_t floatToHalfBits(float value) {
-    uint32_t fltInt32 = *reinterpret_cast<uint32_t*>(&value);
-    uint32_t sign = (fltInt32 >> 31) & 0x1;
-    uint32_t exponent = ((fltInt32 >> 23) & 0xFF); // 8-bit exponent
-    uint32_t fraction = fltInt32 & 0x7FFFFF;       // 23-bit freaction
-    uint16_t resultBits = 0;
-
-    if (exponent == 0x0 && fraction == 0x0) { // Zero
-      return sign << 15;
-    }
-    if (exponent == 0x0 && fraction != 0x0) { // Subnormal for float32
-      // Subnormal float32 is all zero in float16
-      return sign << 15;
-    }
-    if (exponent == 0xFF && fraction == 0x0) { // Infinity
-      return (sign << 15) | (0x1F << 10);
-    }
-    if (exponent - 0x70 > 0x0 && exponent - 0x70 < 0x1F) { // Normalized value
-      // Only exponent within [-14, 15] could be convert to normalized float16
-      // Otherwise it will be inf
-      // Why 0x70(112)? 112 = 127 - 15
-      return (sign << 15) | (((exponent - 0x70) & 0x1F) << 10) |
-             ((fraction & 0x7FE000) >> 13);
-    } else { // Rest cases are all NaN.
-      // This strategy is not quite appropriate and needs improvement.
-      auto nanFraction = (fraction & 0x7FE000) >> 13;
-      if (nanFraction == 0) { nanFraction += 1; }
-      return (sign << 15) | (0x1F << 10) | nanFraction;
-    }
-    return resultBits;
-  }
-
-  // Function to convert half precision bits to float
-  // Refer to https://en.wikipedia.org/wiki/Half-precision_floating-point_format
-  //    and https://en.wikipedia.org/wiki/Single-precision_floating-point_format
-  static float halfBitsToFloat(uint16_t fltInt16) {
-    uint32_t sign = (fltInt16 >> 15) & 0x1;
-    uint32_t exponent = ((fltInt16 >> 10) & 0x1F); // 5-bit exponent
-    uint32_t fraction = fltInt16 & 0x3FF;          // 10-bit fraction
-    uint32_t resultBits = 0;
-
-    if (exponent == 0x0 && fraction == 0x0) { // Zero
-      resultBits = sign << 31;
-    }
-    if (exponent == 0x0 && fraction != 0x0) { // Subnormal for float16
-      // Subnormal float16 is noramlized in float32.
-      // Why 0x89(137)? 137 = 127 + 23 - 13
-      // Why (fraction - 1)? Minus the implicit "1" from normalized
-      resultBits = (sign << 31) | (0x89) << 23 | ((fraction - 1) << 13);
-    }
-    if (exponent > 0x0 && exponent < 0x1F) { // Normalized value
-      // Why 112? 112 = 127 - 15
-      resultBits = (sign << 31) | (exponent + 112) << 23 | (fraction << 13);
-    }
-    if (exponent == 0x1F && fraction != 0) { // Infinity or NaN
-      resultBits = (sign << 31) | 0x7F800000 | (fraction << 13);
-    }
-    return *reinterpret_cast<float*>(&resultBits);
   }
 
   // Method to get the float value from the f16 object
-  float toFloat() const { return halfBitsToFloat(bits); }
+  operator float() const { return __f16_to_f32<float>(bits); }
 };
+
+using half = unsigned short; // device f16 type simulation
+
+inline std::ostream& operator<<(std::ostream& os, const f16& v) {
+  os << (float)v;
+  return os;
+}
+
 #else
 using f16 = __fp16;
-#endif // NATIVE_F16_SUPPORT
+using half = __fp16;
+#endif // __CHOREO_TARGET_NATIVE_HALF_FLOAT_SUPPORT__
 
-#ifndef NATIVE_BF16_SUPPORT
+__co_any__ inline static f16 f32_to_f16(f32 value) {
+  return __f32_to_f16<f16>(value);
+}
+
+__co_any__ inline static f32 f16_to_f32(f16 value) {
+  return __f16_to_f32<f32>(value);
+}
+
+#ifndef __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
 class bf16 {
 private:
-  uint16_t bits; // Storage for the half-precision bits
+  uint16_t bits = 0; // Storage for the half-precision bits
 
 public:
   // Default constructor
@@ -354,7 +394,7 @@ public:
   template <typename T>
   bool operator==(T value) {
     if constexpr (std::is_same<T, bf16>::value) {
-      auto valueF = value.toFloat();
+      auto valueF = (float)value;
       if (std::isnan(valueF)) { return std::isnan(halfBitsToFloat(bits)); }
       return halfBitsToFloat(bits) == valueF;
     } else {
@@ -367,7 +407,7 @@ public:
   template <typename T>
   bool operator>(T value) {
     if constexpr (std::is_same<T, bf16>::value) {
-      auto valueF = value.toFloat();
+      auto valueF = (float)value;
       if (std::isnan(valueF)) { return std::isnan(halfBitsToFloat(bits)); }
       return halfBitsToFloat(bits) > valueF;
     } else {
@@ -380,7 +420,7 @@ public:
   template <typename T>
   bool operator<(T value) {
     if constexpr (std::is_same<T, bf16>::value) {
-      auto valueF = value.toFloat();
+      auto valueF = (float)value;
       if (std::isnan(valueF)) { return std::isnan(halfBitsToFloat(bits)); }
       return halfBitsToFloat(bits) < valueF;
     } else {
@@ -406,25 +446,32 @@ public:
   }
 
   // Method to get the float value from the bf16 object
-  float toFloat() const { return halfBitsToFloat(bits); }
+  operator float() const { return halfBitsToFloat(bits); }
 };
-#else
+
+using bfloat16 = unsigned short; // device bfloat16 type
+
+inline std::ostream& operator<<(std::ostream& os, const bf16& v) {
+  os << (float)v;
+  return os;
+}
+
+#else // __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
+
+using bf16 = __bf16;
+using bfloat16 = __bf16;
+
 // Check for __bf16 support
-#if defined(__TOPSCC__)
-#define BF16_SUPPORTED 1
-using bf16 = __bf16;
-#elif defined(__clang__)
-#if __clang_major__ >= 11
-#define BF16_SUPPORTED 1
-using bf16 = __bf16;
-#endif
-#elif defined(__GNUC__)
-#if __GNUC__ >= 11
-#define BF16_SUPPORTED 1
-using bf16 = __bf16;
-#endif
-#endif
-#endif // NATIVE_BF16_SUPPORT
+#if !defined(__TOPSCC__) || !defined(__clang__) || !defined(__GNUC__)
+#error                                                                         \
+    "Compiler does not support __bf16. Please use a compiler that supports __bf16 or define a fallback type."
+#elif (defined(__clang__) && __clang_major__ < 11) ||                          \
+    (defined(__GNUC__) && __GNUC__ < 11)
+#error                                                                         \
+    "Compiler does not support __bf16. Please use a compiler that supports __bf16 or define a fallback type."
+#endif // defined...
+
+#endif // __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
 
 #ifndef BF16_SUPPORTED
 //#error \
@@ -524,14 +571,8 @@ private:
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<float> rand_func(
-#ifdef NATIVE_F16_SUPPORT
         static_cast<float>(lb),
-        static_cast<float>(ub)
-#else
-        lb.toFloat(),
-        ub.toFloat()
-#endif
-    ); // [-1.0, 1.0)
+        static_cast<float>(ub)); // [-1.0, 1.0)
     std::generate_n(&array[0], N, [&]() { return U(rand_func(gen)); });
   }
 
@@ -542,14 +583,8 @@ private:
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<float> rand_func(
-#ifdef NATIVE_BF16_SUPPORT
         static_cast<float>(lb),
-        static_cast<float>(ub)
-#else
-        lb.toFloat(),
-        ub.toFloat()
-#endif
-    ); // [-1.0, 1.0)
+        static_cast<float>(ub)); // [-1.0, 1.0)
 
     std::generate_n(&array[0], N, [&]() { return U(rand_func(gen)); });
   }
@@ -712,7 +747,6 @@ static __attribute__((always_inline)) inline void abend_true(bool p) {
   if (p) std::abort();
 }
 
-#define __co_device__ __device__
 // --- light-weight choreo-topscc device library --- //
 
 __device__ inline static __attribute__((noreturn)) void __co_abort__() {

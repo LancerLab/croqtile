@@ -7,10 +7,10 @@ __co__ void init() {
   }
 }
 
-// CHECK:   __shared__ __fp16 b[33];
+// CHECK:   __shared__ choreo::half b[33];
 // CHECK:   tops_dte_ctx_t b__init;
 // CHECK:   tops::dte_scope s_b__init(b__init);
-// CHECK:   tops::memset(b__init, tops::mdspan(tops::Shared, (__fp16*)b, 33), 3);
+// CHECK:   tops::memset(b__init, tops::mdspan(tops::Shared, (choreo::half*)b, 33), 3);
 // CHECK:   __local__ unsigned char c[78];
 // CHECK:   tops_dte_ctx_t c__init;
 // CHECK:   tops::dte_scope s_c__init(c__init);

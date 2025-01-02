@@ -231,7 +231,7 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
         // Only the globals are declared in host. The shareds/locals are
         // declared in device
         auto sym = UnScopedName(item.name);
-        std::string bts = NameBaseType(sty->ElementType());
+        std::string bts = NameBaseType(sty->ElementType(), false);
         auto buf_sym = sym + "__device";
         hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
         hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym << ", "
@@ -296,6 +296,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
 
     bool spmem = false; // allocatable scratchpad memory: share, local
     if (sty->GetStorage() == Storage::GLOBAL) {
+      bts = NameBaseType(sty->ElementType(), false); // use the device type name
       auto buf_sym = sym + "__device";
       if (!IsChoreoOutput(InScopeName(sym))) {
         if (!n.init_value) {
@@ -729,7 +730,7 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
   for (auto& a : n.GetArguments()) {
     ds << ((i++ == 0) ? "" : ", ");
     if (auto sty = GetSpannedType(NodeType(*a))) {
-      std::string bts{NameBaseType(sty->ElementType())};
+      std::string bts{NameBaseType(sty->ElementType(), false)};
       ds << "(" << bts << "*)" << ExprSTR(a, false);
     } else
       ds << ExprSTR(a, false);
@@ -869,7 +870,7 @@ DeviceParamTypeStringify(const Choreo::Type& ty) {
   else if (isa<BooleanType>(&ty))
     return "bool";
   else if (auto sty = dyn_cast<SpannedType>(&ty)) {
-    return std::string(NameBaseType(sty->ElementType())) + " *";
+    return std::string(NameBaseType(sty->ElementType(), false)) + " *";
   } else
     choreo_unreachable("unsupported host function type.");
   return "";

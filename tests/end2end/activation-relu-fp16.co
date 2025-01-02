@@ -1,17 +1,17 @@
-// REQUIRES: TARGET-GCU210
-// TODO: <topscc failed on gcu210>: choreo -gs -t topscc %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -gs -t factor %s -o %s.factor.result && bash %s.factor.result --execute | FileCheck --match-full-lines %s && rm -f %s.factor.result
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
 
-#include "choreo.h"
 #include <chrono>
 
 __cok__ { /// kernel program
 
-__co_device__ void relu_kernel(__fp16* input, __fp16* out) {
+__co_device__ extern "C" void relu_kernel(choreo::f16 * input, choreo::f16 * out) {
   constexpr int m = 128;
   constexpr int n = 256;
   for (int i = 0; i < m; ++i) {
     for (int j = 0; j < n; ++j) {
-      out[i*n + j] = input[i*n + j] > __fp16(0.0f) ? input[i*n + j] : __fp16(0.0f);
+      out[i*n + j] = choreo::f16_to_f32(input[i*n + j]) > 0.0f ? input[i*n + j] : choreo::f32_to_f16(0.0f);
     }
   }
 }
@@ -51,12 +51,11 @@ int main() { /// host program
   choreo::f16 a[512][1024]; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::f16 b[512][512] = {0};
 
   auto input_data = choreo::make_spanview<2, choreo::f16>((choreo::f16*)a, {512, 1024});
-  input_data.fill_random(-1.0, 1.0);
+  input_data.fill_random(-1.0f, 1.0f);
 
   auto start = std::chrono::high_resolution_clock::now();
 
-  auto res
-    = relu(input_data);
+  auto res = relu(input_data);
 
   auto end = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
@@ -69,7 +68,7 @@ int main() { /// host program
     for (size_t j = 0; j < res.shape()[1]; ++j) {
         // std::cout << "i: " << i << ", j: " << j << "\n";
         // std::cout << "res: " << res[i][j].toFloat() << "\n";
-        choreo::f16 ref = input_data[i][j] > 0.0? input_data[i][j] : 0.0;
+        choreo::f16 ref = input_data[i][j] > 0.0f ? input_data[i][j] : f32_to_f16(0.0f);
 
         // std::cout << "ref: " << ref.toFloat() << std::endl;
         assert(ref == res[i][j]);
