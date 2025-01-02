@@ -22,36 +22,32 @@ __co__ void nested()  {
 // CHECK:     int __iv_index__elem__0 = 0;
 // CHECK:     int __iv_index__elem__1 = 0;
 // CHECK:     {
-// CHECK:       int __iv_x__elem__0 = 0;
 // CHECK:       for (__iv_index__elem__0 = 0; __iv_index__elem__0 < 10; ++__iv_index__elem__0) {
-// CHECK:         __iv_index__elem__1 = 0;
-// CHECK:         __iv_x__elem__0 = 0;
 // CHECK:         for (__iv_index__elem__1 = 0; __iv_index__elem__1 < 9; ++__iv_index__elem__1) {
-// CHECK:           __iv_x__elem__0 = 0;
 // CHECK:           for (__iv_x__elem__0 = 0; __iv_x__elem__0 < 7; ++__iv_x__elem__0) {
 // CHECK:             {
 // CHECK:               int __iv_idx__elem__0 = 0;
 // CHECK:               int __iv_idx__elem__1 = 0;
 // CHECK:               int __iv_idx__elem__2 = 0;
 // CHECK:               {
-// CHECK:                 int __iv_y__elem__0 = 0;
 // CHECK:                 for (__iv_y__elem__0 = 0; __iv_y__elem__0 < 3; ++__iv_y__elem__0) {
-// CHECK:                   __iv_idx__elem__0 = 0;
-// CHECK:                   __iv_idx__elem__1 = 0;
-// CHECK:                   __iv_idx__elem__2 = 0;
 // CHECK:                   for (__iv_idx__elem__0 = 0; __iv_idx__elem__0 < 8; ++__iv_idx__elem__0) {
-// CHECK:                     __iv_idx__elem__1 = 0;
-// CHECK:                     __iv_idx__elem__2 = 0;
 // CHECK:                     for (__iv_idx__elem__1 = 0; __iv_idx__elem__1 < 9; ++__iv_idx__elem__1) {
-// CHECK:                       __iv_idx__elem__2 = 0;
 // CHECK:                       for (__iv_idx__elem__2 = 0; __iv_idx__elem__2 < 10; ++__iv_idx__elem__2) {
 // CHECK:                       } // idx__elem__2
+// CHECK:                       __iv_idx__elem__2 = 0;
 // CHECK:                     } // idx__elem__1
+// CHECK:                     __iv_idx__elem__1 = 0;
 // CHECK:                   } // idx__elem__0
+// CHECK:                   __iv_idx__elem__0 = 0;
 // CHECK:                 } // y__elem__0
+// CHECK:                 __iv_y__elem__0 = 0;
 // CHECK:               }
 // CHECK:             }
 // CHECK:           } // x__elem__0
+// CHECK:           __iv_x__elem__0 = 0;
 // CHECK:         } // index__elem__1
+// CHECK:         __iv_index__elem__1 = 0;
 // CHECK:       } // index__elem__0
+// CHECK:       __iv_index__elem__0 = 0;
 // CHECK:     }

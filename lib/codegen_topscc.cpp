@@ -216,6 +216,9 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
     ssm.MapHostSymbol(item.first, UnScopedName(item.first));
   }
 
+  // emit the runtime checks
+  EmitHostRuntimeCheck();
+
   // do not generate device function unless parallel-by exists
   if (NeedDeviceFunc()) {
     EmitDeviceFuncDecl(ds);
@@ -788,9 +791,6 @@ bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
          << UnScopedExpr(STR(iv_bty->GetUpperBound())) << "; ++"
          << ssm.DeviceName(iv_name) << ") {\n";
       IncrDeviceIndent();
-      // must reset all the enclosed IVs to be zero
-      for (auto enclosed_iv : ProbeEnclosedIVs(iv_name, n))
-        ds << d_indent << ssm.DeviceName(enclosed_iv) << " = 0;\n";
     }
   }
   return true;
@@ -859,6 +859,64 @@ void TopsccCodeGen::EmitHostFuncDecl(std::ostringstream& oss) {
   oss << ")";
 
   VST_DEBUG(dbgs() << "Host function prototype:\n" << oss.str());
+}
+
+void TopsccCodeGen::EmitHostRuntimeCheck() {
+  // check if the input shape is as declared in choreo
+  if (cgi->ParameterCount(fname) == 0) return;
+
+  struct Entry {
+    size_t para_ordinal;
+    size_t dim;
+    std::string elem_name;
+  };
+  std::map<ValueExpr, std::vector<Entry>> ve_entries_map;
+
+  size_t host_pindex = 0;
+  for (auto& item : GetChoreoFuncIns()) {
+    assert((int)host_pindex == item.p_index);
+    auto name = ssm.HostName(item.name);
+    if (auto sty = dyn_cast<SpannedType>(item.type)) {
+      size_t dim_count = 0;
+      for (auto vi : sty->GetShape().Value()) {
+        auto elem_name = name + ".shape()[" + std::to_string(dim_count) + "]";
+        if (auto vale = dyn_cast<int>(&vi)) {
+          hs << "  choreo::runtime_check(" << elem_name << " == " << *vale;
+          hs << ", \"shape inconsistent on the " << Ordinal(host_pindex + 1)
+             << " parameter (dim: " << dim_count << ").\");\n";
+        } else if (auto vale = dyn_cast<ValueExpr>(&vi)) {
+          ve_entries_map[*vale].push_back(
+              {host_pindex + 1, dim_count, elem_name});
+        }
+        dim_count++;
+      }
+    }
+    host_pindex++;
+  }
+
+  // check if the named dims meet the constraint
+  // eg. __co__ void foo(f32 [M, N] a, f32 [N, K] b)
+  // then a.shape()[1] should be equal to b.shape()[0]
+  for (auto& [_, entries] : ve_entries_map) {
+    for (size_t i = 1; i < entries.size(); ++i) {
+      auto& entry0 = entries[i - 1];
+      auto& entry1 = entries[i];
+      hs << "  choreo::runtime_check(" << entry0.elem_name
+         << " == " << entry1.elem_name;
+      hs << ", \"The shapes of the " << Ordinal(entry0.para_ordinal)
+         << " parameter (dim: " << entry0.dim << ") and the "
+         << Ordinal(entry1.para_ordinal) << " parameter (dim: " << entry1.dim
+         << ") are inconsistent.\");\n";
+    }
+  }
+
+  hs << "\n";
+
+  for (const auto& rc : FCtx(fname).GetRtChecks()) {
+    hs << "  choreo::runtime_check(" << ValueSTR(rc.lhs) << " " << rc.op << " "
+       << ValueSTR(rc.rhs) << ", \"" << rc.message << ", " << rc.loc
+       << "\");\n";
+  }
 }
 
 static inline const std::string

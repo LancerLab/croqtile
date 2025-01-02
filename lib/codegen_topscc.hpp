@@ -183,6 +183,8 @@ private:
   void EmitSource();
   void EmitScript();
 
+  void EmitHostRuntimeCheck();
+
 private:
   void IncrHostIndent() { h_indent += "  "; }
   void IncrDeviceIndent() { d_indent += "  "; }
