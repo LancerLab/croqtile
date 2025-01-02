@@ -6,7 +6,6 @@
 #include "codegen_prepare.hpp"
 #include "earlysema.hpp"
 #include "gcucheck.hpp"
-#include "factorcheck.hpp"
 #include "latenorm.hpp"
 #include "memcheck.hpp"
 #include "normalize.hpp"
@@ -315,9 +314,6 @@ int main(int argc, char* argv[]) {
     // apply the gcu specific checking
     GCUCheck gcu_checker;
     if (!gcu_checker.RunOnProgram(root)) return gcu_checker.Status();
-
-    FactorCheck factor_checker(sc.SymTab());
-    if (!factor_checker.RunOnProgram(root)) return factor_checker.Status();
 
     FactorTrans trans;
     if (!trans.RunOnProgram(root)) return trans.Status();
