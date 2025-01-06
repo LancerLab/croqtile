@@ -1274,7 +1274,8 @@ void FactorCodeGen::EmitFixedHostHead() {
 
 // include the choreo header;
 )";
-  if (native_f16) oss << "#define  __CHOREO_TARGET_NATIVE_HALF_FLOAT_SUPPORT__\n";
+  if (native_f16)
+    oss << "#define  __CHOREO_TARGET_NATIVE_HALF_FLOAT_SUPPORT__\n";
   oss << R"(#include "choreo.h"
 
 using namespace choreo;

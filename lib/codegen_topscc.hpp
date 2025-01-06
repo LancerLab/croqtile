@@ -73,6 +73,15 @@ public:
     assert(!device_map.back().count(csym) && "symbol existed");
     device_map.back()[csym] = name;
   }
+  void MapDeviceSymbolIfNotExist(const std::string& csym,
+                                 const std::string& name) {
+    assert(PrefixedWith(csym, "::") && "expect a scoped name.");
+    if (!device_map.back().count(csym))
+      MapDeviceSymbol(csym, name);
+    else
+      assert((device_map.back().at(csym) == name) &&
+             "map symbol with a different name.");
+  }
   // only for specific purpose
   void RemapDeviceSymbol(const std::string& csym, const std::string& name) {
     assert(PrefixedWith(csym, "::") && "expect a scoped name.");
@@ -89,6 +98,12 @@ public:
     for (auto mapit = device_map.rbegin(); mapit != device_map.rend(); ++mapit)
       if (mapit->count(csym)) return (*mapit).at(csym);
     return csym;
+  }
+
+  bool HasDeviceName(const std::string& csym) const {
+    for (auto mapit = device_map.rbegin(); mapit != device_map.rend(); ++mapit)
+      if (mapit->count(csym)) return true;
+    return false;
   }
 
   const std::string DeviceNameOrNull(const std::string& csym) const {

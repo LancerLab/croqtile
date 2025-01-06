@@ -458,30 +458,40 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
 bool TopsccCodeGen::Visit(AST::DMA& n) {
   TraceEachVisit(n);
 
-  auto claimContext = [this, &n]() {
+  auto claimFuture = [this, &n](const std::string& buf_expr) -> std::string {
+    if (!n.future.empty() && claimed_dte.count(InScopeName(n.future)))
+      return n.future;
+
     // claim the date transfer engine
     auto dte_ctx = GetDTEContextName();
     ds << d_indent << "tops_dte_ctx_t " << dte_ctx << ";\n";
-    ds << d_indent << "tops::dte_scope s_" << dte_ctx << "(" << dte_ctx
-       << ");\n";
+    auto future_name = n.future;
+    if (future_name.empty()) {
+      static size_t future_count = 0;
+      future_name = "__choreo_anon_fut__" + std::to_string(future_count++);
+    } else {
+      claimed_dte.emplace(InScopeName(n.future), dte_ctx);
+      ssm.MapDeviceSymbol(InScopeName(n.future), n.future);
+      ssm.MapDeviceSymbol(InScopeName(n.future) + ".data",
+                          n.future + ".data()");
+    }
+    ds << d_indent << "choreo::future " << future_name << "(" << dte_ctx
+       << ", \"" << n.future << "\", " << n.LOC().begin.line << ", "
+       << n.LOC().begin.column;
+    if (!buf_expr.empty()) ds << ", " << buf_expr;
+    ds << ");\n";
 
-    return dte_ctx;
+    return future_name;
   };
 
   auto nty = NodeType(n);
   if (auto ph = dyn_cast<PlaceHolderType>(nty)) {
     assert(ph->Category() == TypeCategory::FUTURE);
-    ds << d_indent << "choreo::future " << n.future << "(\"" << n.future
-       << "\", " << n.LOC().begin.line << ", " << n.LOC().begin.column
-       << ");\n"; // declarative future
-    ds << d_indent << "tops::event " << n.future << "__event__;\n";
-    claimed_dte.emplace(InScopeName(n.future), claimContext());
-    ssm.MapDeviceSymbol(InScopeName(n.future), n.future);
     // must set the buffer
     auto buf_name = FBInfo().at(InScopeName(n.future)).buffer;
-    ds << d_indent << n.future << ".set_data(" << UnScopedName(buf_name)
-       << ");\n";
-    ssm.MapDeviceSymbol(InScopeName(n.future) + ".data", n.future + ".data()");
+    assert(ssm.HasDeviceName(buf_name) && "buffer has been defined");
+
+    claimFuture(UnScopedName(buf_name));
     // make following buffer reference all be indirect
     // TODO: any better idea than this
     ssm.RemapDeviceSymbol(buf_name, n.future + ".data()");
@@ -490,12 +500,6 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
 
   assert(isa<AST::ChunkAt>(n.from) && "Unexpected type for DMA's source.");
   assert(isa<AST::ChunkAt>(n.to) && "Unexpected type for DMA's destination.");
-
-  std::string dte_ctx;
-  if (n.future.empty() || !claimed_dte.count(InScopeName(n.future)))
-    dte_ctx = claimContext();
-  else
-    dte_ctx = claimed_dte.at(InScopeName(n.future));
 
   auto fty = dyn_cast<FutureType>(nty);
   assert(fty && "Invalid type of DMA statement!");
@@ -520,6 +524,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       buf_expr = ssm.DeviceName(InScopeName(sym));
     return buf_expr;
   };
+
   auto GetMDSName = [this](const std::string& buf_expr,
                            const ptr<SpannedType>& sty) {
     static int mds_cnt = 0;
@@ -537,31 +542,29 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   auto f_mds_name = GetMDSName(f_buf_expr, f_sty);
   auto t_mds_name = GetMDSName(t_buf_expr, t_sty);
 
+  auto future_name = n.future;
+  // bind the data to the future
+  if (!((f_ca->positions == nullptr) && (t_ca->positions)))
+    future_name = claimFuture(t_buf_expr);
+  else
+    future_name = claimFuture("");
+
   std::string event_name;
-  if (!n.future.empty()) {
-    event_name = n.future + "__event__";
-    if (!claimed_dte.count(InScopeName(n.future))) {
-      ds << d_indent << "choreo::future " << n.future << "(\"" << n.future
-         << "\", " << n.LOC().begin.line << ", " << n.LOC().begin.column
-         << ");\n";
-      if (!((f_ca->positions == nullptr) && (t_ca->positions)))
-        ds << d_indent << n.future << ".set_data(" << t_buf_expr << ");\n";
-    }
-  }
+  if (fty->IsAsync()) event_name = future_name + "__event__";
 
   if (n.operation == ".copy") {
     if (f_ca->positions == nullptr) {
       if (t_ca->positions == nullptr) {
         // no chunkat
-        ds << d_indent
-           << (fty->IsAsync() ? "tops::event " + event_name + " = " : "");
-        ds << "tops::memcpy" << (fty->IsAsync() ? "_async" : "") << "("
-           << dte_ctx << ", " << t_mds_name << ", " << f_mds_name << ");\n";
+        ds << d_indent;
+        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
+        ds << "tops::memcpy" << (fty->IsAsync() ? "_async" : "") << "(*"
+           << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
+           << ");\n";
         // set the device future
-        if (!n.future.empty()) {
-          if (fty->IsAsync())
-            ds << d_indent << n.future << ".set_event(" << event_name << ");\n";
-        }
+        if (!event_name.empty())
+          ds << d_indent << future_name << ".set_event(" << event_name
+             << ");\n";
       } else {
         static int ds_cnt = 0;
         auto off_name = "__deslice_offset" + std::to_string(ds_cnt++) + "__" +
@@ -585,18 +588,18 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         }
         ds << d_indent << "int " << off_name << "[] = {" << offset.str()
            << "};\n";
-        ds << d_indent
-           << (fty->IsAsync() ? "tops::event " + event_name + " = " : "");
-        ds << "tops::deslice" << (fty->IsAsync() ? "_async" : "") << "("
-           << dte_ctx << ", " << t_mds_name << ", " << f_mds_name << ", "
-           << off_name << ");\n";
+        ds << d_indent;
+        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
+        ds << "tops::deslice" << (fty->IsAsync() ? "_async" : "") << "(*"
+           << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
+           << ", " << off_name << ");\n";
         // set the device future
-        if (!n.future.empty()) {
-          if (fty->IsAsync())
-            ds << d_indent << n.future << ".set_event(" << event_name << ");\n";
-          std::string bts{NameBaseType(t_sty->ElementType())};
+        if (!event_name.empty()) {
+          ds << d_indent << future_name << ".set_event(" << event_name
+             << ");\n";
 #if 0
-          ds << d_indent << n.future << ".set_data(&" << f_mds_name << ".get<"
+          std::string bts{NameBaseType(t_sty->ElementType())};
+          ds << d_indent << future_name << ".set_data(&" << f_mds_name << ".get<"
              << bts << ">(" << offset.str() << "));\n";
 #endif
         }
@@ -624,16 +627,14 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       }
       ds << d_indent << "int " << off_name << "[] = {" << offset.str()
          << "};\n";
-      ds << d_indent
-         << (fty->IsAsync() ? "tops::event " + event_name + " = " : "");
-      ds << "tops::slice" << (fty->IsAsync() ? "_async" : "") << "(" << dte_ctx
-         << ", " << t_mds_name << ", " << f_mds_name << ", " << off_name
-         << ");\n";
+      ds << d_indent;
+      if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
+      ds << "tops::slice" << (fty->IsAsync() ? "_async" : "") << "(*"
+         << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
+         << ", " << off_name << ");\n";
       // set the device future
-      if (!n.future.empty()) {
-        if (fty->IsAsync())
-          ds << d_indent << n.future << ".set_event(" << event_name << ");\n";
-      }
+      if (!event_name.empty())
+        ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
     }
   } else if (n.operation == ".pad") {
     auto pad_config = cast<PadConfig>(n.GetConfig());
@@ -644,17 +645,16 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     ds << d_indent << "int __pad_mid_" << f_buf_expr << "[] = {"
        << DelimitedString(pad_config->pad_mid) << "};\n";
     if (f_ca->positions == nullptr) {
-      ds << d_indent
-         << (fty->IsAsync() ? "tops::event " + event_name + " = " : "");
-      ds << "tops::pad" << (fty->IsAsync() ? "_async" : "") << "(" << dte_ctx
-         << ", __mds_" << t_buf_expr << ", __mds_" << f_buf_expr
-         << ", __pad_low_" << f_buf_expr << ", __pad_high_" << f_buf_expr
-         << ", __pad_mid_" << f_buf_expr << ", " << pad_config->value.v
-         << ");\n";
+      ds << d_indent;
+      if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
+      ds << "tops::pad" << (fty->IsAsync() ? "_async" : "") << "(*"
+         << future_name << ".get_ctx(), __mds_" << t_buf_expr << ", __mds_"
+         << f_buf_expr << ", __pad_low_" << f_buf_expr << ", __pad_high_"
+         << f_buf_expr << ", __pad_mid_" << f_buf_expr << ", "
+         << pad_config->value.v << ");\n";
       // set the device future
-      if (!n.future.empty()) {
-        if (fty->IsAsync())
-          ds << d_indent << n.future << ".set_event(" << event_name << ");\n";
+      if (!event_name.empty()) {
+        ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
       }
     } else {
       assert(false && "unsupported");
@@ -665,26 +665,19 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     ds << d_indent << "int __transpose_layout_" << f_buf_expr << "[] = {"
        << DelimitedString(transp_config->dim_values) << "};\n";
     if (f_ca->positions == nullptr) {
-      ds << d_indent
-         << (fty->IsAsync() ? "tops::event " + event_name + " = " : "");
-      ds << "tops::transpose" << (fty->IsAsync() ? "_async" : "") << "("
-         << dte_ctx << ", " << t_mds_name << ", " << f_mds_name
+      ds << d_indent;
+      if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
+      ds << "tops::transpose" << (fty->IsAsync() ? "_async" : "") << "(*"
+         << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
          << ", __transpose_layout_" << f_buf_expr << ");\n";
       // set the device future
-      if (!n.future.empty()) {
-        if (fty->IsAsync())
-          ds << d_indent << n.future << ".set_event(" << event_name << ");\n";
+      if (!event_name.empty()) {
+        ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
       }
     } else {
       assert(false && "unsupported");
       // TODO: shall we support slice_transpose (chunkat+transpose)?
     }
-  }
-
-  if (!n.future.empty() && !claimed_dte.count(InScopeName(n.future))) {
-    claimed_dte.emplace(InScopeName(n.future), dte_ctx);
-    ssm.MapDeviceSymbol(InScopeName(n.future), n.future);
-    ssm.MapDeviceSymbol(InScopeName(n.future) + ".data", n.future + ".data()");
   }
 
   return true;
@@ -881,7 +874,8 @@ void TopsccCodeGen::EmitHostRuntimeCheck() {
       for (auto vi : sty->GetShape().Value()) {
         auto elem_name = name + ".shape()[" + std::to_string(dim_count) + "]";
         if (auto vale = dyn_cast<int>(&vi)) {
-          hs << "  choreo::runtime_check(" << elem_name << " == " << *vale;
+          hs << h_indent << "choreo::runtime_check(" << elem_name
+             << " == " << *vale;
           hs << ", \"shape inconsistent on the " << Ordinal(host_pindex + 1)
              << " parameter (dim: " << dim_count << ").\");\n";
         } else if (auto vale = dyn_cast<ValueExpr>(&vi)) {
@@ -894,14 +888,16 @@ void TopsccCodeGen::EmitHostRuntimeCheck() {
     host_pindex++;
   }
 
-  // check if the named dims meet the constraint
-  // eg. __co__ void foo(f32 [M, N] a, f32 [N, K] b)
+  // Check if the named dims meet the constraint. Eg.
+  //
+  //   __co__ void foo(f32 [M, N] a, f32 [N, K] b)
+  //
   // then a.shape()[1] should be equal to b.shape()[0]
   for (auto& [_, entries] : ve_entries_map) {
     for (size_t i = 1; i < entries.size(); ++i) {
       auto& entry0 = entries[i - 1];
       auto& entry1 = entries[i];
-      hs << "  choreo::runtime_check(" << entry0.elem_name
+      hs << h_indent << "choreo::runtime_check(" << entry0.elem_name
          << " == " << entry1.elem_name;
       hs << ", \"The shapes of the " << Ordinal(entry0.para_ordinal)
          << " parameter (dim: " << entry0.dim << ") and the "
@@ -913,9 +909,9 @@ void TopsccCodeGen::EmitHostRuntimeCheck() {
   hs << "\n";
 
   for (const auto& rc : FCtx(fname).GetRtChecks()) {
-    hs << "  choreo::runtime_check(" << ValueSTR(rc.lhs) << " " << rc.op << " "
-       << ValueSTR(rc.rhs) << ", \"" << rc.message << ", " << rc.loc
-       << "\");\n";
+    hs << h_indent << "choreo::runtime_check(" << ValueSTR(rc.lhs) << " "
+       << rc.op << " " << ValueSTR(rc.rhs) << ", \"" << rc.message << ", "
+       << rc.loc << "\");\n";
   }
 }
 

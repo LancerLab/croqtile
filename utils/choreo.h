@@ -759,14 +759,20 @@ __device__ inline static __attribute__((noreturn)) void __co_abort__() {
 
 // choreo device future
 struct future {
-  tops::event* e = nullptr;
-  void* d = nullptr;
+  tops_dte_ctx_t* ctx = nullptr;
+  tops::event e;
+  void* d = nullptr; // data: future's user must gurantee it is valid
 
   // for runtime check purpose
+  //
+  // ST_NONE -> ST_INITED -> ST_TRIGGERED -> ST_WAITED
+  //                              ^              |
+  //                              +--------------+
   enum Status {
-    ST_NONE,
-    ST_TRIGGERED,
-    ST_WAITED,
+    ST_NONE = 0,
+    ST_INITED = 1,
+    ST_TRIGGERED = 2,
+    ST_WAITED = 3,
   };
   Status s = ST_NONE;
   const char* name = nullptr;
@@ -774,27 +780,69 @@ struct future {
   unsigned line = 0;
   unsigned column = 0;
 
-  __device__ future(const char* n, unsigned l, unsigned c)
-      : e(nullptr), d(nullptr), s(ST_NONE), name(n), line(l), column(c) {}
+  __device__ future(tops_dte_ctx_t& dte, const char* n, unsigned l, unsigned c,
+                    void* data = nullptr)
+      : ctx(&dte), d(data), s(ST_NONE), name(n), line(l), column(c) {}
 
+  // context is retrieved to invoke data operations
+  __device__ auto get_ctx() {
+    if (s == ST_NONE) {
+      tops_init_dte(ctx);
+      s = ST_INITED;
+    }
+    if (s != ST_INITED && s != ST_WAITED) {
+      printf("[choreo-rt] Internal error: future (defined at line %u:%u) "
+             "is not initialized.\n",
+             line, column);
+      __co_abort__();
+    }
+    return ctx;
+  }
+
+  // when async, an event is obtained for later waiting
   __device__ void set_event(tops::event& ev) {
     if (s == ST_TRIGGERED) {
       printf("[choreo-rt] Error is detected: future (defined at line %u:%u) "
              "is triggered on an in-flight event.\n",
              line, column);
       __co_abort__();
+    } else if (s == ST_NONE) {
+      printf("[choreo-rt] Internal error: future (defined at line %u:%u) "
+             "is not initialized before triggering.\n",
+             line, column);
+      __co_abort__();
     }
-    e = &ev;
+    if (ev.ctx != ctx) {
+      printf("[choreo-rt] Internal error: future (defined at line %u:%u) "
+             "is used incosistently.\n",
+             line, column);
+      __co_abort__();
+    }
+
+    e = ev;
     s = ST_TRIGGERED;
   }
+
+  // when sync, no wait is required. simply change the status
+  __device__ void set_nowait() {
+    if (s != ST_INITED && s != ST_WAITED) {
+      printf("[choreo-rt] Internal error: future (defined at line %u:%u) "
+             "is used incorrectly.\n",
+             line, column);
+      __co_abort__();
+    }
+    s = ST_WAITED;
+  }
+
   __device__ void set_data(void* data) { d = data; }
   __device__ void set_event_data(tops::event& ev, void* data) {
     set_event(ev);
     set_data(data);
   }
+
   __device__ void wait() {
     if (s == ST_TRIGGERED) {
-      tops::wait(*e);
+      tops::wait(e);
       s = ST_WAITED;
     } else if (s == ST_WAITED) {
       printf("[choreo-rt] Error is detected: future (defined at line %u:%u) "
@@ -802,13 +850,33 @@ struct future {
              "multiple times.\n",
              line, column);
       __co_abort__();
+    } else if (s == ST_INITED) {
+      printf("[choreo-rt] Internal error: future (defined at line %u:%u) "
+             "is used incorrectly.\n",
+             line, column);
+      __co_abort__();
     } else
       assert(s == ST_NONE); // waiting on not triggered future is acceptable
   }
 
-  __device__ tops::event& event() { return *e; }
+#if 0
+  __device__ tops::event& event() {
+    if (s == ST_TRIGGERED) {
+      printf("[choreo-rt] internal error: future (defined at line %u:%u) is not associated with an event.\n",
+             line, column);
+      __co_abort__();
+    }
+    return e;
+  }
+#endif
+
   __device__ void* data() {
-    assert(d && "future is not associated with a data");
+    if (!d) {
+      printf("[choreo-rt] internal error: future (defined at line %u:%u) is "
+             "not associated with a data.\n",
+             line, column);
+      __co_abort__();
+    }
     if (s == ST_TRIGGERED) {
       // TODO: requires krt %s support to print future name
       printf("[choreo-rt] Error is detected: future (defined at line %u:%u) is "
@@ -819,6 +887,7 @@ struct future {
     }
     return d;
   }
+
   __device__ ~future() {
     if (s == ST_TRIGGERED) {
       // TODO: requires krt %s support to print future name
@@ -828,6 +897,7 @@ struct future {
              line, column);
       __co_abort__();
     }
+    if (s >= ST_INITED) tops_destroy_dte(ctx);
   }
   __device__ future(const future& f) = delete;
   __device__ future(future&& f) = delete;
@@ -835,18 +905,21 @@ struct future {
 };
 
 __device__ static inline void swap(future& a, future& b) {
+  auto ctx = a.ctx;
   auto e = a.e;
   auto d = a.d;
   auto s = a.s;
   auto l = a.line;
   auto c = a.column;
 
+  a.ctx = b.ctx;
   a.e = b.e;
   a.d = b.d;
   a.s = b.s;
   a.line = b.line;
   a.column = b.column;
 
+  b.ctx = ctx;
   b.e = e;
   b.d = d;
   b.s = s;
