@@ -1,4 +1,4 @@
-// RUN: choreo %s -v --stop-after=valno 2>&1 | FileCheck %s
+// RUN: choreo %s -vn --stop-after=valno 2>&1 | FileCheck %s
 
 __co__ auto placeholder(f32 [24, 17, 128] a) {
    f = dma.any;

@@ -1,5 +1,5 @@
 // RUN: choreo -i %s | FileCheck --match-full-lines %s
-// RUN: choreo -v %s | FileCheck --check-prefix=CHKVALNO --match-full-lines %s
+// RUN: choreo -vn %s | FileCheck --check-prefix=CHKVALNO --match-full-lines %s
 
 // device program
 __co__ void bounded_arith(s32 [180, 27, 12] a) {

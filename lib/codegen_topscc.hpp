@@ -196,8 +196,8 @@ private:
   void EmitDeviceFuncDecl(std::ostringstream&);
 
   void EmitSource();
-  void EmitScript();
-
+  void EmitScript(std::ostream& os, const std::string& exe_fn = "");
+  bool CompileWithScript(const std::string&);
   void EmitHostRuntimeCheck();
 
 private:

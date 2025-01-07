@@ -20,7 +20,11 @@ using namespace Choreo::Topscc;
 
 extern Option<bool> native_f16;
 extern Option<bool> native_bf16;
+extern Option<bool> verbose;
 extern Option<std::string> output;
+
+Option<bool> emit_fatbin(OptionKind::Hidden, "-fb", "", false,
+                         "Emit fatbin file.");
 
 namespace {
 
@@ -78,17 +82,34 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
 
   if (isa<AST::Program>(&n)) {
     ssm.LeaveScope();
+
+    // internal functionality: fatbin generation
+    if (emit_fatbin) {
+      if (!CompileWithScript("--gen-fatbin")) {
+        error_count++;
+        return false;
+      } else
+        return true;
+    }
+
     switch (CCtx().GetOutputKind()) {
     case OutputKind::TargetSourceCode: EmitSource(); break;
-    case OutputKind::TargetModule:
-      choreo_unreachable("topscc target module is yet to support.");
+    case OutputKind::TargetModule: {
+      if (!CompileWithScript("--compile-module")) {
+        error_count++;
+        return false;
+      }
       break;
+    }
     case OutputKind::TargetExecutable: {
-      choreo_unreachable("topscc target executable is yet to support.");
+      if (!CompileWithScript("--compile-link")) {
+        error_count++;
+        return false;
+      }
       break;
     }
     case OutputKind::ShellScript: {
-      EmitScript();
+      EmitScript(outs());
       break;
     }
     default:
@@ -954,38 +975,40 @@ void TopsccCodeGen::EmitSource() {
   for (auto& code : code_segments) outs() << code << "\n";
 }
 
-void TopsccCodeGen::EmitScript() {
+void TopsccCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
   auto filename = RemoveDirectoryPrefix(
       RemoveSuffix(OptionRegistry::GetInstance().GetInputFileName(), ".co"));
-  outs() << "#!/usr/bin/env bash\n\n";
-  outs() << "# This is the choreo generated bash script to compile factor "
-            "code\n\n";
+  os << "#!/usr/bin/env bash\n\n";
+  os << "# This is the choreo generated bash script to compile factor "
+        "code\n\n";
 
-  outs() << "TOPSCC_INSTALL=" << STRINGIZE(__CHOREO_TOPSCC_DIR__) << "\n";
-  outs() << "TOPSCC=${TOPSCC_INSTALL}/bin/topscc\n";
-  outs() << "TOPSCC_LIB=${TOPSCC_INSTALL}/lib\n\n";
+  os << "TOPSCC_INSTALL=" << STRINGIZE(__CHOREO_TOPSCC_DIR__) << "\n";
+  os << "TOPSCC=${TOPSCC_INSTALL}/bin/topscc\n";
+  os << "TOPSCC_LIB=${TOPSCC_INSTALL}/lib\n\n";
 
   auto build_path = CreateUniquePath();
   auto cc_file = build_path + "/__choreo_topscc_" + filename + ".cpp";
-  auto exe_file = build_path + "/__choreo_topscc_" + filename + ".exe";
-  auto fb_file = build_path + "/__choreo_topscc_" + filename + ".fb";
-  outs() << "rm -fr " << build_path << "\n";
-  outs() << "mkdir -p " << build_path << "\n\n";
+  auto exe_file = exe_fn;
+  if (exe_file.empty())
+    exe_file = build_path + "/__choreo_topscc_" + filename + ".exe";
+  auto fb_file = "__choreo_topscc_" + filename + ".topsfb";
+  os << "rm -fr " << build_path << "\n";
+  os << "mkdir -p " << build_path << "\n\n";
 
   // place the choreo header
-  outs() << "cat <<'EOF' > " << build_path << "/choreo.h\n";
-  outs() << __choreo_header_as_string << "\nEOF\n\n";
+  os << "cat <<'EOF' > " << build_path << "/choreo.h\n";
+  os << __choreo_header_as_string << "\nEOF\n\n";
 
-  outs() << "cat <<'EOF' > " << cc_file << "\n";
-  for (auto& code : code_segments) outs() << code << "\n";
-  outs() << "\nEOF\n\n";
+  os << "cat <<'EOF' > " << cc_file << "\n";
+  for (auto& code : code_segments) os << code << "\n";
+  os << "\nEOF\n\n";
 
   // JIT: detect the environment
-  outs() << R"script(
+  os << R"script(
 # check the device just-in-time
 # TODO: improve the target check with more solid code
 GCU_DEVICE_STR="$(lspci | grep Enflame | head -1)"
-echo $GCU_DEVICE_STR
+# echo $GCU_DEVICE_STR
 if [[ "${GCU_DEVICE_STR}" == *"S60G"* ]]; then
   gcu_arch=gcu300
 elif [[ "${GCU_DEVICE_STR}" == *"c035"* ]]; then
@@ -1003,31 +1026,97 @@ else
 fi
 )script";
 
-  outs() << R"script(
+  os << R"script(
 show_usage() {
-  echo "  Usage: $0 | --execute           -> compile and execute choreo in factor"
-  echo "                | --compile-binary    -> compile and generate the binary code"
-  echo "                | --compile-fatbin    -> compile and generate the fatbin"
+  echo "  Usage: $0 | --execute           -> compile and execute"
+  echo "                | --compile-link      -> compile and link"
+  echo "                | --compile-module    -> compile and generate the module"
+  echo "                | --gen-fatbin        -> compile and generate the fatbin"
   exit 1
 }
 
 # compile, execute
 )script";
 
-  outs() << R"(export CFLAGS="-arch ${gcu_arch} -std=c++17 -ltops -lm -O3")";
-  outs() << "\nexport LD_LIBRARY_PATH=${TOPSCC_LIB}:${LD_LIBRARY_PATH}\n\n";
-  outs() << R"(if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then)";
-  outs() << "\n  ${TOPSCC} ${CFLAGS} " << cc_file << " -o " << exe_file;
-  outs() << "\n  " << exe_file << "\n";
-  outs() << R"(elif [ "$1" == "--compile-binary" ]; then)";
-  outs() << "\n  ${TOPSCC} -c ${CFLAGS} " << cc_file << " -o " << exe_file
-         << "\n";
-  outs() << R"(elif [ "$1" == "--compile-fatbin" ]; then)";
-  // TODO: figure out the option
-  outs() << "\n  ${TOPSCC} -c ${CFLAGS} " << cc_file << " -o " << fb_file
-         << "\n";
-  outs() << "else show_usage\n";
-  outs() << "fi";
+  os << R"(export CFLAGS="-arch ${gcu_arch} -std=c++17 -ltops -lm -O3)";
+  if (verbose)
+    os << " -v\""; // if it requires to be verbose
+  else
+    os << "\"";
+  os << "\nexport LD_LIBRARY_PATH=${TOPSCC_LIB}:${LD_LIBRARY_PATH}\n\n";
+  os << R"(if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then)";
+  if (verbose)
+    os << "\n  echo ${TOPSCC} ${CFLAGS} " << cc_file << " -o " << exe_file;
+  os << "\n  ${TOPSCC} ${CFLAGS} " << cc_file << " -o " << exe_file;
+  if (verbose) os << "\n  echo " << exe_file << "\n";
+  os << "\n  " << exe_file << "\n";
+  os << R"(elif [ "$1" == "--compile-module" ]; then)";
+  if (verbose)
+    os << "\n  echo ${TOPSCC} -c ${CFLAGS} " << cc_file << " -o " << exe_file
+       << "\n";
+  os << "\n  ${TOPSCC} -c ${CFLAGS} " << cc_file << " -o " << exe_file << "\n";
+  os << R"(elif [ "$1" == "--compile-link" ]; then)";
+  if (verbose)
+    os << "\n  echo ${TOPSCC} ${CFLAGS} " << cc_file << " -o " << exe_file
+       << "\n";
+  os << "\n  ${TOPSCC} ${CFLAGS} " << cc_file << " -o " << exe_file << "\n";
+  os << R"(elif [ "$1" == "--gen-fatbin" ]; then)";
+  os << "\n  __cur_dir=$(pwd)";
+  os << "\n  cd " << build_path;
+  if (verbose)
+    os << "\n  echo ${TOPSCC} -save-temps -c ${CFLAGS} " << cc_file << " -o "
+       << exe_file << "\n";
+  os << "\n  ${TOPSCC} -save-temps -c ${CFLAGS} " << cc_file << " -o "
+     << exe_file << "\n";
+  if (verbose)
+    os << "\n  echo cp " << cc_file
+       << "-tops-dtu-enflame-tops.topsfb ${__cur_dir}/" << fb_file;
+  os << "\n  cp " << cc_file << "-tops-dtu-enflame-tops.topsfb ${__cur_dir}/"
+     << fb_file;
+  os << "\n  cd ${__cur_dir}";
+  os << "\n  echo \"Fatbin file generated: " << fb_file << "\"";
+  os << "\nelse show_usage";
+  os << "\nfi";
+}
+
+bool TopsccCodeGen::CompileWithScript(const std::string& action) {
+  assert(!action.empty() && "no action is specified.");
+
+  char tempFileName[] = "/tmp/choreo_topscc_script_XXXXXX";
+  int fd = mkstemp(tempFileName);
+  if (fd == -1) {
+    errs() << "Failed to create temporary file.\n";
+    return false;
+  }
+  close(fd);
+
+  // Open the file for writing
+  std::ofstream tempFile(tempFileName);
+  if (!tempFile) {
+    errs() << "Failed to open temporary file for writing.\n";
+    return false;
+  }
+
+  auto outfile = OptionRegistry::GetInstance().GetOutputFileName();
+  EmitScript(tempFile, outfile);
+  tempFile.close(); // important: make sure the temp file is closed
+
+  // Execute the file
+  std::string command = "bash " + std::string(tempFileName) + " " + action;
+  VST_DEBUG(dbgs() << "Compile " << outfile << ": " << command << "\n");
+  int result = system(command.c_str());
+  if (result == -1) {
+    errs() << "Failed to execute the file.\n";
+    return false;
+  }
+
+  // Remove the temporary file
+  if (remove(tempFileName) != 0) {
+    errs() << "Failed to remove the temporary file.\n";
+    return false;
+  }
+
+  return true;
 }
 
 // TODO: eliminate the need of the value replacement?

@@ -75,6 +75,9 @@ Option<bool>
     native_bf16(OptionKind::User, "--native-bf16", "-bf16n", false,
                "Utilize native bf16 type when target platform support.");
 
+Option<bool> verbose(OptionKind::User, "--verbose", "-v", false,
+                      "Display the programs invoked by the compiler.");
+
 Option<std::string> abend_after(OptionKind::Hidden, "--stop-after", "-sa", "",
                                 "Stop compilation after the visit pass.",
                                 "--stop-after=<pass>");
@@ -106,7 +109,7 @@ Option<bool> debug_on(OptionKind::Hidden, "--debug", "-d", false,
                       "Enable Debugging of all the visit passes.");
 Option<bool> dump_ast(OptionKind::User, "--dump-ast", "-e", false,
                       "Dump the Abstract Syntax Tree (AST) after parsing.");
-Option<bool> print_vn(OptionKind::Hidden, "--print-valno", "-v", false,
+Option<bool> print_vn(OptionKind::Hidden, "--print-valno", "-vn", false,
                       "Trace the value numbering process.");
 Option<bool> dump_sym(OptionKind::Hidden, "--dump-symbol", "-l", false,
                       "Dump the symbol table after LATENORM.");
@@ -334,9 +337,6 @@ int main(int argc, char* argv[]) {
     break;
   }
   case CompileTarget::Topscc: {
-    // remove it when topscc is ready
-    errs() << "NOTE: target '" << target.GetValue() << "' is experimental.\n";
-
     // apply GCU specific checks
     GCUCheck gcu_checker;
     if (!gcu_checker.RunOnProgram(root)) return gcu_checker.Status();
