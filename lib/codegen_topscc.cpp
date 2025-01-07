@@ -1014,7 +1014,7 @@ show_usage() {
 # compile, execute
 )script";
 
-  outs() << R"(export CFLAGS="-arch ${gcu_arch} -std=c++17 -ltops -lm")";
+  outs() << R"(export CFLAGS="-arch ${gcu_arch} -std=c++17 -ltops -lm -O3")";
   outs() << "\nexport LD_LIBRARY_PATH=${TOPSCC_LIB}:${LD_LIBRARY_PATH}\n\n";
   outs() << R"(if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then)";
   outs() << "\n  ${TOPSCC} ${CFLAGS} " << cc_file << " -o " << exe_file;

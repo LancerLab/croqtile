@@ -1,5 +1,6 @@
 // REQUIRES: TARGET-GCU300
-// RUN: choreo -gs -t factor %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
+// RUN: choreo -gs -t factor %s -o %s.factor.result && bash %s.factor.result --execute | FileCheck --match-full-lines %s && rm -f %s.factor.result
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
 
 // topsop/topsop/lib/kernel/factor_kernel/rgb2gray/rgb2gray_nchw_impl.cc
 // topsop/topsop/lib/kernel/c_src/rgb2gray_fp32_fp32.cc
@@ -22,7 +23,8 @@ union vector_type {
 
 #define OFFSET_STRIDE_0 0x00010001
 
-extern "C" void rgb2gray_kernel_fp32_fp32(int in_addr, int output_addr, int num, int is_rgb) {
+__co_device__
+extern "C" void rgb2gray_kernel_fp32_fp32_impl(int in_addr, int output_addr, int num, int is_rgb) {
   union vector_type in0_00, in0_10, in0_20, in0_30,
                     in0_01, in0_11, in0_21, in0_31,
                     in0_02, in0_12, in0_22, in0_32;
@@ -299,6 +301,12 @@ extern "C" void rgb2gray_kernel_fp32_fp32(int in_addr, int output_addr, int num,
   __dtu_l_tvsta_w(vacc6, output_tar, output_offset0);
   __dtu_l_tvsta_w(vacc7, output_tar, output_offset1);
 }
+
+__co_device__
+extern "C" void rgb2gray_kernel_fp32_fp32(float *in, float* output, int num, int is_rgb) {
+  rgb2gray_kernel_fp32_fp32_impl(__addr2int__(in), __addr2int__(output), num, is_rgb);
+}
+
 }
 
 // is_rgb = 1
@@ -318,9 +326,14 @@ __co__ auto rgb2gray(f32 [N, 3, H, W] input) {
           dma.copy out_L1 => out.chunkat(q#n, h, w - 1);
           swap(input_L1_A, input_L1_B);
         }
+#ifdef __TOPSCC__
+        wait input_L1_A;
+        call rgb2gray_kernel_fp32_fp32(input_L1_A.data, out_L1, |out_L1|, 1);
+#else
         input_L1 = select(#w % 2, input_L1_B, input_L1_A);
         wait input_L1;
         call rgb2gray_kernel_fp32_fp32(input_L1.data, out_L1, |out_L1|, 1);
+#endif
         dma.copy out_L1 => out.chunkat(q#n, h, w(-1));
       }
     }
