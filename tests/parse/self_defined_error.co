@@ -1,0 +1,11 @@
+// RUN: choreo %s 2>&1 | FileCheck %s
+__co__ void ml() {
+  parallel p by 55, {x, q, v} by [3, 2, 1] {
+    f = dma.any;
+    swap(f);
+  }
+}
+
+// CHECK: error: Builtin function 'swap' accept exact two parameters.
+// CHECK: Parsing failed due to syntax errors.
+// CHECK-EMPTY:

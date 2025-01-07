@@ -4,6 +4,7 @@
 %define api.token.constructor
 //%define parse.trace
 %define api.parser.class { Parser }
+%parse-param { PContext &pctx }
 %define parse.error verbose
 %define parse.assert
 %define api.namespace { Choreo }
@@ -24,6 +25,14 @@ struct SymbolWithInitVal {
   SymbolWithInitVal(const std::string & n, T i) : name(n), init_val(i) {}
 };
 
+class PContext {
+  private:
+    size_t error_count = 0;
+  public:
+    size_t GetErrorCount() { return error_count; }
+    bool HasError() { return error_count > 0; }
+    void recordError() { error_count++; }
+};
 }
 
 %code top {
@@ -1220,4 +1229,5 @@ void Parser::error(const location &loc , const std::string &message) {
   errs() << ((should_use_colors()) ? color_red : "") << "error: "
          << ((should_use_colors()) ? color_reset : "");
   errs() << message << "\n";
+  pctx.recordError();
 }
