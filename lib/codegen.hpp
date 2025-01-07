@@ -496,7 +496,7 @@ inline const std::string UnScopedExpr(const std::string& input) {
 }
 
 inline const std::string UnScopedSizeExpr(const Type& ty) {
-  return UnScopedExpr(SizeExprOf(ty));
+  return UnScopedExpr(SizeExprOf(ty, true));
 }
 
 } // end anonymous namespace

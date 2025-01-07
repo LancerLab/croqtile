@@ -1183,7 +1183,7 @@ inline size_t SizeOf(const Type& ty) {
 }
 
 // This util might be useful to keep symbolic form till runtime
-inline std::string SizeExprOf(const Type& ty) {
+inline std::string SizeExprOf(const Type& ty, bool ULL_suffix = false) {
   if (isa<VoidType>(&ty)) return {};
   if (isa<IntegerType>(&ty))
     return "4";
@@ -1192,7 +1192,7 @@ inline std::string SizeExprOf(const Type& ty) {
   else if (isa<BoundedIntegerType>(&ty))
     return "4";
   else if (auto t = dyn_cast<SpannedType>(&ty))
-    return t->ByteSizeExpression();
+    return t->ByteSizeExpression(ULL_suffix);
   choreo_unreachable(STR(ty) + " does not imply runtime storage.");
   return {};
 }

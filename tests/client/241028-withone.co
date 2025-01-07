@@ -1,5 +1,4 @@
-// RUN: choreo -gs %s | FileCheck %s --match-full-lines
-#include <choreo.h>
+// RUN: choreo -t factor -gs %s -o - | FileCheck %s --match-full-lines
 
 __cok__ {
   extern "c" void vector_mul_kernel(float *lhs, float *rhs, float *out,

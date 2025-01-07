@@ -1,4 +1,4 @@
-// RUN: choreo -gs %s | FileCheck %s --match-full-lines
+// RUN: choreo -gs -t factor %s -o - | FileCheck %s --match-full-lines
 
 __co__ f32[3145728] normal_add(f32[3145728] lhs, f32[3145728] rhs) {
   f32[3145728] output;

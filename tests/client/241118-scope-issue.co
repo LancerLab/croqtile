@@ -1,5 +1,6 @@
 // REQUIRES: TARGET-GCUALL
-// RUN: choreo -gs -t factor %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
+// RUN: choreo -gs -t factor %s -o %s.factor.result && bash %s.factor.result --execute | FileCheck --match-full-lines %s && rm -f %s.factor.result
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
 
 #include "choreo.h"
 #include <algorithm>
@@ -10,7 +11,7 @@
 
 __cok__ { /// kernel program
 
-  extern "C" void matmul_kernel(float *lhs, float *rhs, float *out, int m,
+__co_device__  extern "C" void matmul_kernel(float *lhs, float *rhs, float *out, int m,
                                 int k, int n) {
     for (int i = 0; i < m; ++i)
       for (int j = 0; j < n; ++j)
@@ -18,7 +19,7 @@ __cok__ { /// kernel program
           out[i * n + j] += lhs[i * k + z] * rhs[z * n + j];
   }
 
-  extern "C" void softmax_kernel(float *input, float *output, int m, int n) {
+__co_device__  extern "C" void softmax_kernel(float *input, float *output, int m, int n) {
     for (int i = 0; i < m; ++i) {
       float max_val = input[i * n] / 22.627417;
       // Find the maximum value in the current row (to avoid numerical overflow)
