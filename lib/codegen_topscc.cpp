@@ -659,19 +659,21 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     }
   } else if (n.operation == ".pad") {
     auto pad_config = cast<PadConfig>(n.GetConfig());
-    ds << d_indent << "int __pad_high_" << f_buf_expr << "[] = {"
+    auto f_buf_name = RemoveSuffix(f_buf_expr, ".data()");
+    auto t_buf_name = RemoveSuffix(t_buf_expr, ".data()");
+    ds << d_indent << "int __pad_high_" << f_buf_name << "[] = {"
        << DelimitedString(pad_config->pad_high) << "};\n";
-    ds << d_indent << "int __pad_low_" << f_buf_expr << "[] = {"
+    ds << d_indent << "int __pad_low_" << f_buf_name << "[] = {"
        << DelimitedString(pad_config->pad_low) << "};\n";
-    ds << d_indent << "int __pad_mid_" << f_buf_expr << "[] = {"
+    ds << d_indent << "int __pad_mid_" << f_buf_name << "[] = {"
        << DelimitedString(pad_config->pad_mid) << "};\n";
     if (f_ca->positions == nullptr) {
       ds << d_indent;
       if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
       ds << "tops::pad" << (fty->IsAsync() ? "_async" : "") << "(*"
-         << future_name << ".get_ctx(), __mds_" << t_buf_expr << ", __mds_"
-         << f_buf_expr << ", __pad_low_" << f_buf_expr << ", __pad_high_"
-         << f_buf_expr << ", __pad_mid_" << f_buf_expr << ", "
+         << future_name << ".get_ctx(), __mds_" << t_buf_name << ", __mds_"
+         << f_buf_name << ", __pad_low_" << f_buf_name << ", __pad_high_"
+         << f_buf_name << ", __pad_mid_" << f_buf_name << ", "
          << pad_config->value.v << ");\n";
       // set the device future
       if (!event_name.empty()) {
@@ -683,14 +685,16 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     }
   } else if (n.operation == ".transp") {
     auto transp_config = cast<TransposeConfig>(n.GetConfig());
-    ds << d_indent << "int __transpose_layout_" << f_buf_expr << "[] = {"
+    auto f_buf_name = RemoveSuffix(f_buf_expr, ".data()");
+    auto t_buf_name = RemoveSuffix(t_buf_expr, ".data()");
+    ds << d_indent << "int __transpose_layout_" << f_buf_name << "[] = {"
        << DelimitedString(transp_config->dim_values) << "};\n";
     if (f_ca->positions == nullptr) {
       ds << d_indent;
       if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
       ds << "tops::transpose" << (fty->IsAsync() ? "_async" : "") << "(*"
          << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-         << ", __transpose_layout_" << f_buf_expr << ");\n";
+         << ", __transpose_layout_" << f_buf_name << ");\n";
       // set the device future
       if (!event_name.empty()) {
         ds << d_indent << future_name << ".set_event(" << event_name << ");\n";

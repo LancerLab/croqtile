@@ -1,0 +1,33 @@
+// RUN: choreo -t topscc %s -es -o - 2>&1 |FileCheck %s
+
+__co__ auto foo(s32 [8, 32] i)
+{
+  s32[i.span(1), i.span(0)] o;
+  parallel p by 1 {
+    with index = {a, b} in [1,1] {
+      foreach index {
+        ii = dma.copy i => local;
+        dma.transp<1,0> ii => o;
+      }
+    }
+  }
+  return o;
+}
+
+#include <iostream>
+
+int main()
+{
+  choreo::s32 x[8][32] = {0};
+  auto sv = choreo::make_spanview<2, choreo::s32>((int*)x, {8, 32});
+  auto res = foo(sv);
+  for (int i=0; i<8; i++)
+    for (int j=0; j<32; j++) {
+      assert(res[j][i] == x[i][j]);
+      std::cout << "res[" << j << "][" << i << "] = " << res[j][i] << "\n";
+      std::cout << "x[" << i << "][" << j << "] = " << x[i][j] << "\n";
+    }
+  return 0;
+}
+
+// CHECK-NOT: error:
