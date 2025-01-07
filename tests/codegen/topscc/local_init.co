@@ -19,5 +19,5 @@ __co__ void init() {
 // CHECK:   float a__init[17];
 // CHECK:   memset(a__init, 1, sizeof(a__init));
 // CHECK:   float * a__device= nullptr;
-// CHECK:   choreo::abend_true(topsMalloc((&a__device, 68));
-// CHECK:   choreo::abend_true(topsMemcpy(a__device, a__init, 68, topsMemcpyHostToDevice));
+// CHECK:   choreo::abend_true(topsMalloc((&a__device, 68ULL));
+// CHECK:   choreo::abend_true(topsMemcpy(a__device, a__init, 68ULL, topsMemcpyHostToDevice));

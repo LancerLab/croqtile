@@ -26,14 +26,14 @@ __co__ auto foo(f32 [32, 4] a) {
  
 // CHECK: choreo::spanned_data<choreo::f32, 2> foo(const choreo::spanned_view<choreo::f32, 2> & hp0) {
 // CHECK:   float * a__device = nullptr;
-// CHECK:   choreo::abend_true(topsMalloc(&a__device, 512));
-// CHECK:   choreo::abend_true(topsMemcpy(a__device, hp0.data(), 512, topsMemcpyHostToDevice));
+// CHECK:   choreo::abend_true(topsMalloc(&a__device, 512ULL));
+// CHECK:   choreo::abend_true(topsMemcpy(a__device, hp0.data(), 512ULL, topsMemcpyHostToDevice));
 // CHECK:   auto data = choreo::make_spandata<float, 2>({32, 4});
 // CHECK:   float * data__device = nullptr;
-// CHECK:   choreo::abend_true(topsMalloc(&data__device, 512));
+// CHECK:   choreo::abend_true(topsMalloc(&data__device, 512ULL));
 // CHECK:   dim3 __foo_gdims0(1, 1, 1);
 // CHECK:   dim3 __foo_bdims0(2, 1, 1);
 // CHECK:   __choreo_device_foo<<<__foo_gdims0, __foo_bdims0>>>(a__device, data__device);
-// CHECK:   choreo::abend_true(topsMemcpy(data.data(), data__device, 512, topsMemcpyDeviceToHost));
+// CHECK:   choreo::abend_true(topsMemcpy(data.data(), data__device, 512ULL, topsMemcpyDeviceToHost));
 // CHECK:   return data;
 // CHECK: }
