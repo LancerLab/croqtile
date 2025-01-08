@@ -253,6 +253,11 @@ private:
 
   bool NeedDeviceFunc() const { return cgi->HasParallelBy(fname); }
 
+  bool IsFutureBlockShared(const std::string& n) const {
+    return false; /*TODO*/
+  }
+  bool IsDMABlockShared(AST::DMA& n) const { return false; /*TODO*/ }
+
   const std::string ValueSTR(const ValueItem& vi) const;
   const std::string ExprSTR(AST::ptr<AST::Node>, bool is_host = true) const;
 };

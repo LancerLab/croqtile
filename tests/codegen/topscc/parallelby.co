@@ -18,7 +18,7 @@ __co__ auto bar1(f16 [36, 14, 64] a) {
 // CHECK:   {
 // CHECK:     int __iv_index__elem__0 = 0;
 // CHECK:     for (__iv_index__elem__0 = 0; __iv_index__elem__0 < 2; ++__iv_index__elem__0) {
-// CHECK:       __local__ choreo::half anon_0[384];
+// CHECK:       __local__ __valigned__ choreo::half anon_0[384];
 // CHECK:       tops::mdspan __mds0_a(tops::Global, (choreo::half*)a, 36, 14, 64);
 // CHECK:       tops::mdspan __mds1_anon_0(tops::Private, (choreo::half*)anon_0, 6, 2, 32);
 // CHECK:       tops_dte_ctx_t choreo_topscc_ctx0;
@@ -58,7 +58,7 @@ __co__ auto bar2(f16 [4, 36, 14, 64] a) {
 // CHECK:   {
 // CHECK:     int __iv_index__elem__0 = 0;
 // CHECK:     for (__iv_index__elem__0 = 0; __iv_index__elem__0 < 2; ++__iv_index__elem__0) {
-// CHECK:       __local__ choreo::half anon_1[512];
+// CHECK:       __local__ __valigned__ choreo::half anon_1[512];
 // CHECK:       tops::mdspan __mds2_a(tops::Global, (choreo::half*)a, 4, 36, 14, 64);
 // CHECK:       tops::mdspan __mds3_anon_1(tops::Private, (choreo::half*)anon_1, 2, 4, 2, 32);
 // CHECK:       tops_dte_ctx_t choreo_topscc_ctx1;

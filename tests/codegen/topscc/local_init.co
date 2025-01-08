@@ -11,7 +11,7 @@ __co__ void init() {
 // CHECK:   tops_dte_ctx_t b__init;
 // CHECK:   tops::dte_scope s_b__init(b__init);
 // CHECK:   tops::memset(b__init, tops::mdspan(tops::Shared, (choreo::half*)b, 33), 3);
-// CHECK:   __local__ unsigned char c[78];
+// CHECK:   __local__ __valigned__ unsigned char c[78];
 // CHECK:   tops_dte_ctx_t c__init;
 // CHECK:   tops::dte_scope s_c__init(c__init);
 // CHECK:   tops::memset(c__init, tops::mdspan(tops::Private, (unsigned char*)c, 78), 15);

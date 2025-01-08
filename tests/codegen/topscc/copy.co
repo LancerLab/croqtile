@@ -15,7 +15,7 @@ __co__ auto foo(f32 [32, 4] a) {
 // CHECK:   tops_dte_ctx_t choreo_topscc_ctx0;
 // CHECK:   choreo::future __choreo_anon_fut__0(choreo_topscc_ctx0, "", 4, 1, data);
 // CHECK:   tops::memcpy(*__choreo_anon_fut__0.get_ctx(), __mds1_data, __mds0_a);
-// CHECK:   __local__ float anon_0[32];
+// CHECK:   __local__ __valigned__ float anon_0[32];
 // CHECK:   tops::mdspan __mds2_data(tops::Global, (float*)data, 32, 4);
 // CHECK:   tops::mdspan __mds3_anon_0(tops::Private, (float*)anon_0, 16, 2);
 // CHECK:   tops_dte_ctx_t choreo_topscc_ctx1;

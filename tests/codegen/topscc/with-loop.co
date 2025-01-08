@@ -44,7 +44,7 @@ __co__ auto bar(f16 [128, 4, 14, 69] a) {
 // CHECK:     int __iv_y = 0;
 // CHECK:     for (__iv_x = 0; __iv_x < 4; ++__iv_x) {
 // CHECK:       for (__iv_y = 0; __iv_y < 9; ++__iv_y) {
-// CHECK:         __local__ float anon_0[48];
+// CHECK:         __local__ __valigned__ float anon_0[48];
 // CHECK:         tops::mdspan __mds0_a(tops::Global, (float*)a, 32, 4, 27);
 // CHECK:         tops::mdspan __mds1_anon_0(tops::Private, (float*)anon_0, 16, 1, 3);
 // CHECK:         tops_dte_ctx_t choreo_topscc_ctx0;
@@ -74,7 +74,7 @@ __co__ auto bar(f16 [128, 4, 14, 69] a) {
 // CHECK:     int __iv_index__elem__1 = 0;
 // CHECK:     for (__iv_index__elem__0 = 0; __iv_index__elem__0 < 2; ++__iv_index__elem__0) {
 // CHECK:       for (__iv_index__elem__1 = 0; __iv_index__elem__1 < 4; ++__iv_index__elem__1) {
-// CHECK:         __local__ choreo::half anon_1[2944];
+// CHECK:         __local__ __valigned__ choreo::half anon_1[2944];
 // CHECK:         tops::mdspan __mds2_a(tops::Global, (choreo::half*)a, 128, 4, 14, 69);
 // CHECK:         tops::mdspan __mds3_anon_1(tops::Private, (choreo::half*)anon_1, 64, 1, 2, 23);
 // CHECK:         tops_dte_ctx_t choreo_topscc_ctx1;

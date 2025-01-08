@@ -360,7 +360,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       }
     } else if (sty->GetStorage() == Storage::LOCAL) {
       if (!IsChoreoOutput(InScopeName(sym))) {
-        ds << d_indent << "__local__ " << bts << " " << sym << "["
+        ds << d_indent << "__local__ __valigned__ " << bts << " " << sym << "["
            << ElemCountExprOf(*sty) << "];\n";
         ssm.MapDeviceSymbol(InScopeName(sym), sym);
         spmem = true;
@@ -573,6 +573,15 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   std::string event_name;
   if (fty->IsAsync()) event_name = future_name + "__event__";
 
+  // handles dma related to shared memory, where only single thread can operate
+  bool shared_in_block = false;
+  if (!n.future.empty()) shared_in_block = IsDMABlockShared(n);
+
+  if (shared_in_block) {
+    ds << d_indent << "if (threadIdx.x == 0) {\n";
+    IncrDeviceIndent();
+  }
+
   if (n.operation == ".copy") {
     if (f_ca->positions == nullptr) {
       if (t_ca->positions == nullptr) {
@@ -705,6 +714,16 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     }
   }
 
+  if (shared_in_block) {
+    DecrDeviceIndent();
+    ds << d_indent << "} // threadIdx.x == 0\n";
+    if (!fty->IsAsync()) {
+      // not async, must syncthreads immediately
+      // else, defer the sync till the wait time
+      ds << d_indent << "__syncthreads();\n";
+    }
+  }
+
   return true;
 }
 
@@ -726,8 +745,25 @@ bool TopsccCodeGen::Visit(AST::Rotate& n) {
 bool TopsccCodeGen::Visit(AST::Wait& n) {
   TraceEachVisit(n);
 
+  bool shared_in_block = false;
+  for (auto& f : n.GetFutures()) {
+    auto name = cast<AST::Identifier>(f)->name;
+    shared_in_block |= IsFutureBlockShared(InScopeName(name));
+  }
+
+  if (shared_in_block) {
+    ds << d_indent << "if (threadIdx.x == 0) {\n";
+    IncrDeviceIndent();
+  }
+
   for (auto& f : n.GetFutures())
     ds << d_indent << ExprSTR(f, false) << ".wait();\n";
+
+  if (shared_in_block) {
+    DecrDeviceIndent();
+    ds << d_indent << "}\n";
+    ds << d_indent << "__syncthread();\n";
+  }
 
   return true;
 }
