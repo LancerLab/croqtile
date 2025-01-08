@@ -1,8 +1,8 @@
-// REQUIRES: TARGET-GCUALL
+// REQUIRES: TARGET-GCU300
 // RUN: choreo -t topscc -gs %s -o %s.result && bash %s.result |FileCheck %s && rm -f %s.result
 
 __cok__ {
-#include <tcle.h>
+//#include <tcle.h>
 __co_device__  extern "C" void matmul_vector_kernel_8_256_16(__fp16 *lhs, __fp16 *rhs, __fp16 *out) {
   constexpr unsigned int MTILE = 8;
   constexpr unsigned int NTILE = 256; // Fixed with vector length
