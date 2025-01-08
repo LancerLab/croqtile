@@ -848,19 +848,14 @@ public:
 
     if (cannot_proceed) return true;
 
+    Shape s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
+    n.SetType(MakeBoundedITupleType(s, "pv"));
     if (n.HasBIV()) {
-      std::string bound = "const_" + std::to_string(n.bound);
-      int valno = vn.GetOrInsertValueNumberFromSignature(bound);
       std::string iv_name =
           SSTab().ScopedName("@" + n.biv); // upper-bound of bounded variable
-      vn.AssociateSignatureWithValueNumber(iv_name, valno);
-      Shape s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(valno));
-      n.SetType(MakeBoundedITupleType(s, "pv"));
+      vn.AssociateSignatureWithValueNumber(iv_name, cur_vn);
       SSTab().DefineSymbol("@" + n.biv, MakeMDSpanType(s));
       SSTab().DefineSymbol(n.biv, n.GetType());
-    } else {
-      Shape s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
-      n.SetType(MakeBoundedITupleType(s, "pv"));
     }
     std::map<size_t, std::string> idx2dim;
     idx2dim[0] = "x";
@@ -873,7 +868,7 @@ public:
       std::string iv_name = SSTab().ScopedName("@" + sym->name);
       vn.AssociateSignatureWithValueNumber(iv_name, valno);
       Shape s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(valno));
-      sym->SetType(MakeBoundedITupleType(s, "p_component:" + idx2dim[i]));
+      sym->SetType(MakeBoundedITupleType(s, "pi:" + idx2dim[i]));
       SSTab().DefineSymbol("@" + sym->name, MakeMDSpanType(s));
       SSTab().DefineSymbol(sym->name, sym->GetType());
     }

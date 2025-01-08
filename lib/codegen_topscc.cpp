@@ -1188,9 +1188,8 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       else
         choreo_unreachable("invalid bounded type note.");
     } else if (isa<BoundedType>(ty) &&
-               PrefixedWith(cast<BoundedType>(ty)->GetNote(), "p_component")) {
-      auto l =
-          RemovePrefixOrNull("p_component:", cast<BoundedType>(ty)->GetNote());
+               PrefixedWith(cast<BoundedType>(ty)->GetNote(), "pi")) {
+      auto l = RemovePrefixOrNull("pi:", cast<BoundedType>(ty)->GetNote());
       assert(l.has_value());
       // l should be (x|y|z):(0|1)
       if (l->length() != 3) choreo_unreachable("invalid bounded type note.");

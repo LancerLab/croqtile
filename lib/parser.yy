@@ -84,13 +84,18 @@ static Parser::symbol_type yylex(Scanner &scanner) {
 //
 static bool parsing_prefixed_list = false;
 
+bool parsing_chunkat_value_list = false;
+
+ptr<AST::MultiNodes> ConstructPBRecursively(size_t idx,
+                                          const ptr<AST::MultiNodes>& ps,
+                                          const ptr<AST::MultiNodes>& stmts);
+std::set<std::string> paraby_symbols;
+
 }
 
 %{
 #include <stdio.h>
 extern int yylex();
-
-bool parsing_chunkat_value_list = false;
 
 void choreo_info(const char *message) {
     // fprintf(stderr, "Error: %s\n", s);
@@ -100,9 +105,6 @@ void choreo_info(const char *message) {
   errs() << "Info location: " << ::loc << "\n";
 }
 
-ptr<AST::MultiNodes> ConstructPBRecursively(size_t idx,
-                                          const ptr<AST::MultiNodes>& ps,
-                                          const ptr<AST::MultiNodes>& stmts);
 %}
 
 // make yylex() expects one parameter of type 'Choreo::Scanner &'
@@ -445,10 +447,12 @@ return_stmt
     ;
 
 paraby_block
-    : PARA parabys LBRACE statements RBRACE {
-        $$ = AST::Make<AST::ParallelBy>(@1, cast<AST::MultiNodes>($2->AllSubs()[0]), $4);
-        if ($2->Count() > 1)
-          $$->stmts = ConstructPBRecursively(1, $2, $4);
+    : PARA {
+        paraby_symbols.clear();
+      } parabys LBRACE statements RBRACE {
+        $$ = AST::Make<AST::ParallelBy>(@1, cast<AST::MultiNodes>($3->AllSubs()[0]), $5);
+        if ($3->Count() > 1)
+          $$->stmts = ConstructPBRecursively(1, $3, $5);
       }
     ;
 
@@ -465,21 +469,29 @@ parabys
 
 paraby
     : IDENTIFIER BY NUM {
+        if (paraby_symbols.find($1) != paraby_symbols.end())
+          Parser::error(@1, "The symbol '" + $1 + "' has been used in the same parallelby block.");
+        paraby_symbols.insert($1);
         symtab.AddSymbol($1, MakeUnknownType());
         $$ = AST::Make<AST::MultiNodes>(@1);
         $$->Append(AST::Make<AST::Identifier>(@1, $1));
         $$->Append(AST::Make<AST::IntLiteral>(@3, $3));
       }
     | IDENTIFIER ASSIGN LBRACE id_list RBRACE BY LBRAKT iv_list RBRAKT {
+        if (paraby_symbols.find($1) != paraby_symbols.end())
+          Parser::error(@1, "The symbol '" + $1 + "' has been used in the same parallelby block.");
+        paraby_symbols.insert($1);
+        symtab.AddSymbol($1, MakeUnknownType());
         if ($4->Count() != $8->Count())
           Parser::error(@4, "The number of arguments in parallel bound config "
                         "should be consistent.");
         for (auto id : $4->AllValues()) {
           auto name = cast<AST::Identifier>(id)->name;
+          if (paraby_symbols.find(name) != paraby_symbols.end())
+            Parser::error(@1, "The symbol '" + name + "' has been used in the same parallelby block.");
+          paraby_symbols.insert(name);
           symtab.AddSymbol(name, MakeUnknownType());
         }
-        symtab.AddSymbol($1, MakeUnknownType());
-
         $$ = AST::Make<AST::MultiNodes>(@1);
         $$->Append(AST::Make<AST::Identifier>(@1, $1));
         $$->Append($4);
@@ -491,6 +503,9 @@ paraby
                         "should be consistent.");
         for (auto id : $2->AllValues()) {
           auto name = cast<AST::Identifier>(id)->name;
+          if (paraby_symbols.find(name) != paraby_symbols.end())
+            Parser::error(@1, "The symbol '" + name + "' has been used in the same parallelby block.");
+          paraby_symbols.insert(name);
           symtab.AddSymbol(name, MakeUnknownType());
         }
         $$ = AST::Make<AST::MultiNodes>(@1);
