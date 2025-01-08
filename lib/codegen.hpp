@@ -101,6 +101,7 @@ using SymbolDetails = std::map<std::string, std::vector<SymbolDetail>>;
 using LaunchDetails = std::map<std::string, std::vector<LaunchConfig>>;
 using ReturnSymbols = std::map<std::string, std::string>;
 using FunctionTraits = std::map<std::string, OtherTrait>;
+using SharedFutures = std::map<std::string, std::set<std::string>>;
 
 enum PassedOrDeclaredSymbolKind : int {
   PDSYM_NONE = 0,
@@ -117,6 +118,7 @@ private:
   LaunchDetails launches;
   ReturnSymbols returns;
   FunctionTraits traits;
+  SharedFutures shr_futs;
 
   size_t param_count = 0;
 
@@ -143,6 +145,14 @@ public:
   }
   OtherTrait& GetFunctionTrait(const std::string& fname) {
     return traits[fname];
+  }
+
+  const std::set<std::string>&
+  GetFunctionSharedFutures(const std::string& fname) const {
+    return shr_futs.at(fname);
+  }
+  std::set<std::string>& GetFunctionSharedFutures(const std::string& fname) {
+    return shr_futs[fname];
   }
 
   bool HasParallelBy(const std::string& fname) const {
@@ -497,6 +507,13 @@ inline const std::string UnScopedExpr(const std::string& input) {
 
 inline const std::string UnScopedSizeExpr(const Type& ty) {
   return UnScopedExpr(SizeExprOf(ty, true));
+}
+
+inline int GetMaxParallelLevelFromNote(AST::ParallelBy& n) {
+  auto pos = n.GetNote().find("mxl-");
+  if (pos != std::string::npos)
+    return std::stoi(n.GetNote().substr(pos + 4, pos + 5));
+  return -1;
 }
 
 } // end anonymous namespace

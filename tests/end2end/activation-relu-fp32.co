@@ -79,7 +79,7 @@ int main() { /// host program
         float ref = input_data[i][j] > 0? input_data[i][j] : 0;
 
         // std::cout << "ref: " << ref << std::endl;
-        assert(ref == res[i][j]);
+        choreo::choreo_assert(ref == res[i][j], "values are not equal.");
       }
   std::cout << "Test Passed\n" << std::endl;
   std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;

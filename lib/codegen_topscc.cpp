@@ -60,10 +60,11 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
     device_fn = "__choreo_device_" + fname;
     fty = cast<FunctionType>(GetSymbolType(fname));
     ssm.EnterScope();
-  } else if (isa<AST::ParallelBy>(&n)) {
+  } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     if (parallel_level == 0)
       ds << d_indent << "// parallel-by: " << n.LOC() << "\n";
     parallel_level++;
+    max_parallel_level = GetMaxParallelLevelFromNote(*pb);
   } else if (isa<AST::WithBlock>(&n)) {
     ds << d_indent << "// with-in: " << n.LOC() << "\n";
     ds << d_indent << "{\n";
@@ -123,6 +124,7 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
     hs.str("");
   } else if (isa<AST::ParallelBy>(&n)) {
     parallel_level--;
+    if (parallel_level == 0) max_parallel_level = 0;
   } else if (isa<AST::WithBlock>(&n)) {
     DecrDeviceIndent();
     ds << d_indent << "}\n";
@@ -762,7 +764,7 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
   if (shared_in_block) {
     DecrDeviceIndent();
     ds << d_indent << "}\n";
-    ds << d_indent << "__syncthread();\n";
+    ds << d_indent << "__syncthreads();\n";
   }
 
   return true;

@@ -7,10 +7,50 @@
 
 namespace Choreo {
 
+struct CodegenPrepareStage2 : public CodeGenerator {
+private:
+  ptr<CodeGenInfo> cgi = nullptr;
+  int parallel_level = 0;
+  int mxpl = 0;
+
+public:
+  CodegenPrepareStage2(ptr<CodeGenInfo> c)
+      : CodeGenerator("prepare2", CCtx().GetGlobalSymbolTable()), cgi(c) {}
+
+  bool BeforeVisitImpl(AST::Node& n) override {
+    if (isa<AST::ChoreoFunction>(&n)) {
+      parallel_level = 0;
+      mxpl = 0;
+    } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+      parallel_level++;
+      mxpl = GetMaxParallelLevelFromNote(*pb);
+    }
+    return true;
+  }
+
+  bool AfterVisitImpl(AST::Node& n) override {
+    if (isa<AST::ParallelBy>(&n)) {
+      if (parallel_level == 1) mxpl = 0;
+      parallel_level--;
+    }
+    return true;
+  }
+
+  bool Visit(AST::DMA& n) {
+    if (n.future.empty() || (n.operation == ".any")) return true;
+    if (mxpl == 2 && parallel_level == 1) {
+      // the DMA is inside block-shared zone
+      cgi->GetFunctionSharedFutures(fname).insert(InScopeName(n.future));
+    }
+    return true;
+  }
+};
+
 struct CodegenPrepare : public CodeGenerator {
 private:
   ptr<CodeGenInfo> cgi;
   int parallel_level = 0;
+  int max_parallel_level = 0;
 
 private:
   bool BeforeVisitImpl(AST::Node& n) override {
@@ -19,6 +59,7 @@ private:
       cgi->GetFunctionTrait(fname).has_parallelby = false;
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       parallel_level++;
+      max_parallel_level = std::max(parallel_level, max_parallel_level);
       // for Factor backend
       auto& lcs = cgi->GetFunctionLaunches(fname);
       if (parallel_level == 1) {
@@ -55,6 +96,8 @@ private:
         VST_DEBUG(dbgs() << "\tBlock Dims: "
                          << cgi->GetFunctionLaunches(fname).back().block_dim_x
                          << "\n");
+        n.AppendNote("mxl-" + std::to_string(max_parallel_level));
+        max_parallel_level = 0;
       }
       parallel_level--;
     }
@@ -150,6 +193,28 @@ public:
   bool Visit(AST::ChoreoFunction&) { return true; }
   bool Visit(AST::CppSourceCode&) { return true; }
   bool Visit(AST::Program&) { return true; }
+
+  bool RunOnProgram(AST::Node& root) override {
+    if (!isa<AST::Program>(&root)) {
+      Error(root.LOC(), "Not running a choreo program.");
+      return false;
+    }
+
+    if (prt_visitor) dbgs() << "|- " << GetName() << NewL;
+
+    if (prt_visitor) dbgs() << " |- Prepare" << NewL;
+    root.accept(*this);
+    if (HasError()) return false;
+
+    if (prt_visitor) dbgs() << " |- Prepare2" << NewL;
+    CodegenPrepareStage2 cps2(cgi);
+    cps2.RunOnProgram(root);
+    if (cps2.HasError()) return false;
+
+    if (abend_after) return false;
+
+    return true;
+  }
 };
 
 } // end namespace Choreo

@@ -55,7 +55,17 @@ struct Node {
   virtual std::string getRefName() const { return ""; }
 
   virtual const std::string& GetNote() const { return note; }
-  virtual void SetNote(const std::string& n) { note = n; }
+  virtual void SetNote(const std::string& n) {
+    assert(!n.empty() && "can not set empty note.");
+    note = n;
+  }
+  virtual void AppendNote(const std::string& n) {
+    assert(!n.empty() && "can not append empty note.");
+    if (note.empty())
+      SetNote(n);
+    else
+      note += "," + n;
+  }
 
   virtual void Print(std::ostream& os,
                      const std::string& prefix = {}) const = 0;
@@ -906,7 +916,7 @@ struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
     if (config->Count() == 2) {
       if (isa<Identifier>(config->values[0])) {
         // parallel p by 2 {}
-        // equivalent to `parallel p={anon} by [2] {}`
+        // equivalent to `parallel {p} by [2] {}`
         // implement it in normalization
         assert(config->Count() == 2 && "unexpected parallel config.");
         biv = cast<Identifier>(config->values[0])->name;
@@ -1004,6 +1014,8 @@ struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
       bounds->InlinePrint(os);
       os << "]";
     }
+    if (!note.empty()) os << "\n" << prefix << "   (note: " << GetNote() << ")";
+
     if (!stmts)
       os << std::endl;
     else

@@ -490,7 +490,7 @@ int main() {
           std::cout << "res=" << res[i][j][k] << " res_cpu=" << res_cpu[i][j][k] << std::endl;
           std::cout << "diff=" << res[i][j][k] - res_cpu[i][j][k] << std::endl;
           std::cout << "input=" << input[i][0][j][k] << " " << input[i][1][j][k] << " " << input[i][2][j][k] << std::endl;
-          assert(false);
+          choreo::choreo_assert(false, "values are not equal.");
         }
       }
     }

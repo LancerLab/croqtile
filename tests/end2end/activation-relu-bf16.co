@@ -83,7 +83,7 @@ int main() { /// host program
         choreo::bf16 ref = input_data[i][j];
 
         // std::cout << "ref: " << ref << std::endl;
-        assert(ref == res[i][j]);
+        choreo::choreo_assert(ref == res[i][j], "values are not equal.");
       }
   std::cout << "Test Passed\n" << std::endl;
   std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;

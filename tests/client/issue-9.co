@@ -1,0 +1,243 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -t topscc -gs %s -o %s.result && bash %s.result |FileCheck %s && rm -f %s.result
+
+__cok__ {
+#include <tcle.h>
+__co_device__  extern "C" void matmul_vector_kernel_8_256_16(__fp16 *lhs, __fp16 *rhs, __fp16 *out) {
+  constexpr unsigned int MTILE = 8;
+  constexpr unsigned int NTILE = 256; // Fixed with vector length
+  constexpr unsigned int KTILE = 16;
+  using vtype = tops::scalar_to_vector<tops::unified_scalar<__fp16>::type, TOPS_VECTOR_LENGTH>::type;
+  auto out_leaptr = tops::simple_leaptr<vtype>(reinterpret_cast<generic_ptr>(out));
+  auto acc_leaptr = tops::simple_leaptr<vtype>(reinterpret_cast<generic_ptr>(out));
+  auto rhs_leaptr = tops::simple_leaptr<vtype>(reinterpret_cast<generic_ptr>(rhs));
+
+  vtype rhs_v[KTILE];
+#pragma unroll
+  for (unsigned int k_idx = 0; k_idx < KTILE; ++k_idx) {
+    rhs_v[k_idx] = rhs_leaptr.load();
+  }
+
+#pragma unroll
+  for (unsigned int m_idx = 0; m_idx < MTILE; ++m_idx) {
+    auto acc_v = acc_leaptr.load();
+#pragma unroll
+    for (unsigned int k_idx = 0; k_idx < KTILE; ++k_idx) {
+      auto lhs_v = tops::vbroadcast<vtype>(lhs[m_idx * KTILE + k_idx]);
+      auto mul_res_v = tops::vmul<vtype>(lhs_v, rhs_v[k_idx]);
+      acc_v = tops::vadd<vtype>(acc_v, mul_res_v);
+    }
+    out_leaptr.store(acc_v);
+  }
+}
+
+} // __cok__
+
+// Single cluster, single sip. No problem.
+__co__ f16 [M, N] matmul_f16_p1q1(f16 [M, K] lhs, f16 [K, N] rhs) {
+  global f16 [M, N] out;
+  mdspan<3> L1_tile : [8, 256, 16];                                 // [m, n, k]
+  mdspan<3> L2_tile : [L1_tile(0) * 2, L1_tile(1) * 2, L1_tile(2)]; // [m, n, k]
+  parallel p by 1 {
+    with tiling_L2 = {     L2_m_tile,      L2_n_tile,      L2_k_tile}
+                  in [M / L2_tile(0), N / L2_tile(1), K / L2_tile(2)] {
+      foreach L2_m_tile, L2_n_tile {
+        shared f16 [L2_tile(0), L2_tile(1)] out_shared_buf{0};
+        foreach L2_k_tile {
+          lhs_shared_load = dma.copy.async lhs.chunkat(L2_m_tile, L2_k_tile) => shared;
+          rhs_shared_load = dma.copy.async rhs.chunkat(L2_k_tile, L2_n_tile) => shared;
+          wait lhs_shared_load, rhs_shared_load;
+          parallel q by 1 {
+            with tiling_L1 = {              L1_m_tile,               L1_n_tile,               L1_k_tile}
+                          in [L2_tile(0) / L1_tile(0), L2_tile(1) / L1_tile(1), L2_tile(2) / L1_tile(2)] {
+              foreach L1_m_tile, L1_n_tile {
+                out_local = dma.copy.async out_shared_buf.chunkat(L1_m_tile, L1_n_tile) => local;
+                wait out_local;
+                foreach L1_k_tile {
+                  lhs_local = dma.copy.async lhs_shared_load.chunkat(L1_m_tile, L1_k_tile) => local;
+                  rhs_local = dma.copy.async rhs_shared_load.chunkat(L1_k_tile, L1_n_tile) => local;
+                  wait lhs_local, rhs_local;
+                  call matmul_vector_kernel_8_256_16(lhs_local.data, rhs_local.data, out_local.data);
+                }
+                out_shared_store = dma.copy.async out_local => out_shared_buf.chunkat(L1_m_tile, L1_n_tile);
+                wait out_shared_store;
+              }
+            }
+          }
+          out_global_store = dma.copy.async out_shared_buf => out.chunkat(L2_m_tile, L2_n_tile);
+          wait out_global_store;
+        }
+      }
+    }
+  }
+  return out;
+}
+
+// Two clusters, single sip. No problem
+// M is replaced with 1024, since <bounded scalar>#p is not support
+// when <bound scalar> is generated with dynamic shape.
+__co__ f16 [M, N] matmul_f16_p2q1(f16 [M, K] lhs, f16 [K, N] rhs) {
+  global f16 [M, N] out;
+  mdspan<3> L1_tile : [8, 256, 16];                                 // [m, n, k]
+  mdspan<3> L2_tile : [L1_tile(0) * 2, L1_tile(1) * 2, L1_tile(2)]; // [m, n, k]
+  parallel p by 2 {
+    with tiling_L2 = {             L2_m_tile,      L2_n_tile,      L2_k_tile}
+                  in [M / L2_tile(0) / #p, N / L2_tile(1), K / L2_tile(2)] {
+      foreach L2_m_tile, L2_n_tile {
+        shared f16 [L2_tile(0), L2_tile(1)] out_shared_buf{0};
+        foreach L2_k_tile {
+          lhs_shared_load = dma.copy.async lhs.chunkat(L2_m_tile#p, L2_k_tile) => shared;
+          rhs_shared_load = dma.copy.async rhs.chunkat(L2_k_tile, L2_n_tile) => shared;
+          wait lhs_shared_load, rhs_shared_load;
+          parallel q by 1 {
+            with tiling_L1 = {              L1_m_tile,               L1_n_tile,               L1_k_tile}
+                          in [L2_tile(0) / L1_tile(0), L2_tile(1) / L1_tile(1), L2_tile(2) / L1_tile(2)] {
+              foreach L1_m_tile, L1_n_tile {
+                out_local = dma.copy.async out_shared_buf.chunkat(L1_m_tile, L1_n_tile) => local;
+                wait out_local;
+                foreach L1_k_tile {
+                  lhs_local = dma.copy.async lhs_shared_load.chunkat(L1_m_tile, L1_k_tile) => local;
+                  rhs_local = dma.copy.async rhs_shared_load.chunkat(L1_k_tile, L1_n_tile) => local;
+                  wait lhs_local, rhs_local;
+                  call matmul_vector_kernel_8_256_16(lhs_local.data, rhs_local.data, out_local.data);
+                }
+                out_shared_store = dma.copy.async out_local => out_shared_buf.chunkat(L1_m_tile, L1_n_tile);
+                wait out_shared_store;
+              }
+            }
+          }
+          out_global_store = dma.copy.async out_shared_buf => out.chunkat(L2_m_tile#p, L2_n_tile);
+          wait out_global_store;
+        }
+      }
+    }
+  }
+  return out;
+}
+
+// Single cluster, two sip. Verification fails.
+__co__ f16 [M, N] matmul_f16_p1q2(f16 [M, K] lhs, f16 [K, N] rhs) {
+  global f16 [M, N] out;
+  mdspan<3> L1_tile : [8, 256, 16];                                 // [m, n, k]
+  mdspan<3> L2_tile : [L1_tile(0) * 2, L1_tile(1) * 2, L1_tile(2)]; // [m, n, k]
+  parallel p by 1 {
+    with tiling_L2 = {     L2_m_tile,      L2_n_tile,      L2_k_tile}
+                  in [M / L2_tile(0), N / L2_tile(1), K / L2_tile(2)] {
+      foreach L2_m_tile, L2_n_tile {
+        shared f16 [L2_tile(0), L2_tile(1)] out_shared_buf{0};
+        foreach L2_k_tile {
+          lhs_shared_load = dma.copy.async lhs.chunkat(L2_m_tile, L2_k_tile) => shared;
+          rhs_shared_load = dma.copy.async rhs.chunkat(L2_k_tile, L2_n_tile) => shared;
+          wait lhs_shared_load, rhs_shared_load;
+          parallel q by 2 {
+            with tiling_L1 = {                   L1_m_tile,               L1_n_tile,               L1_k_tile}
+                          in [L2_tile(0) / (L1_tile(0) * #q), L2_tile(1) / L1_tile(1), L2_tile(2) / L1_tile(2)] {
+              foreach L1_m_tile, L1_n_tile {
+                out_local = dma.copy.async out_shared_buf.chunkat(L1_m_tile#q, L1_n_tile) => local;
+                wait out_local;
+                foreach L1_k_tile {
+                  lhs_local = dma.copy.async lhs_shared_load.chunkat(L1_m_tile, L1_k_tile) => local;
+                  rhs_local = dma.copy.async rhs_shared_load.chunkat(L1_k_tile, L1_n_tile) => local;
+                  wait lhs_local, rhs_local;
+                  call matmul_vector_kernel_8_256_16(lhs_local.data, rhs_local.data, out_local.data);
+                }
+                out_shared_store = dma.copy.async out_local => out_shared_buf.chunkat(L1_m_tile#q, L1_n_tile);
+                wait out_shared_store;
+              }
+            }
+          }
+          out_global_store = dma.copy.async out_shared_buf => out.chunkat(L2_m_tile, L2_n_tile);
+          wait out_global_store;
+        }
+      }
+    }
+  }
+  return out;
+}
+
+//////////// Host program
+#include <iomanip>
+
+int main() {
+  constexpr size_t MATM = 1024;
+  constexpr size_t MATN = 1024;
+  constexpr size_t MATK = 16;
+
+  auto lhs = new choreo::f16[MATM * MATK];
+  auto rhs = new choreo::f16[MATK * MATN];
+  auto cpu_out = new choreo::f16[MATM * MATN];
+
+  // Chess board init
+  std::cout << "Init the lhs and rhs as chessboard" << std::endl;
+  for (size_t blockRow = 0; blockRow < MATM / 4; ++blockRow) {
+    for (size_t blockCol = 0; blockCol < MATK / 4; ++blockCol) {
+      int blockVal = (blockRow + blockCol) % 2;
+      for (size_t i = 0; i < 4; ++i) {
+        for (size_t j = 0; j < 4; ++j) {
+          lhs[(blockRow * 4 + i) * MATK + blockCol * 4 + j] = blockCol * 0.5f * blockVal;
+        }
+      }
+    }
+  }
+  for (size_t blockRow = 0; blockRow < MATK / 4; ++blockRow) {
+    for (size_t blockCol = 0; blockCol < MATN / 4; ++blockCol) {
+      int blockVal = (blockRow + blockCol) % 2;
+      for (size_t i = 0; i < 4; ++i) {
+        for (size_t j = 0; j < 4; ++j) {
+          rhs[(blockRow * 4 + i) * MATN + blockCol * 4 + j] = 0.5f * blockVal;
+        }
+      }
+    }
+  }
+
+  auto lhs_data = choreo::make_spanview<2, choreo::f16>(lhs, {MATM, MATK});
+  auto rhs_data = choreo::make_spanview<2, choreo::f16>(rhs, {MATK, MATN});
+
+  // auto res = matmul_f16_p1q1(lhs_data, rhs_data);
+  // auto res = matmul_f16_p2q1(lhs_data, rhs_data);
+  auto res = matmul_f16_p1q2(lhs_data, rhs_data);
+
+
+  // CPU Verification
+  std::fill(cpu_out, cpu_out + MATM * MATN, 0.0f);
+  for (size_t m = 0; m < MATM; m++) {
+    for (size_t n = 0; n < MATN; n++) {
+      for (size_t k = 0; k < MATK; k++) {
+        cpu_out[m * MATN + n] += lhs[m * MATK + k] * rhs[k * MATN + n];
+      }
+    }
+  }
+
+  // Print Result and verification
+  constexpr auto epsilon = 0.0001f * std::max(MATM, std::max(MATN, MATK));
+  auto fp_close = [&epsilon](choreo::f32 input0, choreo::f32 input1) {
+    return std::abs(input0 - input1) < epsilon ||
+    std::abs(input0 - input1) < epsilon * std::max(std::abs(input0), std::abs(input1));
+  };
+  for (size_t m = 0; m < MATM; ++m) {
+    for (size_t n = 0; n < MATN; ++n) {
+        auto cpu_res = static_cast<float>(cpu_out[m * MATN + n]);
+        auto gcu_res = static_cast<float>(res.data()[m * MATN + n]);
+        // std::cout << std::left
+        //   << std::setw(16) << "[" + std::to_string(m) + ", " + std::to_string(n) + "]"
+        //   << std::setw(16) << cpu_res
+        //   << std::setw(16) << gcu_res
+        //   << std::endl;
+        choreo::choreo_assert(fp_close(cpu_res, gcu_res),
+            std::string("Verification for gcu_res fails " +
+                        std::to_string(m) + ", " + std::to_string(n) + ": " +
+                        std::to_string(cpu_res) + ", " + std::to_string(gcu_res)).c_str());
+    }
+  }
+
+
+  delete[] lhs;
+  delete[] rhs;
+  delete[] cpu_out;
+
+  std::cout << "Run Success.\n";
+
+  return 0;
+}
+
+// CHECK: Run Success.

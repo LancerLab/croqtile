@@ -81,7 +81,7 @@ int main() { /// host program
         std::cout << "i: " << i << "\n";
         std::cout << "res: " << res[i] << "\n";
         std::cout << "ref: " << ref << std::endl;
-        assert(ref == res[i]);
+        choreo::choreo_assert(ref == res[i], "values are not equal.");
       }
     }
     std::cout << "Test 1 Passed" << std::endl;
@@ -104,7 +104,7 @@ int main() { /// host program
         std::cout << "i: " << i << "\n";
         std::cout << "res: " << res[i] << "\n";
         std::cout << "ref: " << ref << std::endl;
-        assert(ref == res[i]);
+        choreo::choreo_assert(ref == res[i], "values are not equal.");
       }
     }
     std::cout << "Test 2 Passed" << std::endl;
@@ -127,7 +127,7 @@ int main() { /// host program
         std::cout << "i: " << i << "\n";
         std::cout << "res: " << res[i] << "\n";
         std::cout << "ref: " << ref << std::endl;
-        assert(ref == res[i]);
+        choreo::choreo_assert(ref == res[i], "values are not equal.");
       }
     }
     std::cout << "Test 3 Passed" << std::endl;

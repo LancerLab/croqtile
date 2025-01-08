@@ -175,6 +175,7 @@ private:
   std::string d_indent; // device indentation
 
   int parallel_level = 0;
+  int max_parallel_level = 0;
 
   size_t host_param_count = 0; // host parameter count
 
@@ -254,9 +255,12 @@ private:
   bool NeedDeviceFunc() const { return cgi->HasParallelBy(fname); }
 
   bool IsFutureBlockShared(const std::string& n) const {
-    return false; /*TODO*/
+    assert(PrefixedWith(n, "::") && "requires a scoped name.");
+    return cgi->GetFunctionSharedFutures(fname).count(n);
   }
-  bool IsDMABlockShared(AST::DMA& n) const { return false; /*TODO*/ }
+  bool IsDMABlockShared(AST::DMA&) const {
+    return (parallel_level == 1) && (max_parallel_level == 2);
+  }
 
   const std::string ValueSTR(const ValueItem& vi) const;
   const std::string ExprSTR(AST::ptr<AST::Node>, bool is_host = true) const;

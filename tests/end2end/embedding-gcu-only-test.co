@@ -57,7 +57,7 @@ int main() { /// host program
         std::cout << "i: " << i << ", j: " << j << "\n";
         std::cout << "res: " << res[i][j] << "\n";
         std::cout << "ref: " << ref << std::endl;
-        assert(ref == res[i][j]);
+        choreo::choreo_assert(ref == res[i][j], "values are not equal.");
       }
   }
   std::cout << "Test Passed\n" << std::endl;

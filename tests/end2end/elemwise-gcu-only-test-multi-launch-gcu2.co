@@ -76,7 +76,7 @@ int main() {
         // std::cout << "i: " << i << ", j: " << j << ", k: " << k << "\n";
         // std::cout << "a: " << a[i][j][k] << ", b: " << b[i][j][k] << ", res: " << res[i][j][k] << "\n";
         if (a[i][j][k] + b[i][j][k] != res[i][j][k]) {
-          assert(a[i][j][k] + b[i][j][k] == res[i][j][k]);
+          choreo::choreo_assert(a[i][j][k] + b[i][j][k] == res[i][j][k], "values are not equal.");
         }
       }
 
