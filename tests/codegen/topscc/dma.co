@@ -31,7 +31,7 @@ __co__ auto foo(f32 [32, 4] a) {
 // CHECK:   choreo::future f0(choreo_topscc_ctx1, "f0", 9, 1, c);
 // CHECK:   tops::event f0__event__ = tops::memcpy_async(*f0.get_ctx(), __mds3_c, __mds2_b);
 // CHECK:   f0.set_event(f0__event__);
-// CHECK:   __local__ __valigned__ float d[165];
+// CHECK:   __local__ __valigned__ int d[165];
 // CHECK:   f0.wait();
 // CHECK:   tops::mdspan __mds4_c_s32(tops::Private, (int*)c_s32, 32, 4);
 // CHECK:   tops::mdspan __mds5_d(tops::Private, (int*)d, 33, 5);
