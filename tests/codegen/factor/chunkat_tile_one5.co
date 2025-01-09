@@ -29,7 +29,7 @@ __co__ s32 [512, 1024] chunkat_tile_one5(s32 [512, 1024] lhs, s32 [1024, 1024] r
   return output;
 }
 
-// CHECK:  D(func_)("__choreo_chunkat_tile_one5_parallel", {lhs_type, rhs_type}, {output_type}, [&](auto args, auto results) {
+// CHECK:  D(func_)("__choreo_chunkat_tile_one5_parallel", {lhs_type, rhs_type}, {__choreo_factor_out_type}, [&](auto args, auto results) {
 // CHECK:    auto & lhs = args[0];
 // CHECK:    auto & rhs = args[1];
 // CHECK:    auto & output = results[0];

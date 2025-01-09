@@ -27,7 +27,7 @@ __co__ auto chunkat_tile_one4(s32 [N, M, 64] i, f32[16] oo) {
   return o;
 }
 
-// CHECK:  D(func_)("__choreo_chunkat_tile_one4_parallel", {i_type, oo_type, __type}, {output_type}, [&](auto args, auto results) {
+// CHECK:  D(func_)("__choreo_chunkat_tile_one4_parallel", {i_type, oo_type, __type}, {__choreo_factor_out_type}, [&](auto args, auto results) {
 // CHECK:    auto & i = args[0];
 // CHECK:    auto & oo = args[1];
 // CHECK:    auto & _ = args[2];

@@ -6,7 +6,7 @@ __co__ int foo(f32 [32] d, int) { return 1;}
 // CHECK:    void __choreo_foo() {
 // CHECK:      auto d_type = DRAMType(FloatType(32), {32});
 // CHECK:      auto anon_0_type = DRAMType(IntType(32), (1));
-// CHECK:      auto output_type = DRAMType(IntType(32), (1));
+// CHECK:      auto __choreo_factor_out_type = DRAMType(IntType(32), (1));
 // CHECK:      D(host_func_)("__choreo_foo", {d_type, anon_0_type, StreamType()}, [&](auto args){{.*}}
 // CHECK:    } // end of __choreo_foo
 
@@ -22,7 +22,7 @@ __co__ auto foobar(f32 [32] a, int, bool b, f16 [?]) { return 1;}
 // CHECK:   auto anon_1_type = DRAMType(IntType(32), (1));
 // CHECK:   auto b_type = DRAMType(BoolType(32), (1));
 // CHECK:   auto anon_2_type = DRAMType(FloatType(16), {-1});
-// CHECK:   auto output_type = DRAMType(IntType(32), {1});
+// CHECK:   auto __choreo_factor_out_type = DRAMType(IntType(32), {1});
 // CHECK:   D(host_func_)("__choreo_foobar", {a_type, anon_1_type, b_type, anon_2_type, StreamType()}, [&](auto args){{.*}}
 // CHECK: } // end of __choreo_foobar
 

@@ -177,7 +177,7 @@ int main() {
 
 // CHECK:   D(host_func_)("__choreo_attention", {lhs_type, rhs_type, v_type, output1_type, StreamType()}, [&](auto args)
 // CHECK:     auto ts = launch_kernel_("__choreo_attention_parallel", grid_dim, block_dim, args.back(), {args[0], args[1], args[2], args[3]}, {output});
-// CHECK:   D(func_)("__choreo_attention_parallel", {lhs_type, rhs_type, v_type, output1_type}, {output_type}, [&](auto args, auto results) {
+// CHECK:   D(func_)("__choreo_attention_parallel", {lhs_type, rhs_type, v_type, output1_type}, {__choreo_factor_out_type}, [&](auto args, auto results) {
 // CHECK:     auto & lhs = args[0];
 // CHECK:     auto & rhs = args[1];
 // CHECK:     auto & v = args[2];

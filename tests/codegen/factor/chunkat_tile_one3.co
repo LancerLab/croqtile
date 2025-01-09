@@ -17,7 +17,7 @@ __co__ auto chunkat_tile_one3(f32 [M, 1] input) {
 }
 
 
-// CHECK:  D(func_)("__choreo_chunkat_tile_one3_parallel", {input_type}, {output_type}, [&](auto args, auto results) {
+// CHECK:  D(func_)("__choreo_chunkat_tile_one3_parallel", {input_type}, {__choreo_factor_out_type}, [&](auto args, auto results) {
 // CHECK:    auto & input = args[0];
 // CHECK:    auto & out = results[0];
 // CHECK:    auto thread_id = thread_id_();

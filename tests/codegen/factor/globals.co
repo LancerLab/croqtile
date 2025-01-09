@@ -15,13 +15,13 @@ __co__ s32 [6, 17, 128] globals_pass(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs)
 // CHECK:   auto lhs_type = DRAMType(IntType(32), {6, 17, 128});
 // CHECK:   auto rhs_type = DRAMType(IntType(32), {6, 17, 128});
 // CHECK:   auto f1_type = DRAMType(IntType(32), {6, 17, 128});
-// CHECK:   auto output_type = DRAMType(IntType(32), {6, 17, 128});
+// CHECK:   auto __choreo_factor_out_type = DRAMType(IntType(32), {6, 17, 128});
 // CHECK:   D(host_func_)("__choreo_globals_pass", {lhs_type, rhs_type, f1_type, StreamType()}, [&](auto args) {
-// CHECK:     auto output = alloc_(output_type);
+// CHECK:     auto output = alloc_(__choreo_factor_out_type);
 // CHECK:     auto ts = launch_kernel_("__choreo_globals_pass_parallel", grid_dim, block_dim, args.back(), {args[0], args[1], args[2]}, {output});
 // CHECK:     return std::vector<Value>{output};
 // CHECK:   }, true);
-// CHECK:   D(func_)("__choreo_globals_pass_parallel", {lhs_type, rhs_type, f1_type}, {output_type}, [&](auto args, auto results) {
+// CHECK:   D(func_)("__choreo_globals_pass_parallel", {lhs_type, rhs_type, f1_type}, {__choreo_factor_out_type}, [&](auto args, auto results) {
 // CHECK:     auto & lhs = args[0];
 // CHECK:     auto & rhs = args[1];
 // CHECK:     auto & f1 = args[2];

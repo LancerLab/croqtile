@@ -45,7 +45,7 @@ void foo2() {}
 // CHECK: }
 
 // CHECK:   D(host_func_)("__choreo_bar", {input_type, StreamType()}, [&](auto args) {
-// CHECK:   D(func_)("__choreo_bar_parallel", {input_type}, {output_type}, [&](auto args, auto results) {
+// CHECK:   D(func_)("__choreo_bar_parallel", {input_type}, {__choreo_factor_out_type}, [&](auto args, auto results) {
 
 // CHECK: #include <queue>
 // CHECK-NEXT: void helper_func(int& cnt) {}

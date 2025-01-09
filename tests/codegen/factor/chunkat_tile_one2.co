@@ -24,7 +24,7 @@ __co__ auto chunkat_tile_one2(s32 [N, M, 64] i) {
   return o;
 }
 
-// CHECK:  D(func_)("__choreo_chunkat_tile_one2_parallel", {i_type}, {output_type}, [&](auto args, auto results) {
+// CHECK:  D(func_)("__choreo_chunkat_tile_one2_parallel", {i_type}, {__choreo_factor_out_type}, [&](auto args, auto results) {
 // CHECK:    auto & i = args[0];
 // CHECK:    auto & o = results[0];
 // CHECK:    auto thread_id = thread_id_();

@@ -6,7 +6,7 @@ int main() {
 }
 
 // CHECK:   D(host_func_)("__choreo_int_ret", {StreamType()}, [&](auto args) {
-// CHECK:     auto anon_0 = alloc_(output_type);
+// CHECK:     auto anon_0 = alloc_(__choreo_factor_out_type);
 // CHECK:     return std::vector<Value>{anon_0};
 // CHECK:   }, true); // end of choreo-factor host program
 

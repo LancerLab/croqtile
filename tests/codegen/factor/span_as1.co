@@ -33,7 +33,7 @@ __co__ s32 [N, M, K] ele_add(s32 [N, M, K] lhs, s32 [N, M, K] rhs) {
 // CHECK: void __choreo_ele_add() {
 // CHECK:   auto lhs_type = DRAMType(IntType(32), {-1, -1, -1});
 // CHECK:   auto rhs_type = DRAMType(IntType(32), {-1, -1, -1});
-// CHECK:   auto output_type = DRAMType(IntType(32), {-1, -1, -1});
+// CHECK:   auto __choreo_factor_out_type = DRAMType(IntType(32), {-1, -1, -1});
 // CHECK:   // choreo-factor dataflow function
 // CHECK:   D(host_func_)("__choreo_ele_add", {lhs_type, rhs_type, StreamType()}, [&](auto args) {
 // CHECK:     auto output_rt_dim0 = dim_(args[0], 0);
@@ -42,13 +42,13 @@ __co__ s32 [N, M, K] ele_add(s32 [N, M, K] lhs, s32 [N, M, K] rhs) {
 // CHECK:     auto __choreo_nd_ref_K = dim_(args[0], 2);
 // CHECK:     auto __choreo_nd_ref_M = dim_(args[0], 1);
 // CHECK:     auto __choreo_nd_ref_N = dim_(args[0], 0);
-// CHECK:     auto output = alloc_({output_rt_dim0, output_rt_dim1, output_rt_dim2}, output_type);
+// CHECK:     auto output = alloc_({output_rt_dim0, output_rt_dim1, output_rt_dim2}, __choreo_factor_out_type);
 // CHECK:     Dim3 grid_dim(1);
 // CHECK:     Dim3 block_dim(1);
 // CHECK:     auto ts = launch_kernel_("__choreo_ele_add_parallel", grid_dim, block_dim, args.back(), {args[0], args[1]}, {output});
 // CHECK:     return std::vector<Value>{output};
 // CHECK:   }, true); // end of choreo-factor host program
-// CHECK:   D(func_)("__choreo_ele_add_parallel", {lhs_type, rhs_type}, {output_type}, [&](auto args, auto results) {
+// CHECK:   D(func_)("__choreo_ele_add_parallel", {lhs_type, rhs_type}, {__choreo_factor_out_type}, [&](auto args, auto results) {
 // CHECK:     auto & lhs = args[0];
 // CHECK:     auto & rhs = args[1];
 // CHECK:     auto & output = results[0];

@@ -555,7 +555,7 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
       dfun << "}, ";
 
       // output argument
-      dfun << "{" << ((void_return) ? "" : "output_type") << "},";
+      dfun << "{" << ((void_return) ? "" : "__choreo_factor_out_type") << "},";
 
       // fixed parameter list
       dfun << " [&](auto args, auto results)";
@@ -1133,7 +1133,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
     if (debug_visit) VST_DEBUG(dbgs() << "VOID\n");
   } else if (auto rty = dyn_cast<SpannedType>(fty->out_ty)) {
     auto name = cgi->GetReturnSymbol(fname);
-    std::string type_name = "output_type";
+    std::string type_name = "__choreo_factor_out_type";
     auto type_string = "DRAMType(" + stringify(rty->ElementType()) + ", " +
                        ReplaceRuntimeNames(LSTR(rty->GetShape()), "", false) +
                        ")";
@@ -1141,7 +1141,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
     // handle dynamic-typed output when necessary. Generate code snippet like:
     //
     //   auto output_rt_dim0 = dim_(args[0], 1);
-    //   auto output = alloc_({output_rt_dim0}, output_type);
+    //   auto output = alloc_({output_rt_dim0}, __choreo_factor_out_type);
     //
     const auto& dyn_dims = rty->GetShape().GetDynamicDims();
     if (!dyn_dims.empty()) {
@@ -1157,19 +1157,19 @@ bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
         else
           type_name += ", " + ddim_name;
       }
-      type_name = "{" + type_name + "}, output_type";
+      type_name = "{" + type_name + "}, __choreo_factor_out_type";
     }
 
-    fs << indent << "auto output_type = " << type_string << ";\n";
+    fs << indent << "auto __choreo_factor_out_type = " << type_string << ";\n";
     factor_symbols.AddSymbol(name, type_name, type_string);
 
     if (debug_visit)
-      VST_DEBUG(dbgs() << indent << "auto output_type = " << type_string
-                       << ");\n");
+      VST_DEBUG(dbgs() << indent << "auto __choreo_factor_out_type = "
+                       << type_string << ");\n");
   } else {
     auto name =
         (cgi->HasReturnSymbol(fname)) ? cgi->GetReturnSymbol(fname) : "output";
-    auto type_name = "output_type";
+    auto type_name = "__choreo_factor_out_type";
     auto type_string =
         "DRAMType(" + stringify(TC2BT(fty->out_ty->Category())) + ", (1))";
     fs << indent << "auto " << type_name << " = " << type_string << ";\n";

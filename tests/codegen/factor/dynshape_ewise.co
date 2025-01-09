@@ -34,7 +34,7 @@ __co__ auto ele_add(s32 [6, ?, 128] lhs, s32 [6, ?, 128] rhs) {
 }
 // CHECK: auto lhs_type = DRAMType(IntType(32), {6, -1, 128});
 // CHECK: auto rhs_type = DRAMType(IntType(32), {6, -1, 128});
-// CHECK: auto output_type = DRAMType(IntType(32), {6, -1, 128});
+// CHECK: auto __choreo_factor_out_type = DRAMType(IntType(32), {6, -1, 128});
 // CHECK:    auto lhs_load__buf__ = alloc_(L1Type(IntType(32),{6, 2, 32}));
 // CHECK:    auto rhs_load__buf__ = alloc_(L1Type(IntType(32),{6, 2, 32}));
 // CHECK:    auto l1_out = alloc_(L1Type(IntType(32),{6, 2, 32}));
