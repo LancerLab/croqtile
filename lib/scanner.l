@@ -52,7 +52,8 @@ std::string kernel_buffer; // buffering the kernel code
 
 id          [a-zA-Z_][a-zA-Z0-9_]*
 num         [0-9]+
-floatnum    -?[0-9]+\.[0-9]+
+fpnum       -?[0-9]+\.[0-9]+
+fpnum_f     -?[0-9]+\.[0-9]+[fF]
 blank       [ \t\r]
 
 %%
@@ -108,7 +109,8 @@ blank       [ \t\r]
   {blank}+   {}
   \n+        {}
   {num}      return Choreo::Parser::make_NUM(std::stoi(yytext), loc);
-  {floatnum} return Choreo::Parser::make_FLOAT(std::stod(yytext), loc);
+  {fpnum}    return Choreo::Parser::make_DOUBLE(std::stod(yytext), loc);
+  {fpnum_f}  return Choreo::Parser::make_FLOAT(std::stof(yytext), loc);
   "//".*     {}  // Ignore everything from // to the end of the line
   "auto"     return Choreo::Parser::make_AUTO(yytext, loc);
   "mdspan"   return Choreo::Parser::make_MDSPAN(yytext, loc);

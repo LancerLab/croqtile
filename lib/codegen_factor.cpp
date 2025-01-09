@@ -1561,9 +1561,14 @@ void FactorCodeGen::EmitHostRuntimeCheck(std::ostream& os) {
   os << "\n";
 
   for (const auto& rc : FCtx(fname).GetRtChecks()) {
+
     os << "  choreo::runtime_check(" << ReplaceRuntimeNames(rc.lhs) << " "
-       << rc.op << " " << rc.rhs << ", \"" << rc.message << ", " << rc.loc
-       << "\");\n";
+       << rc.op << " " << rc.rhs << ", \"";
+    if (!rc.message.empty() && rc.message.back() == '.')
+      os << rc.message.substr(0, rc.message.size() - 1);
+    else
+      os << rc.message;
+    os << ", " << rc.loc << "\");\n";
   }
 }
 
@@ -1643,6 +1648,17 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
     }
   } else if (auto il = dyn_cast<AST::IntLiteral>(e)) {
     oss << WrapWithValue(il->value);
+  } else if (auto fl = dyn_cast<AST::FloatLiteral>(e)) {
+    std::string str;
+    if (fl->IsFloat32()) {
+      // Value(1.23f)
+      auto f32 = fl->Val_f32();
+      str = std::to_string(f32) + "f";
+    } else {
+      choreo_unreachable("unsupported float type " + PSTR(fl->GetType()) +
+                         " in Factor.");
+    }
+    oss << WrapWithValue(str);
   } else if (auto ii = dyn_cast<AST::IntIndex>(e)) {
     return ExprSTR(ii->value);
   } else if (auto expr = dyn_cast<AST::Expr>(e)) {

@@ -1,0 +1,26 @@
+// RUN: choreo -t topscc -es %s -o - | FileCheck %s
+
+#include "choreo.h"
+
+__co__ f32 [2] func() {
+  global f32 [2] out;
+  parallel p by 1 {
+    parallel q by 1 {
+      local f32 [2] buf{-11.0f};
+      dma.copy buf => out;
+    }
+  }
+  return out;
+}
+
+// CHECK: __global__ void __choreo_device_func(float * out) {
+// CHECK:   __local__ __valigned__ float buf[2];
+// CHECK:   tops_dte_ctx_t buf__init;
+// CHECK:   tops::dte_scope s_buf__init(buf__init);
+// CHECK:   tops::memset(buf__init, tops::mdspan(tops::Private, (float*)buf, 2), -11.000000f);
+// CHECK:   tops::mdspan __mds0_buf(tops::Private, (float*)buf, 2);
+// CHECK:   tops::mdspan __mds1_out(tops::Global, (float*)out, 2);
+// CHECK:   tops_dte_ctx_t choreo_topscc_ctx0;
+// CHECK:   choreo::future __choreo_anon_fut__0(choreo_topscc_ctx0, "", 10, 1, out);
+// CHECK:   tops::memcpy(*__choreo_anon_fut__0.get_ctx(), __mds1_out, __mds0_buf);
+// CHECK: }

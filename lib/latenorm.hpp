@@ -149,6 +149,7 @@ public:
 
   bool Visit(AST::MultiValues&) override { return true; };
   bool Visit(AST::IntLiteral&) override { return true; };
+  bool Visit(AST::FloatLiteral&) override { return true; };
   bool Visit(AST::Boolean&) override { return true; };
   bool Visit(AST::Expr&) override { return true; };
   bool Visit(AST::MultiDimSpans&) override { return true; };

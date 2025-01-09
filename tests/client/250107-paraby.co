@@ -1,0 +1,22 @@
+// RUN: choreo %s 2>&1 | FileCheck %s
+
+__co__ void ml() {
+  parallel p = {x, y, z} by [6, 5, 4], {p, q, v} by [3, 2, 1] {
+  }
+}
+
+__co__ void ml2() {
+  parallel p = {x, y, z} by [6, 5, 4], {x, m, n} by [3, 2, 1] {
+  }
+}
+
+__co__ void ml2() {
+  parallel p  by 4, {a, p, a} by [3, 2, 1] {
+  }
+}
+
+// CHECK: error: The symbol 'p' has been used in the same parallelby block.
+// CHECK: error: The symbol 'x' has been used in the same parallelby block.
+// CHECK: error: The symbol 'p' has been used in the same parallelby block.
+// CHECK: error: The symbol 'a' has been used in the same parallelby block.
+// CHECK: Parsing failed due to syntax errors.

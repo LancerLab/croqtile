@@ -333,8 +333,8 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
           // support simple int literal initialization
           hs << h_indent << bts << " " << sym << "__init["
              << ElemCountExprOf(*sty) << "];\n";
-          hs << h_indent << "memset(" << sym << "__init, " << PSTR(n.init_value)
-             << ", sizeof(" << sym << "__init));\n";
+          hs << h_indent << "memset(" << sym << "__init, "
+             << ExprSTR(n.init_value) << ", sizeof(" << sym << "__init));\n";
           hs << h_indent << bts << " * " << buf_sym << "= nullptr;\n";
           hs << h_indent << "choreo::abend_true(topsMalloc((&" << buf_sym
              << ", " << UnScopedSizeExpr(*sty) << "));\n";
@@ -1188,9 +1188,8 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       else
         choreo_unreachable("invalid bounded type note.");
     } else if (isa<BoundedType>(ty) &&
-               PrefixedWith(cast<BoundedType>(ty)->GetNote(), "p_component")) {
-      auto l =
-          RemovePrefixOrNull("p_component:", cast<BoundedType>(ty)->GetNote());
+               PrefixedWith(cast<BoundedType>(ty)->GetNote(), "pi")) {
+      auto l = RemovePrefixOrNull("pi:", cast<BoundedType>(ty)->GetNote());
       assert(l.has_value());
       // l should be (x|y|z):(0|1)
       if (l->length() != 3) choreo_unreachable("invalid bounded type note.");
@@ -1215,6 +1214,17 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
     }
   } else if (auto il = dyn_cast<AST::IntLiteral>(e)) {
     oss << il->value;
+  } else if (auto fl = dyn_cast<AST::FloatLiteral>(e)) {
+    std::ostringstream fp_val;
+    // std::fixed: the value should be in fixed-point notation
+    // otherwise, 1.0f => 1f (error)
+    if (fl->IsFloat32())
+      fp_val << std::fixed << fl->Val_f32() << "f";
+    else if (fl->IsFloat64())
+      fp_val << std::fixed << fl->Val_f64();
+    else
+      choreo_unreachable("unsupported float literal.");
+    oss << fp_val.str();
   } else if (auto ii = dyn_cast<AST::IntIndex>(e)) {
     return ExprSTR(ii->value, is_host);
   } else if (auto expr = dyn_cast<AST::Expr>(e)) {

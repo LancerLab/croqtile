@@ -165,6 +165,7 @@ public:
   }
 
   bool Visit(AST::IntLiteral&) override { return true; }
+  bool Visit(AST::FloatLiteral&) override { return true; }
   bool Visit(AST::Boolean&) override { return true; }
   bool Visit(AST::Expr& n) override {
     TraceEachVisit(n);
@@ -237,8 +238,8 @@ public:
         AST::Make<AST::Identifier>(n.LOC(), n.biv + "__elem__x"));
     n.bounds = AST::Make<AST::MultiValues>(n.LOC(), ", ");
     n.bounds->Append(AST::Make<AST::IntLiteral>(n.LOC(), n.bound));
-    n.iv_symbols->ValueAt(0)->SetType(MakeBoundedITupleType(
-        Shape(n.bound, n.biv + "__elem__x"), "p_component:x"));
+    n.iv_symbols->ValueAt(0)->SetType(
+        MakeBoundedITupleType(Shape(n.bound, n.biv + "__elem__x"), "pi:x"));
     VST_DEBUG(dbgs() << "Generate iv_symbols in parallelby for '" << n.biv
                      << "': " << STR(n.iv_symbols) << "\n");
     return true;

@@ -32,6 +32,11 @@ bool SemaChecker::Visit(AST::IntLiteral& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
+bool SemaChecker::Visit(AST::FloatLiteral& n) {
+  TraceEachVisit(n);
+  if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
+  return true;
+}
 bool SemaChecker::Visit(AST::Boolean& n) {
   TraceEachVisit(n);
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;

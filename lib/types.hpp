@@ -27,6 +27,8 @@ using ptr = std::shared_ptr<T>;
 
 enum class TypeCategory {
   INT,
+  FLOAT,
+  DOUBLE,
   BOOL,
   INDEX,
   ITUPLE,
@@ -43,6 +45,8 @@ enum class TypeCategory {
 inline static std::string STR(TypeCategory tc) {
   switch (tc) {
   case TypeCategory::INT: return "INT";
+  case TypeCategory::FLOAT: return "FLOAT";
+  case TypeCategory::DOUBLE: return "DOUBLE";
   case TypeCategory::BOOL: return "BOOL";
   case TypeCategory::INDEX: return "INDEX";
   case TypeCategory::ITUPLE: return "ITUPLE";
@@ -72,6 +76,8 @@ enum class BaseType {
   U8,
   S8,
   INT,
+  FLOAT,
+  DOUBLE,
   BOOL,
   ITUPLE,
   VOID,
@@ -113,6 +119,8 @@ enum Attribute : uint16_t {
 inline BaseType TC2BT(TypeCategory tc) {
   switch (tc) {
   case TypeCategory::INT: return BaseType::INT;
+  case TypeCategory::FLOAT: return BaseType::FLOAT;
+  case TypeCategory::DOUBLE: return BaseType::DOUBLE;
   case TypeCategory::BOOL: return BaseType::BOOL;
   case TypeCategory::VOID: return BaseType::VOID;
   default:
@@ -141,13 +149,14 @@ inline static size_t SizeOf(FundamentalType ft) {
 // utility functions to map types to strings, and the opposite.
 inline static BaseType BaseTypeFromString(const std::string& input) {
   static const std::unordered_map<std::string, BaseType> typeMap = {
-      {"f32", BaseType::F32},   {"f16", BaseType::F16},
-      {"bf16", BaseType::BF16}, {"u32", BaseType::U32},
-      {"s32", BaseType::S32},   {"u16", BaseType::U16},
-      {"s16", BaseType::S16},   {"u8", BaseType::U8},
-      {"s8", BaseType::S8},     {"int", BaseType::INT},
-      {"bool", BaseType::BOOL}, {"ituple", BaseType::ITUPLE},
-      {"void", BaseType::VOID}, {"unknown", BaseType::UNKNOWN},
+      {"f32", BaseType::F32},     {"f16", BaseType::F16},
+      {"bf16", BaseType::BF16},   {"u32", BaseType::U32},
+      {"s32", BaseType::S32},     {"u16", BaseType::U16},
+      {"s16", BaseType::S16},     {"u8", BaseType::U8},
+      {"s8", BaseType::S8},       {"int", BaseType::INT},
+      {"float", BaseType::FLOAT}, {"double", BaseType::DOUBLE},
+      {"bool", BaseType::BOOL},   {"ituple", BaseType::ITUPLE},
+      {"void", BaseType::VOID},   {"unknown", BaseType::UNKNOWN},
   };
 
   auto it = typeMap.find(input);
@@ -160,13 +169,14 @@ namespace __internal__ {
 
 inline static std::string GetStringFrom(BaseType dataType) {
   static const std::unordered_map<BaseType, std::string> enumToString = {
-      {BaseType::F32, "f32"},   {BaseType::F16, "f16"},
-      {BaseType::BF16, "bf16"}, {BaseType::U32, "u32"},
-      {BaseType::S32, "s32"},   {BaseType::U16, "u16"},
-      {BaseType::S16, "s16"},   {BaseType::U8, "u8"},
-      {BaseType::S8, "s8"},     {BaseType::INT, "int"},
-      {BaseType::BOOL, "bool"}, {BaseType::ITUPLE, "ituple"},
-      {BaseType::VOID, "void"}, {BaseType::UNKNOWN, "unknown"},
+      {BaseType::F32, "f32"},     {BaseType::F16, "f16"},
+      {BaseType::BF16, "bf16"},   {BaseType::U32, "u32"},
+      {BaseType::S32, "s32"},     {BaseType::U16, "u16"},
+      {BaseType::S16, "s16"},     {BaseType::U8, "u8"},
+      {BaseType::S8, "s8"},       {BaseType::INT, "int"},
+      {BaseType::FLOAT, "float"}, {BaseType::DOUBLE, "double"},
+      {BaseType::BOOL, "bool"},   {BaseType::ITUPLE, "ituple"},
+      {BaseType::VOID, "void"},   {BaseType::UNKNOWN, "unknown"},
   };
 
   auto it = enumToString.find(dataType);
@@ -706,6 +716,30 @@ struct IntegerType : public ScalarType, public TypeIDProvider<IntegerType> {
   __UDT_TYPE_INFO__(ScalarType, IntegerType)
 };
 
+struct FloatType : public ScalarType, public TypeIDProvider<FloatType> {
+  FloatType() : ScalarType(TypeCategory::FLOAT) {}
+  void Print(std::ostream& os) const override { os << "float"; }
+  const std::string Name() const override { return "float"; }
+
+  bool operator==(const Type& ty) const override { return isa<FloatType>(&ty); }
+  bool ApprxEqual(const Type& ty) const override { return operator==(ty); }
+
+  __UDT_TYPE_INFO__(ScalarType, FloatType)
+};
+
+struct DoubleType : public ScalarType, public TypeIDProvider<DoubleType> {
+  DoubleType() : ScalarType(TypeCategory::DOUBLE) {}
+  void Print(std::ostream& os) const override { os << "double"; }
+  const std::string Name() const override { return "double"; }
+
+  bool operator==(const Type& ty) const override {
+    return isa<DoubleType>(&ty);
+  }
+  bool ApprxEqual(const Type& ty) const override { return operator==(ty); }
+
+  __UDT_TYPE_INFO__(ScalarType, DoubleType)
+};
+
 struct BooleanType final : public ScalarType,
                            public TypeIDProvider<BooleanType> {
   BooleanType() : ScalarType(TypeCategory::BOOL) {}
@@ -743,7 +777,7 @@ struct ITupleType : public Type, public TypeIDProvider<ITupleType> {
       : Type(TypeCategory::ITUPLE) {} // this initialize an invalid ITupleType
                                       // The Type must be deduced for use
 
-  bool HasSufficientInfo() const { return IsValidRank(dim_count); }
+  bool HasSufficientInfo() const override { return IsValidRank(dim_count); }
 
   ITupleType(size_t n) : Type(TypeCategory::ITUPLE), dim_count(n) {}
 
@@ -1210,6 +1244,10 @@ inline BaseType GetBaseType(const Type& ty) {
   if (isa<VoidType>(&ty)) return BaseType::VOID;
   if (isa<IntegerType>(&ty))
     return BaseType::INT;
+  else if (isa<FloatType>(&ty))
+    return BaseType::FLOAT;
+  else if (isa<DoubleType>(&ty))
+    return BaseType::DOUBLE;
   else if (isa<BooleanType>(&ty))
     return BaseType::BOOL;
   else if (isa<BoundedIntegerType>(&ty))
@@ -1260,6 +1298,12 @@ inline ptr<UnknownType> MakeUnknownType() {
 
 inline ptr<IntegerType> MakeIntegerType() {
   return std::make_shared<IntegerType>();
+}
+
+inline ptr<FloatType> MakeFloatType() { return std::make_shared<FloatType>(); }
+
+inline ptr<DoubleType> MakeDoubleType() {
+  return std::make_shared<DoubleType>();
 }
 
 inline ptr<IntegerType> MakeIntegerType(const Shape& s) {

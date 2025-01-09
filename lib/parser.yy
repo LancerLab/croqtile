@@ -4,6 +4,7 @@
 %define api.token.constructor
 //%define parse.trace
 %define api.parser.class { Parser }
+%parse-param { PContext &pctx }
 %define parse.error verbose
 %define parse.assert
 %define api.namespace { Choreo }
@@ -24,6 +25,14 @@ struct SymbolWithInitVal {
   SymbolWithInitVal(const std::string & n, T i) : name(n), init_val(i) {}
 };
 
+class PContext {
+  private:
+    size_t error_count = 0;
+  public:
+    size_t GetErrorCount() { return error_count; }
+    bool HasError() { return error_count > 0; }
+    void recordError() { error_count++; }
+};
 }
 
 %code top {
@@ -75,13 +84,18 @@ static Parser::symbol_type yylex(Scanner &scanner) {
 //
 static bool parsing_prefixed_list = false;
 
+bool parsing_chunkat_value_list = false;
+
+ptr<AST::MultiNodes> ConstructPBRecursively(size_t idx,
+                                          const ptr<AST::MultiNodes>& ps,
+                                          const ptr<AST::MultiNodes>& stmts);
+std::set<std::string> paraby_symbols;
+
 }
 
 %{
 #include <stdio.h>
 extern int yylex();
-
-bool parsing_chunkat_value_list = false;
 
 void choreo_info(const char *message) {
     // fprintf(stderr, "Error: %s\n", s);
@@ -91,9 +105,6 @@ void choreo_info(const char *message) {
   errs() << "Info location: " << ::loc << "\n";
 }
 
-ptr<AST::MultiNodes> ConstructPBRecursively(size_t idx,
-                                          const ptr<AST::MultiNodes>& ps,
-                                          const ptr<AST::MultiNodes>& stmts);
 %}
 
 // make yylex() expects one parameter of type 'Choreo::Scanner &'
@@ -143,7 +154,8 @@ ptr<AST::MultiNodes> ConstructPBRecursively(size_t idx,
 %token END 0 "end of file"
 %token <char> CHAR
 %token <int> NUM
-%token <double> FLOAT
+%token <float> FLOAT
+%token <double> DOUBLE
 %token <std::string> HOST_CODE KERNEL_CODE
 %token <std::string> IDENTIFIER ATTR_CO
 // type related
@@ -171,7 +183,7 @@ ptr<AST::MultiNodes> ConstructPBRecursively(size_t idx,
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::SpanAs>> span_as
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
-%nterm <AST::ptr<AST::Node>> foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt swap_stmt expr_or_qes range_expr if_else_block optional_scalar_init param_mdspan_val chunkat_or_storage_or_select pred
+%nterm <AST::ptr<AST::Node>> foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt swap_stmt expr_or_qes range_expr if_else_block optional_scalar_init param_mdspan_val chunkat_or_storage_or_select pred f_expr
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause else_block multi_decls named_spanned_decl
 %nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers passables future_data_list template_params
 %nterm <AST::ptr<AST::Expr>> s_expr template_value_expr span_expr id_expr bound_expr
@@ -436,10 +448,12 @@ return_stmt
     ;
 
 paraby_block
-    : PARA parabys LBRACE statements RBRACE {
-        $$ = AST::Make<AST::ParallelBy>(@1, cast<AST::MultiNodes>($2->AllSubs()[0]), $4);
-        if ($2->Count() > 1)
-          $$->stmts = ConstructPBRecursively(1, $2, $4);
+    : PARA {
+        paraby_symbols.clear();
+      } parabys LBRACE statements RBRACE {
+        $$ = AST::Make<AST::ParallelBy>(@1, cast<AST::MultiNodes>($3->AllSubs()[0]), $5);
+        if ($3->Count() > 1)
+          $$->stmts = ConstructPBRecursively(1, $3, $5);
       }
     ;
 
@@ -456,21 +470,29 @@ parabys
 
 paraby
     : IDENTIFIER BY NUM {
+        if (paraby_symbols.find($1) != paraby_symbols.end())
+          Parser::error(@1, "The symbol '" + $1 + "' has been used in the same parallelby block.");
+        paraby_symbols.insert($1);
         symtab.AddSymbol($1, MakeUnknownType());
         $$ = AST::Make<AST::MultiNodes>(@1);
         $$->Append(AST::Make<AST::Identifier>(@1, $1));
         $$->Append(AST::Make<AST::IntLiteral>(@3, $3));
       }
     | IDENTIFIER ASSIGN LBRACE id_list RBRACE BY LBRAKT iv_list RBRAKT {
+        if (paraby_symbols.find($1) != paraby_symbols.end())
+          Parser::error(@1, "The symbol '" + $1 + "' has been used in the same parallelby block.");
+        paraby_symbols.insert($1);
+        symtab.AddSymbol($1, MakeUnknownType());
         if ($4->Count() != $8->Count())
           Parser::error(@4, "The number of arguments in parallel bound config "
                         "should be consistent.");
         for (auto id : $4->AllValues()) {
           auto name = cast<AST::Identifier>(id)->name;
+          if (paraby_symbols.find(name) != paraby_symbols.end())
+            Parser::error(@1, "The symbol '" + name + "' has been used in the same parallelby block.");
+          paraby_symbols.insert(name);
           symtab.AddSymbol(name, MakeUnknownType());
         }
-        symtab.AddSymbol($1, MakeUnknownType());
-
         $$ = AST::Make<AST::MultiNodes>(@1);
         $$->Append(AST::Make<AST::Identifier>(@1, $1));
         $$->Append($4);
@@ -482,6 +504,9 @@ paraby
                         "should be consistent.");
         for (auto id : $2->AllValues()) {
           auto name = cast<AST::Identifier>(id)->name;
+          if (paraby_symbols.find(name) != paraby_symbols.end())
+            Parser::error(@1, "The symbol '" + name + "' has been used in the same parallelby block.");
+          paraby_symbols.insert(name);
           symtab.AddSymbol(name, MakeUnknownType());
         }
         $$ = AST::Make<AST::MultiNodes>(@1);
@@ -559,7 +584,7 @@ named_spanned_decl
           symtab.AddSymbol(val->name, $2->GetType());
           $$->Append(AST::Make<AST::NamedVariableDecl>(
             @3, val->name, $2, $1, nullptr,
-            AST::Make<AST::IntLiteral>(@3, val->init_val)));
+            AST::Make<AST::FloatLiteral>(@3, val->init_val)));
         }
       }
     ;
@@ -1153,6 +1178,12 @@ passable
     | s_expr FNDATA {
       $$ = AST::Make<AST::Expr>(@1, "dataof", $1);
     }
+    | f_expr { $$ = $1; }
+    ;
+
+f_expr
+    : FLOAT { $$ = AST::Make<AST::FloatLiteral>(@1, $1); }
+    | DOUBLE { $$ = AST::Make<AST::FloatLiteral>(@1, $1); }
     ;
 
 with_matchers /* TODO: this special case is pattern-match ids for with-block */
@@ -1220,4 +1251,5 @@ void Parser::error(const location &loc , const std::string &message) {
   errs() << ((should_use_colors()) ? color_red : "") << "error: "
          << ((should_use_colors()) ? color_reset : "");
   errs() << message << "\n";
+  pctx.recordError();
 }

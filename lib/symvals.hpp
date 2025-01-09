@@ -19,6 +19,10 @@ static constexpr size_t INVALID_UNSIGNED = std::numeric_limits<size_t>::max();
 static constexpr int INVALID_SIGNED = std::numeric_limits<int>::max();
 static constexpr int UNKNOWN_SIGNED =
     std::numeric_limits<int>::min(); // represent literal value '?' only
+static constexpr int UNKNOWN_FLOAT =
+    std::numeric_limits<float>::min(); // represent literal value '?' only
+static constexpr int UNKNOWN_DOUBLE =
+    std::numeric_limits<double>::min(); // represent literal value '?' only
 } // namespace __internal
 
 inline constexpr size_t GetInvalidUnsigned() {
@@ -26,6 +30,8 @@ inline constexpr size_t GetInvalidUnsigned() {
 }
 inline constexpr int GetInvalidSigned() { return __internal::INVALID_SIGNED; }
 inline constexpr int GetUnKnownInteger() { return __internal::UNKNOWN_SIGNED; }
+inline constexpr int GetUnKnownFloat() { return __internal::UNKNOWN_FLOAT; }
+inline constexpr int GetUnKnownDouble() { return __internal::UNKNOWN_DOUBLE; }
 
 inline constexpr bool IsValidUnsigned(size_t v) {
   return v != GetInvalidUnsigned();
@@ -33,6 +39,12 @@ inline constexpr bool IsValidUnsigned(size_t v) {
 inline constexpr bool IsValidSigned(int v) { return v != GetInvalidSigned(); }
 inline constexpr bool IsUnKnownInteger(int v) {
   return v == GetUnKnownInteger();
+}
+inline constexpr bool IsUnKnownFloatPoint(float v) {
+  return v == GetUnKnownFloat();
+}
+inline constexpr bool IsUnKnownFloatPoint(double v) {
+  return v == GetUnKnownDouble();
 }
 
 inline constexpr size_t GetInvalidRank() { return GetInvalidUnsigned(); }
@@ -136,34 +148,40 @@ inline T GetValueAt(ValueList vlist, int idx) {
   return *(std::get_if<T>(&vlist[idx]));
 };
 
+// If vi is not int, wrap it with "(xxx)".
+inline std::string WrapWithParentheses(const ValueItem& vi) {
+  if (!isa<int>(&vi)) return "(" + ValueItemAsString(vi) + ")";
+  return ValueItemAsString(vi);
+}
+
 // some operations
 inline ValueItem operator+(const ValueItem& vi1, const ValueItem& vi2) {
   if (!isa<int>(&vi1) || !isa<int>(&vi2))
-    return ValueItemAsString(vi1) + "+" + ValueItemAsString(vi2);
+    return WrapWithParentheses(vi1) + "+" + WrapWithParentheses(vi2);
   return *cast<int>(&vi1) + *cast<int>(&vi2);
 }
 
 inline ValueItem operator-(const ValueItem& vi1, const ValueItem& vi2) {
   if (!isa<int>(&vi1) || !isa<int>(&vi2))
-    return ValueItemAsString(vi1) + "-" + ValueItemAsString(vi2);
+    return WrapWithParentheses(vi1) + "-" + WrapWithParentheses(vi2);
   return *cast<int>(&vi1) - *cast<int>(&vi2);
 }
 
 inline ValueItem operator*(const ValueItem& vi1, const ValueItem& vi2) {
   if (!isa<int>(&vi1) || !isa<int>(&vi2))
-    return ValueItemAsString(vi1) + "*" + ValueItemAsString(vi2);
+    return WrapWithParentheses(vi1) + "*" + WrapWithParentheses(vi2);
   return *cast<int>(&vi1) * *cast<int>(&vi2);
 }
 
 inline ValueItem operator/(const ValueItem& vi1, const ValueItem& vi2) {
   if (!isa<int>(&vi1) || !isa<int>(&vi2))
-    return ValueItemAsString(vi1) + "/" + ValueItemAsString(vi2);
+    return WrapWithParentheses(vi1) + "/" + WrapWithParentheses(vi2);
   return *cast<int>(&vi1) / *cast<int>(&vi2);
 }
 
 inline ValueItem operator%(const ValueItem& vi1, const ValueItem& vi2) {
   if (!isa<int>(&vi1) || !isa<int>(&vi2))
-    return ValueItemAsString(vi1) + "%" + ValueItemAsString(vi2);
+    return WrapWithParentheses(vi1) + "%" + WrapWithParentheses(vi2);
   return *cast<int>(&vi1) % *cast<int>(&vi2);
 }
 

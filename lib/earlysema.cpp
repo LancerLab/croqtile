@@ -72,6 +72,26 @@ bool EarlySemantics::Visit(AST::IntLiteral& n) {
   return true;
 }
 
+bool EarlySemantics::Visit(AST::FloatLiteral& n) {
+  TraceEachVisit(n);
+  if (n.IsFloat32()) {
+    assert(std::holds_alternative<float>(n.value) &&
+           "unexpected floating-point type.");
+    assert(!IsUnKnownFloatPoint(n.Val_f32()) &&
+           "floating-point number can only used as literal for now.");
+    SetNodeType(n, MakeFloatType());
+  } else if (n.IsFloat64()) {
+    assert(std::holds_alternative<double>(n.value) &&
+           "unexpected floating-point type.");
+    assert(!IsUnKnownFloatPoint(n.Val_f64()) &&
+           "floating-point number can only used as literal for now.");
+    SetNodeType(n, MakeDoubleType());
+  } else
+    choreo_unreachable("unexpected floating-point type.");
+
+  return true;
+}
+
 bool EarlySemantics::Visit(AST::Boolean& n) {
   TraceEachVisit(n);
   SetNodeType(n, MakeBooleanType());
@@ -677,20 +697,15 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
     error_count++;
   }
 
-  ReportErrorWhenViolateODR(n.LOC(), n.biv, __FILE__, __LINE__,
-                            MakeBoundedITupleType(Shape(1, n.biv), "pv"));
-  // TODO(wsj): rank of shape?
-  // if p={px,py,pz}, will chunkat(p) be explained as
-  // chunkat(px,py,pz) or still
-  // chunkat(p) where ubound of p is #px * #py * #pz, rank of p is 1.
-  // ReportErrorWhenViolateODR(n.LOC(), n.biv, __FILE__, __LINE__,
-  //                           MakeBoundedITupleType(Shape(n.dims, n.biv),
-  //                           "pv"));
+  if (!n.biv.empty())
+    ReportErrorWhenViolateODR(
+        n.LOC(), n.biv, __FILE__, __LINE__,
+        MakeBoundedITupleType(Shape(n.dims, n.biv), "pv"));
 
   if (n.iv_symbols) {
     for (auto& sym : n.iv_symbols->AllValues()) {
       auto sname = cast<AST::Identifier>(sym)->name;
-      auto mty = MakeBoundedITupleType(Shape(1, sname), "p_component");
+      auto mty = MakeBoundedITupleType(Shape(1, sname), "pi");
       ReportErrorWhenViolateODR(n.LOC(), sname, __FILE__, __LINE__, mty);
       SetNodeType(*sym, mty);
     }

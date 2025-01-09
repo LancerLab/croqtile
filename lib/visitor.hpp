@@ -58,6 +58,7 @@ struct Visitor {
   virtual bool Visit(AST::MultiNodes&) = 0;
   virtual bool Visit(AST::MultiValues&) = 0;
   virtual bool Visit(AST::IntLiteral&) = 0;
+  virtual bool Visit(AST::FloatLiteral&) = 0;
   virtual bool Visit(AST::Boolean&) = 0;
   virtual bool Visit(AST::Expr&) = 0;
   virtual bool Visit(AST::MultiDimSpans&) = 0;
@@ -418,6 +419,7 @@ public:
   bool Visit(AST::MultiNodes&) override { return true; };
   bool Visit(AST::MultiValues&) override { return true; };
   bool Visit(AST::IntLiteral&) override { return true; };
+  bool Visit(AST::FloatLiteral&) override { return true; };
   bool Visit(AST::Boolean&) override { return true; };
   bool Visit(AST::Expr&) override { return true; };
   bool Visit(AST::MultiDimSpans&) override { return true; };

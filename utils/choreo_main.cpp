@@ -6,7 +6,6 @@
 #include "codegen_prepare.hpp"
 #include "earlysema.hpp"
 #include "gcucheck.hpp"
-#include "factorcheck.hpp"
 #include "latenorm.hpp"
 #include "memcheck.hpp"
 #include "normalize.hpp"
@@ -241,7 +240,8 @@ int main(int argc, char* argv[]) {
 
   Scanner s;
   s.yyrestart((no_pp) ? r.GetInputStream() : pps);
-  Parser p(s);
+  PContext pctx;
+  Parser p(pctx, s);
 
   if (debug_on) {
     dbgs() << "Choreo: Debug of parsing is switched on." << std::endl;
@@ -252,7 +252,7 @@ int main(int argc, char* argv[]) {
   if (del_comm) Scanner::SetRemoveComments();
 
   if (prt_pass) dbgs() << "|- parse program into AST.\n";
-  if (p.parse() != 0) {
+  if (p.parse() != 0 || pctx.HasError()) {
     errs() << "Parsing failed due to syntax errors." << std::endl;
     return 1;
   }
@@ -315,9 +315,6 @@ int main(int argc, char* argv[]) {
     // apply the gcu specific checking
     GCUCheck gcu_checker;
     if (!gcu_checker.RunOnProgram(root)) return gcu_checker.Status();
-
-    FactorCheck factor_checker(sc.SymTab());
-    if (!factor_checker.RunOnProgram(root)) return factor_checker.Status();
 
     FactorTrans trans;
     if (!trans.RunOnProgram(root)) return trans.Status();

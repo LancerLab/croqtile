@@ -169,6 +169,17 @@ bool TypeInference::Visit(AST::IntLiteral& n) {
   return true;
 }
 
+bool TypeInference::Visit(AST::FloatLiteral& n) {
+  if (std::holds_alternative<float>(n.value))
+    n.SetType(MakeFloatType());
+  else if (std::holds_alternative<double>(n.value))
+    n.SetType(MakeDoubleType());
+  else
+    choreo_unreachable("unhandled floating-point type.");
+  TraceEachVisit(n);
+  return true;
+}
+
 bool TypeInference::Visit(AST::Boolean& n) {
   n.SetType(MakeBooleanType());
   TraceEachVisit(n);
