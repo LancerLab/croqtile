@@ -333,8 +333,8 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
           // support simple int literal initialization
           hs << h_indent << bts << " " << sym << "__init["
              << ElemCountExprOf(*sty) << "];\n";
-          hs << h_indent << "memset(" << sym << "__init, " << PSTR(n.init_value)
-             << ", sizeof(" << sym << "__init));\n";
+          hs << h_indent << "memset(" << sym << "__init, "
+             << ExprSTR(n.init_value) << ", sizeof(" << sym << "__init));\n";
           hs << h_indent << bts << " * " << buf_sym << "= nullptr;\n";
           hs << h_indent << "choreo::abend_true(topsMalloc((&" << buf_sym
              << ", " << UnScopedSizeExpr(*sty) << "));\n";

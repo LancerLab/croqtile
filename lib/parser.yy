@@ -584,7 +584,7 @@ named_spanned_decl
           symtab.AddSymbol(val->name, $2->GetType());
           $$->Append(AST::Make<AST::NamedVariableDecl>(
             @3, val->name, $2, $1, nullptr,
-            AST::Make<AST::IntLiteral>(@3, val->init_val)));
+            AST::Make<AST::FloatLiteral>(@3, val->init_val)));
         }
       }
     ;
