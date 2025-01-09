@@ -1,4 +1,4 @@
-// RUN: choreo -t factor -es %s -o - | FileCheck %s
+// RUN: choreo -t factor -gs %s | FileCheck %s
 
 #include "choreo.h"
 
@@ -13,7 +13,7 @@ __co__ f32 [2] func() {
   return out;
 }
 
-// CHECK: D(func_)("__choreo_func_parallel", {}, {output_type}, [&](auto args, auto results) {
+// CHECK: D(func_)("__choreo_func_parallel", {}, {__choreo_factor_out_type}, [&](auto args, auto results) {
 // CHECK:   auto & out = results[0];
 // CHECK:   auto thread_id = thread_id_();
 // CHECK:   auto block_id = block_id_();
