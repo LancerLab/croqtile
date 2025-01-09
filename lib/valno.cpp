@@ -730,6 +730,18 @@ std::string ValueNumbering::GenerateNodeSignature(const AST::Node& node,
   if (auto* n = dyn_cast<AST::IntLiteral>(&node)) {
     if (IsUnKnownInteger(n->value)) return "?";
     return "const_" + std::to_string(n->value);
+  } else if (auto* n = dyn_cast<AST::FloatLiteral>(&node)) {
+    if (n->IsFloat32()) {
+      auto f32 = n->Val_f32();
+      if (IsUnKnownFloatPoint(f32)) return "?";
+      return "const_" + std::to_string(f32) + "f";
+    } else if (n->IsFloat64()) {
+      auto f64 = n->Val_f64();
+      if (IsUnKnownFloatPoint(f64)) return "?";
+      return "const_" + std::to_string(f64);
+    } else {
+      choreo_unreachable("unexpected float point type.");
+    }
   } else if (auto* n = dyn_cast<AST::Boolean>(&node)) {
     return n->value;
   } else if (auto* v = dyn_cast<AST::Identifier>(&node)) {

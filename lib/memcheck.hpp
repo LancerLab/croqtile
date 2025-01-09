@@ -252,6 +252,10 @@ public:
     TraceEachVisit(n);
     return true;
   }
+  bool Visit(AST::FloatLiteral& n) override {
+    TraceEachVisit(n);
+    return true;
+  }
   bool Visit(AST::Boolean& n) override {
     TraceEachVisit(n);
     return true;

@@ -131,6 +131,7 @@ public:
   bool Visit(AST::MultiNodes&) override { return true; };
   bool Visit(AST::MultiValues&) override { return true; };
   bool Visit(AST::IntLiteral&) override { return true; };
+  bool Visit(AST::FloatLiteral&) override { return true; };
   bool Visit(AST::Expr&) override { return true; };
   bool Visit(AST::MultiDimSpans&) override { return true; };
   bool Visit(AST::NamedTypeDecl&) override { return true; };

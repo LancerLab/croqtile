@@ -256,6 +256,65 @@ struct IntLiteral : public Node, public TypeIDProvider<IntLiteral> {
   __UDT_TYPE_INFO__(Node, IntLiteral)
 };
 
+// Single/Double precision floating-point number
+struct FloatLiteral : public Node, public TypeIDProvider<FloatLiteral> {
+  std::variant<float, double> value;
+
+  FloatLiteral(const location& l, float v = GetUnKnownFloat())
+      : Node(l, MakeFloatType()) {
+    value = v;
+  }
+
+  FloatLiteral(const location& l, double v = GetUnKnownFloat())
+      : Node(l, MakeDoubleType()) {
+    value = v;
+  }
+
+  // allow copy construction
+  explicit FloatLiteral(const FloatLiteral& fl)
+      : Node(fl.LOC()), value(fl.value) {}
+
+  float Val_f32() const {
+    assert(
+        IsFloat32() &&
+        "Cannot get f32 value from float-point number whose type is not f32.");
+    return std::get<float>(value);
+  }
+  double Val_f64() const {
+    assert(
+        IsFloat64() &&
+        "Cannot get f64 value from float-point number whose type is not f64.");
+    return std::get<double>(value);
+  }
+
+  bool IsFloat32() const { return isa<FloatType>(GetType()); }
+  bool IsFloat64() const { return isa<DoubleType>(GetType()); }
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    std::ostringstream oss;
+    if (IsFloat32()) {
+      auto f32 = std::get<float>(value);
+      if (IsUnKnownFloatPoint(f32))
+        oss << prefix << "?";
+      else
+        oss << prefix << std::fixed << f32 << "f";
+    } else if (IsFloat64()) {
+      auto f64 = std::get<double>(value);
+      if (IsUnKnownFloatPoint(f64))
+        oss << prefix << "?";
+      else
+        oss << prefix << std::fixed << f64;
+    } else {
+      choreo_unreachable("unhandled floating-point type.");
+    }
+    os << oss.str();
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, FloatLiteral)
+};
+
 struct Expr : public Node, public TypeIDProvider<Expr> {
   // Different expression type
   enum Form { Unary, Binary, Ternary, Reference };
@@ -774,16 +833,16 @@ struct NamedVariableDecl : public Node,
                            public TypeIDProvider<NamedVariableDecl> {
   const std::string name_str;
   const std::string init_str;
-  const ptr<Memory> mem = nullptr;            // storage location
-  ptr<DataType> type = nullptr;               // type annotation
-  const ptr<Node> init_expr = nullptr;        // associated initializer
-  const ptr<IntLiteral> init_value = nullptr; // associated initial value
+  const ptr<Memory> mem = nullptr;      // storage location
+  ptr<DataType> type = nullptr;         // type annotation
+  const ptr<Node> init_expr = nullptr;  // associated initializer
+  const ptr<Node> init_value = nullptr; // associated initial value
 
   explicit NamedVariableDecl(const location& l, const std::string& n,
                              const ptr<DataType>& t = nullptr,
                              const ptr<Memory>& s = nullptr,
                              const ptr<Node>& i = nullptr,
-                             const ptr<IntLiteral>& v = nullptr,
+                             const ptr<Node>& v = nullptr,
                              const std::string& d = "=")
       : Node(l), name_str(n), init_str(d), mem(s), type(t), init_expr(i),
         init_value(v) {

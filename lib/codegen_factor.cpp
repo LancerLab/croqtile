@@ -1648,6 +1648,17 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
     }
   } else if (auto il = dyn_cast<AST::IntLiteral>(e)) {
     oss << WrapWithValue(il->value);
+  } else if (auto fl = dyn_cast<AST::FloatLiteral>(e)) {
+    std::string str;
+    if (fl->IsFloat32()) {
+      // Value(1.23f)
+      auto f32 = fl->Val_f32();
+      str = std::to_string(f32) + "f";
+    } else {
+      choreo_unreachable("unsupported float type " + PSTR(fl->GetType()) +
+                         " in Factor.");
+    }
+    oss << WrapWithValue(str);
   } else if (auto ii = dyn_cast<AST::IntIndex>(e)) {
     return ExprSTR(ii->value);
   } else if (auto expr = dyn_cast<AST::Expr>(e)) {

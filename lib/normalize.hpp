@@ -165,6 +165,7 @@ public:
   }
 
   bool Visit(AST::IntLiteral&) override { return true; }
+  bool Visit(AST::FloatLiteral&) override { return true; }
   bool Visit(AST::Boolean&) override { return true; }
   bool Visit(AST::Expr& n) override {
     TraceEachVisit(n);

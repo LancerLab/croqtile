@@ -630,6 +630,19 @@ public:
     TraceEachVisit(n);
     return true;
   }
+  bool Visit(AST::FloatLiteral& n) override {
+    TraceEachVisit(n);
+
+    if (CCtx().GetTarget() == CompileTarget::Factor) {
+      if (!n.IsFloat32()) {
+        Error(n.LOC(), "Factor backend in Choreo does not support " +
+                           PSTR(n.GetType()) + " float-point number yet!");
+        error_count++;
+      }
+    }
+
+    return true;
+  }
   bool Visit(AST::Boolean& n) override {
     TraceEachVisit(n);
     return true;

@@ -72,6 +72,26 @@ bool EarlySemantics::Visit(AST::IntLiteral& n) {
   return true;
 }
 
+bool EarlySemantics::Visit(AST::FloatLiteral& n) {
+  TraceEachVisit(n);
+  if (n.IsFloat32()) {
+    assert(std::holds_alternative<float>(n.value) &&
+           "unexpected floating-point type.");
+    assert(!IsUnKnownFloatPoint(n.Val_f32()) &&
+           "floating-point number can only used as literal for now.");
+    SetNodeType(n, MakeFloatType());
+  } else if (n.IsFloat64()) {
+    assert(std::holds_alternative<double>(n.value) &&
+           "unexpected floating-point type.");
+    assert(!IsUnKnownFloatPoint(n.Val_f64()) &&
+           "floating-point number can only used as literal for now.");
+    SetNodeType(n, MakeDoubleType());
+  } else
+    choreo_unreachable("unexpected floating-point type.");
+
+  return true;
+}
+
 bool EarlySemantics::Visit(AST::Boolean& n) {
   TraceEachVisit(n);
   SetNodeType(n, MakeBooleanType());

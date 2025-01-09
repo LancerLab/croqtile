@@ -199,6 +199,7 @@ public:
 
   bool Visit(AST::MultiValues&) { return true; }
   bool Visit(AST::IntLiteral&) { return true; }
+  bool Visit(AST::FloatLiteral&) { return true; }
   bool Visit(AST::Boolean&) { return true; }
 
   bool Visit(AST::Expr& n) {

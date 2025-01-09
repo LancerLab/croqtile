@@ -415,6 +415,14 @@ public:
     return true;
   }
 
+  bool Visit(AST::FloatLiteral& n) {
+    TraceEachVisit(n);
+    if (cannot_proceed) return true;
+    int valNo = vn.GenerateValueNumberForNode(n);
+    cur_vn = valNo;
+    return true;
+  }
+
   bool Visit(AST::Boolean& n) {
     TraceEachVisit(n);
 

@@ -18,6 +18,7 @@ void MultiValues::accept(Choreo::Visitor& v) {
 
 void Boolean::accept(Choreo::Visitor& v) { v.Visit(*this); }
 void IntLiteral::accept(Choreo::Visitor& v) { v.Visit(*this); }
+void FloatLiteral::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
 void Expr::accept(Choreo::Visitor& v) {
   if (value_c) value_c->accept(v);

@@ -225,7 +225,6 @@ public:
 public:
   bool Visit(AST::MultiNodes& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     return true;
@@ -233,7 +232,6 @@ public:
 
   bool Visit(AST::MultiValues& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     for (auto value : n.AllValues()) {
@@ -248,7 +246,13 @@ public:
 
   bool Visit(AST::IntLiteral& n) override {
     TraceEachVisit(n);
+    if (cannot_proceed) return true;
 
+    return true;
+  }
+
+  bool Visit(AST::FloatLiteral& n) override {
+    TraceEachVisit(n);
     if (cannot_proceed) return true;
 
     return true;
@@ -256,7 +260,6 @@ public:
 
   bool Visit(AST::Boolean& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     return true;
@@ -264,7 +267,6 @@ public:
 
   bool Visit(AST::Expr& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     return true;
@@ -272,7 +274,6 @@ public:
 
   bool Visit(AST::MultiDimSpans& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     return true;
@@ -280,7 +281,6 @@ public:
 
   bool Visit(AST::NamedTypeDecl& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     if (n.init_expr) {
@@ -295,7 +295,6 @@ public:
 
   bool Visit(AST::NamedVariableDecl& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     if (n.init_expr && !isa<AST::Select>(n.init_expr)) {
@@ -317,7 +316,6 @@ public:
 
   bool Visit(AST::IntTuple& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     return true;
@@ -325,7 +323,6 @@ public:
 
   bool Visit(AST::Assignment& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     if (!SSTab().IsDeclared(n.name))
@@ -338,7 +335,6 @@ public:
 
   bool Visit(AST::IntIndex& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     return true;
@@ -346,7 +342,6 @@ public:
 
   bool Visit(AST::DataType& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     return true;
@@ -354,7 +349,6 @@ public:
 
   bool Visit(AST::Identifier& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     if (!SSTab().IsDeclared(n.name))
@@ -366,7 +360,6 @@ public:
 
   bool Visit(AST::Parameter& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     return true;
@@ -374,7 +367,6 @@ public:
 
   bool Visit(AST::ParamList& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     return true;
@@ -382,7 +374,6 @@ public:
 
   bool Visit(AST::ParallelBy& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     // TODO
@@ -398,7 +389,6 @@ public:
 
   bool Visit(AST::WhereBind& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     return true;
@@ -406,7 +396,6 @@ public:
 
   bool Visit(AST::WithIn& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     // @xx == some int literal should be done in valno pass.
@@ -417,7 +406,6 @@ public:
 
   bool Visit(AST::WithBlock& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     return true;
@@ -425,7 +413,6 @@ public:
 
   bool Visit(AST::Memory& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     return true;
@@ -433,7 +420,6 @@ public:
 
   bool Visit(AST::SpanAs& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     return true;
@@ -441,7 +427,6 @@ public:
 
   bool Visit(AST::DMA& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     // TODO: define symbol
@@ -451,7 +436,6 @@ public:
 
   bool Visit(AST::ChunkAt& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     return true;
@@ -459,7 +443,6 @@ public:
 
   bool Visit(AST::Wait& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     return true;
@@ -467,7 +450,6 @@ public:
 
   bool Visit(AST::Call& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     return true;
@@ -475,7 +457,6 @@ public:
 
   bool Visit(AST::Rotate& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     return true;
@@ -483,7 +464,6 @@ public:
 
   bool Visit(AST::Select& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     return true;
@@ -491,7 +471,6 @@ public:
 
   bool Visit(AST::Return& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     return true;
@@ -499,7 +478,6 @@ public:
 
   bool Visit(AST::LoopRange& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     return true;
@@ -507,7 +485,6 @@ public:
 
   bool Visit(AST::ForeachBlock& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     return true;
@@ -515,7 +492,6 @@ public:
 
   bool Visit(AST::IncrementBlock& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     return true;
@@ -523,7 +499,6 @@ public:
 
   bool Visit(AST::FunctionDecl& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     for (ptr<AST::Parameter> p : n.params->values)
@@ -534,7 +509,6 @@ public:
 
   bool Visit(AST::ChoreoFunction& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     return true;
@@ -542,7 +516,6 @@ public:
 
   bool Visit(AST::CppSourceCode& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     return true;
@@ -550,7 +523,6 @@ public:
 
   bool Visit(AST::Program& n) override {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
 
     return true;

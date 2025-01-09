@@ -1214,6 +1214,17 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
     }
   } else if (auto il = dyn_cast<AST::IntLiteral>(e)) {
     oss << il->value;
+  } else if (auto fl = dyn_cast<AST::FloatLiteral>(e)) {
+    std::ostringstream fp_val;
+    // std::fixed: the value should be in fixed-point notation
+    // otherwise, 1.0f => 1f (error)
+    if (fl->IsFloat32())
+      fp_val << std::fixed << fl->Val_f32() << "f";
+    else if (fl->IsFloat64())
+      fp_val << std::fixed << fl->Val_f64();
+    else
+      choreo_unreachable("unsupported float literal.");
+    oss << fp_val.str();
   } else if (auto ii = dyn_cast<AST::IntIndex>(e)) {
     return ExprSTR(ii->value, is_host);
   } else if (auto expr = dyn_cast<AST::Expr>(e)) {
