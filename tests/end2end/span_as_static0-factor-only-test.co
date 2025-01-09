@@ -1,6 +1,5 @@
 // REQUIRES: TARGET-GCUALL
 // RUN: choreo -gs -t factor %s -o %s.factor.result && bash %s.factor.result --execute | FileCheck --match-full-lines %s && rm -f %.factor.result
-// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %.topscc.result
 
 #include "choreo.h"
 #include <random>
@@ -86,9 +85,10 @@ int main() { /// host program
             for (size_t f = 0; f < bounds[5]; ++f) {
               std::cout << a << ", " << b << ", " << c << ", " << d << ", " << e
                         << ", " << f << "\n";
-              std::cout << "\tx: " << x[a][b][c][d][e][f]
-                        << "\n\tres: " << res[c][d][a][e][b][f] << "\n";
-              assert(x[a][b][c][d][e][f] == res[c][d][a][e][b][f]);
+              auto vcpu = x[a][b][c][d][e][f];
+              auto vgcu = res[c][d][a][e][b][f];
+              std::cout << "\tx: " << vcpu << "\n\tres: " << vgcu << "\n";
+              choreo::choreo_assert(vcpu == vgcu, "output of gcu is wrong.");
             }
 
   std::cout << "Test Passed\n" << std::endl;
