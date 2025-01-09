@@ -1,0 +1,11 @@
+// RUN: choreo %s 2>&1 | FileCheck %s
+
+__co__ void host_copy(u8 [3, 2] a) {
+  dma.copy a => local;
+  dma.copy a => shared;
+  dma.copy a => global;
+}
+
+// CHECK: error: `local' can not be DMA destination outside parallel-by.
+// CHECK: error: `shared' can not be DMA destination outside parallel-by.
+// CHECK: Totally 2 errors have been detected.

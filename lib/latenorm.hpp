@@ -292,11 +292,19 @@ public:
       var->SetType(sty);
 
       if (sty->GetStorage() == Storage::GLOBAL) {
-        // it is a global, must not be inside parallel_by
-        assert(cur_pb_index != -1);
-        int index = cur_pb_index + mnodes_insertions[cur_pb_mn].size();
-        mnodes_insertions[cur_pb_mn].push_back(
-            {index, var, to_buffer_name, future_name, &n});
+        if (cur_pb_index != -1) {
+          // DMA dst is a global, must not be inside parallel_by
+          int index = cur_pb_index + mnodes_insertions[cur_pb_mn].size();
+          mnodes_insertions[cur_pb_mn].push_back(
+              {index, var, to_buffer_name, future_name, &n});
+        } else {
+          // moving global dma
+          assert(cur_dma_index != -1);
+          int index =
+              cur_dma_index + mnodes_insertions[multi_nodes.top()].size();
+          mnodes_insertions[multi_nodes.top()].push_back(
+              {index, var, to_buffer_name, future_name, &n});
+        }
       } else {
         assert(cur_dma_index != -1);
         int index = cur_dma_index + mnodes_insertions[multi_nodes.top()].size();

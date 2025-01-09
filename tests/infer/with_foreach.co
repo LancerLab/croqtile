@@ -90,12 +90,12 @@ __co__ void with_foreach(s32 [6, 128] lhs, s32 [128] rhs) {
 
   with index in [32] {
     foreach index {
-      rhs_load = dma.copy rhs.chunkat(index) => shared;
+      rhs_load = dma.copy rhs.chunkat(index) => global;
     }
   }
 // CHECK: Bounded:   ::with_foreach::within_4::index, Type: {int}->[32]
 // CHECK: Bounded:   ::with_foreach::within_4::index__elem__0, Type: {int}->[32]
-// CHECK: Future:    ::with_foreach::within_4::foreach_4::rhs_load, Type: sync=>shared s32 mdspan<1> [4]
+// CHECK: Future:    ::with_foreach::within_4::foreach_4::rhs_load, Type: sync=>global s32 mdspan<1> [4]
 // VALNO:   scope-2 {
 // VALNO:    New VN #12: 'const_32'
 // VALNO:    Alias "::with_foreach::within_4::@index(0)" -> #12

@@ -880,6 +880,28 @@ bool EarlySemantics::Visit(AST::DMA& n) {
   ptr<SpannedType> tty = nullptr;
   if (!isa<AST::Memory>(n.to)) tty = cast<SpannedType>(NodeType(*n.to));
 
+  // target specific check
+  if ((CCtx().GetTarget() == CompileTarget::Factor ||
+       CCtx().GetTarget() == CompileTarget::Topscc) &&
+      parallel_level == 0) {
+    if (auto m = dyn_cast<AST::Memory>(n.to)) {
+      if ((m->Get() != Storage::GLOBAL) && (m->Get() != Storage::DEFAULT)) {
+        Error(n.LOC(), "`" + STR(m->Get()) +
+                           "' can not be DMA destination outside parallel-by.");
+        ++error_count;
+        if (debug_visit)
+          dbgs() << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
+      }
+    } else if ((tty->GetStorage() != Storage::GLOBAL) &&
+               (tty->GetStorage() != Storage::DEFAULT)) {
+      Error(n.LOC(), "`" + STR(tty->GetStorage()) +
+                         "' can not be DMA destination outside parallel-by.");
+      ++error_count;
+      if (debug_visit)
+        dbgs() << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
+    }
+  }
+
   if (!n.future.empty()) {
     size_t rank = sty->Dims();
     assert(IsValidRank(rank));

@@ -1,7 +1,9 @@
 // RUN: not choreo %s 2>&1 | FileCheck %s
 
 __co__ void illegal_copy(f32 [1, 2, 3] src) {
-  dma.copy src => local;
+  parallel p by 1 {
+    dma.copy src => local;
+  }
   f32 [3, 2] dst0;
   dma.copy src => dst0;
   f32 [3, 3, 2, 2, 1] dst1;
@@ -13,11 +15,13 @@ __co__ void illegal_copy(f32 [1, 2, 3] src) {
 }
 
 __co__ void illegal_pad(f32 [1, 2, 3] src) {
-  dma.pad<{1, 0}, {1, 0, 3}, {0, 0}, 4> src => local;
-  dma.pad<{1, 0}, {1, 0}, {0, 0}, 2> src => local;
-  // TODO(wsj): It actually produces a type inconsistent error!
-  // how to denote u8?
-  // dma.pad<{1, 1, 1}, {1, 1, 1}, {1, 1, 0}, 1> src => local;
+  parallel p by 1 {
+    dma.pad<{1, 0}, {1, 0, 3}, {0, 0}, 4> src => local;
+    dma.pad<{1, 0}, {1, 0}, {0, 0}, 2> src => local;
+    // TODO(wsj): It actually produces a type inconsistent error!
+    // how to denote u8?
+    // dma.pad<{1, 1, 1}, {1, 1, 1}, {1, 1, 0}, 1> src => local;
+  }
 }
 
 __co__ void illegal_transp(s32 [2, 16] src) {
