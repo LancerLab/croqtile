@@ -1,6 +1,7 @@
 #ifndef __CHOREO_SYMBOL_VALUES_H__
 #define __CHOREO_SYMBOL_VALUES_H__
 
+#include <cmath>
 #include <limits>
 #include <sstream>
 #include <string>
@@ -19,19 +20,27 @@ static constexpr size_t INVALID_UNSIGNED = std::numeric_limits<size_t>::max();
 static constexpr int INVALID_SIGNED = std::numeric_limits<int>::max();
 static constexpr int UNKNOWN_SIGNED =
     std::numeric_limits<int>::min(); // represent literal value '?' only
-static constexpr int UNKNOWN_FLOAT =
-    std::numeric_limits<float>::min(); // represent literal value '?' only
-static constexpr int UNKNOWN_DOUBLE =
-    std::numeric_limits<double>::min(); // represent literal value '?' only
+static constexpr float INVALID_FLOAT = std::numeric_limits<float>::quiet_NaN();
+static constexpr double INVALID_DOUBLE =
+    std::numeric_limits<double>::quiet_NaN();
+static constexpr float UNKNOWN_FLOAT = std::numeric_limits<float>::infinity();
+static constexpr double UNKNOWN_DOUBLE =
+    std::numeric_limits<double>::infinity();
 } // namespace __internal
 
 inline constexpr size_t GetInvalidUnsigned() {
   return __internal::INVALID_UNSIGNED;
 }
 inline constexpr int GetInvalidSigned() { return __internal::INVALID_SIGNED; }
+inline constexpr float GetInvalidFloat() { return __internal::INVALID_FLOAT; }
+inline constexpr double GetInvalidDouble() {
+  return __internal::INVALID_DOUBLE;
+}
 inline constexpr int GetUnKnownInteger() { return __internal::UNKNOWN_SIGNED; }
-inline constexpr int GetUnKnownFloat() { return __internal::UNKNOWN_FLOAT; }
-inline constexpr int GetUnKnownDouble() { return __internal::UNKNOWN_DOUBLE; }
+inline constexpr float GetUnKnownFloat() { return __internal::UNKNOWN_FLOAT; }
+inline constexpr double GetUnKnownDouble() {
+  return __internal::UNKNOWN_DOUBLE;
+}
 
 inline constexpr bool IsValidUnsigned(size_t v) {
   return v != GetInvalidUnsigned();
@@ -40,12 +49,10 @@ inline constexpr bool IsValidSigned(int v) { return v != GetInvalidSigned(); }
 inline constexpr bool IsUnKnownInteger(int v) {
   return v == GetUnKnownInteger();
 }
-inline constexpr bool IsUnKnownFloatPoint(float v) {
-  return v == GetUnKnownFloat();
-}
-inline constexpr bool IsUnKnownFloatPoint(double v) {
-  return v == GetUnKnownDouble();
-}
+inline constexpr bool IsValidFloatPoint(float v) { return !std::isnan(v); }
+inline constexpr bool IsValidFloatPoint(double v) { return !std::isnan(v); }
+inline constexpr bool IsUnKnownFloatPoint(float v) { return std::isinf(v); }
+inline constexpr bool IsUnKnownFloatPoint(double v) { return std::isinf(v); }
 
 inline constexpr size_t GetInvalidRank() { return GetInvalidUnsigned(); }
 inline constexpr int GetInvalidValueNumber() { return GetInvalidSigned(); }
