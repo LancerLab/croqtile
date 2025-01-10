@@ -962,6 +962,14 @@ bool EarlySemantics::Visit(AST::DMA& n) {
     }
   }
 
+  if (isa<AST::ChunkAt>(n.from) && isa<AST::ChunkAt>(n.to))
+    if (cast<AST::ChunkAt>(n.from)->positions &&
+        cast<AST::ChunkAt>(n.to)->positions) {
+      Error(n.LOC(),
+            "slice and deslice in single DMA statement is not supported yet.");
+      error_count++;
+    }
+
   if (!isa<AST::Memory>(n.to)) {
     if (sty->Dims() != tty->Dims() && !allow_auto_threading) {
       Error(n.LOC(),
@@ -1004,7 +1012,7 @@ bool EarlySemantics::Visit(AST::DMA& n) {
     auto tcfg = dyn_cast<TransposeConfig>(n.config);
     if (!tcfg) {
       Error(n.LOC(), "The DMA TRANSPOSE config is incorrect. The correct form: "
-                     "dma.transp(.async)<{dim0, dim1, ...}>");
+                     "dma.transp(.async)<dim0, dim1, ...>");
       error_count++;
     } else {
       auto dim_values = tcfg->dim_values;
