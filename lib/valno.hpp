@@ -924,7 +924,11 @@ public:
         }
 
     } else if (isa<AST::Expr>(n.in)) {
-      cur_mdspan_vn = cur_vn;
+      if (auto id = AST::GetIdentifier(*n.in))
+        cur_mdspan_vn = vn.GetValueNumberOfSignature(SSTab().InScopeName(id->name));
+      else
+        cur_mdspan_vn = cur_vn;
+      assert(ValidVN(cur_mdspan_vn) && "no valid vn for with-in.");
       InvalidateVN(cur_vn);
     } else {
       choreo_unreachable("unexpected with-in statement.");
@@ -1413,6 +1417,10 @@ public:
 
     gen_values = true; // allow generate values for statements
 
+    // invalidate any current value generated
+    InvalidateVN(cur_mdspan_vn);
+    InvalidateVN(cur_vn);
+
     if (cannot_proceed) return true;
 
     return true;
@@ -1422,6 +1430,10 @@ public:
     TraceEachVisit(n);
 
     gen_values = true; // allow generate values for statements
+
+    // invalidate any current value generated
+    InvalidateVN(cur_mdspan_vn);
+    InvalidateVN(cur_vn);
 
     if (cannot_proceed) return true;
 

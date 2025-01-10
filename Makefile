@@ -117,7 +117,7 @@ clobber: clean
 	find $(TOOLCHAIN_DIR) -mindepth 1 ! -name 'Makefile' -print0 | xargs -0 rm -rf
 
 lines:
-	echo "source files:"; wc -l *.cpp *.yy *.l *.hpp Makefile utils/*.h; \
+	echo "source files:"; wc -l lib/*.cpp lib/*.yy lib/*.l lib/*.hpp Makefile utils/*.h; \
 	echo "test files"; wc -l $$(find tests/ -type f |grep -v "\.test")
 
 format:
