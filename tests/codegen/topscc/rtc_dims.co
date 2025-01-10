@@ -2,5 +2,5 @@
 
 __co__ void foo(f32 [a, b, 2] input, f16 [b] c) { }
 
-// CHECK:   choreo::runtime_check(hp0.shape()[2] == 2, "shape inconsistent on the 1st parameter (dim: 2).");
-// CHECK:   choreo::runtime_check(hp0.shape()[1] == hp1.shape()[0], "The shapes of the 1st parameter (dim: 1) and the 2nd parameter (dim: 0) are inconsistent.");
+// CHECK:   choreo::runtime_check(input.shape()[2] == 2, "shape inconsistent on the 1st parameter (dim: 2).");
+// CHECK:   choreo::runtime_check(input.shape()[1] == c.shape()[0], "The shapes of the 1st parameter (dim: 1) and the 2nd parameter (dim: 0) are inconsistent.");

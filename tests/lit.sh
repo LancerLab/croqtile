@@ -78,7 +78,7 @@ check_requirement() {
   local dynshape=$(echo $requires | grep "DYNAMIC-SHAPE\>")
   [ ! -z "${dynshape}" ] && requires_dynamic_shape=1;
 
-  expect_fail=$(grep "^\/\/" $file |grep "XFAIL:" | sed 's/.*XFAIL://')
+  expect_fail=$(grep "^\/\/" $file |grep "XFAIL:" | sed 's/.*XFAIL:[[:blank:]]*//')
   expect_skip=$(grep "^\/\/" $file |grep "SKIP:")
 }
 
@@ -143,7 +143,7 @@ execute_command() {
     eval "$command" 2>/dev/null
 
     if [[ $? -eq 0 ]]; then
-      if [ "$expect_fail" == "*\**" ]; then
+      if [[ "$expect_fail" == "*"* ]]; then
         num_uepass=$(($num_uepass + 1));
         reproduce_commands+=("$command");
         echo "UNEXPECTD PASS: $file ($count of $total)"
@@ -157,7 +157,7 @@ execute_command() {
         echo "PASS: $file ($count of $total)"
       fi
     else
-      if [ "$expect_fail" == "*\**" ]; then
+      if [[ "${expect_fail}" == "*"* ]]; then
         num_xfails=$(($num_xfails + 1));
         echo "XFAIL: $file ($count of $total)"
       elif [[ ! -z "${expect_fail}" ]] &&
@@ -263,14 +263,6 @@ for file in "${files_array[@]}"; do
           echo "SKIP(dyn-shape): ${file} "
           num_skiped=$(($num_skiped + 1));
           continue; #simply skip the unmatched target
-        fi
-      fi
-
-      if [ ! -z "$expect_fail" ]; then
-        if [[ "${expect_fail}" == *"${gcu_arch}"* ]]; then
-          echo "XFAIL: $file"
-          num_xfails=$(($num_xfails + 1));
-          continue;
         fi
       fi
 

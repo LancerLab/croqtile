@@ -213,6 +213,7 @@ void LoopRange::accept(Choreo::Visitor& v) {
 void ForeachBlock::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
   ranges->accept(v);
+  if (pred) pred->accept(v);
   v.Visit(*this);
   stmts->accept(v);
   v.AfterVisit(*this);

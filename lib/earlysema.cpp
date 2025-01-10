@@ -298,10 +298,21 @@ bool EarlySemantics::Visit(AST::Expr& n) {
              (n.op == "!=") || (n.op == "<=") || (n.op == ">=")) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
-    // assert(false);
     // only support IntegerType currently
-    assert(isa<IntegerType>(lty) && isa<IntegerType>(rty));
-    if (!(lty->ApprxEqual(*rty))) {
+    if (!(CanYieldAnInteger(lty) && CanYieldAnInteger(lty))) {
+      Error(n.LOC(), "in operation \"" + n.op +
+                         "\": unable to apply to the types (" + PSTR(lty) +
+                         " vs. " + PSTR(rty) +
+                         "). (Only the values that can produce integers are "
+                         "supported by now.)");
+      error_count++;
+      return false;
+    }
+    if ((IsActualBoundedIntegerType(lty) && ConvertibleToInt(rty)) ||
+        (IsActualBoundedIntegerType(rty) && ConvertibleToInt(lty)) ||
+        (ConvertibleToInt(lty) && ConvertibleToInt(rty))) {
+      // this is acceptable
+    } else if (!(lty->ApprxEqual(*rty))) {
       Error(n.LOC(), "in operation \"" + n.op +
                          "\": unable to apply to the types (" + PSTR(lty) +
                          " vs. " + PSTR(rty) + ").");
@@ -1292,6 +1303,15 @@ bool EarlySemantics::Visit(AST::LoopRange& n) {
 
 bool EarlySemantics::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
+
+  if (n.pred) {
+    if (!isa<BooleanType>(NodeType(*n.pred))) {
+      Error(n.LOC(), "requires a predication expression but got '" +
+                         PSTR(NodeType(*n.pred)) + "'.");
+      error_count++;
+    }
+  }
+
   for (auto& i : n.GetRanges()) {
     if (auto id = dyn_cast<AST::LoopRange>(i)->iv) {
       if (id->name == "_") {
@@ -1301,14 +1321,14 @@ bool EarlySemantics::Visit(AST::ForeachBlock& n) {
       }
       auto ity = NodeType(*id);
       if (!(IsBoundedType(ity))) {
-        Error(n.LOC(), "expecting a bounded type for iteration variable '" +
+        Error(n.LOC(), "expect a bounded type for iteration variable '" +
                            id->name + "' but got '" + PSTR(ity) + "'.");
         error_count++;
       }
     } else {
       auto ity = i->GetType();
       if (!(IsBoundedType(ity))) {
-        Error(n.LOC(), "expecting a bounded type but got '" + PSTR(ity) + "'.");
+        Error(n.LOC(), "expect a bounded type but got '" + PSTR(ity) + "'.");
         error_count++;
       }
     }

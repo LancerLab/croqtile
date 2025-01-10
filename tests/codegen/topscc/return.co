@@ -3,15 +3,15 @@ __co__ auto foo(int a, int b) {
   return a + 1 + b / 2;
 }
 
-// CHECK: void foo(int hp0, int hp1)
-// CHECK:   return ((((hp0)+((1))))+(((hp1)/((2)))));
+// CHECK: void foo(int a, int b)
+// CHECK:   return ((((a)+((1))))+(((b)/((2)))));
 
 __co__ auto bar(bf16 [1] a) {
   return a;
 }
 
-// CHECK: choreo::spanned_data<choreo::bf16, 1> bar(const choreo::spanned_view<choreo::bf16, 1> & hp0)
-// CHECK:   return hp0;
+// CHECK: choreo::spanned_data<choreo::bf16, 1> bar(const choreo::spanned_view<choreo::bf16, 1> & a)
+// CHECK:   return a;
 
 __co__ auto foo1() {
   int a = 3;

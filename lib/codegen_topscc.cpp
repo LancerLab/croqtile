@@ -129,6 +129,10 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
     DecrDeviceIndent();
     ds << d_indent << "}\n";
   } else if (auto fb = dyn_cast<AST::ForeachBlock>(&n)) {
+    if (fb->pred) {
+      DecrDeviceIndent();
+      ds << d_indent << "}\n";
+    }
     const auto& ranges = fb->GetRangeNodes();
     for (int j = ranges->Count() - 1; j >= 0; --j) {
       auto rng = cast<AST::LoopRange>(ranges->ValueAt(j));
@@ -209,7 +213,7 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
   for (auto& item : GetChoreoFuncIns()) {
     if (item.IsParameter()) {
       assert((int)host_pindex == item.p_index);
-      item.host_name = GenHostParamName();
+      item.host_name = UnScopedName(item.name);
       ssm.MapHostSymbol(item.name, item.host_name);
       ssm.MapDeviceSymbol(item.name, UnScopedName(item.name));
       if (auto sty = dyn_cast<SpannedType>(item.type))
@@ -842,13 +846,19 @@ bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
       assert(IsActualBoundedIntegerType(iv_ty));
       auto iv_bty = cast<BoundedType>(iv_ty);
       ds << d_indent << "for (" << ssm.DeviceName(iv_name) << " = "
-         << (rng->lbound ? ("(" + ExprSTR(rng->lbound) + ")") : "0") << "; "
-         << ssm.DeviceName(iv_name) << " < "
+         << (rng->lbound ? ("(" + ExprSTR(rng->lbound, false) + ")") : "0")
+         << "; " << ssm.DeviceName(iv_name) << " < "
          << UnScopedExpr(STR(iv_bty->GetUpperBound())) << "; ++"
          << ssm.DeviceName(iv_name) << ") {\n";
       IncrDeviceIndent();
     }
   }
+
+  if (n.pred) {
+    ds << d_indent << "if (" << ExprSTR(n.pred, false) << ") {\n";
+    IncrDeviceIndent();
+  }
+
   return true;
 }
 

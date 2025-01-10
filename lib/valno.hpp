@@ -925,7 +925,8 @@ public:
 
     } else if (isa<AST::Expr>(n.in)) {
       if (auto id = AST::GetIdentifier(*n.in))
-        cur_mdspan_vn = vn.GetValueNumberOfSignature(SSTab().InScopeName(id->name));
+        cur_mdspan_vn =
+            vn.GetValueNumberOfSignature(SSTab().InScopeName(id->name));
       else
         cur_mdspan_vn = cur_vn;
       assert(ValidVN(cur_mdspan_vn) && "no valid vn for with-in.");

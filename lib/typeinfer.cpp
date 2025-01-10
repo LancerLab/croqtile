@@ -480,6 +480,21 @@ bool TypeInference::Visit(AST::Expr& n) {
 
     auto& pty_lhs = n.GetL()->GetType();
     auto& pty_rhs = n.GetR()->GetType();
+
+    if (n.IsLogical()) {
+      if ((IsActualBoundedIntegerType(pty_lhs) && ConvertibleToInt(pty_rhs)) ||
+          (IsActualBoundedIntegerType(pty_rhs) && ConvertibleToInt(pty_lhs)) ||
+          (ConvertibleToInt(pty_lhs) && ConvertibleToInt(pty_rhs))) {
+        n.SetType(MakeBooleanType());
+        return true;
+      } else {
+        Error(n.LOC(), "The operands of the expression cannot undergo '" +
+                           n.op + "' operation.");
+        error_count++;
+        return false;
+      }
+    }
+
     if ((isa<MDSpanType>(pty_lhs) && isa<ITupleType>(pty_rhs)) ||
         (isa<MDSpanType>(pty_rhs) && isa<ITupleType>(pty_lhs))) {
       if (n.op == "concat") {

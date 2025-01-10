@@ -1432,16 +1432,18 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
 struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
   ptr<MultiValues> ranges;
   ptr<MultiNodes> stmts;
+  ptr<Expr> pred;
 
   explicit ForeachBlock(const location& l, const ptr<MultiValues>& i,
-                        const ptr<MultiNodes>& s)
-      : Node(l), ranges(i), stmts(s) {
+                        const ptr<MultiNodes>& s, const ptr<Expr> p = nullptr)
+      : Node(l), ranges(i), stmts(s), pred(p) {
     assert(i != nullptr && "missing iteration variables for the statement.");
   }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Foreach Block:";
     ranges->Print(os, prefix + " ");
+    if (pred) os << "\n" << prefix << " `- Predication: " << PSTR(pred);
     if (stmts) { stmts->Print(os, prefix + " "); }
   }
 

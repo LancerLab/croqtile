@@ -1,0 +1,27 @@
+// RUN: choreo -t topscc %s -es -o - | FileCheck %s
+
+__co__ void foo(int N) {
+  parallel p by 6 {
+    with index = {x, y, z} in [N % #p, 2, 1]
+      foreach index if (p < N %p) {}
+  }
+}
+
+__co__ void bar(int N) {
+  parallel p by 6 {
+    with index = {x, y, z} in [N/#p, 2, 1], re in [N%#p] {
+      foreach index {}
+      foreach re, y, z if (p == 0) {}
+    }
+  }
+}
+
+// CHECK:     for (__iv_x = 0; __iv_x < N%6; ++__iv_x) {
+// CHECK:       for (__iv_y = 0; __iv_y < 2; ++__iv_y) {
+// CHECK:         for (__iv_z = 0; __iv_z < 1; ++__iv_z) {
+// CHECK:           if (((__tops_tid_x())<(((N)%(__tops_tid_x()))))) {
+
+// CHECK:     for (__iv_re__elem__0 = 0; __iv_re__elem__0 < N%6; ++__iv_re__elem__0) {
+// CHECK:       for (__iv_y = 0; __iv_y < 2; ++__iv_y) {
+// CHECK:         for (__iv_z = 0; __iv_z < 1; ++__iv_z) {
+// CHECK:           if (((__tops_tid_x())==((0)))) {

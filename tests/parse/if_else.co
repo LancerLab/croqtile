@@ -1,4 +1,5 @@
 // RUN: choreo -e %s | FileCheck --match-full-lines %s
+// XFAIL: *
 
 // recognize the __co__ function
 

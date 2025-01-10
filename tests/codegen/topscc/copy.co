@@ -24,10 +24,10 @@ __co__ auto foo(f32 [32, 4] a) {
 // CHECK:   tops::slice(*__choreo_anon_fut__1.get_ctx(), __mds3_anon_0, __mds2_data, __slice_offset0__data_2_anon_0);
 // CHECK: }
  
-// CHECK: choreo::spanned_data<choreo::f32, 2> foo(const choreo::spanned_view<choreo::f32, 2> & hp0) {
+// CHECK: choreo::spanned_data<choreo::f32, 2> foo(const choreo::spanned_view<choreo::f32, 2> & a) {
 // CHECK:   float * a__device = nullptr;
 // CHECK:   choreo::abend_true(topsMalloc(&a__device, 512ULL));
-// CHECK:   choreo::abend_true(topsMemcpy(a__device, hp0.data(), 512ULL, topsMemcpyHostToDevice));
+// CHECK:   choreo::abend_true(topsMemcpy(a__device, a.data(), 512ULL, topsMemcpyHostToDevice));
 // CHECK:   auto data = choreo::make_spandata<float, 2>({32, 4});
 // CHECK:   float * data__device = nullptr;
 // CHECK:   choreo::abend_true(topsMalloc(&data__device, 512ULL));

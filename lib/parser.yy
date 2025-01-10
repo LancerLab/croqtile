@@ -183,10 +183,10 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::SpanAs>> span_as
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
-%nterm <AST::ptr<AST::Node>> foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt swap_stmt expr_or_qes range_expr if_else_block optional_scalar_init param_mdspan_val chunkat_or_storage_or_select pred f_expr
-%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause else_block multi_decls named_spanned_decl
+%nterm <AST::ptr<AST::Node>> foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt swap_stmt expr_or_qes range_expr optional_scalar_init param_mdspan_val chunkat_or_storage_or_select pred f_expr
+%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause multi_decls named_spanned_decl
 %nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers passables future_data_list template_params
-%nterm <AST::ptr<AST::Expr>> s_expr template_value_expr span_expr id_expr bound_expr
+%nterm <AST::ptr<AST::Expr>> s_expr template_value_expr span_expr id_expr bound_expr optional_pred
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
 %nterm <AST::ptr<AST::Parameter>> parameter
@@ -437,7 +437,6 @@ statement
     | return_stmt  SEMCOL { $$ = $1; }
     | paraby_block        { $$ = $1; }
     | within_block        { $$ = $1; }
-    | if_else_block       { $$ = $1; }
     | foreach_block       { $$ = $1; }
     | increment_block { $$ = $1; }
     ;
@@ -911,28 +910,32 @@ future_data_list
       }
     ;
 
-if_else_block
-    : IF LPAREN s_expr RPAREN LBRACE statements RBRACE else_block {
-        $$ = AST::Make<AST::IfElse>(@1, $3, $6, $8);
-      }
-    ;
-
-else_block
-    : ELSE LBRACE statements RBRACE { $$ = $3; }
-    | /* empty */ { $$ = AST::Make<AST::MultiNodes>(loc); }
-    ;
-
 within_block
     : WITH withins LBRACE statements RBRACE {
         $$ = AST::Make<AST::WithBlock>(@1);
         $$->withins = $2;
         $$->stmts = $4;
       }
+    | WITH withins statement {
+        $$ = AST::Make<AST::WithBlock>(@1);
+        $$->withins = $2;
+        auto mv = AST::Make<AST::MultiNodes>(@3);
+        mv->Append($3);
+        $$->stmts = mv;
+      }
     | WITH withins where_clause LBRACE statements RBRACE {
         $$ = AST::Make<AST::WithBlock>(@1);
         $$->withins = $2;
         $$->reqs = $3;
         $$->stmts = $5;
+      }
+    | WITH withins where_clause statement {
+        $$ = AST::Make<AST::WithBlock>(@1);
+        $$->withins = $2;
+        $$->reqs = $3;
+        auto mv = AST::Make<AST::MultiNodes>(@4);
+        mv->Append($4);
+        $$->stmts = mv;
       }
     ;
 
@@ -988,9 +991,19 @@ where_bind
       }
     ;
 
+optional_pred
+    : /* empty */ { $$ = nullptr; }
+    | IF LPAREN s_expr RPAREN { $$ = $3; }
+    ;
+
 foreach_block
-    : FOREACH range_exprs LBRACE statements RBRACE {
-        $$ = AST::Make<AST::ForeachBlock>(@1, $2, $4);
+    : FOREACH range_exprs optional_pred LBRACE statements RBRACE {
+        $$ = AST::Make<AST::ForeachBlock>(@1, $2, $5, $3);
+      }
+    | FOREACH range_exprs optional_pred statement {
+        auto mv = AST::Make<AST::MultiNodes>(@4);
+        mv->Append($4);
+        $$ = AST::Make<AST::ForeachBlock>(@1, $2, mv, $3);
       }
     ;
 

@@ -672,6 +672,10 @@ ValueNumbering::TryToSimplifyNodeSignature(const AST::Node& node) {
                } else
                  choreo_unreachable("upper bound expression is unexpected.");
              }},
+            {"getith",
+             [this, &n]() -> std::optional<std::string> {
+               return std::nullopt;
+             }},
             {"dimof", // calculate the dim of a given mdspan index
              [this, &n]() -> std::optional<std::string> {
                std::string base_sig;

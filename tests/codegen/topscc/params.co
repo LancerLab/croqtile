@@ -7,6 +7,6 @@ __co__ auto bar(bf16 [1] a, s8[2] b, u16[3] c, f16 [2] d, s32 [1] e, s16 [3] f, 
 }
 
 // CHECK: __global__ void __choreo_device_foo(int a, float * b)
-// CHECK: void foo(int hp0, const choreo::spanned_view<choreo::f32, 2> & hp1)
+// CHECK: void foo(int a, const choreo::spanned_view<choreo::f32, 2> & b)
 // CHECK: __global__ void __choreo_device_bar(choreo::bf16 * a, char * b, unsigned short * c, choreo::f16 * d, int * e, short * f, unsigned char * g, unsigned int * i, bool anon_0)
-// CHECK: choreo::spanned_data<choreo::bf16, 1> bar(const choreo::spanned_view<choreo::bf16, 1> & hp0, const choreo::spanned_view<choreo::s8, 1> & hp1, const choreo::spanned_view<choreo::u16, 1> & hp2, const choreo::spanned_view<choreo::f16, 1> & hp3, const choreo::spanned_view<choreo::s32, 1> & hp4, const choreo::spanned_view<choreo::s16, 1> & hp5, const choreo::spanned_view<choreo::u8, 1> & hp6, const choreo::spanned_view<choreo::u32, 2> & hp7, bool hp8)
+// CHECK: choreo::spanned_data<choreo::bf16, 1> bar(const choreo::spanned_view<choreo::bf16, 1> & a, const choreo::spanned_view<choreo::s8, 1> & b, const choreo::spanned_view<choreo::u16, 1> & c, const choreo::spanned_view<choreo::f16, 1> & d, const choreo::spanned_view<choreo::s32, 1> & e, const choreo::spanned_view<choreo::s16, 1> & f, const choreo::spanned_view<choreo::u8, 1> & g, const choreo::spanned_view<choreo::u32, 2> & i, bool anon_0)
