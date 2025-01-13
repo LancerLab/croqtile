@@ -41,6 +41,7 @@ public:
     if (mxpl == 2 && parallel_level == 1) {
       // the DMA is inside block-shared zone
       cgi->GetFunctionSharedFutures(fname).insert(InScopeName(n.future));
+      VST_DEBUG(dbgs() << "Shared Future: " << InScopeName(n.future) << "\n");
     }
     return true;
   }
@@ -89,6 +90,7 @@ private:
                << ", index: " << item.p_index << "\n";
       });
     } else if (isa<AST::ParallelBy>(&n)) {
+      n.AppendNote("mxl-" + std::to_string(max_parallel_level));
       if (parallel_level == 1) {
         VST_DEBUG(dbgs() << "\tGrid Dims: "
                          << cgi->GetFunctionLaunches(fname).back().grid_dim_x
@@ -96,7 +98,6 @@ private:
         VST_DEBUG(dbgs() << "\tBlock Dims: "
                          << cgi->GetFunctionLaunches(fname).back().block_dim_x
                          << "\n");
-        n.AppendNote("mxl-" + std::to_string(max_parallel_level));
         max_parallel_level = 0;
       }
       parallel_level--;

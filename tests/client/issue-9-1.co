@@ -1,0 +1,1589 @@
+// REQUIRES: TARGET-GCU300
+// RUN: choreo -t topscc -gs %s -o %s.result && bash %s.result |FileCheck %s && rm -f %s.result
+
+__cok__ {
+  /* Copyright 2020-2023 Enflame. All Rights Reserved.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  ==============================================================================*/
+  // #include <sip30intrin.h>
+
+  #define TAR_ADDR_WARP(addr, ss) (((addr)) | ((((addr) + (ss)) << 16)))
+  #define TAR_OFF_WARP(offset1, offset2) (((offset1) << 16) | ((offset2)&0xffff))
+
+  __co_device__ extern "C" void c_func_hgemm_general(int a_addr, int b_addr, int c_addr, int M,
+                                       int N, int K, int nacc_flag,
+                                       int stroe_flag, int alpha_enable,
+                                       int beta_enable, float alpha, float beta,
+                                       int bias_en, int bias_addr, int cur_n);
+
+  __co_device__ void hgemm(__fp16* a_ptr, __fp16* b_ptr, __fp16* c_ptr, int M, int N, int K) {
+    long a_addr = long(a_ptr);
+    long b_addr = long(b_ptr);
+    long c_addr = long(c_ptr);
+    c_func_hgemm_general(a_addr, b_addr, c_addr, M, N, K, 1, 1, 1, 1,
+                         1.0, 1.0, 0, c_addr, 0);
+  }
+
+  // tune->sip_m = 32;
+  // tune->sip_n = 128;
+  // tune->sip_k = 64;
+  __co_device__ extern "C" void c_func_hgemm_general(int a_addr, int b_addr, int c_addr, int M,
+                                       int N, int K, int nacc_flag,
+                                       int stroe_flag, int alpha_enable,
+                                       int beta_enable, float alpha, float beta,
+                                       int bias_en, int bias_addr, int cur_n) {
+    __dtu_c_movsr2vab_lv_s(0);
+    __dtu_c_movsr2vab_lv_d(0);
+    __dtu_c_movsr2vab_m_s1(0);
+    __dtu_c_movsr2vab_m_s2(0);
+    __dtu_c_movsr2vab_m_d(0);
+
+    int BPE = 2;
+    smr_t smr0, smr1;
+    v64i8 vr0, vr1, vr2, vr3, vr4, vr5, vr6, vr7, vr8, vr9, vr10, vr11, vr12,
+        vr13, vr14, vr15, vr16, vr17, vr18, vr19, vr20, vr21, vr22, vr23, vr24,
+        vr25, vr26, vr27, vr28, vr29, vr30, vr31;
+    v16f32 vr_alpha = __dtu_s_movr2vr_dup_f32(alpha);
+
+    va16f32x4 qacc[32];
+    va16f16x2 c_dacc[32];
+
+    va16f32 va_alpha0, va_alpha1, va_alpha2, va_alpha3;
+    va_alpha0 = __dtu_l_movvr2va(vr_alpha);
+    va_alpha1 = __dtu_l_movvr2va(vr_alpha);
+    va_alpha2 = __dtu_l_movvr2va(vr_alpha);
+    va_alpha3 = __dtu_l_movvr2va(vr_alpha);
+    va16f32x4 qa_alpha =
+        __dtu_insertva2qa_f32(va_alpha0, va_alpha1, va_alpha2, va_alpha3);
+
+    v16f32 vr_scale = __dtu_s_movr2vr_dup_f32(beta);
+    va16f32 vacc_beta0, vacc_beta1, vacc_beta2, vacc_beta3;
+    vacc_beta0 = __dtu_l_movvr2va(vr_scale);
+    vacc_beta1 = __dtu_l_movvr2va(vr_scale);
+    vacc_beta2 = __dtu_l_movvr2va(vr_scale);
+    vacc_beta3 = __dtu_l_movvr2va(vr_scale);
+    va16f32x4 qa_beta =
+        __dtu_insertva2qa_f32(vacc_beta0, vacc_beta1, vacc_beta2, vacc_beta3);
+
+    if (bias_en == 0) {
+      vr_scale = __dtu_s_movr2vr_dup_f32(0.0f);
+    } else {
+      vr_scale = __dtu_s_movr2vr_dup_f32(1.0f);
+    }
+    vacc_beta0 = __dtu_l_movvr2va(vr_scale);
+    vacc_beta1 = __dtu_l_movvr2va(vr_scale);
+    vacc_beta2 = __dtu_l_movvr2va(vr_scale);
+    vacc_beta3 = __dtu_l_movvr2va(vr_scale);
+    va16f32x4 qa_bias =
+        __dtu_insertva2qa_f32(vacc_beta0, vacc_beta1, vacc_beta2, vacc_beta3);
+    va16f16x2 bs_dacc;
+
+    auto k_unit = K >> 5;
+    auto n_unit = N >> 6;
+    auto on_unit = N >> 6;
+    // vpt parallel in rhs
+    int lt_addr = a_addr >> 6;
+    int rt_addr = b_addr >> 7;
+    int ot_addr = c_addr >> 7;
+    int offset = 0;
+    tar_t lt_base = __dtu_c_movsr2targ(TAR_ADDR_WARP(lt_addr, 0));
+    offset = TAR_OFF_WARP(k_unit, k_unit);
+    tar_t lt_off0 = __dtu_c_movsr2tari(offset, lt_base);
+    offset = TAR_OFF_WARP(1 - 31 * k_unit, 1 - 31 * k_unit);  // next k
+    tar_t lt_off1 = __dtu_c_movsr2tari(offset, lt_base);
+    offset = TAR_OFF_WARP(1 - 32 * k_unit, 1 - 32 * k_unit);  //  new n
+    tar_t lt_off2 = __dtu_c_movsr2tari(offset, lt_base);
+    offset = TAR_OFF_WARP(1, 1);  // end k end n new m
+    tar_t lt_off3 = __dtu_c_movsr2tari(offset, lt_base);
+
+    tar_t rt_base = __dtu_c_movsr2targ((rt_addr) | ((rt_addr) + 1) << 16);
+    offset = TAR_OFF_WARP(n_unit, n_unit);
+    tar_t rt_off0 = __dtu_c_movsr2tari(offset, rt_base);
+    offset = TAR_OFF_WARP(2 - (K - 1) * n_unit, 2 - (K - 1) * n_unit);
+    tar_t rt_off1 = __dtu_c_movsr2tari(offset, rt_base);  // new n
+    offset = TAR_OFF_WARP(2 - K * n_unit, 2 - K * n_unit);
+    tar_t rt_off2 = __dtu_c_movsr2tari(offset, rt_base);  // new m
+
+    auto bn_unit = N >> 6;
+    int bt_addr = (c_addr >> 7) | ((c_addr >> 7) + 1) << 16;
+    tar_t bt_base = __dtu_c_movsr2targ(bt_addr);
+    offset = (bn_unit << 16) | bn_unit;
+    tar_t bt_off0 = __dtu_c_movsr2tari(offset, bt_base);
+    offset = (2 - 31 * bn_unit) & 0xffff;
+    offset = (offset << 16) | offset;
+    tar_t bt_off1 = __dtu_c_movsr2tari(offset, bt_base);
+    offset = (2 << 16) | 2;
+    tar_t bt_off2 = __dtu_c_movsr2tari(offset, bt_base);
+
+    int biast_addr = ((bias_addr + cur_n * 2) >> 7) |
+        (((bias_addr + cur_n * 2) >> 7) + 1) << 16;
+    tar_t biast_base = __dtu_c_movsr2targ(biast_addr);
+    offset = (2 << 16) | 2;
+    tar_t biast_off0 = __dtu_c_movsr2tari(offset, biast_base);
+    offset = (2 - bn_unit) & 0xffff;
+    offset = (offset << 16) | offset;
+    tar_t biast_off1 = __dtu_c_movsr2tari(offset, bt_base);
+
+    tar_t ot_base = __dtu_c_movsr2targ((ot_addr) | ((ot_addr) + 1) << 16);
+    offset = TAR_OFF_WARP(on_unit, on_unit);
+    tar_t ot_off0 = __dtu_c_movsr2tari(offset, ot_base);
+    offset = TAR_OFF_WARP(2 - 31 * on_unit, 2 - 31 * on_unit);
+    tar_t ot_off1 = __dtu_c_movsr2tari(offset, ot_base);  // new n
+    offset = TAR_OFF_WARP(2, 2);
+    tar_t ot_off2 = __dtu_c_movsr2tari(offset, ot_base);  // new m
+
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 0);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 1);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 2);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 3);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 4);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 5);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 6);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 7);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 8);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 9);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 10);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 11);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 12);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 13);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 14);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 15);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 16);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 17);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 18);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 19);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 20);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 21);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 22);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 23);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 24);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 25);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 26);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 27);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 28);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 29);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 30);
+    smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 31);
+    // m0k0
+    vr0 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr1 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr2 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr3 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr4 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr5 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr6 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr7 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr8 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr9 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr10 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr11 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr12 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr13 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr14 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr15 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr16 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr17 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr18 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr19 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr20 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr21 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr22 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr23 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr24 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr25 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr26 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr27 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr28 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr29 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr30 = __dtu_s_tvld_itar(lt_base, lt_off0);
+    vr31 = __dtu_s_tvld_itar(lt_base, lt_off1);
+
+    int naccovr = 0x10001;
+    if (nacc_flag ^ 1) {
+      naccovr = 0x1;
+    }
+    __dtu_c_movsr2naccovr(naccovr);
+    __dtu_c_movsr2vab_m_s2(0);
+    int vab_shift = 0;
+  // fp16 vmm2 mode17: [32, 64] * [64, 128] = [64, 128]
+    for (int m = 0; m < M; m += 32) {
+      for (int n = 0; n < N - 128; n += 128) {  // VPT PARA DIM
+        __dtu_c_movsr2naccovr(naccovr);
+        for (int k = 0; k < K - 64; k += 64) {
+          // m0k0 * smr0
+          qacc[0] = __dtu_m_vmm2_mode17_f16(qacc[0], vr0, smr0);
+          qacc[1] = __dtu_m_vmm2_mode17_f16(qacc[1], vr1, smr0);
+          qacc[2] = __dtu_m_vmm2_mode17_f16(qacc[2], vr2, smr0);
+          qacc[3] = __dtu_m_vmm2_mode17_f16(qacc[3], vr3, smr0);
+          qacc[4] = __dtu_m_vmm2_mode17_f16(qacc[4], vr4, smr0);
+          qacc[5] = __dtu_m_vmm2_mode17_f16(qacc[5], vr5, smr0);
+          qacc[6] = __dtu_m_vmm2_mode17_f16(qacc[6], vr6, smr0);
+          qacc[7] = __dtu_m_vmm2_mode17_f16(qacc[7], vr7, smr0);
+          qacc[8] = __dtu_m_vmm2_mode17_f16(qacc[8], vr8, smr0);
+          qacc[9] = __dtu_m_vmm2_mode17_f16(qacc[9], vr9, smr0);
+          qacc[10] = __dtu_m_vmm2_mode17_f16(qacc[10], vr10, smr0);
+          qacc[11] = __dtu_m_vmm2_mode17_f16(qacc[11], vr11, smr0);
+          qacc[12] = __dtu_m_vmm2_mode17_f16(qacc[12], vr12, smr0);
+          qacc[13] = __dtu_m_vmm2_mode17_f16(qacc[13], vr13, smr0);
+          qacc[14] = __dtu_m_vmm2_mode17_f16(qacc[14], vr14, smr0);
+          qacc[15] = __dtu_m_vmm2_mode17_f16(qacc[15], vr15, smr0);
+          qacc[16] = __dtu_m_vmm2_mode17_f16(qacc[16], vr16, smr0);
+          qacc[17] = __dtu_m_vmm2_mode17_f16(qacc[17], vr17, smr0);
+          qacc[18] = __dtu_m_vmm2_mode17_f16(qacc[18], vr18, smr0);
+          qacc[19] = __dtu_m_vmm2_mode17_f16(qacc[19], vr19, smr0);
+          qacc[20] = __dtu_m_vmm2_mode17_f16(qacc[20], vr20, smr0);
+          qacc[21] = __dtu_m_vmm2_mode17_f16(qacc[21], vr21, smr0);
+          qacc[22] = __dtu_m_vmm2_mode17_f16(qacc[22], vr22, smr0);
+          qacc[23] = __dtu_m_vmm2_mode17_f16(qacc[23], vr23, smr0);
+          qacc[24] = __dtu_m_vmm2_mode17_f16(qacc[24], vr24, smr0);
+          qacc[25] = __dtu_m_vmm2_mode17_f16(qacc[25], vr25, smr0);
+          qacc[26] = __dtu_m_vmm2_mode17_f16(qacc[26], vr26, smr0);
+          qacc[27] = __dtu_m_vmm2_mode17_f16(qacc[27], vr27, smr0);
+          qacc[28] = __dtu_m_vmm2_mode17_f16(qacc[28], vr28, smr0);
+          qacc[29] = __dtu_m_vmm2_mode17_f16(qacc[29], vr29, smr0);
+          qacc[30] = __dtu_m_vmm2_mode17_f16(qacc[30], vr30, smr0);
+          qacc[31] = __dtu_m_vmm2_mode17_f16(qacc[31], vr31, smr0);
+          // m0k1
+          vr0 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr1 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr2 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr3 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr4 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr5 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr6 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr7 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr8 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr9 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr10 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr11 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr12 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr13 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr14 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr15 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr16 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr17 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr18 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr19 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr20 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr21 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr22 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr23 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr24 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr25 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr26 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr27 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr28 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr29 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr30 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr31 = __dtu_s_tvld_itar(lt_base, lt_off1);
+          // smr1
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 0);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 1);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 2);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 3);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 4);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 5);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 6);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 7);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 8);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 9);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 10);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 11);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 12);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 13);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 14);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 15);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 16);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 17);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 18);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 19);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 20);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 21);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 22);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 23);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 24);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 25);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 26);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 27);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 28);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 29);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 30);
+          smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 31);
+          __dtu_c_movsr2naccovr(0x1);
+          // m0k1 * smr1
+          qacc[0] = __dtu_m_vmm2_mode17_f16(qacc[0], vr0, smr1);
+          qacc[1] = __dtu_m_vmm2_mode17_f16(qacc[1], vr1, smr1);
+          qacc[2] = __dtu_m_vmm2_mode17_f16(qacc[2], vr2, smr1);
+          qacc[3] = __dtu_m_vmm2_mode17_f16(qacc[3], vr3, smr1);
+          qacc[4] = __dtu_m_vmm2_mode17_f16(qacc[4], vr4, smr1);
+          qacc[5] = __dtu_m_vmm2_mode17_f16(qacc[5], vr5, smr1);
+          qacc[6] = __dtu_m_vmm2_mode17_f16(qacc[6], vr6, smr1);
+          qacc[7] = __dtu_m_vmm2_mode17_f16(qacc[7], vr7, smr1);
+          qacc[8] = __dtu_m_vmm2_mode17_f16(qacc[8], vr8, smr1);
+          qacc[9] = __dtu_m_vmm2_mode17_f16(qacc[9], vr9, smr1);
+          qacc[10] = __dtu_m_vmm2_mode17_f16(qacc[10], vr10, smr1);
+          qacc[11] = __dtu_m_vmm2_mode17_f16(qacc[11], vr11, smr1);
+          qacc[12] = __dtu_m_vmm2_mode17_f16(qacc[12], vr12, smr1);
+          qacc[13] = __dtu_m_vmm2_mode17_f16(qacc[13], vr13, smr1);
+          qacc[14] = __dtu_m_vmm2_mode17_f16(qacc[14], vr14, smr1);
+          qacc[15] = __dtu_m_vmm2_mode17_f16(qacc[15], vr15, smr1);
+          qacc[16] = __dtu_m_vmm2_mode17_f16(qacc[16], vr16, smr1);
+          qacc[17] = __dtu_m_vmm2_mode17_f16(qacc[17], vr17, smr1);
+          qacc[18] = __dtu_m_vmm2_mode17_f16(qacc[18], vr18, smr1);
+          qacc[19] = __dtu_m_vmm2_mode17_f16(qacc[19], vr19, smr1);
+          qacc[20] = __dtu_m_vmm2_mode17_f16(qacc[20], vr20, smr1);
+          qacc[21] = __dtu_m_vmm2_mode17_f16(qacc[21], vr21, smr1);
+          qacc[22] = __dtu_m_vmm2_mode17_f16(qacc[22], vr22, smr1);
+          qacc[23] = __dtu_m_vmm2_mode17_f16(qacc[23], vr23, smr1);
+          qacc[24] = __dtu_m_vmm2_mode17_f16(qacc[24], vr24, smr1);
+          qacc[25] = __dtu_m_vmm2_mode17_f16(qacc[25], vr25, smr1);
+          qacc[26] = __dtu_m_vmm2_mode17_f16(qacc[26], vr26, smr1);
+          qacc[27] = __dtu_m_vmm2_mode17_f16(qacc[27], vr27, smr1);
+          qacc[28] = __dtu_m_vmm2_mode17_f16(qacc[28], vr28, smr1);
+          qacc[29] = __dtu_m_vmm2_mode17_f16(qacc[29], vr29, smr1);
+          qacc[30] = __dtu_m_vmm2_mode17_f16(qacc[30], vr30, smr1);
+          qacc[31] = __dtu_m_vmm2_mode17_f16(qacc[31], vr31, smr1);
+          // next k unit smr0
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 0);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 1);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 2);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 3);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 4);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 5);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 6);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 7);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 8);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 9);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 10);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 11);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 12);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 13);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 14);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 15);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 16);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 17);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 18);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 19);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 20);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 21);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 22);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 23);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 24);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 25);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 26);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 27);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 28);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 29);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 30);
+          smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 31);
+          // next k unit m0k0
+          vr0 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr1 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr2 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr3 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr4 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr5 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr6 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr7 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr8 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr9 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr10 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr11 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr12 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr13 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr14 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr15 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr16 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr17 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr18 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr19 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr20 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr21 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr22 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr23 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr24 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr25 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr26 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr27 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr28 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr29 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr30 = __dtu_s_tvld_itar(lt_base, lt_off0);
+          vr31 = __dtu_s_tvld_itar(lt_base, lt_off1);
+        }  // end kcout-1
+        // last k unit
+        // m0k0 * smr0
+        qacc[0] = __dtu_m_vmm2_mode17_f16(qacc[0], vr0, smr0);
+        qacc[1] = __dtu_m_vmm2_mode17_f16(qacc[1], vr1, smr0);
+        qacc[2] = __dtu_m_vmm2_mode17_f16(qacc[2], vr2, smr0);
+        qacc[3] = __dtu_m_vmm2_mode17_f16(qacc[3], vr3, smr0);
+        qacc[4] = __dtu_m_vmm2_mode17_f16(qacc[4], vr4, smr0);
+        qacc[5] = __dtu_m_vmm2_mode17_f16(qacc[5], vr5, smr0);
+        qacc[6] = __dtu_m_vmm2_mode17_f16(qacc[6], vr6, smr0);
+        qacc[7] = __dtu_m_vmm2_mode17_f16(qacc[7], vr7, smr0);
+        qacc[8] = __dtu_m_vmm2_mode17_f16(qacc[8], vr8, smr0);
+        qacc[9] = __dtu_m_vmm2_mode17_f16(qacc[9], vr9, smr0);
+        qacc[10] = __dtu_m_vmm2_mode17_f16(qacc[10], vr10, smr0);
+        qacc[11] = __dtu_m_vmm2_mode17_f16(qacc[11], vr11, smr0);
+        qacc[12] = __dtu_m_vmm2_mode17_f16(qacc[12], vr12, smr0);
+        qacc[13] = __dtu_m_vmm2_mode17_f16(qacc[13], vr13, smr0);
+        qacc[14] = __dtu_m_vmm2_mode17_f16(qacc[14], vr14, smr0);
+        qacc[15] = __dtu_m_vmm2_mode17_f16(qacc[15], vr15, smr0);
+        qacc[16] = __dtu_m_vmm2_mode17_f16(qacc[16], vr16, smr0);
+        qacc[17] = __dtu_m_vmm2_mode17_f16(qacc[17], vr17, smr0);
+        qacc[18] = __dtu_m_vmm2_mode17_f16(qacc[18], vr18, smr0);
+        qacc[19] = __dtu_m_vmm2_mode17_f16(qacc[19], vr19, smr0);
+        qacc[20] = __dtu_m_vmm2_mode17_f16(qacc[20], vr20, smr0);
+        qacc[21] = __dtu_m_vmm2_mode17_f16(qacc[21], vr21, smr0);
+        qacc[22] = __dtu_m_vmm2_mode17_f16(qacc[22], vr22, smr0);
+        qacc[23] = __dtu_m_vmm2_mode17_f16(qacc[23], vr23, smr0);
+        qacc[24] = __dtu_m_vmm2_mode17_f16(qacc[24], vr24, smr0);
+        qacc[25] = __dtu_m_vmm2_mode17_f16(qacc[25], vr25, smr0);
+        qacc[26] = __dtu_m_vmm2_mode17_f16(qacc[26], vr26, smr0);
+        qacc[27] = __dtu_m_vmm2_mode17_f16(qacc[27], vr27, smr0);
+        qacc[28] = __dtu_m_vmm2_mode17_f16(qacc[28], vr28, smr0);
+        qacc[29] = __dtu_m_vmm2_mode17_f16(qacc[29], vr29, smr0);
+        qacc[30] = __dtu_m_vmm2_mode17_f16(qacc[30], vr30, smr0);
+        qacc[31] = __dtu_m_vmm2_mode17_f16(qacc[31], vr31, smr0);
+        // m0k1
+        vr0 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr1 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr2 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr3 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr4 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr5 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr6 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr7 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr8 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr9 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr10 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr11 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr12 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr13 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr14 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr15 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr16 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr17 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr18 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr19 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr20 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr21 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr22 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr23 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr24 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr25 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr26 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr27 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr28 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr29 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr30 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr31 = __dtu_s_tvld_itar(lt_base, lt_off2);  // end k new n
+        // smr1
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 0);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 1);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 2);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 3);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 4);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 5);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 6);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 7);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 8);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 9);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 10);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 11);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 12);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 13);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 14);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 15);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 16);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 17);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 18);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 19);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 20);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 21);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 22);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 23);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 24);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 25);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 26);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 27);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 28);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 29);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 30);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off1, 31);
+        __dtu_c_movsr2naccovr(0x1);
+        // m0k1 * smr1
+        qacc[0] = __dtu_m_vmm2_mode17_f16(qacc[0], vr0, smr1);
+        qacc[1] = __dtu_m_vmm2_mode17_f16(qacc[1], vr1, smr1);
+        qacc[2] = __dtu_m_vmm2_mode17_f16(qacc[2], vr2, smr1);
+        qacc[3] = __dtu_m_vmm2_mode17_f16(qacc[3], vr3, smr1);
+        qacc[4] = __dtu_m_vmm2_mode17_f16(qacc[4], vr4, smr1);
+        qacc[5] = __dtu_m_vmm2_mode17_f16(qacc[5], vr5, smr1);
+        qacc[6] = __dtu_m_vmm2_mode17_f16(qacc[6], vr6, smr1);
+        qacc[7] = __dtu_m_vmm2_mode17_f16(qacc[7], vr7, smr1);
+        qacc[8] = __dtu_m_vmm2_mode17_f16(qacc[8], vr8, smr1);
+        qacc[9] = __dtu_m_vmm2_mode17_f16(qacc[9], vr9, smr1);
+        qacc[10] = __dtu_m_vmm2_mode17_f16(qacc[10], vr10, smr1);
+        qacc[11] = __dtu_m_vmm2_mode17_f16(qacc[11], vr11, smr1);
+        qacc[12] = __dtu_m_vmm2_mode17_f16(qacc[12], vr12, smr1);
+        qacc[13] = __dtu_m_vmm2_mode17_f16(qacc[13], vr13, smr1);
+        qacc[14] = __dtu_m_vmm2_mode17_f16(qacc[14], vr14, smr1);
+        qacc[15] = __dtu_m_vmm2_mode17_f16(qacc[15], vr15, smr1);
+        qacc[16] = __dtu_m_vmm2_mode17_f16(qacc[16], vr16, smr1);
+        qacc[17] = __dtu_m_vmm2_mode17_f16(qacc[17], vr17, smr1);
+        qacc[18] = __dtu_m_vmm2_mode17_f16(qacc[18], vr18, smr1);
+        qacc[19] = __dtu_m_vmm2_mode17_f16(qacc[19], vr19, smr1);
+        qacc[20] = __dtu_m_vmm2_mode17_f16(qacc[20], vr20, smr1);
+        qacc[21] = __dtu_m_vmm2_mode17_f16(qacc[21], vr21, smr1);
+        qacc[22] = __dtu_m_vmm2_mode17_f16(qacc[22], vr22, smr1);
+        qacc[23] = __dtu_m_vmm2_mode17_f16(qacc[23], vr23, smr1);
+        qacc[24] = __dtu_m_vmm2_mode17_f16(qacc[24], vr24, smr1);
+        qacc[25] = __dtu_m_vmm2_mode17_f16(qacc[25], vr25, smr1);
+        qacc[26] = __dtu_m_vmm2_mode17_f16(qacc[26], vr26, smr1);
+        qacc[27] = __dtu_m_vmm2_mode17_f16(qacc[27], vr27, smr1);
+        qacc[28] = __dtu_m_vmm2_mode17_f16(qacc[28], vr28, smr1);
+        qacc[29] = __dtu_m_vmm2_mode17_f16(qacc[29], vr29, smr1);
+        qacc[30] = __dtu_m_vmm2_mode17_f16(qacc[30], vr30, smr1);
+        qacc[31] = __dtu_m_vmm2_mode17_f16(qacc[31], vr31, smr1);
+        // next n unit smr0
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 0);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 1);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 2);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 3);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 4);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 5);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 6);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 7);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 8);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 9);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 10);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 11);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 12);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 13);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 14);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 15);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 16);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 17);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 18);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 19);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 20);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 21);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 22);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 23);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 24);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 25);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 26);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 27);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 28);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 29);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 30);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 31);
+        // next n unit m0k0
+        vr0 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr1 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr2 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr3 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr4 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr5 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr6 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr7 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr8 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr9 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr10 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr11 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr12 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr13 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr14 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr15 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr16 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr17 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr18 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr19 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr20 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr21 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr22 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr23 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr24 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr25 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr26 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr27 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr28 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr29 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr30 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr31 = __dtu_s_tvld_itar(lt_base, lt_off1);
+
+        vab_shift += 256;
+        __dtu_c_movsr2vab_m_s1(vab_shift);
+        __dtu_c_movsr2vab_m_d(vab_shift);
+      }  // end ncount-1
+      __dtu_c_movsr2naccovr(naccovr);
+      for (int k = 0; k < K - 64; k += 64) {
+        // m0k0 * smr0
+        qacc[0] = __dtu_m_vmm2_mode17_f16(qacc[0], vr0, smr0);
+        qacc[1] = __dtu_m_vmm2_mode17_f16(qacc[1], vr1, smr0);
+        qacc[2] = __dtu_m_vmm2_mode17_f16(qacc[2], vr2, smr0);
+        qacc[3] = __dtu_m_vmm2_mode17_f16(qacc[3], vr3, smr0);
+        qacc[4] = __dtu_m_vmm2_mode17_f16(qacc[4], vr4, smr0);
+        qacc[5] = __dtu_m_vmm2_mode17_f16(qacc[5], vr5, smr0);
+        qacc[6] = __dtu_m_vmm2_mode17_f16(qacc[6], vr6, smr0);
+        qacc[7] = __dtu_m_vmm2_mode17_f16(qacc[7], vr7, smr0);
+        qacc[8] = __dtu_m_vmm2_mode17_f16(qacc[8], vr8, smr0);
+        qacc[9] = __dtu_m_vmm2_mode17_f16(qacc[9], vr9, smr0);
+        qacc[10] = __dtu_m_vmm2_mode17_f16(qacc[10], vr10, smr0);
+        qacc[11] = __dtu_m_vmm2_mode17_f16(qacc[11], vr11, smr0);
+        qacc[12] = __dtu_m_vmm2_mode17_f16(qacc[12], vr12, smr0);
+        qacc[13] = __dtu_m_vmm2_mode17_f16(qacc[13], vr13, smr0);
+        qacc[14] = __dtu_m_vmm2_mode17_f16(qacc[14], vr14, smr0);
+        qacc[15] = __dtu_m_vmm2_mode17_f16(qacc[15], vr15, smr0);
+        qacc[16] = __dtu_m_vmm2_mode17_f16(qacc[16], vr16, smr0);
+        qacc[17] = __dtu_m_vmm2_mode17_f16(qacc[17], vr17, smr0);
+        qacc[18] = __dtu_m_vmm2_mode17_f16(qacc[18], vr18, smr0);
+        qacc[19] = __dtu_m_vmm2_mode17_f16(qacc[19], vr19, smr0);
+        qacc[20] = __dtu_m_vmm2_mode17_f16(qacc[20], vr20, smr0);
+        qacc[21] = __dtu_m_vmm2_mode17_f16(qacc[21], vr21, smr0);
+        qacc[22] = __dtu_m_vmm2_mode17_f16(qacc[22], vr22, smr0);
+        qacc[23] = __dtu_m_vmm2_mode17_f16(qacc[23], vr23, smr0);
+        qacc[24] = __dtu_m_vmm2_mode17_f16(qacc[24], vr24, smr0);
+        qacc[25] = __dtu_m_vmm2_mode17_f16(qacc[25], vr25, smr0);
+        qacc[26] = __dtu_m_vmm2_mode17_f16(qacc[26], vr26, smr0);
+        qacc[27] = __dtu_m_vmm2_mode17_f16(qacc[27], vr27, smr0);
+        qacc[28] = __dtu_m_vmm2_mode17_f16(qacc[28], vr28, smr0);
+        qacc[29] = __dtu_m_vmm2_mode17_f16(qacc[29], vr29, smr0);
+        qacc[30] = __dtu_m_vmm2_mode17_f16(qacc[30], vr30, smr0);
+        qacc[31] = __dtu_m_vmm2_mode17_f16(qacc[31], vr31, smr0);
+        // m0k1
+        vr0 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr1 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr2 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr3 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr4 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr5 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr6 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr7 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr8 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr9 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr10 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr11 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr12 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr13 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr14 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr15 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr16 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr17 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr18 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr19 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr20 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr21 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr22 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr23 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr24 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr25 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr26 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr27 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr28 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr29 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr30 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr31 = __dtu_s_tvld_itar(lt_base, lt_off1);
+        // smr1
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 0);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 1);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 2);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 3);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 4);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 5);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 6);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 7);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 8);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 9);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 10);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 11);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 12);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 13);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 14);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 15);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 16);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 17);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 18);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 19);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 20);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 21);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 22);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 23);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 24);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 25);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 26);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 27);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 28);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 29);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 30);
+        smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 31);
+        __dtu_c_movsr2naccovr(0x1);
+        // m0k1 * smr1
+        qacc[0] = __dtu_m_vmm2_mode17_f16(qacc[0], vr0, smr1);
+        qacc[1] = __dtu_m_vmm2_mode17_f16(qacc[1], vr1, smr1);
+        qacc[2] = __dtu_m_vmm2_mode17_f16(qacc[2], vr2, smr1);
+        qacc[3] = __dtu_m_vmm2_mode17_f16(qacc[3], vr3, smr1);
+        qacc[4] = __dtu_m_vmm2_mode17_f16(qacc[4], vr4, smr1);
+        qacc[5] = __dtu_m_vmm2_mode17_f16(qacc[5], vr5, smr1);
+        qacc[6] = __dtu_m_vmm2_mode17_f16(qacc[6], vr6, smr1);
+        qacc[7] = __dtu_m_vmm2_mode17_f16(qacc[7], vr7, smr1);
+        qacc[8] = __dtu_m_vmm2_mode17_f16(qacc[8], vr8, smr1);
+        qacc[9] = __dtu_m_vmm2_mode17_f16(qacc[9], vr9, smr1);
+        qacc[10] = __dtu_m_vmm2_mode17_f16(qacc[10], vr10, smr1);
+        qacc[11] = __dtu_m_vmm2_mode17_f16(qacc[11], vr11, smr1);
+        qacc[12] = __dtu_m_vmm2_mode17_f16(qacc[12], vr12, smr1);
+        qacc[13] = __dtu_m_vmm2_mode17_f16(qacc[13], vr13, smr1);
+        qacc[14] = __dtu_m_vmm2_mode17_f16(qacc[14], vr14, smr1);
+        qacc[15] = __dtu_m_vmm2_mode17_f16(qacc[15], vr15, smr1);
+        qacc[16] = __dtu_m_vmm2_mode17_f16(qacc[16], vr16, smr1);
+        qacc[17] = __dtu_m_vmm2_mode17_f16(qacc[17], vr17, smr1);
+        qacc[18] = __dtu_m_vmm2_mode17_f16(qacc[18], vr18, smr1);
+        qacc[19] = __dtu_m_vmm2_mode17_f16(qacc[19], vr19, smr1);
+        qacc[20] = __dtu_m_vmm2_mode17_f16(qacc[20], vr20, smr1);
+        qacc[21] = __dtu_m_vmm2_mode17_f16(qacc[21], vr21, smr1);
+        qacc[22] = __dtu_m_vmm2_mode17_f16(qacc[22], vr22, smr1);
+        qacc[23] = __dtu_m_vmm2_mode17_f16(qacc[23], vr23, smr1);
+        qacc[24] = __dtu_m_vmm2_mode17_f16(qacc[24], vr24, smr1);
+        qacc[25] = __dtu_m_vmm2_mode17_f16(qacc[25], vr25, smr1);
+        qacc[26] = __dtu_m_vmm2_mode17_f16(qacc[26], vr26, smr1);
+        qacc[27] = __dtu_m_vmm2_mode17_f16(qacc[27], vr27, smr1);
+        qacc[28] = __dtu_m_vmm2_mode17_f16(qacc[28], vr28, smr1);
+        qacc[29] = __dtu_m_vmm2_mode17_f16(qacc[29], vr29, smr1);
+        qacc[30] = __dtu_m_vmm2_mode17_f16(qacc[30], vr30, smr1);
+        qacc[31] = __dtu_m_vmm2_mode17_f16(qacc[31], vr31, smr1);
+        // next k unit smr0
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 0);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 1);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 2);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 3);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 4);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 5);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 6);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 7);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 8);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 9);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 10);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 11);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 12);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 13);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 14);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 15);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 16);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 17);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 18);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 19);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 20);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 21);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 22);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 23);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 24);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 25);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 26);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 27);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 28);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 29);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 30);
+        smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 31);
+        // next k unit m0k0
+        vr0 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr1 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr2 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr3 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr4 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr5 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr6 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr7 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr8 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr9 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr10 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr11 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr12 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr13 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr14 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr15 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr16 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr17 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr18 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr19 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr20 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr21 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr22 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr23 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr24 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr25 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr26 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr27 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr28 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr29 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr30 = __dtu_s_tvld_itar(lt_base, lt_off0);
+        vr31 = __dtu_s_tvld_itar(lt_base, lt_off1);
+      }  // end kcout-1
+      // last k unit of last n unit
+      // m0k0 * smr0
+      qacc[0] = __dtu_m_vmm2_mode17_f16(qacc[0], vr0, smr0);
+      qacc[1] = __dtu_m_vmm2_mode17_f16(qacc[1], vr1, smr0);
+      qacc[2] = __dtu_m_vmm2_mode17_f16(qacc[2], vr2, smr0);
+      qacc[3] = __dtu_m_vmm2_mode17_f16(qacc[3], vr3, smr0);
+      qacc[4] = __dtu_m_vmm2_mode17_f16(qacc[4], vr4, smr0);
+      qacc[5] = __dtu_m_vmm2_mode17_f16(qacc[5], vr5, smr0);
+      qacc[6] = __dtu_m_vmm2_mode17_f16(qacc[6], vr6, smr0);
+      qacc[7] = __dtu_m_vmm2_mode17_f16(qacc[7], vr7, smr0);
+      qacc[8] = __dtu_m_vmm2_mode17_f16(qacc[8], vr8, smr0);
+      qacc[9] = __dtu_m_vmm2_mode17_f16(qacc[9], vr9, smr0);
+      qacc[10] = __dtu_m_vmm2_mode17_f16(qacc[10], vr10, smr0);
+      qacc[11] = __dtu_m_vmm2_mode17_f16(qacc[11], vr11, smr0);
+      qacc[12] = __dtu_m_vmm2_mode17_f16(qacc[12], vr12, smr0);
+      qacc[13] = __dtu_m_vmm2_mode17_f16(qacc[13], vr13, smr0);
+      qacc[14] = __dtu_m_vmm2_mode17_f16(qacc[14], vr14, smr0);
+      qacc[15] = __dtu_m_vmm2_mode17_f16(qacc[15], vr15, smr0);
+      qacc[16] = __dtu_m_vmm2_mode17_f16(qacc[16], vr16, smr0);
+      qacc[17] = __dtu_m_vmm2_mode17_f16(qacc[17], vr17, smr0);
+      qacc[18] = __dtu_m_vmm2_mode17_f16(qacc[18], vr18, smr0);
+      qacc[19] = __dtu_m_vmm2_mode17_f16(qacc[19], vr19, smr0);
+      qacc[20] = __dtu_m_vmm2_mode17_f16(qacc[20], vr20, smr0);
+      qacc[21] = __dtu_m_vmm2_mode17_f16(qacc[21], vr21, smr0);
+      qacc[22] = __dtu_m_vmm2_mode17_f16(qacc[22], vr22, smr0);
+      qacc[23] = __dtu_m_vmm2_mode17_f16(qacc[23], vr23, smr0);
+      qacc[24] = __dtu_m_vmm2_mode17_f16(qacc[24], vr24, smr0);
+      qacc[25] = __dtu_m_vmm2_mode17_f16(qacc[25], vr25, smr0);
+      qacc[26] = __dtu_m_vmm2_mode17_f16(qacc[26], vr26, smr0);
+      qacc[27] = __dtu_m_vmm2_mode17_f16(qacc[27], vr27, smr0);
+      qacc[28] = __dtu_m_vmm2_mode17_f16(qacc[28], vr28, smr0);
+      qacc[29] = __dtu_m_vmm2_mode17_f16(qacc[29], vr29, smr0);
+      qacc[30] = __dtu_m_vmm2_mode17_f16(qacc[30], vr30, smr0);
+      qacc[31] = __dtu_m_vmm2_mode17_f16(qacc[31], vr31, smr0);
+      // m0k1
+      vr0 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr1 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr2 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr3 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr4 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr5 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr6 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr7 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr8 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr9 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr10 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr11 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr12 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr13 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr14 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr15 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr16 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr17 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr18 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr19 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr20 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr21 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr22 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr23 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr24 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr25 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr26 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr27 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr28 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr29 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr30 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr31 = __dtu_s_tvld_itar(lt_base, lt_off3);  // end k  end n new m
+      // smr1
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 0);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 1);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 2);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 3);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 4);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 5);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 6);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 7);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 8);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 9);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 10);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 11);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 12);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 13);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 14);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 15);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 16);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 17);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 18);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 19);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 20);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 21);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 22);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 23);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 24);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 25);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 26);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 27);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 28);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 29);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off0, 30);
+      smr1 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr1, rt_base, rt_off2, 31);
+      __dtu_c_movsr2naccovr(0x1);
+      // m0k1 * smr1
+      qacc[0] = __dtu_m_vmm2_mode17_f16(qacc[0], vr0, smr1);
+      qacc[1] = __dtu_m_vmm2_mode17_f16(qacc[1], vr1, smr1);
+      qacc[2] = __dtu_m_vmm2_mode17_f16(qacc[2], vr2, smr1);
+      qacc[3] = __dtu_m_vmm2_mode17_f16(qacc[3], vr3, smr1);
+      qacc[4] = __dtu_m_vmm2_mode17_f16(qacc[4], vr4, smr1);
+      qacc[5] = __dtu_m_vmm2_mode17_f16(qacc[5], vr5, smr1);
+      qacc[6] = __dtu_m_vmm2_mode17_f16(qacc[6], vr6, smr1);
+      qacc[7] = __dtu_m_vmm2_mode17_f16(qacc[7], vr7, smr1);
+      qacc[8] = __dtu_m_vmm2_mode17_f16(qacc[8], vr8, smr1);
+      qacc[9] = __dtu_m_vmm2_mode17_f16(qacc[9], vr9, smr1);
+      qacc[10] = __dtu_m_vmm2_mode17_f16(qacc[10], vr10, smr1);
+      qacc[11] = __dtu_m_vmm2_mode17_f16(qacc[11], vr11, smr1);
+      qacc[12] = __dtu_m_vmm2_mode17_f16(qacc[12], vr12, smr1);
+      qacc[13] = __dtu_m_vmm2_mode17_f16(qacc[13], vr13, smr1);
+      qacc[14] = __dtu_m_vmm2_mode17_f16(qacc[14], vr14, smr1);
+      qacc[15] = __dtu_m_vmm2_mode17_f16(qacc[15], vr15, smr1);
+      qacc[16] = __dtu_m_vmm2_mode17_f16(qacc[16], vr16, smr1);
+      qacc[17] = __dtu_m_vmm2_mode17_f16(qacc[17], vr17, smr1);
+      qacc[18] = __dtu_m_vmm2_mode17_f16(qacc[18], vr18, smr1);
+      qacc[19] = __dtu_m_vmm2_mode17_f16(qacc[19], vr19, smr1);
+      qacc[20] = __dtu_m_vmm2_mode17_f16(qacc[20], vr20, smr1);
+      qacc[21] = __dtu_m_vmm2_mode17_f16(qacc[21], vr21, smr1);
+      qacc[22] = __dtu_m_vmm2_mode17_f16(qacc[22], vr22, smr1);
+      qacc[23] = __dtu_m_vmm2_mode17_f16(qacc[23], vr23, smr1);
+      qacc[24] = __dtu_m_vmm2_mode17_f16(qacc[24], vr24, smr1);
+      qacc[25] = __dtu_m_vmm2_mode17_f16(qacc[25], vr25, smr1);
+      qacc[26] = __dtu_m_vmm2_mode17_f16(qacc[26], vr26, smr1);
+      qacc[27] = __dtu_m_vmm2_mode17_f16(qacc[27], vr27, smr1);
+      qacc[28] = __dtu_m_vmm2_mode17_f16(qacc[28], vr28, smr1);
+      qacc[29] = __dtu_m_vmm2_mode17_f16(qacc[29], vr29, smr1);
+      qacc[30] = __dtu_m_vmm2_mode17_f16(qacc[30], vr30, smr1);
+      qacc[31] = __dtu_m_vmm2_mode17_f16(qacc[31], vr31, smr1);
+      // next n unit smr0
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 0);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 1);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 2);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 3);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 4);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 5);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 6);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 7);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 8);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 9);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 10);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 11);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 12);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 13);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 14);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 15);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 16);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 17);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 18);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 19);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 20);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 21);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 22);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 23);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 24);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 25);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 26);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 27);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 28);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 29);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 30);
+      smr0 = __dtu_v_ldsmr2_mem_v_mode17_f16_row(smr0, rt_base, rt_off0, 31);
+      // next n unit m0k0
+      vr0 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr1 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr2 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr3 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr4 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr5 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr6 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr7 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr8 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr9 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr10 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr11 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr12 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr13 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr14 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr15 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr16 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr17 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr18 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr19 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr20 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr21 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr22 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr23 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr24 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr25 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr26 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr27 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr28 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr29 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr30 = __dtu_s_tvld_itar(lt_base, lt_off0);
+      vr31 = __dtu_s_tvld_itar(lt_base, lt_off1);
+      vab_shift += 256;
+      __dtu_c_movsr2vab_m_s1(vab_shift);
+      __dtu_c_movsr2vab_m_d(vab_shift);
+    }  // end mcount
+    if (stroe_flag) {
+      vab_shift = 0;
+      __dtu_c_movsr2vab_lv_s(0);
+      __dtu_c_movsr2vab_lv_d(0);
+      __dtu_c_movsr2vab_m_s1(0);
+      __dtu_c_movsr2vab_m_d(0);
+  #pragma clang loop unroll(disable)
+      for (int m = 0; m < M; m = m + 32) {
+  #pragma clang loop unroll(disable)
+        for (int n = 0; n < N - 128; n = n + 128) {
+          bs_dacc = __dtu_l_tvldqa_f16_da(biast_base, biast_off0);
+          c_dacc[0] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[1] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[2] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[3] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[4] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[5] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[6] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[7] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[8] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[9] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[10] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[11] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[12] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[13] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[14] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[15] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[16] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[17] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[18] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[19] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[20] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[21] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[22] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[23] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[24] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[25] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[26] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[27] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[28] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[29] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[30] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+          c_dacc[31] = __dtu_l_tvldqa_f16_da(bt_base, bt_off1);
+          __dtu_c_movsr2vab_m_s2(0);
+          qacc[0] = __dtu_m_mop_mul_f32_qa(qacc[0], qa_alpha);
+          qacc[1] = __dtu_m_mop_mul_f32_qa(qacc[1], qa_alpha);
+          qacc[2] = __dtu_m_mop_mul_f32_qa(qacc[2], qa_alpha);
+          qacc[3] = __dtu_m_mop_mul_f32_qa(qacc[3], qa_alpha);
+          qacc[4] = __dtu_m_mop_mul_f32_qa(qacc[4], qa_alpha);
+          qacc[5] = __dtu_m_mop_mul_f32_qa(qacc[5], qa_alpha);
+          qacc[6] = __dtu_m_mop_mul_f32_qa(qacc[6], qa_alpha);
+          qacc[7] = __dtu_m_mop_mul_f32_qa(qacc[7], qa_alpha);
+          qacc[8] = __dtu_m_mop_mul_f32_qa(qacc[8], qa_alpha);
+          qacc[9] = __dtu_m_mop_mul_f32_qa(qacc[9], qa_alpha);
+          qacc[10] = __dtu_m_mop_mul_f32_qa(qacc[10], qa_alpha);
+          qacc[11] = __dtu_m_mop_mul_f32_qa(qacc[11], qa_alpha);
+          qacc[12] = __dtu_m_mop_mul_f32_qa(qacc[12], qa_alpha);
+          qacc[13] = __dtu_m_mop_mul_f32_qa(qacc[13], qa_alpha);
+          qacc[14] = __dtu_m_mop_mul_f32_qa(qacc[14], qa_alpha);
+          qacc[15] = __dtu_m_mop_mul_f32_qa(qacc[15], qa_alpha);
+          qacc[16] = __dtu_m_mop_mul_f32_qa(qacc[16], qa_alpha);
+          qacc[17] = __dtu_m_mop_mul_f32_qa(qacc[17], qa_alpha);
+          qacc[18] = __dtu_m_mop_mul_f32_qa(qacc[18], qa_alpha);
+          qacc[19] = __dtu_m_mop_mul_f32_qa(qacc[19], qa_alpha);
+          qacc[20] = __dtu_m_mop_mul_f32_qa(qacc[20], qa_alpha);
+          qacc[21] = __dtu_m_mop_mul_f32_qa(qacc[21], qa_alpha);
+          qacc[22] = __dtu_m_mop_mul_f32_qa(qacc[22], qa_alpha);
+          qacc[23] = __dtu_m_mop_mul_f32_qa(qacc[23], qa_alpha);
+          qacc[24] = __dtu_m_mop_mul_f32_qa(qacc[24], qa_alpha);
+          qacc[25] = __dtu_m_mop_mul_f32_qa(qacc[25], qa_alpha);
+          qacc[26] = __dtu_m_mop_mul_f32_qa(qacc[26], qa_alpha);
+          qacc[27] = __dtu_m_mop_mul_f32_qa(qacc[27], qa_alpha);
+          qacc[28] = __dtu_m_mop_mul_f32_qa(qacc[28], qa_alpha);
+          qacc[29] = __dtu_m_mop_mul_f32_qa(qacc[29], qa_alpha);
+          qacc[30] = __dtu_m_mop_mul_f32_qa(qacc[30], qa_alpha);
+          qacc[31] = __dtu_m_mop_mul_f32_qa(qacc[31], qa_alpha);
+
+          qacc[0] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[0], qa_beta, qacc[0]);
+          qacc[1] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[1], qa_beta, qacc[1]);
+          qacc[2] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[2], qa_beta, qacc[2]);
+          qacc[3] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[3], qa_beta, qacc[3]);
+          qacc[4] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[4], qa_beta, qacc[4]);
+          qacc[5] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[5], qa_beta, qacc[5]);
+          qacc[6] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[6], qa_beta, qacc[6]);
+          qacc[7] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[7], qa_beta, qacc[7]);
+          qacc[8] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[8], qa_beta, qacc[8]);
+          qacc[9] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[9], qa_beta, qacc[9]);
+          qacc[10] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[10], qa_beta, qacc[10]);
+          qacc[11] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[11], qa_beta, qacc[11]);
+          qacc[12] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[12], qa_beta, qacc[12]);
+          qacc[13] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[13], qa_beta, qacc[13]);
+          qacc[14] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[14], qa_beta, qacc[14]);
+          qacc[15] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[15], qa_beta, qacc[15]);
+          qacc[16] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[16], qa_beta, qacc[16]);
+          qacc[17] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[17], qa_beta, qacc[17]);
+          qacc[18] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[18], qa_beta, qacc[18]);
+          qacc[19] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[19], qa_beta, qacc[19]);
+          qacc[20] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[20], qa_beta, qacc[20]);
+          qacc[21] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[21], qa_beta, qacc[21]);
+          qacc[22] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[22], qa_beta, qacc[22]);
+          qacc[23] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[23], qa_beta, qacc[23]);
+          qacc[24] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[24], qa_beta, qacc[24]);
+          qacc[25] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[25], qa_beta, qacc[25]);
+          qacc[26] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[26], qa_beta, qacc[26]);
+          qacc[27] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[27], qa_beta, qacc[27]);
+          qacc[28] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[28], qa_beta, qacc[28]);
+          qacc[29] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[29], qa_beta, qacc[29]);
+          qacc[30] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[30], qa_beta, qacc[30]);
+          qacc[31] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[31], qa_beta, qacc[31]);
+
+          // add bias
+          if (bias_en == 1) {
+            qacc[0] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[0]);
+            qacc[1] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[1]);
+            qacc[2] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[2]);
+            qacc[3] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[3]);
+            qacc[4] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[4]);
+            qacc[5] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[5]);
+            qacc[6] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[6]);
+            qacc[7] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[7]);
+            qacc[8] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[8]);
+            qacc[9] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[9]);
+            qacc[10] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[10]);
+            qacc[11] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[11]);
+            qacc[12] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[12]);
+            qacc[13] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[13]);
+            qacc[14] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[14]);
+            qacc[15] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[15]);
+            qacc[16] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[16]);
+            qacc[17] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[17]);
+            qacc[18] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[18]);
+            qacc[19] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[19]);
+            qacc[20] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[20]);
+            qacc[21] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[21]);
+            qacc[22] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[22]);
+            qacc[23] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[23]);
+            qacc[24] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[24]);
+            qacc[25] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[25]);
+            qacc[26] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[26]);
+            qacc[27] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[27]);
+            qacc[28] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[28]);
+            qacc[29] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[29]);
+            qacc[30] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[30]);
+            qacc[31] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[31]);
+          }
+
+          c_dacc[0] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[0]);
+          c_dacc[1] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[1]);
+          c_dacc[2] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[2]);
+          c_dacc[3] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[3]);
+          c_dacc[4] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[4]);
+          c_dacc[5] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[5]);
+          c_dacc[6] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[6]);
+          c_dacc[7] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[7]);
+          c_dacc[8] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[8]);
+          c_dacc[9] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[9]);
+          c_dacc[10] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[10]);
+          c_dacc[11] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[11]);
+          c_dacc[12] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[12]);
+          c_dacc[13] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[13]);
+          c_dacc[14] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[14]);
+          c_dacc[15] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[15]);
+          c_dacc[16] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[16]);
+          c_dacc[17] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[17]);
+          c_dacc[18] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[18]);
+          c_dacc[19] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[19]);
+          c_dacc[20] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[20]);
+          c_dacc[21] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[21]);
+          c_dacc[22] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[22]);
+          c_dacc[23] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[23]);
+          c_dacc[24] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[24]);
+          c_dacc[25] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[25]);
+          c_dacc[26] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[26]);
+          c_dacc[27] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[27]);
+          c_dacc[28] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[28]);
+          c_dacc[29] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[29]);
+          c_dacc[30] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[30]);
+          c_dacc[31] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[31]);
+
+          __dtu_v_tvstda_f16_dual(c_dacc[0], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[1], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[2], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[3], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[4], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[5], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[6], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[7], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[8], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[9], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[10], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[11], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[12], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[13], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[14], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[15], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[16], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[17], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[18], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[19], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[20], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[21], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[22], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[23], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[24], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[25], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[26], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[27], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[28], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[29], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[30], ot_base, ot_off0);
+          __dtu_v_tvstda_f16_dual(c_dacc[31], ot_base, ot_off1);
+
+          vab_shift += 256;
+          __dtu_c_movsr2vab_lv_s(vab_shift);
+          __dtu_c_movsr2vab_lv_d(vab_shift);
+          __dtu_c_movsr2vab_m_s1(vab_shift);
+          __dtu_c_movsr2vab_m_d(vab_shift);
+        }
+        bs_dacc = __dtu_l_tvldqa_f16_da(biast_base, biast_off1);
+        c_dacc[0] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[1] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[2] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[3] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[4] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[5] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[6] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[7] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[8] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[9] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[10] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[11] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[12] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[13] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[14] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[15] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[16] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[17] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[18] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[19] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[20] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[21] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[22] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[23] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[24] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[25] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[26] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[27] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[28] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[29] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[30] = __dtu_l_tvldqa_f16_da(bt_base, bt_off0);
+        c_dacc[31] = __dtu_l_tvldqa_f16_da(bt_base, bt_off2);
+        __dtu_c_movsr2vab_m_s2(0);
+        qacc[0] = __dtu_m_mop_mul_f32_qa(qacc[0], qa_alpha);
+        qacc[1] = __dtu_m_mop_mul_f32_qa(qacc[1], qa_alpha);
+        qacc[2] = __dtu_m_mop_mul_f32_qa(qacc[2], qa_alpha);
+        qacc[3] = __dtu_m_mop_mul_f32_qa(qacc[3], qa_alpha);
+        qacc[4] = __dtu_m_mop_mul_f32_qa(qacc[4], qa_alpha);
+        qacc[5] = __dtu_m_mop_mul_f32_qa(qacc[5], qa_alpha);
+        qacc[6] = __dtu_m_mop_mul_f32_qa(qacc[6], qa_alpha);
+        qacc[7] = __dtu_m_mop_mul_f32_qa(qacc[7], qa_alpha);
+        qacc[8] = __dtu_m_mop_mul_f32_qa(qacc[8], qa_alpha);
+        qacc[9] = __dtu_m_mop_mul_f32_qa(qacc[9], qa_alpha);
+        qacc[10] = __dtu_m_mop_mul_f32_qa(qacc[10], qa_alpha);
+        qacc[11] = __dtu_m_mop_mul_f32_qa(qacc[11], qa_alpha);
+        qacc[12] = __dtu_m_mop_mul_f32_qa(qacc[12], qa_alpha);
+        qacc[13] = __dtu_m_mop_mul_f32_qa(qacc[13], qa_alpha);
+        qacc[14] = __dtu_m_mop_mul_f32_qa(qacc[14], qa_alpha);
+        qacc[15] = __dtu_m_mop_mul_f32_qa(qacc[15], qa_alpha);
+        qacc[16] = __dtu_m_mop_mul_f32_qa(qacc[16], qa_alpha);
+        qacc[17] = __dtu_m_mop_mul_f32_qa(qacc[17], qa_alpha);
+        qacc[18] = __dtu_m_mop_mul_f32_qa(qacc[18], qa_alpha);
+        qacc[19] = __dtu_m_mop_mul_f32_qa(qacc[19], qa_alpha);
+        qacc[20] = __dtu_m_mop_mul_f32_qa(qacc[20], qa_alpha);
+        qacc[21] = __dtu_m_mop_mul_f32_qa(qacc[21], qa_alpha);
+        qacc[22] = __dtu_m_mop_mul_f32_qa(qacc[22], qa_alpha);
+        qacc[23] = __dtu_m_mop_mul_f32_qa(qacc[23], qa_alpha);
+        qacc[24] = __dtu_m_mop_mul_f32_qa(qacc[24], qa_alpha);
+        qacc[25] = __dtu_m_mop_mul_f32_qa(qacc[25], qa_alpha);
+        qacc[26] = __dtu_m_mop_mul_f32_qa(qacc[26], qa_alpha);
+        qacc[27] = __dtu_m_mop_mul_f32_qa(qacc[27], qa_alpha);
+        qacc[28] = __dtu_m_mop_mul_f32_qa(qacc[28], qa_alpha);
+        qacc[29] = __dtu_m_mop_mul_f32_qa(qacc[29], qa_alpha);
+        qacc[30] = __dtu_m_mop_mul_f32_qa(qacc[30], qa_alpha);
+        qacc[31] = __dtu_m_mop_mul_f32_qa(qacc[31], qa_alpha);
+
+        qacc[0] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[0], qa_beta, qacc[0]);
+        qacc[1] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[1], qa_beta, qacc[1]);
+        qacc[2] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[2], qa_beta, qacc[2]);
+        qacc[3] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[3], qa_beta, qacc[3]);
+        qacc[4] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[4], qa_beta, qacc[4]);
+        qacc[5] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[5], qa_beta, qacc[5]);
+        qacc[6] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[6], qa_beta, qacc[6]);
+        qacc[7] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[7], qa_beta, qacc[7]);
+        qacc[8] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[8], qa_beta, qacc[8]);
+        qacc[9] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[9], qa_beta, qacc[9]);
+        qacc[10] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[10], qa_beta, qacc[10]);
+        qacc[11] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[11], qa_beta, qacc[11]);
+        qacc[12] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[12], qa_beta, qacc[12]);
+        qacc[13] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[13], qa_beta, qacc[13]);
+        qacc[14] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[14], qa_beta, qacc[14]);
+        qacc[15] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[15], qa_beta, qacc[15]);
+        qacc[16] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[16], qa_beta, qacc[16]);
+        qacc[17] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[17], qa_beta, qacc[17]);
+        qacc[18] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[18], qa_beta, qacc[18]);
+        qacc[19] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[19], qa_beta, qacc[19]);
+        qacc[20] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[20], qa_beta, qacc[20]);
+        qacc[21] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[21], qa_beta, qacc[21]);
+        qacc[22] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[22], qa_beta, qacc[22]);
+        qacc[23] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[23], qa_beta, qacc[23]);
+        qacc[24] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[24], qa_beta, qacc[24]);
+        qacc[25] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[25], qa_beta, qacc[25]);
+        qacc[26] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[26], qa_beta, qacc[26]);
+        qacc[27] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[27], qa_beta, qacc[27]);
+        qacc[28] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[28], qa_beta, qacc[28]);
+        qacc[29] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[29], qa_beta, qacc[29]);
+        qacc[30] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[30], qa_beta, qacc[30]);
+        qacc[31] = __dtu_m_mop_mac_f32mix_f16_da(c_dacc[31], qa_beta, qacc[31]);
+
+        // add bias
+        if (bias_en == 1) {
+          qacc[0] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[0]);
+          qacc[1] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[1]);
+          qacc[2] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[2]);
+          qacc[3] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[3]);
+          qacc[4] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[4]);
+          qacc[5] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[5]);
+          qacc[6] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[6]);
+          qacc[7] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[7]);
+          qacc[8] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[8]);
+          qacc[9] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[9]);
+          qacc[10] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[10]);
+          qacc[11] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[11]);
+          qacc[12] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[12]);
+          qacc[13] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[13]);
+          qacc[14] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[14]);
+          qacc[15] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[15]);
+          qacc[16] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[16]);
+          qacc[17] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[17]);
+          qacc[18] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[18]);
+          qacc[19] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[19]);
+          qacc[20] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[20]);
+          qacc[21] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[21]);
+          qacc[22] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[22]);
+          qacc[23] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[23]);
+          qacc[24] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[24]);
+          qacc[25] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[25]);
+          qacc[26] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[26]);
+          qacc[27] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[27]);
+          qacc[28] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[28]);
+          qacc[29] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[29]);
+          qacc[30] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[30]);
+          qacc[31] = __dtu_m_mop_mac_f32mix_f16_da(bs_dacc, qa_bias, qacc[31]);
+        }
+
+        c_dacc[0] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[0]);
+        c_dacc[1] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[1]);
+        c_dacc[2] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[2]);
+        c_dacc[3] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[3]);
+        c_dacc[4] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[4]);
+        c_dacc[5] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[5]);
+        c_dacc[6] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[6]);
+        c_dacc[7] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[7]);
+        c_dacc[8] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[8]);
+        c_dacc[9] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[9]);
+        c_dacc[10] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[10]);
+        c_dacc[11] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[11]);
+        c_dacc[12] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[12]);
+        c_dacc[13] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[13]);
+        c_dacc[14] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[14]);
+        c_dacc[15] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[15]);
+        c_dacc[16] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[16]);
+        c_dacc[17] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[17]);
+        c_dacc[18] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[18]);
+        c_dacc[19] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[19]);
+        c_dacc[20] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[20]);
+        c_dacc[21] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[21]);
+        c_dacc[22] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[22]);
+        c_dacc[23] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[23]);
+        c_dacc[24] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[24]);
+        c_dacc[25] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[25]);
+        c_dacc[26] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[26]);
+        c_dacc[27] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[27]);
+        c_dacc[28] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[28]);
+        c_dacc[29] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[29]);
+        c_dacc[30] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[30]);
+        c_dacc[31] = __dtu_m_mop_cvt_qa_rne_clamp_f32_f16(qacc[31]);
+        __dtu_v_tvstda_f16_dual(c_dacc[0], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[1], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[2], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[3], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[4], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[5], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[6], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[7], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[8], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[9], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[10], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[11], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[12], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[13], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[14], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[15], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[16], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[17], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[18], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[19], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[20], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[21], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[22], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[23], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[24], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[25], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[26], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[27], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[28], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[29], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[30], ot_base, ot_off0);
+        __dtu_v_tvstda_f16_dual(c_dacc[31], ot_base, ot_off2);
+
+        vab_shift += 256;
+        __dtu_c_movsr2vab_lv_s(vab_shift);
+        __dtu_c_movsr2vab_lv_d(vab_shift);
+        __dtu_c_movsr2vab_m_s1(vab_shift);
+        __dtu_c_movsr2vab_m_d(vab_shift);
+      }
+    }
+  }
+}
+
+__co__ f16 [M, N] matmul_f16_p1q8(f16 [M, K] lhs, f16 [K, N] rhs) {
+  global f16 [M, N] out;
+  mdspan<3> L1_tile : [32, 128, 64];                                 // [m, n, k]
+  mdspan<3> L2_tile : [L1_tile(0) * 16, L1_tile(1) * 16, L1_tile(2)];  // [m, n, k]
+  parallel p by 1 {
+    with tiling_L2 = {     L2_m_tile,      L2_n_tile,      L2_k_tile}
+                  in [M / L2_tile(0), N / L2_tile(1), K / L2_tile(2)] {
+      foreach L2_m_tile, L2_n_tile {
+        shared f16 [L2_tile(0), L2_tile(1)] out_shared_buf{0};
+        foreach L2_k_tile {
+          lhs_shared_load = dma.copy.async lhs.chunkat(L2_m_tile, L2_k_tile) => shared;
+          rhs_shared_load = dma.copy.async rhs.chunkat(L2_k_tile, L2_n_tile) => shared;
+          wait lhs_shared_load, rhs_shared_load;
+          parallel q by 8 {
+            with tiling_L1 = {                   L1_m_tile,               L1_n_tile,               L1_k_tile}
+                          in [L2_tile(0) / (L1_tile(0) * #q), L2_tile(1) / L1_tile(1), L2_tile(2) / L1_tile(2)] {
+              foreach L1_m_tile, L1_n_tile {
+                out_local = dma.copy.async out_shared_buf.chunkat(L1_m_tile#q, L1_n_tile) => local;
+                wait out_local;
+                foreach L1_k_tile {
+                  lhs_local = dma.copy.async lhs_shared_load.chunkat(L1_m_tile, L1_k_tile) => local;
+                  rhs_local = dma.copy.async rhs_shared_load.chunkat(L1_k_tile, L1_n_tile) => local;
+                  wait lhs_local, rhs_local;
+                  // call matmul_vector_kernel_8_256_16(lhs_local.data, rhs_local.data, out_local.data);
+                  call hgemm(lhs_local.data, rhs_local.data, out_local.data, L1_tile(0), L1_tile(1), L1_tile(2));
+                }
+                out_shared_store = dma.copy.async out_local => out_shared_buf.chunkat(L1_m_tile#q, L1_n_tile);
+                wait out_shared_store;
+              }
+            }
+          }
+          out_global_store = dma.copy.async out_shared_buf => out.chunkat(L2_m_tile, L2_n_tile);
+          wait out_global_store;
+        }
+      }
+    }
+  }
+  return out;
+}
+
+//////////// Host program
+#include <iomanip>
+
+int main() {
+  constexpr size_t MATM = 2048;
+  constexpr size_t MATN = 2048;
+  constexpr size_t MATK = 64;
+
+  auto lhs = new choreo::f16[MATM * MATK];
+  auto rhs = new choreo::f16[MATK * MATN];
+  auto cpu_out = new choreo::f16[MATM * MATN];
+
+  // Chess board init
+  std::cout << "Init the lhs and rhs as chessboard" << std::endl;
+  for (size_t blockRow = 0; blockRow < MATM / 4; ++blockRow) {
+    for (size_t blockCol = 0; blockCol < MATK / 4; ++blockCol) {
+      int blockVal = (blockRow + blockCol) % 2;
+      for (size_t i = 0; i < 4; ++i) {
+        for (size_t j = 0; j < 4; ++j) {
+          lhs[(blockRow * 4 + i) * MATK + blockCol * 4 + j] = blockCol * 0.5f * blockVal;
+        }
+      }
+    }
+  }
+  for (size_t blockRow = 0; blockRow < MATK / 4; ++blockRow) {
+    for (size_t blockCol = 0; blockCol < MATN / 4; ++blockCol) {
+      int blockVal = (blockRow + blockCol) % 2;
+      for (size_t i = 0; i < 4; ++i) {
+        for (size_t j = 0; j < 4; ++j) {
+          rhs[(blockRow * 4 + i) * MATN + blockCol * 4 + j] = 0.5f * blockVal;
+        }
+      }
+    }
+  }
+
+  auto lhs_data = choreo::make_spanview<2, choreo::f16>(lhs, {MATM, MATK});
+  auto rhs_data = choreo::make_spanview<2, choreo::f16>(rhs, {MATK, MATN});
+
+  // auto res = matmul_f16_p1q1(lhs_data, rhs_data);
+  // auto res = matmul_f16_p2q1(lhs_data, rhs_data);
+  auto res = matmul_f16_p1q8(lhs_data, rhs_data);
+
+
+  // CPU Verification
+  std::fill(cpu_out, cpu_out + MATM * MATN, 0.0f);
+  for (size_t m = 0; m < MATM; m++) {
+    for (size_t n = 0; n < MATN; n++) {
+      for (size_t k = 0; k < MATK; k++) {
+        cpu_out[m * MATN + n] += lhs[m * MATK + k] * rhs[k * MATN + n];
+      }
+    }
+  }
+
+  // Print Result and verification
+  constexpr auto epsilon = 0.0001f * std::max(MATM, std::max(MATN, MATK));
+  auto fp_close = [&epsilon](choreo::f32 input0, choreo::f32 input1) {
+    return std::abs(input0 - input1) < epsilon ||
+    std::abs(input0 - input1) < epsilon * std::max(std::abs(input0), std::abs(input1));
+  };
+  for (size_t m = 0; m < MATM; ++m) {
+    for (size_t n = 0; n < MATN; ++n) {
+        auto cpu_res = static_cast<float>(cpu_out[m * MATN + n]);
+        auto gcu_res = static_cast<float>(res.data()[m * MATN + n]);
+        // std::cout << std::left
+        //   << std::setw(16) << "[" + std::to_string(m) + ", " + std::to_string(n) + "]"
+        //   << std::setw(16) << cpu_res
+        //   << std::setw(16) << gcu_res
+        //   << std::endl;
+        choreo::choreo_assert(fp_close(cpu_res, gcu_res),
+            std::string("Verification for gcu_res fails " +
+                        std::to_string(m) + ", " + std::to_string(n) + ": " +
+                        std::to_string(cpu_res) + ", " + std::to_string(gcu_res)).c_str());
+    }
+  }
+
+
+  delete[] lhs;
+  delete[] rhs;
+  delete[] cpu_out;
+
+  std::cout << "Run Success.\n";
+
+  return 0;
+}
+
+// CHECK: Run Success.
