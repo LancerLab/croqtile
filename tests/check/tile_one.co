@@ -1,7 +1,7 @@
 // RUN: choreo -t topscc %s -es -o - 2>&1 |FileCheck %s
 
 #define EE 1
-#define CC 5
+#define CC 1
 __co__ auto transpose(s32 [4, 2, CC, 8, EE] input) {
 
   s32[input.span[(2), (3), (0), (4), (1)]] output;

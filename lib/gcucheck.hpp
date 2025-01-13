@@ -256,7 +256,7 @@ private:
           CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
         // TODO: offset limitation: [0, 2^24)
         if (t_rank == 5) {
-          auto first = t_ca->positions->ValueAt(4);
+          auto first = t_ca->positions->ValueAt(0);
           auto t = dyn_cast<BoundedITupleType>(first->GetType());
           assert(t != nullptr);
           if (isa<int>(&t->ubounds.ValueAt(0))) {

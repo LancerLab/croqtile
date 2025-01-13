@@ -1,4 +1,5 @@
 // REQUIRES: TARGET-GCUALL
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %.topscc.result
 // RUN: choreo -gs -t factor %s -o %s.factor.result && bash %s.factor.result --execute | FileCheck --match-full-lines %s && rm -f %.factor.result
 
 #include "choreo.h"
@@ -37,7 +38,10 @@ __co__ auto transpose(s32 [4, 2, 4, 8, 2, 4] input) {
         local s32[8, 8, 4] output_shape_c;
         // [a*b, d, f] => [d, a*b, f]
         dma.transp<1, 0, 2> input_shape_c.span_as([8, 8, 4]) => output_shape_c;
-        out_store = dma.copy.async output_shape_c.span_as([1, 8, 4, 1, 8]) => output.span_as([4, 8, 4, 2, 8]).chunkat(c, d, a, e, b#f);
+        // deslice on the first dim of 5-dim span on Topscc is wrong ?!
+        // need to merge d and a
+        // out_store = dma.copy.async output_shape_c.span_as([1, 8, 4, 1, 8]) => output.span_as([4, 8, 4, 2, 8]).chunkat(c, d, a, e, b#f);
+        out_store = dma.copy.async output_shape_c.span_as([1, 32, 1, 8]) => output.span_as([4, 32, 2, 8]).chunkat(c, d#a, e, b#f);
         wait out_store;
       }
     }
