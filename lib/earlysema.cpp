@@ -1059,6 +1059,8 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
   auto sty = GetSpannedType(nty);
 
   if (n.positions) {
+    if (n.bounds) n.bounds->accept(*this);
+
     n.positions->accept(*this);
     size_t rank = sty->Dims();
     size_t r_count = 0;
@@ -1078,6 +1080,26 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
                          std::to_string(rank) + ") and bounded variables (" +
                          std::to_string(r_count) + ").");
       error_count++;
+    }
+
+    if (n.bounds) {
+      size_t b_count = 0;
+      for (auto& v : n.bounds->AllValues()) {
+        auto ty = NodeType(*v);
+        if (!isa<IntegerType>(ty) && !isa<ITupleType>(ty)) {
+          Error(n.LOC(), "expecting '" + PSTR(v) +
+                             "` be a bounded type (but got " + PSTR(ty) + ").");
+          error_count++;
+        }
+        b_count += ty->Dims();
+        SetNodeType(*v, ty);
+      }
+      if (rank != b_count) {
+        Error(n.LOC(), "un-matched ranks between spanned data (" +
+                           std::to_string(rank) + ") and tiling variables (" +
+                           std::to_string(b_count) + ").");
+        error_count++;
+      }
     }
   }
   assert(IsValidRank(nty->Dims()));

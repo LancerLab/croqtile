@@ -1,0 +1,20 @@
+// RUN: choreo -e %s | FileCheck %s
+
+__co__ void foo(f32 [M, N] data) {
+  with {x, y} in [M/3, N/2] {
+    dma.copy data.chunk(3, 2).at(x, y) => global;
+  }
+}
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: foo
+// CHECK:  `- Return type: void
+// CHECK:  `- Parameters
+// CHECK:    `-  type: f32 [ M N ], symbol: data
+// CHECK:  `- With Block:
+// CHECK:    (within constraints)
+// CHECK:    `- {x, y} in [ (M / 3)  (N / 2)  ]
+// CHECK:    (with statements)
+// CHECK:    `- DMA.copy
+// CHECK:      `- from: data.Chunk(3, 2).At(x, y)
+// CHECK:      `- to: global

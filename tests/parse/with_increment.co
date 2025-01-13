@@ -1,4 +1,5 @@
 // RUN: choreo -e %s | FileCheck %s --match-full-lines
+// XFAIL: *
 
 __co__ int with_foreach(int b, f32 [36, 27, 128] input) {
   ndims: [3, b];

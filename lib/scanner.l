@@ -143,7 +143,8 @@ blank       [ \t\r]
   ".data"    return Choreo::Parser::make_FNDATA(yytext, loc);
   ".data.span_as" return Choreo::Parser::make_FNDATASPANAS(yytext, loc);
   ".chunkat" return Choreo::Parser::make_CHUNKAT(yytext, loc);
-  ".chunk_inbound" return Choreo::Parser::make_CHUNKINBOUND(yytext, loc);
+  ".chunk"   return Choreo::Parser::make_CHUNK(yytext, loc);
+  ".at"      return Choreo::Parser::make_AT(yytext, loc);
   "=>"       return Choreo::Parser::make_TRANS(loc);
   "swap"     return Choreo::Parser::make_SWAP(yytext, loc);
   "rotate"   return Choreo::Parser::make_ROTATE(yytext, loc);

@@ -163,7 +163,7 @@ void choreo_info(const char *message) {
 %token <Choreo::Storage> LOCAL SHARED GLOBAL
 %token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT BOOL VOID
 // builtin operations
-%token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT WAIT CALL AUTO SELECT SWAP ROTATE FNDATASPANAS CHUNKINBOUND
+%token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK AT WAIT CALL AUTO SELECT SWAP ROTATE FNDATASPANAS CHUNKINBOUND
 // control related
 %token <std::string> IF ELSE PARA BY WITH IN FOREACH INCR RET WHERE WHILE
 %token <std::string> TRUE FALSE
@@ -1129,6 +1129,14 @@ chunkat_expr
       } value_list RPAREN {
         $5->SetDelimiter(", ");
         $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $5);
+        parsing_chunkat_value_list = false;
+      }
+    | data_id CHUNK LPAREN {
+        parsing_chunkat_value_list = true;
+      } value_list RPAREN AT LPAREN value_list RPAREN {
+        $5->SetDelimiter(", ");
+        $9->SetDelimiter(", ");
+        $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $9, $5);
         parsing_chunkat_value_list = false;
       }
     | span_as CHUNKAT LPAREN  {

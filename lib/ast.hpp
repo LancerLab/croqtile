@@ -1173,14 +1173,21 @@ struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
   ptr<Identifier> data;
   ptr<SpanAs> sa = nullptr; // for span_as expression
   ptr<MultiValues> positions = nullptr;
+  ptr<MultiValues> bounds = nullptr;
 
   ChunkAt(const location& l, const ptr<Identifier>& d,
-          const ptr<MultiValues>& p = nullptr)
-      : Node(l), data(d), sa(nullptr), positions(p) {}
+          const ptr<MultiValues>& p = nullptr,
+          const ptr<MultiValues>& b = nullptr)
+      : Node(l), data(d), sa(nullptr), positions(p), bounds(b) {
+    if (b) assert(p && "position is not provided for separated chunk & at.");
+  }
 
   ChunkAt(const location& l, const ptr<SpanAs>& s,
-          const ptr<MultiValues>& p = nullptr)
-      : Node(l), data(s->nid), sa(s), positions(p) {}
+          const ptr<MultiValues>& p = nullptr,
+          const ptr<MultiValues>& b = nullptr)
+      : Node(l), data(s->nid), sa(s), positions(p), bounds(b) {
+    if (b) assert(p && "position is not provided for separated chunk & at.");
+  }
 
   std::string RefSymbol() const {
     assert(data && "ref data is not set.");
@@ -1195,7 +1202,13 @@ struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
     else
       os << PSTR(data);
 
-    if (positions) os << ".ChunkAt(" << STR(positions) << ")";
+    if (positions) {
+      if (bounds)
+        os << ".Chunk(" << STR(bounds) << ").At(";
+      else
+        os << ".ChunkAt(";
+      os << STR(positions) << ")";
+    }
 
     (void)prefix;
   }
