@@ -121,6 +121,7 @@ void SymReplace::InitializeNode(ptr<AST::Node> n) {
         // concat is here.
       } else if (isa<AST::Boolean>(r)) {
       } else if (isa<AST::SpanAs>(r)) {
+      } else if (isa<AST::FloatLiteral>(r)) {
       } else {
         choreo_unreachable("The operator " + e->op +
                            " is not supported in SymReplace yet.");
@@ -280,6 +281,13 @@ void SymReplace::SymbolizeExprNode(ptr<AST::Node> n) {
         res = SymExpr(GetSymbolFromName(sname));
     } else if (auto num = dyn_cast<AST::IntLiteral>(R)) {
       res = SymReplace::SymExpr(num->Val());
+    } else if (auto f = dyn_cast<AST::FloatLiteral>(R)) {
+      if (f->IsFloat32())
+        res = SymReplace::SymExpr(f->Val_f32());
+      else if (f->IsFloat64())
+        res = SymReplace::SymExpr(f->Val_f64());
+      else
+        choreo_unreachable("unsupport float-point type: " + PSTR(f->GetType()));
     } else if (auto it = dyn_cast<AST::IntTuple>(R)) {
       std::string sname = "{";
       dottedNames(sname, *it->GetValues());

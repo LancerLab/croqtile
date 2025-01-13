@@ -1680,6 +1680,8 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
     if (expr->IsReference()) {
       if (expr->GetInt())
         return ExprSTR(expr->GetReference());
+      else if (expr->GetFloat())
+        return ExprSTR(expr->GetReference());
       else if (expr->GetSymbol())
         return ExprSTR(expr->GetReference());
       else if (isa<AST::Expr>(NodeType(*expr->GetR()))) // should this happen?

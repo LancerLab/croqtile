@@ -17,7 +17,7 @@ __co__ void init() {
 // CHECK:   tops::memset(c__init, tops::mdspan(tops::Private, (unsigned char*)c, 78), 15);
 
 // CHECK:   float a__init[17];
-// CHECK:   memset(a__init, 1, sizeof(a__init));
+// CHECK:   std::fill(std::begin(a__init), std::end(a__init), 1);
 // CHECK:   float * a__device= nullptr;
-// CHECK:   choreo::abend_true(topsMalloc((&a__device, 68ULL));
+// CHECK:   choreo::abend_true(topsMalloc(&a__device, 68ULL));
 // CHECK:   choreo::abend_true(topsMemcpy(a__device, a__init, 68ULL, topsMemcpyHostToDevice));

@@ -419,6 +419,8 @@ static inline std::string HostTypeStringify(const Choreo::Type& ty,
     return "int";
   else if (isa<BooleanType>(&ty))
     return "bool";
+  else if (isa<FloatType>(&ty))
+    return "float";
   else if (auto sty = dyn_cast<SpannedType>(&ty)) {
     if (is_ret) // return by value
       return "choreo::spanned_data<choreo::" + STR(sty->f_type) + ", " +
@@ -427,7 +429,7 @@ static inline std::string HostTypeStringify(const Choreo::Type& ty,
       return "const choreo::spanned_view<choreo::" + STR(sty->f_type) + ", " +
              std::to_string(sty->Dims()) + "> &";
   }
-  choreo_unreachable("unsupported host function type.");
+  choreo_unreachable("unsupported host function type: " + STR(ty) + ".");
   return "";
 }
 

@@ -426,6 +426,11 @@ public:
     return dyn_cast<IntLiteral>(value_r);
   }
 
+  ptr<FloatLiteral> GetFloat() {
+    if (t != Reference) return nullptr;
+    return dyn_cast<FloatLiteral>(value_r);
+  }
+
   bool IsUnary() const { return t == Unary; }
   bool IsBinary() const { return t == Binary; }
   bool IsTernary() const { return t == Ternary; }

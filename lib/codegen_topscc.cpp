@@ -320,6 +320,8 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
   }
 
   if (auto sty = dyn_cast<SpannedType>(nty)) {
+    auto sym__init = sym + "__init";
+    auto buf_sym = sym + "__device";
     // globals are declared in host, while shareds/locals are declared in device
     auto shape = sty->GetShape();
     std::string bts{NameBaseType(sty->ElementType())};
@@ -327,23 +329,23 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
     bool spmem = false; // allocatable scratchpad memory: share, local
     if (sty->GetStorage() == Storage::GLOBAL) {
       bts = NameBaseType(sty->ElementType(), false); // use the device type name
-      auto buf_sym = sym + "__device";
       if (!IsChoreoOutput(InScopeName(sym))) {
         if (!n.init_value) {
           hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
           hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym << ", "
              << UnScopedSizeExpr(*sty) << "));\n";
         } else {
-          // support simple int literal initialization
-          hs << h_indent << bts << " " << sym << "__init["
+          // support int/float-point literal initialization
+          hs << h_indent << bts << " " << sym__init << "["
              << ElemCountExprOf(*sty) << "];\n";
-          hs << h_indent << "memset(" << sym << "__init, "
-             << ExprSTR(n.init_value) << ", sizeof(" << sym << "__init));\n";
+          hs << h_indent << "std::fill(" << "std::begin(" << sym__init
+             << "), std::end(" << sym__init << "), " << ExprSTR(n.init_value)
+             << ");\n";
           hs << h_indent << bts << " * " << buf_sym << "= nullptr;\n";
-          hs << h_indent << "choreo::abend_true(topsMalloc((&" << buf_sym
-             << ", " << UnScopedSizeExpr(*sty) << "));\n";
-          hs << h_indent << "choreo::abend_true(topsMemcpy(" << sym
-             << "__device, " << sym << "__init, " << UnScopedSizeExpr(*sty)
+          hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym << ", "
+             << UnScopedSizeExpr(*sty) << "));\n";
+          hs << h_indent << "choreo::abend_true(topsMemcpy(" << buf_sym << ", "
+             << sym__init << ", " << UnScopedSizeExpr(*sty)
              << ", topsMemcpyHostToDevice));\n";
         }
       } else {
@@ -375,10 +377,10 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       choreo_unreachable("unsupported storage type.");
 
     if (spmem && n.init_value) {
-      ds << d_indent << "tops_dte_ctx_t " << sym << "__init;\n";
-      ds << d_indent << "tops::dte_scope s_" << sym << "__init(" << sym
-         << "__init);\n";
-      ds << d_indent << "tops::memset(" << sym << "__init, tops::mdspan("
+      ds << d_indent << "tops_dte_ctx_t " << sym__init << ";\n";
+      ds << d_indent << "tops::dte_scope s_" << sym__init << "(" << sym__init
+         << ");\n";
+      ds << d_indent << "tops::memset(" << sym__init << ", tops::mdspan("
          << TopsMdsStorage(sty->GetStorage()) << ", ("
          << NameBaseType(sty->ElementType()) << "*)" << sym << ", "
          << UnScopedExpr(RSTR(sty->GetShape())) << "), "
@@ -904,12 +906,17 @@ bool TopsccCodeGen::Visit(AST::CppSourceCode& n) {
 
 void TopsccCodeGen::EmitHostFuncDecl(std::ostringstream& oss) {
   // handle the return type
-  if (!void_return && cgi->HasReturnSymbol(fname)) {
-    auto& item = cgi->GetReturnDetail(fname);
-    if (item.rty_str != "$")
-      oss << item.rty_str;
-    else
+  if (!void_return) {
+    if (cgi->HasReturnSymbol(fname)) {
+      auto& item = cgi->GetReturnDetail(fname);
+      if (item.rty_str != "$")
+        oss << item.rty_str;
+      else
+        oss << HostTypeStringify(*fty->out_ty, true);
+    } else {
+      // return 100;
       oss << HostTypeStringify(*fty->out_ty, true);
+    }
   } else
     oss << "void";
   oss << " " << fname << "(";
@@ -924,7 +931,7 @@ void TopsccCodeGen::EmitHostFuncDecl(std::ostringstream& oss) {
   }
   oss << ")";
 
-  VST_DEBUG(dbgs() << "Host function prototype:\n" << oss.str());
+  VST_DEBUG(dbgs() << "Host function prototype:\n" << oss.str() << "\n");
 }
 
 void TopsccCodeGen::EmitHostRuntimeCheck() {
@@ -1020,7 +1027,7 @@ void TopsccCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
 
   oss << ")";
 
-  VST_DEBUG(dbgs() << "Device function prototype:\n" << oss.str());
+  VST_DEBUG(dbgs() << "Device function prototype:\n" << oss.str() << "\n");
 }
 
 void TopsccCodeGen::EmitSource() {
@@ -1254,6 +1261,8 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
     }
     if (expr->IsReference()) {
       if (expr->GetInt())
+        return ExprSTR(expr->GetReference(), is_host);
+      else if (expr->GetFloat())
         return ExprSTR(expr->GetReference(), is_host);
       else if (expr->GetSymbol())
         return ExprSTR(expr->GetReference(), is_host);

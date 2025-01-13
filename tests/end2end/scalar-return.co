@@ -1,0 +1,21 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+#include <chrono>
+
+__co__ auto int_ret() { return 3; }
+
+__co__ auto float_ret() { return 1.5f; }
+
+#include <iostream>
+
+int main() {
+  auto res0 = int_ret();
+  std::cout << "int return: " << res0 << std::endl;
+
+  auto res1 = float_ret();
+  std::cout << "float return: " << res1 << std::endl;
+}
+
+// CHECK: int return: 3
+// CHECK: float return: 1.5

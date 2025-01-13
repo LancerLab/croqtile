@@ -183,10 +183,10 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::SpanAs>> span_as
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
-%nterm <AST::ptr<AST::Node>> foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt swap_stmt expr_or_qes range_expr optional_scalar_init param_mdspan_val chunkat_or_storage_or_select pred f_expr
+%nterm <AST::ptr<AST::Node>> foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt swap_stmt expr_or_qes range_expr optional_scalar_init param_mdspan_val chunkat_or_storage_or_select pred
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause multi_decls named_spanned_decl
 %nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers passables future_data_list template_params
-%nterm <AST::ptr<AST::Expr>> s_expr template_value_expr span_expr id_expr bound_expr optional_pred
+%nterm <AST::ptr<AST::Expr>> s_expr template_value_expr span_expr id_expr bound_expr optional_pred f_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
 %nterm <AST::ptr<AST::Parameter>> parameter
@@ -1203,8 +1203,8 @@ passable
     ;
 
 f_expr
-    : FLOAT { $$ = AST::Make<AST::FloatLiteral>(@1, $1); }
-    | DOUBLE { $$ = AST::Make<AST::FloatLiteral>(@1, $1); }
+    : FLOAT { $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::FloatLiteral>(@1, $1)); }
+    | DOUBLE { $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::FloatLiteral>(@1, $1)); }
     ;
 
 with_matchers /* TODO: this special case is pattern-match ids for with-block */

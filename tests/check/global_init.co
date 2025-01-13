@@ -1,0 +1,53 @@
+// REQUIRES: TARGET-GCUALL
+// TODORUN: not choreo -t factor %s 2>&1 | FileCheck --check-prefix=CHECKF %s 
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+#define init_val 50
+
+__co__ auto foo() {
+  s32[4,2,4,8,2] output;
+  s32[4,2,4,8,2] oo{init_val};
+  parallel p by 1 {
+    with {e} in [2] {
+      foreach e {
+        lll = dma.copy oo.chunkat(_,_,_,_,e) => local;
+        dma.copy lll => output.chunkat(_,_,_,_,e);
+      }
+    }
+  }
+  return output;
+}
+
+int main() { /// host program
+
+  #define aa 4
+  #define bb 2
+  #define cc 4
+  #define dd 8
+  #define ee 2
+
+  std::vector<int> bounds = {aa, bb, cc, dd, ee};
+  auto res = foo();
+
+  // for (int j=0; j<5; j++) {
+  //   std::cout << "res.shape()[" << j << "] = " << res.shape()[j] << "\n";
+  // }
+
+  // verification
+  for (size_t a = 0; a < bounds[0]; ++a)
+    for (size_t b = 0; b < bounds[1]; ++b)
+      for (size_t c = 0; c < bounds[2]; ++c)
+        for (size_t d = 0; d < bounds[3]; ++d)
+          for (size_t e = 0; e < bounds[4]; ++e) {
+            auto gcu_val = res[a][b][c][d][e];
+            // std::cout << a << ", " << b << ", " << c << ", " << d << ", " << e
+            //           << "\n";
+            // std::cout << "\tres: " << gcu_val << "\n";
+            choreo::choreo_assert(gcu_val == init_val, "error!");
+          }
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK: Test Passed
+// CHECKF: Factor backend of Choreo doesn't support initializing global span yet.
