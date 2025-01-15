@@ -231,17 +231,30 @@ public:
   bool Visit(AST::Parameter&) override { return true; }
   bool Visit(AST::ParamList&) override { return true; }
   bool Visit(AST::ParallelBy& n) override {
-    if (n.iv_symbols) return true;
-    assert(n.biv != "" && "must have a biv.");
-    n.iv_symbols = AST::Make<AST::MultiValues>(n.LOC(), ", ");
-    n.iv_symbols->Append(
-        AST::Make<AST::Identifier>(n.LOC(), n.biv + "__elem__x"));
-    n.bounds = AST::Make<AST::MultiValues>(n.LOC(), ", ");
-    n.bounds->Append(AST::Make<AST::IntLiteral>(n.LOC(), n.bound));
-    n.iv_symbols->ValueAt(0)->SetType(
-        MakeBoundedITupleType(Shape(n.bound, n.biv + "__elem__x"), "pi:x"));
-    VST_DEBUG(dbgs() << "Generate iv_symbols in parallelby for '" << n.biv
-                     << "': " << STR(n.iv_symbols) << "\n");
+    if (n.HasBIV()) {
+      if (n.iv_symbols == nullptr) {
+        // `parallel p by 2`  ==> `parallel p={p__elem__x} by [2]`
+        n.iv_symbols = AST::Make<AST::MultiValues>(n.LOC(), ", ");
+        n.iv_symbols->Append(
+            AST::Make<AST::Identifier>(n.LOC(), n.biv->name + "__elem__x"));
+        n.bounds = AST::Make<AST::MultiValues>(n.LOC(), ", ");
+        if (isa<int>(&n.bound))
+          n.bounds->Append(
+              AST::Make<AST::IntLiteral>(n.LOC(), *cast<int>(&n.bound)));
+        else
+          n.bounds->Append(
+              AST::Make<AST::Identifier>(n.LOC(), ValueItemAsString(n.bound)));
+        n.iv_symbols->ValueAt(0)->SetType(
+            MakeBoundedITupleType(Shape(1, n.biv->name + "__elem__x"), "pi:x"));
+        VST_DEBUG(dbgs() << "Generate iv_symbols in parallelby for '" << n.biv
+                         << "': " << STR(n.iv_symbols) << "\n");
+      }
+    } else {
+      assert(n.iv_symbols && "At least one biv and iv_symbols should exist!");
+      // `parallel {px} by [2]`  ==> `parallel anon={px} by [2]`
+      n.biv = AST::Make<AST::Identifier>(n.LOC(), SymbolTable::GetAnonName());
+      n.biv->SetType(MakeBoundedITupleType(Shape(n.dims), "pv"));
+    }
     return true;
   }
   bool Visit(AST::WhereBind&) override { return true; }

@@ -378,8 +378,7 @@ public:
 
     // TODO
     // SSTab().DefineSymbol("@" + n.biv, MakeMDSpanType(s));
-    if (n.HasBIV())
-      SSTab().DefineSymbol(n.biv, MakeUnknownBoundedIntegerType());
+    SSTab().DefineSymbol(n.biv->name, MakeUnknownBoundedIntegerType());
     for (auto sym : n.iv_symbols->AllValues())
       SSTab().DefineSymbol(cast<AST::Identifier>(sym)->name,
                            MakeUnknownBoundedIntegerType());

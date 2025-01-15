@@ -857,21 +857,27 @@ public:
     if (cannot_proceed) return true;
 
     Shape s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
-    n.SetType(MakeBoundedITupleType(s, "pv"));
-    if (n.HasBIV()) {
-      std::string iv_name =
-          SSTab().ScopedName("@" + n.biv); // upper-bound of bounded variable
-      vn.AssociateSignatureWithValueNumber(iv_name, cur_vn);
-      SSTab().DefineSymbol("@" + n.biv, MakeMDSpanType(s));
-      SSTab().DefineSymbol(n.biv, n.GetType());
-    }
+    n.SetType(MakeMDSpanType(s));
+
+    std::string iv_name = SSTab().ScopedName("@" + n.biv->name);
+    vn.AssociateSignatureWithValueNumber(iv_name, cur_vn);
+    n.biv->SetType(MakeBoundedITupleType(s, "pv"));
+    SSTab().DefineSymbol("@" + n.biv->name, MakeMDSpanType(s));
+    SSTab().DefineSymbol(n.biv->name, n.biv->GetType());
+
     std::map<size_t, std::string> idx2dim;
     idx2dim[0] = "x";
     idx2dim[1] = "y";
     idx2dim[2] = "z";
     for (size_t i = 0; i < n.dims; ++i) {
       const auto& [sym, b] = n.GetIV(i);
-      std::string bound = "const_" + std::to_string(b->value);
+      std::string bound;
+      if (auto il = dyn_cast<AST::IntLiteral>(b))
+        bound = "const_" + std::to_string(il->Val());
+      else if (auto id = dyn_cast<AST::Identifier>(b))
+        bound = id->name;
+      else
+        choreo_unreachable("unexpected type of parallelby bound item");
       int valno = vn.GetOrInsertValueNumberFromSignature(bound);
       std::string iv_name = SSTab().ScopedName("@" + sym->name);
       vn.AssociateSignatureWithValueNumber(iv_name, valno);

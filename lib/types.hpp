@@ -1480,6 +1480,8 @@ inline static Shape GetShape(const ptr<Type>& ty) {
     return sty->GetShape();
   else if (auto fty = dyn_cast<FutureType>(ty))
     return fty->GetShape();
+  else if (auto bty = dyn_cast<BoundedITupleType>(ty))
+    return bty->GetSizes();
 
   return Shape(); // avoid warning
 }

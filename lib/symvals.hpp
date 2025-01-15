@@ -192,6 +192,14 @@ inline ValueItem operator%(const ValueItem& vi1, const ValueItem& vi2) {
   return *cast<int>(&vi1) % *cast<int>(&vi2);
 }
 
+inline std::ostream& operator<<(std::ostream& os, const ValueItem& vi) {
+  if (vi.index() == 0)
+    os << std::get<0>(vi);
+  else
+    os << std::get<1>(vi);
+  return os;
+}
+
 struct ValueListHasher {
   std::size_t operator()(const ValueList& val) const noexcept {
     std::size_t hash = 0;
@@ -267,19 +275,10 @@ struct ValueListRepo {
 
 inline void PrintValueList(const ValueList& vl, std::ostream& os,
                            const char* lb = "[", const char* rb = "]") {
-  auto print_variant = [&os](const ValueItem& vle) {
-    if (vle.index() == 0)
-      os << std::get<0>(vle);
-    else
-      os << std::get<1>(vle);
-  };
   if (lb) os << lb;
   if (!vl.empty()) {
-    print_variant(vl[0]);
-    for (unsigned i = 1; i < vl.size(); ++i) {
-      os << ", ";
-      print_variant(vl[i]);
-    }
+    os << vl[0];
+    for (unsigned i = 1; i < vl.size(); ++i) { os << ", " << vl[i]; }
   }
   if (rb) os << rb;
 }

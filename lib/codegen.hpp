@@ -43,12 +43,12 @@ struct SymbolDetail {
 };
 
 struct LaunchConfig {
-  size_t grid_dim_z = 1;
-  size_t grid_dim_y = 1;
-  size_t grid_dim_x = 1;
-  size_t block_dim_z = 1;
-  size_t block_dim_y = 1;
-  size_t block_dim_x = 1;
+  ValueItem grid_dim_z = 1;
+  ValueItem grid_dim_y = 1;
+  ValueItem grid_dim_x = 1;
+  ValueItem block_dim_z = 1;
+  ValueItem block_dim_y = 1;
+  ValueItem block_dim_x = 1;
 
   // reset the block dimensions to 1
   void ResetBDims() {
@@ -64,8 +64,7 @@ struct LaunchConfig {
     grid_dim_z = 1;
   }
 
-  void SetBlockDims(const std::vector<int>& dims) {
-    for (auto dim : dims) assert(dim >= 1 && "Invalid dimension.");
+  void SetBlockDims(const ValueList& dims) {
     ResetBDims();
     switch (dims.size()) {
     case 3: block_dim_z = dims[2]; [[fallthrough]];
@@ -75,8 +74,7 @@ struct LaunchConfig {
     }
   }
 
-  void SetGridDims(const std::vector<int>& dims) {
-    for (auto dim : dims) assert(dim >= 1 && "Invalid dimension.");
+  void SetGridDims(const ValueList& dims) {
     ResetGDims();
     switch (dims.size()) {
     case 3: grid_dim_z = dims[2]; [[fallthrough]];

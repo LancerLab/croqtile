@@ -46,7 +46,7 @@ private:
     if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       std::string append_note =
           ":" + std::to_string(max_parallel_level - parallel_level);
-      auto pty = cast<BoundedITupleType>(NodeType(n));
+      auto pty = cast<BoundedITupleType>(NodeType(*pb->biv));
       pty->AppendNote(append_note);
       for (auto& symbol : pb->iv_symbols->AllValues())
         cast<BoundedITupleType>(NodeType(*symbol))->AppendNote(append_note);
@@ -752,6 +752,14 @@ public:
   }
   bool Visit(AST::ParallelBy& n) override {
     TraceEachVisit(n);
+    if (CCtx().GetTarget() == CompileTarget::Factor) {
+      auto shape = GetShape(NodeType(n));
+      if (shape.IsDynamic()) {
+        Error(n.LOC(),
+              "symbolic bound value is not supported for Factor backend yet.");
+        error_count++;
+      }
+    }
     return true;
   }
   bool Visit(AST::WhereBind& n) override {

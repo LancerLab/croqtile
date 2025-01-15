@@ -482,13 +482,13 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
       auto pb_idx_str = pb_idx == 0 ? "" : "_" + std::to_string(pb_idx);
       fs << this->indent << "Dim3 grid_dim" << pb_idx_str << "("
          << lc.grid_dim_x;
-      if (lc.grid_dim_y > 1) fs << ", " << lc.grid_dim_y;
-      if (lc.grid_dim_z > 1) fs << ", " << lc.grid_dim_z;
+      if (!IsValueItemEqual(lc.grid_dim_y, 1)) fs << ", " << lc.grid_dim_y;
+      if (!IsValueItemEqual(lc.grid_dim_z, 1)) fs << ", " << lc.grid_dim_z;
       fs << ");\n";
       fs << this->indent << "Dim3 block_dim" << pb_idx_str << "("
          << lc.block_dim_x;
-      if (lc.block_dim_y > 1) fs << ", " << lc.block_dim_y;
-      if (lc.block_dim_z > 1) fs << ", " << lc.block_dim_z;
+      if (!IsValueItemEqual(lc.block_dim_y, 1)) fs << ", " << lc.block_dim_y;
+      if (!IsValueItemEqual(lc.block_dim_z, 1)) fs << ", " << lc.block_dim_z;
       fs << ");\n";
 
       // [Factor host] LaunchKernel statement:

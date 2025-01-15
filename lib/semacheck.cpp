@@ -116,6 +116,24 @@ bool SemaChecker::Visit(AST::ParamList& n) {
 }
 bool SemaChecker::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
+  if (auto shape = GetShape(NodeType(n)); shape.IsDynamic()) {
+    std::string mds = STR(shape);
+    auto mds_vals = SplitStringByDelimiter(mds.substr(1, mds.size() - 2), ", ");
+    int idx = 1;
+    for (auto& mds_val : mds_vals) {
+      std::string lhs, op, rhs, message;
+      lhs = mds_val;
+      op = ">";
+      rhs = "0";
+      message =
+          "The " + Ordinal(idx) +
+          " bound item of parallelby is invalid: should be greater than 0";
+      FCtx(fname).AppendRtCheck(
+          {lhs, op, rhs, n.bounds->ValueAt(idx - 1)->LOC(), message, {}});
+      ++idx;
+    }
+  }
+
   return true;
 }
 bool SemaChecker::Visit(AST::WhereBind& n) {

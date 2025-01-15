@@ -708,11 +708,12 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
     error_count++;
   }
 
-  if (!n.biv.empty())
-    ReportErrorWhenViolateODR(
-        n.LOC(), n.biv, __FILE__, __LINE__,
-        MakeBoundedITupleType(Shape(n.dims, n.biv), "pv"));
-
+  if (n.HasBIV()) {
+    SetNodeType(*n.biv,
+                MakeBoundedITupleType(Shape(n.dims, n.biv->name), "pv"));
+    ReportErrorWhenViolateODR(n.LOC(), n.biv->name, __FILE__, __LINE__,
+                              n.biv->GetType());
+  }
   if (n.iv_symbols) {
     for (auto& sym : n.iv_symbols->AllValues()) {
       auto sname = cast<AST::Identifier>(sym)->name;
@@ -721,6 +722,21 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
       SetNodeType(*sym, mty);
     }
     SetNodeType(*n.bounds, MakeBoundedITupleType(n.bounds->Count()));
+  }
+
+  if (auto i = dyn_cast<int>(&n.bound); n.biv && i && *i <= 0) {
+    Error(n.biv->LOC(),
+          "bound " + ValueItemAsString(n.bound) +
+              " in parallelby is invalid: should be greater than 0.");
+    error_count++;
+  }
+  for (auto& bv : n.BoundValues()) {
+    if (auto i = dyn_cast<int>(&bv); i && *i <= 0) {
+      Error(n.LOC(),
+            "bound item " + ValueItemAsString(bv) +
+                " in parallelby is invalid: should be greater than 0.");
+      error_count++;
+    }
   }
 
   /*

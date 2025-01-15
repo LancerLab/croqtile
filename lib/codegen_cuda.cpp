@@ -364,7 +364,10 @@ bool CUDACodeGen::Visit(AST::ParamList& n) {
 // TODO(albert): revolsve HC in p/q => blockid
 bool CUDACodeGen::Visit(AST::ParallelBy& by) {
   __TRACE_EACH_VISIT__(by)
-  parallel_cuda *= by.bound;
+  if (!isa<int>(&by.bound))
+    choreo_unreachable(
+        "symbolic bound value is not supported for cuda backend yet.");
+  parallel_cuda *= *cast<int>(&by.bound);
   if (parallel_level > 1) { return true; }
   // emit
   // dim3 blockDim

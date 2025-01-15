@@ -319,7 +319,9 @@ public:
   bool Visit(AST::Parameter&) override { return true; }
   bool Visit(AST::ParamList&) override { return true; }
   bool Visit(AST::ParallelBy& pb) override {
-    parallel_factor *= pb.bound;
+    if (!isa<int>(&pb.bound))
+      choreo_unreachable("symbolic bound is not supported in visulize yet.");
+    parallel_factor *= *cast<int>(&pb.bound);
     return true;
   }
   bool Visit(AST::WhereBind&) override { return true; }
@@ -366,7 +368,9 @@ public:
   bool BeforeVisitImpl(AST::Node&) override { return true; }
   bool AfterVisitImpl(AST::Node& n) override {
     if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
-      parallel_factor /= pb->bound;
+      if (!isa<int>(&pb->bound))
+        choreo_unreachable("symbolic bound is not supported in visulize yet.");
+      parallel_factor /= *cast<int>(&pb->bound);
       return true;
     }
     if (!isa<AST::Program>(&n)) return true;

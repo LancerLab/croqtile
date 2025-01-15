@@ -185,7 +185,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
 %nterm <AST::ptr<AST::Node>> foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt swap_stmt expr_or_qes range_expr optional_scalar_init param_mdspan_val chunkat_or_storage_or_select pred
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause multi_decls named_spanned_decl
-%nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers passables future_data_list template_params
+%nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers passables future_data_list template_params gi_list
 %nterm <AST::ptr<AST::Expr>> s_expr template_value_expr span_expr id_expr bound_expr optional_pred f_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
@@ -371,6 +371,17 @@ general_index
       }
     ;
 
+gi_list
+    : gi_list COMMA general_index {
+        $1->Append($3);
+        $$ = $1;
+      }
+    | general_index {
+        $$ = AST::Make<AST::MultiValues>(@1, ", ");
+        $$->Append($1);
+      }
+    ;
+
 bool_literal
     : TRUE { $$ = AST::Make<AST::Boolean>(@1, std::string("true")); }
     | FALSE { $$ = AST::Make<AST::Boolean>(@1, std::string("false")); }
@@ -468,16 +479,16 @@ parabys
     ; /* do not allow empty paraby */
 
 paraby
-    : IDENTIFIER BY NUM {
+    : IDENTIFIER BY general_index {
         if (paraby_symbols.find($1) != paraby_symbols.end())
           Parser::error(@1, "The symbol '" + $1 + "' has been used in the same parallelby block.");
         paraby_symbols.insert($1);
         symtab.AddSymbol($1, MakeUnknownType());
         $$ = AST::Make<AST::MultiNodes>(@1);
         $$->Append(AST::Make<AST::Identifier>(@1, $1));
-        $$->Append(AST::Make<AST::IntLiteral>(@3, $3));
+        $$->Append($3);
       }
-    | IDENTIFIER ASSIGN LBRACE id_list RBRACE BY LBRAKT iv_list RBRAKT {
+    | IDENTIFIER ASSIGN LBRACE id_list RBRACE BY LBRAKT gi_list RBRAKT {
         if (paraby_symbols.find($1) != paraby_symbols.end())
           Parser::error(@1, "The symbol '" + $1 + "' has been used in the same parallelby block.");
         paraby_symbols.insert($1);
@@ -497,7 +508,7 @@ paraby
         $$->Append($4);
         $$->Append($8);
       }
-    | LBRACE id_list RBRACE BY LBRAKT iv_list RBRAKT {
+    | LBRACE id_list RBRACE BY LBRAKT gi_list RBRAKT {
         if ($2->Count() != $6->Count())
           Parser::error(@2, "The number of arguments in parallel bound config "
                         "should be consistent.");

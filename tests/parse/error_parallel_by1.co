@@ -4,5 +4,5 @@ __co__ void i_parallel_by1(int a, int b) {
   parallel p by {6} { }
 }
 
-// CHECK: error: syntax error, unexpected {, expecting NUM
+// CHECK: error: syntax error, unexpected {, expecting - or NUM or IDENTIFIER
 // CHECK-NOT: error:
