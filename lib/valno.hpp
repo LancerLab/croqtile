@@ -445,6 +445,17 @@ public:
             cur_mdspan_vn = cur_vn;
             InvalidateVN(cur_vn);
           }
+          if (ValidVN(cur_vn)) {
+            n.s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
+            if (ConvertibleToInt(NodeType(n))) {
+              assert(n.s.DimCount() == 1);
+              if (!n.s.IsDynamic()) {
+                n.opt_vals.int_expr = n.s.ValueAt(0);
+                VST_DEBUG(dbgs() << "[ExprVal] " << STR(n) << ": "
+                                 << STR(n.s.ValueAt(0)) << "\n");
+              }
+            }
+          }
         } else {
           // no value number is obtained
           InvalidateVN(cur_vn);

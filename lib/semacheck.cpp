@@ -369,7 +369,7 @@ bool SemaChecker::Visit(AST::Call& n) {
       // must be a scalar type
       if (!CanYieldAnInteger(ty)) {
         Error(n.LOC(),
-              "(" + std::to_string(count) + "th) template argument of type '" +
+              "The " + Ordinal(count) + " template argument of type '" +
                   PSTR(ty) +
                   "` can not be used to instantiate the kernel function.");
         error_count++;
@@ -378,8 +378,8 @@ bool SemaChecker::Visit(AST::Call& n) {
       // fail if the template argument can not be evaluated as a compile-time
       // constant
       if (!IsValidValueItem(val_expr) || !isa<int>(&val_expr)) {
-        Error(n.LOC(), "(" + std::to_string(count) +
-                           "th) template argument of type '" + PSTR(ty) +
+        Error(n.LOC(), "The " + Ordinal(count) +
+                           " template argument of type '" + PSTR(ty) +
                            "` can not be evaluated at choreo compile time.");
         error_count++;
       }
