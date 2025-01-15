@@ -7,9 +7,9 @@ __co__ void foo(f32 [M, K] lhs, f32 [N, K] rhs) {
 // CHECK: __global__ void __choreo_device_foo(float * lhs, float * rhs, unsigned K, unsigned M, unsigned N)
 
 // CHECK: void foo(const choreo::spanned_view<choreo::f32, 2> & lhs, const choreo::spanned_view<choreo::f32, 2> & rhs) {
-// CHECK:   unsigned K = lhs.shape()[1];
-// CHECK:   unsigned M = lhs.shape()[0];
-// CHECK:   unsigned N = rhs.shape()[0];
+// CHECK:   auto K = lhs.shape()[1];
+// CHECK:   auto M = lhs.shape()[0];
+// CHECK:   auto N = rhs.shape()[0];
 // CHECK:   float * lhs__device = nullptr;
 // CHECK:   choreo::abend_true(topsMalloc(&lhs__device, ((M) * (K)) * 4));
 // CHECK:   choreo::abend_true(topsMemcpy(lhs__device, lhs.data(), ((M) * (K)) * 4, topsMemcpyHostToDevice));

@@ -238,7 +238,8 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
 
   // name the symbolic dimensions
   for (auto item : symbolic_dimensions) {
-    hs << h_indent << "unsigned " << UnScopedName(item.first) << " = "
+    // type of symbolic dims is deduced from API of span
+    hs << h_indent << "auto " << UnScopedName(item.first) << " = "
        << item.second.hsd_expr << ";\n";
     ssm.MapHostSymbol(item.first, UnScopedName(item.first));
   }
