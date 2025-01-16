@@ -1257,7 +1257,7 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
     }
     if (ConvertibleToInt(NodeType(*e))) {
       if (IsValidValueItem(expr->opt_vals.int_expr)) {
-        return "(" + STR(expr->opt_vals.int_expr) + ")";
+        return "(" + UnScopedExpr(STR(expr->opt_vals.int_expr)) + ")";
       }
     }
     if (expr->IsReference()) {

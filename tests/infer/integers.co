@@ -15,5 +15,5 @@ __co__ void sym_add(int b) {
    c = a + b;
 }
 
-// CHECK: [SymVal] ::sym_add::a: 2-::sym_add::b
+// CHECK: [SymVal] ::sym_add::a: (2)-(::sym_add::b)
 // CHECK: [SymVal] ::sym_add::c: 2

@@ -1,0 +1,32 @@
+// RUN: choreo -t topscc %s -es -o - 2>&1 |FileCheck %s
+
+__co__ auto foo(f32 [32, 4] a, s8 [1] b, int c) {
+  int d = 996;
+  int e = a.span(0) + d;
+  int f = 2 + c;
+  parallel p by 2 {
+    with index = {x, y} in [f % c, f*a.span(0)] {
+      foreach index {}
+    }
+    call kernel0();
+    call kernel1(a, b, c, d);
+    call kernel2<b.span(0)+3, d + 1>(b, e * f);
+  }
+}
+
+
+// CHECK: __global__ void __choreo_device_foo(float * a, char * b, int c) {
+// CHECK:   {
+// CHECK:     int __iv_x = 0;
+// CHECK:     int __iv_y = 0;
+// CHECK:     for (__iv_x = 0; __iv_x < ((2)+(c))%(c); ++__iv_x) {
+// CHECK:       for (__iv_y = 0; __iv_y < ((2)+(c))*(32); ++__iv_y) {
+// CHECK:       } // y
+// CHECK:       __iv_y = 0;
+// CHECK:     } // x
+// CHECK:     __iv_x = 0;
+// CHECK:   }
+// CHECK:   kernel0();
+// CHECK:   kernel1((float*)a, (char*)b, c, (996));
+// CHECK:   kernel2<(4), (997)>((char*)b, ((1028)*((2)+(c))));
+// CHECK: }

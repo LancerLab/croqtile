@@ -62,5 +62,5 @@ __co__ void foo(f32 [2, 3, 4] d, int e) {
 // CHECK: Parameter: ::foo::d, Type: f32 mdspan<3> [2, 3, 4]
 // CHECK: Parameter: ::foo::e, Type: int
 // CHECK: Partial:   ::foo::a, Type: mdspan<3> [5, 1, 1]
-// CHECK: Partial:   ::foo::b, Type: mdspan<3> [1, ::foo::e+1, 20]
+// CHECK: Partial:   ::foo::b, Type: mdspan<3> [1, (::foo::e)+(1), 20]
 // CHECK: Partial:   ::foo::c, Type: mdspan<2> [1, 23]

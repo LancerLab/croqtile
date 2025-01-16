@@ -39,7 +39,7 @@ __co__ auto ele_add(s32 [6, ?, 128] lhs, s32 [6, ?, 128] rhs) {
 // CHECK:    auto rhs_load__buf__ = alloc_(L1Type(IntType(32),{6, 2, 32}));
 // CHECK:    auto l1_out = alloc_(L1Type(IntType(32),{6, 2, 32}));
 // CHECK:    for_(q, 1, 1, [&](auto iv_q) {
-// CHECK:      for_(x, (dim_(args[0], 1)/2)-0, 1, [&](auto iv_x) {
+// CHECK:      for_(x, ((dim_(args[0], 1))/(2))-0, 1, [&](auto iv_x) {
 // CHECK:        auto iv_z = iv_x;
 // CHECK:        for_(y, 4, 1, [&](auto iv_y) {
 // CHECK:          async_load_(lhs_load, lhs, lhs_load__buf__, {Value(6)*iv_q,Value(2)*iv_x,Value(32)*iv_y});

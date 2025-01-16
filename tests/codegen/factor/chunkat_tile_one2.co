@@ -40,7 +40,7 @@ __co__ auto chunkat_tile_one2(s32 [N, M, 64] i) {
 // CHECK:    t0 = 0;
 // CHECK:    var_ t1(IntType(32));
 // CHECK:    t1 = 0;
-// CHECK:    for_(t0, (dim_(args[0], 0)/256)-0, 1, [&](auto iv_t0) {
+// CHECK:    for_(t0, ((dim_(args[0], 0))/(256))-0, 1, [&](auto iv_t0) {
 // CHECK:      async_load_(i_s, i, i_s__buf__, {Value(256)*iv_t0,Value(128)*t1,0});
 // CHECK:      wait_dma_(i_s);
 // CHECK:      { // start of with-in: tests/codegen/factor/chunkat_tile_one2.co:11.1-16

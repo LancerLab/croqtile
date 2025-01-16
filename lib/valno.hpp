@@ -1555,8 +1555,8 @@ private:
 
       while (std::getline(stream, part, ':')) parts.push_back(part);
       assert(parts.size() == 3);
-      return GenerateExpression(parts[1]) + parts[0] +
-             GenerateExpression(parts[2]);
+      return "(" + GenerateExpression(parts[1]) + ")" + parts[0] + "(" +
+             GenerateExpression(parts[2]) + ")";
     }
 
     // this is a symbol
