@@ -63,6 +63,9 @@ ci-gcu3-test: setup-gcu3 $(TARGET)
 
 BUILD_OBJECTS = $(patsubst $(SRC_DIR)/%.cpp, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/*.cpp))
 
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
+
 $(CHOREO_BIN): utils/choreo_main.cpp $(BUILD_DIR)/parser.tab.o $(BUILD_DIR)/scanner.yy.o $(BUILD_OBJECTS)
 	$(CC) $(CFLAGS) $^ -I$(WORK_DIR) -I$(SRC_DIR) $(SYMBOLIC_INCLUDE_FLAGS) $(SYMBOLIC_LIB_FLAGS) -o $@
 
@@ -72,10 +75,10 @@ scanner.yy.cc: $(LEX_SRC)
 parser.tab.cc parser.tab.hh location.hh: $(PARSER_SRC)
 	$(BISON) $(BISON_FLAGS) $(PARSER_SRC)
 
-$(BUILD_DIR)/%.o : %.cc $(HEADER_FILES) parser.tab.hh location.hh
+$(BUILD_DIR)/%.o : %.cc $(HEADER_FILES) parser.tab.hh location.hh | $(BUILD_DIR)
 	$(CC) -I$(WORK_DIR) -I$(SRC_DIR) $(CFLAGS) $< -c -o $@
 
-$(BUILD_DIR)/%.o : $(SRC_DIR)/%.cpp $(HEADER_FILES) location.hh
+$(BUILD_DIR)/%.o : $(SRC_DIR)/%.cpp $(HEADER_FILES) location.hh | $(BUILD_DIR)
 	$(CC) -I$(WORK_DIR) -I$(SRC_DIR) $(CFLAGS) $(SYMBOLIC_INCLUDE_FLAGS) $< -c  -o $@
 
 $(COPP_BIN): utils/choreo_preprocess.cpp $(HEADER_FILES)
