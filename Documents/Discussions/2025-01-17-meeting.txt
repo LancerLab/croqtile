@@ -1,0 +1,55 @@
+1. Any special handling of shared DMA? Need more cases (x)
+
+2. Discussion about 'AFTER' semantics. Need improvement.
+
+3. Improvement: DMA at host side
+__co__ void foo(f32 [100, 8] a) {
+  with idx in [25] {
+    foreach idx {
+      dma.copy a.chumkat(idx, _) => global;
+       parallel p by {
+       }
+    }
+  }
+}
+
+
+4. Symbolic shape of local/shared
+// add runtime check, improve the symbolic valno handling
+__co__ void foo(f32 [M, N] a) {
+  parallel p by 6 {
+     a.chunkat(p, _) => local;
+  }
+}
+
+5. Minimal codesize: runtime check disable functionality
+
+6. Optimization: DMA config - incremental config - opt
+
+7. Allocation of memory - research topic
+
+// practical
+parallel by {
+  foreach {
+  local a;
+  }
+  foreach {
+  local b;
+  }
+  ...
+}
+
+
+__local__ a;
+
+within/foreach/pb
+
+8. remainder support.
+
+9. MPI prototype.
+
+
+priority:
+- P0: 7, 8, 3
+- P1: 2, 4(7), 9
+- P2: 5, 6
