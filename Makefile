@@ -6,10 +6,11 @@ TOOLCHAIN_DIR=$(WORK_DIR)/tools
 FTP_SERVER:=172.16.11.18
 
 # Targets
-CHOREO_BIN = choreo
-COPP_BIN = copp
+CHOREO_BIN = build/choreo
+COPP_BIN = build/copp
 TARGET = $(CHOREO_BIN) $(COPP_BIN)
 SRC_DIR = $(WORK_DIR)/lib
+BUILD_DIR = $(WORK_DIR)/build
 LEX_SRC = $(SRC_DIR)/scanner.l
 PARSER_SRC = $(SRC_DIR)/parser.yy
 #BISON_FLAGS = --language=c++ --skeleton=lalr1.cc -t -d  # Generates both parser.tab.c and parser.tab.h
@@ -60,7 +61,9 @@ ci-gcu2-test: setup-gcu2 $(TARGET)
 ci-gcu3-test: setup-gcu3 $(TARGET)
 	$(LIT) tests && $(MAKE) standalone_test
 
-$(CHOREO_BIN): utils/choreo_main.cpp scanner.yy.o parser.tab.o codegen_factor.o codegen_cuda.o codegen_topscc.o earlysema.o typeinfer.o semacheck.o ast.o types.o codegen_factor_types.o codegen_cuda_types.o valno.o visitor.o sym_replace.o
+BUILD_OBJECTS = $(patsubst $(SRC_DIR)/%.cpp, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/*.cpp))
+
+$(CHOREO_BIN): utils/choreo_main.cpp $(BUILD_DIR)/parser.tab.o $(BUILD_DIR)/scanner.yy.o $(BUILD_OBJECTS)
 	$(CC) $(CFLAGS) $^ -I$(WORK_DIR) -I$(SRC_DIR) $(SYMBOLIC_INCLUDE_FLAGS) $(SYMBOLIC_LIB_FLAGS) -o $@
 
 scanner.yy.cc: $(LEX_SRC)
@@ -69,13 +72,13 @@ scanner.yy.cc: $(LEX_SRC)
 parser.tab.cc parser.tab.hh location.hh: $(PARSER_SRC)
 	$(BISON) $(BISON_FLAGS) $(PARSER_SRC)
 
-%.o : %.cc $(HEADER_FILES) parser.tab.hh location.hh
+$(BUILD_DIR)/%.o : %.cc $(HEADER_FILES) parser.tab.hh location.hh
 	$(CC) -I$(WORK_DIR) -I$(SRC_DIR) $(CFLAGS) $< -c -o $@
 
-%.o : $(SRC_DIR)/%.cpp $(HEADER_FILES) location.hh
+$(BUILD_DIR)/%.o : $(SRC_DIR)/%.cpp $(HEADER_FILES) location.hh
 	$(CC) -I$(WORK_DIR) -I$(SRC_DIR) $(CFLAGS) $(SYMBOLIC_INCLUDE_FLAGS) $< -c  -o $@
 
-copp: utils/choreo_preprocess.cpp $(HEADER_FILES)
+$(COPP_BIN): utils/choreo_preprocess.cpp $(HEADER_FILES)
 	$(CC) $(CFLAGS) $< -I$(WORK_DIR) -I$(SRC_DIR) -o $@
 
 choreo_header.inc : utils/choreo.h
