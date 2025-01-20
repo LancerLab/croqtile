@@ -351,12 +351,23 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
              << ", topsMemcpyHostToDevice));\n";
         }
       } else {
+        std::string sym_data = sym + ".data()";
         hs << h_indent << "auto " << sym << " = choreo::make_spandata<" << bts
            << ", " << shape.Rank() << ">({" << UnScopedExpr(RSTR(shape))
            << "});\n";
+        if (n.init_value) {
+          // support initialization of output
+          hs << h_indent << "std::fill(" << sym_data << ", " << sym_data << "+"
+             << sym << ".size()" << ", " << ExprSTR(n.init_value) << ");\n";
+        }
         hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
         hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym << ", "
            << UnScopedSizeExpr(*sty) << "));\n";
+        if (n.init_value) {
+          hs << h_indent << "choreo::abend_true(topsMemcpy(" << buf_sym << ", "
+             << sym_data << ", " << UnScopedSizeExpr(*sty)
+             << ", topsMemcpyHostToDevice));\n";
+        }
       }
       ssm.MapHostSymbol(InScopeName(sym) + "__device", buf_sym);
       ssm.MapHostSymbol(InScopeName(sym), sym);
