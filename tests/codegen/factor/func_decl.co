@@ -1,12 +1,12 @@
-// RUN: choreo -gs  %s | FileCheck --match-full-lines %s
+// RUN: choreo -gs -t factor %s | FileCheck --match-full-lines %s
 
-__co__ int foo(f32 [32] d, int) { return 1;}
+__co__ auto foo(f32 [32] d, int) { s32[1] aa; return aa;}
 
 // CHECK:    using namespace factor;
 // CHECK:    void __choreo_foo() {
 // CHECK:      auto d_type = DRAMType(FloatType(32), {32});
 // CHECK:      auto anon_0_type = DRAMType(IntType(32), (1));
-// CHECK:      auto __choreo_factor_out_type = DRAMType(IntType(32), (1));
+// CHECK:      auto __choreo_factor_out_type = DRAMType(IntType(32), {1});
 // CHECK:      D(host_func_)("__choreo_foo", {d_type, anon_0_type, StreamType()}, [&](auto args){{.*}}
 // CHECK:    } // end of __choreo_foo
 
@@ -16,7 +16,7 @@ __co__ auto bar() {}
 // CHECK:      D(host_func_)("__choreo_bar", {StreamType()}, [&](auto args){{.*}}
 // CHECK:    } // end of __choreo_bar
 
-__co__ auto foobar(f32 [32] a, int, bool b, f16 [?]) { return 1;}
+__co__ auto foobar(f32 [32] a, int, bool b, f16 [?]) { s32[1] aa; return aa;}
 // CHECK: void __choreo_foobar() {
 // CHECK:   auto a_type = DRAMType(FloatType(32), {32});
 // CHECK:   auto anon_1_type = DRAMType(IntType(32), (1));
@@ -26,7 +26,7 @@ __co__ auto foobar(f32 [32] a, int, bool b, f16 [?]) { return 1;}
 // CHECK:   D(host_func_)("__choreo_foobar", {a_type, anon_1_type, b_type, anon_2_type, StreamType()}, [&](auto args){{.*}}
 // CHECK: } // end of __choreo_foobar
 
-// CHECK:  int foo(const choreo::spanned_view<choreo::f32, 1> & hp0, int hp1){{.*}}
+// CHECK: choreo::spanned_data<choreo::s32, 1> foo(const choreo::spanned_view<choreo::f32, 1> & hp0, int hp1) {
 // CHECK:    {{.*}}topsStreamCreate{{.*}}
 // CHECK:    {{.*}}topsMalloc{{.*}}
 // CHECK:    {{.*}}topsMemcpy{{.*}}
@@ -40,5 +40,5 @@ __co__ auto foobar(f32 [32] a, int, bool b, f16 [?]) { return 1;}
 // CHECK:    {{.*}}topsFree{{.*}}
 // CHECK:    {{.*}}topsStreamDestroy{{.*}}
 
-// CHECK:  int foobar(const choreo::spanned_view<choreo::f32, 1> & hp0, int hp1, bool hp2, const choreo::spanned_view<choreo::f16, 1> & hp3){{.*}}
+// CHECK:  choreo::spanned_data<choreo::s32, 1> foobar(const choreo::spanned_view<choreo::f32, 1> & hp0, int hp1, bool hp2, const choreo::spanned_view<choreo::f16, 1> & hp3){{.*}}
 

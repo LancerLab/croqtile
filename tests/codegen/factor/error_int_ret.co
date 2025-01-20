@@ -1,0 +1,8 @@
+// RUN: not choreo -gs -t factor %s 2>&1 | FileCheck %s
+__co__ auto int_ret() { return 3; }
+
+int main() {
+  auto res = int_ret();
+}
+
+// CHECK: error: returning scalar value in Factor backend is not supproted yet.

@@ -1336,6 +1336,15 @@ bool EarlySemantics::Visit(AST::Return& n) {
       error_count++;
       return false;
     }
+
+    if (CCtx().GetTarget() == CompileTarget::Factor) {
+      if (isa<ScalarType>(vty)) {
+        Error(n.LOC(),
+              "returning scalar value in Factor backend is not supproted yet.");
+        error_count++;
+        return false;
+      }
+    }
   }
 
   return true;

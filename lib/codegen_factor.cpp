@@ -354,6 +354,10 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl& node) {
       }
       fs << ");\n";
     } else if (factor_symbols.Exists(InScopeName(sym))) {
+      if (MemLevel(sty->GetStorage()) >= 2 && node.init_value) {
+        choreo_unreachable("Factor backend of Choreo doesn't support "
+                           "initializing global span yet.");
+      }
       // factor weird behavior: only the output needs alloc
       if (MemLevel(sty->GetStorage()) < 2 ||
           cgi->IsReturnSymbol(fname, InScopeName(sym))) {
@@ -390,7 +394,6 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl& node) {
            << ");\n";
 
         // generate "memset_()" action to initiate each alloc_memory with value
-        // 0
         fs << indent << "memset_(" << sym << "_init, " << sym << ", "
            << ExprSTR(node.init_value, false) << ");\n";
       }
@@ -1078,7 +1081,9 @@ bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
   //
   size_t host_pindex = 0;
   for (auto& item : GetFactorHostInParams()) {
+    std::cerr << "item: " << item.name << " " << item.p_index << "\n";
     if (item.IsParameter()) {
+      std::cerr << host_pindex << "\n";
       assert((int)host_pindex == item.p_index);
       item.host_name = GenHostParamName();
       if (auto sty = dyn_cast<SpannedType>(item.type))
