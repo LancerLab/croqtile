@@ -1,0 +1,20 @@
+// RUN: choreo -i %s | FileCheck --match-full-lines %s
+
+#define K (1024)
+#define M (1024*1024)
+#define G (1024*1024*1024)
+
+__co__ auto foo() {
+  u8 [4*G] ans;
+  parallel p by 1 {
+    with idx in [1] {
+      foreach idx {
+      }
+    }
+  }
+
+  return ans;
+}
+
+// CHECK: Symbol:    ::foo::ans, Type: global u8 mdspan<1> [4294967296]
+// CHECK: Function:  ::foo, Type: u8 mdspan<1> [4294967296] (*)()

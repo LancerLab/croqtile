@@ -220,51 +220,51 @@ ValueNumbering::TryToSimplifyBinary(const location& loc, const std::string& op,
   if (l_cv && r_cv) {
     std::string res = "const_";
     if (op == "+")
-      res += std::to_string(std::stoi(*l_cv) + std::stoi(*r_cv));
+      res += std::to_string(std::stoll(*l_cv) + std::stoll(*r_cv));
     else if (op == "-")
-      res += std::to_string(std::stoi(*l_cv) - std::stoi(*r_cv));
+      res += std::to_string(std::stoll(*l_cv) - std::stoll(*r_cv));
     else if (op == "*")
-      res += std::to_string(std::stoi(*l_cv) * std::stoi(*r_cv));
+      res += std::to_string(std::stoll(*l_cv) * std::stoll(*r_cv));
     else if (op == "/") {
-      int div_end = std::stoi(*r_cv);
+      auto div_end = std::stoll(*r_cv);
       if (div_end == 0) {
         dbgs() << ScopeIndent() << "<ERROR> divide by zero: " << lhs << " / "
                << rhs << "\n";
         choreo_unreachable("divide by zero is found in shape evaluation.");
       }
-      res += std::to_string(std::stoi(*l_cv) / div_end);
+      res += std::to_string(std::stoll(*l_cv) / div_end);
     } else if (op == "%") {
-      int div_end = std::stoi(*r_cv);
+      auto div_end = std::stoll(*r_cv);
       if (div_end == 0) {
         dbgs() << ScopeIndent() << "<ERROR> divide by zero: " << lhs << " / "
                << rhs << "\n";
         choreo_unreachable("divide by zero is found in shape evaluation.");
       }
-      res += std::to_string(std::stoi(*l_cv) % std::stoi(*r_cv));
+      res += std::to_string(std::stoll(*l_cv) % std::stoll(*r_cv));
     } else if (op == "<") {
-      res = std::stoi(*l_cv) < std::stoi(*r_cv) ? "true" : "false";
+      res = std::stoll(*l_cv) < std::stoll(*r_cv) ? "true" : "false";
     } else if (op == ">") {
-      res = std::stoi(*l_cv) > std::stoi(*r_cv) ? "true" : "false";
+      res = std::stoll(*l_cv) > std::stoll(*r_cv) ? "true" : "false";
     } else if (op == "==") {
-      res = std::stoi(*l_cv) == std::stoi(*r_cv) ? "true" : "false";
+      res = std::stoll(*l_cv) == std::stoll(*r_cv) ? "true" : "false";
     } else if (op == "!=") {
-      res = std::stoi(*l_cv) != std::stoi(*r_cv) ? "true" : "false";
+      res = std::stoll(*l_cv) != std::stoll(*r_cv) ? "true" : "false";
     } else if (op == "<=") {
-      res = std::stoi(*l_cv) <= std::stoi(*r_cv) ? "true" : "false";
+      res = std::stoll(*l_cv) <= std::stoll(*r_cv) ? "true" : "false";
     } else if (op == ">=") {
-      res = std::stoi(*l_cv) >= std::stoi(*r_cv) ? "true" : "false";
+      res = std::stoll(*l_cv) >= std::stoll(*r_cv) ? "true" : "false";
     } else if (op == "cdiv") {
-      int div_end = std::stoi(*r_cv);
+      auto div_end = std::stoll(*r_cv);
       if (div_end == 0) {
         dbgs() << ScopeIndent() << "<ERROR> divide by zero: " << lhs << " / "
                << rhs << "\n";
         choreo_unreachable("divide by zero is found in shape evaluation.");
       }
-      res += std::to_string((std::stoi(*l_cv) + std::stoi(*r_cv) - 1) /
-                            std::stoi(*r_cv));
+      res += std::to_string((std::stoll(*l_cv) + std::stoll(*r_cv) - 1) /
+                            std::stoll(*r_cv));
     } else if (op == "#") {
       // calculate the upper bound result
-      res += std::to_string(std::stoi(*l_cv) * std::stoi(*r_cv));
+      res += std::to_string(std::stoll(*l_cv) * std::stoll(*r_cv));
     } else {
       Error(loc,
             "simplification of operation `" + op + "' is not yet supported.");
