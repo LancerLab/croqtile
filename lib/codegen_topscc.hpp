@@ -78,10 +78,30 @@ public:
     assert(PrefixedWith(csym, "::") && "expect a scoped name.");
     if (!device_map.back().count(csym))
       MapDeviceSymbol(csym, name);
-    else
-      assert((device_map.back().at(csym) == name) &&
-             "map symbol with a different name.");
   }
+
+  void DumpDeviceMap() {
+    dbgs() << "==================== Device Map Information ====================" << std::endl;
+    dbgs() << "Symbol -> Buffer Name Mapping:" << "\n";
+    dbgs() << "--------------------------------------------------------------" << "\n";
+
+    for (auto& table : device_map) {
+      // Print a formatted table with columns for symbol and buffer name
+      dbgs() << std::setw(30) << std::left << "Symbol" 
+                << std::setw(50) << std::left << "Buffer Name" << "\n";
+      dbgs() << "--------------------------------------------------------------" << "\n";
+
+      for (const auto& entry : table) {
+          dbgs() << std::setw(30) << std::left << entry.first  // Symbol
+                    << std::setw(50) << std::left << entry.second << "\n";  // Buffer Name
+      }
+
+    }
+
+    dbgs() << "--------------------------------------------------------------" << "\n";
+    dbgs() << "================================================================" << "\n";
+  }
+
   // only for specific purpose
   void RemapDeviceSymbol(const std::string& csym, const std::string& name) {
     assert(PrefixedWith(csym, "::") && "expect a scoped name.");
@@ -189,6 +209,7 @@ private:
   std::ostringstream hs; // host stream
 
   std::map<std::string, std::string> claimed_dte;
+  std::vector<std::string> pld_checklist = {};
 
 private:
   void EmitFixedHostHead();
@@ -239,6 +260,17 @@ private:
 
   const FutureBufferInfo& FBInfo() const {
     return FCtx(fname).GetFutureBufferInfo();
+  }
+
+  // check if the placeholder buffer exists
+  // this check can only be processed when all device symbol
+  // has been mapped
+  void PLDCheck () {
+    VST_DEBUG(ssm.DumpDeviceMap());
+    for (int idx = 0; idx < pld_checklist.size(); ++idx) {
+      auto pld_name = pld_checklist[idx];
+      assert(ssm.HasDeviceName(pld_name) && "buffer has been defined");
+    }
   }
 
   bool IsChoreoInput(const std::string& sname) {

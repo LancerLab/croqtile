@@ -118,6 +118,7 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
                          " is not supported.");
     }
   } else if (isa<AST::ChoreoFunction>(&n)) {
+    PLDCheck();
     ssm.LeaveScope();
     code_segments.back() += ds.str() + hs.str();
     ds.str(""); // reset the streams
@@ -359,7 +360,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       }
       ssm.MapHostSymbol(InScopeName(sym) + "__device", buf_sym);
       ssm.MapHostSymbol(InScopeName(sym), sym);
-      ssm.MapDeviceSymbol(InScopeName(sym), sym);
+      ssm.MapDeviceSymbolIfNotExist(InScopeName(sym), sym);
     } else if (sty->GetStorage() == Storage::SHARED) {
       if (!IsChoreoOutput(InScopeName(sym))) {
         ds << d_indent << "__shared__ " << bts << " " << sym << "["
@@ -519,7 +520,13 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     assert(ph->Category() == TypeCategory::FUTURE);
     // must set the buffer
     auto buf_name = FBInfo().at(InScopeName(n.future)).buffer;
-    assert(ssm.HasDeviceName(buf_name) && "buffer has been defined");
+
+    // Handle placeholder checks that need to postpone after all lv processed
+    // currently, the only case is the plder tied to global buffer
+    //
+    // assert(ssm.HasDeviceName(buf_name) && "buffer has been defined");
+    if (!ssm.HasDeviceName(buf_name))
+      pld_checklist.push_back(buf_name);
 
     claimFuture(UnScopedName(buf_name));
     // make following buffer reference all be indirect

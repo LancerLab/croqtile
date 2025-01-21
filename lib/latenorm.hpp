@@ -214,7 +214,8 @@ public:
 
         if (sty->GetStorage() == Storage::GLOBAL) {
           // it is a global, must not be inside parallel_by
-          assert(cur_pb_index != -1);
+          // no outer PB exists
+          assert(cur_pb_index == -1);
           int index = cur_pb_index + mnodes_insertions[cur_pb_mn].size();
           mnodes_insertions[cur_pb_mn].push_back(
               {index, var, anon_sym, future_name, nullptr});
