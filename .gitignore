@@ -8,6 +8,8 @@ tests/*co.test
 tools/*
 choreo
 copp
+build
+extern
 sgemm-ref
 demo/*.bin
 demo/*.fb

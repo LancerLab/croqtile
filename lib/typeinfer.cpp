@@ -34,7 +34,7 @@ bool TypeInference::AfterVisitImpl(AST::Node& n) {
     assert(!isa<UnknownType>(sym_ty) && "symbol type is not deduced.");
 
     auto func_ty = cast<FunctionType>(sym_ty);
-    if (AST::typeof<UnknownType>(f) || isa<SpannedType>(func_ty->out_ty)) {
+    if (AST::istypeof<UnknownType>(f) || isa<SpannedType>(func_ty->out_ty)) {
       // update the return type node since type inference could have changed the
       // function type already
       f->f_decl.ret_type->SetType(func_ty->out_ty);
@@ -236,7 +236,7 @@ bool TypeInference::Visit(AST::NamedVariableDecl& n) {
 
   cur_type.reset();
 
-  if (AST::typeof<UnknownType>(&n)) {
+  if (AST::istypeof<UnknownType>(&n)) {
     Error(n.LOC(), "can not infer the type of `" + n.name_str + "'.");
     error_count++;
     return false;
@@ -245,12 +245,12 @@ bool TypeInference::Visit(AST::NamedVariableDecl& n) {
   auto nty = NodeType(n);
   AssignSymbolWithType(n.LOC(), n.name_str, nty);
 
-  if (AST::typeof<SpannedType>(&n)) {
+  if (AST::istypeof<SpannedType>(&n)) {
     AssignSymbolWithType(n.LOC(), n.name_str + ".span",
                          cast<SpannedType>(nty)->GetMDSpanType());
   }
 
-  if (AST::typeof<FutureType>(&n)) {
+  if (AST::istypeof<FutureType>(&n)) {
     AssignSymbolWithType(n.LOC(), n.name_str + ".data",
                          cast<FutureType>(nty)->GetSpannedType());
     AssignSymbolWithType(
@@ -259,7 +259,7 @@ bool TypeInference::Visit(AST::NamedVariableDecl& n) {
   }
 
   if (Dump) {
-    dbgs() << ((AST::typeof<FutureType>(&n)) ? "Future" : "Symbol");
+    dbgs() << ((AST::istypeof<FutureType>(&n)) ? "Future" : "Symbol");
     dbgs() << ":    " << InScopeName(n.name_str) << ", Type: " << PSTR(nty);
     dbgs() << "\n";
   }
@@ -271,7 +271,7 @@ bool TypeInference::Visit(AST::NamedTypeDecl& n) {
   TraceEachVisit(n);
 
   if (n.init_expr) {
-    if (AST::typeof<UnknownType>(n.init_expr)) {
+    if (AST::istypeof<UnknownType>(n.init_expr)) {
       Error(n.LOC(), "unable to inference the type of `" + n.name_str + "'.");
       error_count++;
       return false;
@@ -285,7 +285,7 @@ bool TypeInference::Visit(AST::NamedTypeDecl& n) {
     }
 
     n.SetType(n.init_expr->GetType());
-  } else if (AST::typeof<UnknownType>(&n)) {
+  } else if (AST::istypeof<UnknownType>(&n)) {
     // need type inference
     Error(n.LOC(),
           "`" + n.name_str +
@@ -438,7 +438,7 @@ bool TypeInference::Visit(AST::Expr& n) {
     // must have de-sugared early
     assert(!isa<AST::IntIndex>(ref));
 
-    if (AST::typeof<UnknownType>(ref)) {
+    if (AST::istypeof<UnknownType>(ref)) {
       Error(n.LOC(), "unable to infer the type of expression.");
       error_count++;
       return false;
@@ -642,7 +642,7 @@ bool TypeInference::Visit(AST::DMA& n) {
   TraceEachVisit(n);
 
   // future's type has been obtained by shape inference
-  if (AST::typeof<UnknownType>(&n)) {
+  if (AST::istypeof<UnknownType>(&n)) {
     Error(n.LOC(), "fail to infer the FUTURE type of `" + n.future + "'.");
     error_count++;
     return false;

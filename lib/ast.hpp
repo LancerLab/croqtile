@@ -84,11 +84,11 @@ struct Node {
 
 // utility functions
 template <typename T>
-bool typeof(const Node* n) {
+bool istypeof(const Node* n) {
   return isa<T>(n->GetType());
 }
 template <typename T>
-bool typeof(const ptr<Node>& n) {
+bool istypeof(const ptr<Node>& n) {
   return isa<T>(n->GetType());
 }
 
@@ -531,12 +531,12 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
   void SetRank(size_t n) { rank = n; }
 
   void SetTypeDetail(const Shape& s) {
-    assert(typeof<MDSpanType>(this) && "Incorrect type for mdspan.");
+    assert(istypeof<MDSpanType>(this) && "Incorrect type for mdspan.");
     cast<MDSpanType>(GetType())->SetShape(s);
   }
 
   const Shape GetTypeDetail() {
-    assert(typeof<MDSpanType>(this) && "Incorrect type for mdspan.");
+    assert(istypeof<MDSpanType>(this) && "Incorrect type for mdspan.");
     return cast<MDSpanType>(GetType())->GetShape();
   }
 
@@ -594,12 +594,12 @@ struct SpanAs : public Node, public TypeIDProvider<SpanAs> {
   }
 
   void SetTypeDetail(const Shape& s) {
-    assert(typeof<SpannedType>(this) && "Incorrect type for mdspan.");
+    assert(istypeof<SpannedType>(this) && "Incorrect type for mdspan.");
     cast<MDSpanType>(GetType())->SetShape(s);
   }
 
   const Shape GetTypeDetail() {
-    assert(typeof<SpannedType>(this) && "Incorrect type for mdspan.");
+    assert(istypeof<SpannedType>(this) && "Incorrect type for mdspan.");
     return cast<MDSpanType>(GetType())->GetShape();
   }
 

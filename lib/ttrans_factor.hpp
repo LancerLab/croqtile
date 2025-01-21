@@ -233,7 +233,7 @@ public:
 
     if (kind != Kind::T_SELECT) return true;
 
-    if (!AST::typeof<FutureType>(&n)) return true;
+    if (!AST::istypeof<FutureType>(&n)) return true;
     if (!isa<AST::Select>(n.init_expr)) return true;
 
     // do not care about the swap generated one
@@ -276,7 +276,7 @@ public:
 
     if (kind != Kind::T_SELECT) return true;
 
-    if (!AST::typeof<FutureType>(&n)) return true;
+    if (!AST::istypeof<FutureType>(&n)) return true;
     if (!isa<AST::Select>(n.value)) return true;
 
     // do not care about the swap generated one
@@ -337,7 +337,7 @@ public:
     TraceEachVisit(n);
 
     if (kind != Kind::T_SWAP) return true;
-    if (!AST::typeof<FutureType>(&n)) return true;
+    if (!AST::istypeof<FutureType>(&n)) return true;
 
     if (!n.future.empty()) {
       auto fut = n.future;

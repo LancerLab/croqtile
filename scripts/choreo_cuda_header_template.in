@@ -1,0 +1,7 @@
+#ifndef __CHOREO_RUNTIME_HEADER_H__
+#define __CHOREO_RUNTIME_HEADER_H__
+
+static const char* __choreo_header_as_string = R"(@CHOREO_CUDA_HEADER_CONTENT@)";
+
+#endif // __CHOREO_RUNTIME_HEADER_H__
+

@@ -495,7 +495,7 @@ public:
       }
     }
 
-    if (AST::typeof<MDSpanType>(&n)) {
+    if (AST::istypeof<MDSpanType>(&n)) {
       cur_mdspan_vn = cur_vn;
       cast<MDSpanType>(n.GetType())
           ->SetShape(GenShapeFromSignature(

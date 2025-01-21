@@ -182,7 +182,7 @@ bool SemaChecker::Visit(AST::SpanAs& n) {
     return false;
   }
 
-  if (!(AST::typeof<SpannedType>(&n))) {
+  if (!(AST::istypeof<SpannedType>(&n))) {
     Error(n.LOC(), "Invalid type of span_as expression.");
     error_count++;
     return false;

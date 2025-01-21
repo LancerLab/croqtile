@@ -46,11 +46,22 @@ GINAC_DIR = $(SYMBOLIC_DIR)/ginac-1.8.7
 SYMBOLIC_LIB_FLAGS = -L$(CLN_DIR)/install/lib -lcln -L$(GINAC_DIR)/install/lib -lginac -Wl,-rpath -Wl,$(GINAC_DIR)/install/lib
 SYMBOLIC_INCLUDE_FLAGS = -I$(CLN_DIR)/install/include -I$(GINAC_DIR)/install/include
 
+# For CMAKE config
+CMAKE_BUILD_DIR = $(BUILD_DIR)
+CMAKE = cmake
+CMAKE_BUILD_TYPE = Release
+
 # Build rules
 all: $(TARGET)
 
 test: $(TARGET)
 	$(LIT) tests && $(MAKE) standalone_test
+
+build-with-cmake:
+	@echo "Starting build with CMake..."
+	@if [ ! -d $(CMAKE_BUILD_DIR) ]; then mkdir $(CMAKE_BUILD_DIR); fi
+	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE)
+	$(MAKE) -C $(CMAKE_BUILD_DIR)
 
 ci-gpu-test: setup $(TARGET)
 	$(LIT) tests && $(MAKE) standalone_test

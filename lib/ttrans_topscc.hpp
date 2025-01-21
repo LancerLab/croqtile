@@ -83,7 +83,7 @@ public:
   bool Visit(AST::NamedVariableDecl& n) {
     TraceEachVisit(n);
 
-    if (!AST::typeof<FutureType>(&n)) return true;
+    if (!AST::istypeof<FutureType>(&n)) return true;
     if (!isa<AST::Select>(n.init_expr)) return true;
 
     auto sel = cast<AST::Select>(n.init_expr);
@@ -118,7 +118,7 @@ public:
   bool Visit(AST::Assignment& n) {
     TraceEachVisit(n);
 
-    if (!AST::typeof<FutureType>(&n)) return true;
+    if (!AST::istypeof<FutureType>(&n)) return true;
     if (!isa<AST::Select>(n.value)) return true;
 
     auto sel = cast<AST::Select>(n.value);

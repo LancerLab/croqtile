@@ -1,0 +1,7 @@
+#ifndef __CHOREO_CUDA_SCRIPT_H__
+#define __CHOREO_CUDA_SCRIPT_H__
+
+static const char* __cuda_script_as_string = R"__co_cuda__(@CUDA_SCRIPT_CONTENT@)__co_cuda__";
+
+#endif // __CHOREO_CUDA_SCRIPT_H__
+
