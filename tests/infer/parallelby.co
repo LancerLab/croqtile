@@ -40,49 +40,51 @@ __co__ void bar1() {
 // CHECK: Symbol:    ::bar1::paraby_3::paraby_4::l, Type: local f16 mdspan<1> [4]
 // CHECK: Function:  ::bar1, Type: void (*)()
 
-// VALNO: scope-1 {
-// VALNO:  scope-2 {
-// VALNO:  New VN #0: 'const_2'
-// VALNO:  New VN #1: 'const_6'
-// VALNO:  New VN #2: '#0,#1'
-// VALNO:  Alias "::bar1::paraby_0::@bdim" -> #2
-// VALNO:  Alias "::bar1::paraby_0::@x" -> #0
-// VALNO:  Alias "::bar1::paraby_0::@y" -> #1
-// VALNO:  New VN #3: 'const_4'
-// VALNO:  Alias "::bar1::paraby_0::l.span" -> #3
-// VALNO:  } // end scope-2
-// VALNO:  scope-2 {
-// VALNO:  New VN #4: 'const_2'
-// VALNO:  New VN #5: 'const_6'
-// VALNO:  New VN #6: 'const_3'
-// VALNO:  New VN #7: '#4,#5,#6'
-// VALNO:  Alias "::bar1::paraby_1::@gdim" -> #7
-// VALNO:  Alias "::bar1::paraby_1::@xx" -> #4
-// VALNO:  Alias "::bar1::paraby_1::@yy" -> #5
-// VALNO:  Alias "::bar1::paraby_1::@zz" -> #6
-// VALNO:   scope-3 {
-// VALNO:   New VN #8: 'const_4'
-// VALNO:   New VN #9: 'const_5'
-// VALNO:   New VN #10: '#8,#9'
-// VALNO:   Alias "::bar1::paraby_1::paraby_2::@bdim" -> #10
-// VALNO:   Alias "::bar1::paraby_1::paraby_2::@x" -> #8
-// VALNO:   Alias "::bar1::paraby_1::paraby_2::@y" -> #9
-// VALNO:   Alias "::bar1::paraby_1::paraby_2::l.span" -> #8
-// VALNO:   } // end scope-3
-// VALNO:  } // end scope-2
-// VALNO:  scope-2 {
-// VALNO:  New VN #11: 'const_4'
-// VALNO:  Alias "::bar1::paraby_3::@p" -> #11
-// VALNO:  Alias "::bar1::paraby_3::@p__elem__x" -> #11
-// VALNO:   scope-3 {
-// VALNO:   New VN #12: 'const_3'
-// VALNO:   New VN #13: 'const_2'
-// VALNO:   New VN #14: '#11,#12,#13'
-// VALNO:   Alias "::bar1::paraby_3::paraby_4::@q" -> #14
-// VALNO:   Alias "::bar1::paraby_3::paraby_4::@x" -> #11
-// VALNO:   Alias "::bar1::paraby_3::paraby_4::@y" -> #12
-// VALNO:   Alias "::bar1::paraby_3::paraby_4::@z" -> #13
-// VALNO:   Alias "::bar1::paraby_3::paraby_4::l.span" -> #11
-// VALNO:   } // end scope-3
-// VALNO:  } // end scope-2
-// VALNO: } // end scope-1
+// VALNO:  scope-1 {
+// VALNO:   New VN #0: 'const_1'
+// VALNO:   Alias "::@__choreo_no_tiling__" -> #0
+// VALNO:   scope-2 {
+// VALNO:    New VN #1: 'const_2'
+// VALNO:    New VN #2: 'const_6'
+// VALNO:    New VN #3: '#1,#2'
+// VALNO:    Alias "::bar1::paraby_0::@bdim" -> #3
+// VALNO:    Alias "::bar1::paraby_0::@x" -> #1
+// VALNO:    Alias "::bar1::paraby_0::@y" -> #2
+// VALNO:    New VN #4: 'const_4'
+// VALNO:    Alias "::bar1::paraby_0::l.span" -> #4
+// VALNO:   } // end scope-2
+// VALNO:   scope-2 {
+// VALNO:    New VN #5: 'const_2'
+// VALNO:    New VN #6: 'const_6'
+// VALNO:    New VN #7: 'const_3'
+// VALNO:    New VN #8: '#5,#6,#7'
+// VALNO:    Alias "::bar1::paraby_1::@gdim" -> #8
+// VALNO:    Alias "::bar1::paraby_1::@xx" -> #5
+// VALNO:    Alias "::bar1::paraby_1::@yy" -> #6
+// VALNO:    Alias "::bar1::paraby_1::@zz" -> #7
+// VALNO:    scope-3 {
+// VALNO:     New VN #9: 'const_4'
+// VALNO:     New VN #10: 'const_5'
+// VALNO:     New VN #11: '#9,#10'
+// VALNO:     Alias "::bar1::paraby_1::paraby_2::@bdim" -> #11
+// VALNO:     Alias "::bar1::paraby_1::paraby_2::@x" -> #9
+// VALNO:     Alias "::bar1::paraby_1::paraby_2::@y" -> #10
+// VALNO:     Alias "::bar1::paraby_1::paraby_2::l.span" -> #9
+// VALNO:    } // end scope-3
+// VALNO:   } // end scope-2
+// VALNO:   scope-2 {
+// VALNO:    New VN #12: 'const_4'
+// VALNO:    Alias "::bar1::paraby_3::@p" -> #12
+// VALNO:    Alias "::bar1::paraby_3::@p__elem__x" -> #12
+// VALNO:    scope-3 {
+// VALNO:     New VN #13: 'const_3'
+// VALNO:     New VN #14: 'const_2'
+// VALNO:     New VN #15: '#12,#13,#14'
+// VALNO:     Alias "::bar1::paraby_3::paraby_4::@q" -> #15
+// VALNO:     Alias "::bar1::paraby_3::paraby_4::@x" -> #12
+// VALNO:     Alias "::bar1::paraby_3::paraby_4::@y" -> #13
+// VALNO:     Alias "::bar1::paraby_3::paraby_4::@z" -> #14
+// VALNO:     Alias "::bar1::paraby_3::paraby_4::l.span" -> #12
+// VALNO:    } // end scope-3
+// VALNO:   } // end scope-2
+// VALNO:  } // end scope-1

@@ -295,6 +295,10 @@ public:
     if (isa<AST::Program>(&n)) {
       Reset();
       SSTab().EnterScope(""); // global scope
+      // fixed symbol definition
+      SSTab().DefineSymbol("__choreo_no_tiling__",
+                           MakeBoundedITupleType(MultiBounds(1, 1)));
+      SSTab().DefineSymbol("@__choreo_no_tiling__", MakeIntegerType());
     } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
       SSTab().EnterScope(f->name);
       fname = f->name;

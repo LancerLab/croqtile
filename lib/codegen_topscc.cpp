@@ -446,9 +446,11 @@ bool TopsccCodeGen::Visit(AST::Assignment& n) {
       isa<IntegerType>(nty)) {
     ds << d_indent << "auto " << n.name << " = " << ExprSTR(n.value, false)
        << ";\n";
-  } else
+  } else {
     errs() << "Assignment " << STR(n) << " unprocessed, not supported "
            << PSTR(nty) << "\n";
+    return false;
+  }
 
   return true;
 }
@@ -623,7 +625,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
             auto idx_exprs = SplitStringByDelimiter(ExprSTR(p, false));
             for (auto i_expr : idx_exprs) {
               if (i != 0) offset << ", ";
-              if (i_expr == "__choreo_tile_one")
+              if (i_expr == "__choreo_no_tiling__")
                 offset << "0";
               else
                 offset << "(int)(" << i_expr << " * " << STR(shape.ValueAt(i))
@@ -662,7 +664,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
           auto idx_exprs = SplitStringByDelimiter(ExprSTR(p, false));
           for (auto i_expr : idx_exprs) {
             if (i != 0) offset << ", ";
-            if (i_expr == "__choreo_tile_one")
+            if (i_expr == "__choreo_no_tiling__")
               offset << "0";
             else
               offset << "(int)(" << i_expr << " * " << STR(shape.ValueAt(i))
@@ -1196,7 +1198,7 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
   std::ostringstream oss;
 
   if (auto id = dyn_cast<AST::Identifier>(e)) {
-    if (id->name == "__choreo_tile_one") {
+    if (id->name == "__choreo_no_tiling__") {
       assert(!is_host);
       return id->name;
     }

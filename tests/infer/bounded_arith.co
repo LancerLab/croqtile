@@ -15,14 +15,14 @@ __co__ void bounded_arith(s32 [180, 27, 12] a) {
   }
 }
 
-// CHKVALNO:      Alias "::bounded_arith::paraby_0::within_0::@y" -> #9
+// CHKVALNO:      Alias "::bounded_arith::paraby_0::within_0::@y" -> [[Y_VAL:#[0-9]+]]
 // CHKVALNO:       <Bounded> 'x # y' ubound: 'const_90'
-// CHKVALNO:       New VN #15: 'const_90'
-// CHKVALNO:       Alias "::bounded_arith::paraby_0::within_0::foreach_0::@anon_0" -> #15
+// CHKVALNO:       New VN [[CONST_VAL:#[0-9]+]]: 'const_90'
+// CHKVALNO:       Alias "::bounded_arith::paraby_0::within_0::foreach_0::@anon_0" -> [[CONST_VAL]]
 // CHKVALNO:       <Bounded> 'y + 1' ubound: 'const_9'
-// CHKVALNO:       Alias "::bounded_arith::paraby_0::within_0::foreach_0::@anon_1" -> #9
+// CHKVALNO:       Alias "::bounded_arith::paraby_0::within_0::foreach_0::@anon_1" -> [[Y_VAL]]
 // CHKVALNO:       <Bounded> ' (x # y)  # z' ubound: 'const_180'
-// CHKVALNO:       Alias "::bounded_arith::paraby_0::within_0::foreach_0::@anon_2" -> #0
+// CHKVALNO:       Alias "::bounded_arith::paraby_0::within_0::foreach_0::@anon_2" -> #{{[0-9]+}}
 // CHKVALNO:       <Bounded> 'y + 2' ubound: 'const_9'
 
 

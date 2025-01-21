@@ -164,25 +164,25 @@ bool TypeInference::Visit(AST::MultiValues& n) {
 }
 
 bool TypeInference::Visit(AST::IntLiteral& n) {
-  n.SetType(MakeIntegerType());
   TraceEachVisit(n);
+  n.SetType(MakeIntegerType());
   return true;
 }
 
 bool TypeInference::Visit(AST::FloatLiteral& n) {
+  TraceEachVisit(n);
   if (std::holds_alternative<float>(n.value))
     n.SetType(MakeFloatType());
   else if (std::holds_alternative<double>(n.value))
     n.SetType(MakeDoubleType());
   else
     choreo_unreachable("unhandled floating-point type.");
-  TraceEachVisit(n);
   return true;
 }
 
 bool TypeInference::Visit(AST::Boolean& n) {
-  n.SetType(MakeBooleanType());
   TraceEachVisit(n);
+  n.SetType(MakeBooleanType());
   return true;
 }
 
@@ -771,12 +771,7 @@ bool TypeInference::Visit(AST::ChunkAt& n) {
 
   if (n.positions) {
     // update all the nodes with correct types
-    for (auto& v : n.positions->AllValues()) {
-      if (auto id = dyn_cast<AST::Identifier>(v))
-        if (id->name == "__choreo_tile_one" && !SSTab().IsDeclared(id->name))
-          AssignSymbolWithType(v->LOC(), id->name, id->GetType());
-      v->SetType(NodeType(*v));
-    }
+    for (auto& v : n.positions->AllValues()) { v->SetType(NodeType(*v)); }
   }
   // also update current node
   n.SetType(

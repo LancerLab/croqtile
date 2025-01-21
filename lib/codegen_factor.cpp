@@ -738,7 +738,7 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
       // It could either be identifier or a 'getith' expr
       if (auto id = dyn_cast<AST::Identifier>(bv)) {
         auto bvn = id->name;
-        if (bvn == "__choreo_tile_one") {
+        if (bvn == "__choreo_no_tiling__") {
           offss << "0";
         } else {
           auto ty = cast<BoundedType>(NodeType(*id));
@@ -1081,9 +1081,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
   //
   size_t host_pindex = 0;
   for (auto& item : GetFactorHostInParams()) {
-    std::cerr << "item: " << item.name << " " << item.p_index << "\n";
     if (item.IsParameter()) {
-      std::cerr << host_pindex << "\n";
       assert((int)host_pindex == item.p_index);
       item.host_name = GenHostParamName();
       if (auto sty = dyn_cast<SpannedType>(item.type))

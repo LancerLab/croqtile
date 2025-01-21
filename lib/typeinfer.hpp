@@ -32,10 +32,7 @@ private:
   bool ModifySymbolType(const location&, const std::string&, const ptr<Type>&);
 
   void TraceEachVisit(const AST::Node& n) {
-    if (trace_visit) {
-      dbgs() << n.TypeNameString() << ": ";
-      dbgs() << "\n";
-    }
+    if (trace_visit) dbgs() << n.TypeNameString() << ":\n";
   }
 
 public:

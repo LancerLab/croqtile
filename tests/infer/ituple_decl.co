@@ -8,31 +8,32 @@ __co__ void foo(f32 [2, 3, 4] d, int e) {
 }
 
 // VALNO:  scope-1 {
-// VALNO:   New VN #0: 'const_2'
-// VALNO:   New VN #1: 'const_3'
-// VALNO:   New VN #2: 'const_4'
-// VALNO:   New VN #3: '#0,#1,#2'
-// VALNO:   New VN #4: 'index_const_0'
-// VALNO:   Alias "#0,#1,#2(0)" -> #0
-// VALNO:   New VN #5: 'index_const_1'
-// VALNO:   Alias "#0,#1,#2(1)" -> #1
-// VALNO:   New VN #6: 'index_const_2'
-// VALNO:   Alias "#0,#1,#2(2)" -> #2
-// VALNO:   Alias "::foo::d.span" -> #3
-// VALNO:   New VN #7: '::foo::e'
-// VALNO:   New VN #8: 'const_5'
-// VALNO:   New VN #9: 'const_1'
-// VALNO:   <Simplify> 'dimof:#3:#6 / ref:#1' to 'const_1'
-// VALNO:   <Simplify> 'dimof:#3:#6 / ref:#1' to 'const_1'
-// VALNO:   New VN #10: '#8,#9,#9'
-// VALNO:   Alias "#8,#9,#9(0)" -> #8
-// VALNO:   Alias "#8,#9,#9(1)" -> #9
-// VALNO:   Alias "#8,#9,#9(2)" -> #9
-// VALNO:   <Simplify> 'dimof:#3:#6 / ref:#1' to 'const_1'
+// VALNO:   New VN #0: 'const_1'
+// VALNO:   Alias "::@__choreo_no_tiling__" -> #0
+// VALNO:   New VN #1: 'const_2'
+// VALNO:   New VN #2: 'const_3'
+// VALNO:   New VN #3: 'const_4'
+// VALNO:   New VN #4: '#1,#2,#3'
+// VALNO:   New VN #5: 'index_const_0'
+// VALNO:   Alias "#1,#2,#3(0)" -> #1
+// VALNO:   New VN #6: 'index_const_1'
+// VALNO:   Alias "#1,#2,#3(1)" -> #2
+// VALNO:   New VN #7: 'index_const_2'
+// VALNO:   Alias "#1,#2,#3(2)" -> #3
+// VALNO:   Alias "::foo::d.span" -> #4
+// VALNO:   New VN #8: '::foo::e'
+// VALNO:   New VN #9: 'const_5'
+// VALNO:   <Simplify> 'dimof:#4:#7 / ref:#2' to 'const_1'
+// VALNO:   <Simplify> 'dimof:#4:#7 / ref:#2' to 'const_1'
+// VALNO:   New VN #10: '#9,#0,#0'
+// VALNO:   Alias "#9,#0,#0(0)" -> #9
+// VALNO:   Alias "#9,#0,#0(1)" -> #0
+// VALNO:   Alias "#9,#0,#0(2)" -> #0
+// VALNO:   <Simplify> 'dimof:#4:#7 / ref:#2' to 'const_1'
 // VALNO:   Alias "::foo::a" -> #10
-// VALNO:   New VN #11: '#7,#1'
-// VALNO:   Alias "#7,#1(0)" -> #7
-// VALNO:   Alias "#7,#1(1)" -> #1
+// VALNO:   New VN #11: '#8,#2'
+// VALNO:   Alias "#8,#2(0)" -> #8
+// VALNO:   Alias "#8,#2(1)" -> #2
 // VALNO:   Alias "::foo::b" -> #11
 // VALNO:  } // end scope-1
 

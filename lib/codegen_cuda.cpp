@@ -617,7 +617,7 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
     size_t dim_cursor = 0;
     for (auto& bv : ca->positions->AllValues()) {
       auto bvn = cast<AST::Identifier>(bv)->name;
-      if (bvn == "__choreo_tile_one") {
+      if (bvn == "__choreo_no_tiling__") {
         offss << "I(0)";
         if (++dim_cursor < rank) offss << ", ";
         continue;

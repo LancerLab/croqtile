@@ -672,12 +672,6 @@ bool EarlySemantics::Visit(AST::Identifier& n) {
     } else
       ReportErrorWhenViolateODR(n.LOC(), n.name, __FILE__, __LINE__);
   } else {
-    // to avoid the expected error
-    if (n.name == "__choreo_tile_one" && !SSTab().DeclaredInScope(n.name)) {
-      auto bit = MakeBoundedIntegerType(1);
-      SSTab().DefineSymbol(n.name, bit);
-      SSTab().DefineSymbol("@" + n.name, MakeIntegerType());
-    }
     ReportErrorWhenUseBeforeDefine(n.LOC(), n.name);
   }
   return true;
@@ -1064,11 +1058,21 @@ bool EarlySemantics::Visit(AST::DMA& n) {
 bool EarlySemantics::Visit(AST::ChunkAt& n) {
   TraceEachVisit(n);
 
-  if (n.positions)
+  if (n.positions) {
+    bool notile = false;
     for (auto& v : n.positions->AllValues())
       if (auto expr = cast<AST::Expr>(v); expr->IsReference())
         if (auto id = dyn_cast<AST::Identifier>(expr->GetReference()))
-          if (id->name == "_") id->name = "__choreo_tile_one";
+          if (id->name == "__choreo_no_tiling__") {
+            notile = true;
+            break;
+          }
+
+    if (notile && n.bounds) {
+      Error(n.LOC(), ".chunk operation can not work with .at() with '_'.");
+      error_count++;
+    }
+  }
 
   n.data->accept(*this);
   auto nty = NodeType(*n.data);
@@ -1437,6 +1441,7 @@ bool EarlySemantics::Visit(AST::CppSourceCode& n) {
   TraceEachVisit(n);
   return true;
 }
+
 bool EarlySemantics::Visit(AST::Program& n) {
   TraceEachVisit(n);
   return true;

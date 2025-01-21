@@ -91,6 +91,8 @@ ptr<AST::MultiNodes> ConstructPBRecursively(size_t idx,
                                           const ptr<AST::MultiNodes>& stmts);
 std::set<std::string> paraby_symbols;
 
+inline ptr<AST::ChunkAt> ReformChunkAt(const ptr<AST::ChunkAt> &);
+
 }
 
 %{
@@ -394,8 +396,8 @@ pred
       } value_list RPAREN {
         // note: normalize will hoist span_as
         $5->SetDelimiter(", ");
-        $$ = AST::Make<AST::Expr>(@1, "inbound",
-                 AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $5));
+        $$ = AST::Make<AST::Expr>(@1, "inbound", ReformChunkAt(
+                 AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $5)));
         parsing_chunkat_value_list = false;
       }
     ;
@@ -1139,7 +1141,8 @@ chunkat_expr
         parsing_chunkat_value_list = true;
       } value_list RPAREN {
         $5->SetDelimiter(", ");
-        $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $5);
+        $$ = ReformChunkAt(
+            AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $5));
         parsing_chunkat_value_list = false;
       }
     | data_id CHUNK LPAREN {
@@ -1147,7 +1150,8 @@ chunkat_expr
       } value_list RPAREN AT LPAREN value_list RPAREN {
         $5->SetDelimiter(", ");
         $9->SetDelimiter(", ");
-        $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $9, $5);
+        $$ = ReformChunkAt(
+            AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $9, $5));
         parsing_chunkat_value_list = false;
       }
     | span_as CHUNKAT LPAREN  {
@@ -1155,11 +1159,13 @@ chunkat_expr
       } value_list RPAREN {
         // note: normalize will hoist span_as
         $5->SetDelimiter(", ");
-        $$ = AST::Make<AST::ChunkAt>(@1, $1, $5);
+        $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, $1, $5));
         parsing_chunkat_value_list = false;
       }
-    | data_id { $$ = AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1)); }
-    | span_as { $$ = AST::Make<AST::ChunkAt>(@1, $1); }
+    | data_id { $$ = ReformChunkAt(
+            AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1)));
+      }
+    | span_as { $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, $1)); }
     ;
 
 select_expr
@@ -1275,6 +1281,27 @@ ptr<AST::MultiNodes> ConstructPBRecursively(size_t idx,
   auto mn = AST::Make<AST::MultiNodes>(ps->LOC());
   mn->Append(pb);
   return mn;
+}
+
+inline ptr<AST::ChunkAt> ReformChunkAt(const ptr<AST::ChunkAt> &ca) {
+  // normalize "_" list
+  if (!ca->positions) return ca;
+
+  bool not_tiled = true;
+  for (auto pos : ca->positions->values) {
+    if (auto biv = AST::GetIdentifier(*pos)) {
+      if (biv->name == "_") {
+        biv->name = "__choreo_no_tiling__";
+        continue;
+      }
+    }
+    not_tiled = false;
+  }
+
+  if (not_tiled)
+    ca->positions = nullptr;
+
+  return ca;
 }
 
 // Bison expects us to provide implementation - otherwise linker complains

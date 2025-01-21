@@ -336,6 +336,9 @@ public:
       vn.EnterScope();
       cur_fn = f->name;
       cannot_proceed = false; // recover state when starting a new function
+      int valno = vn.GetOrInsertValueNumberFromSignature("const_1");
+      vn.AssociateSignatureWithValueNumber(InScopeName("@__choreo_no_tiling__"),
+                                           valno);
     } else if (isa<AST::ParallelBy>(&n)) {
       vn.EnterScope();
     } else if (isa<AST::WithBlock>(&n)) {
@@ -1167,19 +1170,6 @@ public:
     auto span_name = RemoveSuffix(n.data->name, ".data") + ".span";
     auto sty = GetSpannedType(pty);
 
-    // if positions is all `__choreo_tile_one`, set positions to nullptr
-    if (n.positions) {
-      bool all_tile_one = true;
-      for (auto pos : n.positions->values) {
-        auto biv = dyn_cast<AST::Identifier>(pos);
-        if (biv == nullptr || biv->name != "__choreo_tile_one") {
-          all_tile_one = false;
-          break;
-        }
-      }
-      if (all_tile_one) n.positions = nullptr;
-    }
-
     if (!n.positions) {
       // it is just a symbol reference
       ca_valno = vn.GetValueNumberOfSignature(SSTab().InScopeName(span_name));
@@ -1223,19 +1213,6 @@ public:
           biv = cast<AST::Expr>(expr->GetL())->GetSymbol();
         }
         assert(biv && "failed to obtain the identifier.");
-        if (biv->name == "__choreo_tile_one") {
-          std::string one = "const_1";
-          int valno = vn.GetOrInsertValueNumberFromSignature(one);
-          Shape s =
-              GenShapeFromSignature(vn.GetSignatureFromValueNumber(valno));
-          pos->SetType(MakeBoundedITupleType(s));
-          if (!SSTab().DeclaredInScope("__choreo_tile_one")) {
-            std::string iv_name = SSTab().ScopedName("@" + biv->name);
-            vn.AssociateSignatureWithValueNumber(iv_name, valno);
-            SSTab().DefineSymbol("@" + biv->name, MakeMDSpanType(s));
-            SSTab().DefineSymbol(biv->name, pos->GetType());
-          }
-        }
         auto bound_name = SSTab().InScopeName("@" + biv->name);
         int bound_vn = vn.GetValueNumberOfSignature(bound_name);
         std::string bound_sn = vn.GetSignatureFromValueNumber(bound_vn);

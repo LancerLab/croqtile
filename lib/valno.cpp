@@ -59,6 +59,8 @@ ValueNumbering::VNSymbolName(const AST::Identifier& id) const {
 
 void ValueNumbering::EnterScope() {
   std::string indent = ScopeIndent();
+  assert(!indent.empty() && "unexpected empty indent.");
+  indent.pop_back();
 
   expressionValueNumbers.push_back({});
   valueNumberExpressions.push_back({});
@@ -87,7 +89,11 @@ void ValueNumbering::LeaveScope() {
     bind_info.Clear();
   }
 
-  if (trace) dbgs() << ScopeIndent() << "} // end scope-" << sname << "\n";
+  std::string indent = ScopeIndent();
+  assert(!indent.empty() && "unexpected empty indent.");
+  indent.pop_back();
+
+  if (trace) dbgs() << indent << "} // end scope-" << sname << "\n";
 }
 
 // It binds a expression sigature with an existing value number.  use it
