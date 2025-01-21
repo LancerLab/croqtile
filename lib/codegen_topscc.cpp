@@ -527,8 +527,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     // currently, the only case is the plder tied to global buffer
     //
     // assert(ssm.HasDeviceName(buf_name) && "buffer has been defined");
-    if (!ssm.HasDeviceName(buf_name))
-      pld_checklist.push_back(buf_name);
+    if (!ssm.HasDeviceName(buf_name)) pld_checklist.push_back(buf_name);
 
     claimFuture(UnScopedName(buf_name));
     // make following buffer reference all be indirect

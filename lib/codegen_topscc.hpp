@@ -76,30 +76,34 @@ public:
   void MapDeviceSymbolIfNotExist(const std::string& csym,
                                  const std::string& name) {
     assert(PrefixedWith(csym, "::") && "expect a scoped name.");
-    if (!device_map.back().count(csym))
-      MapDeviceSymbol(csym, name);
+    if (!device_map.back().count(csym)) MapDeviceSymbol(csym, name);
   }
 
   void DumpDeviceMap() {
-    dbgs() << "==================== Device Map Information ====================" << std::endl;
+    dbgs() << "==================== Device Map Information ===================="
+           << std::endl;
     dbgs() << "Symbol -> Buffer Name Mapping:" << "\n";
-    dbgs() << "--------------------------------------------------------------" << "\n";
+    dbgs() << "--------------------------------------------------------------"
+           << "\n";
 
     for (auto& table : device_map) {
       // Print a formatted table with columns for symbol and buffer name
-      dbgs() << std::setw(30) << std::left << "Symbol" 
-                << std::setw(50) << std::left << "Buffer Name" << "\n";
-      dbgs() << "--------------------------------------------------------------" << "\n";
+      dbgs() << std::setw(30) << std::left << "Symbol" << std::setw(50)
+             << std::left << "Buffer Name" << "\n";
+      dbgs() << "--------------------------------------------------------------"
+             << "\n";
 
       for (const auto& entry : table) {
-          dbgs() << std::setw(30) << std::left << entry.first  // Symbol
-                    << std::setw(50) << std::left << entry.second << "\n";  // Buffer Name
+        dbgs() << std::setw(30) << std::left << entry.first // Symbol
+               << std::setw(50) << std::left << entry.second
+               << "\n"; // Buffer Name
       }
-
     }
 
-    dbgs() << "--------------------------------------------------------------" << "\n";
-    dbgs() << "================================================================" << "\n";
+    dbgs() << "--------------------------------------------------------------"
+           << "\n";
+    dbgs() << "================================================================"
+           << "\n";
   }
 
   // only for specific purpose
@@ -265,7 +269,7 @@ private:
   // check if the placeholder buffer exists
   // this check can only be processed when all device symbol
   // has been mapped
-  void PLDCheck () {
+  void PLDCheck() {
     VST_DEBUG(ssm.DumpDeviceMap());
     for (int idx = 0; idx < pld_checklist.size(); ++idx) {
       auto pld_name = pld_checklist[idx];

@@ -164,7 +164,7 @@ void DMA::accept(Choreo::Visitor& v) {
 void ChunkAt::accept(Choreo::Visitor& v) {
   // handle span_as
   if (sa) sa->accept(v);
-  // note: visit the positions inside
+  // note: visit the positions/bounds inside
   v.Visit(*this);
 }
 
