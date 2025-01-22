@@ -8,7 +8,8 @@
 #include <string>
 
 #include "ast.hpp"
-#include "extern/ginac/ginac-1.8.7/install/include/ginac/ginac.h"
+// #include "extern/ginac/ginac-1.8.7/install/include/ginac/ginac.h"
+#include "ginac/ginac.h"
 #include "symtab.hpp"
 #include "types.hpp"
 #include "visitor.hpp"

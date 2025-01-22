@@ -15,6 +15,21 @@ gputest:
     - release/alpha
     - merge_requests
 
+cmake-build-test:
+  stage: check-in-tests
+  script:
+    - echo "CMAKE building tests with GPU..."
+    - make build-with-cmake 
+    - make clean-with-cmake
+    - make build-with-cmake-ninja 
+    - make test-with-cmake
+  tags:
+    - GPU
+  only:
+    - main
+    - release/alpha
+    - merge_requests
+
 gcu2test:
   stage: check-in-tests
   script:

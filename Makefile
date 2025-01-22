@@ -57,11 +57,26 @@ all: $(TARGET)
 test: $(TARGET)
 	$(LIT) tests && $(MAKE) standalone_test
 
+test-with-cmake: build-with-cmake-ninja
+	$(LIT) tests && $(MAKE) standalone-test-with-cmake
+
+standalone-test-with-cmake: build-with-cmake-ninja
+	cd tests/standalone/ && $(MAKE) test
+
+clean-with-cmake:
+	@rm -rf $(CMAKE_BUILD_DIR) $(TEST_TARGETS) tests/*.result
+
 build-with-cmake:
 	@echo "Starting build with CMake..."
 	@if [ ! -d $(CMAKE_BUILD_DIR) ]; then mkdir $(CMAKE_BUILD_DIR); fi
 	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE)
-	$(MAKE) -C $(CMAKE_BUILD_DIR)
+	time $(MAKE) -C $(CMAKE_BUILD_DIR)
+
+build-with-cmake-ninja:
+	@echo "Starting build with CMake..."
+	@if [ ! -d $(CMAKE_BUILD_DIR) ]; then mkdir $(CMAKE_BUILD_DIR); fi
+	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -G Ninja -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE)
+	time ninja -C $(CMAKE_BUILD_DIR)
 
 ci-gpu-test: setup $(TARGET)
 	$(LIT) tests && $(MAKE) standalone_test
