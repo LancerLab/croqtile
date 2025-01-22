@@ -1,5 +1,5 @@
-#ifndef __CHOREO_PRE_PROCESS__
-#define __CHOREO_PRE_PROCESS__
+#ifndef __CHOREO_PRE_PROCESS_HPP__
+#define __CHOREO_PRE_PROCESS_HPP__
 
 #include "aux.hpp"
 #include "context.hpp"
@@ -494,4 +494,4 @@ public:
 
 } // end namespace Choreo
 
-#endif //__CHOREO_PRE_PROCESS__
+#endif //__CHOREO_PRE_PROCESS_HPP__

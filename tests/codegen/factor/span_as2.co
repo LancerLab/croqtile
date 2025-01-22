@@ -1,4 +1,4 @@
-// RUN: choreo -gs  %s | FileCheck --match-full-lines %s
+// RUN: choreo -gs -t factor %s | FileCheck --match-full-lines %s
 
 //                    s32 [a,   b,   c] input
 __co__ auto transpose(s32 [64, 256, 32] input) {

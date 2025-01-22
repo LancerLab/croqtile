@@ -1,4 +1,4 @@
-// RUN: choreo -gs  -kt %s | FileCheck %s
+// RUN: choreo -gs -t factor -kt %s -o - | FileCheck %s
 
 __co__ void foo() {
   int i = 3;

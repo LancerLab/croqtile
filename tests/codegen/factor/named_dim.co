@@ -1,4 +1,4 @@
-// RUN: choreo -gs  %s | FileCheck --match-full-lines %s
+// RUN: choreo -gs -t factor %s -o - | FileCheck --match-full-lines %s
 
 __co__ auto foo(s32 [N, M, K] lhs, s32 [M, N, N] rhs, s32 [K, M] filter) {
   s32[K, M, K] output;

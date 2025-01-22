@@ -1,4 +1,4 @@
-// RUN: choreo -gs %s | FileCheck --match-full-lines %s
+// RUN: choreo -t factor -gs %s | FileCheck --match-full-lines %s
 // RUN: choreo -i %s | FileCheck --check-prefix=INFER --match-full-lines %s
 
 #define M 128

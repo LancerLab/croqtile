@@ -1,4 +1,4 @@
-// RUN: choreo -gs  %s | FileCheck %s --match-full-lines
+// RUN: choreo -gs -t factor %s | FileCheck %s --match-full-lines
 
 // device program
 __co__ void bounded(s32 [12, 4, 16] a) {

@@ -1,4 +1,4 @@
-// RUN: choreo -gs %s | FileCheck --match-full-lines %s
+// RUN: choreo -t factor -gs %s | FileCheck --match-full-lines %s
 
 __co__ s32 [512, 1024] chunkat_tile_one5(s32 [512, 1024] lhs, s32 [1024, 1024] rhs) { 
   s32[lhs.span(0), rhs.span(1)] output; 

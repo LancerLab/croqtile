@@ -1,4 +1,4 @@
-// RUN: choreo -gs  %s | FileCheck --match-full-lines %s
+// RUN: choreo -gs -t factor %s | FileCheck --match-full-lines %s
 
 // NOTE: this is a tmp test file that workarounds Value Numbering bug
 // referencing tops/factor/tests/samples/operators/add/main.cc

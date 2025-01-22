@@ -36,7 +36,7 @@ using namespace Choreo;
 
 // Major available options
 Option<std::string> target(
-    OptionKind::User, "--target", "-t", "factor",
+    OptionKind::User, "--target", "-t", "topscc",
     "Set the compilation target. The 'platform' includes <factor|topscc|cuda>.",
     "--target <platform>", true);
 Option<std::string> arch(OptionKind::User, "-arch", "", "gcu300",

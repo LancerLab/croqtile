@@ -1,4 +1,4 @@
-// RUN: choreo -gs  %s | FileCheck %s
+// RUN: choreo -gs -t factor %s | FileCheck %s
 
 // device program
 __co__ void ubound(s32 [180, 27] a, int ua, int ub) {

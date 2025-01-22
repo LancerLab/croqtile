@@ -1,4 +1,4 @@
-// RUN: choreo -gs  %s | FileCheck %s --match-full-lines
+// RUN: choreo -gs -t factor %s | FileCheck %s --match-full-lines
 
 __co__ void foo (f32[5+3*5, 5*(5+5), 5/2+1, 3*4/2, 3*5/2] a) {}
 

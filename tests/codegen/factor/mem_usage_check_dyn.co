@@ -1,4 +1,4 @@
-// RUN: choreo -gs -arch=gcu300 %s | FileCheck %s
+// RUN: choreo -t factor -gs -arch=gcu300 %s | FileCheck %s
 
 #include "choreo.h"
 
