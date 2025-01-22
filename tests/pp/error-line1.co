@@ -1,0 +1,9 @@
+// RUN: choreo %s 2>&1 |FileCheck %s
+
+#inline 32 "bb.c"
+__co__ void foo() {
+#line 35 "ab.c"
+  invalid;
+}
+
+// CHECK: ab.c:35.10: error:

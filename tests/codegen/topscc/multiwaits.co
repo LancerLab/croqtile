@@ -17,4 +17,4 @@ int main() {
   nowait(choreo::make_spanview(i));
 }
 
-// CHECK: [choreo-rt] Error is detected: future (defined at line 6:1) has been waited multiple times.
+// CHECK: [choreo-rt] Error is detected: future (defined at line 6:10) has been waited multiple times.

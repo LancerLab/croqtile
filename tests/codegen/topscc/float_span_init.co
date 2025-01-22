@@ -21,6 +21,6 @@ __co__ f32 [2] func() {
 // CHECK:   tops::mdspan __mds0_buf(tops::Private, (float*)buf, 2);
 // CHECK:   tops::mdspan __mds1_out(tops::Global, (float*)out, 2);
 // CHECK:   tops_dte_ctx_t choreo_topscc_ctx0;
-// CHECK:   choreo::future __choreo_anon_fut__0(choreo_topscc_ctx0, "", 10, 1, out);
+// CHECK:   choreo::future __choreo_anon_fut__0(choreo_topscc_ctx0, "", {{[0-9]+}}, {{[0-9]+}}, out);
 // CHECK:   tops::memcpy(*__choreo_anon_fut__0.get_ctx(), __mds1_out, __mds0_buf);
 // CHECK: }

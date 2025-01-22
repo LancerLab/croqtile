@@ -6,7 +6,7 @@ add_custom_command(
 )
 
 add_custom_command(
-  OUTPUT ${CMAKE_BINARY_DIR}/parser.tab.cc ${CMAKE_BINARY_DIR}/parser.tab.hh ${CMAKE_BINARY_DIR}/location.hh
+  OUTPUT ${CMAKE_BINARY_DIR}/parser.tab.cc ${CMAKE_BINARY_DIR}/parser.tab.hh
   COMMAND ${BISON_ENV} ${BISON_PATH} -t -d -o ${CMAKE_BINARY_DIR}/parser.tab.cc ${CMAKE_SOURCE_DIR}/lib/parser.yy
   DEPENDS ${CMAKE_SOURCE_DIR}/lib/parser.yy
   COMMENT "Generating parser.tab.cc and parser.tab.hh with bison"
@@ -44,7 +44,6 @@ add_custom_target(
   ${CMAKE_BINARY_DIR}/scanner.yy.cc 
   ${CMAKE_BINARY_DIR}/parser.tab.cc 
   ${CMAKE_BINARY_DIR}/parser.tab.hh 
-  ${CMAKE_BINARY_DIR}/location.hh
   ${CMAKE_BINARY_DIR}/cuda_script.inc
   ${CMAKE_BINARY_DIR}/factor_script.inc
   ${CMAKE_BINARY_DIR}/choreo_cuda_header.inc

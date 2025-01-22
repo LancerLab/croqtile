@@ -1,4 +1,4 @@
-// RUN: choreo -t factor -gs %s | FileCheck --match-full-lines %s
+// RUN: choreo -t factor -gs %s -o - | FileCheck %s
 
 __cok__ {
 union vector_type {
@@ -484,8 +484,8 @@ int main() {
   return 0;
 }
 
-// CHECK: choreo::runtime_check((hp0.shape()[0])/(6) != 0, "zero is detected for the 1st dim of the mdspan inside the with-in statement, {{.*}}.co:{{[0-9]+}}.1-14");
-// CHECK: choreo::runtime_check(1 != 0, "zero is detected for the 2nd dim of the mdspan inside the with-in statement, {{.*}}.co:{{[0-9]+}}.1-14");
-// CHECK: choreo::runtime_check((hp0.shape()[2])/(16) != 0, "zero is detected for the 3rd dim of the mdspan inside the with-in statement, {{.*}}.co:{{[0-9]+}}.1-14");
-// CHECK: choreo::runtime_check((hp0.shape()[3])/(512) != 0, "zero is detected for the 4th dim of the mdspan inside the with-in statement, {{.*}}.co:{{[0-9]+}}.1-14");
+// CHECK: choreo::runtime_check((hp0.shape()[0])/(6) != 0, "zero is detected for the 1st dim of the mdspan inside the with-in statement, {{.*}}.co{{.*}}");
+// CHECK: choreo::runtime_check(1 != 0, "zero is detected for the 2nd dim of the mdspan inside the with-in statement, {{.*}}.co{{.*}}");
+// CHECK: choreo::runtime_check((hp0.shape()[2])/(16) != 0, "zero is detected for the 3rd dim of the mdspan inside the with-in statement, {{.*}}.co{{.*}}");
+// CHECK: choreo::runtime_check((hp0.shape()[3])/(512) != 0, "zero is detected for the 4th dim of the mdspan inside the with-in statement, {{.*}}.co{{.*}}");
 

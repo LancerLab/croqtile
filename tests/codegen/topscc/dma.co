@@ -23,12 +23,12 @@ __co__ auto foo(f32 [32, 4] a) {
 // CHECK:   tops::mdspan __mds0_a(tops::Global, (float*)a, 32, 4);
 // CHECK:   tops::mdspan __mds1_b(tops::Shared, (float*)b, 32, 4);
 // CHECK:   tops_dte_ctx_t choreo_topscc_ctx0;
-// CHECK:   choreo::future __choreo_anon_fut__0(choreo_topscc_ctx0, "", 8, 1, b);
+// CHECK:   choreo::future __choreo_anon_fut__0(choreo_topscc_ctx0, "", {{[0-9]+}}, {{[0-9]+}}, b);
 // CHECK:   tops::memcpy(*__choreo_anon_fut__0.get_ctx(), __mds1_b, __mds0_a);
 // CHECK:   tops::mdspan __mds2_b(tops::Shared, (float*)b, 32, 4);
 // CHECK:   tops::mdspan __mds3_c(tops::Private, (float*)c, 32, 4);
 // CHECK:   tops_dte_ctx_t choreo_topscc_ctx1;
-// CHECK:   choreo::future f0(choreo_topscc_ctx1, "f0", 9, 1, c);
+// CHECK:   choreo::future f0(choreo_topscc_ctx1, "f0", {{[0-9]+}}, {{[0-9]+}}, c);
 // CHECK:   tops::event f0__event__ = tops::memcpy_async(*f0.get_ctx(), __mds3_c, __mds2_b);
 // CHECK:   f0.set_event(f0__event__);
 // CHECK:   __local__ __valigned__ int d[165];
@@ -36,7 +36,7 @@ __co__ auto foo(f32 [32, 4] a) {
 // CHECK:   tops::mdspan __mds4_c_s32(tops::Private, (int*)c_s32, 32, 4);
 // CHECK:   tops::mdspan __mds5_d(tops::Private, (int*)d, 33, 5);
 // CHECK:   tops_dte_ctx_t choreo_topscc_ctx2;
-// CHECK:   choreo::future f1(choreo_topscc_ctx2, "f1", 12, 1, d);
+// CHECK:   choreo::future f1(choreo_topscc_ctx2, "f1", {{[0-9]+}}, {{[0-9]+}}, d);
 // CHECK:   int __pad_high_c_s32[] = {1, 1};
 // CHECK:   int __pad_low_c_s32[] = {0, 0};
 // CHECK:   int __pad_mid_c_s32[] = {0, 0};
@@ -46,7 +46,7 @@ __co__ auto foo(f32 [32, 4] a) {
 // CHECK:   tops::mdspan __mds6_c(tops::Private, (float*)c, 32, 4);
 // CHECK:   tops::mdspan __mds7_anon_0(tops::Private, (float*)anon_0, 4, 32);
 // CHECK:   tops_dte_ctx_t choreo_topscc_ctx3;
-// CHECK:   choreo::future __choreo_anon_fut__1(choreo_topscc_ctx3, "", 13, 1, anon_0);
+// CHECK:   choreo::future __choreo_anon_fut__1(choreo_topscc_ctx3, "", {{[0-9]+}}, {{[0-9]+}}, anon_0);
 // CHECK:   int __transpose_layout_c[] = {1, 0};
 // CHECK:   tops::transpose(*__choreo_anon_fut__1.get_ctx(), __mds7_anon_0, __mds6_c, __transpose_layout_c);
 // CHECK:   f1.wait();

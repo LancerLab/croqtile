@@ -10,7 +10,7 @@
 #include "aux.hpp"
 #include "context.hpp"
 #include "dmaconf.hpp"
-#include "location.hh"
+#include "loc.hpp"
 #include "symtab.hpp"
 
 extern Choreo::SymbolTable symtab;

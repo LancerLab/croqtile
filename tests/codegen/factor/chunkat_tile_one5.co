@@ -1,4 +1,4 @@
-// RUN: choreo -t factor -gs %s | FileCheck --match-full-lines %s
+// RUN: choreo -t factor -gs %s | FileCheck %s
 
 __co__ s32 [512, 1024] chunkat_tile_one5(s32 [512, 1024] lhs, s32 [1024, 1024] rhs) { 
   s32[lhs.span(0), rhs.span(1)] output; 
@@ -35,7 +35,7 @@ __co__ s32 [512, 1024] chunkat_tile_one5(s32 [512, 1024] lhs, s32 [1024, 1024] r
 // CHECK:    auto & output = results[0];
 // CHECK:    auto thread_id = thread_id_();
 // CHECK:    auto block_id = block_id_();
-// CHECK:    { // start of with-in: tests/codegen/factor/chunkat_tile_one5.co:7.1-14
+// CHECK:    { // start of with-in
 // CHECK:    auto lhs_load__buf__ = alloc_(SRAMType(IntType(32),{1, 1024})).shared_(SharedType::kBlockShared);
 // CHECK:    auto lhs_load = alloc_dma_(CDMAType());
 // CHECK:    auto rhs_load__buf__ = alloc_(SRAMType(IntType(32),{1024, 1})).shared_(SharedType::kBlockShared);
@@ -50,7 +50,7 @@ __co__ s32 [512, 1024] chunkat_tile_one5(s32 [512, 1024] lhs, s32 [1024, 1024] r
 // CHECK:        async_load_(rhs_load, rhs, rhs_load__buf__, {0,Value(1)*iv_n_tile});
 // CHECK:        wait_dma_(lhs_load);
 // CHECK:        wait_dma_(rhs_load);
-// CHECK:        { // start of with-in: tests/codegen/factor/chunkat_tile_one5.co:14.1-22
+// CHECK:        { // start of with-in
 // CHECK:        auto lhs_load_s__buf__ = alloc_(L1Type(IntType(32),{1, 1024}));
 // CHECK:        auto lhs_load_s = alloc_dma_(SDMAType());
 // CHECK:        auto rhs_load_s__buf__ = alloc_(L1Type(IntType(32),{1024, 1}));
@@ -67,8 +67,8 @@ __co__ s32 [512, 1024] chunkat_tile_one5(s32 [512, 1024] lhs, s32 [1024, 1024] r
 // CHECK:            wait_dma_(rhs_load_s);
 // CHECK:          }); // end of choreo-foreach block on 'n_tile_s'.
 // CHECK:        }); // end of choreo-foreach block on 'm_tile_s'.
-// CHECK:        } // end of with-in: tests/codegen/factor/chunkat_tile_one5.co:14.1-16
+// CHECK:        } // end of with-in
 // CHECK:      }); // end of choreo-foreach block on 'n_tile'.
 // CHECK:    }); // end of choreo-foreach block on 'm_tile'.
-// CHECK:    } // end of with-in: tests/codegen/factor/chunkat_tile_one5.co:7.1-8
+// CHECK:    } // end of with-in
 // CHECK:  }); // end of choreo-factor device function

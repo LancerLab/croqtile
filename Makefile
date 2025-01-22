@@ -101,13 +101,13 @@ $(CHOREO_BIN): utils/choreo_main.cpp $(BUILD_DIR)/parser.tab.o $(BUILD_DIR)/scan
 scanner.yy.cc: $(LEX_SRC)
 	$(FLEX) -o $@ $(LEX_SRC)
 
-parser.tab.cc parser.tab.hh location.hh: $(PARSER_SRC)
+parser.tab.cc parser.tab.hh: $(PARSER_SRC)
 	$(BISON) $(BISON_FLAGS) $(PARSER_SRC)
 
-$(BUILD_DIR)/%.o : %.cc $(HEADER_FILES) parser.tab.hh location.hh | $(BUILD_DIR)
+$(BUILD_DIR)/%.o : %.cc $(HEADER_FILES) parser.tab.hh | $(BUILD_DIR)
 	$(CC) -I$(WORK_DIR) -I$(SRC_DIR) $(CFLAGS) $< -c -o $@
 
-$(BUILD_DIR)/%.o : $(SRC_DIR)/%.cpp $(HEADER_FILES) location.hh | $(BUILD_DIR)
+$(BUILD_DIR)/%.o : $(SRC_DIR)/%.cpp $(HEADER_FILES) | $(BUILD_DIR)
 	$(CC) -I$(WORK_DIR) -I$(SRC_DIR) $(CFLAGS) $(SYMBOLIC_INCLUDE_FLAGS) $< -c  -o $@
 
 $(COPP_BIN): utils/choreo_preprocess.cpp $(HEADER_FILES)

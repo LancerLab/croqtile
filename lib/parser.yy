@@ -8,11 +8,12 @@
 %define parse.error verbose
 %define parse.assert
 %define api.namespace { Choreo }
-//%define api.token.prefix {TOK_}
 %locations
+%define api.location.type {Choreo::location}
 
 %code requires {
 
+#include "loc.hpp"
 #include <string>
 #include <fstream>
 

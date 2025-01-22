@@ -220,7 +220,7 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  loc.begin.filename = loc.end.filename = &filename;
+  loc.begin.filename = loc.end.filename = filename;
 
   if (prt_pass) dbgs() << "|- " << filename << "\n";
 

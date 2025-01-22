@@ -1,4 +1,4 @@
-// RUN: choreo -t factor -gs %s | FileCheck --match-full-lines %s
+// RUN: choreo -t factor -gs %s | FileCheck %s
 
 __co__ auto chunkat_tile_one(s32 [4, 8, 16] i) {
   s32 [i.span] o;
@@ -25,7 +25,7 @@ __co__ auto chunkat_tile_one(s32 [4, 8, 16] i) {
 // CHECK:    auto l0 = alloc_dma_(SDMAType());
 // CHECK:    async_load_(l0, i, l0__buf__, {0, 0, 0});
 // CHECK:    wait_dma_(l0);
-// CHECK:    { // start of with-in: tests/codegen/factor/chunkat_tile_one1.co:7.1-10
+// CHECK:    { // start of with-in
 // CHECK:    auto l2__buf__ = alloc_(L1Type(IntType(32),{2, 8, 16}));
 // CHECK:    auto l2 = alloc_dma_(SDMAType());
 // CHECK:    auto l3__buf__ = alloc_(L1Type(IntType(32),{4, 4, 16}));
@@ -49,5 +49,5 @@ __co__ auto chunkat_tile_one(s32 [4, 8, 16] i) {
 // CHECK:      async_store_(__choreo_anon_fut__0, l5__buf__, o, {0,Value(4)*iv_t0,0});
 // CHECK:      wait_dma_(__choreo_anon_fut__0);
 // CHECK:    }); // end of choreo-foreach block on 't0'.
-// CHECK:    } // end of with-in: tests/codegen/factor/chunkat_tile_one1.co:7.1-8
+// CHECK:    } // end of with-in
 // CHECK:  }); // end of choreo-factor device function

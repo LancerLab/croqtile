@@ -3,7 +3,7 @@
 
 // shared global context for a compilation process
 
-#include "location.hh"
+#include "loc.hpp"
 #include "symvals.hpp"
 #include "types.hpp"
 #include <map>

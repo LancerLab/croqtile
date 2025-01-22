@@ -15,4 +15,4 @@ int main() {
   nowait(choreo::make_spanview(i));
 }
 
-// CHECK: [choreo-rt] Error is detected: future (defined at line 7:1) has never been waited.
+// CHECK: [choreo-rt] Error is detected: future (defined at line 7:10) has never been waited.

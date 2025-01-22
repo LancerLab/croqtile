@@ -1,0 +1,8 @@
+// RUN: choreo %s 2>&1 |FileCheck %s
+
+#inline 32 "bb.c"
+__co__ void foo() {
+#line 78
+  should fail
+}
+// CHECK: 78.10: error:

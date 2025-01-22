@@ -17,27 +17,17 @@
 #include "symtab.hpp"
 #include "scanner.hpp"
 #include "parser.tab.hh"
-#include "location.hh"
+#include "loc.hpp"
 
 
 static int scope = 0;
 
 extern Choreo::location loc;
 
-void update_location(const char *text) {
-  const char* it = text;
-  while (*it) {
-    if (*it == '\n') {
-      loc.lines();
-      loc.step(); // Reset column to 0 or 1 based on your implementation
-    } else {
-      loc.columns();
-    }
-    ++it;
-  }
-}
-
 std::string kernel_buffer; // buffering the kernel code
+
+void update_location(const char *text);
+void handle_line_directive(const char* text);
 
 // Original yyterminate() macro returns int. Since we're using Bison 3 variants
 // as tokens, we must redefine it to change type from `int` to `Parser::semantic_type`
@@ -57,6 +47,15 @@ fpnum_f     -?[0-9]+\.[0-9]+[fF]
 blank       [ \t\r]
 
 %%
+<INITIAL,KERNEL,CO_FUNC>{
+    #line[ \t]+([0-9]+)[ \t]+\"([^\"]*)\" {
+      handle_line_directive(yytext);
+    }
+    #line[ \t]+([0-9]+) {
+      handle_line_directive(yytext);
+    }
+}
+
 <INITIAL>{
   "//".*   {
     if (Choreo::Scanner::KeepComments())
@@ -202,8 +201,35 @@ blank       [ \t\r]
 %%
 
 // Any helper functions or C code goes here.
+void handle_line_directive(const char* text) {
+  // Parse the line number and optional filename
+  int new_line;
+  char filename[256] = {0};
+  if (sscanf(text, "#line %d \"%[^\"]\"", &new_line, filename) == 2) {
+    // Update location with new line and filename
+	Choreo::location::filename_type fname(filename); // Convert to filename_type
+	loc.initialize(fname, new_line - 1, 0); // Use correct type
+  } else if (sscanf(text, "#line %d", &new_line) == 1) {
+    // Update only line number if no filename is provided
+    loc.initialize("", new_line - 1, 0); // Reset to line-1
+  }
+}
+
+void update_location(const char *text) {
+  const char* it = text;
+  loc.step(); // set begin to current end
+  while (*it) {
+    if (*it == '\n') {
+      loc.lines();
+    } else {
+      loc.columns();
+    }
+    ++it;
+  }
+}
+
 int yywrap() {
-    return 1;
+  return 1;
 }
 
 bool Choreo::Scanner::debug = false;

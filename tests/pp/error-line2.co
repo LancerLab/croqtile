@@ -1,0 +1,7 @@
+// RUN: choreo %s 2>&1 | FileCheck %s
+
+#line 32 "bb.c"
+__co__ foo() {
+}
+
+// CHECK: bb.c:32.8: error:

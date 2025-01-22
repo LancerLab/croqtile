@@ -8,7 +8,7 @@
 #include <unordered_set>
 
 #include "ast.hpp"
-#include "location.hh"
+#include "loc.hpp"
 
 namespace Choreo {
 
