@@ -740,6 +740,7 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
         auto bvn = id->name;
         if (bvn == "__choreo_no_tiling__") {
           offss << "0";
+          if (++dim_cursor < rank) offss << ",";
         } else {
           auto ty = cast<BoundedType>(NodeType(*id));
           // iterate over single bounded variables
@@ -752,9 +753,9 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
             auto iv_str = ExprSTR(AST::Make<AST::Identifier>(id->LOC(), name));
             offss << "Value(" << RSTR(shape.ValueAt(dim_cursor)) << ")*"
                   << iv_str;
+            if (++dim_cursor < rank) offss << ",";
           }
         }
-        if (++dim_cursor < rank) offss << ",";
       } else if (auto gi_exp = dyn_cast<AST::Expr>(bv)) {
         auto id = cast<AST::Expr>(gi_exp->GetL())->GetSymbol();
         auto ty = cast<BoundedType>(NodeType(*id));

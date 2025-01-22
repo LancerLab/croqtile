@@ -146,6 +146,26 @@ inline static size_t SizeOf(FundamentalType ft) {
   return 0;
 }
 
+inline static size_t SizeOf(BaseType bt) {
+  switch (bt) {
+  case BaseType::DOUBLE: return sizeof(double);
+  case BaseType::F32:
+  case BaseType::U32:
+  case BaseType::S32: return 4;
+  case BaseType::INT: return sizeof(int);
+  case BaseType::FLOAT: return sizeof(float);
+  case BaseType::F16:
+  case BaseType::BF16:
+  case BaseType::U16:
+  case BaseType::S16: return 2;
+  case BaseType::U8:
+  case BaseType::S8: return 1;
+  case BaseType::BOOL: return sizeof(bool);
+  default: choreo_unreachable("base type is not supported.");
+  }
+  return 0;
+}
+
 // utility functions to map types to strings, and the opposite.
 inline static BaseType BaseTypeFromString(const std::string& input) {
   static const std::unordered_map<std::string, BaseType> typeMap = {

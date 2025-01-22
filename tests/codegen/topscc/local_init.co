@@ -16,8 +16,8 @@ __co__ void init() {
 // CHECK:   tops::dte_scope s_c__init(c__init);
 // CHECK:   tops::memset(c__init, tops::mdspan(tops::Private, (unsigned char*)c, 78), 15);
 
-// CHECK:   float a__init[17];
-// CHECK:   std::fill(std::begin(a__init), std::end(a__init), 1);
-// CHECK:   float * a__device= nullptr;
+// CHECK:   float * a__device = nullptr;
 // CHECK:   choreo::abend_true(topsMalloc(&a__device, 68ULL));
-// CHECK:   choreo::abend_true(topsMemcpy(a__device, a__init, 68ULL, topsMemcpyHostToDevice));
+// CHECK:   float a_init_val = 1;
+// CHECK:   int* a_init_vptr = reinterpret_cast<int*>(&a_init_val);
+// CHECK:   choreo::abend_true(topsMemsetD32(a__device, *a_init_vptr, 17));
