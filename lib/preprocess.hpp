@@ -52,7 +52,7 @@ private:
   CodePartition code_partition = CP_USER;
 
   bool c_skip = false;
-  size_t line_num = 0;
+  size_t line_num = 1;
 
   bool debug = false;
 
@@ -357,6 +357,7 @@ private:
         co_skip_stack.push(co_skip_line);
         co_skip_line = co_skip_line || !condition;
       }
+      if (!co_skip_line) output << "#line " << line_num + 1 << "\n";
     } else if (isDirective(bline, "#ifndef")) {
       std::regex ifndefRegex("#ifndef\\s+(\\w+)");
       std::smatch match;
@@ -366,6 +367,7 @@ private:
         co_skip_stack.push(co_skip_line);
         co_skip_line = co_skip_line || !condition;
       }
+      if (!co_skip_line) output << "#line " << line_num + 1 << "\n";
     } else if (isDirective(bline, "#define")) {
       if (cur_cond && !cur_skip) {
         std::regex defineRegex("#define\\s+(\\w+)(?:\\s+(.*))?");
@@ -374,6 +376,7 @@ private:
           localDefines[match[1]] = match[2].matched ? match[2].str() : "1";
         }
       }
+      if (!co_skip_line) output << "#line " << line_num + 1 << "\n";
     } else if (isDirective(bline, "#undef")) {
       if (cur_cond && !cur_skip) {
         std::regex undefRegex("#undef\\s+(\\w+)");
@@ -382,6 +385,7 @@ private:
           localDefines.erase(match[1]);
         }
       }
+      if (!co_skip_line) output << "#line " << line_num + 1 << "\n";
     } else if (isDirective(bline, "#if")) {
       std::regex ifRegex("#if\\s+(.*)");
       std::smatch match;
@@ -397,18 +401,21 @@ private:
           co_skip_line = true;
         }
       }
+      if (!co_skip_line) output << "#line " << line_num + 1 << "\n";
     } else if (isDirective(bline, "#else")) {
       if (!co_condition_stack.empty()) {
         bool currentCondition = co_condition_stack.top();
         co_condition_stack.top() = !currentCondition;
         co_skip_line = co_skip_stack.top() || !co_condition_stack.top();
       }
+      if (!co_skip_line) output << "#line " << line_num + 1 << "\n";
     } else if (isDirective(bline, "#endif")) {
       if (!co_condition_stack.empty()) {
         co_condition_stack.pop();
         co_skip_line = co_skip_stack.top();
         co_skip_stack.pop();
       }
+      if (!co_skip_line) output << "#line " << line_num + 1 << "\n";
     } else if (!co_skip_line) {
       size_t co_start = 0;
       size_t co_end = aline.size();

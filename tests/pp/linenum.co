@@ -1,0 +1,22 @@
+// RUN: choreo -E %s |FileCheck %s
+
+__co__ void foo(f32 [15] input) {
+#define USE_SWAP
+  parallel p by 1 {
+    f0 = dma.copy.async input => local;
+    f1 = dma.copy.async input => local;
+#ifdef USE_SWAP
+    swap(f0, f1);
+    wait f1;
+#else
+    f2 = select(1, f0, f1);
+    wait f2;
+#endif
+    int a = 3;
+  }
+}
+
+// CHECK: #line 5
+// CHECK: #line 9
+// CHECK-NOT: #line 12
+// CHECK: #line 15
