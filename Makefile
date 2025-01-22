@@ -60,6 +60,10 @@ test: $(TARGET)
 test-with-cmake: build-with-cmake-ninja
 	$(LIT) tests && $(MAKE) standalone-test-with-cmake
 
+ci-gpu-build-with-cmake-test: setup
+	$(MAKE) build-with-cmake-ninja
+	$(MAKE) build-with-cmake
+
 standalone-test-with-cmake: build-with-cmake-ninja
 	cd tests/standalone/ && $(MAKE) test
 

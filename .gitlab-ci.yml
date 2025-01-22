@@ -19,16 +19,11 @@ cmake-build-test:
   stage: check-in-tests
   script:
     - echo "CMAKE building tests with GPU..."
-    - make build-with-cmake 
-    - make clean-with-cmake
-    - make build-with-cmake-ninja 
-    - make test-with-cmake
+    - make ci-gpu-build-with-cmake-test
   tags:
     - GPU
   only:
     - main
-    - release/alpha
-    - merge_requests
 
 gcu2test:
   stage: check-in-tests
