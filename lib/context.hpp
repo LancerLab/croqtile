@@ -196,20 +196,35 @@ public:
 
   size_t GetMemCapacity(Storage sto) const {
     switch (arch) {
-    case TargetArch::GCU21:
+    case TargetArch::GCU21: {
       switch (sto) {
       case Storage::LOCAL: return 1008ull * 1024;             // 1008KB
       case Storage::SHARED: return 24ull * 1024 * 1024;       // 24MB
       case Storage::GLOBAL: return 4ull * 1024 * 1024 * 1024; // 4GB
       default: choreo_unreachable("Unsupported mem level.");
       }
-    case TargetArch::GCU3:
+    }
+
+    case TargetArch::GCU3: {
       switch (sto) {
-      case Storage::LOCAL: return 1.5 * 1024 * 1024;          // 1.5MB
-      case Storage::SHARED: return 24ull * 1024 * 1024;       // 24MB
-      case Storage::GLOBAL: return 4ull * 1024 * 1024 * 1024; // 4GB
+      case Storage::LOCAL:
+        switch (GetTarget()) {
+        case CompileTarget::Factor: return 1.5 * 1024 * 1024; // 1.5MB
+        case CompileTarget::Topscc:
+          return 1.5 * 1024 * 1024 - 512; // special case
+        default: choreo_unreachable("Unhandled target.");
+        }
+      case Storage::SHARED:
+        switch (GetTarget()) {
+        case CompileTarget::Factor: return 24ull * 1024 * 1024; // 24MB
+        case CompileTarget::Topscc: return 64ull * 1024 * 1024; // 64MB
+        default: choreo_unreachable("Unhandled target.");
+        }
+      case Storage::GLOBAL: return 40.75 * 1024 * 1024 * 1024; // 40.75GB
       default: choreo_unreachable("Unsupported mem level.");
       }
+    }
+
     default: choreo_unreachable("Unsupported target arch.");
     }
     return 0;
