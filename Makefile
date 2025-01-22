@@ -62,7 +62,6 @@ test-with-cmake: build-with-cmake-ninja
 
 ci-gpu-build-with-cmake-test: setup
 	$(MAKE) build-with-cmake-ninja
-	$(MAKE) build-with-cmake
 
 standalone-test-with-cmake: build-with-cmake-ninja
 	cd tests/standalone/ && $(MAKE) test
