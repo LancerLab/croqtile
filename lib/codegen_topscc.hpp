@@ -271,7 +271,7 @@ private:
   // has been mapped
   void PLDCheck() {
     VST_DEBUG(ssm.DumpDeviceMap());
-    for (int idx = 0; idx < pld_checklist.size(); ++idx) {
+    for (size_t idx = 0; idx < pld_checklist.size(); ++idx) {
       auto pld_name = pld_checklist[idx];
       assert(ssm.HasDeviceName(pld_name) && "buffer has been defined");
     }

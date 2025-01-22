@@ -395,10 +395,10 @@ ValueNumbering::SignBoundedOperation(const location& loc, const std::string& op,
                                      bool verbose) {
   std::optional<std::string> res;
   if (op == "+" || op == "-") {
-    if (isa<BoundedIntegerType>(lhs.GetType()) &&
+    if (isa<BoundedType>(lhs.GetType()) && (lhs.GetType()->Dims() == 1) &&
         (isa<IntegerType>(rhs.GetType())))
       res = GetSignatureForNode(lhs);
-    else if (isa<BoundedIntegerType>(rhs.GetType()) &&
+    else if (isa<BoundedType>(rhs.GetType()) && (rhs.GetType()->Dims() == 1) &&
              (isa<IntegerType>(lhs.GetType())))
       res = GetSignatureForNode(rhs);
     else if (isa<BoundedITupleType>(lhs.GetType()) &&
@@ -408,7 +408,9 @@ ValueNumbering::SignBoundedOperation(const location& loc, const std::string& op,
              (isa<ITupleType>(lhs.GetType())))
       res = GetSignatureForNode(rhs);
     else
-      choreo_unreachable("operation is not permitted.");
+      choreo_unreachable("operation '" + op + "' is not permitted for '" +
+                         STR(lhs) + "(" + PSTR(lhs.GetType()) + ")' and '" +
+                         STR(rhs) + "(" + PSTR(rhs.GetType()) + ")'.");
   } else if (op == "#") {
     if (IsActualBoundedIntegerType(lhs.GetType()) &&
         IsActualBoundedIntegerType(rhs.GetType())) {

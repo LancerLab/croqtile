@@ -175,7 +175,7 @@ public:
   void AssociateSignatureWithValueNumber(const std::string& sig, int valno);
   void AssociateSignatureWithInvalidValueNumber(const std::string& sig);
   // rebind/modify the value number.
-  // Caution: only used for scenario where the value number hass not been
+  // Caution: only used for scenario where the value number has not been
   // determined yet.
   void RebindSignatureWithValueNumber(const std::string& sig, int valno);
 
@@ -693,7 +693,6 @@ public:
     TraceEachVisit(n);
 
     if (cannot_proceed) return true;
-
     if (SSTab().IsDeclared(n.name)) return true;
 
     // this is the un-type-annotated declaration
@@ -1010,6 +1009,7 @@ public:
       Shape s = GenShapeFromSignature(vn_sig);
       n.with->SetType(MakeBoundedITupleType(s));
       SSTab().DefineSymbol("@" + n.with->name, MakeMDSpanType(s));
+      SSTab().DefineSymbol(n.with->name, n.with->GetType());
     }
     InvalidateVN(cur_mdspan_vn);
 
