@@ -45,6 +45,7 @@ num         [0-9]+
 fpnum       -?[0-9]+\.[0-9]+
 fpnum_f     -?[0-9]+\.[0-9]+[fF]
 blank       [ \t\r]
+cstr        \"([^"\\]|\\.)*\"
 
 %%
 <INITIAL,KERNEL,CO_FUNC>{
@@ -110,6 +111,27 @@ blank       [ \t\r]
   {num}      return Choreo::Parser::make_NUM(std::stoi(yytext), loc);
   {fpnum}    return Choreo::Parser::make_DOUBLE(std::stod(yytext), loc);
   {fpnum_f}  return Choreo::Parser::make_FLOAT(std::stof(yytext), loc);
+  {cstr}     { // Remove the surrounding quotes and unescape
+               std::string str = yytext;
+               str = str.substr(1, str.length() - 2); // Remove the quotes
+
+               // Replace escape sequences
+               size_t pos = 0;
+               while ((pos = str.find("\\", pos)) != std::string::npos) {
+                 if (pos + 1 < str.length()) {
+                   switch (str[pos + 1]) {
+                     case 'n': str.replace(pos, 2, "\n"); break;
+                     case 't': str.replace(pos, 2, "\t"); break;
+                     case '"': str.replace(pos, 2, "\""); break;
+                     case '\\': str.replace(pos, 2, "\\"); break;
+                     default: ++pos; break; // Leave unsupported sequences
+                   }
+                 } else {
+                   ++pos;
+                 }
+               }
+               return Choreo::Parser::make_STRING(str, loc);
+             }
   "//".*     {}  // Ignore everything from // to the end of the line
   "auto"     return Choreo::Parser::make_AUTO(yytext, loc);
   "mdspan"   return Choreo::Parser::make_MDSPAN(yytext, loc);
@@ -147,6 +169,7 @@ blank       [ \t\r]
   "=>"       return Choreo::Parser::make_TRANS(loc);
   "swap"     return Choreo::Parser::make_SWAP(yytext, loc);
   "rotate"   return Choreo::Parser::make_ROTATE(yytext, loc);
+  "assert"   return Choreo::Parser::make_ASSERT (yytext,loc);
   "if"       return Choreo::Parser::make_IF(yytext, loc);
   "else"     return Choreo::Parser::make_ELSE(yytext, loc);
   "parallel" return Choreo::Parser::make_PARA(yytext, loc);
@@ -168,7 +191,7 @@ blank       [ \t\r]
   "/"        return Choreo::Parser::make_SLASH  (loc);
   "%"        return Choreo::Parser::make_PECET  (loc);
   "cdiv"     return Choreo::Parser::make_CDIV   (loc);
-  "after"    return Choreo::Parser::make_CHAIN   (loc);
+  "after"    return Choreo::Parser::make_CHAIN  (loc);
   "="        return Choreo::Parser::make_ASSIGN (loc);
   "<"        return Choreo::Parser::make_LT     (loc);
   ">"        return Choreo::Parser::make_GT     (loc);

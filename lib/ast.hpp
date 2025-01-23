@@ -315,6 +315,42 @@ struct FloatLiteral : public Node, public TypeIDProvider<FloatLiteral> {
   __UDT_TYPE_INFO__(Node, FloatLiteral)
 };
 
+struct StringLiteral : public Node, public TypeIDProvider<StringLiteral> {
+  std::string value;
+  StringLiteral(const location& l, std::string v)
+      : Node(l, MakeIntegerType()), value(v) {}
+
+  // allow copy construction
+  explicit StringLiteral(const StringLiteral& il)
+      : StringLiteral(il.LOC(), il.value) {}
+
+  const std::string Val() const { return value; }
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << prefix << "\"";
+    for (char c : value) {
+      switch (c) {
+      case '\n': os << "\\n"; break;
+      case '\t': os << "\\t"; break;
+      case '\\': os << "\\\\"; break;
+      case '\"': os << "\\\""; break;
+      default:
+        if (isprint(c)) {
+          os << c; // Print printable characters as is
+        } else {
+          os << "\\x" << std::hex << std::setw(2) << std::setfill('0')
+             << (static_cast<unsigned char>(c));
+        }
+      }
+    }
+    os << "\"";
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, StringLiteral)
+};
+
 struct Expr : public Node, public TypeIDProvider<Expr> {
   // Different expression type
   enum Form { Unary, Binary, Ternary, Reference };
@@ -1354,13 +1390,16 @@ struct Call : public Node, public TypeIDProvider<Call> {
   ptr<Identifier> function;
   ptr<MultiValues> arguments;
   ptr<MultiValues> template_args;
+  bool is_bif; // built-in?
 
-  Call(const location& l, const ptr<Identifier>& f, const ptr<MultiValues>& a)
-      : Node(l), function(f), arguments(a), template_args(nullptr) {}
+  Call(const location& l, const ptr<Identifier>& f, const ptr<MultiValues>& a,
+       bool builtin = false)
+      : Node(l), function(f), arguments(a), template_args(nullptr),
+        is_bif(builtin) {}
 
   Call(const location& l, const ptr<Identifier>& f, const ptr<MultiValues>& a,
        const ptr<MultiValues>& b)
-      : Node(l), function(f), arguments(a), template_args(b) {
+      : Node(l), function(f), arguments(a), template_args(b), is_bif(false) {
     arguments->SetDelimiter(", ");
     template_args->SetDelimiter(", ");
   }
@@ -1371,6 +1410,7 @@ struct Call : public Node, public TypeIDProvider<Call> {
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Call: " << STR(*function);
+    if (is_bif) os << " (built-in)";
     os << "\n" << prefix << "  `- with arguments: " << STR(*arguments);
     if (template_args)
       os << "\n"

@@ -159,6 +159,7 @@ void choreo_info(const char *message) {
 %token <int> NUM
 %token <float> FLOAT
 %token <double> DOUBLE
+%token <std::string> STRING
 %token <std::string> HOST_CODE KERNEL_CODE
 %token <std::string> IDENTIFIER ATTR_CO
 // type related
@@ -166,7 +167,7 @@ void choreo_info(const char *message) {
 %token <Choreo::Storage> LOCAL SHARED GLOBAL
 %token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT BOOL VOID
 // builtin operations
-%token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK AT WAIT CALL AUTO SELECT SWAP ROTATE FNDATASPANAS CHUNKINBOUND
+%token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK AT WAIT CALL AUTO SELECT SWAP ROTATE FNDATASPANAS CHUNKINBOUND ASSERT
 // control related
 %token <std::string> IF ELSE PARA BY WITH IN FOREACH INCR RET WHERE WHILE
 %token <std::string> TRUE FALSE
@@ -189,7 +190,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::Node>> foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt swap_stmt expr_or_qes range_expr optional_scalar_init param_mdspan_val chunkat_or_storage_or_select pred
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause multi_decls named_spanned_decl
 %nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers passables future_data_list template_params gi_list
-%nterm <AST::ptr<AST::Expr>> s_expr template_value_expr span_expr id_expr bound_expr optional_pred f_expr
+%nterm <AST::ptr<AST::Expr>> s_expr template_value_expr span_expr id_expr bound_expr optional_pred
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
 %nterm <AST::ptr<AST::Parameter>> parameter
@@ -1214,15 +1215,10 @@ passables
 
 passable
     : s_expr { $$ = $1; }
-    | s_expr FNDATA {
-      $$ = AST::Make<AST::Expr>(@1, "dataof", $1);
-    }
-    | f_expr { $$ = $1; }
-    ;
-
-f_expr
-    : FLOAT { $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::FloatLiteral>(@1, $1)); }
+    | s_expr FNDATA { $$ = AST::Make<AST::Expr>(@1, "dataof", $1); }
+    | FLOAT { $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::FloatLiteral>(@1, $1)); }
     | DOUBLE { $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::FloatLiteral>(@1, $1)); }
+    | STRING { $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::StringLiteral>(@1, $1)); }
     ;
 
 with_matchers /* TODO: this special case is pattern-match ids for with-block */
@@ -1252,6 +1248,12 @@ call_stmt
     | CALL IDENTIFIER template_params LPAREN passables RPAREN {
         $$ = AST::Make<AST::Call>(@1,
                 AST::Make<AST::Identifier>(@2, $2), $5, $3);
+      }
+    | ASSERT LPAREN s_expr COMMA STRING RPAREN {
+        auto mv = AST::Make<AST::MultiValues>(@1, ", ");
+        mv->Append($3);
+        mv->Append(AST::Make<AST::StringLiteral>(@5, $5));
+        $$ = AST::Make<AST::Call>(@1, AST::Make<AST::Identifier>(@1, $1), mv, true);
       }
     ;
 

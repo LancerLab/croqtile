@@ -227,7 +227,6 @@ public:
   bool Visit(AST::MultiNodes& n) override {
     TraceEachVisit(n);
     if (cannot_proceed) return true;
-
     return true;
   }
 
@@ -248,35 +247,36 @@ public:
   bool Visit(AST::IntLiteral& n) override {
     TraceEachVisit(n);
     if (cannot_proceed) return true;
-
     return true;
   }
 
   bool Visit(AST::FloatLiteral& n) override {
     TraceEachVisit(n);
     if (cannot_proceed) return true;
+    return true;
+  }
 
+  bool Visit(AST::StringLiteral& n) override {
+    TraceEachVisit(n);
+    if (cannot_proceed) return true;
     return true;
   }
 
   bool Visit(AST::Boolean& n) override {
     TraceEachVisit(n);
     if (cannot_proceed) return true;
-
     return true;
   }
 
   bool Visit(AST::Expr& n) override {
     TraceEachVisit(n);
     if (cannot_proceed) return true;
-
     return true;
   }
 
   bool Visit(AST::MultiDimSpans& n) override {
     TraceEachVisit(n);
     if (cannot_proceed) return true;
-
     return true;
   }
 

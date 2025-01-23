@@ -1,0 +1,8 @@
+// RUN: choreo -e %s | FileCheck %s
+
+__co__ void foo(f32 [M, N] a) {
+  assert(M > 8, "expected \"M\" is larger than 8.");
+}
+
+// CHECK:  `- Call: assert (built-in)
+// CHECK:    `- with arguments:  (M > 8) , "expected \"M\" is larger than 8."

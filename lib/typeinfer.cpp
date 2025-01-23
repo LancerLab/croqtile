@@ -180,6 +180,12 @@ bool TypeInference::Visit(AST::FloatLiteral& n) {
   return true;
 }
 
+bool TypeInference::Visit(AST::StringLiteral& n) {
+  TraceEachVisit(n);
+  n.SetType(MakeStringType());
+  return true;
+}
+
 bool TypeInference::Visit(AST::Boolean& n) {
   TraceEachVisit(n);
   n.SetType(MakeBooleanType());

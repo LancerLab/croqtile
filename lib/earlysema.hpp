@@ -74,6 +74,7 @@ public:
   bool Visit(AST::MultiValues&) override;
   bool Visit(AST::IntLiteral&) override;
   bool Visit(AST::FloatLiteral&) override;
+  bool Visit(AST::StringLiteral&) override { return true; }
   bool Visit(AST::Boolean&) override;
   bool Visit(AST::Expr&) override;
   bool Visit(AST::MultiDimSpans&) override;

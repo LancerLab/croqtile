@@ -38,6 +38,7 @@ enum class TypeCategory {
   BOUNDED_ITUPLE,
   VOID,
   FUTURE,
+  STRING,
   FUNCTION,
   UNKNOWN,
 };
@@ -57,6 +58,7 @@ inline static std::string STR(TypeCategory tc) {
   case TypeCategory::VOID: return "VOID";
   case TypeCategory::FUTURE: return "FUTURE";
   case TypeCategory::FUNCTION: return "FUNCTION";
+  case TypeCategory::STRING: return "STRING";
   case TypeCategory::UNKNOWN: return "UNKNOWN";
   default: choreo_unreachable("unsupported type category.");
   }
@@ -775,6 +777,23 @@ struct BooleanType final : public ScalarType,
   __UDT_TYPE_INFO__(ScalarType, BooleanType)
 };
 
+struct StringType : public Type, public TypeIDProvider<StringType> {
+  StringType() : Type(TypeCategory::STRING) {}
+  void Print(std::ostream& os) const override { os << "string"; }
+  const std::string Name() const override { return "string"; }
+
+  size_t Dims() const override { return 0; }
+  bool IsComplete() const override { return true; }
+  bool HasSufficientInfo() const override { return true; }
+
+  bool operator==(const Type& ty) const override {
+    return isa<StringType>(&ty);
+  }
+  bool ApprxEqual(const Type& ty) const override { return operator==(ty); }
+
+  __UDT_TYPE_INFO__(Type, StringType)
+};
+
 struct IndexType : public Type, public TypeIDProvider<IndexType> {
   IndexType() : Type(TypeCategory::INDEX) {}
   // note: index type takes 1 dim in mdspan/ituple declaration
@@ -1320,12 +1339,6 @@ inline ptr<IntegerType> MakeIntegerType() {
   return std::make_shared<IntegerType>();
 }
 
-inline ptr<FloatType> MakeFloatType() { return std::make_shared<FloatType>(); }
-
-inline ptr<DoubleType> MakeDoubleType() {
-  return std::make_shared<DoubleType>();
-}
-
 inline ptr<IntegerType> MakeIntegerType(const Shape& s) {
   if (s.IsValid()) {
     assert(s.Rank() == 1);
@@ -1336,6 +1349,16 @@ inline ptr<IntegerType> MakeIntegerType(const Shape& s) {
 
 inline ptr<BooleanType> MakeBooleanType() {
   return std::make_shared<BooleanType>();
+}
+
+inline ptr<FloatType> MakeFloatType() { return std::make_shared<FloatType>(); }
+
+inline ptr<DoubleType> MakeDoubleType() {
+  return std::make_shared<DoubleType>();
+}
+
+inline ptr<StringType> MakeStringType() {
+  return std::make_shared<StringType>();
 }
 
 inline ptr<IndexType> MakeIndexType() { return std::make_shared<IndexType>(); }

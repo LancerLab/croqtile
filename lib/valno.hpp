@@ -426,6 +426,13 @@ public:
     return true;
   }
 
+  bool Visit(AST::StringLiteral& n) {
+    TraceEachVisit(n);
+    if (cannot_proceed) return true;
+    InvalidateVN(cur_vn);
+    return true;
+  }
+
   bool Visit(AST::Boolean& n) {
     TraceEachVisit(n);
 
