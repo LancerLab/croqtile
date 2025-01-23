@@ -808,28 +808,53 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
 bool TopsccCodeGen::Visit(AST::Call& n) {
   TraceEachVisit(n);
 
-  ds << d_indent << n.function->name;
+  bool is_host = (parallel_level == 0);
+
+  auto& os = (is_host) ? hs : ds;
+  auto& indent = (is_host) ? h_indent : d_indent;
+
+  if (n.is_bif) {
+    if (n.function->name == "assert") {
+      if (is_host) {
+        os << indent << "choreo_assert(" << ExprSTR(n.GetArguments().at(0))
+           << ", \"" << ExprSTR(n.GetArguments().at(1)) << "\", \""
+           << n.LOC().begin.get_filename() << "\", " << n.LOC().begin.get_line()
+           << ");\n";
+      } else {
+        os << indent << "if (!(" << ExprSTR(n.GetArguments().at(0)) << ")) {\n";
+        os << indent << "  printf(\"" << n.LOC()
+           << ": choreo assertion abort: " << ExprSTR(n.GetArguments().at(1))
+           << "\");\n";
+        os << indent << "  __co_abort__();\n";
+        os << indent << "}\n";
+      }
+      return true;
+    } else
+      choreo_unreachable("the bif '" + n.function->name +
+                         "' is not supported by this target.");
+  } else
+    os << indent << n.function->name;
 
   // emit template arguments
   if (n.template_args) {
-    ds << "<";
+    os << "<";
     size_t i = 0;
     for (auto& ta : n.template_args->AllValues())
-      ds << ((i++ == 0) ? "" : ", ") << ExprSTR(ta, false);
-    ds << ">";
+      os << ((i++ == 0) ? "" : ", ") << ExprSTR(ta, is_host);
+    os << ">";
   }
 
-  ds << "(";
+  os << "(";
   size_t i = 0;
   for (auto& a : n.GetArguments()) {
-    ds << ((i++ == 0) ? "" : ", ");
+    os << ((i++ == 0) ? "" : ", ");
     if (auto sty = GetSpannedType(NodeType(*a))) {
-      std::string bts{NameBaseType(sty->ElementType(), false)};
-      ds << "(" << bts << "*)" << ExprSTR(a, false);
+      std::string bts{NameBaseType(sty->ElementType(), is_host)};
+      os << "(" << bts << "*)" << ExprSTR(a, is_host);
     } else
-      ds << ExprSTR(a, false);
+      os << ExprSTR(a, is_host);
   }
-  ds << ");\n";
+  os << ");\n";
 
   return true;
 }
@@ -1271,6 +1296,8 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
     else
       choreo_unreachable("unsupported float literal.");
     oss << fp_val.str();
+  } else if (auto sl = dyn_cast<AST::StringLiteral>(e)) {
+    oss << sl->EscapedVal();
   } else if (auto ii = dyn_cast<AST::IntIndex>(e)) {
     return ExprSTR(ii->value, is_host);
   } else if (auto expr = dyn_cast<AST::Expr>(e)) {

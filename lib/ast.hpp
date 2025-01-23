@@ -326,24 +326,28 @@ struct StringLiteral : public Node, public TypeIDProvider<StringLiteral> {
 
   const std::string Val() const { return value; }
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << prefix << "\"";
+  const std::string EscapedVal() const {
+    std::ostringstream oss;
     for (char c : value) {
       switch (c) {
-      case '\n': os << "\\n"; break;
-      case '\t': os << "\\t"; break;
-      case '\\': os << "\\\\"; break;
-      case '\"': os << "\\\""; break;
+      case '\n': oss << "\\n"; break;
+      case '\t': oss << "\\t"; break;
+      case '\\': oss << "\\\\"; break;
+      case '\"': oss << "\\\""; break;
       default:
         if (isprint(c)) {
-          os << c; // Print printable characters as is
+          oss << c; // Print printable characters as is
         } else {
-          os << "\\x" << std::hex << std::setw(2) << std::setfill('0')
-             << (static_cast<unsigned char>(c));
+          oss << "\\x" << std::hex << std::setw(2) << std::setfill('0')
+              << (static_cast<unsigned char>(c));
         }
       }
     }
-    os << "\"";
+    return oss.str();
+  }
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << prefix << "\"" << EscapedVal() << "\"";
   }
 
   void accept(Visitor&) override;

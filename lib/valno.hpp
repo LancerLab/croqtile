@@ -430,6 +430,7 @@ public:
     TraceEachVisit(n);
     if (cannot_proceed) return true;
     InvalidateVN(cur_vn);
+    n.SetType(MakeStringType());
     return true;
   }
 

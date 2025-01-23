@@ -13,13 +13,25 @@
 #include <memory>
 #include <random>
 
+#ifdef __TOPSCC__
+#define __CHOREO_TARGET_NATIVE_HALF_FLOAT_SUPPORT__
+// #define __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
+#define __co_device__ __device__
+#define __co_host__ __host__
+#define __co_any__ __device__ __host__
+#else
+#define __co_device__
+#define __co_host__
+#define __co_any__
+#endif
+
 namespace choreo {
 
 inline void choreo_assert(bool p, const char* msg, const char* file = __FILE__,
                           int line = __LINE__) {
   if (!p) {
-    std::cerr << "Assertion failed: " << msg << ", file " << file << ", line "
-              << line << std::endl;
+    std::cerr << file << ":" << line << ": choreo assertion abort: " << msg
+              << std::endl;
     std::abort();
   }
   return;
@@ -175,18 +187,6 @@ public:
 
 // Floating-point types
 using f32 = float;
-
-#ifdef __TOPSCC__
-#define __CHOREO_TARGET_NATIVE_HALF_FLOAT_SUPPORT__
-// #define __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
-#define __co_device__ __device__
-#define __co_host__ __host__
-#define __co_any__ __device__ __host__
-#else
-#define __co_device__
-#define __co_host__
-#define __co_any__
-#endif
 
 // Function to convert float to half precision bits
 // Refer to https://en.wikipedia.org/wiki/Half-precision_floating-point_format

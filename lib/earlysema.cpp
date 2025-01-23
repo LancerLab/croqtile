@@ -92,6 +92,12 @@ bool EarlySemantics::Visit(AST::FloatLiteral& n) {
   return true;
 }
 
+bool EarlySemantics::Visit(AST::StringLiteral& n) {
+  TraceEachVisit(n);
+  SetNodeType(n, MakeStringType());
+  return true;
+}
+
 bool EarlySemantics::Visit(AST::Boolean& n) {
   TraceEachVisit(n);
   SetNodeType(n, MakeBooleanType());
@@ -1170,11 +1176,35 @@ bool EarlySemantics::Visit(AST::Wait& n) {
 bool EarlySemantics::Visit(AST::Call& n) {
   TraceEachVisit(n);
 
-  if (parallel_level == 0) {
+  size_t ec = error_count;
+
+  if ((parallel_level == 0) && !n.is_bif) {
     Error(n.LOC(),
           "unable to call kernel function outside the parallel-by block(s).");
     error_count++;
     return false;
+  }
+
+  if (n.is_bif) {
+    if (n.template_args) {
+      Error(n.LOC(), "the built-in functions are not function templates.");
+      error_count++;
+    }
+    if (n.function->name == "assert") {
+      auto pty = NodeType(*n.arguments->ValueAt(0));
+      if (!isa<BooleanType>(pty)) {
+        Error(n.LOC(), "expect a predicate but got '" + PSTR(pty) + "'.");
+        error_count++;
+      }
+      auto sty = NodeType(*n.arguments->ValueAt(1));
+      if (!isa<StringType>(sty)) {
+        Error(n.LOC(), "expect a string but got '" + PSTR(sty) + "'.");
+        error_count++;
+      }
+    } else
+      choreo_unreachable("unsupported bif '" + n.function->name + "'.");
+
+    return ec == error_count;
   }
 
   size_t count = 0;

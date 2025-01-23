@@ -151,7 +151,7 @@ void SymReplace::InitializeNode(ptr<AST::Node> n) {
     InsertNdSnSymMap(n, id->name);
   } else if (isa<AST::IntLiteral>(n)) {
     // construct integer symbol directly when SymbolizeExprNode().
-  } else if (isa<AST::FloatLiteral>(n)) {
+  } else if (isa<AST::FloatLiteral>(n) || isa<AST::StringLiteral>(n)) {
     // currently, float-point number is only used as literal.
     // no need to symbolize it.
   } else if (isa<AST::LoopRange>(n)) {
