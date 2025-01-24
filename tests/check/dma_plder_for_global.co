@@ -1,4 +1,4 @@
-// RUN: not choreo -gs -t topscc -arch=gcu300 %s 2>&1 | FileCheck %s --check-prefix=CHECK3
+// RUN: not choreo -es -t topscc -arch=gcu300 %s 2>&1 | FileCheck %s --check-prefix=CHECK3
 
 __co__ auto foo(f32 [32, 4] a, s8 [1] b, int c) {
   f = dma.any;
@@ -14,19 +14,19 @@ __co__ auto foo(f32 [32, 4] a, s8 [1] b, int c) {
 
 // CHECK3: __global__ void __choreo_device_foo(float * a, char * b, int c, float * f__buf__) {
 // CHECK3:   tops_dte_ctx_t choreo_topscc_ctx0;
-// CHECK3:   choreo::future f(choreo_topscc_ctx0, "f", {{[0-9]+}}, {{[0-9]+}}, f__buf__);
-// CHECK3:   tops::mdspan __mds0_a(tops::Global, (float*)a, 32, 4);
-// CHECK3:   tops::mdspan __mds1_f(tops::Global, (float*)f.data(), 32, 4);
-// CHECK3:   tops::memcpy(*f.get_ctx(), __mds1_f, __mds0_a);
+// CHECK3:   choreo::future f(choreo_topscc_ctx0, "f", 4, 3, f__buf__);
+// CHECK3:   // parallel-by: tests/check/dma_plder_for_global.co:6.3
 // CHECK3:   __local__ __valigned__ float d__buf__[8];
 // CHECK3:   tops_dte_ctx_t choreo_topscc_ctx1;
-// CHECK3:   choreo::future d(choreo_topscc_ctx1, "d", {{[0-9]+}}, {{[0-9]+}}, d__buf__);
+// CHECK3:   choreo::future d(choreo_topscc_ctx1, "d", 7, 5, d__buf__);
+// CHECK3:   // with-in: tests/check/dma_plder_for_global.co:8.5
 // CHECK3:   {
 // CHECK3:     int __iv_tiling__elem__0 = 0;
 // CHECK3:     int __iv_tiling__elem__1 = 0;
-// CHECK3:     tops::mdspan __mds2_f(tops::Global, (float*)f.data(), 32, 4);
-// CHECK3:     tops::mdspan __mds3_d(tops::Private, (float*)d.data(), 4, 2);
+// CHECK3:     tops::mdspan __mds0_f__buf__(tops::Global, (float*)f__buf__, 32, 4);
+// CHECK3:     tops::mdspan __mds1_d(tops::Private, (float*)d.data(), 4, 2);
 // CHECK3:     int __slice_offset0__f_2_d__buf__[] = {(int)(__iv_tiling__elem__0 * 4), (int)(__iv_tiling__elem__1 * 2)};
-// CHECK3:     tops::slice(*d.get_ctx(), __mds3_d, __mds2_f, __slice_offset0__f_2_d__buf__);
+// CHECK3:     tops::slice(*d.get_ctx(), __mds1_d, __mds0_f__buf__, __slice_offset0__f_2_d__buf__);
 // CHECK3:   }
 // CHECK3: }
+

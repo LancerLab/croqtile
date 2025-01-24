@@ -289,6 +289,26 @@ private:
     return cgi->IsReturnSymbol(fname, sname);
   }
 
+  bool IsHostSide() const {
+    // if current stmt not enter parallel-by btw device and host
+    // max_parallel_level is not set or set to 0 or has explicit distance to inner-most
+    return (max_parallel_level == 0 || parallel_level + 1 < max_parallel_level);
+  }
+
+  bool IsHostSymbol(const std::string& sym) const {
+    int count = 0;
+    size_t pos = 0;
+    std::string target = "::";
+
+    // find the target substring from the current position
+    while ((pos = sym.find(target, pos)) != std::string::npos) {
+        count++;
+        pos += target.length(); // Move pos to the end of the found target
+    }
+
+    return (count <= 2);
+  }
+
   bool NeedDeviceFunc() const { return cgi->HasParallelBy(fname); }
 
   bool IsFutureBlockShared(const std::string& n) const {

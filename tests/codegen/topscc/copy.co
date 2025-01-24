@@ -10,30 +10,30 @@ __co__ auto foo(f32 [32, 4] a) {
 
 
 // CHECK: __global__ void __choreo_device_foo(float * a, float * data) {
-// CHECK:   tops::mdspan __mds0_a(tops::Global, (float*)a, 32, 4);
-// CHECK:   tops::mdspan __mds1_data(tops::Global, (float*)data, 32, 4);
-// CHECK:   tops_dte_ctx_t choreo_topscc_ctx0;
-// CHECK:   choreo::future __choreo_anon_fut__0(choreo_topscc_ctx0, "", {{[0-9]+}}, {{[0-9]+}}, data);
-// CHECK:   tops::memcpy(*__choreo_anon_fut__0.get_ctx(), __mds1_data, __mds0_a);
+// CHECK:   // parallel-by: tests/codegen/topscc/copy.co:5.3
 // CHECK:   __local__ __valigned__ float anon_0[32];
-// CHECK:   tops::mdspan __mds2_data(tops::Global, (float*)data, 32, 4);
-// CHECK:   tops::mdspan __mds3_anon_0(tops::Private, (float*)anon_0, 16, 2);
-// CHECK:   tops_dte_ctx_t choreo_topscc_ctx1;
-// CHECK:   choreo::future __choreo_anon_fut__1(choreo_topscc_ctx1, "", {{[0-9]+}}, {{[0-9]+}}, anon_0)
+// CHECK:   tops::mdspan __mds0_data(tops::Global, (float*)data, 32, 4);
+// CHECK:   tops::mdspan __mds1_anon_0(tops::Private, (float*)anon_0, 16, 2);
+// CHECK:   tops_dte_ctx_t choreo_topscc_ctx0;
+// CHECK:   choreo::future __choreo_anon_fut__0(choreo_topscc_ctx0, "", 6, 5, anon_0);
 // CHECK:   int __slice_offset0__data_2_anon_0[] = {(int)(__tops_tid_x() * 16), (int)(__tops_tid_x() * 2)};
-// CHECK:   tops::slice(*__choreo_anon_fut__1.get_ctx(), __mds3_anon_0, __mds2_data, __slice_offset0__data_2_anon_0);
+// CHECK:   tops::slice(*__choreo_anon_fut__0.get_ctx(), __mds1_anon_0, __mds0_data, __slice_offset0__data_2_anon_0);
 // CHECK: }
- 
+
 // CHECK: choreo::spanned_data<choreo::f32, 2> foo(const choreo::spanned_view<choreo::f32, 2> & a) {
+// CHECK:   choreo::runtime_check(a.shape()[0] == 32, "shape inconsistent on the 1st parameter (dim: 0).");
+// CHECK:   choreo::runtime_check(a.shape()[1] == 4, "shape inconsistent on the 1st parameter (dim: 1).");
 // CHECK:   float * a__device = nullptr;
 // CHECK:   choreo::abend_true(topsMalloc(&a__device, 512ULL));
 // CHECK:   choreo::abend_true(topsMemcpy(a__device, a.data(), 512ULL, topsMemcpyHostToDevice));
 // CHECK:   auto data = choreo::make_spandata<float, 2>({32, 4});
 // CHECK:   float * data__device = nullptr;
 // CHECK:   choreo::abend_true(topsMalloc(&data__device, 512ULL));
+// CHECK:   float * data__device = a__device;
 // CHECK:   dim3 __foo_gdims0(1, 1, 1);
 // CHECK:   dim3 __foo_bdims0(2, 1, 1);
 // CHECK:   __choreo_device_foo<<<__foo_gdims0, __foo_bdims0>>>(a__device, data__device);
 // CHECK:   choreo::abend_true(topsMemcpy(data.data(), data__device, 512ULL, topsMemcpyDeviceToHost));
 // CHECK:   return data;
 // CHECK: }
+

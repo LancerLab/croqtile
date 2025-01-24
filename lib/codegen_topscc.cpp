@@ -332,32 +332,39 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
     if (sty->GetStorage() == Storage::GLOBAL) {
       bts = NameBaseType(sty->ElementType(), false); // use the device type name
       if (!IsChoreoOutput(InScopeName(sym))) {
-        hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
-        hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym << ", "
-           << UnScopedSizeExpr(*sty) << "));\n";
-        if (n.init_value) {
-          // support int/float-point literal initialization
-          std::string sym_init_val = sym + "_init_val";
-          hs << h_indent << bts << " " << sym_init_val << " = "
-             << ExprSTR(n.init_value) << ";\n";
-          std::string sym_init_vptr = sym + "_init_vptr";
-          size_t data_len = SizeOf(sty->ElementType()) * 8;
-          std::string init_val_type;
-          switch (data_len) {
-          case 32: init_val_type = "int"; break;
-          case 16: init_val_type = "unsigned short"; break;
-          case 8: init_val_type = "unsigned char"; break;
-          default:
-            choreo_unreachable("unsupported data length " +
-                               std::to_string(data_len) +
-                               " in global span init.");
+        if (FBIContainsBuffer(FBInfo(), InScopeName(sym))) {
+          // a non-init global var decl tied with future
+          // this hint is enough to say a host side dataflow
+          VST_DEBUG(dbgs() << "Found " << buf_sym << " in FBInfo - " << STR(FBInfo())
+                     << "\n");
+        } else {
+          hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
+          hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym << ", "
+            << UnScopedSizeExpr(*sty) << "));\n";
+          if (n.init_value) {
+            // support int/float-point literal initialization
+            std::string sym_init_val = sym + "_init_val";
+            hs << h_indent << bts << " " << sym_init_val << " = "
+              << ExprSTR(n.init_value) << ";\n";
+            std::string sym_init_vptr = sym + "_init_vptr";
+            size_t data_len = SizeOf(sty->ElementType()) * 8;
+            std::string init_val_type;
+            switch (data_len) {
+            case 32: init_val_type = "int"; break;
+            case 16: init_val_type = "unsigned short"; break;
+            case 8: init_val_type = "unsigned char"; break;
+            default:
+              choreo_unreachable("unsupported data length " +
+                                std::to_string(data_len) +
+                                " in global span init.");
+            }
+            hs << h_indent << init_val_type << "* " << sym_init_vptr
+              << " = reinterpret_cast<" << init_val_type << "*>(&"
+              << sym_init_val << ");\n";
+            hs << h_indent << "choreo::abend_true(topsMemsetD" << data_len << "("
+              << buf_sym << ", *" << sym_init_vptr << ", "
+              << UnScopedExpr(ElemCountExprOf(*sty)) << "));\n";
           }
-          hs << h_indent << init_val_type << "* " << sym_init_vptr
-             << " = reinterpret_cast<" << init_val_type << "*>(&"
-             << sym_init_val << ");\n";
-          hs << h_indent << "choreo::abend_true(topsMemsetD" << data_len << "("
-             << buf_sym << ", *" << sym_init_vptr << ", "
-             << UnScopedExpr(ElemCountExprOf(*sty)) << "));\n";
         }
       } else {
         std::string sym_data = sym + ".data()";
@@ -573,13 +580,44 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   assert(f_sty && "can not retrieve data from 'from'.");
   assert(t_sty && "can not retrieve data from 'to'.");
 
+  if (t_sty->GetStorage() == Storage::GLOBAL && IsHostSide()) {
+    // no need to generate this part of host buffer allocation work, cause
+    // we have made this through NamedVariableDecl
+    //
+    // for stmt like: f = dma.copy input.chunkat(_) => global;
+    // we need to generate the memcpy here:
+    // ref: choreo::abend_true(topsMemcpy(f__buf__device, input.data(), XXX, XXX))
+    // however, considering the inputs are already alloc'd and memcpy'd
+    // try to reuse it by referencing
+    //
+    std::string bts = NameBaseType(t_sty->ElementType(), false);
+    auto buf_sym = t_sym + "__device";
+    auto buf_sym_from = f_sym + "__device";
+    hs << h_indent << bts << " * " << buf_sym << " = " << buf_sym_from << ";\n";
+    // hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym << ", "
+    //     << UnScopedSizeExpr(*t_sty) << "));\n";
+    // hs << h_indent << "choreo::abend_true(topsMemcpy(" << buf_sym << ", "
+    //     << "input.data()" << ", " << UnScopedSizeExpr(*t_sty)
+    //     << ", topsMemcpyHostToDevice));\n";
+    return true;
+  }
+
   auto GetBufferExpr = [this](const std::string& sym) {
     std::string buf_expr = "";
-    if (isa<FutureType>(GetSymbolType(sym))) {
+    if (isa<FutureType>(GetSymbolType(sym)) && !IsHostSymbol(InScopeName(sym))) {
       std::string buf_name = InScopeName(sym) + ".data";
       buf_expr = ssm.DeviceName(buf_name);
+    } else if (isa<FutureType>(GetSymbolType(sym)) 
+      // This only matches the host-side buffer that is defined in choreo DMA and tied to future
+      // but host-side data copy does not really do device-level DMA, and the future is 
+      // basically a phantom handle do not emit any concrete code at host-side.
+      && IsHostSymbol(InScopeName(sym)) 
+      && !IsChoreoInput(InScopeName(sym))
+      && !IsChoreoOutput(InScopeName(sym))) {
+      buf_expr = UnScopedName(const_cast<FutureBufferInfo&>(FBInfo())[InScopeName(sym)].buffer);
     } else
       buf_expr = ssm.DeviceName(InScopeName(sym));
+
     return buf_expr;
   };
 

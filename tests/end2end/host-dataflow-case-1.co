@@ -1,0 +1,147 @@
+// REQUIRES: TARGET-GCU300
+// RUN-GCU300: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+#include "choreo.h"
+#include <chrono>
+
+__cok__ { /// kernel program
+
+extern "C" void relu_kernel(float* input, float* out) {
+  constexpr int m = 256;
+  constexpr int n = 256;
+  for (int i = 0; i < m; ++i) {
+    for (int j = 0; j < n; ++j) {
+      out[i*n+j] = input[i*n+j] > 0.0f ? input[i*n+j] : 0.0f;
+    }
+  }
+}
+
+} /// end of kernel decl
+
+
+__co__ f32 [10240] identity(f32 [10240] input) { /// device program
+  f32[10240] output; // use same shape as input
+  // with index={tile0} in [1] {
+  //   foreach tile0 {
+  //     f = dma.copy input.chunkat(tile0) => global;
+      f = dma.copy input.chunkat(_) => global;
+      parallel p by 2 {  // p is sip_index
+        shared f32[1024] l2_out;
+        with index={l_tile} in [input.span(0)/l2_out.span(0)/#p] {
+          foreach l_tile {
+            input_load = dma.copy.async f.data.chunkat(p#l_tile) => shared;
+            // input_load = dma.copy.async input.chunkat(p#l_tile) => shared;
+            wait input_load;
+            parallel q by 2 {
+              with index2={l_tile_s} in [16] {
+                foreach l_tile_s {
+                  input_load_s = dma.copy.async input_load.data.chunkat(q#l_tile_s) => local;
+                  wait input_load_s;
+                  out_store_s = dma.copy.async input_load_s.data => l2_out.chunkat(q#l_tile_s);
+                  wait out_store_s;
+                }
+              }
+            }
+            out_store = dma.copy.async l2_out => output.chunkat(p#l_tile); // can use defined vars
+            wait out_store;
+          }
+        }
+      } // can use python styling
+
+  //   }
+  // }
+
+  return output;
+}
+
+// __global__ void __choreo_device_identity(float * input, float * output) {
+//   // parallel-by: example.co:29.1-14
+//   __shared__ float l2_out[1024];
+//   // with-in: example.co:31.1-12
+//   {
+//     int __iv_l_tile = 0;
+//     // foreach: example.co:32.1-17
+//     for (__iv_l_tile = 0; __iv_l_tile < 5; ++__iv_l_tile) {
+//       auto anon_0 = ((__tops_bid_x())*(5)+(__iv_l_tile));
+//       __shared__ float input_load__buf__[1024];
+//       tops::mdspan __mds0_input(tops::Global, (float*)input, 10240);
+//       tops::mdspan __mds1_input_load__buf__(tops::Shared, (float*)input_load__buf__, 1024);
+//       tops_dte_ctx_t choreo_topscc_ctx0;
+//       choreo::future input_load(choreo_topscc_ctx0, "input_load", 34, 1, input_load__buf__);
+
+// TODO: remove input, replace input into f__buf__
+// TODO: remove mdspan at out level, remove dte at outer level
+// TODO: replace f.data() into f__buf__ at mds2_f
+
+// __global__ void __choreo_device_identity(float * input, float * output, float * f__buf__) {
+//   tops::mdspan __mds0_input(tops::Global, (float*)input, 10240);
+//   tops::mdspan __mds1_f__buf__(tops::Global, (float*)f__buf__, 10240);
+//   tops_dte_ctx_t choreo_topscc_ctx0;
+//   choreo::future f(choreo_topscc_ctx0, "f", 28, 1, f__buf__);
+//   tops::memcpy(*f.get_ctx(), __mds1_f__buf__, __mds0_input);
+//   // parallel-by: example.co:29.1-14
+//   __shared__ float l2_out[1024];
+//   // with-in: example.co:31.1-12
+//   {
+//     int __iv_l_tile = 0;
+//     // foreach: example.co:32.1-17
+//     for (__iv_l_tile = 0; __iv_l_tile < 5; ++__iv_l_tile) {
+//       auto anon_0 = ((__tops_bid_x())*(5)+(__iv_l_tile));
+//       __shared__ float input_load__buf__[1024];
+//       tops::mdspan __mds2_f(tops::Global, (float*)f.data(), 10240);
+//       tops::mdspan __mds3_input_load__buf__(tops::Shared, (float*)input_load__buf__, 1024);
+//       tops_dte_ctx_t choreo_topscc_ctx1;
+//       choreo::future input_load(choreo_topscc_ctx1, "input_load", 33, 1, input_load__buf__);
+
+// Rationale:
+// case 1: 
+// __co__ f32 [10240] identity(f32 [10240] input) { /// device program
+//   f32[10240] output; // use same shape as input
+//   parallel p by 2 {  // use input and output
+//
+// case 2: 
+// __co__ f32 [10240] identity(f32 [10240] input) { /// device program
+//   f32[10240] output; // use same shape as input
+//   f = dma.copy input.chunkat(_) => global;
+//   parallel p by 2 {  // use f and output
+//       
+// 
+// 1. namedvardecl => choreo::make_spandata
+// 2. all vars/params, ref'd by parallel-by, 
+//    float* <name>_dev
+//    topsMalloc(<name>_dev)
+//    case 1, is input and output
+//    case 2, is f and output
+// 3. for DMA => GLOBAL; not dte copy, we need a topsMemcpy from input to f__buf__
+// 4. for with ??
+// 5. for foreach ??
+
+int main() { /// host program
+  choreo::f32 a[1024*10]; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::f32 b[512][512] = {0};
+
+  auto input_data = choreo::make_spanview<1, choreo::f32>((float*)a, {1024*10});
+  input_data.fill_random(-1.0, 1.0);
+
+  auto start = std::chrono::high_resolution_clock::now();
+
+  auto res
+    = identity(input_data);
+
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
+  std::cout << res.shape()[0] << std::endl;
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i) {
+      std::cout << "i: " << i << "\n";
+      std::cout << "res: " << res[i] << "\n";
+      float ref = input_data[i];
+
+      std::cout << "ref: " << ref << std::endl;
+      choreo::choreo_assert(ref == res[i], "values are not equal.");
+  }
+  std::cout << "Test Passed\n" << std::endl;
+  std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
+}
+// CHECK: Test Passed

@@ -113,6 +113,15 @@ inline const std::string STR(const FutureBufferInfo& fbi) {
   return oss.str();
 }
 
+inline bool FBIContainsBuffer(const FutureBufferInfo& buffer_info, const std::string& name) {
+    for (const auto& item : buffer_info) {
+        if (item.second.buffer == name) {
+            return true;
+        }
+    }
+    return false;
+}
+
 struct OptimizedValues {
   ValueItem int_expr = GetInvalidValueItem();
   ValueItem size_expr = GetInvalidValueItem();
