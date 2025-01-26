@@ -60,8 +60,14 @@ test: $(TARGET)
 test-with-cmake: build-with-cmake-ninja
 	$(LIT) tests && $(MAKE) standalone-test-with-cmake
 
-ci-gpu-build-with-cmake-test: setup
-	$(MAKE) build-with-cmake-ninja
+ci-gpu-test: setup build-with-cmake-ninja
+	$(LIT) tests && $(MAKE) standalone-test-with-cmake
+
+ci-gcu2-test: setup-gcu2 build-with-cmake-ninja
+	$(LIT) tests && $(MAKE) standalone-test-with-cmake
+
+ci-gcu3-test: setup-gcu3 build-with-cmake-ninja
+	$(LIT) tests && $(MAKE) standalone-test-with-cmake
 
 standalone-test-with-cmake: build-with-cmake-ninja
 	cd tests/standalone/ && $(MAKE) test
@@ -81,13 +87,13 @@ build-with-cmake-ninja:
 	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -G Ninja -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE)
 	time ninja -C $(CMAKE_BUILD_DIR)
 
-ci-gpu-test: setup $(TARGET)
+ci-gpu-test-makefile: setup $(TARGET)
 	$(LIT) tests && $(MAKE) standalone_test
 
-ci-gcu2-test: setup-gcu2 $(TARGET)
+ci-gcu2-test-makefile: setup-gcu2 $(TARGET)
 	$(LIT) tests && $(MAKE) standalone_test
 
-ci-gcu3-test: setup-gcu3 $(TARGET)
+ci-gcu3-test-makefile: setup-gcu3 $(TARGET)
 	$(LIT) tests && $(MAKE) standalone_test
 
 BUILD_OBJECTS = $(patsubst $(SRC_DIR)/%.cpp, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/*.cpp))
