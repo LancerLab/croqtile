@@ -52,12 +52,12 @@ CMAKE = cmake
 CMAKE_BUILD_TYPE = Release
 
 # Build rules
-all: $(TARGET)
+all: build-with-cmake-ninja 
 
-test: $(TARGET)
+test-legacy: $(TARGET)
 	$(LIT) tests && $(MAKE) standalone_test
 
-test-with-cmake: build-with-cmake-ninja
+test: build-with-cmake-ninja
 	$(LIT) tests && $(MAKE) standalone-test-with-cmake
 
 ci-gpu-test: setup build-with-cmake-ninja
@@ -72,7 +72,7 @@ ci-gcu3-test: setup-gcu3 build-with-cmake-ninja
 standalone-test-with-cmake: build-with-cmake-ninja
 	cd tests/standalone/ && $(MAKE) test
 
-clean-with-cmake:
+clean:
 	@rm -rf $(CMAKE_BUILD_DIR) $(TEST_TARGETS) tests/*.result
 
 build-with-cmake:
@@ -87,13 +87,13 @@ build-with-cmake-ninja:
 	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -G Ninja -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE)
 	time ninja -C $(CMAKE_BUILD_DIR)
 
-ci-gpu-test-makefile: setup $(TARGET)
+ci-gpu-test-legacy: setup $(TARGET)
 	$(LIT) tests && $(MAKE) standalone_test
 
-ci-gcu2-test-makefile: setup-gcu2 $(TARGET)
+ci-gcu2-test-legacy: setup-gcu2 $(TARGET)
 	$(LIT) tests && $(MAKE) standalone_test
 
-ci-gcu3-test-makefile: setup-gcu3 $(TARGET)
+ci-gcu3-test-legacy: setup-gcu3 $(TARGET)
 	$(LIT) tests && $(MAKE) standalone_test
 
 BUILD_OBJECTS = $(patsubst $(SRC_DIR)/%.cpp, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/*.cpp))
@@ -151,7 +151,7 @@ cuda_script.inc : scripts/cuda_script.sh
 	echo ")__co_cuda__\";" >> $@
 	echo "#endif // __CHOREO_CUDA_SCRIPT_H__" >> $@
 
-clean:
+clean-legacy:
 	@rm -f *.cc *.hh *.inc *.o $(TEST_TARGETS) tests/*.result
 
 clobber: clean
