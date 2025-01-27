@@ -66,14 +66,31 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
     parallel_level++;
     max_parallel_level = GetMaxParallelLevelFromNote(*pb);
   } else if (isa<AST::WithBlock>(&n)) {
-    ds << d_indent << "// with-in: " << n.LOC() << "\n";
-    ds << d_indent << "{\n";
-    IncrDeviceIndent();
+    // anchor
+    if (IsHostSide()) {
+      hs << h_indent << "// with-in: " << n.LOC() << "\n";
+      hs << h_indent << "{\n";
+      IncrHostIndent();
+    } else {
+      ds << d_indent << "// with-in: " << n.LOC() << "\n";
+      ds << d_indent << "{\n";
+      IncrDeviceIndent();
+    }
   } else if (isa<AST::ForeachBlock>(&n)) {
-    ds << d_indent << "// foreach: " << n.LOC() << "\n";
+    // anchor
+    if (IsHostSide()) 
+      hs << h_indent << "// foreach: " << n.LOC() << "\n";
+    else
+      ds << d_indent << "// foreach: " << n.LOC() << "\n";
   } else if (isa<AST::IncrementBlock>(&n)) {
-    ds << d_indent << "// incr: " << n.LOC() << "\n";
-    IncrDeviceIndent();
+    // anchor
+    if (IsHostSide()) {
+      hs << h_indent << "// incr: " << n.LOC() << "\n";
+      IncrHostIndent();
+    } else {
+      ds << d_indent << "// incr: " << n.LOC() << "\n";
+      IncrDeviceIndent();
+    } 
   }
   return true;
 }
@@ -127,8 +144,14 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
     parallel_level--;
     if (parallel_level == 0) max_parallel_level = 0;
   } else if (isa<AST::WithBlock>(&n)) {
-    DecrDeviceIndent();
-    ds << d_indent << "}\n";
+    // anchor
+    if (IsHostSide()) {
+      DecrHostIndent();
+      hs << h_indent << "}\n";
+    } else {
+      DecrDeviceIndent();
+      ds << d_indent << "}\n";
+    }
   } else if (auto fb = dyn_cast<AST::ForeachBlock>(&n)) {
     if (fb->pred) {
       DecrDeviceIndent();
@@ -140,14 +163,28 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
       auto cname = rng->IVName();
       auto ivs = within_map.at(InScopeName(cname));
       for (auto iv_itr = ivs.rbegin(); iv_itr != ivs.rend(); ++iv_itr) {
-        DecrDeviceIndent();
-        ds << d_indent << "} // " << UnScopedName(*iv_itr) << "\n";
-        ds << d_indent << ssm.DeviceName(*iv_itr) << " = 0;\n"; // must reset
+    // anchor
+        if (IsHostSide()) {
+          DecrHostIndent();
+          hs << h_indent << "} // " << UnScopedName(*iv_itr) << "\n";
+          hs << h_indent << ssm.DeviceName(*iv_itr) << " = 0;\n"; // must reset
+
+        } else {
+          DecrDeviceIndent();
+          ds << d_indent << "} // " << UnScopedName(*iv_itr) << "\n";
+          ds << d_indent << ssm.DeviceName(*iv_itr) << " = 0;\n"; // must reset
+        }
       }
     }
   } else if (isa<AST::IncrementBlock>(&n)) {
-    DecrDeviceIndent();
-    ds << d_indent << "}\n";
+    // anchor
+    if (IsHostSide()) {
+      DecrHostIndent();
+      hs << h_indent << "}\n";
+    } else {
+      DecrDeviceIndent();
+      ds << d_indent << "}\n";
+    }
   }
   return true;
 }
@@ -581,26 +618,53 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   assert(t_sty && "can not retrieve data from 'to'.");
 
   if (t_sty->GetStorage() == Storage::GLOBAL && IsHostSide()) {
-    // no need to generate this part of host buffer allocation work, cause
-    // we have made this through NamedVariableDecl
-    //
-    // for stmt like: f = dma.copy input.chunkat(_) => global;
-    // we need to generate the memcpy here:
-    // ref: choreo::abend_true(topsMemcpy(f__buf__device, input.data(), XXX, XXX))
-    // however, considering the inputs are already alloc'd and memcpy'd
-    // try to reuse it by referencing
-    //
     std::string bts = NameBaseType(t_sty->ElementType(), false);
     auto buf_sym = t_sym + "__device";
     auto buf_sym_from = f_sym + "__device";
-    hs << h_indent << bts << " * " << buf_sym << " = " << buf_sym_from << ";\n";
-    // hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym << ", "
-    //     << UnScopedSizeExpr(*t_sty) << "));\n";
-    // hs << h_indent << "choreo::abend_true(topsMemcpy(" << buf_sym << ", "
-    //     << "input.data()" << ", " << UnScopedSizeExpr(*t_sty)
-    //     << ", topsMemcpyHostToDevice));\n";
+    if (n.operation == ".copy") {
+      if (f_ca->positions == nullptr) {
+        if (t_ca->positions == nullptr) {
+          // direct copy
+          hs << h_indent << bts << " * " << buf_sym << " = " 
+            << buf_sym_from << ";\n";
+        } else {
+          choreo_unreachable("not support host-side deslice yet");
+        }
+      } else {
+        static int s_cnt = 0;
+        auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
+                        f_sym + "_2_" + t_sym;
+        std::ostringstream offset;
+        { // calculate the offsets
+          size_t i = 0;
+          auto shape = t_sty->GetShape();
+          for (auto& p : f_ca->positions->AllValues()) {
+            auto idx_exprs = SplitStringByDelimiter(ExprSTR(p, false));
+            for (auto i_expr : idx_exprs) {
+              if (i != 0) offset << ", ";
+              if (i_expr == "__choreo_no_tiling__")
+                offset << "0";
+              else
+                offset << "(int)(" << i_expr << " * " << STR(shape.ValueAt(i))
+                      << ")";
+              ++i;
+            }
+          }
+        }
+        hs << h_indent << "int " << off_name << " = " << offset.str()
+          << ";\n";
+
+        hs << h_indent << bts << " * " 
+          << buf_sym << " = " 
+          << buf_sym_from << " + " << off_name << "" 
+          << ";\n";
+      }
+    } else
+      choreo_unreachable("not support host-side dma other than copy");
+
     return true;
   }
+
 
   auto GetBufferExpr = [this](const std::string& sym) {
     std::string buf_expr = "";
@@ -908,6 +972,9 @@ bool TopsccCodeGen::Visit(AST::WithIn& n) {
   for (auto& v : n.GetMatchers()) {
     auto id = cast<AST::Identifier>(v);
     ssm.MapDeviceSymbol(InScopeName(id->name), "__iv_" + id->name);
+    // Keep the device side decl, even for host side iv.
+    // for visibility of shapes
+    if (IsHostSide()) hs << h_indent << "int __iv_" << id->name << " = 0;\n";
     ds << d_indent << "int __iv_" << id->name << " = 0;\n";
   }
 
@@ -939,18 +1006,34 @@ bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
       auto iv_ty = GetSymbolType(UnScopedName(iv_name));
       assert(IsActualBoundedIntegerType(iv_ty));
       auto iv_bty = cast<BoundedType>(iv_ty);
-      ds << d_indent << "for (" << ssm.DeviceName(iv_name) << " = "
-         << (rng->lbound ? ("(" + ExprSTR(rng->lbound, false) + ")") : "0")
-         << "; " << ssm.DeviceName(iv_name) << " < "
-         << UnScopedExpr(STR(iv_bty->GetUpperBound())) << "; ++"
-         << ssm.DeviceName(iv_name) << ") {\n";
-      IncrDeviceIndent();
+      // anchor
+      if (IsHostSide()) {
+        hs << h_indent << "for (" << ssm.DeviceName(iv_name) << " = "
+          << (rng->lbound ? ("(" + ExprSTR(rng->lbound, false) + ")") : "0")
+          << "; " << ssm.DeviceName(iv_name) << " < "
+          << UnScopedExpr(STR(iv_bty->GetUpperBound())) << "; ++"
+          << ssm.DeviceName(iv_name) << ") {\n";
+        IncrHostIndent();
+      } else {
+        ds << d_indent << "for (" << ssm.DeviceName(iv_name) << " = "
+          << (rng->lbound ? ("(" + ExprSTR(rng->lbound, false) + ")") : "0")
+          << "; " << ssm.DeviceName(iv_name) << " < "
+          << UnScopedExpr(STR(iv_bty->GetUpperBound())) << "; ++"
+          << ssm.DeviceName(iv_name) << ") {\n";
+        IncrDeviceIndent();
+      }
     }
   }
 
   if (n.pred) {
-    ds << d_indent << "if (" << ExprSTR(n.pred, false) << ") {\n";
-    IncrDeviceIndent();
+    // anchor
+    if (IsHostSide()) {
+      hs << h_indent << "if (" << ExprSTR(n.pred, false) << ") {\n";
+      IncrHostIndent();
+    } else {
+      ds << d_indent << "if (" << ExprSTR(n.pred, false) << ") {\n";
+      IncrDeviceIndent();
+    }
   }
 
   return true;

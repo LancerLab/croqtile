@@ -298,7 +298,10 @@ private:
   bool IsHostSymbol(const std::string& sym) const {
     int count = 0;
     size_t pos = 0;
-    std::string target = "::";
+    std::string target = "paraby";
+    // anchor
+    // dbgs() << "anchor for symbol " << sym << "; maxprlv = " << max_parallel_level << "\n";
+    int host_side_parallel_lv_cnt = std::max(max_parallel_level - 2, 0);
 
     // find the target substring from the current position
     while ((pos = sym.find(target, pos)) != std::string::npos) {
@@ -306,7 +309,7 @@ private:
         pos += target.length(); // Move pos to the end of the found target
     }
 
-    return (count <= 2);
+    return (count <= host_side_parallel_lv_cnt);
   }
 
   bool NeedDeviceFunc() const { return cgi->HasParallelBy(fname); }
