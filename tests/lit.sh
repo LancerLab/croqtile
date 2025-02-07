@@ -238,7 +238,7 @@ toupper() {
     echo "$1" | tr '[:lower:]' '[:upper:]'
 }
 
-
+# Iterate over the array
 for file in "${files_array[@]}"; do
     # check requirement specified by the file
     check_requirement $file
@@ -246,7 +246,7 @@ for file in "${files_array[@]}"; do
     if [ ! -z "$expect_skip" ]; then
       echo "SKIP:  $file"
       num_skiped=$(($num_skiped + 1));
-      continue
+			continue
     fi
 
     if [ $is_gcu_available -eq 1 ]; then
@@ -276,67 +276,31 @@ for file in "${files_array[@]}"; do
       fi
     fi
 
-    # Check if the file is in the "end2end" folder
-    file_name=$(basename "$file")
-    folder_name=$(dirname "$file")
-
-    # If it's in the end2end folder, keep it blocking
-    if [[ "$folder_name" == *"end2end"* ]]; then
-        # Read the file and search for lines starting with "// RUN:"
-        run_num=$(grep -E 'RUN(:|-.*:)' $file | wc -l)
-        run_count=0
-        while IFS= read -r line; do
-            if [[ $line =~ ^//[[:blank:]]*RUN:[[:blank:]]*(.+) ]]; then
-                run_count=$(($run_count + 1))
-                # Extract the command after "RUN:"
-                run_command="${BASH_REMATCH[1]}"
-                # Execute the command with replacements
-                execute_command "$file" "$run_command" "$run_count" "$run_num"
-            elif [[ $line =~ ^//[[:blank:]]*RUN-(.+):[[:blank:]]*(.+) ]]; then
-                run_count=$(($run_count + 1))
-                run_target="${BASH_REMATCH[1]}"
-                run_target=$(echo "$run_target" | tr '[:upper:]' '[:lower:]')
-                if [[ "${run_target}" == "$gcu_arch" ]]; then
-                  # Extract the command after "RUN:"
-                  run_command="${BASH_REMATCH[2]}"
-                  # Execute the command with replacements
-                  execute_command "$file" "$run_command" "$run_count" "$run_num"
-                else
-                  echo "SKIP($run_target): ${file} ($run_count of $run_num)"
-                  num_skiped=$(($num_skiped + 1)); #simply skip the unmatched target
-                fi
+    # Read the file and search for lines starting with "// RUN:"
+    run_num=$(grep -E 'RUN(:|-.*:)' $file | wc -l)
+    run_count=0
+    while IFS= read -r line; do
+        if [[ $line =~ ^//[[:blank:]]*RUN:[[:blank:]]*(.+) ]]; then
+            run_count=$(($run_count + 1))
+            # Extract the command after "RUN:"
+            run_command="${BASH_REMATCH[1]}"
+            # Execute the command with replacements
+            execute_command "$file" "$run_command" "$run_count" "$run_num"
+        elif [[ $line =~ ^//[[:blank:]]*RUN-(.+):[[:blank:]]*(.+) ]]; then
+            run_count=$(($run_count + 1))
+            run_target="${BASH_REMATCH[1]}"
+            run_target=$(echo "$run_target" | tr '[:upper:]' '[:lower:]')
+            if [[ "${run_target}" == "$gcu_arch" ]]; then
+              # Extract the command after "RUN:"
+              run_command="${BASH_REMATCH[2]}"
+              # Execute the command with replacements
+              execute_command "$file" "$run_command" "$run_count" "$run_num"
+            else
+              echo "SKIP($run_target): ${file} ($run_count of $run_num)"
+              num_skiped=$(($num_skiped + 1)); #simply skip the unmatched target
             fi
-        done < "$file"
-    else
-        # For all other tests, use parallel execution
-        run_num=$(grep -E 'RUN(:|-.*:)' $file | wc -l)
-        run_count=0
-        while IFS= read -r line; do
-            if [[ $line =~ ^//[[:blank:]]*RUN:[[:blank:]]*(.+) ]]; then
-                run_count=$(($run_count + 1))
-                run_command="${BASH_REMATCH[1]}"
-
-                # Run the command in the background
-                execute_command "$file" "$run_command" "$run_count" "$run_num" &
-            elif [[ $line =~ ^//[[:blank:]]*RUN-(.+):[[:blank:]]*(.+) ]]; then
-                run_count=$(($run_count + 1))
-                run_target="${BASH_REMATCH[1]}"
-                run_target=$(echo "$run_target" | tr '[:upper:]' '[:lower:]')
-                if [[ "${run_target}" == "$gcu_arch" ]]; then
-                  run_command="${BASH_REMATCH[2]}"
-                  # Run the command in the background
-                  execute_command "$file" "$run_command" "$run_count" "$run_num" &
-                else
-                  echo "SKIP($run_target): ${file} ($run_count of $run_num)"
-                  num_skiped=$(($num_skiped + 1)); #simply skip the unmatched target
-                fi
-            fi
-        done < "$file"
-
-        # Wait for all background processes to finish before moving to the next file
-        wait
-    fi
+        fi
+    done < "$file"
 done
-
 
 showresult
