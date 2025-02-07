@@ -36,7 +36,9 @@ struct PadConfig final : public DMAConfig, public TypeIDProvider<PadConfig> {
   } value;
 
 #define DefineSetPadValue(type, ft)                                            \
-  void SetPadValue(type val) { value = {*((uint32_t*)&val), ft}; }
+  void SetPadValue(type val) {                                                 \
+    value = {*(reinterpret_cast<uint32_t*>(&val)), ft};                        \
+  }
 
   DefineSetPadValue(uint32_t, FundamentalType::U32);
   DefineSetPadValue(int32_t, FundamentalType::S32);

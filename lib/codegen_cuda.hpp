@@ -1,5 +1,5 @@
-#ifndef CHOREO_CODEGEN_CUDA_HPP_
-#define CHOREO_CODEGEN_CUDA_HPP_
+#ifndef __CHOREO_CODEGEN_CUDA_HPP__
+#define __CHOREO_CODEGEN_CUDA_HPP__
 
 #include <filesystem>
 #include <iostream>
@@ -12,9 +12,7 @@
 #include <vector>
 
 #include "ast.hpp"
-#include "choreo_cuda_header.inc"
 #include "codegen.hpp"
-#include "cuda_script.inc"
 #include "types.hpp"
 
 namespace Choreo {
@@ -156,4 +154,4 @@ private:
 
 } // end namespace Choreo
 
-#endif // CHOREO_CODEGEN_CUDA_HPP_
+#endif // __CHOREO_CODEGEN_CUDA_HPP__

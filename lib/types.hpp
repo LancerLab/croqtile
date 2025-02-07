@@ -595,6 +595,7 @@ struct Type {
   // codegen util for emitting target's code in string format
   virtual std::string EmitTo(CompileTarget) const {
     assert(false && "Emit stringify not impled for this type");
+    return "";
   }
 
   // for runtime type disambiguition

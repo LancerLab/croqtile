@@ -327,6 +327,8 @@ template <>
 inline bool Option<bool>::Parse(int argc, char** argv, int& currentArg) {
   assert(currentArg < argc &&
          "current argument index exceeds the total count.");
+  (void)argc;
+
   std::string arg = argv[currentArg];
   auto pos = arg.find('=');
   if (pos != std::string::npos) {

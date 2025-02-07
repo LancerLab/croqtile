@@ -40,7 +40,7 @@ inline static std::string stringify(const ptr<T>& pt) {
 }
 
 template <>
-std::string stringify(const ptr<AST::Node>& pt) {
+inline std::string stringify(const ptr<AST::Node>& pt) {
   if (auto pt_new = cast<AST::MultiDimSpans>(pt)) return stringify(*pt_new);
   return "invalid";
 }

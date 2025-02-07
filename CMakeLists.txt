@@ -35,6 +35,12 @@ set(BISON_ENV "BISON_PKGDATADIR=${TOOLCHAIN_DIR}/shared/bison/")
 
 add_compile_options(-Wall -Wextra -g  -D__CHOREO_FACTOR_DIR__="${TOOLCHAIN_DIR}" -D__CHOREO_CUDA_DIR__="${TOOLCHAIN_DIR}" -D__CHOREO_TOPSCC_DIR__="${TOOLCHAIN_DIR}")
 
+# do not warn about strict-aliasing
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    add_compile_options(-fno-strict-aliasing)
+endif()
+
+
 # Include generated files
 include_directories(${CMAKE_BINARY_DIR})
 include_directories(${CMAKE_SOURCE_DIR}/lib)
