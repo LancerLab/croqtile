@@ -11,6 +11,8 @@ COPP_BIN = build/copp
 TARGET = $(CHOREO_BIN) $(COPP_BIN)
 SRC_DIR = $(WORK_DIR)/lib
 BUILD_DIR = $(WORK_DIR)/build
+DBG_BUILD_DIR = $(WORK_DIR)/build-debug
+REL_BUILD_DIR = $(WORK_DIR)/build-release
 LEX_SRC = $(SRC_DIR)/scanner.l
 PARSER_SRC = $(SRC_DIR)/parser.yy
 #BISON_FLAGS = --language=c++ --skeleton=lalr1.cc -t -d  # Generates both parser.tab.c and parser.tab.h
@@ -52,12 +54,23 @@ CMAKE = cmake
 CMAKE_BUILD_TYPE = Release
 
 # Build rules
-all: $(TARGET)
+all: build-with-cmake-ninja
 
-test: $(TARGET)
+# Specific Release/debug build
+release: CMAKE_BUILD_TYPE=Release
+release: CMAKE_BUILD_DIR=$(REL_BUILD_DIR)
+release: build-with-cmake-ninja
+
+debug: CMAKE_BUILD_TYPE=Debug
+debug: CMAKE_BUILD_DIR=$(DBG_BUILD_DIR)
+debug: build-with-cmake-ninja
+
+legacy: $(TARGETS)
+
+test-legacy: $(TARGET)
 	$(LIT) tests && $(MAKE) standalone_test
 
-test-with-cmake: build-with-cmake-ninja
+test: build-with-cmake-ninja
 	$(LIT) tests && $(MAKE) standalone-test-with-cmake
 
 ci-gpu-test: setup build-with-cmake-ninja
@@ -72,8 +85,8 @@ ci-gcu3-test: setup-gcu3 build-with-cmake-ninja
 standalone-test-with-cmake: build-with-cmake-ninja
 	cd tests/standalone/ && $(MAKE) test
 
-clean-with-cmake:
-	@rm -rf $(CMAKE_BUILD_DIR) $(TEST_TARGETS) tests/*.result
+clean:
+	@rm -rf $(BUILD_DIR) $(DBG_BUILD_DIR) $(REL_BUILD_DIR) $(TEST_TARGETS) tests/*.result
 
 build-with-cmake:
 	@echo "Starting build with CMake..."
@@ -83,19 +96,20 @@ build-with-cmake:
 
 build-with-cmake-ninja:
 	@echo "Starting build with CMake..."
-	@if [ ! -d $(CMAKE_BUILD_DIR) ]; then mkdir $(CMAKE_BUILD_DIR); fi
+	@if [ ! -d $(CMAKE_BUILD_DIR) ]; then mkdir -p $(CMAKE_BUILD_DIR); fi
 	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -G Ninja -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE)
 	time ninja -C $(CMAKE_BUILD_DIR)
 
-ci-gpu-test-makefile: setup $(TARGET)
+ci-gpu-test-legacy: setup $(TARGET)
 	$(LIT) tests && $(MAKE) standalone_test
 
-ci-gcu2-test-makefile: setup-gcu2 $(TARGET)
+ci-gcu2-test-legacy: setup-gcu2 $(TARGET)
 	$(LIT) tests && $(MAKE) standalone_test
 
-ci-gcu3-test-makefile: setup-gcu3 $(TARGET)
+ci-gcu3-test-legacy: setup-gcu3 $(TARGET)
 	$(LIT) tests && $(MAKE) standalone_test
 
+# Legacy Makefile
 BUILD_OBJECTS = $(patsubst $(SRC_DIR)/%.cpp, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/*.cpp))
 
 $(BUILD_DIR):
@@ -151,7 +165,7 @@ cuda_script.inc : scripts/cuda_script.sh
 	echo ")__co_cuda__\";" >> $@
 	echo "#endif // __CHOREO_CUDA_SCRIPT_H__" >> $@
 
-clean:
+clean-legacy:
 	@rm -f *.cc *.hh *.inc *.o $(TEST_TARGETS) tests/*.result
 
 clobber: clean

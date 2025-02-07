@@ -1,6 +1,7 @@
 #ifndef __CHOREO_SYMBOL_VALUES_H__
 #define __CHOREO_SYMBOL_VALUES_H__
 
+#include "aux.hpp"
 #include <cmath>
 #include <limits>
 #include <sstream>

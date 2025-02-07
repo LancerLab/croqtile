@@ -78,7 +78,7 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
     }
   } else if (isa<AST::ForeachBlock>(&n)) {
     // anchor
-    if (IsHostSide()) 
+    if (IsHostSide())
       hs << h_indent << "// foreach: " << n.LOC() << "\n";
     else
       ds << d_indent << "// foreach: " << n.LOC() << "\n";
@@ -90,7 +90,7 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
     } else {
       ds << d_indent << "// incr: " << n.LOC() << "\n";
       IncrDeviceIndent();
-    } 
+    }
   }
   return true;
 }
@@ -163,7 +163,7 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
       auto cname = rng->IVName();
       auto ivs = within_map.at(InScopeName(cname));
       for (auto iv_itr = ivs.rbegin(); iv_itr != ivs.rend(); ++iv_itr) {
-    // anchor
+        // anchor
         if (IsHostSide()) {
           DecrHostIndent();
           hs << h_indent << "} // " << UnScopedName(*iv_itr) << "\n";
@@ -372,17 +372,17 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
         if (FBIContainsBuffer(FBInfo(), InScopeName(sym))) {
           // a non-init global var decl tied with future
           // this hint is enough to say a host side dataflow
-          VST_DEBUG(dbgs() << "Found " << buf_sym << " in FBInfo - " << STR(FBInfo())
-                     << "\n");
+          VST_DEBUG(dbgs() << "Found " << buf_sym << " in FBInfo - "
+                           << STR(FBInfo()) << "\n");
         } else {
           hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
           hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym << ", "
-            << UnScopedSizeExpr(*sty) << "));\n";
+             << UnScopedSizeExpr(*sty) << "));\n";
           if (n.init_value) {
             // support int/float-point literal initialization
             std::string sym_init_val = sym + "_init_val";
             hs << h_indent << bts << " " << sym_init_val << " = "
-              << ExprSTR(n.init_value) << ";\n";
+               << ExprSTR(n.init_value) << ";\n";
             std::string sym_init_vptr = sym + "_init_vptr";
             size_t data_len = SizeOf(sty->ElementType()) * 8;
             std::string init_val_type;
@@ -392,15 +392,15 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
             case 8: init_val_type = "unsigned char"; break;
             default:
               choreo_unreachable("unsupported data length " +
-                                std::to_string(data_len) +
-                                " in global span init.");
+                                 std::to_string(data_len) +
+                                 " in global span init.");
             }
             hs << h_indent << init_val_type << "* " << sym_init_vptr
-              << " = reinterpret_cast<" << init_val_type << "*>(&"
-              << sym_init_val << ");\n";
-            hs << h_indent << "choreo::abend_true(topsMemsetD" << data_len << "("
-              << buf_sym << ", *" << sym_init_vptr << ", "
-              << UnScopedExpr(ElemCountExprOf(*sty)) << "));\n";
+               << " = reinterpret_cast<" << init_val_type << "*>(&"
+               << sym_init_val << ");\n";
+            hs << h_indent << "choreo::abend_true(topsMemsetD" << data_len
+               << "(" << buf_sym << ", *" << sym_init_vptr << ", "
+               << UnScopedExpr(ElemCountExprOf(*sty)) << "));\n";
           }
         }
       } else {
@@ -625,8 +625,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       if (f_ca->positions == nullptr) {
         if (t_ca->positions == nullptr) {
           // direct copy
-          hs << h_indent << bts << " * " << buf_sym << " = " 
-            << buf_sym_from << ";\n";
+          hs << h_indent << bts << " * " << buf_sym << " = " << buf_sym_from
+             << ";\n";
         } else {
           choreo_unreachable("not support host-side deslice yet");
         }
@@ -646,18 +646,16 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
                 offset << "0";
               else
                 offset << "(int)(" << i_expr << " * " << STR(shape.ValueAt(i))
-                      << ")";
+                       << ")";
               ++i;
             }
           }
         }
-        hs << h_indent << "int " << off_name << " = " << offset.str()
-          << ";\n";
+        hs << h_indent << "int " << off_name << " = " << offset.str() << ";\n";
 
-        hs << h_indent << bts << " * " 
-          << buf_sym << " = " 
-          << buf_sym_from << " + " << off_name << "" 
-          << ";\n";
+        hs << h_indent << bts << " * " << buf_sym << " = " << buf_sym_from
+           << " + " << off_name << ""
+           << ";\n";
       }
     } else
       choreo_unreachable("not support host-side dma other than copy");
@@ -665,20 +663,22 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     return true;
   }
 
-
   auto GetBufferExpr = [this](const std::string& sym) {
     std::string buf_expr = "";
-    if (isa<FutureType>(GetSymbolType(sym)) && !IsHostSymbol(InScopeName(sym))) {
+    if (isa<FutureType>(GetSymbolType(sym)) &&
+        !IsHostSymbol(InScopeName(sym))) {
       std::string buf_name = InScopeName(sym) + ".data";
       buf_expr = ssm.DeviceName(buf_name);
-    } else if (isa<FutureType>(GetSymbolType(sym)) 
-      // This only matches the host-side buffer that is defined in choreo DMA and tied to future
-      // but host-side data copy does not really do device-level DMA, and the future is 
-      // basically a phantom handle do not emit any concrete code at host-side.
-      && IsHostSymbol(InScopeName(sym)) 
-      && !IsChoreoInput(InScopeName(sym))
-      && !IsChoreoOutput(InScopeName(sym))) {
-      buf_expr = UnScopedName(const_cast<FutureBufferInfo&>(FBInfo())[InScopeName(sym)].buffer);
+    } else if (isa<FutureType>(GetSymbolType(sym))
+               // This only matches the host-side buffer that is defined in
+               // choreo DMA and tied to future but host-side data copy does not
+               // really do device-level DMA, and the future is basically a
+               // phantom handle do not emit any concrete code at host-side.
+               && IsHostSymbol(InScopeName(sym)) &&
+               !IsChoreoInput(InScopeName(sym)) &&
+               !IsChoreoOutput(InScopeName(sym))) {
+      buf_expr = UnScopedName(
+          const_cast<FutureBufferInfo&>(FBInfo())[InScopeName(sym)].buffer);
     } else
       buf_expr = ssm.DeviceName(InScopeName(sym));
 
@@ -1009,17 +1009,17 @@ bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
       // anchor
       if (IsHostSide()) {
         hs << h_indent << "for (" << ssm.DeviceName(iv_name) << " = "
-          << (rng->lbound ? ("(" + ExprSTR(rng->lbound, false) + ")") : "0")
-          << "; " << ssm.DeviceName(iv_name) << " < "
-          << UnScopedExpr(STR(iv_bty->GetUpperBound())) << "; ++"
-          << ssm.DeviceName(iv_name) << ") {\n";
+           << (rng->lbound ? ("(" + ExprSTR(rng->lbound, false) + ")") : "0")
+           << "; " << ssm.DeviceName(iv_name) << " < "
+           << UnScopedExpr(STR(iv_bty->GetUpperBound())) << "; ++"
+           << ssm.DeviceName(iv_name) << ") {\n";
         IncrHostIndent();
       } else {
         ds << d_indent << "for (" << ssm.DeviceName(iv_name) << " = "
-          << (rng->lbound ? ("(" + ExprSTR(rng->lbound, false) + ")") : "0")
-          << "; " << ssm.DeviceName(iv_name) << " < "
-          << UnScopedExpr(STR(iv_bty->GetUpperBound())) << "; ++"
-          << ssm.DeviceName(iv_name) << ") {\n";
+           << (rng->lbound ? ("(" + ExprSTR(rng->lbound, false) + ")") : "0")
+           << "; " << ssm.DeviceName(iv_name) << " < "
+           << UnScopedExpr(STR(iv_bty->GetUpperBound())) << "; ++"
+           << ssm.DeviceName(iv_name) << ") {\n";
         IncrDeviceIndent();
       }
     }

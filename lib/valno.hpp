@@ -163,7 +163,8 @@ private:
   std::optional<std::string> ref = std::nullopt;
 
 public:
-  explicit ValueNumbering(ShapeInference* v, bool t) : visitor(v), trace(t) {}
+  explicit ValueNumbering(ShapeInference* v)
+      : visitor(v), trace(CCtx().TraceValueNumbers()) {}
 
   void EnterScope();
   void LeaveScope();
@@ -309,7 +310,7 @@ private:
   }
 
 public:
-  ShapeInference(bool t = false) : VisitorWithScope("valno"), vn(this, t) {
+  ShapeInference() : VisitorWithScope("valno"), vn(this) {
     type_equals.SetDebug(debug_visit);
   }
 

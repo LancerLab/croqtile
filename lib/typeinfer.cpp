@@ -41,7 +41,7 @@ bool TypeInference::AfterVisitImpl(AST::Node& n) {
       f->f_decl.SetType(sym_ty);
       f->SetType(sym_ty);
     }
-    if (Dump) {
+    if (CCtx().ShowInferredTypes()) {
       dbgs() << "Function:  " << SSTab().InScopeName(f->name)
              << ", Type: " << AST::TYPE_STR(*f) << "\n";
     }
@@ -264,7 +264,7 @@ bool TypeInference::Visit(AST::NamedVariableDecl& n) {
         cast<FutureType>(nty)->GetSpannedType()->GetMDSpanType());
   }
 
-  if (Dump) {
+  if (CCtx().ShowInferredTypes()) {
     dbgs() << ((AST::istypeof<FutureType>(&n)) ? "Future" : "Symbol");
     dbgs() << ":    " << InScopeName(n.name_str) << ", Type: " << PSTR(nty);
     dbgs() << "\n";
@@ -302,7 +302,7 @@ bool TypeInference::Visit(AST::NamedTypeDecl& n) {
 
   AssignSymbolWithType(n.LOC(), n.name_str, n.GetType());
 
-  if (Dump) {
+  if (CCtx().ShowInferredTypes()) {
     dbgs() << "Partial:   " << InScopeName(n.name_str)
            << ", Type: " << AST::TYPE_STR(n) << "\n";
   }
@@ -351,7 +351,7 @@ bool TypeInference::Visit(AST::Assignment& n) {
                          fty->GetSpannedType()->GetMDSpanType());
   }
 
-  if (Dump) {
+  if (CCtx().ShowInferredTypes()) {
     dbgs() << "Symbol:    " << InScopeName(n.name) << ", Type: " << PSTR(ty)
            << "\n";
   }
@@ -399,7 +399,7 @@ bool TypeInference::Visit(AST::Parameter& p) {
   // collect the parameter types
   cur_param_types.push_back(p.GetType());
 
-  if (Dump) {
+  if (CCtx().ShowInferredTypes()) {
     dbgs() << "Parameter: ";
     if (p.HasSymbol())
       dbgs() << InScopeName(p.sym->name);
@@ -682,7 +682,7 @@ bool TypeInference::Visit(AST::DMA& n) {
     }
   }
 
-  if (Dump) {
+  if (CCtx().ShowInferredTypes()) {
     dbgs() << "Future:    "
            << ((n.future.empty()) ? SSTab().ScopeName() + "(anon)"
                                   : InScopeName(n.future))
@@ -697,7 +697,7 @@ bool TypeInference::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
 
   AssignSymbolWithType(n.LOC(), n.biv->name, n.biv->GetType());
-  if (Dump) {
+  if (CCtx().ShowInferredTypes()) {
     dbgs() << "Bounded:   " << InScopeName(n.biv->name)
            << ", Type: " << AST::TYPE_STR(n.biv) << "\n";
   }
@@ -705,7 +705,7 @@ bool TypeInference::Visit(AST::ParallelBy& n) {
   for (auto sym : n.iv_symbols->AllValues()) {
     auto id = cast<AST::Identifier>(sym);
     AssignSymbolWithType(sym->LOC(), id->name, sym->GetType());
-    if (Dump) {
+    if (CCtx().ShowInferredTypes()) {
       dbgs() << "Bounded:   " << InScopeName(id->name)
              << ", Type: " << AST::TYPE_STR(sym) << "\n";
     }
@@ -729,7 +729,7 @@ bool TypeInference::Visit(AST::WithIn& n) {
     }
   }
 
-  if (Dump) {
+  if (CCtx().ShowInferredTypes()) {
     if (n.with) {
       dbgs() << "Bounded:   ";
       dbgs() << InScopeName(n.with->name)

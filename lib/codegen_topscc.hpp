@@ -291,7 +291,8 @@ private:
 
   bool IsHostSide() const {
     // if current stmt not enter parallel-by btw device and host
-    // max_parallel_level is not set or set to 0 or has explicit distance to inner-most
+    // max_parallel_level is not set or set to 0 or has explicit distance to
+    // inner-most
     return (max_parallel_level == 0 || parallel_level + 1 < max_parallel_level);
   }
 
@@ -300,13 +301,14 @@ private:
     size_t pos = 0;
     std::string target = "paraby";
     // anchor
-    // dbgs() << "anchor for symbol " << sym << "; maxprlv = " << max_parallel_level << "\n";
+    // dbgs() << "anchor for symbol " << sym << "; maxprlv = " <<
+    // max_parallel_level << "\n";
     int host_side_parallel_lv_cnt = std::max(max_parallel_level - 2, 0);
 
     // find the target substring from the current position
     while ((pos = sym.find(target, pos)) != std::string::npos) {
-        count++;
-        pos += target.length(); // Move pos to the end of the found target
+      count++;
+      pos += target.length(); // Move pos to the end of the found target
     }
 
     return (count <= host_side_parallel_lv_cnt);

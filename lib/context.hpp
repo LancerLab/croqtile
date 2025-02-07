@@ -113,13 +113,12 @@ inline const std::string STR(const FutureBufferInfo& fbi) {
   return oss.str();
 }
 
-inline bool FBIContainsBuffer(const FutureBufferInfo& buffer_info, const std::string& name) {
-    for (const auto& item : buffer_info) {
-        if (item.second.buffer == name) {
-            return true;
-        }
-    }
-    return false;
+inline bool FBIContainsBuffer(const FutureBufferInfo& buffer_info,
+                              const std::string& name) {
+  for (const auto& item : buffer_info) {
+    if (item.second.buffer == name) { return true; }
+  }
+  return false;
 }
 
 struct OptimizedValues {
@@ -163,12 +162,26 @@ class SymbolTable;
 // per-compilation context
 class CompilationContext {
 private:
-  bool debug_symtab = false;
   std::map<std::string, FunctionContext> function_contexts;
   CompileTarget compile_target = CompileTarget::Unknown;
   TargetArch arch = TargetArch::Unknown;
   OutputKind out_kind = OutputKind::TargetExecutable;
   uint8_t opt_level = 0;
+
+private:
+  // compiler configurations
+  bool debug_symtab = false;
+  bool dump_ast = false;
+  bool no_codegen = false;          // stop before code generation
+  bool print_pass_names = false;    // print pass name before pass run
+  bool no_pre_process = false;      // do not invoke pre-processor
+  bool drop_comment = false;        // drop any comments
+  bool debug_all = false;           // enable full debug
+  bool show_inferred_types = false; // show the inferred types
+  bool dump_symtab = false;         // dump symbol table after type check
+  bool visualize = false;           // visualize the DMAs
+  bool cross_compile = false;       // TODO: figure out
+  bool trace_vn = false;            // trace the value numbering
 
 private:
   std::shared_ptr<SymbolTable> sym_tab = nullptr; // global symbol table
@@ -179,6 +192,7 @@ public:
   void SetGlobalSymbolTable(const std::shared_ptr<SymbolTable>& st) {
     sym_tab = st;
   }
+
   std::shared_ptr<SymbolTable>& GetGlobalSymbolTable() {
     if (!sym_tab) choreo_unreachable("global symbol table is invalid.");
     return sym_tab;
@@ -238,6 +252,33 @@ public:
     }
     return 0;
   }
+
+public:
+  // Getters of compiler configurations
+  bool DumpAst() const { return dump_ast; }
+  bool NoCodegen() const { return no_codegen; }
+  bool PrintPassNames() const { return print_pass_names; }
+  bool NoPreProcess() const { return no_pre_process; }
+  bool DropComments() const { return drop_comment; }
+  bool DebugAll() const { return debug_all; }
+  bool ShowInferredTypes() const { return show_inferred_types; }
+  bool DumpSymtab() const { return dump_symtab; }
+  bool Visualize() const { return visualize; }
+  bool CrossCompile() const { return cross_compile; }
+  bool TraceValueNumbers() const { return trace_vn; }
+
+  // Setters of compiler configurations
+  void SetDumpAst(bool value) { dump_ast = value; }
+  void SetNoCodegen(bool value) { no_codegen = value; }
+  void SetPrintPassNames(bool value) { print_pass_names = value; }
+  void SetNoPreProcess(bool value) { no_pre_process = value; }
+  void SetDropComments(bool value) { drop_comment = value; }
+  void SetDebugAll(bool value) { debug_all = value; }
+  void SetShowInferredTypes(bool value) { show_inferred_types = value; }
+  void SetDumpSymtab(bool value) { dump_symtab = value; }
+  void SetVisualize(bool value) { visualize = value; }
+  void SetCrossCompile(bool value) { cross_compile = value; }
+  void SetTraceValueNumbers(bool value) { trace_vn = value; }
 
 public:
   static CompilationContext& GetInstance() {

@@ -12,7 +12,6 @@ namespace Choreo {
 struct TypeInference : public VisitorWithScope {
 private:
   TypeConstraints type_equals;
-  bool Dump = false;
 
 private:
   ptr<Type> cur_type = nullptr;
@@ -36,9 +35,8 @@ private:
   }
 
 public:
-  TypeInference(bool d)
-      : VisitorWithScope("infer"), type_equals(this), Dump(d) {
-    type_equals.SetTypeReport(Dump);
+  TypeInference() : VisitorWithScope("infer"), type_equals(this) {
+    type_equals.SetTypeReport(CCtx().ShowInferredTypes());
   }
 
   bool Visit(AST::MultiNodes&) override;

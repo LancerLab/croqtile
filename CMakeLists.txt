@@ -15,6 +15,10 @@ else()
     message(STATUS "ccache not found, compilation will not be cached")
 endif()
 
+# allow diagnotics-color
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  add_compile_options(-fdiagnostics-color)
+endif()
 
 # Specify the build directory (this is automatically handled by CMake)
 set(BUILD_DIR ${CMAKE_BINARY_DIR}/build)
@@ -53,11 +57,20 @@ target_include_directories(choreo PRIVATE ${CMAKE_SOURCE_DIR})
 
 # Link the library to the executable
 # porting from config -Wl,-rpath -Wl,$(GINAC_DIR)/install/lib
-target_link_libraries(choreo PRIVATE 
-  parser_obj 
+target_link_libraries(choreo PRIVATE
+  parser_obj
   scanner_obj
-  codegen 
-  ${CLN_DIR}/lib/libcln.so 
+  cl_obj
+  codegen
+  ${CLN_DIR}/lib/libcln.so
+  ${GINAC_DIR}/lib/libginac.so
+)
+
+target_link_libraries(copp PRIVATE
+  parser_obj
+  scanner_obj
+  codegen
+  ${CLN_DIR}/lib/libcln.so
   ${GINAC_DIR}/lib/libginac.so
 )
 

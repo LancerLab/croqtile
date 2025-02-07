@@ -60,6 +60,7 @@ set(CODEGEN_SOURCES
   codegen_topscc.cpp
   earlysema.cpp
   semacheck.cpp
+  symtab.cpp
   sym_replace.cpp
   typeinfer.cpp
   types.cpp
@@ -75,10 +76,14 @@ add_library(scanner_obj OBJECT ${CMAKE_BINARY_DIR}/scanner.yy.cc)
 target_include_directories(scanner_obj PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_dependencies(scanner_obj generate_sources)
 
+add_library(cl_obj OBJECT ${CMAKE_SOURCE_DIR}/lib/command_line.cpp)
+target_include_directories(cl_obj PRIVATE ${CMAKE_SOURCE_DIR}/lib)
+
 # Add the codegen library
 add_library(codegen STATIC 
   ${CODEGEN_SOURCES}
 )
+
 target_include_directories(codegen PRIVATE ${WORK_DIR} ${CMAKE_SOURCE_DIR})
 target_link_libraries(codegen PRIVATE
   ${CLN_DIR}/lib/libcln.so 
@@ -90,4 +95,3 @@ target_compile_definitions(codegen PRIVATE
     __CHOREO_CUDA_DIR__="${TOOLCHAIN_DIR}"
     __CHOREO_TOPSCC_DIR__="${TOOLCHAIN_DIR}"
 )
-

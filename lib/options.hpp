@@ -149,39 +149,46 @@ public:
 
   bool Parse(int argc, char** argv) {
     Reset();
-    for (int i = 1; i < argc; ++i) {
-      std::string arg = argv[i];
-      auto option = arg;
-      if (auto pos = option.find("="); pos != std::string::npos)
-        option = arg.substr(0, pos);
-      if (option == "--help" || option == "-H") {
-        Help(OptionKind::User);
-        return false;
-      } else if (option == "--help-hidden") {
-        Help(OptionKind::Hidden);
-        return false;
-      }
-      if (options.count(option)) {
-        if (!options[option]->Parse(argc, argv, i)) {
-          ess << options[option]->GetError();
-          return false;
-        }
-      } else {
-        if (!input_filename.empty()) {
-          ess << "error: set input file twice: '" << input_filename << "' and '"
-              << arg << "'.";
-          ret_code = 1;
-          return false;
-        } else
-          input_filename = arg;
-        if (input_filename == "-") stdin_as_input = true;
-      }
-    }
+    for (int i = 1; i < argc; ++i)
+      if (!Parse(argc, argv, i)) return false;
 
     if (!stdin_as_input && input_filename.empty()) {
       ess << "error: no input file.";
       ret_code = 1;
       return false;
+    }
+    return true;
+  }
+
+  bool Parse(int argc, char** argv, int& i) {
+    assert(i < argc && "the argument is out of bound.");
+    (void)argc;
+
+    std::string arg = argv[i];
+    auto option = arg;
+    if (auto pos = option.find("="); pos != std::string::npos)
+      option = arg.substr(0, pos);
+    if (option == "--help" || option == "-H") {
+      Help(OptionKind::User);
+      return false;
+    } else if (option == "--help-hidden") {
+      Help(OptionKind::Hidden);
+      return false;
+    }
+    if (options.count(option)) {
+      if (!options[option]->Parse(argc, argv, i)) {
+        ess << options[option]->GetError();
+        return false;
+      }
+    } else {
+      if (!input_filename.empty()) {
+        ess << "error: set input file twice: '" << input_filename << "' and '"
+            << arg << "'.";
+        ret_code = 1;
+        return false;
+      } else
+        input_filename = arg;
+      if (input_filename == "-") stdin_as_input = true;
     }
 
     return true;
