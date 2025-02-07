@@ -1,6 +1,7 @@
 #ifndef __CHOREO_COMMAND_LINE_HPP__
 #define __CHOREO_COMMAND_LINE_HPP__
 
+#include <string>
 #include <unordered_map>
 
 namespace Choreo {
