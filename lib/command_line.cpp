@@ -101,29 +101,28 @@ inline bool file_exists(const std::string& filename) {
   return (stat(filename.c_str(), &buffer) == 0);
 }
 
-std::unordered_map<std::string, std::string> CommandLine::macro_defs;
-
 bool CommandLine::Parse(int argc, char** argv) {
   // parse all the options
   auto& r = OptionRegistry::GetInstance();
   r.Reset();
   for (int i = 1; i < argc; ++i) {
     std::string arg = argv[i];
-    if (arg.substr(0, 2) == "-D") { // handle macros definitions
+    if (arg.substr(0, 2) == "-D") { // macros definitions
       auto pos = arg.find('=');
       if (pos != std::string::npos) {
-        auto name = arg.substr(2, pos);
+        auto name = arg.substr(2, pos - 2);
         auto val = arg.substr(pos + 1);
-        macro_defs[name] = val;
+        CCtx().GetCLMacros()[name] = val;
       } else
-        macro_defs[arg.substr(2)] = "";
-    } else if (arg.substr(0, 2) == "-O") { // handle optimization level
-      if (arg.size() != 3 || std::isdigit(static_cast<unsigned char>(arg[2]))) {
+        CCtx().GetCLMacros()[arg.substr(2)] = "";
+    } else if (arg.substr(0, 2) == "-O") { // optimization level
+      int level = arg[2] - '0';
+      if (arg.size() != 3 || level > 3 || level < 0) {
         std::cerr << "Invalid optimization level: " << arg << ".\n";
         ret_code = 1;
         return false;
       }
-      CCtx().SetOptimizationLevel(arg[2] - '0');
+      CCtx().SetOptimizationLevel(level);
     } else if (!r.Parse(argc, argv, i)) {
       if (!r.Message().empty()) errs() << r.Message() << "\n";
       exit(r.ReturnCode());

@@ -65,13 +65,21 @@ debug: CMAKE_BUILD_TYPE=Debug
 debug: CMAKE_BUILD_DIR=$(DBG_BUILD_DIR)
 debug: build-with-cmake-ninja
 
-legacy: $(TARGETS)
+legacy: $(TARGET)
+	ln -sf $(CHOREO_BIN) $(WORK_DIR)/choreo
+	ln -sf $(COPP_BIN) $(WORK_DIR)/copp
 
-test-legacy: $(TARGET)
+test-legacy: legacy
 	$(LIT) tests && $(MAKE) standalone_test
 
 test: build-with-cmake-ninja
 	$(LIT) tests && $(MAKE) standalone-test-with-cmake
+
+test-debug: debug
+	$(LIT) tests && $(MAKE) standalone_test
+
+test-release: release
+	$(LIT) tests && $(MAKE) standalone_test
 
 ci-gpu-test: setup build-with-cmake-ninja
 	$(LIT) tests && $(MAKE) standalone-test-with-cmake
@@ -99,14 +107,16 @@ build-with-cmake-ninja:
 	@if [ ! -d $(CMAKE_BUILD_DIR) ]; then mkdir -p $(CMAKE_BUILD_DIR); fi
 	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -G Ninja -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE)
 	time ninja -C $(CMAKE_BUILD_DIR)
+	ln -sf $(CMAKE_BUILD_DIR)/choreo $(WORK_DIR)/choreo
+	ln -sf $(CMAKE_BUILD_DIR)/copp $(WORK_DIR)/copp
 
-ci-gpu-test-legacy: setup $(TARGET)
+ci-gpu-test-legacy: setup legacy
 	$(LIT) tests && $(MAKE) standalone_test
 
-ci-gcu2-test-legacy: setup-gcu2 $(TARGET)
+ci-gcu2-test-legacy: setup-gcu2 legacy
 	$(LIT) tests && $(MAKE) standalone_test
 
-ci-gcu3-test-legacy: setup-gcu3 $(TARGET)
+ci-gcu3-test-legacy: setup-gcu3 legacy
 	$(LIT) tests && $(MAKE) standalone_test
 
 # Legacy Makefile

@@ -9,12 +9,6 @@ namespace Choreo {
 class CommandLine {
 private:
   int ret_code = 0;
-  static std::unordered_map<std::string, std::string> macro_defs;
-
-public:
-  static const std::unordered_map<std::string, std::string>& GetMacros() {
-    return macro_defs;
-  }
 
 public:
   bool Parse(int argc, char** argv);

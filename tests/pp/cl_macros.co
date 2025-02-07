@@ -1,0 +1,19 @@
+// RUN: choreo -DMACRO1=2 -DM3 -E %s -o - | grep -v "\<CHECK\>" | FileCheck --match-full-lines %s
+
+__co__ void foo(f32 [1, 2] a) {
+#ifdef MACRO1
+ abc MACRO1
+#ifdef M3
+ bcd M3
+#else
+ cde
+#endif
+#else
+ def
+#endif
+}
+
+// CHECK: abc 2
+// CHECK: bcd
+// CHECK-NOT: cde
+// CHECK-NOT: def

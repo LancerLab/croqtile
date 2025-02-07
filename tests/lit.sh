@@ -4,7 +4,7 @@
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
 # Add the script's parent directory to PATH
-export PATH="$script_dir:${script_dir}/../:${script_dir}/../build/:${script_dir}/../tools/bin:$PATH"
+export PATH="$script_dir:${script_dir}/../:${script_dir}/../tools/bin:$PATH"
 
 # Check if FileCheck exists in the PATH
 if ! which FileCheck &>/dev/null; then

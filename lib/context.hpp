@@ -186,6 +186,9 @@ private:
 private:
   std::shared_ptr<SymbolTable> sym_tab = nullptr; // global symbol table
 
+private:
+  std::unordered_map<std::string, std::string> cl_macros; // defined macros
+
 public:
   bool DebugSymTab() const { return debug_symtab; }
 
@@ -279,6 +282,14 @@ public:
   void SetVisualize(bool value) { visualize = value; }
   void SetCrossCompile(bool value) { cross_compile = value; }
   void SetTraceValueNumbers(bool value) { trace_vn = value; }
+
+  const std::unordered_map<std::string, std::string>& GetCLMacros() const {
+    return cl_macros;
+  }
+
+  std::unordered_map<std::string, std::string>& GetCLMacros() {
+    return cl_macros;
+  }
 
 public:
   static CompilationContext& GetInstance() {

@@ -69,6 +69,9 @@ public:
     case TargetArch::GCU3: globalDefines.emplace("__GCU_ARCH__", "300"); break;
     default: break;
     }
+    // command-line macros override
+    for (auto& item : CCtx().GetCLMacros())
+      globalDefines[item.first] = item.second;
   }
 
 private:
