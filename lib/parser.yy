@@ -27,12 +27,38 @@ struct SymbolWithInitVal {
 };
 
 class PContext {
-  private:
-    size_t error_count = 0;
-  public:
-    size_t GetErrorCount() { return error_count; }
-    bool HasError() { return error_count > 0; }
-    void recordError() { error_count++; }
+private:
+  size_t error_count = 0;
+
+public:
+  size_t GetErrorCount() { return error_count; }
+  bool HasError() { return error_count > 0; }
+  void recordError() { error_count++; }
+
+private:
+  std::vector<std::string> source_lines; // Store the source file's lines
+
+public:
+  void recordSourceLine(const std::string& line) {
+    source_lines.push_back(line);
+  }
+
+  std::string getSourceLine(int line_no) const {
+    if (line_no > 0 && line_no <= (int)source_lines.size()) {
+      return source_lines[line_no - 1];
+    }
+    return "";
+  }
+
+  // force to load the source file
+  PContext(std::istream& input) { loadSourceCode(input); }
+
+private:
+  void loadSourceCode(std::istream& input) {
+    std::string line;
+    while (std::getline(input, line))
+      source_lines.push_back(line);
+  }
 };
 }
 
@@ -1313,5 +1339,19 @@ void Parser::error(const location &loc , const std::string &message) {
   errs() << ((should_use_colors()) ? color_red : "") << "error: "
          << ((should_use_colors()) ? color_reset : "");
   errs() << message << "\n";
+
+  // Retrieve the line that caused the error
+  std::string errorLine = pctx.getSourceLine(loc.begin.line);
+  if (!errorLine.empty()) {
+    errs() << "  " << errorLine << "\n"; // Print the source line
+
+    // Print caret (^) under the error position
+    errs() << "  ";
+    for (int i = 1; i < loc.begin.column; ++i) {
+      errs() << " "; // Align the caret with the exact error position
+    }
+    errs() << "^" << "\n";
+  }
+
   pctx.recordError();
 }

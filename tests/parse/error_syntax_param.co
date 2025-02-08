@@ -1,3 +1,5 @@
+// RUN: choreo %s 2>&1| FileCheck %s
+
 #include <iostream>
 
 // kernel program
@@ -33,3 +35,7 @@ __co__ int foo(f32 d[]) {
 int bar(int a[], int b[]) {
   return foo(a) + b;
 }
+
+// CHECK: error: syntax error, unexpected IDENTIFIER, expecting [ or MDSPAN
+// CHECK:   __co__ int foo(f32 d[]) {
+// CHECK:                      ^

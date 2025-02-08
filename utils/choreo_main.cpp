@@ -64,7 +64,10 @@ int main(int argc, char* argv[]) {
 
   Scanner s;
   s.yyrestart((CCtx().NoPreProcess()) ? r.GetInputStream() : pps);
-  PContext pctx;
+
+  // new stream applied to source code (for the syntax errors)
+  std::ifstream scs(r.GetInputFileName());
+  PContext pctx(scs);
   Parser p(pctx, s);
 
   if (CCtx().DebugAll()) {
