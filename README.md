@@ -7,17 +7,19 @@ To address these challenges, Choreo is designed to simplify DMA programming by i
 
 ## Features
 ### Productivity
-One of the standout features of Choreo by design is its ability of **mind-set saving** in **data tiling** tasks. This is achieved by introducing domain specific types, which simplify data shape manipulation to a level comparable to *Python*. For instance: 
+One of the standout features of Choreo by design is its ability of **mind-set saving** in **data tiling** tasks. This is achieved by introducing domain specific types, which simplify data **shape manipulation** to a level comparable to *Python*. For instance: 
 ```cpp
-__co__ f32 mdspan<2> my_function(f32 [8, 4, 12] d) {
-    block_shape : d.span { (0)/ 2, (1)/ 4, 1, (2)};
+__co__ auto shape_master(f32 [8, 4, 12] shaped_data) {
+  new_shape : shaped_data.span { (0)/ 2, (1)/ 4, 1, (2)};
 }
 ```
-With this code, programmers can effortlessly create a shape with a tiling factor of {2, 4, 1} from data 'd' and even add an extra dimension to the tiled 'block_shape', all in a single line. Furthermore, beside easy shape manipulation, the following code demostrates how Choreo simplify operations on DMA:
+With this code, programmers can effortlessly create a shape with a tiling factor of {2, 4, 1} from data 'd' and even add an extra dimension to the 'new_shape', all in a single line. Compared with corresponding C++ code, which has to build array and apply trivial arithmetics, Choreo spares programmers from having to combine low-level abstractions. 
+
+Furthermore, as Choreo simplify operations of data movement, it provides the high-level abstraction of tiled data movement:
 ```cpp
   dma.copy input.chunkat(tiling_factors) => shared;
 ```
-This code transfers a data chunk with specified tiling factors to a storage location named 'shared' via DMA. The explicit tiling in the code is easy to maintain, and the complexities of DMA configurations, index calculations, and storage management are handled implicitly by the Choreo compiler. The design allows programmers to concentrate on high-level strategies for building high-performance kernels.
+This code moves a data chunk of 'input' with specified tiling factors to a storage location named 'shared'. The code is usually observed in programs with hardware DMA support. Choreo compiler hides the complexities of DMA configurations, index calculations, and storage management with easy-to-maintain semantics. Therefore, it allows programmers to concentrate on high-level strategies for building high-performance kernels, which are normally essential for building ML/HPC applications.
 
 ### Code Safety
 Another primary design goal of Choreo is to **ensure code safety** by catching errors at compile-time or as early as possible at runtime. To achieve this, Choreo employs **compile-time checks** and instruments **runtime-check** based on the shapes and rules inferred from the *tileflow code*.
@@ -25,23 +27,23 @@ Another primary design goal of Choreo is to **ensure code safety** by catching e
 Bugs related to DMA are typically challenging to diagnose. However, with Choreo's safety checks, programmers can significantly reduce debugging efforts, thereby shortening the overall development cycle.
 
 ### Dynamic/Symbolic Shapes
-Dynamic shape support is crucial for building many ML kernels. Choreo enhances the dynamic shape support via the **symbolic shapes**. Programmers can utilize the feature easily like the below code:
+Dynamic shape support is crucial for building many ML kernels. Choreo enhances the dynamic shape support via the **symbolic shapes** feature. Programmers can utilize the feature easily like the below code:
 
 ```
 __co__ auto matmul(f32 [M, K] lhs, f32 [N, K] rhs) { ... }
 ```
-This feature introduces a natural way to program shaped inputs, such as tensors. Additionally, symbolic shapes are also checked to ensure safety. This eliminates the need for many trivial, explicitly programmed assertions, thereby reducing boilerplate code.
+'M', 'N' and 'K' are the symbolic shape values. Programs program shaped inputs, such as tensors, in such a natural way. Such a design priors any existing systems (late 2024). Additionally, symbolic shapes are also checked to ensure safety. As it is automatic, and systematic, it eliminates the need for non-systematic, explicitly programmed assertions by the users, thereby reducing boilerplate code.
 
 ### Visualization
-**Analytic and visualization** is another compelling feature of Choreo, designed to help newcomers understand DMA behaviors. For instance, consider the following DMA statement:
+**Analytic and visualization** is another compelling feature of Choreo, designed to help programmers understand tiling behaviors. For instance, consider the following data movement statement:
 
 `f1 = dma.copy a.chunkat(p, x, y) => local;`
 
-With Choreo's visualization capability, programmers can observe the data movement resulting from this statement. The visualization might look something like this:
+With Choreo's visualization capability, it renders figures like:
 
 ![visualizing the DMA statement](./images/simple_dma.png)
 
-This is helpful for programmers escpecially for novices as visualization gives clear projection about the tiling behavior. Or else, programmers have to visualize in their mind, which is more error-prone.
+Programmers is easy to find the projection of the tiling and data movement behavior from this visualization. Such assistance can significantly reduce user erorrs when being properly used.
 
 # Documentation for Reference
 Consult the [Choreo Documentation and Tutorials](http://10.31.50.149:8000/) document for information on building Choreo and the detailed usage.
