@@ -5,13 +5,12 @@ Traditionally, programming DMA has focused on hardware configuration rather than
 
 To address these challenges, Choreo is designed to simplify DMA programming by introducing a novel paradigm called **'TileFlow' programming**. It has already shown significant improvement on productivity, safety, and adaptibility over existing design, and is proven effective for building **high-performance machine learnig kernels** on heterogeneous hardware.
 
-## Features
+## Features and Design Targets
 ### Productivity
 One of the standout features of Choreo by design is its ability of **mind-set saving** in **data tiling** tasks. This is achieved by introducing domain specific types, which simplify data **shape manipulation** to a level comparable to *Python*. For instance: 
 ```cpp
-__co__ auto shape_master(f32 [8, 4, 12] shaped_data) {
+  f32 [8, 4, 12] shaped_data;
   new_shape : shaped_data.span { (0)/ 2, (1)/ 4, 1, (2)};
-}
 ```
 With this code, programmers can effortlessly create a shape with a tiling factor of {2, 4, 1} from data 'd' and even add an extra dimension to the 'new_shape', all in a single line. Compared with corresponding C++ code, which has to build array and apply trivial arithmetics, Choreo spares programmers from having to combine low-level abstractions. 
 
