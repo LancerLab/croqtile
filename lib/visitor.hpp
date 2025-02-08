@@ -242,21 +242,42 @@ private:
   static constexpr const char* color_yellow = "\033[33m";
   static constexpr const char* color_reset = "\033[0m";
 
+protected:
+  void ShowSourceLocation() {
+    if (!CCtx().ShowSourceLocation()) return;
+
+    // Retrieve the line that caused the error
+    std::string error_line = CCtx().GetSourceLine(loc.begin.line);
+    if (!error_line.empty()) {
+      errs() << "  " << error_line << "\n"; // Print the source line
+
+      // Print caret (^) under the error position
+      errs() << "  ";
+      for (int i = 1; i < loc.begin.column; ++i)
+        errs() << " "; // Align the caret with the exact error position
+
+      errs() << "^" << "\n";
+    }
+  }
+
 public:
   void Error(const location& loc, const std::string& message) {
     errs() << loc << ": " << ((should_use_colors()) ? color_red : "")
            << "error: " << ((should_use_colors()) ? color_reset : "");
     errs() << message << "\n";
+    ShowSourceLocation();
   }
 
   void Warning(const location& loc, const std::string& message) {
     errs() << loc << ": " << ((should_use_colors()) ? color_yellow : "")
            << "warning: " << ((should_use_colors()) ? color_reset : "");
     errs() << message << "\n";
+    ShowSourceLocation();
   }
 
   void Note(const location& loc, const std::string& message) {
     errs() << loc << ": note: " << message << std::endl;
+    ShowSourceLocation();
   }
 
   virtual int Status() { return error_count; }

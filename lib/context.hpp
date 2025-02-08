@@ -10,6 +10,8 @@
 #include <memory>
 #include <sstream>
 
+extern Choreo::location loc;
+
 namespace Choreo {
 
 // The target languages
@@ -182,12 +184,14 @@ private:
   bool visualize = false;           // visualize the DMAs
   bool cross_compile = false;       // TODO: figure out
   bool trace_vn = false;            // trace the value numbering
+  bool show_source_loc = true; // show source code location when error, etc.
 
 private:
   std::shared_ptr<SymbolTable> sym_tab = nullptr; // global symbol table
 
 private:
   std::unordered_map<std::string, std::string> cl_macros; // defined macros
+  std::vector<std::string> source_lines;
 
 public:
   bool DebugSymTab() const { return debug_symtab; }
@@ -289,6 +293,22 @@ public:
 
   std::unordered_map<std::string, std::string>& GetCLMacros() {
     return cl_macros;
+  }
+
+  void SetShowSourceLocation(bool s) { show_source_loc = s; }
+  bool ShowSourceLocation() const { return show_source_loc; }
+
+  void ReadSourceLines(std::istream& input) {
+    std::string line;
+    // TODO: do not read all lines for large source file
+    while (std::getline(input, line)) source_lines.push_back(line);
+  }
+
+  std::string GetSourceLine(int line_no) const {
+    if (line_no > 0 && line_no <= (int)source_lines.size()) {
+      return source_lines[line_no - 1];
+    }
+    return "";
   }
 
 public:

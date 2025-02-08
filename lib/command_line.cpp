@@ -1,5 +1,6 @@
 #include "command_line.hpp"
 #include "context.hpp"
+#include <fstream>
 #include <sys/stat.h>
 
 using namespace Choreo;
@@ -94,6 +95,10 @@ Option<bool> prt_pass(OptionKind::Hidden, "--show-passes", "-sp", false,
                       "Show the visit pass pipeline.");
 Option<bool> save_temps(OptionKind::Hidden, "--save-temps", "", false,
                         "Save the temporal files.");
+// TODO: add machanism to handle GCC-style "-f" options
+Option<bool> no_show_source(
+    OptionKind::Hidden, "-fno-show-source-location", "", false,
+    "Do not show the source code location when error/warning/etc..");
 
 // Some system missed c++17 filesystem support. Use POSIX instead
 inline bool file_exists(const std::string& filename) {
@@ -195,6 +200,7 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetVisualize(visualiz.GetValue());
   CCtx().SetCrossCompile(cross_compile.GetValue());
   CCtx().SetTraceValueNumbers(print_vn.GetValue());
+  CCtx().SetShowSourceLocation(!no_show_source.GetValue());
 
   if (!trace_visit.GetValue().empty())
     setenv("CHOREO_TRACE_VISITOR", ToUpper(trace_visit.GetValue()).c_str(), 1);
@@ -222,15 +228,21 @@ bool CommandLine::Parse(int argc, char** argv) {
     setenv("CHOREO_STOP_AFTER_PASS", ToUpper(abend_after.GetValue()).c_str(),
            1);
 
-  std::string filename = r.GetInputFileName();
-  if (!file_exists(filename)) {
-    errs() << "error: The input file '" << filename << "' does not exist."
-           << std::endl;
-    ret_code = 1;
-    return false;
-  }
+  if (!r.StdinAsInput()) {
+    std::string filename = r.GetInputFileName();
+    if (!file_exists(filename)) {
+      errs() << "error: The input file '" << filename << "' does not exist."
+             << std::endl;
+      ret_code = 1;
+      return false;
+    }
 
-  loc.begin.filename = loc.end.filename = filename;
+    loc.begin.filename = loc.end.filename = filename;
+
+    // read the source file into memory
+    std::ifstream ifs(filename);
+    CCtx().ReadSourceLines(ifs);
+  }
 
   return true;
 }

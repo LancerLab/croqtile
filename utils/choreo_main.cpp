@@ -27,7 +27,6 @@
 
 using namespace Choreo;
 
-extern location loc;
 extern AST::Program root;
 
 using namespace AST;
@@ -64,10 +63,7 @@ int main(int argc, char* argv[]) {
 
   Scanner s;
   s.yyrestart((CCtx().NoPreProcess()) ? r.GetInputStream() : pps);
-
-  // new stream applied to source code (for the syntax errors)
-  std::ifstream scs(r.GetInputFileName());
-  PContext pctx(scs);
+  PContext pctx;
   Parser p(pctx, s);
 
   if (CCtx().DebugAll()) {

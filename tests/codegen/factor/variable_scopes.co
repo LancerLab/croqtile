@@ -1,4 +1,4 @@
-// RUN: not choreo %s 2>&1 | FileCheck %s
+// RUN: not choreo -fno-show-source-location %s 2>&1 | FileCheck %s
 
 // this check the scopes for the variable declarations
 __co__ void foo(f32 [32] d, int) {
