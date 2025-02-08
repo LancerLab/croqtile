@@ -1,0 +1,25 @@
+// RUN: choreo -E %s | FileCheck %s
+
+#if 0
+// TODO
+__co__ auto bar(f16 [128, 4, 14, 69] a) {
+  parallel p by 7 {
+    parallel q by 3 {
+      with index in [2, 4] {
+        incr index while a.chunk_inbound(index, p, q) {
+          dma.copy a.chunkat(index, p, q) => local;
+        }
+      }
+    }
+  }
+  return a;
+}
+#endif
+
+void func() {}
+
+// CHECK: #if 0
+// CHECK: // TODO
+// CHECK: #line 17
+// CHECK: #endif
+// CHECK: void func() {}

@@ -239,13 +239,15 @@ private:
 
         // Output the function declaration. Append any leading C comment. C
         // comments in the middle of decl are ignored
-        if (auto pos = line.find("__co__ "))
-          output << line.substr(0, pos) << co_decl;
-        else
-          output << co_decl;
+        if (!uc_skip_line) {
+          if (auto pos = line.find("__co__ "))
+            output << line.substr(0, pos) << co_decl;
+          else
+            output << co_decl;
+        }
 
         HandleOneChoreoLine(co_code, false);
-      } else
+      } else if (!uc_skip_line)
         output << line << '\n'; // output the original line
 
       return;
@@ -450,17 +452,19 @@ private:
       auto sline = SubstituteLocalDefines(co_code);
 
       // output the choreo code
-      output << aline.substr(0, co_start) << sline;
+      if (!uc_skip_line) output << aline.substr(0, co_start) << sline;
 
       if (choreo_brace_count == 0) {
-        // there could be host code followed
-        output << "}";
         code_partition = CP_USER;
         localDefines.clear(); // Clear local defines
-        HandleOneUserLine(aline.substr(
-            co_end +
-            1)); // note user's C comments in this line is also stripped
-      } else
+
+        if (!uc_skip_line) {
+          output << "}"; // there could be host code followed
+          // note user's C comments in this line is also stripped
+          HandleOneUserLine(aline.substr(co_end + 1));
+        } else
+          output << "#line " << line_num + 1 << "\n";
+      } else if (!uc_skip_line)
         output << '\n';
     } else {
       // skip the line
