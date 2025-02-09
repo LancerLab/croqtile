@@ -29,10 +29,10 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - Getting Started with Choreo: getting-started-with-choreo.md
+  - Getting Started with Choreo-C++: getting-started-with-choreo.md
   - What is Choreo: what-is-choreo.md
-  - Basics of Choreo Program:
-    - Choreo Program Structure: choreo-program-structure.md
+  - Basics of Choreo-C++ Program:
+    - Choreo-C++ Program Structure: choreo-program-structure.md
     - Abstractions and Syntax in Choreo Function:
       - Shape/Data in Choreo: shape-in-choreo.md
       - Memory in Choreo: memory-in-choreo.md

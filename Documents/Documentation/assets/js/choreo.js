@@ -21,7 +21,7 @@
   choreo.contains.push(
     {
       className: 'attribute',
-      begin: /\b(__co__|__cok__)\b/,
+      begin: /\b(__co__|__cok__|__global__|__device__)\b/,
       relevance: 10
     },
     {

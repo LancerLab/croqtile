@@ -1,39 +1,69 @@
+## Host, Device and Tileflow
+A typical **Choreo-C++** program is composed of multiple parts depending on the target platform it targets to. For a Choreo-supported platform, which is usually a programming environment utilizing the heterogeous parallel hardware, the Choreo-C++ program normally contains three parts: The *Device Program*, the *Host Program*, and the *Tileflow Program*. The below code showcases a full Choreo-C++ program targeting to *topscc*/*CUDA*:
 
-A typical **Choreo** program is composed of three main parts, each serving a specific purpose and allowing for efficient data orchestration and parallel computation. These components can be integrated into a single program, making it easier to manage the flow of data and execution. Let's dive deeper into each part and its role within a Choreo program.
-
-Here is a typical skeleton of Choreo program:
 ```choreo
-// some C++ code
-__cok__ {
-  void kernel_function(...args...) {
-    // kernel code in intrinsics/tcle/primo++
-  }
-} // end of __cok__
-
-__co__ void choreo_function() {
-  // choreo code
+// Device program: normally run on GPU/NPU/GCU
+__global__ void device_function(...) {
+  // high-performance kernel implementation
 }
 
-// another C++ code
-void foo() {
-  choreo_function();
+// Tileflow program: ochestrating data movement
+__co__ void choreo_function(...) {
+  // ... choreo code ...
+  device_function(...);
+  // ...
+}
+
+// Host program: normally run on CPU
+void main() {
+  // ... prepare data ...
+  choreo_function(...);
+  // ...
 }
 ```
 
-**Host Program**: The **Host Program** typically serves as the caller to the Choreo program. Written in standard C++, the host program runs on the CPU and is responsible for managing the overall flow of the application. Its tasks include: 
-Preparing data for Choreo functions;
-Invoking Choreo functions;
-Obtaining and handling return values from Choreo functions.
-In cases where the target platform supports the _Single Source Programming Model_ such as **Topscc**, **CUDA**, etc, the host program may also include the _computation kernels_ (see below).
+Let's dive deeper into each part:
 
-**Kernel Program (Optional)**: For targets like *factor* (OpenCL like), which only support _Separate Programming Model_, the host and device code must be compiled separately. In Choreo, this typically requires wrapping the **Kernel Program** the in the `__cok__` block in choreo. The *kernel program* defines the "computation-intensive" operations executed on the target device. It is responsible for processing data in parallel, leveraging the full computational power of the target hardware. This includes exploiting capabilities such as SIMD instructions, specialized function units, or even hardware matrix engines.
+**Host Program**
 
-You can use arbitrary programming tools (other than Choreo) to write this part of code, as long as this is supported by Choreo for collaboration. Currently, Choreo supports _kernel programs_ utilizing **Intrinsics**/built-ins, **TCLE**, with plans to support **Primo++** in the future.
+The *Host Program* typically serves as the entry of the *Choreo-C++ module/program* and the caller of the *Tileflow Program*(*Choreo Functions*). Written in standard C++, it runs on the CPU and is responsible for managing the overall workflow of the heterogeneous application.
 
-**Choreo Function (Tileflow Program)**: The **Choreo Function** (also called the Tileflow Program) is the heart of Choreo-C++ programs. It is responsible for orchestrating the movement and computation of data between the host and the kernel, ensuring that data is processed in manageable chunks (tiles) and moved efficiently between different memory spaces. In essence, the Choreo function provides a high-level abstraction that simplifies the process of orchestrating data flow and parallel computation, making it easier for developers to write high-performance applications. In addition, the _Choreo Function_ also manages the workflow of heterogeneous program implicitly, including works like kernel launches, synchronization with the target device (e.g., CPU, GPU, or accelerator), and data movement between the CPU and the device.
+In a simple high-performance kernel implementation, the programmers normally prepare necessary data in the host program to invoke Choreo functions, which perform computations with the data (in parallel), and obtain the return values to step further.
 
-Notably, **Choreo** programs integrate all three parts—**Host Program**, **Kernel Program**, and **Choreo Function**—into a single source file. This design simplifies the coding process by reducing the mental overhead required to manage multiple files simultaneously and jump back and forth during coding. By keeping all parts of the program in one place, Choreo encourages a compact and cohesive code structure. The feasibility of this organization relies on the overall brevity of the program, where the **lines of code (LOC)** are significantly reduced. This is achieved by making Choreo programs highly information-dense, enabling developers to express complex operations with minimal code. In subsequent chapters, we will gradually introduce these design characteristics and demonstrate how Choreo achieves both simplicity and expressiveness through its unique abstractions.
+**Device Program**
 
+In most cases, it defines the "computation-intensive" operations executed on the target device. In the above example, the device function is prefixed with `__global__`, indicating it is an entry of device program. In *CUDA*/*topscc*, programmers may use `__global__`/`__device__` to declares functions with execution environment of the heterogeous device.
+
+In device programs, programs can fully utilize the computational power of the parallel target hardware. The device program follows a Single-Program-Multiple-Data (SPMD) style, where multiple instances of the program are executed in parallel to process data in parallel. Programmers can exploit any hardware capabilities, including thread parallelism, fine-grainarity data parallelism (SIMD instructions), specialized function units (SFU), and even hardware matrix engines, etc., to speed-up the device programs.
+
+**Tileflow Program**
+
+The *Tileflow Program*, which are composed of choreo functions (prefixed with `__co__`), is the heart of *Choreo-C++* programs. It is responsible for orchestrating data movement among different host/devices, and also among different levels of storages of single devices. In a typical workflow, the tileflow program moves the data to a proper storage place (buffer) and call *device programs* to conduct computations. When the work is done, it move the result (buffer) back to host.
+
+In Choreo's workflow, it transpiles the *tileflow program* into target code. This compilation generate some host code together with some device code from the *choreo functions*. Mixing them up with the user provided device and host code, Choreo invoke the *target compiler* to perform *target compilation* to finalize the compilation process.
+
+**NOTE:** As Choreo is a source-to-source compiler equiping with end-to-end compilation capability, it handles both the
+
+- _Single Source Programming Model_: like *CUDA*/*topscc*, where the *target compiler* allows device and host programs appears in a single source file for *target compilation*.
+- _Separate Source Programming Model_: like *factor*/*OpenCL*, the host and device code must be target-compiled in separate.
+
+Since the two models differs in compliation workflow, Choreo requires wrapping the *Device Program* in the `__cok__` block if the target only support _Separate Prgoramming Model_. An *factor*-targeted *Choreo-C++* code example showcases the situation:
+
+```choreo
+__cok__ {
+  void device_function(...args...) {
+    // any device programming entities: intrinsics/tcle/primo++
+  }
+} // end of __cok__
+
+__co__ void choreo_function() { ... }
+
+void foo() { ... }
+```
+
+The factor compiler normally requires the device program (`devie_function` in the code) be compiled in separate with the host program. In this case, the `__cok__ {}` wrapper allows Choreo compiler able to handle user-provided device code properly. To be specific, unlike *CUDA/topscc*, the device code must be in a different file than host code for factor compilation. Choreo manages to achieve device and host code separation from a single source file with the assistant of `__cok__` wrapper.
+
+The subsequent sections will illustrate how to code different parts by example.
 
 ## Host Program
 
