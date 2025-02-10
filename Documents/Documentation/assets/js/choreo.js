@@ -31,7 +31,7 @@
     },
     {
       className: 'operation',
-      begin: /\b(call|wait|dma\.copy|dma.copy.async|=>|select)\b/,
+      begin: /\b(call|dma.copy|dma.copy.async|=>|select)\b/,
       relevance: 10
     },
   );
