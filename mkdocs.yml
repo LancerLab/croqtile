@@ -29,7 +29,7 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - Getting Started with Choreo-C++: getting-started-with-choreo.md
+  - Build Choreo from Scratch: getting-started-with-choreo.md
   - What is Choreo: what-is-choreo.md
   - Basics of Choreo-C++ Program:
     - Choreo-C++ Program Structure: choreo-program-structure.md

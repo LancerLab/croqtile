@@ -43,9 +43,9 @@ assist in setting up the GCU-3.x compiler, runtime, and hardware driver.
 
 
 ## Compile Choreo-C++ Program
-In the current implementation, Choreo performs **source-to-source translation** to convert *choreo-c++* programs into vendor-supported C++ language code and APIs (such as Factor, Topscc, and CUDA).
+In the current implementation, Choreo performs **source-to-source translation** (or **transpilation**) to convert *Choreo-C++* programs into vendor-supported C++ language code and APIs (such as Factor, Topscc, and CUDA).
 
-However, since Choreo integrates lower-level compiler in its compilation process, it appears as an **end-to-end compiler** when the vendor-provided device-level C++ compiler is properly configured.
+However, since Choreo integrates lower-level *target compiler* in its compilation process, it appears as an **end-to-end compiler** when the vendor-provided device-level C++ compiler is properly configured.
 
 Therefore, Once Choreo is built, developers can compile Choreo-C++ programs into various output forms, including:
 
@@ -53,26 +53,27 @@ Therefore, Once Choreo is built, developers can compile Choreo-C++ programs into
 - Target object module
 - Target executable binary/module
 - Target assembly
+- Work-script
 
-The availability of these output forms depends on the target platform's support and limitations.
+Species execpt for *target source code* and *work-script* (introduced later) are similar to those of `gcc` and `clang`. However, the availability of these output forms depends on the target platform's support and limitations.
 
-The usage of the Choreo-C++ compiler is similar to that of _gcc_ or _clang_. For example:
+The usage of the Choreo-C++ compiler is similar to that of `gcc` or `clang`. For example:
 ```
 choreo your_program.co
 ```
-This command generates an _a.out_ executable file. The _-o <filename>_ option can be used to specify the output filename when needed. Compiler options like _-c_ and _-S_ work similarly to those in C++ compilers, provided they are supported by the target platform.
+This command generates an `a.out` executable file. The `-o <filename>` option can be used to specify the output filename when needed. Compiler options like `-c` and `-S` work similarly to those in C++ compilers, provided they are supported by the target platform.
 
-The _-t <platform>_ option allows you to specify the target platform for the compilation. Additionally, the _-es_ option generates target source code without performing the compilation. For instance:
+The `-t <platform>` option allows you to specify the target platform for the compilation. Additionally, the `-es` option generates *target source code* without performing the "target compilation*. For instance:
 ```bash
 choreo -t cuda your_program.co -es -o cuda_source.co
 ```
 This command produces CUDA C++ source code, which can be useful for specific development tasks.
 
-Notably, Choreo includes the _-E_ option to support Choreo-only preprocessing. The Choreo preprocessor handles simple macros and preprocessor directives such as #if, #ifdef, #ifndef, #else, and #endif, enabling Choreo functions to be integrated with other C++ code. The _-E_ option outputs the preprocessed code, for example, removing code within #if 0 and #endif directives inside Choreo functions.
+Notably, Choreo allows the `-E` option to support Choreo-only preprocessing. The Choreo preprocessor handles simple macros and preprocessor directives such as `#if`, `#ifdef`, `#ifndef`, `#else`, and `#endif`, enabling Choreo functions to be integrated with other C++ code. The `-E` option outputs the preprocessed code, for example, removing code within `#if 0` and `#endif` directives inside Choreo functions.
 
-Furthermore, in development scenarios, Choreo can generate scripts (using the _-gs_ option) to drive further low-level compilation and execution. This facilitates the development process, as many scripts are integrated for easy debugging.
+Furthermore, in development scenarios, Choreo can generate *work-script* (using the `-gs` option) to drive further low-level compilation and execution. This facilitates the development process, as many scripts are integrated for easy debugging.
 
-Lastly, options _--help_ and _--help-hidden_ are available for listing the full option set. Programmers and users can check the list to find their appropriate usage.
+Lastly, options `--help` and `--help-hidden` are available for listing the full option set. Programmers and users can check the list to find their appropriate usage.
 
 Here is a example output of `--help`:
 
