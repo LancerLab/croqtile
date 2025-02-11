@@ -6,7 +6,7 @@ The below code showcases a Choreo-C++ program targeting to *Topscc*/*CUDA*:
 
 ```choreo
 // Device program: normally run on GPU/NPU/GCU
-__global__ void device_function(...) {
+__device__ void device_function(...) {
   // high-performance kernel implementation
 }
 
@@ -35,7 +35,7 @@ In a simple high-performance kernel implementation, the programmers normally pre
 
 **Device Program**
 
-In most cases, it defines the "computation-intensive" operations executed on the target device. In the above example, the device function is prefixed with `__global__`, indicating it is an entry of device program. In *CUDA*/*Topscc*, programmers may use `__global__`/`__device__` to declares functions with execution environment of the heterogeous device.
+In most cases, it defines the "computation-intensive" operations executed on the target device. In the above example, the device function is prefixed with `__device__`, indicating it is a device function with only the execution environment of the heterogenous device. Similar to the *Host Program*, Choreo would not alter the content of *Device Program*.
 
 **Tileflow Program**
 
@@ -57,12 +57,10 @@ Since the two models differs in compliation workflow, Choreo requires to wrap th
 
 ```choreo
 __cok__ {
-  void device_function(...args...) {
-    // any device programming entities: intrinsics/tcle/primo++
-  }
+  void device_function(...) { ... }
 } // end of __cok__
 
-__co__ void choreo_function() { ... }
+__co__ void choreo_function(...) { ... }
 
 void foo() { ... }
 ```
@@ -221,7 +219,7 @@ And the programmer should be aware that the device program follows a Single-Prog
 
 ### Tileflow Program
 
-The *Tileflow Program* consists of *Choreo functions*. As described, it manages the movement of data between the host and the target device and ensures that data is copied correctly across different memory spaces.
+The *Tileflow Program* consists of *Choreo functions*. As described, it manages the movement of data between the host and the target device and ensures that data is copied correctly across different storage locations.
 
 Let us repeat the code for convinience:
 
@@ -231,11 +229,12 @@ __co__ s32 [6, 17, 128] ele_add(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) {
 
   // first `parallel` indicates the kernel launch
   parallel p by 6 {
-    local s32 [lhs_load.span] l1_out;
     with index in [17, 4] { // Tiling factors
       foreach index {
         lhs_load = dma.copy lhs.chunkat(p, index) => local;
         rhs_load = dma.copy rhs.chunkat(p, index) => local;
+
+        local s32 [lhs_load.span] l1_out;
 
         // Call kernel with loaded data
         call kernel(lhs_load.data, rhs_load.data, l1_out, |lhs_load.span|);
@@ -251,10 +250,31 @@ __co__ s32 [6, 17, 128] ele_add(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) {
 
 In this code, the `__co__` prefixed Choreo function accepts two input `lhs`, `rhs`, both with the shape of `[6, 17, 128]` and element type of `s32` (signed 32-bit integer). And the output is defined as the same type of input.
 
-As the core part of a Choreo program, `__co__` function has following roles:
+The `parallel p by 6 {...}` block indicates the code enbraced runs in parallel. To be specific, there are 6 instances of the code are parallelly executed. If you are familiar with the heterogeneous programming model like *CUDA*/*Topscc*, the term *kernel launch* describes what is happening. To be simple, programs may consider that the execution environment is changed from host to device.
 
-- **Tiling and partitioning**: The function divides the data into tiles (`lhs.chunkat(p, x, y)`) to ensure that the computation is performed on smaller, manageable pieces.
-- **DMA transfers**: The `dma.copy.async` operation is used to asynchronously copy data from the device memory to local buffers for computation. This is a crucial feature for optimizing memory access patterns in high-performance computing.
-- **Parallelism**: The `parallel p by 6` construct allows for parallel execution across different data chunks, improving throughput and utilizing the target device efficiently.
-- **Kernel invocation**: Once the data is loaded, the `call kernel()` invokes the computational kernel (defined in the `__cok__` block) to perform the element-wise addition.
-- **Synchronization**: The `wait` statements ensure proper synchronization between memory transfers and computation.
+Inside the `parallel-by` block, a `with-in` block binds symbol `index` will two values `17` and `4`. In Choreo, `index` is called the *bounded ituple* with two *bounded variable*s, which can be used for the `foreach` statements. (We will explain the `bounded variables` in later chapters).
+
+The `foreach index {...}` statement is equivalent to C code like:
+
+```
+for (int x = 0; x < 17; x++)
+  for (int y = 0; y < 4; y++) { ... }
+```
+
+Within foreach, the `dma.copy` statement described how the data movement. Taking `lhs_load = dma.copy lhs.chunkat(p, index) => local;` as example,
+
+- The symbol `lhs_load` in Choreo is called the **future** of the DMA operation, which gives the information related to DMA destination. 
+- `dma.copy` indicates it invokes direct a DMA data tranfer without transformation the shape of the data. The expression on the left-hand-side of `=>` represents the DMA source, and the right-hand-side represents the destination.
+- In this case, the destination is specified as a `local` buffer, which will be allocated automatically by Choreo compiler.
+- The source expression `lhs.chunkat(p, index)` is named as the `chunkat` expression of Choreo. In this case, `p, index` is a tiling factor of buffer `lhs`. As `lhs`' shape is `[6, 17, 128]`, and the upper bound of `p, index` are `6, 17, 4`, it indicates a data chunk size is `1, 1, 32` (`6/6, 17/17, 128/4`). In each iteration, one signle data chunk is used as source, but the exact chunk is decided by current values of `p, index`. For example, in parallel thread 1, and the iteration of `16, 2`, the chunks' offset is set to be `1, 16, 2`.  
+This is illustrated in the below figure:
+
+![Choreo-Sturctur-Chunkat](assets/figures/chunkat-6-17-4.drawio.png)
+
+With the DMA statement, different chunks of data tiled from `lhs` are moved from host to device's `local` memory iteratively and parallelly. Similarly, the DMA statement manage `rhs` as small chunks and move it to `local` memory for processing.
+
+Next, the statement `local s32 [lhs_load.span] l1_out;` defines a per-parallel-thread buffer. Note here it takes the shape from expression `lhs_load.span`, which represents the tiled block. The buffer is utilized to save the output data in the consequent `call` statement. Next, the call invoke the device function named `kernel` for computations. When back, another DMA statement moves the output data from `local` buffer back to host. In this way, one iteration is done.
+
+In this code, each parallel thread runs `17x4` iterations. And different iteration handles different `1x1x32` sized chunk of data. *Choreo program* terminates when all the parallel threads have finished all their iterations. It then returns the output buffer to its caller, the host program.
+
+You may notice that Choreo code does not only abstract DMA to a higher level semantics, it also makes the iteration, tiling combined for easier use. This makes Choreo code neat. We will delve deeper into the Choreo's syntax and semantics in the following chapters to explore more.
