@@ -42,13 +42,13 @@ In a simple high-performance kernel implementation, programmers typically prepar
 
 **Device Program**
 
-The *Device Program* defines computation-intensive operations executed on the target device. In the example above, the device function is prefixed with `__device__`, which is an keyword from *CUDA*/*TopsCC*, indicating it runs exclusively on the heterogeneous device. Similar to the *host program*, any device program is not altered in Choreo tranpilation process.
+The *Device Program* defines computation-intensive operations executed on the target device. In the example above, the device function is prefixed with `__device__`, which is an keyword from *CUDA*/*TopsCC*, indicating it runs exclusively on the heterogeneous device. Similar to the *host program*, any device program is not altered in Choreo compilation process.
 
 **Tileflow Program**
 
 Those familiar with *CUDA*/*TopsCC* may already be acquainted with host programs and device programs. However, the *Tileflow Program*, composed of *Choreo functions* (prefixed with `__co__`), is the core of *Choreo-C++* programs. It orchestrates data movement among different hosts/devices and among different storage levels within a single device. In a typical workflow, the Tileflow program moves data to an appropriate storage location (as buffer) and calls *device programs* to perform computations. Once the work is complete, it moves the results back to the host.
 
-### Compilation and Trancompilation
+### Transpilation and Compilation
 The Choreo compilation process typically involves three major steps: **Pre-processing**, **Transpilation**, and **Target Compilation**. To better understand how different parts of a Choreo-C++ program work together, the full compilation workflow is illustrated below:
 
 ![Choreo-Workflow](assets/figures/compile-workflow.drawio.png)
@@ -59,8 +59,8 @@ Thus, the Choreo compiler functions as a end-to-end compiler, with the key step 
 
 One notable feature of Choreo compilation is its support for both:
 
-*Single Source Compilation Model*: Similar to *CUDA*/*TopsCC*, where the target compiler allows device and host programs to be in a single source file for target compilation.
-*Separate Source Compilation Model*: Similar to *OpenCL*/*Factor*, where host and device code must be compiled separately.
+- **Single Source Compilation Model**: Similar to *CUDA*/*TopsCC*, where the target compiler allows device and host programs to be in a single source file for target compilation.
+- **Separate Source Compilation Model**: Similar to *OpenCL*/*Factor*, where host and device code must be compiled separately.
 
 The code shown above naturally supports the *Single Source Compilation Model*. However, to support the *Separate Source Compilation Model*, Choreo requires wrapping the Device Program with the `__cok__` block, as shown below:
 
@@ -87,24 +87,22 @@ __device__ void kernel(int * a, int * b, int * c, int n) {
 
 // Tileflow Program
 __co__ s32 [6, 17, 128] ele_add(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) {
-  s32[lhs.span] output; // Use same shape as lhs
+  s32 [lhs.span] output; // Use same shape as lhs
 
   // first `parallel` indicates the kernel launch
   parallel p by 6 {
-    with index in [17, 4] {
+    with index in [17, 4] { // Tiling factors
       foreach index {
-        lhs_load = dma.copy.async lhs.chunkat(p, index) => local; // Tiling factor
-        rhs_load = dma.copy.async rhs.chunkat(p, index) => local;
-        wait lhs_load, rhs_load;
+        lhs_load = dma.copy lhs.chunkat(p, index) => local;
+        rhs_load = dma.copy rhs.chunkat(p, index) => local;
 
-        local s32[lhs_load.span] l1_out;
+        local s32 [lhs_load.span] l1_out;
 
         // Call kernel with loaded data
         call kernel(lhs_load.data, rhs_load.data, l1_out, |lhs_load.span|);
 
         // Store result back to output
-        out_store = dma.copy.async l1_out => output.chunkat(p, index);
-        wait out_store;
+        dma.copy l1_out => output.chunkat(p, index);
       }
     }
   }
@@ -122,8 +120,8 @@ int main() {
   std::fill_n(&b[0][0][0], sizeof(b) / sizeof(b[0][0][0]), 2);
 
   // Call Choreo function (data movement and device kernel execution)
-  auto res = ele_add(choreo::make_spanview<3, choreo::s32>((int*)a, {6, 17, 128}),
-                     choreo::make_spanview<3, choreo::s32>((int*)b, {6, 17, 128}));
+  auto res = ele_add(choreo::make_spanview<3>(&a[0][0][0], {6, 17, 128}),
+                     choreo::make_spanview<3>(&b[0][0][0], {6, 17, 128}));
 
   // Verification: check correctness of results
   for (size_t i = 0; i < res.shape()[0]; ++i)
@@ -261,9 +259,9 @@ Inside the `parallel-by` block, a `with-in` block binds the symbol `index` to tw
 
 The `foreach index {...}` statement is equivalent to the following C code:
 
-```
-for (int x = 0; x < 17; x++)
-  for (int y = 0; y < 4; y++) { ... }
+```cpp
+for (int x = 0; x < 17; x++)  // assume 'x' represents the 1st element of 'index'
+  for (int y = 0; y < 4; y++) { ... }  // and 'y' represents the 2nd element of 'index'
 ```
 
 Within the `foreach` block, the `dma.copy` statement describes how data movement occurs. For example, consider the statement `lhs_load = dma.copy lhs.chunkat(p, index) => local;`:
@@ -283,4 +281,7 @@ Next, the statement `local s32 [lhs_load.span] l1_out;` defines a per-parallel-t
 
 In this code, each parallel thread runs `17x4` iterations, with each iteration handling a `1x1x32`-sized chunk of data. The *choreo program* terminates when all `6` parallel threads have completed their iterations. It then returns the output buffer to its caller, the host program.
 
-You may notice that Choreo not only abstracts DMA operations into higher-level semantics but also combines iteration and tiling for ease of use. This makes Choreo code concise and expressive. In the following chapters, we will delve deeper into Choreo's syntax and semantics to explore its full potential.
+## Quick Summary
+You are now aware that a Choreo-C++ program consists of three parts, with the *tileflow program* being the core. This part is transpiled into target source code during the compilation process. The call chain typically flows from the host to the tileflow program, and then from the tileflow program to the device code.
+
+You may have noticed that Choreo not only abstracts DMA operations into higher-level semantics but also combines iteration and tiling for ease of use. This makes Choreo code concise and expressive. In the following chapters, we will delve deeper into Choreo's syntax and semantics to explore its full potential.

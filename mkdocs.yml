@@ -33,17 +33,18 @@ nav:
   - Basics of Choreo-C++ Program:
     - Choreo-C++ Program Structure: choreo-program-structure.md
     - Construct the Shaped Data:
-      - Shape as the First-Level Citizen: shape-in-choreo.md
+      - Shape and MDSpan: shape-in-choreo.md
       - Integers and I-Tuples: integer-ituple.md
-      - Data buffers: data-buffers.md
-      - Memory in Choreo: memory-in-choreo.md
-    - Data Movement:
+      - Data with Shape: data-buffers.md
+      - Storage Specifier: memory-in-choreo.md
+    - Move the Data by Chunks:
       - DMA in Choreo: dma-in-choreo.md
-      - Call Statements in Choreo: call-in-choreo.md
-    - Parallelisation:
-      - Parallelism in Choreo: parallel-in-choreo.md
+    - Looping and Parallel Execution:
+      - Parallelism: parallel-in-choreo.md
+      - Construct the Loops: parallel-in-choreo.md
     - C++ Embedding of Choreo Function:
-      - Choreo Function Declaration: abc.md
+      - Passing Data to the Tileflow Program: abc.md
+      - Invoke the Device Program: call-in-choreo.md
       - Macro and Preprocessing: macro-in-choreo.md
   - A Whirlwind Tour to Optimisation Patterns:
     - Tileflow Optimisations: tileflow-opt.md
