@@ -1,23 +1,30 @@
-## Basics
-A typical **Choreo-C++** program is composed of multiple parts depending on the target platform it targets to. For a Choreo-supported platform, which is usually a programming environment utilizing the heterogeous parallel hardware, the Choreo-C++ program normally contains three parts: The *Device Program*, the *Host Program*, and the *Tileflow Program*.
+## Overview
+In this section, we will introduce the fundamental structure of *Choreo-C++* programs and their associated terminology. Additionally, we will present a parallel element-wise addition *Choreo-C++* program to demonstrate how Choreo simplifies data orchestration across heterogeneous hardware.
+
+## Construct a Choreo-C++ Program
+A typical *Choreo-C++* program is composed of multiple parts, depending on the target platform. For a Choreo-supported platform, which is usually a programming environment leveraging heterogeneous parallel hardware, the Choreo-C++ program typically contains three parts:
+
+* The Device Program
+* The Host Program
+* The Tileflow Program
 
 ### Host, Device and Tileflow
-The below code showcases a Choreo-C++ program targeting to *Topscc*/*CUDA*:
+The code below showcases a *Choreo-C++* program targeting *TopsCC*/*CUDA*:
 
 ```choreo
-// Device program: normally run on GPU/NPU/GCU
+// Device program: typically runs on GPU/NPU/GCU
 __device__ void device_function(...) {
-  // high-performance kernel implementation
+  // High-performance device kernel implementation
 }
 
-// Tileflow program: ochestrating data movement
+// Tileflow program: orchestrating data movement
 __co__ void choreo_function(...) {
   // ... choreo code ...
   device_function(...);
   // ...
 }
 
-// Host program: normally run on CPU
+// Host program: typically runs on CPU
 void main() {
   // ... prepare data ...
   choreo_function(...);
@@ -25,35 +32,37 @@ void main() {
 }
 ```
 
-Let's have a quick review of each part:
+Let's briefly review each part:
 
 **Host Program**
 
-The *Host Program* typically serves as the entry of the *Choreo-C++ module/program* and the caller of the *Tileflow Program*(*Choreo Functions*). Written in standard C++, it runs on the CPU and is responsible for managing the overall workflow of the heterogeneous application.
+The *Host Program* serves as the entry point of the *Choreo-C++* module/program and is the caller of the *Tileflow* Program (Choreo Functions). Written in standard C++, it runs on the CPU and manages the overall workflow of the heterogeneous application.
 
-In a simple high-performance kernel implementation, the programmers normally prepare necessary data in the host program to invoke Choreo functions, which perform computations with the data (in parallel), and obtain the return values to step further.
+In a simple high-performance kernel implementation, programmers typically prepare the necessary data in the host program to invoke *Choreo functions* and hande their return values to advance further steps.
 
 **Device Program**
 
-In most cases, it defines the "computation-intensive" operations executed on the target device. In the above example, the device function is prefixed with `__device__`, indicating it is a device function with only the execution environment of the heterogenous device. Similar to the *Host Program*, Choreo would not alter the content of *Device Program*.
+The *Device Program* defines computation-intensive operations executed on the target device. In the example above, the device function is prefixed with `__device__`, which is an keyword from *CUDA*/*TopsCC*, indicating it runs exclusively on the heterogeneous device. Similar to the *host program*, any device program is not altered in Choreo tranpilation process.
 
 **Tileflow Program**
 
-The *Tileflow Program*, which are composed of choreo functions (prefixed with `__co__`), is the heart of *Choreo-C++* programs. It is responsible for orchestrating data movement among different host/devices, and also among different levels of storages of single devices. In a typical workflow, the tileflow program moves the data to a proper storage place (buffer) and call *device programs* to conduct computations. When the work is done, it move the result (buffer) back to host.
+Those familiar with *CUDA*/*TopsCC* may already be acquainted with host programs and device programs. However, the *Tileflow Program*, composed of *Choreo functions* (prefixed with `__co__`), is the core of *Choreo-C++* programs. It orchestrates data movement among different hosts/devices and among different storage levels within a single device. In a typical workflow, the Tileflow program moves data to an appropriate storage location (as buffer) and calls *device programs* to perform computations. Once the work is complete, it moves the results back to the host.
 
-### Tileflow Program in the Compilation Workflow
-To better understand how the different parts of Choreo-C++ program get into work, we need to dive into the compilation workflow. The below figure illustrates the full compilation process:
+### Compilation and Trancompilation
+The Choreo compilation process typically involves three major steps: **Pre-processing**, **Transpilation**, and **Target Compilation**. To better understand how different parts of a Choreo-C++ program work together, the full compilation workflow is illustrated below:
 
 ![Choreo-Workflow](assets/figures/compile-workflow.drawio.png)
 
-In Choreo's workflow, its major target is to transpiles the *tileflow program* into target code form. As observed from the figure, after a simple pre-processing step, Choreo transform the *pre-processed tileflow program* into some host and device source code. Choreo then mixes them up with the user provided code to generate the *Target Source Code*, which can be fully compiled by the *target compiler*.
+As shown in the figure, immediately after *pre-processing*, Choreo *transpiles* (*source-to-source* compilation) the *tileflow program* into target code, leaving the user-provided *host program* and *device program* unchanged. The *tileflow program* is *transpiled* into host and device source code, which we refer to as *choreo-generated code*. The compiler then combines the user-provided code and *choreo-generated* code to perform the *target compilation* process. This process can generate various outputs, such as transpiled source code, workscripts, target modules, target assembly, and executables.
 
-Consequently, Choreo appears as a source-to-source compiler but equiping with end-to-end compilation capability. Furthermore, it supports both the
+Thus, the Choreo compiler functions as a end-to-end compiler, with the key step being the transpilation of the *tileflow program* into *choreo-generated code*.
 
-- _Single Source Programming Model_: like *CUDA*/*Topscc*, where the *target compiler* allows device and host programs appears in a single source file for *target compilation*.
-- _Separate Source Programming Model_: like *Factor*/*OpenCL*, the host and device code must be target-compiled in separate.
+One notable feature of Choreo compilation is its support for both:
 
-Since the two models differs in compliation workflow, Choreo requires to wrap the *Device Program* if the target platform only support _Separate Prgoramming Model_. An *Factor*-targeted *Choreo-C++* code example showcases the situation:
+*Single Source Compilation Model*: Similar to *CUDA*/*TopsCC*, where the target compiler allows device and host programs to be in a single source file for target compilation.
+*Separate Source Compilation Model*: Similar to *OpenCL*/*Factor*, where host and device code must be compiled separately.
+
+The code shown above naturally supports the *Single Source Compilation Model*. However, to support the *Separate Source Compilation Model*, Choreo requires wrapping the Device Program with the `__cok__` block, as shown below:
 
 ```choreo
 __cok__ {
@@ -65,11 +74,10 @@ __co__ void choreo_function(...) { ... }
 void foo() { ... }
 ```
 
-The Factor compiler requires the device program (`devie_function` in the code) be stored in a separate file rather than the host program. In this case, the `__cok__ {}` wrapper allows Choreo compiler able to handle user-provided device code properly. The wrapper assists Choreo to manage device and host code separation from the single Choreo source. So do not be surprise when you find `__cok__` for certain target code. That is the payment of integrating _Separate Source Programming Model_ support.
+This is the code structure for a *Choreo-Factor C++* program. The Factor compiler requires the device program (`device_function` in the code) to be stored in a separate file from the host program. The `__cok__ {}` wrapper enables the Choreo compiler to handle user-provided device code properly. It helps Choreo separate device and host code from a single Choreo source file for different compilation processes. Therefore, do not be surprised if you encounter `__cok__` in certain Choreo code; it is necessary for integrating support for the *Separate Source Compilation Model*.
 
-
-## A Full Choreo-C++ Code Example
-A full *Choreo-C++* code example to perform element-wise addition on top of two arrays (with same size and element type) is listed as below:
+## A Full Choreo-Topscc C++ Code Example
+Below is a complete *Choreo-Topscc C++* code example that performs element-wise addition on two arrays of the same size and element type:
 
 ```choreo
 // Device Program
@@ -130,11 +138,10 @@ int main() {
 }
 ```
 
-The subsequent sections will explain the different code parts.
+The subsequent sections will explain the different parts of the code.
 
-### Host Program
-
-As we introduced, the **host program** is the entry point of the *Choreo-C++* program. It is typically written in standard C++ and serves as the control center. Let us repeat the code for convinience:
+### Host Program - the Control Center
+As introduced, the **host program** serves as the entry point of the *Choreo-C++* program and acts as the control center. For convenience, here is the code again:
 
 ```choreo
 int main() {
@@ -147,8 +154,8 @@ int main() {
   std::fill_n(&b[0][0][0], sizeof(b) / sizeof(b[0][0][0]), 2);
 
   // Call Choreo function (data movement and device kernel execution)
-  auto res = ele_add(choreo::make_spanview<3, choreo::s32>((int*)a, {6, 17, 128}),
-                     choreo::make_spanview<3, choreo::s32>((int*)b, {6, 17, 128}));
+  auto res = ele_add(choreo::make_spanview<3>(&a[0][0][0], {6, 17, 128}),
+                     choreo::make_spanview<3>(&b[0][0][0], {6, 17, 128}));
 
   // Verification: check correctness of results
   for (size_t i = 0; i < res.shape()[0]; ++i)
@@ -163,35 +170,33 @@ int main() {
 }
 ```
 
-The `main` function is a standard C++ function except for the usage of Choreo APIs. In this program, we first define two arrays `a` and `b`, and fill them with different values. Then the API `choreo::make_spanview` is used to attach the shape information with the data.
+The `main` function is written with standard C++, except for the use of Choreo APIs. In this program, we first define two arrays, `a` and `b`, and fill them with different values. The API `choreo::make_spanview` is then used to attach shape information to the data.
 
-`choreo::make_spanview` is a function template, where it takes `Rank`, `ElementType` as its template parameters, together with a data `pointer` and a `std::initializer_list` as the function parameters.
-
-The `choreo::make_spanview` API is declared as below:
+The `choreo::make_spanview` is declared as follows:
 
 ```cpp
-template <size_t Rank, typename ElementType>
-spanned_view<T, Rank> make_spanview(ElementType* ptr, std::initializer_list<size_t> init);
+template <size_t Rank, typename T>
+spanned_view<T, Rank> make_spanview(T* ptr, std::initializer_list<size_t> init);
 ```
 
-We repeat the usage here for your reference:
+Here is the usage for reference:
 ```cpp
-choreo::make_spanview<3, choreo::s32>((int*)a, {6, 17, 128})
+choreo::make_spanview<3>(&a[0][0][0], {6, 17, 128});
 ```
 
-This API is essential to connect host code to the Choreo function. In essence, any Choreo input buffer (named the `spanned` data) is always associated with its shape, which makes Choreo able to guarantee shape safety at compile and run.
+This API is essential for connecting *host code* to the *choreo functions*. Essentially, any input buffer (named the `spanned` data) of choreo function is always associated with its shape. It enables Choreo to guarantee shape safety at compile and runtime.
 
-**Note:** The most significant dimension value comes first in the `initializer_list` depicted shape. Thus, a shape of `{6, 17, 128}` is literally given in the same order of C multi-dimensional array like `a[6][17][128]`.
+**Note:** The most significant dimension value comes first in the `initializer_list` shape. Thus, a shape of `{6, 17, 128}` corresponds to a C multi-dimensional array like `a[6][17][128]`.
 
-In the example code, choreo function `ele_add` is then called. It calculates the sum element-by-element in parallel. Thereafter, the host code take the result buffer `res` and apply its verification.
+In the example code, choreo function `ele_add` is called to calculate the element-wise sum in parallel. Afterward, the host code verifies the result buffer `res`.
 
-There is one detail worth noticing, that the output of choreo function is of type `choreo::spanned_data`. Contrary to `choreo::spanned_view`, which does not own buffer memory of the data it points to, `choreo::spanned_data` is the buffer owner. In this way, it guarantees the later data verification process is applied on valid memory. The `choreo::spanned_view` is built with rich APIs. It does not only allow C-style array indexing, but also supports shape query via member function `.shape()`.
+One important detail is that the output of the choreo function is of type `choreo::spanned_data`. Unlike `choreo::spanned_view`, which does not own the buffer memory of the data it points to, `choreo::spanned_data` owns the buffer. This ensures that the subsequent data verification process is applied to valid memory. The `choreo::spanned_view` provides rich APIs, supporting C-style array indexing and shape queries via the member function `.shape()`.
 
-Similarly, the most significant dimension is listed as the first element in this array of shape (`res.shape()[0]` in this case). In essence, Choreo code follows a '**most-significant-dimension-majored**' ordering, or in some term '**row-majored**' ordering, where the first dimension varies slowest.
+Similarly, the most significant dimension is listed first in this shape array (`res.shape()[0]` in this case). Choreo follows a '**most-significant-dimension-major**' ordering, also known as '**row-major**' ordering, where the first dimension varies the slowest.
 
-### Device Program
+### Device Program: Parallel Computation
 
-The **device program** defines the computational logic that will be executed on the target device (e.g., GPU, CPU). The kernel is designed to operate on input data, process it in parallel, and produce the output.
+The **device program** defines the computational kernel that will be executed on the target device, such as a GPU or GCU. The kernel is designed to operate on input data, process it in parallel, and generate the output.
 
 We repeat the code as below:
 
@@ -201,7 +206,7 @@ __device__ void kernel(int * a, int * b, int * c, int n) {
 }
 ```
 
-As described ahead, for a target only support _Separated Source Programming Model_, the code may be wrapped within a `__cok__` block, be like:
+For targets that only support the _Separated Source Programming Model_, the code may need to be wrapped within a `__cok__ {}` block. The equivalent *Choreo-Factor C++* code is shown below:
 
 ```choreo
 __cok__ {
@@ -211,17 +216,17 @@ __cok__ {
 } // end of __cok__
 ```
 
-This is the equivalent code for *Factor target*. An `extern "C"` annotation replaces the `__device__` keyword used in *Topscc*/*CUDA* target since *Factor* requires C-linkage for the device functions only.
+Here, the `extern "C"` annotation replaces the `__device__` keyword used in *TopsCC* target, as *Factor* requires C-linkage for the device functions.
 
-In general, Choreo's device programming varies on targets depending on the target supports. Taking *Topscc*/*Factor* target as example, it allows the use of either *TCLE (Target Compiler Language Extension)*, *intrinsic function*, etc., to fully utilize the computational power of the parallel target hardware.
+Choreo's device programming model varies depending on the target hardware and its supported features. For example, the *TopsCC* and *Factor* target allows the use of *TCLE (Target Compiler Language Extension)*, or *intrinsic function* to fully leverage the computational power of the parallel target hardware.
 
-And the programmer should be aware that the device program follows a Single-Program-Multiple-Data (SPMD) paradigm, where multiple instances of the same device program are executed in parallel. This paradigm is effecient for processing data in parallel hardware. However, in Choreo, it is not necessary to program data movement across host-device, and among multiple storage levels in device. All such work can be programmed easily with the *Tileflow Program*.
+Programmers must be aware that the device program follows the *Single-Program-Multiple-Data (SPMD)* paradigm. In this paradigm, multiple instances of the same device program are executed in parallel, making it highly efficient for exploiting data-level parallelism on target hardware. However, unlike traditional *TopsCC* programs, the device program does not manage data movement —whether between the host and device or across multiple storage levels within the device. Instead, the *tileflow program* orchestrates these tasks in a much simpler and safer manner.
 
-### Tileflow Program
+### Tileflow Program: Ochestrating the Data Movement
 
-The *Tileflow Program* consists of *Choreo functions*. As described, it manages the movement of data between the host and the target device and ensures that data is copied correctly across different storage locations.
+The *Tileflow Program* consists of *Choreo functions*. As described earlier, it manages the movement of data between the host and the target device, ensuring that data is copied correctly across different storage locations.
 
-Let us repeat the code for convinience:
+For convenience, let’s revisit the code:
 
 ```choreo
 __co__ s32 [6, 17, 128] ele_add(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) {
@@ -248,33 +253,34 @@ __co__ s32 [6, 17, 128] ele_add(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) {
 }
 ```
 
-In this code, the `__co__` prefixed Choreo function accepts two input `lhs`, `rhs`, both with the shape of `[6, 17, 128]` and element type of `s32` (signed 32-bit integer). And the output is defined as the same type of input.
+In this code, the `__co__`-prefixed choreo function accepts two inputs `lhs` and `rhs`, both with the shape `[6, 17, 128]` and the element type of `s32` (signed 32-bit integer). And the output is defined to have the same shape and type as the inputs.
 
-The `parallel p by 6 {...}` block indicates the code enbraced runs in parallel. To be specific, there are 6 instances of the code are parallelly executed. If you are familiar with the heterogeneous programming model like *CUDA*/*Topscc*, the term *kernel launch* describes what is happening. To be simple, programs may consider that the execution environment is changed from host to device.
+The `parallel p by 6 {...}` block indicates that the enclosed code runs in parallel. Specifically, six instances of the code are executed concurrently. This implies a transition in the execution environment from the host to the device. For those familiar with *CUDA* or *TopsCC*, this concept is analogous to a kernel launch, where multiple threads or processes are initiated to perform computations simultaneously on the device.
 
-Inside the `parallel-by` block, a `with-in` block binds symbol `index` will two values `17` and `4`. In Choreo, `index` is called the *bounded ituple* with two *bounded variable*s, which can be used for the `foreach` statements. (We will explain the `bounded variables` in later chapters).
+Inside the `parallel-by` block, a `with-in` block binds the symbol `index` to two values, `17` and `4`. In Choreo, `index` is referred to as a `bounded-ituple` with two `bounded` values, which can be used in `foreach` statements. (We will explain `bounded` types in later chapters.)
 
-The `foreach index {...}` statement is equivalent to C code like:
+The `foreach index {...}` statement is equivalent to the following C code:
 
 ```
 for (int x = 0; x < 17; x++)
   for (int y = 0; y < 4; y++) { ... }
 ```
 
-Within foreach, the `dma.copy` statement described how the data movement. Taking `lhs_load = dma.copy lhs.chunkat(p, index) => local;` as example,
+Within the `foreach` block, the `dma.copy` statement describes how data movement occurs. For example, consider the statement `lhs_load = dma.copy lhs.chunkat(p, index) => local;`:
 
-- The symbol `lhs_load` in Choreo is called the **future** of the DMA operation, which gives the information related to DMA destination. 
-- `dma.copy` indicates it invokes direct a DMA data tranfer without transformation the shape of the data. The expression on the left-hand-side of `=>` represents the DMA source, and the right-hand-side represents the destination.
-- In this case, the destination is specified as a `local` buffer, which will be allocated automatically by Choreo compiler.
-- The source expression `lhs.chunkat(p, index)` is named as the `chunkat` expression of Choreo. In this case, `p, index` is a tiling factor of buffer `lhs`. As `lhs`' shape is `[6, 17, 128]`, and the upper bound of `p, index` are `6, 17, 4`, it indicates a data chunk size is `1, 1, 32` (`6/6, 17/17, 128/4`). In each iteration, one signle data chunk is used as source, but the exact chunk is decided by current values of `p, index`. For example, in parallel thread 1, and the iteration of `16, 2`, the chunks' offset is set to be `1, 16, 2`.  
+- The symbol `lhs_load` is called **future** of the DMA operation, which contains information about the DMA destination.
+- `dma.copy` invokes a direct DMA data transfer without transforming the shape of the data. The expression on the left-hand side of `=>` represents the DMA source, while the right-hand side represents the destination.
+- In this case, the destination is specified as a `local` buffer, which is automatically allocated by the Choreo compiler.
+- The source expression `lhs.chunkat(p, index)` is referred to as the **chunkat expression** in Choreo. Here, `p` and `index` tiling factors for the `lhs`. Given that `lhs` has a shape of `[6, 17, 128]` and the upper bounds of `p` and `index` are `6`, `17`, and `4`, the data chunk size is `1x1x32` (`6/6, 17/17, 128/4`). In each iteration, a single data chunk is used as the source, with the exact chunk determined by the current values of `p` and `index`. For example, in parallel thread `1` and the iteration `{16, 2}`, the chunk's offset is set to `{1, 16, 2}`.
+
 This is illustrated in the below figure:
 
 ![Choreo-Sturctur-Chunkat](assets/figures/chunkat-6-17-4.drawio.png)
 
-With the DMA statement, different chunks of data tiled from `lhs` are moved from host to device's `local` memory iteratively and parallelly. Similarly, the DMA statement manage `rhs` as small chunks and move it to `local` memory for processing.
+With the DMA statement, different chunks of data tiled from `lhs` are moved iteratively and in parallel from the host to the device's `local` memory. Similarly, the DMA statement manages `rhs` by moving it in small chunks to `local` memory for processing.
 
-Next, the statement `local s32 [lhs_load.span] l1_out;` defines a per-parallel-thread buffer. Note here it takes the shape from expression `lhs_load.span`, which represents the tiled block. The buffer is utilized to save the output data in the consequent `call` statement. Next, the call invoke the device function named `kernel` for computations. When back, another DMA statement moves the output data from `local` buffer back to host. In this way, one iteration is done.
+Next, the statement `local s32 [lhs_load.span] l1_out;` defines a per-parallel-thread buffer. Note here it takes its shape from the expression `lhs_load.span`, which represents the tiled block. The buffer is used to store the output data in the subsequent `call` statement. The `call` statement invoke the *device function* named `kernel` to perform computations. Once the computation is complete, another DMA statement moves the output data from the `local` buffer back to host. This complete one iteration.
 
-In this code, each parallel thread runs `17x4` iterations. And different iteration handles different `1x1x32` sized chunk of data. *Choreo program* terminates when all the parallel threads have finished all their iterations. It then returns the output buffer to its caller, the host program.
+In this code, each parallel thread runs `17x4` iterations, with each iteration handling a `1x1x32`-sized chunk of data. The *choreo program* terminates when all `6` parallel threads have completed their iterations. It then returns the output buffer to its caller, the host program.
 
-You may notice that Choreo code does not only abstract DMA to a higher level semantics, it also makes the iteration, tiling combined for easier use. This makes Choreo code neat. We will delve deeper into the Choreo's syntax and semantics in the following chapters to explore more.
+You may notice that Choreo not only abstracts DMA operations into higher-level semantics but also combines iteration and tiling for ease of use. This makes Choreo code concise and expressive. In the following chapters, we will delve deeper into Choreo's syntax and semantics to explore its full potential.

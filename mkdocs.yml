@@ -29,16 +29,21 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - Build Choreo from Scratch: getting-started-with-choreo.md
   - What is Choreo: what-is-choreo.md
   - Basics of Choreo-C++ Program:
     - Choreo-C++ Program Structure: choreo-program-structure.md
-    - Abstractions and Syntax in Choreo Function:
-      - Shape/Data in Choreo: shape-in-choreo.md
+    - Construct the Shaped Data:
+      - Shape as the First-Level Citizen: shape-in-choreo.md
+      - Integers and I-Tuples: integer-ituple.md
+      - Data buffers: data-buffers.md
       - Memory in Choreo: memory-in-choreo.md
+    - Data Movement:
       - DMA in Choreo: dma-in-choreo.md
       - Call Statements in Choreo: call-in-choreo.md
+    - Parallelisation:
       - Parallelism in Choreo: parallel-in-choreo.md
+    - C++ Embedding of Choreo Function:
+      - Choreo Function Declaration: abc.md
       - Macro and Preprocessing: macro-in-choreo.md
   - A Whirlwind Tour to Optimisation Patterns:
     - Tileflow Optimisations: tileflow-opt.md
@@ -47,7 +52,9 @@ nav:
   - Reference Palette on Operators: operator-samples.md
   - Design Rationales:
     - Syntax Design of Choreo: syntax-design-of-choreo.md
+    - Why Symbolic Shapes: why-symbolic-shapes.md
     - Design of Symbolic Evaluation System: value-numbering.md
     - Dynaminism Support with Symbolic Representation: dynamic-design.md
+  - Build Choreo from Scratch: getting-started-with-choreo.md
   - Contributing to Choreo: contribute.md
 
