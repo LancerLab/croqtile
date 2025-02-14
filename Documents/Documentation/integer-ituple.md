@@ -73,7 +73,7 @@ ituple<3> a = {1, 2};  // error: inconsistent rank
 ```
 
 ### Operations on I-Tuples
-Operations on *i-tuple*s are similar to those on *mdspan*. You can either use the operator `()` to retrieve the element values or use *ituple* as a whole:
+Operations on *i-tuple*s are similar to those on *mdspan*. You can either use the *element-of* operation `()` to retrieve the element values or use *ituple* as a whole:
 
 ```choreo
 a = {3, 4};

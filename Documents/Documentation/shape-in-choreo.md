@@ -54,7 +54,7 @@ In Choreo, the definition of `new-shape0` is equivalent to:
 new-shape0: [shape(0) / 2, shape(1) / 4, 1];
 ```
 
-Here, the initial `shape` is explicitly listed element-wise rather than specified outside '[]'. But similar to the prior version, '()' operation is used on top of existing shape to retrieve dimension values. Obviously, this approach requires more code but yields the same result. Thus, the prior version can be considered *syntactic sugar* for the complete *initialization expression* of the new shape.
+Here, the initial `shape` is explicitly listed element-wise rather than specified outside `[]`. But similar to the prior version, The **element-of** operation, which is annotated as `()`, is used on top of existing shape to retrieve dimension values. Obviously, this approach requires more code but yields the same result. Thus, the prior version can be considered *syntactic sugar* for the complete *initialization expression* of the new shape.
 
 In the code example, `new-shape1` is also derived from `shape`, it pads dimesnion 1 by `2` and swaps the dimensions in the derived shape.
 

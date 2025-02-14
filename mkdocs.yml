@@ -32,12 +32,12 @@ nav:
   - What is Choreo: what-is-choreo.md
   - Basics of Choreo-C++ Program:
     - Choreo-C++ Program Structure: choreo-program-structure.md
-    - Construct the Shaped Data:
+    - Manipulating the Shaped Data:
       - Shape and MDSpan: shape-in-choreo.md
       - Integers and I-Tuples: integer-ituple.md
-      - Data with Shape: data-buffers.md
-      - Storage Specifier: memory-in-choreo.md
-    - Move the Data by Chunks:
+      - Data with Shape: spanned-data.md
+      - Dynamic Shape Support: symbolic-shape.md
+    - Moving the Data by Chunks:
       - DMA in Choreo: dma-in-choreo.md
     - Looping and Parallel Execution:
       - Parallelism: parallel-in-choreo.md
