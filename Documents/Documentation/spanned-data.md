@@ -64,7 +64,7 @@ local s32 [17, 6] b1 {0};       // elements are initialized to 0
 shared f32 [128, 16] b2 {3.14f}; // elements are initialized to 3.14f
 ```
 
-The syntax for the *initialization expression* of a *spanned data* is straightforward: it encloses an initial value inside brackets following the variable name. However, its functionality is very limited - it always initializes all elements with a same value.
+The syntax for the *initialization expression* of a *spanned data* is straightforward: it encloses an initial value inside brackets following the variable name. However, its functionality is limited - it always set all elements to a fixed value.
 
 ## Declaring the Parameters and Return Values
 A *spanned data* is passed between host and tileflow programs. Therefore, a choreo function can have *spanned data*s as its parameters. The following code showcases an example:
@@ -75,7 +75,7 @@ __co__ f16 [7, 8] foo(f32 [16, 17, 5] input) {...}
 
 The syntax is similar to variable definitions, except that operations on an existing *mdspan* is not possible. Additionally, no storage specifier is allowed or initialization is allowed.
 
-One useful built-in member function forthe *spanned* parameters is `.span`, which provides the associated *mdspan* of the *spanned data*. The following code demonstrates how to use it for a buffer declaration:
+One useful built-in member function for the *spanned* parameters is `.span`, which provides the associated *mdspan* of the *spanned data*. The following code demonstrates how to use it for a buffer declaration:
 
 ```choreo
 __co__ auto foo(f32 [16, 17, 5] input) {
@@ -88,4 +88,4 @@ __co__ auto foo(f32 [16, 17, 5] input) {
 The lifetime of storage allocated inside a *choreo function* is managed by the Choreo compiler for efficient use. The compiler attempts to reuse buffers as much as possible if their lifetimes do not overlap. Therefore users of Choreo are not necessary to do buffer management.
 
 ## Quick Summary
-This section covered defining and managing data/buffers in Choreo tileflow programs, including declaration syntax, initialization, storage specifiers, and efficient buffer lifetime management by the compiler. In the next chapter, we will step to an important topic: the dynamic shape support.
+This section covered defining and managing data/buffers in Choreo tileflow programs, including declaration syntax, initialization, storage specifiers, and efficient buffer lifetime management by the compiler. This enables us to step further to the next essential topic: the dynamic shape support.

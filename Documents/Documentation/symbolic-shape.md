@@ -28,7 +28,7 @@ The *anonymous dimension* can work properly for this case. However, in certain s
 Another approach in Choreo to support dynamic shape is to use **Symbolic Dimension**. *Symbolic dimension*s are named but as well unknown at compile-time. Here's an example:
 
 ```choreo
-__co__ auto Matmul(s32 [M, K] lhs, s32 [K, N] rhs) { 
+__co__ auto Matmul(s32 [M, K] lhs, s32 [K, N] rhs) {
   int tile_m = 32, tile_m = 8, tile_k = 16;
 
   s32 [M / tile_m, K / tile_k] tiled_lhs;
@@ -43,7 +43,7 @@ In the code, each dimension is given a symbolic name (`M, K, N` in this case) fo
 The reason for improved code safety of using *symbolic dimension* is that more comprehensive code checks can be applied by Choreo compiler. For example, consider an *anonymous dimension* version of the `Matmul` function:
 
 ```choreo
-__co__ auto Matmul(s32 [?, ?] lhs, s32 [?, ?] rhs) { 
+__co__ auto Matmul(s32 [?, ?] lhs, s32 [?, ?] rhs) {
   int tile_m = 32, tile_m = 8, tile_k = 16;
 
   s32 [lhs.span / {tile_m, tile_k}] tiled_lhs;  // 'mdspan' and 'ituple': rank must be same
@@ -65,7 +65,7 @@ void __choreo_transpiled_Matmul(choreo::span_view<2, choreo::s32> lhs,
                  "the 0 dimension of 'lhs' may result in spanned data "
                  "with a dimension value of 0.");
    // ...
-} 
+}
 ```
 
 Here, the `choreo_abort` function aborts program execution if the condition is not met. This early check helps Choreo detect issues promptly.
@@ -83,7 +83,7 @@ void __choreo_transpiled_Matmul(choreo::span_view<2, choreo::s32> lhs,
                  "the 0 dimension of 'lhs' may result in spanned data "
                  "with a dimension value of 0.");
    // ...
-} 
+}
 ```
 
 In addition to the checks performed in the *anonymous dimension* version, the *symbolic dimension* version verifies the consistency of dimensions between `lhs` and `rhs`, resulting in safer code.

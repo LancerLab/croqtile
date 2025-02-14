@@ -35,17 +35,21 @@ nav:
     - Manipulating the Shaped Data:
       - Shape and MDSpan: shape-in-choreo.md
       - Integers and I-Tuples: integer-ituple.md
-      - Data with Shape: spanned-data.md
-      - Dynamic Shape Support: symbolic-shape.md
-    - Moving the Data by Chunks:
-      - DMA in Choreo: dma-in-choreo.md
+      - Spanned Data and Buffers: spanned-data.md
+      - Dynamic Shape: symbolic-shape.md
     - Looping and Parallel Execution:
-      - Parallelism: parallel-in-choreo.md
-      - Construct the Loops: parallel-in-choreo.md
+      - SPMD Parallellism: parallel-in-choreo.md
+      - Loops: loops.md
+    - Move Data in Chunks:
+      - DMA in Choreo: dma-in-choreo.md
+      - Placeholder of Future: placeholder-future.md
     - C++ Embedding of Choreo Function:
-      - Passing Data to the Tileflow Program: abc.md
-      - Invoke the Device Program: call-in-choreo.md
+      - From Host to Tileflow: host-to-tileflow.md
+      - Call Device Program in Tileflow: call-in-choreo.md
+    - Miscellaneous:
       - Macro and Preprocessing: macro-in-choreo.md
+      - Check Tileflow Program Statically: compiler-func.md
+      - Assertions: assertion.md
   - A Whirlwind Tour to Optimisation Patterns:
     - Tileflow Optimisations: tileflow-opt.md
     - Asynchoronous DMA transfer patterns with Choreo: async-dma-patterns.md
