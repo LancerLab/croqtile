@@ -4,8 +4,8 @@ n this section, you will learn about the *anonymous dimension* and *symbolic dim
 ## Fixed and Dynamic Shape
 Data with fixed shapes is commonly used in high-performance computing kernels, allowing for aggressive optimization with known dimensions. However, certain scenarios require handling shapes with runtime dimensions, known as dynamic shapes. This necessitates kernel generality to manage inputs of varying shapes, a feature highlighted by many machine learning frameworks.
 
-## *mdspan* with *Anonymous Dimension*
-Choreo supports shape dimensions with unknown values, similar to many high-level machine learning languages. The simplest method is to use *Anonymous Dimension* in `mdspan`:
+## *mdspan* with **Anonymous Dimension**
+Choreo supports shape dimensions with unknown values, similar to many high-level machine learning languages. The simplest method is to use **Anonymous Dimension** in `mdspan`:
 
 ```choreo
 __co__ auto foo(s32 [?, 1, 2] input) { ... }
@@ -23,7 +23,7 @@ In this example, the first dimension of `input` is provided by `foo`'s *spanned*
 
 The *anonymous dimension* can work properly for this case. However, in certain scenarios, it is not sufficient.
 
-## Step Further: *Symbolic Dimension*
+## Step Further: **Symbolic Dimension**
 
 Another approach in Choreo to support dynamic shape is to use **Symbolic Dimension**. *Symbolic dimension*s are named but as well unknown at compile-time. Here's an example:
 
@@ -56,15 +56,15 @@ __co__ auto Matmul(s32 [?, ?] lhs, s32 [?, ?] rhs) {
 Choreo performs both compile-time and runtime checks to ensure safety:
 
 - **Compile-time Checks**: Choreo verifies rank consistency. In this example, `lhs.span` has a ranked of `2`, matching the rank of `{tile_m, tile_k}`, so there are no issues.
-- **Runtime Checks**: Choreo generates code to validate dimensions at runtime. For instance, in the declaration of `tiled_lhs`, its shape must not have a dimension of `0`, which would result in an invalid zero-sized buffer. Choreo's compiler generates the following *target host code*:
+- **Runtime Checks**: Choreo generates code to validate dimensions at runtime. For instance, in the declaration of `tiled_lhs`, its shape must not have a dimension of `0`, which would result in an invalid zero-sized buffer. Choreo's *transpliation* process generates the following *target host code*:
 
 ```cpp
 void __choreo_transpiled_Matmul(choreo::span_view<2, choreo::s32> lhs,
                                 choreo::span_view<2, choreo::s32> rhs) {
-   choreo_assert(lhs.shape()[0] / 32 > 0,
-                 "the 0 dimension of 'lhs' may result in spanned data "
-                 "with a dimension value of 0.");
-   // ...
+  choreo_assert(lhs.shape()[0] / 32 > 0,
+                "the 0 dimension of 'lhs' may result in spanned data "
+                "with a dimension value of 0.");
+  // ...
 }
 ```
 
@@ -75,14 +75,14 @@ For the *symbolic dimension* version, Choreo compiler generates additional check
 ```cpp
 void __choreo_transpiled_Matmul(choreo::span_view<2, choreo::s32> lhs,
                                 choreo::span_view<2, choreo::s32> rhs) {
-   // additional check happens only when using symbolic dimensions
-   choreo_assert(lhs.shape()[1] == rhs.shape()[0],
-                 "dimension 'K' is not consistent.");
+  // additional check happens only when using symbolic dimensions
+  choreo_assert(lhs.shape()[1] == rhs.shape()[0],
+                "dimension 'K' is not consistent.");
 
-   choreo_assert(lhs.shape()[0] / 32 > 0,
-                 "the 0 dimension of 'lhs' may result in spanned data "
-                 "with a dimension value of 0.");
-   // ...
+  choreo_assert(lhs.shape()[0] / 32 > 0,
+                "the 0 dimension of 'lhs' may result in spanned data "
+                "with a dimension value of 0.");
+  // ...
 }
 ```
 

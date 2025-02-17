@@ -38,8 +38,9 @@ nav:
       - Spanned Data and Buffers: spanned-data.md
       - Dynamic Shape: symbolic-shape.md
     - Looping and Parallel Execution:
+      - Prelude: intro-loop-parallel.md
       - SPMD Parallellism: parallel-in-choreo.md
-      - Loops: loops.md
+      - Loop Control: within-loops.md
     - Move Data in Chunks:
       - DMA in Choreo: dma-in-choreo.md
       - Placeholder of Future: placeholder-future.md
@@ -62,4 +63,3 @@ nav:
     - Dynaminism Support with Symbolic Representation: dynamic-design.md
   - Build Choreo from Scratch: getting-started-with-choreo.md
   - Contributing to Choreo: contribute.md
-
