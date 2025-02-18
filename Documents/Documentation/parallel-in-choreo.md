@@ -87,10 +87,13 @@ For targets like *CUDA*, *TopsCC*, or *Factor*, the `parallel-by` block not only
 ```choreo
 __co__ void foo(...) {
   // Generate host code
-  parallel p by 6 {
+  // ...
+  parallel p by 6 { // Kernel launch
     // Generate device code
+    // ...
   }
   // Generate host code
+  // ...
 }
 ```
 

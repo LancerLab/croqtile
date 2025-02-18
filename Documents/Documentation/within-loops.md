@@ -1,83 +1,185 @@
 ## Overview
 
+In this section, you will learn about constructing *bounded variable*s using the `with-in` statement and creating loops with the `foreach` statement.
 
-### `with-in` + `foreach`: Virtual Parallelism Abstraction
+## Loops in Choreo
 
-The `with-in` and `foreach` constructs are designed for more flexible, virtualized parallelism. Unlike `parallel-by`, these constructs are not tied directly to the physical execution model but are used to abstract the data flow and control how elements in a multi-dimensional space are processed.
+In C++, loops are typically constructed using `for`, `while`, and `do-while` blocks. These loops include conditions for termination and usually involve variable manipulations related to loop control. Programmers have the freedom to define exit conditions, loop stepping, and other aspects, allowing for flexible loop structures.
 
-#### `with-in` Block: Binding Data
-
-The `with-in` block allows you to bind i-tuples (index tuples) to `mdspan` objects, which are multi-dimensional data structures in Choreo. The block allows you to define index ranges and create these bindings.
-
-Example:
+In contrast, Choreo, being a domain-specific language for data movement, supports a more constrained loop structure. The current loop construction in Choreo is as follows:
 
 ```choreo
-with index in [10, 10] {
-  // index is an i-tuple with 2 elements
+foreach index {
+  // loop body
 }
 ```
 
-- **index**: Represents an i-tuple, which is a tuple of multiple indices.
-- **[10, 10]**: Defines the range of indices for the i-tuple, meaning the index will have 2 elements, both ranging from 0 to 9.
+Here, `index` is a *bounded variable* (introduced in the previous section). If `index` has an upper bound of `6`, the above code is equivalent to:
 
-You can also name the elements of the i-tuple for clarity:
+```cpp
+for (int index = 0; index < 6; index++) {
+  // loop body
+}
+```
+
+While *bounded variables* may seem restrictive, they are sufficient for data movement tasks, as you typically won't move data with a negative or out-of-bound index.
+
+In Choreo, *bounded variables* defined within a `parallel-by` statement are immutable and cannot be used in `foreach` statements. Instead, programmers should use the `with-in` statement to define the *bounded variables* suitable for loops.
+
+Here's a refined version of your text with improved clarity and consistency:
+
+## The **With-In** Block
+
+### Defining *Bounded Variable*s:
+
+A `with-in` statement allows you to define either a *bounded integer* or a *bounded ituple*. Syntactically, it resembles the `parallel-by` statement but only defines *bounded variable*s without invoking multiple instances for execution. Below are examples:
+
+```choreo
+with x in [512] {
+  // 'x' is a bounded integer
+}
+with index in [10, 10] {
+  // 'index' is a bounded ituple
+}
+```
+
+Here, `x` represents a bounded integer with an upper bound of `512`. `index` represents a bounded ituple with upper bounds of `10, 10`. Similar to the `parallel-by` statement, you can name the elements of the ituple for clarity or declare both the bounded ituple and the associated bounded integers, as shown below:
+
 ```choreo
 with {x, y} in [10, 10] {
-  // x and y are now explicitly named elements of the i-tuple
+  // x and y are explicitly named elements of the ituple
 }
-
-```
-
-Alternatively, you can give the entire i-tuple a name and refer to its elements by name:
-```choreo
 with index = {x, y} in [10, 10] {
-  // x and y can be used within the block
+  // 'x', 'y', and 'index' can be used within the block
 }
 ```
 
-#### `foreach` Block: Iterating Over Bounded Elements
+Like the `parallel-by` statement, multiple `with-in` declarations can be combined using a comma-separated syntax, as demonstrated below:
 
-Once the i-tuple is defined in a with-in block, you can use the foreach block to iterate over these bounded elements.
-
-In this case, the foreach block will iterate over each element of the index x in the range [0, 9] and execute the corresponding code for each value of x.
-
-Example:
 ```choreo
-with x in [10] {
-  foreach x {
-    // do something with each x
+with index = {x, y} in [10, 10], idx in [100, 10] { }
+```
+
+In this way, two bounded ituples are defined. Note that either `index` or `idx` can only be referenced within the following `with-in` block.
+
+### Optional: The *Where-Binding*
+
+You can append a *where-clause* to impose **Where-Binding** constraints among different bounded variables defined in a `with-in` statement. This allows different bounded variables to be treated as aliases for each other. Below is an example:
+
+```choreo
+with {m, n} in [M, N], {n_p, k} in [N_P, K]
+where n_p <-> n {
+  // matmul implements with m, n, K. 'n_p' always refers to the same value as 'n'.
+}
+```
+
+Syntactically, the `<->` operation establishes the *where-binding* between two bounded variables. Within the `with-in` block, any reference to `n_p` refers to `n`, and vice versa.
+
+Here's a refined version of your text for clarity and consistency:
+
+## The `foreach` Block
+
+### Basic Syntax
+
+The `with-in` statement defines *bounded variable*s, which can then be iterated over using the `foreach` statement. The basic syntax is as follows:
+
+```choreo
+with index in [6] {
+  foreach index {
+    // Perform operations with each index
   }
 }
-
 ```
 
-## Optional: `where` clause for loop constraints
-You can append a where clause to impose constraints between indices, which can be useful in cases where certain indices need to have specific relationships.
+In this example, the `foreach` block iterates 6 times, with the value of the **interation variable** `index` ranging from `0` to `5` incrementally.
+
+It is also possible to iterate over *bounded ituple*s. For example:
 
 ```choreo
-with {m, n} in [M, N], {n_p, k} in [N_P, K] 
-where n_p <-> n {
-  // matmul implements with m, n, K. n_p is no longer useful.
+with index = {x, y} in [6, 17] {
+  foreach index { }
 }
+```
+
+This code defines a *bounded ituple* `index`. Iterating over `index` is equivalent to a nested loop structure:
+
+```cpp
+for (int x = 0; x < 6; ++x)
+  for (int y = 0; y < 17; ++y) { }
+```
+
+Notice the ordering of the loop nesting: the **left-to-right** order of the *bounded variable*s within a *bounded ituple* corresponds to the **outer-to-inner** nesting of the loops. This ordering is essential for correct code behavior constructing sometimes.
+
+Furthermore, This rule also applies to the *comma-separated bounded variable list* that follows the `foreach` statement:
+
+```choreo
+with index = {x, y} in [6, 17], iv in [128] {
+  foreach iv, index { }
+}
+```
+In this code, two bounded variables are defined. The following `foreach` block is equivalent to a multi-level nested loop:
+
+```cpp
+for (int iv = 0; iv < 128; ++iv)
+  for (int x = 0; x < 6; ++x)
+    for (int y = 0; y < 17; ++y) { }
+```
+
+### Deriving the Loop From a Bounded Integer
+
+In certain scenarios, such as pipelining data movement, it may be necessary to modify loop iterations. In Choreo, this can be achieved by deriving a loop from a *bounded integer* within the `foreach` statement. For example:
+
+```choreo
+with {x, y} in [6, 17] {
+  foreach x, y(1::) { }
+}
+```
+
+In this case, a **Range Operation** is applied to the bounded integer `y`. This results in equivalent C/C++ code:
+
+```cpp
+for (int x = 0; x < 6; ++x)
+  for (int y = 1; y < 17; ++y) { }
+```
+
+As seen in the code, the `y`-loop starts at `1`. The *range operation* consists of three colon-separated integer values in the form:
 
 ```
-In this example:
+  bounded-variable(lower-offset:upper-offset:stride)
+```
 
-- The where clause defines that n_p and n must have the same value in all iterations.
-- `<->` is the notation used to indicate that n_p is related to n in some way.
+This derives a loop from the `bounded-variable`, where the `bounded-variable` serves as the *iteration variable* of the loop. Specifically:
 
-The with-in block by itself does not imply parallelism, unlike parallel-by. It is used primarily to bind data, iterate over ranges, and define relationships between indices. The where clause further refines how these indices interact within the block.
+- The initial value of the *iteration variable* is the `lower-offset` plus the lower bound of the `bounded-variable`. Since all bounded integers have a lower bound of `0` in Choreo, the `lower-offset` sets the initial value of the loop.
+- The loop terminates when the *iteration variable* is equal to or greater than the upper bound of the `bounded-variable` plus `upper-offset`. Negative values are typically used for `upper-offset`.
+- The *iteration variable* increments by `stride` at the end of each iteration.
 
-#### Quick summary
-- `with-in`: Binds indices or i-tuples to a data structure (e.g., an mdspan). It is used to create a virtualized iteration space but does not directly imply parallelism.
-- `foreach`: Used in combination with with-in to iterate over the bound indices or i-tuples, performing operations on each element. It provides a convenient way to loop over multidimensional data.
+Thus, `y(1:-1:2)` results in a loop like `for (y = 0 + 1; y < 17 - 1; y += 2)` in the example above. If any field of the *range operation* is not specified, the default values are `0` for `lower-offset` and `upper-offset`, and `1` for `stride`.
 
-### Key Differences Between `parallel-by` and `with-in` + `foreach`
+Note that *range operation*s only apply to the *bounded variable*s. Range operation over the *bounded ituple* triggers an error at compile time.
 
-| Feature               | `parallel-by`                        | `with-in` and `foreach`                |
-|-----------------------|--------------------------------------|----------------------------------------|
-| **Parallelism Type**   | Physical parallelism (SPMD model)    | Virtualized parallelism (used for data binding and iteration) |
-| **Synchronization**    | Threads are asynchronous but synchronized within the block | Sequential execution; no parallel execution implied |
-| **Indexing**           | Index `p` is bounded, corresponds to thread index | Index or i-tuple binds to `mdspan`, can define relationships with `where` clause |
-| **Usage**              | Directly for parallel execution on multiple threads | For binding and iterating over data in virtual parallel regions |
+## Values of Bounded Variables
 
+Understanding the values associated with a bounded variable is crucial. A bounded variable has two key values:
+
+- **Current Value**:
+    - Within a `foreach` statement, the current value is determined by the loop iteration, as the bounded variable serves as the iteration variable.
+    - Outside of a `foreach` statement, the bounded variable always has a value of zero.
+
+- **Upper-Bound Value**: This is specified in the `with-in` or `parallel-by` statements.
+
+Programmers may encounter issues when using the current value of a bounded variable outside of a `foreach` statement, particularly after the loop has completed. By definition, the current value of a bounded variable is immutable except within a `foreach` loop. The following code illustrates this:
+
+```choreo
+with x in 6 {
+  // x's current value is 0
+  foreach x {
+    // x's current value is either 0, 1, 2, ..., 5
+  }
+  // x's current value is 0, NOT 6
+}
+```
+## Quick Summary
+In this section, we explain the use of `with-in` and `foreach` statements in Choreo to define and iterate over *bounded variable*s, which are essential for data movement tasks. We introduced the syntax and behavior of these constructs, including how to apply range operations to modify loop iterations and the importance of understanding the current and upper-bound values of bounded variables.
+
+The loop deriving part is important for implementing multi-buffering datamovement, which is essential for building high-performance kernels and will be introduced in optimization chapters later.
