@@ -25,13 +25,13 @@ Another primary design goal of Choreo is to **ensure code safety** by catching e
 
 Bugs related to DMA are typically challenging to diagnose. However, with Choreo's safety checks, programmers can significantly reduce debugging efforts, thereby shortening the overall development cycle.
 
-### Dynamic/Symbolic Shapes
-Dynamic shape support is crucial for building many ML kernels. Choreo enhances the dynamic shape support via the **symbolic shapes** feature. Programmers can utilize the feature easily like the below code:
+### Dynamic Shapes
+Dynamic shape support is crucial for building many ML kernels. Choreo enhances the dynamic shape support via the **symbolic dimension** feature. Programmers can utilize the feature easily like the below code:
 
 ```
 __co__ auto matmul(f32 [M, K] lhs, f32 [N, K] rhs) { ... }
 ```
-'M', 'N' and 'K' are the symbolic shape values. Programs program shaped inputs, such as tensors, in such a natural way. Such a design priors any existing systems (late 2024). Additionally, symbolic shapes are also checked to ensure safety. As it is automatic, and systematic, it eliminates the need for non-systematic, explicitly programmed assertions by the users, thereby reducing boilerplate code.
+'M', 'N' and 'K' are the symbolic shape dimensions. Programs program shaped inputs, such as tensors, in such a natural way. Such a design priors any existing systems (late 2024). Additionally, symbolic dimensions are also checked to ensure safety. As it is automatic, and systematic, it eliminates the need for non-systematic, explicitly programmed assertions by the users, thereby reducing boilerplate code.
 
 ### Visualization
 **Analytic and visualization** is another compelling feature of Choreo, designed to help programmers understand tiling behaviors. For instance, consider the following data movement statement:
@@ -45,5 +45,6 @@ With Choreo's visualization capability, it renders figures like:
 Programmers is easy to find the projection of the tiling and data movement behavior from this visualization. Such assistance can significantly reduce user erorrs when being properly used.
 
 # Documentation for Reference
-Consult the [Choreo Documentation and Tutorials](http://10.31.50.149:8000/) document for information on building Choreo and the detailed usage.
+Consult the [Getting Started With Choreo](./Document/Documentation/getting-started-with-choreo.md) to build and install Choreo.
+Consult the [Choreo Tutorials](http://10.31.50.149:8000/) document for information on building Choreo and the detailed usage.
 

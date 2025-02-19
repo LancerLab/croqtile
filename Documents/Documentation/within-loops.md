@@ -26,8 +26,6 @@ While *bounded variables* may seem restrictive, they are sufficient for data mov
 
 In Choreo, *bounded variables* defined within a `parallel-by` statement are immutable and cannot be used in `foreach` statements. Instead, programmers should use the `with-in` statement to define the *bounded variables* suitable for loops.
 
-Here's a refined version of your text with improved clarity and consistency:
-
 ## The **With-In** Block
 
 ### Defining *Bounded Variable*s:
@@ -61,21 +59,6 @@ with index = {x, y} in [10, 10], idx in [100, 10] { }
 ```
 
 In this way, two bounded ituples are defined. Note that either `index` or `idx` can only be referenced within the following `with-in` block.
-
-### Optional: The *Where-Binding*
-
-You can append a *where-clause* to impose **Where-Binding** constraints among different bounded variables defined in a `with-in` statement. This allows different bounded variables to be treated as aliases for each other. Below is an example:
-
-```choreo
-with {m, n} in [M, N], {n_p, k} in [N_P, K]
-where n_p <-> n {
-  // matmul implements with m, n, K. 'n_p' always refers to the same value as 'n'.
-}
-```
-
-Syntactically, the `<->` operation establishes the *where-binding* between two bounded variables. Within the `with-in` block, any reference to `n_p` refers to `n`, and vice versa.
-
-Here's a refined version of your text for clarity and consistency:
 
 ## The `foreach` Block
 
@@ -135,14 +118,14 @@ with {x, y} in [6, 17] {
 }
 ```
 
-In this case, a **Range Operation** is applied to the bounded integer `y`. This results in equivalent C/C++ code:
+In this case, the **Range Expression** `y(1::)` is used to derive the loop. This results in equivalent C/C++ code:
 
 ```cpp
 for (int x = 0; x < 6; ++x)
   for (int y = 1; y < 17; ++y) { }
 ```
 
-As seen in the code, the `y`-loop starts at `1`. The *range operation* consists of three colon-separated integer values in the form:
+As seen in the code, the `y`-loop starts at `1`. The *range expression* consists of a *bounded variable*, followed by braced enclosing three colon-separated integer values, like the below form:
 
 ```
   bounded-variable(lower-offset:upper-offset:stride)
@@ -154,9 +137,9 @@ This derives a loop from the `bounded-variable`, where the `bounded-variable` se
 - The loop terminates when the *iteration variable* is equal to or greater than the upper bound of the `bounded-variable` plus `upper-offset`. Negative values are typically used for `upper-offset`.
 - The *iteration variable* increments by `stride` at the end of each iteration.
 
-Thus, `y(1:-1:2)` results in a loop like `for (y = 0 + 1; y < 17 - 1; y += 2)` in the example above. If any field of the *range operation* is not specified, the default values are `0` for `lower-offset` and `upper-offset`, and `1` for `stride`.
+Thus, `y(1:-1:2)` results in a loop like `for (y = 0 + 1; y < 17 - 1; y += 2)` in the example above. If any field of the *range expression* is not specified, it results in default values: `0` for `lower-offset` and `upper-offset`, and `1` for `stride`.
 
-Note that *range operation*s only apply to the *bounded variable*s. Range operation over the *bounded ituple* triggers an error at compile time.
+Note that *range expression*s only apply to the *bounded variable*s. *Range experession* over the *bounded ituple* triggers an error at compile time.
 
 ## Values of Bounded Variables
 
@@ -179,6 +162,7 @@ with x in 6 {
   // x's current value is 0, NOT 6
 }
 ```
+
 ## Quick Summary
 In this section, we explain the use of `with-in` and `foreach` statements in Choreo to define and iterate over *bounded variable*s, which are essential for data movement tasks. We introduced the syntax and behavior of these constructs, including how to apply range operations to modify loop iterations and the importance of understanding the current and upper-bound values of bounded variables.
 

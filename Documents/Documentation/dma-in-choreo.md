@@ -1,25 +1,41 @@
-# DMA in Choreo
+## Overiew
+In this section, you will learn the basic data movement statements and the future variable they produce.
 
-In Choreo, Direct Memory Access (DMA) operations are designed to manage data transfers between various memory regions, such as from host memory to device memory or between different memory hierarchies. DMA operations in Choreo are triggered using the dma keyword, followed by the specific operation type (e.g., dma.copy, dma.pad, dma.transp). These operations play a key role in optimizing memory access and are essential for achieving high performance in parallel computing environments.
+## Data Movement Statement
 
-## DMA Operations in Choreo
-A typical DMA operation in Choreo follows this structure:
+Choreo intends to address mulitple-levels of data movement. However, till now the primary focus of Choreo is the data movement between heterogeous hardware, and across memory hiararchy. In hardware terminology, such movement are named the **Direct Memory Access (DMA)**. Choreo follows this naming and abstract the data movement as **DMA Operations**.
+
+### Basic Syntax
+The DMA statement is the most complicated statement in Choreo. A DMA statement in Choreo could be an asynchronous entity, which means that the code following an asynchronous DMA execute in parallel with the DMA statement. In some terminology, the *asynchronous DMA* is called the **None-Blocking DMA**, since it would not block the code following from execution, while the *synchronous DMA* is named the **Blocking DMA**, as the code would not step further until the DMA has finished. For the *Asynchronous DMA*, an explicit synchronization is required before using the DMA result.
+
+To support such features, the *DMA statement* in Choreo is organized as below:
 
 ```choreo
-future = dma-op src-operand => dst-operand;
+future = dma-op src-expr => dst-expr;
 ```
-Where:
 
-- `dma-op`: The DMA operation type, such as dma.copy, dma.pad, or dma.transp, specifies the type of data transfer operation (e.g., copying data, padding data, or transposing data).
+The statement defines a **future**-typed variable, which appears on the left of operator "=". In Choreo, a *future* represent **both the handle of asynchrous execution instance and the DMA result**. Thus, the definition of *future* could be ignored for synchronized *DMA statement*s.
 
-- `src-operand`: The source operand can be an identifier (a variable or array) or a chunkat (a slice or chunk of a memory block). It refers to the memory from which data will be transferred.
+The right-hand-side of the *DMA operation* includes the operation type (`dma-op`), expression for the operation source (`src-expr`), and the expression for the destination (`dst-expr`). The source and destination is seperated with the symbol "=>", which indicates how the data flow.
 
-- `dst-operand`: The destination operand can also be an identifier or a chunkat. This specifies the location to which data will be transferred. Additionally, it can include a memory specifier (such as shared, local, or global), which indicates the memory space where the data will reside.
+### Operation Type
 
-- `future`: A future represents the result of the DMA operation. It serves as a handle to track the operation's completion. If the DMA operation is asynchronous, you can use the future object to synchronize the program execution using wait.
+Choreo's DMA statement is an abstraction that is extended to support morden hardware. Despite linear memory copies, advanced hardware, such as *Data Transfer Engine (DTE)* of GCU hardware and *Tensor Memory Accelerator (TMA)*, are capable to transfer shaped data and apply shape transformations inflight Therefore, currently Choreo supports operations including:
 
-## Synchronous vs. Asynchronous DMA Operations
-DMA operations in Choreo can be synchronous or asynchronous, each providing different behavior in terms of blocking and non-blocking execution.
+- `dma.copy`: it copies the flat memory directly.
+- `dma.pad`: it *pad*s shaped data while transferring the data.
+- `dma.transp`: it *transpose*s the shaped data while transferring the data.
+
+
+Note the support of the operation types may differ according to the underlying software and hardware. If not support, the compiler will emit error to warn programmers.
+
+In addtion to the operation type, an `.async` suffix could be appended to the operation to indicate the operation is asynchronous. For example:
+
+```
+dma.copy from => data;           // synchronous
+f = dma.copy.async from => data; // asynchronous
+f = dma.pad.async<1,1 from => data; // asynchronous
+```
 
 ### Synchronous DMA Operations
 In a synchronous DMA operation, the program execution will block until the DMA operation is completed. For example:

@@ -41,8 +41,10 @@ nav:
       - Prelude: intro-loop-parallel.md
       - SPMD Parallellism: parallel-in-choreo.md
       - Loop Control: within-loops.md
+      - Advanced Features: loop-in-advance.md
     - Move Data in Chunks:
-      - DMA in Choreo: dma-in-choreo.md
+      - Data Movement and Future: dma-in-choreo.md
+      - Tiling and ChunkAt: tiling-chunkat.md
       - Placeholder of Future: placeholder-future.md
     - C++ Embedding of Choreo Function:
       - From Host to Tileflow: host-to-tileflow.md
@@ -61,5 +63,4 @@ nav:
     - Why Symbolic Shapes: why-symbolic-shapes.md
     - Design of Symbolic Evaluation System: value-numbering.md
     - Dynaminism Support with Symbolic Representation: dynamic-design.md
-  - Build Choreo from Scratch: getting-started-with-choreo.md
   - Contributing to Choreo: contribute.md
