@@ -43,16 +43,16 @@ nav:
       - Loop Control: within-loops.md
       - Advanced Features: loop-in-advance.md
     - Move Data in Chunks:
-      - Data Movement and Future: dma-in-choreo.md
+      - Data Movement Basics: basic-dma.md
       - Tiling and ChunkAt: tiling-chunkat.md
-      - Placeholder of Future: placeholder-future.md
+      - Advanced Future: dma-in-advance.md
     - C++ Embedding of Choreo Function:
       - From Host to Tileflow: host-to-tileflow.md
       - Call Device Program in Tileflow: call-in-choreo.md
     - Miscellaneous:
       - Macro and Preprocessing: macro-in-choreo.md
       - Check Tileflow Program Statically: compiler-func.md
-      - Assertions: assertion.md
+      - Useful Utilities: assertion.md
   - A Whirlwind Tour to Optimisation Patterns:
     - Tileflow Optimisations: tileflow-opt.md
     - Asynchoronous DMA transfer patterns with Choreo: async-dma-patterns.md
