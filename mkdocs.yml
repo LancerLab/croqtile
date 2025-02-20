@@ -44,8 +44,8 @@ nav:
       - Advanced Features: loop-in-advance.md
     - Move Data in Chunks:
       - Data Movement Basics: basic-dma.md
-      - Tiling and ChunkAt: tiling-chunkat.md
-      - Advanced Future: dma-in-advance.md
+      - Data Tiling and ChunkAt: tiling-chunkat.md
+      - Advanced Features: dma-in-advance.md
     - C++ Embedding of Choreo Function:
       - From Host to Tileflow: host-to-tileflow.md
       - Call Device Program in Tileflow: call-in-choreo.md
