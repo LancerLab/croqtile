@@ -1,5 +1,5 @@
 ## Overview
-In this section, you will learn how to define data or buffers in Choreo tileflow programs.
+Choreo *tileflow program* describes how to move data around. Therefore, declaring or defining the data or buffer are fundamenetal. In this section, you will learn related syntax.
 
 ## *Spanned*: Data and Buffers
 The primary focus of a Tileflow program is to manipulate large datasets by moving them around. In some terminology, the input and output of a Choreo function are classified as "input data" and "output data," respectively. Meanwhile, any other storage is referred to as "buffers." This conceptually distinguishes between "external" and "internal" memory from a function's perspective. However, both "data" and "buffer" refer to storage positions. In Choreo, both are typed as **spanned**, reflecting that they are data/buffers associated with an

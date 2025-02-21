@@ -32,26 +32,26 @@ nav:
   - What is Choreo: what-is-choreo.md
   - Basics of Choreo-C++ Program:
     - Choreo-C++ Program Structure: choreo-program-structure.md
-    - Manipulating the Shaped Data:
+    - Shaped Data Manipulation:
       - Shape and MDSpan: shape-in-choreo.md
       - Integers and I-Tuples: integer-ituple.md
       - Spanned Data and Buffers: spanned-data.md
-      - Dynamic Shape: symbolic-shape.md
-    - Looping and Parallel Execution:
-      - Prelude: intro-loop-parallel.md
-      - SPMD Parallellism: parallel-in-choreo.md
+      - Dynamic Shape and Symbolic Dimension: symbolic-shape.md
+    - Loop Constructs and Parallel Execution:
+      - About Parallelism and Iterations: intro-loop-parallel.md
+      - SPMD Parallelism: parallel-in-choreo.md
       - Loop Control: within-loops.md
-    - Move Data in Chunks:
-      - Data Movement Basics: basic-dma.md
+    - Chunk-Based Data Movement:
+      - The DMA Statement: basic-dma.md
       - Data Tiling and ChunkAt: tiling-chunkat.md
-    - C++ Embedding of Choreo Function:
-      - From Host to Tileflow: host-to-tileflow.md
+    - Embeddings into C++ Code:
+      - Inputs and Output: input-output.md
       - Call Device Program in Tileflow: call-in-choreo.md
-    - Advanced Features:
+      - Macro and Preprocessing: macro-in-choreo.md
+    - Advanced Features and Techniques:
       - Advanced In Program Control: loop-in-advance.md
       - Advanced In DMA: dma-in-advance.md
-    - Miscellaneous:
-      - Macro and Preprocessing: macro-in-choreo.md
+    - Additional Topics:
       - Check Tileflow Program Statically: compiler-func.md
       - Useful Utilities: assertion.md
   - A Whirlwind Tour to Optimisation Patterns:
