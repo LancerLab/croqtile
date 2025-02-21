@@ -16,8 +16,9 @@ For now, Choreo experimentally supports explicit masking of the `foreach` block,
 __co__  void foo() {
   parallel p by 6 {
     with q in [2] {
-    foreach q if (p == 0) {
-      // this iteration only work for parallel thread 0
+      foreach q if (p == 0) {
+        // this iteration only work for parallel thread 0
+      }
     }
   }
 }

@@ -62,7 +62,7 @@ parallel {px, py, pz} by [1, 1, 2] {
 
 In this example, two levels of parallelism are defined. The first level (*level-0*) is subdivided into three sub-levels, annotated by the `{px, py, pz}` `ituple`. The second level (*level-1*) is subdivided into two sub-levels, annotated by the `{qx, qy}` `ituple`, or `t_index` as a whole. For each sub-level, the parallelization count corresponds to the respective value inside the `mdspan`.
 
-The concept of sub-levels originates from *CUDA*'s GPU workload management, which often involves data with 2D or 3D elements. Note that the first element inside the `ituple` represents the **least significant parallel vairable**. Choreo adopts this ordering to align with *CUDA* developers' conventions, rather than for internal consistency.
+The concept of sub-levels originates from *CUDA*'s GPU workload management, which often involves data with 2D or 3D elements. Note that the first element inside the `ituple` represents the **least significant parallel variable**. Choreo adopts this ordering to align with *CUDA* developers' conventions, rather than for internal consistency.
 
 ### Bounded Variable
 
