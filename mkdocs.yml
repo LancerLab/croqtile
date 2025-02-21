@@ -41,14 +41,15 @@ nav:
       - Prelude: intro-loop-parallel.md
       - SPMD Parallellism: parallel-in-choreo.md
       - Loop Control: within-loops.md
-      - Advanced Features: loop-in-advance.md
     - Move Data in Chunks:
       - Data Movement Basics: basic-dma.md
       - Data Tiling and ChunkAt: tiling-chunkat.md
-      - Advanced Features: dma-in-advance.md
     - C++ Embedding of Choreo Function:
       - From Host to Tileflow: host-to-tileflow.md
       - Call Device Program in Tileflow: call-in-choreo.md
+    - Advanced Features:
+      - Advanced In Program Control: loop-in-advance.md
+      - Advanced In DMA: dma-in-advance.md
     - Miscellaneous:
       - Macro and Preprocessing: macro-in-choreo.md
       - Check Tileflow Program Statically: compiler-func.md
