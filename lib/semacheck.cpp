@@ -75,6 +75,11 @@ bool SemaChecker::Visit(AST::Assignment& n) {
 
   if ((*GetSymbolType(n.name) != *NodeType(*n.value)) ||
       (*NodeType(n) != *NodeType(*n.value))) {
+    dbgs() 
+      << STR(*GetSymbolType(n.name))
+      << STR(*NodeType(*n.value))
+      << STR(*NodeType(n));
+        
     Error(n.LOC(), "inconsistent types are found in the assignment.");
     error_count++;
     return false;
@@ -102,6 +107,7 @@ bool SemaChecker::Visit(AST::DataType& n) {
 bool SemaChecker::Visit(AST::Identifier& n) {
   TraceEachVisit(n);
   if (PrefixedWith(n.name, "$")) return true; // do not check internal symbols
+  if (n.name == "_") return true; // ignore unit biv
   if (!ReportUnknownSymbol(n.name, n.LOC(), __FILE__, __LINE__)) return false;
   return true;
 }
@@ -515,6 +521,7 @@ bool SemaChecker::ReportUnknownSymbol(const std::string& name,
 
 bool SemaChecker::ReportUnknown(AST::Node& n, const char* file, int line,
                                 bool ignore_detail) {
+  if (STR(n) == "_") return true; // ignore built-in unit iv.
   if (isa<UnknownType>(NodeType(n))) {
     ++error_count;
     Error(n.LOC(), "failed to obtain a type.");
@@ -522,6 +529,10 @@ bool SemaChecker::ReportUnknown(AST::Node& n, const char* file, int line,
     return false;
   }
 
+  // dbgs() << "checking node = " << STR(n) << "\n";
+  // dbgs() << "checking node = " << PSTR(NodeType(n)) << "\n";
+  // dbgs() << "ignore_detail = " << ignore_detail << "\n";
+  // dbgs() << "has-sufficient-info = " << NodeType(n)->HasSufficientInfo() << "\n";
   if (!ignore_detail && !NodeType(n)->HasSufficientInfo()) {
     ++error_count;
     Error(n.LOC(), "failed to obtain a type with sufficient info.");

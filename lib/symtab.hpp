@@ -295,11 +295,35 @@ public:
   }
 
   // get the current scope name
+  // consider rename to getScope, more intuitive, not ambiguis to ScopedName
   std::string ScopeName() const {
     std::string name;
     for (auto it = scope_names.begin(); it != scope_names.end(); ++it)
       name += *it + "::";
     return name;
+  }
+
+  std::string getParentScope() const {
+    // Ensure the input is not empty and ends with "::"
+    if (ScopeName().empty() || ScopeName().size() <= 2) {
+      return ""; // Invalid or empty scope
+    }
+
+    // Find the last occurrence of "::"
+    size_t lastPos = ScopeName().rfind("::");
+
+    // Ensure the "::" is found and it's not the first or only "::"
+    if (lastPos != std::string::npos && lastPos > 2) {
+      // Now find the second-to-last occurrence of "::"
+      size_t secondLastPos = ScopeName().rfind("::", lastPos - 1);
+
+      // If second-to-last "::" is found, return the substring up to that point
+      if (secondLastPos != std::string::npos) {
+        return ScopeName().substr(0, secondLastPos + 2); // Include "::" in the result
+      }
+    }
+
+    return "";
   }
 
   // get the name when the symbol is assumed to be defined in current scope

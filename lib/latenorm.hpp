@@ -53,6 +53,10 @@ protected:
   WorkingList workinglist;
   std::map<AST::MultiNodes*, BufferInsertInfo> mnodes_insertions;
 
+  // utils for heterogeneous scenario analysis
+  int parallel_level = 0;
+  int max_parallel_level = 0;
+
   FutureBufferInfo& FBInfo() { return FCtx(fname).GetFutureBufferInfo(); }
 
   const std::string ProperBufferName(const std::string name) {
@@ -73,6 +77,8 @@ protected:
       cur_pb_index = multi_nodes.top()->GetIndex(m);
       cur_pb_mn = multi_nodes.top();
       assert(cur_pb_index != -1 && "unexpected node index.");
+      // handle parallel-level
+      parallel_level++;
     } else if (auto d = dyn_cast<AST::DMA>(&n)) {
       cur_dma_index = multi_nodes.top()->GetIndex(d);
       assert(cur_dma_index != -1 && "unexpected node index.");
@@ -89,8 +95,37 @@ protected:
     } else if (isa<AST::ParallelBy>(&n)) {
       cur_pb_index = -1;
       cur_pb_mn = nullptr;
+      // handle parallel-level
+      parallel_level--;
     }
     return true;
+  }
+
+  inline bool IsHostSide() const {
+    // if current stmt not enter parallel-by btw device and host
+    // max_parallel_level is not set or set to 0 or has explicit distance to
+    // inner-most
+    return (max_parallel_level == 0 || parallel_level + 1 < max_parallel_level);
+  }
+
+  inline bool IsHostSymbol(const std::string& sym) const {
+    int count = 0;
+    size_t pos = 0;
+    std::string target = "paraby";
+    // anchor
+    // dbgs() << "anchor for symbol " << sym << "; maxprlv = " <<
+    // max_parallel_level << "\n";
+    int host_side_parallel_lv_cnt = std::max(max_parallel_level - 2, 0);
+    // dbgs() << "ishostsymbol call\n" << "should be " << host_side_parallel_lv_cnt;
+
+    // find the target substring from the current position
+    while ((pos = sym.find(target, pos)) != std::string::npos) {
+      count++;
+      pos += target.length(); // Move pos to the end of the found target
+    }
+    // dbgs() << "got " << count << "\n";
+
+    return (count <= host_side_parallel_lv_cnt);
   }
 
   void TraceEachVisit(const AST::Node& n) {
@@ -183,6 +218,259 @@ public:
   bool Visit(AST::Program&) override { return true; };
 };
 
+// step 0 prepare: 
+// get max_parallel_level before handling; 
+struct ParallelLevelAnalysis : public LateNormBase {
+public:
+  ParallelLevelAnalysis(const ptr<SymbolTable> s_tab)
+      : LateNormBase(s_tab, "parallel-level-analysis") {}
+  ~ParallelLevelAnalysis() {}
+
+protected:
+  bool BeforeVisitImpl(AST::Node& n) {
+    if (auto m = dyn_cast<AST::ParallelBy>(&n)) {
+      parallel_level++;
+      max_parallel_level = parallel_level > max_parallel_level ? parallel_level : max_parallel_level;
+    }
+    return true;
+  }
+
+  bool AfterVisitImpl(AST::Node& n) {
+    if (isa<AST::ParallelBy>(&n)) {
+      parallel_level--;
+    }
+    return true;
+  }
+
+public:
+  int getMaxParallelLv() {
+    return max_parallel_level;
+  }
+};
+
+struct HostSliceBufferGen : public LateNormBase {
+  std::vector<std::string> buffer_list_tiled_by_host_iv = {};
+  std::vector<ptr<AST::Node>> buffer_list_tiled_by_host_iv_ptr = {};
+  std::vector<std::string> host_buffer_slice_list = {};
+  AST::MultiNodes* host_device_border_mn;
+  int host_device_border_index;
+  std::string host_device_border_scope;
+public:
+  HostSliceBufferGen(const ptr<SymbolTable> s_tab, int max_plv)
+      : LateNormBase(s_tab, "host-slice-buffer-gen") { max_parallel_level = max_plv; }
+  ~HostSliceBufferGen() {}
+
+public:
+  // step 1: find out host-side IVs used at device-side, remember its id
+  // impl'd within processHostIVForExpr
+  bool BeforeVisitImpl(AST::Node& n) {
+    if (trace_visit) dbgs() << "before visiting " << n.TypeNameString() << "\n";
+    if (isa<AST::ChoreoFunction>(&n)) {
+      VST_DEBUG(dbgs() << "Before " << GetName() << " - " << STR(FBInfo())
+                       << "\n");
+    } else if (auto m = dyn_cast<AST::MultiNodes>(&n)) {
+      multi_nodes.push(m);
+    } else if (auto m = dyn_cast<AST::ParallelBy>(&n)) {
+      cur_pb_index = multi_nodes.top()->GetIndex(m);
+      cur_pb_mn = multi_nodes.top();
+      assert(cur_pb_index != -1 && "unexpected node index.");
+      parallel_level++;
+      // if current parallel-by is the border between host-and-device
+      // do staging for later handling.
+      if (parallel_level == max_parallel_level - 1) {
+        host_device_border_scope = SSTab().getParentScope();
+        host_device_border_mn = cur_pb_mn;
+        host_device_border_index = cur_pb_index;
+      }
+    } else if (auto d = dyn_cast<AST::DMA>(&n)) {
+      cur_dma_index = multi_nodes.top()->GetIndex(d);
+      assert(cur_dma_index != -1 && "unexpected node index.");
+    } else if (auto n_ptr = dyn_cast<AST::Assignment>(&n)) {
+      // since all chunkat is normalised at previous stage,
+      // to generate a dummy buffer, we can find all IV usage (in chunkat)
+      // at Assignment Node.
+      AST::Assignment& an = *n_ptr;
+      if (isa<AST::Expr>(an.value)) {
+        processHostIVForExpr(an.value, an.name, an);
+      }
+    }
+    return true;
+  }
+
+  // step 2: find out which host-side buffer is used at device-side and tiled by
+  // above mentioned host-side IVs.
+  // step 3: create a buffer slice of the host-side buffer, and will be sent to device-side;
+  // at this stage, data from host-side buffer to its buffer slice, is essentially a pointer
+  // offset, but we need to add a dma stmt and let backend handle it.
+  bool Visit(AST::ChunkAt& n) {
+    TraceEachVisit(n);
+    if (n.positions != nullptr) {
+      for (auto& tile_factor : n.positions->AllValues()) {
+        // from ChunkAt nodes, find out who uses host-side IV at device code
+        if (std::find(buffer_list_tiled_by_host_iv.begin(), 
+                      buffer_list_tiled_by_host_iv.end(), 
+                      STR(tile_factor)) != buffer_list_tiled_by_host_iv.end()) {
+          // get the host-side IV.
+          auto tiler_node = buffer_list_tiled_by_host_iv_ptr[
+            std::distance(buffer_list_tiled_by_host_iv.begin(), 
+                          std::find(buffer_list_tiled_by_host_iv.begin(),
+                                    buffer_list_tiled_by_host_iv.end(),
+                                    STR(tile_factor)))];
+          // get the source buffer for this chunkat
+          if (std::find(host_buffer_slice_list.begin(), 
+                        host_buffer_slice_list.end(), 
+                        n.data->name) == host_buffer_slice_list.end()) {
+            host_buffer_slice_list.push_back(n.data->name);
+
+            // formulte the updated shape/types for this optimisation
+            auto ty = NodeType(n);
+            auto ty_data = GetSymbolType(n.data->name);
+            auto ty_tiler = NodeType(*tiler_node);
+
+            auto data_shape = dyn_cast<SpannedType>(GetSymbolType(n.data->name))->GetShape();
+            auto tiler_shape = dyn_cast<BoundedITupleType>(NodeType(*tiler_node))->GetUpperBounds();
+
+            assert(data_shape.Rank() == tiler_shape.Rank());
+            ValueList new_shape_values;
+            for (int i = 0; i < data_shape.Rank(); ++i) {
+              new_shape_values.push_back(data_shape.ValueAt(i) / tiler_shape.ValueAt(i));
+            }
+            auto chunkat_shape = Shape(data_shape.Rank(), new_shape_values);
+            auto new_chunkat_ty = MakeSpannedType(
+              GetBaseType(*ty_data),
+              chunkat_shape,
+              Storage::GLOBAL
+            );
+
+            // create new AST nodes, and rewrite
+            // remember to settypes and update symbol table
+            std::string slice_fut_postfix = "__future__";
+            auto dnode_id = n.data; // ptr<Identifier>
+            auto slice_fut_id = AST::Make<AST::Identifier>(dnode_id->loc, dnode_id->name + slice_fut_postfix);
+
+            n.data = slice_fut_id;
+
+            auto mv_node = AST::Make<AST::MultiValues>(dnode_id->loc);
+            mv_node->Append(tiler_node);
+
+            auto ca_node = AST::Make<AST::ChunkAt>(
+              dnode_id->loc,
+              dnode_id,
+              mv_node);
+            ca_node->SetType(new_chunkat_ty);
+
+            auto dma_node = AST::Make<AST::DMA>(
+              dnode_id->loc,
+              ".copy",
+              slice_fut_id->name,
+              ca_node,
+              AST::Make<AST::Memory>(dnode_id->loc, Storage::GLOBAL),
+              false
+            );
+            dma_node->to->SetType(new_chunkat_ty);
+            dma_node->from->SetType(new_chunkat_ty);
+            dma_node->SetType(MakeFutureType(new_chunkat_ty, false));
+
+            // NOTE: only built-in SymTab in scopedsymboltable will be persist to next compilation
+            // pipeline stage. not scoped symbol table (which wraps the builtin symtab)
+            // so we need to update by SymTab(), not through SSTab()
+            auto sname = host_device_border_scope + slice_fut_id->name;
+            SymTab()->AddSymbol(sname, MakeFutureType(new_chunkat_ty, false));
+
+            // update FBInfo(), to complete latter future-buffer checks/handlings, correctly
+            auto from_kind = DOK_CHUNK;
+            auto to_kind = DOK_SYMBOL;
+            FCtx(fname).GetFutureBufferInfo().emplace(
+                sname, DMABufferInfo{"", from_kind, to_kind});
+
+            host_device_border_mn->Insert(dma_node, host_device_border_index);
+          }
+        }
+      }
+    }
+    return true;
+  }
+  //anchor
+private:
+  inline void dumpVector(std::vector<std::string>& _list) {  // Capture everything by reference
+    dbgs() << ">>>>>>>> DUMP Vector contents:\n";
+    int index = 1;
+    for (const auto& element : _list) {
+        // Format and print each element with its index
+        dbgs() << "[" << index++ << "] " << element << "\n";
+    }
+    dbgs() << ">>>>>>>> END Vector contents:\n";
+  }
+
+  template<typename T>
+  inline void dumpStack(const std::stack<T>& s) {
+    std::stack<T> tempStack = s;  // Copy the original stack
+    dbgs() << ">>>>>>>> Stack contents (from top to bottom):\n";
+    int index = 1;
+    while (!tempStack.empty()) {
+      dbgs() << "Element #" << index++ << ": " << PSTR(tempStack.top()) << "\n";
+      tempStack.pop();  // Pop elements from the copy to print
+    }
+    dbgs() << ">>>>>>>> END Stack contents:\n";
+  }
+
+  // NOTE: Recursively handle if a expr is a host-side IV ref'd at device-side
+  // If so, we need to make it a unit IV, and set the data source handler
+  // as a buffer slice of the original host-side buffer (must-be host-side buffer, otherwise
+  // host-side IV is not permitted to use as a tiler for this buffer)
+  // The buffer slice is just tiled (at host-side) by the host-side IV, ONLY.
+  void processHostIVForExpr(std::shared_ptr<AST::Node> expr_node_ptr, 
+                            std::string current_iv_name, 
+                            AST::Assignment& top_node) {
+    // Ensure the expression pointer is valid
+    if (!isa<AST::Expr>(expr_node_ptr)) return;
+    auto expr_ptr = cast<AST::Expr>(expr_node_ptr);
+    if (!expr_ptr) return;
+
+    // If it's a unary expression, process the right operand (GetR)
+    if (expr_ptr->IsReference()) {
+      // guard checks for outliers
+      if (ConvertibleToInt(NodeType(*expr_ptr))) return;
+      if (isa<AST::IntLiteral>(expr_ptr)) return;
+      if (isa<AST::FloatLiteral>(expr_ptr)) return;
+      if (isa<AST::IntTuple>(expr_ptr)) return;
+      if (isa<AST::SpanAs>(expr_ptr)) return;
+      if (isa<AST::MultiDimSpans>(expr_ptr)) return;
+      if (isa<AST::Boolean>(expr_ptr)) return;
+      if (IsHostSymbol(InScopeName(STR(expr_ptr->GetR()))) && !IsHostSide()) {
+        if (std::find(buffer_list_tiled_by_host_iv.begin(), 
+                      buffer_list_tiled_by_host_iv.end(), 
+                      current_iv_name) == buffer_list_tiled_by_host_iv.end()) {
+          buffer_list_tiled_by_host_iv.push_back(current_iv_name);
+          buffer_list_tiled_by_host_iv_ptr.push_back(expr_ptr->GetR());
+        }
+        auto host_iv_ubs = dyn_cast<BoundedITupleType>(NodeType(*expr_ptr->GetR()))->GetUpperBound(0);
+        auto top_iv_ubs = dyn_cast<BoundedITupleType>(top_node.value->GetType())->GetUpperBound(0);
+        auto new_host_iv_ty = MakeBoundedITupleType(Shape(1, top_iv_ubs / host_iv_ubs));
+
+        auto new_node = AST::MakeIdExpr(expr_ptr->GetR()->loc, "_");
+        new_node->opt_vals.int_expr = "0";
+        auto unit_bound_ty = MakeBoundedITupleType(Shape(1, 1));
+
+        new_node->SetType(unit_bound_ty);
+        top_node.value->SetType(new_host_iv_ty);
+        top_node.SetType(new_host_iv_ty);
+
+        SymTab()->AddSymbol(SSTab().ScopeName() + "_", unit_bound_ty);
+        SymTab()->GetSymbol(InScopeName(top_node.name))->SetType(new_host_iv_ty);
+        expr_ptr->SetR(new_node);  // Replace GetR with a new node
+      }
+    } else if (expr_ptr->IsUnary()) {
+      processHostIVForExpr(expr_ptr->GetR(), current_iv_name, top_node);
+    } else if (expr_ptr->IsBinary()) {
+      processHostIVForExpr(expr_ptr->GetL(), current_iv_name, top_node);
+      processHostIVForExpr(expr_ptr->GetR(), current_iv_name, top_node);
+    } else {
+      return;
+    }
+  }
+};
+
 struct DummyBufferGen : public LateNormBase {
 public:
   DummyBufferGen(const ptr<SymbolTable> s_tab)
@@ -235,7 +523,7 @@ public:
 struct BufferInfoCollect : public LateNormBase {
 public:
   BufferInfoCollect(const ptr<SymbolTable> s_tab)
-      : LateNormBase(s_tab, "latenorm") {}
+      : LateNormBase(s_tab, "buffer-info-collect") {}
 
   bool Visit(AST::DMA& n) {
     TraceEachVisit(n);
@@ -336,6 +624,19 @@ public:
 
     if (prt_visitor) dbgs() << "|- " << GetName() << NewL;
 
+    ParallelLevelAnalysis pla(SymTab());
+    root.accept(pla);
+    if (prt_visitor) dbgs() << " |- " << pla.GetName() << NewL;
+    if (pla.HasError()) return false;
+    auto max_plv = pla.getMaxParallelLv();
+
+    HostSliceBufferGen hsg(SymTab(), max_plv);
+    hsg.SetTraceVisit(trace_visit);
+    hsg.SetDebugVisit(debug_visit);
+    if (prt_visitor) dbgs() << " |- " << hsg.GetName() << NewL;
+    root.accept(hsg);
+    if (hsg.HasError()) return false;
+
     DummyBufferGen bg(SymTab());
     bg.SetTraceVisit(trace_visit);
     bg.SetDebugVisit(debug_visit);
@@ -347,6 +648,7 @@ public:
     if (prt_visitor) dbgs() << " |- " << GetName() << NewL;
     root.accept(*this);
     if (this->HasError()) return false;
+
     // after the transformations, recollect the future-buffer info
     BufferInfoCollect bic(SymTab());
     bic.SetTraceVisit(trace_visit);

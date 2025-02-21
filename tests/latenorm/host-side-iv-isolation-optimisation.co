@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GCU300
-// RUN-GCU300: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+// RUN-GCU300: choreo %s -pa=latenorm -sa=latenorm | FileCheck %s && rm -f %s.topscc.result
 
 #include "choreo.h"
 #include <chrono>
@@ -83,4 +83,14 @@ int main() { /// host program
   std::cout << "Test Passed\n" << std::endl;
   std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
 }
-// CHECK: Test Passed
+// CHECK:     `- DMA.copy
+// CHECK:       `- future: output__future__
+// CHECK:       `- from: output.ChunkAt(tile0)
+// CHECK:       `- to: output__future____buf__
+// CHECK:         `- Assign: anon_3 =  ( (p # l_tile)  # _)
+// CHECK:         `- DMA.copy.async
+// CHECK:           `- future: out_store
+// CHECK:           `- from: l2_out
+// CHECK:           `- to: output__future__.ChunkAt(anon_3)
+// CHECK:         `- WAIT: out_store
+

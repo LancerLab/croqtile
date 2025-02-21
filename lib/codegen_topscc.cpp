@@ -1437,6 +1437,7 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       }
     }
     if (expr->IsReference()) {
+      if (PSTR(expr) == "_") return "(0)";
       if (expr->GetInt())
         return ExprSTR(expr->GetReference(), is_host);
       else if (expr->GetFloat())
@@ -1445,6 +1446,9 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
         return ExprSTR(expr->GetReference(), is_host);
       else if (isa<AST::Expr>(NodeType(*expr->GetR()))) // should this happen?
         return ExprSTR(expr->GetR(), is_host);
+      else if (isa<AST::Identifier>(expr->GetReference()))
+        if (cast<AST::Identifier>(expr->GetReference())->name == "_")
+          return "(0)";
       else
         choreo_unreachable("Unsupported reference: " + PSTR(expr));
     } else if (expr->IsUnary()) {
@@ -1490,9 +1494,13 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
             IsActualBoundedIntegerType(r->GetType())) {
           auto rty = cast<BoundedType>(NodeType(*r));
           assert(rty->Dims() == 1);
-          oss << "((" << ExprSTR(l, is_host) << ")*("
-              << ValueSTR(rty->GetUpperBound()) << ")+(" << ExprSTR(r, false)
-              << "))";
+          if (PSTR(r) == "_")
+            oss << "((" << ExprSTR(l, is_host) << ")*(1)+(" << ExprSTR(r, false)
+                << "))";
+          else
+            oss << "((" << ExprSTR(l, is_host) << ")*("
+                << ValueSTR(rty->GetUpperBound()) << ")+(" << ExprSTR(r, false)
+                << "))";
         } else
           oss << "((" << ExprSTR(l, is_host) << ")" << op << "("
               << ExprSTR(r, is_host) << "))";

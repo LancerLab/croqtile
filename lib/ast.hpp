@@ -123,6 +123,11 @@ struct MultiNodes : public Node, public TypeIDProvider<MultiNodes> {
     assert(m != nullptr && "Unexpected: null pointer.");
     values.push_back(m);
   }
+  void Insert(const ptr<Node>& m, int index) {
+    assert(m != nullptr && "Unexpected: null pointer.");
+    assert(index <= values.size());
+    values.insert(values.begin() + index, m);
+  }
 
   size_t Count() const { return values.size(); }
 
