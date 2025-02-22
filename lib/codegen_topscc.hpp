@@ -201,6 +201,7 @@ private:
 
   int parallel_level = 0;
   int max_parallel_level = 0;
+  bool max_parallel_level_valid = false;
 
   size_t host_param_count = 0; // host parameter count
 
@@ -300,9 +301,6 @@ private:
     int count = 0;
     size_t pos = 0;
     std::string target = "paraby";
-    // anchor
-    // dbgs() << "anchor for symbol " << sym << "; maxprlv = " <<
-    // max_parallel_level << "\n";
     int host_side_parallel_lv_cnt = std::max(max_parallel_level - 2, 0);
 
     // find the target substring from the current position

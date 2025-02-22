@@ -194,7 +194,6 @@ bool FactorCodeGen::AfterVisitImpl(AST::Node& n) {
 
     // std::string placeholder = fs.str();
     // while (!alloc_fs_stack.empty()) {
-    //   std::cout << "anchor" << std::endl;
     //   std::cout << alloc_fs_stack.size() << std::endl;
     //   std::cout << alloc_indent_stack.size() << std::endl;
     //   std::cout << alloc_pos_stack.size() << std::endl;
@@ -1697,7 +1696,6 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
         oss << "!(" << ExprSTR(expr->GetR()) << ")";
       } else if (expr->op == "ubound") {
         auto rty = cast<BoundedType>(NodeType(*expr->GetR()));
-        // anchor
         if (rty->Dims() == 1) { oss << ValueSTR(rty->GetUpperBound(), true); }
       } else if (expr->op == "dataof") {
         assert(isa<FutureType>(expr->GetR()->GetType()) &&

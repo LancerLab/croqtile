@@ -105,25 +105,20 @@ protected:
     // if current stmt not enter parallel-by btw device and host
     // max_parallel_level is not set or set to 0 or has explicit distance to
     // inner-most
-    return (max_parallel_level == 0 || parallel_level + 1 < max_parallel_level);
+    return (parallel_level + 1 < max_parallel_level);
   }
 
   inline bool IsHostSymbol(const std::string& sym) const {
     int count = 0;
     size_t pos = 0;
     std::string target = "paraby";
-    // anchor
-    // dbgs() << "anchor for symbol " << sym << "; maxprlv = " <<
-    // max_parallel_level << "\n";
     int host_side_parallel_lv_cnt = std::max(max_parallel_level - 2, 0);
-    // dbgs() << "ishostsymbol call\n" << "should be " << host_side_parallel_lv_cnt;
 
     // find the target substring from the current position
     while ((pos = sym.find(target, pos)) != std::string::npos) {
       count++;
       pos += target.length(); // Move pos to the end of the found target
     }
-    // dbgs() << "got " << count << "\n";
 
     return (count <= host_side_parallel_lv_cnt);
   }
@@ -390,7 +385,7 @@ public:
     }
     return true;
   }
-  //anchor
+
 private:
   inline void dumpVector(std::vector<std::string>& _list) {  // Capture everything by reference
     dbgs() << ">>>>>>>> DUMP Vector contents:\n";
