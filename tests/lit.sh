@@ -163,7 +163,7 @@ execute_command() {
     local term_width=$(tput cols)
     local max_text_width=$((term_width - 25))
 
-    if [[ $? -eq 0 ]]; then
+    if [[ $exit_code -eq 0 ]]; then
       if [[ "$expect_fail" == "*"* ]]; then
         num_uepass=$(($num_uepass + 1));
         reproduce_commands+=("$command");
