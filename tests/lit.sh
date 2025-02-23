@@ -139,35 +139,87 @@ execute_command() {
 
     num_tested=$(($num_tested + 1))
 
-    # Execute the command
+    # start timing
+    local start_time_ns=$(date +%s%N)
+
+    # execute the command
     eval "$command" 2>/dev/null
+    local exit_code=$?
+
+    # Calculate elapsed time in nanoseconds
+    local end_time_ns=$(date +%s%N)
+    local elapsed_ns=$((end_time_ns - start_time_ns))
+
+    # Convert time to appropriate unit
+    local elapsed_time
+    if [[ $elapsed_ns -ge 1000000000 ]]; then
+        elapsed_time="$(bc <<< "scale=3; $elapsed_ns / 1000000000") s"
+    elif [[ $elapsed_ns -ge 1000000 ]]; then
+        elapsed_time="$(bc <<< "scale=3; $elapsed_ns / 1000000") ms"
+    else
+        elapsed_time="$(bc <<< "scale=3; $elapsed_ns / 1000") µs"
+    fi
+
+    local term_width=$(tput cols)
+    local max_text_width=$((term_width - 25))
 
     if [[ $? -eq 0 ]]; then
       if [[ "$expect_fail" == "*"* ]]; then
         num_uepass=$(($num_uepass + 1));
         reproduce_commands+=("$command");
-        echo "UNEXPECTD PASS: $file ($count of $total)"
+        # echo "UNEXPECTD PASS: $file ($count of $total)  |>>  Time: ${elapsed_time}"
+	if [[ ${#test_info} -gt $max_text_width ]]; then
+	  printf "%*s %s\n" $((max_text_width)) "UNEXPECTED PASS: $file ($count of $total)" "| Time: $elapsed_time"
+	else
+	  printf "%-*s %s\n" "$max_text_width" "UNEXPECTED PASS: $file ($count of $total)" "| Time: $elapsed_time"
+	fi
+	  
       elif [[ ! -z "${expect_fail}" ]] &&
            [[ "$(toupper ${expect_fail})" ==  *"$(toupper ${gcu_arch})"* ]]; then
         num_uepass=$(($num_uepass + 1));
         reproduce_commands+=("$command");
-        echo "UNEXPECTD PASS: $file ($count of $total)"
+	# printf "%-60.60s %10s\n" "UNEXPECTED PASS: $file ($count of $total)" "| Time: $elapsed_time"
+	if [[ ${#test_info} -gt $max_text_width ]]; then
+	  printf "%*s %s\n" $((max_text_width)) "UNEXPECTED PASS: $file ($count of $total)" "| Time: $elapsed_time"
+	else
+	  printf "%-*s %s\n" "$max_text_width" "UNEXPECTED PASS: $file ($count of $total)" "| Time: $elapsed_time"
+	fi
       else
         num_passed=$(($num_passed + 1));
-        echo "PASS: $file ($count of $total)"
+	# printf "%-60.60s %10s\n" "PASS: $file ($count of $total)" "| Time: $elapsed_time"
+	if [[ ${#test_info} -gt $max_text_width ]]; then
+	  printf "%*s %s\n" $((max_text_width)) "PASS: $file ($count of $total)" "| Time: $elapsed_time"
+	else
+	  printf "%-*s %s\n" "$max_text_width" "PASS: $file ($count of $total)" "| Time: $elapsed_time"
+	fi
       fi
     else
       if [[ "${expect_fail}" == "*"* ]]; then
         num_xfails=$(($num_xfails + 1));
-        echo "XFAIL: $file ($count of $total)"
+	# printf "%-60.60s %10s\n" "XFAIL: $file ($count of $total)" "| Time: $elapsed_time"
+	if [[ ${#test_info} -gt $max_text_width ]]; then
+	  printf "%*s %s\n" $((max_text_width)) "XFAIL: $file ($count of $total)" "| Time: $elapsed_time"
+	else
+	  printf "%-*s %s\n" "$max_text_width" "XFAIL: $file ($count of $total)" "| Time: $elapsed_time"
+	fi
       elif [[ ! -z "${expect_fail}" ]] &&
            [[ "$(toupper ${expect_fail})" ==  *"$(toupper ${gcu_arch})"* ]]; then
         num_xfails=$(($num_xfails + 1));
-        echo "XFAIL: $file ($count of $total)"
+	# printf "%-60.60s %10s\n" "XFAIL: $file ($count of $total)" "| Time: $elapsed_time"
+	if [[ ${#test_info} -gt $max_text_width ]]; then
+	  printf "%*s %s\n" $((max_text_width)) "XFAIL: $file ($count of $total)" "| Time: $elapsed_time"
+	else
+	  printf "%-*s %s\n" "$max_text_width" "XFAIL: $file ($count of $total)" "| Time: $elapsed_time"
+	fi
       else
         num_failed=$(($num_failed + 1));
         reproduce_commands+=("$command");
-        echo "FAIL: $file ($count of $total)"
+	# printf "%-60.60s %10s\n" "FAIL: $file ($count of $total)" "| Time: $elapsed_time"
+	if [[ ${#test_info} -gt $max_text_width ]]; then
+	  printf "%*s %s\n" $((max_text_width)) "FAIL: $file ($count of $total)" "| Time: $elapsed_time"
+	else
+	  printf "%-*s %s\n" "$max_text_width" "FAIL: $file ($count of $total)" "| Time: $elapsed_time"
+	fi
       fi
     fi
 }
