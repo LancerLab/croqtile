@@ -8,23 +8,23 @@ export PATH="$script_dir:${script_dir}/../:${script_dir}/../tools/bin:$PATH"
 
 # Check if FileCheck exists in the PATH
 if ! which FileCheck &>/dev/null; then
-    echo "Error: FileCheck tool not found in PATH."
-    exit 1
+  echo "Error: FileCheck tool not found in PATH."
+  exit 1
 fi
 
 if ! which choreo &>/dev/null; then
-    echo "Error: choreo is not found in PATH."
-    exit 1
+  echo "Error: choreo is not found in PATH."
+  exit 1
 fi
 
 if ! which copp &>/dev/null; then
-    echo "Error: copp is not found in PATH."
-    exit 1
+  echo "Error: copp is not found in PATH."
+  exit 1
 fi
 
 if ! which not.sh &>/dev/null; then
-    echo "Error: not.sh is not found in PATH."
-    exit 1
+  echo "Error: not.sh is not found in PATH."
+  exit 1
 fi
 
 
@@ -118,110 +118,171 @@ check_device_features() {
   fi
 }
 
+increment_counter() {
+  local counter=$1
+  local value=$2
+  local lock_file="/tmp/${counter}_lock"
+  
+  exec 200>"$lock_file"
+  flock -x 200
+  
+  eval $counter=$(($counter + value))
+  
+  exec 200>&-
+}
+
+lock_file="./build/test_script_lock"
+counter_file="./build/test_counters.txt"
+rm $counter_file
+
+initialize_counters() {
+  if [ ! -f "$counter_file" ]; then
+    echo "num_tested=0" > "$counter_file"
+    echo "num_failed=0" >> "$counter_file"
+    echo "num_passed=0" >> "$counter_file"
+    echo "num_uepass=0" >> "$counter_file"
+    echo "num_xfails=0" >> "$counter_file"
+  fi
+}
+
+read_counter() {
+  local counter_name=$1
+  grep -E "^$counter_name=" "$counter_file" | cut -d'=' -f2
+}
+
+increment_counter() {
+  local counter_name=$1
+  local value=$2
+  local lock_file="/tmp/${counter_name}_lock"
+
+  exec 200>"$lock_file"
+  flock -x 200
+
+  local current_value
+  current_value=$(read_counter "$counter_name")
+  old_num_tested=$(read_counter "num_tested")
+
+  new_value=$((current_value + value))
+  new_num_tested=$((old_num_tested + 1))
+
+  sed -i "s/^$counter_name=.*/$counter_name=$new_value/" "$counter_file"
+  sed -i "s/^num_tested=.*/num_tested=$new_num_tested/" "$counter_file"
+
+  exec 200>&-
+}
+
+
 # Function to replace placeholders and execute command
 execute_command() {
-    local file=$1
-    local command=$2
-    local count=$3
-    local total=$4
+  local file=$1
+  local command=$2
+  local count=$3
+  local total=$4
 
-    # Replace %s with the filename
-    command=${command//%s/"$file"}
+  # Replace %s with the filename
+  command=${command//%s/"$file"}
 
-    # Replace 'choreo', 'copp' and 'FileCheck' with their absolute paths
-    # Note: It must uses '-n' to remove comments inside host code.
-    #       Or else FileCheck will check the line of "// CHECK:"
-    command=${command//choreo/"$(which choreo) -n"}
-    command=${command//copp/"$(which copp)"}
-    command=${command//FileCheck/"$(which FileCheck)"}
-    local not_command=$(which not.sh | sed 's/[&/\]/\\&/g')
-    command=$(echo "$command" | sed "s/\bnot \(.*\)/${not_command} \1/")
+  # Replace 'choreo', 'copp' and 'FileCheck' with their absolute paths
+  # Note: It must uses '-n' to remove comments inside host code.
+  #       Or else FileCheck will check the line of "// CHECK:"
+  command=${command//choreo/"$(which choreo) -n"}
+  command=${command//copp/"$(which copp)"}
+  command=${command//FileCheck/"$(which FileCheck)"}
+  local not_command=$(which not.sh | sed 's/[&/\]/\\&/g')
+  command=$(echo "$command" | sed "s/\bnot \(.*\)/${not_command} \1/")
 
-    num_tested=$(($num_tested + 1))
+  # num_tested=$(($num_tested + 1))
+  # echo "num_tested before add " $(read_counter "num_tested")
+  # echo "num_tested after add " $(read_counter "num_tested")
 
-    # start timing
-    local start_time_ns=$(date +%s%N)
+  # start timing
+  local start_time_ns=$(date +%s%N)
 
-    # execute the command
-    eval "$command" 2>/dev/null
-    local exit_code=$?
+  # execute the command
+  eval "$command" 2>/dev/null
+  local exit_code=$?
 
-    # Calculate elapsed time in nanoseconds
-    local end_time_ns=$(date +%s%N)
-    local elapsed_ns=$((end_time_ns - start_time_ns))
+  # Calculate elapsed time in nanoseconds
+  local end_time_ns=$(date +%s%N)
+  local elapsed_ns=$((end_time_ns - start_time_ns))
 
-    # Convert time to appropriate unit
-    local elapsed_time
-    if [[ $elapsed_ns -ge 1000000000 ]]; then
-        elapsed_time="$(bc <<< "scale=3; $elapsed_ns / 1000000000") s"
-    elif [[ $elapsed_ns -ge 1000000 ]]; then
-        elapsed_time="$(bc <<< "scale=3; $elapsed_ns / 1000000") ms"
-    else
-        elapsed_time="$(bc <<< "scale=3; $elapsed_ns / 1000") µs"
-    fi
+  # Convert time to appropriate unit
+  local elapsed_time
+  if [[ $elapsed_ns -ge 1000000000 ]]; then
+      elapsed_time="$(bc <<< "scale=3; $elapsed_ns / 1000000000") s"
+  elif [[ $elapsed_ns -ge 1000000 ]]; then
+      elapsed_time="$(bc <<< "scale=3; $elapsed_ns / 1000000") ms"
+  else
+      elapsed_time="$(bc <<< "scale=3; $elapsed_ns / 1000") µs"
+  fi
 
-    local term_width=$(tput cols)
-    local max_text_width=$((term_width - 25))
+  local term_width=$(tput cols)
+  local max_text_width=$((term_width - 25))
 
-    if [[ $exit_code -eq 0 ]]; then
-      if [[ "$expect_fail" == "*"* ]]; then
-        num_uepass=$(($num_uepass + 1));
-        reproduce_commands+=("$command");
-        # echo "UNEXPECTD PASS: $file ($count of $total)  |>>  Time: ${elapsed_time}"
-	if [[ ${#test_info} -gt $max_text_width ]]; then
-	  printf "%*s %s\n" $((max_text_width)) "UNEXPECTED PASS: $file ($count of $total)" "| Time: $elapsed_time"
-	else
-	  printf "%-*s %s\n" "$max_text_width" "UNEXPECTED PASS: $file ($count of $total)" "| Time: $elapsed_time"
-	fi
-	  
-      elif [[ ! -z "${expect_fail}" ]] &&
-           [[ "$(toupper ${expect_fail})" ==  *"$(toupper ${gcu_arch})"* ]]; then
-        num_uepass=$(($num_uepass + 1));
-        reproduce_commands+=("$command");
-	# printf "%-60.60s %10s\n" "UNEXPECTED PASS: $file ($count of $total)" "| Time: $elapsed_time"
-	if [[ ${#test_info} -gt $max_text_width ]]; then
-	  printf "%*s %s\n" $((max_text_width)) "UNEXPECTED PASS: $file ($count of $total)" "| Time: $elapsed_time"
-	else
-	  printf "%-*s %s\n" "$max_text_width" "UNEXPECTED PASS: $file ($count of $total)" "| Time: $elapsed_time"
-	fi
+  if [[ $exit_code -eq 0 ]]; then
+    if [[ "$expect_fail" == "*"* ]]; then
+      # num_uepass=$(($num_uepass + 1));
+      increment_counter num_uepass 1
+      reproduce_commands+=("$command");
+      # echo "UNEXPECTD PASS: $file ($count of $total)  |>>  Time: ${elapsed_time}"
+      if [[ ${#test_info} -gt $max_text_width ]]; then
+        printf "%*s %s\n" $((max_text_width)) "UNEXPECTED PASS: $file ($count of $total)" "| Time: $elapsed_time"
       else
-        num_passed=$(($num_passed + 1));
-	# printf "%-60.60s %10s\n" "PASS: $file ($count of $total)" "| Time: $elapsed_time"
-	if [[ ${#test_info} -gt $max_text_width ]]; then
-	  printf "%*s %s\n" $((max_text_width)) "PASS: $file ($count of $total)" "| Time: $elapsed_time"
-	else
-	  printf "%-*s %s\n" "$max_text_width" "PASS: $file ($count of $total)" "| Time: $elapsed_time"
-	fi
+        printf "%-*s %s\n" "$max_text_width" "UNEXPECTED PASS: $file ($count of $total)" "| Time: $elapsed_time"
+      fi
+    elif [[ ! -z "${expect_fail}" ]] &&
+         [[ "$(toupper ${expect_fail})" ==  *"$(toupper ${gcu_arch})"* ]]; then
+      # num_uepass=$(($num_uepass + 1));
+      increment_counter num_uepass 1
+      reproduce_commands+=("$command");
+      # printf "%-60.60s %10s\n" "UNEXPECTED PASS: $file ($count of $total)" "| Time: $elapsed_time"
+      if [[ ${#test_info} -gt $max_text_width ]]; then
+        printf "%*s %s\n" $((max_text_width)) "UNEXPECTED PASS: $file ($count of $total)" "| Time: $elapsed_time"
+      else
+        printf "%-*s %s\n" "$max_text_width" "UNEXPECTED PASS: $file ($count of $total)" "| Time: $elapsed_time"
       fi
     else
-      if [[ "${expect_fail}" == "*"* ]]; then
-        num_xfails=$(($num_xfails + 1));
-	# printf "%-60.60s %10s\n" "XFAIL: $file ($count of $total)" "| Time: $elapsed_time"
-	if [[ ${#test_info} -gt $max_text_width ]]; then
-	  printf "%*s %s\n" $((max_text_width)) "XFAIL: $file ($count of $total)" "| Time: $elapsed_time"
-	else
-	  printf "%-*s %s\n" "$max_text_width" "XFAIL: $file ($count of $total)" "| Time: $elapsed_time"
-	fi
-      elif [[ ! -z "${expect_fail}" ]] &&
-           [[ "$(toupper ${expect_fail})" ==  *"$(toupper ${gcu_arch})"* ]]; then
-        num_xfails=$(($num_xfails + 1));
-	# printf "%-60.60s %10s\n" "XFAIL: $file ($count of $total)" "| Time: $elapsed_time"
-	if [[ ${#test_info} -gt $max_text_width ]]; then
-	  printf "%*s %s\n" $((max_text_width)) "XFAIL: $file ($count of $total)" "| Time: $elapsed_time"
-	else
-	  printf "%-*s %s\n" "$max_text_width" "XFAIL: $file ($count of $total)" "| Time: $elapsed_time"
-	fi
+      num_passed=$(($num_passed + 1));
+      increment_counter num_passed 1
+      # printf "%-60.60s %10s\n" "PASS: $file ($count of $total)" "| Time: $elapsed_time"
+      if [[ ${#test_info} -gt $max_text_width ]]; then
+        printf "%*s %s\n" $((max_text_width)) "PASS: $file ($count of $total)" "| Time: $elapsed_time"
       else
-        num_failed=$(($num_failed + 1));
-        reproduce_commands+=("$command");
-	# printf "%-60.60s %10s\n" "FAIL: $file ($count of $total)" "| Time: $elapsed_time"
-	if [[ ${#test_info} -gt $max_text_width ]]; then
-	  printf "%*s %s\n" $((max_text_width)) "FAIL: $file ($count of $total)" "| Time: $elapsed_time"
-	else
-	  printf "%-*s %s\n" "$max_text_width" "FAIL: $file ($count of $total)" "| Time: $elapsed_time"
-	fi
+        printf "%-*s %s\n" "$max_text_width" "PASS: $file ($count of $total)" "| Time: $elapsed_time"
       fi
     fi
+  else
+    if [[ "${expect_fail}" == "*"* ]]; then
+      # num_xfails=$(($num_xfails + 1));
+      increment_counter num_xfails 1
+      # printf "%-60.60s %10s\n" "XFAIL: $file ($count of $total)" "| Time: $elapsed_time"
+      if [[ ${#test_info} -gt $max_text_width ]]; then
+        printf "%*s %s\n" $((max_text_width)) "XFAIL: $file ($count of $total)" "| Time: $elapsed_time"
+      else
+        printf "%-*s %s\n" "$max_text_width" "XFAIL: $file ($count of $total)" "| Time: $elapsed_time"
+      fi
+    elif [[ ! -z "${expect_fail}" ]] &&
+         [[ "$(toupper ${expect_fail})" ==  *"$(toupper ${gcu_arch})"* ]]; then
+      num_xfails=$(($num_xfails + 1));
+      increment_counter num_xfails 1
+      # printf "%-60.60s %10s\n" "XFAIL: $file ($count of $total)" "| Time: $elapsed_time"
+      if [[ ${#test_info} -gt $max_text_width ]]; then
+        printf "%*s %s\n" $((max_text_width)) "XFAIL: $file ($count of $total)" "| Time: $elapsed_time"
+      else
+        printf "%-*s %s\n" "$max_text_width" "XFAIL: $file ($count of $total)" "| Time: $elapsed_time"
+      fi
+    else
+      num_failed=$(($num_failed + 1));
+      increment_counter num_failed 1
+      reproduce_commands+=("$command");
+      # printf "%-60.60s %10s\n" "FAIL: $file ($count of $total)" "| Time: $elapsed_time"
+      if [[ ${#test_info} -gt $max_text_width ]]; then
+        printf "%*s %s\n" $((max_text_width)) "FAIL: $file ($count of $total)" "| Time: $elapsed_time"
+      else
+        printf "%-*s %s\n" "$max_text_width" "FAIL: $file ($count of $total)" "| Time: $elapsed_time"
+      fi
+    fi
+  fi
 }
 
 # Check if the argument is a valid file or directory
@@ -249,6 +310,7 @@ fi
 
 # check device supported feature
 check_device_features
+initialize_counters
 
 if [ $is_gcu_available -eq 0 ] && [ $is_gpu_available -eq 0 ]; then
   echo "No supported device was found. abort..."
@@ -258,16 +320,16 @@ fi
 showresult() {
   echo ""
   echo "------ Lit Test summary ------"
-  echo "Tested:  $num_tested"
-  echo "Passed:  $num_passed"
+  echo "Tested:  $(read_counter 'num_tested')"
+  echo "Passed:  $(read_counter 'num_passed')"
 
-  [ ${num_skiped} -ne 0 ] && echo "Skipped: $num_skiped"
-  [ ${num_failed} -ne 0 ] && echo "Failed:  $num_failed"
-  [ ${num_xfails} -ne 0 ] && echo "Expected Failures: $num_xfails"
-  [ ${num_uepass} -ne 0 ] && echo "Unexpected Passes: $num_uepass"
+  [ $num_skiped -ne 0 ] && echo Skipped: $num_skiped
+  [ $(read_counter 'num_failed') -ne 0 ] && echo "Failed:  $(read_counter 'num_failed')"
+  [ $(read_counter 'num_xfails') -ne 0 ] && echo "Expected Failures: $(read_counter 'num_xfails')"
+  [ $(read_counter 'num_uepass') -ne 0 ] && echo "Unexpected Passes: $(read_counter 'num_uepass')"
 
-  local succed=$(($num_passed + $num_xfails))
-  local failed=$(($num_failed + $num_uepass))
+  local succed=$(($(read_counter 'num_passed') + $(read_counter 'num_xfails')))
+  local failed=$(($(read_counter 'num_failed') + $(read_counter 'num_uepass')))
 
   if [[ $failed -ne 0 ]]; then
     echo ""
@@ -291,68 +353,168 @@ toupper() {
 }
 
 # Iterate over the array
+# for file in "${files_array[@]}"; do
+#     # check requirement specified by the file
+#     check_requirement $file
+#
+#     if [ ! -z "$expect_skip" ]; then
+#       echo "SKIP:  $file"
+#       num_skiped=$(($num_skiped + 1));
+# 			continue
+#     fi
+#
+#     if [ $is_gcu_available -eq 1 ]; then
+#       if [ ! -z "$test_target" ] && [ "$test_target" != "gcu-any" ]; then
+#         if [ "$gcu_arch" != "$test_target" ]; then
+#           echo "SKIP($test_target): ${file}"
+#           num_skiped=$(($num_skiped + 1));
+#           continue; #simply skip the unmatched target
+#         fi
+#       fi
+#
+#       if [ $requires_dynamic_shape -eq 1 ]; then
+#         if [ $is_dynshape_supported -eq 0 ]; then
+#           echo "SKIP(dyn-shape): ${file} "
+#           num_skiped=$(($num_skiped + 1));
+#           continue; #simply skip the unmatched target
+#         fi
+#       fi
+#
+#     elif [ $is_gpu_available -eq 1 ]; then
+#       if [ ! -z "$test_target" ] ; then
+#         if [ "$test_target" != "gpu" ]; then
+#           echo "SKIP($test_target): ${file}"
+#           num_skiped=$(($num_skiped + 1));
+#           continue; #simply skip the unmatched target
+#         fi
+#       fi
+#     fi
+#
+#     # Read the file and search for lines starting with "// RUN:"
+#     run_num=$(grep -E 'RUN(:|-.*:)' $file | wc -l)
+#     run_count=0
+#     while IFS= read -r line; do
+#         if [[ $line =~ ^//[[:blank:]]*RUN:[[:blank:]]*(.+) ]]; then
+#             run_count=$(($run_count + 1))
+#             # Extract the command after "RUN:"
+#             run_command="${BASH_REMATCH[1]}"
+#             # Execute the command with replacements
+#             execute_command "$file" "$run_command" "$run_count" "$run_num"
+#         elif [[ $line =~ ^//[[:blank:]]*RUN-(.+):[[:blank:]]*(.+) ]]; then
+#             run_count=$(($run_count + 1))
+#             run_target="${BASH_REMATCH[1]}"
+#             run_target=$(echo "$run_target" | tr '[:upper:]' '[:lower:]')
+#             if [[ "${run_target}" == "$gcu_arch" ]]; then
+#               # Extract the command after "RUN:"
+#               run_command="${BASH_REMATCH[2]}"
+#               # Execute the command with replacements
+#               execute_command "$file" "$run_command" "$run_count" "$run_num"
+#             else
+#               echo "SKIP($run_target): ${file} ($run_count of $run_num)"
+#               num_skiped=$(($num_skiped + 1)); #simply skip the unmatched target
+#             fi
+#         fi
+#     done < "$file"
+# done
+#
 for file in "${files_array[@]}"; do
-    # check requirement specified by the file
-    check_requirement $file
+  # check requirement specified by the file
+  check_requirement $file
 
-    if [ ! -z "$expect_skip" ]; then
-      echo "SKIP:  $file"
-      num_skiped=$(($num_skiped + 1));
-			continue
-    fi
+  if [ ! -z "$expect_skip" ]; then
+    echo "SKIP:  $file"
+    num_skiped=$(($num_skiped + 1));
+    continue;
+  fi
 
-    if [ $is_gcu_available -eq 1 ]; then
-      if [ ! -z "$test_target" ] && [ "$test_target" != "gcu-any" ]; then
-        if [ "$gcu_arch" != "$test_target" ]; then
-          echo "SKIP($test_target): ${file}"
-          num_skiped=$(($num_skiped + 1));
-          continue; #simply skip the unmatched target
-        fi
-      fi
-
-      if [ $requires_dynamic_shape -eq 1 ]; then
-        if [ $is_dynshape_supported -eq 0 ]; then
-          echo "SKIP(dyn-shape): ${file} "
-          num_skiped=$(($num_skiped + 1));
-          continue; #simply skip the unmatched target
-        fi
-      fi
-
-    elif [ $is_gpu_available -eq 1 ]; then
-      if [ ! -z "$test_target" ] ; then
-        if [ "$test_target" != "gpu" ]; then
-          echo "SKIP($test_target): ${file}"
-          num_skiped=$(($num_skiped + 1));
-          continue; #simply skip the unmatched target
-        fi
+  if [ $is_gcu_available -eq 1 ]; then
+    if [ ! -z "$test_target" ] && [ "$test_target" != "gcu-any" ]; then
+      if [ "$gcu_arch" != "$test_target" ]; then
+        echo "SKIP($test_target): ${file}"
+        num_skiped=$(($num_skiped + 1));
+        continue; #simply skip the unmatched target
       fi
     fi
 
+    if [ $requires_dynamic_shape -eq 1 ]; then
+      if [ $is_dynshape_supported -eq 0 ]; then
+        echo "SKIP(dyn-shape): ${file} "
+        num_skiped=$(($num_skiped + 1));
+        continue; #simply skip the unmatched target
+      fi
+    fi
+
+  elif [ $is_gpu_available -eq 1 ]; then
+    if [ ! -z "$test_target" ] ; then
+      if [ "$test_target" != "gpu" ]; then
+        echo "SKIP($test_target): ${file}"
+        num_skiped=$(($num_skiped + 1));
+        continue; #simply skip the unmatched target
+      fi
+    fi
+  fi
+
+  # Check if the file is in the "end2end" folder
+  file_name=$(basename "$file")
+  folder_name=$(dirname "$file")
+
+  # If it's in the end2end folder, keep it blocking
+  if [[ "$folder_name" == *"end2end"* ]]; then
     # Read the file and search for lines starting with "// RUN:"
     run_num=$(grep -E 'RUN(:|-.*:)' $file | wc -l)
     run_count=0
     while IFS= read -r line; do
-        if [[ $line =~ ^//[[:blank:]]*RUN:[[:blank:]]*(.+) ]]; then
-            run_count=$(($run_count + 1))
-            # Extract the command after "RUN:"
-            run_command="${BASH_REMATCH[1]}"
-            # Execute the command with replacements
-            execute_command "$file" "$run_command" "$run_count" "$run_num"
-        elif [[ $line =~ ^//[[:blank:]]*RUN-(.+):[[:blank:]]*(.+) ]]; then
-            run_count=$(($run_count + 1))
-            run_target="${BASH_REMATCH[1]}"
-            run_target=$(echo "$run_target" | tr '[:upper:]' '[:lower:]')
-            if [[ "${run_target}" == "$gcu_arch" ]]; then
-              # Extract the command after "RUN:"
-              run_command="${BASH_REMATCH[2]}"
-              # Execute the command with replacements
-              execute_command "$file" "$run_command" "$run_count" "$run_num"
-            else
-              echo "SKIP($run_target): ${file} ($run_count of $run_num)"
-              num_skiped=$(($num_skiped + 1)); #simply skip the unmatched target
-            fi
+      if [[ $line =~ ^//[[:blank:]]*RUN:[[:blank:]]*(.+) ]]; then
+        run_count=$(($run_count + 1))
+        # Extract the command after "RUN:"
+        run_command="${BASH_REMATCH[1]}"
+        # Execute the command with replacements
+        execute_command "$file" "$run_command" "$run_count" "$run_num"
+      elif [[ $line =~ ^//[[:blank:]]*RUN-(.+):[[:blank:]]*(.+) ]]; then
+        run_count=$(($run_count + 1))
+        run_target="${BASH_REMATCH[1]}"
+        run_target=$(echo "$run_target" | tr '[:upper:]' '[:lower:]')
+        if [[ "${run_target}" == "$gcu_arch" ]]; then
+          # Extract the command after "RUN:"
+          run_command="${BASH_REMATCH[2]}"
+          # Execute the command with replacements
+          execute_command "$file" "$run_command" "$run_count" "$run_num"
+        else
+          echo "SKIP($run_target): ${file} ($run_count of $run_num)"
+          num_skiped=$(($num_skiped + 1)); #simply skip the unmatched target
         fi
+      fi
     done < "$file"
+  else
+    # For all other tests, use parallel execution
+    run_num=$(grep -E 'RUN(:|-.*:)' $file | wc -l)
+    run_count=0
+    while IFS= read -r line; do
+      if [[ $line =~ ^//[[:blank:]]*RUN:[[:blank:]]*(.+) ]]; then
+        run_count=$(($run_count + 1))
+        run_command="${BASH_REMATCH[1]}"
+
+        # Run the command in the background
+        execute_command "$file" "$run_command" "$run_count" "$run_num" &
+      elif [[ $line =~ ^//[[:blank:]]*RUN-(.+):[[:blank:]]*(.+) ]]; then
+        run_count=$(($run_count + 1))
+        run_target="${BASH_REMATCH[1]}"
+        run_target=$(echo "$run_target" | tr '[:upper:]' '[:lower:]')
+        if [[ "${run_target}" == "$gcu_arch" ]]; then
+          run_command="${BASH_REMATCH[2]}"
+          # Run the command in the background
+          execute_command "$file" "$run_command" "$run_count" "$run_num" &
+        else
+          echo "SKIP($run_target): ${file} ($run_count of $run_num)"
+          num_skiped=$(($num_skiped + 1)); #simply skip the unmatched target
+        fi
+      fi
+    done < "$file"
+
+    # Wait for all background processes to finish before moving to the next file
+    wait
+  fi
 done
+
 
 showresult
