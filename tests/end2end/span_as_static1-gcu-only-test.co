@@ -80,11 +80,13 @@ int main() { /// host program
         for (size_t b = 0; b < bounds[3]; ++b)
           for (size_t c = 0; c < bounds[4]; ++c)
             for (size_t d = 0; d < bounds[5]; ++d) {
-              std::cout << a1 << ", " << a2 << ", " << a3 << ", " << b << ", " << c
-                        << ", " << d << "\n";
-              std::cout << "\tx: " << x[a1][a2][a3][b][c][d]
-                        << "\n\tres: " << res[b][d][a1][a2][a3][c] << "\n";
-              choreo::choreo_assert(x[a1][a2][a3][b][c][d] == res[b][d][a1][a2][a3][c], "values are not equal.");
+              if (x[a1][a2][a3][b][c][d] != res[b][d][a1][a2][a3][c]) {
+                std::cout << a1 << ", " << a2 << ", " << a3 << ", " << b << ", " << c
+                          << ", " << d << "\n";
+                std::cout << "\tx: " << x[a1][a2][a3][b][c][d]
+                          << "\n\tres: " << res[b][d][a1][a2][a3][c] << "\n";
+                choreo::choreo_assert(x[a1][a2][a3][b][c][d] == res[b][d][a1][a2][a3][c], "values are not equal.");
+              }
             }
 
   std::cout << "Test Passed\n" << std::endl;

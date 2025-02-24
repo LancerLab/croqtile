@@ -87,12 +87,14 @@ int main() { /// host program
         for (size_t d = 0; d < bounds[3]; ++d)
           for (size_t e = 0; e < bounds[4]; ++e)
             for (size_t f = 0; f < bounds[5]; ++f) {
-              std::cout << a << ", " << b << ", " << c << ", " << d << ", " << e
-                        << ", " << f << "\n";
               auto vcpu = x[a][b][c][d][e][f];
               auto vgcu = res[c][d][a][e][b][f];
-              std::cout << "\tx: " << vcpu << "\n\tres: " << vgcu << "\n";
-              choreo::choreo_assert(vcpu == vgcu, "output of gcu is wrong.");
+              if (vgcu != vcpu) {
+                std::cout << a << ", " << b << ", " << c << ", " << d << ", " << e
+                          << ", " << f << "\n";
+                std::cout << "\tx: " << vcpu << "\n\tres: " << vgcu << "\n";
+                choreo::choreo_assert(vcpu == vgcu, "output of gcu is wrong.");
+              }
             }
 
   std::cout << "Test Passed\n" << std::endl;

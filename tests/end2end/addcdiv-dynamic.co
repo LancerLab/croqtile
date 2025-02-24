@@ -488,12 +488,12 @@ int main() { /// host program
 
   // verfication
   for (size_t j = 0; j < res.shape()[0]; ++j) {
-    std::cout << "j = " << j << std::endl;
-    std::cout << "res: " << res[j] << "\n";
+    // std::cout << "j = " << j << std::endl;
+    // std::cout << "res: " << res[j] << "\n";
     float ref = first_data[j] + second_data[j] / third_data[j];
     // float ref = first_data[j] + second_data[j];
 
-    std::cout << "ref: " << ref << std::endl;
+    // std::cout << "ref: " << ref << std::endl;
     choreo::choreo_assert(ref == res[j], "values are not equal.");
   }
   std::cout << "Test Passed\n" << std::endl;

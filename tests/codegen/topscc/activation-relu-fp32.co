@@ -1,0 +1,212 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -es -t topscc %s | FileCheck --match-full-lines --check-prefix=CHECK-TOPSCC %s && rm -f %s.topscc.result
+// RUN: choreo -es -t factor %s | FileCheck --match-full-lines --check-prefix=CHECK-FACTOR %s && rm -f %s.factor.result
+
+#include "choreo.h"
+#include <chrono>
+#include <random>
+#include <algorithm>
+
+__cok__ { /// kernel program
+
+__co_device__ extern "C" void relu_kernel(float* input, float* out) {
+  constexpr int m = 256;
+  constexpr int n = 256;
+  for (int i = 0; i < m; ++i) {
+    for (int j = 0; j < n; ++j) {
+      out[i*n+j] = input[i*n+j] > 0.0f ? input[i*n+j] : 0.0f;
+    }
+  }
+}
+
+} /// end of kernel decl
+
+
+__co__ f32 [512, 1024] relu(f32 [512, 1024] input) { /// device program
+  f32[input.span(0), input.span(1)] output; // use same shape as input
+
+  parallel p by 2 {  // p is sip_index
+    with index = {n_tile} in [1] {  // decl your tiled spans
+      foreach n_tile {
+        shared f32[input.span(0)/#p, input.span(1)/#n_tile] l2_out;
+        input_load = dma.copy.async input.chunkat(p, n_tile) => shared;
+        wait input_load;
+        parallel q by 1 {
+          with index = {m_tile_s, n_tile_s} in [2, 4] {
+            foreach m_tile_s {
+              foreach n_tile_s {
+                input_load_s = dma.copy.async input_load.data.chunkat(m_tile_s, n_tile_s) => local;
+                out_load_s = dma.copy.async l2_out.chunkat(m_tile_s, n_tile_s) => local;
+                wait input_load_s, out_load_s;
+                call relu_kernel(input_load_s.data, out_load_s.data); // |span| calculate the total size of span.
+                out_store_s = dma.copy.async out_load_s.data => l2_out.chunkat(m_tile_s, n_tile_s); // can use defined vars
+                wait out_store_s;
+              }
+            }
+          }
+        }
+        out_store = dma.copy.async l2_out => output.chunkat(p, n_tile); // can use defined vars
+        wait out_store;
+      }
+    }
+  } // can use python styling
+  return output;
+}
+
+
+int main() { /// host program
+  choreo::f32 a[512][1024] = {0.0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::f32 b[512][512] = {0};
+
+  auto input_data = choreo::make_spanview<2, choreo::f32>((float*)a, {512, 1024});
+  input_data.fill_random(-1.0, 1.0);
+
+  auto start = std::chrono::high_resolution_clock::now();
+
+  auto res
+    = relu(input_data);
+
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
+  std::cout << res.shape()[0] << std::endl;
+  std::cout << res.shape()[1] << std::endl;
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+        // std::cout << "i: " << i << ", j: " << j << "\n";
+        // std::cout << "res: " << res[i][j] << "\n";
+        float ref = input_data[i][j] > 0? input_data[i][j] : 0;
+
+        // std::cout << "ref: " << ref << std::endl;
+        choreo::choreo_assert(ref == res[i][j], "values are not equal.");
+      }
+  std::cout << "Test Passed\n" << std::endl;
+  std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
+}
+// CHECK-TOPSCC: __global__ void __choreo_device_relu(float * input, float * output) {
+// CHECK-TOPSCC:   {
+// CHECK-TOPSCC:     int __iv_n_tile = 0;
+// CHECK-TOPSCC:     for (__iv_n_tile = 0; __iv_n_tile < 1; ++__iv_n_tile) {
+// CHECK-TOPSCC:       __shared__ float l2_out[262144];
+// CHECK-TOPSCC:       __shared__ float input_load__buf__[262144];
+// CHECK-TOPSCC:       tops::mdspan __mds0_input(tops::Global, (float*)input, 512, 1024);
+// CHECK-TOPSCC:       tops::mdspan __mds1_input_load__buf__(tops::Shared, (float*)input_load__buf__, 256, 1024);
+// CHECK-TOPSCC:       tops_dte_ctx_t choreo_topscc_ctx0;
+// CHECK-TOPSCC:       if (threadIdx.x == 0) {
+// CHECK-TOPSCC:         int __slice_offset0__input_2_input_load__buf__[] = {(int)(__tops_bid_x() * 256), (int)(__iv_n_tile * 1024)};
+// CHECK-TOPSCC:         tops::event input_load__event__ = tops::slice_async(*input_load.get_ctx(), __mds1_input_load__buf__, __mds0_input, __slice_offset0__input_2_input_load__buf__);
+// CHECK-TOPSCC:         input_load.set_event(input_load__event__);
+// CHECK-TOPSCC:       } // threadIdx.x == 0
+// CHECK-TOPSCC:       if (threadIdx.x == 0) {
+// CHECK-TOPSCC:         input_load.wait();
+// CHECK-TOPSCC:       }
+// CHECK-TOPSCC:       __syncthreads();
+// CHECK-TOPSCC:       {
+// CHECK-TOPSCC:         int __iv_m_tile_s = 0;
+// CHECK-TOPSCC:         int __iv_n_tile_s = 0;
+// CHECK-TOPSCC:         for (__iv_m_tile_s = 0; __iv_m_tile_s < 2; ++__iv_m_tile_s) {
+// CHECK-TOPSCC:           for (__iv_n_tile_s = 0; __iv_n_tile_s < 4; ++__iv_n_tile_s) {
+// CHECK-TOPSCC:             __local__ __valigned__ float input_load_s__buf__[32768];
+// CHECK-TOPSCC:             tops::mdspan __mds2_input_load(tops::Shared, (float*)input_load.data(), 256, 1024);
+// CHECK-TOPSCC:             tops::mdspan __mds3_input_load_s__buf__(tops::Private, (float*)input_load_s__buf__, 128, 256);
+// CHECK-TOPSCC:             tops_dte_ctx_t choreo_topscc_ctx1;
+// CHECK-TOPSCC:             int __slice_offset1__input_load_2_input_load_s__buf__[] = {(int)(__iv_m_tile_s * 128), (int)(__iv_n_tile_s * 256)};
+// CHECK-TOPSCC:             tops::event input_load_s__event__ = tops::slice_async(*input_load_s.get_ctx(), __mds3_input_load_s__buf__, __mds2_input_load, __slice_offset1__input_load_2_input_load_s__buf__);
+// CHECK-TOPSCC:             input_load_s.set_event(input_load_s__event__);
+// CHECK-TOPSCC:             __local__ __valigned__ float out_load_s__buf__[32768];
+// CHECK-TOPSCC:             tops::mdspan __mds4_l2_out(tops::Shared, (float*)l2_out, 256, 1024);
+// CHECK-TOPSCC:             tops::mdspan __mds5_out_load_s__buf__(tops::Private, (float*)out_load_s__buf__, 128, 256);
+// CHECK-TOPSCC:             tops_dte_ctx_t choreo_topscc_ctx2;
+// CHECK-TOPSCC:             int __slice_offset2__l2_out_2_out_load_s__buf__[] = {(int)(__iv_m_tile_s * 128), (int)(__iv_n_tile_s * 256)};
+// CHECK-TOPSCC:             tops::event out_load_s__event__ = tops::slice_async(*out_load_s.get_ctx(), __mds5_out_load_s__buf__, __mds4_l2_out, __slice_offset2__l2_out_2_out_load_s__buf__);
+// CHECK-TOPSCC:             out_load_s.set_event(out_load_s__event__);
+// CHECK-TOPSCC:             input_load_s.wait();
+// CHECK-TOPSCC:             out_load_s.wait();
+// CHECK-TOPSCC:             relu_kernel((float*)input_load_s.data(), (float*)out_load_s.data());
+// CHECK-TOPSCC:             tops::mdspan __mds6_out_load_s(tops::Private, (float*)out_load_s.data(), 128, 256);
+// CHECK-TOPSCC:             tops::mdspan __mds7_l2_out(tops::Shared, (float*)l2_out, 256, 1024);
+// CHECK-TOPSCC:             tops_dte_ctx_t choreo_topscc_ctx3;
+// CHECK-TOPSCC:             int __deslice_offset0__l2_out_2_out_load_s[] = {(int)(__iv_m_tile_s * 128), (int)(__iv_n_tile_s * 256)};
+// CHECK-TOPSCC:             tops::event out_store_s__event__ = tops::deslice_async(*out_store_s.get_ctx(), __mds7_l2_out, __mds6_out_load_s, __deslice_offset0__l2_out_2_out_load_s);
+// CHECK-TOPSCC:             out_store_s.set_event(out_store_s__event__);
+// CHECK-TOPSCC:             out_store_s.wait();
+// CHECK-TOPSCC:           } // n_tile_s
+// CHECK-TOPSCC:           __iv_n_tile_s = 0;
+// CHECK-TOPSCC:         } // m_tile_s
+// CHECK-TOPSCC:         __iv_m_tile_s = 0;
+// CHECK-TOPSCC:       }
+// CHECK-TOPSCC:       tops::mdspan __mds8_l2_out(tops::Shared, (float*)l2_out, 256, 1024);
+// CHECK-TOPSCC:       tops::mdspan __mds9_output(tops::Global, (float*)output, 512, 1024);
+// CHECK-TOPSCC:       tops_dte_ctx_t choreo_topscc_ctx4;
+// CHECK-TOPSCC:       if (threadIdx.x == 0) {
+// CHECK-TOPSCC:         int __deslice_offset1__output_2_l2_out[] = {(int)(__tops_bid_x() * 256), (int)(__iv_n_tile * 1024)};
+// CHECK-TOPSCC:         tops::event out_store__event__ = tops::deslice_async(*out_store.get_ctx(), __mds9_output, __mds8_l2_out, __deslice_offset1__output_2_l2_out);
+// CHECK-TOPSCC:         out_store.set_event(out_store__event__);
+// CHECK-TOPSCC:       } // threadIdx.x == 0
+// CHECK-TOPSCC:       if (threadIdx.x == 0) {
+// CHECK-TOPSCC:         out_store.wait();
+// CHECK-TOPSCC:       }
+// CHECK-TOPSCC:       __syncthreads();
+// CHECK-TOPSCC:     } // n_tile
+// CHECK-TOPSCC:     __iv_n_tile = 0;
+// CHECK-TOPSCC:   }
+// CHECK-TOPSCC: }
+
+
+// CHECK-FACTOR: using namespace factor;
+// CHECK-FACTOR: void __choreo_relu() {
+// CHECK-FACTOR:   auto input_type = DRAMType(FloatType(32), {512, 1024});
+// CHECK-FACTOR:   auto __choreo_factor_out_type = DRAMType(FloatType(32), {512, 1024});
+// CHECK-FACTOR:   // choreo-factor dataflow function
+// CHECK-FACTOR:   D(host_func_)("__choreo_relu", {input_type, StreamType()}, [&](auto args) {
+// CHECK-FACTOR:     auto & input = args[0];
+// CHECK-FACTOR:     auto output = alloc_(__choreo_factor_out_type);
+// CHECK-FACTOR:     Dim3 grid_dim(2);
+// CHECK-FACTOR:     Dim3 block_dim(1);
+// CHECK-FACTOR:     auto ts = launch_kernel_("__choreo_relu_parallel", grid_dim, block_dim, args.back(), {args[0]}, {output});
+// CHECK-FACTOR:     return std::vector<Value>{output};
+// CHECK-FACTOR:   }, true); // end of choreo-factor host program
+// CHECK-FACTOR:   D(func_)("__choreo_relu_parallel", {input_type}, {__choreo_factor_out_type}, [&](auto args, auto results) {
+// CHECK-FACTOR:     auto & input = args[0];
+// CHECK-FACTOR:     auto & output = results[0];
+// CHECK-FACTOR:     auto thread_id = thread_id_();
+// CHECK-FACTOR:     auto block_id = block_id_();
+// CHECK-FACTOR:     auto l2_out = alloc_(SRAMType(FloatType(32),{256, 1024})).shared_(SharedType::kBlockShared);
+// CHECK-FACTOR:     auto input_load__buf__ = alloc_(SRAMType(FloatType(32),{256, 1024})).shared_(SharedType::kBlockShared);
+// CHECK-FACTOR:     auto input_load = alloc_dma_(CDMAType());
+// CHECK-FACTOR:     auto out_store = alloc_dma_(CDMAType());
+// CHECK-FACTOR:     var_ n_tile(IntType(32));
+// CHECK-FACTOR:     n_tile = 0;
+// CHECK-FACTOR:     for_(n_tile, 1, 1, [&](auto iv_n_tile) {
+// CHECK-FACTOR:       async_load_(input_load, input, input_load__buf__, {Value(256)*block_id,Value(1024)*iv_n_tile});
+// CHECK-FACTOR:       wait_dma_(input_load);
+// CHECK-FACTOR:       auto input_load_s__buf__ = alloc_(L1Type(FloatType(32),{128, 256}));
+// CHECK-FACTOR:       auto input_load_s = alloc_dma_(SDMAType());
+// CHECK-FACTOR:       auto out_load_s__buf__ = alloc_(L1Type(FloatType(32),{128, 256}));
+// CHECK-FACTOR:       auto out_load_s = alloc_dma_(SDMAType());
+// CHECK-FACTOR:       auto out_store_s = alloc_dma_(SDMAType());
+// CHECK-FACTOR:       var_ m_tile_s(IntType(32));
+// CHECK-FACTOR:       m_tile_s = 0;
+// CHECK-FACTOR:       var_ n_tile_s(IntType(32));
+// CHECK-FACTOR:       n_tile_s = 0;
+// CHECK-FACTOR:       for_(m_tile_s, 2, 1, [&](auto iv_m_tile_s) {
+// CHECK-FACTOR:         for_(n_tile_s, 4, 1, [&](auto iv_n_tile_s) {
+// CHECK-FACTOR:           async_load_(input_load_s, input_load__buf__, input_load_s__buf__, {Value(128)*iv_m_tile_s,Value(256)*iv_n_tile_s});
+// CHECK-FACTOR:           async_load_(out_load_s, l2_out, out_load_s__buf__, {Value(128)*iv_m_tile_s,Value(256)*iv_n_tile_s});
+// CHECK-FACTOR:           wait_dma_(input_load_s);
+// CHECK-FACTOR:           wait_dma_(out_load_s);
+// CHECK-FACTOR:           call_("relu_kernel", {input_load_s__buf__.addr_(),out_load_s__buf__.addr_()});
+// CHECK-FACTOR:           async_store_(out_store_s, out_load_s__buf__, l2_out, {Value(128)*iv_m_tile_s,Value(256)*iv_n_tile_s});
+// CHECK-FACTOR:           wait_dma_(out_store_s);
+// CHECK-FACTOR:         }); // end of choreo-foreach block on 'n_tile_s'.
+// CHECK-FACTOR:         n_tile_s = 0;
+// CHECK-FACTOR:       }); // end of choreo-foreach block on 'm_tile_s'.
+// CHECK-FACTOR:       m_tile_s = 0;
+// CHECK-FACTOR:       async_store_(out_store, l2_out, output, {Value(256)*block_id,Value(1024)*iv_n_tile});
+// CHECK-FACTOR:       wait_dma_(out_store);
+// CHECK-FACTOR:     }); // end of choreo-foreach block on 'n_tile'.
+// CHECK-FACTOR:     n_tile = 0;
+// CHECK-FACTOR:   }); // end of choreo-factor device function
+// CHECK-FACTOR: } // end of __choreo_relu
+// CHECK-FACTOR: MODULE_REGISTER("lib__choreo_activation-relu-fp32", __choreo_relu);

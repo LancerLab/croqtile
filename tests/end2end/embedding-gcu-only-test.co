@@ -54,9 +54,9 @@ int main() { /// host program
     for (size_t j = 0; j < res.shape()[1]; ++j) {
       float ref = embedding_weights[input_indices[i]][j];
       if (ref != res[i][j]) {
-        std::cout << "i: " << i << ", j: " << j << "\n";
-        std::cout << "res: " << res[i][j] << "\n";
-        std::cout << "ref: " << ref << std::endl;
+        // std::cout << "i: " << i << ", j: " << j << "\n";
+        // std::cout << "res: " << res[i][j] << "\n";
+        // std::cout << "ref: " << ref << std::endl;
         choreo::choreo_assert(ref == res[i][j], "values are not equal.");
       }
   }

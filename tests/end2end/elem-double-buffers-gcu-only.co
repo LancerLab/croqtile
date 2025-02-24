@@ -66,8 +66,8 @@ int main() { /// host program
     for (size_t j = 0; j < res.shape()[1]; ++j)
       for (size_t k = 0; k < res.shape()[2]; ++k) {
         if (a[i][j][k] + b[i][j][k] != res[i][j][k]) {
-          std::cout << "[" << i << ", " << j << ", " << k << "] ";
-          std::cout << "a: " << a[i][j][k] << ", b: " << b[i][j][k] << ", res: " << res[i][j][k] << "\n";
+          // std::cout << "[" << i << ", " << j << ", " << k << "] ";
+          // std::cout << "a: " << a[i][j][k] << ", b: " << b[i][j][k] << ", res: " << res[i][j][k] << "\n";
           assert(a[i][j][k] + b[i][j][k] == res[i][j][k]);
         }
       }

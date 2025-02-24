@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GCU300
-// RUN-GCU300: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+// RUN: choreo -es -t topscc %s | FileCheck --match-full-lines --check-prefix=CHECK-TOPSCC %s && rm -f %s.topscc.result
 
 #include "choreo.h"
 #include <chrono>
@@ -144,4 +144,15 @@ int main() { /// host program
   std::cout << "Test Passed\n" << std::endl;
   std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
 }
-// CHECK: Test Passed
+// CHECK-TOPSCC:   tops::mdspan __mds0_f__buf__(tops::Global, (float*)f__buf__, 10240);
+// CHECK-TOPSCC:      tops::mdspan __mds1_input_load__buf__(tops::Shared, (float*)input_load__buf__, 1024);
+// CHECK-TOPSCC:      tops_dte_ctx_t choreo_topscc_ctx0;
+// CHECK-TOPSCC:      choreo::future input_load(choreo_topscc_ctx0, "input_load", 32, 26, input_load__buf__);
+// CHECK-TOPSCC:      if (threadIdx.x == 0) {
+// CHECK-TOPSCC:        int __slice_offset0__f_2_input_load__buf__[] = {(int)(anon_0 * 1024)};
+// CHECK-TOPSCC:        tops::event input_load__event__ = tops::slice_async(*input_load.get_ctx(), __mds1_input_load__buf__, __mds0_f__buf__, __slice_offset0__f_2_input_load__buf__);
+// CHECK-TOPSCC:        input_load.set_event(input_load__event__);
+// CHECK-TOPSCC:      } // threadIdx.x == 0
+// CHECK-TOPSCC: float * f__buf____device = input__device;
+// CHECK-TOPSCC: __choreo_device_identity<<<__identity_gdims0, __identity_bdims0>>>(input__device, output__device, f__buf____device);
+

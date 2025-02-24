@@ -62,9 +62,11 @@ int main() {
   for (size_t i = 0; i < res1.shape()[0]; ++i)
     for (size_t j = 0; j < res1.shape()[1]; ++j)
       for (size_t k = 0; k < res1.shape()[2]; ++k) {
-        // std::cout << "i: " << i << ", j: " << j << ", k: " << k << "\n";
-        // std::cout << "a: " << a[i][j][k] << ", b: " << b[i][j][k] << ", res1: " << res1[i][j][k] << "\n";
-        choreo::choreo_assert(a[i][j][k] + b[i][j][k] == res[i][j][k], "values are not equal.");
+        if (a[i][j][k] + b[i][j][k] != res[i][j][k]) {
+          std::cout << "i: " << i << ", j: " << j << ", k: " << k << "\n";
+          std::cout << "a: " << a[i][j][k] << ", b: " << b[i][j][k] << ", res1: " << res1[i][j][k] << "\n";
+          choreo::choreo_assert(a[i][j][k] + b[i][j][k] == res[i][j][k], "values are not equal.");
+        }
       }
 
   std::cout << "Test Passed with PF: " << PF << "\n";

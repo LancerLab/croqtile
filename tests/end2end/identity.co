@@ -61,11 +61,11 @@ int main() { /// host program
 
   // verfication
   for (size_t i = 0; i < res.shape()[0]; ++i) {
-      std::cout << "i: " << i << "\n";
-      std::cout << "res: " << res[i] << "\n";
+      // std::cout << "i: " << i << "\n";
+      // std::cout << "res: " << res[i] << "\n";
       float ref = input_data[i];
 
-      std::cout << "ref: " << ref << std::endl;
+      // std::cout << "ref: " << ref << std::endl;
       choreo::choreo_assert(ref == res[i], "values are not equal");
   }
   std::cout << "Test Passed\n" << std::endl;
