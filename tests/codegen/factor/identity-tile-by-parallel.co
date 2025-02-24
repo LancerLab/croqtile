@@ -1,3 +1,6 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -es -t factor %s | FileCheck --match-full-lines %s && rm -f %s.factor.result
+
 #include "choreo.h"
 #include <chrono>
 
@@ -55,3 +58,24 @@ int main() { /// host program
   std::cout << "Test Passed\n" << std::endl;
   std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
 }
+
+// CHECK:  D(func_)("__choreo_identity_parallel", {input_type}, {__choreo_factor_out_type}, [&](auto args, auto results) {
+// CHECK:    auto & input = args[0];
+// CHECK:    auto & output = results[0];
+// CHECK:    auto thread_id = thread_id_();
+// CHECK:    auto block_id = block_id_();
+// CHECK:    auto l2_out = alloc_(SRAMType(FloatType(32),{5120})).shared_(SharedType::kBlockShared);
+// CHECK:    auto input_load__buf__ = alloc_(SRAMType(FloatType(32),{5120})).shared_(SharedType::kBlockShared);
+// CHECK:    auto input_load = alloc_dma_(CDMAType());
+// CHECK:    auto out_store = alloc_dma_(CDMAType());
+// CHECK:    async_load_(input_load, input, input_load__buf__, {Value(5120)*block_id});
+// CHECK:    wait_dma_(input_load);
+// CHECK:    auto input_load_s__buf__ = alloc_(L1Type(FloatType(32),{1024}));
+// CHECK:    auto input_load_s = alloc_dma_(SDMAType());
+// CHECK:    auto out_store_s = alloc_dma_(SDMAType());
+// CHECK:    async_load_(input_load_s, input_load__buf__, input_load_s__buf__, {Value(1024)*thread_id});
+// CHECK:    wait_dma_(input_load_s);
+// CHECK:    async_store_(out_store_s, input_load_s__buf__, l2_out, {Value(1024)*thread_id});
+// CHECK:    wait_dma_(out_store_s);
+// CHECK:    async_store_(out_store, l2_out, output, {Value(5120)*block_id});
+// CHECK:    wait_dma_(out_store);

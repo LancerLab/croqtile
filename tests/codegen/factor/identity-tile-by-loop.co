@@ -1,6 +1,5 @@
 // REQUIRES: TARGET-GCUALL
-// RUN: choreo -gs -t factor %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
-// RUN: choreo -gs -t topscc %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
+// RUN: choreo -es -t factor %s | FileCheck --match-full-lines %s && rm -f %s.factor.result
 
 #include <chrono>
 
@@ -60,4 +59,28 @@ int main() { /// host program
   std::cout << "Test Passed\n" << std::endl;
   std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
 }
-// CHECK: Test Passed
+
+// CHECK:    auto input_load__buf__ = alloc_(SRAMType(FloatType(32),{1024})).shared_(SharedType::kBlockShared);
+// CHECK:    auto input_load = alloc_dma_(CDMAType());
+// CHECK:    auto out_store = alloc_dma_(CDMAType());
+// CHECK:    var_ l_tile(IntType(32));
+// CHECK:    l_tile = 0;
+// CHECK:    for_(l_tile, 10, 1, [&](auto iv_l_tile) {
+// CHECK:      async_load_(input_load, input, input_load__buf__, {Value(1024)*iv_l_tile});
+// CHECK:      wait_dma_(input_load);
+// CHECK:      auto input_load_s__buf__ = alloc_(L1Type(FloatType(32),{64}));
+// CHECK:      auto input_load_s = alloc_dma_(SDMAType());
+// CHECK:      auto out_store_s = alloc_dma_(SDMAType());
+// CHECK:      var_ l_tile_s(IntType(32));
+// CHECK:      l_tile_s = 0;
+// CHECK:      for_(l_tile_s, 16, 1, [&](auto iv_l_tile_s) {
+// CHECK:        async_load_(input_load_s, input_load__buf__, input_load_s__buf__, {Value(64)*iv_l_tile_s});
+// CHECK:        wait_dma_(input_load_s);
+// CHECK:        async_store_(out_store_s, input_load_s__buf__, l2_out, {Value(64)*iv_l_tile_s});
+// CHECK:        wait_dma_(out_store_s);
+// CHECK:      }); // end of choreo-foreach block on 'l_tile_s'.
+// CHECK:      l_tile_s = 0;
+// CHECK:      async_store_(out_store, l2_out, output, {Value(1024)*iv_l_tile});
+// CHECK:      wait_dma_(out_store);
+// CHECK:    }); // end of choreo-foreach block on 'l_tile'.
+

@@ -1,0 +1,143 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -es -t factor %s | FileCheck --match-full-lines --check-prefix=CHECK-FACTOR %s && rm -f %s.factor.result
+
+#include "choreo.h"
+#include <chrono>
+#include <random>
+#include <algorithm>
+
+__cok__ { /// kernel program
+
+__co_device__ extern "C" void relu_kernel(int* input, int* out) {
+  constexpr int m = 256;
+  constexpr int n = 256;
+  for (int i = 0; i < m; ++i) {
+    for (int j = 0; j < n; ++j) {
+      out[i*n+j] = input[i*n+j] > 0 ? input[i*n+j] : 0;
+    }
+  }
+}
+
+} /// end of kernel decl
+
+
+__co__ s32 [512, 1024] relu(s32 [512, 1024] input) { /// device program
+  s32[input.span(0), input.span(1)] output; // use same shape as input
+
+  parallel p by 2 {  // p is sip_index
+    with index = {n_tile} in [1] {  // decl your tiled spans
+      foreach n_tile {
+        shared s32[input.span(0)/#p, input.span(1)/#n_tile] l2_out;
+        input_load = dma.copy.async input.chunkat(p, n_tile) => shared;
+        wait input_load;
+        parallel q by 1 {
+          with index = {m_tile_s, n_tile_s} in [2, 4] {
+            foreach m_tile_s {
+              foreach n_tile_s {
+                input_load_s = dma.copy.async input_load.data.chunkat(m_tile_s, n_tile_s) => local;
+                out_load_s = dma.copy.async l2_out.chunkat(m_tile_s, n_tile_s) => local;
+                wait input_load_s, out_load_s;
+                call relu_kernel(input_load_s.data, out_load_s.data); // |span| calculate the total size of span.
+                out_store_s = dma.copy.async out_load_s.data => l2_out.chunkat(m_tile_s, n_tile_s); // can use defined vars
+                wait out_store_s;
+              }
+            }
+          }
+        }
+        out_store = dma.copy.async l2_out => output.chunkat(p, n_tile); // can use defined vars
+        wait out_store;
+      }
+    }
+  } // can use python styling
+  return output;
+}
+
+
+int main() { /// host program
+  choreo::s32 a[512][1024] = {0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::s32 b[512][512] = {0};
+
+  auto input_data = choreo::make_spanview<2, choreo::s32>((int*)a, {512, 1024});
+  input_data.fill_random(-10, 10);
+
+  auto start = std::chrono::high_resolution_clock::now();
+
+  auto res
+    = relu(input_data);
+
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
+  std::cout << res.shape()[0] << std::endl;
+  std::cout << res.shape()[1] << std::endl;
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+        // std::cout << "i: " << i << ", j: " << j << "\n";
+        // std::cout << "res: " << res[i][j] << "\n";
+        int ref = input_data[i][j] > 0? input_data[i][j] : 0;
+
+        // std::cout << "ref: " << ref << std::endl;
+        choreo::choreo_assert(ref == res[i][j], "values are not equal.");
+      }
+  std::cout << "Test Passed\n" << std::endl;
+  std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
+}
+
+// CHECK-FACTOR: using namespace factor;
+// CHECK-FACTOR: void __choreo_relu() {
+// CHECK-FACTOR:   auto input_type = DRAMType(IntType(32), {512, 1024});
+// CHECK-FACTOR:   auto __choreo_factor_out_type = DRAMType(IntType(32), {512, 1024});
+// CHECK-FACTOR:   // choreo-factor dataflow function
+// CHECK-FACTOR:   D(host_func_)("__choreo_relu", {input_type, StreamType()}, [&](auto args) {
+// CHECK-FACTOR:     auto & input = args[0];
+// CHECK-FACTOR:     auto output = alloc_(__choreo_factor_out_type);
+// CHECK-FACTOR:     Dim3 grid_dim(2);
+// CHECK-FACTOR:     Dim3 block_dim(1);
+// CHECK-FACTOR:     auto ts = launch_kernel_("__choreo_relu_parallel", grid_dim, block_dim, args.back(), {args[0]}, {output});
+// CHECK-FACTOR:     return std::vector<Value>{output};
+// CHECK-FACTOR:   }, true); // end of choreo-factor host program
+// CHECK-FACTOR:   D(func_)("__choreo_relu_parallel", {input_type}, {__choreo_factor_out_type}, [&](auto args, auto results) {
+// CHECK-FACTOR:     auto & input = args[0];
+// CHECK-FACTOR:     auto & output = results[0];
+// CHECK-FACTOR:     auto thread_id = thread_id_();
+// CHECK-FACTOR:     auto block_id = block_id_();
+// CHECK-FACTOR:     auto l2_out = alloc_(SRAMType(IntType(32),{256, 1024})).shared_(SharedType::kBlockShared);
+// CHECK-FACTOR:     auto input_load__buf__ = alloc_(SRAMType(IntType(32),{256, 1024})).shared_(SharedType::kBlockShared);
+// CHECK-FACTOR:     auto input_load = alloc_dma_(CDMAType());
+// CHECK-FACTOR:     auto out_store = alloc_dma_(CDMAType());
+// CHECK-FACTOR:     var_ n_tile(IntType(32));
+// CHECK-FACTOR:     n_tile = 0;
+// CHECK-FACTOR:     for_(n_tile, 1, 1, [&](auto iv_n_tile) {
+// CHECK-FACTOR:       async_load_(input_load, input, input_load__buf__, {Value(256)*block_id,Value(1024)*iv_n_tile});
+// CHECK-FACTOR:       wait_dma_(input_load);
+// CHECK-FACTOR:       auto input_load_s__buf__ = alloc_(L1Type(IntType(32),{128, 256}));
+// CHECK-FACTOR:       auto input_load_s = alloc_dma_(SDMAType());
+// CHECK-FACTOR:       auto out_load_s__buf__ = alloc_(L1Type(IntType(32),{128, 256}));
+// CHECK-FACTOR:       auto out_load_s = alloc_dma_(SDMAType());
+// CHECK-FACTOR:       auto out_store_s = alloc_dma_(SDMAType());
+// CHECK-FACTOR:       var_ m_tile_s(IntType(32));
+// CHECK-FACTOR:       m_tile_s = 0;
+// CHECK-FACTOR:       var_ n_tile_s(IntType(32));
+// CHECK-FACTOR:       n_tile_s = 0;
+// CHECK-FACTOR:       for_(m_tile_s, 2, 1, [&](auto iv_m_tile_s) {
+// CHECK-FACTOR:         for_(n_tile_s, 4, 1, [&](auto iv_n_tile_s) {
+// CHECK-FACTOR:           async_load_(input_load_s, input_load__buf__, input_load_s__buf__, {Value(128)*iv_m_tile_s,Value(256)*iv_n_tile_s});
+// CHECK-FACTOR:           async_load_(out_load_s, l2_out, out_load_s__buf__, {Value(128)*iv_m_tile_s,Value(256)*iv_n_tile_s});
+// CHECK-FACTOR:           wait_dma_(input_load_s);
+// CHECK-FACTOR:           wait_dma_(out_load_s);
+// CHECK-FACTOR:           call_("relu_kernel", {input_load_s__buf__.addr_(),out_load_s__buf__.addr_()});
+// CHECK-FACTOR:           async_store_(out_store_s, out_load_s__buf__, l2_out, {Value(128)*iv_m_tile_s,Value(256)*iv_n_tile_s});
+// CHECK-FACTOR:           wait_dma_(out_store_s);
+// CHECK-FACTOR:         }); // end of choreo-foreach block on 'n_tile_s'.
+// CHECK-FACTOR:         n_tile_s = 0;
+// CHECK-FACTOR:       }); // end of choreo-foreach block on 'm_tile_s'.
+// CHECK-FACTOR:       m_tile_s = 0;
+// CHECK-FACTOR:       async_store_(out_store, l2_out, output, {Value(256)*block_id,Value(1024)*iv_n_tile});
+// CHECK-FACTOR:       wait_dma_(out_store);
+// CHECK-FACTOR:     }); // end of choreo-foreach block on 'n_tile'.
+// CHECK-FACTOR:     n_tile = 0;
+// CHECK-FACTOR:   }); // end of choreo-factor device function
+// CHECK-FACTOR: } // end of __choreo_relu
+// CHECK-FACTOR: MODULE_REGISTER("lib__choreo_activation-relu-int32", __choreo_relu);
+

@@ -1,0 +1,115 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -es -t topscc %s | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+#include "choreo.h"
+#include <chrono>
+
+__cok__ { /// kernel program
+
+extern "C" void relu_kernel(float* input, float* out) {
+  constexpr int m = 256;
+  constexpr int n = 256;
+  for (int i = 0; i < m; ++i) {
+    for (int j = 0; j < n; ++j) {
+      out[i*n+j] = input[i*n+j] > 0.0f ? input[i*n+j] : 0.0f;
+    }
+  }
+}
+
+} /// end of kernel decl
+
+
+
+__co__ f32 [1024] identity(f32 [1024] input) { /// device program
+  f32[input.span(0)] output; // use same shape as input
+
+  parallel p by 1 {  // p is sip_index
+    shared f32[input.span(0)/#p] l2_out;
+    input_load = dma.copy.async input.chunkat(p) => shared;
+    wait input_load;
+    parallel q by 1 {
+      // input_load_s = dma.copy.async input_load.data.chunkat(q) => local;
+      input_load_s = dma.copy.async input_load.data => local;
+      wait input_load_s;
+      // out_store_s = dma.copy.async input_load_s.data => l2_out.chunkat(q);
+      out_store_s = dma.copy.async input_load_s.data => l2_out;
+      wait out_store_s;
+    }
+    out_store = dma.copy.async l2_out => output.chunkat(p); // can use defined vars
+    wait out_store;
+  } // can use python styling
+  return output;
+}
+
+
+int main() { /// host program
+  choreo::f32 a[1024]; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::f32 b[512][512] = {0};
+
+  auto input_data = choreo::make_spanview<1, choreo::f32>((float*)a, {1024});
+  input_data.fill_random(-1.0, 1.0);
+
+  auto start = std::chrono::high_resolution_clock::now();
+
+  auto res
+    = identity(input_data);
+
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
+  std::cout << res.shape()[0] << std::endl;
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i) {
+      // std::cout << "i: " << i << "\n";
+      // std::cout << "res: " << res[i] << "\n";
+      float ref = input_data[i];
+
+      // std::cout << "ref: " << ref << std::endl;
+      choreo::choreo_assert(ref == res[i], "values are not equal");
+  }
+  std::cout << "Test Passed\n" << std::endl;
+  std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
+}
+
+// CHECK: __global__ void __choreo_device_identity(float * input, float * output) {
+// CHECK:   // parallel-by: tests/codegen/topscc/identity.co:26.3
+// CHECK:   __shared__ float l2_out[1024];
+// CHECK:   __shared__ float input_load__buf__[1024];
+// CHECK:   tops::mdspan __mds0_input(tops::Global, (float*)input, 1024);
+// CHECK:   tops::mdspan __mds1_input_load__buf__(tops::Shared, (float*)input_load__buf__, 1024);
+// CHECK:   tops_dte_ctx_t choreo_topscc_ctx0;
+// CHECK:   if (threadIdx.x == 0) {
+// CHECK:     int __slice_offset0__input_2_input_load__buf__[] = {(int)(__tops_bid_x() * 1024)};
+// CHECK:     tops::event input_load__event__ = tops::slice_async(*input_load.get_ctx(), __mds1_input_load__buf__, __mds0_input, __slice_offset0__input_2_input_load__buf__);
+// CHECK:     input_load.set_event(input_load__event__);
+// CHECK:   } // threadIdx.x == 0
+// CHECK:   if (threadIdx.x == 0) {
+// CHECK:     input_load.wait();
+// CHECK:   }
+// CHECK:   __syncthreads();
+// CHECK:   __local__ __valigned__ float input_load_s__buf__[1024];
+// CHECK:   tops::mdspan __mds2_input_load(tops::Shared, (float*)input_load.data(), 1024);
+// CHECK:   tops::mdspan __mds3_input_load_s__buf__(tops::Private, (float*)input_load_s__buf__, 1024);
+// CHECK:   tops_dte_ctx_t choreo_topscc_ctx1;
+// CHECK:   tops::event input_load_s__event__ = tops::memcpy_async(*input_load_s.get_ctx(), __mds3_input_load_s__buf__, __mds2_input_load);
+// CHECK:   input_load_s.set_event(input_load_s__event__);
+// CHECK:   input_load_s.wait();
+// CHECK:   tops::mdspan __mds4_input_load_s(tops::Private, (float*)input_load_s.data(), 1024);
+// CHECK:   tops::mdspan __mds5_l2_out(tops::Shared, (float*)l2_out, 1024);
+// CHECK:   tops_dte_ctx_t choreo_topscc_ctx2;
+// CHECK:   tops::event out_store_s__event__ = tops::memcpy_async(*out_store_s.get_ctx(), __mds5_l2_out, __mds4_input_load_s);
+// CHECK:   out_store_s.set_event(out_store_s__event__);
+// CHECK:   out_store_s.wait();
+// CHECK:   tops::mdspan __mds6_l2_out(tops::Shared, (float*)l2_out, 1024);
+// CHECK:   tops::mdspan __mds7_output(tops::Global, (float*)output, 1024);
+// CHECK:   tops_dte_ctx_t choreo_topscc_ctx3;
+// CHECK:   if (threadIdx.x == 0) {
+// CHECK:     int __deslice_offset0__output_2_l2_out[] = {(int)(__tops_bid_x() * 1024)};
+// CHECK:     tops::event out_store__event__ = tops::deslice_async(*out_store.get_ctx(), __mds7_output, __mds6_l2_out, __deslice_offset0__output_2_l2_out);
+// CHECK:     out_store.set_event(out_store__event__);
+// CHECK:   } // threadIdx.x == 0
+// CHECK:   if (threadIdx.x == 0) {
+// CHECK:     out_store.wait();
+// CHECK:   }
+// CHECK:   __syncthreads();
+// CHECK: }
