@@ -42,15 +42,15 @@ __co_device__  extern "C" void softmax_kernel(float *input, float *output, int m
 
 } /// end of kernel decl
 
-__co__ f32[256, 512] math_product_attention(f32[256, 512] lhs,
-                                            f32[512, 256] rhs,
-                                            f32[256, 512] v) {
+__co__ f32[64, 512] math_product_attention(f32[64, 512] lhs,
+                                            f32[512, 64] rhs,
+                                            f32[64, 512] v) {
 
   f32[lhs.span(0), v.span(1)] output;
   parallel p by 1 {
     shared f32[lhs.span(0), rhs.span(1)] l2_out;
     with index = {m_tile, k_tile,
-                  n_tile} in[64, 1, 8] { // decl your tiled spans
+                  n_tile} in[16, 1, 2] { // decl your tiled spans
       foreach
         m_tile, n_tile {
           local f32[4, 32] l1_out{0};
@@ -65,23 +65,23 @@ __co__ f32[256, 512] math_product_attention(f32[256, 512] lhs,
             }
         }
     }
-    with index = {m_tile, n_tile} in[256 / 64, 1] { // Define tile size
+    with index = {m_tile, n_tile} in[16 / 8, 1] { // Define tile size
       foreach
         m_tile {
-          local f32[64, 256] local_output;
+          local f32[32, 64] local_output;
 
           // Use DMA to load tile data into local memory
           local_input = dma.copy l2_out.chunkat(m_tile, n_tile) => local;
 
           // Call the softmax kernel function
-          call softmax_kernel(local_input.data, local_output, 64, 256);
+          call softmax_kernel(local_input.data, local_output, 32, 64);
 
           // Copy the result back to global memory
           dma.copy local_output => l2_out.chunkat(m_tile, n_tile);
         }
     }
     with index = {m_tile, k_tile,
-                  n_tile} in[64, 1, 8] { // decl your tiled spans
+                  n_tile} in[16, 1, 8] { // decl your tiled spans
       foreach
         m_tile, n_tile {
           local f32[4, 64] l1_out_v{0};
@@ -91,7 +91,7 @@ __co__ f32[256, 512] math_product_attention(f32[256, 512] lhs,
               rhs_load_v = dma.copy v.chunkat(k_tile, n_tile) => local;
 
               call matmul_kernel(lhs_load_v.data, rhs_load_v.data, l1_out_v, 4,
-                                 256, 64);
+                                 64, 64);
               dma.copy l1_out_v => output.chunkat(m_tile, n_tile);
             }
         }
@@ -161,20 +161,20 @@ extern "C" void cpu_attention(const float *query, const float *key,
 }
 int main() {
   // Define matrix sizes
-  int m = 256; // Rows in Q and output
+  int m = 64; // Rows in Q and output
   int n = 512; // Columns in K and V (and output)
   int k = 512; // Columns in Q and rows in K
 
   // Allocate memory for Q, K, V
-  choreo::f32 key[256][512]; // Query matrix (256 x 512)
-  choreo::f32 q[512][256];   // Key matrix (512 x 512)
-  choreo::f32 v[256][512];   // Value matrix (512 x 512)
+  choreo::f32 key[64][512]; // Query matrix (64 x 512)
+  choreo::f32 q[512][64];   // Key matrix (512 x 512)
+  choreo::f32 v[64][512];   // Value matrix (512 x 512)
 
   // Initialize Q, K, V with some values (example)
-  std::fill(&key[0][0], &key[0][0] + 256 * 512, 1.0f); // Fill lhs (Q) with 1.0
-  std::fill(&q[0][0], &q[0][0] + 512 * 256, 1.0f);     // Fill rhs (K) with 1.0
-  std::fill(&v[0][0], &v[0][0] + 256 * 512, 1.0f);     // Fill v (V) with 1.0
-  for (int i = 0; i < 256; ++i) {
+  std::fill(&key[0][0], &key[0][0] + 64 * 512, 1.0f); // Fill lhs (Q) with 1.0
+  std::fill(&q[0][0], &q[0][0] + 512 * 64, 1.0f);     // Fill rhs (K) with 1.0
+  std::fill(&v[0][0], &v[0][0] + 64 * 512, 1.0f);     // Fill v (V) with 1.0
+  for (int i = 0; i < 64; ++i) {
     for (int j = 0; j < 512; ++j) {
       key[i][j] = i + j; // Fill lhs (Q) with unique values
       q[i][j] = i + j;   // Fill rhs (K) with unique values
@@ -182,17 +182,17 @@ int main() {
     }
   }
   auto k_data =
-      choreo::make_spanview<2, choreo::f32>((choreo::f32 *)key, {256, 512});
+      choreo::make_spanview<2, choreo::f32>((choreo::f32 *)key, {64, 512});
   auto q_data =
-      choreo::make_spanview<2, choreo::f32>((choreo::f32 *)q, {512, 256});
+      choreo::make_spanview<2, choreo::f32>((choreo::f32 *)q, {512, 64});
   auto v_data =
-      choreo::make_spanview<2, choreo::f32>((choreo::f32 *)v, {256, 512});
+      choreo::make_spanview<2, choreo::f32>((choreo::f32 *)v, {64, 512});
 
   // Call attention function
   auto result = math_product_attention(k_data, q_data, v_data);
-  float cpu_result[256][512] = {0};
+  float cpu_result[64][512] = {0};
   // Call attention function on CPU
-  cpu_attention(&q[0][0], &key[0][0], &v[0][0], &cpu_result[0][0], 256, 512);
+  cpu_attention(&q[0][0], &key[0][0], &v[0][0], &cpu_result[0][0], 64, 512);
 
   // Compare results
   bool match = true;

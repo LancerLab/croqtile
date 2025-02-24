@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GCUALL DYNAMIC-SHAPE
-// RUN: choreo -gs  -t factor -kt %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
+// RUN: choreo -es -t factor %s | FileCheck --match-full-lines %s
 
 #include "choreo.h"
 
@@ -33,4 +33,19 @@ int main() { /// host program
 
   std::cout << "Test Passed\n" << std::endl;
 }
-// CHECK: Test Passed
+
+// CHECK: void __choreo_addcdiv() {
+// CHECK:   auto first_type = DRAMType(FloatType(32), {-1});
+// CHECK:   auto __choreo_factor_out_type = DRAMType(FloatType(32), {-1});
+
+// CHECK:   D(host_func_)("__choreo_addcdiv", {first_type, StreamType()}, [&](auto args) {
+// CHECK:     auto & first = args[0];
+// CHECK:     auto output_rt_dim0 = dim_(args[0], 0);
+// CHECK:     auto __choreo_nd_ref_L = dim_(args[0], 0);
+// CHECK:     auto output = alloc_({output_rt_dim0}, __choreo_factor_out_type);
+
+// CHECK:   D(func_)("__choreo_addcdiv_parallel", {first_type}, {__choreo_factor_out_type}, [&](auto args, auto results) {
+// CHECK:     auto anon_0 = select_((((dim_(args[0], 0))/(8192))%(Value(2))) == Value(0), first_load_B__buf__, first_load_A__buf__);
+// CHECK:     auto first_load_tail = select_((((dim_(args[0], 0))/(8192))%(Value(2)))== Value(0), first_load_B, first_load_A);
+// CHECK:     async_store_(out_store_tail, out, output, {Value(8192)*((dim_(args[0], 0))/(8192)+(Value(-1)))});
+

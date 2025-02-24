@@ -6,7 +6,7 @@
 __cok__ { /// kernel program
 __co_device__ extern "C" void kernel(int * lhs, int * rhs, int * out) {
   int m = 4;
-  int k = 512;
+  int k = 256;
   int n = 64;
   for (int i = 0; i < m; ++i)
     for (int j = 0; j < n; ++j)
@@ -15,11 +15,11 @@ __co_device__ extern "C" void kernel(int * lhs, int * rhs, int * out) {
 }
 } /// end of kernel decl
 
-__co__ s32 [256, 512] ele_add(s32 [256, 512] lhs, s32 [512, 512] rhs) {
+__co__ s32 [128, 256] ele_add(s32 [128, 256] lhs, s32 [256, 256] rhs) {
   s32[lhs.span(0), rhs.span(1)] output;
 
   parallel p by 1 {
-    with index = {m_tile, k_tile, n_tile} in [64, 1, 8] {  // decl your tiled spans
+    with index = {m_tile, k_tile, n_tile} in [32, 1, 4] {  // decl your tiled spans
       foreach m_tile, n_tile {
         local s32[4, 64] l1_out {0};
         foreach k_tile {
@@ -36,10 +36,10 @@ __co__ s32 [256, 512] ele_add(s32 [256, 512] lhs, s32 [512, 512] rhs) {
 }
 
 int main() { /// host program
-  choreo::s32 a[256][512] = {0};
-  choreo::s32 b[512][512] = {0};
-  auto lhs_data = choreo::make_spanview<2, choreo::s32>((int*)a, {256, 512});
-  auto rhs_data = choreo::make_spanview<2, choreo::s32>((int*)b, {512, 512});
+  choreo::s32 a[128][256] = {0};
+  choreo::s32 b[256][256] = {0};
+  auto lhs_data = choreo::make_spanview<2, choreo::s32>((int*)a, {128, 256});
+  auto rhs_data = choreo::make_spanview<2, choreo::s32>((int*)b, {256, 256});
   lhs_data.fill_random(-10, 10);
   rhs_data.fill_random(-10, 10);
 

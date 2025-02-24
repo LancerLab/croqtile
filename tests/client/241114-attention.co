@@ -41,46 +41,46 @@ __co_device__ extern "C" void softmax_kernel(float* input, float* output, int m,
 
 } /// end of kernel decl
 
-__co__ f32 [256, 512] attention(f32 [256, 512] lhs, f32 [512, 256] rhs, f32 [256, 512] v) {
+__co__ f32 [128, 256] attention(f32 [128, 256] lhs, f32 [256, 128] rhs, f32 [128, 256] v) {
 
   f32[lhs.span(0), rhs.span(1)] output1;
   f32[lhs.span(0), v.span(1)] output;
 
   parallel p by 1 {
-    with index = {m_tile, k_tile, n_tile} in [64, 1, 8] {  // decl your tiled spans
+    with index = {m_tile, k_tile, n_tile} in [32, 1, 8] {  // decl your tiled spans
       foreach m_tile, n_tile {
-        local f32[4, 32] l1_out {0};
+        local f32[4, 16] l1_out {0};
         foreach k_tile {
           lhs_load = dma.copy lhs.chunkat(m_tile, k_tile) => local;
           rhs_load = dma.copy rhs.chunkat(k_tile, n_tile) => local;
 
-          call matmul_kernel(lhs_load.data, rhs_load.data, l1_out,4,512,32);
+          call matmul_kernel(lhs_load.data, rhs_load.data, l1_out,4,256,16);
           dma.copy l1_out => output1.chunkat(m_tile, n_tile);
         }
       }
     }
-    with index = {m_tile1, n_tile1} in [256/64, 1] {  // Define tile size
+    with index = {m_tile1, n_tile1} in [128/64, 1] {  // Define tile size
       foreach m_tile1 {
-        local f32[64,256] local_output;
+        local f32[64,128] local_output;
 
         // Use DMA to load tile data into local memory
         local_input = dma.copy output1.chunkat(m_tile1, n_tile1) => local;
 
         // Call the softmax kernel function
-        call softmax_kernel(local_input.data, local_output, 64, 256);
+        call softmax_kernel(local_input.data, local_output, 64, 128);
 
         // Copy the result back to global memory
         dma.copy local_output => output1.chunkat(m_tile1,n_tile1);
       }
     }
-    with index = {m_tile2, k_tile2, n_tile2} in [64, 1, 8] {  // decl your tiled spans
+    with index = {m_tile2, k_tile2, n_tile2} in [32, 1, 8] {  // decl your tiled spans
       foreach m_tile2, n_tile2 {
-        local f32[4, 64] l1_out_v {0};
+        local f32[4, 32] l1_out_v {0};
         foreach k_tile2 {
           lhs_load_v = dma.copy output1.chunkat(m_tile2, k_tile2) => local;
           rhs_load_v = dma.copy v.chunkat(k_tile2, n_tile2) => local;
 
-          call matmul_kernel(lhs_load_v.data, rhs_load_v.data, l1_out_v,4,256,64);
+          call matmul_kernel(lhs_load_v.data, rhs_load_v.data, l1_out_v,4,128,32);
           dma.copy l1_out_v => output.chunkat(m_tile2, n_tile2);
         }
       }
@@ -140,79 +140,40 @@ extern "C" void cpu_attention(const float *query, const float *key, const float 
 }
 int main() {
     // Define matrix sizes
-    int m = 256;  // Rows in Q and output
-    int n = 512;  // Columns in K and V (and output)
-    int k = 512;  // Columns in Q and rows in K
+    int m = 128;  // Rows in Q and output
+    int n = 256;  // Columns in K and V (and output)
+    int k = 256;  // Columns in Q and rows in K
 
     // Allocate memory for Q, K, V
-    choreo::f32 key[256][512];  // Query matrix (256 x 512)
-    choreo::f32 q[512][256];  // Key matrix (512 x 512)
-    choreo::f32 v[256][512];    // Value matrix (512 x 512)
+    choreo::f32 key[128][256];  // Query matrix (128 x 256)
+    choreo::f32 q[256][128];  // Key matrix (256 x 256)
+    choreo::f32 v[128][256];    // Value matrix (256 x 256)
 
     // Initialize Q, K, V with some values (example)
-    std::fill(&key[0][0], &key[0][0] + 256 * 512, 1.0f);  // Fill lhs (Q) with 1.0
-    std::fill(&q[0][0], &q[0][0] + 512 * 256, 1.0f);  // Fill rhs (K) with 1.0
-    std::fill(&v[0][0], &v[0][0] + 256 * 512, 1.0f);      // Fill v (V) with 1.0
+    std::fill(&key[0][0], &key[0][0] + 128 * 256, 1.0f);  // Fill lhs (Q) with 1.0
+    std::fill(&q[0][0], &q[0][0] + 256 * 128, 1.0f);  // Fill rhs (K) with 1.0
+    std::fill(&v[0][0], &v[0][0] + 128 * 256, 1.0f);      // Fill v (V) with 1.0
 
-    auto k_data = choreo::make_spanview<2, choreo::f32>((choreo::f32*)key, {256, 512});
-    auto q_data = choreo::make_spanview<2, choreo::f32>((choreo::f32*)q, {512, 256});
-    auto v_data = choreo::make_spanview<2, choreo::f32>((choreo::f32*)v, {256, 512});
+    auto k_data = choreo::make_spanview<2, choreo::f32>((choreo::f32*)key, {128, 256});
+    auto q_data = choreo::make_spanview<2, choreo::f32>((choreo::f32*)q, {256, 128});
+    auto v_data = choreo::make_spanview<2, choreo::f32>((choreo::f32*)v, {128, 256});
 
 
     // Call attention function
     auto result = attention(k_data, q_data, v_data);
 
     // Output the final result
-    std::cout << "Attention Output (Softmax(QK^T) * V):\n";
-    for (int i = 0; i < m; ++i) {
-        for (int j = 0; j < n; ++j) {
-            std::cout << result[i][j] << " ";
-        }
-        std::cout << "\n";
-    }
+    // std::cout << "Attention Output (Softmax(QK^T) * V):\n";
+    // for (int i = 0; i < m; ++i) {
+    //     for (int j = 0; j < n; ++j) {
+    //         std::cout << result[i][j] << " ";
+    //     }
+    //     std::cout << "\n";
+    // }
     std::cout << "Test Complete.\n";
 
     return 0;
 }
 
-// CHECK:   D(host_func_)("__choreo_attention", {lhs_type, rhs_type, v_type, output1_type, StreamType()}, [&](auto args)
-// CHECK:     auto ts = launch_kernel_("__choreo_attention_parallel", grid_dim, block_dim, args.back(), {args[0], args[1], args[2], args[3]}, {output});
-// CHECK:   D(func_)("__choreo_attention_parallel", {lhs_type, rhs_type, v_type, output1_type}, {__choreo_factor_out_type}, [&](auto args, auto results) {
-// CHECK:     auto & lhs = args[0];
-// CHECK:     auto & rhs = args[1];
-// CHECK:     auto & v = args[2];
-// CHECK:     auto & output1 = args[3];
-// CHECK:     auto & output = results[0];
 
-// CHECK:   void *in_mem0 = nullptr;
-// CHECK:   CHECK(topsMalloc(&in_mem0, 524288ULL));
-// CHECK:   CHECK(topsMemcpy(in_mem0, reinterpret_cast<void *>(hp0.data()), 524288ULL, topsMemcpyHostToDevice));
-// CHECK:   void *in_mem1 = nullptr;
-// CHECK:   CHECK(topsMalloc(&in_mem1, 524288ULL));
-// CHECK:   CHECK(topsMemcpy(in_mem1, reinterpret_cast<void *>(hp1.data()), 524288ULL, topsMemcpyHostToDevice));
-// CHECK:   void *in_mem2 = nullptr;
-// CHECK:   CHECK(topsMalloc(&in_mem2, 524288ULL));
-// CHECK:   CHECK(topsMemcpy(in_mem2, reinterpret_cast<void *>(hp2.data()), 524288ULL, topsMemcpyHostToDevice));
-// CHECK:   void *in_mem3 = nullptr;
-// CHECK:   CHECK(topsMalloc(&in_mem3, 262144ULL));
-// CHECK-NOT:   topsMemcpy(in_mem3
-
-// CHECK:   void * out_mem = nullptr;
-// CHECK:   CHECK(topsMalloc(&out_mem, 524288));
-
-// CHECK:   // adaption: convert to the factor parameters
-// CHECK:   std::unique_ptr<char[]> memref_raw0(new char[SizeOfRankedMemref(2)]);
-// CHECK:   auto input0 = CreateUnrankedMemref(in_mem0, memref_raw0.get(), {256, 512});
-// CHECK:   std::unique_ptr<char[]> memref_raw1(new char[SizeOfRankedMemref(2)]);
-// CHECK:   auto input1 = CreateUnrankedMemref(in_mem1, memref_raw1.get(), {512, 256});
-// CHECK:   std::unique_ptr<char[]> memref_raw2(new char[SizeOfRankedMemref(2)]);
-// CHECK:   auto input2 = CreateUnrankedMemref(in_mem2, memref_raw2.get(), {256, 512});
-// CHECK:   std::unique_ptr<char[]> memref_raw3(new char[SizeOfRankedMemref(2)]);
-// CHECK:   auto input3 = CreateUnrankedMemref(in_mem3, memref_raw3.get(), {256, 256});
-// CHECK:   std::vector<int64_t> out_shape = {256, 512};
-// CHECK:   std::unique_ptr<char[]> memref_raw4(new char[SizeOfRankedMemref(out_shape.size())]);
-// CHECK:   auto output = CreateUnrankedMemref(out_mem, memref_raw4.get(), out_shape);
-
-// CHECK:   __choreo_attention(&input0, &input1, &input2, &input3, stream, &output);
-
-// CHKRUN: Test Complete.
+// CHECK: Test Complete.

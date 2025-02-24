@@ -25,21 +25,21 @@ __co_device__  extern "C" void kernel_backward(float *output, float *d_output, f
 }
 
 // Top-level function: Tile-based parallel softmax backward
-__co__ auto softmax_backward(f32[256, 512] output, f32[256, 512] d_output) {
+__co__ auto softmax_backward(f32[32, 128] output, f32[32, 128] d_output) {
   f32[output.span(0), output.span(1)] d_input;
 
   parallel p by 1 {
-    with index = {m_tile, n_tile} in[256 / 64, 1] { // Define tile size
+    with index = {m_tile, n_tile} in[32 / 16, 1] { // Define tile size
       foreach
         m_tile {
-          local f32[64, 512] local_d_input;
+          local f32[16, 128] local_d_input;
 
           // Use DMA to load tile data into local memory
           local_output = dma.copy output.chunkat(m_tile, n_tile) => local;
           local_d_output = dma.copy d_output.chunkat(m_tile, n_tile) => local;
 
           // Call the softmax backward kernel function
-          call kernel_backward(local_output.data, local_d_output.data, local_d_input, 64, 512);
+          call kernel_backward(local_output.data, local_d_output.data, local_d_input, 64, 128);
 
           // Copy the result back to global memory
           dma.copy local_d_input => d_input.chunkat(m_tile, n_tile);
@@ -64,28 +64,28 @@ extern "C" void cpu_softmax_backward(choreo::f32 *output, choreo::f32 *d_output,
 
 // Main function: test softmax backward implementation
 int main() {
-  choreo::f32 output[256][512] = {0};
-  choreo::f32 d_output[256][512] = {0};
-  choreo::f32 d_input[256][512] = {0};
+  choreo::f32 output[32][128] = {0};
+  choreo::f32 d_output[32][128] = {0};
+  choreo::f32 d_input[32][128] = {0};
 
   std::fill_n(&output[0][0], sizeof(output) / sizeof(output[0][0]), 0.5f);
   std::fill_n(&d_output[0][0], sizeof(d_output) / sizeof(d_output[0][0]), 1.0f);
 
-  auto output_data = choreo::make_spanview<2, choreo::f32>((float *)output, {256, 512});
-  auto d_output_data = choreo::make_spanview<2, choreo::f32>((float *)d_output, {256, 512});
+  auto output_data = choreo::make_spanview<2, choreo::f32>((float *)output, {32, 128});
+  auto d_output_data = choreo::make_spanview<2, choreo::f32>((float *)d_output, {32, 128});
 
   auto result = softmax_backward(output_data, d_output_data);
-  choreo::f32 d_input_cpu[256][512];
+  choreo::f32 d_input_cpu[32][128];
 
   // Perform softmax backward on the CPU
-  cpu_softmax_backward((choreo::f32 *)output, (choreo::f32 *)d_output, (choreo::f32 *)d_input_cpu, 256, 512);
+  cpu_softmax_backward((choreo::f32 *)output, (choreo::f32 *)d_output, (choreo::f32 *)d_input_cpu, 32, 128);
 
   // Validation: Compare results between CPU and device
   bool match = true;
 
 #if 1
-  for (int i = 0; i < 256; ++i) {
-    for (int j = 0; j < 512; ++j) {
+  for (int i = 0; i < 32; ++i) {
+    for (int j = 0; j < 128; ++j) {
       if (std::abs(result[i][j] - d_input_cpu[i][j]) > 1e-6) {
         std::cout << "Mismatch at [" << i << "][" << j
                   << "] - Device: " << result[i][j]

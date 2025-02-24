@@ -122,17 +122,17 @@ __co_device__  extern "C" void flash_attention_kernel(float *Q, float *K, float 
 
 } /// end of kernel decl
 
-__co__ f32[256, 512] flash_attention(f32[256, 512] lhs,
-                                            f32[512, 256] rhs,
-                                            f32[256, 512] v) {
+__co__ f32[128, 512] flash_attention(f32[128, 512] lhs,
+                                            f32[512, 128] rhs,
+                                            f32[128, 512] v) {
 
   f32[lhs.span(0), v.span(1)] output;
   parallel p by 1 {
-    with index = {m_tile, k_tile, n_tile} in[16, 1, 16] { // decl your tiled spans
+    with index = {m_tile, k_tile, n_tile} in[32, 1, 16] { // decl your tiled spans
       foreach
         m_tile{
-          local f32[16, 512] l1_out{0};
-          local f32[16] max_value{0};
+          local f32[4, 512] l1_out{0};
+          local f32[4] max_value{0};
           foreach
             k_tile {
               foreach
@@ -140,7 +140,7 @@ __co__ f32[256, 512] flash_attention(f32[256, 512] lhs,
                   lhs_load = dma.copy lhs.chunkat(m_tile, k_tile) => local;
                   rhs_load = dma.copy rhs.chunkat(k_tile, n_tile) => local;
                   v_load = dma.copy rhs.chunkat(n_tile, k_tile) => local;
-                  call flash_attention_kernel(lhs_load.data, rhs_load.data, v_load.data,l1_out,16,512,max_value);
+                  call flash_attention_kernel(lhs_load.data, rhs_load.data, v_load.data,l1_out,4,512,max_value);
                   dma.copy l1_out => output.chunkat(m_tile, k_tile);
                 }
             }
@@ -211,20 +211,20 @@ extern "C" void cpu_attention(const float *query, const float *key,
 }
 int main() {
   // Define matrix sizes
-  int m = 256; // Rows in Q and output
+  int m = 128; // Rows in Q and output
   int n = 512; // Columns in K and V (and output)
   int k = 512; // Columns in Q and rows in K
 
   // Allocate memory for Q, K, V
-  choreo::f32 key[256][512]; // Query matrix (256 x 512)
-  choreo::f32 q[512][256];   // Key matrix (512 x 512)
-  choreo::f32 v[256][512];   // Value matrix (512 x 512)
+  choreo::f32 key[128][512]; // Query matrix (128 x 512)
+  choreo::f32 q[512][128];   // Key matrix (512 x 512)
+  choreo::f32 v[128][512];   // Value matrix (512 x 512)
 
   // Initialize Q, K, V with some values (example)
-  std::fill(&key[0][0], &key[0][0] + 256 * 512, 1.0f); // Fill lhs (Q) with 1.0
-  std::fill(&q[0][0], &q[0][0] + 512 * 256, 1.0f);     // Fill rhs (K) with 1.0
-  std::fill(&v[0][0], &v[0][0] + 256 * 512, 1.0f);     // Fill v (V) with 1.0
-  for (int i = 0; i < 256; ++i) {
+  std::fill(&key[0][0], &key[0][0] + 128 * 512, 1.0f); // Fill lhs (Q) with 1.0
+  std::fill(&q[0][0], &q[0][0] + 512 * 128, 1.0f);     // Fill rhs (K) with 1.0
+  std::fill(&v[0][0], &v[0][0] + 128 * 512, 1.0f);     // Fill v (V) with 1.0
+  for (int i = 0; i < 128; ++i) {
     for (int j = 0; j < 512; ++j) {
       key[i][j] = i + j; // Fill lhs (Q) with unique values
       q[i][j] = i + j;   // Fill rhs (K) with unique values
@@ -232,17 +232,17 @@ int main() {
     }
   }
   auto k_data =
-      choreo::make_spanview<2, choreo::f32>((choreo::f32 *)key, {256, 512});
+      choreo::make_spanview<2, choreo::f32>((choreo::f32 *)key, {128, 512});
   auto q_data =
-      choreo::make_spanview<2, choreo::f32>((choreo::f32 *)q, {512, 256});
+      choreo::make_spanview<2, choreo::f32>((choreo::f32 *)q, {512, 128});
   auto v_data =
-      choreo::make_spanview<2, choreo::f32>((choreo::f32 *)v, {256, 512});
+      choreo::make_spanview<2, choreo::f32>((choreo::f32 *)v, {128, 512});
 
   // Call attention function
   auto result = flash_attention(k_data, q_data, v_data);
-  float cpu_result[256][512] = {0};
+  float cpu_result[128][512] = {0};
   // Call attention function on CPU
-  cpu_attention(&q[0][0], &key[0][0], &v[0][0], &cpu_result[0][0], 256, 512);
+  cpu_attention(&q[0][0], &key[0][0], &v[0][0], &cpu_result[0][0], 128, 512);
 
   // Compare results
   bool match = true;

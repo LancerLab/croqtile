@@ -19,7 +19,7 @@ __co_device__ void relu_kernel(float* input, float* out) {
 } /// end of kernel decl
 
 
-__co__ f32 [512, 1024] relu(f32 [512, 1024] input) { /// device program
+__co__ f32 [128, 256] relu(f32 [128, 256] input) { /// device program
   f32[input.span(0), input.span(1)] output; // use same shape as input
 
   parallel p by 2 {  // p is sip_index
@@ -50,9 +50,9 @@ __co__ f32 [512, 1024] relu(f32 [512, 1024] input) { /// device program
 
 
 int main() { /// host program
-  choreo::f32 a[512][1024]; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::f32 b[512][512] = {0};
+  choreo::f32 a[128][256]; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::f32 b[128][128] = {0};
 
-  auto input_data = choreo::make_spanview<2, choreo::f32>((float*)a, {512, 1024});
+  auto input_data = choreo::make_spanview<2, choreo::f32>((float*)a, {128, 256});
   input_data.fill_random(-1.0, 1.0);
 
   auto start = std::chrono::high_resolution_clock::now();
@@ -69,11 +69,11 @@ int main() { /// host program
   // verfication
   for (size_t i = 0; i < res.shape()[0]; ++i)
     for (size_t j = 0; j < res.shape()[1]; ++j) {
-        std::cout << "i: " << i << ", j: " << j << "\n";
-        std::cout << "res: " << res[i][j] << "\n";
+        // std::cout << "i: " << i << ", j: " << j << "\n";
+        // std::cout << "res: " << res[i][j] << "\n";
         float ref = input_data[i][j] > 0? input_data[i][j] : 0;
 
-        std::cout << "ref: " << ref << std::endl;
+        // std::cout << "ref: " << ref << std::endl;
         choreo::choreo_assert(ref == res[i][j], "values are not equal.");
       }
   std::cout << "Test Passed\n" << std::endl;

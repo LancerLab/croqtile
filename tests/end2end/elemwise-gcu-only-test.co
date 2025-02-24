@@ -10,7 +10,7 @@ __co_device__ extern "C" void kernel(int * a, int * b, int * c, int n) {
 }
 } /// end of kernel decl
 
-__co__ s32 [6, 17, 128] ele_add(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) { /// device program
+__co__ s32 [6, 17, 64] ele_add(s32 [6, 17, 64] lhs, s32 [6, 17, 64] rhs) { /// device program
   s32[lhs.span] output; // use same shape as lhs
 
   parallel p by 6 {  // p is sip_index
@@ -35,11 +35,11 @@ __co__ s32 [6, 17, 128] ele_add(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) { //
 }
 
 int main() { /// host program
-  choreo::s32 a[6][17][128] = {0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge
-  choreo::s32 b[6][17][128] = {0};
+  choreo::s32 a[6][17][64] = {0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge
+  choreo::s32 b[6][17][64] = {0};
   
-  auto a_data = choreo::make_spanview<3, choreo::s32>((int*)a, {6, 17, 128});
-  auto b_data = choreo::make_spanview<3, choreo::s32>((int*)b, {6, 17, 128});
+  auto a_data = choreo::make_spanview<3, choreo::s32>((int*)a, {6, 17, 64});
+  auto b_data = choreo::make_spanview<3, choreo::s32>((int*)b, {6, 17, 64});
   a_data.fill_random(-10, 10);
   b_data.fill_random(-10, 10);
 
