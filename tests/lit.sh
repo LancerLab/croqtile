@@ -2,6 +2,7 @@
 
 # Get the directory where the script is located
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+timestamp=$(date +%Y%m%d%H%M%S)
 
 # Add the script's parent directory to PATH
 export PATH="$script_dir:${script_dir}/../:${script_dir}/../tools/bin:$PATH"
@@ -118,22 +119,12 @@ check_device_features() {
   fi
 }
 
-increment_counter() {
-  local counter=$1
-  local value=$2
-  local lock_file="/tmp/${counter}_lock"
-  
-  exec 200>"$lock_file"
-  flock -x 200
-  
-  eval $counter=$(($counter + value))
-  
-  exec 200>&-
-}
-
-lock_file="./build/test_script_lock"
-counter_file="./build/test_counters.txt"
-rm $counter_file
+lock_file="/tmp/test_script_lock_${timestamp}"
+counter_file="/tmp/test_counters_${timestamp}.txt"
+reproduce_file="/tmp/reproduce_commands_${timestamp}.txt"
+rm -f $counter_file
+rm -f $reproduce_file
+touch $reproduce_file
 
 initialize_counters() {
   if [ ! -f "$counter_file" ]; then
@@ -153,9 +144,9 @@ read_counter() {
 increment_counter() {
   local counter_name=$1
   local value=$2
-  local lock_file="/tmp/${counter_name}_lock"
+  local counter_lock_file="/tmp/${counter_name}_lock_${timestamp}"
 
-  exec 200>"$lock_file"
+  exec 200>"$counter_lock_file"
   flock -x 200
 
   local current_value
@@ -171,6 +162,17 @@ increment_counter() {
   exec 200>&-
 }
 
+append_reproduce_command() {
+  local command=$1
+  local reproduce_lock_file="/tmp/reproduce_lock_${timestamp}"
+
+  exec 200>"$reproduce_lock_file"
+  flock -x 200
+
+  echo "$command" >> "$reproduce_file"
+
+  exec 200>&-
+}
 
 # Function to replace placeholders and execute command
 execute_command() {
@@ -221,10 +223,8 @@ execute_command() {
 
   if [[ $exit_code -eq 0 ]]; then
     if [[ "$expect_fail" == "*"* ]]; then
-      # num_uepass=$(($num_uepass + 1));
       increment_counter num_uepass 1
-      reproduce_commands+=("$command");
-      # echo "UNEXPECTD PASS: $file ($count of $total)  |>>  Time: ${elapsed_time}"
+      append_reproduce_command "$command"
       if [[ ${#test_info} -gt $max_text_width ]]; then
         printf "%*s %s\n" $((max_text_width)) "UNEXPECTED PASS: $file ($count of $total)" "| Time: $elapsed_time"
       else
@@ -232,19 +232,15 @@ execute_command() {
       fi
     elif [[ ! -z "${expect_fail}" ]] &&
          [[ "$(toupper ${expect_fail})" ==  *"$(toupper ${gcu_arch})"* ]]; then
-      # num_uepass=$(($num_uepass + 1));
       increment_counter num_uepass 1
-      reproduce_commands+=("$command");
-      # printf "%-60.60s %10s\n" "UNEXPECTED PASS: $file ($count of $total)" "| Time: $elapsed_time"
+      append_reproduce_command "$command"
       if [[ ${#test_info} -gt $max_text_width ]]; then
         printf "%*s %s\n" $((max_text_width)) "UNEXPECTED PASS: $file ($count of $total)" "| Time: $elapsed_time"
       else
         printf "%-*s %s\n" "$max_text_width" "UNEXPECTED PASS: $file ($count of $total)" "| Time: $elapsed_time"
       fi
     else
-      num_passed=$(($num_passed + 1));
       increment_counter num_passed 1
-      # printf "%-60.60s %10s\n" "PASS: $file ($count of $total)" "| Time: $elapsed_time"
       if [[ ${#test_info} -gt $max_text_width ]]; then
         printf "%*s %s\n" $((max_text_width)) "PASS: $file ($count of $total)" "| Time: $elapsed_time"
       else
@@ -253,9 +249,7 @@ execute_command() {
     fi
   else
     if [[ "${expect_fail}" == "*"* ]]; then
-      # num_xfails=$(($num_xfails + 1));
       increment_counter num_xfails 1
-      # printf "%-60.60s %10s\n" "XFAIL: $file ($count of $total)" "| Time: $elapsed_time"
       if [[ ${#test_info} -gt $max_text_width ]]; then
         printf "%*s %s\n" $((max_text_width)) "XFAIL: $file ($count of $total)" "| Time: $elapsed_time"
       else
@@ -263,19 +257,15 @@ execute_command() {
       fi
     elif [[ ! -z "${expect_fail}" ]] &&
          [[ "$(toupper ${expect_fail})" ==  *"$(toupper ${gcu_arch})"* ]]; then
-      num_xfails=$(($num_xfails + 1));
       increment_counter num_xfails 1
-      # printf "%-60.60s %10s\n" "XFAIL: $file ($count of $total)" "| Time: $elapsed_time"
       if [[ ${#test_info} -gt $max_text_width ]]; then
         printf "%*s %s\n" $((max_text_width)) "XFAIL: $file ($count of $total)" "| Time: $elapsed_time"
       else
         printf "%-*s %s\n" "$max_text_width" "XFAIL: $file ($count of $total)" "| Time: $elapsed_time"
       fi
     else
-      num_failed=$(($num_failed + 1));
       increment_counter num_failed 1
-      reproduce_commands+=("$command");
-      # printf "%-60.60s %10s\n" "FAIL: $file ($count of $total)" "| Time: $elapsed_time"
+      append_reproduce_command "$command"
       if [[ ${#test_info} -gt $max_text_width ]]; then
         printf "%*s %s\n" $((max_text_width)) "FAIL: $file ($count of $total)" "| Time: $elapsed_time"
       else
@@ -317,6 +307,12 @@ if [ $is_gcu_available -eq 0 ] && [ $is_gpu_available -eq 0 ]; then
   exit 0
 fi
 
+cleantmplocks() {
+  rm -f $lock_file
+  rm -f $counter_lock_file
+  rm -f $reproduce_lock_file
+}
+
 showresult() {
   echo ""
   echo "------ Lit Test summary ------"
@@ -334,15 +330,18 @@ showresult() {
   if [[ $failed -ne 0 ]]; then
     echo ""
     echo "Commands to reproduce failures:"
-    for com in "${reproduce_commands[@]}"; do
-      echo $com;
-    done
+
+    while IFS= read -r com; do
+        echo "$com"
+    done < "$reproduce_file"
+
     return ${failed}
   fi
 }
 
 on_ctrl_c() {
   showresult
+  cleantmplocks
   exit 1
 }
 
@@ -352,71 +351,6 @@ toupper() {
     echo "$1" | tr '[:lower:]' '[:upper:]'
 }
 
-# Iterate over the array
-# for file in "${files_array[@]}"; do
-#     # check requirement specified by the file
-#     check_requirement $file
-#
-#     if [ ! -z "$expect_skip" ]; then
-#       echo "SKIP:  $file"
-#       num_skiped=$(($num_skiped + 1));
-# 			continue
-#     fi
-#
-#     if [ $is_gcu_available -eq 1 ]; then
-#       if [ ! -z "$test_target" ] && [ "$test_target" != "gcu-any" ]; then
-#         if [ "$gcu_arch" != "$test_target" ]; then
-#           echo "SKIP($test_target): ${file}"
-#           num_skiped=$(($num_skiped + 1));
-#           continue; #simply skip the unmatched target
-#         fi
-#       fi
-#
-#       if [ $requires_dynamic_shape -eq 1 ]; then
-#         if [ $is_dynshape_supported -eq 0 ]; then
-#           echo "SKIP(dyn-shape): ${file} "
-#           num_skiped=$(($num_skiped + 1));
-#           continue; #simply skip the unmatched target
-#         fi
-#       fi
-#
-#     elif [ $is_gpu_available -eq 1 ]; then
-#       if [ ! -z "$test_target" ] ; then
-#         if [ "$test_target" != "gpu" ]; then
-#           echo "SKIP($test_target): ${file}"
-#           num_skiped=$(($num_skiped + 1));
-#           continue; #simply skip the unmatched target
-#         fi
-#       fi
-#     fi
-#
-#     # Read the file and search for lines starting with "// RUN:"
-#     run_num=$(grep -E 'RUN(:|-.*:)' $file | wc -l)
-#     run_count=0
-#     while IFS= read -r line; do
-#         if [[ $line =~ ^//[[:blank:]]*RUN:[[:blank:]]*(.+) ]]; then
-#             run_count=$(($run_count + 1))
-#             # Extract the command after "RUN:"
-#             run_command="${BASH_REMATCH[1]}"
-#             # Execute the command with replacements
-#             execute_command "$file" "$run_command" "$run_count" "$run_num"
-#         elif [[ $line =~ ^//[[:blank:]]*RUN-(.+):[[:blank:]]*(.+) ]]; then
-#             run_count=$(($run_count + 1))
-#             run_target="${BASH_REMATCH[1]}"
-#             run_target=$(echo "$run_target" | tr '[:upper:]' '[:lower:]')
-#             if [[ "${run_target}" == "$gcu_arch" ]]; then
-#               # Extract the command after "RUN:"
-#               run_command="${BASH_REMATCH[2]}"
-#               # Execute the command with replacements
-#               execute_command "$file" "$run_command" "$run_count" "$run_num"
-#             else
-#               echo "SKIP($run_target): ${file} ($run_count of $run_num)"
-#               num_skiped=$(($num_skiped + 1)); #simply skip the unmatched target
-#             fi
-#         fi
-#     done < "$file"
-# done
-#
 for file in "${files_array[@]}"; do
   # check requirement specified by the file
   check_requirement $file
@@ -516,5 +450,5 @@ for file in "${files_array[@]}"; do
   fi
 done
 
-
 showresult
+cleantmplocks
