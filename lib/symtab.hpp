@@ -319,7 +319,8 @@ public:
 
       // If second-to-last "::" is found, return the substring up to that point
       if (secondLastPos != std::string::npos) {
-        return ScopeName().substr(0, secondLastPos + 2); // Include "::" in the result
+        return ScopeName().substr(0, secondLastPos +
+                                         2); // Include "::" in the result
       }
     }
 

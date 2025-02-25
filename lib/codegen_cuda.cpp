@@ -318,7 +318,7 @@ bool CUDACodeGen::Visit(AST::NamedVariableDecl& node) {
       _os << indent << "cudaMalloc(&";
       _os << sym;
       _os << ", ";
-      _os << sty->GetShape().GetSizeExpression();
+      _os << sty->GetShape().GetElementCountExpression();
       // TODO sort all size function together
       _os << "*4";
       _os << ");\n";
@@ -892,7 +892,7 @@ bool CUDACodeGen::Visit(AST::Call& c) {
             size = size * (*(std::get_if<int>(&shapes[dim_cursor++])));
           fs << std::to_string(size);
 #endif
-        fs << shape.GetSizeExpression();
+        fs << shape.GetElementCountExpression();
       } else if (arg->op == "dataof") {
         fs << STR(arg->GetR()) << "__buf__.data";
       }

@@ -502,8 +502,8 @@ public:
   constexpr size_t rank() const { return Rank; }
   const mdspan<Rank>& shape() const { return dims; }
 
-  size_t size() const { return span_size(dims); }
-  size_t bytes() const { return size() * sizeof(T); }
+  size_t element_count() const { return span_size(dims); }
+  size_t bytes() const { return element_count() * sizeof(T); }
   T* data() { return ptr; }
   T* data() const { return ptr; }
 
@@ -532,23 +532,25 @@ public:
   friend bool operator==(const spanned_view& l, const spanned_view& r) {
     if (l.dims != r.dims) return false;
 
-    for (size_t i = 0; i < l.size(); ++i)
+    for (size_t i = 0; i < l.element_count(); ++i)
       if (l.ptr[i] != r.ptr[i]) return false;
 
     return true;
   }
 
-  void fill(T value) { std::fill_n(this->data(), this->size(), value); }
+  void fill(T value) {
+    std::fill_n(this->data(), this->element_count(), value);
+  }
 
   void fill_random(T lb, T ub) {
-    fill_random(this->data(), this->size(), lb, ub);
+    fill_random(this->data(), this->element_count(), lb, ub);
   }
 
   template <typename U>
   typename std::enable_if<std::is_same<U, f16>::value ||
                           std::is_same<U, bf16>::value>::type
   fill_random(float lb, float ub) {
-    fill_random(this->data(), this->size(), lb, ub);
+    fill_random(this->data(), this->element_count(), lb, ub);
   }
 
 private:
@@ -632,8 +634,8 @@ public:
   constexpr size_t rank() const { return Rank; }
   const mdspan<Rank>& shape() const { return dims; }
 
-  size_t size() const { return span_size(dims); }
-  size_t bytes() const { return size() * sizeof(T); }
+  size_t element_count() const { return span_size(dims); }
+  size_t bytes() const { return element_count() * sizeof(T); }
   T* data() { return ptr.get(); }
 
   // allow multi-dim-style access, be like: a[1][3]
@@ -662,7 +664,7 @@ public:
   friend bool operator==(const spanned_data& l, const spanned_data& r) {
     if (l.dims != r.dims) return false;
 
-    for (size_t i = 0; i < l.size(); ++i)
+    for (size_t i = 0; i < l.element_count(); ++i)
       if (l.ptr[i] != r.ptr[i]) return false;
 
     return true;
@@ -694,26 +696,28 @@ spanned_view<T, 2> make_spanview(T (&arr)[N][M]) {
 
 template <typename T, size_t Rank>
 spanned_data<T, Rank> make_spandata(std::initializer_list<size_t> init) {
-  size_t size = 1;
-  for (auto& value : init) size *= value;
-  choreo_assert(size > 0, "error: invalid size.", __FILE__, __LINE__);
+  size_t element_count = 1;
+  for (auto& value : init) element_count *= value;
+  choreo_assert(element_count > 0, "error: invalid dimensions.", __FILE__,
+                __LINE__);
 
-  return spanned_data<T, Rank>(std::make_unique<T[]>(size),
+  return spanned_data<T, Rank>(std::make_unique<T[]>(element_count),
                                make_mdspan<Rank>(init));
 }
 
 // converting from vector to another type
 template <size_t Rank, typename T>
 auto copy_as_spanned(T* ptr, std::initializer_list<size_t> init) {
-  size_t size = 1;
-  for (auto& value : init) size *= value;
-  choreo_assert(size > 0, "error: invalid size.", __FILE__, __LINE__);
+  size_t element_count = 1;
+  for (auto& value : init) element_count *= value;
+  choreo_assert(element_count > 0, "error: invalid dimensions.", __FILE__,
+                __LINE__);
 
-  auto parr = std::make_unique<T[]>(size);
-  std::copy(ptr, ptr + size, parr.get());
+  auto parr = std::make_unique<T[]>(element_count);
+  std::copy(ptr, ptr + element_count, parr.get());
   auto res = spanned_data<T, Rank>(std::move(parr), make_mdspan<Rank>(init));
-  choreo_assert(res.bytes() == size * sizeof(T), "error: size does not match.",
-                __FILE__, __LINE__);
+  choreo_assert(res.bytes() == element_count * sizeof(T),
+                "error: element_count does not match.", __FILE__, __LINE__);
   return res;
 }
 

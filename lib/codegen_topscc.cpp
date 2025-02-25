@@ -406,7 +406,8 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
         if (n.init_value) {
           // support initialization of output
           hs << h_indent << "std::fill(" << sym_data << ", " << sym_data << "+"
-             << sym << ".size()" << ", " << ExprSTR(n.init_value) << ");\n";
+             << sym << ".element_count()" << ", " << ExprSTR(n.init_value)
+             << ");\n";
         }
         hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
         hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym << ", "
@@ -620,7 +621,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       if (f_ca->positions == nullptr && t_ca->positions == nullptr) {
         // direct copy
         hs << h_indent << bts << " * " << buf_sym << " = " << buf_sym_from
-            << ";\n";
+           << ";\n";
       } else if (f_ca->positions == nullptr && t_ca->positions != nullptr) {
         static int s_cnt = 0;
         auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
@@ -644,8 +645,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         }
         hs << h_indent << "int " << off_name << " = " << offset.str() << ";\n";
 
-        hs << h_indent << bts << " * " << buf_sym << " + " << off_name << " = " << buf_sym_from
-            << ";\n";
+        hs << h_indent << bts << " * " << buf_sym << " + " << off_name << " = "
+           << buf_sym_from << ";\n";
       } else if (f_ca->positions != nullptr && t_ca->positions == nullptr) {
         static int s_cnt = 0;
         auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
@@ -1464,8 +1465,8 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       else if (isa<AST::Identifier>(expr->GetReference()))
         if (cast<AST::Identifier>(expr->GetReference())->name == "_")
           return "(0)";
-      else
-        choreo_unreachable("Unsupported reference: " + PSTR(expr));
+        else
+          choreo_unreachable("Unsupported reference: " + PSTR(expr));
     } else if (expr->IsUnary()) {
       if (expr->op == "!") {
         oss << "!(" << ExprSTR(expr->GetR(), is_host) << ")";
@@ -1483,7 +1484,7 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
         auto var = RemoveSuffix(*AST::GetName(*expr->GetR()), ".span");
         auto shape = GetShape(GetSymbolType(var));
         assert(shape.IsValid() && "Invalid shape is found");
-        oss << shape.GetSizeExpression();
+        oss << shape.GetElementCountExpression();
       } else
         choreo_unreachable("Unsupported choreo expression.");
     } else if (expr->IsBinary()) {

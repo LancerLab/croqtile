@@ -465,8 +465,9 @@ struct Shape {
     return res;
   }
 
-  std::string GetSizeExpression(bool ULL_suffix = false) const {
-    if (!IsDynamic()) return std::to_string(Size()) + (ULL_suffix ? "ULL" : "");
+  std::string GetElementCountExpression(bool ULL_suffix = false) const {
+    if (!IsDynamic())
+      return std::to_string(ElementCount()) + (ULL_suffix ? "ULL" : "");
 
     assert(!Value().empty() && "no values inside the shape.");
     std::string res;
@@ -494,7 +495,7 @@ struct Shape {
     return *ilist;
   }
 
-  size_t Size() const {
+  size_t ElementCount() const {
     auto ilist = IntList();
     size_t sz = 1;
     for (int s : ilist) {
@@ -965,19 +966,19 @@ struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
   }
 
   // use these interface when the shape is NOT runtime-shaped
-  size_t ShapeSize() const { return GetShape().Size(); }
-  size_t ByteSize() const { return SizeOf(f_type) * GetShape().Size(); }
+  size_t ElementCount() const { return GetShape().ElementCount(); }
+  size_t ByteSize() const { return SizeOf(f_type) * GetShape().ElementCount(); }
 
   const std::string ShapeSizeExpression(bool ULL_suffix = false) const {
     if (RuntimeShaped())
-      return "(" + GetShape().GetSizeExpression(ULL_suffix) + ")";
+      return "(" + GetShape().GetElementCountExpression(ULL_suffix) + ")";
     else
-      return std::to_string(ShapeSize()) + (ULL_suffix ? "ULL" : "");
+      return std::to_string(ElementCount()) + (ULL_suffix ? "ULL" : "");
   }
 
   const std::string ByteSizeExpression(bool ULL_suffix = false) const {
     if (RuntimeShaped())
-      return "(" + GetShape().GetSizeExpression(ULL_suffix) + ") * " +
+      return "(" + GetShape().GetElementCountExpression(ULL_suffix) + ") * " +
              std::to_string(SizeOf(f_type));
     else
       return std::to_string(ByteSize()) + (ULL_suffix ? "ULL" : "");
