@@ -215,10 +215,14 @@ public:
 
 // step 0 prepare: 
 // get max_parallel_level before handling; 
-struct ParallelLevelAnalysis : public LateNormBase {
+struct ParallelLevelAnalysis : public VisitorWithSymTab {
+  // utils for heterogeneous scenario analysis
+  int parallel_level = 0;
+  int max_parallel_level = 0;
+
 public:
   ParallelLevelAnalysis(const ptr<SymbolTable> s_tab)
-      : LateNormBase(s_tab, "parallel-level-analysis") {}
+      : VisitorWithSymTab("parallel-level-analysis", s_tab) {}
   ~ParallelLevelAnalysis() {}
 
 protected:
