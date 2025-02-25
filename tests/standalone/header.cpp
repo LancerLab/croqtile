@@ -95,8 +95,8 @@ TEST_F(HeaderTest, SpanViewTest) {
   ASSERT_TRUE(sv1.rank() == 3);
   ASSERT_TRUE(sv2.rank() == 4);
   ASSERT_FALSE(sv0.shape() == sv1.shape());
-  ASSERT_TRUE(sv0.size() == sv1.size());
-  ASSERT_TRUE(sv0.size() == sv2.size());
+  ASSERT_TRUE(sv0.element_count() == sv1.element_count());
+  ASSERT_TRUE(sv0.element_count() == sv2.element_count());
 
   std::flush(std::cout);
   auto s = sv0.shape();
