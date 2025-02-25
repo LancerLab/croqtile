@@ -56,6 +56,9 @@ CMAKE_BUILD_TYPE = Release
 # Build rules
 all: build-with-cmake-ninja
 
+# lit max-jobs config
+JOBS ?= 1
+
 # Specific Release/debug build
 release: CMAKE_BUILD_TYPE=Release
 release: CMAKE_BUILD_DIR=$(REL_BUILD_DIR)
@@ -200,7 +203,7 @@ standalone_test: $(TARGET)
 # toolchains
 FLEX = $(TOOLCHAIN_DIR)/bin/flex
 BISON_BIN = $(TOOLCHAIN_DIR)/bin/bison
-LIT:=$(WORK_DIR)/tests/lit.sh
+LIT:=$(WORK_DIR)/tests/lit.sh -j$(JOBS)
 FILECHECK:=$(TOOLCHAIN_DIR)/bin/FileCheck
 PACKAGE_NAME=choreo_toolchain_240703.tgz
 SUPPORT_PKG =$(TOOLCHAIN_DIR)/$(PACKAGE_NAME)

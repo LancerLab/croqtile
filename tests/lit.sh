@@ -47,6 +47,8 @@ requires_dynamic_shape=0
 expect_fail=
 expect_skip=
 
+max_jobs=1
+
 # Function to fill the target-specific variables
 check_requirement() {
   local file=$1
@@ -125,6 +127,9 @@ reproduce_file="/tmp/reproduce_commands_${timestamp}.txt"
 rm -f $counter_file
 rm -f $reproduce_file
 touch $reproduce_file
+
+
+
 
 initialize_counters() {
   if [ ! -f "$counter_file" ]; then
@@ -275,28 +280,51 @@ execute_command() {
   fi
 }
 
-# Check if the argument is a valid file or directory
-if [ -d "$1" ]; then
-    # Directory: Fill the array with .co files from the directory
-    files_array=($(find "$1" -type f -name '*.co'))
-#    files_array=($(find "$1" -type f -name '*.co' | grep -v 'only'))
-#    if [ $is_gpu_available -eq 1 ]; then
-#        files_array+=($(find "$1" -type f -name '*.co' | grep 'gpu-only'))
-#    fi
-#    if [ $is_gcu_available -eq 1 ]; then
-#        files_array+=($(find "$1" -type f -name '*.co' | grep 'gcu-only'))
-#    fi
-    # verbose all tests files
-    # for file in "${files_array[@]}"; do
-    #     echo "$file"
-    # done
-elif [ -f "$1" ]; then
-    # File: Fill the array with the single file
-    files_array=("$1")
-else
-    echo "Provided argument is not a valid file or directory."
+# ---------------------------------------"
+#         Handle arguments
+# ---------------------------------------"
+if [ $# -lt 1 ]; then
+    echo "Usage: $0 [-jN] <file_or_directory>"
     exit 1
 fi
+
+# Process arguments with while-case loop
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -j*)
+      # Handle -jN argument (extract the number after -j)
+      num_jobs="${1#-j}"
+
+      if [[ ! "$num_jobs" =~ ^[1-9][0-9]*$ ]]; then
+          echo "Error: Invalid -j value '$num_jobs'. It must be a positive integer."
+          exit 1
+      fi
+
+      max_jobs="$num_jobs"
+      shift
+      ;;
+    -*)
+      # Handle invalid option
+      echo "Unknown option: $1"
+      exit 1
+      ;;
+    *)
+      # Handle the first positional argument (file or directory)
+      if [ -d "$1" ]; then
+          # If it's a directory, find all .co files
+          files_array=($(find "$1" -type f -name '*.co'))
+      elif [ -f "$1" ]; then
+          # If it's a file, add it to the array
+          files_array=("$1")
+      else
+          # Invalid argument
+          echo "Provided argument is not a valid file or directory."
+          exit 1
+      fi
+      shift
+      ;;
+  esac
+done
 
 # check device supported feature
 check_device_features
@@ -429,7 +457,15 @@ for file in "${files_array[@]}"; do
         run_command="${BASH_REMATCH[1]}"
 
         # Run the command in the background
-        execute_command "$file" "$run_command" "$run_count" "$run_num" &
+        if [[ $max_jobs -eq 1 ]]; then
+          # specialised serial test logic
+          execute_command "$file" "$run_command" "$run_count" "$run_num"
+        else
+          while [[ $(jobs | wc -l) -ge $max_jobs ]]; do
+            wait -n
+          done
+          execute_command "$file" "$run_command" "$run_count" "$run_num" &
+        fi
       elif [[ $line =~ ^//[[:blank:]]*RUN-(.+):[[:blank:]]*(.+) ]]; then
         run_count=$(($run_count + 1))
         run_target="${BASH_REMATCH[1]}"
@@ -437,7 +473,15 @@ for file in "${files_array[@]}"; do
         if [[ "${run_target}" == "$gcu_arch" ]]; then
           run_command="${BASH_REMATCH[2]}"
           # Run the command in the background
-          execute_command "$file" "$run_command" "$run_count" "$run_num" &
+          if [[ $max_jobs -eq 1 ]]; then
+            # specialised serial test logic
+            execute_command "$file" "$run_command" "$run_count" "$run_num"
+          else
+            while [[ $(jobs | wc -l) -ge $max_jobs ]]; do
+              wait -n
+            done
+            execute_command "$file" "$run_command" "$run_count" "$run_num" &
+          fi
         else
           echo "SKIP($run_target): ${file} ($run_count of $run_num)"
           num_skiped=$(($num_skiped + 1)); #simply skip the unmatched target
