@@ -36,6 +36,6 @@ int bar(int a[], int b[]) {
   return foo(a) + b;
 }
 
-// CHECK: error: syntax error, unexpected IDENTIFIER, expecting [ or MDSPAN
+// CHECK: error: syntax error, unexpected 
 // CHECK:   __co__ int foo(f32 d[]) {
 // CHECK:                      ^

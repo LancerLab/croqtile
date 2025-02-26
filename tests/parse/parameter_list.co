@@ -1,0 +1,43 @@
+// RUN: choreo -e %s | FileCheck --match-full-lines %s
+
+// recognize the __co__ function's parameters
+
+__co__ s32 foo(s32 a, s32 mdspan<1>) { }
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: foo
+// CHECK:  `- Return type: s32
+// CHECK:  `- Parameters
+// CHECK:    `-  type: s32, symbol: a
+// CHECK:    `-  type: s32 <1>, symbol: anon_0
+
+__co__ s8 foo(s8 a, s8 mdspan<1>) { }
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: foo
+// CHECK:  `- Return type: s8
+// CHECK:  `- Parameters
+// CHECK:    `-  type: s8, symbol: a
+// CHECK:    `-  type: s8 <1>, symbol: anon_1
+
+__co__ bf16 foo(bf16 a, bf16 mdspan<1>) { }
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: foo
+// CHECK:  `- Return type: bf16
+// CHECK:  `- Parameters
+// CHECK:    `-  type: bf16, symbol: a
+// CHECK:    `-  type: bf16 <1>, symbol: anon_2
+
+__co__ f32 foo(f32 a, f32 mdspan<1>) { }
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: foo
+// CHECK:  `- Return type: f32
+// CHECK:  `- Parameters
+// CHECK:    `-  type: f32, symbol: a
+// CHECK:    `-  type: f32 <1>, symbol: anon_3
+
+__co__ auto ele_add() {
+  s32[lhs.span] output;
+}
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: ele_add
+// CHECK:  `- Return type: unknown
+// CHECK:  `- Var Decl (s32 [ lhs.span ], default): output
