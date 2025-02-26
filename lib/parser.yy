@@ -62,9 +62,9 @@ const char* color_reset = "\033[0m";
 const char* color_green = "\033[32m";
 
 static inline bool shell_supports_colors() {
-  const char* term = getenv("TERM");
-  return term && (strcmp(term, "xterm-256color") == 0
-  			  || strcmp(term, "xterm") == 0);
+	const char* term = getenv("TERM");
+	return term && (strcmp(term, "xterm-256color") == 0
+							 || strcmp(term, "xterm") == 0);
 }
 
 static inline bool should_use_colors() {
@@ -192,7 +192,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause multi_decls named_spanned_decl
 %nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers passables future_data_list template_params gi_list
 %nterm <AST::ptr<AST::Expr>> s_expr template_value_expr span_expr id_expr bound_expr optional_pred
-%nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type scalar_and_fundamental_type
+%nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
 %nterm <AST::ptr<AST::Parameter>> parameter
 %nterm <AST::ptr<AST::ChoreoFunction>> dsl_function
@@ -264,10 +264,10 @@ return_type
     ;
 
 param_type
-    : fundamental_type param_mdspan {
+    : scalar_type { $$ = $1; }
+    | fundamental_type param_mdspan {
         $$ = AST::Make<AST::DataType>(@1, $1, $2);
       }
-    | scalar_and_fundamental_type { $$ = $1; }
     ;
 
 param_mdspan
@@ -323,10 +323,6 @@ auto_type
 scalar_type
     : INT   { $$ = AST::Make<AST::DataType>(@1, $1); }
     | BOOL  { $$ = AST::Make<AST::DataType>(@1, $1); }
-
-scalar_and_fundamental_type
-    : scalar_type { $$ = $1; } 
-    | fundamental_type { $$ = AST::Make<AST::DataType>(@1, $1); }
     ;
 
 spanned_type
@@ -546,12 +542,11 @@ assignments
     ;
 
 declarations
-    : multi_decls { 
-    $$ = $1; }
-    | declaration {
+    : declaration {
         $$ = AST::Make<AST::MultiNodes>(@1);
         $$->Append($1);
       }
+    | multi_decls { $$ = $1; }
     ;
 
 declaration
@@ -566,7 +561,6 @@ multi_decls
 
 named_scalar_decl
     : scalar_type IDENTIFIER optional_scalar_init {
-        printf("matched ID in named_scalar_type\n");
         assert($1->isScalar() && "Not a scalar type.");
         symtab.AddSymbol($2, $1->GetType());
         if (!$3)
