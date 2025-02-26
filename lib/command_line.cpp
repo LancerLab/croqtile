@@ -37,7 +37,7 @@ Option<bool> pp_only(OptionKind::User, "-E", "", false,
 Option<bool> no_pp(OptionKind::Hidden, "--no-preprocess", "-npp", false,
                    "Donnot invoke Choreo Proprocessor to compile.");
 Option<bool> use_kernel_template(
-    OptionKind::Hidden, "--use_kernel_template", "-kt", false,
+    OptionKind::Hidden, "--use-kernel-template", "-kt", false,
     "(Experimental) Allow choreo code to instantiate C++ template functions.");
 Option<bool>
     native_f16(OptionKind::User, "--native-f16", "-f16n", false,

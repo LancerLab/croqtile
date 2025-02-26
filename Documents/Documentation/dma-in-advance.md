@@ -1,4 +1,11 @@
-### The Placeholders
+## Overview
+The data movement is essential for *tileflow programs*. In this section, you will learn more advanced syntax of *DMA statements* to support different scenarios.
+
+## Advances in *Data Expression*
+### Reshape with `.span_as`
+
+
+### Dimension Composition inside `chunkat`
 
 ### Full Non-Blocking DMA Mode (Chain Mode in Choreo)
 In Choreo, it's possible to perform a full non-blocking DMA by chaining multiple asynchronous DMA operations and using event-based notifications with after. This enables complete non-blocking execution, where one DMA operation is triggered only after the completion of a prior one. Here’s an example of such a setup:
@@ -16,5 +23,9 @@ In this case, neither `out_store` nor `out_store_s` will block the main program 
 
 ## Dynamic Shape
 
+### The Placeholders
+
 
 ## Mutate the Current Value
+
+

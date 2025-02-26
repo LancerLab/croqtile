@@ -1,76 +1,125 @@
-In Choreo, the `call` statement is used to invoke kernel functions defined within a kernel program (i.e., `cok`). It provides a convenient way to trigger kernel execution, passing the necessary arguments that the kernel function requires for computation. Below, we will break down the structure of a call statement and explain its key components.
+## Overview
+In current implementation of Choreo functions, it invokes *device function* to implement the specified target computations. In this section, we will learn the detail about the *call statement*s in Choreo.
 
-### Syntax of Call Statements
+## Call Device Functions
+
+To call a device function in the choreo function, it requires the call statement explicitly led by `call`.
+
+### Basic Syntax of Call Statements
 
 The general syntax for a `call` statement in Choreo is:
 
 ```choreo
-call krn-func-name <template-args> (arguments);
+call func-name <optional-template-args> (arguments);
 ```
+Here, the keyword `call` is followed by a function name `func-name`, an optional `<>` enclosed template arguments, which are comma-seperated. The `arguments` are also comma-seperated and listed inside `()` like normal C/C++ functions.
 
+Note that **Choreo transpilation process would not apply any check between the callers and the callees**, including the function existence, function signature consistency, and parameter consistency. It delegates such duties to the target compilation process. Programmers must be careful about the conventions between choreo function and device function consequently.
 
-#### 1. **krn-func-name** (Kernel Function Name)
-- This is the name of the kernel function that is being called.
-- It corresponds to a function defined within a kernel program (or `cok`).
-  
-#### 2. **template-args** (Template Arguments)
-- The template arguments specify the types and shapes that are passed to the kernel function. 
-- These arguments are provided inside `<` and `>` brackets. In Choreo, template arguments are crucial for specifying the shapes and sizes of the data that the kernel will process.
-- For example, in the statement `call matmul_kernel_sm_stationary<output.span(0)/#p, output.span(1)/#q, 32, 16, 16>(lhs_load.data, rhs_load.data, l2_out);`, `output.span(0)/#p` and `output.span(1)/#q` are template arguments defining the dimensions of the output matrix, while `32`, `16`, and `16` are fixed dimension sizes used for tiling.
+Beside that, in all the currently supported platform, such calls must be made inside `parallel-by`, since it calls device function which only runs on heteregeneous hardware. Therefore, in the following example, `call bar();` in `mou` is illegal code since it tries to call device function in a code location which is assumed to be host code area.
 
-#### 3. **arguments** (Kernel Arguments)
-- The arguments are the actual values or data that are passed into the kernel function. 
-- These arguments can be of primitive types (such as integers or floating-point values), or they can be **data types** (which represent memory references or views into data).
-  
-In the example call:
 ```choreo
-call matmul_kernel_sm_stationary<output.span(0)/#p, output.span(1)/#q, 32, 16, 16>(lhs_load.data, rhs_load.data, l2_out);
-```
-where `lhs_load.data`, `rhs_load.data`, and `l2_out` are the arguments passed into the kernel. These are references to data stored in memory, and each of them must resolve to a data type (not a future handle).
-
-### Arguments allowed types
-Basically, kernel function can takes primitive types (s32 as int32_t, u32 as unsigned int, and so on), and data types in Choreo.
-If one of the arguments involves a future handle, the syntax to extract the underlying data would be:
-Instead of passing a future handle directly to the kernel, use .data to access the data contained in the future.
-```choreo
-lhs_load.data
-```
-In this case, lhs_load is a future handle (from a previous dma operation), and .data is used to access the actual data that the kernel will operate on.
-
-### Kernel templates in Choreo
-Choreo provides powerful support for kernel function templates, which allows for highly flexible and efficient execution on different hardware backends, even with backends that does not support template call (such as **Factor**).
-
-#### Template Parameters and Requirements
-
-When defining a kernel function, you can use template parameters to enable specialization based on the data shape, dimensions, or other factors. The template parameters in Choreo can be expressions, and the kernel can be specialized based on these parameters at compile-time. This flexibility can significantly reduce code complexity and enhance optimization.
-
-Example Kernel Definition:
-```choreo
-template <typename T, int P, int Q, int M, int N, int K>
-void matmul_kernel_sm_stationary(T* lhs, T* rhs, T* output) {
-    // Kernel logic for matrix multiplication
+__co__ void foo() {
+  parallel p by 1 {
+    call bar();  // ok
+  }
+}
+__co__ void mou() {
+  call bar();  // error: not able to call device function from host
 }
 ```
-In this case:
 
-- P, Q, M, N, and K are template parameters that specify the dimensions of the matrices.
-- These parameters can be evaluated symbolically at compile-time, and they allow the kernel to be highly specialized for different shapes.
+### The Convention: Allowed Argument Types
+In current implementation, the argument must be either:
 
-### Expression support in template arguments
+- *Spanned Data* type, or
+- *Integer* type, or
+- *Floating-Point* (literals only).
 
-Choreo's template system is more flexible than standard C++ templates in the sense that it does not require constexpr or const for the template parameters. Instead, Choreo allows symbolic expressions that can be evaluated at compile-time based on the context of the program.
-
-For instance, while traditional C++ template parameters require constexpr or constant values, Choreo allows dynamic dimensions to be part of the template parameters, as long as the dimensions are constraint-free at compile-time.
-
-This feature is built upon Choreo comprehensive compile-time evaluation system for any expressions in program.
-Choreo permits symbolic expressions that can be resolved during compilation, making it easier to handle cases where the dimensions of data are not known at the time of writing but can be inferred from the program's structure
-
-To enable Choreo's template parameter functionality, you need to use the `-kt` compiler option, which allows the kernel function to be written as a standard C++ template function. This option removes the need for extern "C" decoration and enables more advanced template functionality, such as symbolic evaluation of template parameters.
-
-When the `-kt` option is enabled, the kernel function should be written in standard C++ template form, without the extern "C" linkage specification.
+The below code showcases an example:
 
 ```choreo
-int M = 32;
-int N = 16;
-call matmul_kernel_sm_stationary<output.span(0)/#M, output.span(1)/#N, 64, 16, 16>(lhs_load.data, rhs_load.data, l2_out);
+__device__ void bar(float *p, int m, int n) {}
+__device__ void foo(float *p, int n, unsigned i, float j) {}
+
+__co__ void foobar(f32 [M, 24] input, int N) {
+  parallel p by 1 {
+    shared f32 [14, 7] buffer;
+    call bar(input.data, M, buffer.span(0));
+    call foo(buffer.data, N, 3, 3.14f);
+  }
+}
 ```
+
+In this example, it passes different data types as arguments from choreo function to the device functions, which matches the device parameters exactly. Note that in the device function, the **corresponding parameter type of the *spanned data* argument is simply the pointer of its _element type_**, where the shape information is dropped. For example, the `foo`'s argument `p` is `float*`, which corresponds the *spanned data* argument `input.data`. In Choreo, we names the parameter as a **decayed** pointer of the *spanned data*. If using other form like `float p[]`, it will trigger failure in target compilation stage.
+
+For some types like `f16`, and `bf16`, there may not be native target support of such types, it is possible to utilize `choreo::f16` and `choreo::bf16` to handle such types.
+
+## Call Template Functions
+
+### Trigger C++ Template Instantiation
+
+It is possible for Choreo code to make function call to a template function. For example:
+
+```
+template<int M, int N, int K>
+__device__ void matmul_kernel(int *lhs, int* rhs, int* output) {}
+
+__co__ matmul(s32 [96, 72] lhs, s32 [72, 24] rhs) {
+  s32 [lhs.span(0), rhs.span(1)] output;
+  parallel p by 6 {
+    shared s32 [output / #p] buffer;   // shape: [16, 4]
+    call matmul_kernel<buffer.span(0), buffer.span(1), 72>(lhs_load.data, rhs_load.data, buffer);
+  }
+}
+```
+In this case, it defines device function template named `matmul_kernel`, which takes three template parameters. As the caller specified the template function arguments, it triggers the instantiation of the function template, which results in a template function `matmul<16, 4, 72>` for the call.
+
+So in Choreo, calling a template function is similar to those in C++. However, **the template argument passed must be able to be inferenced as compile time constant value** by Choreo compiler. Therefore, any runtime values can result in error.
+
+```choreo
+__co__ void foo(int M) {
+  parallel p by 1 {
+    call bar<M>();  // error: 'M' is a runtime value
+  }
+}
+```
+
+Choreo compiler could inference values as much as possible at compile time. If the template argument can not be inferenced, the compilation will abort and error will be emitted.
+
+
+### *Factor* Target Specific Details
+
+In some target like *factor*, it requires the device function to follow C-linkage, where the device functions must be prefixed with `extern "C"`. Since template functions can not be applies to functions with C-linkage, Choreo has some wrapper tricks to enable it. For example:
+
+```choreo
+__cok__ {
+extern "C" void bar(int v) {};  // v is a compile-time constant
+}
+
+__co__ void foo() {
+  parallel p by 1 { call bar(3); }
+}
+```
+
+Programmers can turn `bar` into a function template, like following:
+
+```choreo
+__cok__ {
+template <int v> void bar() {};
+
+// compiler generate a explicit function template specialization:
+// template<> void bar<3>() {};
+}
+
+__co__ void foo() {
+  parallel p by 1 { call bar<3>(); }
+}
+```
+
+As the comment depicts, Choreo compiler may generate a specialization version of function template `bar<3>`, which enables the function template as well. But note that, the function template no longer requires `extern "C" decoration` as those for normal *factor* device functions.
+
+As the implementation is different with other targets, you may utilize `-kt` to enable such functionality for *choreo-factor* compilation.
+
+### Quick Summary
+In this section, we learned the syntax to invoke device functions, including normal ones and those triggers function template instantiations. Programmers must code in cautious since no check is applied at transpilation time, which may result in more confusing error reporting since the check is applied at target compile time with generated functions.

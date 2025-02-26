@@ -49,8 +49,8 @@ nav:
       - Call Device Program in Tileflow: call-in-choreo.md
       - Macro and Preprocessing: macro-in-choreo.md
     - Advanced Features and Techniques:
-      - Advanced In Program Control: loop-in-advance.md
-      - Advanced In DMA: dma-in-advance.md
+      - Advanced Program Control: loop-in-advance.md
+      - Advanced Data Movement: dma-in-advance.md
     - Additional Topics:
       - Check Tileflow Program Statically: compiler-func.md
       - Useful Utilities: assertion.md
