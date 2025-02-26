@@ -1395,8 +1395,8 @@ bool EarlySemantics::Visit(AST::ForeachBlock& n) {
 
   if (n.pred) {
     if (!isa<BooleanType>(NodeType(*n.pred))) {
-      Error(n.LOC(), "requires a predication expression but got '" +
-                         PSTR(NodeType(*n.pred)) + "'.");
+      Error(n.pred->LOC(), "requires a predication expression but got '" +
+                               PSTR(NodeType(*n.pred)) + "'.");
       error_count++;
     }
   }
@@ -1404,20 +1404,31 @@ bool EarlySemantics::Visit(AST::ForeachBlock& n) {
   for (auto& i : n.GetRanges()) {
     if (auto id = dyn_cast<AST::LoopRange>(i)->iv) {
       if (id->name == "_") {
-        Error(n.LOC(), "_ is not allowed as an iteration variable.");
+        Error(id->LOC(), "_ is not allowed as an iteration variable.");
         error_count++;
         continue;
       }
       auto ity = NodeType(*id);
       if (!(IsBoundedType(ity))) {
-        Error(n.LOC(), "expect a bounded type for iteration variable '" +
-                           id->name + "' but got '" + PSTR(ity) + "'.");
+        Error(id->LOC(), "expect a bounded type for iteration variable '" +
+                             id->name + "' but got '" + PSTR(ity) + "'.");
+        error_count++;
+        continue;
+      }
+      std::string scope_name = GetScope(InScopeName(id->name));
+      auto scopes = SplitStringByDelimiter(scope_name, "::");
+      if (!PrefixedWith(scopes.back(), "within_")) {
+        std::string error_msg = "expect the bounded variable '" + id->name +
+                                "' to be declared by 'within' block";
+        if (PrefixedWith(scopes.back(), "paraby_"))
+          error_msg += " instead of 'parallel-by' block";
+        Error(id->LOC(), error_msg + ".");
         error_count++;
       }
     } else {
       auto ity = i->GetType();
       if (!(IsBoundedType(ity))) {
-        Error(n.LOC(), "expect a bounded type but got '" + PSTR(ity) + "'.");
+        Error(i->LOC(), "expect a bounded type but got '" + PSTR(ity) + "'.");
         error_count++;
       }
     }

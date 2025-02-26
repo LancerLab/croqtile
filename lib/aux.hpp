@@ -70,21 +70,20 @@ inline static std::string DelimitedString(const Container& container,
 
 // split `input` to a vector
 inline static std::vector<std::string>
-SplitStringByDelimiter(std::string input, std::string delimiter = ",") {
+SplitStringByDelimiter(std::string input, std::string delimiter = ",",
+                       bool trim = true) {
   std::vector<std::string> tokens;
   size_t pos = 0;
+  std::string token;
   while ((pos = input.find(delimiter)) != std::string::npos) {
-    std::string token = input.substr(0, pos);
-    // remove leading and trailing whitespace
-    token.erase(0, token.find_first_not_of(" \t"));
-    token.erase(token.find_last_not_of(" \t") + 1);
-    tokens.push_back(token);
-    input.erase(0, pos + 1);
+    token = input.substr(0, pos);
+    if (!token.empty()) tokens.push_back(token);
+    input.erase(0, pos + delimiter.length());
   }
-  std::string token = input;
-  token.erase(0, token.find_first_not_of(" \t"));
-  token.erase(token.find_last_not_of(" \t") + 1);
-  tokens.push_back(token);
+  if (!input.empty()) tokens.push_back(input);
+  if (!trim) return tokens;
+  for (auto& token : tokens)
+    token = std::regex_replace(token, std::regex("^\\s+|\\s+$"), "");
   return tokens;
 }
 
