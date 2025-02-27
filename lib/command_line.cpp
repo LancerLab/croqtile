@@ -39,6 +39,10 @@ Option<bool> no_pp(OptionKind::Hidden, "--no-preprocess", "-npp", false,
 Option<bool> use_kernel_template(
     OptionKind::Hidden, "--use-kernel-template", "-kt", false,
     "(Experimental) Allow choreo code to instantiate C++ template functions.");
+Option<bool> use_hetero_tileflow(
+    OptionKind::Hidden, "--use-hetero-tileflow", "-ht", false,
+    "(Experimental) Allow choreo code to apply implicit/aggressive tileflow",
+    "optimisation under heterogeneous scenario.");
 Option<bool>
     native_f16(OptionKind::User, "--native-f16", "-f16n", false,
                "Utilize native f16 type when target platform support.");

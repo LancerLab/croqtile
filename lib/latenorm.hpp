@@ -10,6 +10,8 @@
 #include "types.hpp"
 #include "visitor.hpp"
 
+extern Option<bool> use_hetero_tileflow;
+
 namespace Choreo {
 
 class WorkingList {
@@ -630,18 +632,20 @@ public:
 
     if (prt_visitor) dbgs() << "|- " << GetName() << NewL;
 
-    ParallelLevelAnalysis pla(SymTab());
-    root.accept(pla);
-    if (prt_visitor) dbgs() << " |- " << pla.GetName() << NewL;
-    if (pla.HasError()) return false;
-    auto max_plv = pla.getMaxParallelLv();
+    if (use_hetero_tileflow) {
+      ParallelLevelAnalysis pla(SymTab());
+      root.accept(pla);
+      if (prt_visitor) dbgs() << " |- " << pla.GetName() << NewL;
+      if (pla.HasError()) return false;
+      auto max_plv = pla.getMaxParallelLv();
 
-    HostSliceBufferGen hsg(SymTab(), max_plv);
-    hsg.SetTraceVisit(trace_visit);
-    hsg.SetDebugVisit(debug_visit);
-    if (prt_visitor) dbgs() << " |- " << hsg.GetName() << NewL;
-    root.accept(hsg);
-    if (hsg.HasError()) return false;
+      HostSliceBufferGen hsg(SymTab(), max_plv);
+      hsg.SetTraceVisit(trace_visit);
+      hsg.SetDebugVisit(debug_visit);
+      if (prt_visitor) dbgs() << " |- " << hsg.GetName() << NewL;
+      root.accept(hsg);
+      if (hsg.HasError()) return false;
+    }
 
     DummyBufferGen bg(SymTab());
     bg.SetTraceVisit(trace_visit);

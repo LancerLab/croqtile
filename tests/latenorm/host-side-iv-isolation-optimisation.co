@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GCU300
-// RUN-GCU300: choreo %s -pa=latenorm -sa=latenorm | FileCheck %s && rm -f %s.topscc.result
+// RUN-GCU300: choreo %s -pa=latenorm -sa=latenorm --use-hetero-tileflow | FileCheck %s && rm -f %s.topscc.result
 
 #include "choreo.h"
 #include <chrono>

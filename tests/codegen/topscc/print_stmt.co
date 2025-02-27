@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GCUALL
-// RUN: choreo -es %s | FileCheck --match-full-lines %s
+// RUN: choreo -es --use-hetero-tileflow %s | FileCheck --match-full-lines %s
 
 #include "choreo.h"
 

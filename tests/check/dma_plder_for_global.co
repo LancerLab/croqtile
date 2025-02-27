@@ -1,4 +1,4 @@
-// RUN: not choreo -es -t topscc -arch=gcu300 %s 2>&1 | FileCheck %s --check-prefix=CHECK3
+// RUN: not choreo -es --use-hetero-tileflow -t topscc -arch=gcu300 %s 2>&1 | FileCheck %s --check-prefix=CHECK3
 
 __co__ auto foo(f32 [32, 4] a, s8 [1] b, int c) {
   f = dma.any;
