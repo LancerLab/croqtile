@@ -66,6 +66,7 @@ set(CODEGEN_SOURCES
   types.cpp
   valno.cpp
   visitor.cpp
+  liveness_analysis.cpp
 )
 
 add_library(parser_obj OBJECT ${CMAKE_BINARY_DIR}/parser.tab.cc)

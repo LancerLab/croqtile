@@ -95,6 +95,8 @@ Option<bool> prt_pass(OptionKind::Hidden, "--show-passes", "-sp", false,
                       "Show the visit pass pipeline.");
 Option<bool> save_temps(OptionKind::Hidden, "--save-temps", "", false,
                         "Save the temporal files.");
+Option<bool> liveness(OptionKind::Hidden, "--liveness", "", false,
+                      "Analyze the liveness of the program.");
 // TODO: add machanism to handle GCC-style "-f" options
 Option<bool> no_show_source(
     OptionKind::Hidden, "-fno-show-source-location", "", false,
@@ -201,6 +203,7 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetCrossCompile(cross_compile.GetValue());
   CCtx().SetTraceValueNumbers(print_vn.GetValue());
   CCtx().SetShowSourceLocation(!no_show_source.GetValue());
+  CCtx().SetLivenessAnalysis(liveness.GetValue());
 
   if (!trace_visit.GetValue().empty())
     setenv("CHOREO_TRACE_VISITOR", ToUpper(trace_visit.GetValue()).c_str(), 1);

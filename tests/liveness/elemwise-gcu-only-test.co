@@ -1,0 +1,54 @@
+// REQUIRES: ALL
+// RUN: CHOREO_DEBUG_VISITOR=liveness choreo --liveness -t topscc -sa=liveness %s -o - | FileCheck --match-full-lines %s
+#include "choreo.h"
+
+__cok__ {
+__co_device__ extern "C" void kernel(int * a, int * b, int * c, int n) {
+  for (int i = 0; i < n; ++i)
+    c[i] = a[i] + b[i];
+}
+}
+
+__co__ s32 [6, 17, 64] ele_add(s32 [6, 17, 64] lhs, s32 [6, 17, 64] rhs) {
+  s32[lhs.span] output;
+
+  parallel p by 6 { 
+    with index = {x, y, z} in [17, 4, 1] { 
+      foreach x {
+        foreach y {
+          lhs_load = dma.copy.async lhs.chunkat(p, x, y) => local;
+          rhs_load = dma.copy.async rhs.chunkat(p, x, y) => local;
+          wait lhs_load, rhs_load;
+
+          local s32[lhs_load.span] l1_out;
+          call kernel(lhs_load.data, rhs_load.data, l1_out, |lhs_load.span|);
+          out_store = dma.copy.async l1_out => output.chunkat(p, x, y);
+          wait out_store;
+        }
+      }
+    }
+  }
+  return output;
+}
+
+// CHECK: (  0) ele_add(s32 mdspan<3> [6, 17, 64] lhs, s32 mdspan<3> [6, 17, 64] rhs) {
+// CHECK: (  1)   global s32 [ lhs.span ] output
+// CHECK: (  2)   parallel p = {p__elem__x} by [6] {
+// CHECK: (  3)     with index = {x, y, z} in [ 17 4 1 ] {
+// CHECK: (  4)       foreach x(::) {
+// CHECK: (  5)         foreach y(::) {
+// CHECK: (  6)           local s32 mdspan<3> [1, 1, 16] lhs_load__buf__
+// CHECK: (  7)           lhs_load = dma.copy.async lhs.ChunkAt(p, x, y) => lhs_load__buf__
+// CHECK: (  8)           local s32 mdspan<3> [1, 1, 16] rhs_load__buf__
+// CHECK: (  9)           rhs_load = dma.copy.async rhs.ChunkAt(p, x, y) => rhs_load__buf__
+// CHECK: ( 10)           wait lhs_load, rhs_load
+// CHECK: ( 11)           local s32 [ lhs_load.span ] l1_out
+// CHECK: ( 12)           call kernel( (dataof lhs_load) ,  (dataof rhs_load) , l1_out,  (sizeof lhs_load.span) )
+// CHECK: ( 13)           out_store = dma.copy.async l1_out => output.ChunkAt(p, x, y)
+// CHECK: ( 14)           wait out_store
+// CHECK: ( 15)         }
+// CHECK: ( 16)       }
+// CHECK: ( 17)     }
+// CHECK: ( 18)   }
+// CHECK: ( 19)   return output
+// CHECK: ( 20) }

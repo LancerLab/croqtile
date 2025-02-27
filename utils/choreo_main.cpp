@@ -7,6 +7,7 @@
 #include "earlysema.hpp"
 #include "gcucheck.hpp"
 #include "latenorm.hpp"
+#include "liveness_analysis.hpp"
 #include "memcheck.hpp"
 #include "normalize.hpp"
 #include "options.hpp"
@@ -121,6 +122,12 @@ int main(int argc, char* argv[]) {
     Visualizer vl;
     if (!vl.RunOnProgram(root)) return vl.Status();
     return 0;
+  }
+
+  // currently, liveness analysis is not performed by default.
+  if (CCtx().LivenessAnalysis()) {
+    LivenessAnalyzer la;
+    if (!la.RunOnProgram(root)) return la.Status();
   }
 
   // apply the semantic check

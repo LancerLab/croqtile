@@ -185,7 +185,7 @@ private:
   bool cross_compile = false;       // TODO: figure out
   bool trace_vn = false;            // trace the value numbering
   bool show_source_loc = true; // show source code location when error, etc.
-
+  bool liveness = false;       // analyze the liveness of the program
 private:
   std::shared_ptr<SymbolTable> sym_tab = nullptr; // global symbol table
 
@@ -273,6 +273,7 @@ public:
   bool Visualize() const { return visualize; }
   bool CrossCompile() const { return cross_compile; }
   bool TraceValueNumbers() const { return trace_vn; }
+  bool LivenessAnalysis() const { return liveness; }
 
   // Setters of compiler configurations
   void SetDumpAst(bool value) { dump_ast = value; }
@@ -286,6 +287,7 @@ public:
   void SetVisualize(bool value) { visualize = value; }
   void SetCrossCompile(bool value) { cross_compile = value; }
   void SetTraceValueNumbers(bool value) { trace_vn = value; }
+  void SetLivenessAnalysis(bool value) { liveness = value; }
 
   const std::unordered_map<std::string, std::string>& GetCLMacros() const {
     return cl_macros;
