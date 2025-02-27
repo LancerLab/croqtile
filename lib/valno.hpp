@@ -1334,6 +1334,10 @@ public:
     return true;
   };
 
+  bool Visit(AST::PrintNode& n) {
+    TraceEachVisit(n);
+    return true;
+  }
   bool Visit(AST::Rotate& n) {
     TraceEachVisit(n);
 

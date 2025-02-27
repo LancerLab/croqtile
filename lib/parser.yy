@@ -164,7 +164,7 @@ void choreo_info(const char *message) {
 %token <std::string> HOST_CODE KERNEL_CODE
 %token <std::string> IDENTIFIER ATTR_CO
 // type related
-%token <std::string> MDSPAN ITUPLE
+%token <std::string> MDSPAN ITUPLE PRINT
 %token <Choreo::Storage> LOCAL SHARED GLOBAL
 %token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT BOOL VOID
 // builtin operations
@@ -188,7 +188,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::SpanAs>> span_as
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
-%nterm <AST::ptr<AST::Node>> foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt swap_stmt expr_or_qes range_expr optional_scalar_init param_mdspan_val chunkat_or_storage_or_select pred
+%nterm <AST::ptr<AST::Node>> foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt print_stmt swap_stmt expr_or_qes range_expr optional_scalar_init param_mdspan_val chunkat_or_storage_or_select pred
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause multi_decls named_spanned_decl
 %nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers passables future_data_list template_params gi_list
 %nterm <AST::ptr<AST::Expr>> s_expr template_value_expr span_expr id_expr bound_expr optional_pred
@@ -450,6 +450,7 @@ statement
     | wait_stmt    SEMCOL { $$ = $1; }
     | call_stmt    SEMCOL { $$ = $1; }
     | swap_stmt    SEMCOL { $$ = $1; }
+    | print_stmt   SEMCOL { $$ = $1; }
     | return_stmt  SEMCOL { $$ = $1; }
     | paraby_block        { $$ = $1; }
     | within_block        { $$ = $1; }
@@ -558,6 +559,9 @@ declaration
 multi_decls
     : named_spanned_decl { $$ = $1; }
     ;
+
+print_stmt
+    : PRINT LPAREN IDENTIFIER RPAREN { $$ = AST::Make<AST::PrintNode>(@1, AST::Make<AST::Identifier>(@3,$3)); }
 
 named_scalar_decl
     : scalar_type IDENTIFIER optional_scalar_init {

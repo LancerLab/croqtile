@@ -856,8 +856,7 @@ private:
     case BaseType::U8:
     case BaseType::S8:
       assert(mdspan_type != nullptr && "Expecting a valid mdspan.");
-      SetType(MakeSpannedType(base_type,
-                              GenUninitShape())); // need type inference
+      SetType(MakeSpannedType(base_type, GenUninitShape())); // need type inference
       break;
     case BaseType::ITUPLE:
       if (!IsValidRank(rank))
@@ -1428,6 +1427,20 @@ struct Call : public Node, public TypeIDProvider<Call> {
   void accept(Visitor&) override;
 
   __UDT_TYPE_INFO__(Node, Call)
+};
+
+struct PrintNode : public Node, public TypeIDProvider<PrintNode> {
+  ptr<Identifier> id;
+
+  PrintNode(const location& loc, const ptr<Identifier>& v) : Node(loc), id(v) {}
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << "\n" << prefix << "`- Print: ";
+    os << "\n" << prefix << "  `- with identifier: " << PSTR(id);
+  }
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, PrintNode)
 };
 
 struct Rotate : public Node, public TypeIDProvider<Rotate> {

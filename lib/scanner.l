@@ -136,6 +136,7 @@ cstr        \"([^"\\]|\\.)*\"
   "auto"     return Choreo::Parser::make_AUTO(yytext, loc);
   "mdspan"   return Choreo::Parser::make_MDSPAN(yytext, loc);
   "ituple"   return Choreo::Parser::make_ITUPLE(yytext, loc);
+  "print"   return Choreo::Parser::make_PRINT(yytext, loc);
   "local"    return Choreo::Parser::make_LOCAL(Storage::LOCAL, loc);
   "shared"   return Choreo::Parser::make_SHARED(Storage::SHARED, loc);
   "global"   return Choreo::Parser::make_GLOBAL(Storage::GLOBAL, loc);

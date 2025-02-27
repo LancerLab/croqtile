@@ -1239,6 +1239,12 @@ bool EarlySemantics::Visit(AST::Call& n) {
   return true;
 }
 
+bool EarlySemantics::Visit(AST::PrintNode& n) {
+  TraceEachVisit(n);
+  ReportErrorWhenUseBeforeDefine(n.LOC(), n.id->name);
+  return true;
+}
+
 bool EarlySemantics::Visit(AST::Rotate& n) {
   TraceEachVisit(n);
 

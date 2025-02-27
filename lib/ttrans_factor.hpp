@@ -366,6 +366,7 @@ public:
 
   bool Visit(AST::Wait&) { return true; }
   bool Visit(AST::Call&) { return true; }
+  bool Visit(AST::PrintNode&) { return true; }
   bool Visit(AST::Rotate& n) {
     TraceEachVisit(n);
     if (kind != Kind::T_SWAP) return true;

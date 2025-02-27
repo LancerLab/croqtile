@@ -393,6 +393,12 @@ bool SemaChecker::Visit(AST::Call& n) {
   return true;
 }
 
+bool SemaChecker::Visit(AST::PrintNode& n) {
+  TraceEachVisit(n);
+  if (!ReportUnknownSymbol(n.id->name, n.id->LOC(), __FILE__, __LINE__)) return false;
+  return true;
+}
+
 bool SemaChecker::Visit(AST::Rotate& n) {
   TraceEachVisit(n);
   size_t index = 0;

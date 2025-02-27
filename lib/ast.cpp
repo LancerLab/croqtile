@@ -199,6 +199,13 @@ void Call::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
+void PrintNode::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+  id->accept(v);
+  v.Visit(*this);
+  v.AfterVisit(*this);
+}
+
 void Rotate::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
   ids->accept(v);

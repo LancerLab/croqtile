@@ -373,6 +373,10 @@ public:
     TraceEachVisit(n);
     return true;
   }
+  bool Visit(AST::PrintNode& n) override {
+    TraceEachVisit(n);
+    return true;
+  }
   bool Visit(AST::Rotate& n) override {
     TraceEachVisit(n);
     return true;

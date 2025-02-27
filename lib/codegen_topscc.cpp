@@ -884,6 +884,18 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   return true;
 }
 
+bool TopsccCodeGen::Visit(AST::PrintNode& n) {
+  TraceEachVisit(n);
+  if (IsHostSide()) {
+    // TODO: support print format
+    // TODO: support indexing of buffer
+    // TODO: support device-side print
+    hs << h_indent << "std::cout << " << STR(n.id) << " << \"\\n\";\n";
+  } else
+    choreo_unreachable("TODO: device-side print to be impl'd.");
+  return true;
+}
+
 bool TopsccCodeGen::Visit(AST::Rotate& n) {
   TraceEachVisit(n);
   ds << d_indent << "choreo::rotate(";

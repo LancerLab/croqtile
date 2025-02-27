@@ -796,6 +796,11 @@ bool TypeInference::Visit(AST::Call& n) {
   return true;
 }
 
+bool TypeInference::Visit(AST::PrintNode& n) {
+  TraceEachVisit(n);
+  return true;
+}
+
 bool TypeInference::Visit(AST::Rotate& n) {
   TraceEachVisit(n);
 
