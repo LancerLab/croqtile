@@ -224,7 +224,36 @@ public:
 
     return true;
   }
-  bool Visit(AST::IntTuple&) override { return true; }
+  bool Visit(AST::IntTuple& n) override {
+    bool replace_mv = false;
+    auto mv = AST::Make<AST::MultiValues>(n.GetValues()->LOC(), ",");
+    for (auto& v : n.GetValues()->AllValues()) {
+      if (isa<AST::IntLiteral>(v)) {
+        mv->Append(v);
+        continue;
+      }
+      auto expr = cast<AST::Expr>(v);
+      if (auto itt = dyn_cast<ITupleType>(expr->GetType())) {
+        VST_DEBUG(dbgs() << "Repalce " << PSTR(expr) << " in " << STR(n)
+                         << " with:\n");
+        for (size_t idx = 0; idx < itt->dim_count; ++idx) {
+          auto ii = AST::Make<AST::IntIndex>(
+              expr->LOC(), AST::Make<AST::IntLiteral>(expr->LOC(), idx));
+          auto new_expr = AST::Make<AST::Expr>(expr->LOC(), "dimof", expr, ii);
+          mv->Append(new_expr);
+          VST_DEBUG(dbgs() << "\t" << PSTR(new_expr) << "\n");
+          replace_mv = true;
+        }
+      } else {
+        mv->Append(v);
+      }
+    }
+    if (replace_mv) {
+      n.vlist = mv;
+      n.SetType(MakeITupleType(n.vlist->Count()));
+    }
+    return true;
+  }
   bool Visit(AST::Assignment&) override { return true; }
   bool Visit(AST::IntIndex&) override { return true; }
   bool Visit(AST::DataType&) override { return true; }
@@ -247,8 +276,8 @@ public:
               AST::Make<AST::Identifier>(n.LOC(), ValueItemAsString(n.bound)));
         n.iv_symbols->ValueAt(0)->SetType(
             MakeBoundedITupleType(Shape(1, n.biv->name + "__elem__x"), "pi:x"));
-        VST_DEBUG(dbgs() << "Generate iv_symbols in parallelby for '" << n.biv
-                         << "': " << STR(n.iv_symbols) << "\n");
+        VST_DEBUG(dbgs() << "Generate iv_symbols in parallelby for '"
+                         << PSTR(n.biv) << "': " << STR(n.iv_symbols) << "\n");
       }
     } else {
       assert(n.iv_symbols && "At least one biv and iv_symbols should exist!");

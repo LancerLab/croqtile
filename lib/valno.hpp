@@ -516,6 +516,21 @@ public:
         assert(n.s.DimCount() == 1);
         n.SetType(MakeBoundedIntegerType(n.s.ValueAt(0)));
       }
+    } else if (AST::istypeof<ITupleType>(&n)) {
+      auto vn_sig = vn.GetSignatureFromValueNumber(cur_vn);
+
+      if (CountElementsInSignature(vn_sig) > 1) {
+        // set alias expressions with proper value numbers
+        ProcessValueNumberString(
+            vn_sig, [this, &vn_sig](int valno, size_t index) {
+              if (UnknownVN(valno))
+                return; // do not associate it with vn of "?"
+              vn.GetOrInsertValueNumberFromSignature("index_const_" +
+                                                     std::to_string(index));
+              vn.AssociateSignatureWithValueNumber(
+                  vn_sig + "(" + std::to_string(index) + ")", valno);
+            });
+      }
     }
 
     return true;

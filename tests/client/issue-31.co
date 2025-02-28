@@ -1,0 +1,40 @@
+// RUN: choreo -dv=norm -sa=norm %s | FileCheck --match-full-lines --check-prefix=NORM %s
+// RUN: choreo %s -i | FileCheck --match-full-lines --check-prefix=INFER %s
+
+
+#include "choreo.h"
+
+__co__ void cofoo0() {
+  a = {1, 2};
+  c = a + 1;             // {2, 3}
+  bb = {a, 3, 4};        // {1, 2, 3, 4}
+  b = {c, bb(1), 4};     // {2, 3, 2, 4}
+
+  parallel p by 2 {
+    with idx in [12,12,12,12] / b {
+      foreach idx {}     // 6, 4, 6, 3
+    }
+  }
+}
+
+int main() {}
+
+// NORM: Repalce a in {a, 3, 4} with:
+// NORM:         a(0)
+// NORM:         a(1)
+// NORM: Repalce c in {c, bb(1), 4} with:
+// NORM:         c(0)
+// NORM:         c(1)
+
+// INFER: Symbol:    ::cofoo0::a, Type: ituple<2>
+// INFER: Symbol:    ::cofoo0::c, Type: ituple<2>
+// INFER: Symbol:    ::cofoo0::bb, Type: ituple<4>
+// INFER: Symbol:    ::cofoo0::b, Type: ituple<4>
+// INFER: Bounded:   ::cofoo0::paraby_0::p, Type: {int}->[2]
+// INFER: Bounded:   ::cofoo0::paraby_0::p__elem__x, Type: {int}->[2]
+// INFER: Bounded:   ::cofoo0::paraby_0::within_0::idx, Type: {int,int,int,int}->[6, 4, 6, 3]
+// INFER: Bounded:   ::cofoo0::paraby_0::within_0::idx__elem__0, Type: {int}->[6]
+// INFER: Bounded:   ::cofoo0::paraby_0::within_0::idx__elem__1, Type: {int}->[4]
+// INFER: Bounded:   ::cofoo0::paraby_0::within_0::idx__elem__2, Type: {int}->[6]
+// INFER: Bounded:   ::cofoo0::paraby_0::within_0::idx__elem__3, Type: {int}->[3]
+// INFER: Function:  ::cofoo0, Type: void (*)()

@@ -570,7 +570,15 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
 
 bool EarlySemantics::Visit(AST::IntTuple& n) {
   TraceEachVisit(n);
-  SetNodeType(n, MakeITupleType(n.GetValues()->Count()));
+  size_t dim_count = 0;
+  for (auto& v : n.GetValues()->AllValues()) {
+    if (auto itt = dyn_cast<ITupleType>(v->GetType())) {
+      dim_count += itt->dim_count;
+    } else {
+      ++dim_count;
+    }
+  }
+  SetNodeType(n, MakeITupleType(dim_count));
   return true;
 }
 
