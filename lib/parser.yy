@@ -85,6 +85,7 @@ static Parser::symbol_type yylex(Scanner &scanner) {
 //   {(0), (1), 3} represents {0, 1, 3}
 //
 static bool parsing_prefixed_list = false;
+static ptr<AST::DataType> current_scalar_type = nullptr;
 
 bool parsing_chunkat_value_list = false;
 
@@ -188,8 +189,8 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::SpanAs>> span_as
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
-%nterm <AST::ptr<AST::Node>> foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt print_stmt swap_stmt expr_or_qes range_expr optional_scalar_init param_mdspan_val chunkat_or_storage_or_select pred
-%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause multi_decls named_spanned_decl
+%nterm <AST::ptr<AST::Node>> foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt print_stmt swap_stmt expr_or_qes range_expr scalar_init param_mdspan_val chunkat_or_storage_or_select pred
+%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause multi_decls named_spanned_decl named_scalar_decls scalar_decl_without_types
 %nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers passables future_data_list template_params gi_list
 %nterm <AST::ptr<AST::Expr>> s_expr template_value_expr span_expr id_expr bound_expr optional_pred
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
@@ -198,7 +199,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::ChoreoFunction>> dsl_function
 %nterm <AST::ptr<AST::MultiDimSpans>> unnamed_mdspan_decl param_mdspan
 %nterm <AST::ptr<AST::NamedTypeDecl>> named_mdspan_decl
-%nterm <AST::ptr<AST::NamedVariableDecl>> named_ituple_decl named_scalar_decl
+%nterm <AST::ptr<AST::NamedVariableDecl>> named_ituple_decl scalar_decl_without_type
 %nterm <AST::ptr<AST::IntTuple>> unnamed_ituple_decl sugar_unnamed_ituple_decl sugarless_unnamed_ituple_decl
 %nterm <AST::ptr<AST::WithBlock>> within_block
 %nterm <AST::ptr<AST::WithIn>> within
@@ -553,30 +554,52 @@ declarations
 declaration
     : named_mdspan_decl  { $$ = $1; }
     | named_ituple_decl  { $$ = $1; }
-    | named_scalar_decl  { $$ = $1; }
     ;
 
 multi_decls
     : named_spanned_decl { $$ = $1; }
+    | named_scalar_decls { $$ = $1; }
     ;
 
 print_stmt
     : PRINT LPAREN IDENTIFIER RPAREN { $$ = AST::Make<AST::PrintNode>(@1, AST::Make<AST::Identifier>(@3,$3)); }
 
-named_scalar_decl
-    : scalar_type IDENTIFIER optional_scalar_init {
+named_scalar_decls
+    : scalar_type { 
         assert($1->isScalar() && "Not a scalar type.");
-        symtab.AddSymbol($2, $1->GetType());
-        if (!$3)
-          $$ = AST::Make<AST::NamedVariableDecl>(@2, $2, $1);
-        else
-          $$ = AST::Make<AST::NamedVariableDecl>(@2, $2, $1, nullptr, $3);
+        current_scalar_type = $1;
+      } scalar_decl_without_types {
+        $$ = $3;
+        // for (auto decl : $2->AllSubs()) {
+        //   auto nvd = cast<AST::NamedVariableDecl>(decl);
+        //   nvd->type = current_scalar_type;
+        // }
       }
     ;
 
-optional_scalar_init
-    : /*Empty */     { $$ = nullptr; }
-    | ASSIGN s_expr  { $$ = $2; }
+scalar_decl_without_types
+    : scalar_decl_without_types COMMA scalar_decl_without_type {
+        $1->Append($3);
+        $$ = $1;
+      }
+    | scalar_decl_without_type {
+        $$ = AST::Make<AST::MultiNodes>(@1);
+        $$->Append($1);
+      }
+    ;
+
+scalar_decl_without_type
+    : IDENTIFIER scalar_init {
+        symtab.AddSymbol($1, current_scalar_type->GetType());
+        if (!$2)
+          $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, current_scalar_type);
+        else
+          $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, current_scalar_type, nullptr, $2);
+      }
+    ;
+
+scalar_init
+    : ASSIGN s_expr  { $$ = $2; }
     ;
 
 named_spanned_decl

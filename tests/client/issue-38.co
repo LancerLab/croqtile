@@ -1,0 +1,103 @@
+// RUN: choreo %s -vn | FileCheck --match-full-lines --check-prefix=VALNO %s
+// RUN: choreo -es %s | FileCheck --match-full-lines %s
+
+#include "choreo.h"
+
+__co__ void cofoo0() {
+  int a = 1, b = 2, c = 3; // syntax error
+  int x = 1000;
+  y = a + 1;
+  u8 [a,b,c,x,y] mds;
+  parallel p by b {
+    with idx={ia,ib,ic,ix,iy} in [a,b,c,x,y] {
+      foreach idx {}
+    }
+  }
+  bool t = true, f = false;
+}
+
+int main() {}
+
+
+// VALNO:  scope-1 {
+// VALNO:   New VN #0: 'const_1'
+// VALNO:   Alias "::@__choreo_no_tiling__" -> #0
+// VALNO:   Alias "::cofoo0::a" -> #0
+// VALNO:   New VN #1: 'const_2'
+// VALNO:   Alias "::cofoo0::b" -> #1
+// VALNO:   New VN #2: 'const_3'
+// VALNO:   Alias "::cofoo0::c" -> #2
+// VALNO:   New VN #3: 'const_1000'
+// VALNO:   Alias "::cofoo0::x" -> #3
+// VALNO:   Alias "::cofoo0::y" -> #1
+// VALNO:   New VN #4: '#0,#1,#2,#3,#1'
+// VALNO:   New VN #5: 'index_const_0'
+// VALNO:   Alias "#0,#1,#2,#3,#1(0)" -> #0
+// VALNO:   New VN #6: 'index_const_1'
+// VALNO:   Alias "#0,#1,#2,#3,#1(1)" -> #1
+// VALNO:   New VN #7: 'index_const_2'
+// VALNO:   Alias "#0,#1,#2,#3,#1(2)" -> #2
+// VALNO:   New VN #8: 'index_const_3'
+// VALNO:   Alias "#0,#1,#2,#3,#1(3)" -> #3
+// VALNO:   New VN #9: 'index_const_4'
+// VALNO:   Alias "#0,#1,#2,#3,#1(4)" -> #1
+// VALNO:   Alias "::cofoo0::mds.span" -> #4
+// VALNO:   scope-2 {
+// VALNO:    Alias "::cofoo0::paraby_0::@p" -> #1
+// VALNO:    New VN #10: 'b'
+// VALNO:    Alias "::cofoo0::paraby_0::@p__elem__x" -> #10
+// VALNO:    scope-3 {
+// VALNO:     Alias "::cofoo0::paraby_0::within_0::@idx(0)" -> #0
+// VALNO:     Alias "::cofoo0::paraby_0::within_0::@ia" -> #0
+// VALNO:     Alias "::cofoo0::paraby_0::within_0::@idx(1)" -> #1
+// VALNO:     Alias "::cofoo0::paraby_0::within_0::@ib" -> #1
+// VALNO:     Alias "::cofoo0::paraby_0::within_0::@idx(2)" -> #2
+// VALNO:     Alias "::cofoo0::paraby_0::within_0::@ic" -> #2
+// VALNO:     Alias "::cofoo0::paraby_0::within_0::@idx(3)" -> #3
+// VALNO:     Alias "::cofoo0::paraby_0::within_0::@ix" -> #3
+// VALNO:     Alias "::cofoo0::paraby_0::within_0::@idx(4)" -> #1
+// VALNO:     Alias "::cofoo0::paraby_0::within_0::@iy" -> #1
+// VALNO:     Alias "::cofoo0::paraby_0::within_0::@idx" -> #4
+// VALNO:     scope-4 {
+// VALNO:     } // end scope-4
+// VALNO:    } // end scope-3
+// VALNO:   } // end scope-2
+// VALNO:   New VN #11: 'true'
+// VALNO:   Alias "::cofoo0::t" -> #11
+// VALNO:   New VN #12: 'false'
+// VALNO:   Alias "::cofoo0::f" -> #12
+// VALNO:  } // end scope-1
+
+
+// CHECK: __global__ void __choreo_device_cofoo0(unsigned char * mds) {
+// CHECK:   {
+// CHECK:     int __iv_ia = 0;
+// CHECK:     int __iv_ib = 0;
+// CHECK:     int __iv_ic = 0;
+// CHECK:     int __iv_ix = 0;
+// CHECK:     int __iv_iy = 0;
+// CHECK:     for (__iv_ia = 0; __iv_ia < 1; ++__iv_ia) {
+// CHECK:       for (__iv_ib = 0; __iv_ib < 2; ++__iv_ib) {
+// CHECK:         for (__iv_ic = 0; __iv_ic < 3; ++__iv_ic) {
+// CHECK:           for (__iv_ix = 0; __iv_ix < 1000; ++__iv_ix) {
+// CHECK:             for (__iv_iy = 0; __iv_iy < 2; ++__iv_iy) {
+// CHECK:             } // iy
+// CHECK:             __iv_iy = 0;
+// CHECK:           } // ix
+// CHECK:           __iv_ix = 0;
+// CHECK:         } // ic
+// CHECK:         __iv_ic = 0;
+// CHECK:       } // ib
+// CHECK:       __iv_ib = 0;
+// CHECK:     } // ia
+// CHECK:     __iv_ia = 0;
+// CHECK:   }
+// CHECK: }
+
+// CHECK: void cofoo0() {
+// CHECK:   unsigned char * mds__device = nullptr;
+// CHECK:   choreo::abend_true(topsMalloc(&mds__device, 12000ULL));
+// CHECK:   dim3 __cofoo0_gdims0(1, 1, 1);
+// CHECK:   dim3 __cofoo0_bdims0(b, 1, 1);
+// CHECK:   __choreo_device_cofoo0<<<__cofoo0_gdims0, __cofoo0_bdims0>>>(mds__device);
+// CHECK: }
