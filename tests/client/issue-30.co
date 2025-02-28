@@ -1,0 +1,18 @@
+// RUN: choreo -dv=norm -sa=norm %s | FileCheck --match-full-lines %s
+// RUN: choreo -es %s -i | FileCheck --match-full-lines --check-prefix=INFER %s
+
+__co__ void foo(s32[N, M, K] lhs) {
+  parallel p by 2 {
+    a = {12, 24};
+    b = a{(0), (1), 2};
+    with idx in lhs.span/b {
+      foreach idx {}
+    }
+  }
+}
+
+// CHECK: Desugar ref: (0) ---> a(0)
+// CHECK: Desugar ref: (1) ---> a(1)
+
+// INFER: Symbol:    ::foo::paraby_0::b, Type: ituple<3>
+// INFER: Bounded:   ::foo::paraby_0::within_0::idx, Type: {int,int,int}->[(::foo::N)/(12), (::foo::M)/(24), (::foo::K)/(2)]

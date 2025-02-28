@@ -58,8 +58,10 @@ void NamedVariableDecl::accept(Choreo::Visitor& v) {
 }
 
 void IntTuple::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
   vlist->accept(v);
   v.Visit(*this);
+  v.AfterVisit(*this);
 }
 
 void SpanAs::accept(Choreo::Visitor& v) {
