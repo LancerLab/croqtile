@@ -27,7 +27,7 @@ make setup-gcu2
 ```
 sets up the GCU-2.x compiler and runtime environment. Additionally,
 ```
-make kmd-gcu2
+make gcu2-kmd
 ```
 helps configure the GCU-2.x hardware driver.
 
@@ -37,7 +37,7 @@ make setup-gcu3
 ```
 and
 ```
-make kmd-gcu3
+make gcu3-kmd
 ```
 assist in setting up the GCU-3.x compiler, runtime, and hardware driver.
 
@@ -83,11 +83,13 @@ Usage: choreo [options] file...
 Options:
   --help                    Display this information.
   --help-hidden             Display hidden options.
-  -e/--dump-ast             Dump the Abstract Syntax Tree (AST) after parsing.
-  -i/--infer-types          Show the result of type inference.
-  -f16n/--native-f16        Utilize native f16 type when target platform support.
-  -n/--remove-comments      Remove all comments in non-choreo code. (Useful for FileCheck)
-  -t/--target <platform>    Set the compilation target. The 'platform' includes <factor|topscc|cuda>.
+  -e, --dump-ast            Dump the Abstract Syntax Tree (AST) after parsing.
+  -i, --infer-types         Show the result of type inference.
+  -bf16n, --native-bf16     Utilize native bf16 type when target platform support.
+  -f16n, --native-f16       Utilize native f16 type when target platform support.
+  -n, --remove-comments     Remove all comments in non-choreo code. (Useful for FileCheck)
+  -t, --target <platform>   Set the compilation target. The 'platform' includes <factor|topscc|cuda>.
+  -v, --verbose             Display the programs invoked by the compiler.
   -E                        Preprocess only; do not compile.
   -arch=<processor>         Set the architecture to execute the binary code.
   -c                        Compile choreo code and the generated target code; Without linking.
