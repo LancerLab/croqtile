@@ -395,7 +395,8 @@ bool SemaChecker::Visit(AST::Call& n) {
 
 bool SemaChecker::Visit(AST::PrintNode& n) {
   TraceEachVisit(n);
-  if (!ReportUnknownSymbol(n.id->name, n.id->LOC(), __FILE__, __LINE__)) return false;
+  if (!ReportUnknownSymbol(n.id->name, n.id->LOC(), __FILE__, __LINE__))
+    return false;
   return true;
 }
 

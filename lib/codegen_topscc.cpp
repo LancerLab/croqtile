@@ -614,7 +614,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   assert(f_sty && "can not retrieve data from 'from'.");
   assert(t_sty && "can not retrieve data from 'to'.");
 
-  if (t_sty->GetStorage() == Storage::GLOBAL && use_hetero_tileflow && IsHostSide()) {
+  if (t_sty->GetStorage() == Storage::GLOBAL && use_hetero_tileflow &&
+      IsHostSide()) {
     std::string bts = NameBaseType(t_sty->ElementType(), false);
     auto buf_sym = t_sym + "__device";
     auto buf_sym_from = f_sym + "__device";
@@ -1005,7 +1006,8 @@ bool TopsccCodeGen::Visit(AST::WithIn& n) {
     ssm.MapDeviceSymbol(InScopeName(id->name), "__iv_" + id->name);
     // Keep the device side decl, even for host side iv.
     // for visibility of shapes
-    if (use_hetero_tileflow && IsHostSide()) hs << h_indent << "int __iv_" << id->name << " = 0;\n";
+    if (use_hetero_tileflow && IsHostSide())
+      hs << h_indent << "int __iv_" << id->name << " = 0;\n";
     ds << d_indent << "int __iv_" << id->name << " = 0;\n";
   }
 

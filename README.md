@@ -45,6 +45,6 @@ With Choreo's visualization capability, it renders figures like:
 Programmers is easy to find the projection of the tiling and data movement behavior from this visualization. Such assistance can significantly reduce user erorrs when being properly used.
 
 # Documentation for Reference
-Consult the [Getting Started With Choreo](./Document/Documentation/getting-started-with-choreo.md) to build and install Choreo.
+Consult the [Getting Started With Choreo](./Documents/Documentation/getting-started-with-choreo.md) to build and install Choreo.
 Consult the [Choreo Tutorials](http://10.31.50.149:8000/) document for information on building Choreo and the detailed usage.
 

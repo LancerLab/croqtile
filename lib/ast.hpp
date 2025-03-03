@@ -856,7 +856,8 @@ private:
     case BaseType::U8:
     case BaseType::S8:
       assert(mdspan_type != nullptr && "Expecting a valid mdspan.");
-      SetType(MakeSpannedType(base_type, GenUninitShape())); // need type inference
+      SetType(
+          MakeSpannedType(base_type, GenUninitShape())); // need type inference
       break;
     case BaseType::ITUPLE:
       if (!IsValidRank(rank))
