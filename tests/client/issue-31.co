@@ -17,8 +17,6 @@ __co__ void cofoo0() {
   }
 }
 
-int main() {}
-
 // NORM: Repalce a in {a, 3, 4} with:
 // NORM:         a(0)
 // NORM:         a(1)
@@ -38,3 +36,23 @@ int main() {}
 // INFER: Bounded:   ::cofoo0::paraby_0::within_0::idx__elem__2, Type: {int}->[6]
 // INFER: Bounded:   ::cofoo0::paraby_0::within_0::idx__elem__3, Type: {int}->[3]
 // INFER: Function:  ::cofoo0, Type: void (*)()
+
+__co__ void cofoo1() {
+  a = {1, 2};
+  c = a + 1;             // {2, 3}
+  b = {a+1, c(0), 4};     // {2, 3, 2, 4}
+
+  parallel p by 2 {
+    with idx in [12,12,12,12] / b {
+      foreach idx {}     // 6, 4, 6, 3
+    }
+  }
+}
+
+// NORM: Repalce  (a + 1)  in { (a + 1) , c(0), 4} with:
+// NORM: 	 (a + 1) (0)
+// NORM: 	 (a + 1) (1)
+
+// INFER: Bounded:   ::cofoo1::paraby_1::within_1::idx, Type: {int,int,int,int}->[6, 4, 6, 3]
+
+int main() {}
