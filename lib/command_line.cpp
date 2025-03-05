@@ -43,6 +43,9 @@ Option<bool> use_hetero_tileflow(
     OptionKind::Hidden, "--use-hetero-tileflow", "-ht", false,
     "(Experimental) Allow choreo code to apply implicit/aggressive tileflow",
     "optimisation under heterogeneous scenario.");
+Option<bool> use_system_toolchain(
+    OptionKind::Hidden, "--use-system-toolchain", "-st", false,
+    "(Experimental) Use system installed toolchain: topscc, topsrt, etc for choreo.");
 Option<bool>
     native_f16(OptionKind::User, "--native-f16", "-f16n", false,
                "Utilize native f16 type when target platform support.");

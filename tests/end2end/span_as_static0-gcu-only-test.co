@@ -1,6 +1,6 @@
 // REQUIRES: TARGET-GCUALL
-// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %.topscc.result
-// RUN: choreo -gs -t factor %s -o %s.factor.result && bash %s.factor.result --execute | FileCheck --match-full-lines %s && rm -f %.factor.result
+// RUN: choreo -t topscc %s -o %s.topscc.result && %s.topscc.result | FileCheck --match-full-lines %s && rm -f %.topscc.result
+// RUN: choreo -t factor %s -o %s.factor.result && %s.factor.result | FileCheck --match-full-lines %s && rm -f %.factor.result
 
 #include "choreo.h"
 #include <random>

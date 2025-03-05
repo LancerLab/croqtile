@@ -1,6 +1,6 @@
 // REQUIRES: TARGET-GCU210
 // TODO: figure out what is wrong on gcu300
-// RUN: choreo -gs -t factor %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
+// RUN: choreo -t factor %s > %s.result && %s.result | FileCheck --match-full-lines %s
 #include "choreo.h"
 
 __cok__ {

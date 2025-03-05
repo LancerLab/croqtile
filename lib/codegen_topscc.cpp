@@ -23,6 +23,7 @@ extern Option<bool> native_bf16;
 extern Option<bool> verbose;
 extern Option<std::string> output;
 extern Option<bool> use_hetero_tileflow;
+extern Option<bool> use_system_toolchain;
 
 Option<bool> emit_fatbin(OptionKind::Hidden, "-fb", "", false,
                          "Emit fatbin file.");
@@ -1247,7 +1248,10 @@ void TopsccCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
   os << "# This is the choreo generated bash script to compile factor "
         "code\n\n";
 
-  os << "TOPSCC_INSTALL=" << STRINGIZE(__CHOREO_TOPSCC_DIR__) << "\n";
+  if (use_system_toolchain)
+    os << "TOPSCC_INSTALL=/opt/tops\n";
+  else
+    os << "TOPSCC_INSTALL=" << STRINGIZE(__CHOREO_TOPSCC_DIR__) << "\n";
   os << "TOPSCC=${TOPSCC_INSTALL}/bin/topscc\n";
   os << "TOPSCC_LIB=${TOPSCC_INSTALL}/lib\n\n";
 
