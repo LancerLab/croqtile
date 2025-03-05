@@ -1,5 +1,6 @@
 stages:
   - check-in-tests
+  - docker-tests
   - doc-gen
 
 
@@ -32,6 +33,21 @@ gcu3test:
   script:
     - echo "Running tests with GCU3 S60..."
     - make ci-gcu3-test
+  tags:
+    - GCU3
+  only:
+    - main 
+    - release/alpha
+    - merge_requests
+
+gcu3dockertest:
+  stage: docker-tests
+  script:
+    - echo "Running tests with GCU3 S60 EFDOCKER..."
+    - source /home/.devtools/tools/env.sh
+    - efdocker enter choreo_ci
+    - make setup-core
+    - make test
   tags:
     - GCU3
   only:

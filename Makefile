@@ -84,7 +84,7 @@ test-debug: debug
 test-release: release
 	$(LIT) tests && $(MAKE) standalone_test
 
-ci-gpu-test: setup build-with-cmake-ninja
+ci-gpu-test: setup-core build-with-cmake-ninja
 	$(LIT) tests && $(MAKE) standalone-test-with-cmake
 
 ci-gcu2-test: setup-gcu2 build-with-cmake-ninja
@@ -112,15 +112,6 @@ build-with-cmake-ninja:
 	time ninja -C $(CMAKE_BUILD_DIR)
 	ln -sf $(CMAKE_BUILD_DIR)/choreo $(WORK_DIR)/choreo
 	ln -sf $(CMAKE_BUILD_DIR)/copp $(WORK_DIR)/copp
-
-ci-gpu-test-legacy: setup legacy
-	$(LIT) tests && $(MAKE) standalone_test
-
-ci-gcu2-test-legacy: setup-gcu2 legacy
-	$(LIT) tests && $(MAKE) standalone_test
-
-ci-gcu3-test-legacy: setup-gcu3 legacy
-	$(LIT) tests && $(MAKE) standalone_test
 
 # Legacy Makefile
 BUILD_OBJECTS = $(patsubst $(SRC_DIR)/%.cpp, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/*.cpp))
@@ -232,14 +223,14 @@ setup-choreo-kit: check-choreo-kit
 	  $(MAKE) install-choreo-kit; \
 	fi;
 
-setup: setup-choreo-kit setup-ginac setup-clang-format
+setup-core: setup-choreo-kit setup-ginac setup-clang-format
 	git submodule update --init --recursive;\
 	ln -sf extern/not.sh tests
 
-setup-gcu2: setup
+setup-gcu2: setup-core
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu2-kit FTP_SERVER=$(FTP_SERVER)
 
-setup-gcu3: setup
+setup-gcu3: setup-core
 	git submodule update --init --recursive;\
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu3-kit FTP_SERVER=$(FTP_SERVER)
 
