@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GCUALL
-// RUN: choreo -t factor %s 2>&1 | FileCheck --check-prefix=CHECKF %s
+// RUN: choreo -gs -t factor %s 2>&1 | FileCheck --check-prefix=CHECKF %s
 // RUN: choreo -t topscc %s -o %s.topscc.result && %s.topscc.result | FileCheck --match-full-lines %s && rm -f %s.topscc.result
 #include "choreo.h"
 
