@@ -1,0 +1,561 @@
+// REQUIRES: TARGET-GCUALL DYNAMIC-SHAPE
+// DOCKER-ONLY
+// RUN: choreo -st -t topscc %s -o %s.result && %s.result | FileCheck --match-full-lines %s && rm -f %s.result
+
+#include "choreo.h"
+#include <chrono>
+
+__cok__ { /// kernel program
+
+#include "sip30intrin.h"
+
+#ifndef EXT32
+#define EXT32(hi, lo) ((hi) << 16 | ((lo)&0xffff))
+#endif
+
+// topsop/atomic_op/src/legacy/basic_operation/add_fp32.cc
+__co_device__ extern "C" void add_fp32(int in0_addr_, int in1_addr_, int size,
+                         int out_addr_) {
+  volatile int operands_addr0_tar = reinterpret_cast<int>(in0_addr_ >> 6);
+  volatile int operands_addr1_tar = reinterpret_cast<int>(in1_addr_ >> 6);
+  volatile int output_base_addr = reinterpret_cast<int>(out_addr_ >> 6);
+
+  tar_t A_addr =
+      __dtu_s_movsr2targ(EXT32(operands_addr0_tar + 1, operands_addr0_tar));
+  tar_t B_addr =
+      __dtu_s_movsr2targ(EXT32(operands_addr1_tar + 1, operands_addr1_tar));
+  tar_t out_addr =
+      __dtu_s_movsr2targ(((output_base_addr + 1) << 16) | output_base_addr);
+  tar_t A_next = __dtu_s_movsr2tari(EXT32(2, 2), A_addr);
+  tar_t B_next = __dtu_s_movsr2tari(EXT32(2, 2), B_addr);
+  tar_t out_next = __dtu_s_movsr2tari(EXT32(2, 2), out_addr);
+
+  v64i8 vr_a0, vr_a1, vr_a2, vr_a3, vr_a4, vr_a5, vr_a6, vr_a7, vr_a8, vr_a9;
+  v64i8 vr_b0, vr_b1, vr_b2, vr_b3, vr_b4, vr_b5, vr_b6, vr_b7, vr_b8, vr_b9;
+  v64i8 vr_out0, vr_out1, vr_out2, vr_out3;
+  v64i8 vr_out4, vr_out5, vr_out6, vr_out7;
+  v64i8 vr_out8, vr_out9;
+
+  int group_num = (size + 31) / 32;
+  int mpr = __dtu_movs_mpr();
+  __dtu_c_movsr2mpr(0xffffffff);
+
+  vr_a0 = __dtu_s_tvld_itar(A_addr, A_next);
+  vr_a1 = __dtu_s_tvld_itar(A_addr, A_next);
+  vr_a2 = __dtu_s_tvld_itar(A_addr, A_next);
+  vr_a3 = __dtu_s_tvld_itar(A_addr, A_next);
+  vr_a4 = __dtu_s_tvld_itar(A_addr, A_next);
+  vr_a5 = __dtu_s_tvld_itar(A_addr, A_next);
+  vr_a6 = __dtu_s_tvld_itar(A_addr, A_next);
+  vr_a7 = __dtu_s_tvld_itar(A_addr, A_next);
+  vr_a8 = __dtu_s_tvld_itar(A_addr, A_next);
+  vr_a9 = __dtu_s_tvld_itar(A_addr, A_next);
+
+  vr_b0 = __dtu_s_tvld_itar(B_addr, B_next);
+  vr_b1 = __dtu_s_tvld_itar(B_addr, B_next);
+  vr_b2 = __dtu_s_tvld_itar(B_addr, B_next);
+  vr_b3 = __dtu_s_tvld_itar(B_addr, B_next);
+  vr_b4 = __dtu_s_tvld_itar(B_addr, B_next);
+  vr_b5 = __dtu_s_tvld_itar(B_addr, B_next);
+  vr_b6 = __dtu_s_tvld_itar(B_addr, B_next);
+  vr_b7 = __dtu_s_tvld_itar(B_addr, B_next);
+  vr_b8 = __dtu_s_tvld_itar(B_addr, B_next);
+  vr_b9 = __dtu_s_tvld_itar(B_addr, B_next);
+#pragma clang loop unroll(disable)
+  while (group_num > 0) {
+    group_num = __dtu_c_addi(group_num, -10);
+    __dtu_m_mpr_tvst_itar(vr_out0, out_addr, out_next);
+    vr_out0 = __dtu_v_vadd_a_f32(vr_a0, vr_b0);
+    vr_a0 = __dtu_s_tvld_itar(A_addr, A_next);
+    vr_b0 = __dtu_s_tvld_itar(B_addr, B_next);
+
+    __dtu_m_mpr_tvst_itar(vr_out1, out_addr, out_next);
+    vr_out1 = __dtu_v_vadd_a_f32(vr_a1, vr_b1);
+    vr_a1 = __dtu_s_tvld_itar(A_addr, A_next);
+    vr_b1 = __dtu_s_tvld_itar(B_addr, B_next);
+
+    __dtu_m_mpr_tvst_itar(vr_out2, out_addr, out_next);
+    vr_out2 = __dtu_v_vadd_a_f32(vr_a2, vr_b2);
+    vr_a2 = __dtu_s_tvld_itar(A_addr, A_next);
+    vr_b2 = __dtu_s_tvld_itar(B_addr, B_next);
+
+    __dtu_m_mpr_tvst_itar(vr_out3, out_addr, out_next);
+    vr_out3 = __dtu_v_vadd_a_f32(vr_a3, vr_b3);
+    vr_a3 = __dtu_s_tvld_itar(A_addr, A_next);
+    vr_b3 = __dtu_s_tvld_itar(B_addr, B_next);
+
+    __dtu_m_mpr_tvst_itar(vr_out4, out_addr, out_next);
+    vr_out4 = __dtu_v_vadd_a_f32(vr_a4, vr_b4);
+    vr_a4 = __dtu_s_tvld_itar(A_addr, A_next);
+    vr_b4 = __dtu_s_tvld_itar(B_addr, B_next);
+
+    __dtu_m_mpr_tvst_itar(vr_out5, out_addr, out_next);
+    vr_out5 = __dtu_v_vadd_a_f32(vr_a5, vr_b5);
+    vr_a5 = __dtu_s_tvld_itar(A_addr, A_next);
+    vr_b5 = __dtu_s_tvld_itar(B_addr, B_next);
+
+    __dtu_m_mpr_tvst_itar(vr_out6, out_addr, out_next);
+    vr_out6 = __dtu_v_vadd_a_f32(vr_a6, vr_b6);
+    vr_a6 = __dtu_s_tvld_itar(A_addr, A_next);
+    vr_b6 = __dtu_s_tvld_itar(B_addr, B_next);
+
+    __dtu_m_mpr_tvst_itar(vr_out7, out_addr, out_next);
+    vr_out7 = __dtu_v_vadd_a_f32(vr_a7, vr_b7);
+    vr_a7 = __dtu_s_tvld_itar(A_addr, A_next);
+    vr_b7 = __dtu_s_tvld_itar(B_addr, B_next);
+
+    __dtu_m_mpr_tvst_itar(vr_out8, out_addr, out_next);
+    vr_out8 = __dtu_v_vadd_a_f32(vr_a8, vr_b8);
+    vr_a8 = __dtu_s_tvld_itar(A_addr, A_next);
+    vr_b8 = __dtu_s_tvld_itar(B_addr, B_next);
+
+    __dtu_m_mpr_tvst_itar(vr_out9, out_addr, out_next);
+    vr_out9 = __dtu_v_vadd_a_f32(vr_a9, vr_b9);
+    vr_a9 = __dtu_s_tvld_itar(A_addr, A_next);
+    vr_b9 = __dtu_s_tvld_itar(B_addr, B_next);
+    __dtu_c_movsr2mpr(0);
+  }
+
+  // remainder
+  __dtu_m_mpr_tvst_itar(vr_out0, out_addr, out_next);
+  if (group_num > -9) {
+    __dtu_m_tvst_itar(vr_out1, out_addr, out_next);
+  }
+  if (group_num > -8) {
+    __dtu_m_tvst_itar(vr_out2, out_addr, out_next);
+  }
+  if (group_num > -7) {
+    __dtu_m_tvst_itar(vr_out3, out_addr, out_next);
+  }
+  if (group_num > -6) {
+    __dtu_m_tvst_itar(vr_out4, out_addr, out_next);
+  }
+  if (group_num > -5) {
+    __dtu_m_tvst_itar(vr_out5, out_addr, out_next);
+  }
+  if (group_num > -4) {
+    __dtu_m_tvst_itar(vr_out6, out_addr, out_next);
+  }
+  if (group_num > -3) {
+    __dtu_m_tvst_itar(vr_out7, out_addr, out_next);
+  }
+  if (group_num > -2) {
+    __dtu_m_tvst_itar(vr_out8, out_addr, out_next);
+  }
+  if (group_num > -1) {
+    __dtu_m_tvst_itar(vr_out9, out_addr, out_next);
+  }
+  __dtu_c_movsr2mpr(mpr);
+}
+
+// topsop/atomic_op/src/legacy/basic_operation/div_fp32.cc
+__co_device__ extern "C" void __attribute__((disable_dtu_instr_sched))
+div_fp32(int in0_addr_, int in1_addr_, int size,
+                         int out_addr_) {
+  volatile int operands_addr0_tar = reinterpret_cast<int>(in0_addr_ >> 6);
+  volatile int operands_addr1_tar = reinterpret_cast<int>(in1_addr_ >> 6);
+  volatile int output_base_addr = reinterpret_cast<int>(out_addr_ >> 6);
+
+  tar_t A_addr = __dtu_s_movsr2targ(EXT32(operands_addr0_tar + 1, operands_addr0_tar));
+  tar_t B_addr = __dtu_s_movsr2targ(EXT32(operands_addr1_tar + 1, operands_addr1_tar));
+  tar_t out_addr =
+      __dtu_s_movsr2targ(((output_base_addr + 1) << 16) | output_base_addr);
+  tar_t A_next = __dtu_s_movsr2tari(EXT32(2, 2), A_addr);
+  tar_t B_next = __dtu_s_movsr2tari(EXT32(2, 2), B_addr);
+  tar_t out_next = __dtu_s_movsr2tari(EXT32(2, 2), out_addr);
+
+  v64i8 vr_a0, vr_a1, vr_a2, vr_a3;
+  v64i8 vr_b0, vr_b1, vr_b2, vr_b3;
+  v64i8 vr_out0, vr_out1, vr_out2, vr_out3;
+  v16f32 vr_BFB8;
+  v64i8 vr_rhs_abs0, vr_vsf_log_rhs0, vr_manti0, vr_rhs_exp0,
+        vr_num_exp0, vr_denorm0, vr_rhs_de0, vr_rhs_real0;
+  v64i8 vr_rhs_abs1, vr_vsf_log_rhs1, vr_manti1, vr_rhs_exp1,
+        vr_num_exp1, vr_denorm1, vr_rhs_de1, vr_rhs_real1;
+  vcc_t vr_sign0, vr_sign1, vr_sign2, vr_sign3;
+  vr_BFB8 = __dtu_v_vldi_hi_vr(vr_BFB8, 0xBFB8);  // -1/ln2
+  vr_BFB8 = __dtu_v_vldi_lo_vr(vr_BFB8, 0xAA3B);
+  v64i8 vr_0000 = __dtu_s_vclr_vr();
+  v64i8 vr_bias = __dtu_s_vclr_vr();
+  vr_bias = __dtu_v_vldi_lo_vr(vr_bias, 254);
+
+  int group_num = (size + 31) / 32;
+  int mpr = __dtu_movs_mpr();
+  __dtu_c_movsr2mpr(0xffffffff);
+
+  vr_a0 = __dtu_s_tvld_itar(A_addr, A_next);
+  vr_a1 = __dtu_s_tvld_itar(A_addr, A_next);
+  vr_a2 = __dtu_s_tvld_itar(A_addr, A_next);
+  vr_a3 = __dtu_s_tvld_itar(A_addr, A_next);
+  vr_b0 = __dtu_s_tvld_itar(B_addr, B_next);
+  vr_b1 = __dtu_s_tvld_itar(B_addr, B_next);
+  vr_b2 = __dtu_s_tvld_itar(B_addr, B_next);
+  vr_b3 = __dtu_s_tvld_itar(B_addr, B_next);
+
+#pragma clang loop unroll(disable)
+  while (group_num > 0) {
+    group_num = __dtu_c_addi(group_num, -4);
+    vr_sign0 = __dtu_v_vslt_f32(vr_b0, vr_0000);
+    vr_rhs_abs0 = __dtu_v_vneg_t_f32(vr_b0, vr_b0, vr_sign0);
+
+    vr_sign1 = __dtu_v_vslt_f32(vr_b1, vr_0000);
+    vr_rhs_abs1 = __dtu_v_vneg_t_f32(vr_b1, vr_b1, vr_sign1);
+
+    vr_sign2 = __dtu_v_vslt_f32(vr_b2, vr_0000);
+    vr_sign3 = __dtu_v_vslt_f32(vr_b3, vr_0000);
+
+    vr_num_exp0 = __dtu_v_vgete_a_f32(vr_b0);
+    vr_b0 = __dtu_s_tvld_itar(B_addr, B_next);
+    vr_denorm0 = __dtu_v_vsub_a_s32(vr_bias, vr_num_exp0);
+    vr_denorm0 = __dtu_v_vslli_a_u32(vr_denorm0, 23);
+    vr_denorm0 = __dtu_v_vmrgf_a_f32(vr_denorm0, vr_0000);
+
+    vr_num_exp1 = __dtu_v_vgete_a_f32(vr_b1);
+    vr_b1 = __dtu_s_tvld_itar(B_addr, B_next);
+    vr_denorm1 = __dtu_v_vsub_a_s32(vr_bias, vr_num_exp1);
+
+    vr_vsf_log_rhs0 = __dtu_v_vsf_f32(vr_rhs_abs0, 5);
+    vr_vsf_log_rhs1 = __dtu_v_vsf_f32(vr_rhs_abs1, 5);
+
+    vr_denorm1 = __dtu_v_vslli_a_u32(vr_denorm1, 23);
+    vr_denorm1 = __dtu_v_vmrgf_a_f32(vr_denorm1, vr_0000);
+
+    vr_rhs_abs0 = __dtu_v_vneg_t_f32(vr_b2, vr_b2, vr_sign2);
+    vr_rhs_abs1 = __dtu_v_vneg_t_f32(vr_b3, vr_b3, vr_sign3);
+
+    vr_num_exp0 = __dtu_v_vgete_a_f32(vr_b2);
+    vr_b2 = __dtu_s_tvld_itar(B_addr, B_next);
+
+    vr_num_exp1 = __dtu_v_vgete_a_f32(vr_b3);
+    vr_b3 = __dtu_s_tvld_itar(B_addr, B_next);
+
+    vr_manti0 = __dtu_v_vmul_a_f32(vr_BFB8, vr_vsf_log_rhs0);
+    vr_rhs_exp0 = __dtu_v_vsf_f32(vr_manti0, 0);
+
+    vr_manti1 = __dtu_v_vmul_a_f32(vr_BFB8, vr_vsf_log_rhs1);
+    vr_rhs_exp1 = __dtu_v_vsf_f32(vr_manti1, 0);
+
+    vr_vsf_log_rhs0 = __dtu_v_vsf_f32(vr_rhs_abs0, 5);
+    vr_manti0 = __dtu_v_vmul_a_f32(vr_BFB8, vr_vsf_log_rhs0);
+    vr_vsf_log_rhs1 = __dtu_v_vsf_f32(vr_rhs_abs1, 5);
+    vr_manti1 = __dtu_v_vmul_a_f32(vr_BFB8, vr_vsf_log_rhs1);
+
+    vr_rhs_de0 = __dtu_v_vmul_a_f32(vr_rhs_exp0, vr_denorm0);
+    vr_rhs_de1 = __dtu_v_vmul_a_f32(vr_rhs_exp1, vr_denorm1);
+
+
+    vr_rhs_exp0 = __dtu_v_vsf_f32(vr_manti0, 0);
+    vr_rhs_exp1 = __dtu_v_vsf_f32(vr_manti1, 0);
+
+    vr_denorm0 = __dtu_v_vsub_a_s32(vr_bias, vr_num_exp0);
+    vr_denorm0 = __dtu_v_vslli_a_u32(vr_denorm0, 23);
+    vr_denorm0 = __dtu_v_vmrgf_a_f32(vr_denorm0, vr_0000);
+
+    vr_denorm1 = __dtu_v_vsub_a_s32(vr_bias, vr_num_exp1);
+    vr_denorm1 = __dtu_v_vslli_a_u32(vr_denorm1, 23);
+    vr_denorm1 = __dtu_v_vmrgf_a_f32(vr_denorm1, vr_0000);
+
+    vr_rhs_real0 = __dtu_v_vneg_t_f32(vr_rhs_de0, vr_rhs_de0, vr_sign0);
+    vr_rhs_real1 = __dtu_v_vneg_t_f32(vr_rhs_de1, vr_rhs_de1, vr_sign1);
+
+    __dtu_m_mpr_tvst_itar(vr_out0, out_addr, out_next);
+    vr_out0 = __dtu_v_vmul_a_f32(vr_a0, vr_rhs_real0);
+    vr_a0 = __dtu_s_tvld_itar(A_addr, A_next);
+
+    __dtu_m_mpr_tvst_itar(vr_out1, out_addr, out_next);
+    vr_out1 = __dtu_v_vmul_a_f32(vr_a1, vr_rhs_real1);
+    vr_a1 = __dtu_s_tvld_itar(A_addr, A_next);
+
+    vr_rhs_de0 = __dtu_v_vmul_a_f32(vr_rhs_exp0, vr_denorm0);
+    vr_rhs_de1 = __dtu_v_vmul_a_f32(vr_rhs_exp1, vr_denorm1);
+
+    vr_rhs_real0 = __dtu_v_vneg_t_f32(vr_rhs_de0, vr_rhs_de0, vr_sign2);
+    vr_rhs_real1 = __dtu_v_vneg_t_f32(vr_rhs_de1, vr_rhs_de1, vr_sign3);
+
+    __dtu_m_mpr_tvst_itar(vr_out2, out_addr, out_next);
+    vr_out2 = __dtu_v_vmul_a_f32(vr_a2, vr_rhs_real0);
+    vr_a2 = __dtu_s_tvld_itar(A_addr, A_next);
+
+    __dtu_m_mpr_tvst_itar(vr_out3, out_addr, out_next);
+    vr_out3 = __dtu_v_vmul_a_f32(vr_a3, vr_rhs_real1);
+    vr_a3 = __dtu_s_tvld_itar(A_addr, A_next);
+    __dtu_c_movsr2mpr(0);
+  }
+
+  // remainder
+  __dtu_m_mpr_tvst_itar(vr_out0, out_addr, out_next);
+  if (group_num > -3) {
+    __dtu_m_tvst_itar(vr_out1, out_addr, out_next);
+  }
+  if (group_num > -2) {
+    __dtu_m_tvst_itar(vr_out2, out_addr, out_next);
+  }
+  if (group_num > -1) {
+    __dtu_m_tvst_itar(vr_out3, out_addr, out_next);
+  }
+  __dtu_c_movsr2mpr(mpr);
+}
+
+// topsop/atomic_op/src/legacy/basic_operation/mul_fp32_scalar.cc
+__co_device__ extern "C" void __attribute__((disable_dtu_instr_sched))
+mul_fp32_scalar(int in0_addr_, float in1, int size,
+                         int out_addr_) {
+  volatile int operands_addr0_tar = reinterpret_cast<int>(in0_addr_ >> 6);
+  volatile int output_base_addr = reinterpret_cast<int>(out_addr_ >> 6);
+
+  tar_t A_addr = __dtu_s_movsr2targ(EXT32(operands_addr0_tar + 1, operands_addr0_tar));
+  tar_t out_addr =
+      __dtu_s_movsr2targ(((output_base_addr + 1) << 16) | output_base_addr);
+  tar_t A_next = __dtu_s_movsr2tari(EXT32(2, 2), A_addr);
+  tar_t out_next = __dtu_s_movsr2tari(EXT32(2, 2), out_addr);
+
+  v64i8 vr_a0, vr_a1, vr_a2, vr_a3, vr_a4, vr_a5, vr_a6, vr_a7, vr_a8, vr_a9;
+  v64i8 vr_b0;
+  v64i8 vr_out0, vr_out1, vr_out2, vr_out3;
+  v64i8 vr_out4, vr_out5, vr_out6, vr_out7;
+  v64i8 vr_out8, vr_out9;
+
+  int group_num = (size + 31) / 32;
+  int mpr = __dtu_movs_mpr();
+  __dtu_c_movsr2mpr(0xffffffff);
+
+  vr_a0 = __dtu_s_tvld_itar(A_addr, A_next);
+  vr_a1 = __dtu_s_tvld_itar(A_addr, A_next);
+  vr_a2 = __dtu_s_tvld_itar(A_addr, A_next);
+  vr_a3 = __dtu_s_tvld_itar(A_addr, A_next);
+  vr_a4 = __dtu_s_tvld_itar(A_addr, A_next);
+  vr_a5 = __dtu_s_tvld_itar(A_addr, A_next);
+  vr_a6 = __dtu_s_tvld_itar(A_addr, A_next);
+  vr_a7 = __dtu_s_tvld_itar(A_addr, A_next);
+  vr_a8 = __dtu_s_tvld_itar(A_addr, A_next);
+  vr_a9 = __dtu_s_tvld_itar(A_addr, A_next);
+
+  vr_b0 = __dtu_s_movr2vr_dup_f32(in1);
+#pragma clang loop unroll(disable)
+  while (group_num > 0) {
+    group_num = __dtu_c_addi(group_num, -10);
+    __dtu_m_mpr_tvst_itar(vr_out0, out_addr, out_next);
+    vr_out0 = __dtu_v_vmul_a_f32(vr_a0, vr_b0);
+    vr_a0 = __dtu_s_tvld_itar(A_addr, A_next);
+
+    __dtu_m_mpr_tvst_itar(vr_out1, out_addr, out_next);
+    vr_out1 = __dtu_v_vmul_a_f32(vr_a1, vr_b0);
+    vr_a1 = __dtu_s_tvld_itar(A_addr, A_next);
+
+    __dtu_m_mpr_tvst_itar(vr_out2, out_addr, out_next);
+    vr_out2 = __dtu_v_vmul_a_f32(vr_a2, vr_b0);
+    vr_a2 = __dtu_s_tvld_itar(A_addr, A_next);
+
+    __dtu_m_mpr_tvst_itar(vr_out3, out_addr, out_next);
+    vr_out3 = __dtu_v_vmul_a_f32(vr_a3, vr_b0);
+    vr_a3 = __dtu_s_tvld_itar(A_addr, A_next);
+
+    __dtu_m_mpr_tvst_itar(vr_out4, out_addr, out_next);
+    vr_out4 = __dtu_v_vmul_a_f32(vr_a4, vr_b0);
+    vr_a4 = __dtu_s_tvld_itar(A_addr, A_next);
+
+    __dtu_m_mpr_tvst_itar(vr_out5, out_addr, out_next);
+    vr_out5 = __dtu_v_vmul_a_f32(vr_a5, vr_b0);
+    vr_a5 = __dtu_s_tvld_itar(A_addr, A_next);
+
+    __dtu_m_mpr_tvst_itar(vr_out6, out_addr, out_next);
+    vr_out6 = __dtu_v_vmul_a_f32(vr_a6, vr_b0);
+    vr_a6 = __dtu_s_tvld_itar(A_addr, A_next);
+
+    __dtu_m_mpr_tvst_itar(vr_out7, out_addr, out_next);
+    vr_out7 = __dtu_v_vmul_a_f32(vr_a7, vr_b0);
+    vr_a7 = __dtu_s_tvld_itar(A_addr, A_next);
+
+    __dtu_m_mpr_tvst_itar(vr_out8, out_addr, out_next);
+    vr_out8 = __dtu_v_vmul_a_f32(vr_a8, vr_b0);
+    vr_a8 = __dtu_s_tvld_itar(A_addr, A_next);
+
+    __dtu_m_mpr_tvst_itar(vr_out9, out_addr, out_next);
+    vr_out9 = __dtu_v_vmul_a_f32(vr_a9, vr_b0);
+    vr_a9 = __dtu_s_tvld_itar(A_addr, A_next);
+    __dtu_c_movsr2mpr(0);
+  }
+
+  // remainder
+  __dtu_m_mpr_tvst_itar(vr_out0, out_addr, out_next);
+  if (group_num > -9) {
+    __dtu_m_tvst_itar(vr_out1, out_addr, out_next);
+  }
+  if (group_num > -8) {
+    __dtu_m_tvst_itar(vr_out2, out_addr, out_next);
+  }
+  if (group_num > -7) {
+    __dtu_m_tvst_itar(vr_out3, out_addr, out_next);
+  }
+  if (group_num > -6) {
+    __dtu_m_tvst_itar(vr_out4, out_addr, out_next);
+  }
+  if (group_num > -5) {
+    __dtu_m_tvst_itar(vr_out5, out_addr, out_next);
+  }
+  if (group_num > -4) {
+    __dtu_m_tvst_itar(vr_out6, out_addr, out_next);
+  }
+  if (group_num > -3) {
+    __dtu_m_tvst_itar(vr_out7, out_addr, out_next);
+  }
+  if (group_num > -2) {
+    __dtu_m_tvst_itar(vr_out8, out_addr, out_next);
+  }
+  if (group_num > -1) {
+    __dtu_m_tvst_itar(vr_out9, out_addr, out_next);
+  }
+  __dtu_c_movsr2mpr(mpr);
+}
+
+extern "C"
+__co_device__ void addcdiv_kernel_0_c_func_fp32(float* a_addr, float* b_addr, float* c_addr, float* d_addr, float* e_addr) {
+  div_fp32(__addr2int__(b_addr), __addr2int__(c_addr), 8192, __addr2int__(e_addr));
+  mul_fp32_scalar(__addr2int__(e_addr), 1.0, 8192, __addr2int__(e_addr));
+  add_fp32(__addr2int__(a_addr), __addr2int__(e_addr), 8192, __addr2int__(d_addr));
+}
+
+extern "C"
+__co_device__ void add_kernel_fp32(float* a_addr, float* b_addr, float* c_addr) {
+  add_fp32(__addr2int__(a_addr), __addr2int__(b_addr), 8192, __addr2int__(c_addr));
+}
+
+} /// end of kernel decl
+
+
+__co__ f32 [L] addcdiv(f32 [L] first, f32 [L] second, f32 [L] third) { /// device program
+  f32[L] output; // use same shape as first
+
+  parallel p by 1 {  // p is sip_index
+    shared f32[8192] out;
+    with index = {c_tile} in [L/8192] {  // decl your tiled spans
+      first_load_A = dma.copy.async first.chunkat(c_tile) => shared;
+      second_load_A = dma.copy.async second.chunkat(c_tile) => shared;
+      third_load_A = dma.copy.async third.chunkat(c_tile) => shared;
+      first_load_B = dma.any;
+      second_load_B = dma.any;
+      third_load_B = dma.any;
+
+      foreach c_tile(1:) {
+        first_load_B = dma.copy.async first.chunkat(c_tile) => shared;
+        second_load_B = dma.copy.async second.chunkat(c_tile) => shared;
+        third_load_B = dma.copy.async third.chunkat(c_tile) => shared;
+
+        wait first_load_A, second_load_A, third_load_A;
+          local f32[8192] out_s;
+          local f32[8192] tmp;
+          with index = {s_tile} in [1] {
+            foreach s_tile {
+              first_load_s = dma.copy.async first_load_A.data.chunkat(s_tile) => local;
+              second_load_s = dma.copy.async second_load_A.data.chunkat(s_tile) => local;
+              third_load_s = dma.copy.async third_load_A.data.chunkat(s_tile) => local;
+              wait first_load_s, second_load_s, third_load_s;
+              call addcdiv_kernel_0_c_func_fp32(
+                  first_load_s.data,
+                  second_load_s.data,
+                  third_load_s.data,
+                  out_s,
+                  tmp);
+              out_store_s = dma.copy.async out_s => out.chunkat(s_tile); // can use defined vars
+              wait out_store_s;
+            }
+          }
+        out_store = dma.copy.async out => output.chunkat(c_tile-1); // can use defined vars
+        wait out_store;
+        swap(first_load_A, first_load_B);
+        swap(second_load_A, second_load_B);
+        swap(third_load_A, third_load_B);
+      }
+      // NOTE: #c_tile(-1) SHOULD be last var of range 0-to-L/8192 => 0-12 => 11
+      // c_tile is not bounded to a literal, but a expr with int-compile-time-value,
+      // this value is not simplified to visible by its user
+
+#ifdef __TOPSCC__
+     wait first_load_A, second_load_A, third_load_A;
+#else
+      first_load_tail = select(#c_tile % 2, first_load_B, first_load_A);
+      second_load_tail = select(#c_tile % 2, second_load_B, second_load_A);
+      third_load_tail = select(#c_tile % 2, third_load_B, third_load_A);
+      wait first_load_tail, second_load_tail, third_load_tail;
+#endif
+        // NOTE: cannot same naming
+        local f32[8192] out_s_tail;
+        local f32[8192] tmp_tail;
+        with index = {s_tile} in [1] {
+          foreach s_tile {
+            // NOTE: cannot naming same
+#ifdef __TOPSCC__
+            first_load_s = dma.copy.async first_load_A.data.chunkat(s_tile) => local;
+            second_load_s_tail = dma.copy.async second_load_A.data.chunkat(s_tile) => local;
+            third_load_s_tail = dma.copy.async third_load_A.data.chunkat(s_tile) => local;
+            wait first_load_s, second_load_s_tail, third_load_s_tail;
+            call addcdiv_kernel_0_c_func_fp32(
+                first_load_s.data,
+                second_load_s_tail.data,
+                third_load_s_tail.data,
+                out_s_tail,
+                tmp_tail);
+#else
+            first_load_s = dma.copy.async first_load_tail.data.chunkat(s_tile) => local;
+            second_load_s_tail = dma.copy.async second_load_tail.data.chunkat(s_tile) => local;
+            third_load_s_tail = dma.copy.async third_load_tail.data.chunkat(s_tile) => local;
+            wait first_load_s, second_load_s_tail, third_load_s_tail;
+            call addcdiv_kernel_0_c_func_fp32(
+                first_load_s.data,
+                second_load_s_tail.data,
+                third_load_s_tail.data,
+                out_s_tail,
+                tmp_tail);
+#endif
+            // NOTE: dito
+            out_store_s_tail = dma.copy.async out_s_tail => out.chunkat(s_tile); // can use defined vars
+            wait out_store_s_tail;
+          }
+        }
+      // NOTE: DITO
+      // NOTE: c_tile(-1) evals to wrong value
+      out_store_tail = dma.copy.async out => output.chunkat(c_tile(-1)); // can use defined vars
+      wait out_store_tail;
+    }
+  } // can use python styling
+  return output;
+}
+
+
+int main() { /// host program
+  const int LL = 8192*12;
+  choreo::f32 a[LL]; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::f32 b[512][512] = {0};
+  choreo::f32 b[LL]; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::f32 b[512][512] = {0};
+  choreo::f32 c[LL]; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::f32 b[512][512] = {0};
+
+  auto first_data = choreo::make_spanview<1, choreo::f32>((float*)a, {LL});
+  auto second_data = choreo::make_spanview<1, choreo::f32>((float*)b, {LL});
+  auto third_data = choreo::make_spanview<1, choreo::f32>((float*)c, {LL});
+
+  std::fill_n((float*)&first_data[0], LL, 1.0);
+  std::fill_n((float*)&second_data[0], LL, 1.0);
+  std::fill_n((float*)&third_data[0], LL, 1.0);
+  // first_data.fill_random(-1.0, 1.0);
+
+  auto start = std::chrono::high_resolution_clock::now();
+
+  auto res
+    = addcdiv(first_data, second_data, third_data);
+
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
+  // verfication
+  for (size_t j = 0; j < res.shape()[0]; ++j) {
+    // std::cout << "j = " << j << std::endl;
+    // std::cout << "res: " << res[j] << "\n";
+    float ref = first_data[j] + second_data[j] / third_data[j];
+    // float ref = first_data[j] + second_data[j];
+
+    // std::cout << "ref: " << ref << std::endl;
+    choreo::choreo_assert(ref == res[j], "values are not equal.");
+  }
+  std::cout << "Test Passed\n" << std::endl;
+  std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
+}
+// CHECK: Test Passed

@@ -1,4 +1,5 @@
 // REQUIRES: TARGET-GCUALL
+// SHELL-ONLY
 // RUN: choreo -gs -t factor -f16n %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
 
 #include <chrono>

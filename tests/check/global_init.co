@@ -1,4 +1,4 @@
-// REQUIRES: TARGET-GCUALL
+// REQUIRES: TARGET-GCUALL SHELL-ONLY
 // RUN: not choreo -t factor %s 2>&1 | FileCheck --check-prefix=CHECKF %s 
 // RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
 

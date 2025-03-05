@@ -1,0 +1,66 @@
+// REQUIRES: TARGET-GCUALL
+// DOCKER-ONLY
+// RUN: choreo -st -t topscc %s -o %s.result && %s.result | FileCheck --match-full-lines %s && rm -f %s.result
+#include "choreo.h"
+
+// extern "C" void embedding_kernel(float * weights, int * indices, float * out, int vocab_size, int embed_dim, int seq_len) {
+__cok__ { /// kernel program
+__co_device__ extern "C" void embedding_kernel(float * weights, int * indices, float * out) {
+  int vocab_size = 512;
+  int embed_dim = 128;
+  int seq_len = 32;
+  
+  for (int i = 0; i < seq_len; ++i)
+    for (int j = 0; j < embed_dim; ++j) {
+      out[i * embed_dim + j] = weights[indices[i] * embed_dim + j];
+    }
+}
+} /// end of kernel decl
+
+__co__ f32 [32, 128] embedding(f32 [512, 128] weights, s32 [32] indices) {
+  f32[indices.span(0), weights.span(1)] output;
+
+  parallel p by 1 {
+    with index = {seq_tile, embed_tile, index_tile} in [1, 1, 1] {  // decl your tiled spans
+      foreach seq_tile {
+        local f32[32, 128] embed_out {0};
+        foreach embed_tile {
+          indices_load = dma.copy indices.chunkat(index_tile) => local;
+          weights_load = dma.copy weights.chunkat(seq_tile, embed_tile) => local;
+
+          call embedding_kernel(weights_load.data, indices_load.data, embed_out);
+          dma.copy embed_out => output.chunkat(index_tile, embed_tile);
+        }
+      }
+    }
+  }
+  return output;
+}
+
+int main() { /// host program
+  choreo::f32 embedding_weights[512][128] = {0};
+  choreo::s32 input_indices[32] = {0};
+  auto weights_data = choreo::make_spanview<2, choreo::f32>((float*)embedding_weights, {512, 128});
+  auto indices_data = choreo::make_spanview<1, choreo::s32>((int*)input_indices, {32});
+  weights_data.fill_random(-1.0f, 1.0f);
+  indices_data.fill_random(0, 511);
+
+  auto res = embedding(weights_data, indices_data);
+  std::cout << res.shape()[0] << std::endl;
+  std::cout << res.shape()[1] << std::endl;
+
+  // verification
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+      float ref = embedding_weights[input_indices[i]][j];
+      if (ref != res[i][j]) {
+        // std::cout << "i: " << i << ", j: " << j << "\n";
+        // std::cout << "res: " << res[i][j] << "\n";
+        // std::cout << "ref: " << ref << std::endl;
+        choreo::choreo_assert(ref == res[i][j], "values are not equal.");
+      }
+  }
+  std::cout << "Test Passed\n" << std::endl;
+}
+// CHECK: Test Passed
+

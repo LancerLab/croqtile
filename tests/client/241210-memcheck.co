@@ -1,4 +1,5 @@
 // REQUIRES: TARGET-GCU300
+// SHELL-ONLY
 // RUN: choreo -gs -t factor %s -o %s.result && bash %s.result --execute 2>&1 | FileCheck %s
 #include "choreo.h"
 

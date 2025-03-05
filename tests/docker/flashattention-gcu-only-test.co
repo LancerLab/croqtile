@@ -1,0 +1,269 @@
+// REQUIRES: TARGET-GCUALL
+// DOCKER-ONLY
+// RUN-GCU300: choreo -st -t topscc %s -o %s.result && %s.result | FileCheck --match-full-lines %s && rm -f %s.result
+
+#include "choreo.h"
+#include <algorithm>
+#include <cfloat>
+#include <cmath>
+#include <iostream>
+#include <vector>
+
+__cok__ { /// kernel program
+
+__co_device__  extern "C" void matmul_kernel(float *lhs, float *rhs, float *out, int m,
+                                int k, int n) {
+    for (int i = 0; i < m; ++i)
+      for (int j = 0; j < n; ++j)
+        for (int z = 0; z < k; ++z)
+          out[i * n + j] += lhs[i * k + z] * rhs[z * n + j];
+  }
+
+__co_device__  extern "C" void softmax_kernel(float *input, float *output, int m, int n) {
+    for (int i = 0; i < m; ++i) {
+      float max_val = input[i * n] / 22.627417;
+      // Find the maximum value in the current row (to avoid numerical overflow)
+      for (int j = 0; j < n; ++j) {
+        input[i * n + j] /= 22.627417;
+        max_val = (max_val > input[i * n + j]) ? max_val : input[i * n + j];
+      }
+      float sum = 0.0f;
+      // Compute the exp of each element and accumulate it in sum
+      for (int j = 0; j < n; ++j) {
+        output[i * n + j] = expf(input[i * n + j] - max_val);
+        sum += output[i * n + j];
+      }
+
+      // Normalize each element by dividing it by sum
+      for (int j = 0; j < n; ++j)
+        output[i * n + j] /= sum;
+    }
+  }
+__co_device__ extern "C" void matmul_kernel_ext(float *lhs, float *rhs, float *out, float *max_row_values, int m, int k, int n) {
+    for (int i = 0; i < m; ++i) {
+        float max_val = -100; // Initialize with the smallest possible value
+        for (int j = 0; j < n; ++j) {
+            out[i * n + j] = 0.0f; // Initialize the output value
+            for (int z = 0; z < k; ++z) {
+                out[i * n + j] += lhs[i * k + z] * rhs[z * n + j];
+            }
+            // Track the maximum value in the current row
+            if (out[i * n + j] > max_val) {
+                max_val = out[i * n + j];
+            }
+        }
+        // Store the maximum value of the current row in max_row_values
+        max_row_values[i] = max_val;
+    }
+}
+__co_device__  extern "C" void softmax_kernel_ext(float *input, float *output, float *max_row_values, int m, int n) {
+    for (int i = 0; i < m; ++i) {
+      float sum = 0.0f;
+      // Compute the exp of each element and accumulate it in sum
+      for (int j = 0; j < n; ++j) {
+        output[i * n + j] = expf((input[i * n + j] - max_row_values[i])/22.627417);
+        sum += output[i * n + j];
+      }
+
+      // Normalize each element by dividing it by sum
+      for (int j = 0; j < n; ++j)
+        output[i * n + j] /= sum;
+    }
+  }
+#include <float.h>
+__co_device__  extern "C" void flash_attention_kernel(float *Q, float *K, float *V, float *O,
+                            int seq_len, int embedding_dim, float *maxi) {
+    // Define the maximum sequence length
+    #define MAX_SEQ_LEN 1024
+    #define MAX_EMBEDDING_DIM 512
+
+    // Temporary buffer shared for scores and attention weights
+    float buffer[MAX_SEQ_LEN];
+    // Precompute the scaling factor for QK^T
+    float scale_factor = 1.0f / powf((float)embedding_dim, 0.5f);
+    // Iterate over each row in the sequence
+    for (int i = 0; i < seq_len; ++i) {
+        float sum_exp = 0.0f;        // Sum of exponential scores for normalization
+        float m_prev = maxi[i]; // m_{i-1}, initialized to negative infinity
+        float d_prev = 0.0f;  // d_{i-1}
+        float d_i = 0.0f; 
+        float o_i[MAX_EMBEDDING_DIM] = {0.0f};
+        float o_prev[MAX_EMBEDDING_DIM] = {0.0f}; 
+        // Step 1: Compute QK^T for the current row and find the maximum score
+        for (int j = 0; j < seq_len; ++j) {
+            float score = 0.0f;
+            for (int d = 0; d < embedding_dim; ++d) {
+                score += Q[i * embedding_dim + d] * K[j * embedding_dim + d];
+            }
+            score *= scale_factor;  // Apply the scaling factor
+            buffer[j] = score;      // Store the score
+            m_prev = maxi[i];
+            if (score > maxi[i]) {
+                maxi[i] = score;  // Update the maximum score
+            }
+            d_i = d_prev * expf(m_prev - maxi[i]) + expf(score - maxi[i]);
+
+            // Step 3: Update o_i
+            for (int d = 0; d < embedding_dim; ++d) {
+                float v_val = V[i * embedding_dim + d]; // V[i]
+                o_i[d] = (o_prev[d] * d_prev * expf(m_prev - maxi[i]) + v_val * expf(score - maxi[i])) / d_i;
+                O[i * embedding_dim + d] = o_i[d];
+                o_prev[d] = o_i[d];
+            }
+
+
+            d_prev = d_i;
+        }
+      }
+    // Undefine the macro
+    #undef MAX_SEQ_LEN
+    #undef MAX_EMBEDDING_DIM
+    }
+
+} /// end of kernel decl
+
+__co__ f32[128, 512] flash_attention(f32[128, 512] lhs,
+                                            f32[512, 128] rhs,
+                                            f32[128, 512] v) {
+
+  f32[lhs.span(0), v.span(1)] output;
+  parallel p by 1 {
+    with index = {m_tile, k_tile, n_tile} in[32, 1, 16] { // decl your tiled spans
+      foreach
+        m_tile{
+          local f32[4, 512] l1_out{0};
+          local f32[4] max_value{0};
+          foreach
+            k_tile {
+              foreach
+                n_tile{
+                  lhs_load = dma.copy lhs.chunkat(m_tile, k_tile) => local;
+                  rhs_load = dma.copy rhs.chunkat(k_tile, n_tile) => local;
+                  v_load = dma.copy rhs.chunkat(n_tile, k_tile) => local;
+                  call flash_attention_kernel(lhs_load.data, rhs_load.data, v_load.data,l1_out,4,512,max_value);
+                  dma.copy l1_out => output.chunkat(m_tile, k_tile);
+                }
+            }
+        }
+    }
+  }
+  return output;
+}
+// Function to calculate dot product of two vectors
+extern "C" float dot_product(const float *a, const float *b, int size) {
+  float result = 0.0;
+  for (int i = 0; i < size; ++i) {
+    result += a[i] * b[i];
+  }
+  return result;
+}
+
+// Function to calculate softmax of a vector
+extern "C" void softmax(float *vector, int size) {
+  float sum = 0.0;
+  float maxv = FLT_MIN;
+  for (int i = 0; i < size; ++i) {
+    maxv = (maxv > vector[i]) ? maxv : vector[i];
+  }
+  for (int i = 0; i < size; ++i) {
+    vector[i] = exp(vector[i] - maxv);
+    sum += vector[i];
+  }
+  for (int i = 0; i < size; ++i) {
+    vector[i] /= sum;
+  }
+}
+
+// Function to perform dot-product attention
+extern "C" void cpu_attention(const float *query, const float *key,
+                              const float *value, float *output, int seq_len,
+                              int embedding_dim) {
+
+  float *temp = (float *)malloc(sizeof(float) * seq_len * seq_len);
+  float max_attention = FLT_MIN;
+  // Calculate attention scores
+  for (int i = 0; i < seq_len; ++i) {
+    for (int j = 0; j < seq_len; ++j) {
+      float attention_score =
+          (dot_product(&query[i * embedding_dim], &key[j * embedding_dim],
+                       embedding_dim)) /
+          sqrt((float)embedding_dim);
+      temp[i * seq_len + j] = attention_score;
+    }
+  }
+
+  // Apply softmax to get attention weights
+  for (int i = 0; i < seq_len; ++i) {
+    softmax(&temp[i * seq_len], seq_len);
+  }
+
+  // Calculate the weighted sum of values using attention weights
+  for (int i = 0; i < seq_len; ++i) {
+    for (int j = 0; j < embedding_dim; ++j) {
+      output[i * embedding_dim + j] = 0.0;
+      for (int k = 0; k < seq_len; ++k) {
+        output[i * embedding_dim + j] +=
+            temp[i * seq_len + k] * value[k * embedding_dim + j];
+      }
+    }
+  }
+  free(temp);
+}
+int main() {
+  // Define matrix sizes
+  int m = 128; // Rows in Q and output
+  int n = 512; // Columns in K and V (and output)
+  int k = 512; // Columns in Q and rows in K
+
+  // Allocate memory for Q, K, V
+  choreo::f32 key[128][512]; // Query matrix (128 x 512)
+  choreo::f32 q[512][128];   // Key matrix (512 x 512)
+  choreo::f32 v[128][512];   // Value matrix (512 x 512)
+
+  // Initialize Q, K, V with some values (example)
+  std::fill(&key[0][0], &key[0][0] + 128 * 512, 1.0f); // Fill lhs (Q) with 1.0
+  std::fill(&q[0][0], &q[0][0] + 512 * 128, 1.0f);     // Fill rhs (K) with 1.0
+  std::fill(&v[0][0], &v[0][0] + 128 * 512, 1.0f);     // Fill v (V) with 1.0
+  for (int i = 0; i < 128; ++i) {
+    for (int j = 0; j < 512; ++j) {
+      key[i][j] = i + j; // Fill lhs (Q) with unique values
+      q[i][j] = i + j;   // Fill rhs (K) with unique values
+      v[i][j] = i + j;   // Fill v (V) with unique values
+    }
+  }
+  auto k_data =
+      choreo::make_spanview<2, choreo::f32>((choreo::f32 *)key, {128, 512});
+  auto q_data =
+      choreo::make_spanview<2, choreo::f32>((choreo::f32 *)q, {512, 128});
+  auto v_data =
+      choreo::make_spanview<2, choreo::f32>((choreo::f32 *)v, {128, 512});
+
+  // Call attention function
+  auto result = flash_attention(k_data, q_data, v_data);
+  float cpu_result[128][512] = {0};
+  // Call attention function on CPU
+  cpu_attention(&q[0][0], &key[0][0], &v[0][0], &cpu_result[0][0], 128, 512);
+
+  // Compare results
+  bool match = true;
+  for (int i = 0; i < m; ++i) {
+    for (int j = 0; j < n; ++j) {
+      if (fabs(result[i][j] - cpu_result[i][j]) > 1e-4) {
+        match = false;
+        std::cout << "Mismatch at (" << i << ", " << j
+                  << "): GCU = " << result[i][j]
+                  << ", CPU = " << cpu_result[i][j] << std::endl;
+      }
+    }
+  }
+
+  if (match) {
+    std::cout << "Attention Test Passed\n" << std::endl;
+  } else {
+    std::cout << "Attention Test Failed\n" << std::endl;
+  }
+
+  return 0;
+}
+// CHECK: Attention Test Passed
+

@@ -1,4 +1,5 @@
 // REQUIRES: TARGET-GCU300
+// SHELL-ONLY
 // RUN: choreo -t topscc -gs %s -o %s.result && bash %s.result |FileCheck %s && rm -f %s.result
 
 __cok__ {

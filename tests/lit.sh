@@ -42,12 +42,24 @@ num_uepass=0
 num_xfails=0
 num_skiped=0
 
+is_in_docker=false
+is_in_shell=false
 test_target=
 requires_dynamic_shape=0
 expect_fail=
 expect_skip=
+expect_docker=
+expect_shell=
 
 max_jobs=1
+
+if [ -f /.dockerenv ] || grep -qE "(docker|containerd)" /proc/1/cgroup; then
+  is_in_docker=true
+  is_in_shell=false
+else
+  is_in_docker=false
+  is_in_shell=true
+fi
 
 # Function to fill the target-specific variables
 check_requirement() {
@@ -59,6 +71,8 @@ check_requirement() {
   test_target=
   expect_fail=
   expect_skip=
+  expect_docker=
+  expect_shell=
   if [ "${tgt}" == "GCU400" ]; then
     [ ! -z "$test_target" ] && echo "Test target has been set to ${test_target}"
     test_target=gcu400
@@ -83,6 +97,8 @@ check_requirement() {
 
   expect_fail=$(grep "^\/\/" $file |grep "XFAIL:" | sed 's/.*XFAIL:[[:blank:]]*//')
   expect_skip=$(grep "^\/\/" $file |grep "SKIP:")
+  expect_docker=$(grep "^\/\/" $file |grep "DOCKER-ONLY")
+  expect_shell=$(grep "^\/\/" $file |grep "SHELL-ONLY")
 }
 
 gcu_arch=
@@ -385,6 +401,18 @@ for file in "${files_array[@]}"; do
 
   if [ ! -z "$expect_skip" ]; then
     echo "SKIP:  $file"
+    num_skiped=$(($num_skiped + 1));
+    continue;
+  fi
+
+  if [ ! -z "$expect_docker" ] && [ ! -z "$is_in_docker" ]; then
+    echo "SKIP-DOCKER-ONLY:  $file"
+    num_skiped=$(($num_skiped + 1));
+    continue;
+  fi
+
+  if [ ! -z "$expect_shell" ] && [ ! -z "$is_in_shell" ]; then
+    echo "SKIP-SHELL-ONLY:  $file"
     num_skiped=$(($num_skiped + 1));
     continue;
   fi

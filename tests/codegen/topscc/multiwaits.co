@@ -1,4 +1,4 @@
-// REQUIRES: TARGET-GCUALL
+// REQUIRES: TARGET-GCUALL SHELL-ONLY
 // RUN: choreo -t topscc %s -gs -o %s.result && bash %s.result | FileCheck %s && rm -f %s.result
 
 __co__ void nowait(f32 [15] input) {
