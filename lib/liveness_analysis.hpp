@@ -93,6 +93,7 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
   // map from stmt to its index in stmts_preordered.
   std::unordered_map<const Stmt*, size_t> stmt2number;
   std::vector<const Stmt*> stmts_preordered;
+  std::unordered_map<const Stmt*, std::string> stmt2str;
 
   struct VisitOrder {
     size_t visit_begin = 0;
@@ -129,6 +130,7 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
 #endif
 
   BufSet buffers;
+  BufSet global_buffers;
   BufSet shared_buffers;
   BufSet local_buffers;
   std::unordered_map<Storage, BufNodes> buf_nodes;
@@ -142,10 +144,12 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
   // one to many. Bind var to other vars. Could happen in select, dma, etc.
   std::unordered_map<std::string, VarSet> Bindings;
 
-  // record the binding info to do restoration in CalculateLiveInOut().
+  // record the binding info to do restoration in ComputeLiveInOut().
   std::unordered_map<const Stmt*, std::string> stmt2binding_restore;
 
   std::unordered_map<size_t, location> idx2loc;
+
+  std::unordered_set<std::string> paraby_bounded_vars;
 
   struct LivenessInfo {
     // TODO: optimize VarSet to use bitset.
@@ -188,7 +192,7 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
   FutureBufferInfo& FBInfo() const { return FCtx(fname).GetFutureBufferInfo(); }
 
 private:
-  void DumpStmtBriefly(const Stmt& n, std::ostream& os, bool indent = false);
+  void DumpStmtBriefly(const Stmt& n, std::ostream& os, bool indent);
   VarSet GetAllSymbolicOperands(AST::Node* n) const;
   VarSet SetUnion(const VarSet& a, const VarSet& b) const;
   VarSet SetDiff(const VarSet& a, const VarSet& b) const;
@@ -196,6 +200,8 @@ private:
   bool IsRef(const AST::Node& n) const;
   std::string GetScopedName(const std::string& name) const;
   void AddUse(const Stmt* s, const std::string& var, bool is_future = false,
+              bool add_extra_use = true);
+  void AddUse(const Stmt* s, const VarSet& vars, bool is_future = false,
               bool add_extra_use = true);
   void AddDef(const Stmt* s, const std::string& var, bool is_buffer = false);
   void AddBufStmt(const Stmt* s, Storage sto);
@@ -207,9 +213,13 @@ private:
   void RemoveBinding(const std::string& bind_res, const std::string& bind_src);
   void AddFut2Buffers(const std::string& fut, const std::string& src,
                       const std::string& dst);
-  void CalculateLiveInOut();
-  void calculateRanges();
+  void ComputeLiveInOut();
+  void ComputeLiveRange();
   void HandleSelect(AST::Node& n, ptr<AST::Select> sel);
+  std::string SSTR(const Stmt* stmt) const;
+
+  template <typename... MapTypes>
+  VarSet TransitiveClosure(const VarSet& vars, const MapTypes&... maps);
 
 public:
   void TraceEachVisit(AST::Node& n, bool detail = false,

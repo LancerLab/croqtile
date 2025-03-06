@@ -1,0 +1,136 @@
+// RUN: choreo --liveness -dv=liveness -sa=liveness %s -o - | FileCheck --match-full-lines %s
+
+__cok__ {
+__co_device__ extern "C" void kernel(int * a, int * b, int * c, int n) {
+  for (int i = 0; i < n; ++i)
+    c[i] = a[i] + b[i];
+}
+}
+
+
+__co__ s32 [6, 17, 128] ele_add(s32 [6, 17, 128] lhs, s32 [6, 17, 128] rhs) {
+  s32[lhs.span] output;
+
+  parallel p by 6 {
+    with index = {x, y} in [17, 4] {
+      // TODO: should we add the use: rhs, p, x, y here?
+      local s32 [rhs.span / {#p, #x, #y}] l_out; 
+      foreach x {
+        // first bunch
+        lfA = dma.copy.async lhs.chunkat(p, x, y) => local;
+        rfA = dma.copy.async rhs.chunkat(p, x, y) => local;
+        // dummy DMA used for A-B buffering
+        lfB = dma.any;
+        rfB = dma.any;
+        foreach y(1:) {
+          lfB = dma.copy.async lhs.chunkat(p, x, y) => local;
+          rfB = dma.copy.async rhs.chunkat(p, x, y) => local;
+
+          wait lfA, rfA;
+
+          call kernel(lfA.data, rfA.data, l_out, |lfB.span|);
+
+          dma.copy l_out => output.chunkat(p, x, y - 1);
+
+          swap(lfA, lfB);
+          swap(rfA, rfB);
+        }
+        wait lfA, rfA;
+        call kernel(lfA.data, rfA.data, l_out, |lfB.span|);
+        dma.copy l_out => output.chunkat(p, x, y(-1));
+      }
+    }
+  }
+
+  return output;
+}
+
+int main() {
+  choreo::s32 a[6][17][128] = {0};
+  choreo::s32 b[6][17][128] = {0};
+
+  auto a_data = choreo::make_spanview<3, choreo::s32>((int*)a, {6, 17, 128});
+  auto b_data = choreo::make_spanview<3, choreo::s32>((int*)b, {6, 17, 128});
+  a_data.fill_random(-10, 10);
+  b_data.fill_random(-10, 10);
+  auto res = ele_add(a_data, b_data);
+
+ 
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k) {
+        if (a[i][j][k] + b[i][j][k] != res[i][j][k]) {
+          assert(a[i][j][k] + b[i][j][k] == res[i][j][k]);
+        }
+      }
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK: (  0) ele_add(s32 mdspan<3> [6, 17, 128] lhs, s32 mdspan<3> [6, 17, 128] rhs) {
+// CHECK: (  1)   global s32 [ lhs.span ] output
+// CHECK: (  2)   parallel p = {p__elem__x} by [6] {
+// CHECK: (  3)     with index = {x, y} in [ 17 4 ] {
+// CHECK: (  4)       local s32 [ (rhs.span / { (ubound p) ,  (ubound x) ,  (ubound y) })  ] l_out
+// CHECK: (  5)       foreach x(::) {
+// CHECK: (  6)         local s32 mdspan<3> [1, 1, 32] lfA__buf__
+// CHECK: (  7)         lfA = dma.copy.async lhs.ChunkAt(p, x, y) => lfA__buf__
+// CHECK: (  8)         local s32 mdspan<3> [1, 1, 32] rfA__buf__
+// CHECK: (  9)         rfA = dma.copy.async rhs.ChunkAt(p, x, y) => rfA__buf__
+// CHECK: ( 10)         local s32 mdspan<3> [1, 1, 32] lfB__buf__
+// CHECK: ( 11)         lfB = dma.any
+// CHECK: ( 12)         local s32 mdspan<3> [1, 1, 32] rfB__buf__
+// CHECK: ( 13)         rfB = dma.any
+// CHECK: ( 14)         anon_0 = 1
+// CHECK: ( 15)         foreach y(anon_0::1) {
+// CHECK: ( 16)           lfB = dma.copy.async lhs.ChunkAt(p, x, y) => lfB__buf__
+// CHECK: ( 17)           rfB = dma.copy.async rhs.ChunkAt(p, x, y) => rfB__buf__
+// CHECK: ( 18)           wait lfA, rfA
+// CHECK: ( 19)           call kernel( (dataof lfA) ,  (dataof rfA) , l_out,  (sizeof lfB.span) )
+// CHECK: ( 20)           anon_1 =  (y - 1) 
+// CHECK: ( 21)           dma.copy l_out => output.ChunkAt(p, x, anon_1)
+// CHECK: ( 22)           swap(lfA, lfB)
+// CHECK: ( 23)           swap(rfA, rfB)
+// CHECK: ( 24)         }
+// CHECK: ( 25)         wait lfA, rfA
+// CHECK: ( 26)         call kernel( (dataof lfA) ,  (dataof rfA) , l_out,  (sizeof lfB.span) )
+// CHECK: ( 27)         dma.copy l_out => output.ChunkAt(p, x, y[-1])
+// CHECK: ( 28)       }
+// CHECK: ( 29)     }
+// CHECK: ( 30)   }
+// CHECK: ( 31)   return output
+// CHECK: ( 32) }
+
+// CHECK: IGNORE global buffer: ::ele_add::lhs
+// CHECK: IGNORE global buffer: ::ele_add::output
+// CHECK: VAR    ::ele_add::paraby_0::p
+// CHECK: 	range: [2, 30]
+// CHECK: VAR    ::ele_add::paraby_0::p__elem__x
+// CHECK: 	range: [2, 30]
+// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::anon_0
+// CHECK: 	range: [14, 24]
+// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::foreach_1::anon_1
+// CHECK: 	range: [20, 21]
+// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::lfA
+// CHECK: 	range: [7, 26]
+// CHECK: BUFFER ::ele_add::paraby_0::within_0::foreach_0::lfA__buf__
+// CHECK: 	range: [6, 26]
+// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::lfB
+// CHECK: 	range: [11, 26]
+// CHECK: BUFFER ::ele_add::paraby_0::within_0::foreach_0::lfB__buf__
+// CHECK: 	range: [10, 26]
+// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::rfA
+// CHECK: 	range: [9, 26]
+// CHECK: BUFFER ::ele_add::paraby_0::within_0::foreach_0::rfA__buf__
+// CHECK: 	range: [8, 26]
+// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::rfB
+// CHECK: 	range: [13, 26]
+// CHECK: BUFFER ::ele_add::paraby_0::within_0::foreach_0::rfB__buf__
+// CHECK: 	range: [12, 26]
+// CHECK: BUFFER ::ele_add::paraby_0::within_0::l_out
+// CHECK: 	range: [4, 28]
+// CHECK: VAR    ::ele_add::paraby_0::within_0::x
+// CHECK: 	range: [3, 28]
+// CHECK: VAR    ::ele_add::paraby_0::within_0::y
+// CHECK: 	range: [3, 28]
+// CHECK: IGNORE global buffer: ::ele_add::rhs

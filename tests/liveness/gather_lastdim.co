@@ -1,0 +1,446 @@
+// RUN: choreo --liveness -dv=liveness -sa=liveness %s -o - | FileCheck --match-full-lines %s
+
+__cok__ {
+#include "tcle.h"
+using namespace tcle;
+
+__co_device__ extern "C" void call_gather_kernel(
+    int* input, int* index, int* output, int* off_buff, int* para) {
+  // TCLE_MAX_VECTOR_LENGTH = 128 in GCU300
+  using in_vtype = typename tcle::altivector<int, TCLE_MAX_VECTOR_LENGTH>::VT;
+  using id_vtype = typename tcle::altivector<int, TCLE_MAX_VECTOR_LENGTH>::VT;
+  using mask_vtype = typename tcle::altivector_to_mask<id_vtype>::type;
+  using cpp_type = typename tcle::altivector_to_scalar<id_vtype>::type;
+
+  int id_dim0 = para[0]; // 1
+  int id_dim1 = para[1]; // 1
+  int id_dim2 = para[2]; // 1
+  int id_dim3 = para[3]; // 512
+  int src_id_dim3 = para[4]; // 512
+  int in_stride0 = para[5]; // 1
+  int in_stride1 = para[6]; // 1
+  int in_stride2 = para[7]; // 1
+  int dim = para[8]; // 3
+  int dim_stride = para[9]; // 1
+
+  int bpe = sizeof(int);
+  int vlength = tcle::altivector_step<in_vtype>(); // 128
+  int loop_num = (id_dim3 + vlength - 1) / vlength; // 512 / 128 = 4
+
+  mask_vtype mask;
+  id_vtype v_index, v_off, v_stride, v_base, v_bpe;
+  in_vtype v_out;
+  id_vtype v0 = (id_vtype)(0);
+  mask = v0 == v0;
+  tcle::leaptr<id_vtype> index_ptr = tcle::simple_leaptr<id_vtype>(index);
+  tcle::leaptr<in_vtype> output_ptr = tcle::simple_leaptr<in_vtype>(output);
+  tcle::leaptr<id_vtype> off_ptr = tcle::simple_leaptr<id_vtype>(off_buff);
+
+  v_stride = (id_vtype)(*reinterpret_cast<cpp_type*>(&dim_stride));
+  v_off = off_ptr.load();
+
+  auto src_addr = (__TCLE_AS__ char*)reinterpret_cast<char*>(input);
+  v_bpe = (id_vtype)(*reinterpret_cast<cpp_type*>(&bpe));
+
+  output[0] = vlength;
+  output[1] = loop_num;
+  
+  if (dim == 0) {
+    for (int i0 = 0; i0 < id_dim0; i0++) {
+      // int off0 = i0 * in_stride0;
+      for (int i1 = 0; i1 < id_dim1; i1++) {
+        int off1 = i1 * in_stride1;
+        for (int i2 = 0; i2 < id_dim2; i2++) {
+          int off2 = i2 * in_stride2;
+          for (int i3 = 0; i3 < loop_num; i3++) {
+            int addr_base = off1 + off2 + i3 * vlength;
+            v_base = (id_vtype)(*reinterpret_cast<cpp_type*>(&addr_base));
+            v_index = index_ptr.load();
+            v_index = tcle::vsel(mask, v_index * v_stride, v_index);
+            v_index = tcle::vsel(mask, v_index + v_base, v_index);
+            v_index = tcle::vsel(mask, v_index + v_off, v_index);
+            v_index = tcle::vsel(mask, v_index * v_bpe, v_index);
+
+            v_out = tcle::gather<in_vtype>(src_addr, v_index);
+            output_ptr.store(v_out);
+          }
+        }
+      }
+    }
+  } else if (dim == 1) {
+    for (int i0 = 0; i0 < id_dim0; i0++) {
+      int off0 = i0 * in_stride0;
+      for (int i1 = 0; i1 < id_dim1; i1++) {
+        // int off1 = i1 * in_stride1;
+        for (int i2 = 0; i2 < id_dim2; i2++) {
+          int off2 = i2 * in_stride2;
+          for (int i3 = 0; i3 < loop_num; i3++) {
+            int addr_base = off0 + off2 + i3 * vlength; // 0
+            v_base = (id_vtype)(*reinterpret_cast<cpp_type*>(&addr_base));
+            v_index = index_ptr.load();
+            v_index = tcle::vsel(mask, v_index * v_stride, v_index); // *1
+            v_index = tcle::vsel(mask, v_index + v_base, v_index); // +0
+            v_index = tcle::vsel(mask, v_index + v_off, v_index); // +0,1,2,,
+            v_index = tcle::vsel(mask, v_index * v_bpe, v_index); // *4
+
+            v_out = tcle::gather<in_vtype>(src_addr, v_index);
+            output_ptr.store(v_out);
+          }
+        }
+      }
+    }
+  } else if (dim == 2) {
+    for (int i0 = 0; i0 < id_dim0; i0++) {
+      int off0 = i0 * in_stride0;
+      for (int i1 = 0; i1 < id_dim1; i1++) {
+        int off1 = i1 * in_stride1;
+        for (int i2 = 0; i2 < id_dim2; i2++) {
+          // int off2 = i2 * in_stride2;
+          for (int i3 = 0; i3 < loop_num; i3++) {
+            int addr_base = off0 + off1 + i3 * vlength;
+            v_base = (id_vtype)(*reinterpret_cast<cpp_type*>(&addr_base));
+            v_index = index_ptr.load();
+            v_index = tcle::vsel(mask, v_index * v_stride, v_index);
+            v_index = tcle::vsel(mask, v_index + v_base, v_index);
+            v_index = tcle::vsel(mask, v_index + v_off, v_index);
+            v_index = tcle::vsel(mask, v_index * v_bpe, v_index);
+
+            v_out = tcle::gather<in_vtype>(src_addr, v_index);
+            output_ptr.store(v_out);
+          }
+        }
+      }
+    }
+  } else if (dim == 3) {
+    for (int i0 = 0; i0 < id_dim0; i0++) {
+      int off0 = i0 * in_stride0;
+      for (int i1 = 0; i1 < id_dim1; i1++) {
+        int off1 = i1 * in_stride1;
+        for (int i2 = 0; i2 < id_dim2; i2++) {
+          int off2 = i2 * in_stride2;
+          for (int i3 = 0; i3 < loop_num; i3++) {
+            int addr_base = off0 + off1 + off2;
+            v_base = (id_vtype)(*reinterpret_cast<cpp_type*>(&addr_base));
+            v_index = index_ptr.load();
+            v_index = tcle::vsel(mask, v_index + v_base, v_index);
+            v_index = tcle::vsel(mask, v_index * v_bpe, v_index);
+
+            v_out = tcle::gather<in_vtype>(src_addr, v_index);
+            output_ptr.store(v_out);
+          }
+        }
+      }
+    }
+  }
+}
+
+__co_device__ extern "C" void call_gather_kernel_2(
+    int* input, int* index, int* output, int* off_buff, int* para) {
+  int id_dim0 = para[0];
+  int id_dim1 = para[1];
+  int id_dim2 = para[2];
+  int id_dim3 = para[3];
+  int src_id_dim3 = para[4];
+  int in_stride0 = para[5];
+  int in_stride1 = para[6];
+  int in_stride2 = para[7];
+  int dim = para[8];
+  int dim_stride = para[9];
+  for (int i=0; i<id_dim3; i++) {
+    output[i] = input[index[i]];
+  }
+}
+}
+
+// using RANK_MAX = 8; // 定义最大维度为8
+// struct GATHER_OP_PARAS {
+//   int in_dims[RANK_MAX];    // 输入张量的每个维度的大小
+//   int in_strides[RANK_MAX]; // 输入张量的每个维度的步长
+//   int id_dims[RANK_MAX];    // 索引张量的每个维度的大小
+//   int id_strides[RANK_MAX]; // 索引张量的每个维度的步长
+//   int dim;                  // 进行gather操作的维度
+//   int rank;                 // 张量的实际维度数
+//   int bpe; // bytes per element，每个元素占用的字节数
+// };
+
+__co__ auto foo(s32[128] off_buff_L3, s32[102400, 512] input, s32[102400, 512] id,
+                s32[10] para) {
+  s32[id.span] output;
+
+  parallel p by 10 {
+
+    local s32[1, 512] output_L1;
+    local s32[128] off_buff;
+    dma.copy off_buff_L3 => off_buff;
+    para_L1 = dma.copy para => local;
+
+    with {d0, d1} in [10240, 1] {
+      foreach d0, d1 {
+        input_L1 = dma.copy input.chunkat(p#d0, d1) => local;
+        id_L1 = dma.copy id.chunkat(p#d0, d1) => local;
+
+        // 120000µs VS 210000µs
+#ifdef __TOPSCC__
+        call call_gather_kernel_2(
+            input_L1.data, id_L1.data, output_L1, off_buff, para_L1.data);
+#else
+// TODO: not sure why the TOPSCC kernel fails. alignment reqs?
+        call call_gather_kernel(
+            input_L1.data, id_L1.data, output_L1, off_buff, para_L1.data);
+#endif
+
+        dma.copy output_L1 => output.chunkat(p#d0, d1);
+      }
+    }
+  }
+  return output;
+}
+
+#define PRINT(x) std::cout << ">>> " << #x << " = " << (x) << std::endl
+
+// 1024*6 = 6144
+const int N = 102400, M = 512;
+int nums[N][M];
+int indice[N][M]; 
+
+auto GatherHost(int nums[N][M], int indice[N][M], int dim) {
+  std::vector<std::vector<int>> output_host(N, std::vector<int>(M));
+  for (int i = 0; i < N; i++)
+    for (int j = 0; j < M; j++)
+      if (dim == 0)
+        output_host[i][j] = nums[indice[i][j]][j];
+      else if (dim == 1)
+        output_host[i][j] = nums[i][indice[i][j]];
+      else
+        std::cout << "dim not supported in host yet: " << dim << std::endl;
+  return output_host;
+}
+
+// sip size
+const int VDMEM_SIZE = 512 * 1024;
+#define ALIGN_UP_128(a) (((a + 127) / 128) * 128)
+#define ALIGN_DOWN_128(a) ((a / 128) * 128)
+#define ALIGN_DOWN_512(a) ((a / 512) * 512)
+// 43520. Using three buffers, so / 3.
+// 512 is size of off_buff.
+#define MAX_NUM ALIGN_DOWN_512((VDMEM_SIZE / 4 - 512) / 3)
+
+int rank = 2;
+// gather on dim 1
+int dim = 1;
+int bpe = 4;
+void init(choreo::s32 para[10]) {
+  int in_dims[2] = {N, M};
+  int id_dims[2] = {N, M};
+  int in_strides[2];
+  int id_strides[2];
+  int id_dim_[2];
+  int id_in_off_flag[2];
+
+  for (int i = 0; i < rank; i++) {
+    int in_stride = 1, id_stride = 1;
+    for (int j = i + 1; j < rank; j++) {
+      in_stride *= in_dims[j];
+      if (j == (rank - 1)) {
+        id_stride *= ALIGN_UP_128(id_dims[j]);
+      } else {
+        id_stride *= id_dims[j];
+      }
+    }
+    in_strides[i] = in_stride;
+    id_strides[i] = id_stride;
+    id_dim_[i] = id_dims[i];
+    id_in_off_flag[i] = 0;
+  }
+
+  int id_size = 1;
+  int in_size = 1;
+  for (int i = 0; i < rank; i++) {
+    id_size *= id_dims[i];
+    in_size *= in_dims[i];
+  }
+
+  int deal_dim_num = 0;
+  int loop_dim_num = 0;
+  int total_loop_n = 1;
+  for (int i = rank - 1; i >= 0; i--) {
+    int cur_id_size = id_dims[i] * id_strides[i];
+    int cur_in_size = in_dims[i] * in_strides[i];
+    if (MAX_NUM > cur_in_size && MAX_NUM > cur_id_size)
+      deal_dim_num += 1;
+    else
+      break;
+  }
+  deal_dim_num = deal_dim_num > 4 ? 4 : deal_dim_num;
+  loop_dim_num = rank - deal_dim_num;
+
+  // get loop_num
+  for (int i = 0; i < loop_dim_num; i++) { total_loop_n *= id_dims[i]; }
+
+  int id_dim0 = 1, id_dim1 = 1, id_dim2 = 1, id_dim3 = 1;
+  int in_dim0 = 1, in_dim1 = 1, in_dim2 = 1, in_dim3 = 1;
+  int in_stride0 = 1, in_stride1 = 1, in_stride2 = 1;
+  int src_id_dim3 = id_dims[rank - 1];
+  int in_block = 1;
+  if (deal_dim_num > 0)
+    in_block = in_dims[rank - deal_dim_num] * in_strides[rank - deal_dim_num];
+
+  switch (deal_dim_num) {
+  case 4:
+    id_dim0 = id_dims[rank - 4];
+    in_dim0 = in_dims[rank - 4];
+    in_stride0 = in_strides[rank - 4];
+  case 3:
+    id_dim1 = id_dims[rank - 3];
+    in_dim1 = in_dims[rank - 3];
+    in_stride1 = in_strides[rank - 3];
+  case 2:
+    id_dim2 = id_dims[rank - 2];
+    in_dim2 = in_dims[rank - 2];
+    in_stride2 = in_strides[rank - 2];
+  case 1:
+    id_dim3 = ALIGN_UP_128(id_dims[rank - 1]);
+    in_dim3 = in_dims[rank - 1];
+  default: break;
+  }
+
+  int in_off = 0, id_off = 0;
+  int dim_stride = dim == (rank - 1) ? 1 : in_strides[dim];
+  int id_block_size = id_dim0 * id_dim1 * id_dim2 * src_id_dim3;
+  int kernel_dim = dim - rank + 4;
+  int deal_dim = rank - 1 - deal_dim_num;
+  int index_max_val = in_dims[dim];
+
+  para[0] = id_dim0;
+  para[1] = id_dim1;
+  para[2] = id_dim2;
+  para[3] = id_dim3;
+  para[4] = src_id_dim3;
+  para[5] = in_stride0;
+  para[6] = in_stride1;
+  para[7] = in_stride2;
+  para[8] = kernel_dim;
+  para[9] = dim_stride;
+}
+
+int main() {
+  choreo::s32 off_buff_L3[128] = {0};
+  std::iota(off_buff_L3, off_buff_L3+128, 0);
+
+  auto off_buff_L3_span = choreo::make_spanview<1, choreo::s32>((int*)off_buff_L3, {128});
+
+  // PRINT(deal_dim_num);
+  // // is 1 currently
+  // // only handle `1` now.
+  // PRINT(id_dim0); // 1
+  // PRINT(id_dim1); // 1
+  // PRINT(id_dim2); // 1
+  // PRINT(id_dim3); // 512
+  // PRINT(src_id_dim3); // 512
+  // PRINT(in_stride0); // 1
+  // PRINT(in_stride1); // 1
+  // PRINT(in_stride2); // 1
+  // PRINT(dim); // 1
+  // PRINT(deal_dim);
+  // PRINT(dim_stride); // 1
+  // PRINT(id_block_size); // 512
+  // PRINT(total_loop_n); // 1024
+  // PRINT(kernel_dim);
+
+  auto input_span = choreo::make_spanview<2, choreo::s32>((int*)nums, {N, M});
+  auto indice_span = choreo::make_spanview<2, choreo::s32>((int*)indice, {N, M});
+  input_span.fill_random(-100, 100);
+  indice_span.fill_random(0, M-1);
+
+  choreo::s32 para[10] = {0};
+  init(para);
+  auto para_span = choreo::make_spanview<1, choreo::s32>((int*)para, {10});
+
+  auto start = std::chrono::high_resolution_clock::now();
+  auto res_device = foo(off_buff_L3_span, input_span, indice_span, para_span);
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+  std::cout << "execution time: " << duration.count() << " microseconds" << std::endl;
+
+  std::cout << "shape of res_device: [" << res_device.shape()[0] << ", "
+            << res_device.shape()[1] << "]" << std::endl;
+
+  auto res_host = GatherHost(nums, indice, dim);
+
+  int err_cnt = 0;
+  for (int i = 0; i < res_device.shape()[0]; i++)
+    for (int j = 0; j < res_device.shape()[1]; j++)
+      if (res_device[i][j] != res_host[i][j]) {
+        err_cnt += 1;
+        if (err_cnt < 10)
+          std::cout << "TEST FAILED: [" << i << ", " << j << "] = "
+                    << res_device[i][j] << " vs " << res_host[i][j] << "\n";
+      }
+  if (err_cnt > 0)
+    std::cout << "TEST FAILED! " << err_cnt << " errors found." << std::endl;
+  else
+    std::cout << "TEST PASSED!" << std::endl;
+
+  return 0;
+}
+
+// CHECK: (  0) foo(s32 mdspan<1> [128] off_buff_L3, s32 mdspan<2> [102400, 512] input, s32 mdspan<2> [102400, 512] id, s32 mdspan<1> [10] para) {
+// CHECK: (  1)   global s32 [ id.span ] output
+// CHECK: (  2)   parallel p = {p__elem__x} by [10] {
+// CHECK: (  3)     local s32 [ 1 512 ] output_L1
+// CHECK: (  4)     local s32 [ 128 ] off_buff
+// CHECK: (  5)     dma.copy off_buff_L3 => off_buff
+// CHECK: (  6)     local s32 mdspan<1> [10] para_L1__buf__
+// CHECK: (  7)     para_L1 = dma.copy para => para_L1__buf__
+// CHECK: (  8)     with {d0, d1} in [ 10240 1 ] {
+// CHECK: (  9)       foreach d0(::), d1(::) {
+// CHECK: ( 10)         anon_0 =  (p # d0) 
+// CHECK: ( 11)         local s32 mdspan<2> [1, 512] input_L1__buf__
+// CHECK: ( 12)         input_L1 = dma.copy input.ChunkAt(anon_0, d1) => input_L1__buf__
+// CHECK: ( 13)         anon_1 =  (p # d0) 
+// CHECK: ( 14)         local s32 mdspan<2> [1, 512] id_L1__buf__
+// CHECK: ( 15)         id_L1 = dma.copy id.ChunkAt(anon_1, d1) => id_L1__buf__
+// CHECK: ( 16)         call call_gather_kernel_2( (dataof input_L1) ,  (dataof id_L1) , output_L1, off_buff,  (dataof para_L1) )
+// CHECK: ( 17)         anon_2 =  (p # d0) 
+// CHECK: ( 18)         dma.copy output_L1 => output.ChunkAt(anon_2, d1)
+// CHECK: ( 19)       }
+// CHECK: ( 20)     }
+// CHECK: ( 21)   }
+// CHECK: ( 22)   return output
+// CHECK: ( 23) }
+
+// CHECK: IGNORE global buffer: ::foo::id
+// CHECK: IGNORE global buffer: ::foo::input
+// CHECK: IGNORE global buffer: ::foo::off_buff_L3
+// CHECK: IGNORE global buffer: ::foo::output
+// CHECK: IGNORE global buffer: ::foo::para
+// CHECK: BUFFER ::foo::paraby_0::off_buff
+// CHECK: 	range: [4, 19]
+// CHECK: BUFFER ::foo::paraby_0::output_L1
+// CHECK: 	range: [3, 19]
+// CHECK: VAR    ::foo::paraby_0::p
+// CHECK: 	range: [2, 21]
+// CHECK: VAR    ::foo::paraby_0::p__elem__x
+// CHECK: 	range: [2, 21]
+// CHECK: VAR    ::foo::paraby_0::para_L1
+// CHECK: 	range: [7, 19]
+// CHECK: BUFFER ::foo::paraby_0::para_L1__buf__
+// CHECK: 	range: [6, 19]
+// CHECK: VAR    ::foo::paraby_0::within_0::d0
+// CHECK: 	range: [8, 19]
+// CHECK: VAR    ::foo::paraby_0::within_0::d1
+// CHECK: 	range: [8, 19]
+// CHECK: VAR    ::foo::paraby_0::within_0::foreach_0::anon_0
+// CHECK: 	range: [10, 12]
+// CHECK: VAR    ::foo::paraby_0::within_0::foreach_0::anon_1
+// CHECK: 	range: [13, 15]
+// CHECK: VAR    ::foo::paraby_0::within_0::foreach_0::anon_2
+// CHECK: 	range: [17, 18]
+// CHECK: VAR    ::foo::paraby_0::within_0::foreach_0::id_L1
+// CHECK: 	range: [15, 16]
+// CHECK: BUFFER ::foo::paraby_0::within_0::foreach_0::id_L1__buf__
+// CHECK: 	range: [14, 16]
+// CHECK: VAR    ::foo::paraby_0::within_0::foreach_0::input_L1
+// CHECK: 	range: [12, 16]
+// CHECK: BUFFER ::foo::paraby_0::within_0::foreach_0::input_L1__buf__
+// CHECK: 	range: [11, 16]
