@@ -6,6 +6,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Define package version
+set(CHOREO_PACKAGE_VERSION "standalone" CACHE STRING "Choose the package version: standalone or core")
+
 # use ccache if exists
 find_program(CCACHE_PROGRAM ccache)
 if(CCACHE_PROGRAM)
@@ -15,7 +18,7 @@ else()
     message(STATUS "ccache not found, compilation will not be cached")
 endif()
 
-# allow diagnotics-color
+# allow diagnostics-color
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   add_compile_options(-fdiagnostics-color)
 endif()
@@ -40,7 +43,6 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
     add_compile_options(-fno-strict-aliasing)
 endif()
 
-
 # Include generated files
 include_directories(${CMAKE_BINARY_DIR})
 include_directories(${CMAKE_SOURCE_DIR}/lib)
@@ -62,7 +64,6 @@ add_executable(choreo
 target_include_directories(choreo PRIVATE ${CMAKE_SOURCE_DIR})
 
 # Link the library to the executable
-# porting from config -Wl,-rpath -Wl,$(GINAC_DIR)/install/lib
 target_link_libraries(choreo PRIVATE
   parser_obj
   scanner_obj
@@ -80,14 +81,72 @@ target_link_libraries(copp PRIVATE
   ${GINAC_DIR}/lib/libginac.so
 )
 
-# Install the executable and library
+message(STATUS "CHOREO_PACKAGE_VERSION is set to: ${CHOREO_PACKAGE_VERSION}")
+# 
+# # Handle different package versions
+# if(CHOREO_PACKAGE_VERSION STREQUAL "standalone")
+#     message(STATUS "Building Standalone Version")
+#     # install(DIRECTORY ${GINAC_DIR}/include DESTINATION include)
+#     # install(DIRECTORY ${GINAC_DIR}/lib DESTINATION lib)
+#     # install(DIRECTORY ${CLN_DIR}/include DESTINATION include)
+#     # install(DIRECTORY ${CLN_DIR}/lib DESTINATION lib)
+#     # install(DIRECTORY ${BISON_PATH}/include DESTINATION include)
+#     # install(DIRECTORY ${BISON_PATH}/lib DESTINATION lib)
+#     # Install the executable and library
+#     install(TARGETS choreo copp codegen
+#       RUNTIME DESTINATION bin
+#       LIBRARY DESTINATION lib
+#       ARCHIVE DESTINATION lib
+#     )
+#     # Install generated headers
+#     install(FILES choreo_header.inc choreo_cuda_header.inc DESTINATION include)
+# 
+# elseif(CHOREO_PACKAGE_VERSION STREQUAL "core")
+#     message(STATUS "Building Core Version")
+#     install(TARGETS choreo copp codegen
+#       RUNTIME DESTINATION bin
+#       LIBRARY DESTINATION lib
+#       ARCHIVE DESTINATION lib
+#     )
+#     install(FILES choreo_header.inc choreo_cuda_header.inc DESTINATION include)
+# 
+# else()
+#     message(FATAL_ERROR "Invalid package version selected. Please choose 'standalone' or 'core'.")
+# endif()
+
+
+
+# Set package information
+set(CPACK_PACKAGE_NAME "choreo")
+set(CPACK_PACKAGE_VERSION "1.0.0.alpha")
+set(CPACK_PACKAGE_DESCRIPTION "Installed package for choreo")
+set(CPACK_PACKAGE_VENDOR "ERA Developers")
+
+# Set the packaging generator (DEB, TGZ, ZIP, RPM)
+set(CPACK_GENERATOR "DEB;TGZ;ZIP;RPM")
+
+# Set the maintainer and contact info
+set(CPACK_PACKAGE_CONTACT "heng.shi@enflame-tech.com")
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "heng.shi@enflame-tech.com")
+
+set(CPACK_DEBIAN_PACKAGE_DESCRIPTION "Installed package for choreo")
+set(CPACK_DEBIAN_PACKAGE_SECTION "devel")
+set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6 (>= 2.27)")
+
+# Set the install prefix
+set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-${CMAKE_SYSTEM_NAME}")
+set(CPACK_PACKAGE_INSTALL_PREFIX "/usr/local")
+set(CPACK_PACKAGE_DIRECTORY "${CMAKE_SOURCE_DIR}/package")
+
+# Install rules
 install(TARGETS choreo copp codegen
   RUNTIME DESTINATION bin
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
 )
+install(FILES ${CMAKE_BINARY_DIR}/choreo_header.inc DESTINATION include)
+install(FILES ${CMAKE_BINARY_DIR}/choreo_cuda_header.inc DESTINATION include)
 
-# Install generated headers
-install(FILES choreo_header.inc choreo_cuda_header.inc
-        DESTINATION include)
-
+# Include CPack
+include(CPack)

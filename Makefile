@@ -54,15 +54,20 @@ CMAKE = cmake
 CMAKE_BUILD_TYPE = Release
 
 # Build rules
-all: build-with-cmake-ninja
+all: build
 
 # lit max-jobs config
 JOBS ?= 1
+
+build: build-with-cmake-ninja
 
 # Specific Release/debug build
 release: CMAKE_BUILD_TYPE=Release
 release: CMAKE_BUILD_DIR=$(REL_BUILD_DIR)
 release: build-with-cmake-ninja
+
+package: release
+	@cmake --build $(REL_BUILD_DIR) --target package
 
 debug: CMAKE_BUILD_TYPE=Debug
 debug: CMAKE_BUILD_DIR=$(DBG_BUILD_DIR)
@@ -84,13 +89,7 @@ test-debug: debug
 test-release: release
 	$(LIT) tests && $(MAKE) standalone_test
 
-ci-gpu-test: setup-core build-with-cmake-ninja
-	$(LIT) tests && $(MAKE) standalone-test-with-cmake
-
-ci-gcu2-test: setup-gcu2 build-with-cmake-ninja
-	$(LIT) tests && $(MAKE) standalone-test-with-cmake
-
-ci-gcu3-test: setup-gcu3 build-with-cmake-ninja
+ci-test:
 	$(LIT) tests && $(MAKE) standalone-test-with-cmake
 
 standalone-test-with-cmake: build-with-cmake-ninja
@@ -112,6 +111,12 @@ build-with-cmake-ninja:
 	time ninja -C $(CMAKE_BUILD_DIR)
 	ln -sf $(CMAKE_BUILD_DIR)/choreo $(WORK_DIR)/choreo
 	ln -sf $(CMAKE_BUILD_DIR)/copp $(WORK_DIR)/copp
+
+config-with-cmake-ninja:
+	@echo "Starting build with CMake..."
+	@if [ ! -d $(CMAKE_BUILD_DIR) ]; then mkdir -p $(CMAKE_BUILD_DIR); fi
+	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -G Ninja -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE)
+
 
 # Legacy Makefile
 BUILD_OBJECTS = $(patsubst $(SRC_DIR)/%.cpp, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/*.cpp))

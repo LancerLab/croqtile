@@ -8,7 +8,9 @@ tests/*co.test
 tools/*
 choreo
 copp
-build
+build/
+build-release/
+package/
 extern
 sgemm-ref
 demo/*.bin
