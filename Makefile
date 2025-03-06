@@ -320,3 +320,9 @@ status-doc:
 	@echo "Checking mkdocs serve process..."
 	@ps aux | grep 'mkdocs serve' | grep -v grep || echo "No mkdocs serve process is running."
 
+# utils to publish packages to releases or package registry
+publish-package: package
+	bash scripts/publish-package.sh
+
+publish-release: package
+	@bash scripts/publish-release.sh
