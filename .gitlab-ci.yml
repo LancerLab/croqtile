@@ -1,7 +1,107 @@
 stages:
+  - check-in-tests
   - pre-release-tests
-  - artifacts
+  - docgen
+  - cleanup
 
+# TODO: make package release work
+#  - artifacts
+# GPU Testing
+gpu_test:
+  stage: check-in-tests
+  script:
+    - echo "Running tests with GPU..."
+    - make setup-core
+    - make build
+    - make ci-test
+  artifacts:
+    paths:
+      - choreo
+      - copp
+      - tools/bin
+      - tools/lib
+      - tools/include
+      - tools/factor_backend
+      - tools/shared
+  tags:
+    - GPU
+  only:
+    - main
+    - release/alpha
+    - merge_requests
+  timeout: 10m
+
+# GCU2 Testing
+gcu2_test:
+  stage: check-in-tests
+  script:
+    - echo "Running tests with GCU2..."
+    - make setup-gcu2
+    - make build
+    - make ci-test
+  artifacts:
+    paths:
+      - choreo
+      - copp
+      - tools/bin
+      - tools/lib
+      - tools/include
+      - tools/factor_backend
+      - tools/shared
+  tags:
+    - GPU
+  only:
+    - main
+    - release/alpha
+    - merge_requests
+  allow_failure: true
+  timeout: 10m
+
+# GCU3 Testing
+gcu3_test:
+  stage: check-in-tests
+  script:
+    - echo "Running tests with GCU3 S60..."
+    - make setup-gcu3
+    - make build
+    - make ci-test
+  artifacts:
+    paths:
+      - choreo
+      - copp
+      - tools/bin
+      - tools/lib
+      - tools/include
+      - tools/factor_backend
+      - tools/shared
+  tags:
+    - GCU3
+  only:
+    - main
+    - release/alpha
+    - merge_requests
+  allow_failure: true
+  timeout: 10m
+
+# Docker environment GCU3 testing
+gcu3_docker_test:
+  stage: pre-release-tests
+  script:
+    - echo "Running tests with GCU3 S60 EFDOCKER..."
+    - source /home/.devtools/tools/env.sh
+    - efdocker enter choreo_ci
+    - make setup-core
+    - make test
+  tags:
+    - GCU3
+  only:
+    - main
+    - release/alpha
+    - merge_requests
+  allow_failure: true
+  timeout: 10m
+
+# Package testing
 package_test:
   stage: pre-release-tests
   script:
@@ -34,44 +134,85 @@ package_test:
     - merge_requests
   timeout: 10m
 
-release:
-  stage: artifacts
+# Documentation generation stage
+generate_docs:
+  stage: docgen
+  tags:
+    - DOC
   script:
-    - echo "Uploading release package..."
-    - |
-      # GitLab API information
-      PERSONAL_API_TOKEN="glpat-3WmtV_HxrUT8v8nQziv5"
-      PACKAGE_PATH=$(ls package/*.deb)  # Adjust the extension based on your package type
-      GITLAB_API_URL="https://git.enflame.cn/api/v4/projects/$CI_PROJECT_ID/uploads"
-      FILE_NAME=$(basename "$PACKAGE_PATH")
-      
-      # Upload the package to GitLab Release
-      RESPONSE=$(curl --header "PRIVATE-TOKEN: $PERSONAL_API_TOKEN" \
-        --form "file=@$PACKAGE_PATH" \
-        --form "description=Release package for $CI_COMMIT_REF_NAME" \
-        "$GITLAB_API_URL")
+    - echo "Setting up environment for documentation generation ..."
+    - python3.8 -m pip install mkdocs mkdocs-material mkdocs-markdownextradata-plugin
+    - make serve-doc
+  timeout: 10m
 
-      # Extract the file URL from the response (to create a release with the uploaded asset)
-      FILE_URL=$(echo "$RESPONSE" | jq -r '.url')
+# release:
+#   stage: artifacts
+#   script:
+#     - echo "Uploading release package..."
+#     - |
+#       # GitLab API information
+#       PERSONAL_API_TOKEN="glpat-3WmtV_HxrUT8v8nQziv5"
+#       PACKAGE_PATH=$(ls package/*.deb)  # Adjust the extension based on your package type
+#       GITLAB_API_URL="https://git.enflame.cn/api/v4/projects/$CI_PROJECT_ID/uploads"
+#       FILE_NAME=$(basename "$PACKAGE_PATH")
+#       
+#       # Upload the package to GitLab Release
+#       RESPONSE=$(curl --header "PRIVATE-TOKEN: $PERSONAL_API_TOKEN" \
+#         --form "file=@$PACKAGE_PATH" \
+#         --form "description=Release package for $CI_COMMIT_REF_NAME" \
+#         "$GITLAB_API_URL")
+# 
+#       # Extract the file URL from the response (to create a release with the uploaded asset)
+#       FILE_URL=$(echo "$RESPONSE" | jq -r '.url')
+# 
+#       # Create a release with the uploaded asset
+#       RELEASE_API_URL="https://git.enflame.cn/api/v4/projects/$CI_PROJECT_ID/releases"
+#       RELEASE_NAME="Release $CI_COMMIT_REF_NAME"
+#       RELEASE_DESCRIPTION="Release created from commit $CI_COMMIT_SHA"
+#       curl --header "PRIVATE-TOKEN: $PERSONAL_API_TOKEN" \
+#         --data "name=$RELEASE_NAME" \
+#         --data "tag_name=$CI_COMMIT_REF_NAME" \
+#         --data "description=$RELEASE_DESCRIPTION" \
+#         --data "assets[links][0][name]=$FILE_NAME" \
+#         --data "assets[links][0][url]=$FILE_URL" \
+#         "$RELEASE_API_URL"
+#   tags:
+#     - GPU
+#   only:
+#     - main
+#     - release/alpha
+#     - merge_requests
+#   timeout: 10m
 
-      # Create a release with the uploaded asset
-      RELEASE_API_URL="https://git.enflame.cn/api/v4/projects/$CI_PROJECT_ID/releases"
-      RELEASE_NAME="Release $CI_COMMIT_REF_NAME"
-      RELEASE_DESCRIPTION="Release created from commit $CI_COMMIT_SHA"
-      curl --header "PRIVATE-TOKEN: $PERSONAL_API_TOKEN" \
-        --data "name=$RELEASE_NAME" \
-        --data "tag_name=$CI_COMMIT_REF_NAME" \
-        --data "description=$RELEASE_DESCRIPTION" \
-        --data "assets[links][0][name]=$FILE_NAME" \
-        --data "assets[links][0][url]=$FILE_URL" \
-        "$RELEASE_API_URL"
+cleanup_gcu2:
+  stage: cleanup
+  script:
+    - echo "Cleaning on GCU2..."
+    - rm -rf $CI_PROJECT_DIR
+  tags:
+    - GCU2
+  when: always
+  allow_failure: true
+
+cleanup_gpu:
+  stage: cleanup
+  script:
+    - echo "Cleaning on GPU..."
+    - rm -rf $CI_PROJECT_DIR
   tags:
     - GPU
-  only:
-    - main
-    - release/alpha
-    - merge_requests
-  timeout: 10m
+  when: always
+  allow_failure: true
+
+cleanup_gcu3:
+  stage: cleanup
+  script:
+    - echo "Cleaning on GCU3..."
+    - rm -rf $CI_PROJECT_DIR
+  tags:
+    - GCU3
+  when: always
+  allow_failure: true
 
 # Cache configuration to speed up CI by reusing the environment
 cache:
