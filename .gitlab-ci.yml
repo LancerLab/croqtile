@@ -184,36 +184,6 @@ generate_docs:
 #     - merge_requests
 #   timeout: 10m
 
-cleanup_gcu2:
-  stage: cleanup
-  script:
-    - echo "Cleaning on GCU2..."
-    - rm -rf $CI_PROJECT_DIR
-  tags:
-    - GCU2
-  when: always
-  allow_failure: true
-
-cleanup_gpu:
-  stage: cleanup
-  script:
-    - echo "Cleaning on GPU..."
-    - rm -rf $CI_PROJECT_DIR
-  tags:
-    - GPU
-  when: always
-  allow_failure: true
-
-cleanup_gcu3:
-  stage: cleanup
-  script:
-    - echo "Cleaning on GCU3..."
-    - rm -rf $CI_PROJECT_DIR
-  tags:
-    - GCU3
-  when: always
-  allow_failure: true
-
 # Cache configuration to speed up CI by reusing the environment
 cache:
   paths:
