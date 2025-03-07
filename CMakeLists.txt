@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Define package version
-set(CHOREO_PACKAGE_VERSION "standalone" CACHE STRING "Choose the package version: standalone or core")
+set(CHOREO_PACKAGE_VERSION "core" CACHE STRING "Choose the package version: standalone or core")
 
 # use ccache if exists
 find_program(CCACHE_PROGRAM ccache)
@@ -82,39 +82,6 @@ target_link_libraries(copp PRIVATE
 )
 
 message(STATUS "CHOREO_PACKAGE_VERSION is set to: ${CHOREO_PACKAGE_VERSION}")
-# 
-# # Handle different package versions
-# if(CHOREO_PACKAGE_VERSION STREQUAL "standalone")
-#     message(STATUS "Building Standalone Version")
-#     # install(DIRECTORY ${GINAC_DIR}/include DESTINATION include)
-#     # install(DIRECTORY ${GINAC_DIR}/lib DESTINATION lib)
-#     # install(DIRECTORY ${CLN_DIR}/include DESTINATION include)
-#     # install(DIRECTORY ${CLN_DIR}/lib DESTINATION lib)
-#     # install(DIRECTORY ${BISON_PATH}/include DESTINATION include)
-#     # install(DIRECTORY ${BISON_PATH}/lib DESTINATION lib)
-#     # Install the executable and library
-#     install(TARGETS choreo copp codegen
-#       RUNTIME DESTINATION bin
-#       LIBRARY DESTINATION lib
-#       ARCHIVE DESTINATION lib
-#     )
-#     # Install generated headers
-#     install(FILES choreo_header.inc choreo_cuda_header.inc DESTINATION include)
-# 
-# elseif(CHOREO_PACKAGE_VERSION STREQUAL "core")
-#     message(STATUS "Building Core Version")
-#     install(TARGETS choreo copp codegen
-#       RUNTIME DESTINATION bin
-#       LIBRARY DESTINATION lib
-#       ARCHIVE DESTINATION lib
-#     )
-#     install(FILES choreo_header.inc choreo_cuda_header.inc DESTINATION include)
-# 
-# else()
-#     message(FATAL_ERROR "Invalid package version selected. Please choose 'standalone' or 'core'.")
-# endif()
-
-
 
 # Set package information
 set(CPACK_PACKAGE_NAME "choreo")
@@ -123,7 +90,7 @@ set(CPACK_PACKAGE_DESCRIPTION "Installed package for choreo")
 set(CPACK_PACKAGE_VENDOR "ERA Developers")
 
 # Set the packaging generator (DEB, TGZ, ZIP, RPM)
-set(CPACK_GENERATOR "DEB;TGZ;ZIP;RPM")
+set(CPACK_GENERATOR "DEB;TGZ;ZIP")
 
 # Set the maintainer and contact info
 set(CPACK_PACKAGE_CONTACT "heng.shi@enflame-tech.com")
@@ -156,6 +123,37 @@ install(TARGETS choreo copp codegen
 )
 install(FILES ${CMAKE_BINARY_DIR}/choreo_header.inc DESTINATION include)
 install(FILES ${CMAKE_BINARY_DIR}/choreo_cuda_header.inc DESTINATION include)
+# 
+# # Handle different package versions
+# if(CHOREO_PACKAGE_VERSION STREQUAL "standalone")
+#     message(STATUS "Building Standalone Version")
+#     # install(DIRECTORY ${GINAC_DIR}/include DESTINATION include)
+#     # install(DIRECTORY ${GINAC_DIR}/lib DESTINATION lib)
+#     # install(DIRECTORY ${CLN_DIR}/include DESTINATION include)
+#     # install(DIRECTORY ${CLN_DIR}/lib DESTINATION lib)
+#     # install(DIRECTORY ${BISON_PATH}/include DESTINATION include)
+#     # install(DIRECTORY ${BISON_PATH}/lib DESTINATION lib)
+#     # Install the executable and library
+#     install(TARGETS choreo copp codegen
+#       RUNTIME DESTINATION bin
+#       LIBRARY DESTINATION lib
+#       ARCHIVE DESTINATION lib
+#     )
+#     # Install generated headers
+#     install(FILES choreo_header.inc choreo_cuda_header.inc DESTINATION include)
+# 
+# elseif(CHOREO_PACKAGE_VERSION STREQUAL "core")
+#     message(STATUS "Building Core Version")
+#     install(TARGETS choreo copp codegen
+#       RUNTIME DESTINATION bin
+#       LIBRARY DESTINATION lib
+#       ARCHIVE DESTINATION lib
+#     )
+#     install(FILES choreo_header.inc choreo_cuda_header.inc DESTINATION include)
+# 
+# else()
+#     message(FATAL_ERROR "Invalid package version selected. Please choose 'standalone' or 'core'.")
+# endif()
 
 # Include CPack
 include(CPack)

@@ -27,7 +27,7 @@ fi
 echo "📦 Detected version: $VERSION"
 
 # Define package types
-PKG_TYPES=("deb" "zip" "tar.gz" "rpm")
+PKG_TYPES=("deb" "zip" "tar.gz")
 
 # Iterate over package types and upload them
 for TYPE in "${PKG_TYPES[@]}"; do

@@ -1,6 +1,6 @@
 stages:
-  - check-in-tests
   - pre-release-tests
+  - check-in-tests
   - docgen
   - cleanup
 
@@ -92,6 +92,10 @@ gcu3_docker_test:
     - efdocker enter choreo_ci
     - make setup-core
     - make test
+    - make package
+    - dpkg -i package/*.deb
+    - choreo samples/topscc/identity.co -es && echo "Choreo Pkg-Run Test Passed" || (echo "Choreo Pkg-Run Test Failed" && exit 1)
+    - dpkg -r choreo
   tags:
     - GCU3
   only:
@@ -113,19 +117,16 @@ package_test:
     - ls package/*.deb
     - ls package/*.zip
     - ls package/*.tar.gz
-    - ls package/*.rpm
     - echo "Package check passed!"
     - echo "Installing .deb package..."
     - sudo dpkg -i package/*.deb
+    - choreo samples/topscc/identity.co -es && echo "Choreo Pkg-Run Test Passed" || (echo "Choreo Pkg-Run Test Failed" && exit 1)
     - echo "Verifying installation..."
     - if [ -f /usr/local/bin/choreo ]; then echo "choreo found in /usr/local/bin"; fi
     - if [ -f /usr/bin/choreo ]; then echo "choreo found in /usr/bin"; fi
     - echo "Testing dpkg removal..."
     - sudo dpkg -r choreo
     - echo "dpkg -r completed!"
-  artifacts:
-    paths:
-      - package/
   tags:
     - GPU
   only:
@@ -144,45 +145,6 @@ generate_docs:
     - python3.8 -m pip install mkdocs mkdocs-material mkdocs-markdownextradata-plugin
     - make serve-doc
   timeout: 10m
-
-# release:
-#   stage: artifacts
-#   script:
-#     - echo "Uploading release package..."
-#     - |
-#       # GitLab API information
-#       PERSONAL_API_TOKEN="glpat-3WmtV_HxrUT8v8nQziv5"
-#       PACKAGE_PATH=$(ls package/*.deb)  # Adjust the extension based on your package type
-#       GITLAB_API_URL="https://git.enflame.cn/api/v4/projects/$CI_PROJECT_ID/uploads"
-#       FILE_NAME=$(basename "$PACKAGE_PATH")
-#       
-#       # Upload the package to GitLab Release
-#       RESPONSE=$(curl --header "PRIVATE-TOKEN: $PERSONAL_API_TOKEN" \
-#         --form "file=@$PACKAGE_PATH" \
-#         --form "description=Release package for $CI_COMMIT_REF_NAME" \
-#         "$GITLAB_API_URL")
-# 
-#       # Extract the file URL from the response (to create a release with the uploaded asset)
-#       FILE_URL=$(echo "$RESPONSE" | jq -r '.url')
-# 
-#       # Create a release with the uploaded asset
-#       RELEASE_API_URL="https://git.enflame.cn/api/v4/projects/$CI_PROJECT_ID/releases"
-#       RELEASE_NAME="Release $CI_COMMIT_REF_NAME"
-#       RELEASE_DESCRIPTION="Release created from commit $CI_COMMIT_SHA"
-#       curl --header "PRIVATE-TOKEN: $PERSONAL_API_TOKEN" \
-#         --data "name=$RELEASE_NAME" \
-#         --data "tag_name=$CI_COMMIT_REF_NAME" \
-#         --data "description=$RELEASE_DESCRIPTION" \
-#         --data "assets[links][0][name]=$FILE_NAME" \
-#         --data "assets[links][0][url]=$FILE_URL" \
-#         "$RELEASE_API_URL"
-#   tags:
-#     - GPU
-#   only:
-#     - main
-#     - release/alpha
-#     - merge_requests
-#   timeout: 10m
 
 # Cache configuration to speed up CI by reusing the environment
 cache:
