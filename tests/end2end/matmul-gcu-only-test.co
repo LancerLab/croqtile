@@ -1,7 +1,7 @@
 // REQUIRES: TARGET-GCUALL
 // SHELL-ONLY
 // RUN: choreo -gs -t factor %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
-// RUN: choreo -t topscc %s -o %s.result && %s.result | FileCheck --match-full-lines %s && rm -f %s.result
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
 
 // extern "C" void kernel(int * lhs, int * rhs, int * out, int m, int k, int n) {
 __cok__ { /// kernel program

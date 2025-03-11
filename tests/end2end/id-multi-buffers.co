@@ -1,6 +1,6 @@
 // REQUIRES: TARGET-GCU300
 // SHELL-ONLY
-// RUN: choreo -t topscc %s -o %s.topscc.result && %s.topscc.result | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
 
 __co__ auto identity_three_buffers(f32 [768] input) {
   f32 [input.span(0)] output;

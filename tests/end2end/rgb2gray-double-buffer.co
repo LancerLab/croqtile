@@ -1,7 +1,7 @@
 // REQUIRES: TARGET-GCU300
 // SHELL-ONLY
 // RUN: choreo -gs -t factor %s -o %s.factor.result && bash %s.factor.result --execute | FileCheck --match-full-lines %s && rm -f %s.factor.result
-// RUN: choreo -t topscc %s -o %s.topscc.result && %s.topscc.result | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
 
 // topsop/topsop/lib/kernel/factor_kernel/rgb2gray/rgb2gray_nchw_impl.cc
 // topsop/topsop/lib/kernel/c_src/rgb2gray_fp32_fp32.cc

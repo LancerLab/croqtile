@@ -393,6 +393,7 @@ handlestatus() {
 on_ctrl_c() {
   cleantmplocks
   showresult
+  exit 1
 }
 
 trap on_ctrl_c SIGINT
@@ -411,13 +412,13 @@ for file in "${files_array[@]}"; do
     continue;
   fi
 
-  if [ ! -z "$expect_docker" ] && [ ! -z "$is_in_docker" ]; then
+  if [ ! -z "$expect_docker" ] && [ "$is_in_docker" = false ]; then
     echo "SKIP-DOCKER-ONLY:  $file"
     num_skiped=$(($num_skiped + 1));
     continue;
   fi
 
-  if [ ! -z "$expect_shell" ] && [ ! -z "$is_in_shell" ]; then
+  if [ ! -z "$expect_shell" ] && [ "$is_in_shell" = false ]; then
     echo "SKIP-SHELL-ONLY:  $file"
     num_skiped=$(($num_skiped + 1));
     continue;
