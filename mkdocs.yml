@@ -43,15 +43,15 @@ nav:
       - Loop Control: within-loops.md
     - Chunk-Based Data Movement:
       - The DMA Statement: basic-dma.md
-      - Data Tiling and ChunkAt: tiling-chunkat.md
+      - Tile Data with ChunkAt: tiling-chunkat.md
     - Embeddings into C++ Code:
       - Inputs and Output: input-output.md
-      - Call Device Program in Tileflow: call-in-choreo.md
+      - Invoke the Device Programs: call-in-choreo.md
       - Macro and Preprocessing: macro-in-choreo.md
     - Advanced Features and Techniques:
       - Advanced Program Control: loop-in-advance.md
       - Advanced Data Movement: dma-in-advance.md
-    - Additional Topics:
+    - Miscellaneous:
       - Check Tileflow Program Statically: compiler-func.md
       - Useful Utilities: assertion.md
   - A Whirlwind Tour to Optimisation Patterns:
