@@ -163,7 +163,6 @@ cstr        \"([^"\\]|\\.)*\"
   ".span"    return Choreo::Parser::make_FNSPAN(yytext, loc);
   ".span_as" return Choreo::Parser::make_FNSPANAS(yytext, loc);
   ".data"    return Choreo::Parser::make_FNDATA(yytext, loc);
-  ".data.span_as" return Choreo::Parser::make_FNDATASPANAS(yytext, loc);
   ".chunkat" return Choreo::Parser::make_CHUNKAT(yytext, loc);
   ".chunk"   return Choreo::Parser::make_CHUNK(yytext, loc);
   ".at"      return Choreo::Parser::make_AT(yytext, loc);

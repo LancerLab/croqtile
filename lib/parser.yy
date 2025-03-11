@@ -169,7 +169,7 @@ void choreo_info(const char *message) {
 %token <Choreo::Storage> LOCAL SHARED GLOBAL
 %token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT BOOL VOID
 // builtin operations
-%token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK AT WAIT CALL AUTO SELECT SWAP ROTATE FNDATASPANAS CHUNKINBOUND ASSERT
+%token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK AT WAIT CALL AUTO SELECT SWAP ROTATE CHUNKINBOUND ASSERT
 // control related
 %token <std::string> IF ELSE PARA BY WITH IN FOREACH INCR RET WHERE WHILE
 %token <std::string> TRUE FALSE
@@ -206,7 +206,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::WhereBind>> where_bind
 %nterm <AST::ptr<AST::ParallelBy>> paraby_block
 %nterm <AST::ptr<AST::Return>> return_stmt
-%nterm <AST::ptr<AST::ChunkAt>> chunkat_expr
+%nterm <AST::ptr<AST::ChunkAt>> chunkat_expr sub_data_expr
 %nterm <AST::ptr<AST::Select>> select_expr
 
 // precedence (low to high) and associativity
@@ -358,7 +358,10 @@ general_val
     | unnamed_mdspan_decl { $$ = $1; }
     | unnamed_ituple_decl { $$ = $1; }
     | bool_literal { $$ = $1; }
-    | span_as { $$ = $1; }
+    | IDENTIFIER span_as {
+        $2->id = AST::Make<AST::Identifier>(@1,$1);
+        $$ = $2;
+      }
     ;
 
 general_index
@@ -1158,15 +1161,24 @@ data_id
     ;
 
 span_as
-    : IDENTIFIER FNSPANAS LPAREN LBRAKT value_list RBRAKT RPAREN {
-        $$ = AST::Make<AST::SpanAs>(@1, AST::Make<AST::Identifier>(@1,$1), $5);
-      }
-    | IDENTIFIER FNDATASPANAS LPAREN LBRAKT value_list RBRAKT RPAREN {
-        $$ = AST::Make<AST::SpanAs>(@1, AST::Make<AST::Identifier>(@1,$1), $5);
+    : FNSPANAS LPAREN LBRAKT value_list RBRAKT RPAREN {
+        $$ = AST::Make<AST::SpanAs>(@1, nullptr/*fill later*/, $4);
       }
     ;
 
 chunkat_expr
+    : sub_data_expr { $$ = $1; }
+    | data_id {
+        $$ = ReformChunkAt(
+        AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1)));
+      }
+    | data_id span_as {
+        $2->id = AST::Make<AST::Identifier>(@1,$1);
+        $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, $2));
+      }
+    ;
+
+sub_data_expr
     : data_id CHUNKAT LPAREN {
         parsing_chunkat_value_list = true;
       } value_list RPAREN {
@@ -1184,18 +1196,15 @@ chunkat_expr
             AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $9, $5));
         parsing_chunkat_value_list = false;
       }
-    | span_as CHUNKAT LPAREN  {
+    | data_id span_as CHUNKAT LPAREN  {
         parsing_chunkat_value_list = true;
       } value_list RPAREN {
         // note: normalize will hoist span_as
-        $5->SetDelimiter(", ");
-        $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, $1, $5));
+        $6->SetDelimiter(", ");
+        $2->id = AST::Make<AST::Identifier>(@1,$1);
+        $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, $2, $6));
         parsing_chunkat_value_list = false;
       }
-    | data_id { $$ = ReformChunkAt(
-            AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1)));
-      }
-    | span_as { $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, $1)); }
     ;
 
 select_expr
@@ -1243,7 +1252,10 @@ passables
 
 passable
     : s_expr { $$ = $1; }
-    | s_expr FNDATA { $$ = AST::Make<AST::Expr>(@1, "dataof", $1); }
+    | IDENTIFIER FNDATA {
+        $$ = AST::Make<AST::Expr>(@1, "dataof",
+               AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1))); }
+    | sub_data_expr { $$ = AST::Make<AST::Expr>(@1, $1); }
     | FLOAT { $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::FloatLiteral>(@1, $1)); }
     | DOUBLE { $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::FloatLiteral>(@1, $1)); }
     | STRING { $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::StringLiteral>(@1, $1)); }

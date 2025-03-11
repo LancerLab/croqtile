@@ -230,7 +230,7 @@ public:
 
 protected:
   bool BeforeVisitImpl(AST::Node& n) {
-    if (auto m = dyn_cast<AST::ParallelBy>(&n)) {
+    if (isa<AST::ParallelBy>(&n)) {
       parallel_level++;
       max_parallel_level = parallel_level > max_parallel_level
                                ? parallel_level
@@ -338,7 +338,7 @@ public:
 
             assert(data_shape.Rank() == tiler_shape.Rank());
             ValueList new_shape_values;
-            for (int i = 0; i < data_shape.Rank(); ++i) {
+            for (size_t i = 0; i < data_shape.Rank(); ++i) {
               new_shape_values.push_back(data_shape.ValueAt(i) /
                                          tiler_shape.ValueAt(i));
             }
