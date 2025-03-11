@@ -32,5 +32,5 @@ __co__ any {
 // CHECK: must show 3
 // CHECK-NOT: should not show up 2
 // CHECK-NOT: should not show up 3
-// CHECK: }
+// CHECK: } ????????????
 // CHECK-NOT: must

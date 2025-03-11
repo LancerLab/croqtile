@@ -383,10 +383,17 @@ showresult() {
   fi
 }
 
+handlestatus() {
+  if [ $? -ne 0 ]; then
+    echo "Tests failed"
+    exit $?
+  fi
+}
+
 on_ctrl_c() {
   showresult
   cleantmplocks
-  exit 1
+  handlestatus
 }
 
 trap on_ctrl_c SIGINT
@@ -524,3 +531,4 @@ done
 
 showresult
 cleantmplocks
+handlestatus
