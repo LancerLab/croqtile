@@ -22,9 +22,9 @@ Option<bool>
     emit_source(OptionKind::User, "-es", "", false,
                 "Emit target source file without target source compilation.");
 Option<bool> compile_only(
-    OptionKind::User, "-c", "", false,
+    OptionKind::User, "--compile", "-c", false,
     "Compile choreo code and the generated target code; Without linking.");
-Option<bool> generate_script(OptionKind::User, "-gs", "", false,
+Option<bool> generate_script(OptionKind::User, "--generate-script", "-gs", false,
                              "Generate target script.");
 
 Option<bool>
@@ -46,6 +46,10 @@ Option<bool> use_hetero_tileflow(
 Option<bool> use_system_toolchain(
     OptionKind::Hidden, "--use-system-toolchain", "-st", false,
     "(Experimental) Use system installed toolchain: topscc, topsrt, etc for choreo.");
+Option<bool> use_pic(
+    OptionKind::Hidden, "--use-pic", "-fpic", false,
+    "(Experimental) Use -fPIC compilation flag to ensure objects are reusable for",
+    "multi-stage compilation.");
 Option<bool>
     native_f16(OptionKind::User, "--native-f16", "-f16n", false,
                "Utilize native f16 type when target platform support.");

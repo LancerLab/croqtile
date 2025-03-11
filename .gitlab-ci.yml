@@ -1,6 +1,6 @@
 stages:
-  - pre-release-tests
   - check-in-tests
+  - pre-release-tests
   - docgen
   - cleanup
 

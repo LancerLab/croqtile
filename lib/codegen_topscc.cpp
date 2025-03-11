@@ -24,6 +24,7 @@ extern Option<bool> verbose;
 extern Option<std::string> output;
 extern Option<bool> use_hetero_tileflow;
 extern Option<bool> use_system_toolchain;
+extern Option<bool> use_pic;
 
 Option<bool> emit_fatbin(OptionKind::Hidden, "-fb", "", false,
                          "Emit fatbin file.");
@@ -1308,10 +1309,12 @@ show_usage() {
 )script";
 
   os << R"(export CFLAGS="-arch ${gcu_arch} -std=c++17 -ltops -lm -O3)";
+  if (use_pic)
+    os << " -fPIC";
   if (verbose)
-    os << " -v\""; // if it requires to be verbose
-  else
-    os << "\"";
+    os << " -v"; // if it requires to be verbose
+  // always enclose
+  os << "\"";
   os << "\nexport LD_LIBRARY_PATH=${TOPSCC_LIB}:${LD_LIBRARY_PATH}\n\n";
   os << R"(if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then)";
   if (verbose)
