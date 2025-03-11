@@ -27,4 +27,7 @@ __co__ auto illegal_foreach(f32 [3, ?, 18] a, s16 [?, 4] b) {
 // CHECK: expect a bounded type for iteration variable 'f' but got 'invalid'.
 // CHECK: expect a bounded type for iteration variable 'it' but got 'ituple<2>'.
 // CHECK: expect a bounded type for iteration variable 'c' but got 'int'.
-// CHECK: Totally 6 errors have been detected.
+// CHECK: error: expect the bounded variable 'p' to be declared by 'within' block instead of 'parallel-by' block.
+// CHECK:       foreach p {}
+// CHECK:               ^
+// CHECK: Totally 7 errors have been detected.
