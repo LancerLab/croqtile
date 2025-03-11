@@ -348,7 +348,7 @@ initialize_counters
 
 if [ $is_gcu_available -eq 0 ] && [ $is_gpu_available -eq 0 ]; then
   echo "No supported device was found. abort..."
-  exit 0
+  exit 1
 fi
 
 cleantmplocks() {
