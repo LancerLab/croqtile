@@ -4,6 +4,7 @@
 *.o
 *.inc
 *.out
+**gcusim.**
 tests/*co.test
 tools/*
 choreo

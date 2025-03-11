@@ -89,13 +89,24 @@ gcu3_docker_test:
   script:
     - echo "Running tests with GCU3 S60 EFDOCKER..."
     - source /home/.devtools/tools/env.sh
-    - efdocker enter choreo_ci
-    - make setup-core
-    - make test
-    - make package
-    - dpkg -i package/*.deb
-    - choreo samples/topscc/identity.co -es && echo "Choreo Pkg-Run Test Passed" || (echo "Choreo Pkg-Run Test Failed" && exit 1)
-    - dpkg -r choreo
+    - |
+      docker exec choreo_ci bash -c "
+      TIMESTAMP=$(date +%Y%m%d_%H%M%S) && \
+      WORKDIR=/tmp/choreo_docker_test_\$TIMESTAMP && \
+      mkdir -p \$WORKDIR && \
+      cd \$WORKDIR && \
+      if [ -d choreo ]; then
+        cd choreo && git reset --hard && git pull;
+      else
+        git clone git@git.enflame.cn:xiaofeng.guan/choreo.git && cd choreo;
+      fi && \
+      make setup-core && \
+      make test && \
+      make package && \
+      dpkg -i package/*.deb && \
+      choreo samples/topscc/identity.co -es && echo 'Choreo Pkg-Run Test Passed' || (echo 'Choreo Pkg-Run Test Failed' && dpkg -r choreo && exit 1) && \
+      dpkg -r choreo && \
+      rm -rf \$WORKDIR"
   tags:
     - GCU3
   only:
