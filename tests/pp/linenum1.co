@@ -18,4 +18,4 @@ __co__ void foo(f32 [15] input) {
 
 // CHECK-NOT: #line 5
 // CHECK: #line 12
-// CHECK: #line ???????????? 15
+// CHECK: #line 15

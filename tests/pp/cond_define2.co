@@ -39,5 +39,5 @@ __co__ int foo(f32 d[]) {
 // CHECK-NOT: show me value 305
 // CHECK-NOT:   #endif
 // CHECK: show me value 304
-// CHECK: #endif ????????????
+// CHECK: #endif
 // CHECK: show me value ABC

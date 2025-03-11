@@ -391,9 +391,8 @@ handlestatus() {
 }
 
 on_ctrl_c() {
-  showresult
   cleantmplocks
-  handlestatus
+  showresult
 }
 
 trap on_ctrl_c SIGINT
@@ -529,6 +528,5 @@ for file in "${files_array[@]}"; do
   fi
 done
 
-showresult
 cleantmplocks
-handlestatus
+showresult
