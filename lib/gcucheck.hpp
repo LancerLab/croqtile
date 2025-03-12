@@ -120,7 +120,8 @@ private:
       }
     };
 
-    if (CCtx().GetArch() == TargetArch::GCU3) {
+    if (CCtx().GetArch() == TargetArch::GCU3 ||
+        CCtx().GetArch() == TargetArch::GCU4) { // todo: check this for GCU400
       // linear copy
       // omitted
 

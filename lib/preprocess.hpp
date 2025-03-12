@@ -67,6 +67,7 @@ public:
     case TargetArch::GCU20: globalDefines.emplace("__GCU_ARCH__", "200"); break;
     case TargetArch::GCU21: globalDefines.emplace("__GCU_ARCH__", "210"); break;
     case TargetArch::GCU3: globalDefines.emplace("__GCU_ARCH__", "300"); break;
+    case TargetArch::GCU4: globalDefines.emplace("__GCU_ARCH__", "400"); break;
     default: break;
     }
     // command-line macros override

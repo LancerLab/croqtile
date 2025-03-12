@@ -44,12 +44,14 @@ num_skiped=0
 
 is_in_docker=false
 is_in_shell=false
+has_gcu_sim=false
 test_target=
 requires_dynamic_shape=0
 expect_fail=
 expect_skip=
 expect_docker=
 expect_shell=
+expect_gcu_sim=
 
 max_jobs=1
 
@@ -59,6 +61,10 @@ if [ -f /.dockerenv ] || grep -qE "(docker|containerd)" /proc/1/cgroup; then
 else
   is_in_docker=false
   is_in_shell=true
+fi
+
+if [ -f ${script_dir}/../tools/lib/libgcusim.so ]; then
+  has_gcu_sim=true
 fi
 
 # Function to fill the target-specific variables
@@ -73,9 +79,14 @@ check_requirement() {
   expect_skip=
   expect_docker=
   expect_shell=
+  unset INTERNAL_GCU_SIM
+  unset LD_PRELOAD
   if [ "${tgt}" == "GCU400" ]; then
     [ ! -z "$test_target" ] && echo "Test target has been set to ${test_target}"
     test_target=gcu400
+    gcu_arch=gcu400
+    export INTERNAL_GCU_SIM=LIBRA
+    export LD_PRELOAD=${script_dir}/../tools/lib/libgcusim.so
   elif [ "${tgt}" == "GCU300" ]; then
     [ ! -z "$test_target" ] && echo "Test target has been set to ${test_target}"
     test_target=gcu300
@@ -99,6 +110,7 @@ check_requirement() {
   expect_skip=$(grep "^\/\/" $file |grep "SKIP:")
   expect_docker=$(grep "^\/\/" $file |grep "DOCKER-ONLY")
   expect_shell=$(grep "^\/\/" $file |grep "SHELL-ONLY")
+  expect_gcu_sim=$(grep "^\/\/" $file |grep "GCUSIM-ONLY")
 }
 
 gcu_arch=
@@ -122,7 +134,7 @@ check_device_features() {
     is_gcu_available=1
   fi
   if [[ "${GCU_DEVICE_STR}" == *"S60G"* ]]; then
-    gcu_arch=gcu400
+    gcu_arch=gcu300
   elif [[ "${GCU_DEVICE_STR}" == *"c035"* ]] || [[ "${GCU_DEVICE_STR}" == *"S60"* ]]; then
     gcu_arch=gcu300
     is_dynshape_supported=1
@@ -431,6 +443,18 @@ for file in "${files_array[@]}"; do
         num_skiped=$(($num_skiped + 1));
         continue; #simply skip the unmatched target
       fi
+    fi
+
+    if [ "$test_target" != "gcu400" ] && [ "$expect_gcu_sim" = true ]; then
+      echo "SKIP($test_target): ${file}"
+      num_skiped=$(($num_skiped + 1));
+      continue; #simply skip the unmatched target
+    fi
+
+    if [ "$test_target" == "gcu400" ] && [ "$has_gcu_sim" = false ]; then
+      echo "SKIP($test_target): ${file}"
+      num_skiped=$(($num_skiped + 1));
+      continue; #simply skip the unmatched target
     fi
 
     if [ $requires_dynamic_shape -eq 1 ]; then

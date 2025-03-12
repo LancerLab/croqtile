@@ -149,6 +149,12 @@ setup-gcu3-factor-kit: check-gcu3-factor-kit
 	    $(MAKE) install-gcu3-factor-kit; \
 	fi
 
+install-gcu-sim:
+	@if [ ! -f "$(TOOLCHAIN_DIR)/lib/libgcusim.so" ]; then \
+		wget http://artifact.enflame.cn/artifactory/release_center/GCUSIM/1.0.64/libgcusim.so; \
+		mv libgcusim.so $(TOOLCHAIN_DIR)/lib/libgcusim.so; \
+	fi;
+
 #-----------------------------------------------------------#
 
 gcu2-kmd: check-gcu-platform-kit
@@ -159,6 +165,7 @@ gcu3-kmd: check-gcu3-platform-kit
 
 gcu2-kit: setup-gcu-sfc-kit setup-gcu-platform-kit setup-gcu-factor-kit
 gcu3-kit: setup-gcu3-platform-kit setup-gcu3-factor-kit
+gcu-sim: install-gcu-sim
 
 gcu2-install: install-gcu-sfc-kit install-gcu-platform-kit install-gcu-factor-kit
 gcu3-install: install-gcu3-platform-kit install-gcu3-factor-kit

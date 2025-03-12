@@ -38,6 +38,7 @@ enum class TargetArch {
   GCU20,
   GCU21,
   GCU3,
+  GCU4,
   GPU,
 };
 
@@ -47,6 +48,7 @@ inline static const std::string STR(TargetArch ta) {
   case TargetArch::GCU20: return "GCU200";
   case TargetArch::GCU21: return "GCU210";
   case TargetArch::GCU3: return "GCU300";
+  case TargetArch::GCU4: return "GCU400";
   case TargetArch::GPU: return "GPU";
   default: choreo_unreachable("Unsupported operand kind.");
   }
@@ -251,6 +253,24 @@ public:
         default: choreo_unreachable("Unhandled target.");
         }
       case Storage::GLOBAL: return 40.75 * 1024 * 1024 * 1024; // 40.75GB
+      default: choreo_unreachable("Unsupported mem level.");
+      }
+    }
+
+    case TargetArch::GCU4: {
+      switch (sto) {
+      case Storage::LOCAL:
+        switch (GetTarget()) {
+        case CompileTarget::Topscc:
+          return 1.5 * 1024 * 1024 - 512; // todo: check this
+        default: choreo_unreachable("Unhandled target.");
+        }
+      case Storage::SHARED:
+        switch (GetTarget()) {
+        case CompileTarget::Topscc: return 64ull * 1024 * 1024; // todo: check this
+        default: choreo_unreachable("Unhandled target.");
+        }
+      case Storage::GLOBAL: return 40.75 * 1024 * 1024 * 1024; // todo: check this
       default: choreo_unreachable("Unsupported mem level.");
       }
     }
