@@ -1377,6 +1377,14 @@ bool EarlySemantics::Visit(AST::Return& n) {
   }
 
   if (n.value) {
+    if (auto rexp = dyn_cast<AST::Expr>(n.value)) {
+      if (isa<AST::ChunkAt>(rexp->GetR())) {
+        Error(n.LOC(), "illegal: chunkat is used in return expression.");
+        error_count++;
+        return false;
+      }
+    }
+
     auto vty = NodeType(*n.value);
     if (!(isa<SpannedType>(vty) || isa<ScalarType>(vty))) {
       Error(n.LOC(),

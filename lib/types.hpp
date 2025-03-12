@@ -413,6 +413,18 @@ struct Shape {
     return values[val_no];
   }
 
+  const Shape TrimHead(size_t n) const {
+    if (n == 0) return *this;
+
+    auto vals = Value();
+    if (n >= vals.size())
+      choreo_unreachable(
+          "the dimension count trimmed is large than shape's rank.");
+
+    vals.assign(vals.begin() + n, vals.end());
+    return {dim_count - n, vals};
+  }
+
   ValueList Value() {
     if (!IsValid()) choreo_unreachable("the shape is not accessible.");
     return values[val_no];

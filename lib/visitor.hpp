@@ -107,6 +107,7 @@ protected:
   bool dsyms_after = false;
   bool abend_after = false;
   bool prt_visitor = false;
+  bool disabled = false;
   size_t error_count = 0;
 
   static std::unordered_set<std::string> AllVisitors;
@@ -159,6 +160,11 @@ public:
       if (ContainsExact(abend, name)) abend_after = true;
     }
 
+    if (std::getenv("CHOREO_DISABLE_VISIT")) {
+      auto disable = ToUpper(std::string(std::getenv("CHOREO_DISABLE_VISIT")));
+      if (ContainsExact(disable, name)) disabled = true;
+    }
+
     if (std::getenv("CHOREO_PRINT_PASSES")) prt_visitor = true;
   }
 
@@ -186,7 +192,7 @@ public:
 
     if (prt_visitor) dbgs() << "|- " << GetName() << NewL;
 
-    root.accept(*this);
+    if (!disabled) root.accept(*this);
 
     if (HasError() || abend_after) return false;
 

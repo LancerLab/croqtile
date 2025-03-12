@@ -24,8 +24,8 @@ Option<bool>
 Option<bool> compile_only(
     OptionKind::User, "--compile", "-c", false,
     "Compile choreo code and the generated target code; Without linking.");
-Option<bool> generate_script(OptionKind::User, "--generate-script", "-gs", false,
-                             "Generate target script.");
+Option<bool> generate_script(OptionKind::User, "--generate-script", "-gs",
+                             false, "Generate target script.");
 
 Option<bool>
     del_comm(OptionKind::User, "--remove-comments", "-n", false,
@@ -43,13 +43,14 @@ Option<bool> use_hetero_tileflow(
     OptionKind::Hidden, "--use-hetero-tileflow", "-ht", false,
     "(Experimental) Allow choreo code to apply implicit/aggressive tileflow",
     "optimisation under heterogeneous scenario.");
-Option<bool> use_system_toolchain(
-    OptionKind::Hidden, "--use-system-toolchain", "-st", false,
-    "(Experimental) Use system installed toolchain: topscc, topsrt, etc for choreo.");
-Option<bool> use_pic(
-    OptionKind::Hidden, "--use-pic", "-fpic", false,
-    "(Experimental) Use -fPIC compilation flag to ensure objects are reusable for",
-    "multi-stage compilation.");
+Option<bool> use_system_toolchain(OptionKind::Hidden, "--use-system-toolchain",
+                                  "-st", false,
+                                  "(Experimental) Use system installed "
+                                  "toolchain: topscc, topsrt, etc for choreo.");
+Option<bool> use_pic(OptionKind::Hidden, "--use-pic", "-fpic", false,
+                     "(Experimental) Use -fPIC compilation flag to ensure "
+                     "objects are reusable for",
+                     "multi-stage compilation.");
 Option<bool>
     native_f16(OptionKind::User, "--native-f16", "-f16n", false,
                "Utilize native f16 type when target platform support.");
@@ -82,6 +83,9 @@ Option<std::string> dsyms_after(OptionKind::Hidden, "--dump-symbol-after",
                                 "-ds", "",
                                 "Dump the symbol table after the visit pass.",
                                 "--dump-symbol-after=<pass>");
+Option<std::string> disable_pass(OptionKind::Hidden, "--disable-visit", "-dp",
+                                 "", "Disable the visit pass.",
+                                 "--disable-visit=<pass>");
 Option<bool> print_ahead_all(OptionKind::Hidden, "--print-before-all", "-pba",
                              false, "Print AST ahead of all the visit passes.");
 Option<bool> print_after_all(OptionKind::Hidden, "--print-after-all", "-paa",
@@ -229,6 +233,9 @@ bool CommandLine::Parse(int argc, char** argv) {
 
   if (!print_after.GetValue().empty())
     setenv("CHOREO_PRINT_AFTER", ToUpper(print_after.GetValue()).c_str(), 1);
+
+  if (!disable_pass.GetValue().empty())
+    setenv("CHOREO_DISABLE_VISIT", ToUpper(disable_pass.GetValue()).c_str(), 1);
 
   if (!dsyms_after.GetValue().empty())
     setenv("CHOREO_DUMP_SYMTAB_AFTER", ToUpper(dsyms_after.GetValue()).c_str(),

@@ -1,0 +1,16 @@
+// REQUIRES: TARGET-GCU300
+// RUN: choreo -t topscc -dp=symrepl %s -es -o - | FileCheck %s
+
+__device__ void kernel(int* , int *, int *, int) {}
+
+__co__ void only_chunkat(s32 [16, 32] lhs, s32 [24, 32] rhs) {
+  parallel r by 4 {
+    with i in [16] {
+      foreach i {
+        call kernel(lhs.chunkat(r, i), rhs.chunkat(r, i), |lhs.span|);
+      }
+    }
+  }
+}
+
+// CHECK:       kernel((int*)lhs + (__tops_tid_x() * 8) + (__iv_i__elem__0 * 2), (int*)rhs + (__tops_tid_x() * 12) + (__iv_i__elem__0 * 2), (512));

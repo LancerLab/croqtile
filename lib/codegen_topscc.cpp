@@ -1309,10 +1309,8 @@ show_usage() {
 )script";
 
   os << R"(export CFLAGS="-arch ${gcu_arch} -std=c++17 -ltops -lm -O3)";
-  if (use_pic)
-    os << " -fPIC";
-  if (verbose)
-    os << " -v"; // if it requires to be verbose
+  if (use_pic) os << " -fPIC";
+  if (verbose) os << " -v"; // if it requires to be verbose
   // always enclose
   os << "\"";
   os << "\nexport LD_LIBRARY_PATH=${TOPSCC_LIB}:${LD_LIBRARY_PATH}\n\n";
@@ -1489,6 +1487,29 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
           return "(0)";
         else
           choreo_unreachable("Unsupported reference: " + PSTR(expr));
+      else if (auto ca = dyn_cast<AST::ChunkAt>(expr->GetR())) {
+        auto caty = cast<SpannedType>(ca->GetType());
+        std::ostringstream offset;
+        { // calculate the offsets
+          size_t i = 0;
+          auto shape = caty->GetShape();
+          for (auto& p : ca->positions->AllValues()) {
+            auto idx_exprs = SplitStringByDelimiter(ExprSTR(p, false));
+            std::string factor = "1";
+            if (shape.Rank() > i)
+              factor = shape.TrimHead(i).GetElementCountExpression();
+            for (auto i_expr : idx_exprs) {
+              if (i != 0) offset << " + ";
+              if (i_expr == "__choreo_no_tiling__")
+                offset << "0";
+              else
+                offset << "(" << i_expr << " * " << factor << ")";
+              ++i;
+            }
+          }
+        }
+        return ExprSTR(ca->data) + " + " + offset.str();
+      }
     } else if (expr->IsUnary()) {
       if (expr->op == "!") {
         oss << "!(" << ExprSTR(expr->GetR(), is_host) << ")";
