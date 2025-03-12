@@ -103,27 +103,23 @@ set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6 (>= 2.27)")
 
 # Set the install prefix
 set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-${CMAKE_SYSTEM_NAME}")
-set(CPACK_PACKAGE_INSTALL_PREFIX "/usr/local")
+set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
 set(CPACK_PACKAGE_DIRECTORY "${CMAKE_SOURCE_DIR}/package")
 
-# Install rules
-install(DIRECTORY ${GINAC_DIR}/include/ginac DESTINATION include USE_SOURCE_PERMISSIONS FILES_MATCHING PATTERN "*")
-install(DIRECTORY ${CLN_DIR}/include/cln DESTINATION include USE_SOURCE_PERMISSIONS FILES_MATCHING PATTERN "*")
-install(DIRECTORY ${GINAC_DIR}/lib/ DESTINATION lib USE_SOURCE_PERMISSIONS FILES_MATCHING PATTERN "*")
-install(DIRECTORY ${CLN_DIR}/lib/ DESTINATION lib USE_SOURCE_PERMISSIONS FILES_MATCHING PATTERN "*")
-install(DIRECTORY ${GINAC_DIR}/bin/ DESTINATION bin USE_SOURCE_PERMISSIONS FILES_MATCHING PATTERN "*")
-install(DIRECTORY ${CLN_DIR}/bin/ DESTINATION bin USE_SOURCE_PERMISSIONS FILES_MATCHING PATTERN "*")
-install(DIRECTORY ${GINAC_DIR}/libexec/ DESTINATION libexec USE_SOURCE_PERMISSIONS FILES_MATCHING PATTERN "*")
-install(DIRECTORY ${GINAC_DIR}/share/ DESTINATION share/ginac USE_SOURCE_PERMISSIONS FILES_MATCHING PATTERN "*")
-install(DIRECTORY ${CLN_DIR}/share/ DESTINATION share/cln USE_SOURCE_PERMISSIONS FILES_MATCHING PATTERN "*")
-install(TARGETS choreo copp codegen
+# Install rules for core version
+# install(DIRECTORY ${GINAC_DIR}/include/ginac DESTINATION include USE_SOURCE_PERMISSIONS FILES_MATCHING PATTERN "*")
+# install(DIRECTORY ${CLN_DIR}/include/cln DESTINATION include USE_SOURCE_PERMISSIONS FILES_MATCHING PATTERN "*")
+install(DIRECTORY ${GINAC_DIR}/lib/ DESTINATION lib USE_SOURCE_PERMISSIONS FILES_MATCHING PATTERN "libginac.so*")
+install(DIRECTORY ${CLN_DIR}/lib/ DESTINATION lib USE_SOURCE_PERMISSIONS FILES_MATCHING PATTERN "libcln.so*")
+install(TARGETS choreo copp
   RUNTIME DESTINATION bin
-  LIBRARY DESTINATION lib
-  ARCHIVE DESTINATION lib
+  # mute for core version
+  # LIBRARY DESTINATION lib
+  # ARCHIVE DESTINATION lib
 )
-install(FILES ${CMAKE_BINARY_DIR}/choreo_header.inc DESTINATION include)
-install(FILES ${CMAKE_BINARY_DIR}/choreo_cuda_header.inc DESTINATION include)
-# 
+# install(FILES ${CMAKE_BINARY_DIR}/choreo_header.inc DESTINATION include)
+# install(FILES ${CMAKE_BINARY_DIR}/choreo_cuda_header.inc DESTINATION include)
+
 # # Handle different package versions
 # if(CHOREO_PACKAGE_VERSION STREQUAL "standalone")
 #     message(STATUS "Building Standalone Version")
@@ -155,5 +151,4 @@ install(FILES ${CMAKE_BINARY_DIR}/choreo_cuda_header.inc DESTINATION include)
 #     message(FATAL_ERROR "Invalid package version selected. Please choose 'standalone' or 'core'.")
 # endif()
 
-# Include CPack
 include(CPack)
