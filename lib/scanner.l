@@ -172,6 +172,7 @@ cstr        \"([^"\\]|\\.)*\"
   "assert"   return Choreo::Parser::make_ASSERT (yytext,loc);
   "if"       return Choreo::Parser::make_IF(yytext, loc);
   "else"     return Choreo::Parser::make_ELSE(yytext, loc);
+  "inthreads" return Choreo::Parser::make_INTHDS(yytext, loc);
   "parallel" return Choreo::Parser::make_PARA(yytext, loc);
   "by"       return Choreo::Parser::make_BY(yytext, loc);
   "with"     return Choreo::Parser::make_WITH(yytext, loc);

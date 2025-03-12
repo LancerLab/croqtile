@@ -175,6 +175,7 @@ public:
   bool Visit(AST::WhereBind&) override;
   bool Visit(AST::WithBlock&) override;
   bool Visit(AST::ForeachBlock&) override;
+  bool Visit(AST::InThreadsBlock&) override;
   bool Visit(AST::Assignment&) override;
   bool Visit(AST::ParallelBy&) override;
   bool Visit(AST::DMA&) override;

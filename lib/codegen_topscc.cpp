@@ -175,6 +175,9 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
         }
       }
     }
+  } else if (isa<AST::InThreadsBlock>(&n)) {
+    DecrDeviceIndent();
+    ds << d_indent << "} // end inthreads\n";
   } else if (isa<AST::IncrementBlock>(&n)) {
     if (use_hetero_tileflow && IsHostSide()) {
       DecrHostIndent();
@@ -1069,6 +1072,13 @@ bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
     }
   }
 
+  return true;
+}
+
+bool TopsccCodeGen::Visit(AST::InThreadsBlock& n) {
+  TraceEachVisit(n);
+  ds << d_indent << "if (" << ExprSTR(n.pred, false) << ") {\n";
+  IncrDeviceIndent();
   return true;
 }
 

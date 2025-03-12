@@ -72,6 +72,7 @@ public:
   bool Visit(AST::Return&) override;
   bool Visit(AST::LoopRange&) override;
   bool Visit(AST::ForeachBlock&) override;
+  bool Visit(AST::InThreadsBlock&) override;
   bool Visit(AST::IncrementBlock&) override;
   bool Visit(AST::FunctionDecl&) override;
   bool Visit(AST::ChoreoFunction&) override;

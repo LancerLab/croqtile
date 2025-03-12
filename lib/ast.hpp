@@ -123,7 +123,7 @@ struct MultiNodes : public Node, public TypeIDProvider<MultiNodes> {
     assert(m != nullptr && "Unexpected: null pointer.");
     values.push_back(m);
   }
-  void Insert(const ptr<Node>& m, int index) {
+  void Insert(const ptr<Node>& m, size_t index) {
     assert(m != nullptr && "Unexpected: null pointer.");
     assert(index <= values.size());
     values.insert(values.begin() + index, m);
@@ -1524,6 +1524,27 @@ struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
   void accept(Visitor&) override;
 
   __UDT_TYPE_INFO__(Node, ForeachBlock)
+};
+
+struct InThreadsBlock : public Node, public TypeIDProvider<InThreadsBlock> {
+  ptr<Expr> pred;
+  ptr<MultiNodes> stmts;
+
+  explicit InThreadsBlock(const location& l, const ptr<Expr> p,
+                          const ptr<MultiNodes>& s)
+      : Node(l), pred(p), stmts(s) {
+    assert(p != nullptr && "missing iteration variables for the statement.");
+  }
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << "\n" << prefix << "`- InThreads Block:";
+    os << "\n" << prefix << " `- Predication: " << PSTR(pred);
+    if (stmts) { stmts->Print(os, prefix + " "); }
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, InThreadsBlock)
 };
 
 struct IncrementBlock : public Node, public TypeIDProvider<IncrementBlock> {

@@ -225,7 +225,15 @@ void ForeachBlock::accept(Choreo::Visitor& v) {
   ranges->accept(v);
   if (pred) pred->accept(v);
   v.Visit(*this);
-  stmts->accept(v);
+  if (stmts) stmts->accept(v);
+  v.AfterVisit(*this);
+}
+
+void InThreadsBlock::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+  pred->accept(v);
+  v.Visit(*this);
+  if (stmts) stmts->accept(v);
   v.AfterVisit(*this);
 }
 
@@ -234,7 +242,7 @@ void IncrementBlock::accept(Choreo::Visitor& v) {
   bvs->accept(v);
   pred->accept(v);
   v.Visit(*this);
-  stmts->accept(v);
+  if (stmts) stmts->accept(v);
   v.AfterVisit(*this);
 }
 

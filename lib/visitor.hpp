@@ -88,6 +88,7 @@ struct Visitor {
   virtual bool Visit(AST::Return&) = 0;
   virtual bool Visit(AST::LoopRange&) = 0;
   virtual bool Visit(AST::ForeachBlock&) = 0;
+  virtual bool Visit(AST::InThreadsBlock&) = 0;
   virtual bool Visit(AST::IncrementBlock&) = 0;
   virtual bool Visit(AST::FunctionDecl&) = 0;
   virtual bool Visit(AST::ChoreoFunction&) = 0;
@@ -310,11 +311,13 @@ private:
   int pb_count = 0; // counting for parallel_by
   int wi_count = 0; // counting for with_in
   int fe_count = 0; // counting for foreach
+  int it_count = 0; // counting for inthreads
 
   void Reset() {
     pb_count = 0;
     wi_count = 0;
     fe_count = 0;
+    it_count = 0;
   }
 
 public:
@@ -337,6 +340,8 @@ public:
       SSTab().EnterScope("within_" + std::to_string(wi_count++));
     } else if (isa<AST::ForeachBlock>(&n)) {
       SSTab().EnterScope("foreach_" + std::to_string(fe_count++));
+    } else if (isa<AST::InThreadsBlock>(&n)) {
+      SSTab().EnterScope("inthreads_" + std::to_string(it_count++));
     } else if (isa<AST::IncrementBlock>(&n)) {
       SSTab().EnterScope("increment_" + std::to_string(fe_count++));
     } else if (auto w = dyn_cast<AST::WithIn>(&n)) {
@@ -371,7 +376,8 @@ public:
       fname = "";
       SSTab().LeaveScope();
     } else if (isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n) ||
-               isa<AST::ForeachBlock>(&n) || isa<AST::IncrementBlock>(&n)) {
+               isa<AST::ForeachBlock>(&n) || isa<AST::InThreadsBlock>(&n) ||
+               isa<AST::IncrementBlock>(&n)) {
       SSTab().LeaveScope();
     }
 
@@ -482,6 +488,7 @@ public:
   bool Visit(AST::Return&) override { return true; }
   bool Visit(AST::LoopRange&) override { return true; }
   bool Visit(AST::ForeachBlock&) override { return true; }
+  bool Visit(AST::InThreadsBlock&) override { return true; }
   bool Visit(AST::IncrementBlock&) override { return true; }
   bool Visit(AST::FunctionDecl&) override { return true; }
   bool Visit(AST::ChoreoFunction&) override { return true; }

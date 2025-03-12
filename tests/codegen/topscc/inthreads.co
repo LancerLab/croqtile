@@ -1,0 +1,26 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -es -t topscc %s -o - | FileCheck %s
+
+__co__  void foo(f32 [1, 2, 4] a) {
+  parallel p by 6 {
+    f = dma.copy a => shared;
+    inthreads (p < 3) dma.copy a => local;
+    inthreads (p > 0) with q in [2] { 
+      inthreads (p == 0) foreach q {
+      // The iterations only work on parallel thread 0
+      }
+    }
+    inthreads (p == 1) { int b = 3; }
+  }
+}
+
+// CHECK: __global__ void __choreo_device_foo(float * a) {
+// CHECK:   if (((__tops_tid_x())<((3)))) {
+// CHECK:   } // end inthreads
+// CHECK:   if (((__tops_tid_x())>((0)))) {
+// CHECK:       if (((__tops_tid_x())==((0)))) {
+// CHECK:       } // end inthreads
+// CHECK:   } // end inthreads
+// CHECK:   if (((__tops_tid_x())==((1)))) {
+// CHECK:   } // end inthreads
+// CHECK: }

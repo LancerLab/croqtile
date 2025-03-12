@@ -342,7 +342,7 @@ public:
                                            valno);
     } else if (isa<AST::ParallelBy>(&n)) {
       vn.EnterScope();
-    } else if (isa<AST::WithBlock>(&n)) {
+    } else if (isa<AST::WithBlock>(&n) || isa<AST::InThreadsBlock>(&n)) {
       vn.EnterScope();
     } else if (isa<AST::ForeachBlock>(&n) || isa<AST::IncrementBlock>(&n)) {
       vn.EnterScope();
@@ -378,7 +378,8 @@ public:
     if (isa<AST::Program>(&n) || isa<AST::ChoreoFunction>(&n) ||
         isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n)) {
       vn.LeaveScope();
-    } else if (isa<AST::ForeachBlock>(&n) || isa<AST::IncrementBlock>(&n)) {
+    } else if (isa<AST::ForeachBlock>(&n) || isa<AST::InThreadsBlock>(&n) ||
+               isa<AST::IncrementBlock>(&n)) {
       vn.LeaveScope();
     } else if (isa<AST::MultiDimSpans>(&n) || isa<AST::IntTuple>(&n)) {
       vn.ResetListReference();
@@ -1461,6 +1462,18 @@ public:
     TraceEachVisit(n);
 
     gen_values = true; // allow generate values for statements
+
+    // invalidate any current value generated
+    InvalidateVN(cur_mdspan_vn);
+    InvalidateVN(cur_vn);
+
+    if (cannot_proceed) return true;
+
+    return true;
+  };
+
+  bool Visit(AST::InThreadsBlock& n) {
+    TraceEachVisit(n);
 
     // invalidate any current value generated
     InvalidateVN(cur_mdspan_vn);

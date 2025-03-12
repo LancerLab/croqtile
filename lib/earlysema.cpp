@@ -1458,6 +1458,18 @@ bool EarlySemantics::Visit(AST::ForeachBlock& n) {
   return true;
 }
 
+bool EarlySemantics::Visit(AST::InThreadsBlock& n) {
+  TraceEachVisit(n);
+  if (!isa<BooleanType>(NodeType(*n.pred))) {
+    Error(n.pred->LOC(), "requires a predication expression but got '" +
+                             PSTR(NodeType(*n.pred)) + "'.");
+    error_count++;
+  }
+
+  // TODO: check only for parallel-bounded-variable comparison
+  return true;
+}
+
 bool EarlySemantics::Visit(AST::IncrementBlock& n) {
   TraceEachVisit(n);
   for (auto& iv : n.GetIterationVars()) {
@@ -1483,6 +1495,7 @@ bool EarlySemantics::Visit(AST::IncrementBlock& n) {
 
   return true;
 }
+
 bool EarlySemantics::Visit(AST::FunctionDecl& n) {
   TraceEachVisit(n);
 

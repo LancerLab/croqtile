@@ -171,7 +171,7 @@ void choreo_info(const char *message) {
 // builtin operations
 %token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK AT WAIT CALL AUTO SELECT SWAP ROTATE CHUNKINBOUND ASSERT
 // control related
-%token <std::string> IF ELSE PARA BY WITH IN FOREACH INCR RET WHERE WHILE
+%token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH INCR RET WHERE WHILE
 %token <std::string> TRUE FALSE
 
 // non-terminals
@@ -202,6 +202,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::NamedVariableDecl>> named_ituple_decl scalar_decl_without_type
 %nterm <AST::ptr<AST::IntTuple>> unnamed_ituple_decl sugar_unnamed_ituple_decl sugarless_unnamed_ituple_decl
 %nterm <AST::ptr<AST::WithBlock>> within_block
+%nterm <AST::ptr<AST::InThreadsBlock>> inthreads_block
 %nterm <AST::ptr<AST::WithIn>> within
 %nterm <AST::ptr<AST::WhereBind>> where_bind
 %nterm <AST::ptr<AST::ParallelBy>> paraby_block
@@ -458,8 +459,9 @@ statement
     | return_stmt  SEMCOL { $$ = $1; }
     | paraby_block        { $$ = $1; }
     | within_block        { $$ = $1; }
+    | inthreads_block     { $$ = $1; }
     | foreach_block       { $$ = $1; }
-    | increment_block { $$ = $1; }
+    | increment_block     { $$ = $1; /* TODO: remove? */ }
     ;
 
 return_stmt
@@ -982,6 +984,17 @@ within_block
         auto mv = AST::Make<AST::MultiNodes>(@4);
         mv->Append($4);
         $$->stmts = mv;
+      }
+    ;
+
+inthreads_block
+    : INTHDS LPAREN s_expr RPAREN LBRACE statements RBRACE {
+        $$ = AST::Make<AST::InThreadsBlock>(@1, $3, $6);
+      }
+    | INTHDS LPAREN s_expr RPAREN statement {
+        auto mv = AST::Make<AST::MultiNodes>(@4);
+        mv->Append($5);
+        $$ = AST::Make<AST::InThreadsBlock>(@1, $3, mv);
       }
     ;
 
