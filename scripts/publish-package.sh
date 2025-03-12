@@ -1,20 +1,9 @@
 #!/bin/bash
 
-# PROJECT_ID="xiaofeng.guan%2Fchoreo"  # Replace with your actual project ID
-# TAG_NAME="v1.0.0"  # Replace with your release tag
-# PKG_PATH="package/"
-# PKG_NAME="choreo-1.0.0.alpha-Linux.deb"
-# TOKEN="glpat-xVcdtK_sahpcei86Ey6q"  # Use PAT or CI/CD token
-# 
-# # Upload the .deb package
-# UPLOAD_RESPONSE=$(curl --header "PRIVATE-TOKEN: $TOKEN" \
-#   --upload-file "$PKG_PATH$PKG_NAME" \
-#   "http://git.enflame.cn/api/v4/projects/$PROJECT_ID/packages/generic/my-deb-package/1.0.0/$PKG_NAME")
-
 # Load project information
 echo "hello"
 PROJECT_ID="xiaofeng.guan%2Fchoreo"  # Use URL-encoded project path
-TOKEN="glpat-xVcdtK_sahpcei86Ey6q"  # Use PAT or CI/CD token
+TOKEN=$(<.gitlab-release-token.txt)
 PKG_PATH="package/"  # Path where packages are stored
 VERSION=$(cat VERSION.txt | tr -d '[:space:]')  # Read version and remove spaces
 

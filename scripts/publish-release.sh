@@ -3,7 +3,7 @@
 PROJECT_ID="xiaofeng.guan%2Fchoreo"  # Replace with your actual project ID
 TAG_NAME="v1.0.0"  # Replace with your release tag
 PACKAGE_PATH="package/choreo-1.0.0.alpha-Linux.deb"
-TOKEN="glpat-xVcdtK_sahpcei86Ey6q"  # Use PAT or CI/CD token
+TOKEN=$(<.gitlab-release-token.txt)
 
 # Upload the .deb package
 UPLOAD_RESPONSE=$(curl --header "PRIVATE-TOKEN: $TOKEN" \
