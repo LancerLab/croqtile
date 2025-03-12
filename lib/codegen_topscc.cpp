@@ -25,6 +25,7 @@ extern Option<std::string> output;
 extern Option<bool> use_hetero_tileflow;
 extern Option<bool> use_system_toolchain;
 extern Option<bool> use_pic;
+extern Option<std::string> arch;
 
 Option<bool> emit_fatbin(OptionKind::Hidden, "-fb", "", false,
                          "Emit fatbin file.");
@@ -1272,29 +1273,33 @@ void TopsccCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
   os << "cat <<'EOF' > " << cc_file << "\n";
   for (auto& code : code_segments) os << code << "\n";
   os << "\nEOF\n\n";
+  bool use_libra = arch.GetValue() == "gcu400";
 
   // JIT: detect the environment
-  os << R"script(
-# check the device just-in-time
-# TODO: improve the target check with more solid code
-GCU_DEVICE_STR="$(lspci | grep Enflame | head -1)"
-# echo $GCU_DEVICE_STR
-if [[ "${GCU_DEVICE_STR}" == *"S60G"* ]]; then
-  gcu_arch=gcu300
-elif [[ "${GCU_DEVICE_STR}" == *"c035"* ]]; then
-  gcu_arch=gcu300
-  export TOPS_VISIBLE_DEVICES=1
-elif [[ "${GCU_DEVICE_STR}" == *"S60"* ]]; then
-  gcu_arch=gcu300
-elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then
-  gcu_arch=gcu210
-elif [[ "$(lspci | grep Tencent)" != "" ]]; then
-  gcu_arch=gcu210
-else
-  echo "can not determine the GCU device type."
-  exit 1
-fi
-)script";
+  if (use_libra)
+    os << R"script(gcu_arch=gcu400)script";
+  else
+    os << R"script(
+  # check the device just-in-time
+  # TODO: improve the target check with more solid code
+  GCU_DEVICE_STR="$(lspci | grep Enflame | head -1)"
+  # echo $GCU_DEVICE_STR
+  if [[ "${GCU_DEVICE_STR}" == *"S60G"* ]]; then
+    gcu_arch=gcu300
+  elif [[ "${GCU_DEVICE_STR}" == *"c035"* ]]; then
+    gcu_arch=gcu300
+    export TOPS_VISIBLE_DEVICES=1
+  elif [[ "${GCU_DEVICE_STR}" == *"S60"* ]]; then
+    gcu_arch=gcu300
+  elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then
+    gcu_arch=gcu210
+  elif [[ "$(lspci | grep Tencent)" != "" ]]; then
+    gcu_arch=gcu210
+  else
+    echo "can not determine the GCU device type."
+    exit 1
+  fi
+  )script";
 
   os << R"script(
 show_usage() {
@@ -1315,7 +1320,12 @@ show_usage() {
     os << " -v"; // if it requires to be verbose
   // always enclose
   os << "\"";
-  os << "\nexport LD_LIBRARY_PATH=${TOPSCC_LIB}:${LD_LIBRARY_PATH}\n\n";
+  if (use_libra) {
+    os << "\nexport INTERNAL_GCU_SIM=LIBRA";
+    os << "\nexport LD_PRELOAD=${TOPSCC_LIB}/libgcusim.so\n\n";
+  } else
+    os << "\nexport LD_LIBRARY_PATH=${TOPSCC_LIB}:${LD_LIBRARY_PATH}\n\n";
+
   os << R"(if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then)";
   if (verbose)
     os << "\n  echo ${TOPSCC} ${CFLAGS} " << cc_file << " -o " << exe_file;
