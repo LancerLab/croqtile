@@ -16,15 +16,6 @@
 
 namespace Choreo {
 
-namespace sym_replace {
-
-#define SR_DEBUG(X)                                                            \
-  do {                                                                         \
-    if (0) { X; }                                                              \
-  } while (false)
-
-} // end namespace sym_replace
-
 // Symbolize all expression nodes.  For expression nodes with the same symbolic
 // meaning, they are replaced with a unified form to facilitate value numbering
 // and shape infering.
@@ -150,53 +141,63 @@ public:
   void SymbolizeExprNode(ptr<AST::Node> n);
 
   inline void AnalyseThenOptimizeExpr(ptr<AST::Node> n) {
-    SR_DEBUG(dbgs() << "AnalyseThenOptimizeExpr: " << PSTR(n) << "\n");
+    VST_DEBUG(dbgs() << "AnalyseThenOptimizeExpr: " << PSTR(n) << "\n");
     expr_nodes.push_back(n);
     InitializeNode(n);
     SymbolizeExprNode(n);
   }
 
   inline void DumpTermimalExprs() const {
-    SR_DEBUG(dbgs() << "Terminal Expr Nodes:\n";
-             for (auto& n : expr_nodes) dbgs() << "\t" << PSTR(n) << "\n";);
+    VST_DEBUG({
+      dbgs() << "Terminal Expr Nodes:\n";
+      for (auto& n : expr_nodes) dbgs() << "\t" << PSTR(n) << "\n";
+    });
   }
 
   inline void DumpNameSymbolMap() const {
-    SR_DEBUG(dbgs() << "Name Symbol Map:\n";
-             for (auto& [name, sym] : name_symbol_map) dbgs()
-             << "\t" << name << " " << sym << "\n";);
+    VST_DEBUG({
+      dbgs() << "Name Symbol Map:\n";
+      for (auto& [name, sym] : name_symbol_map)
+        dbgs() << "\t" << name << " " << sym << "\n";
+    });
   }
 
   inline void DumpNameSymExprMap() const {
-    SR_DEBUG(dbgs() << "Name SymExpr Map:\n";
-             for (auto& [name, sym_expr] : name_sym_expr_map) dbgs()
-             << "\t" << name << " " << sym_expr << "\n";);
+    VST_DEBUG(dbgs() << "Name SymExpr Map:\n";
+              for (auto& [name, sym_expr] : name_sym_expr_map) dbgs()
+              << "\t" << name << " " << sym_expr << "\n";);
   }
 
   inline void DumpExprSymValnoMap() const {
-    SR_DEBUG(dbgs() << "Expr SymbolValno Map:\n";
-             for (auto& [expr, sym_valno] : expr_sym_valno_map) dbgs()
-             << "\t" << PSTR(expr) << " " << sym_valno << "\n";);
+    VST_DEBUG({
+      dbgs() << "Expr SymbolValno Map:\n";
+      for (auto& [expr, sym_valno] : expr_sym_valno_map)
+        dbgs() << "\t" << PSTR(expr) << " " << sym_valno << "\n";
+    });
   }
 
   inline void DumpSymValnoSymExprMap() const {
-    SR_DEBUG(dbgs() << "SymValno SymExpr Map:\n";
-             for (auto& [sym_valno, sym_expr] : sym_valno_sym_expr_map) dbgs()
-             << "\t" << sym_valno << " " << sym_expr << "\n";);
+    VST_DEBUG({
+      dbgs() << "SymValno SymExpr Map:\n";
+      for (auto& [sym_valno, sym_expr] : sym_valno_sym_expr_map)
+        dbgs() << "\t" << sym_valno << " " << sym_expr << "\n";
+    });
   }
 
   inline void DumpExprNodesWithSymExprAndSymValno() const {
-    SR_DEBUG(dbgs() << "ExprNodes With SymExpr And SymValno:\n";
-             for (auto& expr : expr_nodes) {
-               auto sym_valno = GetSymValnoFromExpr(expr);
-               dbgs() << "\t" << PSTR(expr);
-               dbgs() << "\n\t\t\t\t" << sym_valno << " == ";
-               if (sym_valno != 0)
-                 dbgs() << GetSymExprFromSymValno(sym_valno);
-               else
-                 dbgs() << "NONE";
-               dbgs() << "\n";
-             });
+    VST_DEBUG({
+      dbgs() << "ExprNodes With SymExpr And SymValno:\n";
+      for (auto& expr : expr_nodes) {
+        auto sym_valno = GetSymValnoFromExpr(expr);
+        dbgs() << "\t" << PSTR(expr);
+        dbgs() << "\n\t\t\t\t" << sym_valno << " == ";
+        if (sym_valno != 0)
+          dbgs() << GetSymExprFromSymValno(sym_valno);
+        else
+          dbgs() << "NONE";
+        dbgs() << "\n";
+      }
+    });
   }
 
   // use symbolic information to replace expr nodes equivalently.
@@ -204,9 +205,10 @@ public:
 
 public:
   bool BeforeVisitImpl(AST::Node& n) override {
-    SR_DEBUG(if (auto cf = dyn_cast<AST::ChoreoFunction>(&n)) dbgs()
-                 << "symbolic replacing starts for function " << cf->name
-                 << "\n";);
+    VST_DEBUG({
+      if (auto cf = dyn_cast<AST::ChoreoFunction>(&n))
+        dbgs() << "symbolic replacing starts for function " << cf->name << "\n";
+    });
     return true;
   }
   bool AfterVisitImpl(AST::Node& n) override {

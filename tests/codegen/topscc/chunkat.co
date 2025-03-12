@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GCU300
-// RUN: choreo -t topscc -dp=symrepl %s -es -o - | FileCheck %s
+// RUN: choreo -t topscc %s -es -o - | FileCheck %s
 
 __device__ void kernel(int* , int *, int *, int) {}
 

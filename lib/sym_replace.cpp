@@ -4,8 +4,6 @@
 
 using namespace Choreo;
 
-using namespace Choreo::sym_replace;
-
 namespace {
 
 inline std::string ExSTR(const SymReplace::SymExpr& sym_expr) {
@@ -18,8 +16,8 @@ inline std::string ExSTR(const SymReplace::SymExpr& sym_expr) {
 
 bool SymReplace::InsertNameSymbolMap(std::string name, const Symbol& sym) {
   assert(!name_symbol_map.count(name));
-  SR_DEBUG(dbgs() << "insert name symbol map: " << name << " === " << sym
-                  << "\n");
+  VST_DEBUG(dbgs() << "insert name symbol map: " << name << " === " << sym
+                   << "\n");
   name_symbol_map.emplace(name, sym);
   return true;
 }
@@ -33,8 +31,8 @@ SymReplace::GetSymbolFromName(std::string name) const {
 bool SymReplace::InsertNameSymExprMap(std::string sname,
                                       const SymExpr& sym_expr) {
   assert(!name_sym_expr_map.count(sname));
-  SR_DEBUG(dbgs() << "insert name symbol expr map: " << sname
-                  << " === " << sym_expr << "\n");
+  VST_DEBUG(dbgs() << "insert name symbol expr map: " << sname
+                   << " === " << sym_expr << "\n");
   name_sym_expr_map.emplace(sname, sym_expr);
   return true;
 }
@@ -49,8 +47,8 @@ bool SymReplace::InsertExprSymValnoMap(ptr<AST::Node> n,
                                        const SymValno sym_valno) {
   assert(!expr_sym_valno_map.count(n));
   expr_sym_valno_map.emplace(n, sym_valno);
-  SR_DEBUG(dbgs() << "insert expr with symvalno: [" << PSTR(n) << ", "
-                  << sym_valno << "]\n");
+  VST_DEBUG(dbgs() << "insert expr with symvalno: [" << PSTR(n) << ", "
+                   << sym_valno << "]\n");
   return true;
 }
 
@@ -63,8 +61,8 @@ bool SymReplace::InsertSymValnoSymExprMap(SymValno sym_valno,
                                           const SymExpr& sym_expr) {
   if (sym_valno_sym_expr_map.count(sym_valno)) return false;
   sym_valno_sym_expr_map.emplace(sym_valno, sym_expr);
-  SR_DEBUG(dbgs() << "insert symvalno wtih symexpr: [" << sym_valno << ", "
-                  << sym_expr << "]\n");
+  VST_DEBUG(dbgs() << "insert symvalno wtih symexpr: [" << sym_valno << ", "
+                   << sym_expr << "]\n");
   return true;
 }
 
@@ -76,8 +74,8 @@ SymReplace::GetSymExprFromSymValno(SymValno sym_valno) const {
 
 void SymReplace::InsertNdSnSymMap(ptr<AST::Node> n, const std::string& name,
                                   bool should_scoped /* = true */) {
-  SR_DEBUG(dbgs() << "trying to add nd2sn: " << PSTR(n) << " with " << name
-                  << "\n");
+  VST_DEBUG(dbgs() << "trying to add nd2sn: " << PSTR(n) << " with " << name
+                   << "\n");
   std::string res_name;
   if (should_scoped) {
     if (SSTab().IsDeclared(name))
@@ -92,14 +90,14 @@ void SymReplace::InsertNdSnSymMap(ptr<AST::Node> n, const std::string& name,
     Symbol sym(res_name, res_name);
     InsertNameSymbolMap(res_name, sym);
   }
-  SR_DEBUG(dbgs() << "add nd2sn: " << PSTR(n) << " with " << nd2sn.at(n)
-                  << "\n");
+  VST_DEBUG(dbgs() << "add nd2sn: " << PSTR(n) << " with " << nd2sn.at(n)
+                   << "\n");
 }
 
 void SymReplace::InitializeNode(ptr<AST::Node> n) {
   if (n == nullptr) return;
 
-  SR_DEBUG(dbgs() << "Now initialize node: " << PSTR(n) << "\n");
+  VST_DEBUG(dbgs() << "Now initialize node: " << PSTR(n) << "\n");
   if (auto e = dyn_cast<AST::Expr>(n)) {
     InitializeNode(e->GetC());
     InitializeNode(e->GetL());
@@ -110,22 +108,7 @@ void SymReplace::InitializeNode(ptr<AST::Node> n) {
 
     // Other types of AST nodes are processed in the form of operands.
     if (e->op == "ref") {
-      if (auto id = dyn_cast<AST::Identifier>(r)) {
-        InsertNdSnSymMap(n, id->name);
-      } else if (isa<AST::IntLiteral>(r)) {
-        // AST::IntLiteral
-      } else if (isa<AST::IntTuple>(r)) {
-        // since there may be AST::Expr in AST::MultiValues,
-        // deal with AST::IntTuple in SymbolizeExprNode() rather than here.
-      } else if (isa<AST::MultiDimSpans>(r)) {
-        // concat is here.
-      } else if (isa<AST::Boolean>(r)) {
-      } else if (isa<AST::SpanAs>(r)) {
-      } else if (isa<AST::FloatLiteral>(r)) {
-      } else {
-        choreo_unreachable("The operator " + e->op +
-                           " is not supported in SymReplace yet.");
-      }
+      if (nd2sn.count(r)) InsertNdSnSymMap(n, nd2sn.at(r), false);
     } else if (e->op == "ubound") {
       auto id = dyn_cast<AST::Identifier>(r);
       assert(id);
@@ -158,14 +141,20 @@ void SymReplace::InitializeNode(ptr<AST::Node> n) {
     // no need to symbolize it.
   } else if (isa<AST::LoopRange>(n)) {
   } else if (isa<AST::IntTuple>(n)) {
+    // since there may be AST::Expr in AST::MultiValues,
+    // deal with AST::IntTuple in SymbolizeExprNode() rather than here.
   } else if (isa<AST::MultiDimSpans>(n)) {
-  } else if (isa<AST::IntIndex>(n)) {
+    // concat is here.
+  } else if (auto ii = dyn_cast<AST::IntIndex>(n)) {
+    if (isa<AST::Identifier>(ii->value)) InitializeNode(ii->value);
   } else if (isa<AST::SpanAs>(n)) {
   } else if (auto b = dyn_cast<AST::Boolean>(n)) {
     InsertNdSnSymMap(n, b->value, false);
+  } else if (isa<AST::ChunkAt>(n)) {
   } else {
     choreo_unreachable("The node of type " + PSTR(n->GetType()) +
-                       " is not supported in SymReplace yet.");
+                       " is not supported in SymReplace yet.\n\t" +
+                       n->TypeNameString() + "\n");
   }
 }
 
@@ -240,11 +229,11 @@ SymReplace::SymExpr SymReplace::StringifyOpFromSymExpr(
 
 void SymReplace::SymbolizeExprNode(ptr<AST::Node> n) {
   if (n == nullptr) return;
-  SR_DEBUG(dbgs() << "Now symblize for node: " << PSTR(n)
-                  << " with addr: " << n.get() << "\n");
+  VST_DEBUG(dbgs() << "Now symbolize for node: " << PSTR(n)
+                   << " with addr: " << n.get() << "\n");
   auto e = dyn_cast<AST::Expr>(n);
   if (!e) return;
-  SR_DEBUG(dbgs() << "\tthe node is expr!\n");
+  VST_DEBUG(dbgs() << "\tthe node is expr!\n");
 
   auto C = e->GetC();
   auto L = e->GetL();
@@ -327,9 +316,12 @@ void SymReplace::SymbolizeExprNode(ptr<AST::Node> n) {
     } else if (auto b = dyn_cast<AST::Boolean>(R)) {
       (void)b;
       res = SymExpr(GetSymbolFromName(nd2sn.at(R)));
+    } else if (auto ca = dyn_cast<AST::ChunkAt>(R)) {
+      (void)ca;
+      InsertExprSymValnoMap(n, 0);
     } else {
-      choreo_unreachable("The operator " + e->op +
-                         " is not supported in SymReplace yet.");
+      choreo_unreachable("The ref node(" + R->TypeNameString() +
+                         ") is not supported in SymReplace yet.");
     }
   } else if (e->IsUnary()) {
     if (op == "!" || op == "dataof" || op == "sizeof") {
@@ -421,20 +413,25 @@ void SymReplace::SymbolizeExprNode(ptr<AST::Node> n) {
     choreo_unreachable("The form of expr " + PSTR(e) +
                        " is not supported in SymReplace yet.");
   }
-  SR_DEBUG(dbgs() << "res symbolic expr is " << res << "\n");
+  VST_DEBUG(dbgs() << "res symbolic expr is " << res << "\n");
+  if (expr_sym_valno_map.count(n) && expr_sym_valno_map.at(n) == 0) {
+    VST_DEBUG(dbgs() << "IGNORE node: " + PSTR(n) << "\n");
+    return;
+  }
+  VST_DEBUG(dbgs() << "res symbolic expr is " << res << "\n");
   // TODO(wsj): workaround! `named_spanned_decls` in parser.yy leads to insert
   // the node into expr_sym_valno_map repeatedly! Some other
   // situations(tests/parse/spanned_decl.co) may lead to the same result.
   if (expr_sym_valno_map.count(n)) {
-    SR_DEBUG(dbgs() << "WORKAROUND: RETURN due to repeatedly inserting node " +
-                           PSTR(n) + " into expr_sym_valno_map.");
+    VST_DEBUG(dbgs() << "WORKAROUND: RETURN due to repeatedly inserting node " +
+                            PSTR(n) + " into expr_sym_valno_map.");
     return;
   }
   // TODO(wsj): workaround for issue-31.co.
   if (!nd2sn.count(n)) InsertNdSnSymMap(n, ExSTR(res), false);
   InsertExprSymValnoMap(n, GetValidSymValno(res));
   InsertSymValnoSymExprMap(GetSymValnoFromExpr(n), res);
-  SR_DEBUG(dbgs() << "symbolize for node " << PSTR(n) << " is done\n");
+  VST_DEBUG(dbgs() << "symbolize for node " << PSTR(n) << " is done\n");
 }
 
 void SymReplace::EquivalentlyReplaceExprNodes() {
@@ -465,16 +462,17 @@ void SymReplace::EquivalentlyReplaceExprNodes() {
       continue;
     }
 
-    VST_DEBUG(
-        if (should_use_colors()) {
-          dbgs() << cyan << pass_name << " " << blue << "REPLACE " << reset
-                 << PSTR(orig_node) << blue << " WITH " << reset
-                 << PSTR(new_node) << "\n";
-        } else {
-          dbgs() << pass_name << " "
-                 << "REPLACE " << PSTR(orig_node) << " WITH " << PSTR(new_node)
-                 << "\n";
-        });
+    VST_DEBUG({
+      if (should_use_colors()) {
+        dbgs() << cyan << pass_name << " " << blue << "REPLACE " << reset
+               << PSTR(orig_node) << blue << " WITH " << reset << PSTR(new_node)
+               << "\n";
+      } else {
+        dbgs() << pass_name << " "
+               << "REPLACE " << PSTR(orig_node) << " WITH " << PSTR(new_node)
+               << "\n";
+      }
+    });
 
     auto C = new_expr->GetC();
     auto L = new_expr->GetL();
