@@ -73,4 +73,4 @@ __co__ auto illegal_mdspan_arith(f32 [1, 2, 3] a, s32 [78, 69] b, int c, bool bl
 // CHECK: error: in operation "+": unable to apply to the types (bool vs. mdspan<3> []).
 // CHECK: error: unexpected data type 'unknown' is found in mdspan.
 // CHECK: error: in operation "%": dimension inconsistent (2 vs. 3).
-// CHECK: error: expecting a span type but got the unknown type.
+// CHECK: error: expecting a span type or int type, but got the unknown type.

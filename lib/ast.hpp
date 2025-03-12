@@ -402,6 +402,7 @@ public:
     assert(c);
     value_c = c;
   }
+  void ResetL() { value_l = nullptr; }
 
 public:
   Shape s; // to pass information between shape inference & type inference

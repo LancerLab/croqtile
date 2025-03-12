@@ -1,0 +1,9 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ void illegal_within(s32[1,2,3] ss) {
+  with b in |ss.span| {}
+}
+
+
+// CHECK: error: syntax error, unexpected |, expecting [ or NUM or IDENTIFIER
+// CHECK-NOT: error:

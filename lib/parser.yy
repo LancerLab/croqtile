@@ -1010,7 +1010,13 @@ withins
     ; /* do not allow empty within */
 
 within
-    : IDENTIFIER IN span_expr {
+    : IDENTIFIER IN NUM {
+        // TODO: should we upgrade `NUM` to `s_expr`?
+        // `Identifier` has already been handled in `span_expr`
+        symtab.AddSymbol($1, MakeUnknownType()/*Need inference*/);
+        $$ = AST::Make<AST::WithIn>(@1, AST::Make<AST::Identifier>(@1,$1), AST::Make<AST::IntLiteral>(@3, $3));
+      }
+    | IDENTIFIER IN span_expr {
         symtab.AddSymbol($1, MakeUnknownType()/*Need inference*/);
         $$ = AST::Make<AST::WithIn>(@1, AST::Make<AST::Identifier>(@1,$1), $3);
       }

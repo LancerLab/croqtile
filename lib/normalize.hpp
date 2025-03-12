@@ -291,6 +291,13 @@ public:
 
   bool Visit(AST::WithIn& n) override {
     TraceEachVisit(n);
+
+    if (isa<IntegerType>(n.in->GetType())) {
+      auto mv = AST::Make<AST::MultiValues>(n.in->LOC(), ",");
+      mv->Append(n.in);
+      n.in = AST::Make<AST::MultiDimSpans>(n.in->LOC(), "", mv, 1);
+    }
+
     if (n.with_matchers) return true;
     assert(n.with && "must have with statement.");
 

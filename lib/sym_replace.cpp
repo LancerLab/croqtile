@@ -497,7 +497,7 @@ void SymReplace::EquivalentlyReplaceExprNodes() {
                          " is not supported in SymReplace yet.");
 
     if (new_expr->IsUnary()) {
-      orig_expr->SetL(nullptr);
+      orig_expr->ResetL();
     } else if (new_expr->IsBinary()) {
       if (auto ii = dyn_cast<AST::IntIndex>(L)) {
         orig_expr->SetL(AST::Make<AST::IntIndex>(*ii));

@@ -794,19 +794,23 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
   in_decl = true;
 
   auto ity = NodeType(*n.in);
-  if (!isa<MDSpanType>(ity)) {
-    Error(n.in->LOC(),
-          "expecting a span type but got the " + PSTR(ity) + " type.");
+
+  size_t rank = 0;
+  if (isa<IntegerType>(ity)) {
+    rank = 1;
+  } else if (auto mdst = dyn_cast<MDSpanType>(ity)) {
+    rank = mdst->Dims();
+  } else {
+    Error(n.in->LOC(), "expecting a span type or int type, but got the " +
+                           PSTR(ity) + " type.");
     error_count++;
   }
 
   // check the if rank equal between with-in and with-matcher
-  if (n.with_matchers &&
-      n.with_matchers->Count() != cast<MDSpanType>(ity)->Dims()) {
-    Error(n.in->LOC(),
-          "un-matched with-matcher-count(" +
-              std::to_string(n.with_matchers->Count()) + ") and mdspan rank(" +
-              std::to_string(cast<MDSpanType>(ity)->Dims()) + ").");
+  if (n.with_matchers && n.with_matchers->Count() != rank) {
+    Error(n.in->LOC(), "un-matched with-matcher-count(" +
+                           std::to_string(n.with_matchers->Count()) +
+                           ") and mdspan rank(" + std::to_string(rank) + ").");
     error_count++;
   }
 
@@ -831,7 +835,7 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
   if (n.with) {
     n.with->accept(*this); // make the symbol be defined
     with_syms.insert(n.with->name);
-    auto wty = MakeBoundedITupleType(Shape(cast<MDSpanType>(ity)->Dims()));
+    auto wty = MakeBoundedITupleType(Shape(rank));
     ModifySymbolType(n.with->name, wty);
     SetNodeType(*n.with, wty);
   }

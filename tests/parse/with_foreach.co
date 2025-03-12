@@ -36,6 +36,15 @@ __co__ int with_foreach(int b, f32 [36, 27, 128] input) {
       foreach m(:-2) {}
       foreach m(:) {}
     }
+
+    int bb = |input.span|;
+    with idx0 in 3 {
+      with idx1 in b {
+        with idx2 in bb {
+          foreach idx0, idx1, idx2 {}
+        }
+      }
+    }
   }
 }
 
@@ -96,3 +105,21 @@ __co__ int with_foreach(int b, f32 [36, 27, 128] input) {
 // CHECK:      `- Loop Control: (?:-2:1)
 // CHECK:     `- Foreach Block:
 // CHECK:      `- Iteration variables: m
+// CHECK:      `- Loop Control: (?:?:1)
+// CHECK:   `- Var Decl (int): bb =  (sizeof input.span) 
+// CHECK:   `- With Block:
+// CHECK:     (within constraints)
+// CHECK:     `- idx0 in 3
+// CHECK:     (with statements)
+// CHECK:     `- With Block:
+// CHECK:       (within constraints)
+// CHECK:       `- idx1 in b
+// CHECK:       (with statements)
+// CHECK:       `- With Block:
+// CHECK:         (within constraints)
+// CHECK:         `- idx2 in bb
+// CHECK:         (with statements)
+// CHECK:         `- Foreach Block:
+// CHECK:          `- Iteration variables: idx0
+// CHECK:          `- Iteration variables: idx1
+// CHECK:          `- Iteration variables: idx2

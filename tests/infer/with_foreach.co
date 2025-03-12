@@ -158,6 +158,35 @@ __co__ void with_foreach(s32 [6, 128] lhs, s32 [128] rhs) {
 // VALNO:     } // end scope-4
 // VALNO:    } // end scope-3
 // VALNO:   } // end scope-2
+
+  parallel p by 1 {
+    int bb = |lhs.span|;
+    with idx0 in 3 {
+      with idx1 in bb {
+        foreach idx0, idx1 {}
+      }
+    }
+  }
+// CHECK: Symbol:    ::with_foreach::paraby_1::bb, Type: int
+// CHECK: Bounded:   ::with_foreach::paraby_1::within_7::idx0, Type: {int}->[3]
+// CHECK: Bounded:   ::with_foreach::paraby_1::within_7::idx0__elem__0, Type: {int}->[3]
+// CHECK: Bounded:   ::with_foreach::paraby_1::within_7::within_8::idx1, Type: {int}->[768]
+// CHECK: Bounded:   ::with_foreach::paraby_1::within_7::within_8::idx1__elem__0, Type: {int}->[768]
+// VALNO: New VN #21: 'const_768'
+// VALNO: Alias "::with_foreach::paraby_1::bb" -> #21
+// VALNO: scope-3 {
+// VALNO:   New VN #22: 'const_3'
+// VALNO:   Alias "::with_foreach::paraby_1::within_7::@idx0(0)" -> #22
+// VALNO:   Alias "::with_foreach::paraby_1::within_7::@idx0__elem__0" -> #22
+// VALNO:   Alias "::with_foreach::paraby_1::within_7::@idx0" -> #22
+// VALNO:   scope-4 {
+// VALNO:   Alias "::with_foreach::paraby_1::within_7::within_8::@idx1(0)" -> #21
+// VALNO:   Alias "::with_foreach::paraby_1::within_7::within_8::@idx1__elem__0" -> #21
+// VALNO:   Alias "::with_foreach::paraby_1::within_7::within_8::@idx1" -> #21
+// VALNO:   } // end scope-4
+// VALNO: } // end scope-3
+
 // VALNO:  } // end scope-1
+
 }
 
