@@ -1,0 +1,54 @@
+// REQUIRES: TARGET-GCUALL
+// SHELL-ONLY
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+#include "choreo.h"
+
+__device__ void inc_f32_arr(choreo::f32* ptr, int size) {
+  for (int i = 0; i < size; ++i) { ptr[i] += 0.5; }
+}
+
+#define DIM0 4
+#define DIM1 4
+#define DIM2 6
+#define DIM3 4
+
+__co__ auto cofoo(f32 [DIM0 * DIM1 * DIM2 * DIM3] input) {
+  f32 [DIM0 * DIM1 * DIM2 * DIM3] output{1.5f};
+  parallel p by 3 {
+    shared f32 [DIM2 / #p, DIM1, DIM0, DIM3] l2_buf;
+    shared f32 [DIM2 / #p, DIM1, DIM0, DIM3] l2_res;
+    f = dma.transp.async<2, 1, 0, 3> input.span_as([DIM0, DIM1, DIM2, DIM3]).chunkat(_, _, p, _) => l2_buf;
+    wait f;
+    parallel q by 1 {
+      l1 = dma.transp.async<2, 1, 0, 3> l2_buf.chunkat(q, _, _, _) => local;
+      wait l1;
+      call inc_f32_arr(l1.data, |l1.span|);
+      dma.transp<2, 1, 0, 3> l1 => l2_res;
+    }
+    g = dma.transp.async<2, 1, 0, 3> l2_res.chunkat(_,_,_,_) => output.span_as([DIM0, DIM1, DIM2, DIM3]).chunkat(_, _, p, _);
+    wait g;
+  } 
+  return output;
+}
+
+int main() {
+  auto input = new choreo::f32[DIM0 * DIM1 * DIM2 * DIM3];
+  for (size_t i = 0; i < DIM0 * DIM1 * DIM2 * DIM3; ++i) { input[i] = static_cast<choreo::f32>(i); }
+  auto input_view = choreo::make_spanview<1, choreo::f32>(input, {DIM0 * DIM1 * DIM2 * DIM3});
+  auto res = cofoo(input_view);
+  float EPS = 1e-6;
+  for (size_t i = 0; i < DIM0 * DIM1 * DIM2 * DIM3; ++i) {
+    if (std::abs(res[i] - (input[i] + 0.5f)) > EPS) {
+      printf("Error at %zu: %.1f != %.1f\n", i, res[i], input[i] + 0.5f);
+      return 1;
+    }
+  }
+  delete[] input;
+  printf("passed\n");
+  return 0;
+}
+
+// CHECK: passed
+
+

@@ -765,79 +765,68 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     IncrDeviceIndent();
   }
 
-  if (n.operation == ".copy") {
-    if (f_ca->positions == nullptr) {
-      if (t_ca->positions == nullptr) {
-        // no chunkat
-        ds << d_indent;
-        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-        ds << "tops::memcpy" << (fty->IsAsync() ? "_async" : "") << "(*"
-           << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-           << ");\n";
-        // set the device future
-        if (!event_name.empty())
-          ds << d_indent << future_name << ".set_event(" << event_name
-             << ");\n";
-      } else {
-        static int ds_cnt = 0;
-        auto off_name = "__deslice_offset" + std::to_string(ds_cnt++) + "__" +
-                        t_sym + "_2_" + f_sym;
-        std::ostringstream offset;
-        { // calculate the offsets
-          size_t i = 0;
-          auto shape = f_sty->GetShape();
-          for (auto& p : t_ca->positions->AllValues()) {
-            auto idx_exprs = SplitStringByDelimiter(ExprSTR(p, false));
-            for (auto i_expr : idx_exprs) {
-              if (i != 0) offset << ", ";
-              if (i_expr == "__choreo_no_tiling__")
-                offset << "0";
-              else
-                offset << "(int)(" << i_expr << " * " << STR(shape.ValueAt(i))
-                       << ")";
-              ++i;
-            }
-          }
+  auto GenOffset = [&](ptr<DMAConfig> config = nullptr) -> std::ostringstream {
+    assert(!(f_ca->positions && t_ca->positions));
+    assert(f_ca->positions || t_ca->positions);
+    std::ostringstream offset;
+    size_t i = 0;
+    auto shape = (f_ca->positions ? t_sty : f_sty)->GetShape();
+    for (auto& p : (f_ca->positions ? f_ca : t_ca)->positions->AllValues()) {
+      auto idx_exprs = SplitStringByDelimiter(ExprSTR(p, false));
+      for (auto i_expr : idx_exprs) {
+        if (i != 0) offset << ", ";
+        if (i_expr == "__choreo_no_tiling__")
+          offset << "0";
+        else {
+          size_t idx = i;
+          if (isa<TransposeConfig>(config))
+            idx = cast<TransposeConfig>(config)->dim_values[i];
+          offset << "(int)(" << i_expr << " * " << STR(shape.ValueAt(idx))
+                 << ")";
         }
-        ds << d_indent << "int " << off_name << "[] = {" << offset.str()
-           << "};\n";
-        ds << d_indent;
-        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-        ds << "tops::deslice" << (fty->IsAsync() ? "_async" : "") << "(*"
-           << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-           << ", " << off_name << ");\n";
-        // set the device future
-        if (!event_name.empty()) {
-          ds << d_indent << future_name << ".set_event(" << event_name
-             << ");\n";
+        ++i;
+      }
+    }
+    return offset;
+  };
+
+  if (n.operation == ".copy") {
+    if (f_ca->positions == nullptr && t_ca->positions == nullptr) {
+      // no chunkat
+      ds << d_indent;
+      if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
+      ds << "tops::memcpy" << (fty->IsAsync() ? "_async" : "") << "(*"
+         << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
+         << ");\n";
+      // set the device future
+      if (!event_name.empty())
+        ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
+    } else if (f_ca->positions == nullptr && t_ca->positions != nullptr) {
+      static int ds_cnt = 0;
+      auto off_name = "__deslice_offset" + std::to_string(ds_cnt++) + "__" +
+                      t_sym + "_2_" + f_sym;
+      std::ostringstream offset = GenOffset();
+      ds << d_indent << "int " << off_name << "[] = {" << offset.str()
+         << "};\n";
+      ds << d_indent;
+      if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
+      ds << "tops::deslice" << (fty->IsAsync() ? "_async" : "") << "(*"
+         << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
+         << ", " << off_name << ");\n";
+      // set the device future
+      if (!event_name.empty()) {
+        ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
 #if 0
           std::string bts{NameBaseType(t_sty->ElementType())};
           ds << d_indent << future_name << ".set_data(&" << f_mds_name << ".get<"
              << bts << ">(" << offset.str() << "));\n";
 #endif
-        }
       }
-    } else {
+    } else if (f_ca->positions != nullptr && t_ca->positions == nullptr) {
       static int s_cnt = 0;
       auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
                       f_sym + "_2_" + t_sym;
-      std::ostringstream offset;
-      { // calculate the offsets
-        size_t i = 0;
-        auto shape = t_sty->GetShape();
-        for (auto& p : f_ca->positions->AllValues()) {
-          auto idx_exprs = SplitStringByDelimiter(ExprSTR(p, false));
-          for (auto i_expr : idx_exprs) {
-            if (i != 0) offset << ", ";
-            if (i_expr == "__choreo_no_tiling__")
-              offset << "0";
-            else
-              offset << "(int)(" << i_expr << " * " << STR(shape.ValueAt(i))
-                     << ")";
-            ++i;
-          }
-        }
-      }
+      std::ostringstream offset = GenOffset();
       ds << d_indent << "int " << off_name << "[] = {" << offset.str()
          << "};\n";
       ds << d_indent;
@@ -848,6 +837,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       // set the device future
       if (!event_name.empty())
         ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
+    } else {
+      choreo_unreachable("not support dual chunkat in one DMA statement");
     }
   } else if (n.operation == ".pad") {
     auto pad_config = cast<PadConfig>(n.GetConfig());
@@ -876,24 +867,56 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       // TODO: shall we support slice_pad (chunkat+pad)?
     }
   } else if (n.operation == ".transp") {
+    static int t_cnt = 0;
     auto transp_config = cast<TransposeConfig>(n.GetConfig());
     auto f_buf_name = RemoveSuffix(f_buf_expr, ".data()");
     auto t_buf_name = RemoveSuffix(t_buf_expr, ".data()");
-    ds << d_indent << "int __transpose_layout_" << f_buf_name << "[] = {"
+    auto layout_name =
+        "__transpose_layout" + std::to_string(t_cnt++) + "__" + f_buf_name;
+    ds << d_indent << "int " << layout_name << "[] = {"
        << DelimitedString(transp_config->dim_values) << "};\n";
-    if (f_ca->positions == nullptr) {
+    if (f_ca->positions == nullptr && t_ca->positions == nullptr) {
       ds << d_indent;
       if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
       ds << "tops::transpose" << (fty->IsAsync() ? "_async" : "") << "(*"
          << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-         << ", __transpose_layout_" << f_buf_name << ");\n";
+         << ", " << layout_name << ");\n";
       // set the device future
       if (!event_name.empty()) {
         ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
       }
-    } else {
-      assert(false && "unsupported");
-      // TODO: shall we support slice_transpose (chunkat+transpose)?
+    } else if (f_ca->positions != nullptr && t_ca->positions == nullptr) {
+      static int s_cnt = 0;
+      auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
+                      f_sym + "_2_" + t_sym;
+      std::ostringstream offset = GenOffset(n.GetConfig());
+      ds << d_indent << "int " << off_name << "[] = {" << offset.str()
+         << "};\n";
+      ds << d_indent;
+      if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
+      ds << "tops::slice_transpose" << (fty->IsAsync() ? "_async" : "") << "(*"
+         << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
+         << ", " << off_name << ", " << layout_name << ");\n";
+      // set the device future
+      if (!event_name.empty()) {
+        ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
+      }
+    } else if (f_ca->positions == nullptr && t_ca->positions != nullptr) {
+      static int ds_cnt = 0;
+      auto off_name = "__deslice_offset" + std::to_string(ds_cnt++) + "__" +
+                      t_sym + "_2_" + f_sym;
+      std::ostringstream offset = GenOffset(n.GetConfig());
+      ds << d_indent << "int " << off_name << "[] = {" << offset.str()
+         << "};\n";
+      ds << d_indent;
+      if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
+      ds << "tops::transpose_deslice" << (fty->IsAsync() ? "_async" : "")
+         << "(*" << future_name << ".get_ctx(), " << t_mds_name << ", "
+         << f_mds_name << ", " << layout_name << ", " << off_name << ");\n";
+      // set the device future
+      if (!event_name.empty()) {
+        ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
+      }
     }
   }
 

@@ -47,7 +47,7 @@ __co__ auto foo(f32 [32, 4] a) {
 // CHECK:   tops::mdspan __mds7_anon_0(tops::Private, (float*)anon_0, 4, 32);
 // CHECK:   tops_dte_ctx_t choreo_topscc_ctx3;
 // CHECK:   choreo::future __choreo_anon_fut__1(choreo_topscc_ctx3, "", {{[0-9]+}}, {{[0-9]+}}, anon_0);
-// CHECK:   int __transpose_layout_c[] = {1, 0};
-// CHECK:   tops::transpose(*__choreo_anon_fut__1.get_ctx(), __mds7_anon_0, __mds6_c, __transpose_layout_c);
+// CHECK:   int __transpose_layout0__c[] = {1, 0};
+// CHECK:   tops::transpose(*__choreo_anon_fut__1.get_ctx(), __mds7_anon_0, __mds6_c, __transpose_layout0__c);
 // CHECK:   f1.wait();
 // CHECK: }
