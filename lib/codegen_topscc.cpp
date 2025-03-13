@@ -32,6 +32,16 @@ Option<bool> emit_fatbin(OptionKind::Hidden, "-fb", "", false,
 
 namespace {
 
+const char* SingleThreadPredicate() {
+  static const char* pred =
+      "threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0";
+  static const char* pred_subthread =
+      "threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0 && "
+      "subThreadIdx.x == 0 && subThreadIdx.y == 0 && subThreadIdx.z == 0";
+  if (arch.GetValue() == "gcu400") return pred_subthread;
+  return pred;
+}
+
 inline const char* TopsMdsStorage(Storage st) {
   switch (st) {
   case Storage::DEFAULT:
@@ -446,6 +456,10 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       choreo_unreachable("unsupported storage type.");
 
     if (spmem && n.init_value) {
+      if (sty->GetStorage() == Storage::SHARED) {
+        ds << d_indent << "if (" << SingleThreadPredicate() << ") {\n";
+        IncrDeviceIndent();
+      }
       ds << d_indent << "tops_dte_ctx_t " << sym__init << ";\n";
       ds << d_indent << "tops::dte_scope s_" << sym__init << "(" << sym__init
          << ");\n";
@@ -454,6 +468,10 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
          << NameBaseType(sty->ElementType()) << "*)" << sym << ", "
          << UnScopedExpr(RSTR(sty->GetShape())) << "), "
          << ExprSTR(n.init_value, false) << ");\n";
+      if (sty->GetStorage() == Storage::SHARED) {
+        DecrDeviceIndent();
+        ds << d_indent << "} // single instance\n";
+      }
     }
   }
 
@@ -743,7 +761,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   if (!n.future.empty()) shared_in_block = IsDMABlockShared(n);
 
   if (shared_in_block) {
-    ds << d_indent << "if (threadIdx.x == 0) {\n";
+    ds << d_indent << "if (" << SingleThreadPredicate() << ") {\n";
     IncrDeviceIndent();
   }
 
@@ -881,7 +899,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
 
   if (shared_in_block) {
     DecrDeviceIndent();
-    ds << d_indent << "} // threadIdx.x == 0\n";
+    ds << d_indent << "} // single instance\n";
     if (!fty->IsAsync()) {
       // not async, must syncthreads immediately
       // else, defer the sync till the wait time
@@ -929,7 +947,7 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
   }
 
   if (shared_in_block) {
-    ds << d_indent << "if (threadIdx.x == 0) {\n";
+    ds << d_indent << "if (" << SingleThreadPredicate() << ") {\n";
     IncrDeviceIndent();
   }
 

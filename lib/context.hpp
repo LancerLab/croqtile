@@ -267,10 +267,12 @@ public:
         }
       case Storage::SHARED:
         switch (GetTarget()) {
-        case CompileTarget::Topscc: return 64ull * 1024 * 1024; // todo: check this
+        case CompileTarget::Topscc:
+          return 64ull * 1024 * 1024; // todo: check this
         default: choreo_unreachable("Unhandled target.");
         }
-      case Storage::GLOBAL: return 40.75 * 1024 * 1024 * 1024; // todo: check this
+      case Storage::GLOBAL:
+        return 40.75 * 1024 * 1024 * 1024; // todo: check this
       default: choreo_unreachable("Unsupported mem level.");
       }
     }
