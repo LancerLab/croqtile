@@ -86,7 +86,9 @@ check_requirement() {
     test_target=gcu400
     gcu_arch=gcu400
     export INTERNAL_GCU_SIM=LIBRA
-    export LD_PRELOAD=${script_dir}/../tools/lib/libgcusim.so
+    if [ "${has_gcu_sim}" = true ]; then
+      export LD_PRELOAD=${script_dir}/../tools/lib/libgcusim.so
+    fi
   elif [ "${tgt}" == "GCU300" ]; then
     [ ! -z "$test_target" ] && echo "Test target has been set to ${test_target}"
     test_target=gcu300

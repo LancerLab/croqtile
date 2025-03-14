@@ -1392,7 +1392,9 @@ show_usage() {
   os << "\"";
   if (use_libra) {
     os << "\nexport INTERNAL_GCU_SIM=LIBRA";
-    os << "\nexport LD_PRELOAD=${TOPSCC_LIB}/libgcusim.so\n\n";
+    os << "\nif [ -f ${TOPSCC_LIB}/libgcusim.so ]; then";
+    os << "\n export LD_PRELOAD=${TOPSCC_LIB}/libgcusim.so";
+    os << "\nfi\n\n";
   } else
     os << "\nexport LD_LIBRARY_PATH=${TOPSCC_LIB}:${LD_LIBRARY_PATH}\n\n";
 
