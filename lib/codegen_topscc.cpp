@@ -381,7 +381,8 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
     if (sty->GetStorage() == Storage::GLOBAL) {
       bts = NameBaseType(sty->ElementType(), false); // use the device type name
       if (!IsChoreoOutput(InScopeName(sym))) {
-        if (FBIContainsBuffer(FBInfo(), InScopeName(sym))) {
+        if (FBIContainsBuffer(FBInfo(), InScopeName(sym)) &&
+            use_hetero_tileflow && IsHostSide()) {
           // a non-init global var decl tied with future
           // this hint is enough to say a host side dataflow
           VST_DEBUG(dbgs() << "Found " << buf_sym << " in FBInfo - "

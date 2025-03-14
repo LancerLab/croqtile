@@ -1,0 +1,49 @@
+// RUN: choreo -es %s | FileCheck --match-full-lines %s
+
+#include "choreo.h"
+
+#define _1MiB 1048576
+#define BPE_F16 2
+
+__co__ void cofoo(f16 [_1MiB * 1 / BPE_F16] in_buf) {
+  parallel p by 1 {
+    shared_buf = dma.copy in_buf => shared;
+    out_buf = dma.copy shared_buf => global;
+  }
+}
+
+int main() {
+  auto input = new choreo::f16[_1MiB * 1 / BPE_F16];
+  auto input_data = choreo::make_spanview<1, choreo::f16>(input, {_1MiB * 1 / BPE_F16});
+
+  cofoo(input_data);
+
+  delete[] input;
+  return 0;
+}
+
+// CHECK: __global__ void __choreo_device_cofoo(choreo::f16 * in_buf, choreo::f16 * out_buf__buf__) {
+// CHECK:   __shared__ choreo::half shared_buf__buf__[524288];
+// CHECK:   tops::mdspan __mds0_in_buf(tops::Global, (choreo::half*)in_buf, 524288);
+// CHECK:   tops::mdspan __mds1_shared_buf__buf__(tops::Shared, (choreo::half*)shared_buf__buf__, 524288);
+// CHECK:   tops_dte_ctx_t choreo_topscc_ctx0;
+// CHECK:   choreo::future shared_buf(choreo_topscc_ctx0, "shared_buf", {{[0-9]*}}, {{[0-9]*}}, shared_buf__buf__);
+// CHECK:   tops::memcpy(*shared_buf.get_ctx(), __mds1_shared_buf__buf__, __mds0_in_buf);
+// CHECK:   tops::mdspan __mds2_shared_buf(tops::Shared, (choreo::half*)shared_buf.data(), 524288);
+// CHECK:   tops::mdspan __mds3_out_buf__buf__(tops::Global, (choreo::half*)out_buf__buf__, 524288);
+// CHECK:   tops_dte_ctx_t choreo_topscc_ctx1;
+// CHECK:   choreo::future out_buf(choreo_topscc_ctx1, "out_buf", {{[0-9]*}}, {{[0-9]*}}, out_buf__buf__);
+// CHECK:   tops::memcpy(*out_buf.get_ctx(), __mds3_out_buf__buf__, __mds2_shared_buf);
+// CHECK: }
+// CHECK: void cofoo(const choreo::spanned_view<choreo::f16, 1> & in_buf) {
+// CHECK:   choreo::runtime_check(in_buf.shape()[0] == 524288, "shape inconsistent on the 1st parameter (dim: 0).");
+// CHECK:   choreo::f16 * in_buf__device = nullptr;
+// CHECK:   choreo::abend_true(topsMalloc(&in_buf__device, 1048576ULL));
+// CHECK:   choreo::abend_true(topsMemcpy(in_buf__device, in_buf.data(), 1048576ULL, topsMemcpyHostToDevice));
+// CHECK:   choreo::f16 * out_buf__buf____device = nullptr;
+// CHECK:   choreo::abend_true(topsMalloc(&out_buf__buf____device, 1048576ULL));
+// CHECK:   dim3 __cofoo_gdims0(1, 1, 1);
+// CHECK:   dim3 __cofoo_bdims0(1, 1, 1);
+// CHECK:   __choreo_device_cofoo<<<__cofoo_gdims0, __cofoo_bdims0>>>(in_buf__device, out_buf__buf____device);
+// CHECK: }
+
