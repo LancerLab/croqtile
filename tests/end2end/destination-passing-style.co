@@ -1,0 +1,54 @@
+// REQUIRES: TARGET-GCUALL
+// SHELL-ONLY
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+#include "choreo.h"
+#include <chrono>
+
+__co__ void identity_kernel_dps(f32 [1024] input, f32 [1024] output) { /// device program
+  parallel p by 1 {  // p is sip_index
+    shared f32[input.span(0)/#p] l2_out;
+    input_load = dma.copy.async input.chunkat(p) => shared;
+    wait input_load;
+    parallel q by 1 {
+      // input_load_s = dma.copy.async input_load.data.chunkat(q) => local;
+      input_load_s = dma.copy.async input_load.data => local;
+      wait input_load_s;
+      out_store_s = dma.copy.async input_load_s.data => l2_out;
+      wait out_store_s;
+    }
+    out_store = dma.copy.async l2_out => output.chunkat(p); // can use defined vars
+    wait out_store;
+  } // can use python styling
+}
+
+void choreo_identity_dps_impl(float* data_ptr, float* output_ptr, size_t numel) {
+  auto input_data = choreo::make_spanview<1, choreo::f32>(data_ptr, {1024});
+  auto output_data = choreo::make_spanview<1, choreo::f32>(output_ptr, {1024});
+  auto start = std::chrono::high_resolution_clock::now();
+
+  identity_kernel_dps(input_data, output_data);
+  for (size_t i = 0; i < output_data.shape()[0]; ++i) {
+      std::cout << "i: " << i << "  ";
+      std::cout << "res: " << output_data[i] << "  ";
+      std::cout << "ref: " << input_data[i] << std::endl;
+      choreo::choreo_assert(input_data[i] == output_data[i], "not equal");
+  }
+  std::cout << "Test Passed\n" << std::endl;
+
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+  std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
+}
+
+int main() { /// host program
+  size_t numel = 1024;
+  
+  std::vector<float> input_data(numel, 1.0f);
+  std::vector<float> output_data(numel);
+
+  choreo_identity_dps_impl(input_data.data(), output_data.data(), numel);
+
+  return 0;
+}
+// CHECK: Test Passed

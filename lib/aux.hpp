@@ -190,6 +190,10 @@ public:
       while (current != end && !predicate(*current)) { ++current; }
     }
 
+    void skip_to_prev_valid() {
+      while (current != begin && !predicate(*current)) { --current; }
+    }
+
   public:
     Iterator(typename std::vector<T>::iterator current,
              typename std::vector<T>::iterator end,
@@ -201,6 +205,12 @@ public:
     Iterator& operator++() {
       ++current;
       skip_to_next_valid();
+      return *this;
+    }
+
+    Iterator& operator--() {
+      --current;
+      skip_to_prev_valid();
       return *this;
     }
 
@@ -216,6 +226,7 @@ public:
   // Begin and End functions
   Iterator begin() { return Iterator(vec.begin(), vec.end(), predicate); }
   Iterator end() { return Iterator(vec.end(), vec.end(), predicate); }
+  Iterator back() { return Iterator(--vec.end(), vec.end(), predicate); }
 };
 
 #endif // __CHOREO_AUX_HPP__

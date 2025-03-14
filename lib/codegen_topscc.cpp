@@ -571,6 +571,26 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
 
   hs << ");\n";
 
+  // typically, the last buffer is used as output in destination-passing-style convention
+  if (!HasChoreoOutput()) {
+    std::string oname = "";
+    ptr<Type> otype;
+    bool has_spanned_arg = false;
+    for (auto& item : GetDeviceFuncIns()) {
+      auto sname = item.name;
+      if (isa<SpannedType>(item.type)) {
+        oname = UnScopedName(sname);
+        otype = item.type;
+        has_spanned_arg = true;
+      }
+    }
+
+    if (has_spanned_arg)
+      hs << h_indent << "choreo::abend_true(topsMemcpy(" << oname << ".data(), "
+        << oname + "__device" 
+        << ", " << UnScopedSizeExpr(*otype)
+        << ", topsMemcpyDeviceToHost));\n";
+  }
   return true;
 }
 
