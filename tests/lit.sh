@@ -44,14 +44,10 @@ num_skiped=0
 
 is_in_docker=false
 is_in_shell=false
-has_gcu_sim=false
 test_target=
 requires_dynamic_shape=0
 expect_fail=
 expect_skip=
-expect_docker=
-expect_shell=
-expect_gcu_sim=
 
 max_jobs=1
 
@@ -63,32 +59,25 @@ else
   is_in_shell=true
 fi
 
-if [ -f ${script_dir}/../tools/lib/libgcusim.so ]; then
-  has_gcu_sim=true
-fi
-
 # Function to fill the target-specific variables
 check_requirement() {
   local file=$1
   local requires=$(grep "^\/\/" $file | grep "REQUIRES:" | sed 's/.*REQUIRES://')
   local tgt=$(echo $requires | grep "TARGET-.*\>" |sed 's/TARGET-//g' |sed 's/ .*//')
+  local expect_gcu_sim=$(echo $requires | grep "GCUSIM")
+
   # reset target requirement
   requires_dynamic_shape=0
   test_target=
   expect_fail=
   expect_skip=
-  expect_docker=
-  expect_shell=
-  unset INTERNAL_GCU_SIM
-  unset LD_PRELOAD
-  if [ "${tgt}" == "GCU400" ]; then
+
+  if [ ! -z "${expect_gcu_sim}" ]; then
+    [ ! -z "$test_target" ] && echo "Test target has been set to ${test_target}"
+    test_target=gcusim400
+  elif [ "${tgt}" == "GCU400" ]; then
     [ ! -z "$test_target" ] && echo "Test target has been set to ${test_target}"
     test_target=gcu400
-    gcu_arch=gcu400
-    export INTERNAL_GCU_SIM=LIBRA
-    if [ "${has_gcu_sim}" = true ]; then
-      export LD_PRELOAD=${script_dir}/../tools/lib/libgcusim.so
-    fi
   elif [ "${tgt}" == "GCU300" ]; then
     [ ! -z "$test_target" ] && echo "Test target has been set to ${test_target}"
     test_target=gcu300
@@ -110,16 +99,15 @@ check_requirement() {
 
   expect_fail=$(grep "^\/\/" $file |grep "XFAIL:" | sed 's/.*XFAIL:[[:blank:]]*//')
   expect_skip=$(grep "^\/\/" $file |grep "SKIP:")
-  expect_docker=$(grep "^\/\/" $file |grep "DOCKER-ONLY")
-  expect_shell=$(grep "^\/\/" $file |grep "SHELL-ONLY")
-  expect_gcu_sim=$(grep "^\/\/" $file |grep "GCUSIM-ONLY")
 }
 
+# check the hardware device availability
 gcu_arch=
 is_gpu_available=0
 is_gcu_available=0
 is_dynshape_supported=0
-# check device availability
+gcu_sim_lib=
+gcu_sim_arch=
 check_device_features() {
   if command -v nvidia-smi &> /dev/null; then
     if nvidia-smi > /dev/null 2>&1; then
@@ -129,9 +117,15 @@ check_device_features() {
     fi
   fi
 
-  GCU_DEVICE_STR="$(lspci | grep Enflame | head -1)"
-  GCU_DEVICE_STR_BACKUP="$(lspci | grep Tencent)"
-  if [ "${GCU_DEVICE_STR}" != "" ] || [ "${GCU_DEVICE_STR_BACKUP}" != "" ]; then
+  # is the simulators exist?
+  if [ -f "${script_dir}/../tools/lib/libgcusim.so" ]; then
+    gcu_sim_lib=${script_dir}/../tools/lib/
+    gcu_sim_arch=gcusim400
+    is_gcu_available=1
+  fi
+
+  GCU_DEVICE_STR="$(lspci | grep -E '(Enflame|Tencent)' | head -1)"
+  if [ "${GCU_DEVICE_STR}" != "" ]; then
     #echo "GCU is available."
     is_gcu_available=1
   fi
@@ -143,8 +137,10 @@ check_device_features() {
   elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then
     gcu_arch=gcu210
     export TOPS_VISIBLE_DEVICES=1
-  elif [[ "${GCU_DEVICE_STR_BACKUP}" != "" ]]; then
+  elif [[ "${GCU_DEVICE_STR}" == *"Tencent"* ]]; then
     gcu_arch=gcu210
+  elif [[ ! -z "${LIBRA_SIM_DIR}" ]]; then
+    gcu_arch=gcu400
   else
     echo "can not determine the GCU device type."
     exit 1
@@ -157,8 +153,6 @@ reproduce_file="/tmp/reproduce_commands_${timestamp}.txt"
 rm -f $counter_file
 rm -f $reproduce_file
 touch $reproduce_file
-
-
 
 
 initialize_counters() {
@@ -215,6 +209,8 @@ execute_command() {
   local command=$2
   local count=$3
   local total=$4
+  local env_set="$5"
+  local env_unset="$6"
 
   # Replace %s with the filename
   command=${command//%s/"$file"}
@@ -236,6 +232,7 @@ execute_command() {
   local start_time_ns=$(date +%s%N)
 
   # execute the command
+  command="${env_set} $command ${env_unset}"
   eval "$command" 2>/dev/null
   local exit_code=$?
 
@@ -416,6 +413,35 @@ toupper() {
     echo "$1" | tr '[:lower:]' '[:upper:]'
 }
 
+retrieve_run_config() {
+  local line="$@"
+
+  # reset
+  run_command=
+  run_environ=
+  run_target=
+
+  if [[ $line =~ ^//[[:blank:]]*RUN:[[:blank:]]*(.+) ]]; then
+    # Extract the command after "RUN:"
+    run_command="${BASH_REMATCH[1]}"
+    run_environ="shell"
+  elif [[ $line =~ ^//[[:blank:]]*RUN-([^-]+):[[:blank:]]*(.+) ]]; then
+    run_target=$(echo "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')
+    if [[ "${run_target}" == "$gcu_arch" ]]; then
+      run_command="${BASH_REMATCH[2]}"
+      run_environ="shell"
+    elif [[ "${run_target}" == "docker" ]]; then
+      run_command="${BASH_REMATCH[2]}"
+      run_environ="docker"
+      run_target=
+    fi
+  elif [[ $line =~ ^//[[:blank:]]*RUN-([^-]+)-([^-]+):[[:blank:]]*(.+) ]]; then
+    run_target=$(echo "${BASH_REMATCH[2]}" | tr '[:upper:]' '[:lower:]')
+    run_environ=$(echo "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')
+    run_command="${BASH_REMATCH[3]}"
+  fi
+}
+
 for file in "${files_array[@]}"; do
   # check requirement specified by the file
   check_requirement $file
@@ -426,37 +452,9 @@ for file in "${files_array[@]}"; do
     continue;
   fi
 
-  if [ ! -z "$expect_docker" ] && [ "$is_in_docker" = false ]; then
-    echo "SKIP-DOCKER-ONLY:  $file"
-    num_skiped=$(($num_skiped + 1));
-    continue;
-  fi
-
-  if [ ! -z "$expect_shell" ] && [ "$is_in_shell" = false ]; then
-    echo "SKIP-SHELL-ONLY:  $file"
-    num_skiped=$(($num_skiped + 1));
-    continue;
-  fi
-
   if [ $is_gcu_available -eq 1 ]; then
-    if [ ! -z "$test_target" ] && [ "$test_target" != "gcu-any" ]; then
-      if [ "$gcu_arch" != "$test_target" ]; then
-        echo "SKIP($test_target): ${file}"
-        num_skiped=$(($num_skiped + 1));
-        continue; #simply skip the unmatched target
-      fi
-    fi
-
-    if [ "$test_target" != "gcu400" ] && [ "$expect_gcu_sim" = true ]; then
-      echo "SKIP($test_target): ${file}"
-      num_skiped=$(($num_skiped + 1));
-      continue; #simply skip the unmatched target
-    fi
-
-    if [ "$test_target" == "gcu400" ] && [ "$has_gcu_sim" = false ]; then
-      echo "SKIP($test_target): ${file}"
-      num_skiped=$(($num_skiped + 1));
-      continue; #simply skip the unmatched target
+    if [[ -z $test_target ]] || [[ "$test_target" == "gcu-any" ]]; then
+      test_target=$gcu_arch;
     fi
 
     if [ $requires_dynamic_shape -eq 1 ]; then
@@ -468,91 +466,90 @@ for file in "${files_array[@]}"; do
     fi
 
   elif [ $is_gpu_available -eq 1 ]; then
-    if [ ! -z "$test_target" ] ; then
-      if [ "$test_target" != "gpu" ]; then
-        echo "SKIP($test_target): ${file}"
-        num_skiped=$(($num_skiped + 1));
-        continue; #simply skip the unmatched target
-      fi
+    if [ ! -z "$test_target" ] && [ "$test_target" != "gpu" ]; then
+      echo "SKIP($test_target): ${file}"
+      num_skiped=$(($num_skiped + 1));
+      continue; #simply skip the unmatched target
     fi
   fi
 
-  # Check if the file is in the "end2end" folder
-  file_name=$(basename "$file")
-  folder_name=$(dirname "$file")
+  # If it is in the end2end folder, keep it blocking
+  sequential=false
+  [[ "$(dirname ${file})" == *"end2end"* ]] && sequential=true;
 
-  # If it's in the end2end folder, keep it blocking
-  if [[ "$folder_name" == *"end2end"* ]]; then
-    # Read the file and search for lines starting with "// RUN:"
-    run_num=$(grep -E 'RUN(:|-.*:)' $file | wc -l)
-    run_count=0
-    while IFS= read -r line; do
-      if [[ $line =~ ^//[[:blank:]]*RUN:[[:blank:]]*(.+) ]]; then
-        run_count=$(($run_count + 1))
-        # Extract the command after "RUN:"
-        run_command="${BASH_REMATCH[1]}"
-        # Execute the command with replacements
-        execute_command "$file" "$run_command" "$run_count" "$run_num"
-      elif [[ $line =~ ^//[[:blank:]]*RUN-(.+):[[:blank:]]*(.+) ]]; then
-        run_count=$(($run_count + 1))
-        run_target="${BASH_REMATCH[1]}"
-        run_target=$(echo "$run_target" | tr '[:upper:]' '[:lower:]')
-        if [[ "${run_target}" == "$gcu_arch" ]]; then
-          # Extract the command after "RUN:"
-          run_command="${BASH_REMATCH[2]}"
-          # Execute the command with replacements
-          execute_command "$file" "$run_command" "$run_count" "$run_num"
-        else
-          echo "SKIP($run_target): ${file} ($run_count of $run_num)"
-          num_skiped=$(($num_skiped + 1)); #simply skip the unmatched target
-        fi
+  # Read the file and search for lines starting with "// RUN:"
+  run_num=$(grep -E 'RUN(:|-.*:)' $file | wc -l)
+  run_count=0
+  while IFS= read -r line; do
+    retrieve_run_config $line
+
+    [[ -z "$run_command" ]] && continue;
+
+    # Either execute or skip
+    run_count=$(($run_count + 1))
+
+    # Check if the execution environment matches
+    if [[ ("$run_environ" == "docker" && "$is_in_docker" == false) ||
+          ("$run_environ" == "shell" && "$is_in_shell" == false) ]]; then
+      # Skip when the environment does not match
+      echo "SKIP(${run_environ}): ${file} ($run_count of $run_num)"
+      num_skiped=$(($num_skiped + 1)); #simply skip the unmatched target
+      continue;
+    fi
+
+    # There is a specified RUN-TARGET
+    if [[ ! -z "$run_target" ]]; then # no RUN-TARGET specified
+      # check if run-target violates the REQUIRES
+      if [[ "$test_target" != "gcu-any" ]] &&
+         [[ "$test_target" != "$run_target" ]]; then
+        echo "ERROR($file): test target ($test_target) does not match run target ($run_target)."
+        exit 1
       fi
-    done < "$file"
-  else
-    # For all other tests, use parallel execution
-    run_num=$(grep -E 'RUN(:|-.*:)' $file | wc -l)
-    run_count=0
-    while IFS= read -r line; do
-      if [[ $line =~ ^//[[:blank:]]*RUN:[[:blank:]]*(.+) ]]; then
-        run_count=$(($run_count + 1))
-        run_command="${BASH_REMATCH[1]}"
 
-        # Run the command in the background
-        if [[ $max_jobs -eq 1 ]]; then
-          # specialised serial test logic
-          execute_command "$file" "$run_command" "$run_count" "$run_num"
-        else
-          while [[ $(jobs | wc -l) -ge $max_jobs ]]; do
-            wait -n
-          done
-          execute_command "$file" "$run_command" "$run_count" "$run_num" &
-        fi
-      elif [[ $line =~ ^//[[:blank:]]*RUN-(.+):[[:blank:]]*(.+) ]]; then
-        run_count=$(($run_count + 1))
-        run_target="${BASH_REMATCH[1]}"
-        run_target=$(echo "$run_target" | tr '[:upper:]' '[:lower:]')
-        if [[ "${run_target}" == "$gcu_arch" ]]; then
-          run_command="${BASH_REMATCH[2]}"
-          # Run the command in the background
-          if [[ $max_jobs -eq 1 ]]; then
-            # specialised serial test logic
-            execute_command "$file" "$run_command" "$run_count" "$run_num"
-          else
-            while [[ $(jobs | wc -l) -ge $max_jobs ]]; do
-              wait -n
-            done
-            execute_command "$file" "$run_command" "$run_count" "$run_num" &
-          fi
-        else
-          echo "SKIP($run_target): ${file} ($run_count of $run_num)"
-          num_skiped=$(($num_skiped + 1)); #simply skip the unmatched target
-        fi
+      # override the test_target with the run_target
+      test_target=$run_target
+    fi
+
+    # specific - simulator
+    exe_env=
+    unset_env=
+    allows_run=0
+    if [[ "$test_target" == "gcusim400" ]]; then
+      if [[ "$test_target" != "$gcu_sim_arch" ]]; then
+        echo "SKIP(SIM): ${file}"
+        num_skiped=$(($num_skiped + 1));
+        continue;
+      else
+        # set up for the simulator
+        exe_env="old_path=${LD_LIBRARY_PATH}; export LD_LIBRARY_PATH=${gcu_sim_lib}/../tools/lib/:${LD_LIBRARY_PATH}; export INTERNAL_GCU_SIM=LIBRA;"
+        unset_env=";export LD_LIBRARY_PATH=${old_path}; unset INTERNAL_GCU_SIM;"
+        allows_run=1
       fi
-    done < "$file"
+    fi
 
-    # Wait for all background processes to finish before moving to the next file
-    wait
-  fi
+    if  [[ "$test_target" != "$gcu_arch" ]] && [[ $allows_run -eq 0 ]] ; then
+      # Not matched, skip
+      echo "SKIP(${test_target}): ${file} ($run_count of $run_num)"
+      num_skiped=$(($num_skiped + 1)); #simply skip the unmatched target
+      continue;
+    fi
+
+    # Arch Matches: Execute the command with replacements
+    # Run the command in the background
+    if [[ $max_jobs -eq 1 ]] || [[ $sequential -eq 1 ]]; then
+      # specialised serial test logic
+      execute_command "$file" "$run_command" "$run_count" "$run_num" "${exe_env}" "${unset_env}"
+    else
+      while [[ $(jobs | wc -l) -ge $max_jobs ]]; do
+        wait -n
+      done
+      execute_command "$file" "$run_command" "$run_count" "$run_num" "${exe_env}" "${unset_env}" &
+    fi
+
+  done < "$file"
+
+  # Wait for all background processes to finish before moving to the next file
+  wait
 done
 
 cleantmplocks

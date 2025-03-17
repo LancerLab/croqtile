@@ -1,7 +1,7 @@
 // REQUIRES: TARGET-GCUALL
-// SHELL-ONLY
 // RUN: choreo -gs -t factor %s -o %s.factor.result && bash %s.factor.result --execute | FileCheck --match-full-lines %s && rm -f %s.factor.result
 // RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+// RUN-DOCKER: choreo -st -t topscc %s -o %s.topscc.result && %s.topscc.result | FileCheck --match-full-lines %s && rm -f %s.topscc.result
 
 __co__ void nil() {}
 
