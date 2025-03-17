@@ -1,7 +1,7 @@
 // REQUIRES: TARGET-GCUALL
-// SHELL-ONLY
 // RUN: choreo -gs -t factor %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
 // RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+// RUN-DOCKER: choreo -st -t topscc %s -o %s.result && %s.result | FileCheck --match-full-lines %s && rm -f %s.result
 #include "choreo.h"
 
 // extern "C" void embedding_kernel(float * weights, int * indices, float * out, int vocab_size, int embed_dim, int seq_len) {

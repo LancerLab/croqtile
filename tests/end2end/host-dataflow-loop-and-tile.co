@@ -1,6 +1,6 @@
 // REQUIRES: TARGET-GCU300
-// SHELL-ONLY
-// RUN-GCU300: choreo --use-hetero-tileflow -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+// RUN: choreo --use-hetero-tileflow -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+// RUN-DOCKER: choreo -st --use-hetero-tileflow -t topscc %s -o %s.topscc.result && %s.topscc.result | FileCheck --match-full-lines %s && rm -f %s.topscc.result
 
 #include "choreo.h"
 #include <chrono>

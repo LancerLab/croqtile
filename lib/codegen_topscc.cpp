@@ -1322,10 +1322,13 @@ void TopsccCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
   os << "# This is the choreo generated bash script to compile factor "
         "code\n\n";
 
+  os << "if [[ -z ${TOPSCC_INSTALL} ]]; then\n";
   if (use_system_toolchain)
-    os << "TOPSCC_INSTALL=/opt/tops\n";
+    os << "  TOPSCC_INSTALL=/opt/tops\n";
   else
-    os << "TOPSCC_INSTALL=" << STRINGIZE(__CHOREO_TOPSCC_DIR__) << "\n";
+    os << "  TOPSCC_INSTALL=" << STRINGIZE(__CHOREO_TOPSCC_DIR__) << "\n";
+  os << "  if [[ \"$1\" == \"-st\" ]]; then TOPSCC_INSTALL=/opt/tops; shift 1; fi\n";
+  os << "fi\n";
   os << "TOPSCC=${TOPSCC_INSTALL}/bin/topscc\n";
   os << "TOPSCC_LIB=${TOPSCC_INSTALL}/lib\n\n";
 
@@ -1345,11 +1348,13 @@ void TopsccCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
   os << "cat <<'EOF' > " << cc_file << "\n";
   for (auto& code : code_segments) os << code << "\n";
   os << "\nEOF\n\n";
-  bool use_libra = arch.GetValue() == "gcu400";
+
+  // use simulator at this time
+  bool use_sim = arch.GetValue() == "gcu400";
 
   // JIT: detect the environment
-  if (use_libra)
-    os << R"script(gcu_arch=gcu400)script";
+  if (use_sim)
+    os << "gcu_arch=gcu400\n";
   else
     os << R"script(
   # check the device just-in-time
@@ -1375,10 +1380,18 @@ void TopsccCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
 
   os << R"script(
 show_usage() {
-  echo "  Usage: $0 | --execute           -> compile and execute"
-  echo "                | --compile-link      -> compile and link"
-  echo "                | --compile-module    -> compile and generate the module"
-  echo "                | --gen-fatbin        -> compile and generate the fatbin"
+  echo "  Usage: $0 <-st> <actions>"
+  echo ""
+  echo "  Options:"
+  echo "   -st,                 Use default system path for target compilation"
+  echo "   --execute,           Compile and execute"
+  echo "   --compile-link,      Compile and link"
+  echo "   --compile-module,    Compile and generate the module"
+  echo "   --gen-fatbin,        Compile and generate the fatbin"
+  echo ""
+  echo "  Environment Variables:"
+  echo "   EXTRA_TARGET_CFLAGS: Extra target compilation flags"
+  echo "   TOPSCC_INSTALL:      Topscc compiler installation path"
   exit 1
 }
 
@@ -1389,14 +1402,10 @@ show_usage() {
   if (use_pic) os << " -fPIC";
   if (verbose) os << " -v"; // if it requires to be verbose
   // always enclose
-  os << "\"";
-  if (use_libra) {
+  os << " ${EXTRA_TARGET_CFLAGS}\"";
+  if (use_sim)
     os << "\nexport INTERNAL_GCU_SIM=LIBRA";
-    os << "\nif [ -f ${TOPSCC_LIB}/libgcusim.so ]; then";
-    os << "\n export LD_PRELOAD=${TOPSCC_LIB}/libgcusim.so";
-    os << "\nfi\n\n";
-  } else
-    os << "\nexport LD_LIBRARY_PATH=${TOPSCC_LIB}:${LD_LIBRARY_PATH}\n\n";
+  os << "\nexport LD_LIBRARY_PATH=${TOPSCC_LIB}:${LD_LIBRARY_PATH}\n\n";
 
   os << R"(if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then)";
   if (verbose)

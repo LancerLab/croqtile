@@ -1,5 +1,4 @@
 // REQUIRES: TARGET-GCU210
-// SHELL-ONLY
 // TODO: figure out what is wrong on gcu300
 // RUN: choreo -gs -t factor %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
 #include "choreo.h"
