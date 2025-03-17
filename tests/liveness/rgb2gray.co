@@ -1,0 +1,96 @@
+// RUN: choreo --liveness -dv=liveness -sa=liveness %s -o - | FileCheck --match-full-lines %s
+
+__co__ auto rgb2gray(f32 [N, 3, H, W] input) {
+  f32 [N, H, W] out;
+  parallel q by 6 {
+    // TODO: use N, H, W, q?
+    with index={n, c, h, w} in [N, 3, H, W]/{#q, 3, 16, 512} {
+      foreach n, h {
+        input_L1_A = dma.copy.async input.chunkat(q#n, c, h, w) => local;
+        input_L1_B = dma.any;
+        local f32 [input_L1_A.span(0), input_L1_A.span(2), input_L1_A.span(3)] out_L1;
+        foreach w(1:) {
+          input_L1_B = dma.copy.async input.chunkat(q#n, c, h, w) => local;
+          wait input_L1_A;
+          dma.copy out_L1 => out.chunkat(q#n, h, w - 1);
+          swap(input_L1_A, input_L1_B);
+        }
+        input_L1 = select(#w % 2, input_L1_B, input_L1_A);
+        wait input_L1;
+        dma.copy out_L1 => out.chunkat(q#n, h, w(-1));
+      }
+    }
+  }
+  return out;
+}
+
+// CHECK: (  0) rgb2gray(f32 mdspan<4> [::rgb2gray::N, 3, ::rgb2gray::H, ::rgb2gray::W] input) {
+// CHECK: (  1)   global f32 [ N H W ] out
+// CHECK: (  2)   parallel q = {q__elem__x} by [6] {
+// CHECK: (  3)     with index = {n, c, h, w} in  ([ N 3 H W ] / { (ubound q) , 3, 16, 512})  {
+// CHECK: (  4)       foreach n(::), h(::) {
+// CHECK: (  5)         anon_0 =  (q # n) 
+// CHECK: (  6)         local f32 mdspan<4> [1, 3, 16, 512] input_L1_A__buf__
+// CHECK: (  7)         input_L1_A = dma.copy.async input.ChunkAt(anon_0, c, h, w) => input_L1_A__buf__
+// CHECK: (  8)         local f32 mdspan<4> [1, 3, 16, 512] input_L1_B__buf__
+// CHECK: (  9)         input_L1_B = dma.any
+// CHECK: ( 10)         local f32 [ input_L1_A.span(0) input_L1_A.span(2) input_L1_A.span(3) ] out_L1
+// CHECK: ( 11)         anon_1 = 1
+// CHECK: ( 12)         foreach w(anon_1::1) {
+// CHECK: ( 13)           anon_2 =  (q # n) 
+// CHECK: ( 14)           input_L1_B = dma.copy.async input.ChunkAt(anon_2, c, h, w) => input_L1_B__buf__
+// CHECK: ( 15)           wait input_L1_A
+// CHECK: ( 16)           anon_3 =  (q # n) 
+// CHECK: ( 17)           anon_4 =  (w - 1) 
+// CHECK: ( 18)           dma.copy out_L1 => out.ChunkAt(anon_3, h, anon_4)
+// CHECK: ( 19)           swap(input_L1_A, input_L1_B)
+// CHECK: ( 20)         }
+// CHECK: ( 21)         unknown input_L1 = select( ( (ubound w)  % 2) , input_L1_B, input_L1_A)
+// CHECK: ( 22)         wait input_L1
+// CHECK: ( 23)         anon_5 =  (q # n) 
+// CHECK: ( 24)         dma.copy out_L1 => out.ChunkAt(anon_5, h, w[-1])
+// CHECK: ( 25)       }
+// CHECK: ( 26)     }
+// CHECK: ( 27)   }
+// CHECK: ( 28)   return out
+// CHECK: ( 29) }
+// CHECK: VAR    ::rgb2gray::paraby_0::within_0::index
+// CHECK: 	range:
+// CHECK: IGNORE global buffer: ::rgb2gray::input
+// CHECK: IGNORE global buffer: ::rgb2gray::out
+// CHECK: VAR    ::rgb2gray::paraby_0::q
+// CHECK: 	range: [2, 27]
+// CHECK: VAR    ::rgb2gray::paraby_0::q__elem__x
+// CHECK: 	range: [2, 27]
+// CHECK: VAR    ::rgb2gray::paraby_0::within_0::w
+// CHECK: 	range: [3, 25]
+// CHECK: VAR    ::rgb2gray::paraby_0::within_0::n
+// CHECK: 	range: [3, 25]
+// CHECK: VAR    ::rgb2gray::paraby_0::within_0::h
+// CHECK: 	range: [3, 25]
+// CHECK: VAR    ::rgb2gray::paraby_0::within_0::c
+// CHECK: 	range: [3, 25]
+// CHECK: VAR    ::rgb2gray::paraby_0::within_0::foreach_0::anon_0
+// CHECK: 	range: [5, 7]
+// CHECK: BUFFER ::rgb2gray::paraby_0::within_0::foreach_0::input_L1_A__buf__
+// CHECK: 	range: [6, 22]
+// CHECK: VAR    ::rgb2gray::paraby_0::within_0::foreach_0::input_L1_A
+// CHECK: 	range: [7, 22]
+// CHECK: BUFFER ::rgb2gray::paraby_0::within_0::foreach_0::input_L1_B__buf__
+// CHECK: 	range: [8, 22]
+// CHECK: VAR    ::rgb2gray::paraby_0::within_0::foreach_0::input_L1_B
+// CHECK: 	range: [9, 22]
+// CHECK: BUFFER ::rgb2gray::paraby_0::within_0::foreach_0::out_L1
+// CHECK: 	range: [10, 24]
+// CHECK: VAR    ::rgb2gray::paraby_0::within_0::foreach_0::anon_1
+// CHECK: 	range: [11, 20]
+// CHECK: VAR    ::rgb2gray::paraby_0::within_0::foreach_0::foreach_1::anon_2
+// CHECK: 	range: [13, 14]
+// CHECK: VAR    ::rgb2gray::paraby_0::within_0::foreach_0::foreach_1::anon_3
+// CHECK: 	range: [16, 18]
+// CHECK: VAR    ::rgb2gray::paraby_0::within_0::foreach_0::foreach_1::anon_4
+// CHECK: 	range: [17, 18]
+// CHECK: VAR    ::rgb2gray::paraby_0::within_0::foreach_0::input_L1
+// CHECK: 	range: [21, 22]
+// CHECK: VAR    ::rgb2gray::paraby_0::within_0::foreach_0::anon_5
+// CHECK: 	range: [23, 24]

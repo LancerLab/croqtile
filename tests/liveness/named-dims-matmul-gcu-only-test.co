@@ -1,0 +1,125 @@
+// RUN: choreo --liveness -dv=liveness -sa=liveness %s -o - | FileCheck --match-full-lines %s
+
+#include "choreo.h"
+
+// extern "C" void kernel(int * lhs, int * rhs, int * out, int m, int k, int n) {
+__cok__ { /// kernel program
+__co_device__ extern "C" void kernel(int * lhs, int * rhs, int * out) {
+  int m = 4;
+  int k = 512;
+  int n = 64;
+  for (int i = 0; i < m; ++i)
+    for (int j = 0; j < n; ++j)
+      for (int z = 0; z < k; ++z)
+        out[i*n + j] += lhs[i*k+z]*rhs[z*n+j];
+}
+} /// end of kernel decl
+
+__co__ auto matmul_named_dims(s32 [M, K] lhs, s32 [K, N] rhs) {
+  s32[lhs.span(0), rhs.span(1)] output;
+
+  int m = 4;
+  int n = 64;
+  int k = 512;
+
+  parallel p by 1 {
+    with tilings = {m_tile, k_tile, n_tile} in [M/m, K/k, N/n] {  // decl your tiled spans
+      foreach m_tile, n_tile {
+        local s32 [m, n] l1_out {0};
+        foreach k_tile {
+          lhs_load = dma.copy lhs.chunkat(m_tile, k_tile) => local;
+          rhs_load = dma.copy rhs.chunkat(k_tile, n_tile) => local;
+
+          call kernel(lhs_load.data, rhs_load.data, l1_out);
+          dma.copy l1_out => output.chunkat(m_tile, n_tile);
+        }
+      }
+    }
+  } // can use python styling
+  return output;
+}
+
+int main() { /// host program
+  choreo::s32 a[256][512] = {0};
+  choreo::s32 b[512][512] = {0};
+  auto lhs_data = choreo::make_spanview<2, choreo::s32>((int*)a, {256, 512});
+  auto rhs_data = choreo::make_spanview<2, choreo::s32>((int*)b, {512, 512});
+  lhs_data.fill_random(-10, 10);
+  rhs_data.fill_random(-10, 10);
+  
+  auto res = matmul_named_dims(lhs_data, rhs_data);
+
+  std::cout << res.shape()[0] << std::endl;
+  std::cout << res.shape()[1] << std::endl;
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+      int ref = 0;
+      for (size_t k = 0; k < lhs_data.shape()[1]; ++k)
+        ref += a[i][k]*b[k][j];
+      if ( ref != res[i][j]) {
+        // std::cout << "i: " << i << ", j: " << j << "\n";
+        // std::cout << "res: " << res[i][j] << "\n";
+        // std::cout << "ref: " << ref << std::endl;
+        choreo::choreo_assert(ref == res[i][j], "values are not equal.");
+      }
+    }
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK: (  0) matmul_named_dims(s32 mdspan<2> [::matmul_named_dims::M, ::matmul_named_dims::K] lhs, s32 mdspan<2> [::matmul_named_dims::K, ::matmul_named_dims::N] rhs) {
+// CHECK: (  1)   global s32 [ lhs.span(0) rhs.span(1) ] output
+// CHECK: (  2)   int m = 4
+// CHECK: (  3)   int n = 64
+// CHECK: (  4)   int k = 512
+// CHECK: (  5)   parallel p = {p__elem__x} by [1] {
+// CHECK: (  6)     with tilings = {m_tile, k_tile, n_tile} in [ (M / m)  (K / k)  (N / n)  ] {
+// CHECK: (  7)       foreach m_tile(::), n_tile(::) {
+// CHECK: (  8)         local s32 [ m n ] l1_out = {0}
+// CHECK: (  9)         foreach k_tile(::) {
+// CHECK: ( 10)           local s32 mdspan<2> [4, 512] lhs_load__buf__
+// CHECK: ( 11)           lhs_load = dma.copy lhs.ChunkAt(m_tile, k_tile) => lhs_load__buf__
+// CHECK: ( 12)           local s32 mdspan<2> [512, 64] rhs_load__buf__
+// CHECK: ( 13)           rhs_load = dma.copy rhs.ChunkAt(k_tile, n_tile) => rhs_load__buf__
+// CHECK: ( 14)           call kernel( (dataof lhs_load) ,  (dataof rhs_load) , l1_out)
+// CHECK: ( 15)           dma.copy l1_out => output.ChunkAt(m_tile, n_tile)
+// CHECK: ( 16)         }
+// CHECK: ( 17)       }
+// CHECK: ( 18)     }
+// CHECK: ( 19)   }
+// CHECK: ( 20)   return output
+// CHECK: ( 21) }
+
+// CHECK: VAR    ::matmul_named_dims::k
+// CHECK: 	range:
+// CHECK: VAR    ::matmul_named_dims::m
+// CHECK: 	range:
+// CHECK: VAR    ::matmul_named_dims::n
+// CHECK: 	range:
+// CHECK: VAR    ::matmul_named_dims::paraby_0::within_0::tilings
+// CHECK: 	range:
+// CHECK: IGNORE global buffer: ::matmul_named_dims::lhs
+// CHECK: IGNORE global buffer: ::matmul_named_dims::rhs
+// CHECK: IGNORE global buffer: ::matmul_named_dims::output
+// CHECK: VAR    ::matmul_named_dims::paraby_0::p__elem__x
+// CHECK: 	range: [5, 19]
+// CHECK: VAR    ::matmul_named_dims::paraby_0::p
+// CHECK: 	range: [5, 19]
+// CHECK: VAR    ::matmul_named_dims::paraby_0::within_0::k_tile
+// CHECK: 	range: [6, 17]
+// CHECK: VAR    ::matmul_named_dims::paraby_0::within_0::m_tile
+// CHECK: 	range: [6, 17]
+// CHECK: VAR    ::matmul_named_dims::paraby_0::within_0::n_tile
+// CHECK: 	range: [6, 17]
+// CHECK: BUFFER ::matmul_named_dims::paraby_0::within_0::foreach_0::l1_out
+// CHECK: 	range: [8, 16]
+// CHECK: BUFFER ::matmul_named_dims::paraby_0::within_0::foreach_0::foreach_1::lhs_load__buf__
+// CHECK: 	range: [10, 14]
+// CHECK: VAR    ::matmul_named_dims::paraby_0::within_0::foreach_0::foreach_1::lhs_load
+// CHECK: 	range: [11, 14]
+// CHECK: BUFFER ::matmul_named_dims::paraby_0::within_0::foreach_0::foreach_1::rhs_load__buf__
+// CHECK: 	range: [12, 14]
+// CHECK: VAR    ::matmul_named_dims::paraby_0::within_0::foreach_0::foreach_1::rhs_load
+// CHECK: 	range: [13, 14]

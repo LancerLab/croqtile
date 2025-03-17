@@ -409,38 +409,38 @@ int main() {
 // CHECK: ( 22)   return output
 // CHECK: ( 23) }
 
-// CHECK: IGNORE global buffer: ::foo::id
 // CHECK: IGNORE global buffer: ::foo::input
 // CHECK: IGNORE global buffer: ::foo::off_buff_L3
-// CHECK: IGNORE global buffer: ::foo::output
 // CHECK: IGNORE global buffer: ::foo::para
-// CHECK: BUFFER ::foo::paraby_0::off_buff
-// CHECK: 	range: [4, 19]
-// CHECK: BUFFER ::foo::paraby_0::output_L1
-// CHECK: 	range: [3, 19]
+// CHECK: IGNORE global buffer: ::foo::id
+// CHECK: IGNORE global buffer: ::foo::output
 // CHECK: VAR    ::foo::paraby_0::p
 // CHECK: 	range: [2, 21]
 // CHECK: VAR    ::foo::paraby_0::p__elem__x
 // CHECK: 	range: [2, 21]
-// CHECK: VAR    ::foo::paraby_0::para_L1
-// CHECK: 	range: [7, 19]
+// CHECK: BUFFER ::foo::paraby_0::output_L1
+// CHECK: 	range: [3, 19]
+// CHECK: BUFFER ::foo::paraby_0::off_buff
+// CHECK: 	range: [4, 19]
 // CHECK: BUFFER ::foo::paraby_0::para_L1__buf__
 // CHECK: 	range: [6, 19]
+// CHECK: VAR    ::foo::paraby_0::para_L1
+// CHECK: 	range: [7, 19]
 // CHECK: VAR    ::foo::paraby_0::within_0::d0
 // CHECK: 	range: [8, 19]
 // CHECK: VAR    ::foo::paraby_0::within_0::d1
 // CHECK: 	range: [8, 19]
 // CHECK: VAR    ::foo::paraby_0::within_0::foreach_0::anon_0
 // CHECK: 	range: [10, 12]
-// CHECK: VAR    ::foo::paraby_0::within_0::foreach_0::anon_1
-// CHECK: 	range: [13, 15]
-// CHECK: VAR    ::foo::paraby_0::within_0::foreach_0::anon_2
-// CHECK: 	range: [17, 18]
-// CHECK: VAR    ::foo::paraby_0::within_0::foreach_0::id_L1
-// CHECK: 	range: [15, 16]
-// CHECK: BUFFER ::foo::paraby_0::within_0::foreach_0::id_L1__buf__
-// CHECK: 	range: [14, 16]
-// CHECK: VAR    ::foo::paraby_0::within_0::foreach_0::input_L1
-// CHECK: 	range: [12, 16]
 // CHECK: BUFFER ::foo::paraby_0::within_0::foreach_0::input_L1__buf__
 // CHECK: 	range: [11, 16]
+// CHECK: VAR    ::foo::paraby_0::within_0::foreach_0::input_L1
+// CHECK: 	range: [12, 16]
+// CHECK: VAR    ::foo::paraby_0::within_0::foreach_0::anon_1
+// CHECK: 	range: [13, 15]
+// CHECK: BUFFER ::foo::paraby_0::within_0::foreach_0::id_L1__buf__
+// CHECK: 	range: [14, 16]
+// CHECK: VAR    ::foo::paraby_0::within_0::foreach_0::id_L1
+// CHECK: 	range: [15, 16]
+// CHECK: VAR    ::foo::paraby_0::within_0::foreach_0::anon_2
+// CHECK: 	range: [17, 18]

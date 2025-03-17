@@ -1,0 +1,182 @@
+// RUN: choreo --liveness -dv=liveness -sa=liveness %s -o - | FileCheck --match-full-lines %s
+
+__cok__ {
+__co_device__ extern "C" void kernel(int * a, int * b, int * c, int n) {
+  for (int i = 0; i < n; ++i)
+    c[i] = a[i] + b[i];
+}
+}
+
+#define pf0 6
+__co__ s32 [N, 17, 128] ele_add(s32 [N, 17, 128] lhs, s32 [N, 17, 128] rhs) {
+  s32[lhs.span] output;
+
+  parallel p by pf0 {
+    with index = {n, x, y} in [N/#p, 17, 4] {
+      foreach index {
+        lhs_load = dma.copy.async lhs.chunkat(p#n, x, y) => local;
+        rhs_load = dma.copy.async rhs.chunkat(p#n, x, y) => local;
+        wait lhs_load, rhs_load;
+
+        local s32[lhs_load.span] l1_out;
+
+        call kernel(lhs_load.data, rhs_load.data, l1_out, |lhs_load.span|);
+
+        out_store = dma.copy.async l1_out => output.chunkat(p#n, x, y);
+        wait out_store;
+      }
+    }
+  }
+
+  parallel p by 1 {
+    with index = {rm, x, y} in [N, 17, 4] {
+      // foreach rm(lhs.span(0)/pf0*pf0:) {
+      foreach rm(N/pf0*pf0:) {
+        foreach x, y {
+          lhs_load = dma.copy.async lhs.chunkat(rm, x, y) => local;
+          rhs_load = dma.copy.async rhs.chunkat(rm, x, y) => local;
+          wait lhs_load, rhs_load;
+
+          local s32[lhs_load.span] l1_out;
+
+          call kernel(lhs_load.data, rhs_load.data, l1_out, |lhs_load.span|);
+
+          out_store = dma.copy.async l1_out => output.chunkat(rm, x, y);
+          wait out_store;
+        }
+      }
+    }
+  }
+  return output;
+}
+
+#define NN 15
+
+int main() {
+  choreo::s32 a[NN][17][128] = {0};
+  choreo::s32 b[NN][17][128] = {0};
+  
+  auto a_data = choreo::make_spanview<3, choreo::s32>((int*)a, {NN, 17, 128});
+  auto b_data = choreo::make_spanview<3, choreo::s32>((int*)b, {NN, 17, 128});
+  a_data.fill_random(-10, 10);
+  b_data.fill_random(-10, 10);
+
+  auto res = ele_add(a_data, b_data);
+  std::cout << res.shape()[0] << std::endl;
+  std::cout << res.shape()[1] << std::endl;
+  std::cout << res.shape()[2] << std::endl;
+
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k) {
+        // std::cout << "i: " << i << ", j: " << j << ", k: " << k << "\n";
+        // std::cout << "a: " << a[i][j][k] << ", b: " << b[i][j][k] << ", res: " << res[i][j][k] << "\n";
+        if (a[i][j][k] + b[i][j][k] != res[i][j][k]) {
+          choreo::choreo_assert(a[i][j][k] + b[i][j][k] == res[i][j][k], "values are not equal.");
+        }
+      }
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK: (  0) ele_add(s32 mdspan<3> [::ele_add::N, 17, 128] lhs, s32 mdspan<3> [::ele_add::N, 17, 128] rhs) {
+// CHECK: (  1)   global s32 [ lhs.span ] output
+// CHECK: (  2)   parallel p = {p__elem__x} by [6] {
+// CHECK: (  3)     with index = {n, x, y} in [ (N /  (ubound p) )  17 4 ] {
+// CHECK: (  4)       foreach index(::) {
+// CHECK: (  5)         anon_0 =  (p # n) 
+// CHECK: (  6)         local s32 mdspan<3> [1, 1, 32] lhs_load__buf__
+// CHECK: (  7)         lhs_load = dma.copy.async lhs.ChunkAt(anon_0, x, y) => lhs_load__buf__
+// CHECK: (  8)         anon_1 =  (p # n) 
+// CHECK: (  9)         local s32 mdspan<3> [1, 1, 32] rhs_load__buf__
+// CHECK: ( 10)         rhs_load = dma.copy.async rhs.ChunkAt(anon_1, x, y) => rhs_load__buf__
+// CHECK: ( 11)         wait lhs_load, rhs_load
+// CHECK: ( 12)         local s32 [ lhs_load.span ] l1_out
+// CHECK: ( 13)         call kernel( (dataof lhs_load) ,  (dataof rhs_load) , l1_out,  (sizeof lhs_load.span) )
+// CHECK: ( 14)         anon_2 =  (p # n) 
+// CHECK: ( 15)         out_store = dma.copy.async l1_out => output.ChunkAt(anon_2, x, y)
+// CHECK: ( 16)         wait out_store
+// CHECK: ( 17)       }
+// CHECK: ( 18)     }
+// CHECK: ( 19)   }
+// CHECK: ( 20)   parallel p = {p__elem__x} by [1] {
+// CHECK: ( 21)     with index = {rm, x, y} in [ N 17 4 ] {
+// CHECK: ( 22)       anon_3 =  ( (N / 6)  * 6) 
+// CHECK: ( 23)       foreach rm(anon_3::1) {
+// CHECK: ( 24)         foreach x(::), y(::) {
+// CHECK: ( 25)           local s32 mdspan<3> [1, 1, 32] lhs_load__buf__
+// CHECK: ( 26)           lhs_load = dma.copy.async lhs.ChunkAt(rm, x, y) => lhs_load__buf__
+// CHECK: ( 27)           local s32 mdspan<3> [1, 1, 32] rhs_load__buf__
+// CHECK: ( 28)           rhs_load = dma.copy.async rhs.ChunkAt(rm, x, y) => rhs_load__buf__
+// CHECK: ( 29)           wait lhs_load, rhs_load
+// CHECK: ( 30)           local s32 [ lhs_load.span ] l1_out
+// CHECK: ( 31)           call kernel( (dataof lhs_load) ,  (dataof rhs_load) , l1_out,  (sizeof lhs_load.span) )
+// CHECK: ( 32)           out_store = dma.copy.async l1_out => output.ChunkAt(rm, x, y)
+// CHECK: ( 33)           wait out_store
+// CHECK: ( 34)         }
+// CHECK: ( 35)       }
+// CHECK: ( 36)     }
+// CHECK: ( 37)   }
+// CHECK: ( 38)   return output
+// CHECK: ( 39) }
+
+// CHECK: VAR    ::ele_add::paraby_1::within_1::index
+// CHECK: 	range:
+// CHECK: IGNORE global buffer: ::ele_add::lhs
+// CHECK: IGNORE global buffer: ::ele_add::rhs
+// CHECK: IGNORE global buffer: ::ele_add::output
+// CHECK: VAR    ::ele_add::paraby_0::p
+// CHECK: 	range: [2, 19]
+// CHECK: VAR    ::ele_add::paraby_0::p__elem__x
+// CHECK: 	range: [2, 19]
+// CHECK: VAR    ::ele_add::paraby_0::within_0::y
+// CHECK: 	range: [3, 17]
+// CHECK: VAR    ::ele_add::paraby_0::within_0::x
+// CHECK: 	range: [3, 17]
+// CHECK: VAR    ::ele_add::paraby_0::within_0::n
+// CHECK: 	range: [3, 17]
+// CHECK: VAR    ::ele_add::paraby_0::within_0::index
+// CHECK: 	range: [3, 17]
+// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::anon_0
+// CHECK: 	range: [5, 7]
+// CHECK: BUFFER ::ele_add::paraby_0::within_0::foreach_0::lhs_load__buf__
+// CHECK: 	range: [6, 13]
+// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::lhs_load
+// CHECK: 	range: [7, 13]
+// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::anon_1
+// CHECK: 	range: [8, 10]
+// CHECK: BUFFER ::ele_add::paraby_0::within_0::foreach_0::rhs_load__buf__
+// CHECK: 	range: [9, 13]
+// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::rhs_load
+// CHECK: 	range: [10, 13]
+// CHECK: BUFFER ::ele_add::paraby_0::within_0::foreach_0::l1_out
+// CHECK: 	range: [12, 16]
+// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::anon_2
+// CHECK: 	range: [14, 15]
+// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::out_store
+// CHECK: 	range: [15, 16]
+// CHECK: VAR    ::ele_add::paraby_1::p__elem__x
+// CHECK: 	range: [20, 37]
+// CHECK: VAR    ::ele_add::paraby_1::p
+// CHECK: 	range: [20, 37]
+// CHECK: VAR    ::ele_add::paraby_1::within_1::rm
+// CHECK: 	range: [21, 35]
+// CHECK: VAR    ::ele_add::paraby_1::within_1::x
+// CHECK: 	range: [21, 35]
+// CHECK: VAR    ::ele_add::paraby_1::within_1::y
+// CHECK: 	range: [21, 35]
+// CHECK: VAR    ::ele_add::paraby_1::within_1::anon_3
+// CHECK: 	range: [22, 35]
+// CHECK: BUFFER ::ele_add::paraby_1::within_1::foreach_1::foreach_2::lhs_load__buf__
+// CHECK: 	range: [25, 31]
+// CHECK: VAR    ::ele_add::paraby_1::within_1::foreach_1::foreach_2::lhs_load
+// CHECK: 	range: [26, 31]
+// CHECK: BUFFER ::ele_add::paraby_1::within_1::foreach_1::foreach_2::rhs_load__buf__
+// CHECK: 	range: [27, 31]
+// CHECK: VAR    ::ele_add::paraby_1::within_1::foreach_1::foreach_2::rhs_load
+// CHECK: 	range: [28, 31]
+// CHECK: BUFFER ::ele_add::paraby_1::within_1::foreach_1::foreach_2::l1_out
+// CHECK: 	range: [30, 33]
+// CHECK: VAR    ::ele_add::paraby_1::within_1::foreach_1::foreach_2::out_store
+// CHECK: 	range: [32, 33]

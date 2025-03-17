@@ -101,36 +101,38 @@ int main() {
 // CHECK: ( 31)   return output
 // CHECK: ( 32) }
 
+// CHECK: VAR    ::ele_add::paraby_0::within_0::index
+// CHECK: 	range:
 // CHECK: IGNORE global buffer: ::ele_add::lhs
+// CHECK: IGNORE global buffer: ::ele_add::rhs
 // CHECK: IGNORE global buffer: ::ele_add::output
-// CHECK: VAR    ::ele_add::paraby_0::p
-// CHECK: 	range: [2, 30]
 // CHECK: VAR    ::ele_add::paraby_0::p__elem__x
 // CHECK: 	range: [2, 30]
-// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::anon_0
-// CHECK: 	range: [14, 24]
-// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::foreach_1::anon_1
-// CHECK: 	range: [20, 21]
-// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::lfA
-// CHECK: 	range: [7, 26]
-// CHECK: BUFFER ::ele_add::paraby_0::within_0::foreach_0::lfA__buf__
-// CHECK: 	range: [6, 26]
-// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::lfB
-// CHECK: 	range: [11, 26]
-// CHECK: BUFFER ::ele_add::paraby_0::within_0::foreach_0::lfB__buf__
-// CHECK: 	range: [10, 26]
-// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::rfA
-// CHECK: 	range: [9, 26]
-// CHECK: BUFFER ::ele_add::paraby_0::within_0::foreach_0::rfA__buf__
-// CHECK: 	range: [8, 26]
-// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::rfB
-// CHECK: 	range: [13, 26]
-// CHECK: BUFFER ::ele_add::paraby_0::within_0::foreach_0::rfB__buf__
-// CHECK: 	range: [12, 26]
-// CHECK: BUFFER ::ele_add::paraby_0::within_0::l_out
-// CHECK: 	range: [4, 28]
+// CHECK: VAR    ::ele_add::paraby_0::p
+// CHECK: 	range: [2, 30]
 // CHECK: VAR    ::ele_add::paraby_0::within_0::x
 // CHECK: 	range: [3, 28]
 // CHECK: VAR    ::ele_add::paraby_0::within_0::y
 // CHECK: 	range: [3, 28]
-// CHECK: IGNORE global buffer: ::ele_add::rhs
+// CHECK: BUFFER ::ele_add::paraby_0::within_0::l_out
+// CHECK: 	range: [4, 28]
+// CHECK: BUFFER ::ele_add::paraby_0::within_0::foreach_0::lfA__buf__
+// CHECK: 	range: [6, 26]
+// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::lfA
+// CHECK: 	range: [7, 26]
+// CHECK: BUFFER ::ele_add::paraby_0::within_0::foreach_0::rfA__buf__
+// CHECK: 	range: [8, 26]
+// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::rfA
+// CHECK: 	range: [9, 26]
+// CHECK: BUFFER ::ele_add::paraby_0::within_0::foreach_0::lfB__buf__
+// CHECK: 	range: [10, 26]
+// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::lfB
+// CHECK: 	range: [11, 26]
+// CHECK: BUFFER ::ele_add::paraby_0::within_0::foreach_0::rfB__buf__
+// CHECK: 	range: [12, 26]
+// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::rfB
+// CHECK: 	range: [13, 26]
+// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::anon_0
+// CHECK: 	range: [14, 24]
+// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::foreach_1::anon_1
+// CHECK: 	range: [20, 21]

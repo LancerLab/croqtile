@@ -41,28 +41,28 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
     FunctionDecl: use. But the buffers are Global buffers.
     NamedVariableDecl: use if it is a ref.
 
-  实际上，内存的复用不必考虑 scope。暂定将整块 scratch pad 定义在 co 开始
+  In fact, memory reuse does not have to take scope into account.
+  The whole scratch pad is tentatively defined at the beginning of co
 
-
-  def in scope A, use in scope A::B
-    then should add use in the last stmt of scope A::B.
+  def in scope A
+    use in scope A::B
+  then should add use in the last stmt of scope A::B.
 
   def in scope A
     use in scope A::B
     use in scope A
-    then do nothing(the end of live range should be the nest stmt of the last
-  use.)
+  add use in the last stmt of scope A::B.
+  but there is another use in scope A later.
+  so the live range is still [def point, the second use]
 
-  dst of DMA should be treated as def if it is the whole buffer(position is
-  nullptr) else, should be treated as use. so, we need to know the last def of
-  the current use!
-
-  def in scope A
-    def in scope A::B
-    use in scope A
-    because we may of may not enter scope A::B
-    so should pick def in scope A as the begin of live range
-    just find the def inside the current scope or outer scope!
+  dst of DMA is treated as use for now.
+  TODO: be treated as def if it is the whole buffer(position is nullptr)
+    def in scope A
+      def in scope A::B
+      use in scope A
+      because we may of may not enter scope A::B
+      so should pick def in scope A as the begin of live range
+      just find the def inside the current scope or outer scope!
   */
 
   // Certain types of nodes are treated as statements.
@@ -104,21 +104,6 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
 
   std::stringstream stmts_with_indent;
 
-  // map from AST::Node to the stmt that contains it.
-  std::unordered_map<const AST::Node*, const Stmt*> node2stmt;
-
-  struct NodeNumber {
-    size_t pre_num = 0;
-    // TODO: seems useless.
-    // size_t post_num = 0;
-  };
-  // not the index of node! Double numbering for preOrder and postOrder.
-  size_t node_number = 0;
-  std::unordered_map<AST::Node*, NodeNumber> node_index;
-  std::vector<AST::Node*> nodes_preordered;
-  // TODO: seems useless.
-  // std::vector<AST::Node*> nodes_postordered;
-
 #if 0
   using BufSet = std::unordered_set<std::string>;
   using VarSet = std::unordered_set<std::string>;
@@ -152,7 +137,6 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
   std::unordered_set<std::string> paraby_bounded_vars;
 
   struct LivenessInfo {
-    // TODO: optimize VarSet to use bitset.
     VarSet use;
     VarSet def;
     VarSet live_in;
@@ -169,27 +153,58 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
   struct Range {
     size_t start;
     size_t end;
+
     bool Overlaps(const Range& other) const {
       return start <= other.end && end >= other.start;
     }
+
+    bool operator<(const Range& other) const {
+      return std::tie(start, end) < std::tie(other.start, other.end);
+    }
+  };
+
+  struct Ranges {
+    std::vector<Range> ranges;
+
+    bool Empty() const { return ranges.empty(); }
+
+    void PushBack(const Range& range) { ranges.push_back(range); }
+
+    void Merge() {
+      if (ranges.empty()) return;
+      std::sort(ranges.begin(), ranges.end());
+      std::vector<Range> merged;
+      merged.push_back(ranges[0]);
+      for (size_t i = 1; i < ranges.size(); ++i) {
+        Range& back = merged.back();
+        if (back.Overlaps(ranges[i]))
+          back.end = std::max(back.end, ranges[i].end);
+        else
+          merged.push_back(ranges[i]);
+      }
+      ranges = std::move(merged);
+    }
+
+    bool operator<(const Ranges& other) const {
+      if (ranges.empty()) return !other.ranges.empty();
+      if (other.ranges.empty()) return false;
+      return ranges.front().start < other.ranges.front().start;
+    }
+
+    const std::vector<Range>& Values() const { return ranges; }
   };
 
   LivenessAnalyzer()
       : VisitorWithSymTab("liveness", CCtx().GetGlobalSymbolTable()) {
-    // TODO: delete the setting of debug_visit
-    // debug_visit = true;
     if (trace_visit) debug_visit = true; // force debug when tracing
     if (debug_visit) type_equals.SetDebug(true);
   }
   ~LivenessAnalyzer() {}
 
   std::unordered_map<std::string, size_t> buf_sizes;
-  std::unordered_map<std::string, std::vector<Range>> var_ranges;
+  std::unordered_map<std::string, Ranges> var_ranges;
 
   VarSet dma_any;
-  // std::stack<size_t> iter_cnts;
-
-  FutureBufferInfo& FBInfo() const { return FCtx(fname).GetFutureBufferInfo(); }
 
 private:
   void DumpStmtBriefly(const Stmt& n, std::ostream& os, bool indent);
@@ -211,8 +226,7 @@ private:
   void AddIsBinding(const Stmt* s, const std::string& bind_res);
   void AddBinding(const std::string& bind_res, const std::string& bind_src);
   void RemoveBinding(const std::string& bind_res, const std::string& bind_src);
-  void AddFut2Buffers(const std::string& fut, const std::string& src,
-                      const std::string& dst);
+  void AddFut2Buffers(const std::string& fut, const BufInfo& buf_info);
   void ComputeLiveInOut();
   void ComputeLiveRange();
   void HandleSelect(AST::Node& n, ptr<AST::Select> sel);
@@ -220,6 +234,12 @@ private:
 
   template <typename... MapTypes>
   VarSet TransitiveClosure(const VarSet& vars, const MapTypes&... maps);
+
+public:
+  const std::string STMTS_STR() const { return stmts_with_indent.str(); }
+  const std::unordered_map<std::string, Ranges>& VarRanges() const {
+    return var_ranges;
+  }
 
 public:
   void TraceEachVisit(AST::Node& n, bool detail = false,
@@ -265,6 +285,7 @@ public:
   bool Visit(AST::Return&) override;
   bool Visit(AST::LoopRange&) override;
   bool Visit(AST::ForeachBlock&) override;
+  bool Visit(AST::InThreadsBlock&) override;
   bool Visit(AST::IncrementBlock&) override;
   bool Visit(AST::FunctionDecl&) override;
   bool Visit(AST::ChoreoFunction&) override;

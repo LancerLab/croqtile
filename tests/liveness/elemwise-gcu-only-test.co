@@ -53,26 +53,30 @@ __co__ s32 [6, 17, 64] ele_add(s32 [6, 17, 64] lhs, s32 [6, 17, 64] rhs) {
 // CHECK: ( 19)   return output
 // CHECK: ( 20) }
 
+// CHECK: VAR    ::ele_add::paraby_0::within_0::index
+// CHECK: 	range:
+// CHECK: VAR    ::ele_add::paraby_0::within_0::z
+// CHECK: 	range:
 // CHECK: IGNORE global buffer: ::ele_add::lhs
+// CHECK: IGNORE global buffer: ::ele_add::rhs
 // CHECK: IGNORE global buffer: ::ele_add::output
 // CHECK: VAR    ::ele_add::paraby_0::p
 // CHECK: 	range: [2, 18]
 // CHECK: VAR    ::ele_add::paraby_0::p__elem__x
 // CHECK: 	range: [2, 18]
-// CHECK: BUFFER ::ele_add::paraby_0::within_0::foreach_0::foreach_1::l1_out
-// CHECK: 	range: [11, 14]
-// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::foreach_1::lhs_load
-// CHECK: 	range: [7, 12]
-// CHECK: BUFFER ::ele_add::paraby_0::within_0::foreach_0::foreach_1::lhs_load__buf__
-// CHECK: 	range: [6, 12]
-// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::foreach_1::out_store
-// CHECK: 	range: [13, 14]
-// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::foreach_1::rhs_load
-// CHECK: 	range: [9, 12]
-// CHECK: BUFFER ::ele_add::paraby_0::within_0::foreach_0::foreach_1::rhs_load__buf__
-// CHECK: 	range: [8, 12]
 // CHECK: VAR    ::ele_add::paraby_0::within_0::x
 // CHECK: 	range: [3, 16]
 // CHECK: VAR    ::ele_add::paraby_0::within_0::y
 // CHECK: 	range: [3, 16]
-// CHECK: IGNORE global buffer: ::ele_add::rhs
+// CHECK: BUFFER ::ele_add::paraby_0::within_0::foreach_0::foreach_1::lhs_load__buf__
+// CHECK: 	range: [6, 12]
+// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::foreach_1::lhs_load
+// CHECK: 	range: [7, 12]
+// CHECK: BUFFER ::ele_add::paraby_0::within_0::foreach_0::foreach_1::rhs_load__buf__
+// CHECK: 	range: [8, 12]
+// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::foreach_1::rhs_load
+// CHECK: 	range: [9, 12]
+// CHECK: BUFFER ::ele_add::paraby_0::within_0::foreach_0::foreach_1::l1_out
+// CHECK: 	range: [11, 14]
+// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::foreach_1::out_store
+// CHECK: 	range: [13, 14]
