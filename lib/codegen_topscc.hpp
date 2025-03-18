@@ -288,8 +288,8 @@ private:
   }
 
   std::string GetChoreoInputAtLastPos() {
-    auto func_ins = GetChoreoFuncIns();  // 获取所有 items
-    return func_ins.back()->name;  // 获取最后一个 item 的 name
+    auto func_ins = GetChoreoFuncIns(); // 获取所有 items
+    return func_ins.back()->name;       // 获取最后一个 item 的 name
   }
 
   bool HasChoreoOutput() { return !void_return; }

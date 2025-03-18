@@ -377,6 +377,7 @@ public:
   const ptr<Node>& GetR() const { return value_r; }
   const ptr<Node>& GetL() const { return value_l; }
   const ptr<Expr>& GetC() const { return value_c; }
+  const std::string GetOp() const { return op; }
   Form GetForm() const { return t; }
   void SetForm(const Form& form) {
     // the form must be set after operand

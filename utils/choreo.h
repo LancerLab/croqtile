@@ -23,7 +23,7 @@
 #define __co_device__
 #define __co_host__
 #define __co_any__
-#endif
+#endif // __TOPSCC__
 
 namespace choreo {
 
@@ -45,6 +45,32 @@ inline void runtime_check(bool p, const char* msg) {
   return;
 }
 
+#ifdef __TOPSCC__
+template <typename T>
+__co_device__ inline void fill(T* begin, T* end, const T& value) {
+  for (size_t idx = 0; idx < end - begin; ++idx)
+    begin[idx] = value;
+  // TODO: OPT
+}
+
+template <typename T>
+__co_device__ inline void fill_n(T* begin, size_t n, const T& value) {
+  for (size_t idx = 0; idx < n; ++idx)
+    begin[idx] = value;
+  // TODO: OPT
+}
+#endif // __TOPSCC__
+
+template <typename T>
+__co_host__ inline void fill(T* begin, T* end, const T& value) {
+  std::fill(begin, end, value);
+}
+
+template <typename T>
+__co_host__ inline void fill_n(T* begin, size_t n, const T& value) {
+  std::fill_n(begin, n, value);
+}
+
 namespace {
 
 template <typename T, size_t N>
@@ -53,35 +79,35 @@ class SimpleArray {
 
 public:
   // Constructor for brace-initialization
-  SimpleArray(std::initializer_list<T> init) {
+  __co_any__ SimpleArray(std::initializer_list<T> init) {
     std::size_t num_elements = init.size();
     if (num_elements == 1) {
-      std::fill(data, data + N, *init.begin());
+      fill(data, data + N, *init.begin());
     } else {
       for (size_t i = 0; i < num_elements && i < N; ++i)
         data[i] = *(init.begin() + i);
     }
   }
 
-  SimpleArray(const SimpleArray&) = default;
-  SimpleArray& operator=(const SimpleArray&) = default;
-  ~SimpleArray() = default;
+  __co_any__ SimpleArray(const SimpleArray&) = default;
+  __co_any__ SimpleArray& operator=(const SimpleArray&) = default;
+  __co_any__ ~SimpleArray() = default;
 
   // Returns the element at specified index
-  T& operator[](uint32_t index) { return data[index]; }
+  __co_any__ T& operator[](uint32_t index) { return data[index]; }
 
   // Returns the element at specified index (const version)
-  const T& operator[](uint32_t index) const { return data[index]; }
+  __co_any__ const T& operator[](uint32_t index) const { return data[index]; }
 
   // Returns the number of elements in the array
-  constexpr uint32_t size() const noexcept { return N; }
+  __co_any__ constexpr uint32_t size() const noexcept { return N; }
 
   // Returns a pointer to the underlying array serving as element storage
-  T* begin() { return data; }
-  const T* begin() const { return data; }
+  __co_any__ T* begin() { return data; }
+  __co_any__ const T* begin() const { return data; }
 
-  T* end() { return data + N; }
-  const T* end() const { return data + N; }
+  __co_any__ T* end() { return data + N; }
+  __co_any__ const T* end() const { return data + N; }
 
   void fill_random() { fill_random(data, std::is_floating_point<T>()); }
 
@@ -114,8 +140,8 @@ private:
 };
 
 template <typename T, size_t N, size_t M>
-inline static bool operator==(const SimpleArray<T, N>& l,
-                              const SimpleArray<T, M>& r) {
+__co_any__ inline static bool operator==(const SimpleArray<T, N>& l,
+                                         const SimpleArray<T, M>& r) {
   if constexpr (N != M)
     return false;
   else {
@@ -153,13 +179,14 @@ class ArrayProxy {
   size_t offset;
 
 public:
-  ArrayProxy(T* arr, const mdspan<N>& dimensions, size_t off)
+  __co_any__ ArrayProxy(T* arr, const mdspan<N>& dimensions, size_t off)
       : data(arr), dims(&dimensions), offset(off) {}
 
   template <size_t M = N>
   typename std::enable_if<(M == 1),
                           T&>::type // make sure to return the reference type
-  operator[](int index) {
+      __co_any__
+      operator[](int index) {
     choreo_assert(index >= 0, "Index out of bounds", __FILE__, __LINE__);
     choreo_assert((size_t)index < (*dims)[0], "Index out of bounds", __FILE__,
                   __LINE__);
@@ -169,7 +196,7 @@ public:
   }
 
   template <size_t M = N>
-  typename std::enable_if<(M > 1), ArrayProxy<T, N - 1>>::type
+  typename std::enable_if<(M > 1), ArrayProxy<T, N - 1>>::type __co_any__
   operator[](int index) {
     choreo_assert(index >= 0, "Index out of bounds", __FILE__, __LINE__);
     choreo_assert((size_t)index < (*dims)[0], "Index out of bounds", __FILE__,
@@ -273,30 +300,30 @@ private:
 
 public:
   // Default constructor
-  f16() : bits(0) {}
+  __co_any__ f16() : bits(0) {}
 
   // Constructor for conversion from float
-  f16(float value) { bits = __f32_to_f16<uint16_t>(value); }
+  __co_any__ f16(float value) { bits = __f32_to_f16<uint16_t>(value); }
 
   // Constructor for conversion from double
-  f16(double value) {
+  __co_any__ f16(double value) {
     bits = __f32_to_f16<uint16_t>(static_cast<float>(value));
   }
 
   // Implicit conversion from float
-  f16& operator=(float value) {
+  __co_any__ f16& operator=(float value) {
     bits = __f32_to_f16<uint16_t>(value);
     return *this;
   }
 
   // Implicit conversion from double
-  f16& operator=(double value) {
+  __co_any__ f16& operator=(double value) {
     bits = __f32_to_f16<uint16_t>(static_cast<float>(value));
     return *this;
   }
 
   template <typename T>
-  bool operator==(T value) {
+  __co_any__ bool operator==(T value) {
     if constexpr (std::is_same<T, f16>::value) {
       auto valueF = (float)value;
       if (std::isnan(valueF)) { return std::isnan(__f16_to_f32<float>(bits)); }
@@ -309,7 +336,7 @@ public:
   }
 
   template <typename T>
-  bool operator>(T value) {
+  __co_any__ bool operator>(T value) {
     if constexpr (std::is_same<T, f16>::value) {
       auto valueF = (float)value;
       if (std::isnan(valueF)) { return std::isnan(__f16_to_f32<float>(bits)); }
@@ -322,7 +349,7 @@ public:
   }
 
   template <typename T>
-  bool operator<(T value) {
+  __co_any__ bool operator<(T value) {
     if constexpr (std::is_same<T, f16>::value) {
       auto valueF = (float)value;
       if (std::isnan(valueF)) { return std::isnan(__f16_to_f32<float>(bits)); }
@@ -335,7 +362,7 @@ public:
   }
 
   // Method to get the float value from the f16 object
-  operator float() const { return __f16_to_f32<float>(bits); }
+  __co_any__ operator float() const { return __f16_to_f32<float>(bits); }
 };
 
 using half = unsigned short; // device f16 type simulation
@@ -365,34 +392,36 @@ private:
 
 public:
   // Default constructor
-  bf16() : bits(0) {}
+  __co_any__ bf16() : bits(0) {}
 
   // Constructor for conversion from float
-  bf16(float value) { bits = floatToHalfBits(value); }
+  __co_any__ bf16(float value) { bits = floatToHalfBits(value); }
 
   // Constructor for conversion from double
-  bf16(double value) { bits = floatToHalfBits(static_cast<float>(value)); }
+  __co_any__ bf16(double value) {
+    bits = floatToHalfBits(static_cast<float>(value));
+  }
 
   // Implicit conversion from float
-  bf16& operator=(float value) {
+  __co_any__ bf16& operator=(float value) {
     bits = floatToHalfBits(value);
     return *this;
   }
 
   // Implicit conversion from double
-  bf16& operator=(double value) {
+  __co_any__ bf16& operator=(double value) {
     bits = floatToHalfBits(static_cast<float>(value));
     return *this;
   }
 
-  bool operator==(double value) {
+  __co_any__ bool operator==(double value) {
     auto valueF = static_cast<float>(value);
     if (std::isnan(valueF)) { return std::isnan(halfBitsToFloat(bits)); }
     return halfBitsToFloat(bits) == valueF;
   }
 
   template <typename T>
-  bool operator==(T value) {
+  __co_any__ bool operator==(T value) {
     if constexpr (std::is_same<T, bf16>::value) {
       auto valueF = (float)value;
       if (std::isnan(valueF)) { return std::isnan(halfBitsToFloat(bits)); }
@@ -405,7 +434,7 @@ public:
   }
 
   template <typename T>
-  bool operator>(T value) {
+  __co_any__ bool operator>(T value) {
     if constexpr (std::is_same<T, bf16>::value) {
       auto valueF = (float)value;
       if (std::isnan(valueF)) { return std::isnan(halfBitsToFloat(bits)); }
@@ -418,7 +447,7 @@ public:
   }
 
   template <typename T>
-  bool operator<(T value) {
+  __co_any__ bool operator<(T value) {
     if constexpr (std::is_same<T, bf16>::value) {
       auto valueF = (float)value;
       if (std::isnan(valueF)) { return std::isnan(halfBitsToFloat(bits)); }
@@ -431,7 +460,7 @@ public:
   }
 
   // Function to convert float to half precision bits (naive and placeholder)
-  static uint16_t floatToHalfBits(float value) {
+  __co_any__ static uint16_t floatToHalfBits(float value) {
     // Simplified conversion: this does not handle rounding, infinities, or NaNs
     // correctly In practice, use a library or a fully implemented conversion
     // function
@@ -440,13 +469,13 @@ public:
   }
 
   // Function to convert half precision bits to float (naive and placeholder)
-  static float halfBitsToFloat(uint16_t bits) {
+  __co_any__ static float halfBitsToFloat(uint16_t bits) {
     int32_t fltInt32 = ((uint32_t)bits) << 16;
     return *((float*)&fltInt32);
   }
 
   // Method to get the float value from the bf16 object
-  operator float() const { return halfBitsToFloat(bits); }
+  __co_any__ operator float() const { return halfBitsToFloat(bits); }
 };
 
 using bfloat16 = unsigned short; // device bfloat16 type
@@ -497,21 +526,23 @@ class spanned_view {
   const mdspan<Rank> dims;
 
 public:
-  explicit spanned_view(T* d, const mdspan<Rank>& s) : ptr(d), dims(s) {}
+  __co_any__ explicit spanned_view(T* d, const mdspan<Rank>& s)
+      : ptr(d), dims(s) {}
 
   constexpr size_t rank() const { return Rank; }
-  const mdspan<Rank>& shape() const { return dims; }
+  __co_any__ const mdspan<Rank>& shape() const { return dims; }
 
-  size_t element_count() const { return span_size(dims); }
-  size_t bytes() const { return element_count() * sizeof(T); }
-  T* data() { return ptr; }
-  T* data() const { return ptr; }
+  __co_any__ size_t element_count() const { return span_size(dims); }
+  __co_any__ size_t bytes() const { return element_count() * sizeof(T); }
+  __co_any__ T* data() { return ptr; }
+  __co_any__ T* data() const { return ptr; }
 
   // allow multi-dim-style access, be like: a[1][3]
   template <size_t M = Rank>
   typename std::enable_if<(M == 1),
                           T&>::type // make sure to return the reference type
-  operator[](int index) {
+      __co_any__
+      operator[](int index) {
     choreo_assert(index >= 0, "Index out of bounds", __FILE__, __LINE__);
     choreo_assert((size_t)index < dims[0], "Index out of bounds", __FILE__,
                   __LINE__);
@@ -519,7 +550,7 @@ public:
   }
 
   template <size_t M = Rank>
-  typename std::enable_if<(M > 1), ArrayProxy<T, Rank - 1>>::type
+  typename std::enable_if<(M > 1), ArrayProxy<T, Rank - 1>>::type __co_any__
   operator[](int index) {
     choreo_assert(index >= 0, "Index out of bounds", __FILE__, __LINE__);
     choreo_assert((size_t)index < dims[0], "Index out of bounds", __FILE__,
@@ -529,7 +560,8 @@ public:
     return ArrayProxy<T, Rank - 1>(ptr, sub_dims, (size_t)index * dims[1]);
   }
 
-  friend bool operator==(const spanned_view& l, const spanned_view& r) {
+  __co_any__ friend bool operator==(const spanned_view& l,
+                                    const spanned_view& r) {
     if (l.dims != r.dims) return false;
 
     for (size_t i = 0; i < l.element_count(); ++i)
@@ -538,8 +570,8 @@ public:
     return true;
   }
 
-  void fill(T value) {
-    std::fill_n(this->data(), this->element_count(), value);
+  __co_any__ void fill(T value) {
+    fill_n(this->data(), this->element_count(), value);
   }
 
   void fill_random(T lb, T ub) {
@@ -672,15 +704,15 @@ public:
 };
 
 template <size_t Rank>
-mdspan<Rank> make_mdspan(const std::initializer_list<size_t>& init) {
+__co_any__ mdspan<Rank> make_mdspan(const std::initializer_list<size_t>& init) {
   return mdspan<Rank>(init);
 }
 
 // note: spanned_view does not invoke copy. Instead, it associates data with a
 // multi-dimension view of memory
 template <size_t Rank, typename T>
-spanned_view<T, Rank> make_spanview(T* ptr,
-                                    std::initializer_list<size_t> init) {
+__co_any__ spanned_view<T, Rank>
+make_spanview(T* ptr, std::initializer_list<size_t> init) {
   return spanned_view<T, Rank>(ptr, make_mdspan<Rank>(init));
 }
 

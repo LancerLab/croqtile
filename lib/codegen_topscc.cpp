@@ -29,6 +29,9 @@ extern Option<std::string> arch;
 
 Option<bool> emit_fatbin(OptionKind::Hidden, "-fb", "", false,
                          "Emit fatbin file.");
+Option<bool> no_decay_spanview(OptionKind::Hidden, "--no-decay-spanview",
+                               "-ndecay-spv", false,
+                               " decay spanview to be pointers.");
 
 namespace {
 
@@ -571,7 +574,8 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
 
   hs << ");\n";
 
-  // typically, the last buffer is used as output in destination-passing-style convention
+  // typically, the last buffer is used as output in destination-passing-style
+  // convention
   if (!HasChoreoOutput()) {
     std::string oname = "";
     ptr<Type> otype;
@@ -587,9 +591,8 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
 
     if (has_spanned_arg)
       hs << h_indent << "choreo::abend_true(topsMemcpy(" << oname << ".data(), "
-        << oname + "__device" 
-        << ", " << UnScopedSizeExpr(*otype)
-        << ", topsMemcpyDeviceToHost));\n";
+         << oname + "__device" << ", " << UnScopedSizeExpr(*otype)
+         << ", topsMemcpyDeviceToHost));\n";
   }
   return true;
 }
@@ -1015,6 +1018,7 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
   auto& os = (is_host) ? hs : ds;
   auto& indent = (is_host) ? h_indent : d_indent;
 
+  // generate the built-in functions
   if (n.is_bif) {
     if (n.function->name == "assert") {
       if (is_host) {
@@ -1034,8 +1038,9 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
     } else
       choreo_unreachable("the bif '" + n.function->name +
                          "' is not supported by this target.");
-  } else
-    os << indent << n.function->name;
+  }
+
+  os << indent << n.function->name;
 
   // emit template arguments
   if (n.template_args) {
@@ -1052,7 +1057,11 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
     os << ((i++ == 0) ? "" : ", ");
     if (auto sty = GetSpannedType(NodeType(*a))) {
       std::string bts{NameBaseType(sty->ElementType(), is_host)};
-      os << "(" << bts << "*)" << ExprSTR(a, is_host);
+      if (!no_decay_spanview || is_host)
+        os << "(" << bts << "*)" << ExprSTR(a, is_host);
+      else
+        os << "choreo::make_spanview<" << sty->Dims() << ">((" << bts << "*)"
+           << ExprSTR(a, is_host) << ", " << LSTR(sty->GetShape()) << ")";
     } else
       os << ExprSTR(a, is_host);
   }
@@ -1327,7 +1336,8 @@ void TopsccCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
     os << "  TOPSCC_INSTALL=/opt/tops\n";
   else
     os << "  TOPSCC_INSTALL=" << STRINGIZE(__CHOREO_TOPSCC_DIR__) << "\n";
-  os << "  if [[ \"$1\" == \"-st\" ]]; then TOPSCC_INSTALL=/opt/tops; shift 1; fi\n";
+  os << "  if [[ \"$1\" == \"-st\" ]]; then TOPSCC_INSTALL=/opt/tops; shift 1; "
+        "fi\n";
   os << "fi\n";
   os << "TOPSCC=${TOPSCC_INSTALL}/bin/topscc\n";
   os << "TOPSCC_LIB=${TOPSCC_INSTALL}/lib\n\n";
@@ -1403,8 +1413,7 @@ show_usage() {
   if (verbose) os << " -v"; // if it requires to be verbose
   // always enclose
   os << " ${EXTRA_TARGET_CFLAGS}\"";
-  if (use_sim)
-    os << "\nexport INTERNAL_GCU_SIM=LIBRA";
+  if (use_sim) os << "\nexport INTERNAL_GCU_SIM=LIBRA";
   os << "\nexport LD_LIBRARY_PATH=${TOPSCC_LIB}:${LD_LIBRARY_PATH}\n\n";
 
   os << R"(if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then)";
@@ -1604,19 +1613,19 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
         return ExprSTR(ca->data) + " + " + offset.str();
       }
     } else if (expr->IsUnary()) {
-      if (expr->op == "!") {
+      if (expr->GetOp() == "!") {
         oss << "!(" << ExprSTR(expr->GetR(), is_host) << ")";
-      } else if (expr->op == "ubound") {
+      } else if (expr->GetOp() == "ubound") {
         auto rty = cast<BoundedType>(NodeType(*expr->GetR()));
         if (rty->Dims() == 1) { oss << ValueSTR(rty->GetUpperBound()); }
-      } else if (expr->op == "dataof") {
+      } else if (expr->GetOp() == "dataof") {
         assert(isa<FutureType>(expr->GetR()->GetType()) &&
                "expect a future operand.");
         if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol())
           oss << id->name << ".data()"; // leverage the rutime buffer inform
         else
           choreo_unreachable("Can not retrieve name of the future.");
-      } else if (expr->op == "sizeof") {
+      } else if (expr->GetOp() == "sizeof") {
         auto var = RemoveSuffix(*AST::GetName(*expr->GetR()), ".span");
         auto shape = GetShape(GetSymbolType(var));
         assert(shape.IsValid() && "Invalid shape is found");
@@ -1624,12 +1633,12 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       } else
         choreo_unreachable("Unsupported choreo expression.");
     } else if (expr->IsBinary()) {
-      if (expr->op == "cdiv") {
+      if (expr->GetOp() == "cdiv") {
         std::string one = "1";
         oss << "((" << ExprSTR(expr->GetL(), is_host) << ")+("
             << ExprSTR(expr->GetR(), is_host) << "-" << one << ")/("
             << ExprSTR(expr->GetR(), is_host) << ")";
-      } else if (expr->op == "getith") {
+      } else if (expr->GetOp() == "getith") {
         auto lty = cast<BoundedType>(NodeType(*expr->GetL()));
         if (cast<AST::IntIndex>(expr->GetR())->IsNegative()) {
           oss << "(";
@@ -1640,7 +1649,7 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       } else if (expr->IsArith() || expr->IsLogical()) {
         auto& l = expr->GetL();
         auto& r = expr->GetR();
-        auto& op = expr->op;
+        auto& op = expr->GetOp();
         // handle bounded variable times
         if (op == "#" && IsActualBoundedIntegerType(l->GetType()) &&
             IsActualBoundedIntegerType(r->GetType())) {
@@ -1662,10 +1671,10 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
           << ExprSTR(expr->GetL(), is_host) << ") : ("
           << ExprSTR(expr->GetR(), is_host) << ")";
     } else
-      choreo_unreachable("unsupported expression '" + expr->op +
+      choreo_unreachable("unsupported expression '" + expr->GetOp() +
                          "': " + PSTR(expr) + ".");
   } else
-    choreo_unreachable("unsupported expression '" + expr->op + "'.");
+    choreo_unreachable("unsupported expression '" + expr->GetOp() + "'.");
 
   return oss.str();
 }

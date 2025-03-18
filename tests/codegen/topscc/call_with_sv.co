@@ -1,0 +1,16 @@
+// RUN: choreo -t topscc -ndecay-spv -es %s -o - | FileCheck %s
+
+__device__ void bar(choreo::spanned_view<choreo::f32, 2> sv0,
+                    choreo::spanned_view<choreo::s32, 1> sv1) {}
+
+__co__ void pass_sv(f32 [7, 8] input) {
+  parallel by 2 {
+    local s32 [1] b;
+    call bar(input, b);
+  }
+}
+
+// CHECK: __global__ void __choreo_device_pass_sv(float * input) {
+// CHECK:   __local__ __valigned__ int b[1];
+// CHECK:   bar(choreo::make_spanview<2>((float*)input, {7, 8}), choreo::make_spanview<1>((int*)b, {1}));
+// CHECK: }
