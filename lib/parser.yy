@@ -189,10 +189,10 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::SpanAs>> span_as
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
-%nterm <AST::ptr<AST::Node>> foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal passable declaration statement assignment dma_stmt wait_stmt call_stmt print_stmt swap_stmt expr_or_qes range_expr scalar_init param_mdspan_val chunkat_or_storage_or_select pred
+%nterm <AST::ptr<AST::Node>> foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal device_passable declaration statement assignment dma_stmt wait_stmt call_stmt print_stmt swap_stmt expr_or_qes range_expr scalar_init param_mdspan_val chunkat_or_storage_or_select pred returnable
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause multi_decls named_spanned_decl named_scalar_decls scalar_decl_without_types
-%nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers passables future_data_list template_params gi_list
-%nterm <AST::ptr<AST::Expr>> s_expr template_value_expr span_expr id_expr bound_expr optional_pred
+%nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables future_data_list template_params gi_list
+%nterm <AST::ptr<AST::Expr>> s_expr template_value_expr span_expr id_expr bound_expr optional_pred other_lit_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
 %nterm <AST::ptr<AST::Parameter>> parameter
@@ -359,7 +359,7 @@ general_val
     | unnamed_mdspan_decl { $$ = $1; }
     | unnamed_ituple_decl { $$ = $1; }
     | bool_literal { $$ = $1; }
-    | IDENTIFIER span_as {
+    | data_id span_as {
         $2->id = AST::Make<AST::Identifier>(@1,$1);
         $$ = $2;
       }
@@ -466,7 +466,7 @@ statement
 
 return_stmt
     : RET          { $$ = AST::Make<AST::Return>(@1);}
-    | RET passable { $$ = AST::Make<AST::Return>(@1, $2); }
+    | RET returnable { $$ = AST::Make<AST::Return>(@1, $2); }
     ;
 
 paraby_block
@@ -491,7 +491,12 @@ parabys
     ; /* do not allow empty paraby */
 
 paraby
-    : IDENTIFIER BY general_index {
+    : BY NUM {
+        $$ = AST::Make<AST::MultiNodes>(@2);
+        $$->Append(AST::Make<AST::Identifier>(@1, SymbolTable::GetAnonName()));
+        $$->Append(AST::Make<AST::IntLiteral>(@2, $2));
+      }
+    | IDENTIFIER BY general_index {
         if (paraby_symbols.find($1) != paraby_symbols.end())
           Parser::error(@1, "The symbol '" + $1 + "' has been used in the same parallelby block.");
         paraby_symbols.insert($1);
@@ -637,7 +642,10 @@ named_spanned_decl
     ;
 
 ids_with_inits_ty_int
-    : id_with_init_ty_int  { $$ = std::make_shared<std::vector<ptr<SymbolWithInitVal<int>>>>(); $$->push_back($1); }
+    : id_with_init_ty_int  {
+        $$ = std::make_shared<std::vector<ptr<SymbolWithInitVal<int>>>>();
+        $$->push_back($1);
+      }
     | ids_with_inits_ty_int COMMA id_with_init_ty_int {
         $1->push_back($3);
         $$ = $1;
@@ -645,7 +653,10 @@ ids_with_inits_ty_int
     ;
 
 ids_with_inits_ty_float
-    : id_with_init_ty_float  { $$ = std::make_shared<std::vector<ptr<SymbolWithInitVal<float>>>>(); $$->push_back($1); }
+    : id_with_init_ty_float  {
+        $$ = std::make_shared<std::vector<ptr<SymbolWithInitVal<float>>>>();
+        $$->push_back($1);
+      }
     | ids_with_inits_ty_float COMMA id_with_init_ty_float {
         $1->push_back($3);
         $$ = $1;
@@ -1144,7 +1155,7 @@ dma_operation
 
 dma_config
     : LT LBRACE iv_list RBRACE COMMA LBRACE iv_list RBRACE COMMA LBRACE iv_list RBRACE COMMA NUM GT {
-        auto pc = std::make_shared<PadConfig>();
+        auto pc = AST::Make<PadConfig>();
         for (auto high : $3->values)
           pc->pad_high.push_back(cast<AST::IntLiteral>(high)->Val());
         for (auto low : $7->values)
@@ -1155,7 +1166,7 @@ dma_config
         $$ = pc;
       }
     | LT iv_list GT {
-        auto tc = std::make_shared<TransposeConfig>();
+        auto tc = AST::Make<TransposeConfig>();
         for (auto value : $2->values)
           tc->dim_values.push_back(cast<AST::IntLiteral>(value)->Val());
         $$ = tc;
@@ -1255,29 +1266,41 @@ id_list
       }
     ;
 
-passables
+device_passables
     : /* Empty */ {
         $$ = AST::Make<AST::MultiValues>(loc, ", ");
       }
-    | passable {
+    | device_passable {
         $$ = AST::Make<AST::MultiValues>(@1, ", ");
         $$->Append($1);
       }
-    | passables COMMA passable {
+    | device_passables COMMA device_passable {
         $1->Append($3);
         $$ = $1;
       }
     ;
 
-passable
+device_passable
     : s_expr { $$ = $1; }
     | IDENTIFIER FNDATA {
         $$ = AST::Make<AST::Expr>(@1, "dataof",
                AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1))); }
     | sub_data_expr { $$ = AST::Make<AST::Expr>(@1, $1); }
-    | FLOAT { $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::FloatLiteral>(@1, $1)); }
+    | other_lit_expr { $$ = $1; }
+    ;
+
+other_lit_expr
+    : FLOAT { $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::FloatLiteral>(@1, $1)); }
     | DOUBLE { $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::FloatLiteral>(@1, $1)); }
     | STRING { $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::StringLiteral>(@1, $1)); }
+    ;
+
+returnable
+    : s_expr { $$ = $1; }
+    | IDENTIFIER FNDATA {
+        $$ = AST::Make<AST::Expr>(@1, "dataof",
+               AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1))); }
+    | other_lit_expr { $$ = $1; }
     ;
 
 with_matchers /* TODO: this special case is pattern-match ids for with-block */
@@ -1300,11 +1323,11 @@ wait_stmt
     ;
 
 call_stmt
-    : CALL IDENTIFIER LPAREN passables RPAREN {
+    : CALL IDENTIFIER LPAREN device_passables RPAREN {
         $$ = AST::Make<AST::Call>(@1,
                 AST::Make<AST::Identifier>(@2, $2), $4);
       }
-    | CALL IDENTIFIER template_params LPAREN passables RPAREN {
+    | CALL IDENTIFIER template_params LPAREN device_passables RPAREN {
         $$ = AST::Make<AST::Call>(@1,
                 AST::Make<AST::Identifier>(@2, $2), $5, $3);
       }

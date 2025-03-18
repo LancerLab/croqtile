@@ -1,5 +1,18 @@
 // RUN: choreo -t topscc -es %s -o - | FileCheck %s
 
+__co__ auto bar() {
+  parallel by 2 {
+    call foo();
+  }
+}
+
+// CHECK: __global__ void __choreo_device_bar()
+
+// CHECK: void bar() {
+// CHECK:   dim3 __bar_gdims0(1, 1, 1);
+// CHECK:   dim3 __bar_bdims0(2, 1, 1);
+// CHECK:   __choreo_device_bar<<<__bar_gdims0, __bar_bdims0>>>();
+// CHECK: }
 
 __co__ auto bar1(f16 [36, 15, 14, 64] a) {
   parallel p = {px, py} by [2, 3] {
