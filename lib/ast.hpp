@@ -828,7 +828,10 @@ public:
   bool IsVoid() const { return base_type == BaseType::VOID; }
   bool IsUnknown() const { return base_type == BaseType::UNKNOWN; }
   bool isScalar() const {
-    return (base_type == BaseType::INT) || (base_type == BaseType::BOOL);
+    return (base_type == BaseType::INT) || (base_type == BaseType::BOOL) ||
+           (base_type == BaseType::HALF8) || (base_type == BaseType::HALF) ||
+           (base_type == BaseType::BFP16) || (base_type == BaseType::FLOAT) ||
+           (base_type == BaseType::DOUBLE);
   }
   bool isITuple() const { return base_type == BaseType::ITUPLE; }
   bool isSpanned() const { return (bool)mdspan_type; }
@@ -848,6 +851,11 @@ private:
     switch (base_type) {
     case BaseType::INT: SetType(MakeIntegerType()); break;
     case BaseType::BOOL: SetType(MakeBooleanType()); break;
+    case BaseType::HALF8:
+    case BaseType::HALF:
+    case BaseType::BFP16:
+    case BaseType::FLOAT:
+    case BaseType::DOUBLE: SetType(MakeScalarFloatType(base_type)); break;
     case BaseType::F32:
     case BaseType::F16:
     case BaseType::BF16:
@@ -855,6 +863,7 @@ private:
     case BaseType::S32:
     case BaseType::U16:
     case BaseType::S16:
+    case BaseType::F8:
     case BaseType::U8:
     case BaseType::S8:
       assert(mdspan_type != nullptr && "Expecting a valid mdspan.");

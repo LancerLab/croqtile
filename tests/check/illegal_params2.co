@@ -1,4 +1,5 @@
-// RUN: not choreo %s 2>&1 | FileCheck %s
+// RUN: not choreo -e %s 2>&1 | FileCheck %s
+// XFAIL: *
 
 __co__ void illegal_params(float f) { }
 

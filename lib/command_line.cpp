@@ -41,7 +41,7 @@ Option<bool> use_kernel_template(
     "(Experimental) Allow choreo code to instantiate C++ template functions.");
 Option<bool> use_hetero_tileflow(
     OptionKind::Hidden, "--use-hetero-tileflow", "-ht", false,
-    "(Experimental) Allow choreo code to apply implicit/aggressive tileflow",
+    "(Experimental) Allow choreo code to apply implicit/aggressive tileflow"
     "optimisation under heterogeneous scenario.");
 Option<bool> use_system_toolchain(OptionKind::Hidden, "--use-system-toolchain",
                                   "-st", false,
@@ -49,8 +49,7 @@ Option<bool> use_system_toolchain(OptionKind::Hidden, "--use-system-toolchain",
                                   "toolchain: topscc, topsrt, etc for choreo.");
 Option<bool> use_pic(OptionKind::Hidden, "--use-pic", "-fpic", false,
                      "(Experimental) Use -fPIC compilation flag to ensure "
-                     "objects are reusable for",
-                     "multi-stage compilation.");
+                     "objects are reusable for multi-stage compilation.");
 Option<bool>
     native_f16(OptionKind::User, "--native-f16", "-f16n", false,
                "Utilize native f16 type when target platform support.");

@@ -109,8 +109,8 @@ cstr        \"([^"\\]|\\.)*\"
   {blank}+   {}
   \n+        {}
   {num}      return Choreo::Parser::make_NUM(std::stoi(yytext), loc);
-  {fpnum}    return Choreo::Parser::make_DOUBLE(std::stod(yytext), loc);
-  {fpnum_f}  return Choreo::Parser::make_FLOAT(std::stof(yytext), loc);
+  {fpnum}    return Choreo::Parser::make_DFPVAL(std::stod(yytext), loc);
+  {fpnum_f}  return Choreo::Parser::make_FPVAL(std::stof(yytext), loc);
   {cstr}     { // Remove the surrounding quotes and unescape
                std::string str = yytext;
                str = str.substr(1, str.length() - 2); // Remove the quotes
@@ -136,7 +136,7 @@ cstr        \"([^"\\]|\\.)*\"
   "auto"     return Choreo::Parser::make_AUTO(yytext, loc);
   "mdspan"   return Choreo::Parser::make_MDSPAN(yytext, loc);
   "ituple"   return Choreo::Parser::make_ITUPLE(yytext, loc);
-  "print"   return Choreo::Parser::make_PRINT(yytext, loc);
+  "print"    return Choreo::Parser::make_PRINT(yytext, loc);
   "local"    return Choreo::Parser::make_LOCAL(Storage::LOCAL, loc);
   "shared"   return Choreo::Parser::make_SHARED(Storage::SHARED, loc);
   "global"   return Choreo::Parser::make_GLOBAL(Storage::GLOBAL, loc);
@@ -151,6 +151,11 @@ cstr        \"([^"\\]|\\.)*\"
   "s8"       return Choreo::Parser::make_S8(BaseType::S8, loc);
   "int"      return Choreo::Parser::make_INT(BaseType::INT, loc);
   "bool"     return Choreo::Parser::make_BOOL(BaseType::BOOL, loc);
+  "half8"    return Choreo::Parser::make_HALF8(BaseType::HALF8, loc);
+  "half"     return Choreo::Parser::make_HALF(BaseType::HALF, loc);
+  "bfp16"    return Choreo::Parser::make_BFP16(BaseType::BFP16, loc);
+  "float"    return Choreo::Parser::make_FLOAT(BaseType::FLOAT, loc);
+  "double"   return Choreo::Parser::make_DOUBLE(BaseType::DOUBLE, loc);
   "void"     return Choreo::Parser::make_VOID(BaseType::VOID, loc);
   "true"     return Choreo::Parser::make_TRUE(yytext, loc);
   "false"    return Choreo::Parser::make_FALSE(yytext, loc);

@@ -85,7 +85,6 @@ static Parser::symbol_type yylex(Scanner &scanner) {
 //   {(0), (1), 3} represents {0, 1, 3}
 //
 static bool parsing_prefixed_list = false;
-static ptr<AST::DataType> current_scalar_type = nullptr;
 
 bool parsing_chunkat_value_list = false;
 
@@ -159,15 +158,15 @@ void choreo_info(const char *message) {
 %token END 0 "end of file"
 %token <char> CHAR
 %token <int> NUM
-%token <float> FLOAT
-%token <double> DOUBLE
+%token <float> FPVAL
+%token <double> DFPVAL
 %token <std::string> STRING
 %token <std::string> HOST_CODE KERNEL_CODE
 %token <std::string> IDENTIFIER ATTR_CO
 // type related
 %token <std::string> MDSPAN ITUPLE PRINT
 %token <Choreo::Storage> LOCAL SHARED GLOBAL
-%token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT BOOL VOID
+%token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT HALF8 HALF BFP16 FLOAT DOUBLE BOOL VOID
 // builtin operations
 %token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK AT WAIT CALL AUTO SELECT SWAP ROTATE CHUNKINBOUND ASSERT
 // control related
@@ -189,17 +188,17 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::SpanAs>> span_as
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
-%nterm <AST::ptr<AST::Node>> foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal device_passable declaration statement assignment dma_stmt wait_stmt call_stmt print_stmt swap_stmt expr_or_qes range_expr scalar_init param_mdspan_val chunkat_or_storage_or_select pred returnable
-%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause multi_decls named_spanned_decl named_scalar_decls scalar_decl_without_types
+%nterm <AST::ptr<AST::Node>> foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal device_passable declaration statement assignment dma_stmt wait_stmt call_stmt print_stmt swap_stmt expr_or_qes range_expr param_mdspan_val chunkat_or_storage_or_select pred returnable
+%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause multi_decls named_spanned_decl named_scalar_decls scalar_decls
 %nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables future_data_list template_params gi_list
-%nterm <AST::ptr<AST::Expr>> s_expr template_value_expr span_expr id_expr bound_expr optional_pred other_lit_expr
+%nterm <AST::ptr<AST::Expr>> s_expr template_value_expr span_expr id_expr bound_expr optional_pred
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
 %nterm <AST::ptr<AST::Parameter>> parameter
 %nterm <AST::ptr<AST::ChoreoFunction>> dsl_function
 %nterm <AST::ptr<AST::MultiDimSpans>> unnamed_mdspan_decl param_mdspan
 %nterm <AST::ptr<AST::NamedTypeDecl>> named_mdspan_decl
-%nterm <AST::ptr<AST::NamedVariableDecl>> named_ituple_decl scalar_decl_without_type
+%nterm <AST::ptr<AST::NamedVariableDecl>> named_ituple_decl scalar_decl
 %nterm <AST::ptr<AST::IntTuple>> unnamed_ituple_decl sugar_unnamed_ituple_decl sugarless_unnamed_ituple_decl
 %nterm <AST::ptr<AST::WithBlock>> within_block
 %nterm <AST::ptr<AST::InThreadsBlock>> inthreads_block
@@ -323,8 +322,13 @@ auto_type
     ;
 
 scalar_type
-    : INT   { $$ = AST::Make<AST::DataType>(@1, $1); }
-    | BOOL  { $$ = AST::Make<AST::DataType>(@1, $1); }
+    : INT    { $$ = AST::Make<AST::DataType>(@1, $1); }
+    | HALF8  { $$ = AST::Make<AST::DataType>(@1, $1); }
+    | HALF   { $$ = AST::Make<AST::DataType>(@1, $1); }
+    | BFP16  { $$ = AST::Make<AST::DataType>(@1, $1); }
+    | FLOAT  { $$ = AST::Make<AST::DataType>(@1, $1); }
+    | DOUBLE { $$ = AST::Make<AST::DataType>(@1, $1); }
+    | BOOL   { $$ = AST::Make<AST::DataType>(@1, $1); }
     ;
 
 spanned_type
@@ -347,6 +351,9 @@ fundamental_type
 
 general_val
     : NUM { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
+    | FPVAL  { $$ = AST::Make<AST::FloatLiteral>(@1, $1); }
+    | DFPVAL { $$ = AST::Make<AST::FloatLiteral>(@1, $1); }
+    | STRING { $$ = AST::Make<AST::StringLiteral>(@1, $1); }
     | IDENTIFIER {
         if (!symtab.Exists($1))
           if (!parsing_chunkat_value_list && $1 != "_")
@@ -572,45 +579,43 @@ multi_decls
     ;
 
 print_stmt
-    : PRINT LPAREN IDENTIFIER RPAREN { $$ = AST::Make<AST::PrintNode>(@1, AST::Make<AST::Identifier>(@3,$3)); }
-
-named_scalar_decls
-    : scalar_type { 
-        assert($1->isScalar() && "Not a scalar type.");
-        current_scalar_type = $1;
-      } scalar_decl_without_types {
-        $$ = $3;
-        // for (auto decl : $2->AllSubs()) {
-        //   auto nvd = cast<AST::NamedVariableDecl>(decl);
-        //   nvd->type = current_scalar_type;
-        // }
+    : PRINT LPAREN IDENTIFIER RPAREN {
+        $$ = AST::Make<AST::PrintNode>(@1, AST::Make<AST::Identifier>(@3, $3));
       }
     ;
 
-scalar_decl_without_types
-    : scalar_decl_without_types COMMA scalar_decl_without_type {
+named_scalar_decls
+    : scalar_type scalar_decls {
+        assert($1->isScalar() && "Not a scalar type.");
+        for (auto sub : $2->AllSubs()) {
+          auto decl = cast<AST::NamedVariableDecl>(sub);
+          auto sym_name = decl->name_str;
+          symtab.AddSymbol(sym_name, $1->GetType());
+          // override the data type
+          decl->type = $1;
+        }
+        $$ = $2;
+      }
+    ;
+
+scalar_decls
+    : scalar_decls COMMA scalar_decl {
         $1->Append($3);
         $$ = $1;
       }
-    | scalar_decl_without_type {
+    | scalar_decl {
         $$ = AST::Make<AST::MultiNodes>(@1);
         $$->Append($1);
       }
     ;
 
-scalar_decl_without_type
-    : IDENTIFIER scalar_init {
-        symtab.AddSymbol($1, current_scalar_type->GetType());
-        if (!$2)
-          $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, current_scalar_type);
-        else
-          $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, current_scalar_type, nullptr, $2);
+scalar_decl
+    : IDENTIFIER ASSIGN s_expr {
+        $$ = AST::Make<AST::NamedVariableDecl>(@1, $1,
+             AST::Make<AST::DataType>(@1, BaseType::UNKNOWN), nullptr, $3);
       }
     ;
 
-scalar_init
-    : ASSIGN s_expr  { $$ = $2; }
-    ;
 
 named_spanned_decl
     : storage_qual spanned_type id_list {
@@ -672,10 +677,10 @@ id_with_init_ty_int
       }
     ;
 id_with_init_ty_float
-    : IDENTIFIER LBRACE FLOAT RBRACE {
+    : IDENTIFIER LBRACE FPVAL RBRACE {
         $$ = std::make_shared<SymbolWithInitVal<float>>($1, $3);
       }
-    | IDENTIFIER LBRACE MINUS FLOAT RBRACE {
+    | IDENTIFIER LBRACE MINUS FPVAL RBRACE {
         $$ = std::make_shared<SymbolWithInitVal<float>>($1, 0.0-$4);
       }
     ;
@@ -1286,13 +1291,6 @@ device_passable
         $$ = AST::Make<AST::Expr>(@1, "dataof",
                AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1))); }
     | sub_data_expr { $$ = AST::Make<AST::Expr>(@1, $1); }
-    | other_lit_expr { $$ = $1; }
-    ;
-
-other_lit_expr
-    : FLOAT { $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::FloatLiteral>(@1, $1)); }
-    | DOUBLE { $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::FloatLiteral>(@1, $1)); }
-    | STRING { $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::StringLiteral>(@1, $1)); }
     ;
 
 returnable
@@ -1300,7 +1298,6 @@ returnable
     | IDENTIFIER FNDATA {
         $$ = AST::Make<AST::Expr>(@1, "dataof",
                AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1))); }
-    | other_lit_expr { $$ = $1; }
     ;
 
 with_matchers /* TODO: this special case is pattern-match ids for with-block */

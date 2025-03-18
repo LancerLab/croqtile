@@ -38,6 +38,7 @@ inline const char* NameBaseType(BaseType ft, bool co_only = true) {
   case BaseType::F32: return "float";
   case BaseType::F16: return (co_only) ? "choreo::half" : "choreo::f16";
   case BaseType::BF16: return (co_only) ? "choreo::bfloat16" : "choreo::bf16";
+  case BaseType::F8: return "choreo::f8";
   case BaseType::U32: return "unsigned int";
   case BaseType::U16: return "unsigned short";
   case BaseType::U8: return "unsigned char";

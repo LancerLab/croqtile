@@ -48,15 +48,13 @@ inline void runtime_check(bool p, const char* msg) {
 #ifdef __TOPSCC__
 template <typename T>
 __co_device__ inline void fill(T* begin, T* end, const T& value) {
-  for (size_t idx = 0; idx < end - begin; ++idx)
-    begin[idx] = value;
+  for (size_t idx = 0; idx < end - begin; ++idx) begin[idx] = value;
   // TODO: OPT
 }
 
 template <typename T>
 __co_device__ inline void fill_n(T* begin, size_t n, const T& value) {
-  for (size_t idx = 0; idx < n; ++idx)
-    begin[idx] = value;
+  for (size_t idx = 0; idx < n; ++idx) begin[idx] = value;
   // TODO: OPT
 }
 #endif // __TOPSCC__

@@ -417,8 +417,16 @@ static inline std::string HostTypeStringify(const Choreo::Type& ty,
     return "int";
   else if (isa<BooleanType>(&ty))
     return "bool";
+  else if (isa<Half8Type>(&ty))
+    return "choreo::half8";
+  else if (isa<HalfType>(&ty))
+    return "choreo::half";
+  else if (isa<BFP16Type>(&ty))
+    return "choreo::bfp16";
   else if (isa<FloatType>(&ty))
     return "float";
+  else if (isa<DoubleType>(&ty))
+    return "double";
   else if (auto sty = dyn_cast<SpannedType>(&ty)) {
     if (is_ret) // return by value
       return "choreo::spanned_data<choreo::" + STR(sty->f_type) + ", " +

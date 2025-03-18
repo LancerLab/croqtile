@@ -27,9 +27,12 @@ using ptr = std::shared_ptr<T>;
 
 enum class TypeCategory {
   INT,
+  BOOL,
+  HALF8,
+  HALF,
+  BFP16,
   FLOAT,
   DOUBLE,
-  BOOL,
   INDEX,
   ITUPLE,
   PARTIAL,
@@ -46,9 +49,12 @@ enum class TypeCategory {
 inline static std::string STR(TypeCategory tc) {
   switch (tc) {
   case TypeCategory::INT: return "INT";
+  case TypeCategory::BOOL: return "BOOL";
+  case TypeCategory::HALF8: return "HALF8";
+  case TypeCategory::HALF: return "HALF";
+  case TypeCategory::BFP16: return "BFP16";
   case TypeCategory::FLOAT: return "FLOAT";
   case TypeCategory::DOUBLE: return "DOUBLE";
-  case TypeCategory::BOOL: return "BOOL";
   case TypeCategory::INDEX: return "INDEX";
   case TypeCategory::ITUPLE: return "ITUPLE";
   case TypeCategory::PARTIAL: return "PARTIAL";
@@ -71,6 +77,7 @@ enum class BaseType {
   F32,
   F16,
   BF16,
+  F8,
   U32,
   S32,
   U16,
@@ -78,9 +85,12 @@ enum class BaseType {
   U8,
   S8,
   INT,
+  BOOL,
+  HALF8,
+  HALF,
+  BFP16,
   FLOAT,
   DOUBLE,
-  BOOL,
   ITUPLE,
   VOID,
   UNKNOWN
@@ -90,6 +100,7 @@ enum class FundamentalType {
   F32 = (int)BaseType::F32,
   F16 = (int)BaseType::F16,
   BF16 = (int)BaseType::BF16,
+  F8 = (int)BaseType::F8,
   U32 = (int)BaseType::U32,
   U16 = (int)BaseType::U16,
   U8 = (int)BaseType::U8,
@@ -121,9 +132,12 @@ enum Attribute : uint16_t {
 inline BaseType TC2BT(TypeCategory tc) {
   switch (tc) {
   case TypeCategory::INT: return BaseType::INT;
+  case TypeCategory::BOOL: return BaseType::BOOL;
+  case TypeCategory::HALF8: return BaseType::HALF8;
+  case TypeCategory::HALF: return BaseType::HALF;
+  case TypeCategory::BFP16: return BaseType::BFP16;
   case TypeCategory::FLOAT: return BaseType::FLOAT;
   case TypeCategory::DOUBLE: return BaseType::DOUBLE;
-  case TypeCategory::BOOL: return BaseType::BOOL;
   case TypeCategory::VOID: return BaseType::VOID;
   default:
     choreo_unreachable("unsupported mapping from type category to base type.");
@@ -141,6 +155,7 @@ inline static size_t SizeOf(FundamentalType ft) {
   case FundamentalType::BF16:
   case FundamentalType::U16:
   case FundamentalType::S16: return 2;
+  case FundamentalType::F8:
   case FundamentalType::U8:
   case FundamentalType::S8: return 1;
   default: choreo_unreachable("fundamental type is not supported.");
@@ -153,13 +168,14 @@ inline static size_t SizeOf(BaseType bt) {
   case BaseType::DOUBLE: return sizeof(double);
   case BaseType::F32:
   case BaseType::U32:
-  case BaseType::S32: return 4;
-  case BaseType::INT: return sizeof(int);
-  case BaseType::FLOAT: return sizeof(float);
+  case BaseType::S32:
+  case BaseType::INT:
+  case BaseType::FLOAT: return 4;
   case BaseType::F16:
   case BaseType::BF16:
   case BaseType::U16:
   case BaseType::S16: return 2;
+  case BaseType::F8:
   case BaseType::U8:
   case BaseType::S8: return 1;
   case BaseType::BOOL: return sizeof(bool);
@@ -175,8 +191,10 @@ inline static BaseType BaseTypeFromString(const std::string& input) {
       {"bf16", BaseType::BF16},   {"u32", BaseType::U32},
       {"s32", BaseType::S32},     {"u16", BaseType::U16},
       {"s16", BaseType::S16},     {"u8", BaseType::U8},
-      {"s8", BaseType::S8},       {"int", BaseType::INT},
+      {"s8", BaseType::S8},       {"f8", BaseType::F8},
+      {"half8", BaseType::HALF8}, {"half", BaseType::HALF},
       {"float", BaseType::FLOAT}, {"double", BaseType::DOUBLE},
+      {"bfp16", BaseType::BFP16}, {"int", BaseType::INT},
       {"bool", BaseType::BOOL},   {"ituple", BaseType::ITUPLE},
       {"void", BaseType::VOID},   {"unknown", BaseType::UNKNOWN},
   };
@@ -195,7 +213,9 @@ inline static std::string GetStringFrom(BaseType dataType) {
       {BaseType::BF16, "bf16"},   {BaseType::U32, "u32"},
       {BaseType::S32, "s32"},     {BaseType::U16, "u16"},
       {BaseType::S16, "s16"},     {BaseType::U8, "u8"},
-      {BaseType::S8, "s8"},       {BaseType::INT, "int"},
+      {BaseType::S8, "s8"},       {BaseType::F8, "f8"},
+      {BaseType::HALF8, "half8"}, {BaseType::HALF, "half"},
+      {BaseType::BFP16, "bfp16"}, {BaseType::INT, "int"},
       {BaseType::FLOAT, "float"}, {BaseType::DOUBLE, "double"},
       {BaseType::BOOL, "bool"},   {BaseType::ITUPLE, "ituple"},
       {BaseType::VOID, "void"},   {BaseType::UNKNOWN, "unknown"},
@@ -718,6 +738,9 @@ struct ScalarType : public Type, public TypeIDProvider<ScalarType> {
   size_t Dims() const override { return 1; }
   bool IsComplete() const override { return true; }
   bool HasSufficientInfo() const override { return true; }
+
+  virtual bool IsFloat() const { return false; }
+  virtual bool IsBoolInteger() const { return true; }
   // can not have instance
 
   __UDT_TYPE_INFO__(Type, ScalarType)
@@ -752,19 +775,60 @@ struct IntegerType : public ScalarType, public TypeIDProvider<IntegerType> {
   __UDT_TYPE_INFO__(ScalarType, IntegerType)
 };
 
-struct FloatType : public ScalarType, public TypeIDProvider<FloatType> {
-  FloatType() : ScalarType(TypeCategory::FLOAT) {}
+struct ScalarFloatType : public ScalarType,
+                         public TypeIDProvider<ScalarFloatType> {
+  ScalarFloatType(TypeCategory t) : ScalarType(t) {}
+  bool IsFloat() const override { return true; }
+  bool IsBoolInteger() const override { return false; }
+  __UDT_TYPE_INFO__(ScalarType, ScalarFloatType)
+};
+
+struct Half8Type : public ScalarFloatType, public TypeIDProvider<Half8Type> {
+  Half8Type() : ScalarFloatType(TypeCategory::HALF8) {}
+  void Print(std::ostream& os) const override { os << "half8"; }
+  const std::string Name() const override { return "half8"; }
+
+  bool operator==(const Type& ty) const override { return isa<Half8Type>(&ty); }
+  bool ApprxEqual(const Type& ty) const override { return operator==(ty); }
+
+  __UDT_TYPE_INFO__(ScalarFloatType, Half8Type)
+};
+
+struct HalfType : public ScalarFloatType, public TypeIDProvider<HalfType> {
+  HalfType() : ScalarFloatType(TypeCategory::HALF) {}
+  void Print(std::ostream& os) const override { os << "half"; }
+  const std::string Name() const override { return "half"; }
+
+  bool operator==(const Type& ty) const override { return isa<HalfType>(&ty); }
+  bool ApprxEqual(const Type& ty) const override { return operator==(ty); }
+
+  __UDT_TYPE_INFO__(ScalarFloatType, HalfType)
+};
+
+struct BFP16Type : public ScalarFloatType, public TypeIDProvider<BFP16Type> {
+  BFP16Type() : ScalarFloatType(TypeCategory::BFP16) {}
+  void Print(std::ostream& os) const override { os << "bfp16"; }
+  const std::string Name() const override { return "bfp16"; }
+
+  bool operator==(const Type& ty) const override { return isa<BFP16Type>(&ty); }
+  bool ApprxEqual(const Type& ty) const override { return operator==(ty); }
+
+  __UDT_TYPE_INFO__(ScalarFloatType, BFP16Type)
+};
+
+struct FloatType : public ScalarFloatType, public TypeIDProvider<FloatType> {
+  FloatType() : ScalarFloatType(TypeCategory::FLOAT) {}
   void Print(std::ostream& os) const override { os << "float"; }
   const std::string Name() const override { return "float"; }
 
   bool operator==(const Type& ty) const override { return isa<FloatType>(&ty); }
   bool ApprxEqual(const Type& ty) const override { return operator==(ty); }
 
-  __UDT_TYPE_INFO__(ScalarType, FloatType)
+  __UDT_TYPE_INFO__(ScalarFloatType, FloatType)
 };
 
-struct DoubleType : public ScalarType, public TypeIDProvider<DoubleType> {
-  DoubleType() : ScalarType(TypeCategory::DOUBLE) {}
+struct DoubleType : public ScalarFloatType, public TypeIDProvider<DoubleType> {
+  DoubleType() : ScalarFloatType(TypeCategory::DOUBLE) {}
   void Print(std::ostream& os) const override { os << "double"; }
   const std::string Name() const override { return "double"; }
 
@@ -773,7 +837,7 @@ struct DoubleType : public ScalarType, public TypeIDProvider<DoubleType> {
   }
   bool ApprxEqual(const Type& ty) const override { return operator==(ty); }
 
-  __UDT_TYPE_INFO__(ScalarType, DoubleType)
+  __UDT_TYPE_INFO__(ScalarFloatType, DoubleType)
 };
 
 struct BooleanType final : public ScalarType,
@@ -1365,10 +1429,24 @@ inline ptr<BooleanType> MakeBooleanType() {
   return std::make_shared<BooleanType>();
 }
 
-inline ptr<FloatType> MakeFloatType() { return std::make_shared<FloatType>(); }
+inline ptr<ScalarFloatType> MakeScalarFloatType(BaseType bt) {
+  switch (bt) {
+  case BaseType::HALF8: return std::make_shared<Half8Type>();
+  case BaseType::HALF: return std::make_shared<HalfType>();
+  case BaseType::BFP16: return std::make_shared<BFP16Type>();
+  case BaseType::FLOAT: return std::make_shared<FloatType>();
+  case BaseType::DOUBLE: return std::make_shared<DoubleType>();
+  default: choreo_unreachable("unsupported base type.");
+  }
+  return nullptr;
+}
 
-inline ptr<DoubleType> MakeDoubleType() {
-  return std::make_shared<DoubleType>();
+inline ptr<ScalarFloatType> MakeFloatType() {
+  return MakeScalarFloatType(BaseType::FLOAT);
+}
+
+inline ptr<ScalarFloatType> MakeDoubleType() {
+  return MakeScalarFloatType(BaseType::DOUBLE);
 }
 
 inline ptr<StringType> MakeStringType() {

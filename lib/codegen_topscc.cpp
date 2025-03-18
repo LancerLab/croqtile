@@ -1204,7 +1204,6 @@ void TopsccCodeGen::EmitHostFuncDecl(std::ostringstream& oss) {
       else
         oss << HostTypeStringify(*fty->out_ty, true);
     } else {
-      // return 100;
       oss << HostTypeStringify(*fty->out_ty, true);
     }
   } else
