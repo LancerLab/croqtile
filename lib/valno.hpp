@@ -302,11 +302,29 @@ private:
 
   void TraceEachVisit(AST::Node& n, bool detail = false,
                       const std::string& m = "") const {
-    if (!trace_visit) return;
+    if (!trace_visit && !debug_visit) return;
+
+    if (debug_visit) dbgs() << "[";
+
     if (detail)
-      dbgs() << m << STR(n) << "\n";
+      dbgs() << m << STR(n);
     else
-      dbgs() << m << n.TypeNameString() << "\n";
+      dbgs() << m << n.TypeNameString();
+
+    if (debug_visit)
+      dbgs() << "]\t "
+             << (ValidVN(cur_vn) ? ("#" + std::to_string(cur_vn)) : "nil")
+             << "(vn),\t "
+             << (ValidVN(cur_mdspan_vn) ? ("#" + std::to_string(cur_mdspan_vn))
+                                        : "nil")
+             << "(mds)";
+
+    dbgs() << "\n";
+  }
+
+  void ClearVisitorVNs() {
+    InvalidateVN(cur_vn);
+    InvalidateVN(cur_mdspan_vn);
   }
 
 public:
@@ -340,6 +358,7 @@ public:
       int valno = vn.GetOrInsertValueNumberFromSignature("const_1");
       vn.AssociateSignatureWithValueNumber(InScopeName("@__choreo_no_tiling__"),
                                            valno);
+      ClearVisitorVNs();
     } else if (isa<AST::ParallelBy>(&n)) {
       vn.EnterScope();
     } else if (isa<AST::WithBlock>(&n) || isa<AST::InThreadsBlock>(&n)) {
@@ -369,7 +388,9 @@ public:
       gen_values = false;
     } else if (isa<AST::Parameter>(&n)) {
       allow_named_dim = true;
-    }
+    } else if (isa<AST::MultiNodes>(&n))
+      ClearVisitorVNs();
+
     return true;
   }
 
@@ -857,9 +878,6 @@ public:
         return false;
       }
 
-      InvalidateVN(cur_mdspan_vn);
-      InvalidateVN(cur_vn);
-
       if (n.sym) {
         SSTab().DefineSymbol(
             n.sym->name + ".span",
@@ -867,6 +885,7 @@ public:
         SSTab().DefineSymbol(n.sym->name, n.type->GetType());
       }
 
+      ClearVisitorVNs();
       return true;
     }
 
@@ -877,10 +896,11 @@ public:
       vn.GetValueNumberOfSignature(SSTab().ScopedName(n.sym->name));
       if (n.sym) SSTab().DefineSymbol(n.sym->name, n.GetType());
 
-      InvalidateVN(cur_vn);
+      ClearVisitorVNs();
       return true;
     }
 
+    ClearVisitorVNs();
     return true;
   }
 
@@ -1325,7 +1345,7 @@ public:
 
   bool Visit(AST::Wait& n) {
     TraceEachVisit(n);
-
+    ClearVisitorVNs();
     if (cannot_proceed) return true;
 
     return true;
@@ -1350,6 +1370,7 @@ public:
       }
     }
 
+    ClearVisitorVNs();
     return true;
   };
 
@@ -1384,6 +1405,8 @@ public:
 
     // now update the valnos
     UpdateValueNumberForMultiValues(*n.ids, valno);
+
+    ClearVisitorVNs();
 
     return true;
   };
@@ -1444,7 +1467,7 @@ public:
 
   bool Visit(AST::Return& n) {
     TraceEachVisit(n);
-
+    ClearVisitorVNs();
     if (cannot_proceed) return true;
 
     return true;

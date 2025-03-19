@@ -294,11 +294,11 @@ __co_any__ inline static T __f16_to_f32(F value) {
 // this f16 accepts literal initialization, but without arith support
 class f16 {
 private:
-  uint16_t bits; // Storage for the half-precision bits
+  uint16_t bits;
 
 public:
   // Default constructor
-  __co_any__ f16() : bits(0) {}
+  __co_any__ f16() = default;
 
   // Constructor for conversion from float
   __co_any__ f16(float value) { bits = __f32_to_f16<uint16_t>(value); }
@@ -386,11 +386,11 @@ __co_any__ inline static f32 f16_to_f32(f16 value) {
 #ifndef __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
 class bf16 {
 private:
-  uint16_t bits = 0; // Storage for the half-precision bits
+  uint16_t bits; // Storage for the half-precision bits
 
 public:
   // Default constructor
-  __co_any__ bf16() : bits(0) {}
+  __co_any__ bf16() = default;
 
   // Constructor for conversion from float
   __co_any__ bf16(float value) { bits = floatToHalfBits(value); }
@@ -476,7 +476,8 @@ public:
   __co_any__ operator float() const { return halfBitsToFloat(bits); }
 };
 
-using bfloat16 = unsigned short; // device bfloat16 type
+using bfloat16 = bf16;
+using bfp16 = bf16;
 
 inline std::ostream& operator<<(std::ostream& os, const bf16& v) {
   os << (float)v;
@@ -486,6 +487,7 @@ inline std::ostream& operator<<(std::ostream& os, const bf16& v) {
 #else // __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
 
 using bf16 = __bf16;
+using bfp16 = __bf16;
 using bfloat16 = __bf16;
 
 // Check for __bf16 support

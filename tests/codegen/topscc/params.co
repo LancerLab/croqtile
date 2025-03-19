@@ -1,18 +1,23 @@
 // RUN: choreo -t topscc -es %s -o - | FileCheck %s
 __co__ auto foo(int a, f32 [1, 2] b) { parallel p by 1 {}}
 
+// CHECK: __global__ void __choreo_device_foo(int a, float * b)
+// CHECK: void foo(int a, const choreo::spanned_view<choreo::f32, 2> & b)
+
 __co__ auto bar(bf16 [1] a, s8[2] b, u16[3] c, f16 [2] d, s32 [1] e, s16 [3] f, u8 [7] g, u32 [1, 2] i, bool) {
   parallel p by 1 {} // ensure device code be generated
   return a;
 }
 
-// CHECK: __global__ void __choreo_device_foo(int a, float * b)
-// CHECK: void foo(int a, const choreo::spanned_view<choreo::f32, 2> & b)
 // CHECK: __global__ void __choreo_device_bar(choreo::bf16 * a, char * b, unsigned short * c, choreo::f16 * d, int * e, short * f, unsigned char * g, unsigned int * i, bool anon_0)
 // CHECK: choreo::spanned_data<choreo::bf16, 1> bar(const choreo::spanned_view<choreo::bf16, 1> & a, const choreo::spanned_view<choreo::s8, 1> & b, const choreo::spanned_view<choreo::u16, 1> & c, const choreo::spanned_view<choreo::f16, 1> & d, const choreo::spanned_view<choreo::s32, 1> & e, const choreo::spanned_view<choreo::s16, 1> & f, const choreo::spanned_view<choreo::u8, 1> & g, const choreo::spanned_view<choreo::u32, 2> & i, bool anon_0)
 
-__co__ auto mou(float a, s32 [7] b) {
+__co__ auto mou(half8 d, half c, float a, bfp16 e, s32 [7] b) {
   parallel by 1 {
-    call miao(b, a, b.span(0));
+    call miao(b, a, b.span(0), c, d, e);
   }
 }
+// CHECK: __global__ void __choreo_device_mou(choreo::half8 d, choreo::half c, float a, choreo::bfp16 e, int * b) {
+// CHECK:   miao((int*)b, a, (7), c, d, e);
+// CHECK: }
+// CHECK: void mou(choreo::half8 d, choreo::half c, float a, choreo::bfp16 e, const choreo::spanned_view<choreo::s32, 1> & b)
