@@ -3,6 +3,8 @@ To fully utilize parallel hardware, it is crucial to write parallel code in Chor
 
 
 ## Parallel Execution Block
+In Choreo, the code run in parallel are placed into the *parallel execution block*, which showcasing there are multiple instances of the same code that are executed simultaneously.
+
 ### Basic Syntax: `parallel-by`
 
 The basic syntax for a `parallel-by` block is as follows:
@@ -16,8 +18,16 @@ We name the code inside `{}` as the SPMD-style **parallel execution block**, and
 In this example:
 
 - **`parallel`**: This keyword initiates the *parallel execution block*.
-- **`p`**: It is the **parallel variable**. It contains an integer value identifying the current *parallel thread*. Each *parallel thread* runs the same code but with a different value of `p`.
-- **`by 6`**: It indicates that there are totally 6 *parallel thread*s. Thus, `p` ranges from `0` to `5` across different threads.
+- **`p`**: It is the **parallel variable**. It contains an integer value identifying the current *parallel thread*. Each *parallel thread* runs the same code but with a different value of *parallel variable* `p`.
+- **`by 6`**: It indicates that there are totally 6 *parallel thread*s. Thus, the *parallel variable* `p` ranges from `0` to `5` across different threads.
+
+In some scenarios, programers may not require an explicit *parallel variable* for a simple parallel construct. It is possible to omit it:
+
+```choreo
+parallel by 2 { ... }
+```
+
+This invokes two parallel threads to execute. However, it is not possible for the two threads to work on different data, which is normally required by SPMD programs for a data-parallel processing purpose.
 
 ### Multiple-Level Parallelism
 

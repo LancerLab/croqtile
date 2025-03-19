@@ -33,20 +33,24 @@ __co__ void mou() {
 In current implementation, the argument must be either:
 
 - *Spanned Data* type, or
-- *Integer* type, or
-- *Floating-Point* (literals only).
+- Scalar *Integer* type, or
+- Scalar *Floating-Point* type.
+
+Here, the scalar *integer* type only includes `int`, whereas the scalar *floating-point type* includes `float`, `double`, `half`, `bfp16`, and `half8`. However, since the target-platform differs in floating-point support, the *floating-point type* parameter also varies for different target platforms.
+
+In addition, **operations on floating-point are not supported** by Choreo till now, considering the floating is not useful for tileflow programs. Instead, they are typically values for device computation, which the *tileflow program*s pass such values directly to device kernels.
 
 The below code showcases an example:
 
 ```choreo
 __device__ void bar(float *p, int m, int n) {}
-__device__ void foo(float *p, int n, unsigned i, float j) {}
+__device__ void foo(float *, int, unsigned, double, float) {}
 
-__co__ void foobar(f32 [M, 24] input, int N) {
+__co__ void foobar(f32 [M, 24] input, int N, float padding) {
   parallel p by 1 {
     shared f32 [14, 7] buffer;
     call bar(input.data, M, buffer.span(0));
-    call foo(buffer.data, N, 3, 3.14f);
+    call foo(buffer.data, N, 3, 3.14, padding);
   }
 }
 ```
@@ -55,7 +59,7 @@ In this example, it passes different data types as arguments from choreo functio
 
 For some types like `f16`, and `bf16`, there may not be native target support of such types, it is possible to utilize `choreo::f16` and `choreo::bf16` to handle such types.
 
-## Call Template Functions
+## Instantialize the Function Template for Call
 
 ### Trigger C++ Template Instantiation
 
