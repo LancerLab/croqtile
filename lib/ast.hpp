@@ -49,6 +49,7 @@ struct Node {
   virtual void SetType(const ptr<Type>& t) { pty = t; }
   virtual const ptr<Type>& GetType() const { return pty; }
   virtual const location& LOC() const { return loc; }
+  virtual void SetLOC(const location &l) { loc = l; }
 
   virtual ~Node() = default;
 
@@ -894,7 +895,7 @@ struct NamedVariableDecl : public Node,
                            public TypeIDProvider<NamedVariableDecl> {
   const std::string name_str;
   const std::string init_str;
-  const ptr<Memory> mem = nullptr;      // storage location
+  ptr<Memory> mem = nullptr;            // storage location
   ptr<DataType> type = nullptr;         // type annotation
   const ptr<Node> init_expr = nullptr;  // associated initializer
   const ptr<Node> init_value = nullptr; // associated initial value

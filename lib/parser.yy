@@ -178,10 +178,6 @@ void choreo_info(const char *message) {
 %nterm <ptr<DMAConfig>> dma_config
 %nterm <bool> sync_type
 %nterm <int> index index_or_none
-%nterm <ptr<SymbolWithInitVal<int>>> id_with_init_ty_int
-%nterm <ptr<SymbolWithInitVal<float>>> id_with_init_ty_float
-%nterm <ptr<std::vector<ptr<SymbolWithInitVal<int>>>>> ids_with_inits_ty_int
-%nterm <ptr<std::vector<ptr<SymbolWithInitVal<float>>>>> ids_with_inits_ty_float
 %nterm <Choreo::Storage> storage
 %nterm <Choreo::BaseType> fundamental_type
 %nterm <AST::ptr<AST::CppSourceCode>> pass_by host_code
@@ -189,7 +185,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::SpanAs>> span_as
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
 %nterm <AST::ptr<AST::Node>> foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal device_passable declaration statement assignment dma_stmt wait_stmt call_stmt print_stmt swap_stmt expr_or_qes range_expr param_mdspan_val chunkat_or_storage_or_select pred returnable
-%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause multi_decls named_spanned_decl named_scalar_decls scalar_decls
+%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls
 %nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables future_data_list template_params gi_list
 %nterm <AST::ptr<AST::Expr>> s_expr template_value_expr span_expr id_expr bound_expr optional_pred
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
@@ -198,7 +194,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::ChoreoFunction>> dsl_function
 %nterm <AST::ptr<AST::MultiDimSpans>> unnamed_mdspan_decl param_mdspan
 %nterm <AST::ptr<AST::NamedTypeDecl>> named_mdspan_decl
-%nterm <AST::ptr<AST::NamedVariableDecl>> named_ituple_decl scalar_decl
+%nterm <AST::ptr<AST::NamedVariableDecl>> named_ituple_decl spanned_decl scalar_decl
 %nterm <AST::ptr<AST::IntTuple>> unnamed_ituple_decl sugar_unnamed_ituple_decl sugarless_unnamed_ituple_decl
 %nterm <AST::ptr<AST::WithBlock>> within_block
 %nterm <AST::ptr<AST::InThreadsBlock>> inthreads_block
@@ -574,8 +570,8 @@ declaration
     ;
 
 multi_decls
-    : named_spanned_decl { $$ = $1; }
-    | named_scalar_decls { $$ = $1; }
+    : named_spanned_decls { $$ = $1; }
+    | named_scalar_decls  { $$ = $1; }
     ;
 
 print_stmt
@@ -617,71 +613,57 @@ scalar_decl
     ;
 
 
-named_spanned_decl
-    : storage_qual spanned_type id_list {
-        $$ = AST::Make<AST::MultiNodes>(@1);
-        for (auto id : $3->AllValues()) {
-          auto name = cast<AST::Identifier>(id)->name;
-          symtab.AddSymbol(name, $2->GetType());
-          $$->Append(AST::Make<AST::NamedVariableDecl>(@3, name, $2, $1));
+named_spanned_decls
+    : storage_qual spanned_type spanned_decls {
+        for (auto item : $3->AllSubs()) {
+          auto decl = cast<AST::NamedVariableDecl>(item);
+          symtab.AddSymbol(decl->name_str, $2->GetType());
+          decl->type = $2;
+          decl->mem = $1;
         }
-      }
-    | storage_qual spanned_type ids_with_inits_ty_int {
-        $$ = AST::Make<AST::MultiNodes>(@1);
-        for (auto val : *$3) {
-          symtab.AddSymbol(val->name, $2->GetType());
-          $$->Append(AST::Make<AST::NamedVariableDecl>(
-            @3, val->name, $2, $1, nullptr,
-            AST::Make<AST::IntLiteral>(@3, val->init_val)));
-        }
-      }
-    | storage_qual spanned_type ids_with_inits_ty_float {
-        $$ = AST::Make<AST::MultiNodes>(@1);
-        for (auto val : *$3) {
-          symtab.AddSymbol(val->name, $2->GetType());
-          $$->Append(AST::Make<AST::NamedVariableDecl>(
-            @3, val->name, $2, $1, nullptr,
-            AST::Make<AST::FloatLiteral>(@3, val->init_val)));
-        }
+        $3->SetLOC(@1);
+        $$ = $3;
       }
     ;
 
-ids_with_inits_ty_int
-    : id_with_init_ty_int  {
-        $$ = std::make_shared<std::vector<ptr<SymbolWithInitVal<int>>>>();
-        $$->push_back($1);
+spanned_decls
+    : spanned_decl {
+        $$ = AST::Make<AST::MultiNodes>(@1);
+        $$->Append($1);
       }
-    | ids_with_inits_ty_int COMMA id_with_init_ty_int {
-        $1->push_back($3);
+    | spanned_decls COMMA spanned_decl {
+        $1->Append($3);
         $$ = $1;
       }
     ;
 
-ids_with_inits_ty_float
-    : id_with_init_ty_float  {
-        $$ = std::make_shared<std::vector<ptr<SymbolWithInitVal<float>>>>();
-        $$->push_back($1);
+spanned_decl
+    : IDENTIFIER {
+        $$ = AST::Make<AST::NamedVariableDecl>(@1, $1);
       }
-    | ids_with_inits_ty_float COMMA id_with_init_ty_float {
-        $1->push_back($3);
-        $$ = $1;
-      }
-    ;
-
-id_with_init_ty_int
-    : IDENTIFIER LBRACE NUM RBRACE {
-        $$ = std::make_shared<SymbolWithInitVal<int>>($1, $3);
+    | IDENTIFIER LBRACE NUM RBRACE {
+        auto literal = AST::Make<AST::IntLiteral>(@3, $3);
+        $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, nullptr, literal);
       }
     | IDENTIFIER LBRACE MINUS NUM RBRACE {
-        $$ = std::make_shared<SymbolWithInitVal<int>>($1, 0-$4);
+        auto literal = AST::Make<AST::IntLiteral>(@3, -$4);
+        $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, nullptr, literal);
       }
-    ;
-id_with_init_ty_float
-    : IDENTIFIER LBRACE FPVAL RBRACE {
-        $$ = std::make_shared<SymbolWithInitVal<float>>($1, $3);
+    | IDENTIFIER LBRACE FPVAL RBRACE {
+        auto literal = AST::Make<AST::FloatLiteral>(@3, $3);
+        $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, nullptr, literal);
       }
     | IDENTIFIER LBRACE MINUS FPVAL RBRACE {
-        $$ = std::make_shared<SymbolWithInitVal<float>>($1, 0.0-$4);
+        auto literal = AST::Make<AST::FloatLiteral>(@3, -$4);
+        $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, nullptr, literal);
+      }
+    | IDENTIFIER LBRACE DFPVAL RBRACE {
+        auto literal = AST::Make<AST::FloatLiteral>(@3, $3);
+        $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, nullptr, literal);
+      }
+    | IDENTIFIER LBRACE MINUS DFPVAL RBRACE {
+        auto literal = AST::Make<AST::FloatLiteral>(@3, -$4);
+        $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, nullptr, literal);
       }
     ;
 
