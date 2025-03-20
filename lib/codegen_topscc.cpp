@@ -477,7 +477,13 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
         ds << d_indent << "} // single instance\n";
       }
     }
+    return true;
   }
+
+  // when symbol is not valued
+  if (isa<ScalarType>(nty) && !FCtx(fname).HasSymbolValues(InScopeName(sym)))
+    ds << d_indent << NameBaseType(GetBaseType(*nty), false) << " " << sym
+       << " = " << ExprSTR(n.init_expr, false) << ";\n";
 
   return true;
 }

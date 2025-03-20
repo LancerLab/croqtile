@@ -474,6 +474,9 @@ bool TypeInference::Visit(AST::Expr& n) {
       auto id = cast<AST::Identifier>(ref);
       n.SetType(GetSymbolType(id->LOC(), id->name + ".data"));
       return true;
+    } else if (n.op == "!") {
+      n.SetType(MakeBooleanType());
+      return true;
     }
     choreo_unreachable("type inference is yet to implement.");
   }

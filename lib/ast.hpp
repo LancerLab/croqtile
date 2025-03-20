@@ -49,7 +49,7 @@ struct Node {
   virtual void SetType(const ptr<Type>& t) { pty = t; }
   virtual const ptr<Type>& GetType() const { return pty; }
   virtual const location& LOC() const { return loc; }
-  virtual void SetLOC(const location &l) { loc = l; }
+  virtual void SetLOC(const location& l) { loc = l; }
 
   virtual ~Node() = default;
 
