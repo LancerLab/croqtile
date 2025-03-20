@@ -1,0 +1,22 @@
+1. general async entity
+
+ff = parallel.async by 2 {
+  f = inthreads(p == 1) { ...; }
+  d = inthreads(p == 2) { ...; wait f;...;} // wait semantics
+}
+
+dd = parallel.async by 2 after ff {  // after semantics
+  f = inthreads(p == 1) { ...; }
+  g = dma.copy.async ...;  
+  d = inthreads(p == 2) after f, g { ...; ..;}  // after semantics
+}
+
+wait dd; // wait sematics
+
+2. parallel-level annotation
+parallel.async by 3 : mpi {
+  parallel.async by 3 : shared {
+    parallel by 3 after cop : local {
+    }
+  }
+}
