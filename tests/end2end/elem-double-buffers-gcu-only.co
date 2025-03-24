@@ -68,7 +68,7 @@ int main() { /// host program
         if (a[i][j][k] + b[i][j][k] != res[i][j][k]) {
           // std::cout << "[" << i << ", " << j << ", " << k << "] ";
           // std::cout << "a: " << a[i][j][k] << ", b: " << b[i][j][k] << ", res: " << res[i][j][k] << "\n";
-          assert(a[i][j][k] + b[i][j][k] == res[i][j][k]);
+          choreo::choreo_assert(a[i][j][k] + b[i][j][k] == res[i][j][k], "error: the result is not correct");
         }
       }
 
