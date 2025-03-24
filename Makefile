@@ -185,7 +185,7 @@ lines:
 	echo "test files"; wc -l $$(find tests/ -type f |grep -v "\.test")
 
 format:
-	$(CLANG_FORMAT) -i -Werror $(SRC_DIR)/*.cpp $(SRC_DIR)/*.hpp utils/*.h tests/standalone/*.cu tests/standalone/*.cpp
+	$(CLANG_FORMAT) -i -Werror $(SRC_DIR)/*.cpp $(SRC_DIR)/*.hpp utils/*.h utils/*.cpp tests/standalone/*.cu tests/standalone/*.cpp
 
 standalone_test: $(TARGET)
 	cd tests/standalone/ && $(MAKE) test

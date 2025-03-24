@@ -2,8 +2,9 @@
 #include "codegen.hpp"
 #include "codegen_cuda.hpp"
 #include "codegen_factor.hpp"
-#include "codegen_topscc.hpp"
 #include "codegen_prepare.hpp"
+#include "codegen_topscc.hpp"
+#include "command_line.hpp"
 #include "earlysema.hpp"
 #include "gcucheck.hpp"
 #include "latenorm.hpp"
@@ -11,14 +12,13 @@
 #include "memcheck.hpp"
 #include "normalize.hpp"
 #include "options.hpp"
-#include "command_line.hpp"
 #include "preprocess.hpp"
 #include "scanner.hpp"
+#include "semacheck.hpp"
 #include "sym_replace.hpp"
 #include "symtab.hpp"
 #include "ttrans_factor.hpp"
 #include "ttrans_topscc.hpp"
-#include "semacheck.hpp"
 #include "typeinfer.hpp"
 #include "types.hpp"
 #include "valno.hpp"
@@ -35,15 +35,16 @@ using namespace Choreo;
 
 int main(int argc, char* argv[]) {
   CommandLine cl;
-  if (!cl.Parse(argc, argv))
-    return cl.ReturnCode();
+  if (!cl.Parse(argc, argv)) return cl.ReturnCode();
 
   auto& r = OptionRegistry::GetInstance();
 
   if (CCtx().DumpAst() && CCtx().NoCodegen())
-    errs() << "warning: Semantic check is ignored since dumping AST is required.\n";
+    errs() << "warning: Semantic check is ignored since dumping AST is "
+              "required.\n";
 
-  if (CCtx().PrintPassNames()) dbgs() << "<file: " << r.GetInputFileName() << ">\n";
+  if (CCtx().PrintPassNames())
+    dbgs() << "<file: " << r.GetInputFileName() << ">\n";
 
   // Apply the preprocessing
   std::stringstream pps;
@@ -59,8 +60,7 @@ int main(int argc, char* argv[]) {
     }
   }
 
-  if (CCtx().GetOutputKind() == OutputKind::PreProcessedCode)
-    return 0;
+  if (CCtx().GetOutputKind() == OutputKind::PreProcessedCode) return 0;
 
   Scanner s;
   s.yyrestart((CCtx().NoPreProcess()) ? r.GetInputStream() : pps);
@@ -155,8 +155,7 @@ int main(int argc, char* argv[]) {
     if (!mem_usage_checker.RunOnProgram(root))
       return mem_usage_checker.Status();
 
-    Choreo::Factor::FactorCodeGen codegen(
-        cgp.GetASTInfo());
+    Choreo::Factor::FactorCodeGen codegen(cgp.GetASTInfo());
     if (!codegen.RunOnProgram(root)) return codegen.Status();
     break;
   }
@@ -176,8 +175,7 @@ int main(int argc, char* argv[]) {
 #endif
 
     MemUsageCheck muc;
-    if (!muc.RunOnProgram(root))
-      return muc.Status();
+    if (!muc.RunOnProgram(root)) return muc.Status();
 
     Choreo::Topscc::TopsccCodeGen codegen(cgp.GetASTInfo());
     if (!codegen.RunOnProgram(root)) return codegen.Status();
