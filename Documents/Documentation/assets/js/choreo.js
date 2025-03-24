@@ -13,7 +13,7 @@
 
   // Add custom keywords
   choreo.keywords = {
-    keyword: 'chunkat mdspan with parallel ituple by in foreach shared local global where after call wait',
+    keyword: 'chunkat mdspan with parallel ituple by in foreach shared local global where after call wait inthreads',
     literal: 'true false null'
   };
 
@@ -26,7 +26,7 @@
     },
     {
       className: 'type',
-      begin: /\b(f32|s32|u32|f16|bf16|s16|u16|s8|u8)\b/,
+      begin: /\b(f32|s32|u32|f16|bf16|s16|u16|s8|u8|half|bfp16|half8)\b/,
       relevance: 10
     },
     {

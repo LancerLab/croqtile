@@ -49,8 +49,9 @@ nav:
       - Invoke the Device Programs: call-in-choreo.md
       - Macro and Preprocessing: macro-in-choreo.md
     - Advanced Features and Techniques:
-      - Advanced Program Control: loop-in-advance.md
+      - Thread Masking and Divergence: thread-masking.md
       - Advanced Data Movement: dma-in-advance.md
+      - Experimental Features: loop-in-advance.md
     - Miscellaneous:
       - Check Tileflow Program Statically: compiler-func.md
       - Useful Utilities: assertion.md
