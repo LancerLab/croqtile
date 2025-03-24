@@ -189,9 +189,11 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
         }
       }
     }
-  } else if (isa<AST::InThreadsBlock>(&n)) {
+  } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
     DecrDeviceIndent();
     ds << d_indent << "} // end inthreads\n";
+    if (!it->async)
+      ds << d_indent << "__syncthreads();\n";
   } else if (isa<AST::IncrementBlock>(&n)) {
     if (use_hetero_tileflow && IsHostSide()) {
       DecrHostIndent();

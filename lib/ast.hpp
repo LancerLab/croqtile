@@ -1541,15 +1541,17 @@ struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
 struct InThreadsBlock : public Node, public TypeIDProvider<InThreadsBlock> {
   ptr<Expr> pred;
   ptr<MultiNodes> stmts;
+  bool async = false;
 
   explicit InThreadsBlock(const location& l, const ptr<Expr> p,
-                          const ptr<MultiNodes>& s)
-      : Node(l), pred(p), stmts(s) {
+                          const ptr<MultiNodes>& s, bool a = false)
+      : Node(l), pred(p), stmts(s), async(a) {
     assert(p != nullptr && "missing iteration variables for the statement.");
   }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- InThreads Block:";
+    if (async) os << " Async";
     os << "\n" << prefix << " `- Predication: " << PSTR(pred);
     if (stmts) { stmts->Print(os, prefix + " "); }
   }

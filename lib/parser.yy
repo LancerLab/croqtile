@@ -986,13 +986,13 @@ within_block
     ;
 
 inthreads_block
-    : INTHDS LPAREN s_expr RPAREN LBRACE statements RBRACE {
-        $$ = AST::Make<AST::InThreadsBlock>(@1, $3, $6);
+    : INTHDS sync_type LPAREN s_expr RPAREN LBRACE statements RBRACE {
+        $$ = AST::Make<AST::InThreadsBlock>(@1, $4, $7, $2);
       }
-    | INTHDS LPAREN s_expr RPAREN statement {
-        auto mv = AST::Make<AST::MultiNodes>(@4);
-        mv->Append($5);
-        $$ = AST::Make<AST::InThreadsBlock>(@1, $3, mv);
+    | INTHDS sync_type LPAREN s_expr RPAREN statement {
+        auto mv = AST::Make<AST::MultiNodes>(@6);
+        mv->Append($6);
+        $$ = AST::Make<AST::InThreadsBlock>(@1, $4, mv, $2);
       }
     ;
 

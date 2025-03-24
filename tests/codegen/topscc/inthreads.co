@@ -17,10 +17,13 @@ __co__  void foo(f32 [1, 2, 4] a) {
 // CHECK: __global__ void __choreo_device_foo(float * a) {
 // CHECK:   if (((__tops_tid_x())<((3)))) {
 // CHECK:   } // end inthreads
+// CHECK:   __syncthreads();
 // CHECK:   if (((__tops_tid_x())>((0)))) {
 // CHECK:       if (((__tops_tid_x())==((0)))) {
 // CHECK:       } // end inthreads
 // CHECK:   } // end inthreads
+// CHECK:   __syncthreads();
 // CHECK:   if (((__tops_tid_x())==((1)))) {
 // CHECK:   } // end inthreads
+// CHECK:   __syncthreads();
 // CHECK: }
