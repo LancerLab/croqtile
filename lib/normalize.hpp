@@ -479,7 +479,7 @@ public:
 
         auto bound_expr = cast<AST::Expr>(bound);
         if (bound_expr->GetSymbol()) {
-          repls.emplace_back(i, bound_expr->GetReference());
+          repls.emplace_back(i, bound_expr);
           continue;
         } else if (bound_expr->op == "getith") {
           if (auto lexpr = dyn_cast<AST::Expr>(bound_expr->GetL())) {
@@ -493,7 +493,7 @@ public:
                   std::make_tuple(index, assign, nname));
               VST_DEBUG(dbgs()
                         << "replace " << PSTR(bound_expr->GetL()) << " with ");
-              bound_expr->SetL(AST::Make<AST::Identifier>(v->LOC(), nname));
+              bound_expr->SetL(AST::MakeIdExpr(v->LOC(), nname));
               VST_DEBUG(dbgs() << PSTR(bound_expr->GetL()) << ".\n");
             }
           }
@@ -506,7 +506,7 @@ public:
         auto assign = AST::Make<AST::Assignment>(v->LOC(), nname, bound_expr);
         mnodes_insertions[multi_nodes.top()].emplace_back(
             std::make_tuple(index, assign, nname));
-        repls.emplace_back(i, AST::Make<AST::Identifier>(v->LOC(), nname));
+        repls.emplace_back(i, AST::MakeIdExpr(v->LOC(), nname));
       }
 
       for (auto& repl : repls) {

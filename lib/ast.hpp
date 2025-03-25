@@ -1498,7 +1498,7 @@ struct Synchronize : public Node, public TypeIDProvider<Synchronize> {
 
 struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   ptr<Identifier> iv; // induction variable
-  // both will be normalized to Identifier which ref to anon_x
+  // both will be normalized to Expr which ref to anon_x
   ptr<Node> lbound = nullptr;
   ptr<Node> ubound = nullptr;
   int stride = GetInvalidStride();

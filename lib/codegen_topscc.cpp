@@ -1143,15 +1143,17 @@ bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
         hs << h_indent << "for (" << ssm.DeviceName(iv_name) << " = "
            << (rng->lbound ? ("(" + ExprSTR(rng->lbound, false) + ")") : "0")
            << "; " << ssm.DeviceName(iv_name) << " < "
-           << UnScopedExpr(STR(iv_bty->GetUpperBound())) << "; ++"
-           << ssm.DeviceName(iv_name) << ") {\n";
+           << UnScopedExpr(STR(iv_bty->GetUpperBound()))
+           << (rng->ubound ? (" + " + ExprSTR(rng->ubound, false)) : "")
+           << "; ++" << ssm.DeviceName(iv_name) << ") {\n";
         IncrHostIndent();
       } else {
         ds << d_indent << "for (" << ssm.DeviceName(iv_name) << " = "
            << (rng->lbound ? ("(" + ExprSTR(rng->lbound, false) + ")") : "0")
            << "; " << ssm.DeviceName(iv_name) << " < "
-           << UnScopedExpr(STR(iv_bty->GetUpperBound())) << "; ++"
-           << ssm.DeviceName(iv_name) << ") {\n";
+           << UnScopedExpr(STR(iv_bty->GetUpperBound()))
+           << (rng->ubound ? (" + " + ExprSTR(rng->ubound, false)) : "")
+           << "; ++" << ssm.DeviceName(iv_name) << ") {\n";
         IncrDeviceIndent();
       }
     }
@@ -1598,7 +1600,7 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       if (FCtx(fname).HasSymbolValues(sname)) {
         auto svs = FCtx(fname).GetSymbolValues(sname);
         if (IsValidValueItem(svs.int_expr))
-          return "(" + STR(svs.int_expr) + ")";
+          return "(" + UnScopedExpr(STR(svs.int_expr)) + ")";
       }
     }
     if (ConvertibleToInt(NodeType(*e))) {

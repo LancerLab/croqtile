@@ -1142,7 +1142,7 @@ bool LivenessAnalyzer::Visit(AST::ForeachBlock& n) {
     AddUse(current_stmt, range->IVName());
     for (const auto& offset : {range->lbound, range->ubound}) {
       if (!offset) continue;
-      if (auto id = dyn_cast<AST::Identifier>(offset))
+      if (auto id = AST::GetIdentifier(*offset))
         AddUse(current_stmt, id->name);
       else
         assert(false &&

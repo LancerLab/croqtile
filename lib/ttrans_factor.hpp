@@ -388,7 +388,7 @@ public:
     auto& ranges = n.GetRanges();
     auto iv_name = cast<AST::LoopRange>(ranges[0])->iv->name;
     auto lbound = cast<AST::LoopRange>(ranges[0])->lbound;
-    if (lbound == nullptr) lbound = AST::Make<AST::IntLiteral>(n.LOC(), 0);
+    if (lbound == nullptr) lbound = AST::MakeIntExpr(n.LOC(), 0);
 
     // ((iv - lb) % 2 + 2) % 2
     auto Condition = AST::Make<AST::Expr>(
@@ -399,7 +399,7 @@ public:
                 n.LOC(), "%",
                 AST::Make<AST::Expr>(
                     n.LOC(), "-", AST::Make<AST::Identifier>(n.LOC(), iv_name),
-                    AST::Make<AST::Expr>(n.LOC(), lbound) /*end -*/),
+                    lbound /*end -*/),
                 AST::Make<AST::Expr>(
                     n.LOC(), AST::Make<AST::IntLiteral>(n.LOC(), 2)) /*end %*/),
             AST::Make<AST::Expr>(
