@@ -326,7 +326,13 @@ status-doc:
 
 # utils to publish packages to releases or package registry
 publish-package: package
-	bash scripts/publish-package.sh
+	@bash scripts/publish-package.sh
 
 publish-release: package
 	@bash scripts/publish-release.sh
+
+publish-to-apex: package
+	@bash scripts/publish-choreo-for-apex.sh
+
+publish-to-topsop: package
+	@bash scripts/publish-choreo-for-topsop.sh
