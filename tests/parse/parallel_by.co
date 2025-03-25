@@ -118,3 +118,13 @@ __co__ void bar2() {
 // CHECK:   `- Parallelization:  index symbol: b, bound [0, 24)
 // CHECK:                        index component: {x, y, z}, corresponding ubound: [4, 3, 2]
 // CHECK:    `- Var Decl (f16 [ 4 ], local): l
+
+__co__ void async_parallel_by() {
+  parallel.async by 3 ;
+}
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: async_parallel_by
+// CHECK:  `- Return type: void
+// CHECK:  `- Parameters
+// CHECK:  `- Parallelization:  index symbol: anon_1, bound [0, 3)

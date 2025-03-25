@@ -82,7 +82,6 @@ int main(int argc, char* argv[]) {
   }
 
   if (CCtx().DumpAst()) {
-    dbgs() << "here\n";
     root.Print(dbgs());
     return 0;
   }

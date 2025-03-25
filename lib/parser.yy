@@ -187,7 +187,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::SpanAs>> span_as
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
 %nterm <AST::ptr<AST::Node>> foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal device_passable declaration statement assignment dma_stmt wait_stmt call_stmt print_stmt swap_stmt expr_or_qes range_expr param_mdspan_val chunkat_or_storage_or_select pred returnable
-%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls
+%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls stmts_block
 %nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables future_data_list template_params gi_list
 %nterm <AST::ptr<AST::Expr>> s_expr template_value_expr span_expr id_expr bound_expr optional_pred
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
@@ -399,8 +399,8 @@ gi_list
     ;
 
 bool_literal
-    : TRUE { $$ = AST::Make<AST::Boolean>(@1, std::string("true")); }
-    | FALSE { $$ = AST::Make<AST::Boolean>(@1, std::string("false")); }
+    : TRUE { $$ = AST::Make<AST::Boolean>(@1, "true"); }
+    | FALSE { $$ = AST::Make<AST::Boolean>(@1, "false"); }
     ;
 
 pred
@@ -482,13 +482,22 @@ return_stmt
     | RET returnable { $$ = AST::Make<AST::Return>(@1, $2); }
     ;
 
+stmts_block
+    : LBRACE statements RBRACE { $$ = $2; }
+    | statement {
+        $$ = AST::Make<AST::MultiNodes>(@1);
+        $$->Append($1);
+      }
+    | SEMCOL { $$ = AST::Make<AST::MultiNodes>(@1); }
+    ;
+
 paraby_block
     : PARA sync_type {
         paraby_symbols.clear();
-      } parabys LBRACE statements RBRACE {
-        $$ = AST::Make<AST::ParallelBy>(@1, cast<AST::MultiNodes>($4->AllSubs()[0]), $6, $2);
+      } parabys stmts_block {
+        $$ = AST::Make<AST::ParallelBy>(@1, cast<AST::MultiNodes>($4->AllSubs()[0]), $5, $2);
         if ($4->Count() > 1)
-          $$->stmts = ConstructPBRecursively(1, $4, $6, $2);
+          $$->stmts = ConstructPBRecursively(1, $4, $5, $2);
       }
     ;
 
@@ -967,42 +976,22 @@ future_data_list
     ;
 
 within_block
-    : WITH withins LBRACE statements RBRACE {
+    : WITH withins stmts_block {
         $$ = AST::Make<AST::WithBlock>(@1);
         $$->withins = $2;
+        $$->stmts = $3;
+      }
+    | WITH withins where_clause stmts_block {
+        $$ = AST::Make<AST::WithBlock>(@1);
+        $$->withins = $2;
+        $$->reqs = $3;
         $$->stmts = $4;
-      }
-    | WITH withins statement {
-        $$ = AST::Make<AST::WithBlock>(@1);
-        $$->withins = $2;
-        auto mv = AST::Make<AST::MultiNodes>(@3);
-        mv->Append($3);
-        $$->stmts = mv;
-      }
-    | WITH withins where_clause LBRACE statements RBRACE {
-        $$ = AST::Make<AST::WithBlock>(@1);
-        $$->withins = $2;
-        $$->reqs = $3;
-        $$->stmts = $5;
-      }
-    | WITH withins where_clause statement {
-        $$ = AST::Make<AST::WithBlock>(@1);
-        $$->withins = $2;
-        $$->reqs = $3;
-        auto mv = AST::Make<AST::MultiNodes>(@4);
-        mv->Append($4);
-        $$->stmts = mv;
       }
     ;
 
 inthreads_block
-    : INTHDS sync_type LPAREN s_expr RPAREN LBRACE statements RBRACE {
-        $$ = AST::Make<AST::InThreadsBlock>(@1, $4, $7, $2);
-      }
-    | INTHDS sync_type LPAREN s_expr RPAREN statement {
-        auto mv = AST::Make<AST::MultiNodes>(@6);
-        mv->Append($6);
-        $$ = AST::Make<AST::InThreadsBlock>(@1, $4, mv, $2);
+    : INTHDS sync_type LPAREN s_expr RPAREN stmts_block {
+        $$ = AST::Make<AST::InThreadsBlock>(@1, $4, $6, $2);
       }
     ;
 
@@ -1070,19 +1059,14 @@ optional_pred
     ;
 
 foreach_block
-    : FOREACH range_exprs optional_pred LBRACE statements RBRACE {
-        $$ = AST::Make<AST::ForeachBlock>(@1, $2, $5, $3);
-      }
-    | FOREACH range_exprs optional_pred statement {
-        auto mv = AST::Make<AST::MultiNodes>(@4);
-        mv->Append($4);
-        $$ = AST::Make<AST::ForeachBlock>(@1, $2, mv, $3);
+    : FOREACH range_exprs optional_pred stmts_block {
+        $$ = AST::Make<AST::ForeachBlock>(@1, $2, $4, $3);
       }
     ;
 
 increment_block
-    : INCR id_list WHILE pred LBRACE statements RBRACE {
-        $$ = AST::Make<AST::IncrementBlock>(@1, $2, $4, $6);
+    : INCR id_list WHILE pred stmts_block {
+        $$ = AST::Make<AST::IncrementBlock>(@1, $2, $4, $5);
       }
     ;
 
