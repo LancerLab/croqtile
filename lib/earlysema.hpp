@@ -99,6 +99,7 @@ public:
   bool Visit(AST::Call&) override;
   bool Visit(AST::PrintNode&) override;
   bool Visit(AST::Rotate&) override;
+  bool Visit(AST::Synchronize&) override;
   bool Visit(AST::Select&) override;
   bool Visit(AST::Return&) override;
   bool Visit(AST::LoopRange&) override;

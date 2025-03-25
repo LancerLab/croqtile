@@ -190,6 +190,7 @@ public:
   bool Visit(AST::Wait&) override;
   bool Visit(AST::PrintNode&) override;
   bool Visit(AST::Rotate&) override;
+  bool Visit(AST::Synchronize&) override;
   bool Visit(AST::Call&) override;
   bool Visit(AST::NamedVariableDecl&) override;
   bool Visit(AST::CppSourceCode& n) override;

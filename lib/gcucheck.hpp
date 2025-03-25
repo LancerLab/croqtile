@@ -843,6 +843,12 @@ public:
     TraceEachVisit(n);
     return true;
   }
+  bool Visit(AST::Synchronize& n) override {
+    TraceEachVisit(n);
+
+    // TODO: check the scope
+    return true;
+  }
   bool Visit(AST::Select& n) override {
     TraceEachVisit(n);
     return true;

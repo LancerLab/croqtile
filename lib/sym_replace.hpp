@@ -471,6 +471,13 @@ public:
     return true;
   }
 
+  bool Visit(AST::Synchronize& n) override {
+    TraceEachVisit(n);
+    if (cannot_proceed) return true;
+
+    return true;
+  }
+
   bool Visit(AST::Select& n) override {
     TraceEachVisit(n);
     if (cannot_proceed) return true;

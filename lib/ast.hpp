@@ -1023,6 +1023,7 @@ struct IfElse : public Node, public TypeIDProvider<IfElse> {
 struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
   ptr<Identifier> biv = nullptr;
   ValueItem bound;
+
   // components
   ptr<MultiValues> iv_symbols = nullptr;
   ptr<MultiValues> bounds;
@@ -1031,9 +1032,11 @@ struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
   // expilicit dimensions count
   size_t dims;
 
+  bool async;
+
   ParallelBy(const location& l, const ptr<MultiNodes>& config,
-             const ptr<MultiNodes>& ss)
-      : Node(l), stmts(ss) {
+             const ptr<MultiNodes>& ss, bool a = false)
+      : Node(l), stmts(ss), async(a) {
     if (config->Count() == 2) {
       if (isa<Identifier>(config->values[0])) {
         // parallel p by 2 {}
@@ -1477,6 +1480,20 @@ struct Rotate : public Node, public TypeIDProvider<Rotate> {
   void accept(Visitor&) override;
 
   __UDT_TYPE_INFO__(Node, Rotate)
+};
+
+struct Synchronize : public Node, public TypeIDProvider<Synchronize> {
+  ptr<Memory> scope;
+
+  Synchronize(const location& loc, const ptr<Memory>& s)
+      : Node(loc), scope(s) {}
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << "\n" << prefix << "`- " << "Synchronize: " << PSTR(scope);
+  }
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, Synchronize)
 };
 
 struct LoopRange : public Node, public TypeIDProvider<LoopRange> {

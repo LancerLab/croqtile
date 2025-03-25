@@ -15,13 +15,13 @@
 #include "preprocess.hpp"
 #include "scanner.hpp"
 #include "semacheck.hpp"
+#include "shapeinfer.hpp"
 #include "sym_replace.hpp"
 #include "symtab.hpp"
 #include "ttrans_factor.hpp"
 #include "ttrans_topscc.hpp"
 #include "typeinfer.hpp"
 #include "types.hpp"
-#include "valno.hpp"
 #include "visualize.hpp"
 #include <cstdlib>
 #include <getopt.h>

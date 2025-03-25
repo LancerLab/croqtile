@@ -240,38 +240,6 @@ public:
   }
   ~MemUsageCheck() {}
 
-  bool Visit(AST::MultiNodes& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::MultiValues& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::IntLiteral& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::FloatLiteral& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::Boolean& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::Expr& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::MultiDimSpans& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::NamedTypeDecl& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
   bool Visit(AST::NamedVariableDecl& n) override {
     TraceEachVisit(n);
     // mem alloc could happend here
@@ -303,98 +271,6 @@ public:
           SSTab().ScopedName(n.name_str));
     }
 
-    return true;
-  }
-  bool Visit(AST::IntTuple& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::Assignment& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::IntIndex& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::DataType& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::Identifier& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::Parameter& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::ParamList& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::ParallelBy& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::WhereBind& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::WithIn& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::WithBlock& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::Memory& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::SpanAs& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::DMA& d) override {
-    TraceEachVisit(d);
-    return true;
-  }
-  bool Visit(AST::ChunkAt& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::Wait& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::Call& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::PrintNode& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::Rotate& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::Select& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::Return& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::LoopRange& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::ForeachBlock& n) override {
-    TraceEachVisit(n);
     return true;
   }
   bool Visit(AST::FunctionDecl& n) override {
@@ -449,18 +325,6 @@ public:
                      << "Total compile-time mem used of parameters of function "
                      << n.name << ":\n"
                      << GetMemUsageMapDetail(ct_tot_mem_usage));
-    return true;
-  }
-  bool Visit(AST::ChoreoFunction& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::CppSourceCode& n) override {
-    TraceEachVisit(n);
-    return true;
-  }
-  bool Visit(AST::Program& n) override {
-    TraceEachVisit(n);
     return true;
   }
 

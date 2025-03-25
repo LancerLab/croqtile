@@ -215,6 +215,13 @@ void Rotate::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
+void Synchronize::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+  scope->accept(v);
+  v.Visit(*this);
+  v.AfterVisit(*this);
+}
+
 void LoopRange::accept(Choreo::Visitor& v) {
   iv->accept(v);
   v.Visit(*this);

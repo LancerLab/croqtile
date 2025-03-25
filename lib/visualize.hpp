@@ -300,24 +300,6 @@ public:
         parallel_factor(1), start_x(0), start_y(0) {}
   ~Visualizer() {}
 
-  // derived class must call this to incorporate with symbol table
-
-  bool Visit(AST::MultiNodes&) override { return true; }
-  bool Visit(AST::MultiValues&) override { return true; }
-  bool Visit(AST::IntLiteral&) override { return true; }
-  bool Visit(AST::FloatLiteral&) override { return true; }
-  bool Visit(AST::Boolean&) override { return true; }
-  bool Visit(AST::Expr&) override { return true; }
-  bool Visit(AST::MultiDimSpans&) override { return true; }
-  bool Visit(AST::NamedTypeDecl&) override { return true; }
-  bool Visit(AST::NamedVariableDecl&) override { return true; }
-  bool Visit(AST::IntTuple&) override { return true; }
-  bool Visit(AST::Assignment&) override { return true; }
-  bool Visit(AST::IntIndex&) override { return true; }
-  bool Visit(AST::DataType&) override { return true; }
-  bool Visit(AST::Identifier&) override { return true; }
-  bool Visit(AST::Parameter&) override { return true; }
-  bool Visit(AST::ParamList&) override { return true; }
   bool Visit(AST::ParallelBy& pb) override {
     if (!isa<int>(&pb.bound))
       choreo_unreachable("symbolic bound is not supported in visulize yet.");
@@ -350,19 +332,6 @@ public:
     dma_polyhedrons.emplace_back(std::move(dp));
     return true;
   }
-
-  bool Visit(AST::ChunkAt&) override { return true; }
-  bool Visit(AST::Wait&) override { return true; }
-  bool Visit(AST::Call&) override { return true; }
-  bool Visit(AST::Rotate&) override { return true; }
-  bool Visit(AST::Select&) override { return true; }
-  bool Visit(AST::Return&) override { return true; }
-  bool Visit(AST::LoopRange&) override { return true; }
-  bool Visit(AST::ForeachBlock&) override { return true; }
-  bool Visit(AST::FunctionDecl&) override { return true; }
-  bool Visit(AST::ChoreoFunction&) override { return true; }
-  bool Visit(AST::CppSourceCode&) override { return true; }
-  bool Visit(AST::Program&) override { return true; }
 
 public:
   bool BeforeVisitImpl(AST::Node&) override { return true; }

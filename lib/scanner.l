@@ -175,6 +175,7 @@ cstr        \"([^"\\]|\\.)*\"
   "swap"     return Choreo::Parser::make_SWAP(yytext, loc);
   "rotate"   return Choreo::Parser::make_ROTATE(yytext, loc);
   "assert"   return Choreo::Parser::make_ASSERT (yytext,loc);
+  "sync"     return Choreo::Parser::make_SYNC(yytext, loc);
   "if"       return Choreo::Parser::make_IF(yytext, loc);
   "else"     return Choreo::Parser::make_ELSE(yytext, loc);
   "inthreads" return Choreo::Parser::make_INTHDS(yytext, loc);
@@ -212,6 +213,7 @@ cstr        \"([^"\\]|\\.)*\"
   ","        return Choreo::Parser::make_COMMA  (loc);
   ";"        return Choreo::Parser::make_SEMCOL (loc);
   ":"        return Choreo::Parser::make_COL    (loc);
+  "."        return Choreo::Parser::make_DOT    (loc);
   "#"        return Choreo::Parser::make_UBOUND (loc);
   "("        return Choreo::Parser::make_LPAREN (loc);
   ")"        return Choreo::Parser::make_RPAREN (loc);

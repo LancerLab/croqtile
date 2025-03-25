@@ -818,6 +818,11 @@ bool TypeInference::Visit(AST::Rotate& n) {
   return true;
 }
 
+bool TypeInference::Visit(AST::Synchronize& n) {
+  TraceEachVisit(n);
+  return true;
+}
+
 bool TypeInference::Visit(AST::Select& n) {
   TraceEachVisit(n);
 

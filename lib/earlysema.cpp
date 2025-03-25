@@ -1257,6 +1257,13 @@ bool EarlySemantics::Visit(AST::PrintNode& n) {
   return true;
 }
 
+bool EarlySemantics::Visit(AST::Synchronize& n) {
+  TraceEachVisit(n);
+
+  // TODO: check the scope
+  return true;
+}
+
 bool EarlySemantics::Visit(AST::Rotate& n) {
   TraceEachVisit(n);
 

@@ -192,8 +192,7 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
   } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
     DecrDeviceIndent();
     ds << d_indent << "} // end inthreads\n";
-    if (!it->async)
-      ds << d_indent << "__syncthreads();\n";
+    if (!it->async) ds << d_indent << "__syncthreads();\n";
   } else if (isa<AST::IncrementBlock>(&n)) {
     if (use_hetero_tileflow && IsHostSide()) {
       DecrHostIndent();
@@ -988,6 +987,22 @@ bool TopsccCodeGen::Visit(AST::Rotate& n) {
     ds << ExprSTR(id, false);
   }
   ds << ");\n";
+
+  return true;
+}
+
+bool TopsccCodeGen::Visit(AST::Synchronize& n) {
+  TraceEachVisit(n);
+
+  switch (n.scope->Get()) {
+  case Storage::GLOBAL:
+    hs << h_indent << "choreo::abend_true(topsDeviceSynchronize());\n";
+    break;
+  case Storage::SHARED: ds << d_indent << "__syncthreads();\n"; break;
+  default:
+    choreo_unreachable("unsupported synchronization type: " + PSTR(n.scope) +
+                       ".");
+  }
 
   return true;
 }

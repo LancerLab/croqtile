@@ -89,8 +89,9 @@ static bool parsing_prefixed_list = false;
 bool parsing_chunkat_value_list = false;
 
 ptr<AST::MultiNodes> ConstructPBRecursively(size_t idx,
-                                          const ptr<AST::MultiNodes>& ps,
-                                          const ptr<AST::MultiNodes>& stmts);
+                                            const ptr<AST::MultiNodes>& ps,
+                                            const ptr<AST::MultiNodes>& stmts,
+                                            bool);
 std::set<std::string> paraby_symbols;
 
 inline ptr<AST::ChunkAt> ReformChunkAt(const ptr<AST::ChunkAt> &);
@@ -132,6 +133,7 @@ void choreo_info(const char *message) {
   COMMA   ","
   SEMCOL  ";"
   COL     ":"
+  DOT     "."
   LT      "<"
   GT      ">"
   EQ      "=="
@@ -168,7 +170,7 @@ void choreo_info(const char *message) {
 %token <Choreo::Storage> LOCAL SHARED GLOBAL
 %token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT HALF8 HALF BFP16 FLOAT DOUBLE BOOL VOID
 // builtin operations
-%token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK AT WAIT CALL AUTO SELECT SWAP ROTATE CHUNKINBOUND ASSERT
+%token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT
 // control related
 %token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH INCR RET WHERE WHILE
 %token <std::string> TRUE FALSE
@@ -202,6 +204,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::WhereBind>> where_bind
 %nterm <AST::ptr<AST::ParallelBy>> paraby_block
 %nterm <AST::ptr<AST::Return>> return_stmt
+%nterm <AST::ptr<AST::Synchronize>> sync_stmt
 %nterm <AST::ptr<AST::ChunkAt>> chunkat_expr sub_data_expr
 %nterm <AST::ptr<AST::Select>> select_expr
 
@@ -460,11 +463,18 @@ statement
     | swap_stmt    SEMCOL { $$ = $1; }
     | print_stmt   SEMCOL { $$ = $1; }
     | return_stmt  SEMCOL { $$ = $1; }
+    | sync_stmt    SEMCOL { $$ = $1; }
     | paraby_block        { $$ = $1; }
     | within_block        { $$ = $1; }
     | inthreads_block     { $$ = $1; }
     | foreach_block       { $$ = $1; }
     | increment_block     { $$ = $1; /* TODO: remove? */ }
+    ;
+
+sync_stmt
+    : SYNC DOT storage {
+        $$ = AST::Make<AST::Synchronize>(@1, AST::Make<AST::Memory>(@3, $3));
+      }
     ;
 
 return_stmt
@@ -473,12 +483,12 @@ return_stmt
     ;
 
 paraby_block
-    : PARA {
+    : PARA sync_type {
         paraby_symbols.clear();
       } parabys LBRACE statements RBRACE {
-        $$ = AST::Make<AST::ParallelBy>(@1, cast<AST::MultiNodes>($3->AllSubs()[0]), $5);
-        if ($3->Count() > 1)
-          $$->stmts = ConstructPBRecursively(1, $3, $5);
+        $$ = AST::Make<AST::ParallelBy>(@1, cast<AST::MultiNodes>($4->AllSubs()[0]), $6, $2);
+        if ($4->Count() > 1)
+          $$->stmts = ConstructPBRecursively(1, $4, $6, $2);
       }
     ;
 
@@ -1335,13 +1345,14 @@ swap_stmt
 
 
 ptr<AST::MultiNodes> ConstructPBRecursively(size_t idx,
-                                          const ptr<AST::MultiNodes>& ps,
-                                          const ptr<AST::MultiNodes>& stmts) {
+                                            const ptr<AST::MultiNodes>& ps,
+                                            const ptr<AST::MultiNodes>& stmts,
+                                            bool async) {
   auto pb = AST::Make<AST::ParallelBy>(ps->LOC(),
                                        cast<AST::MultiNodes>(ps->AllSubs()[idx]),
-                                       stmts);
+                                       stmts, async);
   if (idx < ps->Count() - 1)
-    pb->stmts = ConstructPBRecursively(idx + 1, ps, stmts);
+    pb->stmts = ConstructPBRecursively(idx + 1, ps, stmts, async);
   auto mn = AST::Make<AST::MultiNodes>(ps->LOC());
   mn->Append(pb);
   return mn;

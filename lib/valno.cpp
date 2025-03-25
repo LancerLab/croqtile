@@ -1,8 +1,9 @@
-#include "valno.hpp"
+#include "shapeinfer.hpp"
 
 using namespace Choreo;
 
 namespace {
+
 std::vector<int> CollectValueNumbers(const std::string& input) {
   std::vector<int> res;
   std::regex valuePattern("#(-?\\d+)");

@@ -84,6 +84,7 @@ struct Visitor {
   virtual bool Visit(AST::Call&) = 0;
   virtual bool Visit(AST::PrintNode&) = 0;
   virtual bool Visit(AST::Rotate&) = 0;
+  virtual bool Visit(AST::Synchronize&) = 0;
   virtual bool Visit(AST::Select&) = 0;
   virtual bool Visit(AST::Return&) = 0;
   virtual bool Visit(AST::LoopRange&) = 0;
@@ -484,6 +485,7 @@ public:
   bool Visit(AST::Call&) override { return true; }
   bool Visit(AST::PrintNode&) override { return true; }
   bool Visit(AST::Rotate&) override { return true; }
+  bool Visit(AST::Synchronize&) override { return true; }
   bool Visit(AST::Select&) override { return true; }
   bool Visit(AST::Return&) override { return true; }
   bool Visit(AST::LoopRange&) override { return true; }
