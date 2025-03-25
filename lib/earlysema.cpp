@@ -710,6 +710,11 @@ bool EarlySemantics::Visit(AST::ParamList& n) {
 bool EarlySemantics::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
 
+  if (parallel_level > 1 && n.async) {
+    Error(n.LOC(), "inner parallel-by level can not be asynchronous.");
+    error_count++;
+  }
+
   if (n.dims > 3) {
     Error(n.LOC(),
           "The number of parallel dimensions is limited to 3 (x, y, z).");

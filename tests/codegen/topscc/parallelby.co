@@ -12,6 +12,7 @@ __co__ auto bar() {
 // CHECK:   dim3 __bar_gdims0(1, 1, 1);
 // CHECK:   dim3 __bar_bdims0(2, 1, 1);
 // CHECK:   __choreo_device_bar<<<__bar_gdims0, __bar_bdims0>>>();
+// CHECK:   choreo::abend_true(topsDeviceSynchronize());
 // CHECK: }
 
 __co__ auto bar1(f16 [36, 15, 14, 64] a) {
@@ -77,3 +78,13 @@ __co__ auto bar2(f16 [4, 36, 14, 64] a) {
 
 // CHECK:   dim3 __bar2_gdims0(2, 9, 1);
 // CHECK:   dim3 __bar2_bdims0(7, 1, 1);
+
+__co__ auto async(bf16 [7, 64] a) {
+  parallel.async p by 2 { }
+  return a;
+}
+
+// CHECK: choreo::spanned_data<choreo::bf16, 2> async(const choreo::spanned_view<choreo::bf16, 2> & a) {
+// CHECK:   __choreo_device_async<<<__async_gdims0, __async_bdims0>>>(a__device);
+// CHECK-NOT:   choreo::abend_true(topsDeviceSynchronize());
+// CHECK: }

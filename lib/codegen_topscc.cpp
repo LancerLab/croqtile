@@ -581,6 +581,9 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
 
   hs << ");\n";
 
+  if (!n.async)
+    hs << h_indent << "choreo::abend_true(topsDeviceSynchronize());\n";
+
   // typically, the last buffer is used as output in destination-passing-style
   // convention
   if (!HasChoreoOutput()) {
