@@ -1002,6 +1002,7 @@ bool TopsccCodeGen::Visit(AST::Synchronize& n) {
     hs << h_indent << "choreo::abend_true(topsDeviceSynchronize());\n";
     break;
   case Storage::SHARED: ds << d_indent << "__syncthreads();\n"; break;
+  case Storage::LOCAL: ds << d_indent << "__syncsubthreads();\n"; break;
   default:
     choreo_unreachable("unsupported synchronization type: " + PSTR(n.scope) +
                        ".");

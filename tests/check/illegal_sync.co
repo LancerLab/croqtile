@@ -1,0 +1,52 @@
+// RUN: choreo %s 2>&1 | FileCheck %s
+// RUN: choreo -arch=gcu400 %s 2>&1 | FileCheck --check-prefix=GCU4CHK %s
+
+__co__ void foo() {
+  parallel by 2 parallel by 1;
+  parallel by 3 parallel by 2 parallel by 1; // only valid for gcu4
+}
+
+// CHECK: error: parallel level exceeds limit: 3 > 2.
+
+__co__ void bar() {
+  sync.global;
+  sync.shared;
+  sync.local;
+  parallel by 3 {
+    sync.global;
+    sync.shared;
+    sync.local;
+    parallel by 2 {
+      sync.global;
+      sync.shared;
+      sync.local;
+      parallel by 1 {
+        sync.global;
+        sync.shared;
+        sync.local;
+      }
+    }
+  }
+}
+
+// CHECK: error: unsupported: shared synchronization in global scope.
+// CHECK: error: GCU300 does not support local synchronization.
+// CHECK: error: unsupported: global synchronization in shared scope.
+// CHECK: error: GCU300 does not support local synchronization.
+// CHECK: error: unsupported: global synchronization in local scope.
+// CHECK: error: unsupported: shared synchronization in local scope.
+// CHECK: error: GCU300 does not support local synchronization.
+// CHECK: error: parallel level exceeds limit: 3 > 2.
+// CHECK: error: unsupported: global synchronization in sub-local scope.
+// CHECK: error: unsupported: shared synchronization in sub-local scope.
+// CHECK: error: GCU300 does not support local synchronization.
+
+// GCU4CHK: error: unsupported: shared synchronization in global scope.
+// GCU4CHK: error: unsupported: local synchronization in global scope.
+// GCU4CHK: error: unsupported: global synchronization in shared scope.
+// GCU4CHK: error: unsupported: local synchronization in shared scope.
+// GCU4CHK: error: unsupported: global synchronization in local scope.
+// GCU4CHK: error: unsupported: shared synchronization in local scope.
+// GCU4CHK: error: unsupported: global synchronization in sub-local scope.
+// GCU4CHK: error: unsupported: shared synchronization in sub-local scope.
+// GCU4CHK: error: unsupported: local synchronization in sub-local scope.

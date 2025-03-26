@@ -1265,7 +1265,14 @@ bool EarlySemantics::Visit(AST::PrintNode& n) {
 bool EarlySemantics::Visit(AST::Synchronize& n) {
   TraceEachVisit(n);
 
-  // TODO: check the scope
+  switch (n.scope->Get()) {
+  case Storage::GLOBAL:
+  case Storage::SHARED:
+  case Storage::LOCAL: break;
+  default:
+    Error(n.scope->LOC(), "Unsupported synchorization: " + PSTR(n.scope) + ".");
+    break;
+  }
   return true;
 }
 

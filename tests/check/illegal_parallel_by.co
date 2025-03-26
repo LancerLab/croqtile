@@ -1,0 +1,10 @@
+// RUN: choreo %s -sa=latenorm 2>&1 | FileCheck %s
+
+__co__ void illegal_pb() {
+  parallel.async by 4
+    parallel.async by 3;  // illegal for inner parallel
+
+  parallel by 4 parallel.async by 3;  // illegal for inner parallel
+}
+
+// CHECK-COUNT-2: error: inner parallel-by level can not be asynchronous.

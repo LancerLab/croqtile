@@ -73,7 +73,7 @@ private:
         lc.OverwriteGDimsByBDims();
         lc.ResetBDims();
         lc.SetBlockDims(pb->BoundValues());
-      } else
+      } else if (parallel_level != 3)
         choreo_unreachable("The parallel-by level " +
                            std::to_string(parallel_level) +
                            " is not supported.");

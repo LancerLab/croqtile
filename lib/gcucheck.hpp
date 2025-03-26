@@ -35,7 +35,11 @@ private:
       cur_fname = cf->name;
     } else if (isa<AST::ParallelBy>(&n)) {
       parallel_level++;
-      assert((parallel_level < 3) && "unexpected parallel level.");
+      const int pl_limit = (CCtx().GetArch() == TargetArch::GCU4) ? 4 : 3;
+      if (parallel_level > pl_limit - 1)
+        Error(n.LOC(), "parallel level exceeds limit: " +
+                           std::to_string(parallel_level) + " > " +
+                           std::to_string(pl_limit - 1) + ".");
       max_parallel_level = parallel_level;
     }
     return true;
@@ -121,7 +125,7 @@ private:
     };
 
     if (CCtx().GetArch() == TargetArch::GCU3 ||
-        CCtx().GetArch() == TargetArch::GCU4) { // todo: check this for GCU400
+        CCtx().GetArch() == TargetArch::GCU4) { // TODO: check this for GCU400
       // linear copy
       // omitted
 
@@ -843,12 +847,54 @@ public:
     TraceEachVisit(n);
     return true;
   }
+
   bool Visit(AST::Synchronize& n) override {
     TraceEachVisit(n);
 
-    // TODO: check the scope
+    auto pl2s = [this]() {
+      switch (parallel_level) {
+      case 0: return Storage::GLOBAL;
+      case 1: return Storage::SHARED;
+      case 2: return Storage::LOCAL;
+      case 3: return Storage::SUB;
+      default: break;
+      }
+      return Storage::NONE;
+    };
+
+    switch (n.scope->Get()) {
+    case Storage::GLOBAL:
+      if (parallel_level != 0) {
+        Error(n.LOC(), "unsupported: " + PSTR(n.scope) +
+                           " synchronization in " + STR(pl2s()) + " scope.");
+        error_count++;
+      }
+      break;
+    case Storage::SHARED:
+      if (parallel_level != 1) {
+        Error(n.LOC(), "unsupported: " + PSTR(n.scope) +
+                           " synchronization in " + STR(pl2s()) + " scope.");
+        error_count++;
+      }
+      break;
+    case Storage::LOCAL:
+      if (CCtx().GetArch() != TargetArch::GCU4) {
+        Error(n.LOC(), STR(CCtx().GetArch()) + " does not support " +
+                           PSTR(n.scope) + " synchronization.");
+        error_count++;
+      } else if (parallel_level != 2) {
+        Error(n.LOC(), "unsupported: " + PSTR(n.scope) +
+                           " synchronization in " + STR(pl2s()) + " scope.");
+        error_count++;
+      }
+      break;
+    default:
+      Error(n.scope->LOC(),
+            "unsupported synchronization: " + PSTR(n.scope) + ".");
+    }
     return true;
   }
+
   bool Visit(AST::Select& n) override {
     TraceEachVisit(n);
     return true;

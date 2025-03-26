@@ -12,7 +12,7 @@
 
 // to avoid definition error
 namespace Choreo {
-enum class Storage { LOCAL, SHARED, GLOBAL, DEFAULT, NONE };
+enum class Storage { SUB, LOCAL, SHARED, GLOBAL, DEFAULT, NONE };
 enum class CompileTarget;
 } // namespace Choreo
 
@@ -229,9 +229,9 @@ inline static std::string GetStringFrom(BaseType dataType) {
 
 inline static std::string GetStringFrom(Storage st) {
   static const std::unordered_map<Storage, std::string> enumToString = {
-      {Storage::LOCAL, "local"},     {Storage::GLOBAL, "global"},
-      {Storage::SHARED, "shared"},   {Storage::NONE, "none"},
-      {Storage::DEFAULT, "default"},
+      {Storage::SUB, "sub-local"}, {Storage::LOCAL, "local"},
+      {Storage::GLOBAL, "global"}, {Storage::SHARED, "shared"},
+      {Storage::NONE, "none"},     {Storage::DEFAULT, "default"},
   };
 
   auto it = enumToString.find(st);
