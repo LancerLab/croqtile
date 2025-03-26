@@ -1,5 +1,5 @@
 ## Overview
-
+While Choreo primarily targets SPMD (Single-Program-Multiple-Data) programming, it also supports MPMD (Multiple-Program-Multiple-Data) execution through thread masking. In this section, we demonstrate how to write divergent code using `inthreads` block in Choreo.
 
 ## Mask the Parallel Threads
 
@@ -82,8 +82,10 @@ __co__  void foo() {
 ```
 In this example, it divides the parallel threads evenly into two sub-groups, without forcing synchronization after each `inthreads` block. In this way, threads in different groups are executed in parallel, mimicing a MPMD executing. However, the `sync.shared` statement established a **synchorinization point** for all threads. That makes sure code for both paths get executed after this *synchorinization point*.
 
+Note that, only the outer `inthreads` can be declared as asynchronous. Programmers will get an compile-time error when using `inthreads.async` for any inner `inthreads` block.
+
 ## Masking for Multi-Levels
-It is possible to mask threads for different parallel levels. The following code showcases an example:
+Thread masking can be applied at different parallel levels. The following example demonstrates this:
 
 ```choreo
 __co__  void foo() {
@@ -99,29 +101,38 @@ __co__  void foo() {
   }
 }
 ```
+This code uses two levels of parallelization:
 
-In this code, we have two level of parallelism. The outer parallelization count is 3, while the inner parallelization count is 4. Here the `inthreads` predicate `p < 2 && q == 0` guard code for both parallel levels. For the outer parallelization, the allowd parallelization identity is restricted to `0` and `1`, while the allowd parallelization identify for the inner is restricted to `0` only. We also show the thread masks there in two levels, which are connected by '-'.
+- Outer level (`p`): Parallel count of 3
+- Inner level (`q`): Parallel count of 4
 
-For the second `inthreads` predicate `q == 1`, it does not have any restriction for the outer parallel level. Therefore, all parallelization identities are allowed, as showed in the comment. As a consequent, programmers must be aware of the count of parallel levels to make sure the parallel threads that execute the divergent code is as expected.
+The first `inthreads` predicate (`p < 2 && q == 0`) restricts execution to:
+
+- Outer parallel IDs: `0, 1` (excluding 2)
+- Inner parallel ID: `0` only
+
+The thread mask (`011-0001`) reflects these constraints, where the two levels are separated by a hyphen (-).
+
+The second predicate (`q == 1`) imposes no restriction on the outer level (`p`), allowing all outer IDs (`0, 1, 2`) while restricting the inner level to `q == 1`.
 
 ## Implicit Masking
-There are some code structures in Choreo that implies implicit masking. One typical situation is the multi-level `parallel-by` block. The below code showcases an example:
+In Choreo, code between multiple `parallel-by` levels can be considered as a type of implicit masking. The below code showcases an example:
 
 ```
 __co__  void foo() {
   parallel p by 6 {
-    // parallel-level-0:
-    //   as if implicitly masked 'inthreads (q == 0)'
+    // implicit masking: 'inthreads (q == 0) { ... } '
     parallel q by 2 {
-      // parallel-level-1:
-      //   code here is for all threads
+      // code here is for all threads
     }
-    // parallel-level-0:
-    //   code here is as if implicitly masked 'inthreads (q == 0)'
+    // implicit masking: 'inthreads (q == 0) { ... } '
   }
 }
 ```
 
-In this example, there exists two-level of parallelization. The code inside `parallel p by 6` block but outside `parallel q by 2` blocks is only for *parallel-level-0*. However, for target like *CUDA*/*Topscc*, it could invoke 2 parallel threads in practise to execute either code inside *parallel-level-0* or *parallel-level-1*. Therefore, the *parallel-level-0*-only part is as if guarded with a C++ block `if (q == 0)`.
+In this example, there exists two levels of parallelization. The code inside `parallel p by 6` block but outside `parallel q by 2` blocks is conceptually for the outer parallelization only. This means, only one thread from the sub-level parallelization execute the code, which is equivalent to `inthreads (q == 0) { ... }`. Programmers must be aware there is only single thread instance to execute the code part. Only the code inside the inner `parallel-by` is executed by all threads.
 
+## Quick Summary
+In this section, we examined the motivation for thread masking, which enables divergent code execution for MPMD-style programming within Choreo's SPMD paradigm. Developers can use either explicit thread masking via `inthreads` blocks or implicit control through `parallel-by` constructs to restrict execution to specific threads.
 
+While thread masking provides flexibility, it introduces thread asynchrony that complicates coordination. The next section will explore advanced techniques for managing these synchronization challenges.

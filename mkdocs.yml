@@ -48,8 +48,11 @@ nav:
       - Inputs and Output: input-output.md
       - Invoke the Device Programs: call-in-choreo.md
       - Macro and Preprocessing: macro-in-choreo.md
+    - Extending to the MPMD Programming:
+      - Thread Masking and Code Divergence: thread-masking.md
+      - Asynchronous and Events: events.md
+      - More On Asynchronous Execution: general-async.md
     - Advanced Features and Techniques:
-      - Thread Masking and Divergence: thread-masking.md
       - Advanced Data Movement: dma-in-advance.md
       - Experimental Features: loop-in-advance.md
     - Miscellaneous:

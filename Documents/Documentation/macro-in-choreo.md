@@ -1,5 +1,8 @@
-# Macros and Preprocessing in Choreo
-Choreo allows simple C/C++ macros be effective both for host code and for choreo code. One essential preprocessor capability choreo has provided is to pass the value of value-based macros defined in host code into the choreo function.
+## Overview
+Macros have long been a fundamental feature in C/C++ programming. To enable seamless manipulation of both C++ and *tileflow* programs, macro expansion is essential. This section demonstrates Choreo's macro processing capabilities.
+
+## Object-Like Macros
+Choreo preprocessor supports C/C++ **object-like macros** to connect both host code and tileflow code. The *object-like macro* performs pure text replacement and accepts no parameters. The below code gives an example:
 
 ```choreo
 #define M 256
@@ -17,15 +20,19 @@ void foo() {
 }
 
 ```
-In the above code snippet, the inputs of choreo function 'matmul' are not dynamically shaped since the choreo pre-processor substitute 'M', 'N', 'K' to be the values of '256', '32', '64' ahead of choreo compilation. The benefit of passing host macros into choreo code is obvious. The data used in host code can be easily made consistent with the user choreo function.
+In the code snippet, the inputs of choreo function `matmul` are not dynamically shaped. Instead, Choreo pre-processor substitutes `M`, `N`, `K` with values `256`, `32`, `64` ahead of Choreo compilation, which produces tileflow function with statically shaped inputs. In this way, programmers makes different code consistent and easy to manipulate.
 
-However, till now choreo only support 'simple' valued macros. Code like:
+Note that, till now Choreo does only support macros with parameters. It means code like:
 ```cpp
 #define MAX(a, b) (((a) > (b)) ? (a) : (b))
 ```
-is not supported by choreo preprocessor.
+would not work.
 
-In addition, choreo support C-style comments, either `/*...*/` or `//...`, leveraging the capability choreo preprocessor has provided. Moreover, C preprocessing directives including `#if`/`#ifdef`/`#ifndef`/`#else`/`#endif` are also supported by choreo preprocessor. Code snippet in the below showcases the usage.
+## Comments
+Choreo support C-style comments, either `/*...*/` or `//...`, leveraging the capability choreo preprocessor has provided.
+
+## Conditional Compilation
+Choreo also support conditional compilation which C/C++ programs used a lot. This includes `#if`/`#ifdef`/`#ifndef`/`#else`/`#endif`. The belwo code snippet showcases the usage:
 
 ```choreo
 #define PATH0
@@ -56,7 +63,8 @@ One important notices about choreo preprocessing is that it is triggered much ea
 chore-preprocessing -> choreo compilation -> c/c++ preprocessing -> c/c++ compilation
 ```
 
-Though the design target of choreo preprocessing is to make host/device macros work as a whole, but such a workflow makes it possible sometimes different. When you encounter any 'weird' compilation behavior, it worths considering the order of different phases.
+The primary target of choreo preprocessing is to make host/device macros work as a whole, but such a workflow makes it possible sometimes different. From an implementation perspective, Choreo pre-processor only substitute/conditionally-compile code inside the tileflow function, while leaving other pre-processing to the C++ preprocessor. That could restrict Choreo pre-processing in a limited scope.
 
-To mimic a target native compilation, choreo preprocess also takes the builtin macros from the target. For example, __TOPSCC__ is globally defined at topscc target compilation. And __CUDA__ is globally defined to generate CUDA code.
-Consequently, these macros can be utilized inside choreo functions as well as the host code.
+## Pre-defined Macros
+To mimic a target native compilation, choreo preprocess also takes the builtin macros from the target. For example, `__TOPSCC__` is globally defined at topscc target compilation, while `__CUDA__` is globally defined to generate CUDA code.
+Consequently, these macros can be utilized inside tileflow functions as well as the host code.
