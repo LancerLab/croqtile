@@ -50,7 +50,7 @@ __co__ auto illegal_call3(f32 [36, 27, 128] input) {
   }
 }
 // CHECK: error: symbol `f' is used before declaration.
-// CHECK: error: in operation "dataof": expecting a future type but got `invalid'.
+// CHECK: error: in operation "dataof": expect a future type but got `invalid'.
 // CHECK: error: (1th) argument of type 'invalid` can not be passed to the kernel function.
 // CHECK: error: (3th) argument of type 'ituple<2>` can not be passed to the kernel function.
 // CHECK: error: (1th) argument of type 'mdspan<2> []` can not be passed to the kernel function.

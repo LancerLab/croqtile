@@ -561,9 +561,9 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
     }
   } else if (const auto w = dyn_cast<AST::Wait>(&n)) {
     os << "wait ";
-    for (size_t i = 0; i < w->GetFutures().size(); ++i) {
+    for (size_t i = 0; i < FuturesOf(*w).size(); ++i) {
       if (i > 0) os << ", ";
-      auto id = AST::GetIdentifier(*w->GetFutures()[i]);
+      auto id = AST::GetIdentifier(*FuturesOf(*w)[i]);
       os << id->name;
     }
   } else if (const auto c = dyn_cast<AST::Call>(&n)) {
@@ -751,7 +751,7 @@ bool LivenessAnalyzer::AfterVisitImpl(AST::Node& n) {
   }
 
   if (auto w = dyn_cast<AST::Wait>(&n)) {
-    for (const auto& f : w->GetFutures()) {
+    for (const auto& f : FuturesOf(*w)) {
       auto id = AST::GetIdentifier(*f);
       assert(id && "expecting an identifier in Wait.");
       auto fut_name = InScopeName(id->name);
@@ -1028,7 +1028,7 @@ bool LivenessAnalyzer::Visit(AST::ChunkAt& n) {
 bool LivenessAnalyzer::Visit(AST::Wait& n) {
   TraceEachVisit(n);
   linfo[current_stmt].buffer_related = true;
-  for (const auto& f : n.GetFutures()) {
+  for (const auto& f : FuturesOf(n)) {
     auto id = AST::GetIdentifier(*f);
     assert(id && "expecting an identifier in Wait.");
     AddUse(current_stmt, id->name);

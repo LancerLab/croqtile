@@ -115,7 +115,8 @@ public:
         vn.SetListReference(n.value());
       }
     } else if (isa<AST::Wait>(&n) || isa<AST::Call>(&n) ||
-               isa<AST::Rotate>(&n) || isa<AST::Select>(&n)) {
+               isa<AST::Rotate>(&n) || isa<AST::Select>(&n) ||
+               isa<AST::Trigger>(&n)) {
       gen_values = false;
     } else if (isa<AST::Parameter>(&n)) {
       allow_named_dim = true;
@@ -136,7 +137,8 @@ public:
     } else if (isa<AST::MultiDimSpans>(&n) || isa<AST::IntTuple>(&n)) {
       vn.ResetListReference();
     } else if (isa<AST::Wait>(&n) || isa<AST::Call>(&n) ||
-               isa<AST::Rotate>(&n) || isa<AST::Select>(&n)) {
+               isa<AST::Rotate>(&n) || isa<AST::Select>(&n) ||
+               isa<AST::Trigger>(&n)) {
       gen_values = true;
     } else if (isa<AST::Parameter>(&n)) {
       allow_named_dim = false;

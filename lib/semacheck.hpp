@@ -11,8 +11,10 @@ struct SemaChecker : public VisitorWithSymTab {
 private:
   bool allow_auto_threading = false;
 
-  std::set<std::string> pending_futures; // a simple check to detect futures
-                                         // that are never be waited
+  std::set<std::string> pending_async; // a simple check to detect async
+                                       // entities that are not waited
+  std::set<std::string> waited_async;  // a simple check to detect async
+                                       // entities that are not waited
 
 private:
   bool BeforeVisitImpl(AST::Node&) override;
@@ -61,6 +63,7 @@ public:
   bool Visit(AST::DMA&) override;
   bool Visit(AST::ChunkAt&) override;
   bool Visit(AST::Wait&) override;
+  bool Visit(AST::Trigger&) override;
   bool Visit(AST::Call&) override;
   bool Visit(AST::PrintNode&) override;
   bool Visit(AST::Rotate&) override;

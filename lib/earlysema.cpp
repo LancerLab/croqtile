@@ -12,9 +12,16 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
     return_deduction = false;
     found_return = false;
     parallel_level = 0;
+    inthreads_levels.clear();
+    inthreads_levels.push_back(0);
   } else if (isa<AST::ParallelBy>(&n)) {
     parallel_level++;
     parallel_levels.push_back(parallel_level);
+    inthreads_levels[parallel_level] = 0;
+  } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
+    ++inthreads_levels[parallel_level];
+    if (inthreads_levels[parallel_level] > 1)
+      it->outer = false; // it is a inner inthreads
   } else if (isa<AST::Parameter>(&n)) {
     in_decl = true;
     allow_named_dim = true; // tolerate repeated symbols inside mdspan params
@@ -46,6 +53,10 @@ bool EarlySemantics::AfterVisitImpl(AST::Node& n) {
   } else if (isa<AST::ParallelBy>(&n)) {
     assert(parallel_level > 0);
     parallel_level--;
+  } else if (isa<AST::InThreadsBlock>(&n)) {
+    if (parallel_level > 0)
+      assert(inthreads_levels.size() == (unsigned)parallel_level);
+    --inthreads_levels[parallel_level];
   } else if (isa<AST::WithBlock>(&n)) {
     with_syms.clear();
   } else if (isa<AST::Parameter>(&n)) {
@@ -114,7 +125,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     auto ty = NodeType(*n.GetR());
     if (!isa<FutureType>(ty)) {
       Error(n.LOC(), "in operation \"" + n.op +
-                         "\": expecting a future type but got `" + PSTR(ty) +
+                         "\": expect a future type but got `" + PSTR(ty) +
                          "'.");
       error_count++;
       return false;
@@ -124,7 +135,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     auto ty = NodeType(*n.GetR());
     if (!GetMDSpanType(ty)) {
       Error(n.LOC(), "in operation \"" + n.op +
-                         "\": expecting a mdspan type but got `" + PSTR(ty) +
+                         "\": expect a mdspan type but got `" + PSTR(ty) +
                          "'.");
       error_count++;
       return false;
@@ -135,14 +146,14 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     auto rty = NodeType(*n.GetR());
     if (!isa<MDSpanType>(lty) && !isa<ITupleType>(lty) && !IsBoundedType(lty)) {
       Error(n.LOC(), "in operation \"" + n.op +
-                         "\": expecting a indexable type but got `" +
-                         PSTR(lty) + "'.");
+                         "\": expect a indexable type but got `" + PSTR(lty) +
+                         "'.");
       error_count++;
       return false;
     }
     if (!isa<IndexType>(rty)) {
       Error(n.LOC(), "in operation \"" + n.op +
-                         "\": expecting a index type but got `" + PSTR(rty) +
+                         "\": expect a index type but got `" + PSTR(rty) +
                          "'.");
       error_count++;
       return false;
@@ -159,7 +170,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     auto ty = NodeType(*n.GetR());
     if (!IsBoundedType(ty)) {
       Error(n.LOC(), "in operation \"" + n.op +
-                         "\": expecting a bounded type but got `" + PSTR(ty) +
+                         "\": expect a bounded type but got `" + PSTR(ty) +
                          "'.");
       error_count++;
       return false;
@@ -715,6 +726,11 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
     error_count++;
   }
 
+  if (inthreads_levels[parallel_level - 1] > 0) {
+    Error(n.LOC(), "parallel-by insides inthreads block is illegal.");
+    error_count++;
+  }
+
   if (n.dims > 3) {
     Error(n.LOC(),
           "The number of parallel dimensions is limited to 3 (x, y, z).");
@@ -770,12 +786,12 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
 bool EarlySemantics::Visit(AST::WhereBind& n) {
   TraceEachVisit(n);
   if (!isa<AST::Identifier>(n.lhs)) {
-    Error(n.lhs->LOC(), "expecting an indentifier.");
+    Error(n.lhs->LOC(), "expect an indentifier.");
     error_count++;
     return false;
   }
   if (!isa<AST::Identifier>(n.rhs)) {
-    Error(n.rhs->LOC(), "expecting an indentifier.");
+    Error(n.rhs->LOC(), "expect an indentifier.");
     error_count++;
     return false;
   }
@@ -806,7 +822,7 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
   } else if (auto mdst = dyn_cast<MDSpanType>(ity)) {
     rank = mdst->Dims();
   } else {
-    Error(n.in->LOC(), "expecting a span type or int type, but got the " +
+    Error(n.in->LOC(), "expect a span type or int type, but got the " +
                            PSTR(ity) + " type.");
     error_count++;
   }
@@ -850,7 +866,7 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
     for (auto v : n.with_matchers->AllValues()) {
       // only id are accepted in with-matcher
       if (!isa<AST::Identifier>(v)) {
-        Error(v->LOC(), "expecting an identifier.");
+        Error(v->LOC(), "expect an identifier.");
         continue;
       }
       auto sname = cast<AST::Identifier>(v)->name;
@@ -1103,7 +1119,7 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
 
   if (!isa<SpannedType>(nty) && !isa<FutureType>(nty)) {
     Error(n.LOC(),
-          "expecting '" + n.data->name + "` of a spanned data or future type.");
+          "expect '" + n.data->name + "` of a spanned data or future type.");
     error_count++;
   }
 
@@ -1118,8 +1134,8 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
     for (auto& v : n.positions->AllValues()) {
       auto ty = NodeType(*v);
       if (!IsBoundedType(ty)) {
-        Error(n.LOC(), "expecting '" + PSTR(v) +
-                           "` be a bounded type (but got " + PSTR(ty) + ").");
+        Error(n.LOC(), "expect '" + PSTR(v) + "` be a bounded type (but got " +
+                           PSTR(ty) + ").");
         error_count++;
       }
       r_count += ty->Dims();
@@ -1138,7 +1154,7 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
       for (auto& v : n.bounds->AllValues()) {
         auto ty = NodeType(*v);
         if (!isa<IntegerType>(ty) && !isa<ITupleType>(ty)) {
-          Error(n.LOC(), "expecting '" + PSTR(v) +
+          Error(n.LOC(), "expect '" + PSTR(v) +
                              "` be a bounded type (but got " + PSTR(ty) + ").");
           error_count++;
         }
@@ -1165,7 +1181,7 @@ bool EarlySemantics::Visit(AST::Wait& n) {
   for (auto& v : n.targets->AllValues()) {
     auto id = dyn_cast<AST::Identifier>(v);
     if (!id) {
-      Error(n.LOC(), "expecting symbol but got '" + AST::STR(*v));
+      Error(n.LOC(), "expect symbol but got '" + AST::STR(*v) + "'.");
       error_count++;
     }
 
@@ -1184,7 +1200,7 @@ bool EarlySemantics::Visit(AST::Wait& n) {
                            "\" can not be waited.");
         error_count++;
       }
-    } else {
+    } else if (!isa<EventType>(ty)) {
       Error(n.LOC(), "'" + id->name + "` of type \"" + PSTR(ty) +
                          "\" can not be waited.");
       error_count++;
@@ -1199,7 +1215,11 @@ bool EarlySemantics::Visit(AST::Trigger& n) {
   for (auto& v : n.targets->AllValues()) {
     auto id = dyn_cast<AST::Identifier>(v);
     if (!id) {
-      Error(n.LOC(), "expecting symbol but got '" + AST::STR(*v));
+      Error(n.LOC(), "expect a symbol but got '" + AST::STR(*v) + "'.");
+      error_count++;
+    } else if (!isa<EventType>(NodeType(*id))) {
+      Error(n.LOC(), "expect `" + PSTR(id) + "' an event but got '" +
+                         PSTR(NodeType(n)) + "'.");
       error_count++;
     }
   }
@@ -1506,7 +1526,16 @@ bool EarlySemantics::Visit(AST::InThreadsBlock& n) {
     error_count++;
   }
 
-  // TODO: check only for parallel-bounded-variable comparison
+  if (parallel_level == 0) {
+    Error(n.pred->LOC(), "inthreads can not be declared in global scope.");
+    error_count++;
+  }
+
+  if (n.async && !n.outer) {
+    Error(n.pred->LOC(), "inner inthreads can not be declared as async.");
+    error_count++;
+  }
+
   return true;
 }
 

@@ -14,6 +14,6 @@ __co__  void foo() {
 // CHECK:  `- Return type: void
 // CHECK:  `- Parameters
 // CHECK:  `- Parallelization:  index symbol: p, bound [0, 6)
-// CHECK:   `- Var Decl (unknown, shared): e
+// CHECK:   `- Var Decl (event, shared): e
 // CHECK:   `- TRIGGER: e
 // CHECK:   `- WAIT: e

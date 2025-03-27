@@ -1,0 +1,20 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ void illegal_inthreads(int a) {
+  inthreads(a);  // can not appear in global scope
+
+  parallel p by 3 {
+    inthreads (p > 1) {
+      inthreads.async(p < 1); // inner inthreads can not be async
+      inthreads(p < 2);
+    }
+
+    inthreads (p > 1)
+    parallel q by 4 ;  // illegal parallel in inthreads
+  }
+}
+
+// CHECK: error: requires a predication expression but got 'int'.
+// CHECK: error: inthreads can not be declared in global scope.
+// CHECK: error: inner inthreads can not be declared as async.
+// CHECK: error: parallel-by insides inthreads block is illegal.

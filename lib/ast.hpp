@@ -131,6 +131,7 @@ struct MultiNodes : public Node, public TypeIDProvider<MultiNodes> {
   }
 
   size_t Count() const { return values.size(); }
+  bool None() const { return Count() == 0; }
 
   void SetDelimiter(const std::string& d) { delimiter = d; }
 
@@ -871,6 +872,7 @@ private:
       SetType(
           MakeSpannedType(base_type, GenUninitShape())); // need type inference
       break;
+    case BaseType::EVENT: SetType(MakeEventType()); break;
     case BaseType::ITUPLE:
       if (!IsValidRank(rank))
         SetType(MakeUninitITupleType()); // type inference to deduce the dim
@@ -1384,7 +1386,7 @@ struct Wait : public Node, public TypeIDProvider<Wait> {
     os << "\n" << prefix << "`- WAIT: " << AST::STR(*targets);
   }
 
-  const std::vector<ptr<Node>>& GetFutures() const {
+  const std::vector<ptr<Node>>& GetTargets() const {
     return targets->AllValues();
   }
 
@@ -1577,10 +1579,12 @@ struct InThreadsBlock : public Node, public TypeIDProvider<InThreadsBlock> {
   ptr<Expr> pred;
   ptr<MultiNodes> stmts;
   bool async = false;
+  bool outer = true;
 
   explicit InThreadsBlock(const location& l, const ptr<Expr> p,
-                          const ptr<MultiNodes>& s, bool a = false)
-      : Node(l), pred(p), stmts(s), async(a) {
+                          const ptr<MultiNodes>& s, bool a = false,
+                          bool o = true)
+      : Node(l), pred(p), stmts(s), async(a), outer(o) {
     assert(p != nullptr && "missing iteration variables for the statement.");
   }
 

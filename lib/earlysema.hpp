@@ -27,6 +27,8 @@ private:
   std::vector<int> parallel_levels;
   bool allow_auto_threading = false;
 
+  std::vector<int> inthreads_levels;
+
   std::unordered_set<std::string>
       with_syms; // symbol defined in with-in statement
 

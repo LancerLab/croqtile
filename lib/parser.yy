@@ -660,7 +660,7 @@ event_decls
 event_decl
     : IDENTIFIER {
         $$ = AST::Make<AST::NamedVariableDecl>(@1, $1,
-             AST::Make<AST::DataType>(@1, BaseType::UNKNOWN));
+             AST::Make<AST::DataType>(@1, BaseType::EVENT));
       }
     ;
 

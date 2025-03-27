@@ -4,15 +4,20 @@
 using namespace Choreo;
 
 bool SemaChecker::BeforeVisitImpl(AST::Node& n) {
-  if (isa<AST::ChoreoFunction>(&n)) pending_futures.clear();
+  if (isa<AST::ChoreoFunction>(&n)) {
+    pending_async.clear();
+    waited_async.clear();
+  }
   return true;
 }
 
 bool SemaChecker::AfterVisitImpl(AST::Node& n) {
   if (isa<AST::ChoreoFunction>(&n)) {
-    if (!pending_futures.empty()) {
-      Error(n.LOC(), "some futures are not explicitly waited: " +
-                         DelimitedString(pending_futures) + ".");
+    for (auto n : waited_async) pending_async.erase(n);
+
+    if (!pending_async.empty()) {
+      Error(n.LOC(), "some asyncs are not explicitly waited: " +
+                         DelimitedString(pending_async) + ".");
       error_count++;
     }
   }
@@ -251,8 +256,8 @@ bool SemaChecker::Visit(AST::DMA& n) {
   }
 
   if (!n.future.empty() && cast<FutureType>(ty)->IsAsync())
-    pending_futures.insert(InScopeName(n.future));
-  if (!n.chain_from.empty()) pending_futures.erase(InScopeName(n.chain_from));
+    pending_async.insert(InScopeName(n.future));
+  if (!n.chain_from.empty()) waited_async.insert(InScopeName(n.chain_from));
 
   if (!isa<AST::ChunkAt>(n.from) || !isa<SpannedType>(n.from->GetType())) {
     Error(n.LOC(),
@@ -346,17 +351,38 @@ bool SemaChecker::Visit(AST::ChunkAt& n) {
   return true;
 }
 
+bool SemaChecker::Visit(AST::Trigger& n) {
+  TraceEachVisit(n);
+
+  for (auto& f : n.GetEvents()) {
+    auto fty = NodeType(*f);
+    if (!isa<EventType>(fty)) {
+      Error(n.LOC(),
+            "trigger a non-event type " + PSTR(f) + " (" + PSTR(fty) + ").");
+      error_count++;
+      continue;
+    }
+    auto e_id = AST::GetIdentifier(*f);
+    assert(e_id);
+    pending_async.insert(InScopeName(e_id->name));
+  }
+  return true;
+}
+
 bool SemaChecker::Visit(AST::Wait& n) {
   TraceEachVisit(n);
 
-  for (auto& f : n.GetFutures()) {
+  for (auto& f : n.GetTargets()) {
     auto fty = NodeType(*f);
-    if (!isa<FutureType>(fty)) {
+    if (!isa<FutureType>(fty) && !isa<EventType>(fty)) {
       Error(n.LOC(),
-            "Wait for a non-future type " + PSTR(f) + "(" + PSTR(fty) + ").");
+            "wait for a non-async type " + PSTR(f) + " (" + PSTR(fty) + ").");
       error_count++;
-    } else if (auto id = AST::GetIdentifier(*f))
-      pending_futures.erase(InScopeName(id->name));
+      continue;
+    }
+    auto id = AST::GetIdentifier(*f);
+    assert(id);
+    waited_async.insert(InScopeName(id->name));
   }
 
   return true;
@@ -405,7 +431,7 @@ bool SemaChecker::Visit(AST::Rotate& n) {
   size_t index = 0;
   for (auto s : n.ids->AllValues()) {
     if (auto id = AST::GetIdentifier(*s))
-      pending_futures.erase(InScopeName(id->name));
+      waited_async.insert(InScopeName(id->name));
 
     if (index == 0) {
       index++;
@@ -459,7 +485,7 @@ bool SemaChecker::Visit(AST::Select& n) {
 
   for (auto expr : expr_list->AllValues()) {
     if (auto id = AST::GetIdentifier(*expr))
-      pending_futures.erase(InScopeName(id->name)); // can not check statically
+      waited_async.insert(InScopeName(id->name)); // can not check statically
 
     if (*NodeType(*expr) == *NodeType(*expr0)) continue;
 

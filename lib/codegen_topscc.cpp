@@ -191,8 +191,11 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
     }
   } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
     DecrDeviceIndent();
-    ds << d_indent << "} // end inthreads\n";
-    if (!it->async) ds << d_indent << "__syncthreads();\n";
+    if (!it->stmts->None()) {
+      ds << d_indent << "}";
+      if (!it->async && it->outer) ds << "\n" << d_indent << "__syncthreads();";
+      ds << " // end inthreads\n";
+    }
   } else if (isa<AST::IncrementBlock>(&n)) {
     if (use_hetero_tileflow && IsHostSide()) {
       DecrHostIndent();
@@ -1015,7 +1018,8 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
   TraceEachVisit(n);
 
   bool shared_in_block = false;
-  for (auto& f : n.GetFutures()) {
+  for (auto& f : n.GetTargets()) {
+    if (!isa<FutureType>(NodeType(*f))) continue;
     auto name = cast<AST::Identifier>(f)->name;
     shared_in_block |= IsFutureBlockShared(InScopeName(name));
   }
@@ -1025,8 +1029,12 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
     IncrDeviceIndent();
   }
 
-  for (auto& f : n.GetFutures())
-    ds << d_indent << ExprSTR(f, false) << ".wait();\n";
+  for (auto& f : n.GetTargets())
+    if (isa<FutureType>(NodeType(*f)))
+      ds << d_indent << ExprSTR(f, false) << ".wait();\n";
+    else if (isa<EventType>(NodeType(*f))) { /*TODO*/
+      ;
+    }
 
   if (shared_in_block) {
     DecrDeviceIndent();
@@ -1178,7 +1186,9 @@ bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
 
 bool TopsccCodeGen::Visit(AST::InThreadsBlock& n) {
   TraceEachVisit(n);
-  ds << d_indent << "if (" << ExprSTR(n.pred, false) << ") {\n";
+  ds << d_indent << "// inthreads: " << n.LOC() << "\n";
+  if (!n.stmts->None())
+    ds << d_indent << "if (" << ExprSTR(n.pred, false) << ") {\n";
   IncrDeviceIndent();
   return true;
 }

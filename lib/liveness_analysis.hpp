@@ -293,6 +293,14 @@ public:
   bool Visit(AST::Program&) override;
 
   bool HasError() override;
+
+private:
+  auto FuturesOf(const AST::Wait& n) {
+    std::vector<ptr<AST::Node>> ret;
+    for (auto item : n.GetTargets())
+      if (isa<FutureType>(NodeType(*item))) ret.push_back(item);
+    return ret;
+  }
 };
 
 } // end namespace Choreo

@@ -94,6 +94,7 @@ enum class BaseType {
   FLOAT,
   DOUBLE,
   ITUPLE,
+  EVENT,
   VOID,
   UNKNOWN
 };
@@ -189,16 +190,17 @@ inline static size_t SizeOf(BaseType bt) {
 // utility functions to map types to strings, and the opposite.
 inline static BaseType BaseTypeFromString(const std::string& input) {
   static const std::unordered_map<std::string, BaseType> typeMap = {
-      {"f32", BaseType::F32},     {"f16", BaseType::F16},
-      {"bf16", BaseType::BF16},   {"u32", BaseType::U32},
-      {"s32", BaseType::S32},     {"u16", BaseType::U16},
-      {"s16", BaseType::S16},     {"u8", BaseType::U8},
-      {"s8", BaseType::S8},       {"f8", BaseType::F8},
-      {"half8", BaseType::HALF8}, {"half", BaseType::HALF},
-      {"float", BaseType::FLOAT}, {"double", BaseType::DOUBLE},
-      {"bfp16", BaseType::BFP16}, {"int", BaseType::INT},
-      {"bool", BaseType::BOOL},   {"ituple", BaseType::ITUPLE},
-      {"void", BaseType::VOID},   {"unknown", BaseType::UNKNOWN},
+      {"f32", BaseType::F32},         {"f16", BaseType::F16},
+      {"bf16", BaseType::BF16},       {"u32", BaseType::U32},
+      {"s32", BaseType::S32},         {"u16", BaseType::U16},
+      {"s16", BaseType::S16},         {"u8", BaseType::U8},
+      {"s8", BaseType::S8},           {"f8", BaseType::F8},
+      {"half8", BaseType::HALF8},     {"half", BaseType::HALF},
+      {"float", BaseType::FLOAT},     {"double", BaseType::DOUBLE},
+      {"bfp16", BaseType::BFP16},     {"int", BaseType::INT},
+      {"bool", BaseType::BOOL},       {"ituple", BaseType::ITUPLE},
+      {"event", BaseType::EVENT},     {"void", BaseType::VOID},
+      {"unknown", BaseType::UNKNOWN},
   };
 
   auto it = typeMap.find(input);
@@ -211,16 +213,17 @@ namespace __internal__ {
 
 inline static std::string GetStringFrom(BaseType dataType) {
   static const std::unordered_map<BaseType, std::string> enumToString = {
-      {BaseType::F32, "f32"},     {BaseType::F16, "f16"},
-      {BaseType::BF16, "bf16"},   {BaseType::U32, "u32"},
-      {BaseType::S32, "s32"},     {BaseType::U16, "u16"},
-      {BaseType::S16, "s16"},     {BaseType::U8, "u8"},
-      {BaseType::S8, "s8"},       {BaseType::F8, "f8"},
-      {BaseType::HALF8, "half8"}, {BaseType::HALF, "half"},
-      {BaseType::BFP16, "bfp16"}, {BaseType::INT, "int"},
-      {BaseType::FLOAT, "float"}, {BaseType::DOUBLE, "double"},
-      {BaseType::BOOL, "bool"},   {BaseType::ITUPLE, "ituple"},
-      {BaseType::VOID, "void"},   {BaseType::UNKNOWN, "unknown"},
+      {BaseType::F32, "f32"},         {BaseType::F16, "f16"},
+      {BaseType::BF16, "bf16"},       {BaseType::U32, "u32"},
+      {BaseType::S32, "s32"},         {BaseType::U16, "u16"},
+      {BaseType::S16, "s16"},         {BaseType::U8, "u8"},
+      {BaseType::S8, "s8"},           {BaseType::F8, "f8"},
+      {BaseType::HALF8, "half8"},     {BaseType::HALF, "half"},
+      {BaseType::BFP16, "bfp16"},     {BaseType::INT, "int"},
+      {BaseType::FLOAT, "float"},     {BaseType::DOUBLE, "double"},
+      {BaseType::BOOL, "bool"},       {BaseType::ITUPLE, "ituple"},
+      {BaseType::EVENT, "event"},     {BaseType::VOID, "void"},
+      {BaseType::UNKNOWN, "unknown"},
   };
 
   auto it = enumToString.find(dataType);
