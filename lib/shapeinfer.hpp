@@ -1082,6 +1082,14 @@ public:
     return true;
   }
 
+  bool Visit(AST::Trigger& n) {
+    TraceEachVisit(n);
+    ClearVisitorVNs();
+    if (cannot_proceed) return true;
+
+    return true;
+  }
+
   bool Visit(AST::Call& n) {
     TraceEachVisit(n);
 

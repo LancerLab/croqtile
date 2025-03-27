@@ -416,6 +416,7 @@ public:
     return true;
   }
   bool Visit(AST::Wait&) override { return true; }
+  bool Visit(AST::Trigger&) override { return true; }
   bool Visit(AST::Call&) override { return true; }
   bool Visit(AST::PrintNode&) override { return true; }
   bool Visit(AST::Rotate&) override { return true; }

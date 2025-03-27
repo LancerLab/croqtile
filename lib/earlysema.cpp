@@ -1164,7 +1164,10 @@ bool EarlySemantics::Visit(AST::Wait& n) {
 
   for (auto& v : n.targets->AllValues()) {
     auto id = dyn_cast<AST::Identifier>(v);
-    if (!id) Error(n.LOC(), "expecting symbol but got '" + AST::STR(*v));
+    if (!id) {
+      Error(n.LOC(), "expecting symbol but got '" + AST::STR(*v));
+      error_count++;
+    }
 
     auto ty = NodeType(*v);
 
@@ -1187,6 +1190,20 @@ bool EarlySemantics::Visit(AST::Wait& n) {
       error_count++;
     }
   }
+  return true;
+}
+
+bool EarlySemantics::Visit(AST::Trigger& n) {
+  TraceEachVisit(n);
+
+  for (auto& v : n.targets->AllValues()) {
+    auto id = dyn_cast<AST::Identifier>(v);
+    if (!id) {
+      Error(n.LOC(), "expecting symbol but got '" + AST::STR(*v));
+      error_count++;
+    }
+  }
+
   return true;
 }
 

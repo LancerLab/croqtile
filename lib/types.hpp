@@ -41,6 +41,7 @@ enum class TypeCategory {
   BOUNDED_ITUPLE,
   VOID,
   FUTURE,
+  EVENT,
   STRING,
   FUNCTION,
   UNKNOWN,
@@ -63,6 +64,7 @@ inline static std::string STR(TypeCategory tc) {
   case TypeCategory::BOUNDED_ITUPLE: return "BOUNDED_ITUPLE";
   case TypeCategory::VOID: return "VOID";
   case TypeCategory::FUTURE: return "FUTURE";
+  case TypeCategory::EVENT: return "EVENT";
   case TypeCategory::FUNCTION: return "FUNCTION";
   case TypeCategory::STRING: return "STRING";
   case TypeCategory::UNKNOWN: return "UNKNOWN";
@@ -1226,13 +1228,34 @@ struct BoundedITupleType final : public BoundedType,
   __UDT_TYPE_INFO__(BoundedType, BoundedITupleType)
 };
 
-struct FutureType : public Type, public TypeIDProvider<FutureType> {
+struct AsyncType : public Type, public TypeIDProvider<AsyncType> {
+  AsyncType(TypeCategory t) : Type(t) {}
+  size_t Dims() const override { return 1; }
+  bool IsComplete() const override { return true; }
+
+  // can not have instance
+  __UDT_TYPE_INFO__(Type, AsyncType)
+};
+
+struct EventType : public AsyncType, public TypeIDProvider<EventType> {
+  explicit EventType() : AsyncType(TypeCategory::EVENT) {}
+  bool HasSufficientInfo() const override { return true; }
+  void Print(std::ostream& os) const override { os << "event"; }
+  const std::string Name() const override { return "event"; }
+
+  bool operator==(const Type& ty) const override { return isa<EventType>(&ty); }
+  bool ApprxEqual(const Type& ty) const override { return operator==(ty); }
+
+  __UDT_TYPE_INFO__(AsyncType, EventType)
+};
+
+struct FutureType : public AsyncType, public TypeIDProvider<FutureType> {
   ptr<SpannedType> psty =
       nullptr; // the spanned data associated with the future
   bool async;
 
   explicit FutureType(const ptr<SpannedType>& s, bool a)
-      : Type(TypeCategory::FUTURE), psty(s), async(a) {}
+      : AsyncType(TypeCategory::FUTURE), psty(s), async(a) {}
   bool IsComplete() const override { return true; }
   bool HasSufficientInfo() const { return psty->HasSufficientInfo(); }
   const std::string Name() const override { return "future"; }
@@ -1273,7 +1296,7 @@ struct FutureType : public Type, public TypeIDProvider<FutureType> {
     psty->Print(os);
   }
 
-  __UDT_TYPE_INFO__(Type, FutureType)
+  __UDT_TYPE_INFO__(AsyncType, FutureType)
 };
 
 struct FunctionType : public Type, public TypeIDProvider<FunctionType> {
@@ -1540,6 +1563,8 @@ inline ptr<BoundedITupleType> MakeUninitBoundedITupleType() {
   return std::make_shared<BoundedITupleType>(GenUninitShape(), GenUninitShape(),
                                              IntegerList(), "");
 }
+
+inline ptr<EventType> MakeEventType() { return std::make_shared<EventType>(); }
 
 inline ptr<FutureType> MakeFutureType(const ptr<SpannedType>& v, bool async) {
   return std::make_shared<FutureType>(v, async);

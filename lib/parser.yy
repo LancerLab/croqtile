@@ -166,11 +166,11 @@ void choreo_info(const char *message) {
 %token <std::string> HOST_CODE KERNEL_CODE
 %token <std::string> IDENTIFIER ATTR_CO
 // type related
-%token <std::string> MDSPAN ITUPLE PRINT
+%token <std::string> MDSPAN ITUPLE EVENT PRINT
 %token <Choreo::Storage> LOCAL SHARED GLOBAL
 %token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT HALF8 HALF BFP16 FLOAT DOUBLE BOOL VOID
 // builtin operations
-%token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT
+%token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER
 // control related
 %token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH INCR RET WHERE WHILE
 %token <std::string> TRUE FALSE
@@ -186,8 +186,8 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::SpanAs>> span_as
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
-%nterm <AST::ptr<AST::Node>> foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal device_passable declaration statement assignment dma_stmt wait_stmt call_stmt print_stmt swap_stmt expr_or_qes range_expr param_mdspan_val chunkat_or_storage_or_select pred returnable
-%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls stmts_block
+%nterm <AST::ptr<AST::Node>> foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal device_passable declaration statement assignment dma_stmt wait_stmt trigger_stmt call_stmt print_stmt swap_stmt expr_or_qes range_expr param_mdspan_val chunkat_or_storage_or_select pred returnable
+%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
 %nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables future_data_list template_params gi_list
 %nterm <AST::ptr<AST::Expr>> s_expr template_value_expr span_expr id_expr bound_expr optional_pred
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
@@ -196,7 +196,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::ChoreoFunction>> dsl_function
 %nterm <AST::ptr<AST::MultiDimSpans>> unnamed_mdspan_decl param_mdspan
 %nterm <AST::ptr<AST::NamedTypeDecl>> named_mdspan_decl
-%nterm <AST::ptr<AST::NamedVariableDecl>> named_ituple_decl spanned_decl scalar_decl
+%nterm <AST::ptr<AST::NamedVariableDecl>> named_ituple_decl spanned_decl scalar_decl event_decl
 %nterm <AST::ptr<AST::IntTuple>> unnamed_ituple_decl sugar_unnamed_ituple_decl sugarless_unnamed_ituple_decl
 %nterm <AST::ptr<AST::WithBlock>> within_block
 %nterm <AST::ptr<AST::InThreadsBlock>> inthreads_block
@@ -459,6 +459,7 @@ statement
     | assignments  SEMCOL { $$ = $1; }
     | dma_stmt     SEMCOL { $$ = $1; }
     | wait_stmt    SEMCOL { $$ = $1; }
+    | trigger_stmt SEMCOL { $$ = $1; }
     | call_stmt    SEMCOL { $$ = $1; }
     | swap_stmt    SEMCOL { $$ = $1; }
     | print_stmt   SEMCOL { $$ = $1; }
@@ -591,6 +592,7 @@ declaration
 multi_decls
     : named_spanned_decls { $$ = $1; }
     | named_scalar_decls  { $$ = $1; }
+    | named_event_decls   { $$ = $1; }
     ;
 
 print_stmt
@@ -630,6 +632,38 @@ scalar_decl
              AST::Make<AST::DataType>(@1, BaseType::UNKNOWN), nullptr, $3);
       }
     ;
+
+named_event_decls
+    : storage_qual EVENT event_decls {
+        for (auto sub : $3->AllSubs()) {
+          auto decl = cast<AST::NamedVariableDecl>(sub);
+          auto sym_name = decl->name_str;
+          symtab.AddSymbol(sym_name, MakeEventType());
+          // override the data type
+          decl->mem = $1;
+        }
+        $$ = $3;
+      }
+    ;
+
+event_decls
+    : event_decls COMMA event_decl {
+        $1->Append($3);
+        $$ = $1;
+      }
+    | event_decl {
+        $$ = AST::Make<AST::MultiNodes>(@1);
+        $$->Append($1);
+      }
+    ;
+
+event_decl
+    : IDENTIFIER {
+        $$ = AST::Make<AST::NamedVariableDecl>(@1, $1,
+             AST::Make<AST::DataType>(@1, BaseType::UNKNOWN));
+      }
+    ;
+
 
 
 named_spanned_decls
@@ -1292,6 +1326,12 @@ with_matchers /* TODO: this special case is pattern-match ids for with-block */
 wait_stmt
     : WAIT id_list {
         $$ = AST::Make<AST::Wait>(@1, $2);
+      }
+    ;
+
+trigger_stmt
+    : TRIGGER id_list {
+        $$ = AST::Make<AST::Trigger>(@1, $2);
       }
     ;
 

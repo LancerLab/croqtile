@@ -794,6 +794,11 @@ bool TypeInference::Visit(AST::Wait& n) {
   return true;
 }
 
+bool TypeInference::Visit(AST::Trigger& n) {
+  TraceEachVisit(n);
+  return true;
+}
+
 bool TypeInference::Visit(AST::Call& n) {
   TraceEachVisit(n);
   return true;

@@ -81,6 +81,7 @@ struct Visitor {
   virtual bool Visit(AST::DMA&) = 0;
   virtual bool Visit(AST::ChunkAt&) = 0;
   virtual bool Visit(AST::Wait&) = 0;
+  virtual bool Visit(AST::Trigger&) = 0;
   virtual bool Visit(AST::Call&) = 0;
   virtual bool Visit(AST::PrintNode&) = 0;
   virtual bool Visit(AST::Rotate&) = 0;
@@ -482,6 +483,7 @@ public:
   bool Visit(AST::DMA&) override { return true; }
   bool Visit(AST::ChunkAt&) override { return true; }
   bool Visit(AST::Wait&) override { return true; }
+  bool Visit(AST::Trigger&) override { return true; }
   bool Visit(AST::Call&) override { return true; }
   bool Visit(AST::PrintNode&) override { return true; }
   bool Visit(AST::Rotate&) override { return true; }

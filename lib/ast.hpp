@@ -1393,6 +1393,24 @@ struct Wait : public Node, public TypeIDProvider<Wait> {
   __UDT_TYPE_INFO__(Node, Wait)
 };
 
+struct Trigger : public Node, public TypeIDProvider<Trigger> {
+  ptr<MultiValues> targets;
+
+  Trigger(const location& l, const ptr<MultiValues>& t) : Node(l), targets(t) {}
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << "\n" << prefix << "`- TRIGGER: " << AST::STR(*targets);
+  }
+
+  const std::vector<ptr<Node>>& GetEvents() const {
+    return targets->AllValues();
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, Trigger)
+};
+
 struct Return : public Node, public TypeIDProvider<Return> {
   ptr<Node> value = nullptr;
 

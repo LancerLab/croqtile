@@ -1,0 +1,19 @@
+// RUN: choreo -e %s -o - | FileCheck %s
+
+
+__co__  void foo() {
+  parallel p by 6 {
+    shared event e;
+    trigger e;
+    wait e;
+  }
+}
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: foo
+// CHECK:  `- Return type: void
+// CHECK:  `- Parameters
+// CHECK:  `- Parallelization:  index symbol: p, bound [0, 6)
+// CHECK:   `- Var Decl (unknown, shared): e
+// CHECK:   `- TRIGGER: e
+// CHECK:   `- WAIT: e
