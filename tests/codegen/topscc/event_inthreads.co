@@ -1,0 +1,34 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -es -t topscc %s -o - | FileCheck %s
+
+
+__co__  void foo(f32 [24] a) {
+  parallel p by 6 {
+    shared event ep, ec;
+    trigger ec;
+    pred = p >= 3;
+    inthreads.async (pred) { wait ec; trigger ep; }; // an event is set after all stmts are executed
+    inthreads.async (!pred) { wait ep; trigger ec;}; // all the stmts can not execute until event is set
+    sync.shared;
+  }
+}
+
+// CHECK: __global__ void __choreo_device_foo(float * a) {
+// CHECK:   __shared__ __volatile__ bool ep; // shared event
+// CHECK:   ep = false;
+// CHECK:   __shared__ __volatile__ bool ec; // shared event
+// CHECK:   ec = false;
+// CHECK:   ec = true;
+// CHECK:   bool pred = ((__tops_tid_x())>=((3)));
+// CHECK:   if (pred) {
+// CHECK:     while (ec == false) continue; // spinlock
+// CHECK:     ec = false; // reset event
+// CHECK:     ep = true;
+// CHECK:   } // end inthreads
+// CHECK:   if (!(pred)) {
+// CHECK:     while (ep == false) continue; // spinlock
+// CHECK:     ep = false; // reset event
+// CHECK:     ec = true;
+// CHECK:   } // end inthreads
+// CHECK:   __syncthreads();
+// CHECK: }

@@ -56,6 +56,16 @@ inline const char* TopsMdsStorage(Storage st) {
   return "";
 }
 
+inline const char* TopsStorageType(Storage st) {
+  switch (st) {
+  case Storage::GLOBAL: return "__global__";
+  case Storage::SHARED: return "__shared__";
+  case Storage::LOCAL: return "__local__";
+  default: choreo_unreachable("storage type is not supported.");
+  }
+  return "";
+}
+
 inline const std::string GetDTEContextName() {
   static unsigned i = 0;
   return "choreo_topscc_ctx" + std::to_string(i++);
@@ -485,9 +495,19 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
   }
 
   // when symbol is not valued
-  if (isa<ScalarType>(nty) && !FCtx(fname).HasSymbolValues(InScopeName(sym)))
+  if (isa<ScalarType>(nty) && !FCtx(fname).HasSymbolValues(InScopeName(sym))) {
     ds << d_indent << NameBaseType(GetBaseType(*nty), false) << " " << sym
        << " = " << ExprSTR(n.init_expr, false) << ";\n";
+    return true;
+  }
+
+  // handle events
+  if (isa<EventType>(nty)) {
+    assert(n.mem && "no storage specifier of the event.");
+    ds << d_indent << TopsStorageType(n.mem->Get()) << " __volatile__ bool "
+       << n.name_str << "; // " << PSTR(n.mem) << " event\n";
+    ds << d_indent << n.name_str << " = false;\n"; // inited as untriggerd
+  }
 
   return true;
 }
@@ -1032,8 +1052,10 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
   for (auto& f : n.GetTargets())
     if (isa<FutureType>(NodeType(*f)))
       ds << d_indent << ExprSTR(f, false) << ".wait();\n";
-    else if (isa<EventType>(NodeType(*f))) { /*TODO*/
-      ;
+    else if (isa<EventType>(NodeType(*f))) {
+      ds << d_indent << "while (" << ExprSTR(f, false)
+         << " == false) continue; // spinlock\n";
+      ds << d_indent << ExprSTR(f, false) << " = false; // reset event\n";
     }
 
   if (shared_in_block) {
@@ -1042,6 +1064,16 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
     ds << d_indent << "__syncthreads();\n";
   }
 
+  return true;
+}
+
+bool TopsccCodeGen::Visit(AST::Trigger& n) {
+  TraceEachVisit(n);
+  for (auto& f : n.GetEvents()) {
+    auto id = AST::GetIdentifier(*f);
+    assert(id && "expect identifier");
+    ds << d_indent << PSTR(id) << " = true;\n";
+  }
   return true;
 }
 

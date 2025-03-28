@@ -882,8 +882,7 @@ struct future {
       s = ST_WAITED;
     } else if (s == ST_WAITED) {
       printf("[choreo-rt] Error is detected: future (defined at line %u:%u) "
-             "has been waited "
-             "multiple times.\n",
+             "has been waited multiple times.\n",
              line, column);
       __co_abort__();
     } else if (s == ST_INITED) {
@@ -916,8 +915,7 @@ struct future {
     if (s == ST_TRIGGERED) {
       // TODO: requires krt %s support to print future name
       printf("[choreo-rt] Error is detected: future (defined at line %u:%u) is "
-             "not waited "
-             "before using.\n",
+             "not waited before using.\n",
              line, column);
       __co_abort__();
     }
@@ -928,8 +926,7 @@ struct future {
     if (s == ST_TRIGGERED) {
       // TODO: requires krt %s support to print future name
       printf("[choreo-rt] Error is detected: future (defined at line %u:%u) "
-             "has never been "
-             "waited.\n",
+             "has never been waited.\n",
              line, column);
       __co_abort__();
     }

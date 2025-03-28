@@ -188,6 +188,7 @@ public:
   bool Visit(AST::ParallelBy&) override;
   bool Visit(AST::DMA&) override;
   bool Visit(AST::Wait&) override;
+  bool Visit(AST::Trigger&) override;
   bool Visit(AST::PrintNode&) override;
   bool Visit(AST::Rotate&) override;
   bool Visit(AST::Synchronize&) override;
