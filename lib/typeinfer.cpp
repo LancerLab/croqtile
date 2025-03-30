@@ -485,6 +485,9 @@ bool TypeInference::Visit(AST::Expr& n) {
     if (n.op == "dimof") {
       n.SetType(MakeIntegerType());
       return true;
+    } else if (n.op == "elemof") {
+      assert(isa<EventType>(NodeType(n)) && "only support elemof event array.");
+      return true;
     }
 
     auto& pty_lhs = n.GetL()->GetType();
@@ -498,7 +501,7 @@ bool TypeInference::Visit(AST::Expr& n) {
         return true;
       } else {
         Error(n.LOC(), "The operands of the expression cannot undergo '" +
-                           n.op + "' operation.");
+                           n.op + "' logical operation.");
         error_count++;
         return false;
       }
@@ -598,7 +601,7 @@ bool TypeInference::Visit(AST::Expr& n) {
       n.SetType(MakeIntegerType());
     } else if (*pty_lhs != *pty_rhs) {
       Error(n.LOC(), "The operands of the expression cannot undergo '" + n.op +
-                         "' operation.");
+                         "' binary operation.");
       error_count++;
       return false;
     } else {

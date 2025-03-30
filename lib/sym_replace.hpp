@@ -237,9 +237,9 @@ public:
     if (cannot_proceed) return true;
 
     for (auto value : n.AllValues()) {
-      if (isa<AST::Expr>(value))
-        AnalyseThenOptimizeExpr(value);
-      else
+      if (auto e = dyn_cast<AST::Expr>(value)) {
+        if (e->op != "elemof") AnalyseThenOptimizeExpr(value);
+      } else
         InitializeNode(value);
     }
 

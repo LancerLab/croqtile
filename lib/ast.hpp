@@ -800,6 +800,7 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
   BaseType base_type;
   size_t rank = GetInvalidRank(); // for annotated ituple only
   ptr<Node> mdspan_type = nullptr;
+  int array_ec = -1;
 
 public:
   explicit DataType(const location& l, BaseType t)
@@ -809,15 +810,22 @@ public:
 
   explicit DataType(const location& l, BaseType bt, const ptr<Node>& st)
       : Node(l), base_type(bt), mdspan_type(st) {
-    assert(bt != BaseType::ITUPLE && "Unexpected type!");
-    assert(bt != BaseType::INT && "Unexpected type!");
-    assert(bt != BaseType::BOOL && "Unexpected type!");
+    assert(bt != BaseType::ITUPLE && "unexpected type!");
+    assert(bt != BaseType::INT && "unexpected type!");
+    assert(bt != BaseType::BOOL && "unexpected type!");
     InitSemaType();
   }
 
-  explicit DataType(const location& l, BaseType bt, int r)
-      : Node(l), base_type(bt), rank(r) {
-    assert(bt == BaseType::ITUPLE && "Unexpected type!");
+  explicit DataType(const location& l, BaseType bt, int r, int ec = -1)
+      : Node(l), base_type(bt), rank(r), array_ec(ec) {
+    assert(bt == BaseType::ITUPLE && "unexpected type!");
+    InitSemaType();
+  }
+
+  explicit DataType(const location& l, int ec, BaseType bt)
+      : Node(l), base_type(bt), rank(1), array_ec(ec) {
+    assert(ec > 0 && "must have a valid element count.");
+    assert(bt == BaseType::EVENT && "unexpected type!");
     InitSemaType();
   }
 
@@ -872,7 +880,12 @@ private:
       SetType(
           MakeSpannedType(base_type, GenUninitShape())); // need type inference
       break;
-    case BaseType::EVENT: SetType(MakeEventType()); break;
+    case BaseType::EVENT:
+      if (array_ec == -1)
+        SetType(MakeEventType());
+      else
+        SetType(MakeEventArrayType(array_ec));
+      break;
     case BaseType::ITUPLE:
       if (!IsValidRank(rank))
         SetType(MakeUninitITupleType()); // type inference to deduce the dim
@@ -901,6 +914,7 @@ struct NamedVariableDecl : public Node,
   ptr<DataType> type = nullptr;         // type annotation
   const ptr<Node> init_expr = nullptr;  // associated initializer
   const ptr<Node> init_value = nullptr; // associated initial value
+  int elem_count = -1;                  // >= 1 when it is an array
 
   explicit NamedVariableDecl(const location& l, const std::string& n,
                              const ptr<DataType>& t = nullptr,
@@ -909,7 +923,7 @@ struct NamedVariableDecl : public Node,
                              const ptr<Node>& v = nullptr,
                              const std::string& d = "=")
       : Node(l), name_str(n), init_str(d), mem(s), type(t), init_expr(i),
-        init_value(v) {
+        init_value(v), elem_count(-1) {
 
     if (init_expr)
       assert(!init_value && "initial value can not be set when initialization "
@@ -921,14 +935,25 @@ struct NamedVariableDecl : public Node,
     assert(name_str.size() > 0 && "Invalid name string.");
   }
 
+  // array variable
+  explicit NamedVariableDecl(const location& l, const std::string& n,
+                             const ptr<DataType>& t, const ptr<Memory>& s,
+                             int array_ec, const ptr<Node>& v = nullptr,
+                             const std::string& d = "=")
+      : Node(l), name_str(n), init_str(d), mem(s), type(t), init_expr(nullptr),
+        init_value(v), elem_count(array_ec) {
+    assert(elem_count > 0 && "elem_count can not be zero.");
+  }
+
+  bool IsArray() const { return elem_count > 0; }
+  bool ArrayElemCount() const { return elem_count; }
+
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Var Decl (";
     if (type) type->Print(os);
-    if (mem) {
-      os << ", ";
-      mem->Print(os);
-    }
+    if (mem) os << ", " << PSTR(mem);
     os << "): " << name_str;
+    if (elem_count != -1) os << "[" << elem_count << "]";
     if (init_expr)
       os << " " << init_str << " " << PSTR(init_expr);
     else if (init_value)
@@ -1716,6 +1741,23 @@ inline Identifier* GetIdentifier(const Node& n) {
     return expr->GetSymbol().get();
   else
     return nullptr;
+}
+
+inline IntLiteral* GetIntLiteral(const Node& n) {
+  if (auto il = dyn_cast<AST::IntLiteral>(&n))
+    return il;
+  else if (auto expr = dyn_cast<AST::Expr>(&n))
+    return expr->GetInt().get();
+  else
+    return nullptr;
+}
+
+inline bool IsSymbolOrArrayRef(const Node& n) {
+  auto id = GetName(n);
+  if (id.has_value()) return true;
+  if (auto e = dyn_cast<AST::Expr>(&n))
+    if (e->op == "elemof") return true;
+  return false;
 }
 
 inline ptr<Node> Ref(const ptr<Node>& n) {

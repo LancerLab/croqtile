@@ -386,8 +386,26 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       SetNodeType(n, MakeUninitMDSpanType());
     else
       SetNodeType(n, MakeRankedMDSpanType(lty->Dims() + rty->Dims()));
+  } else if (n.op == "elemof") {
+    auto lty = NodeType(*n.GetL());
+    auto rty = NodeType(*n.GetR());
+    auto old_ec = error_count;
+    if (!isa<ArrayType>(lty)) {
+      Error(n.LOC(), "in operation \"" + n.op + "\": expect an array but got " +
+                         PSTR(lty) + ".");
+      error_count++;
+    }
+    if (!CanYieldAnInteger(rty)) {
+      Error(n.LOC(), "in operation \"" + n.op +
+                         "\": expect an integer index but got " + PSTR(rty) +
+                         ".");
+      error_count++;
+    }
+    if (error_count != old_ec) return false;
+    SetNodeType(n, MakeEventType());
   } else
     choreo_unreachable("operation in expression is not supported yet.");
+
   return true;
 }
 
@@ -1098,18 +1116,28 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
   TraceEachVisit(n);
 
   if (n.positions) {
-    bool notile = false;
-    for (auto& v : n.positions->AllValues())
+    std::vector<size_t> notile_indices;
+    size_t i = 0;
+    for (auto& v : n.positions->AllValues()) {
       if (auto expr = cast<AST::Expr>(v); expr->IsReference())
         if (auto id = dyn_cast<AST::Identifier>(expr->GetReference()))
           if (id->name == "__choreo_no_tiling__") {
-            notile = true;
+            notile_indices.push_back(i);
             break;
           }
+      ++i;
+    }
 
-    if (notile && n.bounds) {
-      Error(n.LOC(), ".chunk operation can not work with .at() with '_'.");
-      error_count++;
+    // the upper bound of notile must be 1
+    if (n.bounds) {
+      for (auto& i : notile_indices) {
+        auto il = GetIntLiteral(*n.bounds->ValueAt(i));
+        if ((il == nullptr) || (il->value != 1)) {
+          Error(n.LOC(), "upper bound of bounded variable '_' is " +
+                             PSTR(n.bounds->ValueAt(i)) + " (1 is expected.");
+          error_count++;
+        }
+      }
     }
   }
 
@@ -1179,9 +1207,9 @@ bool EarlySemantics::Visit(AST::Wait& n) {
   TraceEachVisit(n);
 
   for (auto& v : n.targets->AllValues()) {
-    auto id = dyn_cast<AST::Identifier>(v);
-    if (!id) {
-      Error(n.LOC(), "expect symbol but got '" + AST::STR(*v) + "'.");
+    if (!AST::IsSymbolOrArrayRef(*v)) {
+      Error(n.LOC(),
+            "expect a symbol/array reference but got '" + AST::STR(*v) + "'.");
       error_count++;
     }
 
@@ -1189,20 +1217,20 @@ bool EarlySemantics::Visit(AST::Wait& n) {
 
     if (auto fty = dyn_cast<FutureType>(ty)) {
       if (!fty->IsAsync()) {
-        Error(n.LOC(),
-              "non-async future '" + id->name + "` can not be waited.");
+        Error(n.LOC(), "non-async future '" + AST::GetName(*v).value() +
+                           "` can not be waited.");
         error_count++;
       }
       continue;
     } else if (auto pty = dyn_cast<PlaceHolderType>(ty)) {
       if (pty->Category() != TypeCategory::FUTURE) {
-        Error(n.LOC(), "'" + id->name + "` of type \"" + PSTR(ty) +
-                           "\" can not be waited.");
+        Error(n.LOC(), "'" + AST::GetName(*v).value() + "` of type \"" +
+                           PSTR(ty) + "\" can not be waited.");
         error_count++;
       }
     } else if (!isa<EventType>(ty)) {
-      Error(n.LOC(), "'" + id->name + "` of type \"" + PSTR(ty) +
-                         "\" can not be waited.");
+      Error(n.LOC(),
+            "'" + STR(n) + "` of type \"" + PSTR(ty) + "\" can not be waited.");
       error_count++;
     }
   }
@@ -1213,13 +1241,15 @@ bool EarlySemantics::Visit(AST::Trigger& n) {
   TraceEachVisit(n);
 
   for (auto& v : n.targets->AllValues()) {
-    auto id = dyn_cast<AST::Identifier>(v);
-    if (!id) {
-      Error(n.LOC(), "expect a symbol but got '" + AST::STR(*v) + "'.");
+    if (!AST::IsSymbolOrArrayRef(*v)) {
+      Error(n.LOC(),
+            "expect a symbol/array reference but got '" + AST::STR(*v) + "'.");
       error_count++;
-    } else if (!isa<EventType>(NodeType(*id))) {
-      Error(n.LOC(), "expect `" + PSTR(id) + "' an event but got '" +
-                         PSTR(NodeType(n)) + "'.");
+    }
+    auto ty = NodeType(*v);
+    if (!isa<EventType>(ty)) {
+      Error(n.LOC(),
+            "expect `" + PSTR(v) + "' an event but got '" + PSTR(ty) + "'.");
       error_count++;
     }
   }

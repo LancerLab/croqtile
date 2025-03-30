@@ -362,9 +362,17 @@ bool SemaChecker::Visit(AST::Trigger& n) {
       error_count++;
       continue;
     }
-    auto e_id = AST::GetIdentifier(*f);
-    assert(e_id);
-    pending_async.insert(InScopeName(e_id->name));
+    if (auto id = AST::GetIdentifier(*f))
+      pending_async.insert(InScopeName(id->name));
+    else if (auto e = dyn_cast<AST::Expr>(f)) {
+      if (e->op != "elemof") {
+        Error(n.LOC(), "expect a element-of operation but got " + e->op + ").");
+        error_count++;
+        continue;
+      }
+      auto id = cast<AST::Identifier>(e->GetL());
+      pending_async.insert(InScopeName(id->name));
+    }
   }
   return true;
 }
@@ -380,9 +388,17 @@ bool SemaChecker::Visit(AST::Wait& n) {
       error_count++;
       continue;
     }
-    auto id = AST::GetIdentifier(*f);
-    assert(id);
-    waited_async.insert(InScopeName(id->name));
+    if (auto id = AST::GetIdentifier(*f))
+      waited_async.insert(InScopeName(id->name));
+    else if (auto e = dyn_cast<AST::Expr>(f)) {
+      if (e->op != "elemof") {
+        Error(n.LOC(), "expect a element-of operation but got " + e->op + ").");
+        error_count++;
+        continue;
+      }
+      auto id = cast<AST::Identifier>(e->GetL());
+      waited_async.insert(InScopeName(id->name));
+    }
   }
 
   return true;

@@ -685,6 +685,10 @@ ValueNumbering::TryToSimplifyNodeSignature(const AST::Node& node) {
              [this, &n]() -> std::optional<std::string> {
                return std::nullopt;
              }},
+            {"elemof",
+             [this, &n]() -> std::optional<std::string> {
+               return std::nullopt;
+             }},
             {"dimof", // calculate the dim of a given mdspan index
              [this, &n]() -> std::optional<std::string> {
                std::string base_sig;
@@ -713,6 +717,7 @@ ValueNumbering::TryToSimplifyNodeSignature(const AST::Node& node) {
              }},
         };
     if ((n->GetForm() == AST::Expr::Binary) && (n->op != "dimof") &&
+        (n->op != "elemof") &&
         ((CountElementsInSignature(GetSignatureForNode(*n->GetR())) > 1) ||
          (CountElementsInSignature(GetSignatureForNode(*n->GetL())) > 1)))
       return SignBinaryCompositeValues(n->LOC(), n->op,

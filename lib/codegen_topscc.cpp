@@ -502,7 +502,15 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
   }
 
   // handle events
-  if (isa<EventType>(nty)) {
+  if (auto ety = dyn_cast<EventArrayType>(nty)) {
+    assert(n.mem && "no storage specifier of the event.");
+    ds << d_indent << TopsStorageType(n.mem->Get()) << " __volatile__ bool "
+       << n.name_str << "[" << ety->ElemCount() << "]; // " << PSTR(n.mem)
+       << " event\n";
+    for (size_t i = 0; i < ety->ElemCount(); ++i)
+      ds << d_indent << n.name_str << "[" << i
+         << "] = false;\n"; // inited as untriggerd
+  } else if (isa<EventType>(nty)) {
     assert(n.mem && "no storage specifier of the event.");
     ds << d_indent << TopsStorageType(n.mem->Get()) << " __volatile__ bool "
        << n.name_str << "; // " << PSTR(n.mem) << " event\n";
@@ -1049,14 +1057,25 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
     IncrDeviceIndent();
   }
 
-  for (auto& f : n.GetTargets())
-    if (isa<FutureType>(NodeType(*f)))
+  for (auto& f : n.GetTargets()) {
+    if (isa<FutureType>(NodeType(*f))) {
       ds << d_indent << ExprSTR(f, false) << ".wait();\n";
-    else if (isa<EventType>(NodeType(*f))) {
+    } else if (auto ety = dyn_cast<EventArrayType>(NodeType(*f))) {
+      ds << d_indent << "while (";
+      for (size_t i = 0; i < ety->ElemCount(); ++i) {
+        ds << ExprSTR(f, false) << "[" << i << "] == false";
+        if (i != ety->ElemCount() - 1) ds << " || ";
+      }
+      ds << ") continue; // spinlock\n";
+      for (size_t i = 0; i < ety->ElemCount(); ++i)
+        ds << d_indent << ExprSTR(f, false) << "[" << i
+           << "] = false; // reset event\n";
+    } else if (isa<EventType>(NodeType(*f))) {
       ds << d_indent << "while (" << ExprSTR(f, false)
          << " == false) continue; // spinlock\n";
       ds << d_indent << ExprSTR(f, false) << " = false; // reset event\n";
     }
+  }
 
   if (shared_in_block) {
     DecrDeviceIndent();
@@ -1070,9 +1089,13 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
 bool TopsccCodeGen::Visit(AST::Trigger& n) {
   TraceEachVisit(n);
   for (auto& f : n.GetEvents()) {
-    auto id = AST::GetIdentifier(*f);
-    assert(id && "expect identifier");
-    ds << d_indent << PSTR(id) << " = true;\n";
+    if (auto ety = dyn_cast<EventArrayType>(NodeType(*f))) {
+      for (size_t i = 0; i < ety->ElemCount(); ++i)
+        ds << d_indent << ExprSTR(f, false) << "[" << i
+           << "] = true; // trigger event\n";
+    } else if (isa<EventType>(NodeType(*f))) {
+      ds << d_indent << ExprSTR(f) << " = true; // trigger event\n";
+    }
   }
   return true;
 }
@@ -1726,6 +1749,8 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
           oss << "+(" << ExprSTR(expr->GetR(), is_host) << "))";
         } else
           oss << "(" << ExprSTR(expr->GetR(), is_host) << ")";
+      } else if (expr->GetOp() == "elemof") {
+        oss << ExprSTR(expr->GetL()) << "[" << ExprSTR(expr->GetR()) << "]";
       } else if (expr->IsArith() || expr->IsLogical()) {
         auto& l = expr->GetL();
         auto& r = expr->GetR();

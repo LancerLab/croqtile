@@ -1,0 +1,74 @@
+// REQUIRES: TARGET-GCU300
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+#define M 76
+#define N 128
+
+__device__ void add_kernel(float *lhs, float* rhs, float* res, int size) {
+  for (int i = 0; i < size; ++i)
+    res[i] = lhs[i] + rhs[i];
+}
+
+__co__ auto pc_pattern(f32 [M, N] lhs, f32 [M, N] rhs) {
+  f32 [lhs.span] out;
+  parallel p by 5 {
+    tfs = {1, 4}; // tiling factors
+    sshape : lhs.span / tfs;
+    shared f32 [sshape] lhs_sbuffer, rhs_sbuffer, out_sbuffer;
+
+    // event for producer and consumer
+    shared event pe[4], ce[4];
+    trigger ce;
+
+    //                  +-> local
+    //                  +-> local
+    // global -> shared +
+    //                  +-> local
+    //                  +-> local
+    with q in [tfs(1)] foreach q {
+      inthreads.async (p == #p - 1) {  // producer
+        wait ce;
+// TODO: ENABLE ituple for .chunk
+//        lf = dma.copy.async lhs.chunk(tfs).at(#p - p, q) => lhs_sbuffer;
+//        rf = dma.copy.async rhs.chunk(tfs).at(#p - p, q) => rhs_sbuffer;
+        lf = dma.copy.async lhs.chunkat(_, q) => lhs_sbuffer;
+        rf = dma.copy.async rhs.chunkat(_, q) => rhs_sbuffer;
+        wait lf, rf;
+        trigger pe;
+      }
+      inthreads.async (p < #p - 1) {  // consumer
+        wait pe[p];
+        lf = dma.copy.async lhs_sbuffer.chunk(#p - 1, 1).at(p, _) => local;
+        rf = dma.copy.async rhs_sbuffer.chunk(#p - 1, 1).at(p, _) => local;
+        wait lf, rf;
+        local f32 [lf.span] out_lbuffer;
+        call add_kernel(lf.data, rf.data, out_lbuffer, |lf.span|);
+        dma.copy out_lbuffer => out.chunk(#p - 1, #q).at(p, q);
+        trigger ce[p];
+      }
+    }
+    sync.shared;
+  }
+  return out;
+}
+
+int main() {
+  choreo::f32 lhs[M][N];
+  choreo::f32 rhs[M][N];
+  std::generate_n((float*)lhs, M*N, []() { static float i = 1.1; i*=2; return i; });
+  std::generate_n((float*)rhs, M*N, []() { static float i = 3.3; i*=1.01; return i; });
+
+  auto res = pc_pattern(choreo::make_spanview(lhs), choreo::make_spanview(rhs));
+
+  for (size_t m = 0; m < M; ++m)
+    for (size_t n = 0; n < M; ++n)
+      if (res[m][n] != lhs[m][n] + rhs[m][n]) {
+        std::cerr << res[m][n] << " != " << lhs[m][n] << " + " << rhs[m][n];
+        choreo::choreo_assert(false, "error: the result is not correct");
+      }
+
+  std::cout << "TEST PASSED!\n";
+  return 0;
+}
+
+// CHECK: TEST PASSED!

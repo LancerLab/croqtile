@@ -42,6 +42,7 @@ enum class TypeCategory {
   VOID,
   FUTURE,
   EVENT,
+  ARRAY,
   STRING,
   FUNCTION,
   UNKNOWN,
@@ -65,6 +66,7 @@ inline static std::string STR(TypeCategory tc) {
   case TypeCategory::VOID: return "VOID";
   case TypeCategory::FUTURE: return "FUTURE";
   case TypeCategory::EVENT: return "EVENT";
+  case TypeCategory::ARRAY: return "ARRAY";
   case TypeCategory::FUNCTION: return "FUNCTION";
   case TypeCategory::STRING: return "STRING";
   case TypeCategory::UNKNOWN: return "UNKNOWN";
@@ -95,6 +97,7 @@ enum class BaseType {
   DOUBLE,
   ITUPLE,
   EVENT,
+  ARRAY,
   VOID,
   UNKNOWN
 };
@@ -190,17 +193,17 @@ inline static size_t SizeOf(BaseType bt) {
 // utility functions to map types to strings, and the opposite.
 inline static BaseType BaseTypeFromString(const std::string& input) {
   static const std::unordered_map<std::string, BaseType> typeMap = {
-      {"f32", BaseType::F32},         {"f16", BaseType::F16},
-      {"bf16", BaseType::BF16},       {"u32", BaseType::U32},
-      {"s32", BaseType::S32},         {"u16", BaseType::U16},
-      {"s16", BaseType::S16},         {"u8", BaseType::U8},
-      {"s8", BaseType::S8},           {"f8", BaseType::F8},
-      {"half8", BaseType::HALF8},     {"half", BaseType::HALF},
-      {"float", BaseType::FLOAT},     {"double", BaseType::DOUBLE},
-      {"bfp16", BaseType::BFP16},     {"int", BaseType::INT},
-      {"bool", BaseType::BOOL},       {"ituple", BaseType::ITUPLE},
-      {"event", BaseType::EVENT},     {"void", BaseType::VOID},
-      {"unknown", BaseType::UNKNOWN},
+      {"f32", BaseType::F32},     {"f16", BaseType::F16},
+      {"bf16", BaseType::BF16},   {"u32", BaseType::U32},
+      {"s32", BaseType::S32},     {"u16", BaseType::U16},
+      {"s16", BaseType::S16},     {"u8", BaseType::U8},
+      {"s8", BaseType::S8},       {"f8", BaseType::F8},
+      {"half8", BaseType::HALF8}, {"half", BaseType::HALF},
+      {"float", BaseType::FLOAT}, {"double", BaseType::DOUBLE},
+      {"bfp16", BaseType::BFP16}, {"int", BaseType::INT},
+      {"bool", BaseType::BOOL},   {"ituple", BaseType::ITUPLE},
+      {"event", BaseType::EVENT}, {"array", BaseType::ARRAY},
+      {"void", BaseType::VOID},   {"unknown", BaseType::UNKNOWN},
   };
 
   auto it = typeMap.find(input);
@@ -213,17 +216,17 @@ namespace __internal__ {
 
 inline static std::string GetStringFrom(BaseType dataType) {
   static const std::unordered_map<BaseType, std::string> enumToString = {
-      {BaseType::F32, "f32"},         {BaseType::F16, "f16"},
-      {BaseType::BF16, "bf16"},       {BaseType::U32, "u32"},
-      {BaseType::S32, "s32"},         {BaseType::U16, "u16"},
-      {BaseType::S16, "s16"},         {BaseType::U8, "u8"},
-      {BaseType::S8, "s8"},           {BaseType::F8, "f8"},
-      {BaseType::HALF8, "half8"},     {BaseType::HALF, "half"},
-      {BaseType::BFP16, "bfp16"},     {BaseType::INT, "int"},
-      {BaseType::FLOAT, "float"},     {BaseType::DOUBLE, "double"},
-      {BaseType::BOOL, "bool"},       {BaseType::ITUPLE, "ituple"},
-      {BaseType::EVENT, "event"},     {BaseType::VOID, "void"},
-      {BaseType::UNKNOWN, "unknown"},
+      {BaseType::F32, "f32"},     {BaseType::F16, "f16"},
+      {BaseType::BF16, "bf16"},   {BaseType::U32, "u32"},
+      {BaseType::S32, "s32"},     {BaseType::U16, "u16"},
+      {BaseType::S16, "s16"},     {BaseType::U8, "u8"},
+      {BaseType::S8, "s8"},       {BaseType::F8, "f8"},
+      {BaseType::HALF8, "half8"}, {BaseType::HALF, "half"},
+      {BaseType::BFP16, "bfp16"}, {BaseType::INT, "int"},
+      {BaseType::FLOAT, "float"}, {BaseType::DOUBLE, "double"},
+      {BaseType::BOOL, "bool"},   {BaseType::ITUPLE, "ituple"},
+      {BaseType::EVENT, "event"}, {BaseType::ARRAY, "array"},
+      {BaseType::VOID, "void"},   {BaseType::UNKNOWN, "unknown"},
   };
 
   auto it = enumToString.find(dataType);
@@ -298,10 +301,32 @@ int TypeIDProvider<T>::__unique_id;
            PTYPE::IsType(ty);                                                  \
   }
 
+#define __UDT_2TYPES_INFO__(PTYPE1, PTYPE2, TTYPE)                             \
+  const std::string TypeNameString() const override {                          \
+    std::string name = __PRETTY_FUNCTION__;                                    \
+    std::regex prefix_regex("^.*Choreo::");                                    \
+    name = std::regex_replace(name, prefix_regex, "");                         \
+    std::regex suffix_regex("::TypeNameString.*$");                            \
+    name = std::regex_replace(name, suffix_regex, "");                         \
+    return name;                                                               \
+  }                                                                            \
+  static uint64_t TypeID() {                                                   \
+    return (uint64_t)&(TypeIDProvider<TTYPE>::__unique_id);                    \
+  }                                                                            \
+  bool IsType(uint64_t ty) const override {                                    \
+    return (ty == (uint64_t)&(TypeIDProvider<TTYPE>::__unique_id)) ||          \
+           PTYPE1::IsType(ty) || PTYPE2::IsType(ty);                           \
+  }
+
 #define __UDT_TYPE_INFO_BASE__(NAME)                                           \
   virtual const std::string TypeNameString() const { return #NAME; }           \
   static uint64_t TypeID() { return 0xDEADBEEFULL; }                           \
   virtual bool IsType(uint64_t ty) const { return ty == 0xDEADBEEFULL; }
+
+#define __UDT_TYPE_INFO_BASE1__(NAME)                                          \
+  virtual const std::string TypeNameString() const { return #NAME; }           \
+  static uint64_t TypeID() { return 0xBAADF00DULL; }                           \
+  virtual bool IsType(uint64_t ty) const { return ty == 0xBAADF00DULL; }
 
 // LLVM-style type utility functions
 //
@@ -1345,6 +1370,47 @@ struct FunctionType : public Type, public TypeIDProvider<FunctionType> {
   __UDT_TYPE_INFO__(Type, FunctionType)
 };
 
+// array is special
+struct ArrayType : public TypeIDProvider<ArrayType> {
+  int count = -1;
+  TypeCategory tc = TypeCategory::ARRAY;
+
+  ArrayType(int c) : count(c) {}
+  virtual size_t ElemCount() const {
+    if (count <= 0) choreo_unreachable("invalid array.");
+    return (size_t)count;
+  }
+
+  // for runtime type disambiguition
+  __UDT_TYPE_INFO_BASE1__(arraytype)
+};
+
+struct EventArrayType : public ArrayType,
+                        public EventType,
+                        public TypeIDProvider<EventArrayType> {
+  EventArrayType(int ec) : ArrayType(ec), EventType() {}
+  size_t Dims() const override { return 1; }
+  bool IsComplete() const override { return true; }
+  bool HasSufficientInfo() const override { return true; }
+
+  bool operator==(const Type& ty) const override {
+    if (auto t = dyn_cast<EventArrayType>(&ty))
+      return t->ElemCount() == ElemCount();
+    return false;
+  }
+
+  bool ApprxEqual(const Type& ty) const override { return operator==(ty); }
+
+  const std::string Name() const override { return "event-array"; }
+
+  void Print(std::ostream& os) const override {
+    os << "event[" << ElemCount() << "]";
+  }
+
+  // can not have instance
+  __UDT_2TYPES_INFO__(ArrayType, EventType, EventArrayType)
+};
+
 inline size_t SizeOf(const Type& ty) {
   if (isa<VoidType>(&ty)) return 0;
   if (isa<IntegerType>(&ty))
@@ -1568,6 +1634,10 @@ inline ptr<BoundedITupleType> MakeUninitBoundedITupleType() {
 }
 
 inline ptr<EventType> MakeEventType() { return std::make_shared<EventType>(); }
+
+inline ptr<EventArrayType> MakeEventArrayType(int ec) {
+  return std::make_shared<EventArrayType>(ec);
+}
 
 inline ptr<FutureType> MakeFutureType(const ptr<SpannedType>& v, bool async) {
   return std::make_shared<FutureType>(v, async);

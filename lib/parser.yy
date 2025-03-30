@@ -186,9 +186,9 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::SpanAs>> span_as
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
-%nterm <AST::ptr<AST::Node>> foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal device_passable declaration statement assignment dma_stmt wait_stmt trigger_stmt call_stmt print_stmt swap_stmt expr_or_qes range_expr param_mdspan_val chunkat_or_storage_or_select pred returnable
+%nterm <AST::ptr<AST::Node>> foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal device_passable declaration statement assignment dma_stmt wait_stmt trigger_stmt call_stmt print_stmt swap_stmt expr_or_qes range_expr param_mdspan_val chunkat_or_storage_or_select pred returnable id_or_elem
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
-%nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables future_data_list template_params gi_list
+%nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables future_data_list template_params gi_list ide_list
 %nterm <AST::ptr<AST::Expr>> s_expr template_value_expr span_expr id_expr bound_expr optional_pred
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
@@ -661,6 +661,11 @@ event_decl
     : IDENTIFIER {
         $$ = AST::Make<AST::NamedVariableDecl>(@1, $1,
              AST::Make<AST::DataType>(@1, BaseType::EVENT));
+      }
+    | IDENTIFIER LBRAKT NUM RBRAKT {
+        // event array
+        $$ = AST::Make<AST::NamedVariableDecl>(@1, $1,
+             AST::Make<AST::DataType>(@1, $3, BaseType::EVENT), nullptr, $3);
       }
     ;
 
@@ -1323,16 +1328,30 @@ with_matchers /* TODO: this special case is pattern-match ids for with-block */
       }
     ;
 
-wait_stmt
-    : WAIT id_list {
-        $$ = AST::Make<AST::Wait>(@1, $2);
+id_or_elem
+    : IDENTIFIER { $$ = AST::Make<AST::Identifier>(@1, $1); }
+    | IDENTIFIER LBRAKT s_expr RBRAKT {
+        $$ = AST::Make<AST::Expr>(@1, "elemof", AST::Make<AST::Identifier>(@1, $1), $3);
       }
     ;
 
-trigger_stmt
-    : TRIGGER id_list {
-        $$ = AST::Make<AST::Trigger>(@1, $2);
+ide_list
+    : ide_list COMMA id_or_elem {
+        $1->Append($3);
+        $$ = $1;
       }
+    | id_or_elem {
+        $$ = AST::Make<AST::MultiValues>(@1, ", ");
+        $$->Append($1);
+      }
+    ;
+
+wait_stmt
+    : WAIT ide_list { $$ = AST::Make<AST::Wait>(@1, $2); }
+    ;
+
+trigger_stmt
+    : TRIGGER ide_list { $$ = AST::Make<AST::Trigger>(@1, $2); }
     ;
 
 call_stmt

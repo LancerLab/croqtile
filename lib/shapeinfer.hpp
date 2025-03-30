@@ -243,6 +243,9 @@ public:
                        << "\n");
       InvalidateVN(cur_vn); // a spanned data does not have a value number
       return true;
+    } else if (n.op == "elemof") {
+      InvalidateVN(cur_vn); // a spanned data does not have a value number
+      return true;
     } else if (isa<AST::ChunkAt>(n.GetR())) {
       InvalidateVN(cur_vn); // a spanned data does not have a value number
       return true;
