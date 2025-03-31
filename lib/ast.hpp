@@ -1549,7 +1549,7 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   int stride = GetInvalidStride();
 
   LoopRange(const location& l, const ptr<Identifier> i)
-      : Node(l), iv(i) {} // the bounds are yet to be inferenced
+      : Node(l), iv(i) {} // the bounds are yet to be inferred
   LoopRange(const location& l, const ptr<Identifier> i, const ptr<Expr> lb,
             const ptr<Expr> ub, int s = 1)
       : Node(l), iv(i), lbound(lb), ubound(ub), stride(s) {}

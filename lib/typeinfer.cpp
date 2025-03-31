@@ -514,16 +514,26 @@ bool TypeInference::Visit(AST::Expr& n) {
         return true;
       }
       if (pty_lhs->Dims() == pty_rhs->Dims()) {
-        n.SetType(MakeMDSpanType(n.s)); // note: the shape has been inferenced
+        n.SetType(MakeMDSpanType(n.s)); // note: the shape has been inferred
         cur_type = n.GetType();
         return true;
-      } else {
-        Error(n.LOC(),
-              "The operands of the expression be performed for inconsistant "
-              "shape dimension.");
-        error_count++;
-        return false;
       }
+
+      for (const auto& pty : {pty_lhs, pty_rhs})
+        if (isa<ITupleType>(pty))
+          if (ConvertibleToInt(pty)) {
+            n.SetType(MakeMDSpanType(n.s));
+            cur_type = n.GetType();
+            return true;
+          }
+
+      Error(n.LOC(),
+            "The operands of the expression be performed for inconsistent "
+            "shape dimension: " +
+                std::to_string(pty_lhs->Dims()) + " vs. " +
+                std::to_string(pty_rhs->Dims()));
+      error_count++;
+      return false;
     } else if (isa<MDSpanType>(pty_lhs) && isa<MDSpanType>(pty_rhs)) {
       if (n.op == "concat") {
         n.SetType(MakeMDSpanType(n.s));
@@ -541,7 +551,7 @@ bool TypeInference::Visit(AST::Expr& n) {
         return true;
       } else {
         Error(n.LOC(),
-              "The operands of the expression be performed for inconsistant "
+              "The operands of the expression be performed for inconsistent "
               "shape dimension.");
         error_count++;
         return false;
@@ -560,7 +570,7 @@ bool TypeInference::Visit(AST::Expr& n) {
         return true;
       } else {
         Error(n.LOC(),
-              "The operands of the expression be performed for inconsistant "
+              "The operands of the expression be performed for inconsistent "
               "shape dimension.");
         error_count++;
         return false;
@@ -912,7 +922,7 @@ bool TypeInference::Visit(AST::Return& n) {
         ModifySymbolType(n.LOC(), fname, MakeFunctionType(nty, fty->in_tys));
       }
     } else if (isa<UnknownType>(fty->out_ty)) {
-      // the type must be inferenced
+      // the type must be inferred
       if (auto tty = dyn_cast<SpannedType>(vty)) {
         // global should be mapped back
         auto nty = MakeSpannedType(tty->ElementType(), tty->GetShape());

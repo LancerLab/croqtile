@@ -28,7 +28,7 @@ __co__ auto illegal_mdspan(f32 [?] a) {
 // CHECK: error: unexpected data type 'bool' is found in mdspan.
 // CHECK: error: unexpected data type 'f32 mdspan<1> []' is found in mdspan.
 // CHECK: error: unexpected data type '{int,int,int}->[]' is found in mdspan.
-// CHECK: error: unexpected data type '{int}->[p]' is found in mdspan.
+// CHECK: error: unexpected data type 'int->[unknown]' is found in mdspan.
 // CHECK: error: unexpected data type 'int->[unknown]' is found in mdspan.
 // CHECK: error: unexpected data type 'int->[unknown]' is found in mdspan.
 // CHECK: error: unexpected data type 'int->[unknown]' is found in mdspan.

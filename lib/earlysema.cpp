@@ -1,4 +1,5 @@
 #include "earlysema.hpp"
+#include "types.hpp"
 
 using namespace Choreo;
 
@@ -175,7 +176,12 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       error_count++;
       return false;
     }
-    SetNodeType(n, MakeIntegerType());
+    if (isa<BoundedIntegerType>(ty))
+      SetNodeType(n, MakeIntegerType());
+    else if (isa<BoundedITupleType>(ty))
+      SetNodeType(n, MakeITupleType(ty->Dims()));
+    else
+      choreo_unreachable("unexpect");
   } else if ((n.op == "+") || (n.op == "-") || (n.op == "*") || (n.op == "/") ||
              (n.op == "%") || (n.op == "cdiv")) {
     auto lty = NodeType(*n.GetL());
@@ -773,22 +779,24 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
   }
 
   if (n.HasBIV()) {
-    SetNodeType(*n.biv,
-                MakeBoundedITupleType(Shape(n.dims, n.biv->name), "pv"));
+    if (!n.iv_symbols)
+      SetNodeType(*n.biv, MakeBoundedIntegerType(n.biv->name));
+    else
+      SetNodeType(*n.biv, MakeBoundedITupleType(Shape(n.dims), "pv"));
     ReportErrorWhenViolateODR(n.LOC(), n.biv->name, __FILE__, __LINE__,
                               n.biv->GetType());
   }
   if (n.iv_symbols) {
     for (auto& sym : n.iv_symbols->AllValues()) {
       auto sname = cast<AST::Identifier>(sym)->name;
-      auto mty = MakeBoundedITupleType(Shape(1, sname), "pi");
+      auto mty = MakeBoundedIntegerType(sname);
       ReportErrorWhenViolateODR(n.LOC(), sname, __FILE__, __LINE__, mty);
       SetNodeType(*sym, mty);
     }
     SetNodeType(*n.bounds, MakeBoundedITupleType(n.bounds->Count()));
   }
 
-  if (auto i = dyn_cast<int>(&n.bound); n.biv && i && *i <= 0) {
+  if (auto i = dyn_cast<int>(&n.bound); n.HasBIV() && i && *i <= 0) {
     Error(n.biv->LOC(),
           "bound " + ValueItemAsString(n.bound) +
               " in parallelby is invalid: should be greater than 0.");
@@ -891,7 +899,11 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
   if (n.with) {
     n.with->accept(*this); // make the symbol be defined
     with_syms.insert(n.with->name);
-    auto wty = MakeBoundedITupleType(Shape(rank));
+    ptr<Type> wty;
+    if (isa<AST::IntLiteral>(n.in))
+      wty = MakeBoundedIntegerType(n.with->name);
+    else
+      wty = MakeBoundedITupleType(Shape(rank));
     ModifySymbolType(n.with->name, wty);
     SetNodeType(*n.with, wty);
   }

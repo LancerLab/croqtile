@@ -1,0 +1,39 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ auto illegal_mdspan_arith(f32 [16, 32] i) {
+  with idx={a} in [2] {
+    shared f32 [i.span / #a] si; // ok. #a is a scalar, because a is of BoundedInteger type.
+    shared f32 [i.span / #idx] sii; // error. #idx is a ITuple, because idx is of BoundedITuple type.
+// CHECK: error: in operation "/": dimension inconsistent (2 vs. 1).
+  }
+  
+  with idx in [2] {
+    shared f32 [i.span / #idx] sii; // the same error. 
+// CHECK: error: in operation "/": dimension inconsistent (2 vs. 1).
+  }
+  
+  with {a} in [2] {
+    shared f32 [i.span / #a] si; // ok.
+  }
+  
+  with idx in 2 {
+    shared f32 [i.span / #idx] sii; // ok. idx is a BoundedInteger here because 2 is without []
+  }
+
+
+
+  parallel p={px} by [4] {
+    shared f32 [i.span / #px] si; // ok.
+    shared f32 [i.span / #p] sii; // error.
+// CHECK: error: in operation "/": dimension inconsistent (2 vs. 1).
+  }
+  
+  parallel {px, py} by [2,2] {
+    shared f32 [i.span / #px] six; // ok.
+    shared f32 [i.span / #py] siy; // ok.
+  }
+  
+  parallel p by 4 {
+    shared f32 [i.span / #p] sii; // ok.
+  }
+}

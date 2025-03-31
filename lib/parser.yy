@@ -742,10 +742,7 @@ value_or_qes_list
     ; // do not allow an empty list
 
 value_list
-    : /* Empty list */ {
-        $$ = AST::Make<AST::MultiValues>(loc);
-      }
-    | value_list COMMA s_expr {
+    : value_list COMMA s_expr {
         $1->Append($3);
         $$ = $1;
       }

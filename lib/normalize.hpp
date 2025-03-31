@@ -274,8 +274,8 @@ public:
         else
           n.bounds->Append(
               AST::Make<AST::Identifier>(n.LOC(), ValueItemAsString(n.bound)));
-        n.iv_symbols->ValueAt(0)->SetType(
-            MakeBoundedITupleType(Shape(1, n.biv->name + "__elem__x"), "pi:x"));
+        n.iv_symbols->ValueAt(0)->SetType(MakeBoundedIntegerType(n.bound));
+        n.biv->SetType(MakeBoundedIntegerType(n.biv->name));
         VST_DEBUG(dbgs() << "Generate iv_symbols in parallelby for '"
                          << PSTR(n.biv) << "': " << STR(n.iv_symbols) << "\n");
       }
@@ -296,6 +296,7 @@ public:
       auto mv = AST::Make<AST::MultiValues>(n.in->LOC(), ",");
       mv->Append(n.in);
       n.in = AST::Make<AST::MultiDimSpans>(n.in->LOC(), "", mv, 1);
+      n.with->SetType(MakeBoundedITupleType(Shape(1)));
     }
 
     if (n.with_matchers) return true;
@@ -304,15 +305,12 @@ public:
     auto wty = n.with->GetType();
     assert(isa<BoundedITupleType>(wty) && "expect a bounded ituple type.");
 
-    // comment to support new feature
-    // if (wty->Dims() == 1) return true;
-
     auto mval = AST::Make<AST::MultiValues>(n.LOC(), ",");
+    auto bity = cast<BoundedITupleType>(wty);
     // fill the with-matchers
     for (size_t i = 0; i < wty->Dims(); ++i) {
       mval->Append(AST::Make<AST::Identifier>(
           n.with->LOC(), n.with->name + "__elem__" + std::to_string(i)));
-      auto bity = cast<BoundedITupleType>(wty);
       if (bity->HasValidBound())
         mval->ValueAt(i)->SetType(
             MakeBoundedIntegerType(bity->GetUpperBound(i)));
