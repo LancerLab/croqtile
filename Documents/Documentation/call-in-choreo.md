@@ -3,7 +3,7 @@ In current implementation of Choreo functions, it invokes *device function* to i
 
 ## Call Device Functions
 
-To call a device function in the choreo function, it requires the call statement explicitly led by `call`.
+To call a device function in the Choreo function, it requires the call statement explicitly led by `call`.
 
 ### Basic Syntax of Call Statements
 
@@ -12,11 +12,11 @@ The general syntax for a `call` statement in Choreo is:
 ```choreo
 call func-name <optional-template-args> (arguments);
 ```
-Here, the keyword `call` is followed by a function name `func-name`, an optional `<>` enclosed template arguments, which are comma-seperated. The `arguments` are also comma-seperated and listed inside `()` like normal C/C++ functions.
+Here, the keyword `call` is followed by a function name `func-name`, an optional `<>` enclosed template arguments, which are comma-separated. The `arguments` are also comma-separated and listed inside `()` like normal C/C++ functions.
 
-Note that **Choreo transpilation process would not apply any check between the callers and the callees**, including the function existence, function signature consistency, and parameter consistency. It delegates such duties to the target compilation process. Programmers must be careful about the conventions between choreo function and device function consequently.
+Note that **Choreo transpilation process would not apply any check between the callers and the callees**, including the function existence, function signature consistency, and parameter consistency. It delegates such duties to the target compilation process. Programmers must be careful about the conventions between Choreo function and device function consequently.
 
-Beside that, in all the currently supported platform, such calls must be made inside `parallel-by`, since it calls device function which only runs on heteregeneous hardware. Therefore, in the following example, `call bar();` in `mou` is illegal code since it tries to call device function in a code location which is assumed to be host code area.
+Beside that, in all the currently supported platform, such calls must be made inside `parallel-by`, since it calls device function which only runs on heterogeneous hardware. Therefore, in the following example, `call bar();` in `mou` is illegal code since it tries to call device function in a code location which is assumed to be host code area.
 
 ```choreo
 __co__ void foo() {
@@ -55,31 +55,34 @@ __co__ void foobar(f32 [M, 24] input, int N, float padding) {
 }
 ```
 
-In this example, it passes different data types as arguments from choreo function to the device functions, which matches the device parameters exactly. Note that in the device function, the **corresponding parameter type of the *spanned data* argument is simply the pointer of its _element type_**, where the shape information is dropped. For example, the `foo`'s argument `p` is `float*`, which corresponds the *spanned data* argument `input.data`. In Choreo, we names the parameter as a **decayed** pointer of the *spanned data*. If using other form like `float p[]`, it will trigger failure in target compilation stage.
+In this example, it passes different data types as arguments from Choreo function to the device functions, which matches the device parameters exactly. Note that in the device function, the **corresponding parameter type of the *spanned data* argument is simply the pointer of its _element type_**, where the shape information is dropped. For example, the `foo`'s argument `p` is `float*`, which corresponds the *spanned data* argument `input.data`. In Choreo, we names the parameter as a **decayed** pointer of the *spanned data*. If using other form like `float p[]`, it will trigger failure in target compilation stage.
 
 For some types like `f16`, and `bf16`, there may not be native target support of such types, it is possible to utilize `choreo::f16` and `choreo::bf16` to handle such types.
 
-## Instantialize the Function Template for Call
+## Instantiate the Function Template for Call
 
 ### Trigger C++ Template Instantiation
 
 It is possible for Choreo code to make function call to a template function. For example:
 
-```
+```choreo
 template<int M, int N, int K>
 __device__ void matmul_kernel(int *lhs, int* rhs, int* output) {}
 
-__co__ matmul(s32 [96, 72] lhs, s32 [72, 24] rhs) {
+__co__ auto matmul(s32 [96, 72] lhs, s32 [72, 24] rhs) {
   s32 [lhs.span(0), rhs.span(1)] output;
   parallel p by 6 {
-    shared s32 [output / #p] buffer;   // shape: [16, 4]
+    shared s32 [output.span / #p] buffer;   // shape: [16, 4]
+    lhs_load = dma.copy lhs.chunkat(p, _) => shared;
+    rhs_load = dma.copy rhs.chunkat(_, p) => shared;
     call matmul_kernel<buffer.span(0), buffer.span(1), 72>(lhs_load.data, rhs_load.data, buffer);
   }
+  return output;
 }
 ```
 In this case, it defines device function template named `matmul_kernel`, which takes three template parameters. As the caller specified the template function arguments, it triggers the instantiation of the function template, which results in a template function `matmul<16, 4, 72>` for the call.
 
-So in Choreo, calling a template function is similar to those in C++. However, **the template argument passed must be able to be inferenced as compile time constant value** by Choreo compiler. Therefore, any runtime values can result in error.
+So in Choreo, calling a template function is similar to those in C++. However, **the template argument passed must be able to be inferred as compile time constant value** by Choreo compiler. Therefore, any runtime values can result in error.
 
 ```choreo
 __co__ void foo(int M) {
@@ -89,7 +92,7 @@ __co__ void foo(int M) {
 }
 ```
 
-Choreo compiler could inference values as much as possible at compile time. If the template argument can not be inferenced, the compilation will abort and error will be emitted.
+Choreo compiler could inference values as much as possible at compile time. If the template argument can not be inferred, the compilation will abort and error will be emitted.
 
 
 ### *Factor* Target Specific Details

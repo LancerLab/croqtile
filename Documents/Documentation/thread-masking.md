@@ -16,7 +16,7 @@ Masking is an implementation-level concept. From the perspective of the SPMD pro
 - **Uniform Code**: *All threads* execute the same code path.
 - **Divergent Code**: Only the *masked threads* execute the *divergent* code path.
 
-It is necessary to have the *divergent* code in SPMD code to handle different real-world requirements. And from a perspective of different programming paradigm, applying *divergent* code in SPMD programs can even mimic MPMD (Multiple Program Multiple Data) behavior. In MPMD, different threads execute different code. Therefore, *divergence* can extend SPMD to MDMP scope conceptually.
+It is necessary to have the *divergent* code in SPMD code to handle different real-world requirements. And from a perspective of different programming paradigm, applying *divergent* code in SPMD programs can even mimic MPMD (Multiple Program Multiple Data) behavior. In MPMD, different threads execute different code. Therefore, *divergence* can extend SPMD to MPMD scope conceptually.
 
 In Choreo, we are able to create divergent code via `inthreads` block. Let us dive into the detail.
 
@@ -61,7 +61,7 @@ In Choreo, the `inthreads` block looks like a `if` conditional block in C/C++. H
 - Can only appear in the SPMD code region, which is enclosed in the `parallel-by` block.
 - Can only have a comparison result related to thread identifiers.
 
-Choreo compiler has the checks for both the corrent comparison expression and `inthread`-block placement.
+Choreo compiler has the checks for both the comparison expression and `inthreads`-block placement.
 
 ### Make it Asynchronous
 Similar to the `parallel-by` statements, it is possible to make the threads with/without executing the divergent code be asynchronous. The following code showcases a example that conduct MPMD execution in the SPMD code:
@@ -80,7 +80,7 @@ __co__  void foo() {
   }
 }
 ```
-In this example, it divides the parallel threads evenly into two sub-groups, without forcing synchronization after each `inthreads` block. In this way, threads in different groups are executed in parallel, mimicing a MPMD executing. However, the `sync.shared` statement established a **synchorinization point** for all threads. That makes sure code for both paths get executed after this *synchorinization point*.
+In this example, it divides the parallel threads evenly into two sub-groups, without forcing synchronization after each `inthreads` block. In this way, threads in different groups are executed in parallel, mimicking a MPMD executing. However, the `sync.shared` statement established a **synchronization point** for all threads. That makes sure code for both paths get executed after this *synchronization point*.
 
 Note that, only the outer `inthreads` can be declared as asynchronous. Programmers will get an compile-time error when using `inthreads.async` for any inner `inthreads` block.
 

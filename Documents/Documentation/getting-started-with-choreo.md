@@ -55,7 +55,7 @@ Therefore, Once Choreo is built, developers can compile Choreo-C++ programs into
 - Target assembly
 - Work-script
 
-Species execpt for *target source code* and *work-script* (introduced later) are similar to those of `gcc` and `clang`. However, the availability of these output forms depends on the target platform's support and limitations.
+Species except for *target source code* and *work-script* (introduced later) are similar to those of `gcc` and `clang`. However, the availability of these output forms depends on the target platform's support and limitations.
 
 The usage of the Choreo-C++ compiler is similar to that of `gcc` or `clang`. For example:
 ```
