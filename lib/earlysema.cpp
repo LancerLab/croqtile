@@ -397,12 +397,19 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     }
     if (!CanYieldAnInteger(rty)) {
       Error(n.LOC(), "in operation \"" + n.op +
-                         "\": expect an integer index but got " + PSTR(rty) +
-                         ".");
+                         "\": expect an integer index expression but got " +
+                         PSTR(rty) + ".");
       error_count++;
     }
+
+    if (auto evty = dyn_cast<EventArrayType>(lty))
+      SetNodeType(n, MakeEventType(evty->GetStorage()));
+    else {
+      Error(n.LOC(), "unsupported array subscription.");
+      error_count++;
+    }
+
     if (error_count != old_ec) return false;
-    SetNodeType(n, MakeEventType());
   } else
     choreo_unreachable("operation in expression is not supported yet.");
 
@@ -548,6 +555,16 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
       error_count++;
       return false;
     }
+
+    // update the scope/storage for event types
+    if (auto evty = dyn_cast<EventArrayType>(tty)) {
+      tty = MakeEventArrayType(evty->ElemCount(), n.mem->Get());
+      SetNodeType(*n.type, tty);
+    } else if (isa<EventType>(tty)) {
+      tty = MakeEventType(n.mem->Get());
+      SetNodeType(*n.type, tty);
+    }
+
     ReportErrorWhenViolateODR(n.LOC(), n.name_str, __FILE__, __LINE__, tty);
     SetNodeType(n, tty);
   } else {

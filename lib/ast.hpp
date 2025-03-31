@@ -882,9 +882,9 @@ private:
       break;
     case BaseType::EVENT:
       if (array_ec == -1)
-        SetType(MakeEventType());
+        SetType(MakeEventType(Storage::DEFAULT));
       else
-        SetType(MakeEventArrayType(array_ec));
+        SetType(MakeEventArrayType(array_ec, Storage::DEFAULT));
       break;
     case BaseType::ITUPLE:
       if (!IsValidRank(rank))

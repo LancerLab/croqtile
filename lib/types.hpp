@@ -1266,13 +1266,19 @@ struct AsyncType : public Type, public TypeIDProvider<AsyncType> {
 };
 
 struct EventType : public AsyncType, public TypeIDProvider<EventType> {
-  explicit EventType() : AsyncType(TypeCategory::EVENT) {}
+  Storage scope;
+  explicit EventType(Storage s) : AsyncType(TypeCategory::EVENT), scope(s) {}
   bool HasSufficientInfo() const override { return true; }
-  void Print(std::ostream& os) const override { os << "event"; }
-  const std::string Name() const override { return "event"; }
+  void Print(std::ostream& os) const override { os << STR(scope) << " event"; }
+  const std::string Name() const override { return STR(scope) + " event"; }
 
-  bool operator==(const Type& ty) const override { return isa<EventType>(&ty); }
+  bool operator==(const Type& ty) const override {
+    if (auto ety = dyn_cast<EventType>(&ty)) return scope == ety->scope;
+    return false;
+  }
   bool ApprxEqual(const Type& ty) const override { return operator==(ty); }
+  virtual Storage GetStorage() const { return scope; }
+  virtual void SetStorage(Storage s) { scope = s; }
 
   __UDT_TYPE_INFO__(AsyncType, EventType)
 };
@@ -1388,7 +1394,7 @@ struct ArrayType : public TypeIDProvider<ArrayType> {
 struct EventArrayType : public ArrayType,
                         public EventType,
                         public TypeIDProvider<EventArrayType> {
-  EventArrayType(int ec) : ArrayType(ec), EventType() {}
+  EventArrayType(int ec, Storage s) : ArrayType(ec), EventType(s) {}
   size_t Dims() const override { return 1; }
   bool IsComplete() const override { return true; }
   bool HasSufficientInfo() const override { return true; }
@@ -1401,10 +1407,13 @@ struct EventArrayType : public ArrayType,
 
   bool ApprxEqual(const Type& ty) const override { return operator==(ty); }
 
-  const std::string Name() const override { return "event-array"; }
+  const std::string Name() const override {
+    return EventType::Name() + " array";
+  }
 
   void Print(std::ostream& os) const override {
-    os << "event[" << ElemCount() << "]";
+    EventType::Print(os);
+    os << "[[" << ElemCount() << "]]";
   }
 
   // can not have instance
@@ -1633,10 +1642,12 @@ inline ptr<BoundedITupleType> MakeUninitBoundedITupleType() {
                                              IntegerList(), "");
 }
 
-inline ptr<EventType> MakeEventType() { return std::make_shared<EventType>(); }
+inline ptr<EventType> MakeEventType(Storage s) {
+  return std::make_shared<EventType>(s);
+}
 
-inline ptr<EventArrayType> MakeEventArrayType(int ec) {
-  return std::make_shared<EventArrayType>(ec);
+inline ptr<EventArrayType> MakeEventArrayType(int ec, Storage s) {
+  return std::make_shared<EventArrayType>(ec, s);
 }
 
 inline ptr<FutureType> MakeFutureType(const ptr<SpannedType>& v, bool async) {

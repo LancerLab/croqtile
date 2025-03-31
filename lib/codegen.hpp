@@ -240,6 +240,12 @@ public:
 
     if (gsk & PDSYM_PARAMETERS_ONLY) return false;
 
+    if (auto ety = dyn_cast<EventType>(sd.type)) {
+      if ((ety->GetStorage() == Storage::GLOBAL) &&
+          (gsk & PDSYM_ALLOC_IN_DEVICE))
+        return true;
+    }
+
     auto sty = dyn_cast<SpannedType>(sd.type);
     if (sty && ((sty->GetStorage() == Storage::GLOBAL) ||
                 (sty->GetStorage() ==

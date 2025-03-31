@@ -333,6 +333,8 @@ private:
 
   bool NeedDeviceFunc() const { return cgi->HasParallelBy(fname); }
 
+  bool IsHost() const { return parallel_level == 0; }
+
   bool IsFutureBlockShared(const std::string& n) const {
     assert(PrefixedWith(n, "::") && "requires a scoped name.");
     return cgi->GetFunctionSharedFutures(fname).count(n);

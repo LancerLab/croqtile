@@ -56,12 +56,11 @@ inline const char* TopsMdsStorage(Storage st) {
   return "";
 }
 
-inline const char* TopsStorageType(Storage st) {
+inline const char* TopsDeviceMemory(Storage st) {
   switch (st) {
-  case Storage::GLOBAL: return "__global__";
   case Storage::SHARED: return "__shared__";
   case Storage::LOCAL: return "__local__";
-  default: choreo_unreachable("storage type is not supported.");
+  default: choreo_unreachable("device storage type is not supported.");
   }
   return "";
 }
@@ -503,18 +502,53 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
 
   // handle events
   if (auto ety = dyn_cast<EventArrayType>(nty)) {
-    assert(n.mem && "no storage specifier of the event.");
-    ds << d_indent << TopsStorageType(n.mem->Get()) << " __volatile__ bool "
-       << n.name_str << "[" << ety->ElemCount() << "]; // " << PSTR(n.mem)
-       << " event\n";
-    for (size_t i = 0; i < ety->ElemCount(); ++i)
-      ds << d_indent << n.name_str << "[" << i
-         << "] = false;\n"; // inited as untriggerd
-  } else if (isa<EventType>(nty)) {
-    assert(n.mem && "no storage specifier of the event.");
-    ds << d_indent << TopsStorageType(n.mem->Get()) << " __volatile__ bool "
-       << n.name_str << "; // " << PSTR(n.mem) << " event\n";
-    ds << d_indent << n.name_str << " = false;\n"; // inited as untriggerd
+    switch (ety->GetStorage()) {
+    case Storage::GLOBAL: {
+      assert(IsHost());
+      auto sym = InScopeName(n.name_str);
+      auto buf_sym = n.name_str + "__device";
+      hs << h_indent << "bool * " << buf_sym << " = nullptr; // global event\n";
+      hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym << ", "
+         << ety->ElemCount() << "));\n";
+      hs << h_indent << "choreo::abend_true(topsMemset(&" << buf_sym << ", 0, "
+         << ety->ElemCount() << "));\n";
+      ssm.MapHostSymbol(sym, buf_sym);
+      ssm.MapDeviceSymbol(sym, n.name_str);
+    } break;
+    case Storage::SHARED:
+    case Storage::LOCAL: {
+      ds << d_indent << TopsDeviceMemory(ety->GetStorage())
+         << " __volatile__ bool " << n.name_str << "[" << ety->ElemCount()
+         << "]; // " << STR(ety->GetStorage()) << " event\n";
+      for (size_t i = 0; i < ety->ElemCount(); ++i)
+        ds << d_indent << n.name_str << "[" << i
+           << "] = false;\n"; // inited as untriggerd
+    } break;
+    default: break;
+    }
+  } else if (auto ety = dyn_cast<EventType>(nty)) {
+    switch (ety->GetStorage()) {
+    case Storage::GLOBAL: {
+      assert(IsHost());
+      auto sym = InScopeName(n.name_str);
+      auto buf_sym = n.name_str + "__device";
+      hs << h_indent << "bool * " << buf_sym << " = nullptr; // global event\n";
+      hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym
+         << ", 1));\n";
+      hs << h_indent << "choreo::abend_true(topsMemset(&" << buf_sym
+         << ", 0, 1));\n";
+      ssm.MapHostSymbol(sym, buf_sym);
+      ssm.MapDeviceSymbol(sym, n.name_str);
+    } break;
+    case Storage::SHARED:
+    case Storage::LOCAL: {
+      ds << d_indent << TopsDeviceMemory(ety->GetStorage())
+         << " __volatile__ bool " << n.name_str << "; // "
+         << STR(ety->GetStorage()) << " event\n";
+      ds << d_indent << n.name_str << " = false;\n"; // inited as untriggerd
+    } break;
+    default: break;
+    }
   }
 
   return true;
@@ -1061,19 +1095,41 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
     if (isa<FutureType>(NodeType(*f))) {
       ds << d_indent << ExprSTR(f, false) << ".wait();\n";
     } else if (auto ety = dyn_cast<EventArrayType>(NodeType(*f))) {
-      ds << d_indent << "while (";
-      for (size_t i = 0; i < ety->ElemCount(); ++i) {
-        ds << ExprSTR(f, false) << "[" << i << "] == false";
-        if (i != ety->ElemCount() - 1) ds << " || ";
+      if (IsHost())
+        choreo_unreachable("yet to support: wait global event in host.");
+      switch (ety->GetStorage()) {
+      case Storage::GLOBAL:
+      case Storage::SHARED:
+      case Storage::LOCAL: {
+        ds << d_indent << "while (";
+        for (size_t i = 0; i < ety->ElemCount(); ++i) {
+          ds << ExprSTR(f, false) << "[" << i << "] == false";
+          if (i != ety->ElemCount() - 1) ds << " || ";
+        }
+        ds << ") continue; // spinlock\n";
+        for (size_t i = 0; i < ety->ElemCount(); ++i)
+          ds << d_indent << ExprSTR(f, false) << "[" << i
+             << "] = false; // reset event\n";
+      } break;
+      default:
+        choreo_unreachable("unsupported event array storage '" +
+                           STR(ety->GetStorage()) + "'.");
       }
-      ds << ") continue; // spinlock\n";
-      for (size_t i = 0; i < ety->ElemCount(); ++i)
-        ds << d_indent << ExprSTR(f, false) << "[" << i
-           << "] = false; // reset event\n";
-    } else if (isa<EventType>(NodeType(*f))) {
-      ds << d_indent << "while (" << ExprSTR(f, false)
-         << " == false) continue; // spinlock\n";
-      ds << d_indent << ExprSTR(f, false) << " = false; // reset event\n";
+    } else if (auto ety = dyn_cast<EventType>(NodeType(*f))) {
+      if (IsHost())
+        choreo_unreachable("yet to support: wait global event in host.");
+      switch (ety->GetStorage()) {
+      case Storage::GLOBAL:
+      case Storage::SHARED:
+      case Storage::LOCAL: {
+        ds << d_indent << "while (" << ExprSTR(f, false)
+           << " == false) continue; // spinlock\n";
+        ds << d_indent << ExprSTR(f, false) << " = false; // reset event\n";
+      } break;
+      default:
+        choreo_unreachable("unsupported event storage '" +
+                           STR(ety->GetStorage()) + "'.");
+      }
     }
   }
 
@@ -1088,13 +1144,47 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
 
 bool TopsccCodeGen::Visit(AST::Trigger& n) {
   TraceEachVisit(n);
+
   for (auto& f : n.GetEvents()) {
     if (auto ety = dyn_cast<EventArrayType>(NodeType(*f))) {
-      for (size_t i = 0; i < ety->ElemCount(); ++i)
-        ds << d_indent << ExprSTR(f, false) << "[" << i
-           << "] = true; // trigger event\n";
-    } else if (isa<EventType>(NodeType(*f))) {
-      ds << d_indent << ExprSTR(f) << " = true; // trigger event\n";
+      if (IsHost()) {
+        assert(ety->GetStorage() == Storage::GLOBAL);
+        hs << h_indent << "choreo::abend_true(topsMemset(&" << ExprSTR(f, true)
+           << ", 1, " << ety->ElemCount() << ")); // trigger event\n";
+
+      } else {
+        switch (ety->GetStorage()) {
+        case Storage::GLOBAL:
+        case Storage::SHARED:
+        case Storage::LOCAL:
+          for (size_t i = 0; i < ety->ElemCount(); ++i)
+            ds << d_indent << ExprSTR(f, false) << "[" << i
+               << "] = true; // trigger event\n";
+          break;
+        default:
+          choreo_unreachable("unsupported event array storage '" +
+                             STR(ety->GetStorage()) + "' to trigger.");
+          break;
+        }
+      }
+    } else if (auto ety = dyn_cast<EventType>(NodeType(*f))) {
+      if (IsHost()) {
+        assert(ety->GetStorage() == Storage::GLOBAL);
+        hs << h_indent << "choreo::abend_true(topsMemset(&" << ExprSTR(f, true)
+           << ", 1, 1)); // trigger event\n";
+      } else {
+        switch (ety->GetStorage()) {
+        case Storage::GLOBAL:
+        case Storage::SHARED:
+        case Storage::LOCAL:
+          ds << d_indent << ExprSTR(f, false) << " = true; // trigger event\n";
+          break;
+        default:
+          choreo_unreachable("unsupported event array storage '" +
+                             STR(ety->GetStorage()) + "' to trigger.");
+          break;
+        }
+      }
     }
   }
   return true;
@@ -1103,15 +1193,13 @@ bool TopsccCodeGen::Visit(AST::Trigger& n) {
 bool TopsccCodeGen::Visit(AST::Call& n) {
   TraceEachVisit(n);
 
-  bool is_host = (parallel_level == 0);
-
-  auto& os = (is_host) ? hs : ds;
-  auto& indent = (is_host) ? h_indent : d_indent;
+  auto& os = (IsHost()) ? hs : ds;
+  auto& indent = (IsHost()) ? h_indent : d_indent;
 
   // generate the built-in functions
   if (n.is_bif) {
     if (n.function->name == "assert") {
-      if (is_host) {
+      if (IsHost()) {
         os << indent << "choreo_assert(" << ExprSTR(n.GetArguments().at(0))
            << ", \"" << ExprSTR(n.GetArguments().at(1)) << "\", \""
            << n.LOC().begin.get_filename() << "\", " << n.LOC().begin.get_line()
@@ -1137,7 +1225,7 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
     os << "<";
     size_t i = 0;
     for (auto& ta : n.template_args->AllValues())
-      os << ((i++ == 0) ? "" : ", ") << ExprSTR(ta, is_host);
+      os << ((i++ == 0) ? "" : ", ") << ExprSTR(ta, IsHost());
     os << ">";
   }
 
@@ -1146,14 +1234,14 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
   for (auto& a : n.GetArguments()) {
     os << ((i++ == 0) ? "" : ", ");
     if (auto sty = GetSpannedType(NodeType(*a))) {
-      std::string bts{NameBaseType(sty->ElementType(), is_host)};
-      if (!no_decay_spanview || is_host)
-        os << "(" << bts << "*)" << ExprSTR(a, is_host);
+      std::string bts{NameBaseType(sty->ElementType(), IsHost())};
+      if (!no_decay_spanview || IsHost())
+        os << "(" << bts << "*)" << ExprSTR(a, IsHost());
       else
         os << "choreo::make_spanview<" << sty->Dims() << ">((" << bts << "*)"
-           << ExprSTR(a, is_host) << ", " << LSTR(sty->GetShape()) << ")";
+           << ExprSTR(a, IsHost()) << ", " << LSTR(sty->GetShape()) << ")";
     } else
-      os << ExprSTR(a, is_host);
+      os << ExprSTR(a, IsHost());
   }
   os << ");\n";
 
@@ -1396,6 +1484,8 @@ DeviceParamTypeStringify(const Choreo::Type& ty) {
     return "float";
   else if (isa<DoubleType>(&ty))
     return "double";
+  else if (isa<EventType>(&ty))
+    return "bool"; // use bool for event
   else if (auto sty = dyn_cast<SpannedType>(&ty)) {
     return std::string(NameBaseType(sty->ElementType(), false)) + " *";
   } else

@@ -1,0 +1,25 @@
+// RUN: choreo -es -t topscc %s -o - | FileCheck %s
+
+__co__ void blocka() {
+  global event e;
+
+  parallel.async p by 1 { wait e; }
+  parallel.async p by 4 { trigger e; }
+
+  sync.global;
+}
+
+// CHECK:   while (e == false) continue; // spinlock
+// CHECK:   e = false; // reset event
+
+// CHECK:   e = true; // trigger event
+
+// CHECK:   bool * e__device = nullptr;
+// CHECK:   choreo::abend_true(topsMalloc(&e__device, 1));
+// CHECK:   choreo::abend_true(topsMemset(&e__device, 0, 1));
+// CHECK:   dim3 __blocka_gdims0(1, 1, 1);
+// CHECK:   dim3 __blocka_bdims0(1, 1, 1);
+// CHECK:   __choreo_device_blocka<<<__blocka_gdims0, __blocka_bdims0>>>(e__device);
+// CHECK:   dim3 __blocka_gdims1(1, 1, 1);
+// CHECK:   dim3 __blocka_bdims1(4, 1, 1);
+// CHECK:   __choreo_device_blocka<<<__blocka_gdims1, __blocka_bdims1>>>(e__device);

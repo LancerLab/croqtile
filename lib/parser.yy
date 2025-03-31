@@ -638,7 +638,7 @@ named_event_decls
         for (auto sub : $3->AllSubs()) {
           auto decl = cast<AST::NamedVariableDecl>(sub);
           auto sym_name = decl->name_str;
-          symtab.AddSymbol(sym_name, MakeEventType());
+          symtab.AddSymbol(sym_name, MakeEventType($1->Get()));
           // override the data type
           decl->mem = $1;
         }
