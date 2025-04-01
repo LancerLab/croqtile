@@ -9,6 +9,7 @@
 #include "gcucheck.hpp"
 #include "latenorm.hpp"
 #include "liveness_analysis.hpp"
+#include "mem_reuse.hpp"
 #include "memcheck.hpp"
 #include "normalize.hpp"
 #include "options.hpp"
@@ -127,6 +128,19 @@ int main(int argc, char* argv[]) {
   if (CCtx().LivenessAnalysis()) {
     LivenessAnalyzer la;
     if (!la.RunOnProgram(root)) return la.Status();
+    if (CCtx().MemReuse()) {
+      if (CCtx().GetTarget() != CompileTarget::Topscc) {
+        errs() << "Memory reuse only works in Topscc target.\n";
+        return 1;
+      }
+      MemReuse mr(la);
+      if (!mr.RunOnProgram(root)) return mr.Status();
+    }
+  } else if (CCtx().MemReuse()) {
+    errs() << "A prerequisite for memory reuse is to perform liveness "
+              "analysis! (add --liveness)"
+           << std::endl;
+    return 1;
   }
 
   // apply the semantic check

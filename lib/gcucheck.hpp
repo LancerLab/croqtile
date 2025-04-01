@@ -680,10 +680,19 @@ public:
       break;
     case Storage::SHARED:
       if (parallel_level != 1) {
-        Error(n.LOC(),
-              "shared variable '" + n.name_str +
-                  "` must be declared inside single level of parallel-by.");
-        error_count++;
+        if (CCtx().MemReuse()) {
+          if (n.note.find("spm") == std::string::npos) {
+            Error(n.LOC(),
+                  "shared variable '" + n.name_str +
+                      "` must be declared inside single level of parallel-by.");
+            error_count++;
+          }
+        } else {
+          Error(n.LOC(),
+                "shared variable '" + n.name_str +
+                    "` must be declared inside single level of parallel-by.");
+          error_count++;
+        }
       } else if (local_level == 1 && parallel_level == 2) {
         // if parallel_level == 1, allow
         // eg. parallel p by 6 { shared; local; }
@@ -701,9 +710,17 @@ public:
       break;
     case Storage::LOCAL:
       if (parallel_level == 0) {
-        Error(n.LOC(), "local variable '" + n.name_str +
-                           "` must be declared inside parallel-by.");
-        error_count++;
+        if (CCtx().MemReuse()) {
+          if (n.note.find("spm") == std::string::npos) {
+            Error(n.LOC(), "local variable '" + n.name_str +
+                               "` must be declared inside parallel-by.");
+            error_count++;
+          }
+        } else {
+          Error(n.LOC(), "local variable '" + n.name_str +
+                             "` must be declared inside parallel-by.");
+          error_count++;
+        }
       } else if (local_level != 0 && parallel_level != local_level) {
         Error(n.LOC(), "local variable '" + n.name_str +
                            "` must be declared inside a level of parallel-by "

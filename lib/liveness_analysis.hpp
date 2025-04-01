@@ -149,6 +149,7 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
 
   using BufInfo = std::pair<std::string, std::string>;
   std::unordered_map<std::string, std::set<BufInfo>> fut2buffers;
+  using StrUintMap = std::unordered_map<std::string, size_t>;
 
   struct Range {
     size_t start;
@@ -201,8 +202,10 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
   }
   ~LivenessAnalyzer() {}
 
-  std::unordered_map<std::string, size_t> buf_sizes;
+  StrUintMap buf_sizes;
   std::unordered_map<std::string, Ranges> var_ranges;
+
+  std::unordered_map<std::string, Storage> buf2sto;
 
   VarSet dma_any;
 
@@ -239,6 +242,11 @@ public:
   const std::string STMTS_STR() const { return stmts_with_indent.str(); }
   const std::unordered_map<std::string, Ranges>& VarRanges() const {
     return var_ranges;
+  }
+
+  const StrUintMap& BufSizes() const { return buf_sizes; }
+  const std::unordered_map<std::string, Storage>& Buf2Sto() const {
+    return buf2sto;
   }
 
 public:

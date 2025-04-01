@@ -171,6 +171,8 @@ private:
   TargetArch arch = TargetArch::Unknown;
   OutputKind out_kind = OutputKind::TargetExecutable;
   uint8_t opt_level = 0;
+  size_t local_spm_size = 0;
+  size_t shared_spm_size = 0;
 
 private:
   // compiler configurations
@@ -188,6 +190,7 @@ private:
   bool trace_vn = false;            // trace the value numbering
   bool show_source_loc = true; // show source code location when error, etc.
   bool liveness = false;       // analyze the liveness of the program
+  bool mem_reuse = false;      // reuse the memory of the program
 private:
   std::shared_ptr<SymbolTable> sym_tab = nullptr; // global symbol table
 
@@ -282,6 +285,11 @@ public:
     return 0;
   }
 
+  size_t GetLocalSPMSize() const { return local_spm_size; }
+  size_t GetSharedSPMSize() const { return shared_spm_size; }
+  void SetLocalSPMSize(size_t size) { local_spm_size = size; }
+  void SetSharedSPMSize(size_t size) { shared_spm_size = size; }
+
 public:
   // Getters of compiler configurations
   bool DumpAst() const { return dump_ast; }
@@ -296,6 +304,7 @@ public:
   bool CrossCompile() const { return cross_compile; }
   bool TraceValueNumbers() const { return trace_vn; }
   bool LivenessAnalysis() const { return liveness; }
+  bool MemReuse() const { return mem_reuse; }
 
   // Setters of compiler configurations
   void SetDumpAst(bool value) { dump_ast = value; }
@@ -310,6 +319,7 @@ public:
   void SetCrossCompile(bool value) { cross_compile = value; }
   void SetTraceValueNumbers(bool value) { trace_vn = value; }
   void SetLivenessAnalysis(bool value) { liveness = value; }
+  void SetMemReuse(bool value) { mem_reuse = value; }
 
   const std::unordered_map<std::string, std::string>& GetCLMacros() const {
     return cl_macros;

@@ -392,9 +392,10 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
     // globals are declared in host, while shareds/locals are declared in device
     auto shape = sty->GetShape();
     std::string bts{NameBaseType(sty->ElementType())};
+    auto sto = sty->GetStorage();
 
     bool spmem = false; // allocatable scratchpad memory: share, local
-    if (sty->GetStorage() == Storage::GLOBAL) {
+    if (sto == Storage::GLOBAL) {
       bts = NameBaseType(sty->ElementType(), false); // use the device type name
       if (!IsChoreoOutput(InScopeName(sym))) {
         if (FBIContainsBuffer(FBInfo(), InScopeName(sym)) &&
@@ -455,17 +456,42 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       ssm.MapHostSymbol(InScopeName(sym) + "__device", buf_sym);
       ssm.MapHostSymbol(InScopeName(sym), sym);
       ssm.MapDeviceSymbolIfNotExist(InScopeName(sym), sym);
-    } else if (sty->GetStorage() == Storage::SHARED) {
+    } else if (sto == Storage::SHARED || sto == Storage::LOCAL) {
       if (!IsChoreoOutput(InScopeName(sym))) {
-        ds << d_indent << "__shared__ " << bts << " " << sym << "["
-           << ElemCountExprOf(*sty) << "];\n";
-        ssm.MapDeviceSymbol(InScopeName(sym), sym);
-        spmem = true;
-      }
-    } else if (sty->GetStorage() == Storage::LOCAL) {
-      if (!IsChoreoOutput(InScopeName(sym))) {
-        ds << d_indent << "__local__ __valigned__ " << bts << " " << sym << "["
-           << ElemCountExprOf(*sty) << "];\n";
+        auto type_modifiers =
+            (sto == Storage::SHARED ? "__shared__ "
+                                    : "__local__ __valigned__ ");
+        if (CCtx().MemReuse()) {
+          if (n.note.find("spm") != std::string::npos) {
+            ds << d_indent << type_modifiers << bts << " " << sym << "["
+               << ElemCountExprOf(*sty) << "];\n";
+          } else {
+            auto notes = SplitStringByDelimiter(n.note, ", ");
+            auto reuse_idx = std::find(notes.begin(), notes.end(), "reuse");
+            auto offset_idx = std::find(notes.begin(), notes.end(), "offset");
+            if (reuse_idx == notes.end()) {
+              assert(offset_idx == notes.end());
+              // TODO: should we DCE the unused buffer?
+              ds << d_indent << type_modifiers << bts << " " << sym << "["
+                 << ElemCountExprOf(*sty) << "];\n";
+            } else {
+              auto reuse_name = *(reuse_idx + 1);
+              auto offset = std::stoull(*(offset_idx + 1));
+#if 1
+              ds << d_indent << bts << "* " << sym << " = (" << bts << "*)"
+                 << reuse_name << " + " << offset << ";\n";
+#else
+              ds << d_indent << type_modifiers << bts << " " << sym << "["
+                 << ElemCountExprOf(*sty) << "];\n";
+              ds << d_indent << sym << " = (" << bts << "*)" << reuse_name
+                 << " + " << offset << ";\n";
+#endif
+            }
+          }
+        } else {
+          ds << d_indent << type_modifiers << bts << " " << sym << "["
+             << ElemCountExprOf(*sty) << "];\n";
+        }
         ssm.MapDeviceSymbol(InScopeName(sym), sym);
         spmem = true;
       }
@@ -473,7 +499,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       choreo_unreachable("unsupported storage type.");
 
     if (spmem && n.init_value) {
-      if (sty->GetStorage() == Storage::SHARED) {
+      if (sto == Storage::SHARED) {
         ds << d_indent << "if (" << SingleThreadPredicate() << ") {\n";
         IncrDeviceIndent();
       }
@@ -481,11 +507,10 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       ds << d_indent << "tops::dte_scope s_" << sym__init << "(" << sym__init
          << ");\n";
       ds << d_indent << "tops::memset(" << sym__init << ", tops::mdspan("
-         << TopsMdsStorage(sty->GetStorage()) << ", ("
-         << NameBaseType(sty->ElementType()) << "*)" << sym << ", "
-         << UnScopedExpr(RSTR(sty->GetShape())) << "), "
+         << TopsMdsStorage(sto) << ", (" << NameBaseType(sty->ElementType())
+         << "*)" << sym << ", " << UnScopedExpr(RSTR(sty->GetShape())) << "), "
          << ExprSTR(n.init_value, false) << ");\n";
-      if (sty->GetStorage() == Storage::SHARED) {
+      if (sto == Storage::SHARED) {
         DecrDeviceIndent();
         ds << d_indent << "} // single instance\n";
       }

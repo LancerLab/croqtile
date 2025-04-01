@@ -261,6 +261,22 @@ public:
           SumUpCtRtUsage(sto), n.LOC(), mem_usage_limit[sto], sto));
     } else {
       // compile time usage
+
+      // if (n.note.find("offset") != std::string::npos) {
+      //   VST_DEBUG({
+      //     dbgs() << "[MemUsage] The mem space of buffer " << n.name_str
+      //            << " reuses the space of self-defined SPM!\n";
+      //   });
+      //   return true;
+      // }
+
+      if (n.note.find("spm") != std::string::npos) {
+        VST_DEBUG(dbgs() << "[MemUsage] The buffer " << n.name_str
+                         << " is self-defined SPM whose memory usage is not "
+                            "counted for now\n");
+        return true;
+      }
+
       auto size = sty->ByteSize();
       VST_DEBUG(dbgs() << "[MemUsage] " << __internal__::GetStringFrom(sto)
                        << " `" << SSTab().ScopedName(n.name_str) << "` need "

@@ -117,9 +117,9 @@ std::string ExactScope(const std::string& outer_scope,
   auto scopes_ret = std::vector<std::string>(scopes_inner.begin(),
                                              scopes_inner.begin() +
                                                  scopes_outer.size() + offset);
-  std::cerr << "outer scope: " << outer_scope << "\n";
-  std::cerr << "inner scope: " << inner_scope << "\n";
-  std::cerr << "scopes_ret: " << DelimitedString(scopes_ret, "::") << "\n";
+  // std::cerr << "outer scope: " << outer_scope << "\n";
+  // std::cerr << "inner scope: " << inner_scope << "\n";
+  // std::cerr << "scopes_ret: " << DelimitedString(scopes_ret, "::") << "\n";
   return "::" + DelimitedString(scopes_ret, "::") + "::";
 }
 
@@ -197,9 +197,18 @@ void LivenessAnalyzer::AddBufStmt(const Stmt* s, Storage sto) {
   buffers.insert(sbuf);
   buf_nodes[sto].insert(nvd);
   switch (sto) {
-  case Storage::GLOBAL: global_buffers.insert(sbuf); break;
-  case Storage::SHARED: shared_buffers.insert(sbuf); break;
-  case Storage::LOCAL: local_buffers.insert(sbuf); break;
+  case Storage::GLOBAL:
+    global_buffers.insert(sbuf);
+    buf2sto.emplace(sbuf, sto);
+    break;
+  case Storage::SHARED:
+    shared_buffers.insert(sbuf);
+    buf2sto.emplace(sbuf, sto);
+    break;
+  case Storage::LOCAL:
+    local_buffers.insert(sbuf);
+    buf2sto.emplace(sbuf, sto);
+    break;
   default: assert(false && "expecting the storage is SHARED, LOCAL or GLOBAL!");
   }
 }
@@ -683,6 +692,10 @@ bool LivenessAnalyzer::BeforeVisitImpl(AST::Node& n) {
           // TODO: AddBufStmt here got error.
           linfo[current_stmt].buffer_related = true;
           buffers.insert(sname);
+          assert((sty->GetStorage() == Storage::GLOBAL ||
+                  sty->GetStorage() == Storage::DEFAULT) &&
+                 "expecting the storage is GLOBAL!");
+          buf2sto.emplace(sname, Storage::GLOBAL);
           global_buffers.insert(sname);
           if (!sty->RuntimeShaped()) {
             // TODO: should we align the size to 512?!
