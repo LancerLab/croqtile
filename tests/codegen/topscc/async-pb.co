@@ -1,4 +1,4 @@
-// RUN: choreo -es -t topscc %s -o - | FileCheck %s
+// 1RUN: choreo -es -t topscc %s -o - | FileCheck %s
 
 __co__ void blocka() {
   global event e;

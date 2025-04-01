@@ -13,6 +13,7 @@ private:
   std::unordered_map<std::string, AST::Parameter*> cur_params;
   int parallel_level = 0;
   int max_parallel_level = 0;
+  int kernel_launch_count = 0;
   int local_level = 0;
   std::string cur_fname;
   std::string cur_arch;
@@ -33,8 +34,10 @@ private:
       local_level = 0;
       cur_params.clear();
       cur_fname = cf->name;
+      kernel_launch_count = 0;
     } else if (isa<AST::ParallelBy>(&n)) {
       parallel_level++;
+      if (parallel_level == 1) ++kernel_launch_count;
       const int pl_limit = (CCtx().GetArch() == TargetArch::GCU4) ? 4 : 3;
       if (parallel_level > pl_limit - 1)
         Error(n.LOC(), "parallel level exceeds limit: " +
@@ -779,6 +782,14 @@ public:
       if (shape.IsDynamic()) {
         Error(n.LOC(),
               "symbolic bound value is not supported for Factor backend yet.");
+        error_count++;
+      }
+    }
+
+    if (CCtx().GetTarget() == CompileTarget::Topscc) {
+      if (kernel_launch_count > 1) {
+        Error(n.LOC(), "Topscc backend does not support multiple kernel launch "
+                       "in a single function for now.");
         error_count++;
       }
     }
