@@ -50,8 +50,8 @@ nav:
       - Macro and Preprocessing: macro-in-choreo.md
     - Extending to the MPMD Programming:
       - Thread Masking and Code Divergence: thread-masking.md
-      - Asynchronous and Events: events.md
-      - More On Asynchronous Execution: general-async.md
+      - (Experimental) Events for Asynchronous Execution: events.md
+      - (Experimental) More On Asynchronous Execution: general-async.md
     - Advanced Features and Techniques:
       - Advanced Data Movement: dma-in-advance.md
       - Experimental Features: loop-in-advance.md

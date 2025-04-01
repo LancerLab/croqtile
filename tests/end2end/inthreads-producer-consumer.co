@@ -17,7 +17,7 @@ __co__ auto pc_pattern(f32 [M, N] lhs, f32 [M, N] rhs) {
     shared f32 [sshape] lhs_sbuffer, rhs_sbuffer, out_sbuffer;
 
     // event for producer and consumer
-    shared event pe, ce[4];
+    shared event pe[4], ce[4];
     trigger ce;
 
     //                  +-> local
@@ -37,7 +37,7 @@ __co__ auto pc_pattern(f32 [M, N] lhs, f32 [M, N] rhs) {
         trigger pe;
       }
       inthreads.async (p < #p - 1) {  // consumer
-        wait pe;
+        wait pe[p];
         lf = dma.copy.async lhs_sbuffer.chunk(#p - 1, 1).at(p, _) => local;
         rf = dma.copy.async rhs_sbuffer.chunk(#p - 1, 1).at(p, _) => local;
         wait lf, rf;

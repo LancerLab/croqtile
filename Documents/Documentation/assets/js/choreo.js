@@ -21,17 +21,17 @@
   choreo.contains.push(
     {
       className: 'attribute',
-      begin: /\b(__co__|__cok__|__global__|__device__)\b/,
+      begin: /\b(__co__|__cok__|__global__|__device__|shared|local|global|.async)\b/,
       relevance: 10
     },
     {
       className: 'type',
-      begin: /\b(f32|s32|u32|f16|bf16|s16|u16|s8|u8|half|bfp16|half8)\b/,
+      begin: /\b(f32|s32|u32|f16|bf16|s16|u16|s8|u8|half|bfp16|half8|event)\b/,
       relevance: 10
     },
     {
       className: 'operation',
-      begin: /\b(call|dma.copy|dma.copy.async|=>|select)\b/,
+      begin: /\b(call|dma.copy|dma.copy|=>|select|trigger|wait|sync)\b/,
       relevance: 10
     },
   );
