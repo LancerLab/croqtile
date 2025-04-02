@@ -346,7 +346,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
   } else if ((n.op == "&&") || (n.op == "||")) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
-    assert(false);
+    // assert(false);
     if (!isa<BooleanType>(lty) || !isa<BooleanType>(rty)) {
       Error(n.LOC(), "in operation \"" + n.op +
                          "\": unable to apply to the types (" + PSTR(lty) +
@@ -872,7 +872,10 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
 
   // check the if rank equal between with-in and with-matcher
   if (n.with_matchers && n.with_matchers->Count() != rank) {
-    Error(n.in->LOC(), "un-matched with-matcher-count(" +
+    std::string which_count = (n.note.find("sugar") == std::string::npos
+                                   ? "with-matcher-count("
+                                   : "iteration-variable-count(");
+    Error(n.in->LOC(), "un-matched " + which_count +
                            std::to_string(n.with_matchers->Count()) +
                            ") and mdspan rank(" + std::to_string(rank) + ").");
     error_count++;

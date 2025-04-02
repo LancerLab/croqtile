@@ -198,7 +198,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::NamedTypeDecl>> named_mdspan_decl
 %nterm <AST::ptr<AST::NamedVariableDecl>> named_ituple_decl spanned_decl scalar_decl event_decl
 %nterm <AST::ptr<AST::IntTuple>> unnamed_ituple_decl sugar_unnamed_ituple_decl sugarless_unnamed_ituple_decl
-%nterm <AST::ptr<AST::WithBlock>> within_block
+%nterm <AST::ptr<AST::WithBlock>> within_block sugar_within_foreach_block
 %nterm <AST::ptr<AST::InThreadsBlock>> inthreads_block
 %nterm <AST::ptr<AST::WithIn>> within
 %nterm <AST::ptr<AST::WhereBind>> where_bind
@@ -455,21 +455,22 @@ statements
     ;
 
 statement
-    : declarations SEMCOL { $$ = $1; }
-    | assignments  SEMCOL { $$ = $1; }
-    | dma_stmt     SEMCOL { $$ = $1; }
-    | wait_stmt    SEMCOL { $$ = $1; }
-    | trigger_stmt SEMCOL { $$ = $1; }
-    | call_stmt    SEMCOL { $$ = $1; }
-    | swap_stmt    SEMCOL { $$ = $1; }
-    | print_stmt   SEMCOL { $$ = $1; }
-    | return_stmt  SEMCOL { $$ = $1; }
-    | sync_stmt    SEMCOL { $$ = $1; }
-    | paraby_block        { $$ = $1; }
-    | within_block        { $$ = $1; }
-    | inthreads_block     { $$ = $1; }
-    | foreach_block       { $$ = $1; }
-    | increment_block     { $$ = $1; /* TODO: remove? */ }
+    : declarations SEMCOL        { $$ = $1; }
+    | assignments  SEMCOL        { $$ = $1; }
+    | dma_stmt     SEMCOL        { $$ = $1; }
+    | wait_stmt    SEMCOL        { $$ = $1; }
+    | trigger_stmt SEMCOL        { $$ = $1; }
+    | call_stmt    SEMCOL        { $$ = $1; }
+    | swap_stmt    SEMCOL        { $$ = $1; }
+    | print_stmt   SEMCOL        { $$ = $1; }
+    | return_stmt  SEMCOL        { $$ = $1; }
+    | sync_stmt    SEMCOL        { $$ = $1; }
+    | paraby_block               { $$ = $1; }
+    | within_block               { $$ = $1; }
+    | sugar_within_foreach_block { $$ = $1; }
+    | inthreads_block            { $$ = $1; }
+    | foreach_block              { $$ = $1; }
+    | increment_block            { $$ = $1; /* TODO: remove? */ }
     ;
 
 sync_stmt
@@ -1045,7 +1046,6 @@ withins
 within
     : IDENTIFIER IN NUM {
         // TODO: should we upgrade `NUM` to `s_expr`?
-        // `Identifier` has already been handled in `span_expr`
         symtab.AddSymbol($1, MakeUnknownType()/*Need inference*/);
         $$ = AST::Make<AST::WithIn>(@1, AST::Make<AST::Identifier>(@1,$1), AST::Make<AST::IntLiteral>(@3, $3));
       }
@@ -1099,6 +1099,49 @@ foreach_block
         $$ = AST::Make<AST::ForeachBlock>(@1, $2, $4, $3);
       }
     ;
+  
+sugar_within_foreach_block
+    : FOREACH range_exprs IN NUM optional_pred stmts_block {
+        $$ = AST::Make<AST::WithBlock>(@1);
+        if ($2->Count() != 1) {
+          Parser::error(@2, "Expect only 1 iteration variable for single upper bound.");
+        }
+        const auto& range = cast<AST::LoopRange>($2->ValueAt(0));
+        auto withins = AST::Make<AST::MultiNodes>(@2);
+        auto with_matchers = AST::Make<AST::MultiValues>(@2);
+        auto within = AST::Make<AST::WithIn>(@2, range->iv, AST::Make<AST::IntLiteral>(@4, $4));
+        within->note += "sugar, ";
+        withins->Append(within);
+        $$->withins = withins;
+        $$->reqs = nullptr;
+        auto stmts = AST::Make<AST::MultiNodes>(@6);
+        stmts->Append(AST::Make<AST::ForeachBlock>(@1, $2, $6, $5));
+        $$->stmts = stmts;
+      }
+    | FOREACH range_exprs IN span_expr optional_pred stmts_block {
+      $$ = AST::Make<AST::WithBlock>(@1);
+        auto withins = AST::Make<AST::MultiNodes>(@2);
+        if ($2->Count() == 1) {
+          const auto& range = cast<AST::LoopRange>($2->ValueAt(0));
+          auto within = AST::Make<AST::WithIn>(@2, range->iv, $4);
+          within->note += "sugar, ";
+          withins->Append(within);
+        } else {
+          auto with_matchers = AST::Make<AST::MultiValues>(@2);
+          for (const auto& value : $2->AllValues())
+            with_matchers->Append(cast<AST::LoopRange>(value)->iv);
+          auto within = AST::Make<AST::WithIn>(@2, $4, with_matchers);
+          within->note += "sugar, ";
+          withins->Append(within);
+        }
+        $$->withins = withins;
+        $$->reqs = nullptr;
+        auto stmts = AST::Make<AST::MultiNodes>(@6);
+        stmts->Append(AST::Make<AST::ForeachBlock>(@1, $2, $6, $5));
+        $$->stmts = stmts;
+      }
+    ;
+    
 
 increment_block
     : INCR id_list WHILE pred stmts_block {

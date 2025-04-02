@@ -1,0 +1,8 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ auto illegal_foreach_sugar() {
+  foreach x,y in 2 {}
+}
+
+// CHECK: error: Expect only 1 iteration variable for single upper bound.
+// CHECK-NOT: error:

@@ -14,19 +14,17 @@ __co__ s32 [N, 17, 128] ele_add(s32 [N, 17, 128] lhs, s32 [N, 17, 128] rhs, int 
   s32[lhs.span] output;
 
   parallel p by PF { 
-    with index = {pf, x, y} in [N/PF, 17, 4] { 
-      foreach index {
-        lhs_load = dma.copy.async lhs.chunkat(p#pf, x, y) => local;
-        rhs_load = dma.copy.async rhs.chunkat(p#pf, x, y) => local;
-        wait lhs_load, rhs_load;
+    foreach pf, x, y in [N/PF, 17, 4] {
+      lhs_load = dma.copy.async lhs.chunkat(p#pf, x, y) => local;
+      rhs_load = dma.copy.async rhs.chunkat(p#pf, x, y) => local;
+      wait lhs_load, rhs_load;
 
-        local s32[lhs_load.span] l1_out;
+      local s32[lhs_load.span] l1_out;
 
-        call kernel(lhs_load.data, rhs_load.data, l1_out, |lhs_load.span|);
+      call kernel(lhs_load.data, rhs_load.data, l1_out, |lhs_load.span|);
 
-        out_store = dma.copy.async l1_out => output.chunkat(p#pf, x, y);
-        wait out_store;
-      }
+      out_store = dma.copy.async l1_out => output.chunkat(p#pf, x, y);
+      wait out_store;
     }
   }
   return output;

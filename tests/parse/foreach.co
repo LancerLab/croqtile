@@ -15,9 +15,8 @@ __co__ void bar(int N) {
 }
 
 __co__ void foobar(int N, int M) {
-    with index = {x, y, z} in [M, 2, 1] 
-      foreach index if ((x < N % M) && (y < N)) {}
-  }
+  with index = {x, y, z} in [M, 2, 1] 
+    foreach index if ((x < N % M) && (y < N)) {}
 }
 
 // CHECK: ChoreoFunction

@@ -177,23 +177,21 @@ __co__ auto foo(s32[128] off_buff_L3, s32[102400, 512] input, s32[102400, 512] i
     dma.copy off_buff_L3 => off_buff;
     para_L1 = dma.copy para => local;
 
-    with {d0, d1} in [10240, 1] {
-      foreach d0, d1 {
-        input_L1 = dma.copy input.chunkat(p#d0, d1) => local;
-        id_L1 = dma.copy id.chunkat(p#d0, d1) => local;
+    foreach d0, d1 in [10240, 1] {
+      input_L1 = dma.copy input.chunkat(p#d0, d1) => local;
+      id_L1 = dma.copy id.chunkat(p#d0, d1) => local;
 
-        // 120000µs VS 210000µs
+      // 120000µs VS 210000µs
 #ifdef __TOPSCC__
-        call call_gather_kernel_2(
-            input_L1.data, id_L1.data, output_L1, off_buff, para_L1.data);
+      call call_gather_kernel_2(
+          input_L1.data, id_L1.data, output_L1, off_buff, para_L1.data);
 #else
 // TODO: not sure why the TOPSCC kernel fails. alignment reqs?
-        call call_gather_kernel(
-            input_L1.data, id_L1.data, output_L1, off_buff, para_L1.data);
+      call call_gather_kernel(
+          input_L1.data, id_L1.data, output_L1, off_buff, para_L1.data);
 #endif
 
-        dma.copy output_L1 => output.chunkat(p#d0, d1);
-      }
+      dma.copy output_L1 => output.chunkat(p#d0, d1);
     }
   }
   return output;
