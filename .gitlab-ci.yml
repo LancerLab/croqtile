@@ -89,6 +89,7 @@ gcu3_docker_test:
   script:
     - echo "Running tests with GCU3 S60 EFDOCKER..."
     - source /home/.devtools/tools/env.sh
+    - docker start choreo_ci
     - |
       docker exec choreo_ci bash -c "
       TIMESTAMP=$(date +%Y%m%d_%H%M%S) && \
