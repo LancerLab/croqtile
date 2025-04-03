@@ -17,7 +17,7 @@ foreach index {
 Here, `index` is a *bounded variable* (introduced in the previous section). If `index` has an upper bound of `6`, the above code is equivalent to:
 
 ```cpp
-for (int index = 0; index < 6; index++) {
+for (int index = 0; index < 6; ++index) {
   // loop body
 }
 ```
@@ -33,15 +33,18 @@ In Choreo, *bounded variables* defined within a `parallel-by` statement are immu
 A `with-in` statement allows you to define either a *bounded integer* or a *bounded ituple*. Syntactically, it resembles the `parallel-by` statement but only defines *bounded variable*s without invoking multiple instances for execution. Below are examples:
 
 ```choreo
-with x in [512] {
+with x in 128 {
   // 'x' is a bounded integer
+}
+with y in [512] {
+  // 'y' is a bounded ituple
 }
 with index in [10, 10] {
   // 'index' is a bounded ituple
 }
 ```
 
-Here, `x` represents a bounded integer with an upper bound of `512`. `index` represents a bounded ituple with upper bounds of `10, 10`. Similar to the `parallel-by` statement, you can name the elements of the ituple for clarity or declare both the bounded ituple and the associated bounded integers, as shown below:
+Here, `x` represents a bounded integer with an upper bound of `128`. Both `y` and `index` represent bounded ituples whose upper bounds are `512` and `10, 10` respectively. Similar to the `parallel-by` statement, you can name the elements of the ituple for clarity or declare both the bounded ituple and the associated bounded integers, as shown below:
 
 ```choreo
 with {x, y} in [10, 10] {
@@ -74,7 +77,7 @@ with index in [6] {
 }
 ```
 
-In this example, the `foreach` block iterates 6 times, with the value of the **interation variable** `index` ranging from `0` to `5` incrementally.
+In this example, the `foreach` block iterates 6 times, with the value of the **iteration variable** `index` ranging from `0` to `5` incrementally.
 
 It is also possible to iterate over *bounded ituple*s. For example:
 
@@ -108,6 +111,34 @@ for (int iv = 0; iv < 128; ++iv)
     for (int y = 0; y < 17; ++y) { }
 ```
 
+### Syntactic Sugar
+
+
+```choreo
+foreach x in 128 { }
+foreach idx in [10, 20] { }
+foreach y, z in [8, 16] { }
+```
+
+The code above is equivalent to the following code:
+
+```choreo
+with x in 128 {
+  foreach x { }
+}
+
+with idx in [10, 20] {
+  foreach idx { }
+}
+
+with {y, z} in [8, 16] {
+  foreach y, z { }
+}
+```
+
+It is worth noting that the iteration variable defined in **sugared foreach** is either a *bounded tuple* or multiple *bounded variables* that match the ituple that follows.
+
+
 ### Deriving the Loop From a Bounded Integer
 
 In certain scenarios, such as pipelining data movement, it may be necessary to modify loop iterations. In Choreo, this can be achieved by deriving a loop from a *bounded integer* within the `foreach` statement. For example:
@@ -139,7 +170,7 @@ This derives a loop from the `bounded-variable`, where the `bounded-variable` se
 
 Thus, `y(1:-1:2)` results in a loop like `for (y = 0 + 1; y < 17 - 1; y += 2)` in the example above. If any field of the *range expression* is not specified, it results in default values: `0` for `lower-offset` and `upper-offset`, and `1` for `stride`.
 
-Note that *range expression*s only apply to the *bounded variable*s. *Range experession* over the *bounded ituple* triggers an error at compile time.
+Note that *range expression*s only apply to the *bounded variable*s. *Range expression* over the *bounded ituple* triggers an error at compile time.
 
 ## Values of Bounded Variables
 
@@ -166,4 +197,4 @@ with x in 6 {
 ## Quick Summary
 In this section, we explain the use of `with-in` and `foreach` statements in Choreo to define and iterate over *bounded variable*s, which are essential for data movement tasks. We introduced the syntax and behavior of these constructs, including how to apply range operations to modify loop iterations and the importance of understanding the current and upper-bound values of bounded variables.
 
-The loop deriving part is important for implementing multi-buffering datamovement, which is essential for building high-performance kernels and will be introduced in optimization chapters later.
+The loop deriving part is important for implementing multi-buffering data movement, which is essential for building high-performance kernels and will be introduced in optimization chapters later.

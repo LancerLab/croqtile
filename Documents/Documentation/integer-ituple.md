@@ -1,7 +1,7 @@
 ## Overview
-In this section, you will learn how to define *integer**s and integer-tuples (*i-tuple*s) in Choreo code and understand their usage.
+In this section, you will learn how to define *integer*s and integer-tuples (*i-tuple*s) in Choreo code and understand their usage.
 
-## Intergers for Program Control
+## Integers for Program Control
 In high-performance computation kernels, integers are typically used for program control rather than computation. In Choreo *tileflow programs*, integers are used exclusively for loop control and array indexing.  Given the limited value ranges in these scenarios, Choreo has provided a single integer type -- the *32-bit signed integer* -- to simplify the design for this domain-specific use.
 
 In Choreo, an **integer**-typed variable is defined similar to C/C++:
@@ -64,7 +64,7 @@ b = {4, 5, 6};  // utilize the type inference
 Since Choreo can infer types from the *initialization expression*, programmers can often omit the `ituple` keyword. However, without explicit type annotation, an *ituple* variable definition might look similar to an *mdspan* definition if you are not yet familiar with Choreo. To distinguish them:
 
 - The *initialization expression* of an *ituple* follows an assignment operation `=` (like integers), whereas an *mdspan* is initialized after `:`;
-- The *initialization expression* of an *ituple* is enclosed by "{}", not "[]" as for *mdspan*.
+- The *initialization expression* of an *ituple* is enclosed by `{}`, not `[]` as for *mdspan*.
 
 Similar to `mdspan`, you may enforce rank check for *ituple*s at compile time:
 
@@ -77,9 +77,9 @@ Operations on *i-tuple*s are similar to those on *mdspan*. You can either use th
 
 ```choreo
 a = {3, 4};
-c = {a(0), 1, a(1)};  // '()' to retrieve the element value
-b = a {(0), (1), 2};  // syntax suger - TODO: fix-bug
-b = {a, 5, 6};        // concatenate - TODO: fix-bug
+b = {a(0), 1, a(1)};  // '()' to retrieve the element value
+c = a {(0), (1), 2};  // syntax sugar
+d = {a, 5, 6};        // concatenate
 e = a + 1;            // addition is applied elementwise
 ```
 
