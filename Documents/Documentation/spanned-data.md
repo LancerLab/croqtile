@@ -1,5 +1,5 @@
 ## Overview
-Choreo *tileflow program* describes how to move data around. Therefore, declaring or defining the data or buffer are fundamenetal. In this section, you will learn related syntax.
+Choreo *tileflow program* describes how to move data around. Therefore, declaring or defining the data or buffer are fundamental. In this section, you will learn related syntax.
 
 ## *Spanned*: Data and Buffers
 The primary focus of a Tileflow program is to manipulate large datasets by moving them around. In some terminology, the input and output of a Choreo function are classified as "input data" and "output data," respectively. Meanwhile, any other storage is referred to as "buffers." This conceptually distinguishes between "external" and "internal" memory from a function's perspective. However, both "data" and "buffer" refer to storage positions. In Choreo, both are typed as **spanned**, reflecting that they are data/buffers associated with an
@@ -48,13 +48,13 @@ shared u8 [512, 144] b;
 local u8 [72, 1024] c;
 ```
 
-Since Choreo handles storage in a heterogeous context, a buffer definition without a storage specifier defaults to the storage type of the host program, i.e., CPU memory. Other storage specifiers are defined by the target. For example, *Topscc* (for GCU hardware) supports:
+Since Choreo handles storage in a heterogenous context, a buffer definition without a storage specifier defaults to the storage type of the host program, i.e., CPU memory. Other storage specifiers are defined by the target. For example, *Topscc* (for GCU hardware) supports:
 
 - *global*: Refers to the device's global storage.
 - *shared*: Refers to the device block's shared storage
 - *local*: Refers to the thread-private storage.
 
-Other targets may have different definitions. Futhermore, buffers with different storage types have limitations in their declarations. We will explore this in later chapters.
+Other targets may have different definitions. Furthermore, buffers with different storage types have limitations in their declarations. We will explore this in later chapters.
 
 ## Initialization
 It is possible to initialize a buffer at the declaration site. For example:
@@ -84,7 +84,7 @@ __co__ auto foo(f32 [16, 17, 5] input) {
 }
 ```
 
-## Buffer Liftime Management
+## Buffer Lifetime Management
 The lifetime of storage allocated inside a *choreo function* is managed by the Choreo compiler for efficient use. The compiler attempts to reuse buffers as much as possible if their lifetimes do not overlap. Therefore users of Choreo are not necessary to do buffer management.
 
 ## Quick Summary

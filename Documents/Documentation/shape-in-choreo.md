@@ -21,7 +21,7 @@ mdspan<1> s1 : [3]; // Defines a 1D shape with dimensions [3]
 In this example, the leading keyword `mdspan` indicates the declaration of a *mdspan* variable, followed by the user-provided variable name. Each *mdspan* variable is initialized with an **initialization expression**, which consists of comma-separated integer values enclosed by `[]`. The symbol `:`, which immediately follows the variable name, introduces the *initialization expression*.
 Therefore, `s0` is defined as a 2D shape with `7` rows and `8` columns, while `s1` is a 1D shape with a dimension of `3`.
 
-It is possible to optionally specify the **rank** of an *mdspan* variable by placing `<>` after the `mdspan` keyword. If the rank is explicitly specified, it informs the Choreo compiler to check for rank consistency. If the rank value differs from the corresponding *initialization expression*, it tiggers a failure at compilation. Here is an example:
+It is possible to optionally specify the **rank** of an *mdspan* variable by placing `<>` after the `mdspan` keyword. If the rank is explicitly specified, it informs the Choreo compiler to check for rank consistency. If the rank value differs from the corresponding *initialization expression*, it triggers a failure at compilation. Here is an example:
 
 ```choreo
 mdspan<3> s2 : [64, 32]; // error: the rank of mdspan is inconsistent
@@ -46,7 +46,7 @@ new-shape0 : shape [(0) / 2, (1) / 4, 1];  // tile and reshape: [1, 64, 16]
 new-shape1 : shape [(1) + 2, (0) / 16];    // pad and reshape: [66, 8]
 ```
 
-In this example, the `new-shape0` is derived from `shape`, with dimension 0 divided by `2`, dimesion 1 divided by `4`. This corresponds to *tiling* operation in high-level semantics. Additionally, the code adds a new dimension to `new-shape`. In high-level semantics, this operation is often referred to as *reshaping*.
+In this example, the `new-shape0` is derived from `shape`, with dimension 0 divided by `2`, dimension 1 divided by `4`. This corresponds to *tiling* operation in high-level semantics. Additionally, the code adds a new dimension to `new-shape`. In high-level semantics, this operation is often referred to as *reshaping*.
 
 In Choreo, the definition of `new-shape0` is equivalent to:
 
@@ -56,7 +56,7 @@ new-shape0: [shape(0) / 2, shape(1) / 4, 1];
 
 Here, the initial `shape` is explicitly listed element-wise rather than specified outside `[]`. But similar to the prior version, The **element-of** operation, which is annotated as `()`, is used on top of existing shape to retrieve dimension values. Obviously, this approach requires more code but yields the same result. Thus, the prior version can be considered *syntactic sugar* for the complete *initialization expression* of the new shape.
 
-In the code example, `new-shape1` is also derived from `shape`, it pads dimesnion 1 by `2` and swaps the dimensions in the derived shape.
+In the code example, `new-shape1` is also derived from `shape`, it pads dimension 1 by `2` and swaps the dimensions in the derived shape.
 
 Furthermore, you may use the `mdspan` as a whole for derivations:
 

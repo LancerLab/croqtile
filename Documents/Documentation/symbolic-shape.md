@@ -15,7 +15,7 @@ Here, the question mark `?` represents a compile-time unknown value. Any positiv
 
 ```cpp
 void bar(int * data, int dim0) {
-  foo(choreo::make_spanview<3>(data, {dim0, 1, 2});
+  foo(choreo::make_spanview<3>(data, {dim0, 1, 2}));
 }
 ```
 
@@ -37,7 +37,7 @@ __co__ auto Matmul(s32 [M, K] lhs, s32 [K, N] rhs) {
   // ...
 }
 ```
-In the code, each dimension is given a symbolic name (`M, K, N` in this case) for the *spanned* inputs. Compared to *anonymous dimesion*, *symbolic dimension* approach clearly describes the relationship between shapes. The code looks intuitive and is easy to maintain. Furthermore, it is possible to improve the code safety with the additional information provided. Let us dive deeper for this.
+In the code, each dimension is given a symbolic name (`M, K, N` in this case) for the *spanned* inputs. Compared to *anonymous dimension*, *symbolic dimension* approach clearly describes the relationship between shapes. The code looks intuitive and is easy to maintain. Furthermore, it is possible to improve the code safety with the additional information provided. Let us dive deeper for this.
 
 ## Improved Code Safety
 The reason for improved code safety of using *symbolic dimension* is that more comprehensive code checks can be applied by Choreo compiler. For example, consider an *anonymous dimension* version of the `Matmul` function:
@@ -56,7 +56,7 @@ __co__ auto Matmul(s32 [?, ?] lhs, s32 [?, ?] rhs) {
 Choreo performs both compile-time and runtime checks to ensure safety:
 
 - **Compile-time Checks**: Choreo verifies rank consistency. In this example, `lhs.span` has a ranked of `2`, matching the rank of `{tile_m, tile_k}`, so there are no issues.
-- **Runtime Checks**: Choreo generates code to validate dimensions at runtime. For instance, in the declaration of `tiled_lhs`, its shape must not have a dimension of `0`, which would result in an invalid zero-sized buffer. Choreo's *transpliation* process generates the following *target host code*:
+- **Runtime Checks**: Choreo generates code to validate dimensions at runtime. For instance, in the declaration of `tiled_lhs`, its shape must not have a dimension of `0`, which would result in an invalid zero-sized buffer. Choreo's *transpilation* process generates the following *target host code*:
 
 ```cpp
 void __choreo_transpiled_Matmul(choreo::span_view<2, choreo::s32> lhs,
@@ -100,4 +100,4 @@ __co__ void foo() { f32 [M] d;} // compile-time error: can not applied to the sp
 ```
 
 ## Quick Summary
-In this section, we discussed *anynomous dimension* and *symbolic dimension* in Choreo, which support dynamic shapes required in certain scenarios. Compared to *anonymous dimension*, using *symbolic dimension* enhance code safety through additional compile-time checks, making them the recommended choice for ease of use and improved safety.
+In this section, we discussed *anonymous dimension* and *symbolic dimension* in Choreo, which support dynamic shapes required in certain scenarios. Compared to *anonymous dimension*, using *symbolic dimension* enhance code safety through additional compile-time checks, making them the recommended choice for ease of use and improved safety.

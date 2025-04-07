@@ -32,7 +32,7 @@ would not work.
 Choreo support C-style comments, either `/*...*/` or `//...`, leveraging the capability choreo preprocessor has provided.
 
 ## Conditional Compilation
-Choreo also support conditional compilation which C/C++ programs used a lot. This includes `#if`/`#ifdef`/`#ifndef`/`#else`/`#endif`. The belwo code snippet showcases the usage:
+Choreo also support conditional compilation which C/C++ programs used a lot. This includes `#if`/`#ifdef`/`#ifndef`/`#else`/`#endif`. The below code snippet showcases the usage:
 
 ```choreo
 #define PATH0

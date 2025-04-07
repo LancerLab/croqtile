@@ -38,7 +38,7 @@ Let's briefly review each part:
 
 The *Host Program* serves as the entry point of the *Choreo-C++* module/program and is the caller of the *Tileflow* Program (Choreo Functions). Written in standard C++, it runs on the CPU and manages the overall workflow of the heterogeneous application.
 
-In a simple high-performance kernel implementation, programmers typically prepare the necessary data in the host program to invoke *Choreo functions* and hande their return values to advance further steps.
+In a simple high-performance kernel implementation, programmers typically prepare the necessary data in the host program to invoke *Choreo functions* and handel their return values to advance further steps.
 
 **Device Program**
 
@@ -220,7 +220,7 @@ Choreo's device programming model varies depending on the target hardware and it
 
 Programmers must be aware that the device program follows the *Single-Program-Multiple-Data (SPMD)* paradigm. In this paradigm, multiple instances of the same device program are executed in parallel, making it highly efficient for exploiting data-level parallelism on target hardware. However, unlike traditional *TopsCC* programs, the device program does not manage data movement —whether between the host and device or across multiple storage levels within the device. Instead, the *tileflow program* orchestrates these tasks in a much simpler and safer manner.
 
-### Tileflow Program: Ochestrating the Data Movement
+### Tileflow Program: Orchestrating the Data Movement
 
 The *Tileflow Program* consists of *Choreo functions*. As described earlier, it manages the movement of data between the host and the target device, ensuring that data is copied correctly across different storage locations.
 
@@ -273,7 +273,7 @@ Within the `foreach` block, the `dma.copy` statement describes how data movement
 
 This is illustrated in the below figure:
 
-![Choreo-Sturctur-Chunkat](assets/figures/chunkat-6-17-4.drawio.png)
+![Choreo-Structure-Chunkat](assets/figures/chunkat-6-17-4.drawio.png)
 
 With the DMA statement, different chunks of data tiled from `lhs` are moved iteratively and in parallel from the host to the device's `local` memory. Similarly, the DMA statement manages `rhs` by moving it in small chunks to `local` memory for processing.
 

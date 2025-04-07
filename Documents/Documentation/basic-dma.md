@@ -1,4 +1,4 @@
-## Overiew
+## Overview
 The data movement is abstracted as the most complicated statement in Choreo. This section will introduce you  the basic *DMA statement* structure and the future variable they produce.
 
 ## Data Movement Statement
@@ -56,9 +56,9 @@ Here, the **DMA configuration**s are enclosed by `<>`. The configuration varies 
 
 Programmers should note that support for DMA types other than `dma.copy` varies by platform. For instance, on the *Topscc*/*Factor* platform, the implementation directly maps hardware-supported advanced data transfer features. On the *CUDA* platform, it could be either a mapping of TMA or an orchestration of load instructions from multiple threads. It is also possible to implement advanced DMA operations using software-only methods or software-hardware cooperation, though these are not yet supported.
 
-### Operation Type
+<!-- ### Operation Type
 
-Choreo's DMA statement is an abstraction that is extended to support morden hardware. Despite linear memory copies, advanced hardware, such as *Data Transfer Engine (DTE)* of GCU hardware and *Tensor Memory Accelerator (TMA)*, are capable to transfer shaped data and apply shape transformations inflight. Choreo mapps such functionaility in software level as different **DMA Operation Type**. The supported operations includes:
+Choreo's DMA statement is an abstraction that is extended to support modern hardware. Despite linear memory copies, advanced hardware, such as *Data Transfer Engine (DTE)* of GCU hardware and *Tensor Memory Accelerator (TMA)*, are capable to transfer shaped data and apply shape transformations inflight. Choreo maps such functionality in software level as different **DMA Operation Type**. The supported operations includes:
  
 - `dma.copy`: it copies the flat memory directly.
 - `dma.pad`: it *pad*s shaped data while transferring the data.
@@ -74,7 +74,7 @@ dma.pad<{1, 0, 3}, {0, 1, 2}, {0, 0, 0}, 0.1f> input => shared; // result shape 
 
 The **DMA configurations** are enclosed by `<>`. The configuration varies according to different operations. The detailed configuration syntax and limitation for *Topscc* is listed below as an example:
 
-Programmers must note that, for the support of DMA type other than `dma.copy`, it differs by platforms. For example, for *Topscc*/*Factor* platform, the implementation directly maps hardware supported advanced data transference features. And for *CUDA* platform, it could be either a mapping of TMA, or ochestration of load instructions from multiple threads. It is also possible to implement the advanced DMA operations by using software-only methods or software-hardware cooperations but not yet appear in current support. 
+Programmers must note that, for the support of DMA type other than `dma.copy`, it differs by platforms. For example, for *Topscc*/*Factor* platform, the implementation directly maps hardware supported advanced data transference features. And for *CUDA* platform, it could be either a mapping of TMA, or orchestration of load instructions from multiple threads. It is also possible to implement the advanced DMA operations by using software-only methods or software-hardware cooperations but not yet appear in current support.  -->
 
 ### Data Expression
 
@@ -106,7 +106,7 @@ wait f0, f1;  // Multiple wait
 wait f2;      // Error: cannot wait on a sync-dma
 ```
 
-In Choreo, another use of a *future* is to retrieve the destination buffer of the associated DMA statement. This is also the reason why **Sync-DMA** is allowed to define a future. Choreo provides two built-in member functions for *future* varaibles:
+In Choreo, another use of a *future* is to retrieve the destination buffer of the associated DMA statement. This is also the reason why **Sync-DMA** is allowed to define a future. Choreo provides two built-in member functions for *future* variables:
 
 - `.span` to retrieve the **mdspan** of the DMA destination buffer.
 - `.data` to retrieve the reference of the DMA destination buffer (spanned data).
