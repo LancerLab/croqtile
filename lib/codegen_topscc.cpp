@@ -1729,27 +1729,32 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       auto l = RemovePrefixOrNull("pv:", cast<BoundedType>(ty)->GetNote());
       assert(l.has_value());
       // is marked as parallel whose level is decided by target check
-      if (*l == "0")
+      if (*l == "local")
         oss << "__tops_tid_x()";
-      else if (*l == "1")
+      else if (*l == "shared")
         oss << "__tops_bid_x()";
+      else if (*l == "sublocal")
+        oss << "__tops_stid_x()";
       else
         choreo_unreachable("invalid bounded type note.");
     } else if (isa<BoundedType>(ty) &&
                PrefixedWith(cast<BoundedType>(ty)->GetNote(), "pi")) {
       auto l = RemovePrefixOrNull("pi:", cast<BoundedType>(ty)->GetNote());
       assert(l.has_value());
-      // l should be (x|y|z):(0|1)
-      if (l->length() != 3) choreo_unreachable("invalid bounded type note.");
+      // l should be (x|y|z):(shared|local)
+      if (l->length() <= 3)
+        choreo_unreachable("invalid bounded type note: " +
+                           cast<BoundedType>(ty)->GetNote() + ".");
       oss << "__tops_";
-      if (l->at(2) == '0')
+      if (l->substr(2) == "local")
         oss << "tid_";
-      else if (l->at(2) == '1')
+      else if (l->substr(2) == "shared")
         oss << "bid_";
       else
         choreo_unreachable("invalid bounded type note.");
       if (l->at(0) > 'z' || l->at(0) < 'x')
-        choreo_unreachable("invalid bounded type note.");
+        choreo_unreachable("invalid bounded type note: " +
+                           cast<BoundedType>(ty)->GetNote() + ".");
       oss << l->at(0) << "()";
     } else if (within_map.count(InScopeName(id->name)) && !is_host) {
       size_t i = 0;

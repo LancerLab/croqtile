@@ -35,6 +35,7 @@ echo "---------------------------------------"
 echo ""
 
 reproduce_commands=()
+working_command=""
 num_tested=0
 num_passed=0
 num_failed=0
@@ -233,8 +234,12 @@ execute_command() {
 
   # execute the command
   command="${env_set} $command ${env_unset}"
+  working_command="$command"
+
   eval "$command" 2>/dev/null
   local exit_code=$?
+
+  working_command=""
 
   # Calculate elapsed time in nanoseconds
   local end_time_ns=$(date +%s%N)
@@ -390,8 +395,15 @@ showresult() {
         echo "$com"
     done < "$reproduce_file"
 
-    return ${failed}
   fi
+
+  if [[ "${working_command}" != "" ]]; then
+    echo ""
+    echo "Command in-work:"
+    echo "${working_command}"
+  fi
+
+  return ${failed}
 }
 
 handlestatus() {

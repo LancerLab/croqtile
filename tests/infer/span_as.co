@@ -31,7 +31,7 @@ __co__ auto span_as(s32 [32, 18, 9] a) {
 // CHKINF: Symbol:    ::span_as::b, Type: global f32 mdspan<3> [32, 18, 9]
 // CHKINF: Symbol:    ::span_as::output0, Type: global s32 mdspan<2> [48, 36]
 // CHKINF: Symbol:    ::span_as::output1, Type: global s32 mdspan<2> [48, 36]
-// CHKINF: Bounded:   ::span_as::paraby_0::p, Type: {int}->[3]
+// CHKINF: Bounded:   ::span_as::paraby_0::p, Type: {int}->[3](pv)
 // CHKINF: Bounded:   ::span_as::paraby_0::within_0::index, Type: {int,int}->[4, 4]
 // CHKINF: Bounded:   ::span_as::paraby_0::within_0::x, Type: {int}->[4]
 // CHKINF: Bounded:   ::span_as::paraby_0::within_0::y, Type: {int}->[4]

@@ -51,8 +51,11 @@ private:
   bool AfterVisitImpl(AST::Node& n) override {
     TraceEachVisit(n, "(post)");
     if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
-      std::string append_note =
-          ":" + std::to_string(max_parallel_level - parallel_level);
+      std::string append_note = ":";
+      if (CCtx().GetTarget() == CompileTarget::Topscc)
+        append_note += PBLevelString();
+      else
+        append_note += std::to_string(max_parallel_level - parallel_level);
       auto pty = cast<BoundedITupleType>(NodeType(*pb->biv));
       pty->AppendNote(append_note);
       for (auto& symbol : pb->iv_symbols->AllValues())
@@ -70,6 +73,29 @@ private:
 
   void TraceEachVisit(AST::Node& n, std::string sup = "") {
     if (trace_visit) dbgs() << n.TypeNameString() << sup << "\n";
+  }
+
+  const std::string PBLevelString() {
+    if (max_parallel_level == 1) {
+      switch (parallel_level) {
+      case 0: return "global"; break;
+      case 1: return "local"; break;
+      default:
+        choreo_unreachable("unsupported parallel level: " +
+                           std::to_string(parallel_level) + ".");
+      }
+    } else {
+      switch (parallel_level) {
+      case 0: return "global"; break;
+      case 1: return "shared"; break;
+      case 2: return "local"; break;
+      case 3: return "sublocal"; break;
+      default:
+        choreo_unreachable("unsupported parallel level: " +
+                           std::to_string(parallel_level) + ".");
+      }
+    }
+    return "";
   }
 
   void CheckDMA(AST::DMA& n) {
@@ -682,20 +708,11 @@ public:
       }
       break;
     case Storage::SHARED:
-      if (parallel_level != 1) {
-        if (CCtx().MemReuse()) {
-          if (n.note.find("spm") == std::string::npos) {
-            Error(n.LOC(),
-                  "shared variable '" + n.name_str +
-                      "` must be declared inside single level of parallel-by.");
-            error_count++;
-          }
-        } else {
-          Error(n.LOC(),
-                "shared variable '" + n.name_str +
-                    "` must be declared inside single level of parallel-by.");
-          error_count++;
-        }
+      if (parallel_level == 0) {
+        Error(n.LOC(), "shared variable '" + n.name_str +
+                           "` must be declared inside parallel-by.");
+        error_count++;
+#if 0
       } else if (local_level == 1 && parallel_level == 2) {
         // if parallel_level == 1, allow
         // eg. parallel p by 6 { shared; local; }
@@ -703,6 +720,7 @@ public:
                            "` mustn't be declared within the same level of "
                            "parallel-by as local variables.");
         error_count++;
+#endif
       }
       if (sty->RuntimeShaped()) {
         Error(n.LOC(), "GCU forbids shared variable '" + n.name_str +
@@ -713,22 +731,16 @@ public:
       break;
     case Storage::LOCAL:
       if (parallel_level == 0) {
-        if (CCtx().MemReuse()) {
-          if (n.note.find("spm") == std::string::npos) {
-            Error(n.LOC(), "local variable '" + n.name_str +
-                               "` must be declared inside parallel-by.");
-            error_count++;
-          }
-        } else {
-          Error(n.LOC(), "local variable '" + n.name_str +
-                             "` must be declared inside parallel-by.");
-          error_count++;
-        }
+        Error(n.LOC(), "local variable '" + n.name_str +
+                           "` must be declared inside parallel-by.");
+        error_count++;
+#if 0
       } else if (local_level != 0 && parallel_level != local_level) {
         Error(n.LOC(), "local variable '" + n.name_str +
                            "` must be declared inside a level of parallel-by "
                            "that is identical to other local variables.");
         error_count++;
+#endif
       } else if (local_level == 0)
         local_level = parallel_level;
       if (sty->RuntimeShaped()) {
@@ -899,7 +911,7 @@ public:
       }
       break;
     case Storage::SHARED:
-      if (parallel_level != 1) {
+      if (parallel_level == 0) {
         Error(n.LOC(), "unsupported: " + PSTR(n.scope) +
                            " synchronization in " + STR(pl2s()) + " scope.");
         error_count++;

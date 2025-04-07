@@ -1112,6 +1112,9 @@ struct BoundedType : public Type, public TypeIDProvider<BoundedType> {
   virtual std::string GetNote() const { return note; };
   virtual void AppendNote(const std::string& n) { note += n; };
   virtual const ValueItem& GetUpperBound() const = 0;
+  void Print(std::ostream& os) const override {
+    if (!note.empty()) os << "(" << note << ")";
+  }
 
   __UDT_TYPE_INFO__(Type, BoundedType)
 };
@@ -1156,6 +1159,7 @@ struct BoundedIntegerType final : public BoundedType,
       os << "int->[unknown]";
     else
       os << "int->[" << STR(lbound) << "," << STR(ubound) << "]:" << stride;
+    BoundedType::Print(os);
   }
 
   const std::string Name() const override { return "bounded-integer"; }
@@ -1222,6 +1226,7 @@ struct BoundedITupleType final : public BoundedType,
   void Print(std::ostream& os) const override {
     if (!ubounds.IsRanked()) {
       os << "{invalid}";
+      BoundedType::Print(os);
       return;
     }
     assert(Dims() > 0 && "dim of bounded ituple is incorrect.");
@@ -1238,6 +1243,7 @@ struct BoundedITupleType final : public BoundedType,
 
     if (plain) {
       os << STR(ubounds);
+      BoundedType::Print(os);
       return;
     }
 
@@ -1249,6 +1255,8 @@ struct BoundedITupleType final : public BoundedType,
          << "):" << strides[i];
     }
     os << "}";
+
+    BoundedType::Print(os);
   }
 
   const std::string Name() const override { return "bounded-ituple"; }

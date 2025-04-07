@@ -22,7 +22,7 @@ __co__ auto pad_func(f32 [4, 4] input) {
 // CHECK: Symbol:    ::pad_func::output, Type: global f32 mdspan<2> [8, 8]
 // CHECK: Partial:   ::pad_func::in_shape_c, Type: mdspan<2> [2, 2]
 // CHECK: Partial:   ::pad_func::ot_shape_c, Type: mdspan<2> [4, 4]
-// CHECK: Bounded:   ::pad_func::paraby_0::p, Type: {int}->[1]
+// CHECK: Bounded:   ::pad_func::paraby_0::p, Type: {int}->[1](pv)
 // CHECK: Bounded:   ::pad_func::paraby_0::within_0::tile_in_c, Type: {int,int}->[2, 2]
 // CHECK: Bounded:   ::pad_func::paraby_0::within_0::tile_ot_c, Type: {int,int}->[2, 2]
 // CHECK: Future:    ::pad_func::paraby_0::within_0::cdt_input, Type: sync=>shared f32 mdspan<2> [2, 2]

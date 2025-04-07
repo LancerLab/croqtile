@@ -10,14 +10,14 @@ __co__ void foo() {
 
 __co__ void bar() {
   sync.global;
-  sync.shared;
-  sync.local;
+  sync.shared;  // error
+  sync.local;   // error
   parallel by 3 {
-    sync.global;
+    sync.global;  // error
     sync.shared;
     sync.local;
     parallel by 2 {
-      sync.global;
+      sync.global;  // error
       sync.shared;
       sync.local;
       parallel by 1 {
@@ -34,11 +34,9 @@ __co__ void bar() {
 // CHECK: error: unsupported: global synchronization in shared scope.
 // CHECK: error: GCU300 does not support local synchronization.
 // CHECK: error: unsupported: global synchronization in local scope.
-// CHECK: error: unsupported: shared synchronization in local scope.
 // CHECK: error: GCU300 does not support local synchronization.
 // CHECK: error: parallel level exceeds limit: 3 > 2.
 // CHECK: error: unsupported: global synchronization in sub-local scope.
-// CHECK: error: unsupported: shared synchronization in sub-local scope.
 // CHECK: error: GCU300 does not support local synchronization.
 
 // GCU4CHK: error: unsupported: shared synchronization in global scope.
@@ -46,7 +44,5 @@ __co__ void bar() {
 // GCU4CHK: error: unsupported: global synchronization in shared scope.
 // GCU4CHK: error: unsupported: local synchronization in shared scope.
 // GCU4CHK: error: unsupported: global synchronization in local scope.
-// GCU4CHK: error: unsupported: shared synchronization in local scope.
 // GCU4CHK: error: unsupported: global synchronization in sub-local scope.
-// GCU4CHK: error: unsupported: shared synchronization in sub-local scope.
 // GCU4CHK: error: unsupported: local synchronization in sub-local scope.

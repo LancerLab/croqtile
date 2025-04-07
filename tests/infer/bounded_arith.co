@@ -27,7 +27,7 @@ __co__ void bounded_arith(s32 [180, 27, 12] a) {
 
 
 // CHECK: Parameter: ::bounded_arith::a, Type: s32 mdspan<3> [180, 27, 12]
-// CHECK: Bounded:   ::bounded_arith::paraby_0::p, Type: {int}->[6]
+// CHECK: Bounded:   ::bounded_arith::paraby_0::p, Type: {int}->[6](pv)
 // CHECK: Bounded:   ::bounded_arith::paraby_0::within_0::index, Type: {int,int,int}->[10, 9, 2]
 // CHECK: Bounded:   ::bounded_arith::paraby_0::within_0::x, Type: {int}->[10]
 // CHECK: Bounded:   ::bounded_arith::paraby_0::within_0::y, Type: {int}->[9]

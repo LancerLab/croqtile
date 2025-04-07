@@ -28,8 +28,8 @@ __co__ void cofoo0() {
 // INFER: Symbol:    ::cofoo0::c, Type: ituple<2>
 // INFER: Symbol:    ::cofoo0::bb, Type: ituple<4>
 // INFER: Symbol:    ::cofoo0::b, Type: ituple<4>
-// INFER: Bounded:   ::cofoo0::paraby_0::p, Type: {int}->[2]
-// INFER: Bounded:   ::cofoo0::paraby_0::p__elem__x, Type: {int}->[2]
+// INFER: Bounded:   ::cofoo0::paraby_0::p, Type: {int}->[2](pv)
+// INFER: Bounded:   ::cofoo0::paraby_0::p__elem__x, Type: {int}->[2](pi:x)
 // INFER: Bounded:   ::cofoo0::paraby_0::within_0::idx, Type: {int,int,int,int}->[6, 4, 6, 3]
 // INFER: Bounded:   ::cofoo0::paraby_0::within_0::idx__elem__0, Type: {int}->[6]
 // INFER: Bounded:   ::cofoo0::paraby_0::within_0::idx__elem__1, Type: {int}->[4]

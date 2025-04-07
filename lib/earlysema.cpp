@@ -18,7 +18,8 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
   } else if (isa<AST::ParallelBy>(&n)) {
     parallel_level++;
     parallel_levels.push_back(parallel_level);
-    inthreads_levels[parallel_level] = 0;
+    inthreads_levels.push_back(0);
+    assert(inthreads_levels.size() == (unsigned)parallel_level + 1);
   } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
     ++inthreads_levels[parallel_level];
     if (inthreads_levels[parallel_level] > 1)
@@ -55,8 +56,7 @@ bool EarlySemantics::AfterVisitImpl(AST::Node& n) {
     assert(parallel_level > 0);
     parallel_level--;
   } else if (isa<AST::InThreadsBlock>(&n)) {
-    if (parallel_level > 0)
-      assert(inthreads_levels.size() == (unsigned)parallel_level);
+    assert(inthreads_levels.size() == (unsigned)parallel_level + 1);
     --inthreads_levels[parallel_level];
   } else if (isa<AST::WithBlock>(&n)) {
     with_syms.clear();
@@ -346,7 +346,6 @@ bool EarlySemantics::Visit(AST::Expr& n) {
   } else if ((n.op == "&&") || (n.op == "||")) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
-    // assert(false);
     if (!isa<BooleanType>(lty) || !isa<BooleanType>(rty)) {
       Error(n.LOC(), "in operation \"" + n.op +
                          "\": unable to apply to the types (" + PSTR(lty) +

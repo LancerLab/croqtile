@@ -8,7 +8,7 @@ __co__ void foo(f32 [32] d, int) {
   int e = 1;
   ituple f = {3, 4, 5};
 }
-// CHECK: shared variable 'a` must be declared inside single level of parallel-by.
+// CHECK: shared variable 'a` must be declared inside parallel-by.
 // CHECK-NEXT: local variable 'b` must be declared inside parallel-by.
 
 __co__ void bar(f32 [32] d, int) {
@@ -33,7 +33,6 @@ __co__ void foobar(f32 [32] d, int) {
     }
   }
 }
-// CHECK: shared variable 'a` must be declared inside single level of parallel-by.
 // CHECK: global variable 'c` mustn't be declared inside parallel-by.
 
 __co__ void local_shared(f32 [32, 2] d, int) {
@@ -48,7 +47,6 @@ __co__ void local_shared(f32 [32, 2] d, int) {
     }
   }
 }
-// CHECK-NEXT: local variable 'b` must be declared inside a level of parallel-by that is identical to other local variables.
 
 __co__ void two_locals(f32 [32, 18] d, int) {
 	global bf16 [d.span + {1, 1}] c;
@@ -61,7 +59,6 @@ __co__ void two_locals(f32 [32, 18] d, int) {
     }
   }
 }
-// CHECK-NEXT: local variable 'b` must be declared inside a level of parallel-by that is identical to other local variables.
 
 __co__ void two_shared(f32 [32, 7] d, int) {
 	global bf16 [d.span + {1, 1}] c;
@@ -92,4 +89,4 @@ __co__ void normal(f32 [32, 12] d, int) {
 // CHECK-NOT: shared variable
 // CHECK-NOT: global variable
 
-// CHECK: Totally 7 errors have been detected.
+// CHECK: Totally 4 errors have been detected.
