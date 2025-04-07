@@ -1192,7 +1192,7 @@ struct WithIn : public Node, public TypeIDProvider<WithIn> {
       : Node(l), with(w), in(i), with_matchers(nullptr) {}
 
   WithIn(const location& l, const ptr<Node>& i, const ptr<MultiValues>& m)
-      : Node(l), with(), in(i), with_matchers(m) {}
+      : Node(l), with(nullptr), in(i), with_matchers(m) {}
 
   WithIn(const location& l, const ptr<Identifier>& w, const ptr<Node>& i,
          ptr<MultiValues> m)

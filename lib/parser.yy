@@ -198,7 +198,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::NamedTypeDecl>> named_mdspan_decl
 %nterm <AST::ptr<AST::NamedVariableDecl>> named_ituple_decl spanned_decl scalar_decl event_decl
 %nterm <AST::ptr<AST::IntTuple>> unnamed_ituple_decl sugar_unnamed_ituple_decl sugarless_unnamed_ituple_decl
-%nterm <AST::ptr<AST::WithBlock>> within_block sugar_within_foreach_block
+%nterm <AST::ptr<AST::WithBlock>> within_block
 %nterm <AST::ptr<AST::InThreadsBlock>> inthreads_block
 %nterm <AST::ptr<AST::WithIn>> within
 %nterm <AST::ptr<AST::WhereBind>> where_bind
@@ -467,7 +467,6 @@ statement
     | sync_stmt    SEMCOL        { $$ = $1; }
     | paraby_block               { $$ = $1; }
     | within_block               { $$ = $1; }
-    | sugar_within_foreach_block { $$ = $1; }
     | inthreads_block            { $$ = $1; }
     | foreach_block              { $$ = $1; }
     | increment_block            { $$ = $1; /* TODO: remove? */ }
@@ -1024,6 +1023,26 @@ within_block
         $$->reqs = $3;
         $$->stmts = $4;
       }
+    | FOREACH withins optional_pred stmts_block {
+        $$ = AST::Make<AST::WithBlock>(@1);
+        $$->withins = $2;
+        // compose the range expression for 'foreach'
+        auto mn = AST::Make<AST::MultiValues>(@2);
+        for (auto item : $2->AllSubs()) {
+          auto wi = cast<AST::WithIn>(item);
+          if (wi->with == nullptr) {
+            assert(wi->with_matchers != nullptr);
+            for (auto wm : wi->with_matchers->AllValues()) {
+              auto id = cast<AST::Identifier>(wm);
+              mn->Append(AST::Make<AST::LoopRange>(id->LOC(), id));
+            }
+          } else
+            mn->Append(AST::Make<AST::LoopRange>(wi->LOC(), wi->with));
+        }
+        auto fe = AST::Make<AST::ForeachBlock>(@1, mn, $4, $3);
+        $$->stmts = AST::Make<AST::MultiNodes>(@3);
+        $$->stmts->Append(fe);
+      }
     ;
 
 inthreads_block
@@ -1100,49 +1119,6 @@ foreach_block
       }
     ;
   
-sugar_within_foreach_block
-    : FOREACH range_exprs IN NUM optional_pred stmts_block {
-        $$ = AST::Make<AST::WithBlock>(@1);
-        if ($2->Count() != 1) {
-          Parser::error(@2, "Expect only 1 iteration variable for single upper bound.");
-        }
-        const auto& range = cast<AST::LoopRange>($2->ValueAt(0));
-        auto withins = AST::Make<AST::MultiNodes>(@2);
-        auto with_matchers = AST::Make<AST::MultiValues>(@2);
-        auto within = AST::Make<AST::WithIn>(@2, range->iv, AST::Make<AST::IntLiteral>(@4, $4));
-        within->note += "sugar, ";
-        withins->Append(within);
-        $$->withins = withins;
-        $$->reqs = nullptr;
-        auto stmts = AST::Make<AST::MultiNodes>(@6);
-        stmts->Append(AST::Make<AST::ForeachBlock>(@1, $2, $6, $5));
-        $$->stmts = stmts;
-      }
-    | FOREACH range_exprs IN span_expr optional_pred stmts_block {
-      $$ = AST::Make<AST::WithBlock>(@1);
-        auto withins = AST::Make<AST::MultiNodes>(@2);
-        if ($2->Count() == 1) {
-          const auto& range = cast<AST::LoopRange>($2->ValueAt(0));
-          auto within = AST::Make<AST::WithIn>(@2, range->iv, $4);
-          within->note += "sugar, ";
-          withins->Append(within);
-        } else {
-          auto with_matchers = AST::Make<AST::MultiValues>(@2);
-          for (const auto& value : $2->AllValues())
-            with_matchers->Append(cast<AST::LoopRange>(value)->iv);
-          auto within = AST::Make<AST::WithIn>(@2, $4, with_matchers);
-          within->note += "sugar, ";
-          withins->Append(within);
-        }
-        $$->withins = withins;
-        $$->reqs = nullptr;
-        auto stmts = AST::Make<AST::MultiNodes>(@6);
-        stmts->Append(AST::Make<AST::ForeachBlock>(@1, $2, $6, $5));
-        $$->stmts = stmts;
-      }
-    ;
-    
-
 increment_block
     : INCR id_list WHILE pred stmts_block {
         $$ = AST::Make<AST::IncrementBlock>(@1, $2, $4, $5);

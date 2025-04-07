@@ -1570,10 +1570,8 @@ bool EarlySemantics::Visit(AST::ForeachBlock& n) {
       }
     } else {
       auto ity = i->GetType();
-      if (!(IsBoundedType(ity))) {
-        Error(i->LOC(), "expect a bounded type but got '" + PSTR(ity) + "'.");
-        error_count++;
-      }
+      Error(i->LOC(), "expect a range expression but got '" + PSTR(ity) + "'.");
+      error_count++;
     }
   }
   return true;

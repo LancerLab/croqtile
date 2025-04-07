@@ -177,7 +177,7 @@ __co__ auto foo(s32[128] off_buff_L3, s32[102400, 512] input, s32[102400, 512] i
     dma.copy off_buff_L3 => off_buff;
     para_L1 = dma.copy para => local;
 
-    foreach d0, d1 in [10240, 1] {
+    foreach {d0, d1} in [10240, 1] {
       input_L1 = dma.copy input.chunkat(p#d0, d1) => local;
       id_L1 = dma.copy id.chunkat(p#d0, d1) => local;
 
