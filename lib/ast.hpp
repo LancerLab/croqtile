@@ -824,7 +824,7 @@ public:
 
   explicit DataType(const location& l, int ec, BaseType bt)
       : Node(l), base_type(bt), rank(1), array_ec(ec) {
-    assert(ec > 0 && "must have a valid element count.");
+    assert(ec != 0 && "element count can not be 0!");
     assert(bt == BaseType::EVENT && "unexpected type!");
     InitSemaType();
   }
@@ -919,11 +919,11 @@ struct NamedVariableDecl : public Node,
   explicit NamedVariableDecl(const location& l, const std::string& n,
                              const ptr<DataType>& t = nullptr,
                              const ptr<Memory>& s = nullptr,
-                             const ptr<Node>& i = nullptr,
+                             const ptr<Node>& i = nullptr, int array_ec = -1,
                              const ptr<Node>& v = nullptr,
                              const std::string& d = "=")
       : Node(l), name_str(n), init_str(d), mem(s), type(t), init_expr(i),
-        init_value(v), elem_count(-1) {
+        init_value(v), elem_count(array_ec) {
 
     if (init_expr)
       assert(!init_value && "initial value can not be set when initialization "
@@ -942,7 +942,7 @@ struct NamedVariableDecl : public Node,
                              const std::string& d = "=")
       : Node(l), name_str(n), init_str(d), mem(s), type(t), init_expr(nullptr),
         init_value(v), elem_count(array_ec) {
-    assert(elem_count > 0 && "elem_count can not be zero.");
+    assert(elem_count != 0 && "elem_count can not be zero.");
   }
 
   bool IsArray() const { return elem_count > 0; }

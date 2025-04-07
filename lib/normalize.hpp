@@ -445,7 +445,7 @@ public:
         auto dt = AST::Make<AST::DataType>(loc, BaseType::S32, mds);
         auto sto = AST::Make<AST::Memory>(loc, Storage::GLOBAL);
         auto nv = AST::Make<AST::NamedVariableDecl>(loc, anon_sym, dt, sto,
-                                                    nullptr, il);
+                                                    nullptr, -1, il);
 
         assert(cur_node_index != -1);
         int index =

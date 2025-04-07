@@ -179,14 +179,14 @@ void choreo_info(const char *message) {
 %nterm <std::string> dma_operation data_id
 %nterm <ptr<DMAConfig>> dma_config
 %nterm <bool> sync_type
-%nterm <int> index index_or_none
+%nterm <int> index index_or_none opt_array_count
 %nterm <Choreo::Storage> storage
 %nterm <Choreo::BaseType> fundamental_type
 %nterm <AST::ptr<AST::CppSourceCode>> pass_by host_code
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::SpanAs>> span_as
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
-%nterm <AST::ptr<AST::Node>> foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal device_passable declaration statement assignment dma_stmt wait_stmt trigger_stmt call_stmt print_stmt swap_stmt expr_or_qes range_expr param_mdspan_val chunkat_or_storage_or_select pred returnable id_or_elem
+%nterm <AST::ptr<AST::Node>> foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal device_passable declaration statement assignment dma_stmt wait_stmt trigger_stmt call_stmt print_stmt swap_stmt expr_or_qes range_expr param_mdspan_val chunkat_or_storage_or_select pred returnable id_or_elem span_init_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
 %nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables future_data_list template_params gi_list ide_list
 %nterm <AST::ptr<AST::Expr>> s_expr template_value_expr span_expr id_expr bound_expr optional_pred
@@ -658,14 +658,9 @@ event_decls
     ;
 
 event_decl
-    : IDENTIFIER {
+    : IDENTIFIER opt_array_count {
         $$ = AST::Make<AST::NamedVariableDecl>(@1, $1,
-             AST::Make<AST::DataType>(@1, BaseType::EVENT));
-      }
-    | IDENTIFIER LBRAKT NUM RBRAKT {
-        // event array
-        $$ = AST::Make<AST::NamedVariableDecl>(@1, $1,
-             AST::Make<AST::DataType>(@1, $3, BaseType::EVENT), nullptr, $3);
+             AST::Make<AST::DataType>(@1, $2, BaseType::EVENT), nullptr, $2);
       }
     ;
 
@@ -696,32 +691,37 @@ spanned_decls
     ;
 
 spanned_decl
-    : IDENTIFIER {
-        $$ = AST::Make<AST::NamedVariableDecl>(@1, $1);
+    : IDENTIFIER opt_array_count {
+        $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, nullptr, $2);
       }
-    | IDENTIFIER LBRACE NUM RBRACE {
-        auto literal = AST::Make<AST::IntLiteral>(@3, $3);
-        $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, nullptr, literal);
+    | IDENTIFIER opt_array_count span_init_val {
+        $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, nullptr, $2, $3);
       }
-    | IDENTIFIER LBRACE MINUS NUM RBRACE {
-        auto literal = AST::Make<AST::IntLiteral>(@3, -$4);
-        $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, nullptr, literal);
+    ;
+
+opt_array_count
+    : /* empty */ { $$ = -1; /* -1: not array */ }
+    | LBRAKT NUM RBRAKT  { $$ = $2; }
+    ;
+
+span_init_val
+    : LBRACE NUM RBRACE {
+        $$ = AST::Make<AST::IntLiteral>(@2, $2);
       }
-    | IDENTIFIER LBRACE FPVAL RBRACE {
-        auto literal = AST::Make<AST::FloatLiteral>(@3, $3);
-        $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, nullptr, literal);
+    | LBRACE MINUS NUM RBRACE {
+        $$ = AST::Make<AST::IntLiteral>(@2, -$3);
       }
-    | IDENTIFIER LBRACE MINUS FPVAL RBRACE {
-        auto literal = AST::Make<AST::FloatLiteral>(@3, -$4);
-        $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, nullptr, literal);
+    | LBRACE FPVAL RBRACE {
+        $$ = AST::Make<AST::FloatLiteral>(@2, $2);
       }
-    | IDENTIFIER LBRACE DFPVAL RBRACE {
-        auto literal = AST::Make<AST::FloatLiteral>(@3, $3);
-        $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, nullptr, literal);
+    | LBRACE MINUS FPVAL RBRACE {
+        $$ = AST::Make<AST::FloatLiteral>(@2, -$3);
       }
-    | IDENTIFIER LBRACE MINUS DFPVAL RBRACE {
-        auto literal = AST::Make<AST::FloatLiteral>(@3, -$4);
-        $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, nullptr, literal);
+    | LBRACE DFPVAL RBRACE {
+        $$ = AST::Make<AST::FloatLiteral>(@2, $2);
+      }
+    | LBRACE MINUS DFPVAL RBRACE {
+        $$ = AST::Make<AST::FloatLiteral>(@2, -$3);
       }
     ;
 
