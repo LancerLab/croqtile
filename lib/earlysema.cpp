@@ -871,10 +871,7 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
 
   // check the if rank equal between with-in and with-matcher
   if (n.with_matchers && n.with_matchers->Count() != rank) {
-    std::string which_count = (n.note.find("sugar") == std::string::npos
-                                   ? "with-matcher-count("
-                                   : "iteration-variable-count(");
-    Error(n.in->LOC(), "un-matched " + which_count +
+    Error(n.in->LOC(), "un-matched with-matcher-count(" +
                            std::to_string(n.with_matchers->Count()) +
                            ") and mdspan rank(" + std::to_string(rank) + ").");
     error_count++;

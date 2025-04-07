@@ -117,7 +117,7 @@ for (int iv = 0; iv < 128; ++iv)
 ```choreo
 foreach x in 128 { }
 foreach idx in [10, 20] { }
-foreach y, z in [8, 16] { }
+foreach {y, z} in [8, 16] { }
 ```
 
 The code above is equivalent to the following code:
@@ -135,9 +135,6 @@ with {y, z} in [8, 16] {
   foreach y, z { }
 }
 ```
-
-It is worth noting that the iteration variable defined in **sugared foreach** is either a *bounded tuple* or multiple *bounded variables* that match the ituple that follows.
-
 
 ### Deriving the Loop From a Bounded Integer
 
