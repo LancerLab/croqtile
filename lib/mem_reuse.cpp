@@ -25,7 +25,8 @@ bool MemReuse::BeforeVisitImpl(AST::Node& n) {
     shared_spm_name = SymbolTable::GetAnonName();
 
     auto Size_t2Int = [](size_t s) -> int {
-      if (s <= std::numeric_limits<int>::max()) return static_cast<int>(s);
+      if (s <= (size_t)std::numeric_limits<int>::max())
+        return static_cast<int>(s);
       choreo_unreachable("size_t to int conversion failed, val: " +
                          std::to_string(s));
     };
@@ -60,7 +61,7 @@ bool MemReuse::BeforeVisitImpl(AST::Node& n) {
       VST_DEBUG(dbgs() << "Defined local scratch pad memory: "
                        << PSTR(local_spm) << ", type: " << PSTR(lsty) << ".\n");
     }
-  } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+  } else if (isa<AST::ParallelBy>(&n)) {
     parallel_level++;
     max_parallel_level = std::max(parallel_level, max_parallel_level);
     if (parallel_level == 1) {

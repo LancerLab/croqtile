@@ -36,3 +36,26 @@ __co__ void bar(f32 [7, 4] data) {
 // CHECK:    (with statements)
 // CHECK:    `- Call: foobar
 // CHECK:      `- with arguments: data.ChunkAt(x, y)
+
+__co__ void wow() {
+  f32 [7] data[2];
+  with {x} in data.span {
+    dma.copy data[0].chunkat(x) => local;
+    call foobar(data[1].chunkat(x));
+  }
+}
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: wow
+// CHECK:  `- Return type: void
+// CHECK:  `- Parameters
+// CHECK:  `- Var Decl (f32 [ 7 ], default): data[2]
+// CHECK:  `- With Block:
+// CHECK:    (within constraints)
+// CHECK:    `- {x} in data.span
+// CHECK:    (with statements)
+// CHECK:    `- DMA.copy
+// CHECK:      `- from: data[0].ChunkAt(x)
+// CHECK:      `- to: local
+// CHECK:    `- Call: foobar
+// CHECK:      `- with arguments: data[1].ChunkAt(x)

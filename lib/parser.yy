@@ -179,24 +179,25 @@ void choreo_info(const char *message) {
 %nterm <std::string> dma_operation data_id
 %nterm <ptr<DMAConfig>> dma_config
 %nterm <bool> sync_type
-%nterm <int> index index_or_none opt_array_count
+%nterm <int> index index_or_none opt_array_num
+%nterm <std::vector<size_t>> opt_array_nums
 %nterm <Choreo::Storage> storage
 %nterm <Choreo::BaseType> fundamental_type
-%nterm <AST::ptr<AST::CppSourceCode>> pass_by host_code
+%nterm <AST::ptr<AST::CppSourceCode>> host_code
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::SpanAs>> span_as
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
-%nterm <AST::ptr<AST::Node>> foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal device_passable declaration statement assignment dma_stmt wait_stmt trigger_stmt call_stmt print_stmt swap_stmt expr_or_qes range_expr param_mdspan_val chunkat_or_storage_or_select pred returnable id_or_elem span_init_val
+%nterm <AST::ptr<AST::Node>> any_code foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal device_passable declaration statement assignment dma_stmt wait_stmt trigger_stmt call_stmt print_stmt swap_stmt expr_or_qes range_expr param_mdspan_val chunkat_or_storage_or_select pred returnable id_or_elem span_init_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
 %nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables future_data_list template_params gi_list ide_list
-%nterm <AST::ptr<AST::Expr>> s_expr template_value_expr span_expr id_expr bound_expr optional_pred
+%nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr span_expr id_expr bound_expr optional_pred
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
 %nterm <AST::ptr<AST::Parameter>> parameter
 %nterm <AST::ptr<AST::ChoreoFunction>> dsl_function
-%nterm <AST::ptr<AST::MultiDimSpans>> unnamed_mdspan_decl param_mdspan
+%nterm <AST::ptr<AST::MultiDimSpans>> unnamed_mdspan_decl mdspan_derivation param_mdspan
 %nterm <AST::ptr<AST::NamedTypeDecl>> named_mdspan_decl
-%nterm <AST::ptr<AST::NamedVariableDecl>> named_ituple_decl spanned_decl scalar_decl event_decl
+%nterm <AST::ptr<AST::NamedVariableDecl>> named_ituple_decl spanned_decl scalar_decl event_decl spanas_spanned_decl
 %nterm <AST::ptr<AST::IntTuple>> unnamed_ituple_decl sugar_unnamed_ituple_decl sugarless_unnamed_ituple_decl
 %nterm <AST::ptr<AST::WithBlock>> within_block
 %nterm <AST::ptr<AST::InThreadsBlock>> inthreads_block
@@ -221,28 +222,31 @@ void choreo_info(const char *message) {
 %left STAR SLASH PECET
 %left UBOUND
 %nonassoc LPAREN RPAREN
-//%left HOST_CODE
+
+%left HOST_CODE
 
 %%
 
 program
     : /* Empty */ {}
-    | program pass_by       { root.nodes.push_back($2); }
-    | program dsl_function  { root.nodes.push_back($2); }
+    | program any_code { if ($2 != nullptr) root.nodes.push_back($2); }
+    ;
 
-pass_by
-    : host_code   { $$ = $1; }
+any_code
+    : host_code { $$ = $1; }
+    | dsl_function { $$ = $1; }
     | KERNEL_CODE {
         $$ = AST::Make<AST::CppSourceCode>(@1, $1, false);
       }
     ;
 
 host_code
-    : host_code HOST_CODE {
-        $$ = AST::Make<AST::CppSourceCode>(@1, $1->code + $2);
-      }
-    | HOST_CODE /* can not be empty */ {
+    : HOST_CODE /* can not be empty */ {
         $$ = AST::Make<AST::CppSourceCode>(@1, $1);
+      }
+    | host_code HOST_CODE {
+        $1->code += $2;
+        $$ = $1;
       }
     ;
 
@@ -365,10 +369,6 @@ general_val
     | unnamed_mdspan_decl { $$ = $1; }
     | unnamed_ituple_decl { $$ = $1; }
     | bool_literal { $$ = $1; }
-    | data_id span_as {
-        $2->id = AST::Make<AST::Identifier>(@1,$1);
-        $$ = $2;
-      }
     ;
 
 general_index
@@ -405,13 +405,13 @@ bool_literal
 
 pred
     : bool_literal { $$ = $1; }
-    | data_id CHUNKINBOUND LPAREN {
+    | data_id opt_array_nums CHUNKINBOUND LPAREN {
         parsing_chunkat_value_list = true;
       } value_list RPAREN {
         // note: normalize will hoist span_as
-        $5->SetDelimiter(", ");
+        $6->SetDelimiter(", ");
         $$ = AST::Make<AST::Expr>(@1, "inbound", ReformChunkAt(
-                 AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $5)));
+                 AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $2, $6)));
         parsing_chunkat_value_list = false;
       }
     ;
@@ -585,8 +585,9 @@ declarations
     ;
 
 declaration
-    : named_mdspan_decl  { $$ = $1; }
-    | named_ituple_decl  { $$ = $1; }
+    : named_mdspan_decl   { $$ = $1; }
+    | named_ituple_decl   { $$ = $1; }
+    | spanas_spanned_decl { $$ = $1; }
     ;
 
 multi_decls
@@ -658,13 +659,11 @@ event_decls
     ;
 
 event_decl
-    : IDENTIFIER opt_array_count {
+    : IDENTIFIER opt_array_num {
         $$ = AST::Make<AST::NamedVariableDecl>(@1, $1,
              AST::Make<AST::DataType>(@1, $2, BaseType::EVENT), nullptr, $2);
       }
     ;
-
-
 
 named_spanned_decls
     : storage_qual spanned_type spanned_decls {
@@ -691,15 +690,23 @@ spanned_decls
     ;
 
 spanned_decl
-    : IDENTIFIER opt_array_count {
+    : IDENTIFIER opt_array_num {
         $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, nullptr, $2);
       }
-    | IDENTIFIER opt_array_count span_init_val {
+    | IDENTIFIER opt_array_num span_init_val {
         $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, nullptr, $2, $3);
       }
     ;
 
-opt_array_count
+opt_array_nums
+    : /*empty*/ {}
+    | opt_array_nums LBRAKT NUM RBRAKT {
+        $1.push_back($3);
+        $$ = $1;
+      }
+    ;
+
+opt_array_num
     : /* empty */ { $$ = -1; /* -1: not array */ }
     | LBRAKT NUM RBRAKT  { $$ = $2; }
     ;
@@ -726,7 +733,7 @@ span_init_val
     ;
 
 expr_or_qes
-    : s_expr      { $$ = $1; }
+    : g_expr      { $$ = $1; }
     | QES         { $$ = AST::Make<AST::IntLiteral>(@1); }
     ; // do not allow non-element
 
@@ -742,11 +749,11 @@ value_or_qes_list
     ; // do not allow an empty list
 
 value_list
-    : value_list COMMA s_expr {
+    : value_list COMMA g_expr {
         $1->Append($3);
         $$ = $1;
       }
-    | s_expr {
+    | g_expr {
         $$ = AST::Make<AST::MultiValues>(@1);
         $$->Append($1);
       }
@@ -802,38 +809,47 @@ template_params
       }
     ;
 
-unnamed_mdspan_decl
+mdspan_derivation
     : IDENTIFIER FNSPAN LBRAKT { parsing_prefixed_list = true; }
-      value_or_qes_list RBRAKT {
+      value_list RBRAKT {
         $$ = AST::Make<AST::MultiDimSpans>(@1, $1, $5);
         parsing_prefixed_list = false;
       }
     | IDENTIFIER LBRAKT { parsing_prefixed_list = true; }
-      value_or_qes_list RBRAKT {
+      value_list RBRAKT {
         $$ = AST::Make<AST::MultiDimSpans>(@1, $1, $4);
         parsing_prefixed_list = false;
       }
-    | LBRAKT value_list RBRAKT {
+    ;
+
+unnamed_mdspan_decl
+    : LBRAKT value_list RBRAKT {
         $$ = AST::Make<AST::MultiDimSpans>(@1, "", $2);
       }
     ;
 
+g_expr
+    : s_expr { $$ = $1; }
+    | mdspan_derivation { $$ = AST::Make<AST::Expr>(@1, $1); }
+    ;
+
 span_val
     : unnamed_mdspan_decl { $$ = $1; }
+    | mdspan_derivation { $$ = $1; }
     | IDENTIFIER { $$ = AST::Make<AST::Identifier>(@1, $1); }
     | IDENTIFIER FNSPAN { $$ = AST::Make<AST::Identifier>(@1, $1 + $2); }
     ;
 
 named_mdspan_decl
-    : MDSPAN IDENTIFIER COL s_expr {
+    : MDSPAN IDENTIFIER COL g_expr {
         symtab.AddSymbol($2, MakeUninitMDSpanType());
         $$ = AST::Make<AST::NamedTypeDecl>(@2, $2, $4);
       }
-    | MDSPAN LT NUM GT IDENTIFIER COL s_expr {
+    | MDSPAN LT NUM GT IDENTIFIER COL g_expr {
         symtab.AddSymbol($5, MakeRankedMDSpanType($3));
         $$ = AST::Make<AST::NamedTypeDecl>(@5, $5, $7, $3);
       }
-    | IDENTIFIER COL s_expr {
+    | IDENTIFIER COL g_expr {
         symtab.AddSymbol($1, MakeUninitMDSpanType());
         $$ = AST::Make<AST::NamedTypeDecl>(@1, $1, $3);
       }
@@ -872,17 +888,38 @@ direct_ituple_val
     ;
 
 named_ituple_decl
-    : ITUPLE IDENTIFIER ASSIGN s_expr {
+    : ITUPLE IDENTIFIER ASSIGN g_expr {
         symtab.AddSymbol($2, MakeUninitITupleType());
         $$ = AST::Make<AST::NamedVariableDecl>(@2,
               $2, AST::Make<AST::DataType>(@1, BaseType::ITUPLE), nullptr, $4);
       }
-    | ITUPLE LT NUM GT IDENTIFIER ASSIGN s_expr {
+    | ITUPLE LT NUM GT IDENTIFIER ASSIGN g_expr {
         symtab.AddSymbol($5, MakeUninitITupleType());
         $$ = AST::Make<AST::NamedVariableDecl>(@5,
               $5, AST::Make<AST::DataType>(@1, BaseType::ITUPLE, $3), nullptr, $7);
       }
     ; // do not allow uninitialized ituple
+
+spanas_spanned_decl
+    : IDENTIFIER ASSIGN IDENTIFIER opt_array_num span_as {
+        symtab.AddSymbol($1, MakeUnknownType());
+        $5->id = AST::Make<AST::Identifier>(@3, $3);
+        auto expr = AST::Make<AST::Expr>(@1, $5);
+        $$ = AST::Make<AST::NamedVariableDecl>(@1,
+              $1, AST::Make<AST::DataType>(@1, BaseType::UNKNOWN), nullptr, expr, $4);
+        // TODO: make it a named variable instead of expr assignment
+        // $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, $5, $4);
+      }
+    | IDENTIFIER ASSIGN IDENTIFIER FNDATA span_as {
+        symtab.AddSymbol($1, MakeUnknownType());
+        $5->id = AST::Make<AST::Identifier>(@3, $3);
+        auto expr = AST::Make<AST::Expr>(@1, $5);
+        $$ = AST::Make<AST::NamedVariableDecl>(@1,
+              $1, AST::Make<AST::DataType>(@1, BaseType::UNKNOWN), nullptr, expr);
+        // TODO: make it a named variable instead of expr assignment
+        // $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, $5);
+      }
+    ;
 
 storage
     : LOCAL   { $$ = $1; }
@@ -1147,7 +1184,7 @@ index_or_none
     ;
 
 bound_expr
-    : s_expr { $$ = $1; }
+    : g_expr { $$ = $1; }
     | MINUS NUM { $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::IntLiteral>(@1, -$2)); }
     | /*nothing*/ { $$ = nullptr; }
     ;
@@ -1234,47 +1271,47 @@ span_as
 
 chunkat_expr
     : sub_data_expr { $$ = $1; }
-    | data_id {
+    | data_id opt_array_nums {
         $$ = ReformChunkAt(
-        AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1)));
+          AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1, $1), $2));
       }
-    | data_id span_as {
-        $2->id = AST::Make<AST::Identifier>(@1,$1);
-        $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, $2));
+    | data_id opt_array_nums span_as {
+        $3->id = AST::Make<AST::Identifier>(@1, $1);
+        $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, $3, $2));
       }
     ;
 
 sub_data_expr
-    : data_id CHUNKAT LPAREN {
+    : data_id opt_array_nums CHUNKAT LPAREN {
         parsing_chunkat_value_list = true;
       } value_list RPAREN {
-        $5->SetDelimiter(", ");
+        $6->SetDelimiter(", ");
         $$ = ReformChunkAt(
-            AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $5));
+            AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $2, $6));
         parsing_chunkat_value_list = false;
       }
-    | data_id CHUNK LPAREN {
+    | data_id opt_array_nums CHUNK LPAREN {
         parsing_chunkat_value_list = true;
       } value_list RPAREN AT LPAREN value_list RPAREN {
-        $5->SetDelimiter(", ");
-        $9->SetDelimiter(", ");
+        $6->SetDelimiter(", ");
+        $10->SetDelimiter(", ");
         $$ = ReformChunkAt(
-            AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $9, $5));
+            AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $2, $10, $6));
         parsing_chunkat_value_list = false;
       }
-    | data_id span_as CHUNKAT LPAREN  {
+    | data_id opt_array_nums span_as CHUNKAT LPAREN  {
         parsing_chunkat_value_list = true;
       } value_list RPAREN {
         // note: normalize will hoist span_as
-        $6->SetDelimiter(", ");
-        $2->id = AST::Make<AST::Identifier>(@1,$1);
-        $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, $2, $6));
+        $7->SetDelimiter(", ");
+        $3->id = AST::Make<AST::Identifier>(@1,$1);
+        $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, $3, $2, $7));
         parsing_chunkat_value_list = false;
       }
     ;
 
 select_expr
-    : SELECT LPAREN s_expr COMMA future_data_list RPAREN {
+    : SELECT LPAREN g_expr COMMA future_data_list RPAREN {
         $$ = AST::Make<AST::Select>(@1, $3, $5);
       }
     ;
@@ -1325,7 +1362,7 @@ device_passable
     ;
 
 returnable
-    : s_expr { $$ = $1; }
+    : g_expr { $$ = $1; }
     | IDENTIFIER FNDATA {
         $$ = AST::Make<AST::Expr>(@1, "dataof",
                AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1))); }
@@ -1346,7 +1383,7 @@ with_matchers /* TODO: this special case is pattern-match ids for with-block */
 
 id_or_elem
     : IDENTIFIER { $$ = AST::Make<AST::Identifier>(@1, $1); }
-    | IDENTIFIER LBRAKT s_expr RBRAKT {
+    | IDENTIFIER LBRAKT g_expr RBRAKT {
         $$ = AST::Make<AST::Expr>(@1, "elemof", AST::Make<AST::Identifier>(@1, $1), $3);
       }
     ;
@@ -1379,7 +1416,7 @@ call_stmt
         $$ = AST::Make<AST::Call>(@1,
                 AST::Make<AST::Identifier>(@2, $2), $5, $3);
       }
-    | ASSERT LPAREN s_expr COMMA STRING RPAREN {
+    | ASSERT LPAREN g_expr COMMA STRING RPAREN {
         auto mv = AST::Make<AST::MultiValues>(@1, ", ");
         mv->Append($3);
         mv->Append(AST::Make<AST::StringLiteral>(@5, $5));

@@ -45,7 +45,7 @@ __co__ auto illegal_call3(f32 [36, 27, 128] input) {
       call def(f.data, true, {4, 5});
     }
     parallel q by 4 {
-      call anything(input[(0), 1] + {1, 2});
+      call anything([input.span(0), 1] + {1, 2});
     }
   }
 }

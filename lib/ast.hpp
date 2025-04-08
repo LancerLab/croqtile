@@ -877,8 +877,12 @@ private:
     case BaseType::U8:
     case BaseType::S8:
       assert(mdspan_type != nullptr && "Expecting a valid mdspan.");
-      SetType(
-          MakeSpannedType(base_type, GenUninitShape())); // need type inference
+      if (array_ec == -1)
+        SetType(MakeSpannedType(base_type,
+                                GenUninitShape())); // need type inference
+      else
+        SetType(MakeSpannedArrayType(array_ec, base_type,
+                                     GenUninitShape())); // need type inference
       break;
     case BaseType::EVENT:
       if (array_ec == -1)
@@ -1251,21 +1255,24 @@ struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
 
 struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
   ptr<Identifier> data;
+  std::vector<size_t> indices;
   ptr<SpanAs> sa = nullptr; // for span_as expression
   ptr<MultiValues> positions = nullptr;
   ptr<MultiValues> bounds = nullptr;
 
   ChunkAt(const location& l, const ptr<Identifier>& d,
+          const std::vector<size_t> idxes = {},
           const ptr<MultiValues>& p = nullptr,
           const ptr<MultiValues>& b = nullptr)
-      : Node(l), data(d), sa(nullptr), positions(p), bounds(b) {
+      : Node(l), data(d), indices(idxes), sa(nullptr), positions(p), bounds(b) {
     if (b) assert(p && "position is not provided for separated chunk & at.");
   }
 
   ChunkAt(const location& l, const ptr<SpanAs>& s,
+          const std::vector<size_t> idxes = {},
           const ptr<MultiValues>& p = nullptr,
           const ptr<MultiValues>& b = nullptr)
-      : Node(l), data(s->nid), sa(s), positions(p), bounds(b) {
+      : Node(l), data(s->nid), indices(idxes), sa(s), positions(p), bounds(b) {
     if (b) assert(p && "position is not provided for separated chunk & at.");
   }
 
@@ -1281,6 +1288,8 @@ struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
       os << PSTR(sa);
     else
       os << PSTR(data);
+
+    for (auto index : indices) os << "[" << index << "]";
 
     if (positions) {
       if (bounds)

@@ -54,9 +54,10 @@ bool EarlySemantics::AfterVisitImpl(AST::Node& n) {
     }
   } else if (isa<AST::ParallelBy>(&n)) {
     assert(parallel_level > 0);
+    assert(inthreads_levels.size() == (unsigned)parallel_level + 1);
+    inthreads_levels.pop_back();
     parallel_level--;
   } else if (isa<AST::InThreadsBlock>(&n)) {
-    assert(inthreads_levels.size() == (unsigned)parallel_level + 1);
     --inthreads_levels[parallel_level];
   } else if (isa<AST::WithBlock>(&n)) {
     with_syms.clear();

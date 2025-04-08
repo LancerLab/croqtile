@@ -1021,7 +1021,7 @@ struct MDSpanType : public Type, public TypeIDProvider<MDSpanType> {
   __UDT_TYPE_INFO__(Type, MDSpanType)
 };
 
-struct SpannedType final : public Type, public TypeIDProvider<SpannedType> {
+struct SpannedType : public Type, public TypeIDProvider<SpannedType> {
   FundamentalType f_type;
   ptr<MDSpanType> s_type = nullptr;
   Storage m_type;
@@ -1399,9 +1399,9 @@ struct ArrayType : public TypeIDProvider<ArrayType> {
   __UDT_TYPE_INFO_BASE1__(arraytype)
 };
 
-struct EventArrayType : public ArrayType,
-                        public EventType,
-                        public TypeIDProvider<EventArrayType> {
+struct EventArrayType final : public ArrayType,
+                              public EventType,
+                              public TypeIDProvider<EventArrayType> {
   EventArrayType(int ec, Storage s) : ArrayType(ec), EventType(s) {}
   size_t Dims() const override { return 1; }
   bool IsComplete() const override { return true; }
@@ -1424,8 +1424,39 @@ struct EventArrayType : public ArrayType,
     os << "[[" << ElemCount() << "]]";
   }
 
-  // can not have instance
   __UDT_2TYPES_INFO__(ArrayType, EventType, EventArrayType)
+};
+
+struct SpannedArrayType final : public ArrayType,
+                                public SpannedType,
+                                public TypeIDProvider<SpannedArrayType> {
+  SpannedArrayType(FundamentalType ft, const ptr<MDSpanType>& s, Storage m,
+                   int ec)
+      : ArrayType(ec), SpannedType(ft, s, m) {}
+  size_t Dims() const override { return 1; }
+  bool IsComplete() const override { return SpannedType::IsComplete(); }
+  bool HasSufficientInfo() const override {
+    return SpannedType::HasSufficientInfo();
+  }
+
+  bool operator==(const Type& ty) const override {
+    if (auto t = dyn_cast<SpannedArrayType>(&ty))
+      return t->ElemCount() == ElemCount();
+    return false;
+  }
+
+  bool ApprxEqual(const Type& ty) const override { return operator==(ty); }
+
+  const std::string Name() const override {
+    return SpannedType::Name() + " array";
+  }
+
+  void Print(std::ostream& os) const override {
+    SpannedType::Print(os);
+    os << "[[" << ElemCount() << "]]";
+  }
+
+  __UDT_2TYPES_INFO__(ArrayType, SpannedType, EventArrayType)
 };
 
 inline size_t SizeOf(const Type& ty) {
@@ -1656,6 +1687,13 @@ inline ptr<EventType> MakeEventType(Storage s) {
 
 inline ptr<EventArrayType> MakeEventArrayType(int ec, Storage s) {
   return std::make_shared<EventArrayType>(ec, s);
+}
+
+inline ptr<SpannedType>
+MakeSpannedArrayType(int ec, BaseType ft, const Shape& v,
+                     const Storage& s = Storage::DEFAULT) {
+  return std::make_shared<SpannedArrayType>((FundamentalType)ft,
+                                            MakeMDSpanType(v), s, ec);
 }
 
 inline ptr<FutureType> MakeFutureType(const ptr<SpannedType>& v, bool async) {

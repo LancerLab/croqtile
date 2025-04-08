@@ -322,8 +322,8 @@ public:
             auto mv_node = AST::Make<AST::MultiValues>(dnode_id->loc);
             mv_node->Append(tiler_node);
 
-            auto ca_node =
-                AST::Make<AST::ChunkAt>(dnode_id->loc, dnode_id, mv_node);
+            auto ca_node = AST::Make<AST::ChunkAt>(
+                dnode_id->loc, dnode_id, std::vector<size_t>{}, mv_node);
             ca_node->SetType(new_chunkat_ty);
 
             auto dma_node = AST::Make<AST::DMA>(

@@ -57,7 +57,7 @@ private:
       Result result;
       result.heap_size = 0;
 
-      assert(alignment >= 0 && "Alignment must be a positive integer");
+      // assert(alignment >= 0 && "Alignment must be a positive integer");
 
       size_t size = chunks.size();
 
