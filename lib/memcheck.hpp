@@ -243,9 +243,8 @@ public:
   bool Visit(AST::NamedVariableDecl& n) override {
     TraceEachVisit(n);
     // mem alloc could happend here
-    auto ty = GetSymbolType(n.name_str);
-    if (!isa<SpannedType>(ty)) return true;
-    auto sty = cast<SpannedType>(ty);
+    auto sty = dyn_cast<SpannedType>(GetSymbolType(n.name_str));
+    if (!sty) return true;
     auto sto = sty->GetStorage();
     assert(valid_storage_type.count(sto) &&
            "Only support Storage types in `valid_storage_type`!");
@@ -261,22 +260,19 @@ public:
           SumUpCtRtUsage(sto), n.LOC(), mem_usage_limit[sto], sto));
     } else {
       // compile time usage
-
-      // if (n.note.find("offset") != std::string::npos) {
-      //   VST_DEBUG({
-      //     dbgs() << "[MemUsage] The mem space of buffer " << n.name_str
-      //            << " reuses the space of self-defined SPM!\n";
-      //   });
-      //   return true;
-      // }
-
-      if (n.note.find("spm") != std::string::npos) {
-        VST_DEBUG(dbgs() << "[MemUsage] The buffer " << n.name_str
-                         << " is self-defined SPM whose memory usage is not "
-                            "counted for now\n");
+      if (n.note.find("offset") != std::string::npos) {
+        VST_DEBUG({
+          dbgs() << "[MemUsage] The mem space of buffer " << n.name_str
+                 << " reuses the space of self-defined SPM!\n";
+        });
         return true;
       }
-
+      // if (n.note.find("spm") != std::string::npos) {
+      //   VST_DEBUG(dbgs() << "[MemUsage] The buffer " << n.name_str
+      //                    << " is self-defined SPM whose memory usage is not "
+      //                       "counted for now\n");
+      //   return true;
+      // }
       auto size = sty->ByteSize();
       VST_DEBUG(dbgs() << "[MemUsage] " << __internal__::GetStringFrom(sto)
                        << " `" << SSTab().ScopedName(n.name_str) << "` need "
@@ -300,36 +296,38 @@ public:
     int param_idx = 0;
     Storage func_param_sto = Storage::GLOBAL;
     for (const auto& p : n.params->values) {
-      if (auto sty = dyn_cast<SpannedType>(p->GetType())) {
-        std::string name = "::" + n.name + "::";
-        name +=
-            (p->HasSymbol() ? p->sym->name : ("#" + std::to_string(param_idx)));
-        if (sty->RuntimeShaped()) {
-          std::string byte_size = sty->ByteSizeExpression(true);
-          rt_mem_usage_list.top()[func_param_sto].push_back(byte_size);
-          rt_tot_mem_usage[func_param_sto].push_back(byte_size);
-          rt_mem_usage_check_list.push_back(
-              std::make_tuple(SumUpCtRtUsage(func_param_sto), p->LOC(),
-                              mem_usage_limit[func_param_sto], func_param_sto));
-          VST_DEBUG(dbgs() << "[MemUsage] "
-                           << "Function parameter `" << name << "`("
-                           << __internal__::GetStringFrom(func_param_sto)
-                           << ") need " << sty->ByteSizeExpression(false)
-                           << " bytes.\n");
-        } else {
-          ct_mem_usage_list.top()[func_param_sto] += sty->ByteSize();
-          ct_tot_mem_usage[func_param_sto] += sty->ByteSize();
-          std::ostringstream oss;
-          p->Print(oss);
-          std::string func_param_inst =
-              "parameter of function " + n.name + ": " + oss.str();
-          ct_mem_alloc_inst_sets.back()[func_param_sto].push_back(
-              func_param_inst);
-          VST_DEBUG(dbgs() << "[MemUsage] "
-                           << "Function parameter `" << name << "`("
-                           << __internal__::GetStringFrom(func_param_sto)
-                           << ") need " << sty->ByteSize() << " bytes.\n");
-        }
+      auto sty = dyn_cast<SpannedType>(p->GetType());
+      if (!sty) continue;
+      std::string name = "::" + n.name + "::";
+      name +=
+          (p->HasSymbol() ? p->sym->name : ("#" + std::to_string(param_idx)));
+      if (sty->RuntimeShaped()) {
+        std::string byte_size = sty->ByteSizeExpression(true);
+        rt_mem_usage_list.top()[func_param_sto].push_back(byte_size);
+        rt_tot_mem_usage[func_param_sto].push_back(byte_size);
+        rt_mem_usage_check_list.push_back(
+            std::make_tuple(SumUpCtRtUsage(func_param_sto), p->LOC(),
+                            mem_usage_limit[func_param_sto], func_param_sto));
+        VST_DEBUG(dbgs() << "[MemUsage] "
+                         << "Function parameter `" << name << "`("
+                         << __internal__::GetStringFrom(func_param_sto)
+                         << ") need " << sty->ByteSizeExpression(false)
+                         << " bytes.\n");
+      } else {
+        size_t size = sty->ByteSize();
+        ct_mem_usage_list.top()[func_param_sto] += size;
+        ct_tot_mem_usage[func_param_sto] += size;
+        std::ostringstream oss;
+        p->Print(oss);
+        std::string func_param_inst =
+            "parameter of function " + n.name + ": " + oss.str();
+        ct_mem_alloc_inst_sets.back()[func_param_sto].push_back(
+            func_param_inst);
+        VST_DEBUG(dbgs() << "[MemUsage] "
+                         << "Function parameter `" << name << "`("
+                         << __internal__::GetStringFrom(func_param_sto)
+                         << ") need " << size << " bytes" << SizeForHuman(size)
+                         << ".\n");
       }
       param_idx++;
     }

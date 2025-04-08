@@ -1,0 +1,127 @@
+// REQUIRES: TARGET-GCU300
+// RUN: choreo -gs -arch=gcu300 --liveness --mem-reuse %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+#include "choreo.h"
+
+__cok__{
+
+__co_device__ void foo0(u8* a, u8* b, int n) {
+  for (int i = 0; i < n; ++i)
+    b[i] = a[i];
+}
+
+__co_device__ void foo1(u8* a, u8* b, int n) {
+  for (int i = 0; i < n; ++i)
+    b[i] += a[i];
+}
+
+__co_device__ void foo2(u8* a, u8* b, int n) {
+  for (int i = 0; i < n; ++i)
+    b[i] *= a[i];
+}
+
+}
+
+#define K 1024
+#define N 2
+
+__co__ auto mem_reuse0(u8 [K, K, N] i0, u8 [K, K, N] i1) {
+  u8 [i0.span] output;
+
+  parallel p by 1 {
+    foreach idx in [2, 1, N] {
+      shared u8 [i0.span / #idx] s0;
+      s1 = dma.copy.async i0.chunkat(idx) => shared;
+      s2 = dma.copy.async i1.chunkat(idx) => shared;
+      wait s1, s2;
+      parallel q by 1 {
+        l1 = dma.copy s1 => local;
+        local u8 [l1.span] l0;
+        call foo0(l1.data, l0, |l0|);
+        
+        l2 = dma.copy s2 => local;
+        call foo1(l2.data, l0, |l0|);
+        
+        dma.copy l0 => s0;
+      }
+      dma.copy s0 => output.chunkat(idx);
+    }
+  }
+  
+  return output;
+}
+
+__co__ auto mem_reuse1(u8 [K, K, N] i0, u8 [K, K, N] i1) {
+  u8 [i0.span] output;
+
+  parallel p by 1 {
+    foreach idx in [2, 1, N] {
+      shared u8 [i0.span / #idx] s0;
+      s1 = dma.copy.async i0.chunkat(idx) => shared;
+      s2 = dma.copy.async i1.chunkat(idx) => shared;
+      wait s1, s2;
+      parallel q by 1 {
+        l1 = dma.copy s1 => local;
+        local u8 [l1.span] l0;
+        call foo0(l1.data, l0, |l0|);
+        
+        l2 = dma.copy s2 => local;
+        call foo2(l2.data, l0, |l0|);
+        
+        dma.copy l0 => s0;
+      }
+      dma.copy s0 => output.chunkat(idx);
+    }
+  }
+  
+  return output;
+}
+
+int main()
+{
+  choreo::u8 a[K][K][N] = {0};
+  choreo::u8 b[K][K][N] = {0};
+  auto a_data = choreo::make_spanview<3, choreo::u8>((choreo::u8*)a, {K, K, N});
+  auto b_data = choreo::make_spanview<3, choreo::u8>((choreo::u8*)b, {K, K, N});
+  a_data.fill_random(0, 10);
+  b_data.fill_random(0, 10);
+
+  auto res = mem_reuse0(a_data, b_data);
+
+  std::cout << "shape of res: " << res.shape()[0] << std::endl;
+  std::cout << "shape of res: " << res.shape()[1] << std::endl;
+  std::cout << "shape of res: " << res.shape()[2] << std::endl;
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k) {
+        if (a[i][j][k] + b[i][j][k] != res[i][j][k]) {
+          std::cout << "index: " << i << ", " << j << ", " << k << std::endl;
+          std::cout << "a: " << (int)a[i][j][k] << std::endl;
+          std::cout << "b: " << (int)b[i][j][k] << std::endl;
+          std::cout << "res: " << (int)res[i][j][k] << std::endl;
+          choreo::choreo_assert(a[i][j][k] + b[i][j][k] == res[i][j][k], "values are not equal.");
+        }
+      }
+
+  auto res2 = mem_reuse1(a_data, b_data);
+
+  std::cout << "shape of res2: " << res2.shape()[0] << std::endl;
+  std::cout << "shape of res2: " << res2.shape()[1] << std::endl;
+  std::cout << "shape of res2: " << res2.shape()[2] << std::endl;
+
+  for (size_t i = 0; i < res2.shape()[0]; ++i)
+    for (size_t j = 0; j < res2.shape()[1]; ++j)
+      for (size_t k = 0; k < res2.shape()[2]; ++k) {
+        if (a[i][j][k] * b[i][j][k] != res2[i][j][k]) {
+          std::cout << "index: " << i << ", " << j << ", " << k << std::endl;
+          std::cout << "a: " << (int)a[i][j][k] << std::endl;
+          std::cout << "b: " << (int)b[i][j][k] << std::endl;
+          std::cout << "res2: " << (int)res2[i][j][k] << std::endl;
+          choreo::choreo_assert(a[i][j][k] + b[i][j][k] == res2[i][j][k], "values are not equal.");
+        }
+      }
+  std::cout << "pass" << std::endl;
+  return 0;
+}
+
+// CHECK: pass

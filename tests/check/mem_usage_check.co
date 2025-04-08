@@ -22,8 +22,8 @@ __co__ auto mem_usage_check(s32 [128, 128, 128] i0, s32 [64, 256, 2] i1) {
 // CHECK: 	 local( 0%):		0x0000fc000 bytes(1008 KB)
 // CHECK: 	shared( 0%):		0x001800000 bytes(24 MB)
 // CHECK: 	global( 0%):		0x100000000 bytes(4 GB)
-// CHECK: [MemUsage] Function parameter `::mem_usage_check::i0`(global) need 8388608 bytes.
-// CHECK: [MemUsage] Function parameter `::mem_usage_check::i1`(global) need 131072 bytes.
+// CHECK: [MemUsage] Function parameter `::mem_usage_check::i0`(global) need 8388608 bytes(8 MB).
+// CHECK: [MemUsage] Function parameter `::mem_usage_check::i1`(global) need 131072 bytes(128 KB).
 // CHECK: [MemUsage] Total compile-time mem used of parameters of function mem_usage_check:
 // CHECK: 	 local( 0%):		0x000000000 bytes(0 B)
 // CHECK: 	shared( 0%):		0x000000000 bytes(0 B)

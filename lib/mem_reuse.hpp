@@ -3,46 +3,55 @@
 
 #include "ast.hpp"
 #include "context.hpp"
+#include "liveness_analysis.hpp"
 #include "typeresolve.hpp"
 #include "types.hpp"
 #include "visitor.hpp"
 
-#include "liveness_analysis.hpp"
 #include <cstdint>
+#include <numeric>
 
 namespace Choreo {
 
 struct MemReuse : public VisitorWithSymTab {
-  using StrUintMap = std::unordered_map<std::string, size_t>;
+  using StrUintMap = LivenessAnalyzer::StrUintMap;
 
 private:
   TypeConstraints type_equals{this};
+  std::string cur_func_name;
   const LivenessAnalyzer& la;
 
   int parallel_level = 0;
   int max_parallel_level = 0;
 
-  StrUintMap local_mem_offsets;
-  StrUintMap shared_mem_offsets;
+  StrUintMap mem_offsets;
 
+  struct SpmSize {
+    size_t local_spm_size;
+    size_t shared_spm_size;
+  };
+
+  std::map<std::string, SpmSize> spm_size_map;
+
+  // update when entering co func.
   std::string local_spm_name;
   std::string shared_spm_name;
 
   const std::unordered_map<std::string, Storage>& buf2sto;
-  // TODO: extend this to support multiple co functions
-  // cause the spm should be allocated for each co function
-  const StrUintMap& buffer_size;
-  StrUintMap buffer_alloc_time;
-  StrUintMap buffer_release_time;
+
+  struct Buffer {
+    size_t size;
+    size_t start_time;
+    size_t end_time;
+    std::string buffer_id;
+  };
+
+  std::vector<Buffer> buffers;
 
   struct HeapSimulator {
   public:
-    struct Chunk {
-      size_t size;
-      size_t start_time;
-      size_t end_time;
-      std::string buffer_id;
-    };
+    using Chunk = Buffer;
+    using Chunks = std::vector<Chunk>;
 
     // memory allocation result
     struct Result {
@@ -56,8 +65,6 @@ private:
                                                size_t alignment = 0) {
       Result result;
       result.heap_size = 0;
-
-      // assert(alignment >= 0 && "Alignment must be a positive integer");
 
       size_t size = chunks.size();
 
@@ -180,6 +187,13 @@ private:
     }
   };
 
+  int Size_t2Int(size_t s) const {
+    if (s <= (size_t)std::numeric_limits<int>::max())
+      return static_cast<int>(s);
+    choreo_unreachable("size_t to int conversion failed, val: " +
+                       std::to_string(s));
+  }
+
 private:
   bool BeforeVisitImpl(AST::Node&) override;
   bool AfterVisitImpl(AST::Node&) override;
@@ -196,12 +210,12 @@ private:
 public:
   MemReuse(const LivenessAnalyzer& la)
       : VisitorWithSymTab("memreuse", CCtx().GetGlobalSymbolTable()), la(la),
-        buf2sto(la.Buf2Sto()), buffer_size(la.BufSizes()) {
+        buf2sto(la.Buf2Sto()) {
     if (trace_visit) debug_visit = true; // force debug when tracing
     if (debug_visit) type_equals.SetDebug(true);
 
     const auto& var_ranges = la.VarRanges();
-    for (const auto& [sname, size] : buffer_size) {
+    for (const auto& [sname, size] : la.BufSizes()) {
       auto ranges = var_ranges.at(sname);
       // For now, there is no case that a var is used in multiple ranges.
       // Because there is no reassignment.
@@ -214,77 +228,96 @@ public:
                << " is used in multiple ranges:\n";
         for (const auto& r : ranges.Values())
           dbgs() << "\t[" << r.start << ", " << r.end << "]\n";
-        assert(ranges.Values().size() == 1);
+        choreo_unreachable(
+            "multiple ranges for a buffer is not supported yet.");
       }
-      buffer_alloc_time[sname] = ranges.Values()[0].start;
-      buffer_release_time[sname] = ranges.Values()[0].end;
+      buffers.push_back(
+          {size, ranges.Values()[0].start, ranges.Values()[0].end, sname});
     }
+    AnalyzeMemOffset();
   }
   ~MemReuse() {}
 
-  void AnalyzeMemOffset() {
-    ProtoType();
-    // TODO: do validation after offset is calculated
+  void AnalyzeMemOffset() { ProtoType(); }
+
+  bool ValidateResult(const HeapSimulator::Result& res,
+                      const HeapSimulator::Chunks& chunks) {
+    size_t size = chunks.size();
+    for (size_t i = 0; i < size; ++i) {
+      for (size_t j = 0; j < size; ++j) {
+        if (i == j) continue;
+        const auto& c1 = chunks[i];
+        const auto& c2 = chunks[j];
+        if (c1.start_time <= c2.end_time && c2.start_time <= c1.end_time) {
+          auto o1 = res.chunk_offsets.at(c1.buffer_id);
+          auto o2 = res.chunk_offsets.at(c2.buffer_id);
+          if ((o1 <= o2 && o1 + c1.size > o2) ||
+              (o2 <= o1 && o2 + c2.size > o1)) {
+            dbgs() << "Error: Memory overlap detected between buffers "
+                   << c1.buffer_id << " and " << c2.buffer_id << "\n";
+            return false;
+          }
+        }
+      }
+    }
+    return true;
   }
 
   void ProtoType() {
-    // define local and shared memory chunks
-    std::vector<HeapSimulator::Chunk> local_chunks;
-    std::vector<HeapSimulator::Chunk> shared_chunks;
+    auto GetFuncNameFromScopedName =
+        [](const std::string& name) -> std::string {
+      if (!PrefixedWith(name, "::"))
+        choreo_unreachable("The scopedname should contain '::'!");
+      return SplitStringByDelimiter(name, "::", true)[0];
+    };
 
-    // convert buffer_size to HeapSimulator::Chunk format
-    for (const auto& [sname, size] : buffer_size) {
-      if (buffer_release_time.count(sname) == 0) continue;
-      HeapSimulator::Chunk chunk{size, buffer_alloc_time.at(sname),
-                                 buffer_release_time.at(sname), sname};
-      if (buf2sto.at(sname) == Storage::LOCAL) {
-        local_chunks.push_back(chunk);
-      } else if (buf2sto.at(sname) == Storage::SHARED) {
-        shared_chunks.push_back(chunk);
+    std::map<std::string, HeapSimulator::Chunks> local_chunks_map;
+    std::map<std::string, HeapSimulator::Chunks> shared_chunks_map;
+
+    for (const auto buffer : buffers) {
+      auto func_name = GetFuncNameFromScopedName(buffer.buffer_id);
+      if (auto sto = buf2sto.at(buffer.buffer_id); sto == Storage::LOCAL) {
+        local_chunks_map[func_name].push_back(buffer);
+      } else if (sto == Storage::SHARED) {
+        shared_chunks_map[func_name].push_back(buffer);
       }
     }
 
     HeapSimulator simulator;
 
-    // allocate local memory
-    if (!local_chunks.empty()) {
-      HeapSimulator::Result local_result =
-          simulator.Allocate(local_chunks, 512);
-      // TODO: should we align the size?
-      CCtx().SetLocalSPMSize(local_result.heap_size);
-      for (const auto& [buffer_id, offset] : local_result.chunk_offsets) {
-        local_mem_offsets.emplace(buffer_id, offset);
+    for (const auto& [func_name, local_chunks] : local_chunks_map) {
+      if (!local_chunks.empty()) {
+        HeapSimulator::Result local_result =
+            simulator.Allocate(local_chunks, 512);
+        assert(ValidateResult(local_result, local_chunks));
+        spm_size_map[func_name].local_spm_size = local_result.heap_size;
+        for (const auto& [buffer_id, offset] : local_result.chunk_offsets) {
+          mem_offsets.emplace(buffer_id, offset);
+        }
+        VST_DEBUG(dbgs() << "Function: " << func_name
+                         << "\n\tLocal memory usage: " << local_result.heap_size
+                         << " bytes\n");
       }
-
-      VST_DEBUG(dbgs() << "Local memory usage: " << local_result.heap_size
-                       << " bytes\n");
-    }
-
-    // allocate shared memory
-    if (!shared_chunks.empty()) {
-      // TODO: shared mem alignment?
-      HeapSimulator::Result shared_result = simulator.Allocate(shared_chunks);
-      // TODO: should we align the size?
-      CCtx().SetSharedSPMSize(shared_result.heap_size);
-
-      for (const auto& [buffer_id, offset] : shared_result.chunk_offsets) {
-        shared_mem_offsets.emplace(buffer_id, offset);
+      if (const auto& shared_chunks = shared_chunks_map[func_name];
+          !shared_chunks.empty()) {
+        HeapSimulator::Result shared_result =
+            simulator.Allocate(shared_chunks, 512);
+        assert(ValidateResult(shared_result, shared_chunks));
+        spm_size_map[func_name].shared_spm_size = shared_result.heap_size;
+        for (const auto& [buffer_id, offset] : shared_result.chunk_offsets) {
+          mem_offsets.emplace(buffer_id, offset);
+        }
+        VST_DEBUG(dbgs() << "Function: " << func_name
+                         << "\n\tShared memory usage: "
+                         << shared_result.heap_size << " bytes\n");
       }
-
-      VST_DEBUG(dbgs() << "Shared memory usage: " << shared_result.heap_size
-                       << " bytes\n");
     }
   }
 
   void ApplyMemOffset(AST::NamedVariableDecl& n, Storage sto) {
-    // TODO: before apply, do validation!
-    // maybe should discretize the ranges of the buffer both in analysis and
-    // validation.
     assert(sto == Storage::LOCAL || sto == Storage::SHARED);
     auto sname = InScopeName(n.name_str);
     auto spm_name = (sto == Storage::LOCAL ? local_spm_name : shared_spm_name);
-    auto mem_offsets =
-        (sto == Storage::LOCAL ? local_mem_offsets : shared_mem_offsets);
     VST_DEBUG({ dbgs() << STR(sto) << " buffer: " << sname << ".\n\t"; });
 
     if (!mem_offsets.count(sname)) {

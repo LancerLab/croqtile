@@ -8,31 +8,16 @@
 using namespace Choreo;
 
 bool MemReuse::BeforeVisitImpl(AST::Node& n) {
-
   if (auto cf = dyn_cast<AST::ChoreoFunction>(&n)) {
+    cur_func_name = cf->name;
     parallel_level = 0;
-
-    // TODO: currently only support local and shared buffers
-    // so do managing at ChoreoFunction level
-    // more detailed, it should be done at inner parallel-by level for local
-    // buffers! And for shared buffers, it should be done at the first
-    // parallel-by level!
-    AnalyzeMemOffset();
-    // TODO: support multi paraby (multi launches)
-
-    // define local scratch pad memory here
-    local_spm_name = SymbolTable::GetAnonName();
-    shared_spm_name = SymbolTable::GetAnonName();
-
-    auto Size_t2Int = [](size_t s) -> int {
-      if (s <= (size_t)std::numeric_limits<int>::max())
-        return static_cast<int>(s);
-      choreo_unreachable("size_t to int conversion failed, val: " +
-                         std::to_string(s));
-    };
-
-    if (size_t shared_spm_size = CCtx().GetSharedSPMSize();
-        shared_spm_size > 0) {
+  } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+    parallel_level++;
+    max_parallel_level = std::max(parallel_level, max_parallel_level);
+    if (parallel_level == 1) {
+      size_t shared_spm_size = spm_size_map[cur_func_name].shared_spm_size;
+      if (shared_spm_size == 0) return true;
+      shared_spm_name = SymbolTable::GetAnonName();
       auto shared_spm =
           AST::Make<AST::NamedVariableDecl>(n.LOC(), shared_spm_name);
       assert(shared_spm_size > 0 &&
@@ -41,14 +26,15 @@ bool MemReuse::BeforeVisitImpl(AST::Node& n) {
           BaseType::U8, Shape(1, Size_t2Int(shared_spm_size)), Storage::SHARED);
       shared_spm->SetType(ssty);
       shared_spm->AppendNote("spm,");
-      cf->stmts->values.insert(cf->stmts->values.begin(), shared_spm);
+      pb->stmts->values.insert(pb->stmts->values.begin(), shared_spm);
       SSTab().DefineSymbol(shared_spm_name, ssty);
       VST_DEBUG(dbgs() << "Defined shared scratch pad memory: "
                        << PSTR(shared_spm) << ", type: " << PSTR(ssty)
                        << ".\n");
-    }
-
-    if (size_t local_spm_size = CCtx().GetLocalSPMSize(); local_spm_size > 0) {
+    } else if (parallel_level == 2) {
+      size_t local_spm_size = spm_size_map[cur_func_name].local_spm_size;
+      if (local_spm_size == 0) return true;
+      local_spm_name = SymbolTable::GetAnonName();
       auto local_spm =
           AST::Make<AST::NamedVariableDecl>(n.LOC(), local_spm_name);
       assert(local_spm_size > 0 && "Local scratch pad memory size is not set.");
@@ -56,16 +42,10 @@ bool MemReuse::BeforeVisitImpl(AST::Node& n) {
           BaseType::U8, Shape(1, Size_t2Int(local_spm_size)), Storage::LOCAL);
       local_spm->SetType(lsty);
       local_spm->AppendNote("spm,");
-      cf->stmts->values.insert(cf->stmts->values.begin(), local_spm);
+      pb->stmts->values.insert(pb->stmts->values.begin(), local_spm);
       SSTab().DefineSymbol(local_spm_name, lsty);
       VST_DEBUG(dbgs() << "Defined local scratch pad memory: "
                        << PSTR(local_spm) << ", type: " << PSTR(lsty) << ".\n");
-    }
-  } else if (isa<AST::ParallelBy>(&n)) {
-    parallel_level++;
-    max_parallel_level = std::max(parallel_level, max_parallel_level);
-    if (parallel_level == 1) {
-    } else if (parallel_level == 2) {
     } else if (parallel_level == 3) {
     } else
       choreo_unreachable("The parallel-by level " +
@@ -76,12 +56,8 @@ bool MemReuse::BeforeVisitImpl(AST::Node& n) {
 
 bool MemReuse::AfterVisitImpl(AST::Node& n) {
   if (isa<AST::ParallelBy>(&n)) {
-    if (parallel_level == 2) {
-      // exiting the level where the local scratch pad memory is defined
-    }
-    if (parallel_level == 1) { max_parallel_level = 0; }
+    if (parallel_level == 1) max_parallel_level = 0;
     parallel_level--;
-  } else if (isa<AST::Program>(&n)) {
   }
   return true;
 }
@@ -124,14 +100,12 @@ bool MemReuse::Visit(AST::NamedTypeDecl& n) {
 }
 bool MemReuse::Visit(AST::NamedVariableDecl& n) {
   TraceEachVisit(n);
-  if (isa<AST::Select>(n.init_expr)) { return true; }
-  if (n.note.find("spm") != std::string::npos) { return true; }
+  if (isa<AST::Select>(n.init_expr)) return true;
+  if (n.note.find("spm") != std::string::npos) return true;
   auto ty = GetSymbolType(n.name_str);
   if (auto sty = dyn_cast<SpannedType>(ty)) {
     auto sto = sty->GetStorage();
-    if (sto == Storage::LOCAL || sto == Storage::SHARED) {
-      ApplyMemOffset(n, sto);
-    }
+    if (sto == Storage::LOCAL || sto == Storage::SHARED) ApplyMemOffset(n, sto);
   }
   return true;
 }

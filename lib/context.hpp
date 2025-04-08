@@ -171,8 +171,6 @@ private:
   TargetArch arch = TargetArch::Unknown;
   OutputKind out_kind = OutputKind::TargetExecutable;
   uint8_t opt_level = 0;
-  size_t local_spm_size = 0;
-  size_t shared_spm_size = 0;
 
 private:
   // compiler configurations
@@ -284,11 +282,6 @@ public:
     }
     return 0;
   }
-
-  size_t GetLocalSPMSize() const { return local_spm_size; }
-  size_t GetSharedSPMSize() const { return shared_spm_size; }
-  void SetLocalSPMSize(size_t size) { local_spm_size = size; }
-  void SetSharedSPMSize(size_t size) { shared_spm_size = size; }
 
 public:
   // Getters of compiler configurations
