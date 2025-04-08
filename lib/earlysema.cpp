@@ -985,7 +985,15 @@ bool EarlySemantics::Visit(AST::DMA& n) {
   auto sty = GetSpannedType(NodeType(*n.from));
 
   ptr<SpannedType> tty = nullptr;
-  if (!isa<AST::Memory>(n.to)) tty = cast<SpannedType>(NodeType(*n.to));
+  if (!isa<AST::Memory>(n.to)) {
+    tty = dyn_cast<SpannedType>(NodeType(*n.to));
+    if (!tty) {
+      Error(n.to->LOC(),
+            "The DMA destination is neither storage identifier nor span.");
+      ++error_count;
+      return true;
+    }
+  }
 
   // target specific check
   if ((CCtx().GetTarget() == CompileTarget::Factor ||
@@ -1178,6 +1186,7 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
     Error(n.LOC(),
           "expect '" + n.data->name + "` of a spanned data or future type.");
     error_count++;
+    return true;
   }
 
   auto sty = GetSpannedType(nty);

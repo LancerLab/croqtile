@@ -1,0 +1,44 @@
+// RUN: not choreo %s 2>&1| FileCheck %s
+
+__co__ void pc_pattern(f32 [76, 128] lhs, f32 [76, 128] rhs, f32 [76, 128] res) {
+  parallel p by 5 {
+    tfs = {1, 4}; // tiling factors
+    sshape : lhs.span / tfs;
+    shared f32 [sshape] lhs_sbuffer, rhs_sbuffer, out_sbuffer;
+
+    // event for producer and consumer
+    shared event pe, ce;
+    trigger ce;
+
+    //                  +-> local
+    //                  +-> local
+    // global -> shared +
+    //                  +-> local
+    //                  +-> local
+    with q in [tfs(1)] foreach q {
+      inthreads.async (p == #p - 1) {  // producer
+        wait ce;
+        lf = dma.copy.async lhs.chunk(tfs).at(#p - p, q) => lhs_sbuffer;
+        rf = dma.copy.async rhs.chunk(tfs).at(#p - p, q) => rhs_sbuffer;
+        wait lf, rf;
+        trigger pe;
+      }
+      inthreads.async (p < #p - 1) {  // consumer
+        wait pe;
+        lf = dma.copy.async lhs_sbuffer.chunk(#p - 1, 1).at(p, _) => local;
+        rf = dma.copy.async rhs_sbuffer.chunk(#p - 1, 1).at(p, _) => local;
+        wait lf, rf;
+        local f32 [lf.span] out_lbuffer;
+        call add_kernel(lf.data, rf.data, out_lbuffer, |lf.span|);
+        dma.copy out_lbuffer => out.chunk(#p - 1, #q).at(p, q);
+      }
+    }
+    sync.shared;
+  }
+}
+
+
+// CHECK: error: symbol `out' is used before declaration.
+// CHECK: error: expect 'out` of a spanned data or future type.
+// CHECK: error: The DMA destination is neither storage identifier nor span.
+// CHECK: Totally 3 errors have been detected.
