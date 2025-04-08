@@ -179,8 +179,8 @@ void choreo_info(const char *message) {
 %nterm <std::string> dma_operation data_id
 %nterm <ptr<DMAConfig>> dma_config
 %nterm <bool> sync_type
-%nterm <int> index index_or_none opt_array_num
-%nterm <std::vector<size_t>> opt_array_nums
+%nterm <int> index index_or_none
+%nterm <std::vector<size_t>> optional_array_dims
 %nterm <Choreo::Storage> storage
 %nterm <Choreo::BaseType> fundamental_type
 %nterm <AST::ptr<AST::CppSourceCode>> host_code
@@ -189,7 +189,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
 %nterm <AST::ptr<AST::Node>> any_code foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal device_passable declaration statement assignment dma_stmt wait_stmt trigger_stmt call_stmt print_stmt swap_stmt expr_or_qes range_expr param_mdspan_val chunkat_or_storage_or_select pred returnable id_or_elem span_init_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
-%nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables future_data_list template_params gi_list ide_list
+%nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables future_data_list template_params gi_list ide_list optional_subscriptions
 %nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr span_expr id_expr bound_expr optional_pred
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
@@ -405,7 +405,7 @@ bool_literal
 
 pred
     : bool_literal { $$ = $1; }
-    | data_id opt_array_nums CHUNKINBOUND LPAREN {
+    | data_id optional_subscriptions CHUNKINBOUND LPAREN {
         parsing_chunkat_value_list = true;
       } value_list RPAREN {
         // note: normalize will hoist span_as
@@ -659,9 +659,9 @@ event_decls
     ;
 
 event_decl
-    : IDENTIFIER opt_array_num {
+    : IDENTIFIER optional_array_dims {
         $$ = AST::Make<AST::NamedVariableDecl>(@1, $1,
-             AST::Make<AST::DataType>(@1, $2, BaseType::EVENT), nullptr, $2);
+             AST::Make<AST::DataType>(@1, BaseType::EVENT, $2), nullptr, $2);
       }
     ;
 
@@ -690,25 +690,28 @@ spanned_decls
     ;
 
 spanned_decl
-    : IDENTIFIER opt_array_num {
+    : IDENTIFIER optional_array_dims {
         $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, nullptr, $2);
       }
-    | IDENTIFIER opt_array_num span_init_val {
+    | IDENTIFIER optional_array_dims span_init_val {
         $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, nullptr, $2, $3);
       }
     ;
 
-opt_array_nums
+optional_array_dims
     : /*empty*/ {}
-    | opt_array_nums LBRAKT NUM RBRAKT {
+    | optional_array_dims LBRAKT NUM RBRAKT {
         $1.push_back($3);
         $$ = $1;
       }
     ;
 
-opt_array_num
-    : /* empty */ { $$ = -1; /* -1: not array */ }
-    | LBRAKT NUM RBRAKT  { $$ = $2; }
+optional_subscriptions
+    : /*empty*/ { $$ = AST::Make<AST::MultiValues>(loc); }
+    | optional_subscriptions LBRAKT s_expr RBRAKT {
+        $1->Append($3);
+        $$ = $1;
+      }
     ;
 
 span_init_val
@@ -901,12 +904,12 @@ named_ituple_decl
     ; // do not allow uninitialized ituple
 
 spanas_spanned_decl
-    : IDENTIFIER ASSIGN IDENTIFIER opt_array_num span_as {
+    : IDENTIFIER ASSIGN IDENTIFIER optional_subscriptions span_as {
         symtab.AddSymbol($1, MakeUnknownType());
         $5->id = AST::Make<AST::Identifier>(@3, $3);
         auto expr = AST::Make<AST::Expr>(@1, $5);
         $$ = AST::Make<AST::NamedVariableDecl>(@1,
-              $1, AST::Make<AST::DataType>(@1, BaseType::UNKNOWN), nullptr, expr, $4);
+              $1, AST::Make<AST::DataType>(@1, BaseType::UNKNOWN), nullptr, expr);
         // TODO: make it a named variable instead of expr assignment
         // $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, $5, $4);
       }
@@ -1271,35 +1274,35 @@ span_as
 
 chunkat_expr
     : sub_data_expr { $$ = $1; }
-    | data_id opt_array_nums {
+    | data_id optional_subscriptions {
         $$ = ReformChunkAt(
           AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1, $1), $2));
       }
-    | data_id opt_array_nums span_as {
+    | data_id optional_subscriptions span_as {
         $3->id = AST::Make<AST::Identifier>(@1, $1);
         $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, $3, $2));
       }
     ;
 
 sub_data_expr
-    : data_id opt_array_nums CHUNKAT LPAREN {
+    : data_id optional_subscriptions CHUNKAT LPAREN {
         parsing_chunkat_value_list = true;
       } value_list RPAREN {
         $6->SetDelimiter(", ");
-        $$ = ReformChunkAt(
-            AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $2, $6));
+        auto id = AST::Make<AST::Identifier>(@1, $1);
+        $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, id, $2, $6));
         parsing_chunkat_value_list = false;
       }
-    | data_id opt_array_nums CHUNK LPAREN {
+    | data_id optional_subscriptions CHUNK LPAREN {
         parsing_chunkat_value_list = true;
       } value_list RPAREN AT LPAREN value_list RPAREN {
         $6->SetDelimiter(", ");
         $10->SetDelimiter(", ");
-        $$ = ReformChunkAt(
-            AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $2, $10, $6));
+        auto id = AST::Make<AST::Identifier>(@1, $1);
+        $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, id, $2, $10, $6));
         parsing_chunkat_value_list = false;
       }
-    | data_id opt_array_nums span_as CHUNKAT LPAREN  {
+    | data_id optional_subscriptions span_as CHUNKAT LPAREN  {
         parsing_chunkat_value_list = true;
       } value_list RPAREN {
         // note: normalize will hoist span_as
@@ -1382,9 +1385,19 @@ with_matchers /* TODO: this special case is pattern-match ids for with-block */
     ;
 
 id_or_elem
-    : IDENTIFIER { $$ = AST::Make<AST::Identifier>(@1, $1); }
-    | IDENTIFIER LBRAKT g_expr RBRAKT {
-        $$ = AST::Make<AST::Expr>(@1, "elemof", AST::Make<AST::Identifier>(@1, $1), $3);
+    : IDENTIFIER optional_subscriptions {
+        if ($2->Count() == 0) {
+          $$ = AST::Make<AST::Identifier>(@1, $1); 
+        } else {
+          AST::ptr<AST::Expr> expr = nullptr;
+          for (auto e : $2->AllValues()) {
+            if (expr == nullptr)
+              expr = AST::Make<AST::Expr>(@1, "elemof", AST::Make<AST::Identifier>(@1, $1), e);
+            else
+              expr = AST::Make<AST::Expr>(@1, "elemof", expr, e);
+          }
+          $$ = expr;
+        }
       }
     ;
 

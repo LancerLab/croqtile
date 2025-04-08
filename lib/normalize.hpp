@@ -444,8 +444,8 @@ public:
         auto mds = AST::Make<AST::MultiDimSpans>(loc, "", mv, 1);
         auto dt = AST::Make<AST::DataType>(loc, BaseType::S32, mds);
         auto sto = AST::Make<AST::Memory>(loc, Storage::GLOBAL);
-        auto nv = AST::Make<AST::NamedVariableDecl>(loc, anon_sym, dt, sto,
-                                                    nullptr, -1, il);
+        auto nv = AST::Make<AST::NamedVariableDecl>(
+            loc, anon_sym, dt, sto, nullptr, std::vector<size_t>{}, il);
 
         assert(cur_node_index != -1);
         int index =

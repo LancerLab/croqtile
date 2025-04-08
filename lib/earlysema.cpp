@@ -564,8 +564,8 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
 
     // update the scope/storage for event types
     if (auto evty = dyn_cast<EventArrayType>(tty)) {
-      tty = MakeEventArrayType(evty->ElemCount(), n.mem->Get());
-      SetNodeType(*n.type, tty);
+      evty->SetStorage(n.mem->Get());
+      SetNodeType(*n.type, evty);
     } else if (isa<EventType>(tty)) {
       tty = MakeEventType(n.mem->Get());
       SetNodeType(*n.type, tty);

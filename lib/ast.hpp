@@ -800,7 +800,7 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
   BaseType base_type;
   size_t rank = GetInvalidRank(); // for annotated ituple only
   ptr<Node> mdspan_type = nullptr;
-  int array_ec = -1;
+  std::vector<size_t> array_dims;
 
 public:
   explicit DataType(const location& l, BaseType t)
@@ -816,16 +816,18 @@ public:
     InitSemaType();
   }
 
-  explicit DataType(const location& l, BaseType bt, int r, int ec = -1)
-      : Node(l), base_type(bt), rank(r), array_ec(ec) {
+  explicit DataType(const location& l, BaseType bt, int r,
+                    const std::vector<size_t> ad = {})
+      : Node(l), base_type(bt), rank(r), array_dims(ad) {
     assert(bt == BaseType::ITUPLE && "unexpected type!");
     InitSemaType();
   }
 
-  explicit DataType(const location& l, int ec, BaseType bt)
-      : Node(l), base_type(bt), rank(1), array_ec(ec) {
-    assert(ec != 0 && "element count can not be 0!");
-    assert(bt == BaseType::EVENT && "unexpected type!");
+  explicit DataType(const location& l, BaseType bt,
+                    const std::vector<size_t> ad)
+      : Node(l), base_type(bt), rank(1), array_dims(ad) {
+    assert(((bt == BaseType::EVENT) || (bt == BaseType::UNKNOWN)) &&
+           "unexpected type!");
     InitSemaType();
   }
 
@@ -877,18 +879,17 @@ private:
     case BaseType::U8:
     case BaseType::S8:
       assert(mdspan_type != nullptr && "Expecting a valid mdspan.");
-      if (array_ec == -1)
-        SetType(MakeSpannedType(base_type,
-                                GenUninitShape())); // need type inference
+      // need type inference
+      if (array_dims.size() == 0)
+        SetType(MakeSpannedType(base_type, GenUninitShape()));
       else
-        SetType(MakeSpannedArrayType(array_ec, base_type,
-                                     GenUninitShape())); // need type inference
+        SetType(MakeSpannedArrayType(base_type, GenUninitShape(), array_dims));
       break;
     case BaseType::EVENT:
-      if (array_ec == -1)
+      if (array_dims.size() == 0)
         SetType(MakeEventType(Storage::DEFAULT));
       else
-        SetType(MakeEventArrayType(array_ec, Storage::DEFAULT));
+        SetType(MakeEventArrayType(Storage::DEFAULT, array_dims));
       break;
     case BaseType::ITUPLE:
       if (!IsValidRank(rank))
@@ -918,16 +919,17 @@ struct NamedVariableDecl : public Node,
   ptr<DataType> type = nullptr;         // type annotation
   const ptr<Node> init_expr = nullptr;  // associated initializer
   const ptr<Node> init_value = nullptr; // associated initial value
-  int elem_count = -1;                  // >= 1 when it is an array
+  std::vector<size_t> array_dims = {};  // has element when it is an array
 
   explicit NamedVariableDecl(const location& l, const std::string& n,
                              const ptr<DataType>& t = nullptr,
                              const ptr<Memory>& s = nullptr,
-                             const ptr<Node>& i = nullptr, int array_ec = -1,
+                             const ptr<Node>& i = nullptr,
+                             const std::vector<size_t> ad = {},
                              const ptr<Node>& v = nullptr,
                              const std::string& d = "=")
       : Node(l), name_str(n), init_str(d), mem(s), type(t), init_expr(i),
-        init_value(v), elem_count(array_ec) {
+        init_value(v), array_dims(ad) {
 
     if (init_expr)
       assert(!init_value && "initial value can not be set when initialization "
@@ -942,22 +944,21 @@ struct NamedVariableDecl : public Node,
   // array variable
   explicit NamedVariableDecl(const location& l, const std::string& n,
                              const ptr<DataType>& t, const ptr<Memory>& s,
-                             int array_ec, const ptr<Node>& v = nullptr,
+                             const std::vector<size_t> ad,
+                             const ptr<Node>& v = nullptr,
                              const std::string& d = "=")
       : Node(l), name_str(n), init_str(d), mem(s), type(t), init_expr(nullptr),
-        init_value(v), elem_count(array_ec) {
-    assert(elem_count != 0 && "elem_count can not be zero.");
-  }
+        init_value(v), array_dims(ad) {}
 
-  bool IsArray() const { return elem_count > 0; }
-  bool ArrayElemCount() const { return elem_count; }
+  bool IsArray() const { return !array_dims.empty(); }
+  bool ArrayDimension(size_t idx) const { return array_dims.at(idx); }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Var Decl (";
     if (type) type->Print(os);
     if (mem) os << ", " << PSTR(mem);
     os << "): " << name_str;
-    if (elem_count != -1) os << "[" << elem_count << "]";
+    for (auto d : array_dims) os << "[" << d << "]";
     if (init_expr)
       os << " " << init_str << " " << PSTR(init_expr);
     else if (init_value)
@@ -1255,13 +1256,13 @@ struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
 
 struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
   ptr<Identifier> data;
-  std::vector<size_t> indices;
+  ptr<MultiValues> indices = nullptr;
   ptr<SpanAs> sa = nullptr; // for span_as expression
   ptr<MultiValues> positions = nullptr;
   ptr<MultiValues> bounds = nullptr;
 
   ChunkAt(const location& l, const ptr<Identifier>& d,
-          const std::vector<size_t> idxes = {},
+          const ptr<MultiValues>& idxes = nullptr,
           const ptr<MultiValues>& p = nullptr,
           const ptr<MultiValues>& b = nullptr)
       : Node(l), data(d), indices(idxes), sa(nullptr), positions(p), bounds(b) {
@@ -1269,7 +1270,7 @@ struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
   }
 
   ChunkAt(const location& l, const ptr<SpanAs>& s,
-          const std::vector<size_t> idxes = {},
+          const ptr<MultiValues>& idxes = nullptr,
           const ptr<MultiValues>& p = nullptr,
           const ptr<MultiValues>& b = nullptr)
       : Node(l), data(s->nid), indices(idxes), sa(s), positions(p), bounds(b) {
@@ -1289,7 +1290,8 @@ struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
     else
       os << PSTR(data);
 
-    for (auto index : indices) os << "[" << index << "]";
+    if (indices)
+      for (auto index : indices->AllValues()) os << "[" << PSTR(index) << "]";
 
     if (positions) {
       if (bounds)
