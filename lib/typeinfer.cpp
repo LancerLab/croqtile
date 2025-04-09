@@ -605,10 +605,16 @@ bool TypeInference::Visit(AST::Expr& n) {
         n.SetType(MakeBoundedITupleType(Shape(1, ub)));
         cur_type = n.GetType();
       }
-    } else if (n.IsArith() && CanYieldAnInteger(pty_lhs) &&
+    } else if (n.IsArith() && n.op != "#" && CanYieldAnInteger(pty_lhs) &&
                CanYieldAnInteger(pty_rhs)) {
       // it is ok to make compatiable types to do arith
-      n.SetType(MakeIntegerType());
+      if (IsActualBoundedIntegerType(pty_lhs) && isa<IntegerType>(pty_rhs)) {
+        n.SetType(pty_lhs);
+      } else if (IsActualBoundedIntegerType(pty_rhs) &&
+                 isa<IntegerType>(pty_lhs)) {
+        n.SetType(pty_rhs);
+      } else
+        n.SetType(MakeIntegerType());
     } else if (*pty_lhs != *pty_rhs) {
       Error(n.LOC(), "The operands of the expression cannot undergo '" + n.op +
                          "' binary operation.");

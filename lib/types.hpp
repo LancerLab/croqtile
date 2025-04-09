@@ -1113,6 +1113,12 @@ struct BoundedType : public Type, public TypeIDProvider<BoundedType> {
   virtual std::string GetNote() const { return note; };
   virtual void AppendNote(const std::string& n) { note += n; };
   virtual const ValueItem& GetUpperBound() const = 0;
+
+  bool LogicalEqual(const Type& ty) const override {
+    if (auto fty = dyn_cast<BoundedType>(&ty)) return Dims() == fty->Dims();
+    return false;
+  }
+
   void Print(std::ostream& os) const override {
     if (!note.empty()) os << "(" << note << ")";
   }
@@ -1156,10 +1162,12 @@ struct BoundedIntegerType final : public BoundedType,
   }
 
   void Print(std::ostream& os) const override {
-    if (HasValidBound())
+    bool plain = true;
+    if (!HasValidBound())
       os << "int->[unknown]";
     else
-      os << "int->[" << STR(lbound) << "," << STR(ubound) << "]:" << stride;
+      os << "int->[" << STR(lbound) << "," << STR(ubound) << "]";
+    if (plain == false) os << ":" << stride;
     BoundedType::Print(os);
   }
 

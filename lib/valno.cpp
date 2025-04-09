@@ -395,7 +395,7 @@ ValueNumbering::SignBoundedOperation(const location& loc, const std::string& op,
                                      const AST::Node& lhs, const AST::Node& rhs,
                                      bool verbose) {
   std::optional<std::string> res;
-  if (op == "+" || op == "-") {
+  if (op == "+" || op == "-" || op == "*" || op == "/" || op == "%") {
     if (isa<BoundedType>(lhs.GetType()) && (lhs.GetType()->Dims() == 1) &&
         (isa<IntegerType>(rhs.GetType())))
       res = GetSignatureForNode(lhs);
@@ -447,7 +447,7 @@ ValueNumbering::SignBoundedOperation(const location& loc, const std::string& op,
 std::optional<std::string>
 ValueNumbering::GenerateSpecialNodeSignature(const AST::Node& node) {
   if (auto* n = dyn_cast<AST::Expr>(&node))
-    if (n->op == "+" || n->op == "-" || n->op == "#") {
+    if (n->IsArith()) {
       if (isa<BoundedType>(n->GetL()->GetType()) ||
           isa<BoundedType>(n->GetR()->GetType())) {
         return SignBoundedOperation(n->LOC(), n->op, *n->GetL(), *n->GetR(),

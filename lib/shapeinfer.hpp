@@ -15,6 +15,9 @@ private:
   // implicit valno of spanned-type with ".span" annotation
   int cur_mdspan_vn = GetInvalidValueNumber();
 
+  // implicit valno of upper-bound
+  int cur_ub_vn = GetInvalidValueNumber();
+
   std::string cur_fn;
   // when values are consumed instead of generated
   bool gen_values = true;
@@ -48,14 +51,17 @@ private:
              << "(vn),\t "
              << (ValidVN(cur_mdspan_vn) ? ("#" + std::to_string(cur_mdspan_vn))
                                         : "nil")
-             << "(mds)";
+             << "(mds),\t "
+             << (ValidVN(cur_ub_vn) ? ("#" + std::to_string(cur_ub_vn)) : "nil")
+             << "(ub)";
 
     dbgs() << "\n";
   }
 
-  void ClearVisitorVNs() {
+  void InvalidateVisitorValNOs() {
     InvalidateVN(cur_vn);
     InvalidateVN(cur_mdspan_vn);
+    InvalidateVN(cur_ub_vn);
   }
 
 public:
@@ -89,7 +95,7 @@ public:
       int valno = vn.GetOrInsertValueNumberFromSignature("const_1");
       vn.AssociateSignatureWithValueNumber(InScopeName("@__choreo_no_tiling__"),
                                            valno);
-      ClearVisitorVNs();
+      InvalidateVisitorValNOs();
     } else if (isa<AST::ParallelBy>(&n)) {
       vn.EnterScope();
     } else if (isa<AST::WithBlock>(&n) || isa<AST::InThreadsBlock>(&n)) {
@@ -121,7 +127,7 @@ public:
     } else if (isa<AST::Parameter>(&n)) {
       allow_named_dim = true;
     } else if (isa<AST::MultiNodes>(&n))
-      ClearVisitorVNs();
+      InvalidateVisitorValNOs();
 
     return true;
   }
@@ -203,11 +209,13 @@ public:
     TraceEachVisit(n);
 
     if (cannot_proceed) return true;
+
     if (auto id = n.GetSymbol()) {
       auto name = vn.VNSymbolName(*id);
       if (SSTab().IsDeclared(name)) {
         if (vn.HasValueNumberOfSignature(SSTab().InScopeName(name))) {
           cur_vn = vn.GetValueNumberOfSignature(SSTab().InScopeName(name));
+          auto nty = NodeType(n);
           if (isa<MDSpanType>(SSTab().LookupSymbol(name))) {
             cur_mdspan_vn = cur_vn;
             InvalidateVN(cur_vn);
@@ -255,6 +263,11 @@ public:
     // type inference
     cur_vn = vn.GenerateValueNumberForNode(n);
     n.s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
+
+    if (IsActualBoundedIntegerType(NodeType(n))) {
+      cur_ub_vn = cur_vn;
+      InvalidateVN(cur_vn);
+    }
 
     if (ConvertibleToInt(NodeType(n))) {
       assert(n.s.DimCount() == 1);
@@ -397,11 +410,17 @@ public:
 
     ptr<Type> nty = nullptr;
     if (n.init_expr) {
-      nty = n.init_expr->GetType();
+      nty = NodeType(*n.init_expr);
       if (GetSpannedType(NodeType(*n.init_expr))) {
         assert(ValidVN(cur_mdspan_vn) && "expecting a valid mdspan valno.");
         vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(name + ".span"),
                                              cur_mdspan_vn);
+      } else if (IsActualBoundedIntegerType(nty)) {
+        assert(ValidVN(cur_ub_vn));
+        SSTab().DefineSymbol("@" + name, MakeBoundedIntegerType(cur_ub_vn));
+        vn.AssociateSignatureWithValueNumber(SSTab().ScopedName("@" + name),
+                                             cur_ub_vn);
+        InvalidateVN(cur_ub_vn);
       } else {
         if (!isa<PlaceHolderType>(nty)) {
           assert(ValidVN(cur_vn) &&
@@ -501,11 +520,14 @@ public:
 
     if (IsActualBoundedIntegerType(nty)) {
       name = "@" + name;
-      SSTab().DefineSymbol(name, MakeIntegerType());
+      assert(ValidVN(cur_ub_vn));
+      SSTab().DefineSymbol(name, MakeBoundedIntegerType(cur_ub_vn));
+      vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(name), cur_ub_vn);
+      InvalidateVN(cur_ub_vn);
+    } else {
+      assert(ValidVN(cur_vn) && "expected a valid current value number.");
+      vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(name), cur_vn);
     }
-
-    assert(ValidVN(cur_vn) && "expected a valid current value number.");
-    vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(name), cur_vn);
 
     if (isa<IntegerType>(nty) && ValidVN(cur_vn)) {
       auto shape =
@@ -621,7 +643,7 @@ public:
         SSTab().DefineSymbol(n.sym->name, n.type->GetType());
       }
 
-      ClearVisitorVNs();
+      InvalidateVisitorValNOs();
       return true;
     }
 
@@ -632,11 +654,11 @@ public:
       vn.GetValueNumberOfSignature(SSTab().ScopedName(n.sym->name));
       if (n.sym) SSTab().DefineSymbol(n.sym->name, n.GetType());
 
-      ClearVisitorVNs();
+      InvalidateVisitorValNOs();
       return true;
     }
 
-    ClearVisitorVNs();
+    InvalidateVisitorValNOs();
     return true;
   }
 
@@ -1081,7 +1103,7 @@ public:
 
   bool Visit(AST::Wait& n) {
     TraceEachVisit(n);
-    ClearVisitorVNs();
+    InvalidateVisitorValNOs();
     if (cannot_proceed) return true;
 
     return true;
@@ -1089,7 +1111,7 @@ public:
 
   bool Visit(AST::Trigger& n) {
     TraceEachVisit(n);
-    ClearVisitorVNs();
+    InvalidateVisitorValNOs();
     if (cannot_proceed) return true;
 
     return true;
@@ -1114,7 +1136,7 @@ public:
       }
     }
 
-    ClearVisitorVNs();
+    InvalidateVisitorValNOs();
     return true;
   };
 
@@ -1151,7 +1173,7 @@ public:
     // now update the valnos
     UpdateValueNumberForMultiValues(*n.ids, valno);
 
-    ClearVisitorVNs();
+    InvalidateVisitorValNOs();
 
     return true;
   };
@@ -1217,7 +1239,7 @@ public:
 
   bool Visit(AST::Return& n) {
     TraceEachVisit(n);
-    ClearVisitorVNs();
+    InvalidateVisitorValNOs();
     if (cannot_proceed) return true;
 
     return true;
@@ -1237,8 +1259,7 @@ public:
     gen_values = true; // allow generate values for statements
 
     // invalidate any current value generated
-    InvalidateVN(cur_mdspan_vn);
-    InvalidateVN(cur_vn);
+    InvalidateVisitorValNOs();
 
     if (cannot_proceed) return true;
 
@@ -1249,8 +1270,7 @@ public:
     TraceEachVisit(n);
 
     // invalidate any current value generated
-    InvalidateVN(cur_mdspan_vn);
-    InvalidateVN(cur_vn);
+    InvalidateVisitorValNOs();
 
     if (cannot_proceed) return true;
 
@@ -1263,8 +1283,7 @@ public:
     gen_values = true; // allow generate values for statements
 
     // invalidate any current value generated
-    InvalidateVN(cur_mdspan_vn);
-    InvalidateVN(cur_vn);
+    InvalidateVisitorValNOs();
 
     if (cannot_proceed) return true;
 

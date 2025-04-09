@@ -39,3 +39,37 @@ __co__ void bounded_arith(s32 [180, 27, 12] a) {
 // CHECK: Symbol:    ::bounded_arith::paraby_0::within_0::foreach_0::anon_3, Type: {int}->[9]
 // CHECK: Future:    ::bounded_arith::paraby_0::within_0::foreach_0::(anon), Type: sync=>local s32 mdspan<3> [1, 3, 2]
 // CHECK: Function:  ::bounded_arith, Type: void (*)(s32 mdspan<3> [180, 27, 12])
+
+__co__ void bounded_decls() {
+  parallel p by 6 {
+    foreach n_tile in [16] {
+      a = n_tile % 2;
+      b = (p + 3) / 2;
+    }
+  }
+}
+
+// CHKVALNO:   scope-1 {
+// CHKVALNO:    New VN #0: 'const_1'
+// CHKVALNO:    Alias "::@__choreo_no_tiling__" -> #0
+// CHKVALNO:    scope-2 {
+// CHKVALNO:     New VN #1: 'const_6'
+// CHKVALNO:     Alias "::bounded_decls::paraby_1::@p" -> #1
+// CHKVALNO:     Alias "::bounded_decls::paraby_1::@p__elem__x" -> #1
+// CHKVALNO:     scope-3 {
+// CHKVALNO:      New VN #2: 'const_16'
+// CHKVALNO:      Alias "::bounded_decls::paraby_1::within_1::@n_tile(0)" -> #2
+// CHKVALNO:      Alias "::bounded_decls::paraby_1::within_1::@n_tile__elem__0" -> #2
+// CHKVALNO:      Alias "::bounded_decls::paraby_1::within_1::@n_tile" -> #2
+// CHKVALNO:      scope-4 {
+// CHKVALNO:       New VN #3: 'const_2'
+// CHKVALNO:       Alias "::bounded_decls::paraby_1::within_1::foreach_1::@a" -> #2
+// CHKVALNO:       New VN #4: 'const_3'
+// CHKVALNO:       Alias "::bounded_decls::paraby_1::within_1::foreach_1::@b" -> #1
+// CHKVALNO:      } // end scope-4
+// CHKVALNO:     } // end scope-3
+// CHKVALNO:    } // end scope-2
+// CHKVALNO:   } // end scope-1
+
+// CHECK: Symbol:    ::bounded_decls::paraby_1::within_1::foreach_1::b, Type: {int}->[6](pv)
+// CHECK: Function:  ::bounded_decls, Type: void (*)()
