@@ -349,7 +349,7 @@ bool isa(const ptr<U>& n) {
 template <typename T, typename U>
 T* dyn_cast(U* n) {
   if (isa<T>(n))
-    return (T*)n;
+    return static_cast<T*>(const_cast<std::remove_cv_t<U>*>(n));
   else
     return nullptr;
 }
@@ -363,44 +363,45 @@ ptr<T> dyn_cast(const ptr<U>& n) {
 
 template <typename T, typename U>
 T* cast(U* n) {
-  if (isa<T>(n))
-    return (T*)n;
-  else {
+  auto t = dyn_cast<T, U>(n);
+  if (t == nullptr) {
     errs() << "type cast failure for incompatibility.\n";
     abort();
   }
+  return t;
 }
 
 template <typename T, typename U>
 ptr<T> cast(const ptr<U>& n) {
-  if (isa<T>(n))
-    return std::static_pointer_cast<T>(n);
-  else {
+  auto t = dyn_cast<T, U>(n);
+  if (t == nullptr) {
     errs() << "type cast failure for incompatibility.\n";
     abort();
   }
+  return t;
 }
 
 // for debug purpose only
 template <typename T, typename U>
 T* cast_dbg(U* n) {
-  if (isa<T>(n))
-    return (T*)n;
-  else {
+  auto t = dyn_cast<T, U>(n);
+  if (t == nullptr) {
     errs() << "type cast failure for incompatibility: " << n->TypeNameString()
            << ".\n";
     abort();
   }
+  return t;
 }
+
 template <typename T, typename U>
 ptr<T> cast_dbg(const ptr<U>& n) {
-  if (isa<T>(n))
-    return std::static_pointer_cast<T>(n);
-  else {
+  auto t = dyn_cast<T, U>(n);
+  if (t == nullptr) {
     errs() << "type cast failure for incompatibility: " << n->TypeNameString()
            << ".\n";
     abort();
   }
+  return t;
 }
 
 using IntegerList = std::vector<int>;
@@ -1385,6 +1386,15 @@ struct FunctionType : public Type, public TypeIDProvider<FunctionType> {
 };
 
 // array is with a fixed-size
+struct ArrayType;
+template <>
+inline ArrayType* dyn_cast<ArrayType, const Type>(const Type* n);
+
+template <>
+inline ptr<ArrayType> dyn_cast<ArrayType, Type>(const ptr<Type>& n);
+
+// ArrayType is not consider as derived Type (avoid multi-inheritance)
+// This hacks corresponding dyn_cast
 struct ArrayType : public TypeIDProvider<ArrayType> {
   std::vector<size_t> dims;
   TypeCategory tc = TypeCategory::ARRAY;
@@ -1402,6 +1412,8 @@ struct ArrayType : public TypeIDProvider<ArrayType> {
       dims.push_back(d);
     }
   }
+
+  virtual const ptr<Type> SubScriptType(size_t) = 0;
 
   size_t ArrayRank() const { return dims.size(); }
 
@@ -1454,8 +1466,8 @@ struct EventArrayType final : public ArrayType,
   explicit EventArrayType(Storage s, std::vector<size_t> ec)
       : ArrayType(ec), EventType(s) {}
 
-  ptr<Type> SubEventType(size_t dim_count) {
-    auto arr = SubScript(dim_count);
+  const ptr<Type> SubScriptType(size_t subscription_count) override {
+    auto arr = SubScript(subscription_count);
     if (arr.size() == 0)
       return std::make_shared<EventType>(EventType::GetStorage());
     else
@@ -1498,6 +1510,18 @@ struct SpannedArrayType final : public ArrayType,
     return SpannedType::HasSufficientInfo();
   }
 
+  const ptr<Type> SubScriptType(size_t subscription_count) override {
+    auto arr = SubScript(subscription_count);
+    if (arr.size() == 0)
+      return std::make_shared<SpannedType>(SpannedType::f_type,
+                                           SpannedType::GetMDSpanType(),
+                                           SpannedType::GetStorage());
+    else
+      return std::make_shared<SpannedArrayType>(SpannedType::f_type,
+                                                SpannedType::GetMDSpanType(),
+                                                SpannedType::GetStorage(), arr);
+  }
+
   size_t Dims() const override { return ArrayType::ArrayRank(); }
 
   bool operator==(const Type& ty) const override {
@@ -1517,8 +1541,25 @@ struct SpannedArrayType final : public ArrayType,
     ArrayType::Print(os);
   }
 
-  __UDT_2TYPES_INFO__(ArrayType, SpannedType, EventArrayType)
+  __UDT_2TYPES_INFO__(ArrayType, SpannedType, SpannedArrayType)
 };
+
+template <>
+inline ArrayType* dyn_cast<ArrayType, const Type>(const Type* n) {
+  if (auto ty = dyn_cast<EventArrayType>(n)) return static_cast<ArrayType*>(ty);
+  if (auto ty = dyn_cast<SpannedArrayType>(n))
+    return static_cast<ArrayType*>(ty);
+  return nullptr;
+}
+
+template <>
+inline ptr<ArrayType> dyn_cast<ArrayType, Type>(const ptr<Type>& n) {
+  if (auto ty = dyn_cast<EventArrayType>(n))
+    return std::static_pointer_cast<ArrayType>(ty);
+  if (auto ty = dyn_cast<SpannedArrayType>(n))
+    return std::static_pointer_cast<ArrayType>(ty);
+  return nullptr;
+}
 
 inline size_t SizeOf(const Type& ty) {
   if (isa<VoidType>(&ty)) return 0;

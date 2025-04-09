@@ -408,12 +408,8 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       error_count++;
     }
 
-    if (auto evty = dyn_cast<EventArrayType>(lty))
-      SetNodeType(n, MakeEventType(evty->GetStorage()));
-    else {
-      Error(n.LOC(), "unsupported array subscription.");
-      error_count++;
-    }
+    auto aty = cast<ArrayType>(lty);
+    SetNodeType(n, aty->SubScriptType(1));
 
     if (error_count != old_ec) return false;
   } else
