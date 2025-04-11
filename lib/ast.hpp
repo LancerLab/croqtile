@@ -952,6 +952,7 @@ struct NamedVariableDecl : public Node,
 
   bool IsArray() const { return !array_dims.empty(); }
   bool ArrayDimension(size_t idx) const { return array_dims.at(idx); }
+  const std::vector<size_t>& ArrayDimensions() const { return array_dims; }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Var Decl (";

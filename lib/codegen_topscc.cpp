@@ -513,8 +513,9 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
             }
           }
         } else {
-          ds << d_indent << type_modifiers << bts << " " << sym << "["
-             << ElemCountExprOf(*sty) << "];\n";
+          ds << d_indent << type_modifiers << bts << " " << sym;
+          for (auto dim : n.ArrayDimensions()) ds << "[" << dim << "]";
+          ds << "[" << ElemCountExprOf(*sty) << "];\n";
         }
         ssm.MapDeviceSymbol(InScopeName(sym), sym);
         spmem = true;
@@ -793,6 +794,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   auto t_ca = cast<AST::ChunkAt>(n.to);
   auto f_sym = f_ca->data->name;
   auto t_sym = t_ca->data->name;
+  auto f_idx = f_ca->indices;
+  auto t_idx = t_ca->indices;
   auto f_sty = GetSpannedType(GetSymbolType(f_sym));
   auto t_sty = GetSpannedType(GetSymbolType(t_sym));
 
@@ -868,7 +871,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     return true;
   }
 
-  auto GetBufferExpr = [this](const std::string& sym) {
+  auto GetBufferExpr = [this](const std::string& sym,
+                              const ptr<AST::MultiValues> subscription) {
     std::string buf_expr = "";
     if (isa<FutureType>(GetSymbolType(sym)) &&
         !IsHostSymbol(InScopeName(sym))) {
@@ -887,14 +891,19 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     } else
       buf_expr = ssm.DeviceName(InScopeName(sym));
 
-    return buf_expr;
+    auto buf_name = buf_expr;
+    if (subscription != nullptr)
+      for (auto expr : subscription->AllValues())
+        buf_expr += "[" + ExprSTR(expr) + "]";
+    return std::make_pair(buf_name, buf_expr);
   };
 
-  auto GetMDSName = [this](const std::string& buf_expr,
+  auto GetMDSName = [this](const std::string& buf_name,
+                           const std::string& buf_expr,
                            const ptr<SpannedType>& sty) {
     static int mds_cnt = 0;
     auto mds_name = "__mds" + std::to_string(mds_cnt++) + "_" +
-                    RemoveSuffix(buf_expr, ".data()");
+                    RemoveSuffix(buf_name, ".data()");
     std::string bts{NameBaseType(sty->ElementType())};
     ds << d_indent << "tops::mdspan " << mds_name << "("
        << TopsMdsStorage(sty->GetStorage()) << ", (" << bts << "*)" << buf_expr
@@ -902,10 +911,10 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     return mds_name;
   };
 
-  std::string f_buf_expr = GetBufferExpr(f_sym);
-  std::string t_buf_expr = GetBufferExpr(t_sym);
-  auto f_mds_name = GetMDSName(f_buf_expr, f_sty);
-  auto t_mds_name = GetMDSName(t_buf_expr, t_sty);
+  auto [f_buf_name, f_buf_expr] = GetBufferExpr(f_sym, f_idx);
+  auto [t_buf_name, t_buf_expr] = GetBufferExpr(t_sym, t_idx);
+  auto f_mds_name = GetMDSName(f_buf_name, f_buf_expr, f_sty);
+  auto t_mds_name = GetMDSName(t_buf_name, t_buf_expr, t_sty);
 
   auto future_name = n.future;
   // bind the data to the future
