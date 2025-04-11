@@ -1,0 +1,23 @@
+// RUN: choreo -es -t topscc %s | FileCheck --match-full-lines %s
+
+__co__ void foo() {
+  parallel p by 1 {
+    with q in 3, r in [4, 5] {
+      pp = p + 1;    // pp is also a bounded variable with same bound, but different current value
+      qq = q - 2;    // same as pp
+//      rr = r + 1;
+    }
+  }
+  with a in [3] {
+    b = a + 1;
+  }
+}
+
+// CHECK:     int __iv_q__elem__0 = 0;
+// CHECK:     int pp = ((__tops_tid_x())+((1)));
+// CHECK:     int qq = ((__iv_q__elem__0)-((2)));
+
+// CHECK:   __choreo_device_foo<<<__foo_gdims0, __foo_bdims0>>>();
+// CHECK:     int __iv_a__elem__0 = 0;
+// CHECK:     int b = ((__iv_a__elem__0)+((1)));
+

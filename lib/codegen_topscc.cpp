@@ -117,7 +117,7 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
     max_parallel_level = GetMaxParallelLevelFromNote(*pb);
     max_parallel_level_valid = true;
   } else if (isa<AST::WithBlock>(&n)) {
-    if (use_hetero_tileflow && IsHostSide()) {
+    if (IsHost()) {
       hs << h_indent << "// with-in: " << n.LOC() << "\n";
       hs << h_indent << "{\n";
       IncrHostIndent();
@@ -127,12 +127,12 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
       IncrDeviceIndent();
     }
   } else if (isa<AST::ForeachBlock>(&n)) {
-    if (use_hetero_tileflow && IsHostSide())
+    if (IsHost())
       hs << h_indent << "// foreach: " << n.LOC() << "\n";
     else
       ds << d_indent << "// foreach: " << n.LOC() << "\n";
   } else if (isa<AST::IncrementBlock>(&n)) {
-    if (use_hetero_tileflow && IsHostSide()) {
+    if (IsHost()) {
       hs << h_indent << "// incr: " << n.LOC() << "\n";
       IncrHostIndent();
     } else {
@@ -192,7 +192,7 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
     parallel_level--;
     if (parallel_level == 0) max_parallel_level = 0;
   } else if (isa<AST::WithBlock>(&n)) {
-    if (use_hetero_tileflow && IsHostSide()) {
+    if (IsHost()) {
       DecrHostIndent();
       hs << h_indent << "}\n";
     } else {
@@ -210,7 +210,7 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
       auto cname = rng->IVName();
       auto ivs = within_map.at(InScopeName(cname));
       for (auto iv_itr = ivs.rbegin(); iv_itr != ivs.rend(); ++iv_itr) {
-        if (use_hetero_tileflow && IsHostSide()) {
+        if (IsHost()) {
           DecrHostIndent();
           hs << h_indent << "} // " << UnScopedName(*iv_itr) << "\n";
           hs << h_indent << ssm.DeviceName(*iv_itr) << " = 0;\n"; // must reset
@@ -230,7 +230,7 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
       ds << " // end inthreads\n";
     }
   } else if (isa<AST::IncrementBlock>(&n)) {
-    if (use_hetero_tileflow && IsHostSide()) {
+    if (IsHost()) {
       DecrHostIndent();
       hs << h_indent << "}\n";
     } else {
@@ -539,6 +539,18 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
         ds << d_indent << "} // single instance\n";
       }
     }
+    return true;
+  } else if (auto bty = dyn_cast<BoundedType>(nty)) {
+    // bounded variable is not with a fixed value
+    if (!IsActualBoundedIntegerType(bty))
+      choreo_unreachable(
+          "yet to support: bounded ituple variable code generation.");
+    if (IsHost())
+      hs << h_indent << "int " << sym << " = " << ExprSTR(n.init_expr, false)
+         << ";\n";
+    else
+      ds << d_indent << "int " << sym << " = " << ExprSTR(n.init_expr, false)
+         << ";\n";
     return true;
   }
 
@@ -1361,9 +1373,10 @@ bool TopsccCodeGen::Visit(AST::WithIn& n) {
     ssm.MapDeviceSymbol(InScopeName(id->name), "__iv_" + id->name);
     // Keep the device side decl, even for host side iv.
     // for visibility of shapes
-    if (use_hetero_tileflow && IsHostSide())
+    if (IsHost())
       hs << h_indent << "int __iv_" << id->name << " = 0;\n";
-    ds << d_indent << "int __iv_" << id->name << " = 0;\n";
+    else
+      ds << d_indent << "int __iv_" << id->name << " = 0;\n";
   }
 
   return true;
@@ -1394,7 +1407,7 @@ bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
       auto iv_ty = GetSymbolType(UnScopedName(iv_name));
       assert(IsActualBoundedIntegerType(iv_ty));
       auto iv_bty = cast<BoundedType>(iv_ty);
-      if (use_hetero_tileflow && IsHostSide()) {
+      if (IsHost()) {
         hs << h_indent << "for (" << ssm.DeviceName(iv_name) << " = "
            << (rng->lbound ? ("(" + ExprSTR(rng->lbound, false) + ")") : "0")
            << "; " << ssm.DeviceName(iv_name) << " < "
@@ -1415,7 +1428,7 @@ bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
   }
 
   if (n.pred) {
-    if (use_hetero_tileflow && IsHostSide()) {
+    if (IsHost()) {
       hs << h_indent << "if (" << ExprSTR(n.pred, false) << ") {\n";
       IncrHostIndent();
     } else {
