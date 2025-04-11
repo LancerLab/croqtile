@@ -1425,15 +1425,22 @@ struct ArrayType : public TypeIDProvider<ArrayType> {
 
   size_t ArrayRank() const { return dims.size(); }
 
+  // array[n][m] - subscripting by 1  results in array[n]
   virtual const std::vector<size_t> SubScript(size_t dim_count) {
     if (dim_count > dims.size())
       choreo_unreachable("invalid subscription: not enough dimesnion.");
-    auto d = dims;
-    for (size_t i = 0; i < dim_count; ++i) d.pop_back();
-    return d;
+    return std::vector<size_t>(dims.begin(), dims.begin() + dim_count);
+  }
+
+  // array[n][m] - subscripting by 1  the remainder dimensions is [m]
+  virtual const std::vector<size_t> RemainderDimensions(size_t dim_count) {
+    if (dim_count > dims.size())
+      choreo_unreachable("invalid subscription: not enough dimesnion.");
+    return std::vector<size_t>(dims.begin() + dim_count, dims.end());
   }
 
   virtual size_t Dimension(size_t idx) const { return dims.at(idx); }
+  virtual const std::vector<size_t>& Dimensions() { return dims; }
   virtual size_t ElemCount() const {
     if (dims.size() == 0) {
       choreo_unreachable("invalid array.");
@@ -1460,6 +1467,10 @@ struct ArrayType : public TypeIDProvider<ArrayType> {
     os << "[";
     for (auto d : dims) os << "[" << d << "]";
     os << "]";
+  }
+
+  virtual void PrintAsCArray(std::ostream& os) const {
+    for (auto d : dims) os << "[" << d << "]";
   }
 
   // for runtime type disambiguition

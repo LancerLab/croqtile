@@ -70,6 +70,30 @@ inline const std::string GetDTEContextName() {
   return "choreo_topscc_ctx" + std::to_string(i++);
 }
 
+inline void PrintSubscriptions(std::ostream& os, const std::string prefix,
+                               const std::string suffix,
+                               const std::vector<size_t>& dims,
+                               std::vector<size_t>& indices, size_t depth = 0) {
+  if (depth == dims.size()) {
+    os << prefix;
+    for (size_t i : indices) os << "[" << i << "]";
+    os << suffix;
+    return;
+  }
+
+  for (size_t i = 0; i < dims[depth]; ++i) {
+    indices[depth] = i;
+    PrintSubscriptions(os, prefix, suffix, dims, indices, depth + 1);
+  }
+}
+
+void GenerateSubscriptions(std::ostream& os, const std::string prefix,
+                           const std::string suffix,
+                           const std::vector<size_t>& dims) {
+  std::vector<size_t> indices(dims.size());
+  PrintSubscriptions(os, prefix, suffix, dims, indices);
+}
+
 } // namespace
 
 bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
@@ -543,11 +567,12 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
     case Storage::SHARED:
     case Storage::LOCAL: {
       ds << d_indent << TopsDeviceMemory(ety->GetStorage())
-         << " __volatile__ bool " << n.name_str << "[" << ety->ElemCount()
-         << "]; // " << STR(ety->GetStorage()) << " event\n";
-      for (size_t i = 0; i < ety->ElemCount(); ++i)
-        ds << d_indent << n.name_str << "[" << i
-           << "] = false;\n"; // inited as untriggerd
+         << " __volatile__ bool " << n.name_str;
+      ety->PrintAsCArray(ds);
+      ds << "; // " << STR(ety->GetStorage()) << " event\n";
+      ds << d_indent << "// initialize the event\n";
+      GenerateSubscriptions(ds, d_indent + n.name_str, " = false;\n",
+                            ety->Dimensions());
     } break;
     default: break;
     }
@@ -1117,6 +1142,8 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
   }
 
   for (auto& f : n.GetTargets()) {
+    auto expr = dyn_cast<AST::Expr>(f);
+    bool is_array_ref = (expr != nullptr);
     if (isa<FutureType>(NodeType(*f))) {
       ds << d_indent << ExprSTR(f, false) << ".wait();\n";
     } else if (auto ety = dyn_cast<EventArrayType>(NodeType(*f))) {
@@ -1126,15 +1153,30 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
       case Storage::GLOBAL:
       case Storage::SHARED:
       case Storage::LOCAL: {
+        ds << d_indent << "// wait event " << PSTR(f) << "\n";
         ds << d_indent << "while (";
-        for (size_t i = 0; i < ety->ElemCount(); ++i) {
-          ds << ExprSTR(f, false) << "[" << i << "] == false";
-          if (i != ety->ElemCount() - 1) ds << " || ";
-        }
-        ds << ") continue; // spinlock\n";
-        for (size_t i = 0; i < ety->ElemCount(); ++i)
-          ds << d_indent << ExprSTR(f, false) << "[" << i
-             << "] = false; // reset event\n";
+        if (is_array_ref) {
+          size_t lvl = GetSubScriptLevel(*expr);
+          auto bid = AST::GetArrayBaseSymbol(*expr);
+          auto bty =
+              cast<EventArrayType>(GetSymbolType(UnScopedName(bid->name)));
+          GenerateSubscriptions(ds, "!" + ExprSTR(f, false), " || ",
+                                bty->RemainderDimensions(lvl));
+        } else
+          GenerateSubscriptions(ds, "!" + ExprSTR(f, false), " || ",
+                                ety->RemainderDimensions(0));
+        ds << "false) continue;\n";
+        ds << d_indent << "// reset event " << PSTR(f) << "\n";
+        if (is_array_ref) {
+          size_t lvl = GetSubScriptLevel(*expr);
+          auto bid = AST::GetArrayBaseSymbol(*expr);
+          auto bty =
+              cast<EventArrayType>(GetSymbolType(UnScopedName(bid->name)));
+          GenerateSubscriptions(ds, d_indent + ExprSTR(f, false), " = false;\n",
+                                bty->RemainderDimensions(lvl));
+        } else
+          GenerateSubscriptions(ds, d_indent + ExprSTR(f, false), " = false;\n",
+                                ety->RemainderDimensions(0));
       } break;
       default:
         choreo_unreachable("unsupported event array storage '" +
@@ -1149,7 +1191,16 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
       case Storage::LOCAL: {
         ds << d_indent << "while (" << ExprSTR(f, false)
            << " == false) continue; // spinlock\n";
-        ds << d_indent << ExprSTR(f, false) << " = false; // reset event\n";
+        if (is_array_ref) {
+          ds << d_indent << "// reset event " << PSTR(f) << "\n";
+          size_t lvl = GetSubScriptLevel(*expr);
+          auto bid = AST::GetArrayBaseSymbol(*expr);
+          auto bty =
+              cast<EventArrayType>(GetSymbolType(UnScopedName(bid->name)));
+          GenerateSubscriptions(ds, d_indent + ExprSTR(f, false), " = false;\n",
+                                bty->RemainderDimensions(lvl));
+        } else
+          ds << d_indent << ExprSTR(f, false) << " = false; // reset event\n";
       } break;
       default:
         choreo_unreachable("unsupported event storage '" +
@@ -1171,20 +1222,32 @@ bool TopsccCodeGen::Visit(AST::Trigger& n) {
   TraceEachVisit(n);
 
   for (auto& f : n.GetEvents()) {
+    auto expr = dyn_cast<AST::Expr>(f);
+    bool is_array_ref = (expr != nullptr);
+    assert(IsSymbolOrArrayRef(*f) &&
+           "expect either symbol or array reference.");
     if (auto ety = dyn_cast<EventArrayType>(NodeType(*f))) {
       if (IsHost()) {
         assert(ety->GetStorage() == Storage::GLOBAL);
         hs << h_indent << "choreo::abend_true(topsMemset(&" << ExprSTR(f, true)
            << ", 1, " << ety->ElemCount() << ")); // trigger event\n";
-
+        // TODO: support array reference
       } else {
         switch (ety->GetStorage()) {
         case Storage::GLOBAL:
         case Storage::SHARED:
         case Storage::LOCAL:
-          for (size_t i = 0; i < ety->ElemCount(); ++i)
-            ds << d_indent << ExprSTR(f, false) << "[" << i
-               << "] = true; // trigger event\n";
+          ds << d_indent << "// trigger event " << PSTR(f) << "\n";
+          if (is_array_ref) {
+            size_t lvl = GetSubScriptLevel(*expr);
+            auto bid = AST::GetArrayBaseSymbol(*expr);
+            auto bty =
+                cast<EventArrayType>(GetSymbolType(UnScopedName(bid->name)));
+            GenerateSubscriptions(ds, d_indent + ExprSTR(f, false),
+                                  " = true;\n", bty->RemainderDimensions(lvl));
+          } else
+            GenerateSubscriptions(ds, d_indent + ExprSTR(f, false),
+                                  " = true;\n", ety->RemainderDimensions(0));
           break;
         default:
           choreo_unreachable("unsupported event array storage '" +
@@ -1197,12 +1260,24 @@ bool TopsccCodeGen::Visit(AST::Trigger& n) {
         assert(ety->GetStorage() == Storage::GLOBAL);
         hs << h_indent << "choreo::abend_true(topsMemset(&" << ExprSTR(f, true)
            << ", 1, 1)); // trigger event\n";
+        // TODO: support array reference
       } else {
         switch (ety->GetStorage()) {
         case Storage::GLOBAL:
         case Storage::SHARED:
         case Storage::LOCAL:
-          ds << d_indent << ExprSTR(f, false) << " = true; // trigger event\n";
+          if (is_array_ref) {
+            ds << d_indent << "// trigger event " << PSTR(f) << "\n";
+            size_t lvl = GetSubScriptLevel(*expr);
+            auto bid = AST::GetArrayBaseSymbol(*expr);
+            auto bty =
+                cast<EventArrayType>(GetSymbolType(UnScopedName(bid->name)));
+            GenerateSubscriptions(ds, d_indent + ExprSTR(f, false),
+                                  " = true; // trigger event\n",
+                                  bty->RemainderDimensions(lvl));
+          } else
+            ds << d_indent << ExprSTR(f, false)
+               << " = true; // trigger event\n";
           break;
         default:
           choreo_unreachable("unsupported event array storage '" +

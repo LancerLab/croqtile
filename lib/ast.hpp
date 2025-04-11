@@ -1771,6 +1771,19 @@ inline bool IsSymbolOrArrayRef(const Node& n) {
   return false;
 }
 
+inline const ptr<Identifier> GetArrayBaseSymbol(const Expr& n) {
+  assert(n.op == "elemof");
+  if (auto id = dyn_cast<AST::Identifier>(n.GetL())) return id;
+  auto expr = cast<AST::Expr>(n.GetL());
+  return GetArrayBaseSymbol(*expr);
+}
+
+inline size_t GetSubScriptLevel(const Expr& n) {
+  assert(n.op == "elemof");
+  if (auto id = dyn_cast<AST::Identifier>(n.GetL())) return 1;
+  return 1 + GetSubScriptLevel(*cast<AST::Expr>(n.GetL()));
+}
+
 inline ptr<Node> Ref(const ptr<Node>& n) {
   if (auto expr = dyn_cast<Expr>(n)) return expr->GetReference();
   return n;

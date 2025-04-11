@@ -24,57 +24,40 @@ bool SemaChecker::AfterVisitImpl(AST::Node& n) {
   return true;
 }
 
-bool SemaChecker::Visit(AST::MultiNodes& n) {
-  TraceEachVisit(n);
-  return true;
-}
-bool SemaChecker::Visit(AST::MultiValues& n) {
-  TraceEachVisit(n);
-  return true;
-}
-bool SemaChecker::Visit(AST::IntLiteral& n) {
-  TraceEachVisit(n);
+bool SemaChecker::VisitNode(AST::IntLiteral& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
-bool SemaChecker::Visit(AST::FloatLiteral& n) {
-  TraceEachVisit(n);
+bool SemaChecker::VisitNode(AST::FloatLiteral& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
-bool SemaChecker::Visit(AST::Boolean& n) {
-  TraceEachVisit(n);
+bool SemaChecker::VisitNode(AST::Boolean& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
-bool SemaChecker::Visit(AST::Expr& n) {
-  TraceEachVisit(n);
+bool SemaChecker::VisitNode(AST::Expr& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
-bool SemaChecker::Visit(AST::MultiDimSpans& n) {
-  TraceEachVisit(n);
+bool SemaChecker::VisitNode(AST::MultiDimSpans& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
-bool SemaChecker::Visit(AST::NamedTypeDecl& n) {
-  TraceEachVisit(n);
+bool SemaChecker::VisitNode(AST::NamedTypeDecl& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
-bool SemaChecker::Visit(AST::NamedVariableDecl& n) {
-  TraceEachVisit(n);
+bool SemaChecker::VisitNode(AST::NamedVariableDecl& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
-bool SemaChecker::Visit(AST::IntTuple& n) {
-  TraceEachVisit(n);
+bool SemaChecker::VisitNode(AST::IntTuple& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
 
-bool SemaChecker::Visit(AST::Assignment& n) {
-  TraceEachVisit(n);
+bool SemaChecker::VisitNode(AST::Assignment& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   if (!ReportUnknownSymbol(n.name, n.LOC(), __FILE__, __LINE__)) return false;
 
@@ -91,8 +74,7 @@ bool SemaChecker::Visit(AST::Assignment& n) {
   return true;
 }
 
-bool SemaChecker::Visit(AST::IntIndex& n) {
-  TraceEachVisit(n);
+bool SemaChecker::VisitNode(AST::IntIndex& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   if (!isa<IntegerType>(n.value->GetType())) {
     Error(n.LOC(), "Expect `" + PSTR(n.value) + "' to be a integer type.");
@@ -101,30 +83,25 @@ bool SemaChecker::Visit(AST::IntIndex& n) {
   }
   return true;
 }
-bool SemaChecker::Visit(AST::DataType& n) {
-  TraceEachVisit(n);
+bool SemaChecker::VisitNode(AST::DataType& n) {
   // TODO: figure out if we could check SufficientInfo
   if (!ReportUnknown(n, __FILE__, __LINE__, true)) return false;
   return true;
 }
-bool SemaChecker::Visit(AST::Identifier& n) {
-  TraceEachVisit(n);
+
+bool SemaChecker::VisitNode(AST::Identifier& n) {
   if (PrefixedWith(n.name, "$")) return true; // do not check internal symbols
   if (n.name == "_") return true;             // ignore unit biv
   if (!ReportUnknownSymbol(n.name, n.LOC(), __FILE__, __LINE__)) return false;
   return true;
 }
-bool SemaChecker::Visit(AST::Parameter& n) {
-  TraceEachVisit(n);
+
+bool SemaChecker::VisitNode(AST::Parameter& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
-bool SemaChecker::Visit(AST::ParamList& n) {
-  TraceEachVisit(n);
-  return true;
-}
-bool SemaChecker::Visit(AST::ParallelBy& n) {
-  TraceEachVisit(n);
+
+bool SemaChecker::VisitNode(AST::ParallelBy& n) {
   if (auto shape = GetShape(NodeType(n)); shape.IsDynamic()) {
     std::string mds = STR(shape);
     auto mds_vals = SplitStringByDelimiter(mds.substr(1, mds.size() - 2), ", ");
@@ -145,12 +122,8 @@ bool SemaChecker::Visit(AST::ParallelBy& n) {
 
   return true;
 }
-bool SemaChecker::Visit(AST::WhereBind& n) {
-  TraceEachVisit(n);
-  return true;
-}
-bool SemaChecker::Visit(AST::WithIn& n) {
-  TraceEachVisit(n);
+
+bool SemaChecker::VisitNode(AST::WithIn& n) {
   if (auto shape = GetShape(NodeType(*n.in)); shape.IsDynamic()) {
     std::string mds = STR(shape);
     auto mds_vals = SplitStringByDelimiter(mds.substr(1, mds.size() - 2), ", ");
@@ -168,18 +141,8 @@ bool SemaChecker::Visit(AST::WithIn& n) {
   }
   return true;
 }
-bool SemaChecker::Visit(AST::WithBlock& n) {
-  TraceEachVisit(n);
-  return true;
-}
-bool SemaChecker::Visit(AST::Memory& n) {
-  TraceEachVisit(n);
-  return true;
-}
 
-bool SemaChecker::Visit(AST::SpanAs& n) {
-  TraceEachVisit(n);
-
+bool SemaChecker::VisitNode(AST::SpanAs& n) {
   if (!ReportUnknownSymbol(n.id->name, n.LOC(), __FILE__, __LINE__))
     return false;
 
@@ -221,9 +184,7 @@ bool SemaChecker::Visit(AST::SpanAs& n) {
   return true;
 }
 
-bool SemaChecker::Visit(AST::DMA& n) {
-  TraceEachVisit(n);
-
+bool SemaChecker::VisitNode(AST::DMA& n) {
   bool IsDummy = (n.operation == ".any");
   auto ty = n.GetType();
 
@@ -345,15 +306,12 @@ bool SemaChecker::Visit(AST::DMA& n) {
   return true;
 }
 
-bool SemaChecker::Visit(AST::ChunkAt& n) {
-  TraceEachVisit(n);
+bool SemaChecker::VisitNode(AST::ChunkAt& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
 
-bool SemaChecker::Visit(AST::Trigger& n) {
-  TraceEachVisit(n);
-
+bool SemaChecker::VisitNode(AST::Trigger& n) {
   for (auto& f : n.GetEvents()) {
     auto fty = NodeType(*f);
     if (!isa<EventType>(fty)) {
@@ -370,16 +328,14 @@ bool SemaChecker::Visit(AST::Trigger& n) {
         error_count++;
         continue;
       }
-      auto id = cast<AST::Identifier>(e->GetL());
-      pending_async.insert(InScopeName(id->name));
+      auto bid = GetArrayBaseSymbol(*e);
+      pending_async.insert(InScopeName(bid->name));
     }
   }
   return true;
 }
 
-bool SemaChecker::Visit(AST::Wait& n) {
-  TraceEachVisit(n);
-
+bool SemaChecker::VisitNode(AST::Wait& n) {
   for (auto& f : n.GetTargets()) {
     auto fty = NodeType(*f);
     if (!isa<FutureType>(fty) && !isa<EventType>(fty)) {
@@ -396,17 +352,15 @@ bool SemaChecker::Visit(AST::Wait& n) {
         error_count++;
         continue;
       }
-      auto id = cast<AST::Identifier>(e->GetL());
-      waited_async.insert(InScopeName(id->name));
+      auto bid = GetArrayBaseSymbol(*e);
+      waited_async.insert(InScopeName(bid->name));
     }
   }
 
   return true;
 }
 
-bool SemaChecker::Visit(AST::Call& n) {
-  TraceEachVisit(n);
-
+bool SemaChecker::VisitNode(AST::Call& n) {
   if (n.template_args) {
     size_t count = 0;
     for (auto& v : n.template_args->AllValues()) {
@@ -435,15 +389,13 @@ bool SemaChecker::Visit(AST::Call& n) {
   return true;
 }
 
-bool SemaChecker::Visit(AST::PrintNode& n) {
-  TraceEachVisit(n);
+bool SemaChecker::VisitNode(AST::PrintNode& n) {
   if (!ReportUnknownSymbol(n.id->name, n.id->LOC(), __FILE__, __LINE__))
     return false;
   return true;
 }
 
-bool SemaChecker::Visit(AST::Rotate& n) {
-  TraceEachVisit(n);
+bool SemaChecker::VisitNode(AST::Rotate& n) {
   size_t index = 0;
   for (auto s : n.ids->AllValues()) {
     if (auto id = AST::GetIdentifier(*s))
@@ -478,8 +430,7 @@ bool SemaChecker::Visit(AST::Rotate& n) {
   return true;
 }
 
-bool SemaChecker::Visit(AST::Select& n) {
-  TraceEachVisit(n);
+bool SemaChecker::VisitNode(AST::Select& n) {
   size_t ec = error_count;
 
   if (!isa<IntegerType>(NodeType(*n.select_factor))) {
@@ -514,9 +465,7 @@ bool SemaChecker::Visit(AST::Select& n) {
   return ec == error_count;
 }
 
-bool SemaChecker::Visit(AST::Return& n) {
-  TraceEachVisit(n);
-
+bool SemaChecker::VisitNode(AST::Return& n) {
   if (n.value) {
     auto vty = NodeType(*n.value);
     if (!(isa<SpannedType>(vty) || isa<ScalarType>(vty))) {
@@ -527,30 +476,6 @@ bool SemaChecker::Visit(AST::Return& n) {
     }
   }
 
-  return true;
-}
-bool SemaChecker::Visit(AST::LoopRange& n) {
-  TraceEachVisit(n);
-  return true;
-}
-bool SemaChecker::Visit(AST::ForeachBlock& n) {
-  TraceEachVisit(n);
-  return true;
-}
-bool SemaChecker::Visit(AST::FunctionDecl& n) {
-  TraceEachVisit(n);
-  return true;
-}
-bool SemaChecker::Visit(AST::ChoreoFunction& n) {
-  TraceEachVisit(n);
-  return true;
-}
-bool SemaChecker::Visit(AST::CppSourceCode& n) {
-  TraceEachVisit(n);
-  return true;
-}
-bool SemaChecker::Visit(AST::Program& n) {
-  TraceEachVisit(n);
   return true;
 }
 

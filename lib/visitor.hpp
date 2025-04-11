@@ -500,6 +500,233 @@ public:
   bool Visit(AST::Program&) override { return true; }
 };
 
+struct TracedVisitorWithSymTab : public VisitorWithSymTab {
+public:
+  TracedVisitorWithSymTab(const std::string& n, const ptr<SymbolTable>& s_tab)
+      : VisitorWithSymTab(n, s_tab) {}
+  ~TracedVisitorWithSymTab() {}
+
+public:
+  virtual void TraceEachVisit(AST::Node& n, bool show_detail = false,
+                              const std::string& prefix = "") {
+    if (!trace_visit) return;
+    if (show_detail)
+      dbgs() << prefix << STR(n) << "\n";
+    else
+      dbgs() << prefix << n.TypeNameString() << "\n";
+  }
+
+  // delegate to VisitNode
+  bool Visit(AST::MultiNodes& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::MultiValues& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::IntLiteral& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::FloatLiteral& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::StringLiteral& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::Boolean& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::Expr& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::MultiDimSpans& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::NamedTypeDecl& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::NamedVariableDecl& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::IntTuple& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::Assignment& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::IntIndex& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::DataType& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::Identifier& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::Parameter& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::ParamList& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::ParallelBy& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::WhereBind& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::WithIn& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::WithBlock& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::Memory& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::SpanAs& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::DMA& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::ChunkAt& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::Wait& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::Trigger& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::Call& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::PrintNode& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::Rotate& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::Synchronize& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::Select& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::Return& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::LoopRange& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::ForeachBlock& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::InThreadsBlock& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::IncrementBlock& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::FunctionDecl& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::ChoreoFunction& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::CppSourceCode& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::Program& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+
+public:
+  // provide default
+  virtual bool VisitNode(AST::MultiNodes&) { return true; }
+  virtual bool VisitNode(AST::MultiValues&) { return true; }
+  virtual bool VisitNode(AST::IntLiteral&) { return true; }
+  virtual bool VisitNode(AST::FloatLiteral&) { return true; }
+  virtual bool VisitNode(AST::StringLiteral&) { return true; }
+  virtual bool VisitNode(AST::Boolean&) { return true; }
+  virtual bool VisitNode(AST::Expr&) { return true; }
+  virtual bool VisitNode(AST::MultiDimSpans&) { return true; }
+  virtual bool VisitNode(AST::NamedTypeDecl&) { return true; }
+  virtual bool VisitNode(AST::NamedVariableDecl&) { return true; }
+  virtual bool VisitNode(AST::IntTuple&) { return true; }
+  virtual bool VisitNode(AST::Assignment&) { return true; }
+  virtual bool VisitNode(AST::IntIndex&) { return true; }
+  virtual bool VisitNode(AST::DataType&) { return true; }
+  virtual bool VisitNode(AST::Identifier&) { return true; }
+  virtual bool VisitNode(AST::Parameter&) { return true; }
+  virtual bool VisitNode(AST::ParamList&) { return true; }
+  virtual bool VisitNode(AST::ParallelBy&) { return true; }
+  virtual bool VisitNode(AST::WhereBind&) { return true; }
+  virtual bool VisitNode(AST::WithIn&) { return true; }
+  virtual bool VisitNode(AST::WithBlock&) { return true; }
+  virtual bool VisitNode(AST::Memory&) { return true; }
+  virtual bool VisitNode(AST::SpanAs&) { return true; }
+  virtual bool VisitNode(AST::DMA&) { return true; }
+  virtual bool VisitNode(AST::ChunkAt&) { return true; }
+  virtual bool VisitNode(AST::Wait&) { return true; }
+  virtual bool VisitNode(AST::Trigger&) { return true; }
+  virtual bool VisitNode(AST::Call&) { return true; }
+  virtual bool VisitNode(AST::PrintNode&) { return true; }
+  virtual bool VisitNode(AST::Rotate&) { return true; }
+  virtual bool VisitNode(AST::Synchronize&) { return true; }
+  virtual bool VisitNode(AST::Select&) { return true; }
+  virtual bool VisitNode(AST::Return&) { return true; }
+  virtual bool VisitNode(AST::LoopRange&) { return true; }
+  virtual bool VisitNode(AST::ForeachBlock&) { return true; }
+  virtual bool VisitNode(AST::InThreadsBlock&) { return true; }
+  virtual bool VisitNode(AST::IncrementBlock&) { return true; }
+  virtual bool VisitNode(AST::FunctionDecl&) { return true; }
+  virtual bool VisitNode(AST::ChoreoFunction&) { return true; }
+  virtual bool VisitNode(AST::CppSourceCode&) { return true; }
+  virtual bool VisitNode(AST::Program&) { return true; }
+};
+
 } // end namespace Choreo
 
 #endif // __CHOREO_VISITOR_HPP__
