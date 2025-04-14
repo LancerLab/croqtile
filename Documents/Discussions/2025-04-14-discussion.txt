@@ -1,0 +1,51 @@
+1. data member access
+
+f32 [1] a[2,3];
+
+syntax: a[1][2].at(3, 4, 5)
+
+2. mutable value:
+
+mutable a = 3;
+mutable int a = 3;
+
+3. mutable value operations:
+
+a = 1;
+a = 2;      // re-assignment
+a += 3;     // assignment and calculation
+a++; a--;   // auto-incr/decr
+
+4. call in if statement (simple call with simple return)
+
+  if (call abc(...)) { ... }
+
+will we support this?
+
+  call abc(a, b, c);
+  bool a = call abc(a, b, );
+
+5. print accept StringLiteral and Expr
+
+print("abc");
+print("abc=", a.at(...), ": ", p, "\n");
+
+6. Choreo Highlight:
+
+- Productivity Improvement in Operator Development
+ - chunkat and dma: high-level abstraction 
+ - simplify routine works of
+    - host management, 
+    - DMA and Event configuration, 
+    - data subscriptions
+    - auto scratchpad memory optimization
+- Safety: static and light-weight runtime check.
+  - unreasonable tiling checks.
+  - data shape mismatch checks.
+  - resource constraint checks.
+  - unexpected DMA status checks.
+- Zero Costs Abstraction
+- The support of dynamic shaped inputs
+- Improve the Working Experience in GCU
+ - Uniform Syntax and Scheme
+ - Well integeration with topscc
