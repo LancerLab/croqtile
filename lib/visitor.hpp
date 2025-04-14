@@ -35,6 +35,8 @@ struct Visitor {
     return true;
   }
 
+  virtual bool InMidVisit(AST::Node&) = 0; // not used by all
+
   virtual bool AfterVisit(AST::Node& n) {
     if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) { // by function print
       if (print_after) {
@@ -91,6 +93,7 @@ struct Visitor {
   virtual bool Visit(AST::LoopRange&) = 0;
   virtual bool Visit(AST::ForeachBlock&) = 0;
   virtual bool Visit(AST::InThreadsBlock&) = 0;
+  virtual bool Visit(AST::IfElseBlock&) = 0;
   virtual bool Visit(AST::IncrementBlock&) = 0;
   virtual bool Visit(AST::FunctionDecl&) = 0;
   virtual bool Visit(AST::ChoreoFunction&) = 0;
@@ -298,8 +301,9 @@ public:
 struct VisitorWithScope : public Visitor {
 protected:
   // for the derived classes
-  virtual bool BeforeVisitImpl(AST::Node& n) = 0;
-  virtual bool AfterVisitImpl(AST::Node& n) = 0;
+  virtual bool BeforeVisitImpl(AST::Node&) = 0;
+  virtual bool AfterVisitImpl(AST::Node&) = 0;
+  virtual bool InMidVisitImpl(AST::Node&) { return true; }
 
   // Tricky: sometimes it requires action before entering the scope
   virtual bool BeforeBeforeVisit(AST::Node&) { return true; }
@@ -314,6 +318,7 @@ private:
   int wi_count = 0; // counting for with_in
   int fe_count = 0; // counting for foreach
   int it_count = 0; // counting for inthreads
+  int ie_count = 0; // counting for ifelse
 
   void Reset() {
     pb_count = 0;
@@ -344,6 +349,8 @@ public:
       SSTab().EnterScope("foreach_" + std::to_string(fe_count++));
     } else if (isa<AST::InThreadsBlock>(&n)) {
       SSTab().EnterScope("inthreads_" + std::to_string(it_count++));
+    } else if (isa<AST::IfElseBlock>(&n)) {
+      SSTab().EnterScope("cond_if_" + std::to_string(ie_count++));
     } else if (isa<AST::IncrementBlock>(&n)) {
       SSTab().EnterScope("increment_" + std::to_string(fe_count++));
     } else if (auto w = dyn_cast<AST::WithIn>(&n)) {
@@ -368,6 +375,15 @@ public:
     return BeforeVisitImpl(n); // derived class to customize
   }
 
+  bool InMidVisit(AST::Node& n) final {
+    // this is very specialized code
+    if (isa<AST::IfElseBlock>(&n)) {
+      SSTab().LeaveScope();
+      SSTab().EnterScope("cond_else" + std::to_string(ie_count));
+    }
+    return true;
+  }
+
   bool AfterVisit(AST::Node& n) final {
     AfterVisitImpl(n); // derived class to customize
     if (isa<AST::Program>(&n)) {
@@ -379,7 +395,7 @@ public:
       SSTab().LeaveScope();
     } else if (isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n) ||
                isa<AST::ForeachBlock>(&n) || isa<AST::InThreadsBlock>(&n) ||
-               isa<AST::IncrementBlock>(&n)) {
+               isa<AST::IfElseBlock>(&n) || isa<AST::IncrementBlock>(&n)) {
       SSTab().LeaveScope();
     }
 
@@ -493,6 +509,7 @@ public:
   bool Visit(AST::LoopRange&) override { return true; }
   bool Visit(AST::ForeachBlock&) override { return true; }
   bool Visit(AST::InThreadsBlock&) override { return true; }
+  bool Visit(AST::IfElseBlock&) override { return true; }
   bool Visit(AST::IncrementBlock&) override { return true; }
   bool Visit(AST::FunctionDecl&) override { return true; }
   bool Visit(AST::ChoreoFunction&) override { return true; }
@@ -661,6 +678,10 @@ public:
     TraceEachVisit(n);
     return VisitNode(n);
   }
+  bool Visit(AST::IfElseBlock& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
   bool Visit(AST::IncrementBlock& n) final {
     TraceEachVisit(n);
     return VisitNode(n);
@@ -720,6 +741,7 @@ public:
   virtual bool VisitNode(AST::LoopRange&) { return true; }
   virtual bool VisitNode(AST::ForeachBlock&) { return true; }
   virtual bool VisitNode(AST::InThreadsBlock&) { return true; }
+  virtual bool VisitNode(AST::IfElseBlock&) { return true; }
   virtual bool VisitNode(AST::IncrementBlock&) { return true; }
   virtual bool VisitNode(AST::FunctionDecl&) { return true; }
   virtual bool VisitNode(AST::ChoreoFunction&) { return true; }

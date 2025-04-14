@@ -957,6 +957,12 @@ bool TypeInference::Visit(AST::InThreadsBlock& n) {
   return true;
 }
 
+bool TypeInference::Visit(AST::IfElseBlock& n) {
+  TraceEachVisit(n);
+  cur_type.reset(); // no current type to annotate the stmts inside
+  return true;
+}
+
 bool TypeInference::Visit(AST::IncrementBlock& n) {
   TraceEachVisit(n);
   cur_type.reset(); // no current type to annotate the stmts inside

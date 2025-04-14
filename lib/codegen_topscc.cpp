@@ -200,10 +200,6 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
       ds << d_indent << "}\n";
     }
   } else if (auto fb = dyn_cast<AST::ForeachBlock>(&n)) {
-    if (fb->pred) {
-      DecrDeviceIndent();
-      ds << d_indent << "}\n";
-    }
     const auto& ranges = fb->GetRangeNodes();
     for (int j = ranges->Count() - 1; j >= 0; --j) {
       auto rng = cast<AST::LoopRange>(ranges->ValueAt(j));
@@ -228,6 +224,14 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
       ds << d_indent << "}";
       if (!it->async && it->outer) ds << "\n" << d_indent << "__syncthreads();";
       ds << " // end inthreads\n";
+    }
+  } else if (auto ie = dyn_cast<AST::IfElseBlock>(&n)) {
+    if (IsHost()) {
+      DecrHostIndent();
+      hs << h_indent << "} // end if-else: " << ie->LOC() << "\n";
+    } else {
+      DecrDeviceIndent();
+      ds << d_indent << "} // end if-else " << ie->LOC() << "\n";
     }
   } else if (isa<AST::IncrementBlock>(&n)) {
     if (IsHost()) {
@@ -1436,16 +1440,6 @@ bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
     }
   }
 
-  if (n.pred) {
-    if (IsHost()) {
-      hs << h_indent << "if (" << ExprSTR(n.pred, false) << ") {\n";
-      IncrHostIndent();
-    } else {
-      ds << d_indent << "if (" << ExprSTR(n.pred, false) << ") {\n";
-      IncrDeviceIndent();
-    }
-  }
-
   return true;
 }
 
@@ -1455,6 +1449,21 @@ bool TopsccCodeGen::Visit(AST::InThreadsBlock& n) {
   if (!n.stmts->None())
     ds << d_indent << "if (" << ExprSTR(n.pred, false) << ") {\n";
   IncrDeviceIndent();
+  return true;
+}
+
+bool TopsccCodeGen::Visit(AST::IfElseBlock& n) {
+  TraceEachVisit(n);
+
+  if (IsHost()) {
+    hs << h_indent << "// if-else: " << n.LOC() << "\n";
+    hs << h_indent << "if (" << ExprSTR(n.pred, false) << ") {\n";
+    IncrHostIndent();
+  } else {
+    ds << d_indent << "// if-else: " << n.LOC() << "\n";
+    ds << d_indent << "if (" << ExprSTR(n.pred, false) << ") {\n";
+    IncrDeviceIndent();
+  }
   return true;
 }
 

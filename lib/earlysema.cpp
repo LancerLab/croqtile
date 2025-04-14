@@ -1539,14 +1539,6 @@ bool EarlySemantics::Visit(AST::LoopRange& n) {
 bool EarlySemantics::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
 
-  if (n.pred) {
-    if (!isa<BooleanType>(NodeType(*n.pred))) {
-      Error(n.pred->LOC(), "requires a predication expression but got '" +
-                               PSTR(NodeType(*n.pred)) + "'.");
-      error_count++;
-    }
-  }
-
   for (auto& i : n.GetRanges()) {
     if (auto id = dyn_cast<AST::LoopRange>(i)->iv) {
       if (id->name == "_") {
@@ -1595,6 +1587,17 @@ bool EarlySemantics::Visit(AST::InThreadsBlock& n) {
 
   if (n.async && !n.outer) {
     Error(n.pred->LOC(), "inner inthreads can not be declared as async.");
+    error_count++;
+  }
+
+  return true;
+}
+
+bool EarlySemantics::Visit(AST::IfElseBlock& n) {
+  TraceEachVisit(n);
+  if (!isa<BooleanType>(NodeType(*n.pred))) {
+    Error(n.pred->LOC(), "requires a predication expression but got '" +
+                             PSTR(NodeType(*n.pred)) + "'.");
     error_count++;
   }
 

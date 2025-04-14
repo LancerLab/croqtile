@@ -1025,32 +1025,32 @@ struct ParamList : public Node, public TypeIDProvider<ParamList> {
   __UDT_TYPE_INFO__(Node, ParamList)
 };
 
-struct IfElse : public Node, public TypeIDProvider<IfElse> {
-  ptr<Node> cond;
+struct IfElseBlock : public Node, public TypeIDProvider<IfElseBlock> {
+  ptr<Expr> pred;
   ptr<MultiNodes> if_stmts;
   ptr<MultiNodes> else_stmts; // optional requirements
 
-  IfElse(const location& l, const ptr<Node>& c, const ptr<MultiNodes>& if_s)
-      : Node(l), cond(c), if_stmts(if_s) {}
-  IfElse(const location& l, const ptr<Node>& c, const ptr<MultiNodes>& if_s,
-         const ptr<MultiNodes>& else_s)
-      : Node(l), cond(c), if_stmts(if_s), else_stmts(else_s) {}
+  IfElseBlock(const location& l, const ptr<Expr>& c,
+              const ptr<MultiNodes>& if_s,
+              const ptr<MultiNodes>& else_s = nullptr)
+      : Node(l), pred(c), if_stmts(if_s), else_stmts(else_s) {
+    assert(if_stmts != nullptr && "must contains the if statements.");
+  }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << prefix << "\n`- IF: ";
-    cond->Print(os);
-    os << "\n`---- THEN: ";
-    if_stmts->Print(os);
-    if (!else_stmts->values.empty()) {
-      os << "\n`---- ELSE: ";
-      else_stmts->Print(os);
+    os << prefix << "\n`- Predication: " << PSTR(pred);
+    os << "\n` - If Block: ";
+    if (if_stmts->Count()) if_stmts->Print(os, prefix + " ");
+    if (else_stmts && else_stmts->Count()) {
+      os << "\n` - Else Block: ";
+      else_stmts->Print(os, prefix + " ");
     }
     os << "\n";
   }
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__(Node, IfElse)
+  __UDT_TYPE_INFO__(Node, IfElseBlock)
 };
 
 struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
@@ -1587,18 +1587,16 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
 struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
   ptr<MultiValues> ranges;
   ptr<MultiNodes> stmts;
-  ptr<Expr> pred;
 
   explicit ForeachBlock(const location& l, const ptr<MultiValues>& i,
-                        const ptr<MultiNodes>& s, const ptr<Expr> p = nullptr)
-      : Node(l), ranges(i), stmts(s), pred(p) {
+                        const ptr<MultiNodes>& s)
+      : Node(l), ranges(i), stmts(s) {
     assert(i != nullptr && "missing iteration variables for the statement.");
   }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Foreach Block:";
     ranges->Print(os, prefix + " ");
-    if (pred) os << "\n" << prefix << " `- Predication: " << PSTR(pred);
     if (stmts) { stmts->Print(os, prefix + " "); }
   }
 

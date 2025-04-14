@@ -211,7 +211,7 @@ private:
   VarSet GetAllSymbolicOperands(AST::Node* n) const;
   VarSet SetUnion(const VarSet& a, const VarSet& b) const;
   VarSet SetDiff(const VarSet& a, const VarSet& b) const;
-  bool IsStmt(const AST::Node& n) const;
+  bool HasStmt(const AST::Node& n) const;
   bool IsRef(const AST::Node& n) const;
   std::string GetScopedName(const std::string& name) const;
   void AddUse(const Stmt* s, const std::string& var, bool is_future = false,
@@ -286,6 +286,7 @@ public:
   bool Visit(AST::LoopRange&) override;
   bool Visit(AST::ForeachBlock&) override;
   bool Visit(AST::InThreadsBlock&) override;
+  bool Visit(AST::IfElseBlock&) override;
   bool Visit(AST::IncrementBlock&) override;
   bool Visit(AST::FunctionDecl&) override;
   bool Visit(AST::ChoreoFunction&) override;

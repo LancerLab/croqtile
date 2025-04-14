@@ -190,7 +190,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::Node>> any_code foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal device_passable declaration statement assignment dma_stmt wait_stmt trigger_stmt call_stmt print_stmt swap_stmt expr_or_qes range_expr param_mdspan_val chunkat_or_storage_or_select pred returnable id_or_elem span_init_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
 %nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables future_data_list template_params gi_list ide_list optional_subscriptions
-%nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr span_expr id_expr bound_expr optional_pred
+%nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr span_expr id_expr bound_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
 %nterm <AST::ptr<AST::ParamList>> parameter_list
 %nterm <AST::ptr<AST::Parameter>> parameter
@@ -201,6 +201,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::IntTuple>> unnamed_ituple_decl sugar_unnamed_ituple_decl sugarless_unnamed_ituple_decl
 %nterm <AST::ptr<AST::WithBlock>> within_block
 %nterm <AST::ptr<AST::InThreadsBlock>> inthreads_block
+%nterm <AST::ptr<AST::IfElseBlock>> if_else_block
 %nterm <AST::ptr<AST::WithIn>> within
 %nterm <AST::ptr<AST::WhereBind>> where_bind
 %nterm <AST::ptr<AST::ParallelBy>> paraby_block
@@ -468,6 +469,7 @@ statement
     | paraby_block               { $$ = $1; }
     | within_block               { $$ = $1; }
     | inthreads_block            { $$ = $1; }
+    | if_else_block               { $$ = $1; }
     | foreach_block              { $$ = $1; }
     | increment_block            { $$ = $1; /* TODO: remove? */ }
     ;
@@ -1063,7 +1065,7 @@ within_block
         $$->reqs = $3;
         $$->stmts = $4;
       }
-    | FOREACH withins optional_pred stmts_block {
+    | FOREACH withins stmts_block {
         $$ = AST::Make<AST::WithBlock>(@1);
         $$->withins = $2;
         // compose the range expression for 'foreach'
@@ -1079,7 +1081,7 @@ within_block
           } else
             mn->Append(AST::Make<AST::LoopRange>(wi->LOC(), wi->with));
         }
-        auto fe = AST::Make<AST::ForeachBlock>(@1, mn, $4, $3);
+        auto fe = AST::Make<AST::ForeachBlock>(@1, mn, $3);
         $$->stmts = AST::Make<AST::MultiNodes>(@3);
         $$->stmts->Append(fe);
       }
@@ -1089,6 +1091,13 @@ inthreads_block
     : INTHDS sync_type LPAREN s_expr RPAREN stmts_block {
         $$ = AST::Make<AST::InThreadsBlock>(@1, $4, $6, $2);
       }
+    ;
+
+if_else_block
+    : IF LPAREN s_expr RPAREN stmts_block {
+        $$ = AST::Make<AST::IfElseBlock>(@1, $3, $5, nullptr);
+      }
+      /* TODO: handle if-else */
     ;
 
 withins
@@ -1148,14 +1157,9 @@ where_bind
       }
     ;
 
-optional_pred
-    : /* empty */ { $$ = nullptr; }
-    | IF LPAREN s_expr RPAREN { $$ = $3; }
-    ;
-
 foreach_block
-    : FOREACH range_exprs optional_pred stmts_block {
-        $$ = AST::Make<AST::ForeachBlock>(@1, $2, $4, $3);
+    : FOREACH range_exprs stmts_block {
+        $$ = AST::Make<AST::ForeachBlock>(@1, $2, $3);
       }
     ;
   

@@ -112,7 +112,15 @@ void ParamList::accept(Choreo::Visitor& v) {
   v.Visit(*this);
 }
 
-void IfElse::accept(Choreo::Visitor& v) { (void)v; }
+void IfElseBlock::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+  pred->accept(v);
+  v.Visit(*this);
+  if (if_stmts) if_stmts->accept(v);
+  v.InMidVisit(*this);
+  if (else_stmts) else_stmts->accept(v);
+  v.AfterVisit(*this);
+}
 
 void ParallelBy::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
@@ -237,7 +245,6 @@ void LoopRange::accept(Choreo::Visitor& v) {
 void ForeachBlock::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
   ranges->accept(v);
-  if (pred) pred->accept(v);
   v.Visit(*this);
   if (stmts) stmts->accept(v);
   v.AfterVisit(*this);

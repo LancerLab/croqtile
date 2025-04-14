@@ -98,7 +98,8 @@ public:
       InvalidateVisitorValNOs();
     } else if (isa<AST::ParallelBy>(&n)) {
       vn.EnterScope();
-    } else if (isa<AST::WithBlock>(&n) || isa<AST::InThreadsBlock>(&n)) {
+    } else if (isa<AST::WithBlock>(&n) || isa<AST::InThreadsBlock>(&n) ||
+               isa<AST::IfElseBlock>(&n)) {
       vn.EnterScope();
     } else if (isa<AST::ForeachBlock>(&n) || isa<AST::IncrementBlock>(&n)) {
       vn.EnterScope();
@@ -132,13 +133,21 @@ public:
     return true;
   }
 
+  virtual bool InMidVisitImpl(AST::Node& n) override {
+    if (isa<AST::IfElseBlock>(&n)) {
+      vn.LeaveScope(); // must clear the vn inside if-scope
+      vn.EnterScope();
+    }
+    return true;
+  }
+
   virtual bool AfterVisitImpl(AST::Node& n) override {
     TraceEachVisit(n, false, "after ");
     if (isa<AST::Program>(&n) || isa<AST::ChoreoFunction>(&n) ||
         isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n)) {
       vn.LeaveScope();
     } else if (isa<AST::ForeachBlock>(&n) || isa<AST::InThreadsBlock>(&n) ||
-               isa<AST::IncrementBlock>(&n)) {
+               isa<AST::IfElseBlock>(&n) || isa<AST::IncrementBlock>(&n)) {
       vn.LeaveScope();
     } else if (isa<AST::MultiDimSpans>(&n) || isa<AST::IntTuple>(&n)) {
       vn.ResetListReference();
@@ -1267,6 +1276,17 @@ public:
   };
 
   bool Visit(AST::InThreadsBlock& n) {
+    TraceEachVisit(n);
+
+    // invalidate any current value generated
+    InvalidateVisitorValNOs();
+
+    if (cannot_proceed) return true;
+
+    return true;
+  };
+
+  bool Visit(AST::IfElseBlock& n) {
     TraceEachVisit(n);
 
     // invalidate any current value generated

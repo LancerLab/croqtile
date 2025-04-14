@@ -55,13 +55,13 @@ inline bool LivenessAnalyzer::IsRef(const AST::Node& n) const {
   return n.GetNote().find("ref") != std::string::npos;
 }
 
-bool LivenessAnalyzer::IsStmt(const AST::Node& n) const {
+bool LivenessAnalyzer::HasStmt(const AST::Node& n) const {
   return isa<AST::NamedTypeDecl>(&n) || isa<AST::NamedVariableDecl>(&n) ||
          isa<AST::Assignment>(&n) || isa<AST::DMA>(&n) || isa<AST::Wait>(&n) ||
          isa<AST::Call>(&n) || isa<AST::Rotate>(&n) || isa<AST::Return>(&n) ||
          isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n) ||
          isa<AST::ForeachBlock>(&n) || isa<AST::InThreadsBlock>(&n) ||
-         isa<AST::ChoreoFunction>(&n);
+         isa<AST::IfElseBlock>(&n) || isa<AST::ChoreoFunction>(&n);
 }
 
 inline std::string
@@ -607,7 +607,6 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
       os << (IsValidStride(lr->stride) ? std::to_string(lr->stride) : "")
          << ")";
     }
-    if (fb->pred) os << " if (" << PSTR(fb->pred) << ")";
   } else if (const auto itb = dyn_cast<AST::InThreadsBlock>(&n)) {
     os << "inthreads " << PSTR(itb->pred);
   } else if (const auto cf = dyn_cast<AST::ChoreoFunction>(&n)) {
@@ -640,11 +639,11 @@ bool IsLoopBlock(AST::Node& n) {
 bool ShouldIndent(AST::Node& n) {
   return isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n) ||
          isa<AST::ForeachBlock>(&n) || isa<AST::InThreadsBlock>(&n) ||
-         isa<AST::ChoreoFunction>(&n);
+         isa<AST::IfElseBlock>(&n) || isa<AST::ChoreoFunction>(&n);
 }
 
 bool LivenessAnalyzer::BeforeVisitImpl(AST::Node& n) {
-  if (IsStmt(n)) {
+  if (HasStmt(n)) {
     stmts_preordered.push_back(&n);
 
     current_stmt = &n;
@@ -691,7 +690,7 @@ bool LivenessAnalyzer::BeforeVisitImpl(AST::Node& n) {
 }
 
 bool LivenessAnalyzer::AfterVisitImpl(AST::Node& n) {
-  if (IsStmt(n)) {
+  if (HasStmt(n)) {
     stmt2visit_order[&n].visit_end = stmt_visit_order;
     ++stmt_visit_order;
 
@@ -1120,6 +1119,7 @@ bool LivenessAnalyzer::Visit(AST::LoopRange& n) {
   TraceEachVisit(n);
   return true;
 }
+
 bool LivenessAnalyzer::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
   for (const auto& item : n.GetRanges()) {
@@ -1135,17 +1135,22 @@ bool LivenessAnalyzer::Visit(AST::ForeachBlock& n) {
                "expecting the bound offset in LoopRange is an Identifier.");
     }
   }
-  if (n.pred) {
-    VarSet operands = GetAllSymbolicOperands(n.pred.get());
-    AddUse(current_stmt, operands);
-  }
   return true;
 }
+
 bool LivenessAnalyzer::Visit(AST::InThreadsBlock& n) {
   TraceEachVisit(n);
   AddUse(current_stmt, GetAllSymbolicOperands(n.pred.get()));
   return true;
 }
+
+bool LivenessAnalyzer::Visit(AST::IfElseBlock& n) {
+  TraceEachVisit(n);
+  VarSet operands = GetAllSymbolicOperands(n.pred.get());
+  AddUse(current_stmt, operands);
+  return true;
+}
+
 bool LivenessAnalyzer::Visit(AST::IncrementBlock& n) {
   TraceEachVisit(n);
   return true;

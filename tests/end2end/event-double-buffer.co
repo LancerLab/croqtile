@@ -1,0 +1,80 @@
+// REQUIRES: TARGET-GCU300
+// RUN: choreo -gs -t topscc %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
+
+__device__ void relu_kernel(float* input, float* out, int m, int n) {
+  for (int i = 0; i < m; ++i) {
+    for (int j = 0; j < n; ++j) {
+      out[i*n+j] = input[i*n+j] > 0.0f ? input[i*n+j] : 0.0f;
+    }
+  }
+}
+
+__co__ f32 [512, 1024] relu(f32 [512, 1024] input) { /// device program
+  f32[input.span(0), input.span(1)] output; // use same shape as input
+
+  parallel p by 1, q by 3 {  // p is sip_index
+    with n_tile in [16] {  // decl your tiled spans
+      shared f32 [input.span / {1, #n_tile} ] l2_input[2];
+      local f32 [input.span / {#q - 1, #n_tile} ] l1_out;
+
+      shared event ep[2][2], ef[2][2];
+
+      // prelogue: load the first bunch
+      dma.copy input.chunkat(_, n_tile) => l2_input[0];
+      trigger ef[1];  // allow to fetch the next bunch
+      trigger ep[0];  // allow to process the next bunch
+
+      foreach n_tile {
+        c_idx = n_tile % 2;       // current buffer index
+        n_idx = (c_idx + 1) % 2;  // next buffer index
+
+        // pre-fetch the next bunch
+        inthreads.async (q == #q - 1) {
+          wait ef[n_idx];
+          if (n_tile + 1 < #n_tile)
+            dma.copy input.chunkat(_, n_tile + 1) => l2_input[n_idx];
+          trigger ep[n_idx];
+        }
+
+        inthreads.async (q < #q - 1) {
+          wait ep[c_idx][q];
+          f = dma.copy l2_input[c_idx].chunk(#q - 1, 1).at(q, _) => local;
+          call relu_kernel(f.data, l1_out, f.span(0), f.span(1));
+          dma.copy l1_out => output.chunk(#q - 1, #n_tile).at(q, n_tile);
+          trigger ef[c_idx][q];
+        }
+      }
+    }
+    sync.shared;
+  }
+  return output;
+}
+
+int main() { /// host program
+  choreo::f32 a[512][1024] = {0.0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::f32 b[512][512] = {0};
+  auto input_data = choreo::make_spanview<2, choreo::f32>((float*)a, {512, 1024});
+  input_data.fill_random(-1.0, 1.0);
+
+  auto start = std::chrono::high_resolution_clock::now();
+  auto res
+    = relu(input_data);
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+  std::cout << res.shape()[0] << std::endl;
+  std::cout << res.shape()[1] << std::endl;
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+        // std::cout << "i: " << i << ", j: " << j << "\n";
+        // std::cout << "res: " << res[i][j] << "\n";
+        float ref = input_data[i][j] > 0? input_data[i][j] : 0;
+
+        // std::cout << "ref: " << ref << std::endl;
+        choreo::choreo_assert(ref == res[i][j], "error: the result is not correct");
+      }
+  std::cout << "TEST PASSED!\n" << std::endl;
+  std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
+}
+
+// CHECK: TEST PASSED!

@@ -520,6 +520,12 @@ public:
     return true;
   }
 
+  bool Visit(AST::IfElseBlock& n) override {
+    TraceEachVisit(n);
+    if (cannot_proceed) return true;
+    return true;
+  }
+
   bool Visit(AST::IncrementBlock& n) override {
     TraceEachVisit(n);
     if (cannot_proceed) return true;
