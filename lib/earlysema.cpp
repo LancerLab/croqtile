@@ -1595,6 +1595,8 @@ bool EarlySemantics::Visit(AST::InThreadsBlock& n) {
 
 bool EarlySemantics::Visit(AST::IfElseBlock& n) {
   TraceEachVisit(n);
+  if (isa<AST::Call>(n.pred)) return true; // can not derive function call
+
   if (!isa<BooleanType>(NodeType(*n.pred))) {
     Error(n.pred->LOC(), "requires a predication expression but got '" +
                              PSTR(NodeType(*n.pred)) + "'.");

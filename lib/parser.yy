@@ -1097,6 +1097,9 @@ if_else_block
     : IF LPAREN s_expr RPAREN stmts_block {
         $$ = AST::Make<AST::IfElseBlock>(@1, $3, $5, nullptr);
       }
+    | IF LPAREN call_stmt RPAREN stmts_block {
+        $$ = AST::Make<AST::IfElseBlock>(@1, $3, $5, nullptr);
+      }
       /* TODO: handle if-else */
     ;
 

@@ -1,0 +1,9 @@
+// RUN: choreo -t topscc -es %s -o - | FileCheck %s
+
+__co__ void foo(int a, f32 [1, 2] b) {
+  parallel p by 3 {
+    if (call bar(3, p, a, b.span(0))) { }
+  }
+}
+
+// CHECK: if (bar((3), __tops_tid_x(), a, (1)))

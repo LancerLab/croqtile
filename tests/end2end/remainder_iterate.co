@@ -28,7 +28,7 @@ __co__ s32 [N, 17, 128] remainder_iterate(s32 [N, 17, 128] lhs, s32 [N, 17, 128]
       }
 
       // iteratively handle the remainders part [#n * #p, N) using single thread
-      foreach nr, x, y if (p == 0) {
+      inthreads (p == 0) foreach nr, x, y {
         lhs_load = dma.copy.async lhs.chunk(N, #x, #y).at(#n * #p + nr, x, y) => local;
         rhs_load = dma.copy.async rhs.chunk(N, #x, #y).at(#n * #p + nr, x, y) => local;
         wait lhs_load, rhs_load;

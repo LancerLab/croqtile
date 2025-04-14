@@ -229,6 +229,8 @@ private:
   std::map<std::string, std::string> claimed_dte;
   std::vector<std::string> pld_checklist = {};
 
+  bool emit_call = true; // emit the call statement
+
 private:
   void EmitFixedHostHead();
   void EmitFixedDeviceHead();
@@ -262,6 +264,7 @@ private:
     claimed_dte.clear();
     fty = nullptr;
     void_return = false;
+    emit_call = true;
   }
 
   std::string GenHostParamName() {
@@ -346,6 +349,7 @@ private:
 
   const std::string ValueSTR(const ValueItem& vi) const;
   const std::string ExprSTR(AST::ptr<AST::Node>, bool is_host = true) const;
+  const std::string CallSTR(AST::Call&) const;
 };
 
 } // namespace Topscc

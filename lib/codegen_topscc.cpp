@@ -131,6 +131,8 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
       hs << h_indent << "// foreach: " << n.LOC() << "\n";
     else
       ds << d_indent << "// foreach: " << n.LOC() << "\n";
+  } else if (isa<AST::IfElseBlock>(&n)) {
+    emit_call = false;
   } else if (isa<AST::IncrementBlock>(&n)) {
     if (IsHost()) {
       hs << h_indent << "// incr: " << n.LOC() << "\n";
@@ -233,6 +235,7 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
       DecrDeviceIndent();
       ds << d_indent << "} // end if-else " << ie->LOC() << "\n";
     }
+    emit_call = true;
   } else if (isa<AST::IncrementBlock>(&n)) {
     if (IsHost()) {
       DecrHostIndent();
@@ -1318,6 +1321,8 @@ bool TopsccCodeGen::Visit(AST::Trigger& n) {
 bool TopsccCodeGen::Visit(AST::Call& n) {
   TraceEachVisit(n);
 
+  if (!emit_call) return true;
+
   auto& os = (IsHost()) ? hs : ds;
   auto& indent = (IsHost()) ? h_indent : d_indent;
 
@@ -1343,32 +1348,7 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
                          "' is not supported by this target.");
   }
 
-  os << indent << n.function->name;
-
-  // emit template arguments
-  if (n.template_args) {
-    os << "<";
-    size_t i = 0;
-    for (auto& ta : n.template_args->AllValues())
-      os << ((i++ == 0) ? "" : ", ") << ExprSTR(ta, IsHost());
-    os << ">";
-  }
-
-  os << "(";
-  size_t i = 0;
-  for (auto& a : n.GetArguments()) {
-    os << ((i++ == 0) ? "" : ", ");
-    if (auto sty = GetSpannedType(NodeType(*a))) {
-      std::string bts{NameBaseType(sty->ElementType(), IsHost())};
-      if (!no_decay_spanview || IsHost())
-        os << "(" << bts << "*)" << ExprSTR(a, IsHost());
-      else
-        os << "choreo::make_spanview<" << sty->Dims() << ">((" << bts << "*)"
-           << ExprSTR(a, IsHost()) << ", " << LSTR(sty->GetShape()) << ")";
-    } else
-      os << UnScopedExpr(ExprSTR(a, IsHost()));
-  }
-  os << ");\n";
+  os << indent << CallSTR(n) << ";\n";
 
   return true;
 }
@@ -1457,11 +1437,17 @@ bool TopsccCodeGen::Visit(AST::IfElseBlock& n) {
 
   if (IsHost()) {
     hs << h_indent << "// if-else: " << n.LOC() << "\n";
-    hs << h_indent << "if (" << ExprSTR(n.pred, false) << ") {\n";
+    if (auto c = dyn_cast<AST::Call>(n.pred))
+      hs << h_indent << "if (" << CallSTR(*c) << ") {\n";
+    else
+      hs << h_indent << "if (" << ExprSTR(n.pred, true) << ") {\n";
     IncrHostIndent();
   } else {
     ds << d_indent << "// if-else: " << n.LOC() << "\n";
-    ds << d_indent << "if (" << ExprSTR(n.pred, false) << ") {\n";
+    if (auto c = dyn_cast<AST::Call>(n.pred))
+      ds << d_indent << "if (" << CallSTR(*c) << ") {\n";
+    else
+      ds << d_indent << "if (" << ExprSTR(n.pred, false) << ") {\n";
     IncrDeviceIndent();
   }
   return true;
@@ -2007,5 +1993,36 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
   } else
     choreo_unreachable("unsupported expression '" + expr->GetOp() + "'.");
 
+  return oss.str();
+}
+
+const std::string TopsccCodeGen::CallSTR(AST::Call& n) const {
+  std::ostringstream oss;
+  oss << n.function->name;
+
+  // emit template arguments
+  if (n.template_args) {
+    oss << "<";
+    size_t i = 0;
+    for (auto& ta : n.template_args->AllValues())
+      oss << ((i++ == 0) ? "" : ", ") << ExprSTR(ta, IsHost());
+    oss << ">";
+  }
+
+  oss << "(";
+  size_t i = 0;
+  for (auto& a : n.GetArguments()) {
+    oss << ((i++ == 0) ? "" : ", ");
+    if (auto sty = GetSpannedType(NodeType(*a))) {
+      std::string bts{NameBaseType(sty->ElementType(), IsHost())};
+      if (!no_decay_spanview || IsHost())
+        oss << "(" << bts << "*)" << ExprSTR(a, IsHost());
+      else
+        oss << "choreo::make_spanview<" << sty->Dims() << ">((" << bts << "*)"
+            << ExprSTR(a, IsHost()) << ", " << LSTR(sty->GetShape()) << ")";
+    } else
+      oss << UnScopedExpr(ExprSTR(a, IsHost()));
+  }
+  oss << ")";
   return oss.str();
 }

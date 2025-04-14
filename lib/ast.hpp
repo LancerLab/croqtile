@@ -1026,11 +1026,11 @@ struct ParamList : public Node, public TypeIDProvider<ParamList> {
 };
 
 struct IfElseBlock : public Node, public TypeIDProvider<IfElseBlock> {
-  ptr<Expr> pred;
+  ptr<Node> pred;
   ptr<MultiNodes> if_stmts;
   ptr<MultiNodes> else_stmts; // optional requirements
 
-  IfElseBlock(const location& l, const ptr<Expr>& c,
+  IfElseBlock(const location& l, const ptr<Node>& c,
               const ptr<MultiNodes>& if_s,
               const ptr<MultiNodes>& else_s = nullptr)
       : Node(l), pred(c), if_stmts(if_s), else_stmts(else_s) {
@@ -1038,7 +1038,8 @@ struct IfElseBlock : public Node, public TypeIDProvider<IfElseBlock> {
   }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << prefix << "\n`- Predication: " << PSTR(pred);
+    os << prefix << "\n`- Predication: ";
+    pred->Print(os, " ");
     os << "\n` - If Block: ";
     if (if_stmts->Count()) if_stmts->Print(os, prefix + " ");
     if (else_stmts && else_stmts->Count()) {
