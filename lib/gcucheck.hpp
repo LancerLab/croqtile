@@ -722,7 +722,7 @@ public:
         error_count++;
 #endif
       }
-      if (sty->RuntimeShaped()) {
+      if (sty->RuntimeShaped() && !CCtx().MemReuse()) {
         Error(n.LOC(), "GCU forbids shared variable '" + n.name_str +
                            "` to be dynamically shaped (by " +
                            STR(sty->GetShape()) + ").");
@@ -743,7 +743,7 @@ public:
 #endif
       } else if (local_level == 0)
         local_level = parallel_level;
-      if (sty->RuntimeShaped()) {
+      if (sty->RuntimeShaped() && !CCtx().MemReuse()) {
         Error(n.LOC(), "GCU forbids local variable '" + n.name_str +
                            "` to be dynamically shaped (by " +
                            STR(sty->GetShape()) + ").");

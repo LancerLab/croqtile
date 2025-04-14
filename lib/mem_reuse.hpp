@@ -3,6 +3,7 @@
 
 #include "ast.hpp"
 #include "context.hpp"
+#include "ginac/ginac.h"
 #include "liveness_analysis.hpp"
 #include "typeresolve.hpp"
 #include "types.hpp"
@@ -12,6 +13,177 @@
 #include <numeric>
 
 namespace Choreo {
+
+struct MemAnalyzer : public VisitorWithSymTab {
+  using SymValno = size_t;
+  using Symbol = GiNaC::symbol;
+  using SymExpr = GiNaC::ex;
+
+  std::unordered_map<std::string, Storage> buf2sto;
+
+  using BSize = std::variant<size_t, SymExpr>;
+  std::unordered_map<std::string, BSize> buf_sizes;
+
+  std::map<std::string, SymExpr> sym_expr_map;
+
+  inline bool IsRef(const AST::Node& n) const {
+    return n.GetNote().find("ref") != std::string::npos;
+  }
+
+  MemAnalyzer() : VisitorWithSymTab("memanlz", CCtx().GetGlobalSymbolTable()) {}
+  ~MemAnalyzer() {}
+
+  std::map<std::string, Symbol> symbol_map;
+  SymExpr GetSymExprFromSizeExpr(std::string size_expr) {
+    auto IsOperator = [](char c) -> bool {
+      return c == '+' || c == '-' || c == '*' || c == '/' || c == '%';
+    };
+
+    std::string temp = "";
+    for (auto c : size_expr)
+      if (c != ' ') temp += c;
+    size_expr = temp;
+
+    std::function<SymExpr(std::string)> HelperFunc = [&](std::string str) {
+      size_t size = str.length();
+      assert(!str.empty());
+      if (str[0] != '(') { return GetSymExprFromStr(str); }
+      size_t idx = 0;
+      size_t leftCount = 0;
+      do {
+        char c = str[idx];
+        if (c == '(') {
+          leftCount++;
+        } else if (c == ')') {
+          leftCount--;
+        }
+        if (leftCount == 0) { break; }
+        idx++;
+      } while (idx < size);
+
+      auto left_expr = HelperFunc(str.substr(1, idx - 1));
+
+      if (idx == size - 1) { return left_expr; }
+      char c = str[++idx];
+      if (!IsOperator(c))
+        choreo_unreachable("The operator(sigle char) " + std::string(1, c) +
+                           " is not supported in MemAnalyzer yet.");
+      std::string op = std::string(1, c);
+      auto right_expr = HelperFunc(str.substr(idx + 1));
+      SymExpr res;
+      if (op == "+") {
+        res = SymExpr(left_expr + right_expr);
+      } else if (op == "-") {
+        res = SymExpr(left_expr - right_expr);
+      } else if (op == "*") {
+        res = SymExpr(left_expr * right_expr);
+      } else if (op == "/" || op == "%") {
+        res = StringifyOpFromSymExpr(left_expr, op, right_expr);
+      } else {
+      }
+      return res;
+    };
+
+    return HelperFunc(size_expr);
+  }
+
+  bool BeforeVisitImpl(AST::Node& n) {
+    if (auto cf = dyn_cast<AST::ChoreoFunction>(&n)) {
+      for (const auto& param : cf->f_decl.params->values) {
+        if (param->HasSymbol()) {
+          std::string sname = InScopeName(param->sym->name);
+          if (auto sty = dyn_cast<SpannedType>(param->GetType())) {
+            VST_DEBUG(dbgs() << "[memanlz] BUFFER: " << sname << "\n");
+            buf2sto.emplace(sname, sty->GetStorage());
+            if (!sty->RuntimeShaped()) {
+              // TODO: should we align the size to 512?!
+              VST_DEBUG(dbgs()
+                        << "\tstatic  size:  " << sty->ByteSize() << "\n");
+              buf_sizes.emplace(sname, sty->ByteSize());
+            } else {
+              auto shape_expr = sty->ShapeSizeExpression();
+              auto size_expr = sty->ByteSizeExpression();
+              if (!sym_expr_map.count(shape_expr)) {
+                auto sym_expr = (GetSymExprFromSizeExpr(shape_expr) *
+                                 SymExpr(SizeOf(sty->f_type)))
+                                    .expand();
+                sym_expr_map.emplace(shape_expr, sym_expr);
+              }
+              // buf_sizes.emplace(sname, sym_expr_map.at(size_expr));
+              VST_DEBUG({
+                dbgs() << "\tdynamic  size: " << size_expr
+                       << "\n\tsymbolic size: " << sym_expr_map.at(size_expr)
+                       << "\n";
+              });
+            }
+          }
+        }
+      }
+    }
+    return true;
+  }
+
+  bool AfterVisitImpl(AST::Node&) { return true; }
+
+  bool Visit(AST::NamedVariableDecl& n) {
+    auto ty = GetSymbolType(n.name_str);
+    if (auto sty = dyn_cast<SpannedType>(ty)) {
+      if (!IsRef(n)) {
+        auto sname = InScopeName(n.name_str);
+        VST_DEBUG(dbgs() << "[memanlz] BUFFER: " << sname << "\n");
+        buf2sto.emplace(sname, sty->GetStorage());
+        if (!sty->RuntimeShaped()) {
+          buf_sizes.emplace(sname, sty->ByteSize());
+          VST_DEBUG(dbgs() << "\tstatic  size:  " << sty->ByteSize() << "\n");
+        } else {
+          auto shape_expr = sty->ShapeSizeExpression();
+          auto size_expr = sty->ByteSizeExpression();
+          if (!sym_expr_map.count(shape_expr)) {
+            auto sym_expr = (GetSymExprFromSizeExpr(shape_expr) *
+                             SymExpr(SizeOf(sty->f_type)))
+                                .expand();
+            sym_expr_map.emplace(shape_expr, sym_expr);
+          }
+          // buf_sizes.emplace(sname, sym_expr_map.at(size_expr));
+          VST_DEBUG({
+            dbgs() << "\tdynamic  size: " << size_expr
+                   << "\n\tsymbolic size: " << sym_expr_map.at(size_expr)
+                   << "\n";
+          });
+        }
+      }
+    }
+    return true;
+  }
+
+private:
+  static inline std::string ExSTR(const SymExpr& sym_expr) {
+    std::ostringstream oss;
+    oss << sym_expr;
+    return oss.str();
+  }
+
+  SymExpr StringifyOpFromSymExpr(const SymExpr& sym_expr_l,
+                                 const std::string& op,
+                                 const SymExpr& sym_expr_r) {
+    std::string symbol_name;
+    std::string sym_expr_l_str = ExSTR(sym_expr_l.expand());
+    std::string sym_expr_r_str = ExSTR(sym_expr_r.expand());
+    symbol_name = "(" + sym_expr_l_str + op + sym_expr_r_str + ")";
+    return GetSymExprFromStr(symbol_name);
+  }
+
+  SymExpr GetSymExprFromStr(std::string str) {
+    if (symbol_map.count(str)) return SymExpr(symbol_map.at(str));
+    auto IsNumber = [](const std::string& str) {
+      return !str.empty() && std::all_of(str.begin(), str.end(), ::isdigit);
+    };
+    if (IsNumber(str)) { return SymExpr(std::stoi(str)); }
+    Symbol symbol(str, str);
+    symbol_map.emplace(str, symbol);
+    return SymExpr(symbol);
+  }
+};
 
 struct MemReuse : public VisitorWithSymTab {
   using StrUintMap = LivenessAnalyzer::StrUintMap;
@@ -208,14 +380,14 @@ private:
   }
 
 public:
-  MemReuse(const LivenessAnalyzer& la)
+  MemReuse(const LivenessAnalyzer& la, const MemAnalyzer& ma)
       : VisitorWithSymTab("memreuse", CCtx().GetGlobalSymbolTable()), la(la),
-        buf2sto(la.Buf2Sto()) {
+        buf2sto(ma.buf2sto) {
     if (trace_visit) debug_visit = true; // force debug when tracing
     if (debug_visit) type_equals.SetDebug(true);
 
     const auto& var_ranges = la.VarRanges();
-    for (const auto& [sname, size] : la.BufSizes()) {
+    for (const auto& [sname, size] : ma.buf_sizes) {
       auto ranges = var_ranges.at(sname);
       // For now, there is no case that a var is used in multiple ranges.
       // Because there is no reassignment.
@@ -231,8 +403,8 @@ public:
         choreo_unreachable(
             "multiple ranges for a buffer is not supported yet.");
       }
-      buffers.push_back(
-          {size, ranges.Values()[0].start, ranges.Values()[0].end, sname});
+      buffers.push_back({std::get<size_t>(size), ranges.Values()[0].start,
+                         ranges.Values()[0].end, sname});
     }
     AnalyzeMemOffset();
   }
@@ -274,7 +446,7 @@ public:
     std::map<std::string, HeapSimulator::Chunks> local_chunks_map;
     std::map<std::string, HeapSimulator::Chunks> shared_chunks_map;
 
-    for (const auto buffer : buffers) {
+    for (const auto& buffer : buffers) {
       auto func_name = GetFuncNameFromScopedName(buffer.buffer_id);
       if (auto sto = buf2sto.at(buffer.buffer_id); sto == Storage::LOCAL) {
         local_chunks_map[func_name].push_back(buffer);

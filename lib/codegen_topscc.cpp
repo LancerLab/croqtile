@@ -488,7 +488,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
         if (CCtx().MemReuse()) {
           if (n.note.find("spm") != std::string::npos) {
             ds << d_indent << type_modifiers << bts << " " << sym << "["
-               << ElemCountExprOf(*sty) << "];\n";
+               << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
           } else {
             auto notes = SplitStringByDelimiter(n.note, ", ");
             auto reuse_idx = std::find(notes.begin(), notes.end(), "reuse");
@@ -497,7 +497,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
               assert(offset_idx == notes.end());
               // TODO: should we DCE the unused buffer?
               ds << d_indent << type_modifiers << bts << " " << sym << "["
-                 << ElemCountExprOf(*sty) << "];\n";
+                 << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
             } else {
               auto reuse_name = *(reuse_idx + 1);
               auto offset = std::stoull(*(offset_idx + 1));
@@ -506,7 +506,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
                  << reuse_name << " + " << offset << ";\n";
 #else
               ds << d_indent << type_modifiers << bts << " " << sym << "["
-                 << ElemCountExprOf(*sty) << "];\n";
+                 << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
               ds << d_indent << sym << " = (" << bts << "*)" << reuse_name
                  << " + " << offset << ";\n";
 #endif
@@ -515,7 +515,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
         } else {
           ds << d_indent << type_modifiers << bts << " " << sym;
           for (auto dim : n.ArrayDimensions()) ds << "[" << dim << "]";
-          ds << "[" << ElemCountExprOf(*sty) << "];\n";
+          ds << "[" << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
         }
         ssm.MapDeviceSymbol(InScopeName(sym), sym);
         spmem = true;
@@ -951,8 +951,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
           size_t idx = i;
           if (isa<TransposeConfig>(config))
             idx = cast<TransposeConfig>(config)->dim_values[i];
-          offset << "(int)(" << i_expr << " * " << STR(shape.ValueAt(idx))
-                 << ")";
+          offset << "(int)(" << i_expr << " * "
+                 << UnScopedExpr(STR(shape.ValueAt(idx))) << ")";
         }
         ++i;
       }
@@ -1362,7 +1362,7 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
         os << "choreo::make_spanview<" << sty->Dims() << ">((" << bts << "*)"
            << ExprSTR(a, IsHost()) << ", " << LSTR(sty->GetShape()) << ")";
     } else
-      os << ExprSTR(a, IsHost());
+      os << UnScopedExpr(ExprSTR(a, IsHost()));
   }
   os << ");\n";
 

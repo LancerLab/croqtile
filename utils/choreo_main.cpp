@@ -133,7 +133,9 @@ int main(int argc, char* argv[]) {
         errs() << "Memory reuse only works in Topscc target.\n";
         return 1;
       }
-      MemReuse mr(la);
+      MemAnalyzer ma;
+      if (!ma.RunOnProgram(root)) return ma.Status();
+      MemReuse mr(la, ma);
       if (!mr.RunOnProgram(root)) return mr.Status();
     }
   } else if (CCtx().MemReuse()) {

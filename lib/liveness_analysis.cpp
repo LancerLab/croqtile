@@ -174,20 +174,12 @@ void LivenessAnalyzer::AddUse(const Stmt* s, const VarSet& vars, bool is_future,
   for (const auto& var : vars) AddUse(s, var, is_future, add_extra_use);
 }
 
-void LivenessAnalyzer::AddDef(const Stmt* s, const std::string& var,
-                              bool is_buffer) {
+void LivenessAnalyzer::AddDef(const Stmt* s, const std::string& var) {
   std::string svar = GetScopedName(var);
   VST_DEBUG(dbgs() << "def: " << svar << "\n");
   linfo[s].def.insert(svar);
   var_events[svar].push_back({"def", SSTab().ScopeName()});
-  if (is_buffer)
-    VST_DEBUG(dbgs() << "\tis buffer, size: "
-                     << (buf_sizes.count(svar)
-                             ? std::to_string(buf_sizes.at(svar))
-                             : "runtime shaped")
-                     << "\n\n");
-  else
-    VST_DEBUG(dbgs() << "\n");
+  VST_DEBUG(dbgs() << "\n");
 }
 
 void LivenessAnalyzer::AddBufStmt(const Stmt* s, Storage sto) {
@@ -197,18 +189,9 @@ void LivenessAnalyzer::AddBufStmt(const Stmt* s, Storage sto) {
   buffers.insert(sbuf);
   buf_nodes[sto].insert(nvd);
   switch (sto) {
-  case Storage::GLOBAL:
-    global_buffers.insert(sbuf);
-    buf2sto.emplace(sbuf, sto);
-    break;
-  case Storage::SHARED:
-    shared_buffers.insert(sbuf);
-    buf2sto.emplace(sbuf, sto);
-    break;
-  case Storage::LOCAL:
-    local_buffers.insert(sbuf);
-    buf2sto.emplace(sbuf, sto);
-    break;
+  case Storage::GLOBAL: global_buffers.insert(sbuf); break;
+  case Storage::SHARED: shared_buffers.insert(sbuf); break;
+  case Storage::LOCAL: local_buffers.insert(sbuf); break;
   default: assert(false && "expecting the storage is SHARED, LOCAL or GLOBAL!");
   }
 }
@@ -695,18 +678,10 @@ bool LivenessAnalyzer::BeforeVisitImpl(AST::Node& n) {
           assert((sty->GetStorage() == Storage::GLOBAL ||
                   sty->GetStorage() == Storage::DEFAULT) &&
                  "expecting the storage is GLOBAL!");
-          buf2sto.emplace(sname, Storage::GLOBAL);
           global_buffers.insert(sname);
-          if (!sty->RuntimeShaped()) {
-            // TODO: should we align the size to 512?!
-            buf_sizes.emplace(sname, sty->ByteSize());
-          } else {
-            // TODO: handle the runtime shaped buffer.
-            // the buffers which are runtime shaped is not in `buf_sizes`.
-          }
-          AddDef(current_stmt, sname, true);
+          AddDef(current_stmt, sname);
         } else {
-          AddDef(current_stmt, sname, true);
+          AddDef(current_stmt, sname);
         }
       }
     }
@@ -847,9 +822,7 @@ bool LivenessAnalyzer::Visit(AST::NamedVariableDecl& n) {
     linfo[current_stmt].buffer_related = true;
     if (!IsRef(n)) {
       AddBufStmt(current_stmt, sty->GetStorage());
-      if (!sty->RuntimeShaped())
-        buf_sizes.emplace(InScopeName(n.name_str), sty->ByteSize());
-      AddDef(current_stmt, n.name_str, true);
+      AddDef(current_stmt, n.name_str);
     } else {
       VST_DEBUG(dbgs() << "The nvd is a reference: " << STR(n) << ".\n\n");
       assert(n.init_expr && "expecting the init_expr is not nullptr.");

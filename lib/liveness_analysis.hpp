@@ -202,10 +202,7 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
   }
   ~LivenessAnalyzer() {}
 
-  StrUintMap buf_sizes;
   std::unordered_map<std::string, Ranges> var_ranges;
-
-  std::unordered_map<std::string, Storage> buf2sto;
 
   VarSet dma_any;
 
@@ -221,7 +218,7 @@ private:
               bool add_extra_use = true);
   void AddUse(const Stmt* s, const VarSet& vars, bool is_future = false,
               bool add_extra_use = true);
-  void AddDef(const Stmt* s, const std::string& var, bool is_buffer = false);
+  void AddDef(const Stmt* s, const std::string& var);
   void AddBufStmt(const Stmt* s, Storage sto);
   void AddAlias(const std::string& alias_var, const std::string& original_var);
   void RemoveAlias(const std::string& alias_var);
@@ -242,11 +239,6 @@ public:
   const std::string STMTS_STR() const { return stmts_with_indent.str(); }
   const std::unordered_map<std::string, Ranges>& VarRanges() const {
     return var_ranges;
-  }
-
-  const StrUintMap& BufSizes() const { return buf_sizes; }
-  const std::unordered_map<std::string, Storage>& Buf2Sto() const {
-    return buf2sto;
   }
 
 public:
