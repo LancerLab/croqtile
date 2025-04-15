@@ -801,15 +801,17 @@ struct DataType : public Node, public TypeIDProvider<DataType> {
   size_t rank = GetInvalidRank(); // for annotated ituple only
   ptr<Node> mdspan_type = nullptr;
   std::vector<size_t> array_dims;
+  bool is_mutable = false;
 
 public:
-  explicit DataType(const location& l, BaseType t)
-      : Node(l), base_type(t), mdspan_type(nullptr) {
+  explicit DataType(const location& l, BaseType t, bool m = false)
+      : Node(l), base_type(t), mdspan_type(nullptr), is_mutable(m) {
     InitSemaType();
   }
 
-  explicit DataType(const location& l, BaseType bt, const ptr<Node>& st)
-      : Node(l), base_type(bt), mdspan_type(st) {
+  explicit DataType(const location& l, BaseType bt, const ptr<Node>& st,
+                    bool m = false)
+      : Node(l), base_type(bt), mdspan_type(st), is_mutable(m) {
     assert(bt != BaseType::ITUPLE && "unexpected type!");
     assert(bt != BaseType::INT && "unexpected type!");
     assert(bt != BaseType::BOOL && "unexpected type!");
@@ -848,12 +850,17 @@ public:
   bool isITuple() const { return base_type == BaseType::ITUPLE; }
   bool isSpanned() const { return (bool)mdspan_type; }
 
+  bool IsMutable() const { return is_mutable; }
+  void SetMutable(bool m) { is_mutable = m; }
+
+  // force regeneration of sema type
+  void ReGenSemaType() { InitSemaType(); }
+
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << prefix << STR(base_type);
-    if (isSpanned()) {
-      os << " ";
-      mdspan_type->Print(os);
-    }
+    os << prefix;
+    if (is_mutable) os << "mutable ";
+    os << STR(base_type);
+    if (isSpanned()) os << " " << STR(mdspan_type);
   }
 
   void accept(Visitor&) override;
@@ -861,13 +868,15 @@ public:
 private:
   ptr<Type> InitSemaType() {
     switch (base_type) {
-    case BaseType::INT: SetType(MakeIntegerType()); break;
-    case BaseType::BOOL: SetType(MakeBooleanType()); break;
+    case BaseType::INT: SetType(MakeIntegerType(is_mutable)); break;
+    case BaseType::BOOL: SetType(MakeBooleanType(is_mutable)); break;
     case BaseType::HALF8:
     case BaseType::HALF:
     case BaseType::BFP16:
     case BaseType::FLOAT:
-    case BaseType::DOUBLE: SetType(MakeScalarFloatType(base_type)); break;
+    case BaseType::DOUBLE:
+      SetType(MakeScalarFloatType(base_type, is_mutable));
+      break;
     case BaseType::F32:
     case BaseType::F16:
     case BaseType::BF16:
@@ -920,6 +929,7 @@ struct NamedVariableDecl : public Node,
   const ptr<Node> init_expr = nullptr;  // associated initializer
   const ptr<Node> init_value = nullptr; // associated initial value
   std::vector<size_t> array_dims = {};  // has element when it is an array
+  bool is_mutable = false;
 
   explicit NamedVariableDecl(const location& l, const std::string& n,
                              const ptr<DataType>& t = nullptr,
@@ -953,6 +963,8 @@ struct NamedVariableDecl : public Node,
   bool IsArray() const { return !array_dims.empty(); }
   bool ArrayDimension(size_t idx) const { return array_dims.at(idx); }
   const std::vector<size_t>& ArrayDimensions() const { return array_dims; }
+  bool IsMutable() const { return is_mutable; }
+  void SetMutable(bool m) { is_mutable = m; }
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
     os << "\n" << prefix << "`- Var Decl (";

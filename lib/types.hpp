@@ -765,10 +765,20 @@ struct PlaceHolderType final : public Type,
 };
 
 struct ScalarType : public Type, public TypeIDProvider<ScalarType> {
-  ScalarType(TypeCategory t) : Type(t) {}
+  bool is_mutable = false;
+  ScalarType(TypeCategory t, bool m) : Type(t), is_mutable(m) {}
   size_t Dims() const override { return 1; }
   bool IsComplete() const override { return true; }
   bool HasSufficientInfo() const override { return true; }
+  virtual bool IsMutable() const { return is_mutable; }
+  virtual void SetMutable(bool m) { is_mutable = m; }
+  virtual ptr<ScalarType> Clone(bool m) const = 0;
+
+  bool operator==(const Type& ty) const override {
+    if (auto sty = dyn_cast<ScalarType>(&ty))
+      return sty->is_mutable == is_mutable;
+    return false;
+  }
 
   virtual bool IsFloat() const { return false; }
   virtual bool IsBoolInteger() const { return true; }
@@ -779,10 +789,16 @@ struct ScalarType : public Type, public TypeIDProvider<ScalarType> {
 
 inline bool ConvertibleToInt(const Type& ty);
 
-struct IntegerType : public ScalarType, public TypeIDProvider<IntegerType> {
+struct IntegerType final : public ScalarType,
+                           public TypeIDProvider<IntegerType> {
   ValueItem value = GetInvalidValueItem(); // optional value expression
-  IntegerType() : ScalarType(TypeCategory::INT) {}
-  IntegerType(const ValueItem& vi) : ScalarType(TypeCategory::INT), value(vi) {}
+  IntegerType(bool m) : ScalarType(TypeCategory::INT, m) {}
+  IntegerType(const ValueItem& vi, bool m)
+      : ScalarType(TypeCategory::INT, m), value(vi) {}
+
+  ptr<ScalarType> Clone(bool m) const {
+    return std::make_shared<IntegerType>(m);
+  }
   void Print(std::ostream& os) const override {
     os << "int" << (IsValidValueItem(value) ? (" [" + STR(value) + "]") : "");
   }
@@ -795,9 +811,11 @@ struct IntegerType : public ScalarType, public TypeIDProvider<IntegerType> {
   }
 
   bool operator==(const Type& ty) const override {
+    return isa<IntegerType>(&ty) && ScalarType::operator==(ty);
+  }
+  bool ApprxEqual(const Type& ty) const override {
     return isa<IntegerType>(&ty);
   }
-  bool ApprxEqual(const Type& ty) const override { return operator==(ty); }
 
   bool LogicalEqual(const Type& ty) const override {
     return ConvertibleToInt(ty);
@@ -808,77 +826,110 @@ struct IntegerType : public ScalarType, public TypeIDProvider<IntegerType> {
 
 struct ScalarFloatType : public ScalarType,
                          public TypeIDProvider<ScalarFloatType> {
-  ScalarFloatType(TypeCategory t) : ScalarType(t) {}
+  ScalarFloatType(TypeCategory t, bool m) : ScalarType(t, m) {}
   bool IsFloat() const override { return true; }
   bool IsBoolInteger() const override { return false; }
   __UDT_TYPE_INFO__(ScalarType, ScalarFloatType)
 };
 
-struct Half8Type : public ScalarFloatType, public TypeIDProvider<Half8Type> {
-  Half8Type() : ScalarFloatType(TypeCategory::HALF8) {}
+struct Half8Type final : public ScalarFloatType,
+                         public TypeIDProvider<Half8Type> {
+  Half8Type(bool m) : ScalarFloatType(TypeCategory::HALF8, m) {}
+  ptr<ScalarType> Clone(bool m) const override {
+    return std::make_shared<Half8Type>(m);
+  }
   void Print(std::ostream& os) const override { os << "half8"; }
   const std::string Name() const override { return "half8"; }
 
-  bool operator==(const Type& ty) const override { return isa<Half8Type>(&ty); }
-  bool ApprxEqual(const Type& ty) const override { return operator==(ty); }
+  bool operator==(const Type& ty) const override {
+    return isa<Half8Type>(&ty) && ScalarType::operator==(ty);
+  }
+  bool ApprxEqual(const Type& ty) const override { return isa<Half8Type>(&ty); }
 
   __UDT_TYPE_INFO__(ScalarFloatType, Half8Type)
 };
 
-struct HalfType : public ScalarFloatType, public TypeIDProvider<HalfType> {
-  HalfType() : ScalarFloatType(TypeCategory::HALF) {}
+struct HalfType final : public ScalarFloatType,
+                        public TypeIDProvider<HalfType> {
+  HalfType(bool m) : ScalarFloatType(TypeCategory::HALF, m) {}
+  ptr<ScalarType> Clone(bool m) const override {
+    return std::make_shared<HalfType>(m);
+  }
   void Print(std::ostream& os) const override { os << "half"; }
   const std::string Name() const override { return "half"; }
 
-  bool operator==(const Type& ty) const override { return isa<HalfType>(&ty); }
-  bool ApprxEqual(const Type& ty) const override { return operator==(ty); }
+  bool operator==(const Type& ty) const override {
+    return isa<HalfType>(&ty) && ScalarType::operator==(ty);
+  }
+  bool ApprxEqual(const Type& ty) const override { return isa<HalfType>(&ty); }
 
   __UDT_TYPE_INFO__(ScalarFloatType, HalfType)
 };
 
-struct BFP16Type : public ScalarFloatType, public TypeIDProvider<BFP16Type> {
-  BFP16Type() : ScalarFloatType(TypeCategory::BFP16) {}
+struct BFP16Type final : public ScalarFloatType,
+                         public TypeIDProvider<BFP16Type> {
+  BFP16Type(bool m) : ScalarFloatType(TypeCategory::BFP16, m) {}
+  ptr<ScalarType> Clone(bool m) const override {
+    return std::make_shared<BFP16Type>(m);
+  }
   void Print(std::ostream& os) const override { os << "bfp16"; }
   const std::string Name() const override { return "bfp16"; }
 
-  bool operator==(const Type& ty) const override { return isa<BFP16Type>(&ty); }
-  bool ApprxEqual(const Type& ty) const override { return operator==(ty); }
+  bool operator==(const Type& ty) const override {
+    return isa<BFP16Type>(&ty) && ScalarType::operator==(ty);
+  }
+  bool ApprxEqual(const Type& ty) const override { return isa<BFP16Type>(&ty); }
 
   __UDT_TYPE_INFO__(ScalarFloatType, BFP16Type)
 };
 
-struct FloatType : public ScalarFloatType, public TypeIDProvider<FloatType> {
-  FloatType() : ScalarFloatType(TypeCategory::FLOAT) {}
+struct FloatType final : public ScalarFloatType,
+                         public TypeIDProvider<FloatType> {
+  FloatType(bool m) : ScalarFloatType(TypeCategory::FLOAT, m) {}
+  ptr<ScalarType> Clone(bool m) const override {
+    return std::make_shared<FloatType>(m);
+  }
   void Print(std::ostream& os) const override { os << "float"; }
   const std::string Name() const override { return "float"; }
 
-  bool operator==(const Type& ty) const override { return isa<FloatType>(&ty); }
-  bool ApprxEqual(const Type& ty) const override { return operator==(ty); }
+  bool operator==(const Type& ty) const override {
+    return isa<FloatType>(&ty) && ScalarType::operator==(ty);
+  }
+  bool ApprxEqual(const Type& ty) const override { return isa<FloatType>(&ty); }
 
   __UDT_TYPE_INFO__(ScalarFloatType, FloatType)
 };
 
-struct DoubleType : public ScalarFloatType, public TypeIDProvider<DoubleType> {
-  DoubleType() : ScalarFloatType(TypeCategory::DOUBLE) {}
+struct DoubleType final : public ScalarFloatType,
+                          public TypeIDProvider<DoubleType> {
+  DoubleType(bool m) : ScalarFloatType(TypeCategory::DOUBLE, m) {}
+  ptr<ScalarType> Clone(bool m) const override {
+    return std::make_shared<DoubleType>(m);
+  }
   void Print(std::ostream& os) const override { os << "double"; }
   const std::string Name() const override { return "double"; }
 
   bool operator==(const Type& ty) const override {
+    return isa<DoubleType>(&ty) && ScalarType::operator==(ty);
+  }
+  bool ApprxEqual(const Type& ty) const override {
     return isa<DoubleType>(&ty);
   }
-  bool ApprxEqual(const Type& ty) const override { return operator==(ty); }
 
   __UDT_TYPE_INFO__(ScalarFloatType, DoubleType)
 };
 
 struct BooleanType final : public ScalarType,
                            public TypeIDProvider<BooleanType> {
-  BooleanType() : ScalarType(TypeCategory::BOOL) {}
+  BooleanType(bool m) : ScalarType(TypeCategory::BOOL, m) {}
+  ptr<ScalarType> Clone(bool m) const override {
+    return std::make_shared<BooleanType>(m);
+  }
   void Print(std::ostream& os) const override { os << "bool"; }
   const std::string Name() const override { return "boolean"; }
 
   bool operator==(const Type& ty) const override {
-    return isa<BooleanType>(&ty);
+    return isa<BooleanType>(&ty) && ScalarType::operator==(ty);
   }
   bool ApprxEqual(const Type& ty) const override {
     return isa<BooleanType>(&ty);
@@ -1635,10 +1686,6 @@ inline BaseType GetBaseType(const Type& ty) {
   choreo_unreachable(STR(ty) + " does not imply runtime storage.");
 }
 
-inline bool IsScalarType(const ptr<Type>& ty) { return isa<ScalarType>(ty); }
-
-inline bool IsBoundedType(const ptr<Type>& ty) { return isa<BoundedType>(ty); }
-
 inline bool IsActualBoundedIntegerType(const ptr<Type>& ty) {
   if (auto bty = dyn_cast<BoundedType>(ty)) return bty->Dims() == 1;
   return false;
@@ -1674,40 +1721,40 @@ inline ptr<UnknownType> MakeUnknownType() {
   return std::make_shared<UnknownType>();
 }
 
-inline ptr<IntegerType> MakeIntegerType() {
-  return std::make_shared<IntegerType>();
+inline ptr<IntegerType> MakeIntegerType(bool m = false) {
+  return std::make_shared<IntegerType>(m);
 }
 
-inline ptr<IntegerType> MakeIntegerType(const Shape& s) {
+inline ptr<IntegerType> MakeIntegerType(const Shape& s, bool m = false) {
   if (s.IsValid()) {
     assert(s.Rank() == 1);
-    return std::make_shared<IntegerType>(s.ValueAt(0));
+    return std::make_shared<IntegerType>(s.ValueAt(0), m);
   }
-  return MakeIntegerType();
+  return MakeIntegerType(m);
 }
 
-inline ptr<BooleanType> MakeBooleanType() {
-  return std::make_shared<BooleanType>();
+inline ptr<BooleanType> MakeBooleanType(bool m = false) {
+  return std::make_shared<BooleanType>(m);
 }
 
-inline ptr<ScalarFloatType> MakeScalarFloatType(BaseType bt) {
+inline ptr<ScalarFloatType> MakeScalarFloatType(BaseType bt, bool m = false) {
   switch (bt) {
-  case BaseType::HALF8: return std::make_shared<Half8Type>();
-  case BaseType::HALF: return std::make_shared<HalfType>();
-  case BaseType::BFP16: return std::make_shared<BFP16Type>();
-  case BaseType::FLOAT: return std::make_shared<FloatType>();
-  case BaseType::DOUBLE: return std::make_shared<DoubleType>();
+  case BaseType::HALF8: return std::make_shared<Half8Type>(m);
+  case BaseType::HALF: return std::make_shared<HalfType>(m);
+  case BaseType::BFP16: return std::make_shared<BFP16Type>(m);
+  case BaseType::FLOAT: return std::make_shared<FloatType>(m);
+  case BaseType::DOUBLE: return std::make_shared<DoubleType>(m);
   default: choreo_unreachable("unsupported base type.");
   }
   return nullptr;
 }
 
-inline ptr<ScalarFloatType> MakeFloatType() {
-  return MakeScalarFloatType(BaseType::FLOAT);
+inline ptr<ScalarFloatType> MakeFloatType(bool m = false) {
+  return MakeScalarFloatType(BaseType::FLOAT, m);
 }
 
-inline ptr<ScalarFloatType> MakeDoubleType() {
-  return MakeScalarFloatType(BaseType::DOUBLE);
+inline ptr<ScalarFloatType> MakeDoubleType(bool m = false) {
+  return MakeScalarFloatType(BaseType::DOUBLE, m);
 }
 
 inline ptr<StringType> MakeStringType() {

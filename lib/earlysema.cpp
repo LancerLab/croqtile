@@ -146,7 +146,8 @@ bool EarlySemantics::Visit(AST::Expr& n) {
   } else if (n.op == "dimof") {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
-    if (!isa<MDSpanType>(lty) && !isa<ITupleType>(lty) && !IsBoundedType(lty)) {
+    if (!isa<MDSpanType>(lty) && !isa<ITupleType>(lty) &&
+        !isa<BoundedType>(lty)) {
       Error(n.LOC(), "in operation \"" + n.op +
                          "\": expect a indexable type but got `" + PSTR(lty) +
                          "'.");
@@ -170,7 +171,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       SetNodeType(n, MakeIntegerType());
   } else if (n.op == "ubound") {
     auto ty = NodeType(*n.GetR());
-    if (!IsBoundedType(ty)) {
+    if (!isa<BoundedType>(ty)) {
       Error(n.LOC(), "in operation \"" + n.op +
                          "\": expect a bounded type but got `" + PSTR(ty) +
                          "'.");
@@ -560,8 +561,8 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
 
     // update the scope/storage for event types
     if (auto evty = dyn_cast<EventArrayType>(tty)) {
-      evty->SetStorage(n.mem->Get());
-      SetNodeType(*n.type, evty);
+      tty = MakeEventArrayType(n.mem->Get(), evty->Dimensions());
+      SetNodeType(*n.type, tty);
     } else if (isa<EventType>(tty)) {
       tty = MakeEventType(n.mem->Get());
       SetNodeType(*n.type, tty);
@@ -588,6 +589,9 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
       if (debug_visit)
         dbgs() << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
     }
+
+    assert(tty && "no expression type.");
+
     // check for type consistency between annotation and init expr.
     if (!isa<UnknownType>(tty) && !tty->ApprxEqual(*ety)) {
       Error(n.LOC(), "`" + n.name_str + "' is declared as \"" +
@@ -596,10 +600,23 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
       error_count++;
       // keep working
     }
+
+    if (n.IsMutable()) {
+      // update with the mutable attributes
+      if (auto sty = dyn_cast<ScalarType>(ety)) {
+        ety = sty->Clone(n.IsMutable());
+      } else {
+        Error(n.LOC(), "`" + n.name_str + "' with a type of \"" + PSTR(ety) +
+                           "\" can not be declared as 'mutable'.");
+        error_count++;
+      }
+    }
+
     ReportErrorWhenViolateODR(n.LOC(), n.name_str, __FILE__, __LINE__, ety);
     SetNodeType(n, ety);
+
     // also set the type of type annotation
-    if (tty && isa<UnknownType>(tty)) SetNodeType(*n.type, ety);
+    if (isa<UnknownType>(tty)) SetNodeType(*n.type, ety);
   }
 
   // now handle the associated symbol
@@ -1195,7 +1212,7 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
     size_t r_count = 0;
     for (auto& v : n.positions->AllValues()) {
       auto ty = NodeType(*v);
-      if (!IsBoundedType(ty)) {
+      if (!isa<BoundedType>(ty)) {
         Error(n.LOC(), "expect '" + PSTR(v) + "` be a bounded type (but got " +
                            PSTR(ty) + ").");
         error_count++;
@@ -1547,7 +1564,7 @@ bool EarlySemantics::Visit(AST::ForeachBlock& n) {
         continue;
       }
       auto ity = NodeType(*id);
-      if (!(IsBoundedType(ity))) {
+      if (!(isa<BoundedType>(ity))) {
         Error(id->LOC(), "expect a bounded type for iteration variable '" +
                              id->name + "' but got '" + PSTR(ity) + "'.");
         error_count++;
@@ -1610,7 +1627,7 @@ bool EarlySemantics::Visit(AST::IncrementBlock& n) {
   TraceEachVisit(n);
   for (auto& iv : n.GetIterationVars()) {
     auto ity = NodeType(*iv);
-    if (!(IsBoundedType(ity))) {
+    if (!(isa<BoundedType>(ity))) {
       Error(n.LOC(), "expect a bounded type but got '" + PSTR(ity) + "'.");
       error_count++;
     }

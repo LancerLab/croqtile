@@ -52,7 +52,7 @@ ValueNumbering::VNSymbolName(const AST::Identifier& id) const {
   if (isa<SpannedType>(pty) || GeneralFutureType(pty)) {
     sig = RemoveSuffix(sig, ".span") +
           ".span"; // only cares about value inside the mdspan
-  } else if (IsBoundedType(pty)) {
+  } else if (isa<BoundedType>(pty)) {
     sig = "@" + sig; // only cares about the upper bound
   }
   return sig;
@@ -692,7 +692,7 @@ ValueNumbering::TryToSimplifyNodeSignature(const AST::Node& node) {
             {"dimof", // calculate the dim of a given mdspan index
              [this, &n]() -> std::optional<std::string> {
                std::string base_sig;
-               if (IsBoundedType(n->GetL()->GetType())) {
+               if (isa<BoundedType>(n->GetL()->GetType())) {
                  auto id = cast<AST::Expr>(n->GetL())->GetSymbol();
                  assert(id != nullptr && "not an identifier.");
                  base_sig = SignatureOfSymbol(

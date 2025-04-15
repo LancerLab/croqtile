@@ -14,7 +14,8 @@ __co__ u8 mdspan<1> scalar_decls(int a, int b) {
 // CHECK:  `- Var Decl (int): c = 1
 // CHECK:  `- Var Decl (int): d = b
 
-// host program
-int host(int a, int b) {
-  return scalar_decls(a, b);
+__co__ void mutables() {
+  mutable a = 3;
+  mutable int b = 4;
 }
+

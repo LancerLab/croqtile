@@ -166,11 +166,11 @@ void choreo_info(const char *message) {
 %token <std::string> HOST_CODE KERNEL_CODE
 %token <std::string> IDENTIFIER ATTR_CO
 // type related
-%token <std::string> MDSPAN ITUPLE EVENT PRINT
+%token <std::string> MDSPAN ITUPLE EVENT MUTABLE
 %token <Choreo::Storage> LOCAL SHARED GLOBAL
 %token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT HALF8 HALF BFP16 FLOAT DOUBLE BOOL VOID
 // builtin operations
-%token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER
+%token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT
 // control related
 %token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH INCR RET WHERE WHILE
 %token <std::string> TRUE FALSE
@@ -178,7 +178,7 @@ void choreo_info(const char *message) {
 // non-terminals
 %nterm <std::string> dma_operation data_id
 %nterm <ptr<DMAConfig>> dma_config
-%nterm <bool> sync_type
+%nterm <bool> sync_type optional_mutable
 %nterm <int> index index_or_none
 %nterm <std::vector<size_t>> optional_array_dims
 %nterm <Choreo::Storage> storage
@@ -296,6 +296,11 @@ param_mdspan_list
         $$ = AST::Make<AST::MultiValues>(@1);
         $$->Append($1);
       }
+    ;
+
+optional_mutable
+    : /* empty */ { $$ = false; }
+    | MUTABLE { $$ = true; }
     ;
 
 param_mdspan_val
@@ -605,14 +610,27 @@ print_stmt
     ;
 
 named_scalar_decls
-    : scalar_type scalar_decls {
-        assert($1->isScalar() && "Not a scalar type.");
+    : optional_mutable scalar_type scalar_decls {
+        assert($2->isScalar() && "Not a scalar type.");
+        $2->SetMutable($1);
+        $2->ReGenSemaType();
+        for (auto sub : $3->AllSubs()) {
+          auto decl = cast<AST::NamedVariableDecl>(sub);
+          decl->type = $2;
+          decl->SetMutable(true);
+          symtab.AddSymbol(decl->name_str, $2->GetType());
+          // override the data type
+        }
+        $$ = $3;
+      }
+    | MUTABLE scalar_decls {
+        // must apply type inference
         for (auto sub : $2->AllSubs()) {
           auto decl = cast<AST::NamedVariableDecl>(sub);
-          auto sym_name = decl->name_str;
-          symtab.AddSymbol(sym_name, $1->GetType());
-          // override the data type
-          decl->type = $1;
+          decl->SetMutable(true);
+          symtab.AddSymbol(decl->name_str, MakeUnknownType());
+          // update the mutable specifier for scalar types
+          decl->type->SetMutable(true);
         }
         $$ = $2;
       }
@@ -1165,7 +1183,7 @@ foreach_block
         $$ = AST::Make<AST::ForeachBlock>(@1, $2, $3);
       }
     ;
-  
+
 increment_block
     : INCR id_list WHILE pred stmts_block {
         $$ = AST::Make<AST::IncrementBlock>(@1, $2, $4, $5);
@@ -1394,7 +1412,7 @@ with_matchers /* TODO: this special case is pattern-match ids for with-block */
 id_or_elem
     : IDENTIFIER optional_subscriptions {
         if ($2->Count() == 0) {
-          $$ = AST::Make<AST::Identifier>(@1, $1); 
+          $$ = AST::Make<AST::Identifier>(@1, $1);
         } else {
           AST::ptr<AST::Expr> expr = nullptr;
           for (auto e : $2->AllValues()) {
