@@ -2,7 +2,6 @@
 #include "types.hpp"
 
 using namespace Choreo;
-
 bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
   if (isa<AST::Program>(&n)) {
     type_equals.Reset();
@@ -184,6 +183,17 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       SetNodeType(n, MakeITupleType(ty->Dims()));
     else
       choreo_unreachable("unexpect");
+  } else if ((n.op == "++") || (n.op == "--")) {
+    auto ty = NodeType(*n.GetR());
+    auto sty = dyn_cast<IntegerType>(ty);
+    if (!sty || !sty->IsMutable()) {
+      Error(n.LOC(), "in operation \"" + n.op +
+                         "\": expect a mutable scalar type but got `" +
+                         PSTR(ty) + "'.");
+      error_count++;
+      return false;
+    }
+    SetNodeType(n, sty);
   } else if ((n.op == "+") || (n.op == "-") || (n.op == "*") || (n.op == "/") ||
              (n.op == "%") || (n.op == "cdiv")) {
     auto lty = NodeType(*n.GetL());
@@ -416,6 +426,10 @@ bool EarlySemantics::Visit(AST::Expr& n) {
   } else
     choreo_unreachable("operation in expression is not supported yet.");
 
+  if (mutables.Contains(n.GetL()) || mutables.Contains(n.GetR()) ||
+      mutables.Contains(n.GetC()))
+    mutables.Add(n);
+
   return true;
 }
 
@@ -518,6 +532,20 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
           error_count++;
         }
 
+  // check if it use mutable values that can not be inferred
+  if (auto mvals = dyn_cast<AST::MultiValues>(n.list)) {
+    for (auto& v : mvals->AllValues()) {
+      bool is_mutable = false;
+      if (mutables.Contains(v)) {
+        Error(v->LOC(),
+              "the mutable value can not used for the mdspan declaration.");
+        error_count++;
+        is_mutable = true;
+      }
+      if (is_mutable) mutables.Add(*v);
+    }
+  }
+
   SetNodeType(n, MakeRankedMDSpanType(rank));
   return true;
 }
@@ -535,6 +563,13 @@ bool EarlySemantics::Visit(AST::NamedTypeDecl& n) {
     error_count++;
     // keep processing
   }
+
+  if (mutables.Contains(n.init_expr)) {
+    Error(n.init_expr->LOC(),
+          "mdspan/ituple can not be initialized with mutable values.");
+    error_count++;
+  }
+
   ReportErrorWhenViolateODR(n.LOC(), n.name_str, __FILE__, __LINE__, ety);
   SetNodeType(n, ety);
   return true;
@@ -630,6 +665,9 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
                               MakeRankedSpannedType(ty->Dims()));
   }
 
+  if (auto sty = dyn_cast<ScalarType>(n.GetType()))
+    if (sty->IsMutable()) mutables.Add(InScopeName(n.name_str));
+
   return true;
 }
 
@@ -642,6 +680,16 @@ bool EarlySemantics::Visit(AST::IntTuple& n) {
     } else {
       ++dim_count;
     }
+  }
+  for (auto& v : n.GetValues()->AllValues()) {
+    bool is_mutable = false;
+    if (mutables.Contains(v)) {
+      Error(v->LOC(),
+            "mutable values can not used for the ituple declaration.");
+      error_count++;
+      is_mutable = true;
+    }
+    if (is_mutable) mutables.Add(*v);
   }
   SetNodeType(n, MakeITupleType(dim_count));
   return true;
@@ -873,7 +921,11 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
   auto ity = NodeType(*n.in);
 
   size_t rank = 0;
-  if (isa<IntegerType>(ity)) {
+  if (auto itty = dyn_cast<IntegerType>(ity)) {
+    if (itty->IsMutable()) {
+      Error(n.in->LOC(), "mutable integer can not be used inside with-in.");
+      error_count++;
+    }
     rank = 1;
   } else if (auto mdst = dyn_cast<MDSpanType>(ity)) {
     rank = mdst->Dims();
@@ -964,6 +1016,14 @@ bool EarlySemantics::Visit(AST::Memory& n) {
 
 bool EarlySemantics::Visit(AST::SpanAs& n) {
   TraceEachVisit(n);
+
+  for (auto val : n.list->AllValues()) {
+    if (mutables.Contains(val)) {
+      Error(val->LOC(),
+            "the mutable value can not used for mdspan declaration.");
+      error_count++;
+    }
+  }
 
   auto sty = GetSpannedType(NodeType(*n.id));
   if (!sty) {
@@ -1206,6 +1266,14 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
 
   if (n.positions) {
     if (n.bounds) n.bounds->accept(*this);
+
+    for (auto v : n.bounds->AllValues()) {
+      if (mutables.Contains(v)) {
+        Error(v->LOC(),
+              "the mutable value can not used for the .chunk expression.");
+        error_count++;
+      }
+    }
 
     n.positions->accept(*this);
     size_t rank = sty->Dims();

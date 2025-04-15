@@ -10,9 +10,63 @@
 
 namespace Choreo {
 
+struct DerivableAttribute {
+private:
+  std::unordered_set<std::string> symbols;
+  std::unordered_set<AST::Node*> nodes;
+
+  VisitorWithScope* vws = nullptr;
+  std::string name;
+  bool debug;
+
+public:
+  DerivableAttribute(VisitorWithScope* v, const std::string& n, bool d = false)
+      : vws(v), name(n), debug(d) {}
+
+  void Add(const std::string& sym) {
+    if (!PrefixedWith(sym, "::"))
+      choreo_unreachable("expect a scoped symbol: " + sym + ".");
+    if (symbols.count(sym))
+      choreo_unreachable("already contains the symbol: " + sym + ".");
+    symbols.insert(sym);
+
+    if (debug) dbgs() << "[" << name << "] added symbol: " << sym << ".\n";
+  }
+
+  void Add(AST::Node& n) {
+    nodes.insert(&n);
+
+    if (debug) dbgs() << "[" << name << "] added expr: " << STR(n) << ".\n";
+  }
+
+  bool Contains(const ptr<AST::Node>& n) {
+    if (n == nullptr) return false; // handle nullptr for easier processing
+
+    if (auto id = dyn_cast<AST::Identifier>(n)) {
+      if (vws->SSTab().IsDeclared(id->name))
+        return symbols.count(vws->InScopeName(id->name));
+    } else if (isa<AST::Expr>(n))
+      return nodes.count(n.get());
+    else if (auto it = dyn_cast<AST::IntTuple>(n))
+      return nodes.count(it->vlist.get());
+    else if (auto mds = dyn_cast<AST::MultiDimSpans>(n))
+      return nodes.count(mds->list.get());
+    else if (AST::IsLiteral(*n) || isa<AST::IntIndex>(n) ||
+             isa<AST::SpanAs>(n) || isa<AST::ChunkAt>(n))
+      return false;
+    else
+      choreo_unreachable("unsupported node: " + n->TypeNameString() + ": " +
+                         PSTR(n) + ".");
+    return false;
+  }
+};
+
 struct EarlySemantics : public VisitorWithScope {
 private:
   TypeConstraints type_equals{this};
+
+  DerivableAttribute mutables{this, "mutables"};
+  DerivableAttribute diverges{this, "diverges"};
 
 private:
   bool in_decl =

@@ -120,7 +120,9 @@ void choreo_info(const char *message) {
 %token
   ASSIGN  "="
   MINUS   "-"
+  MMINUS  "--"
   PLUS    "+"
+  PPLUS   "++"
   STAR    "*"
   SLASH   "/"
   PECET   "%"
@@ -617,7 +619,7 @@ named_scalar_decls
         for (auto sub : $3->AllSubs()) {
           auto decl = cast<AST::NamedVariableDecl>(sub);
           decl->type = $2;
-          decl->SetMutable(true);
+          decl->SetMutable($1);
           symtab.AddSymbol(decl->name_str, $2->GetType());
           // override the data type
         }
@@ -1040,6 +1042,12 @@ s_expr
       }
     | UBOUND IDENTIFIER {
         $$ = AST::Make<AST::Expr>(@1, "ubound", AST::Make<AST::Identifier>(@2, $2));
+      }
+    | IDENTIFIER PPLUS {
+        $$ = AST::Make<AST::Expr>(@1, "++", AST::Make<AST::Identifier>(@1, $1));
+      }
+    | IDENTIFIER MMINUS {
+        $$ = AST::Make<AST::Expr>(@1, "--", AST::Make<AST::Identifier>(@1, $1));
       }
     ;
 

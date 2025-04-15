@@ -1,0 +1,25 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ void foo(int a, f32 [2] aa) {
+  b = {1, 2};
+  c = 3;
+  d : [a, 3];
+  mutable e = 3;
+
+  f : [a, b(1), 5, e];
+  g = {a, b(2), e + 3};
+  h : d + b + e;
+
+  with i in [a, e] { }
+  foreach j in e {}
+  k = aa.span_as([e]);
+  parallel by 1 with l in [8] call bar(aa.chunk(e).at(l));
+}
+
+// CHECK: error: the mutable value can not used for the mdspan declaration.
+// CHECK: error: mutable values can not used for the ituple declaration.
+// CHECK: error: mdspan/ituple can not be initialized with mutable values.
+// CHECK: error: the mutable value can not used for the mdspan declaration.
+// CHECK: error: mutable integer can not be used inside with-in.
+// CHECK: error: the mutable value can not used for mdspan declaration.
+// CHECK: error: the mutable value can not used for the .chunk expression.

@@ -784,6 +784,10 @@ struct ScalarType : public Type, public TypeIDProvider<ScalarType> {
   virtual bool IsBoolInteger() const { return true; }
   // can not have instance
 
+  void Print(std::ostream& os) const override {
+    if (is_mutable) os << "mutable ";
+  }
+
   __UDT_TYPE_INFO__(Type, ScalarType)
 };
 
@@ -800,6 +804,7 @@ struct IntegerType final : public ScalarType,
     return std::make_shared<IntegerType>(m);
   }
   void Print(std::ostream& os) const override {
+    ScalarType::Print(os);
     os << "int" << (IsValidValueItem(value) ? (" [" + STR(value) + "]") : "");
   }
   const std::string Name() const override { return "integer"; }
@@ -838,7 +843,10 @@ struct Half8Type final : public ScalarFloatType,
   ptr<ScalarType> Clone(bool m) const override {
     return std::make_shared<Half8Type>(m);
   }
-  void Print(std::ostream& os) const override { os << "half8"; }
+  void Print(std::ostream& os) const override {
+    ScalarType::Print(os);
+    os << "half8";
+  }
   const std::string Name() const override { return "half8"; }
 
   bool operator==(const Type& ty) const override {
@@ -855,7 +863,10 @@ struct HalfType final : public ScalarFloatType,
   ptr<ScalarType> Clone(bool m) const override {
     return std::make_shared<HalfType>(m);
   }
-  void Print(std::ostream& os) const override { os << "half"; }
+  void Print(std::ostream& os) const override {
+    ScalarType::Print(os);
+    os << "half";
+  }
   const std::string Name() const override { return "half"; }
 
   bool operator==(const Type& ty) const override {
@@ -872,7 +883,10 @@ struct BFP16Type final : public ScalarFloatType,
   ptr<ScalarType> Clone(bool m) const override {
     return std::make_shared<BFP16Type>(m);
   }
-  void Print(std::ostream& os) const override { os << "bfp16"; }
+  void Print(std::ostream& os) const override {
+    ScalarType::Print(os);
+    os << "bfp16";
+  }
   const std::string Name() const override { return "bfp16"; }
 
   bool operator==(const Type& ty) const override {
@@ -889,7 +903,10 @@ struct FloatType final : public ScalarFloatType,
   ptr<ScalarType> Clone(bool m) const override {
     return std::make_shared<FloatType>(m);
   }
-  void Print(std::ostream& os) const override { os << "float"; }
+  void Print(std::ostream& os) const override {
+    ScalarType::Print(os);
+    os << "float";
+  }
   const std::string Name() const override { return "float"; }
 
   bool operator==(const Type& ty) const override {
@@ -906,7 +923,10 @@ struct DoubleType final : public ScalarFloatType,
   ptr<ScalarType> Clone(bool m) const override {
     return std::make_shared<DoubleType>(m);
   }
-  void Print(std::ostream& os) const override { os << "double"; }
+  void Print(std::ostream& os) const override {
+    ScalarType::Print(os);
+    os << "double";
+  }
   const std::string Name() const override { return "double"; }
 
   bool operator==(const Type& ty) const override {
@@ -925,7 +945,10 @@ struct BooleanType final : public ScalarType,
   ptr<ScalarType> Clone(bool m) const override {
     return std::make_shared<BooleanType>(m);
   }
-  void Print(std::ostream& os) const override { os << "bool"; }
+  void Print(std::ostream& os) const override {
+    ScalarType::Print(os);
+    os << "bool";
+  }
   const std::string Name() const override { return "boolean"; }
 
   bool operator==(const Type& ty) const override {

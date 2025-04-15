@@ -196,7 +196,9 @@ cstr        \"([^"\\]|\\.)*\"
   "while"    return Choreo::Parser::make_WHILE(yytext, loc);
   "<->"      return Choreo::Parser::make_BIND   (loc);
   "-"        return Choreo::Parser::make_MINUS  (loc);
+  "--"       return Choreo::Parser::make_MMINUS (loc);
   "+"        return Choreo::Parser::make_PLUS   (loc);
+  "++"       return Choreo::Parser::make_PPLUS   (loc);
   "*"        return Choreo::Parser::make_STAR   (loc);
   "/"        return Choreo::Parser::make_SLASH  (loc);
   "%"        return Choreo::Parser::make_PECET  (loc);

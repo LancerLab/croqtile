@@ -1813,6 +1813,11 @@ inline ptr<Expr> MakeIntExpr(const location& l, int val) {
   return Make<Expr>(l, Make<IntLiteral>(l, val));
 }
 
+inline bool IsLiteral(const AST::Node& n) {
+  return isa<AST::IntLiteral>(&n) || isa<AST::FloatLiteral>(&n) ||
+         isa<AST::Boolean>(&n);
+}
+
 } // end of namespace AST
 
 } // end of namespace Choreo
