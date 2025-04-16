@@ -912,13 +912,6 @@ bool CUDACodeGen::Visit(AST::Call& c) {
   return true;
 }
 
-bool CUDACodeGen::Visit(AST::PrintNode& n) {
-  __TRACE_EACH_VISIT__(n)
-
-  // TODO
-  return true;
-}
-
 bool CUDACodeGen::Visit(AST::Rotate& n) {
   __TRACE_EACH_VISIT__(n)
 

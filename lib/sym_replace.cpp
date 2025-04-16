@@ -266,10 +266,8 @@ void SymReplace::SymbolizeExprNode(ptr<AST::Node> n) {
   if (e->IsReference()) {
     if (isa<AST::Identifier>(R)) {
       assert(nd2sn.count(R));
-      if (auto sname = nd2sn.at(R); name_sym_expr_map.count(sname))
-        res = GetSymExprFromName(sname);
-      else
-        res = SymExpr(GetSymbolFromName(sname));
+      std::string sname = nd2sn.at(R);
+      res = getSymEx(sname);
     } else if (auto num = dyn_cast<AST::IntLiteral>(R)) {
       res = SymReplace::SymExpr(num->Val());
     } else if (auto f = dyn_cast<AST::FloatLiteral>(R)) {
@@ -318,6 +316,8 @@ void SymReplace::SymbolizeExprNode(ptr<AST::Node> n) {
       res = SymExpr(GetSymbolFromName(nd2sn.at(R)));
     } else if (auto ca = dyn_cast<AST::ChunkAt>(R)) {
       (void)ca;
+      InsertExprSymValnoMap(n, 0);
+    } else if (isa<AST::StringLiteral>(R)) {
       InsertExprSymValnoMap(n, 0);
     } else {
       choreo_unreachable("The ref node(" + R->TypeNameString() +
@@ -455,8 +455,9 @@ void SymReplace::EquivalentlyReplaceExprNodes() {
       continue;
     }
 
-    if (orig_expr->IsReference() && new_expr->IsReference() &&
-        isa<AST::IntLiteral>(new_expr->GetR())) {
+    if (orig_expr->IsReference() && new_expr->IsReference()) {
+      continue;
+      // auto r = new_expr->GetR();
       // eg. int c = 4; int foo = c + 5;
       // The replacement of `c` with 4 is not necessary.
       continue;

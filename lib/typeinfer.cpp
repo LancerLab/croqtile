@@ -588,8 +588,6 @@ bool TypeInference::Visit(AST::Expr& n) {
     } else if (isa<BoundedITupleType>(pty_lhs) && isa<IntegerType>(pty_rhs)) {
       n.SetType(pty_lhs);
       cur_type = n.GetType();
-      // TODO(wsj) result type is?
-      // bounded integer, lb and ub changed!
     } else if (isa<BoundedITupleType>(pty_lhs) &&
                isa<BoundedITupleType>(pty_rhs)) {
       // to support `chunkat(x, y#z)`
@@ -823,11 +821,6 @@ bool TypeInference::Visit(AST::Call& n) {
   return true;
 }
 
-bool TypeInference::Visit(AST::PrintNode& n) {
-  TraceEachVisit(n);
-  return true;
-}
-
 bool TypeInference::Visit(AST::Rotate& n) {
   TraceEachVisit(n);
 
@@ -971,6 +964,7 @@ bool TypeInference::Visit(AST::IncrementBlock& n) {
 
 bool TypeInference::Visit(AST::ChoreoFunction& n) {
   TraceEachVisit(n);
+  cur_type.reset(); // no current type to annotate the stmts inside
   return true;
 }
 bool TypeInference::Visit(AST::CppSourceCode& n) {

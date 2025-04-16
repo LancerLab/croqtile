@@ -52,7 +52,6 @@ public:
   bool VisitNode(AST::Wait&) override;
   bool VisitNode(AST::Trigger&) override;
   bool VisitNode(AST::Call&) override;
-  bool VisitNode(AST::PrintNode&) override;
   bool VisitNode(AST::Rotate&) override;
   bool VisitNode(AST::Select&) override;
   bool VisitNode(AST::Return&) override;

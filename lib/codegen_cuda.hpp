@@ -93,7 +93,6 @@ public:
   bool Visit(AST::Assignment&) override;
   bool Visit(AST::Boolean&) override;
   bool Visit(AST::Call&) override;
-  bool Visit(AST::PrintNode&) override;
   bool Visit(AST::Rotate&) override;
   bool Visit(AST::ChoreoFunction&) override;
   bool Visit(AST::ChunkAt&) override;

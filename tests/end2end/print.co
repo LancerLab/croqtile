@@ -1,0 +1,103 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+__co__ void foo(s32 [N, M] i) {
+  println("aaa");
+  int a = 100;
+  // bool b = true;
+  // float f = 1.3f;
+  // double d = 2.6;
+  // print("scalar:\n\ta: ", a, "\n\tM: ", M, "\n\tf: ", f, "\n\td: ", d, "\n");
+  print("scalar:\n\ta: ", a, "\n\tM: ", M, "\n");
+  parallel p by 1 {
+    bool b = false;
+    mds : [1,2,3];
+    it = {4, M};
+    nit = {a, 5};
+    println("b: ", b);
+    // println("d: ", d + 1.5);
+    println("i.span: ", i.span);
+    println("mds: ", mds);
+    println("it: ", it);
+    println("nit: ", nit);
+    foreach idx in [1,2,1] {
+      println("idx: ", idx);
+      foreach bi in 4
+        println("bi: ", bi+N);
+    }
+  }
+  print("bbb\n");
+}
+
+__co__ void bar() {
+  parallel p by 2 {
+    println("p: ", p);
+    shared event e;
+    println("e: ", e);
+    inthreads.async (p == 1) {
+      println("e before wait: ", e);
+      wait e;
+      // println("e after  wait: ", e);
+      println("second");
+    }
+                                          
+    inthreads.async (p == 0) {
+      println("e before trigger: ", e);
+      println("first");
+      trigger e;
+      println("e after  trigger: ", e);
+    }
+                                          
+    sync.shared;
+  }
+}
+
+#define N 128
+#define M 64
+
+int main()
+{
+  auto input = new choreo::s32[N*M];
+  for (size_t i = 0; i < N*M; i++) {
+    input[i] = i;
+  }
+  auto input_data = choreo::make_spanview<2, choreo::s32>(input, {N, M});
+
+  foo(input_data);
+
+  delete[] input;
+
+  bar();
+
+  return 0;
+}
+
+// CHECK: aaa
+// CHECK: scalar:
+// CHECK:         a: 100
+// CHECK:         M: 64
+// CHECK: [0, 0] b: false
+// CHECK: [0, 0] i.span: [128, 64]
+// CHECK: [0, 0] mds: [1, 2, 3]
+// CHECK: [0, 0] it: {4, 64}
+// CHECK: [0, 0] nit: {100, 5}
+// CHECK: [0, 0] idx: {0, 0, 0}
+// CHECK: [0, 0] bi: {128}
+// CHECK: [0, 0] bi: {129}
+// CHECK: [0, 0] bi: {130}
+// CHECK: [0, 0] bi: {131}
+// CHECK: [0, 0] idx: {0, 1, 0}
+// CHECK: [0, 0] bi: {128}
+// CHECK: [0, 0] bi: {129}
+// CHECK: [0, 0] bi: {130}
+// CHECK: [0, 0] bi: {131}
+// CHECK: bbb
+// CHECK-DAG: [0, 1] p: {1}
+// CHECK-DAG: [0, 0] p: {0}
+// CHECK-DAG: [0, 1] e: false
+// CHECK-DAG: [0, 0] e: false
+// CHECK-DAG: [0, 1] e before wait: false
+// CHECK-DAG: [0, 0] e before trigger: false
+// CHECK: [0, 0] first
+// CHECK: [0, 1] second
+// CHECK: [0, 0] e after  trigger: true

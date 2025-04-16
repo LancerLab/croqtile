@@ -172,13 +172,14 @@ void choreo_info(const char *message) {
 %token <Choreo::Storage> LOCAL SHARED GLOBAL
 %token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT HALF8 HALF BFP16 FLOAT DOUBLE BOOL VOID
 // builtin operations
-%token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT
+%token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN
 // control related
 %token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH INCR RET WHERE WHILE
 %token <std::string> TRUE FALSE
 
 // non-terminals
 %nterm <std::string> dma_operation data_id
+%nterm <std::string> builtin_print_func
 %nterm <ptr<DMAConfig>> dma_config
 %nterm <bool> sync_type optional_mutable
 %nterm <int> index index_or_none
@@ -189,7 +190,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::SpanAs>> span_as
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
-%nterm <AST::ptr<AST::Node>> any_code foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal device_passable declaration statement assignment dma_stmt wait_stmt trigger_stmt call_stmt print_stmt swap_stmt expr_or_qes range_expr param_mdspan_val chunkat_or_storage_or_select pred returnable id_or_elem span_init_val
+%nterm <AST::ptr<AST::Node>> any_code foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal device_passable declaration statement assignment dma_stmt wait_stmt trigger_stmt call_stmt swap_stmt expr_or_qes range_expr param_mdspan_val chunkat_or_storage_or_select pred returnable id_or_elem span_init_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
 %nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables future_data_list template_params gi_list ide_list optional_subscriptions
 %nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr span_expr id_expr bound_expr
@@ -470,7 +471,6 @@ statement
     | trigger_stmt SEMCOL        { $$ = $1; }
     | call_stmt    SEMCOL        { $$ = $1; }
     | swap_stmt    SEMCOL        { $$ = $1; }
-    | print_stmt   SEMCOL        { $$ = $1; }
     | return_stmt  SEMCOL        { $$ = $1; }
     | sync_stmt    SEMCOL        { $$ = $1; }
     | paraby_block               { $$ = $1; }
@@ -603,12 +603,6 @@ multi_decls
     : named_spanned_decls { $$ = $1; }
     | named_scalar_decls  { $$ = $1; }
     | named_event_decls   { $$ = $1; }
-    ;
-
-print_stmt
-    : PRINT LPAREN IDENTIFIER RPAREN {
-        $$ = AST::Make<AST::PrintNode>(@1, AST::Make<AST::Identifier>(@3, $3));
-      }
     ;
 
 named_scalar_decls
@@ -1453,6 +1447,11 @@ trigger_stmt
     : TRIGGER ide_list { $$ = AST::Make<AST::Trigger>(@1, $2); }
     ;
 
+builtin_print_func
+    : PRINT   { $$ = $1; }
+    | PRINTLN { $$ = $1; }
+    ;
+
 call_stmt
     : CALL IDENTIFIER LPAREN device_passables RPAREN {
         $$ = AST::Make<AST::Call>(@1,
@@ -1467,6 +1466,9 @@ call_stmt
         mv->Append($3);
         mv->Append(AST::Make<AST::StringLiteral>(@5, $5));
         $$ = AST::Make<AST::Call>(@1, AST::Make<AST::Identifier>(@1, $1), mv, true);
+      }
+    | builtin_print_func LPAREN value_list RPAREN {
+        $$ = AST::Make<AST::Call>(@1, AST::Make<AST::Identifier>(@1, $1), $3, true);
       }
     ;
 

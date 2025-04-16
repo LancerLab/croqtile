@@ -85,7 +85,6 @@ struct Visitor {
   virtual bool Visit(AST::Wait&) = 0;
   virtual bool Visit(AST::Trigger&) = 0;
   virtual bool Visit(AST::Call&) = 0;
-  virtual bool Visit(AST::PrintNode&) = 0;
   virtual bool Visit(AST::Rotate&) = 0;
   virtual bool Visit(AST::Synchronize&) = 0;
   virtual bool Visit(AST::Select&) = 0;
@@ -501,7 +500,6 @@ public:
   bool Visit(AST::Wait&) override { return true; }
   bool Visit(AST::Trigger&) override { return true; }
   bool Visit(AST::Call&) override { return true; }
-  bool Visit(AST::PrintNode&) override { return true; }
   bool Visit(AST::Rotate&) override { return true; }
   bool Visit(AST::Synchronize&) override { return true; }
   bool Visit(AST::Select&) override { return true; }
@@ -646,10 +644,6 @@ public:
     TraceEachVisit(n);
     return VisitNode(n);
   }
-  bool Visit(AST::PrintNode& n) final {
-    TraceEachVisit(n);
-    return VisitNode(n);
-  }
   bool Visit(AST::Rotate& n) final {
     TraceEachVisit(n);
     return VisitNode(n);
@@ -733,7 +727,6 @@ public:
   virtual bool VisitNode(AST::Wait&) { return true; }
   virtual bool VisitNode(AST::Trigger&) { return true; }
   virtual bool VisitNode(AST::Call&) { return true; }
-  virtual bool VisitNode(AST::PrintNode&) { return true; }
   virtual bool VisitNode(AST::Rotate&) { return true; }
   virtual bool VisitNode(AST::Synchronize&) { return true; }
   virtual bool VisitNode(AST::Select&) { return true; }

@@ -480,6 +480,16 @@ public:
     return dyn_cast<FloatLiteral>(value_r);
   }
 
+  ptr<StringLiteral> GetString() {
+    if (t != Reference) return nullptr;
+    return dyn_cast<StringLiteral>(value_r);
+  }
+
+  ptr<Boolean> GetBoolean() {
+    if (t != Reference) return nullptr;
+    return dyn_cast<Boolean>(value_r);
+  }
+
   bool IsUnary() const { return t == Unary; }
   bool IsBinary() const { return t == Binary; }
   bool IsTernary() const { return t == Ternary; }
@@ -1515,20 +1525,6 @@ struct Call : public Node, public TypeIDProvider<Call> {
   __UDT_TYPE_INFO__(Node, Call)
 };
 
-struct PrintNode : public Node, public TypeIDProvider<PrintNode> {
-  ptr<Identifier> id;
-
-  PrintNode(const location& loc, const ptr<Identifier>& v) : Node(loc), id(v) {}
-
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << "\n" << prefix << "`- Print: ";
-    os << "\n" << prefix << "  `- with identifier: " << PSTR(id);
-  }
-  void accept(Visitor&) override;
-
-  __UDT_TYPE_INFO__(Node, PrintNode)
-};
-
 struct Rotate : public Node, public TypeIDProvider<Rotate> {
   ptr<MultiValues> ids;
 
@@ -1815,7 +1811,7 @@ inline ptr<Expr> MakeIntExpr(const location& l, int val) {
 
 inline bool IsLiteral(const AST::Node& n) {
   return isa<AST::IntLiteral>(&n) || isa<AST::FloatLiteral>(&n) ||
-         isa<AST::Boolean>(&n);
+         isa<AST::Boolean>(&n) || isa<AST::StringLiteral>(&n);
 }
 
 } // end of namespace AST

@@ -23,6 +23,6 @@ int main() { /// host program
 // CHECK:  `- Return type: int
 // CHECK:  `- Parameters
 // CHECK:    `-  type: int, symbol: loc
-// CHECK:  `- Print:
-// CHECK:    `- with identifier: loc
+// CHECK:  `- Call: print (built-in)
+// CHECK:    `- with arguments: loc
 // CHECK:  `- Return: loc

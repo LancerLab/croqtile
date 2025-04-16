@@ -226,6 +226,7 @@ public:
           cur_vn = vn.GetValueNumberOfSignature(SSTab().InScopeName(name));
           auto nty = NodeType(n);
           if (isa<MDSpanType>(SSTab().LookupSymbol(name))) {
+            n.s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
             cur_mdspan_vn = cur_vn;
             InvalidateVN(cur_vn);
           }
@@ -265,6 +266,9 @@ public:
       return true;
     } else if (isa<AST::ChunkAt>(n.GetR())) {
       InvalidateVN(cur_vn); // a spanned data does not have a value number
+      return true;
+    } else if (isa<AST::StringLiteral>(n.GetR())) {
+      InvalidateVN(cur_vn); // a string literal does not have a value number
       return true;
     }
 
@@ -1148,11 +1152,6 @@ public:
     InvalidateVisitorValNOs();
     return true;
   };
-
-  bool Visit(AST::PrintNode& n) {
-    TraceEachVisit(n);
-    return true;
-  }
 
   bool Visit(AST::Rotate& n) {
     TraceEachVisit(n);

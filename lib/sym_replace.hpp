@@ -464,13 +464,6 @@ public:
     return true;
   }
 
-  bool Visit(AST::PrintNode& n) override {
-    TraceEachVisit(n);
-    if (cannot_proceed) return true;
-
-    return true;
-  }
-
   bool Visit(AST::Rotate& n) override {
     TraceEachVisit(n);
     if (cannot_proceed) return true;

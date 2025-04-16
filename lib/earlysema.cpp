@@ -1395,7 +1395,8 @@ bool EarlySemantics::Visit(AST::Call& n) {
       Error(n.LOC(), "the built-in functions are not function templates.");
       error_count++;
     }
-    if (n.function->name == "assert") {
+    const auto func_name = n.function->name;
+    if (func_name == "assert") {
       auto pty = NodeType(*n.arguments->ValueAt(0));
       if (!isa<BooleanType>(pty)) {
         Error(n.LOC(), "expect a predicate but got '" + PSTR(pty) + "'.");
@@ -1406,8 +1407,10 @@ bool EarlySemantics::Visit(AST::Call& n) {
         Error(n.LOC(), "expect a string but got '" + PSTR(sty) + "'.");
         error_count++;
       }
+    } else if (func_name == "print" || func_name == "println") {
+      // TODO(wsj): check the type of arguments?
     } else
-      choreo_unreachable("unsupported bif '" + n.function->name + "'.");
+      choreo_unreachable("unsupported bif '" + func_name + "'.");
 
     return ec == error_count;
   }
@@ -1441,12 +1444,6 @@ bool EarlySemantics::Visit(AST::Call& n) {
     }
   }
 
-  return true;
-}
-
-bool EarlySemantics::Visit(AST::PrintNode& n) {
-  TraceEachVisit(n);
-  ReportErrorWhenUseBeforeDefine(n.LOC(), n.id->name);
   return true;
 }
 

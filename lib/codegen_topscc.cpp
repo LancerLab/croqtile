@@ -1110,18 +1110,6 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   return true;
 }
 
-bool TopsccCodeGen::Visit(AST::PrintNode& n) {
-  TraceEachVisit(n);
-  if (use_hetero_tileflow && IsHostSide()) {
-    // TODO: support print format
-    // TODO: support indexing of buffer
-    // TODO: support device-side print
-    hs << h_indent << "std::cout << " << STR(n.id) << " << \"\\n\";\n";
-  } else
-    choreo_unreachable("TODO: device-side print to be impl'd.");
-  return true;
-}
-
 bool TopsccCodeGen::Visit(AST::Rotate& n) {
   TraceEachVisit(n);
   ds << d_indent << "choreo::rotate(";
@@ -1328,7 +1316,8 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
 
   // generate the built-in functions
   if (n.is_bif) {
-    if (n.function->name == "assert") {
+    const auto func_name = n.function->name;
+    if (func_name == "assert") {
       if (IsHost()) {
         os << indent << "choreo_assert(" << ExprSTR(n.GetArguments().at(0))
            << ", \"" << ExprSTR(n.GetArguments().at(1)) << "\", \""
@@ -1342,6 +1331,106 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
         os << indent << "  __co_abort__();\n";
         os << indent << "}\n";
       }
+      return true;
+    } else if (func_name == "print" || func_name == "println") {
+      std::string print_format;
+      print_format += "\"";
+      std::string print_args;
+      auto GenFormatAndArgsFromShape = [](const Shape& shape) {
+        std::string format;
+#if 0
+        for (int i = 0; i < (int)shape.Rank(); ++i) {
+          if (i != 0) format += ", ";
+          if (isa<int>(&shape.ValueAt(i)))
+            format += "%d";
+          else
+            format += "%u";
+        }
+        std::ostringstream oss;
+        shape.PrintPlain(oss);
+        std::string args = UnScopedExpr(oss.str());
+#else
+        std::ostringstream oss;
+        for (int i = 0; i < (int)shape.Rank(); ++i) {
+          if (i != 0) {
+            format += ", ";
+            oss << ", ";
+          }
+          format += "%lld";
+          oss << "(long long)" << shape.ValueAt(i);
+        }
+        std::string args = UnScopedExpr(oss.str());
+#endif
+        return std::make_pair(format, args);
+      };
+      for (const auto& arg : n.GetArguments()) {
+        const auto type = NodeType(*arg);
+        auto e = cast<AST::Expr>(arg);
+        if (isa<StringType>(type)) {
+          print_format += ExprSTR(arg);
+        } else if (isa<IntegerType>(type)) {
+          print_format += "%lld";
+          print_args += "(long long) " + ExprSTR(arg, false) + ", ";
+        } else if (isa<BooleanType>(type)) {
+          print_format += "%s";
+          print_args += "(" + ExprSTR(arg, false) + "? \"true\" : \"false\"), ";
+        } else if (isa<Half8Type>(type) || isa<HalfType>(type) ||
+                   isa<BFP16Type>(type)) {
+          choreo_unreachable("The type " + AST::TYPE_STR(*arg) +
+                             "is not supported in print yet.");
+        } else if (isa<FloatType>(type)) {
+          print_format += "%f";
+          print_args += ExprSTR(arg, false) + ", ";
+        } else if (isa<DoubleType>(type)) {
+          print_format += "%f";
+          print_args += ExprSTR(arg, false) + ", ";
+        } else if (isa<EventType>(type)) {
+          print_format += "%s";
+          print_args += "(" + ExprSTR(arg, false) + "? \"true\" : \"false\"), ";
+        } else if (isa<IndexType>(type)) {
+          choreo_unreachable("The type " + AST::TYPE_STR(*arg) +
+                             "is not supported in print yet.");
+        } else if (isa<ITupleType>(type)) {
+          print_format += "{";
+          auto [format, args] = GenFormatAndArgsFromShape(e->s);
+          print_format += format;
+          print_format += "}";
+          print_args += args + ", ";
+        } else if (isa<MDSpanType>(type)) {
+          print_format += "[";
+          auto [format, args] = GenFormatAndArgsFromShape(e->s);
+          print_format += format;
+          print_format += "]";
+          print_args += args + ", ";
+        } else if (isa<BoundedIntegerType>(type)) {
+          print_format += "%lld";
+          print_args += "(long long)" + ExprSTR(arg, false) + ", ";
+          choreo_unreachable("should not have bit?");
+        } else if (isa<BoundedITupleType>(type)) {
+          print_format += "{";
+          for (int i = 0; i < (int)e->s.Rank(); ++i) {
+            if (i != 0) print_format += ", ";
+            print_format += "%lld";
+          }
+          print_format += "}";
+          std::string args_str = ExprSTR(arg, false);
+          for (const auto& arg_str : SplitStringByDelimiter(args_str, ", "))
+            print_args += "(long long)" + arg_str + ", ";
+        } else
+          choreo_unreachable("unsupported type for printf: " +
+                             AST::TYPE_STR(*arg));
+        // std::cerr << "args: " << ExprSTR(arg)
+        //           << " with type: " << AST::TYPE_STR(*arg) << "\n";
+      }
+      if (func_name == "println") print_format += "\\n";
+      print_format += "\"";
+      os << indent << "printf(" << print_format;
+      if (auto len = print_args.length(); len > 2) {
+        assert(print_args[len - 2] == ',');
+        print_args = print_args.substr(0, len - 2); // remove last ", "
+        os << ", " << print_args;
+      }
+      os << ");\n";
       return true;
     } else
       choreo_unreachable("the bif '" + n.function->name +
@@ -1872,6 +1961,8 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
     oss << fp_val.str();
   } else if (auto sl = dyn_cast<AST::StringLiteral>(e)) {
     oss << sl->EscapedVal();
+  } else if (auto b = dyn_cast<AST::Boolean>(e)) {
+    oss << b->value;
   } else if (auto ii = dyn_cast<AST::IntIndex>(e)) {
     return ExprSTR(ii->value, is_host);
   } else if (auto expr = dyn_cast<AST::Expr>(e)) {
@@ -1894,6 +1985,10 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       if (expr->GetInt())
         return ExprSTR(expr->GetReference(), is_host);
       else if (expr->GetFloat())
+        return ExprSTR(expr->GetReference(), is_host);
+      else if (expr->GetString())
+        return ExprSTR(expr->GetReference(), is_host);
+      else if (expr->GetBoolean())
         return ExprSTR(expr->GetReference(), is_host);
       else if (expr->GetSymbol())
         return ExprSTR(expr->GetReference(), is_host);

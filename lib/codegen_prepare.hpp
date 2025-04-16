@@ -168,7 +168,6 @@ public:
   bool Visit(AST::ChunkAt&) { return true; }
   bool Visit(AST::Wait&) { return true; }
   bool Visit(AST::Call&) { return true; }
-  bool Visit(AST::PrintNode&) { return true; }
   bool Visit(AST::Rotate&) { return true; }
   bool Visit(AST::Select&) { return true; }
 
