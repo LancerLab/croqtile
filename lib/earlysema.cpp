@@ -1265,13 +1265,15 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
   auto sty = GetSpannedType(nty);
 
   if (n.positions) {
-    if (n.bounds) n.bounds->accept(*this);
+    if (n.bounds) {
+      n.bounds->accept(*this);
 
-    for (auto v : n.bounds->AllValues()) {
-      if (mutables.Contains(v)) {
-        Error(v->LOC(),
-              "the mutable value can not used for the .chunk expression.");
-        error_count++;
+      for (auto v : n.bounds->AllValues()) {
+        if (mutables.Contains(v)) {
+          Error(v->LOC(),
+                "the mutable value can not used for the .chunk expression.");
+          error_count++;
+        }
       }
     }
 
