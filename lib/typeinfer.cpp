@@ -605,14 +605,21 @@ bool TypeInference::Visit(AST::Expr& n) {
       }
     } else if (n.IsArith() && n.op != "#" && CanYieldAnInteger(pty_lhs) &&
                CanYieldAnInteger(pty_rhs)) {
-      // it is ok to make compatiable types to do arith
-      if (IsActualBoundedIntegerType(pty_lhs) && isa<IntegerType>(pty_rhs)) {
-        n.SetType(pty_lhs);
-      } else if (IsActualBoundedIntegerType(pty_rhs) &&
-                 isa<IntegerType>(pty_lhs)) {
-        n.SetType(pty_rhs);
-      } else
-        n.SetType(MakeIntegerType());
+      if (isa<ScalarFloatType>(pty_lhs) || isa<ScalarFloatType>(pty_rhs)) {
+        if (isa<DoubleType>(pty_lhs) || isa<DoubleType>(pty_rhs))
+          n.SetType(MakeDoubleType());
+        else
+          n.SetType(MakeFloatType());
+      } else {
+        // it is ok to make compatiable types to do arith
+        if (IsActualBoundedIntegerType(pty_lhs) && isa<IntegerType>(pty_rhs))
+          n.SetType(pty_lhs);
+        else if (IsActualBoundedIntegerType(pty_rhs) &&
+                 isa<IntegerType>(pty_lhs))
+          n.SetType(pty_rhs);
+        else
+          n.SetType(MakeIntegerType());
+      }
     } else if (*pty_lhs != *pty_rhs) {
       Error(n.LOC(), "The operands of the expression cannot undergo '" + n.op +
                          "' binary operation.");
@@ -626,8 +633,26 @@ bool TypeInference::Visit(AST::Expr& n) {
   } // AST::Expr::Binary
 
   if (n.GetForm() == AST::Expr::Ternary) {
-    choreo_unreachable("inference of ternary operation is not implemented.");
-  }
+    if (n.op == "?") {
+      auto& pty_lhs = n.GetL()->GetType();
+      auto& pty_rhs = n.GetR()->GetType();
+
+      if (pty_lhs->HasSufficientInfo() && pty_rhs->HasSufficientInfo()) {
+        if (*pty_lhs != *pty_rhs) {
+          Error(n.LOC(), "The operands of the expression cannot undergo '" +
+                             n.op + "' operation.");
+          error_count++;
+          return false;
+        }
+        n.SetType(pty_lhs);
+        cur_type = n.GetType();
+        return true;
+      }
+    } else {
+      choreo_unreachable(
+          "inference of the current ternary operation is not implemented.");
+    }
+  } // AST::Expr::Ternary
   return true;
 }
 

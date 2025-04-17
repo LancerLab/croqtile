@@ -3,7 +3,7 @@
 
 #include "choreo.h"
 
-__co__ void qes_op(int u_x, int u_y) {
+__co__ void qes_op(int u_x, int u_y, float _f, double _d) {
   bool f = false;
   bool t = true;
 
@@ -34,80 +34,113 @@ __co__ void qes_op(int u_x, int u_y) {
   int u_3 = (c_x < c_z) ? u_x : b;
   int u_4 = (c_x < c_z) ? u_x : 999;
   int u_5 = (u_x < c_z) ? 99 : 999;
+
+  float f0 = 0.5f;
+  float f1 = 1.5f;
+  double d0 = -0.5;
+  double d1 = 1.7;
+  float f2 = (f1 > f0) ? f1 : f0;
+  f3 = (f1 < _f) ? _f : f1;
+  d2 = (d1 > d0) ? d1 : d0;
+  d3 = (d1 != _d) ? d1 : _d;
 }
 
-// VALNO:   scope-1 {
+// VALNO:  scope-1 {
 // VALNO:    New VN #0: 'const_1'
 // VALNO:    Alias "::@__choreo_no_tiling__" -> #0
 // VALNO:    New VN #1: '::qes_op::u_x'
 // VALNO:    New VN #2: '::qes_op::u_y'
-// VALNO:    New VN #3: 'false'
-// VALNO:    Alias "::qes_op::f" -> #3
-// VALNO:    New VN #4: 'true'
-// VALNO:    Alias "::qes_op::t" -> #4
-// VALNO:    New VN #5: 'const_10'
-// VALNO:    Alias "::qes_op::c_x" -> #5
-// VALNO:    Alias "::qes_op::c_y" -> #5
-// VALNO:    New VN #6: 'const_200'
-// VALNO:    Alias "::qes_op::c_z" -> #6
-// VALNO:    New VN #7: 'const_0'
-// VALNO:    Alias "::qes_op::a" -> #7
+// VALNO:    New VN #3: '::qes_op::_f'
+// VALNO:    New VN #4: '::qes_op::_d'
+// VALNO:    New VN #5: 'false'
+// VALNO:    Alias "::qes_op::f" -> #5
+// VALNO:    New VN #6: 'true'
+// VALNO:    Alias "::qes_op::t" -> #6
+// VALNO:    New VN #7: 'const_10'
+// VALNO:    Alias "::qes_op::c_x" -> #7
+// VALNO:    Alias "::qes_op::c_y" -> #7
+// VALNO:    New VN #8: 'const_200'
+// VALNO:    Alias "::qes_op::c_z" -> #8
+// VALNO:    New VN #9: 'const_0'
+// VALNO:    Alias "::qes_op::a" -> #9
 // VALNO:    Alias "::qes_op::b" -> #0
-// VALNO:    <Simplify> 'ref:#5 > ref:#6' to 'false'
-// VALNO:    <Simplify> '>:#5:#6 ? ref:#7 : ref:#0' to 'const_1'
+// VALNO:    <Simplify> 'ref:#7 > ref:#8' to 'false'
+// VALNO:    <Simplify> '>:#7:#8 ? ref:#9 : ref:#0' to 'const_1'
 // VALNO:    Alias "::qes_op::c_0" -> #0
-// VALNO:    <Simplify> 'ref:#5 < ref:#6' to 'true'
-// VALNO:    <Simplify> '<:#5:#6 ? ref:#7 : ref:#0' to 'const_0'
-// VALNO:    Alias "::qes_op::c_1" -> #7
-// VALNO:    <Simplify> 'ref:#5 == ref:#5' to 'true'
-// VALNO:    <Simplify> '==:#5:#5 ? ref:#7 : ref:#0' to 'const_0'
-// VALNO:    Alias "::qes_op::c_2" -> #7
-// VALNO:    <Simplify> 'ref:#5 != ref:#6' to 'true'
-// VALNO:    <Simplify> '!=:#5:#6 ? ref:#7 : ref:#0' to 'const_0'
-// VALNO:    Alias "::qes_op::c_3" -> #7
-// VALNO:    <Simplify> 'ref:#5 <= ref:#6' to 'true'
-// VALNO:    <Simplify> '<=:#5:#6 ? ref:#7 : ref:#0' to 'const_0'
-// VALNO:    Alias "::qes_op::c_4" -> #7
-// VALNO:    <Simplify> 'ref:#5 < ref:#5' to 'false'
-// VALNO:    <Simplify> '<:#5:#5 ? ref:#7 : ref:#0' to 'const_1'
+// VALNO:    <Simplify> 'ref:#7 < ref:#8' to 'true'
+// VALNO:    <Simplify> '<:#7:#8 ? ref:#9 : ref:#0' to 'const_0'
+// VALNO:    Alias "::qes_op::c_1" -> #9
+// VALNO:    <Simplify> 'ref:#7 == ref:#7' to 'true'
+// VALNO:    <Simplify> '==:#7:#7 ? ref:#9 : ref:#0' to 'const_0'
+// VALNO:    Alias "::qes_op::c_2" -> #9
+// VALNO:    <Simplify> 'ref:#7 != ref:#8' to 'true'
+// VALNO:    <Simplify> '!=:#7:#8 ? ref:#9 : ref:#0' to 'const_0'
+// VALNO:    Alias "::qes_op::c_3" -> #9
+// VALNO:    <Simplify> 'ref:#7 <= ref:#8' to 'true'
+// VALNO:    <Simplify> '<=:#7:#8 ? ref:#9 : ref:#0' to 'const_0'
+// VALNO:    Alias "::qes_op::c_4" -> #9
+// VALNO:    <Simplify> 'ref:#7 < ref:#7' to 'false'
+// VALNO:    <Simplify> '<:#7:#7 ? ref:#9 : ref:#0' to 'const_1'
 // VALNO:    Alias "::qes_op::c_5" -> #0
-// VALNO:    <Simplify> 'ref:#5 != ref:#6' to 'true'
-// VALNO:    <Simplify> '!=:#5:#6 ? ref:#7 : ref:#0' to 'const_0'
-// VALNO:    Alias "::qes_op::c_6" -> #7
-// VALNO:    <Simplify> 'ref:#5 > ref:#6' to 'false'
-// VALNO:    New VN #8: 'const_999'
-// VALNO:    <Simplify> '>:#5:#6 ? ref:#8 : ref:#0' to 'const_1'
+// VALNO:    <Simplify> 'ref:#7 != ref:#8' to 'true'
+// VALNO:    <Simplify> '!=:#7:#8 ? ref:#9 : ref:#0' to 'const_0'
+// VALNO:    Alias "::qes_op::c_6" -> #9
+// VALNO:    <Simplify> 'ref:#7 > ref:#8' to 'false'
+// VALNO:    New VN #10: 'const_999'
+// VALNO:    <Simplify> '>:#7:#8 ? ref:#10 : ref:#0' to 'const_1'
 // VALNO:    Alias "::qes_op::c_7" -> #0
-// VALNO:    <Simplify> 'ref:#5 >= ref:#6' to 'false'
-// VALNO:    New VN #9: 'const_9'
-// VALNO:    <Simplify> '>=:#5:#6 ? ref:#8 : ref:#9' to 'const_9'
-// VALNO:    Alias "::qes_op::c_8" -> #9
-// VALNO:    <Simplify> 'ref:#9 <= ref:#8' to 'true'
-// VALNO:    <Simplify> '<=:#9:#8 ? ref:#8 : ref:#9' to 'const_999'
-// VALNO:    Alias "::qes_op::c_9" -> #8
-// VALNO:    New VN #10: '>:#1:#2'
-// VALNO:    New VN #11: '?:#10:#7:#0'
-// VALNO:    Alias "::qes_op::u_0" -> #11
-// VALNO:    New VN #12: '==:#1:#5'
-// VALNO:    New VN #13: '?:#12:#7:#0'
-// VALNO:    Alias "::qes_op::u_1" -> #13
-// VALNO:    New VN #14: '!=:#1:#2'
-// VALNO:    New VN #15: '?:#14:#1:#0'
-// VALNO:    Alias "::qes_op::u_2" -> #15
-// VALNO:    <Simplify> 'ref:#5 < ref:#6' to 'true'
-// VALNO:    <Simplify> '<:#5:#6 ? ref:#1 : ref:#0' to '::qes_op::u_x'
+// VALNO:    <Simplify> 'ref:#7 >= ref:#8' to 'false'
+// VALNO:    New VN #11: 'const_9'
+// VALNO:    <Simplify> '>=:#7:#8 ? ref:#10 : ref:#11' to 'const_9'
+// VALNO:    Alias "::qes_op::c_8" -> #11
+// VALNO:    <Simplify> 'ref:#11 <= ref:#10' to 'true'
+// VALNO:    <Simplify> '<=:#11:#10 ? ref:#10 : ref:#11' to 'const_999'
+// VALNO:    Alias "::qes_op::c_9" -> #10
+// VALNO:    New VN #12: '>:#1:#2'
+// VALNO:    New VN #13: '?:#12:#9:#0'
+// VALNO:    Alias "::qes_op::u_0" -> #13
+// VALNO:    New VN #14: '==:#1:#7'
+// VALNO:    New VN #15: '?:#14:#9:#0'
+// VALNO:    Alias "::qes_op::u_1" -> #15
+// VALNO:    New VN #16: '!=:#1:#2'
+// VALNO:    New VN #17: '?:#16:#1:#0'
+// VALNO:    Alias "::qes_op::u_2" -> #17
+// VALNO:    <Simplify> 'ref:#7 < ref:#8' to 'true'
+// VALNO:    <Simplify> '<:#7:#8 ? ref:#1 : ref:#0' to '::qes_op::u_x'
 // VALNO:    Alias "::qes_op::u_3" -> #1
-// VALNO:    <Simplify> 'ref:#5 < ref:#6' to 'true'
-// VALNO:    <Simplify> '<:#5:#6 ? ref:#1 : ref:#8' to '::qes_op::u_x'
+// VALNO:    <Simplify> 'ref:#7 < ref:#8' to 'true'
+// VALNO:    <Simplify> '<:#7:#8 ? ref:#1 : ref:#10' to '::qes_op::u_x'
 // VALNO:    Alias "::qes_op::u_4" -> #1
-// VALNO:    New VN #16: '<:#1:#6'
-// VALNO:    New VN #17: 'const_99'
-// VALNO:    New VN #18: '?:#16:#17:#8'
-// VALNO:    Alias "::qes_op::u_5" -> #18
+// VALNO:    New VN #18: '<:#1:#8'
+// VALNO:    New VN #19: 'const_99'
+// VALNO:    New VN #20: '?:#18:#19:#10'
+// VALNO:    Alias "::qes_op::u_5" -> #20
+// VALNO:    New VN #21: 'const_0.500000f'
+// VALNO:    Alias "::qes_op::f0" -> #21
+// VALNO:    New VN #22: 'const_1.500000f'
+// VALNO:    Alias "::qes_op::f1" -> #22
+// VALNO:    New VN #23: 'const_-0.500000'
+// VALNO:    Alias "::qes_op::d0" -> #23
+// VALNO:    New VN #24: 'const_1.700000'
+// VALNO:    Alias "::qes_op::d1" -> #24
+// VALNO:    <Simplify> 'ref:#22 > ref:#21' to 'true'
+// VALNO:    <Simplify> '>:#22:#21 ? ref:#22 : ref:#21' to 'const_1.500000f'
+// VALNO:    Alias "::qes_op::f2" -> #22
+// VALNO:    New VN #25: '<:#22:#3'
+// VALNO:    New VN #26: '?:#25:#3:#22'
+// VALNO:    Alias "::qes_op::f3" -> #26
+// VALNO:    <Simplify> 'ref:#24 > ref:#23' to 'true'
+// VALNO:    <Simplify> '>:#24:#23 ? ref:#24 : ref:#23' to 'const_1.700000'
+// VALNO:    Alias "::qes_op::d2" -> #24
+// VALNO:    New VN #27: '!=:#24:#4'
+// VALNO:    New VN #28: '?:#27:#24:#4'
+// VALNO:    Alias "::qes_op::d3" -> #28
 // VALNO:   } // end scope-1
 
 // CHECK: Parameter: ::qes_op::u_x, Type: int
 // CHECK: Parameter: ::qes_op::u_y, Type: int
+// CHECK: Parameter: ::qes_op::_f, Type: float
+// CHECK: Parameter: ::qes_op::_d, Type: double
 // CHECK: Symbol:    ::qes_op::f, Type: bool
 // CHECK: Symbol:    ::qes_op::t, Type: bool
 // CHECK: Symbol:    ::qes_op::c_x, Type: int
@@ -115,4 +148,28 @@ __co__ void qes_op(int u_x, int u_y) {
 // CHECK: Symbol:    ::qes_op::c_z, Type: int
 // CHECK: Symbol:    ::qes_op::a, Type: int
 // CHECK: Symbol:    ::qes_op::b, Type: int
-// CHECK-NOT: Symbol:{{.*}}
+// CHECK: Symbol:    ::qes_op::c_0, Type: int
+// CHECK: Symbol:    ::qes_op::c_1, Type: int
+// CHECK: Symbol:    ::qes_op::c_2, Type: int
+// CHECK: Symbol:    ::qes_op::c_3, Type: int
+// CHECK: Symbol:    ::qes_op::c_4, Type: int
+// CHECK: Symbol:    ::qes_op::c_5, Type: int
+// CHECK: Symbol:    ::qes_op::c_6, Type: int
+// CHECK: Symbol:    ::qes_op::c_7, Type: int
+// CHECK: Symbol:    ::qes_op::c_8, Type: int
+// CHECK: Symbol:    ::qes_op::c_9, Type: int
+// CHECK: Symbol:    ::qes_op::u_0, Type: int
+// CHECK: Symbol:    ::qes_op::u_1, Type: int
+// CHECK: Symbol:    ::qes_op::u_2, Type: int
+// CHECK: Symbol:    ::qes_op::u_3, Type: int
+// CHECK: Symbol:    ::qes_op::u_4, Type: int
+// CHECK: Symbol:    ::qes_op::u_5, Type: int
+// CHECK: Symbol:    ::qes_op::f0, Type: float
+// CHECK: Symbol:    ::qes_op::f1, Type: float
+// CHECK: Symbol:    ::qes_op::d0, Type: double
+// CHECK: Symbol:    ::qes_op::d1, Type: double
+// CHECK: Symbol:    ::qes_op::f2, Type: float
+// CHECK: Symbol:    ::qes_op::f3, Type: float
+// CHECK: Symbol:    ::qes_op::d2, Type: double
+// CHECK: Symbol:    ::qes_op::d3, Type: double
+// CHECK: Function:  ::qes_op, Type: void (*)(int, int, float, double)

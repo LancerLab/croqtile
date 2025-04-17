@@ -5,17 +5,18 @@ __co__ void foo(s32 [N, M] i) {
   println("aaa");
   int a = 100;
   // bool b = true;
-  // float f = 1.3f;
-  // double d = 2.6;
-  // print("scalar:\n\ta: ", a, "\n\tM: ", M, "\n\tf: ", f, "\n\td: ", d, "\n");
-  print("scalar:\n\ta: ", a, "\n\tM: ", M, "\n");
+  float f = 1.3f;
+  double d = 2.6;
+  double dd = 3.9;
+  print("scalar:\n\ta: ", a, "\n\tM: ", M, "\n\tf: ", f, "\n\td: ", d, "\n");
+  println("\td+dd: ", d+dd);
   parallel p by 1 {
     bool b = false;
     mds : [1,2,3];
     it = {4, M};
     nit = {a, 5};
     println("b: ", b);
-    // println("d: ", d + 1.5);
+    println("d: ", d + 1.5);
     println("i.span: ", i.span);
     println("mds: ", mds);
     println("it: ", it);
@@ -76,7 +77,11 @@ int main()
 // CHECK: scalar:
 // CHECK:         a: 100
 // CHECK:         M: 64
+// CHECK:         f: 1.300000
+// CHECK:         d: 2.600000
+// CHECK:         d+dd: 6.500000
 // CHECK: [0, 0] b: false
+// CHECK: [0, 0] d: 4.100000
 // CHECK: [0, 0] i.span: [128, 64]
 // CHECK: [0, 0] mds: [1, 2, 3]
 // CHECK: [0, 0] it: {4, 64}

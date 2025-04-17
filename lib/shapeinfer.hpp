@@ -462,7 +462,10 @@ public:
     SSTab().DefineSymbol(name, nty);
     n.SetType(nty);
 
-    if (isa<IntegerType>(nty) && ValidVN(cur_vn)) {
+    // TODO(wsj): BooleanType? HalfType...?
+    if ((isa<FloatType>(nty) || isa<DoubleType>(nty) ||
+         isa<IntegerType>(nty)) &&
+        ValidVN(cur_vn)) {
       auto shape =
           GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
       assert(shape.DimCount() == 1);

@@ -149,6 +149,20 @@ inline static std::string SearchPattern(const std::string& input,
   return ""; // or throw an exception if no match is found
 }
 
+// Convert string(1.5f) to float
+inline static std::optional<float> Str2Float(std::string str) {
+  auto res = SearchPattern(str, R"(^[-]?[0-9]+\.[0-9]+f$)");
+  if (res == "") return std::nullopt;
+  return std::stof(str);
+}
+
+// Convert string(1.5) to double
+inline static std::optional<double> Str2Double(const std::string& str) {
+  auto res = SearchPattern(str, R"(^[-]?[0-9]+\.[0-9]+$)");
+  if (res == "") return std::nullopt;
+  return std::stod(str);
+}
+
 inline static const std::string ToUpper(const std::string& s) {
   std::string r(s.size(), '\0');
   transform(s.begin(), s.end(), r.begin(), ::toupper);
