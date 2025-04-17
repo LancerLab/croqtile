@@ -1764,7 +1764,12 @@ void TopsccCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
   // JIT: detect the environment
   if (use_sim)
     os << "gcu_arch=gcu400\n";
-  else
+  else if (((CCtx().GetOutputKind() == OutputKind::TargetModule) ||
+            (CCtx().GetOutputKind() == OutputKind::TargetExecutable)) &&
+           !arch.GetValue().empty()) {
+    // enforce the arch type
+    os << "gcu_arch=" << arch.GetValue() << "\n";
+  } else
     os << R"script(
   # check the device just-in-time
   # TODO: improve the target check with more solid code
