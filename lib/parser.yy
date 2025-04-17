@@ -648,6 +648,10 @@ scalar_decl
         $$ = AST::Make<AST::NamedVariableDecl>(@1, $1,
              AST::Make<AST::DataType>(@1, BaseType::UNKNOWN), nullptr, $3);
       }
+    | IDENTIFIER ASSIGN MINUS NUM {
+        $$ = AST::Make<AST::NamedVariableDecl>(@1, $1,
+             AST::Make<AST::DataType>(@1, BaseType::UNKNOWN), nullptr, AST::Make<AST::Expr>(@4, AST::Make<AST::IntLiteral>(@4, -$4)));
+      }
     ;
 
 named_event_decls
