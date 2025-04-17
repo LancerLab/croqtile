@@ -111,15 +111,6 @@ file(WRITE ${CMAKE_BINARY_DIR}/preinst
 # Minimum required glibc version
 MIN_GLIBC_VERSION=\"${MIN_GLIBC_VERSION}\"
 
-# Get the current glibc version
-CURRENT_GLIBC_VERSION=\$(ldd --version | awk '/ldd/{print \$NF}')
-
-# Compare glibc versions
-if [ \"\$(printf '%s\\n' \"\$MIN_GLIBC_VERSION\" \"\$CURRENT_GLIBC_VERSION\" | sort -V | head -n1)\" != \"\$MIN_GLIBC_VERSION\" ]; then
-    echo \"Error: glibc version \$CURRENT_GLIBC_VERSION is too old. Minimum required glibc version is \$MIN_GLIBC_VERSION.\"
-    exit 1
-fi
-
 # Check if 'topscc' is installed
 if ! dpkg -s topscc > /dev/null 2>&1; then
     echo \"Error: The 'topscc' package is not installed. Please install it first.\"
@@ -128,6 +119,9 @@ fi
 
 exit 0
 ")
+
+set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "${CMAKE_BINARY_DIR}/preinst")
+install(PROGRAMS ${CMAKE_BINARY_DIR}/preinst DESTINATION DEBIAN)
 
 # Set package information
 set(CPACK_PACKAGE_NAME "choreo")
