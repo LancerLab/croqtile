@@ -1734,7 +1734,8 @@ if [[ -z ${TOPSCC_INSTALL} ]]; then
   if [[ \"$1\" == \"-st\" ]]; then
     TOPSCC_INSTALL=/opt/tops;
     shift 1;
-  fi)script";
+  fi
+)script";
 
   if (use_system_toolchain) {
 	  os << R"script(
