@@ -1726,20 +1726,47 @@ void TopsccCodeGen::EmitSource() {
 void TopsccCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
   auto filename = RemoveDirectoryPrefix(
       RemoveSuffix(OptionRegistry::GetInstance().GetInputFileName(), ".co"));
-  os << "#!/usr/bin/env bash\n\n";
-  os << "# This is the choreo generated bash script to compile factor "
-        "code\n\n";
+  os << R"script(#!/usr/bin/env bash
 
-  os << "if [[ -z ${TOPSCC_INSTALL} ]]; then\n";
-  if (use_system_toolchain)
-    os << "  TOPSCC_INSTALL=/opt/tops\n";
-  else
+# This is the choreo generated bash script to compile topscc code
+
+if [[ -z ${TOPSCC_INSTALL} ]]; then
+  if [[ \"$1\" == \"-st\" ]]; then
+    TOPSCC_INSTALL=/opt/tops;
+    shift 1;
+  fi)script";
+
+  if (use_system_toolchain) {
+	  os << R"script(
+	# Search for the binary in the PATH
+	FOUND_PATH=$(which "topscc" 2>/dev/null)
+
+	if [ -n "$FOUND_PATH" ]; then
+		# If the binary is found, extract the installation path
+		TOPSCC_INSTALL=$(dirname "$(dirname "$FOUND_PATH")")
+	elif [[ -f /opt/tops/bin/topscc ]]; then
+		# Search for the default topscc installation directory
+		TOPSCC_INSTALL=/opt/tops
+  elif [[ -d )script" << STRINGIZE(__CHOREO_TOPSCC_DIR__) << " ]]; then\n";
+    os << "    TOPSCC_INSTALL=" << STRINGIZE(__CHOREO_TOPSCC_DIR__);
+    os << R"script(
+  fi
+)script";
+  } else
     os << "  TOPSCC_INSTALL=" << STRINGIZE(__CHOREO_TOPSCC_DIR__) << "\n";
-  os << "  if [[ \"$1\" == \"-st\" ]]; then TOPSCC_INSTALL=/opt/tops; shift 1; "
-        "fi\n";
-  os << "fi\n";
-  os << "TOPSCC=${TOPSCC_INSTALL}/bin/topscc\n";
-  os << "TOPSCC_LIB=${TOPSCC_INSTALL}/lib\n\n";
+
+  os << R"script(
+fi
+
+if [[ -z "${TOPSCC_INSTALL}" ]]; then
+  echo "failed to find the topscc installation."
+  echo "install topscc or set TOPSCC_INSTALL to topscc installation directory."
+  exit 1
+fi
+
+TOPSCC=${TOPSCC_INSTALL}/bin/topscc
+TOPSCC_LIB=${TOPSCC_INSTALL}/lib
+)script";
 
   auto build_path = CreateUniquePath();
   auto cc_file = build_path + "/__choreo_topscc_" + filename + ".cpp";

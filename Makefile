@@ -29,7 +29,7 @@ TEST_TARGETS := $(TEST_FILES:.co=.test)
 HEADER_FILES :=  $(shell find $(SRC_DIR) -name '*.hpp') choreo_header.inc choreo_cuda_header.inc factor_script.inc cuda_script.inc
 
 CC = g++
-CFLAGS = -std=c++17 -Wall -Wextra -g -D__CHOREO_FACTOR_DIR__="$(TOOLCHAIN_DIR)" -D__CHOREO_CUDA_DIR__="$(TOOLCHAIN_DIR)" -D__CHOREO_TOPSCC_DIR__="$(TOOLCHAIN_DIR)"
+CFLAGS += -std=c++17 -Wall -Wextra -g -D__CHOREO_FACTOR_DIR__="$(TOOLCHAIN_DIR)" -D__CHOREO_CUDA_DIR__="$(TOOLCHAIN_DIR)" -D__CHOREO_TOPSCC_DIR__="$(TOOLCHAIN_DIR)"
 
 # fix version of clang-format
 CLANG_FORMAT:=$(WORK_DIR)/extern/clang-format-19-1-2
@@ -53,6 +53,8 @@ CMAKE_BUILD_DIR = $(BUILD_DIR)
 CMAKE = cmake
 CMAKE_BUILD_TYPE = Release
 
+PUBLIC_PACKAGE=OFF
+
 # Build rules
 all: build
 
@@ -66,6 +68,7 @@ release: CMAKE_BUILD_TYPE=Release
 release: CMAKE_BUILD_DIR=$(REL_BUILD_DIR)
 release: build-with-cmake-ninja
 
+package: PUBLIC_PACKAGE=ON
 package: release
 	@cmake --build $(REL_BUILD_DIR) --target package
 
@@ -107,7 +110,7 @@ build-with-cmake:
 build-with-cmake-ninja:
 	@echo "Starting build with CMake..."
 	@if [ ! -d $(CMAKE_BUILD_DIR) ]; then mkdir -p $(CMAKE_BUILD_DIR); fi
-	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -G Ninja -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE)
+	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -G Ninja -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) -DPUBLIC_PACKAGE=$(PUBLIC_PACKAGE)
 	time ninja -C $(CMAKE_BUILD_DIR)
 	ln -sf $(CMAKE_BUILD_DIR)/choreo $(WORK_DIR)/choreo
 	ln -sf $(CMAKE_BUILD_DIR)/copp $(WORK_DIR)/copp

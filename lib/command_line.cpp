@@ -44,7 +44,12 @@ Option<bool> use_hetero_tileflow(
     "(Experimental) Allow choreo code to apply implicit/aggressive tileflow"
     "optimisation under heterogeneous scenario.");
 Option<bool> use_system_toolchain(OptionKind::Hidden, "--use-system-toolchain",
-                                  "-st", false,
+                                  "-st",
+#ifdef __CHOREO_INSTALLATION_PACKAGE__
+                                  true,
+#else
+                                  false,
+#endif
                                   "(Experimental) Use system installed "
                                   "toolchain: topscc, topsrt, etc for choreo.");
 Option<bool> use_pic(OptionKind::Hidden, "--use-pic", "-fpic", false,

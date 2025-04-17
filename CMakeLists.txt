@@ -38,6 +38,12 @@ set(BISON_ENV "BISON_PKGDATADIR=${TOOLCHAIN_DIR}/shared/bison/")
 
 add_compile_options(-Wall -Wextra -g  -D__CHOREO_FACTOR_DIR__="${TOOLCHAIN_DIR}" -D__CHOREO_CUDA_DIR__="${TOOLCHAIN_DIR}" -D__CHOREO_TOPSCC_DIR__="${TOOLCHAIN_DIR}")
 
+option(PUBLIC_PACKAGE "Build for Public Release Package")
+
+if (PUBLIC_PACKAGE)
+  add_compile_options(-D__CHOREO_INSTALLATION_PACKAGE__)
+endif()
+
 # do not warn about strict-aliasing
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     add_compile_options(-fno-strict-aliasing)
@@ -85,13 +91,41 @@ target_link_libraries(copp PRIVATE
 
 # Check if VERSION.txt exists
 if(NOT EXISTS "${CMAKE_SOURCE_DIR}/VERSION.txt")
-    message(FATAL_ERROR "VERSION.txt not found! Please create this file with the package version.")
+  message(FATAL_ERROR "VERSION.txt not found!")
 endif()
 
 # Read the version from VERSION.txt
 file(READ "${CMAKE_SOURCE_DIR}/VERSION.txt" CPACK_PACKAGE_VERSION)
 # Strip any leading/trailing whitespace or newlines
 string(STRIP "${CPACK_PACKAGE_VERSION}" CPACK_PACKAGE_VERSION)
+
+# Minimum required glibc version
+set(MIN_GLIBC_VERSION "2.27")
+
+# Create the DEBIAN/preinst script
+file(WRITE ${CMAKE_BINARY_DIR}/preinst
+"#!/bin/bash
+
+# Minimum required glibc version
+MIN_GLIBC_VERSION=\"${MIN_GLIBC_VERSION}\"
+
+# Get the current glibc version
+CURRENT_GLIBC_VERSION=\$(ldd --version | awk '/ldd/{print \$NF}')
+
+# Compare glibc versions
+if [ \"\$(printf '%s\\n' \"\$MIN_GLIBC_VERSION\" \"\$CURRENT_GLIBC_VERSION\" | sort -V | head -n1)\" != \"\$MIN_GLIBC_VERSION\" ]; then
+    echo \"Error: glibc version \$CURRENT_GLIBC_VERSION is too old. Minimum required glibc version is \$MIN_GLIBC_VERSION.\"
+    exit 1
+fi
+
+# Check if 'topscc' is installed
+if ! dpkg -s topscc > /dev/null 2>&1; then
+    echo \"Error: The 'topscc' package is not installed. Please install it first.\"
+    exit 1
+fi
+
+exit 0
+")
 
 # Set package information
 set(CPACK_PACKAGE_NAME "choreo")
@@ -147,7 +181,7 @@ install(TARGETS choreo copp
 #     )
 #     # Install generated headers
 #     install(FILES choreo_header.inc choreo_cuda_header.inc DESTINATION include)
-# 
+#
 # elseif(CHOREO_PACKAGE_VERSION STREQUAL "core")
 #     message(STATUS "Building Core Version")
 #     install(TARGETS choreo copp codegen
@@ -156,7 +190,7 @@ install(TARGETS choreo copp
 #       ARCHIVE DESTINATION lib
 #     )
 #     install(FILES choreo_header.inc choreo_cuda_header.inc DESTINATION include)
-# 
+#
 # else()
 #     message(FATAL_ERROR "Invalid package version selected. Please choose 'standalone' or 'core'.")
 # endif()
