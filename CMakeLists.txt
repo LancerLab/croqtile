@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Define package version
-set(CHOREO_PACKAGE_VERSION "core" CACHE STRING "Choose the package version: standalone or core")
+# set(CHOREO_PACKAGE_VERSION "core" CACHE STRING "Choose the package version: standalone or core")
 
 # use ccache if exists
 find_program(CCACHE_PROGRAM ccache)
@@ -81,11 +81,21 @@ target_link_libraries(copp PRIVATE
   ${GINAC_DIR}/lib/libginac.so
 )
 
-message(STATUS "CHOREO_PACKAGE_VERSION is set to: ${CHOREO_PACKAGE_VERSION}")
+# message(STATUS "CHOREO_PACKAGE_VERSION is set to: ${CHOREO_PACKAGE_VERSION}")
+
+# Check if VERSION.txt exists
+if(NOT EXISTS "${CMAKE_SOURCE_DIR}/VERSION.txt")
+    message(FATAL_ERROR "VERSION.txt not found! Please create this file with the package version.")
+endif()
+
+# Read the version from VERSION.txt
+file(READ "${CMAKE_SOURCE_DIR}/VERSION.txt" CPACK_PACKAGE_VERSION)
+# Strip any leading/trailing whitespace or newlines
+string(STRIP "${CPACK_PACKAGE_VERSION}" CPACK_PACKAGE_VERSION)
 
 # Set package information
 set(CPACK_PACKAGE_NAME "choreo")
-set(CPACK_PACKAGE_VERSION "1.0.0.alpha")
+#set(CPACK_PACKAGE_VERSION "1.0.0.alpha")
 set(CPACK_PACKAGE_DESCRIPTION "Installed package for choreo")
 set(CPACK_PACKAGE_VENDOR "ERA Developers")
 
