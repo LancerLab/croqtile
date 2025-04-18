@@ -49,6 +49,16 @@ struct LaunchConfig {
   ValueItem block_dim_z = 1;
   ValueItem block_dim_y = 1;
   ValueItem block_dim_x = 1;
+  ValueItem warp_dim_x = 1;
+  ValueItem warp_dim_y = 1;
+  ValueItem warp_dim_z = 1;
+
+  // reset the warp dimensions to 1
+  void ResetWDims() {
+    warp_dim_x = 1;
+    warp_dim_y = 1;
+    warp_dim_z = 1;
+  }
 
   // reset the block dimensions to 1
   void ResetBDims() {
@@ -62,6 +72,16 @@ struct LaunchConfig {
     grid_dim_x = 1;
     grid_dim_y = 1;
     grid_dim_z = 1;
+  }
+
+  void SetWarpDims(const ValueList& dims) {
+    ResetWDims();
+    switch (dims.size()) {
+    case 3: warp_dim_z = dims[2]; [[fallthrough]];
+    case 2: warp_dim_y = dims[1]; [[fallthrough]];
+    case 1: warp_dim_x = dims[0]; break;
+    default: choreo_unreachable("The number of dimensions is not supported.");
+    }
   }
 
   void SetBlockDims(const ValueList& dims) {
@@ -100,6 +120,7 @@ using LaunchDetails = std::map<std::string, std::vector<LaunchConfig>>;
 using ReturnSymbols = std::map<std::string, std::string>;
 using FunctionTraits = std::map<std::string, OtherTrait>;
 using SharedFutures = std::map<std::string, std::set<std::string>>;
+using LocalFutures = std::map<std::string, std::set<std::string>>;
 
 enum PassedOrDeclaredSymbolKind : int {
   PDSYM_NONE = 0,
@@ -117,6 +138,7 @@ private:
   ReturnSymbols returns;
   FunctionTraits traits;
   SharedFutures shr_futs;
+  LocalFutures loc_futs;
 
   size_t param_count = 0;
 
@@ -151,6 +173,14 @@ public:
   }
   std::set<std::string>& GetFunctionSharedFutures(const std::string& fname) {
     return shr_futs[fname];
+  }
+
+  const std::set<std::string>&
+  GetFunctionLocalFutures(const std::string& fname) const {
+    return loc_futs.at(fname);
+  }
+  std::set<std::string>& GetFunctionLocalFutures(const std::string& fname) {
+    return loc_futs[fname];
   }
 
   bool HasParallelBy(const std::string& fname) const {
