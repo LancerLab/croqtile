@@ -1402,14 +1402,51 @@ private:
     if (auto digit = RemovePrefixOrNull("const_", sig)) return *digit;
 
     // a value number reference
-    if (auto digit = RemovePrefixOrNull("#", sig))
+    if (auto digit = RemovePrefixOrNull("#", sig);
+        digit && !PrefixedWith(sig, "#:"))
       return GenerateExpression(
           vn.GetSignatureFromValueNumber(std::stoi(*digit)));
 
+    // unary expressions
+    if (PrefixedWith(sig, "!:")) {
+      return "!" + GenerateExpression(sig.substr(2));
+    }
+    if (PrefixedWith(sig, "sizeof:")) {
+      auto all = vn.GetSignatureFromValueNumber(std::stoi(sig.substr(8)));
+      auto parts = SplitStringByDelimiter(all, ",");
+      std::string res;
+      for (auto& p : parts) {
+        if (res != "") res += "*";
+        res += "(" + GenerateExpression(p) + ")";
+      }
+      return res;
+    }
+
     // binary expressions
-    if (sig[1] == ':' &&
-        ((sig[0] == '+') || (sig[0] == '-') || (sig[0] == '*') ||
-         (sig[0] == '/') || (sig[0] == '%'))) {
+    if (PrefixedWith(sig, "cdiv:")) {
+      auto parts = SplitStringByDelimiter(sig.substr(5), ":");
+      assert(parts.size() == 2);
+      auto lhs = GenerateExpression(parts[0]);
+      auto rhs = GenerateExpression(parts[1]);
+      return "((" + lhs + ")+(" + rhs + ")-1)/(" + rhs + ")";
+    }
+    if (PrefixedWith(sig, "#:")) {
+      auto parts = SplitStringByDelimiter(sig.substr(2), ":");
+      assert(parts.size() == 2);
+      std::string res;
+      for (auto& p : parts) {
+        if (res != "") res += "*";
+        res += "(" + GenerateExpression(p) + ")";
+      }
+      return res;
+    }
+    static const std::initializer_list<std::string> prefixes = {
+        "+:",  "-:", "*:", "/:",  "%:",  ">=:", "||:",
+        "&&:", "<:", ">:", "==:", "!=:", "<=:", ">=:"};
+    if (std::any_of(prefixes.begin(), prefixes.end(),
+                    [&](const std::string& prefix) {
+                      return PrefixedWith(sig, prefix);
+                    })) {
       std::istringstream stream(sig);
       std::vector<std::string> parts;
       std::string part;
@@ -1418,6 +1455,16 @@ private:
       assert(parts.size() == 3);
       return "(" + GenerateExpression(parts[1]) + ")" + parts[0] + "(" +
              GenerateExpression(parts[2]) + ")";
+    }
+
+    // ternary expressions
+    if (PrefixedWith(sig, "?:")) {
+      auto parts = SplitStringByDelimiter(sig.substr(2), ":");
+      assert(parts.size() == 3);
+      std::string res = "(" + GenerateExpression(parts[0]) + ")?" + "(" +
+                        GenerateExpression(parts[1]) + "):(" +
+                        GenerateExpression(parts[2]) + ")";
+      return res;
     }
 
     // this is a symbol

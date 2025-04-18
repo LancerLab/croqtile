@@ -1,0 +1,26 @@
+// RUN: choreo -es %s | FileCheck --match-full-lines --check-prefix=CHECK %s
+
+__co__ auto foo(f32 [M] a, s16 [M, N] b, int x, int y, double d) {
+  int r1 = cdiv(x, 5) + y;
+  ii : b.span + {1,2};
+  parallel p by x {
+    foreach r in [|a.span|, |ii|, cdiv(M, 2), (x >= y) ? x : y] { }
+    foreach xq in 5
+      rx = dma.copy a.chunkat(p#xq) => global;
+  }
+  xx = 100 + r1;
+  return xx;
+}
+
+// CHECK: __global__ void __choreo_device_foo(float * a, short * b, int x, int y, double d, float * rx__buf__, int xx, unsigned M, unsigned N) {
+// CHECK:     for (__iv_r__elem__0 = 0; __iv_r__elem__0 < (M); ++__iv_r__elem__0) {
+// CHECK:       for (__iv_r__elem__1 = 0; __iv_r__elem__1 < ((M)+(1))*((N)+(2)); ++__iv_r__elem__1) {
+// CHECK:         for (__iv_r__elem__2 = 0; __iv_r__elem__2 < ((M)+(2)-1)/(2); ++__iv_r__elem__2) {
+// CHECK:           for (__iv_r__elem__3 = 0; __iv_r__elem__3 < ((x)>=(y))?(x):(y); ++__iv_r__elem__3) {
+// CHECK:     int __iv_xq__elem__0 = 0;
+// CHECK:     for (__iv_xq__elem__0 = 0; __iv_xq__elem__0 < 5; ++__iv_xq__elem__0) {
+// CHECK:       auto anon_0 = ((__tops_tid_x())*(5)+(__iv_xq__elem__0));
+// CHECK:       tops::mdspan __mds0_a(tops::Global, (float*)a, M);
+// CHECK:       tops::mdspan __mds1_rx__buf__(tops::Global, (float*)rx__buf__, (M)/((x)*(5)));
+// CHECK: }
+// CHECK:   return ((100)+((((x)+(5)-1)/(5))+(y)));

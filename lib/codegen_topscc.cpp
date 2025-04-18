@@ -576,8 +576,9 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
 
   // when symbol is not valued
   if (isa<ScalarType>(nty) && !FCtx(fname).HasSymbolValues(InScopeName(sym))) {
-    ds << d_indent << NameBaseType(GetBaseType(*nty), false) << " " << sym
-       << " = " << ExprSTR(n.init_expr, false) << ";\n";
+    (IsHost() ? hs : ds) << (IsHost() ? h_indent : d_indent)
+                         << NameBaseType(GetBaseType(*nty), false) << " " << sym
+                         << " = " << ExprSTR(n.init_expr, false) << ";\n";
     return true;
   }
 
@@ -2120,7 +2121,7 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       if (expr->GetOp() == "cdiv") {
         std::string one = "1";
         oss << "((" << ExprSTR(expr->GetL(), is_host) << ")+("
-            << ExprSTR(expr->GetR(), is_host) << "-" << one << ")/("
+            << ExprSTR(expr->GetR(), is_host) << ")-(" << one << "))/("
             << ExprSTR(expr->GetR(), is_host) << ")";
       } else if (expr->GetOp() == "getith") {
         auto lty = cast<BoundedType>(NodeType(*expr->GetL()));
