@@ -254,6 +254,7 @@ public:
     }
     return true;
   }
+  bool Visit(AST::DataAccess&) override { return true; }
   bool Visit(AST::Assignment&) override { return true; }
   bool Visit(AST::IntIndex&) override { return true; }
   bool Visit(AST::DataType&) override { return true; }

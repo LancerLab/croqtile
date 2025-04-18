@@ -421,7 +421,7 @@ bool FactorCodeGen::Visit(AST::Assignment& node) {
     }
     if (arg_idx >= 0) buffer_name = "args[" + std::to_string(arg_idx) + "]";
     auto sty = cast<SpannedType>(node.GetType());
-    fs << indent << "auto " << node.name << " = bitcast_("
+    fs << indent << "auto " << node.GetName() << " = bitcast_("
        << stringify(sty->GetStorage()) << "(" << stringify(sty->ElementType())
        << ", ";
 
@@ -450,7 +450,7 @@ bool FactorCodeGen::Visit(AST::Assignment& node) {
              isa<FutureType>(NodeType(node)) ||
              isa<IntegerType>(NodeType(node)) ||
              isa<ITupleType>(NodeType(node))) {
-    fs << indent << "auto " << node.name << " = " << ExprSTR(node.value)
+    fs << indent << "auto " << node.GetName() << " = " << ExprSTR(node.value)
        << ";\n";
   }
 

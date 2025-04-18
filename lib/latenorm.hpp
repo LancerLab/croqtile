@@ -258,7 +258,7 @@ public:
       // at Assignment Node.
       AST::Assignment& an = *n_ptr;
       if (isa<AST::Expr>(an.value)) {
-        processHostIVForExpr(an.value, an.name, an);
+        processHostIVForExpr(an.value, an.GetName(), an);
       }
     }
     return true;
@@ -428,7 +428,7 @@ private:
 
         SymTab()->AddSymbol(SSTab().ScopeName() + "_", unit_bound_ty);
         SymTab()
-            ->GetSymbol(InScopeName(top_node.name))
+            ->GetSymbol(InScopeName(top_node.GetName()))
             ->SetType(new_host_iv_ty);
         expr_ptr->SetR(new_node); // Replace GetR with a new node
       }

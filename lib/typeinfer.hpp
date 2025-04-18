@@ -50,6 +50,7 @@ public:
   bool Visit(AST::NamedTypeDecl&) override;
   bool Visit(AST::NamedVariableDecl&) override;
   bool Visit(AST::IntTuple&) override;
+  bool Visit(AST::DataAccess&) override;
   bool Visit(AST::Assignment&) override;
   bool Visit(AST::IntIndex&) override;
   bool Visit(AST::DataType&) override;

@@ -73,6 +73,7 @@ private:
       false; // we need context to judge if it is declaration or reference
   bool allow_named_dim = false; // tolerate same symbols (mdspan param only)
 
+  bool donot_check_id = false;
   bool requires_return =
       false; // only void function does not require return value
   bool found_return = false;
@@ -137,6 +138,7 @@ public:
   bool Visit(AST::NamedTypeDecl&) override;
   bool Visit(AST::NamedVariableDecl&) override;
   bool Visit(AST::IntTuple&) override;
+  bool Visit(AST::DataAccess&) override;
   bool Visit(AST::Assignment&) override;
   bool Visit(AST::IntIndex&) override;
   bool Visit(AST::DataType&) override;

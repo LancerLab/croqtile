@@ -460,7 +460,7 @@ void LivenessAnalyzer::HandleSelect(AST::Node& n, ptr<AST::Select> sel) {
   if (auto nvd = dyn_cast<AST::NamedVariableDecl>(&n))
     name = nvd->name_str;
   else if (auto assign = dyn_cast<AST::Assignment>(&n))
-    name = assign->name;
+    name = assign->GetName();
   else
     assert(false && "expecting a NamedVariableDecl or Assignment node!");
   // if (!isa<FutureType>(NodeType(*sel))) {
@@ -533,7 +533,7 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
     else if (nvd->init_value)
       os << " " << nvd->init_str << " {" << PSTR(nvd->init_value) << "}";
   } else if (const auto assign = dyn_cast<AST::Assignment>(&n)) {
-    os << assign->name << " = " << PSTR(assign->value);
+    os << assign->GetName() << " = " << PSTR(assign->value);
   } else if (const auto dma = dyn_cast<AST::DMA>(&n)) {
     if (dma->operation == ".any") {
       os << (dma->future.empty() ? "?" : dma->future);
@@ -865,15 +865,15 @@ bool LivenessAnalyzer::Visit(AST::Assignment& n) {
   } else if (auto sa = dyn_cast<AST::SpanAs>(n.value)) {
     assert(IsRef(n) && "expecting the spanas assignment is a reference.");
     linfo[current_stmt].buffer_related = true;
-    AddDef(current_stmt, n.name);
+    AddDef(current_stmt, n.GetName());
     AddUse(current_stmt, sa->id->name);
-    AddIsAlias(current_stmt, n.name);
-    AddAlias(n.name, sa->id->name);
+    AddIsAlias(current_stmt, n.GetName());
+    AddAlias(n.GetName(), sa->id->name);
   } else {
     assert(!IsRef(n) && "expecting the assignment is not a reference.");
     VST_DEBUG(dbgs() << "The assignment is not sel or sa: " << STR(n)
                      << ".\n\n");
-    AddDef(current_stmt, n.name);
+    AddDef(current_stmt, n.GetName());
     if (auto expr = dyn_cast<AST::Expr>(n.value)) {
       VarSet operands = GetAllSymbolicOperands(expr.get());
       AddUse(current_stmt, operands);

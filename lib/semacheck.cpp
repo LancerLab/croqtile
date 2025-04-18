@@ -59,14 +59,13 @@ bool SemaChecker::VisitNode(AST::IntTuple& n) {
 
 bool SemaChecker::VisitNode(AST::Assignment& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
-  if (!ReportUnknownSymbol(n.name, n.LOC(), __FILE__, __LINE__)) return false;
+  if (!ReportUnknownSymbol(n.GetName(), n.LOC(), __FILE__, __LINE__))
+    return false;
 
-  if ((*GetSymbolType(n.name) != *NodeType(*n.value)) ||
-      (*NodeType(n) != *NodeType(*n.value))) {
-    dbgs() << STR(*GetSymbolType(n.name)) << STR(*NodeType(*n.value))
-           << STR(*NodeType(n));
-
-    Error(n.LOC(), "inconsistent types are found in the assignment.");
+  if ((*NodeType(n) != *NodeType(*n.value))) {
+    Error(n.LOC(), "inconsistent types are found in the assignment: " +
+                       STR(*NodeType(*n.value)) + " vs. " + STR(*NodeType(n)) +
+                       ".");
     error_count++;
     return false;
   }

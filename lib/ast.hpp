@@ -26,7 +26,7 @@ using ptr = Choreo::ptr<T>;
 
 // Utility to generate shared_ptr<Node>
 template <typename T, typename... Args>
-ptr<T> Make(Args&&... args) {
+inline ptr<T> Make(Args&&... args) {
   return std::make_shared<T>(std::forward<Args>(args)...);
 }
 
@@ -751,19 +751,92 @@ struct IntTuple : public Node, public TypeIDProvider<IntTuple> {
   __UDT_TYPE_INFO__(Node, IntTuple)
 };
 
-struct Assignment : public Node, public TypeIDProvider<Assignment> {
+struct Identifier : public Node, public TypeIDProvider<Identifier> {
   std::string name;
+  Identifier(const location& l,
+             const std::string& n = SymbolTable::GetAnonName())
+      : Node(l), name(n) {}
+  Identifier(const Identifier& id) : Node(id.LOC()), name(id.name) {}
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    os << prefix << name;
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, Identifier)
+};
+
+struct DataAccess : public Node, public TypeIDProvider<DataAccess> {
+  ptr<Identifier> data = nullptr;
+  ptr<MultiValues> indices = nullptr;
+
+  DataAccess(const location& l, const ptr<Identifier>& i,
+             const ptr<MultiValues>& m = nullptr)
+      : Node(l), data(i), indices(m) {
+    assert(i != nullptr && "no data is specified.");
+    if (m) assert((m->Count() > 0) && "requires at least one index.");
+  }
+
+  explicit DataAccess(const location& l, const std::string& s)
+      : Node(l), data(Make<Identifier>(l, s)), indices(nullptr) {}
+
+  const ptr<Identifier>& GetData() const { return data; };
+  const std::string& GetDataName() const { return data->name; };
+
+  bool AccessElement() const { return indices != nullptr; }
+
+  const std::vector<ptr<Node>>& GetIndices() const {
+    if (!indices) choreo_unreachable("unexpected null indices.");
+    return indices->AllValues();
+  }
+
+  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+    (void)prefix;
+    os << data->name;
+    if (indices) {
+      os << "[";
+      int i = 0;
+      for (auto e : GetIndices()) {
+        if (i++ != 0) os << ", ";
+        os << PSTR(e);
+      }
+      os << "]";
+    }
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, DataAccess)
+};
+
+struct Assignment : public Node, public TypeIDProvider<Assignment> {
+  ptr<DataAccess> da;
   ptr<Node> value;
 
   explicit Assignment(const location& l, const std::string& n,
                       const ptr<Node>& v)
-      : Node(l), name(n), value(v) {
-    assert(n.size() > 0 && "invalid assignment to the un-named value.");
-  }
+      : Node(l), da(Make<DataAccess>(l, n)), value(v) {}
+
+  explicit Assignment(const location& l, const ptr<DataAccess>& n,
+                      const ptr<Node>& v)
+      : Node(l), da(n), value(v) {}
 
   void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << "\n" << prefix << "`- Assign: " << name << " = " << PSTR(value);
+    os << "\n" << prefix << "`- Assign: " << PSTR(da) << " = " << PSTR(value);
   }
+
+  const std::string& GetName() const {
+    if (da->AccessElement())
+      choreo_unreachable("element access can not be named.");
+    return da->GetDataName();
+  }
+
+  const std::string& GetDataArrayName() const {
+    if (!da->AccessElement()) choreo_unreachable("not a data array access.");
+    return da->GetDataName();
+  }
+
+  bool AssignToDataElement() { return da->AccessElement(); }
 
   void accept(Visitor&) override;
 
@@ -991,21 +1064,6 @@ struct NamedVariableDecl : public Node,
   void accept(Visitor&) override;
 
   __UDT_TYPE_INFO__(Node, NamedVariableDecl)
-};
-
-struct Identifier : public Node, public TypeIDProvider<Identifier> {
-  std::string name;
-  Identifier(const location& l,
-             const std::string& n = SymbolTable::GetAnonName())
-      : Node(l), name(n) {}
-  Identifier(const Identifier& id) : Node(id.LOC()), name(id.name) {}
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << prefix << name;
-  }
-
-  void accept(Visitor&) override;
-
-  __UDT_TYPE_INFO__(Node, Identifier)
 };
 
 struct Parameter : public Node, public TypeIDProvider<Parameter> {

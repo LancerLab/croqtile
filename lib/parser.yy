@@ -192,9 +192,10 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
 %nterm <AST::ptr<AST::Node>> any_code foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal device_passable declaration statement assignment dma_stmt wait_stmt trigger_stmt call_stmt swap_stmt expr_or_qes range_expr param_mdspan_val chunkat_or_storage_or_select pred returnable id_or_elem span_init_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
-%nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables future_data_list template_params gi_list ide_list optional_subscriptions
+%nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables future_data_list template_params gi_list ide_list optional_subscriptions data_indices
 %nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr span_expr id_expr bound_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
+%nterm <AST::ptr<AST::DataAccess>> data_element
 %nterm <AST::ptr<AST::ParamList>> parameter_list
 %nterm <AST::ptr<AST::Parameter>> parameter
 %nterm <AST::ptr<AST::ChoreoFunction>> dsl_function
@@ -972,8 +973,10 @@ assignment
         if (!symtab.Exists($1)) {
           Parser::error(@1, "The symbol '" + $1 + "` has not been defined.");
         } else {
-          $$ = AST::Make<AST::Assignment>(@1,
-              $1, AST::Make<AST::Expr>(@1, "+", $4, AST::Make<AST::Identifier>(@1, $1)));
+          auto id = AST::Make<AST::Identifier>(@1, $1);
+          auto da = AST::Make<AST::DataAccess>(@1, id);
+          $$ = AST::Make<AST::Assignment>(@3,
+              da, AST::Make<AST::Expr>(@2, "+", $4, AST::Make<AST::Expr>(@1, da)));
         }
       }
     | IDENTIFIER ASSIGN select_expr {
@@ -986,6 +989,9 @@ assignment
         } else {
           $$ = AST::Make<AST::Assignment>(@2, $1, $3);
         }
+      }
+    | data_element ASSIGN s_expr {
+        $$ = AST::Make<AST::Assignment>(@1, $1, $3);
       }
     ;
 
@@ -1047,6 +1053,7 @@ s_expr
     | IDENTIFIER MMINUS {
         $$ = AST::Make<AST::Expr>(@1, "--", AST::Make<AST::Identifier>(@1, $1));
       }
+    | data_element { $$ = AST::Make<AST::Expr>(@1, $1); }
     ;
 
 span_expr
@@ -1344,6 +1351,23 @@ sub_data_expr
       }
     ;
 
+data_element
+    : data_id AT LPAREN data_indices RPAREN {
+        $$ = AST::Make<AST::DataAccess>(@1, AST::Make<AST::Identifier>(@1, $1), $4);
+      }
+    ;
+
+data_indices
+    : s_expr {
+        $$ = AST::Make<AST::MultiValues>(@1);
+        $$->Append($1);
+      }
+    | data_indices COMMA s_expr {
+        $1->Append($3);
+        $$ = $1;
+      }
+    ;
+
 select_expr
     : SELECT LPAREN g_expr COMMA future_data_list RPAREN {
         $$ = AST::Make<AST::Select>(@1, $3, $5);
@@ -1360,7 +1384,6 @@ iv_list
         $$->Append(AST::Make<AST::IntLiteral>(@1, $1));
       }
     ;
-
 
 id_list
     : id_list COMMA IDENTIFIER {

@@ -280,8 +280,8 @@ public:
     if (!isa<AST::Select>(n.value)) return true;
 
     // do not care about the swap generated one
-    if (SuffixedWith(n.name, SWAP_SFX_PRE)) return true;
-    if (SuffixedWith(n.name, SWAP_SFX_POS)) return true;
+    if (SuffixedWith(n.GetName(), SWAP_SFX_PRE)) return true;
+    if (SuffixedWith(n.GetName(), SWAP_SFX_POS)) return true;
 
     auto sel = cast<AST::Select>(n.value);
 
@@ -299,14 +299,14 @@ public:
     auto buf_select =
         AST::Make<AST::Select>(n.LOC(), sel->select_factor, buffer_list);
     auto buf_name = SymbolTable::GetAnonName();
-    SymTab()->AddSymbol(GetScope(n.name) + buf_name, bty);
+    SymTab()->AddSymbol(GetScope(n.GetName()) + buf_name, bty);
     auto buf_assign = AST::Make<AST::Assignment>(n.LOC(), buf_name, buf_select);
     buf_assign->SetType(bty);
     buf_select->SetType(bty);
 
-    FBInfo()[InScopeName(n.name)].buffer = InScopeName(buf_name);
-    VST_DEBUG(dbgs() << "Updated: " << STR(*FBInfo().find(InScopeName(n.name)))
-                     << "\n");
+    FBInfo()[InScopeName(n.GetName())].buffer = InScopeName(buf_name);
+    VST_DEBUG(dbgs() << "Updated: "
+                     << STR(*FBInfo().find(InScopeName(n.GetName()))) << "\n");
 
     return true;
   }

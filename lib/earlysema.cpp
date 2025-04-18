@@ -26,6 +26,8 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
   } else if (isa<AST::Parameter>(&n)) {
     in_decl = true;
     allow_named_dim = true; // tolerate repeated symbols inside mdspan params
+  } else if (isa<AST::Assignment>(&n)) {
+    donot_check_id = true;
   }
 
   return true;
@@ -63,6 +65,8 @@ bool EarlySemantics::AfterVisitImpl(AST::Node& n) {
   } else if (isa<AST::Parameter>(&n)) {
     in_decl = false;
     allow_named_dim = false;
+  } else if (isa<AST::Assignment>(&n)) {
+    donot_check_id = false;
   }
 
   return true;
@@ -695,12 +699,54 @@ bool EarlySemantics::Visit(AST::IntTuple& n) {
   return true;
 }
 
+bool EarlySemantics::Visit(AST::DataAccess& n) {
+  TraceEachVisit(n);
+
+  auto dsym = n.GetDataName();
+
+  if (!n.AccessElement()) {
+    SetNodeType(n, SSTab().LookupSymbol(dsym));
+    return true;
+  }
+
+  if (!SSTab().DeclaredInScope(dsym)) {
+    Error(n.LOC(), "unable to access an undeclared variable '" + dsym + "'.");
+    ++error_count;
+    return false;
+  }
+
+  auto dty = NodeType(*n.GetData());
+  auto sty = dyn_cast<SpannedType>(dty);
+  if (!sty) {
+    Error(n.LOC(),
+          "expect '" + dsym + "' a spanned type but got " + PSTR(dty) + ".");
+    error_count++;
+  }
+
+  if (sty->Dims() != n.GetIndices().size()) {
+    Error(n.LOC(),
+          "accessing an spanned data (rank: " + std::to_string(sty->Dims()) +
+              ") with " + std::to_string(n.GetIndices().size()) + " indices.");
+    ++error_count;
+  }
+
+  SetNodeType(n, MakeScalarType(sty->ElementType()));
+
+  return true;
+}
+
 bool EarlySemantics::Visit(AST::Assignment& n) {
   TraceEachVisit(n);
 
-  if (!SSTab().DeclaredInScope(n.name)) {
+  if (!SSTab().DeclaredInScope(n.GetName())) {
     // This is a definition rather than an assignment. The parser fails to make
     // it correct
+    if (n.da->AccessElement()) {
+      Error(n.da->LOC(), "unable to access element of an undeclared variable " +
+                             n.GetName() + ".");
+      ++error_count;
+    }
+
     auto sty = NodeType(*n.value);
     assert((sty && !isa<UnknownType>(sty)) &&
            "internal error: failed to find the type.");
@@ -712,23 +758,24 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
         dbgs() << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
       return false;
     }
-    ReportErrorWhenViolateODR(n.LOC(), n.name, __FILE__, __LINE__,
+    ReportErrorWhenViolateODR(n.LOC(), n.GetName(), __FILE__, __LINE__,
                               ShadowTypeStorage(sty));
     if (auto ty = dyn_cast<SpannedType>(sty)) {
-      ReportErrorWhenViolateODR(n.LOC(), n.name + ".span", __FILE__, __LINE__,
-                                MakeRankedMDSpanType(ty->Dims()));
+      ReportErrorWhenViolateODR(n.LOC(), n.GetName() + ".span", __FILE__,
+                                __LINE__, MakeRankedMDSpanType(ty->Dims()));
     }
     if (auto ty = dyn_cast<FutureType>(sty)) {
-      ReportErrorWhenViolateODR(n.LOC(), n.name + ".span", __FILE__, __LINE__,
-                                MakeRankedMDSpanType(ty->Dims()));
-      ReportErrorWhenViolateODR(n.LOC(), n.name + ".data", __FILE__, __LINE__,
+      ReportErrorWhenViolateODR(n.LOC(), n.GetName() + ".span", __FILE__,
+                                __LINE__, MakeRankedMDSpanType(ty->Dims()));
+      ReportErrorWhenViolateODR(n.LOC(), n.GetName() + ".data", __FILE__,
+                                __LINE__,
                                 ShadowTypeStorage(ty->GetSpannedType()));
     }
     return true;
   }
 
-  auto vty = SSTab().LookupSymbol(n.name); // variable type
-  auto ety = NodeType(*n.value);           // assignment expression type
+  auto vty = SSTab().LookupSymbol(n.GetName()); // variable type
+  auto ety = NodeType(*n.value);                // assignment expression type
 
   // placeholder can be reassigned
   if (isa<PlaceHolderType>(vty)) {
@@ -736,7 +783,7 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
 
     // check for type consistent
     if (!vty->ApprxEqual(*ety)) {
-      Error(n.LOC(), "`" + n.name + "' of type '" + STR(*vty) +
+      Error(n.LOC(), "`" + n.GetName() + "' of type '" + STR(*vty) +
                          "' is assigned as " + STR(*ety) + ".");
       ++error_count;
       if (debug_visit)
@@ -745,8 +792,9 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
     }
 
     if (isa<FutureType>(ety)) {
-      ModifySymbolType(n.name, ety);
-      ModifySymbolType(n.name + ".span", MakeRankedMDSpanType(ety->Dims()));
+      ModifySymbolType(n.GetName(), ety);
+      ModifySymbolType(n.GetName() + ".span",
+                       MakeRankedMDSpanType(ety->Dims()));
     } else
       choreo_unreachable("Expect a future type but got '" + PSTR(ety) + "'.");
   }
@@ -754,10 +802,10 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
   // For now, we have to keep the single assignment
   {
     if (vty->ApprxEqual(*ety))
-      Error(n.LOC(), ToUpper(vty->Name()) + " re-assignment (" + n.name +
+      Error(n.LOC(), ToUpper(vty->Name()) + " re-assignment (" + n.GetName() +
                          ") is not supported.");
     else
-      Error(n.LOC(), "`" + n.name + "' of type \"" + STR(*vty) +
+      Error(n.LOC(), "`" + n.GetName() + "' of type \"" + STR(*vty) +
                          "\" can not be re-assigned as \"" + STR(*ety) + "\".");
     ++error_count;
     if (debug_visit)
@@ -791,6 +839,10 @@ bool EarlySemantics::Visit(AST::DataType& n) {
 
 bool EarlySemantics::Visit(AST::Identifier& n) {
   TraceEachVisit(n);
+
+  // to check in parent node
+  if (donot_check_id) return true;
+
   if (in_decl) {
     if (allow_named_dim) {
       if (!SSTab().DeclaredInScope(n.name))

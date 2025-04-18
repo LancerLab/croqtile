@@ -51,9 +51,8 @@ const char* SingleSubThreadPredicate() {
   return pred_subthread;
 }
 
-const char *SingleInstancePredicate(bool shared_in_block) {
-  if (shared_in_block)
-    return SingleThreadPredicate();
+const char* SingleInstancePredicate(bool shared_in_block) {
+  if (shared_in_block) return SingleThreadPredicate();
   return SingleSubThreadPredicate();
 }
 
@@ -544,7 +543,8 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
 
     if (spmem && n.init_value) {
       if (sto == Storage::SHARED || sto == Storage::LOCAL) {
-        ds << d_indent << "if (" << SingleInstancePredicate(sto == Storage::SHARED) << ") {\n";
+        ds << d_indent << "if ("
+           << SingleInstancePredicate(sto == Storage::SHARED) << ") {\n";
         IncrDeviceIndent();
       }
       ds << d_indent << "tops_dte_ctx_t " << sym__init << ";\n";
@@ -645,7 +645,7 @@ bool TopsccCodeGen::Visit(AST::Assignment& n) {
     assert(!s->inDMA);
     size_t val_count = s->expr_list->Count();
     assert(val_count >= 2);
-    std::string array_sym = n.name + "_select_array__";
+    std::string array_sym = n.GetName() + "_select_array__";
     if (isa<FutureType>(nty)) {
       ds << d_indent << "future * " << array_sym << "[] = {";
       for (size_t i = 0; i < val_count; i++) {
@@ -654,7 +654,7 @@ bool TopsccCodeGen::Visit(AST::Assignment& n) {
       }
       ds << "};\n";
       // make symbol a reference
-      ds << d_indent << "future & " << n.name << " = *" << array_sym << "["
+      ds << d_indent << "future & " << n.GetName() << " = *" << array_sym << "["
          << ExprSTR(s->select_factor) << "];\n";
     } else if (auto sty = dyn_cast<SpannedType>(nty)) {
       auto bts = NameBaseType(sty->ElementType());
@@ -665,8 +665,8 @@ bool TopsccCodeGen::Visit(AST::Assignment& n) {
       }
       ds << "};\n";
       // make symbol a reference
-      ds << d_indent << bts << " & " << n.name << " = *" << array_sym << "["
-         << ExprSTR(s->select_factor) << "];\n";
+      ds << d_indent << bts << " & " << n.GetName() << " = *" << array_sym
+         << "[" << ExprSTR(s->select_factor) << "];\n";
     } else
       choreo_unreachable("select of " + PSTR(NodeType(*s)) +
                          " is yet to implement.");
@@ -675,19 +675,19 @@ bool TopsccCodeGen::Visit(AST::Assignment& n) {
   }
 
   if (auto sa = dyn_cast<AST::SpanAs>(n.value)) {
-    ds << d_indent << "auto * " << n.name << " = ";
+    ds << d_indent << "auto * " << n.GetName() << " = ";
     auto tty = GetSymbolType(sa->id->name);
     if (isa<FutureType>(tty))
       ds << sa->id->name << ".data();\n";
     else
       ds << sa->id->name << ";\n";
-    ssm.MapDeviceSymbol(InScopeName(n.name), n.name);
+    ssm.MapDeviceSymbol(InScopeName(n.GetName()), n.GetName());
     return true;
   }
 
   if (isa<BoundedType>(nty) || isa<SpannedType>(nty) || isa<FutureType>(nty) ||
       isa<IntegerType>(nty)) {
-    ds << d_indent << "auto " << n.name << " = " << ExprSTR(n.value, false)
+    ds << d_indent << "auto " << n.GetName() << " = " << ExprSTR(n.value, false)
        << ";\n";
   } else {
     errs() << "Assignment " << STR(n) << " unprocessed, not supported "
@@ -958,7 +958,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
          "only gcu400 need handle local synchronization");
 
   if (shared_in_block || local_in_warp) {
-    ds << d_indent << "if (" << SingleInstancePredicate(shared_in_block) << ") {\n";
+    ds << d_indent << "if (" << SingleInstancePredicate(shared_in_block)
+       << ") {\n";
     IncrDeviceIndent();
   }
 
@@ -1123,11 +1124,9 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     if (!fty->IsAsync()) {
       // not async, must syncthreads immediately
       // else, defer the sync till the wait time
-      if (shared_in_block)
-        ds << d_indent << "__syncthreads();\n";
+      if (shared_in_block) ds << d_indent << "__syncthreads();\n";
 
-      if (local_in_warp)
-        ds << d_indent << "__syncsubthreads();\n";
+      if (local_in_warp) ds << d_indent << "__syncsubthreads();\n";
     }
   }
 
@@ -1177,12 +1176,13 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
     local_in_warp |= IsFutureWarpLocal(InScopeName(name));
   }
   assert(!(local_in_warp && shared_in_block) &&
-    "local and shared memory should not be used at the same time");
+         "local and shared memory should not be used at the same time");
   assert(!(local_in_warp ^ arch.GetValue() == "gcu400") &&
-    "only gcu400 need handle local synchronization");
+         "only gcu400 need handle local synchronization");
 
   if (shared_in_block || local_in_warp) {
-    ds << d_indent << "if (" << SingleInstancePredicate(shared_in_block) << ") {\n";
+    ds << d_indent << "if (" << SingleInstancePredicate(shared_in_block)
+       << ") {\n";
     IncrDeviceIndent();
   }
 
@@ -1257,10 +1257,8 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
   if (shared_in_block || local_in_warp) {
     DecrDeviceIndent();
     ds << d_indent << "}\n";
-    if (shared_in_block)
-      ds << d_indent << "__syncthreads();\n";
-    if (local_in_warp)
-      ds << d_indent << "__syncsubthreads();\n";
+    if (shared_in_block) ds << d_indent << "__syncthreads();\n";
+    if (local_in_warp) ds << d_indent << "__syncsubthreads();\n";
   }
 
   return true;
@@ -1736,8 +1734,7 @@ void TopsccCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
   auto& lconfig = cgi->GetFunctionLaunches(fname).back();
   if (arch.GetValue() == "gcu400") {
     oss << "__thread_dims__(" << lconfig.warp_dim_x << ", "
-        << lconfig.warp_dim_y << ", "
-        << lconfig.warp_dim_z <<")\n";
+        << lconfig.warp_dim_y << ", " << lconfig.warp_dim_z << ")\n";
   }
 
   oss << "__global__ void " << device_fn << "(";
@@ -1778,7 +1775,7 @@ if [[ -z ${TOPSCC_INSTALL} ]]; then
 )script";
 
   if (use_system_toolchain) {
-	  os << R"script(
+    os << R"script(
 	# Search for the binary in the PATH
 	FOUND_PATH=$(which "topscc" 2>/dev/null)
 
@@ -1788,7 +1785,8 @@ if [[ -z ${TOPSCC_INSTALL} ]]; then
 	elif [[ -f /opt/tops/bin/topscc ]]; then
 		# Search for the default topscc installation directory
 		TOPSCC_INSTALL=/opt/tops
-  elif [[ -d )script" << STRINGIZE(__CHOREO_TOPSCC_DIR__) << " ]]; then\n";
+  elif [[ -d )script"
+       << STRINGIZE(__CHOREO_TOPSCC_DIR__) << " ]]; then\n";
     os << "    TOPSCC_INSTALL=" << STRINGIZE(__CHOREO_TOPSCC_DIR__);
     os << R"script(
   fi

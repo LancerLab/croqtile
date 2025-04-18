@@ -324,12 +324,19 @@ public:
     return true;
   }
 
+  bool Visit(AST::DataAccess& n) override {
+    TraceEachVisit(n);
+    if (cannot_proceed) return true;
+
+    return true;
+  }
+
   bool Visit(AST::Assignment& n) override {
     TraceEachVisit(n);
     if (cannot_proceed) return true;
 
-    if (!SSTab().IsDeclared(n.name))
-      SSTab().DefineSymbol(n.name, n.value->GetType());
+    if (!SSTab().IsDeclared(n.GetName()))
+      SSTab().DefineSymbol(n.GetName(), n.value->GetType());
 
     if (isa<AST::Expr>(n.value)) AnalyseThenOptimizeExpr(n.value);
 

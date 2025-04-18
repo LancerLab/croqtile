@@ -46,8 +46,7 @@ public:
     if (mxpl == 3 && parallel_level == 2) {
       // the DMA is inside warp-local zone
       cgi->GetFunctionLocalFutures(fname).insert(InScopeName(n.future));
-      VST_DEBUG(dbgs() << "Local Future: " << InScopeName(n.future)
-                       << "\n");
+      VST_DEBUG(dbgs() << "Local Future: " << InScopeName(n.future) << "\n");
     }
     return true;
   }
@@ -142,7 +141,8 @@ public:
   bool Visit(AST::IntTuple&) { return true; }
 
   bool Visit(AST::Assignment& n) override {
-    auto name = n.name;
+    if (n.AssignToDataElement()) return true;
+    auto name = n.GetName();
     bool ref = (n.GetNote().find("ref") != std::string::npos);
     if (!SSTab().IsDeclared(name) && !isa<AST::SpanAs>(n.value)) {
       cgi->AddSymbolDetail(fname,

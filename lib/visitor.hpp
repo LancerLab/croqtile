@@ -68,6 +68,7 @@ struct Visitor {
   virtual bool Visit(AST::NamedTypeDecl&) = 0;
   virtual bool Visit(AST::NamedVariableDecl&) = 0;
   virtual bool Visit(AST::IntTuple&) = 0;
+  virtual bool Visit(AST::DataAccess&) = 0;
   virtual bool Visit(AST::Assignment&) = 0;
   virtual bool Visit(AST::IntIndex&) = 0;
   virtual bool Visit(AST::DataType&) = 0;
@@ -483,6 +484,7 @@ public:
   bool Visit(AST::NamedTypeDecl&) override { return true; }
   bool Visit(AST::NamedVariableDecl&) override { return true; }
   bool Visit(AST::IntTuple&) override { return true; }
+  bool Visit(AST::DataAccess&) override { return true; }
   bool Visit(AST::Assignment&) override { return true; }
   bool Visit(AST::IntIndex&) override { return true; }
   bool Visit(AST::DataType&) override { return true; }
@@ -573,6 +575,10 @@ public:
     return VisitNode(n);
   }
   bool Visit(AST::IntTuple& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::DataAccess& n) final {
     TraceEachVisit(n);
     return VisitNode(n);
   }
@@ -710,6 +716,7 @@ public:
   virtual bool VisitNode(AST::NamedTypeDecl&) { return true; }
   virtual bool VisitNode(AST::NamedVariableDecl&) { return true; }
   virtual bool VisitNode(AST::IntTuple&) { return true; }
+  virtual bool VisitNode(AST::DataAccess&) { return true; }
   virtual bool VisitNode(AST::Assignment&) { return true; }
   virtual bool VisitNode(AST::IntIndex&) { return true; }
   virtual bool VisitNode(AST::DataType&) { return true; }

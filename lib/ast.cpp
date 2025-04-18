@@ -75,9 +75,21 @@ void SpanAs::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
+void DataAccess::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+
+  data->accept(v);
+  if (indices) indices->accept(v);
+
+  v.Visit(*this);
+
+  v.AfterVisit(*this);
+}
+
 void Assignment::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
 
+  da->accept(v);
   value->accept(v);
   v.Visit(*this);
 

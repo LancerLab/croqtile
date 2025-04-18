@@ -309,14 +309,33 @@ bool TypeInference::Visit(AST::NamedTypeDecl& n) {
   return true;
 }
 
+bool TypeInference::Visit(AST::DataAccess& n) {
+  TraceEachVisit(n);
+
+  if (n.AccessElement()) {
+    auto dty = GetSymbolType(n.LOC(), n.GetDataName());
+    auto sty = cast<SpannedType>(dty);
+    n.SetType(MakeScalarType(sty->ElementType()));
+  }
+
+  return true;
+}
+
 // ituple override operator "=" for definition
 bool TypeInference::Visit(AST::Assignment& n) {
   TraceEachVisit(n);
 
+  if (n.AssignToDataElement()) {
+    // should be assigned already by DataAccess
+    assert(isa<ScalarType>(NodeType(*n.da)));
+    n.SetType(NodeType(*n.da));
+    return true;
+  }
+
   if (n.value && (isa<AST::Select>(n.value) || isa<AST::SpanAs>(n.value)))
     n.SetNote("ref");
 
-  if (SSTab().IsDeclared(n.name)) {
+  if (SSTab().IsDeclared(n.GetName())) {
     if (!isa<FutureType>(NodeType(*n.value))) {
       Error(n.LOC(),
             "current choreo does not support symbol re-assignment except for "
@@ -333,8 +352,10 @@ bool TypeInference::Visit(AST::Assignment& n) {
     }
   }
 
+  assert(!n.da->AccessElement());
+
   if (isa<UnknownType>(NodeType(*n.value))) {
-    Error(n.LOC(), "fail to deduce type of `" + n.name + "'.");
+    Error(n.LOC(), "fail to deduce type of `" + n.GetName() + "'.");
     error_count++;
     cur_type.reset();
     return false;
@@ -342,18 +363,18 @@ bool TypeInference::Visit(AST::Assignment& n) {
 
   auto ty = ShadowTypeStorage(NodeType(*n.value));
 
-  AssignSymbolWithType(n.LOC(), n.name, ty);
+  AssignSymbolWithType(n.LOC(), n.GetName(), ty);
   n.SetType(ty);
 
   if (auto fty = dyn_cast<FutureType>(ty)) {
-    AssignSymbolWithType(n.LOC(), n.name + ".data", fty->GetSpannedType());
-    AssignSymbolWithType(n.LOC(), n.name + ".span",
+    AssignSymbolWithType(n.LOC(), n.GetName() + ".data", fty->GetSpannedType());
+    AssignSymbolWithType(n.LOC(), n.GetName() + ".span",
                          fty->GetSpannedType()->GetMDSpanType());
   }
 
   if (CCtx().ShowInferredTypes()) {
-    dbgs() << "Symbol:    " << InScopeName(n.name) << ", Type: " << PSTR(ty)
-           << "\n";
+    dbgs() << "Symbol:    " << InScopeName(n.GetName())
+           << ", Type: " << PSTR(ty) << "\n";
   }
 
   cur_type.reset();

@@ -123,7 +123,7 @@ public:
       }
     } else if (isa<AST::Wait>(&n) || isa<AST::Call>(&n) ||
                isa<AST::Rotate>(&n) || isa<AST::Select>(&n) ||
-               isa<AST::Trigger>(&n)) {
+               isa<AST::Trigger>(&n) || isa<AST::DataAccess>(&n)) {
       gen_values = false;
     } else if (isa<AST::Parameter>(&n)) {
       allow_named_dim = true;
@@ -153,7 +153,7 @@ public:
       vn.ResetListReference();
     } else if (isa<AST::Wait>(&n) || isa<AST::Call>(&n) ||
                isa<AST::Rotate>(&n) || isa<AST::Select>(&n) ||
-               isa<AST::Trigger>(&n)) {
+               isa<AST::Trigger>(&n) || isa<AST::DataAccess>(&n)) {
       gen_values = true;
     } else if (isa<AST::Parameter>(&n)) {
       allow_named_dim = false;
@@ -509,21 +509,28 @@ public:
     return true;
   }
 
+  bool Visit(AST::DataAccess& n) {
+    TraceEachVisit(n);
+    return true;
+  }
+
   bool Visit(AST::Assignment& n) {
     TraceEachVisit(n);
 
     if (cannot_proceed) return true;
-    if (SSTab().IsDeclared(n.name)) return true;
+    if (SSTab().IsDeclared(n.GetName())) return true;
+
+    assert(!n.da->AccessElement() &&
+           "unable to access element of undeclared symbol.");
 
     // this is the un-type-annotated declaration
     auto nty = n.value->GetType();
-    SSTab().DefineSymbol(n.name, nty);
+    SSTab().DefineSymbol(n.GetName(), nty);
 
+    auto name = n.GetName();
     if (auto san = dyn_cast<AST::SpanAs>(n.value))
-      assert((n.name == san->nid->name) &&
-             "inconsistent span_as variable name.");
+      assert((name == san->nid->name) && "inconsistent span_as variable name.");
 
-    auto name = n.name;
     if (auto sty = GetSpannedType(nty)) {
       name += ".span";
       SSTab().DefineSymbol(name, sty->GetMDSpanType());

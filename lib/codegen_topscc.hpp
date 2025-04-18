@@ -348,7 +348,8 @@ private:
   }
 
   bool IsDMABlockShared(AST::DMA&) const {
-    return (parallel_level == 1) && (max_parallel_level == 2 || max_parallel_level == 3);
+    return (parallel_level == 1) &&
+           (max_parallel_level == 2 || max_parallel_level == 3);
   }
   bool IsDMAWarpLocal(AST::DMA&) const {
     return (parallel_level == 2) && (max_parallel_level == 3);

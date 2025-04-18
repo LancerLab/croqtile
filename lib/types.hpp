@@ -2011,6 +2011,23 @@ inline static BaseType GetUnderlyingType(const ptr<Type>& ty) {
   return BaseType::UNKNOWN;
 }
 
+inline static ptr<Type> MakeScalarType(BaseType bt, bool m = false) {
+  switch (bt) {
+  case BaseType::F32: return std::make_shared<FloatType>(m);
+  case BaseType::F16: return std::make_shared<HalfType>(m);
+  case BaseType::BF16: return std::make_shared<BFP16Type>(m);
+  case BaseType::F8: return std::make_shared<Half8Type>(m);
+  case BaseType::S32:
+  case BaseType::U32:
+  case BaseType::U16:
+  case BaseType::S16:
+  case BaseType::U8:
+  case BaseType::S8:
+    return std::make_shared<IntegerType>(m); // convert all implicitly?
+  default: choreo_unreachable("unsupported base type: " + STR(bt) + ".");
+  }
+}
+
 } // end namespace Choreo
 
 #endif // __CHOREO_TYPES_H__

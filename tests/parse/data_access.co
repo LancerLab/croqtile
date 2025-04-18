@@ -1,0 +1,19 @@
+// RUN: choreo -e %s | FileCheck --match-full-lines %s
+
+__co__ void data_access(f32 [7, 4] a, f32 [7, 4] b) {
+  foreach i in a.span  a.at(i) = b.at(i);
+}
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: data_access
+// CHECK:  `- Return type: void
+// CHECK:  `- Parameters
+// CHECK:    `-  type: f32 [ 7 4 ], symbol: a
+// CHECK:    `-  type: f32 [ 7 4 ], symbol: b
+// CHECK:  `- With Block:
+// CHECK:    (within constraints)
+// CHECK:    `- i in a.span
+// CHECK:    (with statements)
+// CHECK:    `- Foreach Block:
+// CHECK:     `- Iteration variables: i
+// CHECK:     `- Assign: a[i] = b[i]
