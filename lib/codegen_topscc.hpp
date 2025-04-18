@@ -342,8 +342,16 @@ private:
     assert(PrefixedWith(n, "::") && "requires a scoped name.");
     return cgi->GetFunctionSharedFutures(fname).count(n);
   }
+  bool IsFutureWarpLocal(const std::string& n) const {
+    assert(PrefixedWith(n, "::") && "requires a scoped name.");
+    return cgi->GetFunctionLocalFutures(fname).count(n);
+  }
+
   bool IsDMABlockShared(AST::DMA&) const {
-    return (parallel_level == 1) && (max_parallel_level == 2);
+    return (parallel_level == 1) && (max_parallel_level == 2 || max_parallel_level == 3);
+  }
+  bool IsDMAWarpLocal(AST::DMA&) const {
+    return (parallel_level == 2) && (max_parallel_level == 3);
   }
 
   const std::string ValueSTR(const ValueItem& vi) const;

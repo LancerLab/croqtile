@@ -38,10 +38,16 @@ public:
 
   bool Visit(AST::DMA& n) {
     if (n.future.empty() || (n.operation == ".any")) return true;
-    if (mxpl == 2 && parallel_level == 1) {
+    if ((mxpl == 2 || mxpl == 3) && parallel_level == 1) {
       // the DMA is inside block-shared zone
       cgi->GetFunctionSharedFutures(fname).insert(InScopeName(n.future));
       VST_DEBUG(dbgs() << "Shared Future: " << InScopeName(n.future) << "\n");
+    }
+    if (mxpl == 3 && parallel_level == 2) {
+      // the DMA is inside warp-local zone
+      cgi->GetFunctionLocalFutures(fname).insert(InScopeName(n.future));
+      VST_DEBUG(dbgs() << "Local Future: " << InScopeName(n.future)
+                       << "\n");
     }
     return true;
   }
@@ -73,7 +79,11 @@ private:
         lc.OverwriteGDimsByBDims();
         lc.ResetBDims();
         lc.SetBlockDims(pb->BoundValues());
-      } else if (parallel_level != 3)
+      } else if (parallel_level == 3) {
+        auto& lc = lcs.back();
+        lc.ResetWDims();
+        lc.SetWarpDims(pb->BoundValues());
+      } else
         choreo_unreachable("The parallel-by level " +
                            std::to_string(parallel_level) +
                            " is not supported.");

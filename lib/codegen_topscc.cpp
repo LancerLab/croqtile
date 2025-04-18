@@ -45,6 +45,18 @@ const char* SingleThreadPredicate() {
   return pred;
 }
 
+const char* SingleSubThreadPredicate() {
+  static const char* pred_subthread =
+      "subThreadIdx.x == 0 && subThreadIdx.y == 0 && subThreadIdx.z == 0";
+  return pred_subthread;
+}
+
+const char *SingleInstancePredicate(bool shared_in_block) {
+  if (shared_in_block)
+    return SingleThreadPredicate();
+  return SingleSubThreadPredicate();
+}
+
 inline const char* TopsMdsStorage(Storage st) {
   switch (st) {
   case Storage::DEFAULT:
@@ -531,8 +543,8 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       choreo_unreachable("unsupported storage type.");
 
     if (spmem && n.init_value) {
-      if (sto == Storage::SHARED) {
-        ds << d_indent << "if (" << SingleThreadPredicate() << ") {\n";
+      if (sto == Storage::SHARED || sto == Storage::LOCAL) {
+        ds << d_indent << "if (" << SingleInstancePredicate(sto == Storage::SHARED) << ") {\n";
         IncrDeviceIndent();
       }
       ds << d_indent << "tops_dte_ctx_t " << sym__init << ";\n";
@@ -542,7 +554,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
          << TopsMdsStorage(sto) << ", (" << NameBaseType(sty->ElementType())
          << "*)" << sym << ", " << UnScopedExpr(RSTR(sty->GetShape())) << "), "
          << ExprSTR(n.init_value, false) << ");\n";
-      if (sto == Storage::SHARED) {
+      if (sto == Storage::SHARED || sto == Storage::LOCAL) {
         DecrDeviceIndent();
         ds << d_indent << "} // single instance\n";
       }
@@ -934,11 +946,19 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   if (fty->IsAsync()) event_name = future_name + "__event__";
 
   // handles dma related to shared memory, where only single thread can operate
-  bool shared_in_block = false;
-  if (!n.future.empty()) shared_in_block = IsDMABlockShared(n);
+  bool local_in_warp = false, shared_in_block = false;
+  if (!n.future.empty()) {
+    shared_in_block = IsDMABlockShared(n);
+    local_in_warp = IsDMAWarpLocal(n);
+  }
 
-  if (shared_in_block) {
-    ds << d_indent << "if (" << SingleThreadPredicate() << ") {\n";
+  assert(!(shared_in_block && local_in_warp) &&
+         "local and shared memory should not be used at the same time");
+  assert(!(local_in_warp ^ arch.GetValue() == "gcu400") &&
+         "only gcu400 need handle local synchronization");
+
+  if (shared_in_block || local_in_warp) {
+    ds << d_indent << "if (" << SingleInstancePredicate(shared_in_block) << ") {\n";
     IncrDeviceIndent();
   }
 
@@ -1097,13 +1117,17 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     }
   }
 
-  if (shared_in_block) {
+  if (local_in_warp || shared_in_block) {
     DecrDeviceIndent();
     ds << d_indent << "} // single instance\n";
     if (!fty->IsAsync()) {
       // not async, must syncthreads immediately
       // else, defer the sync till the wait time
-      ds << d_indent << "__syncthreads();\n";
+      if (shared_in_block)
+        ds << d_indent << "__syncthreads();\n";
+
+      if (local_in_warp)
+        ds << d_indent << "__syncsubthreads();\n";
     }
   }
 
@@ -1145,15 +1169,20 @@ bool TopsccCodeGen::Visit(AST::Synchronize& n) {
 bool TopsccCodeGen::Visit(AST::Wait& n) {
   TraceEachVisit(n);
 
-  bool shared_in_block = false;
+  bool local_in_warp = false, shared_in_block = false;
   for (auto& f : n.GetTargets()) {
     if (!isa<FutureType>(NodeType(*f))) continue;
     auto name = cast<AST::Identifier>(f)->name;
     shared_in_block |= IsFutureBlockShared(InScopeName(name));
+    local_in_warp |= IsFutureWarpLocal(InScopeName(name));
   }
+  assert(!(local_in_warp && shared_in_block) &&
+    "local and shared memory should not be used at the same time");
+  assert(!(local_in_warp ^ arch.GetValue() == "gcu400") &&
+    "only gcu400 need handle local synchronization");
 
-  if (shared_in_block) {
-    ds << d_indent << "if (" << SingleThreadPredicate() << ") {\n";
+  if (shared_in_block || local_in_warp) {
+    ds << d_indent << "if (" << SingleInstancePredicate(shared_in_block) << ") {\n";
     IncrDeviceIndent();
   }
 
@@ -1225,10 +1254,13 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
     }
   }
 
-  if (shared_in_block) {
+  if (shared_in_block || local_in_warp) {
     DecrDeviceIndent();
     ds << d_indent << "}\n";
-    ds << d_indent << "__syncthreads();\n";
+    if (shared_in_block)
+      ds << d_indent << "__syncthreads();\n";
+    if (local_in_warp)
+      ds << d_indent << "__syncsubthreads();\n";
   }
 
   return true;
@@ -1700,6 +1732,14 @@ DeviceParamTypeStringify(const Choreo::Type& ty) {
 }
 
 void TopsccCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
+  // Nowadays, we assume there is only one launch configuration.
+  auto& lconfig = cgi->GetFunctionLaunches(fname).back();
+  if (arch.GetValue() == "gcu400") {
+    oss << "__thread_dims__(" << lconfig.warp_dim_x << ", "
+        << lconfig.warp_dim_y << ", "
+        << lconfig.warp_dim_z <<")\n";
+  }
+
   oss << "__global__ void " << device_fn << "(";
 
   size_t index = 0;
@@ -2053,7 +2093,10 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
             }
           }
         }
-        return ExprSTR(ca->data) + " + " + offset.str();
+        if (isa<FutureType>(NodeType(*ca->data)))
+          return ExprSTR(ca->data) + ".data() + " + offset.str();
+        else
+          return ExprSTR(ca->data) + " + " + offset.str();
       }
     } else if (expr->IsUnary()) {
       if (expr->GetOp() == "!") {

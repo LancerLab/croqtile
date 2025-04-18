@@ -9,36 +9,35 @@ __co_device__ extern "C" void kernel(int * a, int * b, int * c, int n) {
 }
 } /// end of kernel decl
 
-__co__ s32 [6, 17, 64] ele_add(s32 [6, 17, 64] lhs, s32 [6, 17, 64] rhs) { /// device program
+__co__ s32 [4, 6, 64] ele_add(s32 [4, 6, 64] lhs, s32 [4, 6, 64] rhs) { /// device program
   s32[lhs.span] output; // use same shape as lhs
 
-  parallel p by 6 {  // p is sip_index
-    with index = {x, y} in [17, 4] {  // decl your tiled spans
-      foreach x { // alternative: foreach index, index.x, index.y
-        foreach y {
-          lhs_load = dma.copy.async lhs.chunkat(p, x, y) => local; // tiling_factor: {6, 17, 4}, new_size {lhs(0)/6, lhs(1)/17, lhs(2)/4}
-          rhs_load = dma.copy.async rhs.chunkat(p, x, y) => local; // no explicit decl the target buffer, but can refer by <FutureType>.data
-          wait lhs_load, rhs_load;
-
-          local s32[lhs_load.span] l1_out; // alternative: s32[lhs.span(0)/#p, lhs.span(1)/#x, rhs.span(2)/#y]
-
-          call kernel(lhs_load.data, rhs_load.data, l1_out, |lhs_load.span|); // |span| calculate the total size of span.
-
-          out_store = dma.copy.async l1_out => output.chunkat(p, x, y); // can use defined vars
-          wait out_store;
-        }
+  parallel p by 4 {
+    parallel q by 6 {
+      lhs_load = dma.copy.async lhs.chunkat(p, q, _) => local;
+      rhs_load = dma.copy.async rhs.chunkat(p, q, _) => local;
+      local s32[lhs_load.span] l1_out;
+      wait lhs_load, rhs_load;
+      parallel r by 4 {
+        call kernel(lhs_load.data.chunkat(_, _, r),
+                    rhs_load.data.chunkat(_, _, r),
+                    l1_out.chunkat(_, _, r),
+                    |lhs_load.span| / #r); // |span| calculate the total size of span.
       }
+      out_store = dma.copy.async l1_out => output.chunkat(p, q, _); // can use defined vars
+      wait out_store;
     }
-  } // can use python styling
+  }
+
   return output;
 }
 
 int main() { /// host program
-  choreo::s32 a[6][17][64] = {0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge
-  choreo::s32 b[6][17][64] = {0};
+  choreo::s32 a[4][6][64] = {0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge
+  choreo::s32 b[4][6][64] = {0};
 
-  auto a_data = choreo::make_spanview<3, choreo::s32>((int*)a, {6, 17, 64});
-  auto b_data = choreo::make_spanview<3, choreo::s32>((int*)b, {6, 17, 64});
+  auto a_data = choreo::make_spanview<3, choreo::s32>((int*)a, {4, 6, 64});
+  auto b_data = choreo::make_spanview<3, choreo::s32>((int*)b, {4, 6, 64});
   a_data.fill_random(-10, 10);
   b_data.fill_random(-10, 10);
 
