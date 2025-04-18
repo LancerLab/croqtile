@@ -1402,9 +1402,16 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
         } else if (isa<IntegerType>(type)) {
           print_format += "%lld";
           print_args += "(long long) " + ExprSTR(arg, false) + ", ";
-        } else if (isa<BooleanType>(type)) {
-          print_format += "%s";
-          print_args += "(" + ExprSTR(arg, false) + "? \"true\" : \"false\"), ";
+        } else if (isa<BooleanType>(type) || isa<EventType>(type)) {
+          if (CCtx().GetArch() == TargetArch::GCU20 ||
+              CCtx().GetArch() == TargetArch::GCU21) {
+            print_format += "%d";
+            print_args += "(" + ExprSTR(arg, false) + " ? 1 : 0), ";
+          } else {
+            print_format += "%s";
+            print_args +=
+                "(" + ExprSTR(arg, false) + " ? \"true\" : \"false\"), ";
+          }
         } else if (isa<Half8Type>(type) || isa<HalfType>(type) ||
                    isa<BFP16Type>(type)) {
           choreo_unreachable("The type " + AST::TYPE_STR(*arg) +
@@ -1415,9 +1422,6 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
         } else if (isa<DoubleType>(type)) {
           print_format += "%f";
           print_args += ExprSTR(arg, false) + ", ";
-        } else if (isa<EventType>(type)) {
-          print_format += "%s";
-          print_args += "(" + ExprSTR(arg, false) + "? \"true\" : \"false\"), ";
         } else if (isa<IndexType>(type)) {
           choreo_unreachable("The type " + AST::TYPE_STR(*arg) +
                              "is not supported in print yet.");

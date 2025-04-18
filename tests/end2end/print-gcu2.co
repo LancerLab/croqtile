@@ -1,0 +1,76 @@
+// REQUIRES: TARGET-GCU210
+// RUN: choreo -gs -t topscc -arch=gcu210 %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+__co__ void foo(s32 [N, M] i) {
+  println("aaa");
+  int a = 100;
+  // bool b = true;
+  float f = 1.3f;
+  double d = 2.6;
+  double dd = 3.9;
+  print("scalar:\n\ta: ", a, "\n\tM: ", M, "\n\tf: ", f, "\n\td: ", d, "\n");
+  println("\td+dd: ", d+dd);
+  parallel p by 1 {
+    bool b = false;
+    mds : [1,2,3];
+    it = {4, M};
+    nit = {a, 5};
+    println("b: ", b);
+    println("d: ", d + 1.5);
+    println("i.span: ", i.span);
+    println("mds: ", mds);
+    println("it: ", it);
+    println("nit: ", nit);
+    foreach idx in [1,2,1] {
+      println("idx: ", idx);
+      foreach bi in 4
+        println("bi: ", bi+N);
+    }
+  }
+  print("bbb\n");
+}
+
+#define N 128
+#define M 64
+
+int main()
+{
+  auto input = new choreo::s32[N*M];
+  for (size_t i = 0; i < N*M; i++) {
+    input[i] = i;
+  }
+  auto input_data = choreo::make_spanview<2, choreo::s32>(input, {N, M});
+
+  foo(input_data);
+
+  delete[] input;
+
+  return 0;
+}
+
+// CHECK: bbb
+// CHECK: aaa
+// CHECK: scalar:
+// CHECK:        	a: 100
+// CHECK:        	M: 64
+// CHECK:        	f: 1.300000
+// CHECK:        	d: 2.600000
+// CHECK:        	d+dd: 6.500000
+
+// CHECK: b: 0
+// CHECK: d: 4.100000
+// CHECK: i.span: [128, 64]
+// CHECK: mds: [1, 2, 3]
+// CHECK: it: {4, 64}
+// CHECK: nit: {100, 5}
+// CHECK: idx: {0, 0, 0}
+// CHECK: bi: {128}
+// CHECK: bi: {129}
+// CHECK: bi: {130}
+// CHECK: bi: {131}
+// CHECK: idx: {0, 1, 0}
+// CHECK: bi: {128}
+// CHECK: bi: {129}
+// CHECK: bi: {130}
+// CHECK: bi: {131}
+// CHECK: bbb
