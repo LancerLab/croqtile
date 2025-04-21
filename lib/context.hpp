@@ -190,6 +190,8 @@ private:
   bool liveness = false;          // analyze the liveness of the program
   bool mem_reuse = false;         // reuse the memory of the program
   bool simplify_fp_valno = false; // simplify the floating point value number
+  bool verify = false;            // verify visitors for legility
+
 private:
   std::shared_ptr<SymbolTable> sym_tab = nullptr; // global symbol table
 
@@ -300,6 +302,7 @@ public:
   bool LivenessAnalysis() const { return liveness; }
   bool MemReuse() const { return mem_reuse; }
   bool SimplifyFpValno() const { return simplify_fp_valno; }
+  bool VerifyVisitors() const { return verify; }
 
   // Setters of compiler configurations
   void SetDumpAst(bool value) { dump_ast = value; }
@@ -316,6 +319,7 @@ public:
   void SetLivenessAnalysis(bool value) { liveness = value; }
   void SetMemReuse(bool value) { mem_reuse = value; }
   void SetSimplfyFpValno(bool value) { simplify_fp_valno = value; }
+  void SetVerifyVisitors(bool value) { verify = value; }
 
   const std::unordered_map<std::string, std::string>& GetCLMacros() const {
     return cl_macros;

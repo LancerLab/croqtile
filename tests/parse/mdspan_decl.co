@@ -12,7 +12,7 @@ __co__ f16 mdspan<2> spans(f32 mdspan<3> d, int f) {
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: spans
 // CHECK:  `- Return type: f16 <2>
-// CHECK:  `- Parameters
+// CHECK:  `- Parameters:
 // CHECK:    `-  type: f32 <3>, symbol: d
 // CHECK:    `-  type: int, symbol: f
 // CHECK:  `- Type Decl: dim1 - [ 100 100 ]

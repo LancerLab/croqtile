@@ -12,7 +12,7 @@ __co__ void foo(int N, int M, s32[2,4] lhs) {
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: foo
 // CHECK:  `- Return type: void
-// CHECK:  `- Parameters
+// CHECK:  `- Parameters:
 // CHECK:    `-  type: int, symbol: N
 // CHECK:    `-  type: int, symbol: M
 // CHECK:    `-  type: s32 [ 2 4 ], symbol: lhs

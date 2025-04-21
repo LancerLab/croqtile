@@ -29,6 +29,15 @@ private:
                             const ptr<Type>&);
   ptr<Type> GetSymbolType(const location&, const std::string&);
   bool ModifySymbolType(const location&, const std::string&, const ptr<Type>&);
+  void SetNodeType(AST::Node& n, const ptr<Type>& ty, bool is_mutable = false) {
+    if (is_mutable && MutableType(*ty))
+      n.SetType(MutateType(*ty));
+    else
+      n.SetType(ty);
+    if (debug_visit)
+      dbgs() << "Set type of " << STR(n) << " AS '" << PSTR(n.GetType())
+             << "'\n";
+  }
 
   void TraceEachVisit(const AST::Node& n) {
     if (trace_visit) dbgs() << n.TypeNameString() << ":\n";

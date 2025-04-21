@@ -335,6 +335,8 @@ public:
     TraceEachVisit(n);
     if (cannot_proceed) return true;
 
+    if (n.AssignToDataElement()) return true;
+
     if (!SSTab().IsDeclared(n.GetName()))
       SSTab().DefineSymbol(n.GetName(), n.value->GetType());
 

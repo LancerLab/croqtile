@@ -9,7 +9,7 @@ __co__ void foo(f32 [M, N] data) {
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: foo
 // CHECK:  `- Return type: void
-// CHECK:  `- Parameters
+// CHECK:  `- Parameters:
 // CHECK:    `-  type: f32 [ M N ], symbol: data
 // CHECK:  `- With Block:
 // CHECK:    (within constraints)
@@ -28,7 +28,7 @@ __co__ void bar(f32 [7, 4] data) {
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: bar
 // CHECK:  `- Return type: void
-// CHECK:  `- Parameters
+// CHECK:  `- Parameters:
 // CHECK:    `-  type: f32 [ 7 4 ], symbol: data
 // CHECK:  `- With Block:
 // CHECK:    (within constraints)
@@ -48,7 +48,7 @@ __co__ void wow() {
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: wow
 // CHECK:  `- Return type: void
-// CHECK:  `- Parameters
+// CHECK:  `- Parameters:
 // CHECK:  `- Var Decl (f32 [ 7 ], default): data[2]
 // CHECK:  `- With Block:
 // CHECK:    (within constraints)

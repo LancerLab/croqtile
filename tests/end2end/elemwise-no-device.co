@@ -1,0 +1,48 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+
+__co__ auto ele_add(s32 [6, 17, 64] lhs, s32 [6, 17, 64] rhs) {
+  s32 [lhs.span] output;
+
+  parallel p by 6
+    foreach index in [17, 4] {
+      lf = dma.copy.async lhs.chunkat(p, index) => local;
+      rf = dma.copy.async rhs.chunkat(p, index) => local;
+      wait lf, rf;
+
+      local s32 [lf.span] l1_out;
+
+      foreach i in [l1_out.span]
+        l1_out.at(i) = lf.data.at(i) + rf.data.at(i);
+
+      dma.copy l1_out => output.chunkat(p, index);
+    }
+
+  return output;
+}
+
+int main() {
+  choreo::s32 a[6][17][64] = {0};
+  choreo::s32 b[6][17][64] = {0};
+
+  auto a_data = choreo::make_spanview<3, choreo::s32>((int*)a, {6, 17, 64});
+  auto b_data = choreo::make_spanview<3, choreo::s32>((int*)b, {6, 17, 64});
+  a_data.fill_random(-10, 10);
+  b_data.fill_random(-10, 10);
+
+  auto res = ele_add(a_data, b_data);
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k) {
+        if (a[i][j][k] + b[i][j][k] != res[i][j][k]) {
+          choreo::choreo_assert(a[i][j][k] + b[i][j][k] == res[i][j][k], "values are not equal.");
+        }
+      }
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK: Test Passed

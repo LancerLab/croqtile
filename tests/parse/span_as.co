@@ -16,7 +16,7 @@ __co__ auto span_as(s32 [32, 18, 9] a) {
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: span_as
 // CHECK:  `- Return type: unknown
-// CHECK:  `- Parameters
+// CHECK:  `- Parameters:
 // CHECK:    `-  type: s32 [ 32 18 9 ], symbol: a
 // CHECK:  `- Var Decl (f32 [ a.span ], default): b
 // CHECK:  `- Parallelization:  index symbol: p, bound [0, 2)

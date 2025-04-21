@@ -73,8 +73,8 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
     ScopeEnd(const location& loc, AST::Node* s = nullptr)
         : Stmt(loc), sibling(s) {}
     AST::Node* sibling = nullptr;
-    void Print(std::ostream& os,
-               const std::string& prefix = {}) const override {
+    void Print(std::ostream& os, const std::string& prefix = {},
+               bool = false) const override {
       os << prefix << "}\n";
     }
     void accept(Visitor& v) override {

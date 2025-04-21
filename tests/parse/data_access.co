@@ -7,7 +7,7 @@ __co__ void data_access(f32 [7, 4] a, f32 [7, 4] b) {
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: data_access
 // CHECK:  `- Return type: void
-// CHECK:  `- Parameters
+// CHECK:  `- Parameters:
 // CHECK:    `-  type: f32 [ 7 4 ], symbol: a
 // CHECK:    `-  type: f32 [ 7 4 ], symbol: b
 // CHECK:  `- With Block:

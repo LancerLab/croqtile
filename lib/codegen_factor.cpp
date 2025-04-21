@@ -1671,14 +1671,19 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       if (FCtx(fname).HasSymbolValues(sname)) {
         auto svs = FCtx(fname).GetSymbolValues(sname);
         if (IsValidValueItem(svs.int_expr))
-          return WrapWithValue(STR(svs.int_expr));
+          sname = WrapWithValue(UnScopedExpr(STR(svs.int_expr)));
       }
       if (auto res = ReplaceDynDimRef(sname); res.has_value())
         return res.value();
     }
     if (ConvertibleToInt(NodeType(*e))) {
-      if (IsValidValueItem(expr->opt_vals.int_expr))
-        return WrapWithValue(STR(expr->opt_vals.int_expr));
+      if (IsValidValueItem(expr->opt_vals.int_expr)) {
+        auto res = WrapWithValue(STR(expr->opt_vals.int_expr));
+        if (auto dres = ReplaceDynDimRef(res); dres.has_value())
+          return dres.value();
+        else
+          return res;
+      }
     }
     if (expr->IsReference()) {
       if (expr->GetInt())

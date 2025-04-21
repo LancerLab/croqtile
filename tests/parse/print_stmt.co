@@ -21,7 +21,7 @@ int main() { /// host program
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: identity
 // CHECK:  `- Return type: int
-// CHECK:  `- Parameters
+// CHECK:  `- Parameters:
 // CHECK:    `-  type: int, symbol: loc
 // CHECK:  `- Call: print (built-in)
 // CHECK:    `- with arguments: loc

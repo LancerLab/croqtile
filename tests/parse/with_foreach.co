@@ -51,7 +51,7 @@ __co__ int with_foreach(int b, f32 [36, 27, 128] input) {
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: with_foreach
 // CHECK:  `- Return type: int
-// CHECK:  `- Parameters
+// CHECK:  `- Parameters:
 // CHECK:    `-  type: int, symbol: b
 // CHECK:    `-  type: f32 [ 36 27 128  ], symbol: input
 // CHECK:  `- Type Decl: ndims - [ 3 b ]

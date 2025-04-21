@@ -37,7 +37,11 @@ private:
   std::string GetInternalValueString() { return "$" + std::to_string(count++); }
 
   void TraceEachVisit(const AST::Node& n) {
-    if (trace_visit) { dbgs() << n.TypeNameString() << ": " << STR(n) << "\n"; }
+    if (trace_visit) {
+      dbgs() << n.TypeNameString();
+      if (!n.IsBlock()) dbgs() << ": " << STR(n);
+      dbgs() << "\n";
+    }
   }
 
 public:
@@ -341,8 +345,12 @@ public:
     int index = cur_node_index + mnodes_insertions[multi_nodes.top()].size();
     cast<AST::Select>(n.to)->inDMA = false;
     auto assign = AST::Make<AST::Assignment>(n.to->LOC(), anon_sym, n.to);
+    assign->SetType(n.to->GetType());
+    assign->da->SetType(n.to->GetType());
     mnodes_insertions[multi_nodes.top()].emplace_back(
         std::make_tuple(index, assign, anon_sym));
+    VST_DEBUG(dbgs() << n.TypeNameString() << ": replace " << PSTR(n.to)
+                     << " with " << anon_sym << ".\n");
 
     n.to = AST::Make<AST::ChunkAt>(
         n.to->LOC(), AST::Make<AST::Identifier>(n.to->LOC(), anon_sym));
@@ -358,8 +366,12 @@ public:
       int index = cur_node_index + mnodes_insertions[multi_nodes.top()].size();
       auto assign =
           AST::Make<AST::Assignment>(n.sa->LOC(), n.sa->nid->name, n.sa);
+      assign->SetType(n.sa->GetType());
+      assign->da->SetType(n.sa->GetType());
       mnodes_insertions[multi_nodes.top()].emplace_back(
           std::make_tuple(index, assign, n.sa->nid->name));
+      VST_DEBUG(dbgs() << n.TypeNameString() << ": replace " << PSTR(n.sa)
+                       << " with " << n.sa->nid->name << "\n");
       n.sa.reset();
     }
 
@@ -384,9 +396,13 @@ public:
               auto nname = SymbolTable::GetAnonName();
               auto assign = AST::Make<AST::Assignment>(expr->GetL()->LOC(),
                                                        nname, expr->GetL());
+              assign->SetType(expr->GetL()->GetType());
+              assign->da->SetType(expr->GetL()->GetType());
               mnodes_insertions[multi_nodes.top()].emplace_back(
                   std::make_tuple(index, assign, nname));
-              VST_DEBUG(dbgs() << "replace " << PSTR(expr->GetL()) << " with ");
+              VST_DEBUG(dbgs()
+                        << n.TypeNameString() << ": replace "
+                        << PSTR(expr->GetL()) << " with " << nname << "\n");
               expr->SetL(AST::Make<AST::Identifier>(v->LOC(), nname));
               VST_DEBUG(dbgs() << PSTR(expr->GetL()) << ".\n");
             }
@@ -399,13 +415,17 @@ public:
             cur_node_index + mnodes_insertions[multi_nodes.top()].size();
         auto nname = SymbolTable::GetAnonName();
         auto assign = AST::Make<AST::Assignment>(v->LOC(), nname, v);
+        assign->SetType(v->GetType());
+        assign->da->SetType(v->GetType());
         mnodes_insertions[multi_nodes.top()].emplace_back(
             std::make_tuple(index, assign, nname));
         repls.emplace_back(i, AST::Make<AST::Identifier>(v->LOC(), nname));
+        VST_DEBUG(dbgs() << n.TypeNameString() << ": replace " << PSTR(v)
+                         << " with " << nname << "\n");
       }
       for (auto& repl : repls) {
-        VST_DEBUG(dbgs() << "replace " << PSTR(n.positions->ValueAt(repl.first))
-                         << " with ");
+        VST_DEBUG(dbgs() << n.TypeNameString() << ": replace "
+                         << PSTR(n.positions->ValueAt(repl.first)) << " with ");
 
         n.positions->values[repl.first] = repl.second;
 
@@ -446,6 +466,7 @@ public:
         auto sto = AST::Make<AST::Memory>(loc, Storage::GLOBAL);
         auto nv = AST::Make<AST::NamedVariableDecl>(
             loc, anon_sym, dt, sto, nullptr, std::vector<size_t>{}, il);
+        nv->SetType(vty);
 
         assert(cur_node_index != -1);
         int index =
@@ -488,10 +509,13 @@ public:
               auto nname = SymbolTable::GetAnonName();
               auto assign = AST::Make<AST::Assignment>(
                   bound_expr->GetL()->LOC(), nname, bound_expr->GetL());
+              assign->SetType(bound_expr->GetL()->GetType());
+              assign->da->SetType(bound_expr->GetL()->GetType());
               mnodes_insertions[multi_nodes.top()].emplace_back(
                   std::make_tuple(index, assign, nname));
-              VST_DEBUG(dbgs()
-                        << "replace " << PSTR(bound_expr->GetL()) << " with ");
+              VST_DEBUG(dbgs() << "range - getith: replace "
+                               << PSTR(bound_expr->GetL()) << "\n with "
+                               << nname << ".\n");
               bound_expr->SetL(AST::MakeIdExpr(v->LOC(), nname));
               VST_DEBUG(dbgs() << PSTR(bound_expr->GetL()) << ".\n");
             }
@@ -503,13 +527,18 @@ public:
             cur_node_index + mnodes_insertions[multi_nodes.top()].size();
         auto nname = SymbolTable::GetAnonName();
         auto assign = AST::Make<AST::Assignment>(v->LOC(), nname, bound_expr);
+        assign->SetType(bound_expr->GetType());
+        assign->da->SetType(bound_expr->GetType());
         mnodes_insertions[multi_nodes.top()].emplace_back(
             std::make_tuple(index, assign, nname));
         repls.emplace_back(i, AST::MakeIdExpr(v->LOC(), nname));
+        VST_DEBUG(dbgs() << "range - " << bound_expr->op << ": "
+                         << "replace " << PSTR(bound_expr->GetL()) << "\n with "
+                         << nname << ".\n");
       }
 
       for (auto& repl : repls) {
-        VST_DEBUG(dbgs() << "replace "
+        VST_DEBUG(dbgs() << n.TypeNameString() << ": " << "replace "
                          << PSTR(n.GetRangeNodes()->ValueAt(repl.first))
                          << " with ");
         auto lr = cast<AST::LoopRange>(n.GetRangeNodes()->values[repl.first]);

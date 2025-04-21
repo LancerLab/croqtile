@@ -68,14 +68,10 @@ struct Node {
       note += "," + n;
   }
 
-  virtual void Print(std::ostream& os,
-                     const std::string& prefix = {}) const = 0;
+  virtual bool IsBlock() const { return false; }
 
-  virtual void PrintType(std::ostream& os,
-                         const std::string& prefix = {}) const {
-    os << prefix;
-    pty->Print(os);
-  };
+  virtual void Print(std::ostream& os, const std::string& prefix = {},
+                     bool with_type = false) const = 0;
 
   virtual void accept(Visitor&) = 0;
 
@@ -145,18 +141,21 @@ struct MultiNodes : public Node, public TypeIDProvider<MultiNodes> {
     return -1;
   }
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  bool IsBlock() const override { return true; }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
     if (delimiter != "" && values.size() > 1) {
       auto i = values.begin();
       auto e = values.end();
-      (*i)->Print(os, prefix);
+      (*i)->Print(os, prefix, with_type);
       ++i;
       for (; i != e; ++i) {
         os << delimiter;
-        (*i)->Print(os, prefix);
+        (*i)->Print(os, prefix, with_type);
       }
     } else {
-      for (auto& v : values) v->Print(os, prefix);
+      for (auto& v : values) v->Print(os, prefix, with_type);
     }
   }
 
@@ -197,18 +196,21 @@ struct MultiValues : public Node, public TypeIDProvider<MultiValues> {
 
   const std::vector<ptr<Node>>& AllValues() const { return values; }
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  bool IsBlock() const override { return true; }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
     if (delimiter != "" && values.size() > 1) {
       auto i = values.begin();
       auto e = values.end();
-      (*i)->Print(os, prefix);
+      (*i)->Print(os, prefix, with_type);
       ++i;
       for (; i != e; ++i) {
         os << delimiter;
-        (*i)->Print(os, prefix);
+        (*i)->Print(os, prefix, with_type);
       }
     } else {
-      for (auto& v : values) v->Print(os, prefix);
+      for (auto& v : values) v->Print(os, prefix, with_type);
     }
   }
 
@@ -232,7 +234,8 @@ struct Boolean : public Node, public TypeIDProvider<Boolean> {
       : Node(l, MakeBooleanType()), value(v) {}
   explicit Boolean(const Boolean& b) : Node(b.LOC()) { value = b.value; }
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool = false) const override {
     os << prefix << value;
   }
 
@@ -251,7 +254,8 @@ struct IntLiteral : public Node, public TypeIDProvider<IntLiteral> {
 
   int Val() const { return value; }
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool = false) const override {
     if (IsUnKnownInteger(value))
       os << prefix << "?";
     else
@@ -297,7 +301,8 @@ struct FloatLiteral : public Node, public TypeIDProvider<FloatLiteral> {
   bool IsFloat32() const { return isa<FloatType>(GetType()); }
   bool IsFloat64() const { return isa<DoubleType>(GetType()); }
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool = false) const override {
     std::ostringstream oss;
     if (IsFloat32()) {
       auto f32 = std::get<float>(value);
@@ -353,7 +358,8 @@ struct StringLiteral : public Node, public TypeIDProvider<StringLiteral> {
     return oss.str();
   }
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool = false) const override {
     os << prefix << "\"" << EscapedVal() << "\"";
   }
 
@@ -511,17 +517,19 @@ public:
     return false;
   }
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
+    if (with_type) os << "<{" << PSTR(GetType()) << "}>";
     if (t == Reference) {
-      value_r->Print(os, prefix);
+      value_r->Print(os, prefix, with_type);
       return;
     }
 
     assert(op.size() > 0 && "must have an operand.");
 
     if (op == "dimof" || op == "getith") {
-      value_l->Print(os, prefix);
-      value_r->Print(os);
+      value_l->Print(os, prefix, with_type);
+      value_r->Print(os, "", with_type);
       return;
     }
 
@@ -529,19 +537,19 @@ public:
     switch (t) {
     case Unary:
       os << op << " ";
-      value_r->Print(os);
+      value_r->Print(os, "", with_type);
       break;
     case Binary:
-      value_l->Print(os);
+      value_l->Print(os, "", with_type);
       os << " " << op << " ";
-      value_r->Print(os);
+      value_r->Print(os, "", with_type);
       break;
     case Ternary:
-      value_c->Print(os);
+      value_c->Print(os, "", with_type);
       os << " ? ";
-      value_l->Print(os);
+      value_l->Print(os, "", with_type);
       os << " : ";
-      value_r->Print(os);
+      value_r->Print(os, "", with_type);
       break;
     default: choreo_unreachable("unhandled expression type."); break;
     }
@@ -613,16 +621,15 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
     return oss.str();
   }
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  void Print(std::ostream& os, const std::string& = {},
+             bool with_type = false) const override {
     if (!list)
       os << "<" << rank << ">";
     else {
       os << "[";
-      list->Print(os, " " + ref_name);
+      list->Print(os, " " + ref_name, with_type);
       os << " ]";
     }
-
-    (void)prefix;
   }
 
   void accept(Visitor&) override;
@@ -662,16 +669,17 @@ struct SpanAs : public Node, public TypeIDProvider<SpanAs> {
     return cast<MDSpanType>(GetType())->GetShape();
   }
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  void Print(std::ostream& os, const std::string& = {},
+             bool with_type = false) const override {
     assert(id && "no original span is specified.");
     assert(nid && "no new span is specified.");
     assert(list && "no span_as is specified.");
 
     os << PSTR(id) << ".span_as[";
-    list->Print(os, " ");
+    list->Print(os, " ", with_type);
     os << " ]";
 
-    (void)prefix;
+    if (with_type) os << "<{" << PSTR(GetType()) << "}>";
   }
 
   void accept(Visitor&) override;
@@ -700,9 +708,11 @@ struct NamedTypeDecl : public Node, public TypeIDProvider<NamedTypeDecl> {
     assert(init_expr && "Invalid value.");
   }
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
     os << "\n" << prefix << "`- Type Decl: ";
     os << name_str << " " << init_str << " " << STR(*init_expr);
+    if (with_type) os << "<{" << PSTR(GetType()) << "}>";
   }
 
   void accept(Visitor&) override;
@@ -715,8 +725,8 @@ struct Memory : public Node, public TypeIDProvider<Memory> {
   Memory(const location& l, const Storage s = Storage::DEFAULT)
       : Node(l), st(s) {}
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    (void)prefix;
+  void Print(std::ostream& os, const std::string& = {},
+             bool = false) const override {
     os << STR(st);
   }
 
@@ -740,7 +750,8 @@ struct IntTuple : public Node, public TypeIDProvider<IntTuple> {
   }
 
   const ptr<MultiValues>& GetValues() const { return vlist; }
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool = false) const override {
     if (ref_name.size() > 0) os << ref_name << " ";
     os << "{" << STR(*vlist) << "}";
     (void)prefix;
@@ -757,7 +768,8 @@ struct Identifier : public Node, public TypeIDProvider<Identifier> {
              const std::string& n = SymbolTable::GetAnonName())
       : Node(l), name(n) {}
   Identifier(const Identifier& id) : Node(id.LOC()), name(id.name) {}
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool = false) const override {
     os << prefix << name;
   }
 
@@ -790,7 +802,8 @@ struct DataAccess : public Node, public TypeIDProvider<DataAccess> {
     return indices->AllValues();
   }
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
     (void)prefix;
     os << data->name;
     if (indices) {
@@ -802,6 +815,7 @@ struct DataAccess : public Node, public TypeIDProvider<DataAccess> {
       }
       os << "]";
     }
+    if (with_type) os << "<{" << PSTR(GetType()) << "}>";
   }
 
   void accept(Visitor&) override;
@@ -810,8 +824,8 @@ struct DataAccess : public Node, public TypeIDProvider<DataAccess> {
 };
 
 struct Assignment : public Node, public TypeIDProvider<Assignment> {
-  ptr<DataAccess> da;
-  ptr<Node> value;
+  ptr<DataAccess> da = nullptr;
+  ptr<Node> value = nullptr;
 
   explicit Assignment(const location& l, const std::string& n,
                       const ptr<Node>& v)
@@ -821,8 +835,12 @@ struct Assignment : public Node, public TypeIDProvider<Assignment> {
                       const ptr<Node>& v)
       : Node(l), da(n), value(v) {}
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << "\n" << prefix << "`- Assign: " << PSTR(da) << " = " << PSTR(value);
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
+    os << "\n" << prefix << "`- Assign: ";
+    da->Print(os, "", with_type);
+    os << " = ";
+    value->Print(os, "", with_type);
   }
 
   const std::string& GetName() const {
@@ -864,8 +882,11 @@ struct IntIndex : public Node, public TypeIDProvider<IntIndex> {
     return false;
   }
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << prefix << lb << STR(value) << rb;
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
+    os << prefix << lb;
+    value->Print(os, "", with_type);
+    os << rb;
   }
 
   void accept(Visitor&) override;
@@ -939,7 +960,8 @@ public:
   // force regeneration of sema type
   void ReGenSemaType() { InitSemaType(); }
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool = false) const override {
     os << prefix;
     if (is_mutable) os << "mutable ";
     os << STR(base_type);
@@ -1049,16 +1071,22 @@ struct NamedVariableDecl : public Node,
   bool IsMutable() const { return is_mutable; }
   void SetMutable(bool m) { is_mutable = m; }
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
     os << "\n" << prefix << "`- Var Decl (";
-    if (type) type->Print(os);
+    if (type) type->Print(os, "", with_type);
     if (mem) os << ", " << PSTR(mem);
     os << "): " << name_str;
     for (auto d : array_dims) os << "[" << d << "]";
-    if (init_expr)
-      os << " " << init_str << " " << PSTR(init_expr);
-    else if (init_value)
-      os << " " << init_str << " {" << PSTR(init_value) << "}";
+    if (with_type) os << "<{" << PSTR(GetType()) << "}>";
+    if (init_expr) {
+      os << " " << init_str << " ";
+      init_expr->Print(os, " ", with_type);
+    } else if (init_value) {
+      os << " " << init_str << " {";
+      init_value->Print(os, "", with_type);
+      os << "}";
+    }
   }
 
   void accept(Visitor&) override;
@@ -1079,9 +1107,11 @@ struct Parameter : public Node, public TypeIDProvider<Parameter> {
 
   bool HasSymbol() const { return (bool)sym; }
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
     type->Print(os, prefix + " type: ");
     if (sym) sym->Print(os, ", symbol: ");
+    if (with_type) os << "<{" << PSTR(GetType()) << "}>";
   }
 
   void accept(Visitor&) override;
@@ -1095,9 +1125,12 @@ struct ParamList : public Node, public TypeIDProvider<ParamList> {
   ParamList(const location& l, std::vector<ptr<Parameter>>& v)
       : Node(l), values(v) {}
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
     os << "\n" << prefix << "Parameters";
-    for (auto& item : values) item->Print(os, "\n  " + prefix);
+    if (with_type) os << "<{" << PSTR(GetType()) << "}>";
+    os << ":";
+    for (auto& item : values) item->Print(os, "\n  " + prefix, with_type);
   }
 
   void accept(Visitor&) override;
@@ -1117,8 +1150,13 @@ struct IfElseBlock : public Node, public TypeIDProvider<IfElseBlock> {
     assert(if_stmts != nullptr && "must contains the if statements.");
   }
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << prefix << "\n`- Predication: ";
+  bool IsBlock() const override { return true; }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
+    os << prefix << "\n`- Predication";
+    if (with_type) os << "<{" << PSTR(GetType()) << "}>";
+    os << ": ";
     pred->Print(os, " ");
     os << "\n` - If Block: ";
     if (if_stmts->Count()) if_stmts->Print(os, prefix + " ");
@@ -1227,8 +1265,11 @@ struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
     return bound_values;
   }
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << "\n" << prefix << "`- Parallelization: ";
+  bool IsBlock() const override { return true; }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
+    os << "\n" << prefix << "`- Parallelization:";
     if (HasBIV())
       os << " index symbol: " << biv->name << ", bound [0, "
          << ValueItemAsString(bound) << ")";
@@ -1245,7 +1286,7 @@ struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
     if (!stmts)
       os << std::endl;
     else
-      stmts->Print(os, prefix + " ");
+      stmts->Print(os, prefix + " ", with_type);
   }
 
   void accept(Visitor&) override;
@@ -1261,7 +1302,8 @@ struct WhereBind : public Node, public TypeIDProvider<WhereBind> {
   WhereBind(const location& l, const ptr<Node>& lhs, const ptr<Node>& rhs)
       : Node(l), lhs(lhs), rhs(rhs) {}
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool = false) const override {
     os << prefix << "`- " << STR(*lhs) << " bind-to " << STR(*rhs) << "\n";
   }
 
@@ -1289,7 +1331,8 @@ struct WithIn : public Node, public TypeIDProvider<WithIn> {
     return with_matchers->AllValues();
   }
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool = false) const override {
     os << prefix << "`- ";
     if (with) os << with->name;
     if (with_matchers) {
@@ -1313,13 +1356,16 @@ struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
 
   explicit WithBlock(const location& l) : Node(l) {}
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  bool IsBlock() const override { return true; }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
     os << "\n" << prefix << "`- With Block:\n";
     os << prefix << "  (within constraints)\n";
-    withins->Print(os, prefix + "  ");
+    withins->Print(os, prefix + "  ", with_type);
     if (reqs) {
       os << prefix << "  (where clause)\n";
-      reqs->Print(os, prefix + "  ");
+      reqs->Print(os, prefix + "  ", with_type);
     }
     if (stmts) {
       if (stmts->values.size() == 0) {
@@ -1327,7 +1373,7 @@ struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
         return;
       }
       os << prefix << "  (with statements)";
-      stmts->Print(os, prefix + "  ");
+      stmts->Print(os, prefix + "  ", with_type);
     }
   }
 
@@ -1366,7 +1412,8 @@ struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
 
   bool SymbolicBufferName() { return !positions; }
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  void Print(std::ostream& os, const std::string& = {},
+             bool with_type = false) const override {
     if (sa)
       os << PSTR(sa);
     else
@@ -1382,8 +1429,7 @@ struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
         os << ".ChunkAt(";
       os << STR(positions) << ")";
     }
-
-    (void)prefix;
+    if (with_type) os << "<{" << PSTR(GetType()) << "}>";
   }
 
   void accept(Visitor&) override;
@@ -1405,9 +1451,13 @@ struct Select : public Node, public TypeIDProvider<Select> {
   // TODO(wsj)
   // x = select(IntLiteral, a, b, c)
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << "select(" << STR(select_factor) << ", " << STR(expr_list) << ")";
-    (void)prefix;
+  void Print(std::ostream& os, const std::string& = {},
+             bool with_type = false) const override {
+    os << "select(";
+    select_factor->Print(os, "", with_type);
+    os << ", ";
+    expr_list->Print(os, "", with_type);
+    os << ")";
   }
 
   void accept(Visitor&) override;
@@ -1465,18 +1515,23 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
   void SetConfig(const ptr<DMAConfig>& cfg) { config = cfg; }
   const ptr<DMAConfig>& GetConfig() const { return config; }
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
     if (operation == ".any") {
       os << "\n" << prefix << "`- DMA" << operation;
+      if (with_type) os << "<{" << PSTR(GetType()) << "}>";
       if (!future.empty()) os << "\n" << prefix << "  `- future: " << future;
       return;
     }
 
     os << "\n" << prefix << "`- DMA" << operation << ((async) ? ".async" : "");
+    if (with_type) os << "<{" << PSTR(GetType()) << "}>";
     if (config) os << "\n" << prefix << "  `- config: " << STR(*config);
     if (!future.empty()) os << "\n" << prefix << "  `- future: " << future;
-    os << "\n" << prefix << "  `- from: " << STR(from);
-    os << "\n" << prefix << "  `- to: " << STR(to);
+    os << "\n" << prefix << "  `- from: ";
+    from->Print(os, "", with_type);
+    os << "\n" << prefix << "  `- to: ";
+    to->Print(os, "", with_type);
 
     if (chained) {
       if (chain_to != "")
@@ -1500,8 +1555,10 @@ struct Wait : public Node, public TypeIDProvider<Wait> {
 
   Wait(const location& l, const ptr<MultiValues>& t) : Node(l), targets(t) {}
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << "\n" << prefix << "`- WAIT: " << AST::STR(*targets);
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
+    os << "\n" << prefix << "`- WAIT: ";
+    targets->Print(os, "", with_type);
   }
 
   const std::vector<ptr<Node>>& GetTargets() const {
@@ -1518,8 +1575,10 @@ struct Trigger : public Node, public TypeIDProvider<Trigger> {
 
   Trigger(const location& l, const ptr<MultiValues>& t) : Node(l), targets(t) {}
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << "\n" << prefix << "`- TRIGGER: " << AST::STR(*targets);
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
+    os << "\n" << prefix << "`- TRIGGER: ";
+    targets->Print(os, "", with_type);
   }
 
   const std::vector<ptr<Node>>& GetEvents() const {
@@ -1537,9 +1596,15 @@ struct Return : public Node, public TypeIDProvider<Return> {
   Return(const location& l) : Node(l) {}
   Return(const location& l, const ptr<Node>& t) : Node(l), value(t) {}
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    os << "\n" << prefix << "`- Return: ";
-    os << ((!value) ? "void" : STR(value));
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
+    os << "\n" << prefix << "`- Return";
+    if (with_type) os << "<{" << PSTR(GetType()) << "}>";
+    os << ": ";
+    if (!value)
+      os << "void";
+    else
+      value->Print(os, {}, with_type);
     if (!note.empty()) os << " (" << note << ")";
   }
 
@@ -1570,13 +1635,16 @@ struct Call : public Node, public TypeIDProvider<Call> {
     return arguments->AllValues();
   }
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
     os << "\n" << prefix << "`- Call: " << STR(*function);
     if (is_bif) os << " (built-in)";
-    os << "\n" << prefix << "  `- with arguments: " << STR(*arguments);
-    if (template_args)
-      os << "\n"
-         << prefix << "  `- with template parameters: " << STR(*template_args);
+    os << "\n" << prefix << "  `- with arguments: ";
+    arguments->Print(os, {}, with_type);
+    if (template_args) {
+      os << "\n" << prefix << "  `- with template parameters: ";
+      template_args->Print(os, {}, with_type);
+    }
   }
   void accept(Visitor&) override;
 
@@ -1596,10 +1664,11 @@ struct Rotate : public Node, public TypeIDProvider<Rotate> {
   }
   const std::vector<ptr<Node>>& GetIds() const { return ids->AllValues(); }
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
     os << "\n"
-       << prefix << "`- " << ((ids->Count() == 2) ? "Swap: " : "Rotate: ")
-       << PSTR(ids);
+       << prefix << "`- " << ((ids->Count() == 2) ? "Swap: " : "Rotate: ");
+    ids->Print(os, "", with_type);
   }
   void accept(Visitor&) override;
 
@@ -1612,7 +1681,8 @@ struct Synchronize : public Node, public TypeIDProvider<Synchronize> {
   Synchronize(const location& loc, const ptr<Memory>& s)
       : Node(loc), scope(s) {}
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool = false) const override {
     os << "\n" << prefix << "`- " << "Synchronize: " << PSTR(scope);
   }
   void accept(Visitor&) override;
@@ -1635,7 +1705,8 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
 
   const std::string IVName() const { return iv->name; }
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool = false) const override {
     os << "\n" << prefix << "`- Iteration variables: " << iv->name;
 
     if (!lbound && !ubound && !IsValidStride(stride)) return;
@@ -1661,10 +1732,13 @@ struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
     assert(i != nullptr && "missing iteration variables for the statement.");
   }
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  bool IsBlock() const override { return true; }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
     os << "\n" << prefix << "`- Foreach Block:";
-    ranges->Print(os, prefix + " ");
-    if (stmts) { stmts->Print(os, prefix + " "); }
+    ranges->Print(os, prefix + " ", with_type);
+    if (stmts) { stmts->Print(os, prefix + " ", with_type); }
   }
 
   ptr<MultiValues> GetRangeNodes() const { return ranges; }
@@ -1683,6 +1757,8 @@ struct InThreadsBlock : public Node, public TypeIDProvider<InThreadsBlock> {
   bool async = false;
   bool outer = true;
 
+  bool IsBlock() const override { return true; }
+
   explicit InThreadsBlock(const location& l, const ptr<Expr> p,
                           const ptr<MultiNodes>& s, bool a = false,
                           bool o = true)
@@ -1690,11 +1766,12 @@ struct InThreadsBlock : public Node, public TypeIDProvider<InThreadsBlock> {
     assert(p != nullptr && "missing iteration variables for the statement.");
   }
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
     os << "\n" << prefix << "`- InThreads Block:";
     if (async) os << " Async";
     os << "\n" << prefix << " `- Predication: " << PSTR(pred);
-    if (stmts) { stmts->Print(os, prefix + " "); }
+    if (stmts) { stmts->Print(os, prefix + " ", with_type); }
   }
 
   void accept(Visitor&) override;
@@ -1714,11 +1791,14 @@ struct IncrementBlock : public Node, public TypeIDProvider<IncrementBlock> {
     assert(p != nullptr && "missing predication for the increment block.");
   }
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  bool IsBlock() const override { return true; }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
     os << "\n" << prefix << "`- Increment Block:";
     os << "\n" << prefix << " `- Iteration variables: " << STR(bvs);
     os << "\n" << prefix << " `- Predicate: " << STR(pred);
-    if (stmts) { stmts->Print(os, prefix + " "); }
+    if (stmts) { stmts->Print(os, prefix + " ", with_type); }
   }
 
   void accept(Visitor&) override;
@@ -1739,11 +1819,12 @@ struct FunctionDecl : public Node, public TypeIDProvider<FunctionDecl> {
 
   FunctionDecl(const location& l) : Node(l) {}
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
     os << "\n" << prefix << "Name: " << name;
     os << "\n" << prefix << "Return type: ";
-    ret_type->Print(os);
-    params->Print(os, prefix);
+    ret_type->Print(os, "", with_type);
+    params->Print(os, prefix, with_type);
   }
   void accept(Visitor&) override;
 
@@ -1757,10 +1838,14 @@ struct ChoreoFunction : public Node, public TypeIDProvider<ChoreoFunction> {
 
   ChoreoFunction(const location& l) : Node(l), f_decl(l) {}
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+  bool IsBlock() const override { return true; }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
     os << "\n" << prefix << "ChoreoFunction";
-    f_decl.Print(os, prefix + " `- ");
-    if (stmts) stmts->Print(os, prefix + " ");
+    if (with_type) os << "<{" << PSTR(GetType()) << "}>";
+    f_decl.Print(os, prefix + " `- ", with_type);
+    if (stmts) stmts->Print(os, prefix + " ", with_type);
   }
   void accept(Visitor&) override;
 
@@ -1772,9 +1857,12 @@ struct CppSourceCode : public Node, public TypeIDProvider<CppSourceCode> {
   bool host; // host or kernel
   CppSourceCode(const location& l, const std::string& c, bool h = true)
       : Node(l), code(c), host(h) {}
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
+
+  bool IsBlock() const override { return true; }
+
+  void Print(std::ostream& os, const std::string& = {},
+             bool = false) const override {
     os << code;
-    (void)prefix;
   }
 
   std::string GetCode() { return code; }
@@ -1789,8 +1877,9 @@ struct Program : public Node, public TypeIDProvider<Program> {
 
   Program(const location& l) : Node(l) {}
 
-  void Print(std::ostream& os, const std::string& prefix = {}) const override {
-    for (auto& node : nodes) node->Print(os, "");
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
+    for (auto& node : nodes) node->Print(os, "", with_type);
     (void)prefix;
   }
 

@@ -22,7 +22,7 @@ __co__ void foobar(int N, int M) {
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: foo
 // CHECK:  `- Return type: void
-// CHECK:  `- Parameters
+// CHECK:  `- Parameters:
 // CHECK:  `- Parallelization:  index symbol: p, bound [0, 6)
 // CHECK:   `- With Block:
 // CHECK:     (within constraints)
@@ -35,7 +35,7 @@ __co__ void foobar(int N, int M) {
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: bar
 // CHECK:  `- Return type: void
-// CHECK:  `- Parameters
+// CHECK:  `- Parameters:
 // CHECK:    `-  type: int, symbol: N
 // CHECK:  `- Parallelization:  index symbol: p, bound [0, 6)
 // CHECK:   `- With Block:
@@ -49,7 +49,7 @@ __co__ void foobar(int N, int M) {
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: foobar
 // CHECK:  `- Return type: void
-// CHECK:  `- Parameters
+// CHECK:  `- Parameters:
 // CHECK:    `-  type: int, symbol: N
 // CHECK:    `-  type: int, symbol: M
 // CHECK:  `- With Block:

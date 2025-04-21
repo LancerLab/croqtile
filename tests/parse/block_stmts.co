@@ -19,7 +19,7 @@ __co__ void foo() {
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: foo
 // CHECK:  `- Return type: void
-// CHECK:  `- Parameters
+// CHECK:  `- Parameters:
 // CHECK:  `- Parallelization:  index symbol: anon_0, bound [0, 3)
 // CHECK:  `- Parallelization:  index symbol: anon_1, bound [0, 3)
 // CHECK:   `- Var Decl (unknown): i = 3

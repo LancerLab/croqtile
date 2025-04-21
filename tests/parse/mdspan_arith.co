@@ -15,7 +15,7 @@ __co__ bf16 mdspan<3> span_arith(s32 mdspan<4> d, int c) {
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: span_arith
 // CHECK:  `- Return type: bf16 <3>
-// CHECK:  `- Parameters
+// CHECK:  `- Parameters:
 // CHECK:    `-  type: s32 <4>, symbol: d
 // CHECK:    `-  type: int, symbol: c
 // CHECK:  `- Type Decl: dims - [ 9 c ]
@@ -39,7 +39,7 @@ __co__ void span_arith1(s32 [32, 18, 6, 1] d, int c) {
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: span_arith1
 // CHECK:  `- Return type: void
-// CHECK:  `- Parameters
+// CHECK:  `- Parameters:
 // CHECK:    `-  type: s32 [ 32 18 6 1 ], symbol: d
 // CHECK:    `-  type: int, symbol: c
 // CHECK:  `- Var Decl (ituple): g = {c, 2, 4, 3}

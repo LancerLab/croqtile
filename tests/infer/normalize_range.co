@@ -11,32 +11,32 @@ __co__ void foo(f32 [128, 256, 512] i, u8[16] ii) {
   }
 }
 
-// CHECK: replace 
+// CHECK: AST::ForeachBlock: replace 
 // CHECK: `- Iteration variables: a
 // CHECK: `- Loop Control: (1: ( (ubound p)  - 1) :1) with 
 // CHECK: `- Iteration variables: a
 // CHECK: `- Loop Control: (anon_0: ( (ubound p)  - 1) :1).
-// CHECK: replace 
+// CHECK: AST::ForeachBlock: replace 
 // CHECK: `- Iteration variables: a
 // CHECK: `- Loop Control: (anon_0: ( (ubound p)  - 1) :1) with 
 // CHECK: `- Iteration variables: a
 // CHECK: `- Loop Control: (anon_0:anon_1:1).
-// CHECK: replace 
+// CHECK: AST::ForeachBlock: replace 
 // CHECK: `- Iteration variables: b
 // CHECK: `- Loop Control: ( (ii.span(0) * 2) : (sizeof ii) :1) with 
 // CHECK: `- Iteration variables: b
 // CHECK: `- Loop Control: (anon_2: (sizeof ii) :1).
-// CHECK: replace 
+// CHECK: AST::ForeachBlock: replace 
 // CHECK: `- Iteration variables: c
 // CHECK: `- Loop Control: ( ( (sizeof t)  % 3) : ( (sizeof ii)  cdiv 3) :1) with 
 // CHECK: `- Iteration variables: c
 // CHECK: `- Loop Control: (anon_3: ( (sizeof ii)  cdiv 3) :1).
-// CHECK: replace 
+// CHECK: AST::ForeachBlock: replace 
 // CHECK: `- Iteration variables: b
 // CHECK: `- Loop Control: (anon_2: (sizeof ii) :1) with 
 // CHECK: `- Iteration variables: b
 // CHECK: `- Loop Control: (anon_2:anon_4:1).
-// CHECK: replace 
+// CHECK: AST::ForeachBlock: replace 
 // CHECK: `- Iteration variables: c
 // CHECK: `- Loop Control: (anon_3: ( (sizeof ii)  cdiv 3) :1) with 
 // CHECK: `- Iteration variables: c

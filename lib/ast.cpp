@@ -22,6 +22,8 @@ void FloatLiteral::accept(Choreo::Visitor& v) { v.Visit(*this); }
 void StringLiteral::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
 void Expr::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+
   if (value_c) value_c->accept(v);
   if (value_l) value_l->accept(v);
 
@@ -243,6 +245,8 @@ void Synchronize::accept(Choreo::Visitor& v) {
 }
 
 void LoopRange::accept(Choreo::Visitor& v) {
+  if (lbound) lbound->accept(v);
+  if (ubound) ubound->accept(v);
   iv->accept(v);
   v.Visit(*this);
 }

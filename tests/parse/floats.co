@@ -11,7 +11,7 @@ __co__ void floats(bool a, int b, half8 c, half d, bfp16 e, float f, double g) {
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: floats
 // CHECK:  `- Return type: void
-// CHECK:  `- Parameters
+// CHECK:  `- Parameters:
 // CHECK:    `-  type: bool, symbol: a
 // CHECK:    `-  type: int, symbol: b
 // CHECK:    `-  type: half8, symbol: c

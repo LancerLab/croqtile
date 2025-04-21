@@ -686,6 +686,13 @@ bool TopsccCodeGen::Visit(AST::Assignment& n) {
     return true;
   }
 
+  if (n.AssignToDataElement()) {
+    if (!IsHost())
+      ds << d_indent << ExprSTR(n.da, false) << " = " << ExprSTR(n.value, false)
+         << ";\n";
+    return true;
+  }
+
   if (isa<BoundedType>(nty) || isa<SpannedType>(nty) || isa<FutureType>(nty) ||
       isa<IntegerType>(nty)) {
     ds << d_indent << "auto " << n.GetName() << " = " << ExprSTR(n.value, false)
@@ -955,7 +962,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
 
   assert(!(shared_in_block && local_in_warp) &&
          "local and shared memory should not be used at the same time");
-  assert(!(local_in_warp ^ arch.GetValue() == "gcu400") &&
+  assert(!(local_in_warp ^ (arch.GetValue() == "gcu400")) &&
          "only gcu400 need handle local synchronization");
 
   if (shared_in_block || local_in_warp) {
@@ -1178,7 +1185,7 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
   }
   assert(!(local_in_warp && shared_in_block) &&
          "local and shared memory should not be used at the same time");
-  assert(!(local_in_warp ^ arch.GetValue() == "gcu400") &&
+  assert(!(local_in_warp ^ (arch.GetValue() == "gcu400")) &&
          "only gcu400 need handle local synchronization");
 
   if (shared_in_block || local_in_warp) {
@@ -2049,6 +2056,41 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
     oss << b->value;
   } else if (auto ii = dyn_cast<AST::IntIndex>(e)) {
     return ExprSTR(ii->value, is_host);
+  } else if (auto da = dyn_cast<AST::DataAccess>(e)) {
+    auto sty = GetSpannedType(GetSymbolType(da->data->name));
+    oss << "*((" << NameBaseType(sty->ElementType()) << "*)"
+        << ExprSTR(da->data, is_host);
+    size_t idx = 0;
+    auto shape = sty->GetShape();
+    for (auto item : da->GetIndices()) {
+      if (auto id = AST::GetIdentifier(*item)) {
+        if (within_map.count(InScopeName(id->name))) {
+          auto ivs = within_map.at(InScopeName(id->name));
+          for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr) {
+            auto shape = sty->GetShape();
+            oss << " + ("
+                << (is_host ? ssm.HostName(*iv_itr) : ssm.DeviceName(*iv_itr));
+            assert(shape.Rank() >= idx + 1);
+            if (shape.Rank() > idx + 1)
+              oss << " * "
+                  << shape.TrimDims(idx + 1).GetElementCountExpression();
+            oss << ")";
+            ++idx;
+          }
+        } else {
+          oss << " + ("
+              << (is_host ? ssm.HostName(InScopeName(id->name))
+                          : ssm.DeviceName(InScopeName(id->name)));
+          assert(shape.Rank() >= idx + 1);
+          if (shape.Rank() > idx + 1)
+            oss << " * " << shape.TrimDims(idx + 1).GetElementCountExpression();
+          oss << ")";
+          ++idx;
+        }
+        oss << ")";
+      } else
+        choreo_unreachable("unsupported data access.");
+    }
   } else if (auto expr = dyn_cast<AST::Expr>(e)) {
     // utilize the optimize value whenever possible
     if (auto sym = expr->GetSymbol()) {
@@ -2066,34 +2108,17 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
     }
     if (expr->IsReference()) {
       if (PSTR(expr) == "_") return "(0)";
-      if (expr->GetInt())
-        return ExprSTR(expr->GetReference(), is_host);
-      else if (expr->GetFloat())
-        return ExprSTR(expr->GetReference(), is_host);
-      else if (expr->GetString())
-        return ExprSTR(expr->GetReference(), is_host);
-      else if (expr->GetBoolean())
-        return ExprSTR(expr->GetReference(), is_host);
-      else if (expr->GetSymbol())
-        return ExprSTR(expr->GetReference(), is_host);
-      else if (isa<AST::Expr>(NodeType(*expr->GetR()))) // should this happen?
-        return ExprSTR(expr->GetR(), is_host);
-      else if (isa<AST::Identifier>(expr->GetReference()))
-        if (cast<AST::Identifier>(expr->GetReference())->name == "_")
-          return "(0)";
-        else
-          choreo_unreachable("Unsupported reference: " + PSTR(expr));
-      else if (auto ca = dyn_cast<AST::ChunkAt>(expr->GetR())) {
+      if (auto ca = dyn_cast<AST::ChunkAt>(expr->GetR())) {
         auto caty = cast<SpannedType>(ca->GetType());
         std::ostringstream offset;
         { // calculate the offsets
           size_t i = 0;
           auto shape = caty->GetShape();
           for (auto& p : ca->positions->AllValues()) {
-            auto idx_exprs = SplitStringByDelimiter(ExprSTR(p, false));
+            auto idx_exprs = SplitStringByDelimiter(ExprSTR(p, is_host));
             std::string factor = "1";
             if (shape.Rank() > i)
-              factor = shape.TrimHead(i).GetElementCountExpression();
+              factor = shape.TrimDims(i).GetElementCountExpression();
             for (auto i_expr : idx_exprs) {
               if (i != 0) offset << " + ";
               if (i_expr == "__choreo_no_tiling__")
@@ -2105,10 +2130,11 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
           }
         }
         if (isa<FutureType>(NodeType(*ca->data)))
-          return ExprSTR(ca->data) + ".data() + " + offset.str();
+          return ExprSTR(ca->data, is_host) + ".data() + " + offset.str();
         else
-          return ExprSTR(ca->data) + " + " + offset.str();
-      }
+          return ExprSTR(ca->data, is_host) + " + " + offset.str();
+      } else
+        return ExprSTR(expr->GetReference(), is_host);
     } else if (expr->IsUnary()) {
       if (expr->GetOp() == "!") {
         oss << "!(" << ExprSTR(expr->GetR(), is_host) << ")";
@@ -2144,7 +2170,8 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
         } else
           oss << "(" << ExprSTR(expr->GetR(), is_host) << ")";
       } else if (expr->GetOp() == "elemof") {
-        oss << ExprSTR(expr->GetL()) << "[" << ExprSTR(expr->GetR()) << "]";
+        oss << ExprSTR(expr->GetL(), is_host) << "["
+            << ExprSTR(expr->GetR(), is_host) << "]";
       } else if (expr->IsArith() || expr->IsLogical()) {
         auto& l = expr->GetL();
         auto& r = expr->GetR();
@@ -2155,12 +2182,12 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
           auto rty = cast<BoundedType>(NodeType(*r));
           assert(rty->Dims() == 1);
           if (PSTR(r) == "_")
-            oss << "((" << ExprSTR(l, is_host) << ")*(1)+(" << ExprSTR(r, false)
-                << "))";
+            oss << "((" << ExprSTR(l, is_host) << ")*(1)+("
+                << ExprSTR(r, is_host) << "))";
           else
             oss << "((" << ExprSTR(l, is_host) << ")*("
-                << ValueSTR(rty->GetUpperBound()) << ")+(" << ExprSTR(r, false)
-                << "))";
+                << ValueSTR(rty->GetUpperBound()) << ")+("
+                << ExprSTR(r, is_host) << "))";
         } else
           oss << "((" << ExprSTR(l, is_host) << ")" << op << "("
               << ExprSTR(r, is_host) << "))";

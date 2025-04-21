@@ -216,8 +216,9 @@ public:
 
   bool Visit(AST::Expr& n) {
     TraceEachVisit(n);
-
     if (cannot_proceed) return true;
+
+    if (IsMutable(*n.GetType())) return true; // mutables are not valno-able
 
     if (auto id = n.GetSymbol()) {
       auto name = vn.VNSymbolName(*id);
@@ -414,6 +415,8 @@ public:
 
     if (cannot_proceed) return true;
 
+    if (IsMutable(*n.GetType())) return true; // mutables are not valno-able
+
     auto name = n.name_str;
     if (SSTab().DeclaredInScope(name)) {
       Error(n.LOC(),
@@ -529,10 +532,10 @@ public:
     TraceEachVisit(n);
 
     if (cannot_proceed) return true;
-    if (SSTab().IsDeclared(n.GetName())) return true;
 
-    assert(!n.da->AccessElement() &&
-           "unable to access element of undeclared symbol.");
+    if (IsMutable(*n.GetType())) return true; // mutables are not valno-able
+
+    if (SSTab().IsDeclared(n.GetName())) return true;
 
     // this is the un-type-annotated declaration
     auto nty = n.value->GetType();

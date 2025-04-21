@@ -464,7 +464,7 @@ struct Shape {
     return values[val_no];
   }
 
-  const Shape TrimHead(size_t n) const {
+  const Shape TrimDims(size_t n) const {
     if (n == 0) return *this;
 
     auto vals = Value();
@@ -821,7 +821,6 @@ struct IntegerType final : public ScalarType,
   bool ApprxEqual(const Type& ty) const override {
     return isa<IntegerType>(&ty);
   }
-
   bool LogicalEqual(const Type& ty) const override {
     return ConvertibleToInt(ty);
   }
@@ -1772,6 +1771,20 @@ inline ptr<ScalarFloatType> MakeScalarFloatType(BaseType bt, bool m = false) {
   return nullptr;
 }
 
+inline ptr<ScalarType> MakeScalarType(BaseType bt, bool m = false) {
+  switch (bt) {
+  case BaseType::INT: return std::make_shared<IntegerType>(m);
+  case BaseType::BOOL: return std::make_shared<BooleanType>(m);
+  case BaseType::HALF8: return std::make_shared<Half8Type>(m);
+  case BaseType::HALF: return std::make_shared<HalfType>(m);
+  case BaseType::BFP16: return std::make_shared<BFP16Type>(m);
+  case BaseType::FLOAT: return std::make_shared<FloatType>(m);
+  case BaseType::DOUBLE: return std::make_shared<DoubleType>(m);
+  default: choreo_unreachable("unsupported base type.");
+  }
+  return nullptr;
+}
+
 inline ptr<ScalarFloatType> MakeFloatType(bool m = false) {
   return MakeScalarFloatType(BaseType::FLOAT, m);
 }
@@ -2011,7 +2024,7 @@ inline static BaseType GetUnderlyingType(const ptr<Type>& ty) {
   return BaseType::UNKNOWN;
 }
 
-inline static ptr<Type> MakeScalarType(BaseType bt, bool m = false) {
+inline static ptr<Type> MakeElemScalarType(BaseType bt, bool m = false) {
   switch (bt) {
   case BaseType::F32: return std::make_shared<FloatType>(m);
   case BaseType::F16: return std::make_shared<HalfType>(m);
@@ -2027,6 +2040,21 @@ inline static ptr<Type> MakeScalarType(BaseType bt, bool m = false) {
   default: choreo_unreachable("unsupported base type: " + STR(bt) + ".");
   }
 }
+
+inline static ptr<Type> MutateType(const Type& ty) {
+  auto sty = dyn_cast<ScalarType>(&ty);
+  if (!sty) choreo_unreachable("can not mutate a '" + STR(ty) + "' type.");
+
+  return MakeScalarType(TC2BT(sty->Category()));
+}
+
+inline bool IsMutable(const Type& ty) {
+  auto sty = dyn_cast<ScalarType>(&ty);
+  if (!sty) return false;
+  return sty->IsMutable();
+}
+
+inline bool MutableType(const Type& ty) { return isa<ScalarType>(&ty); }
 
 } // end namespace Choreo
 

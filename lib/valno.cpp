@@ -218,6 +218,8 @@ ValueNumbering::TryToSimplifyBinary(const location& loc, const std::string& op,
   if (op == "concat") return std::nullopt;
   auto l_cv = RemovePrefixOrNull("const_", lhs);
   auto r_cv = RemovePrefixOrNull("const_", rhs);
+
+  // constant folding
   if (l_cv && r_cv) {
     std::string res = "const_";
     if (CCtx().SimplifyFpValno()) {
@@ -433,6 +435,7 @@ ValueNumbering::TryToSimplifyBinary(const location& loc, const std::string& op,
     return res;
   }
 
+  // for symbolic values
   if (op == "/") {
     // a/a == 1
     if (GetValueNumberOfSignature(lhs) == GetValueNumberOfSignature(rhs)) {
@@ -456,6 +459,28 @@ ValueNumbering::TryToSimplifyBinary(const location& loc, const std::string& op,
         assert(div.size() == 2);
         if (GetValueNumberOfSignature(lhs) == div[0]) {
           auto res = GetSignatureFromValueNumber(div[1]);
+
+          if (trace && verbose)
+            dbgs() << ScopeIndent() << "<Simplify> '" << lhs << " " << op << " "
+                   << rhs << " to '" << res << "'\n";
+
+          return res;
+        }
+      }
+    }
+  } else if (op == "*") {
+    // useful simplification: a*(b/a) = b
+    if (!PrefixedWith(lhs, "#") /*not multiple values*/) {
+      int rvn = GetValueNumberOfSignature(lhs);
+      auto bind_set = GetBindSet(rvn);
+      bind_set.insert(rvn); // always add self
+      for (auto div_vn : bind_set) {
+        auto sig = GetSignatureFromValueNumber(div_vn);
+        if (!PrefixedWith(lhs, "/:")) continue;
+        auto div = GetOperandsValNo(sig);
+        assert(div.size() == 2);
+        if (GetValueNumberOfSignature(rhs) == div[1]) {
+          auto res = GetSignatureFromValueNumber(div[0]);
 
           if (trace && verbose)
             dbgs() << ScopeIndent() << "<Simplify> '" << lhs << " " << op << " "
@@ -867,9 +892,7 @@ ValueNumbering::TryToSimplifyNodeSignature(const AST::Node& node) {
              }},
             {"ref", // it is a reference to another node
              [this, &n]() -> std::optional<std::string> {
-               auto expr = GetSignatureForNode(*n->GetR());
-
-               return expr;
+               return GetSignatureForNode(*n->GetR());
              }},
         };
     if ((n->GetForm() == AST::Expr::Binary) && (n->op != "dimof") &&

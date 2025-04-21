@@ -121,6 +121,10 @@ Option<bool> liveness(OptionKind::Hidden, "--liveness", "", false,
                       "Analyze the liveness of the program.");
 Option<bool> mem_reuse(OptionKind::Hidden, "--mem-reuse", "", false,
                        "Analyze the memory usage, then perform memory reuse.");
+Option<bool> print_node_type(OptionKind::Hidden, "--print-node-type", "-pnt",
+                             false, "Print node with its type.");
+Option<bool> verify_visitors(OptionKind::Hidden, "--verify", "-vf", false,
+                             "verify all visitors for legality.");
 // TODO: add machanism to handle GCC-style "-f" options
 Option<bool> no_show_source(
     OptionKind::Hidden, "-fno-show-source-location", "", false,
@@ -232,6 +236,7 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetLivenessAnalysis(liveness.GetValue());
   CCtx().SetMemReuse(mem_reuse.GetValue());
   CCtx().SetSimplfyFpValno(simplify_fp_valno.GetValue());
+  CCtx().SetVerifyVisitors(verify_visitors.GetValue());
 
   if (!trace_visit.GetValue().empty())
     setenv("CHOREO_TRACE_VISITOR", ToUpper(trace_visit.GetValue()).c_str(), 1);
@@ -255,6 +260,8 @@ bool CommandLine::Parse(int argc, char** argv) {
            1);
 
   if (print_after_all) setenv("CHOREO_PRINT_AFTER", "ALLPASSES", 1);
+
+  if (print_node_type) setenv("CHOREO_PRINT_NODETYPE", "", 1);
 
   if (prt_pass) setenv("CHOREO_PRINT_PASSES", "", 1);
 

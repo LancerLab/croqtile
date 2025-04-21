@@ -27,7 +27,7 @@ __co__ void spanned(f32 mdspan<3> d, int f) {
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: spanned
 // CHECK:  `- Return type: void
-// CHECK:  `- Parameters
+// CHECK:  `- Parameters:
 // CHECK:    `-  type: f32 <3>, symbol: d
 // CHECK:    `-  type: int, symbol: f
 // CHECK:  `- Type Decl: dim1 - [ 100 100 ]

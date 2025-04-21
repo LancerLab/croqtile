@@ -133,9 +133,13 @@ bool EarlySemantics::Visit(AST::Expr& n) {
                          "\": expect a future type but got `" + PSTR(ty) +
                          "'.");
       error_count++;
+      SetNodeType(n, MakeUnknownType());
       return false;
     }
-    SetNodeType(n, MakeDummySpannedType());
+    if (auto sym = cast<AST::Expr>(n.GetR())->GetSymbol())
+      SetNodeType(n, SSTab().LookupSymbol(sym->name + ".data"));
+    else
+      SetNodeType(n, MakeDummySpannedType());
   } else if (n.op == "sizeof") {
     auto ty = NodeType(*n.GetR());
     if (!GetMDSpanType(ty)) {
@@ -143,6 +147,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
                          "\": expect a mdspan type but got `" + PSTR(ty) +
                          "'.");
       error_count++;
+      SetNodeType(n, MakeUnknownType());
       return false;
     }
     SetNodeType(n, MakeIntegerType());
@@ -155,6 +160,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
                          "\": expect a indexable type but got `" + PSTR(lty) +
                          "'.");
       error_count++;
+      SetNodeType(n, MakeUnknownType());
       return false;
     }
     if (!isa<IndexType>(rty)) {
@@ -162,6 +168,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
                          "\": expect a index type but got `" + PSTR(rty) +
                          "'.");
       error_count++;
+      SetNodeType(n, MakeUnknownType());
       return false;
     }
     if (isa<BoundedType>(lty)) {
@@ -179,6 +186,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
                          "\": expect a bounded type but got `" + PSTR(ty) +
                          "'.");
       error_count++;
+      SetNodeType(n, MakeUnknownType());
       return false;
     }
     if (isa<BoundedIntegerType>(ty))
@@ -195,13 +203,15 @@ bool EarlySemantics::Visit(AST::Expr& n) {
                          "\": expect a mutable scalar type but got `" +
                          PSTR(ty) + "'.");
       error_count++;
+      SetNodeType(n, MakeUnknownType());
       return false;
     }
-    SetNodeType(n, sty);
+    SetNodeType(n, sty, true);
   } else if ((n.op == "+") || (n.op == "-") || (n.op == "*") || (n.op == "/") ||
              (n.op == "%") || (n.op == "cdiv")) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
+    bool is_mutable = IsMutable(*lty) || IsMutable(*rty);
     if ((isa<MDSpanType>(lty) && isa<ITupleType>(rty)) ||
         (isa<MDSpanType>(rty) && isa<ITupleType>(lty))) {
       // mdspan + ituple
@@ -213,7 +223,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
         error_count++;
         return false;
       }
-      SetNodeType(n, MakeRankedMDSpanType(lty->Dims()));
+      SetNodeType(n, MakeRankedMDSpanType(lty->Dims()), is_mutable);
     } else if ((isa<ITupleType>(lty) && isa<IntegerType>(rty)) ||
                (isa<MDSpanType>(lty) && isa<IntegerType>(rty))) {
       SetNodeType(n, lty);
@@ -238,6 +248,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       Error(n.LOC(), "in operation \"" + n.op +
                          "\": unable to apply to the types (" + PSTR(lty) +
                          " vs. " + PSTR(rty) + ").");
+      SetNodeType(n, MakeUnknownType());
       return false;
     } else if ((IsActualBoundedIntegerType(lty) && isa<IntegerType>(rty)) ||
                (IsActualBoundedIntegerType(rty) && isa<IntegerType>(lty))) {
@@ -248,6 +259,8 @@ bool EarlySemantics::Visit(AST::Expr& n) {
                 "in operation \"" + n.op +
                     "\": unable to apply to the getith bounded variable (" +
                     PSTR(n.GetL()) + ").");
+          error_count++;
+          SetNodeType(n, MakeUnknownType());
           return false;
         } else
           SetNodeType(n, lty);
@@ -257,6 +270,8 @@ bool EarlySemantics::Visit(AST::Expr& n) {
                 "in operation \"" + n.op +
                     "\": unable to apply to the 'getith' bounded variable (" +
                     PSTR(n.GetR()) + ").");
+          error_count++;
+          SetNodeType(n, MakeUnknownType());
           return false;
         } else
           SetNodeType(n, rty);
@@ -278,6 +293,8 @@ bool EarlySemantics::Visit(AST::Expr& n) {
         Error(n.LOC(), "in operation \"" + n.op +
                            "\": unable to apply to the types (" + PSTR(lty) +
                            " vs. " + PSTR(rty) + ").");
+        error_count++;
+        SetNodeType(n, MakeUnknownType());
         return false;
       }
       if (lty->Dims() != rty->Dims()) {
@@ -286,6 +303,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
                            std::to_string(lty->Dims()) + " vs. " +
                            std::to_string(rty->Dims()) + ").");
         error_count++;
+        SetNodeType(n, MakeUnknownType());
         return false;
       }
       SetNodeType(n, MakeITupleType(lty->Dims()));
@@ -304,6 +322,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
                          "\": unable to apply to the types (" + PSTR(lty) +
                          " vs. " + PSTR(rty) + ").");
       error_count++;
+      SetNodeType(n, MakeUnknownType());
       return false;
     } else if ((isa<IntegerType>(lty) && isa<IndexType>(rty)) ||
                (isa<IntegerType>(rty) && isa<IndexType>(lty))) {
@@ -316,6 +335,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
                          "\": unable to apply to the types (" + PSTR(lty) +
                          " vs. " + PSTR(rty) + ").");
       error_count++;
+      SetNodeType(n, MakeUnknownType());
       return false;
     } else
       SetNodeType(n, lty);
@@ -331,6 +351,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       Error(n.LOC(), "in operation \"" + n.op +
                          "\": unable to apply to the types (" + PSTR(lty) +
                          " vs. " + PSTR(rty) + ").");
+      SetNodeType(n, MakeUnknownType());
       return false;
     }
   } else if ((n.op == "<") || (n.op == ">") || (n.op == "==") ||
@@ -345,6 +366,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
                          "). (Only the values that can produce integers are "
                          "supported by now.)");
       error_count++;
+      SetNodeType(n, MakeUnknownType());
       return false;
     }
     if ((IsActualBoundedIntegerType(lty) && ConvertibleToInt(rty)) ||
@@ -356,6 +378,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
                          "\": unable to apply to the types (" + PSTR(lty) +
                          " vs. " + PSTR(rty) + ").");
       error_count++;
+      SetNodeType(n, MakeUnknownType());
       return false;
     }
     SetNodeType(n, MakeBooleanType());
@@ -367,6 +390,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
                          "\": unable to apply to the types (" + PSTR(lty) +
                          " vs. " + PSTR(rty) + ").");
       error_count++;
+      SetNodeType(n, MakeUnknownType());
       return false;
     }
     SetNodeType(n, MakeBooleanType());
@@ -377,6 +401,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
                          "\": unable to apply to the type (" + PSTR(rty) +
                          ").");
       error_count++;
+      SetNodeType(n, MakeUnknownType());
       return false;
     }
     SetNodeType(n, MakeBooleanType());
@@ -389,6 +414,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
                          "\": unable to apply to the types (" + PSTR(cty) +
                          ") " + PSTR(lty) + " : " + PSTR(rty) + ").");
       error_count++;
+      SetNodeType(n, MakeUnknownType());
       return false;
     }
     SetNodeType(n, lty);
@@ -401,6 +427,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
                          "\": unable to apply to the types " + PSTR(lty) +
                          " and " + PSTR(rty) + ".");
       error_count++;
+      SetNodeType(n, MakeUnknownType());
       return false;
     }
     if ((!IsValidRank(lty->Dims())) || (!IsValidRank(rty->Dims())))
@@ -702,35 +729,41 @@ bool EarlySemantics::Visit(AST::IntTuple& n) {
 bool EarlySemantics::Visit(AST::DataAccess& n) {
   TraceEachVisit(n);
 
-  auto dsym = n.GetDataName();
+  auto dsym = RemoveSuffix(n.GetDataName(), ".data");
 
   if (!n.AccessElement()) {
     SetNodeType(n, SSTab().LookupSymbol(dsym));
     return true;
   }
 
-  if (!SSTab().DeclaredInScope(dsym)) {
+  if (!SSTab().IsDeclared(dsym)) {
     Error(n.LOC(), "unable to access an undeclared variable '" + dsym + "'.");
     ++error_count;
     return false;
   }
 
-  auto dty = NodeType(*n.GetData());
-  auto sty = dyn_cast<SpannedType>(dty);
+  auto dty = SSTab().LookupSymbol(n.GetDataName());
+  auto sty = GetSpannedType(dty);
+
   if (!sty) {
-    Error(n.LOC(),
-          "expect '" + dsym + "' a spanned type but got " + PSTR(dty) + ".");
+    Error(n.LOC(), "expect '" + n.GetDataName() + "' a spanned type but got " +
+                       PSTR(dty) + ".");
     error_count++;
+    return false;
   }
 
-  if (sty->Dims() != n.GetIndices().size()) {
+  size_t idx_count = 0;
+  for (auto idx : n.GetIndices()) idx_count += NodeType(*idx)->Dims();
+
+  if (sty->Dims() != idx_count) {
     Error(n.LOC(),
           "accessing an spanned data (rank: " + std::to_string(sty->Dims()) +
-              ") with " + std::to_string(n.GetIndices().size()) + " indices.");
+              ") with " + std::to_string(idx_count) + " indices.");
     ++error_count;
   }
 
-  SetNodeType(n, MakeScalarType(sty->ElementType()));
+  // data element is considered as mutable
+  SetNodeType(n, MakeElemScalarType(sty->ElementType(), true));
 
   return true;
 }
@@ -738,15 +771,30 @@ bool EarlySemantics::Visit(AST::DataAccess& n) {
 bool EarlySemantics::Visit(AST::Assignment& n) {
   TraceEachVisit(n);
 
-  if (!SSTab().DeclaredInScope(n.GetName())) {
-    // This is a definition rather than an assignment. The parser fails to make
-    // it correct
-    if (n.da->AccessElement()) {
+  // assign to the array element
+  if (n.AssignToDataElement()) {
+    if (!SSTab().IsDeclared(n.GetDataArrayName())) {
       Error(n.da->LOC(), "unable to access element of an undeclared variable " +
                              n.GetName() + ".");
       ++error_count;
     }
 
+    auto ety = NodeType(*n.da);
+    auto vty = NodeType(*n.value);
+
+    if (*ety != *vty) {
+      Error(n.da->LOC(), "type inconsistent: assign " + PSTR(vty) + " to " +
+                             PSTR(ety) + ".");
+      ++error_count;
+    }
+
+    SetNodeType(n, ety);
+    return true;
+  }
+
+  if (!SSTab().DeclaredInScope(n.GetName())) {
+    // This is a definition rather than an assignment. The parser fails to make
+    // it correct
     auto sty = NodeType(*n.value);
     assert((sty && !isa<UnknownType>(sty)) &&
            "internal error: failed to find the type.");
@@ -864,6 +912,7 @@ bool EarlySemantics::Visit(AST::Parameter& n) {
       SSTab().DefineSymbol(n.sym->name + ".span", ty->GetMDSpanType());
     }
   }
+  SetNodeType(n, n.type->GetType());
   return true;
 }
 
@@ -1053,6 +1102,7 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
   }
   in_decl = false;
 
+  SetNodeType(n, ity);
   return true;
 }
 
@@ -1668,6 +1718,15 @@ bool EarlySemantics::Visit(AST::Return& n) {
 
 bool EarlySemantics::Visit(AST::LoopRange& n) {
   TraceEachVisit(n);
+
+  if (n.lbound && !isa<IntegerType>(NodeType(*n.lbound))) {
+    Error(n.lbound->LOC(), "the lower bound is not an integer.");
+    error_count++;
+  }
+  if (n.ubound && !isa<IntegerType>(NodeType(*n.ubound))) {
+    Error(n.ubound->LOC(), "the upper bound is not an integer.");
+    error_count++;
+  }
 
   return true;
 }

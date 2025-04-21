@@ -17,7 +17,7 @@ __co__ u8 mdspan<1> scalar_decls(int a, int b) {
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: scalar_decls
 // CHECK:  `- Return type: u8 <1>
-// CHECK:  `- Parameters
+// CHECK:  `- Parameters:
 // CHECK:    `-  type: int, symbol: a
 // CHECK:    `-  type: int, symbol: b
 // CHECK:  `- Var Decl (int): c =  ( ( (a +  ( (b - a)  * a) )  +  (a / 5) )  -  (b % a) )

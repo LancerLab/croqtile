@@ -479,6 +479,10 @@ void SymReplace::EquivalentlyReplaceExprNodes() {
     auto L = new_expr->GetL();
     auto R = new_expr->GetR();
 
+    auto cty = (C) ? C->GetType() : nullptr;
+    auto lty = (L) ? L->GetType() : nullptr;
+    auto rty = (R) ? R->GetType() : nullptr;
+
     if (auto ii = dyn_cast<AST::IntIndex>(R))
       orig_expr->SetR(AST::Make<AST::IntIndex>(*ii));
     else if (auto e = dyn_cast<AST::Expr>(R))
@@ -519,6 +523,10 @@ void SymReplace::EquivalentlyReplaceExprNodes() {
     }
     orig_expr->op = new_expr->op;
     orig_expr->SetForm(new_expr->GetForm());
+
+    if (cty) orig_expr->GetC()->SetType(cty);
+    if (lty) orig_expr->GetL()->SetType(lty);
+    if (rty) orig_expr->GetR()->SetType(rty);
   }
 }
 

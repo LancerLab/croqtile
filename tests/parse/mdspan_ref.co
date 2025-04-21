@@ -9,7 +9,7 @@ __co__ int span_element(int d, int c) {
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: span_element
 // CHECK:  `- Return type: int
-// CHECK:  `- Parameters
+// CHECK:  `- Parameters:
 // CHECK:    `-  type: int, symbol: d
 // CHECK:    `-  type: int, symbol: c
 // CHECK:  `- Type Decl: dims - [ 9 d ]

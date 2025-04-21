@@ -51,6 +51,8 @@ public:
       return nodes.count(it->vlist.get());
     else if (auto mds = dyn_cast<AST::MultiDimSpans>(n))
       return nodes.count(mds->list.get());
+    else if (auto mds = dyn_cast<AST::DataAccess>(n))
+      return nodes.count(mds->indices.get());
     else if (AST::IsLiteral(*n) || isa<AST::IntIndex>(n) ||
              isa<AST::SpanAs>(n) || isa<AST::ChunkAt>(n))
       return false;
@@ -98,8 +100,11 @@ private:
                                  const char*, int,
                                  const ptr<Type>& = MakeUnknownType());
 
-  void SetNodeType(AST::Node& n, const ptr<Type>& ty) {
-    n.SetType(ty);
+  void SetNodeType(AST::Node& n, const ptr<Type>& ty, bool is_mutable = false) {
+    if (is_mutable && MutableType(*ty))
+      n.SetType(MutateType(*ty));
+    else
+      n.SetType(ty);
     if (debug_visit)
       dbgs() << "Set type of " << STR(n) << " as " << PSTR(n.GetType()) << "\n";
   }
@@ -120,8 +125,11 @@ private:
 
 public:
   EarlySemantics() : VisitorWithScope("sema") {
-    if (trace_visit) debug_visit = true; // force debug when tracing
-    if (debug_visit) type_equals.SetDebug(true);
+    //    if (trace_visit) debug_visit = true; // force debug when tracing
+    if (debug_visit) {
+      trace_visit = true;
+      type_equals.SetDebug(true);
+    }
     if (CCtx().GetTarget() == Choreo::CompileTarget::CUDA)
       allow_auto_threading = true;
   }

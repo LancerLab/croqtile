@@ -6,4 +6,4 @@ __co__ void foo(int a, f32 [1, 2] b) {
   }
 }
 
-// CHECK: if (bar((3), __tops_tid_x(), a, (1)))
+// CHECK: if (bar((3), __tops_tid_x(), (a), (1)))

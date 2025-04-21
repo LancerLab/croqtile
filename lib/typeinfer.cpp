@@ -37,8 +37,8 @@ bool TypeInference::AfterVisitImpl(AST::Node& n) {
     if (AST::istypeof<UnknownType>(f) || isa<SpannedType>(func_ty->out_ty)) {
       // update the return type node since type inference could have changed the
       // function type already
-      f->f_decl.ret_type->SetType(func_ty->out_ty);
-      f->f_decl.SetType(sym_ty);
+      SetNodeType(*f->f_decl.ret_type, func_ty->out_ty);
+      SetNodeType(f->f_decl, sym_ty);
       f->SetType(sym_ty);
     }
     if (CCtx().ShowInferredTypes()) {
@@ -113,7 +113,7 @@ bool TypeInference::SetAsCurrentType(AST::Node& nd, const std::string& n) {
     // already has a type with sufficient info, check for consistence.
     if (cur_type->HasSufficientInfo()) {
       if (BetterQuality(cur_type, nty)) {
-        nd.SetType(ShadowTypeStorage(cur_type));
+        SetNodeType(nd, ShadowTypeStorage(cur_type));
         return true;
       } else {
         assert(!BetterQuality(nty, cur_type) &&
@@ -148,7 +148,7 @@ bool TypeInference::SetAsCurrentType(AST::Node& nd, const std::string& n) {
       if (n->mem) st->SetStorage(n->mem->st);
 
   // The type is successfully inferred, set the node
-  nd.SetType(ShadowTypeStorage(cur_type));
+  SetNodeType(nd, ShadowTypeStorage(cur_type));
 
   return true;
 }
@@ -165,16 +165,16 @@ bool TypeInference::Visit(AST::MultiValues& n) {
 
 bool TypeInference::Visit(AST::IntLiteral& n) {
   TraceEachVisit(n);
-  n.SetType(MakeIntegerType());
+  SetNodeType(n, MakeIntegerType());
   return true;
 }
 
 bool TypeInference::Visit(AST::FloatLiteral& n) {
   TraceEachVisit(n);
   if (std::holds_alternative<float>(n.value))
-    n.SetType(MakeFloatType());
+    SetNodeType(n, MakeFloatType());
   else if (std::holds_alternative<double>(n.value))
-    n.SetType(MakeDoubleType());
+    SetNodeType(n, MakeDoubleType());
   else
     choreo_unreachable("unhandled floating-point type.");
   return true;
@@ -182,13 +182,13 @@ bool TypeInference::Visit(AST::FloatLiteral& n) {
 
 bool TypeInference::Visit(AST::StringLiteral& n) {
   TraceEachVisit(n);
-  n.SetType(MakeStringType());
+  SetNodeType(n, MakeStringType());
   return true;
 }
 
 bool TypeInference::Visit(AST::Boolean& n) {
   TraceEachVisit(n);
-  n.SetType(MakeBooleanType());
+  SetNodeType(n, MakeBooleanType());
   return true;
 }
 
@@ -209,8 +209,9 @@ bool TypeInference::Visit(AST::DataType& n) {
 
   // compound type
   if (auto mdspan = dyn_cast<AST::MultiDimSpans>(n.mdspan_type)) {
-    n.SetType(MakeSpannedType(n.getFundamentalType(),
-                              cast<MDSpanType>(mdspan->GetType())->GetShape()));
+    SetNodeType(
+        n, MakeSpannedType(n.getFundamentalType(),
+                           cast<MDSpanType>(mdspan->GetType())->GetShape()));
     cur_type = n.GetType();
   }
 
@@ -290,7 +291,7 @@ bool TypeInference::Visit(AST::NamedTypeDecl& n) {
       return false;
     }
 
-    n.SetType(n.init_expr->GetType());
+    SetNodeType(n, n.init_expr->GetType());
   } else if (AST::istypeof<UnknownType>(&n)) {
     // need type inference
     Error(n.LOC(),
@@ -312,11 +313,14 @@ bool TypeInference::Visit(AST::NamedTypeDecl& n) {
 bool TypeInference::Visit(AST::DataAccess& n) {
   TraceEachVisit(n);
 
+#if 0
+  auto dty = GetSymbolType(n.LOC(), n.GetDataName());
   if (n.AccessElement()) {
-    auto dty = GetSymbolType(n.LOC(), n.GetDataName());
     auto sty = cast<SpannedType>(dty);
-    n.SetType(MakeScalarType(sty->ElementType()));
-  }
+    SetNodeType(n, MakeElemScalarType(sty->ElementType()));
+  } else
+    SetNodeType(n, dty);
+#endif
 
   return true;
 }
@@ -328,7 +332,10 @@ bool TypeInference::Visit(AST::Assignment& n) {
   if (n.AssignToDataElement()) {
     // should be assigned already by DataAccess
     assert(isa<ScalarType>(NodeType(*n.da)));
-    n.SetType(NodeType(*n.da));
+    auto dty = GetSymbolType(n.LOC(), n.GetDataArrayName());
+    auto ety = MakeElemScalarType(cast<SpannedType>(dty)->ElementType());
+    SetNodeType(*n.da, ety);
+    SetNodeType(n, ety);
     return true;
   }
 
@@ -341,12 +348,13 @@ bool TypeInference::Visit(AST::Assignment& n) {
             "current choreo does not support symbol re-assignment except for "
             "future type.");
       error_count++;
-      n.SetType(MakeUnknownType());
+      SetNodeType(n, MakeUnknownType());
       cur_type.reset();
       return false;
     } else {
       // no type inference is necessary
-      n.SetType(NodeType(*n.value));
+      SetNodeType(n, NodeType(*n.value));
+      SetNodeType(*n.da, NodeType(*n.value));
       cur_type.reset();
       return true;
     }
@@ -364,7 +372,8 @@ bool TypeInference::Visit(AST::Assignment& n) {
   auto ty = ShadowTypeStorage(NodeType(*n.value));
 
   AssignSymbolWithType(n.LOC(), n.GetName(), ty);
-  n.SetType(ty);
+  SetNodeType(n, ty);
+  SetNodeType(*n.da, ty);
 
   if (auto fty = dyn_cast<FutureType>(ty)) {
     AssignSymbolWithType(n.LOC(), n.GetName() + ".data", fty->GetSpannedType());
@@ -383,7 +392,7 @@ bool TypeInference::Visit(AST::Assignment& n) {
 
 bool TypeInference::Visit(AST::IntIndex& n) {
   TraceEachVisit(n);
-  n.SetType(MakeIntegerType());
+  SetNodeType(n, MakeIntegerType());
   return true;
 }
 
@@ -402,7 +411,7 @@ bool TypeInference::Visit(AST::FunctionDecl& n) {
 bool TypeInference::Visit(AST::Parameter& p) {
   TraceEachVisit(p);
   // obtain its type
-  p.SetType(p.type->GetType());
+  SetNodeType(p, p.type->GetType());
 
   if (p.HasSymbol()) {
     if (isa<UnknownType>(p.type->GetType()) || isa<UnknownType>(p.GetType())) {
@@ -453,7 +462,7 @@ bool TypeInference::Visit(AST::Expr& n) {
         if (SuffixedWith(id->name, ".span")) {
           assert(isa<MDSpanType>(pty) && "incorrect type annotated.");
         }
-        n.SetType(pty);
+        SetNodeType(n, pty);
         return true;
       } else {
         Warning(n.LOC(),
@@ -471,7 +480,7 @@ bool TypeInference::Visit(AST::Expr& n) {
       return false;
     }
 
-    n.SetType(ref->GetType());
+    SetNodeType(n, ref->GetType());
     return true;
   }
 
@@ -480,23 +489,23 @@ bool TypeInference::Visit(AST::Expr& n) {
       auto id = cast<AST::Identifier>(n.GetR());
       if (auto bty =
               dyn_cast<BoundedITupleType>(GetSymbolType(id->LOC(), id->name)))
-        n.SetType(MakeITupleType(bty->Dims()));
+        SetNodeType(n, MakeITupleType(bty->Dims()));
       else if (isa<BoundedIntegerType>(GetSymbolType(id->LOC(), id->name)))
-        n.SetType(MakeIntegerType());
+        SetNodeType(n, MakeIntegerType());
       else
         choreo_unreachable("ubound type '" + AST::TYPE_STR(n.GetR()) +
                            "' is unexpected.");
       return true;
     } else if (n.op == "sizeof") {
-      n.SetType(MakeIntegerType());
+      SetNodeType(n, MakeIntegerType());
       return true;
     } else if (n.op == "dataof") {
       auto ref = cast<AST::Expr>(n.GetR())->GetReference();
       auto id = cast<AST::Identifier>(ref);
-      n.SetType(GetSymbolType(id->LOC(), id->name + ".data"));
+      SetNodeType(n, GetSymbolType(id->LOC(), id->name + ".data"));
       return true;
     } else if (n.op == "!") {
-      n.SetType(MakeBooleanType());
+      SetNodeType(n, MakeBooleanType());
       return true;
     }
     choreo_unreachable("type inference is yet to implement.");
@@ -504,7 +513,7 @@ bool TypeInference::Visit(AST::Expr& n) {
 
   if (n.GetForm() == AST::Expr::Binary) {
     if (n.op == "dimof") {
-      n.SetType(MakeIntegerType());
+      SetNodeType(n, MakeIntegerType());
       return true;
     } else if (n.op == "elemof") {
       assert(isa<EventType>(NodeType(n)) && "only support elemof event array.");
@@ -518,7 +527,7 @@ bool TypeInference::Visit(AST::Expr& n) {
       if ((IsActualBoundedIntegerType(pty_lhs) && ConvertibleToInt(pty_rhs)) ||
           (IsActualBoundedIntegerType(pty_rhs) && ConvertibleToInt(pty_lhs)) ||
           (ConvertibleToInt(pty_lhs) && ConvertibleToInt(pty_rhs))) {
-        n.SetType(MakeBooleanType());
+        SetNodeType(n, MakeBooleanType());
         return true;
       } else {
         Error(n.LOC(), "The operands of the expression cannot undergo '" +
@@ -531,11 +540,12 @@ bool TypeInference::Visit(AST::Expr& n) {
     if ((isa<MDSpanType>(pty_lhs) && isa<ITupleType>(pty_rhs)) ||
         (isa<MDSpanType>(pty_rhs) && isa<ITupleType>(pty_lhs))) {
       if (n.op == "concat") {
-        n.SetType(MakeMDSpanType(n.s));
+        SetNodeType(n, MakeMDSpanType(n.s));
         return true;
       }
       if (pty_lhs->Dims() == pty_rhs->Dims()) {
-        n.SetType(MakeMDSpanType(n.s)); // note: the shape has been inferred
+        SetNodeType(n,
+                    MakeMDSpanType(n.s)); // note: the shape has been inferred
         cur_type = n.GetType();
         return true;
       }
@@ -543,7 +553,7 @@ bool TypeInference::Visit(AST::Expr& n) {
       for (const auto& pty : {pty_lhs, pty_rhs})
         if (isa<ITupleType>(pty))
           if (ConvertibleToInt(pty)) {
-            n.SetType(MakeMDSpanType(n.s));
+            SetNodeType(n, MakeMDSpanType(n.s));
             cur_type = n.GetType();
             return true;
           }
@@ -557,7 +567,7 @@ bool TypeInference::Visit(AST::Expr& n) {
       return false;
     } else if (isa<MDSpanType>(pty_lhs) && isa<MDSpanType>(pty_rhs)) {
       if (n.op == "concat") {
-        n.SetType(MakeMDSpanType(n.s));
+        SetNodeType(n, MakeMDSpanType(n.s));
         return true;
       }
       if (!((n.op == "/") || (n.op == "%") || (n.op == "cdiv"))) {
@@ -565,9 +575,10 @@ bool TypeInference::Visit(AST::Expr& n) {
               "The operands of the div/mod expression cannot undergo '" + n.op +
                   "' operation.");
         error_count++;
+        SetNodeType(n, MakeUnknownType());
         return false;
       } else if (pty_lhs->Dims() == pty_rhs->Dims()) {
-        n.SetType(MakeITupleType(pty_lhs->Dims()));
+        SetNodeType(n, MakeITupleType(pty_lhs->Dims()));
         cur_type = n.GetType();
         return true;
       } else {
@@ -581,12 +592,12 @@ bool TypeInference::Visit(AST::Expr& n) {
       if (n.op == "concat") {
         if (!cast<ITupleType>(pty_rhs)->IsDimValid() ||
             !cast<ITupleType>(pty_lhs)->IsDimValid())
-          n.SetType(MakeUninitITupleType());
-        n.SetType(MakeITupleType(pty_rhs->Dims() + pty_lhs->Dims()));
+          SetNodeType(n, MakeUninitITupleType());
+        SetNodeType(n, MakeITupleType(pty_rhs->Dims() + pty_lhs->Dims()));
         return true;
       }
       if (pty_lhs->Dims() == pty_rhs->Dims()) {
-        n.SetType(pty_rhs);
+        SetNodeType(n, pty_rhs);
         cur_type = n.GetType();
         return true;
       } else {
@@ -597,17 +608,17 @@ bool TypeInference::Visit(AST::Expr& n) {
         return false;
       }
     } else if (isa<ITupleType>(pty_rhs) && isa<IntegerType>(pty_lhs)) {
-      n.SetType(pty_rhs);
+      SetNodeType(n, pty_rhs);
       cur_type = n.GetType();
     } else if (isa<ITupleType>(pty_lhs) && isa<IntegerType>(pty_rhs)) {
-      n.SetType(pty_lhs);
+      SetNodeType(n, pty_lhs);
       cur_type = n.GetType();
     } else if ((isa<MDSpanType>(pty_rhs) && isa<IntegerType>(pty_lhs)) ||
                (isa<MDSpanType>(pty_lhs) && isa<IntegerType>(pty_rhs))) {
-      n.SetType(MakeMDSpanType(n.s));
+      SetNodeType(n, MakeMDSpanType(n.s));
       cur_type = n.GetType();
     } else if (isa<BoundedITupleType>(pty_lhs) && isa<IntegerType>(pty_rhs)) {
-      n.SetType(pty_lhs);
+      SetNodeType(n, pty_lhs);
       cur_type = n.GetType();
     } else if (isa<BoundedITupleType>(pty_lhs) &&
                isa<BoundedITupleType>(pty_rhs)) {
@@ -621,25 +632,26 @@ bool TypeInference::Visit(AST::Expr& n) {
             bitt_lhs->Dims() == 1 && bitt_rhs->Dims() == 1 &&
             "for now only support multiplication of one dim bounded ituples.");
         auto ub = bitt_lhs->GetUpperBound(0) * bitt_rhs->GetUpperBound(0);
-        n.SetType(MakeBoundedITupleType(Shape(1, ub)));
+        SetNodeType(n, MakeBoundedITupleType(Shape(1, ub)));
         cur_type = n.GetType();
-      }
+      } else
+        SetNodeType(n, MakeUnknownType());
     } else if (n.IsArith() && n.op != "#" && CanYieldAnInteger(pty_lhs) &&
                CanYieldAnInteger(pty_rhs)) {
       if (isa<ScalarFloatType>(pty_lhs) || isa<ScalarFloatType>(pty_rhs)) {
         if (isa<DoubleType>(pty_lhs) || isa<DoubleType>(pty_rhs))
-          n.SetType(MakeDoubleType());
+          SetNodeType(n, MakeDoubleType());
         else
-          n.SetType(MakeFloatType());
+          SetNodeType(n, MakeFloatType());
       } else {
         // it is ok to make compatiable types to do arith
         if (IsActualBoundedIntegerType(pty_lhs) && isa<IntegerType>(pty_rhs))
-          n.SetType(pty_lhs);
+          SetNodeType(n, pty_lhs);
         else if (IsActualBoundedIntegerType(pty_rhs) &&
                  isa<IntegerType>(pty_lhs))
-          n.SetType(pty_rhs);
+          SetNodeType(n, pty_rhs);
         else
-          n.SetType(MakeIntegerType());
+          SetNodeType(n, MakeIntegerType());
       }
     } else if (*pty_lhs != *pty_rhs) {
       Error(n.LOC(), "The operands of the expression cannot undergo '" + n.op +
@@ -647,7 +659,7 @@ bool TypeInference::Visit(AST::Expr& n) {
       error_count++;
       return false;
     } else {
-      n.SetType(n.GetR()->GetType());
+      SetNodeType(n, n.GetR()->GetType());
       cur_type = n.GetType();
       return true;
     }
@@ -665,7 +677,7 @@ bool TypeInference::Visit(AST::Expr& n) {
           error_count++;
           return false;
         }
-        n.SetType(pty_lhs);
+        SetNodeType(n, pty_lhs);
         cur_type = n.GetType();
         return true;
       }
@@ -697,13 +709,13 @@ bool TypeInference::Visit(AST::SpanAs& n) {
   auto sty = cast<SpannedType>(nty);
 
   if (isa<SpannedType>(ity)) {
-    n.nid->SetType(ShadowTypeStorage(sty));
+    SetNodeType(*n.nid, ShadowTypeStorage(sty));
     cur_type = nty;
   } else {
     auto fty =
         cast<SpannedType>(GetSymbolType(n.id->LOC(), n.id->name + ".data"));
-    n.SetType(ShadowTypeStorage(
-        MakeSpannedType(fty->f_type, sty->GetShape(), fty->GetStorage())));
+    SetNodeType(n, ShadowTypeStorage(MakeSpannedType(
+                       fty->f_type, sty->GetShape(), fty->GetStorage())));
     cur_type = n.GetType();
   }
 
@@ -843,11 +855,11 @@ bool TypeInference::Visit(AST::ChunkAt& n) {
 
   if (n.positions) {
     // update all the nodes with correct types
-    for (auto& v : n.positions->AllValues()) { v->SetType(NodeType(*v)); }
+    for (auto& v : n.positions->AllValues()) { SetNodeType(*v, NodeType(*v)); }
   }
   // also update current node
-  n.SetType(
-      MakeSpannedType(fmty, cast<SpannedType>(n.GetType())->GetShape(), sto));
+  SetNodeType(n, MakeSpannedType(
+                     fmty, cast<SpannedType>(n.GetType())->GetShape(), sto));
 
   return true;
 }
@@ -891,11 +903,11 @@ bool TypeInference::Visit(AST::Select& n) {
 
   if (CanYieldAnInteger(NodeType(*n.select_factor))) {
     // normalize the shape
-    n.select_factor->SetType(MakeIntegerType(n.select_factor->s));
+    SetNodeType(*n.select_factor, MakeIntegerType(n.select_factor->s));
   }
 
   if (cur_type = type_equals.ResolveEqualFutures(*n.expr_list)) {
-    n.SetType(cur_type);
+    SetNodeType(n, cur_type);
     return true;
   }
 
@@ -905,7 +917,7 @@ bool TypeInference::Visit(AST::Select& n) {
   assert(sty);
   dma_mem = sty->GetStorage();
   dma_fmty = sty->ElementType();
-  n.SetType(MakeSpannedType(dma_fmty, sty->GetShape(), dma_mem));
+  SetNodeType(n, MakeSpannedType(dma_fmty, sty->GetShape(), dma_mem));
   cur_type = n.GetType();
 
   return true;

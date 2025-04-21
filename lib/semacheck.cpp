@@ -57,10 +57,20 @@ bool SemaChecker::VisitNode(AST::IntTuple& n) {
   return true;
 }
 
+bool SemaChecker::VisitNode(AST::DataAccess& n) {
+  if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
+  if (n.AccessElement() &&
+      !ReportUnknownSymbol(n.GetDataName(), n.LOC(), __FILE__, __LINE__))
+    return false;
+
+  // TODO: static out-of-bound check
+
+  return true;
+}
+
 bool SemaChecker::VisitNode(AST::Assignment& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
-  if (!ReportUnknownSymbol(n.GetName(), n.LOC(), __FILE__, __LINE__))
-    return false;
+  return false;
 
   if ((*NodeType(n) != *NodeType(*n.value))) {
     Error(n.LOC(), "inconsistent types are found in the assignment: " +

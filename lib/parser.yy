@@ -1352,8 +1352,11 @@ sub_data_expr
     ;
 
 data_element
-    : data_id AT LPAREN data_indices RPAREN {
+    : IDENTIFIER AT LPAREN data_indices RPAREN {
         $$ = AST::Make<AST::DataAccess>(@1, AST::Make<AST::Identifier>(@1, $1), $4);
+      }
+    | IDENTIFIER FNDATA AT LPAREN data_indices RPAREN {
+        $$ = AST::Make<AST::DataAccess>(@1, AST::Make<AST::Identifier>(@1, $1+$2), $5);
       }
     ;
 

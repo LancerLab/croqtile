@@ -19,7 +19,7 @@ __co__ void dma_test(int b, f32 [36, 27, 128] input) {
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: dma_test
 // CHECK:  `- Return type: void
-// CHECK:  `- Parameters
+// CHECK:  `- Parameters:
 // CHECK:    `-  type: int, symbol: b
 // CHECK:    `-  type: f32 [ 36 27 128 ], symbol: input
 // CHECK:  `- Type Decl: ndims - [ 3 b ]
@@ -61,7 +61,7 @@ __co__ void dma_test1(f32 [36, 27, 128] input) {
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: dma_test1
 // CHECK:  `- Return type: void
-// CHECK:  `- Parameters
+// CHECK:  `- Parameters:
 // CHECK:    `-  type: f32 [ 36 27 128 ], symbol: input
 // CHECK:  `- Var Decl (f32 [ 9 3 8 ], default): dst
 // CHECK:  `- With Block:
@@ -94,7 +94,7 @@ __co__ void dma_test2(f32 [27, 128] input) {
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: dma_test2
 // CHECK:  `- Return type: void
-// CHECK:  `- Parameters
+// CHECK:  `- Parameters:
 // CHECK:    `-  type: f32 [ 27 128 ], symbol: input
 // CHECK:  `- With Block:
 // CHECK:    (within constraints)
@@ -126,7 +126,7 @@ __co__ void dma_test3(f32 [36, 27, 128] input) {
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: dma_test3
 // CHECK:  `- Return type: void
-// CHECK:  `- Parameters
+// CHECK:  `- Parameters:
 // CHECK:    `-  type: f32 [ 36 27 128 ], symbol: input
 // CHECK:  `- Var Decl (f32 [ 9 3 8 ], default): dst
 // CHECK:  `- With Block:

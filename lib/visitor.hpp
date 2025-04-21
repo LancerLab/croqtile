@@ -27,7 +27,8 @@ struct Visitor {
       if (print_ahead) {
         dbgs() << NewL << SprT << " Before " << name << ": " << f->name
                << " (Begin) " << SprT << NewL;
-        dbgs() << STR(n) << NewL;
+        n.Print(dbgs(), "", prt_node_ty);
+        dbgs() << NewL;
         dbgs() << SprT << " Before " << name << ": " << f->name << " (End) "
                << SprT << NewL;
       }
@@ -42,7 +43,8 @@ struct Visitor {
       if (print_after) {
         dbgs() << NewL << SprT << " After " << name << ": " << f->name
                << " (Begin) " << SprT << NewL;
-        dbgs() << STR(n) << NewL;
+        n.Print(dbgs(), "", prt_node_ty);
+        dbgs() << NewL;
         dbgs() << SprT << " After " << name << ": " << f->name << " (End) "
                << SprT << NewL;
       }
@@ -113,6 +115,7 @@ protected:
   bool dsyms_after = false;
   bool abend_after = false;
   bool prt_visitor = false;
+  bool prt_node_ty = false;
   bool disabled = false;
   size_t error_count = 0;
 
@@ -172,6 +175,8 @@ public:
     }
 
     if (std::getenv("CHOREO_PRINT_PASSES")) prt_visitor = true;
+
+    if (std::getenv("CHOREO_PRINT_NODETYPE")) prt_node_ty = true;
   }
 
   virtual ~Visitor() {}
@@ -206,6 +211,8 @@ public:
   }
 
 public:
+  // The node type can only be used when symbol table is consturcted or under
+  // construction
   virtual ptr<Type> NodeType(const AST::Node& n) const {
     if (auto id = dyn_cast<AST::Identifier>(&n))
       return GetSymbolType(id->name);
@@ -215,8 +222,9 @@ public:
       } else if (expr->op == "dataof") {
         if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol()) {
           if (!GetSymbolType(id->name)) {
+            // TODO: make NodeType be used properly
             // choreo_unreachable("\"dataof\" operation refers undefined symbol
-            // '" +  id->name + "'.");
+            // '" + id->name + "'.");
             return nullptr;
           }
           return GetSymbolType(id->name + ".data");
@@ -423,6 +431,51 @@ public:
   virtual const std::string GetScope(const std::string& name) const {
     return scoped_symtab.GetScope(name);
   }
+
+public:
+  // provide the defaults
+  bool Visit(AST::MultiNodes&) override { return true; }
+  bool Visit(AST::MultiValues&) override { return true; }
+  bool Visit(AST::IntLiteral&) override { return true; }
+  bool Visit(AST::FloatLiteral&) override { return true; }
+  bool Visit(AST::StringLiteral&) override { return true; }
+  bool Visit(AST::Boolean&) override { return true; }
+  bool Visit(AST::Expr&) override { return true; }
+  bool Visit(AST::MultiDimSpans&) override { return true; }
+  bool Visit(AST::NamedTypeDecl&) override { return true; }
+  bool Visit(AST::NamedVariableDecl&) override { return true; }
+  bool Visit(AST::IntTuple&) override { return true; }
+  bool Visit(AST::DataAccess&) override { return true; }
+  bool Visit(AST::Assignment&) override { return true; }
+  bool Visit(AST::IntIndex&) override { return true; }
+  bool Visit(AST::DataType&) override { return true; }
+  bool Visit(AST::Identifier&) override { return true; }
+  bool Visit(AST::Parameter&) override { return true; }
+  bool Visit(AST::ParamList&) override { return true; }
+  bool Visit(AST::ParallelBy&) override { return true; }
+  bool Visit(AST::WhereBind&) override { return true; }
+  bool Visit(AST::WithIn&) override { return true; }
+  bool Visit(AST::WithBlock&) override { return true; }
+  bool Visit(AST::Memory&) override { return true; }
+  bool Visit(AST::SpanAs&) override { return true; }
+  bool Visit(AST::DMA&) override { return true; }
+  bool Visit(AST::ChunkAt&) override { return true; }
+  bool Visit(AST::Wait&) override { return true; }
+  bool Visit(AST::Trigger&) override { return true; }
+  bool Visit(AST::Call&) override { return true; }
+  bool Visit(AST::Rotate&) override { return true; }
+  bool Visit(AST::Synchronize&) override { return true; }
+  bool Visit(AST::Select&) override { return true; }
+  bool Visit(AST::Return&) override { return true; }
+  bool Visit(AST::LoopRange&) override { return true; }
+  bool Visit(AST::ForeachBlock&) override { return true; }
+  bool Visit(AST::InThreadsBlock&) override { return true; }
+  bool Visit(AST::IfElseBlock&) override { return true; }
+  bool Visit(AST::IncrementBlock&) override { return true; }
+  bool Visit(AST::FunctionDecl&) override { return true; }
+  bool Visit(AST::ChoreoFunction&) override { return true; }
+  bool Visit(AST::CppSourceCode&) override { return true; }
+  bool Visit(AST::Program&) override { return true; }
 };
 
 // This accepts static symbol table and provide symbol lookup capability
@@ -471,50 +524,6 @@ public:
   VisitorWithSymTab(const std::string& n, const ptr<SymbolTable>& s_tab)
       : VisitorWithScope(n, s_tab) {}
   ~VisitorWithSymTab() {}
-
-  // provide the defaults
-  bool Visit(AST::MultiNodes&) override { return true; }
-  bool Visit(AST::MultiValues&) override { return true; }
-  bool Visit(AST::IntLiteral&) override { return true; }
-  bool Visit(AST::FloatLiteral&) override { return true; }
-  bool Visit(AST::StringLiteral&) override { return true; }
-  bool Visit(AST::Boolean&) override { return true; }
-  bool Visit(AST::Expr&) override { return true; }
-  bool Visit(AST::MultiDimSpans&) override { return true; }
-  bool Visit(AST::NamedTypeDecl&) override { return true; }
-  bool Visit(AST::NamedVariableDecl&) override { return true; }
-  bool Visit(AST::IntTuple&) override { return true; }
-  bool Visit(AST::DataAccess&) override { return true; }
-  bool Visit(AST::Assignment&) override { return true; }
-  bool Visit(AST::IntIndex&) override { return true; }
-  bool Visit(AST::DataType&) override { return true; }
-  bool Visit(AST::Identifier&) override { return true; }
-  bool Visit(AST::Parameter&) override { return true; }
-  bool Visit(AST::ParamList&) override { return true; }
-  bool Visit(AST::ParallelBy&) override { return true; }
-  bool Visit(AST::WhereBind&) override { return true; }
-  bool Visit(AST::WithIn&) override { return true; }
-  bool Visit(AST::WithBlock&) override { return true; }
-  bool Visit(AST::Memory&) override { return true; }
-  bool Visit(AST::SpanAs&) override { return true; }
-  bool Visit(AST::DMA&) override { return true; }
-  bool Visit(AST::ChunkAt&) override { return true; }
-  bool Visit(AST::Wait&) override { return true; }
-  bool Visit(AST::Trigger&) override { return true; }
-  bool Visit(AST::Call&) override { return true; }
-  bool Visit(AST::Rotate&) override { return true; }
-  bool Visit(AST::Synchronize&) override { return true; }
-  bool Visit(AST::Select&) override { return true; }
-  bool Visit(AST::Return&) override { return true; }
-  bool Visit(AST::LoopRange&) override { return true; }
-  bool Visit(AST::ForeachBlock&) override { return true; }
-  bool Visit(AST::InThreadsBlock&) override { return true; }
-  bool Visit(AST::IfElseBlock&) override { return true; }
-  bool Visit(AST::IncrementBlock&) override { return true; }
-  bool Visit(AST::FunctionDecl&) override { return true; }
-  bool Visit(AST::ChoreoFunction&) override { return true; }
-  bool Visit(AST::CppSourceCode&) override { return true; }
-  bool Visit(AST::Program&) override { return true; }
 };
 
 struct TracedVisitorWithSymTab : public VisitorWithSymTab {

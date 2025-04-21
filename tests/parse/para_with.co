@@ -13,7 +13,7 @@ __co__ int para_with(int b) {
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: para_with
 // CHECK:  `- Return type: int
-// CHECK:  `- Parameters
+// CHECK:  `- Parameters:
 // CHECK:    `-  type: int, symbol: b
 // CHECK:  `- Type Decl: ndims - [ 3 b ]
 // CHECK:  `- Var Decl (int): sum = 0

@@ -20,7 +20,7 @@ __co__ void bar() {
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: foo
 // CHECK:  `- Return type: void
-// CHECK:  `- Parameters
+// CHECK:  `- Parameters:
 // CHECK:  `- Parallelization:  index symbol: p, bound [0, 6)
 // CHECK:   `- Var Decl (event, shared): e
 // CHECK:   `- TRIGGER: e
@@ -30,7 +30,7 @@ __co__ void bar() {
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: bar
 // CHECK:  `- Return type: void
-// CHECK:  `- Parameters
+// CHECK:  `- Parameters:
 // CHECK:  `- Parallelization:  index symbol: anon_0, bound [0, 1)
 // CHECK:   `- Var Decl (event, shared): ge[3]
 // CHECK:   `- Var Decl (event, local): ge1[2][2]

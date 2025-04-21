@@ -39,6 +39,7 @@ public:
   bool VisitNode(AST::NamedTypeDecl&) override;
   bool VisitNode(AST::NamedVariableDecl&) override;
   bool VisitNode(AST::IntTuple&) override;
+  bool VisitNode(AST::DataAccess&) override;
   bool VisitNode(AST::Assignment&) override;
   bool VisitNode(AST::IntIndex&) override;
   bool VisitNode(AST::DataType&) override;
