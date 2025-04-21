@@ -1,0 +1,54 @@
+// RUN: choreo -gs -t topscc -arch=gcu210 %s 2>&1 | FileCheck %s --check-prefix=CHECK210
+// RUN: choreo -gs -t topscc -arch=gcu200 %s 2>&1 | FileCheck %s --check-prefix=CHECK200
+// RUN: choreo -gs -t topscc -arch=gcu300 %s 2>&1 | FileCheck %s --check-prefix=CHECK300
+// RUN: choreo -gs -t factor -arch=gcu300 %s 2>&1 | FileCheck %s --check-prefix=CHECKfactor
+
+
+__co__ void foo() {
+  global event a;
+  global event aa[2];
+  parallel by 3 {
+    shared event b;
+    shared event bb[3];
+    parallel by 2 {
+      local event c;
+      local event cc[4];
+    }
+  }
+}
+
+// CHECK300: __global__ void __choreo_device_foo(bool a, bool aa) {
+// CHECK300:   __shared__ __volatile__ bool b; // shared event
+// CHECK300:   b = false;
+// CHECK300:   __shared__ __volatile__ bool bb[3]; // shared event
+// CHECK300:   // initialize the event
+// CHECK300:   bb[0] = false;
+// CHECK300:   bb[1] = false;
+// CHECK300:   bb[2] = false;
+// CHECK300:   __local__ __volatile__ bool c; // local event
+// CHECK300:   c = false;
+// CHECK300:   __local__ __volatile__ bool cc[4]; // local event
+// CHECK300:   // initialize the event
+// CHECK300:   cc[0] = false;
+// CHECK300:   cc[1] = false;
+// CHECK300:   cc[2] = false;
+// CHECK300:   cc[3] = false;
+// CHECK300: }
+
+// CHECK210: error: Event is not supported on GCU210.
+// CHECK210: error: Event is not supported on GCU210.
+// CHECK210: error: Event is not supported on GCU210.
+// CHECK210: error: Event is not supported on GCU210.
+// CHECK210: error: Event is not supported on GCU210.
+// CHECK210: error: Event is not supported on GCU210.
+// CHECK210: Totally 6 errors have been detected.
+
+// CHECK200: error: Event is not supported on GCU200.
+// CHECK200: error: Event is not supported on GCU200.
+// CHECK200: error: Event is not supported on GCU200.
+// CHECK200: error: Event is not supported on GCU200.
+// CHECK200: error: Event is not supported on GCU200.
+// CHECK200: error: Event is not supported on GCU200.
+// CHECK200: Totally 6 errors have been detected.
+
+// CHECKfactor: Assertion failed: unsupported type (global event) for type declaration.

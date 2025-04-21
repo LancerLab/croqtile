@@ -1117,7 +1117,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
       factor_symbols.AddSymbol(item.name, type_name, type_string);
     } else
       choreo_unreachable("unsupported type (" + PSTR(item.type) +
-                         " for type declaration.");
+                         ") for type declaration.");
 
     if (!type_string.empty()) {
       fs << indent << "auto " << type_name << " = " << type_string << ";\n";

@@ -696,6 +696,12 @@ public:
   bool Visit(AST::NamedVariableDecl& n) override {
     TraceEachVisit(n);
     auto ty = GetSymbolType(n.name_str);
+    if (isa<EventType>(ty) || isa<EventArrayType>(ty))
+      if (CCtx().GetArch() == TargetArch::GCU20 ||
+          CCtx().GetArch() == TargetArch::GCU21) {
+        Error(n.LOC(), "Event is not supported on " + cur_arch + ".");
+        error_count++;
+      }
     if (!isa<SpannedType>(ty)) return true;
     auto sty = cast<SpannedType>(ty);
     auto st = sty->GetStorage();
