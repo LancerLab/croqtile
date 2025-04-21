@@ -293,9 +293,20 @@ public:
 
     if (AST::istypeof<MDSpanType>(&n)) {
       cur_mdspan_vn = cur_vn;
-      cast<MDSpanType>(n.GetType())
-          ->SetShape(GenShapeFromSignature(
-              vn.GetSignatureFromValueNumber(cur_mdspan_vn)));
+      auto vn_sig = vn.GetSignatureFromValueNumber(cur_mdspan_vn);
+      cast<MDSpanType>(n.GetType())->SetShape(GenShapeFromSignature(vn_sig));
+      if (CountElementsInSignature(vn_sig) > 1) {
+        // set alias expressions with proper value numbers
+        ProcessValueNumberString(
+            vn_sig, [this, &vn_sig](int valno, size_t index) {
+              if (UnknownVN(valno))
+                return; // do not associate it with vn of "?"
+              vn.GetOrInsertValueNumberFromSignature("index_const_" +
+                                                     std::to_string(index));
+              vn.AssociateSignatureWithValueNumber(
+                  vn_sig + "(" + std::to_string(index) + ")", valno);
+            });
+      }
       //      InvalidateVN(cur_vn);
     } else if (n.op == "#") {
       if (IsActualBoundedIntegerType(n.GetL()->GetType()) &&
