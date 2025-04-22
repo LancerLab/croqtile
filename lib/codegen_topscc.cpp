@@ -1412,8 +1412,16 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
             print_args +=
                 "(" + ExprSTR(arg, false) + " ? \"true\" : \"false\"), ";
           }
-        } else if (isa<Half8Type>(type) || isa<HalfType>(type) ||
-                   isa<BFP16Type>(type)) {
+        } else if (isa<Half8Type>(type)) {
+          // TODO: test when global data access is supported
+          choreo_unreachable("The type " + AST::TYPE_STR(*arg) +
+                             "is not supported in print yet.");
+        } else if (isa<HalfType>(type)) {
+          choreo_unreachable("The type " + AST::TYPE_STR(*arg) +
+                             "is not supported in print yet.");
+          print_format += "%f";
+          print_args += "f16_to_f32(" + ExprSTR(arg, false) + "), ";
+        } else if (isa<BFP16Type>(type)) {
           choreo_unreachable("The type " + AST::TYPE_STR(*arg) +
                              "is not supported in print yet.");
         } else if (isa<FloatType>(type)) {

@@ -186,9 +186,10 @@ private:
   bool visualize = false;           // visualize the DMAs
   bool cross_compile = false;       // TODO: figure out
   bool trace_vn = false;            // trace the value numbering
-  bool show_source_loc = true; // show source code location when error, etc.
-  bool liveness = false;       // analyze the liveness of the program
-  bool mem_reuse = false;      // reuse the memory of the program
+  bool show_source_loc = true;    // show source code location when error, etc.
+  bool liveness = false;          // analyze the liveness of the program
+  bool mem_reuse = false;         // reuse the memory of the program
+  bool simplify_fp_valno = false; // simplify the floating point value number
 private:
   std::shared_ptr<SymbolTable> sym_tab = nullptr; // global symbol table
 
@@ -298,6 +299,7 @@ public:
   bool TraceValueNumbers() const { return trace_vn; }
   bool LivenessAnalysis() const { return liveness; }
   bool MemReuse() const { return mem_reuse; }
+  bool SimplifyFpValno() const { return simplify_fp_valno; }
 
   // Setters of compiler configurations
   void SetDumpAst(bool value) { dump_ast = value; }
@@ -313,6 +315,7 @@ public:
   void SetTraceValueNumbers(bool value) { trace_vn = value; }
   void SetLivenessAnalysis(bool value) { liveness = value; }
   void SetMemReuse(bool value) { mem_reuse = value; }
+  void SetSimplfyFpValno(bool value) { simplify_fp_valno = value; }
 
   const std::unordered_map<std::string, std::string>& GetCLMacros() const {
     return cl_macros;

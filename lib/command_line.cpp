@@ -55,6 +55,9 @@ Option<bool> use_system_toolchain(OptionKind::Hidden, "--use-system-toolchain",
 Option<bool> use_pic(OptionKind::Hidden, "--use-pic", "-fpic", false,
                      "(Experimental) Use -fPIC compilation flag to ensure "
                      "objects are reusable for multi-stage compilation.");
+Option<bool> simplify_fp_valno(
+    OptionKind::Hidden, "--simplify-fp-valno", "-sfv", false,
+    "(Experimental) Simplify the value numbering for floating point types.");
 Option<bool>
     native_f16(OptionKind::User, "--native-f16", "-f16n", false,
                "Utilize native f16 type when target platform support.");
@@ -228,6 +231,7 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetShowSourceLocation(!no_show_source.GetValue());
   CCtx().SetLivenessAnalysis(liveness.GetValue());
   CCtx().SetMemReuse(mem_reuse.GetValue());
+  CCtx().SetSimplfyFpValno(simplify_fp_valno.GetValue());
 
   if (!trace_visit.GetValue().empty())
     setenv("CHOREO_TRACE_VISITOR", ToUpper(trace_visit.GetValue()).c_str(), 1);

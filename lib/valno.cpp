@@ -220,152 +220,212 @@ ValueNumbering::TryToSimplifyBinary(const location& loc, const std::string& op,
   auto r_cv = RemovePrefixOrNull("const_", rhs);
   if (l_cv && r_cv) {
     std::string res = "const_";
-    using Var = std::variant<float, double, long long>;
-    auto parseNumeric = [](const std::string& s) -> Var {
-      if (auto d = Str2Double(s)) return *d;
-      if (auto f = Str2Float(s)) return *f;
-      return std::stoll(s);
-    };
+    if (CCtx().SimplifyFpValno()) {
+      using Var = std::variant<float, double, long long>;
+      auto parseNumeric = [](const std::string& s) -> Var {
+        if (auto d = Str2Double(s)) return *d;
+        if (auto f = Str2Float(s)) return *f;
+        return std::stoll(s);
+      };
+      auto applyOp = [&](auto&& L, auto&& R, auto f) -> Var {
+        return std::visit(
+            [&](auto a, auto b) -> Var {
+              using CT = std::common_type_t<decltype(a), decltype(b)>;
+              return static_cast<CT>(f(a, b));
+            },
+            L, R);
+      };
 
-    auto applyOp = [&](auto&& L, auto&& R, auto f) -> Var {
-      return std::visit(
-          [&](auto a, auto b) -> Var {
-            using CT = std::common_type_t<decltype(a), decltype(b)>;
-            return static_cast<CT>(f(a, b));
-          },
-          L, R);
-    };
+      Var L = parseNumeric(*l_cv);
+      Var R = parseNumeric(*r_cv);
 
-    Var L = parseNumeric(*l_cv);
-    Var R = parseNumeric(*r_cv);
+      auto isZero = [](const Var& v) {
+        if (std::holds_alternative<double>(v))
+          return std::get<double>(v) == 0.0;
+        if (std::holds_alternative<float>(v)) return std::get<float>(v) == 0.0f;
+        if (std::holds_alternative<long long>(v))
+          return std::get<long long>(v) == 0LL;
+        else
+          choreo_unreachable("unexpected type for zero check.");
+      };
 
-    auto isZero = [](const Var& v) {
-      if (std::holds_alternative<double>(v)) return std::get<double>(v) == 0.0;
-      if (std::holds_alternative<float>(v)) return std::get<float>(v) == 0.0f;
-      if (std::holds_alternative<long long>(v))
-        return std::get<long long>(v) == 0LL;
-      else
-        choreo_unreachable("unexpected type for zero check.");
-    };
-
-    std::unordered_map<std::string, std::function<Var(const Var&, const Var&)>>
-        op_table;
-    op_table["+"] = [&](auto&& A, auto&& B) {
-      return applyOp(A, B, [](auto a, auto b) { return a + b; });
-    };
-    op_table["-"] = [&](auto&& A, auto&& B) {
-      return applyOp(A, B, [](auto a, auto b) { return a - b; });
-    };
-    op_table["*"] = [&](auto&& A, auto&& B) {
-      return applyOp(A, B, [](auto a, auto b) { return a * b; });
-    };
-    op_table["/"] = [&](auto&& A, auto&& B) {
-      if (isZero(B)) {
-        dbgs() << ScopeIndent() << "<ERROR> divide by zero: " << lhs << " / "
-               << rhs << "\n";
-        choreo_unreachable("divide by zero is found in shape evaluation.");
-      }
-      return applyOp(A, B, [](auto a, auto b) { return a / b; });
-    };
-    op_table["%"] = [&](auto&& A, auto&& B) {
-      if (std::holds_alternative<long long>(A) &&
-          std::holds_alternative<long long>(B)) {
+      std::unordered_map<std::string,
+                         std::function<Var(const Var&, const Var&)>>
+          op_table;
+      op_table["+"] = [&](auto&& A, auto&& B) {
+        return applyOp(A, B, [](auto a, auto b) { return a + b; });
+      };
+      op_table["-"] = [&](auto&& A, auto&& B) {
+        return applyOp(A, B, [](auto a, auto b) { return a - b; });
+      };
+      op_table["*"] = [&](auto&& A, auto&& B) {
+        return applyOp(A, B, [](auto a, auto b) { return a * b; });
+      };
+      op_table["/"] = [&](auto&& A, auto&& B) {
         if (isZero(B)) {
-          dbgs() << ScopeIndent() << "<ERROR> mod by zero: " << lhs << " % "
+          dbgs() << ScopeIndent() << "<ERROR> divide by zero: " << lhs << " / "
                  << rhs << "\n";
-          choreo_unreachable("mod by zero is found in shape evaluation.");
+          choreo_unreachable("divide by zero is found in shape evaluation.");
         }
-        return std::get<long long>(A) % std::get<long long>(B);
-      } else {
-        dbgs() << ScopeIndent()
-               << "<ERROR> mod with float-point is not support: " << lhs
-               << " % " << rhs << "\n";
-        choreo_unreachable(
-            "mod with float-point is found in shape evaluation.");
-      }
-    };
-    op_table["<"] = [&](auto&& A, auto&& B) {
-      return Var{static_cast<long long>(
-          std::visit([&](auto a, auto b) { return a < b; }, A, B))};
-    };
-    op_table[">"] = [&](auto&& A, auto&& B) {
-      return Var{static_cast<long long>(
-          std::visit([&](auto a, auto b) { return a > b; }, A, B))};
-    };
-    op_table["=="] = [&](auto&& A, auto&& B) {
-      // TODO: do we need EPSILON for float-point?
-      return Var{static_cast<long long>(
-          std::visit([&](auto a, auto b) { return a == b; }, A, B))};
-    };
-    op_table["!="] = [&](auto&& A, auto&& B) {
-      // TODO: do we need EPSILON for float-point?
-      return Var{static_cast<long long>(
-          std::visit([&](auto a, auto b) { return a != b; }, A, B))};
-    };
-    op_table["<="] = [&](auto&& A, auto&& B) {
-      // TODO: do we need EPSILON for float-point?
-      return Var{static_cast<long long>(
-          std::visit([&](auto a, auto b) { return a <= b; }, A, B))};
-    };
-    op_table[">="] = [&](auto&& A, auto&& B) {
-      // TODO: do we need EPSILON for float-point?
-      return Var{static_cast<long long>(
-          std::visit([&](auto a, auto b) { return a >= b; }, A, B))};
-    };
-    op_table["cdiv"] = [&](auto&& A, auto&& B) {
-      if (std::holds_alternative<long long>(A) &&
-          std::holds_alternative<long long>(B)) {
-        if (isZero(B)) {
-          dbgs() << ScopeIndent() << "<ERROR> cdiv by zero: " << lhs << " % "
-                 << rhs << "\n";
-          choreo_unreachable("cdiv by zero is found in shape evaluation.");
+        return applyOp(A, B, [](auto a, auto b) { return a / b; });
+      };
+      op_table["%"] = [&](auto&& A, auto&& B) {
+        if (std::holds_alternative<long long>(A) &&
+            std::holds_alternative<long long>(B)) {
+          if (isZero(B)) {
+            dbgs() << ScopeIndent() << "<ERROR> mod by zero: " << lhs << " % "
+                   << rhs << "\n";
+            choreo_unreachable("mod by zero is found in shape evaluation.");
+          }
+          return std::get<long long>(A) % std::get<long long>(B);
+        } else {
+          dbgs() << ScopeIndent()
+                 << "<ERROR> mod with float-point is not support: " << lhs
+                 << " % " << rhs << "\n";
+          choreo_unreachable(
+              "mod with float-point is found in shape evaluation.");
         }
-        return (std::get<long long>(A) + std::get<long long>(B) - 1ll) /
-               std::get<long long>(B);
-      } else {
-        dbgs() << ScopeIndent()
-               << "<ERROR> cdiv with float-point is not support: " << lhs
-               << " % " << rhs << "\n";
-        choreo_unreachable(
-            "cdiv with float-point is found in shape evaluation.");
-      }
-    };
-    op_table["#"] = [&](auto&& A, auto&& B) {
-      if (std::holds_alternative<long long>(A) &&
-          std::holds_alternative<long long>(B)) {
-        return std::get<long long>(A) * std::get<long long>(B);
-      } else {
-        dbgs() << ScopeIndent()
-               << "<ERROR> # with float-point is not support: " << lhs << " % "
-               << rhs << "\n";
-        choreo_unreachable("# with float-point is found in shape evaluation.");
-      }
-    };
+      };
+      op_table["<"] = [&](auto&& A, auto&& B) {
+        return Var{static_cast<long long>(
+            std::visit([&](auto a, auto b) { return a < b; }, A, B))};
+      };
+      op_table[">"] = [&](auto&& A, auto&& B) {
+        return Var{static_cast<long long>(
+            std::visit([&](auto a, auto b) { return a > b; }, A, B))};
+      };
+      op_table["=="] = [&](auto&& A, auto&& B) {
+        // TODO: do we need EPSILON for float-point?
+        return Var{static_cast<long long>(
+            std::visit([&](auto a, auto b) { return a == b; }, A, B))};
+      };
+      op_table["!="] = [&](auto&& A, auto&& B) {
+        // TODO: do we need EPSILON for float-point?
+        return Var{static_cast<long long>(
+            std::visit([&](auto a, auto b) { return a != b; }, A, B))};
+      };
+      op_table["<="] = [&](auto&& A, auto&& B) {
+        // TODO: do we need EPSILON for float-point?
+        return Var{static_cast<long long>(
+            std::visit([&](auto a, auto b) { return a <= b; }, A, B))};
+      };
+      op_table[">="] = [&](auto&& A, auto&& B) {
+        // TODO: do we need EPSILON for float-point?
+        return Var{static_cast<long long>(
+            std::visit([&](auto a, auto b) { return a >= b; }, A, B))};
+      };
+      op_table["cdiv"] = [&](auto&& A, auto&& B) {
+        if (std::holds_alternative<long long>(A) &&
+            std::holds_alternative<long long>(B)) {
+          if (isZero(B)) {
+            dbgs() << ScopeIndent() << "<ERROR> cdiv by zero: " << lhs << " % "
+                   << rhs << "\n";
+            choreo_unreachable("cdiv by zero is found in shape evaluation.");
+          }
+          return (std::get<long long>(A) + std::get<long long>(B) - 1ll) /
+                 std::get<long long>(B);
+        } else {
+          dbgs() << ScopeIndent()
+                 << "<ERROR> cdiv with float-point is not support: " << lhs
+                 << " % " << rhs << "\n";
+          choreo_unreachable(
+              "cdiv with float-point is found in shape evaluation.");
+        }
+      };
+      op_table["#"] = [&](auto&& A, auto&& B) {
+        if (std::holds_alternative<long long>(A) &&
+            std::holds_alternative<long long>(B)) {
+          return std::get<long long>(A) * std::get<long long>(B);
+        } else {
+          dbgs() << ScopeIndent()
+                 << "<ERROR> # with float-point is not support: " << lhs
+                 << " % " << rhs << "\n";
+          choreo_unreachable(
+              "# with float-point is found in shape evaluation.");
+        }
+      };
 
-    if (op_table.count(op)) {
-      Var raw = op_table.at(op)(L, R);
-      std::visit(
-          [&](auto x) -> std::string {
-            using T = decltype(x);
-            if constexpr (std::is_same_v<T, long long>) {
-              if (op == "<" || op == ">" || op == "==" || op == "!=" ||
-                  op == "<=" || op == ">=") {
-                return res = x ? "true" : "false";
+      if (op_table.count(op)) {
+        Var raw = op_table.at(op)(L, R);
+        std::visit(
+            [&](auto x) -> std::string {
+              using T = decltype(x);
+              if constexpr (std::is_same_v<T, long long>) {
+                if (op == "<" || op == ">" || op == "==" || op == "!=" ||
+                    op == "<=" || op == ">=") {
+                  return res = x ? "true" : "false";
+                }
+                return res += std::to_string(x);
+              } else if constexpr (std::is_same_v<T, float>) {
+                return res += std::to_string(x) + "f";
+              } else if constexpr (std::is_same_v<T, double>) {
+                return res += std::to_string(x);
+              } else {
+                choreo_unreachable("unexpected type for simplification.");
               }
-              return res += std::to_string(x);
-            } else if constexpr (std::is_same_v<T, float>) {
-              return res += std::to_string(x) + "f";
-            } else if constexpr (std::is_same_v<T, double>) {
-              return res += std::to_string(x);
-            } else {
-              choreo_unreachable("unexpected type for simplification.");
-            }
-          },
-          raw);
+            },
+            raw);
+      } else {
+        Error(loc,
+              "simplification of operation `" + op + "' is not yet supported.");
+        return std::nullopt;
+      }
     } else {
-      Error(loc,
-            "simplification of operation `" + op + "' is not yet supported.");
-      return std::nullopt;
+      // if the const value is not integer, stop simplification
+      if (l_cv->find(".") != std::string::npos ||
+          r_cv->find(".") != std::string::npos)
+        return std::nullopt;
+
+      if (op == "+")
+        res += std::to_string(std::stoll(*l_cv) + std::stoll(*r_cv));
+      else if (op == "-")
+        res += std::to_string(std::stoll(*l_cv) - std::stoll(*r_cv));
+      else if (op == "*")
+        res += std::to_string(std::stoll(*l_cv) * std::stoll(*r_cv));
+      else if (op == "/") {
+        auto div_end = std::stoll(*r_cv);
+        if (div_end == 0) {
+          dbgs() << ScopeIndent() << "<ERROR> divide by zero: " << lhs << " / "
+                 << rhs << "\n";
+          choreo_unreachable("divide by zero is found in shape evaluation.");
+        }
+        res += std::to_string(std::stoll(*l_cv) / div_end);
+      } else if (op == "%") {
+        auto div_end = std::stoll(*r_cv);
+        if (div_end == 0) {
+          dbgs() << ScopeIndent() << "<ERROR> divide by zero: " << lhs << " / "
+                 << rhs << "\n";
+          choreo_unreachable("divide by zero is found in shape evaluation.");
+        }
+        res += std::to_string(std::stoll(*l_cv) % std::stoll(*r_cv));
+      } else if (op == "<") {
+        res = std::stoll(*l_cv) < std::stoll(*r_cv) ? "true" : "false";
+      } else if (op == ">") {
+        res = std::stoll(*l_cv) > std::stoll(*r_cv) ? "true" : "false";
+      } else if (op == "==") {
+        res = std::stoll(*l_cv) == std::stoll(*r_cv) ? "true" : "false";
+      } else if (op == "!=") {
+        res = std::stoll(*l_cv) != std::stoll(*r_cv) ? "true" : "false";
+      } else if (op == "<=") {
+        res = std::stoll(*l_cv) <= std::stoll(*r_cv) ? "true" : "false";
+      } else if (op == ">=") {
+        res = std::stoll(*l_cv) >= std::stoll(*r_cv) ? "true" : "false";
+      } else if (op == "cdiv") {
+        auto div_end = std::stoll(*r_cv);
+        if (div_end == 0) {
+          dbgs() << ScopeIndent() << "<ERROR> divide by zero: " << lhs << " / "
+                 << rhs << "\n";
+          choreo_unreachable("divide by zero is found in shape evaluation.");
+        }
+        res += std::to_string((std::stoll(*l_cv) + std::stoll(*r_cv) - 1) /
+                              std::stoll(*r_cv));
+      } else if (op == "#") {
+        // calculate the upper bound result
+        res += std::to_string(std::stoll(*l_cv) * std::stoll(*r_cv));
+      } else {
+        Error(loc,
+              "simplification of operation `" + op + "' is not yet supported.");
+      }
     }
     if (trace && verbose)
       dbgs() << ScopeIndent() << "<Simplify> '" << lhs << " " << op << " "
@@ -982,7 +1042,8 @@ int ValueNumbering::GenerateValueNumberForNode(const AST::Node& n) {
     Error(n.LOC(),
           "failed to generate signature for expression `" + AST::STR(n) + "'.");
 
-  // Duplicated computation: different expression encounters the same signature
+  // Duplicated computation: different expression encounters the same
+  // signature
   if (HasValueNumberOfSignature(signature))
     return GetValueNumberOfSignature(signature);
 

@@ -1,5 +1,5 @@
 // RUN: choreo -i %s | FileCheck --match-full-lines %s
-// RUN: choreo -vn %s | FileCheck --check-prefix=VALNO --match-full-lines %s
+// RUN: choreo -vn --simplify-fp-valno %s | FileCheck --check-prefix=VALNO --match-full-lines %s
 
 #include "choreo.h"
 
