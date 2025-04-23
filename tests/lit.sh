@@ -239,12 +239,13 @@ execute_command() {
   local start_time_ns=$(date +%s%N)
 
   # execute the command
-  command="${env_set} $command ${env_unset}"
+  command="${env_set} $command"
   working_command="$command"
 
   eval "$command" 2>/dev/null
   local exit_code=$?
 
+  eval "$env_unset" 2>/dev/null
   working_command=""
 
   # Calculate elapsed time in nanoseconds
