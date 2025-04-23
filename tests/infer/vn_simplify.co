@@ -1,0 +1,30 @@
+// RUN: choreo -vn %s | FileCheck --check-prefix=CHECK --match-full-lines %s
+// RUN: choreo -vn -sfv %s | FileCheck --check-prefix=CHECK-SFV --match-full-lines %s
+
+__co__ void vn_simplify() {
+  double d0 = 1.5;
+  double d1 = 3.9;
+  double d2 = d0 + d1;
+
+  float f0 = 1.5f;
+  float f1 = 3.9f;
+  float f2 = f0 - f1;
+
+  int i0 = 2;
+  int i1 = 3;
+  int i2 = i0 * i1;
+
+  bool a = true;
+  bool b = false;
+  bool c = a && b;
+}
+
+// CHECK-NOT: <Simplify> {{.*}} + {{.*}} to {{.*}}
+// CHECK-NOT: <Simplify> {{.*}} - {{.*}} to {{.*}}
+// CHECK: <Simplify> {{.*}} * {{.*}} to {{.*}}
+// CHECK-NOT: <Simplify> {{.*}} && {{.*}} to {{.*}}
+
+// CHECK-SFV: <Simplify> {{.*}} + {{.*}} to {{.*}}
+// CHECK-SFV: <Simplify> {{.*}} - {{.*}} to {{.*}}
+// CHECK-SFV: <Simplify> {{.*}} * {{.*}} to {{.*}}
+// CHECK-SFV-NOT: <Simplify> {{.*}} && {{.*}} to {{.*}}

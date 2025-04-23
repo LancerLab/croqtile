@@ -32,8 +32,8 @@ inline ptr<T> Make(Args&&... args) {
 
 //------------------------- AST Node Fundamentals ----------------------------//
 
-class Identifier;
-class DataType;
+struct Identifier;
+struct DataType;
 
 // interface class for all AST nodes
 struct Node {

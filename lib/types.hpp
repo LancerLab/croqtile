@@ -441,7 +441,7 @@ struct Shape {
     dim_count = s.dim_count;
     Invalidate();
   }
-  constexpr Shape& operator=(const Shape&) = default;
+  Shape& operator=(const Shape&) = default;
 
   size_t DimCount() const { return dim_count; }
   size_t Rank() const { return dim_count; }

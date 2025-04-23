@@ -163,6 +163,12 @@ inline static std::optional<double> Str2Double(const std::string& str) {
   return std::stod(str);
 }
 
+inline static bool IsInteger(const std::string& str) {
+  std::istringstream iss(str);
+  int num;
+  return iss >> num && iss.eof();
+}
+
 inline static const std::string ToUpper(const std::string& s) {
   std::string r(s.size(), '\0');
   transform(s.begin(), s.end(), r.begin(), ::toupper);
