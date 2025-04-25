@@ -75,16 +75,18 @@ target_link_libraries(choreo PRIVATE
   scanner_obj
   cl_obj
   codegen
-  ${CLN_DIR}/lib/libcln.so
-  ${GINAC_DIR}/lib/libginac.so
+  ${GINAC_DIR}/lib/libginac.a
+  ${CLN_DIR}/lib/libcln.a
+  gmp
 )
 
 target_link_libraries(copp PRIVATE
   parser_obj
   scanner_obj
   codegen
-  ${CLN_DIR}/lib/libcln.so
-  ${GINAC_DIR}/lib/libginac.so
+  ${GINAC_DIR}/lib/libginac.a
+  ${CLN_DIR}/lib/libcln.a
+  gmp
 )
 
 # message(STATUS "CHOREO_PACKAGE_VERSION is set to: ${CHOREO_PACKAGE_VERSION}")
@@ -153,8 +155,9 @@ set(CPACK_PACKAGE_DIRECTORY "${CMAKE_SOURCE_DIR}/package")
 # Install rules for core version
 # install(DIRECTORY ${GINAC_DIR}/include/ginac DESTINATION include USE_SOURCE_PERMISSIONS FILES_MATCHING PATTERN "*")
 # install(DIRECTORY ${CLN_DIR}/include/cln DESTINATION include USE_SOURCE_PERMISSIONS FILES_MATCHING PATTERN "*")
-install(DIRECTORY ${GINAC_DIR}/lib/ DESTINATION lib USE_SOURCE_PERMISSIONS FILES_MATCHING PATTERN "libginac.so*")
-install(DIRECTORY ${CLN_DIR}/lib/ DESTINATION lib USE_SOURCE_PERMISSIONS FILES_MATCHING PATTERN "libcln.so*")
+#install(DIRECTORY ${GINAC_DIR}/lib/ DESTINATION lib USE_SOURCE_PERMISSIONS FILES_MATCHING PATTERN "libginac.a")
+#install(DIRECTORY ${CLN_DIR}/lib/ DESTINATION lib USE_SOURCE_PERMISSIONS FILES_MATCHING PATTERN "libcln.a")
+install(FILES ${CMAKE_SOURCE_DIR}/utils/choreo.h DESTINATION include)
 install(TARGETS choreo copp
   RUNTIME DESTINATION bin
   # mute for core version

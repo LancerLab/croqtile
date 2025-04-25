@@ -40,10 +40,10 @@ configure_file(
 
 add_custom_target(
   generate_sources ALL
-  DEPENDS 
-  ${CMAKE_BINARY_DIR}/scanner.yy.cc 
-  ${CMAKE_BINARY_DIR}/parser.tab.cc 
-  ${CMAKE_BINARY_DIR}/parser.tab.hh 
+  DEPENDS
+  ${CMAKE_BINARY_DIR}/scanner.yy.cc
+  ${CMAKE_BINARY_DIR}/parser.tab.cc
+  ${CMAKE_BINARY_DIR}/parser.tab.hh
   ${CMAKE_BINARY_DIR}/cuda_script.inc
   ${CMAKE_BINARY_DIR}/factor_script.inc
   ${CMAKE_BINARY_DIR}/choreo_cuda_header.inc
@@ -82,14 +82,14 @@ add_library(cl_obj OBJECT ${CMAKE_SOURCE_DIR}/lib/command_line.cpp)
 target_include_directories(cl_obj PRIVATE ${CMAKE_SOURCE_DIR}/lib)
 
 # Add the codegen library
-add_library(codegen STATIC 
+add_library(codegen STATIC
   ${CODEGEN_SOURCES}
 )
 
 target_include_directories(codegen PRIVATE ${WORK_DIR} ${CMAKE_SOURCE_DIR})
 target_link_libraries(codegen PRIVATE
-  ${CLN_DIR}/lib/libcln.so 
-  ${GINAC_DIR}/lib/libginac.so
+  ${GINAC_DIR}/lib/libginac.a
+  ${CLN_DIR}/lib/libcln.a
 )
 
 target_compile_definitions(codegen PRIVATE

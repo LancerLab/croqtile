@@ -281,14 +281,14 @@ check-ginac:
 cln-setup:
 	tar -xvf $(CLN_TAR) -C $(SYMBOLIC_DIR); \
 	cd $(CLN_DIR); \
-	./configure --prefix=$(CLN_DIR)/install; \
+	./configure --prefix=$(CLN_DIR)/install --enable-static; \
 	$(MAKE) -j && $(MAKE) install
 
-setup-ginac: check-ginac
+setup-ginac: check-ginac cln-setup
 	$(MAKE) cln-setup; \
 	tar -xvf $(GINAC_TAR) -C $(SYMBOLIC_DIR); \
 	cd $(GINAC_DIR); \
-	PKG_CONFIG_PATH=$(CLN_DIR) ./configure --prefix=$(GINAC_DIR)/install; \
+	PKG_CONFIG_PATH=$(CLN_DIR) ./configure --prefix=$(GINAC_DIR)/install --with-cln=$(CLN_DIR)/install  --enable-static; \
 	$(MAKE) -j && $(MAKE) install
 
 CFORMAT_MD5=6ee59eba63782b362bc9ba1138911f3a
