@@ -179,7 +179,7 @@ void choreo_info(const char *message) {
 
 // non-terminals
 %nterm <std::string> dma_operation data_id
-%nterm <std::string> builtin_print_func
+%nterm <std::string> builtin_print_func arith_operation
 %nterm <ptr<DMAConfig>> dma_config
 %nterm <bool> sync_type optional_mutable
 %nterm <int> index index_or_none
@@ -956,6 +956,14 @@ storage_qual
     | storage { $$ = AST::Make<AST::Memory>(@1, $1); }
     ;
 
+arith_operation
+    : PLUS  { $$ = "+"; }
+    | MINUS { $$ = "-"; }
+    | STAR  { $$ = "*"; }
+    | SLASH { $$ = "/"; }
+    | PECET { $$ = "%"; }
+    ;
+
 assignment
     : IDENTIFIER ASSIGN s_expr {
         // note: the symbol is not scoped. therefore, an assignment could result in initialization
@@ -969,22 +977,21 @@ assignment
           $$ = AST::Make<AST::Assignment>(@2, $1, $3);
         }
       }
-    | IDENTIFIER PLUS ASSIGN s_expr {
+    | IDENTIFIER arith_operation ASSIGN s_expr {
         if (!symtab.Exists($1)) {
           Parser::error(@1, "The symbol '" + $1 + "` has not been defined.");
         } else {
-          auto id = AST::Make<AST::Identifier>(@1, $1);
-          auto da = AST::Make<AST::DataAccess>(@1, id);
+          auto da = AST::Make<AST::DataAccess>(@1, AST::Make<AST::Identifier>(@1, $1));
           $$ = AST::Make<AST::Assignment>(@3,
-              da, AST::Make<AST::Expr>(@2, "+", $4, AST::Make<AST::Expr>(@1, da)));
+              da, AST::Make<AST::Expr>(@2, $2, AST::Make<AST::Expr>(@1, da), $4));
         }
       }
     | IDENTIFIER ASSIGN select_expr {
         if (!symtab.Exists($1)) {
           // since the symbol is not defined, it is a declaration without type annotation
           symtab.AddSymbol($1, MakeUnknownType());
-          $$ = AST::Make<AST::NamedVariableDecl>(@1,
-                $1, AST::Make<AST::DataType>(@1, BaseType::UNKNOWN), nullptr, $3);
+          $$ = AST::Make<AST::NamedVariableDecl>(@1, $1,
+                 AST::Make<AST::DataType>(@1, BaseType::UNKNOWN), nullptr, $3);
           break;
         } else {
           $$ = AST::Make<AST::Assignment>(@2, $1, $3);
@@ -992,6 +999,14 @@ assignment
       }
     | data_element ASSIGN s_expr {
         $$ = AST::Make<AST::Assignment>(@1, $1, $3);
+      }
+    | data_element arith_operation ASSIGN s_expr {
+        if (!symtab.Exists($1->GetDataName())) {
+          Parser::error(@1, "The symbol '" + $1->GetDataName() + "` has not been defined.");
+        } else {
+          $$ = AST::Make<AST::Assignment>(@3, $1,
+                AST::Make<AST::Expr>(@2, $2, AST::Make<AST::Expr>(@1, $1), $4));
+        }
       }
     ;
 
