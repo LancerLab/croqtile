@@ -2087,10 +2087,10 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
           oss << ")";
           ++idx;
         }
-        oss << ")";
       } else
         choreo_unreachable("unsupported data access.");
     }
+    oss << ")";
   } else if (auto expr = dyn_cast<AST::Expr>(e)) {
     // utilize the optimize value whenever possible
     if (auto sym = expr->GetSymbol()) {

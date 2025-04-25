@@ -1,0 +1,54 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+__co__ s32 [128, 256] ele_add(s32 [128, 256] lhs, s32 [256, 256] rhs) {
+  s32[lhs.span(0), rhs.span(1)] output;
+
+  parallel p by 1 {
+    with index = {m_tile, k_tile, n_tile} in [32, 1, 4] {  // decl your tiled spans
+      foreach m_tile, n_tile {
+        local s32[4, 64] l1_out {0};
+        foreach k_tile {
+          lhs_load = dma.copy lhs.chunkat(m_tile, k_tile) => local;
+          rhs_load = dma.copy rhs.chunkat(k_tile, n_tile) => local;
+
+          foreach {m, n, k} in [lhs_load.span(0), rhs_load.span(1), lhs_load.span(1)]
+            l1_out.at(m, n) += lhs_load.data.at(m, k) * rhs_load.data.at(k, n);
+
+          dma.copy l1_out => output.chunkat(m_tile, n_tile);
+        }
+      }
+    }
+  } // can use python styling
+  return output;
+}
+
+int main() { /// host program
+  choreo::s32 a[128][256] = {0};
+  choreo::s32 b[256][256] = {0};
+  auto lhs_data = choreo::make_spanview<2, choreo::s32>((int*)a, {128, 256});
+  auto rhs_data = choreo::make_spanview<2, choreo::s32>((int*)b, {256, 256});
+  lhs_data.fill_random(-10, 10);
+  rhs_data.fill_random(-10, 10);
+
+  auto res = ele_add(lhs_data, rhs_data);
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+      int ref = 0;
+      for (size_t k = 0; k < lhs_data.shape()[1]; ++k)
+        ref += a[i][k]*b[k][j];
+      if ( ref != res[i][j]) {
+        // std::cout << "i: " << i << ", j: " << j << "\n";
+        // std::cout << "res: " << res[i][j] << "\n";
+        // std::cout << "ref: " << ref << std::endl;
+        choreo::choreo_assert(ref == res[i][j], "values are not equal.");
+      }
+    }
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK: Test Passed
+
