@@ -6,7 +6,7 @@ __co__ void illegal_reassign_int() {
   parallel i0 by 6 {} // ok. 'i0' is a bounded integer
   with i0 in [4] {}  // ok. 'i0' is a bounded integer
 }
-// CHECK: error: INTEGER re-assignment (i0) is not supported.
+// CHECK: error: only mutables can be re-assigned (i0) 
 // CHECK-NOT: error:{{.*}}i0{{.*}}
 
 __co__ void illegal_reassign_bool() {
@@ -19,11 +19,11 @@ __co__ void illegal_reassign_bool() {
   ba = bc;       // not allow for current simple valno
   bc = 1;        // not allow
 }
-// CHECK: error: BOOLEAN re-assignment (ba) is not supported.
+// CHECK: error: only mutables can be re-assigned (ba).
 // CHECK-NOT: error:{{.*}}ba{{.*}}
 // CHECK: error: `bb' is declared as "bool" but initialized as "int".
-// CHECK: error: BOOLEAN re-assignment (ba) is not supported.
-// CHECK: error: `bc' of type "bool" can not be re-assigned as "int".
+// CHECK: error: only mutables can be re-assigned (ba).
+// CHECK: error: only mutables can be re-assigned (bc).
 
 __co__ void illegal_reassign_ituple() {
   ita = {3, 4};
@@ -34,7 +34,7 @@ __co__ void illegal_reassign_ituple() {
   }
   with ita in [7, 8] {}  // ok. 'ita' is in another scope
 }
-// CHECK: error: ITUPLE re-assignment (ita) is not supported.
+// CHECK: error: only mutables can be re-assigned (ita).
 // CHECK-NOT: error:{{.*}}itb{{.*}}
 // CHECK-NOT: error:{{.*}}ita{{.*}}
 
@@ -66,15 +66,15 @@ __co__ void illegal_reassign_span() {
 }
 
 // CHECK: error: symbol `mdsa' has been declared already.
-// CHECK: error: MDSPAN re-assignment (mdsa) is not supported.
+// CHECK: error: only mutables can be re-assigned (mdsa).
 // CHECK: error: symbol `mdsa' has been declared already.
-// CHECK: error: `mdsa' of type "int->[0,mdsa]" can not be re-assigned as "mdspan<3> []".
+// CHECK: error: only mutables can be re-assigned (mdsa).
 // CHECK: error: `mdsg' is declared as "mdspan<>" but initialized as "int".
 // CHECK: error: symbol `mdsg' has been declared already.
-// CHECK: error: `mdsg' of type "mdspan<2> []" can not be re-assigned as "int".
+// CHECK: error: only mutables can be re-assigned (mdsg).
 // CHECK: error: `mdsf' is declared as "mdspan<>" but initialized as "ituple<4>".
 // CHECK: error: symbol `mdsf' has been declared already.
-// CHECK: error: `mdsf' of type "mdspan<2> []" can not be re-assigned as "ituple<4>".
-// CHECK: error: MDSPAN re-assignment (mdsb) is not supported.
+// CHECK: error: only mutables can be re-assigned (mdsf).
+// CHECK: error: only mutables can be re-assigned (mdsb).
 
 // CHECK: Totally 17 errors have been detected

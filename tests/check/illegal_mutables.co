@@ -14,6 +14,25 @@ __co__ void foo(int a, f32 [2] aa) {
   foreach j in e {}
   k = aa.span_as([e]);
   parallel by 1 with l in [8] call bar(aa.chunk(e).at(l));
+
+  c += 1;
+  c -= 1;
+  c *= 1;
+  c /= 1;
+  c %= 1;
+  e += 1;
+  e -= 1;
+  e *= 1;
+  e /= 1;
+  e %= 1;
+  foreach m in [a] {
+    aa.at(m) += 1.0f;
+    aa.at(m) -= 1.0f;
+    aa.at(m) *= 1.0f;
+    aa.at(m) /= 1.0f;
+    aa.at(m) %= 1.0f;
+//    aa.at(m) %= 1; TODO: type promotion
+  }
 }
 
 // CHECK: error: the mutable value can not used for the mdspan declaration.
@@ -23,3 +42,9 @@ __co__ void foo(int a, f32 [2] aa) {
 // CHECK: error: mutable integer can not be used inside with-in.
 // CHECK: error: the mutable value can not used for mdspan declaration.
 // CHECK: error: the mutable value can not used for the .chunk expression.
+// CHECK: error: only mutables can be re-assigned (c).
+// CHECK: error: only mutables can be re-assigned (c).
+// CHECK: error: only mutables can be re-assigned (c).
+// CHECK: error: only mutables can be re-assigned (c).
+// CHECK: error: only mutables can be re-assigned (c).
+// CHECK: Totally 12 errors have been detected.

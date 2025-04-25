@@ -847,17 +847,19 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
       choreo_unreachable("Expect a future type but got '" + PSTR(ety) + "'.");
   }
 
-  // For now, we have to keep the single assignment
-  {
-    if (vty->ApprxEqual(*ety))
-      Error(n.LOC(), ToUpper(vty->Name()) + " re-assignment (" + n.GetName() +
-                         ") is not supported.");
-    else
-      Error(n.LOC(), "`" + n.GetName() + "' of type \"" + STR(*vty) +
-                         "\" can not be re-assigned as \"" + STR(*ety) + "\".");
+  // Allow re-assignment only for mutables
+  if (!IsMutable(*vty)) {
+    Error(n.LOC(), "only mutables can be re-assigned (" + n.GetName() + ").");
     ++error_count;
-    if (debug_visit)
-      dbgs() << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
+    SetNodeType(n, MakeUnknownType());
+    return false;
+  }
+
+  if (!vty->ApprxEqual(*ety)) {
+    Error(n.LOC(), "`" + n.GetName() + "' of type \"" + STR(*vty) +
+                       "\" can not be re-assigned as \"" + STR(*ety) + "\".");
+    ++error_count;
+    SetNodeType(n, MakeUnknownType());
     return false;
   }
 
