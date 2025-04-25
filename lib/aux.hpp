@@ -189,15 +189,15 @@ private:
   std::function<bool(const T&)> predicate;
 
 public:
-  // Constructor
   FilterRange(std::vector<T>& vec, std::function<bool(const T&)> pred)
       : vec(vec), predicate(pred) {}
 
-  // Iterator class
   class Iterator {
   private:
-    typename std::vector<T>::iterator current;
-    typename std::vector<T>::iterator end;
+    using viter = typename std::vector<T>::iterator;
+    viter current;
+    viter begin;
+    viter end;
     std::function<bool(const T&)> predicate;
 
     void skip_to_next_valid() {
@@ -206,30 +206,43 @@ public:
 
     void skip_to_prev_valid() {
       while (current != begin && !predicate(*current)) { --current; }
+      // If we reached begin and it's not valid, move to end
+      if (current == begin && !predicate(*current)) { current = end; }
     }
 
   public:
-    Iterator(typename std::vector<T>::iterator current,
-             typename std::vector<T>::iterator end,
+    Iterator(viter current, viter begin, viter end,
              std::function<bool(const T&)> pred)
-        : current(current), end(end), predicate(pred) {
-      skip_to_next_valid();
+        : current(current), begin(begin), end(end), predicate(pred) {
+      if (current != end)
+        if (!predicate(*current)) skip_to_next_valid();
     }
 
     Iterator& operator++() {
-      ++current;
-      skip_to_next_valid();
+      if (current != end) {
+        ++current;
+        skip_to_next_valid();
+      }
       return *this;
     }
 
     Iterator& operator--() {
-      --current;
-      skip_to_prev_valid();
+      if (current != begin) {
+        --current;
+        skip_to_prev_valid();
+      }
       return *this;
     }
 
-    T& operator*() { return *current; }
-    T* operator->() { return &(*current); }
+    T& operator*() {
+      if (current == end) choreo_unreachable("Dereferencing empty iterator");
+      return *current;
+    }
+
+    T* operator->() {
+      if (current == end) choreo_unreachable("Dereferencing empty iterator");
+      return &(*current);
+    }
 
     bool operator==(const Iterator& other) const {
       return current == other.current;
@@ -237,10 +250,24 @@ public:
     bool operator!=(const Iterator& other) const { return !(*this == other); }
   };
 
-  // Begin and End functions
-  Iterator begin() { return Iterator(vec.begin(), vec.end(), predicate); }
-  Iterator end() { return Iterator(vec.end(), vec.end(), predicate); }
-  Iterator back() { return Iterator(--vec.end(), vec.end(), predicate); }
+  Iterator begin() {
+    if (vec.empty()) return end();
+    return Iterator(vec.begin(), vec.begin(), vec.end(), predicate);
+  }
+
+  Iterator end() {
+    return Iterator(vec.end(), vec.begin(), vec.end(), predicate);
+  }
+
+  Iterator back() {
+    if (vec.empty()) return end();
+    return --end();
+  }
+
+  bool empty() const {
+    if (vec.empty()) return true;
+    return std::none_of(vec.begin(), vec.end(), predicate);
+  }
 };
 
 #endif // __CHOREO_AUX_HPP__
