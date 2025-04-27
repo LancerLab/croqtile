@@ -241,6 +241,7 @@ private:
   void EmitScript(std::ostream& os, const std::string& exe_fn = "");
   bool CompileWithScript(const std::string&);
   void EmitHostRuntimeCheck();
+  void EmitMemReuse();
 
 private:
   void IncrHostIndent() { h_indent += "  "; }

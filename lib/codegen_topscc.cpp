@@ -356,6 +356,8 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
   // emit the runtime checks
   EmitHostRuntimeCheck();
 
+  EmitMemReuse();
+
   // do not generate device function unless parallel-by exists
   if (NeedDeviceFunc()) {
     EmitDeviceFuncDecl(ds);
@@ -519,7 +521,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
                  << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
             } else {
               auto reuse_name = *(reuse_idx + 1);
-              auto offset = std::stoull(*(offset_idx + 1));
+              auto offset = *(offset_idx + 1);
 #if 1
               ds << d_indent << bts << "* " << sym << " = (" << bts << "*)"
                  << reuse_name << " + " << offset << ";\n";
@@ -734,6 +736,13 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
     hs << ((i++ > 0) ? ", " : "");
     hs << UnScopedName(item.first);
   }
+  const auto& offset_args = FCtx(fname).GetMemReuseOffsetArgs();
+  // have to traverse storage in the order
+  for (Storage sto : {Storage::LOCAL, Storage::SHARED})
+    if (offset_args.count(sto))
+      for (size_t idx = 0; idx < offset_args.at(sto).size(); ++idx)
+        hs << ((i++ > 0) ? ", " : "") << "__co__" << STR(sto)
+           << "_chunk_offsets[" << idx << "]";
 
   hs << ");\n";
 
@@ -1723,6 +1732,14 @@ void TopsccCodeGen::EmitHostRuntimeCheck() {
   }
 }
 
+void TopsccCodeGen::EmitMemReuse() {
+  const auto& script = FCtx(fname).GetMemReuseScript();
+  if (script.empty()) return;
+  hs << h_indent << R"(// JIT memory reuse begin)" << "\n";
+  for (const auto& s : script) { hs << h_indent << s << "\n"; }
+  hs << h_indent << R"(// JIT memory reuse end)" << "\n";
+}
+
 static inline const std::string
 DeviceParamTypeStringify(const Choreo::Type& ty) {
   if (isa<VoidType>(&ty))
@@ -1771,6 +1788,14 @@ void TopsccCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
     oss << ((index++ > 0) ? ", unsigned " : "unsigned ");
     oss << UnScopedName(item.first);
   }
+
+  const auto& offset_args = FCtx(fname).GetMemReuseOffsetArgs();
+  // have to traverse storage in the order
+  for (Storage sto : {Storage::LOCAL, Storage::SHARED})
+    if (offset_args.count(sto))
+      for (size_t idx = 0; idx < offset_args.at(sto).size(); ++idx)
+        oss << ((index++ > 0) ? ", " : "") << "unsigned long "
+            << RegexReplaceAll(offset_args.at(sto)[idx], "::", "_");
 
   oss << ")";
 

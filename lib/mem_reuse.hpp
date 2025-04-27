@@ -2,6 +2,7 @@
 #define __CHOREO_MEM_REUSE_HPP__
 
 #include "ast.hpp"
+#include "codegen.hpp"
 #include "context.hpp"
 #include "ginac/ginac.h"
 #include "liveness_analysis.hpp"
@@ -14,202 +15,65 @@
 
 namespace Choreo {
 
+// Analyze memory: storage, shape(size)
 struct MemAnalyzer : public VisitorWithSymTab {
-  using SymValno = size_t;
   using Symbol = GiNaC::symbol;
   using SymExpr = GiNaC::ex;
 
-  std::unordered_map<std::string, Storage> buf2sto;
+  // whether JIT memory reuse is needed
+  bool have_dynamic_shape = false;
 
-  using BSize = std::variant<size_t, SymExpr>;
-  std::unordered_map<std::string, BSize> buf_sizes;
-
+  std::map<std::string, Symbol> symbol_map;
   std::map<std::string, SymExpr> sym_expr_map;
 
-  inline bool IsRef(const AST::Node& n) const {
-    return n.GetNote().find("ref") != std::string::npos;
-  }
+  // using BSize = std::variant<size_t, SymExpr>;
+  using BSize = std::variant<size_t, std::string>;
+  std::unordered_map<std::string, BSize> buf_size;
+  std::unordered_map<std::string, Storage> buf_sto;
 
   MemAnalyzer() : VisitorWithSymTab("memanlz", CCtx().GetGlobalSymbolTable()) {}
   ~MemAnalyzer() {}
 
-  std::map<std::string, Symbol> symbol_map;
-  SymExpr GetSymExprFromSizeExpr(std::string size_expr) {
-    auto IsOperator = [](char c) -> bool {
-      return c == '+' || c == '-' || c == '*' || c == '/' || c == '%';
-    };
-
-    std::string temp = "";
-    for (auto c : size_expr)
-      if (c != ' ') temp += c;
-    size_expr = temp;
-
-    std::function<SymExpr(std::string)> HelperFunc = [&](std::string str) {
-      size_t size = str.length();
-      assert(!str.empty());
-      if (str[0] != '(') { return GetSymExprFromStr(str); }
-      size_t idx = 0;
-      size_t leftCount = 0;
-      do {
-        char c = str[idx];
-        if (c == '(') {
-          leftCount++;
-        } else if (c == ')') {
-          leftCount--;
-        }
-        if (leftCount == 0) { break; }
-        idx++;
-      } while (idx < size);
-
-      auto left_expr = HelperFunc(str.substr(1, idx - 1));
-
-      if (idx == size - 1) { return left_expr; }
-      char c = str[++idx];
-      if (!IsOperator(c))
-        choreo_unreachable("The operator(sigle char) " + std::string(1, c) +
-                           " is not supported in MemAnalyzer yet.");
-      std::string op = std::string(1, c);
-      auto right_expr = HelperFunc(str.substr(idx + 1));
-      SymExpr res;
-      if (op == "+") {
-        res = SymExpr(left_expr + right_expr);
-      } else if (op == "-") {
-        res = SymExpr(left_expr - right_expr);
-      } else if (op == "*") {
-        res = SymExpr(left_expr * right_expr);
-      } else if (op == "/" || op == "%") {
-        res = StringifyOpFromSymExpr(left_expr, op, right_expr);
-      } else {
-      }
-      return res;
-    };
-
-    return HelperFunc(size_expr);
-  }
-
-  bool BeforeVisitImpl(AST::Node& n) {
-    if (auto cf = dyn_cast<AST::ChoreoFunction>(&n)) {
-      for (const auto& param : cf->f_decl.params->values) {
-        if (param->HasSymbol()) {
-          std::string sname = InScopeName(param->sym->name);
-          if (auto sty = dyn_cast<SpannedType>(param->GetType())) {
-            VST_DEBUG(dbgs() << "[memanlz] BUFFER: " << sname << "\n");
-            buf2sto.emplace(sname, sty->GetStorage());
-            if (!sty->RuntimeShaped()) {
-              // TODO: should we align the size to 512?!
-              VST_DEBUG(dbgs()
-                        << "\tstatic  size:  " << sty->ByteSize() << "\n");
-              buf_sizes.emplace(sname, sty->ByteSize());
-            } else {
-              auto shape_expr = sty->ShapeSizeExpression();
-              auto size_expr = sty->ByteSizeExpression();
-              if (!sym_expr_map.count(shape_expr)) {
-                auto sym_expr = (GetSymExprFromSizeExpr(shape_expr) *
-                                 SymExpr(SizeOf(sty->f_type)))
-                                    .expand();
-                sym_expr_map.emplace(shape_expr, sym_expr);
-              }
-              // buf_sizes.emplace(sname, sym_expr_map.at(size_expr));
-              VST_DEBUG({
-                dbgs() << "\tdynamic  size: " << size_expr
-                       << "\n\tsymbolic size: " << sym_expr_map.at(size_expr)
-                       << "\n";
-              });
-            }
-          }
-        }
-      }
-    }
-    return true;
-  }
-
-  bool AfterVisitImpl(AST::Node&) { return true; }
-
-  bool Visit(AST::NamedVariableDecl& n) {
-    auto ty = GetSymbolType(n.name_str);
-    if (auto sty = dyn_cast<SpannedType>(ty)) {
-      if (!IsRef(n)) {
-        auto sname = InScopeName(n.name_str);
-        VST_DEBUG(dbgs() << "[memanlz] BUFFER: " << sname << "\n");
-        buf2sto.emplace(sname, sty->GetStorage());
-        if (!sty->RuntimeShaped()) {
-          buf_sizes.emplace(sname, sty->ByteSize());
-          VST_DEBUG(dbgs() << "\tstatic  size:  " << sty->ByteSize() << "\n");
-        } else {
-          auto shape_expr = sty->ShapeSizeExpression();
-          auto size_expr = sty->ByteSizeExpression();
-          if (!sym_expr_map.count(shape_expr)) {
-            auto sym_expr = (GetSymExprFromSizeExpr(shape_expr) *
-                             SymExpr(SizeOf(sty->f_type)))
-                                .expand();
-            sym_expr_map.emplace(shape_expr, sym_expr);
-          }
-          // buf_sizes.emplace(sname, sym_expr_map.at(size_expr));
-          VST_DEBUG({
-            dbgs() << "\tdynamic  size: " << size_expr
-                   << "\n\tsymbolic size: " << sym_expr_map.at(size_expr)
-                   << "\n";
-          });
-        }
-      }
-    }
-    return true;
-  }
-
 private:
+  bool BeforeVisitImpl(AST::Node& n) override;
+  bool AfterVisitImpl(AST::Node&) override { return true; }
+  bool Visit(AST::NamedVariableDecl& n) override;
+
+  static inline bool IsRef(const AST::Node& n) {
+    return n.GetNote().find("ref") != std::string::npos;
+  }
   static inline std::string ExSTR(const SymExpr& sym_expr) {
     std::ostringstream oss;
     oss << sym_expr;
     return oss.str();
   }
-
   SymExpr StringifyOpFromSymExpr(const SymExpr& sym_expr_l,
                                  const std::string& op,
-                                 const SymExpr& sym_expr_r) {
-    std::string symbol_name;
-    std::string sym_expr_l_str = ExSTR(sym_expr_l.expand());
-    std::string sym_expr_r_str = ExSTR(sym_expr_r.expand());
-    symbol_name = "(" + sym_expr_l_str + op + sym_expr_r_str + ")";
-    return GetSymExprFromStr(symbol_name);
-  }
-
-  SymExpr GetSymExprFromStr(std::string str) {
-    if (symbol_map.count(str)) return SymExpr(symbol_map.at(str));
-    auto IsNumber = [](const std::string& str) {
-      return !str.empty() && std::all_of(str.begin(), str.end(), ::isdigit);
-    };
-    if (IsNumber(str)) { return SymExpr(std::stoi(str)); }
-    Symbol symbol(str, str);
-    symbol_map.emplace(str, symbol);
-    return SymExpr(symbol);
-  }
+                                 const SymExpr& sym_expr_r);
+  SymExpr GetSymExprFromStr(std::string str);
+  SymExpr GetSymExprFromSizeExpr(std::string size_expr);
 };
 
 struct MemReuse : public VisitorWithSymTab {
-  using StrUintMap = LivenessAnalyzer::StrUintMap;
-
 private:
-  TypeConstraints type_equals{this};
   std::string cur_func_name;
   const LivenessAnalyzer& la;
+  const MemAnalyzer& ma;
 
   int parallel_level = 0;
   int max_parallel_level = 0;
 
-  StrUintMap mem_offsets;
+  std::map<std::string, size_t> mem_offset;
 
   struct SpmSize {
     size_t local_spm_size;
     size_t shared_spm_size;
   };
-
   std::map<std::string, SpmSize> spm_size_map;
 
   // update when entering co func.
   std::string local_spm_name;
   std::string shared_spm_name;
-
-  const std::unordered_map<std::string, Storage>& buf2sto;
 
   struct Buffer {
     size_t size;
@@ -217,8 +81,14 @@ private:
     size_t end_time;
     std::string buffer_id;
   };
-
+  struct DBuffer {
+    std::string size;
+    size_t start_time;
+    size_t end_time;
+    std::string buffer_id;
+  };
   std::vector<Buffer> buffers;
+  std::vector<DBuffer> dynamic_buffers;
 
   struct HeapSimulator {
   public:
@@ -267,7 +137,7 @@ private:
       }
 
       // assign space for each buffer
-      std::unordered_map<size_t, size_t> assigned_offsets;
+      std::map<size_t, size_t> assigned_offsets;
 
       using Range = std::pair<size_t, size_t>;
 
@@ -359,191 +229,31 @@ private:
     }
   };
 
-  int Size_t2Int(size_t s) const {
-    if (s <= (size_t)std::numeric_limits<int>::max())
-      return static_cast<int>(s);
-    choreo_unreachable("size_t to int conversion failed, val: " +
-                       std::to_string(s));
+public:
+  MemReuse(const LivenessAnalyzer& la, const MemAnalyzer& ma)
+      : VisitorWithSymTab("memreuse", CCtx().GetGlobalSymbolTable()), la(la),
+        ma(ma) {
+    if (trace_visit) debug_visit = true;
   }
+  ~MemReuse() {}
 
 private:
   bool BeforeVisitImpl(AST::Node&) override;
   bool AfterVisitImpl(AST::Node&) override;
 
-  virtual void TraceEachVisit(AST::Node& n, bool detail = false,
-                              const std::string& m = "") const {
-    if (!trace_visit) return;
-    if (detail)
-      dbgs() << m << STR(n) << "\n";
-    else
-      dbgs() << m << n.TypeNameString() << "\n";
+  static int Size_t2Int(size_t s) {
+    if (s <= (size_t)std::numeric_limits<int>::max())
+      return static_cast<int>(s);
+    choreo_unreachable("size_t to int conversion failed, val: " +
+                       std::to_string(s));
   }
-
-public:
-  MemReuse(const LivenessAnalyzer& la, const MemAnalyzer& ma)
-      : VisitorWithSymTab("memreuse", CCtx().GetGlobalSymbolTable()), la(la),
-        buf2sto(ma.buf2sto) {
-    if (trace_visit) debug_visit = true; // force debug when tracing
-    if (debug_visit) type_equals.SetDebug(true);
-
-    const auto& var_ranges = la.VarRanges();
-    for (const auto& [sname, size] : ma.buf_sizes) {
-      auto ranges = var_ranges.at(sname);
-      // For now, there is no case that a var is used in multiple ranges.
-      // Because there is no reassignment.
-      if (ranges.Values().size() == 0) {
-        dbgs() << "Warning: buffer " << sname << " is never used!\n";
-        continue;
-      }
-      if (ranges.Values().size() > 1) {
-        dbgs() << "Warning: buffer " << sname
-               << " is used in multiple ranges:\n";
-        for (const auto& r : ranges.Values())
-          dbgs() << "\t[" << r.start << ", " << r.end << "]\n";
-        choreo_unreachable(
-            "multiple ranges for a buffer is not supported yet.");
-      }
-      buffers.push_back({std::get<size_t>(size), ranges.Values()[0].start,
-                         ranges.Values()[0].end, sname});
-    }
-    AnalyzeMemOffset();
-  }
-  ~MemReuse() {}
-
-  void AnalyzeMemOffset() { ProtoType(); }
-
-  bool ValidateResult(const HeapSimulator::Result& res,
-                      const HeapSimulator::Chunks& chunks) {
-    size_t size = chunks.size();
-    for (size_t i = 0; i < size; ++i) {
-      for (size_t j = 0; j < size; ++j) {
-        if (i == j) continue;
-        const auto& c1 = chunks[i];
-        const auto& c2 = chunks[j];
-        if (c1.start_time <= c2.end_time && c2.start_time <= c1.end_time) {
-          auto o1 = res.chunk_offsets.at(c1.buffer_id);
-          auto o2 = res.chunk_offsets.at(c2.buffer_id);
-          if ((o1 <= o2 && o1 + c1.size > o2) ||
-              (o2 <= o1 && o2 + c2.size > o1)) {
-            dbgs() << "Error: Memory overlap detected between buffers "
-                   << c1.buffer_id << " and " << c2.buffer_id << "\n";
-            return false;
-          }
-        }
-      }
-    }
-    return true;
-  }
-
-  void ProtoType() {
-    auto GetFuncNameFromScopedName =
-        [](const std::string& name) -> std::string {
-      if (!PrefixedWith(name, "::"))
-        choreo_unreachable("The scopedname should contain '::'!");
-      return SplitStringByDelimiter(name, "::", true)[0];
-    };
-
-    std::map<std::string, HeapSimulator::Chunks> local_chunks_map;
-    std::map<std::string, HeapSimulator::Chunks> shared_chunks_map;
-
-    for (const auto& buffer : buffers) {
-      auto func_name = GetFuncNameFromScopedName(buffer.buffer_id);
-      if (auto sto = buf2sto.at(buffer.buffer_id); sto == Storage::LOCAL) {
-        local_chunks_map[func_name].push_back(buffer);
-      } else if (sto == Storage::SHARED) {
-        shared_chunks_map[func_name].push_back(buffer);
-      }
-    }
-
-    HeapSimulator simulator;
-
-    for (const auto& [func_name, local_chunks] : local_chunks_map) {
-      if (!local_chunks.empty()) {
-        HeapSimulator::Result local_result =
-            simulator.Allocate(local_chunks, 512);
-        assert(ValidateResult(local_result, local_chunks));
-        spm_size_map[func_name].local_spm_size = local_result.heap_size;
-        for (const auto& [buffer_id, offset] : local_result.chunk_offsets) {
-          mem_offsets.emplace(buffer_id, offset);
-        }
-        VST_DEBUG(dbgs() << "Function: " << func_name
-                         << "\n\tLocal memory usage: " << local_result.heap_size
-                         << " bytes\n");
-      }
-      if (const auto& shared_chunks = shared_chunks_map[func_name];
-          !shared_chunks.empty()) {
-        HeapSimulator::Result shared_result =
-            simulator.Allocate(shared_chunks, 512);
-        assert(ValidateResult(shared_result, shared_chunks));
-        spm_size_map[func_name].shared_spm_size = shared_result.heap_size;
-        for (const auto& [buffer_id, offset] : shared_result.chunk_offsets) {
-          mem_offsets.emplace(buffer_id, offset);
-        }
-        VST_DEBUG(dbgs() << "Function: " << func_name
-                         << "\n\tShared memory usage: "
-                         << shared_result.heap_size << " bytes\n");
-      }
-    }
-  }
-
-  void ApplyMemOffset(AST::NamedVariableDecl& n, Storage sto) {
-    assert(sto == Storage::LOCAL || sto == Storage::SHARED);
-    auto sname = InScopeName(n.name_str);
-    auto spm_name = (sto == Storage::LOCAL ? local_spm_name : shared_spm_name);
-    VST_DEBUG({ dbgs() << STR(sto) << " buffer: " << sname << ".\n\t"; });
-
-    if (!mem_offsets.count(sname)) {
-      VST_DEBUG(dbgs() << "has no valid reuse offset!\n");
-      return;
-    }
-    VST_DEBUG({
-      dbgs() << "using spm:   " << spm_name
-             << "\n\twith offset: " << mem_offsets.at(sname) << "\n";
-    });
-    n.note.append("reuse, " + spm_name + ", ");
-    n.note.append("offset, " + std::to_string(mem_offsets.at(sname)) + ", ");
-  }
-
-  bool Visit(AST::MultiNodes&) override;
-  bool Visit(AST::MultiValues&) override;
-  bool Visit(AST::IntLiteral&) override;
-  bool Visit(AST::FloatLiteral&) override;
-  bool Visit(AST::StringLiteral&) override;
-  bool Visit(AST::Boolean&) override;
-  bool Visit(AST::Expr&) override;
-  bool Visit(AST::MultiDimSpans&) override;
-  bool Visit(AST::NamedTypeDecl&) override;
   bool Visit(AST::NamedVariableDecl&) override;
-  bool Visit(AST::IntTuple&) override;
-  bool Visit(AST::Assignment&) override;
-  bool Visit(AST::IntIndex&) override;
-  bool Visit(AST::DataType&) override;
-  bool Visit(AST::Identifier&) override;
-  bool Visit(AST::Parameter&) override;
-  bool Visit(AST::ParamList&) override;
-  bool Visit(AST::ParallelBy&) override;
-  bool Visit(AST::WhereBind&) override;
-  bool Visit(AST::WithIn&) override;
-  bool Visit(AST::WithBlock&) override;
-  bool Visit(AST::Memory&) override;
-  bool Visit(AST::SpanAs&) override;
-  bool Visit(AST::DMA&) override;
-  bool Visit(AST::ChunkAt&) override;
-  bool Visit(AST::Wait&) override;
-  bool Visit(AST::Call&) override;
-  bool Visit(AST::Rotate&) override;
-  bool Visit(AST::Select&) override;
-  bool Visit(AST::Return&) override;
-  bool Visit(AST::LoopRange&) override;
-  bool Visit(AST::ForeachBlock&) override;
-  bool Visit(AST::InThreadsBlock&) override;
-  bool Visit(AST::IncrementBlock&) override;
-  bool Visit(AST::FunctionDecl&) override;
-  bool Visit(AST::ChoreoFunction&) override;
-  bool Visit(AST::CppSourceCode&) override;
-  bool Visit(AST::Program&) override;
-
-  bool HasError() override;
+  void Initialize();
+  void AnalyzeMemOffset();
+  void ProtoType();
+  bool ValidateResult(const HeapSimulator::Result& res,
+                      const HeapSimulator::Chunks& chunks);
+  void ApplyMemOffset(AST::NamedVariableDecl& n, Storage sto);
 };
 
 } // end namespace Choreo

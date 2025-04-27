@@ -145,6 +145,8 @@ class FunctionContext {
   FutureBufferInfo fbi;
   std::map<std::string, OptimizedValues> sym_values;
   std::vector<RuntimeCheckEntry> rt_checks;
+  std::vector<std::string> mem_reuse_script;
+  std::map<Storage, std::vector<std::string>> mem_reuse_offset_args;
 
 public:
   FutureBufferInfo& GetFutureBufferInfo() { return fbi; }
@@ -159,6 +161,12 @@ public:
   }
   void AppendRtCheck(RuntimeCheckEntry rc) { rt_checks.push_back(rc); }
   std::vector<RuntimeCheckEntry>& GetRtChecks() { return rt_checks; }
+  const auto& GetMemReuseScript() const { return mem_reuse_script; }
+  void SetMemReuseScript(std::vector<std::string> s) { mem_reuse_script = s; }
+  const auto& GetMemReuseOffsetArgs() const { return mem_reuse_offset_args; }
+  void SetMemReuseOffsetArgs(std::map<Storage, std::vector<std::string>> s) {
+    mem_reuse_offset_args = s;
+  }
 };
 
 class SymbolTable;
