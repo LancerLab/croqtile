@@ -1895,6 +1895,20 @@ show_usage() {
   exit 1
 }
 
+option_detect() {
+  local tmpf=/tmp/__nasty_option_detect__.cpp
+  echo "#include <krt/builtins.h>" > ${tmpf}
+  echo "__device__ void foo() { tops::abort();  }" >> ${tmpf}
+
+  ${TOPSCC} ${CFLAGS} -c ${tmpf} -o /dev/null 2>/dev/null
+
+  if [[ $? -eq 0 ]]; then
+    export CFLAGS="${CFLAGS} -D__CHOREO_USE_TOPS_ABORT__";
+  fi
+
+  rm -f ${tmpf}
+}
+
 # compile, execute
 )script";
 
@@ -1903,6 +1917,7 @@ show_usage() {
   if (verbose) os << " -v"; // if it requires to be verbose
   // always enclose
   os << " ${EXTRA_TARGET_CFLAGS}\"";
+  os << "\noption_detect";
   if (use_sim) os << "\nexport INTERNAL_GCU_SIM=LIBRA";
   os << "\nexport LD_LIBRARY_PATH=${TOPSCC_LIB}:${LD_LIBRARY_PATH}\n\n";
 
