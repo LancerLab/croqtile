@@ -126,7 +126,7 @@ gcu3_docker_test:
       else
         git clone git@git.enflame.cn:xiaofeng.guan/choreo.git && cd choreo;
       fi && \
-      apt install libgmp-dev && \
+      sudo apt install libgmp-dev && \
       make setup-core && \
       make test && \
       make package && \
