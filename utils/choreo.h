@@ -785,7 +785,7 @@ static __attribute__((always_inline)) inline void abend_true(bool p) {
 
 // --- light-weight choreo-topscc device library --- //
 
-__device__ inline static __attribute__((noreturn)) void __co_abort__() {
+__device__ __attribute__((always_inline)) static inline void __co_abort__() {
 #ifdef __CHOREO_USE_TOPS_ABORT__
   tops::abort();
 #else
