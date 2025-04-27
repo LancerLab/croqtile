@@ -175,7 +175,7 @@ private:
 private:
   // compiler configurations
   bool debug_symtab = false;
-  bool dump_ast = false;
+  bool dump_ast = false;            // dump the AST after parsing
   bool no_codegen = false;          // stop before code generation
   bool print_pass_names = false;    // print pass name before pass run
   bool no_pre_process = false;      // do not invoke pre-processor
@@ -191,6 +191,7 @@ private:
   bool mem_reuse = false;         // reuse the memory of the program
   bool simplify_fp_valno = false; // simplify the floating point value number
   bool verify = false;            // verify visitors for legility
+  bool gen_debug_info = false;    // generate debug information
 
 private:
   std::shared_ptr<SymbolTable> sym_tab = nullptr; // global symbol table
@@ -303,6 +304,7 @@ public:
   bool MemReuse() const { return mem_reuse; }
   bool SimplifyFpValno() const { return simplify_fp_valno; }
   bool VerifyVisitors() const { return verify; }
+  bool GenDebugInfo() const { return gen_debug_info; }
 
   // Setters of compiler configurations
   void SetDumpAst(bool value) { dump_ast = value; }
@@ -320,6 +322,7 @@ public:
   void SetMemReuse(bool value) { mem_reuse = value; }
   void SetSimplfyFpValno(bool value) { simplify_fp_valno = value; }
   void SetVerifyVisitors(bool value) { verify = value; }
+  void SetGenDebugInfo(bool value) { gen_debug_info = value; }
 
   const std::unordered_map<std::string, std::string>& GetCLMacros() const {
     return cl_macros;

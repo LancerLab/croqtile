@@ -1,4 +1,4 @@
-TOOLCHAIN_DIR:=$(PWD)
+TOOLCHAIN_DIR:=$(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 
 #------------------------- GCU-2.x -------------------------#
 GCU_REL_PATH=.
@@ -48,8 +48,7 @@ download-gcu-platform-kit:
 
 install-gcu-platform-kit:
 	mkdir -p $(TOOLCHAIN_DIR) ;\
-	$(GCU_PLATFORM_PKG) -y -C topsruntime --install-dir $(TOOLCHAIN_DIR); \
-	$(GCU_PLATFORM_PKG) -y -C topscc --install-dir $(TOOLCHAIN_DIR); \
+	$(GCU_PLATFORM_PKG) -y -C topsruntime,topscc --install-dir $(TOOLCHAIN_DIR); \
 	rsync -av $(TOOLCHAIN_DIR)/opt/tops/* $(TOOLCHAIN_DIR); \
 	rm -fr $(TOOLCHAIN_DIR)/opt;
 
@@ -108,10 +107,12 @@ download-gcu3-platform-kit:
 
 install-gcu3-platform-kit:
 	mkdir -p $(TOOLCHAIN_DIR) ;\
-	$(GCU3_PLATFORM_PKG) -y -C topsruntime --install-dir $(TOOLCHAIN_DIR); \
-	$(GCU3_PLATFORM_PKG) -y -C topscc --install-dir $(TOOLCHAIN_DIR); \
+	$(GCU3_PLATFORM_PKG) -y -C topsruntime,topscc --install-dir $(TOOLCHAIN_DIR); \
 	rsync -av $(TOOLCHAIN_DIR)/opt/tops/* $(TOOLCHAIN_DIR); \
 	rm -fr $(TOOLCHAIN_DIR)/opt;
+
+install-gcu3-topscc:
+	sudo $(GCU3_PLATFORM_PKG) -y -C topsruntime,topscc
 
 setup-gcu3-platform-kit: check-gcu3-platform-kit
 	@if [ "$(CUR_GCU3_PLATFORM_PKG_MD5)" != "$(GCU3_PLATFORM_PKG_MD5)"  ]; then \
@@ -169,4 +170,3 @@ gcu-sim: install-gcu-sim
 
 gcu2-install: install-gcu-sfc-kit install-gcu-platform-kit install-gcu-factor-kit
 gcu3-install: install-gcu3-platform-kit install-gcu3-factor-kit
-

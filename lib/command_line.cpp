@@ -26,6 +26,8 @@ Option<bool> compile_only(
     "Compile choreo code and the generated target code; Without linking.");
 Option<bool> generate_script(OptionKind::User, "--generate-script", "-gs",
                              false, "Generate target script.");
+Option<bool> generate_debug_info(OptionKind::User, "-g", "", false,
+                                 "Generate source-level debug information.");
 
 Option<bool>
     del_comm(OptionKind::User, "--remove-comments", "-n", false,
@@ -52,9 +54,9 @@ Option<bool> use_system_toolchain(OptionKind::Hidden, "--use-system-toolchain",
 #endif
                                   "(Experimental) Use system installed "
                                   "toolchain: topscc, topsrt, etc for choreo.");
-Option<bool> use_pic(OptionKind::Hidden, "--use-pic", "-fpic", false,
-                     "(Experimental) Use -fPIC compilation flag to ensure "
-                     "objects are reusable for multi-stage compilation.");
+Option<bool>
+    use_pic(OptionKind::Hidden, "--use-pic", "-fpic", false,
+            "Generate position-independent code if possible (small mode).");
 Option<bool> simplify_fp_valno(
     OptionKind::Hidden, "--simplify-fp-valno", "-sfv", false,
     "(Experimental) Simplify the value numbering for floating point types.");
@@ -69,6 +71,9 @@ Option<bool>
 Option<bool> verbose(OptionKind::User, "--verbose", "-v", false,
                      "Display the programs invoked by the compiler.");
 
+Option<std::string>
+    target_options(OptionKind::Hidden, "--target-options", "-tos", "",
+                   "Extra target options used for target compilation.", "");
 Option<std::string> abend_after(OptionKind::Hidden, "--stop-after", "-sa", "",
                                 "Stop compilation after the visit pass.",
                                 "--stop-after=<pass>");
@@ -221,6 +226,7 @@ bool CommandLine::Parse(int argc, char** argv) {
   r.SetOutputStream(output.GetValue());
 
   // save the options to the global context
+  CCtx().SetGenDebugInfo(generate_debug_info.GetValue());
   CCtx().SetDumpAst(dump_ast.GetValue());
   CCtx().SetNoCodegen(ncodegen.GetValue());
   CCtx().SetPrintPassNames(prt_pass.GetValue());

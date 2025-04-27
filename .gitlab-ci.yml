@@ -130,6 +130,7 @@ gcu3_docker_test:
       make setup-core && \
       make test && \
       make package && \
+      make -C tools install-gcu3-topscc && \
       dpkg -i package/*.deb && \
       choreo samples/topscc/identity.co -es && echo 'Choreo Pkg-Run Test Passed' || (echo 'Choreo Pkg-Run Test Failed' && dpkg -r choreo && exit 1) && \
       dpkg -r choreo && \

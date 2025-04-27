@@ -26,6 +26,7 @@ extern Option<bool> use_hetero_tileflow;
 extern Option<bool> use_system_toolchain;
 extern Option<bool> use_pic;
 extern Option<std::string> arch;
+extern Option<std::string> target_options;
 
 Option<bool> emit_fatbin(OptionKind::Hidden, "-fb", "", false,
                          "Emit fatbin file.");
@@ -1913,6 +1914,8 @@ option_detect() {
 )script";
 
   os << R"(export CFLAGS="-arch ${gcu_arch} -std=c++17 -ltops -lm -O3)";
+  if (CCtx().GenDebugInfo()) os << " -g";
+  if (!target_options.GetValue().empty()) os << " " << target_options;
   if (use_pic) os << " -fPIC";
   if (verbose) os << " -v"; // if it requires to be verbose
   // always enclose
