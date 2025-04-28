@@ -111,6 +111,7 @@ install-gcu3-platform-kit:
 	rsync -av $(TOOLCHAIN_DIR)/opt/tops/* $(TOOLCHAIN_DIR); \
 	rm -fr $(TOOLCHAIN_DIR)/opt;
 
+# specific used for package testing
 install-gcu3-topscc: check-gcu3-platform-kit
 	sudo $(GCU3_PLATFORM_PKG) -y -C topsruntime,topscc
 

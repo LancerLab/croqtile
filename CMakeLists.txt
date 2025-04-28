@@ -105,23 +105,23 @@ string(STRIP "${CPACK_PACKAGE_VERSION}" CPACK_PACKAGE_VERSION)
 set(MIN_GLIBC_VERSION "2.27")
 
 # Create the DEBIAN/preinst script
-file(WRITE ${CMAKE_BINARY_DIR}/preinst
-"#!/bin/bash
-
-# Minimum required glibc version
-MIN_GLIBC_VERSION=\"${MIN_GLIBC_VERSION}\"
-
-# Check if 'topscc' is installed
-if ! dpkg -s topscc > /dev/null 2>&1; then
-    echo \"Error: The 'topscc' package is not installed. Please install it first.\"
-    exit 1
-fi
-
-exit 0
-")
-
-set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "${CMAKE_BINARY_DIR}/preinst")
-install(PROGRAMS ${CMAKE_BINARY_DIR}/preinst DESTINATION DEBIAN)
+#file(WRITE ${CMAKE_BINARY_DIR}/preinst
+#"#!/bin/bash
+#
+## Minimum required glibc version
+#MIN_GLIBC_VERSION=\"${MIN_GLIBC_VERSION}\"
+#
+## Check if 'topscc' is installed
+#if ! dpkg -s topscc > /dev/null 2>&1; then
+#    echo \"Error: The 'topscc' package is not installed. Please install it first.\"
+#    exit 1
+#fi
+#
+#exit 0
+#")
+#
+#set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "${CMAKE_BINARY_DIR}/preinst")
+#install(PROGRAMS ${CMAKE_BINARY_DIR}/preinst DESTINATION DEBIAN)
 
 # Set package information
 set(CPACK_PACKAGE_NAME "choreo")
@@ -139,7 +139,7 @@ set(CPACK_DEBIAN_PACKAGE_MAINTAINER "heng.shi@enflame-tech.com")
 set(CPACK_DEBIAN_PACKAGE_DESCRIPTION "Installed package for choreo")
 set(CPACK_DEBIAN_PACKAGE_SECTION "devel")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6 (>= 2.27), libgmp10 (>= 6.1.2)")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6 (>= 2.27), libgmp10 (>= 6.1.2), topscc (>= 1.3.20241227)")
 
 # Set the install prefix
 set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-${CMAKE_SYSTEM_NAME}")
