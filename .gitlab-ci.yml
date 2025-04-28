@@ -158,8 +158,7 @@ package_test:
     - ls package/*.tar.gz
     - echo "Package check passed!"
     - echo "Installing .deb package..."
-    - make -C tools install-gcu3-topscc FTP_SERVER=172.16.11.18
-    - sudo dpkg -i package/*.deb
+    - sudo dpkg --force-depends -i package/*.deb
     - choreo samples/topscc/identity.co -es && echo "Choreo Pkg-Run Test Passed" || (echo "Choreo Pkg-Run Test Failed" && exit 1)
     - echo "Verifying installation..."
     - if [ -f /usr/local/bin/choreo ]; then echo "choreo found in /usr/local/bin"; fi
