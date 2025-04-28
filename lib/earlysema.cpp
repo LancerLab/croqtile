@@ -126,6 +126,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     auto rty = NodeType(*ref);
     assert(!isa<UnknownType>(rty) && "reference type is unknown.");
     SetNodeType(n, rty);
+    if (diverges.Contains(dyn_cast<AST::Identifier>(ref))) diverges.Add(n);
   } else if (n.op == "dataof") {
     auto ty = NodeType(*n.GetR());
     if (!isa<FutureType>(ty)) {
@@ -337,8 +338,11 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       error_count++;
       SetNodeType(n, MakeUnknownType());
       return false;
-    } else
+    } else {
       SetNodeType(n, lty);
+    }
+    if (diverges.Contains(n.GetL()) || diverges.Contains(n.GetR()))
+      diverges.Add(n);
   } else if (n.op == "#") {
     // allow only # operator for catesian products on two bounded-vars
     // a # b => a * (#b) + b
@@ -381,6 +385,14 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       SetNodeType(n, MakeUnknownType());
       return false;
     }
+
+    auto ld = diverges.Contains(n.GetL());
+    auto rd = diverges.Contains(n.GetR());
+
+    // comparing two divergent values, like p < q - 1 makes no sense in
+    // inthreads pred.
+    if ((ld && !rd) || (!ld && rd)) diverges.Add(n);
+
     SetNodeType(n, MakeBooleanType());
   } else if ((n.op == "&&") || (n.op == "||")) {
     auto lty = NodeType(*n.GetL());
@@ -394,6 +406,10 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       return false;
     }
     SetNodeType(n, MakeBooleanType());
+
+    // inthreads requires both operations are divergent
+    if (diverges.Contains(n.GetL()) && diverges.Contains(n.GetR()))
+      diverges.Add(n);
   } else if (n.op == "!") {
     auto rty = NodeType(*n.GetR());
     if (!isa<BooleanType>(rty)) { // TODO: will we allow integer?
@@ -405,6 +421,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       return false;
     }
     SetNodeType(n, MakeBooleanType());
+    if (diverges.Contains(n.GetR())) diverges.Add(n);
   } else if (n.op == "?") {
     auto cty = NodeType(*n.GetC());
     auto lty = NodeType(*n.GetL());
@@ -683,6 +700,8 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
 
     // also set the type of type annotation
     if (isa<UnknownType>(tty)) SetNodeType(*n.type, ety);
+
+    if (diverges.Contains(n.init_expr)) diverges.Add(InScopeName(n.name_str));
   }
 
   // now handle the associated symbol
@@ -819,6 +838,9 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
                                 __LINE__,
                                 ShadowTypeStorage(ty->GetSpannedType()));
     }
+
+    if (diverges.Contains(n.value)) diverges.Add(InScopeName(n.GetName()));
+
     return true;
   }
 
@@ -975,18 +997,21 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
     }
   }
 
-  /*
-  parallel p by x {
-    parallel q by y {}
-    parallel q by z {} // should be treated as ERROR!
-  }
-  */
   if (auto size = parallel_levels.size(); size >= 2)
     if (parallel_levels[size - 1] == parallel_levels[size - 2] &&
         parallel_levels.back() == 2) {
       Error(n.LOC(), "Multiple inner parallels are not allowed!");
       error_count++;
     }
+
+  if (n.biv) diverges.Add(InScopeName(n.biv->name));
+  if (n.iv_symbols)
+    for (auto& v : n.iv_symbols->AllValues()) {
+      auto name = AST::GetName(*v);
+      assert(name.has_value() && "expect a name.");
+      diverges.Add(InScopeName(name.value()));
+    }
+
   return true;
 }
 
@@ -1676,6 +1701,15 @@ bool EarlySemantics::Visit(AST::Select& n) {
 
   SetNodeType(n, ShadowTypeStorage(NodeType(*n.expr_list->AllValues()[0])));
 
+  bool all_diverge = true;
+  for (auto& v : n.expr_list->AllValues())
+    if (diverges.Contains(v)) {
+      all_diverge = false;
+      break;
+    }
+
+  if (all_diverge) diverges.Add(n);
+
   return true;
 }
 
@@ -1784,6 +1818,11 @@ bool EarlySemantics::Visit(AST::InThreadsBlock& n) {
 
   if (n.async && !n.outer) {
     Error(n.pred->LOC(), "inner inthreads can not be declared as async.");
+    error_count++;
+  }
+
+  if (!diverges.Contains(n.pred)) {
+    Error(n.pred->LOC(), "inthreads' predicate must be strictly divergent.");
     error_count++;
   }
 

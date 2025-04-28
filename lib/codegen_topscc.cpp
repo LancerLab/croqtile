@@ -1922,7 +1922,7 @@ show_usage() {
 }
 
 option_detect() {
-  local tmpf=/tmp/__nasty_option_detect__.cpp
+  local tmpf=/tmp/$(date +"%Y%m%d_%H%M%S.%3N")__nasty_option_detect__.cpp
   echo "#include <krt/builtins.h>" > ${tmpf}
   echo "__device__ void foo() { tops::abort();  }" >> ${tmpf}
 

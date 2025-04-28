@@ -53,6 +53,8 @@ public:
       return nodes.count(mds->list.get());
     else if (auto mds = dyn_cast<AST::DataAccess>(n))
       return nodes.count(mds->indices.get());
+    else if (auto sl = dyn_cast<AST::Select>(n))
+      return nodes.count(sl.get());
     else if (AST::IsLiteral(*n) || isa<AST::IntIndex>(n) ||
              isa<AST::SpanAs>(n) || isa<AST::ChunkAt>(n))
       return false;

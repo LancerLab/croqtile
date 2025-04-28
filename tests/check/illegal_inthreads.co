@@ -18,3 +18,28 @@ __co__ void illegal_inthreads(int a) {
 // CHECK: error: inthreads can not be declared in global scope.
 // CHECK: error: inner inthreads can not be declared as async.
 // CHECK: error: parallel-by insides inthreads block is illegal.
+
+
+__co__ void foo(int a, s32 [7, b] c) {
+  parallel p by 3, q by 4 {
+    inthreads (a > 0) {} // illegal
+    inthreads (b > 0) {} // illegal
+    inthreads (c.span(0) > 0) {} // illegal
+
+    int d = 4;
+    mutable e = 5;
+
+    inthreads (d < 4) {}  // illegal
+    inthreads (e == 5) {} // illegal
+
+    inthreads (p > 3) {}
+    inthreads (q < a) {}
+    inthreads ((p == b) && (q < 4)) {}
+
+    inthreads ((p > 0) && (d == 3)) {}  // illegal
+    inthreads (p > q - 1) {}  // illegal for now
+  }
+}
+
+// CHECK-COUNT-7: error: inthreads' predicate must be strictly divergent.
+// CHECK-NOT: error:
