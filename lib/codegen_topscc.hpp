@@ -222,8 +222,9 @@ private:
 
   SDimsInfo symbolic_dimensions;
 
-  std::ostringstream ds; // device stream
-  std::ostringstream hs; // host stream
+  std::ostringstream ds;            // device stream
+  std::ostringstream hs;            // host stream
+  std::ostringstream return_stream; // stream for return node
 
   std::map<std::string, std::string> claimed_dte;
   std::vector<std::string> pld_checklist = {};

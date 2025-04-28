@@ -25,6 +25,9 @@ __co__ auto foo(int a, f32 [1, 2] b) {
 // CHECK:   dim3 __foo_gdims0(2, 1, 1);
 // CHECK:   dim3 __foo_bdims0(3, 1, 1);
 // CHECK:   __choreo_device_foo<<<__foo_gdims0, __foo_bdims0>>>(a, b__device, g_data__device);
+// CHECK:   choreo::abend_true(topsDeviceSynchronize());
+// CHECK:   choreo::abend_true(topsFree(b__device));
 // CHECK:   choreo::abend_true(topsMemcpy(g_data.data(), g_data__device, 4ULL, topsMemcpyDeviceToHost));
+// CHECK:   choreo::abend_true(topsFree(g_data__device));
 // CHECK:   return g_data;
 // CHECK: }

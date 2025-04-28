@@ -202,6 +202,7 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
     code_segments.back() += ds.str() + hs.str();
     ds.str(""); // reset the streams
     hs.str("");
+    return_stream.str("");
   } else if (isa<AST::ParallelBy>(&n)) {
     parallel_level--;
     if (parallel_level == 0) max_parallel_level = 0;
@@ -391,6 +392,17 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
 
 bool TopsccCodeGen::Visit(AST::ChoreoFunction& n) {
   TraceEachVisit(n);
+
+  if (!use_hetero_tileflow) {
+    for (const auto& item : GetDeviceFuncIns()) {
+      if (IsChoreoOutput(item.name)) continue;
+      if (!isa<SpannedType>(item.type)) continue;
+      hs << h_indent << "choreo::abend_true(topsFree("
+         << UnScopedName(item.name) << "__device));\n";
+    }
+  }
+
+  hs << return_stream.str();
 
   DecrHostIndent();
   hs << "}\n\n";
@@ -769,6 +781,7 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
          << oname + "__device" << ", " << UnScopedSizeExpr(*otype)
          << ", topsMemcpyDeviceToHost));\n";
   }
+
   return true;
 }
 
@@ -1607,26 +1620,29 @@ bool TopsccCodeGen::Visit(AST::Return& n) {
 
   auto vty = NodeType(*n.value);
   if (isa<ScalarType>(vty)) {
-    hs << h_indent << "return " << ExprSTR(n.value, true) << ";\n";
+    return_stream << h_indent << "return " << ExprSTR(n.value, true) << ";\n";
     return true;
   } else if (auto id = AST::GetIdentifier(*n.value)) {
     auto sym = id->name;
     if (IsChoreoInput(InScopeName(sym))) {
       // return the parameter
-      hs << h_indent << "return " << ExprSTR(n.value, true) << ";\n";
+      return_stream << h_indent << "return " << ExprSTR(n.value, true) << ";\n";
       return true;
     } else if (IsChoreoOutput(InScopeName(sym))) {
       if (auto sty = dyn_cast<SpannedType>(GetSymbolType(sym))) {
         // return the global storage, must map back
-        hs << h_indent << "choreo::abend_true(topsMemcpy(" << sym << ".data(), "
-           << sym << "__device, " << UnScopedSizeExpr(*sty)
-           << ", topsMemcpyDeviceToHost));\n";
+        return_stream << h_indent << "choreo::abend_true(topsMemcpy(" << sym
+                      << ".data(), " << sym << "__device, "
+                      << UnScopedSizeExpr(*sty)
+                      << ", topsMemcpyDeviceToHost));\n";
+        return_stream << h_indent << "choreo::abend_true(topsFree(" << sym
+                      << "__device));\n";
       }
     }
   }
 
   assert(isa<SpannedType>(vty) && "expect a spanned data.");
-  hs << h_indent << "return " << ExprSTR(n.value, true) << ";\n";
+  return_stream << h_indent << "return " << ExprSTR(n.value, true) << ";\n";
   return true;
 }
 
