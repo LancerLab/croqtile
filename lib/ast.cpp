@@ -267,6 +267,14 @@ void InThreadsBlock::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
+void WhileBlock::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+  pred->accept(v);
+  v.Visit(*this);
+  if (stmts) stmts->accept(v);
+  v.AfterVisit(*this);
+}
+
 void IncrementBlock::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
   bvs->accept(v);

@@ -1,0 +1,19 @@
+// RUN: choreo -e %s | FileCheck --match-full-lines %s
+
+__co__ void foo() {
+  parallel by 3 {
+    event a, b[2];
+    while (a);
+    while (b);
+    while (a && b[0]);
+  }
+}
+
+// CHECK:   `- Var Decl (event, default): a
+// CHECK:   `- Var Decl (event, default): b[2]
+// CHECK:   `- While Block:
+// CHECK:    `- Predication: a
+// CHECK:   `- While Block:
+// CHECK:    `- Predication: b
+// CHECK:   `- While Block:
+// CHECK:    `- Predication:  (a &&  (b elemof 0) )

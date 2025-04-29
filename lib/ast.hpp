@@ -1763,7 +1763,7 @@ struct InThreadsBlock : public Node, public TypeIDProvider<InThreadsBlock> {
                           const ptr<MultiNodes>& s, bool a = false,
                           bool o = true)
       : Node(l), pred(p), stmts(s), async(a), outer(o) {
-    assert(p != nullptr && "missing iteration variables for the statement.");
+    assert(p != nullptr && "missing predication.");
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -1777,6 +1777,30 @@ struct InThreadsBlock : public Node, public TypeIDProvider<InThreadsBlock> {
   void accept(Visitor&) override;
 
   __UDT_TYPE_INFO__(Node, InThreadsBlock)
+};
+
+struct WhileBlock : public Node, public TypeIDProvider<WhileBlock> {
+  ptr<Expr> pred;
+  ptr<MultiNodes> stmts;
+
+  bool IsBlock() const override { return true; }
+
+  explicit WhileBlock(const location& l, const ptr<Expr> p,
+                          const ptr<MultiNodes>& s)
+      : Node(l), pred(p), stmts(s) {
+    assert(p != nullptr && "predication is requried.");
+  }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
+    os << "\n" << prefix << "`- While Block:";
+    os << "\n" << prefix << " `- Predication: " << PSTR(pred);
+    if (stmts) { stmts->Print(os, prefix + " ", with_type); }
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, WhileBlock)
 };
 
 struct IncrementBlock : public Node, public TypeIDProvider<IncrementBlock> {

@@ -397,7 +397,11 @@ bool EarlySemantics::Visit(AST::Expr& n) {
   } else if ((n.op == "&&") || (n.op == "||")) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
-    if (!isa<BooleanType>(lty) || !isa<BooleanType>(rty)) {
+    if (isa<BooleanType>(lty) && isa<BooleanType>(rty))
+      SetNodeType(n, MakeBooleanType());
+    else if (isa<EventType>(lty) && isa<EventType>(rty) && (*lty == *rty))
+      SetNodeType(n, lty);
+    else {
       Error(n.LOC(), "in operation \"" + n.op +
                          "\": unable to apply to the types (" + PSTR(lty) +
                          " vs. " + PSTR(rty) + ").");
@@ -405,14 +409,15 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       SetNodeType(n, MakeUnknownType());
       return false;
     }
-    SetNodeType(n, MakeBooleanType());
 
     // inthreads requires both operations are divergent
     if (diverges.Contains(n.GetL()) && diverges.Contains(n.GetR()))
       diverges.Add(n);
   } else if (n.op == "!") {
     auto rty = NodeType(*n.GetR());
-    if (!isa<BooleanType>(rty)) { // TODO: will we allow integer?
+    if (isa<BooleanType>(rty) || isa<EventType>(rty)) {
+      SetNodeType(n, rty);
+    } else {
       Error(n.LOC(), "in operation \"" + n.op +
                          "\": unable to apply to the type (" + PSTR(rty) +
                          ").");
@@ -420,7 +425,6 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       SetNodeType(n, MakeUnknownType());
       return false;
     }
-    SetNodeType(n, MakeBooleanType());
     if (diverges.Contains(n.GetR())) diverges.Add(n);
   } else if (n.op == "?") {
     auto cty = NodeType(*n.GetC());
@@ -1818,6 +1822,23 @@ bool EarlySemantics::Visit(AST::InThreadsBlock& n) {
 
   if (n.async && !n.outer) {
     Error(n.pred->LOC(), "inner inthreads can not be declared as async.");
+    error_count++;
+  }
+
+  if (!diverges.Contains(n.pred)) {
+    Error(n.pred->LOC(), "inthreads' predicate must be strictly divergent.");
+    error_count++;
+  }
+
+  return true;
+}
+
+bool EarlySemantics::Visit(AST::WhileBlock& n) {
+  TraceEachVisit(n);
+
+  if (!isa<EventType>(NodeType(*n.pred))) {
+    Error(n.pred->LOC(), "requires a event predication expression but got '" +
+                             PSTR(NodeType(*n.pred)) + "'.");
     error_count++;
   }
 

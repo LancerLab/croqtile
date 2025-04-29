@@ -193,7 +193,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::Node>> any_code foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal device_passable declaration statement assignment dma_stmt wait_stmt trigger_stmt call_stmt swap_stmt expr_or_qes range_expr param_mdspan_val chunkat_or_storage_or_select pred returnable id_or_elem span_init_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
 %nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables future_data_list template_params gi_list ide_list optional_subscriptions data_indices
-%nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr span_expr id_expr bound_expr
+%nterm <AST::ptr<AST::Expr>> s_expr g_expr ie_expr template_value_expr span_expr id_expr bound_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
 %nterm <AST::ptr<AST::DataAccess>> data_element
 %nterm <AST::ptr<AST::ParamList>> parameter_list
@@ -205,6 +205,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::IntTuple>> unnamed_ituple_decl sugar_unnamed_ituple_decl sugarless_unnamed_ituple_decl
 %nterm <AST::ptr<AST::WithBlock>> within_block
 %nterm <AST::ptr<AST::InThreadsBlock>> inthreads_block
+%nterm <AST::ptr<AST::WhileBlock>> while_block
 %nterm <AST::ptr<AST::IfElseBlock>> if_else_block
 %nterm <AST::ptr<AST::WithIn>> within
 %nterm <AST::ptr<AST::WhereBind>> where_bind
@@ -477,7 +478,8 @@ statement
     | paraby_block               { $$ = $1; }
     | within_block               { $$ = $1; }
     | inthreads_block            { $$ = $1; }
-    | if_else_block               { $$ = $1; }
+    | while_block                { $$ = $1; }
+    | if_else_block              { $$ = $1; }
     | foreach_block              { $$ = $1; }
     | increment_block            { $$ = $1; /* TODO: remove? */ }
     ;
@@ -1136,6 +1138,22 @@ within_block
 inthreads_block
     : INTHDS sync_type LPAREN s_expr RPAREN stmts_block {
         $$ = AST::Make<AST::InThreadsBlock>(@1, $4, $6, $2);
+      }
+    ;
+
+ie_expr
+    : id_or_elem {
+        if (isa<AST::Identifier>($1)) $$ = AST::Make<AST::Expr>(@1, $1);
+        else $$ = cast<AST::Expr>($1);
+      }
+    | NOT ie_expr { $$ = AST::Make<AST::Expr>(@1, "!", $2); }
+    | ie_expr OR ie_expr { $$ = AST::Make<AST::Expr>(@1, "||", $1, $3); }
+    | ie_expr AND ie_expr { $$ = AST::Make<AST::Expr>(@1, "&&", $1, $3); }
+    ;
+
+while_block
+    : WHILE LPAREN ie_expr RPAREN stmts_block {
+        $$ = AST::Make<AST::WhileBlock>(@1, $3, $5);
       }
     ;
 

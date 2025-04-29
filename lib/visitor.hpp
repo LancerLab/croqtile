@@ -95,6 +95,7 @@ struct Visitor {
   virtual bool Visit(AST::LoopRange&) = 0;
   virtual bool Visit(AST::ForeachBlock&) = 0;
   virtual bool Visit(AST::InThreadsBlock&) = 0;
+  virtual bool Visit(AST::WhileBlock&) = 0;
   virtual bool Visit(AST::IfElseBlock&) = 0;
   virtual bool Visit(AST::IncrementBlock&) = 0;
   virtual bool Visit(AST::FunctionDecl&) = 0;
@@ -357,6 +358,8 @@ public:
       SSTab().EnterScope("foreach_" + std::to_string(fe_count++));
     } else if (isa<AST::InThreadsBlock>(&n)) {
       SSTab().EnterScope("inthreads_" + std::to_string(it_count++));
+    } else if (isa<AST::WhileBlock>(&n)) {
+      SSTab().EnterScope("while_" + std::to_string(it_count++));
     } else if (isa<AST::IfElseBlock>(&n)) {
       SSTab().EnterScope("cond_if_" + std::to_string(ie_count++));
     } else if (isa<AST::IncrementBlock>(&n)) {
@@ -470,6 +473,7 @@ public:
   bool Visit(AST::LoopRange&) override { return true; }
   bool Visit(AST::ForeachBlock&) override { return true; }
   bool Visit(AST::InThreadsBlock&) override { return true; }
+  bool Visit(AST::WhileBlock&) override { return true; }
   bool Visit(AST::IfElseBlock&) override { return true; }
   bool Visit(AST::IncrementBlock&) override { return true; }
   bool Visit(AST::FunctionDecl&) override { return true; }
@@ -687,6 +691,10 @@ public:
     TraceEachVisit(n);
     return VisitNode(n);
   }
+  bool Visit(AST::WhileBlock& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
   bool Visit(AST::IfElseBlock& n) final {
     TraceEachVisit(n);
     return VisitNode(n);
@@ -750,6 +758,7 @@ public:
   virtual bool VisitNode(AST::LoopRange&) { return true; }
   virtual bool VisitNode(AST::ForeachBlock&) { return true; }
   virtual bool VisitNode(AST::InThreadsBlock&) { return true; }
+  virtual bool VisitNode(AST::WhileBlock&) { return true; }
   virtual bool VisitNode(AST::IfElseBlock&) { return true; }
   virtual bool VisitNode(AST::IncrementBlock&) { return true; }
   virtual bool VisitNode(AST::FunctionDecl&) { return true; }
