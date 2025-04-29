@@ -42,4 +42,18 @@ __co__ void foo(int a, s32 [7, b] c) {
 }
 
 // CHECK-COUNT-7: error: inthreads' predicate must be strictly divergent.
+
+__co__ void bar(int a, s32 [7] b, f32 [M] c) {
+  inthreads (a > 1) {} // illegal: inthreads no inside parallel-by block
+  parallel p by 3 {
+    inthreads(b.span(1) > 0) {} // illegal: pred is uniform
+    inthreads(M < 4) {} // illegal: pred is uniform
+    inthreads(p < M || M > 3) {} // illegal: not strictly divergent
+    d = p - 1;
+    inthreads(d > 0) {}
+  }
+}
+
+// CHECK: error: inthreads can not be declared in global scope.
+// CHECK-COUNT-4: error: inthreads' predicate must be strictly divergent.
 // CHECK-NOT: error:
