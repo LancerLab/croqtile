@@ -1837,13 +1837,8 @@ bool EarlySemantics::Visit(AST::WhileBlock& n) {
   TraceEachVisit(n);
 
   if (!isa<EventType>(NodeType(*n.pred))) {
-    Error(n.pred->LOC(), "requires a event predication expression but got '" +
+    Error(n.pred->LOC(), "requires an event predication expression but got '" +
                              PSTR(NodeType(*n.pred)) + "'.");
-    error_count++;
-  }
-
-  if (!diverges.Contains(n.pred)) {
-    Error(n.pred->LOC(), "inthreads' predicate must be strictly divergent.");
     error_count++;
   }
 

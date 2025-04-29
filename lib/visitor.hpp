@@ -327,6 +327,7 @@ private:
   int wi_count = 0; // counting for with_in
   int fe_count = 0; // counting for foreach
   int it_count = 0; // counting for inthreads
+  int wl_count = 0; // counting for while
   int ie_count = 0; // counting for ifelse
 
   void Reset() {
@@ -334,6 +335,7 @@ private:
     wi_count = 0;
     fe_count = 0;
     it_count = 0;
+    wl_count = 0;
   }
 
 public:
@@ -359,7 +361,7 @@ public:
     } else if (isa<AST::InThreadsBlock>(&n)) {
       SSTab().EnterScope("inthreads_" + std::to_string(it_count++));
     } else if (isa<AST::WhileBlock>(&n)) {
-      SSTab().EnterScope("while_" + std::to_string(it_count++));
+      SSTab().EnterScope("while_" + std::to_string(wl_count++));
     } else if (isa<AST::IfElseBlock>(&n)) {
       SSTab().EnterScope("cond_if_" + std::to_string(ie_count++));
     } else if (isa<AST::IncrementBlock>(&n)) {
@@ -406,7 +408,8 @@ public:
       SSTab().LeaveScope();
     } else if (isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n) ||
                isa<AST::ForeachBlock>(&n) || isa<AST::InThreadsBlock>(&n) ||
-               isa<AST::IfElseBlock>(&n) || isa<AST::IncrementBlock>(&n)) {
+               isa<AST::WhileBlock>(&n) || isa<AST::IfElseBlock>(&n) ||
+               isa<AST::IncrementBlock>(&n)) {
       SSTab().LeaveScope();
     }
 

@@ -1,0 +1,25 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+// RUN: not choreo -DILLEGAL0 %s 2>&1 | FileCheck --check-prefix=CHEK0 %s
+// RUN: not choreo -DILLEGAL1 %s 2>&1 | FileCheck --check-prefix=CHEK1 %s
+
+
+__co__ void foo(int aa, bool bb) {
+  bool cc = true;
+  parallel p by 3 {
+    shared event a, b[2];
+    while (a);
+    while (b);
+    while (a && b[0]);
+#ifdef ILLEGAL0
+    while (a && bb > 0); // illegal
+#endif
+#ifdef ILLEGAL1
+    while (2 > 1); // illegal
+#endif
+    while (cc); // illegal
+  }
+}
+
+// CHECK: error: requires an event predication expression but got 'bool'.
+// CHEK0: error: syntax error, unexpected >, expecting ) or && or ||
+// CHEK1: error: syntax error, unexpected NUM, expecting ! or IDENTIFIER
