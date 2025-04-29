@@ -1786,7 +1786,7 @@ struct WhileBlock : public Node, public TypeIDProvider<WhileBlock> {
   bool IsBlock() const override { return true; }
 
   explicit WhileBlock(const location& l, const ptr<Expr> p,
-                          const ptr<MultiNodes>& s)
+                      const ptr<MultiNodes>& s)
       : Node(l), pred(p), stmts(s) {
     assert(p != nullptr && "predication is requried.");
   }

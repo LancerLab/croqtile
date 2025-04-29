@@ -393,7 +393,7 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
 bool TopsccCodeGen::Visit(AST::ChoreoFunction& n) {
   TraceEachVisit(n);
 
-  if (!use_hetero_tileflow) {
+  if (!use_hetero_tileflow && NeedDeviceFunc()) {
     for (const auto& item : GetDeviceFuncIns()) {
       if (IsChoreoOutput(item.name)) continue;
       if (!isa<SpannedType>(item.type)) continue;
