@@ -150,6 +150,11 @@ void choreo_info(const char *message) {
   BIND    "<->"
   PIPE    "|"
   UBOUND  "#"
+  UBPLUS  "#+"
+  UBMINUS "#-"
+  UBSTAR  "#*"
+  UBSLASH "#/"
+  UBPECET "#%"
   DONTCARE"_"
   CDIV    "cdiv"
   CHAIN   "after"
@@ -226,6 +231,8 @@ void choreo_info(const char *message) {
 %nonassoc LE GE EQ NE
 %left PLUS MINUS
 %left STAR SLASH PECET
+%left UBMINUS UBPLUS
+%left UBSTAR UBSLASH UBPECET
 %left UBOUND
 %nonassoc LPAREN RPAREN
 
@@ -1022,6 +1029,11 @@ s_expr
     | s_expr OR s_expr { $$ = AST::Make<AST::Expr>(@1, "||", $1, $3); }
     | s_expr AND s_expr { $$ = AST::Make<AST::Expr>(@1, "&&", $1, $3); }
     | s_expr UBOUND s_expr {$$ = AST::Make<AST::Expr>(@1, "#", $1, $3); }
+    | s_expr UBPLUS s_expr { $$ = AST::Make<AST::Expr>(@1, "#+", $1, $3); }
+    | s_expr UBMINUS s_expr { $$ = AST::Make<AST::Expr>(@1, "#-", $1, $3); }
+    | s_expr UBSTAR s_expr { $$ = AST::Make<AST::Expr>(@1, "#*", $1, $3); }
+    | s_expr UBSLASH s_expr { $$ = AST::Make<AST::Expr>(@1, "#/", $1, $3); }
+    | s_expr UBPECET s_expr { $$ = AST::Make<AST::Expr>(@1, "#%", $1, $3); }
     | NOT s_expr { $$ = AST::Make<AST::Expr>(@1, "!", $2); }
     | LPAREN s_expr RPAREN {
         // Does String "(0)" represent an indexing operation or an arithmetic operation

@@ -378,7 +378,7 @@ void SymReplace::SymbolizeExprNode(ptr<AST::Node> n) {
         res = StringifyOpFromSymExpr(n, sym_expr_l, op, sym_expr_r);
       } else if (op == "cdiv") {
         res = StringifyOpFromSymExpr(n, op, sym_expr_l, sym_expr_r);
-      } else if (op == "#") {
+      } else if (op == "#" || op == "#+" || op == "#-") {
         res = StringifyOpFromSymExpr(n, op, sym_expr_l, sym_expr_r);
       } else if (op == "||" || op == "&&") {
         res = StringifyOpFromSymExpr(n, sym_expr_l, op, sym_expr_r);

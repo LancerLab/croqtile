@@ -2247,7 +2247,14 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
             oss << "((" << ExprSTR(l, is_host) << ")*("
                 << ValueSTR(rty->GetUpperBound()) << ")+("
                 << ExprSTR(r, is_host) << "))";
-        } else
+        } else if ((op == "#+" || op == "#-") &&
+                   IsActualBoundedIntegerType(l->GetType()) &&
+                   isa<IntegerType>(r->GetType()))
+          oss << "(" << ExprSTR(l, is_host) << ")";
+        else if (op == "#/" || op == "#*" || op == "#%")
+          choreo_unreachable("unsupported expression '" + expr->GetOp() +
+                             "': " + PSTR(expr) + ".");
+        else
           oss << "((" << ExprSTR(l, is_host) << ")" << op << "("
               << ExprSTR(r, is_host) << "))";
       }

@@ -278,6 +278,11 @@ public:
     cur_vn = vn.GenerateValueNumberForNode(n);
     n.s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
 
+    if (n.IsUBArith()) {
+      n.SetType(MakeBoundedITupleType(n.s));
+      vn.AssociateSignatureWithValueNumber(
+          vn.GetSignatureFromValueNumber(cur_vn), cur_vn);
+    }
     if (IsActualBoundedIntegerType(NodeType(n))) {
       cur_ub_vn = cur_vn;
       InvalidateVN(cur_vn);
@@ -447,6 +452,11 @@ public:
         SSTab().DefineSymbol("@" + name, MakeBoundedIntegerType(cur_ub_vn));
         vn.AssociateSignatureWithValueNumber(SSTab().ScopedName("@" + name),
                                              cur_ub_vn);
+        Shape s =
+            GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_ub_vn));
+        nty = MakeBoundedITupleType(s);
+        vn.AssociateSignatureWithValueNumber(name, cur_ub_vn);
+
         InvalidateVN(cur_ub_vn);
       } else {
         if (!isa<PlaceHolderType>(nty)) {

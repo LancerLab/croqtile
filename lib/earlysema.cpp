@@ -358,6 +358,26 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       SetNodeType(n, MakeUnknownType());
       return false;
     }
+  } else if ((n.op == "#-") || (n.op == "#+")) {
+    auto lty = NodeType(*n.GetL());
+    auto rty = NodeType(*n.GetR());
+    if ((IsActualBoundedIntegerType(lty) && isa<IntegerType>(rty))) {
+      SetNodeType(n, MakeBoundedITupleType(Shape(1)));
+    } else {
+      // TODO: computation of multi-dim bounded vars is not supported yet.
+      Error(n.LOC(), "in operation \"" + n.op +
+                         "\": unable to apply to the types (" + PSTR(lty) +
+                         " vs. " + PSTR(rty) + ").");
+      SetNodeType(n, MakeUnknownType());
+      return false;
+    }
+  } else if ((n.op == "#*") || (n.op == "#/") || (n.op == "#%")) {
+    auto lty = NodeType(*n.GetL());
+    auto rty = NodeType(*n.GetR());
+    Error(n.LOC(), "in operation \"" + n.op +
+                       "\": unable to apply to the types (" + PSTR(lty) +
+                       " vs. " + PSTR(rty) + ").");
+    return false;
   } else if ((n.op == "<") || (n.op == ">") || (n.op == "==") ||
              (n.op == "!=") || (n.op == "<=") || (n.op == ">=")) {
     auto lty = NodeType(*n.GetL());
