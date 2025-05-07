@@ -221,6 +221,11 @@ cstr        \"([^"\\]|\\.)*\"
   ":"        return Choreo::Parser::make_COL    (loc);
   "."        return Choreo::Parser::make_DOT    (loc);
   "#"        return Choreo::Parser::make_UBOUND (loc);
+  "#+"       return Choreo::Parser::make_UBPLUS (loc);
+  "#-"       return Choreo::Parser::make_UBMINUS (loc);
+  "#*"       return Choreo::Parser::make_UBSTAR (loc);
+  "#/"       return Choreo::Parser::make_UBSLASH (loc);
+  "#%"       return Choreo::Parser::make_UBPECET (loc);
   "("        return Choreo::Parser::make_LPAREN (loc);
   ")"        return Choreo::Parser::make_RPAREN (loc);
   "["        return Choreo::Parser::make_LBRAKT (loc);

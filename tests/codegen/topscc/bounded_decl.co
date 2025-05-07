@@ -1,0 +1,27 @@
+// RUN: choreo -es -t topscc %s | FileCheck --match-full-lines %s
+
+__co__ void bounded_decls(s32 [160, 27, 9] input) {
+  parallel p by 2, q by 4 {
+    foreach {x, y} in [3, 9] {
+      q1 = q #- 1;
+      pq1 = p # q1;
+      p_q1 = p # (q #- 1);
+      pq_1 = p # q #- 1;
+      pqx = p # q # x;
+
+      dma.copy input.chunkat(p#q1#x, p#q#+1, x-1) => local;
+      dma.copy input.chunkat(pq1 + 1, p_q1, pq_1) => local;
+      dma.copy input.chunkat(pqx, _, y) => local;
+    }
+  }
+}
+
+// CHECK: int q1 = (__tops_tid_x());
+// CHECK: int pq1 = ((__tops_bid_x())*(3)+(q1));
+// CHECK: int p_q1 = ((__tops_bid_x())*(3)+(q1));
+// CHECK: int pq_1 = (((__tops_bid_x())*(4)+(__tops_tid_x())));
+// CHECK: int pqx = ((((__tops_bid_x())*(4)+(__tops_tid_x())))*(3)+(__iv_x));
+// CHECK: auto anon_0 = ((((__tops_bid_x())*(3)+(q1)))*(3)+(__iv_x));
+// CHECK: auto anon_1 = (((__tops_bid_x())*(4)+(__tops_tid_x())));
+// CHECK: auto anon_2 = ((__iv_x)-((1)));
+// CHECK: auto anon_3 = ((pq1)+((1)));

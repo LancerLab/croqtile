@@ -347,6 +347,32 @@ ValueNumbering::TryToSimplifyBinary(const location& loc, const std::string& op,
         }
       };
 
+      op_table["#+"] = [&](auto&& A, auto&& B) {
+        if (std::holds_alternative<long long>(A) &&
+            std::holds_alternative<long long>(B)) {
+          return std::get<long long>(A) + std::get<long long>(B);
+        } else {
+          dbgs() << ScopeIndent()
+                 << "<ERROR> # with float-point is not support: " << lhs
+                 << " % " << rhs << "\n";
+          choreo_unreachable(
+              "# with float-point is found in shape evaluation.");
+        }
+      };
+
+      op_table["#-"] = [&](auto&& A, auto&& B) {
+        if (std::holds_alternative<long long>(A) &&
+            std::holds_alternative<long long>(B)) {
+          return std::get<long long>(A) - std::get<long long>(B);
+        } else {
+          dbgs() << ScopeIndent()
+                 << "<ERROR> # with float-point is not support: " << lhs
+                 << " % " << rhs << "\n";
+          choreo_unreachable(
+              "# with float-point is found in shape evaluation.");
+        }
+      };
+
       if (op_table.count(op)) {
         Var raw = op_table.at(op)(L, R);
         std::visit(
@@ -422,6 +448,10 @@ ValueNumbering::TryToSimplifyBinary(const location& loc, const std::string& op,
       } else if (op == "#") {
         // calculate the upper bound result
         res += std::to_string(l * r);
+      } else if (op == "#+") {
+        res += std::to_string(l + r);
+      } else if (op == "#-") {
+        res += std::to_string(l - r);
       } else {
         Error(loc,
               "simplification of operation `" + op + "' is not yet supported.");
@@ -573,6 +603,21 @@ std::optional<std::string>
 ValueNumbering::SignBoundedOperation(const location& loc, const std::string& op,
                                      const AST::Node& lhs, const AST::Node& rhs,
                                      bool verbose) {
+  auto getSignature = [&](const AST::Node& n) {
+    auto bound = GetSingleUpperBound(visitor->NodeType(n));
+    auto sig = ValueItemAsString(bound);
+    if (isa<int>(&bound))
+      return "const_" + sig;
+    else {
+      if (!visitor->SSTab().NameInScopeOrNull(sig)) {
+        bound = GetSingleUpperBound(n.GetType());
+        sig = ValueItemAsString(bound);
+      }
+      sig = SignatureOfSymbol(visitor->SSTab().InScopeName("@" + sig));
+    }
+    return sig;
+  };
+
   std::optional<std::string> res;
   if (op == "+" || op == "-" || op == "*" || op == "/" || op == "%") {
     if (isa<BoundedType>(lhs.GetType()) && (lhs.GetType()->Dims() == 1) &&
@@ -594,18 +639,21 @@ ValueNumbering::SignBoundedOperation(const location& loc, const std::string& op,
   } else if (op == "#") {
     if (IsActualBoundedIntegerType(lhs.GetType()) &&
         IsActualBoundedIntegerType(rhs.GetType())) {
-      auto lbound = GetSingleUpperBound(lhs.GetType());
-      auto rbound = GetSingleUpperBound(rhs.GetType());
-      auto lsig = ValueItemAsString(lbound);
-      auto rsig = ValueItemAsString(rbound);
-      if (isa<int>(&lbound))
-        lsig = "const_" + lsig;
-      else
-        lsig = SignatureOfSymbol(visitor->SSTab().InScopeName("@" + lsig));
-      if (isa<int>(&rbound))
-        rsig = "const_" + rsig;
-      else
-        rsig = SignatureOfSymbol(visitor->SSTab().InScopeName("@" + rsig));
+      auto lsig = getSignature(lhs);
+      auto rsig = getSignature(rhs);
+      res = TryToSimplifyBinary(loc, op, lsig, rsig, verbose);
+      if (!res) {
+        auto lvn = GetOrInsertValueNumberFromSignature(lsig);
+        auto rvn = GetOrInsertValueNumberFromSignature(rsig);
+        res = op + ":#" + std::to_string(lvn) + ":#" + std::to_string(rvn);
+      }
+    } else
+      choreo_unreachable("operation is not permitted.");
+  } else if (op == "#+" || op == "#-") {
+    if (IsActualBoundedIntegerType(lhs.GetType()) &&
+        isa<IntegerType>(rhs.GetType())) {
+      auto lsig = getSignature(lhs);
+      auto rsig = "const_" + STR(rhs);
       res = TryToSimplifyBinary(loc, op, lsig, rsig, verbose);
       if (!res) {
         auto lvn = GetOrInsertValueNumberFromSignature(lsig);
@@ -727,6 +775,30 @@ ValueNumbering::TryToSimplifyNodeSignature(const AST::Node& node) {
                if (res && trace)
                  dbgs() << ScopeIndent() << "<Simplify> '"
                         << GenerateNodeSignature(*n->GetL(), false) << " # "
+                        << GenerateNodeSignature(*n->GetR(), false) << "' to '"
+                        << res.value() << "'\n";
+               return res;
+             }},
+            {"#+",
+             [this, &n]() -> std::optional<std::string> {
+               auto res = TryToSimplifyBinary(n->LOC(), "#+",
+                                              GetSignatureForNode(*n->GetL()),
+                                              GetSignatureForNode(*n->GetR()));
+               if (res && trace)
+                 dbgs() << ScopeIndent() << "<Simplify> '"
+                        << GenerateNodeSignature(*n->GetL(), false) << " #+ "
+                        << GenerateNodeSignature(*n->GetR(), false) << "' to '"
+                        << res.value() << "'\n";
+               return res;
+             }},
+            {"#-",
+             [this, &n]() -> std::optional<std::string> {
+               auto res = TryToSimplifyBinary(n->LOC(), "#-",
+                                              GetSignatureForNode(*n->GetL()),
+                                              GetSignatureForNode(*n->GetR()));
+               if (res && trace)
+                 dbgs() << ScopeIndent() << "<Simplify> '"
+                        << GenerateNodeSignature(*n->GetL(), false) << " #- "
                         << GenerateNodeSignature(*n->GetR(), false) << "' to '"
                         << res.value() << "'\n";
                return res;

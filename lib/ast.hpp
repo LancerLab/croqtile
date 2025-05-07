@@ -504,7 +504,8 @@ public:
   bool IsArith() const {
     if (!IsBinary()) return false;
     if ((op == "+") || (op == "-") || (op == "*") || (op == "/") ||
-        (op == "%") || (op == "cdiv") || (op == "#"))
+        (op == "%") || (op == "cdiv") || (op == "#") || (op == "#+") ||
+        (op == "#-") || (op == "#*") || (op == "#/") || (op == "#%"))
       return true;
     return false;
   }
@@ -514,6 +515,11 @@ public:
         (op == "<=") || (op == "==") || (op == ">") || (op == ">=") ||
         (op == "!="))
       return true;
+    return false;
+  }
+
+  bool IsUBArith() const {
+    if ((op == "#") || (op == "#+") || (op == "#-")) return true;
     return false;
   }
 

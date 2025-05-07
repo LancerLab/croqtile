@@ -618,7 +618,15 @@ bool TypeInference::Visit(AST::Expr& n) {
       SetNodeType(n, MakeMDSpanType(n.s));
       cur_type = n.GetType();
     } else if (isa<BoundedITupleType>(pty_lhs) && isa<IntegerType>(pty_rhs)) {
-      SetNodeType(n, pty_lhs);
+      if (n.op == "#-" || n.op == "#+")
+        SetNodeType(n, MakeBoundedITupleType(n.s));
+      else if (n.op == "#" || n.op == "#*" || n.op == "#/" || n.op == "#%") {
+        Error(n.LOC(), "The operands of the expression cannot undergo '" +
+                           n.op + "' binary operation.");
+        error_count++;
+      } else
+        SetNodeType(n, pty_lhs);
+
       cur_type = n.GetType();
     } else if (isa<BoundedITupleType>(pty_lhs) &&
                isa<BoundedITupleType>(pty_rhs)) {
@@ -636,7 +644,7 @@ bool TypeInference::Visit(AST::Expr& n) {
         cur_type = n.GetType();
       } else
         SetNodeType(n, MakeUnknownType());
-    } else if (n.IsArith() && n.op != "#" && CanYieldAnInteger(pty_lhs) &&
+    } else if (n.IsArith() && !n.IsUBArith() && CanYieldAnInteger(pty_lhs) &&
                CanYieldAnInteger(pty_rhs)) {
       if (isa<ScalarFloatType>(pty_lhs) || isa<ScalarFloatType>(pty_rhs)) {
         if (isa<DoubleType>(pty_lhs) || isa<DoubleType>(pty_rhs))
