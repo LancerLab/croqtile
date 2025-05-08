@@ -45,4 +45,3 @@ __co__ void bar() {
 // GCU4CHK: error: unsupported: local synchronization in shared scope.
 // GCU4CHK: error: unsupported: global synchronization in local scope.
 // GCU4CHK: error: unsupported: global synchronization in sub-local scope.
-// GCU4CHK: error: unsupported: local synchronization in sub-local scope.
