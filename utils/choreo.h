@@ -518,6 +518,75 @@ using s32 = int32_t; // 32-bit signed integer
 using s16 = int16_t; // 16-bit signed integer
 using s8 = int8_t;   // 8-bit signed integer
 
+namespace utils {
+
+// template <typename U>
+// inline void fill_random(U*, size_t, U, U);
+
+// specializations
+
+// f32
+template <typename U>
+inline typename std::enable_if<std::is_same<U, float>::value, void>::type
+fill_random(U* array, size_t N, U lb, U ub) {
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_real_distribution<U> rand_func(lb,
+                                              ub); // [-1.0, 1.0)
+
+  std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
+}
+
+// f16
+template <typename U>
+inline typename std::enable_if<std::is_same<U, f16>::value, void>::type
+fill_random(U* array, size_t N, U lb, U ub) {
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_real_distribution<float> rand_func(
+      static_cast<float>(lb),
+      static_cast<float>(ub)); // [-1.0, 1.0)
+  std::generate_n(&array[0], N, [&]() { return f16(rand_func(gen)); });
+}
+
+// bf16
+template <typename U>
+inline typename std::enable_if<std::is_same<U, bf16>::value, void>::type
+fill_random(U* array, size_t N, U lb, U ub) {
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_real_distribution<float> rand_func(
+      static_cast<float>(lb),
+      static_cast<float>(ub)); // [-1.0, 1.0)
+
+  std::generate_n(&array[0], N, [&]() { return bf16(rand_func(gen)); });
+}
+
+// f16/bf16 with float lb/ub
+template <typename U>
+inline typename std::enable_if<
+    std::is_same<U, f16>::value || std::is_same<U, bf16>::value, void>::type
+fill_random(U* array, size_t N, float lb, float ub) {
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_real_distribution<float> rand_func(lb, ub);
+
+  std::generate_n(&array[0], N, [&]() { return U(rand_func(gen)); });
+}
+
+// s32/u32 ...
+// if T is integer，utilize std::uniform_int_distribution
+template <typename U>
+inline typename std::enable_if<std::is_integral<U>::value, void>::type
+fill_random(U* array, size_t N, U lb, U ub) {
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<U> rand_func(lb, ub); // [-100, 100]
+
+  std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
+}
+} // end namespace utils
+
 // A 'spanned_view' is a memview of data. It is ranked, but no necessary to have
 // compile-time dimensions
 template <typename T, size_t Rank>
@@ -575,89 +644,30 @@ public:
     fill_n(this->data(), this->element_count(), value);
   }
 
-  void fill_random(T lb, T ub) {
-    fill_random(this->data(), this->element_count(), lb, ub);
-  }
-
-  template <typename U>
-  typename std::enable_if<std::is_same<U, f16>::value ||
-                          std::is_same<U, bf16>::value>::type
-  fill_random(float lb, float ub) {
-    fill_random(this->data(), this->element_count(), lb, ub);
-  }
-
-private:
-  // f32
-  template <typename U>
-  typename std::enable_if<std::is_same<U, float>::value>::type
-  fill_random(U* array, size_t N, U lb, U ub) {
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_real_distribution<U> rand_func(lb,
-                                                ub); // [-1.0, 1.0)
-
-    std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
-  }
-
-  // f16
-  template <typename U>
-  typename std::enable_if<std::is_same<U, f16>::value>::type
-  fill_random(U* array, size_t N, U lb, U ub) {
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_real_distribution<float> rand_func(
-        static_cast<float>(lb),
-        static_cast<float>(ub)); // [-1.0, 1.0)
-    std::generate_n(&array[0], N, [&]() { return U(rand_func(gen)); });
-  }
-
-  // bf16
-  template <typename U>
-  typename std::enable_if<std::is_same<U, bf16>::value>::type
-  fill_random(U* array, size_t N, U lb, U ub) {
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_real_distribution<float> rand_func(
-        static_cast<float>(lb),
-        static_cast<float>(ub)); // [-1.0, 1.0)
-
-    std::generate_n(&array[0], N, [&]() { return U(rand_func(gen)); });
-  }
-
-  // f16/bf16 with float lb/ub
-  template <typename U>
-  typename std::enable_if<std::is_same<U, f16>::value ||
-                          std::is_same<U, bf16>::value>::type
-  fill_random(U* array, size_t N, float lb, float ub) {
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_real_distribution<float> rand_func(lb, ub);
-
-    std::generate_n(&array[0], N, [&]() { return U(rand_func(gen)); });
-  }
-
-  // s32/u32 ...
-  // if T is integer，utilize std::uniform_int_distribution
-  template <typename U>
-  typename std::enable_if<std::is_integral<U>::value>::type
-  fill_random(U* array, size_t N, U lb, U ub) {
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<U> rand_func(lb, ub); // [-100, 100]
-
-    std::generate_n(&array[0], N, [&]() { return rand_func(gen); });
+  __co_host__ void fill_random(T lb, T ub) {
+    utils::fill_random(this->data(), this->element_count(), lb, ub);
   }
 };
+
+template <typename T>
+using spanned_data_deleter_t = void (*)(T*);
+
+template <typename T>
+using spanned_data_unique_ptr = std::unique_ptr<T, spanned_data_deleter_t<T>>;
 
 // A 'spanned_data' is similar to 'spanned_view' but manage memory
 template <typename T, size_t Rank>
 class spanned_data {
-  std::unique_ptr<T[]> ptr = nullptr; // this is used as the output
+public:
+  using unique_ptr_t = spanned_data_unique_ptr<T>;
+
+private:
+  unique_ptr_t ptr = nullptr; // this is used as the output
   mdspan<Rank> dims;
 
 public:
-  explicit spanned_data(std::unique_ptr<T[]>&& d, const mdspan<Rank>& s)
-      : ptr(std::move(d)), dims(s) {}
+  explicit spanned_data(unique_ptr_t&& raw, const mdspan<Rank>& s)
+      : ptr(std::move(raw)), dims(s) {}
 
   spanned_data(const spanned_data&) = delete; // move only
   spanned_data& operator=(const spanned_data&) = delete;
@@ -679,7 +689,7 @@ public:
     choreo_assert(index >= 0, "Index out of bounds", __FILE__, __LINE__);
     choreo_assert((size_t)index < dims[0], "Index out of bounds", __FILE__,
                   __LINE__);
-    return ptr[index];
+    return *(data() + index);
   }
 
   template <size_t M = Rank>
@@ -702,6 +712,14 @@ public:
 
     return true;
   }
+
+  __co_host__ void fill_random(T lb, T ub) {
+    utils::fill_random(data(), element_count(), lb, ub);
+  }
+
+  __co_host__ spanned_view<T, Rank> view() {
+    return spanned_view<T, Rank>(data(), dims);
+  }
 };
 
 template <size_t Rank>
@@ -718,24 +736,46 @@ make_spanview(T* ptr, std::initializer_list<size_t> init) {
 }
 
 template <typename T, size_t N>
-spanned_view<T, 1> make_spanview(T (&arr)[N]) {
+__co_any__ spanned_view<T, 1> make_spanview(T (&arr)[N]) {
   return spanned_view<T, 1>((T*)arr, {N});
 }
 
 template <typename T, size_t N, size_t M>
-spanned_view<T, 2> make_spanview(T (&arr)[N][M]) {
+__co_any__ spanned_view<T, 2> make_spanview(T (&arr)[N][M]) {
   return spanned_view<T, 2>((T*)arr, {N, M});
 }
 
 template <typename T, size_t Rank>
-spanned_data<T, Rank> make_spandata(std::initializer_list<size_t> init) {
+__co_host__ spanned_data<T, Rank>
+make_spandata(std::initializer_list<size_t> init) {
   size_t element_count = 1;
   for (auto& value : init) element_count *= value;
   choreo_assert(element_count > 0, "error: invalid dimensions.", __FILE__,
                 __LINE__);
 
-  return spanned_data<T, Rank>(std::make_unique<T[]>(element_count),
-                               make_mdspan<Rank>(init));
+  T* raw_ptr = nullptr;
+#ifdef __TOPSCC__
+  // host memory optimization
+  runtime_check(!topsHostMalloc(&raw_ptr, element_count * sizeof(T)),
+                "[choreo-rt] failed to allocate memory.");
+  auto del = [](T* p) {
+    runtime_check(!topsHostFree(p), "[choreo-rt] failed to free memory.");
+  };
+#else
+  raw_ptr = new T[element_count];
+  auto del = [](T* p) { delete[] p; };
+#endif
+  spanned_data_unique_ptr<T> ptr(raw_ptr, del);
+  return spanned_data<T, Rank>(std::move(ptr), make_mdspan<Rank>(init));
+}
+
+// alternative interface
+template <typename T, typename... Dims,
+          typename = typename std::enable_if<
+              (std::is_convertible<Dims, size_t>::value && ...)>::type>
+__co_host__ auto make_spandata(Dims... dims) {
+  constexpr size_t Rank = sizeof...(Dims);
+  return make_spandata<T, Rank>({static_cast<size_t>(dims)...});
 }
 
 // converting from vector to another type
@@ -746,9 +786,11 @@ auto copy_as_spanned(T* ptr, std::initializer_list<size_t> init) {
   choreo_assert(element_count > 0, "error: invalid dimensions.", __FILE__,
                 __LINE__);
 
-  auto parr = std::make_unique<T[]>(element_count);
-  std::copy(ptr, ptr + element_count, parr.get());
-  auto res = spanned_data<T, Rank>(std::move(parr), make_mdspan<Rank>(init));
+  auto parr = new T[element_count];
+  std::copy(ptr, ptr + element_count, parr);
+  auto del = [](T* p) { delete[] p; };
+  spanned_data_unique_ptr<T> uptr((T*)parr, del);
+  auto res = spanned_data<T, Rank>(std::move(uptr), make_mdspan<Rank>(init));
   choreo_assert(res.bytes() == element_count * sizeof(T),
                 "error: element_count does not match.", __FILE__, __LINE__);
   return res;

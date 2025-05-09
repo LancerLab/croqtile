@@ -32,15 +32,12 @@ __co__ s32 [6, 17, 64] ele_add(s32 [6, 17, 64] lhs, s32 [6, 17, 64] rhs) { /// d
 }
 
 int main() { /// host program
-  choreo::s32 a[6][17][64] = {0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge
-  choreo::s32 b[6][17][64] = {0};
-  
-  auto a_data = choreo::make_spanview<3, choreo::s32>((int*)a, {6, 17, 64});
-  auto b_data = choreo::make_spanview<3, choreo::s32>((int*)b, {6, 17, 64});
-  a_data.fill_random(-10, 10);
-  b_data.fill_random(-10, 10);
+  auto a = choreo::make_spandata<choreo::s32>(6, 17, 64);
+  auto b = choreo::make_spandata<choreo::s32>(6, 17, 64);
+  a.fill_random(-10, 10);
+  b.fill_random(-10, 10);
 
-  auto res = ele_add(a_data, b_data);
+  auto res = ele_add(a.view(), b.view());
   std::cout << res.shape()[0] << std::endl;
   std::cout << res.shape()[1] << std::endl;
   std::cout << res.shape()[2] << std::endl;

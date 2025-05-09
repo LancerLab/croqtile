@@ -1,0 +1,36 @@
+// RUN: choreo -t topscc -gs %s -o %s.result && bash %s.result | FileCheck %s --match-full-lines
+
+#include <chrono>
+__device__ void voidKernel(choreo::s32* inptr, int size) {}
+
+// clang-format off
+__co__ void cofoo(s32 [128, 128, 128] input) {
+  parallel p by 1 {
+    with x in [32] {
+      foreach x {
+        local_F = dma.copy.async input.chunkat(x, _, _) => local;
+        wait local_F;
+        call voidKernel(local_F.data, |local_F.span|);
+      }
+    }
+  }
+}
+// clang-format on
+
+int main() {
+#ifdef EASIER_WAY
+  auto input = choreo::make_spandata<choreo::s32>(128, 128, 128);
+#else
+  auto input = choreo::make_spandata<choreo::s32, 3>({128, 128, 128});
+#endif
+  cofoo(input.view()); // warm up
+  auto start = std::chrono::high_resolution_clock::now();
+  for (size_t i = 0; i < 256; ++i) { cofoo(input.view()); }
+  auto stop = std::chrono::high_resolution_clock::now();
+  std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count() << " ms" << std::endl;
+  std::cout << "Passed.\n";
+
+  return 0;
+}
+
+// CHECK: Passed.
