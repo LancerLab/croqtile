@@ -83,6 +83,32 @@ gcu3_test:
   allow_failure: true
   timeout: 10m
 
+# GCU4 Testing
+gcu4_test:
+  stage: check-in-tests
+  script:
+    - echo "Running tests with GCU4 LIBRA..."
+    - make setup-gcu4
+    - make build
+    - make test-libra
+  artifacts:
+    paths:
+      - choreo
+      - copp
+      - tools/bin
+      - tools/lib
+      - tools/include
+      - tools/factor_backend
+      - tools/shared
+  tags:
+    - GCU3
+  only:
+    - main
+    - release/alpha
+    - merge_requests
+  allow_failure: true
+  timeout: 10m
+
 # GCU3 Debug Testing
 gcu3_debug_test:
   stage: check-in-tests
