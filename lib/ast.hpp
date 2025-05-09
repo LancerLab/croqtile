@@ -1070,7 +1070,7 @@ struct NamedVariableDecl : public Node,
         init_value(v), array_dims(ad) {}
 
   bool IsArray() const { return !array_dims.empty(); }
-  bool ArrayDimension(size_t idx) const { return array_dims.at(idx); }
+  size_t ArrayDimension(size_t idx) const { return array_dims.at(idx); }
   const std::vector<size_t>& ArrayDimensions() const { return array_dims; }
   bool IsMutable() const { return is_mutable; }
   void SetMutable(bool m) { is_mutable = m; }

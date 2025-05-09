@@ -462,7 +462,6 @@ void SymReplace::EquivalentlyReplaceExprNodes() {
       // auto r = new_expr->GetR();
       // eg. int c = 4; int foo = c + 5;
       // The replacement of `c` with 4 is not necessary.
-      continue;
     }
 
     VST_DEBUG({

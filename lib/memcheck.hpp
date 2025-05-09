@@ -2,6 +2,7 @@
 #define __CHOREO_MEMORY_USAGE_CHECK_HPP__
 
 #include <iomanip>
+#include <numeric>
 
 #include "ast.hpp"
 #include "context.hpp"
@@ -261,9 +262,17 @@ public:
     //                       "counted for now\n");
     //   return true;
     // }
+    size_t array_dim_product = 1;
+    if (n.IsArray())
+      array_dim_product = std::accumulate(n.ArrayDimensions().begin(),
+                                          n.ArrayDimensions().end(), 1,
+                                          std::multiplies<size_t>());
     if (sty->RuntimeShaped()) {
       // runtime usage
       std::string byte_size = sty->ByteSizeExpression(true);
+      if (array_dim_product != 1)
+        byte_size =
+            std::to_string(array_dim_product) + " * (" + byte_size + ")";
       VST_DEBUG(dbgs() << "[MemUsage] " << __internal__::GetStringFrom(sto)
                        << " `" << SSTab().ScopedName(n.name_str) << "` need "
                        << sty->ByteSizeExpression(false) << " bytes.\n");
@@ -273,7 +282,7 @@ public:
           SumUpCtRtUsage(sto), n.LOC(), mem_usage_limit[sto], sto));
     } else {
       // compile time usage
-      auto size = sty->ByteSize();
+      auto size = sty->ByteSize() * array_dim_product;
       VST_DEBUG(dbgs() << "[MemUsage] " << __internal__::GetStringFrom(sto)
                        << " `" << SSTab().ScopedName(n.name_str) << "` need "
                        << size << " bytes" << SizeForHuman(size) << ".\n");
