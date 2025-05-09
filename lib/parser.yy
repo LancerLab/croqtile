@@ -84,14 +84,14 @@ static Parser::symbol_type yylex(Scanner &scanner) {
 //
 //   {(0), (1), 3} represents {0, 1, 3}
 //
-static bool parsing_prefixed_list = false;
-
-bool parsing_chunkat_value_list = false;
+static bool parsing_derivation_decl = false;
+static bool ignore_fndata = false;
 
 ptr<AST::MultiNodes> ConstructPBRecursively(size_t idx,
                                             const ptr<AST::MultiNodes>& ps,
                                             const ptr<AST::MultiNodes>& stmts,
                                             bool);
+std::pair<ptr<AST::Identifier>, ptr<AST::MultiValues>> ElementMultiValues(const ptr<AST::Expr>&);
 std::set<std::string> paraby_symbols;
 
 inline ptr<AST::ChunkAt> ReformChunkAt(const ptr<AST::ChunkAt> &);
@@ -169,6 +169,7 @@ void choreo_info(const char *message) {
 %token <int> NUM
 %token <float> FPVAL
 %token <double> DFPVAL
+%token <std::string> TRUE FALSE
 %token <std::string> STRING
 %token <std::string> HOST_CODE KERNEL_CODE
 %token <std::string> IDENTIFIER ATTR_CO
@@ -180,14 +181,12 @@ void choreo_info(const char *message) {
 %token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN
 // control related
 %token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH INCR RET WHERE WHILE
-%token <std::string> TRUE FALSE
 
 // non-terminals
-%nterm <std::string> dma_operation data_id
-%nterm <std::string> builtin_print_func arith_operation
+%nterm <std::string> dma_operation builtin_print_func arith_operation spanid
 %nterm <ptr<DMAConfig>> dma_config
-%nterm <bool> sync_type optional_mutable
-%nterm <int> index index_or_none
+%nterm <bool> bool_value sync_type optional_mutable
+%nterm <int> integer_value index_or_none
 %nterm <std::vector<size_t>> optional_array_dims
 %nterm <Choreo::Storage> storage
 %nterm <Choreo::BaseType> fundamental_type
@@ -195,19 +194,19 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::SpanAs>> span_as
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
-%nterm <AST::ptr<AST::Node>> any_code foreach_block increment_block general_val template_val general_index span_val direct_ituple_val bool_literal device_passable declaration statement assignment dma_stmt wait_stmt trigger_stmt call_stmt swap_stmt expr_or_qes range_expr param_mdspan_val chunkat_or_storage_or_select pred returnable id_or_elem span_init_val
+%nterm <AST::ptr<AST::Node>> any_code foreach_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt wait_stmt trigger_stmt call_stmt swap_stmt range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
-%nterm <AST::ptr<AST::MultiValues>> value_or_qes_list value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables future_data_list template_params gi_list ide_list optional_subscriptions data_indices
-%nterm <AST::ptr<AST::Expr>> s_expr g_expr ie_expr template_value_expr span_expr id_expr bound_expr
-%nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type spanned_type
+%nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params idt_list ids_list subscriptions data_indices
+%nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr
+%nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type mdspan_as_type
 %nterm <AST::ptr<AST::DataAccess>> data_element
 %nterm <AST::ptr<AST::ParamList>> parameter_list
 %nterm <AST::ptr<AST::Parameter>> parameter
 %nterm <AST::ptr<AST::ChoreoFunction>> dsl_function
-%nterm <AST::ptr<AST::MultiDimSpans>> unnamed_mdspan_decl mdspan_derivation param_mdspan
+%nterm <AST::ptr<AST::MultiDimSpans>> unamed_mdspan_decl mdspan_list mdspan_derivation param_mdspan
 %nterm <AST::ptr<AST::NamedTypeDecl>> named_mdspan_decl
-%nterm <AST::ptr<AST::NamedVariableDecl>> named_ituple_decl spanned_decl scalar_decl event_decl spanas_spanned_decl
-%nterm <AST::ptr<AST::IntTuple>> unnamed_ituple_decl sugar_unnamed_ituple_decl sugarless_unnamed_ituple_decl
+%nterm <AST::ptr<AST::NamedVariableDecl>> named_ituple_decl spanned_decl scalar_decl event_decl
+%nterm <AST::ptr<AST::IntTuple>> ituple_list
 %nterm <AST::ptr<AST::WithBlock>> within_block
 %nterm <AST::ptr<AST::InThreadsBlock>> inthreads_block
 %nterm <AST::ptr<AST::WhileBlock>> while_block
@@ -217,11 +216,10 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::ParallelBy>> paraby_block
 %nterm <AST::ptr<AST::Return>> return_stmt
 %nterm <AST::ptr<AST::Synchronize>> sync_stmt
-%nterm <AST::ptr<AST::ChunkAt>> chunkat_expr sub_data_expr
+%nterm <AST::ptr<AST::ChunkAt>> chunkat_expr subdata_expr
 %nterm <AST::ptr<AST::Select>> select_expr
 
 // precedence (low to high) and associativity
-%right LBRACE
 %right ASSIGN
 %right QES COL
 %left OR
@@ -233,8 +231,11 @@ void choreo_info(const char *message) {
 %left STAR SLASH PECET
 %left UBMINUS UBPLUS
 %left UBSTAR UBSLASH UBPECET
+%right PPLUS MMINUS
 %left UBOUND
 %nonassoc LPAREN RPAREN
+%nonassoc LBRAKT RBRAKT
+%left FNSPAN
 
 %left HOST_CODE
 
@@ -294,8 +295,14 @@ param_mdspan
     | LBRAKT param_mdspan_list RBRAKT {
         $$ = AST::Make<AST::MultiDimSpans>(@2, "", $2);
       }
+    | LBRAKT LBRAKT param_mdspan_list RBRAKT RBRAKT  {
+        $$ = AST::Make<AST::MultiDimSpans>(@3, "", $3);
+      }
     | MDSPAN LBRAKT param_mdspan_list RBRAKT {
-        $$ = AST::Make<AST::MultiDimSpans>(@2, "", $3);
+        $$ = AST::Make<AST::MultiDimSpans>(@1, "", $3);
+      }
+    | MDSPAN LBRAKT LBRAKT param_mdspan_list RBRAKT RBRAKT {
+        $$ = AST::Make<AST::MultiDimSpans>(@1, "", $4);
       }
     ;
 
@@ -352,9 +359,18 @@ scalar_type
     | BOOL   { $$ = AST::Make<AST::DataType>(@1, $1); }
     ;
 
-spanned_type
-    : fundamental_type LBRAKT value_list RBRAKT {
-        $$ = AST::Make<AST::DataType>(@1, $1, AST::Make<AST::MultiDimSpans>(@3, "", $3));
+mdspan_as_type
+    : fundamental_type LBRAKT g_value_list RBRAKT {
+        // if it contains a single mdspan, use it directly
+        bool direct_mdspan = false;
+        ptr<AST::MultiDimSpans> mds = nullptr;
+        if ($3->Count() == 1)
+          if (auto e = dyn_cast<AST::Expr>($3->ValueAt(0)))
+            if (auto mdss = dyn_cast<AST::MultiDimSpans>(e->GetReference()))
+              mds = mdss;
+
+        if (!mds) mds = AST::Make<AST::MultiDimSpans>(@3, "", $3);
+        $$ = AST::Make<AST::DataType>(@1, $1, mds);
       }
     ;
 
@@ -370,68 +386,40 @@ fundamental_type
     | S32   { $$ = $1; }
     ;
 
-general_val
-    : NUM { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
+simple_val
+    : integer_value { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
+    | bool_value { $$ = AST::Make<AST::Boolean>(@1, $1); }
     | FPVAL  { $$ = AST::Make<AST::FloatLiteral>(@1, $1); }
     | DFPVAL { $$ = AST::Make<AST::FloatLiteral>(@1, $1); }
     | STRING { $$ = AST::Make<AST::StringLiteral>(@1, $1); }
-    | IDENTIFIER {
-        if (!symtab.Exists($1))
-          if (!parsing_chunkat_value_list && $1 != "_")
-            Parser::error(@1,
-              "The symbol `" + $1 + "' has not been defined.");
-
-        $$ = AST::Make<AST::Identifier>(@1, $1);
-      }
+    | IDENTIFIER { $$ = AST::Make<AST::Identifier>(@1, $1); }
     | IDENTIFIER FNSPAN { $$ = AST::Make<AST::Identifier>(@1, $1 + $2); }
-    | unnamed_mdspan_decl { $$ = $1; }
-    | unnamed_ituple_decl { $$ = $1; }
-    | bool_literal { $$ = $1; }
     ;
 
-general_index
-    : index { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
+int_or_id
+    : integer_value { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
     | IDENTIFIER {
         if (!symtab.Exists($1))
           Parser::error(@1,
             "The symbol `" + $1 + "' has not been defined.");
-
-        auto ty = symtab.GetSymbol($1)->GetType();
-        if (!isa<IntegerType>(ty.get()))
-          Parser::error(@1, "expecting symbol `" + $1 + "' (type: " + ty->Name()
-                            + ") of a integer type.");
-
         $$ = AST::Make<AST::Identifier>(@1, $1);
       }
     ;
 
-gi_list
-    : gi_list COMMA general_index {
+idt_list /* list of integers or ids */
+    : idt_list COMMA int_or_id {
         $1->Append($3);
         $$ = $1;
       }
-    | general_index {
+    | int_or_id {
         $$ = AST::Make<AST::MultiValues>(@1, ", ");
         $$->Append($1);
       }
     ;
 
-bool_literal
-    : TRUE { $$ = AST::Make<AST::Boolean>(@1, "true"); }
-    | FALSE { $$ = AST::Make<AST::Boolean>(@1, "false"); }
-    ;
-
-pred
-    : bool_literal { $$ = $1; }
-    | data_id optional_subscriptions CHUNKINBOUND LPAREN {
-        parsing_chunkat_value_list = true;
-      } value_list RPAREN {
-        // note: normalize will hoist span_as
-        $6->SetDelimiter(", ");
-        $$ = AST::Make<AST::Expr>(@1, "inbound", ReformChunkAt(
-                 AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1,$1), $2, $6)));
-        parsing_chunkat_value_list = false;
-      }
+bool_value
+    : TRUE { $$ = true; }
+    | FALSE { $$ = false; }
     ;
 
 parameter_list
@@ -488,7 +476,6 @@ statement
     | while_block                { $$ = $1; }
     | if_else_block              { $$ = $1; }
     | foreach_block              { $$ = $1; }
-    | increment_block            { $$ = $1; /* TODO: remove? */ }
     ;
 
 sync_stmt
@@ -538,7 +525,7 @@ paraby
         $$->Append(AST::Make<AST::Identifier>(@1, SymbolTable::GetAnonName()));
         $$->Append(AST::Make<AST::IntLiteral>(@2, $2));
       }
-    | IDENTIFIER BY general_index {
+    | IDENTIFIER BY int_or_id {
         if (paraby_symbols.find($1) != paraby_symbols.end())
           Parser::error(@1, "The symbol '" + $1 + "' has been used in the same parallelby block.");
         paraby_symbols.insert($1);
@@ -547,7 +534,7 @@ paraby
         $$->Append(AST::Make<AST::Identifier>(@1, $1));
         $$->Append($3);
       }
-    | IDENTIFIER ASSIGN LBRACE id_list RBRACE BY LBRAKT gi_list RBRAKT {
+    | IDENTIFIER ASSIGN LBRACE id_list RBRACE BY LBRAKT idt_list RBRAKT {
         if (paraby_symbols.find($1) != paraby_symbols.end())
           Parser::error(@1, "The symbol '" + $1 + "' has been used in the same parallelby block.");
         paraby_symbols.insert($1);
@@ -567,7 +554,7 @@ paraby
         $$->Append($4);
         $$->Append($8);
       }
-    | LBRACE id_list RBRACE BY LBRAKT gi_list RBRAKT {
+    | LBRACE id_list RBRACE BY LBRAKT idt_list RBRAKT {
         if ($2->Count() != $6->Count())
           Parser::error(@2, "The number of arguments in parallel bound config "
                         "should be consistent.");
@@ -606,7 +593,6 @@ declarations
 declaration
     : named_mdspan_decl   { $$ = $1; }
     | named_ituple_decl   { $$ = $1; }
-    | spanas_spanned_decl { $$ = $1; }
     ;
 
 multi_decls
@@ -658,9 +644,9 @@ scalar_decl
         $$ = AST::Make<AST::NamedVariableDecl>(@1, $1,
              AST::Make<AST::DataType>(@1, BaseType::UNKNOWN), nullptr, $3);
       }
-    | IDENTIFIER ASSIGN MINUS NUM {
-        $$ = AST::Make<AST::NamedVariableDecl>(@1, $1,
-             AST::Make<AST::DataType>(@1, BaseType::UNKNOWN), nullptr, AST::Make<AST::Expr>(@4, AST::Make<AST::IntLiteral>(@4, -$4)));
+    | IDENTIFIER ASSIGN LBRAKT {
+        Parser::error(@3, "must use '{' and '}' to define an ituple.");
+        YYERROR;
       }
     ;
 
@@ -696,7 +682,7 @@ event_decl
     ;
 
 named_spanned_decls
-    : storage_qual spanned_type spanned_decls {
+    : storage_qual mdspan_as_type spanned_decls {
         for (auto item : $3->AllSubs()) {
           auto decl = cast<AST::NamedVariableDecl>(item);
           symtab.AddSymbol(decl->name_str, $2->GetType());
@@ -736,9 +722,12 @@ optional_array_dims
       }
     ;
 
-optional_subscriptions
-    : /*empty*/ { $$ = AST::Make<AST::MultiValues>(loc); }
-    | optional_subscriptions LBRAKT s_expr RBRAKT {
+subscriptions
+    : LBRAKT s_expr RBRAKT {
+        $$ = AST::Make<AST::MultiValues>(loc);
+        $$->Append($2);
+      }
+    | subscriptions LBRAKT s_expr RBRAKT {
         $1->Append($3);
         $$ = $1;
       }
@@ -765,24 +754,26 @@ span_init_val
       }
     ;
 
-expr_or_qes
-    : g_expr      { $$ = $1; }
-    | QES         { $$ = AST::Make<AST::IntLiteral>(@1); }
-    ; // do not allow non-element
+g_expr /* any expression like 'a[...]' are interpreted as derivation */
+    : { parsing_derivation_decl = true; } s_expr {
+        $$ = $2;
+        parsing_derivation_decl = false;
+      }
+    ;
 
-value_or_qes_list
-    : value_or_qes_list COMMA expr_or_qes {
+value_list /* contains at least one value */
+    : value_list COMMA s_expr {
         $1->Append($3);
         $$ = $1;
       }
-    | expr_or_qes {
+    | s_expr {
         $$ = AST::Make<AST::MultiValues>(@1);
         $$->Append($1);
       }
-    ; // do not allow an empty list
+    ;
 
-value_list
-    : value_list COMMA g_expr {
+g_value_list /* contains at least two value */
+    : g_value_list COMMA g_expr {
         $1->Append($3);
         $$ = $1;
       }
@@ -794,16 +785,8 @@ value_list
 
 template_val
     : NUM { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
-    | IDENTIFIER {
-        if (!symtab.Exists($1))
-          Parser::error(@1,
-            "The symbol `" + $1 + "' has not been defined.");
-
-        $$ = AST::Make<AST::Identifier>(@1, $1);
-      }
-    | IDENTIFIER FNSPAN { $$ = AST::Make<AST::Identifier>(@1, $1 + $2); }
+    | spanid { $$ = AST::Make<AST::Identifier>(@1, $1); }
     ;
-
 
 template_value_expr
     : template_val      { $$ = AST::Make<AST::Expr>(@1, $1); }
@@ -817,7 +800,7 @@ template_value_expr
     | template_value_expr PECET template_value_expr { $$ = AST::Make<AST::Expr>(@1, "%", $1, $3); }
     | CDIV LPAREN template_value_expr COMMA template_value_expr RPAREN { $$ = AST::Make<AST::Expr>(@1, "cdiv", $3, $5); }
     | template_value_expr UBOUND template_value_expr {$$ = AST::Make<AST::Expr>(@1, "#", $1, $3); }
-    | template_value_expr LPAREN general_index RPAREN {
+    | template_value_expr LPAREN int_or_id RPAREN {
         $$ = AST::Make<AST::Expr>(@1, "dimof", $1, AST::Make<AST::IntIndex>(@3, $3));
       }
     ;
@@ -842,81 +825,59 @@ template_params
       }
     ;
 
+spanid
+    : IDENTIFIER FNSPAN { $$ = $1 + $2; }
+    | IDENTIFIER { $$ = $1; }
+    ;
+
 mdspan_derivation
-    : IDENTIFIER FNSPAN LBRAKT { parsing_prefixed_list = true; }
-      value_list RBRAKT {
-        $$ = AST::Make<AST::MultiDimSpans>(@1, $1, $5);
-        parsing_prefixed_list = false;
-      }
-    | IDENTIFIER LBRAKT { parsing_prefixed_list = true; }
-      value_list RBRAKT {
+    : IDENTIFIER LBRAKT { parsing_derivation_decl = true; } value_list RBRAKT {
         $$ = AST::Make<AST::MultiDimSpans>(@1, $1, $4);
-        parsing_prefixed_list = false;
+        parsing_derivation_decl = false;
+      }
+    | IDENTIFIER FNSPAN LBRAKT { parsing_derivation_decl = true; } value_list RBRAKT {
+        $$ = AST::Make<AST::MultiDimSpans>(@1, $1, $5);
+        parsing_derivation_decl = false;
       }
     ;
 
-unnamed_mdspan_decl
-    : LBRAKT value_list RBRAKT {
-        $$ = AST::Make<AST::MultiDimSpans>(@1, "", $2);
+mdspan_list
+    : LBRAKT { parsing_derivation_decl = true; } value_list RBRAKT {
+        $$ = AST::Make<AST::MultiDimSpans>(@1, "", $3);
+        parsing_derivation_decl = false;
       }
-    ;
-
-g_expr
-    : s_expr { $$ = $1; }
-    | mdspan_derivation { $$ = AST::Make<AST::Expr>(@1, $1); }
-    ;
-
-span_val
-    : unnamed_mdspan_decl { $$ = $1; }
-    | mdspan_derivation { $$ = $1; }
-    | IDENTIFIER { $$ = AST::Make<AST::Identifier>(@1, $1); }
-    | IDENTIFIER FNSPAN { $$ = AST::Make<AST::Identifier>(@1, $1 + $2); }
     ;
 
 named_mdspan_decl
-    : MDSPAN IDENTIFIER COL g_expr {
+    : MDSPAN IDENTIFIER COL { parsing_derivation_decl = true; } s_expr {
         symtab.AddSymbol($2, MakeUninitMDSpanType());
-        $$ = AST::Make<AST::NamedTypeDecl>(@2, $2, $4);
+        $$ = AST::Make<AST::NamedTypeDecl>(@2, $2, $5);
+        parsing_derivation_decl = false;
       }
-    | MDSPAN LT NUM GT IDENTIFIER COL g_expr {
+    | MDSPAN LT NUM GT IDENTIFIER COL { parsing_derivation_decl = true; } s_expr {
         symtab.AddSymbol($5, MakeRankedMDSpanType($3));
-        $$ = AST::Make<AST::NamedTypeDecl>(@5, $5, $7, $3);
+        $$ = AST::Make<AST::NamedTypeDecl>(@5, $5, $8, $3);
+        parsing_derivation_decl = false;
       }
-    | IDENTIFIER COL g_expr {
+    | IDENTIFIER COL { parsing_derivation_decl = true; } s_expr {
         symtab.AddSymbol($1, MakeUninitMDSpanType());
-        $$ = AST::Make<AST::NamedTypeDecl>(@1, $1, $3);
+        $$ = AST::Make<AST::NamedTypeDecl>(@1, $1, $4);
+        parsing_derivation_decl = false;
+      }
+    | MDSPAN IDENTIFIER ASSIGN {
+        Parser::error(@3, "must use ':' to initialize a mdspan.");
+        YYERROR;
+      }
+    | MDSPAN LT NUM GT IDENTIFIER ASSIGN {
+        Parser::error(@3, "must use ':' to initialize a mdspan.");
+        YYERROR;
       }
     ;
 
-unnamed_ituple_decl
-    : sugarless_unnamed_ituple_decl { $$ = $1; }
-    | sugar_unnamed_ituple_decl     { $$ = $1; }
-    ;
-
-sugar_unnamed_ituple_decl
-    : IDENTIFIER LBRACE { parsing_prefixed_list = true; }
-      value_or_qes_list RBRACE {
-        // anchor
-        if (!symtab.Exists($1))
-          Parser::error(@1, "The symbol '" + $1 + "` has not been defined.");
-
-        $4->SetDelimiter(", ");
-        $$ = AST::Make<AST::IntTuple>(@1, $1, $4);
-        parsing_prefixed_list = true;
-      }
-    ;
-
-sugarless_unnamed_ituple_decl
-    : LBRACE value_list RBRACE {
+ituple_list
+    : LBRACE g_value_list RBRACE {
         $2->SetDelimiter(", ");
         $$ = AST::Make<AST::IntTuple>(@1, "", $2);
-      }
-    ;
-
-direct_ituple_val
-    : sugarless_unnamed_ituple_decl { $$ = $1; }
-    | IDENTIFIER {
-        $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1));
       }
     ;
 
@@ -931,28 +892,35 @@ named_ituple_decl
         $$ = AST::Make<AST::NamedVariableDecl>(@5,
               $5, AST::Make<AST::DataType>(@1, BaseType::ITUPLE, $3), nullptr, $7);
       }
+    | ITUPLE IDENTIFIER COL {
+        Parser::error(@3, "must use '=' to initialize an ituple.");
+        YYERROR;
+      }
+    | ITUPLE IDENTIFIER LBRAKT s_expr RBRAKT {
+        Parser::error(@2, "no ituple array is allowed.");
+        YYERROR;
+      }
+    | ITUPLE IDENTIFIER {
+        Parser::error(@2, "an ituple must be initialized.");
+        YYERROR;
+      }
     ; // do not allow uninitialized ituple
 
+/*
 spanas_spanned_decl
-    : IDENTIFIER ASSIGN IDENTIFIER optional_subscriptions span_as {
+    : IDENTIFIER ASSIGN { ignore_fndata = true; } ids_expr span_as {
         symtab.AddSymbol($1, MakeUnknownType());
-        $5->id = AST::Make<AST::Identifier>(@3, $3);
+        auto ide = ElementMultiValues($4);
+        $5->id = ide.first;
         auto expr = AST::Make<AST::Expr>(@1, $5);
         $$ = AST::Make<AST::NamedVariableDecl>(@1,
               $1, AST::Make<AST::DataType>(@1, BaseType::UNKNOWN), nullptr, expr);
         // TODO: make it a named variable instead of expr assignment
         // $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, $5, $4);
-      }
-    | IDENTIFIER ASSIGN IDENTIFIER FNDATA span_as {
-        symtab.AddSymbol($1, MakeUnknownType());
-        $5->id = AST::Make<AST::Identifier>(@3, $3);
-        auto expr = AST::Make<AST::Expr>(@1, $5);
-        $$ = AST::Make<AST::NamedVariableDecl>(@1,
-              $1, AST::Make<AST::DataType>(@1, BaseType::UNKNOWN), nullptr, expr);
-        // TODO: make it a named variable instead of expr assignment
-        // $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, $5);
+        ignore_fndata = false;
       }
     ;
+*/
 
 storage
     : LOCAL   { $$ = $1; }
@@ -986,6 +954,16 @@ assignment
           $$ = AST::Make<AST::Assignment>(@2, $1, $3);
         }
       }
+    | IDENTIFIER ASSIGN ids_expr span_as {
+        symtab.AddSymbol($1, MakeUnknownType());
+        auto ide = ElementMultiValues($3);
+        $4->id = ide.first;
+        auto expr = AST::Make<AST::Expr>(@1, $4);
+        $$ = AST::Make<AST::NamedVariableDecl>(@1,
+              $1, AST::Make<AST::DataType>(@1, BaseType::UNKNOWN), nullptr, expr);
+        // TODO: make it a named variable instead of expr assignment
+        // $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, $5, $4);
+      }
     | IDENTIFIER arith_operation ASSIGN s_expr {
         if (!symtab.Exists($1)) {
           Parser::error(@1, "The symbol '" + $1 + "` has not been defined.");
@@ -1017,8 +995,13 @@ assignment
                 AST::Make<AST::Expr>(@2, $2, AST::Make<AST::Expr>(@1, $1), $4));
         }
       }
+    | IDENTIFIER ASSIGN LBRAKT {
+        Parser::error(@3, "must use '{' and '}' to define an ituple.");
+        YYERROR;
+      }
     ;
 
+/* simple expression: no ambiguity with [] */
 s_expr
     : s_expr PLUS s_expr { $$ = AST::Make<AST::Expr>(@1, "+", $1, $3); }
     | s_expr MINUS s_expr { $$ = AST::Make<AST::Expr>(@1, "-", $1, $3); }
@@ -1037,7 +1020,7 @@ s_expr
     | NOT s_expr { $$ = AST::Make<AST::Expr>(@1, "!", $2); }
     | LPAREN s_expr RPAREN {
         // Does String "(0)" represent an indexing operation or an arithmetic operation
-        if (!parsing_prefixed_list) {
+        if (!parsing_derivation_decl) {
           $$ = $2;
           break;
         }
@@ -1068,48 +1051,67 @@ s_expr
     | s_expr NE s_expr { $$ = AST::Make<AST::Expr>(@1, "!=", $1, $3); }
     | s_expr LE s_expr { $$ = AST::Make<AST::Expr>(@1, "<=", $1, $3); }
     | s_expr GE s_expr { $$ = AST::Make<AST::Expr>(@1, ">=", $1, $3); }
-    | general_val      { $$ = AST::Make<AST::Expr>(@1, $1); }
+    | simple_val       { $$ = AST::Make<AST::Expr>(@1, $1); }
+    | ituple_list      { $$ = AST::Make<AST::Expr>(@1, $1); }
+    | mdspan_list      { $$ = AST::Make<AST::Expr>(@1, $1); }
+    | dataid_expr      { $$ = $1; }
+    | subscript_like_expr { $$ = $1; }
     | PIPE s_expr PIPE { $$ = AST::Make<AST::Expr>(@1, "sizeof", $2); }
-    | s_expr LPAREN general_index RPAREN {
+    | s_expr LPAREN int_or_id RPAREN {
         $$ = AST::Make<AST::Expr>(@1, "dimof", $1, AST::Make<AST::IntIndex>(@3, $3));
       }
     | UBOUND IDENTIFIER {
         $$ = AST::Make<AST::Expr>(@1, "ubound", AST::Make<AST::Identifier>(@2, $2));
       }
-    | IDENTIFIER PPLUS {
-        $$ = AST::Make<AST::Expr>(@1, "++", AST::Make<AST::Identifier>(@1, $1));
+    | PPLUS IDENTIFIER {
+        $$ = AST::Make<AST::Expr>(@1, "++", AST::Make<AST::Identifier>(@1, $2));
       }
-    | IDENTIFIER MMINUS {
-        $$ = AST::Make<AST::Expr>(@1, "--", AST::Make<AST::Identifier>(@1, $1));
+    | MMINUS IDENTIFIER {
+        $$ = AST::Make<AST::Expr>(@1, "--", AST::Make<AST::Identifier>(@1, $2));
       }
     | data_element { $$ = AST::Make<AST::Expr>(@1, $1); }
     ;
 
-span_expr
-    : span_expr PLUS  direct_ituple_val { $$ = AST::Make<AST::Expr>(@1, "+", $1, $3); }
-    | span_expr MINUS direct_ituple_val { $$ = AST::Make<AST::Expr>(@1, "-", $1, $3); }
-    | span_expr STAR  direct_ituple_val { $$ = AST::Make<AST::Expr>(@1, "*", $1, $3); }
-    | span_expr SLASH direct_ituple_val { $$ = AST::Make<AST::Expr>(@1, "/", $1, $3); }
-    | span_expr PECET direct_ituple_val { $$ = AST::Make<AST::Expr>(@1, "%", $1, $3); }
-    | span_val { $$ = AST::Make<AST::Expr>(@1, $1); }
+mdspan_expr
+    : mdspan_expr PLUS  mdspan_expr { $$ = AST::Make<AST::Expr>(@1, "+", $1, $3); }
+    | mdspan_expr MINUS mdspan_expr { $$ = AST::Make<AST::Expr>(@1, "-", $1, $3); }
+    | mdspan_expr STAR  mdspan_expr { $$ = AST::Make<AST::Expr>(@1, "*", $1, $3); }
+    | mdspan_expr SLASH mdspan_expr { $$ = AST::Make<AST::Expr>(@1, "/", $1, $3); }
+    | mdspan_expr PECET mdspan_expr { $$ = AST::Make<AST::Expr>(@1, "%", $1, $3); }
+    | mdspan_operator { $$ = $1; }
     ;
 
-id_expr
-    : IDENTIFIER { $$ = AST::MakeIdExpr(@1, $1); }
-    | IDENTIFIER FNDATA {
-        $$ = AST::Make<AST::Expr>(@1, "dataof", AST::MakeIdExpr(@1, $1));
+mdspan_operator
+    : mdspan_val_expr { $$ = $1; }
+    | ituple_list { $$ = AST::Make<AST::Expr>(@1, $1); }
+    | integer_value { $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::IntLiteral>(@1, $1)); }
+/*    | spanid LPAREN int_or_id RPAREN {
+        auto id_expr = AST::MakeIdExpr(@1, $1);
+        auto idx = AST::Make<AST::IntIndex>(@3, $3);
+        $$ = AST::Make<AST::Expr>(@1, "dimof", id_expr, idx);
       }
+    | UBOUND IDENTIFIER {
+        $$ = AST::Make<AST::Expr>(@1, "ubound", AST::Make<AST::Identifier>(@2, $2));
+      } */
     ;
 
-future_data_list
-    : future_data_list COMMA id_expr {
-        $1->Append($3);
-        $$ = $1;
-      }
-    | id_expr {
-        $$ = AST::Make<AST::MultiValues>(@1);
-        $$->SetDelimiter(", ");
-        $$->Append($1);
+unamed_mdspan_decl
+    : mdspan_list       { $$ = $1; }
+    | mdspan_derivation { $$ = $1; }
+    ;
+
+mdspan_val_expr
+    : unamed_mdspan_decl { $$ = AST::Make<AST::Expr>(@1, $1); }
+    | spanid { $$ = AST::MakeIdExpr(@1, $1); }
+    ;
+
+dataid_expr
+    : IDENTIFIER FNDATA {
+        if (ignore_fndata) {
+          $$ = AST::MakeIdExpr(@1, $1);
+        } else {
+          $$ = AST::Make<AST::Expr>(@1, "dataof", AST::MakeIdExpr(@1, $1));
+        }
       }
     ;
 
@@ -1153,18 +1155,8 @@ inthreads_block
       }
     ;
 
-ie_expr
-    : id_or_elem {
-        if (isa<AST::Identifier>($1)) $$ = AST::Make<AST::Expr>(@1, $1);
-        else $$ = cast<AST::Expr>($1);
-      }
-    | NOT ie_expr { $$ = AST::Make<AST::Expr>(@1, "!", $2); }
-    | ie_expr OR ie_expr { $$ = AST::Make<AST::Expr>(@1, "||", $1, $3); }
-    | ie_expr AND ie_expr { $$ = AST::Make<AST::Expr>(@1, "&&", $1, $3); }
-    ;
-
 while_block
-    : WHILE LPAREN ie_expr RPAREN stmts_block {
+    : WHILE LPAREN s_expr RPAREN stmts_block {
         $$ = AST::Make<AST::WhileBlock>(@1, $3, $5);
       }
     ;
@@ -1191,21 +1183,18 @@ withins
     ; /* do not allow empty within */
 
 within
-    : IDENTIFIER IN NUM {
-        // TODO: should we upgrade `NUM` to `s_expr`?
-        symtab.AddSymbol($1, MakeUnknownType()/*Need inference*/);
-        $$ = AST::Make<AST::WithIn>(@1, AST::Make<AST::Identifier>(@1,$1), AST::Make<AST::IntLiteral>(@3, $3));
-      }
-    | IDENTIFIER IN span_expr {
+    : IDENTIFIER IN mdspan_expr {
         symtab.AddSymbol($1, MakeUnknownType()/*Need inference*/);
         $$ = AST::Make<AST::WithIn>(@1, AST::Make<AST::Identifier>(@1,$1), $3);
       }
-    | IDENTIFIER ASSIGN LBRACE with_matchers RBRACE IN span_expr {
+    | IDENTIFIER ASSIGN LBRACE with_matchers RBRACE IN mdspan_expr {
         symtab.AddSymbol($1, MakeUnknownType()/*Need inference*/);
         $$ = AST::Make<AST::WithIn>(@1, AST::Make<AST::Identifier>(@1,$1), $7, $4);
+        parsing_derivation_decl = false;
       }
-    | LBRACE with_matchers RBRACE IN span_expr {
+    | LBRACE with_matchers RBRACE IN mdspan_expr {
         $$ = AST::Make<AST::WithIn>(@1, $5, $2); // no identifier
+        parsing_derivation_decl = false;
       }
     ;
 
@@ -1242,12 +1231,6 @@ foreach_block
       }
     ;
 
-increment_block
-    : INCR id_list WHILE pred stmts_block {
-        $$ = AST::Make<AST::IncrementBlock>(@1, $2, $4, $5);
-      }
-    ;
-
 range_exprs
     : range_exprs COMMA range_expr  {
         $1->Append($3);
@@ -1259,19 +1242,18 @@ range_exprs
       }
     ; /* do not allow the empty ivs */
 
-index
+integer_value
     : NUM { $$ = $1; }
     | MINUS NUM { $$ = -$2; }
     ;
 
 index_or_none
-    : index { $$ = $1; }
+    : integer_value { $$ = $1; }
     | /*nothing*/ { $$ = GetInvalidBound(); }
     ;
 
 bound_expr
-    : g_expr { $$ = $1; }
-    | MINUS NUM { $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::IntLiteral>(@1, -$2)); }
+    : s_expr { $$ = $1; }
     | /*nothing*/ { $$ = nullptr; }
     ;
 
@@ -1339,60 +1321,50 @@ sync_type
     ;
 
 chunkat_or_storage_or_select
-    : chunkat_expr { $$ = $1; }
+    : { ignore_fndata = true; } chunkat_expr { $$ = $2; ignore_fndata = false; }
     | storage      { $$ = AST::Make<AST::Memory>(@1, $1); }
     | select_expr  { $$ = $1; }
     ;
 
-data_id
-    : IDENTIFIER { $$ = $1; }
-    | IDENTIFIER FNDATA { $$ = $1; /* ignore '.data' */ }
-    ;
-
 span_as
-    : FNSPANAS LPAREN LBRAKT value_list RBRAKT RPAREN {
+    : FNSPANAS LPAREN LBRAKT g_value_list RBRAKT RPAREN {
         $$ = AST::Make<AST::SpanAs>(@1, nullptr/*fill later*/, $4);
+        parsing_derivation_decl = false;
       }
     ;
 
 chunkat_expr
-    : sub_data_expr { $$ = $1; }
-    | data_id optional_subscriptions {
+    : subdata_expr { $$ = $1; }
+    | ids_expr {
+        auto ide = ElementMultiValues($1);
         $$ = ReformChunkAt(
-          AST::Make<AST::ChunkAt>(@1, AST::Make<AST::Identifier>(@1, $1), $2));
+          AST::Make<AST::ChunkAt>(@1, ide.first, ide.second));
       }
-    | data_id optional_subscriptions span_as {
-        $3->id = AST::Make<AST::Identifier>(@1, $1);
-        $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, $3, $2));
+    | ids_expr span_as {
+        auto ide = ElementMultiValues($1);
+        $2->id = ide.first;
+        $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, $2, ide.second));
       }
     ;
 
-sub_data_expr
-    : data_id optional_subscriptions CHUNKAT LPAREN {
-        parsing_chunkat_value_list = true;
-      } value_list RPAREN {
-        $6->SetDelimiter(", ");
-        auto id = AST::Make<AST::Identifier>(@1, $1);
-        $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, id, $2, $6));
-        parsing_chunkat_value_list = false;
+subdata_expr
+    : ids_expr CHUNKAT LPAREN value_list RPAREN {
+        $4->SetDelimiter(", ");
+        auto ide = ElementMultiValues($1);
+        $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, ide.first, ide.second, $4));
       }
-    | data_id optional_subscriptions CHUNK LPAREN {
-        parsing_chunkat_value_list = true;
-      } value_list RPAREN AT LPAREN value_list RPAREN {
-        $6->SetDelimiter(", ");
-        $10->SetDelimiter(", ");
-        auto id = AST::Make<AST::Identifier>(@1, $1);
-        $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, id, $2, $10, $6));
-        parsing_chunkat_value_list = false;
+    | ids_expr CHUNK LPAREN value_list RPAREN AT LPAREN value_list RPAREN {
+        $4->SetDelimiter(", ");
+        $8->SetDelimiter(", ");
+        auto ide = ElementMultiValues($1);
+        $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, ide.first, ide.second, $8, $4));
       }
-    | data_id optional_subscriptions span_as CHUNKAT LPAREN  {
-        parsing_chunkat_value_list = true;
-      } value_list RPAREN {
+    | ids_expr span_as CHUNKAT LPAREN value_list RPAREN {
         // note: normalize will hoist span_as
-        $7->SetDelimiter(", ");
-        $3->id = AST::Make<AST::Identifier>(@1,$1);
-        $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, $3, $2, $7));
-        parsing_chunkat_value_list = false;
+        $5->SetDelimiter(", ");
+        auto ide = ElementMultiValues($1);
+        $2->id = ide.first;
+        $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, $2, ide.second, $5));
       }
     ;
 
@@ -1417,7 +1389,8 @@ data_indices
     ;
 
 select_expr
-    : SELECT LPAREN g_expr COMMA future_data_list RPAREN {
+    : SELECT LPAREN s_expr COMMA value_list RPAREN {
+        $5->SetDelimiter(", ");
         $$ = AST::Make<AST::Select>(@1, $3, $5);
       }
     ;
@@ -1460,17 +1433,11 @@ device_passables
 
 device_passable
     : s_expr { $$ = $1; }
-    | IDENTIFIER FNDATA {
-        $$ = AST::Make<AST::Expr>(@1, "dataof",
-               AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1))); }
-    | sub_data_expr { $$ = AST::Make<AST::Expr>(@1, $1); }
+    | subdata_expr { $$ = AST::Make<AST::Expr>(@1, $1); }
     ;
 
 returnable
-    : g_expr { $$ = $1; }
-    | IDENTIFIER FNDATA {
-        $$ = AST::Make<AST::Expr>(@1, "dataof",
-               AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1))); }
+    : s_expr { $$ = $1; }
     ;
 
 with_matchers /* TODO: this special case is pattern-match ids for with-block */
@@ -1486,40 +1453,94 @@ with_matchers /* TODO: this special case is pattern-match ids for with-block */
       }
     ;
 
-id_or_elem
-    : IDENTIFIER optional_subscriptions {
-        if ($2->Count() == 0) {
-          $$ = AST::Make<AST::Identifier>(@1, $1);
-        } else {
-          AST::ptr<AST::Expr> expr = nullptr;
-          for (auto e : $2->AllValues()) {
-            if (expr == nullptr)
-              expr = AST::Make<AST::Expr>(@1, "elemof", AST::Make<AST::Identifier>(@1, $1), e);
-            else
-              expr = AST::Make<AST::Expr>(@1, "elemof", expr, e);
-          }
-          $$ = expr;
-        }
+ids_expr /* enforce: either a ref to id or a subscription */
+    : s_expr {
+        if ($1->IsReference()) {
+          if (!$1->GetSymbol())
+            Parser::error($1->LOC(), "expect a symbol but got a " + $1->GetR()->TypeNameString() + ".");
+          $$ = $1;
+        } else if ($1->op == "dataof") {  // ignore the dataof
+          auto er = cast<AST::Expr>($1->GetR());
+          if ((er->op == "elemof") || (er->GetSymbol()))
+            $$ = er;
+          else
+            Parser::error($1->LOC(), "expect a subscription but got a " + $1->op + ".");
+        } else if ($1->op != "elemof") {
+          Parser::error($1->LOC(), "expect a subscription but got a " + $1->op + ".");
+        } else
+          $$ = $1;
       }
     ;
 
-ide_list
-    : ide_list COMMA id_or_elem {
+subscript_like_expr /* for multi-dim element accesses and also mdspan derivations */
+    : IDENTIFIER LBRAKT s_expr RBRAKT {
+        if (parsing_derivation_decl) {  /* mdspan */
+          $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::MultiDimSpans>(@1, $1, $3));
+        } else {
+          $$ = AST::Make<AST::Expr>(@1, "elemof", AST::Make<AST::Identifier>(@1, $1), $3);
+        }
+      }
+    | IDENTIFIER LBRAKT s_expr RBRAKT subscriptions {
+        if (parsing_derivation_decl)
+          Parser::error(@3, "must use 'a[(1), (2), ...]' for mdspan derivations.");
+
+        assert ($5->Count() > 0);
+        $5->Insert($3, 0);
+        AST::ptr<AST::Expr> expr = nullptr;
+        for (auto e : $5->AllValues()) {
+          if (expr == nullptr)
+            expr = AST::Make<AST::Expr>(@1, "elemof", AST::Make<AST::Identifier>(@1, $1), e);
+          else
+            expr = AST::Make<AST::Expr>(@1, "elemof", expr, e);
+        }
+        $$ = expr;
+      }
+    | IDENTIFIER FNSPAN LBRAKT s_expr RBRAKT subscriptions {
+        Parser::error(@3, "must use 'a.span[(1), (2), ...]' for mdspan derivations.");
+        YYERROR;
+      }
+    | IDENTIFIER LBRAKT s_expr COMMA value_list RBRAKT {
+        if (!parsing_derivation_decl)
+          Parser::error(@3, "must use '[a][2]...' for multi-dimensional array access.");
+        $5->Insert($3, 0);
+        $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::MultiDimSpans>(@1, $1, $5));
+      }
+    | IDENTIFIER FNSPAN LBRAKT s_expr COMMA value_list RBRAKT {
+        if (!parsing_derivation_decl)
+          Parser::error(@3, "must use '[a][2]...' for multi-dimensional array access.");
+        $6->Insert($4, 0);
+        $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::MultiDimSpans>(@1, $1, $6));
+      }
+/*
+    | IDENTIFIER LBRACE s_expr RBRACE {
+        if (!parsing_derivation_decl)
+          Parser::error(@3, "must use 'a{(1)}' for ituple derivations.");
+        $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::MultiDimSpans>(@1, $1, $3));
+      }
+*/
+    | IDENTIFIER LBRACE g_value_list RBRACE {
+        $3->SetDelimiter(", ");
+        $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::IntTuple>(@1, $1, $3));
+      }
+    ;
+
+ids_list
+    : ids_list COMMA ids_expr {
         $1->Append($3);
         $$ = $1;
       }
-    | id_or_elem {
+    | ids_expr {
         $$ = AST::Make<AST::MultiValues>(@1, ", ");
         $$->Append($1);
       }
     ;
 
 wait_stmt
-    : WAIT ide_list { $$ = AST::Make<AST::Wait>(@1, $2); }
+    : WAIT ids_list { $$ = AST::Make<AST::Wait>(@1, $2); }
     ;
 
 trigger_stmt
-    : TRIGGER ide_list { $$ = AST::Make<AST::Trigger>(@1, $2); }
+    : TRIGGER ids_list { $$ = AST::Make<AST::Trigger>(@1, $2); }
     ;
 
 builtin_print_func
@@ -1536,7 +1557,7 @@ call_stmt
         $$ = AST::Make<AST::Call>(@1,
                 AST::Make<AST::Identifier>(@2, $2), $5, $3);
       }
-    | ASSERT LPAREN g_expr COMMA STRING RPAREN {
+    | ASSERT LPAREN s_expr COMMA STRING RPAREN {
         auto mv = AST::Make<AST::MultiValues>(@1, ", ");
         mv->Append($3);
         mv->Append(AST::Make<AST::StringLiteral>(@5, $5));
@@ -1562,6 +1583,26 @@ swap_stmt
 
 %%
 
+std::pair<ptr<AST::Identifier>, ptr<AST::MultiValues>>
+ElementMultiValues(const ptr<AST::Expr>&e) {
+  auto mv = AST::Make<AST::MultiValues>(e->LOC());
+  ptr<AST::Identifier> id = nullptr;
+  if (e->IsReference()) {
+    id = cast<AST::Identifier>(e->GetR());
+  } else {
+    auto we = e;
+    while (true) {
+      if (we->op != "elemof")
+        choreo_unreachable("unable to handle this expr: " + PSTR(e));
+      mv->Insert(e->GetR(), 0);
+      if (id = dyn_cast<AST::Identifier>(e->GetL()))
+        break;
+      else
+        we = cast<AST::Expr>(e->GetL());
+    }
+  }
+  return std::make_pair(id, mv);
+}
 
 ptr<AST::MultiNodes> ConstructPBRecursively(size_t idx,
                                             const ptr<AST::MultiNodes>& ps,
@@ -1583,9 +1624,9 @@ inline ptr<AST::ChunkAt> ReformChunkAt(const ptr<AST::ChunkAt> &ca) {
 
   bool not_tiled = true;
   for (auto pos : ca->positions->values) {
-    if (auto biv = AST::GetIdentifier(*pos)) {
-      if (biv->name == "_") {
-        biv->name = "__choreo_no_tiling__";
+    if (auto bpv = AST::GetIdentifier(*pos)) {
+      if (bpv->name == "_") {
+        bpv->name = "__choreo_no_tiling__";
         continue;
       }
     }

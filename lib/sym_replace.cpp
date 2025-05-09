@@ -149,7 +149,7 @@ void SymReplace::InitializeNode(ptr<AST::Node> n) {
     if (isa<AST::Identifier>(ii->value)) InitializeNode(ii->value);
   } else if (isa<AST::SpanAs>(n)) {
   } else if (auto b = dyn_cast<AST::Boolean>(n)) {
-    InsertNdSnSymMap(n, b->value, false);
+    InsertNdSnSymMap(n, PSTR(b), false);
   } else if (isa<AST::ChunkAt>(n)) {
   } else {
     choreo_unreachable("The node of type " + PSTR(n->GetType()) +

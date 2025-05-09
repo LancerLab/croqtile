@@ -4,5 +4,5 @@ __co__ auto illegal_mdspan() {
   mdspan it = [7, 8];  // must init with ":"
 }
 
-// CHECK: error: syntax error, unexpected =, expecting :
+// CHECK: error: must use ':' to initialize a mdspan.
 // CHECK-NOT: error:

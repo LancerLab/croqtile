@@ -382,7 +382,8 @@ public:
     if (kind != Kind::T_SWAP) return true;
     if (cur_swaps.empty()) return true;
     if (n.ranges->Count() > 1)
-      choreo_unreachable("swapping inside multi-bounds is yet to support.");
+      choreo_unreachable(
+          "swapping inside multi-cmpt_bounds is yet to support.");
 
     auto& ranges = n.GetRanges();
     auto iv_name = cast<AST::LoopRange>(ranges[0])->iv->name;

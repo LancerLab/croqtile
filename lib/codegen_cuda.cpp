@@ -384,7 +384,7 @@ bool CUDACodeGen::Visit(AST::ParallelBy& by) {
   // TODO(albert): impl begin/end/next for support auto val : by.iv_list
 
   for (size_t idx = 0; idx < by.dims; idx++) {
-    fs << STR(by.bounds->ValueAt(idx));
+    fs << STR(by.cmpt_bounds->ValueAt(idx));
     fs << (idx == by.dims - 1 ? "" : ", ");
   }
   fs << ");\n";
@@ -447,7 +447,7 @@ bool CUDACodeGen::Visit(AST::ParallelBy& by) {
   builtins[2] = "blockIdx.z";
 
   for (size_t idx = 0; idx < by.dims; idx++)
-    fs << this->indent << "auto " << STR(by.iv_symbols->ValueAt(idx))
+    fs << this->indent << "auto " << STR(by.cmpt_bpvs->ValueAt(idx))
        << " = IndexDyn(" << builtins[idx] << ");\n";
 
   fs << this->indent << "auto tid_x = IndexDyn(threadIdx.x);\n";

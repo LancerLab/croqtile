@@ -119,7 +119,7 @@ private:
   virtual void TraceEachVisit(AST::Node& n, bool detail = false,
                               const std::string& m = "") const {
     if (!trace_visit) return;
-    if (detail)
+    if (detail && !n.IsBlock())
       dbgs() << m << STR(n) << "\n";
     else
       dbgs() << m << n.TypeNameString() << "\n";

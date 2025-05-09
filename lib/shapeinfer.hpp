@@ -175,6 +175,7 @@ public:
     if (gen_values) {
       int valNo = vn.GenerateValueNumberForNode(n);
       cur_vn = valNo;
+      cur_mdspan_vn = cur_vn;
     } else
       InvalidateVN(cur_vn);
     return true;
@@ -380,7 +381,7 @@ public:
       } else
         n.SetRank(vl.Rank());
 
-      // pass the value number over
+      // pass the list value number over
       cur_mdspan_vn = cur_vn;
     } else if (n.Rank() > 0) {
       std::string unknown_spans = "#" + std::to_string(UnknownValue());
@@ -725,11 +726,11 @@ public:
     Shape s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
     n.SetType(MakeMDSpanType(s));
 
-    std::string iv_name = SSTab().ScopedName("@" + n.biv->name);
+    std::string iv_name = SSTab().ScopedName("@" + n.bpv->name);
     vn.AssociateSignatureWithValueNumber(iv_name, cur_vn);
-    n.biv->SetType(MakeBoundedITupleType(s, "pv"));
-    SSTab().DefineSymbol("@" + n.biv->name, MakeMDSpanType(s));
-    SSTab().DefineSymbol(n.biv->name, n.biv->GetType());
+    n.bpv->SetType(MakeBoundedITupleType(s, "pv"));
+    SSTab().DefineSymbol("@" + n.bpv->name, MakeMDSpanType(s));
+    SSTab().DefineSymbol(n.bpv->name, n.bpv->GetType());
 
     std::map<size_t, std::string> idx2dim;
     idx2dim[0] = "x";
@@ -790,7 +791,7 @@ public:
              "no valid value number generated for the mdspan.");
       if (n.with_matchers)
         if (n.with_matchers->Count() != mds->Rank()) {
-          Error(n.LOC(), "inconsistent with-in values and bounds.");
+          Error(n.LOC(), "inconsistent with-in values and cmpt_bounds.");
           error_count++;
           return false;
         }
@@ -1069,24 +1070,24 @@ public:
     int index = -1;
     for (auto pos : n.positions->values) {
       ++index;
-      auto biv = dyn_cast<AST::Identifier>(pos);
-      if (!biv) {
+      auto bpv = dyn_cast<AST::Identifier>(pos);
+      if (!bpv) {
         auto expr = cast<AST::Expr>(pos);
         assert(expr->op == "getith");
-        biv = cast<AST::Expr>(expr->GetL())->GetSymbol();
+        bpv = cast<AST::Expr>(expr->GetL())->GetSymbol();
       }
-      assert(biv && "failed to obtain the identifier.");
+      assert(bpv && "failed to obtain the identifier.");
       int bound_vn = GetInvalidValueNumber();
-      if (n.bounds) {
+      if (n.cmpt_bounds) {
         // when explicit bound exists
-        auto bnode = n.bounds->ValueAt(index);
+        auto bnode = n.cmpt_bounds->ValueAt(index);
         if (isa<AST::IntLiteral>(AST::Ref(bnode)))
           bound_vn =
               vn.GetOrInsertValueNumberFromSignature("const_" + STR(*bnode));
         else
           bound_vn = vn.GenerateValueNumberForNode(*bnode);
       } else {
-        auto bound_name = SSTab().InScopeName("@" + biv->name);
+        auto bound_name = SSTab().InScopeName("@" + bpv->name);
         bound_vn = vn.GetValueNumberOfSignature(bound_name);
       }
       std::string bound_sn = vn.GetSignatureFromValueNumber(bound_vn);
@@ -1119,7 +1120,7 @@ public:
           error_count++;
         }
       } else {
-        // multiple bounds
+        // multiple cmpt_bounds
         ProcessValueNumberString(bound_sn, [this, &GetDimValNO,
                                             &AppendSignature, &dim_index,
                                             &dim_count, &n](int valno, size_t) {

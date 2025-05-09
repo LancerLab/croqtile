@@ -1202,7 +1202,8 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
   bool local_in_warp = false, shared_in_block = false;
   for (auto& f : n.GetTargets()) {
     if (!isa<FutureType>(NodeType(*f))) continue;
-    auto name = cast<AST::Identifier>(f)->name;
+    assert(cast<AST::Expr>(f)->GetSymbol());
+    auto name = cast<AST::Expr>(f)->GetSymbol()->name;
     shared_in_block |= IsFutureBlockShared(InScopeName(name));
     local_in_warp |= IsFutureWarpLocal(InScopeName(name));
   }
@@ -1218,8 +1219,8 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
   }
 
   for (auto& f : n.GetTargets()) {
-    auto expr = dyn_cast<AST::Expr>(f);
-    bool is_array_ref = (expr != nullptr);
+    auto expr = cast<AST::Expr>(f);
+    bool is_array_ref = (expr->op == "elemof");
     if (isa<FutureType>(NodeType(*f))) {
       ds << d_indent << ExprSTR(f, false) << ".wait();\n";
     } else if (auto ety = dyn_cast<EventArrayType>(NodeType(*f))) {
@@ -1299,8 +1300,8 @@ bool TopsccCodeGen::Visit(AST::Trigger& n) {
   TraceEachVisit(n);
 
   for (auto& f : n.GetEvents()) {
-    auto expr = dyn_cast<AST::Expr>(f);
-    bool is_array_ref = (expr != nullptr);
+    auto expr = cast<AST::Expr>(f);
+    bool is_array_ref = (expr->op == "elemof");
     assert(IsSymbolOrArrayRef(*f) &&
            "expect either symbol or array reference.");
     if (auto ety = dyn_cast<EventArrayType>(NodeType(*f))) {

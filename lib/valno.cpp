@@ -1010,7 +1010,7 @@ std::string ValueNumbering::GenerateNodeSignature(const AST::Node& node,
       choreo_unreachable("unexpected float point type.");
     }
   } else if (auto* n = dyn_cast<AST::Boolean>(&node)) {
-    return n->value;
+    return PSTR(n);
   } else if (auto* v = dyn_cast<AST::Identifier>(&node)) {
     auto sname = VNSymbolName(*v);
     if (auto name_in_scope = visitor->SSTab().NameInScopeOrNull(sname)) {

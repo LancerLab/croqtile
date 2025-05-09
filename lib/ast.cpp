@@ -139,7 +139,7 @@ void IfElseBlock::accept(Choreo::Visitor& v) {
 void ParallelBy::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
 
-  if (bounds) bounds->accept(v);
+  if (cmpt_bounds) cmpt_bounds->accept(v);
   v.Visit(*this);
 
   // handle identifier/matcher inside 'parallelby'
@@ -189,7 +189,7 @@ void DMA::accept(Choreo::Visitor& v) {
 void ChunkAt::accept(Choreo::Visitor& v) {
   // handle span_as
   if (sa) sa->accept(v);
-  // note: visit the positions/bounds inside
+  // note: visit the positions/cmpt_bounds inside
   v.Visit(*this);
 }
 

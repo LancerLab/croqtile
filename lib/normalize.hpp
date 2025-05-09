@@ -266,29 +266,29 @@ public:
   bool Visit(AST::Parameter&) override { return true; }
   bool Visit(AST::ParamList&) override { return true; }
   bool Visit(AST::ParallelBy& n) override {
-    if (n.HasBIV()) {
-      if (n.iv_symbols == nullptr) {
+    if (n.HasBPV()) {
+      if (n.cmpt_bpvs == nullptr) {
         // `parallel p by 2`  ==> `parallel p={p__elem__x} by [2]`
-        n.iv_symbols = AST::Make<AST::MultiValues>(n.LOC(), ", ");
-        n.iv_symbols->Append(
-            AST::Make<AST::Identifier>(n.LOC(), n.biv->name + "__elem__x"));
-        n.bounds = AST::Make<AST::MultiValues>(n.LOC(), ", ");
+        n.cmpt_bpvs = AST::Make<AST::MultiValues>(n.LOC(), ", ");
+        n.cmpt_bpvs->Append(
+            AST::Make<AST::Identifier>(n.LOC(), n.bpv->name + "__elem__x"));
+        n.cmpt_bounds = AST::Make<AST::MultiValues>(n.LOC(), ", ");
         if (isa<int>(&n.bound))
-          n.bounds->Append(
+          n.cmpt_bounds->Append(
               AST::Make<AST::IntLiteral>(n.LOC(), *cast<int>(&n.bound)));
         else
-          n.bounds->Append(
+          n.cmpt_bounds->Append(
               AST::Make<AST::Identifier>(n.LOC(), ValueItemAsString(n.bound)));
-        n.iv_symbols->ValueAt(0)->SetType(MakeBoundedIntegerType(n.bound));
-        n.biv->SetType(MakeBoundedIntegerType(n.biv->name));
-        VST_DEBUG(dbgs() << "Generate iv_symbols in parallelby for '"
-                         << PSTR(n.biv) << "': " << STR(n.iv_symbols) << "\n");
+        n.cmpt_bpvs->ValueAt(0)->SetType(MakeBoundedIntegerType(n.bound));
+        n.bpv->SetType(MakeBoundedIntegerType(n.bpv->name));
+        VST_DEBUG(dbgs() << "Generate cmpt_bpvs in parallelby for '"
+                         << PSTR(n.bpv) << "': " << STR(n.cmpt_bpvs) << "\n");
       }
     } else {
-      assert(n.iv_symbols && "At least one biv and iv_symbols should exist!");
+      assert(n.cmpt_bpvs && "At least one bpv and cmpt_bpvs should exist!");
       // `parallel {px} by [2]`  ==> `parallel anon={px} by [2]`
-      n.biv = AST::Make<AST::Identifier>(n.LOC(), SymbolTable::GetAnonName());
-      n.biv->SetType(MakeBoundedITupleType(Shape(n.dims), "pv"));
+      n.bpv = AST::Make<AST::Identifier>(n.LOC(), SymbolTable::GetAnonName());
+      n.bpv->SetType(MakeBoundedITupleType(Shape(n.dims), "pv"));
     }
     return true;
   }

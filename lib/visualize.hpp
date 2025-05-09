@@ -375,17 +375,18 @@ private:
       // use whole data as a single chunk
 
       // dimension 1 is repeated parallel_count times
-      std::vector<int> bounds(data_shape.Rank(), 1);
-      bounds[p_dim] = parallel_count;
+      std::vector<int> cmpt_bounds(data_shape.Rank(), 1);
+      cmpt_bounds[p_dim] = parallel_count;
       std::set<int> parallel_bounds;
       parallel_bounds.insert(p_dim);
 
       auto sp = std::make_unique<ShapePolyhedron>(expr, debug_visit);
-      sp->Create(positions, data_sizes, bounds, parallel_bounds);
+      sp->Create(positions, data_sizes, cmpt_bounds, parallel_bounds);
       return sp;
     }
 
-    std::vector<int> bounds; // specify the repeating count for each dimension
+    std::vector<int>
+        cmpt_bounds; // specify the repeating count for each dimension
     std::vector<std::string> bv_names; // the name of the bounded variable
     std::set<int>
         parallel_bounds; // specify which dimension is executed in parallel
@@ -393,12 +394,12 @@ private:
       auto id = dyn_cast<AST::Identifier>(pos);
       assert(id && "node other than identifier is not handled.");
       auto ty = GetSymbolType(id->name);
-      if (auto bivs = dyn_cast<BoundedITupleType>(ty)) {
-        bool parallel = (!bivs->GetNote().empty());
-        auto vlist = bivs->GetUpperBounds().Value();
+      if (auto bpvs = dyn_cast<BoundedITupleType>(ty)) {
+        bool parallel = (!bpvs->GetNote().empty());
+        auto vlist = bpvs->GetUpperBounds().Value();
         for (size_t i = 0; i < vlist.size(); ++i) {
           if (auto pint = dyn_cast<int>(&vlist[i])) {
-            bounds.push_back(*pint);
+            cmpt_bounds.push_back(*pint);
           } else {
             Warning(ca.LOC(), "unable to handle '" +
                                   *cast<ValueExpr>(&vlist[i]) +
@@ -409,7 +410,7 @@ private:
             bv_names.push_back(id->name);
           else
             bv_names.push_back(id->name + "(" + std::to_string(i) + ")");
-          if (parallel) parallel_bounds.insert(bounds.size() - 1);
+          if (parallel) parallel_bounds.insert(cmpt_bounds.size() - 1);
         }
       } else {
         dbgs() << STR(*ty) << " is not expected.\n";
@@ -420,8 +421,8 @@ private:
     Shape block_shape = cast<SpannedType>(ca.GetType())->GetShape();
 
     assert(block_shape.Rank() > 1 && "unexpected shape dimensions.");
-    assert(block_shape.Rank() == bounds.size() &&
-           "inconsistence between shape bounds and tiling");
+    assert(block_shape.Rank() == cmpt_bounds.size() &&
+           "inconsistence between shape cmpt_bounds and tiling");
 
     if (block_shape.Rank() > 3) {
       Warning(ca.LOC(), "unable to visualize tensors with high dimensions.");
@@ -438,12 +439,12 @@ private:
       dbgs() << "data shape: " << STR(data_shape) << "\n";
       dbgs() << "block shape: " << STR(block_shape) << "\n";
       dbgs() << "tiling factors: [ ";
-      for (auto b : bounds) dbgs() << b << " ";
+      for (auto b : cmpt_bounds) dbgs() << b << " ";
       dbgs() << "]\n";
     }
 
     auto sp = std::make_unique<ShapePolyhedron>(expr, debug_visit);
-    sp->Create(positions, *psizes, bounds, parallel_bounds);
+    sp->Create(positions, *psizes, cmpt_bounds, parallel_bounds);
     sp->SetAxesLabels(bv_names);
     return sp;
   }
@@ -464,13 +465,13 @@ private:
     start_x += sizes[0] * axis_scale[0] + label_distance + 100;
 
     // the dimension representing parallelism is repeated parallel_count times
-    std::vector<int> bounds(shape.Rank(), 1);
-    bounds[p_dim] = parallel_count;
+    std::vector<int> cmpt_bounds(shape.Rank(), 1);
+    cmpt_bounds[p_dim] = parallel_count;
     std::set<int> parallel_bounds;
     parallel_bounds.insert(p_dim);
 
     auto sp = std::make_unique<ShapePolyhedron>(mem, debug_visit);
-    sp->Create(positions, sizes, bounds, parallel_bounds);
+    sp->Create(positions, sizes, cmpt_bounds, parallel_bounds);
     return sp;
   }
 };

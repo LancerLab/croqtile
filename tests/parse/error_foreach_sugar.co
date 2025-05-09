@@ -4,5 +4,5 @@ __co__ auto illegal_foreach_sugar() {
   foreach {x,y} in 2 {}
 }
 
-// CHECK: error: syntax error, unexpected NUM, expecting [ or IDENTIFIER
+// CHECK: error: un-matched with-matcher-count(2) and mdspan rank(1).
 // CHECK-NOT: error:

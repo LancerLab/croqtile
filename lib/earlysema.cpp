@@ -680,8 +680,11 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
   } else {
     // in this case, the type is deduced from initialize expression
     if (isa<MDSpanType>(ety)) {
-      Error(n.LOC(), "use ':' instead of '=' to define the \"" + PSTR(ety) +
-                         "\" type variable.");
+      if (isa<ITupleType>(tty))
+        Error(n.LOC(), "must use '{' and '}' to initialize an ituple.");
+      else
+        Error(n.LOC(), "use ':' instead of '=' to define the \"" + PSTR(ety) +
+                           "\" type variable.");
       error_count++;
       if (debug_visit)
         dbgs() << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
@@ -988,26 +991,26 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
     error_count++;
   }
 
-  if (n.HasBIV()) {
-    if (!n.iv_symbols)
-      SetNodeType(*n.biv, MakeBoundedIntegerType(n.biv->name));
+  if (n.HasBPV()) {
+    if (!n.cmpt_bpvs)
+      SetNodeType(*n.bpv, MakeBoundedIntegerType(n.bpv->name));
     else
-      SetNodeType(*n.biv, MakeBoundedITupleType(Shape(n.dims), "pv"));
-    ReportErrorWhenViolateODR(n.LOC(), n.biv->name, __FILE__, __LINE__,
-                              n.biv->GetType());
+      SetNodeType(*n.bpv, MakeBoundedITupleType(Shape(n.dims), "pv"));
+    ReportErrorWhenViolateODR(n.LOC(), n.bpv->name, __FILE__, __LINE__,
+                              n.bpv->GetType());
   }
-  if (n.iv_symbols) {
-    for (auto& sym : n.iv_symbols->AllValues()) {
+  if (n.cmpt_bpvs) {
+    for (auto& sym : n.cmpt_bpvs->AllValues()) {
       auto sname = cast<AST::Identifier>(sym)->name;
       auto mty = MakeBoundedIntegerType(sname);
       ReportErrorWhenViolateODR(n.LOC(), sname, __FILE__, __LINE__, mty);
       SetNodeType(*sym, mty);
     }
-    SetNodeType(*n.bounds, MakeBoundedITupleType(n.bounds->Count()));
+    SetNodeType(*n.cmpt_bounds, MakeBoundedITupleType(n.cmpt_bounds->Count()));
   }
 
-  if (auto i = dyn_cast<int>(&n.bound); n.HasBIV() && i && *i <= 0) {
-    Error(n.biv->LOC(),
+  if (auto i = dyn_cast<int>(&n.bound); n.HasBPV() && i && *i <= 0) {
+    Error(n.bpv->LOC(),
           "bound " + ValueItemAsString(n.bound) +
               " in parallelby is invalid: should be greater than 0.");
     error_count++;
@@ -1028,9 +1031,9 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
       error_count++;
     }
 
-  if (n.biv) diverges.Add(InScopeName(n.biv->name));
-  if (n.iv_symbols)
-    for (auto& v : n.iv_symbols->AllValues()) {
+  if (n.bpv) diverges.Add(InScopeName(n.bpv->name));
+  if (n.cmpt_bpvs)
+    for (auto& v : n.cmpt_bpvs->AllValues()) {
       auto name = AST::GetName(*v);
       assert(name.has_value() && "expect a name.");
       diverges.Add(InScopeName(name.value()));
@@ -1392,12 +1395,13 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
     }
 
     // the upper bound of notile must be 1
-    if (n.bounds) {
+    if (n.cmpt_bounds) {
       for (auto& i : notile_indices) {
-        auto il = GetIntLiteral(*n.bounds->ValueAt(i));
+        auto il = GetIntLiteral(*n.cmpt_bounds->ValueAt(i));
         if ((il == nullptr) || (il->value != 1)) {
           Error(n.LOC(), "upper bound of bounded variable '_' is " +
-                             PSTR(n.bounds->ValueAt(i)) + " (1 is expected.");
+                             PSTR(n.cmpt_bounds->ValueAt(i)) +
+                             " (1 is expected.");
           error_count++;
         }
       }
@@ -1418,10 +1422,10 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
   auto sty = GetSpannedType(nty);
 
   if (n.positions) {
-    if (n.bounds) {
-      n.bounds->accept(*this);
+    if (n.cmpt_bounds) {
+      n.cmpt_bounds->accept(*this);
 
-      for (auto v : n.bounds->AllValues()) {
+      for (auto v : n.cmpt_bounds->AllValues()) {
         if (mutables.Contains(v)) {
           Error(v->LOC(),
                 "the mutable value can not used for the .chunk expression.");
@@ -1451,9 +1455,9 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
       error_count++;
     }
 
-    if (n.bounds) {
+    if (n.cmpt_bounds) {
       size_t b_count = 0;
-      for (auto& v : n.bounds->AllValues()) {
+      for (auto& v : n.cmpt_bounds->AllValues()) {
         auto ty = NodeType(*v);
         if (!isa<IntegerType>(ty) && !isa<ITupleType>(ty)) {
           Error(n.LOC(), "expect '" + PSTR(v) +

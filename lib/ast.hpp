@@ -53,8 +53,6 @@ struct Node {
 
   virtual ~Node() = default;
 
-  virtual std::string getRefName() const { return ""; }
-
   virtual const std::string& GetNote() const { return note; }
   virtual void SetNote(const std::string& n) {
     assert(!n.empty() && "can not set empty note.");
@@ -182,6 +180,12 @@ struct MultiValues : public Node, public TypeIDProvider<MultiValues> {
     values.push_back(m);
   }
 
+  void Insert(const ptr<Node>& m, size_t index) {
+    assert(m != nullptr && "Unexpected: null pointer.");
+    assert(index <= values.size());
+    values.insert(values.begin() + index, m);
+  }
+
   size_t Count() const { return values.size(); }
 
   void SetDelimiter(const std::string& d) { delimiter = d; }
@@ -229,14 +233,14 @@ struct MultiValues : public Node, public TypeIDProvider<MultiValues> {
 };
 
 struct Boolean : public Node, public TypeIDProvider<Boolean> {
-  std::string value;
-  explicit Boolean(const location& l, const std::string& v)
+  bool value;
+  explicit Boolean(const location& l, bool v)
       : Node(l, MakeBooleanType()), value(v) {}
   explicit Boolean(const Boolean& b) : Node(b.LOC()) { value = b.value; }
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool = false) const override {
-    os << prefix << value;
+    os << prefix << ((value) ? "true" : "false");
   }
 
   void accept(Visitor&) override;
@@ -603,6 +607,14 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
   size_t Rank() const { return rank; }
   void SetRank(size_t n) { rank = n; }
 
+  bool IsSymbolReference() {
+    if (ref_name != "") return false;
+    if (auto e = dyn_cast<Expr>(list)) {
+      if (e->GetSymbol()) return true;
+    }
+    return false;
+  }
+
   void SetTypeDetail(const Shape& s) {
     assert(istypeof<MDSpanType>(this) && "Incorrect type for mdspan.");
     cast<MDSpanType>(GetType())->SetShape(s);
@@ -611,20 +623,6 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
   const Shape GetTypeDetail() {
     assert(istypeof<MDSpanType>(this) && "Incorrect type for mdspan.");
     return cast<MDSpanType>(GetType())->GetShape();
-  }
-
-  Shape MakeValueList() {
-    if (!list) {
-      // dynamically valued
-      return {Shape(rank)};
-    } else
-      return {Shape(0) /*TODO: make Type from the list*/};
-  }
-
-  std::string getRefName() const override {
-    std::ostringstream oss;
-    if (list) { list->Print(oss, ""); }
-    return oss.str();
   }
 
   void Print(std::ostream& os, const std::string& = {},
@@ -1179,14 +1177,15 @@ struct IfElseBlock : public Node, public TypeIDProvider<IfElseBlock> {
 };
 
 struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
-  ptr<Identifier> biv = nullptr;
+  ptr<Identifier> bpv = nullptr; // bounded parallel variables
   ValueItem bound;
 
   // components
-  ptr<MultiValues> iv_symbols = nullptr;
-  ptr<MultiValues> bounds;
+  ptr<MultiValues> cmpt_bpvs = nullptr;
+  ptr<MultiValues> cmpt_bounds = nullptr;
 
-  ptr<MultiNodes> stmts;
+  ptr<MultiNodes> stmts = nullptr;
+
   // expilicit dimensions count
   size_t dims;
 
@@ -1201,7 +1200,7 @@ struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
         // equivalent to `parallel p={px} by [2] {}`
         // implement it in normalization
         assert(config->Count() == 2 && "unexpected parallel config.");
-        biv = cast<Identifier>(config->values[0]);
+        bpv = cast<Identifier>(config->values[0]);
         auto& bound_node = config->values[1];
         if (auto il = dyn_cast<IntLiteral>(bound_node))
           bound = il->Val();
@@ -1217,9 +1216,9 @@ struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
         // implement it in normalization
         assert(isa<MultiValues>(config->values[1]) &&
                "unexpected parallel config.");
-        iv_symbols = cast<MultiValues>(config->values[0]);
-        bounds = cast<MultiValues>(config->values[1]);
-        dims = iv_symbols->Count();
+        cmpt_bpvs = cast<MultiValues>(config->values[0]);
+        cmpt_bounds = cast<MultiValues>(config->values[1]);
+        dims = cmpt_bpvs->Count();
       } else {
         choreo_unreachable("unexpected parallel config.");
       }
@@ -1233,33 +1232,33 @@ struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
                "unexpected parallel config.");
         assert(isa<MultiValues>(config->values[2]) &&
                "unexpected parallel config.");
-        biv = cast<Identifier>(config->values[0]);
-        iv_symbols = cast<MultiValues>(config->values[1]);
-        bounds = cast<MultiValues>(config->values[2]);
-        assert(iv_symbols->Count() == bounds->Count());
+        bpv = cast<Identifier>(config->values[0]);
+        cmpt_bpvs = cast<MultiValues>(config->values[1]);
+        cmpt_bounds = cast<MultiValues>(config->values[2]);
+        assert(cmpt_bpvs->Count() == cmpt_bounds->Count());
         bound = 1;
         for (auto vi : BoundValues()) bound = bound * vi;
-        dims = iv_symbols->Count();
+        dims = cmpt_bpvs->Count();
       } else {
         choreo_unreachable("unexpected parallel config.");
       }
     }
   }
 
-  bool HasBIV() const { return biv != nullptr; }
+  bool HasBPV() const { return bpv != nullptr; }
 
   // Get the index symbol and its bound
   std::pair<ptr<Identifier>, ptr<Node>> GetIV(size_t idx) const {
-    assert(idx < iv_symbols->Count() && "index out of bound!");
-    return std::make_pair(cast<Identifier>(iv_symbols->ValueAt(idx)),
-                          bounds->ValueAt(idx));
+    assert(idx < cmpt_bpvs->Count() && "index out of bound!");
+    return std::make_pair(cast<Identifier>(cmpt_bpvs->ValueAt(idx)),
+                          cmpt_bounds->ValueAt(idx));
   }
 
   // Return a ValueList which contains values of bound items.
   ValueList BoundValues() const {
     ValueList bound_values;
-    if (bounds == nullptr) return bound_values;
-    for (auto bound : bounds->AllValues()) {
+    if (cmpt_bounds == nullptr) return bound_values;
+    for (auto bound : cmpt_bounds->AllValues()) {
       if (auto il = dyn_cast<AST::IntLiteral>(bound))
         bound_values.push_back(il->Val());
       else if (auto id = dyn_cast<AST::Identifier>(bound))
@@ -1276,15 +1275,15 @@ struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
   void Print(std::ostream& os, const std::string& prefix = {},
              bool with_type = false) const override {
     os << "\n" << prefix << "`- Parallelization:";
-    if (HasBIV())
-      os << " index symbol: " << biv->name << ", bound [0, "
+    if (HasBPV())
+      os << " index symbol: " << bpv->name << ", bound [0, "
          << ValueItemAsString(bound) << ")";
-    if (iv_symbols != nullptr) {
-      if (HasBIV()) os << "\n" << prefix << "                    ";
+    if (cmpt_bpvs != nullptr) {
+      if (HasBPV()) os << "\n" << prefix << "                    ";
       os << " index component: {";
-      iv_symbols->InlinePrint(os);
+      cmpt_bpvs->InlinePrint(os);
       os << "}, corresponding ubound: [";
-      bounds->InlinePrint(os);
+      cmpt_bounds->InlinePrint(os);
       os << "]";
     }
     if (!note.empty()) os << "\n" << prefix << "   (note: " << GetNote() << ")";
@@ -1393,13 +1392,14 @@ struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
   ptr<MultiValues> indices = nullptr;
   ptr<SpanAs> sa = nullptr; // for span_as expression
   ptr<MultiValues> positions = nullptr;
-  ptr<MultiValues> bounds = nullptr;
+  ptr<MultiValues> cmpt_bounds = nullptr;
 
   ChunkAt(const location& l, const ptr<Identifier>& d,
           const ptr<MultiValues>& idxes = nullptr,
           const ptr<MultiValues>& p = nullptr,
           const ptr<MultiValues>& b = nullptr)
-      : Node(l), data(d), indices(idxes), sa(nullptr), positions(p), bounds(b) {
+      : Node(l), data(d), indices(idxes), sa(nullptr), positions(p),
+        cmpt_bounds(b) {
     if (b) assert(p && "position is not provided for separated chunk & at.");
   }
 
@@ -1407,7 +1407,8 @@ struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
           const ptr<MultiValues>& idxes = nullptr,
           const ptr<MultiValues>& p = nullptr,
           const ptr<MultiValues>& b = nullptr)
-      : Node(l), data(s->nid), indices(idxes), sa(s), positions(p), bounds(b) {
+      : Node(l), data(s->nid), indices(idxes), sa(s), positions(p),
+        cmpt_bounds(b) {
     if (b) assert(p && "position is not provided for separated chunk & at.");
   }
 
@@ -1429,8 +1430,8 @@ struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
       for (auto index : indices->AllValues()) os << "[" << PSTR(index) << "]";
 
     if (positions) {
-      if (bounds)
-        os << ".Chunk(" << STR(bounds) << ").At(";
+      if (cmpt_bounds)
+        os << ".Chunk(" << STR(cmpt_bounds) << ").At(";
       else
         os << ".ChunkAt(";
       os << STR(positions) << ")";
@@ -1704,7 +1705,7 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   int stride = GetInvalidStride();
 
   LoopRange(const location& l, const ptr<Identifier> i)
-      : Node(l), iv(i) {} // the bounds are yet to be inferred
+      : Node(l), iv(i) {} // the cmpt_bounds are yet to be inferred
   LoopRange(const location& l, const ptr<Identifier> i, const ptr<Expr> lb,
             const ptr<Expr> ub, int s = 1)
       : Node(l), iv(i), lbound(lb), ubound(ub), stride(s) {}

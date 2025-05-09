@@ -36,9 +36,12 @@ void handle_line_directive(const char* text);
 /* update location on each matching */
 #define YY_USER_ACTION update_location(yytext);
 
+static bool double_bracket = false;
+static bool no_line_update = false;
+
 %}
 
-%x CO_FUNC KERNEL
+%x CO_FUNC KERNEL MDSPAN_SUGER
 
 id          [a-zA-Z_][a-zA-Z0-9_]*
 num         [0-9]+
@@ -105,6 +108,27 @@ cstr        \"([^"\\]|\\.)*\"
            }
 } // state <KERNEL>
 
+<MDSPAN_SUGER>{
+  "["/[^\[\],]*,[^\[\]]*"]" { // sugar form: emit '[['
+                  BEGIN(CO_FUNC);
+                  assert(double_bracket == false);
+                  double_bracket = true;
+                  no_line_update = true;
+                  yyless(0);
+                  return Choreo::Parser::make_LBRAKT (loc);
+               }
+  "]"          {  // Double-brackets is required, emit ']]'
+                  BEGIN(CO_FUNC);
+                  assert(double_bracket == true);
+                  double_bracket = false;
+                  no_line_update = true;
+                  return Choreo::Parser::make_RBRAKT (loc);
+               }
+  /* Other tokens reset to CO_FUNC */
+  [ \t\n]   ; /* Ignore whitespace */
+  .         { BEGIN(CO_FUNC); yyless(0); } /* Rewind and reprocess in NORMAL */
+}
+
 <CO_FUNC>{
   {blank}+   {}
   \n+        {}
@@ -143,15 +167,15 @@ cstr        \"([^"\\]|\\.)*\"
   "shared"   return Choreo::Parser::make_SHARED(Storage::SHARED, loc);
   "global"   return Choreo::Parser::make_GLOBAL(Storage::GLOBAL, loc);
   "mutable"  return Choreo::Parser::make_MUTABLE(yytext, loc);
-  "f32"      return Choreo::Parser::make_F32(BaseType::F32, loc);
-  "f16"      return Choreo::Parser::make_F16(BaseType::F16, loc);
-  "bf16"     return Choreo::Parser::make_BF16(BaseType::BF16, loc);
-  "u32"      return Choreo::Parser::make_U32(BaseType::U32, loc);
-  "s32"      return Choreo::Parser::make_S32(BaseType::S32, loc);
-  "u16"      return Choreo::Parser::make_U16(BaseType::U16, loc);
-  "s16"      return Choreo::Parser::make_S16(BaseType::S16, loc);
-  "u8"       return Choreo::Parser::make_U8(BaseType::U8, loc);
-  "s8"       return Choreo::Parser::make_S8(BaseType::S8, loc);
+  "f32"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_F32(BaseType::F32, loc); }
+  "f16"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_F16(BaseType::F16, loc); }
+  "bf16"     { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_BF16(BaseType::BF16, loc); }
+  "u32"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_U32(BaseType::U32, loc); }
+  "s32"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_S32(BaseType::S32, loc); }
+  "u16"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_U16(BaseType::U16, loc); }
+  "s16"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_S16(BaseType::S16, loc); }
+  "u8"       { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_U8(BaseType::U8, loc); }
+  "s8"       { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_S8(BaseType::S8, loc); }
   "int"      return Choreo::Parser::make_INT(BaseType::INT, loc);
   "bool"     return Choreo::Parser::make_BOOL(BaseType::BOOL, loc);
   "half8"    return Choreo::Parser::make_HALF8(BaseType::HALF8, loc);
@@ -229,7 +253,12 @@ cstr        \"([^"\\]|\\.)*\"
   "("        return Choreo::Parser::make_LPAREN (loc);
   ")"        return Choreo::Parser::make_RPAREN (loc);
   "["        return Choreo::Parser::make_LBRAKT (loc);
-  "]"        return Choreo::Parser::make_RBRAKT (loc);
+  "]"        { if (double_bracket) {
+                 BEGIN(MDSPAN_SUGER);
+                 yyless(0);  // rewind to emit one more
+               }
+               return Choreo::Parser::make_RBRAKT (loc);
+             }
   "{"        { scope++; return Choreo::Parser::make_LBRACE(loc); }
   "}"        { if (--scope == 0) { BEGIN(INITIAL); }
                return Choreo::Parser::make_RBRACE(loc);
@@ -258,6 +287,10 @@ void handle_line_directive(const char* text) {
 }
 
 void update_location(const char *text) {
+  if (no_line_update) {
+    no_line_update = false;
+    return;
+  }
   const char* it = text;
   loc.step(); // set begin to current end
   while (*it) {

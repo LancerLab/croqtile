@@ -782,13 +782,13 @@ bool TypeInference::Visit(AST::DMA& n) {
 bool TypeInference::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
 
-  AssignSymbolWithType(n.LOC(), n.biv->name, n.biv->GetType());
+  AssignSymbolWithType(n.LOC(), n.bpv->name, n.bpv->GetType());
   if (CCtx().ShowInferredTypes()) {
-    dbgs() << "Bounded:   " << InScopeName(n.biv->name)
-           << ", Type: " << AST::TYPE_STR(n.biv) << "\n";
+    dbgs() << "Bounded:   " << InScopeName(n.bpv->name)
+           << ", Type: " << AST::TYPE_STR(n.bpv) << "\n";
   }
 
-  for (auto sym : n.iv_symbols->AllValues()) {
+  for (auto sym : n.cmpt_bpvs->AllValues()) {
     auto id = cast<AST::Identifier>(sym);
     AssignSymbolWithType(sym->LOC(), id->name, sym->GetType());
     if (CCtx().ShowInferredTypes()) {

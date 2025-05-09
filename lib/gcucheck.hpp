@@ -56,9 +56,9 @@ private:
         append_note += PBLevelString();
       else
         append_note += std::to_string(max_parallel_level - parallel_level);
-      auto pty = cast<BoundedITupleType>(NodeType(*pb->biv));
+      auto pty = cast<BoundedITupleType>(NodeType(*pb->bpv));
       pty->AppendNote(append_note);
-      for (auto& symbol : pb->iv_symbols->AllValues())
+      for (auto& symbol : pb->cmpt_bpvs->AllValues())
         cast<BoundedITupleType>(NodeType(*symbol))->AppendNote(append_note);
 
       parallel_level--;

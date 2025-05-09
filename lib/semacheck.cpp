@@ -100,7 +100,7 @@ bool SemaChecker::VisitNode(AST::DataType& n) {
 
 bool SemaChecker::VisitNode(AST::Identifier& n) {
   if (PrefixedWith(n.name, "$")) return true; // do not check internal symbols
-  if (n.name == "_") return true;             // ignore unit biv
+  if (n.name == "_") return true;             // ignore unit bpv
   if (!ReportUnknownSymbol(n.name, n.LOC(), __FILE__, __LINE__)) return false;
   return true;
 }
@@ -124,7 +124,7 @@ bool SemaChecker::VisitNode(AST::ParallelBy& n) {
           "The " + Ordinal(idx) +
           " bound item of parallelby is invalid: should be greater than 0";
       FCtx(fname).AppendRtCheck(
-          {lhs, op, rhs, n.bounds->ValueAt(idx - 1)->LOC(), message, {}});
+          {lhs, op, rhs, n.cmpt_bounds->ValueAt(idx - 1)->LOC(), message, {}});
       ++idx;
     }
   }

@@ -5,5 +5,5 @@ __co__ void illegal_within(s32[1,2,3] ss) {
 }
 
 
-// CHECK: error: syntax error, unexpected |, expecting [ or NUM or IDENTIFIER
+// CHECK: error: syntax error, unexpected |
 // CHECK-NOT: error:
