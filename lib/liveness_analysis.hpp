@@ -16,9 +16,6 @@ namespace Choreo {
 
 // No changes will be made to AST
 struct LivenessAnalyzer : public VisitorWithSymTab {
-  // currently, only analyze the memory buffer.
-
-  TypeConstraints type_equals{this};
 
   /*
   live_in(n)  = use(n) U (live_out(n) - def(n)) U
@@ -71,8 +68,8 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
 
   struct ScopeEnd : public Stmt {
     ScopeEnd(const location& loc, AST::Node* s = nullptr)
-        : Stmt(loc), sibling(s) {}
-    AST::Node* sibling = nullptr;
+        : Stmt(loc), scope_start(s) {}
+    const AST::Node* scope_start = nullptr;
     void Print(std::ostream& os, const std::string& prefix = {},
                bool = false) const override {
       os << prefix << "}\n";
@@ -95,13 +92,6 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
   std::vector<const Stmt*> stmts_preordered;
   std::unordered_map<const Stmt*, std::string> stmt2str;
 
-  struct VisitOrder {
-    size_t visit_begin = 0;
-    size_t visit_end = 0;
-  };
-  size_t stmt_visit_order = 0; // contains both pre and post order.
-  std::unordered_map<const Stmt*, VisitOrder> stmt2visit_order;
-
   std::stringstream stmts_with_indent;
 
 #if 0
@@ -115,10 +105,6 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
 #endif
 
   BufSet buffers;
-  BufSet global_buffers;
-  BufSet shared_buffers;
-  BufSet local_buffers;
-  std::unordered_map<Storage, BufNodes> buf_nodes;
 
   // use and def of vars about memory buffer. var can be future or buffer.
   std::unordered_map<std::string, BufSet> var2buf;
@@ -135,6 +121,10 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
   std::unordered_map<size_t, location> idx2loc;
 
   std::unordered_set<std::string> paraby_bounded_vars;
+
+  size_t inthreads_async_level = 0;
+  std::unordered_map<std::string, VarSet> async_inthreads_vars;
+  bool visiting_synchronize;
 
   struct LivenessInfo {
     VarSet use;
@@ -198,7 +188,6 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
   LivenessAnalyzer()
       : VisitorWithSymTab("liveness", CCtx().GetGlobalSymbolTable()) {
     if (trace_visit) debug_visit = true; // force debug when tracing
-    if (debug_visit) type_equals.SetDebug(true);
   }
   ~LivenessAnalyzer() {}
 
@@ -206,30 +195,35 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
 
   VarSet dma_any;
 
+public:
+  static VarSet SetUnion(const VarSet& a, const VarSet& b);
+  static VarSet SetDiff(const VarSet& a, const VarSet& b);
+  static bool IsRef(const AST::Node& n);
+
 private:
+  VarSet GetAllSymbolicOperands(const AST::Node* n) const;
   void DumpStmtBriefly(const Stmt& n, std::ostream& os, bool indent);
-  VarSet GetAllSymbolicOperands(AST::Node* n) const;
-  VarSet SetUnion(const VarSet& a, const VarSet& b) const;
-  VarSet SetDiff(const VarSet& a, const VarSet& b) const;
   bool HasStmt(const AST::Node& n) const;
-  bool IsRef(const AST::Node& n) const;
   std::string GetScopedName(const std::string& name) const;
-  void AddUse(const Stmt* s, const std::string& var, bool is_future = false,
-              bool add_extra_use = true);
-  void AddUse(const Stmt* s, const VarSet& vars, bool is_future = false,
-              bool add_extra_use = true);
-  void AddDef(const Stmt* s, const std::string& var);
-  void AddBufStmt(const Stmt* s, Storage sto);
+  void AddUse(const Stmt* s, const std::string& var, bool add_extra_use = true);
+  void AddUse(const Stmt* s, const VarSet& vars, bool add_extra_use = true);
+  void AddDef(const Stmt* s, const std::string& var,
+              bool is_buffer_or_future = false);
+  void AddIsAlias(const Stmt* s, const std::string& alias_var);
   void AddAlias(const std::string& alias_var, const std::string& original_var);
   void RemoveAlias(const std::string& alias_var);
-  void AddIsAlias(const Stmt* s, const std::string& alias_var);
   void AddIsBinding(const Stmt* s, const std::string& bind_res);
   void AddBinding(const std::string& bind_res, const std::string& bind_src);
   void RemoveBinding(const std::string& bind_res, const std::string& bind_src);
   void AddFut2Buffers(const std::string& fut, const BufInfo& buf_info);
+  void AddAsyncInthreadsVar(const std::string& scope_name,
+                            const std::string& var);
   void ComputeLiveInOut();
   void ComputeLiveRange();
   void HandleSelect(AST::Node& n, ptr<AST::Select> sel);
+  // handle stmt in Before/AfterVisitImpl
+  void HandleStmtInBefore(AST::Node& n);
+  void HandleStmtInAfter(AST::Node& n);
   std::string SSTR(const Stmt* stmt) const;
 
   template <typename... MapTypes>
@@ -253,55 +247,27 @@ public:
   bool BeforeVisitImpl(AST::Node&) override;
   bool AfterVisitImpl(AST::Node&) override;
 
-  bool Visit(AST::MultiNodes&) override;
-  bool Visit(AST::MultiValues&) override;
-  bool Visit(AST::IntLiteral&) override;
-  bool Visit(AST::FloatLiteral&) override;
-  bool Visit(AST::StringLiteral&) override;
-  bool Visit(AST::Boolean&) override;
-  bool Visit(AST::Expr&) override;
-  bool Visit(AST::MultiDimSpans&) override;
   bool Visit(AST::NamedTypeDecl&) override;
   bool Visit(AST::NamedVariableDecl&) override;
-  bool Visit(AST::IntTuple&) override;
   bool Visit(AST::Assignment&) override;
-  bool Visit(AST::IntIndex&) override;
-  bool Visit(AST::DataType&) override;
-  bool Visit(AST::Identifier&) override;
-  bool Visit(AST::Parameter&) override;
-  bool Visit(AST::ParamList&) override;
   bool Visit(AST::ParallelBy&) override;
-  bool Visit(AST::WhereBind&) override;
-  bool Visit(AST::WithIn&) override;
   bool Visit(AST::WithBlock&) override;
-  bool Visit(AST::Memory&) override;
-  bool Visit(AST::SpanAs&) override;
   bool Visit(AST::DMA&) override;
   bool Visit(AST::ChunkAt&) override;
   bool Visit(AST::Wait&) override;
   bool Visit(AST::Call&) override;
   bool Visit(AST::Rotate&) override;
+  bool Visit(AST::Synchronize&) override;
+  bool Visit(AST::Trigger&) override;
   bool Visit(AST::Select&) override;
   bool Visit(AST::Return&) override;
-  bool Visit(AST::LoopRange&) override;
   bool Visit(AST::ForeachBlock&) override;
   bool Visit(AST::InThreadsBlock&) override;
   bool Visit(AST::IfElseBlock&) override;
-  bool Visit(AST::IncrementBlock&) override;
   bool Visit(AST::FunctionDecl&) override;
   bool Visit(AST::ChoreoFunction&) override;
-  bool Visit(AST::CppSourceCode&) override;
-  bool Visit(AST::Program&) override;
 
   bool HasError() override;
-
-private:
-  auto FuturesOf(const AST::Wait& n) {
-    std::vector<ptr<AST::Node>> ret;
-    for (auto item : n.GetTargets())
-      if (isa<FutureType>(NodeType(*item))) ret.push_back(item);
-    return ret;
-  }
 };
 
 } // end namespace Choreo

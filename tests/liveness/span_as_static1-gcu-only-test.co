@@ -114,43 +114,66 @@ int main() { /// host program
 // CHECK: ( 21)   }
 // CHECK: ( 22)   return output
 // CHECK: ( 23) }
-// CHECK: IGNORE global buffer: ::transpose::input
-// CHECK: IGNORE global buffer: ::transpose::output
+
+// CHECK: BUFFER ::transpose::input
+// CHECK:         range: [0, 21] 
+// CHECK: VAR    ::transpose::input.span
+// CHECK:         range: [0, x] 
+// CHECK: BUFFER ::transpose::output
+// CHECK:         range: [1, 22] 
+// CHECK: VAR    ::transpose::output.span
+// CHECK:         range: [1, x] 
 // CHECK: VAR    ::transpose::paraby_0::p
-// CHECK:         range: [2, 21]
+// CHECK:         range: [2, 21] 
 // CHECK: VAR    ::transpose::paraby_0::p__elem__x
-// CHECK:         range: [2, 21]
-// CHECK: VAR    ::transpose::paraby_0::within_0::index
-// CHECK:         range: [3, 19]
-// CHECK: VAR    ::transpose::paraby_0::within_0::d
-// CHECK:         range: [3, 19]
-// CHECK: VAR    ::transpose::paraby_0::within_0::c
-// CHECK:         range: [3, 19]
-// CHECK: VAR    ::transpose::paraby_0::within_0::b
-// CHECK:         range: [3, 19]
-// CHECK: VAR    ::transpose::paraby_0::within_0::a5
-// CHECK:         range: [3, 19]
+// CHECK:         range: [2, 21] 
 // CHECK: VAR    ::transpose::paraby_0::within_0::a4
-// CHECK:         range: [3, 19]
-// CHECK: IGNORE var: ::transpose::paraby_0::within_0::foreach_0::anon_0
-// CHECK:         which is an alias of ::transpose::input
+// CHECK:         range: [3, 19] 
+// CHECK: VAR    ::transpose::paraby_0::within_0::a5
+// CHECK:         range: [3, 19] 
+// CHECK: VAR    ::transpose::paraby_0::within_0::b
+// CHECK:         range: [3, 19] 
+// CHECK: VAR    ::transpose::paraby_0::within_0::c
+// CHECK:         range: [3, 19] 
+// CHECK: VAR    ::transpose::paraby_0::within_0::d
+// CHECK:         range: [3, 19] 
+// CHECK: VAR    ::transpose::paraby_0::within_0::index
+// CHECK:         range: [3, 19] 
+// CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::anon_0
+// CHECK:         range: [5, 9] 
+// CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::anon_0.span
+// CHECK:         range: [5, x] 
 // CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::anon_4
-// CHECK:         range: [6, 8]
+// CHECK:         range: [6, 8] 
 // CHECK: BUFFER ::transpose::paraby_0::within_0::foreach_0::input_shape_c__buf__
-// CHECK:         range: [7, 12]
+// CHECK:         range: [7, 12] 
+// CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::input_shape_c__buf__.span
+// CHECK:         range: [7, x] 
 // CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::input_shape_c
-// CHECK:         range: [8, 12]
+// CHECK:         range: [8, 12] 
+// CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::input_shape_c.span
+// CHECK:         range: [8, x] 
 // CHECK: BUFFER ::transpose::paraby_0::within_0::foreach_0::output_shape_c
-// CHECK:         range: [10, 18]
+// CHECK:         range: [10, 18] 
+// CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::output_shape_c.span
+// CHECK:         range: [10, x] 
 // CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::anon_1
-// CHECK:         range: [11, 12]
+// CHECK:         range: [11, 12] 
+// CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::anon_1.span
+// CHECK:         range: [11, x] 
 // CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::anon_2
-// CHECK:         range: [13, 18]
-// CHECK: IGNORE var: ::transpose::paraby_0::within_0::foreach_0::anon_3
-// CHECK:         which is an alias of ::transpose::output
+// CHECK:         range: [13, 18] 
+// CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::anon_2.span
+// CHECK:         range: [13, x] 
+// CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::anon_3
+// CHECK:         range: [14, 18] 
+// CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::anon_3.span
+// CHECK:         range: [14, x] 
 // CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::anon_5
-// CHECK:         range: [15, 17]
+// CHECK:         range: [15, 17] 
 // CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::anon_6
-// CHECK:         range: [16, 17]
+// CHECK:         range: [16, 17] 
 // CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::out_store
-// CHECK:         range: [17, 18]
+// CHECK:         range: [17, 18] 
+// CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::out_store.span
+// CHECK:         range: [17, x]

@@ -10,58 +10,82 @@ using namespace Choreo;
 
 #define DUMP_EACH_STMT true
 #define DUMP_STMT_WITH_TYPE_INFO false
-#define IGNORE_GLOBAL_BUFFER true
 #define ONLY_SHOW_BUFFER false
 
 LivenessAnalyzer::VarSet LivenessAnalyzer::SetUnion(const VarSet& a,
-                                                    const VarSet& b) const {
+                                                    const VarSet& b) {
   VarSet ret = a;
   ret.insert(b.begin(), b.end());
   return ret;
 }
 
 LivenessAnalyzer::VarSet LivenessAnalyzer::SetDiff(const VarSet& a,
-                                                   const VarSet& b) const {
+                                                   const VarSet& b) {
   VarSet ret = a;
   for (const auto& item : b) ret.erase(item);
   return ret;
 }
 
 LivenessAnalyzer::VarSet
-LivenessAnalyzer::GetAllSymbolicOperands(AST::Node* n) const {
-
+LivenessAnalyzer::GetAllSymbolicOperands(const AST::Node* n) const {
   if (auto id = dyn_cast<AST::Identifier>(n)) {
     return {InScopeName(id->name)};
   } else if (auto expr = dyn_cast<AST::Expr>(n)) {
-    VarSet ret;
+    VarSet res;
     if (auto c = expr->GetC())
-      ret = SetUnion(ret, GetAllSymbolicOperands(c.get()));
+      res = SetUnion(res, GetAllSymbolicOperands(c.get()));
     for (const auto& e : {expr->GetL(), expr->GetR()})
-      if (e) ret = SetUnion(ret, GetAllSymbolicOperands(e.get()));
-    return ret;
+      if (e) res = SetUnion(res, GetAllSymbolicOperands(e.get()));
+    return res;
   } else if (isa<AST::IntLiteral>(n) || isa<AST::FloatLiteral>(n) ||
              isa<AST::StringLiteral>(n)) {
     return {};
   } else if (auto ii = dyn_cast<AST::IntIndex>(n)) {
     return GetAllSymbolicOperands(ii->value.get());
+  } else if (auto mds = dyn_cast<AST::MultiDimSpans>(n)) {
+    if (mds->ref_name != "") {
+      return {InScopeName(mds->ref_name)};
+    } else {
+      auto mv = dyn_cast<AST::MultiValues>(mds->list);
+      if (!mv) {
+        VST_DEBUG(dbgs() << "the list of mds is not multivalues: " << PSTR(n)
+                         << "\n");
+        return {};
+      }
+      VarSet res;
+      for (const auto& v : mv->AllValues())
+        res = SetUnion(res, GetAllSymbolicOperands(v.get()));
+      return res;
+    }
+  } else if (auto da = dyn_cast<AST::DataAccess>(n)) {
+    return {da->GetDataName()};
+  } else if (auto it = dyn_cast<AST::IntTuple>(n)) {
+    VarSet res;
+    for (const auto& v : it->GetValues()->AllValues())
+      res = SetUnion(res, GetAllSymbolicOperands(v.get()));
+    return res;
+  } else if (auto call = dyn_cast<AST::Call>(n)) {
+    (void)call;
+    return {};
   } else {
-    VST_DEBUG(std::cerr << "The node is not an Expr or Identifier: " << PSTR(n)
-                        << "\n\t" << n->TypeNameString() << "\n");
+    choreo_unreachable("expecting the node to be an Expr or Identifier.");
     return {};
   }
 }
 
-inline bool LivenessAnalyzer::IsRef(const AST::Node& n) const {
+inline bool LivenessAnalyzer::IsRef(const AST::Node& n) {
   return n.GetNote().find("ref") != std::string::npos;
 }
 
 bool LivenessAnalyzer::HasStmt(const AST::Node& n) const {
   return isa<AST::NamedTypeDecl>(&n) || isa<AST::NamedVariableDecl>(&n) ||
          isa<AST::Assignment>(&n) || isa<AST::DMA>(&n) || isa<AST::Wait>(&n) ||
-         isa<AST::Call>(&n) || isa<AST::Rotate>(&n) || isa<AST::Return>(&n) ||
-         isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n) ||
-         isa<AST::ForeachBlock>(&n) || isa<AST::InThreadsBlock>(&n) ||
-         isa<AST::IfElseBlock>(&n) || isa<AST::ChoreoFunction>(&n);
+         isa<AST::Call>(&n) || isa<AST::Rotate>(&n) ||
+         isa<AST::Synchronize>(&n) || isa<AST::Trigger>(&n) ||
+         isa<AST::Return>(&n) || isa<AST::ParallelBy>(&n) ||
+         isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n) ||
+         isa<AST::InThreadsBlock>(&n) || isa<AST::IfElseBlock>(&n) ||
+         isa<AST::ChoreoFunction>(&n);
 }
 
 inline std::string
@@ -101,8 +125,8 @@ int ScopeCompare(const std::string& s1, const std::string& s2) {
 // of `x` in `::foo::pb::within0::foreach0::within1::foreach1::`, then
 // the liveness of `x` should be extended to the end of
 // `::foo::pb::within0::foreach0::` explicitly.
-std::string ExactScope(const std::string& outer_scope,
-                       const std::string& inner_scope) {
+std::string ExactFirstLoopScope(const std::string& outer_scope,
+                                const std::string& inner_scope) {
   assert(PrefixedWith(inner_scope, outer_scope) &&
          "expecting the inner scope to be prefixed with the outer scope.");
   auto scopes_outer = SplitStringByDelimiter(outer_scope, "::");
@@ -117,29 +141,29 @@ std::string ExactScope(const std::string& outer_scope,
   auto scopes_ret = std::vector<std::string>(scopes_inner.begin(),
                                              scopes_inner.begin() +
                                                  scopes_outer.size() + offset);
-  // std::cerr << "outer scope: " << outer_scope << "\n";
-  // std::cerr << "inner scope: " << inner_scope << "\n";
-  // std::cerr << "scopes_ret: " << DelimitedString(scopes_ret, "::") << "\n";
   return "::" + DelimitedString(scopes_ret, "::") + "::";
 }
 
 void LivenessAnalyzer::AddUse(const Stmt* s, const std::string& var,
-                              bool is_future, bool add_extra_use) {
-  std::string svar = GetScopedName(var);
-  VST_DEBUG(dbgs() << "use: " << svar << "\n\n");
+                              bool add_extra_use) {
+  std::string svar = GetScopedName(RemoveSuffix(var, ".data"));
+  VST_DEBUG(dbgs() << "USE: " << svar << "\n");
   linfo[s].use.insert(svar);
   var_events[svar].push_back({"use", SSTab().ScopeName()});
+  if (inthreads_async_level && !visiting_synchronize)
+    AddAsyncInthreadsVar(SSTab().ScopeName(), svar);
   // when using a var, its binding should also be treated as used.
   // important when dealing with `AST::Rotate`
   if (Bindings.count(svar)) {
     auto binding_vars = TransitiveClosure({svar}, Bindings);
     for (const auto& binding_var : binding_vars) {
       if (linfo[s].use.count(binding_var)) continue;
-      AddUse(s, binding_var);
+      AddUse(s, binding_var, add_extra_use);
     }
   }
-  if (is_future)
-    for (const auto& [src, dst] : fut2buffers[svar]) AddUse(s, dst);
+  if (fut2buffers.count(svar))
+    for (const auto& [src, dst] : fut2buffers[svar])
+      AddUse(s, dst, add_extra_use);
   if (!add_extra_use) return;
   // for bounded vars which are defined in paraby, we add extra uses in other
   // place.
@@ -148,52 +172,82 @@ void LivenessAnalyzer::AddUse(const Stmt* s, const std::string& var,
   for (const auto& event : var_events.at(svar)) {
     // only consider the def event.
     if (event.first != "def") continue;
+    // std::cerr << "event for var: " << svar << "\n";
+    // std::cerr << "event.second: " << event.second << "\n";
+    // std::cerr << "current scope: " << SSTab().ScopeName() << "\n";
     int res = ScopeCompare(event.second, SSTab().ScopeName());
+    // std::cerr << "res: " << res << "\n";
     if (res < 0) {
-      std::string exact_scope = ExactScope(event.second, SSTab().ScopeName());
+      /*
+      {
+        def x                              (event.second)
+        loop {                             (exact_scope)
+          {
+            use x                          (SSTab().ScopeName())
+            ...
+          }
+        } // add extra use in '}' for x    (end of exact_scope)
+      }
+      */
+      std::string exact_scope =
+          ExactFirstLoopScope(event.second, SSTab().ScopeName());
       if (!events_to_add[scope2stmt.at(exact_scope)].count({"use", svar})) {
-        VST_DEBUG(std::cerr << "outer scope: " << event.second << "\n";
-                  std::cerr << "inner scope: " << SSTab().ScopeName() << "\n";
-                  std::cerr << "exact scope: " << exact_scope << "\n";
-                  dbgs() << "record extra use: " << svar << "\n\tin "
-                         << exact_scope << "\n";);
+        VST_DEBUG({
+          dbgs() << "RECORD extra use " << svar << "\n\tin the end of "
+                 << stmt2number[scope2stmt.at(exact_scope)] << "\n";
+        });
         events_to_add[scope2stmt.at(exact_scope)].insert({"use", svar});
       }
     } else if (res == 0) {
+      // no need to add extra use
       break;
     } else {
-      assert(
-          false &&
-          "expecting the scope of the event is less than the current scope.");
+      /*
+      {
+        def x
+        loop {
+          def x;                          (event.second)
+          {
+            use x;
+            ...
+          }
+        }
+        use x;                            (SSTab().ScopeName())
+      }
+      then res is 1, which means that
+      the current scope !>= the scope of the definition point
+      just ignore it.
+      */
+      continue;
     }
   }
 }
 
-void LivenessAnalyzer::AddUse(const Stmt* s, const VarSet& vars, bool is_future,
+void LivenessAnalyzer::AddUse(const Stmt* s, const VarSet& vars,
                               bool add_extra_use) {
-  for (const auto& var : vars) AddUse(s, var, is_future, add_extra_use);
+  for (const auto& var : vars) AddUse(s, var, add_extra_use);
 }
 
-void LivenessAnalyzer::AddDef(const Stmt* s, const std::string& var) {
+void LivenessAnalyzer::AddDef(const Stmt* s, const std::string& var,
+                              bool is_buffer_or_future) {
   std::string svar = GetScopedName(var);
-  VST_DEBUG(dbgs() << "def: " << svar << "\n");
+  VST_DEBUG(dbgs() << "DEF: " << svar << "\n");
   linfo[s].def.insert(svar);
   var_events[svar].push_back({"def", SSTab().ScopeName()});
+  if (is_buffer_or_future) {
+    std::string svar_span = svar + ".span";
+    VST_DEBUG(dbgs() << "\tand the .span: " << svar_span << "\n");
+    linfo[s].def.insert(svar_span);
+    var_events[svar_span].push_back({"def", SSTab().ScopeName()});
+  }
   VST_DEBUG(dbgs() << "\n");
 }
 
-void LivenessAnalyzer::AddBufStmt(const Stmt* s, Storage sto) {
-  auto nvd = dyn_cast<AST::NamedVariableDecl>(s);
-  assert(nvd && "expecting NamedVariableDecl node as stmt!");
-  std::string sbuf = GetScopedName(nvd->name_str);
-  buffers.insert(sbuf);
-  buf_nodes[sto].insert(nvd);
-  switch (sto) {
-  case Storage::GLOBAL: global_buffers.insert(sbuf); break;
-  case Storage::SHARED: shared_buffers.insert(sbuf); break;
-  case Storage::LOCAL: local_buffers.insert(sbuf); break;
-  default: assert(false && "expecting the storage is SHARED, LOCAL or GLOBAL!");
-  }
+void LivenessAnalyzer::AddIsAlias(const Stmt* s, const std::string& alias_var) {
+  std::string salias = GetScopedName(alias_var);
+  VST_DEBUG(dbgs() << "AddIsAlias: " << salias << "\n\n");
+  assert(linfo[s].name_if_alias == "" && "expecting no alias before.");
+  linfo[s].name_if_alias = salias;
 }
 
 // y = x.spanas(...), then y is alias to x
@@ -213,13 +267,6 @@ void LivenessAnalyzer::RemoveAlias(const std::string& alias_var) {
   VST_DEBUG(dbgs() << "Remove alias: " << salias << " <-> " << Alias[salias]
                    << "\n\n");
   Alias.erase(salias);
-}
-
-void LivenessAnalyzer::AddIsAlias(const Stmt* s, const std::string& alias_var) {
-  std::string salias = GetScopedName(alias_var);
-  VST_DEBUG(dbgs() << "AddIsAlias: " << salias << "\n\n");
-  assert(linfo[s].name_if_alias == "" && "expecting no alias before.");
-  linfo[s].name_if_alias = salias;
 }
 
 void LivenessAnalyzer::AddIsBinding(const Stmt* s,
@@ -261,6 +308,13 @@ void LivenessAnalyzer::AddFut2Buffers(const std::string& fut,
     VST_DEBUG(dbgs() << "\tinserted!\n");
     fut2buffers[sfut].insert({ssrc, sdst});
   }
+}
+
+inline void
+LivenessAnalyzer::AddAsyncInthreadsVar(const std::string& scope_name,
+                                       const std::string& var) {
+  // VST_DEBUG(dbgs() << "Add async inthreads var: " << var << "\n");
+  async_inthreads_vars[scope_name].insert(GetScopedName(var));
 }
 
 template <typename MapType>
@@ -319,6 +373,8 @@ void LivenessAnalyzer::ComputeLiveInOut() {
     if (i < (int)stmts_preordered.size() - 1)
       linfo[s].live_out = linfo[stmts_preordered[i + 1]].live_in;
 
+    VarSet all_use = linfo[s].use;
+
     linfo[s].live_in =
         SetUnion(linfo[s].use, SetDiff(linfo[s].live_out, linfo[s].def));
 
@@ -351,18 +407,6 @@ void LivenessAnalyzer::ComputeLiveInOut() {
         AddBinding(fut_name, src);
     }
   }
-#if 1
-  VST_DEBUG({
-    if (!linfo[stmts_preordered[0]].live_in.empty()) {
-      std::cerr << "live_in of the first stmt is not empty.\n";
-      for (const auto& item : linfo[stmts_preordered[0]].live_in)
-        std::cerr << "\t" << item << "\n";
-    }
-  });
-#else
-  assert(linfo[stmts_preordered[0]].live_in.empty() &&
-         "expecting the live_in of the first stmt is empty.");
-#endif
   VST_DEBUG({
     auto PrintSet = [](std::ostream& os, const std::string& label,
                        const LivenessAnalyzer::VarSet& vars) {
@@ -381,6 +425,19 @@ void LivenessAnalyzer::ComputeLiveInOut() {
     PrintSet(dbgs(), "buffers", buffers);
     dbgs() << "\n";
   });
+#if 1
+  VST_DEBUG({
+    if (!linfo[stmts_preordered[0]].live_in.empty()) {
+      std::cerr << "live_in of the first stmt is not empty.\n";
+      for (const auto& item : linfo[stmts_preordered[0]].live_in)
+        std::cerr << "\t" << item << "\n";
+      choreo_unreachable("expecting the live_in of the first stmt is empty.");
+    }
+  });
+#else
+  assert(linfo[stmts_preordered[0]].live_in.empty() &&
+         "expecting the live_in of the first stmt is empty.");
+#endif
 }
 
 // the start and end of the live range are both inclusive.
@@ -428,27 +485,21 @@ void LivenessAnalyzer::ComputeLiveRange() {
     var_ranges.emplace(var, ranges);
   }
   std::sort(var_live_ranges.begin(), var_live_ranges.end(),
-            [](const std::pair<std::string, Ranges>& a,
-               const std::pair<std::string, Ranges>& b) {
-              return a.second < b.second;
+            [&](const std::pair<std::string, Ranges>& a,
+                const std::pair<std::string, Ranges>& b) {
+              return std::tie(var_def_points[a.first].front(), a.first) <
+                     std::tie(var_def_points[b.first].front(), b.first);
             });
   VST_DEBUG({
     for (const auto& [var, ranges] : var_live_ranges) {
-#if IGNORE_GLOBAL_BUFFER
-      if (global_buffers.count(var)) {
-        dbgs() << "IGNORE global buffer: " << var << "\n";
-        continue;
-      }
-      if (Alias.count(var) && global_buffers.count(Alias[var])) {
-        dbgs() << "IGNORE var: " << var << "\n\twhich is an alias of "
-               << Alias[var] << "\n";
-        continue;
-      }
-#endif
       dbgs() << (buffers.count(var) ? "BUFFER " : "VAR    ") << var << "\n";
-      dbgs() << "\trange:";
-      for (const auto& range : ranges.Values())
-        dbgs() << " [" << range.start << ", " << range.end << "]";
+      if (ranges.Values().empty()) {
+        dbgs() << "\trange: [" << var_def_points[var].front() << ", x] ";
+      } else {
+        dbgs() << "\trange:";
+        for (const auto& range : ranges.Values())
+          dbgs() << " [" << range.start << ", " << range.end << "] ";
+      }
       dbgs() << "\n";
     }
   });
@@ -468,14 +519,13 @@ void LivenessAnalyzer::HandleSelect(AST::Node& n, ptr<AST::Select> sel) {
   //          << "\n";
   // }
   assert(isa<FutureType>(NodeType(*sel)) || isa<SpannedType>(NodeType(*sel)));
-  bool is_future = isa<FutureType>(NodeType(*sel));
   linfo[current_stmt].buffer_related = true;
   AddDef(current_stmt, name);
   AddIsBinding(current_stmt, name);
   for (const auto& item : sel->expr_list->AllValues()) {
     auto id = AST::GetIdentifier(*item);
     if (id) {
-      AddUse(current_stmt, id->name, is_future);
+      AddUse(current_stmt, id->name);
       // Bind name with id->name
       // because if the sym in select is future
       // id->name has been bound with the src and dst.
@@ -487,7 +537,7 @@ void LivenessAnalyzer::HandleSelect(AST::Node& n, ptr<AST::Select> sel) {
       // TODO: actually, there are many situations that the node can be either
       // an identifier or an expression. Need to handle them in other Nodes!
       VarSet ops = GetAllSymbolicOperands(item.get());
-      AddUse(current_stmt, ops, is_future);
+      AddUse(current_stmt, ops);
       for (const auto& op : ops) {
         AddBinding(name, op);
         if (fut2buffers.count(op))
@@ -501,11 +551,19 @@ void LivenessAnalyzer::HandleSelect(AST::Node& n, ptr<AST::Select> sel) {
   }
 }
 
-std::string LivenessAnalyzer::SSTR(const Stmt* stmt) const {
+inline std::string LivenessAnalyzer::SSTR(const Stmt* stmt) const {
   return stmt2str.at(stmt);
 }
 
-std::string DUMP_INDENT = "";
+std::string dump_indent = "";
+
+inline void IncrDumpIndent() { dump_indent += "  "; }
+
+inline void DecrDumpIndent() {
+  if (dump_indent.size() < 2)
+    choreo_unreachable("the indent can not be decreased.");
+  dump_indent = dump_indent.substr(2);
+}
 
 void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
                                        bool dump_brace) {
@@ -515,25 +573,33 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
   auto num = std::to_string(stmt2number.at(&n));
   if (num.size() < 3) num = std::string(3 - num.size(), ' ') + num;
   os << "(" << num << ") ";
-  os << DUMP_INDENT;
+  os << dump_indent;
   if (const auto ntd = dyn_cast<AST::NamedTypeDecl>(&n)) {
-    os << ntd->name_str << " " << ntd->init_str << " " << PSTR(ntd->init_expr);
+    os << ntd->name_str << " : " << PSTR(ntd->init_expr);
   } else if (const auto nvd = dyn_cast<AST::NamedVariableDecl>(&n)) {
-    if (nvd->mem) {
-      nvd->mem->Print(os);
-      os << " ";
-    }
-    if (nvd->type)
-      nvd->type->Print(os);
-    else
+    if (nvd->type && nvd->type->IsUnknown()) {
       GetSymbolType(nvd->name_str)->Print(os);
-    os << " " << nvd->name_str;
+      os << " " << nvd->name_str;
+    } else {
+      if (nvd->mem) {
+        nvd->mem->Print(os);
+        os << " ";
+      }
+      if (nvd->type)
+        nvd->type->Print(os);
+      else
+        GetSymbolType(nvd->name_str)->Print(os);
+      os << " " << nvd->name_str;
+      if (nvd->IsArray())
+        for (auto d : nvd->array_dims) os << "[" << d << "]";
+    }
     if (nvd->init_expr)
       os << " " << nvd->init_str << " " << PSTR(nvd->init_expr);
     else if (nvd->init_value)
       os << " " << nvd->init_str << " {" << PSTR(nvd->init_value) << "}";
   } else if (const auto assign = dyn_cast<AST::Assignment>(&n)) {
-    os << assign->GetName() << " = " << PSTR(assign->value);
+    assign->da->Print(os);
+    os << " = " << PSTR(assign->value);
   } else if (const auto dma = dyn_cast<AST::DMA>(&n)) {
     if (dma->operation == ".any") {
       os << (dma->future.empty() ? "?" : dma->future);
@@ -553,11 +619,7 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
     }
   } else if (const auto w = dyn_cast<AST::Wait>(&n)) {
     os << "wait ";
-    for (size_t i = 0; i < FuturesOf(*w).size(); ++i) {
-      if (i > 0) os << ", ";
-      auto id = AST::GetIdentifier(*FuturesOf(*w)[i]);
-      os << id->name;
-    }
+    w->targets->Print(os);
   } else if (const auto c = dyn_cast<AST::Call>(&n)) {
     os << "call " << PSTR(c->function);
     if (c->template_args) {
@@ -572,6 +634,11 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
     os << ((r->ids->Count() == 2) ? "swap" : "rotate") << "(";
     r->ids->InlinePrint(os);
     os << ")";
+  } else if (const auto sync = dyn_cast<AST::Synchronize>(&n)) {
+    os << "sync." << PSTR(sync->scope);
+  } else if (const auto tr = dyn_cast<AST::Trigger>(&n)) {
+    os << "trigger ";
+    tr->targets->Print(os);
   } else if (const auto ret = dyn_cast<AST::Return>(&n)) {
     os << "return";
     if (ret->value) os << " " << PSTR(ret->value);
@@ -596,6 +663,10 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
       }
       os << " in " << PSTR(w->in);
     }
+    if (wb->reqs) {
+      os << " where ";
+      wb->reqs->Print(os);
+    }
   } else if (const auto fb = dyn_cast<AST::ForeachBlock>(&n)) {
     os << "foreach ";
     for (size_t i = 0; i < fb->ranges->Count(); ++i) {
@@ -608,7 +679,15 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
          << ")";
     }
   } else if (const auto itb = dyn_cast<AST::InThreadsBlock>(&n)) {
-    os << "inthreads " << PSTR(itb->pred);
+    os << "inthreads" << (itb->async ? ".async " : " ") << PSTR(itb->pred);
+  } else if (const auto ie = dyn_cast<AST::IfElseBlock>(&n)) {
+    os << "if ";
+    if (!HasStmt(*ie->pred)) {
+      ie->pred->Print(os, " ");
+    } else {
+      os << "(the condition is the next line)";
+    }
+    // TODO: support else stmts
   } else if (const auto cf = dyn_cast<AST::ChoreoFunction>(&n)) {
     os << cf->f_decl.name << "(";
     for (size_t i = 0; i < cf->f_decl.params->values.size(); ++i) {
@@ -631,113 +710,116 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
   os << (dump_brace ? " {" : "") << "\n";
 }
 
-bool IsLoopBlock(AST::Node& n) {
-  return isa<AST::ParallelBy>(&n) || isa<AST::ForeachBlock>(&n) ||
-         isa<AST::InThreadsBlock>(&n);
+inline bool IsLoopBlock(const AST::Node& n) {
+  return isa<AST::ParallelBy>(&n) || isa<AST::ForeachBlock>(&n);
 }
 
-bool ShouldIndent(AST::Node& n) {
+inline bool ShouldIndent(const AST::Node& n) {
   return isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n) ||
          isa<AST::ForeachBlock>(&n) || isa<AST::InThreadsBlock>(&n) ||
          isa<AST::IfElseBlock>(&n) || isa<AST::ChoreoFunction>(&n);
 }
 
-bool LivenessAnalyzer::BeforeVisitImpl(AST::Node& n) {
-  if (HasStmt(n)) {
-    stmts_preordered.push_back(&n);
+void LivenessAnalyzer::HandleStmtInBefore(AST::Node& n) {
+  if (!HasStmt(n)) return;
 
-    current_stmt = &n;
-    stmt2number.emplace(&n, stmt_number);
-    ++stmt_number;
+  stmts_preordered.push_back(&n);
 
-    stmt2visit_order[&n].visit_begin = stmt_visit_order;
-    ++stmt_visit_order;
+  current_stmt = &n;
+  stmt2number.emplace(&n, stmt_number);
+  ++stmt_number;
 
-    DumpStmtBriefly(n, stmts_with_indent, ShouldIndent(n));
-    if (ShouldIndent(n)) {
-      DUMP_INDENT += "  ";
-      scope2stmt.emplace(SSTab().ScopeName(), &n);
-    }
-    std::stringstream ss;
-    DumpStmtBriefly(n, ss, false);
-    stmt2str.emplace(&n, ss.str());
-#if DUMP_EACH_STMT
-    VST_DEBUG(dbgs() << SSTR(&n));
-#endif
+  DumpStmtBriefly(n, stmts_with_indent, ShouldIndent(n));
+  if (ShouldIndent(n)) {
+    IncrDumpIndent();
+    scope2stmt.emplace(SSTab().ScopeName(), &n);
   }
+  std::stringstream ss;
+  DumpStmtBriefly(n, ss, false);
+  stmt2str.emplace(&n, ss.str());
+#if DUMP_EACH_STMT
+  VST_DEBUG(dbgs() << SSTR(&n));
+#endif
+}
+
+void LivenessAnalyzer::HandleStmtInAfter(AST::Node& n) {
+  if (!HasStmt(n)) return;
+
+  // only after-handle stmts which need indent
+  if (!ShouldIndent(n)) return;
+
+  DecrDumpIndent();
+
+  auto rbrace = AST::Make<ScopeEnd>(n.LOC(), &n);
+
+  scope_ends.push_back(rbrace);
+  stmts_preordered.push_back(rbrace.get());
+  stmt2number.emplace(rbrace.get(), stmt_number);
+  ++stmt_number;
+
+  DumpStmtBriefly(*rbrace, stmts_with_indent, false);
+
+  if (IsLoopBlock(n)) {
+    if (events_to_add.count(&n)) {
+      for (const auto& [event_type, var] : events_to_add[&n]) {
+        if (event_type != "use") assert(false && "unexpected event type.");
+        VST_DEBUG(dbgs() << "EXTRA use: " << var << " in "
+                         << stmt2number[rbrace.get()] << "\n";);
+        AddUse(rbrace.get(), var, false);
+      }
+    }
+  }
+  std::stringstream ss;
+  DumpStmtBriefly(*rbrace, ss, false);
+  stmt2str.emplace(rbrace.get(), ss.str());
+#if DUMP_EACH_STMT
+  VST_DEBUG(dbgs() << SSTR(rbrace.get()));
+#endif
+}
+
+bool LivenessAnalyzer::BeforeVisitImpl(AST::Node& n) {
+  HandleStmtInBefore(n);
 
   if (auto cf = dyn_cast<AST::ChoreoFunction>(&n)) {
     for (const auto& param : cf->f_decl.params->values) {
-      if (param->HasSymbol()) {
-        std::string sname = InScopeName(param->sym->name);
-        if (auto sty = dyn_cast<SpannedType>(param->GetType())) {
-          // TODO: AddBufStmt here got error.
-          linfo[current_stmt].buffer_related = true;
-          buffers.insert(sname);
-          assert((sty->GetStorage() == Storage::GLOBAL ||
-                  sty->GetStorage() == Storage::DEFAULT) &&
-                 "expecting the storage is GLOBAL!");
-          global_buffers.insert(sname);
-          AddDef(current_stmt, sname);
-        } else {
-          AddDef(current_stmt, sname);
+      if (!param->HasSymbol()) continue;
+      std::string sname = InScopeName(param->sym->name);
+      if (auto sty = dyn_cast<SpannedType>(param->GetType())) {
+        linfo[current_stmt].buffer_related = true;
+        buffers.insert(sname);
+        if (sty->RuntimeShaped()) {
+          auto shape = sty->GetShape();
+          for (const auto& [_, v] : shape.GetDynamicDims())
+            AddDef(current_stmt, v);
         }
       }
+      AddDef(current_stmt, sname, true);
     }
+  } else if (auto ib = dyn_cast<AST::InThreadsBlock>(&n)) {
+    // For vars which are defined inside inthreads.async block,
+    // an extra use should be added to the sync point statement.
+    // In other words, their liveness is extended to the sync point.
+    if (ib->async) ++inthreads_async_level;
   }
 
   return true;
 }
 
 bool LivenessAnalyzer::AfterVisitImpl(AST::Node& n) {
-  if (HasStmt(n)) {
-    stmt2visit_order[&n].visit_end = stmt_visit_order;
-    ++stmt_visit_order;
-
-    if (ShouldIndent(n)) {
-      assert(DUMP_INDENT.size() >= 2);
-      DUMP_INDENT.pop_back();
-      DUMP_INDENT.pop_back();
-
-      auto rbrace = AST::Make<ScopeEnd>(n.LOC(), &n);
-      stmt2visit_order[rbrace.get()].visit_begin = stmt_visit_order;
-      ++stmt_visit_order;
-      stmt2visit_order[rbrace.get()].visit_end = stmt_visit_order;
-      ++stmt_visit_order;
-
-      scope_ends.push_back(rbrace);
-      stmts_preordered.push_back(rbrace.get());
-      stmt2number.emplace(rbrace.get(), stmt_number);
-      ++stmt_number;
-
-      DumpStmtBriefly(*rbrace, stmts_with_indent, false);
-
-      if (IsLoopBlock(n)) {
-        if (events_to_add.count(&n)) {
-          for (const auto& [event_type, var] : events_to_add[&n]) {
-            if (event_type != "use") assert(false && "unexpected event type.");
-            VST_DEBUG(dbgs() << "insert extra uses: " << var << " in "
-                             << stmt2number[rbrace.get()] << "\n";);
-            AddUse(rbrace.get(), var, false, false);
-          }
-        }
-      }
-      std::stringstream ss;
-      DumpStmtBriefly(*rbrace, ss, false);
-      stmt2str.emplace(rbrace.get(), ss.str());
-#if DUMP_EACH_STMT
-      VST_DEBUG(dbgs() << SSTR(rbrace.get()));
-#endif
-    }
-  }
+  HandleStmtInAfter(n);
 
   if (isa<AST::Program>(&n)) {
     VST_DEBUG(dbgs() << "\n" << stmts_with_indent.str() << "\n");
     ComputeLiveInOut();
     ComputeLiveRange();
-  }
-
-  if (auto w = dyn_cast<AST::Wait>(&n)) {
+  } else if (auto w = dyn_cast<AST::Wait>(&n)) {
+    auto FuturesOf = [&](const AST::Wait& n) {
+      std::vector<ptr<AST::Node>> ret;
+      for (auto item : n.GetTargets())
+        if (isa<FutureType>(NodeType(*item))) ret.push_back(item);
+      return ret;
+    };
+    // after wait node, the async dma is done, remove the binding
     for (const auto& f : FuturesOf(*w)) {
       auto id = AST::GetIdentifier(*f);
       assert(id && "expecting an identifier in Wait.");
@@ -751,48 +833,21 @@ bool LivenessAnalyzer::AfterVisitImpl(AST::Node& n) {
       // ComputeLiveInOut().
       stmt2binding_restore[&n] = fut_name;
     }
+  } else if (isa<AST::InThreadsBlock>(&n)) {
+    --inthreads_async_level;
   }
 
   return true;
 }
 
-bool LivenessAnalyzer::Visit(AST::MultiNodes& n) {
-  TraceEachVisit(n);
-  return true;
-}
-bool LivenessAnalyzer::Visit(AST::MultiValues& n) {
-  TraceEachVisit(n);
-  return true;
-}
-bool LivenessAnalyzer::Visit(AST::IntLiteral& n) {
-  TraceEachVisit(n);
-  return true;
-}
-bool LivenessAnalyzer::Visit(AST::FloatLiteral& n) {
-  TraceEachVisit(n);
-  return true;
-}
-bool LivenessAnalyzer::Visit(AST::StringLiteral& n) {
-  TraceEachVisit(n);
-  return true;
-}
-bool LivenessAnalyzer::Visit(AST::Boolean& n) {
-  TraceEachVisit(n);
-  return true;
-}
-bool LivenessAnalyzer::Visit(AST::Expr& n) {
-  TraceEachVisit(n);
-  return true;
-}
-bool LivenessAnalyzer::Visit(AST::MultiDimSpans& n) {
-  TraceEachVisit(n);
-  return true;
-}
 bool LivenessAnalyzer::Visit(AST::NamedTypeDecl& n) {
   TraceEachVisit(n);
   // TODO: handle the case of named type decl
+  AddDef(&n, n.name_str);
+  AddUse(&n, GetAllSymbolicOperands(n.init_expr.get()));
   return true;
 }
+
 bool LivenessAnalyzer::Visit(AST::NamedVariableDecl& n) {
   TraceEachVisit(n);
   // mem buffer can only be defined here
@@ -820,14 +875,14 @@ bool LivenessAnalyzer::Visit(AST::NamedVariableDecl& n) {
   } else if (auto sty = dyn_cast<SpannedType>(ty)) {
     linfo[current_stmt].buffer_related = true;
     if (!IsRef(n)) {
-      AddBufStmt(current_stmt, sty->GetStorage());
-      AddDef(current_stmt, n.name_str);
+      AddDef(current_stmt, n.name_str, true);
+      buffers.insert(InScopeName(n.name_str));
     } else {
       VST_DEBUG(dbgs() << "The nvd is a reference: " << STR(n) << ".\n\n");
       assert(n.init_expr && "expecting the init_expr is not nullptr.");
       if (auto e = dyn_cast<AST::Expr>(n.init_expr)) {
         if (auto sa = dyn_cast<AST::SpanAs>(e->GetR())) {
-          AddDef(current_stmt, n.name_str);
+          AddDef(current_stmt, n.name_str, true);
           AddUse(current_stmt, sa->id->name);
           AddAlias(n.name_str, sa->id->name);
         } else {
@@ -836,26 +891,22 @@ bool LivenessAnalyzer::Visit(AST::NamedVariableDecl& n) {
       } else {
         assert(false && "expecting the init_expr is an expr.");
       }
-      // TODO: how to handle the case of ref: a = b where b is a buffer?
-      // init_expr or init_val?
     }
   } else if (isa<BoundedType>(ty)) {
-    // TODO: maybe gather all branches?
     AddDef(current_stmt, n.name_str);
     AddUse(current_stmt, GetAllSymbolicOperands(n.init_expr.get()));
   } else if (isa<FutureType>(ty)) {
     // TODO: handle the case of future type
     assert(false && "not implemented yet.");
+  } else if (isa<EventType>(ty)) {
+    AddDef(current_stmt, n.name_str);
   } else {
     assert(false && "expecting the type is spanned, scalar, string, index, "
                     "ituple, or mdspan.");
   }
   return true;
 }
-bool LivenessAnalyzer::Visit(AST::IntTuple& n) {
-  TraceEachVisit(n);
-  return true;
-}
+
 bool LivenessAnalyzer::Visit(AST::Assignment& n) {
   TraceEachVisit(n);
 
@@ -865,7 +916,7 @@ bool LivenessAnalyzer::Visit(AST::Assignment& n) {
   } else if (auto sa = dyn_cast<AST::SpanAs>(n.value)) {
     assert(IsRef(n) && "expecting the spanas assignment is a reference.");
     linfo[current_stmt].buffer_related = true;
-    AddDef(current_stmt, n.GetName());
+    AddDef(current_stmt, n.GetName(), true);
     AddUse(current_stmt, sa->id->name);
     AddIsAlias(current_stmt, n.GetName());
     AddAlias(n.GetName(), sa->id->name);
@@ -873,7 +924,10 @@ bool LivenessAnalyzer::Visit(AST::Assignment& n) {
     assert(!IsRef(n) && "expecting the assignment is not a reference.");
     VST_DEBUG(dbgs() << "The assignment is not sel or sa: " << STR(n)
                      << ".\n\n");
-    AddDef(current_stmt, n.GetName());
+    if (n.AssignToDataElement())
+      AddDef(current_stmt, n.GetDataArrayName());
+    else
+      AddDef(current_stmt, n.GetName());
     if (auto expr = dyn_cast<AST::Expr>(n.value)) {
       VarSet operands = GetAllSymbolicOperands(expr.get());
       AddUse(current_stmt, operands);
@@ -883,26 +937,7 @@ bool LivenessAnalyzer::Visit(AST::Assignment& n) {
   }
   return true;
 }
-bool LivenessAnalyzer::Visit(AST::IntIndex& n) {
-  TraceEachVisit(n);
-  return true;
-}
-bool LivenessAnalyzer::Visit(AST::DataType& n) {
-  TraceEachVisit(n);
-  return true;
-}
-bool LivenessAnalyzer::Visit(AST::Identifier& n) {
-  TraceEachVisit(n);
-  return true;
-}
-bool LivenessAnalyzer::Visit(AST::Parameter& n) {
-  TraceEachVisit(n);
-  return true;
-}
-bool LivenessAnalyzer::Visit(AST::ParamList& n) {
-  TraceEachVisit(n);
-  return true;
-}
+
 bool LivenessAnalyzer::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
   assert(n.bpv && n.cmpt_bpvs &&
@@ -919,56 +954,58 @@ bool LivenessAnalyzer::Visit(AST::ParallelBy& n) {
   }
   return true;
 }
-bool LivenessAnalyzer::Visit(AST::WhereBind& n) {
-  TraceEachVisit(n);
-  return true;
-}
-bool LivenessAnalyzer::Visit(AST::WithIn& n) {
-  TraceEachVisit(n);
-  return true;
-}
+
 bool LivenessAnalyzer::Visit(AST::WithBlock& n) {
   TraceEachVisit(n);
-  if (n.reqs) {
-    for (const auto& req : n.reqs->AllSubs()) {
-      auto wb = cast<AST::WhereBind>(req);
-      AddUse(current_stmt, AST::GetIdentifier(*wb->lhs)->name);
-      AddUse(current_stmt, AST::GetIdentifier(*wb->rhs)->name);
-    }
-  }
+  VarSet def_set;
   for (const auto& item : n.withins->AllSubs()) {
     auto w = cast<AST::WithIn>(item);
-    if (w->with) AddDef(current_stmt, w->with->name);
+    if (w->with) {
+      AddDef(current_stmt, w->with->name);
+      def_set.insert(w->with->name);
+    }
     if (w->with_matchers) {
       for (const auto& item : w->with_matchers->AllValues()) {
         auto id = cast<AST::Identifier>(item);
         AddDef(current_stmt, id->name);
+        def_set.insert(id->name);
         if (w->with) AddBinding(w->with->name, id->name);
       }
+    }
+    AddUse(current_stmt, GetAllSymbolicOperands(w->in.get()));
+  }
+  if (n.reqs) {
+    for (const auto& req : n.reqs->AllSubs()) {
+      auto wb = cast<AST::WhereBind>(req);
+      // special case: if a symbol in where is def in with or with_matchers,
+      // ignore it. Because it is a use that after define.
+      if (!def_set.count(AST::GetIdentifier(*wb->lhs)->name))
+        AddUse(current_stmt, AST::GetIdentifier(*wb->lhs)->name);
+      if (!def_set.count(AST::GetIdentifier(*wb->rhs)->name))
+        AddUse(current_stmt, AST::GetIdentifier(*wb->rhs)->name);
     }
   }
   return true;
 }
-bool LivenessAnalyzer::Visit(AST::Memory& n) {
-  TraceEachVisit(n);
-  return true;
-}
-bool LivenessAnalyzer::Visit(AST::SpanAs& n) {
-  TraceEachVisit(n);
-  return true;
-}
+
 bool LivenessAnalyzer::Visit(AST::DMA& n) {
   TraceEachVisit(n);
   linfo[current_stmt].buffer_related = true;
+  /*
+  If the dma is sync, then only the dst buffer is alias to the future.
+  The src buffer can be reused immediately after the dma done.
+
+  If the dma is async, then the future is alias to the src buffer.
+  The corresponding src buffer can be reused only after the future has been
+  waited.
+  */
   if (n.future.empty()) {
     assert(!n.async && "async dma should have a future.");
     AddUse(current_stmt, n.FromSymbol());
     AddUse(current_stmt, n.ToSymbol());
-    // If the dma is sync, then only the dst buffer is alias to the future.
-    // The src buffer can be reused immediately after the dma done.
   } else {
     if (n.operation == ".any") {
-      AddDef(current_stmt, n.future);
+      AddDef(current_stmt, n.future, true);
       dma_any.insert(InScopeName(n.future));
       return true;
     }
@@ -976,14 +1013,12 @@ bool LivenessAnalyzer::Visit(AST::DMA& n) {
     if (dma_any.count(InScopeName(n.future)))
       AddUse(current_stmt, n.future);
     else
-      AddDef(current_stmt, n.future);
+      AddDef(current_stmt, n.future, true);
 
     AddUse(current_stmt, n.FromSymbol());
     AddUse(current_stmt, n.ToSymbol());
+
     AddIsBinding(current_stmt, n.future);
-    // If the dma is async, then the future is alias to the src buffer.
-    // The corresponding src buffer can be reused only after the future has been
-    // waited.
     if (n.async) AddBinding(n.future, n.FromSymbol());
     AddBinding(n.future, n.ToSymbol());
     AddFut2Buffers(n.future, BufInfo{n.FromSymbol(), n.ToSymbol()});
@@ -992,6 +1027,7 @@ bool LivenessAnalyzer::Visit(AST::DMA& n) {
   if (n.chained && n.chain_from != "") AddUse(current_stmt, n.chain_from);
   return true;
 }
+
 bool LivenessAnalyzer::Visit(AST::ChunkAt& n) {
   TraceEachVisit(n);
   assert(n.sa == nullptr && "after norm, there should be no span_as.");
@@ -1003,6 +1039,8 @@ bool LivenessAnalyzer::Visit(AST::ChunkAt& n) {
       VarSet operands = GetAllSymbolicOperands(expr.get());
       AddUse(current_stmt, operands);
     } else if (auto id = dyn_cast<AST::Identifier>(pos)) {
+      // ignore the __choreo_no_tiling__
+      if (id->name == "__choreo_no_tiling__") continue;
       AddUse(current_stmt, id->name);
     } else {
       assert(false && "expecting the chunkat position is an expr.");
@@ -1010,24 +1048,40 @@ bool LivenessAnalyzer::Visit(AST::ChunkAt& n) {
   }
   return true;
 }
+
 bool LivenessAnalyzer::Visit(AST::Wait& n) {
   TraceEachVisit(n);
-  linfo[current_stmt].buffer_related = true;
-  for (const auto& f : FuturesOf(n)) {
-    auto id = AST::GetIdentifier(*f);
-    assert(id && "expecting an identifier in Wait.");
-    AddUse(current_stmt, id->name);
-    const std::string sname = InScopeName(id->name);
-    if (!fut2buffers.count(sname))
-      assert(dma_any.count(sname) &&
-             "expecting the future to be dma_any if not in fut2buffers.");
-    for (const auto& [src, dst] : fut2buffers[sname]) {
-      AddUse(current_stmt, src);
-      AddUse(current_stmt, dst);
+  for (const auto& item : n.GetTargets()) {
+    if (isa<FutureType>(NodeType(*item))) {
+      // future
+      linfo[current_stmt].buffer_related = true;
+      auto id = AST::GetIdentifier(*item);
+      assert(id && "expecting an identifier in Wait.");
+      AddUse(current_stmt, id->name);
+      const std::string sname = InScopeName(id->name);
+      if (!fut2buffers.count(sname))
+        assert(dma_any.count(sname) &&
+               "expecting the future to be dma_any if not in fut2buffers.");
+      for (const auto& [src, dst] : fut2buffers[sname]) {
+        AddUse(current_stmt, src);
+        AddUse(current_stmt, dst);
+      }
+    } else {
+      // event
+      auto expr = dyn_cast<AST::Expr>(item);
+      assert(IsSymbolOrArrayRef(*item) &&
+             "expect either symbol or array reference.");
+      std::string name;
+      if (expr)
+        name = AST::GetArrayBaseSymbol(*expr)->name;
+      else
+        name = AST::GetIdentifier(*item)->name;
+      AddUse(&n, name);
     }
   }
   return true;
 }
+
 bool LivenessAnalyzer::Visit(AST::Call& n) {
   TraceEachVisit(n);
   linfo[current_stmt].buffer_related = true;
@@ -1037,17 +1091,18 @@ bool LivenessAnalyzer::Visit(AST::Call& n) {
       if (auto id = AST::GetIdentifier(*arg)) {
         AddUse(current_stmt, id->name);
       } else if (auto expr = dyn_cast<AST::Expr>(arg)) {
-        if (expr->op != "dataof") {
-          choreo_unreachable(
-              "can only use future.data or buffer as parameters in call!");
+        if (expr->op == "dataof") {
+          // TODO: will only the dims of future be used?
+          assert(isa<FutureType>(expr->GetR()->GetType()) &&
+                 "expect a future operand.");
+          if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol())
+            AddUse(current_stmt, id->name);
+          else
+            choreo_unreachable("Can not retrieve name of the future.");
+        } else {
+          assert(isa<AST::ChunkAt>(expr->GetR()) &&
+                 "expect a chunkat operand.");
         }
-        // TODO: will only the dims of future be used?
-        assert(isa<FutureType>(expr->GetR()->GetType()) &&
-               "expect a future operand.");
-        if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol())
-          AddUse(current_stmt, id->name, true);
-        else
-          choreo_unreachable("Can not retrieve name of the future.");
       }
     } else {
       if (auto expr = dyn_cast<AST::Expr>(arg)) {
@@ -1056,8 +1111,9 @@ bool LivenessAnalyzer::Visit(AST::Call& n) {
       } else if (isa<AST::StringLiteral>(arg)) {
       } else {
         VST_DEBUG({
-          std::cerr << "the argument is not an expr: " << STR(*arg) << ".\n";
-          std::cerr << "the type is: " << AST::TYPE_STR(*arg) << ".\n";
+          dbgs() << "the argument is neither expr nor string literal: "
+                 << STR(*arg) << ".\n";
+          dbgs() << "its type is: " << AST::TYPE_STR(*arg) << ".\n";
         });
         assert(false && "expecting the argument is an expr.");
       }
@@ -1065,6 +1121,7 @@ bool LivenessAnalyzer::Visit(AST::Call& n) {
   }
   return true;
 }
+
 bool LivenessAnalyzer::Visit(AST::Rotate& n) {
   TraceEachVisit(n);
   linfo[current_stmt].buffer_related = true;
@@ -1091,11 +1148,48 @@ bool LivenessAnalyzer::Visit(AST::Rotate& n) {
   AddUse(current_stmt, uses);
   return true;
 }
+
+bool LivenessAnalyzer::Visit(AST::Synchronize& n) {
+  TraceEachVisit(n);
+  std::string cur_scope = SSTab().ScopeName();
+  visiting_synchronize = true;
+  for (const auto& [scope, vars] : async_inthreads_vars) {
+    if (!PrefixedWith(scope, cur_scope)) continue;
+    /*
+    {
+      inthreads.async() { def x; ...}
+      inthreads.async() { def y; ...}
+      sync.shared; // add extra use of both x and y here manually!
+    }
+    */
+    for (const auto& var : vars) AddUse(&n, var, false);
+  }
+  visiting_synchronize = false;
+  return true;
+}
+
+bool LivenessAnalyzer::Visit(AST::Trigger& n) {
+  TraceEachVisit(n);
+  for (const auto& e : n.GetEvents()) {
+    auto expr = dyn_cast<AST::Expr>(e);
+    assert(IsSymbolOrArrayRef(*e) &&
+           "expect either symbol or array reference.");
+    std::string name;
+    if (expr)
+      name = AST::GetArrayBaseSymbol(*expr)->name;
+    else
+      name = AST::GetIdentifier(*e)->name;
+    AddUse(&n, name);
+  }
+  return true;
+}
+
 bool LivenessAnalyzer::Visit(AST::Select& n) {
   TraceEachVisit(n);
   // already handled in NamedVariableDecl or Assignment
   return true;
 }
+
 bool LivenessAnalyzer::Visit(AST::Return& n) {
   TraceEachVisit(n);
   // TODO: can we return future.data?
@@ -1113,10 +1207,6 @@ bool LivenessAnalyzer::Visit(AST::Return& n) {
     VarSet operands = GetAllSymbolicOperands(expr.get());
     AddUse(current_stmt, operands);
   }
-  return true;
-}
-bool LivenessAnalyzer::Visit(AST::LoopRange& n) {
-  TraceEachVisit(n);
   return true;
 }
 
@@ -1151,27 +1241,16 @@ bool LivenessAnalyzer::Visit(AST::IfElseBlock& n) {
   return true;
 }
 
-bool LivenessAnalyzer::Visit(AST::IncrementBlock& n) {
-  TraceEachVisit(n);
-  return true;
-}
 bool LivenessAnalyzer::Visit(AST::FunctionDecl& n) {
   // deal with the parameters in `AST::ChoreoFunction`.
   TraceEachVisit(n);
   return true;
 }
+
 bool LivenessAnalyzer::Visit(AST::ChoreoFunction& n) {
   TraceEachVisit(n);
   // deal with ChoreoFunction in BeforeVisitImpl due to the orders in
   // accept().
-  return true;
-}
-bool LivenessAnalyzer::Visit(AST::CppSourceCode& n) {
-  TraceEachVisit(n);
-  return true;
-}
-bool LivenessAnalyzer::Visit(AST::Program& n) {
-  TraceEachVisit(n);
   return true;
 }
 

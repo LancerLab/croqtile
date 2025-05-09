@@ -1,0 +1,149 @@
+// REQUIRES: TARGET-GCU300
+// RUN: choreo -gs -arch=gcu300 --liveness --mem-reuse %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+// RUN: choreo --liveness -dv=liveness -sa=liveness %s -o - | FileCheck --match-full-lines --check-prefix=LIVENESS %s
+
+#include "choreo.h"
+
+__cok__{
+
+__co_device__ void foo0(u8* a, u8* b, int n) {
+  for (int i = 0; i < n; i++)
+    b[i] = a[i];
+}
+
+}
+
+#define K 512
+#define N 1
+
+__co__ auto mem_reuse0(u8 [K, K, N] i0, u8 [K, K, N] i1) {
+  u8 [K, K, N * 2] output;
+
+  parallel p by 1, q by 2 {
+    foreach idx in [2, 1, N] {
+      shared u8 [output.span / #idx] s0;
+
+      s1 = dma.copy.async i0.chunkat(idx) => shared;
+      s2 = dma.copy.async i1.chunkat(idx) => shared;
+      wait s1, s2;
+
+      local u8 [s1.span] l1;
+      inthreads.async (q == 0) {
+        local u8 [l1.span] l0{0};
+        dma.copy s1 => l1;
+        call foo0(l1, l0, |l0|);
+        dma.copy l0 => s0.chunkat(_, _, q);
+      }
+      
+      local u8 [s2.span] l2;
+      inthreads.async (q == 1) {
+        local u8 [l2.span] l0{0};
+        dma.copy s2 => l2;
+        call foo0(l2, l0, |l0|);
+        dma.copy l0 => s0.chunkat(_, _, q);
+      }
+      sync.shared;
+
+      dma.copy s0 => output.chunkat(idx);
+    }
+  }
+  
+  return output;
+}
+
+int main()
+{
+  choreo::u8 a[K][K][N] = {0};
+  choreo::u8 b[K][K][N] = {0};
+  auto a_data = choreo::make_spanview<3, choreo::u8>((choreo::u8*)a, {K, K, N});
+  auto b_data = choreo::make_spanview<3, choreo::u8>((choreo::u8*)b, {K, K, N});
+  a_data.fill_random(0, 4);
+  b_data.fill_random(0, 4);
+
+  auto res = mem_reuse0(a_data, b_data);
+
+  std::cout << "shape of res: " << res.shape()[0] << std::endl;
+  std::cout << "shape of res: " << res.shape()[1] << std::endl;
+  std::cout << "shape of res: " << res.shape()[2] << std::endl;
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < 1; ++k) {
+        auto aa = (int)a[i][j][k];
+        auto bb = (int)b[i][j][k];
+        auto r = (int)res[i][j][k];
+        auto rr = (int)res[i][j][k + 1];
+        if (aa == r && bb == rr) continue;
+        std::cout << "index: " << i << ", " << j << ", " << k << std::endl;
+        std::cout << "a: " << aa << std::endl;
+        std::cout << "b: " << bb << std::endl;
+        std::cout << "res: " << r << ' ' << rr << std::endl;
+        choreo::choreo_assert(false, "values are not equal.");
+      }
+
+  std::cout << "pass" << std::endl;
+  return 0;
+}
+
+// CHECK: pass
+
+
+// LIVENESS:  (  0) mem_reuse0(u8 mdspan<3> [512, 512, 1] i0, u8 mdspan<3> [512, 512, 1] i1) {
+// LIVENESS:  (  1)   global u8 [ 512 512 (1 * 2)  ] output
+// LIVENESS:  (  2)   parallel p = {p__elem__x} by [1] {
+// LIVENESS:  (  3)     parallel q = {q__elem__x} by [2] {
+// LIVENESS:  (  4)       with idx = {idx__elem__0, idx__elem__1, idx__elem__2} in [ (1 * 2)  1 1 ] {
+// LIVENESS:  (  5)         foreach idx(::) {
+// LIVENESS:  (  6)           shared u8 [ (output.span /  (ubound idx) )  ] s0
+// LIVENESS:  (  7)           shared u8 mdspan<3> [256, 512, 1] s1__buf__
+// LIVENESS:  (  8)           s1 = dma.copy.async i0.ChunkAt(idx) => s1__buf__
+// LIVENESS:  (  9)           shared u8 mdspan<3> [256, 512, 1] s2__buf__
+// LIVENESS:  ( 10)           s2 = dma.copy.async i1.ChunkAt(idx) => s2__buf__
+// LIVENESS:  ( 11)           wait s1, s2
+// LIVENESS:  ( 12)           local u8 [ s1.span ] l1
+// LIVENESS:  ( 13)           inthreads.async  (q == 0)  {
+// LIVENESS:  ( 14)             local u8 [ l1.span ] l0 = {0}
+// LIVENESS:  ( 15)             dma.copy s1 => l1
+// LIVENESS:  ( 16)             call foo0(l1, l0,  (sizeof l0) )
+// LIVENESS:  ( 17)             dma.copy l0 => s0.ChunkAt(__choreo_no_tiling__, __choreo_no_tiling__, q)
+// LIVENESS:  ( 18)           }
+// LIVENESS:  ( 19)           local u8 [ s2.span ] l2
+// LIVENESS:  ( 20)           inthreads.async  (q == 1)  {
+// LIVENESS:  ( 21)             local u8 [ l2.span ] l0 = {0}
+// LIVENESS:  ( 22)             dma.copy s2 => l2
+// LIVENESS:  ( 23)             call foo0(l2, l0,  (sizeof l0) )
+// LIVENESS:  ( 24)             dma.copy l0 => s0.ChunkAt(__choreo_no_tiling__, __choreo_no_tiling__, q)
+// LIVENESS:  ( 25)           }
+// LIVENESS:  ( 26)           sync.shared
+// LIVENESS:  ( 27)           dma.copy s0 => output.ChunkAt(idx)
+// LIVENESS:  ( 28)         }
+// LIVENESS:  ( 29)       }
+// LIVENESS:  ( 30)     }
+// LIVENESS:  ( 31)   }
+// LIVENESS:  ( 32)   return output
+// LIVENESS:  ( 33) }
+
+// LIVENESS:  BUFFER ::mem_reuse0::i0
+// LIVENESS:  	range: [0, 31] 
+// LIVENESS:  BUFFER ::mem_reuse0::i1
+// LIVENESS:  	range: [0, 31] 
+// LIVENESS:  BUFFER ::mem_reuse0::output
+// LIVENESS:  	range: [1, 32] 
+// LIVENESS:  BUFFER ::mem_reuse0::paraby_0::paraby_1::within_0::foreach_0::s0
+// LIVENESS:  	range: [6, 27] 
+// LIVENESS:  BUFFER ::mem_reuse0::paraby_0::paraby_1::within_0::foreach_0::s1__buf__
+// LIVENESS:  	range: [7, 26] 
+// LIVENESS:  VAR    ::mem_reuse0::paraby_0::paraby_1::within_0::foreach_0::s1
+// LIVENESS:  	range: [8, 26] 
+// LIVENESS:  BUFFER ::mem_reuse0::paraby_0::paraby_1::within_0::foreach_0::s2__buf__
+// LIVENESS:  	range: [9, 26] 
+// LIVENESS:  VAR    ::mem_reuse0::paraby_0::paraby_1::within_0::foreach_0::s2
+// LIVENESS:  	range: [10, 26] 
+// LIVENESS:  BUFFER ::mem_reuse0::paraby_0::paraby_1::within_0::foreach_0::l1
+// LIVENESS:  	range: [12, 26] 
+// LIVENESS:  BUFFER ::mem_reuse0::paraby_0::paraby_1::within_0::foreach_0::inthreads_0::l0
+// LIVENESS:  	range: [14, 26] 
+// LIVENESS:  BUFFER ::mem_reuse0::paraby_0::paraby_1::within_0::foreach_0::l2
+// LIVENESS:  	range: [19, 26] 
+// LIVENESS:  BUFFER ::mem_reuse0::paraby_0::paraby_1::within_0::foreach_0::inthreads_1::l0
+// LIVENESS:  	range: [21, 26] 

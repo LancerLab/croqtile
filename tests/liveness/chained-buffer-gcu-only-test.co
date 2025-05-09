@@ -93,36 +93,59 @@ int main() { /// host program
 // CHECK: ( 23)   return output
 // CHECK: ( 24) }
 
-// CHECK: VAR    ::relu::paraby_0::within_0::index
-// CHECK: 	range:
-// CHECK: IGNORE global buffer: ::relu::input
-// CHECK: IGNORE global buffer: ::relu::output
+// CHECK: BUFFER ::relu::input
+// CHECK:         range: [0, 22] 
+// CHECK: VAR    ::relu::input.span
+// CHECK:         range: [0, x] 
+// CHECK: BUFFER ::relu::output
+// CHECK:         range: [1, 23] 
+// CHECK: VAR    ::relu::output.span
+// CHECK:         range: [1, x] 
 // CHECK: VAR    ::relu::paraby_0::p
-// CHECK: 	range: [2, 22]
+// CHECK:         range: [2, 22] 
 // CHECK: VAR    ::relu::paraby_0::p__elem__x
-// CHECK: 	range: [2, 22]
+// CHECK:         range: [2, 22] 
+// CHECK: VAR    ::relu::paraby_0::within_0::index
+// CHECK:         range: [3, x] 
 // CHECK: VAR    ::relu::paraby_0::within_0::n_tile
-// CHECK: 	range: [3, 20]
+// CHECK:         range: [3, 20] 
 // CHECK: BUFFER ::relu::paraby_0::within_0::foreach_0::l2_out
-// CHECK: 	range: [5, 19]
+// CHECK:         range: [5, 19] 
+// CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::l2_out.span
+// CHECK:         range: [5, x] 
 // CHECK: BUFFER ::relu::paraby_0::within_0::foreach_0::input_load__buf__
-// CHECK: 	range: [6, 17]
+// CHECK:         range: [6, 17] 
+// CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::input_load__buf__.span
+// CHECK:         range: [6, x] 
 // CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::input_load
-// CHECK: 	range: [7, 17]
+// CHECK:         range: [7, 17] 
+// CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::input_load.span
+// CHECK:         range: [7, x] 
 // CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::paraby_1::q
-// CHECK: 	range: [8, 17]
+// CHECK:         range: [8, 17] 
 // CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::paraby_1::q__elem__x
-// CHECK: 	range: [8, 17]
+// CHECK:         range: [8, 17] 
 // CHECK: BUFFER ::relu::paraby_0::within_0::foreach_0::paraby_1::input_load_s__buf__
-// CHECK: 	range: [9, 14]
+// CHECK:         range: [9, 14] 
+// CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::paraby_1::input_load_s__buf__.span
+// CHECK:         range: [9, x] 
 // CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::paraby_1::input_load_s
-// CHECK: 	range: [10, 14]
+// CHECK:         range: [10, 14] 
+// CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::paraby_1::input_load_s.span
+// CHECK:         range: [10, x] 
 // CHECK: BUFFER ::relu::paraby_0::within_0::foreach_0::paraby_1::out_load_s__buf__
-// CHECK: 	range: [11, 16]
+// CHECK:         range: [11, 16] 
+// CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::paraby_1::out_load_s__buf__.span
+// CHECK:         range: [11, x] 
 // CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::paraby_1::out_load_s
-// CHECK: 	range: [12, 16]
+// CHECK:         range: [12, 16] 
+// CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::paraby_1::out_load_s.span
+// CHECK:         range: [12, x] 
 // CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::paraby_1::out_store_s
-// CHECK: 	range: [15, 16]
+// CHECK:         range: [15, 16] 
+// CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::paraby_1::out_store_s.span
+// CHECK:         range: [15, x] 
 // CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::out_store
-// CHECK: 	range: [18, 19]
-
+// CHECK:         range: [18, 19] 
+// CHECK: VAR    ::relu::paraby_0::within_0::foreach_0::out_store.span
+// CHECK:         range: [18, x]
