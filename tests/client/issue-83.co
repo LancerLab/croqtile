@@ -1,3 +1,4 @@
+// REQUIRES: TARGET-GCUALL
 // RUN: choreo -t topscc -gs %s -o %s.result && bash %s.result | FileCheck %s --match-full-lines
 
 #include <chrono>
