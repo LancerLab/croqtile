@@ -163,6 +163,26 @@ public:
   }
 
 public:
+  // enable NodeType to retrive a scoped name
+  ptr<Type> GetSymbolType(const std::string& n) const override {
+    return SSTab().LookupSymbol(n);
+  }
+
+  ptr<Type> NodeType(const AST::Node& n) const override {
+    if (auto id = dyn_cast<AST::Identifier>(&n)) {
+      if (!SSTab().IsDeclared(id->name)) {
+        return n.GetType();
+      } else {
+        return GetSymbolType(id->name);
+      }
+    } else if (auto expr = dyn_cast<AST::Expr>(&n)) {
+      if (auto sym = expr->GetSymbol()) return GetSymbolType(sym->name);
+      return expr->GetType();
+    }
+    return VisitorWithScope::NodeType(n);
+  }
+
+public:
   bool Visit(AST::MultiNodes& n) {
     TraceEachVisit(n);
     if (cannot_proceed) return true;
@@ -171,13 +191,19 @@ public:
 
   bool Visit(AST::MultiValues& n) {
     TraceEachVisit(n);
-    if (cannot_proceed) return true;
+
+    if (cannot_proceed || !CanBeValueNumbered(&n)) {
+      InvalidateVN(cur_vn);
+      return true;
+    }
+
     if (gen_values) {
       int valNo = vn.GenerateValueNumberForNode(n);
       cur_vn = valNo;
       cur_mdspan_vn = cur_vn;
     } else
       InvalidateVN(cur_vn);
+
     return true;
   }
 
@@ -219,7 +245,10 @@ public:
     TraceEachVisit(n);
     if (cannot_proceed) return true;
 
-    if (IsMutable(*n.GetType())) return true; // mutables are not valno-able
+    if (!CanBeValueNumbered(&n)) {
+      InvalidateVN(cur_vn);
+      return true;
+    }
 
     if (auto id = n.GetSymbol()) {
       auto name = vn.VNSymbolName(*id);
@@ -262,15 +291,6 @@ public:
       VST_DEBUG(dbgs() << "[ExprShape] Shape for " << STR(n) << ": " << STR(n.s)
                        << "\n");
       InvalidateVN(cur_vn); // a spanned data does not have a value number
-      return true;
-    } else if (n.op == "elemof") {
-      InvalidateVN(cur_vn); // a spanned data does not have a value number
-      return true;
-    } else if (isa<AST::ChunkAt>(n.GetR())) {
-      InvalidateVN(cur_vn); // a spanned data does not have a value number
-      return true;
-    } else if (isa<AST::StringLiteral>(n.GetR())) {
-      InvalidateVN(cur_vn); // a string literal does not have a value number
       return true;
     }
 
@@ -406,7 +426,7 @@ public:
     if (n.init_expr) {
       assert(ValidVN(cur_mdspan_vn) &&
              "invalid value number for the named type.");
-      SSTab().DefineSymbol(name, n.GetType());
+      DefineASymbol(name, n.GetType());
 
       vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(name),
                                            cur_mdspan_vn);
@@ -421,14 +441,11 @@ public:
 
     if (cannot_proceed) return true;
 
-    if (IsMutable(*n.GetType())) return true; // mutables are not valno-able
-
     auto name = n.name_str;
-    if (SSTab().DeclaredInScope(name)) {
-      Error(n.LOC(),
-            "ODR violation: symbol `" + name + "' has been declared already.");
-      error_count++;
-      return false;
+
+    if (!CanBeValueNumbered(&n)) {
+      DefineASymbol(name, NodeType(n));
+      return true; // mutables and events are not valno-able
     }
 
     Storage sto = Storage::NONE;
@@ -450,7 +467,7 @@ public:
                                              cur_mdspan_vn);
       } else if (IsActualBoundedIntegerType(nty)) {
         assert(ValidVN(cur_ub_vn));
-        SSTab().DefineSymbol("@" + name, MakeBoundedIntegerType(cur_ub_vn));
+        DefineASymbol("@" + name, MakeBoundedIntegerType(cur_ub_vn));
         vn.AssociateSignatureWithValueNumber(SSTab().ScopedName("@" + name),
                                              cur_ub_vn);
         Shape s =
@@ -484,7 +501,7 @@ public:
 
     // fill-up the symbol table
     assert(nty);
-    SSTab().DefineSymbol(name, nty);
+    DefineASymbol(name, nty);
     n.SetType(nty);
 
     // TODO(wsj): BooleanType? HalfType...?
@@ -500,7 +517,8 @@ public:
     }
 
     if (isa<FutureType>(n.GetType()) || isa<SpannedType>(n.GetType()))
-      SSTab().DefineSymbol(name + ".span", GetSpannedType(n.GetType()));
+      DefineASymbol(name + ".span",
+                    GetSpannedType(n.GetType())->GetMDSpanType());
 
     InvalidateVN(cur_mdspan_vn); // stop propagation
     InvalidateVN(cur_vn);
@@ -544,13 +562,13 @@ public:
 
     if (cannot_proceed) return true;
 
-    if (IsMutable(*n.GetType())) return true; // mutables are not valno-able
+    if (IsMutable(*NodeType(n))) return true; // mutables are not valno-able
 
     if (SSTab().IsDeclared(n.GetName())) return true;
 
     // this is the un-type-annotated declaration
     auto nty = n.value->GetType();
-    SSTab().DefineSymbol(n.GetName(), nty);
+    DefineASymbol(n.GetName(), nty);
 
     auto name = n.GetName();
     if (auto san = dyn_cast<AST::SpanAs>(n.value))
@@ -558,7 +576,7 @@ public:
 
     if (auto sty = GetSpannedType(nty)) {
       name += ".span";
-      SSTab().DefineSymbol(name, sty->GetMDSpanType());
+      DefineASymbol(name, sty->GetMDSpanType());
       assert(ValidVN(cur_mdspan_vn) &&
              "expected a valid current value number.");
       vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(name),
@@ -569,7 +587,7 @@ public:
     if (IsActualBoundedIntegerType(nty)) {
       name = "@" + name;
       assert(ValidVN(cur_ub_vn));
-      SSTab().DefineSymbol(name, MakeBoundedIntegerType(cur_ub_vn));
+      DefineASymbol(name, MakeBoundedIntegerType(cur_ub_vn));
       vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(name), cur_ub_vn);
       InvalidateVN(cur_ub_vn);
     } else {
@@ -617,6 +635,8 @@ public:
     if (cannot_proceed) return true;
 
     if (!gen_values) return false;
+    if (SSTab().IsDeclared(n.name))
+      if (!CanBeValueNumbered(&n)) { return false; }
 
     auto name = vn.VNSymbolName(n);
     if (SSTab().IsDeclared(name)) {
@@ -630,7 +650,7 @@ public:
 
     if (allow_named_dim) { // for named dims in parameters
       if (!SSTab().DeclaredInScope(n.name)) {
-        SSTab().DefineSymbol(n.name, MakeIntegerType());
+        DefineASymbol(n.name, MakeIntegerType());
         cur_vn =
             vn.GenerateValueNumberFromSignature(SSTab().InScopeName(n.name));
       } else {
@@ -685,10 +705,9 @@ public:
       }
 
       if (n.sym) {
-        SSTab().DefineSymbol(
-            n.sym->name + ".span",
-            cast<SpannedType>(n.type->GetType())->GetMDSpanType());
-        SSTab().DefineSymbol(n.sym->name, n.type->GetType());
+        DefineASymbol(n.sym->name + ".span",
+                      cast<SpannedType>(n.type->GetType())->GetMDSpanType());
+        DefineASymbol(n.sym->name, n.type->GetType());
       }
 
       InvalidateVisitorValNOs();
@@ -700,7 +719,7 @@ public:
 
       // get the value number and make it defined
       vn.GetValueNumberOfSignature(SSTab().ScopedName(n.sym->name));
-      if (n.sym) SSTab().DefineSymbol(n.sym->name, n.GetType());
+      if (n.sym) DefineASymbol(n.sym->name, n.GetType());
 
       InvalidateVisitorValNOs();
       return true;
@@ -729,8 +748,8 @@ public:
     std::string iv_name = SSTab().ScopedName("@" + n.bpv->name);
     vn.AssociateSignatureWithValueNumber(iv_name, cur_vn);
     n.bpv->SetType(MakeBoundedITupleType(s, "pv"));
-    SSTab().DefineSymbol("@" + n.bpv->name, MakeMDSpanType(s));
-    SSTab().DefineSymbol(n.bpv->name, n.bpv->GetType());
+    DefineASymbol("@" + n.bpv->name, MakeMDSpanType(s));
+    DefineASymbol(n.bpv->name, n.bpv->GetType());
 
     std::map<size_t, std::string> idx2dim;
     idx2dim[0] = "x";
@@ -750,8 +769,8 @@ public:
       vn.AssociateSignatureWithValueNumber(iv_name, valno);
       Shape s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(valno));
       sym->SetType(MakeBoundedITupleType(s, "pi:" + idx2dim[i]));
-      SSTab().DefineSymbol("@" + sym->name, MakeMDSpanType(s));
-      SSTab().DefineSymbol(sym->name, sym->GetType());
+      DefineASymbol("@" + sym->name, MakeMDSpanType(s));
+      DefineASymbol(sym->name, sym->GetType());
     }
     return true;
   };
@@ -842,11 +861,11 @@ public:
         vn.AssociateSignatureWithValueNumber(name, valno);
         Shape s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(valno));
         sym->SetType(MakeBoundedITupleType(s));
-        SSTab().DefineSymbol("@" + sym->name, MakeMDSpanType(s));
+        DefineASymbol("@" + sym->name, MakeMDSpanType(s));
 
         // because we use bounded integer var as identifier
         name = SSTab().ScopedName(sym->name);
-        SSTab().DefineSymbol(sym->name, sym->GetType());
+        DefineASymbol(sym->name, sym->GetType());
         // vn.GetOrInsertValueNumberFromSignature(name);
         // TODO(wsj): deal with expression contains bounded integers
       }
@@ -862,8 +881,8 @@ public:
           SSTab().ScopedName("@" + n.with->name), cur_mdspan_vn);
       Shape s = GenShapeFromSignature(vn_sig);
       n.with->SetType(MakeBoundedITupleType(s));
-      SSTab().DefineSymbol("@" + n.with->name, MakeMDSpanType(s));
-      SSTab().DefineSymbol(n.with->name, n.with->GetType());
+      DefineASymbol("@" + n.with->name, MakeMDSpanType(s));
+      DefineASymbol(n.with->name, n.with->GetType());
     }
     InvalidateVN(cur_mdspan_vn);
 
@@ -920,8 +939,8 @@ public:
 
     if (n.operation == ".any") {
       assert(!n.future.empty() && "unexpected: the future is empty.");
-      SSTab().DefineSymbol(n.future, MakePlaceHolderFutureType());
-      SSTab().DefineSymbol(n.future + ".span", MakePlaceHolderMDSpanType());
+      DefineASymbol(n.future, MakePlaceHolderFutureType());
+      DefineASymbol(n.future + ".span", MakePlaceHolderMDSpanType());
       vn.AssociateSignatureWithInvalidValueNumber(
           SSTab().ScopedName(n.future + ".span"));
       InvalidateVN(cur_vn);
@@ -987,8 +1006,8 @@ public:
     } else {
       std::string f_span = n.future + ".span";
       vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(f_span), cur_vn);
-      SSTab().DefineSymbol(n.future, n.GetType());
-      SSTab().DefineSymbol(f_span, MakeMDSpanType(s)); // implicit symbol
+      DefineASymbol(n.future, n.GetType());
+      DefineASymbol(f_span, MakeMDSpanType(s)); // implicit symbol
     }
 
     auto vn_sig = vn.GetSignatureFromValueNumber(cur_vn);
@@ -1172,6 +1191,7 @@ public:
 
     // value the scalars
     for (auto& s : n.arguments->AllValues()) {
+      if (!CanBeValueNumbered(s.get())) continue;
       if (isa<IntegerType>(NodeType(*s))) {
         auto expr = cast<AST::Expr>(s);
         expr->s = GenShapeFromSignature(vn.GetSignatureForNode(*s));
@@ -1542,6 +1562,44 @@ private:
       } else
         choreo_unreachable("expect an identifier.");
     }
+  }
+
+  bool CanBeValueNumbered(AST::Node* n) const {
+    if (!n) return true;
+
+    if (auto mv = dyn_cast<AST::MultiValues>(n)) {
+      for (auto v : mv->AllValues())
+        if (!CanBeValueNumbered(v.get())) return false;
+      return true;
+    }
+
+    assert(!n->IsBlock() && "do not pass in block node.");
+
+    if (isa<AST::ChunkAt>(n)) return false;
+    if (isa<AST::StringLiteral>(n)) return false;
+    if (isa<AST::DataAccess>(n)) return false;
+    if (!NodeType(*n)) {
+      // sometimes the symbol is yet to define, simply make it work.
+      return true;
+    }
+    if (IsMutable(*NodeType(*n))) return false;
+    if (isa<EventType>(NodeType(*n))) return false;
+
+    if (auto e = dyn_cast<AST::Expr>(n)) {
+      if (e->op == "elemof") return false;
+      return CanBeValueNumbered(e->GetR().get()) &&
+             CanBeValueNumbered(e->GetL().get()) &&
+             CanBeValueNumbered(e->GetC().get());
+    }
+    return true; // could be id/int/...
+  }
+
+  void DefineASymbol(const std::string& name, const ptr<Type>& ty) {
+    assert(!SSTab().IsDeclared(name) && "symbol has been declared.");
+    SSTab().DefineSymbol(name, ty);
+    if (debug_visit)
+      dbgs() << "[symtab] add: " << SSTab().InScopeName(name)
+             << ", type: " << PSTR(ty) << "\n";
   }
 };
 

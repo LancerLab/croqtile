@@ -828,10 +828,18 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
     auto ety = NodeType(*n.da);
     auto vty = NodeType(*n.value);
 
-    if (*ety != *vty) {
-      Error(n.da->LOC(), "type inconsistent: assign " + PSTR(vty) + " to " +
-                             PSTR(ety) + ".");
+    if (!IsMutable(*ety)) {
+      Error(n.da->LOC(), "must assign to a mutable value.");
       ++error_count;
+    }
+
+    if (*ety != *vty) {
+      // consider taking value of bounded variables
+      if (!(isa<IntegerType>(ety) && CanYieldAnInteger(vty))) {
+        Error(n.da->LOC(), "type inconsistent: assign " + PSTR(vty) + " to " +
+                               PSTR(ety) + ".");
+        ++error_count;
+      }
     }
 
     SetNodeType(n, ety);
@@ -945,8 +953,8 @@ bool EarlySemantics::Visit(AST::Identifier& n) {
   if (in_decl) {
     if (allow_named_dim) {
       if (!SSTab().DeclaredInScope(n.name))
-        SSTab().DefineSymbol(n.name,
-                             MakeIntegerType()); // named dim is integer
+        ReportErrorWhenViolateODR(n.LOC(), n.name, __FILE__, __LINE__,
+                                  MakeIntegerType()); // named dim is integer
     } else
       ReportErrorWhenViolateODR(n.LOC(), n.name, __FILE__, __LINE__);
   } else {
@@ -960,7 +968,10 @@ bool EarlySemantics::Visit(AST::Parameter& n) {
   if (n.sym) {
     ModifySymbolType(n.sym->name, n.type->GetType());
     if (auto ty = dyn_cast<SpannedType>(n.type->GetType())) {
-      SSTab().DefineSymbol(n.sym->name + ".span", ty->GetMDSpanType());
+
+      ReportErrorWhenViolateODR(n.LOC(), n.sym->name + ".span", __FILE__,
+                                __LINE__,
+                                ty->GetMDSpanType()); // named dim is integer
     }
   }
   SetNodeType(n, n.type->GetType());
@@ -1190,7 +1201,7 @@ bool EarlySemantics::Visit(AST::SpanAs& n) {
 
   auto asty = MakeRankedSpannedType(n.list->Count(), (BaseType)sty->f_type,
                                     sty->m_type);
-  SSTab().DefineSymbol(n.nid->name, asty);
+  ReportErrorWhenViolateODR(n.LOC(), n.nid->name, __FILE__, __LINE__, asty);
   SetNodeType(n, asty);
 
   // TODO: set the proper type

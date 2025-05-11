@@ -187,6 +187,7 @@ public:
 
   // simple reference to the symbol table
   virtual ScopedSymbolTable& SSTab() { return scoped_symtab; }
+  virtual const ScopedSymbolTable& SSTab() const { return scoped_symtab; }
 
   virtual const ptr<SymbolTable> SymTab() const {
     if (auto st = scoped_symtab.GlobalSymbolTable()) return st;

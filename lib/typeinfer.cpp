@@ -343,20 +343,21 @@ bool TypeInference::Visit(AST::Assignment& n) {
     n.SetNote("ref");
 
   if (SSTab().IsDeclared(n.GetName())) {
-    if (!isa<FutureType>(NodeType(*n.value))) {
-      Error(n.LOC(),
-            "current choreo does not support symbol re-assignment except for "
-            "future type.");
-      error_count++;
-      SetNodeType(n, MakeUnknownType());
-      cur_type.reset();
-      return false;
-    } else {
+    auto vty = NodeType(*n.value);
+    if (isa<FutureType>(vty) || IsMutable(*vty)) {
       // no type inference is necessary
       SetNodeType(n, NodeType(*n.value));
       SetNodeType(*n.da, NodeType(*n.value));
       cur_type.reset();
       return true;
+    } else {
+      Error(n.LOC(),
+            "current choreo does not support symbol re-assignment except for "
+            "future/mutable type.");
+      error_count++;
+      SetNodeType(n, MakeUnknownType());
+      cur_type.reset();
+      return false;
     }
   }
 
@@ -507,8 +508,12 @@ bool TypeInference::Visit(AST::Expr& n) {
     } else if (n.op == "!") {
       SetNodeType(n, MakeBooleanType());
       return true;
+    } else if (n.op == "++" || n.op == "--") {
+      SetNodeType(n, NodeType(*n.GetR()));
+      return true;
     }
-    choreo_unreachable("type inference is yet to implement.");
+    choreo_unreachable("type inference is yet to implement for '" + n.op +
+                       "'.");
   }
 
   if (n.GetForm() == AST::Expr::Binary) {
@@ -522,6 +527,8 @@ bool TypeInference::Visit(AST::Expr& n) {
 
     auto& pty_lhs = n.GetL()->GetType();
     auto& pty_rhs = n.GetR()->GetType();
+
+    bool is_mutable = IsMutable(*pty_lhs) || IsMutable(*pty_rhs);
 
     if (n.IsLogical()) {
       if ((IsActualBoundedIntegerType(pty_lhs) && ConvertibleToInt(pty_rhs)) ||
@@ -659,7 +666,7 @@ bool TypeInference::Visit(AST::Expr& n) {
                  isa<IntegerType>(pty_lhs))
           SetNodeType(n, pty_rhs);
         else
-          SetNodeType(n, MakeIntegerType());
+          SetNodeType(n, MakeIntegerType(is_mutable));
       }
     } else if (*pty_lhs != *pty_rhs) {
       Error(n.LOC(), "The operands of the expression cannot undergo '" + n.op +

@@ -509,14 +509,17 @@ public:
               auto nname = SymbolTable::GetAnonName();
               auto assign = AST::Make<AST::Assignment>(
                   bound_expr->GetL()->LOC(), nname, bound_expr->GetL());
-              assign->SetType(bound_expr->GetL()->GetType());
-              assign->da->SetType(bound_expr->GetL()->GetType());
+              auto lty = bound_expr->GetL()->GetType();
+              assign->SetType(lty);
+              assign->da->SetType(lty);
               mnodes_insertions[multi_nodes.top()].emplace_back(
                   std::make_tuple(index, assign, nname));
               VST_DEBUG(dbgs() << "range - getith: replace "
                                << PSTR(bound_expr->GetL()) << "\n with "
                                << nname << ".\n");
-              bound_expr->SetL(AST::MakeIdExpr(v->LOC(), nname));
+              auto id_expr = AST::MakeIdExpr(v->LOC(), nname);
+              id_expr->SetType(lty);
+              bound_expr->SetL(id_expr);
               VST_DEBUG(dbgs() << PSTR(bound_expr->GetL()) << ".\n");
             }
           }
@@ -527,11 +530,14 @@ public:
             cur_node_index + mnodes_insertions[multi_nodes.top()].size();
         auto nname = SymbolTable::GetAnonName();
         auto assign = AST::Make<AST::Assignment>(v->LOC(), nname, bound_expr);
-        assign->SetType(bound_expr->GetType());
-        assign->da->SetType(bound_expr->GetType());
+        auto bty = bound_expr->GetType();
+        assign->SetType(bty);
+        assign->da->SetType(bty);
         mnodes_insertions[multi_nodes.top()].emplace_back(
             std::make_tuple(index, assign, nname));
-        repls.emplace_back(i, AST::MakeIdExpr(v->LOC(), nname));
+        auto id_expr = AST::MakeIdExpr(v->LOC(), nname);
+        id_expr->SetType(bty);
+        repls.emplace_back(i, id_expr);
         VST_DEBUG(dbgs() << "range - " << bound_expr->op << ": "
                          << "replace " << PSTR(bound_expr->GetL()) << "\n with "
                          << nname << ".\n");

@@ -249,6 +249,14 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
       ds << d_indent << "} // end if-else " << ie->LOC() << "\n";
     }
     emit_call = true;
+  } else if (auto ie = dyn_cast<AST::WhileBlock>(&n)) {
+    if (IsHost()) {
+      DecrHostIndent();
+      hs << h_indent << "} // end while: " << ie->LOC() << "\n";
+    } else {
+      DecrDeviceIndent();
+      ds << d_indent << "} // end while: " << ie->LOC() << "\n";
+    }
   } else if (isa<AST::IncrementBlock>(&n)) {
     if (IsHost()) {
       DecrHostIndent();
@@ -710,8 +718,8 @@ bool TopsccCodeGen::Visit(AST::Assignment& n) {
 
   if (isa<BoundedType>(nty) || isa<SpannedType>(nty) || isa<FutureType>(nty) ||
       isa<IntegerType>(nty)) {
-    ds << d_indent << "auto " << n.GetName() << " = " << ExprSTR(n.value, false)
-       << ";\n";
+    ds << d_indent << ((IsMutable(*nty)) ? "" : "auto ") << n.GetName() << " = "
+       << ExprSTR(n.value, false) << ";\n";
   } else {
     errs() << "Assignment " << STR(n) << " unprocessed, not supported "
            << PSTR(nty) << "\n";
@@ -1616,6 +1624,21 @@ bool TopsccCodeGen::Visit(AST::IfElseBlock& n) {
   return true;
 }
 
+bool TopsccCodeGen::Visit(AST::WhileBlock& n) {
+  TraceEachVisit(n);
+
+  if (IsHost()) {
+    hs << h_indent << "// while: " << n.LOC() << "\n";
+    hs << h_indent << "while (" << ExprSTR(n.pred, true) << ") {\n";
+    IncrHostIndent();
+  } else {
+    ds << d_indent << "// while: " << n.LOC() << "\n";
+    ds << d_indent << "while (" << ExprSTR(n.pred, false) << ") {\n";
+    IncrDeviceIndent();
+  }
+  return true;
+}
+
 bool TopsccCodeGen::Visit(AST::Return& n) {
   TraceEachVisit(n);
 
@@ -2213,6 +2236,10 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
         auto shape = GetShape(GetSymbolType(var));
         assert(shape.IsValid() && "Invalid shape is found");
         oss << shape.GetElementCountExpression();
+      } else if (expr->GetOp() == "++") {
+        oss << "++" << ExprSTR(expr->GetR(), is_host);
+      } else if (expr->GetOp() == "--") {
+        oss << "--" << ExprSTR(expr->GetR(), is_host);
       } else
         choreo_unreachable("Unsupported choreo expression.");
     } else if (expr->IsBinary()) {
