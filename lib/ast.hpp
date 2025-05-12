@@ -1940,6 +1940,15 @@ inline Identifier* GetIdentifier(const Node& n) {
     return nullptr;
 }
 
+inline ptr<Identifier> GetIdentifier(const ptr<Node>& n) {
+  if (auto id = dyn_cast<AST::Identifier>(n))
+    return id;
+  else if (auto expr = dyn_cast<AST::Expr>(n))
+    return expr->GetSymbol();
+  else
+    return nullptr;
+}
+
 inline IntLiteral* GetIntLiteral(const Node& n) {
   if (auto il = dyn_cast<AST::IntLiteral>(&n))
     return il;

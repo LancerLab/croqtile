@@ -602,6 +602,11 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
     (IsHost() ? hs : ds) << (IsHost() ? h_indent : d_indent)
                          << NameBaseType(GetBaseType(*nty), false) << " " << sym
                          << " = " << ExprSTR(n.init_expr, false) << ";\n";
+
+    // mutables have references
+    if (IsMutable(*nty))
+      if (!IsHost()) ssm.MapDeviceSymbol(InScopeName(sym), sym);
+
     return true;
   }
 
@@ -2069,6 +2074,54 @@ const std::string TopsccCodeGen::ValueSTR(const ValueItem& vi) const {
   return UnScopedExpr(STR(vi));
 }
 
+std::optional<std::string>
+TopsccCodeGen::ThreadIdString(const ptr<AST::Identifier>& id) const {
+  auto ty = NodeType(*id);
+  if (isa<BoundedType>(ty) &&
+      PrefixedWith(cast<BoundedType>(ty)->GetNote(), "pv")) {
+    auto l = RemovePrefixOrNull("pv:", cast<BoundedType>(ty)->GetNote());
+    assert(l.has_value());
+    // is marked as parallel whose level is decided by target check
+    if (*l == "local")
+      return "__tops_tid_x()";
+    else if (*l == "shared")
+      return "__tops_bid_x()";
+    else if (*l == "sublocal")
+      return "__tops_stid_x()";
+    else
+      choreo_unreachable("invalid bounded type note.");
+  }
+  return std::nullopt;
+}
+
+std::optional<std::string>
+TopsccCodeGen::SubThreadIdString(const ptr<AST::Identifier>& id) const {
+  auto ty = NodeType(*id);
+  std::ostringstream oss;
+  if (isa<BoundedType>(ty) &&
+      PrefixedWith(cast<BoundedType>(ty)->GetNote(), "pi")) {
+    auto l = RemovePrefixOrNull("pi:", cast<BoundedType>(ty)->GetNote());
+    assert(l.has_value());
+    // l should be (x|y|z):(shared|local)
+    if (l->length() <= 3)
+      choreo_unreachable("invalid bounded type note: " +
+                         cast<BoundedType>(ty)->GetNote() + ".");
+    oss << "__tops_";
+    if (l->substr(2) == "local")
+      oss << "tid_";
+    else if (l->substr(2) == "shared")
+      oss << "bid_";
+    else
+      choreo_unreachable("invalid bounded type note.");
+    if (l->at(0) > 'z' || l->at(0) < 'x')
+      choreo_unreachable("invalid bounded type note: " +
+                         cast<BoundedType>(ty)->GetNote() + ".");
+    oss << l->at(0) << "()";
+    return oss.str();
+  }
+  return std::nullopt;
+}
+
 const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
                                          bool is_host) const {
   std::ostringstream oss;
@@ -2078,40 +2131,11 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       assert(!is_host);
       return id->name;
     }
-    auto ty = NodeType(*id);
-    if (isa<BoundedType>(ty) &&
-        PrefixedWith(cast<BoundedType>(ty)->GetNote(), "pv")) {
-      auto l = RemovePrefixOrNull("pv:", cast<BoundedType>(ty)->GetNote());
-      assert(l.has_value());
-      // is marked as parallel whose level is decided by target check
-      if (*l == "local")
-        oss << "__tops_tid_x()";
-      else if (*l == "shared")
-        oss << "__tops_bid_x()";
-      else if (*l == "sublocal")
-        oss << "__tops_stid_x()";
-      else
-        choreo_unreachable("invalid bounded type note.");
-    } else if (isa<BoundedType>(ty) &&
-               PrefixedWith(cast<BoundedType>(ty)->GetNote(), "pi")) {
-      auto l = RemovePrefixOrNull("pi:", cast<BoundedType>(ty)->GetNote());
-      assert(l.has_value());
-      // l should be (x|y|z):(shared|local)
-      if (l->length() <= 3)
-        choreo_unreachable("invalid bounded type note: " +
-                           cast<BoundedType>(ty)->GetNote() + ".");
-      oss << "__tops_";
-      if (l->substr(2) == "local")
-        oss << "tid_";
-      else if (l->substr(2) == "shared")
-        oss << "bid_";
-      else
-        choreo_unreachable("invalid bounded type note.");
-      if (l->at(0) > 'z' || l->at(0) < 'x')
-        choreo_unreachable("invalid bounded type note: " +
-                           cast<BoundedType>(ty)->GetNote() + ".");
-      oss << l->at(0) << "()";
-    } else if (within_map.count(InScopeName(id->name)) && !is_host) {
+    if (auto ids = ThreadIdString(id))
+      oss << ids.value();
+    else if (auto sids = SubThreadIdString(id))
+      oss << sids.value();
+    else if (within_map.count(InScopeName(id->name)) && !is_host) {
       size_t i = 0;
       for (auto iv_name : within_map.at(InScopeName(id->name)))
         oss << ((i++ == 0) ? "" : ", ")
@@ -2146,8 +2170,12 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
     size_t idx = 0;
     auto shape = sty->GetShape();
     for (auto item : da->GetIndices()) {
-      if (auto id = AST::GetIdentifier(*item)) {
-        if (within_map.count(InScopeName(id->name))) {
+      if (auto id = AST::GetIdentifier(item)) {
+        if (auto ids = ThreadIdString(id))
+          oss << " + " << ids.value();
+        else if (auto sids = SubThreadIdString(id))
+          oss << " + " << sids.value();
+        else if (within_map.count(InScopeName(id->name))) {
           auto ivs = within_map.at(InScopeName(id->name));
           for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr) {
             auto shape = sty->GetShape();

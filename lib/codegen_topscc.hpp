@@ -361,6 +361,10 @@ private:
   const std::string ValueSTR(const ValueItem& vi) const;
   const std::string ExprSTR(AST::ptr<AST::Node>, bool is_host = true) const;
   const std::string CallSTR(AST::Call&) const;
+
+  std::optional<std::string> ThreadIdString(const ptr<AST::Identifier>&) const;
+  std::optional<std::string>
+  SubThreadIdString(const ptr<AST::Identifier>&) const;
 };
 
 } // namespace Topscc
