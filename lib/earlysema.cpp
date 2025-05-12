@@ -789,7 +789,7 @@ bool EarlySemantics::Visit(AST::DataAccess& n) {
   }
 
   auto dty = SSTab().LookupSymbol(n.GetDataName());
-  auto sty = GetSpannedType(dty);
+  auto sty = dyn_cast<SpannedType>(dty);
 
   if (!sty) {
     Error(n.LOC(), "expect '" + n.GetDataName() + "' a spanned type but got " +

@@ -151,6 +151,7 @@ void SymReplace::InitializeNode(ptr<AST::Node> n) {
   } else if (auto b = dyn_cast<AST::Boolean>(n)) {
     InsertNdSnSymMap(n, PSTR(b), false);
   } else if (isa<AST::ChunkAt>(n)) {
+  } else if (auto da = dyn_cast<AST::DataAccess>(n)) {
   } else {
     choreo_unreachable("The node of type " + PSTR(n->GetType()) +
                        " is not supported in SymReplace yet.\n\t" +
@@ -318,6 +319,8 @@ void SymReplace::SymbolizeExprNode(ptr<AST::Node> n) {
       (void)ca;
       InsertExprSymValnoMap(n, 0);
     } else if (isa<AST::StringLiteral>(R)) {
+      InsertExprSymValnoMap(n, 0);
+    } else if (isa<AST::DataAccess>(R)) {
       InsertExprSymValnoMap(n, 0);
     } else {
       choreo_unreachable("The ref node(" + R->TypeNameString() +

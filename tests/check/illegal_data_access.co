@@ -1,0 +1,13 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ void foobar(f32 [M, 24] input, int N, float d) {
+  parallel p by 1 {
+    shared f32 [14, 7] buffer;
+    foreach i in M {
+      ii = dma.copy input.chunkat(i, _) => local;
+      println(ii.at(i, i));
+    }
+  }
+}
+
+// CHECK: error: expect 'ii' a spanned type but got sync=>local f32 mdspan<2> [].
