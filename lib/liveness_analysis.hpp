@@ -124,7 +124,7 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
 
   size_t inthreads_async_level = 0;
   std::unordered_map<std::string, VarSet> async_inthreads_vars;
-  bool visiting_synchronize;
+  bool visiting_synchronize = false;
 
   struct LivenessInfo {
     VarSet use;
