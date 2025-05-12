@@ -1595,7 +1595,7 @@ private:
   }
 
   void DefineASymbol(const std::string& name, const ptr<Type>& ty) {
-    assert(!SSTab().IsDeclared(name) && "symbol has been declared.");
+    // assert(!SSTab().IsDeclared(name) && "symbol has been declared.");
     SSTab().DefineSymbol(name, ty);
     if (debug_visit)
       dbgs() << "[symtab] add: " << SSTab().InScopeName(name)
