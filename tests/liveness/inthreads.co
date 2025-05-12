@@ -122,26 +122,26 @@ int main()
 // LIVENESS: ( 33) }
 
 // LIVENESS: BUFFER ::mem_reuse0::i0
-// LIVENESS: 	range: [0, 31] 
+// LIVENESS-NEXT: 	range: [0, 31] 
 // LIVENESS: BUFFER ::mem_reuse0::i1
-// LIVENESS: 	range: [0, 31] 
+// LIVENESS-NEXT: 	range: [0, 31] 
 // LIVENESS: BUFFER ::mem_reuse0::output
-// LIVENESS: 	range: [1, 32] 
+// LIVENESS-NEXT: 	range: [1, 32] 
 // LIVENESS: BUFFER ::mem_reuse0::paraby_0::paraby_1::within_0::foreach_0::s0
-// LIVENESS: 	range: [6, 27] 
+// LIVENESS-NEXT: 	range: [6, 27] 
 // LIVENESS: BUFFER ::mem_reuse0::paraby_0::paraby_1::within_0::foreach_0::s1__buf__
-// LIVENESS: 	range: [7, 26] 
+// LIVENESS-NEXT: 	range: [7, 26] 
 // LIVENESS: VAR    ::mem_reuse0::paraby_0::paraby_1::within_0::foreach_0::s1
-// LIVENESS: 	range: [8, 26] 
+// LIVENESS-NEXT: 	range: [8, 26] 
 // LIVENESS: BUFFER ::mem_reuse0::paraby_0::paraby_1::within_0::foreach_0::s2__buf__
-// LIVENESS: 	range: [9, 26] 
+// LIVENESS-NEXT: 	range: [9, 26] 
 // LIVENESS: VAR    ::mem_reuse0::paraby_0::paraby_1::within_0::foreach_0::s2
-// LIVENESS: 	range: [10, 26] 
+// LIVENESS-NEXT: 	range: [10, 26] 
 // LIVENESS: BUFFER ::mem_reuse0::paraby_0::paraby_1::within_0::foreach_0::l1
-// LIVENESS: 	range: [12, 26] 
+// LIVENESS-NEXT: 	range: [12, 26] 
 // LIVENESS: BUFFER ::mem_reuse0::paraby_0::paraby_1::within_0::foreach_0::inthreads_0::l0
-// LIVENESS: 	range: [14, 26] 
+// LIVENESS-NEXT: 	range: [14, 26] 
 // LIVENESS: BUFFER ::mem_reuse0::paraby_0::paraby_1::within_0::foreach_0::l2
-// LIVENESS: 	range: [19, 26] 
+// LIVENESS-NEXT: 	range: [19, 26] 
 // LIVENESS: BUFFER ::mem_reuse0::paraby_0::paraby_1::within_0::foreach_0::inthreads_1::l0
-// LIVENESS: 	range: [21, 26] 
+// LIVENESS-NEXT: 	range: [21, 26] 
