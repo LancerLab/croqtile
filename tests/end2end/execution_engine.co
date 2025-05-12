@@ -1,0 +1,57 @@
+// REQUIRES: TARGET-GCU300
+// RUN: choreo -gs -t topscc -dp=symrepl %s -o %s.topscc.result && bash %s.topscc.result --execute 2>&1 | FileCheck %s && rm -f %s.topscc.result
+
+#define NUM_ENGINE 4
+#define K 14
+__co__ void exe_engine(s32 [K] inputs) {
+  parallel p by 5 {
+    shared s32 [NUM_ENGINE] thread_context;
+    shared event ce[NUM_ENGINE], pe[NUM_ENGINE];
+    shared event terminated[NUM_ENGINE];
+    mutable int tidx = 0;
+
+    trigger ce;  // make executors active
+
+    // dispatcher
+    inthreads.async (p == #p - 1) {
+      f = dma.copy inputs => local;
+      foreach i in [K]
+        if (f.data.at(i) == 1) {
+          while (!ce[tidx]) tidx = (++tidx) % NUM_ENGINE;
+          wait ce[tidx];  // reset the event, add keyword 'reset'?
+          // engine is not busy, set context[tidx]
+          thread_context.at(tidx) = i;
+          trigger pe[tidx];
+        }
+      trigger terminated;
+    }
+
+    // executor
+    inthreads.async (p < #p - 1) {
+      while (!terminated[p]) {
+        wait pe[p];
+        println("Thread ", p, ": workload: ", thread_context.at(p));
+        trigger ce[p];
+      }
+      wait terminated[p];
+    }
+    sync.shared;
+  }
+}
+
+int main() {
+  int inputs[] = {1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0};
+  exe_engine(choreo::make_spanview(inputs));
+
+  return 0;
+}
+
+// CHECK-DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 0
+// CHECK-DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 2
+// CHECK-DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 3
+// CHECK-DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 4
+// CHECK-DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 6
+// CHECK-DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 7
+// CHECK-DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 9
+// CHECK-DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 11
+// CHECK-DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 12
