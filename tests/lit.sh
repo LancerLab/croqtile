@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
 
-# Check if TERM is unset. It enables 'tput' in some docker environment.
-if [ -z "$TERM" ]; then
-  export TERM=xterm
-#  echo "TERM was unset, set to 'xterm'"
-fi
-
 # Get the directory where the script is located
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 timestamp=$(date +%Y%m%d%H%M%S)
@@ -260,6 +254,12 @@ execute_command() {
       elapsed_time="$(bc <<< "scale=3; $elapsed_ns / 1000000") ms"
   else
       elapsed_time="$(bc <<< "scale=3; $elapsed_ns / 1000") µs"
+  fi
+
+  # Check if TERM is unset. It enables 'tput' in some docker environment.
+  if [ -z "$TERM" ]; then
+    export TERM=xterm
+  #  echo "TERM was unset, set to 'xterm'"
   fi
 
   local term_width=$(tput cols)

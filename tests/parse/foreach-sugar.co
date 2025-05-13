@@ -23,7 +23,7 @@ __co__ void foo(int N, int M, s32[2,4] lhs) {
 // CHECK:     (with statements)
 // CHECK:     `- Foreach Block:
 // CHECK:      `- Iteration variables: index
-// CHECK:      `- Predication:  (p < 3) 
+// CHECK:      `- Branch On Condition:  (p < 3) 
 // CHECK:   `- With Block:
 // CHECK:     (within constraints)
 // CHECK:     `- index in [ 3 2 1 ]
@@ -38,11 +38,11 @@ __co__ void foo(int N, int M, s32[2,4] lhs) {
 // CHECK:      `- Iteration variables: x
 // CHECK:      `- Iteration variables: y
 // CHECK:      `- Iteration variables: z
-// CHECK:      `- Predication:  (p <  (N %  (ubound p) ) ) 
+// CHECK:      `- Branch On Condition:  (p <  (N %  (ubound p) ) ) 
 // CHECK:   `- With Block:
 // CHECK:     (within constraints)
 // CHECK:     `- index in lhs.span
 // CHECK:     (with statements)
 // CHECK:     `- Foreach Block:
 // CHECK:      `- Iteration variables: index
-// CHECK:      `- Predication:  (p <  (N %  (ubound p) ) )
+// CHECK:      `- Branch On Condition:  (p <  (N %  (ubound p) ) )

@@ -999,7 +999,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   assert(!(shared_in_block && local_in_warp) &&
          "local and shared memory should not be used at the same time");
   if (local_in_warp)
-    assert(arch.GetValue() == "gcu400" && "only gcu400 need handle local synchronization");
+    assert(arch.GetValue() == "gcu400" &&
+           "only gcu400 need handle local synchronization");
 
   if (shared_in_block || local_in_warp) {
     ds << d_indent << "if (" << SingleInstancePredicate(shared_in_block)
@@ -1223,7 +1224,8 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
   assert(!(local_in_warp && shared_in_block) &&
          "local and shared memory should not be used at the same time");
   if (local_in_warp)
-    assert(arch.GetValue() == "gcu400" && "only gcu400 need handle local synchronization");
+    assert(arch.GetValue() == "gcu400" &&
+           "only gcu400 need handle local synchronization");
 
   if (shared_in_block || local_in_warp) {
     ds << d_indent << "if (" << SingleInstancePredicate(shared_in_block)

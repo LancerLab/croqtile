@@ -1158,17 +1158,15 @@ struct IfElseBlock : public Node, public TypeIDProvider<IfElseBlock> {
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool with_type = false) const override {
-    os << prefix << "\n`- Predication";
-    if (with_type) os << "<{" << PSTR(GetType()) << "}>";
-    os << ": ";
+    os << "\n" << prefix << "`- Branch On Condition: ";
     pred->Print(os, " ");
-    os << "\n` - If Block: ";
-    if (if_stmts->Count()) if_stmts->Print(os, prefix + " ");
+    if (with_type) os << "<{" << PSTR(GetType()) << "}>";
+    os << "\n" << prefix << " `- If-Block:";
+    if (if_stmts->Count()) if_stmts->Print(os, prefix + "  ", with_type);
     if (else_stmts && else_stmts->Count()) {
-      os << "\n` - Else Block: ";
-      else_stmts->Print(os, prefix + " ");
+      os << "\n" << prefix << " `- Else-Block:";
+      else_stmts->Print(os, prefix + "  ", with_type);
     }
-    os << "\n";
   }
 
   void accept(Visitor&) override;
@@ -1646,8 +1644,10 @@ struct Call : public Node, public TypeIDProvider<Call> {
              bool with_type = false) const override {
     os << "\n" << prefix << "`- Call: " << STR(*function);
     if (is_bif) os << " (built-in)";
-    os << "\n" << prefix << "  `- with arguments: ";
-    arguments->Print(os, {}, with_type);
+    if (arguments->Count()) {
+      os << "\n" << prefix << "  `- with arguments: ";
+      arguments->Print(os, {}, with_type);
+    }
     if (template_args) {
       os << "\n" << prefix << "  `- with template parameters: ";
       template_args->Print(os, {}, with_type);

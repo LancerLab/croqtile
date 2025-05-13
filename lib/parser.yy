@@ -219,6 +219,10 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::ChunkAt>> chunkat_expr subdata_expr
 %nterm <AST::ptr<AST::Select>> select_expr
 
+// resolving the ambiguity of dangling ELSE
+%nonassoc IF_PREC
+%nonassoc ELSE
+
 // precedence (low to high) and associativity
 %right ASSIGN
 %right QES COL
@@ -339,7 +343,7 @@ num_expr
     | num_expr STAR num_expr { $$ = AST::Make<AST::IntLiteral>(@1, $1->value * $3->value); }
     | num_expr SLASH num_expr { $$ = AST::Make<AST::IntLiteral>(@1, $1->value / $3->value); }
     | num_expr PECET num_expr { $$ = AST::Make<AST::IntLiteral>(@1, $1->value % $3->value); }
-    | LPAREN num_expr RPAREN { $$ = AST::Make<AST::IntLiteral>(@1, $2->value);}
+    | LPAREN num_expr RPAREN { $$ = AST::Make<AST::IntLiteral>(@1, $2->value); }
 
 void_type
     : VOID  { $$ = AST::Make<AST::DataType>(@1, $1); }
@@ -362,7 +366,6 @@ scalar_type
 mdspan_as_type
     : fundamental_type LBRAKT g_value_list RBRAKT {
         // if it contains a single mdspan, use it directly
-        bool direct_mdspan = false;
         ptr<AST::MultiDimSpans> mds = nullptr;
         if ($3->Count() == 1)
           if (auto e = dyn_cast<AST::Expr>($3->ValueAt(0)))
@@ -1162,13 +1165,18 @@ while_block
     ;
 
 if_else_block
-    : IF LPAREN s_expr RPAREN stmts_block {
+    : IF LPAREN s_expr RPAREN stmts_block %prec IF_PREC {
         $$ = AST::Make<AST::IfElseBlock>(@1, $3, $5, nullptr);
       }
-    | IF LPAREN call_stmt RPAREN stmts_block {
+    | IF LPAREN call_stmt RPAREN stmts_block %prec IF_PREC {
         $$ = AST::Make<AST::IfElseBlock>(@1, $3, $5, nullptr);
       }
-      /* TODO: handle if-else */
+    | IF LPAREN s_expr RPAREN stmts_block ELSE stmts_block {
+        $$ = AST::Make<AST::IfElseBlock>(@1, $3, $5, $7);
+      }
+    | IF LPAREN call_stmt RPAREN stmts_block ELSE stmts_block {
+        $$ = AST::Make<AST::IfElseBlock>(@1, $3, $5, $7);
+      }
     ;
 
 withins
