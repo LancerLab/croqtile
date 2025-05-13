@@ -1174,8 +1174,9 @@ bool LivenessAnalyzer::Visit(AST::Trigger& n) {
     auto expr = dyn_cast<AST::Expr>(e);
     assert(IsSymbolOrArrayRef(*e) &&
            "expect either symbol or array reference.");
+    bool is_array_ref = (expr->op == "elemof");
     std::string name;
-    if (expr)
+    if (is_array_ref)
       name = AST::GetArrayBaseSymbol(*expr)->name;
     else
       name = AST::GetIdentifier(*e)->name;

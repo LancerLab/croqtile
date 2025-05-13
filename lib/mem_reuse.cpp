@@ -42,10 +42,19 @@ bool MemAnalyzer::BeforeVisitImpl(AST::Node& n) {
 
 bool MemAnalyzer::Visit(AST::NamedVariableDecl& n) {
   auto ty = GetSymbolType(n.name_str);
-  auto sty = dyn_cast<SpannedType>(ty);
-  if (!sty) return true;
-  if (!IsRef(n)) {
-    auto sname = InScopeName(n.name_str);
+  auto sname = InScopeName(n.name_str);
+  if (auto et = dyn_cast<EventType>(ty)) {
+    // need to consider the event type!
+    event_vars.insert(sname);
+    buf_sto.emplace(sname, n.mem->Get());
+    size_t size = 1;
+    if (n.IsArray())
+      size =
+          std::accumulate(n.ArrayDimensions().begin(),
+                          n.ArrayDimensions().end(), size, std::multiplies<>());
+    buf_size.emplace(sname, size);
+  }
+  if (auto sty = dyn_cast<SpannedType>(ty); sty && !IsRef(n)) {
     VST_DEBUG(dbgs() << "[memanlz] BUFFER: " << sname << "\n");
     buf_sto.emplace(sname, sty->GetStorage());
     if (!sty->RuntimeShaped()) {
@@ -157,43 +166,46 @@ bool MemReuse::BeforeVisitImpl(AST::Node& n) {
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     parallel_level++;
     max_parallel_level = std::max(parallel_level, max_parallel_level);
+    // for now, we are allowed to decl different memory inside paraby level 1.
+    // so generate all kinds of spm at level 1.
     if (parallel_level == 1) {
       size_t shared_spm_size = spm_size_map[cur_func_name].shared_spm_size;
-      if (shared_spm_size == 0) return true;
-      shared_spm_name = SymbolTable::GetAnonName();
-      auto shared_spm =
-          AST::Make<AST::NamedVariableDecl>(n.LOC(), shared_spm_name);
-      assert(shared_spm_size > 0 &&
-             "Shared scratch pad memory size is not set.");
-      auto ssty = MakeSpannedType(
-          BaseType::U8, Shape(1, Size_t2Int(shared_spm_size)), Storage::SHARED);
-      shared_spm->SetType(ssty);
-      shared_spm->AppendNote("spm,");
-      pb->stmts->values.insert(pb->stmts->values.begin(), shared_spm);
-      SSTab().DefineSymbol(shared_spm_name, ssty);
-      VST_DEBUG(dbgs() << "Defined shared scratch pad memory: "
-                       << PSTR(shared_spm) << ", type: " << PSTR(ssty)
-                       << ".\n");
-    } else if (parallel_level == 2) {
+      if (shared_spm_size != 0) {
+        shared_spm_name = SymbolTable::GetAnonName();
+        auto shared_spm =
+            AST::Make<AST::NamedVariableDecl>(n.LOC(), shared_spm_name);
+        assert(shared_spm_size > 0 &&
+               "Shared scratch pad memory size is not set.");
+        auto ssty =
+            MakeSpannedType(BaseType::U8, Shape(1, Size_t2Int(shared_spm_size)),
+                            Storage::SHARED);
+        shared_spm->SetType(ssty);
+        shared_spm->AppendNote("spm,");
+        pb->stmts->values.insert(pb->stmts->values.begin(), shared_spm);
+        SSTab().DefineSymbol(shared_spm_name, ssty);
+        VST_DEBUG(dbgs() << "Defined shared scratch pad memory: "
+                         << PSTR(shared_spm) << ", type: " << PSTR(ssty)
+                         << ".\n");
+      }
       size_t local_spm_size = spm_size_map[cur_func_name].local_spm_size;
-      if (local_spm_size == 0) return true;
-      local_spm_name = SymbolTable::GetAnonName();
-      auto local_spm =
-          AST::Make<AST::NamedVariableDecl>(n.LOC(), local_spm_name);
-      assert(local_spm_size > 0 && "Local scratch pad memory size is not set.");
-      auto lsty = MakeSpannedType(
-          BaseType::U8, Shape(1, Size_t2Int(local_spm_size)), Storage::LOCAL);
-      local_spm->SetType(lsty);
-      local_spm->AppendNote("spm,");
-      pb->stmts->values.insert(pb->stmts->values.begin(), local_spm);
-      SSTab().DefineSymbol(local_spm_name, lsty);
-      VST_DEBUG(dbgs() << "Defined local scratch pad memory: "
-                       << PSTR(local_spm) << ", type: " << PSTR(lsty) << ".\n");
-    } else if (parallel_level == 3) {
+      if (local_spm_size != 0) {
+        local_spm_name = SymbolTable::GetAnonName();
+        auto local_spm =
+            AST::Make<AST::NamedVariableDecl>(n.LOC(), local_spm_name);
+        assert(local_spm_size > 0 &&
+               "Local scratch pad memory size is not set.");
+        auto lsty = MakeSpannedType(
+            BaseType::U8, Shape(1, Size_t2Int(local_spm_size)), Storage::LOCAL);
+        local_spm->SetType(lsty);
+        local_spm->AppendNote("spm,");
+        pb->stmts->values.insert(pb->stmts->values.begin(), local_spm);
+        SSTab().DefineSymbol(local_spm_name, lsty);
+        VST_DEBUG(dbgs() << "Defined local scratch pad memory: "
+                         << PSTR(local_spm) << ", type: " << PSTR(lsty)
+                         << ".\n");
+      }
       // TODO: subthread
-    } else
-      choreo_unreachable("The parallel-by level " +
-                         std::to_string(parallel_level) + " is not supported.");
+    }
   }
   return true;
 }
@@ -221,6 +233,14 @@ void MemReuse::Initialize() {
   const auto& var_ranges = la.VarRanges();
 
   for (const auto& [sname, size] : ma.buf_size) {
+    // do not consider the event vars for now
+    // cause shared events have `__volatile__` attribute
+    if (ma.event_vars.count(sname)) {
+      VST_DEBUG(dbgs() << "Ignore event buffer " << sname << ".\n");
+      continue;
+    }
+    // TODO: local event?
+
     auto ranges = var_ranges.at(sname);
     if (ranges.Values().size() == 0) {
       VST_DEBUG(dbgs() << "Warning: buffer " << sname << " is never used!\n");
@@ -248,14 +268,16 @@ void MemReuse::Initialize() {
 
   VST_DEBUG({
     for (const auto& buffer : buffers) {
-      dbgs() << "static  buffer: " << buffer.buffer_id
-             << "\n\tsize: " << buffer.size
+      dbgs() << "static  buffer: " << buffer.buffer_id << "\n\t"
+             << STR(ma.buf_sto.at(buffer.buffer_id))
+             << ", size: " << buffer.size
              << ", start_time: " << buffer.start_time
              << ", end_time: " << buffer.end_time << "\n";
     }
     for (const auto& buffer : dynamic_buffers) {
-      dbgs() << "dynamic buffer: " << buffer.buffer_id
-             << "\n\tsize: " << buffer.size
+      dbgs() << "dynamic buffer: " << buffer.buffer_id << "\n\t"
+             << STR(ma.buf_sto.at(buffer.buffer_id))
+             << ", size: " << buffer.size
              << ", start_time: " << buffer.start_time
              << ", end_time: " << buffer.end_time << "\n";
     }
@@ -298,16 +320,31 @@ void MemReuse::ProtoType() {
         std::string buffer_size;
         if constexpr (std::is_same_v<decltype(buffer.size), std::string>)
           buffer_size = UnScopedExpr(buffer.size);
-        else if constexpr (std::is_same_v<decltype(buffer.size), int>)
+        else if constexpr (std::is_same_v<decltype(buffer.size), size_t>)
           buffer_size = UnScopedExpr(std::to_string(buffer.size));
         else
-          choreo_unreachable("Unexpected type of buffer.size!");
+          choreo_unreachable("Unexpected type of buffer.size: " +
+                             std::string(typeid(buffer.size).name()) +
+                             "\n\twith buffer " + buffer.buffer_id);
         script.push_back("__co__" + STR(sto) + "_chunks.push_back({" +
                          buffer_size + ", " +
                          std::to_string(buffer.start_time) + ", " +
                          std::to_string(buffer.end_time) + ", \"" +
                          UnScopedName(buffer.buffer_id) + "\"});");
       }
+    };
+
+    auto TotalEventSize = [&](const std::string& func_name,
+                              Storage sto) -> size_t {
+      size_t total_event_size = 0;
+      for (const auto& event : ma.event_vars) {
+        if (GetFuncNameFromScopedName(event) != func_name) continue;
+        if (ma.buf_sto.at(event) != sto) continue;
+        auto event_size = ma.buf_size.at(event);
+        assert(std::holds_alternative<size_t>(event_size));
+        total_event_size += std::get<size_t>(event_size);
+      }
+      return total_event_size;
     };
 
     GenPushBackScript(buffers);
@@ -334,10 +371,13 @@ void MemReuse::ProtoType() {
                          stos +
                          " spm should not exceed the memory usage limit " +
                          std::to_string(mem_capacity) + "bytes.\");");
+        size_t total_event_size = TotalEventSize(func_name, sto);
         if (sto == Storage::LOCAL)
-          spm_size_map[func_name].local_spm_size = mem_capacity;
+          spm_size_map[func_name].local_spm_size =
+              mem_capacity - AlignUp(total_event_size, 8);
         else if (sto == Storage::SHARED)
-          spm_size_map[func_name].shared_spm_size = mem_capacity;
+          spm_size_map[func_name].shared_spm_size =
+              mem_capacity - AlignUp(total_event_size, 8);
         // generate offsets in array
         script.push_back(
             "unsigned long __co__" + stos + "_chunk_offsets[" +

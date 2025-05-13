@@ -43,16 +43,17 @@ SymReplace::GetSymExprFromName(std::string name) const {
   return name_sym_expr_map.at(name);
 }
 
-bool SymReplace::InsertExprSymValnoMap(ptr<AST::Node> n,
+bool SymReplace::InsertExprSymValnoMap(const ptr<AST::Node> n,
                                        const SymValno sym_valno) {
   assert(!expr_sym_valno_map.count(n));
   expr_sym_valno_map.emplace(n, sym_valno);
   VST_DEBUG(dbgs() << "insert expr with symvalno: [" << PSTR(n) << ", "
-                   << sym_valno << "]\n");
+                   << sym_valno << "]\n\t" << n << "\n");
   return true;
 }
 
-SymReplace::SymValno SymReplace::GetSymValnoFromExpr(ptr<AST::Node> n) const {
+SymReplace::SymValno
+SymReplace::GetSymValnoFromExpr(const ptr<AST::Node> n) const {
   assert(expr_sym_valno_map.count(n));
   return expr_sym_valno_map.at(n);
 }
@@ -371,35 +372,42 @@ void SymReplace::SymbolizeExprNode(ptr<AST::Node> n) {
       assert(name_symbol_map.count(nd2sn.at(n)));
       res = SymExpr(GetSymbolFromName(nd2sn.at(n)));
     } else {
-      auto sym_expr_l = GetSymExprFromSymValno(GetSymValnoFromExpr(L));
-      auto sym_expr_r = GetSymExprFromSymValno(GetSymValnoFromExpr(R));
-      if (op == "+") {
-        res = SymExpr(sym_expr_l + sym_expr_r);
-      } else if (op == "-") {
-        res = SymExpr(sym_expr_l - sym_expr_r);
-      } else if (op == "*") {
-        res = SymExpr(sym_expr_l * sym_expr_r);
-      } else if (op == "/" || op == "%") {
-        res = StringifyOpFromSymExpr(n, sym_expr_l, op, sym_expr_r);
-      } else if (op == "cdiv") {
-        res = StringifyOpFromSymExpr(n, op, sym_expr_l, sym_expr_r);
-      } else if (op == "#" || op == "#+" || op == "#-") {
-        res = StringifyOpFromSymExpr(n, op, sym_expr_l, sym_expr_r);
-      } else if (op == "||" || op == "&&") {
-        res = StringifyOpFromSymExpr(n, sym_expr_l, op, sym_expr_r);
-      } else if (op == "<" || op == ">" || op == "==" || op == "!=" ||
-                 op == "<=" || op == ">=") {
-        // unify the op to the less than form.
-        // since we do not allow ++ or --, the transformation is valid.
-        if (op == ">")
-          res = StringifyOpFromSymExpr(n, sym_expr_r, "<", sym_expr_l);
-        else if (op == ">=")
-          res = StringifyOpFromSymExpr(n, sym_expr_r, "<=", sym_expr_l);
-        else
-          res = StringifyOpFromSymExpr(n, sym_expr_l, op, sym_expr_r);
+      auto sym_valno_l = GetSymValnoFromExpr(L);
+      auto sym_valno_r = GetSymValnoFromExpr(R);
+
+      if (sym_valno_l == 0 || sym_valno_r == 0) {
+        InsertExprSymValnoMap(n, 0);
       } else {
-        choreo_unreachable("The operator " + e->op +
-                           " is not supported in SymReplace yet.");
+        auto sym_expr_l = GetSymExprFromSymValno(sym_valno_l);
+        auto sym_expr_r = GetSymExprFromSymValno(sym_valno_r);
+        if (op == "+") {
+          res = SymExpr(sym_expr_l + sym_expr_r);
+        } else if (op == "-") {
+          res = SymExpr(sym_expr_l - sym_expr_r);
+        } else if (op == "*") {
+          res = SymExpr(sym_expr_l * sym_expr_r);
+        } else if (op == "/" || op == "%") {
+          res = StringifyOpFromSymExpr(n, sym_expr_l, op, sym_expr_r);
+        } else if (op == "cdiv") {
+          res = StringifyOpFromSymExpr(n, op, sym_expr_l, sym_expr_r);
+        } else if (op == "#" || op == "#+" || op == "#-") {
+          res = StringifyOpFromSymExpr(n, op, sym_expr_l, sym_expr_r);
+        } else if (op == "||" || op == "&&") {
+          res = StringifyOpFromSymExpr(n, sym_expr_l, op, sym_expr_r);
+        } else if (op == "<" || op == ">" || op == "==" || op == "!=" ||
+                   op == "<=" || op == ">=") {
+          // unify the op to the less than form.
+          // since we do not allow ++ or --, the transformation is valid.
+          if (op == ">")
+            res = StringifyOpFromSymExpr(n, sym_expr_r, "<", sym_expr_l);
+          else if (op == ">=")
+            res = StringifyOpFromSymExpr(n, sym_expr_r, "<=", sym_expr_l);
+          else
+            res = StringifyOpFromSymExpr(n, sym_expr_l, op, sym_expr_r);
+        } else {
+          choreo_unreachable("The operator " + e->op +
+                             " is not supported in SymReplace yet.");
+        }
       }
     }
   } else if (e->IsTernary()) {
@@ -423,7 +431,6 @@ void SymReplace::SymbolizeExprNode(ptr<AST::Node> n) {
     VST_DEBUG(dbgs() << "IGNORE node: " + PSTR(n) << "\n");
     return;
   }
-  VST_DEBUG(dbgs() << "res symbolic expr is " << res << "\n");
   // TODO(wsj): workaround! `named_spanned_decls` in parser.yy leads to insert
   // the node into expr_sym_valno_map repeatedly! Some other
   // situations(tests/parse/spanned_decl.co) may lead to the same result.

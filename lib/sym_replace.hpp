@@ -99,7 +99,7 @@ public:
 
   // reset all status and clear data structures.
   inline void Reset() {
-    sym_valno = 0;
+    sym_valno = 1;
     name_symbol_map.clear();
     name_sym_expr_map.clear();
     expr_sym_valno_map.clear();

@@ -30,6 +30,7 @@ struct MemAnalyzer : public VisitorWithSymTab {
   using BSize = std::variant<size_t, std::string>;
   std::unordered_map<std::string, BSize> buf_size;
   std::unordered_map<std::string, Storage> buf_sto;
+  LivenessAnalyzer::VarSet event_vars;
 
   MemAnalyzer() : VisitorWithSymTab("memanlz", CCtx().GetGlobalSymbolTable()) {}
   ~MemAnalyzer() {}
@@ -108,12 +109,7 @@ private:
       Result result;
       result.heap_size = 0;
 
-      size_t size = chunks.size();
-
-      auto AlignUp = [alignment](size_t x) -> size_t {
-        if (alignment == 0) return x;
-        return (x + alignment - 1) / alignment * alignment;
-      };
+      size_t length = chunks.size();
 
       // sort by size in descending order
       // TODO: use idx or pointer rather than Chunk
@@ -124,10 +120,10 @@ private:
       // build interference graph - represent which buffers' lifetime overlap
       // TODO: O(n^2) maybe can be optimized
       std::vector<std::vector<bool>> interference_graph(
-          size, std::vector<bool>(size, false));
+          length, std::vector<bool>(length, false));
 
-      for (size_t i = 0; i < size; ++i) {
-        for (size_t j = i + 1; j < size; ++j) {
+      for (size_t i = 0; i < length; ++i) {
+        for (size_t j = i + 1; j < length; ++j) {
           if (sorted_chunks[i].start_time <= sorted_chunks[j].end_time &&
               sorted_chunks[j].start_time <= sorted_chunks[i].end_time) {
             interference_graph[i][j] = true;
@@ -141,7 +137,7 @@ private:
 
       using Range = std::pair<size_t, size_t>;
 
-      for (size_t i = 0; i < size; ++i) {
+      for (size_t i = 0; i < length; ++i) {
         const Chunk& chunk = sorted_chunks[i];
 
         // collect the allocated regions that overlap with the current buffer
@@ -180,7 +176,7 @@ private:
         // find the first valid position that satisfies the alignment
         // requirement
         size_t pos = 0;
-        pos = AlignUp(pos);
+        pos = AlignUp(pos, alignment);
 
         bool found_valid_position = false;
         for (size_t j = 0; j <= forbidden_ranges.size(); ++j) {
@@ -194,7 +190,7 @@ private:
           // update the position to the current forbidden range
           pos = forbidden_ranges[j].second;
           // ensure the new position satisfies the alignment requirement
-          pos = AlignUp(pos);
+          pos = AlignUp(pos, alignment);
         }
 
         if (!found_valid_position) {
@@ -219,7 +215,7 @@ private:
       }
 
       // ensure the final heap size also satisfies the alignment requirement
-      result.heap_size = AlignUp(result.heap_size);
+      result.heap_size = AlignUp(result.heap_size, alignment);
 
       return result;
     }
@@ -247,6 +243,12 @@ private:
     choreo_unreachable("size_t to int conversion failed, val: " +
                        std::to_string(s));
   }
+
+  static size_t AlignUp(size_t x, size_t alignment) {
+    if (alignment == 0) return x;
+    return (x + alignment - 1) / alignment * alignment;
+  }
+
   bool Visit(AST::NamedVariableDecl&) override;
   void Initialize();
   void AnalyzeMemOffset();
