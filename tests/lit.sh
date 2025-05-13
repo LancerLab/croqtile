@@ -540,8 +540,8 @@ for file in "${files_array[@]}"; do
         continue;
       else
         # set up for the simulator
-        exe_env="old_path=${LD_LIBRARY_PATH}; export LD_LIBRARY_PATH=${gcu_sim_lib}/../tools/lib/:${LD_LIBRARY_PATH}; export INTERNAL_GCU_SIM=LIBRA;"
-        unset_env=";export LD_LIBRARY_PATH=${old_path}; unset INTERNAL_GCU_SIM;"
+        exe_env="old_path=${LD_LIBRARY_PATH}; export LD_LIBRARY_PATH=${gcu_sim_lib}:${LD_LIBRARY_PATH}; export INTERNAL_GCU_SIM=LIBRA;"
+        unset_env="export LD_LIBRARY_PATH=${old_path}; unset INTERNAL_GCU_SIM;"
         allows_run=1
       fi
     fi

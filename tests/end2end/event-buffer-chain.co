@@ -13,23 +13,24 @@ __co__ f32 [512, 1024] relu(f32 [512, 1024] input) { /// device program
   f32[input.span(0), input.span(1)] output; // use same shape as input
 
   parallel p by 1, q by 3 {  // p is sip_index
-    shared event ep, ec;
+    q1 = q #- 1;
+    shared event ep[2], ec[2];
     trigger ec;
     with {n_tile} in [16] {  // decl your tiled spans
       shared f32 [input.span / {1, #n_tile} ] l2_input;
-      local f32 [input.span / {#q - 1, #n_tile} ] l1_out;
+      local f32 [input.span / {#q1, #n_tile} ] l1_out;
       foreach n_tile {
-        inthreads.async (q == #q - 1) {
+        inthreads.async (q == #q1) {
           wait ec;
           dma.copy input.chunkat(_, n_tile) => l2_input;
           trigger ep;
         }
         inthreads.async (q < #q - 1) {
-          wait ep;
-          f = dma.copy l2_input.chunk(#q - 1, 1).at(q, _) => local;
+          wait ep[q];
+          f = dma.copy l2_input.chunkat(q1, _) => local;
           call relu_kernel(f.data, l1_out, f.span(0), f.span(1));
-          dma.copy l1_out => output.chunk(#q - 1, #n_tile).at(q, n_tile);
-          trigger ec;
+          dma.copy l1_out => output.chunkat(q1, n_tile);
+          trigger ec[q];
         }
       }
     }

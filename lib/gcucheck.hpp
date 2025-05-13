@@ -924,7 +924,7 @@ public:
         Error(n.LOC(), STR(CCtx().GetArch()) + " does not support " +
                            PSTR(n.scope) + " synchronization.");
         error_count++;
-      } else if (parallel_level != 2) {
+      } else if (parallel_level != 3) {
         Error(n.LOC(), "unsupported: " + PSTR(n.scope) +
                            " synchronization in " + STR(pl2s()) + " scope.");
         error_count++;

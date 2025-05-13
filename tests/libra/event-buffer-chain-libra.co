@@ -1,0 +1,79 @@
+// REQUIRES: TARGET-GCU400 GCUSIM
+// RUN: choreo -gs -t topscc -arch=gcu400 %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
+
+__device__ void relu_kernel(float* input, float* out, int m, int n) {
+  for (int i = 0; i < m; ++i) {
+    for (int j = 0; j < n; ++j) {
+      out[i*n+j] = input[i*n+j] > 0.0f ? input[i*n+j] : 0.0f;
+    }
+  }
+}
+
+__co__ f32 [32, 512] relu(f32 [32, 512] input) { /// device program
+  f32[input.span(0), input.span(1)] output; // use same shape as input
+
+  parallel p by 1 {
+    parallel q by 2 {
+      with {n_tile} in [2] {  // decl your tiled spans
+        parallel r by 3 {  // p is sip_index
+          r1 = r #- 1; // r1 = [0, 2), r = [0, 3)
+          local event ep[2], ec[2];
+          trigger ec;
+          local f32 [input.span / {#q, #n_tile} ] l1_input;
+          local f32 [input.span / {#q, #n_tile} ] l1_out;
+          foreach n_tile {
+            inthreads.async (r == #r1) {
+              wait ec;
+              dma.copy input.chunkat(q, n_tile) => l1_input;
+              trigger ep;
+              
+              wait ec;
+              dma.copy l1_out => output.chunkat(q, n_tile);
+              trigger ec;
+            }
+            inthreads.async (r < #r1) {
+              wait ep[r];
+              call relu_kernel(l1_input.chunkat(r1, _),
+                               l1_out.chunkat(r1, _),
+                               l1_input.span(0) / #r1, l1_input.span(1));
+              trigger ec[r];
+            }
+          }
+          sync.local;
+        }
+      }
+    }
+  }
+  return output;
+}
+
+int main() { /// host program
+  choreo::f32 a[32][512] = {0.0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::f32 b[512][512] = {0};
+  auto input_data = choreo::make_spanview<2, choreo::f32>((float*)a, {32, 512});
+  input_data.fill_random(-1.0, 1.0);
+
+  auto start = std::chrono::high_resolution_clock::now();
+  auto res
+    = relu(input_data);
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+  std::cout << res.shape()[0] << std::endl;
+  std::cout << res.shape()[1] << std::endl;
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+        float ref = input_data[i][j] > 0? input_data[i][j] : 0;
+
+        if (ref != res[i][j]) {
+          std::cout << "Mismatch at index (" << i << ", " << j << "): ";
+          std::cout << "Expected: " << ref << ", Got: " << res[i][j] << std::endl;
+        }
+
+        choreo::choreo_assert(ref == res[i][j], "error: the result is not correct");
+      }
+  std::cout << "TEST PASSED!\n" << std::endl;
+  std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
+}
+
+// CHECK: TEST PASSED!

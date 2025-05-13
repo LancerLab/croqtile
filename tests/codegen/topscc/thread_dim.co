@@ -1,0 +1,9 @@
+// RUN: choreo -t topscc -arch=gcu400  -es %s  | FileCheck  %s
+
+__co__ void foo(s32 [4, 6, 64] input) { /// device program
+  parallel p by 4, q by 6, r by 4 {}
+}
+
+// CHECK: __thread_dims__(4, 1, 1)
+// CHECK: __global__ void __choreo_device_foo(int * input) {
+// CHECK: }

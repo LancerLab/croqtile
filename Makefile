@@ -92,6 +92,9 @@ test-debug: debug
 test-release: release
 	$(LIT) tests && $(MAKE) standalone_test
 
+test-libra: release
+	$(LIT) tests/libra && $(MAKE) standalone_test
+
 ci-test:
 	$(LIT) tests && $(MAKE) standalone-test-with-cmake
 
@@ -242,8 +245,7 @@ setup-gcu3: setup-core
 	git submodule update --init --recursive;\
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu3-kit FTP_SERVER=$(FTP_SERVER)
 
-setup-gcu4: setup-core
-	git submodule update --init --recursive;\
+setup-gcu4: setup-gcu3
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu-sim
 
 resetup-gcu2: install-choreo-kit
