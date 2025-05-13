@@ -68,20 +68,43 @@ private:
       max_parallel_level = std::max(parallel_level, max_parallel_level);
       // for Factor backend
       auto& lcs = cgi->GetFunctionLaunches(fname);
+
+      auto ToSymbolValues = [&](const ValueList& dims) -> ValueList {
+        ValueList res;
+        for (auto dim : dims) {
+          if (isa<int>(&dim)) {
+            res.push_back(dim);
+            continue;
+          }
+          auto sname = InScopeName(ValueItemAsString(dim));
+          if (FCtx(fname).HasSymbolValues(sname)) {
+            auto svs = FCtx(fname).GetSymbolValues(sname);
+            if (IsValidValueItem(svs.int_expr))
+              res.push_back("(" + UnScopedExpr(STR(svs.int_expr)) + ")");
+            else
+              choreo_unreachable("Expect the symbol " + sname +
+                                 " has a valid symbol value!");
+          } else {
+            res.push_back(dim);
+          }
+        }
+        return res;
+      };
+
       if (parallel_level == 1) {
         // represents the index of the current ParallelBy in cgi
         n.note += std::to_string(lcs.size()) + ", ";
         lcs.push_back({});
-        lcs.back().SetBlockDims(pb->BoundValues());
+        lcs.back().SetBlockDims(ToSymbolValues(pb->BoundValues()));
       } else if (parallel_level == 2) {
         auto& lc = lcs.back();
         lc.OverwriteGDimsByBDims();
         lc.ResetBDims();
-        lc.SetBlockDims(pb->BoundValues());
+        lc.SetBlockDims(ToSymbolValues(pb->BoundValues()));
       } else if (parallel_level == 3) {
         auto& lc = lcs.back();
         lc.ResetWDims();
-        lc.SetWarpDims(pb->BoundValues());
+        lc.SetWarpDims(ToSymbolValues(pb->BoundValues()));
       } else
         choreo_unreachable("The parallel-by level " +
                            std::to_string(parallel_level) +

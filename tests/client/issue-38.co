@@ -4,7 +4,7 @@
 #include "choreo.h"
 
 __co__ void cofoo0() {
-  int a = 1, b = 2, c = 3; // syntax error
+  int a = 1, b = 2, c = 3;
   int x = 1000;
   y = a + 1;
   u8 [a,b,c,x,y] mds;
@@ -44,9 +44,13 @@ int main() {}
 // VALNO:   Alias "::cofoo0::mds.span" -> #4
 // VALNO:   scope-2 {
 // VALNO:    Alias "::cofoo0::paraby_0::@p" -> #1
-// VALNO:    New VN #10: 'b'
-// VALNO:    Alias "::cofoo0::paraby_0::@p__elem__x" -> #10
+// VALNO:    Alias "::cofoo0::paraby_0::@p__elem__x" -> #1
 // VALNO:    scope-3 {
+// VALNO:     Alias "#0,#1,#2,#3,#1(0)" -> #0
+// VALNO:     Alias "#0,#1,#2,#3,#1(1)" -> #1
+// VALNO:     Alias "#0,#1,#2,#3,#1(2)" -> #2
+// VALNO:     Alias "#0,#1,#2,#3,#1(3)" -> #3
+// VALNO:     Alias "#0,#1,#2,#3,#1(4)" -> #1
 // VALNO:     Alias "::cofoo0::paraby_0::within_0::@idx(0)" -> #0
 // VALNO:     Alias "::cofoo0::paraby_0::within_0::@ia" -> #0
 // VALNO:     Alias "::cofoo0::paraby_0::within_0::@idx(1)" -> #1
@@ -62,12 +66,11 @@ int main() {}
 // VALNO:     } // end scope-4
 // VALNO:    } // end scope-3
 // VALNO:   } // end scope-2
-// VALNO:   New VN #11: 'true'
-// VALNO:   Alias "::cofoo0::t" -> #11
-// VALNO:   New VN #12: 'false'
-// VALNO:   Alias "::cofoo0::f" -> #12
+// VALNO:   New VN #10: 'true'
+// VALNO:   Alias "::cofoo0::t" -> #10
+// VALNO:   New VN #11: 'false'
+// VALNO:   Alias "::cofoo0::f" -> #11
 // VALNO:  } // end scope-1
-
 
 // CHECK: __global__ void __choreo_device_cofoo0(unsigned char * mds) {
 // CHECK:   {
@@ -98,6 +101,6 @@ int main() {}
 // CHECK:   unsigned char * mds__device = nullptr;
 // CHECK:   choreo::abend_true(topsMalloc(&mds__device, 12000ULL));
 // CHECK:   dim3 __cofoo0_gdims0(1, 1, 1);
-// CHECK:   dim3 __cofoo0_bdims0(b, 1, 1);
+// CHECK:   dim3 __cofoo0_bdims0((2), 1, 1);
 // CHECK:   __choreo_device_cofoo0<<<__cofoo0_gdims0, __cofoo0_bdims0>>>(mds__device);
 // CHECK: }

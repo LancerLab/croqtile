@@ -760,9 +760,18 @@ public:
       std::string bound;
       if (auto il = dyn_cast<AST::IntLiteral>(b))
         bound = "const_" + std::to_string(il->Val());
-      else if (auto id = dyn_cast<AST::Identifier>(b))
-        bound = id->name;
-      else
+      else if (auto id = dyn_cast<AST::Identifier>(b)) {
+        if (auto name_in_scope = SSTab().NameInScopeOrNull(id->name)) {
+          if (vn.HasValueNumberOfSignature(*name_in_scope))
+            bound = *name_in_scope;
+          else
+            choreo_unreachable("symbol `" + *name_in_scope +
+                               "' is not associated with a value number.");
+        } else {
+          choreo_unreachable("expect symbol `" + *name_in_scope +
+                             "' to be defined in symtab!");
+        }
+      } else
         choreo_unreachable("unexpected type of parallelby bound item");
       int valno = vn.GetOrInsertValueNumberFromSignature(bound);
       std::string iv_name = SSTab().ScopedName("@" + sym->name);

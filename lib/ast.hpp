@@ -1257,6 +1257,7 @@ struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
   }
 
   // Return a ValueList which contains values of bound items.
+  // notice: the values are just number or identifier names.
   ValueList BoundValues() const {
     ValueList bound_values;
     if (cmpt_bounds == nullptr) return bound_values;
