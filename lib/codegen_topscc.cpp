@@ -157,6 +157,22 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
   return true;
 }
 
+bool TopsccCodeGen::InMidVisitImpl(AST::Node& n) {
+  if (auto ie = dyn_cast<AST::IfElseBlock>(&n)) {
+    if (!ie->HasElse()) return true;
+    if (IsHost()) {
+      DecrHostIndent();
+      hs << h_indent << "} else {\n";
+      IncrHostIndent();
+    } else {
+      DecrDeviceIndent();
+      ds << d_indent << "} else {\n";
+      IncrDeviceIndent();
+    }
+  }
+  return true;
+}
+
 bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
   if (trace_visit) dbgs() << "After visiting " << n.TypeNameString() << "\n";
 
@@ -248,7 +264,6 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
       DecrDeviceIndent();
       ds << d_indent << "} // end if-else " << ie->LOC() << "\n";
     }
-    emit_call = true;
   } else if (auto ie = dyn_cast<AST::WhileBlock>(&n)) {
     if (IsHost()) {
       DecrHostIndent();
@@ -1628,6 +1643,7 @@ bool TopsccCodeGen::Visit(AST::IfElseBlock& n) {
       ds << d_indent << "if (" << ExprSTR(n.pred, false) << ") {\n";
     IncrDeviceIndent();
   }
+  emit_call = true;
   return true;
 }
 
@@ -2323,6 +2339,8 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
     } else
       choreo_unreachable("unsupported expression '" + expr->GetOp() +
                          "': " + PSTR(expr) + ".");
+  } else if (auto c = dyn_cast<AST::Call>(e)) {
+    return CallSTR(*c);
   } else
     choreo_unreachable("unsupported expression '" + expr->GetOp() + "'.");
 

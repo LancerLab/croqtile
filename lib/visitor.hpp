@@ -395,7 +395,7 @@ public:
       SSTab().LeaveScope();
       SSTab().EnterScope("cond_else" + std::to_string(ie_count));
     }
-    return true;
+    return InMidVisitImpl(n);
   }
 
   bool AfterVisit(AST::Node& n) final {

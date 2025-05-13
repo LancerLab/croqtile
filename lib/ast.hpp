@@ -1161,13 +1161,17 @@ struct IfElseBlock : public Node, public TypeIDProvider<IfElseBlock> {
     os << "\n" << prefix << "`- Branch On Condition: ";
     pred->Print(os, " ");
     if (with_type) os << "<{" << PSTR(GetType()) << "}>";
-    os << "\n" << prefix << " `- If-Block:";
-    if (if_stmts->Count()) if_stmts->Print(os, prefix + "  ", with_type);
+    if (if_stmts->Count()) {
+      os << "\n" << prefix << " `- If-Block:";
+      if_stmts->Print(os, prefix + "  ", with_type);
+    }
     if (else_stmts && else_stmts->Count()) {
       os << "\n" << prefix << " `- Else-Block:";
       else_stmts->Print(os, prefix + "  ", with_type);
     }
   }
+
+  bool HasElse() const { return else_stmts && else_stmts->Count(); }
 
   void accept(Visitor&) override;
 

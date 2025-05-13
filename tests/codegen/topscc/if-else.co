@@ -3,7 +3,20 @@
 __co__ void foo(int a, f32 [1, 2] b) {
   parallel p by 3 {
     if (call bar(3, p, a, b.span(0))) { }
+    if (a > 3) shared f32 [b.span + 1] c;
+    else if (a < 2) local s8 [b.span(1) - 1] c;
+    else call foobar(b.span(0) + 1);
   }
 }
 
 // CHECK: if (bar((3), __tops_tid_x(), (a), (1)))
+
+// CHECK:   if (((a)>((3)))) {
+// CHECK:     __shared__ float c[6];
+// CHECK:   } else {
+// CHECK:     if (((a)<((2)))) {
+// CHECK:       __local__ __valigned__ char c[1];
+// CHECK:     } else {
+// CHECK:       foobar((2));
+// CHECK:     } // end if-else
+// CHECK:   } // end if-else

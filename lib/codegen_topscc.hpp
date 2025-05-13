@@ -158,6 +158,7 @@ public:
   }
 
   bool BeforeVisitImpl(AST::Node&) override;
+  bool InMidVisitImpl(AST::Node&) override;
   bool AfterVisitImpl(AST::Node&) override;
 
   bool Visit(AST::MultiNodes&) override { return true; };
