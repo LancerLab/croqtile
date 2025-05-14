@@ -10,13 +10,20 @@ __co__ void exe_engine(s32 [K] inputs) {
     shared s32 [NUM_ENGINE] thread_context;
     shared event ce[NUM_ENGINE], pe[NUM_ENGINE];
     shared event terminated[NUM_ENGINE];
+    shared event ready[NUM_ENGINE];
+    shared s32 [1] job_count{0};
     mutable int tidx = 0;
 
     trigger ce;  // make executors active
 
     // dispatcher
     inthreads.async (p == #p - 1) {
+      println("in dispatcher, K: ", K);
       f = dma.copy inputs => local;
+      foreach {i, z} in [K, 1]
+        if (f.data.at(i) == 1)
+          job_count.at(z) = job_count.at(z) + 1;
+      trigger ready;
       foreach i in [K]
         if (f.data.at(i) == 1) {
           while (!ce[tidx]) tidx = (++tidx) % NUM_ENGINE;
@@ -30,10 +37,14 @@ __co__ void exe_engine(s32 [K] inputs) {
 
     // executor
     inthreads.async (p < #p - 1) {
+      wait ready[p];
       while (!terminated[p]) {
-        wait pe[p];
-        println("Thread ", p, ": workload: ", thread_context.at(p));
-        trigger ce[p];
+        foreach z in [1]
+          if (p < job_count.at(z)) {
+            wait pe[p];
+            println("Thread ", p, ": workload: ", thread_context.at(p));
+            trigger ce[p];
+          }
       }
       wait terminated[p];
     }
@@ -42,31 +53,40 @@ __co__ void exe_engine(s32 [K] inputs) {
 }
 
 int main() {
-  int inputs0[] = {1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0};
+  printf("inputs0\n");
+  
+  int inputs0[] = {1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 0};
   exe_engine(choreo::make_spanview(inputs0));
-
-  printf("next input\n");
-
-  int inputs1[] = {1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 0};
+  
+  printf("inputs1\n");
+  
+  int inputs1[] = {0, 0, 0, 0, 1, 1, 0};
   exe_engine(choreo::make_spanview(inputs1));
+  
+  printf("inputs2\n");
+  
+  int inputs2[] = {0, 1, 0};
+  exe_engine(choreo::make_spanview(inputs2));
 
   return 0;
 }
 
-// CHECK-DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 0
-// CHECK-DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 2
-// CHECK-DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 3
-// CHECK-DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 4
-// CHECK-DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 6
-// CHECK-DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 7
-// CHECK-DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 9
-// CHECK-DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 11
-// CHECK-DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 12
-// CHECK: next input
-// CHECK-DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 0
-// CHECK-DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 2
-// CHECK-DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 3
-// CHECK-DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 4
-// CHECK-DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 6
-// CHECK-DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 7
-// CHECK-DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 9
+// CHECK: inputs0
+// CHECK: in dispatcher, K: 11
+// CHECK_DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 0
+// CHECK_DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 4
+// CHECK_DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 3
+// CHECK_DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 2
+// CHECK_DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 6
+// CHECK_DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 7
+// CHECK_DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 9
+
+// CHECK: inputs1
+// CHECK: in dispatcher, K: 7
+// CHECK_DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 4
+// CHECK_DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 5
+
+// CHECK: inputs2
+// CHECK-DAG: in dispatcher, K: 3
+// CHECK-DAG: Thread {{[{]}}[[NUM:[0-3]]]{{[}]}}: workload: 1
+// CHECK-EMPTY:
