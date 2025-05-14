@@ -145,6 +145,8 @@ void choreo_info(const char *message) {
   AND     "&&"
   OR      "||"
   NOT     "!"
+  LSHIFT  "<<"
+  RSHIFT  ">>"
   QES     "?"
   TRANS   "=>"
   BIND    "<->"
@@ -158,6 +160,7 @@ void choreo_info(const char *message) {
   DONTCARE"_"
   CDIV    "cdiv"
   CHAIN   "after"
+  INLCPP  "__cpp__"
 ;
 
 // instead of union, using c++17 variant for terminal and non-terminals
@@ -183,14 +186,14 @@ void choreo_info(const char *message) {
 %token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH INCR RET WHERE WHILE
 
 // non-terminals
-%nterm <std::string> dma_operation builtin_print_func arith_operation spanid
+%nterm <std::string> dma_operation builtin_print_func arith_operation spanid cstrings
 %nterm <ptr<DMAConfig>> dma_config
 %nterm <bool> bool_value sync_type optional_mutable
-%nterm <int> integer_value index_or_none
+%nterm <int> integer_value index_or_none const_sizeof
 %nterm <std::vector<size_t>> optional_array_dims
 %nterm <Choreo::Storage> storage
 %nterm <Choreo::BaseType> fundamental_type
-%nterm <AST::ptr<AST::CppSourceCode>> host_code
+%nterm <AST::ptr<AST::CppSourceCode>> host_code in_cpp_stmt
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::SpanAs>> span_as
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
@@ -230,7 +233,8 @@ void choreo_info(const char *message) {
 %left GT LT
 %left AND
 %right NOT
-%nonassoc LE GE EQ NE
+%left LSHIFT RSHIFT
+%left LE GE EQ NE
 %left PLUS MINUS
 %left STAR SLASH PECET
 %left UBMINUS UBPLUS
@@ -394,7 +398,7 @@ simple_val
     | bool_value { $$ = AST::Make<AST::Boolean>(@1, $1); }
     | FPVAL  { $$ = AST::Make<AST::FloatLiteral>(@1, $1); }
     | DFPVAL { $$ = AST::Make<AST::FloatLiteral>(@1, $1); }
-    | STRING { $$ = AST::Make<AST::StringLiteral>(@1, $1); }
+    | cstrings { $$ = AST::Make<AST::StringLiteral>(@1, $1); }
     | IDENTIFIER { $$ = AST::Make<AST::Identifier>(@1, $1); }
     | IDENTIFIER FNSPAN { $$ = AST::Make<AST::Identifier>(@1, $1 + $2); }
     ;
@@ -473,6 +477,7 @@ statement
     | swap_stmt    SEMCOL        { $$ = $1; }
     | return_stmt  SEMCOL        { $$ = $1; }
     | sync_stmt    SEMCOL        { $$ = $1; }
+    | in_cpp_stmt  SEMCOL        { $$ = $1; }
     | paraby_block               { $$ = $1; }
     | within_block               { $$ = $1; }
     | inthreads_block            { $$ = $1; }
@@ -1077,6 +1082,25 @@ s_expr
         $$ = AST::Make<AST::Expr>(@1, "--", AST::Make<AST::Identifier>(@1, $2));
       }
     | data_element { $$ = AST::Make<AST::Expr>(@1, $1); }
+    | const_sizeof { $$ = AST::MakeIntExpr(@1, $1); }
+    ;
+
+const_sizeof /* make it immediate values */
+    : PIPE DOUBLE PIPE { $$ = 8; }
+    | PIPE S32 PIPE { $$ = 4; }
+    | PIPE U32 PIPE { $$ = 4; }
+    | PIPE F32 PIPE { $$ = 4; }
+    | PIPE INT PIPE { $$ = 4; }
+    | PIPE FLOAT PIPE { $$ = 4; }
+    | PIPE S16 PIPE { $$ = 2; }
+    | PIPE U16 PIPE { $$ = 2; }
+    | PIPE F16 PIPE { $$ = 2; }
+    | PIPE BF16 PIPE { $$ = 2; }
+    | PIPE BFP16 PIPE { $$ = 2; }
+    | PIPE HALF PIPE { $$ = 2; }
+    | PIPE S8 PIPE { $$ = 1; }
+    | PIPE U8 PIPE { $$ = 1; }
+    | PIPE HALF8 PIPE { $$ = 1; }
     ;
 
 mdspan_expr
@@ -1257,6 +1281,7 @@ range_exprs
 integer_value
     : NUM { $$ = $1; }
     | MINUS NUM { $$ = -$2; }
+    | NUM LSHIFT NUM { $$ = $1 << $3; /* temporally */}
     ;
 
 index_or_none
@@ -1560,6 +1585,16 @@ builtin_print_func
     | PRINTLN { $$ = $1; }
     ;
 
+cstrings /* concatenate strings */
+    : cstrings STRING { $$ = $1 + $2; }
+    | STRING { $$ = $1; }
+    ;
+
+in_cpp_stmt
+    : INLCPP LPAREN cstrings RPAREN {
+        $$ = AST::Make<AST::CppSourceCode>(@3, $3, false);
+      }
+
 call_stmt
     : CALL IDENTIFIER LPAREN device_passables RPAREN {
         $$ = AST::Make<AST::Call>(@1,
@@ -1569,7 +1604,7 @@ call_stmt
         $$ = AST::Make<AST::Call>(@1,
                 AST::Make<AST::Identifier>(@2, $2), $5, $3);
       }
-    | ASSERT LPAREN s_expr COMMA STRING RPAREN {
+    | ASSERT LPAREN s_expr COMMA cstrings RPAREN {
         auto mv = AST::Make<AST::MultiValues>(@1, ", ");
         mv->Append($3);
         mv->Append(AST::Make<AST::StringLiteral>(@5, $5));

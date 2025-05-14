@@ -24,7 +24,10 @@ static int scope = 0;
 
 extern Choreo::location loc;
 
-std::string kernel_buffer; // buffering the kernel code
+static std::string kernel_buffer; // buffering the kernel code
+static std::string rawstr_delimiter;
+static std::string rawstr_buffer;
+static Choreo::location rawstr_loc;
 
 void update_location(const char *text);
 void handle_line_directive(const char* text);
@@ -41,7 +44,7 @@ static bool no_line_update = false;
 
 %}
 
-%x CO_FUNC KERNEL MDSPAN_SUGER
+%x CO_FUNC KERNEL MDSPAN_SUGER RAW_STRING
 
 id          [a-zA-Z_][a-zA-Z0-9_]*
 num         [0-9]+
@@ -128,6 +131,34 @@ cstr        \"([^"\\]|\\.)*\"
   [ \t\n]   ; /* Ignore whitespace */
   .         { BEGIN(CO_FUNC); yyless(0); } /* Rewind and reprocess in NORMAL */
 }
+
+<RAW_STRING>{
+
+  \){id}\"  { std::string a {yytext};
+              if (a.substr(1, a.size() - 2) == rawstr_delimiter) {
+                auto rstr = rawstr_buffer;
+                rawstr_buffer = "";
+                rawstr_delimiter = "";
+                BEGIN(CO_FUNC);
+                return Choreo::Parser::make_STRING(rstr, rawstr_loc);
+              } else
+                rawstr_buffer = rawstr_buffer + yytext;
+            }
+
+  \)\"      {
+              if (rawstr_delimiter == "") {
+                auto rstr = rawstr_buffer;
+                rawstr_buffer = "";
+                BEGIN(CO_FUNC);
+                return Choreo::Parser::make_STRING(rstr, rawstr_loc);
+              } else
+                rawstr_buffer = rawstr_buffer + yytext;
+            }
+
+  .         { rawstr_buffer += yytext; }
+
+} // state <RAW_STRING>
+
 
 <CO_FUNC>{
   {blank}+   {}
@@ -239,6 +270,8 @@ cstr        \"([^"\\]|\\.)*\"
   "&&"       return Choreo::Parser::make_AND    (loc);
   "||"       return Choreo::Parser::make_OR     (loc);
   "!"        return Choreo::Parser::make_NOT    (loc);
+  "<<"       return Choreo::Parser::make_LSHIFT (loc);
+  ">>"       return Choreo::Parser::make_RSHIFT (loc);
   "?"        return Choreo::Parser::make_QES    (loc);
   ","        return Choreo::Parser::make_COMMA  (loc);
   ";"        return Choreo::Parser::make_SEMCOL (loc);
@@ -264,7 +297,14 @@ cstr        \"([^"\\]|\\.)*\"
                return Choreo::Parser::make_RBRACE(loc);
              }
   "|"        { return Choreo::Parser::make_PIPE(loc); }
+  "__cpp__"  { return Choreo::Parser::make_INLCPP(loc); }
   {id}       { return Choreo::Parser::make_IDENTIFIER(yytext, loc); }
+  R\"\(      { BEGIN(RAW_STRING); }
+  R\"{id}\(  { std::string a {yytext};
+               rawstr_delimiter = a.substr(2, a.size() - 3);
+               rawstr_loc = loc;
+               BEGIN(RAW_STRING);
+             }
   .          { return Choreo::Parser::make_CHAR(yytext[0], loc); } // Any other single character within the function
 
 } // state <CO_FUNC>

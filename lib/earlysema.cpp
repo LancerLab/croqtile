@@ -358,6 +358,8 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       SetNodeType(n, MakeUnknownType());
       return false;
     }
+    if (diverges.Contains(n.GetL()) || diverges.Contains(n.GetR()))
+      diverges.Add(n);
   } else if ((n.op == "#-") || (n.op == "#+")) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
@@ -988,11 +990,6 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
 
   if (parallel_level > 1 && n.async) {
     Error(n.LOC(), "inner parallel-by level can not be asynchronous.");
-    error_count++;
-  }
-
-  if (inthreads_levels[parallel_level - 1] > 0) {
-    Error(n.LOC(), "parallel-by insides inthreads block is illegal.");
     error_count++;
   }
 

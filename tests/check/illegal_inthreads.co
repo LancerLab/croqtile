@@ -17,7 +17,6 @@ __co__ void illegal_inthreads(int a) {
 // CHECK: error: requires a predication expression but got 'int'.
 // CHECK: error: inthreads can not be declared in global scope.
 // CHECK: error: inner inthreads can not be declared as async.
-// CHECK: error: parallel-by insides inthreads block is illegal.
 
 
 __co__ void foo(int a, s32 [7, b] c) {

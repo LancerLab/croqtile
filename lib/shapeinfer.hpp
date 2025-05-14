@@ -18,7 +18,6 @@ private:
   // implicit valno of upper-bound
   int cur_ub_vn = GetInvalidValueNumber();
 
-  std::string cur_fn;
   // when values are consumed instead of generated
   bool gen_values = true;
 
@@ -88,9 +87,8 @@ public:
 
     if (isa<AST::Program>(&n)) {
       vn.EnterScope(); // global scope
-    } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
+    } else if (isa<AST::ChoreoFunction>(&n)) {
       vn.EnterScope();
-      cur_fn = f->name;
       cannot_proceed = false; // recover state when starting a new function
       int valno = vn.GetOrInsertValueNumberFromSignature("const_1");
       vn.AssociateSignatureWithValueNumber(InScopeName("@__choreo_no_tiling__"),
@@ -856,7 +854,7 @@ public:
       error_count++;
       cannot_proceed = true;
       Error(n.LOC(),
-            "unable to apply shape inference for function '" + cur_fn + "'.");
+            "unable to apply shape inference for function '" + fname + "'.");
       return false;
     }
 

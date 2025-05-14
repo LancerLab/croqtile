@@ -2,6 +2,7 @@
 // RUN: choreo -gs -t factor %s -o %s.factor.result && bash %s.factor.result --execute | FileCheck --match-full-lines %s && rm -f %s.factor.result
 // RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
 // RUN-DOCKER: choreo -st -t topscc %s -o %s.topscc.result && %s.topscc.result | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+// RUN: choreo -c %s -o /dev/null 2>&1 | wc -l | FileCheck --check-prefix=CHKNO --match-full-lines %s
 
 __cok__ { /// kernel program
 __co_device__ extern "C" void kernel(int * a, int * b, int * c, int n) {
@@ -57,3 +58,4 @@ int main() { /// host program
 }
 
 // CHECK: Test Passed
+// CHKNO: 0
