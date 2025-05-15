@@ -1942,10 +1942,14 @@ inline ptr<FunctionType> MakeFunctionType(const ptr<Type> ot,
 
 // map default to global
 inline static ptr<Type> ShadowTypeStorage(const ptr<Type>& ty) {
-  if (auto sty = dyn_cast<SpannedType>(ty))
-    return MakeSpannedType(sty->ElementType(), sty->GetShape(),
-                           ProjectStorage(sty->GetStorage()));
-  else if (auto fty = dyn_cast<FutureType>(ty)) {
+  if (auto sty = dyn_cast<SpannedType>(ty)) {
+    if (auto at = dyn_cast<ArrayType>(ty))
+      return MakeSpannedArrayType(sty->ElementType(), sty->GetShape(), at->dims,
+                                  ProjectStorage(sty->GetStorage()));
+    else
+      return MakeSpannedType(sty->ElementType(), sty->GetShape(),
+                             ProjectStorage(sty->GetStorage()));
+  } else if (auto fty = dyn_cast<FutureType>(ty)) {
     auto sty = fty->GetSpannedType();
     return MakeFutureType(MakeSpannedType(sty->ElementType(), sty->GetShape(),
                                           ProjectStorage(sty->GetStorage())),

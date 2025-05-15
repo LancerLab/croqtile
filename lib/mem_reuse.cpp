@@ -43,30 +43,33 @@ bool MemAnalyzer::BeforeVisitImpl(AST::Node& n) {
 bool MemAnalyzer::Visit(AST::NamedVariableDecl& n) {
   auto ty = GetSymbolType(n.name_str);
   auto sname = InScopeName(n.name_str);
+
   if (auto et = dyn_cast<EventType>(ty)) {
     // need to consider the event type!
     event_vars.insert(sname);
     buf_sto.emplace(sname, n.mem->Get());
-    size_t size = 1;
-    if (n.IsArray())
-      size =
-          std::accumulate(n.ArrayDimensions().begin(),
-                          n.ArrayDimensions().end(), size, std::multiplies<>());
-    buf_size.emplace(sname, size);
+    buf_size.emplace(sname, n.ArraySize());
+    return true;
   }
+
   if (auto sty = dyn_cast<SpannedType>(ty); sty && !IsRef(n)) {
     VST_DEBUG(dbgs() << "[memanlz] BUFFER: " << sname << "\n");
     buf_sto.emplace(sname, sty->GetStorage());
     if (!sty->RuntimeShaped()) {
-      buf_size.emplace(sname, sty->ByteSize());
-      VST_DEBUG(dbgs() << "\tstatic  size:  " << sty->ByteSize() << "\n");
+      size_t total_size = sty->ByteSize() * n.ArraySize();
+      buf_size.emplace(sname, total_size);
+      VST_DEBUG(dbgs() << "\tstatic  size:  " << total_size << "\n");
     } else {
       have_dynamic_shape = true;
       auto size_expr = sty->ByteSizeExpression();
+      if (n.IsArray())
+        size_expr =
+            "(" + size_expr + ") * (" + std::to_string(n.ArraySize()) + ")";
       if (!sym_expr_map.count(size_expr)) {
         auto shape_expr = sty->ShapeSizeExpression();
         auto sym_size_expr =
-            (GetSymExprFromSizeExpr(shape_expr) * SymExpr(SizeOf(sty->f_type)))
+            (GetSymExprFromSizeExpr(shape_expr) * SymExpr(n.ArraySize()) *
+             SymExpr(SizeOf(sty->f_type)))
                 .expand();
         sym_expr_map.emplace(size_expr, sym_size_expr);
       }
@@ -76,7 +79,9 @@ bool MemAnalyzer::Visit(AST::NamedVariableDecl& n) {
                << "\n\tsymbolic size: " << sym_expr_map.at(size_expr) << "\n";
       });
     }
+    return true;
   }
+
   return true;
 }
 

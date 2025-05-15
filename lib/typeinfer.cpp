@@ -209,9 +209,11 @@ bool TypeInference::Visit(AST::DataType& n) {
 
   // compound type
   if (auto mdspan = dyn_cast<AST::MultiDimSpans>(n.mdspan_type)) {
-    SetNodeType(
-        n, MakeSpannedType(n.getFundamentalType(),
-                           cast<MDSpanType>(mdspan->GetType())->GetShape()));
+    auto shape = cast<MDSpanType>(mdspan->GetType())->GetShape();
+    if (n.isArray())
+      SetNodeType(n, MakeSpannedArrayType(n.base_type, shape, n.array_dims));
+    else
+      SetNodeType(n, MakeSpannedType(n.getFundamentalType(), shape));
     cur_type = n.GetType();
   }
 

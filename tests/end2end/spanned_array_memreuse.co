@@ -1,0 +1,64 @@
+// REQUIRES: TARGET-GCU300
+// RUN: choreo -gs -arch=gcu300 --liveness --mem-reuse %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+__cok__ {
+__co_device__ void kernel(int* i, int* o, int chunk_size, int chunk_number) {
+  int total = chunk_size*chunk_number;
+  for (size_t idx = 0; idx < total; ++idx) {
+    *(o + (idx % chunk_size)) += *(i + idx);
+  }
+}
+}
+
+__co__ auto foo() {
+  s32 [32, 64] o;
+  parallel by 1 {
+    local s32[32, 64] oo{0};
+
+    local s32[32, 64] l[2][3];
+
+    local s32[32, 64] l0{1};
+    dma.copy l0 => l[0][0];
+
+    local s32[32, 64] l1{3};
+    dma.copy l1 => l[0][1];
+
+    local s32[32, 64] l2{5};
+    dma.copy l2 => l[0][2];
+
+    local s32[32, 64] l3{7};
+    dma.copy l3 => l[1][0];
+
+    local s32[32, 64] l4{9};
+    dma.copy l4 => l[1][1];
+
+    local s32[32, 64] l5{11};
+    dma.copy l5 => l[1][2];
+
+    call kernel(l, oo, |oo.span|, 6);
+
+    dma.copy oo => o;
+  }
+
+  return o;
+}
+
+int main()
+{
+  auto res = foo();
+  std::cout << res.shape()[0] << std::endl;
+  std::cout << res.shape()[1] << std::endl;
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+      if (res[i][j] != 36) {
+        std::cout << "i: " << i << ", j: " << j << "\n";
+        std::cout << "res: " << res[i][j] << "\n";
+      }
+      // std::cout << "ref: " << ref << std::endl;
+      choreo::choreo_assert(36 == res[i][j], "error: the result is not correct");
+    }
+  std::cout << "TEST PASSED!\n" << std::endl;
+}
+
+// CHECK: TEST PASSED!

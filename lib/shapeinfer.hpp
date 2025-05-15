@@ -491,7 +491,11 @@ public:
                                              cur_mdspan_vn);
         auto mds_value = GenShapeFromSignature(
             vn.GetSignatureFromValueNumber(cur_mdspan_vn));
-        nty = MakeSpannedType(n.type->base_type, mds_value, sto);
+        if (n.IsArray())
+          nty = MakeSpannedArrayType(n.type->base_type, mds_value,
+                                     n.ArrayDimensions(), sto);
+        else
+          nty = MakeSpannedType(n.type->base_type, mds_value, sto);
       } else if (ValidVN(cur_vn)) {
         vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(name), cur_vn);
         nty = NodeType(*n.type);

@@ -955,6 +955,7 @@ public:
            (base_type == BaseType::BFP16) || (base_type == BaseType::FLOAT) ||
            (base_type == BaseType::DOUBLE);
   }
+  bool isArray() const { return !array_dims.empty(); }
   bool isITuple() const { return base_type == BaseType::ITUPLE; }
   bool isSpanned() const { return (bool)mdspan_type; }
 
@@ -1072,6 +1073,11 @@ struct NamedVariableDecl : public Node,
   bool IsArray() const { return !array_dims.empty(); }
   size_t ArrayDimension(size_t idx) const { return array_dims.at(idx); }
   const std::vector<size_t>& ArrayDimensions() const { return array_dims; }
+  size_t ArraySize() const {
+    size_t size = 1;
+    for (auto d : array_dims) size *= d;
+    return size;
+  }
   bool IsMutable() const { return is_mutable; }
   void SetMutable(bool m) { is_mutable = m; }
 

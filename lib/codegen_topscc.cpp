@@ -874,8 +874,10 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   auto t_sym = t_ca->data->name;
   auto f_idx = f_ca->indices;
   auto t_idx = t_ca->indices;
-  auto f_sty = GetSpannedType(GetSymbolType(f_sym));
-  auto t_sty = GetSpannedType(GetSymbolType(t_sym));
+  auto f_ty = GetSymbolType(f_sym);
+  auto t_ty = GetSymbolType(t_sym);
+  auto f_sty = GetSpannedType(f_ty);
+  auto t_sty = GetSpannedType(t_ty);
 
   assert(f_sty && "can not retrieve data from 'from'.");
   assert(t_sty && "can not retrieve data from 'to'.");
@@ -950,29 +952,52 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   }
 
   auto GetBufferExpr = [this](const std::string& sym,
-                              const ptr<AST::MultiValues> subscription) {
+                              const ptr<AST::MultiValues> subscription,
+                              const ptr<Type>& sym_ty) {
     std::string buf_expr = "";
-    if (isa<FutureType>(GetSymbolType(sym)) &&
-        !IsHostSymbol(InScopeName(sym))) {
-      std::string buf_name = InScopeName(sym) + ".data";
+    std::string sname = InScopeName(sym);
+    if (isa<FutureType>(sym_ty) && !IsHostSymbol(sname)) {
+      std::string buf_name = sname + ".data";
       buf_expr = ssm.DeviceName(buf_name);
-    } else if (isa<FutureType>(GetSymbolType(sym))
+    } else if (isa<FutureType>(sym_ty)
                // This only matches the host-side buffer that is defined in
                // choreo DMA and tied to future but host-side data copy does not
                // really do device-level DMA, and the future is basically a
                // phantom handle do not emit any concrete code at host-side.
-               && IsHostSymbol(InScopeName(sym)) &&
-               !IsChoreoInput(InScopeName(sym)) &&
-               !IsChoreoOutput(InScopeName(sym))) {
-      buf_expr = UnScopedName(
-          const_cast<FutureBufferInfo&>(FBInfo())[InScopeName(sym)].buffer);
+               && IsHostSymbol(sname) && !IsChoreoInput(sname) &&
+               !IsChoreoOutput(sname)) {
+      buf_expr =
+          UnScopedName(const_cast<FutureBufferInfo&>(FBInfo())[sname].buffer);
     } else
-      buf_expr = ssm.DeviceName(InScopeName(sym));
+      buf_expr = ssm.DeviceName(sname);
 
     auto buf_name = buf_expr;
-    if (subscription != nullptr)
-      for (auto expr : subscription->AllValues())
-        buf_expr += "[" + ExprSTR(expr) + "]";
+    if (subscription != nullptr) {
+      if (auto array_ty = dyn_cast<ArrayType>(sym_ty);
+          array_ty && CCtx().MemReuse()) {
+        // Suppose we declared `shared s32[3,4] i[2]`
+        // For `i[1]`, if memory reuse is enabled, we need to generate pointer
+        // expr `i + 1 * (3*4)` rather than array subscript expr `i[1]`. Because
+        // if memory reuse is enabled, `i` is declared as point not array!
+        std::string array_idx = "";
+        auto subscriptions = subscription->AllValues();
+        auto array_sizes = array_ty->Dimensions();
+        for (size_t i = 0; i < subscriptions.size(); ++i) {
+          if (array_idx.empty())
+            array_idx = ExprSTR(subscriptions[i]);
+          else
+            array_idx = "(" + array_idx + ")*" +
+                        std::to_string(array_sizes[i]) + "+" +
+                        ExprSTR(subscriptions[i]);
+        }
+        std::string elem_count =
+            cast<SpannedType>(sym_ty)->GetShape().GetElementCountExpression();
+        buf_expr += " + (" + array_idx + ")*(" + elem_count + ")";
+      } else {
+        for (auto expr : subscription->AllValues())
+          buf_expr += "[" + ExprSTR(expr) + "]";
+      }
+    }
     return std::make_pair(buf_name, buf_expr);
   };
 
@@ -988,9 +1013,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
        << ", " << UnScopedExpr(RSTR(sty->GetShape())) << ");\n";
     return mds_name;
   };
-
-  auto [f_buf_name, f_buf_expr] = GetBufferExpr(f_sym, f_idx);
-  auto [t_buf_name, t_buf_expr] = GetBufferExpr(t_sym, t_idx);
+  auto [f_buf_name, f_buf_expr] = GetBufferExpr(f_sym, f_idx, f_ty);
+  auto [t_buf_name, t_buf_expr] = GetBufferExpr(t_sym, t_idx, t_ty);
   auto f_mds_name = GetMDSName(f_buf_name, f_buf_expr, f_sty);
   auto t_mds_name = GetMDSName(t_buf_name, t_buf_expr, t_sty);
 

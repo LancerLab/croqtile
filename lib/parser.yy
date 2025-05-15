@@ -690,6 +690,10 @@ named_spanned_decls
           auto decl = cast<AST::NamedVariableDecl>(item);
           symtab.AddSymbol(decl->name_str, $2->GetType());
           decl->type = $2;
+          if (decl->IsArray()) {
+            decl->type->array_dims = decl->ArrayDimensions();
+            decl->type->ReGenSemaType();
+          }
           decl->mem = $1;
         }
         $3->SetLOC(@1);
@@ -1601,12 +1605,12 @@ ElementMultiValues(const ptr<AST::Expr>&e) {
     auto we = e;
     while (true) {
       if (we->op != "elemof")
-        choreo_unreachable("unable to handle this expr: " + PSTR(e));
-      mv->Insert(e->GetR(), 0);
-      if (id = dyn_cast<AST::Identifier>(e->GetL()))
+        choreo_unreachable("unable to handle this expr: " + PSTR(we));
+      mv->Insert(we->GetR(), 0);
+      if (id = dyn_cast<AST::Identifier>(we->GetL()))
         break;
       else
-        we = cast<AST::Expr>(e->GetL());
+        we = cast<AST::Expr>(we->GetL());
     }
   }
   return std::make_pair(id, mv);
