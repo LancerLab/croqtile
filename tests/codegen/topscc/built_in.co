@@ -1,0 +1,21 @@
+// RUN: choreo -es -t topscc %s | FileCheck --match-full-lines %s
+__co__ f32 [128, 512] foo(f32 [128, 512] input) { /// device program
+  f32[input.span(0), input.span(1)] output; // use same shape as input
+  parallel p by 2, q by 4 {
+    L1_input = dma.copy input.chunkat(p, q) => local;
+    local f32 [L1_input.span(0), L1_input.span(1)] L1_output;
+    foreach {i, j} in [L1_input.span(0), L1_input.span(1)] {
+      a = L1_input.data.at(i, j);
+      b = __sin(__cos(a)) + __tan(a);
+
+      L1_output.at(i,j) = __sigmoid(b);
+    }
+    dma.copy L1_output => output.chunkat(p, q);
+  }
+  return output;
+}
+
+// CHECK: #include "tcle.h"
+// CHECK: float a = *((float*)L1_input.data() + (__iv_i * 128) + (__iv_j));
+// CHECK: float b = ((tcle::sin(tcle::cos(a)))+(tcle::tan(a)));
+// CHECK: *((float*)L1_output + (__iv_i * 128) + (__iv_j)) = tcle::sigmoid(b);

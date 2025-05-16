@@ -182,11 +182,12 @@ void choreo_info(const char *message) {
 %token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT HALF8 HALF BFP16 FLOAT DOUBLE BOOL VOID
 // builtin operations
 %token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN
+%token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXPM1 FLOOR GELU ISFINITE ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH
 // control related
 %token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH INCR RET WHERE WHILE
 
 // non-terminals
-%nterm <std::string> dma_operation builtin_print_func arith_operation spanid cstrings
+%nterm <std::string> dma_operation builtin_print_func arith_operation spanid cstrings arith_builtin_func
 %nterm <ptr<DMAConfig>> dma_config
 %nterm <bool> bool_value sync_type optional_mutable
 %nterm <int> integer_value index_or_none const_sizeof
@@ -200,7 +201,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::Node>> any_code foreach_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt wait_stmt trigger_stmt call_stmt swap_stmt range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
 %nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params idt_list ids_list subscriptions data_indices
-%nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr
+%nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr call_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type mdspan_as_type
 %nterm <AST::ptr<AST::DataAccess>> data_element
 %nterm <AST::ptr<AST::ParamList>> parameter_list
@@ -1082,6 +1083,7 @@ s_expr
         $$ = AST::Make<AST::Expr>(@1, "--", AST::Make<AST::Identifier>(@1, $2));
       }
     | data_element { $$ = AST::Make<AST::Expr>(@1, $1); }
+    | call_expr { $$ = $1; }
     | const_sizeof { $$ = AST::MakeIntExpr(@1, $1); }
     ;
 
@@ -1583,6 +1585,42 @@ trigger_stmt
 builtin_print_func
     : PRINT   { $$ = $1; }
     | PRINTLN { $$ = $1; }
+    ;
+
+arith_builtin_func
+    : ACOS     { $$ = $1; }
+    | ASIN     { $$ = $1; }
+    | ATAN     { $$ = $1; }
+    | ATAN2    { $$ = $1; }
+    | CEIL     { $$ = $1; }
+    | COS      { $$ = $1; }
+    | COSH     { $$ = $1; }
+    | EXP      { $$ = $1; }
+    | EXPM1    { $$ = $1; }
+    | FLOOR    { $$ = $1; }
+    | GELU     { $$ = $1; }
+    | ISFINITE { $$ = $1; }
+    | ROUND    { $$ = $1; }
+    | RSQRT    { $$ = $1; }
+    | SIGMOID  { $$ = $1; }
+    | SIN      { $$ = $1; }
+    | SINH     { $$ = $1; }
+    | SOFTPLUS { $$ = $1; }
+    | SQRT     { $$ = $1; }
+    | TAN      { $$ = $1; }
+    | TANH     { $$ = $1; }
+    | LOG1P    { $$ = $1; }
+    | LOG      { $$ = $1; }
+    | POW      { $$ = $1; }
+    | SIGN     { $$ = $1; }
+    ;
+
+call_expr
+    : arith_builtin_func LPAREN value_list RPAREN {
+        $$ = AST::Make<AST::Expr>(@1,
+             AST::Make<AST::Call>(@1,
+             AST::Make<AST::Identifier>(@1, $1), $3, true, true, false));
+      }
     ;
 
 cstrings /* concatenate strings */

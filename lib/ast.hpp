@@ -1634,15 +1634,18 @@ struct Call : public Node, public TypeIDProvider<Call> {
   ptr<MultiValues> arguments;
   ptr<MultiValues> template_args;
   bool is_bif; // built-in?
+  bool is_arith_bif;
+  bool is_stmt;
 
   Call(const location& l, const ptr<Identifier>& f, const ptr<MultiValues>& a,
-       bool builtin = false)
+       bool builtin = false, bool arith = false, bool stmt = true)
       : Node(l), function(f), arguments(a), template_args(nullptr),
-        is_bif(builtin) {}
+        is_bif(builtin), is_arith_bif(arith), is_stmt(stmt) {}
 
   Call(const location& l, const ptr<Identifier>& f, const ptr<MultiValues>& a,
        const ptr<MultiValues>& b)
-      : Node(l), function(f), arguments(a), template_args(b), is_bif(false) {
+      : Node(l), function(f), arguments(a), template_args(b), is_bif(false),
+        is_arith_bif(false), is_stmt(true) {
     arguments->SetDelimiter(", ");
     template_args->SetDelimiter(", ");
   }

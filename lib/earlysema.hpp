@@ -58,7 +58,9 @@ public:
     else if (AST::IsLiteral(*n) || isa<AST::IntIndex>(n) ||
              isa<AST::SpanAs>(n) || isa<AST::ChunkAt>(n))
       return false;
-    else
+    else if (auto c = dyn_cast<AST::Call>(n)) {
+      return nodes.count(c.get());
+    } else
       choreo_unreachable("unsupported node: " + n->TypeNameString() + ": " +
                          PSTR(n) + ".");
     return false;
