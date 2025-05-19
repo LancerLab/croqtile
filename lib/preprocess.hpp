@@ -94,8 +94,11 @@ private:
     return result;
   }
 
-  bool isDirective(const std::string& line, const std::string& directive) {
-    return line == directive || line.rfind(directive + " ", 0) == 0;
+  bool isDirective(const std::string& line, const std::string& directive,
+                   bool blank = true) {
+    auto d = directive;
+    if (blank) d += " ";
+    return line == directive || line.rfind(d, 0) == 0;
   }
 
 private:
@@ -186,18 +189,79 @@ private:
       output << line << '\n';
       return;
     } else if (isDirective(bline, "#if")) {
+      // todo [fem]: handle complex condition expression
       std::regex ifRegex("#if\\s+(.*)");
       std::smatch match;
       if (std::regex_match(bline, match, ifRegex)) {
-        try {
-          bool condition = std::stoi(match[1].str()) != 0;
+        auto uc_code = match[1].str();
+        std::smatch uc_code_match;
+
+        std::regex uc_code_regex("(!?)defined\\s*(?:\\((\\w+)\\)|(\\w+))\\s*");
+        if (std::regex_match(uc_code, uc_code_match, uc_code_regex)) {
+          auto uc_not_str = uc_code_match[1].str();
+          auto uc_condition_str = uc_code_match[2].str().empty()
+                                      ? uc_code_match[3].str()
+                                      : uc_code_match[2].str();
+          bool condition =
+              globalDefines.find(uc_condition_str) != globalDefines.end();
+          if (!uc_not_str.empty()) condition = !condition;
+
           uc_condition_stack.push(condition);
           uc_skip_stack.push(uc_skip_line);
           uc_skip_line = uc_skip_line || !condition;
-        } catch (...) {
-          uc_condition_stack.push(false);
+        } else {
+          try {
+            bool condition = std::stoi(match[1].str()) != 0;
+            uc_condition_stack.push(condition);
+            uc_skip_stack.push(uc_skip_line);
+            uc_skip_line = uc_skip_line || !condition;
+          } catch (...) {
+            uc_condition_stack.push(false);
+            uc_skip_stack.push(uc_skip_line);
+            uc_skip_line = true;
+          }
+        }
+      }
+
+      output << line << '\n';
+      return;
+    } else if (isDirective(bline, "#elif")) {
+      if (!uc_condition_stack.empty()) {
+        bool currentCondition = uc_condition_stack.top();
+        uc_condition_stack.top() = !currentCondition;
+        uc_skip_line = uc_skip_stack.top() || !uc_condition_stack.top();
+      }
+
+      std::regex ifRegex("#elif\\s+(.*)");
+      std::smatch match;
+      if (std::regex_match(bline, match, ifRegex)) {
+        auto uc_code = match[1].str();
+        std::smatch uc_code_match;
+
+        std::regex uc_code_regex("(!?)defined\\s*(?:\\((\\w+)\\)|(\\w+))\\s*");
+        if (std::regex_match(uc_code, uc_code_match, uc_code_regex)) {
+          auto uc_not_str = uc_code_match[1].str();
+          auto uc_condition_str = uc_code_match[2].str().empty()
+                                      ? uc_code_match[3].str()
+                                      : uc_code_match[2].str();
+          bool condition =
+              globalDefines.find(uc_condition_str) != globalDefines.end();
+          if (!uc_not_str.empty()) condition = !condition;
+
+          uc_condition_stack.push(condition);
           uc_skip_stack.push(uc_skip_line);
-          uc_skip_line = true;
+          uc_skip_line = uc_skip_line || !condition;
+        } else {
+          try {
+            bool condition = std::stoi(match[1].str()) != 0;
+            uc_condition_stack.push(condition);
+            uc_skip_stack.push(uc_skip_line);
+            uc_skip_line = uc_skip_line || !condition;
+          } catch (...) {
+            uc_condition_stack.push(false);
+            uc_skip_stack.push(uc_skip_line);
+            uc_skip_line = true;
+          }
         }
       }
       output << line << '\n';
@@ -393,18 +457,74 @@ private:
       }
       if (!co_skip_line) output << "#line " << line_num + 1 << "\n";
     } else if (isDirective(bline, "#if")) {
+      // todo [fem]: handle complex condition expression
       std::regex ifRegex("#if\\s+(.*)");
       std::smatch match;
       if (std::regex_match(bline, match, ifRegex)) {
-        try {
-          bool condition = std::stoi(match[1].str()) != 0;
+        auto co_code = match[1].str();
+        std::smatch co_code_match;
+
+        std::regex co_code_regex("(!?)defined\\s*(?:\\((\\w+)\\)|(\\w+))\\s*");
+        if (std::regex_match(co_code, co_code_match, co_code_regex)) {
+          auto co_not_str = co_code_match[1].str();
+          auto co_condition_str = co_code_match[2].str().empty()
+                                      ? co_code_match[3].str()
+                                      : co_code_match[2].str();
+          bool condition =
+              localDefines.find(co_condition_str) != localDefines.end();
+          if (!co_not_str.empty()) condition = !condition;
           co_condition_stack.push(condition);
           co_skip_stack.push(co_skip_line);
           co_skip_line = co_skip_line || !condition;
-        } catch (...) {
-          co_condition_stack.push(false);
+        } else {
+          try {
+            bool condition = std::stoi(match[1].str()) != 0;
+            co_condition_stack.push(condition);
+            co_skip_stack.push(co_skip_line);
+            co_skip_line = co_skip_line || !condition;
+          } catch (...) {
+            co_condition_stack.push(false);
+            co_skip_stack.push(co_skip_line);
+            co_skip_line = true;
+          }
+        }
+      }
+      if (!co_skip_line) output << "#line " << line_num + 1 << "\n";
+    } else if (isDirective(bline, "#elif")) {
+      // todo [fem]: handle complex condition expression
+      if (!co_condition_stack.empty()) {
+        bool currentCondition = co_condition_stack.top();
+        co_condition_stack.top() = !currentCondition;
+        co_skip_line = co_skip_stack.top() || !co_condition_stack.top();
+      }
+      std::regex elifRegex("#elif\\s+(.*)");
+      std::smatch match;
+      if (std::regex_match(bline, match, elifRegex)) {
+        auto co_code = match[1].str();
+        std::regex co_code_regex("(!?)defined\\s*(?:\\((\\w+)\\)|(\\w+))\\s*");
+        std::smatch co_code_match;
+        if (std::regex_match(co_code, co_code_match, co_code_regex)) {
+          auto co_not_str = co_code_match[1].str();
+          auto co_condition_str = co_code_match[2].str().empty()
+                                      ? co_code_match[3].str()
+                                      : co_code_match[2].str();
+          bool condition =
+              localDefines.find(co_condition_str) != localDefines.end();
+          if (!co_not_str.empty()) condition = !condition;
+          co_condition_stack.push(condition);
           co_skip_stack.push(co_skip_line);
-          co_skip_line = true;
+          co_skip_line = co_skip_line || !condition;
+        } else {
+          try {
+            bool condition = std::stoi(match[1].str()) != 0;
+            co_condition_stack.push(condition);
+            co_skip_stack.push(co_skip_line);
+            co_skip_line = co_skip_line || !condition;
+          } catch (...) {
+            co_condition_stack.push(false);
+            co_skip_stack.push(co_skip_line);
+            co_skip_line = true;
+          }
         }
       }
       if (!co_skip_line) output << "#line " << line_num + 1 << "\n";
