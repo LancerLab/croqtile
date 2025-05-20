@@ -1,0 +1,28 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -es -t topscc %s  | FileCheck --match-full-lines %s
+
+__co__ void foo(f32 [14] b) {
+  parallel by 2 {
+    mutable a = 2;
+    a+=3;
+    a-=4;
+    a*=5;
+    a/=6;
+    a%=7;
+
+    shared s32 [3] b;
+
+    foreach i in [b.span]
+      b.at(i) += 2;
+  }
+}
+
+
+// CHECK: int a = (2);
+// CHECK: a = ((a)+((3)));
+// CHECK: a = ((a)-((4)));
+// CHECK: a = ((a)*((5)));
+// CHECK: a = ((a)/((6)));
+// CHECK: a = ((a)%((7)));
+// CHECK: __shared__ int b[3];
+// CHECK: *((int*)b + (__iv_i__elem__0)) = ((*((int*)b + (__iv_i__elem__0)))+((2)));
