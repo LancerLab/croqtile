@@ -1,4 +1,4 @@
-// 1RUN: choreo -es -t topscc %s -o - | FileCheck %s
+// RUN: choreo -es -t topscc %s -o - | FileCheck %s
 
 __co__ void blocka() {
   global event e;
@@ -19,7 +19,7 @@ __co__ void blocka() {
 // CHECK:   choreo::abend_true(topsMemset(&e__device, 0, 1));
 // CHECK:   dim3 __blocka_gdims0(1, 1, 1);
 // CHECK:   dim3 __blocka_bdims0(1, 1, 1);
-// CHECK:   __choreo_device_blocka<<<__blocka_gdims0, __blocka_bdims0>>>(e__device);
+// CHECK:   __choreo_device_blocka0<<<__blocka_gdims0, __blocka_bdims0>>>(e__device);
 // CHECK:   dim3 __blocka_gdims1(1, 1, 1);
 // CHECK:   dim3 __blocka_bdims1(4, 1, 1);
-// CHECK:   __choreo_device_blocka<<<__blocka_gdims1, __blocka_bdims1>>>(e__device);
+// CHECK:   __choreo_device_blocka1<<<__blocka_gdims1, __blocka_bdims1>>>(e__device);

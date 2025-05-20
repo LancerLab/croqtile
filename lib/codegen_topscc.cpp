@@ -123,8 +123,15 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
     fty = cast<FunctionType>(GetSymbolType(fname));
     ssm.EnterScope();
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
-    if (parallel_level == 0)
+    if (parallel_level == 0) {
+      parallel_idx += 1;
+      if (cgi->GetFunctionTrait(fname).multiple_parallelby)
+        device_fn = "__choreo_device_" + fname + std::to_string(parallel_idx);
+      EmitDeviceFuncDecl(ds);
+      ds << " {\n";
+      IncrDeviceIndent();
       ds << d_indent << "// parallel-by: " << n.LOC() << "\n";
+    }
     parallel_level++;
     max_parallel_level = GetMaxParallelLevelFromNote(*pb);
     max_parallel_level_valid = true;
@@ -221,7 +228,11 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
     return_stream.str("");
   } else if (isa<AST::ParallelBy>(&n)) {
     parallel_level--;
-    if (parallel_level == 0) max_parallel_level = 0;
+    if (parallel_level == 0) {
+      max_parallel_level = 0;
+      DecrDeviceIndent();
+      ds << "}\n\n";
+    }
   } else if (isa<AST::WithBlock>(&n)) {
     if (IsHost()) {
       DecrHostIndent();
@@ -241,7 +252,6 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
           DecrHostIndent();
           hs << h_indent << "} // " << UnScopedName(*iv_itr) << "\n";
           hs << h_indent << ssm.DeviceName(*iv_itr) << " = 0;\n"; // must reset
-
         } else {
           DecrDeviceIndent();
           ds << d_indent << "} // " << UnScopedName(*iv_itr) << "\n";
@@ -347,7 +357,7 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
   //  - decide the topscc-host parameter indices,
   //
   size_t host_pindex = 0;
-  for (auto& item : GetChoreoFuncIns()) {
+  for (auto& item : GetChoreoFuncIns(cgi)) {
     if (item.IsParameter()) {
       assert((int)host_pindex == item.p_index);
       item.host_name = UnScopedName(item.name);
@@ -388,15 +398,11 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
 
   // do not generate device function unless parallel-by exists
   if (NeedDeviceFunc()) {
-    EmitDeviceFuncDecl(ds);
-    ds << " {\n";
-    IncrDeviceIndent();
-
     for (auto item : symbolic_dimensions)
       ssm.MapDeviceSymbol(item.first, UnScopedName(item.first));
 
     // map the choreo input to device memory
-    for (auto& item : GetChoreoFuncIns()) {
+    for (auto& item : GetChoreoFuncIns(cgi)) {
       if (auto sty = dyn_cast<SpannedType>(item.type)) {
         // Only the globals are declared in host. The shareds/locals are
         // declared in device
@@ -421,7 +427,7 @@ bool TopsccCodeGen::Visit(AST::ChoreoFunction& n) {
   TraceEachVisit(n);
 
   if (!use_hetero_tileflow && NeedDeviceFunc()) {
-    for (const auto& item : GetDeviceFuncIns()) {
+    for (const auto& item : GetDeviceFuncIns(cgi)) {
       if (IsChoreoOutput(item.name)) continue;
       if (!isa<SpannedType>(item.type)) continue;
       hs << h_indent << "choreo::abend_true(topsFree("
@@ -434,11 +440,6 @@ bool TopsccCodeGen::Visit(AST::ChoreoFunction& n) {
   DecrHostIndent();
   hs << "}\n\n";
 
-  if (NeedDeviceFunc()) {
-    DecrDeviceIndent();
-    ds << "}\n\n";
-  }
-
   return true;
 }
 
@@ -447,6 +448,10 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
 
   auto nty = NodeType(n);
   auto sym = n.name_str;
+
+  bool ref = (n.GetNote().find("ref") != std::string::npos);
+  updating_cgi->AddSymbolDetail(fname,
+                                {InScopeName(sym), GetSymbolType(sym), ref});
 
   if (auto s = dyn_cast<AST::Select>(n.init_expr)) {
     assert(!s->inDMA);
@@ -687,6 +692,14 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
 bool TopsccCodeGen::Visit(AST::Assignment& n) {
   TraceEachVisit(n);
 
+  if (!n.AssignToDataElement()) {
+    auto name = n.GetName();
+    bool ref = (n.GetNote().find("ref") != std::string::npos);
+    if (!SSTab().IsDeclared(name) && !isa<AST::SpanAs>(n.value))
+      updating_cgi->AddSymbolDetail(
+          fname, {InScopeName(name), GetSymbolType(name), ref});
+  }
+
   auto nty = NodeType(n);
 
   if (auto s = dyn_cast<AST::Select>(n.value)) {
@@ -758,23 +771,26 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
 
   if (parallel_level != 1) return true;
 
-  auto pb_idx = std::stoi(SplitStringByDelimiter(n.note, ", ")[0]);
-
-  auto& lconfig = cgi->GetFunctionLaunches(fname)[pb_idx];
-  hs << h_indent << "dim3 __" << fname << "_gdims" << pb_idx << "("
+  auto& lconfig = cgi->GetFunctionLaunches(fname)[parallel_idx];
+  hs << h_indent << "dim3 __" << fname << "_gdims" << parallel_idx << "("
      << lconfig.grid_dim_x << ", " << lconfig.grid_dim_y << ", "
      << lconfig.grid_dim_z << ");\n";
-  hs << h_indent << "dim3 __" << fname << "_bdims" << pb_idx << "("
+  hs << h_indent << "dim3 __" << fname << "_bdims" << parallel_idx << "("
      << lconfig.block_dim_x << ", " << lconfig.block_dim_y << ", "
      << lconfig.block_dim_z << ");\n";
-  hs << h_indent << device_fn << "<<<__" << fname << "_gdims" << pb_idx
-     << ", __" << fname << "_bdims" << pb_idx << ">>>(";
+  hs << h_indent << device_fn << "<<<__" << fname << "_gdims" << parallel_idx
+     << ", __" << fname << "_bdims" << parallel_idx << ">>>(";
 
   size_t i = 0;
-  for (auto& item : GetDeviceFuncIns()) {
+  for (auto& item : GetDeviceFuncIns(updating_cgi)) {
     auto sname = item.name;
     if (isa<SpannedType>(item.type)) sname += "__device";
-    hs << ((i++ == 0) ? "" : ", ") << ssm.HostName(sname);
+    if (!PrefixedWith(scoped_symtab.ScopeName(), GetScope(sname))) continue;
+    hs << ((i++ == 0) ? "" : ", ");
+    if (ssm.HasHostName(sname))
+      hs << ssm.HostName(sname);
+    else
+      hs << UnScopedName(ssm.DeviceName(sname));
   }
   for (auto item : symbolic_dimensions) {
     hs << ((i++ > 0) ? ", " : "");
@@ -799,7 +815,7 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
     std::string oname = "";
     ptr<Type> otype;
     bool has_spanned_arg = false;
-    for (auto& item : GetDeviceFuncIns()) {
+    for (auto& item : GetDeviceFuncIns(updating_cgi)) {
       auto sname = item.name;
       if (isa<SpannedType>(item.type)) {
         oname = UnScopedName(sname);
@@ -949,6 +965,27 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
            << ";\n";
       } else
         choreo_unreachable("not support dual-side chuckat in dma copy");
+    } else
+      choreo_unreachable("not support host-side dma other than copy");
+
+    return true;
+  }
+
+  // not consider tileflow for now
+  // TODO: how to do tiling in host-side?
+  if (t_sty->GetStorage() == Storage::GLOBAL && IsHost()) {
+    std::string bts = NameBaseType(t_sty->ElementType(), false);
+    auto buf_sym = t_sym + "__device";
+    auto buf_sym_from = f_sym + "__device";
+    if (n.operation == ".copy") {
+      if (f_ca->positions == nullptr && t_ca->positions == nullptr) {
+        // direct copy
+        hs << h_indent << "choreo::abend_true(topsMemcpy(" << buf_sym << ", "
+           << buf_sym_from << ", " << UnScopedSizeExpr(*f_sty)
+           << ", topsMemcpyDeviceToDevice));\n";
+      } else
+        choreo_unreachable(
+            "not support tiling chuckat in dma copy at host side for now");
     } else
       choreo_unreachable("not support host-side dma other than copy");
 
@@ -1575,6 +1612,14 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
   return true;
 }
 
+bool TopsccCodeGen::Visit(AST::ParamList& n) {
+  int index = 0;
+  for (auto param : n.values)
+    updating_cgi->AddSymbolDetail(fname, {InScopeName(param->sym->name),
+                                          param->GetType(), false, index++});
+  return true;
+}
+
 bool TopsccCodeGen::Visit(AST::WithIn& n) {
   TraceEachVisit(n);
 
@@ -1585,12 +1630,14 @@ bool TopsccCodeGen::Visit(AST::WithIn& n) {
 
   for (auto& v : n.GetMatchers()) {
     auto id = cast<AST::Identifier>(v);
-    ssm.MapDeviceSymbol(InScopeName(id->name), "__iv_" + id->name);
+    ssm.RemapDeviceSymbol(InScopeName(id->name), "__iv_" + id->name);
     // Keep the device side decl, even for host side iv.
     // for visibility of shapes
-    if (IsHost())
+    if (IsHost()) {
       hs << h_indent << "int __iv_" << id->name << " = 0;\n";
-    else
+      updating_cgi->AddSymbolDetail(
+          fname, {InScopeName(id->name), id->GetType(), true, -1, "", true});
+    } else
       ds << d_indent << "int __iv_" << id->name << " = 0;\n";
   }
 
@@ -1698,14 +1745,15 @@ bool TopsccCodeGen::Visit(AST::Return& n) {
   if (isa<ScalarType>(vty)) {
     return_stream << h_indent << "return " << ExprSTR(n.value, true) << ";\n";
     return true;
-  } else if (auto id = AST::GetIdentifier(*n.value)) {
-    auto sym = id->name;
-    if (IsChoreoInput(InScopeName(sym))) {
-      // return the parameter
-      return_stream << h_indent << "return " << ExprSTR(n.value, true) << ";\n";
-      return true;
-    } else if (IsChoreoOutput(InScopeName(sym))) {
-      if (auto sty = dyn_cast<SpannedType>(GetSymbolType(sym))) {
+  } else if (auto sty = dyn_cast<SpannedType>(vty)) {
+    if (auto id = AST::GetIdentifier(*n.value)) {
+      auto sym = id->name;
+      if (IsChoreoInput(InScopeName(sym))) {
+        // return the parameter
+        return_stream << h_indent << "return " << ExprSTR(n.value, true)
+                      << ";\n";
+        return true;
+      } else if (IsChoreoOutput(InScopeName(sym))) {
         // return the global storage, must map back
         return_stream << h_indent << "choreo::abend_true(topsMemcpy(" << sym
                       << ".data(), " << sym << "__device, "
@@ -1714,9 +1762,20 @@ bool TopsccCodeGen::Visit(AST::Return& n) {
         return_stream << h_indent << "choreo::abend_true(topsFree(" << sym
                       << "__device));\n";
       }
+    } else if (auto expr = cast<AST::Expr>(n.value);
+               expr && expr->op == "dataof") {
+      // return future.data, must map back
+      auto id = cast<AST::Expr>(expr->GetR())->GetSymbol();
+      assert(id && "expect a symbol");
+      auto sym = id->name + "__buf__";
+      return_stream << h_indent << "choreo::abend_true(topsMemcpy(" << sym
+                    << ".data(), " << sym << "__device, "
+                    << UnScopedSizeExpr(*sty)
+                    << ", topsMemcpyDeviceToHost));\n";
+      return_stream << h_indent << "choreo::abend_true(topsFree(" << sym
+                    << "__device));\n";
     }
   }
-
   assert(isa<SpannedType>(vty) && "expect a spanned data.");
   return_stream << h_indent << "return " << ExprSTR(n.value, true) << ";\n";
   return true;
@@ -1752,7 +1811,7 @@ void TopsccCodeGen::EmitHostFuncDecl(std::ostringstream& oss) {
 
   // emit the parameters
   size_t host_pindex = 0;
-  for (auto& item : GetChoreoFuncIns()) {
+  for (auto& item : GetChoreoFuncIns(cgi)) {
     if (item.IsParameter()) assert((int)host_pindex == item.p_index);
     oss << ((host_pindex == 0) ? "" : ", ") << HostTypeStringify(*item.type)
         << " " << item.host_name;
@@ -1775,7 +1834,7 @@ void TopsccCodeGen::EmitHostRuntimeCheck() {
   std::map<ValueExpr, std::vector<Entry>> ve_entries_map;
 
   size_t host_pindex = 0;
-  for (auto& item : GetChoreoFuncIns()) {
+  for (auto& item : GetChoreoFuncIns(cgi)) {
     assert((int)host_pindex == item.p_index);
     auto name = ssm.HostName(item.name);
     if (auto sty = dyn_cast<SpannedType>(item.type)) {
@@ -1852,17 +1911,19 @@ DeviceParamTypeStringify(const Choreo::Type& ty) {
     return "double";
   else if (isa<EventType>(&ty))
     return "bool"; // use bool for event
-  else if (auto sty = dyn_cast<SpannedType>(&ty)) {
+  else if (auto sty = dyn_cast<SpannedType>(&ty))
     return std::string(NameBaseType(sty->ElementType(), false)) + " *";
+  else if (auto bitt = dyn_cast<BoundedITupleType>(&ty)) {
+    assert(bitt->Dims() == 1);
+    return "int";
   } else
     choreo_unreachable("unsupported host function type.");
   return "";
 }
 
 void TopsccCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
-  // Nowadays, we assume there is only one launch configuration.
-  auto& lconfig = cgi->GetFunctionLaunches(fname).back();
   if (arch.GetValue() == "gcu400") {
+    auto& lconfig = cgi->GetFunctionLaunches(fname)[parallel_idx];
     oss << "__thread_dims__(" << lconfig.warp_dim_x << ", "
         << lconfig.warp_dim_y << ", " << lconfig.warp_dim_z << ")\n";
   }
@@ -1870,10 +1931,11 @@ void TopsccCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
   oss << "__global__ void " << device_fn << "(";
 
   size_t index = 0;
-  for (auto& item : GetDeviceFuncIns()) {
+  for (auto& item : GetDeviceFuncIns(updating_cgi)) {
+    if (!PrefixedWith(scoped_symtab.ScopeName(), GetScope(item.name))) continue;
     oss << ((index++ > 0) ? ", " : "");
     oss << DeviceParamTypeStringify(*item.type) << " ";
-    oss << UnScopedName(item.name);
+    oss << (item.need_iv_prefix ? "__iv_" : "") << UnScopedName(item.name);
   }
 
   for (auto item : symbolic_dimensions) {
@@ -2302,9 +2364,12 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       } else if (expr->GetOp() == "dataof") {
         assert(isa<FutureType>(expr->GetR()->GetType()) &&
                "expect a future operand.");
-        if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol())
-          oss << id->name << ".data()"; // leverage the rutime buffer inform
-        else
+        if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol()) {
+          if (is_host)
+            oss << id->name << "__buf__";
+          else
+            oss << id->name << ".data()";
+        } else
           choreo_unreachable("Can not retrieve name of the future.");
       } else if (expr->GetOp() == "sizeof") {
         auto var = RemoveSuffix(*AST::GetName(*expr->GetR()), ".span");

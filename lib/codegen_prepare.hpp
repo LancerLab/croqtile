@@ -36,7 +36,7 @@ public:
     return true;
   }
 
-  bool Visit(AST::DMA& n) {
+  bool Visit(AST::DMA& n) override {
     if (n.future.empty() || (n.operation == ".any")) return true;
     if ((mxpl == 2 || mxpl == 3) && parallel_level == 1) {
       // the DMA is inside block-shared zone
@@ -64,9 +64,11 @@ private:
       parallel_level = 0;
       cgi->GetFunctionTrait(fname).has_parallelby = false;
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+      if (parallel_level == 0 && cgi->GetFunctionTrait(fname).has_parallelby)
+        cgi->GetFunctionTrait(fname).multiple_parallelby = true;
       parallel_level++;
       max_parallel_level = std::max(parallel_level, max_parallel_level);
-      // for Factor backend
+
       auto& lcs = cgi->GetFunctionLaunches(fname);
 
       auto ToSymbolValues = [&](const ValueList& dims) -> ValueList {
@@ -137,6 +139,9 @@ private:
     return true;
   }
 
+private:
+  bool IsHost() const { return parallel_level == 0; }
+
 public:
   CodegenPrepare() : CodeGenerator("prepare", CCtx().GetGlobalSymbolTable()) {
     cgi = std::make_shared<CodeGenInfo>();
@@ -205,10 +210,21 @@ public:
   bool Visit(AST::Select&) { return true; }
 
   bool Visit(AST::Return& n) override {
-    auto id = GetIdentifier(*n.value);
-    if (!id) return true;
+    std::string ret_name;
+    if (auto id = GetIdentifier(*n.value); id) {
+      ret_name = id->name;
+    } else {
+      if (auto expr = dyn_cast<AST::Expr>(n.value);
+          expr && expr->op == "dataof") {
+        id = cast<AST::Expr>(expr->GetR())->GetSymbol().get();
+        assert(id && "Expect a symbol.");
+        ret_name = id->name + "__buf__";
+      } else {
+        return true;
+      }
+    }
     for (auto& item : cgi->GetFunctionSymbols(fname)) {
-      if (item.name == InScopeName(id->name)) {
+      if (item.name == InScopeName(ret_name)) {
         auto rty_str = RemovePrefixOrNull("host-type:", n.GetNote());
         if (rty_str.has_value())
           item.SetAsReturn(STR(rty_str.value()));
@@ -217,7 +233,7 @@ public:
       }
     }
 
-    cgi->SetReturnSymbol(fname, InScopeName(id->name));
+    cgi->SetReturnSymbol(fname, InScopeName(ret_name));
 
     return true;
   }

@@ -803,14 +803,6 @@ public:
         error_count++;
       }
     }
-
-    if (CCtx().GetTarget() == CompileTarget::Topscc) {
-      if (kernel_launch_count > 1) {
-        Error(n.LOC(), "Topscc backend does not support multiple kernel launch "
-                       "in a single function for now.");
-        error_count++;
-      }
-    }
     return true;
   }
   bool Visit(AST::WhereBind& n) override {

@@ -17,6 +17,7 @@ struct SymbolDetail {
   std::string rty_str;
   bool is_reference = false;
   int p_index = -1; // index of parameter in choreo function decl
+  bool need_iv_prefix = false;
 
   // information used for codegen
   std::string host_name;   // mapped host name
@@ -27,8 +28,9 @@ struct SymbolDetail {
   int h_index = -1;   // some target like factor requires host function indices
 
   SymbolDetail(const std::string& n, const ptr<Type>& t, bool ref = false,
-               int index = -1, const std::string& ret = "")
-      : name(n), type(t), rty_str(ret), is_reference(ref), p_index(index) {
+               int index = -1, const std::string& ret = "", bool iv = false)
+      : name(n), type(t), rty_str(ret), is_reference(ref), p_index(index),
+        need_iv_prefix(iv) {
     assert((!(IsParameter() && IsReference())) &&
            "Parameters are not references.");
   }
@@ -113,6 +115,7 @@ struct LaunchConfig {
 
 struct OtherTrait {
   bool has_parallelby = false;
+  bool multiple_parallelby = false;
 };
 
 using SymbolDetails = std::map<std::string, std::vector<SymbolDetail>>;
@@ -140,7 +143,7 @@ private:
   SharedFutures shr_futs;
   LocalFutures loc_futs;
 
-  size_t param_count = 0;
+  // TODO: maybe should add some vars here
 
 public:
   const std::vector<SymbolDetail>&
@@ -190,14 +193,15 @@ public:
   bool HasReturnSymbol(const std::string& fname) const {
     return returns.count(fname);
   }
-
   const std::string& GetReturnSymbol(const std::string& fname) const {
     return returns.at(fname);
   }
-
   bool IsReturnSymbol(const std::string& fname, const std::string& sym) const {
     if (HasReturnSymbol(fname)) return GetReturnSymbol(fname) == sym;
     return false;
+  }
+  void SetReturnSymbol(const std::string fname, const std::string& rs) {
+    returns[fname] = rs;
   }
 
   void AddSymbolDetail(const std::string fname, const SymbolDetail& sd) {
@@ -210,14 +214,9 @@ public:
   void SetLaunchDetail(const std::string fname, const LaunchConfig& lc) {
     launches[fname].push_back(lc);
   }
-
   void SetLaunchDetails(const std::string fname,
                         const std::vector<LaunchConfig>& lcs) {
     launches[fname] = lcs;
-  }
-
-  void SetReturnSymbol(const std::string fname, const std::string& rs) {
-    returns[fname] = rs;
   }
 
   // argument's index by its scoped name
@@ -291,6 +290,13 @@ public:
       // PDSYM_NO_RETURN: pass-by
     }
 
+    auto bitt = dyn_cast<BoundedITupleType>(sd.type);
+    if (bitt) {
+      assert(bitt->Dims() == 1);
+      if (sd.IsReference() && (gsk & PDSYM_WITH_REFERENCE)) return true;
+      return false;
+    }
+
     if (gsk & PDSYM_ALLOC_IN_DEVICE) return false;
 
     // no more filters
@@ -318,6 +324,14 @@ public:
     return FilterRange<SymbolDetail>(
         this->all_syms[fname], [this](const SymbolDetail& sd) {
           return this->IsPassedOrDeclaredSymbols(sd, PDSYM_ALLOC_IN_DEVICE);
+        });
+  }
+
+  FilterRange<SymbolDetail> GetDeviceAllIns(const std::string& fname) {
+    return FilterRange<SymbolDetail>(
+        this->all_syms[fname], [this](const SymbolDetail& sd) {
+          return this->IsPassedOrDeclaredSymbols(sd, PDSYM_ALLOC_IN_DEVICE |
+                                                         PDSYM_WITH_REFERENCE);
         });
   }
 
@@ -470,8 +484,11 @@ static inline std::string HostTypeStringify(const Choreo::Type& ty,
     else // pass in by reference
       return "const choreo::spanned_view<choreo::" + STR(sty->f_type) + ", " +
              std::to_string(sty->Dims()) + "> &";
-  }
-  choreo_unreachable("unsupported host function type: " + STR(ty) + ".");
+  } else if (auto bitt = dyn_cast<BoundedITupleType>(&ty)) {
+    assert(bitt->Dims() == 1);
+    return "int";
+  } else
+    choreo_unreachable("unsupported host function type: " + STR(ty) + ".");
   return "";
 }
 

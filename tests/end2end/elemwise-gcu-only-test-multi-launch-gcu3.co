@@ -1,6 +1,6 @@
 // REQUIRES: TARGET-GCU300
 // RUN: choreo -gs -t factor %s -o %s.factor.result && bash %s.factor.result --execute | FileCheck --match-full-lines %s && rm -f %s.factor.result
-// 1RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
 
 __cok__ {
 __co_device__ extern "C" void kernel(int * a, int * b, int * c, int n) {
@@ -32,7 +32,6 @@ __co__ s32 [N, 17, 128] ele_add(s32 [N, 17, 128] lhs, s32 [N, 17, 128] rhs) {
 
   parallel p by 1 {
     with index = {rm, x, y} in [N, 17, 4] {
-      // foreach rm(lhs.span(0)/pf0*pf0:) {
       foreach rm(N/pf0*pf0:) {
         foreach x, y {
           lhs_load = dma.copy.async lhs.chunkat(rm, x, y) => local;

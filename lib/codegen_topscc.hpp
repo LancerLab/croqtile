@@ -126,6 +126,12 @@ public:
     return csym;
   }
 
+  bool HasHostName(const std::string& csym) const {
+    for (auto mapit = host_map.rbegin(); mapit != host_map.rend(); ++mapit)
+      if (mapit->count(csym)) return true;
+    return false;
+  }
+
   const std::string DeviceName(const std::string& csym) const {
     for (auto mapit = device_map.rbegin(); mapit != device_map.rend(); ++mapit)
       if (mapit->count(csym)) return (*mapit).at(csym);
@@ -147,7 +153,11 @@ public:
 
 struct TopsccCodeGen : public CodeGenerator {
 private:
+  // fixed codegen info, which is not updated during the TopsccCodegen
   ptr<CodeGenInfo> cgi;
+  // update when visiting nodes in TopsccCodegen at any time.
+  // Only use it for function parameters.
+  ptr<CodeGenInfo> updating_cgi;
   ScopedSymbolMap ssm;
 
 public:
@@ -155,6 +165,7 @@ public:
       : CodeGenerator("codegen", CCtx().GetGlobalSymbolTable()), cgi(ci) {
     cu_name = "__choreo_" + OptionRegistry::GetInstance().GetInputName();
     cmp_dir = CreateUniquePath();
+    updating_cgi = AST::Make<CodeGenInfo>();
   }
 
   bool BeforeVisitImpl(AST::Node&) override;
@@ -173,13 +184,13 @@ public:
   bool Visit(AST::DataType&) override { return true; };
   bool Visit(AST::Identifier&) override { return true; };
   bool Visit(AST::Parameter&) override { return true; };
-  bool Visit(AST::ParamList&) override { return true; };
   bool Visit(AST::Memory&) override { return true; };
   bool Visit(AST::ChunkAt&) override { return true; };
   bool Visit(AST::Select&) override { return true; };
   bool Visit(AST::LoopRange&) override { return true; };
   bool Visit(AST::Program&) override { return true; };
 
+  bool Visit(AST::ParamList&) override;
   bool Visit(AST::WithIn&) override;
   bool Visit(AST::WhereBind&) override;
   bool Visit(AST::WithBlock&) override;
@@ -216,6 +227,8 @@ private:
   int parallel_level = 0;
   int max_parallel_level = 0;
   bool max_parallel_level_valid = false;
+  // idx of the most outer pb
+  int parallel_idx = -1;
 
   size_t host_param_count = 0; // host parameter count
 
@@ -268,18 +281,21 @@ private:
     fty = nullptr;
     void_return = false;
     emit_call = true;
+    parallel_idx = -1;
   }
 
   std::string GenHostParamName() {
     return "hp" + std::to_string(host_param_count++);
   }
 
-  FilterRange<SymbolDetail> GetDeviceFuncIns() {
-    return cgi->GetDeviceAllocatables(fname);
+  FilterRange<SymbolDetail>
+  GetDeviceFuncIns(const ptr<CodeGenInfo>& info) const {
+    return info->GetDeviceAllIns(fname);
   }
 
-  FilterRange<SymbolDetail> GetChoreoFuncIns() {
-    return cgi->GetParameters(fname);
+  FilterRange<SymbolDetail>
+  GetChoreoFuncIns(const ptr<CodeGenInfo>& info) const {
+    return info->GetParameters(fname);
   }
 
   const FutureBufferInfo& FBInfo() const {
@@ -299,14 +315,9 @@ private:
 
   bool IsChoreoInput(const std::string& sname) {
     assert(PrefixedWith(sname, "::") && "expect a scoped name.");
-    for (auto& item : GetChoreoFuncIns())
+    for (auto& item : GetChoreoFuncIns(cgi))
       if (sname == item.name) return true;
     return false;
-  }
-
-  std::string GetChoreoInputAtLastPos() {
-    auto func_ins = GetChoreoFuncIns(); // 获取所有 items
-    return func_ins.back()->name;       // 获取最后一个 item 的 name
   }
 
   bool HasChoreoOutput() { return !void_return; }

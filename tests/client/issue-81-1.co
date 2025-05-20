@@ -12,7 +12,7 @@ __co__ auto foo(f32 [M] a, s16 [M, N] b, int x, int y, double d) {
   return xx;
 }
 
-// CHECK: __global__ void __choreo_device_foo(float * a, short * b, int x, int y, double d, float * rx__buf__, int xx, unsigned M, unsigned N) {
+// CHECK: __global__ void __choreo_device_foo(float * a, short * b, int x, int y, double d, float * rx__buf__, unsigned M, unsigned N) {
 // CHECK:     for (__iv_r__elem__0 = 0; __iv_r__elem__0 < (M); ++__iv_r__elem__0) {
 // CHECK:       for (__iv_r__elem__1 = 0; __iv_r__elem__1 < ((M)+(1))*((N)+(2)); ++__iv_r__elem__1) {
 // CHECK:         for (__iv_r__elem__2 = 0; __iv_r__elem__2 < ((M)+(2)-1)/(2); ++__iv_r__elem__2) {
@@ -24,4 +24,8 @@ __co__ auto foo(f32 [M] a, s16 [M, N] b, int x, int y, double d) {
 // CHECK:       tops::mdspan __mds0_a(tops::Global, (float*)a, M);
 // CHECK:       tops::mdspan __mds1_rx__buf__(tops::Global, (float*)rx__buf__, (M)/((x)*(5)));
 // CHECK: }
+
+// CHECK:   dim3 __foo_gdims0(1, 1, 1);
+// CHECK:   dim3 __foo_bdims0(x, 1, 1);
+// CHECK:   __choreo_device_foo<<<__foo_gdims0, __foo_bdims0>>>(a__device, b__device, x, y, d, rx__buf____device, M, N);
 // CHECK:   return ((100)+((((x)+(5)-1)/(5))+(y)));

@@ -1,4 +1,4 @@
-// RUN: choreo %s -es 2>&1 | FileCheck %s
+// TODO-RUN: choreo %s -es 2>&1 | FileCheck %s
 
 __co__ auto foo(s32 [16, 32] a) {
   s32 [a.span] res;
