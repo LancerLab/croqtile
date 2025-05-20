@@ -883,6 +883,11 @@ public:
   }
   bool Visit(AST::Call& n) override {
     TraceEachVisit(n);
+    if (n.is_arith_bif && (CCtx().GetArch() == TargetArch::GCU20 ||
+                           CCtx().GetArch() == TargetArch::GCU21)) {
+      Error(n.LOC(), "Arithmetic built-in function is not supported on GCU2.");
+      error_count++;
+    }
     return true;
   }
   bool Visit(AST::Rotate& n) override {

@@ -298,8 +298,12 @@ void TopsccCodeGen::EmitFixedHostHead() {
 #include "tops/tops_ext.h"
 #include "tops/tops_runtime.h"
 
-// include the choreo header;
 )";
+
+  if (arch.GetValue() == "gcu400" || arch.GetValue() == "gcu300")
+    oss << "#include \"tcle.h\"\n";
+
+  oss << "// include the choreo header;\n";
   if (native_f16) oss << "#define NATIVE_F16_SUPPORT\n";
   if (native_bf16) oss << "#define NATIVE_BF16_SUPPORT\n";
   oss << R"(#include "choreo.h"
@@ -1560,12 +1564,13 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
       }
       os << ");\n";
       return true;
+    } else if (n.is_arith_bif) {
     } else
       choreo_unreachable("the bif '" + n.function->name +
                          "' is not supported by this target.");
   }
 
-  os << indent << CallSTR(n) << ";\n";
+  if (n.is_stmt) os << indent << CallSTR(n) << ";\n";
 
   return true;
 }
@@ -2373,7 +2378,24 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
 
 const std::string TopsccCodeGen::CallSTR(AST::Call& n) const {
   std::ostringstream oss;
-  oss << n.function->name;
+  auto func_name = [&n](const std::string& name) {
+    if (!n.is_arith_bif) return name;
+    if (name == "__log")
+      return std::string("tcle::ln");
+    else if (name == "__pow")
+      return std::string("tcle::power");
+    else {
+      const std::string prefix = "__";
+      std::string func_name = name;
+      if (name.size() >= prefix.size() &&
+          name.compare(0, prefix.size(), prefix) == 0) {
+        func_name = name.substr(prefix.size());
+      }
+      return std::string("tcle::") + func_name;
+    }
+  };
+
+  oss << func_name(n.function->name);
 
   // emit template arguments
   if (n.template_args) {
@@ -2395,8 +2417,10 @@ const std::string TopsccCodeGen::CallSTR(AST::Call& n) const {
       else
         oss << "choreo::make_spanview<" << sty->Dims() << ">((" << bts << "*)"
             << ExprSTR(a, IsHost()) << ", " << LSTR(sty->GetShape()) << ")";
-    } else
-      oss << UnScopedExpr(ExprSTR(a, IsHost()));
+    } else if (n.is_arith_bif)
+      oss << ExprSTR(a, IsHost());
+    else
+      oss << UnScopedName(ExprSTR(a, IsHost()));
   }
   oss << ")";
   return oss.str();

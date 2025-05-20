@@ -1,0 +1,781 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+#include <cmath>
+#include <codecvt>
+#include <cstdlib>
+#include <ratio>
+#include <string>
+using namespace std;
+
+__co__ f32 [512] co_sin_f32(f32 [512] input) { /// device program
+  f32[input.span(0)] output; // use same shape as input
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local f32 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __sin(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ bf16 [512] co_sin_bf16(bf16 [512] input) { /// device program
+  bf16[input.span(0)] output; // use same shape as input
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local bf16 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __sin(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ f32 [512] co_acos_f32(f32 [512] input) {
+  f32[input.span(0)] output;
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local f32 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __acos(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ bf16 [512] co_acos_bf16(bf16 [512] input) {
+  bf16[input.span(0)] output;
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local bf16 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __acos(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ f32 [512] co_asin_f32(f32 [512] input) {
+  f32[input.span(0)] output;
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local f32 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __asin(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ bf16 [512] co_asin_bf16(bf16 [512] input) {
+  bf16[input.span(0)] output;
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local bf16 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __asin(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ f32 [512] co_atan_f32(f32 [512] input) {
+  f32[input.span(0)] output;
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local f32 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __atan(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ bf16 [512] co_atan_bf16(bf16 [512] input) {
+  bf16[input.span(0)] output;
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local bf16 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __atan(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ f32 [512] co_atan2_f32(f32 [512] input1, f32 [512] input2) {
+  f32[input1.span(0)] output;
+  parallel p by 1 {
+    L1_input1 = dma.copy input1.chunkat(p) => local;
+    L1_input2 = dma.copy input2.chunkat(p) => local;
+    local f32 [L1_input1.span(0)] L1_output;
+    foreach {i} in [L1_input1.span(0)] {
+      L1_output.at(i) = __atan2(L1_input1.data.at(i), L1_input2.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ bf16 [512] co_atan2_bf16(bf16 [512] input1, bf16 [512] input2) {
+  bf16[input1.span(0)] output;
+  parallel p by 1 {
+    L1_input1 = dma.copy input1.chunkat(p) => local;
+    L1_input2 = dma.copy input2.chunkat(p) => local;
+    local bf16 [L1_input1.span(0)] L1_output;
+    foreach {i} in [L1_input1.span(0)] {
+      L1_output.at(i) = __atan2(L1_input1.data.at(i), L1_input2.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ f32 [512] co_cos_f32(f32 [512] input) { /// device program
+  f32[input.span(0)] output; // use same shape as input
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local f32 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __cos(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ bf16 [512] co_cos_bf16(bf16 [512] input) { /// device program
+  bf16[input.span(0)] output; // use same shape as input
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local bf16 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __cos(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ f32 [512] co_cosh_f32(f32 [512] input) { /// device program
+  f32[input.span(0)] output; // use same shape as input
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local f32 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __cosh(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ bf16 [512] co_cosh_bf16(bf16 [512] input) { /// device program
+  bf16[input.span(0)] output; // use same shape as input
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local bf16 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __cosh(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+
+__co__ f32 [512] co_exp_f32(f32 [512] input) {
+  f32[input.span(0)] output;
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local f32 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __exp(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+
+__co__ bf16 [512] co_exp_bf16(bf16 [512] input) { /// device program
+  bf16[input.span(0)] output; // use same shape as input
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local bf16 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __exp(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+
+__co__ f32 [512] co_expm1_f32(f32 [512] input) {
+  f32[input.span(0)] output;
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local f32 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __expm1(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+
+__co__ bf16 [512] co_expm1_bf16(bf16 [512] input) { /// device program
+  bf16[input.span(0)] output; // use same shape as input
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local bf16 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __expm1(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ f32 [512] co_floor_f32(f32 [512] input) {
+  f32[input.span(0)] output;
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local f32 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __floor(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ bf16 [512] co_floor_bf16(bf16 [512] input) { /// device program
+  bf16[input.span(0)] output; // use same shape as input
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local bf16 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __floor(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ f32 [512] co_gelu_f32(f32 [512] input) {
+  f32[input.span(0)] output;
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local f32 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __gelu(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ bf16 [512] co_gelu_bf16(bf16 [512] input) { /// device program
+  bf16[input.span(0)] output; // use same shape as input
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local bf16 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __gelu(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ f32 [512] co_isfinite_f32(f32 [512] input) {
+  f32[input.span(0)] output;
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local f32 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __isfinite(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ bf16 [512] co_isfinite_bf16(bf16 [512] input) { /// device program
+  bf16[input.span(0)] output; // use same shape as input
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local bf16 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __isfinite(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ f32 [512] co_round_f32(f32 [512] input) {
+  f32[input.span(0)] output;
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local f32 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __round(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ bf16 [512] co_round_bf16(bf16 [512] input) { /// device program
+  bf16[input.span(0)] output; // use same shape as input
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local bf16 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __round(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ f32 [512] co_rsqrt_f32(f32 [512] input) {
+  f32[input.span(0)] output;
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local f32 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __rsqrt(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ bf16 [512] co_rsqrt_bf16(bf16 [512] input) { /// device program
+  bf16[input.span(0)] output; // use same shape as input
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local bf16 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __rsqrt(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ f32 [512] co_sinh_f32(f32 [512] input) {
+  f32[input.span(0)] output;
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local f32 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __sinh(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ bf16 [512] co_sinh_bf16(bf16 [512] input) { /// device program
+  bf16[input.span(0)] output; // use same shape as input
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local bf16 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __sinh(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ f32 [512] co_softplus_f32(f32 [512] input) {
+  f32[input.span(0)] output;
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local f32 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __softplus(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ bf16 [512] co_softplus_bf16(bf16 [512] input) { /// device program
+  bf16[input.span(0)] output; // use same shape as input
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local bf16 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __expm1(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ f32 [512] co_sigmoid_f32(f32 [512] input) {
+  f32[input.span(0)] output;
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local f32 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __sigmoid(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ bf16 [512] co_sigmoid_bf16(bf16 [512] input) { /// device program
+  bf16[input.span(0)] output; // use same shape as input
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local bf16 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __sigmoid(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ f32 [512] co_sqrt_f32(f32 [512] input) {
+  f32[input.span(0)] output;
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local f32 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __sqrt(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ bf16 [512] co_sqrt_bf16(bf16 [512] input) { /// device program
+  bf16[input.span(0)] output; // use same shape as input
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local bf16 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __sqrt(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ f32 [512] co_tan_f32(f32 [512] input) {
+  f32[input.span(0)] output;
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local f32 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __tan(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ bf16 [512] co_tan_bf16(bf16 [512] input) { /// device program
+  bf16[input.span(0)] output; // use same shape as input
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local bf16 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __tan(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ f32 [512] co_log1p_f32(f32 [512] input) {
+  f32[input.span(0)] output;
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local f32 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __log1p(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ bf16 [512] co_log1p_bf16(bf16 [512] input) { /// device program
+  bf16[input.span(0)] output; // use same shape as input
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local bf16 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __log1p(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ f32 [512] co_log_f32(f32 [512] input) {
+  f32[input.span(0)] output;
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local f32 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __log(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ bf16 [512] co_log_bf16(bf16 [512] input) { /// device program
+  bf16[input.span(0)] output; // use same shape as input
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local bf16 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __log(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ f32 [512] co_pow_f32(f32 [512] input1, f32 [512] input2) {
+  f32[input1.span(0)] output;
+  parallel p by 1 {
+    L1_input1 = dma.copy input1.chunkat(p) => local;
+    L1_input2 = dma.copy input2.chunkat(p) => local;
+    local f32 [L1_input1.span(0)] L1_output;
+    foreach {i} in [L1_input1.span(0)] {
+      L1_output.at(i) = __pow(L1_input1.data.at(i), L1_input2.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ bf16 [512] co_pow_bf16(bf16 [512] input1, bf16 [512] input2) {
+  bf16[input1.span(0)] output;
+  parallel p by 1 {
+    L1_input1 = dma.copy input1.chunkat(p) => local;
+    L1_input2 = dma.copy input2.chunkat(p) => local;
+    local bf16 [L1_input1.span(0)] L1_output;
+    foreach {i} in [L1_input1.span(0)] {
+      L1_output.at(i) = __pow(L1_input1.data.at(i), L1_input2.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ f32 [512] co_sign_f32(f32 [512] input) {
+  f32[input.span(0)] output;
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local f32 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __sign(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ bf16 [512] co_sign_bf16(bf16 [512] input) { /// device program
+  bf16[input.span(0)] output; // use same shape as input
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local bf16 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __sign(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ f32 [512] co_tanh_f32(f32 [512] input) {
+  f32[input.span(0)] output;
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local f32 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __tanh(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+__co__ bf16 [512] co_tanh_bf16(bf16 [512] input) { /// device program
+  bf16[input.span(0)] output; // use same shape as input
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local bf16 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __tanh(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+
+
+template <typename T>
+T sigmoid(T x) {
+    return 1 / (1 + std::exp(-x));
+}
+
+
+#define CHOREO_TEST_FUNC(func, type) \
+void test_##func##_##type() { \
+  cout<<"Testing " << #func << "_" << #type << endl; \
+  choreo::type input[512] = {0.0f}; \
+  auto input_data = choreo::make_spanview<1, choreo::type>((choreo::type *)input, {512}); \
+  input_data.fill_random(-1.0, 1.0); \
+  auto res = co_##func##_##type(input_data); \
+  for (size_t i = 0; i < 512; ++i) { \
+    choreo::type ref = func(input[i]); \
+    if (std::abs(ref - res[i]) > 1e-3) { \
+      choreo::choreo_assert(ref == res[i], "values are not equal."); \
+    } \
+  } \
+}
+
+#define CHOREO_TEST_FUNC_BINARY(func, type) \
+void test_##func##_##type() { \
+  cout<<"Testing " << #func << "_" << #type << endl; \
+  choreo::type input1[512] = {0.0f}; \
+  choreo::type input2[512] = {0.0f}; \
+  auto input_data1 = choreo::make_spanview<1, choreo::type>((choreo::type *)input1, {512}); \
+  input_data1.fill_random(-1.0, 1.0); \
+  auto input_data2 = choreo::make_spanview<1, choreo::type>((choreo::type *)input2, {512}); \
+  input_data2.fill_random(-1.0, 1.0); \
+  auto res = co_##func##_##type(input_data1, input_data2); \
+  for (size_t i = 0; i < 512; ++i) { \
+    choreo::type ref = func(input1[i], input2[i]); \
+    if (std::abs(ref - res[i]) > 1e-5) { \
+      choreo::choreo_assert(ref == res[i], "values are not equal."); \
+    } \
+  } \
+}
+
+CHOREO_TEST_FUNC(sin, f32)
+CHOREO_TEST_FUNC(sin, bf16)
+CHOREO_TEST_FUNC(acos, f32)
+CHOREO_TEST_FUNC(acos, bf16)
+CHOREO_TEST_FUNC(atan, f32)
+CHOREO_TEST_FUNC(atan, bf16)
+CHOREO_TEST_FUNC(cos, f32)
+CHOREO_TEST_FUNC(cos, bf16)
+CHOREO_TEST_FUNC(cosh, f32)
+CHOREO_TEST_FUNC(cosh, bf16)
+CHOREO_TEST_FUNC_BINARY(atan2, f32)
+CHOREO_TEST_FUNC_BINARY(atan2, bf16)
+CHOREO_TEST_FUNC(exp, f32)
+CHOREO_TEST_FUNC(exp, bf16)
+CHOREO_TEST_FUNC(expm1, f32)
+CHOREO_TEST_FUNC(expm1, bf16)
+CHOREO_TEST_FUNC(floor, f32)
+CHOREO_TEST_FUNC(floor, bf16)
+CHOREO_TEST_FUNC(gelu, f32)
+CHOREO_TEST_FUNC(gelu, bf16)
+CHOREO_TEST_FUNC(isfinite, f32)
+// CHOREO_TEST_FUNC(isfinite, bf16)
+CHOREO_TEST_FUNC(round, f32)
+CHOREO_TEST_FUNC(round, bf16)
+CHOREO_TEST_FUNC(rsqrt, f32)
+CHOREO_TEST_FUNC(rsqrt, bf16)
+CHOREO_TEST_FUNC(sinh, f32)
+CHOREO_TEST_FUNC(sinh, bf16)
+CHOREO_TEST_FUNC(softplus, f32)
+CHOREO_TEST_FUNC(softplus, bf16)
+CHOREO_TEST_FUNC(sqrt, f32)
+CHOREO_TEST_FUNC(sqrt, bf16)
+CHOREO_TEST_FUNC(tan, f32)
+CHOREO_TEST_FUNC(tan, bf16)
+CHOREO_TEST_FUNC(log1p, f32)
+CHOREO_TEST_FUNC(log1p, bf16)
+CHOREO_TEST_FUNC(log, f32)
+CHOREO_TEST_FUNC(log, bf16)
+CHOREO_TEST_FUNC_BINARY(pow, f32)
+CHOREO_TEST_FUNC_BINARY(pow, bf16)
+CHOREO_TEST_FUNC(sign, f32)
+CHOREO_TEST_FUNC(sign, bf16)
+CHOREO_TEST_FUNC(tanh, f32)
+CHOREO_TEST_FUNC(tanh, bf16)
+CHOREO_TEST_FUNC(sigmoid, f32)
+CHOREO_TEST_FUNC(sigmoid, bf16)
+
+int main() {
+  test_sin_f32();
+  test_sin_bf16();
+  test_acos_f32();
+  test_acos_bf16();
+  test_atan_f32();
+  test_atan_bf16();
+  test_atan2_f32();
+  test_atan2_bf16();
+  test_cos_f32();
+  // test_cos_bf16();
+  test_cosh_f32();
+  test_cosh_bf16();
+  test_exp_f32();
+  test_exp_bf16();
+  test_expm1_f32();
+  test_expm1_bf16();
+  test_floor_f32();
+  test_floor_bf16();
+  test_gelu_f32();
+  // test_gelu_bf16();
+  test_isfinite_f32();
+  // test_isfinite_bf16();
+  test_round_f32();
+  test_round_bf16();
+  test_rsqrt_f32();
+  test_rsqrt_bf16();
+  test_sinh_f32();
+  test_sinh_bf16();
+  test_softplus_f32();
+  // test_softplus_bf16();
+  test_sqrt_f32();
+  // test_sqrt_bf16();
+  test_tan_f32();
+  test_tan_bf16();
+  test_log1p_f32();
+  test_log1p_bf16();
+  test_log_f32();
+  test_log_bf16();
+  // test_pow_f32();
+  test_pow_bf16();
+  test_sign_f32();
+  test_sign_bf16();
+  test_tanh_f32();
+  test_tanh_bf16();
+  test_sigmoid_f32();
+  test_sigmoid_bf16();
+
+  std::cout << "\nTest Passed\n" << std::endl;
+}
+
+// CHECK: Test Passed

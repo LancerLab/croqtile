@@ -307,6 +307,7 @@ public:
       InsertNdSnSymMap(n.init_expr, n.name_str);
       // int x = a + b;
       // then ::foo::x -> (::foo::a+::foo::b).
+      if (GetSymValnoFromExpr(n.init_expr) == 0) return true;
       InsertNameSymExprMap(
           NameWithScope(n.name_str),
           GetSymExprFromSymValno(GetSymValnoFromExpr(n.init_expr)));

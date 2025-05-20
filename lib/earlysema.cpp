@@ -1574,6 +1574,22 @@ bool EarlySemantics::Visit(AST::Call& n) {
       }
     } else if (func_name == "print" || func_name == "println") {
       // TODO(wsj): check the type of arguments?
+    } else if (n.is_arith_bif) {
+      auto pty = NodeType(*n.arguments->ValueAt(0));
+      if (!isa<ScalarFloatType>(pty))
+        Error(n.LOC(), "expect the argument to be a float type but got '" +
+                           PSTR(pty) + "'.");
+
+      for (size_t i = 1; i < n.arguments->Count(); ++i) {
+        auto sty = NodeType(*n.arguments->ValueAt(i));
+        if (!sty->ApprxEqual(*pty)) {
+          Error(n.LOC(),
+                "expect the " + std::to_string(i) +
+                    "th argument to be the same type as the first one.");
+          error_count++;
+        }
+      }
+      SetNodeType(n, pty);
     } else
       choreo_unreachable("unsupported bif '" + func_name + "'.");
 
