@@ -115,7 +115,7 @@ private:
   void ModifySymbolType(const std::string& n, const ptr<Type>& ty) {
     SSTab().ModifySymbolType(n, ty);
     if (debug_visit)
-      dbgs() << "Modify type of " << STR(n) << " as " << PSTR(ty) << "\n";
+      dbgs() << "Modify type of " << n << " as " << PSTR(ty) << "\n";
   }
 
   virtual void TraceEachVisit(AST::Node& n, bool detail = false,

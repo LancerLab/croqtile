@@ -337,7 +337,7 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
                                          size_t hp_index) {
     size_t dim_index = 0;
     for (auto vi : sty->GetShape().Value()) {
-      if (auto vale = dyn_cast<ValueExpr>(&vi)) { // the dimension is symbolic
+      if (auto vale = VIStr(vi)) { // the dimension is symbolic
         assert(PrefixedWith(*vale, "::" + fname + "::") &&
                "unexpected symbolic dimension name.");
 
@@ -345,6 +345,7 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
         if (symbolic_dimensions.count(*vale) == 0)
           symbolic_dimensions[*vale] = {dim_expr, hp_index, dim_index};
       }
+      assert(!VIIsBop(vi) && "unexpected binary operation.");
       dim_index++;
     }
   };
@@ -773,11 +774,11 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
 
   auto& lconfig = cgi->GetFunctionLaunches(fname)[parallel_idx];
   hs << h_indent << "dim3 __" << fname << "_gdims" << parallel_idx << "("
-     << lconfig.grid_dim_x << ", " << lconfig.grid_dim_y << ", "
-     << lconfig.grid_dim_z << ");\n";
+     << ValueSTR(lconfig.grid_dim_x) << ", " << ValueSTR(lconfig.grid_dim_y)
+     << ", " << ValueSTR(lconfig.grid_dim_z) << ");\n";
   hs << h_indent << "dim3 __" << fname << "_bdims" << parallel_idx << "("
-     << lconfig.block_dim_x << ", " << lconfig.block_dim_y << ", "
-     << lconfig.block_dim_z << ");\n";
+     << ValueSTR(lconfig.block_dim_x) << ", " << ValueSTR(lconfig.block_dim_y)
+     << ", " << ValueSTR(lconfig.block_dim_z) << ");\n";
   hs << h_indent << device_fn << "<<<__" << fname << "_gdims" << parallel_idx
      << ", __" << fname << "_bdims" << parallel_idx << ">>>(";
 
@@ -1841,12 +1842,12 @@ void TopsccCodeGen::EmitHostRuntimeCheck() {
       size_t dim_count = 0;
       for (auto vi : sty->GetShape().Value()) {
         auto elem_name = name + ".shape()[" + std::to_string(dim_count) + "]";
-        if (auto vale = dyn_cast<int>(&vi)) {
+        if (auto vale = VIInt(vi)) {
           hs << h_indent << "choreo::runtime_check(" << elem_name
              << " == " << *vale;
           hs << ", \"shape inconsistent on the " << Ordinal(host_pindex + 1)
              << " parameter (dim: " << dim_count << ").\");\n";
-        } else if (auto vale = dyn_cast<ValueExpr>(&vi)) {
+        } else if (auto vale = VIStr(vi)) {
           ve_entries_map[*vale].push_back(
               {host_pindex + 1, dim_count, elem_name});
         }
@@ -1877,9 +1878,9 @@ void TopsccCodeGen::EmitHostRuntimeCheck() {
   hs << "\n";
 
   for (const auto& rc : FCtx(fname).GetRtChecks()) {
-    hs << h_indent << "choreo::runtime_check(" << ValueSTR(rc.lhs) << " "
-       << rc.op << " " << ValueSTR(rc.rhs) << ", \"" << rc.message << ", "
-       << rc.loc << "\");\n";
+    hs << h_indent << "choreo::runtime_check(" << ValueSTR(sbe::sym(rc.lhs))
+       << " " << rc.op << " " << ValueSTR(sbe::sym(rc.rhs)) << ", \""
+       << rc.message << ", " << rc.loc << "\");\n";
   }
 }
 
@@ -2094,7 +2095,8 @@ option_detect() {
 
   os << R"(export CFLAGS="-arch ${gcu_arch} -std=c++17 -ltops -lm -O3)";
   if (CCtx().GenDebugInfo()) os << " -g";
-  if (!target_options.GetValue().empty()) os << " " << target_options;
+  if (!target_options.GetValue().empty())
+    os << " " << target_options.GetValue();
   if (use_pic) os << " -fPIC";
   if (verbose) os << " -v"; // if it requires to be verbose
   // always enclose
@@ -2180,7 +2182,17 @@ bool TopsccCodeGen::CompileWithScript(const std::string& action) {
 
 // TODO: eliminate the need of the value replacement?
 const std::string TopsccCodeGen::ValueSTR(const ValueItem& vi) const {
-  return UnScopedExpr(STR(vi));
+  if (!IsValidValueItem(vi)) choreo_unreachable("invalid value item.");
+  if (auto iv = VIInt(vi))
+    return PSTR(vi);
+  else if (auto sv = VIStr(vi))
+    return UnScopedExpr(PSTR(vi));
+  else if (auto bo = VIBop(vi))
+    return "(" + ValueSTR(bo->GetLeft()) + " " + STR(bo->GetOpCode()) + " " +
+           ValueSTR(bo->GetRight()) + ")";
+  else
+    choreo_unreachable("unsupported value.");
+  return "";
 }
 
 std::optional<std::string>
@@ -2322,8 +2334,8 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       }
     }
     if (ConvertibleToInt(NodeType(*e))) {
-      if (IsValidValueItem(expr->opt_vals.int_expr)) {
-        return "(" + UnScopedExpr(STR(expr->opt_vals.int_expr)) + ")";
+      if (IsValidValueItem(expr->GetOptValExpr())) {
+        return "(" + UnScopedExpr(STR(expr->GetOptValExpr())) + ")";
       }
     }
     if (expr->IsReference()) {

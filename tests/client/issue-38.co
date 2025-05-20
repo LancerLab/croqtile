@@ -101,6 +101,6 @@ int main() {}
 // CHECK:   unsigned char * mds__device = nullptr;
 // CHECK:   choreo::abend_true(topsMalloc(&mds__device, 12000ULL));
 // CHECK:   dim3 __cofoo0_gdims0(1, 1, 1);
-// CHECK:   dim3 __cofoo0_bdims0((2), 1, 1);
+// CHECK:   dim3 __cofoo0_bdims0(2, 1, 1);
 // CHECK:   __choreo_device_cofoo0<<<__cofoo0_gdims0, __cofoo0_bdims0>>>(mds__device);
 // CHECK: }

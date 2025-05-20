@@ -614,7 +614,7 @@ ValueNumbering::SignBoundedOperation(const location& loc, const std::string& op,
   auto getSignature = [&](const AST::Node& n) {
     auto bound = GetSingleUpperBound(visitor->NodeType(n));
     auto sig = ValueItemAsString(bound);
-    if (isa<int>(&bound))
+    if (VIIsInt(bound))
       return "const_" + sig;
     else {
       if (!visitor->SSTab().NameInScopeOrNull(sig)) {

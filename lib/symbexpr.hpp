@@ -4,11 +4,13 @@
 #include "aux.hpp"
 #include "utils.hpp"
 #include <cmath>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -103,8 +105,15 @@ public:
   virtual ~SymbolicExpression() = default;
   virtual std::string ToString() const = 0;
   virtual bool IsNumeric() const = 0;
+  virtual size_t Hash() const = 0;
   virtual bool operator==(const SymbolicExpression&) const = 0;
   virtual bool IsLeaf() const = 0;
+  virtual void
+  Apply(const std::function<void(const SymbolicExpression*)>& func) {
+    func(this);
+  }
+
+public:
   virtual Operand Clone() const = 0;
   virtual Operand Fold() const = 0;
   virtual Operand Reorder() const = 0;
@@ -135,6 +144,7 @@ public:
 
   std::string ToString() const override { return std::to_string(value); }
   int64_t Value() const { return value; }
+  size_t Hash() const override { return std::hash<int64_t>{}(Value()); }
 
   bool IsNumeric() const override { return true; }
 
@@ -175,6 +185,7 @@ public:
   }
 
   const std::string Value() const { return symbol; }
+  size_t Hash() const override { return std::hash<std::string>{}(Value()); }
 
 public:
   bool IsLeaf() const override { return true; }
@@ -218,10 +229,13 @@ public:
     return false;
   }
 
+  size_t Hash() const override { return std::hash<std::string>{}(ToString()); }
+
 public:
   bool IsLeaf() const override { return false; }
   const Operand GetLeft() const { return left; }
   const Operand GetRight() const { return right; }
+  OpCode GetOpCode() const { return op; }
 
   Operand Clone() const override {
     return std::make_shared<BinaryOperation>(op, left->Clone(), right->Clone());
@@ -457,6 +471,19 @@ inline bool operator<(const SymbolicExpression& lhs,
   return Compare(lhs, rhs) < 0;
 }
 
+inline bool operator==(const SymbolicExpression& lhs, int rhs) {
+  return lhs == NumericValue(rhs);
+}
+inline bool operator!=(const SymbolicExpression& lhs, int rhs) {
+  return !(lhs == rhs);
+}
+inline bool operator==(const SymbolicExpression& lhs, const std::string& rhs) {
+  return lhs == SymbolicValue(rhs);
+}
+inline bool operator!=(const SymbolicExpression& lhs, const std::string& rhs) {
+  return !(lhs == rhs);
+}
+
 inline Operand SimplifyExpression(const Operand& expr) {
   return expr->Normalize();
 }
@@ -482,6 +509,73 @@ inline std::shared_ptr<SymbolicExpression>
 make_operation(OpCode op, const Operand& left, const Operand& right) {
   return std::make_shared<BinaryOperation>(op, left, right);
 }
+
+// short-cuts
+inline std::shared_ptr<SymbolicExpression> nu(int64_t value) {
+  return make_numeric(value);
+}
+
+inline std::shared_ptr<SymbolicExpression> sym(const std::string& name) {
+  return make_symbolic(name);
+}
+
+inline std::shared_ptr<SymbolicExpression> bop(OpCode op, const Operand& left,
+                                               const Operand& right) {
+  return make_operation(op, left, right);
+}
+
+inline Operand operator+(const Operand& vi1, const Operand& vi2) {
+  return bop(OpCode::ADD, vi1, vi2)->Normalize();
+}
+
+inline Operand operator-(const Operand& vi1, const Operand& vi2) {
+  return bop(OpCode::SUBTRACT, vi1, vi2)->Normalize();
+}
+
+inline Operand operator*(const Operand& vi1, const Operand& vi2) {
+  return bop(OpCode::MULTIPLY, vi1, vi2)->Normalize();
+}
+
+inline Operand operator/(const Operand& vi1, const Operand& vi2) {
+  return bop(OpCode::DIVIDE, vi1, vi2)->Normalize();
+}
+
+inline Operand operator%(const Operand& vi1, const Operand& vi2) {
+  return bop(OpCode::RES, vi1, vi2)->Normalize();
+}
+
+template <typename T>
+inline std::basic_ostream<T>& operator<<(std::basic_ostream<T>& os,
+                                         const Operand& oprd) {
+  os << oprd->ToString();
+  return os;
+}
+
+class OperandHasher {
+private:
+  std::unordered_set<size_t> used_hashes;
+  std::unordered_map<Operand, size_t> item2hash;
+  std::unordered_map<size_t, Operand> hash2item;
+
+public:
+  size_t operator()(const Operand& oprd) {
+    if (oprd == nullptr) choreo_unreachable("operand is null.");
+    if (item2hash.count(oprd)) return item2hash[oprd];
+
+    size_t content_hash = oprd->Hash();
+    size_t sbe_hash =
+        content_hash ^ (0x9e3779b9 + (content_hash << 6) + (content_hash >> 2));
+    while (used_hashes.count(sbe_hash)) {
+      if (*hash2item.at(sbe_hash) == *oprd) // existing symbolic expression
+        return sbe_hash;
+      ++sbe_hash; // avoid collision
+    }
+    used_hashes.insert(sbe_hash);
+    item2hash.emplace(oprd, sbe_hash);
+    hash2item.emplace(sbe_hash, oprd);
+    return sbe_hash;
+  }
+};
 
 } // end namespace sbe
 

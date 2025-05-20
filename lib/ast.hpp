@@ -377,6 +377,8 @@ struct Expr : public Node, public TypeIDProvider<Expr> {
   enum Form { Unary, Binary, Ternary, Reference };
 
   std::string op;
+
+private:
   OptimizedValues opt_vals;
 
 private:
@@ -416,6 +418,21 @@ public:
     value_c = c;
   }
   void ResetL() { value_l = nullptr; }
+
+  void SetOptValExpr(ValueItem vi) {
+    if (IsValidValueItem(vi))
+      opt_vals.int_expr = vi->Normalize();
+    else
+      choreo_unreachable("invalid value item.");
+  }
+  void SetOptSizeExpr(ValueItem vi) {
+    if (IsValidValueItem(vi))
+      opt_vals.size_expr = vi->Normalize();
+    else
+      choreo_unreachable("invalid value item.");
+  }
+  ValueItem GetOptValExpr() const { return opt_vals.int_expr; }
+  ValueItem SetOptSizeExpr() const { return opt_vals.size_expr; }
 
 public:
   Shape s; // to pass information between shape inference & type inference
@@ -574,7 +591,7 @@ public:
 // Represents both dimensions and s like {3, 4, 5} or {1, 2, 1}
 struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
   std::string ref_name;           // syntax suger, could be empty
-  ptr<Node> list;                 // null if the span is dynamically valued
+  ptr<Node> list = nullptr;       // null if the span is dynamically valued
   size_t rank = GetInvalidRank(); // dynamic value with known dimension count
 
   // If the mdspan is known
@@ -1186,8 +1203,10 @@ struct IfElseBlock : public Node, public TypeIDProvider<IfElseBlock> {
 
 struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
   ptr<Identifier> bpv = nullptr; // bounded parallel variables
-  ValueItem bound;
+private:
+  ValueItem bound = GetInvalidValueItem();
 
+public:
   // components
   ptr<MultiValues> cmpt_bpvs = nullptr;
   ptr<MultiValues> cmpt_bounds = nullptr;
@@ -1195,9 +1214,9 @@ struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
   ptr<MultiNodes> stmts = nullptr;
 
   // expilicit dimensions count
-  size_t dims;
+  size_t sub_count = 0;
 
-  bool async;
+  bool async = false;
 
   ParallelBy(const location& l, const ptr<MultiNodes>& config,
              const ptr<MultiNodes>& ss, bool a = false)
@@ -1211,13 +1230,13 @@ struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
         bpv = cast<Identifier>(config->values[0]);
         auto& bound_node = config->values[1];
         if (auto il = dyn_cast<IntLiteral>(bound_node))
-          bound = il->Val();
+          bound = sbe::nu(il->Val());
         else if (auto id = dyn_cast<Identifier>(bound_node))
-          bound = id->name;
+          bound = sbe::sym(id->name);
         else
           choreo_unreachable("unexpected type of bound: " +
                              PSTR(bound_node->GetType()));
-        dims = 1;
+        sub_count = 1;
       } else if (isa<MultiValues>(config->values[0])) {
         // parallel {px,py,pz} by [2,3,4] {}
         // equivalent to `parallel anon={px,py,pz} by [2,3,4] {}`
@@ -1226,7 +1245,7 @@ struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
                "unexpected parallel config.");
         cmpt_bpvs = cast<MultiValues>(config->values[0]);
         cmpt_bounds = cast<MultiValues>(config->values[1]);
-        dims = cmpt_bpvs->Count();
+        sub_count = cmpt_bpvs->Count();
       } else {
         choreo_unreachable("unexpected parallel config.");
       }
@@ -1244,9 +1263,9 @@ struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
         cmpt_bpvs = cast<MultiValues>(config->values[1]);
         cmpt_bounds = cast<MultiValues>(config->values[2]);
         assert(cmpt_bpvs->Count() == cmpt_bounds->Count());
-        bound = 1;
+        bound = sbe::nu(1);
         for (auto vi : BoundValues()) bound = bound * vi;
-        dims = cmpt_bpvs->Count();
+        sub_count = cmpt_bpvs->Count();
       } else {
         choreo_unreachable("unexpected parallel config.");
       }
@@ -1254,6 +1273,14 @@ struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
   }
 
   bool HasBPV() const { return bpv != nullptr; }
+  bool IsAsync() const { return async; }
+  size_t SubCount() const { return sub_count; }
+
+  const ptr<MultiValues> SubPVs() const { return cmpt_bpvs; }
+  const ptr<MultiValues> SubBounds() const { return cmpt_bounds; }
+
+  void SetBound(const ValueItem& vi) { bound = vi; }
+  ValueItem GetBound() const { return bound; }
 
   // Get the index symbol and its bound
   std::pair<ptr<Identifier>, ptr<Node>> GetIV(size_t idx) const {
@@ -1269,9 +1296,9 @@ struct ParallelBy : public Node, public TypeIDProvider<ParallelBy> {
     if (cmpt_bounds == nullptr) return bound_values;
     for (auto bound : cmpt_bounds->AllValues()) {
       if (auto il = dyn_cast<AST::IntLiteral>(bound))
-        bound_values.push_back(il->Val());
+        bound_values.push_back(sbe::nu(il->Val()));
       else if (auto id = dyn_cast<AST::Identifier>(bound))
-        bound_values.push_back(id->name);
+        bound_values.push_back(sbe::sym(id->name));
       else
         choreo_unreachable("unexpected type of paraby bound: " +
                            PSTR(bound->GetType()));

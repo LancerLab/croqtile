@@ -63,19 +63,10 @@ std::string stringify(const Storage& sto) {
 
 std::string stringify(const ValueList& vl) {
   std::ostringstream oss;
-  auto print_variant = [&oss](const ValueItem& vle) {
-    if (vle.index() == 0)
-      oss << std::get<0>(vle);
-    else
-      oss << std::get<1>(vle);
-  };
   oss << "{";
   if (!vl.empty()) {
-    print_variant(vl[0]);
-    for (unsigned i = 1; i < vl.size(); ++i) {
-      oss << ", ";
-      print_variant(vl[i]);
-    }
+    oss << PSTR(vl[0]);
+    for (unsigned i = 1; i < vl.size(); ++i) oss << ", " << PSTR(vl[i]);
   }
   oss << "}";
   return oss.str();

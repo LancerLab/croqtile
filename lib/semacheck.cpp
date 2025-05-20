@@ -295,7 +295,7 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
       for (size_t i = 0; i < dim_count; ++i) {
         size_t pad_length = pc->pad_high[i] + pc->pad_low[i] + pc->pad_mid[i];
         if (!IsValueItemEqual(f_shape.ValueAt(i) +
-                                  ValueItem(clampLongToInt(pad_length)),
+                                  sbe::nu(clampLongToInt(pad_length)),
                               t_shape.ValueAt(i))) {
           Error(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
                              ") with " + PSTR(pc) + " and 'to'(" + PSTR(tty) +
@@ -383,10 +383,10 @@ bool SemaChecker::VisitNode(AST::Call& n) {
                   "` can not be used to instantiate the kernel function.");
         error_count++;
       }
-      auto val_expr = cast<AST::Expr>(v)->opt_vals.int_expr;
+      auto val_expr = cast<AST::Expr>(v)->GetOptValExpr();
       // fail if the template argument can not be evaluated as a compile-time
       // constant
-      if (!IsValidValueItem(val_expr) || !isa<int>(&val_expr)) {
+      if (!IsValidValueItem(val_expr) || !val_expr->IsNumeric()) {
         Error(n.LOC(), "The " + Ordinal(count) +
                            " template argument of type '" + PSTR(ty) +
                            "` can not be evaluated at choreo compile time.");

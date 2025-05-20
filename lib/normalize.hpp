@@ -273,13 +273,12 @@ public:
         n.cmpt_bpvs->Append(
             AST::Make<AST::Identifier>(n.LOC(), n.bpv->name + "__elem__x"));
         n.cmpt_bounds = AST::Make<AST::MultiValues>(n.LOC(), ", ");
-        if (isa<int>(&n.bound))
-          n.cmpt_bounds->Append(
-              AST::Make<AST::IntLiteral>(n.LOC(), *cast<int>(&n.bound)));
+        if (auto b = VIInt(n.GetBound()))
+          n.cmpt_bounds->Append(AST::Make<AST::IntLiteral>(n.LOC(), *b));
         else
-          n.cmpt_bounds->Append(
-              AST::Make<AST::Identifier>(n.LOC(), ValueItemAsString(n.bound)));
-        n.cmpt_bpvs->ValueAt(0)->SetType(MakeBoundedIntegerType(n.bound));
+          n.cmpt_bounds->Append(AST::Make<AST::Identifier>(
+              n.LOC(), ValueItemAsString(n.GetBound())));
+        n.cmpt_bpvs->ValueAt(0)->SetType(MakeBoundedIntegerType(n.GetBound()));
         n.bpv->SetType(MakeBoundedIntegerType(n.bpv->name));
         VST_DEBUG(dbgs() << "Generate cmpt_bpvs in parallelby for '"
                          << PSTR(n.bpv) << "': " << STR(n.cmpt_bpvs) << "\n");
@@ -288,7 +287,7 @@ public:
       assert(n.cmpt_bpvs && "At least one bpv and cmpt_bpvs should exist!");
       // `parallel {px} by [2]`  ==> `parallel anon={px} by [2]`
       n.bpv = AST::Make<AST::Identifier>(n.LOC(), SymbolTable::GetAnonName());
-      n.bpv->SetType(MakeBoundedITupleType(Shape(n.dims), "pv"));
+      n.bpv->SetType(MakeBoundedITupleType(Shape(n.SubCount()), "pv"));
     }
     return true;
   }

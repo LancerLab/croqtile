@@ -364,10 +364,11 @@ bool CUDACodeGen::Visit(AST::ParamList& n) {
 // TODO(albert): revolsve HC in p/q => blockid
 bool CUDACodeGen::Visit(AST::ParallelBy& by) {
   __TRACE_EACH_VISIT__(by)
-  if (!isa<int>(&by.bound))
+  if (auto b = VIInt(cast<BoundedType>(NodeType(*by.bpv))->GetUpperBound()))
+    parallel_cuda *= *b;
+  else
     choreo_unreachable(
         "symbolic bound value is not supported for cuda backend yet.");
-  parallel_cuda *= *cast<int>(&by.bound);
   if (parallel_level > 1) { return true; }
   // emit
   // dim3 blockDim
@@ -383,9 +384,9 @@ bool CUDACodeGen::Visit(AST::ParallelBy& by) {
   fs << this->indent << "dim3 gridDim(";
   // TODO(albert): impl begin/end/next for support auto val : by.iv_list
 
-  for (size_t idx = 0; idx < by.dims; idx++) {
+  for (size_t idx = 0; idx < by.SubCount(); idx++) {
     fs << STR(by.cmpt_bounds->ValueAt(idx));
-    fs << (idx == by.dims - 1 ? "" : ", ");
+    fs << (idx == by.SubCount() - 1 ? "" : ", ");
   }
   fs << ");\n";
 
@@ -446,7 +447,7 @@ bool CUDACodeGen::Visit(AST::ParallelBy& by) {
   builtins[1] = "blockIdx.y";
   builtins[2] = "blockIdx.z";
 
-  for (size_t idx = 0; idx < by.dims; idx++)
+  for (size_t idx = 0; idx < by.SubCount(); idx++)
     fs << this->indent << "auto " << STR(by.cmpt_bpvs->ValueAt(idx))
        << " = IndexDyn(" << builtins[idx] << ");\n";
 
@@ -746,7 +747,8 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
     auto iv_row_name = "iv_row_" + dst_buffer_name;
     fs << "for (auto " << iv_row_name << " = I(0); ";
     fs << iv_row_name << " < "
-       << "make_index<" << STR(sty->GetShape().ValueAt(0) / (256 / 32)) << ">()"
+       << "make_index<"
+       << sty->GetShape().ValueAt(0) / (sbe::nu(256) / sbe::nu(32)) << ">()"
        << "; ";
     fs << "++" << iv_row_name << ") {\n";
 
@@ -755,7 +757,7 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
     auto iv_col_name = "iv_col_" + dst_buffer_name;
     fs << "for (auto " << iv_col_name << " = I(0); ";
     fs << iv_col_name << " < "
-       << "make_index<" << STR(sty->GetShape().ValueAt(1) / 32) << ">()"
+       << "make_index<" << sty->GetShape().ValueAt(1) / sbe::nu(32) << ">()"
        << "; ";
     fs << "++" << iv_col_name << ") {\n";
 
@@ -787,7 +789,8 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
     auto iv_row_name = "iv_row_" + dst_buffer_name;
     fs << "for (auto " << iv_row_name << " = I(0); ";
     fs << iv_row_name << " < "
-       << "make_index<" << STR(sty->GetShape().ValueAt(0) / (256 / 32)) << ">()"
+       << "make_index<"
+       << sty->GetShape().ValueAt(0) / (sbe::nu(256) / sbe::nu(32)) << ">()"
        << "; ";
     fs << "++" << iv_row_name << ") {\n";
 
@@ -796,7 +799,7 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
     auto iv_col_name = "iv_col_" + dst_buffer_name;
     fs << "for (auto " << iv_col_name << " = I(0); ";
     fs << iv_col_name << " < "
-       << "make_index<" << STR(sty->GetShape().ValueAt(1) / 32) << ">()"
+       << "make_index<" << sty->GetShape().ValueAt(1) / sbe::nu(32) << ">()"
        << "; ";
     fs << "++" << iv_col_name << ") {\n";
 
@@ -857,8 +860,7 @@ bool CUDACodeGen::Visit(AST::Call& c) {
     for (size_t i = 0; i < c.template_args->Count(); ++i) {
       if (need_delimiter) fs << ", ";
       need_delimiter = true;
-      fs << STR(
-          cast<AST::Expr>(c.template_args->ValueAt(i))->opt_vals.int_expr);
+      fs << STR(cast<AST::Expr>(c.template_args->ValueAt(i))->GetOptValExpr());
     }
     fs << ">";
   }
@@ -1028,7 +1030,7 @@ bool CUDACodeGen::Visit(AST::FunctionDecl& d) {
                                      const std::string& name, size_t p_index) {
     size_t count = 0;
     for (auto vi : sty->GetShape().Value()) {
-      if (auto vale = dyn_cast<ValueExpr>(&vi)) {
+      if (auto vale = VIStr(vi)) {
         auto elem_name = name + ".shape()[" + std::to_string(count) + "]";
         rts_nmap.emplace(*vale, elem_name);
         rts_pidx.emplace(*vale, p_index);
@@ -1425,11 +1427,11 @@ void CUDACodeGen::EmitRuntimeCheck(std::ostream& os, const Type& ty) {
       size_t count = 0;
       for (auto vi : sty->GetShape().Value()) {
         auto elem_name = name + ".shape()[" + std::to_string(count) + "]";
-        if (auto vale = dyn_cast<int>(&vi)) {
+        if (auto vale = VIInt(vi)) {
           os << "  choreo::runtime_check(" << elem_name << " == " << *vale;
           os << ", \"shape inconsistent on the " << Ordinal(i + 1)
              << " parameter (dim: " << count << ").\");\n";
-        } else if (auto vale = dyn_cast<ValueExpr>(&vi)) {
+        } else if (auto vale = VIStr(vi)) {
           ve_entries_map[*vale].push_back({i + 1, count, elem_name});
         }
         count++;

@@ -993,22 +993,22 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
     error_count++;
   }
 
-  if (n.dims > 3) {
+  if (n.SubCount() > 3) {
     Error(n.LOC(),
           "The number of parallel dimensions is limited to 3 (x, y, z).");
     error_count++;
   }
 
   if (n.HasBPV()) {
-    if (!n.cmpt_bpvs)
+    if (!n.SubPVs())
       SetNodeType(*n.bpv, MakeBoundedIntegerType(n.bpv->name));
     else
-      SetNodeType(*n.bpv, MakeBoundedITupleType(Shape(n.dims), "pv"));
+      SetNodeType(*n.bpv, MakeBoundedITupleType(Shape(n.SubCount()), "pv"));
     ReportErrorWhenViolateODR(n.LOC(), n.bpv->name, __FILE__, __LINE__,
                               n.bpv->GetType());
   }
-  if (n.cmpt_bpvs) {
-    for (auto& sym : n.cmpt_bpvs->AllValues()) {
+  if (n.SubPVs()) {
+    for (auto& sym : n.SubPVs()->AllValues()) {
       auto sname = cast<AST::Identifier>(sym)->name;
       auto mty = MakeBoundedIntegerType(sname);
       ReportErrorWhenViolateODR(n.LOC(), sname, __FILE__, __LINE__, mty);
@@ -1017,15 +1017,16 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
     SetNodeType(*n.cmpt_bounds, MakeBoundedITupleType(n.cmpt_bounds->Count()));
   }
 
-  if (auto i = dyn_cast<int>(&n.bound);
+  if (auto i = VIInt(n.GetBound());
       !n.cmpt_bounds && n.HasBPV() && i && *i <= 0) {
     Error(n.bpv->LOC(),
-          "bound " + ValueItemAsString(n.bound) +
+          "bound " + STR(n.GetBound()) +
               " in parallelby is invalid: should be greater than 0.");
     error_count++;
   }
+
   for (auto& bv : n.BoundValues()) {
-    if (auto i = dyn_cast<int>(&bv); i && *i <= 0) {
+    if (auto i = VIInt(bv); i && *i <= 0) {
       Error(n.LOC(),
             "bound item " + ValueItemAsString(bv) +
                 " in parallelby is invalid: should be greater than 0.");

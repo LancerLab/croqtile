@@ -264,7 +264,7 @@ public:
             if (ConvertibleToInt(NodeType(n))) {
               assert(n.s.DimCount() == 1);
               if (!n.s.IsDynamic()) {
-                n.opt_vals.int_expr = n.s.ValueAt(0);
+                n.SetOptValExpr(n.s.ValueAt(0));
                 VST_DEBUG(dbgs() << "[ExprVal] " << STR(n) << ": "
                                  << STR(n.s.ValueAt(0)) << "\n");
               }
@@ -310,7 +310,7 @@ public:
     if (ConvertibleToInt(NodeType(n))) {
       assert(n.s.DimCount() == 1);
       if (!n.s.IsDynamic()) {
-        n.opt_vals.int_expr = n.s.ValueAt(0);
+        n.SetOptValExpr(n.s.ValueAt(0));
         VST_DEBUG(dbgs() << "[ExprVal] " << STR(n) << ": "
                          << STR(n.s.ValueAt(0)) << "\n");
       }
@@ -757,7 +757,7 @@ public:
     idx2dim[0] = "x";
     idx2dim[1] = "y";
     idx2dim[2] = "z";
-    for (size_t i = 0; i < n.dims; ++i) {
+    for (size_t i = 0; i < n.SubCount(); ++i) {
       const auto& [sym, b] = n.GetIV(i);
       std::string bound;
       if (auto il = dyn_cast<AST::IntLiteral>(b))
@@ -1209,7 +1209,7 @@ public:
         VST_DEBUG(dbgs() << "[ExprShape] Shape for " << PSTR(s) << ": "
                          << STR(expr->s) << "\n");
         assert(expr->s.DimCount() == 1);
-        expr->opt_vals.int_expr = expr->s.ValueAt(0);
+        expr->SetOptValExpr(expr->s.ValueAt(0));
         VST_DEBUG(dbgs() << "[ExprVal] Value for " << PSTR(expr) << ": "
                          << STR(expr->s.ValueAt(0)) << "\n");
       }
@@ -1446,9 +1446,9 @@ private:
       auto [ptr, ec] =
           std::from_chars(expr.data(), expr.data() + expr.size(), int_val);
       if (ec == std::errc() && ptr == expr.data() + expr.size()) {
-        result.emplace_back(int_val);
+        result.emplace_back(sbe::nu(int_val));
       } else
-        result.emplace_back(expr);
+        result.emplace_back(sbe::sym(expr));
     }
 
     return {result.size(), result};

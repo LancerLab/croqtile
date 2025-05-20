@@ -74,7 +74,7 @@ private:
       auto ToSymbolValues = [&](const ValueList& dims) -> ValueList {
         ValueList res;
         for (auto dim : dims) {
-          if (isa<int>(&dim)) {
+          if (VIIsInt(dim)) {
             res.push_back(dim);
             continue;
           }
@@ -82,13 +82,12 @@ private:
           if (FCtx(fname).HasSymbolValues(sname)) {
             auto svs = FCtx(fname).GetSymbolValues(sname);
             if (IsValidValueItem(svs.int_expr))
-              res.push_back("(" + UnScopedExpr(STR(svs.int_expr)) + ")");
+              res.push_back(svs.int_expr);
             else
               choreo_unreachable("Expect the symbol " + sname +
                                  " has a valid symbol value!");
-          } else {
+          } else
             res.push_back(dim);
-          }
         }
         return res;
       };
@@ -227,7 +226,7 @@ public:
       if (item.name == InScopeName(ret_name)) {
         auto rty_str = RemovePrefixOrNull("host-type:", n.GetNote());
         if (rty_str.has_value())
-          item.SetAsReturn(STR(rty_str.value()));
+          item.SetAsReturn(rty_str.value());
         else
           item.SetAsReturn("$");
       }

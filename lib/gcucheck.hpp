@@ -165,11 +165,13 @@ private:
           CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
         for (size_t idx = 1; idx < t_rank; ++idx)
           CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
-        auto bpe = ValueItem((int)(SizeOf(f_sty->f_type)));
-        auto value = (f_shape.ValueAt(0) * bpe + 127) / 128 * 128;
+        auto bpe = sbe::nu((int)(SizeOf(f_sty->f_type)));
+        auto value = (f_shape.ValueAt(0) * bpe + sbe::nu(127)) / sbe::nu(128) *
+                     sbe::nu(128);
         CheckValue(value, "<", 1 << 24, n.from->LOC(),
                    "CeilTo128Byte(src_dim0_size * bpe) < 2^24.");
-        value = (t_shape.ValueAt(0) * bpe + 127) / 128 * 128;
+        value = (t_shape.ValueAt(0) * bpe + sbe::nu(127)) / sbe::nu(128) *
+                sbe::nu(128);
         CheckValue(value, "<", 1 << 24, n.to->LOC(),
                    "CeilTo128Byte(dst_dim0_size * bpe) < 2^24.");
         for (size_t idx = 1; idx < t_rank; ++idx)
@@ -264,7 +266,7 @@ private:
           auto first = f_ca->positions->ValueAt(0);
           auto t = dyn_cast<BoundedITupleType>(first->GetType());
           assert(t != nullptr);
-          if (isa<int>(&t->ubounds.ValueAt(0))) {
+          if (VIIsInt(t->ubounds.ValueAt(0))) {
             if (!IsValueItemEqual(1, t->ubounds.ValueAt(0))) {
               Error(n.LOC(), "On " + cur_arch +
                                  ", dma.copy(slice) does not "
@@ -293,7 +295,7 @@ private:
           auto first = t_ca->positions->ValueAt(0);
           auto t = dyn_cast<BoundedITupleType>(first->GetType());
           assert(t != nullptr);
-          if (isa<int>(&t->ubounds.ValueAt(0))) {
+          if (VIIsInt(t->ubounds.ValueAt(0))) {
             if (!IsValueItemEqual(1, t->ubounds.ValueAt(0))) {
               Error(n.LOC(), "On " + cur_arch +
                                  ", dma.copy(deslice) does not "
@@ -316,11 +318,13 @@ private:
           CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
         for (size_t idx = 1; idx < t_rank; ++idx)
           CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
-        auto bpe = ValueItem((int)(SizeOf(f_sty->f_type)));
-        auto value = (f_shape.ValueAt(0) * bpe + 127) / 128 * 128;
+        auto bpe = sbe::nu(SizeOf(f_sty->f_type));
+        auto value = (f_shape.ValueAt(0) * bpe + sbe::nu(127)) / sbe::nu(128) *
+                     sbe::nu(128);
         CheckValue(value, "<", 1 << 24, n.from->LOC(),
                    "CeilTo128Byte(src_dim0_size * bpe) < 2^24.");
-        value = (t_shape.ValueAt(0) * bpe + 127) / 128 * 128;
+        value = (t_shape.ValueAt(0) * bpe + sbe::nu(127)) / sbe::nu(128) *
+                sbe::nu(128);
         CheckValue(value, "<", 1 << 24, n.to->LOC(),
                    "CeilTo128Byte(dst_dim0_size * bpe) < 2^24.");
         for (size_t idx = 1; idx < t_rank; ++idx)
@@ -337,11 +341,13 @@ private:
           CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
         for (size_t idx = 1; idx < t_rank; ++idx)
           CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
-        auto bpe = ValueItem((int)(SizeOf(f_sty->f_type)));
-        auto value = (f_shape.ValueAt(0) * bpe + 127) / 128 * 128;
+        auto bpe = sbe::nu((int)(SizeOf(f_sty->f_type)));
+        auto value = (f_shape.ValueAt(0) * bpe + sbe::nu(127)) / sbe::nu(128) *
+                     sbe::nu(128);
         CheckValue(value, "<", 1 << 24, n.from->LOC(),
-                   "CeilTo128Byte(src_dim0_size * bpe) < 2^24.");
-        value = (t_shape.ValueAt(0) * bpe + 127) / 128 * 128;
+                   "CeilTosbe::nu(128)Byte(src_dim0_size * bpe) < 2^24.");
+        value = (t_shape.ValueAt(0) * bpe + sbe::nu(127)) / sbe::nu(128) *
+                sbe::nu(128);
         CheckValue(value, "<", 1 << 24, n.to->LOC(),
                    "CeilTo128Byte(dst_dim0_size * bpe) < 2^24.");
         for (size_t idx = 1; idx < t_rank; ++idx)
@@ -488,7 +494,7 @@ private:
           auto first = f_ca->positions->ValueAt(0);
           auto t = dyn_cast<BoundedITupleType>(first->GetType());
           assert(t != nullptr);
-          if (isa<int>(&t->ubounds.ValueAt(0))) {
+          if (VIIsInt(t->ubounds.ValueAt(0))) {
             if (!IsValueItemEqual(1, t->ubounds.ValueAt(0))) {
               Error(n.LOC(), "On " + cur_arch +
                                  ", dma.copy(slice) does not "
@@ -537,7 +543,7 @@ private:
           auto first = f_ca->positions->ValueAt(0);
           auto t = dyn_cast<BoundedITupleType>(first->GetType());
           assert(t != nullptr);
-          if (isa<int>(&t->ubounds.ValueAt(0))) {
+          if (VIIsInt(t->ubounds.ValueAt(0))) {
             if (!IsValueItemEqual(1, t->ubounds.ValueAt(0))) {
               Error(n.LOC(), "On " + cur_arch +
                                  ", dma.transp(slice then "
@@ -584,7 +590,7 @@ private:
           auto first = t_ca->positions->ValueAt(0);
           auto t = dyn_cast<BoundedITupleType>(first->GetType());
           assert(t != nullptr);
-          if (isa<int>(&t->ubounds.ValueAt(0))) {
+          if (VIIsInt(t->ubounds.ValueAt(0))) {
             if (!IsValueItemEqual(1, t->ubounds.ValueAt(0))) {
               Error(n.LOC(), "On " + cur_arch +
                                  ", dma.transp(transpose then "
@@ -630,7 +636,7 @@ private:
                      << std::to_string(limit) + "ULL"
                      << "\n\twith message: " << message << "\n");
     message = "On " + cur_arch + ", must satisfy: " + message;
-    if (auto vi_int = dyn_cast<int>(&vi); vi_int && op_map.count(op)) {
+    if (auto vi_int = VIInt(vi); vi_int && op_map.count(op)) {
       if (!op_map[op](*vi_int, limit)) {
         Error(loc, message);
         error_count++;

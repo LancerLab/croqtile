@@ -22,9 +22,9 @@ __co__ auto matmul(s32 [M, K] lhs, s32 [K, N] rhs) {
   return output;
 }
 
-// CHECK:     for_(m_tile, ((dim_(args[0], 0))/(8))-0, 1, [&](auto iv_m_tile) {
-// CHECK:       for_(n_tile, ((dim_(args[1], 1))/(128))-0, 1, [&](auto iv_n_tile) {
-// CHECK:         for_(k_tile, ((dim_(args[0], 1))/(1024))-0, 1, [&](auto iv_k_tile) {
+// CHECK:     for_(m_tile, ((dim_(args[0], 0))/(8) - 0), 1, [&](auto iv_m_tile) {
+// CHECK:       for_(n_tile, ((dim_(args[1], 1))/(128) - 0), 1, [&](auto iv_n_tile) {
+// CHECK:         for_(k_tile, ((dim_(args[0], 1))/(1024) - 0), 1, [&](auto iv_k_tile) {
 // CHECK:           async_load_(lhs_load, lhs, lhs_load__buf__, {Value(8)*iv_m_tile,Value(1024)*iv_k_tile});
 // CHECK:           wait_dma_(lhs_load);
 // CHECK:           async_load_(rhs_load, rhs, rhs_load__buf__, {Value(1024)*iv_k_tile,Value(128)*iv_n_tile});

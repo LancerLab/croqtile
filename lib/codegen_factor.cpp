@@ -484,13 +484,13 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
       auto pb_idx_str = pb_idx == 0 ? "" : "_" + std::to_string(pb_idx);
       fs << this->indent << "Dim3 grid_dim" << pb_idx_str << "("
          << lc.grid_dim_x;
-      if (!IsValueItemEqual(lc.grid_dim_y, 1)) fs << ", " << lc.grid_dim_y;
-      if (!IsValueItemEqual(lc.grid_dim_z, 1)) fs << ", " << lc.grid_dim_z;
+      if (*lc.grid_dim_y != 1) fs << ", " << lc.grid_dim_y;
+      if (*lc.grid_dim_z != 1) fs << ", " << lc.grid_dim_z;
       fs << ");\n";
       fs << this->indent << "Dim3 block_dim" << pb_idx_str << "("
          << lc.block_dim_x;
-      if (!IsValueItemEqual(lc.block_dim_y, 1)) fs << ", " << lc.block_dim_y;
-      if (!IsValueItemEqual(lc.block_dim_z, 1)) fs << ", " << lc.block_dim_z;
+      if (*lc.block_dim_y != 1) fs << ", " << lc.block_dim_y;
+      if (*lc.block_dim_z != 1) fs << ", " << lc.block_dim_z;
       fs << ");\n";
 
       // [Factor host] LaunchKernel statement:
@@ -1058,7 +1058,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
                                      size_t hp_index) {
     size_t dim_index = 0;
     for (auto vi : sty->GetShape().Value()) {
-      if (auto vale = dyn_cast<ValueExpr>(&vi)) { // the dimension is symbolic
+      if (auto vale = VIStr(vi)) { // the dimension is symbolic
         assert(PrefixedWith(*vale, "::" + fname + "::") &&
                "unexpected symbol name.");
 
@@ -1067,7 +1067,8 @@ bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
           dims_info[*vale] = {dim_name, hp_index, dim_index};
 
         idnm_rts.emplace(FineName(UnScopedName(*vale)), *vale);
-      }
+      } else
+        assert(VIIsInt(vi));
       dim_index++;
     }
   };
@@ -1531,11 +1532,11 @@ void FactorCodeGen::EmitHostRuntimeCheck(std::ostream& os) {
       size_t dim_count = 0;
       for (auto vi : sty->GetShape().Value()) {
         auto elem_name = name + ".shape()[" + std::to_string(dim_count) + "]";
-        if (auto vale = dyn_cast<int>(&vi)) {
+        if (auto vale = VIInt(vi)) {
           os << "  choreo::runtime_check(" << elem_name << " == " << *vale;
           os << ", \"shape inconsistent on the " << Ordinal(host_pindex + 1)
              << " parameter (dim: " << dim_count << ").\");\n";
-        } else if (auto vale = dyn_cast<ValueExpr>(&vi)) {
+        } else if (auto vale = VIStr(vi)) {
           ve_entries_map[*vale].push_back(
               {host_pindex + 1, dim_count, elem_name});
         }
@@ -1609,7 +1610,7 @@ void FactorCodeGen::EmitHostFuncDecl(std::ostringstream& oss,
 
 const std::string FactorCodeGen::ValueSTR(const ValueItem& vi,
                                           bool factor_value = true) const {
-  if (auto i = dyn_cast<int>(&vi)) {
+  if (auto i = VIInt(vi)) {
     return "Value(" + std::to_string(*i) + ")";
   } else if (factor_value) {
     // not int => this is a dynamic var or var bounded by dynamic var.
@@ -1677,8 +1678,8 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
         return res.value();
     }
     if (ConvertibleToInt(NodeType(*e))) {
-      if (IsValidValueItem(expr->opt_vals.int_expr)) {
-        auto res = WrapWithValue(STR(expr->opt_vals.int_expr));
+      if (IsValidValueItem(expr->GetOptValExpr())) {
+        auto res = WrapWithValue(STR(expr->GetOptValExpr()));
         if (auto dres = ReplaceDynDimRef(res); dres.has_value())
           return dres.value();
         else

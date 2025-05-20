@@ -301,9 +301,10 @@ public:
   ~Visualizer() {}
 
   bool Visit(AST::ParallelBy& pb) override {
-    if (!isa<int>(&pb.bound))
+    if (auto b = VIInt(pb.GetBound()))
+      parallel_factor *= *b;
+    else
       choreo_unreachable("symbolic bound is not supported in visulize yet.");
-    parallel_factor *= *cast<int>(&pb.bound);
     return true;
   }
   bool Visit(AST::WhereBind&) override { return true; }
@@ -337,9 +338,10 @@ public:
   bool BeforeVisitImpl(AST::Node&) override { return true; }
   bool AfterVisitImpl(AST::Node& n) override {
     if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
-      if (!isa<int>(&pb->bound))
+      if (auto b = VIInt(pb->GetBound()))
+        parallel_factor /= *b;
+      else
         choreo_unreachable("symbolic bound is not supported in visulize yet.");
-      parallel_factor /= *cast<int>(&pb->bound);
       return true;
     }
     if (!isa<AST::Program>(&n)) return true;
@@ -398,11 +400,10 @@ private:
         bool parallel = (!bpvs->GetNote().empty());
         auto vlist = bpvs->GetUpperBounds().Value();
         for (size_t i = 0; i < vlist.size(); ++i) {
-          if (auto pint = dyn_cast<int>(&vlist[i])) {
+          if (auto pint = VIInt(vlist[i])) {
             cmpt_bounds.push_back(*pint);
           } else {
-            Warning(ca.LOC(), "unable to handle '" +
-                                  *cast<ValueExpr>(&vlist[i]) +
+            Warning(ca.LOC(), "unable to handle '" + PSTR(vlist[i]) +
                                   "' (with runtime value).");
             return nullptr;
           }

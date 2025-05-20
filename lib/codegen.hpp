@@ -45,35 +45,35 @@ struct SymbolDetail {
 };
 
 struct LaunchConfig {
-  ValueItem grid_dim_z = 1;
-  ValueItem grid_dim_y = 1;
-  ValueItem grid_dim_x = 1;
-  ValueItem block_dim_z = 1;
-  ValueItem block_dim_y = 1;
-  ValueItem block_dim_x = 1;
-  ValueItem warp_dim_x = 1;
-  ValueItem warp_dim_y = 1;
-  ValueItem warp_dim_z = 1;
+  ValueItem grid_dim_z = sbe::nu(1);
+  ValueItem grid_dim_y = sbe::nu(1);
+  ValueItem grid_dim_x = sbe::nu(1);
+  ValueItem block_dim_z = sbe::nu(1);
+  ValueItem block_dim_y = sbe::nu(1);
+  ValueItem block_dim_x = sbe::nu(1);
+  ValueItem warp_dim_x = sbe::nu(1);
+  ValueItem warp_dim_y = sbe::nu(1);
+  ValueItem warp_dim_z = sbe::nu(1);
 
   // reset the warp dimensions to 1
   void ResetWDims() {
-    warp_dim_x = 1;
-    warp_dim_y = 1;
-    warp_dim_z = 1;
+    warp_dim_x = sbe::nu(1);
+    warp_dim_y = sbe::nu(1);
+    warp_dim_z = sbe::nu(1);
   }
 
   // reset the block dimensions to 1
   void ResetBDims() {
-    block_dim_x = 1;
-    block_dim_y = 1;
-    block_dim_z = 1;
+    block_dim_x = sbe::nu(1);
+    block_dim_y = sbe::nu(1);
+    block_dim_z = sbe::nu(1);
   }
 
   // reset the grid dimensions to 1
   void ResetGDims() {
-    grid_dim_x = 1;
-    grid_dim_y = 1;
-    grid_dim_z = 1;
+    grid_dim_x = sbe::nu(1);
+    grid_dim_y = sbe::nu(1);
+    grid_dim_z = sbe::nu(1);
   }
 
   void SetWarpDims(const ValueList& dims) {
@@ -568,6 +568,22 @@ inline const std::string UnScopedExpr(const std::string& input) {
 
 inline const std::string UnScopedSizeExpr(const Type& ty) {
   return UnScopedExpr(SizeExprOf(ty, true));
+}
+
+inline static std::string UnScopedValueItemString(const ValueItem& input) {
+  if (auto bo = dyn_cast<sbe::BinaryOperation>(input)) {
+    return "(" + UnScopedValueItemString(bo->GetLeft()) + " " +
+           STR(bo->GetOpCode()) + " " +
+           UnScopedValueItemString(bo->GetRight()) + ")";
+  } else if (auto name = VIStr(input)) {
+    size_t last_colon = name->find_last_of(":");
+    return name->substr(last_colon + 1);
+  } else if (auto iv = VIInt(input))
+    return std::to_string(*iv);
+}
+
+inline const std::string UnScopedValueItem(const ValueItem& input) {
+  return UnScopedValueItemString(input);
 }
 
 inline int GetMaxParallelLevelFromNote(AST::ParallelBy& n) {

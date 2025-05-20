@@ -419,7 +419,7 @@ private:
             MakeBoundedITupleType(Shape(1, top_iv_ubs / host_iv_ubs));
 
         auto new_node = AST::MakeIdExpr(expr_ptr->GetR()->loc, "_");
-        new_node->opt_vals.int_expr = "0";
+        new_node->SetOptValExpr(sbe::nu(0));
         auto unit_bound_ty = MakeBoundedITupleType(Shape(1, 1));
 
         new_node->SetType(unit_bound_ty);

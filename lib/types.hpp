@@ -294,6 +294,16 @@ struct Shape {
     std::fill(vl.begin(), vl.end(), v);
     val_no = values.Insert(vl);
   }
+  Shape(size_t n, int v) : dim_count(n) {
+    ValueList vl(n);
+    std::fill(vl.begin(), vl.end(), sbe::nu(v));
+    val_no = values.Insert(vl);
+  }
+  Shape(size_t n, const std::string& v) : dim_count(n) {
+    ValueList vl(n);
+    std::fill(vl.begin(), vl.end(), sbe::sym(v));
+    val_no = values.Insert(vl);
+  }
   Shape(const ValueList& v) { val_no = values.Insert(v); }
   // could be inconsistently sized, but only be verified with sema checker
   Shape(size_t n, const ValueList& v) : dim_count(n) {
@@ -360,15 +370,14 @@ struct Shape {
   }
 
   int NthInteger(size_t index) const {
-    const ValueItem& vi = Value().at(index);
-    return *cast<int>(const_cast<ValueItem*>(&vi));
+    return cast<sbe::NumericValue>(Value().at(index))->Value();
   }
 
   std::optional<IntegerList> GetIntList() const {
     IntegerList int_list;
     for (auto v : Value()) {
-      if (auto pint = dyn_cast<int>(&v))
-        int_list.push_back(*pint);
+      if (auto pint = dyn_cast<sbe::NumericValue>(v))
+        int_list.push_back(pint->Value());
       else
         return std::nullopt;
     }
@@ -377,7 +386,7 @@ struct Shape {
 
   bool IsDynamic() const {
     for (auto v : Value())
-      if (!isa<int>(&v))
+      if (!isa<sbe::NumericValue>(v))
         return true; // a symbolic value represents that the value is decided
                      // at runtime
     return false;
@@ -388,7 +397,7 @@ struct Shape {
     std::vector<std::pair<int, ValueExpr>> res;
     size_t i = 0;
     for (auto& v : Value()) {
-      if (!isa<int>(&v)) res.emplace_back(i, *cast<ValueExpr>(&v));
+      if (!isa<sbe::NumericValue>(v)) res.emplace_back(i, PSTR(v));
       ++i;
     }
     return res;
@@ -409,9 +418,9 @@ struct Shape {
   std::optional<std::vector<size_t>> GetUIntList() const {
     std::vector<size_t> int_list;
     for (auto v : Value()) {
-      if (auto pint = dyn_cast<int>(&v)) {
-        if (*pint < 0) return std::nullopt;
-        int_list.push_back(*pint);
+      if (auto pint = dyn_cast<sbe::NumericValue>(v)) {
+        if (pint->Value() < 0) return std::nullopt;
+        int_list.push_back(pint->Value());
       } else
         return std::nullopt;
     }
@@ -549,12 +558,8 @@ inline std::string STR(const Shape& s) {
 }
 
 inline std::string STR(const ValueItem& vi) {
-  std::ostringstream oss;
-  if (auto iv = dyn_cast<int>(&vi))
-    oss << *iv;
-  else
-    oss << *cast<std::string>(&vi);
-  return oss.str();
+  if (!vi) return "invalid";
+  return vi->ToString();
 }
 
 // string as list
@@ -571,14 +576,7 @@ inline std::string RSTR(const Shape& s) {
   return oss.str();
 }
 
-inline std::string RSTR(const ValueItem& vi) {
-  std::ostringstream oss;
-  if (auto iv = dyn_cast<int>(&vi))
-    oss << *iv;
-  else
-    oss << *cast<std::string>(&vi);
-  return oss.str();
-}
+inline std::string RSTR(const ValueItem& vi) { return STR(vi); }
 
 struct VoidType final : public Type, public TypeIDProvider<VoidType> {
   explicit VoidType() : Type(TypeCategory::VOID) {}
@@ -1072,6 +1070,8 @@ struct BoundedIntegerType final : public BoundedType,
   int stride = GetInvalidStride();
 
   BoundedIntegerType() : BoundedType(TypeCategory::BOUNDED_INT, "") {}
+  BoundedIntegerType(int lb, int ub, int s = 1, const std::string& note = "")
+      : BoundedIntegerType(sbe::nu(lb), sbe::nu(ub), s, note) {}
   BoundedIntegerType(const ValueItem& lexpr, const ValueItem& uexpr, int s = 1,
                      const std::string& note = "")
       : BoundedType(TypeCategory::BOUNDED_INT, note), lbound(lexpr),
@@ -1150,7 +1150,7 @@ struct BoundedITupleType final : public BoundedType,
   }
   int GetStride(size_t idx) const { return strides[idx]; }
   bool IsPlain(size_t idx) const {
-    return (lbounds.ValueAt(idx) == ValueItem(0)) && (strides[idx] == 1);
+    return (*lbounds.ValueAt(idx) == *sbe::nu(0)) && (strides[idx] == 1);
   }
   bool HasValidBound() const override {
     return lbounds.IsValid() && ubounds.IsValid() && !strides.empty() &&
@@ -1592,7 +1592,7 @@ inline bool ConvertibleToInt(const Type& ty) {
   return isa<ScalarType>(&ty) || (isa<ITupleType>(&ty) && ty.Dims() == 1);
 }
 
-inline const ValueItem& GetSingleUpperBound(const ptr<Type>& ty) {
+inline ValueItem GetSingleUpperBound(const ptr<Type>& ty) {
   if (!IsActualBoundedIntegerType(ty))
     choreo_unreachable("can not get the single upper bound for a " + PSTR(ty) +
                        " type.");
@@ -1715,8 +1715,16 @@ inline ptr<SpannedType> MakeShapedSpannedType(const Shape& s,
   return MakeSpannedType(bt, s, Storage::DEFAULT);
 }
 
+inline ptr<BoundedIntegerType> MakeBoundedIntegerType(int ub) {
+  return std::make_shared<BoundedIntegerType>(sbe::nu(0), sbe::nu(ub));
+}
+
+inline ptr<BoundedIntegerType> MakeBoundedIntegerType(const std::string& ub) {
+  return std::make_shared<BoundedIntegerType>(sbe::nu(0), sbe::sym(ub));
+}
+
 inline ptr<BoundedIntegerType> MakeBoundedIntegerType(const ValueItem& ub) {
-  return std::make_shared<BoundedIntegerType>(0, ub);
+  return std::make_shared<BoundedIntegerType>(sbe::nu(0), ub);
 }
 
 inline ptr<BoundedIntegerType> MakeUnknownBoundedIntegerType() {
@@ -1725,7 +1733,7 @@ inline ptr<BoundedIntegerType> MakeUnknownBoundedIntegerType() {
 
 inline ptr<BoundedITupleType> MakeBoundedITupleType(const MultiBounds& ub,
                                                     const std::string& n = "") {
-  MultiBounds lb(ub.DimCount(), 0);
+  MultiBounds lb(ub.DimCount(), sbe::nu(0));
   IntegerList s(ub.DimCount());
   std::fill(s.begin(), s.end(), 1);
   return std::make_shared<BoundedITupleType>(lb, ub, s, n);

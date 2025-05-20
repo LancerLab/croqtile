@@ -1,13 +1,10 @@
 #ifndef __CHOREO_SYMBOL_VALUES_H__
 #define __CHOREO_SYMBOL_VALUES_H__
 
-#include "aux.hpp"
+#include "symbexpr.hpp"
 #include <cmath>
 #include <limits>
 #include <sstream>
-#include <string>
-#include <unordered_map>
-#include <variant>
 #include <vector>
 
 namespace Choreo {
@@ -69,153 +66,72 @@ inline constexpr bool IsValidStride(int v) { return v != GetInvalidStride(); }
 
 // ------------------------------------------------------------------------- //
 using ValueExpr = std::string;
-using ValueItem = std::variant<int, ValueExpr>;
+using ValueItem = sbe::Operand;
 using ValueList = std::vector<ValueItem>;
 
-inline ValueItem GetInvalidValueItem() { return ValueItem{GetInvalidSigned()}; }
-inline bool IsValidValueItem(const ValueItem& vi) {
-  if (std::holds_alternative<ValueExpr>(vi)) return true;
-  return IsValidSigned(std::get<int>(vi));
-}
-
-// specialization for ValueItem
-template <typename T>
-T* dyn_cast(ValueItem* vi) {
-  if (std::holds_alternative<T>(*vi)) return &std::get<T>(*vi);
-  return nullptr;
-}
-template <typename T>
-const T* dyn_cast(const ValueItem* vi) {
-  if (std::holds_alternative<T>(*vi)) return &std::get<T>(*vi);
-  return nullptr;
-}
-
-template <typename T>
-bool isa(ValueItem* vi) {
-  if (std::holds_alternative<T>(*vi)) return true;
-  return false;
-}
-template <typename T>
-bool isa(const ValueItem* vi) {
-  if (std::holds_alternative<T>(*vi)) return true;
-  return false;
-}
-
-template <typename T>
-T* cast(ValueItem* vi) {
-  if (T* res = dyn_cast<T>(vi)) return res;
-  choreo_unreachable("value item does not contain the type.");
-  return nullptr;
-}
-
-template <typename T>
-const T* cast(const ValueItem* vi) {
-  if (auto* res = dyn_cast<T>(vi)) return res;
-  choreo_unreachable("value item does not contain the type.");
-  return nullptr;
-}
-
-struct ValueExprHasher {
-  std::size_t operator()(const ValueExpr& v) const noexcept {
-    return std::hash<std::string>{}(v);
-  }
-};
-
-struct ValueItemHasher {
-  std::size_t operator()(const ValueItem& var) const noexcept {
-    std::size_t content_hash = std::visit(
-        [](auto&& arg) -> std::size_t {
-          using T = std::decay_t<decltype(arg)>;
-          if constexpr (std::is_same_v<T, int>) {
-            return std::hash<int>{}(arg);
-          } else if constexpr (std::is_same_v<T, std::string>) {
-            return ValueExprHasher{}(arg);
-          } else {
-            static_assert(always_false<void>, "Unhandled type in variant");
-            return 0; // This line should theoretically never be reached.
-          }
-        },
-        var);
-
-    // Combine the content hash with the variant's index to differentiate types
-    std::size_t type_index_hash = std::hash<size_t>{}(var.index());
-    return content_hash ^ (type_index_hash + 0x9e3779b9 + (content_hash << 6) +
-                           (content_hash >> 2));
-  }
-};
+inline ValueItem GetInvalidValueItem() { return nullptr; }
+inline bool IsValidValueItem(const ValueItem& vi) { return vi != nullptr; }
 
 inline std::string ValueItemAsString(const ValueItem& vi,
                                      bool ULL_suffix = false) {
-  if (auto pint = dyn_cast<int>(&vi))
-    return std::to_string(*pint) + (ULL_suffix ? "ULL" : "");
-  return *cast<ValueExpr>(&vi);
+  if (ULL_suffix) {
+    if (isa<sbe::NumericValue>(vi))
+      return PSTR(vi) + (ULL_suffix ? "ULL" : "");
+    else if (auto bo = dyn_cast<sbe::BinaryOperation>(vi))
+      return "(" + ValueItemAsString(bo->GetLeft()) + " " +
+             STR(bo->GetOpCode()) + " " + ValueItemAsString(bo->GetRight()) +
+             ")";
+    else if (isa<sbe::SymbolicValue>(vi))
+      return PSTR(vi);
+    else
+      choreo_unreachable("unsupported value item type.");
+  } else
+    return PSTR(vi);
 }
+
+inline static std::optional<int> VIInt(const ValueItem& vi) {
+  if (auto iv = dyn_cast<sbe::NumericValue>(vi)) return iv->Value();
+  return std::nullopt;
+}
+inline static bool VIIsInt(const ValueItem& vi) {
+  return VIInt(vi).has_value();
+}
+
+inline static std::optional<std::string> VIStr(const ValueItem& vi) {
+  if (auto iv = dyn_cast<sbe::SymbolicValue>(vi)) return iv->Value();
+  return std::nullopt;
+}
+inline static bool VIIsStr(const ValueItem& vi) {
+  return VIStr(vi).has_value();
+}
+
+inline static std::shared_ptr<sbe::BinaryOperation> VIBop(const ValueItem& vi) {
+  return dyn_cast<sbe::BinaryOperation>(vi);
+}
+inline static bool VIIsBop(const ValueItem& vi) { return VIBop(vi) != nullptr; }
 
 template <typename T>
 inline T GetValueAt(ValueList vlist, int idx) {
   return *(std::get_if<T>(&vlist[idx]));
 };
 
-// If vi is not int, wrap it with "(xxx)".
-inline std::string WrapWithParentheses(const ValueItem& vi) {
-  if (!isa<int>(&vi)) return "(" + ValueItemAsString(vi) + ")";
-  return ValueItemAsString(vi);
-}
-
-// some operations
-inline ValueItem operator+(const ValueItem& vi1, const ValueItem& vi2) {
-  if (!isa<int>(&vi1) || !isa<int>(&vi2))
-    return WrapWithParentheses(vi1) + "+" + WrapWithParentheses(vi2);
-  return *cast<int>(&vi1) + *cast<int>(&vi2);
-}
-
-inline ValueItem operator-(const ValueItem& vi1, const ValueItem& vi2) {
-  if (!isa<int>(&vi1) || !isa<int>(&vi2))
-    return WrapWithParentheses(vi1) + "-" + WrapWithParentheses(vi2);
-  return *cast<int>(&vi1) - *cast<int>(&vi2);
-}
-
-inline ValueItem operator*(const ValueItem& vi1, const ValueItem& vi2) {
-  if (!isa<int>(&vi1) || !isa<int>(&vi2))
-    return WrapWithParentheses(vi1) + "*" + WrapWithParentheses(vi2);
-  return *cast<int>(&vi1) * *cast<int>(&vi2);
-}
-
-inline ValueItem operator/(const ValueItem& vi1, const ValueItem& vi2) {
-  if (!isa<int>(&vi1) || !isa<int>(&vi2))
-    return WrapWithParentheses(vi1) + "/" + WrapWithParentheses(vi2);
-  return *cast<int>(&vi1) / *cast<int>(&vi2);
-}
-
-inline ValueItem operator%(const ValueItem& vi1, const ValueItem& vi2) {
-  if (!isa<int>(&vi1) || !isa<int>(&vi2))
-    return WrapWithParentheses(vi1) + "%" + WrapWithParentheses(vi2);
-  return *cast<int>(&vi1) % *cast<int>(&vi2);
-}
-
-inline std::ostream& operator<<(std::ostream& os, const ValueItem& vi) {
-  if (vi.index() == 0)
-    os << std::get<0>(vi);
-  else
-    os << std::get<1>(vi);
-  return os;
-}
-
 struct ValueListHasher {
   std::size_t operator()(const ValueList& val) const noexcept {
     std::size_t hash = 0;
-    ValueItemHasher variantHasher;
+    sbe::OperandHasher vi_hasher;
     for (const auto& v : val)
-      hash ^= variantHasher(v) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+      hash ^= vi_hasher(v) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
 
     return hash;
   }
 };
 
 inline bool IsValueItemEqual(const ValueItem& a, const ValueItem& b) {
-  if (a.index() != b.index()) return false; // Different types
+  return *(a->Normalize()) == *(b->Normalize());
+}
 
-  return a == b;
+inline bool IsValueItemEqual(int a, const ValueItem& b) {
+  return *sbe::nu(a) == *(b->Normalize());
 }
 
 // Function to compare two ValueList
@@ -286,18 +202,12 @@ inline void PrintValueList(const ValueList& vl, std::ostream& os,
 
 inline void PrintValueListSizeExpr(const ValueList& vl, std::ostream& os,
                                    const char* lb = "[", const char* rb = "]") {
-  auto print_variant = [&os](const ValueItem& vle) {
-    if (vle.index() == 0)
-      os << std::get<0>(vle);
-    else
-      os << std::get<1>(vle);
-  };
   if (lb) os << lb;
   if (!vl.empty()) {
-    print_variant(vl[0]);
+    os << vl[0];
     for (unsigned i = 1; i < vl.size(); ++i) {
       os << " * ";
-      print_variant(vl[i]);
+      os << vl[i];
     }
   }
   if (rb) os << rb;
