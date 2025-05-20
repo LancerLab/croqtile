@@ -1017,7 +1017,8 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
     SetNodeType(*n.cmpt_bounds, MakeBoundedITupleType(n.cmpt_bounds->Count()));
   }
 
-  if (auto i = dyn_cast<int>(&n.bound); n.HasBPV() && i && *i <= 0) {
+  if (auto i = dyn_cast<int>(&n.bound);
+      !n.cmpt_bounds && n.HasBPV() && i && *i <= 0) {
     Error(n.bpv->LOC(),
           "bound " + ValueItemAsString(n.bound) +
               " in parallelby is invalid: should be greater than 0.");
