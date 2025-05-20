@@ -497,7 +497,10 @@ ValueNumbering::TryToSimplifyBinary(const location& loc, const std::string& op,
       }
     }
   } else if (op == "*") {
+#if 0
     // useful simplification: a*(b/a) = b
+    // TODO: 6 * ( N/6 ), if N = 15, get error res 15
+    // TODO: is there other simplify error?
     if (!PrefixedWith(lhs, "#") /*not multiple values*/) {
       int rvn = GetValueNumberOfSignature(lhs);
       auto bind_set = GetBindSet(rvn);
@@ -511,13 +514,15 @@ ValueNumbering::TryToSimplifyBinary(const location& loc, const std::string& op,
           auto res = GetSignatureFromValueNumber(div[0]);
 
           if (trace && verbose)
-            dbgs() << ScopeIndent() << "<Simplify> '" << lhs << " " << op << " "
+            dbgs() << ScopeIndent() << "<Simplify> '" << lhs << " " << op <<
+            " "
                    << rhs << " to '" << res << "'\n";
 
           return res;
         }
       }
     }
+#endif
   } else if (op == "-") {
     // a-a == 1
     if (GetValueNumberOfSignature(lhs) == GetValueNumberOfSignature(rhs)) {
@@ -576,6 +581,9 @@ ValueNumbering::TryToSimplifyBinary(const location& loc, const std::string& op,
       }
     }
     if (!PrefixedWith(rhs, "#")) {
+      // TODO: # is different with *
+      // a # (b/a) will alway result in a?
+      // if so, we need to emphasize this optimization to our users.
       int lvn = GetValueNumberOfSignature(lhs);
       auto bind_set = GetBindSet(lvn);
       bind_set.insert(lvn); // always add self

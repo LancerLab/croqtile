@@ -1,7 +1,7 @@
 // RUN: choreo -vn %s | FileCheck --check-prefix=CHECK --match-full-lines %s
 // RUN: choreo -vn -sfv %s | FileCheck --check-prefix=CHECK-SFV --match-full-lines %s
 
-__co__ void vn_simplify() {
+__co__ void vn_simplify(s32 [N, M] i) {
   double d0 = 1.5;
   double d1 = 3.9;
   double d2 = d0 + d1;
@@ -17,6 +17,10 @@ __co__ void vn_simplify() {
   bool a = true;
   bool b = false;
   bool c = a && b;
+
+  // The value of x should not be optimized to N.
+  int x = N / 5 * 5;
+  println(x);
 }
 
 // CHECK-NOT: <Simplify> {{.*}} + {{.*}} to {{.*}}
