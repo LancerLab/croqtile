@@ -142,7 +142,7 @@ gcu3_docker_test:
     - source /home/.devtools/tools/env.sh
     - docker start choreo_ci
     - |
-      docker exec choreo_ci bash -c "
+      docker exec -u choreo_bot choreo_ci bash -c "
       TIMESTAMP=$(date +%Y%m%d_%H%M%S) && \
       WORKDIR=/tmp/choreo_docker_test_\$TIMESTAMP && \
       mkdir -p \$WORKDIR && \
