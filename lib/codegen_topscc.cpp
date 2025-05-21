@@ -748,9 +748,22 @@ bool TopsccCodeGen::Visit(AST::Assignment& n) {
   }
 
   if (n.AssignToDataElement()) {
+    if (!IsHost() && (IsBlockShared() || IsWarpLocal())) {
+      ds << d_indent << "if (" << SingleInstancePredicate(IsBlockShared())
+         << ") {\n";
+      IncrDeviceIndent();
+    }
     if (!IsHost())
       ds << d_indent << ExprSTR(n.da, false) << " = " << ExprSTR(n.value, false)
          << ";\n";
+    if (!IsHost() && (IsBlockShared() || IsWarpLocal())) {
+      DecrDeviceIndent();
+      ds << d_indent << "} // single instance\n";
+      if (IsBlockShared())
+        ds << d_indent << "__syncthreads();\n";
+      else if (IsWarpLocal())
+        ds << d_indent << "__syncsubthreads();\n";
+    }
     return true;
   }
 
