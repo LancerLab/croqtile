@@ -835,7 +835,7 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
     std::string oname = "";
     ptr<Type> otype;
     bool has_spanned_arg = false;
-    for (auto& item : GetDeviceFuncIns(updating_cgi)) {
+    for (auto& item : GetChoreoFuncIns(updating_cgi)) {
       auto sname = item.name;
       if (isa<SpannedType>(item.type)) {
         oname = UnScopedName(sname);

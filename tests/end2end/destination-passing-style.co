@@ -6,6 +6,7 @@
 #include <chrono>
 
 __co__ void identity_kernel_dps(f32 [1024] input, f32 [1024] output) { /// device program
+  s32[555] not_output{15};
   parallel p by 1 {  // p is sip_index
     shared f32[input.span(0)/#p] l2_out;
     input_load = dma.copy.async input.chunkat(p) => shared;
