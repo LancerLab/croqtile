@@ -1,0 +1,24 @@
+// RUN:choreo -E %s | FileCheck --match-full-lines %s
+#define ABC 3
+show me value ABC
+#if defined ABC
+#define DEF 4
+#endif
+
+
+__co__ int if_defined(f32 d[]) {
+
+#if !defined DEF
+    should not show up 0
+#else
+    show me value DEF
+#endif
+}
+
+
+// CHECK: #define ABC 3
+// CHECK: show me value ABC
+// CHECK: #if defined ABC
+// CHECK: #define DEF 4
+// CHECK: #endif
+// CHECK: show me value 4
