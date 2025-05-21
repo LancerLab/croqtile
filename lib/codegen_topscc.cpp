@@ -1916,6 +1916,7 @@ DeviceParamTypeStringify(const Choreo::Type& ty) {
     return std::string(NameBaseType(sty->ElementType(), false)) + " *";
   else if (auto bitt = dyn_cast<BoundedITupleType>(&ty)) {
     assert(bitt->Dims() == 1);
+    (void)bitt;
     return "int";
   } else
     choreo_unreachable("unsupported host function type.");
@@ -2285,23 +2286,35 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
   } else if (auto ii = dyn_cast<AST::IntIndex>(e)) {
     return ExprSTR(ii->value, is_host);
   } else if (auto da = dyn_cast<AST::DataAccess>(e)) {
-    auto sty = GetSpannedType(GetSymbolType(da->data->name));
-    oss << "*((" << NameBaseType(sty->ElementType()) << "*)"
-        << ExprSTR(da->data, is_host);
-    size_t idx = 0;
-    auto shape = sty->GetShape();
-    for (auto item : da->GetIndices()) {
-      if (auto id = AST::GetIdentifier(item)) {
-        if (auto ids = ThreadIdString(id))
-          oss << " + " << ids.value();
-        else if (auto sids = SubThreadIdString(id))
-          oss << " + " << sids.value();
-        else if (within_map.count(InScopeName(id->name))) {
-          auto ivs = within_map.at(InScopeName(id->name));
-          for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr) {
-            auto shape = sty->GetShape();
+    if (auto sty = GetSpannedType(GetSymbolType(da->data->name))) {
+      oss << "*((" << NameBaseType(sty->ElementType()) << "*)"
+          << ExprSTR(da->data, is_host);
+      size_t idx = 0;
+      auto shape = sty->GetShape();
+      for (auto item : da->GetIndices()) {
+        if (auto id = AST::GetIdentifier(item)) {
+          if (auto ids = ThreadIdString(id))
+            oss << " + " << ids.value();
+          else if (auto sids = SubThreadIdString(id))
+            oss << " + " << sids.value();
+          else if (within_map.count(InScopeName(id->name))) {
+            auto ivs = within_map.at(InScopeName(id->name));
+            for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr) {
+              auto shape = sty->GetShape();
+              oss << " + ("
+                  << (is_host ? ssm.HostName(*iv_itr)
+                              : ssm.DeviceName(*iv_itr));
+              assert(shape.Rank() >= idx + 1);
+              if (shape.Rank() > idx + 1)
+                oss << " * "
+                    << shape.TrimDims(idx + 1).GetElementCountExpression();
+              oss << ")";
+              ++idx;
+            }
+          } else {
             oss << " + ("
-                << (is_host ? ssm.HostName(*iv_itr) : ssm.DeviceName(*iv_itr));
+                << (is_host ? ssm.HostName(InScopeName(id->name))
+                            : ssm.DeviceName(InScopeName(id->name)));
             assert(shape.Rank() >= idx + 1);
             if (shape.Rank() > idx + 1)
               oss << " * "
@@ -2309,20 +2322,17 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
             oss << ")";
             ++idx;
           }
-        } else {
-          oss << " + ("
-              << (is_host ? ssm.HostName(InScopeName(id->name))
-                          : ssm.DeviceName(InScopeName(id->name)));
-          assert(shape.Rank() >= idx + 1);
-          if (shape.Rank() > idx + 1)
-            oss << " * " << shape.TrimDims(idx + 1).GetElementCountExpression();
-          oss << ")";
-          ++idx;
-        }
-      } else
-        choreo_unreachable("unsupported data access.");
+        } else
+          choreo_unreachable("unsupported data access.");
+      }
+      oss << ")";
+    } else {
+      assert(!da->AccessElement());
+      assert(!within_map.count(InScopeName(da->data->name)));
+      oss << UnScopedName(((is_host)
+                               ? ssm.HostName(InScopeName(da->data->name))
+                               : ssm.DeviceName(InScopeName(da->data->name))));
     }
-    oss << ")";
   } else if (auto expr = dyn_cast<AST::Expr>(e)) {
     // utilize the optimize value whenever possible
     if (auto sym = expr->GetSymbol()) {

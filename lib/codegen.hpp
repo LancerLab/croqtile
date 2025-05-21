@@ -374,6 +374,7 @@ struct CodeGenerator : public VisitorWithSymTab {
       dbgs() << m << n.TypeNameString() << "\n";
   }
 
+#if 0
 protected:
   std::vector<std::string> ProbeEnclosedIVs(const std::string& iv,
                                             AST::ForeachBlock& n) {
@@ -421,6 +422,7 @@ protected:
     }
     return res;
   }
+#endif
 };
 
 /////////////////////////////////////////////////////////////
@@ -486,6 +488,7 @@ static inline std::string HostTypeStringify(const Choreo::Type& ty,
              std::to_string(sty->Dims()) + "> &";
   } else if (auto bitt = dyn_cast<BoundedITupleType>(&ty)) {
     assert(bitt->Dims() == 1);
+    (void)bitt;
     return "int";
   } else
     choreo_unreachable("unsupported host function type: " + STR(ty) + ".");
