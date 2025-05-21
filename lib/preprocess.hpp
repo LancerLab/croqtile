@@ -76,22 +76,65 @@ public:
   }
 
 private:
-  std::string SubstituteGlobalDefines(const std::string& line) {
-    std::string result = line;
-    for (const auto& [key, value] : globalDefines) {
-      std::regex pattern("\\b" + key + "\\b");
-      result = std::regex_replace(result, pattern, value);
+  std::string SubStituteDefines(
+      const std::string& line,
+      const std::unordered_map<std::string, std::string>& defines) {
+    std::string result;
+    std::string current_token;
+    bool in_string = false;
+    bool escape = false;
+    for (size_t i = 0; i < line.length(); ++i) {
+      char c = line[i];
+      if (c == '"' && !escape) {
+        in_string = !in_string;
+        result += c;
+        continue;
+      }
+
+      if (c == '\\') {
+        escape = true;
+        result += c;
+        continue;
+      } else
+        escape = false;
+
+      if (in_string) {
+        result += c;
+        continue;
+      }
+
+      if (std::isalnum(c) || c == '_') {
+        current_token += c;
+      } else {
+        if (!current_token.empty()) {
+          auto it = defines.find(current_token);
+          if (it != defines.end())
+            result += it->second;
+          else
+            result += current_token;
+          current_token.clear();
+        }
+        result += c;
+      }
     }
+
+    if (!current_token.empty()) {
+      auto it = defines.find(current_token);
+      if (it != defines.end())
+        result += it->second;
+      else
+        result += current_token;
+    }
+
     return result;
   }
 
+  std::string SubstituteGlobalDefines(const std::string& line) {
+    return SubStituteDefines(line, globalDefines);
+  }
+
   std::string SubstituteLocalDefines(const std::string& line) {
-    std::string result = line;
-    for (const auto& [key, value] : localDefines) {
-      std::regex pattern("\\b" + key + "\\b");
-      result = std::regex_replace(result, pattern, value);
-    }
-    return result;
+    return SubStituteDefines(line, localDefines);
   }
 
   bool isDirective(const std::string& line, const std::string& directive,
