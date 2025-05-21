@@ -857,7 +857,7 @@ public:
       case Storage::SHARED:
       case Storage::LOCAL: {
         auto p = cur_params[InScopeName(f_name)];
-        p->attr = ATT_SHADOW_TO_GLOBAL;
+        if (p->attr == ParamAttr::NONE) p->attr = ParamAttr::SHADOW_TO_GLOBAL;
         break;
       }
       default: break;

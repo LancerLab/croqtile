@@ -1,0 +1,55 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+__co_device__ extern "C" void kernel(int * a, int * b, int * c, int n) {
+  for (int i = 0; i < n; ++i)
+    c[i] = a[i] + b[i];
+}
+
+__co__ s32 [6, 17, 64] global_input(global s32 [6, 17, 64] lhs, s32 [6, 17, 64] rhs) {
+  s32[lhs.span] output;
+
+  parallel p by 6
+    foreach index in [17, 4] {
+      lf = dma.copy.async lhs.chunkat(p, index) => local;
+      rf = dma.copy.async rhs.chunkat(p, index) => local;
+      wait lf, rf;
+
+      local s32[lf.span] l1_out;
+
+      foreach i in [l1_out.span]
+        l1_out.at(i) = lf.data.at(i) + rf.data.at(i);
+
+      out_store = dma.copy.async l1_out => output.chunkat(p, index);
+      wait out_store;
+    }
+
+  return output;
+}
+
+int main() {
+  int a[6][17][64];
+  int * a_device = nullptr;
+  choreo::abend_true(topsMalloc(&a_device, 26112ULL));
+  choreo::abend_true(topsMemcpy(a_device, &a[0][0][0], 26112ULL, topsMemcpyHostToDevice));
+
+  // a_view is a spanned_view of the device (global) memory
+  auto a_view = choreo::make_spanview<3, choreo::s32>(a_device, {6, 17, 64});
+
+  auto b = choreo::make_spandata<choreo::s32>(6, 17, 64);
+  b.fill_random(-10, 10);
+
+  auto res = global_input(a_view, b.view());
+
+  choreo::abend_true(topsFree(a_device));
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k)
+        choreo::choreo_assert(a[i][j][k] + b[i][j][k] == res[i][j][k], "values are not equal.");
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK: Test Passed

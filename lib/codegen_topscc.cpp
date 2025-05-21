@@ -405,6 +405,11 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
     // map the choreo input to device memory
     for (auto& item : GetChoreoFuncIns(cgi)) {
       if (auto sty = dyn_cast<SpannedType>(item.type)) {
+        if (item.attr == ParamAttr::GLOBAL_INPUT) {
+          ssm.MapHostSymbol(item.name + "__device",
+                            UnScopedName(item.name) + ".data()");
+          continue;
+        }
         // Only the globals are declared in host. The shareds/locals are
         // declared in device
         auto sym = UnScopedName(item.name);
@@ -431,6 +436,7 @@ bool TopsccCodeGen::Visit(AST::ChoreoFunction& n) {
     for (const auto& item : GetDeviceFuncIns(cgi)) {
       if (IsChoreoOutput(item.name)) continue;
       if (!isa<SpannedType>(item.type)) continue;
+      if (item.attr == ParamAttr::GLOBAL_INPUT) continue;
       hs << h_indent << "choreo::abend_true(topsFree("
          << UnScopedName(item.name) << "__device));\n";
     }
@@ -1630,7 +1636,8 @@ bool TopsccCodeGen::Visit(AST::ParamList& n) {
   int index = 0;
   for (auto param : n.values)
     updating_cgi->AddSymbolDetail(fname, {InScopeName(param->sym->name),
-                                          param->GetType(), false, index++});
+                                          param->GetType(), false, index++,
+                                          param->GetAttr()});
   return true;
 }
 
@@ -1649,8 +1656,9 @@ bool TopsccCodeGen::Visit(AST::WithIn& n) {
     // for visibility of shapes
     if (IsHost()) {
       hs << h_indent << "int __iv_" << id->name << " = 0;\n";
-      updating_cgi->AddSymbolDetail(
-          fname, {InScopeName(id->name), id->GetType(), true, -1, "", true});
+      updating_cgi->AddSymbolDetail(fname,
+                                    {InScopeName(id->name), id->GetType(), true,
+                                     -1, ParamAttr::NONE, "", true});
     } else
       ds << d_indent << "int __iv_" << id->name << " = 0;\n";
   }

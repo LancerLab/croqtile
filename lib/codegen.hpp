@@ -17,8 +17,10 @@ struct SymbolDetail {
   std::string rty_str;
   bool is_reference = false;
   int p_index = -1; // index of parameter in choreo function decl
+  ParamAttr attr = ParamAttr::NONE;
   bool need_iv_prefix = false;
 
+public:
   // information used for codegen
   std::string host_name;   // mapped host name
   std::string device_name; // mapped device name
@@ -28,9 +30,10 @@ struct SymbolDetail {
   int h_index = -1;   // some target like factor requires host function indices
 
   SymbolDetail(const std::string& n, const ptr<Type>& t, bool ref = false,
-               int index = -1, const std::string& ret = "", bool iv = false)
+               int index = -1, ParamAttr a = ParamAttr::NONE,
+               const std::string& ret = "", bool iv = false)
       : name(n), type(t), rty_str(ret), is_reference(ref), p_index(index),
-        need_iv_prefix(iv) {
+        attr(a), need_iv_prefix(iv) {
     assert((!(IsParameter() && IsReference())) &&
            "Parameters are not references.");
   }

@@ -452,6 +452,15 @@ parameter
     | param_type {
         $$ = AST::Make<AST::Parameter>(@1, $1, AST::Make<AST::Identifier>(@1));
       }
+    | GLOBAL param_type IDENTIFIER { /* handle parameter type and name here */
+        symtab.AddSymbol($3, $2->GetType());
+        $$ = AST::Make<AST::Parameter>(@1, $2, AST::Make<AST::Identifier>(@3, $3), ParamAttr::GLOBAL_INPUT);
+      }
+    | GLOBAL param_type {
+        $$ = AST::Make<AST::Parameter>(@1, $2, AST::Make<AST::Identifier>(@2), ParamAttr::GLOBAL_INPUT);
+      }
+    | SHARED { Parser::error(@1, "the shared data can not be used as a parameter."); }
+    | LOCAL { Parser::error(@1, "the local data can not be used as a parameter."); }
     ;
 
 statements

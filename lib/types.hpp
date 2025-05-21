@@ -128,10 +128,21 @@ inline static Storage ProjectStorage(const Storage& a) {
     return a;
 }
 
-enum Attribute : uint16_t {
-  ATT_NONE = 0,
-  ATT_SHADOW_TO_GLOBAL = 1, // shadow the host memory to global
+enum class ParamAttr : uint16_t {
+  NONE = 0,
+  SHADOW_TO_GLOBAL = 1, // shadow the host memory to global
+  GLOBAL_INPUT = 2,     // it is a global buffer
 };
+
+inline static std::string STR(ParamAttr at) {
+  switch (at) {
+  case ParamAttr::NONE: return "";
+  case ParamAttr::SHADOW_TO_GLOBAL: return "shadow";
+  case ParamAttr::GLOBAL_INPUT: return "global-input";
+  default: choreo_unreachable("unknown parameter attribute.");
+  }
+  return "";
+}
 
 inline BaseType TC2BT(TypeCategory tc) {
   switch (tc) {

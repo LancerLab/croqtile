@@ -185,8 +185,9 @@ public:
   bool Visit(AST::ParamList& n) override {
     int index = 0;
     for (auto param : n.values) {
-      cgi->AddSymbolDetail(fname, {InScopeName(param->sym->name),
-                                   param->GetType(), false, index++});
+      cgi->AddSymbolDetail(fname,
+                           {InScopeName(param->sym->name), param->GetType(),
+                            false, index++, param->GetAttr()});
     }
     return true;
   }
