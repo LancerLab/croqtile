@@ -19,8 +19,8 @@ __co__ auto foo(f32 [32, 4] a, s8 [1] b, int c) {
 // CHECK:   {
 // CHECK:     int __iv_x = 0;
 // CHECK:     int __iv_y = 0;
-// CHECK:     for (__iv_x = 0; __iv_x < ((2)+(c))%(c); ++__iv_x) {
-// CHECK:       for (__iv_y = 0; __iv_y < ((2)+(c))*(32); ++__iv_y) {
+// CHECK:     for (__iv_x = 0; __iv_x < ((c + 2) % c); ++__iv_x) {
+// CHECK:       for (__iv_y = 0; __iv_y < ((c + 2) * 32); ++__iv_y) {
 // CHECK:       } // y
 // CHECK:       __iv_y = 0;
 // CHECK:     } // x
@@ -28,5 +28,5 @@ __co__ auto foo(f32 [32, 4] a, s8 [1] b, int c) {
 // CHECK:   }
 // CHECK:   kernel0();
 // CHECK:   kernel1((float*)a, (char*)b, (c), (996));
-// CHECK:   kernel2<(4), (997)>((char*)b, ((1028)*((2)+(c))));
+// CHECK:   kernel2<(4), (997)>((char*)b, (((c + 2) * 1028)));
 // CHECK: }

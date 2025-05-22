@@ -29,7 +29,7 @@ __co__ f32 [M] softmax(f32 [M, N] input,int TILE_M) {
 // CHECK: Bounded:   ::softmax::paraby_0::p, Type: {int}->[1](pv)
 // CHECK: Bounded:   ::softmax::paraby_0::p__elem__x, Type: {int}->[1](pi:x)
 // CHECK: Bounded:   ::softmax::paraby_0::within_0::index, Type: {int,int}->[(::softmax::M)/(::softmax::TILE_M), 1]
-// CHECK: Bounded:   ::softmax::paraby_0::within_0::m_tile, Type: {int}->[(::softmax::M)/(::softmax::TILE_M)]
+// CHECK: Bounded:   ::softmax::paraby_0::within_0::m_tile, Type: {int}->[(::softmax::M / ::softmax::TILE_M)]
 // CHECK: Bounded:   ::softmax::paraby_0::within_0::n_tile, Type: {int}->[1]
 // CHECK: Symbol:    ::softmax::paraby_0::within_0::foreach_0::local_output, Type: local f32 mdspan<1> [::softmax::TILE_M]
 // CHECK: Future:    ::softmax::paraby_0::within_0::foreach_0::local_input, Type: sync=>local f32 mdspan<2> [::softmax::TILE_M, ::softmax::N]

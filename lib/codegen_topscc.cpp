@@ -2360,8 +2360,8 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       auto sname = InScopeName(sym->name);
       if (FCtx(fname).HasSymbolValues(sname)) {
         auto svs = FCtx(fname).GetSymbolValues(sname);
-        if (IsValidValueItem(svs.int_expr))
-          return "(" + UnScopedExpr(STR(svs.int_expr)) + ")";
+        if (IsValidValueItem(svs.val_expr))
+          return "(" + UnScopedExpr(STR(svs.val_expr)) + ")";
       }
     }
     if (ConvertibleToInt(NodeType(*e))) {

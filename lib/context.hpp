@@ -126,8 +126,9 @@ inline bool FBIContainsBuffer(const FutureBufferInfo& buffer_info,
 }
 
 struct OptimizedValues {
-  ValueItem int_expr = GetInvalidValueItem();
+  ValueItem val_expr = GetInvalidValueItem();
   ValueItem size_expr = GetInvalidValueItem();
+  ValueItem ub_expr = GetInvalidValueItem();
 };
 
 struct RuntimeCheckEntry {

@@ -39,7 +39,7 @@
 namespace Choreo {
 
 // Supported operation types
-enum class OpCode { ADD, SUBTRACT, MULTIPLY, DIVIDE, RES, POWER };
+enum class OpCode { NONE, ADD, SUBTRACT, MULTIPLY, DIVIDE, RES, POWER };
 
 inline static std::string STR(OpCode tc) {
   switch (tc) {
@@ -52,6 +52,22 @@ inline static std::string STR(OpCode tc) {
   default: choreo_unreachable("unsupported opcode");
   }
   return "";
+}
+
+inline static OpCode ToOpCode(const std::string& op) {
+  if (op == "+")
+    return OpCode::ADD;
+  else if (op == "-")
+    return OpCode::SUBTRACT;
+  else if (op == "*")
+    return OpCode::MULTIPLY;
+  else if (op == "/")
+    return OpCode::DIVIDE;
+  else if (op == "%")
+    return OpCode::RES;
+  else
+    choreo_unreachable("operation '" + op + "' is not suppported.");
+  return OpCode::NONE;
 }
 
 namespace sbe {
@@ -547,7 +563,10 @@ inline Operand operator%(const Operand& vi1, const Operand& vi2) {
 template <typename T>
 inline std::basic_ostream<T>& operator<<(std::basic_ostream<T>& os,
                                          const Operand& oprd) {
-  os << oprd->ToString();
+  if (!oprd)
+    os << "nil";
+  else
+    os << oprd->ToString();
   return os;
 }
 

@@ -45,6 +45,35 @@ std::vector<int> GetOperandsValNo(const std::string& input) {
 
 } // namespace
 
+// Note: it adds value numbers as necessary
+std::string ValueNumbering::ValueItemToSignature(const ValueItem& vi,
+                                                 bool gen = false) {
+  if (auto iv = VIInt(vi)) {
+    auto sign = "const_" + STR(vi);
+    auto vn = GetOrInsertValueNumberFromSignature(sign); // always generate
+    return GetSignatureFromValueNumber(vn);
+  } else if (auto sym = VIStr(vi)) {
+    assert(PrefixedWith(sym.value(), "::") && "expected a scoped symbol.");
+    assert(HasValueNumberOfSignature(sym.value()) &&
+           "the symbol does have a value number.");
+    return sym.value();
+  } else if (auto bop = VIBop(vi)) {
+    auto lsign = ValueItemToSignature(bop->GetLeft(), true);
+    auto rsign = ValueItemToSignature(bop->GetRight(), true);
+    auto lvn = GetValueNumberOfSignature(lsign);
+    auto rvn = GetValueNumberOfSignature(rsign);
+    auto sign = STR(bop->GetOpCode()) + ":#" + std::to_string(lvn) + ":#" +
+                std::to_string(rvn);
+    if (gen) {
+      auto vn = GetOrInsertValueNumberFromSignature(sign);
+      return GetSignatureFromValueNumber(vn);
+    } else
+      return sign;
+  } else
+    choreo_unreachable("unsupported value.");
+  return "";
+}
+
 const std::string
 ValueNumbering::VNSymbolName(const AST::Identifier& id) const {
   auto sig = id.name;
@@ -613,17 +642,7 @@ ValueNumbering::SignBoundedOperation(const location& loc, const std::string& op,
                                      bool verbose) {
   auto getSignature = [&](const AST::Node& n) {
     auto bound = GetSingleUpperBound(visitor->NodeType(n));
-    auto sig = ValueItemAsString(bound);
-    if (VIIsInt(bound))
-      return "const_" + sig;
-    else {
-      if (!visitor->SSTab().NameInScopeOrNull(sig)) {
-        bound = GetSingleUpperBound(n.GetType());
-        sig = ValueItemAsString(bound);
-      }
-      sig = SignatureOfSymbol(visitor->SSTab().InScopeName("@" + sig));
-    }
-    return sig;
+    return ValueItemToSignature(bound);
   };
 
   std::optional<std::string> res;

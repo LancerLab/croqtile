@@ -515,7 +515,7 @@ public:
       assert(shape.DimCount() == 1);
       VST_DEBUG(dbgs() << "[SymVal] " << InScopeName(name) << ": "
                        << STR(shape.ValueAt(0)) << "\n");
-      SymVal(InScopeName(name)).int_expr = shape.ValueAt(0);
+      SymVal(InScopeName(name)).val_expr = shape.ValueAt(0);
     }
 
     if (isa<FutureType>(n.GetType()) || isa<SpannedType>(n.GetType()))
@@ -603,7 +603,7 @@ public:
       assert(shape.DimCount() == 1);
       VST_DEBUG(dbgs() << "[SymVal] " << SSTab().ScopedName(name) << ": "
                        << STR(shape.ValueAt(0)) << "\n");
-      SymVal(SSTab().ScopedName(name)).int_expr = shape.ValueAt(0);
+      SymVal(SSTab().ScopedName(name)).val_expr = shape.ValueAt(0);
     }
 
     return true;
@@ -1428,6 +1428,41 @@ private:
     }
   }
 
+  ValueItem GenValueItemFromSignature(const std::string& input) {
+    if (auto iv = RemovePrefixOrNull("const_", input)) {
+      if (input.find(".") !=
+          std::string::npos) // do not handle floating numbers
+        return nullptr;
+      return sbe::nu(std::stoll(*iv));
+    } else if (PrefixedWith(input, "::")) {
+      // must be a scoped symbol
+      return sbe::sym(input);
+    }
+
+    // it is an operation
+    auto parts = SplitStringByDelimiter(input, ":");
+    if (parts.size() != 3) return nullptr;
+    if (PrefixedWith(input, "+:") || PrefixedWith(input, "-:") ||
+        PrefixedWith(input, "*:") || PrefixedWith(input, "/:") ||
+        PrefixedWith(input, "%:")) {
+      auto lvi = GenValueItemFromSignature(
+          vn.GetSignatureFromValueNumber(std::stoi(parts[1].substr(1))));
+      auto rvi = GenValueItemFromSignature(
+          vn.GetSignatureFromValueNumber(std::stoi(parts[2].substr(1))));
+      if (lvi && rvi)
+        return sbe::bop(ToOpCode(input.substr(0, 1)), lvi, rvi)->Normalize();
+    } else if (PrefixedWith(input, "cdiv:")) {
+      auto lvi = GenValueItemFromSignature(
+          vn.GetSignatureFromValueNumber(std::stoi(parts[1].substr(1))));
+      auto rvi = GenValueItemFromSignature(
+          vn.GetSignatureFromValueNumber(std::stoi(parts[2].substr(1))));
+      if (lvi && rvi)
+        return sbe::bop(OpCode::DIVIDE, lvi + (rvi - sbe::nu(1)), rvi)
+            ->Normalize();
+    }
+    return nullptr;
+  }
+
   // TODO: should be recursive
   Shape GenShapeFromSignature(const std::string& input) {
     ValueList result;
@@ -1441,14 +1476,19 @@ private:
 
       assert(!component.empty() && "unexpected component.");
 
-      auto expr = GenerateExpression(component);
-      int int_val;
-      auto [ptr, ec] =
-          std::from_chars(expr.data(), expr.data() + expr.size(), int_val);
-      if (ec == std::errc() && ptr == expr.data() + expr.size()) {
-        result.emplace_back(sbe::nu(int_val));
-      } else
-        result.emplace_back(sbe::sym(expr));
+      if (auto vi = GenValueItemFromSignature(component)) {
+        result.push_back(vi);
+      } else {
+        // TODO: remove the legacy method totally
+        auto expr = GenerateExpression(component);
+        int int_val;
+        auto [ptr, ec] =
+            std::from_chars(expr.data(), expr.data() + expr.size(), int_val);
+        if (ec == std::errc() && ptr == expr.data() + expr.size()) {
+          result.emplace_back(sbe::nu(int_val));
+        } else
+          result.emplace_back(sbe::sym(expr));
+      }
     }
 
     return {result.size(), result};

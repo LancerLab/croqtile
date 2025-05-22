@@ -45,7 +45,7 @@ int main() { /// host program
 // CHECK:     auto output = alloc_({output_rt_dim0}, __choreo_factor_out_type);
 
 // CHECK:   D(func_)("__choreo_addcdiv_parallel", {first_type}, {__choreo_factor_out_type}, [&](auto args, auto results) {
-// CHECK:     auto anon_0 = select_((((dim_(args[0], 0))/(8192))%(Value(2))) == Value(0), first_load_B__buf__, first_load_A__buf__);
-// CHECK:     auto first_load_tail = select_((((dim_(args[0], 0))/(8192))%(Value(2)))== Value(0), first_load_B, first_load_A);
-// CHECK:     async_store_(out_store_tail, out, output, {Value(8192)*((dim_(args[0], 0))/(8192)+(Value(-1)))});
+// CHECK:     auto anon_0 = select_((((dim_(args[0], 0) / 8192))%(Value(2))) == Value(0), first_load_B__buf__, first_load_A__buf__);
+// CHECK:     auto first_load_tail = select_((((dim_(args[0], 0) / 8192))%(Value(2)))== Value(0), first_load_B, first_load_A);
+// CHECK:     async_store_(out_store_tail, out, output, {Value(8192)*((dim_(args[0], 0) / 8192)+(Value(-1)))});
 

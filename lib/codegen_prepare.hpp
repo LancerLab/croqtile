@@ -81,8 +81,8 @@ private:
           auto sname = InScopeName(ValueItemAsString(dim));
           if (FCtx(fname).HasSymbolValues(sname)) {
             auto svs = FCtx(fname).GetSymbolValues(sname);
-            if (IsValidValueItem(svs.int_expr))
-              res.push_back(svs.int_expr);
+            if (IsValidValueItem(svs.val_expr))
+              res.push_back(svs.val_expr);
             else
               choreo_unreachable("Expect the symbol " + sname +
                                  " has a valid symbol value!");

@@ -12,5 +12,5 @@ __co__ auto foo(f32 [32, 4] a, s8 [1] b, int c) {
 // CHECK: __global__ void __choreo_device_foo(float * a, char * b, int c) {
 // CHECK:   kernel0();
 // CHECK:   kernel1((float*)a, (char*)b, (c), (996));
-// CHECK:   kernel2<(4), (997)>((char*)b, ((32)+(c)));
+// CHECK:   kernel2<(4), (997)>((char*)b, ((c + 32)));
 // CHECK: }

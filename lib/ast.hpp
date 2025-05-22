@@ -421,7 +421,7 @@ public:
 
   void SetOptValExpr(ValueItem vi) {
     if (IsValidValueItem(vi))
-      opt_vals.int_expr = vi->Normalize();
+      opt_vals.val_expr = vi->Normalize();
     else
       choreo_unreachable("invalid value item.");
   }
@@ -431,8 +431,15 @@ public:
     else
       choreo_unreachable("invalid value item.");
   }
-  ValueItem GetOptValExpr() const { return opt_vals.int_expr; }
+  void SetOptUBoundExpr(ValueItem vi) {
+    if (IsValidValueItem(vi))
+      opt_vals.ub_expr = vi->Normalize();
+    else
+      choreo_unreachable("invalid value item.");
+  }
+  ValueItem GetOptValExpr() const { return opt_vals.val_expr; }
   ValueItem SetOptSizeExpr() const { return opt_vals.size_expr; }
+  ValueItem GetOptUBoundExpr() const { return opt_vals.ub_expr; }
 
 public:
   Shape s; // to pass information between shape inference & type inference
