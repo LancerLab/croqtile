@@ -82,30 +82,63 @@ private:
     std::string result;
     std::string current_token;
     bool in_string = false;
+    bool in_raw_string = false;
     bool escape = false;
+    size_t paren_count = 0;
     for (size_t i = 0; i < line.length(); ++i) {
       char c = line[i];
-      if (c == '"' && !escape) {
+      // raw string begins
+      if (!in_string && !in_raw_string && i + 2 < line.length() &&
+          line[i] == 'R' && line[i + 1] == '"' && line[i + 2] == '(') {
+        i += 2;
+        in_raw_string = true;
+        result += "R\"(";
+        paren_count ++;
+        continue;
+      }
+
+      // raw string ends
+      if (in_raw_string && paren_count > 0) {
+        if (c == ')') {
+          paren_count --;
+          if (paren_count == 0)
+            in_raw_string = false;
+          result += c;
+          continue;
+        } else {
+          // append char in raw string
+          result += c;
+          continue;
+        }
+      }
+
+      // string begins & ends
+      if (c == '"' && !in_raw_string && !escape) {
         in_string = !in_string;
         result += c;
         continue;
       }
 
-      if (c == '\\') {
-        escape = true;
-        result += c;
-        continue;
-      } else
-        escape = false;
+      // escape character
+      if (in_string && !in_raw_string) {
+        if (c == '\\') {
+          escape = true;
+          result += c;
+          continue;
+        } else
+          escape = false;
+      }
 
-      if (in_string) {
+      // append char in string
+      if (in_string || in_raw_string) {
         result += c;
         continue;
       }
 
-      if (std::isalnum(c) || c == '_') {
+      if (std::isalnum(c) || c == '_')
         current_token += c;
-      } else {
+      else {
+        // substitute token
         if (!current_token.empty()) {
           auto it = defines.find(current_token);
           if (it != defines.end())
@@ -118,6 +151,7 @@ private:
       }
     }
 
+    // last token
     if (!current_token.empty()) {
       auto it = defines.find(current_token);
       if (it != defines.end())
