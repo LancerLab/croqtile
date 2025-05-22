@@ -3,6 +3,11 @@
 __co__ void foo() {
   println("K: ", K);
   println("\"K\": ", K);
+  println(R"(K)", K);
+  __cpp__(R"(printf("time spend: %lld\n", start - end);)");
 }
+
 // CHECK: println("K: ", 14);
 // CHECK: println("\"K\": ", 14);
+// CHECK: println(R"(K)", K);
+// CHECK: __cpp__(R"(printf("time spend: %lld\n", start - end);)");
