@@ -267,7 +267,8 @@ public:
                                         const std::string&, const std::string&,
                                         bool = false);
 
-  std::string ValueItemToSignature(const ValueItem&, bool);
+  ValueItem GenValueItemFromSignature(const std::string& input);
+  std::string ValueItemToSignature(const ValueItem&, bool = false);
 
 private:
   std::string ScopeIndent();

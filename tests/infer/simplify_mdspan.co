@@ -39,20 +39,19 @@ __co__ void foo(f32 [2, 3, 4] d, int e) {
 // VALNO:   Alias "::foo::a" -> #10
 // VALNO:   New VN #11: '+:#8:#0'
 // VALNO:   New VN #12: 'const_7'
-// VALNO:   <Simplify> 'ref:#12 * ref:#2' to 'const_21'
-// VALNO:   New VN #13: 'const_21'
-// VALNO:   <Simplify> '*:#12:#2 - ref:#0' to 'const_20'
-// VALNO:   New VN #14: 'const_20'
+// VALNO-DAG:   <Simplify> 'ref:#12 * ref:#2' to 'const_21'
+// VALNO-DAG:   New VN #13: 'const_21'
+// VALNO-DAG:   <Simplify> '*:#12:#2 - ref:#0' to 'const_20'
+// VALNO-DAG:   New VN #14: 'const_20'
 // VALNO:   New VN #15: '#0,#11,#14'
 // VALNO:   Alias "#0,#11,#14(0)" -> #0
 // VALNO:   Alias "#0,#11,#14(1)" -> #11
 // VALNO:   Alias "#0,#11,#14(2)" -> #14
 // VALNO:   Alias "::foo::b" -> #15
 // VALNO:   New VN #16: 'const_0'
-// VALNO:   <Simplify> 'dimof:#10:#5 / ref:#9' to 'const_1'
-// VALNO:   <Simplify> 'ref:#2 + dimof:#15:#7' to 'const_23'
-// VALNO:   New VN #17: 'const_23'
-// VALNO:   <Simplify> 'dimof:#10:#5 / ref:#9' to 'const_1'
+// VALNO-DAG:   <Simplify> 'dimof:#10:#5 / ref:#9' to 'const_1'
+// VALNO-DAG:   <Simplify> 'ref:#2 + dimof:#15:#7' to 'const_23'
+// VALNO-DAG:   New VN #17: 'const_23'
 // VALNO:   New VN #18: '#0,#17'
 // VALNO:   Alias "#0,#17(0)" -> #0
 // VALNO:   Alias "#0,#17(1)" -> #17

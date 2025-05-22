@@ -39,7 +39,15 @@
 namespace Choreo {
 
 // Supported operation types
-enum class OpCode { NONE, ADD, SUBTRACT, MULTIPLY, DIVIDE, RES, POWER };
+enum class OpCode {
+  NONE,
+  ADD,
+  SUBTRACT,
+  MULTIPLY,
+  DIVIDE /*mathematical*/,
+  IRES,
+  POWER
+};
 
 inline static std::string STR(OpCode tc) {
   switch (tc) {
@@ -47,7 +55,7 @@ inline static std::string STR(OpCode tc) {
   case OpCode::SUBTRACT: return "-";
   case OpCode::MULTIPLY: return "*";
   case OpCode::DIVIDE: return "/";
-  case OpCode::RES: return "%";
+  case OpCode::IRES: return "%";
   case OpCode::POWER: return "^";
   default: choreo_unreachable("unsupported opcode");
   }
@@ -64,13 +72,24 @@ inline static OpCode ToOpCode(const std::string& op) {
   else if (op == "/")
     return OpCode::DIVIDE;
   else if (op == "%")
-    return OpCode::RES;
+    return OpCode::IRES;
   else
     choreo_unreachable("operation '" + op + "' is not suppported.");
   return OpCode::NONE;
 }
 
 namespace sbe {
+
+inline static int64_t gcd(int64_t a, int64_t b) {
+  while (b != 0) {
+    int64_t temp = b;
+    b = a % b;
+    a = temp;
+  }
+  return a;
+}
+
+inline static bool multipleof(int64_t a, int64_t b) { return gcd(a, b) == b; }
 
 // Note: Same symbol names implies same value. Therefore scoped symbols are
 // requried.
@@ -85,13 +104,25 @@ class BinaryOperation;
 // SymbolicExpression
 using Operand = ptr<SymbolicExpression>;
 
+// forward decls
+inline Operand operator+(const Operand&, const Operand&);
+inline Operand operator-(const Operand&, const Operand&);
+inline Operand operator*(const Operand&, const Operand&);
+inline Operand operator/(const Operand&, const Operand&);
+inline Operand operator%(const Operand&, const Operand&);
+inline int Compare(const SymbolicExpression&, const SymbolicExpression&);
+inline bool operator<(const SymbolicExpression&, const SymbolicExpression&);
+inline Operand nu(int64_t value);
+inline Operand sym(const std::string& name);
+inline Operand bop(OpCode, const Operand&, const Operand&);
+
 inline static int64_t IsCommutative(OpCode op) {
   switch (op) {
   case OpCode::ADD:
   case OpCode::MULTIPLY: return true;
   case OpCode::SUBTRACT:
   case OpCode::DIVIDE:
-  case OpCode::RES:
+  case OpCode::IRES:
   case OpCode::POWER: return false;
   default: choreo_unreachable("unsupported opcode");
   }
@@ -104,15 +135,12 @@ inline static int64_t IsAssociative(OpCode op) {
   case OpCode::MULTIPLY: return true;
   case OpCode::SUBTRACT:
   case OpCode::DIVIDE:
-  case OpCode::RES:
+  case OpCode::IRES:
   case OpCode::POWER: return false;
   default: choreo_unreachable("unsupported opcode");
   }
   return false;
 }
-
-inline int Compare(const SymbolicExpression&, const SymbolicExpression&);
-inline bool operator<(const SymbolicExpression&, const SymbolicExpression&);
 
 extern bool debug;
 
@@ -171,9 +199,7 @@ public:
 
 public:
   bool IsLeaf() const override { return true; }
-  Operand Clone() const override {
-    return std::make_shared<NumericValue>(value);
-  };
+  Operand Clone() const override { return nu(value); };
   Operand Fold() const override { return Clone(); }
   Operand Reorder() const override { return Clone(); };
   Operand Normalize() const override { return Clone(); };
@@ -205,9 +231,7 @@ public:
 
 public:
   bool IsLeaf() const override { return true; }
-  Operand Clone() const override {
-    return std::make_shared<SymbolicValue>(symbol);
-  }
+  Operand Clone() const override { return sym(symbol); }
   Operand Fold() const override { return Clone(); }
   Operand Reorder() const override { return Clone(); };
   Operand Normalize() const override { return Clone(); };
@@ -239,9 +263,10 @@ public:
     return left->IsNumeric() && right->IsNumeric();
   }
 
-  bool operator==(const SymbolicExpression& op) const override {
-    if (auto se = dyn_cast<BinaryOperation>(&op))
-      return (*se->left == *left) && (*se->right == *right);
+  bool operator==(const SymbolicExpression& expr) const override {
+    if (auto se = dyn_cast<BinaryOperation>(&expr))
+      if (se->op == op && (*se->left == *left) && (*se->right == *right))
+        return true;
     return false;
   }
 
@@ -270,20 +295,17 @@ public:
       int64_t rightVal = rnv->Value();
 
       switch (op) {
-      case OpCode::ADD:
-        return std::make_shared<NumericValue>(leftVal + rightVal);
-      case OpCode::SUBTRACT:
-        return std::make_shared<NumericValue>(leftVal - rightVal);
-      case OpCode::MULTIPLY:
-        return std::make_shared<NumericValue>(leftVal * rightVal);
-      case OpCode::DIVIDE:
+      case OpCode::ADD: return nu(leftVal + rightVal);
+      case OpCode::SUBTRACT: return nu(leftVal - rightVal);
+      case OpCode::MULTIPLY: return nu(leftVal * rightVal);
+      case OpCode::DIVIDE: {
         if (rightVal == 0) choreo_unreachable("Division by zero");
-        return std::make_shared<NumericValue>(leftVal / rightVal);
-      case OpCode::RES:
+        return nu(leftVal / rightVal);
+      }
+      case OpCode::IRES:
         if (rightVal == 0) choreo_unreachable("Division by zero");
-        return std::make_shared<NumericValue>(leftVal % rightVal);
-      case OpCode::POWER:
-        return std::make_shared<NumericValue>(std::pow(leftVal, rightVal));
+        return nu(leftVal % rightVal);
+      case OpCode::POWER: return nu(std::pow(leftVal, rightVal));
       default: choreo_unreachable("Unknown operation");
       }
     }
@@ -296,6 +318,10 @@ public:
       if (rnv && (rnv->Value() == 0)) return simplifiedLeft;
       if (lnv && (lnv->Value() == 0)) return simplifiedRight;
     }
+    // x - 0 = x
+    else if (op == OpCode::SUBTRACT) {
+      if (rnv && (rnv->Value() == 0)) return simplifiedLeft;
+    }
     // x * 0 = 0, 0 * x = 0
     else if (op == OpCode::MULTIPLY) {
       if ((lnv && (lnv->Value() == 0)) || (rnv && (rnv->Value() == 0)))
@@ -304,10 +330,14 @@ public:
       if (rnv && (rnv->Value() == 1)) return simplifiedLeft;
       if (lnv && (lnv->Value() == 1)) return simplifiedRight;
     }
+    // x / 1 = x
+    else if (op == OpCode::DIVIDE) {
+      if (rnv && (rnv->Value() == 1)) return simplifiedLeft;
+    }
     // x^1 = x, 1^x = 1
     else if (op == OpCode::POWER) {
       if (rnv && (rnv->Value() == 1)) return simplifiedLeft;
-      if (lnv && (lnv->Value() == 1)) return std::make_shared<NumericValue>(1);
+      if (lnv && (lnv->Value() == 1)) return nu(1);
     }
 
     // If no simplification possible, return a new binary operation
@@ -422,7 +452,55 @@ public:
   Operand Reorder() const override {
     auto l = left->Reorder();
     auto r = right->Reorder();
+
+    if (auto lbop = dyn_cast<BinaryOperation>(l)) {
+      auto a = lbop->GetLeft();
+      auto b = lbop->GetRight();
+      auto c = r;
+      if (lbop->op == OpCode::MULTIPLY && op == OpCode::DIVIDE &&
+          !a->IsNumeric() && b->IsNumeric() && c->IsNumeric()) {
+        // simplify (a * b) / c
+        auto bv = cast<NumericValue>(b)->Value();
+        auto cv = cast<NumericValue>(c)->Value();
+        auto gcd_val = gcd(bv, cv);
+        if (gcd_val != 1)
+          return (a * (b / nu(gcd_val))->Fold()) / (c / nu(gcd_val)->Fold());
+      }
+#if 0
+      if (lbop->op == OpCode::DIVIDE && op == OpCode::MULTIPLY && (*b < *c || (b->IsNumeric() && c->IsNumeric()))) {
+        // (a / b) * c -> a * (c / b), when a is not numeric
+        auto bv = cast<NumericValue>(b)->Value();
+        auto cv = cast<NumericValue>(c)->Value();
+        if (gcd(bv, cv) == bv) return a * (c / b)->Fold();
+      }
+#endif
+    }
+
+    if (auto rbop = dyn_cast<BinaryOperation>(r)) {
+      auto a = l;
+      auto b = rbop->GetLeft();
+      auto c = rbop->right;
+      if (rbop->op == OpCode::DIVIDE && op == OpCode::DIVIDE &&
+          !a->IsNumeric()) {
+        if (*a == *b) {
+          // a / (b / c) -> c,  when a == b
+          return c;
+        }
+#if 0
+        if (b->IsNumeric() && c->IsNumeric()) {
+          auto bv = cast<NumericValue>(b)->Value();
+          auto cv = cast<NumericValue>(c)->Value();
+          if (cv > bv) {
+            // a / (b / c) = a * (c / b)
+            return a * (c / b);
+          }
+        }
+#endif
+      }
+    }
+
     if (IsCommutative(op) && (*l < *r)) std::swap(l, r);
+
     return std::make_shared<BinaryOperation>(op, l, r);
   }
 
@@ -487,6 +565,10 @@ inline bool operator<(const SymbolicExpression& lhs,
   return Compare(lhs, rhs) < 0;
 }
 
+inline bool operator!=(const SymbolicExpression& lhs,
+                       const SymbolicExpression& rhs) {
+  return !(lhs == rhs);
+}
 inline bool operator==(const SymbolicExpression& lhs, int rhs) {
   return lhs == NumericValue(rhs);
 }
@@ -516,27 +598,21 @@ inline std::shared_ptr<SymbolicExpression> make_numeric(int64_t value) {
   return std::make_shared<NumericValue>(value);
 }
 
-inline std::shared_ptr<SymbolicExpression>
-make_symbolic(const std::string& name) {
+inline Operand make_symbolic(const std::string& name) {
   return std::make_shared<SymbolicValue>(name);
 }
 
-inline std::shared_ptr<SymbolicExpression>
-make_operation(OpCode op, const Operand& left, const Operand& right) {
+inline Operand make_operation(OpCode op, const Operand& left,
+                              const Operand& right) {
   return std::make_shared<BinaryOperation>(op, left, right);
 }
 
 // short-cuts
-inline std::shared_ptr<SymbolicExpression> nu(int64_t value) {
-  return make_numeric(value);
-}
+inline Operand nu(int64_t value) { return make_numeric(value); }
 
-inline std::shared_ptr<SymbolicExpression> sym(const std::string& name) {
-  return make_symbolic(name);
-}
+inline Operand sym(const std::string& name) { return make_symbolic(name); }
 
-inline std::shared_ptr<SymbolicExpression> bop(OpCode op, const Operand& left,
-                                               const Operand& right) {
+inline Operand bop(OpCode op, const Operand& left, const Operand& right) {
   return make_operation(op, left, right);
 }
 
@@ -557,7 +633,7 @@ inline Operand operator/(const Operand& vi1, const Operand& vi2) {
 }
 
 inline Operand operator%(const Operand& vi1, const Operand& vi2) {
-  return bop(OpCode::RES, vi1, vi2)->Normalize();
+  return bop(OpCode::IRES, vi1, vi2)->Normalize();
 }
 
 template <typename T>

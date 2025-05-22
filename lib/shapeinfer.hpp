@@ -180,6 +180,21 @@ public:
     return VisitorWithScope::NodeType(n);
   }
 
+  void SetNodeType(AST::Node& n, const ptr<Type>& ty, bool is_mutable = false) {
+    if (is_mutable && MutableType(*ty))
+      n.SetType(MutateType(*ty));
+    else
+      n.SetType(ty);
+    if (debug_visit)
+      dbgs() << "Set type of " << STR(n) << " as " << PSTR(n.GetType()) << "\n";
+  }
+
+  void SetMdsShape(AST::MultiDimSpans& n, const Shape& s) {
+    n.SetTypeDetail(s);
+    if (debug_visit)
+      dbgs() << "Set shape of " << STR(n) << " as " << STR(s) << "\n";
+  }
+
 public:
   bool Visit(AST::MultiNodes& n) {
     TraceEachVisit(n);
@@ -226,7 +241,7 @@ public:
     TraceEachVisit(n);
     if (cannot_proceed) return true;
     InvalidateVN(cur_vn);
-    n.SetType(MakeStringType());
+    SetNodeType(n, MakeStringType());
     return true;
   }
 
@@ -297,11 +312,7 @@ public:
     cur_vn = vn.GenerateValueNumberForNode(n);
     n.s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
 
-    if (n.IsUBArith()) {
-      n.SetType(MakeBoundedITupleType(n.s));
-      vn.AssociateSignatureWithValueNumber(
-          vn.GetSignatureFromValueNumber(cur_vn), cur_vn);
-    }
+    if (n.IsUBArith()) { SetNodeType(n, MakeBoundedITupleType(n.s)); }
     if (IsActualBoundedIntegerType(NodeType(n))) {
       cur_ub_vn = cur_vn;
       InvalidateVN(cur_vn);
@@ -337,7 +348,7 @@ public:
       if (IsActualBoundedIntegerType(n.GetL()->GetType()) &&
           IsActualBoundedIntegerType(n.GetR()->GetType())) {
         assert(n.s.DimCount() == 1);
-        n.SetType(MakeBoundedIntegerType(n.s.ValueAt(0)));
+        SetNodeType(n, MakeBoundedIntegerType(n.s.ValueAt(0)));
       }
     } else if (AST::istypeof<ITupleType>(&n)) {
       auto vn_sig = vn.GetSignatureFromValueNumber(cur_vn);
@@ -385,7 +396,7 @@ public:
       }
 
       auto vl = GenShapeFromSignature(vn_sig);
-      n.SetTypeDetail(vl);
+      SetMdsShape(n, vl);
 
       if (IsValidRank(n.Rank())) {
 #if 0
@@ -406,7 +417,7 @@ public:
       for (size_t i = 1; i < n.Rank(); ++i)
         unknown_spans = unknown_spans + ",#" + std::to_string(UnknownValue());
       cur_mdspan_vn = vn.GetOrInsertValueNumberFromSignature(unknown_spans);
-      n.SetTypeDetail(GenShapeFromSignature(unknown_spans));
+      SetMdsShape(n, GenShapeFromSignature(unknown_spans));
     } else {
       SetUnknownVN(cur_mdspan_vn); // failed to deduce the type detail
     }
@@ -504,7 +515,7 @@ public:
     // fill-up the symbol table
     assert(nty);
     DefineASymbol(name, nty);
-    n.SetType(nty);
+    SetNodeType(n, nty);
 
     // TODO(wsj): BooleanType? HalfType...?
     if ((isa<FloatType>(nty) || isa<DoubleType>(nty) ||
@@ -535,7 +546,7 @@ public:
 
     auto mvals = n.GetValues();
     // cur_ituple_vn = cur_vn;
-    n.SetType(MakeITupleType(mvals->Count()));
+    SetNodeType(n, MakeITupleType(mvals->Count()));
 
     auto vn_sig = vn.GetSignatureFromValueNumber(cur_vn);
 
@@ -689,16 +700,16 @@ public:
         // Put alias names of mdspan into the value number table
         vn.AssociateSignatureWithValueNumber(
             SSTab().ScopedName(n.sym->name + ".span"), cur_mdspan_vn);
-        n.type->SetType(
-            MakeSpannedType(n.type->base_type, span->GetTypeDetail()));
+        SetNodeType(*n.type,
+                    MakeSpannedType(n.type->base_type, span->GetTypeDetail()));
 
       } else if (IsValidRank(span->Rank())) {
         assert(ValidVN(cur_mdspan_vn) && "unexpected value number for mdspan.");
         // Put alias names of mdspan into the value number table
         vn.AssociateSignatureWithValueNumber(
             SSTab().ScopedName(n.sym->name + ".span"), cur_mdspan_vn);
-        n.type->SetType(
-            MakeSpannedType(n.type->base_type, span->GetTypeDetail()));
+        SetNodeType(*n.type,
+                    MakeSpannedType(n.type->base_type, span->GetTypeDetail()));
       } else {
         // the value number is unknown at compile time
         Error(n.LOC(), "The type can not be inference at compile time.");
@@ -745,11 +756,11 @@ public:
     if (cannot_proceed) return true;
 
     Shape s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
-    n.SetType(MakeMDSpanType(s));
+    SetNodeType(n, MakeMDSpanType(s));
 
     std::string iv_name = SSTab().ScopedName("@" + n.bpv->name);
     vn.AssociateSignatureWithValueNumber(iv_name, cur_vn);
-    n.bpv->SetType(MakeBoundedITupleType(s, "pv"));
+    SetNodeType(*n.bpv, MakeBoundedITupleType(s, "pv"));
     DefineASymbol("@" + n.bpv->name, MakeMDSpanType(s));
     DefineASymbol(n.bpv->name, n.bpv->GetType());
 
@@ -779,7 +790,7 @@ public:
       std::string iv_name = SSTab().ScopedName("@" + sym->name);
       vn.AssociateSignatureWithValueNumber(iv_name, valno);
       Shape s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(valno));
-      sym->SetType(MakeBoundedITupleType(s, "pi:" + idx2dim[i]));
+      SetNodeType(*sym, MakeBoundedITupleType(s, "pi:" + idx2dim[i]));
       DefineASymbol("@" + sym->name, MakeMDSpanType(s));
       DefineASymbol(sym->name, sym->GetType());
     }
@@ -871,7 +882,7 @@ public:
         std::string name = SSTab().ScopedName("@" + sym->name);
         vn.AssociateSignatureWithValueNumber(name, valno);
         Shape s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(valno));
-        sym->SetType(MakeBoundedITupleType(s));
+        SetNodeType(*sym, MakeBoundedITupleType(s));
         DefineASymbol("@" + sym->name, MakeMDSpanType(s));
 
         // because we use bounded integer var as identifier
@@ -891,7 +902,7 @@ public:
       vn.AssociateSignatureWithValueNumber(
           SSTab().ScopedName("@" + n.with->name), cur_mdspan_vn);
       Shape s = GenShapeFromSignature(vn_sig);
-      n.with->SetType(MakeBoundedITupleType(s));
+      SetNodeType(*n.with, MakeBoundedITupleType(s));
       DefineASymbol("@" + n.with->name, MakeMDSpanType(s));
       DefineASymbol(n.with->name, n.with->GetType());
     }
@@ -938,7 +949,7 @@ public:
     auto shape = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
     auto nty = MakeSpannedType(sty->ElementType(), shape, sty->GetStorage());
 
-    n.SetType(nty);
+    SetNodeType(n, nty);
 
     return true;
   }
@@ -999,7 +1010,7 @@ public:
 
     // annotate the shape on AST for later type inference
     auto s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
-    n.SetType(MakeShapedFutureType(s, n.async));
+    SetNodeType(n, MakeShapedFutureType(s, n.async));
 
     if (n.future.empty()) {
       InvalidateVN(cur_vn);
@@ -1058,10 +1069,11 @@ public:
       // it is just a symbol reference
       ca_valno = vn.GetValueNumberOfSignature(SSTab().InScopeName(span_name));
       // set the chunkat's type
-      n.SetType(MakeSpannedType(
-          sty->f_type,
-          GenShapeFromSignature(vn.GetSignatureFromValueNumber(ca_valno)),
-          sty->GetStorage()));
+      SetNodeType(n,
+                  MakeSpannedType(sty->f_type,
+                                  GenShapeFromSignature(
+                                      vn.GetSignatureFromValueNumber(ca_valno)),
+                                  sty->GetStorage()));
 
       cur_vn = ca_valno;
       return true;
@@ -1169,10 +1181,11 @@ public:
     ca_valno = vn.GetOrInsertValueNumberFromSignature(fs_signature);
 
     // set the chunkat's type
-    n.SetType(MakeSpannedType(
-        sty->f_type,
-        GenShapeFromSignature(vn.GetSignatureFromValueNumber(ca_valno)),
-        sty->GetStorage()));
+    SetNodeType(
+        n, MakeSpannedType(
+               sty->f_type,
+               GenShapeFromSignature(vn.GetSignatureFromValueNumber(ca_valno)),
+               sty->GetStorage()));
 
     cur_vn = ca_valno;
 
@@ -1267,7 +1280,7 @@ public:
       auto s0 = cast<AST::Expr>(n.expr_list->ValueAt(0));
       auto s0ty = NodeType(*s0);
       if (s0ty && s0ty->HasSufficientInfo())
-        n.SetType(s0ty);
+        SetNodeType(n, s0ty);
       else {
         // handle dataof expr (TODO: any better idea?)
         if (!s0->s.IsValid()) {
@@ -1277,7 +1290,7 @@ public:
           return false;
         }
         auto nty = MakeSpannedType(sty->f_type, s0->s, sty->GetStorage());
-        n.SetType(nty);
+        SetNodeType(n, nty);
       }
 
       cur_mdspan_vn = vn.GenerateValueNumberForNode(n);
@@ -1291,7 +1304,7 @@ public:
         error_count++;
         return false;
       }
-      n.SetType(fty);
+      SetNodeType(n, fty);
       if (isa<PlaceHolderType>(fty)) return true;
 
       cur_mdspan_vn = GetOnlyValueNumberFromMultiValues(*n.expr_list);
@@ -1428,41 +1441,6 @@ private:
     }
   }
 
-  ValueItem GenValueItemFromSignature(const std::string& input) {
-    if (auto iv = RemovePrefixOrNull("const_", input)) {
-      if (input.find(".") !=
-          std::string::npos) // do not handle floating numbers
-        return nullptr;
-      return sbe::nu(std::stoll(*iv));
-    } else if (PrefixedWith(input, "::")) {
-      // must be a scoped symbol
-      return sbe::sym(input);
-    }
-
-    // it is an operation
-    auto parts = SplitStringByDelimiter(input, ":");
-    if (parts.size() != 3) return nullptr;
-    if (PrefixedWith(input, "+:") || PrefixedWith(input, "-:") ||
-        PrefixedWith(input, "*:") || PrefixedWith(input, "/:") ||
-        PrefixedWith(input, "%:")) {
-      auto lvi = GenValueItemFromSignature(
-          vn.GetSignatureFromValueNumber(std::stoi(parts[1].substr(1))));
-      auto rvi = GenValueItemFromSignature(
-          vn.GetSignatureFromValueNumber(std::stoi(parts[2].substr(1))));
-      if (lvi && rvi)
-        return sbe::bop(ToOpCode(input.substr(0, 1)), lvi, rvi)->Normalize();
-    } else if (PrefixedWith(input, "cdiv:")) {
-      auto lvi = GenValueItemFromSignature(
-          vn.GetSignatureFromValueNumber(std::stoi(parts[1].substr(1))));
-      auto rvi = GenValueItemFromSignature(
-          vn.GetSignatureFromValueNumber(std::stoi(parts[2].substr(1))));
-      if (lvi && rvi)
-        return sbe::bop(OpCode::DIVIDE, lvi + (rvi - sbe::nu(1)), rvi)
-            ->Normalize();
-    }
-    return nullptr;
-  }
-
   // TODO: should be recursive
   Shape GenShapeFromSignature(const std::string& input) {
     ValueList result;
@@ -1476,7 +1454,7 @@ private:
 
       assert(!component.empty() && "unexpected component.");
 
-      if (auto vi = GenValueItemFromSignature(component)) {
+      if (auto vi = vn.GenValueItemFromSignature(component)) {
         result.push_back(vi);
       } else {
         // TODO: remove the legacy method totally

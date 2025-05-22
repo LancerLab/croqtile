@@ -73,9 +73,9 @@ __co__ s32 [N, M, K] ele_add(s32 [N, M, K] lhs, s32 [N, M, K] rhs) {
 // CHECK:     y = 0;
 // CHECK:     var_ xx(IntType(32));
 // CHECK:     xx = 0;
-// CHECK:     for_(q, ((dim_(args[0], 0) / 4) - 0), 1, [&](auto iv_q) {
-// CHECK:       for_(x, ((dim_(args[0], 2) / 8) - 0), 1, [&](auto iv_x) {
-// CHECK:         for_(y, (dim_(args[0], 1) - 0), 1, [&](auto iv_y) {
+// CHECK:     for_(q, (dim_(args[0], 0) / 4), 1, [&](auto iv_q) {
+// CHECK:       for_(x, (dim_(args[0], 2) / 8), 1, [&](auto iv_x) {
+// CHECK:         for_(y, dim_(args[0], 1), 1, [&](auto iv_y) {
 // CHECK:           auto anon_0 = bitcast_(DRAMType(IntType(32), {-1, -1, -1}), lhs, {__choreo_nd_ref_N, __choreo_nd_ref_K, __choreo_nd_ref_M});
 // CHECK:           async_load_(lhs_load, anon_0, lhs_load__buf__, {Value(4)*iv_q,Value(8)*iv_x,Value(1)*iv_y});
 // CHECK:           auto anon_1 = bitcast_(DRAMType(IntType(32), {-1, -1, -1}), rhs, {__choreo_nd_ref_N, __choreo_nd_ref_K, __choreo_nd_ref_M});
@@ -89,8 +89,8 @@ __co__ s32 [N, M, K] ele_add(s32 [N, M, K] lhs, s32 [N, M, K] rhs) {
 // CHECK:         }); // end of choreo-foreach block on 'y'.
 // CHECK:       }); // end of choreo-foreach block on 'x'.
 // CHECK:     }); // end of choreo-foreach block on 'q'.
-// CHECK:     for_(xx, (((dim_(args[0], 2) * dim_(args[0], 0)) / 16) - 0), 1, [&](auto iv_xx) {
-// CHECK:       for_(y, (dim_(args[0], 1) - 0), 1, [&](auto iv_y) {
+// CHECK:     for_(xx, ((dim_(args[0], 2) * dim_(args[0], 0)) / 16), 1, [&](auto iv_xx) {
+// CHECK:       for_(y, dim_(args[0], 1), 1, [&](auto iv_y) {
 // CHECK:         auto anon_3 = bitcast_(DRAMType(IntType(32), {-1, -1}), lhs, { (__choreo_nd_ref_N * __choreo_nd_ref_K) , __choreo_nd_ref_M});
 // CHECK:         async_load_(lhs_load2, anon_3, lhs_load2__buf__, {Value(16)*iv_xx,Value(1)*iv_y});
 // CHECK:         wait_dma_(lhs_load2);

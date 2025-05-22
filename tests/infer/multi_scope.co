@@ -39,26 +39,24 @@ __co__ void foo(f32 [2, 3, 4] d, int e) {
 // VALNO:   Alias "::foo::f" -> #3
 // VALNO:   New VN #9: 'const_5'
 // VALNO:   <Simplify> 'dimof:#4:#7 / ref:#2' to 'const_1'
-// VALNO:   <Simplify> 'dimof:#4:#7 / ref:#2' to 'const_1'
 // VALNO:   New VN #10: '#9,#0,#0'
 // VALNO:   Alias "#9,#0,#0(0)" -> #9
 // VALNO:   Alias "#9,#0,#0(1)" -> #0
 // VALNO:   Alias "#9,#0,#0(2)" -> #0
-// VALNO:   <Simplify> 'dimof:#4:#7 / ref:#2' to 'const_1'
 // VALNO:   Alias "::foo::a" -> #10
 // VALNO:   New VN #11: '+:#8:#0'
 // VALNO:   New VN #12: 'const_7'
-// VALNO:   <Simplify> 'ref:#12 * ref:#2' to 'const_21'
-// VALNO:   New VN #13: 'const_21'
-// VALNO:   <Simplify> '*:#12:#2 - ref:#0' to 'const_20'
-// VALNO:   New VN #14: 'const_20'
+// VALNO-DAG:   <Simplify> 'ref:#12 * ref:#2' to 'const_21'
+// VALNO-DAG:   New VN #13: 'const_21'
+// VALNO-DAG:   <Simplify> '*:#12:#2 - ref:#0' to 'const_20'
+// VALNO-DAG:   New VN #14: 'const_20'
 // VALNO:   New VN #15: '#0,#11,#14'
 // VALNO:   Alias "#0,#11,#14(0)" -> #0
 // VALNO:   Alias "#0,#11,#14(1)" -> #11
 // VALNO:   Alias "#0,#11,#14(2)" -> #14
 // VALNO:   Alias "::foo::b" -> #15
 // VALNO:   New VN #16: 'const_0'
-// VALNO:   New VN #17: '+:#11:#3'
+// VALNO:   New VN #17: '+:#8:#9'
 // VALNO:   New VN #18: '#9,#17,#3'
 // VALNO:   Alias "#9,#17,#3(0)" -> #9
 // VALNO:   Alias "#9,#17,#3(1)" -> #17
@@ -78,10 +76,9 @@ __co__ void foo(f32 [2, 3, 4] d, int e) {
 // VALNO:     Alias "::foo::paraby_0::within_0::@g(0)" -> #2
 // VALNO:     Alias "::foo::paraby_0::within_0::@g__elem__0" -> #2
 // VALNO:     Alias "::foo::paraby_0::within_0::@g" -> #2
-// VALNO:     <Simplify> 'dimof:#21:#5 / ref:#9' to 'const_5'
-// VALNO:     <Simplify> 'ref:#2 + dimof:#15:#7' to 'const_23'
-// VALNO:     New VN #22: 'const_23'
-// VALNO:     <Simplify> 'dimof:#21:#5 / ref:#9' to 'const_5'
+// VALNO-DAG:     <Simplify> 'dimof:#21:#5 / ref:#9' to 'const_5'
+// VALNO-DAG:     <Simplify> 'ref:#2 + dimof:#15:#7' to 'const_23'
+// VALNO-DAG:     New VN #22: 'const_23'
 // VALNO:     New VN #23: '#9,#22'
 // VALNO:     Alias "#9,#22(0)" -> #9
 // VALNO:     Alias "#9,#22(1)" -> #22

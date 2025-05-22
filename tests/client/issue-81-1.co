@@ -22,7 +22,7 @@ __co__ auto foo(f32 [M] a, s16 [M, N] b, int x, int y, double d) {
 // CHECK:     for (__iv_xq__elem__0 = 0; __iv_xq__elem__0 < 5; ++__iv_xq__elem__0) {
 // CHECK:       auto anon_0 = ((__tops_tid_x())*(5)+(__iv_xq__elem__0));
 // CHECK:       tops::mdspan __mds0_a(tops::Global, (float*)a, M);
-// CHECK:       tops::mdspan __mds1_rx__buf__(tops::Global, (float*)rx__buf__, (M)/((x)*(5)));
+// CHECK:       tops::mdspan __mds1_rx__buf__(tops::Global, (float*)rx__buf__, (M / (x * 5)));
 // CHECK: }
 
 // CHECK:   dim3 __foo_gdims0(1, 1, 1);

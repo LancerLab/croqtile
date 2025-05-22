@@ -45,9 +45,43 @@ std::vector<int> GetOperandsValNo(const std::string& input) {
 
 } // namespace
 
+ValueItem ValueNumbering::GenValueItemFromSignature(const std::string& input) {
+  if (auto iv = RemovePrefixOrNull("const_", input)) {
+    if (input.find(".") != std::string::npos) // do not handle floating numbers
+      return nullptr;
+    return sbe::nu(std::stoll(*iv));
+  } else if (PrefixedWith(input, "::")) {
+    // must be a scoped symbol
+    return sbe::sym(input);
+  }
+
+  // it is an operation
+  auto parts = SplitStringByDelimiter(input, ":");
+  if (parts.size() != 3) return nullptr;
+  if (PrefixedWith(input, "+:") || PrefixedWith(input, "-:") ||
+      PrefixedWith(input, "*:") || PrefixedWith(input, "/:") ||
+      PrefixedWith(input, "%:")) {
+    auto lvi = GenValueItemFromSignature(
+        GetSignatureFromValueNumber(std::stoi(parts[1].substr(1))));
+    auto rvi = GenValueItemFromSignature(
+        GetSignatureFromValueNumber(std::stoi(parts[2].substr(1))));
+    if (lvi && rvi)
+      return sbe::bop(ToOpCode(input.substr(0, 1)), lvi, rvi)->Normalize();
+  } else if (PrefixedWith(input, "cdiv:")) {
+    auto lvi = GenValueItemFromSignature(
+        GetSignatureFromValueNumber(std::stoi(parts[1].substr(1))));
+    auto rvi = GenValueItemFromSignature(
+        GetSignatureFromValueNumber(std::stoi(parts[2].substr(1))));
+    if (lvi && rvi)
+      return sbe::bop(OpCode::DIVIDE, lvi + (rvi - sbe::nu(1)), rvi)
+          ->Normalize();
+  }
+  return nullptr;
+}
+
 // Note: it adds value numbers as necessary
 std::string ValueNumbering::ValueItemToSignature(const ValueItem& vi,
-                                                 bool gen = false) {
+                                                 bool gen) {
   if (auto iv = VIInt(vi)) {
     auto sign = "const_" + STR(vi);
     auto vn = GetOrInsertValueNumberFromSignature(sign); // always generate
@@ -245,6 +279,23 @@ ValueNumbering::TryToSimplifyBinary(const location& loc, const std::string& op,
                                     const std::string& lhs,
                                     const std::string& rhs, bool verbose) {
   if (op == "concat") return std::nullopt;
+
+  // try simplify using symbexpr first
+  auto lvi = GenValueItemFromSignature(lhs);
+  auto rvi = GenValueItemFromSignature(rhs);
+  if (lvi && rvi &&
+      (op == "+" || op == "-" || op == "*" || op == "/" || op == "%")) {
+    auto res_vi = sbe::bop(ToOpCode(op), lvi, rvi);
+    auto opt_vi = res_vi->Normalize();
+    if (*res_vi != *opt_vi) {
+      auto res = ValueItemToSignature(opt_vi);
+      if (trace && verbose)
+        dbgs() << ScopeIndent() << "<Simplify> '" << lhs << " " << op << " "
+               << rhs << " to '" << res << "'\n";
+      return res;
+    }
+  }
+
   auto l_cv = RemovePrefixOrNull("const_", lhs);
   auto r_cv = RemovePrefixOrNull("const_", rhs);
 
@@ -642,7 +693,7 @@ ValueNumbering::SignBoundedOperation(const location& loc, const std::string& op,
                                      bool verbose) {
   auto getSignature = [&](const AST::Node& n) {
     auto bound = GetSingleUpperBound(visitor->NodeType(n));
-    return ValueItemToSignature(bound);
+    return ValueItemToSignature(bound, true);
   };
 
   std::optional<std::string> res;
@@ -672,7 +723,7 @@ ValueNumbering::SignBoundedOperation(const location& loc, const std::string& op,
       if (!res) {
         auto lvn = GetOrInsertValueNumberFromSignature(lsig);
         auto rvn = GetOrInsertValueNumberFromSignature(rsig);
-        res = op + ":#" + std::to_string(lvn) + ":#" + std::to_string(rvn);
+        res = "*:#" + std::to_string(lvn) + ":#" + std::to_string(rvn);
       }
     } else
       choreo_unreachable("operation is not permitted.");

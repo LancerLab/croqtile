@@ -117,3 +117,29 @@ TEST_F(ExpressionTest, ComplexExpression) {
   auto norm = SimplifyExpression(expr);
   EXPECT_EQ(norm->ToString(), "((a + 2) * (b + 3))");
 }
+
+TEST_F(ExpressionTest, MuliplyDivide) {
+  // (a * 4) / 2 should normalize to a * 2
+  auto term = make_operation(OpCode::MULTIPLY, a, four);
+  auto expr = make_operation(OpCode::DIVIDE, term, two);
+
+  auto norm = SimplifyExpression(expr);
+  EXPECT_EQ(norm->ToString(), "(a * 2)");
+}
+
+TEST_F(ExpressionTest, DivideDivide) {
+  // a / (a / 2) should normalize to 2
+  auto term = make_operation(OpCode::DIVIDE, a, two);
+  auto expr = make_operation(OpCode::DIVIDE, a, term);
+
+  auto norm = SimplifyExpression(expr);
+  EXPECT_EQ(norm->ToString(), "2");
+}
+
+TEST_F(ExpressionTest, DivideDivide2) {
+  // (a + 3) / ((a + 3) / 2) should normalize to 2
+  auto expr = (a + three) / ((a + three) / two);
+
+  auto norm = SimplifyExpression(expr);
+  EXPECT_EQ(norm->ToString(), "2");
+}

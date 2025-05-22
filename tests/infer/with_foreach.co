@@ -104,8 +104,8 @@ __co__ void with_foreach(s32 [6, 128] lhs, s32 [128] rhs) {
 // VALNO:    Alias "::with_foreach::within_4::@index__elem__0" -> #13
 // VALNO:    Alias "::with_foreach::within_4::@index" -> #13
 // VALNO:    scope-3 {
-// VALNO:     <Simplify> 'const_128 / const_32 to 'const_4'
-// VALNO:     New VN #14: 'const_4'
+// VALNO-DAG:     <Simplify> 'const_128 / const_32 to 'const_4'
+// VALNO-DAG:     New VN #14: 'const_4'
 // VALNO:     Alias "::with_foreach::within_4::foreach_4::rhs_load.span" -> #14
 // VALNO:    } // end scope-3
 // VALNO:   } // end scope-2
@@ -147,10 +147,10 @@ __co__ void with_foreach(s32 [6, 128] lhs, s32 [128] rhs) {
 // VALNO:     Alias "::with_foreach::paraby_0::within_6::@index__elem__1" -> #16
 // VALNO:     Alias "::with_foreach::paraby_0::within_6::@index" -> #17
 // VALNO:     scope-4 {
-// VALNO:      <Simplify> 'const_6 / const_128 to 'const_0'
-// VALNO:      New VN #18: 'const_0'
-// VALNO:      <Simplify> 'const_128 / const_32 to 'const_4'
-// VALNO:      New VN #19: 'const_4'
+// VALNO-DAG:      <Simplify> 'const_6 / const_128 to 'const_0'
+// VALNO-DAG:      New VN #18: 'const_0'
+// VALNO-DAG:      <Simplify> 'const_128 / const_32 to 'const_4'
+// VALNO-DAG:      New VN #19: 'const_4'
 // VALNO:      New VN #20: '#18,#19'
 // VALNO:      Alias "::with_foreach::paraby_0::within_6::foreach_6::lhs_load.span" -> #20
 // VALNO:      Alias "#18,#19(0)" -> #18
