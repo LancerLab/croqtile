@@ -36,7 +36,6 @@ __co__ auto bar(f16 [128, 4, 14, 69] a) {
 //  }
 //  return a;
 //}
-#endif
 
 // CHECK: __global__ void __choreo_device_foo(float * a) {
 // CHECK:   {

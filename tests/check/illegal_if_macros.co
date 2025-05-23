@@ -1,0 +1,15 @@
+// RUN: choreo -E %s | FileCheck %s
+
+#define ABC 1
+#define DEF 2
+
+__co__ int if_else() {
+  #ifdef ABC
+  #if defined DEF
+   show ABC and DEF
+  #else
+   show ABC
+  #endif
+
+}
+// CHECK: error: missing '#endif'.
