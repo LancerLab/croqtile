@@ -568,7 +568,7 @@ inline void DecrDumpIndent() {
 void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
                                        bool dump_brace) {
 #if DUMP_STMT_WITH_TYPE_INFO
-  os << std::left << std::setw(20) << n.TypeNameString();
+  os << std::left << std::setw(25) << n.TypeNameString();
 #endif
   auto num = std::to_string(stmt2number.at(&n));
   if (num.size() < 3) num = std::string(3 - num.size(), ' ') + num;
@@ -1194,14 +1194,20 @@ bool LivenessAnalyzer::Visit(AST::Select& n) {
 
 bool LivenessAnalyzer::Visit(AST::Return& n) {
   TraceEachVisit(n);
-  // TODO: can we return future.data?
   auto vty = NodeType(*n.value);
   if (isa<SpannedType>(vty)) {
     if (auto id = AST::GetIdentifier(*n.value)) {
       linfo[current_stmt].buffer_related = true;
       AddUse(current_stmt, id->name);
+    } else if (auto expr = dyn_cast<AST::Expr>(n.value);
+               expr && expr->op == "dataof") {
+      linfo[current_stmt].buffer_related = true;
+      auto id = cast<AST::Expr>(expr->GetR())->GetSymbol();
+      assert(id && "expect a symbol");
+      AddUse(current_stmt, id->name);
     } else {
-      assert(false && "expecting the return value is an identifier.");
+      assert(false &&
+             "expecting the return value is an identifier or future.data.");
     }
   } else {
     auto expr = dyn_cast<AST::Expr>(n.value);

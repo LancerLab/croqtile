@@ -122,6 +122,8 @@ public:
     return "";
   }
 
+  bool IsHost() const { return pl_depth == 0; }
+
   void CheckDMA(AST::DMA& n) {
     if (n.operation == ".any") return;
 
@@ -732,8 +734,16 @@ public:
         Error(n.LOC(), "Event is not supported on " + cur_arch + ".");
         error_count++;
       }
+
+    if (isa<AST::Select>(n.init_expr))
+      if (IsHost() && CCtx().GetTarget() != CompileTarget::Factor) {
+        Error(n.LOC(), "select in host is not supported.");
+        error_count++;
+      }
+
     if (!isa<SpannedType>(ty)) return true;
     auto sty = cast<SpannedType>(ty);
+
     auto st = sty->GetStorage();
     switch (st) {
     case Storage::GLOBAL:

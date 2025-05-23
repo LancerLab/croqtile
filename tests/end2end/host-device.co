@@ -1,0 +1,130 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck %s && rm -f %s.topscc.result
+
+#include "choreo.h"
+
+__cok__ {
+__co_device__ void kernel0() {}
+__co_device__ void kernel1() {}
+__co_device__ int  kernel2(float* l, int size, int q) { return q & 1; }
+__co_device__ int  kernel3(float* l, int size, int q, int y, int ans) { return q & 1; }
+}
+
+__co__ auto foo(f32 [32, 4] a, int x, int y) {
+  println("co begin");
+
+  if (x > 10) {
+    parallel by 2 {
+      println("call kernel0");
+      call kernel0();
+    }
+    return 0;
+  } else if (x > 5) {
+    parallel p by 1, q by 2 {
+      println("call kernel1");
+      call kernel1();
+    }
+    return 1;
+  } else if (x > 0) {
+    cp = dma.copy a => global;
+    foreach q in [y] {
+      parallel by 1 {
+        mutable int res = 0;
+        l = dma.copy a => local;
+        if (call kernel2(l.data, |l|, q))
+          res = 1;
+        println("after calling kernel2\n\tiv: ", q, "\n\tres: ", res);
+      }
+      int ans = cdiv(x, 2);
+      parallel by 2 {
+        l = dma.copy a => local;
+        println("call kernel3");
+        call kernel3(l.data, |l|, q, y, ans);
+        println("\tans: ", ans);
+      }
+    }
+    return 2;
+  } else {
+    println("in host!");
+    with q in [2] {
+      println("\tin host within!");
+      foreach q
+        println("\tin host foreach!");
+    }
+    return 3;
+  }
+
+  // never printed
+  println("co end");
+}
+
+int main()
+{
+  auto input = choreo::make_spandata<choreo::f32>(32, 4);
+  input.fill_random(-1.0, 1.0);
+
+  int x, y;
+  int res = 0;
+  y = 2;
+
+  std::cout << "================((x = 11))==============\n";
+  x = 11;
+  res = foo(input.view(), x, y);
+  std::cout << "return value: " << res << std::endl;
+  
+  std::cout << "================((x =  6))==============\n";
+  x = 6;
+  res = foo(input.view(), x, y);
+  std::cout << "return value: " << res << std::endl;
+
+  std::cout << "================((x =  3))==============\n";
+  x = 3;
+  res = foo(input.view(), x, y);
+  std::cout << "return value: " << res << std::endl;
+
+  std::cout << "================((x = -3))==============\n";
+  x = -3;
+  res = foo(input.view(), x, y);
+  std::cout << "return value: " << res << std::endl;
+
+  std::cout << "passed\n";
+  return 0;
+}
+
+// ================((x = 11))==============
+// CHECK: co begin
+// CHECK-DAG: call kernel0
+// CHECK-DAG: call kernel0
+// CHECK: return value: 0
+// CHECK-NOT: co end
+// ================((x =  6))==============
+// CHECK: co begin
+// CHECK-DAG: call kernel1
+// CHECK-DAG: call kernel1
+// CHECK: return value: 1
+// CHECK-NOT: co end
+// ================((x =  3))==============
+// CHECK: co begin
+// CHECK: after calling kernel2
+// CHECK: 	iv: {0}
+// CHECK: 	res: 0
+// CHECK-DAG: call kernel3
+// CHECK-DAG: call kernel3
+// CHECK-DAG: ans: 2
+// CHECK-DAG: ans: 2
+// CHECK: after calling kernel2
+// CHECK: 	iv: {1}
+// CHECK: 	res: 1
+// CHECK-DAG: call kernel3
+// CHECK-DAG: call kernel3
+// CHECK-DAG: ans: 2
+// CHECK-DAG: ans: 2
+// CHECK: return value: 2
+// ================((x = -3))==============
+// CHECK: co begin
+// CHECK: in host!
+// CHECK: 	in host within!
+// CHECK: 	in host foreach!
+// CHECK: 	in host foreach!
+// CHECK: return value: 3
+// CHECK: passed

@@ -276,9 +276,9 @@ int main() {
 // CHECK:   float * output__device = nullptr;
 // CHECK:   choreo::abend_true(topsMalloc(&output__device, 524288ULL));
 // CHECK:   choreo::abend_true(topsDeviceSynchronize());
+// CHECK:   choreo::abend_true(topsMemcpy(output.data(), output__device, 524288ULL, topsMemcpyDeviceToHost));
 // CHECK:   choreo::abend_true(topsFree(lhs__device));
 // CHECK:   choreo::abend_true(topsFree(rhs__device));
 // CHECK:   choreo::abend_true(topsFree(v__device));
-// CHECK:   choreo::abend_true(topsMemcpy(output.data(), output__device, 524288ULL, topsMemcpyDeviceToHost));
 // CHECK:   choreo::abend_true(topsFree(output__device));
 // CHECK:   return output;

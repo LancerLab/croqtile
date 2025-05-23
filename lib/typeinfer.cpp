@@ -345,17 +345,24 @@ bool TypeInference::Visit(AST::Assignment& n) {
     n.SetNote("ref");
 
   if (SSTab().IsDeclared(n.GetName())) {
-    auto vty = NodeType(*n.value);
-    if (isa<FutureType>(vty) || IsMutable(*vty)) {
+    auto ety = NodeType(*n.value);
+    if (isa<FutureType>(ety) || IsMutable(*ety)) {
       // no type inference is necessary
-      SetNodeType(n, NodeType(*n.value));
-      SetNodeType(*n.da, NodeType(*n.value));
+      SetNodeType(n, ety);
+      SetNodeType(*n.da, ety);
+      cur_type.reset();
+      return true;
+    } else if (auto vty = GetSymbolType(n.da->LOC(), n.GetName());
+               IsMutable(*vty)) {
+      SetNodeType(n, vty);
+      SetNodeType(*n.da, vty);
       cur_type.reset();
       return true;
     } else {
       Error(n.LOC(),
             "current choreo does not support symbol re-assignment except for "
-            "future/mutable type.");
+            "future/mutable type. Current type: " +
+                PSTR(ety));
       error_count++;
       SetNodeType(n, MakeUnknownType());
       cur_type.reset();

@@ -58,6 +58,9 @@ private:
   int parallel_level = 0;
   int max_parallel_level = 0;
 
+  // special case for `return select.data;`
+  std::set<std::string> select_syms;
+
 private:
   bool BeforeVisitImpl(AST::Node& n) override {
     if (isa<AST::ChoreoFunction>(&n)) {
@@ -162,6 +165,7 @@ public:
     auto name = n.name_str;
     bool ref = (n.GetNote().find("ref") != std::string::npos);
     cgi->AddSymbolDetail(fname, {InScopeName(name), GetSymbolType(name), ref});
+    if (isa<AST::Select>(n.init_expr)) select_syms.insert(InScopeName(name));
     return true;
   }
 
@@ -174,6 +178,7 @@ public:
     if (!SSTab().IsDeclared(name) && !isa<AST::SpanAs>(n.value)) {
       cgi->AddSymbolDetail(fname,
                            {InScopeName(name), GetSymbolType(name), ref});
+      if (isa<AST::Select>(n.value)) select_syms.insert(InScopeName(name));
     }
     return true;
   }
@@ -218,6 +223,8 @@ public:
           expr && expr->op == "dataof") {
         id = cast<AST::Expr>(expr->GetR())->GetSymbol().get();
         assert(id && "Expect a symbol.");
+        // `return select.data;` is ignored in cgi.
+        if (select_syms.count(InScopeName(id->name))) return true;
         ret_name = id->name + "__buf__";
       } else {
         return true;

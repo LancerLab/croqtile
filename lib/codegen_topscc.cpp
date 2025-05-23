@@ -137,6 +137,7 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
     fty = cast<FunctionType>(GetSymbolType(fname));
     ssm.EnterScope();
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+    // only on device-side
     if (parallel_level == 0) {
       parallel_idx += 1;
       if (cgi->GetFunctionTrait(fname).multiple_parallelby)
@@ -252,6 +253,7 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
     hs.str("");
     return_stream.str("");
   } else if (isa<AST::ParallelBy>(&n)) {
+    // only on device-side
     parallel_level--;
     if (parallel_level == 0) {
       max_parallel_level = 0;
@@ -285,6 +287,7 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
       }
     }
   } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
+    // only on device-side
     DecrDeviceIndent();
     if (!it->stmts->None()) {
       ds << d_indent << "}";
@@ -365,7 +368,7 @@ void TopsccCodeGen::EmitFixedDeviceHead() {}
 bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
   TraceEachVisit(n);
 
-  assert(n.name == fname && "incosistent in function names.");
+  assert(n.name == fname && "inconsistent in function names.");
   assert(isa<FunctionType>(n.GetType()) && "unexpected type.");
 
   auto HandleSymbolicDimensions = [this](const ptr<SpannedType>& sty,
@@ -446,8 +449,8 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
                             UnScopedName(item.name) + ".data()");
           continue;
         }
-        // Only the globals are declared in host. The shareds/locals are
-        // declared in device
+        // Only the globals are declared in host.
+        // The shareds/locals are declared in device.
         auto sym = UnScopedName(item.name);
         std::string bts = NameBaseType(sty->ElementType(), false);
         auto buf_sym = sym + "__device";
@@ -468,17 +471,8 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
 bool TopsccCodeGen::Visit(AST::ChoreoFunction& n) {
   TraceEachVisit(n);
 
-  if (!use_hetero_tileflow && NeedDeviceFunc()) {
-    for (const auto& item : GetDeviceFuncIns(cgi)) {
-      if (IsChoreoOutput(item.name)) continue;
-      if (!isa<SpannedType>(item.type)) continue;
-      if (item.attr == ParamAttr::GLOBAL_INPUT) continue;
-      hs << h_indent << "choreo::abend_true(topsFree("
-         << UnScopedName(item.name) << "__device));\n";
-    }
-  }
-
-  hs << return_stream.str();
+  // If there is no AST::Return
+  if (return_stream.str().empty() && NeedDeviceFunc()) EmitTopsFree();
 
   DecrHostIndent();
   hs << "}\n\n";
@@ -496,7 +490,11 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
   updating_cgi->AddSymbolDetail(fname,
                                 {InScopeName(sym), GetSymbolType(sym), ref});
 
+  // The type is determined first, and then
+  // the device or host side is determined
+
   if (auto s = dyn_cast<AST::Select>(n.init_expr)) {
+    assert(!IsHost() && "select should be on device side.");
     assert(!s->inDMA);
     size_t val_count = s->expr_list->Count();
     assert(val_count >= 2);
@@ -527,45 +525,12 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
     auto sto = sty->GetStorage();
 
     bool spmem = false; // allocatable scratchpad memory: share, local
-    if (sto == Storage::GLOBAL) {
+
+    auto HandleGlobal = [&]() -> void {
       bts = NameBaseType(sty->ElementType(), false); // use the device type name
-      if (!IsChoreoOutput(InScopeName(sym))) {
-        if (FBIContainsBuffer(FBInfo(), InScopeName(sym)) &&
-            use_hetero_tileflow && IsHostSide()) {
-          // a non-init global var decl tied with future
-          // this hint is enough to say a host side dataflow
-          VST_DEBUG(dbgs() << "Found " << buf_sym << " in FBInfo - "
-                           << STR(FBInfo()) << "\n");
-        } else {
-          hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
-          hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym << ", "
-             << UnScopedSizeExpr(*sty) << "));\n";
-          if (n.init_value) {
-            // support int/float-point literal initialization
-            std::string sym_init_val = sym + "_init_val";
-            hs << h_indent << bts << " " << sym_init_val << " = "
-               << ExprSTR(n.init_value) << ";\n";
-            std::string sym_init_vptr = sym + "_init_vptr";
-            size_t data_len = SizeOf(sty->ElementType()) * 8;
-            std::string init_val_type;
-            switch (data_len) {
-            case 32: init_val_type = "int"; break;
-            case 16: init_val_type = "unsigned short"; break;
-            case 8: init_val_type = "unsigned char"; break;
-            default:
-              choreo_unreachable("unsupported data length " +
-                                 std::to_string(data_len) +
-                                 " in global span init.");
-            }
-            hs << h_indent << init_val_type << "* " << sym_init_vptr
-               << " = reinterpret_cast<" << init_val_type << "*>(&"
-               << sym_init_val << ");\n";
-            hs << h_indent << "choreo::abend_true(topsMemsetD" << data_len
-               << "(" << buf_sym << ", *" << sym_init_vptr << ", "
-               << UnScopedExpr(ElemCountExprOf(*sty)) << "));\n";
-          }
-        }
-      } else {
+
+      if (IsChoreoOutput(InScopeName(sym))) {
+        // the sym is choreo output
         std::string sym_data = sym + ".data()";
         hs << h_indent << "auto " << sym << " = choreo::make_spandata<" << bts
            << ", " << shape.Rank() << ">({" << UnScopedExpr(RSTR(shape))
@@ -584,59 +549,112 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
              << sym_data << ", " << UnScopedSizeExpr(*sty)
              << ", topsMemcpyHostToDevice));\n";
         }
+        return;
       }
+
+      // the sym is not choreo output
+      if (FBIContainsBuffer(FBInfo(), InScopeName(sym)) &&
+          use_hetero_tileflow && IsHostSide()) {
+        // a non-init global var decl tied with future
+        // this hint is enough to say a host side dataflow
+        VST_DEBUG(dbgs() << "Found " << buf_sym << " in FBInfo - "
+                         << STR(FBInfo()) << "\n");
+      } else {
+        hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
+        hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym << ", "
+           << UnScopedSizeExpr(*sty) << "));\n";
+
+        if (!n.init_value) return;
+
+        // support int/float-point literal initialization
+        std::string sym_init_val = sym + "_init_val";
+        hs << h_indent << bts << " " << sym_init_val << " = "
+           << ExprSTR(n.init_value) << ";\n";
+        std::string sym_init_vptr = sym + "_init_vptr";
+        size_t data_len = SizeOf(sty->ElementType()) * 8;
+        std::string init_val_type;
+        switch (data_len) {
+        case 32: init_val_type = "int"; break;
+        case 16: init_val_type = "unsigned short"; break;
+        case 8: init_val_type = "unsigned char"; break;
+        default:
+          choreo_unreachable("unsupported data length " +
+                             std::to_string(data_len) +
+                             " in global span init.");
+        }
+        hs << h_indent << init_val_type << "* " << sym_init_vptr
+           << " = reinterpret_cast<" << init_val_type << "*>(&" << sym_init_val
+           << ");\n";
+        hs << h_indent << "choreo::abend_true(topsMemsetD" << data_len << "("
+           << buf_sym << ", *" << sym_init_vptr << ", "
+           << UnScopedExpr(ElemCountExprOf(*sty)) << "));\n";
+      }
+    };
+
+    auto HandleSharedLocal = [&]() -> void {
+      if (IsChoreoOutput(InScopeName(sym)))
+        choreo_unreachable(
+            "error: shared/local buffer cannot be Choreo output.");
+
+      auto type_modifiers =
+          (sto == Storage::SHARED ? "__shared__ " : "__local__ __valigned__ ");
+
+      if (!CCtx().MemReuse()) {
+        ds << d_indent << type_modifiers << bts << " " << sym;
+        for (auto dim : n.ArrayDimensions()) ds << "[" << dim << "]";
+        ds << "[" << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
+        return;
+      }
+
+      // memory reuse is enabled
+
+      if (n.note.find("spm") != std::string::npos) {
+        ds << d_indent << type_modifiers << bts << " " << sym << "["
+           << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
+        return;
+      }
+
+      // the buffer is not the declared whole spm.
+      auto notes = SplitStringByDelimiter(n.note, ", ");
+      auto reuse_idx = std::find(notes.begin(), notes.end(), "reuse");
+      auto offset_idx = std::find(notes.begin(), notes.end(), "offset");
+      if (reuse_idx == notes.end()) {
+        // the buffer is not reused
+        // which means that it is declared but never used.
+        assert(offset_idx == notes.end());
+        // TODO: should we DCE the unused buffer?
+        ds << d_indent << type_modifiers << bts << " " << sym << "["
+           << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
+      } else {
+        auto reuse_name = *(reuse_idx + 1);
+        auto offset = *(offset_idx + 1);
+        ds << d_indent << bts << "* " << sym << " = (" << bts << "*)"
+           << reuse_name << " + " << offset << ";\n";
+      }
+    };
+
+    if (sto == Storage::GLOBAL) {
+      if (!IsHost()) choreo_unreachable("error: global var decl in device.");
+      HandleGlobal();
       ssm.MapHostSymbol(InScopeName(sym) + "__device", buf_sym);
       ssm.MapHostSymbol(InScopeName(sym), sym);
       ssm.MapDeviceSymbolIfNotExist(InScopeName(sym), sym);
     } else if (sto == Storage::SHARED || sto == Storage::LOCAL) {
-      if (!IsChoreoOutput(InScopeName(sym))) {
-        auto type_modifiers =
-            (sto == Storage::SHARED ? "__shared__ "
-                                    : "__local__ __valigned__ ");
-        if (CCtx().MemReuse()) {
-          if (n.note.find("spm") != std::string::npos) {
-            ds << d_indent << type_modifiers << bts << " " << sym << "["
-               << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
-          } else {
-            auto notes = SplitStringByDelimiter(n.note, ", ");
-            auto reuse_idx = std::find(notes.begin(), notes.end(), "reuse");
-            auto offset_idx = std::find(notes.begin(), notes.end(), "offset");
-            if (reuse_idx == notes.end()) {
-              assert(offset_idx == notes.end());
-              // TODO: should we DCE the unused buffer?
-              ds << d_indent << type_modifiers << bts << " " << sym << "["
-                 << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
-            } else {
-              auto reuse_name = *(reuse_idx + 1);
-              auto offset = *(offset_idx + 1);
-#if 1
-              ds << d_indent << bts << "* " << sym << " = (" << bts << "*)"
-                 << reuse_name << " + " << offset << ";\n";
-#else
-              ds << d_indent << type_modifiers << bts << " " << sym << "["
-                 << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
-              ds << d_indent << sym << " = (" << bts << "*)" << reuse_name
-                 << " + " << offset << ";\n";
-#endif
-            }
-          }
-        } else {
-          ds << d_indent << type_modifiers << bts << " " << sym;
-          for (auto dim : n.ArrayDimensions()) ds << "[" << dim << "]";
-          ds << "[" << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
-        }
-        ssm.MapDeviceSymbol(InScopeName(sym), sym);
-        spmem = true;
-      }
+      if (IsHost()) choreo_unreachable("error: shared/local var decl in host.");
+      HandleSharedLocal();
+      ssm.MapDeviceSymbol(InScopeName(sym), sym);
+      spmem = true;
     } else
       choreo_unreachable("unsupported storage type.");
 
+    // initialize the spm buffer if needed
     if (spmem && n.init_value) {
-      if (sto == Storage::SHARED || sto == Storage::LOCAL) {
-        ds << d_indent << "if ("
-           << SingleInstancePredicate(sto == Storage::SHARED) << ") {\n";
-        IncrDeviceIndent();
-      }
+      if (sto != Storage::SHARED && sto != Storage::LOCAL)
+        choreo_unreachable(
+            "error: unexpected storage type in spm initialization.");
+      ds << d_indent << "if ("
+         << SingleInstancePredicate(sto == Storage::SHARED) << ") {\n";
+      IncrDeviceIndent();
       ds << d_indent << "tops_dte_ctx_t " << sym__init << ";\n";
       ds << d_indent << "tops::dte_scope s_" << sym__init << "(" << sym__init
          << ");\n";
@@ -644,13 +662,13 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
          << TopsMdsStorage(sto) << ", (" << NameBaseType(sty->ElementType())
          << "*)" << sym << ", " << UnScopedExpr(RSTR(sty->GetShape())) << "), "
          << ExprSTR(n.init_value, false) << ");\n";
-      if (sto == Storage::SHARED || sto == Storage::LOCAL) {
-        DecrDeviceIndent();
-        ds << d_indent << "} // single instance\n";
-      }
+      DecrDeviceIndent();
+      ds << d_indent << "} // single instance\n";
     }
     return true;
-  } else if (auto bty = dyn_cast<BoundedType>(nty)) {
+  }
+
+  if (auto bty = dyn_cast<BoundedType>(nty)) {
     // bounded variable is not with a fixed value
     if (!IsActualBoundedIntegerType(bty))
       choreo_unreachable(
@@ -694,6 +712,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
     } break;
     case Storage::SHARED:
     case Storage::LOCAL: {
+      assert(!IsHost());
       ds << d_indent << TopsDeviceMemory(ety->GetStorage())
          << " __volatile__ bool " << n.name_str;
       ety->PrintAsCArray(ds);
@@ -720,10 +739,11 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
     } break;
     case Storage::SHARED:
     case Storage::LOCAL: {
+      assert(!IsHost());
       ds << d_indent << TopsDeviceMemory(ety->GetStorage())
          << " __volatile__ bool " << n.name_str << "; // "
          << STR(ety->GetStorage()) << " event\n";
-      ds << d_indent << n.name_str << " = false;\n"; // inited as untriggerd
+      ds << d_indent << n.name_str << " = false;\n"; // inited as untriggered
     } break;
     default: break;
     }
@@ -746,6 +766,7 @@ bool TopsccCodeGen::Visit(AST::Assignment& n) {
   auto nty = NodeType(n);
 
   if (auto s = dyn_cast<AST::Select>(n.value)) {
+    assert(!IsHost() && "select should be on device side.");
     assert(!s->inDMA);
     size_t val_count = s->expr_list->Count();
     assert(val_count >= 2);
@@ -779,6 +800,7 @@ bool TopsccCodeGen::Visit(AST::Assignment& n) {
   }
 
   if (auto sa = dyn_cast<AST::SpanAs>(n.value)) {
+    assert(!IsHost() && "span-as should be on device side.");
     ds << d_indent << "auto * " << n.GetName() << " = ";
     auto tty = GetSymbolType(sa->id->name);
     if (isa<FutureType>(tty))
@@ -806,27 +828,45 @@ bool TopsccCodeGen::Visit(AST::Assignment& n) {
       else if (IsWarpLocal())
         ds << d_indent << "__syncsubthreads();\n";
     }
+
+    if (IsHost()) {
+      // TODO: test the case!
+      choreo_unreachable(
+          "error: assignment to data element should be on device side.");
+    }
+
     return true;
   }
 
-  if (isa<BoundedType>(nty) || isa<SpannedType>(nty) || isa<FutureType>(nty) ||
-      isa<IntegerType>(nty)) {
+  if (isa<BoundedType>(nty) || isa<SpannedType>(nty) || isa<FutureType>(nty)) {
+    assert(!IsHost() && "bounded/spanned/future should be on device side.");
     ds << d_indent << ((IsMutable(*nty)) ? "" : "auto ") << n.GetName() << " = "
        << ExprSTR(n.value, false) << ";\n";
-  } else {
-    errs() << "Assignment " << STR(n) << " unprocessed, not supported "
-           << PSTR(nty) << "\n";
-    return false;
+    return true;
   }
 
-  return true;
+  if (isa<IntegerType>(nty)) {
+    if (IsHost())
+      hs << h_indent << ((IsMutable(*nty)) ? "" : "auto ") << n.GetName()
+         << " = " << ExprSTR(n.value, false) << ";\n";
+    else
+      ds << d_indent << ((IsMutable(*nty)) ? "" : "auto ") << n.GetName()
+         << " = " << ExprSTR(n.value, false) << ";\n";
+    return true;
+  }
+
+  errs() << "Assignment " << STR(n) << " unprocessed, not supported "
+         << PSTR(nty) << "\n";
+  return false;
 }
 
 bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
 
+  // only do the whole codegen when accessing the outer parallel-by
   if (parallel_level != 1) return true;
 
+  // note: `thread_dims` for gcu400 is generated in `EmitDeviceFuncDecl`
   auto& lconfig = cgi->GetFunctionLaunches(fname)[parallel_idx];
   hs << h_indent << "dim3 __" << fname << "_gdims" << parallel_idx << "("
      << ValueSTR(lconfig.grid_dim_x) << ", " << ValueSTR(lconfig.grid_dim_y)
@@ -872,7 +912,7 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
     ptr<Type> otype;
     ParamAttr oattr = ParamAttr::NONE;
     bool has_spanned_arg = false;
-    for (auto& item : GetChoreoFuncIns(updating_cgi)) {
+    for (const auto& item : GetChoreoFuncIns(updating_cgi)) {
       auto sname = item.name;
       if (isa<SpannedType>(item.type)) {
         oname = UnScopedName(sname);
@@ -894,6 +934,13 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
 bool TopsccCodeGen::Visit(AST::DMA& n) {
   TraceEachVisit(n);
 
+  // Currently, DMA in host-side:
+  // - will not generate any future.
+  // - are performed directly by manipulating pointers.
+  // - not support tiling.
+  // - not support async.
+
+  // Generate tops dte and choreo::future in device-side
   auto claimFuture = [this, &n](const std::string& buf_expr) -> std::string {
     if (!n.future.empty() && claimed_dte.count(InScopeName(n.future)))
       return n.future;
@@ -927,10 +974,14 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     auto buf_name = FBInfo().at(InScopeName(n.future)).buffer;
 
     // Handle placeholder checks that need to postpone after all lv processed
-    // currently, the only case is the plder tied to global buffer
-    //
+    // Currently, the only case is the plder tied to global buffer
+
     // assert(ssm.HasDeviceName(buf_name) && "buffer has been defined");
     if (!ssm.HasDeviceName(buf_name)) pld_checklist.push_back(buf_name);
+
+    // dma.any in host-side is of no practical use.
+    // It should not be claimed. And there is no future to remap to.
+    if (IsHost()) return true;
 
     claimFuture(UnScopedName(buf_name));
     // make following buffer reference all be indirect
@@ -960,17 +1011,28 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   assert(f_sty && "can not retrieve data from 'from'.");
   assert(t_sty && "can not retrieve data from 'to'.");
 
+  auto SymbolToSymbol = [f_ca, t_ca]() -> bool {
+    return f_ca->SymbolicBufferName() && t_ca->SymbolicBufferName();
+  };
+  auto SymbolToTile = [f_ca, t_ca]() -> bool {
+    return f_ca->SymbolicBufferName() && !t_ca->SymbolicBufferName();
+  };
+  auto TileToSymbol = [f_ca, t_ca]() -> bool {
+    return !f_ca->SymbolicBufferName() && t_ca->SymbolicBufferName();
+  };
+  // Currently, not support tile to tile.
+
   if (t_sty->GetStorage() == Storage::GLOBAL && use_hetero_tileflow &&
       IsHostSide()) {
     std::string bts = NameBaseType(t_sty->ElementType(), false);
     auto buf_sym = t_sym + "__device";
     auto buf_sym_from = f_sym + "__device";
     if (n.operation == ".copy") {
-      if (f_ca->positions == nullptr && t_ca->positions == nullptr) {
+      if (SymbolToSymbol()) {
         // direct copy
         hs << h_indent << bts << " * " << buf_sym << " = " << buf_sym_from
            << ";\n";
-      } else if (f_ca->positions == nullptr && t_ca->positions != nullptr) {
+      } else if (SymbolToTile()) {
         static int s_cnt = 0;
         auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
                         f_sym + "_2_" + t_sym;
@@ -995,7 +1057,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
 
         hs << h_indent << bts << " * " << buf_sym << " + " << off_name << " = "
            << buf_sym_from << ";\n";
-      } else if (f_ca->positions != nullptr && t_ca->positions == nullptr) {
+      } else if (TileToSymbol()) {
         static int s_cnt = 0;
         auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
                         f_sym + "_2_" + t_sym;
@@ -1022,33 +1084,36 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
            << " + " << off_name << ""
            << ";\n";
       } else
-        choreo_unreachable("not support dual-side chuckat in dma copy");
+        choreo_unreachable("not support dual-side chunkat in dma copy");
     } else
       choreo_unreachable("not support host-side dma other than copy");
 
     return true;
   }
 
-  // not consider tileflow for now
   // TODO: how to do tiling in host-side?
   if (t_sty->GetStorage() == Storage::GLOBAL && IsHost()) {
+    if (n.async) choreo_unreachable("not support host-side async dma yet");
     std::string bts = NameBaseType(t_sty->ElementType(), false);
     auto buf_sym = t_sym + "__device";
     auto buf_sym_from = f_sym + "__device";
     if (n.operation == ".copy") {
-      if (f_ca->positions == nullptr && t_ca->positions == nullptr) {
+      if (SymbolToSymbol()) {
         // direct copy
         hs << h_indent << "choreo::abend_true(topsMemcpy(" << buf_sym << ", "
            << buf_sym_from << ", " << UnScopedSizeExpr(*f_sty)
            << ", topsMemcpyDeviceToDevice));\n";
       } else
         choreo_unreachable(
-            "not support tiling chuckat in dma copy at host side for now");
+            "not support tiling chunkat in dma copy at host side for now");
     } else
       choreo_unreachable("not support host-side dma other than copy");
 
     return true;
   }
+
+  // TODO: correct?
+  if (IsHost()) choreo_unreachable("the dma is not supported in host side!");
 
   auto GetBufferExpr = [this](const std::string& sym,
                               const ptr<AST::MultiValues> subscription,
@@ -1070,7 +1135,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     } else
       buf_expr = ssm.DeviceName(sname);
 
-    auto buf_name = buf_expr;
+    std::string buf_name = buf_expr;
     if (subscription != nullptr) {
       if (auto array_ty = dyn_cast<ArrayType>(sym_ty);
           array_ty && CCtx().MemReuse()) {
@@ -1100,6 +1165,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     return std::make_pair(buf_name, buf_expr);
   };
 
+  // output mdspan declaration in device side, return mds name.
   auto GetMDSName = [this](const std::string& buf_name,
                            const std::string& buf_expr,
                            const ptr<SpannedType>& sty) {
@@ -1112,6 +1178,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
        << ", " << UnScopedExpr(RSTR(sty->GetShape())) << ");\n";
     return mds_name;
   };
+
   auto [f_buf_name, f_buf_expr] = GetBufferExpr(f_sym, f_idx, f_ty);
   auto [t_buf_name, t_buf_expr] = GetBufferExpr(t_sym, t_idx, t_ty);
   auto f_mds_name = GetMDSName(f_buf_name, f_buf_expr, f_sty);
@@ -1119,7 +1186,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
 
   auto future_name = n.future;
   // bind the data to the future
-  if (!((f_ca->positions == nullptr) && (t_ca->positions)))
+  if (SymbolToSymbol() || TileToSymbol())
     future_name = claimFuture(t_buf_expr);
   else
     future_name = claimFuture("");
@@ -1147,12 +1214,12 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   }
 
   auto GenOffset = [&](ptr<DMAConfig> config = nullptr) -> std::ostringstream {
-    assert(!(f_ca->positions && t_ca->positions));
-    assert(f_ca->positions || t_ca->positions);
+    // One is symbolic buffer, the other is tiling buffer.
+    assert(SymbolToTile() || TileToSymbol());
     std::ostringstream offset;
     size_t i = 0;
-    auto shape = (f_ca->positions ? t_sty : f_sty)->GetShape();
-    for (auto& p : (f_ca->positions ? f_ca : t_ca)->positions->AllValues()) {
+    auto shape = (SymbolToTile() ? f_sty : t_sty)->GetShape();
+    for (auto& p : (SymbolToTile() ? t_ca : f_ca)->positions->AllValues()) {
       auto idx_exprs = SplitStringByDelimiter(ExprSTR(p, false));
       for (auto i_expr : idx_exprs) {
         if (i != 0) offset << ", ";
@@ -1160,8 +1227,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
           offset << "0";
         else {
           size_t idx = i;
-          if (isa<TransposeConfig>(config))
-            idx = cast<TransposeConfig>(config)->dim_values[i];
+          if (auto tc = dyn_cast<TransposeConfig>(config))
+            idx = tc->dim_values[i];
           offset << "(int)(" << i_expr << " * "
                  << UnScopedExpr(STR(shape.ValueAt(idx))) << ")";
         }
@@ -1172,7 +1239,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   };
 
   if (n.operation == ".copy") {
-    if (f_ca->positions == nullptr && t_ca->positions == nullptr) {
+    if (SymbolToSymbol()) {
       // no chunkat
       ds << d_indent;
       if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
@@ -1182,7 +1249,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       // set the device future
       if (!event_name.empty())
         ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
-    } else if (f_ca->positions == nullptr && t_ca->positions != nullptr) {
+    } else if (SymbolToTile()) {
       static int ds_cnt = 0;
       auto off_name = "__deslice_offset" + std::to_string(ds_cnt++) + "__" +
                       t_sym + "_2_" + f_sym;
@@ -1203,7 +1270,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
              << bts << ">(" << offset.str() << "));\n";
 #endif
       }
-    } else if (f_ca->positions != nullptr && t_ca->positions == nullptr) {
+    } else if (TileToSymbol()) {
       static int s_cnt = 0;
       auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
                       f_sym + "_2_" + t_sym;
@@ -1231,7 +1298,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
        << DelimitedString(pad_config->pad_low) << "};\n";
     ds << d_indent << "int __pad_mid_" << f_buf_name << "[] = {"
        << DelimitedString(pad_config->pad_mid) << "};\n";
-    if (f_ca->positions == nullptr) {
+    if (SymbolToSymbol()) {
       ds << d_indent;
       if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
       ds << "tops::pad" << (fty->IsAsync() ? "_async" : "") << "(*"
@@ -1240,9 +1307,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
          << f_buf_name << ", __pad_mid_" << f_buf_name << ", "
          << pad_config->value.v << ");\n";
       // set the device future
-      if (!event_name.empty()) {
+      if (!event_name.empty())
         ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
-      }
     } else {
       assert(false && "unsupported");
       // TODO: shall we support slice_pad (chunkat+pad)?
@@ -1256,17 +1322,16 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         "__transpose_layout" + std::to_string(t_cnt++) + "__" + f_buf_name;
     ds << d_indent << "int " << layout_name << "[] = {"
        << DelimitedString(transp_config->dim_values) << "};\n";
-    if (f_ca->positions == nullptr && t_ca->positions == nullptr) {
+    if (SymbolToSymbol()) {
       ds << d_indent;
       if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
       ds << "tops::transpose" << (fty->IsAsync() ? "_async" : "") << "(*"
          << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
          << ", " << layout_name << ");\n";
       // set the device future
-      if (!event_name.empty()) {
+      if (!event_name.empty())
         ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
-      }
-    } else if (f_ca->positions != nullptr && t_ca->positions == nullptr) {
+    } else if (TileToSymbol()) {
       static int s_cnt = 0;
       auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
                       f_sym + "_2_" + t_sym;
@@ -1279,10 +1344,9 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
          << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
          << ", " << off_name << ", " << layout_name << ");\n";
       // set the device future
-      if (!event_name.empty()) {
+      if (!event_name.empty())
         ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
-      }
-    } else if (f_ca->positions == nullptr && t_ca->positions != nullptr) {
+    } else if (SymbolToTile()) {
       static int ds_cnt = 0;
       auto off_name = "__deslice_offset" + std::to_string(ds_cnt++) + "__" +
                       t_sym + "_2_" + f_sym;
@@ -1295,9 +1359,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
          << "(*" << future_name << ".get_ctx(), " << t_mds_name << ", "
          << f_mds_name << ", " << layout_name << ", " << off_name << ");\n";
       // set the device future
-      if (!event_name.empty()) {
+      if (!event_name.empty())
         ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
-      }
     }
   }
 
@@ -1308,7 +1371,6 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       // not async, must syncthreads immediately
       // else, defer the sync till the wait time
       if (shared_in_block) ds << d_indent << "__syncthreads();\n";
-
       if (local_in_warp) ds << d_indent << "__syncsubthreads();\n";
     }
   }
@@ -1318,6 +1380,11 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
 
 bool TopsccCodeGen::Visit(AST::Rotate& n) {
   TraceEachVisit(n);
+
+  if (IsHost())
+    choreo_unreachable(
+        "rotate is only support in device side(inside parallel-by)!");
+
   ds << d_indent << "choreo::rotate(";
   int i = 0;
   for (auto& id : n.GetIds()) {
@@ -1375,6 +1442,7 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
     auto expr = cast<AST::Expr>(f);
     bool is_array_ref = (expr->op == "elemof");
     if (isa<FutureType>(NodeType(*f))) {
+      assert(!IsHost());
       ds << d_indent << ExprSTR(f, false) << ".wait();\n";
     } else if (auto ety = dyn_cast<EventArrayType>(NodeType(*f))) {
       if (IsHost())
@@ -1553,18 +1621,6 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
       std::string print_args;
       auto GenFormatAndArgsFromShape = [](const Shape& shape) {
         std::string format;
-#if 0
-        for (int i = 0; i < (int)shape.Rank(); ++i) {
-          if (i != 0) format += ", ";
-          if (isa<int>(&shape.ValueAt(i)))
-            format += "%d";
-          else
-            format += "%u";
-        }
-        std::ostringstream oss;
-        shape.PrintPlain(oss);
-        std::string args = UnScopedExpr(oss.str());
-#else
         std::ostringstream oss;
         for (int i = 0; i < (int)shape.Rank(); ++i) {
           if (i != 0) {
@@ -1575,7 +1631,6 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
           oss << "(long long)" << shape.ValueAt(i);
         }
         std::string args = UnScopedExpr(oss.str());
-#endif
         return std::make_pair(format, args);
       };
       for (const auto& arg : n.GetArguments()) {
@@ -1644,10 +1699,8 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
           for (const auto& arg_str : SplitStringByDelimiter(args_str, ", "))
             print_args += "(long long)" + arg_str + ", ";
         } else
-          choreo_unreachable("unsupported type for printf: " +
-                             AST::TYPE_STR(*arg));
-        // std::cerr << "args: " << ExprSTR(arg)
-        //           << " with type: " << AST::TYPE_STR(*arg) << "\n";
+          choreo_unreachable("unsupported type for print: " +
+                             AST::TYPE_STR(*arg) + "\n\targ: " + ExprSTR(arg));
       }
       if (func_name == "println") print_format += "\\n";
       print_format += "\"";
@@ -1754,6 +1807,7 @@ bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
 
 bool TopsccCodeGen::Visit(AST::InThreadsBlock& n) {
   TraceEachVisit(n);
+  assert(!IsHost());
   ds << d_indent << "// inthreads: " << n.LOC() << "\n";
   if (!n.stmts->None())
     ds << d_indent << "if (" << ExprSTR(n.pred, false) << ") {\n";
@@ -1801,43 +1855,44 @@ bool TopsccCodeGen::Visit(AST::WhileBlock& n) {
 bool TopsccCodeGen::Visit(AST::Return& n) {
   TraceEachVisit(n);
 
+  return_stream.str("");
+
   auto vty = NodeType(*n.value);
+
   if (isa<ScalarType>(vty)) {
-    return_stream << h_indent << "return " << ExprSTR(n.value, true) << ";\n";
-    return true;
+    return_stream << "return " << ExprSTR(n.value, true) << ";\n";
   } else if (auto sty = dyn_cast<SpannedType>(vty)) {
     if (auto id = AST::GetIdentifier(*n.value)) {
       auto sym = id->name;
       if (IsChoreoInput(InScopeName(sym))) {
         // return the parameter
-        return_stream << h_indent << "return " << ExprSTR(n.value, true)
-                      << ";\n";
-        return true;
+        return_stream << "return " << ExprSTR(n.value, true) << ";\n";
       } else if (IsChoreoOutput(InScopeName(sym))) {
         // return the global storage, must map back
-        return_stream << h_indent << "choreo::abend_true(topsMemcpy(" << sym
-                      << ".data(), " << sym << "__device, "
-                      << UnScopedSizeExpr(*sty)
-                      << ", topsMemcpyDeviceToHost));\n";
-        return_stream << h_indent << "choreo::abend_true(topsFree(" << sym
-                      << "__device));\n";
-      }
+        hs << h_indent << "choreo::abend_true(topsMemcpy(" << sym << ".data(), "
+           << sym << "__device, " << UnScopedSizeExpr(*sty)
+           << ", topsMemcpyDeviceToHost));\n";
+      } else
+        choreo_unreachable("unexpected situation");
     } else if (auto expr = cast<AST::Expr>(n.value);
                expr && expr->op == "dataof") {
       // return future.data, must map back
       auto id = cast<AST::Expr>(expr->GetR())->GetSymbol();
       assert(id && "expect a symbol");
       auto sym = id->name + "__buf__";
-      return_stream << h_indent << "choreo::abend_true(topsMemcpy(" << sym
-                    << ".data(), " << sym << "__device, "
-                    << UnScopedSizeExpr(*sty)
-                    << ", topsMemcpyDeviceToHost));\n";
-      return_stream << h_indent << "choreo::abend_true(topsFree(" << sym
-                    << "__device));\n";
+      hs << h_indent << "choreo::abend_true(topsMemcpy(" << sym << ".data(), "
+         << sym << "__device, " << UnScopedSizeExpr(*sty)
+         << ", topsMemcpyDeviceToHost));\n";
     }
+    return_stream << "return " << ExprSTR(n.value, true) << ";\n";
+  } else {
+    choreo_unreachable("not support return value of type: " + PSTR(vty));
   }
-  assert(isa<SpannedType>(vty) && "expect a spanned data.");
-  return_stream << h_indent << "return " << ExprSTR(n.value, true) << ";\n";
+
+  EmitTopsFree();
+
+  hs << h_indent << return_stream.str();
+
   return true;
 }
 
@@ -1845,7 +1900,7 @@ bool TopsccCodeGen::Visit(AST::CppSourceCode& n) {
   TraceEachVisit(n);
 
   CodeSegment cur_cs = (n.host) ? CS_USER : CS_COK;
-  if (cur_cs != cs) { code_segments.push_back(""); }
+  if (cur_cs != cs) code_segments.push_back("");
 
   // append the content
   code_segments.back() += n.GetCode();
@@ -1894,7 +1949,7 @@ void TopsccCodeGen::EmitHostRuntimeCheck() {
   std::map<ValueExpr, std::vector<Entry>> ve_entries_map;
 
   size_t host_pindex = 0;
-  for (auto& item : GetChoreoFuncIns(cgi)) {
+  for (const auto& item : GetChoreoFuncIns(cgi)) {
     assert((int)host_pindex == item.p_index);
     auto name = ssm.HostName(item.name);
     if (auto sty = dyn_cast<SpannedType>(item.type)) {
@@ -1921,7 +1976,7 @@ void TopsccCodeGen::EmitHostRuntimeCheck() {
   //   __co__ void foo(f32 [M, N] a, f32 [N, K] b)
   //
   // then a.shape()[1] should be equal to b.shape()[0]
-  for (auto& [_, entries] : ve_entries_map) {
+  for (const auto& [_, entries] : ve_entries_map) {
     for (size_t i = 1; i < entries.size(); ++i) {
       auto& entry0 = entries[i - 1];
       auto& entry1 = entries[i];
@@ -1944,6 +1999,7 @@ void TopsccCodeGen::EmitHostRuntimeCheck() {
 }
 
 void TopsccCodeGen::EmitMemReuse() {
+  assert(IsHost());
   const auto& script = FCtx(fname).GetMemReuseScript();
   if (script.empty()) return;
   hs << h_indent << R"(// JIT memory reuse begin)" << "\n";
@@ -1974,12 +2030,26 @@ DeviceParamTypeStringify(const Choreo::Type& ty) {
   else if (auto sty = dyn_cast<SpannedType>(&ty))
     return std::string(NameBaseType(sty->ElementType(), false)) + " *";
   else if (auto bitt = dyn_cast<BoundedITupleType>(&ty)) {
+    // There should have no BoundedIntegerType.
+    // They have been normalized to BoundedITupleType.
     assert(bitt->Dims() == 1);
     (void)bitt;
     return "int";
   } else
     choreo_unreachable("unsupported host function type.");
   return "";
+}
+
+void TopsccCodeGen::EmitTopsFree() {
+  assert(IsHost());
+  for (const auto& item : GetDeviceFuncIns(updating_cgi)) {
+    if (!PrefixedWith(scoped_symtab.ScopeName(), GetScope(item.name))) continue;
+    if (!isa<SpannedType>(item.type)) continue;
+    if (item.attr == ParamAttr::GLOBAL_INPUT) continue;
+    if (!NeedDeviceFunc() && !IsChoreoOutput(item.name)) continue;
+    hs << h_indent << "choreo::abend_true(topsFree(" << UnScopedName(item.name)
+       << "__device));\n";
+  }
 }
 
 void TopsccCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
@@ -2402,11 +2472,11 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
           return "(" + UnScopedExpr(STR(svs.val_expr)) + ")";
       }
     }
-    if (ConvertibleToInt(NodeType(*e))) {
-      if (IsValidValueItem(expr->GetOptValExpr())) {
+
+    if (ConvertibleToInt(NodeType(*e)))
+      if (IsValidValueItem(expr->GetOptValExpr()))
         return "(" + UnScopedExpr(STR(expr->GetOptValExpr())) + ")";
-      }
-    }
+
     if (expr->IsReference()) {
       if (PSTR(expr) == "_") return "(0)";
       if (auto ca = dyn_cast<AST::ChunkAt>(expr->GetR())) {
@@ -2484,7 +2554,6 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
         auto& l = expr->GetL();
         auto& r = expr->GetR();
         auto& op = expr->GetOp();
-        // handle bounded variable times
         if (op == "#" && IsActualBoundedIntegerType(l->GetType()) &&
             IsActualBoundedIntegerType(r->GetType())) {
           auto rty = cast<BoundedType>(NodeType(*r));
@@ -2515,6 +2584,7 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       choreo_unreachable("unsupported expression '" + expr->GetOp() +
                          "': " + PSTR(expr) + ".");
   } else if (auto c = dyn_cast<AST::Call>(e)) {
+    assert(!is_host);
     return CallSTR(*c);
   } else
     choreo_unreachable("unsupported expression '" + expr->GetOp() + "'.");
@@ -2524,20 +2594,17 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
 
 const std::string TopsccCodeGen::CallSTR(AST::Call& n) const {
   std::ostringstream oss;
-  auto func_name = [&n](const std::string& name) {
+  auto func_name = [&n](const std::string& name) -> std::string {
     if (!n.is_arith_bif) return name;
     if (name == "__log")
-      return std::string("tcle::ln");
+      return "tcle::ln";
     else if (name == "__pow")
-      return std::string("tcle::power");
+      return "tcle::power";
     else {
       const std::string prefix = "__";
       std::string func_name = name;
-      if (name.size() >= prefix.size() &&
-          name.compare(0, prefix.size(), prefix) == 0) {
-        func_name = name.substr(prefix.size());
-      }
-      return std::string("tcle::") + func_name;
+      if (auto res = RemovePrefixOrNull(prefix, name)) func_name = *res;
+      return "tcle::" + func_name;
     }
   };
 
@@ -2569,5 +2636,6 @@ const std::string TopsccCodeGen::CallSTR(AST::Call& n) const {
       oss << UnScopedName(ExprSTR(a, IsHost()));
   }
   oss << ")";
+
   return oss.str();
 }

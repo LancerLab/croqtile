@@ -60,8 +60,8 @@ __co__ auto foo(f32 [32, 4] a) {
 // CHECK-NHT:   dim3 __foo_bdims0(2, 1, 1);
 // CHECK-NHT:   __choreo_device_foo<<<__foo_gdims0, __foo_bdims0>>>(a__device, data__device);
 // CHECK-NHT:   choreo::abend_true(topsDeviceSynchronize());
-// CHECK-NHT:   choreo::abend_true(topsFree(a__device));
 // CHECK-NHT:   choreo::abend_true(topsMemcpy(data.data(), data__device, 512ULL, topsMemcpyDeviceToHost));
+// CHECK-NHT:   choreo::abend_true(topsFree(a__device));
 // CHECK-NHT:   choreo::abend_true(topsFree(data__device));
 // CHECK-NHT:   return data;
 // CHECK-NHT: }
