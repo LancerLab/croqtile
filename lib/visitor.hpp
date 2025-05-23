@@ -266,7 +266,7 @@ private:
   static constexpr const char* color_reset = "\033[0m";
 
 protected:
-  void ShowSourceLocation(const location& l) {
+  void ShowSourceLocation(const location& l) const {
     if (!CCtx().ShowSourceLocation()) return;
 
     // Retrieve the line that caused the error
@@ -284,21 +284,21 @@ protected:
   }
 
 public:
-  void Error(const location& loc, const std::string& message) {
+  void Error(const location& loc, const std::string& message) const {
     errs() << loc << ": " << ((should_use_colors()) ? color_red : "")
            << "error: " << ((should_use_colors()) ? color_reset : "");
     errs() << message << "\n";
     ShowSourceLocation(loc);
   }
 
-  void Warning(const location& loc, const std::string& message) {
+  void Warning(const location& loc, const std::string& message) const {
     errs() << loc << ": " << ((should_use_colors()) ? color_yellow : "")
            << "warning: " << ((should_use_colors()) ? color_reset : "");
     errs() << message << "\n";
     ShowSourceLocation(loc);
   }
 
-  void Note(const location& loc, const std::string& message) {
+  void Note(const location& loc, const std::string& message) const {
     errs() << loc << ": note: " << message << std::endl;
     ShowSourceLocation(loc);
   }

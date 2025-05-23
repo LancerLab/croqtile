@@ -36,20 +36,34 @@ Option<bool> no_decay_spanview(OptionKind::Hidden, "--no-decay-spanview",
 
 namespace {
 
+inline const char* LocalSharedPredicate() {
+  return "threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0";
+}
+inline const char* SubSharedPredicate() {
+  return "threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0 && "
+         "subThreadIdx.x == 0 && subThreadIdx.y == 0 && subThreadIdx.z == 0";
+}
+
 const char* SingleThreadPredicate() {
-  static const char* pred =
-      "threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0";
-  static const char* pred_subthread =
-      "threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0 && "
-      "subThreadIdx.x == 0 && subThreadIdx.y == 0 && subThreadIdx.z == 0";
-  if (arch.GetValue() == "gcu400") return pred_subthread;
-  return pred;
+  if (arch.GetValue() == "gcu400") return SubSharedPredicate();
+  return LocalSharedPredicate();
 }
 
 const char* SingleSubThreadPredicate() {
   static const char* pred_subthread =
       "subThreadIdx.x == 0 && subThreadIdx.y == 0 && subThreadIdx.z == 0";
   return pred_subthread;
+}
+
+inline std::string ImplicitPred(Storage max, Storage cur) {
+  if (max == Storage::SUB) {
+    if (cur == Storage::LOCAL)
+      return SingleSubThreadPredicate();
+    else if (cur == Storage::SHARED)
+      return SubSharedPredicate();
+  } else if (max == Storage::LOCAL && cur == Storage::SHARED)
+    return LocalSharedPredicate();
+  return "";
 }
 
 const char* SingleInstancePredicate(bool shared_in_block) {
@@ -161,6 +175,17 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
       IncrDeviceIndent();
     }
   }
+
+  if (!IsHost() && max_parallel_level_valid && !n.IsBlock() &&
+      n.GetLevel() != Storage::NONE) {
+    auto max_pl = GCUDeviceParallelLevel(max_parallel_level);
+    auto pred = ImplicitPred(max_pl, n.GetLevel());
+    if (!pred.empty()) {
+      ds << d_indent << "if (" << pred << ") { // implicit inthreads\n";
+      IncrDeviceIndent();
+    }
+  }
+
   return true;
 }
 
@@ -291,6 +316,17 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
       ds << d_indent << "}\n";
     }
   }
+
+  if (!IsHost() && max_parallel_level_valid && !n.IsBlock() &&
+      n.GetLevel() != Storage::NONE) {
+    auto max_pl = GCUDeviceParallelLevel(max_parallel_level);
+    auto pred = ImplicitPred(max_pl, n.GetLevel());
+    if (!pred.empty()) {
+      DecrDeviceIndent();
+      ds << d_indent << "} // end implicit inthreads\n";
+    }
+  }
+
   return true;
 }
 

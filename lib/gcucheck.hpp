@@ -8,11 +8,14 @@
 
 namespace Choreo {
 
+extern Storage GCUDeviceParallelLevel(int);
+extern int GCUDeviceParallelDepth(Storage);
+
 struct GCUCheck : public VisitorWithSymTab {
 private:
   std::unordered_map<std::string, AST::Parameter*> cur_params;
-  int parallel_level = 0;
-  int max_parallel_level = 0;
+  int pl_depth = 0;
+  int max_pl_depth = 0;
   int kernel_launch_count = 0;
   int local_level = 0;
   std::string cur_fname;
@@ -35,15 +38,14 @@ private:
       cur_params.clear();
       cur_fname = cf->name;
       kernel_launch_count = 0;
-    } else if (isa<AST::ParallelBy>(&n)) {
-      parallel_level++;
-      if (parallel_level == 1) ++kernel_launch_count;
-      const int pl_limit = (CCtx().GetArch() == TargetArch::GCU4) ? 4 : 3;
-      if (parallel_level > pl_limit - 1)
-        Error(n.LOC(), "parallel level exceeds limit: " +
-                           std::to_string(parallel_level) + " > " +
-                           std::to_string(pl_limit - 1) + ".");
-      max_parallel_level = parallel_level;
+    } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+      if (pb->GetLevel() == Storage::NONE) {
+        pl_depth++;
+        pb->SetLevel(PLevel(*pb, pl_depth));
+      } else
+        pl_depth = PDepth(*pb, pb->GetLevel());
+      if (pb->GetLevel() == Storage::SHARED) ++kernel_launch_count;
+      max_pl_depth = pl_depth;
     }
     return true;
   }
@@ -52,22 +54,29 @@ private:
     TraceEachVisit(n, "(post)");
     if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       std::string append_note = ":";
+      assert(pb->GetLevel() != Storage::NONE);
+      pl_depth = PDepth(*pb, pb->GetLevel());
       if (CCtx().GetTarget() == CompileTarget::Topscc)
-        append_note += PBLevelString();
+        append_note += PBLevelString(*pb);
       else
-        append_note += std::to_string(max_parallel_level - parallel_level);
+        append_note += std::to_string(max_pl_depth - pl_depth);
       auto pty = cast<BoundedITupleType>(NodeType(*pb->bpv));
       pty->AppendNote(append_note);
       for (auto& symbol : pb->cmpt_bpvs->AllValues())
         cast<BoundedITupleType>(NodeType(*symbol))->AppendNote(append_note);
 
-      parallel_level--;
-      assert(parallel_level >= 0 && "Unexpected parallel level");
-      if (parallel_level == 0) {
-        max_parallel_level = 0;
+      pl_depth--;
+      assert(pl_depth >= 0 && "Unexpected parallel level");
+      if (pl_depth == 0) {
+        max_pl_depth = 0;
         local_level = 0;
       }
     }
+
+    // mask stmts that are possible to be shared
+    else if (auto c = dyn_cast<AST::Call>(&n))
+      if (c->is_stmt) n.SetLevel(PLevel(n, pl_depth));
+
     return true;
   }
 
@@ -75,26 +84,41 @@ private:
     if (trace_visit) dbgs() << n.TypeNameString() << sup << "\n";
   }
 
-  const std::string PBLevelString() {
-    if (max_parallel_level == 1) {
-      switch (parallel_level) {
+private:
+  Storage PLevel(AST::Node& n, int depth) {
+    auto lvl = GCUDeviceParallelLevel(depth);
+    if (lvl == Storage::NONE) {
+      Error(n.LOC(), "the parallel level (depth: " + std::to_string(pl_depth) +
+                         ") is not supported by current GCU architecture (" +
+                         cur_arch + ").");
+      ++error_count;
+    }
+    return lvl;
+  }
+
+  int PDepth(AST::Node& n, Storage l) {
+    auto depth = GCUDeviceParallelDepth(l);
+    if (depth == -1) {
+      Error(n.LOC(), "the parallel level (" + STR(l) +
+                         ") is not supported by  current GCU architecture (" +
+                         cur_arch + ").");
+      ++error_count;
+    }
+    return depth;
+  }
+
+public:
+  const std::string PBLevelString(AST::ParallelBy& n) {
+    if (max_pl_depth == 1) {
+      switch (pl_depth) {
       case 0: return "global"; break;
       case 1: return "local"; break;
       default:
-        choreo_unreachable("unsupported parallel level: " +
-                           std::to_string(parallel_level) + ".");
+        choreo_unreachable(
+            "unsupported parallel level: " + std::to_string(pl_depth) + ".");
       }
-    } else {
-      switch (parallel_level) {
-      case 0: return "global"; break;
-      case 1: return "shared"; break;
-      case 2: return "local"; break;
-      case 3: return "sublocal"; break;
-      default:
-        choreo_unreachable("unsupported parallel level: " +
-                           std::to_string(parallel_level) + ".");
-      }
-    }
+    } else
+      return STR(PLevel(n, pl_depth));
     return "";
   }
 
@@ -713,26 +737,17 @@ public:
     auto st = sty->GetStorage();
     switch (st) {
     case Storage::GLOBAL:
-      if (parallel_level != 0) {
+      if (pl_depth != 0) {
         Error(n.LOC(), "global variable '" + n.name_str +
                            "` mustn't be declared inside parallel-by.");
         error_count++;
       }
       break;
     case Storage::SHARED:
-      if (parallel_level == 0) {
+      if (pl_depth == 0) {
         Error(n.LOC(), "shared variable '" + n.name_str +
                            "` must be declared inside parallel-by.");
         error_count++;
-#if 0
-      } else if (local_level == 1 && parallel_level == 2) {
-        // if parallel_level == 1, allow
-        // eg. parallel p by 6 { shared; local; }
-        Error(n.LOC(), "shared variable '" + n.name_str +
-                           "` mustn't be declared within the same level of "
-                           "parallel-by as local variables.");
-        error_count++;
-#endif
       }
       if (sty->RuntimeShaped() && !CCtx().MemReuse()) {
         Error(n.LOC(), "GCU forbids shared variable '" + n.name_str +
@@ -742,19 +757,12 @@ public:
       }
       break;
     case Storage::LOCAL:
-      if (parallel_level == 0) {
+      if (pl_depth == 0) {
         Error(n.LOC(), "local variable '" + n.name_str +
                            "` must be declared inside parallel-by.");
         error_count++;
-#if 0
-      } else if (local_level != 0 && parallel_level != local_level) {
-        Error(n.LOC(), "local variable '" + n.name_str +
-                           "` must be declared inside a level of parallel-by "
-                           "that is identical to other local variables.");
-        error_count++;
-#endif
       } else if (local_level == 0)
-        local_level = parallel_level;
+        local_level = pl_depth;
       if (sty->RuntimeShaped() && !CCtx().MemReuse()) {
         Error(n.LOC(), "GCU forbids local variable '" + n.name_str +
                            "` to be dynamically shaped (by " +
@@ -897,7 +905,7 @@ public:
     TraceEachVisit(n);
 
     auto pl2s = [this]() {
-      switch (parallel_level) {
+      switch (pl_depth) {
       case 0: return Storage::GLOBAL;
       case 1: return Storage::SHARED;
       case 2: return Storage::LOCAL;
@@ -909,14 +917,14 @@ public:
 
     switch (n.scope->Get()) {
     case Storage::GLOBAL:
-      if (parallel_level != 0) {
+      if (pl_depth != 0) {
         Error(n.LOC(), "unsupported: " + PSTR(n.scope) +
                            " synchronization in " + STR(pl2s()) + " scope.");
         error_count++;
       }
       break;
     case Storage::SHARED:
-      if (parallel_level == 0) {
+      if (pl_depth == 0) {
         Error(n.LOC(), "unsupported: " + PSTR(n.scope) +
                            " synchronization in " + STR(pl2s()) + " scope.");
         error_count++;
@@ -927,7 +935,7 @@ public:
         Error(n.LOC(), STR(CCtx().GetArch()) + " does not support " +
                            PSTR(n.scope) + " synchronization.");
         error_count++;
-      } else if (parallel_level != 3) {
+      } else if (pl_depth != 3) {
         Error(n.LOC(), "unsupported: " + PSTR(n.scope) +
                            " synchronization in " + STR(pl2s()) + " scope.");
         error_count++;

@@ -1,0 +1,83 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -gs -t topscc --mem-reuse --liveness %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+#include <iostream>
+
+//#define SINGLE_STORE
+
+__co__ auto ele_add(s32 [M] lhs, s32 [M] rhs) {
+  s32 [lhs.span] output;
+
+  // maximum parallelizations
+  gpl = 2, bpl = 12;
+  max_pl = gpl * bpl;
+
+  // hardware limitations
+  l1_size = (1 << 20) + (1 << 19);
+  l2_size = (1 << 22);
+
+  l2_elem_count = (((l2_size / 3 / |s32|) + 127) / 128) * 128;
+//  println("M: ", M, ", l2 elem count: ", l2_elem_count, ", iteration count: ", M / (l2_elem_count * gpl), ", max elem: ", M / (l2_elem_count * gpl) * (l2_elem_count * gpl));
+
+  if (M > (l2_elem_count * gpl)) {
+    // in this scenario, it worth utilizing all the PEs
+//    __cpp__("auto start = std::chrono::high_resolution_clock::now();");
+
+    parallel p by gpl {
+      // decide the iteration count
+      with x in [M / (l2_elem_count * #p)]
+        foreach x(:1:) inthreads (x # p * l2_elem_count + l2_elem_count < M) {
+//          println("[", p, "] iteration: ", x, ", x # p: ", x # p, ", index: ", (x # p) * (M / (#x * #p)), ", inthreads: ", x # p * l2_elem_count);
+          lfs = dma.copy.async lhs.chunkat(x # p) => shared;
+          rfs = dma.copy.async rhs.chunkat(x # p) => shared;
+          wait lfs, rfs;
+
+#ifndef SINGLE_STORE
+          shared s32 [lfs.span] l2_out;
+#endif
+
+          parallel q by bpl {
+            lfl = dma.copy.async lfs.chunkat(q) => local;
+            rfl = dma.copy.async rfs.chunkat(q) => local;
+            wait lfl, rfl;
+
+            local s32 [lfl.span] l1_out;
+
+            foreach i in [l1_out.span]
+              l1_out.at(i) = lfl.data.at(i) + rfl.data.at(i);
+
+#ifdef SINGLE_STORE
+            dma.copy l1_out => output.chunkat(x # p # q);
+          }
+#else
+            dma.copy l1_out => l2_out.chunkat(q);
+          }
+          dma.copy l2_out => output.chunkat(x # p);
+#endif
+        }
+
+    }
+
+//    __cpp__("auto end = std::chrono::high_resolution_clock::now();");
+//    __cpp__(R"(printf("time spend: %lld\n", start - end);)");
+  }
+
+  return output;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::s32>(1 << 23);
+  auto b = choreo::make_spandata<choreo::s32>(1 << 23);
+  a.fill_random(-10, 10);
+  b.fill_random(-10, 10);
+
+  auto res = ele_add(a.view(), b.view());
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    choreo::choreo_assert(a[i] + b[i] == res[i], ("values[" + std::to_string(i) + "] are not equal.").c_str());
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK: Test Passed

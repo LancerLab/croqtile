@@ -698,11 +698,11 @@ ValueNumbering::SignBoundedOperation(const location& loc, const std::string& op,
 
   std::optional<std::string> res;
   if (op == "+" || op == "-" || op == "*" || op == "/" || op == "%") {
-    if (isa<BoundedType>(lhs.GetType()) && (lhs.GetType()->Dims() == 1) &&
-        (isa<IntegerType>(rhs.GetType())))
+    if (isa<BoundedType>(lhs.GetType()) && lhs.GetType()->Dims() == 1 &&
+        CanYieldAnInteger(visitor->NodeType(rhs)))
       res = GetSignatureForNode(lhs);
     else if (isa<BoundedType>(rhs.GetType()) && (rhs.GetType()->Dims() == 1) &&
-             (isa<IntegerType>(lhs.GetType())))
+             CanYieldAnInteger(visitor->NodeType(lhs)))
       res = GetSignatureForNode(rhs);
     else if (isa<BoundedITupleType>(lhs.GetType()) &&
              (isa<ITupleType>(rhs.GetType())))

@@ -1,0 +1,20 @@
+// RUN: choreo -es -t topscc %s -o - | FileCheck --match-full-lines %s
+
+__co__ auto foo(global f32 [1, 2] a, s32 [3, 5] b) {
+  parallel p by 1{
+    dma.copy a => shared;
+    dma.copy b => local;
+  }
+}
+
+
+// CHECK-NOT: int * a__device = nullptr;
+// CHECK: int * b__device = nullptr;
+// CHECK: choreo::abend_true(topsMalloc(&b__device, 60ULL));
+// CHECK: choreo::abend_true(topsMemcpy(b__device, b.data(), 60ULL, topsMemcpyHostToDevice));
+// CHECK-NOT: int * a__device = nullptr;
+// CHECK: __choreo_device_foo<<<__foo_gdims0, __foo_bdims0>>>(a.data(), b__device);
+// CHECK-NOT: choreo::abend_true(topsMemcpy(a.data(), a__device, *
+// CHECK: choreo::abend_true(topsMemcpy(b.data(), b__device, 60ULL, topsMemcpyDeviceToHost));
+// CHECK-NOT: choreo::abend_true(topsFree(a__device));
+// CHECK: choreo::abend_true(topsFree(b__device));

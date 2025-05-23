@@ -41,6 +41,10 @@ struct Node {
   ptr<Type> pty = MakeUnknownType();
   std::string note;
 
+protected:
+  Storage level = Storage::NONE; // belongs to a specific level
+
+public:
   Node(const location& l, const ptr<Type>& p = MakeUnknownType())
       : loc(l), pty(p) {}
 
@@ -67,6 +71,8 @@ struct Node {
   }
 
   virtual bool IsBlock() const { return false; }
+  virtual Storage GetLevel() const { return level; }
+  virtual void SetLevel(Storage l) { level = l; }
 
   virtual void Print(std::ostream& os, const std::string& prefix = {},
                      bool with_type = false) const = 0;
@@ -1228,8 +1234,10 @@ public:
   bool async = false;
 
   ParallelBy(const location& l, const ptr<MultiNodes>& config,
-             const ptr<MultiNodes>& ss, bool a = false)
+             const ptr<MultiNodes>& ss, bool a = false,
+             Storage s = Storage::NONE)
       : Node(l), stmts(ss), async(a) {
+    SetLevel(s); // override it for the parallel-level annotation
     if (config->Count() == 2) {
       if (isa<Identifier>(config->values[0])) {
         // parallel p by 2 {}

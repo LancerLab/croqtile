@@ -6,7 +6,7 @@ __co__ void foo() {
   parallel by 3 parallel by 2 parallel by 1; // only valid for gcu4
 }
 
-// CHECK: error: parallel level exceeds limit: 3 > 2.
+// CHECK: error: the parallel level (depth: 3) is not supported by current GCU architecture (GCU300).
 
 __co__ void bar() {
   sync.global;
@@ -35,7 +35,7 @@ __co__ void bar() {
 // CHECK: error: GCU300 does not support local synchronization.
 // CHECK: error: unsupported: global synchronization in local scope.
 // CHECK: error: GCU300 does not support local synchronization.
-// CHECK: error: parallel level exceeds limit: 3 > 2.
+// CHECK: error: the parallel level (depth: 3) is not supported by current GCU architecture (GCU300).
 // CHECK: error: unsupported: global synchronization in sub-local scope.
 // CHECK: error: GCU300 does not support local synchronization.
 

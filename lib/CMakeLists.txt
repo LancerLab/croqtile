@@ -53,6 +53,7 @@ add_custom_target(
 # Define the source files for your codegen library
 set(CODEGEN_SOURCES
   ast.cpp
+  codegen.cpp
   codegen_cuda.cpp
   codegen_cuda_types.cpp
   codegen_factor.cpp

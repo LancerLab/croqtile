@@ -10,6 +10,9 @@
 
 namespace Choreo {
 
+extern Storage GCUDeviceParallelLevel(int);
+extern int GCUDeviceParallelDepth(Storage);
+
 struct SymbolDetail {
   // information from choreo code
   std::string name;
