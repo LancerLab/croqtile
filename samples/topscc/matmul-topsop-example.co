@@ -1,0 +1,59 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+__co__ auto matmul(s32 [M, K] lhs, s32 [K, N] rhs) {
+ s32 [M, N] output;
+
+ // set the L1 block dimensions
+ block_m = 4, block_k = 256, block_n = 64;
+
+ parallel p by 1
+  with {m_tile, k_tile, n_tile}
+   in [M/block_m, K/block_k, N/block_n] // the tiling factors
+
+   foreach m_tile, n_tile {
+     // define the L1 buffer and initialize
+     local s32 [block_m, block_n] l1_out {0};
+
+     foreach k_tile {
+       lf = dma.copy.async lhs.chunkat(m_tile, k_tile) => local;
+       rf = dma.copy.async rhs.chunkat(k_tile, n_tile) => local;
+       wait lf , rf;
+
+       // calculating in a single block
+       foreach {m, n, k} in [block_m, block_n, block_k]
+         l1_out.at(m, n) +=
+            lf.data.at(m, k) * rf.data.at(k, n);
+
+       dma.copy l1_out => output.chunkat(m_tile, n_tile);
+     }
+   }
+
+ return output;
+}
+
+int main() {
+  auto lhs = choreo::make_spandata<choreo::s32>(128, 256);
+  auto rhs = choreo::make_spandata<choreo::s32>(256, 256);
+
+  lhs.fill_random(-10, 10);
+  rhs.fill_random(-10, 10);
+
+  auto res = matmul(lhs.view(), rhs.view());
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j) {
+      int ref = 0;
+
+      for (size_t k = 0; k < lhs.shape()[1]; ++k)
+        ref += lhs[i][k]*rhs[k][j];
+
+      choreo::choreo_assert(ref == res[i][j],
+                            "values are not equal.");
+    }
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK: Test Passed
+

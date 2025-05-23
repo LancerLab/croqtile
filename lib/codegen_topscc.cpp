@@ -834,17 +834,19 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
   if (!HasChoreoOutput()) {
     std::string oname = "";
     ptr<Type> otype;
+    ParamAttr oattr = ParamAttr::NONE;
     bool has_spanned_arg = false;
     for (auto& item : GetChoreoFuncIns(updating_cgi)) {
       auto sname = item.name;
       if (isa<SpannedType>(item.type)) {
         oname = UnScopedName(sname);
         otype = item.type;
+        oattr = item.attr;
         has_spanned_arg = true;
       }
     }
 
-    if (has_spanned_arg)
+    if (has_spanned_arg && oattr != ParamAttr::GLOBAL_INPUT)
       hs << h_indent << "choreo::abend_true(topsMemcpy(" << oname << ".data(), "
          << oname + "__device" << ", " << UnScopedSizeExpr(*otype)
          << ", topsMemcpyDeviceToHost));\n";
