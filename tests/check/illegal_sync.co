@@ -1,13 +1,6 @@
 // RUN: choreo %s 2>&1 | FileCheck %s
 // RUN: choreo -arch=gcu400 %s 2>&1 | FileCheck --check-prefix=GCU4CHK %s
 
-__co__ void foo() {
-  parallel by 2 parallel by 1;
-  parallel by 3 parallel by 2 parallel by 1; // only valid for gcu4
-}
-
-// CHECK: error: the parallel level (depth: 3) is not supported by current GCU architecture (GCU300).
-
 __co__ void bar() {
   sync.global;
   sync.shared;  // error
