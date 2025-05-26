@@ -1899,11 +1899,19 @@ bool TopsccCodeGen::Visit(AST::Return& n) {
 bool TopsccCodeGen::Visit(AST::CppSourceCode& n) {
   TraceEachVisit(n);
 
-  CodeSegment cur_cs = (n.host) ? CS_USER : CS_COK;
-  if (cur_cs != cs) code_segments.push_back("");
+  if (n.kind == AST::CppSourceCode::Inline) {
+    if (IsHost())
+      hs << n.GetCode();
+    else
+      ds << n.GetCode();
+  } else {
+    CodeSegment cur_cs =
+        (n.kind == AST::CppSourceCode::Host) ? CS_USER : CS_COK;
+    if (cur_cs != cs) { code_segments.push_back(""); }
 
-  // append the content
-  code_segments.back() += n.GetCode();
+    // append the content
+    code_segments.back() += n.GetCode();
+  }
 
   return true;
 }

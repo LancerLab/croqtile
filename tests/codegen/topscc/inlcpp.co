@@ -1,0 +1,17 @@
+// RUN: choreo -t topscc -es %s -o - | FileCheck %s
+
+__co__ void foo(f32 [32, 17] a) {
+  __cpp__("auto start = std::chrono::high_resolution_clock::now();");
+  parallel p by 1 {
+    dma.copy a => local;
+  }
+  __cpp__("auto end = std::chrono::high_resolution_clock::now();\n");
+  __cpp__("auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);\n");
+  __cpp__(R"(std::cout << "time spend: " << duration.count() << "\n";)");
+}
+
+// CHECK: auto start = std::chrono::high_resolution_clock::now();  dim3 __foo_gdims0(1, 1, 1);
+// CHECK:   __choreo_device_foo<<<__foo_gdims0, __foo_bdims0>>>(a__device);
+// CHECK: auto end = std::chrono::high_resolution_clock::now();
+// CHECK: auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+// CHECK: std::cout << "time spend: " << duration.count() << "\n";  choreo::abend_true(topsFree(a__device));

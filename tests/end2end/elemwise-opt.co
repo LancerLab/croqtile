@@ -21,7 +21,7 @@ __co__ auto ele_add(s32 [M] lhs, s32 [M] rhs) {
 
   if (M > (l2_elem_count * gpl)) {
     // in this scenario, it worth utilizing all the PEs
-//    __cpp__("auto start = std::chrono::high_resolution_clock::now();");
+    __cpp__("auto start = std::chrono::high_resolution_clock::now();");
 
     parallel p by gpl {
       // decide the iteration count
@@ -58,8 +58,9 @@ __co__ auto ele_add(s32 [M] lhs, s32 [M] rhs) {
 
     }
 
-//    __cpp__("auto end = std::chrono::high_resolution_clock::now();");
-//    __cpp__(R"(printf("time spend: %lld\n", start - end);)");
+    __cpp__("auto end = std::chrono::high_resolution_clock::now();\n");
+    __cpp__("auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);\n");
+    __cpp__(R"(std::cout << "time spend: " << duration.count() << "\n";)");
   }
 
   return output;

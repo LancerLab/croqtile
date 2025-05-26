@@ -1942,10 +1942,12 @@ struct ChoreoFunction : public Node, public TypeIDProvider<ChoreoFunction> {
 };
 
 struct CppSourceCode : public Node, public TypeIDProvider<CppSourceCode> {
+  enum Kind { None, Host, Device, Inline };
   std::string code;
-  bool host; // host or kernel
-  CppSourceCode(const location& l, const std::string& c, bool h = true)
-      : Node(l), code(c), host(h) {}
+  Kind kind;
+
+  CppSourceCode(const location& l, const std::string& c, Kind k = None)
+      : Node(l), code(c), kind(k) {}
 
   bool IsBlock() const override { return true; }
 

@@ -1243,10 +1243,14 @@ bool FactorCodeGen::Visit(AST::Return& n) {
 bool FactorCodeGen::Visit(AST::CppSourceCode& n) {
   TraceEachVisit(n);
 
-  if (n.host)
+  if (n.kind == AST::CppSourceCode::Host)
     cs << n.GetCode();
-  else
+  else if (n.kind == AST::CppSourceCode::Device)
     ks << n.GetCode();
+  else if (n.kind == AST::CppSourceCode::Inline)
+    choreo_unreachable("inline cpp is not supported by the target.");
+  else
+    choreo_unreachable("unsupported source code kind.");
 
   return true;
 }

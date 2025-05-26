@@ -1131,11 +1131,16 @@ bool CUDACodeGen::Visit(AST::ChoreoFunction&) {
 
 bool CUDACodeGen::Visit(AST::CppSourceCode& n) {
   __TRACE_EACH_VISIT__(n)
-  if (n.host) {
+
+  if (n.kind == AST::CppSourceCode::Host)
     hs << n.GetCode();
-  } else {
+  else if (n.kind == AST::CppSourceCode::Device)
     ks << n.GetCode();
-  }
+  else if (n.kind == AST::CppSourceCode::Inline)
+    choreo_unreachable("inline cpp is yet to support.");
+  else
+    choreo_unreachable("unsupported source code kind.");
+
   return true;
 }
 

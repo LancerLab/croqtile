@@ -93,16 +93,15 @@ private:
         i += 2;
         in_raw_string = true;
         result += "R\"(";
-        paren_count ++;
+        paren_count++;
         continue;
       }
 
       // raw string ends
       if (in_raw_string && paren_count > 0) {
         if (c == ')') {
-          paren_count --;
-          if (paren_count == 0)
-            in_raw_string = false;
+          paren_count--;
+          if (paren_count == 0) in_raw_string = false;
           result += c;
           continue;
         } else {

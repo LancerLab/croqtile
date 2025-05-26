@@ -174,7 +174,7 @@ void choreo_info(const char *message) {
 %token <double> DFPVAL
 %token <std::string> TRUE FALSE
 %token <std::string> STRING
-%token <std::string> HOST_CODE KERNEL_CODE
+%token <std::string> HOST_CODE DEVICE_CODE
 %token <std::string> IDENTIFIER ATTR_CO
 // type related
 %token <std::string> MDSPAN ITUPLE EVENT MUTABLE
@@ -194,7 +194,7 @@ void choreo_info(const char *message) {
 %nterm <std::vector<size_t>> optional_array_dims
 %nterm <Choreo::Storage> storage
 %nterm <Choreo::BaseType> fundamental_type
-%nterm <AST::ptr<AST::CppSourceCode>> host_code in_cpp_stmt
+%nterm <AST::ptr<AST::CppSourceCode>> host_code inlcpp_stmt
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::SpanAs>> span_as
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
@@ -258,14 +258,14 @@ program
 any_code
     : host_code { $$ = $1; }
     | dsl_function { $$ = $1; }
-    | KERNEL_CODE {
-        $$ = AST::Make<AST::CppSourceCode>(@1, $1, false);
+    | DEVICE_CODE {
+        $$ = AST::Make<AST::CppSourceCode>(@1, $1, AST::CppSourceCode::Device);
       }
     ;
 
 host_code
     : HOST_CODE /* can not be empty */ {
-        $$ = AST::Make<AST::CppSourceCode>(@1, $1);
+        $$ = AST::Make<AST::CppSourceCode>(@1, $1, AST::CppSourceCode::Host);
       }
     | host_code HOST_CODE {
         $1->code += $2;
@@ -487,7 +487,7 @@ statement
     | swap_stmt    SEMCOL        { $$ = $1; }
     | return_stmt  SEMCOL        { $$ = $1; }
     | sync_stmt    SEMCOL        { $$ = $1; }
-    | in_cpp_stmt  SEMCOL        { $$ = $1; }
+    | inlcpp_stmt  SEMCOL        { $$ = $1; }
     | paraby_block               { $$ = $1; }
     | within_block               { $$ = $1; }
     | inthreads_block            { $$ = $1; }
@@ -1637,9 +1637,9 @@ cstrings /* concatenate strings */
     | STRING { $$ = $1; }
     ;
 
-in_cpp_stmt
+inlcpp_stmt
     : INLCPP LPAREN cstrings RPAREN {
-        $$ = AST::Make<AST::CppSourceCode>(@3, $3, false);
+        $$ = AST::Make<AST::CppSourceCode>(@3, $3, AST::CppSourceCode::Inline);
       }
 
 call_stmt

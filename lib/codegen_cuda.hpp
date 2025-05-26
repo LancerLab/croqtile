@@ -79,10 +79,9 @@ public:
       : CodeGenerator("codegen", CCtx().GetGlobalSymbolTable()),
         cross_compile(CCtx().CrossCompile()) {}
   void ResetBuffers() {
-    // TODO: should use .str("") to reset ostringstream
-    // ks.clear();
-    // fs.clear();
-    // hs.clear();
+    // ks.str("");
+    // fs.str("");
+    // hs.str("");
   }
 
   bool BeforeVisitImpl(AST::Node&) override;

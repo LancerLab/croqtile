@@ -157,7 +157,6 @@ private:
 
     // Reset buffers;
     fs.str("");
-    fs.clear();
     alloc_in_fs.clear();
 
     // recalculate the arities

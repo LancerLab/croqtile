@@ -94,7 +94,7 @@ cstr        \"([^"\\]|\\.)*\"
   "{"      { scope++; if (scope > 1) kernel_buffer += yytext; }
   "}"      { if (--scope == 0) {
                BEGIN(INITIAL);
-               auto res = Choreo::Parser::make_KERNEL_CODE(kernel_buffer, loc);
+               auto res = Choreo::Parser::make_DEVICE_CODE(kernel_buffer, loc);
                kernel_buffer = "";  // reset the buffer
                return res;
              } else
@@ -105,7 +105,7 @@ cstr        \"([^"\\]|\\.)*\"
   <<EOF>>  { if (scope > 0)
                 Choreo::Scanner::Error(loc, "missing '}' for the kernel code.");
              Choreo::Scanner::Debug("token (char): " + std::string(yytext));
-             auto res = Choreo::Parser::make_KERNEL_CODE(kernel_buffer, loc);
+             auto res = Choreo::Parser::make_DEVICE_CODE(kernel_buffer, loc);
              kernel_buffer = "";  // reset the buffer
              return res;
            }
