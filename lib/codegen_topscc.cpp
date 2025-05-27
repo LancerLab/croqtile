@@ -1156,18 +1156,18 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         auto array_sizes = array_ty->Dimensions();
         for (size_t i = 0; i < subscriptions.size(); ++i) {
           if (array_idx.empty())
-            array_idx = ExprSTR(subscriptions[i]);
+            array_idx = ExprSTR(subscriptions[i], IsHost());
           else
             array_idx = "(" + array_idx + ")*" +
                         std::to_string(array_sizes[i]) + "+" +
-                        ExprSTR(subscriptions[i]);
+                        ExprSTR(subscriptions[i], IsHost());
         }
         std::string elem_count =
             cast<SpannedType>(sym_ty)->GetShape().GetElementCountExpression();
         buf_expr += " + (" + array_idx + ")*(" + elem_count + ")";
       } else {
         for (auto expr : subscription->AllValues())
-          buf_expr += "[" + ExprSTR(expr) + "]";
+          buf_expr += "[" + ExprSTR(expr, IsHost()) + "]";
       }
     }
     return std::make_pair(buf_name, buf_expr);

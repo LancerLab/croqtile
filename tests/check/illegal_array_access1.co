@@ -1,0 +1,54 @@
+// RUN: not choreo -gs %s 2>&1 | FileCheck %s
+
+__co__ auto check_spanned_arr(f32 [2,4] a, int idx) {
+  parallel by 1 {
+    local f32[2, 8] b[2][3];
+
+    foreach p in 2 {
+      dma.copy a => b[1][idx].chunkat(_, p);
+      dma.copy b[idx+3][1].chunkat(_, p) => a;
+    }
+  }
+}
+
+// CHECK: choreo::runtime_check(idx < 3, "Index ::check_spanned_arr::idx is out of bounds of the 2nd dimension of array 'b', where the valid range is [0, 3)., {{.*}}.co{{.*}}");
+// CHECK: choreo::runtime_check(idx >= 0, "Index ::check_spanned_arr::idx is out of bounds of the 2nd dimension of array 'b', where the valid range is [0, 3)., {{.*}}.co{{.*}}");
+// CHECK: choreo::runtime_check((idx + 3) < 2, "Index (::check_spanned_arr::idx + 3) is out of bounds of the 1st dimension of array 'b', where the valid range is [0, 2)., {{.*}}.co{{.*}}");
+// CHECK: choreo::runtime_check((idx + 3) >= 0, "Index (::check_spanned_arr::idx + 3) is out of bounds of the 1st dimension of array 'b', where the valid range is [0, 2)., {{.*}}.co{{.*}}");
+
+__co__ void check_event_arr(int idx) {
+   parallel by 1 {
+     shared event e[3];
+
+     trigger e[idx];
+     trigger e[1+idx];
+     trigger e[idx-1];
+     wait e[idx];
+     wait e[2+idx];
+     wait e[idx-2];
+   }
+}
+
+// CHECK: choreo::runtime_check(idx < 3, "Index ::check_event_arr::idx is out of bounds of the 1st dimension of array 'e', where the valid range is [0, 3)., {{.*}}.co{{.*}}");
+// CHECK: choreo::runtime_check(idx >= 0, "Index ::check_event_arr::idx is out of bounds of the 1st dimension of array 'e', where the valid range is [0, 3)., {{.*}}.co{{.*}}");
+// CHECK: choreo::runtime_check((idx + 1) < 3, "Index (::check_event_arr::idx + 1) is out of bounds of the 1st dimension of array 'e', where the valid range is [0, 3)., {{.*}}.co{{.*}}");
+// CHECK: choreo::runtime_check((idx + 1) >= 0, "Index (::check_event_arr::idx + 1) is out of bounds of the 1st dimension of array 'e', where the valid range is [0, 3)., {{.*}}.co{{.*}}");
+// CHECK: choreo::runtime_check((idx - 1) < 3, "Index (::check_event_arr::idx - 1) is out of bounds of the 1st dimension of array 'e', where the valid range is [0, 3)., {{.*}}.co{{.*}}");
+// CHECK: choreo::runtime_check((idx - 1) >= 0, "Index (::check_event_arr::idx - 1) is out of bounds of the 1st dimension of array 'e', where the valid range is [0, 3)., {{.*}}.co{{.*}}");
+// CHECK: choreo::runtime_check(idx < 3, "Index ::check_event_arr::idx is out of bounds of the 1st dimension of array 'e', where the valid range is [0, 3)., {{.*}}.co{{.*}}");
+// CHECK: choreo::runtime_check(idx >= 0, "Index ::check_event_arr::idx is out of bounds of the 1st dimension of array 'e', where the valid range is [0, 3)., {{.*}}.co{{.*}}");
+// CHECK: choreo::runtime_check((idx + 2) < 3, "Index (::check_event_arr::idx + 2) is out of bounds of the 1st dimension of array 'e', where the valid range is [0, 3)., {{.*}}.co{{.*}}");
+// CHECK: choreo::runtime_check((idx + 2) >= 0, "Index (::check_event_arr::idx + 2) is out of bounds of the 1st dimension of array 'e', where the valid range is [0, 3)., {{.*}}.co{{.*}}");
+// CHECK: choreo::runtime_check((idx - 2) < 3, "Index (::check_event_arr::idx - 2) is out of bounds of the 1st dimension of array 'e', where the valid range is [0, 3)., {{.*}}.co{{.*}}");
+// CHECK: choreo::runtime_check((idx - 2) >= 0, "Index (::check_event_arr::idx - 2) is out of bounds of the 1st dimension of array 'e', where the valid range is [0, 3)., {{.*}}.co{{.*}}");
+
+__co__ void check_array_access_with_bounded_var(f32 [2,4] a, int idx0, int idx1) {
+  parallel p by idx0 {
+    shared f32[2, 8] b[2][3];
+
+    foreach q in idx1 {
+      dma.copy b[p][q].chunkat(_, _) => local;  // both ok. Currently, no check for bounded vars as index.
+    }
+  }
+}
+// CHECK-NOT: choreo::runtime_check{{.*}}out of bounds{{.*}}where the valid range

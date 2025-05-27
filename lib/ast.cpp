@@ -193,6 +193,8 @@ void DMA::accept(Choreo::Visitor& v) {
 void ChunkAt::accept(Choreo::Visitor& v) {
   // handle span_as
   if (sa) sa->accept(v);
+  // indices seems to be always present, check the size.
+  if (indices && indices->Count() > 0) indices->accept(v);
   // note: visit the positions/cmpt_bounds inside
   v.Visit(*this);
 }

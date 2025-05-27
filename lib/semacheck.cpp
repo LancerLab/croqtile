@@ -38,6 +38,69 @@ bool SemaChecker::VisitNode(AST::Boolean& n) {
 }
 bool SemaChecker::VisitNode(AST::Expr& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
+
+  // check out-of-bound for the elemof operation in wait or trigger.
+  // note: elemof in chunkat is not Expr node, so we do not check it here.
+  if (n.op == "elemof") {
+    auto arr_sym = GetArrayBaseSymbol(n);
+    size_t subscription_level = GetSubScriptLevel(n);
+    // access: events[a][b][c]
+    // level:         1  2  3
+    auto ty = NodeType(*arr_sym);
+    auto arr_ty = cast<ArrayType>(ty);
+    assert(arr_ty && "expect the array symbol to be an array type.");
+
+    size_t arr_rank = arr_ty->ArrayRank();
+    if (subscription_level > arr_rank) {
+      Error(n.LOC(), "Invalid array access: expected " +
+                         std::to_string(arr_rank) + " dimensions, but " +
+                         std::to_string(subscription_level) + " were used.");
+      error_count++;
+      return false;
+    }
+
+    auto dims = arr_ty->Dimensions();
+    int bound = arr_ty->Dimension(subscription_level - 1);
+    auto idx = n.GetR();
+
+    // TODO: parallel p by 2 { xxx; dma arr[p] => local; }
+    // if the index is a bounded var, hard to determine if it is out of bound
+    if (isa<BoundedType>(NodeType(*idx))) return true;
+
+    // using shape info to check the index
+    auto shape = cast<AST::Expr>(idx)->s;
+    // if the shape is not valid, it means the index is mutable!
+    if (!shape.IsValid()) return true;
+    assert(shape.DimCount() == 1);
+
+    if (shape.IsDynamic()) {
+      std::string shape_str = STR(shape);
+      std::string idx_str = shape_str.substr(1, shape_str.size() - 2);
+      std::string lhs, op, rhs, message;
+      lhs = idx_str;
+      op = "<";
+      rhs = std::to_string(bound);
+      message = "Index " + lhs + " is out of bounds of the " +
+                Ordinal(subscription_level) + " dimension of array '" +
+                PSTR(arr_sym) + "', where the valid range is [0, " + rhs + ").";
+      FCtx(fname).AppendRtCheck({lhs, op, rhs, idx->LOC(), message, {}});
+      FCtx(fname).AppendRtCheck({lhs, ">=", "0", idx->LOC(), message, {}});
+    } else {
+      auto idx_val = VIInt(shape.ValueAt(0));
+      assert(idx_val);
+      if (*idx_val < 0 || *idx_val >= bound) {
+        Error(idx->LOC(), "Index " + std::to_string(*idx_val) +
+                              " is out of bounds of the " +
+                              Ordinal(subscription_level) +
+                              " dimension of array '" + PSTR(arr_sym) +
+                              "', where the valid range is [0, " +
+                              std::to_string(bound) + ").");
+        error_count++;
+        return false;
+      }
+    }
+  }
+
   return true;
 }
 bool SemaChecker::VisitNode(AST::MultiDimSpans& n) {
@@ -64,6 +127,7 @@ bool SemaChecker::VisitNode(AST::DataAccess& n) {
     return false;
 
   // TODO: static out-of-bound check
+  // data.at(xxx, xxx) or future.data.at(xxx, xxx)
 
   return true;
 }
@@ -317,6 +381,63 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
 
 bool SemaChecker::VisitNode(AST::ChunkAt& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
+
+  if (n.indices && n.indices->Count()) {
+    auto ty = NodeType(*n.data);
+    auto arr_ty = cast<ArrayType>(ty);
+    assert(arr_ty && "expect the array symbol to be an array type.");
+
+    size_t rank = arr_ty->ArrayRank();
+    size_t idx_cnt = n.indices->Count();
+    // need exactly `rank` indices to access the array!
+    if (idx_cnt != rank) {
+      Error(n.LOC(), "Invalid array access: expected " + std::to_string(rank) +
+                         " dimensions, but " + std::to_string(idx_cnt) +
+                         " were used.");
+      error_count++;
+      return false;
+    }
+
+    // check if the indices are out of bound
+    for (size_t i = 0; i < rank; ++i) {
+      int bound = arr_ty->Dimension(i);
+
+      auto idx = n.indices->ValueAt(i);
+      // TODO: improve the out-of-bound check for bounded vars
+      if (isa<BoundedType>(NodeType(*idx))) continue;
+
+      auto shape = cast<AST::Expr>(idx)->s;
+      // if the shape is not valid, it means the index is mutable!
+      if (!shape.IsValid()) return true;
+      assert(shape.DimCount() == 1);
+
+      if (shape.IsDynamic()) {
+        std::string shape_str = STR(shape);
+        std::string idx_str = shape_str.substr(1, shape_str.size() - 2);
+        std::string lhs, op, rhs, message;
+        lhs = idx_str;
+        op = "<";
+        rhs = std::to_string(bound);
+        message = "Index " + lhs + " is out of bounds of the " +
+                  Ordinal(i + 1) + " dimension of array '" + PSTR(n.data) +
+                  "', where the valid range is [0, " + rhs + ").";
+        FCtx(fname).AppendRtCheck({lhs, op, rhs, idx->LOC(), message, {}});
+        FCtx(fname).AppendRtCheck({lhs, ">=", "0", idx->LOC(), message, {}});
+      } else {
+        auto idx_val = VIInt(shape.ValueAt(0));
+        assert(idx_val);
+        if (*idx_val < 0 || *idx_val >= bound) {
+          Error(idx->LOC(), "Index " + std::to_string(*idx_val) +
+                                " is out of bounds of the " + Ordinal(i + 1) +
+                                " dimension of array '" + PSTR(n.data) +
+                                "', where the valid range is [0, " +
+                                std::to_string(bound) + ").");
+          error_count++;
+          return false;
+        }
+      }
+    }
+  }
   return true;
 }
 
