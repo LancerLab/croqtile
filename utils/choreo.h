@@ -713,6 +713,10 @@ public:
     return true;
   }
 
+  __co_host__ void fill(T value) {
+    fill_n(data(), this->element_count(), value);
+  }
+
   __co_host__ void fill_random(T lb, T ub) {
     utils::fill_random(data(), element_count(), lb, ub);
   }

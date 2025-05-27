@@ -353,8 +353,9 @@ void TopsccCodeGen::EmitFixedHostHead() {
     oss << "#include \"tcle.h\"\n";
 
   oss << "// include the choreo header;\n";
-  if (native_f16) oss << "#define NATIVE_F16_SUPPORT\n";
-  if (native_bf16) oss << "#define NATIVE_BF16_SUPPORT\n";
+  if (native_f16)
+    oss << "#define __CHOREO_TARGET_NATIVE_HALF_FLOAT_SUPPORT__\n";
+  if (native_bf16) oss << "#define __CHOREO_TARGET_NATIVE_BF16_SUPPORT__\n";
   oss << R"(#include "choreo.h"
 
 using namespace choreo;
@@ -487,8 +488,15 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
   auto sym = n.name_str;
 
   bool ref = (n.GetNote().find("ref") != std::string::npos);
-  updating_cgi->AddSymbolDetail(fname,
-                                {InScopeName(sym), GetSymbolType(sym), ref});
+  // workaround:
+  // if a symbol is declared but have no symbol value(optimized value)
+  // pass it to device func even it is unused.
+  if (!FCtx(fname).HasSymbolValues(InScopeName(sym)))
+    updating_cgi->AddSymbolDetail(fname,
+                                  {InScopeName(sym), GetSymbolType(sym), true});
+  else
+    updating_cgi->AddSymbolDetail(fname,
+                                  {InScopeName(sym), GetSymbolType(sym), ref});
 
   // The type is determined first, and then
   // the device or host side is determined
@@ -1628,7 +1636,7 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
             oss << ", ";
           }
           format += "%lld";
-          oss << "(long long)" << shape.ValueAt(i);
+          oss << "static_cast<long long> (" << shape.ValueAt(i) << ")";
         }
         std::string args = UnScopedExpr(oss.str());
         return std::make_pair(format, args);
@@ -1640,7 +1648,8 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
           print_format += ExprSTR(arg);
         } else if (isa<IntegerType>(type)) {
           print_format += "%lld";
-          print_args += "(long long) " + ExprSTR(arg, false) + ", ";
+          print_args +=
+              "static_cast<long long> ( " + ExprSTR(arg, false) + "), ";
         } else if (isa<BooleanType>(type) || isa<EventType>(type)) {
           if (CCtx().GetArch() == TargetArch::GCU20 ||
               CCtx().GetArch() == TargetArch::GCU21) {
@@ -1651,27 +1660,19 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
             print_args +=
                 "(" + ExprSTR(arg, false) + " ? \"true\" : \"false\"), ";
           }
-        } else if (isa<Half8Type>(type)) {
-          // TODO: test when global data access is supported
-          choreo_unreachable("The type " + AST::TYPE_STR(*arg) +
-                             "is not supported in print yet.");
         } else if (isa<HalfType>(type)) {
-          choreo_unreachable("The type " + AST::TYPE_STR(*arg) +
-                             "is not supported in print yet.");
           print_format += "%f";
           print_args += "f16_to_f32(" + ExprSTR(arg, false) + "), ";
         } else if (isa<BFP16Type>(type)) {
-          choreo_unreachable("The type " + AST::TYPE_STR(*arg) +
-                             "is not supported in print yet.");
+          print_format += "%f";
+          // because always use the choreo::bf16 in choreo.h as the type
+          print_args += "static_cast<float>(" + ExprSTR(arg, false) + "), ";
         } else if (isa<FloatType>(type)) {
           print_format += "%f";
           print_args += ExprSTR(arg, false) + ", ";
         } else if (isa<DoubleType>(type)) {
           print_format += "%f";
           print_args += ExprSTR(arg, false) + ", ";
-        } else if (isa<IndexType>(type)) {
-          choreo_unreachable("The type " + AST::TYPE_STR(*arg) +
-                             "is not supported in print yet.");
         } else if (isa<ITupleType>(type)) {
           print_format += "{";
           auto [format, args] = GenFormatAndArgsFromShape(e->s);
@@ -1686,7 +1687,8 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
           print_args += args + ", ";
         } else if (isa<BoundedIntegerType>(type)) {
           print_format += "%lld";
-          print_args += "(long long)" + ExprSTR(arg, false) + ", ";
+          print_args +=
+              "static_cast<long long> (" + ExprSTR(arg, false) + "), ";
           choreo_unreachable("should not have bit?");
         } else if (isa<BoundedITupleType>(type)) {
           print_format += "{";
@@ -1697,7 +1699,7 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
           print_format += "}";
           std::string args_str = ExprSTR(arg, false);
           for (const auto& arg_str : SplitStringByDelimiter(args_str, ", "))
-            print_args += "(long long)" + arg_str + ", ";
+            print_args += "static_cast<long long> (" + arg_str + "), ";
         } else
           choreo_unreachable("unsupported type for print: " +
                              AST::TYPE_STR(*arg) + "\n\targ: " + ExprSTR(arg));

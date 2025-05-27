@@ -296,9 +296,7 @@ public:
       // PDSYM_NO_RETURN: pass-by
     }
 
-    auto bitt = dyn_cast<BoundedITupleType>(sd.type);
-    if (bitt) {
-      assert(bitt->Dims() == 1);
+    if (CanYieldAnInteger(sd.type)) {
       if (sd.IsReference() && (gsk & PDSYM_WITH_REFERENCE)) return true;
       return false;
     }
@@ -589,6 +587,8 @@ inline static std::string UnScopedValueItemString(const ValueItem& input) {
     return name->substr(last_colon + 1);
   } else if (auto iv = VIInt(input))
     return std::to_string(*iv);
+  else
+    choreo_unreachable("unexpected value item: " + STR(input) + ".");
 }
 
 inline const std::string UnScopedValueItem(const ValueItem& input) {

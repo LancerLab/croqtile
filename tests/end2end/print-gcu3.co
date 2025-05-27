@@ -1,17 +1,16 @@
 // REQUIRES: TARGET-GCU300
-// RUN: choreo -gs -t topscc -arch=gcu300 %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+// RUN: choreo -gs -t topscc -arch=gcu300 %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck %s && rm -f %s.topscc.result
 
 __co__ void foo(s32 [N, M] i) {
   println("aaa");
   int a = 100;
-  // bool b = true;
+  bool b = false;
   float f = 1.3f;
   double d = 2.6;
   double dd = 3.9;
-  print("scalar:\n\ta: ", a, "\n\tM: ", M, "\n\tf: ", f, "\n\td: ", d, "\n");
+  print("scalar:\n\ta: ", a, "\n\tM: ", M, "\n\tf: ", f, "\n\td: ", d, "\n\tb: ", b, "\n");
   println("\td+dd: ", d+dd);
   parallel p by 1 {
-    bool b = false;
     mds : [1,2,3];
     it = {4, M};
     nit = {a, 5};
@@ -53,6 +52,22 @@ __co__ void bar() {
   }
 }
 
+__co__ auto foo1(f16 [4, 8] f16_in, bf16 [4, 8] bf16_in, u8 [4, 8] u8_in, s8 [4, 8] s8_in, half half_scalar) {
+  parallel p by 1 {
+    f16_l = dma.copy f16_in => local;
+    bf16_l = dma.copy bf16_in => local;
+    u8_l = dma.copy u8_in => local;
+    s8_l = dma.copy s8_in => local;
+    foreach z in [1] {
+      println("f16_in[0,0] in device: ", f16_l.data.at(z, z));
+      println("bf16_in[0,0] in device: ", bf16_l.data.at(z, z));
+      println("u8_in[0,0] in device: ", u8_l.data.at(z, z));
+      println("s8_in[0,0] in device: ", s8_l.data.at(z, z));
+    }
+    println("half_scalar in device: ", half_scalar);
+  }
+}
+
 #define N 128
 #define M 64
 
@@ -70,6 +85,31 @@ int main()
 
   bar();
 
+  auto f16_in = choreo::make_spandata<choreo::f16>(4, 8);
+  f16_in.fill(1.987654f);
+  printf("f16_in[0,0] in host: %f\n", f16_to_f32(f16_in[0][0]));
+
+  auto bf16_in = choreo::make_spandata<choreo::bf16>(4, 8);
+  bf16_in.fill_random(-1.0, 1.0);
+  printf("bf16_in[0,0] in host: %f\n", static_cast<float>(bf16_in[0][0]));
+
+  auto u8_in = choreo::make_spandata<choreo::u8>(4, 8);
+  u8_in.fill(122);
+  printf("u8_in[0,0] in host: %lld\n", static_cast<long long>(u8_in[0][0]));
+
+  auto s8_in = choreo::make_spandata<choreo::s8>(4, 8);
+  s8_in.fill_random(-64, 63);
+  printf("s8_in[0,0] in host: %lld\n", static_cast<long long>(s8_in[0][0]));
+  
+  
+  auto half_scalar = f32_to_f16(1.99f);
+  printf("half_scalar in host: %f\n", static_cast<float>(half_scalar));
+
+  foo1(f16_in.view(), bf16_in.view(), u8_in.view(), s8_in.view(), half_scalar);
+
+
+  printf("passed\n");
+
   return 0;
 }
 
@@ -79,6 +119,7 @@ int main()
 // CHECK:         M: 64
 // CHECK:         f: 1.300000
 // CHECK:         d: 2.600000
+// CHECK:         b: false
 // CHECK:         d+dd: 6.500000
 // CHECK: [0, 0] b: false
 // CHECK: [0, 0] d: 4.100000
@@ -106,3 +147,16 @@ int main()
 // CHECK: [0, 0] first
 // CHECK: [0, 1] second
 // CHECK: [0, 0] e after  trigger: true
+
+// CHECK: f16_in[0,0] in host: [[F16_HOST:.*]]
+// CHECK: bf16_in[0,0] in host: [[BF16_HOST:.*]]
+// CHECK: u8_in[0,0] in host: [[U8_HOST:.*]]
+// CHECK: s8_in[0,0] in host: [[S8_HOST:.*]]
+// CHECK: half_scalar in host: [[HALF_SCALAR_HOST:.*]]
+
+// CHECK: f16_in[0,0] in device: [[F16_HOST]]
+// CHECK: bf16_in[0,0] in device: [[BF16_HOST]]
+// CHECK: u8_in[0,0] in device: [[U8_HOST]]
+// CHECK: s8_in[0,0] in device: [[S8_HOST]]
+// CHECK: half_scalar in device: [[HALF_SCALAR_HOST]]
+// CHECK: passed

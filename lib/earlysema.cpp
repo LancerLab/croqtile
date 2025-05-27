@@ -1575,7 +1575,19 @@ bool EarlySemantics::Visit(AST::Call& n) {
         error_count++;
       }
     } else if (func_name == "print" || func_name == "println") {
-      // TODO(wsj): check the type of arguments?
+      auto Printable = [](ptr<Type> ty) -> bool {
+        if (isa<StringType>(ty) || isa<IntegerType>(ty) ||
+            isa<BooleanType>(ty) || isa<EventType>(ty) || isa<FloatType>(ty) ||
+            isa<DoubleType>(ty) || isa<ITupleType>(ty) || isa<MDSpanType>(ty) ||
+            isa<BoundedType>(ty) || isa<HalfType>(ty) || isa<BFP16Type>(ty))
+          return true;
+        // half8 is invalid.
+        return false;
+      };
+      for (const auto& arg : n.GetArguments())
+        if (const auto ty = NodeType(*arg); !Printable(ty))
+          Error(arg->LOC(), "the argument of type '" + PSTR(ty) +
+                                "' is not supported for printing.");
     } else if (n.is_arith_bif) {
       auto pty = NodeType(*n.arguments->ValueAt(0));
       if (!isa<ScalarFloatType>(pty))

@@ -317,7 +317,7 @@ public:
 // Floating-point types
 using f32 = float;
 
-#ifndef NATIVE_F16_SUPPORT
+#ifndef __CHOREO_TARGET_NATIVE_HALF_FLOAT_SUPPORT__
 // this f16 accepts literal initialization, but without arith support
 class f16 {
 private:
@@ -381,9 +381,9 @@ public:
 };
 #else
 using f16 = __fp16;
-#endif // NATIVE_F16_SUPPORT
+#endif // __CHOREO_TARGET_NATIVE_HALF_FLOAT_SUPPORT__
 
-#ifndef NATIVE_BF16_SUPPORT
+#ifndef __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
 class bf16 {
 private:
   uint16_t bits; // Storage for the half-precision bits
@@ -445,7 +445,7 @@ using bf16 = __bf16;
 using bf16 = __bf16;
 #endif
 #endif
-#endif // NATIVE_BF16_SUPPORT
+#endif // __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
 
 #ifndef BF16_SUPPORTED
 //#error \

@@ -517,9 +517,8 @@ public:
     DefineASymbol(name, nty);
     SetNodeType(n, nty);
 
-    // TODO(wsj): BooleanType? HalfType...?
-    if ((isa<FloatType>(nty) || isa<DoubleType>(nty) ||
-         isa<IntegerType>(nty)) &&
+    if ((isa<FloatType>(nty) || isa<DoubleType>(nty) || isa<IntegerType>(nty) ||
+         isa<HalfType>(nty) || isa<Half8Type>(nty)) &&
         ValidVN(cur_vn)) {
       auto shape =
           GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
