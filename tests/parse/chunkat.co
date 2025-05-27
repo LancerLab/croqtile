@@ -59,3 +59,26 @@ __co__ void wow() {
 // CHECK:      `- to: local
 // CHECK:    `- Call: foobar
 // CHECK:      `- with arguments: data[1].ChunkAt(x)
+
+__co__ void cow(f32 [9] inp) {
+  with {x} in [3] {
+    dma.copy inp.subspan(3).at(x) => local;
+    dma.copy inp.chunk(3).at(x) => local;
+  }
+}
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: cow
+// CHECK:  `- Return type: void
+// CHECK:  `- Parameters:
+// CHECK:    `-  type: f32 [ 9 ], symbol: inp
+// CHECK:  `- With Block:
+// CHECK:    (within constraints)
+// CHECK:    `- {x} in [ 3 ]
+// CHECK:    (with statements)
+// CHECK:    `- DMA.copy
+// CHECK:      `- from: inp.SubSpan(3).At(x)
+// CHECK:      `- to: local
+// CHECK:    `- DMA.copy
+// CHECK:      `- from: inp.Chunk(3).At(x)
+// CHECK:      `- to: local

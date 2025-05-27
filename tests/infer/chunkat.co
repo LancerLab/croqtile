@@ -1,5 +1,5 @@
-// RUN: choreo -vn -i %s | FileCheck --check-prefix=CHKVN %s
-// RUN: choreo -vn -i %s | FileCheck --check-prefix=CHKINF %s
+// RUN: choreo -vn %s | FileCheck --check-prefix=CHKVN %s
+// RUN: choreo -i %s | FileCheck --check-prefix=CHKINF %s
 
 __co__ void foo(f32 [M, N] data, int b) {
   with {x, y} in [M/3, N/2] {
@@ -15,13 +15,13 @@ __co__ void foo(f32 [M, N] data, int b) {
 // CHKVN:    New VN [[FOO_b:#[0-9]+]]: '::foo::b'
 // CHKVN:    scope-2 {
 // CHKVN:     New VN [[CON7:#[0-9]+]]: 'const_7'
-// CHKVN:     New VN #{{[0-9]+}}: '/:[[FOO_M]]:[[CON7]]'
 // CHKVN:     New VN [[CON8:#[0-9]+]]: 'const_8'
+// CHKVN:     New VN #{{[0-9]+}}: '/:[[FOO_M]]:[[CON7]]'
 // CHKVN:     New VN #{{[0-9]+}}: '/:[[FOO_N]]:[[CON8]]'
 // CHKVN:    } // end scope-2
 // CHKVN:    scope-2 {
-// CHKVN:     New VN #{{[0-9]+}}: '/:[[FOO_M]]:[[FOO_b]]'
 // CHKVN:     New VN [[CON5:#[0-9]+]]: 'const_5'
+// CHKVN:     New VN #{{[0-9]+}}: '/:[[FOO_M]]:[[FOO_b]]'
 // CHKVN:     New VN #{{[0-9]+}}: '/:[[FOO_N]]:[[CON5]]'
 // CHKVN:    } // end scope-2
 // CHKVN:   } // end scope-1

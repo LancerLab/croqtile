@@ -15,7 +15,7 @@ syntax keyword coKeyword mdspan with parallel ituple by in foreach shared local 
 syntax match coType "\<\(f32\|f16\|bf16\|f8\|u32\|s32\|u16\|s16\|u8\|s8\|half8\|half\|bfp16\)\>"
 syntax match coAttribute "\(__co__\|__cok__\)"
 syntax match coOperator "\(=>\|#\|cdiv\)"
-syntax match coFunction "\(\<wait\>\|\<trigger\>\|\<call\>\|\<select\>\|\<swap\>\|\<shift\>\|\<sync\.\(shared\|global\|local\)\>\|\.\<async\>\|\.span_as\|\.chunkat\|\.chunk\|\.at\|\<dma\.\(any\|copy\|transp\|pad\)\>\(\.async\)\?\)"
+syntax match coFunction "\(\<wait\>\|\<trigger\>\|\<call\>\|\<select\>\|\<swap\>\|\<shift\>\|\<sync\.\(shared\|global\|local\)\>\|\.\<async\>\|\.span_as\|\.chunkat\|\.chunk\|\.subspan\|\.at\|\<dma\.\(any\|copy\|transp\|pad\)\>\(\.async\)\?\)"
 
 highlight coOperator guifg=cyan ctermfg=cyan gui=bold
 

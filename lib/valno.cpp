@@ -79,6 +79,16 @@ ValueItem ValueNumbering::GenValueItemFromSignature(const std::string& input) {
   return nullptr;
 }
 
+const std::vector<ValueItem>
+ValueNumbering::GenValueItemsFromSignature(const std::string& input) {
+  std::vector<ValueItem> res;
+  ProcessValueNumberString(input, [this, &res](int valno, size_t) {
+    auto sig = GetSignatureFromValueNumber(valno);
+    res.push_back(GenValueItemFromSignature(sig));
+  });
+  return res;
+}
+
 // Note: it adds value numbers as necessary
 std::string ValueNumbering::ValueItemToSignature(const ValueItem& vi,
                                                  bool gen) {
@@ -1040,7 +1050,9 @@ ValueNumbering::TryToSimplifyNodeSignature(const AST::Node& node) {
              }},
             {"ref", // it is a reference to another node
              [this, &n]() -> std::optional<std::string> {
-               return GetSignatureForNode(*n->GetR());
+               if (HasValueNumberForNode(*n->GetR()))
+                 return GetSignatureForNode(*n->GetR());
+               return std::nullopt;
              }},
         };
     if ((n->GetForm() == AST::Expr::Binary) && (n->op != "dimof") &&
@@ -1191,12 +1203,11 @@ int ValueNumbering::GetValueNumberForNode(const AST::Node& n) {
   if (auto id = dyn_cast<AST::Identifier>(&n)) {
     // Must consider about the scope of any identifier reference
     auto sname = VNSymbolName(*id);
-    auto pty = visitor->NodeType(n);
     if (auto name_in_scope = visitor->SSTab().NameInScopeOrNull(sname))
       return GetValueNumberOfSignature(*name_in_scope);
     else
-      choreo_unreachable("symbol `" + id->name + "` with name: " + sname +
-                         " is not valued.");
+      choreo_unreachable("symbol `" + id->name + "' with vn name `" + sname +
+                         "' is not valued.");
   }
 
   std::string signature = GenerateNodeSignature(n);
@@ -1227,7 +1238,8 @@ int ValueNumbering::GenerateValueNumberForNode(const AST::Node& n) {
   return valNo;
 }
 
-int ValueNumbering::GetValueNumberOfSignature(const std::string& signature) {
+int ValueNumbering::GetValueNumberOfSignature(
+    const std::string& signature) const {
   if (signature == "") choreo_unreachable("invalid signature provided.");
 
   if (signature == "?") return UnknownValue();
@@ -1297,6 +1309,49 @@ int ValueNumbering::GenerateValueNumberFromSignature(
   return valNo;
 }
 
+const std::vector<int> ValueNumbering::Flatten(int valno) const {
+  if (!ValidVN(valno)) choreo_unreachable("expect a valid valno.");
+  std::vector<int> mvn;
+  std::deque<int> work_list;
+  work_list.push_back(valno);
+
+  while (!work_list.empty()) {
+    auto val_no = work_list.front();
+    work_list.pop_front();
+    assert(ValidVN(val_no));
+
+    auto valsign = GetSignatureFromValueNumber(val_no);
+    auto vn_count = CountElementsInSignature(valsign);
+
+    assert(vn_count >= 1);
+
+    if (vn_count == 1) {
+      mvn.push_back(val_no);
+      continue;
+    }
+
+    for (int i = vn_count - 1; i >= 0; --i)
+      work_list.push_front(GetNthValNo(valsign, i));
+  }
+  assert(mvn.size() > 0);
+  return mvn;
+}
+
+int ValueNumbering::GetNthValNo(const std::string& input, int n) const {
+  auto ith_str = GetNthElement(input, n);
+  if (!ith_str)
+    choreo_unreachable("no value number is found for (" + std::to_string(n) +
+                       "th): " + input + ".");
+
+  assert(ith_str.value()[0] == '#' ||
+         (ith_str.value().substr(0, 6) == "const_"));
+
+  int valno = ith_str.value()[0] == '#'
+                  ? std::stoi(ith_str.value().substr(1))
+                  : GetValueNumberOfSignature(ith_str.value());
+
+  return valno;
+}
 std::string ValueNumbering::ScopeIndent() {
   std::string indent;
   for (size_t i = 0; i <= visitor->SSTab().ScopeDepth(); ++i) indent += " ";

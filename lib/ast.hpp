@@ -437,15 +437,20 @@ public:
     else
       choreo_unreachable("invalid value item.");
   }
-  void SetOptUBoundExpr(ValueItem vi) {
-    if (IsValidValueItem(vi))
-      opt_vals.ub_expr = vi->Normalize();
-    else
-      choreo_unreachable("invalid value item.");
+  void SetOptUBoundExprs(const std::vector<ValueItem>& vis) {
+    for (auto vi : vis) {
+      if (IsValidValueItem(vi))
+        opt_vals.ub_exprs.push_back(vi->Normalize());
+      else
+        choreo_unreachable("invalid value item.");
+    }
   }
   ValueItem GetOptValExpr() const { return opt_vals.val_expr; }
-  ValueItem SetOptSizeExpr() const { return opt_vals.size_expr; }
-  ValueItem GetOptUBoundExpr() const { return opt_vals.ub_expr; }
+  ValueItem GetOptSizeExpr() const { return opt_vals.size_expr; }
+  const std::vector<ValueItem>& GetOptUBoundExprs() const {
+    return opt_vals.ub_exprs;
+  }
+  std::vector<ValueItem>& GetOptUBoundExprs() { return opt_vals.ub_exprs; }
 
 public:
   Shape s; // to pass information between shape inference & type inference
@@ -1442,18 +1447,22 @@ struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
 
 struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
   ptr<Identifier> data;
-  ptr<MultiValues> indices = nullptr;
-  ptr<SpanAs> sa = nullptr; // for span_as expression
-  ptr<MultiValues> positions = nullptr;
-  ptr<MultiValues> cmpt_bounds = nullptr;
+  ptr<MultiValues> indices = nullptr;   // indexing of data arrays
+  ptr<SpanAs> sa = nullptr;             // for span_as expression
+  ptr<MultiValues> positions = nullptr; // subscription expression of data
+private:
+  ptr<MultiValues> tfss_expr = nullptr; // tiling-factor or shape values
+  bool is_subspan = false;
 
+public:
   ChunkAt(const location& l, const ptr<Identifier>& d,
           const ptr<MultiValues>& idxes = nullptr,
           const ptr<MultiValues>& p = nullptr,
-          const ptr<MultiValues>& b = nullptr)
+          const ptr<MultiValues>& b = nullptr, bool ss = false)
       : Node(l), data(d), indices(idxes), sa(nullptr), positions(p),
-        cmpt_bounds(b) {
+        tfss_expr(b), is_subspan(ss) {
     if (b) assert(p && "position is not provided for separated chunk & at.");
+    if (ss) assert(p && "subspan requires shape defination.");
   }
 
   ChunkAt(const location& l, const ptr<SpanAs>& s,
@@ -1461,7 +1470,7 @@ struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
           const ptr<MultiValues>& p = nullptr,
           const ptr<MultiValues>& b = nullptr)
       : Node(l), data(s->nid), indices(idxes), sa(s), positions(p),
-        cmpt_bounds(b) {
+        tfss_expr(b) {
     if (b) assert(p && "position is not provided for separated chunk & at.");
   }
 
@@ -1471,6 +1480,24 @@ struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
   }
 
   bool SymbolicBufferName() { return !positions; }
+
+  bool MultipleExprs() { return tfss_expr != nullptr; }
+  bool HasTilingExpr() { return (tfss_expr != nullptr) && !is_subspan; }
+  bool HasSubSpanExpr() { return (tfss_expr != nullptr) && is_subspan; }
+
+  ptr<MultiValues> GetTFSSExpr() const { return tfss_expr; }
+
+  ptr<MultiValues> GetTilingFactors() const {
+    if (is_subspan) choreo_unreachable("no tiling factor exist.");
+    return tfss_expr;
+  }
+
+  ptr<MultiValues> GetSubSpanExpr() const {
+    if (!is_subspan) choreo_unreachable("no sub-span exist.");
+    return tfss_expr;
+  }
+
+  ptr<MultiValues> GetSubScriptExpr() const { return positions; }
 
   void Print(std::ostream& os, const std::string& = {},
              bool with_type = false) const override {
@@ -1483,9 +1510,12 @@ struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
       for (auto index : indices->AllValues()) os << "[" << PSTR(index) << "]";
 
     if (positions) {
-      if (cmpt_bounds)
-        os << ".Chunk(" << STR(cmpt_bounds) << ").At(";
-      else
+      if (tfss_expr) {
+        if (is_subspan)
+          os << ".SubSpan(" << STR(tfss_expr) << ").At(";
+        else
+          os << ".Chunk(" << STR(tfss_expr) << ").At(";
+      } else
         os << ".ChunkAt(";
       os << STR(positions) << ")";
     }

@@ -68,7 +68,7 @@ private:
   std::vector<std::unordered_map<const AST::Node*, int>>
       nodeValueNumbers; // cache to direct map node to value number
 
-  bool InternalHasExprValNo(const std::string& expr) {
+  bool InternalHasExprValNo(const std::string& expr) const {
     for (auto expr_valno = expressionValueNumbers.rbegin();
          expr_valno != expressionValueNumbers.rend(); expr_valno++) {
       if (!expr_valno->count(expr)) continue;
@@ -77,11 +77,11 @@ private:
     return false;
   }
 
-  int InternalGetExprValNo(const std::string& expr) {
+  int InternalGetExprValNo(const std::string& expr) const {
     for (auto expr_valno = expressionValueNumbers.rbegin();
          expr_valno != expressionValueNumbers.rend(); expr_valno++) {
       if (!expr_valno->count(expr)) continue;
-      return (*expr_valno)[expr];
+      return expr_valno->at(expr);
     }
     choreo_unreachable("can not find valno of expression : " + expr + ".");
   }
@@ -98,7 +98,7 @@ private:
     expressionValueNumbers.back()[expr] = val_no;
   }
 
-  bool InternalHasValNoExpr(int vn) {
+  bool InternalHasValNoExpr(int vn) const {
     for (auto valno_expr = valueNumberExpressions.rbegin();
          valno_expr != valueNumberExpressions.rend(); valno_expr++) {
       if (!valno_expr->count(vn)) continue;
@@ -107,11 +107,11 @@ private:
     return false;
   }
 
-  const std::string& InternalGetValNoExpr(int vn) {
+  const std::string& InternalGetValNoExpr(int vn) const {
     for (auto valno_expr = valueNumberExpressions.rbegin();
          valno_expr != valueNumberExpressions.rend(); valno_expr++) {
       if (!valno_expr->count(vn)) continue;
-      return (*valno_expr)[vn];
+      return valno_expr->at(vn);
     }
     choreo_unreachable(
         "can not find expression of valno: " + std::to_string(vn) + ".");
@@ -199,7 +199,7 @@ public:
   bool HasValueNumberForNode(const AST::Node&);
 
   // Directly get the value number from a signature. Abort when it fails.
-  int GetValueNumberOfSignature(const std::string&);
+  int GetValueNumberOfSignature(const std::string&) const;
 
   // Bind two value numbers
   void BindValueNumbers(int, int);
@@ -228,7 +228,7 @@ public:
   const std::string VNSymbolName(const AST::Identifier&) const;
 
   // Retrieve the signature from a value number. About when fails.
-  std::string GetSignatureFromValueNumber(int vn) {
+  std::string GetSignatureFromValueNumber(int vn) const {
     if (vn == UnknownValue()) return "?";
 
     if (!InternalHasValNoExpr(vn))
@@ -267,8 +267,13 @@ public:
                                         const std::string&, const std::string&,
                                         bool = false);
 
-  ValueItem GenValueItemFromSignature(const std::string& input);
+  ValueItem GenValueItemFromSignature(const std::string&);
+  const std::vector<ValueItem> GenValueItemsFromSignature(const std::string&);
   std::string ValueItemToSignature(const ValueItem&, bool = false);
+
+  // retrieve the n-th element from the comma-seperated input string
+  int GetNthValNo(const std::string& input, int n) const;
+  const std::vector<int> Flatten(int) const;
 
 private:
   std::string ScopeIndent();
@@ -276,6 +281,25 @@ private:
   void Error(const location& loc, const std::string& message);
   void Warning(const location& loc, const std::string& message);
 };
+
+// Given a multi-value signature, process each value
+inline void ProcessValueNumberString(const std::string& input,
+                                     std::function<void(int, size_t)> lambda) {
+  std::regex valuePattern("#(-?\\d+)");
+  auto begin = std::sregex_iterator(input.begin(), input.end(), valuePattern);
+  auto end = std::sregex_iterator();
+
+  size_t matchIndex = 0;
+  for (auto i = begin; i != end; ++i, ++matchIndex) {
+    std::smatch match = *i;
+    std::string matchStr = match.str(1); // Capture the number part of the match
+    int number = std::stoi(matchStr);
+
+    // Call the passed lambda function with the extracted string and its
+    // index
+    lambda(number, matchIndex);
+  }
+}
 
 } // end namespace Choreo
 

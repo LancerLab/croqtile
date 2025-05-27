@@ -61,6 +61,7 @@ set(CODEGEN_SOURCES
   codegen_topscc.cpp
   earlysema.cpp
   semacheck.cpp
+  shapeinfer.cpp
   symtab.cpp
   sym_replace.cpp
   typeinfer.cpp

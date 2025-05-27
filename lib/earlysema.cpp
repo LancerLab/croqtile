@@ -1405,12 +1405,12 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
     }
 
     // the upper bound of notile must be 1
-    if (n.cmpt_bounds) {
+    if (n.HasTilingExpr()) {
       for (auto& i : notile_indices) {
-        auto il = GetIntLiteral(*n.cmpt_bounds->ValueAt(i));
+        auto il = GetIntLiteral(*n.GetTilingFactors()->ValueAt(i));
         if ((il == nullptr) || (il->value != 1)) {
           Error(n.LOC(), "upper bound of bounded variable '_' is " +
-                             PSTR(n.cmpt_bounds->ValueAt(i)) +
+                             PSTR(n.GetTilingFactors()->ValueAt(i)) +
                              " (1 is expected.");
           error_count++;
         }
@@ -1432,13 +1432,13 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
   auto sty = GetSpannedType(nty);
 
   if (n.positions) {
-    if (n.cmpt_bounds) {
-      n.cmpt_bounds->accept(*this);
+    if (n.MultipleExprs()) {
+      n.GetTFSSExpr()->accept(*this);
 
-      for (auto v : n.cmpt_bounds->AllValues()) {
+      for (auto v : n.GetTFSSExpr()->AllValues()) {
         if (mutables.Contains(v)) {
-          Error(v->LOC(),
-                "the mutable value can not used for the .chunk expression.");
+          Error(v->LOC(), "the mutable value can not used for the "
+                          ".chunk/.subspan expression.");
           error_count++;
         }
       }
@@ -1465,13 +1465,14 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
       error_count++;
     }
 
-    if (n.cmpt_bounds) {
+    if (n.MultipleExprs()) {
       size_t b_count = 0;
-      for (auto& v : n.cmpt_bounds->AllValues()) {
+      for (auto& v : n.GetTFSSExpr()->AllValues()) {
         auto ty = NodeType(*v);
         if (!isa<IntegerType>(ty) && !isa<ITupleType>(ty)) {
           Error(n.LOC(), "expect '" + PSTR(v) +
-                             "` be a bounded type (but got " + PSTR(ty) + ").");
+                             "` be a integer or ituple type (but got " +
+                             PSTR(ty) + ").");
           error_count++;
         }
         b_count += ty->Dims();
@@ -1479,8 +1480,9 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
       }
       if (rank != b_count) {
         Error(n.LOC(), "un-matched ranks between spanned data (" +
-                           std::to_string(rank) + ") and tiling variables (" +
-                           std::to_string(b_count) + ").");
+                           std::to_string(rank) + ") and " +
+                           ((n.HasTilingExpr()) ? "tiling" : "subspan") +
+                           " variables (" + std::to_string(b_count) + ").");
         error_count++;
       }
     }
