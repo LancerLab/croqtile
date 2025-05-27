@@ -1233,7 +1233,7 @@ public:
 
   ptr<MultiNodes> stmts = nullptr;
 
-  // expilicit dimensions count
+  // explicit dimensions count
   size_t sub_count = 0;
 
   bool async = false;

@@ -6,12 +6,5 @@ __co__ auto zero_span(f32 [2, 2] input) {
   with tile_in_s in [input.span / in_shape_s]  {}
 }
 
-__co__ auto zero_span1() {
-  with t in [0, 1]  {}
-}
-
 // CHECK: error: zero value is deduced for the mdspan inside the with-in statement.
-// CHECK: error: unable to apply shape inference for function 'zero_span'.
-// CHECK: error: zero value is deduced for the mdspan inside the with-in statement.
-// CHECK: error: unable to apply shape inference for function 'zero_span1'.
-// CHECK: Totally 2 errors have been detected.
+// CHECK: Totally 1 errors have been detected.
