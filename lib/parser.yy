@@ -181,7 +181,7 @@ void choreo_info(const char *message) {
 %token <Choreo::Storage> LOCAL SHARED GLOBAL
 %token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT HALF8 HALF BFP16 FLOAT DOUBLE BOOL VOID
 // builtin operations
-%token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK SUBSPAN AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN
+%token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK SUBSPAN MODSPAN AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN
 %token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXPM1 FLOOR GELU ISFINITE ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH
 // control related
 %token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH INCR RET WHERE WHILE
@@ -1411,7 +1411,13 @@ subdata_expr
         $4->SetDelimiter(", ");
         $8->SetDelimiter(", ");
         auto ide = ElementMultiValues($1);
-        $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, ide.first, ide.second, $8, $4, true));
+        $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, ide.first, ide.second, $8, $4, AST::ChunkAt::SUBSPAN));
+      }
+    | ids_expr MODSPAN LPAREN value_list RPAREN AT LPAREN value_list RPAREN {
+        $4->SetDelimiter(", ");
+        $8->SetDelimiter(", ");
+        auto ide = ElementMultiValues($1);
+        $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, ide.first, ide.second, $8, $4, AST::ChunkAt::MODSPAN));
       }
     | ids_expr span_as CHUNKAT LPAREN value_list RPAREN {
         // note: normalize will hoist span_as

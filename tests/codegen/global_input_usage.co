@@ -29,8 +29,8 @@ __co__ void matmul_kernel(global f32 [1024] input, global f32 [1024] output) { /
 
 
 // CHECK:  void matmul_kernel(const choreo::spanned_view<choreo::f32, 1> & input, const choreo::spanned_view<choreo::f32, 1> & output) {
-// CHECK:    choreo::runtime_check(input.shape()[0] == 1024, "shape inconsistent on the 1st parameter (dim: 0).");
-// CHECK:    choreo::runtime_check(output.shape()[0] == 1024, "shape inconsistent on the 2nd parameter (dim: 0).");
+// CHECK:    choreo::runtime_check(input.shape()[0] == 1024, "shape inconsistent on the 1st parameter ('input', dim: 0)
+// CHECK:    choreo::runtime_check(output.shape()[0] == 1024, "shape inconsistent on the 2nd parameter ('output', dim: 0)
 // CHECK:    dim3 __matmul_kernel_gdims0(1, 1, 1);
 // CHECK:    dim3 __matmul_kernel_bdims0(1, 1, 1);
 // CHECK:    __choreo_device_matmul_kernel<<<__matmul_kernel_gdims0, __matmul_kernel_bdims0>>>(input.data(), output.data());

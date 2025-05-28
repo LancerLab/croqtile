@@ -20,8 +20,8 @@ __co__ auto foo(f32 [32, 4] a) {
 // CHECK-HT: }
 
 // CHECK-HT: choreo::spanned_data<choreo::f32, 2> foo(const choreo::spanned_view<choreo::f32, 2> & a) {
-// CHECK-HT:   choreo::runtime_check(a.shape()[0] == 32, "shape inconsistent on the 1st parameter (dim: 0).");
-// CHECK-HT:   choreo::runtime_check(a.shape()[1] == 4, "shape inconsistent on the 1st parameter (dim: 1).");
+// CHECK-HT:   choreo::runtime_check(a.shape()[0] == 32, "shape inconsistent on the 1st parameter ('a', dim: 0)
+// CHECK-HT:   choreo::runtime_check(a.shape()[1] == 4, "shape inconsistent on the 1st parameter ('a', dim: 1)
 // CHECK-HT:   float * a__device = nullptr;
 // CHECK-HT:   choreo::abend_true(topsMalloc(&a__device, 512ULL));
 // CHECK-HT:   choreo::abend_true(topsMemcpy(a__device, a.data(), 512ULL, topsMemcpyHostToDevice));
@@ -47,8 +47,8 @@ __co__ auto foo(f32 [32, 4] a) {
 // CHECK-NHT: }
 
 // CHECK-NHT: choreo::spanned_data<choreo::f32, 2> foo(const choreo::spanned_view<choreo::f32, 2> & a) {
-// CHECK-NHT:   choreo::runtime_check(a.shape()[0] == 32, "shape inconsistent on the 1st parameter (dim: 0).");
-// CHECK-NHT:   choreo::runtime_check(a.shape()[1] == 4, "shape inconsistent on the 1st parameter (dim: 1).");
+// CHECK-NHT:   choreo::runtime_check(a.shape()[0] == 32, "shape inconsistent on the 1st parameter ('a', dim: 0)
+// CHECK-NHT:   choreo::runtime_check(a.shape()[1] == 4, "shape inconsistent on the 1st parameter ('a', dim: 1)
 // CHECK-NHT:   float * a__device = nullptr;
 // CHECK-NHT:   choreo::abend_true(topsMalloc(&a__device, 512ULL));
 // CHECK-NHT:   choreo::abend_true(topsMemcpy(a__device, a.data(), 512ULL, topsMemcpyHostToDevice));

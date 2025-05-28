@@ -454,6 +454,12 @@ struct Shape {
     return sz;
   }
 
+  ValueItem ElementCountValue() const {
+    auto vi = sbe::nu(1);
+    for (auto v : Value()) vi = vi * v;
+    return vi;
+  }
+
   void Print(std::ostream& os) const {
     if (!IsValidValueNumber(val_no)) {
       os << "[]";
@@ -1022,6 +1028,7 @@ struct SpannedType : public Type, public TypeIDProvider<SpannedType> {
 
   // use these interface when the shape is NOT runtime-shaped
   size_t ElementCount() const { return GetShape().ElementCount(); }
+  ValueItem ElementCountValue() const { return GetShape().ElementCountValue(); }
   size_t ByteSize() const { return SizeOf(f_type) * GetShape().ElementCount(); }
 
   const std::string ShapeSizeExpression(bool ULL_suffix = false) const {

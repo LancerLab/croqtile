@@ -113,8 +113,21 @@ bool SemaChecker::VisitNode(AST::NamedTypeDecl& n) {
 }
 bool SemaChecker::VisitNode(AST::NamedVariableDecl& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
+
+  auto ty = NodeType(n);
+  auto s = GetShape(ty);
+  if (s.IsValid()) {
+    for (auto sv : s.Value())
+      if (*sv == *sbe::nu(0)) {
+        Error(n.LOC(), "found 0-dimension within the shape of variable `" +
+                           n.name_str + "'.");
+        error_count++;
+      }
+  }
+
   return true;
 }
+
 bool SemaChecker::VisitNode(AST::IntTuple& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
@@ -438,6 +451,15 @@ bool SemaChecker::VisitNode(AST::ChunkAt& n) {
       }
     }
   }
+
+  // TODO: fix normalize to make it work
+#if 0
+  if (!n.s.IsValid()) {
+    Error(n.LOC(), "The tiled block shape is invalid.");
+    error_count++;
+  }
+#endif
+
   return true;
 }
 

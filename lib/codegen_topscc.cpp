@@ -71,6 +71,16 @@ const char* SingleInstancePredicate(bool shared_in_block) {
   return SingleSubThreadPredicate();
 }
 
+inline const char* SyncByLevel(Storage s) {
+  switch (s) {
+  case Storage::SHARED: return "__syncthreads()";
+  case Storage::LOCAL: return "__syncsubthreads()";
+  default:
+    choreo_unreachable("unsupported storage location for the synchronization.");
+  }
+  return "";
+}
+
 inline const char* TopsMdsStorage(Storage st) {
   switch (st) {
   case Storage::DEFAULT:
@@ -726,8 +736,17 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       ety->PrintAsCArray(ds);
       ds << "; // " << STR(ety->GetStorage()) << " event\n";
       ds << d_indent << "// initialize the event\n";
-      GenerateSubscriptions(ds, d_indent + n.name_str, " = false;\n",
-                            ety->Dimensions());
+      auto max_pl = GCUDeviceParallelLevel(max_parallel_level);
+      auto pred = ImplicitPred(max_pl, ety->GetStorage());
+      if (!pred.empty()) {
+        ds << d_indent << "if (" << pred << ") {\n";
+        GenerateSubscriptions(ds, "  " + d_indent + n.name_str, " = false;\n",
+                              ety->Dimensions());
+        ds << d_indent << "}\n";
+      } else
+        GenerateSubscriptions(ds, d_indent + n.name_str, " = false;\n",
+                              ety->Dimensions());
+      ds << d_indent << SyncByLevel(ety->GetStorage()) << ";\n";
     } break;
     default: break;
     }
@@ -751,7 +770,16 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       ds << d_indent << TopsDeviceMemory(ety->GetStorage())
          << " __volatile__ bool " << n.name_str << "; // "
          << STR(ety->GetStorage()) << " event\n";
-      ds << d_indent << n.name_str << " = false;\n"; // inited as untriggered
+      auto max_pl = GCUDeviceParallelLevel(max_parallel_level);
+      auto pred = ImplicitPred(max_pl, ety->GetStorage());
+      if (!pred.empty()) {
+        ds << d_indent << "if (" << pred << ") {\n";
+        ds << d_indent << "  " << n.name_str
+           << " = false;\n"; // inited as untriggered
+        ds << d_indent << "}\n";
+      } else
+        ds << d_indent << n.name_str << " = false;\n"; // inited as untriggered
+      ds << d_indent << SyncByLevel(ety->GetStorage()) << ";\n";
     } break;
     default: break;
     }
@@ -1015,6 +1043,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   auto t_ty = GetSymbolType(t_sym);
   auto f_sty = GetSpannedType(f_ty);
   auto t_sty = GetSpannedType(t_ty);
+  auto f_bshape = (f_ca->s.IsValid()) ? f_ca->s : f_sty->GetShape();
+  auto t_bshape = (t_ca->s.IsValid()) ? t_ca->s : t_sty->GetShape();
 
   assert(f_sty && "can not retrieve data from 'from'.");
   assert(t_sty && "can not retrieve data from 'to'.");
@@ -1047,7 +1077,6 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         std::ostringstream offset;
         { // calculate the offsets
           size_t i = 0;
-          auto shape = f_sty->GetShape();
           for (auto& p : t_ca->positions->AllValues()) {
             auto idx_exprs = SplitStringByDelimiter(ExprSTR(p, false));
             for (auto i_expr : idx_exprs) {
@@ -1055,8 +1084,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
               if (i_expr == "__choreo_no_tiling__")
                 offset << "0";
               else
-                offset << "(int)(" << i_expr << " * " << STR(shape.ValueAt(i))
-                       << ")";
+                offset << "(int)(" << i_expr << " * "
+                       << STR(f_bshape.ValueAt(i)) << ")";
               ++i;
             }
           }
@@ -1072,7 +1101,6 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         std::ostringstream offset;
         { // calculate the offsets
           size_t i = 0;
-          auto shape = t_sty->GetShape();
           for (auto& p : f_ca->positions->AllValues()) {
             auto idx_exprs = SplitStringByDelimiter(ExprSTR(p, false));
             for (auto i_expr : idx_exprs) {
@@ -1080,8 +1108,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
               if (i_expr == "__choreo_no_tiling__")
                 offset << "0";
               else
-                offset << "(int)(" << i_expr << " * " << STR(shape.ValueAt(i))
-                       << ")";
+                offset << "(int)(" << i_expr << " * "
+                       << STR(t_bshape.ValueAt(i)) << ")";
               ++i;
             }
           }
@@ -1226,7 +1254,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     assert(SymbolToTile() || TileToSymbol());
     std::ostringstream offset;
     size_t i = 0;
-    auto shape = (SymbolToTile() ? f_sty : t_sty)->GetShape();
+    auto shape = SymbolToTile() ? f_bshape : t_bshape;
     for (auto& p : (SymbolToTile() ? t_ca : f_ca)->positions->AllValues()) {
       auto idx_exprs = SplitStringByDelimiter(ExprSTR(p, false));
       for (auto i_expr : idx_exprs) {
@@ -1970,7 +1998,9 @@ void TopsccCodeGen::EmitHostRuntimeCheck() {
           hs << h_indent << "choreo::runtime_check(" << elem_name
              << " == " << *vale;
           hs << ", \"shape inconsistent on the " << Ordinal(host_pindex + 1)
-             << " parameter (dim: " << dim_count << ").\");\n";
+             << " parameter (\'" << name << "\', dim: " << dim_count
+             << "): expect: " << *vale << ", but got \" + std::to_string("
+             << elem_name << ") + \".\");\n";
         } else if (auto vale = VIStr(vi)) {
           ve_entries_map[*vale].push_back(
               {host_pindex + 1, dim_count, elem_name});
@@ -2533,10 +2563,16 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
         } else
           choreo_unreachable("Can not retrieve name of the future.");
       } else if (expr->GetOp() == "sizeof") {
-        auto var = RemoveSuffix(*AST::GetName(*expr->GetR()), ".span");
-        auto shape = GetShape(GetSymbolType(var));
-        assert(shape.IsValid() && "Invalid shape is found");
-        oss << shape.GetElementCountExpression();
+        auto se = expr->GetOptSizeExpr();
+        if (IsValidValueItem(se))
+          oss << ValueSTR(se);
+        else {
+          // TODO: deprecate this implementation
+          auto var = RemoveSuffix(*AST::GetName(*expr->GetR()), ".span");
+          auto shape = GetShape(GetSymbolType(var));
+          assert(shape.IsValid() && "Invalid shape is found");
+          oss << shape.GetElementCountExpression();
+        }
       } else if (expr->GetOp() == "++") {
         oss << "++" << ExprSTR(expr->GetR(), is_host);
       } else if (expr->GetOp() == "--") {

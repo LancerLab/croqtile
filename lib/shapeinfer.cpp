@@ -311,6 +311,8 @@ bool ShapeInference::Visit(AST::Expr& n) {
           });
     }
     //      InvalidateVN(cur_vn);
+  } else if ((n.op == "sizeof") && n.s.IsValid()) {
+    n.SetOptSizeExpr(n.s.ElementCountValue());
   } else if (n.op == "#") {
     if (IsActualBoundedIntegerType(n.GetL()->GetType()) &&
         IsActualBoundedIntegerType(n.GetR()->GetType())) {
@@ -1023,12 +1025,13 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
   if (!n.positions) {
     // it is just a symbol reference
     ca_valno = vn.GetValueNumberOfSignature(SSTab().InScopeName(span_name));
+    auto future_shape =
+        GenShapeFromSignature(vn.GetSignatureFromValueNumber(ca_valno));
     // set the chunkat's type
-    SetNodeType(
-        n, MakeSpannedType(
-               sty->f_type,
-               GenShapeFromSignature(vn.GetSignatureFromValueNumber(ca_valno)),
-               sty->GetStorage()));
+    SetNodeType(n,
+                MakeSpannedType(sty->f_type, future_shape, sty->GetStorage()));
+    n.s = future_shape;
+    assert(n.s.IsValid());
 
     cur_vn = ca_valno;
     return true;
@@ -1036,22 +1039,21 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
 
   std::string data_sig = vn.SignatureOfSymbol(SSTab().InScopeName(span_name));
 
-  std::string fs_signature; // signature of the future.span
-
-  auto AddValno = [this, &fs_signature](int valno) {
+  auto AddValno = [this](int valno, std::string& sign) {
     // and append the value number as
-    if (!fs_signature.empty()) fs_signature += ",";
-    fs_signature += "#" + std::to_string(valno);
+    if (!sign.empty()) sign += ",";
+    sign += "#" + std::to_string(valno);
   };
 
-  auto SignatureOfDivide = [this, &AddValno, &n](int dividend_vn,
-                                                 int divisor_vn) {
+  auto SignatureOfBinOp = [this, &AddValno, &n](const std::string& op,
+                                                int dividend_vn,
+                                                int divisor_vn) {
     // the signature without optimiz
-    std::string res_sig =
-        "/:#" + std::to_string(dividend_vn) + ":#" + std::to_string(divisor_vn);
+    std::string res_sig = op + ":#" + std::to_string(dividend_vn) + ":#" +
+                          std::to_string(divisor_vn);
 
     if (auto quotient = vn.TryToSimplifyBinary(
-            n.LOC(), "/", vn.GetSignatureFromValueNumber(dividend_vn),
+            n.LOC(), op, vn.GetSignatureFromValueNumber(dividend_vn),
             vn.GetSignatureFromValueNumber(divisor_vn), true))
       res_sig = quotient.value();
 
@@ -1067,48 +1069,74 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
   assert(data_vns.size() == pos_vns.size());
 
   // in case the code provides explicit tiling factors or subspan
-  std::vector<int> shape_vns;
-  std::vector<int> tf_vns;
+  std::vector<int> tfs_vns;
+  std::vector<int> mod_vns;
   std::vector<int> res_vns;
-  if (n.HasSubSpanExpr()) {
-    shape_vns = Collapse(n.GetSubSpanExpr());
-    assert(shape_vns.size() == pos_vns.size());
-  } else if (n.HasTilingExpr()) {
-    tf_vns = Collapse(n.GetTilingFactors());
-    assert(tf_vns.size() == pos_vns.size());
+  if (n.MultipleExprs()) {
+    tfs_vns = Collapse(n.GetTFSSExpr());
+    assert(tfs_vns.size() == pos_vns.size());
   }
 
   for (size_t index = 0; index < pos_vns.size(); ++index) {
     if (n.HasSubSpanExpr()) {
       // block.span = subspan
-      auto svn = shape_vns[index];
-      res_vns.push_back(svn);
+      res_vns.push_back(tfs_vns[index]);
+    } else if (n.HasModSpanExpr()) {
+      // block.span = data.span % tiling_factor
+      auto mod_sig = SignatureOfBinOp("%", data_vns[index], tfs_vns[index]);
+      mod_vns.push_back(vn.GetOrInsertValueNumberFromSignature(mod_sig));
+      auto res_sig = SignatureOfBinOp("/", data_vns[index], tfs_vns[index]);
+      res_vns.push_back(vn.GetOrInsertValueNumberFromSignature(res_sig));
     } else if (n.HasTilingExpr()) {
       // block.span = data.span / tiling_factor
-      auto res_sig = SignatureOfDivide(data_vns[index], tf_vns[index]);
+      auto res_sig = SignatureOfBinOp("/", data_vns[index], tfs_vns[index]);
       res_vns.push_back(vn.GetOrInsertValueNumberFromSignature(res_sig));
     } else {
       // block.span = data.span / #pos
-      auto res_sig = SignatureOfDivide(data_vns[index], pos_vns[index]);
+      auto res_sig = SignatureOfBinOp("/", data_vns[index], pos_vns[index]);
       res_vns.push_back(vn.GetOrInsertValueNumberFromSignature(res_sig));
     }
   }
 
   assert(res_vns.size() == data_vns.size());
 
-  if (res_vns.size() == 1)
-    ca_valno = res_vns[0];
-  else {
+  Shape block_shape;
+  if (res_vns.size() == 1) {
+    if (n.HasModSpanExpr()) {
+      ca_valno = mod_vns[0];
+      block_shape =
+          GenShapeFromSignature(vn.GetSignatureFromValueNumber(res_vns[0]));
+    } else
+      ca_valno = res_vns[0];
+  } else {
     // generate signature for multivalues
-    for (auto rvn : res_vns) AddValno(rvn);
-    ca_valno = vn.GetOrInsertValueNumberFromSignature(fs_signature);
+
+    std::string f_sign; // signature of the future.span
+    for (auto rvn : res_vns) AddValno(rvn, f_sign);
+    std::string m_sign; // specific for modspan operation
+    for (auto mvn : mod_vns) AddValno(mvn, m_sign);
+
+    if (n.HasModSpanExpr()) { // remainder value as the current shape value
+      ca_valno = vn.GetOrInsertValueNumberFromSignature(m_sign);
+      auto f_valno = vn.GetOrInsertValueNumberFromSignature(f_sign);
+      block_shape =
+          GenShapeFromSignature(vn.GetSignatureFromValueNumber(f_valno));
+    } else
+      ca_valno = vn.GetOrInsertValueNumberFromSignature(f_sign);
   }
 
+  auto future_shape =
+      GenShapeFromSignature(vn.GetSignatureFromValueNumber(ca_valno));
+
   // set the chunkat's type
-  SetNodeType(n, MakeSpannedType(sty->f_type,
-                                 GenShapeFromSignature(
-                                     vn.GetSignatureFromValueNumber(ca_valno)),
-                                 sty->GetStorage()));
+  SetNodeType(n, MakeSpannedType(sty->f_type, future_shape, sty->GetStorage()));
+
+  if (n.HasModSpanExpr())
+    n.s = block_shape;
+  else
+    n.s = future_shape;
+
+  assert(n.s.IsValid());
 
   cur_vn = ca_valno;
 
@@ -1358,6 +1386,8 @@ Shape ShapeInference::GenShapeFromSignature(const std::string& input) {
     if (auto vi = vn.GenValueItemFromSignature(component)) {
       result.push_back(vi);
     } else {
+      if (debug_visit)
+        dbgs() << "failed to generate value item for " << component << ".\n";
       // TODO: remove the legacy method totally
       auto expr = GenerateExpression(component);
       int int_val;

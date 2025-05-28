@@ -1446,23 +1446,30 @@ struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
 };
 
 struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
+  enum OpKind {
+    TILING,
+    SUBSPAN,
+    MODSPAN,
+  };
   ptr<Identifier> data;
   ptr<MultiValues> indices = nullptr;   // indexing of data arrays
   ptr<SpanAs> sa = nullptr;             // for span_as expression
   ptr<MultiValues> positions = nullptr; // subscription expression of data
 private:
   ptr<MultiValues> tfss_expr = nullptr; // tiling-factor or shape values
-  bool is_subspan = false;
+  OpKind op_kind = TILING;
+
+public:
+  Shape s; // internally used to pass real shape of the tiled block
 
 public:
   ChunkAt(const location& l, const ptr<Identifier>& d,
           const ptr<MultiValues>& idxes = nullptr,
           const ptr<MultiValues>& p = nullptr,
-          const ptr<MultiValues>& b = nullptr, bool ss = false)
+          const ptr<MultiValues>& b = nullptr, OpKind ok = TILING)
       : Node(l), data(d), indices(idxes), sa(nullptr), positions(p),
-        tfss_expr(b), is_subspan(ss) {
+        tfss_expr(b), op_kind(ok) {
     if (b) assert(p && "position is not provided for separated chunk & at.");
-    if (ss) assert(p && "subspan requires shape defination.");
   }
 
   ChunkAt(const location& l, const ptr<SpanAs>& s,
@@ -1482,18 +1489,28 @@ public:
   bool SymbolicBufferName() { return !positions; }
 
   bool MultipleExprs() { return tfss_expr != nullptr; }
-  bool HasTilingExpr() { return (tfss_expr != nullptr) && !is_subspan; }
-  bool HasSubSpanExpr() { return (tfss_expr != nullptr) && is_subspan; }
+  bool HasTilingExpr() { return (tfss_expr != nullptr) && (op_kind == TILING); }
+  bool HasSubSpanExpr() {
+    return (tfss_expr != nullptr) && (op_kind == SUBSPAN);
+  }
+  bool HasModSpanExpr() {
+    return (tfss_expr != nullptr) && (op_kind == MODSPAN);
+  }
 
   ptr<MultiValues> GetTFSSExpr() const { return tfss_expr; }
 
   ptr<MultiValues> GetTilingFactors() const {
-    if (is_subspan) choreo_unreachable("no tiling factor exist.");
+    if (op_kind != TILING) choreo_unreachable("no tiling factor exist.");
     return tfss_expr;
   }
 
   ptr<MultiValues> GetSubSpanExpr() const {
-    if (!is_subspan) choreo_unreachable("no sub-span exist.");
+    if (op_kind != SUBSPAN) choreo_unreachable("no sub-span exist.");
+    return tfss_expr;
+  }
+
+  ptr<MultiValues> GetModSpanExpr() const {
+    if (op_kind != MODSPAN) choreo_unreachable("no mod-span exist.");
     return tfss_expr;
   }
 
@@ -1511,10 +1528,11 @@ public:
 
     if (positions) {
       if (tfss_expr) {
-        if (is_subspan)
-          os << ".SubSpan(" << STR(tfss_expr) << ").At(";
-        else
-          os << ".Chunk(" << STR(tfss_expr) << ").At(";
+        switch (op_kind) {
+        case TILING: os << ".Chunk(" << STR(tfss_expr) << ").At("; break;
+        case SUBSPAN: os << ".SubSpan(" << STR(tfss_expr) << ").At("; break;
+        case MODSPAN: os << ".SubSpan(" << STR(tfss_expr) << ").At("; break;
+        }
       } else
         os << ".ChunkAt(";
       os << STR(positions) << ")";

@@ -102,11 +102,11 @@ __co__ auto ele_add(s32 [6, ?, 128] lhs, s32 [6, ?, 128] rhs) {
 // CHECK: Parameter: ::ele_add::rhs, Type: s32 mdspan<3> [6, ::ele_add::$1, 128]
 // CHECK: Symbol:    ::ele_add::output, Type: global s32 mdspan<3> [6, ::ele_add::$0, 128]
 // CHECK: Bounded:   ::ele_add::paraby_0::p, Type: {int}->[6](pv)
-// CHECK: Bounded:   ::ele_add::paraby_0::within_0::idx0, Type: {int,int,int}->[1, (::ele_add::$0)/(2), 4]
+// CHECK: Bounded:   ::ele_add::paraby_0::within_0::idx0, Type: {int,int,int}->[1, (::ele_add::$0 / 2), 4]
 // CHECK: Bounded:   ::ele_add::paraby_0::within_0::q, Type: {int}->[1]
 // CHECK: Bounded:   ::ele_add::paraby_0::within_0::x, Type: {int}->[(::ele_add::$0 / 2)]
 // CHECK: Bounded:   ::ele_add::paraby_0::within_0::y, Type: {int}->[4]
-// CHECK: Bounded:   ::ele_add::paraby_0::within_0::idx1, Type: {int,int,int}->[1, (::ele_add::$1)/(2), 4]
+// CHECK: Bounded:   ::ele_add::paraby_0::within_0::idx1, Type: {int,int,int}->[1, (::ele_add::$1 / 2), 4]
 // CHECK: Bounded:   ::ele_add::paraby_0::within_0::w, Type: {int}->[1]
 // CHECK: Bounded:   ::ele_add::paraby_0::within_0::z, Type: {int}->[(::ele_add::$1 / 2)]
 // CHECK: Bounded:   ::ele_add::paraby_0::within_0::b, Type: {int}->[4]

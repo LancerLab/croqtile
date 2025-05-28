@@ -46,10 +46,20 @@ std::vector<int> GetOperandsValNo(const std::string& input) {
 } // namespace
 
 ValueItem ValueNumbering::GenValueItemFromSignature(const std::string& input) {
-  if (auto iv = RemovePrefixOrNull("const_", input)) {
+  if (auto v = RemovePrefixOrNull("#", input)) { // handle #0 string as well
+    int vn;
+    auto [ptr, ec] = std::from_chars(v->data(), v->data() + v->size(), vn);
+    if (ec != std::errc()) return nullptr;
+    if (InternalHasValNoExpr(vn))
+      return GenValueItemFromSignature(GetSignatureFromValueNumber(vn));
+    return nullptr;
+  } else if (auto iv = RemovePrefixOrNull("const_", input)) {
     if (input.find(".") != std::string::npos) // do not handle floating numbers
       return nullptr;
-    return sbe::nu(std::stoll(*iv));
+    uint64_t vn;
+    auto [ptr, ec] = std::from_chars(iv->data(), iv->data() + iv->size(), vn);
+    if (ec != std::errc()) return nullptr; // can not handle
+    return sbe::nu(vn);
   } else if (PrefixedWith(input, "::")) {
     // must be a scoped symbol
     return sbe::sym(input);
@@ -1008,9 +1018,8 @@ ValueNumbering::TryToSimplifyNodeSignature(const AST::Node& node) {
                auto s = GetShape(visitor->NodeType(*n->GetR()));
                if (s.IsValid() && !s.IsDynamic())
                  return "const_" + s.GetElementCountExpression();
-               // TODO: associate span.size valno with any span in value
-               // numbering
-               return std::nullopt;
+               else
+                 return ValueItemToSignature(s.ElementCountValue(), true);
              }},
             {"ubound",
              [this, &n]() -> std::optional<std::string> {

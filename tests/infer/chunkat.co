@@ -30,8 +30,8 @@ __co__ void foo(f32 [M, N] data, int b) {
 // CHKINF: Parameter: ::foo::b, Type: int
 // CHKINF: Bounded:   ::foo::within_0::x, Type: {int}->[(::foo::M / 3)]
 // CHKINF: Bounded:   ::foo::within_0::y, Type: {int}->[(::foo::N / 2)]
-// CHKINF: Future:    ::foo::within_0::(anon), Type: sync=>global f32 mdspan<2> [(::foo::M)/(7), (::foo::N)/(8)]
+// CHKINF: Future:    ::foo::within_0::(anon), Type: sync=>global f32 mdspan<2> [(::foo::M / 7), (::foo::N / 8)]
 // CHKINF: Bounded:   ::foo::paraby_0::p, Type: {int}->[3]
 // CHKINF: Bounded:   ::foo::paraby_0::p__elem__x, Type: {int}->[3]
-// CHKINF: Future:    ::foo::paraby_0::f, Type: sync=>local f32 mdspan<2> [(::foo::M)/(::foo::b), (::foo::N)/(5)]
+// CHKINF: Future:    ::foo::paraby_0::f, Type: sync=>local f32 mdspan<2> [(::foo::M / ::foo::b), (::foo::N / 5)]
 // CHKINF: Function:  ::foo, Type: void (*)(f32 mdspan<2> [::foo::M, ::foo::N], int)

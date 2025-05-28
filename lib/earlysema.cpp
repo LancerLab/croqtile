@@ -668,6 +668,12 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
       return false;
     }
 
+    if (isa<EventType>(tty) && inthreads_levels[parallel_level] > 0) {
+      Error(n.LOC(),
+            "the event should not be declared inside a inthreads block.");
+      error_count++;
+    }
+
     // update the scope/storage for event types
     if (auto evty = dyn_cast<EventArrayType>(tty)) {
       tty = MakeEventArrayType(n.mem->Get(), evty->Dimensions());
@@ -1469,10 +1475,12 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
       size_t b_count = 0;
       for (auto& v : n.GetTFSSExpr()->AllValues()) {
         auto ty = NodeType(*v);
-        if (!isa<IntegerType>(ty) && !isa<ITupleType>(ty)) {
-          Error(n.LOC(), "expect '" + PSTR(v) +
-                             "` be a integer or ituple type (but got " +
-                             PSTR(ty) + ").");
+        if (!isa<IntegerType>(ty) && !isa<ITupleType>(ty) &&
+            !isa<MDSpanType>(ty)) {
+          Error(n.LOC(),
+                "expect '" + PSTR(v) +
+                    "` be either an integer, ituple or mdspan type (but got " +
+                    PSTR(ty) + ").");
           error_count++;
         }
         b_count += ty->Dims();

@@ -30,7 +30,7 @@ __co__ auto matmul(s32 [M, K] lhs, s32 [K, N] rhs) {
 // CHECK: Symbol:    ::matmul::output, Type: global s32 mdspan<2> [::matmul::M, ::matmul::N]
 // CHECK: Symbol:    ::matmul::block_shape, Type: ituple<3>
 // CHECK: Bounded:   ::matmul::paraby_0::p, Type: {int}->[1]
-// CHECK: Bounded:   ::matmul::paraby_0::within_0::index, Type: {int,int,int}->[(::matmul::M)/(8), (::matmul::K)/(1024), (::matmul::N)/(128)]
+// CHECK: Bounded:   ::matmul::paraby_0::within_0::index, Type: {int,int,int}->[(::matmul::M / 8), (::matmul::K / 1024), (::matmul::N / 128)]
 // CHECK: Bounded:   ::matmul::paraby_0::within_0::m_tile, Type: {int}->[(::matmul::M / 8)]
 // CHECK: Bounded:   ::matmul::paraby_0::within_0::k_tile, Type: {int}->[(::matmul::K / 1024)]
 // CHECK: Bounded:   ::matmul::paraby_0::within_0::n_tile, Type: {int}->[(::matmul::N / 128)]

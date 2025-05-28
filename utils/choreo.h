@@ -46,6 +46,14 @@ inline void runtime_check(bool p, const char* msg) {
   return;
 }
 
+inline void runtime_check(bool p, const std::string& msg) {
+  if (!p) {
+    std::cerr << "choreo runtime check failed: " << msg << std::endl;
+    std::abort();
+  }
+  return;
+}
+
 #ifdef __TOPSCC__
 template <typename T>
 __co_device__ inline void fill(T* begin, T* end, const T& value) {

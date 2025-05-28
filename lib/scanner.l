@@ -254,6 +254,7 @@ cstr        \"([^"\\]|\\.)*\"
   ".chunkat" return Choreo::Parser::make_CHUNKAT(yytext, loc);
   ".chunk"   return Choreo::Parser::make_CHUNK(yytext, loc);
   ".subspan" return Choreo::Parser::make_SUBSPAN(yytext, loc);
+  ".modspan" return Choreo::Parser::make_MODSPAN(yytext, loc);
   ".at"      return Choreo::Parser::make_AT(yytext, loc);
   "=>"       return Choreo::Parser::make_TRANS(loc);
   "swap"     return Choreo::Parser::make_SWAP(yytext, loc);

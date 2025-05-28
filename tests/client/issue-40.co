@@ -36,7 +36,7 @@ int main() {
 // CHECK:   tops::memcpy(*out_buf.get_ctx(), __mds3_out_buf__buf__, __mds2_shared_buf);
 // CHECK: }
 // CHECK: void cofoo(const choreo::spanned_view<choreo::f16, 1> & in_buf) {
-// CHECK:   choreo::runtime_check(in_buf.shape()[0] == 524288, "shape inconsistent on the 1st parameter (dim: 0).");
+// CHECK:   choreo::runtime_check(in_buf.shape()[0] == 524288, "shape inconsistent on the 1st parameter ('in_buf', dim: 0): expect: 524288, but got " + std::to_string(in_buf.shape()[0]) + ".");
 // CHECK:   choreo::f16 * in_buf__device = nullptr;
 // CHECK:   choreo::abend_true(topsMalloc(&in_buf__device, 1048576ULL));
 // CHECK:   choreo::abend_true(topsMemcpy(in_buf__device, in_buf.data(), 1048576ULL, topsMemcpyHostToDevice));

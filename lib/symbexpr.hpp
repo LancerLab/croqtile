@@ -330,9 +330,17 @@ public:
       if (rnv && (rnv->Value() == 1)) return simplifiedLeft;
       if (lnv && (lnv->Value() == 1)) return simplifiedRight;
     }
-    // x / 1 = x
+    // x / x = 1, x / 1 = x, 0 / x = 0
     else if (op == OpCode::DIVIDE) {
+      if (*simplifiedLeft == *simplifiedRight) return nu(1);
       if (rnv && (rnv->Value() == 1)) return simplifiedLeft;
+      if (lnv && (lnv->Value() == 0)) return nu(0);
+    }
+    // x % x = 0 , x % 1 = 0, 0 % x = 0
+    else if (op == OpCode::IRES) {
+      if (*simplifiedLeft == *simplifiedRight) return nu(0);
+      if (rnv && (rnv->Value() == 1)) return nu(0);
+      if (lnv && (lnv->Value() == 0)) return nu(0);
     }
     // x^1 = x, 1^x = 1
     else if (op == OpCode::POWER) {

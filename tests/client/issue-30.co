@@ -15,4 +15,4 @@ __co__ void foo(s32[N, M, K] lhs) {
 // CHECK: Desugar ref: (1) ---> a(1)
 
 // INFER: Symbol:    ::foo::paraby_0::b, Type: ituple<3>
-// INFER: Bounded:   ::foo::paraby_0::within_0::idx, Type: {int,int,int}->[(::foo::N)/(12), (::foo::M)/(24), (::foo::K)/(2)]
+// INFER: Bounded:   ::foo::paraby_0::within_0::idx, Type: {int,int,int}->[(::foo::N / 12), (::foo::M / 24), (::foo::K / 2)]
