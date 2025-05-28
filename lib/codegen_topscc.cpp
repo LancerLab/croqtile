@@ -2347,7 +2347,7 @@ TopsccCodeGen::ThreadIdString(const ptr<AST::Identifier>& id) const {
       return "__tops_tid_x()";
     else if (*l == "shared")
       return "__tops_bid_x()";
-    else if (*l == "sublocal")
+    else if (*l == "sub-local")
       return "__tops_stid_x()";
     else
       choreo_unreachable("invalid bounded type note.");

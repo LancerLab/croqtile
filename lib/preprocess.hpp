@@ -34,6 +34,9 @@ private:
   int choreo_brace_count = 0;
   int kernel_brace_count = 0;
 
+  int uc_if_count = 0;
+  int co_if_count = 0;
+
   bool co_skip_line = false;
   bool uc_skip_line = false;
 
@@ -178,6 +181,163 @@ private:
   }
 
 private:
+  std::string preprocessBooleanExpression(
+      const std::string& expr,
+      const std::unordered_map<std::string, std::string>& defines,
+      std::map<std::string, bool>& macroMap) {
+    std::regex defRegex("defined\\s*(?:\\((\\w+)\\)|(\\w+))");
+    std::smatch match;
+    std::string result = expr;
+    std::map<size_t, std::string> replacements;
+    auto begin = std::sregex_iterator(expr.begin(), expr.end(), defRegex);
+    auto end = std::sregex_iterator();
+    std::vector<std::pair<size_t, std::string>> replaceList;
+    for (auto i = begin; i != end; ++i) {
+      auto m = *i;
+      auto varName = m[1].str().empty() ? m[2].str() : m[1].str();
+      auto fullMatch = m[0].str();
+
+      auto replacement = "def_" + varName;
+      size_t pos = m.position();
+
+      replaceList.emplace_back(pos, replacement);
+      macroMap[replacement] = defines.find(varName) != defines.end();
+    }
+    for (auto it = replaceList.rbegin(); it != replaceList.rend(); ++it) {
+      size_t pos = it->first;
+      const std::string& replacement = it->second;
+      size_t len = expr.substr(pos).find_first_of(")");
+      std::smatch subMatch;
+      if (regex_search(expr.begin() + pos, expr.end(), subMatch, defRegex)) {
+        auto matched_str = subMatch[0];
+        len = matched_str.length();
+      }
+      result.replace(pos, len, replacement);
+    }
+
+    return result;
+  }
+
+  bool EvaluateBooleanExpression(
+      const std::string& condition_expr,
+      const std::unordered_map<std::string, std::string>& defines) {
+    std::map<std::string, bool> macroMap;
+    auto expr = preprocessBooleanExpression(condition_expr, defines, macroMap);
+    auto precedence = [](const std::string& op) {
+      if (op == "!") return 3;
+      if (op == "&&") return 2;
+      if (op == "||") return 1;
+      return 0;
+    };
+
+    auto applyOp = [](const std::string& op, bool b, bool a) {
+      if (op == "&&") return a && b;
+      if (op == "||") return a || b;
+      return false;
+    };
+
+    auto nextToken = [](const std::string& expr,
+                        size_t& pos) -> const std::string {
+      while (pos < expr.size() && isspace(expr[pos])) ++pos;
+      if (pos >= expr.size()) return "";
+
+      char c = expr[pos];
+
+      if (c == '(' || c == ')' || c == '!') {
+        ++pos;
+        return std::string(1, c);
+      }
+
+      if (c == '&' || c == '|') {
+        if (pos + 1 < expr.size() && expr[pos + 1] == c) {
+          pos += 2;
+          return std::string(2, c);
+        }
+      }
+
+      std::string token;
+      while ((pos < expr.size() && isalnum(expr[pos])) || expr[pos] == '_') {
+        token += expr[pos++];
+      }
+      return token;
+    };
+
+    std::stack<bool> values;
+    std::stack<std::string> ops;
+
+    size_t pos = 0;
+    std::string token;
+    while (!(token = nextToken(expr, pos)).empty()) {
+      if (token == "(") {
+        ops.push(token);
+      } else if (token == ")") {
+        while (!ops.empty() && ops.top() != "(") {
+          auto op = ops.top();
+          ops.pop();
+          if (op == "!") {
+            if (values.empty()) errs() << "Invalid expression\n";
+            bool a = values.top();
+            values.pop();
+            values.push(!a);
+          } else {
+            if (values.size() < 2) errs() << "Invalid expression\n";
+            bool b = values.top();
+            values.pop();
+            bool a = values.top();
+            values.pop();
+            values.push(applyOp(op, b, a));
+          }
+        }
+        if (!ops.empty()) ops.pop();
+      } else if (token[0] == '&' || token[0] == '|' || token[0] == '!') {
+        while (!ops.empty() && precedence(ops.top()) >= precedence(token)) {
+          std::string op = ops.top();
+          ops.pop();
+          if (op == "!") {
+            if (values.empty()) errs() << "Invalid expression\n";
+            bool a = values.top();
+            values.pop();
+            values.push(!a);
+          } else {
+            if (values.size() < 2) errs() << "Invalid expression\n";
+            bool b = values.top();
+            values.pop();
+            bool a = values.top();
+            values.pop();
+            values.push(applyOp(op, b, a));
+          }
+        }
+        ops.push(token);
+      } else {
+        auto it = macroMap.find(token);
+        if (it == macroMap.end()) errs() << "Invalid expression\n";
+        values.push(it->second);
+      }
+    }
+
+    while (!ops.empty()) {
+      std::string op = ops.top();
+      ops.pop();
+      if (op == "!") {
+        if (values.empty()) errs() << "Invalid expression\n";
+        bool a = values.top();
+        values.pop();
+        values.push(!a);
+      } else {
+        if (values.size() < 2) errs() << "Invalid expression\n";
+        bool b = values.top();
+        values.pop();
+        bool a = values.top();
+        values.pop();
+        values.push(applyOp(op, b, a));
+      }
+    }
+
+    if (values.size() != 1) errs() << "Invalid expression\n";
+
+    return values.top();
+  }
+
   const std::string HandleCComments(const std::string& line) {
     std::string work_string = line;
     std::string result_line;
@@ -227,6 +387,7 @@ private:
     if (isDirective(bline, "#ifdef")) {
       std::regex ifdefRegex("#ifdef\\s+(\\w+)");
       std::smatch match;
+      uc_if_count++;
       if (std::regex_match(bline, match, ifdefRegex)) {
         bool condition = globalDefines.find(match[1]) != globalDefines.end();
         uc_condition_stack.push(condition);
@@ -238,6 +399,7 @@ private:
     } else if (isDirective(bline, "#ifndef")) {
       std::regex ifndefRegex("#ifndef\\s+(\\w+)");
       std::smatch match;
+      uc_if_count++;
       if (std::regex_match(bline, match, ifndefRegex)) {
         bool condition = globalDefines.find(match[1]) == globalDefines.end();
         uc_condition_stack.push(condition);
@@ -265,23 +427,16 @@ private:
       output << line << '\n';
       return;
     } else if (isDirective(bline, "#if")) {
-      // todo [fem]: handle complex condition expression
       std::regex ifRegex("#if\\s+(.*)");
       std::smatch match;
+      uc_if_count++;
       if (std::regex_match(bline, match, ifRegex)) {
         auto uc_code = match[1].str();
         std::smatch uc_code_match;
 
-        std::regex uc_code_regex("(!?)defined\\s*(?:\\((\\w+)\\)|(\\w+))\\s*");
+        std::regex uc_code_regex(R"(!?defined\s*(?:\(\w+\)|\w+)\s*.*)");
         if (std::regex_match(uc_code, uc_code_match, uc_code_regex)) {
-          auto uc_not_str = uc_code_match[1].str();
-          auto uc_condition_str = uc_code_match[2].str().empty()
-                                      ? uc_code_match[3].str()
-                                      : uc_code_match[2].str();
-          bool condition =
-              globalDefines.find(uc_condition_str) != globalDefines.end();
-          if (!uc_not_str.empty()) condition = !condition;
-
+          bool condition = EvaluateBooleanExpression(uc_code, globalDefines);
           uc_condition_stack.push(condition);
           uc_skip_stack.push(uc_skip_line);
           uc_skip_line = uc_skip_line || !condition;
@@ -302,11 +457,8 @@ private:
       output << line << '\n';
       return;
     } else if (isDirective(bline, "#elif")) {
-      if (!uc_condition_stack.empty()) {
-        bool currentCondition = uc_condition_stack.top();
-        uc_condition_stack.top() = !currentCondition;
-        uc_skip_line = uc_skip_stack.top() || !uc_condition_stack.top();
-      }
+      if (!uc_condition_stack.empty())
+        uc_skip_line = uc_skip_stack.top() || uc_condition_stack.top();
 
       std::regex ifRegex("#elif\\s+(.*)");
       std::smatch match;
@@ -314,16 +466,9 @@ private:
         auto uc_code = match[1].str();
         std::smatch uc_code_match;
 
-        std::regex uc_code_regex("(!?)defined\\s*(?:\\((\\w+)\\)|(\\w+))\\s*");
+        std::regex uc_code_regex(R"(!?defined\s*(?:\(\w+\)|\w+)\s*.*)");
         if (std::regex_match(uc_code, uc_code_match, uc_code_regex)) {
-          auto uc_not_str = uc_code_match[1].str();
-          auto uc_condition_str = uc_code_match[2].str().empty()
-                                      ? uc_code_match[3].str()
-                                      : uc_code_match[2].str();
-          bool condition =
-              globalDefines.find(uc_condition_str) != globalDefines.end();
-          if (!uc_not_str.empty()) condition = !condition;
-
+          bool condition = EvaluateBooleanExpression(uc_code, globalDefines);
           uc_condition_stack.push(condition);
           uc_skip_stack.push(uc_skip_line);
           uc_skip_line = uc_skip_line || !condition;
@@ -351,6 +496,12 @@ private:
       output << line << '\n';
       return;
     } else if (isDirective(bline, "#endif")) {
+      uc_if_count--;
+      if (uc_if_count < 0) {
+        errs() << "copp: in line " << line_num
+               << ": error: redundant '#endif'\n";
+        abort();
+      }
       if (!uc_condition_stack.empty()) {
         uc_condition_stack.pop();
         uc_skip_line = uc_skip_stack.top();
@@ -502,6 +653,7 @@ private:
         co_condition_stack.push(condition);
         co_skip_stack.push(co_skip_line);
         co_skip_line = co_skip_line || !condition;
+        co_if_count++;
       }
       if (!co_skip_line) output << "#line " << line_num + 1 << "\n";
     } else if (isDirective(bline, "#ifndef")) {
@@ -512,6 +664,7 @@ private:
         co_condition_stack.push(condition);
         co_skip_stack.push(co_skip_line);
         co_skip_line = co_skip_line || !condition;
+        co_if_count++;
       }
       if (!co_skip_line) output << "#line " << line_num + 1 << "\n";
     } else if (isDirective(bline, "#define")) {
@@ -533,22 +686,14 @@ private:
       }
       if (!co_skip_line) output << "#line " << line_num + 1 << "\n";
     } else if (isDirective(bline, "#if")) {
-      // todo [fem]: handle complex condition expression
       std::regex ifRegex("#if\\s+(.*)");
       std::smatch match;
       if (std::regex_match(bline, match, ifRegex)) {
         auto co_code = match[1].str();
         std::smatch co_code_match;
-
-        std::regex co_code_regex("(!?)defined\\s*(?:\\((\\w+)\\)|(\\w+))\\s*");
+        std::regex co_code_regex(R"(!?defined\s*(?:\(\w+\)|\w+)\s*.*)");
         if (std::regex_match(co_code, co_code_match, co_code_regex)) {
-          auto co_not_str = co_code_match[1].str();
-          auto co_condition_str = co_code_match[2].str().empty()
-                                      ? co_code_match[3].str()
-                                      : co_code_match[2].str();
-          bool condition =
-              localDefines.find(co_condition_str) != localDefines.end();
-          if (!co_not_str.empty()) condition = !condition;
+          bool condition = EvaluateBooleanExpression(co_code, localDefines);
           co_condition_stack.push(condition);
           co_skip_stack.push(co_skip_line);
           co_skip_line = co_skip_line || !condition;
@@ -564,29 +709,21 @@ private:
             co_skip_line = true;
           }
         }
+        co_if_count++;
       }
       if (!co_skip_line) output << "#line " << line_num + 1 << "\n";
     } else if (isDirective(bline, "#elif")) {
-      // todo [fem]: handle complex condition expression
-      if (!co_condition_stack.empty()) {
-        bool currentCondition = co_condition_stack.top();
-        co_condition_stack.top() = !currentCondition;
-        co_skip_line = co_skip_stack.top() || !co_condition_stack.top();
-      }
+      if (!co_condition_stack.empty())
+        co_skip_line = co_skip_stack.top() || co_condition_stack.top();
+
       std::regex elifRegex("#elif\\s+(.*)");
       std::smatch match;
-      if (std::regex_match(bline, match, elifRegex)) {
+      if (std::regex_match(bline, match, elifRegex) && !co_skip_line) {
         auto co_code = match[1].str();
-        std::regex co_code_regex("(!?)defined\\s*(?:\\((\\w+)\\)|(\\w+))\\s*");
+        std::regex co_code_regex(R"(!?defined\s*(?:\(\w+\)|\w+)\s*.*)");
         std::smatch co_code_match;
         if (std::regex_match(co_code, co_code_match, co_code_regex)) {
-          auto co_not_str = co_code_match[1].str();
-          auto co_condition_str = co_code_match[2].str().empty()
-                                      ? co_code_match[3].str()
-                                      : co_code_match[2].str();
-          bool condition =
-              localDefines.find(co_condition_str) != localDefines.end();
-          if (!co_not_str.empty()) condition = !condition;
+          bool condition = EvaluateBooleanExpression(co_code, localDefines);
           co_condition_stack.push(condition);
           co_skip_stack.push(co_skip_line);
           co_skip_line = co_skip_line || !condition;
@@ -612,6 +749,12 @@ private:
       }
       if (!co_skip_line) output << "#line " << line_num + 1 << "\n";
     } else if (isDirective(bline, "#endif")) {
+      co_if_count--;
+      if (co_if_count < 0) {
+        errs() << "copp: in line " << line_num
+               << ": error: redundant '#endif'\n";
+        abort();
+      }
       if (!co_condition_stack.empty()) {
         co_condition_stack.pop();
         co_skip_line = co_skip_stack.top();
@@ -685,6 +828,11 @@ public:
         line_num++;
       } else
         choreo_unreachable("code partition is not known.");
+    }
+
+    if (co_if_count || uc_if_count) {
+      errs() << "copp: in line " << line_num << ": error: missing '#endif'.\n";
+      return false;
     }
 
     if (kernel_brace_count) {

@@ -5,20 +5,32 @@ show me value ABC
 #define DEF 4
 #endif
 
-
+#if defined ABC && defined DEF
 __co__ int if_defined(f32 d[]) {
 
-#if !defined DEF
-    should not show up 0
-#else
-    show me value DEF
-#endif
+  show inside value DEF
+
+  #if defined ABC && (!defined (HIG) || defined DEF)
+  show me ABC and DEF
+  #elif !defined DEF || defined HIG
+  should not show up
+  #elif defined ABC
+  should not show ABC
+  #endif
 }
+#endif
+  show outside value DEF
 
 
-// CHECK: #define ABC 3
-// CHECK: show me value ABC
-// CHECK: #if defined ABC
-// CHECK: #define DEF 4
-// CHECK: #endif
-// CHECK: show me value 4
+  // CHECK: #define ABC 3
+  // CHECK: show me value ABC
+  // CHECK: #if defined ABC
+  // CHECK: #define DEF 4
+  // CHECK: #endif
+  // CHECK: #if defined ABC && defined DEF
+  // CHECK: show inside value 4
+  // CHECK: show me 3 and 4
+  // CHECK-NOT: should not show up
+  // CHECK-NOT: should not show ABC
+  // CHECK: #endif
+  // CHECK: show outside value DEF
