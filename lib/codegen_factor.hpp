@@ -40,7 +40,7 @@ private:
   std::string indent;
 
   using FunctionStream = std::map<std::string, std::ostringstream>;
-  // ochestrate multiple streams
+  // orchestrate multiple streams
   std::ostringstream ds; // buffer stream of the forward declarations
   std::ostringstream ks; // buffer stream of the kernel code (user provided)
   std::ostringstream fs; // buffer stream of the factor code (generated)

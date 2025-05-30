@@ -227,13 +227,13 @@ using f32 = float;
 //    and https://en.wikipedia.org/wiki/Single-precision_floating-point_format
 template <typename T, typename F>
 __co_any__ inline static T __f32_to_f16(F value) {
-  static_assert(sizeof(F) == 4, "soruce is not a float.");
+  static_assert(sizeof(F) == 4, "source is not a float.");
   static_assert(sizeof(T) == 2, "target is not a half float.");
 
   uint32_t fltInt32 = *reinterpret_cast<uint32_t*>(&value);
   uint32_t sign = (fltInt32 >> 31) & 0x1;
   uint32_t exponent = ((fltInt32 >> 23) & 0xFF); // 8-bit exponent
-  uint32_t fraction = fltInt32 & 0x7FFFFF;       // 23-bit freaction
+  uint32_t fraction = fltInt32 & 0x7FFFFF;       // 23-bit fraction
   uint16_t resultBits = 0;
 
   if (exponent == 0x0 && fraction == 0x0) { // Zero
@@ -272,7 +272,7 @@ __co_any__ inline static T __f32_to_f16(F value) {
 template <typename T, typename F>
 __co_any__ inline static T __f16_to_f32(F value) {
   static_assert(sizeof(T) == 4, "target is not a float.");
-  static_assert(sizeof(F) == 2, "soruce is not a half float.");
+  static_assert(sizeof(F) == 2, "source is not a half float.");
 
   int16_t fltInt16 = *(int16_t*)&value;
   uint32_t sign = (fltInt16 >> 15) & 0x1;
@@ -284,7 +284,7 @@ __co_any__ inline static T __f16_to_f32(F value) {
     resultBits = sign << 31;
   }
   if (exponent == 0x0 && fraction != 0x0) { // Subnormal for float16
-    // Subnormal float16 is noramlized in float32.
+    // Subnormal float16 is normalized in float32.
     // Why 0x89(137)? 137 = 127 + 23 - 13
     // Why (fraction - 1)? Minus the implicit "1" from normalized
     resultBits = (sign << 31) | (0x89) << 23 | ((fraction - 1) << 13);
@@ -952,7 +952,7 @@ public:
   }
 };
 
-// target specific defintions
+// target specific definations
 #ifdef __TOPSCC__
 template <typename T>
 __device__ static int inline __addr2int__(T* v) {
@@ -996,7 +996,7 @@ __device__ __attribute__((always_inline)) static inline void __co_abort__() {
 struct future {
   tops_dte_ctx_t* ctx = nullptr;
   tops::event e;
-  void* d = nullptr; // data: future's user must gurantee it is valid
+  void* d = nullptr; // data: future's user must guarantee it is valid
 
   // for runtime check purpose
   //
@@ -1049,7 +1049,7 @@ struct future {
     }
     if (ev.ctx != ctx) {
       printf("[choreo-rt] Internal error: future (defined at line %u:%u) "
-             "is used incosistently.\n",
+             "is used inconsistently.\n",
              line, column);
       __co_abort__();
     }

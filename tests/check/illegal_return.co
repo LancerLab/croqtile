@@ -16,21 +16,21 @@ __co__ auto illegal_ret3(f32 [1, 2, 3] a) {
    }
 }
 
-// CHECK: error: returning value with type 'sync=>local f32 mdspan<3> []' is not supproted.
+// CHECK: error: returning value with type 'sync=>local f32 mdspan<3> []' is not supported.
 
 __co__ auto illegal_ret4() {
   a = dma.any;
   return a; // illegal
 }
 
-// CHECK: error: returning value with type 'placeholder<FUTURE>' is not supproted.
+// CHECK: error: returning value with type 'placeholder<FUTURE>' is not supported.
 
 __co__ auto illegal_ret5() {
   a = {1};
   return a; // illegal
 }
 
-// CHECK: error: returning value with type 'ituple<1>' is not supproted.
+// CHECK: error: returning value with type 'ituple<1>' is not supported.
 
 __co__ auto illegal_ret6(s16 [M] b) {
   with index in b.span {
@@ -38,4 +38,4 @@ __co__ auto illegal_ret6(s16 [M] b) {
   }
 }
 
-// CHECK: error: returning value with type '{int}->[]' is not supproted.
+// CHECK: error: returning value with type '{int}->[]' is not supported.

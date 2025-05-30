@@ -368,11 +368,11 @@ LivenessAnalyzer::TransitiveClosure(const VarSet& vars,
 }
 
 void LivenessAnalyzer::ComputeLiveInOut() {
-  for (int i = stmts_preordered.size() - 1; i >= 0; --i) {
-    const Stmt* s = stmts_preordered[i];
+  for (int i = preorder_stmts.size() - 1; i >= 0; --i) {
+    const Stmt* s = preorder_stmts[i];
 
-    if (i < (int)stmts_preordered.size() - 1)
-      linfo[s].live_out = linfo[stmts_preordered[i + 1]].live_in;
+    if (i < (int)preorder_stmts.size() - 1)
+      linfo[s].live_out = linfo[preorder_stmts[i + 1]].live_in;
 
     VarSet all_use = linfo[s].use;
 
@@ -414,7 +414,7 @@ void LivenessAnalyzer::ComputeLiveInOut() {
       os << "\t" << label << ": " << vars.size() << "\n";
       for (const auto& item : vars) os << "\t\t" << item << "\n";
     };
-    for (const Stmt* s : stmts_preordered) {
+    for (const Stmt* s : preorder_stmts) {
       if (ONLY_SHOW_BUFFER && !linfo[s].buffer_related) continue;
       dbgs() << "stmt: " << SSTR(s);
       PrintSet(dbgs(), "use", linfo[s].use);
@@ -428,15 +428,15 @@ void LivenessAnalyzer::ComputeLiveInOut() {
   });
 #if 1
   VST_DEBUG({
-    if (!linfo[stmts_preordered[0]].live_in.empty()) {
+    if (!linfo[preorder_stmts[0]].live_in.empty()) {
       std::cerr << "live_in of the first stmt is not empty.\n";
-      for (const auto& item : linfo[stmts_preordered[0]].live_in)
+      for (const auto& item : linfo[preorder_stmts[0]].live_in)
         std::cerr << "\t" << item << "\n";
       choreo_unreachable("expecting the live_in of the first stmt is empty.");
     }
   });
 #else
-  assert(linfo[stmts_preordered[0]].live_in.empty() &&
+  assert(linfo[preorder_stmts[0]].live_in.empty() &&
          "expecting the live_in of the first stmt is empty.");
 #endif
 }
@@ -447,7 +447,7 @@ void LivenessAnalyzer::ComputeLiveRange() {
   std::map<std::string, std::vector<size_t>> var_def_points;
 
   // collect all the def points of each variable.
-  for (const auto* stmt : stmts_preordered)
+  for (const auto* stmt : preorder_stmts)
     for (const auto& var : linfo[stmt].def)
       var_def_points[var].push_back(stmt2number.at(stmt));
 
@@ -463,8 +463,8 @@ void LivenessAnalyzer::ComputeLiveRange() {
       size_t end_point = def_point;
 
       // traverse from the def point to the end.
-      for (size_t i = def_point + 1; i < stmts_preordered.size(); ++i) {
-        auto current_stmt = stmts_preordered[i];
+      for (size_t i = def_point + 1; i < preorder_stmts.size(); ++i) {
+        auto current_stmt = preorder_stmts[i];
         // if the variable is in the live_in or use of the current stmt,
         // update the end_point.
         if (linfo[current_stmt].live_in.count(var) ||
@@ -732,7 +732,7 @@ inline bool ShouldIndent(const AST::Node& n) {
 void LivenessAnalyzer::HandleStmtInBefore(AST::Node& n) {
   if (!HasStmt(n)) return;
 
-  stmts_preordered.push_back(&n);
+  preorder_stmts.push_back(&n);
 
   current_stmt = &n;
   stmt2number.emplace(&n, stmt_number);
@@ -768,7 +768,7 @@ void LivenessAnalyzer::HandleStmtInMid(AST::Node& n) {
 
   auto if_end = AST::Make<ScopeEnd>(n.LOC(), &n);
   scope_ends.push_back(if_end);
-  stmts_preordered.push_back(if_end.get());
+  preorder_stmts.push_back(if_end.get());
   stmt2number.emplace(if_end.get(), stmt_number);
   ++stmt_number;
   DumpStmtBriefly(*if_end, stmts_with_indent, false);
@@ -782,7 +782,7 @@ void LivenessAnalyzer::HandleStmtInMid(AST::Node& n) {
 
   auto else_start = AST::Make<ScopeEnd>(n.LOC(), &n);
   scope_ends.push_back(else_start);
-  stmts_preordered.push_back(else_start.get());
+  preorder_stmts.push_back(else_start.get());
   stmt2number.emplace(else_start.get(), stmt_number);
   ++stmt_number;
   DumpStmtBriefly(*else_start, stmts_with_indent, true, true);
@@ -809,7 +809,7 @@ void LivenessAnalyzer::HandleStmtInAfter(AST::Node& n) {
   auto rbrace = AST::Make<ScopeEnd>(n.LOC(), &n);
 
   scope_ends.push_back(rbrace);
-  stmts_preordered.push_back(rbrace.get());
+  preorder_stmts.push_back(rbrace.get());
   stmt2number.emplace(rbrace.get(), stmt_number);
   ++stmt_number;
 
@@ -1002,7 +1002,7 @@ bool LivenessAnalyzer::Visit(AST::Assignment& n) {
 bool LivenessAnalyzer::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
   assert(n.bpv && n.cmpt_bpvs &&
-         "expecting the parallelby has bpv and cmpt_bpvs.");
+         "expecting the parallel-by has bpv and cmpt_bpvs.");
   AddDef(current_stmt, n.bpv->name);
   events_to_add[current_stmt].insert({"use", n.bpv->name});
   paraby_bounded_vars.insert(n.bpv->name);

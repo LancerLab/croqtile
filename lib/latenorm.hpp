@@ -35,7 +35,7 @@ public:
   void Reset() { string_to_dma.clear(); }
 };
 
-// Auxillary structures for buffer generation
+// Auxiliary structures for buffer generation
 struct BufferInsertionInfo {
   int index = -1;
   ptr<AST::Node> node = nullptr;
@@ -289,7 +289,7 @@ public:
                         n.data->name) == host_buffer_slice_list.end()) {
             host_buffer_slice_list.push_back(n.data->name);
 
-            // formulte the updated shape/types for this optimisation
+            // formulate the updated shape/types for this optimisation
             auto ty = NodeType(n);
             auto ty_data = GetSymbolType(n.data->name);
             auto ty_tiler = NodeType(*tiler_node);

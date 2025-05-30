@@ -199,7 +199,7 @@ private:
   bool liveness = false;          // analyze the liveness of the program
   bool mem_reuse = false;         // reuse the memory of the program
   bool simplify_fp_valno = false; // simplify the floating point value number
-  bool verify = false;            // verify visitors for legility
+  bool verify = false;            // verify visitors for legality
   bool gen_debug_info = false;    // generate debug information
 
 private:
@@ -329,7 +329,7 @@ public:
   void SetTraceValueNumbers(bool value) { trace_vn = value; }
   void SetLivenessAnalysis(bool value) { liveness = value; }
   void SetMemReuse(bool value) { mem_reuse = value; }
-  void SetSimplfyFpValno(bool value) { simplify_fp_valno = value; }
+  void SetSimplifyFpValno(bool value) { simplify_fp_valno = value; }
   void SetVerifyVisitors(bool value) { verify = value; }
   void SetGenDebugInfo(bool value) { gen_debug_info = value; }
 

@@ -423,7 +423,7 @@ private:
 
     assert(block_shape.Rank() > 1 && "unexpected shape dimensions.");
     assert(block_shape.Rank() == cmpt_bounds.size() &&
-           "inconsistence between shape cmpt_bounds and tiling");
+           "inconsistency between shape cmpt_bounds and tiling");
 
     if (block_shape.Rank() > 3) {
       Warning(ca.LOC(), "unable to visualize tensors with high dimensions.");

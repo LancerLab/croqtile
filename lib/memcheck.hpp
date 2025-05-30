@@ -142,7 +142,7 @@ private:
     return oss.str();
   }
 
-  // Tranform size in byte to human readable format like 1KB 2GB etc in decimal.
+  // Transform size in byte to human readable format like 1KB 2GB etc in decimal.
   std::string SizeForHuman(size_t size) {
     std::ostringstream oss;
     oss << std::defaultfloat << "(";
@@ -225,7 +225,7 @@ public:
         TODO:
         For GCU3, all is different with Scorpio (1 Die) in the link below
         Is S60G same with c035?
-        L3 (gobal) is different with Dorado (3VG per Cluster) in
+        L3 (global) is different with Dorado (3VG per Cluster) in
         http://wiki.enflame.cn/display/~james.zhu/Enflame+GCU+Programming+Model#EnflameGCUProgrammingModel-get_memory_space
         */
         // initialize max memory we can allocate in byte
@@ -243,7 +243,7 @@ public:
 
   bool Visit(AST::NamedVariableDecl& n) override {
     TraceEachVisit(n);
-    // mem alloc could happend here
+    // mem alloc could happen here
     auto sty = dyn_cast<SpannedType>(GetSymbolType(n.name_str));
     if (!sty) return true;
     auto sto = sty->GetStorage();

@@ -46,7 +46,7 @@
 #endif
 
 // Scanner method signature is defined by this macro. Original yylex() returns
-// int. Sinice Bison 3 uses symbol_type, we must change returned type. We also
+// int. Since Bison 3 uses symbol_type, we must change returned type. We also
 // rename it to something sane, since you cannot overload return type.
 #undef YY_DECL
 #define YY_DECL Choreo::Parser::symbol_type Choreo::Scanner::get_next_token()

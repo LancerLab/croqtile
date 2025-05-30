@@ -533,7 +533,7 @@ struct Type {
 
   virtual TypeCategory Category() const { return tc; }
   virtual size_t Dims() const = 0;
-  virtual bool IsComplete() const = 0; // it is a partial or compelete type
+  virtual bool IsComplete() const = 0; // it is a partial or complete type
   // Types with/without sufficient info is of the same type. However, a type
   // with sufficient info is higher ranked. In type-inference, a type without
   // sufficient info should promoted to the one with sufficient info.
@@ -554,7 +554,7 @@ struct Type {
     return "";
   }
 
-  // for runtime type disambiguition
+  // for runtime type disambiguation
   __UDT_TYPE_INFO_BASE__(notype)
 };
 
@@ -637,7 +637,7 @@ struct PlaceHolderType final : public Type,
   bool HasSufficientInfo() const { return false; }
 
   bool operator==(const Type&) const override { return false; }
-  // tolarate im-precise comparison
+  // tolerate im-precise comparison
   bool ApprxEqual(const Type& t) const override {
     return t.Category() == Category();
   }
@@ -1366,14 +1366,14 @@ struct ArrayType : public TypeIDProvider<ArrayType> {
 
   ArrayType(std::initializer_list<size_t> ds) {
     for (auto d : ds) {
-      if (d == 0) choreo_unreachable("invalid dimesnion.");
+      if (d == 0) choreo_unreachable("invalid dimension.");
       dims.push_back(d);
     }
   }
 
   explicit ArrayType(std::vector<size_t> ds) {
     for (auto d : ds) {
-      if (d == 0) choreo_unreachable("invalid dimesnion.");
+      if (d == 0) choreo_unreachable("invalid dimension.");
       dims.push_back(d);
     }
   }
@@ -1385,14 +1385,14 @@ struct ArrayType : public TypeIDProvider<ArrayType> {
   // array[n][m] - subscripting by 1  results in array[n]
   virtual const std::vector<size_t> SubScript(size_t dim_count) {
     if (dim_count > dims.size())
-      choreo_unreachable("invalid subscription: not enough dimesnion.");
+      choreo_unreachable("invalid subscription: not enough dimension.");
     return std::vector<size_t>(dims.begin(), dims.begin() + dim_count);
   }
 
   // array[n][m] - subscripting by 1  the remainder dimensions is [m]
   virtual const std::vector<size_t> RemainderDimensions(size_t dim_count) {
     if (dim_count > dims.size())
-      choreo_unreachable("invalid subscription: not enough dimesnion.");
+      choreo_unreachable("invalid subscription: not enough dimension.");
     return std::vector<size_t>(dims.begin() + dim_count, dims.end());
   }
 
@@ -1430,7 +1430,7 @@ struct ArrayType : public TypeIDProvider<ArrayType> {
     for (auto d : dims) os << "[" << d << "]";
   }
 
-  // for runtime type disambiguition
+  // for runtime type disambiguation
   __UDT_TYPE_INFO_BASE1__(arraytype)
 };
 

@@ -361,7 +361,7 @@ bool CUDACodeGen::Visit(AST::ParamList& n) {
 }
 
 // CLEAN
-// TODO(albert): revolsve HC in p/q => blockid
+// TODO(albert): resolve HC in p/q => blockid
 bool CUDACodeGen::Visit(AST::ParallelBy& by) {
   __TRACE_EACH_VISIT__(by)
   if (auto b = VIInt(cast<BoundedType>(NodeType(*by.bpv))->GetUpperBound()))
@@ -1303,7 +1303,7 @@ void CUDACodeGen::EmitHostFuncBody(std::ostream& os, const Type& ty,
        << DelimitedString(device_mems) << ", out_mem_cublas, cublas_handle);\n";
   }
 
-  std::vector<std::string> inputs; // cuda input paramters
+  std::vector<std::string> inputs; // cuda input parameters
 
   // go ref impl with cublas
   os << "  CUDACheck(cudaDeviceSynchronize());\n";

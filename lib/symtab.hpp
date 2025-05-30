@@ -72,7 +72,7 @@ public:
 };
 
 // TODO(albert): remove this when other utils ready
-// currently, we need this for working-around on emit refered ids/types/vars
+// currently, we need this for working-around on emit referred ids/types/vars
 // however, some objects are not printable in Factor form.
 class StringifyTable {
 private:

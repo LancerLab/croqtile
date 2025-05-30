@@ -23,7 +23,7 @@ __co__ auto correct(s32 [1] i) { return i; }
 
 __co__ int correct_int() { return 1; }
 // CHECK-NOT: correct_int
-// CHECKF: error: returning scalar value in Factor backend is not supproted yet.
+// CHECKF: error: returning scalar value in Factor backend is not supported yet.
 
 // CHECK: Totally 2 errors have been detected.
 // CHECKF: Totally 3 errors have been detected.

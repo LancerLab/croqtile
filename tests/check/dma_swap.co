@@ -27,5 +27,5 @@ __co__ auto placeholder(f32 [24, 17, 128] a) {
    return f.data;
 }
 
-// CHECK: can not initialize vairable `f2' with a placeholder.
+// CHECK: can not initialize variable `f2' with a placeholder.
 // CHECK: rotate/swap data of different types (sync=>local f32 mdspan<3> [] vs. async=>local f32 mdspan<3> []

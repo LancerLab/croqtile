@@ -17,10 +17,10 @@ __co__ void cofoo0() {
   }
 }
 
-// NORM: Repalce a in {a, 3, 4} with:
+// NORM: Replace a in {a, 3, 4} with:
 // NORM:         a(0)
 // NORM:         a(1)
-// NORM: Repalce c in {c, bb(1), 4} with:
+// NORM: Replace c in {c, bb(1), 4} with:
 // NORM:         c(0)
 // NORM:         c(1)
 
@@ -49,7 +49,7 @@ __co__ void cofoo1() {
   }
 }
 
-// NORM: Repalce  (a + 1)  in { (a + 1) , c(0), 4} with:
+// NORM: Replace  (a + 1)  in { (a + 1) , c(0), 4} with:
 // NORM: 	 (a + 1) (0)
 // NORM: 	 (a + 1) (1)
 

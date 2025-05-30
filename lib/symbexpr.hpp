@@ -74,7 +74,7 @@ inline static OpCode ToOpCode(const std::string& op) {
   else if (op == "%")
     return OpCode::IRES;
   else
-    choreo_unreachable("operation '" + op + "' is not suppported.");
+    choreo_unreachable("operation '" + op + "' is not supported.");
   return OpCode::NONE;
 }
 
@@ -92,7 +92,7 @@ inline static int64_t gcd(int64_t a, int64_t b) {
 inline static bool multipleof(int64_t a, int64_t b) { return gcd(a, b) == b; }
 
 // Note: Same symbol names implies same value. Therefore scoped symbols are
-// requried.
+// required.
 
 // Forward declarations
 class SymbolicExpression;
@@ -165,7 +165,7 @@ public:
   virtual Operand Reassociate() const = 0;
 
 public:
-  // for runtime type disambiguition
+  // for runtime type disambiguation
   __UDT_TYPE_INFO_BASE__(notype)
 };
 

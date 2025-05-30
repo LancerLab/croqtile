@@ -62,7 +62,7 @@ namespace choreo {
     uint32_t fltInt32 = *reinterpret_cast<uint32_t*>(&value);
     uint32_t sign = (fltInt32 >> 31) & 0x1;
     uint32_t exponent = ((fltInt32 >> 23) & 0xFF); // 8-bit exponent
-    uint32_t fraction = fltInt32 & 0x7FFFFF;       // 23-bit freaction
+    uint32_t fraction = fltInt32 & 0x7FFFFF;       // 23-bit fraction
     uint16_t resultBits = 0;
 
     if (exponent == 0x0 && fraction == 0x0) { // Zero
@@ -101,7 +101,7 @@ namespace choreo {
       resultBits = sign << 31;
     }
     if (exponent == 0x0 && fraction != 0x0) { // Subnormal for float16
-      // Subnormal float16 is noramlized in float32.
+      // Subnormal float16 is normalized in float32.
       // Why 0x89(137)? 137 = 127 + 23 - 13
       // Why (fraction - 1)? Minus the implicit "1" from normalized
       resultBits = (sign << 31) | (0x89) << 23 | ((fraction - 1) << 13);
@@ -173,10 +173,10 @@ bool FactorCodeGen::AfterVisitImpl(AST::Node& n) {
     }
   } else if (isa<AST::ChoreoFunction>(&n)) {
     // choreo-host function:
-    // The user code may require the choreo function be fwd-decalared for its
+    // The user code may require the choreo function be fwd-declared for its
     // call
     EmitHostFuncDecl(ds, fname);
-    ds << "; // foward-declaration of choreo-host\n";
+    ds << "; // forward-declaration of choreo-host\n";
 
     EmitHostFunction(hs);
 
@@ -464,7 +464,7 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
     alloc_pos_stack.push(fs.str().size());
     alloc_indent_stack.push(indent);
     alloc_fs_stack.push(std::ostringstream());
-    // std::cout << "enter inner parallelly" << std::endl;
+    // std::cout << "enter inner parallelby" << std::endl;
     // std::cout << alloc_fs_stack.size() << std::endl;
     // std::cout << alloc_indent_stack.size() << std::endl;
     // std::cout << alloc_pos_stack.size() << std::endl;
@@ -612,7 +612,7 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
   alloc_pos_stack.push(fs.str().size());
   alloc_indent_stack.push(indent);
   alloc_fs_stack.push(std::ostringstream());
-  // std::cout << "enter parallelly" << std::endl;
+  // std::cout << "enter parallelby" << std::endl;
   // std::cout << alloc_fs_stack.size() << std::endl;
   // std::cout << alloc_indent_stack.size() << std::endl;
   // std::cout << alloc_pos_stack.size() << std::endl;
@@ -858,7 +858,7 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
 
   if (d.chained == false) {
     fs << ");\n";
-    // synchornized dma must be waited
+    // synchronized dma must be waited
     if (!ty->IsAsync()) fs << indent << "wait_dma_(" << future_name << ");\n";
   } else {
     assert(ty->IsAsync() &&
@@ -1050,7 +1050,7 @@ bool FactorCodeGen::Visit(AST::ForeachBlock& forNode) {
 bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
   TraceEachVisit(d);
 
-  assert(d.name == fname && "incosistent in function names.");
+  assert(d.name == fname && "inconsistent in function names.");
   assert(isa<FunctionType>(d.GetType()) && "unexpected type.");
 
   auto MapRuntimeShapeNames = [this](const ptr<SpannedType>& sty,
@@ -1399,7 +1399,7 @@ void FactorCodeGen::EmitHostFunction(std::ostream& os) {
     os << "  void *device_outputs[] = {out_mem};\n";
   }
 
-  std::vector<std::string> inputs; // factor input paramters
+  std::vector<std::string> inputs; // factor input parameters
 
   os << "\n  // adaption: convert to the factor parameters\n";
   size_t index = 0;
@@ -1717,7 +1717,7 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
             choreo_unreachable("Future '" + id->name +
                                "' is not associated with a buffer.");
         } else
-          choreo_unreachable("Can not retrive name of the future.");
+          choreo_unreachable("Can not retrieve name of the future.");
       } else if (expr->op == "sizeof") {
         auto var = RemoveSuffix(*AST::GetName(*expr->GetR()), ".span");
         auto shape = GetShape(GetSymbolType(var));

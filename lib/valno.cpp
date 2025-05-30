@@ -180,7 +180,7 @@ void ValueNumbering::LeaveScope() {
   if (trace) dbgs() << indent << "} // end scope-" << sname << "\n";
 }
 
-// It binds a expression sigature with an existing value number.  use it
+// It binds a expression signature with an existing value number.  use it
 // carefully.
 void ValueNumbering::AssociateSignatureWithValueNumber(const std::string& sig,
                                                        int valno) {

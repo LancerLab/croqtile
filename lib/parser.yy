@@ -76,7 +76,7 @@ static Parser::symbol_type yylex(Scanner &scanner) {
   return scanner.get_next_token();
 }
 
-// The flag is used to disambiguate syntax suger:
+// The flag is used to disambiguate syntax sugar:
 //
 //   a {(0), (1), 3} represents { a(0), a(1), 3 }
 //
@@ -207,7 +207,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::ParamList>> parameter_list
 %nterm <AST::ptr<AST::Parameter>> parameter
 %nterm <AST::ptr<AST::ChoreoFunction>> dsl_function
-%nterm <AST::ptr<AST::MultiDimSpans>> unamed_mdspan_decl mdspan_list mdspan_derivation param_mdspan
+%nterm <AST::ptr<AST::MultiDimSpans>> unnamed_mdspan_decl mdspan_list mdspan_derivation param_mdspan
 %nterm <AST::ptr<AST::NamedTypeDecl>> named_mdspan_decl
 %nterm <AST::ptr<AST::NamedVariableDecl>> named_ituple_decl spanned_decl scalar_decl event_decl
 %nterm <AST::ptr<AST::IntTuple>> ituple_list
@@ -1137,13 +1137,13 @@ mdspan_operator
       } */
     ;
 
-unamed_mdspan_decl
+unnamed_mdspan_decl
     : mdspan_list       { $$ = $1; }
     | mdspan_derivation { $$ = $1; }
     ;
 
 mdspan_val_expr
-    : unamed_mdspan_decl { $$ = AST::Make<AST::Expr>(@1, $1); }
+    : unnamed_mdspan_decl { $$ = AST::Make<AST::Expr>(@1, $1); }
     | spanid { $$ = AST::MakeIdExpr(@1, $1); }
     ;
 

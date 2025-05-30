@@ -28,7 +28,7 @@ choreo_unreachable_impl(const char* file, int line,
   std::abort();
 }
 
-// Note: __VA_OPT__ requires C++20. But it is avaliable starting from gcc-8.1
+// Note: __VA_OPT__ requires C++20. But it is available starting from gcc-8.1
 // and clang-6. This pre-requisition should be satisfied.
 
 #if defined(__GNUC__) && !defined(__clang__)

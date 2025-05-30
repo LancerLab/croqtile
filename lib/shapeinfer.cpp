@@ -345,7 +345,7 @@ bool ShapeInference::Visit(AST::MultiDimSpans& n) {
 
   if (n.list) {
     // The Shape now can be deduced from the value number.
-    // Update the type detail acoordingly.
+    // Update the type detail accordingly.
     auto vn_sig = vn.GetSignatureFromValueNumber(cur_vn);
 
     // set alias expressions with proper value numbers
@@ -407,7 +407,7 @@ bool ShapeInference::Visit(AST::NamedTypeDecl& n) {
     vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(name),
                                          cur_mdspan_vn);
 
-    InvalidateVN(cur_mdspan_vn); // comsumes the mdspan
+    InvalidateVN(cur_mdspan_vn); // consumes the mdspan
   }
   return true;
 }
@@ -1048,7 +1048,7 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
   auto SignatureOfBinOp = [this, &AddValno, &n](const std::string& op,
                                                 int dividend_vn,
                                                 int divisor_vn) {
-    // the signature without optimiz
+    // the signature without optimize
     std::string res_sig = op + ":#" + std::to_string(dividend_vn) + ":#" +
                           std::to_string(divisor_vn);
 

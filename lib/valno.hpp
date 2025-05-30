@@ -28,7 +28,7 @@ inline std::string RemovePrefix(const std::string& str,
   return str;
 }
 
-// retrieve the n-th element from the comma-seperated input string
+// retrieve the n-th element from the comma-separated input string
 inline std::optional<std::string> GetNthElement(const std::string& input,
                                                 int n) {
   std::istringstream iss(input);
@@ -172,7 +172,7 @@ public:
   void SetListReference(const std::string& r) { ref = r; }
   void ResetListReference() { ref.reset(); }
 
-  // It binds a expression sigature with an existing value number.
+  // It binds a expression signature with an existing value number.
   void AssociateSignatureWithValueNumber(const std::string& sig, int valno);
   void AssociateSignatureWithInvalidValueNumber(const std::string& sig);
   // rebind/modify the value number.
@@ -271,7 +271,7 @@ public:
   const std::vector<ValueItem> GenValueItemsFromSignature(const std::string&);
   std::string ValueItemToSignature(const ValueItem&, bool = false);
 
-  // retrieve the n-th element from the comma-seperated input string
+  // retrieve the n-th element from the comma-separated input string
   int GetNthValNo(const std::string& input, int n) const;
   const std::vector<int> Flatten(int) const;
 

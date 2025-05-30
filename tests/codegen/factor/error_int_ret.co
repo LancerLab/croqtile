@@ -5,4 +5,4 @@ int main() {
   auto res = int_ret();
 }
 
-// CHECK: error: returning scalar value in Factor backend is not supproted yet.
+// CHECK: error: returning scalar value in Factor backend is not supported yet.

@@ -213,7 +213,7 @@ public:
   }
 
 public:
-  // The node type can only be used when symbol table is consturcted or under
+  // The node type can only be used when symbol table is constructed or under
   // construction
   virtual ptr<Type> NodeType(const AST::Node& n) const {
     if (auto id = dyn_cast<AST::Identifier>(&n))

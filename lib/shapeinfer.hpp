@@ -62,7 +62,7 @@ public:
   virtual bool AfterVisitImpl(AST::Node& n) override;
 
 public:
-  // enable NodeType to retrive a scoped name
+  // enable NodeType to retrieve a scoped name
   ptr<Type> GetSymbolType(const std::string& n) const override {
     return SSTab().LookupSymbol(n);
   }

@@ -668,7 +668,7 @@ bool TypeInference::Visit(AST::Expr& n) {
         else
           SetNodeType(n, MakeFloatType());
       } else {
-        // it is ok to make compatiable types to do arith
+        // it is ok to make compatible types to do arith
         if (IsActualBoundedIntegerType(pty_lhs) && isa<IntegerType>(pty_rhs))
           SetNodeType(n, pty_lhs);
         else if (IsActualBoundedIntegerType(pty_rhs) &&
@@ -766,7 +766,7 @@ bool TypeInference::Visit(AST::DMA& n) {
     return true;
   }
 
-  // update the future type. fill info including storage, fundanmental type
+  // update the future type. fill info including storage, fundamental type
   auto fty = cast<FutureType>(n.GetType());
   auto sty = MakeSpannedType(dma_fmty, fty->GetShape(), dma_mem);
   auto nty = MakeFutureType(sty, fty->IsAsync());
@@ -976,7 +976,7 @@ bool TypeInference::Visit(AST::Return& n) {
       }
       if (rty->Dims() != tty->Dims()) {
         Error(n.LOC(),
-              "return type inconsistant: " + STR(*rty) + " vs. " + STR(*tty));
+              "return type inconsistent: " + STR(*rty) + " vs. " + STR(*tty));
         error_count++;
         return false;
       }
@@ -987,7 +987,7 @@ bool TypeInference::Visit(AST::Return& n) {
         if (*rty->GetMDSpanType() != *tty->GetMDSpanType() ||
             rty->ElementType() != tty->ElementType()) {
           Error(n.LOC(),
-                "return type inconsistant: " + STR(*rty) + " vs. " + STR(*tty));
+                "return type inconsistent: " + STR(*rty) + " vs. " + STR(*tty));
           error_count++;
           return false;
         } else if (tty->m_type != Storage::DEFAULT &&

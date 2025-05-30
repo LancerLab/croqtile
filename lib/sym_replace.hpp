@@ -51,7 +51,7 @@ public:
     return error_count != 0;
   }
 
-  // termial expr node.
+  // terminal expr node.
   std::vector<ptr<AST::Node>> expr_nodes;
   // from node to InScope Name.
   std::map<ptr<AST::Node>, std::string> nd2sn;
@@ -59,7 +59,7 @@ public:
   std::map<std::string, Symbol> name_symbol_map;
   std::map<std::string, SymExpr> name_sym_expr_map;
   // the next valid symbolic value number.
-  // sym_valno of 0 indcates that the node is ignored.
+  // sym_valno 0 indicates that the node is ignored.
   SymValno sym_valno = 1;
   // from expr to symbolic value number.
   std::map<ptr<AST::Node>, SymValno> expr_sym_valno_map;
@@ -147,7 +147,7 @@ public:
     SymbolizeExprNode(n);
   }
 
-  inline void DumpTermimalExprs() const {
+  inline void DumpTerminalExprs() const {
     VST_DEBUG({
       dbgs() << "Terminal Expr Nodes:\n";
       for (auto& n : expr_nodes) dbgs() << "\t" << PSTR(n) << "\n";
@@ -213,7 +213,7 @@ public:
   }
   bool AfterVisitImpl(AST::Node& n) override {
     if (isa<AST::ChoreoFunction>(&n)) {
-      DumpTermimalExprs();
+      DumpTerminalExprs();
       DumpNameSymbolMap();
       DumpNameSymExprMap();
       DumpExprSymValnoMap();

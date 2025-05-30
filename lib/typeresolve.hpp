@@ -150,13 +150,13 @@ public:
         }
         if (fty->HasSufficientInfo() && futy->HasSufficientInfo()) {
           if (report_error && (*futy != *fty))
-            visitor->Error(mv.LOC(), "types are inconistent: " + PSTR(futy) +
+            visitor->Error(mv.LOC(), "types are inconsistent: " + PSTR(futy) +
                                          "(" + std::to_string(index) +
                                          ") vs. " + PSTR(fty) + "(" +
                                          std::to_string(fidx) + ").");
         } else if (!fty->HasSufficientInfo() && futy->HasSufficientInfo()) {
           if (report_error && !fty->ApprxEqual(*futy))
-            visitor->Error(mv.LOC(), "types are inconistent: " + PSTR(futy) +
+            visitor->Error(mv.LOC(), "types are inconsistent: " + PSTR(futy) +
                                          "(" + std::to_string(index) +
                                          ") vs. " + PSTR(fty) + "(" +
                                          std::to_string(fidx) + ").");
@@ -164,13 +164,13 @@ public:
           fidx = index;
         } else if (fty->HasSufficientInfo() && !futy->HasSufficientInfo()) {
           if (report_error && !fty->ApprxEqual(*futy))
-            visitor->Error(mv.LOC(), "types are inconistent: " + PSTR(futy) +
+            visitor->Error(mv.LOC(), "types are inconsistent: " + PSTR(futy) +
                                          "(" + std::to_string(index) +
                                          ") vs. " + PSTR(fty) + "(" +
                                          std::to_string(fidx) + ").");
         } else if (!fty->HasSufficientInfo() && !futy->HasSufficientInfo()) {
           if (report_error && !fty->ApprxEqual(*futy))
-            visitor->Error(mv.LOC(), "types are inconistent: " + PSTR(futy) +
+            visitor->Error(mv.LOC(), "types are inconsistent: " + PSTR(futy) +
                                          "(" + std::to_string(index) +
                                          ") vs. " + PSTR(fty) + "(" +
                                          std::to_string(fidx) + ").");

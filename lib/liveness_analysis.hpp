@@ -87,9 +87,9 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
   std::unordered_map<std::string, std::vector<Event>> var_events;
 
   size_t stmt_number = 0; // only preorder.
-  // map from stmt to its index in stmts_preordered.
+  // map from stmt to its index in preorder_stmts.
   std::unordered_map<const Stmt*, size_t> stmt2number;
-  std::vector<const Stmt*> stmts_preordered;
+  std::vector<const Stmt*> preorder_stmts;
   std::unordered_map<const Stmt*, std::string> stmt2str;
 
   std::stringstream stmts_with_indent;

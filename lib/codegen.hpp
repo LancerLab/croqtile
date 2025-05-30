@@ -133,7 +133,7 @@ using LocalFutures = std::map<std::string, std::set<std::string>>;
 
 enum PassedOrDeclaredSymbolKind : int {
   PDSYM_NONE = 0,
-  PDSYM_PARAMETERS_ONLY = 0x1, // only the paramters declared
+  PDSYM_PARAMETERS_ONLY = 0x1, // only the parameters declared
   PDSYM_ALLOC_IN_DEVICE = 0x2, // must be allocated with a device storage
   PDSYM_NO_RETURN = 0x4,   // simply without symbols that is the return value
   PDSYM_RETURN_ONLY = 0x8, // only the symbol of return statement

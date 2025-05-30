@@ -371,7 +371,7 @@ public:
         auto value = (f_shape.ValueAt(0) * bpe + sbe::nu(127)) / sbe::nu(128) *
                      sbe::nu(128);
         CheckValue(value, "<", 1 << 24, n.from->LOC(),
-                   "CeilTosbe::nu(128)Byte(src_dim0_size * bpe) < 2^24.");
+                   "CeilTo128Byte(src_dim0_size * bpe) < 2^24.");
         value = (t_shape.ValueAt(0) * bpe + sbe::nu(127)) / sbe::nu(128) *
                 sbe::nu(128);
         CheckValue(value, "<", 1 << 24, n.to->LOC(),

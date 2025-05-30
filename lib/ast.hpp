@@ -79,7 +79,7 @@ public:
 
   virtual void accept(Visitor&) = 0;
 
-  // for runtime type disambiguition
+  // for runtime type disambiguation
   __UDT_TYPE_INFO_BASE__(node)
 };
 
@@ -608,7 +608,7 @@ public:
 
 // Represents both dimensions and s like {3, 4, 5} or {1, 2, 1}
 struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
-  std::string ref_name;           // syntax suger, could be empty
+  std::string ref_name;           // syntax sugar, could be empty
   ptr<Node> list = nullptr;       // null if the span is dynamically valued
   size_t rank = GetInvalidRank(); // dynamic value with known dimension count
 

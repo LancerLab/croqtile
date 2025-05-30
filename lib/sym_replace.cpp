@@ -62,7 +62,7 @@ bool SymReplace::InsertSymValnoSymExprMap(SymValno sym_valno,
                                           const SymExpr& sym_expr) {
   if (sym_valno_sym_expr_map.count(sym_valno)) return false;
   sym_valno_sym_expr_map.emplace(sym_valno, sym_expr);
-  VST_DEBUG(dbgs() << "insert symvalno wtih symexpr: [" << sym_valno << ", "
+  VST_DEBUG(dbgs() << "insert symvalno with symexpr: [" << sym_valno << ", "
                    << sym_expr << "]\n");
   return true;
 }
@@ -164,8 +164,8 @@ void SymReplace::InitializeNode(ptr<AST::Node> n) {
 SymReplace::SymValno SymReplace::GetValidSymValno(const SymExpr& sym_expr) {
   for (auto& [sv, se] : sym_valno_sym_expr_map)
     if (IsEqualSymExpr(sym_expr, se)) return sv;
-  auto expaneded_sym_expr = sym_expr.expand();
-  InsertSymValnoSymExprMap(sym_valno, expaneded_sym_expr);
+  auto expanded_sym_expr = sym_expr.expand();
+  InsertSymValnoSymExprMap(sym_valno, expanded_sym_expr);
   ++sym_valno;
   return sym_valno - 1;
 }

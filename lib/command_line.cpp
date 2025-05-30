@@ -37,7 +37,7 @@ Option<bool> inf_type(OptionKind::User, "--infer-types", "-i", false,
 Option<bool> pp_only(OptionKind::User, "-E", "", false,
                      "Preprocess only; do not compile.");
 Option<bool> no_pp(OptionKind::Hidden, "--no-preprocess", "-npp", false,
-                   "Donnot invoke Choreo Proprocessor to compile.");
+                   "Do not invoke Choreo Preprocessor to compile.");
 Option<bool> use_kernel_template(
     OptionKind::Hidden, "--use-kernel-template", "-kt", false,
     "(Experimental) Allow choreo code to instantiate C++ template functions.");
@@ -130,7 +130,7 @@ Option<bool> print_node_type(OptionKind::Hidden, "--print-node-type", "-pnt",
                              false, "Print node with its type.");
 Option<bool> verify_visitors(OptionKind::Hidden, "--verify", "-vf", false,
                              "verify all visitors for legality.");
-// TODO: add machanism to handle GCC-style "-f" options
+// TODO: add mechanism to handle GCC-style "-f" options
 Option<bool> no_show_source(
     OptionKind::Hidden, "-fno-show-source-location", "", false,
     "Do not show the source code location when error/warning/etc..");
@@ -241,7 +241,7 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetShowSourceLocation(!no_show_source.GetValue());
   CCtx().SetLivenessAnalysis(liveness.GetValue());
   CCtx().SetMemReuse(mem_reuse.GetValue());
-  CCtx().SetSimplfyFpValno(simplify_fp_valno.GetValue());
+  CCtx().SetSimplifyFpValno(simplify_fp_valno.GetValue());
   CCtx().SetVerifyVisitors(verify_visitors.GetValue());
 
   if (!trace_visit.GetValue().empty())

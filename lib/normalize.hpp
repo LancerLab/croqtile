@@ -238,7 +238,7 @@ public:
       }
       auto expr = cast<AST::Expr>(v);
       if (auto itt = dyn_cast<ITupleType>(expr->GetType())) {
-        VST_DEBUG(dbgs() << "Repalce " << PSTR(expr) << " in " << STR(n)
+        VST_DEBUG(dbgs() << "Replace " << PSTR(expr) << " in " << STR(n)
                          << " with:\n");
         for (size_t idx = 0; idx < itt->dim_count; ++idx) {
           auto ii = AST::Make<AST::IntIndex>(
@@ -457,7 +457,7 @@ public:
         auto& loc = n.value->LOC();
         auto anon_sym = SymbolTable::GetAnonName();
 
-        // compose the named variable decl with intial value
+        // compose the named variable decl with initial value
         auto mv = AST::Make<AST::MultiValues>(loc, ",");
         mv->Append(AST::MakeIntExpr(loc, 1));
         auto mds = AST::Make<AST::MultiDimSpans>(loc, "", mv, 1);

@@ -173,7 +173,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       return false;
     }
     if (isa<BoundedType>(lty)) {
-      // disambiguite subscription into bounded ituple and getith of bounded
+      // disambiguate subscription into bounded ituple and getith of bounded
       // integer
       n.op = "getith";
       cast<AST::IntIndex>(n.GetR())->UseBracket();
@@ -344,7 +344,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     if (diverges.Contains(n.GetL()) || diverges.Contains(n.GetR()))
       diverges.Add(n);
   } else if (n.op == "#") {
-    // allow only # operator for catesian products on two bounded-vars
+    // allow only # operator for cartesian products on two bounded-vars
     // a # b => a * (#b) + b
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
@@ -548,7 +548,7 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
           dbgs() << "Transform: " << PSTR(n.list) << " to be " << PSTR(last)
                  << "\n";
         n.list = last;
-        n.list->accept(*this); // go evaluate the concatanation
+        n.list->accept(*this); // go evaluate the concatenation
       }
     }
   }
@@ -701,7 +701,7 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
                isa<AST::Expr>(n.init_expr) &&
                cast<AST::Expr>(n.init_expr)->GetSymbol()) {
       // forbid to directly initialize a placeholder with a placeholder
-      Error(n.LOC(), "can not initialize vairable `" + n.name_str +
+      Error(n.LOC(), "can not initialize variable `" + n.name_str +
                          "' with a placeholder.");
       error_count++;
       if (debug_visit)
@@ -1061,12 +1061,12 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
 bool EarlySemantics::Visit(AST::WhereBind& n) {
   TraceEachVisit(n);
   if (!isa<AST::Identifier>(n.lhs)) {
-    Error(n.lhs->LOC(), "expect an indentifier.");
+    Error(n.lhs->LOC(), "expect an identifier.");
     error_count++;
     return false;
   }
   if (!isa<AST::Identifier>(n.rhs)) {
-    Error(n.rhs->LOC(), "expect an indentifier.");
+    Error(n.rhs->LOC(), "expect an identifier.");
     error_count++;
     return false;
   }
@@ -1660,7 +1660,7 @@ bool EarlySemantics::Visit(AST::Synchronize& n) {
   case Storage::SHARED:
   case Storage::LOCAL: break;
   default:
-    Error(n.scope->LOC(), "Unsupported synchorization: " + PSTR(n.scope) + ".");
+    Error(n.scope->LOC(), "Unsupported synchronization: " + PSTR(n.scope) + ".");
     break;
   }
   return true;
@@ -1810,7 +1810,7 @@ bool EarlySemantics::Visit(AST::Return& n) {
     auto vty = NodeType(*n.value);
     if (!(isa<SpannedType>(vty) || isa<ScalarType>(vty))) {
       Error(n.LOC(),
-            "returning value with type '" + PSTR(vty) + "' is not supproted.");
+            "returning value with type '" + PSTR(vty) + "' is not supported.");
       error_count++;
       return false;
     }
@@ -1818,7 +1818,7 @@ bool EarlySemantics::Visit(AST::Return& n) {
     if (CCtx().GetTarget() == CompileTarget::Factor) {
       if (isa<ScalarType>(vty)) {
         Error(n.LOC(),
-              "returning scalar value in Factor backend is not supproted yet.");
+              "returning scalar value in Factor backend is not supported yet.");
         error_count++;
         return false;
       }

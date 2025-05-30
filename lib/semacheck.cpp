@@ -561,7 +561,7 @@ bool SemaChecker::VisitNode(AST::Rotate& n) {
 
     auto lid = AST::GetIdentifier(*n.ids->ValueAt(index - 1));
     auto rid = AST::GetIdentifier(*n.ids->ValueAt(index));
-    assert(lid && rid && "no idendifier is found.");
+    assert(lid && rid && "no identifier is found.");
     auto l_scope = GetScope(InScopeName(lid->name));
     auto r_scope = GetScope(InScopeName(rid->name));
     if (l_scope != r_scope) {
@@ -616,7 +616,7 @@ bool SemaChecker::VisitNode(AST::Return& n) {
     auto vty = NodeType(*n.value);
     if (!(isa<SpannedType>(vty) || isa<ScalarType>(vty))) {
       Error(n.LOC(),
-            "returning value with type '" + PSTR(vty) + "' is not supproted.");
+            "returning value with type '" + PSTR(vty) + "' is not supported.");
       error_count++;
       return false;
     }

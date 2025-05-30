@@ -15,7 +15,7 @@
 
 namespace Choreo {
 
-// forward declartions
+// forward declarations
 std::ostream& errs();
 std::ostream& dbgs();
 
@@ -47,8 +47,8 @@ private:
   std::string alias; // name alias
   T value;
   T default_value;
-  std::string description; // explaination of this option
-  std::string option_desc; // for descrbing the option, if needed
+  std::string description; // explanation of this option
+  std::string option_desc; // for describing the option, if needed
   bool requires_arg;       // if it requires extra argument
 
 public:
