@@ -373,7 +373,7 @@ private:
     std::vector<int> positions{start_x, start_y, 0};
     start_x += data_sizes[0] * axis_scale[0] + label_distance + 100;
 
-    if (!ca.positions) {
+    if (ca.HasTile() && ca.AllTSInfo().size() == 1) {
       // use whole data as a single chunk
 
       // dimension 1 is repeated parallel_count times
@@ -392,30 +392,33 @@ private:
     std::vector<std::string> bv_names; // the name of the bounded variable
     std::set<int>
         parallel_bounds; // specify which dimension is executed in parallel
-    for (auto pos : ca.positions->values) {
-      auto id = dyn_cast<AST::Identifier>(pos);
-      assert(id && "node other than identifier is not handled.");
-      auto ty = GetSymbolType(id->name);
-      if (auto bpvs = dyn_cast<BoundedITupleType>(ty)) {
-        bool parallel = (!bpvs->GetNote().empty());
-        auto vlist = bpvs->GetUpperBounds().Value();
-        for (size_t i = 0; i < vlist.size(); ++i) {
-          if (auto pint = VIInt(vlist[i])) {
-            cmpt_bounds.push_back(*pint);
-          } else {
-            Warning(ca.LOC(), "unable to handle '" + PSTR(vlist[i]) +
-                                  "' (with runtime value).");
-            return nullptr;
+
+    if (ca.HasTile() && ca.AllTSInfo().size() == 1) {
+      for (auto pos : ca.AllTSInfo()[0]->GetIndices()) {
+        auto id = dyn_cast<AST::Identifier>(pos);
+        assert(id && "node other than identifier is not handled.");
+        auto ty = GetSymbolType(id->name);
+        if (auto bpvs = dyn_cast<BoundedITupleType>(ty)) {
+          bool parallel = (!bpvs->GetNote().empty());
+          auto vlist = bpvs->GetUpperBounds().Value();
+          for (size_t i = 0; i < vlist.size(); ++i) {
+            if (auto pint = VIInt(vlist[i])) {
+              cmpt_bounds.push_back(*pint);
+            } else {
+              Warning(ca.LOC(), "unable to handle '" + PSTR(vlist[i]) +
+                                    "' (with runtime value).");
+              return nullptr;
+            }
+            if (vlist.size() == 1)
+              bv_names.push_back(id->name);
+            else
+              bv_names.push_back(id->name + "(" + std::to_string(i) + ")");
+            if (parallel) parallel_bounds.insert(cmpt_bounds.size() - 1);
           }
-          if (vlist.size() == 1)
-            bv_names.push_back(id->name);
-          else
-            bv_names.push_back(id->name + "(" + std::to_string(i) + ")");
-          if (parallel) parallel_bounds.insert(cmpt_bounds.size() - 1);
+        } else {
+          dbgs() << STR(*ty) << " is not expected.\n";
+          choreo_unreachable("unable to handle the type.");
         }
-      } else {
-        dbgs() << STR(*ty) << " is not expected.\n";
-        choreo_unreachable("unable to handle the type.");
       }
     }
     // this calculate the tiled blocks

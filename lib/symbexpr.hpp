@@ -590,6 +590,20 @@ inline bool operator!=(const SymbolicExpression& lhs, const std::string& rhs) {
   return !(lhs == rhs);
 }
 
+// compare for numerics
+inline std::optional<int> nu_compare(const Operand& lhs, const Operand& rhs) {
+  auto nul = dyn_cast<NumericValue>(lhs);
+  auto nur = dyn_cast<NumericValue>(rhs);
+  if (!nul || !nur) return std::nullopt;
+  return nul->Value() - nur->Value();
+}
+
+inline bool nu_lt(const Operand& lhs, const Operand& rhs) {
+  auto r = nu_compare(lhs, rhs);
+  if (!r) return false;
+  return *r < 0;
+}
+
 inline Operand SimplifyExpression(const Operand& expr) {
   return expr->Normalize();
 }

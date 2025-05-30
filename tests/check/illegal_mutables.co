@@ -41,7 +41,7 @@ __co__ void foo(int a, f32 [2] aa) {
 // CHECK: error: the mutable value can not used for the mdspan declaration.
 // CHECK: error: mutable integer can not be used inside with-in.
 // CHECK: error: the mutable value can not used for mdspan declaration.
-// CHECK: error: the mutable value can not used for the .chunk/.subspan expression.
+// CHECK: error: the mutable value can not used for the .chunk/.subspan/.modspan expression.
 // CHECK: error: only mutables can be re-assigned (c).
 // CHECK: error: only mutables can be re-assigned (c).
 // CHECK: error: only mutables can be re-assigned (c).

@@ -1093,20 +1093,20 @@ bool LivenessAnalyzer::Visit(AST::ChunkAt& n) {
   TraceEachVisit(n);
   assert(n.sa == nullptr && "after norm, there should be no span_as.");
   // `n.data` is already handled in Visit(AST::DMA& n)
-  if (!n.positions) return true;
-  for (const auto& pos : n.positions->AllValues()) {
-    VST_DEBUG(dbgs() << "chunkat position: " << PSTR(pos) << ".\n");
-    if (auto expr = dyn_cast<AST::Expr>(pos)) {
-      VarSet operands = GetAllSymbolicOperands(expr.get());
-      AddUse(current_stmt, operands);
-    } else if (auto id = dyn_cast<AST::Identifier>(pos)) {
-      // ignore the __choreo_no_tiling__
-      if (id->name == "__choreo_no_tiling__") continue;
-      AddUse(current_stmt, id->name);
-    } else {
-      assert(false && "expecting the chunkat position is an expr.");
+  for (auto tsi : n.AllTSInfo())
+    for (const auto& pos : tsi->GetIndices()) {
+      VST_DEBUG(dbgs() << "chunkat position: " << PSTR(pos) << ".\n");
+      if (auto expr = dyn_cast<AST::Expr>(pos)) {
+        VarSet operands = GetAllSymbolicOperands(expr.get());
+        AddUse(current_stmt, operands);
+      } else if (auto id = dyn_cast<AST::Identifier>(pos)) {
+        // ignore the __choreo_no_tiling__
+        if (id->name == "__choreo_no_tiling__") continue;
+        AddUse(current_stmt, id->name);
+      } else {
+        assert(false && "expecting the chunkat position is an expr.");
+      }
     }
-  }
   return true;
 }
 

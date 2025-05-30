@@ -14,3 +14,24 @@ __co__ void only_chunkat(s32 [16, 32] lhs, s32 [24, 32] rhs) {
 }
 
 // CHECK:       kernel((int*)lhs + (__tops_tid_x() * 8) + (__iv_i__elem__0 * 2), (int*)rhs + (__tops_tid_x() * 12) + (__iv_i__elem__0 * 2), (512));
+
+__co__ void foo(f32 [128, 72] a, f32 [1024, 512, 256] b) {
+  parallel p by 2, q = {q0, q1} by [3, 4] {
+    dma.copy a.chunkat(p, q0) => local;
+#if 0
+    // TODO: make it work
+    dma.copy a.subspan(42, 18).at(q) => local;
+    dma.copy a.modspan(31, 11).at(q) => local;
+    dma.copy a.subspan(32, 16).at(q).modspan(9, 7).at(q0, p) => local;
+#else
+    dma.copy a.subspan(42, 18).at(q0, q1) => local;
+    dma.copy a.modspan(31, 11).at(q0, q1) => local;
+    dma.copy a.subspan(32, 16).at(q0, q1).modspan(9, 7).at(q0, p) => local;
+#endif
+  }
+}
+
+// CHECK: {(int)(__tops_bid_x() * 64), (int)(__tops_tid_x() * 24)}
+// CHECK: {(int)(__tops_tid_x() * 42), (int)(__tops_tid_y() * 18)}
+// CHECK: {(int)(__tops_tid_x() * 31), (int)(__tops_tid_y() * 11)}
+// CHECK: {(int)(__tops_tid_x() * 32) + (int)(__tops_tid_x() * 9), (int)(__tops_tid_y() * 16) + (int)(__tops_bid_x() * 7)}

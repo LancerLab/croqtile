@@ -1022,7 +1022,7 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
   auto span_name = RemoveSuffix(n.data->name, ".data") + ".span";
   auto sty = GetSpannedType(pty);
 
-  if (!n.positions) {
+  if (n.NoTile()) {
     // it is just a symbol reference
     ca_valno = vn.GetValueNumberOfSignature(SSTab().InScopeName(span_name));
     auto future_shape =
@@ -1060,69 +1060,124 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
     return res_sig;
   };
 
-  // handle any expression recursively
-  n.positions->accept(*this);
-  if (n.MultipleExprs()) n.GetTFSSExpr()->accept(*this);
-
   auto data_vns = vn.Flatten(vn.GetValueNumberOfSignature(data_sig));
-  auto pos_vns = Collapse(n.positions, true);
-  assert(data_vns.size() == pos_vns.size());
 
-  // in case the code provides explicit tiling factors or subspan
-  std::vector<int> tfs_vns;
   std::vector<int> mod_vns;
   std::vector<int> res_vns;
-  if (n.MultipleExprs()) {
-    tfs_vns = Collapse(n.GetTFSSExpr());
-    assert(tfs_vns.size() == pos_vns.size());
-  }
 
-  for (size_t index = 0; index < pos_vns.size(); ++index) {
-    if (n.HasSubSpanExpr()) {
-      // block.span = subspan
-      res_vns.push_back(tfs_vns[index]);
-    } else if (n.HasModSpanExpr()) {
-      // block.span = data.span % tiling_factor
-      auto mod_sig = SignatureOfBinOp("%", data_vns[index], tfs_vns[index]);
-      mod_vns.push_back(vn.GetOrInsertValueNumberFromSignature(mod_sig));
-      auto res_sig = SignatureOfBinOp("/", data_vns[index], tfs_vns[index]);
-      res_vns.push_back(vn.GetOrInsertValueNumberFromSignature(res_sig));
-    } else if (n.HasTilingExpr()) {
-      // block.span = data.span / tiling_factor
-      auto res_sig = SignatureOfBinOp("/", data_vns[index], tfs_vns[index]);
-      res_vns.push_back(vn.GetOrInsertValueNumberFromSignature(res_sig));
-    } else {
-      // block.span = data.span / #pos
-      auto res_sig = SignatureOfBinOp("/", data_vns[index], pos_vns[index]);
-      res_vns.push_back(vn.GetOrInsertValueNumberFromSignature(res_sig));
+  bool is_modspan = false;
+  auto cur_vns = data_vns;
+
+  // handle all chunkat expressions iteratively
+  for (auto tsi : n.AllTSInfo()) {
+    mod_vns.clear();
+    res_vns.clear();
+
+    // make sure all expressions get the value numbers
+    tsi->Positions()->accept(*this);
+    if (tsi->MultipleExprs()) tsi->GetTFSSExpr()->accept(*this);
+
+    auto pos_vns = Collapse(tsi->Positions(), true);
+    assert(cur_vns.size() == pos_vns.size());
+
+    // when the code provides explicit tiling factors or subspan
+    std::vector<int> tfs_vns;
+
+    if (tsi->MultipleExprs()) {
+      tfs_vns = Collapse(tsi->GetTFSSExpr());
+      assert(tfs_vns.size() == pos_vns.size());
     }
+
+    for (size_t index = 0; index < pos_vns.size(); ++index) {
+      if (tsi->HasSubSpanExpr()) {
+        // block.span = subspan
+        auto lvi = vn.GenValueItemFromValueNumber(cur_vns[index]);
+        auto rvi = vn.GenValueItemFromValueNumber(tfs_vns[index]);
+        if (sbe::nu_lt(lvi, rvi)) {
+          Error(tsi->LOC(),
+                "the subspan dimension (dim: " + std::to_string(index) +
+                    ") is larger than original (" + STR(rvi) + " > " +
+                    STR(lvi) + ").");
+          error_count++;
+        }
+        res_vns.push_back(tfs_vns[index]);
+      } else if (tsi->HasModSpanExpr()) {
+        // block.span = data.span % tiling_factor
+        auto lvi = vn.GenValueItemFromValueNumber(cur_vns[index]);
+        auto rvi = vn.GenValueItemFromValueNumber(tfs_vns[index]);
+        if (sbe::nu_lt(lvi, rvi)) {
+          Error(tsi->LOC(),
+                "the subspan dimension (dim: " + std::to_string(index) +
+                    ") is larger than the data (" + STR(rvi) + " > " +
+                    PSTR(lvi) + ").");
+          error_count++;
+        }
+        auto mod_sig = SignatureOfBinOp("%", cur_vns[index], tfs_vns[index]);
+        mod_vns.push_back(vn.GetOrInsertValueNumberFromSignature(mod_sig));
+        res_vns.push_back(tfs_vns[index]);
+      } else if (tsi->HasTilingExpr()) {
+        // block.span = data.span / tiling_factor
+        auto lvi = vn.GenValueItemFromValueNumber(cur_vns[index]);
+        auto rvi = vn.GenValueItemFromValueNumber(tfs_vns[index]);
+        if (sbe::nu_lt(lvi, rvi)) {
+          Error(tsi->LOC(), "the tiling factor (dim: " + std::to_string(index) +
+                                ") is larger than the data dimension (" +
+                                STR(rvi) + " > " + PSTR(lvi) + ").");
+          error_count++;
+        }
+        auto res_sig = SignatureOfBinOp("/", cur_vns[index], tfs_vns[index]);
+        res_vns.push_back(vn.GetOrInsertValueNumberFromSignature(res_sig));
+      } else {
+        // block.span = data.span / #pos
+        auto lvi = vn.GenValueItemFromValueNumber(cur_vns[index]);
+        auto rvi = vn.GenValueItemFromValueNumber(pos_vns[index]);
+        if (sbe::nu_lt(lvi, rvi)) {
+          Error(tsi->LOC(), "the tiling factor (dim: " + std::to_string(index) +
+                                ") is larger than the data dimension (" +
+                                STR(rvi) + " > " + STR(lvi) + ").");
+          error_count++;
+        }
+        auto res_sig = SignatureOfBinOp("/", cur_vns[index], pos_vns[index]);
+        res_vns.push_back(vn.GetOrInsertValueNumberFromSignature(res_sig));
+      }
+    }
+
+    if (tsi->HasModSpanExpr()) {
+      cur_vns = mod_vns;
+      is_modspan = true;
+    } else {
+      cur_vns = res_vns;
+      is_modspan = false;
+    }
+    std::string sig; // signature of the sub-block
+    for (auto rvn : res_vns) AddValno(rvn, sig);
+    tsi->SetBlockShape(GenShapeFromSignature(sig));
   }
 
   assert(res_vns.size() == data_vns.size());
 
   Shape block_shape;
   if (res_vns.size() == 1) {
-    if (n.HasModSpanExpr()) {
+    if (is_modspan) {
       ca_valno = mod_vns[0];
       block_shape =
           GenShapeFromSignature(vn.GetSignatureFromValueNumber(res_vns[0]));
     } else
       ca_valno = res_vns[0];
   } else {
-    // generate signature for multivalues
+    // generate signature for multi-valnos
+    std::string b_sign; // signature of the sub-block
+    for (auto rvn : res_vns) AddValno(rvn, b_sign);
 
-    std::string f_sign; // signature of the future.span
-    for (auto rvn : res_vns) AddValno(rvn, f_sign);
-    std::string m_sign; // specific for modspan operation
-    for (auto mvn : mod_vns) AddValno(mvn, m_sign);
-
-    if (n.HasModSpanExpr()) { // remainder value as the current shape value
+    if (is_modspan) {     // remainder value as the current shape value
+      std::string m_sign; // specific for modspan operation
+      for (auto mvn : mod_vns) AddValno(mvn, m_sign);
       ca_valno = vn.GetOrInsertValueNumberFromSignature(m_sign);
-      auto f_valno = vn.GetOrInsertValueNumberFromSignature(f_sign);
+      auto b_valno = vn.GetOrInsertValueNumberFromSignature(b_sign);
       block_shape =
-          GenShapeFromSignature(vn.GetSignatureFromValueNumber(f_valno));
+          GenShapeFromSignature(vn.GetSignatureFromValueNumber(b_valno));
     } else
-      ca_valno = vn.GetOrInsertValueNumberFromSignature(f_sign);
+      ca_valno = vn.GetOrInsertValueNumberFromSignature(b_sign);
   }
 
   auto future_shape =
@@ -1131,7 +1186,7 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
   // set the chunkat's type
   SetNodeType(n, MakeSpannedType(sty->f_type, future_shape, sty->GetStorage()));
 
-  if (n.HasModSpanExpr())
+  if (is_modspan)
     n.s = block_shape;
   else
     n.s = future_shape;

@@ -375,10 +375,10 @@ public:
     }
 
     // hoist any arith inside of chunkat positions
-    if (n.positions) {
+    for (auto tsi : n.AllTSInfo()) {
       std::vector<std::pair<int, ptr<AST::Node>>> repls;
       int i = -1;
-      for (auto& v : n.positions->AllValues()) {
+      for (auto& v : tsi->GetIndices()) {
         ++i;
         auto expr = cast<AST::Expr>(v);
         if (expr->GetSymbol()) {
@@ -424,11 +424,13 @@ public:
       }
       for (auto& repl : repls) {
         VST_DEBUG(dbgs() << n.TypeNameString() << ": replace "
-                         << PSTR(n.positions->ValueAt(repl.first)) << " with ");
+                         << PSTR(tsi->Positions()->ValueAt(repl.first))
+                         << " with ");
 
-        n.positions->values[repl.first] = repl.second;
+        tsi->Positions()->values[repl.first] = repl.second;
 
-        VST_DEBUG(dbgs() << PSTR(n.positions->ValueAt(repl.first)) << ".\n");
+        VST_DEBUG(dbgs() << PSTR(tsi->Positions()->ValueAt(repl.first))
+                         << ".\n");
       }
     }
     return true;

@@ -268,6 +268,7 @@ public:
                                         bool = false);
 
   ValueItem GenValueItemFromSignature(const std::string&);
+  ValueItem GenValueItemFromValueNumber(int);
   const std::vector<ValueItem> GenValueItemsFromSignature(const std::string&);
   std::string ValueItemToSignature(const ValueItem&, bool = false);
 

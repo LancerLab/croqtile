@@ -343,6 +343,107 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
   return true;
 }
 
+// tops::mdspan style offset
+const std::string TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
+                                              ptr<DMAConfig> config) const {
+  auto& tsis = ca->AllTSInfo();
+  assert(!tsis.empty());
+
+  std::vector<std::ostringstream> offsets;
+  // handle each chunkat inside a seqeunce like 'chunkat(a, b).chunat(c)...'
+  for (size_t tsi_idx = 0; tsi_idx < tsis.size(); ++tsi_idx) {
+    // For each chunkat expression, The tiled-block's shape is cooked by shape
+    // inference. The block shape is different with the result shape of chunkat
+    // expression when using 'modspan', where the result shape represents the
+    // shape that applied mod (%) operation. Anyway, for offset, we only care
+    // about the tiled-block's shape
+    auto& shape = tsis[tsi_idx]->GetBlockShape();
+
+    std::vector<std::string> exprs;
+    // For each 'a, b, c, ...' inside 'chunkat(a, b, c, ...)', that 'b' inside
+    // 'chunkat(a, b, c, ...)' could be bounded var like b = {b0, b1} Therefore,
+    // we collect all the expressions first.
+    for (size_t pi = 0; pi < tsis[tsi_idx]->GetIndices().size(); ++pi) {
+      auto p = tsis[tsi_idx]->GetIndices()[pi];
+      auto idx_exprs = SplitStringByDelimiter(ExprSTR(p, false));
+      for (size_t i = 0; i < idx_exprs.size(); ++i)
+        exprs.push_back(idx_exprs[i]);
+    }
+
+    auto tc = dyn_cast<TransposeConfig>(config);
+    if (tc) {
+      assert(tc->dim_values.size() == exprs.size());
+      assert(tsis.size() == 1);
+    }
+
+#if 0
+    // the transpose operation requries an index array ???
+    std::vector<size_t> indices;
+    for (size_t i = 0; i < exprs.size(); ++i)
+      if (auto tc = dyn_cast<TransposeConfig>(config))
+        indices.push_back(tc->dim_values[i]);
+      else
+        indices.push_back(i);
+#endif
+
+    // Generate the expression for single chunkat
+    // Note that we buffer all expressions of different chunkats by dimensions
+    offsets.resize(exprs.size());
+
+    for (size_t i = 0; i < exprs.size(); ++i) {
+      // combine 'a' and 'c' between expressions like 'chunkat(a, b).chunk(c,
+      // d)'
+      if (tsi_idx > 0) offsets[i] << " + ";
+
+      if (exprs[i] == "__choreo_no_tiling__")
+        offsets[i] << "0";
+      else
+        offsets[i] << "(int)(" << exprs[i] << " * "
+                   << UnScopedExpr(STR(shape.ValueAt(i))) << ")";
+    }
+  }
+
+  std::ostringstream offset;
+  for (size_t i = 0; i < offsets.size(); ++i) {
+    if (i != 0) offset << ", ";
+    offset << offsets[i].str();
+  }
+
+  VST_DEBUG(dbgs() << "Offset for chunkat (" << PSTR(ca)
+                   << "): " << offset.str() << "\n");
+
+  return offset.str();
+}
+
+const std::string TopsccCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca) const {
+  std::ostringstream offset;
+
+  if (ca->NoTile()) return "";
+
+  if (ca->AllTSInfo().size() > 1)
+    choreo_unreachable("multiple chunkat is yet to support.");
+
+  for (auto& tsi : ca->AllTSInfo()) {
+    size_t i = 0;
+    auto& shape = ca->GetShape();
+    for (auto p : tsi->GetIndices()) {
+      auto idx_exprs = SplitStringByDelimiter(ExprSTR(p, IsHost()));
+      std::string factor = "1";
+      if (shape.Rank() > i)
+        factor = shape.TrimDims(i).GetElementCountExpression();
+      for (auto i_expr : idx_exprs) {
+        if (i != 0) offset << " + ";
+        if (i_expr == "__choreo_no_tiling__")
+          offset << "0";
+        else
+          offset << "(" << i_expr << " * " << factor << ")";
+        ++i;
+      }
+    }
+  }
+  return offset.str();
+}
+
 void TopsccCodeGen::EmitFixedHostHead() {
   std::ostringstream oss;
   oss <<
@@ -1043,20 +1144,18 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   auto t_ty = GetSymbolType(t_sym);
   auto f_sty = GetSpannedType(f_ty);
   auto t_sty = GetSpannedType(t_ty);
-  auto f_bshape = (f_ca->s.IsValid()) ? f_ca->s : f_sty->GetShape();
-  auto t_bshape = (t_ca->s.IsValid()) ? t_ca->s : t_sty->GetShape();
 
   assert(f_sty && "can not retrieve data from 'from'.");
   assert(t_sty && "can not retrieve data from 'to'.");
 
   auto SymbolToSymbol = [f_ca, t_ca]() -> bool {
-    return f_ca->SymbolicBufferName() && t_ca->SymbolicBufferName();
+    return f_ca->NoTile() && t_ca->NoTile();
   };
   auto SymbolToTile = [f_ca, t_ca]() -> bool {
-    return f_ca->SymbolicBufferName() && !t_ca->SymbolicBufferName();
+    return f_ca->NoTile() && t_ca->HasTile();
   };
   auto TileToSymbol = [f_ca, t_ca]() -> bool {
-    return !f_ca->SymbolicBufferName() && t_ca->SymbolicBufferName();
+    return f_ca->HasTile() && t_ca->NoTile();
   };
   // Currently, not support tile to tile.
 
@@ -1074,48 +1173,16 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         static int s_cnt = 0;
         auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
                         f_sym + "_2_" + t_sym;
-        std::ostringstream offset;
-        { // calculate the offsets
-          size_t i = 0;
-          for (auto& p : t_ca->positions->AllValues()) {
-            auto idx_exprs = SplitStringByDelimiter(ExprSTR(p, false));
-            for (auto i_expr : idx_exprs) {
-              if (i != 0) offset << ", ";
-              if (i_expr == "__choreo_no_tiling__")
-                offset << "0";
-              else
-                offset << "(int)(" << i_expr << " * "
-                       << STR(f_bshape.ValueAt(i)) << ")";
-              ++i;
-            }
-          }
-        }
-        hs << h_indent << "int " << off_name << " = " << offset.str() << ";\n";
-
+        hs << h_indent << "int " << off_name << " = " << GenMdsOffset(t_ca)
+           << ";\n";
         hs << h_indent << bts << " * " << buf_sym << " + " << off_name << " = "
            << buf_sym_from << ";\n";
       } else if (TileToSymbol()) {
         static int s_cnt = 0;
         auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
                         f_sym + "_2_" + t_sym;
-        std::ostringstream offset;
-        { // calculate the offsets
-          size_t i = 0;
-          for (auto& p : f_ca->positions->AllValues()) {
-            auto idx_exprs = SplitStringByDelimiter(ExprSTR(p, false));
-            for (auto i_expr : idx_exprs) {
-              if (i != 0) offset << ", ";
-              if (i_expr == "__choreo_no_tiling__")
-                offset << "0";
-              else
-                offset << "(int)(" << i_expr << " * "
-                       << STR(t_bshape.ValueAt(i)) << ")";
-              ++i;
-            }
-          }
-        }
-        hs << h_indent << "int " << off_name << " = " << offset.str() << ";\n";
-
+        hs << h_indent << "int " << off_name << " = " << GenMdsOffset(f_ca)
+           << ";\n";
         hs << h_indent << bts << " * " << buf_sym << " = " << buf_sym_from
            << " + " << off_name << ""
            << ";\n";
@@ -1249,31 +1316,6 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     IncrDeviceIndent();
   }
 
-  auto GenOffset = [&](ptr<DMAConfig> config = nullptr) -> std::ostringstream {
-    // One is symbolic buffer, the other is tiling buffer.
-    assert(SymbolToTile() || TileToSymbol());
-    std::ostringstream offset;
-    size_t i = 0;
-    auto shape = SymbolToTile() ? f_bshape : t_bshape;
-    for (auto& p : (SymbolToTile() ? t_ca : f_ca)->positions->AllValues()) {
-      auto idx_exprs = SplitStringByDelimiter(ExprSTR(p, false));
-      for (auto i_expr : idx_exprs) {
-        if (i != 0) offset << ", ";
-        if (i_expr == "__choreo_no_tiling__")
-          offset << "0";
-        else {
-          size_t idx = i;
-          if (auto tc = dyn_cast<TransposeConfig>(config))
-            idx = tc->dim_values[i];
-          offset << "(int)(" << i_expr << " * "
-                 << UnScopedExpr(STR(shape.ValueAt(idx))) << ")";
-        }
-        ++i;
-      }
-    }
-    return offset;
-  };
-
   if (n.operation == ".copy") {
     if (SymbolToSymbol()) {
       // no chunkat
@@ -1289,8 +1331,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       static int ds_cnt = 0;
       auto off_name = "__deslice_offset" + std::to_string(ds_cnt++) + "__" +
                       t_sym + "_2_" + f_sym;
-      std::ostringstream offset = GenOffset();
-      ds << d_indent << "int " << off_name << "[] = {" << offset.str()
+      ds << d_indent << "int " << off_name << "[] = {" << GenMdsOffset(t_ca)
          << "};\n";
       ds << d_indent;
       if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
@@ -1310,8 +1351,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       static int s_cnt = 0;
       auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
                       f_sym + "_2_" + t_sym;
-      std::ostringstream offset = GenOffset();
-      ds << d_indent << "int " << off_name << "[] = {" << offset.str()
+      ds << d_indent << "int " << off_name << "[] = {" << GenMdsOffset(f_ca)
          << "};\n";
       ds << d_indent;
       if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
@@ -1371,9 +1411,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       static int s_cnt = 0;
       auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
                       f_sym + "_2_" + t_sym;
-      std::ostringstream offset = GenOffset(n.GetConfig());
-      ds << d_indent << "int " << off_name << "[] = {" << offset.str()
-         << "};\n";
+      auto offset = GenMdsOffset(f_ca, n.GetConfig());
+      ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
       ds << d_indent;
       if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
       ds << "tops::slice_transpose" << (fty->IsAsync() ? "_async" : "") << "(*"
@@ -1386,9 +1425,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       static int ds_cnt = 0;
       auto off_name = "__deslice_offset" + std::to_string(ds_cnt++) + "__" +
                       t_sym + "_2_" + f_sym;
-      std::ostringstream offset = GenOffset(n.GetConfig());
-      ds << d_indent << "int " << off_name << "[] = {" << offset.str()
-         << "};\n";
+      auto offset = GenMdsOffset(t_ca, n.GetConfig());
+      ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
       ds << d_indent;
       if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
       ds << "tops::transpose_deslice" << (fty->IsAsync() ? "_async" : "")
@@ -2367,6 +2405,7 @@ const std::string TopsccCodeGen::ValueSTR(const ValueItem& vi) const {
 
 std::optional<std::string>
 TopsccCodeGen::ThreadIdString(const ptr<AST::Identifier>& id) const {
+  if (id == nullptr) return std::nullopt;
   auto ty = NodeType(*id);
   if (isa<BoundedType>(ty) &&
       PrefixedWith(cast<BoundedType>(ty)->GetNote(), "pv")) {
@@ -2521,29 +2560,10 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       if (PSTR(expr) == "_") return "(0)";
       if (auto ca = dyn_cast<AST::ChunkAt>(expr->GetR())) {
         auto caty = cast<SpannedType>(ca->GetType());
-        std::ostringstream offset;
-        { // calculate the offsets
-          size_t i = 0;
-          auto shape = caty->GetShape();
-          for (auto& p : ca->positions->AllValues()) {
-            auto idx_exprs = SplitStringByDelimiter(ExprSTR(p, is_host));
-            std::string factor = "1";
-            if (shape.Rank() > i)
-              factor = shape.TrimDims(i).GetElementCountExpression();
-            for (auto i_expr : idx_exprs) {
-              if (i != 0) offset << " + ";
-              if (i_expr == "__choreo_no_tiling__")
-                offset << "0";
-              else
-                offset << "(" << i_expr << " * " << factor << ")";
-              ++i;
-            }
-          }
-        }
         if (isa<FutureType>(NodeType(*ca->data)))
-          return ExprSTR(ca->data, is_host) + ".data() + " + offset.str();
+          return ExprSTR(ca->data, is_host) + ".data() + " + GenOffset(ca);
         else
-          return ExprSTR(ca->data, is_host) + " + " + offset.str();
+          return ExprSTR(ca->data, is_host) + " + " + GenOffset(ca);
       } else
         return ExprSTR(expr->GetReference(), is_host);
     } else if (expr->IsUnary()) {

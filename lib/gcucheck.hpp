@@ -163,13 +163,11 @@ public:
     }
 
     auto IsLinearCopy = [&]() -> bool {
-      return f_ca->positions == nullptr && t_ca->positions == nullptr;
+      return f_ca->NoTile() && t_ca->NoTile();
     };
-    auto IsSlice = [&]() -> bool {
-      return f_ca->positions != nullptr && t_ca->positions == nullptr;
-    };
+    auto IsSlice = [&]() -> bool { return f_ca->HasTile() && t_ca->NoTile(); };
     auto IsDeslice = [&]() -> bool {
-      return f_ca->positions == nullptr && t_ca->positions != nullptr;
+      return f_ca->NoTile() && t_ca->HasTile();
     };
     auto RankLE5 = [&](const std::string& dma_op) {
       if (f_rank > 5) {
@@ -289,21 +287,24 @@ public:
           CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
         // TODO: offset limitation: [0, 2^24)
         if (f_rank == 5) {
-          auto first = f_ca->positions->ValueAt(0);
-          auto t = dyn_cast<BoundedITupleType>(first->GetType());
-          assert(t != nullptr);
-          if (VIIsInt(t->ubounds.ValueAt(0))) {
-            if (!IsValueItemEqual(1, t->ubounds.ValueAt(0))) {
-              Error(n.LOC(), "On " + cur_arch +
-                                 ", dma.copy(slice) does not "
-                                 "support 5-dimensional "
-                                 "array (if dim is 5, offsets[0] must be 0).");
-              error_count++;
+          for (auto tsi : f_ca->AllTSInfo()) {
+            auto first = tsi->Positions()->ValueAt(0);
+            auto t = dyn_cast<BoundedITupleType>(first->GetType());
+            assert(t != nullptr);
+            if (VIIsInt(t->ubounds.ValueAt(0))) {
+              if (!IsValueItemEqual(1, t->ubounds.ValueAt(0))) {
+                Error(n.LOC(),
+                      "On " + cur_arch +
+                          ", dma.copy(slice) does not "
+                          "support 5-dimensional "
+                          "array (if dim is 5, offsets[0] must be 0).");
+                error_count++;
+              }
+            } else {
+              choreo_unreachable("unexpected situation");
+              // TODO
+              // Is that the case?
             }
-          } else {
-            choreo_unreachable("unexpected situation");
-            // TODO
-            // Is that the case?
           }
         }
         // TODO: check for auto padding
@@ -318,21 +319,24 @@ public:
           CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
         // TODO: offset limitation: [0, 2^24)
         if (t_rank == 5) {
-          auto first = t_ca->positions->ValueAt(0);
-          auto t = dyn_cast<BoundedITupleType>(first->GetType());
-          assert(t != nullptr);
-          if (VIIsInt(t->ubounds.ValueAt(0))) {
-            if (!IsValueItemEqual(1, t->ubounds.ValueAt(0))) {
-              Error(n.LOC(), "On " + cur_arch +
-                                 ", dma.copy(deslice) does not "
-                                 "support 5-dimensional "
-                                 "array (if dim is 5, offsets[0] must be 0).");
-              error_count++;
+          for (auto tsi : t_ca->AllTSInfo()) {
+            auto first = tsi->Positions()->ValueAt(0);
+            auto t = dyn_cast<BoundedITupleType>(first->GetType());
+            assert(t != nullptr);
+            if (VIIsInt(t->ubounds.ValueAt(0))) {
+              if (!IsValueItemEqual(1, t->ubounds.ValueAt(0))) {
+                Error(n.LOC(),
+                      "On " + cur_arch +
+                          ", dma.copy(deslice) does not "
+                          "support 5-dimensional "
+                          "array (if dim is 5, offsets[0] must be 0).");
+                error_count++;
+              }
+            } else {
+              choreo_unreachable("unexpected situation");
+              // TODO
+              // Is that the case?
             }
-          } else {
-            choreo_unreachable("unexpected situation");
-            // TODO
-            // Is that the case?
           }
         }
       }
@@ -517,21 +521,24 @@ public:
         for (size_t idx = 0; idx < t_rank; ++idx)
           CheckDimSize(t_shape, idx, "<", 1 << 16, n.to->LOC());
         if (f_rank == 5) {
-          auto first = f_ca->positions->ValueAt(0);
-          auto t = dyn_cast<BoundedITupleType>(first->GetType());
-          assert(t != nullptr);
-          if (VIIsInt(t->ubounds.ValueAt(0))) {
-            if (!IsValueItemEqual(1, t->ubounds.ValueAt(0))) {
-              Error(n.LOC(), "On " + cur_arch +
-                                 ", dma.copy(slice) does not "
-                                 "support 5-dimensional "
-                                 "array (if dim is 5, offsets[0] must be 0).");
-              error_count++;
+          for (auto tsi : f_ca->AllTSInfo()) {
+            auto first = tsi->Positions()->ValueAt(0);
+            auto t = dyn_cast<BoundedITupleType>(first->GetType());
+            assert(t != nullptr);
+            if (VIIsInt(t->ubounds.ValueAt(0))) {
+              if (!IsValueItemEqual(1, t->ubounds.ValueAt(0))) {
+                Error(n.LOC(),
+                      "On " + cur_arch +
+                          ", dma.copy(slice) does not "
+                          "support 5-dimensional "
+                          "array (if dim is 5, offsets[0] must be 0).");
+                error_count++;
+              }
+            } else {
+              choreo_unreachable("unexpected situation");
+              // TODO
+              // Is that the case?
             }
-          } else {
-            choreo_unreachable("unexpected situation");
-            // TODO
-            // Is that the case?
           }
         }
       }
@@ -566,20 +573,23 @@ public:
         }
 
         if (f_rank == 5) {
-          auto first = f_ca->positions->ValueAt(0);
-          auto t = dyn_cast<BoundedITupleType>(first->GetType());
-          assert(t != nullptr);
-          if (VIIsInt(t->ubounds.ValueAt(0))) {
-            if (!IsValueItemEqual(1, t->ubounds.ValueAt(0))) {
-              Error(n.LOC(), "On " + cur_arch +
-                                 ", dma.transp(slice then "
-                                 "transpose) does not support 5-dimensional "
-                                 "array (if dim is 5, offsets[0] must be 0).");
-              error_count++;
+          for (auto tsi : f_ca->AllTSInfo()) {
+            auto first = tsi->Positions()->ValueAt(0);
+            auto t = dyn_cast<BoundedITupleType>(first->GetType());
+            assert(t != nullptr);
+            if (VIIsInt(t->ubounds.ValueAt(0))) {
+              if (!IsValueItemEqual(1, t->ubounds.ValueAt(0))) {
+                Error(n.LOC(),
+                      "On " + cur_arch +
+                          ", dma.transp(slice then "
+                          "transpose) does not support 5-dimensional "
+                          "array (if dim is 5, offsets[0] must be 0).");
+                error_count++;
+              }
+            } else {
+              // TODO
+              // Is that the case?
             }
-          } else {
-            // TODO
-            // Is that the case?
           }
         }
 
@@ -613,20 +623,23 @@ public:
         }
 
         if (t_rank == 5) {
-          auto first = t_ca->positions->ValueAt(0);
-          auto t = dyn_cast<BoundedITupleType>(first->GetType());
-          assert(t != nullptr);
-          if (VIIsInt(t->ubounds.ValueAt(0))) {
-            if (!IsValueItemEqual(1, t->ubounds.ValueAt(0))) {
-              Error(n.LOC(), "On " + cur_arch +
-                                 ", dma.transp(transpose then "
-                                 "deslice) does not support 5-dimensional "
-                                 "array (if dim is 5, offsets[0] must be 0).");
-              error_count++;
+          for (auto tsi : t_ca->AllTSInfo()) {
+            auto first = tsi->Positions()->ValueAt(0);
+            auto t = dyn_cast<BoundedITupleType>(first->GetType());
+            assert(t != nullptr);
+            if (VIIsInt(t->ubounds.ValueAt(0))) {
+              if (!IsValueItemEqual(1, t->ubounds.ValueAt(0))) {
+                Error(n.LOC(),
+                      "On " + cur_arch +
+                          ", dma.transp(transpose then "
+                          "deslice) does not support 5-dimensional "
+                          "array (if dim is 5, offsets[0] must be 0).");
+                error_count++;
+              }
+            } else {
+              // TODO
+              // Is that the case?
             }
-          } else {
-            // TODO
-            // Is that the case?
           }
         }
 

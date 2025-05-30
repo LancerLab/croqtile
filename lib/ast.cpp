@@ -195,7 +195,7 @@ void ChunkAt::accept(Choreo::Visitor& v) {
   if (sa) sa->accept(v);
   // indices seems to be always present, check the size.
   if (indices && indices->Count() > 0) indices->accept(v);
-  // note: visit the positions/cmpt_bounds inside
+  // note: visit the ts_infos inside
   v.Visit(*this);
 }
 

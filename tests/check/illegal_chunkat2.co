@@ -1,0 +1,17 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ auto illegal_chunkat(f32 [16, 32, 64] a) {
+  parallel p by 2 {
+    with idx in [32, 2] {
+      dma.copy a.chunkat(idx, p) => shared;
+      dma.copy a.subspan(8, 33, 1).at(idx, p) => shared;
+      dma.copy a.subspan(8, 16, 32).at(idx, p).modspan(7, 17, 33).at(idx, p) => shared;
+    }
+  }
+}
+
+// CHECK: error: the tiling factor (dim: 0) is larger than the data dimension (32 > 16).
+// CHECK: error: the subspan dimension (dim: 1) is larger than original (33 > 32).
+// CHECK: error: the subspan dimension (dim: 1) is larger than the data (17 > 16).
+// CHECK: error: the subspan dimension (dim: 2) is larger than the data (33 > 32).
+// CHECK: Totally 4 errors have been detected.

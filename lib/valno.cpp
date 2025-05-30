@@ -45,6 +45,10 @@ std::vector<int> GetOperandsValNo(const std::string& input) {
 
 } // namespace
 
+ValueItem ValueNumbering::GenValueItemFromValueNumber(int vn) {
+  return GenValueItemFromSignature(GetSignatureFromValueNumber(vn));
+}
+
 ValueItem ValueNumbering::GenValueItemFromSignature(const std::string& input) {
   if (auto v = RemovePrefixOrNull("#", input)) { // handle #0 string as well
     int vn;

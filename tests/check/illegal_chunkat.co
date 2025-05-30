@@ -20,5 +20,4 @@ __co__ auto illegal_chunkat2(f32 [3, 4, 5, 2, 2] a) {
 
 // CHECK: error: un-matched ranks between spanned data (5) and bounded variables (3).
 
-
 // CHECK: Totally 2 errors have been detected.

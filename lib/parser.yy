@@ -94,7 +94,7 @@ ptr<AST::MultiNodes> ConstructPBRecursively(size_t idx,
 std::pair<ptr<AST::Identifier>, ptr<AST::MultiValues>> ElementMultiValues(const ptr<AST::Expr>&);
 std::set<std::string> paraby_symbols;
 
-inline ptr<AST::ChunkAt> ReformChunkAt(const ptr<AST::ChunkAt> &);
+inline ptr<AST::TSInfo> OptTSInfo(const ptr<AST::TSInfo> &);
 
 }
 
@@ -220,6 +220,8 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::ParallelBy>> paraby_block
 %nterm <AST::ptr<AST::Return>> return_stmt
 %nterm <AST::ptr<AST::Synchronize>> sync_stmt
+%nterm <std::vector<ptr<AST::TSInfo>>> ts_infos
+%nterm <ptr<AST::TSInfo>> ts_info
 %nterm <AST::ptr<AST::ChunkAt>> chunkat_expr subdata_expr
 %nterm <AST::ptr<AST::Select>> select_expr
 
@@ -1385,46 +1387,58 @@ chunkat_expr
     : subdata_expr { $$ = $1; }
     | ids_expr {
         auto ide = ElementMultiValues($1);
-        $$ = ReformChunkAt(
-          AST::Make<AST::ChunkAt>(@1, ide.first, ide.second));
+        $$ = AST::Make<AST::ChunkAt>(@1, ide.first, ide.second);
       }
     | ids_expr span_as {
         auto ide = ElementMultiValues($1);
         $2->id = ide.first;
-        $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, $2, ide.second));
+        $$ = AST::Make<AST::ChunkAt>(@1, $2, ide.second);
+      }
+    ;
+
+ts_infos
+    : ts_infos ts_info {
+        if ($2 != nullptr) $1.push_back($2);
+        $$ = $1;
+      }
+    | ts_info {
+        $$ = std::vector<ptr<AST::TSInfo>>();
+        if ($1 != nullptr) $$.push_back($1);
+      }
+    ;
+
+ts_info
+    : CHUNKAT LPAREN value_list RPAREN {
+        $3->SetDelimiter(", ");
+        $$ = OptTSInfo(AST::Make<AST::TSInfo>(@1, $3));
+      }
+    | CHUNK LPAREN value_list RPAREN AT LPAREN value_list RPAREN {
+        $3->SetDelimiter(", ");
+        $7->SetDelimiter(", ");
+        $$ = OptTSInfo(AST::Make<AST::TSInfo>(@1, $7, $3, AST::TSInfo::TILING));
+      }
+    | SUBSPAN LPAREN value_list RPAREN AT LPAREN value_list RPAREN {
+        $3->SetDelimiter(", ");
+        $7->SetDelimiter(", ");
+        $$ = OptTSInfo(AST::Make<AST::TSInfo>(@1, $7, $3, AST::TSInfo::SUBSPAN));
+      }
+    | MODSPAN LPAREN value_list RPAREN AT LPAREN value_list RPAREN {
+        $3->SetDelimiter(", ");
+        $7->SetDelimiter(", ");
+        $$ = OptTSInfo(AST::Make<AST::TSInfo>(@1, $7, $3, AST::TSInfo::MODSPAN));
       }
     ;
 
 subdata_expr
-    : ids_expr CHUNKAT LPAREN value_list RPAREN {
-        $4->SetDelimiter(", ");
+    : ids_expr ts_infos {
         auto ide = ElementMultiValues($1);
-        $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, ide.first, ide.second, $4));
+        $$ = AST::Make<AST::ChunkAt>(@1, ide.first, ide.second, $2);
       }
-    | ids_expr CHUNK LPAREN value_list RPAREN AT LPAREN value_list RPAREN {
-        $4->SetDelimiter(", ");
-        $8->SetDelimiter(", ");
-        auto ide = ElementMultiValues($1);
-        $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, ide.first, ide.second, $8, $4));
-      }
-    | ids_expr SUBSPAN LPAREN value_list RPAREN AT LPAREN value_list RPAREN {
-        $4->SetDelimiter(", ");
-        $8->SetDelimiter(", ");
-        auto ide = ElementMultiValues($1);
-        $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, ide.first, ide.second, $8, $4, AST::ChunkAt::SUBSPAN));
-      }
-    | ids_expr MODSPAN LPAREN value_list RPAREN AT LPAREN value_list RPAREN {
-        $4->SetDelimiter(", ");
-        $8->SetDelimiter(", ");
-        auto ide = ElementMultiValues($1);
-        $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, ide.first, ide.second, $8, $4, AST::ChunkAt::MODSPAN));
-      }
-    | ids_expr span_as CHUNKAT LPAREN value_list RPAREN {
-        // note: normalize will hoist span_as
-        $5->SetDelimiter(", ");
+    | ids_expr span_as ts_infos {
+        /* TODO: move span_as to ts_info */
         auto ide = ElementMultiValues($1);
         $2->id = ide.first;
-        $$ = ReformChunkAt(AST::Make<AST::ChunkAt>(@1, $2, ide.second, $5));
+        $$ = AST::Make<AST::ChunkAt>(@1, $2, ide.second, $3);
       }
     ;
 
@@ -1724,25 +1738,23 @@ ptr<AST::MultiNodes> ConstructPBRecursively(size_t idx,
   return mn;
 }
 
-inline ptr<AST::ChunkAt> ReformChunkAt(const ptr<AST::ChunkAt> &ca) {
-  // normalize "_" list
-  if (!ca->positions) return ca;
+inline ptr<AST::TSInfo> OptTSInfo(const ptr<AST::TSInfo> &tsi) {
+  if (tsi == nullptr) return nullptr;
 
   bool not_tiled = true;
-  for (auto pos : ca->positions->values) {
-    if (auto bpv = AST::GetIdentifier(*pos)) {
+  for (auto pos : tsi->GetIndices()) {
+    if (auto bpv = AST::GetIdentifier(*pos))
       if (bpv->name == "_") {
         bpv->name = "__choreo_no_tiling__";
         continue;
       }
-    }
+
     not_tiled = false;
   }
 
-  if (not_tiled)
-    ca->positions = nullptr;
+  if (not_tiled) return nullptr;
 
-  return ca;
+  return tsi;
 }
 
 // Bison expects us to provide implementation - otherwise linker complains

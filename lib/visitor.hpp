@@ -320,6 +320,10 @@ protected:
 
   // special to within: map 'with' to its 'with-matchers'
   std::unordered_map<std::string, std::vector<std::string>> within_map;
+  // similar for parallel-by
+  std::unordered_map<std::string, std::vector<std::string>> pb_map;
+  // all bounded variable mapping, including within and parallel-by
+  std::unordered_map<std::string, std::vector<std::string>> bv_map;
 
   std::string fname; // current function name
 
@@ -353,8 +357,27 @@ public:
     } else if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
       SSTab().EnterScope(f->name);
       fname = f->name;
-    } else if (isa<AST::ParallelBy>(&n)) {
+    } else if (auto p = dyn_cast<AST::ParallelBy>(&n)) {
       SSTab().EnterScope("paraby_" + std::to_string(pb_count++));
+      std::string scope_name = scoped_symtab.ScopeName();
+      if (p->HasBPV()) {
+        std::vector<std::string> matchers;
+        if (p->HasSubPVs()) {
+          for (auto v : p->AllSubPVs())
+            matchers.push_back(scope_name + cast<AST::Identifier>(v)->name);
+        } else
+          matchers.push_back(scope_name + p->BPV()->name); // only map to itself
+        pb_map.emplace(scope_name + p->BPV()->name, matchers);
+        bv_map.emplace(scope_name + p->BPV()->name, matchers);
+      } else if (p->HasSubPVs()) {
+        for (auto v : p->AllSubPVs()) {
+          auto name = scope_name + cast<AST::Identifier>(v)->name;
+          std::vector<std::string> matchers;
+          matchers.push_back(name);
+          pb_map.emplace(name, matchers);
+          bv_map.emplace(name, matchers);
+        }
+      }
     } else if (isa<AST::WithBlock>(&n)) {
       SSTab().EnterScope("within_" + std::to_string(wi_count++));
     } else if (isa<AST::ForeachBlock>(&n)) {
@@ -377,12 +400,14 @@ public:
         } else
           matchers.push_back(scope_name + w->with->name); // only map to itself
         within_map.emplace(scope_name + w->with->name, matchers);
+        bv_map.emplace(scope_name + w->with->name, matchers);
       }
       if (w->with_matchers) {
         for (auto v : w->GetMatchers()) {
           auto sname = scope_name + cast<AST::Identifier>(v)->name;
           within_map.emplace(
               sname, std::vector<std::string>{sname}); // always map to itself
+          bv_map.emplace(sname, std::vector<std::string>{sname});
         }
       }
     }

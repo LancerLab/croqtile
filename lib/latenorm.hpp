@@ -272,8 +272,8 @@ public:
   // backend handle it.
   bool Visit(AST::ChunkAt& n) {
     TraceEachVisit(n);
-    if (n.positions != nullptr) {
-      for (auto& tile_factor : n.positions->AllValues()) {
+    for (auto tsi : n.AllTSInfo()) {
+      for (auto& tile_factor : tsi->GetIndices()) {
         // from ChunkAt nodes, find out who uses host-side IV at device code
         if (std::find(buffer_list_tiled_by_host_iv.begin(),
                       buffer_list_tiled_by_host_iv.end(),
@@ -321,9 +321,13 @@ public:
 
             auto mv_node = AST::Make<AST::MultiValues>(dnode_id->loc);
             mv_node->Append(tiler_node);
+            std::vector<ptr<AST::TSInfo>> ntsi;
+            auto tsi = AST::Make<AST::TSInfo>(dnode_id->loc, mv_node);
+            tsi->SetBlockShape(n.GetShape());
+            ntsi.push_back(tsi);
 
-            auto ca_node = AST::Make<AST::ChunkAt>(dnode_id->loc, dnode_id,
-                                                   nullptr, mv_node);
+            auto ca_node =
+                AST::Make<AST::ChunkAt>(dnode_id->loc, dnode_id, nullptr, ntsi);
             ca_node->SetType(new_chunkat_ty);
 
             auto dma_node = AST::Make<AST::DMA>(

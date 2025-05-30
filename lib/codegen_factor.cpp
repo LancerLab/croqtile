@@ -726,14 +726,17 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
     size_t rank = sty->Dims();
 
     auto ca = cast<AST::ChunkAt>(&n);
-    if (!ca->positions) {
+    if (ca->NoTile()) {
       // symbol only, the offset is a multi-dim-zeros
       return "{" + DelimitedString(std::vector<size_t>(rank, 0)) + "}";
     }
 
+    if (ca->AllTSInfo().size() != 1)
+      choreo_unreachable("multiple chunkat is not support by current target.");
+
     std::ostringstream offss;
     size_t dim_cursor = 0;
-    for (auto& bv : ca->positions->AllValues()) {
+    for (auto& bv : ca->AllTSInfo()[0]->GetIndices()) {
       // It could either be identifier or a 'getith' expr
       if (auto id = dyn_cast<AST::Identifier>(bv)) {
         auto bvn = id->name;
@@ -834,7 +837,7 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
   if (isa<AST::Memory>(d.to) || isa<AST::Select>(d.to))
     chunkat_node = d.from;
   else if (auto c = cast<AST::ChunkAt>(d.to)) {
-    if (!c->positions) // xxx.chunkat() => identifier
+    if (c->NoTile()) // xxx.chunkat() => identifier
       chunkat_node = d.from;
     else
       chunkat_node = d.to;

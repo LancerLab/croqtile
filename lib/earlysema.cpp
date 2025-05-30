@@ -1006,15 +1006,15 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
   }
 
   if (n.HasBPV()) {
-    if (!n.SubPVs())
+    if (!n.HasSubPVs())
       SetNodeType(*n.bpv, MakeBoundedIntegerType(n.bpv->name));
     else
       SetNodeType(*n.bpv, MakeBoundedITupleType(Shape(n.SubCount()), "pv"));
     ReportErrorWhenViolateODR(n.LOC(), n.bpv->name, __FILE__, __LINE__,
                               n.bpv->GetType());
   }
-  if (n.SubPVs()) {
-    for (auto& sym : n.SubPVs()->AllValues()) {
+  if (n.HasSubPVs()) {
+    for (auto& sym : n.AllSubPVs()) {
       auto sname = cast<AST::Identifier>(sym)->name;
       auto mty = MakeBoundedIntegerType(sname);
       ReportErrorWhenViolateODR(n.LOC(), sname, __FILE__, __LINE__, mty);
@@ -1312,8 +1312,8 @@ bool EarlySemantics::Visit(AST::DMA& n) {
   }
 
   if (isa<AST::ChunkAt>(n.from) && isa<AST::ChunkAt>(n.to))
-    if (cast<AST::ChunkAt>(n.from)->positions &&
-        cast<AST::ChunkAt>(n.to)->positions) {
+    if (cast<AST::ChunkAt>(n.from)->HasTile() &&
+        cast<AST::ChunkAt>(n.to)->HasTile()) {
       Error(n.LOC(),
             "slice and deslice in single DMA statement is not supported yet.");
       error_count++;
@@ -1397,27 +1397,30 @@ bool EarlySemantics::Visit(AST::DMA& n) {
 bool EarlySemantics::Visit(AST::ChunkAt& n) {
   TraceEachVisit(n);
 
-  if (n.positions) {
-    std::vector<size_t> notile_indices;
-    size_t i = 0;
-    for (auto& v : n.positions->AllValues()) {
-      if (auto expr = cast<AST::Expr>(v); expr->IsReference())
-        if (auto id = dyn_cast<AST::Identifier>(expr->GetReference()))
-          if (id->name == "__choreo_no_tiling__") {
-            notile_indices.push_back(i);
-            break;
-          }
-      ++i;
-    }
+  if (n.HasTile()) {
+    for (auto tsi : n.AllTSInfo()) {
+      if (!tsi->HasTilingExpr()) continue;
 
-    // the upper bound of notile must be 1
-    if (n.HasTilingExpr()) {
+      // if notile has upper-bound rather than 1
+      std::vector<size_t> notile_indices;
+      size_t i = 0;
+      for (auto& v : tsi->GetIndices()) {
+        if (auto expr = cast<AST::Expr>(v); expr->IsReference())
+          if (auto id = dyn_cast<AST::Identifier>(expr->GetReference()))
+            if (id->name == "__choreo_no_tiling__") {
+              notile_indices.push_back(i);
+              break;
+            }
+        ++i;
+      }
+
+      // the upper bound of notile must be 1
       for (auto& i : notile_indices) {
-        auto il = GetIntLiteral(*n.GetTilingFactors()->ValueAt(i));
+        auto il = GetIntLiteral(*tsi->GetTilingFactors()->ValueAt(i));
         if ((il == nullptr) || (il->value != 1)) {
-          Error(n.LOC(), "upper bound of bounded variable '_' is " +
-                             PSTR(n.GetTilingFactors()->ValueAt(i)) +
-                             " (1 is expected.");
+          Error(tsi->LOC(), "upper bound of bounded variable '_' is " +
+                                PSTR(tsi->GetTilingFactors()->ValueAt(i)) +
+                                " (1 is expected).");
           error_count++;
         }
       }
@@ -1437,27 +1440,28 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
 
   auto sty = GetSpannedType(nty);
 
-  if (n.positions) {
-    if (n.MultipleExprs()) {
-      n.GetTFSSExpr()->accept(*this);
+  for (auto tsi : n.AllTSInfo()) {
+    if (tsi->MultipleExprs()) {
+      tsi->GetTFSSExpr()->accept(*this);
 
-      for (auto v : n.GetTFSSExpr()->AllValues()) {
+      for (auto v : tsi->GetTFSSExpr()->AllValues()) {
         if (mutables.Contains(v)) {
           Error(v->LOC(), "the mutable value can not used for the "
-                          ".chunk/.subspan expression.");
+                          ".chunk/.subspan/.modspan expression.");
           error_count++;
         }
       }
     }
 
-    n.positions->accept(*this);
+    tsi->Positions()->accept(*this);
     size_t rank = sty->Dims();
     size_t r_count = 0;
-    for (auto& v : n.positions->AllValues()) {
+    for (auto& v : tsi->GetIndices()) {
       auto ty = NodeType(*v);
       if (!isa<BoundedType>(ty)) {
-        Error(n.LOC(), "expect '" + PSTR(v) + "` be a bounded type (but got " +
-                           PSTR(ty) + ").");
+        Error(tsi->LOC(), "expect '" + PSTR(v) +
+                              "` be a bounded type (but got " + PSTR(ty) +
+                              ").");
         error_count++;
       }
       r_count += ty->Dims();
@@ -1465,19 +1469,19 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
     }
     // report error when the ranks do not match
     if (rank != r_count) {
-      Error(n.LOC(), "un-matched ranks between spanned data (" +
-                         std::to_string(rank) + ") and bounded variables (" +
-                         std::to_string(r_count) + ").");
+      Error(tsi->LOC(), "un-matched ranks between spanned data (" +
+                            std::to_string(rank) + ") and bounded variables (" +
+                            std::to_string(r_count) + ").");
       error_count++;
     }
 
-    if (n.MultipleExprs()) {
+    if (tsi->MultipleExprs()) {
       size_t b_count = 0;
-      for (auto& v : n.GetTFSSExpr()->AllValues()) {
+      for (auto& v : tsi->GetTFSSExpr()->AllValues()) {
         auto ty = NodeType(*v);
         if (!isa<IntegerType>(ty) && !isa<ITupleType>(ty) &&
             !isa<MDSpanType>(ty)) {
-          Error(n.LOC(),
+          Error(tsi->LOC(),
                 "expect '" + PSTR(v) +
                     "` be either an integer, ituple or mdspan type (but got " +
                     PSTR(ty) + ").");
@@ -1487,10 +1491,10 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
         SetNodeType(*v, ty);
       }
       if (rank != b_count) {
-        Error(n.LOC(), "un-matched ranks between spanned data (" +
-                           std::to_string(rank) + ") and " +
-                           ((n.HasTilingExpr()) ? "tiling" : "subspan") +
-                           " variables (" + std::to_string(b_count) + ").");
+        Error(tsi->LOC(), "un-matched ranks between spanned data (" +
+                              std::to_string(rank) + ") and " +
+                              ((tsi->HasTilingExpr()) ? "tiling" : "subspan") +
+                              " variables (" + std::to_string(b_count) + ").");
         error_count++;
       }
     }

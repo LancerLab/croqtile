@@ -1295,11 +1295,19 @@ public:
   }
 
   bool HasBPV() const { return bpv != nullptr; }
+  bool HasSubPVs() const { return cmpt_bounds != nullptr; }
   bool IsAsync() const { return async; }
   size_t SubCount() const { return sub_count; }
 
+  const ptr<Identifier> BPV() const { return bpv; }
   const ptr<MultiValues> SubPVs() const { return cmpt_bpvs; }
   const ptr<MultiValues> SubBounds() const { return cmpt_bounds; }
+  const std::vector<ptr<Node>> AllSubPVs() const {
+    return cmpt_bpvs->AllValues();
+  }
+  const std::vector<ptr<Node>> AllSubBounds() const {
+    return cmpt_bounds->AllValues();
+  }
 
   void SetBound(const ValueItem& vi) { bound = vi; }
   ValueItem GetBound() const { return bound; }
@@ -1445,59 +1453,46 @@ struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
   __UDT_TYPE_INFO__(Node, WithBlock)
 };
 
-struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
+// Information about tile/tiling and subscription
+struct TSInfo {
+public:
   enum OpKind {
     TILING,
     SUBSPAN,
     MODSPAN,
   };
-  ptr<Identifier> data;
-  ptr<MultiValues> indices = nullptr;   // indexing of data arrays
-  ptr<SpanAs> sa = nullptr;             // for span_as expression
-  ptr<MultiValues> positions = nullptr; // subscription expression of data
+
 private:
+  const location loc;
+  ptr<MultiValues> positions = nullptr; // subscription expression of data
   ptr<MultiValues> tfss_expr = nullptr; // tiling-factor or shape values
   OpKind op_kind = TILING;
+  Shape bs; // block shape
 
 public:
-  Shape s; // internally used to pass real shape of the tiled block
-
-public:
-  ChunkAt(const location& l, const ptr<Identifier>& d,
-          const ptr<MultiValues>& idxes = nullptr,
-          const ptr<MultiValues>& p = nullptr,
-          const ptr<MultiValues>& b = nullptr, OpKind ok = TILING)
-      : Node(l), data(d), indices(idxes), sa(nullptr), positions(p),
-        tfss_expr(b), op_kind(ok) {
-    if (b) assert(p && "position is not provided for separated chunk & at.");
+  TSInfo(const location& l, const ptr<MultiValues>& p,
+         const ptr<MultiValues>& b = nullptr, OpKind ok = TILING)
+      : loc(l), positions(p), tfss_expr(b), op_kind(ok) {
+    assert(p && "position is not provided.");
   }
 
-  ChunkAt(const location& l, const ptr<SpanAs>& s,
-          const ptr<MultiValues>& idxes = nullptr,
-          const ptr<MultiValues>& p = nullptr,
-          const ptr<MultiValues>& b = nullptr)
-      : Node(l), data(s->nid), indices(idxes), sa(s), positions(p),
-        tfss_expr(b) {
-    if (b) assert(p && "position is not provided for separated chunk & at.");
+  const location& LOC() const { return loc; }
+  bool MultipleExprs() const { return tfss_expr != nullptr; }
+
+  bool HasTilingExpr() const {
+    return (tfss_expr != nullptr) && (op_kind == TILING);
   }
-
-  std::string RefSymbol() const {
-    assert(data && "ref data is not set.");
-    return RemoveSuffix(data->name, ".data");
-  }
-
-  bool SymbolicBufferName() { return !positions; }
-
-  bool MultipleExprs() { return tfss_expr != nullptr; }
-  bool HasTilingExpr() { return (tfss_expr != nullptr) && (op_kind == TILING); }
-  bool HasSubSpanExpr() {
+  bool HasSubSpanExpr() const {
     return (tfss_expr != nullptr) && (op_kind == SUBSPAN);
   }
-  bool HasModSpanExpr() {
+  bool HasModSpanExpr() const {
     return (tfss_expr != nullptr) && (op_kind == MODSPAN);
   }
 
   ptr<MultiValues> GetTFSSExpr() const { return tfss_expr; }
+
+  auto GetIndices() const { return positions->AllValues(); }
+  ptr<MultiValues> Positions() const { return positions; }
 
   ptr<MultiValues> GetTilingFactors() const {
     if (op_kind != TILING) choreo_unreachable("no tiling factor exist.");
@@ -1514,7 +1509,63 @@ public:
     return tfss_expr;
   }
 
-  ptr<MultiValues> GetSubScriptExpr() const { return positions; }
+  void SetBlockShape(const Shape shape) {
+    if (!shape.IsValid()) choreo_unreachable("invalid shape is specified.");
+    bs = shape;
+  }
+
+  const Shape& GetBlockShape() const {
+    if (!bs.IsValid()) choreo_unreachable("retrieving an invalid shape.");
+    return bs;
+  }
+
+  void Print(std::ostream& os) const {
+    if (tfss_expr) {
+      switch (op_kind) {
+      case TILING: os << ".Chunk(" << STR(tfss_expr) << ").At("; break;
+      case SUBSPAN: os << ".SubSpan(" << STR(tfss_expr) << ").At("; break;
+      case MODSPAN: os << ".ModSpan(" << STR(tfss_expr) << ").At("; break;
+      }
+    } else
+      os << ".ChunkAt(";
+    os << STR(positions) << ")";
+  }
+};
+
+struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
+  ptr<Identifier> data;
+  ptr<MultiValues> indices = nullptr; // indexing of data arrays
+  ptr<SpanAs> sa = nullptr;           // for span_as expression
+
+private:
+  const std::vector<ptr<TSInfo>> ts_infos;
+
+public:
+  Shape s; // internally used to pass real shape of the tiled block
+
+public:
+  ChunkAt(const location& l, const ptr<Identifier>& d,
+          const ptr<MultiValues>& idxes = nullptr,
+          const std::vector<ptr<TSInfo>>& infos = {})
+      : Node(l), data(d), indices(idxes), ts_infos(infos) {}
+
+  ChunkAt(const location& l, const ptr<SpanAs>& s,
+          const ptr<MultiValues>& idxes = nullptr,
+          const std::vector<ptr<TSInfo>>& infos = {})
+      : Node(l), data(s->nid), indices(idxes), sa(s), ts_infos(infos) {}
+
+  std::string RefSymbol() const {
+    assert(data && "ref data is not set.");
+    return RemoveSuffix(data->name, ".data");
+  }
+
+  bool SymbolicBufferName() { return ts_infos.empty(); }
+  bool NoTile() const { return ts_infos.empty(); }
+  bool HasTile() const { return !ts_infos.empty(); }
+  const std::vector<ptr<TSInfo>>& AllTSInfo() const { return ts_infos; }
+
+  const Shape& GetShape() const { return s; }
+  void SetShape(const Shape& shape) { s = shape; }
 
   void Print(std::ostream& os, const std::string& = {},
              bool with_type = false) const override {
@@ -1526,17 +1577,8 @@ public:
     if (indices)
       for (auto index : indices->AllValues()) os << "[" << PSTR(index) << "]";
 
-    if (positions) {
-      if (tfss_expr) {
-        switch (op_kind) {
-        case TILING: os << ".Chunk(" << STR(tfss_expr) << ").At("; break;
-        case SUBSPAN: os << ".SubSpan(" << STR(tfss_expr) << ").At("; break;
-        case MODSPAN: os << ".SubSpan(" << STR(tfss_expr) << ").At("; break;
-        }
-      } else
-        os << ".ChunkAt(";
-      os << STR(positions) << ")";
-    }
+    for (auto tsi : ts_infos) tsi->Print(os);
+
     if (with_type) os << "<{" << PSTR(GetType()) << "}>";
   }
 
