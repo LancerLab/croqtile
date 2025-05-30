@@ -188,6 +188,8 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
   LivenessAnalyzer()
       : VisitorWithSymTab("liveness", CCtx().GetGlobalSymbolTable()) {
     if (trace_visit) debug_visit = true; // force debug when tracing
+    // cause --liveness is enabled by default.
+    if (disabled) CCtx().SetLivenessAnalysis(false);
   }
   ~LivenessAnalyzer() {}
 
@@ -202,7 +204,8 @@ public:
 
 private:
   VarSet GetAllSymbolicOperands(const AST::Node* n) const;
-  void DumpStmtBriefly(const Stmt& n, std::ostream& os, bool indent);
+  void DumpStmtBriefly(const Stmt& n, std::ostream& os, bool indent,
+                       bool only_else = false);
   bool HasStmt(const AST::Node& n) const;
   std::string GetScopedName(const std::string& name) const;
   void AddUse(const Stmt* s, const std::string& var, bool add_extra_use = true);
@@ -223,6 +226,7 @@ private:
   void HandleSelect(AST::Node& n, ptr<AST::Select> sel);
   // handle stmt in Before/AfterVisitImpl
   void HandleStmtInBefore(AST::Node& n);
+  void HandleStmtInMid(AST::Node& n);
   void HandleStmtInAfter(AST::Node& n);
   std::string SSTR(const Stmt* stmt) const;
 
@@ -245,6 +249,7 @@ public:
       dbgs() << m << n.TypeNameString() << "\n";
   }
   bool BeforeVisitImpl(AST::Node&) override;
+  bool InMidVisitImpl(AST::Node&) override;
   bool AfterVisitImpl(AST::Node&) override;
 
   bool Visit(AST::NamedTypeDecl&) override;

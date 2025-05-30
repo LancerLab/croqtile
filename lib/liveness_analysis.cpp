@@ -165,8 +165,7 @@ void LivenessAnalyzer::AddUse(const Stmt* s, const std::string& var,
     for (const auto& [src, dst] : fut2buffers[svar])
       AddUse(s, dst, add_extra_use);
   if (!add_extra_use) return;
-  // for bounded vars which are defined in paraby, we add extra uses in other
-  // place.
+  // for bounded vars defined in paraby, we add extra uses in other place.
   if (paraby_bounded_vars.count(var)) return;
   // add the extra uses in `scope_end`
   for (const auto& event : var_events.at(svar)) {
@@ -191,6 +190,8 @@ void LivenessAnalyzer::AddUse(const Stmt* s, const std::string& var,
       */
       std::string exact_scope =
           ExactFirstLoopScope(event.second, SSTab().ScopeName());
+      // std::cerr << "exact_scope of (" << event.second << ", "
+      //           << SSTab().ScopeName() << "): " << exact_scope << "\n";
       if (!events_to_add[scope2stmt.at(exact_scope)].count({"use", svar})) {
         VST_DEBUG({
           dbgs() << "RECORD extra use " << svar << "\n\tin the end of "
@@ -566,7 +567,7 @@ inline void DecrDumpIndent() {
 }
 
 void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
-                                       bool dump_brace) {
+                                       bool dump_brace, bool only_else) {
 #if DUMP_STMT_WITH_TYPE_INFO
   os << std::left << std::setw(25) << n.TypeNameString();
 #endif
@@ -574,6 +575,13 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
   if (num.size() < 3) num = std::string(3 - num.size(), ' ') + num;
   os << "(" << num << ") ";
   os << dump_indent;
+
+  // special case for the else scope of if-else block
+  if (only_else) {
+    os << "else" << (dump_brace ? " {" : "") << "\n";
+    return;
+  }
+
   if (const auto ntd = dyn_cast<AST::NamedTypeDecl>(&n)) {
     os << ntd->name_str << " : " << PSTR(ntd->init_expr);
   } else if (const auto nvd = dyn_cast<AST::NamedVariableDecl>(&n)) {
@@ -707,6 +715,7 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
   } else {
     assert(false && "unexpected stmt type.");
   }
+
   os << (dump_brace ? " {" : "") << "\n";
 }
 
@@ -739,6 +748,53 @@ void LivenessAnalyzer::HandleStmtInBefore(AST::Node& n) {
   stmt2str.emplace(&n, ss.str());
 #if DUMP_EACH_STMT
   VST_DEBUG(dbgs() << SSTR(&n));
+#endif
+}
+
+void LivenessAnalyzer::HandleStmtInMid(AST::Node& n) {
+  if (!HasStmt(n)) return;
+
+  auto ie = dyn_cast<AST::IfElseBlock>(&n);
+  if (!ie) return;
+
+  // if there is no else block,
+  // do the rbrace job in HandleStmtInAfter as usual.
+  if (!ie->HasElse()) return;
+
+  // complete the end of `if scope`     (rbrace)
+  // process the start of `end scope`   (lbrace)
+
+  DecrDumpIndent();
+
+  auto if_end = AST::Make<ScopeEnd>(n.LOC(), &n);
+  scope_ends.push_back(if_end);
+  stmts_preordered.push_back(if_end.get());
+  stmt2number.emplace(if_end.get(), stmt_number);
+  ++stmt_number;
+  DumpStmtBriefly(*if_end, stmts_with_indent, false);
+
+  std::stringstream ss;
+  DumpStmtBriefly(*if_end, ss, false);
+  stmt2str.emplace(if_end.get(), ss.str());
+#if DUMP_EACH_STMT
+  VST_DEBUG(dbgs() << SSTR(if_end.get()));
+#endif
+
+  auto else_start = AST::Make<ScopeEnd>(n.LOC(), &n);
+  scope_ends.push_back(else_start);
+  stmts_preordered.push_back(else_start.get());
+  stmt2number.emplace(else_start.get(), stmt_number);
+  ++stmt_number;
+  DumpStmtBriefly(*else_start, stmts_with_indent, true, true);
+
+  IncrDumpIndent();
+  scope2stmt.emplace(SSTab().ScopeName(), else_start.get());
+
+  ss.str("");
+  DumpStmtBriefly(*else_start, ss, false);
+  stmt2str.emplace(else_start.get(), ss.str());
+#if DUMP_EACH_STMT
+  VST_DEBUG(dbgs() << SSTR(else_start.get()));
 #endif
 }
 
@@ -802,6 +858,11 @@ bool LivenessAnalyzer::BeforeVisitImpl(AST::Node& n) {
     if (ib->async) ++inthreads_async_level;
   }
 
+  return true;
+}
+
+bool LivenessAnalyzer::InMidVisitImpl(AST::Node& n) {
+  HandleStmtInMid(n);
   return true;
 }
 
