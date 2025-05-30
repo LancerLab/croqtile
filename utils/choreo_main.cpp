@@ -133,27 +133,16 @@ int main(int argc, char* argv[]) {
     return 0;
   }
 
-  // currently, liveness analysis is not performed by default.
-  if (CCtx().LivenessAnalysis()) {
-    LivenessAnalyzer la;
-    if (!la.RunOnProgram(root)) return la.Status();
-    if (CCtx().MemReuse()) {
-      if (CCtx().GetTarget() != CompileTarget::Topscc) {
-        errs() << "Memory reuse only works in Topscc target.\n";
-        return 1;
-      }
-      MemAnalyzer ma;
-      if (!ma.RunOnProgram(root)) return ma.Status();
-      MemReuse mr(la, ma);
-      if (!mr.RunOnProgram(root)) return mr.Status();
-    }
-    if (CCtx().VerifyVisitors()) vf.RunOnProgram(root);
-  } else if (CCtx().MemReuse()) {
-    errs() << "A prerequisite for memory reuse is to perform liveness "
-              "analysis! (add --liveness)"
-           << std::endl;
-    return 1;
+  LivenessAnalyzer la;
+  if (!la.RunOnProgram(root)) return la.Status();
+
+  MemAnalyzer ma;
+  if (!ma.RunOnProgram(root)) return ma.Status();
+  if (CCtx().GetTarget() == CompileTarget::Topscc) {
+    MemReuse mr(la, ma);
+    if (!mr.RunOnProgram(root)) return mr.Status();
   }
+  if (CCtx().VerifyVisitors()) vf.RunOnProgram(root);
 
   // apply the semantic check
   SemaChecker sc;

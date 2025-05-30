@@ -1,4 +1,4 @@
-// RUN: choreo -arch=gcu300 %s 2>&1 | FileCheck --check-prefix=MUCHK %s
+// RUN: choreo -arch=gcu300 -es %s -dp=memreuse 2>&1 | FileCheck --check-prefix=MUCHK %s
 #include "choreo.h"
 
 __cok__{

@@ -1,5 +1,5 @@
-// RUN: choreo -t topscc -es --use-hetero-tileflow %s -o - | FileCheck %s --check-prefix=CHECK-HT
-// RUN: choreo -t topscc -es %s -o - | FileCheck %s --check-prefix=CHECK-NHT
+// RUN: choreo -t topscc -es --use-hetero-tileflow -dp=memreuse %s -o - | FileCheck %s --check-prefix=CHECK-HT
+// RUN: choreo -t topscc -es -dp=memreuse %s -o - | FileCheck %s --check-prefix=CHECK-NHT
 __co__ auto foo(f32 [32, 4] a) {
   f32 [a.span] data;
   dma.copy a => data;

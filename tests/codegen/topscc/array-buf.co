@@ -1,4 +1,4 @@
-// RUN: choreo -es -t topscc %s -o - | FileCheck --match-full-lines %s
+// RUN: choreo -es -dp=memreuse -t topscc %s -o - | FileCheck --match-full-lines %s
 
 __co__  void foo(f32 [24] a) {
   parallel p by 3 {

@@ -1,4 +1,4 @@
-// RUN: choreo -t topscc -es %s -o - | FileCheck %s
+// RUN: choreo -t topscc -es -dp=memreuse %s -o - | FileCheck %s
 
 #include "choreo.h"
 

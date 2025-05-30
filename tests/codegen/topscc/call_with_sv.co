@@ -1,4 +1,4 @@
-// RUN: choreo -t topscc -ndecay-spv -es %s -o - | FileCheck %s
+// RUN: choreo -t topscc -ndecay-spv -dp=memreuse -es %s -o - | FileCheck %s
 
 __device__ void bar(choreo::spanned_view<choreo::f32, 2> sv0,
                     choreo::spanned_view<choreo::s32, 1> sv1) {}

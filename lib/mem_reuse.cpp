@@ -306,15 +306,15 @@ void MemReuse::ProtoType() {
 
     auto GenPushBackScript = [&](const auto& bs) -> void {
       for (const auto& buffer : bs) {
-        auto func_name = GetFuncNameFromScopedName(buffer.buffer_id);
-        auto& required_storage_map = required_storage_maps[func_name];
-        auto& script = mem_reuse_scripts[func_name];
         auto sto = ma.buf_sto.at(buffer.buffer_id);
         // global buffer reuse is not supported yet
         if (sto == Storage::GLOBAL || sto == Storage::DEFAULT) continue;
         if (sto != Storage::LOCAL && sto != Storage::SHARED)
           choreo_unreachable("The storage type: " + STR(sto) +
                              " is not supported yet!");
+        auto func_name = GetFuncNameFromScopedName(buffer.buffer_id);
+        auto& required_storage_map = required_storage_maps[func_name];
+        auto& script = mem_reuse_scripts[func_name];
         offsets_arg_map[func_name][sto].push_back("mr_offset" +
                                                   buffer.buffer_id);
         if (!required_storage_map.count(sto)) {
@@ -331,11 +331,11 @@ void MemReuse::ProtoType() {
           choreo_unreachable("Unexpected type of buffer.size: " +
                              std::string(typeid(buffer.size).name()) +
                              "\n\twith buffer " + buffer.buffer_id);
-        script.push_back("__co__" + STR(sto) + "_chunks.push_back({" +
-                         buffer_size + ", " +
-                         std::to_string(buffer.start_time) + ", " +
-                         std::to_string(buffer.end_time) + ", \"" +
-                         UnScopedName(buffer.buffer_id) + "\"});");
+        script.push_back(
+            "__co__" + STR(sto) + "_chunks.push_back({" + buffer_size + ", " +
+            std::to_string(buffer.start_time) + ", " +
+            std::to_string(buffer.end_time) + ", \"" +
+            RegexReplaceAll(buffer.buffer_id, "::", "_") + "\"});");
       }
     };
 

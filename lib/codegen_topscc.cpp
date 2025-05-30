@@ -647,7 +647,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
         auto reuse_name = *(reuse_idx + 1);
         auto offset = *(offset_idx + 1);
         ds << d_indent << bts << "* " << sym << " = (" << bts << "*)"
-           << reuse_name << " + " << offset << ";\n";
+           << "(" << reuse_name << " + " << offset << ");\n";
       }
     };
 

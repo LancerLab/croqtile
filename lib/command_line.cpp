@@ -122,9 +122,9 @@ Option<bool> prt_pass(OptionKind::Hidden, "--show-passes", "-sp", false,
                       "Show the visit pass pipeline.");
 Option<bool> save_temps(OptionKind::Hidden, "--save-temps", "", false,
                         "Save the temporal files.");
-Option<bool> liveness(OptionKind::Hidden, "--liveness", "", false,
+Option<bool> liveness(OptionKind::Hidden, "--liveness", "", true,
                       "Analyze the liveness of the program.");
-Option<bool> mem_reuse(OptionKind::Hidden, "--mem-reuse", "", false,
+Option<bool> mem_reuse(OptionKind::Hidden, "--mem-reuse", "", true,
                        "Analyze the memory usage, then perform memory reuse.");
 Option<bool> print_node_type(OptionKind::Hidden, "--print-node-type", "-pnt",
                              false, "Print node with its type.");

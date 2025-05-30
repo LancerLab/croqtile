@@ -1,4 +1,4 @@
-// RUN: choreo -t topscc -arch=gcu400  -es %s  | FileCheck  %s
+// RUN: choreo -t topscc -arch=gcu400 -es -dp=memreuse %s  | FileCheck  %s
 __co__  void foo() {
   parallel p by 6 {
     shared f32 [5, 6] s_A {0}; 

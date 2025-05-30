@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GCUALL
-// RUN: choreo -es -t topscc %s | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+// RUN: choreo -es -t topscc -dp=memreuse %s | FileCheck --match-full-lines %s && rm -f %s.topscc.result
 
 #include "choreo.h"
 #include <chrono>

@@ -1,4 +1,4 @@
-// RUN: choreo -es -t topscc %s -o - | FileCheck --match-full-lines --check-prefix=CHECK-TOPSCC %s
+// RUN: choreo -es -t topscc -dp=memreuse %s -o - | FileCheck --match-full-lines --check-prefix=CHECK-TOPSCC %s
 
 #include "choreo.h"
 #include <chrono>

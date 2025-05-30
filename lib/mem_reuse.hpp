@@ -98,6 +98,7 @@ private:
 
     // memory allocation result
     struct Result {
+      // must use std::map for string keys to keep the order buffer_id!
       std::map<std::string, size_t> chunk_offsets; // offset of each buffer
       size_t heap_size;                            // total memory size
     };
@@ -230,6 +231,8 @@ public:
       : VisitorWithSymTab("memreuse", CCtx().GetGlobalSymbolTable()), la(la),
         ma(ma) {
     if (trace_visit) debug_visit = true;
+    // TODO: maybe should do the same for other passes.
+    if (disabled) CCtx().SetMemReuse(false);
   }
   ~MemReuse() {}
 
