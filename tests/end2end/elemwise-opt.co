@@ -3,8 +3,7 @@
 
 #include <iostream>
 
-//#define SINGLE_STORE
-
+#define M 8388608
 __co__ auto ele_add(s32 [M] lhs, s32 [M] rhs) {
   s32 [lhs.span] output;
 
@@ -13,32 +12,66 @@ __co__ auto ele_add(s32 [M] lhs, s32 [M] rhs) {
   max_pl = gpl * bpl;
 
   // hardware limitations
-  l1_size = (1 << 20) + (1 << 19);
-  l2_size = (1 << 22);
+  l1_limit = (1 << 20) + (1 << 19) - 512;
+  l2_limit = 64 * (1 << 20);
 
-  l2_elem_count = (((l2_size / 3 / |s32|) + 127) / 128) * 128;
-//  println("M: ", M, ", l2 elem count: ", l2_elem_count, ", iteration count: ", M / (l2_elem_count * gpl), ", max elem: ", M / (l2_elem_count * gpl) * (l2_elem_count * gpl));
+  padding = 128 * bpl;
+
+  // l1 contains lhs, rhs, output.
+  l1_max_count = (l1_limit / |s32| / 3 / padding) * padding;
+
+  // l2 contains only lhs, rhs. The output moved to global storage directly
+
+  // l2 minimal element count which can fully feed max l1
+  l2_mtp = l1_max_count * bpl;
+
+//  l2_elem_count = (l2_limit / |s32| / 2 / l2_mtp) * l2_mtp;
+
+  l2_elem_count = l2_mtp / 3;  // figure out why mem-reuse fail
 
   if (M > (l2_elem_count * gpl)) {
     // in this scenario, it worth utilizing all the PEs
     __cpp__("auto start = std::chrono::high_resolution_clock::now();");
 
-    parallel p by gpl {
-      // decide the iteration count
-      with x in [M / (l2_elem_count * #p)]
-        foreach x(:1:) inthreads (x # p * l2_elem_count + l2_elem_count < M) {
-//          println("[", p, "] iteration: ", x, ", x # p: ", x # p, ", index: ", (x # p) * (M / (#x * #p)), ", inthreads: ", x # p * l2_elem_count);
-          lfs = dma.copy.async lhs.chunkat(x # p) => shared;
-          rfs = dma.copy.async rhs.chunkat(x # p) => shared;
+    parallel p by gpl, q by bpl {
+
+      // iterate to handle most workload
+      with x in [M / (l2_elem_count * #p)] foreach x(:1:) {
+
+        inthreads (x # p * l2_elem_count + l2_elem_count <= M) {
+          lfs = dma.copy.async lhs.subspan(l2_elem_count).at(x # p) => shared;
+          rfs = dma.copy.async rhs.subspan(l2_elem_count).at(x # p) => shared;
           wait lfs, rfs;
 
-#ifndef SINGLE_STORE
-          shared s32 [lfs.span] l2_out;
-#endif
+          assert(|lfs.span| % padding == 0, "the data can not be divided evenly.");
 
-          parallel q by bpl {
-            lfl = dma.copy.async lfs.chunkat(q) => local;
-            rfl = dma.copy.async rfs.chunkat(q) => local;
+          lfl = dma.copy.async lfs.chunkat(q) => local;
+          rfl = dma.copy.async rfs.chunkat(q) => local;
+          wait lfl, rfl;
+
+          local s32 [lfl.span] l1_out;
+          foreach i in [l1_out.span]
+            l1_out.at(i) = lfl.data.at(i) + rfl.data.at(i);
+
+          dma.copy l1_out => output.subspan(lfl.span).at(x # p # q);
+        }
+
+        // last iteration, handle the remainder count in a single p
+        inthreads ((x # p * l2_elem_count + l2_elem_count > M) &&
+            (x # p * l2_elem_count < M)) {
+          rem_count = M % l2_elem_count;
+          lfs = dma.copy.async lhs.modspan(l2_elem_count).at(x # p) => shared;
+          rfs = dma.copy.async rhs.modspan(l2_elem_count).at(x # p) => shared;
+          wait lfs, rfs;
+
+          // decide the last count
+          l1_min = 512;
+          l1_count = (|lfs.span| / gpl + padding - 1) / padding * padding;
+          last_count = (l1_min > l1_count) ? l1_min : l1_count;
+
+          inthreads ((q + 1) * last_count <= rem_count) {
+            lfl = dma.copy.async lfs.subspan(last_count).at(q) => local;
+            rfl = dma.copy.async rfs.subspan(last_count).at(q) => local;
             wait lfl, rfl;
 
             local s32 [lfl.span] l1_out;
@@ -46,16 +79,24 @@ __co__ auto ele_add(s32 [M] lhs, s32 [M] rhs) {
             foreach i in [l1_out.span]
               l1_out.at(i) = lfl.data.at(i) + rfl.data.at(i);
 
-#ifdef SINGLE_STORE
-            dma.copy l1_out => output.chunkat(x # p # q);
+            dma.copy l1_out => output.modspan(l2_elem_count).at(x # p).subspan(l1_count).at(q);
           }
-#else
-            dma.copy l1_out => l2_out.chunkat(q);
-          }
-          dma.copy l2_out => output.chunkat(x # p);
-#endif
-        }
 
+          // last bunch
+          inthreads ((q * last_count < rem_count) && ((q + 1) * last_count > rem_count)) {
+            lfl = dma.copy.async lfs.modspan(last_count).at(q) => local;
+            rfl = dma.copy.async rfs.modspan(last_count).at(q) => local;
+            wait lfl, rfl;
+
+            local s32 [lfl.span] l1_out;
+
+            foreach i in [l1_out.span]
+              l1_out.at(i) = lfl.data.at(i) + rfl.data.at(i);
+
+            dma.copy l1_out => output.modspan(l2_elem_count).at(x # p).modspan(last_count).at(q);
+          }
+        }
+      }
     }
 
     __cpp__("auto end = std::chrono::high_resolution_clock::now();\n");
