@@ -437,7 +437,7 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
   ptr<Type> nty = nullptr;
   if (n.init_expr) {
     nty = NodeType(*n.init_expr);
-    if (GetSpannedType(NodeType(*n.init_expr))) {
+    if (GetSpannedType(nty)) {
       assert(ValidVN(cur_mdspan_vn) && "expecting a valid mdspan valno.");
       vn.AssociateSignatureWithValueNumber(SSTab().ScopedName(name + ".span"),
                                            cur_mdspan_vn);
@@ -1595,12 +1595,14 @@ bool ShapeInference::CanBeValueNumbered(AST::Node* n) const {
   if (isa<AST::ChunkAt>(n)) return false;
   if (isa<AST::StringLiteral>(n)) return false;
   if (isa<AST::DataAccess>(n)) return false;
-  if (!NodeType(*n)) {
+  auto nty = NodeType(*n);
+  if (!nty) {
     // sometimes the symbol is yet to define, simply make it work.
     return true;
   }
-  if (IsMutable(*NodeType(*n))) return false;
-  if (isa<EventType>(NodeType(*n))) return false;
+  if (IsMutable(*nty)) return false;
+  if (isa<EventType>(nty)) return false;
+  if (isa<StringType>(nty)) return false;
 
   if (auto e = dyn_cast<AST::Expr>(n)) {
     if (e->op == "elemof") return false;

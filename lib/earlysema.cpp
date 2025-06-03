@@ -706,6 +706,9 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
       error_count++;
       if (debug_visit)
         dbgs() << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
+    } else if (isa<StringType>(ety)) {
+      Error(n.LOC(), "can not declare a string variable `" + n.name_str + ".");
+      error_count++;
     }
 
     assert(tty && "no expression type.");

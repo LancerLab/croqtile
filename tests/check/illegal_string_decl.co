@@ -1,0 +1,13 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ auto StringDecl() {
+  a = "abc";
+  println(a);
+  parallel by 2 {
+    b = "xyz";
+    println(b);
+  }
+}
+
+// CHECK: not support declaring variable of string type yet.
+// CHECK: not support declaring variable of string type yet.
