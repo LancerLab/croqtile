@@ -22,17 +22,19 @@ bool MemAnalyzer::BeforeVisitImpl(AST::Node& n) {
         buf_size.emplace(sname, sty->ByteSize());
       } else {
         auto size_expr = sty->ByteSizeExpression();
-        if (!sym_expr_map.count(size_expr)) {
-          auto shape_expr = sty->ShapeSizeExpression();
-          auto sym_size_expr = (GetSymExprFromSizeExpr(shape_expr) *
-                                SymExpr(SizeOf(sty->f_type)))
-                                   .expand();
-          sym_expr_map.emplace(size_expr, sym_size_expr);
-        }
+        // if (!sym_expr_map.count(size_expr)) {
+        //   auto shape_expr = sty->ShapeSizeExpression();
+        //   auto sym_size_expr = (GetSymExprFromSizeExpr(shape_expr) *
+        //                         SymExpr(SizeOf(sty->f_type)))
+        //                            .expand();
+        //   sym_expr_map.emplace(size_expr, sym_size_expr);
+        // }
         buf_size.emplace(sname, size_expr);
         VST_DEBUG({
-          dbgs() << "\tdynamic  size: " << size_expr
-                 << "\n\tsymbolic size: " << sym_expr_map.at(size_expr) << "\n";
+          // dbgs() << "\tdynamic  size: " << size_expr
+          //        << "\n\tsymbolic size: " << sym_expr_map.at(size_expr) <<
+          //        "\n";
+          dbgs() << "\tdynamic  size: " << size_expr << "\n";
         });
       }
     }
@@ -65,18 +67,20 @@ bool MemAnalyzer::Visit(AST::NamedVariableDecl& n) {
       if (n.IsArray())
         size_expr =
             "(" + size_expr + ") * (" + std::to_string(n.ArraySize()) + ")";
-      if (!sym_expr_map.count(size_expr)) {
-        auto shape_expr = sty->ShapeSizeExpression();
-        auto sym_size_expr =
-            (GetSymExprFromSizeExpr(shape_expr) * SymExpr(n.ArraySize()) *
-             SymExpr(SizeOf(sty->f_type)))
-                .expand();
-        sym_expr_map.emplace(size_expr, sym_size_expr);
-      }
+      // if (!sym_expr_map.count(size_expr)) {
+      //   auto shape_expr = sty->ShapeSizeExpression();
+      //   auto sym_size_expr =
+      //       (GetSymExprFromSizeExpr(shape_expr) * SymExpr(n.ArraySize()) *
+      //        SymExpr(SizeOf(sty->f_type)))
+      //           .expand();
+      //   sym_expr_map.emplace(size_expr, sym_size_expr);
+      // }
       buf_size.emplace(sname, size_expr);
       VST_DEBUG({
-        dbgs() << "\tdynamic  size: " << size_expr
-               << "\n\tsymbolic size: " << sym_expr_map.at(size_expr) << "\n";
+        // dbgs() << "\tdynamic  size: " << size_expr
+        //        << "\n\tsymbolic size: " << sym_expr_map.at(size_expr) <<
+        //        "\n";
+        dbgs() << "\tdynamic  size: " << size_expr << "\n";
       });
     }
     return true;
@@ -85,81 +89,81 @@ bool MemAnalyzer::Visit(AST::NamedVariableDecl& n) {
   return true;
 }
 
-MemAnalyzer::SymExpr
-MemAnalyzer::StringifyOpFromSymExpr(const SymExpr& sym_expr_l,
-                                    const std::string& op,
-                                    const SymExpr& sym_expr_r) {
-  std::string symbol_name;
-  std::string sym_expr_l_str = ExSTR(sym_expr_l.expand());
-  std::string sym_expr_r_str = ExSTR(sym_expr_r.expand());
-  symbol_name = "(" + sym_expr_l_str + op + sym_expr_r_str + ")";
-  return GetSymExprFromStr(symbol_name);
-}
+// MemAnalyzer::SymExpr
+// MemAnalyzer::StringifyOpFromSymExpr(const SymExpr& sym_expr_l,
+//                                     const std::string& op,
+//                                     const SymExpr& sym_expr_r) {
+//   std::string symbol_name;
+//   std::string sym_expr_l_str = ExSTR(sym_expr_l.expand());
+//   std::string sym_expr_r_str = ExSTR(sym_expr_r.expand());
+//   symbol_name = "(" + sym_expr_l_str + op + sym_expr_r_str + ")";
+//   return GetSymExprFromStr(symbol_name);
+// }
 
-MemAnalyzer::SymExpr MemAnalyzer::GetSymExprFromStr(std::string str) {
-  if (symbol_map.count(str)) return SymExpr(symbol_map.at(str));
-  auto IsNumber = [](const std::string& str) {
-    return !str.empty() && std::all_of(str.begin(), str.end(), ::isdigit);
-  };
-  if (IsNumber(str)) { return SymExpr(std::stoi(str)); }
-  Symbol symbol(str, str);
-  symbol_map.emplace(str, symbol);
-  return SymExpr(symbol);
-}
+// MemAnalyzer::SymExpr MemAnalyzer::GetSymExprFromStr(std::string str) {
+//   if (symbol_map.count(str)) return SymExpr(symbol_map.at(str));
+//   auto IsNumber = [](const std::string& str) {
+//     return !str.empty() && std::all_of(str.begin(), str.end(), ::isdigit);
+//   };
+//   if (IsNumber(str)) { return SymExpr(std::stoi(str)); }
+//   Symbol symbol(str, str);
+//   symbol_map.emplace(str, symbol);
+//   return SymExpr(symbol);
+// }
 
-MemAnalyzer::SymExpr
-MemAnalyzer::GetSymExprFromSizeExpr(std::string size_expr) {
-  auto IsOperator = [](char c) -> bool {
-    return c == '+' || c == '-' || c == '*' || c == '/' || c == '%';
-  };
+// MemAnalyzer::SymExpr
+// MemAnalyzer::GetSymExprFromSizeExpr(std::string size_expr) {
+//   auto IsOperator = [](char c) -> bool {
+//     return c == '+' || c == '-' || c == '*' || c == '/' || c == '%';
+//   };
 
-  std::string temp = "";
-  for (auto c : size_expr)
-    if (c != ' ') temp += c;
-  size_expr = temp;
+//   std::string temp = "";
+//   for (auto c : size_expr)
+//     if (c != ' ') temp += c;
+//   size_expr = temp;
 
-  std::function<SymExpr(std::string)> HelperFunc = [&](std::string str) {
-    size_t size = str.length();
-    assert(!str.empty());
-    if (str[0] != '(') return GetSymExprFromStr(str);
-    size_t idx = 0;
-    size_t leftCount = 0;
-    do {
-      char c = str[idx];
-      if (c == '(')
-        ++leftCount;
-      else if (c == ')')
-        --leftCount;
-      if (leftCount == 0) break;
-      idx++;
-    } while (idx < size);
+//   std::function<SymExpr(std::string)> HelperFunc = [&](std::string str) {
+//     size_t size = str.length();
+//     assert(!str.empty());
+//     if (str[0] != '(') return GetSymExprFromStr(str);
+//     size_t idx = 0;
+//     size_t leftCount = 0;
+//     do {
+//       char c = str[idx];
+//       if (c == '(')
+//         ++leftCount;
+//       else if (c == ')')
+//         --leftCount;
+//       if (leftCount == 0) break;
+//       idx++;
+//     } while (idx < size);
 
-    auto left_expr = HelperFunc(str.substr(1, idx - 1));
+//     auto left_expr = HelperFunc(str.substr(1, idx - 1));
 
-    if (idx == size - 1) return left_expr;
-    char c = str[++idx];
-    if (!IsOperator(c))
-      choreo_unreachable("The operator(single char) " + std::string(1, c) +
-                         " is not supported in MemAnalyzer yet.");
-    std::string op = std::string(1, c);
-    auto right_expr = HelperFunc(str.substr(idx + 1));
-    SymExpr res;
-    if (op == "+")
-      res = SymExpr(left_expr + right_expr);
-    else if (op == "-")
-      res = SymExpr(left_expr - right_expr);
-    else if (op == "*")
-      res = SymExpr(left_expr * right_expr);
-    else if (op == "/" || op == "%")
-      res = StringifyOpFromSymExpr(left_expr, op, right_expr);
-    else
-      choreo_unreachable("The operator " + op +
-                         " is not supported in MemAnalyzer yet.");
-    return res;
-  };
+//     if (idx == size - 1) return left_expr;
+//     char c = str[++idx];
+//     if (!IsOperator(c))
+//       choreo_unreachable("The operator(single char) " + std::string(1, c) +
+//                          " is not supported in MemAnalyzer yet.");
+//     std::string op = std::string(1, c);
+//     auto right_expr = HelperFunc(str.substr(idx + 1));
+//     SymExpr res;
+//     if (op == "+")
+//       res = SymExpr(left_expr + right_expr);
+//     else if (op == "-")
+//       res = SymExpr(left_expr - right_expr);
+//     else if (op == "*")
+//       res = SymExpr(left_expr * right_expr);
+//     else if (op == "/" || op == "%")
+//       res = StringifyOpFromSymExpr(left_expr, op, right_expr);
+//     else
+//       choreo_unreachable("The operator " + op +
+//                          " is not supported in MemAnalyzer yet.");
+//     return res;
+//   };
 
-  return HelperFunc(size_expr);
-}
+//   return HelperFunc(size_expr);
+// }
 
 bool MemReuse::BeforeVisitImpl(AST::Node& n) {
   if (isa<AST::Program>(&n)) {

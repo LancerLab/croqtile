@@ -17,14 +17,14 @@ namespace Choreo {
 
 // Analyze memory: storage, shape(size)
 struct MemAnalyzer : public VisitorWithSymTab {
-  using Symbol = GiNaC::symbol;
-  using SymExpr = GiNaC::ex;
+  // using Symbol = GiNaC::symbol;
+  // using SymExpr = GiNaC::ex;
 
   // whether JIT memory reuse is needed
   bool have_dynamic_shape = false;
 
-  std::map<std::string, Symbol> symbol_map;
-  std::map<std::string, SymExpr> sym_expr_map;
+  // std::map<std::string, Symbol> symbol_map;
+  // std::map<std::string, SymExpr> sym_expr_map;
 
   // using BSize = std::variant<size_t, SymExpr>;
   using BSize = std::variant<size_t, std::string>;
@@ -43,16 +43,16 @@ private:
   static inline bool IsRef(const AST::Node& n) {
     return n.GetNote().find("ref") != std::string::npos;
   }
-  static inline std::string ExSTR(const SymExpr& sym_expr) {
-    std::ostringstream oss;
-    oss << sym_expr;
-    return oss.str();
-  }
-  SymExpr StringifyOpFromSymExpr(const SymExpr& sym_expr_l,
-                                 const std::string& op,
-                                 const SymExpr& sym_expr_r);
-  SymExpr GetSymExprFromStr(std::string str);
-  SymExpr GetSymExprFromSizeExpr(std::string size_expr);
+  // static inline std::string ExSTR(const SymExpr& sym_expr) {
+  //   std::ostringstream oss;
+  //   oss << sym_expr;
+  //   return oss.str();
+  // }
+  // SymExpr StringifyOpFromSymExpr(const SymExpr& sym_expr_l,
+  //                                const std::string& op,
+  //                                const SymExpr& sym_expr_r);
+  // SymExpr GetSymExprFromStr(std::string str);
+  // SymExpr GetSymExprFromSizeExpr(std::string size_expr);
 };
 
 struct MemReuse : public VisitorWithSymTab {
