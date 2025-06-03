@@ -707,7 +707,7 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
       if (debug_visit)
         dbgs() << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
     } else if (isa<StringType>(ety)) {
-      Error(n.LOC(), "can not declare a string variable `" + n.name_str + ".");
+      Error(n.LOC(), "not support declaring variable of string type yet.");
       error_count++;
     }
 
@@ -1667,7 +1667,8 @@ bool EarlySemantics::Visit(AST::Synchronize& n) {
   case Storage::SHARED:
   case Storage::LOCAL: break;
   default:
-    Error(n.scope->LOC(), "Unsupported synchronization: " + PSTR(n.scope) + ".");
+    Error(n.scope->LOC(),
+          "Unsupported synchronization: " + PSTR(n.scope) + ".");
     break;
   }
   return true;
