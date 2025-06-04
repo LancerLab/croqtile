@@ -1,0 +1,408 @@
+// Mixture of Experts (MoE) Basic Version
+// This sample demonstrates a basic implementation of MoE using Choreo
+// Inspired by the multi-head-attention-basic.co example
+
+#include "choreo.h"
+#include <cmath>
+#include <iostream>
+#include <vector>
+#include <algorithm>
+
+// Device kernel: matrix multiplication (C = A x B)
+__co_device__ extern "C" void matmul_kernel(float* A, float* B, float* C, int M, int K, int N) {
+    for (int m = 0; m < M; ++m) {
+        for (int n = 0; n < N; ++n) {
+            float sum = 0.0f;
+            for (int k = 0; k < K; ++k) {
+                sum += A[m * K + k] * B[k * N + n];
+            }
+            C[m * N + n] = sum;
+        }
+    }
+}
+
+// Device kernel: ReLU activation function
+__co_device__ extern "C" void relu_kernel(float* input, float* output, int size) {
+    for (int i = 0; i < size; ++i) {
+        output[i] = input[i] > 0.0f ? input[i] : 0.0f;
+    }
+}
+
+// Device kernel: row-wise softmax with top-k selection
+__co_device__ extern "C" void topk_softmax_kernel(float* input, float* output, int* indices, int M, int N, int k) {
+    for (int m = 0; m < M; ++m) {
+        // Find top-k indices
+        for (int i = 0; i < k; ++i) {
+            float max_val = -INFINITY;
+            int max_idx = -1;
+            
+            for (int n = 0; n < N; ++n) {
+                // Check if this index was already selected
+                bool already_selected = false;
+                for (int j = 0; j < i; ++j) {
+                    if (indices[m * k + j] == n) {
+                        already_selected = true;
+                        break;
+                    }
+                }
+                
+                if (!already_selected && input[m * N + n] > max_val) {
+                    max_val = input[m * N + n];
+                    max_idx = n;
+                }
+            }
+            
+            indices[m * k + i] = max_idx;
+        }
+        
+        // Compute softmax only for the top-k values
+        float max_val = -INFINITY;
+        for (int i = 0; i < k; ++i) {
+            int idx = indices[m * k + i];
+            if (input[m * N + idx] > max_val) {
+                max_val = input[m * N + idx];
+            }
+        }
+        
+        float sum = 0.0f;
+        for (int i = 0; i < k; ++i) {
+            int idx = indices[m * k + i];
+            output[m * N + idx] = expf(input[m * N + idx] - max_val);
+            sum += output[m * N + idx];
+        }
+        
+        // Normalize only the top-k values, others remain 0
+        for (int n = 0; n < N; ++n) {
+            output[m * N + n] = 0.0f;  // Initialize all to zero
+        }
+        
+        for (int i = 0; i < k; ++i) {
+            int idx = indices[m * k + i];
+            output[m * N + idx] /= sum;
+        }
+    }
+}
+
+// Device kernel: FFN for a single expert
+__co_device__ extern "C" void expert_ffn_kernel(float* input, float* W1, float* b1, float* W2, float* b2, 
+                                                float* output, int S, int D, int H) {
+    // Temporary buffers for intermediate calculations
+    float* tmp_hidden = new float[S * H];
+    float* tmp_hidden_relu = new float[S * H];
+    
+    // 1. First linear layer: input * W1 + b1
+    matmul_kernel(input, W1, tmp_hidden, S, D, H);
+    
+    // Add bias
+    for (int s = 0; s < S; ++s) {
+        for (int h = 0; h < H; ++h) {
+            tmp_hidden[s * H + h] += b1[h];
+        }
+    }
+    
+    // 2. Apply ReLU activation
+    relu_kernel(tmp_hidden, tmp_hidden_relu, S * H);
+    
+    // 3. Second linear layer: tmp_hidden_relu * W2 + b2
+    matmul_kernel(tmp_hidden_relu, W2, output, S, H, D);
+    
+    // Add bias
+    for (int s = 0; s < S; ++s) {
+        for (int d = 0; d < D; ++d) {
+            output[s * D + d] += b2[d];
+        }
+    }
+    
+    // Free temporary buffers
+    delete[] tmp_hidden;
+    delete[] tmp_hidden_relu;
+}
+
+// Device kernel: Weighted sum of expert outputs
+__co_device__ extern "C" void weighted_sum_kernel(float* expert_outputs, float* router_probs, int* expert_indices,
+                                                 float* final_output, int S, int D, int E, int k) {
+    for (int s = 0; s < S; ++s) {
+        for (int d = 0; d < D; ++d) {
+            float weighted_sum = 0.0f;
+            
+            for (int i = 0; i < k; ++i) {
+                int e = expert_indices[s * k + i];
+                float prob = router_probs[s * E + e];
+                weighted_sum += prob * expert_outputs[e * S * D + s * D + d];
+            }
+            
+            final_output[s * D + d] = weighted_sum;
+        }
+    }
+}
+
+// Tileflow function: MoE Router
+// Returns router_probs[B, S, E] and expert_indices[B, S, k]
+__co__ f32[B, S, E], i32[B, S, k] moe_router(f32[B, S, D] input, f32[D, E] W_router, i32 top_k) {
+    f32[B, S, E] router_probs;
+    i32[B, S, k] expert_indices;
+    
+    parallel b by B { // batch parallel
+        // Allocate local buffers
+        local f32[S, D] local_input;
+        local f32[S, E] router_logits;
+        local f32[S, E] local_probs;
+        local i32[S, k] local_indices;
+        
+        // 1. Copy input data
+        dma.copy input.chunkat(b, _, _) => local_input;
+        
+        // 2. Compute router logits: input x W_router
+        call matmul_kernel(local_input.data, W_router.data, router_logits.data, S, D, E);
+        
+        // 3. Apply top-k softmax
+        call topk_softmax_kernel(router_logits.data, local_probs.data, local_indices.data, S, E, k);
+        
+        // 4. Write results
+        dma.copy local_probs.span_as([1, S, E]) => router_probs.chunkat(b, _, _);
+        dma.copy local_indices.span_as([1, S, k]) => expert_indices.chunkat(b, _, _);
+    }
+    
+    return router_probs, expert_indices;
+}
+
+// Tileflow function: Complete MoE
+// Input: [B, S, D], Expert weights: W1[E, D, H], b1[E, H], W2[E, H, D], b2[E, D]
+// Output: [B, S, D]
+__co__ f32[B, S, D] moe_basic(f32[B, S, D] input, f32[D, E] W_router, f32[E, D, H] W1, f32[E, H] b1, 
+                             f32[E, H, D] W2, f32[E, D] b2, i32 top_k) {
+    f32[B, S, D] output;
+    
+    // 1. Call router to get routing probabilities and expert indices
+    auto [router_probs, expert_indices] = moe_router(input, W_router, top_k);
+    
+    // 2. Process each batch separately
+    parallel b by B {
+        // Allocate local buffers
+        local f32[S, D] local_input;
+        local f32[S, E] local_probs;
+        local i32[S, k] local_indices;
+        local f32[E, S, D] expert_outputs;  // outputs from all experts
+        local f32[S, D] local_output;       // final output after weighted sum
+        
+        // Copy input, router probs, and indices to local
+        dma.copy input.chunkat(b, _, _) => local_input;
+        dma.copy router_probs.chunkat(b, _, _) => local_probs;
+        dma.copy expert_indices.chunkat(b, _, _) => local_indices;
+        
+        // 3. Call each expert's FFN
+        parallel e by E {
+            // Each expert processes the entire sequence
+            local f32[S, D] expert_output;
+            
+            // Extract expert-specific weights and biases
+            local f32[D, H] expert_W1;
+            local f32[H] expert_b1;
+            local f32[H, D] expert_W2;
+            local f32[D] expert_b2;
+            
+            dma.copy W1.chunkat(e, _, _) => expert_W1;
+            dma.copy b1.chunkat(e, _) => expert_b1;
+            dma.copy W2.chunkat(e, _, _) => expert_W2;
+            dma.copy b2.chunkat(e, _) => expert_b2;
+            
+            // Apply the FFN
+            call expert_ffn_kernel(local_input.data, expert_W1.data, expert_b1.data, expert_W2.data, expert_b2.data,
+                                  expert_output.data, S, D, H);
+            
+            // Store expert output
+            dma.copy expert_output => expert_outputs.chunkat(e, _, _);
+        }
+        
+        // 4. Compute weighted sum of expert outputs
+        call weighted_sum_kernel(expert_outputs.data, local_probs.data, local_indices.data, 
+                               local_output.data, S, D, E, k);
+        
+        // 5. Write final output
+        dma.copy local_output.span_as([1, S, D]) => output.chunkat(b, _, _);
+    }
+    
+    return output;
+}
+
+// ------------------- Host Test Code -------------------
+// Simple CPU reference implementation for validation
+void cpu_moe_ref(const float* input, const float* W_router, 
+                const float* W1, const float* b1, const float* W2, const float* b2,
+                float* output, int B, int S, int D, int E, int H, int k) {
+    // Temporary storage for router probabilities and expert indices
+    std::vector<float> router_probs(B * S * E, 0.0f);
+    std::vector<int> expert_indices(B * S * k, 0);
+    
+    // 1. Compute router probabilities and expert indices
+    for (int b = 0; b < B; ++b) {
+        // Compute router logits
+        std::vector<float> router_logits(S * E, 0.0f);
+        for (int s = 0; s < S; ++s) {
+            for (int e = 0; e < E; ++e) {
+                float sum = 0.0f;
+                for (int d = 0; d < D; ++d) {
+                    sum += input[b * S * D + s * D + d] * W_router[d * E + e];
+                }
+                router_logits[s * E + e] = sum;
+            }
+        }
+        
+        // Find top-k and apply softmax
+        for (int s = 0; s < S; ++s) {
+            // Find top-k indices
+            std::vector<int> top_indices;
+            std::vector<float> values = std::vector<float>(E);
+            for (int e = 0; e < E; ++e) {
+                values[e] = router_logits[s * E + e];
+                router_probs[b * S * E + s * E + e] = 0.0f; // Initialize all to zero
+            }
+            
+            for (int i = 0; i < k; ++i) {
+                float max_val = -INFINITY;
+                int max_idx = -1;
+                
+                for (int e = 0; e < E; ++e) {
+                    if (std::find(top_indices.begin(), top_indices.end(), e) == top_indices.end() && 
+                        values[e] > max_val) {
+                        max_val = values[e];
+                        max_idx = e;
+                    }
+                }
+                
+                top_indices.push_back(max_idx);
+                expert_indices[b * S * k + s * k + i] = max_idx;
+            }
+            
+            // Compute softmax for top-k
+            float max_val = -INFINITY;
+            for (int i = 0; i < k; ++i) {
+                int e = top_indices[i];
+                max_val = std::max(max_val, router_logits[s * E + e]);
+            }
+            
+            float sum = 0.0f;
+            for (int i = 0; i < k; ++i) {
+                int e = top_indices[i];
+                float exp_val = std::exp(router_logits[s * E + e] - max_val);
+                router_probs[b * S * E + s * E + e] = exp_val;
+                sum += exp_val;
+            }
+            
+            // Normalize
+            for (int i = 0; i < k; ++i) {
+                int e = top_indices[i];
+                router_probs[b * S * E + s * E + e] /= sum;
+            }
+        }
+    }
+    
+    // 2. Compute each expert's output
+    std::vector<float> expert_outputs(E * B * S * D, 0.0f);
+    for (int e = 0; e < E; ++e) {
+        for (int b = 0; b < B; ++b) {
+            for (int s = 0; s < S; ++s) {
+                // First linear layer: input * W1 + b1
+                std::vector<float> hidden(H, 0.0f);
+                for (int h = 0; h < H; ++h) {
+                    float sum = 0.0f;
+                    for (int d = 0; d < D; ++d) {
+                        sum += input[b * S * D + s * D + d] * W1[e * D * H + d * H + h];
+                    }
+                    hidden[h] = sum + b1[e * H + h];
+                }
+                
+                // Apply ReLU
+                for (int h = 0; h < H; ++h) {
+                    hidden[h] = hidden[h] > 0.0f ? hidden[h] : 0.0f;
+                }
+                
+                // Second linear layer: hidden * W2 + b2
+                for (int d = 0; d < D; ++d) {
+                    float sum = 0.0f;
+                    for (int h = 0; h < H; ++h) {
+                        sum += hidden[h] * W2[e * H * D + h * D + d];
+                    }
+                    expert_outputs[e * B * S * D + b * S * D + s * D + d] = sum + b2[e * D + d];
+                }
+            }
+        }
+    }
+    
+    // 3. Compute weighted sum of expert outputs
+    for (int b = 0; b < B; ++b) {
+        for (int s = 0; s < S; ++s) {
+            for (int d = 0; d < D; ++d) {
+                float weighted_sum = 0.0f;
+                
+                for (int i = 0; i < k; ++i) {
+                    int e = expert_indices[b * S * k + s * k + i];
+                    float prob = router_probs[b * S * E + s * E + e];
+                    weighted_sum += prob * expert_outputs[e * B * S * D + b * S * D + s * D + d];
+                }
+                
+                output[b * S * D + s * D + d] = weighted_sum;
+            }
+        }
+    }
+}
+
+int main() {
+    constexpr int B = 2;    // batch size
+    constexpr int S = 4;    // sequence length
+    constexpr int D = 8;    // embedding dimension
+    constexpr int E = 4;    // number of experts
+    constexpr int H = 16;   // hidden dimension in FFN
+    constexpr int k = 2;    // top-k experts to select
+    
+    // Allocate and initialize input and weights
+    auto input = choreo::make_spandata<float>(B, S, D);
+    auto W_router = choreo::make_spandata<float>(D, E);
+    auto W1 = choreo::make_spandata<float>(E, D, H);
+    auto b1 = choreo::make_spandata<float>(E, H);
+    auto W2 = choreo::make_spandata<float>(E, H, D);
+    auto b2 = choreo::make_spandata<float>(E, D);
+    
+    input.fill_random(-1.0f, 1.0f);
+    W_router.fill_random(-1.0f, 1.0f);
+    W1.fill_random(-1.0f, 1.0f);
+    b1.fill_random(-0.1f, 0.1f);
+    W2.fill_random(-1.0f, 1.0f);
+    b2.fill_random(-0.1f, 0.1f);
+    
+    // Call Choreo MoE
+    auto result = moe_basic(input.view(), W_router.view(), W1.view(), b1.view(), W2.view(), b2.view(), k);
+    
+    // Call CPU reference
+    std::vector<float> ref(B * S * D, 0.0f);
+    cpu_moe_ref(input.data(), W_router.data(), W1.data(), b1.data(), W2.data(), b2.data(), 
+               ref.data(), B, S, D, E, H, k);
+    
+    // Compare results
+    int error_count = 0;
+    for (int i = 0; i < B * S * D; ++i) {
+        float diff = std::abs(result[i] - ref[i]);
+        if (diff > 1e-3f) {
+            if (error_count < 10) {
+                std::cout << "Mismatch at " << i << ": Choreo = " << result[i] 
+                          << ", Ref = " << ref[i] << ", Diff = " << diff << std::endl;
+            }
+            ++error_count;
+        }
+    }
+    
+    if (error_count == 0) {
+        std::cout << "[PASS] Choreo MoE matches CPU reference." << std::endl;
+    } else {
+        std::cout << "[FAIL] Mismatches found: " << error_count << std::endl;
+    }
+    
+    // Print a sample of the output
+    std::cout << "Sample output (first batch, first sequence):" << std::endl;
+    for (int d = 0; d < D; ++d) {
+        std::cout << result[d] << " ";
+    }
+    std::cout << std::endl;
+    
+    return 0;
+} 

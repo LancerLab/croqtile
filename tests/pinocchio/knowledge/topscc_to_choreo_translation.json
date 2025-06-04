@@ -1,0 +1,169 @@
+{
+  "version": "1.0",
+  "description": "TopSCC to Choreo translation rules based on empirical testing",
+  
+  "data_types": {
+    "basic_types": [
+      {
+        "topscc": "U32",
+        "choreo": "u32",
+        "notes": "TopSCC使用大写类型名，Choreo使用小写"
+      },
+      {
+        "topscc": "S32",
+        "choreo": "s32",
+        "notes": "TopSCC使用大写类型名，Choreo使用小写"
+      },
+      {
+        "topscc": "F32",
+        "choreo": "f32",
+        "notes": "TopSCC使用大写类型名，Choreo使用小写"
+      },
+      {
+        "topscc": "U64",
+        "choreo": "u32",
+        "notes": "Choreo不支持u64类型，建议使用u32替代"
+      },
+      {
+        "topscc": "S64",
+        "choreo": "s32",
+        "notes": "Choreo不支持s64类型，建议使用s32替代"
+      }
+    ],
+    "literals": [
+      {
+        "topscc": "0.5",
+        "choreo": "0.5f",
+        "notes": "Choreo浮点字面量需要f后缀"
+      },
+      {
+        "topscc": "0xFFFFFFFF",
+        "choreo": "4294967295",
+        "notes": "Choreo不支持十六进制常量，需转换为十进制"
+      }
+    ]
+  },
+  
+  "array_declarations": {
+    "examples": [
+      {
+        "topscc": "U32 array[2][4];",
+        "choreo": "u32 [2, 4] array;",
+        "notes": "Choreo使用单个方括号包含所有维度，且类型和变量位置相反"
+      },
+      {
+        "topscc": "F32 matrix[rows][cols];",
+        "choreo": "f32 [rows, cols] matrix;",
+        "notes": "Choreo中维度在类型后，变量名前"
+      }
+    ],
+    "memory_placement": [
+      {
+        "topscc": "__shared__ U32 shared_array[10];",
+        "choreo": "local u32 [10] shared_array;",
+        "notes": "TopSCC中的__shared__对应Choreo中的local"
+      },
+      {
+        "topscc": "__device__ F32 device_array[10];",
+        "choreo": "global f32 [10] device_array;",
+        "notes": "TopSCC中的__device__对应Choreo中的global"
+      }
+    ]
+  },
+  
+  "array_access": {
+    "examples": [
+      {
+        "topscc": "array[i][j] = value;",
+        "choreo": "array.at(i, j) = value;",
+        "notes": "Choreo使用.at()方法访问数组元素，将所有索引作为参数"
+      },
+      {
+        "topscc": "value = array[i][j];",
+        "choreo": "value = array.at(i, j);",
+        "notes": "Choreo始终使用.at()方法，不使用方括号"
+      }
+    ]
+  },
+  
+  "variable_declaration": {
+    "examples": [
+      {
+        "topscc": "U32 var = 123;",
+        "choreo": "u32 var;\nvar = 123;",
+        "notes": "Choreo中变量声明和赋值必须分开"
+      },
+      {
+        "topscc": "F32 pi = 3.14;",
+        "choreo": "f32 pi;\npi = 3.14f;",
+        "notes": "Choreo中变量声明和赋值分开，浮点数需要f后缀"
+      }
+    ]
+  },
+  
+  "logical_expressions": {
+    "examples": [
+      {
+        "topscc": "if (a != 0 && b < c) { ... }",
+        "choreo": "if (a != 0) {\n  if (b < c) {\n    ...\n  }\n}",
+        "notes": "Choreo不支持复合逻辑表达式，需要拆分为嵌套if语句"
+      },
+      {
+        "topscc": "if (a == 0 || b >= c) { ... }",
+        "choreo": "if (a == 0) {\n  ...\n} else {\n  if (b >= c) {\n    ...\n  }\n}",
+        "notes": "OR条件需转换为if-else结构"
+      }
+    ]
+  },
+  
+  "index_arithmetic": {
+    "examples": [
+      {
+        "topscc": "array[i + j] = value;",
+        "choreo": "// 需要额外变量存储计算结果\nu32 idx;\nidx = i;\n// 不支持直接计算，需要用循环或条件语句代替\n// 或重构算法避免索引算术",
+        "notes": "Choreo不支持索引算术，需要重构访问模式"
+      }
+    ]
+  },
+  
+  "parallel_constructs": {
+    "topscc_to_choreo": [
+      {
+        "topscc": "for (int i = 0; i < n; i++) {\n  #pragma omp parallel for\n  for (int j = 0; j < m; j++) {\n    // 计算\n  }\n}",
+        "choreo": "parallel p by 1 {\n  with i in [n] {\n    foreach i {\n      with j in [m] {\n        foreach j {\n          // 计算\n        }\n      }\n    }\n  }\n}",
+        "notes": "TopSCC的OpenMP并行结构转换为Choreo的parallel/with/foreach结构"
+      },
+      {
+        "topscc": "// CUDA kernel\n__global__ void kernel(U32* data) {\n  int idx = blockIdx.x * blockDim.x + threadIdx.x;\n  if (idx < n) {\n    // 计算\n  }\n}",
+        "choreo": "parallel p by 1 {\n  with idx in [n] {\n    foreach idx {\n      // 计算\n    }\n  }\n}",
+        "notes": "CUDA线程索引计算转换为Choreo的with/foreach结构"
+      }
+    ]
+  },
+  
+  "function_parameters": {
+    "examples": [
+      {
+        "topscc": "void func(U32 array[SIZE]) { ... }",
+        "choreo": "// 需要特别处理函数参数中的数组\n// 选项1：使用全局数组\n__co__ void func() {\n  // 直接使用全局数组\n}\n\n// 选项2：使用值传递\n__co__ void func(u32 value) {\n  // 处理单个值\n}",
+        "notes": "Choreo函数参数中不支持直接定义多维数组，需要重构"
+      }
+    ]
+  },
+  
+  "common_patterns": {
+    "embedding_cache": {
+      "topscc": "// TopSCC嵌入式缓存示例\nU32 cache[SET_ASSOCIATIVITY][CACHE_SIZE];\nvoid lookup(U32 key) {\n  U32 set_idx = key % CACHE_SIZE;\n  for (U32 i = 0; i < SET_ASSOCIATIVITY; i++) {\n    if (cache[i][set_idx] == key) {\n      // 缓存命中\n      return;\n    }\n  }\n  // 缓存未命中\n}",
+      "choreo": "// Choreo嵌入式缓存示例\nglobal u32 [SET_ASSOCIATIVITY, CACHE_SIZE] cache;\n\n__co__ void lookup() {\n  u32 key;\n  // 读取key值\n  \n  u32 set_idx;\n  set_idx = key;\n  // 不支持直接取模，需要使用其他方法计算set_idx\n  \n  // 遍历查找\n  with i in [SET_ASSOCIATIVITY] {\n    foreach i {\n      u32 cache_value;\n      cache_value = cache.at(i, set_idx);\n      \n      if (cache_value == key) {\n        // 缓存命中处理\n      }\n    }\n  }\n  // 缓存未命中处理\n}",
+      "notes": "TopSCC到Choreo的嵌入式缓存实现转换示例"
+    }
+  },
+  
+  "best_practices": {
+    "algorithm_restructuring": "可能需要重构算法以适应Choreo的语法限制",
+    "index_calculation": "避免使用复杂的索引计算，使用更简单的遍历模式",
+    "memory_management": "仔细设计数据结构布局，减少不必要的数据移动",
+    "parallelism": "优先使用Choreo的并行结构，而不是直接翻译CUDA/OpenMP代码",
+    "testing": "逐步转换和测试代码，不要尝试一次性完成整个转换"
+  }
+} 

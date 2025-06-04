@@ -1,0 +1,91 @@
+// Softmax TCLE Version 2
+__co__ f32[batch, seq, dim] softmax_tcle_2(f32[batch, seq, dim] X) {
+    f32[batch, seq, dim] Y;
+    
+    // 使用 TCLE 向量化处理
+    __cok__ {
+    #include "tcle.h"
+    using namespace tcle;
+    
+    __co_device__ extern "C" void softmax_kernel(float* input_ptr, float* output_ptr, int seq_len, int dim_size) {
+        // 使用 TCLE 向量类型获得最佳性能
+        using vec_type = typename tcle::altivector<float, TCLE_MAX_VECTOR_LENGTH>::VT;
+        
+        // 创建向量化内存访问指针
+        auto input_leaptr = tcle::simple_leaptr<vec_type>((generic_ptr)input_ptr);
+        auto output_leaptr = tcle::simple_leaptr<vec_type>((generic_ptr)output_ptr);
+        
+        // 获取平台向量长度
+        const int vec_len = tcle::altivector_step<vec_type>();
+        
+        // 分配临时存储空间
+        float* exp_values = (float*)tcle::malloc(dim_size * sizeof(float));
+        
+        // 处理每个序列
+        for (int s = 0; s < seq_len; s++) {
+            int seq_offset = s * dim_size;
+            
+            // 步骤 1: 找出最大值，保证数值稳定性
+            float max_val = -INFINITY;
+            for (int d = 0; d < dim_size; d++) {
+                max_val = tcle::max(max_val, input_ptr[seq_offset + d]);
+            }
+            
+            // 步骤 2: 计算平移后的指数值
+            float sum_exp = 0.0f;
+            for (int d = 0; d < dim_size; d++) {
+                // 减去最大值提高数值稳定性
+                float shifted_val = input_ptr[seq_offset + d] - max_val;
+                float exp_val = tcle::exp(shifted_val);
+                exp_values[d] = exp_val;
+                sum_exp += exp_val;
+            }
+            
+            // 步骤 3: 归一化指数值得到 softmax
+            vec_type sum_exp_vec = tcle::vbroadcast<vec_type>(sum_exp);
+            
+            // 以向量大小为单位处理维度
+            for (int d = 0; d < dim_size; d += vec_len) {
+                // 处理末尾可能的部分向量
+                int remaining = tcle::min(vec_len, dim_size - d);
+                
+                if (remaining == vec_len) {
+                    // 完整向量情况 - 加载指数值并归一化
+                    vec_type exp_vec = tcle::vload<vec_type>(&exp_values[d]);
+                    
+                    // 除以和进行归一化
+                    vec_type softmax_vec = tcle::vdiv<vec_type>(exp_vec, sum_exp_vec);
+                    
+                    // 存储结果
+                    output_leaptr.store_at(softmax_vec, seq_offset + d);
+                } else {
+                    // 部分向量情况（边缘情况）
+                    for (int j = 0; j < remaining; j++) {
+                        output_ptr[seq_offset + d + j] = exp_values[d + j] / sum_exp;
+                    }
+                }
+            }
+        }
+        
+        // 释放临时存储
+        tcle::free(exp_values);
+    }
+    } // __cok__
+    
+    // 主体并行结构
+    parallel b by batch {
+        local f32[seq, dim] X_local;
+        local f32[seq, dim] Y_local;
+        
+        // 复制输入数据到本地内存
+        dma.copy X.chunkat(b, _, _) => X_local;
+        
+        // 计算 Softmax
+        __call_tcle softmax_kernel(X_local.data, Y_local.data, seq, dim);
+        
+        // 复制结果到输出
+        dma.copy Y_local => Y.chunkat(b, _, _);
+    }
+    
+    return Y;
+} 

@@ -1,0 +1,148 @@
+// Identity TILING Version 3 - Optimized with tiling for memory hierarchy
+__co__ f32[batch, seq, hidden] identity_tiling_3(f32[batch, seq, hidden] X) {
+    f32[batch, seq, hidden] Y;
+    
+    // 内存层级大小
+    // L1 (LOCAL): ~1.5MB
+    // L2 (SHARED): 64MB
+    // Global: 40.75GB
+    
+    // 向量长度优化参数
+    const int VL = 128; // TCLE_MAX_VECTOR_LENGTH for GCU300
+    
+    // 定义分块大小以优化缓存使用
+    const int SEQ_TILE = 128;      // 序列维度分块
+    const int HIDDEN_TILE = 1024;  // 隐藏层维度分块
+    
+    // 对于 L2 缓存，我们可以处理更大的批次
+    const int SEQ_TILE_L2 = 512;     // L2 序列维度分块
+    const int HIDDEN_TILE_L2 = 4096; // L2 隐藏层维度分块
+    
+    // 使用 TCLE 向量化处理
+    __cok__ {
+    #include "tcle.h"
+    using namespace tcle;
+    
+    // 处理一个分块的数据复制
+    void copy_block(
+        float* input_ptr, float* output_ptr,
+        int seq_start, int seq_end,
+        int hidden_start, int hidden_end,
+        int seq_len, int hidden_size) {
+        
+        // 使用 TCLE 向量类型获得最佳性能
+        using vec_type = typename tcle::altivector<float, TCLE_MAX_VECTOR_LENGTH>::VT;
+        
+        // 创建向量化内存访问指针
+        auto input_leaptr = tcle::simple_leaptr<vec_type>((generic_ptr)input_ptr);
+        auto output_leaptr = tcle::simple_leaptr<vec_type>((generic_ptr)output_ptr);
+        
+        // 获取平台向量长度
+        const int vec_len = tcle::altivector_step<vec_type>();
+        
+        // 当前分块的大小
+        int block_seq = seq_end - seq_start;
+        int block_hidden = hidden_end - hidden_start;
+        
+        // 处理分块中的每个序列位置
+        for (int s_idx = 0; s_idx < block_seq; s_idx++) {
+            int s = seq_start + s_idx;
+            int base_offset = s * hidden_size + hidden_start;
+            
+            // 使用向量化复制隐藏层维度数据
+            for (int h_idx = 0; h_idx < block_hidden; h_idx += vec_len) {
+                int remaining = tcle::min(vec_len, block_hidden - h_idx);
+                int offset = base_offset + h_idx;
+                
+                if (remaining == vec_len) {
+                    // 完整向量情况
+                    vec_type data_vec = input_leaptr.load_at(offset);
+                    output_leaptr.store_at(data_vec, offset);
+                } else {
+                    // 部分向量情况（边缘情况）
+                    for (int i = 0; i < remaining; i++) {
+                        output_ptr[offset + i] = input_ptr[offset + i];
+                    }
+                }
+            }
+        }
+    }
+    
+    __co_device__ extern "C" void identity_tiled_kernel(
+        float* input_ptr, float* output_ptr,
+        int seq_len, int hidden_size,
+        int seq_tile, int hidden_tile) {
+        
+        // 多层分块处理
+        for (int seq_start = 0; seq_start < seq_len; seq_start += seq_tile) {
+            int seq_end = tcle::min(seq_start + seq_tile, seq_len);
+            
+            for (int hidden_start = 0; hidden_start < hidden_size; hidden_start += hidden_tile) {
+                int hidden_end = tcle::min(hidden_start + hidden_tile, hidden_size);
+                
+                // 处理当前分块
+                copy_block(
+                    input_ptr, output_ptr,
+                    seq_start, seq_end,
+                    hidden_start, hidden_end,
+                    seq_len, hidden_size
+                );
+            }
+        }
+    }
+    } // __cok__
+    
+    // 主体并行结构与分层分块
+    parallel b by batch {
+        // 使用共享内存处理适合 L2 的大块
+        shared f32[SEQ_TILE_L2, hidden] X_shared;
+        shared f32[SEQ_TILE_L2, hidden] Y_shared;
+        
+        // 处理 L2 序列分块
+        for (int s = 0; s < seq; s += SEQ_TILE_L2) {
+            int s_end_l2 = min(s + SEQ_TILE_L2, seq);
+            int seq_size_l2 = s_end_l2 - s;
+            
+            // 复制输入分块到共享内存
+            dma.copy X.chunkat(b, s:s_end_l2, _) => X_shared.chunkat(0:seq_size_l2, _);
+            
+            // 处理 L1 分块
+            for (int s_l1 = 0; s_l1 < seq_size_l2; s_l1 += SEQ_TILE) {
+                int s_end_l1 = min(s_l1 + SEQ_TILE, seq_size_l2);
+                int seq_size_l1 = s_end_l1 - s_l1;
+                
+                // 处理隐藏层维度的 L2 分块
+                for (int h_l2 = 0; h_l2 < hidden; h_l2 += HIDDEN_TILE_L2) {
+                    int h_end_l2 = min(h_l2 + HIDDEN_TILE_L2, hidden);
+                    int hidden_size_l2 = h_end_l2 - h_l2;
+                    
+                    // 创建 L1 分块
+                    local f32[seq_size_l1, hidden_size_l2] X_local;
+                    local f32[seq_size_l1, hidden_size_l2] Y_local;
+                    
+                    // 从共享内存复制到本地内存
+                    dma.copy X_shared.chunkat(s_l1:s_end_l1, h_l2:h_end_l2) => X_local;
+                    
+                    // 处理隐藏层维度的 L1 分块
+                    // 由于 identity 的简单性质，我们可以直接处理整个本地块
+                    __call_tcle identity_tiled_kernel(
+                        X_local.data,
+                        Y_local.data,
+                        seq_size_l1,
+                        hidden_size_l2,
+                        SEQ_TILE,
+                        HIDDEN_TILE
+                    );
+                    
+                    // 结果复制回共享内存
+                    dma.copy Y_local => Y_shared.chunkat(s_l1:s_end_l1, h_l2:h_end_l2);
+                }
+            }
+            
+            // 将处理后的 L2 分块复制到输出
+            dma.copy Y_shared.chunkat(0:seq_size_l2, _) => Y.chunkat(b, s:s_end_l2, _);
+        }
+    }
+    
+    return Y;
+} 

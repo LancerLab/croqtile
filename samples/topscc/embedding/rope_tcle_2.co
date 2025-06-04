@@ -1,0 +1,92 @@
+// Rotary Position Embedding (RoPE) TCLE Version 2
+__co__ f32[batch, seq, hidden] rope_tcle_2(f32[batch, seq, hidden] X) {
+    f32[batch, seq, hidden] Y;
+    
+    // 使用 TCLE 向量化处理
+    __cok__ {
+    #include "tcle.h"
+    using namespace tcle;
+    
+    __co_device__ extern "C" void rope_kernel(
+        float* input_ptr, float* output_ptr,
+        int batch_size, int seq_len, int hidden_size, int rope_dim) {
+        
+        // 使用 TCLE 向量类型获得最佳性能
+        using vec_type = typename tcle::altivector<float, TCLE_MAX_VECTOR_LENGTH>::VT;
+        
+        // 创建向量化内存访问指针
+        auto input_leaptr = tcle::simple_leaptr<vec_type>((generic_ptr)input_ptr);
+        auto output_leaptr = tcle::simple_leaptr<vec_type>((generic_ptr)output_ptr);
+        
+        // 获取平台向量长度
+        const int vec_len = tcle::altivector_step<vec_type>();
+        
+        // 处理每个批次和序列位置
+        for (int b = 0; b < batch_size; b++) {
+            for (int s = 0; s < seq_len; s++) {
+                int token_offset = (b * seq_len + s) * hidden_size;
+                
+                // 应用 RoPE 变换：只对每对维度应用旋转
+                for (int d = 0; d < rope_dim; d += 2) {
+                    // 获取当前位置和维度的原始值
+                    float x_d = input_ptr[token_offset + d];
+                    float x_d_plus_1 = input_ptr[token_offset + d + 1];
+                    
+                    // 计算旋转角度，根据维度和位置
+                    float theta = tcle::pow(10000.0f, -1.0f * d / rope_dim);
+                    float freq = s * theta;
+                    float cos_freq = tcle::cos(freq);
+                    float sin_freq = tcle::sin(freq);
+                    
+                    // 应用旋转变换
+                    output_ptr[token_offset + d] = x_d * cos_freq - x_d_plus_1 * sin_freq;
+                    output_ptr[token_offset + d + 1] = x_d * sin_freq + x_d_plus_1 * cos_freq;
+                }
+                
+                // 对于不需要旋转的维度，直接复制
+                for (int d = rope_dim; d < hidden_size; d += vec_len) {
+                    int remaining = tcle::min(vec_len, hidden_size - d);
+                    
+                    if (remaining == vec_len) {
+                        // 完整向量情况
+                        vec_type in_vec = input_leaptr.load_at(token_offset + d);
+                        output_leaptr.store_at(in_vec, token_offset + d);
+                    } else {
+                        // 部分向量情况（边缘情况）
+                        for (int i = 0; i < remaining; i++) {
+                            output_ptr[token_offset + d + i] = input_ptr[token_offset + d + i];
+                        }
+                    }
+                }
+            }
+        }
+    }
+    } // __cok__
+    
+    // RoPE 配置参数
+    const int rope_dim = hidden / 2;  // 通常 RoPE 只应用于一半的隐藏维度
+    
+    // 主体并行结构
+    parallel b by batch {
+        local f32[seq, hidden] X_local;
+        local f32[seq, hidden] Y_local;
+        
+        // 复制输入数据到本地内存
+        dma.copy X.chunkat(b, _, _) => X_local;
+        
+        // 应用 RoPE 变换
+        __call_tcle rope_kernel(
+            X_local.data,
+            Y_local.data,
+            1, // 只处理一个批次
+            seq,
+            hidden,
+            rope_dim
+        );
+        
+        // 复制结果到输出
+        dma.copy Y_local => Y.chunkat(b, _, _);
+    }
+    
+    return Y;
+} 

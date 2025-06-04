@@ -1,0 +1,282 @@
+// Mixture of Experts Double Buffer Version 4 - Optimized with tiling and double buffering
+__co__ f32[batch, seq, hidden] moe_doublebuffer_4(
+    f32[batch, seq, hidden] X,
+    f32[batch, seq, experts, k_experts] router_indices) {
+    
+    f32[batch, seq, hidden] out;
+    
+    // Memory hierarchy sizes
+    // L1 (LOCAL): ~1.5MB
+    // L2 (SHARED): 64MB
+    // Global: 40.75GB
+    
+    // Vector length optimization parameter
+    const int VL = 128; // TCLE_MAX_VECTOR_LENGTH for GCU300
+    
+    // Define optimal tile sizes
+    const int SEQ_TILE = 32;        // Sequence dimension tile
+    const int HIDDEN_TILE = 256;    // Hidden dimension tile (multiple of VL)
+    const int EXPERT_HIDDEN_TILE = 512; // Expert intermediate dimension tile
+    
+    // For L2 cache, we can process larger batches
+    const int SEQ_TILE_L2 = 128;    // L2 sequence dimension tile
+    
+    __cok__ {
+    #include "tcle.h"
+    using namespace tcle;
+    
+    // Expert forward function (FFN)
+    void expert_forward(
+        float* input, float* weights_in, float* bias_in,
+        float* weights_out, float* bias_out, float* output,
+        int hidden_size, int intermediate_size) {
+        
+        // Use TCLE vector types for optimal performance
+        using vec_type = typename tcle::altivector<float, TCLE_MAX_VECTOR_LENGTH>::VT;
+        
+        // Vector length for this platform
+        const int vec_len = tcle::altivector_step<vec_type>();
+        
+        // Temporary buffer for intermediate values
+        float* intermediate = (float*)tcle::malloc(intermediate_size * sizeof(float));
+        
+        // First layer: input × weights_in + bias_in
+        for (int i = 0; i < intermediate_size; i++) {
+            float sum = bias_in[i];
+            for (int h = 0; h < hidden_size; h++) {
+                sum += input[h] * weights_in[i * hidden_size + h];
+            }
+            // Apply GELU activation
+            float x3 = sum * sum * sum;
+            intermediate[i] = 0.5f * sum * (1.0f + tcle::tanh(0.79788456f * (sum + 0.044715f * x3)));
+        }
+        
+        // Second layer: intermediate × weights_out + bias_out
+        for (int h = 0; h < hidden_size; h++) {
+            float sum = bias_out[h];
+            for (int i = 0; i < intermediate_size; i++) {
+                sum += intermediate[i] * weights_out[h * intermediate_size + i];
+            }
+            output[h] = sum;
+        }
+        
+        // Free temporary buffer
+        tcle::free(intermediate);
+    }
+    
+    __co_device__ extern "C" void moe_forward_kernel(
+        float* input_ptr, float* router_indices, float* router_scores,
+        float** expert_weights_in, float** expert_bias_in,
+        float** expert_weights_out, float** expert_bias_out,
+        float* output_ptr,
+        int seq_len, int hidden_size, int intermediate_size,
+        int num_experts, int top_k) {
+        
+        // Use TCLE vector types for best performance
+        using vec_type = typename tcle::altivector<float, TCLE_MAX_VECTOR_LENGTH>::VT;
+        
+        // Vector length for this platform
+        const int vec_len = tcle::altivector_step<vec_type>();
+        
+        // Process each token in the batch
+        for (int s = 0; s < seq_len; s++) {
+            int token_offset = s * hidden_size;
+            
+            // Initialize output to zeros
+            for (int h = 0; h < hidden_size; h++) {
+                output_ptr[token_offset + h] = 0.0f;
+            }
+            
+            // Temporary buffer for expert output
+            float* expert_output = (float*)tcle::malloc(hidden_size * sizeof(float));
+            
+            // For each token, send to top-k experts
+            for (int k = 0; k < top_k; k++) {
+                // Get expert index and score for this token
+                float expert_idx_f = router_indices[s * num_experts * top_k + k];
+                float expert_score = router_scores[s * num_experts * top_k + k];
+                
+                int expert_idx = (int)expert_idx_f;
+                
+                // Forward through the expert
+                expert_forward(
+                    &input_ptr[token_offset],
+                    expert_weights_in[expert_idx],
+                    expert_bias_in[expert_idx],
+                    expert_weights_out[expert_idx],
+                    expert_bias_out[expert_idx],
+                    expert_output,
+                    hidden_size,
+                    intermediate_size
+                );
+                
+                // Add weighted expert output to final output
+                for (int h = 0; h < hidden_size; h += vec_len) {
+                    int remaining = tcle::min(vec_len, hidden_size - h);
+                    
+                    if (remaining == vec_len) {
+                        // Full vector
+                        auto leaptr_out = tcle::simple_leaptr<vec_type>((generic_ptr)&output_ptr[token_offset + h]);
+                        auto leaptr_expert = tcle::simple_leaptr<vec_type>((generic_ptr)&expert_output[h]);
+                        
+                        vec_type out_vec = leaptr_out.load_at(0);
+                        vec_type expert_vec = leaptr_expert.load_at(0);
+                        vec_type score_vec = tcle::vbroadcast<vec_type>(expert_score);
+                        
+                        // out += score * expert_output
+                        out_vec = tcle::vfma<vec_type>(out_vec, score_vec, expert_vec);
+                        leaptr_out.store_at(out_vec, 0);
+                    } else {
+                        // Partial vector (edge case)
+                        for (int i = 0; i < remaining; i++) {
+                            output_ptr[token_offset + h + i] += expert_score * expert_output[h + i];
+                        }
+                    }
+                }
+            }
+            
+            // Free temporary buffer
+            tcle::free(expert_output);
+        }
+    }
+    } // __cok__
+    
+    // Expert model parameters (weights and biases)
+    // In a real implementation, these would be inputs or loaded from memory
+    const int intermediate_size = hidden * 4; // Typical size in transformer models
+    
+    shared f32[experts, intermediate_size, hidden] expert_weights_in;
+    shared f32[experts, intermediate_size] expert_bias_in;
+    shared f32[experts, hidden, intermediate_size] expert_weights_out;
+    shared f32[experts, hidden] expert_bias_out;
+    
+    // Initialize expert weights with example values
+    foreach {e, i, h} in [experts, intermediate_size, hidden] {
+        if (h < hidden && i < intermediate_size) {
+            expert_weights_in.at(e, i, h) = 0.01f * (e + i + h); // Example initialization
+        }
+        if (h == 0 && i < intermediate_size) {
+            expert_bias_in.at(e, i) = 0.0f; // Bias initialization
+        }
+        if (h < hidden && i < intermediate_size) {
+            expert_weights_out.at(e, h, i) = 0.01f * (e + i + h); // Example initialization
+        }
+        if (i == 0 && h < hidden) {
+            expert_bias_out.at(e, h) = 0.0f; // Bias initialization
+        }
+    }
+    
+    // Pointers to expert weights for kernel
+    shared ptr<f32> expert_weights_in_ptr[experts];
+    shared ptr<f32> expert_bias_in_ptr[experts];
+    shared ptr<f32> expert_weights_out_ptr[experts];
+    shared ptr<f32> expert_bias_out_ptr[experts];
+    
+    // Set up pointers to expert weights
+    for (int e = 0; e < experts; e++) {
+        expert_weights_in_ptr.at(e) = expert_weights_in.chunkat(e, _, _).data;
+        expert_bias_in_ptr.at(e) = expert_bias_in.chunkat(e, _).data;
+        expert_weights_out_ptr.at(e) = expert_weights_out.chunkat(e, _, _).data;
+        expert_bias_out_ptr.at(e) = expert_bias_out.chunkat(e, _).data;
+    }
+    
+    // Main parallel structure with hierarchical tiling and double buffering
+    parallel b by batch {
+        // Double buffers for L2 shared memory
+        shared f32[2][SEQ_TILE_L2, hidden] X_shared;
+        shared f32[2][SEQ_TILE_L2, experts, k_experts] router_indices_shared;
+        shared f32[2][SEQ_TILE_L2, hidden] out_shared;
+        
+        // Double buffers for L1 local memory
+        local f32[2][SEQ_TILE, hidden] X_local;
+        local f32[2][SEQ_TILE, experts, k_experts] router_indices_local;
+        local f32[2][SEQ_TILE, hidden] out_local;
+        
+        // Buffer indices
+        int l2_buf_idx = 0;
+        int l1_buf_idx = 0;
+        
+        // Process L2 tiles
+        for (int s = 0; s < seq; s += SEQ_TILE_L2) {
+            int s_end_l2 = min(s + SEQ_TILE_L2, seq);
+            int seq_tile_size_l2 = s_end_l2 - s;
+            
+            // Preload first L2 tiles into current buffer
+            dma.copy X.chunkat(b, s:s_end_l2, _) => X_shared[l2_buf_idx].chunkat(0:seq_tile_size_l2, _);
+            dma.copy router_indices.chunkat(b, s:s_end_l2, _, _) => router_indices_shared[l2_buf_idx].chunkat(0:seq_tile_size_l2, _, _);
+            
+            // For all L2 tiles except the last one, preload the next tile
+            if (s + SEQ_TILE_L2 < seq) {
+                int next_s = s + SEQ_TILE_L2;
+                int next_s_end_l2 = min(next_s + SEQ_TILE_L2, seq);
+                int next_seq_tile_size_l2 = next_s_end_l2 - next_s;
+                
+                // Preload next L2 tiles to the other buffer
+                dma.copy X.chunkat(b, next_s:next_s_end_l2, _) => X_shared[1-l2_buf_idx].chunkat(0:next_seq_tile_size_l2, _);
+                dma.copy router_indices.chunkat(b, next_s:next_s_end_l2, _, _) => router_indices_shared[1-l2_buf_idx].chunkat(0:next_seq_tile_size_l2, _, _);
+            }
+            
+            // Clear output shared memory for accumulation
+            foreach {s, h} in [seq_tile_size_l2, hidden] {
+                out_shared[l2_buf_idx].at(s, h) = 0.0f;
+            }
+            
+            // Process L1 tiles within this L2 tile with double buffering
+            for (int s_l1 = 0; s_l1 < seq_tile_size_l2; s_l1 += SEQ_TILE) {
+                int s_end_l1 = min(s_l1 + SEQ_TILE, seq_tile_size_l2);
+                int seq_tile_size_l1 = s_end_l1 - s_l1;
+                
+                // Preload first L1 tiles into current buffer
+                dma.copy X_shared[l2_buf_idx].chunkat(s_l1:s_end_l1, _) => X_local[l1_buf_idx];
+                dma.copy router_indices_shared[l2_buf_idx].chunkat(s_l1:s_end_l1, _, _) => router_indices_local[l1_buf_idx];
+                
+                // For all L1 tiles except the last one in this L2 tile, preload the next tile
+                if (s_l1 + SEQ_TILE < seq_tile_size_l2) {
+                    int next_s_l1 = s_l1 + SEQ_TILE;
+                    int next_s_end_l1 = min(next_s_l1 + SEQ_TILE, seq_tile_size_l2);
+                    int next_seq_tile_size_l1 = next_s_end_l1 - next_s_l1;
+                    
+                    // Preload next L1 tiles to the other buffer
+                    dma.copy X_shared[l2_buf_idx].chunkat(next_s_l1:next_s_end_l1, _) => X_local[1-l1_buf_idx];
+                    dma.copy router_indices_shared[l2_buf_idx].chunkat(next_s_l1:next_s_end_l1, _, _) => router_indices_local[1-l1_buf_idx];
+                }
+                
+                // Clear output local memory for current tile
+                foreach {s, h} in [seq_tile_size_l1, hidden] {
+                    out_local[l1_buf_idx].at(s, h) = 0.0f;
+                }
+                
+                // Process current L1 tile
+                __call_tcle moe_forward_kernel(
+                    X_local[l1_buf_idx].data,
+                    router_indices_local[l1_buf_idx].data,
+                    router_indices_local[l1_buf_idx].data, // Reuse for scores (simplified)
+                    expert_weights_in_ptr.data,
+                    expert_bias_in_ptr.data,
+                    expert_weights_out_ptr.data,
+                    expert_bias_out_ptr.data,
+                    out_local[l1_buf_idx].data,
+                    seq_tile_size_l1,
+                    hidden,
+                    intermediate_size,
+                    experts,
+                    k_experts
+                );
+                
+                // Copy results back to shared memory
+                dma.copy out_local[l1_buf_idx] => out_shared[l2_buf_idx].chunkat(s_l1:s_end_l1, _);
+                
+                // Swap L1 buffers for the next iteration
+                l1_buf_idx = 1 - l1_buf_idx;
+            }
+            
+            // Copy the processed L2 tile to output
+            dma.copy out_shared[l2_buf_idx].chunkat(0:seq_tile_size_l2, _) => out.chunkat(b, s:s_end_l2, _);
+            
+            // Swap L2 buffers for the next iteration
+            l2_buf_idx = 1 - l2_buf_idx;
+        }
+    }
+    
+    return out;
+} 

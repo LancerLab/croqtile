@@ -1,0 +1,12 @@
+// Multi-Head Latent Attention (MLA) Basic Version 1
+__co__ f32[B, S, D] mla_basic_1(f32[B, S, D] Q, f32[B, S, D] K, f32[B, S, D] V) {
+    f32[B, S, D] O;
+    parallel b by B {
+        local f32[S, D] latent;
+        local f32[S, D] out;
+        // 1. latent = Q @ W1 (省略权重)
+        // 2. out = latent @ W2 (省略权重)
+        dma.copy out => O.chunkat(b, _, _);
+    }
+    return O;
+} 

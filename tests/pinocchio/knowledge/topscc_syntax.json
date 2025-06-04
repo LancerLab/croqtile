@@ -1,0 +1,628 @@
+{
+  "version": "1.0",
+  "language": "TopSCC",
+  "description": "Knowledge base for TopSCC syntax and mapping to Choreo",
+  
+  "basic_mapping": {
+    "description": "Core mapping concepts between TopSCC and Choreo",
+    "tensor_declarations": {
+      "topscc": "float* tensor_name;",
+      "choreo": "tensor tensor_name[dim1][dim2]...[dimN] : float32;"
+    },
+    "memory_types": {
+      "topscc": {
+        "global": "Global memory is accessed directly using pointers",
+        "shared": "__shared__ float shared_tensor[size];",
+        "local": "Local variables within kernel functions"
+      },
+      "choreo": {
+        "global": "tensor tensor_name[dims] : type = input/output;",
+        "shared": "shared tensor tensor_name[dims] : type;",
+        "local": "local tensor tensor_name[dims] : type;"
+      }
+    },
+    "parallelism": {
+      "topscc": "Explicit thread indexing with grid/block dimensions",
+      "choreo": "parallel p by N { /* code */ }"
+    },
+    "tiling": {
+      "topscc": "Manual loop tiling with explicit index calculations",
+      "choreo": "with {tile_vars} in [tile_dims] { /* code */ }"
+    },
+    "data_movement": {
+      "topscc": "Explicit memory copies between host and device",
+      "choreo": "dma.copy source => destination;"
+    }
+  },
+  
+  "tensor_operations": {
+    "element_wise": {
+      "topscc": [
+        "// Element-wise operation in TopSCC",
+        "void elementwise_kernel(float* input, float* output, int size) {",
+        "  int idx = blockIdx.x * blockDim.x + threadIdx.x;",
+        "  if (idx < size) {",
+        "    output[idx] = operation(input[idx]);",
+        "  }",
+        "}"
+      ],
+      "choreo": [
+        "// Element-wise operation in Choreo",
+        "__co__ f32[N] elementwise(f32[N] input) {",
+        "  f32[N] output;",
+        "  parallel p by 1 {",
+        "    foreach {i} in [N] {",
+        "      output.at(i) = operation(input.at(i));",
+        "    }",
+        "  }",
+        "  return output;",
+        "}"
+      ]
+    },
+    "matrix_multiplication": {
+      "topscc": [
+        "// Matrix multiplication in TopSCC",
+        "void matmul_kernel(float* A, float* B, float* C, int M, int N, int K) {",
+        "  int row = blockIdx.y * blockDim.y + threadIdx.y;",
+        "  int col = blockIdx.x * blockDim.x + threadIdx.x;",
+        "  if (row < M && col < N) {",
+        "    float sum = 0.0f;",
+        "    for (int k = 0; k < K; ++k) {",
+        "      sum += A[row * K + k] * B[k * N + col];",
+        "    }",
+        "    C[row * N + col] = sum;",
+        "  }",
+        "}"
+      ],
+      "choreo": [
+        "// Matrix multiplication in Choreo",
+        "__co__ f32[M, N] matmul(f32[M, K] lhs, f32[K, N] rhs) {",
+        "  f32[M, N] output;",
+        "  ",
+        "  parallel p by 1 {",
+        "    with {m_tile, k_tile, n_tile} in [M/TILE_M, K/TILE_K, N/TILE_N] {",
+        "      foreach m_tile, n_tile {",
+        "        local f32[TILE_M, TILE_N] l1_out {0};",
+        "        ",
+        "        foreach k_tile {",
+        "          lf = dma.copy.async lhs.chunkat(m_tile, k_tile) => local;",
+        "          rf = dma.copy.async rhs.chunkat(k_tile, n_tile) => local;",
+        "          wait lf, rf;",
+        "          ",
+        "          foreach {m, n, k} in [TILE_M, TILE_N, TILE_K] {",
+        "            l1_out.at(m, n) += lf.data.at(m, k) * rf.data.at(k, n);",
+        "          }",
+        "          ",
+        "          dma.copy l1_out => output.chunkat(m_tile, n_tile);",
+        "        }",
+        "      }",
+        "    }",
+        "  }",
+        "  ",
+        "  return output;",
+        "}"
+      ]
+    },
+    "reduction": {
+      "topscc": [
+        "// Reduction operation in TopSCC",
+        "void reduction_kernel(float* input, float* output, int size) {",
+        "  __shared__ float shared_data[BLOCK_SIZE];",
+        "  int tid = threadIdx.x;",
+        "  int idx = blockIdx.x * blockDim.x + threadIdx.x;",
+        "  ",
+        "  // Load data to shared memory",
+        "  shared_data[tid] = (idx < size) ? input[idx] : 0;",
+        "  __syncthreads();",
+        "  ",
+        "  // Perform reduction in shared memory",
+        "  for (int s = blockDim.x / 2; s > 0; s >>= 1) {",
+        "    if (tid < s) {",
+        "      shared_data[tid] += shared_data[tid + s];",
+        "    }",
+        "    __syncthreads();",
+        "  }",
+        "  ",
+        "  // Write result for this block to global memory",
+        "  if (tid == 0) output[blockIdx.x] = shared_data[0];",
+        "}"
+      ],
+      "choreo": [
+        "// Reduction operation in Choreo",
+        "__co__ f32[1] reduce_sum(f32[N] input) {",
+        "  f32[1] output;",
+        "  ",
+        "  compute reduction(sum, 0) {",
+        "    output[0] = input[N_idx];",
+        "  }",
+        "  ",
+        "  return output;",
+        "}"
+      ]
+    }
+  },
+  
+  "memory_patterns": {
+    "double_buffering": {
+      "topscc": [
+        "// Double buffering in TopSCC",
+        "void double_buffer_kernel(float* input, float* output, int size) {",
+        "  __shared__ float buffer_a[TILE_SIZE];",
+        "  __shared__ float buffer_b[TILE_SIZE];",
+        "  ",
+        "  int tid = threadIdx.x;",
+        "  int bid = blockIdx.x;",
+        "  int idx = bid * TILE_SIZE + tid;",
+        "  ",
+        "  // Load first tile",
+        "  if (idx < size) buffer_a[tid] = input[idx];",
+        "  __syncthreads();",
+        "  ",
+        "  for (int i = 1; i < (size + TILE_SIZE - 1) / TILE_SIZE; i++) {",
+        "    // Load next tile in parallel with computation",
+        "    int next_idx = (bid * TILE_SIZE + i * TILE_SIZE) + tid;",
+        "    if (next_idx < size) buffer_b[tid] = input[next_idx];",
+        "    ",
+        "    // Process current tile",
+        "    if (idx < size) {",
+        "      output[idx] = process(buffer_a[tid]);",
+        "    }",
+        "    __syncthreads();",
+        "    ",
+        "    // Swap buffers",
+        "    float* temp = buffer_a;",
+        "    buffer_a = buffer_b;",
+        "    buffer_b = temp;",
+        "    ",
+        "    idx += TILE_SIZE;",
+        "  }",
+        "  ",
+        "  // Process last tile",
+        "  if (idx < size) {",
+        "    output[idx] = process(buffer_a[tid]);",
+        "  }",
+        "}"
+      ],
+      "choreo": [
+        "// Double buffering in Choreo",
+        "__co__ f32[N] double_buffer(f32[N] input) {",
+        "  f32[N] output;",
+        "  ",
+        "  parallel p by 1 {",
+        "    with tile in [N / TILE_SIZE] {",
+        "      shared f32[TILE_SIZE] buffer[2];",
+        "      shared event load_done[2], compute_done[2];",
+        "      ",
+        "      // Preload first tile",
+        "      dma.copy input.chunkat(0) => buffer[0];",
+        "      trigger load_done[0];",
+        "      ",
+        "      // Process tiles with double buffering",
+        "      foreach tile {",
+        "        int curr_buf = tile % 2;",
+        "        int next_buf = 1 - curr_buf;",
+        "        int next_tile = tile + 1;",
+        "        ",
+        "        // Load next tile asynchronously",
+        "        if (next_tile < #tile) {",
+        "          inthreads.async {",
+        "            dma.copy input.chunkat(next_tile) => buffer[next_buf];",
+        "            trigger load_done[next_buf];",
+        "          }",
+        "        }",
+        "        ",
+        "        // Process current tile",
+        "        wait load_done[curr_buf];",
+        "        foreach i in [TILE_SIZE] {",
+        "          int idx = tile * TILE_SIZE + i;",
+        "          if (idx < N) {",
+        "            output.at(idx) = process(buffer[curr_buf].at(i));",
+        "          }",
+        "        }",
+        "        trigger compute_done[curr_buf];",
+        "      }",
+        "    }",
+        "  }",
+        "  ",
+        "  return output;",
+        "}"
+      ]
+    },
+    "tiling": {
+      "topscc": [
+        "// Tiling in TopSCC",
+        "void tiled_kernel(float* input, float* output, int M, int N) {",
+        "  const int TILE_M = 16;",
+        "  const int TILE_N = 16;",
+        "  ",
+        "  __shared__ float tile[TILE_M][TILE_N];",
+        "  ",
+        "  int tx = threadIdx.x;",
+        "  int ty = threadIdx.y;",
+        "  int bx = blockIdx.x;",
+        "  int by = blockIdx.y;",
+        "  ",
+        "  int row = by * TILE_M + ty;",
+        "  int col = bx * TILE_N + tx;",
+        "  ",
+        "  if (row < M && col < N) {",
+        "    tile[ty][tx] = input[row * N + col];",
+        "  }",
+        "  __syncthreads();",
+        "  ",
+        "  if (row < M && col < N) {",
+        "    output[row * N + col] = process(tile[ty][tx]);",
+        "  }",
+        "}"
+      ],
+      "choreo": [
+        "// Tiling in Choreo",
+        "__co__ f32[M, N] tiled_process(f32[M, N] input) {",
+        "  f32[M, N] output;",
+        "  ",
+        "  parallel p by 1 {",
+        "    with {m_tile, n_tile} in [ceil_div(M, TILE_M), ceil_div(N, TILE_N)] {",
+        "      foreach m_tile, n_tile {",
+        "        // Get actual dimensions for this tile",
+        "        int m_size = min(TILE_M, M - m_tile * TILE_M);",
+        "        int n_size = min(TILE_N, N - n_tile * TILE_N);",
+        "        ",
+        "        // Load tile to shared memory",
+        "        shared f32[m_size, n_size] tile;",
+        "        dma.copy input.chunkat(m_tile * TILE_M, n_tile * TILE_N).subview(0:m_size, 0:n_size) => tile;",
+        "        ",
+        "        // Process tile",
+        "        foreach {mi, ni} in [m_size, n_size] {",
+        "          tile.at(mi, ni) = process(tile.at(mi, ni));",
+        "        }",
+        "        ",
+        "        // Copy result back",
+        "        dma.copy tile => output.chunkat(m_tile * TILE_M, n_tile * TILE_N).subview(0:m_size, 0:n_size);",
+        "      }",
+        "    }",
+        "  }",
+        "  ",
+        "  return output;",
+        "}"
+      ]
+    }
+  },
+  
+  "synchronization": {
+    "barriers": {
+      "topscc": "__syncthreads();",
+      "choreo": "sync.shared;"
+    },
+    "events": {
+      "topscc": [
+        "// Events in TopSCC",
+        "cudaEvent_t event;",
+        "cudaEventCreate(&event);",
+        "cudaEventRecord(event, stream);",
+        "cudaStreamWaitEvent(stream, event);"
+      ],
+      "choreo": [
+        "// Events in Choreo",
+        "shared event e;",
+        "trigger e;",
+        "wait e;"
+      ]
+    }
+  },
+  
+  "data_movement": {
+    "memcpy": {
+      "topscc": [
+        "// Memory copy in TopSCC",
+        "cudaMemcpy(dst, src, size, cudaMemcpyDeviceToDevice);"
+      ],
+      "choreo": [
+        "// Memory copy in Choreo",
+        "dma.copy source => destination;"
+      ]
+    },
+    "async_memcpy": {
+      "topscc": [
+        "// Asynchronous memory copy in TopSCC",
+        "cudaMemcpyAsync(dst, src, size, cudaMemcpyDeviceToDevice, stream);"
+      ],
+      "choreo": [
+        "// Asynchronous memory copy in Choreo",
+        "auto transfer = dma.copy.async source => destination;",
+        "wait transfer;"
+      ]
+    }
+  },
+  
+  "control_flow": {
+    "loops": {
+      "topscc": [
+        "// Loop in TopSCC",
+        "for (int i = 0; i < N; i++) {",
+        "  // loop body",
+        "}"
+      ],
+      "choreo": [
+        "// Loop in Choreo",
+        "foreach {i} in [N] {",
+        "  // loop body",
+        "}"
+      ]
+    },
+    "conditionals": {
+      "topscc": [
+        "// Conditional in TopSCC",
+        "if (condition) {",
+        "  // then branch",
+        "} else {",
+        "  // else branch",
+        "}"
+      ],
+      "choreo": [
+        "// Conditional in Choreo",
+        "if (condition) {",
+        "  // then branch",
+        "} else {",
+        "  // else branch",
+        "}"
+      ]
+    }
+  },
+  
+  "program_structure": {
+    "kernel_function": {
+      "topscc": [
+        "// Kernel function in TopSCC",
+        "__global__ void kernel_name(parameters...) {",
+        "  // kernel body",
+        "}"
+      ],
+      "choreo": [
+        "// Device function in Choreo",
+        "__co__ return_type function_name(parameters...) {",
+        "  // function body",
+        "  return result;",
+        "}"
+      ]
+    },
+    "host_function": {
+      "topscc": [
+        "// Host function in TopSCC",
+        "void host_function(parameters...) {",
+        "  // Configure kernel launch",
+        "  dim3 grid_dim(grid_x, grid_y);",
+        "  dim3 block_dim(block_x, block_y);",
+        "  ",
+        "  // Launch kernel",
+        "  kernel_name<<<grid_dim, block_dim>>>(arguments...);",
+        "}"
+      ],
+      "choreo": [
+        "// Host program in Choreo",
+        "int main() {",
+        "  // Setup tensors",
+        "  choreo::f32 tensor[M][N];",
+        "  auto view = choreo::make_spanview(tensor);",
+        "  ",
+        "  // Call device function",
+        "  auto result = function_name(view);",
+        "  ",
+        "  return 0;",
+        "}"
+      ]
+    }
+  },
+  
+  "type_mapping": {
+    "scalar_types": {
+      "topscc": {
+        "float": "float",
+        "double": "double",
+        "int": "int",
+        "uint": "unsigned int",
+        "short": "short",
+        "ushort": "unsigned short",
+        "char": "char",
+        "uchar": "unsigned char",
+        "bool": "bool"
+      },
+      "choreo": {
+        "float": "f32",
+        "double": "f64",
+        "int": "s32",
+        "uint": "u32",
+        "short": "s16",
+        "ushort": "u16",
+        "char": "s8",
+        "uchar": "u8",
+        "bool": "bool"
+      }
+    },
+    "tensor_types": {
+      "topscc": {
+        "1D": "float* arr",
+        "2D": "float* matrix // linearized as row-major",
+        "3D": "float* tensor // linearized as row-major"
+      },
+      "choreo": {
+        "1D": "tensor arr[N] : float32",
+        "2D": "tensor matrix[M][N] : float32",
+        "3D": "tensor tensor[D1][D2][D3] : float32"
+      }
+    }
+  },
+  
+  "translation_examples": {
+    "simple_elementwise": {
+      "topscc": [
+        "// Simple elementwise operation in TopSCC",
+        "__global__ void square_kernel(float* input, float* output, int N) {",
+        "  int idx = blockIdx.x * blockDim.x + threadIdx.x;",
+        "  if (idx < N) {",
+        "    output[idx] = input[idx] * input[idx];",
+        "  }",
+        "}",
+        "",
+        "void square(float* input, float* output, int N) {",
+        "  int block_size = 256;",
+        "  int grid_size = (N + block_size - 1) / block_size;",
+        "  square_kernel<<<grid_size, block_size>>>(input, output, N);",
+        "}"
+      ],
+      "choreo": [
+        "// Simple elementwise operation in Choreo",
+        "__co__ f32[N] square(f32[N] input) {",
+        "  f32[N] output;",
+        "  ",
+        "  parallel p by 1 {",
+        "    foreach {i} in [N] {",
+        "      output.at(i) = input.at(i) * input.at(i);",
+        "    }",
+        "  }",
+        "  ",
+        "  return output;",
+        "}"
+      ]
+    },
+    "matrix_multiply": {
+      "topscc": [
+        "// Matrix multiplication in TopSCC",
+        "__global__ void matmul_kernel(float* A, float* B, float* C, int M, int N, int K) {",
+        "  int row = blockIdx.y * blockDim.y + threadIdx.y;",
+        "  int col = blockIdx.x * blockDim.x + threadIdx.x;",
+        "  ",
+        "  if (row < M && col < N) {",
+        "    float sum = 0.0f;",
+        "    for (int k = 0; k < K; k++) {",
+        "      sum += A[row * K + k] * B[k * N + col];",
+        "    }",
+        "    C[row * N + col] = sum;",
+        "  }",
+        "}",
+        "",
+        "void matmul(float* A, float* B, float* C, int M, int N, int K) {",
+        "  dim3 block_dim(16, 16);",
+        "  dim3 grid_dim((N + block_dim.x - 1) / block_dim.x, ",
+        "                (M + block_dim.y - 1) / block_dim.y);",
+        "  matmul_kernel<<<grid_dim, block_dim>>>(A, B, C, M, N, K);",
+        "}"
+      ],
+      "choreo": [
+        "// Matrix multiplication in Choreo",
+        "__co__ f32[M, N] matmul(f32[M, K] A, f32[K, N] B) {",
+        "  f32[M, N] C;",
+        "  ",
+        "  parallel p by 1 {",
+        "    foreach {i, j} in [M, N] {",
+        "      C.at(i, j) = 0.0f;",
+        "      foreach {k} in [K] {",
+        "        C.at(i, j) += A.at(i, k) * B.at(k, j);",
+        "      }",
+        "    }",
+        "  }",
+        "  ",
+        "  return C;",
+        "}"
+      ]
+    },
+    "tiled_matrix_multiply": {
+      "topscc": [
+        "// Tiled matrix multiplication in TopSCC",
+        "__global__ void tiled_matmul_kernel(float* A, float* B, float* C, int M, int N, int K) {",
+        "  const int TILE_SIZE = 16;",
+        "  ",
+        "  __shared__ float As[TILE_SIZE][TILE_SIZE];",
+        "  __shared__ float Bs[TILE_SIZE][TILE_SIZE];",
+        "  ",
+        "  int bx = blockIdx.x;",
+        "  int by = blockIdx.y;",
+        "  int tx = threadIdx.x;",
+        "  int ty = threadIdx.y;",
+        "  ",
+        "  int row = by * TILE_SIZE + ty;",
+        "  int col = bx * TILE_SIZE + tx;",
+        "  ",
+        "  float sum = 0.0f;",
+        "  ",
+        "  for (int t = 0; t < (K + TILE_SIZE - 1) / TILE_SIZE; t++) {",
+        "    // Load tiles to shared memory",
+        "    if (row < M && t * TILE_SIZE + tx < K) {",
+        "      As[ty][tx] = A[row * K + t * TILE_SIZE + tx];",
+        "    } else {",
+        "      As[ty][tx] = 0.0f;",
+        "    }",
+        "    ",
+        "    if (t * TILE_SIZE + ty < K && col < N) {",
+        "      Bs[ty][tx] = B[(t * TILE_SIZE + ty) * N + col];",
+        "    } else {",
+        "      Bs[ty][tx] = 0.0f;",
+        "    }",
+        "    ",
+        "    __syncthreads();",
+        "    ",
+        "    // Compute partial sum for this tile",
+        "    for (int k = 0; k < TILE_SIZE; k++) {",
+        "      sum += As[ty][k] * Bs[k][tx];",
+        "    }",
+        "    ",
+        "    __syncthreads();",
+        "  }",
+        "  ",
+        "  // Write result",
+        "  if (row < M && col < N) {",
+        "    C[row * N + col] = sum;",
+        "  }",
+        "}",
+        "",
+        "void tiled_matmul(float* A, float* B, float* C, int M, int N, int K) {",
+        "  const int TILE_SIZE = 16;",
+        "  dim3 block_dim(TILE_SIZE, TILE_SIZE);",
+        "  dim3 grid_dim((N + TILE_SIZE - 1) / TILE_SIZE, ",
+        "                (M + TILE_SIZE - 1) / TILE_SIZE);",
+        "  tiled_matmul_kernel<<<grid_dim, block_dim>>>(A, B, C, M, N, K);",
+        "}"
+      ],
+      "choreo": [
+        "// Tiled matrix multiplication in Choreo",
+        "__co__ f32[M, N] tiled_matmul(f32[M, K] A, f32[K, N] B) {",
+        "  f32[M, N] C;",
+        "  const int TILE_SIZE = 16;",
+        "  ",
+        "  parallel p by 1 {",
+        "    with {m_tile, n_tile, k_tile} in [ceil_div(M, TILE_SIZE), ceil_div(N, TILE_SIZE), ceil_div(K, TILE_SIZE)] {",
+        "      foreach m_tile, n_tile {",
+        "        // Define tile dimensions accounting for edge cases",
+        "        int m_size = min(TILE_SIZE, M - m_tile * TILE_SIZE);",
+        "        int n_size = min(TILE_SIZE, N - n_tile * TILE_SIZE);",
+        "        ",
+        "        // Initialize output tile",
+        "        local f32[m_size, n_size] c_tile {0};",
+        "        ",
+        "        foreach k_tile {",
+        "          int k_size = min(TILE_SIZE, K - k_tile * TILE_SIZE);",
+        "          ",
+        "          // Load tiles to shared memory",
+        "          shared f32[m_size, k_size] a_tile;",
+        "          shared f32[k_size, n_size] b_tile;",
+        "          ",
+        "          dma.copy A.chunkat(m_tile * TILE_SIZE, k_tile * TILE_SIZE).subview(0:m_size, 0:k_size) => a_tile;",
+        "          dma.copy B.chunkat(k_tile * TILE_SIZE, n_tile * TILE_SIZE).subview(0:k_size, 0:n_size) => b_tile;",
+        "          ",
+        "          // Compute partial sums",
+        "          foreach {mi, ni, ki} in [m_size, n_size, k_size] {",
+        "            c_tile.at(mi, ni) += a_tile.at(mi, ki) * b_tile.at(ki, ni);",
+        "          }",
+        "        }",
+        "        ",
+        "        // Write result",
+        "        dma.copy c_tile => C.chunkat(m_tile * TILE_SIZE, n_tile * TILE_SIZE).subview(0:m_size, 0:n_size);",
+        "      }",
+        "    }",
+        "  }",
+        "  ",
+        "  return C;",
+        "}"
+      ]
+    }
+  }
+} 

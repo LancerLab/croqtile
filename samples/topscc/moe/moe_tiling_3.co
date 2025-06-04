@@ -1,0 +1,345 @@
+// MoE Complete TILING Version 3 - Optimized with tiling for memory hierarchy
+__co__ f32[batch, seq, hidden] moe_tiling_3(f32[batch, seq, hidden] X) {
+    f32[batch, seq, hidden] Y;
+    
+    // Memory hierarchy sizes
+    // L1 (LOCAL): ~1.5MB
+    // L2 (SHARED): 64MB
+    // Global: 40.75GB
+    
+    // Assuming f32 (4 bytes), max elements in L1 = 1.5MB / 4 = 375K elements
+    
+    // Vector length for optimization
+    const int VL = 128; // TCLE_MAX_VECTOR_LENGTH for GCU300
+    
+    // Define optimal tile sizes
+    const int SEQ_TILE = 32;      // Sequence dimension tile
+    const int HIDDEN_TILE = 256;  // Hidden dimension tile (multiple of VL)
+    const int FF_TILE = 512;      // Feed-forward dimension tile
+    
+    // For L2 cache, we can process larger batches
+    const int SEQ_TILE_L2 = 128;  // L2 sequence dimension tile
+    
+    // MoE parameters
+    const int experts = 8;        // Number of experts
+    const int k_experts = 2;      // Number of experts to route to
+    const int ff_dim = 4 * hidden; // Expert feed-forward dimension
+    
+    __cok__ {
+    #include "tcle.h"
+    using namespace tcle;
+    
+    // Helper function to perform top-k selection
+    void top_k_indices(float* scores, int* indices, int num_experts, int k) {
+        // Initialize indices
+        for (int i = 0; i < num_experts; i++) {
+            indices[i] = i;
+        }
+        
+        // Simple selection sort for top-k
+        for (int i = 0; i < k; i++) {
+            int max_idx = i;
+            for (int j = i + 1; j < num_experts; j++) {
+                if (scores[indices[j]] > scores[indices[max_idx]]) {
+                    max_idx = j;
+                }
+            }
+            // Swap
+            if (max_idx != i) {
+                int temp = indices[i];
+                indices[i] = indices[max_idx];
+                indices[max_idx] = temp;
+            }
+        }
+    }
+    
+    // Router kernel
+    void router_kernel(
+        float* input_ptr, float* router_weights, float* router_bias,
+        int* expert_indices, float* expert_weights,
+        int seq_len, int hidden_size, int num_experts, int top_k) {
+        
+        // Temporary storage for expert scores
+        float* expert_scores = (float*)tcle::malloc(num_experts * sizeof(float));
+        int* idx_buffer = (int*)tcle::malloc(num_experts * sizeof(int));
+        
+        // Process each token in the batch
+        for (int s = 0; s < seq_len; s++) {
+            int token_offset = s * hidden_size;
+            
+            // Initialize expert scores to bias values
+            for (int e = 0; e < num_experts; e++) {
+                expert_scores[e] = router_bias[e];
+            }
+            
+            // Compute router logits: X * router_weights + router_bias
+            for (int h = 0; h < hidden_size; h++) {
+                float token_feature = input_ptr[token_offset + h];
+                
+                // For each expert, accumulate score
+                for (int e = 0; e < num_experts; e++) {
+                    expert_scores[e] += token_feature * router_weights[e * hidden_size + h];
+                }
+            }
+            
+            // Apply softmax to get routing probabilities
+            // Step 1: Find max for numerical stability
+            float max_score = expert_scores[0];
+            for (int e = 1; e < num_experts; e++) {
+                max_score = tcle::max(max_score, expert_scores[e]);
+            }
+            
+            // Step 2: Compute exp(score - max) and sum
+            float sum_exp = 0.0f;
+            for (int e = 0; e < num_experts; e++) {
+                expert_scores[e] = tcle::exp(expert_scores[e] - max_score);
+                sum_exp += expert_scores[e];
+            }
+            
+            // Step 3: Normalize
+            for (int e = 0; e < num_experts; e++) {
+                expert_scores[e] /= sum_exp;
+            }
+            
+            // Select top-k experts
+            top_k_indices(expert_scores, idx_buffer, num_experts, top_k);
+            
+            // Store top-k expert indices and weights
+            for (int k = 0; k < top_k; k++) {
+                int idx = idx_buffer[k];
+                expert_indices[s * top_k + k] = idx;
+                expert_weights[s * top_k + k] = expert_scores[idx];
+            }
+        }
+        
+        // Free temporary storage
+        tcle::free(expert_scores);
+        tcle::free(idx_buffer);
+    }
+    
+    // Expert FFN kernel with vectorization
+    void expert_ffn_kernel(
+        float* input, float* output,
+        float* expert_w1, float* expert_b1,
+        float* expert_w2, float* expert_b2,
+        int seq_len, int hidden_size, int ff_size,
+        int expert_idx, int* token_to_expert, float* expert_weights,
+        int top_k, int num_experts) {
+        
+        using vec_type = typename tcle::altivector<float, TCLE_MAX_VECTOR_LENGTH>::VT;
+        
+        // Vector length for this platform
+        const int vec_len = tcle::altivector_step<vec_type>();
+        
+        // Temporary buffer for intermediate FF activations
+        float* ff_activations = (float*)tcle::malloc(ff_size * sizeof(float));
+        
+        // Process each token in the batch
+        for (int s = 0; s < seq_len; s++) {
+            float token_weight = 0.0f;
+            
+            // Check if this token uses this expert
+            bool uses_expert = false;
+            for (int k = 0; k < top_k; k++) {
+                if (token_to_expert[s * top_k + k] == expert_idx) {
+                    token_weight = expert_weights[s * top_k + k];
+                    uses_expert = true;
+                    break;
+                }
+            }
+            
+            // Skip if token doesn't use this expert
+            if (!uses_expert) {
+                continue;
+            }
+            
+            // First layer: Linear + GELU
+            // Initialize with bias
+            for (int f = 0; f < ff_size; f++) {
+                ff_activations[f] = expert_b1[f];
+            }
+            
+            // Matrix multiplication: hidden x ff_dim
+            for (int h = 0; h < hidden_size; h++) {
+                float in_val = input[s * hidden_size + h];
+                
+                for (int f = 0; f < ff_size; f++) {
+                    ff_activations[f] += in_val * expert_w1[h * ff_size + f];
+                }
+            }
+            
+            // Apply GELU activation
+            for (int f = 0; f < ff_size; f++) {
+                ff_activations[f] = tcle::gelu(ff_activations[f]);
+            }
+            
+            // Second layer: Linear
+            // Initialize output with bias
+            for (int h = 0; h < hidden_size; h++) {
+                float bias = expert_b2[h];
+                float acc = bias;
+                
+                // Matrix multiplication: ff_dim x hidden
+                for (int f = 0; f < ff_size; f++) {
+                    acc += ff_activations[f] * expert_w2[f * hidden_size + h];
+                }
+                
+                // Scale by token weight and accumulate to output
+                output[s * hidden_size + h] += token_weight * acc;
+            }
+        }
+        
+        // Free temporary buffer
+        tcle::free(ff_activations);
+    }
+    
+    // Main MoE kernel that combines routing and expert computation
+    __co_device__ extern "C" void moe_kernel(
+        float* input_ptr, float* output_ptr,
+        float* router_weights, float* router_bias,
+        float* expert_w1, float* expert_b1,
+        float* expert_w2, float* expert_b2,
+        int seq_len, int hidden_size, int ff_size, int num_experts, int top_k) {
+        
+        // Allocate memory for routing results
+        int* expert_indices = (int*)tcle::malloc(seq_len * top_k * sizeof(int));
+        float* expert_weights = (float*)tcle::malloc(seq_len * top_k * sizeof(float));
+        
+        // Initialize output to zeros
+        for (int s = 0; s < seq_len; s++) {
+            for (int h = 0; h < hidden_size; h++) {
+                output_ptr[s * hidden_size + h] = 0.0f;
+            }
+        }
+        
+        // Step 1: Route tokens to experts
+        router_kernel(
+            input_ptr, router_weights, router_bias,
+            expert_indices, expert_weights,
+            seq_len, hidden_size, num_experts, top_k
+        );
+        
+        // Step 2: Process each expert
+        for (int e = 0; e < num_experts; e++) {
+            // Get expert weights
+            float* expert_w1_ptr = &expert_w1[e * hidden_size * ff_size];
+            float* expert_b1_ptr = &expert_b1[e * ff_size];
+            float* expert_w2_ptr = &expert_w2[e * ff_size * hidden_size];
+            float* expert_b2_ptr = &expert_b2[e * hidden_size];
+            
+            // Process tokens for this expert
+            expert_ffn_kernel(
+                input_ptr, output_ptr,
+                expert_w1_ptr, expert_b1_ptr,
+                expert_w2_ptr, expert_b2_ptr,
+                seq_len, hidden_size, ff_size,
+                e, expert_indices, expert_weights,
+                top_k, num_experts
+            );
+        }
+        
+        // Free temporary memory
+        tcle::free(expert_indices);
+        tcle::free(expert_weights);
+    }
+    } // __cok__
+    
+    // Expert weights and biases (would be model parameters in a real implementation)
+    shared f32[experts, hidden, ff_dim] expert_w1;
+    shared f32[experts, ff_dim] expert_b1;
+    shared f32[experts, ff_dim, hidden] expert_w2;
+    shared f32[experts, hidden] expert_b2;
+    
+    // Router weights and bias
+    shared f32[experts, hidden] router_W;
+    shared f32[experts] router_b;
+    
+    // Initialize weights (in a real implementation, these would be inputs or loaded)
+    foreach {e, h, f} in [experts, hidden, ff_dim] {
+        // Simple initialization for demonstration purposes
+        if (f < ff_dim) {
+            expert_w1.at(e, h, f) = 0.01f * (e + h + f);
+            if (h == 0) {
+                expert_b1.at(e, f) = 0.0f;
+            }
+        }
+        
+        if (h < hidden && f < ff_dim) {
+            expert_w2.at(e, f, h) = 0.01f * (e + f + h);
+            if (f == 0) {
+                expert_b2.at(e, h) = 0.0f;
+            }
+        }
+        
+        if (f == 0) {
+            router_W.at(e, h) = 0.01f * (e + h);
+            if (h == 0) {
+                router_b.at(e) = 0.0f;
+            }
+        }
+    }
+    
+    // Main parallel structure with hierarchical tiling
+    parallel b by batch {
+        // Use shared memory for larger blocks that fit in L2
+        shared f32[SEQ_TILE_L2, hidden] X_shared;
+        shared f32[SEQ_TILE_L2, hidden] Y_shared;
+        
+        // Process L2 tiles
+        for (int s = 0; s < seq; s += SEQ_TILE_L2) {
+            int s_end_l2 = min(s + SEQ_TILE_L2, seq);
+            int seq_tile_size_l2 = s_end_l2 - s;
+            
+            // Copy input tile to shared memory
+            dma.copy X.chunkat(b, s:s_end_l2, _) => X_shared.chunkat(0:seq_tile_size_l2, _);
+            
+            // Initialize output in shared memory
+            foreach {si, h} in [seq_tile_size_l2, hidden] {
+                Y_shared.at(si, h) = 0.0f;
+            }
+            
+            // Process L1 tiles within this L2 tile
+            for (int s_l1 = 0; s_l1 < seq_tile_size_l2; s_l1 += SEQ_TILE) {
+                int s_end_l1 = min(s_l1 + SEQ_TILE, seq_tile_size_l2);
+                int seq_tile_size_l1 = s_end_l1 - s_l1;
+                
+                // Create L1 tiles for processing
+                local f32[seq_tile_size_l1, hidden] X_local;
+                local f32[seq_tile_size_l1, hidden] Y_local;
+                
+                // Copy from shared to local memory
+                dma.copy X_shared.chunkat(s_l1:s_end_l1, _) => X_local;
+                
+                // Initialize output tile
+                foreach {si, h} in [seq_tile_size_l1, hidden] {
+                    Y_local.at(si, h) = 0.0f;
+                }
+                
+                // Call the optimized kernel for MoE
+                __call_tcle moe_kernel(
+                    X_local.data,
+                    Y_local.data,
+                    router_W.data,
+                    router_b.data,
+                    expert_w1.data,
+                    expert_b1.data,
+                    expert_w2.data,
+                    expert_b2.data,
+                    seq_tile_size_l1,
+                    hidden,
+                    ff_dim,
+                    experts,
+                    k_experts
+                );
+                
+                // Copy results back to shared memory
+                dma.copy Y_local => Y_shared.chunkat(s_l1:s_end_l1, _);
+            }
+            
+            // Copy the processed L2 tile to output
+            dma.copy Y_shared.chunkat(0:seq_tile_size_l2, _) => Y.chunkat(b, s:s_end_l2, _);
+        }
+    }
+    
+    return Y;
+} 

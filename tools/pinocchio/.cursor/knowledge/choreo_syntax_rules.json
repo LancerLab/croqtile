@@ -1,0 +1,537 @@
+{
+  "version": "2.0",
+  "language": "Choreo",
+  "description": "Comprehensive knowledge base for Choreo syntax, semantics, and rules - integrated from multiple sources",
+  
+  "basic_syntax": {
+    "comments": {
+      "line_comment": "// This is a line comment",
+      "block_comment": "/* This is a block comment */"
+    },
+    
+    "statements": {
+      "termination": "Statements end with semicolons (;)",
+      "blocks": "Code blocks are enclosed in curly braces {}"
+    }
+  },
+  
+  "grammar": {
+    "ebnf": {
+      "program": "{ any_code | dsl_function | host_code }",
+      "dsl_function": "\"__co__\" return_type IDENTIFIER \"(\" parameter_list \")\" LBRACE statements RBRACE",
+      "return_type": "param_type | void_type | auto_type",
+      "parameter_list": "[ parameter { \",\" parameter } ]",
+      "parameter": "[storage] param_type IDENTIFIER",
+      "param_type": "scalar_type | fundamental_type param_mdspan",
+      "scalar_type": "\"int\" | \"bool\" | \"half8\" | \"half\" | \"bfp16\" | \"float\" | \"double\"",
+      "fundamental_type": "\"f32\" | \"f16\" | \"bf16\" | \"u32\" | \"s32\" | \"u16\" | \"s16\" | \"u8\" | \"s8\"",
+      "param_mdspan": "\"mdspan\" \"<\" NUM \">\" | \"[\" param_mdspan_list \"]\"",
+      "stmts_block": "\"{\" statements \"}\" | statement",
+      "statements": "{ statement | \";\" }",
+      "statement": "declaration | assignment | dma_stmt | wait_stmt | trigger_stmt | call_stmt | swap_stmt | return_stmt | sync_stmt | inlcpp_stmt | paraby_block | within_block | inthreads_block | while_block | if_else_block | foreach_block | increment_block",
+      "declaration": "named_mdspan_decl | named_ituple_decl | named_scalar_decls | named_event_decls | named_spanned_decls",
+      "assignment": "IDENTIFIER \"=\" s_expr | data_element \"=\" s_expr | IDENTIFIER \"=\" select_expr | IDENTIFIER arith_operation \"=\" s_expr | data_element arith_operation \"=\" s_expr",
+      "paraby_block": "\"parallel\" [sync_type] parabys stmts_block",
+      "parabys": "paraby { \",\" paraby }",
+      "paraby": "\"by\" NUM | IDENTIFIER \"by\" int_or_id | IDENTIFIER \"=\" \"{\" id_list \"}\" \"by\" \"[\" idt_list \"]\" | \"{\" id_list \"}\" \"by\" \"[\" idt_list \"]\"",
+      "within_block": "\"with\" withins [where_clause] stmts_block | \"foreach\" withins stmts_block",
+      "within": "IDENTIFIER \"in\" mdspan_expr | IDENTIFIER \"=\" \"{\" with_matchers \"}\" \"in\" mdspan_expr | \"{\" with_matchers \"}\" \"in\" mdspan_expr",
+      "foreach_block": "\"foreach\" range_exprs stmts_block",
+      "range_expr": "IDENTIFIER | IDENTIFIER \"(\" [bound_expr] \":\" [bound_expr] \")\" | IDENTIFIER \"(\" [bound_expr] \":\" [bound_expr] \":\" [index_or_none] \")\"",
+      "inthreads_block": "\"inthreads\" [sync_type] \"(\" s_expr \")\" stmts_block",
+      "while_block": "\"while\" \"(\" s_expr \")\" stmts_block",
+      "if_else_block": "\"if\" \"(\" s_expr \")\" stmts_block [\"else\" stmts_block]",
+      "increment_block": "\"increment\" \"{\" id_list \"}\" \"(\" s_expr \")\" stmts_block",
+      "return_stmt": "\"return\" [returnable]",
+      "sync_stmt": "\"sync.\" storage",
+      "wait_stmt": "\"wait\" ids_list",
+      "trigger_stmt": "\"trigger\" ids_list",
+      "call_stmt": "\"call\" IDENTIFIER [template_params] \"(\" [device_passables] \")\" | \"assert\" \"(\" s_expr \",\" cstrings \")\" | builtin_print_func \"(\" value_list \")\" | builtin_print_func \"!\" \"(\" value_list \")\"",
+      "swap_stmt": "\"swap\" \"(\" id_list \")\" | \"rotate\" \"(\" id_list \")\"",
+      "dma_stmt": "IDENTIFIER \"=\" \"dma\" dma_operation [sync_type] [dma_config] chunkat_expr \"=>\" chunkat_or_storage_or_select [\"after\" IDENTIFIER] | \"dma\" dma_operation [sync_type] [dma_config] chunkat_expr \"=>\" chunkat_or_storage_or_select [\"after\" IDENTIFIER] | IDENTIFIER \"=\" \"dma.none\"",
+      "dma_operation": "\"copy\" | \"pad\" | \"transpose\"",
+      "select_expr": "\"select\" \"(\" s_expr \",\" value_list \")\"",
+      "data_element": "IDENTIFIER \".at\" \"(\" data_indices \")\" | IDENTIFIER \".data\" \".at\" \"(\" data_indices \")\"",
+      "chunkat_expr": "ids_expr | ids_expr span_as | ids_expr ts_infos | ids_expr span_as ts_infos",
+      "span_as": "\".span_as\" \"(\" \"[\" g_value_list \"]\" \")\"",
+      "ts_info": "\".chunkat\" \"(\" value_list \")\" | \".chunk\" \"(\" value_list \")\" \".at\" \"(\" value_list \")\" | \".subspan\" \"(\" value_list \")\" \".at\" \"(\" value_list \")\" | \".modspan\" \"(\" value_list \")\" \".at\" \"(\" value_list \")\"",
+      "mdspan_list": "\"[\" value_list \"]\"",
+      "ituple_list": "\"{\" g_value_list \"}\"",
+      "value_list": "s_expr { \",\" s_expr }"
+    }
+  },
+  
+  "program_structure": {
+    "complete_choreo_program": {
+      "required_elements": [
+        "算子函数声明（推荐用 `__co__` 修饰）",
+        "参数声明",
+        "内部变量声明",
+        "主计算逻辑",
+        "返回值（若有）"
+      ],
+      "function_declaration": "入口为 `__co__ <ret_type> <op_name>(<param_list>) { ... }`",
+      "parameter_declaration": "参数需明确类型、shape，区分 input/output",
+      "variable_declaration": "在函数体内声明临时变量、张量、event、buffer 等",
+      "computation_logic": "foreach/parallel/inthreads 等控制流，张量操作，事件/缓冲/优化等",
+      "return_value": "若有返回值，需 return；否则 void",
+      "example": "```choreo\n__co__ void layernorm(f32[N, M] X, f32[M] gamma, f32[M] beta, f32[N, M] Y, f32 eps) {\n    f32[N] mean;\n    f32[N] var;\n    foreach i(0:N) {\n        mean.at(i) = reduce_sum(j in 0..M) X.at(i, j) / M;\n    }\n    foreach i(0:N) {\n        var.at(i) = reduce_sum(j in 0..M) (X.at(i, j) - mean.at(i)) * (X.at(i, j) - mean.at(i)) / M;\n    }\n    parallel p by N {\n        foreach j(0:M) {\n            Y.at(p, j) = gamma.at(j) * (X.at(p, j) - mean.at(p)) / sqrt(var.at(p) + eps) + beta.at(j);\n        }\n    }\n}\n```",
+      "invalid_examples": [
+        "只写 for/并行/张量操作，没有函数签名和参数声明",
+        "只写函数体内部代码"
+      ]
+    }
+  },
+  
+  "data_types": {
+    "naming_convention": {
+      "rule": "数据类型名称必须使用小写",
+      "correct_examples": ["u32", "s32", "f32", "half", "bfp16", "float", "double"],
+      "incorrect_examples": ["U32", "S32", "F32"],
+      "notes": "Choreo中的类型名称严格区分大小写，必须使用小写形式"
+    },
+    "supported_types": {
+      "integer_types": ["u8", "u16", "u32", "s8", "s16", "s32", "int"],
+      "floating_types": ["f32", "f16", "bf16", "half8", "half", "bfp16", "float", "double"],
+      "other_types": ["bool"],
+      "unsupported_types": ["u64", "s64"],
+      "notes": "不支持直接使用u64/s64类型，需使用u32/s32替代"
+    },
+    "literal_values": {
+      "integer_literals": "支持十进制整数，如123",
+      "float_literals": "浮点数必须添加f后缀，如0.5f",
+      "double_literals": "双精度浮点数不需要后缀，如0.5",
+      "boolean_literals": "true, false",
+      "string_literals": "用双引号包围，如\"hello\"",
+      "unsupported_literals": "不支持十六进制常量，如0xFFFFFFFF",
+      "notes": "使用字面量时必须注意类型匹配，不支持隐式类型转换"
+    }
+  },
+  
+  "array_and_mdspan": {
+    "declaration": {
+      "rule": "维度必须在类型名称后的单个方括号内用逗号分隔",
+      "correct_examples": ["f32[2, 4]", "f32[CAPACITY, SET_ASSOCIATIVITY, WARP_SIZE]"],
+      "incorrect_examples": ["f32[2][4]", "f32[2, 4][3]"],
+      "notes": "数组声明时所有维度必须在一个方括号内以逗号分隔"
+    },
+    "memory_placement": {
+      "rule": "如需指定内存位置，可使用global、shared或local关键字",
+      "examples": ["global f32[2]", "local u32[2, 4]", "shared f32[10]"],
+      "notes": "在函数内部，数组可以不指定内存位置"
+    },
+    "access": {
+      "rule": "数组访问必须使用.at()方法",
+      "correct_examples": ["array.at(i)", "matrix.at(i, j)"],
+      "incorrect_examples": ["array[i]", "matrix[i, j]", "matrix[i][j]"],
+      "notes": "不能使用方括号操作符访问数组元素"
+    },
+    "dimension_specification": {
+      "constant": "f32[10, 20] X;",
+      "symbolic": "f32[N, M] Y;",
+      "computed": "f32[2*N, M/2] Z;",
+      "dynamic": "f32[lhs.span] output; // 使用其他张量的维度",
+      "complex": "f32[input.span / {1, #n_tile}] buffer; // 使用除法和元组进行维度计算"
+    },
+    "span_operations": {
+      "span_as": {
+        "syntax": "tensor.span_as([dim1, dim2, ...]) - 重新解释张量的形状",
+        "example": "X = A.span_as([N*K, M])"
+      },
+      "subspan": {
+        "syntax": "tensor.subspan(sizes).at(offsets) - 获取子张量",
+        "examples": [
+          "block = X.subspan(16, 16).at(i*16, j*16)",
+          "lfs = dma.copy.async lhs.subspan(l2_elem_count).at(x # p) => shared;"
+        ]
+      },
+      "chunk": {
+        "syntax": "tensor.chunk(sizes).at(indices) - 获取分块",
+        "examples": [
+          "tile = X.chunk(16, 16).at(i, j)",
+          "f = dma.copy l2_input[c_idx].chunk(#q - 1, 1).at(q, _) => local;"
+        ]
+      },
+      "modspan": {
+        "syntax": "tensor.modspan(sizes).at(indices) - 获取循环分块，处理余数",
+        "examples": [
+          "cyclic_tile = X.modspan(16, 16).at(i, j)",
+          "lfs = dma.copy.async lhs.modspan(l2_elem_count).at(x # p) => shared;",
+          "dma.copy l1_out => output.modspan(l2_elem_count).at(x # p).modspan(last_count).at(q);"
+        ],
+        "notes": "modspan特别适用于处理不能被块大小整除的余数情况"
+      },
+      "chunkat": {
+        "syntax": "tensor.chunkat(indices) - 直接获取位置",
+        "examples": [
+          "element = X.chunkat(i, j)",
+          "lfl = dma.copy.async lfs.chunkat(q) => local;",
+          "dma.copy input.chunkat(_, n_tile) => l2_input[0];"
+        ],
+        "notes": "使用_表示保持该维度不变"
+      }
+    }
+  },
+  
+  "function_parameters": {
+    "rule": "函数参数可以是基本类型或多维数组类型",
+    "correct_examples": [
+      "__co__ void func(f32[N, M] input, f32[N, M] output) { ... }",
+      "__co__ void func(int a, bool flag, f32[N] arr) { ... }"
+    ],
+    "storage_attributes": {
+      "global": "指定参数为全局内存参数",
+      "example": "__co__ void func(global f32[N, M] input) { ... }"
+    },
+    "notes": "函数参数中的数组类型需要指定维度"
+  },
+  
+  "variable_declarations": {
+    "rule": "函数内变量无法在声明时直接赋值",
+    "incorrect_examples": ["u32 var = 123;"],
+    "correct_examples": ["u32 var;\nvar = 123;"],
+    "array_declaration": {
+      "syntax": "type[dim1, dim2, ...] name;",
+      "example": "f32[16, 16] block;"
+    },
+    "array_with_multiple_buffers": {
+      "syntax": "type[dims] name[buffer_count];",
+      "example": "shared f32[input.span / {1, #n_tile}] l2_input[2];",
+      "notes": "用于实现double buffer等多缓冲区模式"
+    },
+    "event_declaration": {
+      "syntax": "[storage] event name[optional_dims];",
+      "examples": [
+        "shared event e;", 
+        "local event barrier[4];",
+        "shared event ep[2][2], ef[2][2];"
+      ],
+      "notes": "事件可以是多维数组，用于复杂的同步场景"
+    },
+    "ituple_declaration": {
+      "syntax": "ituple name = {val1, val2, ...};",
+      "example": "ituple dims = {16, 16, 4};"
+    },
+    "mdspan_declaration": {
+      "syntax": "mdspan name: expr;",
+      "example": "mdspan shape: [N, M];"
+    },
+    "index_variables": {
+      "syntax": "var_name = expression % mod_value;",
+      "example": "c_idx = n_tile % 2; n_idx = (c_idx + 1) % 2;",
+      "notes": "用于循环索引计算，特别是在double buffer模式中"
+    },
+    "notes": "必须先声明变量，然后在单独的语句中赋值"
+  },
+  
+  "operators_and_expressions": {
+    "arithmetic": ["+", "-", "*", "/", "%", "cdiv"],
+    "unbound_arithmetic": ["#", "#+", "#-", "#*", "#/", "#%"],
+    "logical": ["&&", "||", "!"],
+    "comparison": ["<", ">", "<=", ">=", "==", "!="],
+    "bitwise": ["<<", ">>"],
+    "other": ["?:", "&", "++", "--"],
+    "logical_operators": {
+      "rule": "支持基本的逻辑表达式",
+      "examples": ["if (a != 0 && b < c)", "if (x || y)"],
+      "notes": "复杂的逻辑表达式可能需要拆分为嵌套的if语句"
+    },
+    "arithmetic_operations": {
+      "rule": "支持基本的算术运算",
+      "examples": ["x = a + b * c", "y = (a + b) / 2"],
+      "compound_assignment": ["+=", "-=", "*=", "/=", "%="],
+      "notes": "支持复合赋值操作符"
+    },
+    "type_conversion": {
+      "rule": "不支持隐式类型转换",
+      "notes": "不同类型之间的赋值可能导致编译错误，即使看起来类型兼容"
+    },
+    "special_functions": {
+      "mathematical": ["sqrt", "exp", "log", "sin", "cos", "tan", "abs", "floor", "ceil", "round", "acos", "asin", "atan", "atan2", "cosh", "expm1", "gelu", "isfinite", "rsqrt", "sigmoid", "sinh", "softplus", "tanh", "log1p", "pow", "sign"],
+      "alignment": ["alignup", "aligndown"],
+      "tensor_specific": ["reduce_sum", "reduce_max", "reduce_min"]
+    }
+  },
+  
+  "control_flow": {
+    "if_statement": {
+      "correct_syntax": "if (condition) { statements... } else { statements... }",
+      "notes": "条件必须是有效的表达式"
+    },
+    "foreach_loop": {
+      "syntax": "foreach range_exprs { statements... }",
+      "range_syntax": [
+        "identifier - 使用with子句定义的变量",
+        "identifier(start:end) - 带有起始和结束的范围",
+        "identifier(start:end:stride) - 带有起始、结束和步长的范围"
+      ],
+      "examples": [
+        "foreach i { statements... }",
+        "foreach i(0:N) { statements... }",
+        "foreach i(0:N:2) { statements... }"
+      ],
+      "notes": "foreach可以单独使用，也可以与with子句配合使用"
+    },
+    "while_loop": {
+      "syntax": "while (condition) { statements... }",
+      "example": "while (i < N) { statements...; i = i + 1; }"
+    },
+    "increment_block": {
+      "syntax": "increment {var1, var2, ...} (condition) { statements... }",
+      "example": "increment {i, j} (i < N) { statements... }"
+    }
+  },
+  
+  "parallel_and_foreach": {
+    "parallel_block": {
+      "syntax": [
+        "parallel by N { statements... }",
+        "parallel id by N { statements... }",
+        "parallel id={id1,id2,...} by [N1,N2,...] { statements... }",
+        "parallel {id1,id2,...} by [N1,N2,...] { statements... }"
+      ],
+      "async_variant": "parallel.async ... { statements... }",
+      "examples": [
+        "parallel by 4 { statements... }",
+        "parallel p by N { statements... }",
+        "parallel p={px,py} by [16,16] { statements... }",
+        "parallel {tx,ty} by [32,32] { statements... }"
+      ],
+      "notes": "parallel块必须包含有效的操作"
+    },
+    "foreach_structure": {
+      "rule": "foreach循环也必须包含实际操作",
+      "notes": "foreach不能为空块"
+    },
+    "with_clause": {
+      "syntax": [
+        "with id in expr { statements... }",
+        "with id={matcher1,matcher2,...} in expr { statements... }",
+        "with {matcher1,matcher2,...} in expr { statements... }"
+      ],
+      "where_clause": "with ... where id1 <-> id2, ... { statements... }",
+      "examples": [
+        "with i in [N] { statements... }",
+        "with i={ix,iy} in [N,M] { statements... }",
+        "with {x,y} in [16,16] { statements... }"
+      ],
+      "notes": "with子句定义迭代变量，可以与foreach配合使用"
+    },
+    "inthreads_block": {
+      "syntax": "inthreads(condition) { statements... }",
+      "async_variant": "inthreads.async(condition) { statements... }",
+      "examples": [
+        "inthreads(threadIdx < 32) { statements... }",
+        "inthreads(x # p * l2_elem_count + l2_elem_count <= M) { statements... }",
+        "inthreads.async(q == #q - 1) { wait ef[n_idx]; statements... }"
+      ],
+      "condition_patterns": [
+        "简单条件: inthreads(q < 4) { ... }",
+        "复合条件: inthreads((q + 1) * last_count <= rem_count) { ... }",
+        "余数处理: inthreads((x # p * l2_elem_count + l2_elem_count > M) && (x # p * l2_elem_count < M)) { ... }"
+      ],
+      "notes": "inthreads可以用于条件执行和线程级并行，特别适合处理边界条件和余数"
+    }
+  },
+  
+  "tensor_operations": {
+    "element_wise": {
+      "addition": "Y.at(i, j) = X1.at(i, j) + X2.at(i, j);",
+      "multiplication": "Y.at(i, j) = X1.at(i, j) * X2.at(i, j);",
+      "functions": "Y.at(i, j) = sqrt(X.at(i, j));"
+    },
+    "reduction": {
+      "sum": "mean.at(i) = reduce_sum(j in 0..M) X.at(i, j) / M;",
+      "min_max": "max_val = reduce_max(i in 0..N) X.at(i);"
+    },
+    "matrix_operations": {
+      "matrix_multiplication": "for i in 0..M {\n  for j in 0..N {\n    C.at(i, j) = 0;\n    for k in 0..K {\n      C.at(i, j) += A.at(i, k) * B.at(k, j);\n    }\n  }\n}"
+    },
+    "select_operation": {
+      "syntax": "result = select(index, value_list);",
+      "example": "val = select(i % 3, {1, 2, 3});"
+    }
+  },
+  
+  "dma_operations": {
+    "copy": {
+      "syntax": "dst = dma.copy[.async] [config] src => destination;",
+      "no_assign": "dma.copy[.async] [config] src => destination;",
+      "chained": "dst = dma.copy[.async] [config] src => destination after prev_dma;",
+      "examples": [
+        "lfs = dma.copy.async lhs.subspan(N) => shared;",
+        "dma.copy local_data => output.subspan(size).at(offset);",
+        "lfl = dma.copy.async lfs.chunkat(q) => local;"
+      ]
+    },
+    "pad": {
+      "syntax": "dst = dma.pad[.async] <config> src => destination;",
+      "config": "<{low}, {high}, {mid}, value>",
+      "example": "pad_result = dma.pad<{1,1},{1,1},{0,0},0> input => output;"
+    },
+    "transpose": {
+      "syntax": "dst = dma.transpose[.async] <dims> src => destination;",
+      "example": "trans = dma.transpose<0,2,1> input => output;"
+    },
+    "none": {
+      "syntax": "event = dma.none;",
+      "example": "dummy = dma.none;"
+    },
+    "wait": {
+      "syntax": "wait event_list;",
+      "examples": [
+        "wait lfs, rfs;", 
+        "wait transfer;",
+        "wait ep[c_idx][q];"
+      ],
+      "notes": "可以等待单个或多个事件，包括事件数组中的特定元素"
+    },
+    "trigger": {
+      "syntax": "trigger event_list;",
+      "examples": [
+        "trigger done_event, ready_event;",
+        "trigger ef[1];",
+        "trigger ep[n_idx];"
+      ],
+      "notes": "可以触发单个或多个事件，包括事件数组中的特定元素"
+    },
+    "sync": {
+      "syntax": "sync.storage;",
+      "examples": [
+        "sync.shared;",
+        "sync.local;"
+      ],
+      "notes": "用于同步特定存储级别的所有线程，确保所有线程在此点同步"
+    }
+  },
+  
+  "inline_cpp": {
+    "syntax": "__cpp__(\"C++ code\");",
+    "example": "__cpp__(\"printf(\\\"Hello, world!\\n\\\");\");"
+  },
+  
+  "common_errors": {
+    "constant_usage": "不能直接使用宏定义的常量",
+    "variable_assignment": "函数内变量不能在声明时赋值",
+    "complex_expressions": "过于复杂的表达式可能导致编译错误",
+    "type_mismatch": "类型不匹配的赋值会导致编译错误，即使添加类型后缀",
+    "array_access": "使用方括号访问数组元素，应使用.at()方法",
+    "c_style_loops": "使用C风格for循环，应使用Choreo特有的循环语法"
+  },
+  
+  "best_practices": {
+    "keep_it_simple": "保持代码简单，避免复杂表达式和操作",
+    "use_scalar_values": "尽量使用基本的标量值，避免复杂的常量",
+    "explicit_types": "显式指定类型，避免隐式转换",
+    "structured_parallelism": "使用结构化的并行模式，避免复杂的嵌套",
+    "data_movement": "优先使用DMA操作进行数据移动，而非逐元素赋值",
+    "memory_hierarchy": "合理利用memory hierarchy (global/shared/local)，减少访存开销",
+    "synchronization": "适当使用同步操作，避免数据竞争"
+  },
+  
+  "advanced_patterns": {
+    "double_buffer": {
+      "description": "双缓冲技术允许在处理当前数据块的同时预取下一个数据块，提高数据传输和计算的重叠",
+      "key_components": [
+        "多缓冲区声明: shared f32[input.span / {1, #n_tile}] l2_input[2];",
+        "索引计算: c_idx = n_tile % 2; n_idx = (c_idx + 1) % 2;",
+        "事件同步: 使用event数组进行缓冲区间的同步",
+        "异步执行: 使用inthreads.async进行异步数据传输"
+      ],
+      "example": [
+        "// 预加载第一个数据块",
+        "dma.copy input.chunkat(_, n_tile) => l2_input[0];",
+        "trigger ef[1]; // 允许获取下一个数据块",
+        "trigger ep[0]; // 允许处理当前数据块",
+        "",
+        "// 主循环",
+        "foreach n_tile {",
+        "  c_idx = n_tile % 2;       // 当前缓冲区索引",
+        "  n_idx = (c_idx + 1) % 2;  // 下一个缓冲区索引",
+        "",
+        "  // 预取下一个数据块",
+        "  inthreads.async (q == #q - 1) {",
+        "    wait ef[n_idx];",
+        "    if (n_tile + 1 < #n_tile)",
+        "      dma.copy input.chunkat(_, n_tile + 1) => l2_input[n_idx];",
+        "    trigger ep[n_idx];",
+        "  }",
+        "",
+        "  // 处理当前数据块",
+        "  inthreads.async (q < #q - 1) {",
+        "    wait ep[c_idx][q];",
+        "    // 处理逻辑...",
+        "    trigger ef[c_idx][q];",
+        "  }",
+        "}"
+      ],
+      "notes": "双缓冲模式需要仔细管理事件同步，确保缓冲区访问不会发生冲突"
+    },
+    
+    "remainder_handling": {
+      "description": "处理不能被块大小整除的数据集，确保正确处理边界条件",
+      "key_components": [
+        "条件检测: 使用inthreads条件判断是否需要处理余数",
+        "余数计算: rem_count = M % l2_elem_count;",
+        "动态调整: 根据余数大小调整处理策略"
+      ],
+      "example": [
+        "// 处理主要工作负载",
+        "inthreads (x # p * l2_elem_count + l2_elem_count <= M) {",
+        "  // 正常处理完整块",
+        "}",
+        "",
+        "// 处理最后一次迭代中的余数",
+        "inthreads ((x # p * l2_elem_count + l2_elem_count > M) && (x # p * l2_elem_count < M)) {",
+        "  rem_count = M % l2_elem_count;",
+        "  // 使用modspan处理余数",
+        "  lfs = dma.copy.async lhs.modspan(l2_elem_count).at(x # p) => shared;",
+        "  // ...",
+        "}",
+        "",
+        "// 处理最后一块中的子块",
+        "inthreads ((q + 1) * last_count <= rem_count) {",
+        "  // 处理完整子块",
+        "}",
+        "",
+        "// 处理最后一块中的最后一个子块",
+        "inthreads ((q * last_count < rem_count) && ((q + 1) * last_count > rem_count)) {",
+        "  // 处理部分子块",
+        "}"
+      ],
+      "notes": "余数处理是高性能计算中的关键部分，确保正确处理所有数据而不会越界"
+    },
+    
+    "event_synchronization": {
+      "description": "使用事件进行线程间同步，协调不同线程的执行顺序",
+      "key_components": [
+        "事件声明: shared event ep[2][2], ef[2][2];",
+        "事件触发: trigger ef[1];",
+        "事件等待: wait ep[c_idx][q];"
+      ],
+      "patterns": [
+        "生产者-消费者: 一个线程触发事件，另一个线程等待该事件",
+        "屏障同步: 多个线程在继续执行前都等待同一事件",
+        "双缓冲同步: 使用事件数组控制双缓冲访问"
+      ],
+      "example": [
+        "// 事件声明",
+        "shared event ep[2][2], ef[2][2];",
+        "",
+        "// 线程1: 生产者",
+        "inthreads.async (q == #q - 1) {",
+        "  // 执行某些操作",
+        "  trigger ep[n_idx]; // 通知消费者数据已准备好",
+        "}",
+        "",
+        "// 线程2: 消费者",
+        "inthreads.async (q < #q - 1) {",
+        "  wait ep[c_idx][q]; // 等待数据准备好",
+        "  // 处理数据",
+        "  trigger ef[c_idx][q]; // 通知生产者缓冲区已释放",
+        "}"
+      ],
+      "notes": "事件同步是实现高效并行算法的关键，但需要小心避免死锁"
+    }
+  }
+} 

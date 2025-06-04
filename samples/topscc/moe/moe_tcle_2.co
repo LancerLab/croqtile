@@ -1,0 +1,328 @@
+// MoE Complete TCLE Version 2
+__co__ f32[batch, seq, hidden] moe_tcle_2(f32[batch, seq, hidden] X) {
+    f32[batch, seq, hidden] Y;
+    
+    // 定义 MoE 参数
+    const int num_experts = 8;   // 专家数量
+    const int top_k = 2;         // 选择前 k 个专家
+    const int expert_hidden = hidden * 4; // FFN 中间层维度 (通常是 4x)
+    
+    // 使用 TCLE 向量化处理
+    __cok__ {
+    #include "tcle.h"
+    using namespace tcle;
+    
+    // 辅助函数：执行 top-k 选择
+    void top_k_indices(float* scores, int* indices, int num_experts, int k) {
+        // 初始化索引
+        for (int i = 0; i < num_experts; i++) {
+            indices[i] = i;
+        }
+        
+        // 简单选择排序找出 top-k
+        for (int i = 0; i < k; i++) {
+            int max_idx = i;
+            for (int j = i + 1; j < num_experts; j++) {
+                if (scores[indices[j]] > scores[indices[max_idx]]) {
+                    max_idx = j;
+                }
+            }
+            // 交换
+            if (max_idx != i) {
+                int temp = indices[i];
+                indices[i] = indices[max_idx];
+                indices[max_idx] = temp;
+            }
+        }
+    }
+    
+    // MoE 路由器内核
+    void moe_router_kernel(
+        float* input_ptr, float* router_weights, float* router_bias,
+        int* expert_indices, float* expert_weights, 
+        int seq_len, int hidden_size, int num_experts, int top_k) {
+        
+        // 临时存储专家分数
+        float* expert_scores = (float*)tcle::malloc(num_experts * sizeof(float));
+        int* indices = (int*)tcle::malloc(num_experts * sizeof(int));
+        
+        // 处理每个序列中的每个 token
+        for (int s = 0; s < seq_len; s++) {
+            int token_offset = s * hidden_size;
+            
+            // 初始化专家分数为偏置值
+            for (int e = 0; e < num_experts; e++) {
+                expert_scores[e] = router_bias[e];
+            }
+            
+            // 计算路由 logits: X * router_weights + router_bias
+            for (int h = 0; h < hidden_size; h++) {
+                float token_feature = input_ptr[token_offset + h];
+                
+                // 对每个专家累加分数
+                for (int e = 0; e < num_experts; e++) {
+                    expert_scores[e] += token_feature * router_weights[e * hidden_size + h];
+                }
+            }
+            
+            // 应用 softmax 得到路由概率
+            // 步骤 1: 找出最大值，保证数值稳定性
+            float max_score = expert_scores[0];
+            for (int e = 1; e < num_experts; e++) {
+                max_score = tcle::max(max_score, expert_scores[e]);
+            }
+            
+            // 步骤 2: 计算 exp(score - max) 和求和
+            float sum_exp = 0.0f;
+            for (int e = 0; e < num_experts; e++) {
+                expert_scores[e] = tcle::exp(expert_scores[e] - max_score);
+                sum_exp += expert_scores[e];
+            }
+            
+            // 步骤 3: 归一化
+            for (int e = 0; e < num_experts; e++) {
+                expert_scores[e] /= sum_exp;
+            }
+            
+            // 选择 top-k 专家
+            top_k_indices(expert_scores, indices, num_experts, top_k);
+            
+            // 存储 top-k 专家索引和分数
+            for (int k = 0; k < top_k; k++) {
+                int idx = indices[k];
+                expert_indices[s * top_k + k] = idx;
+                expert_weights[s * top_k + k] = expert_scores[idx];
+            }
+        }
+        
+        // 释放临时存储
+        tcle::free(expert_scores);
+        tcle::free(indices);
+    }
+    
+    // 专家网络（简化的 FFN）内核
+    void expert_ffn_kernel(
+        float* input_ptr, float* output_ptr,
+        float* expert_w1, float* expert_b1,
+        float* expert_w2, float* expert_b2,
+        int hidden_size, int ff_size) {
+        
+        // 使用 TCLE 向量类型获得最佳性能
+        using vec_type = typename tcle::altivector<float, TCLE_MAX_VECTOR_LENGTH>::VT;
+        
+        // 创建向量化内存访问指针
+        auto output_leaptr = tcle::simple_leaptr<vec_type>((generic_ptr)output_ptr);
+        
+        // 获取平台向量长度
+        const int vec_len = tcle::altivector_step<vec_type>();
+        
+        // 临时存储中间结果
+        float* intermediate = (float*)tcle::malloc(ff_size * sizeof(float));
+        
+        // 计算第一层: intermediate = GeLU(input * W1 + b1)
+        for (int f = 0; f < ff_size; f++) {
+            float sum = expert_b1[f];
+            for (int h = 0; h < hidden_size; h++) {
+                sum += input_ptr[h] * expert_w1[f * hidden_size + h];
+            }
+            
+            // 应用 GeLU 激活
+            // GeLU(x) ≈ 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x^3)))
+            float x = sum;
+            float x3 = x * x * x;
+            float inner = 0.79788456f * (x + 0.044715f * x3); // sqrt(2/π) ≈ 0.79788456
+            intermediate[f] = 0.5f * x * (1.0f + tcle::tanh(inner));
+        }
+        
+        // 计算第二层: output = intermediate * W2 + b2
+        for (int h = 0; h < hidden_size; h += vec_len) {
+            int remaining = tcle::min(vec_len, hidden_size - h);
+            
+            if (remaining == vec_len) {
+                // 完整向量情况
+                vec_type bias_vec = tcle::vload<vec_type>(&expert_b2[h]);
+                vec_type result = bias_vec;
+                
+                for (int f = 0; f < ff_size; f++) {
+                    float inter_val = intermediate[f];
+                    vec_type inter_vec = tcle::vbroadcast<vec_type>(inter_val);
+                    vec_type weight_vec = tcle::vload<vec_type>(&expert_w2[f * hidden_size + h]);
+                    
+                    // 累加: result += inter_val * weight_vec
+                    result = tcle::vfma<vec_type>(result, inter_vec, weight_vec);
+                }
+                
+                // 存储结果
+                output_leaptr.store_at(result, h);
+            } else {
+                // 部分向量情况（边缘情况）
+                for (int i = 0; i < remaining; i++) {
+                    float sum = expert_b2[h + i];
+                    for (int f = 0; f < ff_size; f++) {
+                        sum += intermediate[f] * expert_w2[f * hidden_size + h + i];
+                    }
+                    output_ptr[h + i] = sum;
+                }
+            }
+        }
+        
+        // 释放临时存储
+        tcle::free(intermediate);
+    }
+    
+    // MoE 完整处理内核
+    __co_device__ extern "C" void moe_kernel(
+        float* input_ptr, float* output_ptr,
+        float* router_weights, float* router_bias,
+        float* expert_w1, float* expert_b1,
+        float* expert_w2, float* expert_b2,
+        int seq_len, int hidden_size, int ff_size, 
+        int num_experts, int top_k) {
+        
+        // 使用 TCLE 向量类型获得最佳性能
+        using vec_type = typename tcle::altivector<float, TCLE_MAX_VECTOR_LENGTH>::VT;
+        
+        // 获取平台向量长度
+        const int vec_len = tcle::altivector_step<vec_type>();
+        
+        // 临时存储
+        int* expert_indices = (int*)tcle::malloc(seq_len * top_k * sizeof(int));
+        float* expert_weights = (float*)tcle::malloc(seq_len * top_k * sizeof(float));
+        float* expert_output = (float*)tcle::malloc(hidden_size * sizeof(float));
+        float* token_result = (float*)tcle::malloc(hidden_size * sizeof(float));
+        
+        // 计算路由决策
+        moe_router_kernel(
+            input_ptr, router_weights, router_bias,
+            expert_indices, expert_weights,
+            seq_len, hidden_size, num_experts, top_k
+        );
+        
+        // 对每个序列位置处理
+        for (int s = 0; s < seq_len; s++) {
+            int token_offset = s * hidden_size;
+            
+            // 初始化 token 结果为 0
+            for (int h = 0; h < hidden_size; h++) {
+                token_result[h] = 0.0f;
+            }
+            
+            // 处理选定的专家
+            for (int k = 0; k < top_k; k++) {
+                int expert_idx = expert_indices[s * top_k + k];
+                float expert_weight = expert_weights[s * top_k + k];
+                
+                // 获取当前专家的权重指针
+                float* cur_w1 = &expert_w1[expert_idx * hidden_size * ff_size];
+                float* cur_b1 = &expert_b1[expert_idx * ff_size];
+                float* cur_w2 = &expert_w2[expert_idx * ff_size * hidden_size];
+                float* cur_b2 = &expert_b2[expert_idx * hidden_size];
+                
+                // 应用专家 FFN
+                expert_ffn_kernel(
+                    &input_ptr[token_offset], expert_output,
+                    cur_w1, cur_b1, cur_w2, cur_b2,
+                    hidden_size, ff_size
+                );
+                
+                // 加权累加专家输出
+                for (int h = 0; h < hidden_size; h += vec_len) {
+                    int remaining = tcle::min(vec_len, hidden_size - h);
+                    
+                    if (remaining == vec_len) {
+                        // 完整向量情况
+                        vec_type weight_vec = tcle::vbroadcast<vec_type>(expert_weight);
+                        vec_type expert_vec = tcle::vload<vec_type>(&expert_output[h]);
+                        vec_type result_vec = tcle::vload<vec_type>(&token_result[h]);
+                        
+                        // 累加: result += weight * expert_output
+                        result_vec = tcle::vfma<vec_type>(result_vec, weight_vec, expert_vec);
+                        
+                        // 存储结果
+                        tcle::vstore<vec_type>(result_vec, &token_result[h]);
+                    } else {
+                        // 部分向量情况（边缘情况）
+                        for (int i = 0; i < remaining; i++) {
+                            token_result[h + i] += expert_weight * expert_output[h + i];
+                        }
+                    }
+                }
+            }
+            
+            // 复制最终结果到输出
+            for (int h = 0; h < hidden_size; h++) {
+                output_ptr[token_offset + h] = token_result[h];
+            }
+        }
+        
+        // 释放临时存储
+        tcle::free(expert_indices);
+        tcle::free(expert_weights);
+        tcle::free(expert_output);
+        tcle::free(token_result);
+    }
+    } // __cok__
+    
+    // 共享权重
+    shared f32[num_experts, hidden] router_W;
+    shared f32[num_experts] router_b;
+    
+    shared f32[num_experts, hidden, expert_hidden] expert_W1;
+    shared f32[num_experts, expert_hidden] expert_b1;
+    shared f32[num_experts, expert_hidden, hidden] expert_W2;
+    shared f32[num_experts, hidden] expert_b2;
+    
+    // 初始化权重 - 在实际实现中，这些将是输入或加载的
+    foreach {e, h} in [num_experts, hidden] {
+        router_W.at(e, h) = 0.01f * (e + h); // 示例初始化
+        
+        if (h == 0) {
+            router_b.at(e) = 0.0f; // 偏置初始化
+        }
+        
+        foreach {eh} in [expert_hidden] {
+            expert_W1.at(e, h, eh) = 0.01f * (e + h + eh);
+            
+            if (h == 0) {
+                expert_b1.at(e, eh) = 0.0f;
+            }
+        }
+        
+        expert_b2.at(e, h) = 0.0f;
+        
+        foreach {eh} in [expert_hidden] {
+            expert_W2.at(e, eh, h) = 0.01f * (e + eh + h);
+        }
+    }
+    
+    // 主体并行结构
+    parallel b by batch {
+        local f32[seq, hidden] X_local;
+        local f32[seq, hidden] Y_local;
+        
+        // 复制输入数据到本地内存
+        dma.copy X.chunkat(b, _, _) => X_local;
+        
+        // 计算 MoE
+        __call_tcle moe_kernel(
+            X_local.data,
+            Y_local.data,
+            router_W.data,
+            router_b.data,
+            expert_W1.data,
+            expert_b1.data,
+            expert_W2.data,
+            expert_b2.data,
+            seq,
+            hidden,
+            expert_hidden,
+            num_experts,
+            top_k
+        );
+        
+        // 复制结果到输出
+        dma.copy Y_local => Y.chunkat(b, _, _);
+    }
+    
+    return Y;
+} 

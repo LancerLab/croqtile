@@ -4,15 +4,27 @@
 #define LEN 1000
 #define EMB_VEC_SIZE 64
 
-// 实现merge_emb_vec函数 - 与CUDA核心对应
-__co__ void merge_emb_vec(f32[LEN, EMB_VEC_SIZE] output_emb_vec, f32[LEN, EMB_VEC_SIZE] missing_emb_vec, u32[LEN] missing_index) {
-  parallel {p, q} by [1, 1] {
-    with {src_emb_vec, dst_float} in [LEN, EMB_VEC_SIZE] {
-      foreach src_emb_vec, dst_float {
-        int dst_emb_vec = missing_index.at(src_emb_vec);
-        output_emb_vec.at(dst_emb_vec, dst_float) = missing_emb_vec.at(src_emb_vec, dst_float);
-      }
+__cok__ {
+__co_device__ void fill_missing(float* dst_table, float* src_table, unsigned int* index) {
+  for (int i = 0; i < LEN; ++i)
+    for (int j = 0; j < EMB_VEC_SIZE; ++j) {
+        unsigned int idx_element = index[i];
+        dst_table[idx_element * EMB_VEC_SIZE + j] = src_table[i * EMB_VEC_SIZE + j];
     }
+}
+}
+
+// 实现merge_emb_vec函数 - 与CUDA核心对应
+__co__ void merge_emb_vec(f32[LEN, EMB_VEC_SIZE] missing_emb_vec, u32[LEN] missing_index, f32[LEN, EMB_VEC_SIZE] output_emb_vec) {
+  parallel {p, q} by [1, 1] {
+    local f32[LEN/#p/#q, EMB_VEC_SIZE] local_emb_vec_dst;
+    local f32[LEN/#p/#q, EMB_VEC_SIZE] local_emb_vec_src;
+    local u32[LEN/#p/#q] index;
+    dma.copy output_emb_vec.chunkat(p#q, _) => local_emb_vec_dst;
+    dma.copy missing_emb_vec.chunkat(p#q, _) => local_emb_vec_src;
+    dma.copy missing_index.chunkat(p#q) => index;
+    call fill_missing(local_emb_vec_dst, local_emb_vec_src, index);
+    dma.copy local_emb_vec_dst => output_emb_vec.chunkat(p#q, _);
   }
 }
 
@@ -94,7 +106,7 @@ int main() {
     auto missing_index_view = choreo::make_spanview<1, choreo::u32>((uint32_t*)missing_index, {LEN});
     auto missing_emb_vec_view = choreo::make_spanview<2, choreo::f32>((float*)missing_emb_vec, {LEN, EMB_VEC_SIZE});
     auto output_choreo_view = choreo::make_spanview<2, choreo::f32>((float*)output_choreo, {LEN, EMB_VEC_SIZE});
-    merge_emb_vec(output_choreo_view, missing_emb_vec_view, missing_index_view);
+    merge_emb_vec(missing_emb_vec_view, missing_index_view, output_choreo_view);
     // 校验
     int fail = 0;
     for (int i = 0; i < LEN; ++i) {

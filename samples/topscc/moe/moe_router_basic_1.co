@@ -1,0 +1,18 @@
+// MoE Router Basic Version 1
+__co__ f32[batch, seq, experts, k_experts] moe_router_basic_1(f32[batch, seq, hidden] X) {
+    f32[batch, seq, experts, k_experts] router_indices;
+    parallel b by batch {
+        local f32[seq, hidden] X_local;
+        local f32[seq, experts, k_experts] router_local;
+        
+        // 复制输入数据到本地内存
+        dma.copy X.chunkat(b, _, _) => X_local;
+        
+        // 1. 计算路由索引和权重
+        // router_local = router(X_local)
+        
+        // 复制结果到输出
+        dma.copy router_local => router_indices.chunkat(b, _, _, _);
+    }
+    return router_indices;
+} 

@@ -1,0 +1,151 @@
+// Multi-Head Attention TCLE Version 2
+__co__ f32[batch, seq_q, hidden] mha_tcle_2(
+    f32[batch, seq_q, hidden] Q,
+    f32[batch, seq_k, hidden] K,
+    f32[batch, seq_k, hidden] V) {
+    
+    f32[batch, seq_q, hidden] out;
+    
+    // 定义多头注意力参数
+    const int num_heads = 16;  // 头数
+    const int head_dim = hidden / num_heads;  // 每个头的维度
+    
+    // 使用 TCLE 向量化处理
+    __cok__ {
+    #include "tcle.h"
+    using namespace tcle;
+    
+    __co_device__ extern "C" void mha_kernel(
+        float* q_ptr, float* k_ptr, float* v_ptr, float* out_ptr,
+        int seq_q_len, int seq_k_len, int hidden_size, 
+        int num_heads, int head_dim) {
+        
+        // 使用 TCLE 向量类型获得最佳性能
+        using vec_type = typename tcle::altivector<float, TCLE_MAX_VECTOR_LENGTH>::VT;
+        
+        // 创建向量化内存访问指针
+        auto q_leaptr = tcle::simple_leaptr<vec_type>((generic_ptr)q_ptr);
+        auto k_leaptr = tcle::simple_leaptr<vec_type>((generic_ptr)k_ptr);
+        auto v_leaptr = tcle::simple_leaptr<vec_type>((generic_ptr)v_ptr);
+        auto out_leaptr = tcle::simple_leaptr<vec_type>((generic_ptr)out_ptr);
+        
+        // 获取平台向量长度
+        const int vec_len = tcle::altivector_step<vec_type>();
+        
+        // 临时缓冲区，用于存储 Q×K 的结果
+        float* attention_scores = (float*)tcle::malloc(seq_q_len * seq_k_len * sizeof(float));
+        
+        // 缩放因子
+        float scale = 1.0f / sqrtf(head_dim);
+        
+        // 对每个头进行计算
+        for (int h = 0; h < num_heads; h++) {
+            int head_offset = h * head_dim;
+            
+            // 计算注意力分数: Q×K^T / sqrt(head_dim)
+            for (int q = 0; q < seq_q_len; q++) {
+                for (int k = 0; k < seq_k_len; k++) {
+                    float score = 0.0f;
+                    
+                    // 计算 Q[q] 和 K[k] 的点积
+                    for (int d = 0; d < head_dim; d++) {
+                        float q_val = q_ptr[q * hidden_size + head_offset + d];
+                        float k_val = k_ptr[k * hidden_size + head_offset + d];
+                        score += q_val * k_val;
+                    }
+                    
+                    // 应用缩放
+                    attention_scores[q * seq_k_len + k] = score * scale;
+                }
+                
+                // 对注意力分数进行 softmax
+                // 步骤 1: 找出最大值，保证数值稳定性
+                float max_score = attention_scores[q * seq_k_len];
+                for (int k = 1; k < seq_k_len; k++) {
+                    max_score = tcle::max(max_score, attention_scores[q * seq_k_len + k]);
+                }
+                
+                // 步骤 2: 计算 exp(score - max) 和求和
+                float sum_exp = 0.0f;
+                for (int k = 0; k < seq_k_len; k++) {
+                    attention_scores[q * seq_k_len + k] = 
+                        tcle::exp(attention_scores[q * seq_k_len + k] - max_score);
+                    sum_exp += attention_scores[q * seq_k_len + k];
+                }
+                
+                // 步骤 3: 归一化
+                for (int k = 0; k < seq_k_len; k++) {
+                    attention_scores[q * seq_k_len + k] /= sum_exp;
+                }
+                
+                // 计算注意力输出: scores × V
+                for (int d = 0; d < head_dim; d += vec_len) {
+                    int remaining = tcle::min(vec_len, head_dim - d);
+                    
+                    if (remaining == vec_len) {
+                        // 完整向量宽度
+                        vec_type out_vec = (vec_type)(0.0f);
+                        
+                        for (int k = 0; k < seq_k_len; k++) {
+                            float attn_val = attention_scores[q * seq_k_len + k];
+                            vec_type attn_vec = tcle::vbroadcast<vec_type>(attn_val);
+                            vec_type v_vec = v_leaptr.load_at(k * hidden_size + head_offset + d);
+                            
+                            // 累加: out += attn * v
+                            out_vec = tcle::vfma<vec_type>(out_vec, attn_vec, v_vec);
+                        }
+                        
+                        // 存储结果
+                        out_leaptr.store_at(out_vec, q * hidden_size + head_offset + d);
+                    } else {
+                        // 部分向量（边缘情况）
+                        for (int i = 0; i < remaining; i++) {
+                            float sum = 0.0f;
+                            for (int k = 0; k < seq_k_len; k++) {
+                                float attn_val = attention_scores[q * seq_k_len + k];
+                                float v_val = v_ptr[k * hidden_size + head_offset + d + i];
+                                sum += attn_val * v_val;
+                            }
+                            out_ptr[q * hidden_size + head_offset + d + i] = sum;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 释放临时存储
+        tcle::free(attention_scores);
+    }
+    } // __cok__
+    
+    // 主体并行结构
+    parallel b by batch {
+        local f32[seq_q, hidden] Q_local;
+        local f32[seq_k, hidden] K_local;
+        local f32[seq_k, hidden] V_local;
+        local f32[seq_q, hidden] out_local;
+        
+        // 复制输入数据到本地内存
+        dma.copy Q.chunkat(b, _, _) => Q_local;
+        dma.copy K.chunkat(b, _, _) => K_local;
+        dma.copy V.chunkat(b, _, _) => V_local;
+        
+        // 计算多头注意力
+        __call_tcle mha_kernel(
+            Q_local.data,
+            K_local.data,
+            V_local.data,
+            out_local.data,
+            seq_q,
+            seq_k,
+            hidden,
+            num_heads,
+            head_dim
+        );
+        
+        // 复制结果到输出
+        dma.copy out_local => out.chunkat(b, _, _);
+    }
+    
+    return out;
+} 

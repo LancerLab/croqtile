@@ -1,0 +1,10 @@
+// LayerNorm Basic Version 1
+__co__ f32[batch, seq, dim] layernorm_basic_1(f32[batch, seq, dim] X) {
+    f32[batch, seq, dim] Y;
+    parallel b by batch {
+        local f32[seq, dim] tmp;
+        // 1. tmp = (X.chunkat(b, _, _) - mean) / std
+        dma.copy tmp => Y.chunkat(b, _, _);
+    }
+    return Y;
+} 

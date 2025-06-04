@@ -1,0 +1,45 @@
+{
+  "version": "1.0",
+  "test_description": "Pinocchio系统功能测试配置",
+  
+  "test_files": {
+    "errors_example": "test_choreo_errors.choreo",
+    "correct_example": "test_choreo_correct.choreo",
+    "embedding_cache": "embedding_cache.choreo"
+  },
+  
+  "test_tools": {
+    "analyzer": "test_analyzer.py",
+    "translator": "test_translator.py"
+  },
+  
+  "test_cases": [
+    {
+      "id": "syntax_check_1",
+      "description": "检测基本语法错误",
+      "target_file": "test_choreo_errors.choreo",
+      "expected_errors": 10,
+      "expected_types": ["数据类型错误", "数组声明错误", "数组访问错误", "变量初始化错误", "逻辑表达式错误"]
+    },
+    {
+      "id": "syntax_check_2",
+      "description": "验证正确代码",
+      "target_file": "test_choreo_correct.choreo",
+      "expected_errors": 0
+    },
+    {
+      "id": "translator_1",
+      "description": "TopSCC到Choreo转换",
+      "input_type": "topscc",
+      "expected_output_type": "choreo",
+      "check_data_types": true,
+      "check_array_access": true
+    }
+  ],
+  
+  "test_prompts": [
+    "Pinocchio，请分析tests/pinocchio/test_choreo_errors.choreo文件中的语法错误",
+    "Pinocchio，请检查tests/pinocchio/test_choreo_correct.choreo文件是否符合Choreo语法",
+    "Pinocchio，请将测试示例中的TopSCC代码转换为Choreo代码"
+  ]
+} 

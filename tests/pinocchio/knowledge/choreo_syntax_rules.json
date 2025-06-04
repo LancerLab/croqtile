@@ -1,0 +1,106 @@
+{
+  "version": "1.1",
+  "language": "Choreo",
+  "description": "Updated knowledge base for Choreo syntax rules based on empirical testing",
+  
+  "data_types": {
+    "naming_convention": {
+      "rule": "数据类型名称必须使用小写",
+      "correct_examples": ["u32", "s32", "f32"],
+      "incorrect_examples": ["U32", "S32", "F32"],
+      "notes": "Choreo中的类型名称严格区分大小写，必须使用小写形式"
+    },
+    "supported_types": {
+      "integer_types": ["u8", "u16", "u32", "s8", "s16", "s32"],
+      "floating_types": ["f32"],
+      "unsupported_types": ["u64", "s64", "f64"],
+      "notes": "不支持直接使用u64/s64类型，需使用u32/s32替代"
+    },
+    "literal_values": {
+      "integer_literals": "支持十进制整数，如123",
+      "float_literals": "浮点数必须添加f后缀，如0.5f",
+      "unsupported_literals": "不支持十六进制常量，如0xFFFFFFFF",
+      "notes": "使用字面量时必须注意类型匹配，不支持隐式类型转换"
+    }
+  },
+  
+  "array_and_mdspan": {
+    "declaration": {
+      "rule": "维度必须在类型名称后的单个方括号内用逗号分隔",
+      "correct_examples": ["u32 [2, 4]", "f32 [CAPACITY, SET_ASSOCIATIVITY, WARP_SIZE]"],
+      "incorrect_examples": ["u32 [2][4]", "u32 [2, 4][3]"],
+      "notes": "数组声明时所有维度必须在一个方括号内以逗号分隔"
+    },
+    "memory_placement": {
+      "rule": "如需指定内存位置，可使用global或local关键字",
+      "examples": ["global f32 [2]", "local u32 [2, 4]"],
+      "notes": "在函数内部，数组可以不指定内存位置"
+    },
+    "access": {
+      "rule": "数组访问必须使用.at()方法",
+      "correct_examples": ["array.at(i)", "matrix.at(i, j)"],
+      "incorrect_examples": ["array[i]", "matrix[i, j]", "matrix[i][j]"],
+      "notes": "不能使用方括号操作符访问数组元素"
+    }
+  },
+  
+  "function_parameters": {
+    "rule": "不支持在函数参数中直接定义多维数组类型",
+    "notes": "函数参数中的数组类型需要特殊处理"
+  },
+  
+  "variable_declarations": {
+    "rule": "函数内变量无法在声明时直接赋值",
+    "incorrect_examples": ["u32 var = 123;"],
+    "notes": "必须先声明变量，然后在单独的语句中赋值"
+  },
+  
+  "operators_and_expressions": {
+    "logical_operators": {
+      "rule": "不支持复杂的逻辑表达式",
+      "incorrect_examples": ["if (a != 0 && b < c)"],
+      "correct_examples": ["if (a != 0) { if (b < c) { ... } }"],
+      "notes": "复杂的逻辑表达式需要拆分为嵌套的if语句"
+    },
+    "arithmetic_operations": {
+      "rule": "不支持对索引变量进行算术运算",
+      "incorrect_examples": ["cache.at(i + j) = 1;"],
+      "notes": "索引变量应直接使用，不应参与算术运算"
+    },
+    "type_conversion": {
+      "rule": "不支持隐式类型转换",
+      "notes": "不同类型之间的赋值可能导致编译错误，即使看起来类型兼容"
+    }
+  },
+  
+  "parallel_and_foreach": {
+    "parallel_block": {
+      "rule": "parallel块中必须包含实际操作，不能为空",
+      "correct_examples": ["parallel p by 1 { with i in [4] { foreach i { ... } } }"],
+      "notes": "parallel块必须包含有效的操作"
+    },
+    "foreach_structure": {
+      "rule": "foreach循环也必须包含实际操作",
+      "notes": "foreach不能为空块"
+    },
+    "with_clause": {
+      "rule": "必须先定义with子句，再使用foreach",
+      "correct_examples": ["with i in [2] { foreach i { ... } }"],
+      "notes": "with子句定义迭代变量，foreach使用这些变量"
+    }
+  },
+  
+  "common_errors": {
+    "constant_usage": "不能直接使用宏定义的常量",
+    "variable_assignment": "函数内变量不能在声明时赋值",
+    "complex_expressions": "不支持复杂的逻辑表达式，需拆分为简单表达式",
+    "type_mismatch": "类型不匹配的赋值会导致编译错误，即使添加类型后缀"
+  },
+  
+  "best_practices": {
+    "keep_it_simple": "保持代码简单，避免复杂表达式和操作",
+    "use_scalar_values": "尽量使用基本的标量值，避免复杂的常量",
+    "explicit_types": "显式指定类型，避免隐式转换",
+    "structured_parallelism": "使用结构化的并行模式，避免复杂的嵌套"
+  }
+} 

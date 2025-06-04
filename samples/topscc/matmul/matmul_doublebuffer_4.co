@@ -1,0 +1,213 @@
+// MatMul Double Buffer Version 4 - Optimized with tiling and double buffering
+__co__ f32[batch, m, n] matmul_doublebuffer_4(f32[batch, m, k] A, f32[batch, k, n] B) {
+    f32[batch, m, n] C;
+    
+    // Memory hierarchy sizes
+    // L1 (LOCAL): ~1.5MB
+    // L2 (SHARED): 64MB
+    // Global: 40.75GB
+    
+    // Vector length for TCLE optimization
+    const int VL = 128; // TCLE_MAX_VECTOR_LENGTH for GCU300
+    
+    // Define tile sizes for best cache utilization
+    // Align tile sizes with vector length
+    const int MT = 128;  // M dimension tile size
+    const int NT = 256;  // N dimension tile size (larger for better vectorization)
+    const int KT = 64;   // K dimension tile size (smaller to reduce memory footprint)
+    
+    // For L2 cache, use larger tiles
+    const int MT_L2 = 512;  // L2 M dimension tile
+    const int NT_L2 = 1024; // L2 N dimension tile
+    const int KT_L2 = 256;  // L2 K dimension tile
+    
+    __cok__ {
+    #include "tcle.h"
+    using namespace tcle;
+    
+    __co_device__ extern "C" void matmul_kernel(
+        float* A_ptr, float* B_ptr, float* C_ptr,
+        int M, int N, int K, int lda, int ldb, int ldc) {
+        
+        // Use TCLE vector types for optimal performance
+        using vec_type = typename tcle::altivector<float, TCLE_MAX_VECTOR_LENGTH>::VT;
+        
+        // Create leaptrs for vectorized memory access
+        auto A_leaptr = tcle::simple_leaptr<vec_type>((generic_ptr)A_ptr);
+        auto B_leaptr = tcle::simple_leaptr<vec_type>((generic_ptr)B_ptr);
+        auto C_leaptr = tcle::simple_leaptr<vec_type>((generic_ptr)C_ptr);
+        
+        // Vector length for this platform
+        const int vec_len = tcle::altivector_step<vec_type>();
+        
+        // Initialize C to zeros
+        for (int m = 0; m < M; m++) {
+            for (int n = 0; n < N; n += vec_len) {
+                int n_vec = tcle::min(vec_len, N - n);
+                
+                if (n_vec == vec_len) {
+                    // Full vector width
+                    vec_type zeros = (vec_type)(0.0f);
+                    C_leaptr.store_at(zeros, m * ldc + n);
+                } else {
+                    // Partial vector (edge case)
+                    for (int v = 0; v < n_vec; v++) {
+                        C_ptr[m * ldc + n + v] = 0.0f;
+                    }
+                }
+            }
+        }
+        
+        // Compute C using vectorization
+        for (int k = 0; k < K; k++) {
+            for (int m = 0; m < M; m++) {
+                // Broadcast A value
+                float a_val = A_ptr[m * lda + k];
+                vec_type a_vec = tcle::vbroadcast<vec_type>(a_val);
+                
+                for (int n = 0; n < N; n += vec_len) {
+                    int n_vec = tcle::min(vec_len, N - n);
+                    
+                    if (n_vec == vec_len) {
+                        // Full vector width
+                        vec_type b_vec = B_leaptr.load_at(k * ldb + n);
+                        vec_type c_vec = C_leaptr.load_at(m * ldc + n);
+                        
+                        // Vectorized FMA operation
+                        vec_type result = tcle::vfma<vec_type>(c_vec, a_vec, b_vec);
+                        C_leaptr.store_at(result, m * ldc + n);
+                    } else {
+                        // Partial vector (edge case)
+                        for (int v = 0; v < n_vec; v++) {
+                            float b_val = B_ptr[k * ldb + n + v];
+                            C_ptr[m * ldc + n + v] += a_val * b_val;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    } // __cok__
+    
+    // Main parallel structure with hierarchical tiling and double buffering
+    parallel b by batch {
+        // Double buffers for L2 shared memory
+        shared f32[2][MT_L2, KT_L2] A_shared;
+        shared f32[2][KT_L2, NT_L2] B_shared;
+        shared f32[2][MT_L2, NT_L2] C_shared;
+        
+        // Buffer indices for L2
+        int l2_buf_idx = 0;
+        
+        // Process larger tiles that fit in L2
+        for (int m_l2 = 0; m_l2 < m; m_l2 += MT_L2) {
+            int m_end_l2 = min(m_l2 + MT_L2, m);
+            int m_size_l2 = m_end_l2 - m_l2;
+            
+            for (int n_l2 = 0; n_l2 < n; n_l2 += NT_L2) {
+                int n_end_l2 = min(n_l2 + NT_L2, n);
+                int n_size_l2 = n_end_l2 - n_l2;
+                
+                // Initialize C tile to zeros
+                foreach {mi, ni} in [m_size_l2, n_size_l2] {
+                    C_shared[l2_buf_idx].at(mi, ni) = 0.0f;
+                }
+                
+                // Double buffers for L1 local memory
+                local f32[2][MT, KT] A_local;
+                local f32[2][KT, NT] B_local;
+                local f32[2][MT, NT] C_local;
+                
+                // Buffer indices for L1
+                int l1_buf_idx = 0;
+                
+                // Process K dimension with double buffering at L2 level
+                for (int k_l2 = 0; k_l2 < k; k_l2 += KT_L2) {
+                    int k_end_l2 = min(k_l2 + KT_L2, k);
+                    int k_size_l2 = k_end_l2 - k_l2;
+                    
+                    // Load A and B tiles into current L2 buffer
+                    dma.copy A.chunkat(b, m_l2:m_end_l2, k_l2:k_end_l2) => A_shared[l2_buf_idx].chunkat(0:m_size_l2, 0:k_size_l2);
+                    dma.copy B.chunkat(b, k_l2:k_end_l2, n_l2:n_end_l2) => B_shared[l2_buf_idx].chunkat(0:k_size_l2, 0:n_size_l2);
+                    
+                    // Preload next K tiles if not at the end
+                    if (k_l2 + KT_L2 < k) {
+                        int next_k_l2 = k_l2 + KT_L2;
+                        int next_k_end_l2 = min(next_k_l2 + KT_L2, k);
+                        int next_k_size_l2 = next_k_end_l2 - next_k_l2;
+                        
+                        // Preload next tiles to the other buffer
+                        dma.copy A.chunkat(b, m_l2:m_end_l2, next_k_l2:next_k_end_l2) => 
+                            A_shared[1-l2_buf_idx].chunkat(0:m_size_l2, 0:next_k_size_l2);
+                        dma.copy B.chunkat(b, next_k_l2:next_k_end_l2, n_l2:n_end_l2) => 
+                            B_shared[1-l2_buf_idx].chunkat(0:next_k_size_l2, 0:n_size_l2);
+                    }
+                    
+                    // Process L2 tiles with L1 tiling and double buffering
+                    for (int m_l1 = 0; m_l1 < m_size_l2; m_l1 += MT) {
+                        int m_end_l1 = min(m_l1 + MT, m_size_l2);
+                        int m_size_l1 = m_end_l1 - m_l1;
+                        
+                        for (int n_l1 = 0; n_l1 < n_size_l2; n_l1 += NT) {
+                            int n_end_l1 = min(n_l1 + NT, n_size_l2);
+                            int n_size_l1 = n_end_l1 - n_l1;
+                            
+                            // Initialize C local tile to zeros
+                            foreach {mi, ni} in [m_size_l1, n_size_l1] {
+                                C_local[l1_buf_idx].at(mi, ni) = 0.0f;
+                            }
+                            
+                            // Process k dimension with L1 tiling and double buffering
+                            for (int k_l1 = 0; k_l1 < k_size_l2; k_l1 += KT) {
+                                int k_end_l1 = min(k_l1 + KT, k_size_l2);
+                                int k_size_l1 = k_end_l1 - k_l1;
+                                
+                                // Load A and B tiles into current L1 buffer
+                                dma.copy A_shared[l2_buf_idx].chunkat(m_l1:m_end_l1, k_l1:k_end_l1) => 
+                                    A_local[l1_buf_idx].chunkat(0:m_size_l1, 0:k_size_l1);
+                                dma.copy B_shared[l2_buf_idx].chunkat(k_l1:k_end_l1, n_l1:n_end_l1) => 
+                                    B_local[l1_buf_idx].chunkat(0:k_size_l1, 0:n_size_l1);
+                                
+                                // Preload next K tiles if not at the end of the L2 tile
+                                if (k_l1 + KT < k_size_l2) {
+                                    int next_k_l1 = k_l1 + KT;
+                                    int next_k_end_l1 = min(next_k_l1 + KT, k_size_l2);
+                                    int next_k_size_l1 = next_k_end_l1 - next_k_l1;
+                                    
+                                    // Preload next tiles to the other buffer
+                                    dma.copy A_shared[l2_buf_idx].chunkat(m_l1:m_end_l1, next_k_l1:next_k_end_l1) => 
+                                        A_local[1-l1_buf_idx].chunkat(0:m_size_l1, 0:next_k_size_l1);
+                                    dma.copy B_shared[l2_buf_idx].chunkat(next_k_l1:next_k_end_l1, n_l1:n_end_l1) => 
+                                        B_local[1-l1_buf_idx].chunkat(0:next_k_size_l1, 0:n_size_l1);
+                                }
+                                
+                                // Call the optimized TCLE kernel for matrix multiplication
+                                __call_tcle matmul_kernel(
+                                    A_local[l1_buf_idx].data, B_local[l1_buf_idx].data, C_local[l1_buf_idx].data,
+                                    m_size_l1, n_size_l1, k_size_l1,
+                                    m_size_l1, n_size_l1, n_size_l1  // Leading dimensions
+                                );
+                                
+                                // Swap L1 buffers for the next iteration
+                                l1_buf_idx = 1 - l1_buf_idx;
+                            }
+                            
+                            // Accumulate L1 results to L2 buffer
+                            dma.copy C_local[1-l1_buf_idx].chunkat(0:m_size_l1, 0:n_size_l1) => 
+                                C_shared[l2_buf_idx].chunkat(m_l1:m_end_l1, n_l1:n_end_l1);
+                        }
+                    }
+                    
+                    // Swap L2 buffers for the next iteration
+                    l2_buf_idx = 1 - l2_buf_idx;
+                }
+                
+                // Copy the computed L2 tile to the final output
+                dma.copy C_shared[1-l2_buf_idx].chunkat(0:m_size_l2, 0:n_size_l2) => 
+                    C.chunkat(b, m_l2:m_end_l2, n_l2:n_end_l2);
+            }
+        }
+    }
+    
+    return C;
+} 

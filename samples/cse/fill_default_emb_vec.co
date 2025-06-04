@@ -1,25 +1,59 @@
-// cse/fill_default_emb_vec.co - 默认值填充函数（choreo版本）
+// cse/fill_default_emb_vec_basic.co - 默认值填充函数（choreo版本）- 未优化版本
 
 // 使用常量定义
 #include "choreo.h"
 #define LEN 1000
 #define EMB_VEC_SIZE 64
 #define DEFAULT_VALUE 0.5f
+#
+__cok__ {
 
-// 实现fill_default_emb_vec函数
-__co__ void fill_default_emb_vec(f32[LEN, EMB_VEC_SIZE] output_emb_vec, u32[LEN] missing_index) {
+__co_device__ void fill_default(float* table, unsigned int* index) {
+  for (int i = 0; i < LEN; ++i)
+    for (int j = 0; j < EMB_VEC_SIZE; ++j) {
+        unsigned int idx_element = index[i];
+        table[idx_element * EMB_VEC_SIZE + j] = DEFAULT_VALUE;
+    }
+}
+
+}
+
+// 实现fill_default_emb_vec函数 - 未优化版本
+__co__ void fill_default_emb_vec(u32[LEN] missing_index, f32[LEN, EMB_VEC_SIZE] output_emb_vec) {
+
   parallel p by 1 {
-    foreach i in [LEN] {
-      int dst_emb_vec = missing_index.at(i);
-      parallel q by 1 {
-        foreach j in [EMB_VEC_SIZE] {
-          output_emb_vec.at(dst_emb_vec, j) = output_emb_vec.at(dst_emb_vec, j) + DEFAULT_VALUE;
-          // output_emb_vec.at(dst_emb_vec, j) = DEFAULT_VALUE;
-        }
-      }
+    parallel q by 1 {
+      local f32[LEN/#p/#q, EMB_VEC_SIZE] local_emb_vec;
+      local u32[LEN/#p/#q] index;
+      dma.copy output_emb_vec.chunkat(p#q, _) => local_emb_vec;
+      dma.copy missing_index.chunkat(p#q) => index;
+      // foreach {i, j} in [LEN/#p/#q, EMB_VEC_SIZE] {
+      //     unsigned int dst_emb_vec = missing_index.at(i);
+      //     local_emb_vec.at(dst_emb_vec, j) = local_emb_vec.at(dst_emb_vec, j) + 0.5f;
+      // }
+      call fill_default(local_emb_vec, index);
+      dma.copy local_emb_vec => output_emb_vec.chunkat(p#q, _);
     }
   }
 }
+
+__co__ void fill_default_emb_vec_direct(u32[LEN] missing_index, f32[LEN, EMB_VEC_SIZE] output_emb_vec) {
+
+  parallel p by 1 {
+    parallel q by 1 {
+      local f32[LEN/#p/#q, EMB_VEC_SIZE] local_emb_vec;
+      local u32[LEN/#p/#q] index;
+      dma.copy output_emb_vec.chunkat(p#q, _) => local_emb_vec;
+      dma.copy missing_index.chunkat(p#q) => index;
+      foreach {i, j} in [LEN/#p/#q, EMB_VEC_SIZE] {
+          int dst_emb_vec = missing_index.at(i);
+          local_emb_vec.at(dst_emb_vec, j) = local_emb_vec.at(dst_emb_vec, j) + 0.5f;
+      }
+      dma.copy local_emb_vec => output_emb_vec.chunkat(p#q, _);
+    }
+  }
+}
+
 
 // --- CPU参考实现 ---
 void fill_default_emb_vec_cpu(float* output_emb_vec, const float default_emb_vec,
@@ -78,18 +112,22 @@ int main() {
     unsigned int missing_index[LEN];
     for (int i = 0; i < LEN; ++i) missing_index[i] = rand() % LEN;
 
+    for (int i = 0; i < LEN; ++i) printf("missing index[%d] = %d\n", i, missing_index[i]);
+
     // CPU实现
     fill_default_emb_vec_cpu(&output_cpu[0][0], DEFAULT_VALUE, missing_index, LEN, EMB_VEC_SIZE);
 
     // choreo调用
     auto missing_index_view = choreo::make_spanview<1, choreo::u32>((unsigned int*)missing_index, {LEN});
     auto output_choreo_view = choreo::make_spanview<2, choreo::f32>((float*)output_choreo, {LEN, EMB_VEC_SIZE});
-    fill_default_emb_vec(output_choreo_view, missing_index_view);
+    fill_default_emb_vec(missing_index_view, output_choreo_view);
 
     // 校验
     bool match = true;
     for (int i = 0; i < LEN; ++i) {
         for (int j = 0; j < EMB_VEC_SIZE; ++j) {
+            if (i < 3 && j < 16) printf("{%d, %d} = %.2f; should be", i, j, output_choreo[i][j]);
+            if (i < 3 && j < 16) printf("{%d, %d} = %.2f\n", i, j, output_cpu[i][j]);
             if (fabs(output_choreo[i][j] - output_cpu[i][j]) > 1e-5) {
                 match = false;
                 break;
@@ -99,4 +137,4 @@ int main() {
     if (match) printf("fill_default_emb_vec: PASS\n");
     else printf("fill_default_emb_vec: FAIL\n");
     return 0;
-}
+} 

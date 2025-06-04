@@ -1,30 +1,32 @@
-// cse/decompress_emb_vec_op2.co - 嵌入向量解压函数（op2版本）
+// cse/decompress_emb_vec.co - 嵌入向量解压函数
 
 // 使用常量定义
 #define LEN 1000
 #define EMB_VEC_SIZE 64
 
-// 实现decompress_emb_vec函数
-__co__ f32[LEN, EMB_VEC_SIZE] decompress_emb_vec_op2(f32[LEN, EMB_VEC_SIZE] src_emb_vec, 
-                                                     f32[LEN, EMB_VEC_SIZE] dst_emb_vec, 
-                                                     u32[LEN] src_index) {
-  // 使用并行处理
-  parallel {p, q} by [1, 1] {
-    // 遍历所有向量
-    with i in [LEN] {
-      // 获取源索引
-      int src_idx = src_index.at(i);
-      // 遍历每个向量中的元素
-      with j in [EMB_VEC_SIZE] {
-        foreach i, j {
-          // 执行解压操作
-          dst_emb_vec.at(i, j) = src_emb_vec.at(src_idx, j);
-        }
-      }
+__cok__ {
+__co_device__ void decompress_kernel(float* dst_table, float* src_table, unsigned int* index) {
+  for (int i = 0; i < LEN; ++i)
+    for (int j = 0; j < EMB_VEC_SIZE; ++j) {
+        unsigned int idx_element = index[i];
+        dst_table[i * EMB_VEC_SIZE + j] = src_table[idx_element * EMB_VEC_SIZE + j];
     }
+}
+}
+
+__co__ void decompress_emb_vec(f32 [LEN, EMB_VEC_SIZE] src_emb_vec, 
+                               u32 [LEN] src_index,
+                               f32 [LEN, EMB_VEC_SIZE] dst_emb_vec) {
+  parallel {p, q} by [1, 1] {
+    local f32 [LEN/#p/#q, EMB_VEC_SIZE] local_emb_vec_dst;
+    local f32 [LEN/#p/#q, EMB_VEC_SIZE] local_emb_vec_src;
+    local u32 [LEN/#p/#q] index;
+    dma.copy dst_emb_vec.chunkat(p#q, _) => local_emb_vec_dst;
+    dma.copy src_emb_vec.chunkat(p#q, _) => local_emb_vec_src;
+    dma.copy src_index.chunkat(p#q) => index;
+    call decompress_kernel(local_emb_vec_dst, local_emb_vec_src, index);
+    dma.copy local_emb_vec_dst => dst_emb_vec.chunkat(p#q, _);
   }
-  
-  return dst_emb_vec;
 }
 
 // ================== CPU参考实现搬运 ==================
@@ -123,7 +125,7 @@ int main() {
     // choreo算子调用
     auto src_index_view = choreo::make_spanview<1, choreo::u32>((uint32_t*)src_index, {LEN});
     auto src_emb_vec_view = choreo::make_spanview<2, choreo::f32>((float*)src_emb_vec, {LEN, EMB_VEC_SIZE});
-    auto dst_choreo_view = decompress_emb_vec_op2(src_emb_vec_view, src_index_view);
+    auto dst_choreo_view = decompress_emb_vec(src_emb_vec_view, src_index_view);
     // 拷贝choreo结果到dst_choreo
     for (int i = 0; i < LEN; ++i)
         for (int j = 0; j < EMB_VEC_SIZE; ++j)
@@ -140,7 +142,7 @@ int main() {
             }
         }
     }
-    printf("decompress_emb_vec_op2: %s\n", fail ? "FAIL" : "PASS");
+    printf("decompress_emb_vec: %s\n", fail ? "FAIL" : "PASS");
     // 其它版本一致性
     int opt_fail = 0, adv_fail = 0;
     for (int i = 0; i < LEN * EMB_VEC_SIZE; ++i) {

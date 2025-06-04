@@ -1,0 +1,152 @@
+// Multi-Head Attention (Basic) Example for Topscc
+// This sample demonstrates a clear and correct implementation of MHA without advanced optimizations.
+// All comments are in English for clarity.
+
+#include "choreo.h"
+#include <cmath>
+#include <iostream>
+#include <vector>
+
+// Device kernel: matrix multiplication (C = A x B)
+__co_device__ extern "C" void matmul_kernel(float* A, float* B, float* C, int M, int K, int N) {
+    for (int m = 0; m < M; ++m) {
+        for (int n = 0; n < N; ++n) {
+            float sum = 0.0f;
+            for (int k = 0; k < K; ++k) {
+                sum += A[m * K + k] * B[k * N + n];
+            }
+            C[m * N + n] = sum;
+        }
+    }
+}
+
+// Device kernel: row-wise softmax
+__co_device__ extern "C" void softmax_kernel(float* input, float* output, int M, int N) {
+    for (int m = 0; m < M; ++m) {
+        float max_val = input[m * N];
+        for (int n = 1; n < N; ++n) {
+            if (input[m * N + n] > max_val) max_val = input[m * N + n];
+        }
+        float sum = 0.0f;
+        for (int n = 0; n < N; ++n) {
+            output[m * N + n] = expf(input[m * N + n] - max_val);
+            sum += output[m * N + n];
+        }
+        for (int n = 0; n < N; ++n) {
+            output[m * N + n] /= sum;
+        }
+    }
+}
+
+// Tileflow function: Multi-Head Attention (single head, basic version)
+// Q: [B, S, D], K: [B, S, D], V: [B, S, D] (B=batch, S=seq_len, D=dim)
+// Output: [B, S, D]
+__co__ f32[B, S, D] multi_head_attention_basic(f32[B, S, D] Q, f32[B, S, D] K, f32[B, S, D] V) {
+    f32[B, S, D] output;
+    parallel b by B { // batch parallel
+        // Allocate local buffers for intermediate results
+        local f32[S, S] attn_score;   // Q x K^T
+        local f32[S, S] attn_weight;  // softmax(QK^T)
+        local f32[S, D] attn_out;     // output = attn_weight x V
+
+        // 1. Compute attention scores: Q x K^T
+        // Q: [S, D], K: [S, D] -> attn_score: [S, S]
+        local_q = dma.copy Q.chunkat(b, _, _) => local;
+        local_k = dma.copy K.chunkat(b, _, _) => local;
+        call matmul_kernel(local_q.data, local_k.data, attn_score, S, D, S); // K^T is handled in kernel
+
+        // 2. Apply softmax to each row of attn_score
+        call softmax_kernel(attn_score, attn_weight, S, S);
+
+        // 3. Weighted sum: attn_weight x V
+        local_v = dma.copy V.chunkat(b, _, _) => local;
+        call matmul_kernel(attn_weight, local_v.data, attn_out, S, S, D);
+
+        // 4. Write result to output (整体搬运)
+        dma.copy attn_out.span_as([1, S, D]) => output.chunkat(b, _, _);
+    }
+    return output;
+}
+
+// ------------------- Host Test Code -------------------
+// Simple CPU reference implementation for validation
+void cpu_mha_ref(const float* Q, const float* K, const float* V, float* O, int B, int S, int D) {
+    for (int b = 0; b < B; ++b) {
+        // Compute QK^T
+        std::vector<float> attn_score(S * S, 0.0f);
+        for (int i = 0; i < S; ++i) {
+            for (int j = 0; j < S; ++j) {
+                float sum = 0.0f;
+                for (int d = 0; d < D; ++d) {
+                    sum += Q[b * S * D + i * D + d] * K[b * S * D + j * D + d];
+                }
+                attn_score[i * S + j] = sum;
+            }
+        }
+        // Softmax
+        std::vector<float> attn_weight(S * S, 0.0f);
+        for (int i = 0; i < S; ++i) {
+            float maxv = attn_score[i * S];
+            for (int j = 1; j < S; ++j) maxv = std::max(maxv, attn_score[i * S + j]);
+            float sum = 0.0f;
+            for (int j = 0; j < S; ++j) {
+                attn_weight[i * S + j] = std::exp(attn_score[i * S + j] - maxv);
+                sum += attn_weight[i * S + j];
+            }
+            for (int j = 0; j < S; ++j) attn_weight[i * S + j] /= sum;
+        }
+        // Weighted sum
+        for (int i = 0; i < S; ++i) {
+            for (int d = 0; d < D; ++d) {
+                float sum = 0.0f;
+                for (int j = 0; j < S; ++j) {
+                    sum += attn_weight[i * S + j] * V[b * S * D + j * D + d];
+                }
+                O[b * S * D + i * D + d] = sum;
+            }
+        }
+    }
+}
+
+int main() {
+    constexpr int B = 2;   // batch size
+    constexpr int S = 4;   // sequence length
+    constexpr int D = 8;   // embedding dim
+
+    // Allocate and initialize Q, K, V using Choreo fill_random API
+    auto Q = choreo::make_spandata<float>(B, S, D);
+    auto K = choreo::make_spandata<float>(B, S, D);
+    auto V = choreo::make_spandata<float>(B, S, D);
+    Q.fill_random(-1.0f, 1.0f);
+    K.fill_random(-1.0f, 1.0f);
+    V.fill_random(-1.0f, 1.0f);
+
+    // Call Choreo MHA
+    auto result = multi_head_attention_basic(Q.view(), K.view(), V.view());
+
+    // Call CPU reference
+    std::vector<float> ref(B * S * D, 0.0f);
+    cpu_mha_ref(Q.data(), K.data(), V.data(), ref.data(), B, S, D);
+
+    // Compare results
+    int error_count = 0;
+    for (int i = 0; i < B * S * D; ++i) {
+        float diff = std::abs(result[i] - ref[i]);
+        if (diff > 1e-3f) {
+            if (error_count < 10) {
+                std::cout << "Mismatch at " << i << ": Choreo = " << result[i] << ", Ref = " << ref[i] << ", Diff = " << diff << std::endl;
+            }
+            ++error_count;
+        }
+    }
+    if (error_count == 0) {
+        std::cout << "[PASS] Choreo MHA matches CPU reference." << std::endl;
+    } else {
+        std::cout << "[FAIL] Mismatches found: " << error_count << std::endl;
+    }
+    // Optionally print a small part of the result
+    std::cout << "Sample output (first batch, first row): ";
+    for (int d = 0; d < D; ++d) std::cout << result[d] << " ";
+    std::cout << std::endl;
+    return 0;
+} 

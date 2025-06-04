@@ -1,0 +1,312 @@
+// Multi-head Linear Attention TILING Version 3 - Optimized with tiling for memory hierarchy
+__co__ f32[batch, seq_q, hidden] mla_tiling_3(
+    f32[batch, seq_q, hidden] Q,
+    f32[batch, seq_k, hidden] K,
+    f32[batch, seq_k, hidden] V) {
+    
+    f32[batch, seq_q, hidden] out;
+    
+    // 内存层级大小
+    // L1 (LOCAL): ~1.5MB
+    // L2 (SHARED): 64MB
+    // Global: 40.75GB
+    
+    // 定义多头注意力参数
+    const int num_heads = 16;  // 头数
+    const int head_dim = hidden / num_heads;  // 每个头的维度
+    
+    // 向量长度优化参数
+    const int VL = 128; // TCLE_MAX_VECTOR_LENGTH for GCU300
+    
+    // 定义分块大小以优化缓存使用
+    const int SEQ_Q_TILE = 64;   // 查询序列维度分块
+    const int SEQ_K_TILE = 256;  // 键值序列维度分块
+    const int HEAD_TILE = 4;     // 一次处理的头数
+    
+    // 对于 L2 缓存，我们可以处理更大的批次
+    const int SEQ_Q_TILE_L2 = 256; // L2 查询序列维度分块
+    const int SEQ_K_TILE_L2 = 1024; // L2 键值序列维度分块
+    
+    __cok__ {
+    #include "tcle.h"
+    using namespace tcle;
+    
+    // 对分块进行线性注意力计算
+    void compute_linear_attention_block(
+        float* q_ptr, float* k_ptr, float* v_ptr, float* out_ptr,
+        float* kv_sum, float* k_sum,
+        int seq_q_start, int seq_q_end,
+        int seq_k_start, int seq_k_end,
+        int head_start, int head_end,
+        int seq_q_len, int seq_k_len, int hidden_size, int head_dim) {
+        
+        // 使用 TCLE 向量类型获得最佳性能
+        using vec_type = typename tcle::altivector<float, TCLE_MAX_VECTOR_LENGTH>::VT;
+        
+        // 创建向量化内存访问指针
+        auto q_leaptr = tcle::simple_leaptr<vec_type>((generic_ptr)q_ptr);
+        auto k_leaptr = tcle::simple_leaptr<vec_type>((generic_ptr)k_ptr);
+        auto v_leaptr = tcle::simple_leaptr<vec_type>((generic_ptr)v_ptr);
+        auto out_leaptr = tcle::simple_leaptr<vec_type>((generic_ptr)out_ptr);
+        
+        // 获取平台向量长度
+        const int vec_len = tcle::altivector_step<vec_type>();
+        
+        // 当前分块的大小
+        int block_seq_q = seq_q_end - seq_q_start;
+        int block_seq_k = seq_k_end - seq_k_start;
+        
+        // 对分块中的每个头进行处理
+        for (int h = head_start; h < head_end; h++) {
+            int head_offset = h * head_dim;
+            int h_idx = h - head_start;
+            
+            // 累加当前 K-V 分块的贡献
+            for (int k_idx = 0; k_idx < block_seq_k; k_idx++) {
+                int k = seq_k_start + k_idx;
+                
+                // 处理每个特征维度
+                for (int d = 0; d < head_dim; d++) {
+                    float k_val = k_ptr[k * hidden_size + head_offset + d];
+                    float v_val = v_ptr[k * hidden_size + head_offset + d];
+                    
+                    // 累加 k*v
+                    kv_sum[h_idx * head_dim + d] += k_val * v_val;
+                    
+                    // 在第一个维度上累加 k (只需要做一次)
+                    if (d == 0) {
+                        for (int d2 = 0; d2 < head_dim; d2++) {
+                            k_sum[h_idx] += k_ptr[k * hidden_size + head_offset + d2];
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // 计算查询与积累的 K-V 的结果
+    void compute_query_result(
+        float* q_ptr, float* out_ptr,
+        float* kv_sum, float* k_sum,
+        int seq_q_start, int seq_q_end,
+        int head_start, int head_end,
+        int hidden_size, int head_dim) {
+        
+        // 使用 TCLE 向量类型获得最佳性能
+        using vec_type = typename tcle::altivector<float, TCLE_MAX_VECTOR_LENGTH>::VT;
+        
+        // 创建向量化内存访问指针
+        auto q_leaptr = tcle::simple_leaptr<vec_type>((generic_ptr)q_ptr);
+        auto out_leaptr = tcle::simple_leaptr<vec_type>((generic_ptr)out_ptr);
+        
+        // 获取平台向量长度
+        const int vec_len = tcle::altivector_step<vec_type>();
+        
+        // 当前查询分块的大小
+        int block_seq_q = seq_q_end - seq_q_start;
+        
+        // 对每个头进行处理
+        for (int h = head_start; h < head_end; h++) {
+            int head_offset = h * head_dim;
+            int h_idx = h - head_start;
+            
+            // 处理查询分块中的每个查询
+            for (int q_idx = 0; q_idx < block_seq_q; q_idx++) {
+                int q = seq_q_start + q_idx;
+                
+                // 计算线性注意力输出: q·(kv_sum) / (q·k_sum)
+                float q_k_sum = 0.0f;
+                
+                // 计算 q·k_sum 
+                for (int d = 0; d < head_dim; d++) {
+                    float q_val = q_ptr[q * hidden_size + head_offset + d];
+                    q_k_sum += q_val * k_sum[h_idx];
+                }
+                
+                // 防止除零
+                q_k_sum = tcle::max(q_k_sum, 1e-6f);
+                
+                // 计算 q·(kv_sum) / (q·k_sum)
+                for (int d = 0; d < head_dim; d += vec_len) {
+                    int remaining = tcle::min(vec_len, head_dim - d);
+                    
+                    if (remaining == vec_len) {
+                        // 完整向量宽度
+                        vec_type q_vec = q_leaptr.load_at(q * hidden_size + head_offset + d);
+                        vec_type kv_vec = tcle::vload<vec_type>(&kv_sum[h_idx * head_dim + d]);
+                        
+                        // 点积和归一化
+                        vec_type tmp = tcle::vmul<vec_type>(q_vec, kv_vec);
+                        vec_type q_k_sum_vec = tcle::vbroadcast<vec_type>(q_k_sum);
+                        vec_type out_vec = tcle::vdiv<vec_type>(tmp, q_k_sum_vec);
+                        
+                        // 存储结果
+                        out_leaptr.store_at(out_vec, q * hidden_size + head_offset + d);
+                    } else {
+                        // 部分向量（边缘情况）
+                        for (int i = 0; i < remaining; i++) {
+                            float q_val = q_ptr[q * hidden_size + head_offset + d + i];
+                            float kv_val = kv_sum[h_idx * head_dim + d + i];
+                            out_ptr[q * hidden_size + head_offset + d + i] = (q_val * kv_val) / q_k_sum;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    __co_device__ extern "C" void mla_tiled_kernel(
+        float* q_ptr, float* k_ptr, float* v_ptr, float* out_ptr,
+        int seq_q_len, int seq_k_len, int hidden_size, 
+        int num_heads, int head_dim,
+        int seq_q_tile, int seq_k_tile, int head_tile) {
+        
+        // 初始化输出为零
+        for (int q = 0; q < seq_q_len; q++) {
+            for (int h = 0; h < num_heads; h++) {
+                int head_offset = h * head_dim;
+                for (int d = 0; d < head_dim; d++) {
+                    out_ptr[q * hidden_size + head_offset + d] = 0.0f;
+                }
+            }
+        }
+        
+        // 多层分块处理
+        for (int head_start = 0; head_start < num_heads; head_start += head_tile) {
+            int head_end = tcle::min(head_start + head_tile, num_heads);
+            int num_heads_in_tile = head_end - head_start;
+            
+            // 为当前头分块分配累加器
+            float* kv_sum = (float*)tcle::malloc(num_heads_in_tile * head_dim * sizeof(float));
+            float* k_sum = (float*)tcle::malloc(num_heads_in_tile * sizeof(float));
+            
+            // 初始化累加器
+            for (int h = 0; h < num_heads_in_tile; h++) {
+                k_sum[h] = 0.0f;
+                for (int d = 0; d < head_dim; d++) {
+                    kv_sum[h * head_dim + d] = 0.0f;
+                }
+            }
+            
+            // 处理所有 K-V 键值对，累加到 kv_sum 和 k_sum
+            for (int seq_k_start = 0; seq_k_start < seq_k_len; seq_k_start += seq_k_tile) {
+                int seq_k_end = tcle::min(seq_k_start + seq_k_tile, seq_k_len);
+                
+                compute_linear_attention_block(
+                    q_ptr, k_ptr, v_ptr, out_ptr,
+                    kv_sum, k_sum,
+                    0, 0, // 查询暂时不需要
+                    seq_k_start, seq_k_end,
+                    head_start, head_end,
+                    seq_q_len, seq_k_len, hidden_size, head_dim
+                );
+            }
+            
+            // 处理查询，计算最终结果
+            for (int seq_q_start = 0; seq_q_start < seq_q_len; seq_q_start += seq_q_tile) {
+                int seq_q_end = tcle::min(seq_q_start + seq_q_tile, seq_q_len);
+                
+                compute_query_result(
+                    q_ptr, out_ptr,
+                    kv_sum, k_sum,
+                    seq_q_start, seq_q_end,
+                    head_start, head_end,
+                    hidden_size, head_dim
+                );
+            }
+            
+            // 释放临时存储
+            tcle::free(kv_sum);
+            tcle::free(k_sum);
+        }
+    }
+    } // __cok__
+    
+    // 主体并行结构与分层分块
+    parallel b by batch {
+        // 使用共享内存处理适合 L2 的大块
+        shared f32[SEQ_Q_TILE_L2, hidden] Q_shared;
+        shared f32[SEQ_K_TILE_L2, hidden] K_shared;
+        shared f32[SEQ_K_TILE_L2, hidden] V_shared;
+        shared f32[SEQ_Q_TILE_L2, hidden] out_shared;
+        
+        // 处理 L2 查询序列分块
+        for (int sq = 0; sq < seq_q; sq += SEQ_Q_TILE_L2) {
+            int sq_end_l2 = min(sq + SEQ_Q_TILE_L2, seq_q);
+            int seq_q_size_l2 = sq_end_l2 - sq;
+            
+            // 复制查询分块到共享内存
+            dma.copy Q.chunkat(b, sq:sq_end_l2, _) => Q_shared.chunkat(0:seq_q_size_l2, _);
+            
+            // 初始化输出分块
+            foreach {s, h} in [seq_q_size_l2, hidden] {
+                out_shared.at(s, h) = 0.0f;
+            }
+            
+            // 处理 L1 分块
+            local f32[SEQ_Q_TILE, hidden] Q_local;
+            local f32[SEQ_K_TILE, hidden] K_local;
+            local f32[SEQ_K_TILE, hidden] V_local;
+            local f32[SEQ_Q_TILE, hidden] out_local;
+            
+            for (int sq_l1 = 0; sq_l1 < seq_q_size_l2; sq_l1 += SEQ_Q_TILE) {
+                int sq_end_l1 = min(sq_l1 + SEQ_Q_TILE, seq_q_size_l2);
+                int seq_q_size_l1 = sq_end_l1 - sq_l1;
+                
+                // 复制查询分块到本地内存
+                dma.copy Q_shared.chunkat(sq_l1:sq_end_l1, _) => Q_local.chunkat(0:seq_q_size_l1, _);
+                
+                // 初始化本地输出
+                foreach {s, h} in [seq_q_size_l1, hidden] {
+                    out_local.at(s, h) = 0.0f;
+                }
+                
+                // 处理键值序列分块（通过 L2 缓存）
+                for (int sk = 0; sk < seq_k; sk += SEQ_K_TILE_L2) {
+                    int sk_end_l2 = min(sk + SEQ_K_TILE_L2, seq_k);
+                    int seq_k_size_l2 = sk_end_l2 - sk;
+                    
+                    // 复制键值分块到共享内存
+                    dma.copy K.chunkat(b, sk:sk_end_l2, _) => K_shared.chunkat(0:seq_k_size_l2, _);
+                    dma.copy V.chunkat(b, sk:sk_end_l2, _) => V_shared.chunkat(0:seq_k_size_l2, _);
+                    
+                    // 进一步处理 L1 级别的键值分块
+                    for (int sk_l1 = 0; sk_l1 < seq_k_size_l2; sk_l1 += SEQ_K_TILE) {
+                        int sk_end_l1 = min(sk_l1 + SEQ_K_TILE, seq_k_size_l2);
+                        int seq_k_size_l1 = sk_end_l1 - sk_l1;
+                        
+                        // 复制键值分块到本地内存
+                        dma.copy K_shared.chunkat(sk_l1:sk_end_l1, _) => K_local.chunkat(0:seq_k_size_l1, _);
+                        dma.copy V_shared.chunkat(sk_l1:sk_end_l1, _) => V_local.chunkat(0:seq_k_size_l1, _);
+                        
+                        // 调用优化的 MLA 内核
+                        // 我们在这里可以直接传入整个算子，因为 K、V 已经分块到 L1
+                        // 如果需要更精细的控制，可以扩展内核以支持更精细的分块
+                        __call_tcle mla_tiled_kernel(
+                            Q_local.data,
+                            K_local.data,
+                            V_local.data,
+                            out_local.data,
+                            seq_q_size_l1,
+                            seq_k_size_l1,
+                            hidden,
+                            num_heads,
+                            head_dim,
+                            SEQ_Q_TILE,
+                            SEQ_K_TILE,
+                            HEAD_TILE
+                        );
+                    }
+                }
+                
+                // 复制本地结果到共享内存
+                dma.copy out_local => out_shared.chunkat(sq_l1:sq_end_l1, _);
+            }
+            
+            // 复制结果到全局输出
+            dma.copy out_shared.chunkat(0:seq_q_size_l2, _) => out.chunkat(b, sq:sq_end_l2, _);
+        }
+    }
+    
+    return out;
+} 

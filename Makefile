@@ -352,3 +352,5 @@ publish-to-apex: package
 
 publish-to-topsop: package
 	@bash scripts/publish-choreo-for-topsop.sh
+
+prepare: cln-setup setup-ginac

@@ -191,6 +191,7 @@ install(TARGETS choreo copp
 # else()
 #     message(FATAL_ERROR "Invalid package version selected. Please choose 'standalone' or 'core'.")
 # endif()
+
 # Set standalone packaging mode if CMake变量STANDALONE=ON
 option(STANDALONE "Build standalone package (打包tools和ginac/cln)" OFF)
 if(STANDALONE)

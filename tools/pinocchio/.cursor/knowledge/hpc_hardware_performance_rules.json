@@ -1,0 +1,109 @@
+{
+  "version": "1.0",
+  "description": "Hardware performance optimization rules for Choreo",
+  
+  "memory_hierarchy": {
+    "priority": "优先使用寄存器/共享内存存放热点数据，减少全局内存访问",
+    "shared_memory": "共享内存分配需考虑bank conflict，避免warp内线程访问同一bank",
+    "dma_transfers": "大块数据搬运优先用DMA/异步拷贝（如dma.copy.async），并配合wait/sync同步",
+    "coalescing": "访存coalescing：连续线程访问连续全局内存地址，避免分散访问",
+    "constant_memory": "只读常量/纹理数据建议用const/texture memory"
+  },
+  
+  "parallelism_and_scheduling": {
+    "block_dimensions": "blockDim/threadDim建议为32的倍数，提升warp利用率",
+    "occupancy": "充分利用occupancy（活跃线程数/SM资源），避免寄存器/共享内存溢出导致occupancy下降",
+    "dynamic_parallelism": "动态并行适合递归/不规则任务，但需关注launch overhead",
+    "pipelining": "pipeline：多stage算子建议用流/事件/异步拷贝实现流水线，提升吞吐"
+  },
+  
+  "memory_access_optimization": {
+    "alignment": "访存对齐：全局内存访问地址对齐128B，提升带宽利用率",
+    "bank_conflicts": "避免bank conflict：共享内存访问时，warp内线程访问不同bank",
+    "unified_memory": "统一内存/跨设备：大数据建议用unified memory+prefetch，减少手动拷贝",
+    "page_locked_memory": "page-locked host memory提升H2D/D2H带宽"
+  },
+  
+  "atomic_operations_and_synchronization": {
+    "atomic_operations": "atomicAdd/Min/Max等原子操作仅用于必要场景，避免全局原子热点",
+    "local_reduction": "局部归约优先用共享内存+block级同步，减少全局原子",
+    "synchronization": "sync/wait用于block内同步，跨block需用事件/流"
+  },
+  
+  "operator_fusion_and_dataflow": {
+    "fusion": "支持算子融合（fuse）时，优先合并访存/计算密集型算子，减少中间结果写回全局内存",
+    "launch_bounds": "launch bounds/occupancy calculator自动推导最优block/grid配置",
+    "pipeline_scheduling": "pipeline/graph调度：多算子异步串联，减少同步点"
+  },
+  
+  "anti_patterns": {
+    "patterns": [
+      "warp内分支发散",
+      "bank conflict",
+      "全局原子热点",
+      "频繁小kernel launch",
+      "访存未对齐",
+      "低occupancy"
+    ],
+    "automatic_optimization": "检测上述反模式时，自动调整blockDim、访存模式、融合算子、插入异步拷贝、调整内存分配"
+  },
+  
+  "key_patterns": {
+    "coalesced_access": {
+      "description": "访存coalescing",
+      "example": "```choreo\nparallel p by 256 {\n  output.at(p) = input.at(p); // 连续线程访问连续地址\n}\n```"
+    },
+    "async_copy_pipeline": {
+      "description": "异步拷贝+pipeline",
+      "example": "```choreo\nlfs = dma.copy.async lhs.subspan(N) => shared;\nwait lfs;\nkernel<<<grid, block, 0, stream>>>(...); \nsync.stream;\n```"
+    },
+    "shared_memory_reduction": {
+      "description": "共享内存规约",
+      "example": "```choreo\nlocal f32 [blockDim.x] sdata;\nsdata.at(threadIdx.x) = input.at(threadIdx.x);\nsync.local;\n// 规约\n```"
+    }
+  },
+  
+  "code_generation_rules": {
+    "data_block_expression": {
+      "description": "数据块表达与DMA优先范式",
+      "rule": "choreo程序优先采用 __co__ 层的数据块（mdspan）表达，利用 dma.copy/dma.async 等机制，控制数据从 host、external memory、shared memory 到 local/register 的搬运与分块",
+      "responsibilities": {
+        "__co__": "负责数据流、分块、搬运、调度、并行、事件等全局/片上/片下存储层级的编排",
+        "__co_device__": "只负责 register-ALU-register 的核心计算逻辑（如向量/张量的逐元素运算、归约等），不直接处理大规模数据搬运"
+      },
+      "recommended_pattern": "```choreo\n__co__ void op(f32[N, M] X, f32[N, M] Y, ...) {\n  // 数据分块、搬运、并行、事件\n  dma.copy.async X => shared;\n  call __co_device__op(...);\n  dma.copy ...;\n}\n__co_device__ void __co_device__op(f32[block] x, f32[block] y, ...) {\n  // 只做寄存器级别的计算\n  for ... { y(i) = ...; }\n}\n```",
+      "fallback": "只有在硬件/编译器不支持数据块搬运时，才fallback到 .at 索引/单元素API"
+    },
+    "code_generation_rules": {
+      "mandatory": [
+        "choreo:generator/optimizer 必须优先采用上述范式生成/优化 choreo 程序",
+        "生成/优化时，__co__ 层负责数据流、搬运、并行、事件，__co_device__ 只做寄存器级别计算",
+        "fallback 到 .at 索引/单元素API 仅限于无法用数据块+DMA表达时",
+        "所有 agent 生成/优化/调试时需 review 该范式，确保输出的 choreo 程序尽可能遵循"
+      ]
+    },
+    "anti_patterns": {
+      "description": "在 __co_device__ 里直接用 dma.copy、全局/片上数据搬运，或在 __co__ 里大量用 .at 索引，均为反模式"
+    },
+    "main_function_generation": {
+      "rule": "pinocchio系统在生成choreo算子时，除非用户明确要求只生成__co__/__co_device__，否则必须自动生成自包含的main函数",
+      "requirements": [
+        "输入/输出张量的分配与初始化（如随机填充、常量等）",
+        "算子调用（如layernorm(...), 支持host侧直接调用）",
+        "结果验证（如与CPU baseline对比、数值误差检查）",
+        "性能计时（如调用前后计时、输出耗时、加速比等）"
+      ],
+      "example": "```cpp\nint main() {\n  auto X = choreo::make_spandata<choreo::f32>(N, M);\n  auto gamma = choreo::make_spandata<choreo::f32>(M);\n  auto beta = choreo::make_spandata<choreo::f32>(M);\n  auto Y = choreo::make_spandata<choreo::f32>(N, M);\n  X.fill_random(-1, 1);\n  gamma.fill(1.0f);\n  beta.fill(0.0f);\n  float eps = 1e-5;\n  // 计时开始\n  auto t0 = choreo::now();\n  layernorm(X.view(), gamma.view(), beta.view(), Y.view(), eps);\n  auto t1 = choreo::now();\n  // 验证\n  for (int i = 0; i < N; ++i)\n    for (int j = 0; j < M; ++j)\n      assert(fabs(Y(i, j) - cpu_layernorm(X, gamma, beta, i, j, eps)) < 1e-3);\n  std::cout << \"耗时: \" << (t1-t0) << \" ms\\n\";\n  std::cout << \"Test Passed\\n\";\n}\n```",
+      "enforcement": "该规范对所有choreo:generator/optimizer agent强制生效，确保生成的.co源码自包含、可直接编译运行和验证"
+    },
+    "code_order": {
+      "rule": "pinocchio系统生成choreo程序时，必须遵循如下顺序",
+      "order": [
+        "先输出所有 __co_device__ 函数（设备端内核/寄存器级计算）",
+        "再输出所有 __co__ 函数（数据流/搬运/并行/调度）",
+        "最后输出 host/main 函数（分配、调用、验证、计时）"
+      ],
+      "note": "该顺序适用于所有自动生成/补全/优化的choreo程序，确保风格统一、可读性和工程最佳实践"
+    }
+  }
+} 

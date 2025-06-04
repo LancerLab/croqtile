@@ -1,0 +1,97 @@
+// MatMul TCLE Version 2
+__co__ f32[batch, m, n] matmul_tcle_2(f32[batch, m, k] A, f32[batch, k, n] B) {
+    f32[batch, m, n] C;
+    
+    // 使用 TCLE 向量化处理
+    __cok__ {
+    #include "tcle.h"
+    using namespace tcle;
+    
+    __co_device__ extern "C" void matmul_kernel(
+        float* a_ptr, float* b_ptr, float* c_ptr,
+        int M, int N, int K) {
+        
+        // 使用 TCLE 向量类型获得最佳性能
+        using vec_type = typename tcle::altivector<float, TCLE_MAX_VECTOR_LENGTH>::VT;
+        
+        // 创建向量化内存访问指针
+        auto a_leaptr = tcle::simple_leaptr<vec_type>((generic_ptr)a_ptr);
+        auto b_leaptr = tcle::simple_leaptr<vec_type>((generic_ptr)b_ptr);
+        auto c_leaptr = tcle::simple_leaptr<vec_type>((generic_ptr)c_ptr);
+        
+        // 获取平台向量长度
+        const int vec_len = tcle::altivector_step<vec_type>();
+        
+        // 初始化输出矩阵为 0
+        for (int m = 0; m < M; m++) {
+            for (int n = 0; n < N; n += vec_len) {
+                int remaining = tcle::min(vec_len, N - n);
+                
+                if (remaining == vec_len) {
+                    // 完整向量宽度
+                    vec_type zeros = (vec_type)(0.0f);
+                    c_leaptr.store_at(zeros, m * N + n);
+                } else {
+                    // 部分向量（边缘情况）
+                    for (int i = 0; i < remaining; i++) {
+                        c_ptr[m * N + n + i] = 0.0f;
+                    }
+                }
+            }
+        }
+        
+        // 矩阵乘法计算
+        for (int m = 0; m < M; m++) {
+            for (int k = 0; k < K; k++) {
+                // 获取 A 的元素并广播
+                float a_val = a_ptr[m * K + k];
+                vec_type a_vec = tcle::vbroadcast<vec_type>(a_val);
+                
+                for (int n = 0; n < N; n += vec_len) {
+                    int remaining = tcle::min(vec_len, N - n);
+                    
+                    if (remaining == vec_len) {
+                        // 完整向量宽度
+                        vec_type b_vec = b_leaptr.load_at(k * N + n);
+                        vec_type c_vec = c_leaptr.load_at(m * N + n);
+                        
+                        // 向量化 FMA 操作: c += a * b
+                        vec_type result = tcle::vfma<vec_type>(c_vec, a_vec, b_vec);
+                        c_leaptr.store_at(result, m * N + n);
+                    } else {
+                        // 部分向量（边缘情况）
+                        for (int i = 0; i < remaining; i++) {
+                            float b_val = b_ptr[k * N + n + i];
+                            c_ptr[m * N + n + i] += a_val * b_val;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    } // __cok__
+    
+    // 主体并行结构
+    parallel b by batch {
+        local f32[m, k] A_local;
+        local f32[k, n] B_local;
+        local f32[m, n] C_local;
+        
+        // 复制输入数据到本地内存
+        dma.copy A.chunkat(b, _, _) => A_local;
+        dma.copy B.chunkat(b, _, _) => B_local;
+        
+        // 计算矩阵乘法
+        __call_tcle matmul_kernel(
+            A_local.data,
+            B_local.data,
+            C_local.data,
+            m, n, k
+        );
+        
+        // 复制结果到输出
+        dma.copy C_local => C.chunkat(b, _, _);
+    }
+    
+    return C;
+} 

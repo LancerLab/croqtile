@@ -1,0 +1,269 @@
+// Feed-Forward Network TILING Version 3 - Optimized with tiling for memory hierarchy
+__co__ f32[batch, seq, hidden] ffn_tiling_3(f32[batch, seq, hidden] X) {
+    f32[batch, seq, hidden] Y;
+    
+    // 内存层级大小
+    // L1 (LOCAL): ~1.5MB
+    // L2 (SHARED): 64MB
+    // Global: 40.75GB
+    
+    // 定义 FFN 参数
+    const int ff_dim = hidden * 4;  // 扩展维度，通常是隐藏层的 4 倍
+    
+    // 向量长度优化参数
+    const int VL = 128; // TCLE_MAX_VECTOR_LENGTH for GCU300
+    
+    // 定义分块大小以优化缓存使用
+    const int SEQ_TILE = 64;      // 序列维度分块
+    const int HIDDEN_TILE = 512;  // 隐藏层维度分块
+    const int FF_TILE = 1024;     // FFN 中间层维度分块
+    
+    // 对于 L2 缓存，我们可以处理更大的批次
+    const int SEQ_TILE_L2 = 256;    // L2 序列维度分块
+    const int HIDDEN_TILE_L2 = 1024; // L2 隐藏层维度分块
+    const int FF_TILE_L2 = 2048;     // L2 FFN 中间层维度分块
+    
+    __cok__ {
+    #include "tcle.h"
+    using namespace tcle;
+    
+    // 计算第一层: Xh * W1 + b1 → GeLU → 中间层
+    void compute_ffn_first_layer(
+        float* input_ptr, float* w1_ptr, float* b1_ptr, float* intermediate_ptr,
+        int seq_start, int seq_end,
+        int hidden_start, int hidden_end,
+        int ff_start, int ff_end,
+        int seq_len, int hidden_size, int ff_size) {
+        
+        // 使用 TCLE 向量类型获得最佳性能
+        using vec_type = typename tcle::altivector<float, TCLE_MAX_VECTOR_LENGTH>::VT;
+        
+        // 获取平台向量长度
+        const int vec_len = tcle::altivector_step<vec_type>();
+        
+        // 当前分块的大小
+        int block_seq = seq_end - seq_start;
+        int block_hidden = hidden_end - hidden_start;
+        int block_ff = ff_end - ff_start;
+        
+        // 对分块中的每个序列位置进行处理
+        for (int s_idx = 0; s_idx < block_seq; s_idx++) {
+            int s = seq_start + s_idx;
+            int token_offset = s * hidden_size;
+            
+            // 计算第一层: intermediate = input * W1 + b1，然后应用 GeLU
+            for (int f_idx = 0; f_idx < block_ff; f_idx++) {
+                int f = ff_start + f_idx;
+                
+                float sum = b1_ptr[f];
+                for (int h_idx = 0; h_idx < block_hidden; h_idx++) {
+                    int h = hidden_start + h_idx;
+                    sum += input_ptr[token_offset + h] * w1_ptr[f * hidden_size + h];
+                }
+                
+                // 应用 GeLU 激活
+                // GeLU(x) ≈ 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x^3)))
+                float x = sum;
+                float x3 = x * x * x;
+                float inner = 0.79788456f * (x + 0.044715f * x3); // sqrt(2/π) ≈ 0.79788456
+                intermediate_ptr[s_idx * ff_size + f_idx] = 0.5f * x * (1.0f + tcle::tanh(inner));
+            }
+        }
+    }
+    
+    // 计算第二层: 中间层 * W2 + b2 → 输出
+    void compute_ffn_second_layer(
+        float* intermediate_ptr, float* w2_ptr, float* b2_ptr, float* output_ptr,
+        int seq_start, int seq_end,
+        int hidden_start, int hidden_end,
+        int ff_start, int ff_end,
+        int seq_len, int hidden_size, int ff_size) {
+        
+        // 使用 TCLE 向量类型获得最佳性能
+        using vec_type = typename tcle::altivector<float, TCLE_MAX_VECTOR_LENGTH>::VT;
+        
+        // 创建向量化内存访问指针
+        auto output_leaptr = tcle::simple_leaptr<vec_type>((generic_ptr)output_ptr);
+        
+        // 获取平台向量长度
+        const int vec_len = tcle::altivector_step<vec_type>();
+        
+        // 当前分块的大小
+        int block_seq = seq_end - seq_start;
+        int block_hidden = hidden_end - hidden_start;
+        int block_ff = ff_end - ff_start;
+        
+        // 对分块中的每个序列位置进行处理
+        for (int s_idx = 0; s_idx < block_seq; s_idx++) {
+            int s = seq_start + s_idx;
+            int token_offset = s * hidden_size;
+            
+            // 计算第二层: output = intermediate * W2 + b2
+            for (int h_idx = 0; h_idx < block_hidden; h_idx += vec_len) {
+                int h = hidden_start + h_idx;
+                int remaining = tcle::min(vec_len, block_hidden - h_idx);
+                
+                if (remaining == vec_len) {
+                    // 完整向量情况
+                    vec_type bias_vec = tcle::vload<vec_type>(&b2_ptr[h]);
+                    vec_type result = bias_vec;
+                    
+                    for (int f_idx = 0; f_idx < block_ff; f_idx++) {
+                        int f = ff_start + f_idx;
+                        float inter_val = intermediate_ptr[s_idx * ff_size + f_idx];
+                        vec_type inter_vec = tcle::vbroadcast<vec_type>(inter_val);
+                        vec_type weight_vec = tcle::vload<vec_type>(&w2_ptr[f * hidden_size + h]);
+                        
+                        // 累加: result += inter_val * weight_vec
+                        result = tcle::vfma<vec_type>(result, inter_vec, weight_vec);
+                    }
+                    
+                    // 存储结果
+                    output_leaptr.store_at(result, token_offset + h);
+                } else {
+                    // 部分向量情况（边缘情况）
+                    for (int i = 0; i < remaining; i++) {
+                        float sum = b2_ptr[h + i];
+                        for (int f_idx = 0; f_idx < block_ff; f_idx++) {
+                            int f = ff_start + f_idx;
+                            sum += intermediate_ptr[s_idx * ff_size + f_idx] * w2_ptr[f * hidden_size + h + i];
+                        }
+                        output_ptr[token_offset + h + i] = sum;
+                    }
+                }
+            }
+        }
+    }
+    
+    __co_device__ extern "C" void ffn_tiled_kernel(
+        float* input_ptr, float* output_ptr,
+        float* w1_ptr, float* b1_ptr,
+        float* w2_ptr, float* b2_ptr,
+        int seq_len, int hidden_size, int ff_size,
+        int seq_tile, int hidden_tile, int ff_tile) {
+        
+        // 初始化输出为零
+        for (int s = 0; s < seq_len; s++) {
+            for (int h = 0; h < hidden_size; h++) {
+                output_ptr[s * hidden_size + h] = 0.0f;
+            }
+        }
+        
+        // 为中间层分配临时内存
+        float* intermediate = (float*)tcle::malloc(seq_tile * ff_tile * sizeof(float));
+        
+        // 多层分块处理
+        for (int seq_start = 0; seq_start < seq_len; seq_start += seq_tile) {
+            int seq_end = tcle::min(seq_start + seq_tile, seq_len);
+            
+            for (int ff_start = 0; ff_start < ff_size; ff_start += ff_tile) {
+                int ff_end = tcle::min(ff_start + ff_tile, ff_size);
+                
+                // 计算第一层: Xh * W1 + b1 → GeLU → 中间层
+                // 对 hidden 维度完整扫描
+                compute_ffn_first_layer(
+                    input_ptr, w1_ptr, b1_ptr, intermediate,
+                    seq_start, seq_end,
+                    0, hidden_size,
+                    ff_start, ff_end,
+                    seq_len, hidden_size, ff_tile
+                );
+                
+                for (int hidden_start = 0; hidden_start < hidden_size; hidden_start += hidden_tile) {
+                    int hidden_end = tcle::min(hidden_start + hidden_tile, hidden_size);
+                    
+                    // 计算第二层: 中间层 * W2 + b2 → 输出
+                    compute_ffn_second_layer(
+                        intermediate, w2_ptr, b2_ptr, output_ptr,
+                        seq_start, seq_end,
+                        hidden_start, hidden_end,
+                        ff_start, ff_end,
+                        seq_len, hidden_size, ff_tile
+                    );
+                }
+            }
+        }
+        
+        // 释放临时内存
+        tcle::free(intermediate);
+    }
+    } // __cok__
+    
+    // 网络权重和偏置
+    shared f32[ff_dim, hidden] W1;
+    shared f32[ff_dim] b1;
+    shared f32[ff_dim, hidden] W2;
+    shared f32[hidden] b2;
+    
+    // 初始化网络权重 - 在实际实现中，这些将是输入或加载的
+    foreach {f, h} in [ff_dim, hidden] {
+        W1.at(f, h) = 0.01f * (f + h); // 示例初始化
+        W2.at(f, h) = 0.01f * (f + h);
+        
+        if (h == 0) {
+            b1.at(f) = 0.0f; // 偏置初始化
+        }
+    }
+    
+    foreach {h} in [hidden] {
+        b2.at(h) = 0.0f;
+    }
+    
+    // 主体并行结构与分层分块
+    parallel b by batch {
+        // 使用共享内存处理适合 L2 的大块
+        shared f32[SEQ_TILE_L2, hidden] X_shared;
+        shared f32[SEQ_TILE_L2, hidden] Y_shared;
+        
+        // 处理 L2 序列分块
+        for (int s = 0; s < seq; s += SEQ_TILE_L2) {
+            int s_end_l2 = min(s + SEQ_TILE_L2, seq);
+            int seq_size_l2 = s_end_l2 - s;
+            
+            // 复制输入分块到共享内存
+            dma.copy X.chunkat(b, s:s_end_l2, _) => X_shared.chunkat(0:seq_size_l2, _);
+            
+            // 初始化输出分块
+            foreach {s_idx, h} in [seq_size_l2, hidden] {
+                Y_shared.at(s_idx, h) = 0.0f;
+            }
+            
+            // 处理 L1 分块
+            for (int s_l1 = 0; s_l1 < seq_size_l2; s_l1 += SEQ_TILE) {
+                int s_end_l1 = min(s_l1 + SEQ_TILE, seq_size_l2);
+                int seq_size_l1 = s_end_l1 - s_l1;
+                
+                // 创建 L1 分块
+                local f32[seq_size_l1, hidden] X_local;
+                local f32[seq_size_l1, hidden] Y_local;
+                
+                // 从共享内存复制到本地内存
+                dma.copy X_shared.chunkat(s_l1:s_end_l1, _) => X_local;
+                
+                // 调用优化的 FFN 内核
+                __call_tcle ffn_tiled_kernel(
+                    X_local.data,
+                    Y_local.data,
+                    W1.data,
+                    b1.data,
+                    W2.data,
+                    b2.data,
+                    seq_size_l1,
+                    hidden,
+                    ff_dim,
+                    SEQ_TILE,
+                    HIDDEN_TILE,
+                    FF_TILE
+                );
+                
+                // 结果复制回共享内存
+                dma.copy Y_local => Y_shared.chunkat(s_l1:s_end_l1, _);
+            }
+            
+            // 将处理后的 L2 分块复制到输出
+            dma.copy Y_shared.chunkat(0:seq_size_l2, _) => Y.chunkat(b, s:s_end_l2, _);
+        }
+    }
+    
+    return Y;
+} 

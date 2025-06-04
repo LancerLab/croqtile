@@ -1,0 +1,143 @@
+// MoE Router TCLE Version 2
+__co__ f32[batch, seq, experts, k_experts] moe_router_tcle_2(f32[batch, seq, hidden] X) {
+    f32[batch, seq, experts, k_experts] router_indices;
+    
+    // 使用 TCLE 向量化处理
+    __cok__ {
+    #include "tcle.h"
+    using namespace tcle;
+    
+    // 辅助函数：执行 top-k 选择
+    void top_k_indices(float* scores, int* indices, int num_experts, int k) {
+        // 初始化索引
+        for (int i = 0; i < num_experts; i++) {
+            indices[i] = i;
+        }
+        
+        // 简单选择排序找出 top-k
+        for (int i = 0; i < k; i++) {
+            int max_idx = i;
+            for (int j = i + 1; j < num_experts; j++) {
+                if (scores[indices[j]] > scores[indices[max_idx]]) {
+                    max_idx = j;
+                }
+            }
+            // 交换
+            if (max_idx != i) {
+                int temp = indices[i];
+                indices[i] = indices[max_idx];
+                indices[max_idx] = temp;
+            }
+        }
+    }
+    
+    __co_device__ extern "C" void moe_router_kernel(
+        float* input_ptr, float* router_weights, float* router_bias,
+        float* output_indices, float* output_scores,
+        int seq_len, int hidden_size, int num_experts, int top_k) {
+        
+        // 使用 TCLE 向量类型获得最佳性能
+        using vec_type = typename tcle::altivector<float, TCLE_MAX_VECTOR_LENGTH>::VT;
+        
+        // 获取平台向量长度
+        const int vec_len = tcle::altivector_step<vec_type>();
+        
+        // 临时存储专家分数
+        float* expert_scores = (float*)tcle::malloc(num_experts * sizeof(float));
+        int* expert_indices = (int*)tcle::malloc(num_experts * sizeof(int));
+        
+        // 处理每个序列中的每个 token
+        for (int s = 0; s < seq_len; s++) {
+            int token_offset = s * hidden_size;
+            
+            // 初始化专家分数为偏置值
+            for (int e = 0; e < num_experts; e++) {
+                expert_scores[e] = router_bias[e];
+            }
+            
+            // 计算路由 logits: X * router_weights + router_bias
+            for (int h = 0; h < hidden_size; h++) {
+                float token_feature = input_ptr[token_offset + h];
+                
+                // 对每个专家累加分数
+                for (int e = 0; e < num_experts; e++) {
+                    expert_scores[e] += token_feature * router_weights[e * hidden_size + h];
+                }
+            }
+            
+            // 应用 softmax 得到路由概率
+            // 步骤 1: 找出最大值，保证数值稳定性
+            float max_score = expert_scores[0];
+            for (int e = 1; e < num_experts; e++) {
+                max_score = tcle::max(max_score, expert_scores[e]);
+            }
+            
+            // 步骤 2: 计算 exp(score - max) 和求和
+            float sum_exp = 0.0f;
+            for (int e = 0; e < num_experts; e++) {
+                expert_scores[e] = tcle::exp(expert_scores[e] - max_score);
+                sum_exp += expert_scores[e];
+            }
+            
+            // 步骤 3: 归一化
+            for (int e = 0; e < num_experts; e++) {
+                expert_scores[e] /= sum_exp;
+            }
+            
+            // 选择 top-k 专家
+            top_k_indices(expert_scores, expert_indices, num_experts, top_k);
+            
+            // 存储 top-k 专家索引和分数
+            for (int k = 0; k < top_k; k++) {
+                int idx = expert_indices[k];
+                output_indices[s * num_experts * top_k + idx * top_k + k] = (float)idx;
+                output_scores[s * num_experts * top_k + idx * top_k + k] = expert_scores[idx];
+            }
+        }
+        
+        // 释放临时存储
+        tcle::free(expert_scores);
+        tcle::free(expert_indices);
+    }
+    } // __cok__
+    
+    // 路由器权重和偏置
+    shared f32[experts, hidden] router_W;
+    shared f32[experts] router_b;
+    
+    // 初始化路由器权重 - 在实际实现中，这些将是输入或加载的
+    foreach {e, h} in [experts, hidden] {
+        router_W.at(e, h) = 0.01f * (e + h); // 示例初始化
+        if (h == 0) {
+            router_b.at(e) = 0.0f; // 偏置初始化
+        }
+    }
+    
+    // 主体并行结构
+    parallel b by batch {
+        local f32[seq, hidden] X_local;
+        local f32[seq, experts, k_experts] routes_local;
+        local f32[seq, experts, k_experts] scores_local;
+        
+        // 复制输入数据到本地内存
+        dma.copy X.chunkat(b, _, _) => X_local;
+        
+        // 计算 MoE 路由
+        __call_tcle moe_router_kernel(
+            X_local.data,
+            router_W.data,
+            router_b.data,
+            routes_local.data,
+            scores_local.data,
+            seq,
+            hidden,
+            experts,
+            k_experts
+        );
+        
+        // 复制结果到输出
+        dma.copy routes_local => router_indices.chunkat(b, _, _, _);
+    }
+    
+    return router_indices;
+} 

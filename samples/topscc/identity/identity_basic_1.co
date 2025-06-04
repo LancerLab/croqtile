@@ -1,0 +1,24 @@
+// Identity Basic Version 1
+__co__ f32[batch, seq, hidden] identity_basic_1(f32[batch, seq, hidden] X) {
+    f32[batch, seq, hidden] Y;
+    
+    parallel b by batch {
+        parallel s by seq {
+            local f32[hidden] x_local;
+            local f32[hidden] y_local;
+            
+            // 复制输入数据到本地内存
+            dma.copy X.chunkat(b, s, _) => x_local;
+            
+            // 简单地复制数据，不做任何修改
+            foreach {h} in [hidden] {
+                y_local.at(h) = x_local.at(h);
+            }
+            
+            // 复制结果到输出
+            dma.copy y_local => Y.chunkat(b, s, _);
+        }
+    }
+    
+    return Y;
+} 

@@ -1,0 +1,15 @@
+// Multi-Head Attention (MHA) Basic Version 1
+__co__ f32[B, S, D] mha_basic_1(f32[B, S, D] Q, f32[B, S, D] K, f32[B, S, D] V) {
+    f32[B, S, D] O;
+    parallel b by B {
+        local f32[S, S] attn;
+        local f32[S, D] out;
+        // 1. attn = Q x K^T
+        // 2. attn = softmax(attn)
+        // 3. out = attn x V
+        // 4. O = out
+        // (伪代码，实际kernel略)
+        dma.copy out => O.chunkat(b, _, _);
+    }
+    return O;
+} 

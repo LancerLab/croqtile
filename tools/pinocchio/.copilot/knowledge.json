@@ -1,5 +1,5 @@
 {
-  "choreo_syntax_rules": "knowledge/choreo_syntax_rules.mdc",
-  "choreo_templates": "knowledge/choreo_templates.mdc",
-  "hpc_hardware_performance_rules": "knowledge/hpc_hardware_performance_rules.mdc"
+  "choreo_syntax_rules": ".copilot/knowledge/choreo_syntax_rules.mdc",
+  "choreo_templates": ".copilot/knowledge/choreo_templates.mdc",
+  "hpc_hardware_performance_rules": ".copilot/knowledge/hpc_hardware_performance_rules.mdc"
 }
