@@ -32,7 +32,7 @@ bool SemaChecker::VisitNode(AST::FloatLiteral& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
-bool SemaChecker::VisitNode(AST::Boolean& n) {
+bool SemaChecker::VisitNode(AST::BoolLiteral& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
@@ -526,10 +526,10 @@ bool SemaChecker::VisitNode(AST::Call& n) {
                   "` can not be used to instantiate the kernel function.");
         error_count++;
       }
-      auto val_expr = cast<AST::Expr>(v)->GetOptValExpr();
+      auto expr = cast<AST::Expr>(v);
       // fail if the template argument can not be evaluated as a compile-time
       // constant
-      if (!IsValidValueItem(val_expr) || !val_expr->IsNumeric()) {
+      if (!expr->Opts().HasVal() || !expr->Opts().GetVal()->IsNumeric()) {
         Error(n.LOC(), "The " + Ordinal(count) +
                            " template argument of type '" + PSTR(ty) +
                            "` can not be evaluated at choreo compile time.");

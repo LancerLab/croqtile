@@ -33,7 +33,7 @@ public:
 
   bool VisitNode(AST::IntLiteral&) override;
   bool VisitNode(AST::FloatLiteral&) override;
-  bool VisitNode(AST::Boolean&) override;
+  bool VisitNode(AST::BoolLiteral&) override;
   bool VisitNode(AST::Expr&) override;
   bool VisitNode(AST::MultiDimSpans&) override;
   bool VisitNode(AST::NamedTypeDecl&) override;

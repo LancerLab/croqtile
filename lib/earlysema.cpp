@@ -114,7 +114,7 @@ bool EarlySemantics::Visit(AST::StringLiteral& n) {
   return true;
 }
 
-bool EarlySemantics::Visit(AST::Boolean& n) {
+bool EarlySemantics::Visit(AST::BoolLiteral& n) {
   TraceEachVisit(n);
   SetNodeType(n, MakeBooleanType());
   return true;
@@ -1567,14 +1567,14 @@ bool EarlySemantics::Visit(AST::Call& n) {
 
   size_t ec = error_count;
 
-  if ((parallel_level == 0) && !n.is_bif) {
+  if ((parallel_level == 0) && !n.IsBIF()) {
     Error(n.LOC(),
           "unable to call kernel function outside the parallel-by block(s).");
     error_count++;
     return false;
   }
 
-  if (n.is_bif) {
+  if (n.IsBIF()) {
     if (n.template_args) {
       Error(n.LOC(), "the built-in functions are not function templates.");
       error_count++;
@@ -1601,11 +1601,25 @@ bool EarlySemantics::Visit(AST::Call& n) {
         // half8 is invalid.
         return false;
       };
-      for (const auto& arg : n.GetArguments())
-        if (const auto ty = NodeType(*arg); !Printable(ty))
-          Error(arg->LOC(), "the argument of type '" + PSTR(ty) +
+      for (const auto& arg : n.GetArguments()) {
+        const auto aty = NodeType(*arg);
+        if (n.CompileTimeEval()) {
+          if (isa<ScalarType>(aty)) {
+            if (isa<BooleanType>(aty) || isa<ScalarFloatType>(aty))
+              Warning(arg->LOC(), "compile-time evaluation of type '" +
+                                      PSTR(aty) + "' is yet to support.");
+          } else if (isa<BoundedType>(aty) || isa<EventType>(aty) ||
+                     isa<SpannedType>(aty) || isa<AsyncType>(aty)) {
+            Warning(arg->LOC(), "compile-time evaluation of type '" +
+                                    PSTR(aty) +
+                                    "' is impossible since its value is "
+                                    "determined at runtime.");
+          }
+        } else if (!Printable(aty))
+          Error(arg->LOC(), "the argument of type '" + PSTR(aty) +
                                 "' is not supported for printing.");
-    } else if (n.is_arith_bif) {
+      }
+    } else if (n.IsArith()) {
       auto pty = NodeType(*n.arguments->ValueAt(0));
       if (!isa<ScalarFloatType>(pty))
         Error(n.LOC(), "expect the argument to be a float type but got '" +

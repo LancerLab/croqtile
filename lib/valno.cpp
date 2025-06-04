@@ -93,8 +93,14 @@ ValueItem ValueNumbering::GenValueItemFromSignature(const std::string& input) {
   return nullptr;
 }
 
-const std::vector<ValueItem>
-ValueNumbering::GenValueItemsFromSignature(const std::string& input) {
+const ValueList ValueNumbering::GenValueListFromValueNumber(int vn) {
+  auto sig = GetSignatureFromValueNumber(vn);
+  assert(CountElementsInSignature(sig) > 1);
+  return GenValueListFromSignature(sig);
+}
+
+const ValueList
+ValueNumbering::GenValueListFromSignature(const std::string& input) {
   std::vector<ValueItem> res;
   ProcessValueNumberString(input, [this, &res](int valno, size_t) {
     auto sig = GetSignatureFromValueNumber(valno);
@@ -1112,7 +1118,7 @@ std::string ValueNumbering::GenerateNodeSignature(const AST::Node& node,
     } else {
       choreo_unreachable("unexpected float point type.");
     }
-  } else if (auto* n = dyn_cast<AST::Boolean>(&node)) {
+  } else if (auto* n = dyn_cast<AST::BoolLiteral>(&node)) {
     return PSTR(n);
   } else if (auto* v = dyn_cast<AST::Identifier>(&node)) {
     auto sname = VNSymbolName(*v);

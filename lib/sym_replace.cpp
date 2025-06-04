@@ -149,7 +149,7 @@ void SymReplace::InitializeNode(ptr<AST::Node> n) {
   } else if (auto ii = dyn_cast<AST::IntIndex>(n)) {
     if (isa<AST::Identifier>(ii->value)) InitializeNode(ii->value);
   } else if (isa<AST::SpanAs>(n)) {
-  } else if (auto b = dyn_cast<AST::Boolean>(n)) {
+  } else if (auto b = dyn_cast<AST::BoolLiteral>(n)) {
     InsertNdSnSymMap(n, PSTR(b), false);
   } else if (isa<AST::ChunkAt>(n)) {
   } else if (isa<AST::Call>(n) || isa<AST::DataAccess>(n)) {
@@ -314,7 +314,7 @@ void SymReplace::SymbolizeExprNode(ptr<AST::Node> n) {
           return;
         }
       }
-    } else if (auto b = dyn_cast<AST::Boolean>(R)) {
+    } else if (auto b = dyn_cast<AST::BoolLiteral>(R)) {
       (void)b;
       res = SymExpr(GetSymbolFromName(nd2sn.at(R)));
     } else if (auto ca = dyn_cast<AST::ChunkAt>(R)) {
@@ -505,8 +505,8 @@ void SymReplace::EquivalentlyReplaceExprNodes() {
       orig_expr->SetR(AST::Make<AST::SpanAs>(*sa));
     else if (auto il = dyn_cast<AST::IntLiteral>(R))
       orig_expr->SetR(AST::Make<AST::IntLiteral>(*il));
-    else if (auto b = dyn_cast<AST::Boolean>(R))
-      orig_expr->SetR(AST::Make<AST::Boolean>(*b));
+    else if (auto b = dyn_cast<AST::BoolLiteral>(R))
+      orig_expr->SetR(AST::Make<AST::BoolLiteral>(*b));
     else
       choreo_unreachable("The node of type " + PSTR(R->GetType()) +
                          " is not supported in SymReplace yet.");

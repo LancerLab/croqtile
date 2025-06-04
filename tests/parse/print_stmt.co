@@ -1,23 +1,11 @@
 // REQUIRES: TARGET-GCUALL
 // RUN: choreo -e %s | FileCheck --match-full-lines %s
 
-#include "choreo.h"
-
-__cok__ { /// kernel program
-} /// end of kernel decl
-
-
 __co__ int identity(int loc) { /// device program
   print(loc);
   return loc;
 }
 
-int main() { /// host program
-  choreo::int loc = 7;
-  auto res
-    = identity(input_data, loc);
-  std::cout << res.data();
-}
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: identity
 // CHECK:  `- Return type: int
@@ -26,3 +14,20 @@ int main() { /// host program
 // CHECK:  `- Call: print (built-in)
 // CHECK:    `- with arguments: loc
 // CHECK:  `- Return: loc
+
+__co__ void prints(int a, f32 [3, 2] b) {
+  print("hello");
+  println("this is ", a);
+
+  print!("wor" "ld!");
+  println!("that is ", b.span);
+}
+
+// CHECK:  `- Call: print (built-in)
+// CHECK:    `- with arguments: "hello"
+// CHECK:  `- Call: println (built-in)
+// CHECK:    `- with arguments: "this is ", a
+// CHECK:  `- Call: print (compile-time built-in)
+// CHECK:    `- with arguments: "world!"
+// CHECK:  `- Call: println (compile-time built-in)
+// CHECK:    `- with arguments: "that is ", b.span

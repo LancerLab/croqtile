@@ -264,7 +264,7 @@ public:
     return true;
   }
 
-  bool Visit(AST::Boolean& n) override {
+  bool Visit(AST::BoolLiteral& n) override {
     TraceEachVisit(n);
     if (cannot_proceed) return true;
     return true;

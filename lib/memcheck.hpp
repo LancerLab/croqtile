@@ -142,7 +142,8 @@ private:
     return oss.str();
   }
 
-  // Transform size in byte to human readable format like 1KB 2GB etc in decimal.
+  // Transform size in byte to human readable format like 1KB 2GB etc in
+  // decimal.
   std::string SizeForHuman(size_t size) {
     std::ostringstream oss;
     oss << std::defaultfloat << "(";

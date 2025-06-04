@@ -406,7 +406,7 @@ private:
       if (isa<AST::IntTuple>(expr_ptr)) return;
       if (isa<AST::SpanAs>(expr_ptr)) return;
       if (isa<AST::MultiDimSpans>(expr_ptr)) return;
-      if (isa<AST::Boolean>(expr_ptr)) return;
+      if (isa<AST::BoolLiteral>(expr_ptr)) return;
       if (IsHostSymbol(InScopeName(STR(expr_ptr->GetR()))) && !IsHostSide()) {
         if (std::find(buffer_list_tiled_by_host_iv.begin(),
                       buffer_list_tiled_by_host_iv.end(),
@@ -423,7 +423,7 @@ private:
             MakeBoundedITupleType(Shape(1, top_iv_ubs / host_iv_ubs));
 
         auto new_node = AST::MakeIdExpr(expr_ptr->GetR()->loc, "_");
-        new_node->SetOptValExpr(sbe::nu(0));
+        new_node->Opts().SetVal(sbe::nu(0));
         auto unit_bound_ty = MakeBoundedITupleType(Shape(1, 1));
 
         new_node->SetType(unit_bound_ty);

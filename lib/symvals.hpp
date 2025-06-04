@@ -101,9 +101,6 @@ inline static std::optional<std::string> VIStr(const ValueItem& vi) {
   if (auto iv = dyn_cast<sbe::SymbolicValue>(vi)) return iv->Value();
   return std::nullopt;
 }
-inline static bool VIIsStr(const ValueItem& vi) {
-  return VIStr(vi).has_value();
-}
 
 inline static std::shared_ptr<sbe::BinaryOperation> VIBop(const ValueItem& vi) {
   return dyn_cast<sbe::BinaryOperation>(vi);

@@ -90,7 +90,7 @@ public:
                     const std::string&, const std::string&, const Shape&);
 
   bool Visit(AST::Assignment&) override;
-  bool Visit(AST::Boolean&) override;
+  bool Visit(AST::BoolLiteral&) override;
   bool Visit(AST::Call&) override;
   bool Visit(AST::Rotate&) override;
   bool Visit(AST::ChoreoFunction&) override;

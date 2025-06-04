@@ -15,6 +15,15 @@ struct ASTVerify : public VisitorWithScope {
         isa<AST::Rotate>(&n) || isa<AST::Identifier>(&n))
       return true;
 
+    if (auto c = dyn_cast<AST::Call>(&n)) {
+      if (!c->IsBIF()) {
+        if (c->IsArith())
+          dbgs() << "can not annotate non-bif as arithmetic.\n";
+        else if (c->CompileTimeEval())
+          dbgs() << "can not evaluate a non-bif at compile-time.\n";
+      }
+    }
+
     if (n.GetType() == nullptr) {
       choreo_unreachable("[" + n.TypeNameString() +
                          "] is not typed: " + STR(n));

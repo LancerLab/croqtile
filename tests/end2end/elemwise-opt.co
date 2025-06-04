@@ -19,6 +19,7 @@ __co__ auto ele_add(s32 [M] lhs, s32 [M] rhs) {
 
   // l1 contains lhs, rhs, output.
   l1_max_count = (l1_limit / |s32| / 3 / padding) * padding;
+//  println!("l1_max_count: ", l1_max_count);
 
   // l2 contains only lhs, rhs. The output moved to global storage directly
 

@@ -398,7 +398,7 @@ fundamental_type
 
 simple_val
     : integer_value { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
-    | bool_value { $$ = AST::Make<AST::Boolean>(@1, $1); }
+    | bool_value { $$ = AST::Make<AST::BoolLiteral>(@1, $1); }
     | FPVAL  { $$ = AST::Make<AST::FloatLiteral>(@1, $1); }
     | DFPVAL { $$ = AST::Make<AST::FloatLiteral>(@1, $1); }
     | cstrings { $$ = AST::Make<AST::StringLiteral>(@1, $1); }
@@ -1654,7 +1654,7 @@ call_expr
     : arith_builtin_func LPAREN value_list RPAREN {
         $$ = AST::Make<AST::Expr>(@1,
              AST::Make<AST::Call>(@1,
-             AST::Make<AST::Identifier>(@1, $1), $3, true, true, false));
+             AST::Make<AST::Identifier>(@1, $1), $3, AST::Call::BIF | AST::Call::ARITH));
       }
     ;
 
@@ -1681,10 +1681,16 @@ call_stmt
         auto mv = AST::Make<AST::MultiValues>(@1, ", ");
         mv->Append($3);
         mv->Append(AST::Make<AST::StringLiteral>(@5, $5));
-        $$ = AST::Make<AST::Call>(@1, AST::Make<AST::Identifier>(@1, $1), mv, true);
+        $$ = AST::Make<AST::Call>(@1, AST::Make<AST::Identifier>(@1, $1), mv, AST::Call::BIF);
       }
     | builtin_print_func LPAREN value_list RPAREN {
-        $$ = AST::Make<AST::Call>(@1, AST::Make<AST::Identifier>(@1, $1), $3, true);
+        $3->SetDelimiter(", ");
+        $$ = AST::Make<AST::Call>(@1, AST::Make<AST::Identifier>(@1, $1), $3, AST::Call::BIF);
+      }
+    | builtin_print_func NOT LPAREN value_list RPAREN {
+        $4->SetDelimiter(", ");
+        $$ = AST::Make<AST::Call>(@1, AST::Make<AST::Identifier>(@1, $1), $4,
+                                  AST::Call::BIF | AST::Call::COMPTIME);
       }
     ;
 

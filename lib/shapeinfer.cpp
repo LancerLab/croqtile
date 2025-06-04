@@ -210,7 +210,7 @@ bool ShapeInference::Visit(AST::StringLiteral& n) {
   return true;
 }
 
-bool ShapeInference::Visit(AST::Boolean& n) {
+bool ShapeInference::Visit(AST::BoolLiteral& n) {
   TraceEachVisit(n);
 
   if (cannot_proceed) return true;
@@ -244,7 +244,7 @@ bool ShapeInference::Visit(AST::Expr& n) {
           if (ConvertibleToInt(NodeType(n))) {
             assert(n.s.DimCount() == 1);
             if (!n.s.IsDynamic()) {
-              n.SetOptValExpr(n.s.ValueAt(0));
+              n.Opts().SetVal(n.s.ValueAt(0));
               VST_DEBUG(dbgs() << "[ExprVal] " << STR(n) << ": "
                                << STR(n.s.ValueAt(0)) << "\n");
             }
@@ -254,6 +254,13 @@ bool ShapeInference::Visit(AST::Expr& n) {
         // no value number is obtained
         InvalidateVN(cur_vn);
       }
+
+      if (isa<ITupleType>(SSTab().LookupSymbol(name))) {
+        n.Opts().SetVals(SymVal(SSTab().ScopedName(name)).GetVals());
+        VST_DEBUG(dbgs() << "[ExprVal] " << STR(n) << ": "
+                         << STR(n.Opts().GetVals()) << "\n");
+      }
+
       return true;
     }
   } else if (n.op == "dataof") {
@@ -279,7 +286,7 @@ bool ShapeInference::Visit(AST::Expr& n) {
 
   if (n.IsUBArith()) {
     SetNodeType(n, MakeBoundedITupleType(n.s));
-    n.SetOptUBoundExprs(vn.GenValueItemsFromSignature(cur_sign));
+    n.Opts().SetUBounds(vn.GenValueListFromSignature(cur_sign));
   }
   if (IsActualBoundedIntegerType(NodeType(n))) {
     cur_ub_vn = cur_vn;
@@ -289,10 +296,14 @@ bool ShapeInference::Visit(AST::Expr& n) {
   if (ConvertibleToInt(NodeType(n))) {
     assert(n.s.DimCount() == 1);
     if (!n.s.IsDynamic()) {
-      n.SetOptValExpr(n.s.ValueAt(0));
+      n.Opts().SetVal(n.s.ValueAt(0));
       VST_DEBUG(dbgs() << "[ExprVal] " << STR(n) << ": " << STR(n.s.ValueAt(0))
                        << "\n");
     }
+  } else if (isa<ITupleType>(NodeType(n))) {
+    n.Opts().SetVals(vn.GenValueListFromSignature(cur_sign));
+    VST_DEBUG(dbgs() << "[ExprVal] " << STR(n) << ": "
+                     << STR(n.Opts().GetVals()) << "\n");
   }
 
   if (AST::istypeof<MDSpanType>(&n)) {
@@ -312,7 +323,7 @@ bool ShapeInference::Visit(AST::Expr& n) {
     }
     //      InvalidateVN(cur_vn);
   } else if ((n.op == "sizeof") && n.s.IsValid()) {
-    n.SetOptSizeExpr(n.s.ElementCountValue());
+    n.Opts().SetSize(n.s.ElementCountValue());
   } else if (n.op == "#") {
     if (IsActualBoundedIntegerType(n.GetL()->GetType()) &&
         IsActualBoundedIntegerType(n.GetR()->GetType())) {
@@ -491,7 +502,11 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
     assert(shape.DimCount() == 1);
     VST_DEBUG(dbgs() << "[SymVal] " << InScopeName(name) << ": "
                      << STR(shape.ValueAt(0)) << "\n");
-    SymVal(InScopeName(name)).val_expr = shape.ValueAt(0);
+    SymVal(InScopeName(name)).SetVal(shape.ValueAt(0));
+  } else if (isa<ITupleType>(nty)) {
+    SymVal(InScopeName(name)).SetVals(vn.GenValueListFromValueNumber(cur_vn));
+    VST_DEBUG(dbgs() << "[SymVal] " << InScopeName(name) << ": "
+                     << STR(SymVal(InScopeName(name)).GetVals()) << "\n");
   }
 
   if (isa<FutureType>(n.GetType()) || isa<SpannedType>(n.GetType()))
@@ -575,7 +590,7 @@ bool ShapeInference::Visit(AST::Assignment& n) {
     assert(shape.DimCount() == 1);
     VST_DEBUG(dbgs() << "[SymVal] " << SSTab().ScopedName(name) << ": "
                      << STR(shape.ValueAt(0)) << "\n");
-    SymVal(SSTab().ScopedName(name)).val_expr = shape.ValueAt(0);
+    SymVal(SSTab().ScopedName(name)).SetVal(shape.ValueAt(0));
   }
 
   return true;
@@ -716,7 +731,7 @@ bool ShapeInference::Visit(AST::ParallelBy& n) {
   if (cannot_proceed) return true;
 
   Shape s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
-  SetNodeType(n, MakeMDSpanType(s));
+  SetNodeType(n, MakeMDSpanType(s)); // useful for the sema check
 
   std::string iv_name = SSTab().ScopedName("@" + n.bpv->name);
   vn.AssociateSignatureWithValueNumber(iv_name, cur_vn);
@@ -1220,7 +1235,7 @@ bool ShapeInference::Visit(AST::Call& n) {
   if (cannot_proceed) return true;
 
   // value the scalars
-  for (auto& s : n.arguments->AllValues()) {
+  for (auto& s : n.GetArguments()) {
     if (!CanBeValueNumbered(s.get())) continue;
     if (isa<IntegerType>(NodeType(*s))) {
       auto expr = cast<AST::Expr>(s);
@@ -1228,13 +1243,52 @@ bool ShapeInference::Visit(AST::Call& n) {
       VST_DEBUG(dbgs() << "[ExprShape] Shape for " << PSTR(s) << ": "
                        << STR(expr->s) << "\n");
       assert(expr->s.DimCount() == 1);
-      expr->SetOptValExpr(expr->s.ValueAt(0));
+      expr->Opts().SetVal(expr->s.ValueAt(0));
       VST_DEBUG(dbgs() << "[ExprVal] Value for " << PSTR(expr) << ": "
                        << STR(expr->s.ValueAt(0)) << "\n");
     }
   }
 
   InvalidateVisitorValNOs();
+
+  if (!(n.IsBIF() && n.CompileTimeEval())) return true;
+
+  const auto func_name = n.function->name;
+  // compile-time print
+  if (func_name == "print" || func_name == "println") {
+    for (const auto& arg : n.GetArguments()) {
+      const auto nty = NodeType(*arg);
+      auto e = cast<AST::Expr>(arg);
+      if (auto sl = e->GetString()) {
+        dbgs() << sl->Val();
+      } else if (auto fl = e->GetFloat()) {
+        if (fl->IsFloat32())
+          dbgs() << fl->Val_f32();
+        else if (fl->IsFloat64())
+          dbgs() << fl->Val_f64();
+      } else if (auto bl = e->GetBoolean()) {
+        dbgs() << bl->Val();
+      } else if (ConvertibleToInt(nty)) {
+        if (e->Opts().HasVal())
+          dbgs() << STR(e->Opts().GetVal());
+        else
+          dbgs() << "unknown"; // TODO
+      } else if (isa<ScalarType>(nty)) {
+        dbgs() << "unknown"; // TODO: opt values
+      } else if (isa<ITupleType>(nty)) {
+        //        dbgs() << STR(e->Opts().GetVals());
+        PrintValueList(e->Opts().GetVals(), dbgs(), "{", "}");
+      } else if (isa<MDSpanType>(nty)) {
+        dbgs() << STR(GetShape(nty));
+      } else if (isa<BoundedType>(nty) || isa<SpannedType>(nty) ||
+                 isa<AsyncType>(nty)) {
+        dbgs() << "rt-val";
+      } else
+        choreo_unreachable("unsupported type for print: " +
+                           AST::TYPE_STR(*arg) + "\n\targ: " + PSTR(arg));
+    }
+    if (func_name == "println") dbgs() << "\n";
+  }
   return true;
 }
 

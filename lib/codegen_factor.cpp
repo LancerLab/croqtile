@@ -1678,15 +1678,15 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       auto sname = InScopeName(sym->name);
       if (FCtx(fname).HasSymbolValues(sname)) {
         auto svs = FCtx(fname).GetSymbolValues(sname);
-        if (IsValidValueItem(svs.val_expr))
-          sname = WrapWithValue(UnScopedExpr(STR(svs.val_expr)));
+        if (svs.HasVal())
+          sname = WrapWithValue(UnScopedExpr(STR(svs.GetVal())));
       }
       if (auto res = ReplaceDynDimRef(sname); res.has_value())
         return res.value();
     }
     if (ConvertibleToInt(NodeType(*e))) {
-      if (IsValidValueItem(expr->GetOptValExpr())) {
-        auto res = WrapWithValue(STR(expr->GetOptValExpr()));
+      if (expr->Opts().HasVal()) {
+        auto res = WrapWithValue(STR(expr->Opts().GetVal()));
         if (auto dres = ReplaceDynDimRef(res); dres.has_value())
           return dres.value();
         else

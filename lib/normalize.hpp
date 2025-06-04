@@ -171,7 +171,7 @@ public:
   bool Visit(AST::IntLiteral&) override { return true; }
   bool Visit(AST::FloatLiteral&) override { return true; }
   bool Visit(AST::StringLiteral&) override { return true; }
-  bool Visit(AST::Boolean&) override { return true; }
+  bool Visit(AST::BoolLiteral&) override { return true; }
   bool Visit(AST::Expr& n) override {
     TraceEachVisit(n);
     if (list_ref) { // could be with syntax sugar

@@ -238,11 +238,15 @@ struct MultiValues : public Node, public TypeIDProvider<MultiValues> {
   __UDT_TYPE_INFO__(Node, MultiValues)
 };
 
-struct Boolean : public Node, public TypeIDProvider<Boolean> {
+struct BoolLiteral : public Node, public TypeIDProvider<BoolLiteral> {
   bool value;
-  explicit Boolean(const location& l, bool v)
+  explicit BoolLiteral(const location& l, bool v)
       : Node(l, MakeBooleanType()), value(v) {}
-  explicit Boolean(const Boolean& b) : Node(b.LOC()) { value = b.value; }
+  explicit BoolLiteral(const BoolLiteral& b) : Node(b.LOC()) {
+    value = b.value;
+  }
+
+  bool Val() const { return value; }
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool = false) const override {
@@ -251,7 +255,7 @@ struct Boolean : public Node, public TypeIDProvider<Boolean> {
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__(Node, Boolean)
+  __UDT_TYPE_INFO__(Node, BoolLiteral)
 };
 
 struct IntLiteral : public Node, public TypeIDProvider<IntLiteral> {
@@ -425,32 +429,8 @@ public:
   }
   void ResetL() { value_l = nullptr; }
 
-  void SetOptValExpr(ValueItem vi) {
-    if (IsValidValueItem(vi))
-      opt_vals.val_expr = vi->Normalize();
-    else
-      choreo_unreachable("invalid value item.");
-  }
-  void SetOptSizeExpr(ValueItem vi) {
-    if (IsValidValueItem(vi))
-      opt_vals.size_expr = vi->Normalize();
-    else
-      choreo_unreachable("invalid value item.");
-  }
-  void SetOptUBoundExprs(const std::vector<ValueItem>& vis) {
-    for (auto vi : vis) {
-      if (IsValidValueItem(vi))
-        opt_vals.ub_exprs.push_back(vi->Normalize());
-      else
-        choreo_unreachable("invalid value item.");
-    }
-  }
-  ValueItem GetOptValExpr() const { return opt_vals.val_expr; }
-  ValueItem GetOptSizeExpr() const { return opt_vals.size_expr; }
-  const std::vector<ValueItem>& GetOptUBoundExprs() const {
-    return opt_vals.ub_exprs;
-  }
-  std::vector<ValueItem>& GetOptUBoundExprs() { return opt_vals.ub_exprs; }
+  OptimizedValues& Opts() { return opt_vals; }
+  const OptimizedValues& Opts() const { return opt_vals; }
 
 public:
   Shape s; // to pass information between shape inference & type inference
@@ -530,9 +510,9 @@ public:
     return dyn_cast<StringLiteral>(value_r);
   }
 
-  ptr<Boolean> GetBoolean() {
+  ptr<BoolLiteral> GetBoolean() {
     if (t != Reference) return nullptr;
-    return dyn_cast<Boolean>(value_r);
+    return dyn_cast<BoolLiteral>(value_r);
   }
 
   bool IsUnary() const { return t == Unary; }
@@ -1764,22 +1744,36 @@ struct Return : public Node, public TypeIDProvider<Return> {
 };
 
 struct Call : public Node, public TypeIDProvider<Call> {
+  enum CallAttr : uint8_t {
+    NONE = 0,
+    BIF = 0x1,
+    COMPTIME = 0x2,
+    ARITH = 0x4,
+    EXPR = 0x8
+  };
+  // Overload bitwise OR
+  friend constexpr CallAttr operator|(CallAttr lhs, CallAttr rhs) {
+    return static_cast<CallAttr>(
+        static_cast<std::underlying_type_t<CallAttr>>(lhs) |
+        static_cast<std::underlying_type_t<CallAttr>>(rhs));
+  }
+
+public:
   ptr<Identifier> function;
   ptr<MultiValues> arguments;
   ptr<MultiValues> template_args;
-  bool is_bif; // built-in?
-  bool is_arith_bif;
-  bool is_stmt;
 
+private:
+  CallAttr attr;
+
+public:
   Call(const location& l, const ptr<Identifier>& f, const ptr<MultiValues>& a,
-       bool builtin = false, bool arith = false, bool stmt = true)
-      : Node(l), function(f), arguments(a), template_args(nullptr),
-        is_bif(builtin), is_arith_bif(arith), is_stmt(stmt) {}
+       CallAttr ba = NONE)
+      : Node(l), function(f), arguments(a), template_args(nullptr), attr(ba) {}
 
   Call(const location& l, const ptr<Identifier>& f, const ptr<MultiValues>& a,
        const ptr<MultiValues>& b)
-      : Node(l), function(f), arguments(a), template_args(b), is_bif(false),
-        is_arith_bif(false), is_stmt(true) {
+      : Node(l), function(f), arguments(a), template_args(b), attr(NONE) {
     arguments->SetDelimiter(", ");
     template_args->SetDelimiter(", ");
   }
@@ -1788,10 +1782,20 @@ struct Call : public Node, public TypeIDProvider<Call> {
     return arguments->AllValues();
   }
 
+  bool IsBIF() const { return (bool)(attr & BIF); }
+  bool CompileTimeEval() const { return (bool)(attr & COMPTIME); }
+  bool IsArith() const { return (bool)(attr & ARITH); }
+  bool IsExpr() const { return (bool)(attr & EXPR); }
+
   void Print(std::ostream& os, const std::string& prefix = {},
              bool with_type = false) const override {
     os << "\n" << prefix << "`- Call: " << STR(*function);
-    if (is_bif) os << " (built-in)";
+    if (IsBIF()) {
+      if (CompileTimeEval())
+        os << " (compile-time built-in)";
+      else
+        os << " (built-in)";
+    }
     if (arguments->Count()) {
       os << "\n" << prefix << "  `- with arguments: ";
       arguments->Print(os, {}, with_type);
@@ -2148,7 +2152,7 @@ inline ptr<Expr> MakeIntExpr(const location& l, int val) {
 
 inline bool IsLiteral(const AST::Node& n) {
   return isa<AST::IntLiteral>(&n) || isa<AST::FloatLiteral>(&n) ||
-         isa<AST::Boolean>(&n) || isa<AST::StringLiteral>(&n);
+         isa<AST::BoolLiteral>(&n) || isa<AST::StringLiteral>(&n);
 }
 
 } // end of namespace AST

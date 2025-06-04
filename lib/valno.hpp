@@ -269,7 +269,8 @@ public:
 
   ValueItem GenValueItemFromSignature(const std::string&);
   ValueItem GenValueItemFromValueNumber(int);
-  const std::vector<ValueItem> GenValueItemsFromSignature(const std::string&);
+  const ValueList GenValueListFromSignature(const std::string&);
+  const ValueList GenValueListFromValueNumber(int);
   std::string ValueItemToSignature(const ValueItem&, bool = false);
 
   // retrieve the n-th element from the comma-separated input string

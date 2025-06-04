@@ -84,8 +84,8 @@ private:
           auto sname = InScopeName(ValueItemAsString(dim));
           if (FCtx(fname).HasSymbolValues(sname)) {
             auto svs = FCtx(fname).GetSymbolValues(sname);
-            if (IsValidValueItem(svs.val_expr))
-              res.push_back(svs.val_expr);
+            if (svs.HasVal())
+              res.push_back(svs.GetVal());
             else
               choreo_unreachable("Expect the symbol " + sname +
                                  " has a valid symbol value!");
@@ -156,7 +156,7 @@ public:
   bool Visit(AST::MultiValues&) { return true; }
   bool Visit(AST::IntLiteral&) { return true; }
   bool Visit(AST::FloatLiteral&) { return true; }
-  bool Visit(AST::Boolean&) { return true; }
+  bool Visit(AST::BoolLiteral&) { return true; }
   bool Visit(AST::Expr&) { return true; }
   bool Visit(AST::MultiDimSpans&) { return true; }
   bool Visit(AST::NamedTypeDecl&) { return true; }

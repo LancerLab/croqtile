@@ -1603,11 +1603,12 @@ inline bool CanYieldAnInteger(const ptr<Type>& ty) {
 }
 
 inline bool ConvertibleToInt(const ptr<Type>& ty) {
-  return isa<ScalarType>(ty) || (isa<ITupleType>(ty) && ty->Dims() == 1);
+  return ConvertibleToInt(*ty);
 }
 
 inline bool ConvertibleToInt(const Type& ty) {
-  return isa<ScalarType>(&ty) || (isa<ITupleType>(&ty) && ty.Dims() == 1);
+  return (isa<ScalarType>(&ty) && !isa<ScalarFloatType>(&ty)) ||
+         (isa<ITupleType>(&ty) && ty.Dims() == 1);
 }
 
 inline ValueItem GetSingleUpperBound(const ptr<Type>& ty) {

@@ -1672,7 +1672,7 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
   auto& indent = (IsHost()) ? h_indent : d_indent;
 
   // generate the built-in functions
-  if (n.is_bif) {
+  if (n.IsBIF()) {
     const auto func_name = n.function->name;
     if (func_name == "assert") {
       if (IsHost()) {
@@ -1780,13 +1780,13 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
       }
       os << ");\n";
       return true;
-    } else if (n.is_arith_bif) {
+    } else if (n.IsArith()) {
     } else
       choreo_unreachable("the bif '" + n.function->name +
                          "' is not supported by this target.");
   }
 
-  if (n.is_stmt) os << indent << CallSTR(n) << ";\n";
+  if (!n.IsExpr()) os << indent << CallSTR(n) << ";\n";
 
   return true;
 }
@@ -2497,7 +2497,7 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
     oss << fp_val.str();
   } else if (auto sl = dyn_cast<AST::StringLiteral>(e)) {
     oss << sl->EscapedVal();
-  } else if (auto b = dyn_cast<AST::Boolean>(e)) {
+  } else if (auto b = dyn_cast<AST::BoolLiteral>(e)) {
     oss << b->value;
   } else if (auto ii = dyn_cast<AST::IntIndex>(e)) {
     return ExprSTR(ii->value, is_host);
@@ -2555,14 +2555,13 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       auto sname = InScopeName(sym->name);
       if (FCtx(fname).HasSymbolValues(sname)) {
         auto svs = FCtx(fname).GetSymbolValues(sname);
-        if (IsValidValueItem(svs.val_expr))
-          return "(" + UnScopedExpr(STR(svs.val_expr)) + ")";
+        if (svs.HasVal()) return "(" + UnScopedExpr(STR(svs.GetVal())) + ")";
       }
     }
 
     if (ConvertibleToInt(NodeType(*e)))
-      if (IsValidValueItem(expr->GetOptValExpr()))
-        return "(" + UnScopedExpr(STR(expr->GetOptValExpr())) + ")";
+      if (expr->Opts().HasVal())
+        return "(" + UnScopedExpr(STR(expr->Opts().GetVal())) + ")";
 
     if (expr->IsReference()) {
       if (PSTR(expr) == "_") return "(0)";
@@ -2591,7 +2590,7 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
         } else
           choreo_unreachable("Can not retrieve name of the future.");
       } else if (expr->GetOp() == "sizeof") {
-        auto se = expr->GetOptSizeExpr();
+        auto se = expr->Opts().GetSize();
         if (IsValidValueItem(se))
           oss << ValueSTR(se);
         else {
@@ -2669,7 +2668,7 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
 const std::string TopsccCodeGen::CallSTR(AST::Call& n) const {
   std::ostringstream oss;
   auto func_name = [&n](const std::string& name) -> std::string {
-    if (!n.is_arith_bif) return name;
+    if (!n.IsArith()) return name;
     if (name == "__log")
       return "tcle::ln";
     else if (name == "__pow")
@@ -2704,7 +2703,7 @@ const std::string TopsccCodeGen::CallSTR(AST::Call& n) const {
       else
         oss << "choreo::make_spanview<" << sty->Dims() << ">((" << bts << "*)"
             << ExprSTR(a, IsHost()) << ", " << LSTR(sty->GetShape()) << ")";
-    } else if (n.is_arith_bif)
+    } else if (n.IsArith())
       oss << ExprSTR(a, IsHost());
     else
       oss << UnScopedName(ExprSTR(a, IsHost()));

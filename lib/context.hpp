@@ -126,9 +126,69 @@ inline bool FBIContainsBuffer(const FutureBufferInfo& buffer_info,
 }
 
 struct OptimizedValues {
-  ValueItem val_expr = GetInvalidValueItem();
-  ValueItem size_expr = GetInvalidValueItem();
+private:
+  std::vector<ValueItem> val_exprs;
   std::vector<ValueItem> ub_exprs;
+  ValueItem size_expr = GetInvalidValueItem();
+
+public:
+  void SetVal(ValueItem vi) {
+    val_exprs.clear();
+    val_exprs.push_back(vi);
+  }
+  void SetVals(const std::vector<ValueItem>& vis) {
+    val_exprs.clear();
+    for (auto vi : vis) {
+      if (!IsValidValueItem(vi))
+        choreo_unreachable("invalid value item.");
+      else
+        val_exprs.push_back(vi->Normalize());
+    }
+  }
+  void SetSize(ValueItem vi) {
+    if (IsValidValueItem(vi))
+      size_expr = vi->Normalize();
+    else
+      choreo_unreachable("invalid value item.");
+  }
+  void SetUBound(ValueItem vi) {
+    ub_exprs.clear();
+    ub_exprs.push_back(vi);
+  }
+  void SetUBounds(const std::vector<ValueItem>& vis) {
+    ub_exprs.clear();
+    for (auto vi : vis) {
+      if (IsValidValueItem(vi))
+        ub_exprs.push_back(vi->Normalize());
+      else
+        choreo_unreachable("invalid value item.");
+    }
+  }
+  bool HasVal() const { return val_exprs.size() == 1; }
+  bool HasVals() const { return !val_exprs.empty(); }
+  bool HasSize() const { return IsValidValueItem(size_expr); }
+  bool HasUBound() const { return ub_exprs.size() == 1; }
+  bool HasUBounds() const { return !ub_exprs.empty(); }
+  const ValueItem GetVal() const {
+    if (val_exprs.size() != 1)
+      choreo_unreachable("not single value item.");
+    else if (!IsValidValueItem(val_exprs[0]))
+      choreo_unreachable("invalid value item.");
+    return val_exprs[0];
+  }
+  const std::vector<ValueItem>& GetVals() const { return val_exprs; }
+  std::vector<ValueItem>& GetVals() { return val_exprs; }
+  ValueItem GetSize() const { return size_expr; }
+  const std::vector<ValueItem>& GetOptUBoundExprs() const { return ub_exprs; }
+  const ValueItem GetUBound() const {
+    if (ub_exprs.size() != 1)
+      choreo_unreachable("not single value item.");
+    else if (!IsValidValueItem(ub_exprs[0]))
+      choreo_unreachable("invalid value item.");
+    return ub_exprs[0];
+  }
+  std::vector<ValueItem>& GetOptUBounds() { return ub_exprs; }
+  const std::vector<ValueItem>& GetOptUBounds() const { return ub_exprs; }
 };
 
 struct RuntimeCheckEntry {

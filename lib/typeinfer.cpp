@@ -186,7 +186,7 @@ bool TypeInference::Visit(AST::StringLiteral& n) {
   return true;
 }
 
-bool TypeInference::Visit(AST::Boolean& n) {
+bool TypeInference::Visit(AST::BoolLiteral& n) {
   TraceEachVisit(n);
   SetNodeType(n, MakeBooleanType());
   return true;

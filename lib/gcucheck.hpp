@@ -75,7 +75,7 @@ private:
 
     // mask stmts that are possible to be shared
     else if (auto c = dyn_cast<AST::Call>(&n))
-      if (c->is_stmt) n.SetLevel(PLevel(n, pl_depth));
+      if (!c->IsExpr()) n.SetLevel(PLevel(n, pl_depth));
 
     return true;
   }
@@ -722,7 +722,7 @@ public:
 
     return true;
   }
-  bool Visit(AST::Boolean& n) override {
+  bool Visit(AST::BoolLiteral& n) override {
     TraceEachVisit(n);
     return true;
   }
@@ -912,8 +912,8 @@ public:
   }
   bool Visit(AST::Call& n) override {
     TraceEachVisit(n);
-    if (n.is_arith_bif && (CCtx().GetArch() == TargetArch::GCU20 ||
-                           CCtx().GetArch() == TargetArch::GCU21)) {
+    if (n.IsArith() && (CCtx().GetArch() == TargetArch::GCU20 ||
+                        CCtx().GetArch() == TargetArch::GCU21)) {
       Error(n.LOC(), "Arithmetic built-in function is not supported on GCU2.");
       error_count++;
     }

@@ -264,7 +264,7 @@ fi
 bool CUDACodeGen::Visit(AST::MultiNodes&) { return true; }
 bool CUDACodeGen::Visit(AST::MultiValues&) { return true; }
 bool CUDACodeGen::Visit(AST::IntLiteral&) { return true; };
-bool CUDACodeGen::Visit(AST::Boolean&) { return true; };
+bool CUDACodeGen::Visit(AST::BoolLiteral&) { return true; };
 bool CUDACodeGen::Visit(AST::Expr&) { return true; };
 bool CUDACodeGen::Visit(AST::MultiDimSpans&) { return true; };
 bool CUDACodeGen::Visit(AST::NamedTypeDecl&) { return true; };
@@ -867,7 +867,7 @@ bool CUDACodeGen::Visit(AST::Call& c) {
     for (size_t i = 0; i < c.template_args->Count(); ++i) {
       if (need_delimiter) fs << ", ";
       need_delimiter = true;
-      fs << STR(cast<AST::Expr>(c.template_args->ValueAt(i))->GetOptValExpr());
+      fs << STR(cast<AST::Expr>(c.template_args->ValueAt(i))->Opts().GetVal());
     }
     fs << ">";
   }

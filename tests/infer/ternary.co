@@ -1,0 +1,10 @@
+// RUN: choreo -i %s | FileCheck --match-full-lines %s
+
+__co__ void foo(s8 [3, 2] a, int da) {
+  b = 3 + 2;
+  c = (a.span(0) > 2) ? a.span(1) : b + 1;
+  d = ((c < 4) ? b + c : b) + da;
+  global f32 [c, d] data;
+}
+
+// CHECK: Symbol:    ::foo::data, Type: global f32 mdspan<2> [2, (::foo::da + 7)]
