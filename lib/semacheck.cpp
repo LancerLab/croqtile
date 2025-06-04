@@ -538,6 +538,27 @@ bool SemaChecker::VisitNode(AST::Call& n) {
     }
   }
 
+  if (n.IsBIF()) {
+    const auto func_name = n.function->name;
+    if (func_name == "assert") {
+      auto cmp = n.arguments->ValueAt(0);
+      if (auto cexpr = dyn_cast<AST::Expr>(cmp)) {
+        auto is_false = cexpr->s.ValueAt(0)->ToString() == "false";
+        std::string msg;
+        if (auto str = dyn_cast<AST::StringLiteral>(n.arguments->ValueAt(1))) {
+          msg = str->value;
+        } else {
+          choreo_unreachable(
+              "choreo assertion requires a string message as the second.");
+        }
+        if (is_false) {
+          Error(n.LOC(), "choreo assertion abort: " + msg);
+          error_count++;
+        }
+      }
+    }
+  }
+
   return true;
 }
 
