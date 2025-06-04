@@ -10,4 +10,4 @@ __co__ void notile(f16 [32, 17, 6] a) {
 
 // CHECK:     tops::mdspan __mds0_a(tops::Global, (choreo::half*)a, 32, 17, 6);
 // CHECK:     tops::mdspan __mds1_anon_0(tops::Private, (choreo::half*)anon_0, 32, 17, 2);
-// CHECK:     int __slice_offset0__a_2_anon_0[] = {(int)(__tops_tid_x() * 32), 0, (int)(__iv_index__elem__0 * 2)};
+// CHECK:     int __slice_offset0__a_2_anon_0[] = {(int)(__tops_tid_x() * (32)), 0, (int)(__iv_index__elem__0 * (2))};

@@ -37,7 +37,7 @@ __co__ auto bar1(f16 [36, 15, 14, 64] a) {
 // CHECK:       tops::mdspan __mds1_a_local__buf__(tops::Private, (choreo::half*)a_local__buf__, 18, 5, 2, 32);
 // CHECK:       tops_dte_ctx_t choreo_topscc_ctx0;
 // CHECK:       choreo::future a_local(choreo_topscc_ctx0, "a_local", {{[0-9]+}}, {{[0-9]+}}, a_local__buf__);
-// CHECK:       int __slice_offset0__a_2_a_local__buf__[] = {(int)(__tops_bid_x() * 18), (int)(__tops_tid_x() * 5), (int)(__iv_index__elem__0 * 2)};
+// CHECK:       int __slice_offset0__a_2_a_local__buf__[] = {(int)(__tops_bid_x() * (18)), (int)(__tops_tid_x() * (5)), (int)(__iv_index__elem__0 * (2))};
 // CHECK:       tops::slice(*a_local.get_ctx(), __mds1_a_local__buf__, __mds0_a, __slice_offset0__a_2_a_local__buf__);
 // CHECK:     } // index__elem__0
 // CHECK:     __iv_index__elem__0 = 0;
@@ -69,7 +69,7 @@ __co__ auto bar2(f16 [4, 36, 14, 64] a) {
 // CHECK:       tops::mdspan __mds3_a_local__buf__(tops::Private, (choreo::half*)a_local__buf__, 2, 4, 2, 32);
 // CHECK:       tops_dte_ctx_t choreo_topscc_ctx1;
 // CHECK:       choreo::future a_local(choreo_topscc_ctx1, "a_local", {{[0-9]+}}, {{[0-9]+}}, a_local__buf__);
-// CHECK:       int __slice_offset1__a_2_a_local__buf__[] = {(int)(__tops_bid_x() * 2), (int)(__tops_bid_y() * 4), (int)(__tops_tid_x() * 2), (int)(__iv_index__elem__0 * 32)};
+// CHECK:       int __slice_offset1__a_2_a_local__buf__[] = {(int)(__tops_bid_x() * (2)), (int)(__tops_bid_y() * (4)), (int)(__tops_tid_x() * (2)), (int)(__iv_index__elem__0 * (32))};
 // CHECK:       tops::slice(*a_local.get_ctx(), __mds3_a_local__buf__, __mds2_a, __slice_offset1__a_2_a_local__buf__);
 // CHECK:     } // index__elem__0
 // CHECK:     __iv_index__elem__0 = 0;

@@ -398,8 +398,8 @@ const std::string TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
       if (exprs[i] == "__choreo_no_tiling__")
         offsets[i] << "0";
       else
-        offsets[i] << "(int)(" << exprs[i] << " * "
-                   << UnScopedExpr(STR(shape.ValueAt(i))) << ")";
+        offsets[i] << "(int)(" << exprs[i] << " * ("
+                   << UnScopedExpr(STR(shape.ValueAt(i))) << "))";
     }
   }
 

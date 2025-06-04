@@ -13,7 +13,7 @@ __co__  void foo(f32 [24] a) {
 // CHECK:   tops::mdspan __mds1_sa(tops::Shared, (float*)sa[__tops_tid_x()], 8);
 // CHECK:   tops_dte_ctx_t choreo_topscc_ctx0;
 // CHECK:   choreo::future __choreo_anon_fut__0(choreo_topscc_ctx0, "", 6, 5, sa[__tops_tid_x()]);
-// CHECK:   int __slice_offset0__a_2_sa[] = {(int)(__tops_tid_x() * 8)};
+// CHECK:   int __slice_offset0__a_2_sa[] = {(int)(__tops_tid_x() * (8))};
 // CHECK:   tops::slice(*__choreo_anon_fut__0.get_ctx(), __mds1_sa, __mds0_a, __slice_offset0__a_2_sa);
 // CHECK:   __local__ __valigned__ float anon_1[8];
 // CHECK:   tops::mdspan __mds2_sa(tops::Shared, (float*)sa[__tops_tid_x()], 8);

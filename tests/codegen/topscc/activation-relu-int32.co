@@ -93,7 +93,7 @@ int main() { /// host program
 // CHECK-TOPSCC:       tops::mdspan __mds1_input_load__buf__(tops::Shared, (int*)input_load__buf__, 256, 1024);
 // CHECK-TOPSCC:       tops_dte_ctx_t choreo_topscc_ctx0;
 // CHECK-TOPSCC:       if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {
-// CHECK-TOPSCC:         int __slice_offset0__input_2_input_load__buf__[] = {(int)(__tops_bid_x() * 256), (int)(__iv_n_tile * 1024)};
+// CHECK-TOPSCC:         int __slice_offset0__input_2_input_load__buf__[] = {(int)(__tops_bid_x() * (256)), (int)(__iv_n_tile * (1024))};
 // CHECK-TOPSCC:         tops::event input_load__event__ = tops::slice_async(*input_load.get_ctx(), __mds1_input_load__buf__, __mds0_input, __slice_offset0__input_2_input_load__buf__);
 // CHECK-TOPSCC:         input_load.set_event(input_load__event__);
 // CHECK-TOPSCC:       } // single instance
@@ -110,14 +110,14 @@ int main() { /// host program
 // CHECK-TOPSCC:             tops::mdspan __mds2_input_load(tops::Shared, (int*)input_load.data(), 256, 1024);
 // CHECK-TOPSCC:             tops::mdspan __mds3_input_load_s__buf__(tops::Private, (int*)input_load_s__buf__, 128, 256);
 // CHECK-TOPSCC:             tops_dte_ctx_t choreo_topscc_ctx1;
-// CHECK-TOPSCC:             int __slice_offset1__input_load_2_input_load_s__buf__[] = {(int)(__iv_m_tile_s * 128), (int)(__iv_n_tile_s * 256)};
+// CHECK-TOPSCC:             int __slice_offset1__input_load_2_input_load_s__buf__[] = {(int)(__iv_m_tile_s * (128)), (int)(__iv_n_tile_s * (256))};
 // CHECK-TOPSCC:             tops::event input_load_s__event__ = tops::slice_async(*input_load_s.get_ctx(), __mds3_input_load_s__buf__, __mds2_input_load, __slice_offset1__input_load_2_input_load_s__buf__);
 // CHECK-TOPSCC:             input_load_s.set_event(input_load_s__event__);
 // CHECK-TOPSCC:             __local__ __valigned__ int out_load_s__buf__[32768];
 // CHECK-TOPSCC:             tops::mdspan __mds4_l2_out(tops::Shared, (int*)l2_out, 256, 1024);
 // CHECK-TOPSCC:             tops::mdspan __mds5_out_load_s__buf__(tops::Private, (int*)out_load_s__buf__, 128, 256);
 // CHECK-TOPSCC:             tops_dte_ctx_t choreo_topscc_ctx2;
-// CHECK-TOPSCC:             int __slice_offset2__l2_out_2_out_load_s__buf__[] = {(int)(__iv_m_tile_s * 128), (int)(__iv_n_tile_s * 256)};
+// CHECK-TOPSCC:             int __slice_offset2__l2_out_2_out_load_s__buf__[] = {(int)(__iv_m_tile_s * (128)), (int)(__iv_n_tile_s * (256))};
 // CHECK-TOPSCC:             tops::event out_load_s__event__ = tops::slice_async(*out_load_s.get_ctx(), __mds5_out_load_s__buf__, __mds4_l2_out, __slice_offset2__l2_out_2_out_load_s__buf__);
 // CHECK-TOPSCC:             out_load_s.set_event(out_load_s__event__);
 // CHECK-TOPSCC:             input_load_s.wait();
@@ -126,7 +126,7 @@ int main() { /// host program
 // CHECK-TOPSCC:             tops::mdspan __mds6_out_load_s(tops::Private, (int*)out_load_s.data(), 128, 256);
 // CHECK-TOPSCC:             tops::mdspan __mds7_l2_out(tops::Shared, (int*)l2_out, 256, 1024);
 // CHECK-TOPSCC:             tops_dte_ctx_t choreo_topscc_ctx3;
-// CHECK-TOPSCC:             int __deslice_offset0__l2_out_2_out_load_s[] = {(int)(__iv_m_tile_s * 128), (int)(__iv_n_tile_s * 256)};
+// CHECK-TOPSCC:             int __deslice_offset0__l2_out_2_out_load_s[] = {(int)(__iv_m_tile_s * (128)), (int)(__iv_n_tile_s * (256))};
 // CHECK-TOPSCC:             tops::event out_store_s__event__ = tops::deslice_async(*out_store_s.get_ctx(), __mds7_l2_out, __mds6_out_load_s, __deslice_offset0__l2_out_2_out_load_s);
 // CHECK-TOPSCC:             out_store_s.set_event(out_store_s__event__);
 // CHECK-TOPSCC:             out_store_s.wait();
@@ -139,7 +139,7 @@ int main() { /// host program
 // CHECK-TOPSCC:       tops::mdspan __mds9_output(tops::Global, (int*)output, 512, 1024);
 // CHECK-TOPSCC:       tops_dte_ctx_t choreo_topscc_ctx4;
 // CHECK-TOPSCC:       if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {
-// CHECK-TOPSCC:         int __deslice_offset1__output_2_l2_out[] = {(int)(__tops_bid_x() * 256), (int)(__iv_n_tile * 1024)};
+// CHECK-TOPSCC:         int __deslice_offset1__output_2_l2_out[] = {(int)(__tops_bid_x() * (256)), (int)(__iv_n_tile * (1024))};
 // CHECK-TOPSCC:         tops::event out_store__event__ = tops::deslice_async(*out_store.get_ctx(), __mds9_output, __mds8_l2_out, __deslice_offset1__output_2_l2_out);
 // CHECK-TOPSCC:         out_store.set_event(out_store__event__);
 // CHECK-TOPSCC:       } // single instance

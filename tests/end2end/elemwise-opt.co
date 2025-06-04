@@ -79,7 +79,7 @@ __co__ auto ele_add(s32 [M] lhs, s32 [M] rhs) {
             foreach i in [l1_out.span]
               l1_out.at(i) = lfl.data.at(i) + rfl.data.at(i);
 
-            dma.copy l1_out => output.modspan(l2_elem_count).at(x # p).subspan(l1_count).at(q);
+            dma.copy l1_out => output.modspan(l2_elem_count).at(x # p).subspan(last_count).at(q);
           }
 
           // last bunch

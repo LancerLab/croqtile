@@ -48,7 +48,7 @@ __co__ auto bar(f16 [128, 4, 14, 69] a) {
 // CHECK:         tops::mdspan __mds1_anon_0(tops::Private, (float*)anon_0, 16, 1, 3);
 // CHECK:         tops_dte_ctx_t choreo_topscc_ctx0;
 // CHECK:         choreo::future __choreo_anon_fut__0(choreo_topscc_ctx0, "", {{[0-9]+}}, {{[0-9]+}}, anon_0);
-// CHECK:         int __slice_offset0__a_2_anon_0[] = {(int)(__tops_tid_x() * 16), (int)(__iv_x * 1), (int)(__iv_y * 3)};
+// CHECK:         int __slice_offset0__a_2_anon_0[] = {(int)(__tops_tid_x() * (16)), (int)(__iv_x * (1)), (int)(__iv_y * (3))};
 // CHECK:         tops::slice(*__choreo_anon_fut__0.get_ctx(), __mds1_anon_0, __mds0_a, __slice_offset0__a_2_anon_0);
 // CHECK:       } // y
 // CHECK:       __iv_y = 0;
@@ -78,7 +78,7 @@ __co__ auto bar(f16 [128, 4, 14, 69] a) {
 // CHECK:         tops::mdspan __mds3_anon_1(tops::Private, (choreo::half*)anon_1, 64, 1, 2, 23);
 // CHECK:         tops_dte_ctx_t choreo_topscc_ctx1;
 // CHECK:         choreo::future __choreo_anon_fut__1(choreo_topscc_ctx1, "", {{[0-9]+}}, {{[0-9]+}}, anon_1);
-// CHECK:         int __slice_offset1__a_2_anon_1[] = {(int)(__iv_index__elem__0 * 64), (int)(__iv_index__elem__1 * 1), (int)(__tops_bid_x() * 2), (int)(__tops_tid_x() * 23)};
+// CHECK:         int __slice_offset1__a_2_anon_1[] = {(int)(__iv_index__elem__0 * (64)), (int)(__iv_index__elem__1 * (1)), (int)(__tops_bid_x() * (2)), (int)(__tops_tid_x() * (23))};
 // CHECK:         tops::slice(*__choreo_anon_fut__1.get_ctx(), __mds3_anon_1, __mds2_a, __slice_offset1__a_2_anon_1);
 // CHECK:       } // index__elem__1
 // CHECK:       __iv_index__elem__1 = 0;
