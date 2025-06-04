@@ -1,0 +1,47 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+// RUN: choreo -es -t topscc %s | FileCheck --match-full-lines --check-prefix=CODEGEN %s
+
+#include "choreo.h"
+
+__co__ auto foo(s32 [32, 4] a) {
+  parallel by 1 {
+    local s32[32, 4] l_a{-5};
+    dma.copy l_a => a;
+  }
+  return a;
+}
+
+int main()
+{
+  auto input = choreo::make_spandata<choreo::s32>(32, 4);
+  input.fill(101);
+  std::cout << "before" << std::endl;
+  std::cout << "input[0][0] = " << input[0][0] << std::endl;
+  
+  auto res = foo(input.view());
+
+  std::cout << "after co call" << std::endl;
+  
+  std::cout << "input[0][0] = " << input[0][0] << std::endl;
+  std::cout << "res[0][0] = " << res[0][0] << std::endl;
+  
+  
+  res[0][0] = 1010;
+  std::cout << "after host assignment" << std::endl;
+  std::cout << "input[0][0] = " << input[0][0] << std::endl;
+  std::cout << "res[0][0] = " << res[0][0] << std::endl;
+
+  return 0;
+}
+
+// CODEGEN: return choreo::copy_as_spanned(a.data(), a.shape());
+
+// CHECK: before
+// CHECK: input[0][0] = 101
+// CHECK: after co call
+// CHECK: input[0][0] = -5
+// CHECK: res[0][0] = -5
+// CHECK: after host assignment
+// CHECK: input[0][0] = -5
+// CHECK: res[0][0] = 1010

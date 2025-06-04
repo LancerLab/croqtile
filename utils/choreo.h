@@ -808,6 +808,19 @@ auto copy_as_spanned(T* ptr, std::initializer_list<size_t> init) {
   return res;
 }
 
+template <size_t Rank, typename T>
+auto copy_as_spanned(T* ptr, const mdspan<Rank> dims) {
+  size_t element_count = span_size(dims);
+  auto parr = new T[element_count];
+  std::copy(ptr, ptr + element_count, parr);
+  auto del = [](T* p) { delete[] p; };
+  spanned_data_unique_ptr<T> uptr((T*)parr, del);
+  auto res = spanned_data<T, Rank>(std::move(uptr), dims);
+  choreo_assert(res.bytes() == element_count * sizeof(T),
+                "error: element_count does not match.", __FILE__, __LINE__);
+  return res;
+}
+
 struct HeapSimulator {
 public:
   struct Chunk {

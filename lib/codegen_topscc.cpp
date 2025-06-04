@@ -1933,15 +1933,21 @@ bool TopsccCodeGen::Visit(AST::Return& n) {
     if (auto id = AST::GetIdentifier(*n.value)) {
       auto sym = id->name;
       if (IsChoreoInput(InScopeName(sym))) {
-        // return the parameter
-        return_stream << "return " << ExprSTR(n.value, true) << ";\n";
+        // return the global storage, must map back
+        hs << h_indent << "choreo::abend_true(topsMemcpy(" << sym << ".data(), "
+           << sym << "__device, " << UnScopedSizeExpr(*sty)
+           << ", topsMemcpyDeviceToHost));\n";
+        return_stream << "return choreo::copy_as_spanned(" << sym << ".data(), "
+                      << sym << ".shape());\n";
       } else if (IsChoreoOutput(InScopeName(sym))) {
         // return the global storage, must map back
         hs << h_indent << "choreo::abend_true(topsMemcpy(" << sym << ".data(), "
            << sym << "__device, " << UnScopedSizeExpr(*sty)
            << ", topsMemcpyDeviceToHost));\n";
-      } else
+        return_stream << "return " << ExprSTR(n.value, true) << ";\n";
+      } else {
         choreo_unreachable("unexpected situation");
+      }
     } else if (auto expr = cast<AST::Expr>(n.value);
                expr && expr->op == "dataof") {
       // return future.data, must map back
@@ -1951,8 +1957,10 @@ bool TopsccCodeGen::Visit(AST::Return& n) {
       hs << h_indent << "choreo::abend_true(topsMemcpy(" << sym << ".data(), "
          << sym << "__device, " << UnScopedSizeExpr(*sty)
          << ", topsMemcpyDeviceToHost));\n";
+      return_stream << "return " << ExprSTR(n.value, true) << ";\n";
+    } else {
+      choreo_unreachable("not support return value of type: " + PSTR(vty));
     }
-    return_stream << "return " << ExprSTR(n.value, true) << ";\n";
   } else {
     choreo_unreachable("not support return value of type: " + PSTR(vty));
   }

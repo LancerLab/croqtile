@@ -64,7 +64,10 @@ __co__ auto bar(f16 [128, 4, 14, 69] a) {
 // CHECK:   dim3 __foo_gdims0(1, 1, 1);
 // CHECK:   dim3 __foo_bdims0(2, 1, 1);
 // CHECK:   __choreo_device_foo<<<__foo_gdims0, __foo_bdims0>>>(a__device);
-// CHECK:   return a;
+// CHECK:   choreo::abend_true(topsDeviceSynchronize());
+// CHECK:   choreo::abend_true(topsMemcpy(a.data(), a__device, 13824ULL, topsMemcpyDeviceToHost));
+// CHECK:   choreo::abend_true(topsFree(a__device));
+// CHECK:   return choreo::copy_as_spanned(a.data(), a.shape());
 // CHECK: }
 
 // CHECK: __global__ void __choreo_device_bar(choreo::f16 * a) {
@@ -94,5 +97,8 @@ __co__ auto bar(f16 [128, 4, 14, 69] a) {
 // CHECK:   dim3 __bar_gdims0(7, 1, 1);
 // CHECK:   dim3 __bar_bdims0(3, 1, 1);
 // CHECK:   __choreo_device_bar<<<__bar_gdims0, __bar_bdims0>>>(a__device);
-// CHECK:   return a;
+// CHECK:   choreo::abend_true(topsDeviceSynchronize());
+// CHECK:   choreo::abend_true(topsMemcpy(a.data(), a__device, 989184ULL, topsMemcpyDeviceToHost));
+// CHECK:   choreo::abend_true(topsFree(a__device));
+// CHECK:   return choreo::copy_as_spanned(a.data(), a.shape());
 // CHECK: }

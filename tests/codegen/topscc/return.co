@@ -11,7 +11,7 @@ __co__ auto bar(bf16 [1] a) {
 }
 
 // CHECK: choreo::spanned_data<choreo::bf16, 1> bar(const choreo::spanned_view<choreo::bf16, 1> & a)
-// CHECK:   return a;
+// CHECK:   return choreo::copy_as_spanned(a.data(), a.shape());
 
 __co__ auto foo1() {
   int a = 3;
