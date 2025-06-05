@@ -62,8 +62,10 @@ class ScopedSymbolMap {
   using SymbolMap = std::unordered_map<std::string, std::string>;
   std::vector<SymbolMap> host_map;
   std::vector<SymbolMap> device_map;
+  bool debug;
 
 public:
+  ScopedSymbolMap(bool d = false) : debug(d) {}
   void EnterScope() {
     host_map.push_back({});
     device_map.push_back({});
@@ -74,42 +76,65 @@ public:
   }
   void MapHostSymbol(const std::string& csym, const std::string& name) {
     assert(!host_map.back().count(csym) && "symbol existed");
+    if (debug)
+      dbgs() << "[Host] Map symbol: " << csym << " -> " << name << "\n";
     host_map.back()[csym] = name;
   }
   void MapDeviceSymbol(const std::string& csym, const std::string& name) {
     assert(PrefixedWith(csym, "::") && "expect a scoped name.");
     assert(!device_map.back().count(csym) && "symbol existed");
+    if (debug)
+      dbgs() << "[Device] Map symbol: " << csym << " -> " << name << "\n";
     device_map.back()[csym] = name;
   }
   void MapDeviceSymbolIfNotExist(const std::string& csym,
                                  const std::string& name) {
     assert(PrefixedWith(csym, "::") && "expect a scoped name.");
-    if (!device_map.back().count(csym)) MapDeviceSymbol(csym, name);
+    if (!device_map.back().count(csym)) {
+      if (debug)
+        dbgs() << "[Device] Map symbol: " << csym << " -> " << name << "\n";
+      MapDeviceSymbol(csym, name);
+    }
   }
 
-  void DumpDeviceMap() {
-    dbgs() << "==================== Device Map Information ===================="
-           << std::endl;
-    dbgs() << "Symbol -> Buffer Name Mapping:" << "\n";
-    dbgs() << "--------------------------------------------------------------"
-           << "\n";
+  void DumpHostMap() {
+    dbgs()
+        << "==================== Host Map Information ====================\n";
+    // Print a formatted table with columns for symbol and buffer name
+    dbgs() << std::setw(30) << std::left << "Symbol" << std::setw(50)
+           << std::left << " -> Buffer Name" << "\n";
+    dbgs()
+        << "--------------------------------------------------------------\n";
 
-    for (auto& table : device_map) {
-      // Print a formatted table with columns for symbol and buffer name
-      dbgs() << std::setw(30) << std::left << "Symbol" << std::setw(50)
-             << std::left << "Buffer Name" << "\n";
-      dbgs() << "--------------------------------------------------------------"
-             << "\n";
-
+    for (auto& table : host_map) {
+      if (table.empty()) continue;
       for (const auto& entry : table) {
         dbgs() << std::setw(30) << std::left << entry.first // Symbol
-               << std::setw(50) << std::left << entry.second
-               << "\n"; // Buffer Name
+               << " -> " << entry.second << "\n";           // Buffer Name
       }
     }
 
-    dbgs() << "--------------------------------------------------------------"
+    dbgs() << "================================================================"
            << "\n";
+  }
+  void DumpDeviceMap() {
+    dbgs()
+        << "==================== Device Map Information ====================\n";
+    // Print a formatted table with columns for symbol and buffer name
+    dbgs() << std::setw(30) << std::left << "Symbol" << std::setw(50)
+           << std::left << " -> Buffer Name" << "\n";
+    dbgs()
+        << "--------------------------------------------------------------\n";
+
+    for (auto& table : device_map) {
+      if (table.empty()) continue;
+
+      for (const auto& entry : table) {
+        dbgs() << std::setw(30) << std::left << entry.first // Symbol
+               << " -> " << entry.second << "\n";           // Buffer Name
+      }
+    }
+
     dbgs() << "================================================================"
            << "\n";
   }
@@ -309,6 +334,7 @@ private:
   // this check can only be processed when all device symbol
   // has been mapped
   void PLDCheck() {
+    VST_DEBUG(ssm.DumpHostMap());
     VST_DEBUG(ssm.DumpDeviceMap());
     for (size_t idx = 0; idx < pld_checklist.size(); ++idx) {
       auto pld_name = pld_checklist[idx];

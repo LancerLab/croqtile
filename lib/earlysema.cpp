@@ -141,6 +141,17 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       SetNodeType(n, SSTab().LookupSymbol(sym->name + ".data"));
     else
       SetNodeType(n, MakeDummySpannedType());
+  } else if (n.op == "addrof") {
+    auto ty = NodeType(*n.GetR());
+    if (!isa<SpannedType>(ty)) {
+      Error(n.LOC(), "in operation \"" + n.op +
+                         "\": expect a spanned type but got `" + PSTR(ty) +
+                         "'.");
+      error_count++;
+      SetNodeType(n, MakeUnknownType());
+      return false;
+    }
+    SetNodeType(n, MakeAddrType());
   } else if (n.op == "sizeof") {
     auto ty = NodeType(*n.GetR());
     if (!GetMDSpanType(ty)) {
@@ -707,7 +718,10 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
       if (debug_visit)
         dbgs() << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
     } else if (isa<StringType>(ety)) {
-      Error(n.LOC(), "not support declaring variable of string type yet.");
+      Error(n.LOC(), "string variables are not supported yet.");
+      error_count++;
+    } else if (isa<AddrType>(ety)) {
+      Error(n.LOC(), "pointer variables are not supported.");
       error_count++;
     }
 
@@ -873,9 +887,17 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
       if (debug_visit)
         dbgs() << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
       return false;
+    } else if (isa<StringType>(sty)) {
+      Error(n.LOC(), "string variable declarstions are not supported yet.");
+      error_count++;
+    } else if (isa<AddrType>(sty)) {
+      Error(n.LOC(), "pointer variable declarations are not supported.");
+      error_count++;
     }
+
     ReportErrorWhenViolateODR(n.LOC(), n.GetName(), __FILE__, __LINE__,
                               ShadowTypeStorage(sty));
+
     if (auto ty = dyn_cast<SpannedType>(sty)) {
       ReportErrorWhenViolateODR(n.LOC(), n.GetName() + ".span", __FILE__,
                                 __LINE__, MakeRankedMDSpanType(ty->Dims()));
@@ -1599,7 +1621,8 @@ bool EarlySemantics::Visit(AST::Call& n) {
         if (isa<StringType>(ty) || isa<IntegerType>(ty) ||
             isa<BooleanType>(ty) || isa<EventType>(ty) || isa<FloatType>(ty) ||
             isa<DoubleType>(ty) || isa<ITupleType>(ty) || isa<MDSpanType>(ty) ||
-            isa<BoundedType>(ty) || isa<HalfType>(ty) || isa<BFP16Type>(ty))
+            isa<BoundedType>(ty) || isa<HalfType>(ty) || isa<BFP16Type>(ty) ||
+            isa<AddrType>(ty))
           return true;
         // half8 is invalid.
         return false;
@@ -1612,7 +1635,8 @@ bool EarlySemantics::Visit(AST::Call& n) {
               Warning(arg->LOC(), "compile-time evaluation of type '" +
                                       PSTR(aty) + "' is yet to support.");
           } else if (isa<BoundedType>(aty) || isa<EventType>(aty) ||
-                     isa<SpannedType>(aty) || isa<AsyncType>(aty)) {
+                     isa<SpannedType>(aty) || isa<AsyncType>(aty) ||
+                     isa<AddrType>(aty)) {
             Warning(arg->LOC(), "compile-time evaluation of type '" +
                                     PSTR(aty) +
                                     "' is impossible since its value is "

@@ -513,10 +513,12 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
     if (item.IsParameter()) {
       assert((int)host_pindex == item.p_index);
       item.host_name = UnScopedName(item.name);
-      ssm.MapHostSymbol(item.name, item.host_name);
       ssm.MapDeviceSymbol(item.name, UnScopedName(item.name));
-      if (auto sty = dyn_cast<SpannedType>(item.type))
+      if (auto sty = dyn_cast<SpannedType>(item.type)) {
+        ssm.MapHostSymbol(item.name, item.host_name + ".data()");
         HandleSymbolicDimensions(sty, item.host_name, host_pindex);
+      } else
+        ssm.MapHostSymbol(item.name, item.host_name);
     } else
       item.host_name = UnScopedName(item.name);
 
@@ -570,7 +572,7 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
         hs << h_indent << "choreo::abend_true(topsMalloc(&" << buf_sym << ", "
            << UnScopedSizeExpr(*sty) << "));\n";
         hs << h_indent << "choreo::abend_true(topsMemcpy(" << buf_sym << ", "
-           << ssm.HostName(item.name) << ".data(), " << UnScopedSizeExpr(*sty)
+           << ssm.HostName(item.name) << ", " << UnScopedSizeExpr(*sty)
            << ", topsMemcpyHostToDevice));\n";
         ssm.MapHostSymbol(item.name + "__device", buf_sym);
       }
@@ -756,7 +758,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       if (!IsHost()) choreo_unreachable("error: global var decl in device.");
       HandleGlobal();
       ssm.MapHostSymbol(InScopeName(sym) + "__device", buf_sym);
-      ssm.MapHostSymbol(InScopeName(sym), sym);
+      ssm.MapHostSymbol(InScopeName(sym), buf_sym);
       ssm.MapDeviceSymbolIfNotExist(InScopeName(sym), sym);
     } else if (sto == Storage::SHARED || sto == Storage::LOCAL) {
       if (IsHost()) choreo_unreachable("error: shared/local var decl in host.");
@@ -1766,6 +1768,9 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
           std::string args_str = ExprSTR(arg, false);
           for (const auto& arg_str : SplitStringByDelimiter(args_str, ", "))
             print_args += "static_cast<long long> (" + arg_str + "), ";
+        } else if (isa<AddrType>(type)) {
+          print_format += "%p";
+          print_args += "static_cast<void*>(" + ExprSTR(arg, IsHost()) + "), ";
         } else
           choreo_unreachable("unsupported type for print: " +
                              AST::TYPE_STR(*arg) + "\n\targ: " + ExprSTR(arg));
@@ -1944,7 +1949,7 @@ bool TopsccCodeGen::Visit(AST::Return& n) {
         hs << h_indent << "choreo::abend_true(topsMemcpy(" << sym << ".data(), "
            << sym << "__device, " << UnScopedSizeExpr(*sty)
            << ", topsMemcpyDeviceToHost));\n";
-        return_stream << "return " << ExprSTR(n.value, true) << ";\n";
+        return_stream << "return " << sym << ";\n";
       } else {
         choreo_unreachable("unexpected situation");
       }
@@ -2035,7 +2040,7 @@ void TopsccCodeGen::EmitHostRuntimeCheck() {
   size_t host_pindex = 0;
   for (const auto& item : GetChoreoFuncIns(cgi)) {
     assert((int)host_pindex == item.p_index);
-    auto name = ssm.HostName(item.name);
+    auto name = UnScopedName(item.name);
     if (auto sty = dyn_cast<SpannedType>(item.type)) {
       size_t dim_count = 0;
       for (auto vi : sty->GetShape().Value()) {
@@ -2604,6 +2609,11 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
         oss << "++" << ExprSTR(expr->GetR(), is_host);
       } else if (expr->GetOp() == "--") {
         oss << "--" << ExprSTR(expr->GetR(), is_host);
+      } else if (expr->GetOp() == "addrof") {
+        if (auto id = AST::GetIdentifier(expr->GetR())) {
+          oss << ExprSTR(id, is_host);
+        } else
+          choreo_unreachable("Can not retrieve name of the spanned data.");
       } else
         choreo_unreachable("Unsupported choreo expression.");
     } else if (expr->IsBinary()) {

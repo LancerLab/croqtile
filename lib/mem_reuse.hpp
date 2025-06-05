@@ -198,8 +198,8 @@ private:
           // this should not happen in normal cases, because we always can find
           // a position after all forbidden ranges but just in case, we should
           // handle this situation
-          std::cerr << "Error: Could not find valid position for buffer "
-                    << chunk.buffer_id << std::endl;
+          errs() << "Error: Could not find valid position for buffer "
+                 << chunk.buffer_id << std::endl;
           // indicate allocation failed
           result.chunk_offsets[chunk.buffer_id] = -1;
           continue;

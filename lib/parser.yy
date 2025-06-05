@@ -152,6 +152,7 @@ void choreo_info(const char *message) {
   BIND    "<->"
   PIPE    "|"
   UBOUND  "#"
+  AMP     "&"
   UBPLUS  "#+"
   UBMINUS "#-"
   UBSTAR  "#*"
@@ -967,7 +968,10 @@ arith_operation
 
 assignment
     : IDENTIFIER ASSIGN s_expr {
-        // note: the symbol is not scoped. therefore, an assignment could result in initialization
+        // Note: It checks the symbol existance without considering its scope.
+        //       As a result, it generates NamedVariableDecls conservatively,
+        //       where some symbol with a same name of outer scope ones is
+        //       treated as Assignment. AST visitors must take care of this.
         if (!symtab.Exists($1)) {
           // since the symbol is not defined, it is a declaration without type annotation
           symtab.AddSymbol($1, MakeUnknownType());
@@ -1086,6 +1090,9 @@ s_expr
       }
     | UBOUND IDENTIFIER {
         $$ = AST::Make<AST::Expr>(@1, "ubound", AST::Make<AST::Identifier>(@2, $2));
+      }
+    | AMP IDENTIFIER {
+        $$ = AST::Make<AST::Expr>(@1, "addrof", AST::Make<AST::Identifier>(@2, $2));
       }
     | PPLUS IDENTIFIER {
         $$ = AST::Make<AST::Expr>(@1, "++", AST::Make<AST::Identifier>(@1, $2));

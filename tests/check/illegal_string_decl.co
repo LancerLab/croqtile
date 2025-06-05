@@ -9,5 +9,5 @@ __co__ auto StringDecl() {
   }
 }
 
-// CHECK: not support declaring variable of string type yet.
-// CHECK: not support declaring variable of string type yet.
+// CHECK: string variables are not supported yet.
+// CHECK: string variables are not supported yet.

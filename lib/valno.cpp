@@ -1043,6 +1043,10 @@ ValueNumbering::TryToSimplifyNodeSignature(const AST::Node& node) {
              [this, &n]() -> std::optional<std::string> {
                return std::nullopt;
              }},
+            {"addrof",
+             [this, &n]() -> std::optional<std::string> {
+               return std::nullopt;
+             }},
             {"elemof",
              [this, &n]() -> std::optional<std::string> {
                return std::nullopt;

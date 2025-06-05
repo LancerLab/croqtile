@@ -41,6 +41,7 @@ enum class TypeCategory {
   FUTURE,
   EVENT,
   ARRAY,
+  ADDR,
   STRING,
   FUNCTION,
   UNKNOWN,
@@ -65,6 +66,7 @@ inline static std::string STR(TypeCategory tc) {
   case TypeCategory::FUTURE: return "FUTURE";
   case TypeCategory::EVENT: return "EVENT";
   case TypeCategory::ARRAY: return "ARRAY";
+  case TypeCategory::ADDR: return "ADDR";
   case TypeCategory::FUNCTION: return "FUNCTION";
   case TypeCategory::STRING: return "STRING";
   case TypeCategory::UNKNOWN: return "UNKNOWN";
@@ -96,6 +98,7 @@ enum class BaseType {
   ITUPLE,
   EVENT,
   ARRAY,
+  ADDR,
   VOID,
   UNKNOWN
 };
@@ -202,17 +205,18 @@ inline static size_t SizeOf(BaseType bt) {
 // utility functions to map types to strings, and the opposite.
 inline static BaseType BaseTypeFromString(const std::string& input) {
   static const std::unordered_map<std::string, BaseType> typeMap = {
-      {"f32", BaseType::F32},     {"f16", BaseType::F16},
-      {"bf16", BaseType::BF16},   {"u32", BaseType::U32},
-      {"s32", BaseType::S32},     {"u16", BaseType::U16},
-      {"s16", BaseType::S16},     {"u8", BaseType::U8},
-      {"s8", BaseType::S8},       {"f8", BaseType::F8},
-      {"half8", BaseType::HALF8}, {"half", BaseType::HALF},
-      {"float", BaseType::FLOAT}, {"double", BaseType::DOUBLE},
-      {"bfp16", BaseType::BFP16}, {"int", BaseType::INT},
-      {"bool", BaseType::BOOL},   {"ituple", BaseType::ITUPLE},
-      {"event", BaseType::EVENT}, {"array", BaseType::ARRAY},
-      {"void", BaseType::VOID},   {"unknown", BaseType::UNKNOWN},
+      {"f32", BaseType::F32},         {"f16", BaseType::F16},
+      {"bf16", BaseType::BF16},       {"u32", BaseType::U32},
+      {"s32", BaseType::S32},         {"u16", BaseType::U16},
+      {"s16", BaseType::S16},         {"u8", BaseType::U8},
+      {"s8", BaseType::S8},           {"f8", BaseType::F8},
+      {"half8", BaseType::HALF8},     {"half", BaseType::HALF},
+      {"float", BaseType::FLOAT},     {"double", BaseType::DOUBLE},
+      {"bfp16", BaseType::BFP16},     {"int", BaseType::INT},
+      {"bool", BaseType::BOOL},       {"ituple", BaseType::ITUPLE},
+      {"event", BaseType::EVENT},     {"array", BaseType::ARRAY},
+      {"address", BaseType::ADDR},    {"void", BaseType::VOID},
+      {"unknown", BaseType::UNKNOWN},
   };
 
   auto it = typeMap.find(input);
@@ -225,17 +229,18 @@ namespace __internal__ {
 
 inline static std::string GetStringFrom(BaseType dataType) {
   static const std::unordered_map<BaseType, std::string> enumToString = {
-      {BaseType::F32, "f32"},     {BaseType::F16, "f16"},
-      {BaseType::BF16, "bf16"},   {BaseType::U32, "u32"},
-      {BaseType::S32, "s32"},     {BaseType::U16, "u16"},
-      {BaseType::S16, "s16"},     {BaseType::U8, "u8"},
-      {BaseType::S8, "s8"},       {BaseType::F8, "f8"},
-      {BaseType::HALF8, "half8"}, {BaseType::HALF, "half"},
-      {BaseType::BFP16, "bfp16"}, {BaseType::INT, "int"},
-      {BaseType::FLOAT, "float"}, {BaseType::DOUBLE, "double"},
-      {BaseType::BOOL, "bool"},   {BaseType::ITUPLE, "ituple"},
-      {BaseType::EVENT, "event"}, {BaseType::ARRAY, "array"},
-      {BaseType::VOID, "void"},   {BaseType::UNKNOWN, "unknown"},
+      {BaseType::F32, "f32"},         {BaseType::F16, "f16"},
+      {BaseType::BF16, "bf16"},       {BaseType::U32, "u32"},
+      {BaseType::S32, "s32"},         {BaseType::U16, "u16"},
+      {BaseType::S16, "s16"},         {BaseType::U8, "u8"},
+      {BaseType::S8, "s8"},           {BaseType::F8, "f8"},
+      {BaseType::HALF8, "half8"},     {BaseType::HALF, "half"},
+      {BaseType::BFP16, "bfp16"},     {BaseType::INT, "int"},
+      {BaseType::FLOAT, "float"},     {BaseType::DOUBLE, "double"},
+      {BaseType::BOOL, "bool"},       {BaseType::ITUPLE, "ituple"},
+      {BaseType::EVENT, "event"},     {BaseType::ARRAY, "array"},
+      {BaseType::ADDR, "address"},    {BaseType::VOID, "void"},
+      {BaseType::UNKNOWN, "unknown"},
   };
 
   auto it = enumToString.find(dataType);
@@ -607,6 +612,20 @@ struct VoidType final : public Type, public TypeIDProvider<VoidType> {
   bool ApprxEqual(const Type& ty) const override { return isa<VoidType>(&ty); }
 
   __UDT_TYPE_INFO__(Type, VoidType)
+};
+
+struct AddrType final : public Type, public TypeIDProvider<AddrType> {
+  explicit AddrType() : Type(TypeCategory::ADDR) {}
+  size_t Dims() const override { return GetInvalidRank(); }
+  bool IsComplete() const override { return true; }
+  void Print(std::ostream& os) const override { os << "address"; }
+  const std::string Name() const override { return "addr_type"; }
+  bool HasSufficientInfo() const { return true; }
+
+  bool operator==(const Type& ty) const override { return isa<AddrType>(&ty); }
+  bool ApprxEqual(const Type& ty) const override { return isa<AddrType>(&ty); }
+
+  __UDT_TYPE_INFO__(Type, AddrType)
 };
 
 // The type is unknown. It requires type inference
@@ -1623,6 +1642,8 @@ inline ValueItem GetSingleUpperBound(const ptr<Type>& ty) {
 inline Shape GenUninitShape() { return Shape(); }
 
 inline ptr<VoidType> MakeVoidType() { return std::make_shared<VoidType>(); }
+
+inline ptr<AddrType> MakeAddrType() { return std::make_shared<AddrType>(); }
 
 inline ptr<UnknownType> MakeUnknownType() {
   return std::make_shared<UnknownType>();

@@ -171,11 +171,11 @@ void LivenessAnalyzer::AddUse(const Stmt* s, const std::string& var,
   for (const auto& event : var_events.at(svar)) {
     // only consider the def event.
     if (event.first != "def") continue;
-    // std::cerr << "event for var: " << svar << "\n";
-    // std::cerr << "event.second: " << event.second << "\n";
-    // std::cerr << "current scope: " << SSTab().ScopeName() << "\n";
+    // errs() << "event for var: " << svar << "\n";
+    // errs() << "event.second: " << event.second << "\n";
+    // errs() << "current scope: " << SSTab().ScopeName() << "\n";
     int res = ScopeCompare(event.second, SSTab().ScopeName());
-    // std::cerr << "res: " << res << "\n";
+    // errs() << "res: " << res << "\n";
     if (res < 0) {
       /*
       {
@@ -190,7 +190,7 @@ void LivenessAnalyzer::AddUse(const Stmt* s, const std::string& var,
       */
       std::string exact_scope =
           ExactFirstLoopScope(event.second, SSTab().ScopeName());
-      // std::cerr << "exact_scope of (" << event.second << ", "
+      // errs() << "exact_scope of (" << event.second << ", "
       //           << SSTab().ScopeName() << "): " << exact_scope << "\n";
       if (!events_to_add[scope2stmt.at(exact_scope)].count({"use", svar})) {
         VST_DEBUG({
@@ -429,9 +429,10 @@ void LivenessAnalyzer::ComputeLiveInOut() {
 #if 1
   VST_DEBUG({
     if (!linfo[preorder_stmts[0]].live_in.empty()) {
-      std::cerr << "live_in of the first stmt is not empty.\n";
+      errs() << SSTR(preorder_stmts[0]);
+      errs() << "live_in of the first stmt is not empty, including:\n";
       for (const auto& item : linfo[preorder_stmts[0]].live_in)
-        std::cerr << "\t" << item << "\n";
+        errs() << "\t" << item << "\n";
       choreo_unreachable("expecting the live_in of the first stmt is empty.");
     }
   });
@@ -986,7 +987,7 @@ bool LivenessAnalyzer::Visit(AST::Assignment& n) {
     VST_DEBUG(dbgs() << "The assignment is not sel or sa: " << STR(n)
                      << ".\n\n");
     if (n.AssignToDataElement())
-      AddDef(current_stmt, n.GetDataArrayName());
+      AddUse(current_stmt, n.GetDataArrayName());
     else
       AddDef(current_stmt, n.GetName());
     if (auto expr = dyn_cast<AST::Expr>(n.value)) {
@@ -1158,6 +1159,11 @@ bool LivenessAnalyzer::Visit(AST::Call& n) {
           assert(isa<FutureType>(expr->GetR()->GetType()) &&
                  "expect a future operand.");
           if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol())
+            AddUse(current_stmt, id->name);
+          else
+            choreo_unreachable("Can not retrieve name of the future.");
+        } else if (expr->op == "addrof") {
+          if (auto id = AST::GetIdentifier(expr->GetR()))
             AddUse(current_stmt, id->name);
           else
             choreo_unreachable("Can not retrieve name of the future.");

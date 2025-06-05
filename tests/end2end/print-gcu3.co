@@ -10,6 +10,11 @@ __co__ void foo(s32 [N, M] i) {
   double dd = 3.9;
   print("scalar:\n\ta: ", a, "\n\tM: ", M, "\n\tf: ", f, "\n\td: ", d, "\n\tb: ", b, "\n");
   println("\td+dd: ", d+dd);
+
+  f32 [N, M] ii;
+  println("&i: ", &i);
+  println("&ii: ", &ii);
+
   parallel p by 1 {
     mds : [1,2,3];
     it = {4, M};
@@ -20,6 +25,10 @@ __co__ void foo(s32 [N, M] i) {
     println("mds: ", mds);
     println("it: ", it);
     println("nit: ", nit);
+    shared f32 [N, M] is;
+    println("&i: ", &i);
+    println("&ii: ", &ii);
+    println("&is: ", &is);
     foreach idx in [1,2,1] {
       println("idx: ", idx);
       foreach bi in 4
@@ -121,12 +130,17 @@ int main()
 // CHECK:         d: 2.600000
 // CHECK:         b: false
 // CHECK:         d+dd: 6.500000
+// CHECK: &i: 0x{{.*}}
+// CHECK: &ii: 0x{{.*}}
 // CHECK: [0, 0] b: false
 // CHECK: [0, 0] d: 4.100000
 // CHECK: [0, 0] i.span: [128, 64]
 // CHECK: [0, 0] mds: [1, 2, 3]
 // CHECK: [0, 0] it: {4, 64}
 // CHECK: [0, 0] nit: {100, 5}
+// CHECK: [0, 0] &i: 0x{{.*}}
+// CHECK: [0, 0] &ii: 0x{{.*}}
+// CHECK: [0, 0] &is: 0x{{.*}}
 // CHECK: [0, 0] idx: {0, 0, 0}
 // CHECK: [0, 0] bi: {128}
 // CHECK: [0, 0] bi: {129}
