@@ -850,6 +850,9 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
         Error(n.da->LOC(), "type inconsistent: assign " + PSTR(vty) + " to " +
                                PSTR(ety) + ".");
         ++error_count;
+      } else {
+        // for example: u8 <= u32
+        // TODO: maybe generate a warning here?
       }
     }
 

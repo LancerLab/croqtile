@@ -1,0 +1,7 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ auto foo () {
+  return 3147483647;
+}
+
+// CHECK: error: integer literal 3147483647 out of range [0, 2147483647].

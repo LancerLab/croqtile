@@ -48,6 +48,7 @@ static bool no_line_update = false;
 
 id          [a-zA-Z_][a-zA-Z0-9_]*
 num         [0-9]+
+hex_num     0[xX][0-9a-fA-F]+
 fpnum       -?[0-9]+\.[0-9]+
 fpnum_f     -?[0-9]+\.[0-9]+[fF]
 blank       [ \t\r]
@@ -163,7 +164,35 @@ cstr        \"([^"\\]|\\.)*\"
 <CO_FUNC>{
   {blank}+   {}
   \n+        {}
-  {num}      return Choreo::Parser::make_NUM(std::stoi(yytext), loc);
+  {num}      {
+               char* end = nullptr;
+               errno = 0;
+               unsigned long val = std::strtoul(yytext, &end, 10);
+               if (errno == ERANGE || val > INT_MAX) {
+                 // In C++, `-2147483648` is treated as `0 - 2147483648`, which is of long type.
+                 std::string text = std::string(yytext);
+                 std::string msg = "integer literal " + text + " out of range [0, 2147483647].";
+                 if (text == "2147483648") msg += " If want to delcare '-2147483648', try '-2147483647 - 1'.";
+                 Choreo::Scanner::Error(loc, msg);
+               }
+               if (*end != '\0')
+                 Choreo::Scanner::Error(loc, "invalid character in integer literal.");
+               return Choreo::Parser::make_NUM(static_cast<int>(val), loc);
+             }
+  {hex_num}  {
+               char* end = nullptr;
+               errno = 0;
+               unsigned long val = std::strtoul(yytext, &end, 16);
+               if (errno == ERANGE || val > INT_MAX) {
+                 std::string text = std::string(yytext);
+                 std::string msg = "hex integer literal " + text + " out of range [0x0, 0x7FFFFFFF].";
+                 if (text == "0x80000000") msg += " If want to delcare '-0x80000000', try '-0x7FFFFFFF - 1'.";
+                 Choreo::Scanner::Error(loc, msg);
+               }
+               if (*end != '\0')
+                 Choreo::Scanner::Error(loc, "invalid character in integer literal.");
+               return Choreo::Parser::make_NUM(static_cast<int>(val), loc);
+             }
   {fpnum}    return Choreo::Parser::make_DFPVAL(std::stod(yytext), loc);
   {fpnum_f}  return Choreo::Parser::make_FPVAL(std::stof(yytext), loc);
   {cstr}     { // Remove the surrounding quotes and unescape

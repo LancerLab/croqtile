@@ -1,0 +1,7 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ void foo () {
+  mds : [0xFFFFFFFF, 1];
+}
+
+// CHECK: error: hex integer literal 0xFFFFFFFF out of range [0x0, 0x7FFFFFFF].
