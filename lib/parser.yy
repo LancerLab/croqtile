@@ -808,7 +808,7 @@ g_value_list /* contains at least two value */
       }
     ;
 
-template_val
+template_val /* TODO: could be negative number? */
     : NUM { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
     | spanid { $$ = AST::Make<AST::Identifier>(@1, $1); }
     ;
@@ -1352,15 +1352,26 @@ dma_operation
     ;
 
 dma_config
-    : LT LBRACE iv_list RBRACE COMMA LBRACE iv_list RBRACE COMMA LBRACE iv_list RBRACE COMMA NUM GT {
+    : LT LBRACE iv_list RBRACE COMMA LBRACE iv_list RBRACE COMMA LBRACE iv_list RBRACE COMMA integer_value GT {
         auto pc = AST::Make<PadConfig>();
-        for (auto high : $3->values)
-          pc->pad_high.push_back(cast<AST::IntLiteral>(high)->Val());
-        for (auto low : $7->values)
+        for (auto low : $3->values)
           pc->pad_low.push_back(cast<AST::IntLiteral>(low)->Val());
+        for (auto high : $7->values)
+          pc->pad_high.push_back(cast<AST::IntLiteral>(high)->Val());
         for (auto mid : $11->values)
           pc->pad_mid.push_back(cast<AST::IntLiteral>(mid)->Val());
-        pc->SetPadValue($14);
+        pc->SetPadValue<int>($14);
+        $$ = pc;
+      }
+    | LT LBRACE iv_list RBRACE COMMA LBRACE iv_list RBRACE COMMA LBRACE iv_list RBRACE COMMA FPVAL GT {
+        auto pc = AST::Make<PadConfig>();
+        for (auto low : $3->values)
+          pc->pad_low.push_back(cast<AST::IntLiteral>(low)->Val());
+        for (auto high : $7->values)
+          pc->pad_high.push_back(cast<AST::IntLiteral>(high)->Val());
+        for (auto mid : $11->values)
+          pc->pad_mid.push_back(cast<AST::IntLiteral>(mid)->Val());
+        pc->SetPadValue<float>($14);
         $$ = pc;
       }
     | LT iv_list GT {

@@ -268,14 +268,26 @@ public:
           }
         }
 
-        if (pc->value.t != f_sty->f_type) {
-          Error(n.from->LOC(), "On " + cur_arch +
-                                   ", Data type of pad value is "
-                                   "inconsistent with that of data in dma: " +
-                                   STR(pc->value.t) + " vs. " +
-                                   STR(f_sty->f_type) + ".");
-          error_count++;
-        }
+        if (std::holds_alternative<int>(pc->value)) {
+          if (!IntegerFundamentalType(f_sty->f_type)) {
+            Error(n.from->LOC(),
+                  "On " + cur_arch +
+                      ", data type of pad value is "
+                      "incompatible with that of data in dma: int" +
+                      " vs. " + STR(f_sty->f_type) + ".");
+            error_count++;
+          }
+        } else if (std::holds_alternative<float>(pc->value)) {
+          if (!FloatPointFundamentalType(f_sty->f_type)) {
+            Error(n.from->LOC(),
+                  "On " + cur_arch +
+                      ", data type of pad value is "
+                      "incompatible with that of data in dma: float" +
+                      " vs. " + STR(f_sty->f_type) + ".");
+            error_count++;
+          }
+        } else
+          choreo_unreachable("unexpected pad value type in dma.pad");
       }
 
       // slice
@@ -502,14 +514,27 @@ public:
           }
         }
 
-        if (pc->value.t != f_sty->f_type) {
-          Error(n.from->LOC(), "On " + cur_arch +
-                                   ", Data type of pad value is "
-                                   "inconsistent with that of data in dma: " +
-                                   STR(pc->value.t) + " vs. " +
-                                   STR(f_sty->f_type) + ".");
-          error_count++;
-        }
+        if (std::holds_alternative<int>(pc->value)) {
+          if (!IntegerFundamentalType(f_sty->f_type)) {
+            Error(n.from->LOC(),
+                  "On " + cur_arch +
+                      ", data type of pad value is "
+                      "incompatible with that of data in dma: int" +
+                      " vs. " + STR(f_sty->f_type) + ".");
+            error_count++;
+          }
+        } else if (std::holds_alternative<float>(pc->value)) {
+          // pad value is a float point number.
+          if (!FloatPointFundamentalType(f_sty->f_type)) {
+            Error(n.from->LOC(),
+                  "On " + cur_arch +
+                      ", data type of pad value is "
+                      "incompatible with that of data in span: float" +
+                      " vs. " + STR(f_sty->f_type) + ".");
+            error_count++;
+          }
+        } else
+          choreo_unreachable("unexpected pad value type in dma.pad");
       }
 
       // slice

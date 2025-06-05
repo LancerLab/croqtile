@@ -117,6 +117,17 @@ enum class FundamentalType {
   UND = (int)BaseType::UNKNOWN,
 };
 
+inline static bool IntegerFundamentalType(FundamentalType ft) {
+  return ft == FundamentalType::S32 || ft == FundamentalType::U32 ||
+         ft == FundamentalType::S16 || ft == FundamentalType::U16 ||
+         ft == FundamentalType::S8 || ft == FundamentalType::U8;
+}
+
+inline static bool FloatPointFundamentalType(FundamentalType ft) {
+  return ft == FundamentalType::F32 || ft == FundamentalType::F16 ||
+         ft == FundamentalType::BF16 || ft == FundamentalType::F8;
+}
+
 inline static bool Compatible(const Storage& a, const Storage& b) {
   if (a == Storage::DEFAULT || a == Storage::GLOBAL)
     return (b == Storage::DEFAULT || b == Storage::GLOBAL);
@@ -1116,7 +1127,7 @@ struct BoundedIntegerType final : public BoundedType,
 
   size_t Dims() const override { return 1; }
   bool IsComplete() const override { return true; }
-  bool HasSufficientInfo() const { return HasValidBound(); }
+  bool HasSufficientInfo() const override { return HasValidBound(); }
   bool HasValidBound() const override {
     return IsValidValueItem(lbound) && IsValidValueItem(ubound) &&
            IsValidStride(stride);

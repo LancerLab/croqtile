@@ -25,7 +25,7 @@ __co__ auto foo(f32 [32, 4] a) {
 // CHECK-HT:   float * a__device = nullptr;
 // CHECK-HT:   choreo::abend_true(topsMalloc(&a__device, 512ULL));
 // CHECK-HT:   choreo::abend_true(topsMemcpy(a__device, a.data(), 512ULL, topsMemcpyHostToDevice));
-// CHECK-HT:   auto data = choreo::make_spandata<float, 2>({32, 4});
+// CHECK-HT:   auto data = choreo::make_spandata<choreo::f32, 2>({32, 4});
 // CHECK-HT:   float * data__device = nullptr;
 // CHECK-HT:   choreo::abend_true(topsMalloc(&data__device, 512ULL));
 // CHECK-HT:   float * data__device = a__device;
@@ -52,7 +52,7 @@ __co__ auto foo(f32 [32, 4] a) {
 // CHECK-NHT:   float * a__device = nullptr;
 // CHECK-NHT:   choreo::abend_true(topsMalloc(&a__device, 512ULL));
 // CHECK-NHT:   choreo::abend_true(topsMemcpy(a__device, a.data(), 512ULL, topsMemcpyHostToDevice));
-// CHECK-NHT:   auto data = choreo::make_spandata<float, 2>({32, 4});
+// CHECK-NHT:   auto data = choreo::make_spandata<choreo::f32, 2>({32, 4});
 // CHECK-NHT:   float * data__device = nullptr;
 // CHECK-NHT:   choreo::abend_true(topsMalloc(&data__device, 512ULL));
 // CHECK-NHT:   choreo::abend_true(topsMemcpy(data__device, a__device, 512ULL, topsMemcpyDeviceToDevice));

@@ -7,11 +7,8 @@ __co__ auto foo(f32 [32, 4] a) {
     local s32 [a.span] c_s32;
     dma.copy a => b;
     f0 = dma.copy.async b => c;
-    local s32 [a.span + {1, 1}] d;
     wait f0; 
-    f1 = dma.pad.async<{1,1}, {0,0}, {0,0}, 0> c_s32 => d;
     dma.transp<1,0> c => local;
-    wait f1;
   }
   return data;
 }
@@ -31,23 +28,12 @@ __co__ auto foo(f32 [32, 4] a) {
 // CHECK:   choreo::future f0(choreo_topscc_ctx1, "f0", {{[0-9]+}}, {{[0-9]+}}, c);
 // CHECK:   tops::event f0__event__ = tops::memcpy_async(*f0.get_ctx(), __mds3_c, __mds2_b);
 // CHECK:   f0.set_event(f0__event__);
-// CHECK:   __local__ __valigned__ int d[165];
 // CHECK:   f0.wait();
-// CHECK:   tops::mdspan __mds4_c_s32(tops::Private, (int*)c_s32, 32, 4);
-// CHECK:   tops::mdspan __mds5_d(tops::Private, (int*)d, 33, 5);
-// CHECK:   tops_dte_ctx_t choreo_topscc_ctx2;
-// CHECK:   choreo::future f1(choreo_topscc_ctx2, "f1", {{[0-9]+}}, {{[0-9]+}}, d);
-// CHECK:   int __pad_high_c_s32[] = {1, 1};
-// CHECK:   int __pad_low_c_s32[] = {0, 0};
-// CHECK:   int __pad_mid_c_s32[] = {0, 0};
-// CHECK:   tops::event f1__event__ = tops::pad_async(*f1.get_ctx(), __mds_d, __mds_c_s32, __pad_low_c_s32, __pad_high_c_s32, __pad_mid_c_s32, 0);
-// CHECK:   f1.set_event(f1__event__);
 // CHECK:   __local__ __valigned__ float anon_0[128];
-// CHECK:   tops::mdspan __mds6_c(tops::Private, (float*)c, 32, 4);
-// CHECK:   tops::mdspan __mds7_anon_0(tops::Private, (float*)anon_0, 4, 32);
-// CHECK:   tops_dte_ctx_t choreo_topscc_ctx3;
-// CHECK:   choreo::future __choreo_anon_fut__1(choreo_topscc_ctx3, "", {{[0-9]+}}, {{[0-9]+}}, anon_0);
+// CHECK:   tops::mdspan __mds4_c(tops::Private, (float*)c, 32, 4);
+// CHECK:   tops::mdspan __mds5_anon_0(tops::Private, (float*)anon_0, 4, 32);
+// CHECK:   tops_dte_ctx_t choreo_topscc_ctx2;
+// CHECK:   choreo::future __choreo_anon_fut__1(choreo_topscc_ctx2, "", {{[0-9]*}}, {{[0-9]*}}, anon_0);
 // CHECK:   int __transpose_layout0__c[] = {1, 0};
-// CHECK:   tops::transpose(*__choreo_anon_fut__1.get_ctx(), __mds7_anon_0, __mds6_c, __transpose_layout0__c);
-// CHECK:   f1.wait();
+// CHECK:   tops::transpose(*__choreo_anon_fut__1.get_ctx(), __mds5_anon_0, __mds4_c, __transpose_layout0__c);
 // CHECK: }

@@ -49,7 +49,7 @@ The configurations, such as padding and transposing details, are programmed as p
 ```choreo
 global f32 [32, 16, 9] input;
 dma.transp<0, 2, 1> input => shared;  // Result shape [32, 9, 16]
-dma.pad<{1, 0, 3}, {0, 1, 2}, {0, 0, 0}, 0.1f> input => shared; // Result shape [33, 17, 12]
+dma.pad<{1, 0, 3}, {0, 1, 2}, {0, 0, 0}, 0.1f> input => shared; // Result shape [33, 17, 14]
 ```
 
 Here, the **DMA configuration**s are enclosed by `<>`. The configuration varies according to different operations. The detailed configuration syntax and limitations for a specific platform, such as *Topscc*, are listed below as an example:

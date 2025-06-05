@@ -1,0 +1,47 @@
+// RUN: choreo -t topscc -es %s -o - | FileCheck %s
+
+#include "choreo.h"
+
+__co__ auto foo(bf16[2, 3] i) {
+  global bf16 [2,5] res;
+  parallel p by 1 {
+    dma.copy i => local;
+    dma.pad<{0,0}, {0,2}, {0,0}, 1.2f> i => res;
+  }
+  return res;
+}
+
+int main()
+{
+  auto input = choreo::make_spandata<choreo::bf16>(2, 3);
+  input.fill(1.5f);
+  
+  auto res = foo(input.view());
+
+  for (int i = 0; i < res.shape()[0]; ++i) {
+    for (int j = 0; j < res.shape()[1]; ++j) {
+      std::cout << (float)res[i][j] << " ";
+    }
+    std::cout << std::endl;
+  }
+
+  return 0;
+}
+
+// CHECK: __global__ void __choreo_device_foo(choreo::bf16 * i, choreo::bf16 * res) {
+// CHECK:   __local__ __valigned__ unsigned char anon_1[512];
+// CHECK:   choreo::bfloat16* anon_0 = (choreo::bfloat16*)(anon_1 + 0);
+// CHECK:   tops::mdspan __mds0_i(tops::Global, (choreo::bfloat16*)i, 2, 3);
+// CHECK:   tops::mdspan __mds1_anon_0(tops::Private, (choreo::bfloat16*)anon_0, 2, 3);
+// CHECK:   tops_dte_ctx_t choreo_topscc_ctx0;
+// CHECK:   choreo::future __choreo_anon_fut__0(choreo_topscc_ctx0, "", {{[0-9]*}}, {{[0-9]*}}, anon_0);
+// CHECK:   tops::memcpy(*__choreo_anon_fut__0.get_ctx(), __mds1_anon_0, __mds0_i);
+// CHECK:   tops::mdspan __mds2_i(tops::Global, (choreo::bfloat16*)i, 2, 3);
+// CHECK:   tops::mdspan __mds3_res(tops::Global, (choreo::bfloat16*)res, 2, 5);
+// CHECK:   tops_dte_ctx_t choreo_topscc_ctx1;
+// CHECK:   choreo::future __choreo_anon_fut__1(choreo_topscc_ctx1, "", {{[0-9]*}}, {{[0-9]*}}, res);
+// CHECK:   unsigned int __pad_low_i[] = {0, 0};
+// CHECK:   unsigned int __pad_high_i[] = {0, 2};
+// CHECK:   unsigned int __pad_mid_i[] = {0, 0};
+// CHECK:   tops::pad(*__choreo_anon_fut__1.get_ctx(), __mds3_res, __mds2_i, __pad_low_i, __pad_high_i, __pad_mid_i, choreo::bf16(1.2f));
+// CHECK: }

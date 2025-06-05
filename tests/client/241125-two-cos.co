@@ -255,7 +255,7 @@ int main() {
 }
 
 // CHECK: choreo::spanned_data<choreo::f32, 2> math_product_attention_1(const choreo::spanned_view<choreo::f32, 2> & lhs, const choreo::spanned_view<choreo::f32, 2> & rhs, const choreo::spanned_view<choreo::f32, 2> & v) {
-// CHECK:   auto output = choreo::make_spandata<float, 2>({256, 512});
+// CHECK:   auto output = choreo::make_spandata<choreo::f32, 2>({256, 512});
 // CHECK:   float * output__device = nullptr;
 // CHECK:   choreo::abend_true(topsMalloc(&output__device, 524288ULL));
 // CHECK:   choreo::abend_true(topsMemcpy(output.data(), output__device, 524288ULL, topsMemcpyDeviceToHost));
@@ -272,7 +272,7 @@ int main() {
 // CHECK:   float * v__device = nullptr;
 // CHECK:   choreo::abend_true(topsMalloc(&v__device, 524288ULL));
 // CHECK:   choreo::abend_true(topsMemcpy(v__device, v.data(), 524288ULL, topsMemcpyHostToDevice));
-// CHECK:   auto output = choreo::make_spandata<float, 2>({256, 512});
+// CHECK:   auto output = choreo::make_spandata<choreo::f32, 2>({256, 512});
 // CHECK:   float * output__device = nullptr;
 // CHECK:   choreo::abend_true(topsMalloc(&output__device, 524288ULL));
 // CHECK:   choreo::abend_true(topsDeviceSynchronize());

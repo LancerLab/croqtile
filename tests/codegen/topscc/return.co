@@ -27,5 +27,5 @@ __co__ auto bar1() {
 }
 
 // CHECK: choreo::spanned_data<choreo::s8, 2> bar1()
-// CHECK:   auto a = choreo::make_spandata<char, 2>({3, 2});
+// CHECK:   auto a = choreo::make_spandata<choreo::s8, 2>({3, 2});
 // CHECK:   return a;

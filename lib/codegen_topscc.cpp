@@ -653,9 +653,9 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       if (IsChoreoOutput(InScopeName(sym))) {
         // the sym is choreo output
         std::string sym_data = sym + ".data()";
-        hs << h_indent << "auto " << sym << " = choreo::make_spandata<" << bts
-           << ", " << shape.Rank() << ">({" << UnScopedExpr(RSTR(shape))
-           << "});\n";
+        hs << h_indent << "auto " << sym
+           << " = choreo::make_spandata<choreo::" << STR(sty->f_type) << ", "
+           << shape.Rank() << ">({" << UnScopedExpr(RSTR(shape)) << "});\n";
         if (n.init_value) {
           // support initialization of output
           hs << h_indent << "std::fill(" << sym_data << ", " << sym_data << "+"
@@ -1368,22 +1368,50 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     }
   } else if (n.operation == ".pad") {
     auto pad_config = cast<PadConfig>(n.GetConfig());
-    auto f_buf_name = RemoveSuffix(f_buf_expr, ".data()");
-    auto t_buf_name = RemoveSuffix(t_buf_expr, ".data()");
-    ds << d_indent << "int __pad_high_" << f_buf_name << "[] = {"
-       << DelimitedString(pad_config->pad_high) << "};\n";
-    ds << d_indent << "int __pad_low_" << f_buf_name << "[] = {"
+    ds << d_indent << "unsigned int __pad_low_" << f_buf_name << "[] = {"
        << DelimitedString(pad_config->pad_low) << "};\n";
-    ds << d_indent << "int __pad_mid_" << f_buf_name << "[] = {"
+    ds << d_indent << "unsigned int __pad_high_" << f_buf_name << "[] = {"
+       << DelimitedString(pad_config->pad_high) << "};\n";
+    ds << d_indent << "unsigned int __pad_mid_" << f_buf_name << "[] = {"
        << DelimitedString(pad_config->pad_mid) << "};\n";
     if (SymbolToSymbol()) {
       ds << d_indent;
       if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
       ds << "tops::pad" << (fty->IsAsync() ? "_async" : "") << "(*"
-         << future_name << ".get_ctx(), __mds_" << t_buf_name << ", __mds_"
-         << f_buf_name << ", __pad_low_" << f_buf_name << ", __pad_high_"
-         << f_buf_name << ", __pad_mid_" << f_buf_name << ", "
-         << pad_config->value.v << ");\n";
+         << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
+         << ", __pad_low_" << f_buf_name << ", __pad_high_" << f_buf_name
+         << ", __pad_mid_" << f_buf_name << ", ";
+      std::ostringstream pad_value_s;
+      FundamentalType ft = f_sty->f_type;
+      if (IntegerFundamentalType(ft)) {
+        // narrowing conversions may cause data truncation
+        // but the pad value is given by user, so we can trust it?
+        // TODO: maybe generate a warning?
+        pad_value_s << "static_cast<" << KernelTypeStringify(ft) << ">("
+                    << pad_config->GetPadValue<int>() << ")";
+      } else if (FloatPointFundamentalType(ft)) {
+        switch (ft) {
+        case FundamentalType::F32:
+          pad_value_s << pad_config->GetPadValue<float>() << "f";
+          break;
+        case FundamentalType::F16:
+          pad_value_s << "f32_to_f16(" << pad_config->GetPadValue<float>()
+                      << "f)";
+          break;
+        case FundamentalType::BF16:
+          pad_value_s << "choreo::bf16(" << pad_config->GetPadValue<float>()
+                      << "f)";
+          break;
+        case FundamentalType::F8: [[fallthrough]];
+        default:
+          choreo_unreachable("unsupport: data type of pad value: float, data "
+                             "in span: " +
+                             STR(f_sty->f_type));
+        }
+      } else
+        choreo_unreachable(
+            "pad value should be integer or float type, but got " + STR(ft));
+      ds << pad_value_s.str() << ");\n";
       // set the device future
       if (!event_name.empty())
         ds << d_indent << future_name << ".set_event(" << event_name << ");\n";

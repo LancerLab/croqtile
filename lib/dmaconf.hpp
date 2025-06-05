@@ -13,28 +13,39 @@ struct DMAConfig {
 };
 
 struct CopyConfig final : public DMAConfig, public TypeIDProvider<CopyConfig> {
-  const std::string Name() const { return "copy"; }
+  const std::string Name() const override { return "copy"; }
   void Print(std::ostream&) const override {};
   __UDT_TYPE_INFO__(DMAConfig, CopyConfig)
 };
 
 struct SliceConfig final : public DMAConfig,
                            public TypeIDProvider<SliceConfig> {
-  const std::string Name() const { return "slice"; }
+  const std::string Name() const override { return "slice"; }
   void Print(std::ostream&) const override {};
   __UDT_TYPE_INFO__(DMAConfig, SliceConfig)
 };
 
 struct PadConfig final : public DMAConfig, public TypeIDProvider<PadConfig> {
-  std::vector<size_t> pad_high;
   std::vector<size_t> pad_low;
+  std::vector<size_t> pad_high;
   std::vector<size_t> pad_mid;
 
-  struct PadValue {
-    uint32_t v;
-    FundamentalType t;
-  } value;
+  // may have different types of padding value
+  using ValueType = std::variant<int, float>;
+  ValueType value = 0;
 
+  template <typename T>
+  void SetPadValue(T val) {
+    value = val;
+  }
+
+  template <typename T>
+  T GetPadValue() const {
+    assert(std::holds_alternative<T>(value));
+    return std::get<T>(value);
+  }
+
+#if 0
 #define DefineSetPadValue(type, ft)                                            \
   void SetPadValue(type val) {                                                 \
     value = {*(reinterpret_cast<uint32_t*>(&val)), ft};                        \
@@ -48,17 +59,22 @@ struct PadConfig final : public DMAConfig, public TypeIDProvider<PadConfig> {
   DefineSetPadValue(int8_t, FundamentalType::S8);
   DefineSetPadValue(float, FundamentalType::F32);
 
-  // TODO: involve scalar types
-#if 0
   DefineSetPadValue(f16, FundamentalType::F16);
   DefineSetPadValue(bf16, FundamentalType::BF16);
 #endif
 
-  const std::string Name() const { return "pad"; }
+  const std::string Name() const override { return "pad"; }
   void Print(std::ostream& os) const override {
-    os << "padding: high{" << DelimitedString(pad_high) << "}, low{"
+    os << "padding: low{" << DelimitedString(pad_low) << "}, high{"
        << DelimitedString(pad_high) << "}, mid{" << DelimitedString(pad_mid)
-       << "}, value: " << value.v;
+       << "}, value: ";
+    if (std::holds_alternative<int>(value)) {
+      os << std::get<int>(value);
+    } else if (std::holds_alternative<float>(value)) {
+      os << std::get<float>(value);
+    } else {
+      os << "unknown type";
+    }
   }
 
   __UDT_TYPE_INFO__(DMAConfig, PadConfig)
@@ -67,7 +83,7 @@ struct PadConfig final : public DMAConfig, public TypeIDProvider<PadConfig> {
 struct TransposeConfig final : public DMAConfig,
                                public TypeIDProvider<TransposeConfig> {
   std::vector<size_t> dim_values;
-  const std::string Name() const { return "transpose"; }
+  const std::string Name() const override { return "transpose"; }
   void Print(std::ostream& os) const override {
     os << "transpose: dims{" << DelimitedString(dim_values) << "}";
   };

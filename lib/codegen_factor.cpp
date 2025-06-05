@@ -853,7 +853,13 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
     fs << ", {" << DelimitedString(layout) << "}, {"
        << DelimitedString(pcfg->pad_low) << "}, {"
        << DelimitedString(pcfg->pad_high) << "}, {"
-       << DelimitedString(pcfg->pad_mid) << "}, " << pcfg->value.v;
+       << DelimitedString(pcfg->pad_mid) << "}, ";
+    if (std::holds_alternative<int>(pcfg->value))
+      fs << pcfg->GetPadValue<int>();
+    else
+      choreo_unreachable(
+          "Factor backend only support integer as pad value type for now.");
+    // TODO: support more pad value types.
   } else if (auto tcfg = dyn_cast<TransposeConfig>(d.config)) {
     auto& layout = tcfg->dim_values;
     fs << ", {" << DelimitedString(layout) << "}";
