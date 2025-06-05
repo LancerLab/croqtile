@@ -1,0 +1,19 @@
+// RUN:choreo -E %s | FileCheck %s
+
+__co__ void foo(f32 [128][128] a) {
+  #define ADD(a , b) \
+    (a + b)
+  #define SUB(a, b) \
+    (a - b)
+  #define NESTED(a, b) \
+    ADD(ADD(a, b), \
+        SUB(a, b))
+
+  foreach {i, j} in [a.span(0), a.span(1)] {
+    a.at(i, j) = ADD(a.at(i, j), 1.0f);
+    a.at(i, j) = NESTED(a.at(i, j), 1.0f);
+  }
+}
+
+// CHECK: a.at(i, j) = (a.at(i, j) + 1.0f);
+// CHECK: a.at(i, j) = ((a.at(i, j) + 1.0f) + (a.at(i, j) - 1.0f));
