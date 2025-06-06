@@ -16,9 +16,12 @@ protected:
     three = make_numeric(3);
     four = make_numeric(4);
     five = make_numeric(5);
+    tru = make_boolean(true);
+    fls = make_boolean(false);
   }
 
-  std::shared_ptr<SymbolicExpression> a, b, c, x, y, two, three, four, five;
+  std::shared_ptr<SymbolicExpression> a, b, c, x, y, two, three, four, five,
+      tru, fls;
 };
 
 TEST_F(ExpressionTest, BasicNormalization) {
@@ -142,4 +145,28 @@ TEST_F(ExpressionTest, DivideDivide2) {
 
   auto norm = SimplifyExpression(expr);
   EXPECT_EQ(norm->ToString(), "2");
+}
+
+TEST_F(ExpressionTest, SimpleSelect) {
+  // (false) ? a : b should normalize to b
+  auto expr = sel(fls, a, b);
+
+  auto norm = SimplifyExpression(expr);
+  EXPECT_EQ(norm->ToString(), "b");
+}
+
+TEST_F(ExpressionTest, Select1) {
+  // (3 < 2) ? (a + 3) : b - 4 / 2) should normalize to b - 2
+  auto expr = sel(oc_lt(three, two), a + three, b - four / two);
+
+  auto norm = SimplifyExpression(expr);
+  EXPECT_EQ(norm->ToString(), "(b - 2)");
+}
+
+TEST_F(ExpressionTest, Select2) {
+  // (a <= 2) ? (2 + 3) : 4 + b) should normalize to (a <= 2) ? 5 : b + 4
+  auto expr = sel(oc_le(a, two), two + three, four + b);
+
+  auto norm = SimplifyExpression(expr);
+  EXPECT_EQ(norm->ToString(), "((a <= 2) ? 5 : (b + 4))");
 }

@@ -1108,7 +1108,7 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
         // block.span = subspan
         auto lvi = vn.GenValueItemFromValueNumber(cur_vns[index]);
         auto rvi = vn.GenValueItemFromValueNumber(tfs_vns[index]);
-        if (sbe::nu_lt(lvi, rvi)) {
+        if (sbe::clt(lvi, rvi)) {
           Error(tsi->LOC(),
                 "the subspan dimension (dim: " + std::to_string(index) +
                     ") is larger than original (" + STR(rvi) + " > " +
@@ -1120,7 +1120,7 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
         // block.span = data.span % tiling_factor
         auto lvi = vn.GenValueItemFromValueNumber(cur_vns[index]);
         auto rvi = vn.GenValueItemFromValueNumber(tfs_vns[index]);
-        if (sbe::nu_lt(lvi, rvi)) {
+        if (sbe::clt(lvi, rvi)) {
           Error(tsi->LOC(),
                 "the subspan dimension (dim: " + std::to_string(index) +
                     ") is larger than the data (" + STR(rvi) + " > " +
@@ -1134,7 +1134,7 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
         // block.span = data.span / tiling_factor
         auto lvi = vn.GenValueItemFromValueNumber(cur_vns[index]);
         auto rvi = vn.GenValueItemFromValueNumber(tfs_vns[index]);
-        if (sbe::nu_lt(lvi, rvi)) {
+        if (sbe::clt(lvi, rvi)) {
           Error(tsi->LOC(), "the tiling factor (dim: " + std::to_string(index) +
                                 ") is larger than the data dimension (" +
                                 STR(rvi) + " > " + PSTR(lvi) + ").");
@@ -1146,7 +1146,7 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
         // block.span = data.span / #pos
         auto lvi = vn.GenValueItemFromValueNumber(cur_vns[index]);
         auto rvi = vn.GenValueItemFromValueNumber(pos_vns[index]);
-        if (sbe::nu_lt(lvi, rvi)) {
+        if (sbe::clt(lvi, rvi)) {
           Error(tsi->LOC(), "the tiling factor (dim: " + std::to_string(index) +
                                 ") is larger than the data dimension (" +
                                 STR(rvi) + " > " + STR(lvi) + ").");

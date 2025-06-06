@@ -34,20 +34,57 @@
 // can be used for expression comparison.
 //
 // Limitation: risk of overflow values
-// Note: special thanks to deepseek
+//
+// Note: special thanks to deepseek for initiating the code
 
 namespace Choreo {
 
 // Supported operation types
 enum class OpCode {
   NONE,
+  /* arithmetic */
   ADD,
   SUBTRACT,
   MULTIPLY,
-  DIVIDE /*mathematical*/,
+  DIVIDE,
   IRES,
-  POWER
+  POWER,
+  /* comparison */
+  GT,
+  LT,
+  EQ,
+  GE,
+  LE,
+  NE,
+  /* ternary */
+  SELECT,
 };
+
+inline static bool IsArith(OpCode op) {
+  switch (op) {
+  case OpCode::ADD:
+  case OpCode::SUBTRACT:
+  case OpCode::MULTIPLY:
+  case OpCode::DIVIDE:
+  case OpCode::IRES:
+  case OpCode::POWER: return true;
+  default: break;
+  }
+  return false;
+}
+
+inline static bool IsCompare(OpCode op) {
+  switch (op) {
+  case OpCode::GT:
+  case OpCode::LT:
+  case OpCode::EQ:
+  case OpCode::GE:
+  case OpCode::LE:
+  case OpCode::NE: return true;
+  default: break;
+  }
+  return false;
+}
 
 inline static std::string STR(OpCode tc) {
   switch (tc) {
@@ -57,6 +94,13 @@ inline static std::string STR(OpCode tc) {
   case OpCode::DIVIDE: return "/";
   case OpCode::IRES: return "%";
   case OpCode::POWER: return "^";
+  case OpCode::GT: return ">";
+  case OpCode::LT: return "<";
+  case OpCode::EQ: return "==";
+  case OpCode::GE: return ">=";
+  case OpCode::LE: return "<=";
+  case OpCode::NE: return "!=";
+  case OpCode::SELECT: return "?";
   default: choreo_unreachable("unsupported opcode");
   }
   return "";
@@ -110,39 +154,53 @@ inline Operand operator-(const Operand&, const Operand&);
 inline Operand operator*(const Operand&, const Operand&);
 inline Operand operator/(const Operand&, const Operand&);
 inline Operand operator%(const Operand&, const Operand&);
+// Operands comparison
+// Note: Operand are partially ordered. Use it carefully.
+//       - oc_lt(a, b) == false, it does not always mean 'a >= b',
+//       - oc_lt(a, b) == true, 'a' must be strictly less than 'b'.
+inline Operand oc_lt(const Operand&, const Operand&);
+inline Operand oc_gt(const Operand&, const Operand&);
+inline Operand oc_le(const Operand&, const Operand&);
+inline Operand oc_ge(const Operand&, const Operand&);
+inline Operand oc_eq(const Operand&, const Operand&);
+inline Operand oc_ne(const Operand&, const Operand&);
 inline int Compare(const SymbolicExpression&, const SymbolicExpression&);
 inline bool operator<(const SymbolicExpression&, const SymbolicExpression&);
-inline Operand nu(int64_t value);
+inline Operand nu(int64_t);
+inline Operand bl(bool);
 inline Operand sym(const std::string& name);
 inline Operand bop(OpCode, const Operand&, const Operand&);
+inline Operand sel(const Operand&, const Operand&, const Operand&);
 
 inline static int64_t IsCommutative(OpCode op) {
-  switch (op) {
-  case OpCode::ADD:
-  case OpCode::MULTIPLY: return true;
-  case OpCode::SUBTRACT:
-  case OpCode::DIVIDE:
-  case OpCode::IRES:
-  case OpCode::POWER: return false;
-  default: choreo_unreachable("unsupported opcode");
+  if (IsArith(op)) {
+    switch (op) {
+    case OpCode::ADD:
+    case OpCode::MULTIPLY: return true;
+    case OpCode::SUBTRACT:
+    case OpCode::DIVIDE:
+    case OpCode::IRES:
+    case OpCode::POWER: return false;
+    default: choreo_unreachable("unsupported opcode");
+    }
   }
   return false;
 }
 
 inline static int64_t IsAssociative(OpCode op) {
-  switch (op) {
-  case OpCode::ADD:
-  case OpCode::MULTIPLY: return true;
-  case OpCode::SUBTRACT:
-  case OpCode::DIVIDE:
-  case OpCode::IRES:
-  case OpCode::POWER: return false;
-  default: choreo_unreachable("unsupported opcode");
+  if (IsArith(op)) {
+    switch (op) {
+    case OpCode::ADD:
+    case OpCode::MULTIPLY: return true;
+    case OpCode::SUBTRACT:
+    case OpCode::DIVIDE:
+    case OpCode::IRES:
+    case OpCode::POWER: return false;
+    default: choreo_unreachable("unsupported opcode");
+    }
   }
   return false;
 }
-
-extern bool debug;
 
 class SymbolicExpression {
 public:
@@ -210,6 +268,37 @@ private:
 
 public:
   __UDT_TYPE_INFO__(SymbolicExpression, NumericValue)
+};
+
+class BooleanValue : public SymbolicExpression,
+                     public TypeIDProvider<BooleanValue> {
+public:
+  BooleanValue(bool value) : value(value) {}
+
+  std::string ToString() const override { return std::to_string(value); }
+  bool Value() const { return value; }
+  size_t Hash() const override { return std::hash<bool>{}(Value()); }
+
+  bool IsNumeric() const override { return true; }
+
+  bool operator==(const SymbolicExpression& op) const override {
+    if (auto nv = dyn_cast<BooleanValue>(&op)) return nv->value == value;
+    return false;
+  }
+
+public:
+  bool IsLeaf() const override { return true; }
+  Operand Clone() const override { return bl(value); };
+  Operand Fold() const override { return Clone(); }
+  Operand Reorder() const override { return Clone(); };
+  Operand Normalize() const override { return Clone(); };
+  Operand Reassociate() const override { return Clone(); };
+
+private:
+  bool value;
+
+public:
+  __UDT_TYPE_INFO__(SymbolicExpression, BooleanValue)
 };
 
 class SymbolicValue : public SymbolicExpression,
@@ -283,6 +372,46 @@ public:
   }
 
   Operand Fold() const override {
+    // handle comparison
+    if (IsCompare(op)) {
+      if (auto nu = dyn_cast<NumericValue>((left - right)->Normalize())) {
+        switch (op) {
+        case OpCode::GT:
+          if (nu->Value() > 0)
+            return bl(true);
+          else
+            return bl(false);
+        case OpCode::LT:
+          if (nu->Value() < 0)
+            return bl(true);
+          else
+            return bl(false);
+        case OpCode::EQ:
+          if (nu->Value() == 0)
+            return bl(true);
+          else
+            return bl(false);
+        case OpCode::GE:
+          if (nu->Value() >= 0)
+            return bl(true);
+          else
+            return bl(false);
+        case OpCode::LE:
+          if (nu->Value() <= 0)
+            return bl(true);
+          else
+            return bl(false);
+        case OpCode::NE:
+          if (nu->Value() <= 0)
+            return bl(true);
+          else
+            return bl(false);
+        default: choreo_unreachable("unsupported comparison.");
+        }
+      }
+      // else no simpilification
+    }
+
     auto simplifiedLeft = left->Fold();
     auto simplifiedRight = right->Fold();
 
@@ -516,6 +645,81 @@ public:
   __UDT_TYPE_INFO__(SymbolicExpression, BinaryOperation)
 };
 
+class TernaryOperation : public SymbolicExpression,
+                         public TypeIDProvider<TernaryOperation> {
+private:
+  OpCode op;
+  Operand pred;
+  Operand left;
+  Operand right;
+
+public:
+  TernaryOperation(OpCode op, const Operand& p, const Operand& l,
+                   const Operand& r)
+      : op(op), pred(p), left(l), right(r) {
+    // currently only support select
+    assert(op == OpCode::SELECT);
+  }
+
+  std::string ToString() const override {
+    return "(" + PSTR(pred) + " " + STR(op) + " " + PSTR(left) + " : " +
+           PSTR(right) + ")";
+  }
+
+  bool IsNumeric() const override {
+    // can be optimized
+    return pred->IsNumeric() && left->IsNumeric() && right->IsNumeric();
+  }
+
+  bool operator==(const SymbolicExpression& expr) const override {
+    if (auto se = dyn_cast<TernaryOperation>(&expr))
+      if (se->op == op && (*se->pred == *pred) && (*se->left == *left) &&
+          (*se->right == *right))
+        return true;
+    return false;
+  }
+
+  size_t Hash() const override { return std::hash<std::string>{}(ToString()); }
+
+public:
+  bool IsLeaf() const override { return false; }
+  const Operand GetPred() const { return pred; }
+  const Operand GetLeft() const { return left; }
+  const Operand GetRight() const { return right; }
+  OpCode GetOpCode() const { return op; }
+
+  Operand Clone() const override {
+    return std::make_shared<TernaryOperation>(op, pred->Clone(), left->Clone(),
+                                              right->Clone());
+  }
+
+  Operand Fold() const override {
+    auto npred = pred->Fold();
+    auto nl = left->Fold();
+    auto nr = right->Fold();
+    if (auto p = dyn_cast<BooleanValue>(npred)) {
+      if (p->Value() == true)
+        return left->Fold();
+      else
+        return right->Fold();
+    }
+
+    return sel(npred, nl, nr);
+  }
+
+  Operand Normalize() const override {
+    auto nv = Fold();
+    if (!isa<TernaryOperation>(nv)) return nv->Normalize();
+    return sel(pred->Normalize(), left->Normalize(), right->Normalize());
+  }
+
+  Operand Reassociate() const override { return Clone(); }
+  Operand Reorder() const override { return Clone(); }
+
+public:
+  __UDT_TYPE_INFO__(SymbolicExpression, TernaryOperation)
+};
+
 namespace {
 
 std::string GetHighRankString(const BinaryOperation& b) {
@@ -572,7 +776,6 @@ inline bool operator<(const SymbolicExpression& lhs,
                       const SymbolicExpression& rhs) {
   return Compare(lhs, rhs) < 0;
 }
-
 inline bool operator!=(const SymbolicExpression& lhs,
                        const SymbolicExpression& rhs) {
   return !(lhs == rhs);
@@ -588,20 +791,6 @@ inline bool operator==(const SymbolicExpression& lhs, const std::string& rhs) {
 }
 inline bool operator!=(const SymbolicExpression& lhs, const std::string& rhs) {
   return !(lhs == rhs);
-}
-
-// compare for numerics
-inline std::optional<int> nu_compare(const Operand& lhs, const Operand& rhs) {
-  auto nul = dyn_cast<NumericValue>(lhs);
-  auto nur = dyn_cast<NumericValue>(rhs);
-  if (!nul || !nur) return std::nullopt;
-  return nul->Value() - nur->Value();
-}
-
-inline bool nu_lt(const Operand& lhs, const Operand& rhs) {
-  auto r = nu_compare(lhs, rhs);
-  if (!r) return false;
-  return *r < 0;
 }
 
 inline Operand SimplifyExpression(const Operand& expr) {
@@ -620,6 +809,10 @@ inline std::shared_ptr<SymbolicExpression> make_numeric(int64_t value) {
   return std::make_shared<NumericValue>(value);
 }
 
+inline std::shared_ptr<SymbolicExpression> make_boolean(bool value) {
+  return std::make_shared<BooleanValue>(value);
+}
+
 inline Operand make_symbolic(const std::string& name) {
   return std::make_shared<SymbolicValue>(name);
 }
@@ -629,13 +822,25 @@ inline Operand make_operation(OpCode op, const Operand& left,
   return std::make_shared<BinaryOperation>(op, left, right);
 }
 
+inline Operand make_select(const Operand& pred, const Operand& left,
+                           const Operand& right) {
+  return std::make_shared<TernaryOperation>(OpCode::SELECT, pred, left, right);
+}
+
 // short-cuts
 inline Operand nu(int64_t value) { return make_numeric(value); }
+
+inline Operand bl(bool value) { return make_boolean(value); }
 
 inline Operand sym(const std::string& name) { return make_symbolic(name); }
 
 inline Operand bop(OpCode op, const Operand& left, const Operand& right) {
   return make_operation(op, left, right);
+}
+
+inline Operand sel(const Operand& pred, const Operand& left,
+                   const Operand& right) {
+  return make_select(pred, left, right);
 }
 
 inline Operand operator+(const Operand& vi1, const Operand& vi2) {
@@ -656,6 +861,55 @@ inline Operand operator/(const Operand& vi1, const Operand& vi2) {
 
 inline Operand operator%(const Operand& vi1, const Operand& vi2) {
   return bop(OpCode::IRES, vi1, vi2)->Normalize();
+}
+
+inline Operand oc_lt(const Operand& vi1, const Operand& vi2) {
+  return bop(OpCode::LT, vi1, vi2)->Normalize();
+}
+
+inline Operand oc_gt(const Operand& vi1, const Operand& vi2) {
+  return bop(OpCode::GT, vi1, vi2)->Normalize();
+}
+
+inline Operand oc_ge(const Operand& vi1, const Operand& vi2) {
+  return bop(OpCode::GE, vi1, vi2)->Normalize();
+}
+
+inline Operand oc_le(const Operand& vi1, const Operand& vi2) {
+  return bop(OpCode::LE, vi1, vi2)->Normalize();
+}
+
+inline Operand oc_eq(const Operand& vi1, const Operand& vi2) {
+  return bop(OpCode::EQ, vi1, vi2)->Normalize();
+}
+
+inline Operand oc_ne(const Operand& vi1, const Operand& vi2) {
+  return bop(OpCode::NE, vi1, vi2)->Normalize();
+}
+
+inline bool clt(const Operand& vi1, const Operand& vi2) {
+  if (auto v = dyn_cast<BooleanValue>(oc_lt(vi1, vi2))) return v->Value();
+  return false;
+}
+inline bool cgt(const Operand& vi1, const Operand& vi2) {
+  if (auto v = dyn_cast<BooleanValue>(oc_gt(vi1, vi2))) return v->Value();
+  return false;
+}
+inline bool cle(const Operand& vi1, const Operand& vi2) {
+  if (auto v = dyn_cast<BooleanValue>(oc_le(vi1, vi2))) return v->Value();
+  return false;
+}
+inline bool cge(const Operand& vi1, const Operand& vi2) {
+  if (auto v = dyn_cast<BooleanValue>(oc_ge(vi1, vi2))) return v->Value();
+  return false;
+}
+inline bool ceq(const Operand& vi1, const Operand& vi2) {
+  if (auto v = dyn_cast<BooleanValue>(oc_eq(vi1, vi2))) return v->Value();
+  return false;
+}
+inline bool cne(const Operand& vi1, const Operand& vi2) {
+  if (auto v = dyn_cast<BooleanValue>(oc_ne(vi1, vi2))) return v->Value();
+  return false;
 }
 
 template <typename T>
