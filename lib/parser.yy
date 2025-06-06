@@ -1018,8 +1018,10 @@ assignment
         $$ = AST::Make<AST::Assignment>(@1, $1, $3);
       }
     | data_element arith_operation ASSIGN s_expr {
-        if (!symtab.Exists($1->GetDataName())) {
-          Parser::error(@1, "The symbol '" + $1->GetDataName() + "` has not been defined.");
+        std::string dname = $1->GetDataName();
+        if (SuffixedWith(dname, ".data")) dname = dname.substr(0, dname.size() - 5);
+        if (!symtab.Exists(dname)) {
+          Parser::error(@1, "The symbol '" + dname + "` has not been defined.");
         } else {
           $$ = AST::Make<AST::Assignment>(@3, $1,
                 AST::Make<AST::Expr>(@2, $2, AST::Make<AST::Expr>(@1, $1), $4));
