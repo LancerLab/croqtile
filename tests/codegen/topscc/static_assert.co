@@ -1,0 +1,20 @@
+// RUN: choreo -t topscc -es %s -o - | FileCheck %s
+
+__co__ void foo(f32 [128, 512] a) {
+  parallel p by 1, q by 4 {
+    assert(a.span(0) < a.span(1), "128 > 64");
+    local f32 [a.span(0)/#p, a.span(1)/#q] L2_a {0.0f};
+    assert(L2_a.span(0) == L2_a.span(1), "128/1 == 512/4");
+  }
+}
+
+// CHECK-NOT: error: choreo assertion abort: 128 > 64
+// CHECK-NOT: error: choreo assertion abort: 128/1 == 512/4
+// CHECK: __global__ void __choreo_device_foo(float * a) {
+// CHECK:   __local__ __valigned__ float L2_a[16384];
+// CHECK:   if (subThreadIdx.x == 0 && subThreadIdx.y == 0 && subThreadIdx.z == 0) {
+// CHECK:     tops_dte_ctx_t L2_a__init;
+// CHECK:     tops::dte_scope s_L2_a__init(L2_a__init);
+// CHECK:     tops::memset(L2_a__init, tops::mdspan(tops::Private, (float*)L2_a, 128, 128), 0.000000f);
+// CHECK:   } // single instance
+// CHECK: }

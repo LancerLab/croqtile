@@ -1,0 +1,12 @@
+// RUN: choreo -es %s 2>&1 | FileCheck %s
+
+__co__ void foo(f32 [128, 512] a) {
+  parallel p by 1, q by 4 {
+    assert(a.span(0) > a.span(1), "128 > 64");
+    local f32 [a.span(0)/#p, a.span(1)/#q] L2_a {0.0f};
+    assert(L2_a.span(0) != L2_a.span(1), "128/1 == 512/4");
+  }
+}
+
+// CHECK: error: choreo assertion abort: 128 > 64
+// CHECK: error: choreo assertion abort: 128/1 == 512/4

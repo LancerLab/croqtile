@@ -27,9 +27,15 @@ Option<bool> debugPP(OptionKind::Internal, "--debug-pp", "", false,
 
 class SimplePreprocessor {
 private:
+  using DefineMap = std::unordered_map<std::string, std::string>;
+  using FuncMap =
+      std::unordered_map<std::string, std::tuple<std::string, std::string>>;
+
   std::ostream& output;
-  std::unordered_map<std::string, std::string> globalDefines;
-  std::unordered_map<std::string, std::string> localDefines;
+  DefineMap globalDefines;
+  DefineMap localDefines;
+  FuncMap globalDefinedFuncs;
+  FuncMap localDefinedFuncs;
 
   int choreo_brace_count = 0;
   int kernel_brace_count = 0;
@@ -79,9 +85,100 @@ public:
   }
 
 private:
-  std::string SubStituteDefines(
-      const std::string& line,
-      const std::unordered_map<std::string, std::string>& defines) {
+  std::string trim(const std::string& str) {
+    size_t first = str.find_first_not_of(' ');
+    if (first == std::string::npos) return "";
+
+    size_t last = str.find_last_not_of(' ');
+    return str.substr(first, last - first + 1);
+  }
+
+  std::string SubStituteMacroFuncs(const std::string& line,
+                                   const FuncMap& funcs, bool& changed) {
+    if (!changed) return line;
+
+    auto extractArgs = [this](const std::string& line,
+                              const std::string& func_name, std::string& prefix,
+                              std::string& suffix) {
+      std::regex pattern("\\b" + func_name + "\\b");
+      std::smatch match;
+      size_t pos = std::string::npos;
+      if (std::regex_search(line, match, pattern)) {
+        pos = match.position(0);
+      } else
+        return std::vector<std::string>();
+
+      std::vector<std::string> args;
+      int paren_count = 0;
+      int start_pos = pos + func_name.length();
+      prefix = line.substr(0, pos);
+      for (size_t i = pos + func_name.length(); i < line.length(); ++i) {
+        char c = line[i];
+        if (c == '(') {
+          paren_count++;
+          if (paren_count == 1) {
+            start_pos = i + 1; // start after the opening parenthesis
+          }
+        } else if (c == ')') {
+          paren_count--;
+          if (paren_count == 0) {
+            // found the closing parenthesis, extract the last argument
+            std::string arg = line.substr(start_pos, i - start_pos);
+            args.push_back(trim(arg));
+            suffix = line.substr(i + 1);
+            break;
+          }
+          if (paren_count < 0) {
+            errs() << "error: unmatched parenthesis in macro function call '"
+                   << func_name << "'\n";
+            return std::vector<std::string>();
+          } // unmatched parenthesis
+        } else if (c == ',' && paren_count == 1) {
+          // found a comma at the top level, extract the argument
+          std::string arg = line.substr(start_pos, i - start_pos);
+          args.push_back(trim(arg));
+          start_pos = i + 1; // move to the next character after the comma
+        }
+      }
+      return args;
+    };
+
+    std::string result;
+
+    for (const auto& func : funcs) {
+      const auto& name = func.first;
+      const auto& args_str = std::get<0>(func.second);
+      const auto& body_str = std::get<1>(func.second);
+      // build regex for function arguments
+
+      std::stringstream ss(args_str);
+      std::string arg;
+      std::vector<std::string> arg_template;
+      while (std::getline(ss, arg, ',')) { arg_template.push_back(trim(arg)); }
+      std::string prefix, suffix;
+      auto args = extractArgs(line, name, prefix, suffix);
+      if (args.empty() || args.size() != arg_template.size()) continue;
+      changed = true;
+      std::string substituted = body_str;
+      for (size_t i = 0; i < args.size(); ++i) {
+        auto& arg_name = arg_template[i];
+        auto& arg_value = args[i];
+        // replace the argument in the macro function body
+        size_t pos = 0;
+        while ((pos = substituted.find(arg_name, pos)) != std::string::npos) {
+          substituted.replace(pos, arg_name.length(), arg_value);
+          pos += arg_value.length();
+        }
+      }
+      return prefix + substituted + suffix;
+    }
+    changed = false;
+    return line;
+  }
+
+  std::string SubStituteDefines(const std::string& line,
+                                const DefineMap& defines,
+                                const FuncMap& funcs) {
     std::string result;
     std::string current_token;
     bool in_string = false;
@@ -143,7 +240,8 @@ private:
         // substitute token
         if (!current_token.empty()) {
           auto it = defines.find(current_token);
-          if (it != defines.end())
+          auto func_it = funcs.find(current_token);
+          if (it != defines.end() && func_it == funcs.end())
             result += it->second;
           else
             result += current_token;
@@ -166,11 +264,21 @@ private:
   }
 
   std::string SubstituteGlobalDefines(const std::string& line) {
-    return SubStituteDefines(line, globalDefines);
+    return SubStituteDefines(line, globalDefines, globalDefinedFuncs);
   }
 
   std::string SubstituteLocalDefines(const std::string& line) {
-    return SubStituteDefines(line, localDefines);
+    return SubStituteDefines(line, localDefines, localDefinedFuncs);
+  }
+
+  std::string SubstituteGlobalMacroFuncs(const std::string& line,
+                                         bool& changed) {
+    return SubStituteMacroFuncs(line, globalDefinedFuncs, changed);
+  }
+
+  std::string SubstituteLocalMacroFuncs(const std::string& line,
+                                        bool& changed) {
+    return SubStituteMacroFuncs(line, localDefinedFuncs, changed);
   }
 
   bool isDirective(const std::string& line, const std::string& directive,
@@ -181,10 +289,9 @@ private:
   }
 
 private:
-  std::string preprocessBooleanExpression(
-      const std::string& expr,
-      const std::unordered_map<std::string, std::string>& defines,
-      std::map<std::string, bool>& macroMap) {
+  std::string
+  preprocessBooleanExpression(const std::string& expr, const DefineMap& defines,
+                              std::map<std::string, bool>& macroMap) {
     std::regex defRegex("defined\\s*(?:\\((\\w+)\\)|(\\w+))");
     std::smatch match;
     std::string result = expr;
@@ -218,9 +325,8 @@ private:
     return result;
   }
 
-  bool EvaluateBooleanExpression(
-      const std::string& condition_expr,
-      const std::unordered_map<std::string, std::string>& defines) {
+  bool EvaluateBooleanExpression(const std::string& condition_expr,
+                                 const DefineMap& defines) {
     std::map<std::string, bool> macroMap;
     auto expr = preprocessBooleanExpression(condition_expr, defines, macroMap);
     auto precedence = [](const std::string& op) {
@@ -414,6 +520,26 @@ private:
         std::smatch match;
         if (std::regex_match(bline, match, defineRegex))
           globalDefines[match[1]] = match[2].matched ? match[2].str() : "1";
+        else {
+          defineRegex = std::regex(R"(#define\s+(\w+)\((.*)\)\s+(.*))");
+          if (std::regex_match(bline, match, defineRegex)) {
+            assert(match[2].matched && match[3].matched &&
+                   "Expecting a function-like macro definition.");
+            auto macro_func_name = match[1].str();
+            auto macro_func_params = match[2].str();
+            auto macro_func_body = match[3].str();
+            if (globalDefines.count(macro_func_name)) {
+              errs() << "copp: in line " << line_num
+                     << ": error: redefinition of macro function '"
+                     << macro_func_name << "'\n";
+              abort();
+            } else {
+              globalDefines[macro_func_name] = macro_func_body;
+              globalDefinedFuncs[macro_func_name] =
+                  std::make_tuple(macro_func_params, macro_func_body);
+            }
+          }
+        }
       }
       output << line << '\n';
       return;
@@ -421,8 +547,10 @@ private:
       if (cur_cond && !cur_skip) {
         std::regex undefRegex("#undef\\s+(\\w+)");
         std::smatch match;
-        if (std::regex_match(bline, match, undefRegex))
+        if (std::regex_match(bline, match, undefRegex)) {
           globalDefines.erase(match[1]);
+          globalDefinedFuncs.erase(match[1]);
+        }
       }
       output << line << '\n';
       return;
@@ -513,6 +641,8 @@ private:
 
     // Make substitution for the further work
     auto sline = SubstituteGlobalDefines(aline);
+    bool changed = true;
+    while (changed) { sline = SubstituteGlobalMacroFuncs(sline, changed); }
 
     // Check if entering a __co__ function
     if (sline.find("__co__ ") != std::string::npos) {
@@ -667,12 +797,32 @@ private:
         co_if_count++;
       }
       if (!co_skip_line) output << "#line " << line_num + 1 << "\n";
-    } else if (isDirective(bline, "#define")) {
+    } else if (isDirective(bline, "#define", false)) {
       if (cur_cond && !cur_skip) {
         std::regex defineRegex("#define\\s+(\\w+)(?:\\s+(.*))?");
         std::smatch match;
         if (std::regex_match(bline, match, defineRegex)) {
           localDefines[match[1]] = match[2].matched ? match[2].str() : "1";
+        } else {
+          defineRegex = std::regex(R"(#define\s+(\w+)\((.*)\)\s+(.*))");
+          if (std::regex_match(bline, match, defineRegex)) {
+            assert(match[2].matched && match[3].matched &&
+                   "Expecting a function-like macro definition.");
+            auto macro_func_name = match[1].str();
+            auto macro_func_params = match[2].str();
+            auto macro_func_body = match[3].str();
+
+            if (localDefines.count(macro_func_name)) {
+              errs() << "copp: in line " << line_num
+                     << ": error: redefinition of macro function '"
+                     << macro_func_name << "'\n";
+              abort();
+            } else {
+              localDefines[macro_func_name] = macro_func_body;
+              localDefinedFuncs[macro_func_name] =
+                  std::make_tuple(macro_func_params, macro_func_body);
+            }
+          }
         }
       }
       if (!co_skip_line) output << "#line " << line_num + 1 << "\n";
@@ -682,6 +832,7 @@ private:
         std::smatch match;
         if (std::regex_match(bline, match, undefRegex)) {
           localDefines.erase(match[1]);
+          localDefinedFuncs.erase(match[1]);
         }
       }
       if (!co_skip_line) output << "#line " << line_num + 1 << "\n";
@@ -772,6 +923,7 @@ private:
             // just entered
             co_start = i;
             localDefines = globalDefines;
+            localDefinedFuncs = globalDefinedFuncs;
           }
         } else if (c == '}') {
           choreo_brace_count--;
@@ -790,6 +942,8 @@ private:
 
       auto co_code = aline.substr(co_start, co_end - co_start);
       auto sline = SubstituteLocalDefines(co_code);
+      bool changed = true;
+      while (changed) { sline = SubstituteLocalMacroFuncs(sline, changed); }
 
       // output the choreo code
       if (!uc_skip_line) output << aline.substr(0, co_start) << sline;
@@ -814,17 +968,35 @@ private:
 public:
   bool Process(std::istream& input) {
     code_partition = CP_USER;
-    std::string line;
+    std::string cur_line;
+    std::string line_to_handle;
+    while (std::getline(input, cur_line)) {
+      if (line_to_handle.back() == '\\') {
+        line_to_handle.pop_back();
+        line_to_handle += " " + trim(cur_line);
+      } else
+        line_to_handle = cur_line;
 
-    while (std::getline(input, line)) {
+      size_t bs_pos = cur_line.find_last_of('\\');
+      if (bs_pos != std::string::npos &&
+          bs_pos == cur_line.find_last_not_of(' ')) {
+        if (bs_pos != cur_line.size() - 1)
+          errs() << ("copp: in line " + std::to_string(line_num) +
+                     ": warning: backslash and newline separated by space\n");
+        line_num++;
+        line_to_handle =
+            line_to_handle.substr(0, line_to_handle.find_last_not_of(' ') + 1);
+        continue;
+      }
+
       if (code_partition == CP_USER) {
-        HandleOneUserLine(line);
+        HandleOneUserLine(line_to_handle);
         line_num++;
       } else if (code_partition == CP_CHOREO) {
-        HandleOneChoreoLine(line);
+        HandleOneChoreoLine(line_to_handle);
         line_num++;
       } else if (code_partition == CP_KERNEL) {
-        HandleOneKernelLine(line);
+        HandleOneKernelLine(line_to_handle);
         line_num++;
       } else
         choreo_unreachable("code partition is not known.");
