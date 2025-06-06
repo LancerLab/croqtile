@@ -2,7 +2,6 @@ stages:
   - check-in-tests
   - pre-release-tests
   - docgen
-  - cleanup
 
 # TODO: make package release work
 #  - artifacts
@@ -30,6 +29,10 @@ gpu_test:
     - release/alpha
     - merge_requests
   timeout: 10m
+  after_script:
+    - 'echo "Cleaning up CI project directory: $CI_PROJECT_DIR ..."'
+    - 'if [ -n "$CI_PROJECT_DIR" ] && [ "$CI_PROJECT_DIR" != "/" ]; then rm -rf $CI_PROJECT_DIR/{*,.[!.]*,..?*}; else echo "CI_PROJECT_DIR is not set or is root, skip cleanup!"; fi'
+    - 'echo "Cleanup done."'
 
 # GCU2 Testing
 gcu2_test:
@@ -56,6 +59,10 @@ gcu2_test:
     - merge_requests
   allow_failure: true
   timeout: 10m
+  after_script:
+    - 'echo "Cleaning up CI project directory: $CI_PROJECT_DIR ..."'
+    - 'if [ -n "$CI_PROJECT_DIR" ] && [ "$CI_PROJECT_DIR" != "/" ]; then rm -rf $CI_PROJECT_DIR/{*,.[!.]*,..?*}; else echo "CI_PROJECT_DIR is not set or is root, skip cleanup!"; fi'
+    - 'echo "Cleanup done."'
 
 # GCU3 Testing
 gcu3_test:
@@ -82,6 +89,10 @@ gcu3_test:
     - merge_requests
   allow_failure: true
   timeout: 10m
+  after_script:
+    - 'echo "Cleaning up CI project directory: $CI_PROJECT_DIR ..."'
+    - 'if [ -n "$CI_PROJECT_DIR" ] && [ "$CI_PROJECT_DIR" != "/" ]; then rm -rf $CI_PROJECT_DIR/{*,.[!.]*,..?*}; else echo "CI_PROJECT_DIR is not set or is root, skip cleanup!"; fi'
+    - 'echo "Cleanup done."'
 
 # GCU4 Testing
 gcu4_test:
@@ -108,6 +119,10 @@ gcu4_test:
     - merge_requests
   allow_failure: true
   timeout: 10m
+  after_script:
+    - 'echo "Cleaning up CI project directory: $CI_PROJECT_DIR ..."'
+    - 'if [ -n "$CI_PROJECT_DIR" ] && [ "$CI_PROJECT_DIR" != "/" ]; then rm -rf $CI_PROJECT_DIR/{*,.[!.]*,..?*}; else echo "CI_PROJECT_DIR is not set or is root, skip cleanup!"; fi'
+    - 'echo "Cleanup done."'
 
 # GCU3 Debug Testing
 gcu3_debug_test:
@@ -133,6 +148,10 @@ gcu3_debug_test:
     - merge_requests
   allow_failure: true
   timeout: 10m
+  after_script:
+    - 'echo "Cleaning up CI project directory: $CI_PROJECT_DIR ..."'
+    - 'if [ -n "$CI_PROJECT_DIR" ] && [ "$CI_PROJECT_DIR" != "/" ]; then rm -rf $CI_PROJECT_DIR/{*,.[!.]*,..?*}; else echo "CI_PROJECT_DIR is not set or is root, skip cleanup!"; fi'
+    - 'echo "Cleanup done."'
 
 # Docker environment GCU3 testing
 gcu3_docker_test:
@@ -168,6 +187,10 @@ gcu3_docker_test:
     - merge_requests
   allow_failure: true
   timeout: 10m
+  after_script:
+    - 'echo "Cleaning up CI project directory: $CI_PROJECT_DIR ..."'
+    - 'if [ -n "$CI_PROJECT_DIR" ] && [ "$CI_PROJECT_DIR" != "/" ]; then rm -rf $CI_PROJECT_DIR/{*,.[!.]*,..?*}; else echo "CI_PROJECT_DIR is not set or is root, skip cleanup!"; fi'
+    - 'echo "Cleanup done."'
 
 # Package testing
 package_test:
@@ -198,6 +221,10 @@ package_test:
     - release/alpha
     - merge_requests
   timeout: 10m
+  after_script:
+    - 'echo "Cleaning up CI project directory: $CI_PROJECT_DIR ..."'
+    - 'if [ -n "$CI_PROJECT_DIR" ] && [ "$CI_PROJECT_DIR" != "/" ]; then rm -rf $CI_PROJECT_DIR/{*,.[!.]*,..?*}; else echo "CI_PROJECT_DIR is not set or is root, skip cleanup!"; fi'
+    - 'echo "Cleanup done."'
 
 # Documentation generation stage
 generate_docs:
@@ -209,10 +236,4 @@ generate_docs:
     - python3.8 -m pip install mkdocs mkdocs-material mkdocs-markdownextradata-plugin
     - make serve-doc
   timeout: 10m
-
-# Cache configuration to speed up CI by reusing the environment
-cache:
-  paths:
-    - venv/
-    - .cache/pip/
 
