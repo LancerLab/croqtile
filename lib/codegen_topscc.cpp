@@ -33,8 +33,28 @@ Option<bool> emit_fatbin(OptionKind::Hidden, "-fb", "", false,
 Option<bool> no_decay_spanview(OptionKind::Hidden, "--no-decay-spanview",
                                "-ndecay-spv", false,
                                " decay spanview to be pointers.");
+Option<bool>
+    dma_verbose(OptionKind::Hidden, "--dma-verbose", "", false,
+                " print DMA related informtion at runtime (debug only).");
 
 namespace {
+
+inline void VerboseDMA(std::ostringstream& os, const std::string& indent,
+                       const std::string& from, const std::string& to,
+                       const std::string action, const std::string& offset,
+                       size_t offcnt, const std::string& suffix = "") {
+  if (!dma_verbose) return;
+
+  os << indent << "printf(\"" << from << "->" << to << ", " << action
+     << " offset: {";
+  for (size_t i = 0; i < offcnt; ++i) {
+    if (i > 0) os << ", ";
+    os << "%d";
+  }
+  os << "} " << suffix << "\\n\"";
+  if (offcnt > 0) os << ", " << offset;
+  os << ");\n";
+}
 
 inline const char* LocalSharedPredicate() {
   return "threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0";
@@ -344,8 +364,9 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
 }
 
 // tops::mdspan style offset
-const std::string TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
-                                              ptr<DMAConfig> config) const {
+std::pair<std::string, size_t>
+TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
+                            ptr<DMAConfig> config) const {
   auto& tsis = ca->AllTSInfo();
   assert(!tsis.empty());
 
@@ -412,7 +433,7 @@ const std::string TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
   VST_DEBUG(dbgs() << "Offset for chunkat (" << PSTR(ca)
                    << "): " << offset.str() << "\n");
 
-  return offset.str();
+  return {offset.str(), offsets.size()};
 }
 
 const std::string TopsccCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca) const {
@@ -1175,16 +1196,16 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         static int s_cnt = 0;
         auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
                         f_sym + "_2_" + t_sym;
-        hs << h_indent << "int " << off_name << " = " << GenMdsOffset(t_ca)
-           << ";\n";
+        auto [offset, offcnt] = GenMdsOffset(t_ca);
+        hs << h_indent << "int " << off_name << " = " << offset << ";\n";
         hs << h_indent << bts << " * " << buf_sym << " + " << off_name << " = "
            << buf_sym_from << ";\n";
       } else if (TileToSymbol()) {
         static int s_cnt = 0;
         auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
                         f_sym + "_2_" + t_sym;
-        hs << h_indent << "int " << off_name << " = " << GenMdsOffset(f_ca)
-           << ";\n";
+        auto [offset, offcnt] = GenMdsOffset(f_ca);
+        hs << h_indent << "int " << off_name << " = " << offset << ";\n";
         hs << h_indent << bts << " * " << buf_sym << " = " << buf_sym_from
            << " + " << off_name << ""
            << ";\n";
@@ -1326,6 +1347,9 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       ds << "tops::memcpy" << (fty->IsAsync() ? "_async" : "") << "(*"
          << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
          << ");\n";
+
+      VerboseDMA(ds, d_indent, t_sym, f_sym, "copy", "", 0,
+                 ", line " + std::to_string(n.LOC().begin.line));
       // set the device future
       if (!event_name.empty())
         ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
@@ -1333,8 +1357,10 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       static int ds_cnt = 0;
       auto off_name = "__deslice_offset" + std::to_string(ds_cnt++) + "__" +
                       t_sym + "_2_" + f_sym;
-      ds << d_indent << "int " << off_name << "[] = {" << GenMdsOffset(t_ca)
-         << "};\n";
+      auto [offset, offcnt] = GenMdsOffset(t_ca);
+      VerboseDMA(ds, d_indent, t_sym, f_sym, "deslice", offset, offcnt,
+                 ", line " + std::to_string(n.LOC().begin.line));
+      ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
       ds << d_indent;
       if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
       ds << "tops::deslice" << (fty->IsAsync() ? "_async" : "") << "(*"
@@ -1353,8 +1379,10 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       static int s_cnt = 0;
       auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
                       f_sym + "_2_" + t_sym;
-      ds << d_indent << "int " << off_name << "[] = {" << GenMdsOffset(f_ca)
-         << "};\n";
+      auto [offset, offcnt] = GenMdsOffset(f_ca);
+      VerboseDMA(ds, d_indent, f_sym, t_sym, "slice", offset, offcnt,
+                 ", line " + std::to_string(n.LOC().begin.line));
+      ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
       ds << d_indent;
       if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
       ds << "tops::slice" << (fty->IsAsync() ? "_async" : "") << "(*"
@@ -1441,7 +1469,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       static int s_cnt = 0;
       auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
                       f_sym + "_2_" + t_sym;
-      auto offset = GenMdsOffset(f_ca, n.GetConfig());
+      auto [offset, offcnt] = GenMdsOffset(f_ca, n.GetConfig());
       ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
       ds << d_indent;
       if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
@@ -1455,7 +1483,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       static int ds_cnt = 0;
       auto off_name = "__deslice_offset" + std::to_string(ds_cnt++) + "__" +
                       t_sym + "_2_" + f_sym;
-      auto offset = GenMdsOffset(t_ca, n.GetConfig());
+      auto [offset, offcnt] = GenMdsOffset(t_ca, n.GetConfig());
       ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
       ds << d_indent;
       if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
@@ -2640,6 +2668,8 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       } else if (expr->GetOp() == "addrof") {
         if (auto id = AST::GetIdentifier(expr->GetR())) {
           oss << ExprSTR(id, is_host);
+        } else if (isa<AST::DataAccess>(expr->GetR())) {
+          oss << "&" << ExprSTR(expr->GetR(), is_host);
         } else
           choreo_unreachable("Can not retrieve name of the spanned data.");
       } else
@@ -2688,8 +2718,8 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
               << ExprSTR(r, is_host) << "))";
       }
     } else if (expr->IsTernary()) {
-      oss << "(" << ExprSTR(expr->GetC(), is_host) << ") ? ("
-          << ExprSTR(expr->GetL(), is_host) << ") : ("
+      oss << "((" << ExprSTR(expr->GetC(), is_host) << ") ? "
+          << ExprSTR(expr->GetL(), is_host) << " : "
           << ExprSTR(expr->GetR(), is_host) << ")";
     } else
       choreo_unreachable("unsupported expression '" + expr->GetOp() +

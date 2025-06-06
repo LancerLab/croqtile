@@ -143,10 +143,9 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       SetNodeType(n, MakeDummySpannedType());
   } else if (n.op == "addrof") {
     auto ty = NodeType(*n.GetR());
-    if (!isa<SpannedType>(ty)) {
+    if (!isa<SpannedType>(ty) && !isa<AST::DataAccess>(n.GetR())) {
       Error(n.LOC(), "in operation \"" + n.op +
-                         "\": expect a spanned type but got `" + PSTR(ty) +
-                         "'.");
+                         "\": expect a data type but got `" + PSTR(ty) + "'.");
       error_count++;
       SetNodeType(n, MakeUnknownType());
       return false;

@@ -1,7 +1,10 @@
 // RUN: choreo -e %s | FileCheck --match-full-lines %s
 
 __co__ void data_access(f32 [7, 4] a, f32 [7, 4] b) {
-  foreach i in a.span  a.at(i) = b.at(i);
+  foreach i in a.span {
+    a.at(i) = b.at(i);
+    println(&a.at(i));
+  }
 }
 
 // CHECK: ChoreoFunction
@@ -17,3 +20,5 @@ __co__ void data_access(f32 [7, 4] a, f32 [7, 4] b) {
 // CHECK:    `- Foreach Block:
 // CHECK:     `- Iteration variables: i
 // CHECK:     `- Assign: a[i] = b[i]
+// CHECK:     `- Call: println (built-in)
+// CHECK:       `- with arguments:  (addrof a[i])

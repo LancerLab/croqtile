@@ -1165,7 +1165,7 @@ bool LivenessAnalyzer::Visit(AST::Call& n) {
         } else if (expr->op == "addrof") {
           if (auto id = AST::GetIdentifier(expr->GetR()))
             AddUse(current_stmt, id->name);
-          else
+          else if (!isa<AST::DataAccess>(expr->GetR()))
             choreo_unreachable("Can not retrieve name of the future.");
         } else {
           assert(isa<AST::ChunkAt>(expr->GetR()) &&

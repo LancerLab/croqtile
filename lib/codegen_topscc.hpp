@@ -410,8 +410,8 @@ private:
   std::optional<std::string> ThreadIdString(const ptr<AST::Identifier>&) const;
   std::optional<std::string>
   SubThreadIdString(const ptr<AST::Identifier>&) const;
-  const std::string GenMdsOffset(const ptr<AST::ChunkAt>,
-                                 ptr<DMAConfig> = nullptr) const;
+  std::pair<std::string, size_t> GenMdsOffset(const ptr<AST::ChunkAt>,
+                                              ptr<DMAConfig> = nullptr) const;
   const std::string GenOffset(const ptr<AST::ChunkAt>&) const;
 };
 

@@ -244,7 +244,9 @@ void choreo_info(const char *message) {
 %left UBMINUS UBPLUS
 %left UBSTAR UBSLASH UBPECET
 %right PPLUS MMINUS
+%right AMP
 %left UBOUND
+%left DOT
 %nonassoc LPAREN RPAREN
 %nonassoc LBRAKT RBRAKT
 %left FNSPAN
@@ -1093,6 +1095,9 @@ s_expr
       }
     | AMP IDENTIFIER {
         $$ = AST::Make<AST::Expr>(@1, "addrof", AST::Make<AST::Identifier>(@2, $2));
+      }
+    | AMP data_element {
+        $$ = AST::Make<AST::Expr>(@1, "addrof", $2);
       }
     | PPLUS IDENTIFIER {
         $$ = AST::Make<AST::Expr>(@1, "++", AST::Make<AST::Identifier>(@1, $2));

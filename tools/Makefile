@@ -89,7 +89,7 @@ setup-gcu-factor-kit: check-gcu-factor-kit
 GCU3_REL_PATH=250508/gcu30
 GCU3_PLATFORM_NAME=TopsPlatform_1.4.20250310-18636a_deb_amd64.run
 GCU3_PLATFORM_PKG=$(TOOLCHAIN_DIR)/$(GCU3_PLATFORM_NAME)
-GCU3_PLATFORM_PKG_MD5:=cb1227127ef6441bc895380638ad4ba3
+GCU3_PLATFORM_PKG_MD5:=4220f099f1c50313ccd82823aaf34683
 CUR_GCU3_PLATFORM_PKG_MD5:=$(shell md5sum $(GCU3_PLATFORM_PKG) 2>/dev/null| cut -d ' ' -f 1)
 
 check-gcu3-platform-kit:

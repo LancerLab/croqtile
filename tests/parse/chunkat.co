@@ -69,4 +69,3 @@ __co__ void mow(f32 [9] inp) {
 // CHECK:    `- DMA.copy
 // CHECK:      `- from: inp.SubSpan(3).At(x).ModSpan(4).At(x).ChunkAt(x)
 // CHECK:      `- to: local
-
