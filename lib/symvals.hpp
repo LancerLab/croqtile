@@ -77,10 +77,16 @@ inline std::string ValueItemAsString(const ValueItem& vi,
   if (ULL_suffix) {
     if (isa<sbe::NumericValue>(vi))
       return PSTR(vi) + (ULL_suffix ? "ULL" : "");
+    else if (isa<sbe::BooleanValue>(vi))
+      return PSTR(vi);
     else if (auto bo = dyn_cast<sbe::BinaryOperation>(vi))
       return "(" + ValueItemAsString(bo->GetLeft()) + " " +
              STR(bo->GetOpCode()) + " " + ValueItemAsString(bo->GetRight()) +
              ")";
+    else if (auto tn = dyn_cast<sbe::TernaryOperation>(vi))
+      return "(" + ValueItemAsString(tn->GetPred()) + " ? " +
+             ValueItemAsString(tn->GetLeft()) + " : " +
+             ValueItemAsString(tn->GetRight()) + ")";
     else if (isa<sbe::SymbolicValue>(vi))
       return PSTR(vi);
     else
@@ -96,6 +102,13 @@ inline static std::optional<int> VIInt(const ValueItem& vi) {
 inline static bool VIIsInt(const ValueItem& vi) {
   return VIInt(vi).has_value();
 }
+inline static std::optional<int> VIBool(const ValueItem& vi) {
+  if (auto iv = dyn_cast<sbe::BooleanValue>(vi)) return iv->Value();
+  return std::nullopt;
+}
+inline static bool VIIsBool(const ValueItem& vi) {
+  return VIBool(vi).has_value();
+}
 
 inline static std::optional<std::string> VIStr(const ValueItem& vi) {
   if (auto iv = dyn_cast<sbe::SymbolicValue>(vi)) return iv->Value();
@@ -106,6 +119,12 @@ inline static std::shared_ptr<sbe::BinaryOperation> VIBop(const ValueItem& vi) {
   return dyn_cast<sbe::BinaryOperation>(vi);
 }
 inline static bool VIIsBop(const ValueItem& vi) { return VIBop(vi) != nullptr; }
+
+inline static std::shared_ptr<sbe::TernaryOperation>
+VITop(const ValueItem& vi) {
+  return dyn_cast<sbe::TernaryOperation>(vi);
+}
+inline static bool VIIsTop(const ValueItem& vi) { return VITop(vi) != nullptr; }
 
 template <typename T>
 inline T GetValueAt(ValueList vlist, int idx) {

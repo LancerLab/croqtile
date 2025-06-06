@@ -2462,11 +2462,16 @@ const std::string TopsccCodeGen::ValueSTR(const ValueItem& vi) const {
   if (!IsValidValueItem(vi)) choreo_unreachable("invalid value item.");
   if (auto iv = VIInt(vi))
     return PSTR(vi);
+  else if (auto bv = VIBool(vi))
+    return PSTR(vi);
   else if (auto sv = VIStr(vi))
     return UnScopedExpr(PSTR(vi));
   else if (auto bo = VIBop(vi))
     return "(" + ValueSTR(bo->GetLeft()) + " " + STR(bo->GetOpCode()) + " " +
            ValueSTR(bo->GetRight()) + ")";
+  else if (auto to = VITop(vi))
+    return "(" + ValueSTR(to->GetPred()) + " ? " + ValueSTR(to->GetLeft()) +
+           " : " + ValueSTR(to->GetRight()) + ")";
   else
     choreo_unreachable("unsupported value.");
   return "";

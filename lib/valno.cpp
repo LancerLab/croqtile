@@ -71,10 +71,25 @@ ValueItem ValueNumbering::GenValueItemFromSignature(const std::string& input) {
 
   // it is an operation
   auto parts = SplitStringByDelimiter(input, ":");
+
+  if (parts.size() == 4) {
+    // ternary operation
+    assert(PrefixedWith(input, "?:") && "unexpected ternary operation.");
+    auto pvi = GenValueItemFromSignature(
+        GetSignatureFromValueNumber(std::stoi(parts[1].substr(1))));
+    auto lvi = GenValueItemFromSignature(
+        GetSignatureFromValueNumber(std::stoi(parts[2].substr(1))));
+    auto rvi = GenValueItemFromSignature(
+        GetSignatureFromValueNumber(std::stoi(parts[3].substr(1))));
+    if (pvi && lvi && rvi) return sbe::sel(pvi, lvi, rvi)->Normalize();
+    return nullptr;
+  }
+
   if (parts.size() != 3) return nullptr;
   if (PrefixedWith(input, "+:") || PrefixedWith(input, "-:") ||
       PrefixedWith(input, "*:") || PrefixedWith(input, "/:") ||
-      PrefixedWith(input, "%:")) {
+      PrefixedWith(input, "%:") || PrefixedWith(input, ">:") ||
+      PrefixedWith(input, "<:")) {
     auto lvi = GenValueItemFromSignature(
         GetSignatureFromValueNumber(std::stoi(parts[1].substr(1))));
     auto rvi = GenValueItemFromSignature(
@@ -89,6 +104,14 @@ ValueItem ValueNumbering::GenValueItemFromSignature(const std::string& input) {
     if (lvi && rvi)
       return sbe::bop(OpCode::DIVIDE, lvi + (rvi - sbe::nu(1)), rvi)
           ->Normalize();
+  } else if (PrefixedWith(input, ">=:") || PrefixedWith(input, "<=:") ||
+             PrefixedWith(input, "==:") || PrefixedWith(input, "!=:")) {
+    auto lvi = GenValueItemFromSignature(
+        GetSignatureFromValueNumber(std::stoi(parts[1].substr(1))));
+    auto rvi = GenValueItemFromSignature(
+        GetSignatureFromValueNumber(std::stoi(parts[2].substr(1))));
+    if (lvi && rvi)
+      return sbe::bop(ToOpCode(input.substr(0, 2)), lvi, rvi)->Normalize();
   }
   return nullptr;
 }

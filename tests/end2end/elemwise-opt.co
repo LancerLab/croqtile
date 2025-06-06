@@ -3,7 +3,6 @@
 
 #include <iostream>
 
-#define M 8388608
 __co__ auto ele_add(s32 [M] lhs, s32 [M] rhs) {
   s32 [lhs.span] output;
 

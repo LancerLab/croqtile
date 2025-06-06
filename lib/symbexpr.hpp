@@ -117,6 +117,18 @@ inline static OpCode ToOpCode(const std::string& op) {
     return OpCode::DIVIDE;
   else if (op == "%")
     return OpCode::IRES;
+  else if (op == ">")
+    return OpCode::GT;
+  else if (op == "<")
+    return OpCode::LT;
+  else if (op == ">=")
+    return OpCode::GE;
+  else if (op == "<=")
+    return OpCode::LE;
+  else if (op == "==")
+    return OpCode::EQ;
+  else if (op == "!=")
+    return OpCode::NE;
   else
     choreo_unreachable("operation '" + op + "' is not supported.");
   return OpCode::NONE;
