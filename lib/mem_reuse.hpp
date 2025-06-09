@@ -17,64 +17,44 @@ namespace Choreo {
 
 // Analyze memory: storage, shape(size)
 struct MemAnalyzer : public VisitorWithSymTab {
-  // using Symbol = GiNaC::symbol;
-  // using SymExpr = GiNaC::ex;
+  int parallel_level;
+  // NOTE: use paraby scope to distinguish different device functions.
+  // If equal to co func name, indicate that not in device scope.
+  std::string cur_dev_func_name;
 
-  // whether JIT memory reuse is needed
-  bool have_dynamic_shape = false;
+  // whether JIT memory reuse is needed.
+  // the key is dec func name, the val is false by default.
+  std::map<std::string, bool> have_dynamic_shape;
 
-  // std::map<std::string, Symbol> symbol_map;
-  // std::map<std::string, SymExpr> sym_expr_map;
-
-  // using BSize = std::variant<size_t, SymExpr>;
   using BSize = std::variant<size_t, std::string>;
   std::unordered_map<std::string, BSize> buf_size;
   std::unordered_map<std::string, Storage> buf_sto;
-  LivenessAnalyzer::VarSet event_vars;
+  std::unordered_map<std::string, std::string> buf_dev_func_name;
+  std::set<std::string> event_vars;
 
   MemAnalyzer() : VisitorWithSymTab("memanlz", CCtx().GetGlobalSymbolTable()) {}
   ~MemAnalyzer() {}
 
 private:
   bool BeforeVisitImpl(AST::Node& n) override;
-  bool AfterVisitImpl(AST::Node&) override { return true; }
+  bool AfterVisitImpl(AST::Node&) override;
   bool Visit(AST::NamedVariableDecl& n) override;
 
-  static inline bool IsRef(const AST::Node& n) {
+  static bool IsRef(const AST::Node& n) {
     return n.GetNote().find("ref") != std::string::npos;
   }
-  // static inline std::string ExSTR(const SymExpr& sym_expr) {
-  //   std::ostringstream oss;
-  //   oss << sym_expr;
-  //   return oss.str();
-  // }
-  // SymExpr StringifyOpFromSymExpr(const SymExpr& sym_expr_l,
-  //                                const std::string& op,
-  //                                const SymExpr& sym_expr_r);
-  // SymExpr GetSymExprFromStr(std::string str);
-  // SymExpr GetSymExprFromSizeExpr(std::string size_expr);
 };
 
 struct MemReuse : public VisitorWithSymTab {
 private:
-  std::string cur_func_name;
   const LivenessAnalyzer& la;
   const MemAnalyzer& ma;
 
   int parallel_level = 0;
   int max_parallel_level = 0;
-
-  std::map<std::string, size_t> mem_offset;
-
-  struct SpmSize {
-    size_t local_spm_size;
-    size_t shared_spm_size;
-  };
-  std::map<std::string, SpmSize> spm_size_map;
-
-  // update when entering co func.
-  std::string local_spm_name;
-  std::string shared_spm_name;
+  // NOTE: use paraby scope to distinguish different device functions.
+  // If equal to co func name, indicate that not in device scope.
+  std::string cur_dev_func_name;
 
   struct Buffer {
     size_t size;
@@ -88,8 +68,35 @@ private:
     size_t end_time;
     std::string buffer_id;
   };
-  std::vector<Buffer> buffers;
-  std::vector<DBuffer> dynamic_buffers;
+
+  struct DevFuncMemReuseCtx {
+    std::string local_spm_name;
+    std::string shared_spm_name;
+    size_t local_spm_size;
+    size_t shared_spm_size;
+    std::vector<Buffer> buffers;
+    std::vector<DBuffer> dynamic_buffers;
+    std::map<std::string, size_t> mem_offset;
+  };
+
+  std::map<std::string, DevFuncMemReuseCtx> df_ctxs;
+
+  DevFuncMemReuseCtx& DFCtx(std::string dev_func_name = "") {
+    if (dev_func_name == "") assert(cur_dev_func_name != "");
+    return df_ctxs[dev_func_name == "" ? cur_dev_func_name : dev_func_name];
+  }
+
+  std::map<std::string, DevFuncMemReuseCtx>& DFCtxs() { return df_ctxs; }
+
+  std::string GetFuncNameFromScopedName(const std::string& name) {
+    // indicate that it is a co function name
+    if (!PrefixedWith(name, "::")) return name;
+    return SplitStringByDelimiter(name, "::", true)[0];
+  }
+
+  std::string GetDeclDevFuncOfBuffer(std::string buf_name) const {
+    return ma.buf_dev_func_name.at(buf_name);
+  }
 
   struct HeapSimulator {
   public:
@@ -255,7 +262,7 @@ private:
   bool Visit(AST::NamedVariableDecl&) override;
   void Initialize();
   void AnalyzeMemOffset();
-  void ProtoType();
+  void ProtoType(const std::string& dev_fname, DevFuncMemReuseCtx& ctx);
   bool ValidateResult(const HeapSimulator::Result& res,
                       const HeapSimulator::Chunks& chunks);
   void ApplyMemOffset(AST::NamedVariableDecl& n, Storage sto);

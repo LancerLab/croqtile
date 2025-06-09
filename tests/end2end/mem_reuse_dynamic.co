@@ -79,6 +79,8 @@ void test0() {
 }
 
 void test1() {
+  #undef K
+  #undef N
   #define K 256
   #define N 7
   choreo::u8 a[K][K][N] = {0};

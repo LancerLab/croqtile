@@ -569,8 +569,6 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
   // emit the runtime checks
   EmitHostRuntimeCheck();
 
-  EmitMemReuse();
-
   // do not generate device function unless parallel-by exists
   if (NeedDeviceFunc()) {
     for (auto item : symbolic_dimensions)
@@ -1026,6 +1024,8 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
   // only do the whole codegen when accessing the outer parallel-by
   if (parallel_level != 1) return true;
 
+  EmitMemReuse(SSTab().ScopeName());
+
   // note: `thread_dims` for gcu400 is generated in `EmitDeviceFuncDecl`
   auto& lconfig = cgi->GetFunctionLaunches(fname)[parallel_idx];
   hs << h_indent << "dim3 __" << fname << "_gdims" << parallel_idx << "("
@@ -1052,11 +1052,11 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
     hs << ((i++ > 0) ? ", " : "");
     hs << UnScopedName(item.first);
   }
-  const auto& offset_args = FCtx(fname).GetMemReuseOffsetArgs();
-  // have to traverse storage in the order
-  for (Storage sto : {Storage::LOCAL, Storage::SHARED})
-    if (offset_args.count(sto))
-      for (size_t idx = 0; idx < offset_args.at(sto).size(); ++idx)
+  const auto& offset_args =
+      FCtx(fname).GetMemReuseOffsetArgs(SSTab().ScopeName());
+  if (offset_args.has_value())
+    for (const auto& [sto, offsets] : offset_args.value())
+      for (size_t idx = 0; idx < offsets.size(); ++idx)
         hs << ((i++ > 0) ? ", " : "") << "__co__" << STR(sto)
            << "_chunk_offsets[" << idx << "]";
 
@@ -2170,12 +2170,11 @@ void TopsccCodeGen::EmitHostRuntimeCheck() {
   }
 }
 
-void TopsccCodeGen::EmitMemReuse() {
-  assert(IsHost());
-  const auto& script = FCtx(fname).GetMemReuseScript();
-  if (script.empty()) return;
+void TopsccCodeGen::EmitMemReuse(const std::string& df_name) {
+  const auto& script = FCtx(fname).GetMemReuseScript(df_name);
+  if (!script.has_value()) return;
   hs << h_indent << R"(// JIT memory reuse begin)" << "\n";
-  for (const auto& s : script) { hs << h_indent << s << "\n"; }
+  for (const auto& s : script.value()) { hs << h_indent << s << "\n"; }
   hs << h_indent << R"(// JIT memory reuse end)" << "\n";
 }
 
@@ -2246,13 +2245,13 @@ void TopsccCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
     oss << UnScopedName(item.first);
   }
 
-  const auto& offset_args = FCtx(fname).GetMemReuseOffsetArgs();
-  // have to traverse storage in the order
-  for (Storage sto : {Storage::LOCAL, Storage::SHARED})
-    if (offset_args.count(sto))
-      for (size_t idx = 0; idx < offset_args.at(sto).size(); ++idx)
+  const auto& offset_args =
+      FCtx(fname).GetMemReuseOffsetArgs(SSTab().ScopeName());
+  if (offset_args.has_value())
+    for (const auto& [_, offsets] : offset_args.value())
+      for (size_t idx = 0; idx < offsets.size(); ++idx)
         oss << ((index++ > 0) ? ", " : "") << "unsigned long "
-            << RegexReplaceAll(offset_args.at(sto)[idx], "::", "_");
+            << RegexReplaceAll(offsets[idx], "::", "_");
 
   oss << ")";
 

@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GCUALL
-// RUN: choreo -es -t topscc %s  | FileCheck --match-full-lines %s
+// RUN: choreo -es -t topscc -dp=memreuse %s  | FileCheck --match-full-lines %s
 
 __co__ void foo(f32 [14] b) {
   parallel by 2 {

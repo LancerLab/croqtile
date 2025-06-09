@@ -203,11 +203,19 @@ struct RuntimeCheckEntry {
 
 // per-function context
 class FunctionContext {
+public:
+  using MemReuseOffsetMap = std::map<Storage, std::vector<std::string>>;
+
+private:
   FutureBufferInfo fbi;
   std::map<std::string, OptimizedValues> sym_values;
   std::vector<RuntimeCheckEntry> rt_checks;
-  std::vector<std::string> mem_reuse_script;
-  std::map<Storage, std::vector<std::string>> mem_reuse_offset_args;
+
+  struct MemReuseInfo {
+    std::vector<std::string> mem_reuse_script;
+    MemReuseOffsetMap mem_reuse_offset_args;
+  };
+  std::map<std::string, MemReuseInfo> mem_reuse_infos;
 
 public:
   FutureBufferInfo& GetFutureBufferInfo() { return fbi; }
@@ -220,13 +228,27 @@ public:
   bool HasSymbolValues(const std::string& sym) const {
     return sym_values.count(sym);
   }
+
   void AppendRtCheck(RuntimeCheckEntry rc) { rt_checks.push_back(rc); }
   std::vector<RuntimeCheckEntry>& GetRtChecks() { return rt_checks; }
-  const auto& GetMemReuseScript() const { return mem_reuse_script; }
-  void SetMemReuseScript(std::vector<std::string> s) { mem_reuse_script = s; }
-  const auto& GetMemReuseOffsetArgs() const { return mem_reuse_offset_args; }
-  void SetMemReuseOffsetArgs(std::map<Storage, std::vector<std::string>> s) {
-    mem_reuse_offset_args = s;
+
+  std::optional<std::vector<std::string>>
+  GetMemReuseScript(const std::string& dev_func) const {
+    if (!mem_reuse_infos.count(dev_func)) return std::nullopt;
+    return mem_reuse_infos.at(dev_func).mem_reuse_script;
+  }
+  void SetMemReuseScript(const std::string& dev_func,
+                         const std::vector<std::string>& s) {
+    mem_reuse_infos[dev_func].mem_reuse_script = s;
+  }
+  std::optional<MemReuseOffsetMap>
+  GetMemReuseOffsetArgs(const std::string& dev_func) const {
+    if (!mem_reuse_infos.count(dev_func)) return std::nullopt;
+    return mem_reuse_infos.at(dev_func).mem_reuse_offset_args;
+  }
+  void SetMemReuseOffsetArgs(const std::string& dev_func,
+                             const MemReuseOffsetMap& s) {
+    mem_reuse_infos.at(dev_func).mem_reuse_offset_args = s;
   }
 };
 

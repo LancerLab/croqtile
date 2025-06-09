@@ -9,6 +9,8 @@ using namespace Choreo;
 
 bool MemAnalyzer::BeforeVisitImpl(AST::Node& n) {
   if (auto cf = dyn_cast<AST::ChoreoFunction>(&n)) {
+    parallel_level = 0;
+    cur_dev_func_name = CurrentFunctionName();
     for (const auto& param : cf->f_decl.params->values) {
       if (!param->HasSymbol()) continue;
       std::string sname = InScopeName(param->sym->name);
@@ -22,22 +24,23 @@ bool MemAnalyzer::BeforeVisitImpl(AST::Node& n) {
         buf_size.emplace(sname, sty->ByteSize());
       } else {
         auto size_expr = sty->ByteSizeExpression();
-        // if (!sym_expr_map.count(size_expr)) {
-        //   auto shape_expr = sty->ShapeSizeExpression();
-        //   auto sym_size_expr = (GetSymExprFromSizeExpr(shape_expr) *
-        //                         SymExpr(SizeOf(sty->f_type)))
-        //                            .expand();
-        //   sym_expr_map.emplace(size_expr, sym_size_expr);
-        // }
         buf_size.emplace(sname, size_expr);
-        VST_DEBUG({
-          // dbgs() << "\tdynamic  size: " << size_expr
-          //        << "\n\tsymbolic size: " << sym_expr_map.at(size_expr) <<
-          //        "\n";
-          dbgs() << "\tdynamic  size: " << size_expr << "\n";
-        });
+        VST_DEBUG(dbgs() << "\tdynamic  size: " << size_expr << "\n";);
       }
+      buf_dev_func_name.emplace(sname, cur_dev_func_name);
+      VST_DEBUG(dbgs() << "\tdecl in dev func: " << cur_dev_func_name << "\n";);
     }
+  } else if (isa<AST::ParallelBy>(&n)) {
+    ++parallel_level;
+    if (parallel_level == 1) cur_dev_func_name = SSTab().ScopeName();
+  }
+  return true;
+}
+
+bool MemAnalyzer::AfterVisitImpl(AST::Node& n) {
+  if (isa<AST::ParallelBy>(&n)) {
+    if (parallel_level == 1) cur_dev_func_name = CurrentFunctionName();
+    parallel_level--;
   }
   return true;
 }
@@ -46,11 +49,15 @@ bool MemAnalyzer::Visit(AST::NamedVariableDecl& n) {
   auto ty = GetSymbolType(n.name_str);
   auto sname = InScopeName(n.name_str);
 
+  if (!have_dynamic_shape.count(cur_dev_func_name))
+    have_dynamic_shape.emplace(cur_dev_func_name, false);
+
   if (auto et = dyn_cast<EventType>(ty)) {
     // need to consider the event type!
     event_vars.insert(sname);
     buf_sto.emplace(sname, n.mem->Get());
     buf_size.emplace(sname, n.ArraySize());
+    buf_dev_func_name.emplace(sname, cur_dev_func_name);
     return true;
   }
 
@@ -62,153 +69,66 @@ bool MemAnalyzer::Visit(AST::NamedVariableDecl& n) {
       buf_size.emplace(sname, total_size);
       VST_DEBUG(dbgs() << "\tstatic  size:  " << total_size << "\n");
     } else {
-      have_dynamic_shape = true;
+      have_dynamic_shape[cur_dev_func_name] = true;
       auto size_expr = sty->ByteSizeExpression();
       if (n.IsArray())
         size_expr =
             "(" + size_expr + ") * (" + std::to_string(n.ArraySize()) + ")";
-      // if (!sym_expr_map.count(size_expr)) {
-      //   auto shape_expr = sty->ShapeSizeExpression();
-      //   auto sym_size_expr =
-      //       (GetSymExprFromSizeExpr(shape_expr) * SymExpr(n.ArraySize()) *
-      //        SymExpr(SizeOf(sty->f_type)))
-      //           .expand();
-      //   sym_expr_map.emplace(size_expr, sym_size_expr);
-      // }
       buf_size.emplace(sname, size_expr);
-      VST_DEBUG({
-        // dbgs() << "\tdynamic  size: " << size_expr
-        //        << "\n\tsymbolic size: " << sym_expr_map.at(size_expr) <<
-        //        "\n";
-        dbgs() << "\tdynamic  size: " << size_expr << "\n";
-      });
+      VST_DEBUG(dbgs() << "\tdynamic  size: " << size_expr << "\n";);
     }
+    buf_dev_func_name.emplace(sname, cur_dev_func_name);
+    VST_DEBUG(dbgs() << "\tdecl in dev func: " << cur_dev_func_name << "\n";);
     return true;
   }
 
   return true;
 }
 
-// MemAnalyzer::SymExpr
-// MemAnalyzer::StringifyOpFromSymExpr(const SymExpr& sym_expr_l,
-//                                     const std::string& op,
-//                                     const SymExpr& sym_expr_r) {
-//   std::string symbol_name;
-//   std::string sym_expr_l_str = ExSTR(sym_expr_l.expand());
-//   std::string sym_expr_r_str = ExSTR(sym_expr_r.expand());
-//   symbol_name = "(" + sym_expr_l_str + op + sym_expr_r_str + ")";
-//   return GetSymExprFromStr(symbol_name);
-// }
-
-// MemAnalyzer::SymExpr MemAnalyzer::GetSymExprFromStr(std::string str) {
-//   if (symbol_map.count(str)) return SymExpr(symbol_map.at(str));
-//   auto IsNumber = [](const std::string& str) {
-//     return !str.empty() && std::all_of(str.begin(), str.end(), ::isdigit);
-//   };
-//   if (IsNumber(str)) { return SymExpr(std::stoi(str)); }
-//   Symbol symbol(str, str);
-//   symbol_map.emplace(str, symbol);
-//   return SymExpr(symbol);
-// }
-
-// MemAnalyzer::SymExpr
-// MemAnalyzer::GetSymExprFromSizeExpr(std::string size_expr) {
-//   auto IsOperator = [](char c) -> bool {
-//     return c == '+' || c == '-' || c == '*' || c == '/' || c == '%';
-//   };
-
-//   std::string temp = "";
-//   for (auto c : size_expr)
-//     if (c != ' ') temp += c;
-//   size_expr = temp;
-
-//   std::function<SymExpr(std::string)> HelperFunc = [&](std::string str) {
-//     size_t size = str.length();
-//     assert(!str.empty());
-//     if (str[0] != '(') return GetSymExprFromStr(str);
-//     size_t idx = 0;
-//     size_t leftCount = 0;
-//     do {
-//       char c = str[idx];
-//       if (c == '(')
-//         ++leftCount;
-//       else if (c == ')')
-//         --leftCount;
-//       if (leftCount == 0) break;
-//       idx++;
-//     } while (idx < size);
-
-//     auto left_expr = HelperFunc(str.substr(1, idx - 1));
-
-//     if (idx == size - 1) return left_expr;
-//     char c = str[++idx];
-//     if (!IsOperator(c))
-//       choreo_unreachable("The operator(single char) " + std::string(1, c) +
-//                          " is not supported in MemAnalyzer yet.");
-//     std::string op = std::string(1, c);
-//     auto right_expr = HelperFunc(str.substr(idx + 1));
-//     SymExpr res;
-//     if (op == "+")
-//       res = SymExpr(left_expr + right_expr);
-//     else if (op == "-")
-//       res = SymExpr(left_expr - right_expr);
-//     else if (op == "*")
-//       res = SymExpr(left_expr * right_expr);
-//     else if (op == "/" || op == "%")
-//       res = StringifyOpFromSymExpr(left_expr, op, right_expr);
-//     else
-//       choreo_unreachable("The operator " + op +
-//                          " is not supported in MemAnalyzer yet.");
-//     return res;
-//   };
-
-//   return HelperFunc(size_expr);
-// }
-
 bool MemReuse::BeforeVisitImpl(AST::Node& n) {
   if (isa<AST::Program>(&n)) {
     Initialize();
     AnalyzeMemOffset();
-  } else if (auto cf = dyn_cast<AST::ChoreoFunction>(&n)) {
-    cur_func_name = cf->name;
+  } else if (isa<AST::ChoreoFunction>(&n)) {
     parallel_level = 0;
+    cur_dev_func_name = CurrentFunctionName();
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     parallel_level++;
     max_parallel_level = std::max(parallel_level, max_parallel_level);
     // for now, we are allowed to decl different memory inside paraby level 1.
     // so generate all kinds of spm at level 1.
     if (parallel_level == 1) {
-      size_t shared_spm_size = spm_size_map[cur_func_name].shared_spm_size;
-      if (shared_spm_size != 0) {
-        shared_spm_name = SymbolTable::GetAnonName();
+      cur_dev_func_name = SSTab().ScopeName();
+      if (DFCtx().shared_spm_size != 0) {
+        DFCtx().shared_spm_name = SymbolTable::GetAnonName();
         auto shared_spm =
-            AST::Make<AST::NamedVariableDecl>(n.LOC(), shared_spm_name);
-        assert(shared_spm_size > 0 &&
+            AST::Make<AST::NamedVariableDecl>(n.LOC(), DFCtx().shared_spm_name);
+        assert(DFCtx().shared_spm_size > 0 &&
                "Shared scratch pad memory size is not set.");
-        auto ssty =
-            MakeSpannedType(BaseType::U8, Shape(1, Size_t2Int(shared_spm_size)),
-                            Storage::SHARED);
+        auto ssty = MakeSpannedType(
+            BaseType::U8, Shape(1, Size_t2Int(DFCtx().shared_spm_size)),
+            Storage::SHARED);
         shared_spm->SetType(ssty);
         shared_spm->AppendNote("spm,");
         pb->stmts->values.insert(pb->stmts->values.begin(), shared_spm);
-        SSTab().DefineSymbol(shared_spm_name, ssty);
+        SSTab().DefineSymbol(DFCtx().shared_spm_name, ssty);
         VST_DEBUG(dbgs() << "Defined shared scratch pad memory: "
                          << PSTR(shared_spm) << ", type: " << PSTR(ssty)
                          << ".\n");
       }
-      size_t local_spm_size = spm_size_map[cur_func_name].local_spm_size;
-      if (local_spm_size != 0) {
-        local_spm_name = SymbolTable::GetAnonName();
+      if (DFCtx().local_spm_size != 0) {
+        DFCtx().local_spm_name = SymbolTable::GetAnonName();
         auto local_spm =
-            AST::Make<AST::NamedVariableDecl>(n.LOC(), local_spm_name);
-        assert(local_spm_size > 0 &&
+            AST::Make<AST::NamedVariableDecl>(n.LOC(), DFCtx().local_spm_name);
+        assert(DFCtx().local_spm_size > 0 &&
                "Local scratch pad memory size is not set.");
         auto lsty = MakeSpannedType(
-            BaseType::U8, Shape(1, Size_t2Int(local_spm_size)), Storage::LOCAL);
+            BaseType::U8, Shape(1, Size_t2Int(DFCtx().local_spm_size)),
+            Storage::LOCAL);
         local_spm->SetType(lsty);
         local_spm->AppendNote("spm,");
         pb->stmts->values.insert(pb->stmts->values.begin(), local_spm);
-        SSTab().DefineSymbol(local_spm_name, lsty);
+        SSTab().DefineSymbol(DFCtx().local_spm_name, lsty);
         VST_DEBUG(dbgs() << "Defined local scratch pad memory: "
                          << PSTR(local_spm) << ", type: " << PSTR(lsty)
                          << ".\n");
@@ -221,7 +141,10 @@ bool MemReuse::BeforeVisitImpl(AST::Node& n) {
 
 bool MemReuse::AfterVisitImpl(AST::Node& n) {
   if (isa<AST::ParallelBy>(&n)) {
-    if (parallel_level == 1) max_parallel_level = 0;
+    if (parallel_level == 1) {
+      max_parallel_level = 0;
+      cur_dev_func_name = CurrentFunctionName();
+    }
     parallel_level--;
   }
   return true;
@@ -266,47 +189,55 @@ void MemReuse::Initialize() {
       });
       choreo_unreachable("multiple ranges for a buffer is not supported yet.");
     }
+    std::string dev_func_name = GetDeclDevFuncOfBuffer(sname);
     if (std::holds_alternative<size_t>(size))
-      buffers.push_back({std::get<size_t>(size), ranges.Values()[0].start,
-                         ranges.Values()[0].end, sname});
+      DFCtx(dev_func_name)
+          .buffers.push_back({.size = std::get<size_t>(size),
+                              .start_time = ranges.Values()[0].start,
+                              .end_time = ranges.Values()[0].end,
+                              .buffer_id = sname});
     else
-      dynamic_buffers.push_back({std::get<std::string>(size),
-                                 ranges.Values()[0].start,
-                                 ranges.Values()[0].end, sname});
+      DFCtx(dev_func_name)
+          .dynamic_buffers.push_back({.size = std::get<std::string>(size),
+                                      .start_time = ranges.Values()[0].start,
+                                      .end_time = ranges.Values()[0].end,
+                                      .buffer_id = sname});
   }
 
   VST_DEBUG({
-    for (const auto& buffer : buffers) {
-      dbgs() << "static  buffer: " << buffer.buffer_id << "\n\t"
-             << STR(ma.buf_sto.at(buffer.buffer_id))
-             << ", size: " << buffer.size
-             << ", start_time: " << buffer.start_time
-             << ", end_time: " << buffer.end_time << "\n";
-    }
-    for (const auto& buffer : dynamic_buffers) {
-      dbgs() << "dynamic buffer: " << buffer.buffer_id << "\n\t"
-             << STR(ma.buf_sto.at(buffer.buffer_id))
-             << ", size: " << buffer.size
-             << ", start_time: " << buffer.start_time
-             << ", end_time: " << buffer.end_time << "\n";
+    for (const auto& [df_name, ctx] : DFCtxs()) {
+      dbgs() << "For '" << df_name << "'\n";
+      for (const auto& buffer : ctx.buffers) {
+        dbgs() << "static  buffer: " << buffer.buffer_id << "\n\t"
+               << STR(ma.buf_sto.at(buffer.buffer_id))
+               << ", size: " << buffer.size
+               << ", start_time: " << buffer.start_time
+               << ", end_time: " << buffer.end_time << "\n";
+      }
+      for (const auto& buffer : ctx.dynamic_buffers) {
+        dbgs() << "dynamic buffer: " << buffer.buffer_id << "\n\t"
+               << STR(ma.buf_sto.at(buffer.buffer_id))
+               << ", size: " << buffer.size
+               << ", start_time: " << buffer.start_time
+               << ", end_time: " << buffer.end_time << "\n";
+      }
     }
   });
 }
 
-void MemReuse::AnalyzeMemOffset() { ProtoType(); }
+void MemReuse::AnalyzeMemOffset() {
+  for (auto& [df_name, ctx] : DFCtxs()) ProtoType(df_name, ctx);
+}
 
-void MemReuse::ProtoType() {
-  auto GetFuncNameFromScopedName = [](const std::string& name) -> std::string {
-    if (!PrefixedWith(name, "::"))
-      choreo_unreachable("The scopedname should contain '::'!");
-    return SplitStringByDelimiter(name, "::", true)[0];
-  };
-
-  if (ma.have_dynamic_shape) {
-    std::map<std::string, std::set<Storage>> required_storage_maps;
-    std::map<std::string, std::vector<std::string>> mem_reuse_scripts;
-    std::map<std::string, std::map<Storage, std::vector<std::string>>>
-        offsets_arg_map;
+void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx) {
+  std::string co_func_name = GetFuncNameFromScopedName(df_name);
+  if (ma.have_dynamic_shape.count(df_name) &&
+      ma.have_dynamic_shape.at(df_name)) {
+    std::set<Storage> required_storage;
+    // JIT memory reuse script
+    std::vector<std::string> script;
+    // the args which are passed to device function
+    FunctionContext::MemReuseOffsetMap offset_args;
 
     auto GenPushBackScript = [&](const auto& bs) -> void {
       for (const auto& buffer : bs) {
@@ -316,13 +247,9 @@ void MemReuse::ProtoType() {
         if (sto != Storage::LOCAL && sto != Storage::SHARED)
           choreo_unreachable("The storage type: " + STR(sto) +
                              " is not supported yet!");
-        auto func_name = GetFuncNameFromScopedName(buffer.buffer_id);
-        auto& required_storage_map = required_storage_maps[func_name];
-        auto& script = mem_reuse_scripts[func_name];
-        offsets_arg_map[func_name][sto].push_back("mr_offset" +
-                                                  buffer.buffer_id);
-        if (!required_storage_map.count(sto)) {
-          required_storage_map.insert(sto);
+        offset_args[sto].push_back("mr_offset" + buffer.buffer_id);
+        if (!required_storage.count(sto)) {
+          required_storage.insert(sto);
           script.insert(script.begin(),
                         "HeapSimulator::Chunks __co__" + STR(sto) + "_chunks;");
         }
@@ -343,11 +270,10 @@ void MemReuse::ProtoType() {
       }
     };
 
-    auto TotalEventSize = [&](const std::string& func_name,
-                              Storage sto) -> size_t {
+    auto TotalEventSize = [&](Storage sto) -> size_t {
       size_t total_event_size = 0;
       for (const auto& event : ma.event_vars) {
-        if (GetFuncNameFromScopedName(event) != func_name) continue;
+        if (GetDeclDevFuncOfBuffer(event) != df_name) continue;
         if (ma.buf_sto.at(event) != sto) continue;
         auto event_size = ma.buf_size.at(event);
         assert(std::holds_alternative<size_t>(event_size));
@@ -356,73 +282,60 @@ void MemReuse::ProtoType() {
       return total_event_size;
     };
 
-    GenPushBackScript(buffers);
-    GenPushBackScript(dynamic_buffers);
+    GenPushBackScript(ctx.buffers);
+    GenPushBackScript(ctx.dynamic_buffers);
 
-    for (auto& [func_name, script] : mem_reuse_scripts) {
-      script.push_back("HeapSimulator __co__heap_simulator;");
-      for (const auto& sto : required_storage_maps.at(func_name)) {
-        std::string stos = STR(sto);
-        // TODO: Is shared alignment needed?
-        script.push_back("HeapSimulator::Result __co__" + stos +
-                         "_result = "
-                         "__co__heap_simulator.Allocate(__co__" +
-                         stos + "_chunks, 512);");
-        std::string spm_size_var = "__co__" + stos + "_spm_size";
-        script.push_back("unsigned " + spm_size_var + " = __co__" + stos +
-                         "_result.heap_size;");
-        // special case for RtCheck which emits after general RtCheck.
-        size_t mem_capacity = CCtx().GetMemCapacity(sto);
-        script.push_back("choreo::runtime_check(" + spm_size_var +
-                         " <= (size_t)" + std::to_string(mem_capacity) +
-                         ", \"In the memory reuse of dynamic shapes, the size "
-                         "of the initial " +
-                         stos +
-                         " spm should not exceed the memory usage limit " +
-                         std::to_string(mem_capacity) + "bytes.\");");
-        size_t total_event_size = TotalEventSize(func_name, sto);
-        if (sto == Storage::LOCAL)
-          spm_size_map[func_name].local_spm_size =
-              mem_capacity - AlignUp(total_event_size, 8);
-        else if (sto == Storage::SHARED)
-          spm_size_map[func_name].shared_spm_size =
-              mem_capacity - AlignUp(total_event_size, 8);
-        // generate offsets in array
-        script.push_back(
-            "unsigned long __co__" + stos + "_chunk_offsets[" +
-            std::to_string(offsets_arg_map.at(func_name).at(sto).size()) +
-            "];");
-        // TODO: need validation?
-        script.push_back("size_t __co__" + stos + "_chunk_idx = 0;");
-        script.push_back("for (const auto& [buffer_id, offset] : __co__" +
-                         stos + "_result.chunk_offsets)");
-        script.push_back("  __co__" + stos + "_chunk_offsets[__co__" + stos +
-                         "_chunk_idx++] = offset;");
-      }
-      FCtx(func_name).SetMemReuseScript(script);
-      // record the offset args in sorted order
-      auto& chunks = offsets_arg_map.at(func_name);
-      std::map<Storage, std::vector<std::string>> offset_args;
-      for (Storage sto : {Storage::LOCAL, Storage::SHARED})
-        if (chunks.count(sto)) {
-          auto& args = chunks.at(sto);
-          std::sort(args.begin(), args.end());
-          offset_args.emplace(sto, args);
-        }
-      FCtx(func_name).SetMemReuseOffsetArgs(offset_args);
+    script.push_back("HeapSimulator __co__heap_simulator;");
+    for (const auto& sto : required_storage) {
+      std::string stos = STR(sto);
+      // TODO: Is shared alignment needed?
+      script.push_back("HeapSimulator::Result __co__" + stos +
+                       "_result = "
+                       "__co__heap_simulator.Allocate(__co__" +
+                       stos + "_chunks, 512);");
+      std::string spm_size_var = "__co__" + stos + "_spm_size";
+      script.push_back("unsigned " + spm_size_var + " = __co__" + stos +
+                       "_result.heap_size;");
+      // special case for RtCheck which emits after general RtCheck.
+      size_t mem_capacity = CCtx().GetMemCapacity(sto);
+      script.push_back("choreo::runtime_check(" + spm_size_var +
+                       " <= (size_t)" + std::to_string(mem_capacity) +
+                       ", \"In the memory reuse of dynamic shapes, the size "
+                       "of the initial " +
+                       stos + " spm should not exceed the memory usage limit " +
+                       std::to_string(mem_capacity) + "bytes.\");");
+      size_t total_event_size = TotalEventSize(sto);
+      if (sto == Storage::LOCAL)
+        ctx.local_spm_size = mem_capacity - AlignUp(total_event_size, 8);
+      else if (sto == Storage::SHARED)
+        ctx.shared_spm_size = mem_capacity - AlignUp(total_event_size, 8);
+      // generate offsets in array
+      script.push_back("unsigned long __co__" + stos + "_chunk_offsets[" +
+                       std::to_string(offset_args.at(sto).size()) + "];");
+      // TODO: need validation?
+      script.push_back("size_t __co__" + stos + "_chunk_idx = 0;");
+      script.push_back("for (const auto& [buffer_id, offset] : __co__" + stos +
+                       "_result.chunk_offsets)");
+      script.push_back("  __co__" + stos + "_chunk_offsets[__co__" + stos +
+                       "_chunk_idx++] = offset;");
     }
+    FCtx(co_func_name).SetMemReuseScript(df_name, script);
+
+    // record the offset args in sorted order
+    for (auto& [sto, args] : offset_args) std::sort(args.begin(), args.end());
+    FCtx(co_func_name).SetMemReuseOffsetArgs(df_name, offset_args);
+
     return;
   }
+  // All the buffers are static.
+  HeapSimulator::Chunks local_chunks;
+  HeapSimulator::Chunks shared_chunks;
 
-  std::map<std::string, HeapSimulator::Chunks> local_chunks_map;
-  std::map<std::string, HeapSimulator::Chunks> shared_chunks_map;
-
-  for (const auto& buffer : buffers) {
-    auto func_name = GetFuncNameFromScopedName(buffer.buffer_id);
+  for (const auto& buffer : ctx.buffers) {
     if (auto sto = ma.buf_sto.at(buffer.buffer_id); sto == Storage::LOCAL)
-      local_chunks_map[func_name].push_back(buffer);
+      local_chunks.push_back(buffer);
     else if (sto == Storage::SHARED)
-      shared_chunks_map[func_name].push_back(buffer);
+      shared_chunks.push_back(buffer);
     else if (sto == Storage::GLOBAL || sto == Storage::DEFAULT)
       continue;
     else
@@ -432,30 +345,24 @@ void MemReuse::ProtoType() {
 
   HeapSimulator simulator;
 
-  for (const auto& [func_name, local_chunks] : local_chunks_map) {
-    if (!local_chunks.empty()) {
-      HeapSimulator::Result local_result =
-          simulator.Allocate(local_chunks, 512);
-      assert(ValidateResult(local_result, local_chunks));
-      spm_size_map[func_name].local_spm_size = local_result.heap_size;
-      for (const auto& [buffer_id, offset] : local_result.chunk_offsets)
-        mem_offset.emplace(buffer_id, offset);
-      VST_DEBUG(dbgs() << "Function: " << func_name
-                       << "\n\tLocal memory usage: " << local_result.heap_size
-                       << " bytes\n");
-    }
-    if (const auto& shared_chunks = shared_chunks_map[func_name];
-        !shared_chunks.empty()) {
-      HeapSimulator::Result shared_result =
-          simulator.Allocate(shared_chunks, 512);
-      assert(ValidateResult(shared_result, shared_chunks));
-      spm_size_map[func_name].shared_spm_size = shared_result.heap_size;
-      for (const auto& [buffer_id, offset] : shared_result.chunk_offsets)
-        mem_offset.emplace(buffer_id, offset);
-      VST_DEBUG(dbgs() << "Function: " << func_name
-                       << "\n\tShared memory usage: " << shared_result.heap_size
-                       << " bytes\n");
-    }
+  if (!local_chunks.empty()) {
+    HeapSimulator::Result local_result = simulator.Allocate(local_chunks, 512);
+    assert(ValidateResult(local_result, local_chunks));
+    ctx.local_spm_size = local_result.heap_size;
+    for (const auto& [buffer_id, offset] : local_result.chunk_offsets)
+      ctx.mem_offset.emplace(buffer_id, offset);
+    VST_DEBUG(dbgs() << "For '" << df_name << "'\n\tLocal memory usage: "
+                     << local_result.heap_size << " bytes\n");
+  }
+  if (!shared_chunks.empty()) {
+    HeapSimulator::Result shared_result =
+        simulator.Allocate(shared_chunks, 512);
+    assert(ValidateResult(shared_result, shared_chunks));
+    ctx.shared_spm_size = shared_result.heap_size;
+    for (const auto& [buffer_id, offset] : shared_result.chunk_offsets)
+      ctx.mem_offset.emplace(buffer_id, offset);
+    VST_DEBUG(dbgs() << "For '" << df_name << "'\n\tShared memory usage: "
+                     << shared_result.heap_size << " bytes\n");
   }
 }
 
@@ -486,19 +393,23 @@ bool MemReuse::ValidateResult(const HeapSimulator::Result& res,
 void MemReuse::ApplyMemOffset(AST::NamedVariableDecl& n, Storage sto) {
   assert(sto == Storage::LOCAL || sto == Storage::SHARED);
   auto sname = InScopeName(n.name_str);
-  auto spm_name = (sto == Storage::LOCAL ? local_spm_name : shared_spm_name);
   VST_DEBUG(dbgs() << STR(sto) << " buffer: " << sname << "\n\t";);
-  if (!mem_offset.count(sname) && !ma.have_dynamic_shape) {
+
+  bool dynamic = ma.have_dynamic_shape.at(cur_dev_func_name);
+  if (!DFCtx().mem_offset.count(sname) && !dynamic) {
     VST_DEBUG(dbgs() << "has no valid reuse offset!\n");
     return;
   }
-  std::string offset = ma.have_dynamic_shape
-                           ? "mr_offset" + RegexReplaceAll(sname, "::", "_")
-                           : std::to_string(mem_offset.at(sname));
+
+  std::string spm_name = (sto == Storage::LOCAL ? DFCtx().local_spm_name
+                                                : DFCtx().shared_spm_name);
+  std::string offset = dynamic ? "mr_offset" + RegexReplaceAll(sname, "::", "_")
+                               : std::to_string(DFCtx().mem_offset.at(sname));
   VST_DEBUG({
     dbgs() << "using spm:   " << spm_name << "\n\twith offset: " << offset
            << "\n";
   });
+
   n.note.append("reuse, " + spm_name + ", ");
   n.note.append("offset, " + offset + ", ");
 }

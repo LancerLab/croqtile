@@ -1,4 +1,4 @@
-// RUN: choreo -es %s | FileCheck --match-full-lines %s
+// RUN: choreo -es -dp=memreuse %s | FileCheck --match-full-lines %s
 
 #include "choreo.h"
 

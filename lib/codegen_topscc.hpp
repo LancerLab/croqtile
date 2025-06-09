@@ -283,7 +283,8 @@ private:
   bool CompileWithScript(const std::string&);
 
   void EmitHostRuntimeCheck();
-  void EmitMemReuse();
+  // emit mem reuse script for each device function.
+  void EmitMemReuse(const std::string& dev_func_name);
   void EmitTopsFree();
 
 private:
