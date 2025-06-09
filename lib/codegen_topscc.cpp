@@ -1402,50 +1402,75 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
        << DelimitedString(pad_config->pad_high) << "};\n";
     ds << d_indent << "unsigned int __pad_mid_" << f_buf_name << "[] = {"
        << DelimitedString(pad_config->pad_mid) << "};\n";
+
+    std::ostringstream pad_value_s;
+    FundamentalType ft = f_sty->f_type;
+    if (IntegerFundamentalType(ft)) {
+      // narrowing conversions may cause data truncation
+      // but the pad value is given by user, so we can trust it?
+      // TODO: maybe generate a warning?
+      pad_value_s << "static_cast<" << KernelTypeStringify(ft) << ">("
+                  << pad_config->GetPadValue<int>() << ")";
+    } else if (FloatPointFundamentalType(ft)) {
+      switch (ft) {
+      case FundamentalType::F32:
+        pad_value_s << pad_config->GetPadValue<float>() << "f";
+        break;
+      case FundamentalType::F16:
+        pad_value_s << "f32_to_f16(" << pad_config->GetPadValue<float>()
+                    << "f)";
+        break;
+      case FundamentalType::BF16:
+        pad_value_s << "choreo::bf16(" << pad_config->GetPadValue<float>()
+                    << "f)";
+        break;
+      case FundamentalType::F8: [[fallthrough]];
+      default:
+        choreo_unreachable("unsupport: data type of pad value: float, data "
+                           "in span: " +
+                           STR(f_sty->f_type));
+      }
+    } else
+      choreo_unreachable("pad value should be integer or float type, but got " +
+                         STR(ft));
+
     if (SymbolToSymbol()) {
       ds << d_indent;
       if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
       ds << "tops::pad" << (fty->IsAsync() ? "_async" : "") << "(*"
          << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
          << ", __pad_low_" << f_buf_name << ", __pad_high_" << f_buf_name
-         << ", __pad_mid_" << f_buf_name << ", ";
-      std::ostringstream pad_value_s;
-      FundamentalType ft = f_sty->f_type;
-      if (IntegerFundamentalType(ft)) {
-        // narrowing conversions may cause data truncation
-        // but the pad value is given by user, so we can trust it?
-        // TODO: maybe generate a warning?
-        pad_value_s << "static_cast<" << KernelTypeStringify(ft) << ">("
-                    << pad_config->GetPadValue<int>() << ")";
-      } else if (FloatPointFundamentalType(ft)) {
-        switch (ft) {
-        case FundamentalType::F32:
-          pad_value_s << pad_config->GetPadValue<float>() << "f";
-          break;
-        case FundamentalType::F16:
-          pad_value_s << "f32_to_f16(" << pad_config->GetPadValue<float>()
-                      << "f)";
-          break;
-        case FundamentalType::BF16:
-          pad_value_s << "choreo::bf16(" << pad_config->GetPadValue<float>()
-                      << "f)";
-          break;
-        case FundamentalType::F8: [[fallthrough]];
-        default:
-          choreo_unreachable("unsupport: data type of pad value: float, data "
-                             "in span: " +
-                             STR(f_sty->f_type));
-        }
-      } else
-        choreo_unreachable(
-            "pad value should be integer or float type, but got " + STR(ft));
-      ds << pad_value_s.str() << ");\n";
+         << ", __pad_mid_" << f_buf_name << ", " << pad_value_s.str() << ");\n";
+      // set the device future
+      if (!event_name.empty())
+        ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
+    } else if (TileToSymbol()) {
+      static int s_cnt = 0;
+      auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
+                      f_sym + "_2_" + t_sym;
+      auto [offset, offcnt] = GenMdsOffset(f_ca);
+      VerboseDMA(ds, d_indent, t_sym, f_sym, "slice+pad", offset, offcnt,
+                 ", line " + std::to_string(n.LOC().begin.line));
+      ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
+      auto slice_shape_name = "__slice_shape" + std::to_string(s_cnt++) + "__" +
+                              f_sym + "_2_" + t_sym;
+      std::ostringstream oss;
+      f_ca->GetShape().PrintAsList(oss);
+      ds << d_indent << "unsigned int " << slice_shape_name
+         << "[] = " << UnScopedExpr(oss.str()) << ";\n";
+      ds << d_indent;
+      if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
+      ds << "tops::slice_pad" << (fty->IsAsync() ? "_async" : "") << "(*"
+         << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
+         << ", " << off_name << ", " << slice_shape_name << ", __pad_low_"
+         << f_buf_name << ", __pad_high_" << f_buf_name << ", __pad_mid_"
+         << f_buf_name << ", " << pad_value_s.str() << ");\n";
       // set the device future
       if (!event_name.empty())
         ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
     } else {
-      assert(false && "unsupported");
-      // TODO: shall we support slice_pad (chunkat+pad)?
+      assert(false &&
+             "only support dma.pad with (symbol=>symbol), (tile=>symbol).");
     }
   } else if (n.operation == ".transp") {
     static int t_cnt = 0;
