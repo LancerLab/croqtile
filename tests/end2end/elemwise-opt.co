@@ -27,7 +27,7 @@ __co__ auto ele_add(s32 [M] lhs, s32 [M] rhs) {
 
 //  l2_elem_count = (l2_limit / |s32| / 2 / l2_mtp) * l2_mtp;
 
-  l2_elem_count = l2_mtp / 3;  // figure out why mem-reuse fail
+  l2_elem_count = l2_mtp;
 
   if (M > (l2_elem_count * gpl)) {
     // in this scenario, it worth utilizing all the PEs
@@ -66,7 +66,7 @@ __co__ auto ele_add(s32 [M] lhs, s32 [M] rhs) {
 
           // decide the last count
           l1_min = 512;
-          l1_count = (|lfs.span| / gpl + padding - 1) / padding * padding;
+          l1_count = (|lfs.span| / bpl + padding - 1) / padding * padding;
           last_count = (l1_min > l1_count) ? l1_min : l1_count;
 
           inthreads ((q + 1) * last_count <= rem_count) {
