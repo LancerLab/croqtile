@@ -1661,6 +1661,23 @@ bool EarlySemantics::Visit(AST::Call& n) {
         }
       }
       SetNodeType(n, pty);
+    } else if (func_name == "__alignup" || func_name == "__aligndown") {
+      if (n.arguments->Count() != 2) {
+        Error(n.LOC(), "expect 2 arguments but got " +
+                           std::to_string(n.arguments->Count()) + ".");
+        error_count++;
+      }
+      for (size_t i = 0; i < n.arguments->Count(); ++i) {
+        auto arg_ty = NodeType(*n.arguments->ValueAt(i));
+        if (!isa<IntegerType>(arg_ty)) {
+          Error(n.LOC(), "expect the " + std::to_string(i) +
+                             "th argument to be a integer type but got '" +
+                             PSTR(arg_ty) + "'.");
+          error_count++;
+        }
+      }
+      auto pty = NodeType(*n.arguments->ValueAt(0));
+      SetNodeType(n, pty);
     } else
       choreo_unreachable("unsupported bif '" + func_name + "'.");
 

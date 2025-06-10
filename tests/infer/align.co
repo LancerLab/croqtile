@@ -1,0 +1,28 @@
+// RUN: choreo -vn %s | FileCheck %s
+
+__co__ void foo(f32 [128, 512] a) {
+  parallel p by 3, q by 6 {
+    assert(__alignup(a.span(0), #q) ==  132, "alignup(128, 6) == 132");
+    assert(__aligndown(a.span(0)/#p, 32) == 32, "aligndown(128/3, 32) == 32");
+   }
+}
+
+// CHECK: New VN #0: 'const_1'
+// CHECK: New VN #1: 'const_128'
+// CHECK: New VN #2: 'const_512'
+// CHECK: New VN #3: '#1,#2'
+// CHECK: New VN #4: 'index_const_0'
+// CHECK: New VN #5: 'index_const_1'
+// CHECK: New VN #6: 'const_3'
+// CHECK: New VN #7: 'const_6'
+// CHECK: New VN #8: 'const_0'
+// CHECK: New VN #9: 'const_134'
+// CHECK: New VN #10: 'const_133'
+// CHECK: <Simplify> 'dimof:#3:#4 + ubound:#7' to 'const_134'
+// CHECK: New VN #11: 'const_22'
+// CHECK: -:#9:#0 / ubound:#7' to 'const_22'
+// CHECK: New VN #12: 'const_132'
+// CHECK: /:#10:#7 * ubound:#7' to 'const_132'
+// CHECK: *:#11:#7 == ref:#12' to 'true'
+// CHECK: /:#14:#15 * ref:#15' to 'const_32'
+// CHECK: *:#0:#15 == ref:#15' to 'true'
