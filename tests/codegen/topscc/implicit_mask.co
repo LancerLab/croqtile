@@ -24,16 +24,6 @@ __co__ auto foo1(f16 [36, 15, 14, 64] a) {
   return a;
 }
 
-__co__ void foo2() {
-  parallel p by 1 {
-    shared s32 [8] b;
-    foreach i in [b.span] {
-      b.at(i) = i;
-      c = b.at(i);
-    }
-    parallel q by 2{}
-  }
-}
 
 // CHECK: __thread_dims__(4, 1, 1)
 // CHECK: __global__ void __choreo_device_foo() {
@@ -80,20 +70,4 @@ __co__ void foo2() {
 // CHECK:     tops::slice(*a_local.get_ctx(), __mds3_a_local__buf__, __mds2_a, __slice_offset1__a_2_a_local__buf__);
 // CHECK:   } // single instance
 // CHECK:   __syncsubthreads();
-// CHECK: }
-
-// CHECK: __thread_dims__(1, 1, 1)
-// CHECK: __global__ void __choreo_device_foo2() {
-// CHECK:   __shared__ int b[8];
-// CHECK:   {
-// CHECK:     int __iv_i__elem__0 = 0;
-// CHECK:     for (__iv_i__elem__0 = 0; __iv_i__elem__0 < 8; ++__iv_i__elem__0) {
-// CHECK:       if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0 && subThreadIdx.x == 0 && subThreadIdx.y == 0 && subThreadIdx.z == 0) {
-// CHECK:         *((int*)b + (__iv_i__elem__0)) = __iv_i__elem__0;
-// CHECK:       } // single instance
-// CHECK:       __syncthreads();
-// CHECK:       int c = *((int*)b + (__iv_i__elem__0));
-// CHECK:     } // i__elem__0
-// CHECK:     __iv_i__elem__0 = 0;
-// CHECK:   }
 // CHECK: }

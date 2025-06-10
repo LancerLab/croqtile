@@ -392,15 +392,11 @@ private:
     return cgi->GetFunctionLocalFutures(fname).count(n);
   }
 
-  bool IsDMABlockShared(AST::DMA&) const { return IsBlockShared(); }
-  bool IsDMAWarpLocal(AST::DMA&) const { return IsWarpLocal(); }
-
-  bool IsBlockShared() const {
+  bool IsDMABlockShared(AST::DMA&) const {
     return (parallel_level == 1) &&
            (max_parallel_level == 2 || max_parallel_level == 3);
   }
-
-  bool IsWarpLocal() const {
+  bool IsDMAWarpLocal(AST::DMA&) const {
     return (parallel_level == 2) && (max_parallel_level == 3);
   }
 
