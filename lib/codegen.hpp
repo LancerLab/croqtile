@@ -515,11 +515,6 @@ static inline std::string KernelTypeStringify(const Choreo::BaseType& type) {
   }
 }
 
-static inline std::string
-KernelTypeStringify(const Choreo::FundamentalType type) {
-  return KernelTypeStringify((Choreo::BaseType)type);
-}
-
 inline const std::string FineName(const std::string& input) {
   std::string result = input;
 

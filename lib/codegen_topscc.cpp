@@ -678,7 +678,10 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
         if (n.init_value) {
           // support initialization of output
           hs << h_indent << "std::fill(" << sym_data << ", " << sym_data << "+"
-             << sym << ".element_count()" << ", " << ExprSTR(n.init_value)
+             << sym << ".element_count()"
+             << ", "
+             << ExprCastSTR(n.init_value, std::nullopt, GetBaseType(*sty),
+                            TC2BT(n.init_value->GetType()->tc))
              << ");\n";
         }
         hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
@@ -801,7 +804,9 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       ds << d_indent << "tops::memset(" << sym__init << ", tops::mdspan("
          << TopsMdsStorage(sto) << ", (" << NameBaseType(sty->ElementType())
          << "*)" << sym << ", " << UnScopedExpr(RSTR(sty->GetShape())) << "), "
-         << ExprSTR(n.init_value, false) << ");\n";
+         << ExprCastSTR(n.init_value, std::nullopt, GetBaseType(*sty),
+                        TC2BT(n.init_value->GetType()->tc), false)
+         << ");\n";
       DecrDeviceIndent();
       ds << d_indent << "} // single instance\n";
     }
@@ -1403,36 +1408,10 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     ds << d_indent << "unsigned int __pad_mid_" << f_buf_name << "[] = {"
        << DelimitedString(pad_config->pad_mid) << "};\n";
 
-    std::ostringstream pad_value_s;
-    FundamentalType ft = f_sty->f_type;
-    if (IntegerFundamentalType(ft)) {
-      // narrowing conversions may cause data truncation
-      // but the pad value is given by user, so we can trust it?
-      // TODO: maybe generate a warning?
-      pad_value_s << "static_cast<" << KernelTypeStringify(ft) << ">("
-                  << pad_config->GetPadValue<int>() << ")";
-    } else if (FloatPointFundamentalType(ft)) {
-      switch (ft) {
-      case FundamentalType::F32:
-        pad_value_s << pad_config->GetPadValue<float>() << "f";
-        break;
-      case FundamentalType::F16:
-        pad_value_s << "f32_to_f16(" << pad_config->GetPadValue<float>()
-                    << "f)";
-        break;
-      case FundamentalType::BF16:
-        pad_value_s << "choreo::bf16(" << pad_config->GetPadValue<float>()
-                    << "f)";
-        break;
-      case FundamentalType::F8: [[fallthrough]];
-      default:
-        choreo_unreachable("unsupport: data type of pad value: float, data "
-                           "in span: " +
-                           STR(f_sty->f_type));
-      }
-    } else
-      choreo_unreachable("pad value should be integer or float type, but got " +
-                         STR(ft));
+    std::string pad_value_str = ExprCastSTR(
+        nullptr, pad_config->value, GetBaseType(*f_sty),
+        (std::holds_alternative<int>(pad_config->value) ? BaseType::S32
+                                                        : BaseType::F32));
 
     if (SymbolToSymbol()) {
       ds << d_indent;
@@ -1440,7 +1419,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       ds << "tops::pad" << (fty->IsAsync() ? "_async" : "") << "(*"
          << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
          << ", __pad_low_" << f_buf_name << ", __pad_high_" << f_buf_name
-         << ", __pad_mid_" << f_buf_name << ", " << pad_value_s.str() << ");\n";
+         << ", __pad_mid_" << f_buf_name << ", " << pad_value_str << ");\n";
       // set the device future
       if (!event_name.empty())
         ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
@@ -1464,7 +1443,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
          << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
          << ", " << off_name << ", " << slice_shape_name << ", __pad_low_"
          << f_buf_name << ", __pad_high_" << f_buf_name << ", __pad_mid_"
-         << f_buf_name << ", " << pad_value_s.str() << ");\n";
+         << f_buf_name << ", " << pad_value_str << ");\n";
       // set the device future
       if (!event_name.empty())
         ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
@@ -1811,11 +1790,15 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
           }
         } else if (isa<HalfType>(type)) {
           print_format += "%f";
-          print_args += "f16_to_f32(" + ExprSTR(arg, false) + "), ";
+          print_args += ExprCastSTR(arg, std::nullopt, BaseType::F32,
+                                    BaseType::F16, false) +
+                        ", ";
         } else if (isa<BFP16Type>(type)) {
           print_format += "%f";
           // because always use the choreo::bf16 in choreo.h as the type
-          print_args += "static_cast<float>(" + ExprSTR(arg, false) + "), ";
+          print_args += ExprCastSTR(arg, std::nullopt, BaseType::F32,
+                                    BaseType::BF16, false) +
+                        ", ";
         } else if (isa<FloatType>(type)) {
           print_format += "%f";
           print_args += ExprSTR(arg, false) + ", ";
@@ -2548,6 +2531,86 @@ TopsccCodeGen::SubThreadIdString(const ptr<AST::Identifier>& id) const {
     return oss.str();
   }
   return std::nullopt;
+}
+
+// TODO: maybe generate a warning?
+// narrowing conversions may cause data truncation
+// but the value is given by user, so we can trust it?
+
+// if from and to are not the same, only support from of `S32, FP32, BFP16`
+// and to: all integer type, all floating-point type
+const std::string
+TopsccCodeGen::ExprCastSTR(AST::ptr<AST::Node> n,
+                           std::optional<std::variant<int, float>> val,
+                           BaseType t, BaseType f, bool is_host) const {
+
+  std::ostringstream res;
+  std::string value;
+
+  if (n != nullptr) {
+    value = ExprSTR(n, is_host);
+  } else {
+    assert(val.has_value());
+    auto v = val.value();
+    if (std::holds_alternative<int>(v))
+      value = std::to_string(std::get<int>(v));
+    else if (std::holds_alternative<float>(v))
+      value = std::to_string(std::get<float>(v)) + "f";
+    else
+      choreo_unreachable("unexpect type of v");
+  }
+
+  using FT = FundamentalType;
+
+  FT from = BT2FT(f);
+  FT to = BT2FT(t);
+
+  if (from == to) return value;
+
+  // need to do casting or converting.
+
+  auto CheckScalarCast = [from, to]() {
+    static const std::unordered_map<FT, std::unordered_set<FT>> table = {
+        {FT::S32,
+         {FT::S32, FT::U32, FT::S16, FT::U16, FT::S8, FT::U8, FT::F32, FT::F16,
+          FT::BF16}},
+        {FT::F32, {FT::F32, FT::F16, FT::BF16}},
+        {FT::F16, {FT::F32}},
+        {FT::BF16, {FT::F32}},
+    };
+    auto it = table.find(from);
+    if (it != table.end() && it->second.count(to)) return;
+
+    choreo_unreachable("unsupported cast of scalar: " + STR(from) + " => " +
+                       STR(to));
+  };
+
+  CheckScalarCast();
+
+  switch (to) {
+  case FT::S32: [[fallthrough]];
+  case FT::U32: [[fallthrough]];
+  case FT::S16: [[fallthrough]];
+  case FT::U16: [[fallthrough]];
+  case FT::S8: [[fallthrough]];
+  case FT::U8:
+    res << "static_cast<" << NameBaseType(t, is_host) << ">(" << value << ")";
+    break;
+  case FT::F32: res << "static_cast<float>(" << value << ")"; break;
+  case FT::F16: res << "f32_to_f16(" << value << ")"; break;
+  case FT::BF16: {
+    if (from == FT::F32)
+      res << "choreo::bf16(" << value << ")";
+    else if (from == FT::S32)
+      res << "choreo::bf16(static_cast<float>(" << value << "))";
+    else
+      assert(false);
+    break;
+  }
+  default: choreo_unreachable("unexpect fundamental type of to: " + STR(to));
+  }
+
+  return res.str();
 }
 
 const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,

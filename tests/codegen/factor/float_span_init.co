@@ -20,7 +20,7 @@ __co__ f32 [2] func() {
 // CHECK:   auto buf = alloc_(L1Type(FloatType(32),{2}));
 // CHECK:   auto __choreo_anon_fut__0 = alloc_dma_(SDMAType());
 // CHECK:   auto buf_init = alloc_dma_(SDMAType());
-// CHECK:   memset_(buf_init, buf, -11.000000f);
+// CHECK:   memset_(buf_init, buf, Value(-11.000000f));
 // CHECK:   async_store_(__choreo_anon_fut__0, buf, out, {0});
 // CHECK:   wait_dma_(__choreo_anon_fut__0);
 // CHECK: }); // end of choreo-factor device function

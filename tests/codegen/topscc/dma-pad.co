@@ -26,7 +26,7 @@ __co__ auto foo(bf16[2, 3] i) {
 // CHECK:   unsigned int __pad_low_i[] = {0, 0};
 // CHECK:   unsigned int __pad_high_i[] = {0, 2};
 // CHECK:   unsigned int __pad_mid_i[] = {0, 0};
-// CHECK:   tops::pad(*__choreo_anon_fut__1.get_ctx(), __mds3_res, __mds2_i, __pad_low_i, __pad_high_i, __pad_mid_i, choreo::bf16(1.2f));
+// CHECK:   tops::pad(*__choreo_anon_fut__1.get_ctx(), __mds3_res, __mds2_i, __pad_low_i, __pad_high_i, __pad_mid_i, choreo::bf16(1.200000f));
 // CHECK: }
 
 __co__ auto foo1(s32 [N, M] a) {
@@ -51,7 +51,7 @@ __co__ auto foo1(s32 [N, M] a) {
 // CHECK:   unsigned int __pad_mid_a[] = {0, 0};
 // CHECK:   int __slice_offset0__a_2_f1__buf__[] = {0, (int)(__tops_tid_x() * ((M / 2)))};
 // CHECK:   unsigned int __slice_shape1__a_2_f1__buf__[] = {N, (M / 2)};
-// CHECK:   tops::event f1__event__ = tops::slice_pad_async(*f1.get_ctx(), __mds5_f1__buf__, __mds4_a, __slice_offset0__a_2_f1__buf__, __slice_shape1__a_2_f1__buf__, __pad_low_a, __pad_high_a, __pad_mid_a, static_cast<int>(-1));
+// CHECK:   tops::event f1__event__ = tops::slice_pad_async(*f1.get_ctx(), __mds5_f1__buf__, __mds4_a, __slice_offset0__a_2_f1__buf__, __slice_shape1__a_2_f1__buf__, __pad_low_a, __pad_high_a, __pad_mid_a, -1);
 // CHECK:   f1.set_event(f1__event__);
 // CHECK:   f1.wait();
 // CHECK:   tops::mdspan __mds6_f1(tops::Private, (int*)f1.data(), (N + 1), (M / 2));

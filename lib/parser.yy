@@ -761,23 +761,8 @@ subscriptions
     ;
 
 span_init_val
-    : LBRACE NUM RBRACE {
-        $$ = AST::Make<AST::IntLiteral>(@2, $2);
-      }
-    | LBRACE MINUS NUM RBRACE {
-        $$ = AST::Make<AST::IntLiteral>(@2, -$3);
-      }
-    | LBRACE FPVAL RBRACE {
-        $$ = AST::Make<AST::FloatLiteral>(@2, $2);
-      }
-    | LBRACE MINUS FPVAL RBRACE {
-        $$ = AST::Make<AST::FloatLiteral>(@2, -$3);
-      }
-    | LBRACE DFPVAL RBRACE {
-        $$ = AST::Make<AST::FloatLiteral>(@2, $2);
-      }
-    | LBRACE MINUS DFPVAL RBRACE {
-        $$ = AST::Make<AST::FloatLiteral>(@2, -$3);
+    : LBRACE s_expr RBRACE {
+        $$ = $2;
       }
     ;
 

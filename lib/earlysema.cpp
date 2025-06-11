@@ -755,6 +755,21 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
     if (diverges.Contains(n.init_expr)) diverges.Add(InScopeName(n.name_str));
   }
 
+  // check the type of init_value of span
+  if (isa<SpannedType>(n.GetType()) && n.init_value) {
+    auto ty = dyn_cast<SpannedType>(n.GetType());
+    auto iv_ty = n.init_value->GetType();
+    if (!isa<ScalarType>(iv_ty)) {
+      Error(n.LOC(),
+            "'" + n.name_str +
+                "' is declared as a span but has an initialization value "
+                "which is not of scalar type: '" +
+                PSTR(iv_ty) + "'.");
+      error_count++;
+      return false;
+    }
+  }
+
   // now handle the associated symbol
   if (auto ty = dyn_cast<SpannedType>(n.GetType())) {
     ReportErrorWhenViolateODR(n.LOC(), n.name_str + ".span", __FILE__, __LINE__,

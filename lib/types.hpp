@@ -175,6 +175,28 @@ inline BaseType TC2BT(TypeCategory tc) {
   return BaseType::UNKNOWN;
 }
 
+inline FundamentalType BT2FT(BaseType bt) {
+  switch (bt) {
+  case BaseType::F32:
+  case BaseType::FLOAT: return FundamentalType::F32;
+  case BaseType::F16:
+  case BaseType::HALF: return FundamentalType::F16;
+  case BaseType::BF16:
+  case BaseType::BFP16: return FundamentalType::BF16;
+  case BaseType::S32:
+  case BaseType::INT: return FundamentalType::S32;
+  case BaseType::U32: return FundamentalType::U32;
+  case BaseType::S16: return FundamentalType::S16;
+  case BaseType::U16: return FundamentalType::U16;
+  case BaseType::S8: return FundamentalType::S8;
+  case BaseType::U8: return FundamentalType::U8;
+  default:
+    choreo_unreachable(
+        "unsupported mapping from fundamental type to base type.");
+  }
+  return FundamentalType::UND;
+}
+
 inline static size_t SizeOf(FundamentalType ft) {
   switch (ft) {
   case FundamentalType::F32:
@@ -617,7 +639,7 @@ struct VoidType final : public Type, public TypeIDProvider<VoidType> {
   bool IsComplete() const override { return true; }
   void Print(std::ostream& os) const override { os << "void"; }
   const std::string Name() const override { return "void_type"; }
-  bool HasSufficientInfo() const { return true; }
+  bool HasSufficientInfo() const override { return true; }
 
   bool operator==(const Type& ty) const override { return isa<VoidType>(&ty); }
   bool ApprxEqual(const Type& ty) const override { return isa<VoidType>(&ty); }
@@ -631,7 +653,7 @@ struct AddrType final : public Type, public TypeIDProvider<AddrType> {
   bool IsComplete() const override { return true; }
   void Print(std::ostream& os) const override { os << "address"; }
   const std::string Name() const override { return "addr_type"; }
-  bool HasSufficientInfo() const { return true; }
+  bool HasSufficientInfo() const override { return true; }
 
   bool operator==(const Type& ty) const override { return isa<AddrType>(&ty); }
   bool ApprxEqual(const Type& ty) const override { return isa<AddrType>(&ty); }
@@ -646,7 +668,7 @@ struct UnknownType final : public Type, public TypeIDProvider<UnknownType> {
   bool IsComplete() const override { return false; }
   void Print(std::ostream& os) const override { os << "unknown"; }
   const std::string Name() const override { return "unknown_type"; }
-  bool HasSufficientInfo() const { return false; }
+  bool HasSufficientInfo() const override { return false; }
 
   // Not comparable
   bool operator==(const Type&) const override { return false; }
@@ -659,12 +681,12 @@ struct PlaceHolderType final : public Type,
                                public TypeIDProvider<PlaceHolderType> {
   PlaceHolderType(TypeCategory t) : Type(t) {}
   size_t Dims() const override { return 0; }
-  bool IsComplete() const { return false; }
+  bool IsComplete() const override { return false; }
   void Print(std::ostream& os) const override {
     os << "placeholder<" << STR(Category()) << ">";
   }
   const std::string Name() const override { return "place_holder"; }
-  bool HasSufficientInfo() const { return false; }
+  bool HasSufficientInfo() const override { return false; }
 
   bool operator==(const Type&) const override { return false; }
   // tolerate im-precise comparison
@@ -711,7 +733,7 @@ struct IntegerType final : public ScalarType,
   IntegerType(const ValueItem& vi, bool m)
       : ScalarType(TypeCategory::INT, m), value(vi) {}
 
-  ptr<ScalarType> Clone(bool m) const {
+  ptr<ScalarType> Clone(bool m) const override {
     return std::make_shared<IntegerType>(m);
   }
   void Print(std::ostream& os) const override {
@@ -1184,7 +1206,7 @@ struct BoundedITupleType final : public BoundedType,
 
   size_t Dims() const override { return ubounds.Rank(); }
   bool IsComplete() const override { return true; }
-  bool HasSufficientInfo() const { return ubounds.IsValid(); }
+  bool HasSufficientInfo() const override { return ubounds.IsValid(); }
   const MultiBounds GetLowerBounds() const { return lbounds; }
   const MultiBounds GetUpperBounds() const { return ubounds; }
   const Shape GetSizes() const { return ubounds - lbounds; }
@@ -1295,7 +1317,7 @@ struct FutureType : public AsyncType, public TypeIDProvider<FutureType> {
   explicit FutureType(const ptr<SpannedType>& s, bool a)
       : AsyncType(TypeCategory::FUTURE), psty(s), async(a) {}
   bool IsComplete() const override { return true; }
-  bool HasSufficientInfo() const { return psty->HasSufficientInfo(); }
+  bool HasSufficientInfo() const override { return psty->HasSufficientInfo(); }
   const std::string Name() const override { return "future"; }
   Shape GetShape() { return psty->GetShape(); }
   const ptr<SpannedType>& GetSpannedType() const { return psty; }

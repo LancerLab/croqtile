@@ -1,0 +1,12 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ auto foo(s8[4,8] i, float x, int y, half h) {
+  f16[4,8] o{11.5f};
+  parallel by 1 {
+    shared s8 [4, 8] s0{i};
+  }
+  return o;
+}
+
+// CHECK: error: 's0' is declared as a span but has an initialization value which is not of scalar type: 's8 mdspan<2> []'.
+// CHECK: Totally 1 errors have been detected.

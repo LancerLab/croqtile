@@ -404,6 +404,11 @@ private:
     return (parallel_level == 2) && (max_parallel_level == 3);
   }
 
+  const std::string ExprCastSTR(AST::ptr<AST::Node> n,
+                                std::optional<std::variant<int, float>> val,
+                                BaseType to, BaseType from,
+                                bool is_host = true) const;
+
   const std::string ValueSTR(const ValueItem& vi) const;
   const std::string ExprSTR(AST::ptr<AST::Node>, bool is_host = true) const;
   const std::string CallSTR(AST::Call&) const;
