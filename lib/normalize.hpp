@@ -211,6 +211,42 @@ public:
       VST_DEBUG(dbgs() << id->name << ".\n");
     }
 
+    if (n.IsReference()) {
+      auto ref = n.GetReference();
+      auto nty = n.GetType();
+      if (auto call = dyn_cast<AST::Call>(ref)) {
+        auto func_name = call->function->name;
+        if (func_name == "__alignup" || func_name == "__aligndown") {
+          auto arg0 = call->GetArguments()[0];
+          auto arg1 = call->GetArguments()[1];
+          ptr<AST::Expr> new_expr = nullptr;
+          if (func_name == "__alignup") {
+            // __alignup(a, b) -> (a + b - 1) / b * b
+            new_expr = AST::Make<AST::Expr>(
+                n.LOC(), AST::Make<AST::IntLiteral>(n.LOC(), 1));
+            new_expr->SetType(nty);
+            new_expr = AST::Make<AST::Expr>(
+                n.LOC(), "-", AST::Make<AST::Expr>(n.LOC(), "+", arg0, arg1),
+                new_expr);
+            new_expr->SetType(nty);
+            new_expr = AST::Make<AST::Expr>(n.LOC(), "/", new_expr, arg1);
+            new_expr->SetType(nty);
+            new_expr = AST::Make<AST::Expr>(n.LOC(), "*", new_expr, arg1);
+            new_expr->SetType((nty));
+          } else if (func_name == "__aligndown") {
+            // __aligndown(a, b) -> a / b * b
+            new_expr = AST::Make<AST::Expr>(n.LOC(), "/", arg0, arg1);
+            new_expr->SetType((nty));
+            new_expr = AST::Make<AST::Expr>(n.LOC(), "*", new_expr, arg1);
+            new_expr->SetType((nty));
+          }
+          VST_DEBUG(dbgs() << "Desugar " << STR(n) << " -> " << PSTR(new_expr)
+                           << "\n");
+          n.OverWrite(*new_expr);
+        }
+      }
+    }
+
     return true;
   }
 

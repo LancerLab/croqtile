@@ -183,12 +183,12 @@ void choreo_info(const char *message) {
 %token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT HALF8 HALF BFP16 FLOAT DOUBLE BOOL VOID
 // builtin operations
 %token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK SUBSPAN MODSPAN AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN
-%token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXPM1 FLOOR GELU ISFINITE ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH
+%token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXPM1 FLOOR GELU ISFINITE ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN
 // control related
 %token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH INCR RET WHERE WHILE
 
 // non-terminals
-%nterm <std::string> dma_operation builtin_print_func arith_operation spanid cstrings arith_builtin_func
+%nterm <std::string> dma_operation builtin_print_func arith_operation spanid cstrings arith_builtin_func align_func
 %nterm <ptr<DMAConfig>> dma_config
 %nterm <bool> bool_value sync_type optional_mutable
 %nterm <int> integer_value index_or_none const_sizeof
@@ -1627,6 +1627,11 @@ trigger_stmt
     : TRIGGER ids_list { $$ = AST::Make<AST::Trigger>(@1, $2); }
     ;
 
+align_func
+    : ALIGNUP { $$ = $1; }
+    | ALIGNDOWN { $$ = $1; }
+    ;
+
 builtin_print_func
     : PRINT   { $$ = $1; }
     | PRINTLN { $$ = $1; }
@@ -1665,6 +1670,14 @@ call_expr
         $$ = AST::Make<AST::Expr>(@1,
              AST::Make<AST::Call>(@1,
              AST::Make<AST::Identifier>(@1, $1), $3, AST::Call::BIF | AST::Call::ARITH));
+      }
+    | align_func LPAREN s_expr COMMA s_expr RPAREN {
+        auto mn = AST::Make<AST::MultiValues>(@1, ", ");
+        mn->Append($3);
+        mn->Append($5);
+        $$ = AST::Make<AST::Expr>(@1,
+             AST::Make<AST::Call>(@1,
+             AST::Make<AST::Identifier>(@1, $1), mn, AST::Call::BIF | AST::Call::EXPR));
       }
     ;
 

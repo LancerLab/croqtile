@@ -248,6 +248,8 @@ cstr        \"([^"\\]|\\.)*\"
   "__sign"     return Choreo::Parser::make_SIGN(yytext, loc);
   "__sin"      return Choreo::Parser::make_SIN(yytext, loc);
   "__tanh"     return Choreo::Parser::make_TANH(yytext, loc);
+  "__alignup"  return Choreo::Parser::make_ALIGNUP(yytext, loc);
+  "__aligndown" return Choreo::Parser::make_ALIGNDOWN(yytext, loc);
   "local"    return Choreo::Parser::make_LOCAL(Storage::LOCAL, loc);
   "shared"   return Choreo::Parser::make_SHARED(Storage::SHARED, loc);
   "global"   return Choreo::Parser::make_GLOBAL(Storage::GLOBAL, loc);

@@ -1,0 +1,38 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+__co__ auto vecadd(s32 [512] a)  {
+  s32 [a.span] c;
+  parallel p by 4 {
+    l1_a = dma.copy a.chunkat(p) => local;
+    local s32[l1_a.span] l1_c;
+    foreach {i} in [l1_a.span(0)] {
+      l1_c.at(i) = __alignup(l1_a.data.at(i), 4) + __aligndown(l1_a.data.at(i), 4);
+    }
+
+    out_store = dma.copy l1_c => c.chunkat(p);
+  }
+  return c;
+}
+
+
+int main() { /// host program
+  auto a = choreo::make_spandata<choreo::s32>(512);
+  a.fill_random(0, 10);
+
+  auto res = vecadd(a.view());
+
+  // verification
+  for (size_t i = 0; i < res.shape()[0]; ++i) {
+    // std::cout << "i: " << i << "\n";
+    // std::cout << "ref: " << ((a[i] + 3) / 4) * 4 << ", res: " << res[i] << "\n";
+    if (res[i] != ((a[i] + 3) / 4) * 4 + ((a[i] / 4) * 4)) {
+      std::cout << "values[" << i << "] are not equal: " << res[i] << " != " << ((a[i] + 3) / 4) * 4 << "\n";
+      return -1; // Test failed
+    }
+  }
+
+  std::cout << "Test Passed\n" << std::endl;
+  return 0;
+}
+
+// CHECK: Test Passed
