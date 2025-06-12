@@ -1,0 +1,153 @@
+// cse/decompress_emb_vec_op2.co - 嵌入向量解压函数（op2版本）
+
+// 使用常量定义
+#define LEN 1000
+#define EMB_VEC_SIZE 64
+
+// 实现decompress_emb_vec函数
+__co__ f32[LEN, EMB_VEC_SIZE] decompress_emb_vec_op2(f32[LEN, EMB_VEC_SIZE] src_emb_vec, 
+                                                     f32[LEN, EMB_VEC_SIZE] dst_emb_vec, 
+                                                     u32[LEN] src_index) {
+  // 使用并行处理
+  parallel {p, q} by [1, 1] {
+    // 遍历所有向量
+    with i in [LEN] {
+      // 获取源索引
+      int src_idx = src_index.at(i);
+      // 遍历每个向量中的元素
+      with j in [EMB_VEC_SIZE] {
+        foreach i, j {
+          // 执行解压操作
+          dst_emb_vec.at(i, j) = src_emb_vec.at(src_idx, j);
+        }
+      }
+    }
+  }
+  
+  return dst_emb_vec;
+}
+
+// ================== CPU参考实现搬运 ==================
+#include <stdint.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+void decompress_emb_vec_cpu(const float* src_emb_vec, const uint32_t* src_index,
+                       float* dst_emb_vec, const size_t len,
+                       const size_t emb_vec_size) {
+  for (size_t i = 0; i < len; i++) {
+    for (size_t j = 0; j < emb_vec_size; j++) {
+      size_t dst_idx = i;
+      size_t dst_float = j;
+      size_t src_idx = src_index[dst_idx];
+      dst_emb_vec[dst_idx * emb_vec_size + dst_float] =
+          src_emb_vec[src_idx * emb_vec_size + dst_float];
+    }
+  }
+}
+
+void decompress_emb_vec_cpu_optimized(const float* src_emb_vec, const uint32_t* src_index,
+                       float* dst_emb_vec, const size_t len,
+                       const size_t emb_vec_size) {
+    if (emb_vec_size <= 8) {
+        for (size_t i = 0; i < len; i++) {
+            size_t src_idx = src_index[i];
+            const float* src_ptr = src_emb_vec + src_idx * emb_vec_size;
+            float* dst_ptr = dst_emb_vec + i * emb_vec_size;
+            for (size_t j = 0; j < emb_vec_size; j++) {
+                dst_ptr[j] = src_ptr[j];
+            }
+        }
+    } else {
+        for (size_t i = 0; i < len; i++) {
+            size_t src_idx = src_index[i];
+            const float* src_ptr = src_emb_vec + src_idx * emb_vec_size;
+            float* dst_ptr = dst_emb_vec + i * emb_vec_size;
+            size_t j = 0;
+            for (; j + 7 < emb_vec_size; j += 8) {
+                dst_ptr[j] = src_ptr[j];
+                dst_ptr[j+1] = src_ptr[j+1];
+                dst_ptr[j+2] = src_ptr[j+2];
+                dst_ptr[j+3] = src_ptr[j+3];
+                dst_ptr[j+4] = src_ptr[j+4];
+                dst_ptr[j+5] = src_ptr[j+5];
+                dst_ptr[j+6] = src_ptr[j+6];
+                dst_ptr[j+7] = src_ptr[j+7];
+            }
+            for (; j < emb_vec_size; j++) {
+                dst_ptr[j] = src_ptr[j];
+            }
+        }
+    }
+}
+
+void decompress_emb_vec_cpu_advanced(const float* src_emb_vec, const uint32_t* src_index,
+                       float* dst_emb_vec, const size_t len,
+                       const size_t emb_vec_size) {
+    const size_t vec_size_bytes = emb_vec_size * sizeof(float);
+    if (emb_vec_size >= 16) {
+        for (size_t i = 0; i < len; i++) {
+            size_t src_idx = src_index[i];
+            const float* src_ptr = src_emb_vec + src_idx * emb_vec_size;
+            float* dst_ptr = dst_emb_vec + i * emb_vec_size;
+            memcpy(dst_ptr, src_ptr, vec_size_bytes);
+        }
+    } else {
+        decompress_emb_vec_cpu_optimized(src_emb_vec, src_index, dst_emb_vec, len, emb_vec_size);
+    }
+}
+
+// ================== main测试函数 ==================
+int main() {
+    const int LEN = 1000;
+    const int EMB_VEC_SIZE = 64;
+    float src_emb_vec[LEN][EMB_VEC_SIZE];
+    uint32_t src_index[LEN];
+    float dst_choreo[LEN][EMB_VEC_SIZE] = {0};
+    float dst_cpu[LEN][EMB_VEC_SIZE] = {0};
+    float dst_opt[LEN][EMB_VEC_SIZE] = {0};
+    float dst_adv[LEN][EMB_VEC_SIZE] = {0};
+    // 随机生成输入
+    for (int i = 0; i < LEN; ++i) {
+        src_index[i] = rand() % LEN;
+        for (int j = 0; j < EMB_VEC_SIZE; ++j) {
+            src_emb_vec[i][j] = ((float)rand() / RAND_MAX) * 2.0f - 1.0f;
+        }
+    }
+    // CPU参考实现
+    decompress_emb_vec_cpu(&src_emb_vec[0][0], src_index, &dst_cpu[0][0], LEN, EMB_VEC_SIZE);
+    decompress_emb_vec_cpu_optimized(&src_emb_vec[0][0], src_index, &dst_opt[0][0], LEN, EMB_VEC_SIZE);
+    decompress_emb_vec_cpu_advanced(&src_emb_vec[0][0], src_index, &dst_adv[0][0], LEN, EMB_VEC_SIZE);
+    // choreo算子调用
+    auto src_index_view = choreo::make_spanview<1, choreo::u32>((uint32_t*)src_index, {LEN});
+    auto src_emb_vec_view = choreo::make_spanview<2, choreo::f32>((float*)src_emb_vec, {LEN, EMB_VEC_SIZE});
+    auto dst_choreo_view = decompress_emb_vec_op2(src_emb_vec_view, src_index_view);
+    // 拷贝choreo结果到dst_choreo
+    for (int i = 0; i < LEN; ++i)
+        for (int j = 0; j < EMB_VEC_SIZE; ++j)
+            dst_choreo[i][j] = dst_choreo_view.at(i, j);
+    // 校验
+    int fail = 0;
+    for (int i = 0; i < LEN; ++i) {
+        for (int j = 0; j < EMB_VEC_SIZE; ++j) {
+            float ref = dst_cpu[i][j];
+            float val = dst_choreo[i][j];
+            if (fabs(ref - val) > 1e-5) {
+                fail = 1;
+                break;
+            }
+        }
+    }
+    printf("decompress_emb_vec_op2: %s\n", fail ? "FAIL" : "PASS");
+    // 其它版本一致性
+    int opt_fail = 0, adv_fail = 0;
+    for (int i = 0; i < LEN * EMB_VEC_SIZE; ++i) {
+        if (fabs(dst_cpu[0][i] - dst_opt[0][i]) > 1e-5) opt_fail = 1;
+        if (fabs(dst_cpu[0][i] - dst_adv[0][i]) > 1e-5) adv_fail = 1;
+    }
+    printf("CPU optimized: %s\n", opt_fail ? "FAIL" : "PASS");
+    printf("CPU advanced: %s\n", adv_fail ? "FAIL" : "PASS");
+    return 0;
+}

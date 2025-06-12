@@ -1,0 +1,184 @@
+// cse/embedding_cache_replace.co - 嵌入缓存替换内核的Choreo实现
+
+#include "choreo.h"  // 引入Choreo头文件，提供必要的类型和API
+
+// 定义常量
+#define CAPACITY 1024         // 缓存容量（集合数量）
+#define SET_ASSOCIATIVITY 2   // 组相联度
+#define WARP_SIZE 32          // Warp大小
+#define EMB_VEC_SIZE 64       // 嵌入向量大小
+#define EMPTY_KEY 0xFFFFFFFF  // 空键标记
+
+// 最简单的Choreo函数，仅用于验证语法
+__co__ void embedding_cache_replace_minimal() {
+  // 空函数，仅用于验证Choreo语法能否通过编译
+}
+
+// 添加一个带并行处理的简单函数
+__co__ void embedding_cache_replace_parallel() {
+  parallel p by 1 {  // 启动一个并行块，p为并行域，by 1表示单线程（可扩展）
+    // 空体，仅用于验证并行语法
+  }
+}
+
+// 添加一个带简单数组的函数
+__co__ void embedding_cache_replace_with_array() {
+  u32 [2] cache;  // 定义一个长度为2的u32数组
+  
+  parallel p by 1 {
+    with i in [2] {  // 定义i的取值范围为[0,1]
+      foreach i {    // 遍历i
+        cache.at(i) = i;  // 将i赋值给cache的第i个元素
+      }
+    }
+  }
+}
+
+// 添加一个带二维数组的函数
+__co__ void embedding_cache_replace_with_2d_array() {
+  u32 [2, 4] cache;  // 定义一个2x4的二维u32数组
+  
+  parallel p by 1 {
+    with i in [2] {      // 外层i: 0~1
+      with j in [4] {    // 内层j: 0~3
+        foreach i, j {  // 遍历所有(i, j)组合
+          cache.at(i, j) = 1;  // 将1赋值给cache的(i, j)位置
+        }
+      }
+    }
+  }
+}
+
+// 简化版的嵌入缓存替换功能
+__co__ void embedding_cache_replace_basic() {
+  // 定义一个小型缓存
+  u32 [4, 2, 8] keys;          // 4个集合，每个有2路，每路8个槽位，存储key
+  f32 [4, 2, 8, 16] values;    // 嵌入向量，4x2x8组，每组16维
+  u32 [4, 2, 8] counters;      // 访问计数器
+  
+  // 初始化缓存
+  parallel p by 1 {
+    with set_idx in [4] {
+      with way_idx in [2] {
+        with slot_idx in [8] {
+          foreach set_idx, way_idx, slot_idx {
+            keys.at(set_idx, way_idx, slot_idx) = 0;  // 所有key初始化为0（空）
+            counters.at(set_idx, way_idx, slot_idx) = 0;  // 计数器初始化为0
+          }
+        }
+      }
+    }
+  }
+  
+  // 模拟查询处理
+  parallel p by 1 {
+    with set_idx in [1] {
+      with way_idx in [2] {
+        with slot_idx in [8] {
+          foreach set_idx, way_idx, slot_idx {
+            // 这里只是示例，实际应基于查询key
+            if (slot_idx == 0) {
+              keys.at(set_idx, way_idx, slot_idx) = 123;  // 设置key为123
+              counters.at(set_idx, way_idx, slot_idx) = 1;  // 计数器置1
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+// 实现LRU策略的嵌入缓存替换函数
+__co__ void embedding_cache_replace_lru() {
+  // 定义一个小型缓存
+  u32 [4, 2, 8] keys;          // 4个集合，每个有2路，每路8个槽位，存储key
+  u32 [4, 2, 8, 16] values;    // 嵌入向量，4x2x8组，每组16维（用u32简化）
+  u32 [4, 2, 8] counters;      // 访问计数器
+  
+  // 初始化缓存
+  parallel p by 1 {
+    with set_idx in [4] {
+      with way_idx in [2] {
+        with slot_idx in [8] {
+          foreach set_idx, way_idx, slot_idx {
+            keys.at(set_idx, way_idx, slot_idx) = 0;  // 所有key初始化为0（空）
+            counters.at(set_idx, way_idx, slot_idx) = 0;  // 计数器初始化为0
+          }
+        }
+      }
+    }
+  }
+  
+  // 模拟设置一些初始键和计数器值
+  parallel p by 1 {
+    with set_idx in [1] {
+      with way_idx in [1] {
+        with slot_idx in [2] {
+          foreach set_idx, way_idx, slot_idx {
+            if (slot_idx == 0) {
+              keys.at(set_idx, way_idx, slot_idx) = 100;  // 第0槽位key=100
+              counters.at(set_idx, way_idx, slot_idx) = 5; // 计数器=5
+            } else {
+              keys.at(set_idx, way_idx, slot_idx) = 200;  // 第1槽位key=200
+              counters.at(set_idx, way_idx, slot_idx) = 10; // 计数器=10
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  // 实现LRU替换 - 查找计数器最小的槽位
+  u32 [1] min_counter;  // 存储最小计数器值
+  u32 [1] min_way;      // 存储最小计数器对应的way
+  u32 [1] min_slot;     // 存储最小计数器对应的slot
+  
+  // 初始化为最大值
+  parallel p by 1 {
+    with i in [1] {
+      foreach i {
+        min_counter.at(i) = 100;  // 假设计数器不会超过100
+        min_way.at(i) = 0;
+        min_slot.at(i) = 0;
+      }
+    }
+  }
+  
+  // 寻找最小计数器值（简化条件逻辑）
+  parallel p by 1 {
+    with way_idx in [2] {
+      with slot_idx in [8] {
+        foreach way_idx, slot_idx {
+          // 只在有效key上比较计数器
+          if (keys.at(0, way_idx, slot_idx) != 0) {
+            if (counters.at(0, way_idx, slot_idx) < min_counter.at(0)) {
+              min_counter.at(0) = counters.at(0, way_idx, slot_idx);  // 更新最小值
+              min_way.at(0) = way_idx;    // 记录way
+              min_slot.at(0) = slot_idx;  // 记录slot
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  // 执行替换 - 将新键放入LRU位置
+  parallel p by 1 {
+    with i in [1] {
+      foreach i {
+        // 将键123替换到LRU位置
+        keys.at(0, min_way.at(i), min_slot.at(i)) = 123;
+        
+        // 更新相应的值（这里只是示例，实际应从输入复制）
+        with j in [16] {
+          foreach j {
+            values.at(0, min_way.at(i), min_slot.at(i), j) = 5;  // 所有向量分量赋值为5
+          }
+        }
+        
+        // 更新计数器
+        counters.at(0, min_way.at(i), min_slot.at(i)) = 20;  // 新的访问计数
+      }
+    }
+  }
+}
