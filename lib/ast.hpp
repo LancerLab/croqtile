@@ -457,9 +457,6 @@ public:
     assert(value_l);
     assert(value_r);
   }
-
-  // copy constructor for reconstructing expr in SymReplace pass
-  // TODO(wsj): loc?
   explicit Expr(const Expr& e) : Node(e.LOC()) { OverWrite(e); }
 
   void OverWrite(const Expr& e) {

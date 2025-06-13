@@ -458,10 +458,17 @@ struct Shape {
 
     assert(!Value().empty() && "no values inside the shape.");
     std::string res;
+#if 1
     res = "(" + ValueItemAsString(Value()[0], ULL_suffix) + ")";
     for (size_t i = 1; i < Value().size(); ++i)
       res += " * (" + ValueItemAsString(Value()[i], ULL_suffix) + ")";
     return res;
+#else
+    res = ValueItemAsString(Value()[0], ULL_suffix);
+    for (size_t i = 1; i < Value().size(); ++i)
+      res += " * " + ValueItemAsString(Value()[i], ULL_suffix);
+    return res;
+#endif
   }
 
   std::optional<std::vector<size_t>> GetUIntList() const {

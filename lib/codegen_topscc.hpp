@@ -407,6 +407,9 @@ private:
 
   const std::string ValueSTR(const ValueItem& vi) const;
   const std::string ExprSTR(AST::ptr<AST::Node>, bool is_host = true) const;
+  const std::string OpExprSTR(AST::ptr<AST::Node>, bool is_host = true,
+                              const std::string& parent_op = "",
+                              bool is_left = true) const;
   const std::string CallSTR(AST::Call&) const;
 
   std::optional<std::string> ThreadIdString(const ptr<AST::Identifier>&) const;

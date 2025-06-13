@@ -9,11 +9,14 @@
 #include "ast.hpp"
 #include "choreo_header.inc"
 #include "codegen.hpp"
+#include "operator_info.hpp"
 #include "types.hpp"
 
 #ifndef __CHOREO_TOPSCC_DIR__
 #error "missing macro definition of __CHOREO_TOPSCC_DIR__"
 #endif
+
+// #define USING_OP_INFO
 
 using namespace Choreo;
 using namespace Choreo::Topscc;
@@ -419,8 +422,14 @@ TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
       if (exprs[i] == "__choreo_no_tiling__")
         offsets[i] << "0";
       else
+#ifndef USING_OP_INFO
         offsets[i] << "(int)(" << exprs[i] << " * ("
                    << UnScopedExpr(STR(shape.ValueAt(i))) << "))";
+#else
+        offsets[i] << "(int)((" << exprs[i] << ") * "
+                   << UnScopedExpr(ValueItemAsString(shape.ValueAt(i))) << ")";
+#endif
+      // TODO: should consider precedence of `*`
     }
   }
 
@@ -1581,6 +1590,7 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
           auto bid = AST::GetArrayBaseSymbol(*expr);
           auto bty =
               cast<EventArrayType>(GetSymbolType(UnScopedName(bid->name)));
+          // TODO: "!" same here
           GenerateSubscriptions(ds, "!" + ExprSTR(f, false), " || ",
                                 bty->RemainderDimensions(lvl));
         } else
@@ -1651,6 +1661,7 @@ bool TopsccCodeGen::Visit(AST::Trigger& n) {
     if (auto ety = dyn_cast<EventArrayType>(NodeType(*f))) {
       if (IsHost()) {
         assert(ety->GetStorage() == Storage::GLOBAL);
+        // TODO: make & into OpExprSTR?
         hs << h_indent << "choreo::abend_true(topsMemset(&" << ExprSTR(f, true)
            << ", 1, " << ety->ElemCount() << ")); // trigger event\n";
         // TODO: support array reference
@@ -1751,7 +1762,7 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
             oss << ", ";
           }
           format += "%lld";
-          oss << "static_cast<long long> (" << shape.ValueAt(i) << ")";
+          oss << "static_cast<long long>(" << shape.ValueAt(i) << ")";
         }
         std::string args = UnScopedExpr(oss.str());
         return std::make_pair(format, args);
@@ -1763,8 +1774,7 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
           print_format += ExprSTR(arg);
         } else if (isa<IntegerType>(type)) {
           print_format += "%lld";
-          print_args +=
-              "static_cast<long long> ( " + ExprSTR(arg, false) + "), ";
+          print_args += "static_cast<long long>(" + ExprSTR(arg, false) + "), ";
         } else if (isa<BooleanType>(type) || isa<EventType>(type)) {
           if (CCtx().GetArch() == TargetArch::GCU20 ||
               CCtx().GetArch() == TargetArch::GCU21) {
@@ -1806,8 +1816,7 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
           print_args += args + ", ";
         } else if (isa<BoundedIntegerType>(type)) {
           print_format += "%lld";
-          print_args +=
-              "static_cast<long long> (" + ExprSTR(arg, false) + "), ";
+          print_args += "static_cast<long long>(" + ExprSTR(arg, false) + "), ";
           choreo_unreachable("should not have bit?");
         } else if (isa<BoundedITupleType>(type)) {
           print_format += "{";
@@ -1818,7 +1827,7 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
           print_format += "}";
           std::string args_str = ExprSTR(arg, false);
           for (const auto& arg_str : SplitStringByDelimiter(args_str, ", "))
-            print_args += "static_cast<long long> (" + arg_str + "), ";
+            print_args += "static_cast<long long>(" + arg_str + "), ";
         } else if (isa<AddrType>(type)) {
           print_format += "%p";
           print_args += "static_cast<void*>(" + ExprSTR(arg, IsHost()) + "), ";
@@ -2600,6 +2609,7 @@ TopsccCodeGen::ExprCastSTR(AST::ptr<AST::Node> n,
   return res.str();
 }
 
+#ifndef USING_OP_INFO
 const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
                                          bool is_host) const {
   std::ostringstream oss;
@@ -2811,6 +2821,254 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
 
   return oss.str();
 }
+
+#else
+const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
+                                         bool is_host) const {
+  return OpExprSTR(e, is_host);
+}
+
+const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e, bool is_host,
+                                           const std::string& parent_op,
+                                           bool is_left) const {
+  std::ostringstream oss;
+
+  auto WrapWithParen = [&](const std::string& s, const std::string& cur_op) {
+    if (Operator::NeedParen(cur_op, parent_op, is_left)) return "(" + s + ")";
+    return s;
+  };
+
+  if (auto id = dyn_cast<AST::Identifier>(e)) {
+    if (id->name == "__choreo_no_tiling__") {
+      assert(!is_host);
+      return id->name;
+    }
+    if (auto ids = ThreadIdString(id))
+      oss << ids.value();
+    else if (auto sids = SubThreadIdString(id))
+      oss << sids.value();
+    else if (within_map.count(InScopeName(id->name)) && !is_host) {
+      size_t i = 0;
+      for (auto iv_name : within_map.at(InScopeName(id->name)))
+        oss << ((i++ == 0) ? "" : ", ")
+            << UnScopedName(ssm.DeviceName(iv_name));
+    } else {
+      oss << UnScopedName(((is_host) ? ssm.HostName(InScopeName(id->name))
+                                     : ssm.DeviceName(InScopeName(id->name))));
+    }
+  } else if (auto il = dyn_cast<AST::IntLiteral>(e)) {
+    oss << il->value;
+  } else if (auto fl = dyn_cast<AST::FloatLiteral>(e)) {
+    std::ostringstream fp_val;
+    // std::fixed: the value should be in fixed-point notation
+    // otherwise, 1.0f => 1f (error)
+    if (fl->IsFloat32())
+      fp_val << std::fixed << fl->Val_f32() << "f";
+    else if (fl->IsFloat64())
+      fp_val << std::fixed << fl->Val_f64();
+    else
+      choreo_unreachable("unsupported float literal.");
+    oss << fp_val.str();
+  } else if (auto sl = dyn_cast<AST::StringLiteral>(e)) {
+    oss << sl->EscapedVal();
+  } else if (auto b = dyn_cast<AST::BoolLiteral>(e)) {
+    oss << b->value;
+  } else if (auto ii = dyn_cast<AST::IntIndex>(e)) {
+    return OpExprSTR(ii->value, is_host, parent_op);
+  } else if (auto da = dyn_cast<AST::DataAccess>(e)) {
+    if (auto sty = GetSpannedType(GetSymbolType(da->data->name))) {
+      oss << "*((" << NameBaseType(sty->ElementType()) << "*)"
+          << OpExprSTR(da->data, is_host);
+      size_t idx = 0;
+      auto shape = sty->GetShape();
+      for (auto item : da->GetIndices()) {
+        if (auto id = AST::GetIdentifier(item)) {
+          if (auto ids = ThreadIdString(id))
+            oss << " + " << ids.value();
+          else if (auto sids = SubThreadIdString(id))
+            oss << " + " << sids.value();
+          else if (within_map.count(InScopeName(id->name))) {
+            auto ivs = within_map.at(InScopeName(id->name));
+            for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr) {
+              auto shape = sty->GetShape();
+              auto name =
+                  (is_host ? ssm.HostName(*iv_itr) : ssm.DeviceName(*iv_itr));
+              assert(shape.Rank() >= idx + 1);
+              oss << " + ";
+              if (shape.Rank() > idx + 1)
+                oss << "(" << name << " * "
+                    << shape.TrimDims(idx + 1).GetElementCountExpression()
+                    << ")";
+              else
+                oss << name;
+              ++idx;
+            }
+          } else {
+            auto name = (is_host ? ssm.HostName(InScopeName(id->name))
+                                 : ssm.DeviceName(InScopeName(id->name)));
+            assert(shape.Rank() >= idx + 1);
+            oss << " + ";
+            if (shape.Rank() > idx + 1)
+              oss << "(" << name << " * "
+                  << shape.TrimDims(idx + 1).GetElementCountExpression() << ")";
+            else
+              oss << name;
+            ++idx;
+          }
+        } else
+          choreo_unreachable("unsupported data access.");
+      }
+      oss << ")";
+    } else {
+      assert(!da->AccessElement());
+      assert(!within_map.count(InScopeName(da->data->name)));
+      oss << UnScopedName(((is_host)
+                               ? ssm.HostName(InScopeName(da->data->name))
+                               : ssm.DeviceName(InScopeName(da->data->name))));
+    }
+  } else if (auto expr = dyn_cast<AST::Expr>(e)) {
+    // utilize the optimize value whenever possible
+    if (auto sym = expr->GetSymbol()) {
+      auto sname = InScopeName(sym->name);
+      if (FCtx(fname).HasSymbolValues(sname)) {
+        auto svs = FCtx(fname).GetSymbolValues(sname);
+        if (svs.HasVal()) return ValueSTR(svs.GetVal());
+      }
+    }
+
+    if (ConvertibleToInt(NodeType(*e)))
+      if (expr->Opts().HasVal())
+        return UnScopedExpr(ValueSTR(expr->Opts().GetVal()));
+
+    if (expr->IsReference()) {
+      if (PSTR(expr) == "_") return "0";
+      if (auto ca = dyn_cast<AST::ChunkAt>(expr->GetR())) {
+        auto caty = cast<SpannedType>(ca->GetType());
+        if (isa<FutureType>(NodeType(*ca->data)))
+          return OpExprSTR(ca->data, is_host) + ".data() + " + GenOffset(ca);
+        else
+          return OpExprSTR(ca->data, is_host) + " + " + GenOffset(ca);
+      } else {
+        // TODO: ref is always the last order, so no need to add paren?
+        return OpExprSTR(expr->GetReference(), is_host, "ref");
+      }
+    } else if (expr->IsUnary()) {
+      if (expr->GetOp() == "!") {
+        oss << "!" << WrapWithParen(OpExprSTR(expr->GetR(), is_host, "!"), "!");
+      } else if (expr->GetOp() == "ubound") {
+        auto rty = cast<BoundedType>(NodeType(*expr->GetR()));
+        if (rty->Dims() == 1) oss << ValueSTR(rty->GetUpperBound());
+      } else if (expr->GetOp() == "dataof") {
+        assert(isa<FutureType>(expr->GetR()->GetType()) &&
+               "expect a future operand.");
+        if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol()) {
+          if (is_host)
+            oss << id->name << "__buf__";
+          else
+            oss << id->name << ".data()";
+        } else
+          choreo_unreachable("Can not retrieve name of the future.");
+      } else if (expr->GetOp() == "sizeof") {
+        auto se = expr->Opts().GetSize();
+        if (IsValidValueItem(se))
+          oss << ValueSTR(se);
+        else {
+          // TODO: deprecate this implementation
+          auto var = RemoveSuffix(*AST::GetName(*expr->GetR()), ".span");
+          auto shape = GetShape(GetSymbolType(var));
+          assert(shape.IsValid() && "Invalid shape is found");
+          oss << shape.GetElementCountExpression();
+        }
+      } else if (expr->GetOp() == "++") {
+        oss << "++"
+            << WrapWithParen(OpExprSTR(expr->GetR(), is_host, "++"), "++");
+      } else if (expr->GetOp() == "--") {
+        oss << "--"
+            << WrapWithParen(OpExprSTR(expr->GetR(), is_host, "--"), "--");
+      } else if (expr->GetOp() == "addrof") {
+        if (auto id = AST::GetIdentifier(expr->GetR())) {
+          oss << OpExprSTR(id, is_host);
+        } else if (isa<AST::DataAccess>(expr->GetR())) {
+          oss << "&"
+              << WrapWithParen(OpExprSTR(expr->GetR(), is_host, "&"), "&");
+        } else
+          choreo_unreachable("Can not retrieve name of the spanned data.");
+      } else
+        choreo_unreachable("unsupported expression op: '" + expr->GetOp() +
+                           "', expr: " + PSTR(expr) + ".");
+    } else if (expr->IsBinary()) {
+      if (expr->GetOp() == "cdiv") {
+        std::string one = "1";
+        auto L = OpExprSTR(expr->GetL(), is_host, "+");
+        auto R0 = OpExprSTR(expr->GetR(), is_host, "+", false);
+        auto R1 = OpExprSTR(expr->GetR(), is_host, "/", false);
+        // (L + R0 - 1) / R1
+        std::ostringstream res;
+        res << "(" << L << " + " << R0 << " - " << one << ") / " << R1;
+        oss << WrapWithParen(res.str(), "/");
+      } else if (expr->GetOp() == "getith") {
+        auto lty = cast<BoundedType>(NodeType(*expr->GetL()));
+        if (cast<AST::IntIndex>(expr->GetR())->IsNegative()) {
+          std::ostringstream res;
+          // special case: str of r is always a negative integer.
+          res << ValueSTR(lty->GetUpperBound()) << " + "
+              << "(" << OpExprSTR(expr->GetR(), is_host, "+", false) << ")";
+          oss << WrapWithParen(res.str(), "+");
+        } else
+          oss << OpExprSTR(expr->GetR(), is_host, parent_op);
+      } else if (expr->GetOp() == "elemof") {
+        oss << OpExprSTR(expr->GetL(), is_host) << "["
+            << OpExprSTR(expr->GetR(), is_host) << "]";
+      } else if (expr->IsArith() || expr->IsLogical()) {
+        auto& l = expr->GetL();
+        auto& r = expr->GetR();
+        auto& op = expr->GetOp();
+        if (op == "#" && IsActualBoundedIntegerType(l->GetType()) &&
+            IsActualBoundedIntegerType(r->GetType())) {
+          auto rty = cast<BoundedType>(NodeType(*r));
+          assert(rty->Dims() == 1);
+          std::string r_upper_bound;
+          if (PSTR(r) == "_")
+            r_upper_bound = "1";
+          else
+            r_upper_bound = ValueSTR(rty->GetUpperBound());
+          auto L = OpExprSTR(l, is_host, "*");
+          auto R = OpExprSTR(r, is_host, "+", false);
+          std::ostringstream res;
+          res << L << " * " << r_upper_bound << " + " << R;
+          oss << WrapWithParen(res.str(), "+");
+        } else if ((op == "#+" || op == "#-") &&
+                   IsActualBoundedIntegerType(l->GetType()) &&
+                   isa<IntegerType>(r->GetType()))
+          oss << OpExprSTR(l, is_host, parent_op);
+        else if (op == "#/" || op == "#*" || op == "#%")
+          choreo_unreachable("unsupported expression op: '" + expr->GetOp() +
+                             "', expr: " + PSTR(expr) + ".");
+        else {
+          std::ostringstream res;
+          res << OpExprSTR(l, is_host, op) << " " << op << " "
+              << OpExprSTR(r, is_host, op, false);
+          oss << WrapWithParen(res.str(), op);
+        }
+      }
+    } else if (expr->IsTernary()) {
+      std::ostringstream res;
+      res << OpExprSTR(expr->GetC(), is_host, "?") << " ? "
+          << OpExprSTR(expr->GetL(), is_host, "?") << " : "
+          << OpExprSTR(expr->GetR(), is_host, "?", false);
+      oss << WrapWithParen(res.str(), "?");
+    } else
+      choreo_unreachable("unsupported expression op: '" + expr->GetOp() +
+                         "', expr: " + PSTR(expr) + ".");
+  } else if (auto c = dyn_cast<AST::Call>(e)) {
+    assert(!is_host);
+    return CallSTR(*c);
+  } else
+    choreo_unreachable("unsupported expression op: '" + expr->GetOp() + "'.");
+
+  return oss.str();
+}
+#endif
 
 const std::string TopsccCodeGen::CallSTR(AST::Call& n) const {
   std::ostringstream oss;
