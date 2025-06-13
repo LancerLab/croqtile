@@ -52,6 +52,7 @@ SYMBOLIC_INCLUDE_FLAGS = -I$(CLN_DIR)/install/include -I$(GINAC_DIR)/install/inc
 CMAKE_BUILD_DIR = $(BUILD_DIR)
 CMAKE = cmake
 CMAKE_BUILD_TYPE = Release
+STANDALONE = OFF
 
 PUBLIC_PACKAGE=OFF
 
@@ -66,10 +67,20 @@ build: build-with-cmake-ninja
 # Specific Release/debug build
 release: CMAKE_BUILD_TYPE=Release
 release: CMAKE_BUILD_DIR=$(REL_BUILD_DIR)
+release: STANDALONE=OFF
 release: build-with-cmake-ninja
+
+release-full: CMAKE_BUILD_TYPE=Release
+release-full: CMAKE_BUILD_DIR=$(REL_BUILD_DIR)
+release-full: STANDALONE=ON
+release-full: build-with-cmake-ninja
 
 package: PUBLIC_PACKAGE=ON
 package: release
+	@cmake --build $(REL_BUILD_DIR) --target package
+
+package-full: PUBLIC_PACKAGE=ON
+package-full: release-full
 	@cmake --build $(REL_BUILD_DIR) --target package
 
 debug: CMAKE_BUILD_TYPE=Debug
@@ -113,7 +124,7 @@ build-with-cmake:
 build-with-cmake-ninja:
 	@echo "Starting build with CMake..."
 	@if [ ! -d $(CMAKE_BUILD_DIR) ]; then mkdir -p $(CMAKE_BUILD_DIR); fi
-	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -G Ninja -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) -DPUBLIC_PACKAGE=$(PUBLIC_PACKAGE)
+	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -G Ninja -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) -DPUBLIC_PACKAGE=$(PUBLIC_PACKAGE) -DSTANDALONE=$(STANDALONE)
 	time ninja -C $(CMAKE_BUILD_DIR)
 	ln -sf $(CMAKE_BUILD_DIR)/choreo $(WORK_DIR)/choreo
 	ln -sf $(CMAKE_BUILD_DIR)/copp $(WORK_DIR)/copp

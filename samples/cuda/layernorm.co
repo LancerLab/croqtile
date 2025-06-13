@@ -1,0 +1,23 @@
+// LayerNorm 算子示例 (choreo, 推荐范式)
+// 参考知识库: 完整程序结构、mdspan整体传递+__co_device__实现
+
+__co__ void layernorm(f32[N, M] X, f32[M] gamma, f32[M] beta, f32[N, M] Y, f32 eps) {
+    // 推荐：整体mdspan参数传递，主逻辑委托__co_device__实现
+    call __co_device__layernorm(X, gamma, beta, Y, eps);
+}
+
+__co_device__ void __co_device__layernorm(f32[N, M] X, f32[M] gamma, f32[M] beta, f32[N, M] Y, f32 eps) {
+    // 这里可用C++/CUDA风格或tcle接口实现高效张量操作
+    // 伪代码如下（实际可用C++/tcle内核替换）
+    for (int i = 0; i < N; ++i) {
+        float mean = 0.0f, var = 0.0f;
+        for (int j = 0; j < M; ++j) mean += X(i, j);
+        mean /= M;
+        for (int j = 0; j < M; ++j) var += (X(i, j) - mean) * (X(i, j) - mean);
+        var /= M;
+        for (int j = 0; j < M; ++j)
+            Y(i, j) = gamma(j) * (X(i, j) - mean) / sqrt(var + eps) + beta(j);
+    }
+}
+
+// 若硬件/编译器支持，也可用tcle/向量指令进一步优化

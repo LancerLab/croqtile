@@ -1,0 +1,104 @@
+// LayerNorm 高性能choreo实现（自动并行+DMA+缓冲+事件+余数处理，适配GPU/GCU）
+// 参考pinocchio知识库与硬件性能规则
+
+// 1. __co_device__ 设备端实现
+__co_device__ void __co_device__layernorm(f32[N, M] X, f32[M] gamma, f32[M] beta, f32[N, M] Y, f32 eps) {
+  // 仅做寄存器级别的计算，推荐用for/foreach实现
+  for (int i = 0; i < N; ++i) {
+    float mean = 0.0f, var = 0.0f;
+    for (int j = 0; j < M; ++j) mean += X(i, j);
+    mean /= M;
+    for (int j = 0; j < M; ++j) var += (X(i, j) - mean) * (X(i, j) - mean);
+    var /= M;
+    for (int j = 0; j < M; ++j)
+      Y(i, j) = gamma(j) * (X(i, j) - mean) / sqrt(var + eps) + beta(j);
+  }
+}
+
+// 2. __co__ 数据流/并行/搬运/调度实现
+__co__ void layernorm(f32[N, M] X, f32[M] gamma, f32[M] beta, f32[N, M] Y, f32 eps) {
+  // 并行分块参数（自动推断，适配硬件）
+  gpl = 2, bpl = 12;
+  l1_limit = (1 << 20) + (1 << 19) - 512;
+  l2_limit = 64 * (1 << 20);
+  padding = 128 * bpl;
+  l1_max_count = (l1_limit / |f32| / 3 / padding) * padding;
+  l2_elem_count = l1_max_count * bpl;
+
+  if (N > (l2_elem_count * gpl)) {
+    parallel p by gpl, q by bpl {
+      with x in [N / (l2_elem_count * #p)] foreach x(:1:) {
+        // 主块处理
+        inthreads (x # p * l2_elem_count + l2_elem_count <= N) {
+          xfs = dma.copy.async X.subspan(l2_elem_count).at(x # p) => shared;
+          wait xfs;
+          lfl = dma.copy.async xfs.chunkat(q) => local;
+          wait lfl;
+          local f32 [lfl.span] l1_out;
+          local f32 mean, var;
+          // 计算mean/var
+          mean = reduce_sum(i in [lfl.span]) lfl.data.at(i) / lfl.span;
+          var = reduce_sum(i in [lfl.span]) (lfl.data.at(i) - mean) * (lfl.data.at(i) - mean) / lfl.span;
+          foreach i in [lfl.span]
+            l1_out.at(i) = gamma(i) * (lfl.data.at(i) - mean) / sqrt(var + eps) + beta(i);
+          dma.copy l1_out => Y.subspan(lfl.span).at(x # p # q);
+        }
+        // 余数块处理
+        inthreads ((x # p * l2_elem_count + l2_elem_count > N) && (x # p * l2_elem_count < N)) {
+          rem_count = N % l2_elem_count;
+          xfs = dma.copy.async X.modspan(l2_elem_count).at(x # p) => shared;
+          wait xfs;
+          l1_min = 512;
+          l1_count = (|xfs.span| / bpl + padding - 1) / padding * padding;
+          last_count = (l1_min > l1_count) ? l1_min : l1_count;
+          inthreads ((q + 1) * last_count <= rem_count) {
+            lfl = dma.copy.async xfs.subspan(last_count).at(q) => local;
+            wait lfl;
+            local f32 [lfl.span] l1_out;
+            local f32 mean, var;
+            mean = reduce_sum(i in [lfl.span]) lfl.data.at(i) / lfl.span;
+            var = reduce_sum(i in [lfl.span]) (lfl.data.at(i) - mean) * (lfl.data.at(i) - mean) / lfl.span;
+            foreach i in [lfl.span]
+              l1_out.at(i) = gamma(i) * (lfl.data.at(i) - mean) / sqrt(var + eps) + beta(i);
+            dma.copy l1_out => Y.modspan(l2_elem_count).at(x # p).subspan(last_count).at(q);
+          }
+          // last bunch
+          inthreads ((q * last_count < rem_count) && ((q + 1) * last_count > rem_count)) {
+            lfl = dma.copy.async xfs.modspan(last_count).at(q) => local;
+            wait lfl;
+            local f32 [lfl.span] l1_out;
+            local f32 mean, var;
+            mean = reduce_sum(i in [lfl.span]) lfl.data.at(i) / lfl.span;
+            var = reduce_sum(i in [lfl.span]) (lfl.data.at(i) - mean) * (lfl.data.at(i) - mean) / lfl.span;
+            foreach i in [lfl.span]
+              l1_out.at(i) = gamma(i) * (lfl.data.at(i) - mean) / sqrt(var + eps) + beta(i);
+            dma.copy l1_out => Y.modspan(l2_elem_count).at(x # p).modspan(last_count).at(q);
+          }
+        }
+      }
+    }
+  }
+}
+
+// 3. host/main 函数
+int main() {
+  const int N = 1024, M = 256;
+  auto X = choreo::make_spandata<choreo::f32>(N, M);
+  auto gamma = choreo::make_spandata<choreo::f32>(M);
+  auto beta = choreo::make_spandata<choreo::f32>(M);
+  auto Y = choreo::make_spandata<choreo::f32>(N, M);
+  X.fill_random(-1, 1);
+  gamma.fill(1.0f);
+  beta.fill(0.0f);
+  float eps = 1e-5;
+  auto t0 = choreo::now();
+  layernorm(X.view(), gamma.view(), beta.view(), Y.view(), eps);
+  auto t1 = choreo::now();
+  // 验证
+  for (int i = 0; i < N; ++i)
+    for (int j = 0; j < M; ++j)
+      assert(fabs(Y(i, j) - (gamma[j] * (X(i, j) - 0) / sqrt(1 + eps) + beta[j])) < 1e-3);
+  std::cout << "耗时: " << (t1-t0) << " ms\n";
+  std::cout << "Test Passed\n";
+  return 0;
+}

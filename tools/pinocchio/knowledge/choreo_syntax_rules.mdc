@@ -1,0 +1,101 @@
+# Choreo 语法规则与AI可复用知识库（精细+编译器视角）
+
+---
+
+## Part 0. Choreo 语言 EBNF 语法范式（核心子集）
+
+```ebnf
+program         ::= { any_code | dsl_function | host_code }
+dsl_function    ::= "__co__" return_type IDENTIFIER "(" parameter_list ")" stmts_block
+return_type     ::= type | void_type | auto_type
+parameter_list  ::= [ parameter { "," parameter } ]
+parameter       ::= [storage] type IDENTIFIER
+type            ::= scalar_type | mdspan_as_type
+scalar_type     ::= "int" | "i32" | "s32" | "u32" | "u16" | "u8" | "f32" | "f16" | "bf16" | "bool"
+mdspan_as_type  ::= fundamental_type "[" g_value_list "]"
+fundamental_type::= "f32" | "f16" | "bf16" | "u32" | "u16" | "u8" | "int" | "bool"
+g_value_list    ::= g_expr { "," g_expr }
+g_expr          ::= s_expr | mdspan_list | ituple_list | dataid_expr | ...
+stmts_block     ::= "{" statements "}" | statement
+statements      ::= { statement | ";" }
+statement       ::= declaration | assignment | dma_stmt | wait_stmt | trigger_stmt | call_stmt | swap_stmt | return_stmt | sync_stmt | paraby_block | within_block | inthreads_block | while_block | if_else_block | foreach_block
+declaration     ::= named_mdspan_decl | named_ituple_decl | named_scalar_decls | named_event_decls
+assignment      ::= IDENTIFIER ASSIGN s_expr | data_element ASSIGN s_expr | ...
+paraby_block    ::= "parallel" [sync_type] parabys stmts_block
+parabys         ::= paraby { "," paraby }
+paraby          ::= IDENTIFIER "by" int_or_id | ...
+within_block    ::= "with" {id_list} "in" "[" g_value_list "]" stmts_block
+foreach_block   ::= "foreach" id_list stmts_block
+inthreads_block ::= "inthreads" stmts_block | "inthreads.async" "(" cond ")" stmts_block
+while_block     ::= "while" "(" cond ")" stmts_block
+if_else_block   ::= "if" "(" cond ")" stmts_block ["else" stmts_block]
+return_stmt     ::= "return" [returnable]
+sync_stmt       ::= "sync" "." storage
+wait_stmt       ::= "wait" IDENTIFIER
+trigger_stmt    ::= "trigger" IDENTIFIER
+call_stmt       ::= "call" IDENTIFIER "(" [args] ")"
+dma_stmt        ::= IDENTIFIER "=" dma_operation [".async"] src "=>" dst
+data_element    ::= IDENTIFIER [".at(...)" | ".chunkat(...)" | ...]
+mdspan_list     ::= "[" value_list "]"
+ituple_list     ::= "{" g_value_list "}"
+value_list      ::= s_expr { "," s_expr }
+s_expr          ::= ...（见表达式部分）
+```
+
+# Choreo 完整程序结构规范
+
+---
+
+## 完整 choreo 程序结构（强制规范）
+
+一个合法且完整的 choreo 程序，必须包含如下结构：
+
+1. **算子函数声明（推荐用 `__co__` 修饰）**
+   - 入口为 `__co__ <ret_type> <op_name>(<param_list>) { ... }`
+   - 不能只写函数体，必须有完整的函数签名、参数、返回类型。
+   - 例：
+     ```choreo
+     __co__ void layernorm(f32[N, M] X, f32[M] gamma, f32[M] beta, f32[N, M] Y, f32 eps) {
+         // ... 算子实现 ...
+     }
+     ```
+2. **参数声明**
+   - 参数需明确类型、shape，区分 input/output。
+   - 推荐用 f32[N, M] 这类 mdspan 语法。
+3. **内部变量声明**
+   - 在函数体内声明临时变量、张量、event、buffer 等。
+4. **主计算逻辑**
+   - for/foreach/parallel/inthreads 等控制流，张量操作，事件/缓冲/优化等。
+5. **返回值**
+   - 若有返回值，需 return；否则 void。
+6. **可选：多算子/多函数**
+   - 支持多个 __co__ 算子函数，或内嵌 device kernel。
+
+### 典型合法 choreo 程序示例：
+```choreo
+__co__ void layernorm(f32[N, M] X, f32[M] gamma, f32[M] beta, f32[N, M] Y, f32 eps) {
+    f32[N] mean;
+    f32[N] var;
+    for i in 0..N {
+        mean[i] = reduce_sum(j in 0..M) X[i, j] / M;
+    }
+    for i in 0..N {
+        var[i] = reduce_sum(j in 0..M) (X[i, j] - mean[i]) * (X[i, j] - mean[i]) / M;
+    }
+    for i in 0..N parallel {
+        for j in 0..M {
+            Y[i, j] = gamma[j] * (X[i, j] - mean[i]) / sqrt(var[i] + eps) + beta[j];
+        }
+    }
+}
+```
+
+### 反例（不完整/不合法）：
+- 只写 for/并行/张量操作，没有函数签名和参数声明。
+- 只写函数体内部代码。
+
+---
+
+**规范要求**：
+- 生成 choreo 程序时，必须输出完整的函数签名、参数、类型、主逻辑，不能只输出片段或函数体内部代码。
+- 参考 tests/end2end/、Documentation/、choreo_syntax_rules.mdc 示例，确保结构完整。

@@ -1,0 +1,62 @@
+# HPC/GPU/GCU硬件性能规则与优化原则（适配choreo自动化算子生成/调优）
+
+---
+
+## 1. 存储层级与分配
+- 优先使用寄存器/共享内存存放热点数据，减少全局内存访问。
+- 共享内存分配需考虑bank conflict，避免warp内线程访问同一bank。
+- 大块数据搬运优先用DMA/异步拷贝（如dma.copy.async），并配合wait/sync同步。
+- 访存coalescing：连续线程访问连续全局内存地址，避免分散访问。
+- 只读常量/纹理数据建议用const/texture memory。
+
+## 2. 并行度与调度
+- blockDim/threadDim建议为32的倍数，提升warp利用率。
+- 充分利用occupancy（活跃线程数/SM资源），避免寄存器/共享内存溢出导致occupancy下降。
+- 动态并行适合递归/不规则任务，但需关注launch overhead。
+- pipeline：多stage算子建议用流/事件/异步拷贝实现流水线，提升吞吐。
+
+## 3. 访存/带宽优化
+- 访存对齐：全局内存访问地址对齐128B，提升带宽利用率。
+- 避免bank conflict：共享内存访问时，warp内线程访问不同bank。
+- 统一内存/跨设备：大数据建议用unified memory+prefetch，减少手动拷贝。
+- page-locked host memory提升H2D/D2H带宽。
+
+## 4. 原子操作与同步
+- atomicAdd/Min/Max等原子操作仅用于必要场景，避免全局原子热点。
+- 局部归约优先用共享内存+block级同步，减少全局原子。
+- sync/wait用于block内同步，跨block需用事件/流。
+
+## 5. 算子融合与数据流
+- 支持算子融合（fuse）时，优先合并访存/计算密集型算子，减少中间结果写回全局内存。
+- launch bounds/occupancy calculator自动推导最优block/grid配置。
+- pipeline/graph调度：多算子异步串联，减少同步点。
+
+## 6. 反模式与自动优化建议
+- 反模式：warp内分支发散、bank conflict、全局原子热点、频繁小kernel launch、访存未对齐、低occupancy。
+- 自动优化建议：检测上述反模式时，自动调整blockDim、访存模式、融合算子、插入异步拷贝、调整内存分配。
+
+## 7. 关键API/伪代码
+- 访存coalescing:
+  ```choreo
+  parallel p by 256 {
+    output.at(p) = input.at(p); // 连续线程访问连续地址
+  }
+  ```
+- 异步拷贝+pipeline:
+  ```choreo
+  lfs = dma.copy.async lhs.subspan(N) => shared;
+  wait lfs;
+  kernel<<<grid, block, 0, stream>>>(...);
+  sync.stream;
+  ```
+- 共享内存规约:
+  ```choreo
+  local f32 [blockDim.x] sdata;
+  sdata.at(threadIdx.x) = input.at(threadIdx.x);
+  sync.local;
+  // 规约
+  ```
+
+---
+
+【注】本规则文件为pinocchio/agents自动生成choreo代码时的硬件特性与优化原则知识源，所有choreo:generator/optimizer必须引用本文件内容，自动推断/注入最优存储、并行、访存、调度、同步等策略。
