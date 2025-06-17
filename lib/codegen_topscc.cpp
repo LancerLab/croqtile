@@ -2679,8 +2679,9 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
             }
           } else {
             oss << " + ("
-                << (is_host ? ssm.HostName(InScopeName(id->name))
-                            : ssm.DeviceName(InScopeName(id->name)));
+                << UnScopedName(is_host
+                                    ? ssm.HostName(InScopeName(id->name))
+                                    : ssm.DeviceName(InScopeName(id->name)));
             assert(shape.Rank() >= idx + 1);
             if (shape.Rank() > idx + 1)
               oss << " * "
@@ -2904,8 +2905,9 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e, bool is_host,
               ++idx;
             }
           } else {
-            auto name = (is_host ? ssm.HostName(InScopeName(id->name))
-                                 : ssm.DeviceName(InScopeName(id->name)));
+            auto name =
+                UnScopedName(is_host ? ssm.HostName(InScopeName(id->name))
+                                     : ssm.DeviceName(InScopeName(id->name)));
             assert(shape.Rank() >= idx + 1);
             oss << " + ";
             if (shape.Rank() > idx + 1)
