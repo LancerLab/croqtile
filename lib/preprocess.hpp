@@ -652,8 +652,10 @@ private:
         abort();
       }
       code_partition = CP_CHOREO;
+      localDefines = globalDefines;
+      localDefinedFuncs = globalDefinedFuncs;
 
-      auto c_pos = sline.find_first_of('{');
+      auto c_pos = sline.find_first_of('(');
       if (c_pos != std::string::npos) {
         auto b_pos = sline.find("__co__ ");
         auto co_decl = sline.substr(b_pos, c_pos - b_pos);
@@ -913,18 +915,11 @@ private:
       }
       if (!co_skip_line) output << "#line " << line_num + 1 << "\n";
     } else if (!co_skip_line) {
-      size_t co_start = 0;
       size_t co_end = aline.size();
       for (size_t i = 0; i < aline.size(); ++i) {
         char c = aline[i];
         if (c == '{') {
           choreo_brace_count++;
-          if (choreo_brace_count == 1) {
-            // just entered
-            co_start = i;
-            localDefines = globalDefines;
-            localDefinedFuncs = globalDefinedFuncs;
-          }
         } else if (c == '}') {
           choreo_brace_count--;
           if (choreo_brace_count == 0) {
@@ -936,17 +931,18 @@ private:
 
       if ((co_end == aline.size()) && (choreo_brace_count == 0)) {
         // has not entered the choreo code region
-        output << line << '\n';
+        auto sline = SubstituteLocalDefines(aline);
+        if (!uc_skip_line) output << sline << '\n';
         return;
       }
 
-      auto co_code = aline.substr(co_start, co_end - co_start);
+      auto co_code = aline.substr(0, co_end);
       auto sline = SubstituteLocalDefines(co_code);
       bool changed = true;
       while (changed) { sline = SubstituteLocalMacroFuncs(sline, changed); }
 
       // output the choreo code
-      if (!uc_skip_line) output << aline.substr(0, co_start) << sline;
+      if (!uc_skip_line) output << sline;
 
       if (choreo_brace_count == 0) {
         code_partition = CP_USER;

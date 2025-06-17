@@ -1,0 +1,23 @@
+// RUN: choreo -E -n %s | grep -v "\<CHECK\>" | FileCheck --match-full-lines %s
+#define LEN 1000
+#define EMB_VEC_SIZE 64
+
+__co__ void foo(f32 [LEN, EMB_VEC_SIZE] src_emb_vec,
+                u32 [LEN] src_index,
+                f32 [LEN, EMB_VEC_SIZE] dst_emb_vec) {
+  parallel {p, q} by [1, 1] {
+    local f32 [LEN/#p/#q, EMB_VEC_SIZE] local_emb_vec_dst;
+    local f32 [LEN/#p/#q, EMB_VEC_SIZE] local_emb_vec_src;
+    local u32 [LEN/#p/#q] index;
+  }
+}
+
+// CHECK: __co__ void foo(f32 [1000, 64] src_emb_vec,
+// CHECK:                 u32 [1000] src_index,
+// CHECK:                 f32 [1000, 64] dst_emb_vec) {
+// CHECK:   parallel {p, q} by [1, 1] {
+// CHECK:     local f32 [1000/#p/#q, 64] local_emb_vec_dst;
+// CHECK:     local f32 [1000/#p/#q, 64] local_emb_vec_src;
+// CHECK:     local u32 [1000/#p/#q] index;
+// CHECK:   }
+// CHECK: }

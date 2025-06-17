@@ -7,7 +7,7 @@ early and */ eat his breakfast // { { { {
 } // it is not something new
 
 but at the sametime,
-the great  __co__ choreo /* comes to life and } */ { finds /* many
+the great  __co__ choreo(/* comes to life and } */) { finds /* many
 */things weird /*but he does not care*/ // }
 what a co-incidence/* interesting, //
 he/she said*/ } } But actually, this never /*ever*/ happens. It is /*
@@ -20,7 +20,7 @@ just /*fiction*/ a noval
 // CHECK: }
 
 // CHECK: but at the sametime,
-// CHECK: the great  __co__ choreo  { finds
+// CHECK: the great  __co__ choreo()  { finds
 // CHECK: things weird
 // CHECK: what a co-incidence
 // CHECK:  } } But actually, this never  happens. It is
