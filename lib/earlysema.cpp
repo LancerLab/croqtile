@@ -872,7 +872,7 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
       ++error_count;
     }
 
-    if (*ety != *vty) {
+    if (!ety->ApprxEqual(*vty)) {
       // consider taking value of bounded variables
       if (!(isa<IntegerType>(ety) && CanYieldAnInteger(vty))) {
         Error(n.da->LOC(), "type inconsistent: assign " + PSTR(vty) + " to " +

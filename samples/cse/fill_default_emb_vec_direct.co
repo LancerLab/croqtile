@@ -22,7 +22,7 @@ __co__ void fill_default_emb_vec(u32[LEN] missing_index, f32[LEN, EMB_VEC_SIZE] 
       dma.copy missing_index.chunkat(p#q) => index;
       foreach {i, j} in [LEN/#p/#q, EMB_VEC_SIZE] {
           unsigned int dst_emb_vec = missing_index.at(i);
-          local_emb_vec.at(dst_emb_vec, j) = local_emb_vec.at(dst_emb_vec, j) + 0.5f;
+          local_emb_vec.at(dst_emb_vec, j) = 0.5f;
       }
       dma.copy local_emb_vec => output_emb_vec.chunkat(p#q, _);
     }
