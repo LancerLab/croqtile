@@ -1,6 +1,10 @@
 // cse/embedding_cache_replace.co - 嵌入缓存替换内核的Choreo实现
 
 #include "choreo.h"  // 引入Choreo头文件，提供必要的类型和API
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
 
 // 定义常量
 #define CAPACITY 1024         // 缓存容量（集合数量）
@@ -8,6 +12,10 @@
 #define WARP_SIZE 32          // Warp大小
 #define EMB_VEC_SIZE 64       // 嵌入向量大小
 #define EMPTY_KEY 0xFFFFFFFF  // 空键标记
+#define TEST_SET_SIZE 4       // 测试用的集合大小
+#define TEST_WAY_SIZE 2       // 测试用的路数
+#define TEST_SLOT_SIZE 8      // 测试用的槽位数
+#define TEST_VEC_SIZE 16      // 测试用的向量维度
 
 // 最简单的Choreo函数，仅用于验证语法
 __co__ void embedding_cache_replace_minimal() {
@@ -50,17 +58,14 @@ __co__ void embedding_cache_replace_with_2d_array() {
 }
 
 // 简化版的嵌入缓存替换功能
-__co__ void embedding_cache_replace_basic() {
-  // 定义一个小型缓存
-  u32 [4, 2, 8] keys;          // 4个集合，每个有2路，每路8个槽位，存储key
-  f32 [4, 2, 8, 16] values;    // 嵌入向量，4x2x8组，每组16维
-  u32 [4, 2, 8] counters;      // 访问计数器
-  
+__co__ void embedding_cache_replace_basic(u32[TEST_SET_SIZE, TEST_WAY_SIZE, TEST_SLOT_SIZE] keys,
+                                         f32[TEST_SET_SIZE, TEST_WAY_SIZE, TEST_SLOT_SIZE, TEST_VEC_SIZE] values,
+                                         u32[TEST_SET_SIZE, TEST_WAY_SIZE, TEST_SLOT_SIZE] counters) {
   // 初始化缓存
   parallel p by 1 {
-    with set_idx in [4] {
-      with way_idx in [2] {
-        with slot_idx in [8] {
+    with set_idx in [TEST_SET_SIZE] {
+      with way_idx in [TEST_WAY_SIZE] {
+        with slot_idx in [TEST_SLOT_SIZE] {
           foreach set_idx, way_idx, slot_idx {
             keys.at(set_idx, way_idx, slot_idx) = 0;  // 所有key初始化为0（空）
             counters.at(set_idx, way_idx, slot_idx) = 0;  // 计数器初始化为0
@@ -73,8 +78,8 @@ __co__ void embedding_cache_replace_basic() {
   // 模拟查询处理
   parallel p by 1 {
     with set_idx in [1] {
-      with way_idx in [2] {
-        with slot_idx in [8] {
+      with way_idx in [TEST_WAY_SIZE] {
+        with slot_idx in [TEST_SLOT_SIZE] {
           foreach set_idx, way_idx, slot_idx {
             // 这里只是示例，实际应基于查询key
             if (slot_idx == 0) {
@@ -89,45 +94,11 @@ __co__ void embedding_cache_replace_basic() {
 }
 
 // 实现LRU策略的嵌入缓存替换函数
-__co__ void embedding_cache_replace_lru() {
-  // 定义一个小型缓存
-  u32 [4, 2, 8] keys;          // 4个集合，每个有2路，每路8个槽位，存储key
-  u32 [4, 2, 8, 16] values;    // 嵌入向量，4x2x8组，每组16维（用u32简化）
-  u32 [4, 2, 8] counters;      // 访问计数器
-  
-  // 初始化缓存
-  parallel p by 1 {
-    with set_idx in [4] {
-      with way_idx in [2] {
-        with slot_idx in [8] {
-          foreach set_idx, way_idx, slot_idx {
-            keys.at(set_idx, way_idx, slot_idx) = 0;  // 所有key初始化为0（空）
-            counters.at(set_idx, way_idx, slot_idx) = 0;  // 计数器初始化为0
-          }
-        }
-      }
-    }
-  }
-  
-  // 模拟设置一些初始键和计数器值
-  parallel p by 1 {
-    with set_idx in [1] {
-      with way_idx in [1] {
-        with slot_idx in [2] {
-          foreach set_idx, way_idx, slot_idx {
-            if (slot_idx == 0) {
-              keys.at(set_idx, way_idx, slot_idx) = 100;  // 第0槽位key=100
-              counters.at(set_idx, way_idx, slot_idx) = 5; // 计数器=5
-            } else {
-              keys.at(set_idx, way_idx, slot_idx) = 200;  // 第1槽位key=200
-              counters.at(set_idx, way_idx, slot_idx) = 10; // 计数器=10
-            }
-          }
-        }
-      }
-    }
-  }
-  
+__co__ void embedding_cache_replace_lru(u32[TEST_SET_SIZE, TEST_WAY_SIZE, TEST_SLOT_SIZE] keys,
+                                       u32[TEST_SET_SIZE, TEST_WAY_SIZE, TEST_SLOT_SIZE, TEST_VEC_SIZE] values,
+                                       u32[TEST_SET_SIZE, TEST_WAY_SIZE, TEST_SLOT_SIZE] counters,
+                                       u32[1] new_key,
+                                       u32[TEST_VEC_SIZE] new_value) {
   // 实现LRU替换 - 查找计数器最小的槽位
   u32 [1] min_counter;  // 存储最小计数器值
   u32 [1] min_way;      // 存储最小计数器对应的way
@@ -146,8 +117,8 @@ __co__ void embedding_cache_replace_lru() {
   
   // 寻找最小计数器值（简化条件逻辑）
   parallel p by 1 {
-    with way_idx in [2] {
-      with slot_idx in [8] {
+    with way_idx in [TEST_WAY_SIZE] {
+      with slot_idx in [TEST_SLOT_SIZE] {
         foreach way_idx, slot_idx {
           // 只在有效key上比较计数器
           if (keys.at(0, way_idx, slot_idx) != 0) {
@@ -166,13 +137,13 @@ __co__ void embedding_cache_replace_lru() {
   parallel p by 1 {
     with i in [1] {
       foreach i {
-        // 将键123替换到LRU位置
-        keys.at(0, min_way.at(i), min_slot.at(i)) = 123;
+        // 将新键替换到LRU位置
+        keys.at(0, min_way.at(i), min_slot.at(i)) = new_key.at(0);
         
-        // 更新相应的值（这里只是示例，实际应从输入复制）
-        with j in [16] {
+        // 更新相应的值
+        with j in [TEST_VEC_SIZE] {
           foreach j {
-            values.at(0, min_way.at(i), min_slot.at(i), j) = 5;  // 所有向量分量赋值为5
+            values.at(0, min_way.at(i), min_slot.at(i), j) = new_value.at(j);
           }
         }
         
@@ -181,4 +152,147 @@ __co__ void embedding_cache_replace_lru() {
       }
     }
   }
+}
+
+// 优化版本 - 使用多个线程并行处理不同的set
+__co__ void embedding_cache_replace_lru_optimized(u32[TEST_SET_SIZE, TEST_WAY_SIZE, TEST_SLOT_SIZE] keys,
+                                                u32[TEST_SET_SIZE, TEST_WAY_SIZE, TEST_SLOT_SIZE, TEST_VEC_SIZE] values,
+                                                u32[TEST_SET_SIZE, TEST_WAY_SIZE, TEST_SLOT_SIZE] counters,
+                                                u32[1] new_key,
+                                                u32[TEST_VEC_SIZE] new_value) {
+  parallel p by 2 { // 使用2个cluster
+    parallel q by 2 { // 每个cluster使用2个threads
+      // 计算每个线程处理的set数量
+      int set_per_thread = TEST_SET_SIZE / (#p * #q);
+      int start_set = (p * #q + q) * set_per_thread;
+      int end_set = start_set + set_per_thread;
+      
+      // 为每个线程分配本地变量
+      local u32[1] min_counter;
+      local u32[1] min_way;
+      local u32[1] min_slot;
+      
+      // 处理每个分配的set
+      for (int set_idx = start_set; set_idx < end_set; ++set_idx) {
+        if (set_idx < TEST_SET_SIZE) {
+          // 初始化为最大值
+          min_counter[0] = 100;
+          min_way[0] = 0;
+          min_slot[0] = 0;
+          
+          // 寻找最小计数器值
+          for (int way_idx = 0; way_idx < TEST_WAY_SIZE; ++way_idx) {
+            for (int slot_idx = 0; slot_idx < TEST_SLOT_SIZE; ++slot_idx) {
+              if (keys.at(set_idx, way_idx, slot_idx) != 0) {
+                if (counters.at(set_idx, way_idx, slot_idx) < min_counter[0]) {
+                  min_counter[0] = counters.at(set_idx, way_idx, slot_idx);
+                  min_way[0] = way_idx;
+                  min_slot[0] = slot_idx;
+                }
+              }
+            }
+          }
+          
+          // 执行替换
+          keys.at(set_idx, min_way[0], min_slot[0]) = new_key.at(0);
+          
+          // 更新值
+          for (int j = 0; j < TEST_VEC_SIZE; ++j) {
+            values.at(set_idx, min_way[0], min_slot[0], j) = new_value.at(j);
+          }
+          
+          // 更新计数器
+          counters.at(set_idx, min_way[0], min_slot[0]) = 20;
+        }
+      }
+    }
+  }
+}
+
+// --- main函数：测试嵌入缓存替换 ---
+int main() {
+    // 定义测试用的缓存数据
+    uint32_t keys[TEST_SET_SIZE][TEST_WAY_SIZE][TEST_SLOT_SIZE] = {0};
+    uint32_t values[TEST_SET_SIZE][TEST_WAY_SIZE][TEST_SLOT_SIZE][TEST_VEC_SIZE] = {0};
+    uint32_t counters[TEST_SET_SIZE][TEST_WAY_SIZE][TEST_SLOT_SIZE] = {0};
+    uint32_t new_key = 123;
+    uint32_t new_value[TEST_VEC_SIZE];
+    
+    // 初始化测试数据
+    for (int i = 0; i < TEST_SET_SIZE; i++) {
+        for (int j = 0; j < TEST_WAY_SIZE; j++) {
+            for (int k = 0; k < TEST_SLOT_SIZE; k++) {
+                keys[i][j][k] = (i * 100) + (j * 10) + k + 1;  // 设置唯一键，从1开始避免0
+                counters[i][j][k] = (k + 1) * 5;  // 设置不同的计数器值
+                
+                for (int l = 0; l < TEST_VEC_SIZE; l++) {
+                    values[i][j][k][l] = l;  // 简单值
+                }
+            }
+        }
+    }
+    
+    // 设置新值
+    for (int i = 0; i < TEST_VEC_SIZE; i++) {
+        new_value[i] = 100 + i;
+    }
+    
+    // 创建Choreo视图
+    auto keys_view = choreo::make_spanview<3, choreo::u32>((uint32_t*)keys, {TEST_SET_SIZE, TEST_WAY_SIZE, TEST_SLOT_SIZE});
+    auto values_view = choreo::make_spanview<4, choreo::u32>((uint32_t*)values, {TEST_SET_SIZE, TEST_WAY_SIZE, TEST_SLOT_SIZE, TEST_VEC_SIZE});
+    auto counters_view = choreo::make_spanview<3, choreo::u32>((uint32_t*)counters, {TEST_SET_SIZE, TEST_WAY_SIZE, TEST_SLOT_SIZE});
+    auto new_key_view = choreo::make_spanview<1, choreo::u32>(&new_key, {1});
+    auto new_value_view = choreo::make_spanview<1, choreo::u32>(new_value, {TEST_VEC_SIZE});
+    
+    // 打印替换前的状态
+    printf("替换前第一个集合的状态:\n");
+    for (int j = 0; j < TEST_WAY_SIZE; j++) {
+        for (int k = 0; k < TEST_SLOT_SIZE; k++) {
+            printf("Key[0][%d][%d] = %u, Counter = %u, Values = [%u, %u, ...]\n", 
+                   j, k, keys[0][j][k], counters[0][j][k], values[0][j][k][0], values[0][j][k][1]);
+        }
+    }
+    
+    // 调用LRU替换函数
+    // embedding_cache_replace_lru(keys_view, values_view, counters_view, new_key_view, new_value_view);
+    
+    // 使用优化版本
+    embedding_cache_replace_lru_optimized(keys_view, values_view, counters_view, new_key_view, new_value_view);
+    
+    // 打印替换后的状态
+    printf("\n替换后第一个集合的状态:\n");
+    for (int j = 0; j < TEST_WAY_SIZE; j++) {
+        for (int k = 0; k < TEST_SLOT_SIZE; k++) {
+            printf("Key[0][%d][%d] = %u, Counter = %u, Values = [%u, %u, ...]\n", 
+                   j, k, keys[0][j][k], counters[0][j][k], values[0][j][k][0], values[0][j][k][1]);
+        }
+    }
+    
+    // 验证替换是否成功
+    bool found_replacement = false;
+    for (int j = 0; j < TEST_WAY_SIZE; j++) {
+        for (int k = 0; k < TEST_SLOT_SIZE; k++) {
+            if (keys[0][j][k] == new_key) {
+                found_replacement = true;
+                printf("\n找到替换: Key[0][%d][%d] = %u\n", j, k, keys[0][j][k]);
+                
+                // 验证值是否正确
+                bool values_correct = true;
+                for (int l = 0; l < TEST_VEC_SIZE; l++) {
+                    if (values[0][j][k][l] != new_value[l]) {
+                        values_correct = false;
+                        break;
+                    }
+                }
+                printf("值替换正确: %s\n", values_correct ? "是" : "否");
+                
+                // 验证计数器是否更新
+                printf("计数器更新为: %u (应为20)\n", counters[0][j][k]);
+            }
+        }
+    }
+    
+    printf("\n嵌入缓存替换测试: %s\n", found_replacement ? "PASS" : "FAIL");
+    
+    return 0;
 }

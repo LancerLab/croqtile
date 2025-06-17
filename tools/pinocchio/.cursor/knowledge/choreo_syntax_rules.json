@@ -12,6 +12,19 @@
     "statements": {
       "termination": "Statements end with semicolons (;)",
       "blocks": "Code blocks are enclosed in curly braces {}"
+    },
+    
+    "device_functions": {
+      "co_device_functions": {
+        "description": "__co_device__ 函数用于实现设备端的计算逻辑，必须用 __cok__ {} 进行包裹",
+        "syntax": "__cok__ {\n  __co_device__ <return_type> <function_name>(<parameters>) {\n    // 设备端计算逻辑\n  }\n}",
+        "example": "__cok__ {\n  __co_device__ void fill_default(float* table, unsigned int* index) {\n    for (int i = 0; i < LEN; ++i)\n      for (int j = 0; j < EMB_VEC_SIZE; ++j) {\n        unsigned int idx_element = index[i];\n        table[idx_element * EMB_VEC_SIZE + j] = DEFAULT_VALUE;\n      }\n  }\n}",
+        "notes": [
+          "__co_device__ 函数只能处理 local 级别的数据",
+          "在 __co__ 函数中通过 call 语句调用 __co_device__ 函数",
+          "__co_device__ 函数不能直接使用 dma 或访问 global/shared 级别的数据"
+        ]
+      }
     }
   },
   
@@ -114,6 +127,76 @@
       "correct_examples": ["f32[2, 4]", "f32[CAPACITY, SET_ASSOCIATIVITY, WARP_SIZE]"],
       "incorrect_examples": ["f32[2][4]", "f32[2, 4][3]"],
       "notes": "数组声明时所有维度必须在一个方括号内以逗号分隔"
+    },
+    
+    "memory_hierarchy": {
+      "rule": "Choreo程序以parallel-by结构为划分与硬件对应",
+      "levels": [
+        "第一层parallel by结构外对应的存储为global级别",
+        "向内依次为shared级别",
+        "最内层为local级别"
+      ],
+      "examples": [
+        "global f32[N, M] global_data;",
+        "parallel p by 2 { shared f32[N/2, M] shared_data; }",
+        "parallel p by 2 { parallel q by 12 { local f32[N/2/12, M] local_data; } }"
+      ],
+      "notes": "存储层级与parallel by结构紧密相关，影响数据访问和性能"
+    },
+    
+    "data_operations": {
+      "rule": "__co__函数内的mdspan的计算只能对local级别的数据进行",
+      "exceptions": "int类型是唯一的特例，可以在任何存储层级进行表达式计算，主要用于下标/索引",
+      "notes": [
+        "所有通过.at方式访问mdspan元素时，只能用int类型或bounded var类型",
+        "bounded var只能通过with in或foreach结构定义",
+        "int类型可以从u32基础类型的数据中读取，或者直接从参数读取"
+      ]
+    },
+    
+    "parallel_indexing": {
+      "rule": "优先使用parallel by、with in、foreach创建的bounded var作为索引",
+      "correct_usage": [
+        "在parallel {p, q} by [2, 12]结构中，p和q是已经计算好的索引，可以直接用于.at()方法",
+        "使用.subspan(block_size, EMB_VEC_SIZE).at(p, q)而不是手动计算复杂的偏移量",
+        "对于一维数组，使用单个索引变量，如.subspan(block_size).at(p)"
+      ],
+      "temporarily_unsupported": [
+        "bounded var之间的表达式计算：int offset = p * (LEN/2) + q * block_size;",
+        "这类计算在未来版本的Choreo编译器中将得到支持"
+      ],
+      "workarounds": [
+        "使用inthreads块内部的int计算",
+        "使用__co_device__函数内部的计算",
+        "使用foreach结构代替直接计算"
+      ],
+      "notes": [
+        "虽然手动定义int计算offset是可行的，但在语义正确的前提下，优先使用parallel by、with in、foreach创建的bounded var",
+        "Choreo编译器会自动处理parallel索引与数据分块的映射关系",
+        "尽可能避免多个threads/cluster/blocks对相同位置的数据进行相同计算",
+        "使用bounded var索引可以使代码更简洁、更符合Choreo的编程模型，也更容易被编译器优化"
+      ],
+      "examples": [
+        "parallel {p, q} by [2, 12] { dma.copy data.subspan(block_size, EMB_VEC_SIZE).at(p, q) => local_data; }",
+        "foreach {i, j} in [N, M] { local_data.at(i, j) = value; }"
+      ]
+    },
+    
+    "data_movement": {
+      "rule": "dma是choreo中唯一进行数据搬运的方法",
+      "capabilities": "dma支持global/shared/local之间的互相搬运",
+      "examples": [
+        "dma.copy global_data => shared_data;",
+        "dma.copy shared_data => local_data;",
+        "dma.copy local_data => global_data;"
+      ],
+      "notes": "数据必须先搬运到对应层级才能进行操作"
+    },
+    
+    "function_calls": {
+      "rule": "call语句只能对local级别的数据进行",
+      "example": "call my_device_function(local_data);",
+      "notes": "需要将global或shared级别的数据先搬运到local来才能进行call操作"
     },
     "memory_placement": {
       "rule": "如需指定内存位置，可使用global、shared或local关键字",

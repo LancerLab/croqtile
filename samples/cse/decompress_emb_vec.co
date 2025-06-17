@@ -1,6 +1,7 @@
 // cse/decompress_emb_vec.co - 嵌入向量解压函数
 
 // 使用常量定义
+#include "choreo.h"
 #define LEN 1000
 #define EMB_VEC_SIZE 64
 
@@ -12,11 +13,26 @@ __co_device__ void decompress_kernel(float* dst_table, float* src_table, unsigne
         dst_table[i * EMB_VEC_SIZE + j] = src_table[idx_element * EMB_VEC_SIZE + j];
     }
 }
+
+// 带边界检查的设备函数
+__co_device__ void decompress_kernel_with_bounds(float* dst_table, float* src_table, unsigned int* index, int block_size, int tDim) {
+  int start_idx = (blockIdx.x * tDim + threadIdx.x) * block_size;
+  int end_idx = start_idx + block_size;
+
+  for (int i = start_idx; i < end_idx; ++i) {
+    if (i < LEN) {
+      unsigned int src_idx = index[i];
+      for (int j = 0; j < EMB_VEC_SIZE; ++j) {
+        dst_table[(i - start_idx) * EMB_VEC_SIZE + j] = src_table[src_idx * EMB_VEC_SIZE + j];
+      }
+    }
+  }
+  __syncthreads();
 }
 
-__co__ void decompress_emb_vec(f32 [LEN, EMB_VEC_SIZE] src_emb_vec, 
-                               u32 [LEN] src_index,
-                               f32 [LEN, EMB_VEC_SIZE] dst_emb_vec) {
+}
+
+__co__ void decompress_emb_vec(f32 [LEN, EMB_VEC_SIZE] src_emb_vec, u32 [LEN] src_index, f32 [LEN, EMB_VEC_SIZE] dst_emb_vec) {
   parallel {p, q} by [1, 1] {
     local f32 [LEN/#p/#q, EMB_VEC_SIZE] local_emb_vec_dst;
     local f32 [LEN/#p/#q, EMB_VEC_SIZE] local_emb_vec_src;
@@ -28,6 +44,63 @@ __co__ void decompress_emb_vec(f32 [LEN, EMB_VEC_SIZE] src_emb_vec,
     dma.copy local_emb_vec_dst => dst_emb_vec.chunkat(p#q, _);
   }
 }
+
+// 优化版本 - 充分利用GCU的1个cluster和10个threads
+__co__ void decompress_emb_vec_optimized(f32 [LEN, EMB_VEC_SIZE] src_emb_vec, u32 [LEN] src_index, f32 [LEN, EMB_VEC_SIZE] dst_emb_vec) {
+  parallel p by 2 { // launch 1 cluster
+    parallel q by 10 { // launch 10 sips
+      // 计算每个线程处理的数据块大小
+      int block_size = LEN / #p / #q;
+      
+      // 为每个线程分配本地存储
+      local f32[block_size, EMB_VEC_SIZE] local_emb_vec_dst;
+      local f32[LEN, EMB_VEC_SIZE] local_emb_vec_src;
+      local u32[LEN] local_index;
+      
+      // 从全局内存拷贝数据到本地
+      dma.copy dst_emb_vec.chunkat(p#q, _) => local_emb_vec_dst;
+      dma.copy src_emb_vec => local_emb_vec_src;
+      dma.copy src_index => local_index;
+      
+      call decompress_kernel_with_bounds(local_emb_vec_dst, local_emb_vec_src, local_index, block_size, #q);
+      
+      // 将结果写回全局内存
+      dma.copy local_emb_vec_dst => dst_emb_vec.chunkat(p#q, _);
+    }
+  }
+}
+
+// 新增版本 - parallel q by 12, 余数用 inthreads 处理
+// __co__ void decompress_emb_vec_with_reminder(f32 [LEN, EMB_VEC_SIZE] src_emb_vec, u32 [LEN] src_index, f32 [LEN, EMB_VEC_SIZE] dst_emb_vec) {
+//   parallel p by 2 {
+//     parallel q by 12 {
+//       int block_size = LEN / #p / #q;
+//       int total_main = block_size * #p * #q;
+//       int remain = LEN - total_main;
+//       local f32[block_size, EMB_VEC_SIZE] local_emb_vec_dst;
+//       local f32[LEN, EMB_VEC_SIZE] local_emb_vec_src;
+//       local u32[LEN] local_index;
+//       dma.copy dst_emb_vec.chunkat(p#q, _) => local_emb_vec_dst;
+//       dma.copy src_emb_vec => local_emb_vec_src;
+//       dma.copy src_index => local_index;
+//       call decompress_kernel_with_bounds(local_emb_vec_dst, local_emb_vec_src, local_index, block_size, #q);
+//       dma.copy local_emb_vec_dst => dst_emb_vec.chunkat(p#q, _);
+// 
+//       // 余数部分用 inthreads 处理
+//       inthreads (p == 0 && q == 0) {
+//         local f32[remain, EMB_VEC_SIZE] local_emb_vec_dst;
+//         local f32[LEN, EMB_VEC_SIZE] local_emb_vec_src;
+//         local u32[LEN] local_index;
+//         // TODO: modspan may not work for 2D
+//         dma.copy dst_emb_vec.modspan(block_size).at(p#q, _) => local_emb_vec_dst;
+//         dma.copy src_emb_vec => local_emb_vec_src;
+//         dma.copy src_index => local_index;
+//         call decompress_kernel_with_bounds(local_emb_vec_dst, local_emb_vec_src, local_index, remain, 1);
+//         dma.copy local_emb_vec_dst => dst_emb_vec.modspan(block_size, _).at(p#q, _);
+//       }
+//     }
+//   }
+// }
 
 // ================== CPU参考实现搬运 ==================
 #include <stdint.h>
@@ -103,8 +176,6 @@ void decompress_emb_vec_cpu_advanced(const float* src_emb_vec, const uint32_t* s
 
 // ================== main测试函数 ==================
 int main() {
-    const int LEN = 1000;
-    const int EMB_VEC_SIZE = 64;
     float src_emb_vec[LEN][EMB_VEC_SIZE];
     uint32_t src_index[LEN];
     float dst_choreo[LEN][EMB_VEC_SIZE] = {0};
@@ -125,11 +196,18 @@ int main() {
     // choreo算子调用
     auto src_index_view = choreo::make_spanview<1, choreo::u32>((uint32_t*)src_index, {LEN});
     auto src_emb_vec_view = choreo::make_spanview<2, choreo::f32>((float*)src_emb_vec, {LEN, EMB_VEC_SIZE});
-    auto dst_choreo_view = decompress_emb_vec(src_emb_vec_view, src_index_view);
-    // 拷贝choreo结果到dst_choreo
-    for (int i = 0; i < LEN; ++i)
-        for (int j = 0; j < EMB_VEC_SIZE; ++j)
-            dst_choreo[i][j] = dst_choreo_view.at(i, j);
+    auto dst_choreo_view = choreo::make_spanview<2, choreo::f32>((float*)dst_choreo, {LEN, EMB_VEC_SIZE});
+    
+    // 原始版本
+    // decompress_emb_vec(src_emb_vec_view, src_index_view, dst_choreo_view);
+    
+    // 使用优化版本
+    decompress_emb_vec_optimized(src_emb_vec_view, src_index_view, dst_choreo_view);
+
+    // with remainder handling
+    // decompress_emb_vec_with_reminder(src_emb_vec_view, src_index_view, dst_choreo_view);
+    
+    // 不再需要手动拷贝，因为我们直接使用dst_choreo作为输出
     // 校验
     int fail = 0;
     for (int i = 0; i < LEN; ++i) {

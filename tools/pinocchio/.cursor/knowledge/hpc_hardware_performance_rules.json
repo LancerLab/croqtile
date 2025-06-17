@@ -1,6 +1,30 @@
 {
-  "version": "1.0",
+  "version": "1.1",
   "description": "Hardware performance optimization rules for Choreo",
+  
+  "hardware_targets": {
+    "GCU": {
+      "description": "GCU (Graph Computing Unit) 是一种DSA (Domain-Specific Architecture)",
+      "structure": "GCU最大支持2个cluster，每个cluster内最多12个threads",
+      "parallel_structure": "对应GCU设备的choreo程序需要两层parallel by结构",
+      "example": "parallel {p, q} by [2, 12] 或 parallel p by 2 { parallel q by 12 { ... } }",
+      "memory_hierarchy": "global -> shared -> local，对应第一层parallel by外、第一层与第二层之间、第二层parallel by内",
+      "notes": [
+        "GCU设备是默认目标设备",
+        "与GPU不同，GCU需要两层parallel by结构",
+        "GCU的cluster最大数量是2，每个cluster内threads最大数量是12"
+      ]
+    },
+    "GPU": {
+      "description": "GPU (Graphics Processing Unit)",
+      "parallel_structure": "对应GPU设备的choreo程序通常只需要一层parallel by",
+      "example": "parallel p by N { ... }",
+      "notes": [
+        "GPU通常有更多的并行单元，但每个单元的计算能力相对较弱",
+        "GPU适合大规模并行计算"
+      ]
+    }
+  },
   
   "memory_hierarchy": {
     "priority": "优先使用寄存器/共享内存存放热点数据，减少全局内存访问",

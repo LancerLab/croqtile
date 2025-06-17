@@ -1,6 +1,6 @@
 // cse/merge_emb_vec.co - 嵌入向量合并函数（op2版本）
 
-// 使用常量定义
+#include "choreo.h"
 #define LEN 1000
 #define EMB_VEC_SIZE 64
 
@@ -12,6 +12,26 @@ __co_device__ void fill_missing(float* dst_table, float* src_table, unsigned int
         dst_table[idx_element * EMB_VEC_SIZE + j] = src_table[i * EMB_VEC_SIZE + j];
     }
 }
+
+// 带边界检查的设备函数
+__co_device__ void fill_missing_with_bounds(float* dst_table, float* src_table, unsigned int* index, int block_size, int bDim, int tDim) {
+  int start_idx = (blockIdx.x * tDim + threadIdx.x) * block_size;
+  int end_idx = start_idx + block_size;
+
+  for (int i = 0; i < LEN; ++i) {
+    unsigned int dst_idx = index[i];
+    // 检查索引是否在当前线程负责范围内
+    if (dst_idx >= start_idx && dst_idx < end_idx) {
+      // 转换为局部索引
+      int local_dst_idx = dst_idx - start_idx;
+      for (int j = 0; j < EMB_VEC_SIZE; ++j) {
+        dst_table[local_dst_idx * EMB_VEC_SIZE + j] = src_table[i * EMB_VEC_SIZE + j];
+      }
+    }
+  }
+  __syncthreads();
+}
+
 }
 
 // 实现merge_emb_vec函数 - 与CUDA核心对应
@@ -27,6 +47,32 @@ __co__ void merge_emb_vec(f32[LEN, EMB_VEC_SIZE] missing_emb_vec, u32[LEN] missi
     dma.copy local_emb_vec_dst => output_emb_vec.chunkat(p#q, _);
   }
 }
+
+// 优化版本 - 充分利用GCU的2个cluster和每个cluster的10个threads
+__co__ void merge_emb_vec_optimized(f32[LEN, EMB_VEC_SIZE] missing_emb_vec, u32[LEN] missing_index, f32[LEN, EMB_VEC_SIZE] output_emb_vec) {
+  parallel p by 2 { // launch 1 cluster
+    parallel q by 10 { // launch 10 sips
+      // 计算每个线程处理的数据块大小
+      int block_size = LEN / #p / #q;
+      
+      // 为每个线程分配本地存储
+      local f32[block_size, EMB_VEC_SIZE] local_emb_vec_dst;
+      local f32[LEN, EMB_VEC_SIZE] local_emb_vec_src;
+      local u32[LEN] local_index;
+      
+      // 从全局内存拷贝数据到本地
+      dma.copy output_emb_vec.chunkat(p#q, _) => local_emb_vec_dst;
+      dma.copy missing_emb_vec => local_emb_vec_src;
+      dma.copy missing_index => local_index;
+      
+      call fill_missing_with_bounds(local_emb_vec_dst, local_emb_vec_src, local_index, block_size, #p, #q);
+      
+      // 将结果写回全局内存
+      dma.copy local_emb_vec_dst => output_emb_vec.chunkat(p#q, _);
+    }
+  }
+}
+
 
 // ================== CPU参考实现搬运 ==================
 #include <stdint.h>
@@ -106,7 +152,13 @@ int main() {
     auto missing_index_view = choreo::make_spanview<1, choreo::u32>((uint32_t*)missing_index, {LEN});
     auto missing_emb_vec_view = choreo::make_spanview<2, choreo::f32>((float*)missing_emb_vec, {LEN, EMB_VEC_SIZE});
     auto output_choreo_view = choreo::make_spanview<2, choreo::f32>((float*)output_choreo, {LEN, EMB_VEC_SIZE});
-    merge_emb_vec(missing_emb_vec_view, missing_index_view, output_choreo_view);
+    
+    // 原始版本
+    // merge_emb_vec(missing_emb_vec_view, missing_index_view, output_choreo_view);
+    
+    // 使用优化版本
+    merge_emb_vec_optimized(missing_emb_vec_view, missing_index_view, output_choreo_view);
+    
     // 校验
     int fail = 0;
     for (int i = 0; i < LEN; ++i) {

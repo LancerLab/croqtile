@@ -16,6 +16,31 @@ __co_device__ void fill_default(float* table, unsigned int* index) {
     }
 }
 
+// 带边界检查的设备函数
+__co_device__ void fill_default_with_bounds(float* output, unsigned int* index, int block_size, int bDim, int tDim) {
+  int start_idx = (blockIdx.x * tDim + threadIdx.x) * block_size;
+  int end_idx = start_idx + block_size;
+
+  // if (blockIdx.x == 1 && threadIdx.x == 1) printf("blockDim.x, threadDim.x {%d, %d}\n", blockDim.x, threadDim.x);
+  // if (blockIdx.x == 1 && threadIdx.x == 1) printf("kenrel {%d, %d}\n", blockIdx.x, threadIdx.x);
+  // if (blockIdx.x == 1 && threadIdx.x == 1) printf("valid range = {%d, %d}\n", start_idx, end_idx);
+  for (int i = 0; i < LEN; ++i) {
+    unsigned int dst_idx = index[i];
+    // if (blockIdx.x == 1 && threadIdx.x == 1) printf("i = %d; idx = %d\n", i, dst_idx);
+    // if (blockIdx.x == 1 && threadIdx.x == 1) printf("hit or not = %s\n", ((dst_idx >= start_idx && dst_idx < end_idx) ? "true" : "false"));
+    // 检查索引是否在当前线程负责范围内
+    if (dst_idx >= start_idx && dst_idx < end_idx) {
+      // 转换为局部索引
+      int local_dst_idx = dst_idx - start_idx;
+      // 使用循环展开提高性能
+      for (int j = 0; j < EMB_VEC_SIZE; ++j) {
+        output[local_dst_idx * EMB_VEC_SIZE + j] = DEFAULT_VALUE;
+      }
+    }
+  }
+  __syncthreads();
+}
+
 }
 
 // 实现fill_default_emb_vec函数 - 未优化版本
@@ -24,7 +49,7 @@ __co__ void fill_default_emb_vec(u32[LEN] missing_index, f32[LEN, EMB_VEC_SIZE] 
   parallel p by 1 {
     parallel q by 1 {
       local f32[LEN/#p/#q, EMB_VEC_SIZE] local_emb_vec;
-      local u32[LEN/#p/#q] index;
+      local u32[LEN] index;
       dma.copy output_emb_vec.chunkat(p#q, _) => local_emb_vec;
       dma.copy missing_index.chunkat(p#q) => index;
     //   foreach {i, j} in [LEN/#p/#q, EMB_VEC_SIZE] {
@@ -37,20 +62,75 @@ __co__ void fill_default_emb_vec(u32[LEN] missing_index, f32[LEN, EMB_VEC_SIZE] 
   }
 }
 
-__co__ void fill_default_emb_vec_direct(u32[LEN] missing_index, f32[LEN, EMB_VEC_SIZE] output_emb_vec) {
+// TODO: not support int as at, has scoped name
+// __co__ void fill_default_emb_vec_direct(u32[LEN] missing_index, f32[LEN, EMB_VEC_SIZE] output_emb_vec) {
+// 
+//   parallel p by 1 {
+//     parallel q by 1 {
+//       local f32[LEN/#p/#q, EMB_VEC_SIZE] local_emb_vec;
+//       local u32[LEN] index;
+//       dma.copy output_emb_vec.chunkat(p#q, _) => local_emb_vec;
+//       dma.copy missing_index => index;
+//       foreach {i, j} in [LEN/#p/#q, EMB_VEC_SIZE] {
+//           int dst_emb_vec = missing_index.at(i);
+//           local_emb_vec.at(dst_emb_vec, j) = 0.5f;
+//       }
+//       dma.copy local_emb_vec => output_emb_vec.chunkat(p#q, _);
+//     }
+//   }
+// }
 
-  parallel p by 1 {
-    parallel q by 1 {
-      local f32[LEN/#p/#q, EMB_VEC_SIZE] local_emb_vec;
-      local u32[LEN/#p/#q] index;
-      dma.copy output_emb_vec.chunkat(p#q, _) => local_emb_vec;
-      dma.copy missing_index.chunkat(p#q) => index;
-      foreach {i, j} in [LEN/#p/#q, EMB_VEC_SIZE] {
-          int dst_emb_vec = missing_index.at(i);
-          local_emb_vec.at(dst_emb_vec, j) = local_emb_vec.at(dst_emb_vec, j) + 0.5f;
-      }
-      dma.copy local_emb_vec => output_emb_vec.chunkat(p#q, _);
+// TODO: 1. call use global not report; 2. at use non-local.
+// 优化版本 - 充分利用GCU的2个cluster和每个cluster的12个threads
+__co__ void fill_default_emb_vec_optimized(u32[LEN] missing_index, f32[LEN, EMB_VEC_SIZE] output_emb_vec) {
+  // TODO: when p == 2, error
+  parallel p by 2 { // launch 1 cluster
+
+    // style 2, copy from global to shared, then from shared to local
+    shared f32[LEN / #p, EMB_VEC_SIZE] shared_emb_vec;
+    shared u32[LEN] shared_index;
+    dma.copy output_emb_vec.chunkat(p, _) => shared_emb_vec;
+    dma.copy missing_index => shared_index;
+
+    parallel q by 10 { // launch 10 sips
+      // 计算每个线程处理的数据块大小
+      int block_size = LEN / #p / #q;
+      
+      // 为每个线程分配本地存储
+      local f32[block_size, EMB_VEC_SIZE] local_emb_vec;
+      local u32[LEN] local_index;
+      
+      // 从全局内存拷贝数据到本地
+      // TODO: subspan not report shape error
+      // style 1, use subspan, this syntax use like tile to
+      dma.copy shared_emb_vec.subspan(block_size, EMB_VEC_SIZE).at(q, _) => local_emb_vec;
+      dma.copy missing_index => local_index;
+
+      // style 2, use chunkat, this syntax use like tile by
+      // dma.copy shared_emb_vec.chunkat(q, _) => local_emb_vec;
+      // dma.copy shared_index => local_index;
+
+      // style 3, copy from global to local directly
+      // dma.copy output_emb_vec.chunkat(p#q, _) => local_emb_vec;
+      // dma.copy missing_index => local_index;
+      
+      // println("call kernel at p = ", p);
+      // println(", q = ", q);
+      // mutable int x = p;
+      // mutable int x = 5;
+      // local_emb_vec.at(i, j) = 0.5f;
+      call fill_default_with_bounds(local_emb_vec, local_index, block_size, #p, #q);
+      
+      // 将结果写回全局内存
+
+      // style 3
+      // dma.copy local_emb_vec => output_emb_vec.chunkat(p#q, _);
+
+      // style 2
+      dma.copy local_emb_vec => shared_emb_vec.chunkat(q, _);
     }
+    // style 2
+    dma.copy shared_emb_vec => output_emb_vec.chunkat(p, _);
   }
 }
 
@@ -111,8 +191,9 @@ int main() {
     float output_cpu[LEN][EMB_VEC_SIZE] = {0};
     unsigned int missing_index[LEN];
     for (int i = 0; i < LEN; ++i) missing_index[i] = rand() % LEN;
+    // for (int i = 0; i < LEN; ++i) missing_index[i] = 5;
 
-    for (int i = 0; i < LEN; ++i) printf("missing index[%d] = %d\n", i, missing_index[i]);
+    // for (int i = 0; i < LEN; ++i) printf("missing index[%d] = %d\n", i, missing_index[i]);
 
     // CPU实现
     fill_default_emb_vec_cpu(&output_cpu[0][0], DEFAULT_VALUE, missing_index, LEN, EMB_VEC_SIZE);
@@ -120,17 +201,29 @@ int main() {
     // choreo调用
     auto missing_index_view = choreo::make_spanview<1, choreo::u32>((unsigned int*)missing_index, {LEN});
     auto output_choreo_view = choreo::make_spanview<2, choreo::f32>((float*)output_choreo, {LEN, EMB_VEC_SIZE});
-    fill_default_emb_vec(missing_index_view, output_choreo_view);
+    
+    // 如果需要对比原始版本，可以取消下面的注释
+    // fill_default_emb_vec(missing_index_view, output_choreo_view);
+    
+    // use direct computation not call
+    // fill_default_emb_vec_direct(missing_index_view, output_choreo_view);
+    
+    // 使用优化版本的函数
+    fill_default_emb_vec_optimized(missing_index_view, output_choreo_view);
+
+    // 使用新的优化版本v2
+    // fill_default_emb_vec_optimized_v2(missing_index_view, output_choreo_view);
 
     // 校验
     bool match = true;
     for (int i = 0; i < LEN; ++i) {
         for (int j = 0; j < EMB_VEC_SIZE; ++j) {
-            if (i < 3 && j < 16) printf("{%d, %d} = %.2f; should be", i, j, output_choreo[i][j]);
-            if (i < 3 && j < 16) printf("{%d, %d} = %.2f\n", i, j, output_cpu[i][j]);
+            // if (i < 3 && j < 16) printf("{%d, %d} = %.2f; should be", i, j, output_choreo[i][j]);
+            // if (i < 3 && j < 16) printf("{%d, %d} = %.2f\n", i, j, output_cpu[i][j]);
             if (fabs(output_choreo[i][j] - output_cpu[i][j]) > 1e-5) {
+                printf("error location: {%d, %d} = %.2f vs %.2f\n", i, j, output_choreo[i][j], output_cpu[i][j]);
                 match = false;
-                break;
+                // break;
             }
         }
     }
