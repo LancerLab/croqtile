@@ -1,0 +1,56 @@
+
+__cok__ {
+__co_device__ extern "C" void kernel(int* i, char* ii) {
+  i[0] += 1;
+}
+}
+
+__co__ auto foo(s8[N,8] input, int x, int y, int z) {
+  f32[4,8] o;
+
+  int xx = x - (y - z);
+  int yy = (x > 5) ? y : z + 3;
+  if ((yy > z) && (yy < x) || (x > y))
+    println(xx, yy, yy);
+  if ((yy > z) && ((yy < x) || (x > y)))
+    println(xx, yy, yy);
+  if (((yy > z) && ((yy < x)) || (x > y)))
+    println(xx, yy, yy);
+
+  mds : input.span + {2, 4};
+
+  mutable mx = 10;
+  mutable my = 100;
+
+  foreach {i, j} in [4, 8] {
+    mx = (#i + |mds|) * x;
+    my = cdiv(cdiv(x, y), cdiv(|mds|, mx)) % z + mx;
+    k = i #+ 3;
+    parallel by 1
+      dma.copy input.chunkat(k#j#i, _) => local;
+  }
+
+  return o;
+}
+
+// auto anon_1 = (k * 8 + __iv_j) * 4 + __iv_i;
+// if (((x > 5) ? y : (z + 3)) > z && ((x > 5) ? y : (z + 3)) < x || x > y)
+// if (((x > 5) ? y : (z + 3)) > z && (((x > 5) ? y : (z + 3)) < x || x > y))
+// if (((x > 5) ? y : (z + 3)) > z && ((x > 5) ? y : (z + 3)) < x || x > y)
+// mx = (4 + ((N + 2) * 12)) * x;
+// my = ((x + y - 1) / y + (((N + 2) * 12) + mx - 1) / mx - 1) / ((((N + 2) * 12) + mx - 1) / mx) % z + mx;
+
+
+int main() {
+  auto input = choreo::make_spandata<choreo::s8>(4, 8);
+  input.fill(99);
+  
+  auto res = foo(input.view(), 1, 2, 3);
+
+  for (int i = 0; i < res.shape()[0]; ++i) {
+    for (int j = 0; j < res.shape()[1]; ++j) {
+      std::cout << res[i][j] << " ";
+    }
+    std::cout << std::endl;
+  }
+}

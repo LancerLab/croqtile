@@ -240,6 +240,7 @@ bool TypeInference::Visit(AST::NamedVariableDecl& n) {
 
   if (cur_type && !SetAsCurrentType(n, n.name_str)) {
     cur_type.reset();
+    assert(false);
     return false;
   }
 
@@ -309,6 +310,11 @@ bool TypeInference::Visit(AST::NamedTypeDecl& n) {
     dbgs() << "Partial:   " << InScopeName(n.name_str)
            << ", Type: " << AST::TYPE_STR(n) << "\n";
   }
+
+  // The node only occurs when decl named mdspan.
+  // So the type is unnecessary to propagate.
+  cur_type.reset();
+
   return true;
 }
 
@@ -345,15 +351,16 @@ bool TypeInference::Visit(AST::Assignment& n) {
     n.SetNote("ref");
 
   if (SSTab().IsDeclared(n.GetName())) {
+    auto vty = GetSymbolType(n.LOC(), n.GetName());
     auto ety = NodeType(*n.value);
-    if (isa<FutureType>(ety) || IsMutable(*ety)) {
+    if (isa<FutureType>(vty)) {
       // no type inference is necessary
       SetNodeType(n, ety);
       SetNodeType(*n.da, ety);
       cur_type.reset();
       return true;
-    } else if (auto vty = GetSymbolType(n.da->LOC(), n.GetName());
-               IsMutable(*vty)) {
+    } else if (IsMutable(*vty)) {
+      // no type inference is necessary
       SetNodeType(n, vty);
       SetNodeType(*n.da, vty);
       cur_type.reset();
@@ -362,7 +369,7 @@ bool TypeInference::Visit(AST::Assignment& n) {
       Error(n.LOC(),
             "current choreo does not support symbol re-assignment except for "
             "future/mutable type. Current type: " +
-                PSTR(ety));
+                PSTR(vty));
       error_count++;
       SetNodeType(n, MakeUnknownType());
       cur_type.reset();
