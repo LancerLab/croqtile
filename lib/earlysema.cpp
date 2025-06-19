@@ -610,8 +610,8 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
   if (auto mvals = dyn_cast<AST::MultiValues>(n.list))
     for (auto& v : mvals->AllValues())
       if (auto il = AST::GetIntLiteral(*v))
-        if (il->value <= 0 && il->value != GetUnKnownInteger()) {
-          Error(v->LOC(), "The mdspan size \"" + std::to_string(il->value) +
+        if (il->Val() <= 0 && !IsUnKnownInteger(il->Val())) {
+          Error(v->LOC(), "The mdspan size \"" + std::to_string(il->Val()) +
                               "\" is invalid!");
           error_count++;
         }
@@ -1459,7 +1459,7 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
       // the upper bound of notile must be 1
       for (auto& i : notile_indices) {
         auto il = GetIntLiteral(*tsi->GetTilingFactors()->ValueAt(i));
-        if ((il == nullptr) || (il->value != 1)) {
+        if ((il == nullptr) || (il->Val() != 1)) {
           Error(tsi->LOC(), "upper bound of bounded variable '_' is " +
                                 PSTR(tsi->GetTilingFactors()->ValueAt(i)) +
                                 " (1 is expected).");

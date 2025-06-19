@@ -155,7 +155,7 @@ public:
     if (handle_parameter) { // make runtime values of "?" to be named
       for (size_t i = 0; i < n.values.size(); ++i) {
         if (auto il = dyn_cast<AST::IntLiteral>(n.values[i])) {
-          if (!IsUnKnownInteger(il->value)) continue;
+          if (!IsUnKnownInteger(il->Val())) continue;
           auto new_il =
               AST::Make<AST::Identifier>(il->LOC(), GetInternalValueString());
 

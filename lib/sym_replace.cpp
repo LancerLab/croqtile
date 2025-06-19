@@ -123,7 +123,7 @@ void SymReplace::InitializeNode(ptr<AST::Node> n) {
       std::string name =
           "(" + nd2sn.at(l) + ")" + ((e->op == "getith") ? "[" : "(");
       if (auto num = dyn_cast<AST::IntLiteral>(ii->value))
-        name += std::to_string(num->value);
+        name += std::to_string(num->Val());
       else if (isa<AST::Identifier>(ii->value))
         name += nd2sn.at(ii->value);
       else
@@ -360,7 +360,7 @@ void SymReplace::SymbolizeExprNode(ptr<AST::Node> n) {
         std::string name =
             "(" + nd2sn.at(L) + ")" + ((e->op == "getith") ? "[" : "(");
         if (auto num = dyn_cast<AST::IntLiteral>(ii->value))
-          name += std::to_string(num->value);
+          name += std::to_string(num->Val());
         else if (isa<AST::Identifier>(ii->value))
           name += nd2sn.at(ii->value);
         else

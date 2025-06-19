@@ -1131,8 +1131,8 @@ std::string ValueNumbering::GenerateNodeSignature(const AST::Node& node,
   }
 
   if (auto* n = dyn_cast<AST::IntLiteral>(&node)) {
-    if (IsUnKnownInteger(n->value)) return "?";
-    return "const_" + std::to_string(n->value);
+    if (IsUnKnownInteger(n->Val())) return "?";
+    return "const_" + std::to_string(n->Val());
   } else if (auto* n = dyn_cast<AST::FloatLiteral>(&node)) {
     if (n->IsFloat32()) {
       auto f32 = n->Val_f32();

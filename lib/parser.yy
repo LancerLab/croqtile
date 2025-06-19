@@ -171,6 +171,10 @@ void choreo_info(const char *message) {
 %token END 0 "end of file"
 %token <char> CHAR
 %token <int> NUM
+%token <uint32_t> U32_LITERAL
+%token <uint64_t> U64_LITERAL
+/* %token <int32_t>  S32_LITERAL */  /* which is NUM */
+%token <int64_t>  S64_LITERAL
 %token <float> FPVAL
 %token <double> DFPVAL
 %token <std::string> TRUE FALSE
@@ -180,7 +184,7 @@ void choreo_info(const char *message) {
 // type related
 %token <std::string> MDSPAN ITUPLE EVENT MUTABLE
 %token <Choreo::Storage> LOCAL SHARED GLOBAL
-%token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 INT HALF8 HALF BFP16 FLOAT DOUBLE BOOL VOID
+%token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 U64 S64 INT HALF8 HALF BFP16 FLOAT DOUBLE BOOL VOID
 // builtin operations
 %token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK SUBSPAN MODSPAN AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN
 %token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXPM1 FLOOR GELU ISFINITE ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN
@@ -348,12 +352,13 @@ param_mdspan_val
 
 num_expr
     : NUM   { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
-    | num_expr PLUS num_expr { $$ = AST::Make<AST::IntLiteral>(@1, $1->value + $3->value); }
-    | num_expr MINUS num_expr { $$ = AST::Make<AST::IntLiteral>(@1, $1->value - $3->value); }
-    | num_expr STAR num_expr { $$ = AST::Make<AST::IntLiteral>(@1, $1->value * $3->value); }
-    | num_expr SLASH num_expr { $$ = AST::Make<AST::IntLiteral>(@1, $1->value / $3->value); }
-    | num_expr PECET num_expr { $$ = AST::Make<AST::IntLiteral>(@1, $1->value % $3->value); }
-    | LPAREN num_expr RPAREN { $$ = AST::Make<AST::IntLiteral>(@1, $2->value); }
+    /* related to promotion */
+    | num_expr PLUS num_expr { $$ = AST::Make<AST::IntLiteral>(@1, $1->Val() + $3->Val()); }
+    | num_expr MINUS num_expr { $$ = AST::Make<AST::IntLiteral>(@1, $1->Val() - $3->Val()); }
+    | num_expr STAR num_expr { $$ = AST::Make<AST::IntLiteral>(@1, $1->Val() * $3->Val()); }
+    | num_expr SLASH num_expr { $$ = AST::Make<AST::IntLiteral>(@1, $1->Val() / $3->Val()); }
+    | num_expr PECET num_expr { $$ = AST::Make<AST::IntLiteral>(@1, $1->Val() % $3->Val()); }
+    | LPAREN num_expr RPAREN { $$ = AST::Make<AST::IntLiteral>(@1, $2->Val()); }
 
 void_type
     : VOID  { $$ = AST::Make<AST::DataType>(@1, $1); }
@@ -397,10 +402,15 @@ fundamental_type
     | S8    { $$ = $1; }
     | U32   { $$ = $1; }
     | S32   { $$ = $1; }
+    | U64   { $$ = $1; }
+    | S64   { $$ = $1; }
     ;
 
 simple_val
     : integer_value { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
+    | U32_LITERAL { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
+    | S64_LITERAL { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
+    | U64_LITERAL { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
     | bool_value { $$ = AST::Make<AST::BoolLiteral>(@1, $1); }
     | FPVAL  { $$ = AST::Make<AST::FloatLiteral>(@1, $1); }
     | DFPVAL { $$ = AST::Make<AST::FloatLiteral>(@1, $1); }

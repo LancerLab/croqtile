@@ -259,21 +259,49 @@ struct BoolLiteral : public Node, public TypeIDProvider<BoolLiteral> {
 };
 
 struct IntLiteral : public Node, public TypeIDProvider<IntLiteral> {
-  int value;
-  IntLiteral(const location& l, int v = GetUnKnownInteger())
+  std::variant<int, uint32_t, int64_t, uint64_t> value;
+
+  IntLiteral(const location& l)
+      : Node(l, MakeIntegerType()), value(GetUnKnownInteger()) {}
+  IntLiteral(const location& l, int v) : Node(l, MakeIntegerType()), value(v) {}
+  IntLiteral(const location& l, uint32_t v)
+      : Node(l, MakeIntegerType()), value(v) {}
+  IntLiteral(const location& l, int64_t v)
+      : Node(l, MakeIntegerType()), value(v) {}
+  IntLiteral(const location& l, uint64_t v)
       : Node(l, MakeIntegerType()), value(v) {}
 
   // allow copy construction
-  explicit IntLiteral(const IntLiteral& il) : IntLiteral(il.LOC(), il.value) {}
+  explicit IntLiteral(const IntLiteral& il)
+      : Node(il.LOC(), MakeIntegerType()), value(il.value) {}
 
-  int Val() const { return value; }
+  int64_t Val() const {
+    return std::visit([](auto x) -> int64_t { return static_cast<int64_t>(x); },
+                      value);
+  }
+
+  int ValS32() const { return std::get<int>(value); }
+  uint32_t ValU32() const { return std::get<uint32_t>(value); }
+  uint64_t ValU64() const { return std::get<uint64_t>(value); }
+  int64_t ValS64() const { return std::get<int64_t>(value); }
+
+  bool IsInt() const { return std::holds_alternative<int>(value); }
+  bool IsUint32() const { return std::holds_alternative<uint32_t>(value); }
+  bool IsInt64() const { return std::holds_alternative<int64_t>(value); }
+  bool IsUint64() const { return std::holds_alternative<uint64_t>(value); }
+
+  std::string ValAsString() const {
+    std::ostringstream oss;
+    std::visit([&oss](const auto& val) { oss << val; }, value);
+    return oss.str();
+  }
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool = false) const override {
-    if (IsUnKnownInteger(value))
+    if (IsUnKnownInteger(Val()))
       os << prefix << "?";
     else
-      os << prefix << value;
+      os << prefix << ValAsString();
   }
 
   void accept(Visitor&) override;
@@ -1002,6 +1030,8 @@ private:
     case BaseType::F32:
     case BaseType::F16:
     case BaseType::BF16:
+    case BaseType::U64:
+    case BaseType::S64:
     case BaseType::U32:
     case BaseType::S32:
     case BaseType::U16:

@@ -47,6 +47,9 @@ inline constexpr bool IsValidSigned(int v) { return v != GetInvalidSigned(); }
 inline constexpr bool IsUnKnownInteger(int v) {
   return v == GetUnKnownInteger();
 }
+inline constexpr bool IsUnKnownInteger(int64_t v) {
+  return v == GetUnKnownInteger();
+}
 inline constexpr bool IsValidFloatPoint(float v) { return !std::isnan(v); }
 inline constexpr bool IsValidFloatPoint(double v) { return !std::isnan(v); }
 inline constexpr bool IsUnKnownFloatPoint(float v) { return std::isinf(v); }

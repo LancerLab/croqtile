@@ -47,8 +47,8 @@ static bool no_line_update = false;
 %x CO_FUNC KERNEL MDSPAN_SUGER RAW_STRING
 
 id          [a-zA-Z_][a-zA-Z0-9_]*
-num         [0-9]+
-hex_num     0[xX][0-9a-fA-F]+
+num         (0|[1-9][0-9]*)[uU]?[lL]{0,2}
+hex_num     0[xX][0-9a-fA-F]+[uU]?[lL]{0,2}
 fpnum       -?[0-9]+\.[0-9]+
 fpnum_f     -?[0-9]+\.[0-9]+[fF]
 blank       [ \t\r]
@@ -165,33 +165,67 @@ cstr        \"([^"\\]|\\.)*\"
   {blank}+   {}
   \n+        {}
   {num}      {
-               char* end = nullptr;
+               bool is_unsigned = strchr(yytext, 'u') || strchr(yytext, 'U');
+               bool is_long_long = strstr(yytext, "ll") || strstr(yytext, "LL");
                errno = 0;
-               unsigned long val = std::strtoul(yytext, &end, 10);
-               if (errno == ERANGE || val > INT_MAX) {
-                 // In C++, `-2147483648` is treated as `0 - 2147483648`, which is of long type.
-                 std::string text = std::string(yytext);
-                 std::string msg = "integer literal " + text + " out of range [0, 2147483647].";
-                 if (text == "2147483648") msg += " If want to delcare '-2147483648', try '-2147483647 - 1'.";
-                 Choreo::Scanner::Error(loc, msg);
+               std::string text = std::string(yytext);
+               if (is_unsigned) {
+                 unsigned long long val = strtoull(yytext, nullptr, 10);
+                 if (errno == ERANGE) {
+                   std::string msg = "unsigned integer literal '" + text + "' out of range [0, 18446744073709551615].";
+                   Choreo::Scanner::Error(loc, msg);
+                 }
+                 if (!is_long_long && val <= std::numeric_limits<uint32_t>::max()) {
+                   // 42U → unsigned int
+                   return Choreo::Parser::make_U32_LITERAL(static_cast<uint32_t>(val), loc);
+                 } else {
+                   // 42ULL → unsigned long long
+                   return Choreo::Parser::make_U64_LITERAL(val, loc);
+                 }
+               } else {
+                 long long val = strtoll(yytext, nullptr, 10);
+                 if (errno == ERANGE) {
+                   std::string msg = "signed integer literal '" + text + "' out of range [0, 9223372036854775807].";
+                   Choreo::Scanner::Error(loc, msg);
+                 }
+                 if (!is_long_long && val <= std::numeric_limits<int>::max()) {
+                   // 42 → int
+                   return Choreo::Parser::make_NUM(static_cast<int>(val), loc);
+                 } else {
+                   // 42LL → long long
+                   return Choreo::Parser::make_S64_LITERAL(val, loc);
+                 }
                }
-               if (*end != '\0')
-                 Choreo::Scanner::Error(loc, "invalid character in integer literal.");
-               return Choreo::Parser::make_NUM(static_cast<int>(val), loc);
+               
              }
   {hex_num}  {
-               char* end = nullptr;
+               bool is_unsigned = strchr(yytext, 'u') || strchr(yytext, 'U');
+               bool is_long_long = strstr(yytext, "ll") || strstr(yytext, "LL");
                errno = 0;
-               unsigned long val = std::strtoul(yytext, &end, 16);
-               if (errno == ERANGE || val > INT_MAX) {
-                 std::string text = std::string(yytext);
-                 std::string msg = "hex integer literal " + text + " out of range [0x0, 0x7FFFFFFF].";
-                 if (text == "0x80000000") msg += " If want to delcare '-0x80000000', try '-0x7FFFFFFF - 1'.";
-                 Choreo::Scanner::Error(loc, msg);
+               std::string text = std::string(yytext);
+               if (is_unsigned) {
+                 unsigned long long val = strtoull(yytext, nullptr, 16);
+                 if (errno == ERANGE) {
+                   std::string msg = "unsigned integer literal '" + text + "' out of range [0, 0xffffffffffffffff].";
+                   Choreo::Scanner::Error(loc, msg);
+                 }
+                 if (!is_long_long && val <= std::numeric_limits<uint32_t>::max()) {
+                   return Choreo::Parser::make_U32_LITERAL(static_cast<uint32_t>(val), loc);
+                 } else {
+                   return Choreo::Parser::make_U64_LITERAL(val, loc);
+                 }
+               } else {
+                 long long val = strtoll(yytext, nullptr, 16);
+                 if (errno == ERANGE) {
+                   std::string msg = "signed integer literal '" + text + "' out of range [0, 0x7fffffffffffffff].";
+                   Choreo::Scanner::Error(loc, msg);
+                 }
+                 if (!is_long_long && val <= std::numeric_limits<int>::max()) {
+                   return Choreo::Parser::make_NUM(static_cast<int>(val), loc);
+                 } else {
+                   return Choreo::Parser::make_S64_LITERAL(val, loc);
+                 }
                }
-               if (*end != '\0')
-                 Choreo::Scanner::Error(loc, "invalid character in integer literal.");
-               return Choreo::Parser::make_NUM(static_cast<int>(val), loc);
              }
   {fpnum}    return Choreo::Parser::make_DFPVAL(std::stod(yytext), loc);
   {fpnum_f}  return Choreo::Parser::make_FPVAL(std::stof(yytext), loc);
@@ -259,6 +293,8 @@ cstr        \"([^"\\]|\\.)*\"
   "bf16"     { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_BF16(BaseType::BF16, loc); }
   "u32"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_U32(BaseType::U32, loc); }
   "s32"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_S32(BaseType::S32, loc); }
+  "u64"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_U64(BaseType::U64, loc); }
+  "s64"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_S64(BaseType::S64, loc); }
   "u16"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_U16(BaseType::U16, loc); }
   "s16"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_S16(BaseType::S16, loc); }
   "u8"       { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_U8(BaseType::U8, loc); }

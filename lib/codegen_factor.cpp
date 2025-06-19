@@ -1664,7 +1664,7 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       oss << id->name;
     }
   } else if (auto il = dyn_cast<AST::IntLiteral>(e)) {
-    oss << WrapWithValue(il->value);
+    oss << WrapWithValue(il->Val());
   } else if (auto fl = dyn_cast<AST::FloatLiteral>(e)) {
     std::string str;
     if (fl->IsFloat32()) {

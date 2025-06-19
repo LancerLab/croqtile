@@ -517,11 +517,13 @@ using bfloat16 = __bf16;
 #endif
 
 // Unsigned integer types
+using u64 = uint64_t; // 64-bit unsigned integer
 using u32 = uint32_t; // 32-bit unsigned integer
 using u16 = uint16_t; // 16-bit unsigned integer
 using u8 = uint8_t;   // 8-bit unsigned integer
 
 // Signed integer types
+using s64 = int64_t; // 64-bit signed integer
 using s32 = int32_t; // 32-bit signed integer
 using s16 = int16_t; // 16-bit signed integer
 using s8 = int8_t;   // 8-bit signed integer

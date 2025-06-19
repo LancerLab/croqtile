@@ -2633,7 +2633,7 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
                                      : ssm.DeviceName(InScopeName(id->name))));
     }
   } else if (auto il = dyn_cast<AST::IntLiteral>(e)) {
-    oss << il->value;
+    oss << il->ValAsString();
   } else if (auto fl = dyn_cast<AST::FloatLiteral>(e)) {
     std::ostringstream fp_val;
     // std::fixed: the value should be in fixed-point notation

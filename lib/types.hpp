@@ -82,6 +82,8 @@ enum class BaseType {
   F16,
   BF16,
   F8,
+  U64,
+  S64,
   U32,
   S32,
   U16,
@@ -108,9 +110,11 @@ enum class FundamentalType {
   F16 = (int)BaseType::F16,
   BF16 = (int)BaseType::BF16,
   F8 = (int)BaseType::F8,
+  U64 = (int)BaseType::U64,
   U32 = (int)BaseType::U32,
   U16 = (int)BaseType::U16,
   U8 = (int)BaseType::U8,
+  S64 = (int)BaseType::S64,
   S32 = (int)BaseType::S32,
   S16 = (int)BaseType::S16,
   S8 = (int)BaseType::S8,
@@ -118,7 +122,8 @@ enum class FundamentalType {
 };
 
 inline static bool IntegerFundamentalType(FundamentalType ft) {
-  return ft == FundamentalType::S32 || ft == FundamentalType::U32 ||
+  return ft == FundamentalType::S64 || ft == FundamentalType::U64 ||
+         ft == FundamentalType::S32 || ft == FundamentalType::U32 ||
          ft == FundamentalType::S16 || ft == FundamentalType::U16 ||
          ft == FundamentalType::S8 || ft == FundamentalType::U8;
 }
@@ -183,6 +188,8 @@ inline FundamentalType BT2FT(BaseType bt) {
   case BaseType::HALF: return FundamentalType::F16;
   case BaseType::BF16:
   case BaseType::BFP16: return FundamentalType::BF16;
+  case BaseType::S64: return FundamentalType::S64;
+  case BaseType::U64: return FundamentalType::U64;
   case BaseType::S32:
   case BaseType::INT: return FundamentalType::S32;
   case BaseType::U32: return FundamentalType::U32;
@@ -199,6 +206,8 @@ inline FundamentalType BT2FT(BaseType bt) {
 
 inline static size_t SizeOf(FundamentalType ft) {
   switch (ft) {
+  case FundamentalType::U64:
+  case FundamentalType::S64: return 8;
   case FundamentalType::F32:
   case FundamentalType::U32:
   case FundamentalType::S32: return 4;
@@ -217,6 +226,8 @@ inline static size_t SizeOf(FundamentalType ft) {
 inline static size_t SizeOf(BaseType bt) {
   switch (bt) {
   case BaseType::DOUBLE: return sizeof(double);
+  case BaseType::U64:
+  case BaseType::S64: return 8;
   case BaseType::F32:
   case BaseType::U32:
   case BaseType::S32:
@@ -239,7 +250,8 @@ inline static size_t SizeOf(BaseType bt) {
 inline static BaseType BaseTypeFromString(const std::string& input) {
   static const std::unordered_map<std::string, BaseType> typeMap = {
       {"f32", BaseType::F32},         {"f16", BaseType::F16},
-      {"bf16", BaseType::BF16},       {"u32", BaseType::U32},
+      {"bf16", BaseType::BF16},       {"u64", BaseType::U64},
+      {"s64", BaseType::S64},         {"u32", BaseType::U32},
       {"s32", BaseType::S32},         {"u16", BaseType::U16},
       {"s16", BaseType::S16},         {"u8", BaseType::U8},
       {"s8", BaseType::S8},           {"f8", BaseType::F8},
@@ -263,7 +275,8 @@ namespace __internal__ {
 inline static std::string GetStringFrom(BaseType dataType) {
   static const std::unordered_map<BaseType, std::string> enumToString = {
       {BaseType::F32, "f32"},         {BaseType::F16, "f16"},
-      {BaseType::BF16, "bf16"},       {BaseType::U32, "u32"},
+      {BaseType::BF16, "bf16"},       {BaseType::U64, "u64"},
+      {BaseType::S64, "s64"},         {BaseType::U32, "u32"},
       {BaseType::S32, "s32"},         {BaseType::U16, "u16"},
       {BaseType::S16, "s16"},         {BaseType::U8, "u8"},
       {BaseType::S8, "s8"},           {BaseType::F8, "f8"},
@@ -1988,6 +2001,8 @@ inline static ptr<Type> MakeElemScalarType(BaseType bt, bool m = false) {
   case BaseType::F16: return std::make_shared<HalfType>(m);
   case BaseType::BF16: return std::make_shared<BFP16Type>(m);
   case BaseType::F8: return std::make_shared<Half8Type>(m);
+  case BaseType::S64:
+  case BaseType::U64:
   case BaseType::S32:
   case BaseType::U32:
   case BaseType::U16:

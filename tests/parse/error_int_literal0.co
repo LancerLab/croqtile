@@ -1,7 +1,7 @@
 // RUN: not choreo %s 2>&1 | FileCheck %s
 
 __co__ void foo () {
-  int x = -2147483648;
+  x = 18446744073709551619ull;
 }
 
-// CHECK: error: integer literal 2147483648 out of range [0, 2147483647]. If want to delcare '-2147483648', try '-2147483647 - 1'.
+// CHECK: error: unsigned integer literal '18446744073709551619ull' out of range [0, 18446744073709551615].

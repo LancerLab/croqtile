@@ -1,0 +1,15 @@
+// RUN: choreo -e %s | FileCheck %s
+
+__co__ void foo(f32 [M, N] a) {
+  x = 12345678910;
+  y = 9223372036854775807;
+  z = 18446744073709551615ULL;
+  p = 0xfffffffffffff;
+  // TODO: handle the negative operation
+  // q = -9223372036854775807;
+}
+
+// CHECK: `- Var Decl (unknown): x =  12345678910
+// CHECK: `- Var Decl (unknown): y =  9223372036854775807
+// CHECK: `- Var Decl (unknown): z =  18446744073709551615
+// CHECK: `- Var Decl (unknown): p =  4503599627370495
