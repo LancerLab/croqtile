@@ -826,6 +826,22 @@ public:
     }
     return true;
   }
+  bool Visit(AST::DataAccess& n) override {
+    TraceEachVisit(n, ", " + STR(n));
+    if ((CCtx().GetArch() == TargetArch::GCU20 ||
+         CCtx().GetArch() == TargetArch::GCU21 ||
+         CCtx().GetArch() == TargetArch::GCU3) &&
+        n.indices != nullptr) {
+      if (auto sty = GetSpannedType(GetSymbolType(n.data->name))) {
+        if (sty->GetStorage() == Storage::GLOBAL ||
+            cur_params.count(InScopeName(n.data->name))) {
+          Error(n.LOC(), "global data access '" + STR(n) + "` is not allowed.");
+          error_count++;
+        }
+      }
+    }
+    return true;
+  }
   bool Visit(AST::IntTuple& n) override {
     TraceEachVisit(n);
     return true;
@@ -941,6 +957,29 @@ public:
                         CCtx().GetArch() == TargetArch::GCU21)) {
       Error(n.LOC(), "Arithmetic built-in function is not supported on GCU2.");
       error_count++;
+    }
+
+    if (CCtx().GetArch() == TargetArch::GCU3 && n.function->name != "print" &&
+        n.function->name != "println") {
+      for (auto& arg : n.GetArguments()) {
+        if (auto sty = GetSpannedType(arg->GetType())) {
+          if (sty->GetStorage() == Storage::GLOBAL) {
+            Error(n.LOC(), "function call '" + STR(n) + "` with global data '" +
+                               STR(arg) + "` is not allowed.");
+            error_count++;
+          }
+        }
+
+        if (auto id = AST::GetIdentifier(arg)) {
+          if (cur_params.count(InScopeName(STR(id))) &&
+              isa<SpannedType>(GetSymbolType(id->name))) {
+            Error(n.LOC(), "function call '" + STR(n) +
+                               "` with global data '" + STR(arg) +
+                               "` is not allowed.");
+            error_count++;
+          }
+        }
+      }
     }
     return true;
   }

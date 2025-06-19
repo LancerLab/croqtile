@@ -1,0 +1,26 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+__co__ auto illegal_call(f32 [36] input) {
+  global f32 [3] l3_ptr;
+  parallel p by 3 {
+    call foo(input);
+    call foo(l3_ptr);
+    l3_ptr.at(p) = 1.0f;
+    input.at(p) = 2.0f;
+  }
+}
+
+// CHECK: error: function call '
+// CHECK: `- Call: foo
+// CHECK: `- with arguments: input` with global data 'input` is not allowed.
+// CHECK:     call foo(input);
+
+// CHECK: error: function call '
+// CHECK: `- Call: foo
+// CHECK:   `- with arguments: l3_ptr` with global data 'l3_ptr` is not allowed.
+// CHECK:       call foo(l3_ptr);
+
+// CHECK: error: global data access 'l3_ptr[p]` is not allowed.
+// CHECK:       l3_ptr.at(p) = 1.0f;
+
+// CHECK: error: global data access 'input[p]` is not allowed.
+// CHECK:       input.at(p) = 2.0f;
