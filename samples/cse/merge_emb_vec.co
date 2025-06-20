@@ -35,11 +35,11 @@ __co_device__ void fill_missing_with_bounds(float* dst_table, float* src_table, 
 }
 
 // 实现merge_emb_vec函数 - 与CUDA核心对应
-__co__ void merge_emb_vec(f32[LEN, EMB_VEC_SIZE] missing_emb_vec, u32[LEN] missing_index, f32[LEN, EMB_VEC_SIZE] output_emb_vec) {
+__co__ void merge_emb_vec(f32[LEN2, EMB_VEC_SIZE] missing_emb_vec, u32[LEN2] missing_index, f32[LEN1, EMB_VEC_SIZE] output_emb_vec) {
   parallel {p, q} by [1, 1] {
-    local f32[LEN/#p/#q, EMB_VEC_SIZE] local_emb_vec_dst;
-    local f32[LEN/#p/#q, EMB_VEC_SIZE] local_emb_vec_src;
-    local u32[LEN/#p/#q] index;
+    local f32[LEN1/#p/#q, EMB_VEC_SIZE] local_emb_vec_dst;
+    local f32[LEN2/#p/#q, EMB_VEC_SIZE] local_emb_vec_src;
+    local u32[LEN2/#p/#q] index;
     dma.copy output_emb_vec.chunkat(p#q, _) => local_emb_vec_dst;
     dma.copy missing_emb_vec.chunkat(p#q, _) => local_emb_vec_src;
     dma.copy missing_index.chunkat(p#q) => index;
@@ -47,6 +47,29 @@ __co__ void merge_emb_vec(f32[LEN, EMB_VEC_SIZE] missing_emb_vec, u32[LEN] missi
     dma.copy local_emb_vec_dst => output_emb_vec.chunkat(p#q, _);
   }
 }
+
+// LEN1, not known even at runtime.
+// LEN2, known at runtime
+__co__ void merge_emb_vec_direct(f32[LEN2, EMB_VEC_SIZE] missing_emb_vec, u32[LEN2] missing_index, f32[LEN1, EMB_VEC_SIZE] output_emb_vec) {
+
+  parallel p by 1 {
+    parallel q by 1 {
+      foreach {idx} in [LEN / #p / #q] {
+        local f32[1, EMB_VEC_SIZE] local_emb_vec_dst;
+        local f32[1, EMB_VEC_SIZE] local_emb_vec_src;
+        local u32[1] index;
+        dma.copy missing_emb_vec.subspan(1, EMB_VEC_SIZE).at(p#q#idx, _) => local_emb_vec_src;
+        dma.copy missing_index.subspan(1).at(p#q#idx) => index;
+        dma.copy output_emb_vec.subspan(1, EMB_VEC_SIZE).at(index.at(0), _) => local_emb_vec_dst;
+        foreach {j} in [EMB_VEC_SIZE] {
+            local_emb_vec_dst.at(j) = local_emb_vec_src.at(j);
+        }
+        dma.copy local_emb_vec_dst => output_emb_vec.subspan(1, EMB_VEC_SIZE).at(index.at(0), _);
+      }
+    }
+  }
+}
+
 
 // 优化版本 - 充分利用GCU的2个cluster和每个cluster的10个threads
 __co__ void merge_emb_vec_optimized(f32[LEN, EMB_VEC_SIZE] missing_emb_vec, u32[LEN] missing_index, f32[LEN, EMB_VEC_SIZE] output_emb_vec) {
@@ -157,7 +180,9 @@ int main() {
     // merge_emb_vec(missing_emb_vec_view, missing_index_view, output_choreo_view);
     
     // 使用优化版本
-    merge_emb_vec_optimized(missing_emb_vec_view, missing_index_view, output_choreo_view);
+    // merge_emb_vec_optimized(missing_emb_vec_view, missing_index_view, output_choreo_view);
+    merge_emb_vec_direct(missing_emb_vec_view, missing_index_view, output_choreo_view);
+
     
     // 校验
     int fail = 0;
