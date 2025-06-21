@@ -9,4 +9,4 @@ __co__ void select_func(f32 [32, 4] a, f32 [32, 4] b) {
 }
 
 // CHECK:   future * c_select_array__[] = {&f, &h};
-// CHECK:   future & c = *c_select_array__[(2)];
+// CHECK:   future & c = *c_select_array__[2];

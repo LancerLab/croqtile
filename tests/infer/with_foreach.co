@@ -7,25 +7,24 @@ __co__ void with_foreach(s32 [6, 128] lhs, s32 [128] rhs) {
 // VALNO:  scope-1 {
 // VALNO:   New VN #0: 'const_1'
 // VALNO:   Alias "::@__choreo_no_tiling__" -> #0
-// VALNO:   New VN #1: 'const_6'
-// VALNO:   New VN #2: 'const_128'
-// VALNO:   New VN #3: '#1,#2'
-// VALNO:   New VN #4: 'index_const_0'
-// VALNO:   Alias "#1,#2(0)" -> #1
-// VALNO:   New VN #5: 'index_const_1'
-// VALNO:   Alias "#1,#2(1)" -> #2
-// VALNO:   Alias "::with_foreach::lhs.span" -> #3
-// VALNO:   Alias "::with_foreach::rhs.span" -> #2
+// VALNO:   New VN #1: '::__choreo_no_tiling__'
+// VALNO:   New VN #2: 'const_6'
+// VALNO:   New VN #3: 'const_128'
+// VALNO:   New VN #4: '#2,#3'
+// VALNO:   Alias "::with_foreach::lhs.span" -> #4
+// VALNO:   Alias "::with_foreach::rhs.span" -> #3
   with index={m} in [32] {
     foreach m {}
   }
 // CHECK: Bounded:   ::with_foreach::within_0::index, Type: {int}->[32]
 // CHECK: Bounded:   ::with_foreach::within_0::m, Type: {int}->[32]
 // VALNO:   scope-2 {
-// VALNO:    New VN #6: 'const_32'
-// VALNO:    Alias "::with_foreach::within_0::@index(0)" -> #6
-// VALNO:    Alias "::with_foreach::within_0::@m" -> #6
-// VALNO:    Alias "::with_foreach::within_0::@index" -> #6
+// VALNO:    New VN #5: 'const_32'
+// VALNO:    Alias "::with_foreach::within_0::@index(0)" -> #5
+// VALNO:    Alias "::with_foreach::within_0::@m" -> #5
+// VALNO:    New VN #6: '::with_foreach::within_0::m'
+// VALNO:    New VN #7: '::with_foreach::within_0::index'
+// VALNO:    Alias "::with_foreach::within_0::@index" -> #5
 // VALNO:    scope-3 {
 // VALNO:    } // end scope-3
 // VALNO:   } // end scope-2
@@ -44,28 +43,28 @@ __co__ void with_foreach(s32 [6, 128] lhs, s32 [128] rhs) {
 // CHECK: Bounded:   ::with_foreach::within_2::m, Type: {int}->[32]
 // CHECK: Bounded:   ::with_foreach::within_2::n, Type: {int}->[128]
 // VALNO:   scope-2 {
-// VALNO:    New VN #7: 'const_32'
-// VALNO:    New VN #8: '#7,#2'
-// VALNO:    Alias "#7,#2(0)" -> #7
-// VALNO:    Alias "#7,#2(1)" -> #2
-// VALNO:    Alias "::with_foreach::within_1::@index(0)" -> #7
-// VALNO:    Alias "::with_foreach::within_1::@m" -> #7
-// VALNO:    Alias "::with_foreach::within_1::@index(1)" -> #2
-// VALNO:    Alias "::with_foreach::within_1::@n" -> #2
+// VALNO:    New VN #8: '#5,#3'
+// VALNO:    Alias "::with_foreach::within_1::@index(0)" -> #5
+// VALNO:    Alias "::with_foreach::within_1::@m" -> #5
+// VALNO:    New VN #9: '::with_foreach::within_1::m'
+// VALNO:    Alias "::with_foreach::within_1::@index(1)" -> #3
+// VALNO:    Alias "::with_foreach::within_1::@n" -> #3
+// VALNO:    New VN #10: '::with_foreach::within_1::n'
+// VALNO:    New VN #11: '::with_foreach::within_1::index'
 // VALNO:    Alias "::with_foreach::within_1::@index" -> #8
 // VALNO:    scope-3 {
 // VALNO:    } // end scope-3
 // VALNO:   } // end scope-2
 // VALNO:   scope-2 {
-// VALNO:    New VN #9: 'const_32'
-// VALNO:    New VN #10: '#9,#2'
-// VALNO:    Alias "#9,#2(0)" -> #9
-// VALNO:    Alias "#9,#2(1)" -> #2
-// VALNO:    Alias "::with_foreach::within_2::@index(0)" -> #9
-// VALNO:    Alias "::with_foreach::within_2::@m" -> #9
-// VALNO:    Alias "::with_foreach::within_2::@index(1)" -> #2
-// VALNO:    Alias "::with_foreach::within_2::@n" -> #2
-// VALNO:    Alias "::with_foreach::within_2::@index" -> #10
+// VALNO:    New VN #12: '#5,#3'
+// VALNO:    Alias "::with_foreach::within_2::@index(0)" -> #5
+// VALNO:    Alias "::with_foreach::within_2::@m" -> #5
+// VALNO:    New VN #13: '::with_foreach::within_2::m'
+// VALNO:    Alias "::with_foreach::within_2::@index(1)" -> #3
+// VALNO:    Alias "::with_foreach::within_2::@n" -> #3
+// VALNO:    New VN #14: '::with_foreach::within_2::n'
+// VALNO:    New VN #15: '::with_foreach::within_2::index'
+// VALNO:    Alias "::with_foreach::within_2::@index" -> #12
 // VALNO:    scope-3 {
 // VALNO:    } // end scope-3
 // VALNO:   } // end scope-2
@@ -77,15 +76,15 @@ __co__ void with_foreach(s32 [6, 128] lhs, s32 [128] rhs) {
 // CHECK: Bounded:   ::with_foreach::within_3::index__elem__0, Type: {int}->[32]
 // CHECK: Bounded:   ::with_foreach::within_3::index__elem__1, Type: {int}->[128]
 // VALNO:   scope-2 {
-// VALNO:    New VN #11: 'const_32'
-// VALNO:    New VN #12: '#11,#2'
-// VALNO:    Alias "#11,#2(0)" -> #11
-// VALNO:    Alias "#11,#2(1)" -> #2
-// VALNO:    Alias "::with_foreach::within_3::@index(0)" -> #11
-// VALNO:    Alias "::with_foreach::within_3::@index__elem__0" -> #11
-// VALNO:    Alias "::with_foreach::within_3::@index(1)" -> #2
-// VALNO:    Alias "::with_foreach::within_3::@index__elem__1" -> #2
-// VALNO:    Alias "::with_foreach::within_3::@index" -> #12
+// VALNO:    New VN #16: '#5,#3'
+// VALNO:    Alias "::with_foreach::within_3::@index(0)" -> #5
+// VALNO:    Alias "::with_foreach::within_3::@index__elem__0" -> #5
+// VALNO:    New VN #17: '::with_foreach::within_3::index__elem__0'
+// VALNO:    Alias "::with_foreach::within_3::@index(1)" -> #3
+// VALNO:    Alias "::with_foreach::within_3::@index__elem__1" -> #3
+// VALNO:    New VN #18: '::with_foreach::within_3::index__elem__1'
+// VALNO:    New VN #19: '::with_foreach::within_3::index'
+// VALNO:    Alias "::with_foreach::within_3::@index" -> #16
 // VALNO:    scope-3 {
 // VALNO:    } // end scope-3
 // VALNO:   } // end scope-2
@@ -99,14 +98,15 @@ __co__ void with_foreach(s32 [6, 128] lhs, s32 [128] rhs) {
 // CHECK: Bounded:   ::with_foreach::within_4::index__elem__0, Type: {int}->[32]
 // CHECK: Future:    ::with_foreach::within_4::foreach_4::rhs_load, Type: sync=>global s32 mdspan<1> [4]
 // VALNO:   scope-2 {
-// VALNO:    New VN #13: 'const_32'
-// VALNO:    Alias "::with_foreach::within_4::@index(0)" -> #13
-// VALNO:    Alias "::with_foreach::within_4::@index__elem__0" -> #13
-// VALNO:    Alias "::with_foreach::within_4::@index" -> #13
+// VALNO:    Alias "::with_foreach::within_4::@index(0)" -> #5
+// VALNO:    Alias "::with_foreach::within_4::@index__elem__0" -> #5
+// VALNO:    New VN #20: '::with_foreach::within_4::index__elem__0'
+// VALNO:    New VN #21: '::with_foreach::within_4::index'
+// VALNO:    Alias "::with_foreach::within_4::@index" -> #5
 // VALNO:    scope-3 {
-// VALNO-DAG:     <Simplify> 'const_128 / const_32 to 'const_4'
-// VALNO-DAG:     New VN #14: 'const_4'
-// VALNO:     Alias "::with_foreach::within_4::foreach_4::rhs_load.span" -> #14
+// VALNO:     New VN #22: 'const_4'
+// VALNO:     <Simplify> 'const_128 / const_32 to 'const_4'
+// VALNO:     Alias "::with_foreach::within_4::foreach_4::rhs_load.span" -> #22
 // VALNO:    } // end scope-3
 // VALNO:   } // end scope-2
 
@@ -115,8 +115,8 @@ __co__ void with_foreach(s32 [6, 128] lhs, s32 [128] rhs) {
   }
 // CHECK: Bounded:   ::with_foreach::within_5::m, Type: {int}->[32]
 // VALNO:   scope-2 {
-// VALNO:    New VN #15: 'const_32'
-// VALNO:    Alias "::with_foreach::within_5::@m" -> #15
+// VALNO:    Alias "::with_foreach::within_5::@m" -> #5
+// VALNO:    New VN #23: '::with_foreach::within_5::m'
 // VALNO:    scope-3 {
 // VALNO:    } // end scope-3
 // VALNO:   } // end scope-2
@@ -135,25 +135,25 @@ __co__ void with_foreach(s32 [6, 128] lhs, s32 [128] rhs) {
 // CHECK: Future:    ::with_foreach::paraby_0::within_6::foreach_6::lhs_load, Type: sync=>local s32 mdspan<2> [1, 4]
 // VALNO:   scope-2 {
 // VALNO:    Alias "::with_foreach::paraby_0::@p" -> #0
+// VALNO:    New VN #24: '::with_foreach::paraby_0::p'
 // VALNO:    Alias "::with_foreach::paraby_0::@p__elem__x" -> #0
+// VALNO:    New VN #25: '::with_foreach::paraby_0::p__elem__x'
 // VALNO:    scope-3 {
-// VALNO:     New VN #16: 'const_32'
-// VALNO:     New VN #17: '#1,#16'
-// VALNO:     Alias "#1,#16(0)" -> #1
-// VALNO:     Alias "#1,#16(1)" -> #16
-// VALNO:     Alias "::with_foreach::paraby_0::within_6::@index(0)" -> #1
-// VALNO:     Alias "::with_foreach::paraby_0::within_6::@index__elem__0" -> #1
-// VALNO:     Alias "::with_foreach::paraby_0::within_6::@index(1)" -> #16
-// VALNO:     Alias "::with_foreach::paraby_0::within_6::@index__elem__1" -> #16
-// VALNO:     Alias "::with_foreach::paraby_0::within_6::@index" -> #17
+// VALNO:     New VN #26: '#2,#5'
+// VALNO:     Alias "::with_foreach::paraby_0::within_6::@index(0)" -> #2
+// VALNO:     Alias "::with_foreach::paraby_0::within_6::@index__elem__0" -> #2
+// VALNO:     New VN #27: '::with_foreach::paraby_0::within_6::index__elem__0'
+// VALNO:     Alias "::with_foreach::paraby_0::within_6::@index(1)" -> #5
+// VALNO:     Alias "::with_foreach::paraby_0::within_6::@index__elem__1" -> #5
+// VALNO:     New VN #28: '::with_foreach::paraby_0::within_6::index__elem__1'
+// VALNO:     New VN #29: '::with_foreach::paraby_0::within_6::index'
+// VALNO:     Alias "::with_foreach::paraby_0::within_6::@index" -> #26
 // VALNO:     scope-4 {
-// VALNO-DAG:      <Simplify> 'const_6 / const_6 to 'const_1'
-// VALNO-DAG:      <Simplify> 'const_128 / const_32 to 'const_4'
-// VALNO-DAG:      New VN #18: 'const_4'
-// VALNO:      New VN #19: '#0,#18'
-// VALNO:      Alias "::with_foreach::paraby_0::within_6::foreach_6::lhs_load.span" -> #19
-// VALNO:      Alias "#0,#18(0)" -> #0
-// VALNO:      Alias "#0,#18(1)" -> #18
+// VALNO:      New VN #30: '#27,#28'
+// VALNO:      <Simplify> 'const_6 / const_6 to 'const_1'
+// VALNO:      <Simplify> 'const_128 / const_32 to 'const_4'
+// VALNO:      New VN #31: '#0,#22'
+// VALNO:      Alias "::with_foreach::paraby_0::within_6::foreach_6::lhs_load.span" -> #31
 // VALNO:     } // end scope-4
 // VALNO:    } // end scope-3
 // VALNO:   } // end scope-2
@@ -171,19 +171,31 @@ __co__ void with_foreach(s32 [6, 128] lhs, s32 [128] rhs) {
 // CHECK: Bounded:   ::with_foreach::paraby_1::within_7::idx0__elem__0, Type: {int}->[3]
 // CHECK: Bounded:   ::with_foreach::paraby_1::within_7::within_8::idx1, Type: {int}->[768]
 // CHECK: Bounded:   ::with_foreach::paraby_1::within_7::within_8::idx1__elem__0, Type: {int}->[768]
-// VALNO: New VN #20: 'const_768'
-// VALNO: Alias "::with_foreach::paraby_1::bb" -> #20
-// VALNO: scope-3 {
-// VALNO:   New VN #21: 'const_3'
-// VALNO:   Alias "::with_foreach::paraby_1::within_7::@idx0(0)" -> #21
-// VALNO:   Alias "::with_foreach::paraby_1::within_7::@idx0__elem__0" -> #21
-// VALNO:   Alias "::with_foreach::paraby_1::within_7::@idx0" -> #21
-// VALNO:   scope-4 {
-// VALNO:   Alias "::with_foreach::paraby_1::within_7::within_8::@idx1(0)" -> #20
-// VALNO:   Alias "::with_foreach::paraby_1::within_7::within_8::@idx1__elem__0" -> #20
-// VALNO:   Alias "::with_foreach::paraby_1::within_7::within_8::@idx1" -> #20
-// VALNO:   } // end scope-4
-// VALNO: } // end scope-3
+// VALNO:   scope-2 {
+// VALNO:    Alias "::with_foreach::paraby_1::@p" -> #0
+// VALNO:    New VN #32: '::with_foreach::paraby_1::p'
+// VALNO:    Alias "::with_foreach::paraby_1::@p__elem__x" -> #0
+// VALNO:    New VN #33: '::with_foreach::paraby_1::p__elem__x'
+// VALNO:    New VN #34: 'const_768'
+// VALNO:    Alias "::with_foreach::paraby_1::bb" -> #34
+// VALNO:    scope-3 {
+// VALNO:     New VN #35: 'const_3'
+// VALNO:     Alias "::with_foreach::paraby_1::within_7::@idx0(0)" -> #35
+// VALNO:     Alias "::with_foreach::paraby_1::within_7::@idx0__elem__0" -> #35
+// VALNO:     New VN #36: '::with_foreach::paraby_1::within_7::idx0__elem__0'
+// VALNO:     New VN #37: '::with_foreach::paraby_1::within_7::idx0'
+// VALNO:     Alias "::with_foreach::paraby_1::within_7::@idx0" -> #35
+// VALNO:     scope-4 {
+// VALNO:      Alias "::with_foreach::paraby_1::within_7::within_8::@idx1(0)" -> #34
+// VALNO:      Alias "::with_foreach::paraby_1::within_7::within_8::@idx1__elem__0" -> #34
+// VALNO:      New VN #38: '::with_foreach::paraby_1::within_7::within_8::idx1__elem__0'
+// VALNO:      New VN #39: '::with_foreach::paraby_1::within_7::within_8::idx1'
+// VALNO:      Alias "::with_foreach::paraby_1::within_7::within_8::@idx1" -> #34
+// VALNO:      scope-5 {
+// VALNO:      } // end scope-5
+// VALNO:     } // end scope-4
+// VALNO:    } // end scope-3
+// VALNO:   } // end scope-2
 
 // VALNO:  } // end scope-1
 

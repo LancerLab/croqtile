@@ -1624,13 +1624,27 @@ void FactorCodeGen::EmitHostFuncDecl(std::ostringstream& oss,
 const std::string FactorCodeGen::ValueSTR(const ValueItem& vi,
                                           bool factor_value = true) const {
   if (auto i = VIInt(vi)) {
-    return "Value(" + std::to_string(*i) + ")";
-  } else if (factor_value) {
-    // not int => this is a dynamic var or var bounded by dynamic var.
-    return ReplaceFactorDynDimName(STR(vi));
-  } else {
-    return ReplaceRuntimeNames(STR(vi), "", false);
-  }
+    if (factor_value)
+      return "Value(" + std::to_string(*i) + ")";
+    else
+      return std::to_string(*i);
+  } else if (auto bv = VIBool(vi))
+    return PSTR(vi);
+  else if (auto sv = VIStr(vi)) {
+    if (factor_value) {
+      // not int => this is a dynamic var or var bounded by dynamic var.
+      return UnScopedExpr(ReplaceFactorDynDimName(STR(vi)));
+    } else
+      return UnScopedExpr(ReplaceRuntimeNames(STR(vi), "", false));
+  } else if (auto bo = VIBop(vi))
+    return "(" + ValueSTR(bo->GetLeft()) + " " + STR(bo->GetOpCode()) + " " +
+           ValueSTR(bo->GetRight()) + ")";
+  else if (auto to = VITop(vi))
+    return "(" + ValueSTR(to->GetPred()) + " ? " + ValueSTR(to->GetLeft()) +
+           " : " + ValueSTR(to->GetRight()) + ")";
+  else
+    choreo_unreachable("unsupported value.");
+  return "";
 }
 
 const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
@@ -1749,7 +1763,7 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
           oss << "+(" << ExprSTR(expr->GetR()) << "))";
         } else
           oss << "(" << ExprSTR(expr->GetR()) << ")";
-      } else if (expr->IsArith() || expr->IsLogical()) {
+      } else if (expr->IsArith() || expr->IsLogical() || expr->IsCompare()) {
         auto& l = expr->GetL();
         auto& r = expr->GetR();
         auto& op = expr->op;

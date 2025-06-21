@@ -391,8 +391,8 @@ public:
 
     // TODO
     // SSTab().DefineSymbol("@" + n.bpv, MakeMDSpanType(s));
-    SSTab().DefineSymbol(n.bpv->name, MakeUnknownBoundedIntegerType());
-    for (auto sym : n.cmpt_bpvs->AllValues())
+    SSTab().DefineSymbol(n.BPV()->name, MakeUnknownBoundedIntegerType());
+    for (auto sym : n.AllSubPVs())
       SSTab().DefineSymbol(cast<AST::Identifier>(sym)->name,
                            MakeUnknownBoundedIntegerType());
 

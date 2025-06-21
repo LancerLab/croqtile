@@ -46,96 +46,69 @@ __co__ void qes_op(int u_x, int u_y, float _f, double _d) {
 }
 
 // VALNO:  scope-1 {
-// VALNO:    New VN #0: 'const_1'
-// VALNO:    Alias "::@__choreo_no_tiling__" -> #0
-// VALNO:    New VN #1: '::qes_op::u_x'
-// VALNO:    New VN #2: '::qes_op::u_y'
-// VALNO:    New VN #3: '::qes_op::_f'
-// VALNO:    New VN #4: '::qes_op::_d'
-// VALNO:    New VN #5: 'false'
-// VALNO:    Alias "::qes_op::f" -> #5
-// VALNO:    New VN #6: 'true'
-// VALNO:    Alias "::qes_op::t" -> #6
-// VALNO:    New VN #7: 'const_10'
-// VALNO:    Alias "::qes_op::c_x" -> #7
-// VALNO:    Alias "::qes_op::c_y" -> #7
-// VALNO:    New VN #8: 'const_200'
-// VALNO:    Alias "::qes_op::c_z" -> #8
-// VALNO:    New VN #9: 'const_0'
-// VALNO:    Alias "::qes_op::a" -> #9
-// VALNO:    Alias "::qes_op::b" -> #0
-// VALNO:    <Simplify> 'ref:#7 > ref:#8' to 'false'
-// VALNO:    <Simplify> '>:#7:#8 ? ref:#9 : ref:#0' to 'const_1'
-// VALNO:    Alias "::qes_op::c_0" -> #0
-// VALNO:    <Simplify> 'ref:#7 < ref:#8' to 'true'
-// VALNO:    <Simplify> '<:#7:#8 ? ref:#9 : ref:#0' to 'const_0'
-// VALNO:    Alias "::qes_op::c_1" -> #9
-// VALNO:    <Simplify> 'ref:#7 == ref:#7' to 'true'
-// VALNO:    <Simplify> '==:#7:#7 ? ref:#9 : ref:#0' to 'const_0'
-// VALNO:    Alias "::qes_op::c_2" -> #9
-// VALNO:    <Simplify> 'ref:#7 != ref:#8' to 'true'
-// VALNO:    <Simplify> '!=:#7:#8 ? ref:#9 : ref:#0' to 'const_0'
-// VALNO:    Alias "::qes_op::c_3" -> #9
-// VALNO:    <Simplify> 'ref:#7 <= ref:#8' to 'true'
-// VALNO:    <Simplify> '<=:#7:#8 ? ref:#9 : ref:#0' to 'const_0'
-// VALNO:    Alias "::qes_op::c_4" -> #9
-// VALNO:    <Simplify> 'ref:#7 < ref:#7' to 'false'
-// VALNO:    <Simplify> '<:#7:#7 ? ref:#9 : ref:#0' to 'const_1'
-// VALNO:    Alias "::qes_op::c_5" -> #0
-// VALNO:    <Simplify> 'ref:#7 != ref:#8' to 'true'
-// VALNO:    <Simplify> '!=:#7:#8 ? ref:#9 : ref:#0' to 'const_0'
-// VALNO:    Alias "::qes_op::c_6" -> #9
-// VALNO:    <Simplify> 'ref:#7 > ref:#8' to 'false'
-// VALNO:    New VN #10: 'const_999'
-// VALNO:    <Simplify> '>:#7:#8 ? ref:#10 : ref:#0' to 'const_1'
-// VALNO:    Alias "::qes_op::c_7" -> #0
-// VALNO:    <Simplify> 'ref:#7 >= ref:#8' to 'false'
-// VALNO:    New VN #11: 'const_9'
-// VALNO:    <Simplify> '>=:#7:#8 ? ref:#10 : ref:#11' to 'const_9'
-// VALNO:    Alias "::qes_op::c_8" -> #11
-// VALNO:    <Simplify> 'ref:#11 <= ref:#10' to 'true'
-// VALNO:    <Simplify> '<=:#11:#10 ? ref:#10 : ref:#11' to 'const_999'
-// VALNO:    Alias "::qes_op::c_9" -> #10
-// VALNO:    New VN #12: '>:#1:#2'
-// VALNO:    New VN #13: '?:#12:#9:#0'
-// VALNO:    Alias "::qes_op::u_0" -> #13
-// VALNO:    New VN #14: '==:#1:#7'
-// VALNO:    New VN #15: '?:#14:#9:#0'
-// VALNO:    Alias "::qes_op::u_1" -> #15
-// VALNO:    New VN #16: '!=:#1:#2'
-// VALNO:    New VN #17: '?:#16:#1:#0'
-// VALNO:    Alias "::qes_op::u_2" -> #17
-// VALNO:    <Simplify> 'ref:#7 < ref:#8' to 'true'
-// VALNO:    <Simplify> '<:#7:#8 ? ref:#1 : ref:#0' to '::qes_op::u_x'
-// VALNO:    Alias "::qes_op::u_3" -> #1
-// VALNO:    <Simplify> 'ref:#7 < ref:#8' to 'true'
-// VALNO:    <Simplify> '<:#7:#8 ? ref:#1 : ref:#10' to '::qes_op::u_x'
-// VALNO:    Alias "::qes_op::u_4" -> #1
-// VALNO:    New VN #18: '<:#1:#8'
-// VALNO:    New VN #19: 'const_99'
-// VALNO:    New VN #20: '?:#18:#19:#10'
-// VALNO:    Alias "::qes_op::u_5" -> #20
-// VALNO:    New VN #21: 'const_0.500000f'
-// VALNO:    Alias "::qes_op::f0" -> #21
-// VALNO:    New VN #22: 'const_1.500000f'
-// VALNO:    Alias "::qes_op::f1" -> #22
-// VALNO:    New VN #23: 'const_-0.500000'
-// VALNO:    Alias "::qes_op::d0" -> #23
-// VALNO:    New VN #24: 'const_1.700000'
-// VALNO:    Alias "::qes_op::d1" -> #24
-// VALNO:    <Simplify> 'ref:#22 > ref:#21' to 'true'
-// VALNO:    <Simplify> '>:#22:#21 ? ref:#22 : ref:#21' to 'const_1.500000f'
-// VALNO:    Alias "::qes_op::f2" -> #22
-// VALNO:    New VN #25: '<:#22:#3'
-// VALNO:    New VN #26: '?:#25:#3:#22'
-// VALNO:    Alias "::qes_op::f3" -> #26
-// VALNO:    <Simplify> 'ref:#24 > ref:#23' to 'true'
-// VALNO:    <Simplify> '>:#24:#23 ? ref:#24 : ref:#23' to 'const_1.700000'
-// VALNO:    Alias "::qes_op::d2" -> #24
-// VALNO:    New VN #27: '!=:#24:#4'
-// VALNO:    New VN #28: '?:#27:#24:#4'
-// VALNO:    Alias "::qes_op::d3" -> #28
-// VALNO:   } // end scope-1
+// VALNO:   New VN #0: 'const_1'
+// VALNO:   Alias "::@__choreo_no_tiling__" -> #0
+// VALNO:   New VN #1: '::__choreo_no_tiling__'
+// VALNO:   New VN #2: '::qes_op::u_x'
+// VALNO:   New VN #3: '::qes_op::u_y'
+// VALNO:   New VN #4: '::qes_op::_f'
+// VALNO:   New VN #5: '::qes_op::_d'
+// VALNO:   New VN #6: 'false'
+// VALNO:   Alias "::qes_op::f" -> #6
+// VALNO:   New VN #7: 'true'
+// VALNO:   Alias "::qes_op::t" -> #7
+// VALNO:   New VN #8: 'const_10'
+// VALNO:   Alias "::qes_op::c_x" -> #8
+// VALNO:   Alias "::qes_op::c_y" -> #8
+// VALNO:   New VN #9: 'const_200'
+// VALNO:   Alias "::qes_op::c_z" -> #9
+// VALNO:   New VN #10: 'const_0'
+// VALNO:   Alias "::qes_op::a" -> #10
+// VALNO:   Alias "::qes_op::b" -> #0
+// VALNO:   Alias "::qes_op::c_0" -> #0
+// VALNO:   Alias "::qes_op::c_1" -> #10
+// VALNO:   Alias "::qes_op::c_2" -> #10
+// VALNO:   Alias "::qes_op::c_3" -> #10
+// VALNO:   Alias "::qes_op::c_4" -> #10
+// VALNO:   Alias "::qes_op::c_5" -> #0
+// VALNO:   Alias "::qes_op::c_6" -> #10
+// VALNO:   New VN #11: 'const_999'
+// VALNO:   Alias "::qes_op::c_7" -> #0
+// VALNO:   New VN #12: 'const_9'
+// VALNO:   Alias "::qes_op::c_8" -> #12
+// VALNO:   Alias "::qes_op::c_9" -> #11
+// VALNO:   New VN #13: '>:#2:#3'
+// VALNO:   New VN #14: '?:#13:#10:#0'
+// VALNO:   Alias "::qes_op::u_0" -> #14
+// VALNO:   New VN #15: '==:#2:#8'
+// VALNO:   New VN #16: '?:#15:#10:#0'
+// VALNO:   Alias "::qes_op::u_1" -> #16
+// VALNO:   New VN #17: '!=:#2:#3'
+// VALNO:   New VN #18: '?:#17:#2:#0'
+// VALNO:   Alias "::qes_op::u_2" -> #18
+// VALNO:   Alias "::qes_op::u_3" -> #2
+// VALNO:   Alias "::qes_op::u_4" -> #2
+// VALNO:   New VN #19: '<:#2:#9'
+// VALNO:   New VN #20: 'const_99'
+// VALNO:   New VN #21: '?:#19:#20:#11'
+// VALNO:   Alias "::qes_op::u_5" -> #21
+// VALNO:   New VN #22: 'const_0.500000f'
+// VALNO:   Alias "::qes_op::f0" -> #22
+// VALNO:   New VN #23: 'const_1.500000f'
+// VALNO:   Alias "::qes_op::f1" -> #23
+// VALNO:   New VN #24: 'const_-0.500000'
+// VALNO:   Alias "::qes_op::d0" -> #24
+// VALNO:   New VN #25: 'const_1.700000'
+// VALNO:   Alias "::qes_op::d1" -> #25
+// VALNO:   Alias "::qes_op::f2" -> #23
+// VALNO:   New VN #26: '<:#23:#4'
+// VALNO:   New VN #27: '?:#26:#4:#23'
+// VALNO:   Alias "::qes_op::f3" -> #27
+// VALNO:   Alias "::qes_op::d2" -> #25
+// VALNO:   New VN #28: '!=:#25:#5'
+// VALNO:   New VN #29: '?:#28:#25:#5'
+// VALNO:   Alias "::qes_op::d3" -> #29
+// VALNO:  } // end scope-1
 
 // CHECK: Parameter: ::qes_op::u_x, Type: int
 // CHECK: Parameter: ::qes_op::u_y, Type: int

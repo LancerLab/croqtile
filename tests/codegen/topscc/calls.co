@@ -15,6 +15,6 @@ __co__ auto foo(f32 [32, 4] a, s8 [1] b, int c) {
 // CHECK:   float* l_a = (float*)(anon_0 + 0);
 // CHECK:   char* l_b = (char*)(anon_0 + 512);
 // CHECK:   kernel0();
-// CHECK:   kernel1((float*)l_a, (char*)l_b, (c), (996));
-// CHECK:   kernel2<(4), (997)>((char*)l_b, ((c + 32)));
+// CHECK:   kernel1((float*)l_a, (char*)l_b, c, (996));
+// CHECK:   kernel2<4, 997>((char*)l_b, (c + 32));
 // CHECK: }

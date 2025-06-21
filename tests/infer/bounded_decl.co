@@ -1,5 +1,5 @@
 // RUN: choreo -i %s | FileCheck --match-full-lines %s
-// RUN: choreo -vn %s | FileCheck --check-prefix=CHKVALNO --match-full-lines %s
+// RUN: choreo -vn -dv=valno %s | FileCheck --check-prefix=CHKVALNO --match-full-lines %s
 
 __co__ void bounded_decls(s32 [160, 27, 9] input) {
   parallel p by 2, q by 4 {
@@ -17,19 +17,18 @@ __co__ void bounded_decls(s32 [160, 27, 9] input) {
   }
 }
 
-// CHKVALNO: <Bounded> 'q #- 1' ubound: 'const_3'
-// CHKVALNO: <Bounded> 'p # q1' ubound: 'const_6'
-// CHKVALNO: <Bounded> 'p # q1' ubound: 'const_6'
-// CHKVALNO: <Bounded> 'p # q' ubound: 'const_8'
-// CHKVALNO: <Bounded> ' (p # q)  #- 1' ubound: 'const_7'
-// CHKVALNO: <Bounded> 'p # q' ubound: 'const_8'
-// CHKVALNO: <Bounded> ' (p # q)  # x' ubound: 'const_24'
-// CHKVALNO: <Bounded> 'p # q1' ubound: 'const_6'
-// CHKVALNO: <Bounded> ' (p # q1)  # x' ubound: 'const_18'
-// CHKVALNO: <Bounded> 'p # q' ubound: 'const_8'
-// CHKVALNO: <Bounded> ' (p # q)  #+ 1' ubound: 'const_9'
-// CHKVALNO: <Bounded> 'x - 1' ubound: 'const_3'
-// CHKVALNO: <Bounded> 'pq1 + 1' ubound: 'const_6'
+// CHKVALNO: <Bounded> ' (q #- 1) 's ubound: 'const_3'
+// CHKVALNO: <Bounded> ' (p # q1) 's ubound: 'const_6'
+// CHKVALNO: <Bounded> ' (p # q) 's ubound: 'const_8'
+// CHKVALNO: <Bounded> ' ( (p # q)  #- 1) 's ubound: 'const_7'
+// CHKVALNO: <Bounded> ' (p # q) 's ubound: 'const_8'
+// CHKVALNO: <Bounded> ' ( (p # q)  # x) 's ubound: 'const_24'
+// CHKVALNO: <Bounded> ' (p # q1) 's ubound: 'const_6'
+// CHKVALNO: <Bounded> ' ( (p # q1)  # x) 's ubound: 'const_18'
+// CHKVALNO: <Bounded> ' (p # q) 's ubound: 'const_8'
+// CHKVALNO: <Bounded> ' ( (p # q)  #+ 1) 's ubound: 'const_9'
+// CHKVALNO: <Bounded> ' (x - 1) 's ubound: 'const_3'
+// CHKVALNO: <Bounded> ' (pq1 + 1) 's ubound: 'const_6'
 
 // CHECK: Parameter: ::bounded_decls::input, Type: s32 mdspan<3> [160, 27, 9]
 // CHECK: Bounded:   ::bounded_decls::paraby_0::p, Type: {int}->[2](pv)

@@ -2,6 +2,7 @@
 #include "types.hpp"
 
 using namespace Choreo;
+
 bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
   if (isa<AST::Program>(&n)) {
     type_equals.Reset();
@@ -79,6 +80,22 @@ bool EarlySemantics::Visit(AST::MultiNodes& n) {
 
 bool EarlySemantics::Visit(AST::MultiValues& n) {
   TraceEachVisit(n);
+
+  if (n.None()) return true;
+
+  if (auto ty = NodeType(*n.ValueAt(0)); ty && isa<BoundedType>(ty)) {
+    size_t dims = 0;
+    for (auto v : n.values) {
+      auto vty = NodeType(*v);
+      if (!isa<BoundedType>(ty)) {
+        Error(n.LOC(), PSTR(v) + "is not bounded value.");
+        error_count++;
+      }
+      dims += vty->Dims();
+    }
+    SetNodeType(n, MakeBoundedITupleType(Shape(dims)));
+  }
+
   return true;
 }
 
@@ -631,6 +648,7 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
   }
 
   SetNodeType(n, MakeRankedMDSpanType(rank));
+
   return true;
 }
 
@@ -797,6 +815,7 @@ bool EarlySemantics::Visit(AST::IntTuple& n) {
       ++dim_count;
     }
   }
+
   for (auto& v : n.GetValues()->AllValues()) {
     bool is_mutable = false;
     if (mutables.Contains(v)) {
@@ -807,7 +826,9 @@ bool EarlySemantics::Visit(AST::IntTuple& n) {
     }
     if (is_mutable) mutables.Add(*v);
   }
+
   SetNodeType(n, MakeITupleType(dim_count));
+
   return true;
 }
 
@@ -1024,7 +1045,9 @@ bool EarlySemantics::Visit(AST::Parameter& n) {
                                 ty->GetMDSpanType()); // named dim is integer
     }
   }
-  SetNodeType(n, n.type->GetType());
+
+  if (n.type) SetNodeType(n, n.type->GetType());
+
   return true;
 }
 
@@ -1041,20 +1064,47 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
     error_count++;
   }
 
-  if (n.SubCount() > 3) {
-    Error(n.LOC(),
-          "The number of parallel dimensions is limited to 3 (x, y, z).");
+  auto bty = NodeType(*n.BoundExpr());
+  if (!SupportIntListCollapse(bty)) {
+    Error(n.BoundExpr()->LOC(),
+          "the parallel bound requires integers but got '" + PSTR(bty) + "'.");
+    error_count++;
+  } else if (isa<ITupleType>(bty) && !n.IsBracketed()) {
+    Error(n.BoundExpr()->LOC(),
+          "must use mdspan instead of ituple to define the parallel bound.");
     error_count++;
   }
 
-  if (n.HasBPV()) {
-    if (!n.HasSubPVs())
-      SetNodeType(*n.bpv, MakeBoundedIntegerType(n.bpv->name));
-    else
-      SetNodeType(*n.bpv, MakeBoundedITupleType(Shape(n.SubCount()), "pv"));
-    ReportErrorWhenViolateODR(n.LOC(), n.bpv->name, __FILE__, __LINE__,
-                              n.bpv->GetType());
-  }
+  if (n.HasSubPVs()) {
+    for (auto sb : n.AllBoundExprs()) {
+      auto sbty = NodeType(*sb);
+      if (!SupportIntListCollapse(sbty)) {
+        Error(sb->LOC(), "the parallel bounds require integers but got '" +
+                             PSTR(sbty) + "'.");
+        error_count++;
+      } else if ((n.SubPVCount() == 1) && isa<ITupleType>(sbty) &&
+                 !n.IsBracketed()) {
+        Error(
+            n.BoundExpr()->LOC(),
+            "must use mdspan instead of ituple to define the parallel bound.");
+        error_count++;
+      }
+    }
+
+    auto ub_count = CountMultiValues(n.BoundExprs());
+    if (ub_count > 3) {
+      Error(n.LOC(),
+            "The number of parallel dimensions is limited to 3 (x, y, z).");
+      error_count++;
+    }
+
+    SetNodeType(*n.BPV(), MakeBoundedITupleType(Shape(ub_count), "pv"));
+  } else
+    SetNodeType(*n.BPV(), MakeBoundedIntegerType(n.BPV()->name));
+
+  ReportErrorWhenViolateODR(n.LOC(), n.BPV()->name, __FILE__, __LINE__,
+                            n.BPV()->GetType());
+
   if (n.HasSubPVs()) {
     for (auto& sym : n.AllSubPVs()) {
       auto sname = cast<AST::Identifier>(sym)->name;
@@ -1062,21 +1112,35 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
       ReportErrorWhenViolateODR(n.LOC(), sname, __FILE__, __LINE__, mty);
       SetNodeType(*sym, mty);
     }
-    SetNodeType(*n.cmpt_bounds, MakeBoundedITupleType(n.cmpt_bounds->Count()));
+    SetNodeType(*n.SubPVs(), MakeBoundedITupleType(n.BoundExprs()->Count()));
+
+    auto pv_count = CountMultiValues(n.SubPVs());
+    auto ub_count = CountMultiValues(n.BoundExprs());
+    if (pv_count > ub_count) {
+      Error(n.LOC(), "parallel variables are more than their bounds (" +
+                         std::to_string(pv_count) + " vs. " +
+                         std::to_string(ub_count) + ").");
+      error_count++;
+    } else if (pv_count < ub_count) {
+      Error(n.LOC(), "parallel variables are less than their bounds (" +
+                         std::to_string(pv_count) + " vs. " +
+                         std::to_string(ub_count) + ").");
+      error_count++;
+    }
   }
 
-  if (auto i = VIInt(n.GetBound());
-      !n.cmpt_bounds && n.HasBPV() && i && *i <= 0) {
-    Error(n.bpv->LOC(),
-          "bound " + STR(n.GetBound()) +
+  // simple integer value check
+  if (auto il = AST::GetIntLiteral(*n.BoundExpr()); il && (il->Val() <= 0)) {
+    Error(n.BPV()->LOC(),
+          "bound " + STR(n.BoundExpr()) +
               " in parallelby is invalid: should be greater than 0.");
     error_count++;
   }
 
-  for (auto& bv : n.BoundValues()) {
-    if (auto i = VIInt(bv); i && *i <= 0) {
+  for (auto& bv : n.AllBoundExprs()) {
+    if (auto il = AST::GetIntLiteral(*bv); il && (il->Val() <= 0)) {
       Error(n.LOC(),
-            "bound item " + ValueItemAsString(bv) +
+            "bound item " + STR(bv) +
                 " in parallelby is invalid: should be greater than 0.");
       error_count++;
     }
@@ -1089,13 +1153,12 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
       error_count++;
     }
 
-  if (n.bpv) diverges.Add(InScopeName(n.bpv->name));
-  if (n.cmpt_bpvs)
-    for (auto& v : n.cmpt_bpvs->AllValues()) {
-      auto name = AST::GetName(*v);
-      assert(name.has_value() && "expect a name.");
-      diverges.Add(InScopeName(name.value()));
-    }
+  diverges.Add(InScopeName(n.BPV()->name));
+  for (auto& v : n.AllSubPVs()) {
+    auto name = AST::GetName(*v);
+    assert(name.has_value() && "expect a name.");
+    diverges.Add(InScopeName(name.value()));
+  }
 
   return true;
 }

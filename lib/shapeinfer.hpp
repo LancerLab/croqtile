@@ -1,13 +1,106 @@
 #ifndef __CHOREO_SHAPE_INFERENCE_HPP__
 #define __CHOREO_SHAPE_INFERENCE_HPP__
 
+#include "symvals.hpp"
 #include "valno.hpp"
 
 namespace Choreo {
 
+// An AST node may have multiple value numbers
+enum class VNKind { VNK_VALUE, VNK_UBOUND, VNK_MDSPAN };
+
+inline const std::string STR(VNKind vnt) {
+  switch (vnt) {
+  case VNKind::VNK_VALUE: return "value"; break;
+  case VNKind::VNK_UBOUND: return "ubound"; break;
+  case VNKind::VNK_MDSPAN: return "mdspan"; break;
+  default: choreo_unreachable("unsupported valno kind."); break;
+  }
+  return "";
+}
+
+// value number for each AST node
+class NodeValNo {
+private:
+  std::vector<std::unordered_map<const AST::Node*, std::map<VNKind, int>>>
+      node_valno; // cache to direct map node to value number
+
+  bool debug = false;
+
+public:
+  void EnterScope() { node_valno.push_back({}); }
+  void LeaveScope() { node_valno.pop_back(); }
+
+public:
+  NodeValNo(bool d = false) : debug(d) {}
+
+public:
+  bool Hit(const AST::Node* node, VNKind vnt = VNKind::VNK_VALUE) const {
+    for (auto nv = node_valno.rbegin(); nv != node_valno.rend(); nv++) {
+      if (!nv->count(node)) continue;
+      if (!(nv->at(node).count(vnt))) continue;
+      return true;
+    }
+    return false;
+  }
+
+  std::optional<int> GetOrNull(const AST::Node* node,
+                               VNKind vnt = VNKind::VNK_VALUE) const {
+    for (auto nv = node_valno.rbegin(); nv != node_valno.rend(); nv++) {
+      if (!nv->count(node)) continue;
+      if (!(nv->at(node).count(vnt))) continue;
+      return nv->at(node).at(vnt);
+    }
+    return std::nullopt;
+  }
+
+  int Get(const AST::Node* node, VNKind vnt = VNKind::VNK_VALUE) const {
+    auto v = GetOrNull(node, vnt);
+    if (v.has_value())
+      return v.value();
+    else
+      choreo_unreachable("can not find valno of node: " + PSTR(node) + ".");
+  }
+
+  void Update(const AST::Node* node, int vn, VNKind vnt = VNKind::VNK_VALUE) {
+    for (auto nv = node_valno.rbegin(); nv != node_valno.rend(); nv++) {
+      if (!nv->count(node)) continue;
+      if (!(*nv)[node].count(vnt)) continue;
+      (*nv)[node][vnt] = vn;
+    }
+    assert(!node_valno.empty() && "empty node value number map.");
+    node_valno.back()[node][vnt] = vn;
+
+    if (debug)
+      dbgs() << " |-<node-valno> update [" << node->TypeNameString() << "] "
+             << PSTR(node) << " - " << STR(vnt) << ": #" << vn << "\n";
+  }
+
+  void Copy(const AST::Node* fn, const AST::Node* tn) {
+    if (auto v = GetOrNull(fn, VNKind::VNK_MDSPAN)) {
+      Update(tn, *v, VNKind::VNK_MDSPAN);
+      if (debug)
+        dbgs() << " |-<node-valno> copy (mdspan): '" << PSTR(fn) << "' -> '"
+               << PSTR(tn) << "': #" << *v << "\n";
+    }
+    if (auto v = GetOrNull(fn, VNKind::VNK_UBOUND)) {
+      Update(tn, *v, VNKind::VNK_UBOUND);
+      if (debug)
+        dbgs() << " |-<node-valno> copy (ubound): '" << PSTR(fn) << "' -> '"
+               << PSTR(tn) << "': #" << *v << "\n";
+    }
+    if (auto v = GetOrNull(fn, VNKind::VNK_VALUE)) {
+      Update(tn, *v, VNKind::VNK_VALUE);
+      if (debug)
+        dbgs() << " |-<node-valno> copy (value): '" << PSTR(fn) << "' -> '"
+               << PSTR(tn) << "': #" << *v << "\n";
+    }
+  }
+}; // NodeValNo
+
 class ShapeInference : public VisitorWithScope {
 private:
-  ValueNumbering vn;
+  valno::ValueNumbering vn;
 
   // valno rendered from current ast node
   int cur_vn = GetInvalidValueNumber();
@@ -25,6 +118,8 @@ private:
 
   TypeConstraints type_equals{this};
 
+  NodeValNo ast_vn;
+
   OptimizedValues& SymVal(const std::string sym) {
     return FCtx(fname).GetSymbolValues(sym);
   }
@@ -38,8 +133,51 @@ private:
 
   void InvalidateVisitorValNOs();
 
+#if 0
+  // try apply folding
+  std::optional<std::string> TryOptSign(const AST::Node& node);
+#endif
+
+  // Generate the signature for a node, simplify the signature when optimiz flag
+  // is set.
+  const std::string SignNode(const AST::Node& node);
+
+  const std::string SignSpan(const AST::Node& node);
+
+  std::pair<const std::string, const std::string> SignBounded(const AST::Node&);
+
+  // Directly get the value number. Abort when it fails.
+  int GetValNo(const AST::Node&, VNKind vnt = VNKind::VNK_VALUE) const;
+
+  // Generate the new value number. Abort when the value number exists.
+  int GenValNo(const AST::Node&);
+
+  // Check if the value number exists for the node
+  bool HasValNo(const AST::Node&, VNKind vnt = VNKind::VNK_VALUE) const;
+
+  // Symbol names related to the value numbering
+  const std::string VNSymbolName(const AST::Identifier&) const;
+
+  const std::string GetSign(const AST::Node& n,
+                            VNKind vnt = VNKind::VNK_VALUE) const {
+    return SignValNo(ast_vn.Get(&n, vnt));
+  }
+
+private:
+  // short-hands
+  const std::string SignValNo(int valno) const {
+    return vn.GetSignatureFromValueNumber(valno);
+  }
+  int ValNoSign(const std::string& sign) const {
+    return vn.GetValueNumberOfSignature(sign);
+  }
+
+  void ValNoAliasSign(const std::string& sign, int valno) {
+    vn.AssociateSignatureWithValueNumber(sign, valno);
+  }
+
 public:
-  ShapeInference() : VisitorWithScope("valno"), vn(this) {
+  ShapeInference() : VisitorWithScope("valno"), vn(this), ast_vn(debug_visit) {
     type_equals.SetDebug(debug_visit);
   }
 
@@ -74,14 +212,37 @@ public:
       n.SetType(MutateType(*ty));
     else
       n.SetType(ty);
-    if (debug_visit)
-      dbgs() << "Set type of " << STR(n) << " as " << PSTR(n.GetType()) << "\n";
+    if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+      VST_DEBUG(dbgs() << " |-<type> set: [" << pb->TypeNameString() << "]";
+                pb->PrintWithoutStmts(dbgs(), "   ");
+                dbgs() << "\n   |-> " << PSTR(n.GetType()) << "\n");
+    } else {
+      VST_DEBUG(dbgs() << " |-<type> set: [" << n.TypeNameString() << "]";
+                n.Print(dbgs(), "   ");
+                dbgs() << "   |-> " << PSTR(n.GetType()) << "\n");
+    }
   }
 
   void SetMdsShape(AST::MultiDimSpans& n, const Shape& s) {
     n.SetTypeDetail(s);
-    if (debug_visit)
-      dbgs() << "Set shape of " << STR(n) << " as " << STR(s) << "\n";
+    VST_DEBUG(dbgs() << " |-<shape> set: [" << n.TypeNameString() << "] "
+                     << STR(n) << " |-> " << STR(s) << "\n");
+  }
+
+  VNKind NodeValNoKind(const AST::Node& n) {
+    // multivalues may not be typed
+    if (isa<AST::MultiValues>(&n)) return VNKind::VNK_VALUE;
+    auto nty = NodeType(n);
+    if (!nty || isa<UnknownType>(nty))
+      choreo_unreachable("failed to get the type of " + STR(n) + ": " +
+                         n.TypeNameString());
+    if (isa<BoundedType>(nty))
+      return VNKind::VNK_UBOUND;
+    else if (isa<ITupleType>(nty) || isa<MDSpanType>(nty) ||
+             isa<SpannedType>(nty) || GeneralFutureType(nty))
+      return VNKind::VNK_MDSPAN;
+    else
+      return VNKind::VNK_VALUE;
   }
 
 public:
@@ -129,7 +290,7 @@ public:
   bool Visit(AST::Program& n) override;
 
 private:
-  std::vector<int> Collapse(const ptr<AST::MultiValues>&, bool = false);
+  void CollapseMultiValues(const AST::MultiValues&);
   std::string GenerateExpression(const std::string& sig);
   int GetOnlyValueNumberFromMultiValues(const AST::MultiValues& mv);
   void UpdateValueNumberForMultiValues(const AST::MultiValues& mv, int valno);

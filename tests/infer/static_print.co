@@ -1,4 +1,4 @@
-// RUN: choreo %s -o -sa=infer | FileCheck %s
+// RUN: choreo %s -sa=infer | FileCheck %s
 
 __co__ void foo(s32 [N, M] i) {
   println("aaa");
@@ -33,7 +33,7 @@ __co__ void foo(s32 [N, M] i) {
 // CHECK:         M: ::foo::M
 // CHECK:         f: unknown
 // CHECK:         d: unknown
-// CHECK:         b: unknown
+// CHECK:         b: false
 // CHECK:         d+dd: unknown
 // CHECK: a + 100: 200
 // CHECK: M + 10: (::foo::M + 100)

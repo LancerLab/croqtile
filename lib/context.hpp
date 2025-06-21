@@ -128,6 +128,8 @@ inline bool FBIContainsBuffer(const FutureBufferInfo& buffer_info,
 struct OptimizedValues {
 private:
   std::vector<ValueItem> val_exprs;
+  // TODO: distinguish values and mdspans
+  // std::vector<ValueItem> mds_exprs;
   std::vector<ValueItem> ub_exprs;
   ValueItem size_expr = GetInvalidValueItem();
 

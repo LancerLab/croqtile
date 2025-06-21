@@ -603,6 +603,8 @@ struct Type {
   // used in early semantics
   virtual bool ApprxEqual(const Type& t) const = 0;
 
+  virtual const ptr<Type> Clone() const = 0;
+
   virtual void Print(std::ostream&) const = 0;
   virtual const std::string Name() const = 0;
 
@@ -632,11 +634,6 @@ inline std::string STR(const Shape& s) {
   return oss.str();
 }
 
-inline std::string STR(const ValueItem& vi) {
-  if (!vi) return "invalid";
-  return vi->ToString();
-}
-
 // string as list
 inline std::string LSTR(const Shape& s) {
   std::ostringstream oss;
@@ -661,6 +658,9 @@ struct VoidType final : public Type, public TypeIDProvider<VoidType> {
   const std::string Name() const override { return "void_type"; }
   bool HasSufficientInfo() const override { return true; }
 
+  const ptr<Type> Clone() const override {
+    return std::make_shared<VoidType>();
+  }
   bool operator==(const Type& ty) const override { return isa<VoidType>(&ty); }
   bool ApprxEqual(const Type& ty) const override { return isa<VoidType>(&ty); }
 
@@ -674,6 +674,10 @@ struct AddrType final : public Type, public TypeIDProvider<AddrType> {
   void Print(std::ostream& os) const override { os << "address"; }
   const std::string Name() const override { return "addr_type"; }
   bool HasSufficientInfo() const override { return true; }
+
+  const ptr<Type> Clone() const override {
+    return std::make_shared<AddrType>();
+  }
 
   bool operator==(const Type& ty) const override { return isa<AddrType>(&ty); }
   bool ApprxEqual(const Type& ty) const override { return isa<AddrType>(&ty); }
@@ -689,6 +693,10 @@ struct UnknownType final : public Type, public TypeIDProvider<UnknownType> {
   void Print(std::ostream& os) const override { os << "unknown"; }
   const std::string Name() const override { return "unknown_type"; }
   bool HasSufficientInfo() const override { return false; }
+
+  const ptr<Type> Clone() const override {
+    return std::make_shared<UnknownType>();
+  }
 
   // Not comparable
   bool operator==(const Type&) const override { return false; }
@@ -707,6 +715,10 @@ struct PlaceHolderType final : public Type,
   }
   const std::string Name() const override { return "place_holder"; }
   bool HasSufficientInfo() const override { return false; }
+
+  const ptr<Type> Clone() const override {
+    return std::make_shared<PlaceHolderType>(Type::Category());
+  }
 
   bool operator==(const Type&) const override { return false; }
   // tolerate im-precise comparison
@@ -748,25 +760,19 @@ inline bool ConvertibleToInt(const Type& ty);
 
 struct IntegerType final : public ScalarType,
                            public TypeIDProvider<IntegerType> {
-  ValueItem value = GetInvalidValueItem(); // optional value expression
   IntegerType(bool m) : ScalarType(TypeCategory::INT, m) {}
-  IntegerType(const ValueItem& vi, bool m)
-      : ScalarType(TypeCategory::INT, m), value(vi) {}
 
+  const ptr<Type> Clone() const override {
+    return std::make_shared<IntegerType>(IsMutable());
+  }
   ptr<ScalarType> Clone(bool m) const override {
     return std::make_shared<IntegerType>(m);
   }
   void Print(std::ostream& os) const override {
     ScalarType::Print(os);
-    os << "int" << (IsValidValueItem(value) ? (" [" + STR(value) + "]") : "");
+    os << "int";
   }
   const std::string Name() const override { return "integer"; }
-  std::optional<ValueItem> GetValidExpression() const {
-    if (IsValidValueItem(value))
-      return value;
-    else
-      return std::nullopt;
-  }
 
   bool operator==(const Type& ty) const override {
     return isa<IntegerType>(&ty) && ScalarType::operator==(ty);
@@ -792,6 +798,9 @@ struct ScalarFloatType : public ScalarType,
 struct Half8Type final : public ScalarFloatType,
                          public TypeIDProvider<Half8Type> {
   Half8Type(bool m) : ScalarFloatType(TypeCategory::HALF8, m) {}
+  const ptr<Type> Clone() const override {
+    return std::make_shared<Half8Type>(IsMutable());
+  }
   ptr<ScalarType> Clone(bool m) const override {
     return std::make_shared<Half8Type>(m);
   }
@@ -812,6 +821,9 @@ struct Half8Type final : public ScalarFloatType,
 struct HalfType final : public ScalarFloatType,
                         public TypeIDProvider<HalfType> {
   HalfType(bool m) : ScalarFloatType(TypeCategory::HALF, m) {}
+  const ptr<Type> Clone() const override {
+    return std::make_shared<HalfType>(IsMutable());
+  }
   ptr<ScalarType> Clone(bool m) const override {
     return std::make_shared<HalfType>(m);
   }
@@ -832,6 +844,9 @@ struct HalfType final : public ScalarFloatType,
 struct BFP16Type final : public ScalarFloatType,
                          public TypeIDProvider<BFP16Type> {
   BFP16Type(bool m) : ScalarFloatType(TypeCategory::BFP16, m) {}
+  const ptr<Type> Clone() const override {
+    return std::make_shared<BFP16Type>(IsMutable());
+  }
   ptr<ScalarType> Clone(bool m) const override {
     return std::make_shared<BFP16Type>(m);
   }
@@ -852,6 +867,9 @@ struct BFP16Type final : public ScalarFloatType,
 struct FloatType final : public ScalarFloatType,
                          public TypeIDProvider<FloatType> {
   FloatType(bool m) : ScalarFloatType(TypeCategory::FLOAT, m) {}
+  const ptr<Type> Clone() const override {
+    return std::make_shared<FloatType>(IsMutable());
+  }
   ptr<ScalarType> Clone(bool m) const override {
     return std::make_shared<FloatType>(m);
   }
@@ -872,6 +890,9 @@ struct FloatType final : public ScalarFloatType,
 struct DoubleType final : public ScalarFloatType,
                           public TypeIDProvider<DoubleType> {
   DoubleType(bool m) : ScalarFloatType(TypeCategory::DOUBLE, m) {}
+  const ptr<Type> Clone() const override {
+    return std::make_shared<DoubleType>(IsMutable());
+  }
   ptr<ScalarType> Clone(bool m) const override {
     return std::make_shared<DoubleType>(m);
   }
@@ -894,6 +915,9 @@ struct DoubleType final : public ScalarFloatType,
 struct BooleanType final : public ScalarType,
                            public TypeIDProvider<BooleanType> {
   BooleanType(bool m) : ScalarType(TypeCategory::BOOL, m) {}
+  const ptr<Type> Clone() const override {
+    return std::make_shared<BooleanType>(IsMutable());
+  }
   ptr<ScalarType> Clone(bool m) const override {
     return std::make_shared<BooleanType>(m);
   }
@@ -914,6 +938,10 @@ struct BooleanType final : public ScalarType,
 
 struct StringType : public Type, public TypeIDProvider<StringType> {
   StringType() : Type(TypeCategory::STRING) {}
+
+  const ptr<Type> Clone() const override {
+    return std::make_shared<StringType>();
+  }
   void Print(std::ostream& os) const override { os << "string"; }
   const std::string Name() const override { return "string"; }
 
@@ -932,6 +960,9 @@ struct StringType : public Type, public TypeIDProvider<StringType> {
 struct IndexType : public Type, public TypeIDProvider<IndexType> {
   IndexType() : Type(TypeCategory::INDEX) {}
   // note: index type takes 1 dim in mdspan/ituple declaration
+  const ptr<Type> Clone() const override {
+    return std::make_shared<IndexType>();
+  }
   size_t Dims() const override { return 1; }
   bool IsComplete() const override { return true; }
   void Print(std::ostream& os) const override { os << "idx"; }
@@ -958,6 +989,10 @@ struct ITupleType : public Type, public TypeIDProvider<ITupleType> {
   size_t Dims() const override { return dim_count; }
   bool IsDimValid() const { return IsValidRank(dim_count); }
   bool IsComplete() const override { return true; }
+
+  const ptr<Type> Clone() const override {
+    return std::make_shared<ITupleType>(dim_count);
+  }
 
   void Print(std::ostream& os) const override {
     os << "ituple<";
@@ -1036,6 +1071,10 @@ struct MDSpanType : public Type, public TypeIDProvider<MDSpanType> {
     return false;
   }
 
+  const ptr<Type> Clone() const override {
+    return std::make_shared<MDSpanType>(value);
+  }
+
   void Print(std::ostream& os) const override {
     os << "mdspan<";
     if (value.IsRanked()) os << Dims();
@@ -1059,7 +1098,14 @@ struct SpannedType : public Type, public TypeIDProvider<SpannedType> {
     assert((s_type != nullptr) && "mdspan is not initialized.");
   }
 
+  const ptr<Type> Clone() const override {
+    assert(s_type);
+    return std::make_shared<SpannedType>(
+        f_type, cast<MDSpanType>(s_type->Clone()), m_type);
+  }
+
   BaseType ElementType() const { return (BaseType)f_type; }
+  FundamentalType ElementFType() const { return f_type; }
   size_t Dims() const override { return s_type->Dims(); }
   bool IsComplete() const override { return true; }
   bool HasSufficientInfo() const override {
@@ -1140,6 +1186,7 @@ struct BoundedType : public Type, public TypeIDProvider<BoundedType> {
   virtual std::string GetNote() const { return note; };
   virtual void AppendNote(const std::string& n) { note += n; };
   virtual const ValueItem& GetUpperBound() const = 0;
+  virtual const MultiBounds GetUpperBounds() const = 0;
 
   bool LogicalEqual(const Type& ty) const override {
     if (auto fty = dyn_cast<BoundedType>(&ty)) return Dims() == fty->Dims();
@@ -1167,6 +1214,9 @@ struct BoundedIntegerType final : public BoundedType,
       : BoundedType(TypeCategory::BOUNDED_INT, note), lbound(lexpr),
         ubound(uexpr), stride(s) {}
 
+  const ptr<Type> Clone() const override {
+    return std::make_shared<BoundedIntegerType>(lbound, ubound, stride);
+  }
   size_t Dims() const override { return 1; }
   bool IsComplete() const override { return true; }
   bool HasSufficientInfo() const override { return HasValidBound(); }
@@ -1176,6 +1226,9 @@ struct BoundedIntegerType final : public BoundedType,
   }
   ValueItem GetLowerBound() const { return lbound; }
   const ValueItem& GetUpperBound() const override { return ubound; }
+  const MultiBounds GetUpperBounds() const override {
+    return MultiBounds(1, ubound);
+  }
   ValueItem GetStride() const { return ubound; }
 
   bool operator==(const Type& ty) const override {
@@ -1224,11 +1277,15 @@ struct BoundedITupleType final : public BoundedType,
              "expecting an invalid bound.");
   }
 
+  const ptr<Type> Clone() const override {
+    return std::make_shared<BoundedITupleType>(lbounds, ubounds, strides,
+                                               BoundedType::GetNote());
+  }
   size_t Dims() const override { return ubounds.Rank(); }
   bool IsComplete() const override { return true; }
   bool HasSufficientInfo() const override { return ubounds.IsValid(); }
   const MultiBounds GetLowerBounds() const { return lbounds; }
-  const MultiBounds GetUpperBounds() const { return ubounds; }
+  const MultiBounds GetUpperBounds() const override { return ubounds; }
   const Shape GetSizes() const { return ubounds - lbounds; }
   IntegerList GetStrides() const { return strides; }
   const ValueItem& GetUpperBound() const override { return ubounds.ValueAt(0); }
@@ -1314,6 +1371,9 @@ struct AsyncType : public Type, public TypeIDProvider<AsyncType> {
 struct EventType : public AsyncType, public TypeIDProvider<EventType> {
   Storage scope;
   explicit EventType(Storage s) : AsyncType(TypeCategory::EVENT), scope(s) {}
+  const ptr<Type> Clone() const override {
+    return std::make_shared<EventType>(scope);
+  }
   bool HasSufficientInfo() const override { return true; }
   void Print(std::ostream& os) const override { os << STR(scope) << " event"; }
   const std::string Name() const override { return STR(scope) + " event"; }
@@ -1336,6 +1396,10 @@ struct FutureType : public AsyncType, public TypeIDProvider<FutureType> {
 
   explicit FutureType(const ptr<SpannedType>& s, bool a)
       : AsyncType(TypeCategory::FUTURE), psty(s), async(a) {}
+  const ptr<Type> Clone() const override {
+    return std::make_shared<FutureType>(cast<SpannedType>(psty->Clone()),
+                                        async);
+  }
   bool IsComplete() const override { return true; }
   bool HasSufficientInfo() const override { return psty->HasSufficientInfo(); }
   const std::string Name() const override { return "future"; }
@@ -1386,6 +1450,11 @@ struct FunctionType : public Type, public TypeIDProvider<FunctionType> {
   FunctionType(const ptr<Type>& ot, const std::vector<ptr<Type>>& its)
       : Type(TypeCategory::FUNCTION), out_ty(ot), in_tys(its) {}
 
+  const ptr<Type> Clone() const override {
+    std::vector<ptr<Type>> intys;
+    for (auto ity : in_tys) intys.push_back(ity->Clone());
+    return std::make_shared<FunctionType>(out_ty->Clone(), intys);
+  }
   size_t Dims() const override {
     choreo_unreachable("a function can not have dimensions.");
     return 0;
@@ -1443,7 +1512,7 @@ struct ArrayType : public TypeIDProvider<ArrayType> {
     }
   }
 
-  explicit ArrayType(std::vector<size_t> ds) {
+  explicit ArrayType(const std::vector<size_t>& ds) {
     for (auto d : ds) {
       if (d == 0) choreo_unreachable("invalid dimension.");
       dims.push_back(d);
@@ -1469,7 +1538,7 @@ struct ArrayType : public TypeIDProvider<ArrayType> {
   }
 
   virtual size_t Dimension(size_t idx) const { return dims.at(idx); }
-  virtual const std::vector<size_t>& Dimensions() { return dims; }
+  virtual const std::vector<size_t>& Dimensions() const { return dims; }
   virtual size_t ElemCount() const {
     if (dims.size() == 0) {
       choreo_unreachable("invalid array.");
@@ -1511,8 +1580,13 @@ struct EventArrayType final : public ArrayType,
                               public TypeIDProvider<EventArrayType> {
   EventArrayType(Storage s, std::initializer_list<size_t> ec)
       : ArrayType(ec), EventType(s) {}
-  explicit EventArrayType(Storage s, std::vector<size_t> ec)
+  explicit EventArrayType(Storage s, const std::vector<size_t>& ec)
       : ArrayType(ec), EventType(s) {}
+
+  const ptr<Type> Clone() const override {
+    choreo_unreachable("clone of array type is yet to support.");
+    return nullptr;
+  }
 
   const ptr<Type> SubScriptType(size_t subscription_count) override {
     auto arr = SubScript(subscription_count);
@@ -1551,8 +1625,14 @@ struct SpannedArrayType final : public ArrayType,
                                 public SpannedType,
                                 public TypeIDProvider<SpannedArrayType> {
   SpannedArrayType(FundamentalType ft, const ptr<MDSpanType>& s, Storage m,
-                   std::vector<size_t> ads)
+                   const std::vector<size_t>& ads)
       : ArrayType(ads), SpannedType(ft, s, m) {}
+
+  const ptr<Type> Clone() const override {
+    choreo_unreachable("clone of array type is yet to support.");
+    return nullptr;
+  }
+
   bool IsComplete() const override { return SpannedType::IsComplete(); }
   bool HasSufficientInfo() const override {
     return SpannedType::HasSufficientInfo();
@@ -1704,14 +1784,6 @@ inline ptr<UnknownType> MakeUnknownType() {
 
 inline ptr<IntegerType> MakeIntegerType(bool m = false) {
   return std::make_shared<IntegerType>(m);
-}
-
-inline ptr<IntegerType> MakeIntegerType(const Shape& s, bool m = false) {
-  if (s.IsValid()) {
-    assert(s.Rank() == 1);
-    return std::make_shared<IntegerType>(s.ValueAt(0), m);
-  }
-  return MakeIntegerType(m);
 }
 
 inline ptr<BooleanType> MakeBooleanType(bool m = false) {
@@ -1989,8 +2061,7 @@ inline static BaseType GetUnderlyingType(const ptr<Type>& ty) {
     return TC2BT(ty->Category());
   else if (auto sty = GetSpannedType(ty))
     return sty->ElementType();
-  else if (isa<ITupleType>(ty) &&
-           ty->Dims() == 1) // special handling of ituple with dim-1
+  else if (CanYieldAnInteger(ty))
     return BaseType::INT;
   return BaseType::UNKNOWN;
 }
@@ -2028,6 +2099,10 @@ inline bool IsMutable(const Type& ty) {
 }
 
 inline bool MutableType(const Type& ty) { return isa<ScalarType>(&ty); }
+
+inline bool SupportIntListCollapse(const ptr<Type>& ty) {
+  return isa<IntegerType>(ty) || isa<MDSpanType>(ty) || isa<ITupleType>(ty);
+}
 
 } // end namespace Choreo
 

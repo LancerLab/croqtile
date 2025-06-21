@@ -301,7 +301,7 @@ public:
   ~Visualizer() {}
 
   bool Visit(AST::ParallelBy& pb) override {
-    if (auto b = VIInt(pb.GetBound()))
+    if (auto b = VIInt(pb.BoundValue()))
       parallel_factor *= *b;
     else
       choreo_unreachable("symbolic bound is not supported in visulize yet.");
@@ -338,7 +338,7 @@ public:
   bool BeforeVisitImpl(AST::Node&) override { return true; }
   bool AfterVisitImpl(AST::Node& n) override {
     if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
-      if (auto b = VIInt(pb->GetBound()))
+      if (auto b = VIInt(pb->BoundValue()))
         parallel_factor /= *b;
       else
         choreo_unreachable("symbolic bound is not supported in visulize yet.");

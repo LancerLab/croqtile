@@ -9,7 +9,7 @@ __co__ int simple_pb() {
 // CHECK:  `- Name: simple_pb
 // CHECK:  `- Return type: int
 // CHECK:  `- Parameters:
-// CHECK:  `- Parallelization:  index symbol: anon_0, bound [0, 12)
+// CHECK:  `- Parallelization: index symbol: anon_0, bound [0, 12)
 
 __co__ int parallel_by(int a, int b) {
   parallel p by 6 { }
@@ -21,7 +21,7 @@ __co__ int parallel_by(int a, int b) {
 // CHECK:  `- Parameters:
 // CHECK:    `-  type: int, symbol: a
 // CHECK:    `-  type: int, symbol: b
-// CHECK:  `- Parallelization:  index symbol: p, bound [0, 6)
+// CHECK:  `- Parallelization: index symbol: p, bound [0, 6)
 
 __co__ int parallel_by_nest(int a, int b) {
   parallel p by 6 {
@@ -35,8 +35,8 @@ __co__ int parallel_by_nest(int a, int b) {
 // CHECK:  `- Parameters:
 // CHECK:    `-  type: int, symbol: a
 // CHECK:    `-  type: int, symbol: b
-// CHECK:  `- Parallelization:  index symbol: p, bound [0, 6)
-// CHECK:   `- Parallelization:  index symbol: q, bound [0, 64)
+// CHECK:  `- Parallelization: index symbol: p, bound [0, 6)
+// CHECK:   `- Parallelization: index symbol: q, bound [0, 64)
 
 __co__ int parallel_by0() {
   parallel {p} by [6] {
@@ -48,7 +48,8 @@ __co__ int parallel_by0() {
 // CHECK:  `- Name: parallel_by0
 // CHECK:  `- Return type: int
 // CHECK:  `- Parameters:
-// CHECK:  `- Parallelization:  index component: {p}, corresponding ubound: [6]
+// CHECK:  `- Parallelization: index symbol: anon_1, bound [0, 6)
+// CHECK:                      index component: {p}, corresponding ubound: [6]
 // CHECK:   `- Var Decl (int): a = 100
 
 __co__ int parallel_by1() {
@@ -61,7 +62,8 @@ __co__ int parallel_by1() {
 // CHECK:  `- Name: parallel_by1
 // CHECK:  `- Return type: int
 // CHECK:  `- Parameters:
-// CHECK:  `- Parallelization:  index component: {p, q}, corresponding ubound: [128, 64]
+// CHECK:  `- Parallelization: index symbol: anon_2, bound [0,  (128 * 64) )
+// CHECK:                      index component: {p, q}, corresponding ubound: [128, 64]
 // CHECK:   `- Var Decl (int): b = 100
 
 __co__ int parallel_by2() {
@@ -72,7 +74,8 @@ __co__ int parallel_by2() {
 // CHECK:  `- Name: parallel_by2
 // CHECK:  `- Return type: int
 // CHECK:  `- Parameters:
-// CHECK:  `- Parallelization:  index component: {p, q, r}, corresponding ubound: [6, 32, 64]
+// CHECK:  `- Parallelization: index symbol: anon_3, bound [0,  ( (6 * 32)  * 64) )
+// CHECK:                      index component: {p, q, r}, corresponding ubound: [6, 32, 64]
 
 __co__ int parallel_by3() {
   parallel bdim = {x, y, z} by [2, 4, 8] {}
@@ -82,8 +85,8 @@ __co__ int parallel_by3() {
 // CHECK:  `- Name: parallel_by3
 // CHECK:  `- Return type: int
 // CHECK:  `- Parameters:
-// CHECK:  `- Parallelization:  index symbol: bdim, bound [0, 64)
-// CHECK:                       index component: {x, y, z}, corresponding ubound: [2, 4, 8]
+// CHECK:  `- Parallelization: index symbol: bdim, bound [0,  ( (2 * 4)  * 8) )
+// CHECK:                      index component: {x, y, z}, corresponding ubound: [2, 4, 8]
 
 __co__ void bar2() {
   parallel g by 2, b by 12 {
@@ -106,16 +109,16 @@ __co__ void bar2() {
 // CHECK:  `- Name: bar2
 // CHECK:  `- Return type: void
 // CHECK:  `- Parameters:
-// CHECK:  `- Parallelization:  index symbol: g, bound [0, 2)
-// CHECK:   `- Parallelization:  index symbol: b, bound [0, 12)
+// CHECK:  `- Parallelization: index symbol: g, bound [0, 2)
+// CHECK:   `- Parallelization: index symbol: b, bound [0, 12)
 // CHECK:    `- Var Decl (f16 [ 4 ], local): l
-// CHECK:  `- Parallelization:  index symbol: gdim, bound [0, 36)
-// CHECK:                       index component: {xx, yy, zz}, corresponding ubound: [2, 6, 3]
-// CHECK:   `- Parallelization:  index symbol: bdim, bound [0, 20)
-// CHECK:                        index component: {x, y}, corresponding ubound: [4, 5]
+// CHECK:  `- Parallelization: index symbol: gdim, bound [0,  ( (2 * 6)  * 3) )
+// CHECK:                      index component: {xx, yy, zz}, corresponding ubound: [2, 6, 3]
+// CHECK:   `- Parallelization: index symbol: bdim, bound [0,  (4 * 5) )
+// CHECK:                       index component: {x, y}, corresponding ubound: [4, 5]
 // CHECK:    `- Var Decl (f16 [ 4 ], local): l
 // CHECK:  `- Parallelization:  index symbol: g, bound [0, 4)
-// CHECK:   `- Parallelization:  index symbol: b, bound [0, 24)
+// CHECK:   `- Parallelization:  index symbol: b, bound [0,  ( (4 * 3)  * 2) )
 // CHECK:                        index component: {x, y, z}, corresponding ubound: [4, 3, 2]
 // CHECK:    `- Var Decl (f16 [ 4 ], local): l
 
@@ -127,4 +130,17 @@ __co__ void async_parallel_by() {
 // CHECK:  `- Name: async_parallel_by
 // CHECK:  `- Return type: void
 // CHECK:  `- Parameters:
-// CHECK:  `- Parallelization:  index symbol: anon_1, bound [0, 3)
+// CHECK:  `- Parallelization:  index symbol: anon_4, bound [0, 3)
+
+__co__ void dyn_pb(int up, int uq) {
+  parallel p by up, q by uq {}
+}
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: dyn_pb
+// CHECK:  `- Return type: void
+// CHECK:  `- Parameters:
+// CHECK:    `-  type: int, symbol: up
+// CHECK:    `-  type: int, symbol: uq
+// CHECK:  `- Parallelization: index symbol: p, bound [0, up)
+// CHECK:   `- Parallelization: index symbol: q, bound [0, uq)

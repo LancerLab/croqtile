@@ -1,4 +1,4 @@
-// RUN: choreo -t topscc -es -dp=memreuse %s -o - | FileCheck %s
+// RUN: choreo -t topscc -es %s -o - | FileCheck %s
 
 #include "choreo.h"
 
@@ -74,4 +74,4 @@ int main() {
 
 // CHECK:  dim3 __ele_add_gdims0(1, 1, 1);
 // CHECK:  dim3 __ele_add_bdims0(PF, 1, 1);
-// CHECK:  __choreo_device_ele_add<<<__ele_add_gdims0, __ele_add_bdims0>>>(lhs__device, rhs__device, PF, output__device, N);
+// CHECK:  __choreo_device_ele_add<<<__ele_add_gdims0, __ele_add_bdims0>>>(lhs__device, rhs__device, PF, output__device, N

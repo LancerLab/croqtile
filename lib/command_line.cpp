@@ -64,6 +64,9 @@ Option<bool>
     native_f16(OptionKind::User, "--native-f16", "-f16n", false,
                "Utilize native f16 type when target platform support.");
 
+Option<bool> apprx_div(OptionKind::User, "--apprx-div", "", true,
+                       "Allows legacy inaccurate division patten.");
+
 Option<bool>
     native_bf16(OptionKind::User, "--native-bf16", "-bf16n", false,
                 "Utilize native bf16 type when target platform support.");

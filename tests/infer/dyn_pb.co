@@ -1,0 +1,17 @@
+// RUN: choreo -i %s | FileCheck --match-full-lines %s
+
+__co__ void bar(f32 [M, N] data, int up, int uq) {
+  parallel p by up, q by uq {
+    f = dma.copy data.chunkat(p, q) => local;
+  }
+}
+
+// CHECK: Parameter: ::bar::data, Type: f32 mdspan<2> [::bar::M, ::bar::N]
+// CHECK: Parameter: ::bar::up, Type: int
+// CHECK: Parameter: ::bar::uq, Type: int
+// CHECK: Bounded:   ::bar::paraby_0::p, Type: {int}->[::bar::up](pv)
+// CHECK: Bounded:   ::bar::paraby_0::p__elem__x, Type: {int}->[::bar::up](pi:x)
+// CHECK: Bounded:   ::bar::paraby_0::paraby_1::q, Type: {int}->[::bar::uq](pv)
+// CHECK: Bounded:   ::bar::paraby_0::paraby_1::q__elem__x, Type: {int}->[::bar::uq](pi:x)
+// CHECK: Future:    ::bar::paraby_0::paraby_1::f, Type: sync=>local f32 mdspan<2> [(::bar::M / ::bar::up), (::bar::N / ::bar::uq)]
+// CHECK: Function:  ::bar, Type: void (*)(f32 mdspan<2> [::bar::M, ::bar::N], int, int)

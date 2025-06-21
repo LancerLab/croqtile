@@ -1,4 +1,4 @@
-// RUN: choreo %s -vn | FileCheck --match-full-lines --check-prefix=VALNO %s
+// RUN: choreo %s -i | FileCheck --match-full-lines --check-prefix=INFER %s
 // RUN: choreo -es %s | FileCheck --match-full-lines %s
 
 #include "choreo.h"
@@ -19,58 +19,23 @@ __co__ void cofoo0() {
 int main() {}
 
 
-// VALNO:  scope-1 {
-// VALNO:   New VN #0: 'const_1'
-// VALNO:   Alias "::@__choreo_no_tiling__" -> #0
-// VALNO:   Alias "::cofoo0::a" -> #0
-// VALNO:   New VN #1: 'const_2'
-// VALNO:   Alias "::cofoo0::b" -> #1
-// VALNO:   New VN #2: 'const_3'
-// VALNO:   Alias "::cofoo0::c" -> #2
-// VALNO:   New VN #3: 'const_1000'
-// VALNO:   Alias "::cofoo0::x" -> #3
-// VALNO:   Alias "::cofoo0::y" -> #1
-// VALNO:   New VN #4: '#0,#1,#2,#3,#1'
-// VALNO:   New VN #5: 'index_const_0'
-// VALNO:   Alias "#0,#1,#2,#3,#1(0)" -> #0
-// VALNO:   New VN #6: 'index_const_1'
-// VALNO:   Alias "#0,#1,#2,#3,#1(1)" -> #1
-// VALNO:   New VN #7: 'index_const_2'
-// VALNO:   Alias "#0,#1,#2,#3,#1(2)" -> #2
-// VALNO:   New VN #8: 'index_const_3'
-// VALNO:   Alias "#0,#1,#2,#3,#1(3)" -> #3
-// VALNO:   New VN #9: 'index_const_4'
-// VALNO:   Alias "#0,#1,#2,#3,#1(4)" -> #1
-// VALNO:   Alias "::cofoo0::mds.span" -> #4
-// VALNO:   scope-2 {
-// VALNO:    Alias "::cofoo0::paraby_0::@p" -> #1
-// VALNO:    Alias "::cofoo0::paraby_0::@p__elem__x" -> #1
-// VALNO:    scope-3 {
-// VALNO:     Alias "#0,#1,#2,#3,#1(0)" -> #0
-// VALNO:     Alias "#0,#1,#2,#3,#1(1)" -> #1
-// VALNO:     Alias "#0,#1,#2,#3,#1(2)" -> #2
-// VALNO:     Alias "#0,#1,#2,#3,#1(3)" -> #3
-// VALNO:     Alias "#0,#1,#2,#3,#1(4)" -> #1
-// VALNO:     Alias "::cofoo0::paraby_0::within_0::@idx(0)" -> #0
-// VALNO:     Alias "::cofoo0::paraby_0::within_0::@ia" -> #0
-// VALNO:     Alias "::cofoo0::paraby_0::within_0::@idx(1)" -> #1
-// VALNO:     Alias "::cofoo0::paraby_0::within_0::@ib" -> #1
-// VALNO:     Alias "::cofoo0::paraby_0::within_0::@idx(2)" -> #2
-// VALNO:     Alias "::cofoo0::paraby_0::within_0::@ic" -> #2
-// VALNO:     Alias "::cofoo0::paraby_0::within_0::@idx(3)" -> #3
-// VALNO:     Alias "::cofoo0::paraby_0::within_0::@ix" -> #3
-// VALNO:     Alias "::cofoo0::paraby_0::within_0::@idx(4)" -> #1
-// VALNO:     Alias "::cofoo0::paraby_0::within_0::@iy" -> #1
-// VALNO:     Alias "::cofoo0::paraby_0::within_0::@idx" -> #4
-// VALNO:     scope-4 {
-// VALNO:     } // end scope-4
-// VALNO:    } // end scope-3
-// VALNO:   } // end scope-2
-// VALNO:   New VN #10: 'true'
-// VALNO:   Alias "::cofoo0::t" -> #10
-// VALNO:   New VN #11: 'false'
-// VALNO:   Alias "::cofoo0::f" -> #11
-// VALNO:  } // end scope-1
+// INFER: Symbol:    ::cofoo0::a, Type: int
+// INFER: Symbol:    ::cofoo0::b, Type: int
+// INFER: Symbol:    ::cofoo0::c, Type: int
+// INFER: Symbol:    ::cofoo0::x, Type: int
+// INFER: Symbol:    ::cofoo0::y, Type: int
+// INFER: Symbol:    ::cofoo0::mds, Type: global u8 mdspan<5> [1, 2, 3, 1000, 2]
+// INFER: Bounded:   ::cofoo0::paraby_0::p, Type: {int}->[2](pv)
+// INFER: Bounded:   ::cofoo0::paraby_0::p__elem__x, Type: {int}->[2](pi:x)
+// INFER: Bounded:   ::cofoo0::paraby_0::within_0::idx, Type: {int,int,int,int,int}->[1, 2, 3, 1000, 2]
+// INFER: Bounded:   ::cofoo0::paraby_0::within_0::ia, Type: {int}->[1]
+// INFER: Bounded:   ::cofoo0::paraby_0::within_0::ib, Type: {int}->[2]
+// INFER: Bounded:   ::cofoo0::paraby_0::within_0::ic, Type: {int}->[3]
+// INFER: Bounded:   ::cofoo0::paraby_0::within_0::ix, Type: {int}->[1000]
+// INFER: Bounded:   ::cofoo0::paraby_0::within_0::iy, Type: {int}->[2]
+// INFER: Symbol:    ::cofoo0::t, Type: bool
+// INFER: Symbol:    ::cofoo0::f, Type: bool
+// INFER: Function:  ::cofoo0, Type: void (*)()
 
 // CHECK: __global__ void __choreo_device_cofoo0(unsigned char * mds) {
 // CHECK:   {

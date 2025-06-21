@@ -15,6 +15,8 @@
 
 namespace Choreo {
 
+class ShapeInference;
+
 inline constexpr int UnknownValue() { return -1; }
 inline bool ValidVN(int vn) { return IsValidValueNumber(vn); }
 inline void InvalidateVN(int& vn) { vn = GetInvalidValueNumber(); }
@@ -57,114 +59,215 @@ inline int CountElementsInSignature(const std::string& input) {
   return count;
 }
 
-class ShapeInference;
-class ValueNumbering {
+namespace valno {
+
+using SignTy = std::string; // signature type. TODO: use structure
+using NumTy = int;          // value number type.
+
+inline const std::string STR(const SignTy& s) { return s; }
+inline const std::string STR(const NumTy& v) { return std::to_string(v); }
+using Choreo::STR;
+
+// Assumptions:
+//  1. A value number is 1-1 mapped with a constant signature.
+//  2. If not representing constant, the value number and its signatures are 1-n
+//  mapped, where multiple signaturea could have a same value number.
+//  3. signatures are scoped. Any signature exists on scope stack indicates an
+//  valid expression.
+class ValueNumberTable {
 private:
-  ShapeInference* visitor;
-  std::vector<std::unordered_map<std::string, int>> expressionValueNumbers;
-  std::vector<std::unordered_map<int, std::string>> valueNumberExpressions;
-  ValBind::BindInfo<int> bind_info;
+  // a signature may either be inside the scoped_pool or const_pool
+  std::vector<std::unordered_map<SignTy, NumTy>> scoped_pool;
+  std::unordered_map<SignTy, NumTy> const_pool;
+  std::unordered_map<NumTy, std::vector<SignTy>> value_nums;
 
-  std::vector<std::unordered_map<const AST::Node*, int>>
-      nodeValueNumbers; // cache to direct map node to value number
+private:
+  int next_valno = 0;
+  bool trace = false;
 
-  bool InternalHasExprValNo(const std::string& expr) const {
-    for (auto expr_valno = expressionValueNumbers.rbegin();
-         expr_valno != expressionValueNumbers.rend(); expr_valno++) {
+private:
+  void Reset() {}
+
+  bool IsConstant(const SignTy& s) const { return PrefixedWith(s, "const_"); }
+
+  bool ValueNumExists(const SignTy& expr) const {
+    for (auto expr_valno = scoped_pool.rbegin();
+         expr_valno != scoped_pool.rend(); expr_valno++) {
       if (!expr_valno->count(expr)) continue;
       return true;
     }
-    return false;
+    return const_pool.count(expr) != 0;
   }
 
-  int InternalGetExprValNo(const std::string& expr) const {
-    for (auto expr_valno = expressionValueNumbers.rbegin();
-         expr_valno != expressionValueNumbers.rend(); expr_valno++) {
+  bool SignatureExists(NumTy vn) const { return value_nums.count(vn) != 0; }
+
+  bool InsertToSignTable(const SignTy& s, NumTy v) {
+    bool done = false;
+    for (auto expr_valno = scoped_pool.rbegin();
+         expr_valno != scoped_pool.rend(); expr_valno++) {
+      if (!expr_valno->count(s)) continue;
+      (*expr_valno)[s] = v;
+      done = true;
+      break;
+    }
+    return done;
+  }
+
+public:
+  ValueNumberTable(bool t = false) : trace(t) {}
+
+  bool Exists(SignTy s) const { return ValueNumExists(s); }
+  bool Exists(NumTy vn) const { return SignatureExists(vn); }
+
+  NumTy GetValueNum(const SignTy& expr) const {
+    for (auto expr_valno = scoped_pool.rbegin();
+         expr_valno != scoped_pool.rend(); expr_valno++) {
       if (!expr_valno->count(expr)) continue;
       return expr_valno->at(expr);
     }
-    choreo_unreachable("can not find valno of expression : " + expr + ".");
+    if (const_pool.count(expr) == 0)
+      choreo_unreachable("can not find valno of expression : " + expr + ".");
+    return const_pool.at(expr);
   }
 
-  void InternalUpdateExprValNo(const std::string& expr, int val_no) {
-    for (auto expr_valno = expressionValueNumbers.rbegin();
-         expr_valno != expressionValueNumbers.rend(); expr_valno++) {
-      if (!expr_valno->count(expr)) continue;
-      (*expr_valno)[expr] = val_no;
-      return;
+  const SignTy& GetSignature(NumTy vn) const {
+    if (!Exists(vn))
+      choreo_unreachable("can not find signature of valno: " + STR(vn) + ".");
+
+    return value_nums.at(vn).at(0); // use the first signature
+  }
+
+  // Add a new signature to an existing valno as its alias
+  void Alias(NumTy vn, const SignTy& s) {
+    if (!Exists(vn))
+      choreo_unreachable("Alias fails: valno: " + STR(vn) +
+                         " does not exists.");
+
+    if (Exists(s))
+      choreo_unreachable("Alias fails: signature: " + STR(s) + " exists.");
+
+    if (IsConstant(s))
+      const_pool.emplace(s, vn);
+    else
+      scoped_pool.back().emplace(s, vn);
+
+    value_nums.at(vn).push_back(s);
+  }
+
+  // specific: take a dummy signature in (not associated with an invalid valno)
+  void DummyGen(const SignTy& s) {
+    assert(!IsConstant(s));
+
+    if (Exists(s)) choreo_unreachable("signature: " + STR(s) + " exists.");
+
+    scoped_pool.back().emplace(s, GetInvalidValueNumber());
+  }
+
+  // Generate a valno for the new signature
+  NumTy Generate(const SignTy& s) {
+    // note: dummy sign can be re-generated
+    if (Exists(s) && ValidVN(GetValueNum(s)))
+      choreo_unreachable("signature: " + STR(s) + " exists.");
+
+    // generate a new value number
+    auto valno = next_valno++;
+
+    // be defensive
+    assert(value_nums.count(valno) == 0);
+
+    if (IsConstant(s))
+      const_pool.emplace(s, valno);
+    else
+      scoped_pool.back().emplace(s, valno);
+
+    value_nums.emplace(valno, std::vector<SignTy>{});
+    value_nums[valno].push_back(s);
+
+    return valno;
+  }
+
+  // Bind a valno to the existing (dummy) signature
+  void BindDummy(const SignTy& s, NumTy v) {
+    // note: only dummy sign can be re-generated
+    assert(!IsConstant(s) && "unable to regen const.");
+
+    if (!Exists(s))
+      choreo_unreachable("signature: '" + STR(s) + "' does not exists.");
+    if (!Exists(v))
+      choreo_unreachable("valno: " + STR(s) + " does not exists.");
+
+    if (ValidVN(GetValueNum(s)))
+      choreo_unreachable("signature: " + STR(s) + " has a valid valno.");
+
+    for (auto expr_valno = scoped_pool.rbegin();
+         expr_valno != scoped_pool.rend(); expr_valno++) {
+      if (!expr_valno->count(s)) continue;
+      (*expr_valno)[s] = v;
     }
-    assert(!expressionValueNumbers.empty() &&
-           "empty expression value number map.");
-    expressionValueNumbers.back()[expr] = val_no;
+
+    value_nums[v].push_back(s);
   }
 
-  bool InternalHasValNoExpr(int vn) const {
-    for (auto valno_expr = valueNumberExpressions.rbegin();
-         valno_expr != valueNumberExpressions.rend(); valno_expr++) {
-      if (!valno_expr->count(vn)) continue;
-      return true;
+  // Bind two value numbers
+public:
+  void EnterScope() { scoped_pool.push_back({}); }
+  void LeaveScope() {
+    assert(!scoped_pool.empty());
+
+    for (auto& item : scoped_pool.back()) {
+      // Dummy Signature is not associated with a valid valno
+      if (!ValidVN(item.second)) continue;
+
+      auto& signs = value_nums[item.second];
+      signs.erase(std::remove(signs.begin(), signs.end(), item.first),
+                  signs.end());
+      // remove the valno entry totally when no signatures is mapped
+      if (signs.empty()) value_nums.erase(item.second);
     }
-    return false;
+
+    // drop all the signatures in the frame
+    scoped_pool.pop_back();
+
+    // reset value number when leaving the function scope
+    if (scoped_pool.size() <= 1) Reset();
   }
 
-  const std::string& InternalGetValNoExpr(int vn) const {
-    for (auto valno_expr = valueNumberExpressions.rbegin();
-         valno_expr != valueNumberExpressions.rend(); valno_expr++) {
-      if (!valno_expr->count(vn)) continue;
-      return valno_expr->at(vn);
+public:
+  void Print(std::ostream& os) const {
+    int scope = 0;
+    for (auto& stack : scoped_pool) {
+      os << scope++ << "\n";
+      for (auto& item : stack)
+        os << "expr: \"" << item.first << "\", valno: #" << item.second << "\n";
     }
-    choreo_unreachable(
-        "can not find expression of valno: " + std::to_string(vn) + ".");
+    for (auto& item : const_pool)
+      os << "const: \"" << item.first << "\", valno: #" << item.second << "\n";
   }
+};
 
-  void InternalUpdateValNoExpr(int vn, const std::string& expr) {
-    for (auto valno_expr = valueNumberExpressions.rbegin();
-         valno_expr != valueNumberExpressions.rend(); valno_expr++) {
-      if (!valno_expr->count(vn)) continue;
-      (*valno_expr)[vn] = expr;
-    }
-    assert(!valueNumberExpressions.empty() &&
-           "empty value number expression map.");
-    valueNumberExpressions.back()[vn] = expr;
-  }
+class ValueNumbering {
+private:
+  ShapeInference* visitor;
 
-  bool InternalHasNodeValNo(const AST::Node* node) {
-    for (auto node_valno = nodeValueNumbers.rbegin();
-         node_valno != nodeValueNumbers.rend(); node_valno++) {
-      if (!node_valno->count(node)) continue;
-      return true;
-    }
-    return false;
-  }
+private:
+  ValueNumberTable vntbl;
 
-  int InternalGetNodeValNo(const AST::Node* node) {
-    for (auto node_valno = nodeValueNumbers.rbegin();
-         node_valno != nodeValueNumbers.rend(); node_valno++) {
-      if (!node_valno->count(node)) continue;
-      return (*node_valno)[node];
-    }
-    choreo_unreachable("can not find valno of node: " + PSTR(node) + ".");
-  }
+public:
+  ValueNumberTable& Tabel() { return vntbl; }
+  const ValueNumberTable& Tabel() const { return vntbl; }
 
-  void InternalUpdateNodeValNo(const AST::Node* node, int vn) {
-    for (auto node_valno = nodeValueNumbers.rbegin();
-         node_valno != nodeValueNumbers.rend(); node_valno++) {
-      if (!node_valno->count(node)) continue;
-      (*node_valno)[node] = vn;
-    }
-    assert(!nodeValueNumbers.empty() && "empty node value number map.");
-    nodeValueNumbers.back()[node] = vn;
-  }
+private:
+  const SignTy NumCharToSign(const std::string&) const;
 
-  int nextValueNumber = 0;
-
+  bool need_bound = true;
   bool trace = false;
 
   std::optional<std::string> ref = std::nullopt;
 
 public:
   explicit ValueNumbering(ShapeInference* v)
-      : visitor(v), trace(CCtx().TraceValueNumbers()) {}
+      : visitor(v), vntbl(CCtx().TraceValueNumbers()),
+        trace(CCtx().TraceValueNumbers()) {}
 
   void EnterScope();
   void LeaveScope();
@@ -173,36 +276,67 @@ public:
   void ResetListReference() { ref.reset(); }
 
   // It binds a expression signature with an existing value number.
-  void AssociateSignatureWithValueNumber(const std::string& sig, int valno);
-  void AssociateSignatureWithInvalidValueNumber(const std::string& sig);
+  void AssociateSignatureWithValueNumber(const SignTy& sig, NumTy valno);
+  void AssociateSignatureWithInvalidValueNumber(const SignTy& sig);
   // rebind/modify the value number.
   // Caution: only used for scenario where the value number has not been
   // determined yet.
-  void RebindSignatureWithValueNumber(const std::string& sig, int valno);
-
-  std::optional<std::string> TryToSimplifyNodeSignature(const AST::Node& node);
-
-  // Generate the signature for a node, simplify the signature when optimiz flag
-  // is set.
-  std::string GenerateNodeSignature(const AST::Node& node, bool optimiz = true);
-
-  // special for bounded variables
-  std::optional<std::string> GenerateSpecialNodeSignature(const AST::Node&);
-
-  // Directly get the value number. Abort when it fails.
-  int GetValueNumberForNode(const AST::Node&);
-
-  // Generate the new value number. Abort when the value number exists.
-  int GenerateValueNumberForNode(const AST::Node&);
-
-  // Check if the value number exists for the node
-  bool HasValueNumberForNode(const AST::Node&);
+  void RebindSignatureWithValueNumber(const SignTy& sig, NumTy valno);
 
   // Directly get the value number from a signature. Abort when it fails.
-  int GetValueNumberOfSignature(const std::string&) const;
+  NumTy GetValueNumberOfSignature(const SignTy&) const;
 
-  // Bind two value numbers
-  void BindValueNumbers(int, int);
+  // Generate the new value number from a signature. Abort when the value number
+  // exists.
+  NumTy GenerateValueNumberFromSignature(const SignTy& signature);
+
+  // Check if the value number exists for the signature
+  bool HasValueNumberOfSignature(const SignTy&) const;
+
+  // Check if the value number exists and is valid for the signature
+  bool HasValidValueNumberOfSignature(const SignTy&);
+
+  NumTy GetOrGenValueNumberFromSignature(const SignTy& signature);
+
+  // Retrieve the signature from a value number. About when fails.
+  SignTy GetSignatureFromValueNumber(NumTy vn) const {
+    if (vn == UnknownValue()) return "?";
+
+    if (!vntbl.Exists(vn))
+      choreo_unreachable("value number " + std::to_string(vn) +
+                         " does not exists in the value number table.");
+    return vntbl.GetSignature(vn);
+  }
+
+  SignTy SignatureOfSymbol(SignTy sym) {
+    return GetSignatureFromValueNumber(GetValueNumberOfSignature(sym));
+  }
+
+  const SignTy SimplifySignature(const location&, const SignTy&);
+
+  std::optional<SignTy> TryToSimplifyBinary(const location&, const SignTy&,
+                                            const SignTy&, const SignTy&,
+                                            bool = false);
+
+  SignTy SignBinaryCompositeValues(const location&, const SignTy&,
+                                   const SignTy&, const SignTy&, bool = false);
+
+  ValueItem GenValueItemFromSignature(const SignTy&);
+  ValueItem GenValueItemFromValueNumber(NumTy);
+  const ValueList GenValueListFromSignature(const SignTy&);
+  const ValueList GenValueListFromValueNumber(NumTy);
+  SignTy ValueItemToSignature(const ValueItem&, bool = false);
+  SignTy ValueListToSignature(const ValueList&, bool = true);
+
+public:
+  ValBind::BindInfo<NumTy> bind_info; // TODO: to abondon
+
+  void BindValueNumbers(NumTy vn0, NumTy vn1) {
+    assert(vntbl.Exists(vn0) && vntbl.Exists(vn1) &&
+           "invalid value number is provided.");
+
+    AddBind(vn0, vn1);
+  }
 
   // Bind two value numbers
   const ValBind::Binds<int>::Set& GetBindSet(int vn) {
@@ -212,83 +346,41 @@ public:
 
   void AddBind(int vn0, int vn1) { bind_info.AddBind(vn0, vn1); }
 
-  // Generate the new value number from a signature. Abort when the value number
-  // exists.
-  int GenerateValueNumberFromSignature(const std::string& signature);
-
-  // Check if the value number exists for the signature
-  bool HasValueNumberOfSignature(const std::string&);
-
-  // Check if the value number exists and is valid for the signature
-  bool HasValidValueNumberOfSignature(const std::string&);
-
-  int GetOrInsertValueNumberFromSignature(const std::string& signature);
-
-  // Symbol names related to the value numbering
-  const std::string VNSymbolName(const AST::Identifier&) const;
-
-  // Retrieve the signature from a value number. About when fails.
-  std::string GetSignatureFromValueNumber(int vn) const {
-    if (vn == UnknownValue()) return "?";
-
-    if (!InternalHasValNoExpr(vn))
-      choreo_unreachable("value number " + std::to_string(vn) +
-                         " does not exists in the value number table.");
-    return InternalGetValNoExpr(vn);
-  }
-
-  std::string SignatureOfSymbol(std::string sym) {
-    return GetSignatureFromValueNumber(GetValueNumberOfSignature(sym));
-  }
-
-  std::string GetSignatureForNode(const AST::Node& n) {
-    return GetSignatureFromValueNumber(GetValueNumberForNode(n));
-  }
-
-  void Print(std::ostream& os) {
-    int scope = 0;
-    for (auto& stack : expressionValueNumbers) {
-      os << scope++ << "\n";
-      for (auto& item : stack)
-        os << "expr: \"" << item.first << "\", value_no: #" << item.second
-           << "\n";
-    }
-  }
-
-  std::optional<std::string>
-  SignBoundedOperation(const location&, const std::string&, const AST::Node&,
-                       const AST::Node&, bool verbose);
-
-  std::optional<std::string>
-  TryToSimplifyBinary(const location&, const std::string&, const std::string&,
-                      const std::string&, bool = false);
-
-  std::string SignBinaryCompositeValues(const location&, const std::string&,
-                                        const std::string&, const std::string&,
-                                        bool = false);
-
-  ValueItem GenValueItemFromSignature(const std::string&);
-  ValueItem GenValueItemFromValueNumber(int);
-  const ValueList GenValueListFromSignature(const std::string&);
-  const ValueList GenValueListFromValueNumber(int);
-  std::string ValueItemToSignature(const ValueItem&, bool = false);
-
+public:
   // retrieve the n-th element from the comma-separated input string
-  int GetNthValNo(const std::string& input, int n) const;
-  const std::vector<int> Flatten(int) const;
+  NumTy GetNthValNo(const SignTy& input, NumTy n) const;
+  const std::vector<NumTy> Flatten(NumTy) const;
 
-private:
   std::string ScopeIndent();
 
+  const std::vector<NumTy> AsVector(const SignTy& sign) const {
+    std::vector<NumTy> mvn;
+    if (!PrefixedWith(sign, "#"))
+      mvn.push_back(GetValueNumberOfSignature(sign));
+    else {
+      auto parts = SplitStringByDelimiter(sign, ",");
+      for (auto& p : parts) mvn.push_back(std::stoi(p.substr(1)));
+    }
+    return mvn;
+  }
+
+  const std::vector<NumTy> AsVector(NumTy valno) const {
+    assert(ValidVN(valno) && "not a valid value number.");
+    return AsVector(GetSignatureFromValueNumber(valno));
+  }
+
+  void Print(std::ostream& os) const { vntbl.Print(os); }
+
+private:
   void Error(const location& loc, const std::string& message);
   void Warning(const location& loc, const std::string& message);
 };
 
 // Given a multi-value signature, process each value
-inline void ProcessValueNumberString(const std::string& input,
-                                     std::function<void(int, size_t)> lambda) {
+inline void ForeachValueNumber(const SignTy& sign,
+                               std::function<void(NumTy, size_t)> lambda) {
   std::regex valuePattern("#(-?\\d+)");
-  auto begin = std::sregex_iterator(input.begin(), input.end(), valuePattern);
+  auto begin = std::sregex_iterator(sign.begin(), sign.end(), valuePattern);
   auto end = std::sregex_iterator();
 
   size_t matchIndex = 0;
@@ -302,6 +394,8 @@ inline void ProcessValueNumberString(const std::string& input,
     lambda(number, matchIndex);
   }
 }
+
+} // end namespace valno
 
 } // end namespace Choreo
 

@@ -7,22 +7,35 @@ __co__ void foo(f32 [128, 512] a) {
    }
 }
 
-// CHECK: New VN #0: 'const_1'
-// CHECK: New VN #1: 'const_128'
-// CHECK: New VN #2: 'const_512'
-// CHECK: New VN #3: '#1,#2'
-// CHECK: New VN #4: 'index_const_0'
-// CHECK: New VN #5: 'index_const_1'
-// CHECK: New VN #6: 'const_3'
-// CHECK: New VN #7: 'const_6'
-// CHECK: New VN #8: 'const_0'
-// CHECK: New VN #9: 'const_134'
-// CHECK: New VN #10: 'const_133'
-// CHECK: <Simplify> 'dimof:#3:#4 + ubound:#7' to 'const_134'
-// CHECK: New VN #11: 'const_22'
-// CHECK: -:#9:#0 / ubound:#7' to 'const_22'
-// CHECK: New VN #12: 'const_132'
-// CHECK: /:#10:#7 * ubound:#7' to 'const_132'
-// CHECK: *:#11:#7 == ref:#12' to 'true'
-// CHECK: /:#14:#15 * ref:#15' to 'const_32'
-// CHECK: *:#0:#15 == ref:#15' to 'true'
+// CHECK:   scope-1 {
+// CHECK:    New VN #0: 'const_1'
+// CHECK:    Alias "::@__choreo_no_tiling__" -> #0
+// CHECK:    New VN #1: '::__choreo_no_tiling__'
+// CHECK:    New VN #2: 'const_128'
+// CHECK:    New VN #3: 'const_512'
+// CHECK:    New VN #4: '#2,#3'
+// CHECK:    Alias "::foo::a.span" -> #4
+// CHECK:    scope-2 {
+// CHECK:     New VN #5: 'const_3'
+// CHECK:     Alias "::foo::paraby_0::@p" -> #5
+// CHECK:     New VN #6: '::foo::paraby_0::p'
+// CHECK:     Alias "::foo::paraby_0::@p__elem__x" -> #5
+// CHECK:     New VN #7: '::foo::paraby_0::p__elem__x'
+// CHECK:     scope-3 {
+// CHECK:      New VN #8: 'const_6'
+// CHECK:      Alias "::foo::paraby_0::paraby_1::@q" -> #8
+// CHECK:      New VN #9: '::foo::paraby_0::paraby_1::q'
+// CHECK:      Alias "::foo::paraby_0::paraby_1::@q__elem__x" -> #8
+// CHECK:      New VN #10: '::foo::paraby_0::paraby_1::q__elem__x'
+// CHECK:      New VN #11: 'const_0'
+// CHECK:      New VN #12: 'index_const_0'
+// CHECK:      New VN #13: 'const_134'
+// CHECK:      New VN #14: 'const_133'
+// CHECK:      New VN #15: 'const_22'
+// CHECK:      New VN #16: 'const_132'
+// CHECK:      New VN #17: 'true'
+// CHECK:      New VN #18: 'const_42'
+// CHECK:      New VN #19: 'const_32'
+// CHECK:     } // end scope-3
+// CHECK:    } // end scope-2
+// CHECK:   } // end scope-1

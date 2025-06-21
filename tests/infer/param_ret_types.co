@@ -6,25 +6,18 @@ __co__ void foo(f32 mdspan[2, 3, 4] d, int e, bool, f32 mdspan<2> a) { }
 // VALNO:  scope-1 {
 // VALNO:   New VN #0: 'const_1'
 // VALNO:   Alias "::@__choreo_no_tiling__" -> #0
-// VALNO:   New VN #1: 'const_2'
-// VALNO:   New VN #2: 'const_3'
-// VALNO:   New VN #3: 'const_4'
-// VALNO:   New VN #4: '#1,#2,#3'
-// VALNO:   New VN #5: 'index_const_0'
-// VALNO:   Alias "#1,#2,#3(0)" -> #1
-// VALNO:   New VN #6: 'index_const_1'
-// VALNO:   Alias "#1,#2,#3(1)" -> #2
-// VALNO:   New VN #7: 'index_const_2'
-// VALNO:   Alias "#1,#2,#3(2)" -> #3
-// VALNO:   Alias "::foo::d.span" -> #4
-// VALNO:   New VN #8: '::foo::e'
-// VALNO:   New VN #9: '::foo::anon_0'
-// VALNO:   New VN #10: '::foo::$0'
-// VALNO:   New VN #11: '::foo::$1'
-// VALNO:   New VN #12: '#10,#11'
-// VALNO:   Alias "#10,#11(0)" -> #10
-// VALNO:   Alias "#10,#11(1)" -> #11
-// VALNO:   Alias "::foo::a.span" -> #12
+// VALNO:   New VN #1: '::__choreo_no_tiling__'
+// VALNO:   New VN #2: 'const_2'
+// VALNO:   New VN #3: 'const_3'
+// VALNO:   New VN #4: 'const_4'
+// VALNO:   New VN #5: '#2,#3,#4'
+// VALNO:   Alias "::foo::d.span" -> #5
+// VALNO:   New VN #6: '::foo::e'
+// VALNO:   New VN #7: '::foo::anon_0'
+// VALNO:   New VN #8: '::foo::$0'
+// VALNO:   New VN #9: '::foo::$1'
+// VALNO:   New VN #10: '#8,#9'
+// VALNO:   Alias "::foo::a.span" -> #10
 // VALNO:  } // end scope-1
 
 // CHECK: Parameter: ::foo::d, Type: f32 mdspan<3> [2, 3, 4]
@@ -36,32 +29,18 @@ __co__ void foo(f32 mdspan[2, 3, 4] d, int e, bool, f32 mdspan<2> a) { }
 __co__ void bar(f32 mdspan[?, 2, ?, 4] d, f32 mdspan<4> a) { }
 
 // VALNO:  scope-1 {
-// VALNO:   New VN #0: 'const_1'
 // VALNO:   Alias "::@__choreo_no_tiling__" -> #0
-// VALNO:   New VN #1: '::bar::$0'
-// VALNO:   New VN #2: 'const_2'
-// VALNO:   New VN #3: '::bar::$1'
-// VALNO:   New VN #4: 'const_4'
-// VALNO:   New VN #5: '#1,#2,#3,#4'
-// VALNO:   New VN #6: 'index_const_0'
-// VALNO:   Alias "#1,#2,#3,#4(0)" -> #1
-// VALNO:   New VN #7: 'index_const_1'
-// VALNO:   Alias "#1,#2,#3,#4(1)" -> #2
-// VALNO:   New VN #8: 'index_const_2'
-// VALNO:   Alias "#1,#2,#3,#4(2)" -> #3
-// VALNO:   New VN #9: 'index_const_3'
-// VALNO:   Alias "#1,#2,#3,#4(3)" -> #4
-// VALNO:   Alias "::bar::d.span" -> #5
-// VALNO:   New VN #10: '::bar::$2'
-// VALNO:   New VN #11: '::bar::$3'
-// VALNO:   New VN #12: '::bar::$4'
-// VALNO:   New VN #13: '::bar::$5'
-// VALNO:   New VN #14: '#10,#11,#12,#13'
-// VALNO:   Alias "#10,#11,#12,#13(0)" -> #10
-// VALNO:   Alias "#10,#11,#12,#13(1)" -> #11
-// VALNO:   Alias "#10,#11,#12,#13(2)" -> #12
-// VALNO:   Alias "#10,#11,#12,#13(3)" -> #13
-// VALNO:   Alias "::bar::a.span" -> #14
+// VALNO:   New VN #11: '::__choreo_no_tiling__'
+// VALNO:   New VN #12: '::bar::$0'
+// VALNO:   New VN #13: '::bar::$1'
+// VALNO:   New VN #14: '#12,#2,#13,#4'
+// VALNO:   Alias "::bar::d.span" -> #14
+// VALNO:   New VN #15: '::bar::$2'
+// VALNO:   New VN #16: '::bar::$3'
+// VALNO:   New VN #17: '::bar::$4'
+// VALNO:   New VN #18: '::bar::$5'
+// VALNO:   New VN #19: '#15,#16,#17,#18'
+// VALNO:   Alias "::bar::a.span" -> #19
 // VALNO:  } // end scope-1
 
 // CHECK: Parameter: ::bar::d, Type: f32 mdspan<4> [::bar::$0, 2, ::bar::$1, 4]
@@ -71,22 +50,12 @@ __co__ void bar(f32 mdspan[?, 2, ?, 4] d, f32 mdspan<4> a) { }
 __co__ auto foobar(f32 mdspan[?, 2, ?, 4] a) { return a; }
 
 // VALNO:  scope-1 {
-// VALNO:   New VN #0: 'const_1'
 // VALNO:   Alias "::@__choreo_no_tiling__" -> #0
-// VALNO:   New VN #1: '::foobar::$0'
-// VALNO:   New VN #2: 'const_2'
-// VALNO:   New VN #3: '::foobar::$1'
-// VALNO:   New VN #4: 'const_4'
-// VALNO:   New VN #5: '#1,#2,#3,#4'
-// VALNO:   New VN #6: 'index_const_0'
-// VALNO:   Alias "#1,#2,#3,#4(0)" -> #1
-// VALNO:   New VN #7: 'index_const_1'
-// VALNO:   Alias "#1,#2,#3,#4(1)" -> #2
-// VALNO:   New VN #8: 'index_const_2'
-// VALNO:   Alias "#1,#2,#3,#4(2)" -> #3
-// VALNO:   New VN #9: 'index_const_3'
-// VALNO:   Alias "#1,#2,#3,#4(3)" -> #4
-// VALNO:   Alias "::foobar::a.span" -> #5
+// VALNO:   New VN #20: '::__choreo_no_tiling__'
+// VALNO:   New VN #21: '::foobar::$0'
+// VALNO:   New VN #22: '::foobar::$1'
+// VALNO:   New VN #23: '#21,#2,#22,#4'
+// VALNO:   Alias "::foobar::a.span" -> #23
 // VALNO:  } // end scope-1
 
 // CHECK: Parameter: ::foobar::a, Type: f32 mdspan<4> [::foobar::$0, 2, ::foobar::$1, 4]

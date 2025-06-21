@@ -87,10 +87,6 @@ static Parser::symbol_type yylex(Scanner &scanner) {
 static bool parsing_derivation_decl = false;
 static bool ignore_fndata = false;
 
-ptr<AST::MultiNodes> ConstructPBRecursively(size_t idx,
-                                            const ptr<AST::MultiNodes>& ps,
-                                            const ptr<AST::MultiNodes>& stmts,
-                                            bool);
 std::pair<ptr<AST::Identifier>, ptr<AST::MultiValues>> ElementMultiValues(const ptr<AST::Expr>&);
 std::set<std::string> paraby_symbols;
 
@@ -204,9 +200,9 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::SpanAs>> span_as
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
 %nterm <AST::ptr<AST::Node>> any_code foreach_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt wait_stmt trigger_stmt call_stmt swap_stmt range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
-%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins parabys paraby where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
-%nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params idt_list ids_list subscriptions data_indices
-%nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr call_expr
+%nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
+%nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params ids_list subscriptions data_indices
+%nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr call_expr ituple_derivation
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type mdspan_as_type
 %nterm <AST::ptr<AST::DataAccess>> data_element
 %nterm <AST::ptr<AST::ParamList>> parameter_list
@@ -222,7 +218,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::IfElseBlock>> if_else_block
 %nterm <AST::ptr<AST::WithIn>> within
 %nterm <AST::ptr<AST::WhereBind>> where_bind
-%nterm <AST::ptr<AST::ParallelBy>> paraby_block
+%nterm <AST::ptr<AST::ParallelBy>> paraby_block parabys paraby
 %nterm <AST::ptr<AST::Return>> return_stmt
 %nterm <AST::ptr<AST::Synchronize>> sync_stmt
 %nterm <std::vector<ptr<AST::TSInfo>>> ts_infos
@@ -261,7 +257,7 @@ void choreo_info(const char *message) {
 
 program
     : /* Empty */ {}
-    | program any_code { if ($2 != nullptr) root.nodes.push_back($2); }
+    | program any_code { if ($2 != nullptr) root.nodes->Append($2); }
     ;
 
 any_code
@@ -429,17 +425,6 @@ int_or_id
       }
     ;
 
-idt_list /* list of integers or ids */
-    : idt_list COMMA int_or_id {
-        $1->Append($3);
-        $$ = $1;
-      }
-    | int_or_id {
-        $$ = AST::Make<AST::MultiValues>(@1, ", ");
-        $$->Append($1);
-      }
-    ;
-
 bool_value
     : TRUE { $$ = true; }
     | FALSE { $$ = false; }
@@ -535,46 +520,46 @@ paraby_block
     : PARA sync_type {
         paraby_symbols.clear();
       } parabys stmts_block {
-        $$ = AST::Make<AST::ParallelBy>(@1, cast<AST::MultiNodes>($4->AllSubs()[0]), $5, $2);
-        if ($4->Count() > 1)
-          $$->stmts = ConstructPBRecursively(1, $4, $5, $2);
+        $4->SetAsync($2);
+        // attach statement to the inner-most pb
+        auto pb = $4;
+        while (!pb->stmts->None() && isa<AST::ParallelBy>(pb->stmts->SubAt(0)))
+          pb = cast<AST::ParallelBy>(pb->stmts->SubAt(0));
+        assert(pb->stmts->None() && "expect no statement.");
+        pb->stmts = $5;
+        $$ = $4;
       }
     ;
 
 parabys
     : parabys COMMA paraby {
-        $1->Append($3);
+        // add the paraby as the first stmt of inner-most parallel-by
+        auto pb = $1;
+        while (!pb->stmts->None() && isa<AST::ParallelBy>(pb->stmts->SubAt(0)))
+          pb = cast<AST::ParallelBy>(pb->stmts->SubAt(0));
+        pb->stmts->Append($3);
         $$ = $1;
       }
-    | paraby {
-        $$ = AST::Make<AST::MultiNodes>(@1);
-        $$->Append($1);
-      }
+    | paraby { $$ = $1; }
     ; /* do not allow empty paraby */
 
 paraby
-    : BY NUM {
-        $$ = AST::Make<AST::MultiNodes>(@2);
-        $$->Append(AST::Make<AST::Identifier>(@1, SymbolTable::GetAnonName()));
-        $$->Append(AST::Make<AST::IntLiteral>(@2, $2));
+    : BY s_expr {
+        auto anon_id = AST::Make<AST::Identifier>(@1, SymbolTable::GetAnonName());
+        $$ = AST::Make<AST::ParallelBy>(@1, anon_id, $2);
       }
-    | IDENTIFIER BY int_or_id {
+    | IDENTIFIER BY s_expr {
         if (paraby_symbols.find($1) != paraby_symbols.end())
           Parser::error(@1, "The symbol '" + $1 + "' has been used in the same parallelby block.");
         paraby_symbols.insert($1);
         symtab.AddSymbol($1, MakeUnknownType());
-        $$ = AST::Make<AST::MultiNodes>(@1);
-        $$->Append(AST::Make<AST::Identifier>(@1, $1));
-        $$->Append($3);
+        $$ = AST::Make<AST::ParallelBy>(@1, AST::Make<AST::Identifier>(@1, $1), $3);
       }
-    | IDENTIFIER ASSIGN LBRACE id_list RBRACE BY LBRAKT idt_list RBRAKT {
+    | IDENTIFIER ASSIGN LBRACE id_list RBRACE BY LBRAKT value_list RBRAKT {
         if (paraby_symbols.find($1) != paraby_symbols.end())
           Parser::error(@1, "The symbol '" + $1 + "' has been used in the same parallelby block.");
         paraby_symbols.insert($1);
         symtab.AddSymbol($1, MakeUnknownType());
-        if ($4->Count() != $8->Count())
-          Parser::error(@4, "The number of arguments in parallel bound config "
-                        "should be consistent.");
         for (auto id : $4->AllValues()) {
           auto name = cast<AST::Identifier>(id)->name;
           if (paraby_symbols.find(name) != paraby_symbols.end())
@@ -582,15 +567,11 @@ paraby
           paraby_symbols.insert(name);
           symtab.AddSymbol(name, MakeUnknownType());
         }
-        $$ = AST::Make<AST::MultiNodes>(@1);
-        $$->Append(AST::Make<AST::Identifier>(@1, $1));
-        $$->Append($4);
-        $$->Append($8);
+        $8->SetDelimiter(", ");
+        $$ = AST::Make<AST::ParallelBy>(@1, AST::Make<AST::Identifier>(@1, $1), nullptr, $4, $8);
+        $$->SetBracketed(true);
       }
-    | LBRACE id_list RBRACE BY LBRAKT idt_list RBRAKT {
-        if ($2->Count() != $6->Count())
-          Parser::error(@2, "The number of arguments in parallel bound config "
-                        "should be consistent.");
+    | LBRACE id_list RBRACE BY LBRAKT value_list RBRAKT {
         for (auto id : $2->AllValues()) {
           auto name = cast<AST::Identifier>(id)->name;
           if (paraby_symbols.find(name) != paraby_symbols.end())
@@ -598,9 +579,10 @@ paraby
           paraby_symbols.insert(name);
           symtab.AddSymbol(name, MakeUnknownType());
         }
-        $$ = AST::Make<AST::MultiNodes>(@1);
-        $$->Append($2);
-        $$->Append($6);
+        auto anon_id = AST::Make<AST::Identifier>(@1, SymbolTable::GetAnonName());
+        $6->SetDelimiter(", ");
+        $$ = AST::Make<AST::ParallelBy>(@1, anon_id, nullptr, $2, $6);
+        $$->SetBracketed(true);
       }
     ;
 
@@ -641,9 +623,9 @@ named_scalar_decls
         $2->ReGenSemaType();
         for (auto sub : $3->AllSubs()) {
           auto decl = cast<AST::NamedVariableDecl>(sub);
-          decl->type = $2;
+          decl->type = cast<AST::DataType>($2->Clone());
           decl->SetMutable($1);
-          symtab.AddSymbol(decl->name_str, $2->GetType());
+          symtab.AddSymbol(decl->name_str, $2->GetType()->Clone());
           // override the data type
         }
         $$ = $3;
@@ -690,7 +672,7 @@ named_event_decls
           auto sym_name = decl->name_str;
           symtab.AddSymbol(sym_name, MakeEventType($1->Get()));
           // override the data type
-          decl->mem = $1;
+          decl->mem = cast<AST::Memory>(cast<AST::Memory>($1->Clone()));
         }
         $$ = $3;
       }
@@ -718,13 +700,13 @@ named_spanned_decls
     : storage_qual mdspan_as_type spanned_decls {
         for (auto item : $3->AllSubs()) {
           auto decl = cast<AST::NamedVariableDecl>(item);
-          symtab.AddSymbol(decl->name_str, $2->GetType());
-          decl->type = $2;
+          symtab.AddSymbol(decl->name_str, $2->GetType()->Clone());
+          decl->type = cast<AST::DataType>($2->Clone());
           if (decl->IsArray()) {
             decl->type->array_dims = decl->ArrayDimensions();
             decl->type->ReGenSemaType();
           }
-          decl->mem = $1;
+          decl->mem = cast<AST::Memory>($1->Clone());
         }
         $3->SetLOC(@1);
         $$ = $3;
@@ -988,6 +970,10 @@ assignment
               $1, AST::Make<AST::DataType>(@1, BaseType::UNKNOWN), nullptr, expr);
         // TODO: make it a named variable instead of expr assignment
         // $$ = AST::Make<AST::NamedVariableDecl>(@1, $1, nullptr, nullptr, $5, $4);
+      }
+    | IDENTIFIER ASSIGN ituple_derivation {
+        $$ = AST::Make<AST::NamedVariableDecl>(@1,
+              $1, AST::Make<AST::DataType>(@1, BaseType::ITUPLE), nullptr, $3);
       }
     | IDENTIFIER arith_operation ASSIGN s_expr {
         if (!symtab.Exists($1)) {
@@ -1612,7 +1598,9 @@ subscript_like_expr /* for multi-dim element accesses and also mdspan derivation
         $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::MultiDimSpans>(@1, $1, $3));
       }
 */
-    | IDENTIFIER LBRACE g_value_list RBRACE {
+
+ituple_derivation
+    : IDENTIFIER LBRACE g_value_list RBRACE {
         $3->SetDelimiter(", ");
         $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::IntTuple>(@1, $1, $3));
       }
@@ -1761,20 +1749,6 @@ ElementMultiValues(const ptr<AST::Expr>&e) {
     }
   }
   return std::make_pair(id, mv);
-}
-
-ptr<AST::MultiNodes> ConstructPBRecursively(size_t idx,
-                                            const ptr<AST::MultiNodes>& ps,
-                                            const ptr<AST::MultiNodes>& stmts,
-                                            bool async) {
-  auto pb = AST::Make<AST::ParallelBy>(ps->LOC(),
-                                       cast<AST::MultiNodes>(ps->AllSubs()[idx]),
-                                       stmts, async);
-  if (idx < ps->Count() - 1)
-    pb->stmts = ConstructPBRecursively(idx + 1, ps, stmts, async);
-  auto mn = AST::Make<AST::MultiNodes>(ps->LOC());
-  mn->Append(pb);
-  return mn;
 }
 
 inline ptr<AST::TSInfo> OptTSInfo(const ptr<AST::TSInfo> &tsi) {

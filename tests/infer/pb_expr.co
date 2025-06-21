@@ -1,0 +1,11 @@
+// RUN: choreo -i %s | FileCheck --match-full-lines %s
+
+__co__ auto foo(int a, int b) {
+  parallel p by a + 3, q = {qx, qy} by [7 * 5 - 2, 6 * b - 3] {}
+}
+
+// CHECK: Bounded:   ::foo::paraby_0::p, Type: {int}->[(::foo::a + 3)](pv)
+// CHECK: Bounded:   ::foo::paraby_0::p__elem__x, Type: {int}->[(::foo::a + 3)](pi:x)
+// CHECK: Bounded:   ::foo::paraby_0::paraby_1::q, Type: {int,int}->[33, ((::foo::b * 6) - 3)](pv)
+// CHECK: Bounded:   ::foo::paraby_0::paraby_1::qx, Type: {int}->[33](pi:x)
+// CHECK: Bounded:   ::foo::paraby_0::paraby_1::qy, Type: {int}->[((::foo::b * 6) - 3)](pi:y)

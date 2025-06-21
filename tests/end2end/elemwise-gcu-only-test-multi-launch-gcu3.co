@@ -60,7 +60,7 @@ int main() {
   auto a_data = choreo::make_spanview<3, choreo::s32>((int*)a, {NN, 17, 128});
   auto b_data = choreo::make_spanview<3, choreo::s32>((int*)b, {NN, 17, 128});
   a_data.fill_random(-10, 10);
-  b_data.fill_random(-10, 10);
+ b_data.fill_random(-10, 10);
 
   auto res = ele_add(a_data, b_data);
   std::cout << res.shape()[0] << std::endl;

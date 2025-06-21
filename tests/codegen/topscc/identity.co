@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GCUALL
-// RUN: choreo -es -t topscc -dp=memreuse %s | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+// RUN: choreo -es -t topscc -dp=memreuse %s | FileCheck --match-full-lines %s
 
 #include "choreo.h"
 #include <chrono>
@@ -72,7 +72,6 @@ int main() { /// host program
 }
 
 // CHECK: __global__ void __choreo_device_identity(float * input, float * output) {
-// CHECK:   // parallel-by: tests/codegen/topscc/identity.co:26.3
 // CHECK:   __shared__ float l2_out[1024];
 // CHECK:   __shared__ float input_load__buf__[1024];
 // CHECK:   tops::mdspan __mds0_input(tops::Global, (float*)input, 1024);

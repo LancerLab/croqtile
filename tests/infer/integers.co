@@ -6,14 +6,14 @@ __co__ void add() {
    c = a + b;
 }
 
-// CHECK: [SymVal] ::add::a: 3
-// CHECK: [SymVal] ::add::b: 1
-// CHECK: [SymVal] ::add::c: 4
+// CHECK: <symval> ::add::a: 3
+// CHECK: <symval> ::add::b: 1
+// CHECK: <symval> ::add::c: 4
 
 __co__ void sym_add(int b) {
    a = 1 * 2 - b;
    c = a + b;
 }
 
-// CHECK: [SymVal] ::sym_add::a: (2 - ::sym_add::b)
-// CHECK: [SymVal] ::sym_add::c: 2
+// CHECK: <symval> ::sym_add::a: (2 - ::sym_add::b)
+// CHECK: <symval> ::sym_add::c: 2

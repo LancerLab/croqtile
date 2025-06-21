@@ -141,10 +141,11 @@ public:
           if (auto ref = expr->GetReference()) {
             if (isa<AST::IntIndex>(ref.get())) {
               // apply desugaring a {(0), 1} -> {a(0), 1}
-              auto new_expr =
-                  AST::Make<AST::Expr>(expr->LOC(), "dimof", list_ref, ref);
+              auto new_expr = AST::Make<AST::Expr>(
+                  expr->LOC(), "dimof", list_ref->Clone(), ref->Clone());
               VST_DEBUG(dbgs() << "Desugar ref: " << STR(*expr) << " ---> "
                                << STR(*new_expr) << "\n");
+              new_expr->SetType(MakeIntegerType());
               n.values[i] = new_expr;
             }
           }
@@ -181,7 +182,9 @@ public:
           if (!isa<AST::IntIndex>(ref.get())) return nullptr;
 
           // apply desugaring a {(0), 1} -> {a(0), 1}
-          auto ret = AST::Make<AST::Expr>(expr->LOC(), "dimof", list_ref, ref);
+          auto ret = AST::Make<AST::Expr>(expr->LOC(), "dimof",
+                                          list_ref->Clone(), ref->Clone());
+          ret->SetType(MakeIntegerType()); // must be integer
 
           VST_DEBUG(dbgs() << "Desugaring expression node: " << PSTR(expr)
                            << " --->" << PSTR(ret) << "\n";);
@@ -222,23 +225,22 @@ public:
           ptr<AST::Expr> new_expr = nullptr;
           if (func_name == "__alignup") {
             // __alignup(a, b) -> (a + b - 1) / b * b
-            new_expr = AST::Make<AST::Expr>(
-                n.LOC(), AST::Make<AST::IntLiteral>(n.LOC(), 1));
+            auto il = AST::MakeIntExpr(n.LOC(), 1);
+            il->SetType(nty);
+            auto add = AST::Make<AST::Expr>(n.LOC(), "+", arg0, arg1);
+            add->SetType(nty);
+            auto sub = AST::Make<AST::Expr>(n.LOC(), "-", add, il);
+            sub->SetType(nty);
+            auto div = AST::Make<AST::Expr>(n.LOC(), "/", sub, arg1);
+            div->SetType(nty);
+            new_expr = AST::Make<AST::Expr>(n.LOC(), "*", div, arg1);
             new_expr->SetType(nty);
-            new_expr = AST::Make<AST::Expr>(
-                n.LOC(), "-", AST::Make<AST::Expr>(n.LOC(), "+", arg0, arg1),
-                new_expr);
-            new_expr->SetType(nty);
-            new_expr = AST::Make<AST::Expr>(n.LOC(), "/", new_expr, arg1);
-            new_expr->SetType(nty);
-            new_expr = AST::Make<AST::Expr>(n.LOC(), "*", new_expr, arg1);
-            new_expr->SetType((nty));
           } else if (func_name == "__aligndown") {
             // __aligndown(a, b) -> a / b * b
-            new_expr = AST::Make<AST::Expr>(n.LOC(), "/", arg0, arg1);
-            new_expr->SetType((nty));
-            new_expr = AST::Make<AST::Expr>(n.LOC(), "*", new_expr, arg1);
-            new_expr->SetType((nty));
+            auto div = AST::Make<AST::Expr>(n.LOC(), "/", arg0, arg1);
+            div->SetType(nty);
+            new_expr = AST::Make<AST::Expr>(n.LOC(), "*", div, arg1);
+            new_expr->SetType(nty);
           }
           VST_DEBUG(dbgs() << "Desugar " << STR(n) << " -> " << PSTR(new_expr)
                            << "\n");
@@ -269,7 +271,7 @@ public:
     auto mv = AST::Make<AST::MultiValues>(n.GetValues()->LOC(), ",");
     for (auto& v : n.GetValues()->AllValues()) {
       if (isa<AST::IntLiteral>(v)) {
-        mv->Append(v);
+        mv->Append(v->Clone());
         continue;
       }
       auto expr = cast<AST::Expr>(v);
@@ -279,7 +281,10 @@ public:
         for (size_t idx = 0; idx < itt->dim_count; ++idx) {
           auto ii = AST::Make<AST::IntIndex>(
               expr->LOC(), AST::Make<AST::IntLiteral>(expr->LOC(), idx));
-          auto new_expr = AST::Make<AST::Expr>(expr->LOC(), "dimof", expr, ii);
+          ii->SetType(MakeIndexType());
+          auto new_expr =
+              AST::Make<AST::Expr>(expr->LOC(), "dimof", expr->Clone(), ii);
+          new_expr->SetType(MakeIntegerType());
           mv->Append(new_expr);
           VST_DEBUG(dbgs() << "\t" << PSTR(new_expr) << "\n");
           replace_mv = true;
@@ -302,28 +307,19 @@ public:
   bool Visit(AST::Parameter&) override { return true; }
   bool Visit(AST::ParamList&) override { return true; }
   bool Visit(AST::ParallelBy& n) override {
-    if (n.HasBPV()) {
-      if (n.cmpt_bpvs == nullptr) {
-        // `parallel p by 2`  ==> `parallel p={p__elem__x} by [2]`
-        n.cmpt_bpvs = AST::Make<AST::MultiValues>(n.LOC(), ", ");
-        n.cmpt_bpvs->Append(
-            AST::Make<AST::Identifier>(n.LOC(), n.bpv->name + "__elem__x"));
-        n.cmpt_bounds = AST::Make<AST::MultiValues>(n.LOC(), ", ");
-        if (auto b = VIInt(n.GetBound()))
-          n.cmpt_bounds->Append(AST::Make<AST::IntLiteral>(n.LOC(), *b));
-        else
-          n.cmpt_bounds->Append(AST::Make<AST::Identifier>(
-              n.LOC(), ValueItemAsString(n.GetBound())));
-        n.cmpt_bpvs->ValueAt(0)->SetType(MakeBoundedIntegerType(n.GetBound()));
-        n.bpv->SetType(MakeBoundedIntegerType(n.bpv->name));
-        VST_DEBUG(dbgs() << "Generate cmpt_bpvs in parallelby for '"
-                         << PSTR(n.bpv) << "': " << STR(n.cmpt_bpvs) << "\n");
-      }
-    } else {
-      assert(n.cmpt_bpvs && "At least one bpv and cmpt_bpvs should exist!");
-      // `parallel {px} by [2]`  ==> `parallel anon={px} by [2]`
-      n.bpv = AST::Make<AST::Identifier>(n.LOC(), SymbolTable::GetAnonName());
-      n.bpv->SetType(MakeBoundedITupleType(Shape(n.SubCount()), "pv"));
+    if (!n.HasSubPVs()) {
+      // `parallel p by 2`  ==> `parallel p={p__elem__x} by [2]`
+      auto spv = AST::Make<AST::MultiValues>(n.LOC(), ", ");
+      spv->Append(
+          AST::Make<AST::Identifier>(n.LOC(), n.BPV()->name + "__elem__x"));
+      n.SetSubPVs(spv);
+      auto sub = AST::Make<AST::MultiValues>(n.LOC(), ", ");
+      sub->Append(n.BoundExpr()->Clone());
+      n.SetBoundExprs(sub);
+      n.SubPVs()->ValueAt(0)->SetType(NodeType(*n.BPV()));
+      n.SubPVs()->SetType(NodeType(*n.BPV()));
+      VST_DEBUG(dbgs() << "Generate cmpt_bpvs in parallelby for '"
+                       << PSTR(n.BPV()) << "': " << STR(n.SubPVs()) << "\n");
     }
     return true;
   }
@@ -380,8 +376,8 @@ public:
     int index = cur_node_index + mnodes_insertions[multi_nodes.top()].size();
     cast<AST::Select>(n.to)->inDMA = false;
     auto assign = AST::Make<AST::Assignment>(n.to->LOC(), anon_sym, n.to);
-    assign->SetType(n.to->GetType());
-    assign->da->SetType(n.to->GetType());
+    assign->SetType(n.to->GetType()->Clone());
+    assign->da->SetType(n.to->GetType()->Clone());
     mnodes_insertions[multi_nodes.top()].emplace_back(
         std::make_tuple(index, assign, anon_sym));
     VST_DEBUG(dbgs() << n.TypeNameString() << ": replace " << PSTR(n.to)
@@ -401,8 +397,8 @@ public:
       int index = cur_node_index + mnodes_insertions[multi_nodes.top()].size();
       auto assign =
           AST::Make<AST::Assignment>(n.sa->LOC(), n.sa->nid->name, n.sa);
-      assign->SetType(n.sa->GetType());
-      assign->da->SetType(n.sa->GetType());
+      assign->SetType(n.sa->GetType()->Clone());
+      assign->da->SetType(n.sa->GetType()->Clone());
       mnodes_insertions[multi_nodes.top()].emplace_back(
           std::make_tuple(index, assign, n.sa->nid->name));
       VST_DEBUG(dbgs() << n.TypeNameString() << ": replace " << PSTR(n.sa)
@@ -431,8 +427,8 @@ public:
               auto nname = SymbolTable::GetAnonName();
               auto assign = AST::Make<AST::Assignment>(expr->GetL()->LOC(),
                                                        nname, expr->GetL());
-              assign->SetType(expr->GetL()->GetType());
-              assign->da->SetType(expr->GetL()->GetType());
+              assign->SetType(expr->GetL()->GetType()->Clone());
+              assign->da->SetType(expr->GetL()->GetType()->Clone());
               mnodes_insertions[multi_nodes.top()].emplace_back(
                   std::make_tuple(index, assign, nname));
               VST_DEBUG(dbgs()

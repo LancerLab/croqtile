@@ -1887,6 +1887,11 @@ bool TopsccCodeGen::Visit(AST::WithIn& n) {
       ds << d_indent << "int __iv_" << id->name << " = 0;\n";
   }
 
+  if (n.with && (n.GetMatchers().size() == 1)) {
+    auto m1 = cast<AST::Identifier>(n.GetMatchers()[0]);
+    ssm.RemapDeviceSymbol(InScopeName(n.with->name), "__iv_" + m1->name);
+  }
+
   return true;
 }
 
@@ -2467,9 +2472,16 @@ const std::string TopsccCodeGen::ValueSTR(const ValueItem& vi) const {
     return PSTR(vi);
   else if (auto bv = VIBool(vi))
     return PSTR(vi);
-  else if (auto sv = VIStr(vi))
-    return UnScopedExpr(PSTR(vi));
-  else if (auto bo = VIBop(vi))
+  else if (auto sv = VIStr(vi)) {
+    auto name = PSTR(vi);
+    if (within_map.count(name)) {
+      if (IsHost())
+        return ssm.HostName(name);
+      else
+        return ssm.DeviceName(name);
+    } else
+      return UnScopedExpr(PSTR(vi));
+  } else if (auto bo = VIBop(vi))
     return "(" + ValueSTR(bo->GetLeft()) + " " + STR(bo->GetOpCode()) + " " +
            ValueSTR(bo->GetRight()) + ")";
   else if (auto to = VITop(vi))
@@ -2710,9 +2722,9 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       }
     }
 
-    if (ConvertibleToInt(NodeType(*e)))
-      if (expr->Opts().HasVal())
-        return "(" + UnScopedExpr(STR(expr->Opts().GetVal())) + ")";
+    if (ConvertibleToInt(NodeType(*e))) {
+      if (expr->Opts().HasVal()) return ValueSTR(expr->Opts().GetVal());
+    }
 
     if (expr->IsReference()) {
       if (PSTR(expr) == "_") return "(0)";
@@ -2781,7 +2793,7 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       } else if (expr->GetOp() == "elemof") {
         oss << ExprSTR(expr->GetL(), is_host) << "["
             << ExprSTR(expr->GetR(), is_host) << "]";
-      } else if (expr->IsArith() || expr->IsLogical()) {
+      } else if (expr->IsArith() || expr->IsLogical() || expr->IsCompare()) {
         auto& l = expr->GetL();
         auto& r = expr->GetR();
         auto& op = expr->GetOp();
@@ -2804,8 +2816,8 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
           choreo_unreachable("unsupported expression '" + expr->GetOp() +
                              "': " + PSTR(expr) + ".");
         else
-          oss << "((" << ExprSTR(l, is_host) << ")" << op << "("
-              << ExprSTR(r, is_host) << "))";
+          oss << "(" << ExprSTR(l, is_host) << " " << op << " "
+              << ExprSTR(r, is_host) << ")";
       }
     } else if (expr->IsTernary()) {
       oss << "((" << ExprSTR(expr->GetC(), is_host) << ") ? "

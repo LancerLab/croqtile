@@ -201,7 +201,7 @@ bool SemaChecker::VisitNode(AST::ParallelBy& n) {
           "The " + Ordinal(idx) +
           " bound item of parallelby is invalid: should be greater than 0";
       FCtx(fname).AppendRtCheck(
-          {lhs, op, rhs, n.cmpt_bounds->ValueAt(idx - 1)->LOC(), message, {}});
+          {lhs, op, rhs, n.SubPVs()->ValueAt(idx - 1)->LOC(), message, {}});
       ++idx;
     }
   }

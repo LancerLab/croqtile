@@ -9,14 +9,14 @@ __co__ void foo(int a, f32 [1, 2] b) {
   }
 }
 
-// CHECK: if (bar((3), __tops_tid_x(), (a), (1)))
+// CHECK: if (bar(3, __tops_tid_x(), a, 1))
 
-// CHECK:   if (((a)>((3)))) {
+// CHECK:   if ((a > 3)) {
 // CHECK:     __shared__ float c[6];
 // CHECK:   } else {
-// CHECK:     if (((a)<((2)))) {
+// CHECK:     if ((a < 2)) {
 // CHECK:       __local__ __valigned__ char c[1];
 // CHECK:     } else {
-// CHECK:       foobar((2));
+// CHECK:       foobar(2);
 // CHECK:     } // end if-else
 // CHECK:   } // end if-else

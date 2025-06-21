@@ -145,6 +145,7 @@ void IfElseBlock::accept(Choreo::Visitor& v) {
 void ParallelBy::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
 
+  if (bound_expr) bound_expr->accept(v);
   if (cmpt_bounds) cmpt_bounds->accept(v);
   v.Visit(*this);
 
@@ -316,7 +317,7 @@ void Program::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
 
   v.Visit(*this);
-  for (auto ptr : nodes) ptr->accept(v);
+  nodes->accept(v);
 
   v.AfterVisit(*this);
 }

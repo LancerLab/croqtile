@@ -1,7 +1,6 @@
 // RUN: choreo -t topscc -es %s -o - | FileCheck %s
 __co__ void foo(f32 [M, K] lhs, f32 [N, K] rhs) {
-   parallel x by 1 {
-   }
+   parallel x by 1;
 }
 
 // CHECK: __global__ void __choreo_device_foo(float * lhs, float * rhs, unsigned K, unsigned M, unsigned N)

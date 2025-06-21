@@ -2,6 +2,7 @@
 #define __CHOREO_SYMBOLIC_EXPRESSION_HPP__
 
 #include "aux.hpp"
+#include "options.hpp"
 #include "utils.hpp"
 #include <cmath>
 #include <functional>
@@ -37,6 +38,8 @@
 //
 // Note: special thanks to deepseek for initiating the code
 
+extern Choreo::Option<bool> apprx_div;
+
 namespace Choreo {
 
 // Supported operation types
@@ -49,6 +52,10 @@ enum class OpCode {
   DIVIDE,
   IRES,
   POWER,
+  /* logical */
+  NOT,
+  AND,
+  OR,
   /* comparison */
   GT,
   LT,
@@ -68,6 +75,16 @@ inline static bool IsArith(OpCode op) {
   case OpCode::DIVIDE:
   case OpCode::IRES:
   case OpCode::POWER: return true;
+  default: break;
+  }
+  return false;
+}
+
+inline static bool IsLogical(OpCode op) {
+  switch (op) {
+  case OpCode::NOT:
+  case OpCode::AND:
+  case OpCode::OR: return true;
   default: break;
   }
   return false;
@@ -94,6 +111,9 @@ inline static std::string STR(OpCode tc) {
   case OpCode::DIVIDE: return "/";
   case OpCode::IRES: return "%";
   case OpCode::POWER: return "^";
+  case OpCode::NOT: return "!";
+  case OpCode::AND: return "&&";
+  case OpCode::OR: return "||";
   case OpCode::GT: return ">";
   case OpCode::LT: return "<";
   case OpCode::EQ: return "==";
@@ -117,6 +137,12 @@ inline static OpCode ToOpCode(const std::string& op) {
     return OpCode::DIVIDE;
   else if (op == "%")
     return OpCode::IRES;
+  else if (op == "!")
+    return OpCode::NOT;
+  else if (op == "&&")
+    return OpCode::AND;
+  else if (op == "||")
+    return OpCode::OR;
   else if (op == ">")
     return OpCode::GT;
   else if (op == "<")
@@ -146,6 +172,25 @@ inline static int64_t gcd(int64_t a, int64_t b) {
 }
 
 inline static bool multipleof(int64_t a, int64_t b) { return gcd(a, b) == b; }
+inline bool product_overflow(int64_t a, int64_t b) {
+  if (a == 0 || b == 0) return false;
+
+  const int64_t max = std::numeric_limits<int64_t>::max();
+  const int64_t min = std::numeric_limits<int64_t>::min();
+
+  // Check for overflow in a * b
+  if (a > 0) {
+    if (b > 0)
+      return a > max / b; // Positive * Positive
+    else
+      return b < min / a; // Positive * Negative
+  } else {
+    if (b > 0)
+      return a < min / b; // Negative * Positive
+    else
+      return b < max / a; // Negative * Negative
+  }
+}
 
 // Note: Same symbol names implies same value. Therefore scoped symbols are
 // required.
@@ -287,7 +332,7 @@ class BooleanValue : public SymbolicExpression,
 public:
   BooleanValue(bool value) : value(value) {}
 
-  std::string ToString() const override { return std::to_string(value); }
+  std::string ToString() const override { return (value) ? "true" : "false"; }
   bool Value() const { return value; }
   size_t Hash() const override { return std::hash<bool>{}(Value()); }
 
@@ -345,6 +390,7 @@ public:
   __UDT_TYPE_INFO__(SymbolicExpression, SymbolicValue)
 };
 
+class TernaryOperation;
 class BinaryOperation : public SymbolicExpression,
                         public TypeIDProvider<BinaryOperation> {
 private:
@@ -449,6 +495,17 @@ public:
       case OpCode::POWER: return nu(std::pow(leftVal, rightVal));
       default: choreo_unreachable("Unknown operation");
       }
+    } else if (isa<BooleanValue>(simplifiedLeft) &&
+               isa<BooleanValue>(simplifiedRight)) {
+      auto lnv = cast<BooleanValue>(simplifiedLeft);
+      auto rnv = cast<BooleanValue>(simplifiedRight);
+      bool leftVal = lnv->Value();
+      bool rightVal = rnv->Value();
+      switch (op) {
+      case OpCode::AND: return bl(leftVal && rightVal);
+      case OpCode::OR: return bl(leftVal || rightVal);
+      default: choreo_unreachable("Unknown operation");
+      }
     }
 
     auto lnv = dyn_cast<NumericValue>(simplifiedLeft);
@@ -514,6 +571,8 @@ public:
     auto new_right = right->Reassociate();
     auto new_bin = std::make_shared<BinaryOperation>(op, new_left, new_right);
     if (!IsAssociative(op)) return new_bin;
+    if (isa<TernaryOperation>(new_left) || isa<TernaryOperation>(new_right))
+      return new_bin;
 
     // find right-most and its parent
     auto RightMostOfLeft = [this](const ptr<BinaryOperation>& n, OpCode opc)
@@ -614,6 +673,13 @@ public:
         auto gcd_val = gcd(bv, cv);
         if (gcd_val != 1)
           return (a * (b / nu(gcd_val))->Fold()) / (c / nu(gcd_val)->Fold());
+      } else if (lbop->op == OpCode::DIVIDE && op == OpCode::DIVIDE &&
+                 !a->IsNumeric() && b->IsNumeric() && c->IsNumeric()) {
+        // simplify a / b / c. It is proved equals a / (b * c) when b * c does
+        // not overflow
+        auto bv = cast<NumericValue>(b)->Value();
+        auto cv = cast<NumericValue>(c)->Value();
+        if (!product_overflow(bv, cv)) return (a / nu(bv * cv))->Fold();
       }
 #if 0
       if (lbop->op == OpCode::DIVIDE && op == OpCode::MULTIPLY && (*b < *c || (b->IsNumeric() && c->IsNumeric()))) {
@@ -645,6 +711,15 @@ public:
           }
         }
 #endif
+      } else if (apprx_div && op == OpCode::DIVIDE &&
+                 rbop->op == OpCode::MULTIPLY && isa<BinaryOperation>(b) &&
+                 !a->IsNumeric()) {
+        auto bbop = cast<BinaryOperation>(b);
+        if (bbop->op == OpCode::DIVIDE) {
+          // use option apprx_div to enable this
+          // a / ((a / c) * c) -> 1,  when a == b and a > c
+          if (*a == *bbop->GetLeft() && *c == *bbop->GetRight()) return nu(1);
+        }
       }
     }
 
@@ -720,9 +795,16 @@ public:
   }
 
   Operand Normalize() const override {
-    auto nv = Fold();
-    if (!isa<TernaryOperation>(nv)) return nv->Normalize();
-    return sel(pred->Normalize(), left->Normalize(), right->Normalize());
+    auto npred = pred->Normalize();
+    auto nleft = left->Normalize();
+    auto nright = right->Normalize();
+    if (auto p = dyn_cast<BooleanValue>(npred)) {
+      if (p->Value() == true)
+        return nleft;
+      else if (p->Value() == false)
+        return nright;
+    }
+    return sel(npred, nleft, nright);
   }
 
   Operand Reassociate() const override { return Clone(); }
@@ -734,7 +816,8 @@ public:
 
 namespace {
 
-std::string GetHighRankString(const BinaryOperation& b) {
+inline std::string GetHighRankString(const TernaryOperation& t);
+inline std::string GetHighRankString(const BinaryOperation& b) {
   std::string hrs;
   if (auto sv = dyn_cast<SymbolicValue>(b.GetLeft()))
     hrs = ((hrs > sv->Value()) ? hrs : sv->Value());
@@ -746,6 +829,30 @@ std::string GetHighRankString(const BinaryOperation& b) {
   if (auto sv = dyn_cast<BinaryOperation>(b.GetRight()->Fold()))
     hrs = ((hrs > GetHighRankString(*sv)) ? hrs : GetHighRankString(*sv));
 
+  if (auto sv = dyn_cast<TernaryOperation>(b.GetLeft()->Fold()))
+    hrs = ((hrs > GetHighRankString(*sv)) ? hrs : GetHighRankString(*sv));
+  if (auto sv = dyn_cast<TernaryOperation>(b.GetRight()->Fold()))
+    hrs = ((hrs > GetHighRankString(*sv)) ? hrs : GetHighRankString(*sv));
+  return hrs;
+}
+
+inline std::string GetHighRankString(const TernaryOperation& t) {
+  std::string hrs;
+  // ternary: use the rank string of operands
+  if (auto sv = dyn_cast<SymbolicValue>(t.GetLeft()))
+    hrs = ((hrs > sv->Value()) ? hrs : sv->Value());
+  if (auto sv = dyn_cast<SymbolicValue>(t.GetRight()))
+    hrs = ((hrs > sv->Value()) ? hrs : sv->Value());
+
+  if (auto sv = dyn_cast<BinaryOperation>(t.GetLeft()->Fold()))
+    hrs = ((hrs > GetHighRankString(*sv)) ? hrs : GetHighRankString(*sv));
+  if (auto sv = dyn_cast<BinaryOperation>(t.GetRight()->Fold()))
+    hrs = ((hrs > GetHighRankString(*sv)) ? hrs : GetHighRankString(*sv));
+
+  if (auto sv = dyn_cast<TernaryOperation>(t.GetLeft()->Fold()))
+    hrs = ((hrs > GetHighRankString(*sv)) ? hrs : GetHighRankString(*sv));
+  if (auto sv = dyn_cast<TernaryOperation>(t.GetRight()->Fold()))
+    hrs = ((hrs > GetHighRankString(*sv)) ? hrs : GetHighRankString(*sv));
   return hrs;
 }
 
@@ -760,8 +867,11 @@ inline int Compare(const SymbolicExpression& lhs,
   if (isa<NumericValue>(l)) {
     if (isa<NumericValue>(r))
       return 0;
-    else if (isa<SymbolicValue>(r) || isa<BinaryOperation>(r))
+    else if (isa<SymbolicValue>(r) || isa<BinaryOperation>(r) ||
+             isa<TernaryOperation>(r))
       return -1;
+  } else if (isa<BooleanValue>(&lhs)) {
+    if (isa<BooleanValue>(r)) return 0;
   } else if (auto ls = dyn_cast<SymbolicValue>(&lhs)) {
     if (isa<NumericValue>(r))
       return 1;
@@ -769,6 +879,9 @@ inline int Compare(const SymbolicExpression& lhs,
       return -ls->Value().compare(rs->Value());
     else if (auto rb = dyn_cast<BinaryOperation>(r)) {
       auto hrs = GetHighRankString(*rb);
+      return -ls->Value().compare(hrs);
+    } else if (auto rt = dyn_cast<TernaryOperation>(r)) {
+      auto hrs = GetHighRankString(*rt);
       return -ls->Value().compare(hrs);
     }
   } else if (auto lb = dyn_cast<BinaryOperation>(l)) {
@@ -778,6 +891,18 @@ inline int Compare(const SymbolicExpression& lhs,
     else if (auto rs = dyn_cast<SymbolicValue>(r))
       return -hrs.compare(rs->Value());
     else if (auto rb = dyn_cast<BinaryOperation>(r))
+      return -hrs.compare(GetHighRankString(*rb));
+    else if (auto rb = dyn_cast<TernaryOperation>(r))
+      return -hrs.compare(GetHighRankString(*rb));
+  } else if (auto lt = dyn_cast<TernaryOperation>(l)) {
+    auto hrs = GetHighRankString(*lt);
+    if (isa<NumericValue>(r))
+      return 1;
+    else if (auto rs = dyn_cast<SymbolicValue>(r))
+      return -hrs.compare(rs->Value());
+    else if (auto rb = dyn_cast<BinaryOperation>(r))
+      return -hrs.compare(GetHighRankString(*rb));
+    else if (auto rb = dyn_cast<TernaryOperation>(r))
       return -hrs.compare(GetHighRankString(*rb));
   }
   choreo_unreachable("unsupported value.");

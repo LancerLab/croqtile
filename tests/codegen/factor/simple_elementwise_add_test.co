@@ -65,7 +65,7 @@ int bar(int a[], int b[]) {
 // CHECK: for_(x, 10, 1, [&](auto iv_x) {{.*}}
 // CHECK:   auto anon_0 = Value(1);
 // CHECK:   auto anon_1 = Value(-3);
-// CHECK:   for_(y + (Value(1)), (Value(-3)) + 10, 2, [&](auto iv_y) {{.*}}
+// CHECK:   for_(y + (Value(1)), (anon_1) + 10, 2, [&](auto iv_y) {{.*}}
 // CHECK: async_load_(f1, a, f1__buf__, {Value(24)*thread_id,Value(10)*iv_x,Value(10)*iv_y});
 // CHECK: async_load_(f2, b, f2__buf__, {Value(24)*thread_id,Value(10)*iv_x,Value(10)*iv_y});
 // CHECK: wait_dma_(f1);

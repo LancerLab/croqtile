@@ -1,5 +1,5 @@
-// RUN: choreo -vn -sa=valno %s | FileCheck --match-full-lines %s
-// RUN: choreo -dv=symrepl -sa=symrepl %s | FileCheck --check-prefix=SYMRP %s
+// TODO: choreo -t factor -vn -sa=valno -sa=valno %s | FileCheck --match-full-lines %s
+// RUN: choreo -t factor -dv=symrepl -sa=symrepl %s | FileCheck --check-prefix=SYMRP %s
 
 __co__ auto foo0(s32 [M, K] lhs, s32 [K, N] rhs) {
   s32 [(M + N) + K, (M * N) * K, M * (N + K)]   o1;

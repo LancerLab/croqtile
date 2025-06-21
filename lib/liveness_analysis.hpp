@@ -70,6 +70,12 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
     ScopeEnd(const location& loc, AST::Node* s = nullptr)
         : Stmt(loc), scope_start(s) {}
     const AST::Node* scope_start = nullptr;
+
+    ptr<Node> CloneImpl() const override {
+      choreo_unreachable("unexpected clone.");
+      return nullptr;
+    }
+
     void Print(std::ostream& os, const std::string& prefix = {},
                bool = false) const override {
       os << prefix << "}\n";

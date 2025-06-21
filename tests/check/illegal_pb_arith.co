@@ -1,0 +1,16 @@
+// RUN: choreo %s -sa=latenorm 2>&1 | FileCheck %s
+
+__co__ void illegal_pb_arith(int a, bool b, float c) {
+  parallel p by 3 * a + 7;
+  parallel p by 4.0f + c, q by a + b;
+  parallel {px, py} by [3.14, 7.0];
+  parallel p = {px} by [false];
+}
+
+// CHECK: error: the parallel bound requires integers but got 'float'.
+// CHECK: error: the parallel bound requires integers but got 'unknown'.
+// CHECK: error: the parallel bound requires integers but got 'double'.
+// CHECK: error: the parallel bounds require integers but got 'double'.
+// CHECK: error: the parallel bounds require integers but got 'double'.
+// CHECK: error: the parallel bound requires integers but got 'bool'.
+// CHECK: error: the parallel bounds require integers but got 'bool'.

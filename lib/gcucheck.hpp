@@ -60,9 +60,9 @@ private:
         append_note += PBLevelString(*pb);
       else
         append_note += std::to_string(max_pl_depth - pl_depth);
-      auto pty = cast<BoundedITupleType>(NodeType(*pb->bpv));
+      auto pty = cast<BoundedITupleType>(NodeType(*pb->BPV()));
       pty->AppendNote(append_note);
-      for (auto& symbol : pb->cmpt_bpvs->AllValues())
+      for (auto& symbol : pb->AllSubPVs())
         cast<BoundedITupleType>(NodeType(*symbol))->AppendNote(append_note);
 
       pl_depth--;
@@ -973,9 +973,8 @@ public:
         if (auto id = AST::GetIdentifier(arg)) {
           if (cur_params.count(InScopeName(STR(id))) &&
               isa<SpannedType>(GetSymbolType(id->name))) {
-            Error(n.LOC(), "function call '" + STR(n) +
-                               "` with global data '" + STR(arg) +
-                               "` is not allowed.");
+            Error(n.LOC(), "function call '" + STR(n) + "` with global data '" +
+                               STR(arg) + "` is not allowed.");
             error_count++;
           }
         }

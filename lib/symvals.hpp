@@ -74,6 +74,24 @@ using ValueList = std::vector<ValueItem>;
 
 inline ValueItem GetInvalidValueItem() { return nullptr; }
 inline bool IsValidValueItem(const ValueItem& vi) { return vi != nullptr; }
+inline bool IsValidValueList(const ValueList& vl) {
+  for (auto& vi : vl)
+    if (!IsValidValueItem(vi)) return false;
+  return true;
+}
+
+inline bool IsValueListNumeric(const ValueList& vl) {
+  for (auto& vi : vl)
+    if (!isa<sbe::NumericValue>(vi)) return false;
+  return true;
+}
+
+inline bool IsValueListNumericOrBool(const ValueList& vl) {
+  for (auto& vi : vl)
+    if (!isa<sbe::NumericValue>(vi) && !isa<sbe::BooleanValue>(vi))
+      return false;
+  return true;
+}
 
 inline std::string ValueItemAsString(const ValueItem& vi,
                                      bool ULL_suffix = false) {
@@ -96,6 +114,11 @@ inline std::string ValueItemAsString(const ValueItem& vi,
       choreo_unreachable("unsupported value item type.");
   } else
     return PSTR(vi);
+}
+
+inline std::string STR(const ValueItem& vi) {
+  if (!IsValidValueItem(vi)) return "invalid";
+  return vi->ToString();
 }
 
 inline static std::optional<int> VIInt(const ValueItem& vi) {
@@ -151,6 +174,12 @@ inline bool IsValueItemEqual(const ValueItem& a, const ValueItem& b) {
 
 inline bool IsValueItemEqual(int a, const ValueItem& b) {
   return *sbe::nu(a) == *(b->Normalize());
+}
+
+inline const ValueItem MultiplyAll(const ValueList& vl) {
+  auto res = sbe::nu(1);
+  for (auto vi : vl) res = res * vi;
+  return res->Normalize();
 }
 
 // Function to compare two ValueList
@@ -219,6 +248,12 @@ inline void PrintValueList(const ValueList& vl, std::ostream& os,
   if (rb) os << rb;
 }
 
+inline std::string STR(const ValueList& vl) {
+  std::ostringstream os;
+  PrintValueList(vl, os, "", "");
+  return os.str();
+}
+
 inline void PrintValueListSizeExpr(const ValueList& vl, std::ostream& os,
                                    const char* lb = "[", const char* rb = "]") {
   if (lb) os << lb;
@@ -233,4 +268,5 @@ inline void PrintValueListSizeExpr(const ValueList& vl, std::ostream& os,
 }
 
 } // end namespace Choreo
+
 #endif // __CHOREO_SYMBOL_VALUES_H__

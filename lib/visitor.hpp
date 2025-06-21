@@ -244,6 +244,17 @@ public:
     return n.GetType();
   }
 
+protected:
+  size_t CountMultiValues(const ptr<AST::MultiValues>& mv) {
+    size_t count = 0;
+    for (auto v : mv->AllValues()) {
+      auto vty = NodeType(*v);
+      assert((vty->Dims() != 0) && IsValidRank(vty->Dims()));
+      count += vty->Dims();
+    }
+    return count;
+  }
+
 public:
   static bool shell_supports_colors() {
     const char* term = getenv("TERM");
@@ -360,23 +371,22 @@ public:
     } else if (auto p = dyn_cast<AST::ParallelBy>(&n)) {
       SSTab().EnterScope("paraby_" + std::to_string(pb_count++));
       std::string scope_name = scoped_symtab.ScopeName();
-      if (p->HasBPV()) {
+      std::vector<std::string> matchers;
+      // map the parallel variable to its matchers
+      if (p->HasSubPVs()) {
+        for (auto v : p->AllSubPVs())
+          matchers.push_back(scope_name + cast<AST::Identifier>(v)->name);
+      } else
+        matchers.push_back(scope_name + p->BPV()->name); // only map to itself
+      pb_map.emplace(scope_name + p->BPV()->name, matchers);
+      bv_map.emplace(scope_name + p->BPV()->name, matchers);
+      // map the sub parallel variables to their matchers
+      for (auto v : p->AllSubPVs()) {
+        auto name = scope_name + cast<AST::Identifier>(v)->name;
         std::vector<std::string> matchers;
-        if (p->HasSubPVs()) {
-          for (auto v : p->AllSubPVs())
-            matchers.push_back(scope_name + cast<AST::Identifier>(v)->name);
-        } else
-          matchers.push_back(scope_name + p->BPV()->name); // only map to itself
-        pb_map.emplace(scope_name + p->BPV()->name, matchers);
-        bv_map.emplace(scope_name + p->BPV()->name, matchers);
-      } else if (p->HasSubPVs()) {
-        for (auto v : p->AllSubPVs()) {
-          auto name = scope_name + cast<AST::Identifier>(v)->name;
-          std::vector<std::string> matchers;
-          matchers.push_back(name);
-          pb_map.emplace(name, matchers);
-          bv_map.emplace(name, matchers);
-        }
+        matchers.push_back(name);
+        pb_map.emplace(name, matchers);
+        bv_map.emplace(name, matchers);
       }
     } else if (isa<AST::WithBlock>(&n)) {
       SSTab().EnterScope("within_" + std::to_string(wi_count++));

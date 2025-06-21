@@ -653,10 +653,10 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
     if (ret->value) os << " " << PSTR(ret->value);
   } else if (const auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     os << "parallel ";
-    os << pb->bpv->name << " = {";
-    pb->cmpt_bpvs->InlinePrint(os);
+    os << pb->BPV()->name << " = {";
+    os << DelimitedSTR(pb->AllSubPVs());
     os << "} by " << "[";
-    pb->cmpt_bounds->InlinePrint(os);
+    pb->PrintBounds(os);
     os << "]";
   } else if (const auto wb = dyn_cast<AST::WithBlock>(&n)) {
     os << "with ";
@@ -1002,17 +1002,16 @@ bool LivenessAnalyzer::Visit(AST::Assignment& n) {
 
 bool LivenessAnalyzer::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
-  assert(n.bpv && n.cmpt_bpvs &&
-         "expecting the parallel-by has bpv and cmpt_bpvs.");
-  AddDef(current_stmt, n.bpv->name);
-  events_to_add[current_stmt].insert({"use", n.bpv->name});
-  paraby_bounded_vars.insert(n.bpv->name);
-  for (const auto& iv_symbol : n.cmpt_bpvs->AllValues()) {
+  assert(n.HasSubPVs() && "expecting the parallel-by has bpv and cmpt_bpvs.");
+  AddDef(current_stmt, n.BPV()->name);
+  events_to_add[current_stmt].insert({"use", n.BPV()->name});
+  paraby_bounded_vars.insert(n.BPV()->name);
+  for (const auto& iv_symbol : n.AllSubPVs()) {
     std::string iv_symbol_name = cast<AST::Identifier>(iv_symbol)->name;
     AddDef(current_stmt, iv_symbol_name);
     events_to_add[current_stmt].insert({"use", iv_symbol_name});
     paraby_bounded_vars.insert(iv_symbol_name);
-    AddBinding(n.bpv->name, iv_symbol_name);
+    AddBinding(n.BPV()->name, iv_symbol_name);
   }
   return true;
 }

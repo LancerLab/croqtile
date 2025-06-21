@@ -11,6 +11,6 @@ __co__ void ubound(s32 [180, 27] a, int ua, int ub) {
   }
 }
 
-// CHECK: auto d = select_(((::ubound::ua)%(Value(2)))== Value(0), a, b);
-// CHECK: auto e = select_(((::ubound::ub)%(Value(3)))== Value(0), a, select_(((::ubound::ub)%(Value(3)))== Value(1), b, c));
+// CHECK: auto d = select_(((ua)%(Value(2)))== Value(0), a, b);
+// CHECK: auto e = select_(((ub)%(Value(3)))== Value(0), a, select_(((ub)%(Value(3)))== Value(1), b, c));
 

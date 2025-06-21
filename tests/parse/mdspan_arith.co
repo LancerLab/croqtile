@@ -8,7 +8,7 @@ __co__ bf16 mdspan<3> span_arith(s32 mdspan<4> d, int c) {
   sub : d.span - {d.span(0), c} + e;
   mul : d.span * e;
   div : dims / {2, 3, 4};
-  mod : d.span % e {(2), (3)};
+  mod : d.span % {e (2), e (3)};
   new : d.span / {7, 8, 9} * {1, 2};
 }
 
@@ -25,7 +25,7 @@ __co__ bf16 mdspan<3> span_arith(s32 mdspan<4> d, int c) {
 // CHECK:  `- Type Decl: sub -  ( (d.span - {d.span(0), c})  + e)
 // CHECK:  `- Type Decl: mul -  (d.span * e)
 // CHECK:  `- Type Decl: div -  (dims / {2, 3, 4})
-// CHECK:  `- Type Decl: mod -  (d.span % e {(2), (3)})
+// CHECK:  `- Type Decl: mod -  (d.span % {e(2), e(3)})
 // CHECK:  `- Type Decl: new -  ( (d.span / {7, 8, 9})  * {1, 2})
 
 __co__ void span_arith1(s32 [32, 18, 6, 1] d, int c) {

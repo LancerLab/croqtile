@@ -4,6 +4,9 @@
 using namespace Choreo;
 using namespace Choreo::sbe;
 
+Option<bool> apprx_div(OptionKind::User, "--apprx-div", "", true,
+                       "Allows legacy inaccurate division patten.");
+
 class ExpressionTest : public ::testing::Test {
 protected:
   void SetUp() override {
@@ -37,29 +40,27 @@ TEST_F(ExpressionTest, BasicNormalization) {
 }
 
 TEST_F(ExpressionTest, MultiplicativeNormalization) {
-  // 2 * a * 3 * b should become a * b * 3 * 2
+  // 2 * a * 3 * b should become a * b * 6
   auto part1 = make_operation(OpCode::MULTIPLY, two, a);
   auto part2 = make_operation(OpCode::MULTIPLY, part1, three);
   auto expr = make_operation(OpCode::MULTIPLY, part2, b);
 
-  // After simplification should be a * b * 6
   auto simplified = SimplifyAndPrint(expr);
   EXPECT_EQ(simplified, "(a * (b * 6))");
 }
 
 TEST_F(ExpressionTest, AdditiveNormalization) {
-  // 1 + a + 4 + b should become a + b + 1 + 4
+  // 1 + a + 4 + b should become a + b + 5
   auto part1 = make_operation(OpCode::ADD, make_numeric(1), a);
   auto part2 = make_operation(OpCode::ADD, part1, four);
   auto expr = make_operation(OpCode::ADD, part2, b);
 
-  // After simplification should be a + b + 5
   auto simplified = SimplifyAndPrint(expr);
   EXPECT_EQ(simplified, "(a + (b + 5))");
 }
 
 TEST_F(ExpressionTest, MixedOperationsNormalization) {
-  // a + 2 * b + 3 * a should become 3*a + 2*b + a
+  // a + 2 * b + 3 * a should become a*3 + a + b*2
   // (but exact order may depend on implementation details)
   auto term1 = make_operation(OpCode::MULTIPLY, two, b);
   auto term2 = make_operation(OpCode::MULTIPLY, three, a);
@@ -100,7 +101,7 @@ TEST_F(ExpressionTest, ReassociateToSimplify0) {
 }
 
 TEST_F(ExpressionTest, ReassociateToSimplify1) {
-  // (a * 2) * (3 * b) should become a * (b * 6)
+  // ((a * 2) * x) * ((3 * b) * c) should become a * b * c * x * 6
   auto part1 = make_operation(OpCode::MULTIPLY, a, two);
   auto part2 = make_operation(OpCode::MULTIPLY, three, b);
   auto part3 = make_operation(OpCode::MULTIPLY, part2, c);
@@ -169,4 +170,12 @@ TEST_F(ExpressionTest, Select2) {
 
   auto norm = SimplifyExpression(expr);
   EXPECT_EQ(norm->ToString(), "((a <= 2) ? 5 : (b + 4))");
+}
+
+TEST_F(ExpressionTest, Divdiv) {
+  // (2 + a) / (2 + 3) / 4 should normalize to (a + 2) / 20
+  auto expr = (two + a) / (two + three) / four;
+
+  auto norm = SimplifyExpression(expr);
+  EXPECT_EQ(norm->ToString(), "((a + 2) / 20)");
 }

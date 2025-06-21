@@ -17,5 +17,5 @@ __co__ f32 [128, 512] foo(f32 [128, 512] input) { /// device program
 
 // CHECK: #include "tcle.h"
 // CHECK: float a = *((float*)L1_input.data() + (__iv_i * 128) + (__iv_j));
-// CHECK: float b = ((tcle::sin(tcle::cos(a)))+(tcle::tan(a)));
+// CHECK: float b = (tcle::sin(tcle::cos(a)) + tcle::tan(a));
 // CHECK: *((float*)L1_output + (__iv_i * 128) + (__iv_j)) = tcle::sigmoid(b);

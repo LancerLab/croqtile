@@ -100,9 +100,11 @@ int main(int argc, char* argv[]) {
   if (!ds.RunOnProgram(root)) return ds.Status();
   if (CCtx().VerifyVisitors()) vf.RunOnProgram(root);
 
-  SymReplace sr;
-  if (!sr.RunOnProgram(root)) return sr.Status();
-  if (CCtx().VerifyVisitors()) vf.RunOnProgram(root);
+  if (CCtx().GetTarget() != CompileTarget::Topscc) {
+    SymReplace sr;
+    if (!sr.RunOnProgram(root)) return sr.Status();
+    if (CCtx().VerifyVisitors()) vf.RunOnProgram(root);
+  }
 
   // perform shape inference of mdspans, future, etc.
   ShapeInference si;

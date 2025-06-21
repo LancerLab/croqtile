@@ -550,10 +550,22 @@ bool TypeInference::Visit(AST::Expr& n) {
 
     bool is_mutable = IsMutable(*pty_lhs) || IsMutable(*pty_rhs);
 
-    if (n.IsLogical()) {
+    if (n.IsCompare()) {
       if ((IsActualBoundedIntegerType(pty_lhs) && ConvertibleToInt(pty_rhs)) ||
           (IsActualBoundedIntegerType(pty_rhs) && ConvertibleToInt(pty_lhs)) ||
           (ConvertibleToInt(pty_lhs) && ConvertibleToInt(pty_rhs))) {
+        SetNodeType(n, MakeBooleanType());
+        return true;
+      } else {
+        Error(n.LOC(), "The operands of the expression cannot undergo '" +
+                           n.op + "' logical operation.");
+        error_count++;
+        return false;
+      }
+    }
+
+    if (n.IsLogical()) {
+      if (isa<BooleanType>(pty_lhs) && isa<BooleanType>(pty_rhs)) {
         SetNodeType(n, MakeBooleanType());
         return true;
       } else {
@@ -809,15 +821,15 @@ bool TypeInference::Visit(AST::DMA& n) {
 bool TypeInference::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
 
-  AssignSymbolWithType(n.LOC(), n.bpv->name, n.bpv->GetType());
+  AssignSymbolWithType(n.LOC(), n.BPV()->name, n.BPV()->GetType());
   if (CCtx().ShowInferredTypes()) {
-    dbgs() << "Bounded:   " << InScopeName(n.bpv->name)
-           << ", Type: " << AST::TYPE_STR(n.bpv) << "\n";
+    dbgs() << "Bounded:   " << InScopeName(n.BPV()->name)
+           << ", Type: " << AST::TYPE_STR(n.BPV()) << "\n";
   }
 
-  for (auto sym : n.cmpt_bpvs->AllValues()) {
+  for (auto sym : n.AllSubPVs()) {
     auto id = cast<AST::Identifier>(sym);
-    AssignSymbolWithType(sym->LOC(), id->name, sym->GetType());
+    AssignSymbolWithType(sym->LOC(), id->name, id->GetType());
     if (CCtx().ShowInferredTypes()) {
       dbgs() << "Bounded:   " << InScopeName(id->name)
              << ", Type: " << AST::TYPE_STR(sym) << "\n";
@@ -938,7 +950,7 @@ bool TypeInference::Visit(AST::Select& n) {
 
   if (CanYieldAnInteger(NodeType(*n.select_factor))) {
     // normalize the shape
-    SetNodeType(*n.select_factor, MakeIntegerType(n.select_factor->s));
+    SetNodeType(*n.select_factor, MakeIntegerType());
   }
 
   if (cur_type = type_equals.ResolveEqualFutures(*n.expr_list)) {

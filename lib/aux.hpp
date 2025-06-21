@@ -68,6 +68,19 @@ inline static std::string DelimitedString(const Container& container,
   return oss.str();
 }
 
+template <typename Container>
+inline static std::string DelimitedSTR(const Container& container,
+                                       std::string delimiter = ", ") {
+  std::ostringstream oss;
+  auto it = container.begin();
+  if (it != container.end()) {
+    oss << STR(*it);
+    ++it;
+  }
+  for (; it != container.end(); ++it) oss << delimiter << STR(*it);
+  return oss.str();
+}
+
 // split `input` to a vector
 inline static std::vector<std::string>
 SplitStringByDelimiter(std::string input, std::string delimiter = ",",

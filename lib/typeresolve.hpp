@@ -10,7 +10,7 @@ namespace Choreo {
 
 // simple type constraints collector and resolver
 class TypeConstraints {
-  std::map<std::string, std::vector<std::string>> equals;
+  std::map<std::string, std::set<std::string>> equals;
   VisitorWithScope* visitor = nullptr;
 
   bool debug = false;
@@ -32,21 +32,37 @@ public:
 
     if (a == b) return;
 
-    if (!equals.count(a)) equals.emplace(a, std::vector<std::string>{});
-    if (!equals.count(b)) equals.emplace(b, std::vector<std::string>{});
+    if (!equals.count(a)) equals.emplace(a, std::set<std::string>{});
+    if (!equals.count(b)) equals.emplace(b, std::set<std::string>{});
 
-    equals[a].push_back(b);
-    equals[b].push_back(a);
+    equals[a].insert(b);
+    equals[b].insert(a);
 
     if (debug)
       dbgs() << "[RType] Add equality between '" << a << "' and '" << b
              << "'\n";
   }
 
-  std::optional<std::reference_wrapper<const std::vector<std::string>>>
+  std::optional<const std::vector<std::string>>
   GetEquals(const std::string& name) {
     if (!equals.count(name)) return std::nullopt;
-    return equals[name];
+
+    std::vector<std::string> result;
+    std::set<std::string> visited;
+    std::deque<std::string> work_list;
+
+    work_list.push_back(name);
+    while (!work_list.empty()) {
+      auto c = work_list.back();
+      work_list.pop_back();
+
+      if (visited.count(c)) continue;
+      visited.insert(c);
+
+      if (c != name) result.push_back(c);
+      for (auto& e : equals[c]) work_list.push_back(e);
+    }
+    return result;
   }
 
   void Reset() { equals.clear(); }
@@ -58,7 +74,7 @@ public:
            "can not resolve type to be place holder");
     auto equals = GetEquals(n);
     if (!equals) return true;
-    for (auto& e : equals.value().get()) {
+    for (auto& e : equals.value()) {
       if (visitor->SymTab()->Exists(e)) {
         auto sym = visitor->SymTab()->GetSymbol(e);
         auto sty = sym->GetType();

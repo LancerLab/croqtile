@@ -364,7 +364,7 @@ bool CUDACodeGen::Visit(AST::ParamList& n) {
 // TODO(albert): resolve HC in p/q => blockid
 bool CUDACodeGen::Visit(AST::ParallelBy& by) {
   __TRACE_EACH_VISIT__(by)
-  if (auto b = VIInt(cast<BoundedType>(NodeType(*by.bpv))->GetUpperBound()))
+  if (auto b = VIInt(cast<BoundedType>(NodeType(*by.BPV()))->GetUpperBound()))
     parallel_cuda *= *b;
   else
     choreo_unreachable(
@@ -384,9 +384,9 @@ bool CUDACodeGen::Visit(AST::ParallelBy& by) {
   fs << this->indent << "dim3 gridDim(";
   // TODO(albert): impl begin/end/next for support auto val : by.iv_list
 
-  for (size_t idx = 0; idx < by.SubCount(); idx++) {
-    fs << STR(by.cmpt_bounds->ValueAt(idx));
-    fs << (idx == by.SubCount() - 1 ? "" : ", ");
+  for (size_t idx = 0; idx < by.AllSubPVs().size(); idx++) {
+    fs << STR(by.BoundExprs()->ValueAt(idx));
+    fs << (idx == by.AllSubPVs().size() - 1 ? "" : ", ");
   }
   fs << ");\n";
 
@@ -447,8 +447,8 @@ bool CUDACodeGen::Visit(AST::ParallelBy& by) {
   builtins[1] = "blockIdx.y";
   builtins[2] = "blockIdx.z";
 
-  for (size_t idx = 0; idx < by.SubCount(); idx++)
-    fs << this->indent << "auto " << STR(by.cmpt_bpvs->ValueAt(idx))
+  for (size_t idx = 0; idx < by.SubPVs()->Count(); idx++)
+    fs << this->indent << "auto " << STR(by.SubPVs()->ValueAt(idx))
        << " = IndexDyn(" << builtins[idx] << ");\n";
 
   fs << this->indent << "auto tid_x = IndexDyn(threadIdx.x);\n";

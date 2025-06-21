@@ -45,6 +45,49 @@ std::vector<int> GetOperandsValNo(const std::string& input) {
 
 } // namespace
 
+using namespace valno;
+
+void ValueNumbering::EnterScope() {
+  std::string indent = ScopeIndent();
+  assert(!indent.empty() && "unexpected empty indent.");
+  indent.pop_back();
+
+  vntbl.EnterScope();
+
+  if (trace)
+    if (visitor->SSTab().ScopeDepth() > 1)
+      dbgs() << indent << "scope-" << visitor->SSTab().ScopeDepth() - 1
+             << " {\n";
+}
+
+void ValueNumbering::LeaveScope() {
+  if (visitor->SSTab().ScopeDepth() <= 1) return;
+
+  std::string sname = std::to_string(visitor->SSTab().ScopeDepth() - 1);
+
+  vntbl.LeaveScope();
+
+  std::string indent = ScopeIndent();
+  assert(!indent.empty() && "unexpected empty indent.");
+  indent.pop_back();
+
+  bind_info.Clear();
+
+  if (trace) dbgs() << indent << "} // end scope-" << sname << "\n";
+}
+const std::string
+ValueNumbering::NumCharToSign(const std::string& num_char) const {
+  if (auto v = RemovePrefixOrNull("#", num_char)) { // handle #0 string as well
+    int vn;
+    auto [ptr, ec] = std::from_chars(v->data(), v->data() + v->size(), vn);
+    if (ec != std::errc())
+      choreo_unreachable("num_char is unexpected: " + num_char);
+    if (vntbl.Exists(vn)) return vntbl.GetSignature(vn);
+  } else
+    choreo_unreachable("num_char is unexpected: " + num_char);
+  return "";
+}
+
 ValueItem ValueNumbering::GenValueItemFromValueNumber(int vn) {
   return GenValueItemFromSignature(GetSignatureFromValueNumber(vn));
 }
@@ -54,7 +97,7 @@ ValueItem ValueNumbering::GenValueItemFromSignature(const std::string& input) {
     int vn;
     auto [ptr, ec] = std::from_chars(v->data(), v->data() + v->size(), vn);
     if (ec != std::errc()) return nullptr;
-    if (InternalHasValNoExpr(vn))
+    if (vntbl.Exists(vn))
       return GenValueItemFromSignature(GetSignatureFromValueNumber(vn));
     return nullptr;
   } else if (auto iv = RemovePrefixOrNull("const_", input)) {
@@ -67,6 +110,10 @@ ValueItem ValueNumbering::GenValueItemFromSignature(const std::string& input) {
   } else if (PrefixedWith(input, "::")) {
     // must be a scoped symbol
     return sbe::sym(input);
+  } else if (input == "true") {
+    return sbe::bl(true);
+  } else if (input == "false") {
+    return sbe::bl(false);
   }
 
   // it is an operation
@@ -116,19 +163,21 @@ ValueItem ValueNumbering::GenValueItemFromSignature(const std::string& input) {
   return nullptr;
 }
 
-const ValueList ValueNumbering::GenValueListFromValueNumber(int vn) {
-  auto sig = GetSignatureFromValueNumber(vn);
-  assert(CountElementsInSignature(sig) > 1);
-  return GenValueListFromSignature(sig);
+const ValueList ValueNumbering::GenValueListFromValueNumber(NumTy vn) {
+  return GenValueListFromSignature(GetSignatureFromValueNumber(vn));
 }
 
-const ValueList
-ValueNumbering::GenValueListFromSignature(const std::string& input) {
+const ValueList ValueNumbering::GenValueListFromSignature(const SignTy& input) {
   std::vector<ValueItem> res;
-  ProcessValueNumberString(input, [this, &res](int valno, size_t) {
-    auto sig = GetSignatureFromValueNumber(valno);
-    res.push_back(GenValueItemFromSignature(sig));
-  });
+  if (CountElementsInSignature(input) > 1) {
+    ForeachValueNumber(input, [this, &res](NumTy valno, size_t) {
+      auto sign = GetSignatureFromValueNumber(valno);
+      res.push_back(GenValueItemFromSignature(sign));
+    });
+  } else {
+    assert(CountElementsInSignature(input) == 1);
+    res.push_back(GenValueItemFromSignature(input));
+  }
   return res;
 }
 
@@ -137,7 +186,7 @@ std::string ValueNumbering::ValueItemToSignature(const ValueItem& vi,
                                                  bool gen) {
   if (auto iv = VIInt(vi)) {
     auto sign = "const_" + STR(vi);
-    auto vn = GetOrInsertValueNumberFromSignature(sign); // always generate
+    auto vn = GetOrGenValueNumberFromSignature(sign); // always generate
     return GetSignatureFromValueNumber(vn);
   } else if (auto sym = VIStr(vi)) {
     assert(PrefixedWith(sym.value(), "::") && "expected a scoped symbol.");
@@ -152,7 +201,21 @@ std::string ValueNumbering::ValueItemToSignature(const ValueItem& vi,
     auto sign = STR(bop->GetOpCode()) + ":#" + std::to_string(lvn) + ":#" +
                 std::to_string(rvn);
     if (gen) {
-      auto vn = GetOrInsertValueNumberFromSignature(sign);
+      auto vn = GetOrGenValueNumberFromSignature(sign);
+      return GetSignatureFromValueNumber(vn);
+    } else
+      return sign;
+  } else if (auto top = VITop(vi)) {
+    auto psign = ValueItemToSignature(top->GetPred(), true);
+    auto lsign = ValueItemToSignature(top->GetLeft(), true);
+    auto rsign = ValueItemToSignature(top->GetRight(), true);
+    auto pvn = GetValueNumberOfSignature(psign);
+    auto lvn = GetValueNumberOfSignature(lsign);
+    auto rvn = GetValueNumberOfSignature(rsign);
+    auto sign = STR(top->GetOpCode()) + ":#" + std::to_string(pvn) + ":#" +
+                std::to_string(lvn) + ":#" + std::to_string(rvn);
+    if (gen) {
+      auto vn = GetOrGenValueNumberFromSignature(sign);
       return GetSignatureFromValueNumber(vn);
     } else
       return sign;
@@ -161,100 +224,58 @@ std::string ValueNumbering::ValueItemToSignature(const ValueItem& vi,
   return "";
 }
 
-const std::string
-ValueNumbering::VNSymbolName(const AST::Identifier& id) const {
-  auto sig = id.name;
-  auto pty = visitor->NodeType(id);
-  if (isa<SpannedType>(pty) || GeneralFutureType(pty)) {
-    sig = RemoveSuffix(sig, ".span") +
-          ".span"; // only cares about value inside the mdspan
-  } else if (isa<BoundedType>(pty)) {
-    sig = "@" + sig; // only cares about the upper bound
+std::string ValueNumbering::ValueListToSignature(const ValueList& vl,
+                                                 bool gen) {
+  assert(!vl.empty());
+  std::string sign;
+  int i = 0;
+  for (auto vi : vl) {
+    if (i++ > 0) sign += ",";
+    auto vis = ValueItemToSignature(vi, gen);
+    int vn = GetInvalidValueNumber();
+    if (gen)
+      vn = GetOrGenValueNumberFromSignature(vis);
+    else
+      vn = GetValueNumberOfSignature(vis);
+    sign += "#" + std::to_string(vn);
   }
-  return sig;
-}
-
-void ValueNumbering::EnterScope() {
-  std::string indent = ScopeIndent();
-  assert(!indent.empty() && "unexpected empty indent.");
-  indent.pop_back();
-
-  expressionValueNumbers.push_back({});
-  valueNumberExpressions.push_back({});
-  nodeValueNumbers.push_back({});
-
-  if (trace)
-    if (visitor->SSTab().ScopeDepth() > 1)
-      dbgs() << indent << "scope-" << visitor->SSTab().ScopeDepth() - 1
-             << " {\n";
-}
-
-void ValueNumbering::LeaveScope() {
-  if (visitor->SSTab().ScopeDepth() <= 1) return;
-
-  std::string sname = std::to_string(visitor->SSTab().ScopeDepth() - 1);
-
-  assert(!expressionValueNumbers.empty() && !valueNumberExpressions.empty());
-
-  expressionValueNumbers.pop_back();
-  valueNumberExpressions.pop_back();
-  nodeValueNumbers.pop_back();
-
-  // reset value number when leaving the function scope
-  if (expressionValueNumbers.empty() || expressionValueNumbers.size() == 1) {
-    nextValueNumber = 0;
-    bind_info.Clear();
-  }
-
-  std::string indent = ScopeIndent();
-  assert(!indent.empty() && "unexpected empty indent.");
-  indent.pop_back();
-
-  if (trace) dbgs() << indent << "} // end scope-" << sname << "\n";
+  return sign;
 }
 
 // It binds a expression signature with an existing value number.  use it
 // carefully.
 void ValueNumbering::AssociateSignatureWithValueNumber(const std::string& sig,
                                                        int valno) {
-  assert(InternalHasValNoExpr(valno) && "invalid value number is provided.");
-  if (InternalHasExprValNo(sig))
-    assert((InternalGetExprValNo(sig) == valno) &&
+  assert(vntbl.Exists(valno) && "invalid value number is provided.");
+  if (vntbl.Exists(sig))
+    assert((vntbl.GetValueNum(sig) == valno) &&
            "must associate signature with different value number.");
 
-  InternalUpdateExprValNo(sig, valno);
+  vntbl.Alias(valno, sig);
 
   if (trace)
     dbgs() << ScopeIndent() << "Alias \"" << sig << "\" -> #" << valno << "\n";
 }
 
 void ValueNumbering::AssociateSignatureWithInvalidValueNumber(
-    const std::string& sig) {
-  assert(!InternalHasExprValNo(sig) && "signature does exists.");
+    const SignTy& sig) {
+  assert(!vntbl.Exists(sig) && "signature does exists.");
 
-  InternalUpdateExprValNo(sig, GetInvalidValueNumber());
+  vntbl.DummyGen(sig);
 
   if (trace)
     dbgs() << ScopeIndent() << "Alias \"" << sig << "\" -> #<invalid>\n";
 }
 
-void ValueNumbering::RebindSignatureWithValueNumber(const std::string& sig,
-                                                    int valno) {
-  bool changed = false;
-  for (auto evn = expressionValueNumbers.rbegin();
-       evn != expressionValueNumbers.rend(); ++evn) {
-    if (!evn->count(sig)) continue;
+void ValueNumbering::RebindSignatureWithValueNumber(const SignTy& s, NumTy v) {
+  if (!vntbl.Exists(s))
+    return; // could be invalid symbol for scope change
+            // TODO: is this code safe?
+  vntbl.BindDummy(s, v);
 
-    assert(!ValidVN((*evn)[sig]) &&
-           "expecting rebind of an invalid value number.");
-    (*evn)[sig] = valno;
-    if (!changed && trace)
-      dbgs() << ScopeIndent() << "Alias(Rebind) \"" << sig << "\" -> #" << valno
-             << "\n";
-    changed = true;
-  }
-
-  if (!changed) choreo_unreachable("failed to rebind valno for `" + sig + "'.");
+  if (trace)
+    dbgs() << ScopeIndent() << "Alias(Rebind) \"" << STR(s) << "\" -> #"
+           << STR(v) << "\n";
 }
 
 std::string ValueNumbering::SignBinaryCompositeValues(const location& loc,
@@ -311,12 +332,12 @@ std::string ValueNumbering::SignBinaryCompositeValues(const location& loc,
     auto r_sig = GetSignatureFromValueNumber(r_vns[i]);
     auto opt_sig = TryToSimplifyBinary(loc, op, l_sig, r_sig, verbose);
     if (opt_sig)
-      signatures.push_back(GetOrInsertValueNumberFromSignature(*opt_sig));
+      signatures.push_back(GetOrGenValueNumberFromSignature(*opt_sig));
     else {
       std::ostringstream oss;
       oss << op << ":#" << GetValueNumberOfSignature(l_sig) << ":#"
           << GetValueNumberOfSignature(r_sig);
-      signatures.push_back(GetOrInsertValueNumberFromSignature(oss.str()));
+      signatures.push_back(GetOrGenValueNumberFromSignature(oss.str()));
     }
   }
   assert(signatures.size() > 0);
@@ -325,6 +346,84 @@ std::string ValueNumbering::SignBinaryCompositeValues(const location& loc,
   oss << "#" << signatures[0];
   for (size_t i = 1; i < signatures.size(); ++i) oss << ",#" << signatures[i];
   return oss.str();
+}
+
+const std::string ValueNumbering::SimplifySignature(const location& loc,
+                                                    const std::string& sign) {
+  assert(CountElementsInSignature(sign) == 1);
+
+#if 0
+  auto OptimizeBinary = [&loc, &sign, this](const std::string &op, const std::string & lsign, const std::string & rsign) -> const std::string {
+    if (auto res = TryToSimplifyBinary(loc, op, lsign, rsign))
+      return res.value();
+    return sign;
+  };
+#endif
+
+  // Applies the algebraic simplification
+  std::set<std::string> optimizable = {
+      "+",  "-", "*", "/",  "%",  "cdiv", "@",  "@+",
+      "@-", "<", ">", "<=", ">=", "==",   "!=",
+  };
+
+  auto HandleMultiSigns = [&loc, this](const std::string& op,
+                                       const SignTy& lsign,
+                                       const SignTy& rsign) {
+    // For multiple signatures, it is possible to generate new intermediate
+    // value numbers
+    auto lvns = SplitStringByDelimiter(lsign, ",");
+    auto rvns = SplitStringByDelimiter(rsign, ",");
+    assert(lvns.size() == rvns.size());
+    std::string o_sign;
+    for (size_t i = 0; i < lvns.size(); ++i) {
+      auto e_sign = SimplifySignature(loc, op + ":" + lvns[i] + ":" + rvns[i]);
+      o_sign += "#" + STR(GetOrGenValueNumberFromSignature(e_sign));
+      if (i < lvns.size() - 1) o_sign += ",";
+    }
+    return o_sign;
+  };
+
+  auto sparts = SplitStringByDelimiter(sign, ":");
+  if ((sparts.size() == 3)) {
+    auto op = sparts[0];
+    NumTy lvn = std::stoi(sparts[1].substr(1));
+    NumTy rvn = std::stoi(sparts[2].substr(1));
+    auto lsign = GetSignatureFromValueNumber(lvn);
+    auto rsign = GetSignatureFromValueNumber(rvn);
+
+    if (op == "concat") {
+      auto NumSign = [this](const std::string& s) {
+        if (CountElementsInSignature(s) > 1) return s;
+        return "#" + STR(GetValueNumberOfSignature(s));
+      };
+      return NumSign(lsign) + "," + NumSign(rsign);
+    } else if (optimizable.count(op)) {
+      auto lcnt = CountElementsInSignature(lsign);
+      auto rcnt = CountElementsInSignature(rsign);
+      if (lcnt == rcnt) {
+        if (lcnt == 1) {
+          if (auto res = TryToSimplifyBinary(loc, op, lsign, rsign))
+            return res.value();
+          else if (op == "#")
+            return "*:" + sparts[1] + sparts[2]; // operation '#' is special
+        } else
+          return HandleMultiSigns(op, lsign, rsign);
+      } else {
+        // multivalues operates on a single value
+        assert(((lcnt > 1) && (rcnt == 1)) || ((rcnt > 1) && (lcnt == 1)));
+        if (lcnt == 1) {
+          lsign = "#" + STR(lvn);
+          for (int i = 1; i < rcnt; ++i) lsign += ",#" + STR(lvn);
+        } else if (rcnt == 1) {
+          rsign = "#" + STR(rvn);
+          for (int i = 1; i < lcnt; ++i) rsign += ",#" + STR(rvn);
+        }
+        return HandleMultiSigns(op, lsign, rsign);
+      }
+    }
+  }
+
+  return sign;
 }
 
 std::optional<std::string>
@@ -740,550 +839,6 @@ ValueNumbering::TryToSimplifyBinary(const location& loc, const std::string& op,
   return std::nullopt;
 }
 
-std::optional<std::string>
-ValueNumbering::SignBoundedOperation(const location& loc, const std::string& op,
-                                     const AST::Node& lhs, const AST::Node& rhs,
-                                     bool verbose) {
-  auto getSignature = [&](const AST::Node& n) {
-    auto bound = GetSingleUpperBound(visitor->NodeType(n));
-    return ValueItemToSignature(bound, true);
-  };
-
-  std::optional<std::string> res;
-  if (op == "+" || op == "-" || op == "*" || op == "/" || op == "%") {
-    if (isa<BoundedType>(lhs.GetType()) && lhs.GetType()->Dims() == 1 &&
-        CanYieldAnInteger(visitor->NodeType(rhs)))
-      res = GetSignatureForNode(lhs);
-    else if (isa<BoundedType>(rhs.GetType()) && (rhs.GetType()->Dims() == 1) &&
-             CanYieldAnInteger(visitor->NodeType(lhs)))
-      res = GetSignatureForNode(rhs);
-    else if (isa<BoundedITupleType>(lhs.GetType()) &&
-             (isa<ITupleType>(rhs.GetType())))
-      res = GetSignatureForNode(lhs);
-    else if (isa<BoundedITupleType>(rhs.GetType()) &&
-             (isa<ITupleType>(lhs.GetType())))
-      res = GetSignatureForNode(rhs);
-    else
-      choreo_unreachable("operation '" + op + "' is not permitted for '" +
-                         STR(lhs) + "(" + PSTR(lhs.GetType()) + ")' and '" +
-                         STR(rhs) + "(" + PSTR(rhs.GetType()) + ")'.");
-  } else if (op == "#") {
-    if (IsActualBoundedIntegerType(lhs.GetType()) &&
-        IsActualBoundedIntegerType(rhs.GetType())) {
-      auto lsig = getSignature(lhs);
-      auto rsig = getSignature(rhs);
-      res = TryToSimplifyBinary(loc, op, lsig, rsig, verbose);
-      if (!res) {
-        auto lvn = GetOrInsertValueNumberFromSignature(lsig);
-        auto rvn = GetOrInsertValueNumberFromSignature(rsig);
-        res = "*:#" + std::to_string(lvn) + ":#" + std::to_string(rvn);
-      }
-    } else
-      choreo_unreachable("operation is not permitted.");
-  } else if (op == "#+" || op == "#-") {
-    if (IsActualBoundedIntegerType(lhs.GetType()) &&
-        isa<IntegerType>(rhs.GetType())) {
-      auto lsig = getSignature(lhs);
-      auto rsig = "const_" + STR(rhs);
-      res = TryToSimplifyBinary(loc, op, lsig, rsig, verbose);
-      if (!res) {
-        auto lvn = GetOrInsertValueNumberFromSignature(lsig);
-        auto rvn = GetOrInsertValueNumberFromSignature(rsig);
-        res = op + ":#" + std::to_string(lvn) + ":#" + std::to_string(rvn);
-      }
-    } else
-      choreo_unreachable("operation is not permitted.");
-  } else
-    choreo_unreachable("operation is not supported for bounded variables.");
-
-  if (trace && verbose)
-    dbgs() << ScopeIndent() << "<Bounded> '" << STR(lhs) << " " << op << " "
-           << STR(rhs) << "' ubound: '" << *res << "'\n";
-  return res;
-}
-
-std::optional<std::string>
-ValueNumbering::GenerateSpecialNodeSignature(const AST::Node& node) {
-  if (auto* n = dyn_cast<AST::Expr>(&node))
-    if (n->IsArith()) {
-      if (isa<BoundedType>(n->GetL()->GetType()) ||
-          isa<BoundedType>(n->GetR()->GetType())) {
-        return SignBoundedOperation(n->LOC(), n->op, *n->GetL(), *n->GetR(),
-                                    trace);
-      }
-    }
-
-  return std::nullopt;
-}
-
-std::optional<std::string>
-ValueNumbering::TryToSimplifyNodeSignature(const AST::Node& node) {
-  if (isa<AST::Identifier>(&node)) {
-    return std::nullopt;
-  } else if (auto* n = dyn_cast<AST::Expr>(&node)) {
-    // Applies the algebraic simplification
-    std::map<std::string, std::function<std::optional<std::string>()>>
-        alg_simp = {
-            {"+",
-             [this, &n]() -> std::optional<std::string> {
-               auto res = TryToSimplifyBinary(n->LOC(), "+",
-                                              GetSignatureForNode(*n->GetL()),
-                                              GetSignatureForNode(*n->GetR()));
-
-               if (res && trace)
-                 dbgs() << ScopeIndent() << "<Simplify> '"
-                        << GenerateNodeSignature(*n->GetL(), false) << " + "
-                        << GenerateNodeSignature(*n->GetR(), false) << "' to '"
-                        << res.value() << "'\n";
-               return res;
-             }},
-            {"-",
-             [this, &n]() -> std::optional<std::string> {
-               auto res = TryToSimplifyBinary(n->LOC(), "-",
-                                              GetSignatureForNode(*n->GetL()),
-                                              GetSignatureForNode(*n->GetR()));
-
-               if (res && trace)
-                 dbgs() << ScopeIndent() << "<Simplify> '"
-                        << GenerateNodeSignature(*n->GetL(), false) << " - "
-                        << GenerateNodeSignature(*n->GetR(), false) << "' to '"
-                        << res.value() << "'\n";
-               return res;
-             }},
-            {"*",
-             [this, &n]() -> std::optional<std::string> {
-               auto res = TryToSimplifyBinary(n->LOC(), "*",
-                                              GetSignatureForNode(*n->GetL()),
-                                              GetSignatureForNode(*n->GetR()));
-               if (res && trace)
-                 dbgs() << ScopeIndent() << "<Simplify> '"
-                        << GenerateNodeSignature(*n->GetL(), false) << " * "
-                        << GenerateNodeSignature(*n->GetR(), false) << "' to '"
-                        << res.value() << "'\n";
-               return res;
-             }},
-            {"/",
-             [this, &n]() -> std::optional<std::string> {
-               auto res = TryToSimplifyBinary(n->LOC(), "/",
-                                              GetSignatureForNode(*n->GetL()),
-                                              GetSignatureForNode(*n->GetR()));
-               if (res && trace)
-                 dbgs() << ScopeIndent() << "<Simplify> '"
-                        << GenerateNodeSignature(*n->GetL(), false) << " / "
-                        << GenerateNodeSignature(*n->GetR(), false) << "' to '"
-                        << res.value() << "'\n";
-               return res;
-             }},
-            {"%",
-             [this, &n]() -> std::optional<std::string> {
-               auto res = TryToSimplifyBinary(n->LOC(), "%",
-                                              GetSignatureForNode(*n->GetL()),
-                                              GetSignatureForNode(*n->GetR()));
-               if (res && trace)
-                 dbgs() << ScopeIndent() << "<Simplify> '"
-                        << GenerateNodeSignature(*n->GetL(), false) << " % "
-                        << GenerateNodeSignature(*n->GetR(), false) << "' to '"
-                        << res.value() << "'\n";
-               return res;
-             }},
-            {"cdiv",
-             [this, &n]() -> std::optional<std::string> {
-               auto res = TryToSimplifyBinary(n->LOC(), "cdiv",
-                                              GetSignatureForNode(*n->GetL()),
-                                              GetSignatureForNode(*n->GetR()));
-               if (res && trace)
-                 dbgs() << ScopeIndent() << "<Simplify> '"
-                        << GenerateNodeSignature(*n->GetL(), false) << " cdiv "
-                        << GenerateNodeSignature(*n->GetR(), false) << "' to '"
-                        << res.value() << "'\n";
-               return res;
-             }},
-            {"#",
-             [this, &n]() -> std::optional<std::string> {
-               auto res = TryToSimplifyBinary(n->LOC(), "#",
-                                              GetSignatureForNode(*n->GetL()),
-                                              GetSignatureForNode(*n->GetR()));
-               if (res && trace)
-                 dbgs() << ScopeIndent() << "<Simplify> '"
-                        << GenerateNodeSignature(*n->GetL(), false) << " # "
-                        << GenerateNodeSignature(*n->GetR(), false) << "' to '"
-                        << res.value() << "'\n";
-               return res;
-             }},
-            {"#+",
-             [this, &n]() -> std::optional<std::string> {
-               auto res = TryToSimplifyBinary(n->LOC(), "#+",
-                                              GetSignatureForNode(*n->GetL()),
-                                              GetSignatureForNode(*n->GetR()));
-               if (res && trace)
-                 dbgs() << ScopeIndent() << "<Simplify> '"
-                        << GenerateNodeSignature(*n->GetL(), false) << " #+ "
-                        << GenerateNodeSignature(*n->GetR(), false) << "' to '"
-                        << res.value() << "'\n";
-               return res;
-             }},
-            {"#-",
-             [this, &n]() -> std::optional<std::string> {
-               auto res = TryToSimplifyBinary(n->LOC(), "#-",
-                                              GetSignatureForNode(*n->GetL()),
-                                              GetSignatureForNode(*n->GetR()));
-               if (res && trace)
-                 dbgs() << ScopeIndent() << "<Simplify> '"
-                        << GenerateNodeSignature(*n->GetL(), false) << " #- "
-                        << GenerateNodeSignature(*n->GetR(), false) << "' to '"
-                        << res.value() << "'\n";
-               return res;
-             }},
-            {"||",
-             [this, &n]() -> std::optional<std::string> {
-               return std::nullopt; /*TODO*/
-             }},
-            {"&&",
-             [this, &n]() -> std::optional<std::string> {
-               return std::nullopt; /*TODO*/
-             }},
-            {"!",
-             [this, &n]() -> std::optional<std::string> {
-               return std::nullopt; /*TODO*/
-             }},
-            {"?",
-             [this, &n]() -> std::optional<std::string> {
-               const auto& cond = n->GetC();
-               auto res_cond = TryToSimplifyBinary(
-                   cond->LOC(), cond->op, GetSignatureForNode(*cond->GetL()),
-                   GetSignatureForNode(*cond->GetR()));
-               if (res_cond) {
-                 std::string res;
-                 if (res_cond == "true")
-                   res = GetSignatureForNode(*n->GetL());
-                 else
-                   res = GetSignatureForNode(*n->GetR());
-                 if (trace) {
-                   dbgs() << ScopeIndent() << "<Simplify> '"
-                          << GenerateNodeSignature(*n->GetC(), false) << " ? "
-                          << GenerateNodeSignature(*n->GetL(), false) << " : "
-                          << GenerateNodeSignature(*n->GetR(), false)
-                          << "' to '" << res << "'\n";
-                 }
-                 return res;
-               }
-               return std::nullopt;
-             }},
-            {"<",
-             [this, &n]() -> std::optional<std::string> {
-               auto res = TryToSimplifyBinary(n->LOC(), "<",
-                                              GetSignatureForNode(*n->GetL()),
-                                              GetSignatureForNode(*n->GetR()));
-               if (res && trace)
-                 dbgs() << ScopeIndent() << "<Simplify> '"
-                        << GenerateNodeSignature(*n->GetL(), false) << " < "
-                        << GenerateNodeSignature(*n->GetR(), false) << "' to '"
-                        << res.value() << "'\n";
-               return res;
-             }},
-            {">",
-             [this, &n]() -> std::optional<std::string> {
-               auto res = TryToSimplifyBinary(n->LOC(), ">",
-                                              GetSignatureForNode(*n->GetL()),
-                                              GetSignatureForNode(*n->GetR()));
-               if (res && trace)
-                 dbgs() << ScopeIndent() << "<Simplify> '"
-                        << GenerateNodeSignature(*n->GetL(), false) << " > "
-                        << GenerateNodeSignature(*n->GetR(), false) << "' to '"
-                        << res.value() << "'\n";
-               return res;
-             }},
-            {"==",
-             [this, &n]() -> std::optional<std::string> {
-               auto res = TryToSimplifyBinary(
-                   n->LOC(), "==", GetSignatureForNode(*n->GetL()),
-                   GetSignatureForNode(*n->GetR()));
-               if (res && trace)
-                 dbgs() << ScopeIndent() << "<Simplify> '"
-                        << GenerateNodeSignature(*n->GetL(), false)
-                        << " == " << GenerateNodeSignature(*n->GetR(), false)
-                        << "' to '" << res.value() << "'\n";
-               return res;
-             }},
-            {"!=",
-             [this, &n]() -> std::optional<std::string> {
-               auto res = TryToSimplifyBinary(
-                   n->LOC(), "!=", GetSignatureForNode(*n->GetL()),
-                   GetSignatureForNode(*n->GetR()));
-               if (res && trace)
-                 dbgs() << ScopeIndent() << "<Simplify> '"
-                        << GenerateNodeSignature(*n->GetL(), false)
-                        << " != " << GenerateNodeSignature(*n->GetR(), false)
-                        << "' to '" << res.value() << "'\n";
-               return res;
-             }},
-            {"<=",
-             [this, &n]() -> std::optional<std::string> {
-               auto res = TryToSimplifyBinary(
-                   n->LOC(), "<=", GetSignatureForNode(*n->GetL()),
-                   GetSignatureForNode(*n->GetR()));
-               if (res && trace)
-                 dbgs() << ScopeIndent() << "<Simplify> '"
-                        << GenerateNodeSignature(*n->GetL(), false)
-                        << " <= " << GenerateNodeSignature(*n->GetR(), false)
-                        << "' to '" << res.value() << "'\n";
-               return res;
-             }},
-            {">=",
-             [this, &n]() -> std::optional<std::string> {
-               auto res = TryToSimplifyBinary(
-                   n->LOC(), ">=", GetSignatureForNode(*n->GetL()),
-                   GetSignatureForNode(*n->GetR()));
-               if (res && trace)
-                 dbgs() << ScopeIndent() << "<Simplify> '"
-                        << GenerateNodeSignature(*n->GetL(), false)
-                        << " >= " << GenerateNodeSignature(*n->GetR(), false)
-                        << "' to '" << res.value() << "'\n";
-               return res;
-             }},
-            {"dataof",
-             [this, &n]() -> std::optional<std::string> {
-               // care about the span the data has
-               return GetSignatureForNode(*n->GetR());
-             }},
-            {"sizeof",
-             [this, &n]() -> std::optional<std::string> {
-               auto s = GetShape(visitor->NodeType(*n->GetR()));
-               if (s.IsValid() && !s.IsDynamic())
-                 return "const_" + s.GetElementCountExpression();
-               else
-                 return ValueItemToSignature(s.ElementCountValue(), true);
-             }},
-            {"ubound",
-             [this, &n]() -> std::optional<std::string> {
-               if (auto id = dyn_cast<AST::Identifier>(n->GetR())) {
-                 return visitor->SSTab().NameInScopeOrNull(
-                     "@" + cast<AST::Identifier>(id)->name);
-               } else
-                 choreo_unreachable("upper bound expression is unexpected.");
-             }},
-            {"getith",
-             [this, &n]() -> std::optional<std::string> {
-               return std::nullopt;
-             }},
-            {"addrof",
-             [this, &n]() -> std::optional<std::string> {
-               return std::nullopt;
-             }},
-            {"elemof",
-             [this, &n]() -> std::optional<std::string> {
-               return std::nullopt;
-             }},
-            {"dimof", // calculate the dim of a given mdspan index
-             [this, &n]() -> std::optional<std::string> {
-               std::string base_sig;
-               if (isa<BoundedType>(n->GetL()->GetType())) {
-                 auto id = cast<AST::Expr>(n->GetL())->GetSymbol();
-                 assert(id != nullptr && "not an identifier.");
-                 base_sig = SignatureOfSymbol(
-                     visitor->SSTab().InScopeName("@" + id->name));
-               } else
-                 base_sig = GetSignatureForNode(*n->GetL());
-               auto cv = RemovePrefixOrNull("index_const_",
-                                            GetSignatureForNode(*n->GetR()));
-               assert(cv && "indexing of mdspan can not be evaluated.");
-               assert((std::stoi(*cv) < CountElementsInSignature(base_sig)) &&
-                      "out of bound in 'dimof'.");
-
-               if (CountElementsInSignature(base_sig) == 1) return base_sig;
-
-               return base_sig + "(" + *cv + ")";
-             }},
-            {"ref", // it is a reference to another node
-             [this, &n]() -> std::optional<std::string> {
-               if (HasValueNumberForNode(*n->GetR()))
-                 return GetSignatureForNode(*n->GetR());
-               return std::nullopt;
-             }},
-        };
-    if ((n->GetForm() == AST::Expr::Binary) && (n->op != "dimof") &&
-        (n->op != "elemof") &&
-        ((CountElementsInSignature(GetSignatureForNode(*n->GetR())) > 1) ||
-         (CountElementsInSignature(GetSignatureForNode(*n->GetL())) > 1)))
-      return SignBinaryCompositeValues(n->LOC(), n->op,
-                                       GetSignatureForNode(*n->GetL()),
-                                       GetSignatureForNode(*n->GetR()));
-    // Try to simplify immediately
-    auto it = alg_simp.find(n->op);
-    if (it != alg_simp.end())
-      return it->second(); // Execute the lambda function if found
-    else {
-      choreo_unreachable(
-          ("No handler for operation `" + n->op + "'").c_str()); // Default case
-    }
-  }
-  return std::nullopt;
-}
-
-std::string ValueNumbering::GenerateNodeSignature(const AST::Node& node,
-                                                  bool optimiz) {
-  // handle bounded variables
-  if (auto ssig = GenerateSpecialNodeSignature(node)) return *ssig;
-
-  if (optimiz) {
-    auto sns = TryToSimplifyNodeSignature(node);
-    if (sns) return *sns;
-  }
-
-  if (auto* n = dyn_cast<AST::IntLiteral>(&node)) {
-    if (IsUnKnownInteger(n->Val())) return "?";
-    return "const_" + std::to_string(n->Val());
-  } else if (auto* n = dyn_cast<AST::FloatLiteral>(&node)) {
-    if (n->IsFloat32()) {
-      auto f32 = n->Val_f32();
-      if (IsUnKnownFloatPoint(f32)) return "?";
-      return "const_" + std::to_string(f32) + "f";
-    } else if (n->IsFloat64()) {
-      auto f64 = n->Val_f64();
-      if (IsUnKnownFloatPoint(f64)) return "?";
-      return "const_" + std::to_string(f64);
-    } else {
-      choreo_unreachable("unexpected float point type.");
-    }
-  } else if (auto* n = dyn_cast<AST::BoolLiteral>(&node)) {
-    return PSTR(n);
-  } else if (auto* v = dyn_cast<AST::Identifier>(&node)) {
-    auto sname = VNSymbolName(*v);
-    if (auto name_in_scope = visitor->SSTab().NameInScopeOrNull(sname)) {
-      if (HasValueNumberOfSignature(*name_in_scope)) return *name_in_scope;
-      // error: the name exists but does not have a value number
-      Error(node.LOC(), "symbol `" + *name_in_scope +
-                            "' is not associated with a value number.");
-      choreo_unreachable();
-    }
-    // or else, it is a new name definition
-    return visitor->SSTab().ScopedName(sname);
-  } else if (auto* b = dyn_cast<AST::Expr>(&node)) {
-    auto signature = b->op;
-
-    if (b->GetC()) {
-      int valno = GetValueNumberForNode(*b->GetC());
-      assert(ValidVN(valno) && "invalid value number.");
-      signature += ":#" + std::to_string(valno);
-    }
-    if (b->GetL()) {
-      int valno = GetValueNumberForNode(*b->GetL());
-      assert(ValidVN(valno) && "invalid value number.");
-      signature += ":#" + std::to_string(valno);
-    }
-
-    assert(b->GetR() && "expression is invalid.");
-    int valno = GetValueNumberForNode(*b->GetR());
-    if (!ValidVN(valno)) {
-      // a reference node may have no valNo
-      assert((b->GetForm() == AST::Expr::Reference) && "invalid value number.");
-      return "";
-    }
-    return signature + ":#" + std::to_string(valno);
-  } else if (auto* b = dyn_cast<AST::MultiValues>(&node)) {
-    assert(b->values.size() > 0 && "must have values inside.");
-
-    // when it contains a single value, return the reference.
-    if (b->values.size() == 1) return GetSignatureForNode(*b->values[0]);
-
-    auto NodeSignature = [this](AST::Node& n) {
-      int vn = GetValueNumberForNode(n);
-      auto sig = GetSignatureFromValueNumber(vn);
-      return "#" + std::to_string(vn);
-    };
-    std::string signature = NodeSignature(*b->values[0]);
-    for (size_t i = 1; i < b->values.size(); ++i)
-      signature += "," + NodeSignature(*b->values[i]);
-    return signature;
-  } else if (auto* it = dyn_cast<AST::IntTuple>(&node)) {
-    return GenerateNodeSignature(*(it->GetValues()));
-  } else if (auto* mds = dyn_cast<AST::MultiDimSpans>(&node)) {
-    return GenerateNodeSignature(*(mds->list));
-  } else if (auto* sa = dyn_cast<AST::SpanAs>(&node)) {
-    return GenerateNodeSignature(*(sa->list));
-  } else if (auto* b = dyn_cast<AST::ParamList>(&node)) {
-    std::string signature;
-    if (b->values.size() > 0) {
-      signature = "p:#" + std::to_string(GetValueNumberForNode(*b->values[0]));
-      for (size_t i = 1; i < b->values.size(); ++i)
-        signature +=
-            ",#" + std::to_string(GetValueNumberForNode(*b->values[i]));
-    }
-    return signature;
-  } else if (auto* n = dyn_cast<AST::IntIndex>(&node)) {
-    return "index_" + GenerateNodeSignature(*n->value);
-  } else if (auto* s = dyn_cast<AST::Select>(&node)) {
-    // only care about span
-    auto vn = GetValueNumberForNode(*s->expr_list->ValueAt(0));
-    return GetSignatureFromValueNumber(vn);
-  }
-
-  if (trace)
-    Warning(node.LOC(), "invalid signature for expression `" + AST::STR(node) +
-                            "': " + node.TypeNameString() + ".");
-
-  return ""; // invalid value
-}
-
-bool ValueNumbering::HasValueNumberForNode(const AST::Node& n) {
-  // the node has been visited before
-  if (InternalHasNodeValNo(&n)) return true;
-
-  std::string signature = GenerateNodeSignature(n);
-  if (signature == "") return false;
-
-  return HasValueNumberOfSignature(signature);
-}
-
-// Note:
-// the valno related to a node could either be:
-//   1. integer value of the expression
-//   2. associated span value of the expression
-//   3. associated upper bound value of the expression
-int ValueNumbering::GetValueNumberForNode(const AST::Node& n) {
-  // if it is an visited/numbered node
-  if (InternalHasNodeValNo(&n)) return InternalGetNodeValNo(&n);
-
-  // workaround
-  // TODO(wsj) reference with bounded var and spanned var
-  if (auto id = dyn_cast<AST::Identifier>(&n)) {
-    // Must consider about the scope of any identifier reference
-    auto sname = VNSymbolName(*id);
-    if (auto name_in_scope = visitor->SSTab().NameInScopeOrNull(sname))
-      return GetValueNumberOfSignature(*name_in_scope);
-    else
-      choreo_unreachable("symbol `" + id->name + "' with vn name `" + sname +
-                         "' is not valued.");
-  }
-
-  std::string signature = GenerateNodeSignature(n);
-  if (signature == "")
-    Error(n.LOC(),
-          "failed to generate signature for expression `" + AST::STR(n) + "'.");
-
-  return GetValueNumberOfSignature(signature);
-}
-
-int ValueNumbering::GenerateValueNumberForNode(const AST::Node& n) {
-  std::string signature = GenerateNodeSignature(n);
-  if (signature == "")
-    Error(n.LOC(),
-          "failed to generate signature for expression `" + AST::STR(n) + "'.");
-
-  // Duplicated computation: different expression encounters the same
-  // signature
-  if (HasValueNumberOfSignature(signature))
-    return GetValueNumberOfSignature(signature);
-
-  int valNo = GenerateValueNumberFromSignature(signature);
-
-  // cache the value number
-  assert(!InternalHasNodeValNo(&n));
-  InternalUpdateNodeValNo(&n, valNo);
-
-  return valNo;
-}
-
 int ValueNumbering::GetValueNumberOfSignature(
     const std::string& signature) const {
   if (signature == "") choreo_unreachable("invalid signature provided.");
@@ -1291,8 +846,8 @@ int ValueNumbering::GetValueNumberOfSignature(
   if (signature == "?") return UnknownValue();
 
   // Check if this expression has been encountered before
-  if (InternalHasExprValNo(signature))
-    return InternalGetExprValNo(signature); // Return existing value number
+  if (vntbl.Exists(signature))
+    return vntbl.GetValueNum(signature); // Return existing value number
 
   choreo_unreachable("failed to get value number of signature \"" + signature +
                      "\".");
@@ -1300,29 +855,19 @@ int ValueNumbering::GetValueNumberOfSignature(
   return GetInvalidValueNumber();
 }
 
-void ValueNumbering::BindValueNumbers(int vn0, int vn1) {
-  assert(ValidVN(vn0) && ValidVN(vn1) && "invalid value number is provided.");
-
-  AddBind(vn0, vn1);
-
-  if (trace)
-    dbgs() << ScopeIndent() << "<Bind> VN #" << vn0 << " <-> VN #" << vn1
-           << "\n";
-}
-
-bool ValueNumbering::HasValueNumberOfSignature(const std::string& signature) {
-  return InternalHasExprValNo(signature);
+bool ValueNumbering::HasValueNumberOfSignature(
+    const std::string& signature) const {
+  return vntbl.Exists(signature);
 }
 
 bool ValueNumbering::HasValidValueNumberOfSignature(
     const std::string& signature) {
-  if (InternalHasExprValNo(signature))
-    return ValidVN(InternalGetExprValNo(signature));
+  if (vntbl.Exists(signature)) return ValidVN(vntbl.GetValueNum(signature));
 
   return false;
 }
 
-int ValueNumbering::GetOrInsertValueNumberFromSignature(
+int ValueNumbering::GetOrGenValueNumberFromSignature(
     const std::string& signature) {
   if (PrefixedWith(signature, "#") &&
       (CountElementsInSignature(signature) == 1)) {
@@ -1343,10 +888,7 @@ int ValueNumbering::GenerateValueNumberFromSignature(
   if (HasValueNumberOfSignature(signature))
     choreo_unreachable("signature \"" + signature + "\" has already existed.");
 
-  int valNo = nextValueNumber++;
-
-  InternalUpdateExprValNo(signature, valNo);
-  InternalUpdateValNoExpr(valNo, signature);
+  int valNo = vntbl.Generate(signature);
 
   if (trace)
     dbgs() << ScopeIndent() << "New VN #" << valNo << ": '" << signature
@@ -1398,6 +940,7 @@ int ValueNumbering::GetNthValNo(const std::string& input, int n) const {
 
   return valno;
 }
+
 std::string ValueNumbering::ScopeIndent() {
   std::string indent;
   for (size_t i = 0; i <= visitor->SSTab().ScopeDepth(); ++i) indent += " ";

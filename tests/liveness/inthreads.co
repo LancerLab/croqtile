@@ -90,7 +90,7 @@ int main()
 // LIVENESS: (  1)   global u8 [ 512 512 (1 * 2)  ] output
 // LIVENESS: (  2)   parallel p = {p__elem__x} by [1] {
 // LIVENESS: (  3)     parallel q = {q__elem__x} by [2] {
-// LIVENESS: (  4)       with idx = {idx__elem__0, idx__elem__1, idx__elem__2} in [ (1 * 2)  1 1 ] {
+// LIVENESS: (  4)       with idx = {idx__elem__0, idx__elem__1, idx__elem__2} in [ 2 1 1 ] {
 // LIVENESS: (  5)         foreach idx(::) {
 // LIVENESS: (  6)           shared u8 [ (output.span /  (ubound idx) )  ] s0
 // LIVENESS: (  7)           shared u8 mdspan<3> [256, 512, 1] s1__buf__
