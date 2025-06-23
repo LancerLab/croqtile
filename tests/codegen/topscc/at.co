@@ -1,0 +1,14 @@
+// RUN: choreo -es -t topscc %s -o - | FileCheck --match-full-lines %s
+
+__co__ void foo(f32 [7, 32] data, int i) {
+  // TODO: fix this
+  // mutable b = data.at(0, i);
+  parallel p by 2 foreach x in 3{
+    f = dma.copy data => shared;
+    mutable b = f.data.at(0, i);
+    f.data.at(p, 0) = f.data.at(x, 7); 
+  }
+}
+
+// CHECK: float b = *((float*)f.data() + i);
+// CHECK: *((float*)f.data() + (__tops_tid_x() * 32)) = *((float*)f.data() + (__iv_x__elem__0 * 32) + 7);

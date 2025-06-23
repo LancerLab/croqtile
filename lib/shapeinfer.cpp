@@ -499,19 +499,6 @@ bool ShapeInference::Visit(AST::IntTuple& n) {
   // cur_ituple_vn = cur_vn;
   SetNodeType(n, MakeITupleType(cnt));
 
-#if 0
-  if (cnt > 1) {
-    // set alias expressions with proper value numbers
-    ForeachValueNumber(sign, [this, &sign](int valno, size_t index) {
-      if (UnknownVN(valno)) return; // do not associate it with vn of "?"
-      vn.GetOrGenValueNumberFromSignature("index_const_" +
-                                             std::to_string(index));
-      ValNoAliasSign(
-          sign + "(" + std::to_string(index) + ")", valno);
-    });
-  }
-#endif
-
   InvalidateVN(cur_vn); // Currently cut off value numbering
   return true;
 }
@@ -707,16 +694,6 @@ bool ShapeInference::Visit(AST::Parameter& n) {
       auto span_name = n.sym->name + ".span";
       DefineASymbol(span_name,
                     cast<SpannedType>(n.type->GetType())->GetMDSpanType());
-
-#if 0
-      // generate all aliases
-      auto sign = SignValNo(cur_mdspan_vn);
-      if (CountElementsInSignature(sign) == 1) sign = "#" + STR(ValNoSign(sign));
-      ForeachValueNumber(sign, [this, &span_name, &n](int valno, size_t index) {
-        auto sname = SSTab().ScopedName(span_name) + "(" + std::to_string(index) + ")";
-        ValNoAliasSign(sname, valno);
-      });
-#endif
 
       DefineASymbol(n.sym->name, n.type->GetType());
     }
@@ -953,11 +930,6 @@ bool ShapeInference::Visit(AST::SpanAs& n) {
     return false;
   }
 
-#if 0
-  ValNoAliasSign(
-      SSTab().ScopedName(n.nid->name + ".span"), cur_mdspan_vn);
-#endif
-
   auto shape =
       GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_mdspan_vn));
   auto nty = MakeSpannedType(sty->ElementType(), shape, sty->GetStorage());
@@ -1044,22 +1016,6 @@ bool ShapeInference::Visit(AST::DMA& n) {
     DefineASymbol(n.future, n.GetType());
     DefineASymbol(f_span, MakeMDSpanType(s)); // implicit symbol
   }
-
-  auto vn_sig = vn.GetSignatureFromValueNumber(cur_vn);
-#if 0
-  // set alias expressions with proper value numbers
-  if (CountElementsInSignature(vn_sig) > 1) {
-    ForeachValueNumber(vn_sig, [this, &vn_sig](int valno, size_t index) {
-      if (UnknownVN(valno)) return; // do not associate it with vn of "?"
-      vn.GetOrGenValueNumberFromSignature("index_const_" +
-                                             std::to_string(index));
-      auto elem_sig = vn_sig + "(" + std::to_string(index) + ")";
-      if (!vn.HasValueNumberOfSignature(elem_sig))
-        ValNoAliasSign(
-            vn_sig + "(" + std::to_string(index) + ")", valno);
-    });
-  }
-#endif
 
   InvalidateVN(cur_vn);
   return true;

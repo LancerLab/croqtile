@@ -25,4 +25,4 @@ __co__ void foo(f32 [14] b) {
 // CHECK: a = (a / 6);
 // CHECK: a = (a % 7);
 // CHECK: __shared__ int b[3];
-// CHECK: *((int*)b + (__iv_i__elem__0)) = (*((int*)b + (__iv_i__elem__0)) + 2);
+// CHECK: *((int*)b + __iv_i__elem__0) = (*((int*)b + __iv_i__elem__0) + 2);

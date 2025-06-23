@@ -352,14 +352,6 @@ const std::string ValueNumbering::SimplifySignature(const location& loc,
                                                     const std::string& sign) {
   assert(CountElementsInSignature(sign) == 1);
 
-#if 0
-  auto OptimizeBinary = [&loc, &sign, this](const std::string &op, const std::string & lsign, const std::string & rsign) -> const std::string {
-    if (auto res = TryToSimplifyBinary(loc, op, lsign, rsign))
-      return res.value();
-    return sign;
-  };
-#endif
-
   // Applies the algebraic simplification
   std::set<std::string> optimizable = {
       "+",  "-", "*", "/",  "%",  "cdiv", "@",  "@+",

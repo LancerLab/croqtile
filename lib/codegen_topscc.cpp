@@ -2669,40 +2669,38 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
           << ExprSTR(da->data, is_host);
       size_t idx = 0;
       auto shape = sty->GetShape();
+      auto AppendOffset = [this, &oss, &shape, &idx](const ValueItem& op) {
+        auto offset = op;
+        assert(shape.Rank() >= idx + 1);
+        if (shape.Rank() > idx + 1)
+          offset = offset * shape.TrimDims(idx + 1).ElementCountValue();
+        offset->Normalize();
+        if (!sbe::ceq(offset, sbe::nu(0))) oss << " + " << ValueSTR(offset);
+        ++idx;
+      };
       for (auto item : da->GetIndices()) {
         if (auto id = AST::GetIdentifier(item)) {
           if (auto ids = ThreadIdString(id))
-            oss << " + " << ids.value();
+            AppendOffset(sbe::sym(ids.value()));
           else if (auto sids = SubThreadIdString(id))
-            oss << " + " << sids.value();
+            AppendOffset(sbe::sym(sids.value()));
           else if (within_map.count(InScopeName(id->name))) {
             auto ivs = within_map.at(InScopeName(id->name));
-            for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr) {
-              auto shape = sty->GetShape();
-              oss << " + ("
-                  << (is_host ? ssm.HostName(*iv_itr)
-                              : ssm.DeviceName(*iv_itr));
-              assert(shape.Rank() >= idx + 1);
-              if (shape.Rank() > idx + 1)
-                oss << " * "
-                    << shape.TrimDims(idx + 1).GetElementCountExpression();
-              oss << ")";
-              ++idx;
-            }
-          } else {
-            oss << " + ("
-                << UnScopedName(is_host
-                                    ? ssm.HostName(InScopeName(id->name))
-                                    : ssm.DeviceName(InScopeName(id->name)));
-            assert(shape.Rank() >= idx + 1);
-            if (shape.Rank() > idx + 1)
-              oss << " * "
-                  << shape.TrimDims(idx + 1).GetElementCountExpression();
-            oss << ")";
-            ++idx;
-          }
-        } else
-          choreo_unreachable("unsupported data access.");
+            for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr)
+              AppendOffset(sbe::sym(*iv_itr));
+          } else
+            AppendOffset(sbe::sym(InScopeName(id->name)));
+        } else if (auto il = AST::GetIntLiteral(*item))
+          AppendOffset(sbe::nu(il->Val()));
+        else {
+          oss << " + (" << ExprSTR(item, is_host);
+          assert(shape.Rank() >= idx + 1);
+          if (shape.Rank() > idx + 1)
+            oss << " * "
+                << ValueSTR(shape.TrimDims(idx + 1).ElementCountValue());
+          oss << ")";
+          ++idx;
+        }
       }
       oss << ")";
     } else {
@@ -2795,7 +2793,8 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       } else if (expr->GetOp() == "elemof") {
         oss << ExprSTR(expr->GetL(), is_host) << "["
             << ExprSTR(expr->GetR(), is_host) << "]";
-      } else if (expr->IsArith() || expr->IsLogical() || expr->IsCompare() || expr->isBitwise()) {
+      } else if (expr->IsArith() || expr->IsLogical() || expr->IsCompare() ||
+                 expr->isBitwise()) {
         auto& l = expr->GetL();
         auto& r = expr->GetR();
         auto& op = expr->GetOp();

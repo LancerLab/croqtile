@@ -460,10 +460,10 @@ public:
           else
             return bl(false);
         case OpCode::NE:
-          if (nu->Value() <= 0)
-            return bl(true);
-          else
+          if (nu->Value() == 0)
             return bl(false);
+          else
+            return bl(true);
         default: choreo_unreachable("unsupported comparison.");
         }
       }

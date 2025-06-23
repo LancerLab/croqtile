@@ -133,11 +133,6 @@ private:
 
   void InvalidateVisitorValNOs();
 
-#if 0
-  // try apply folding
-  std::optional<std::string> TryOptSign(const AST::Node& node);
-#endif
-
   // Generate the signature for a node, simplify the signature when optimiz flag
   // is set.
   const std::string SignNode(const AST::Node& node);

@@ -515,7 +515,7 @@ struct Shape {
   ValueItem ElementCountValue() const {
     auto vi = sbe::nu(1);
     for (auto v : Value()) vi = vi * v;
-    return vi;
+    return vi->Normalize();
   }
 
   void Print(std::ostream& os) const {
@@ -1752,6 +1752,10 @@ inline bool IsActualBoundedIntegerType(const ptr<Type>& ty) {
 inline bool CanYieldAnInteger(const ptr<Type>& ty) {
   return isa<ScalarType>(ty) || IsActualBoundedIntegerType(ty) ||
          (isa<ITupleType>(ty) && ty->Dims() == 1);
+}
+
+inline bool CanYieldIndex(const ptr<Type>& ty) {
+  return isa<ScalarType>(ty) || isa<BoundedType>(ty) || (isa<ITupleType>(ty));
 }
 
 inline bool ConvertibleToInt(const ptr<Type>& ty) {

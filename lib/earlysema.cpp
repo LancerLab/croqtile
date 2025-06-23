@@ -910,7 +910,15 @@ bool EarlySemantics::Visit(AST::DataAccess& n) {
   }
 
   size_t idx_count = 0;
-  for (auto idx : n.GetIndices()) idx_count += NodeType(*idx)->Dims();
+  for (auto idx : n.GetIndices()) {
+    auto ity = NodeType(*idx);
+    if (!CanYieldIndex(ity)) {
+      Error(n.LOC(), "expect '" + PSTR(idx) + "' to yield indices but got " +
+                         PSTR(ity) + ".");
+      error_count++;
+    }
+    idx_count += NodeType(*idx)->Dims();
+  }
 
   if (sty->Dims() != idx_count) {
     Error(n.LOC(),
