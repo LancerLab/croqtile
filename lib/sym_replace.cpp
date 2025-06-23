@@ -185,6 +185,8 @@ SymReplace::StringifyOpFromSymExpr(ptr<AST::Node> n, const std::string& op,
     symbol_name = "|" + sym_expr_r_str + "|";
   else if (op == "ubound")
     symbol_name = "#" + sym_expr_r_str;
+  else if (op == "~")
+    symbol_name = "~" + sym_expr_r_str;
   else
     choreo_unreachable("The operator " + op +
                        " is not supported in SymReplace yet.");
@@ -329,7 +331,7 @@ void SymReplace::SymbolizeExprNode(ptr<AST::Node> n) {
                          ") is not supported in SymReplace yet.");
     }
   } else if (e->IsUnary()) {
-    if (op == "!" || op == "dataof" || op == "sizeof") {
+    if (op == "!" || op == "dataof" || op == "sizeof" || op == "~") {
       // construct new SymExpr from Symbol.
       res = StringifyOpFromSymExpr(
           n, op, GetSymExprFromSymValno(GetSymValnoFromExpr(R)));
@@ -405,6 +407,10 @@ void SymReplace::SymbolizeExprNode(ptr<AST::Node> n) {
             res = StringifyOpFromSymExpr(n, sym_expr_r, "<=", sym_expr_l);
           else
             res = StringifyOpFromSymExpr(n, sym_expr_l, op, sym_expr_r);
+        } else if (op == "&" || op == "|" || op == "^") {
+          res = StringifyOpFromSymExpr(n, sym_expr_l, op, sym_expr_r);
+        } else if (op == "<<" || op == ">>") {
+          res = StringifyOpFromSymExpr(n, sym_expr_l, op, sym_expr_r);
         } else {
           choreo_unreachable("The operator " + e->op +
                              " is not supported in SymReplace yet.");

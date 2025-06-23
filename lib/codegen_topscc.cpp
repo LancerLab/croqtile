@@ -2774,6 +2774,8 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
           oss << "&" << ExprSTR(expr->GetR(), is_host);
         } else
           choreo_unreachable("Can not retrieve name of the spanned data.");
+      } else if (expr->GetOp() == "~") {
+        oss << "~" << ExprSTR(expr->GetR(), is_host);
       } else
         choreo_unreachable("Unsupported choreo expression.");
     } else if (expr->IsBinary()) {
@@ -2793,7 +2795,7 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       } else if (expr->GetOp() == "elemof") {
         oss << ExprSTR(expr->GetL(), is_host) << "["
             << ExprSTR(expr->GetR(), is_host) << "]";
-      } else if (expr->IsArith() || expr->IsLogical() || expr->IsCompare()) {
+      } else if (expr->IsArith() || expr->IsLogical() || expr->IsCompare() || expr->isBitwise()) {
         auto& l = expr->GetL();
         auto& r = expr->GetR();
         auto& op = expr->GetOp();

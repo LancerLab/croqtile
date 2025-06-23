@@ -626,6 +626,13 @@ public:
     return false;
   }
 
+  bool isBitwise() const {
+    if ((op == "&") || (op == "|") || (op == "^") || (op == "~") ||
+        (op == "<<") || (op == ">>"))
+      return true;
+    return false;
+  }
+
   bool IsUBArith() const {
     if ((op == "#") || (op == "#+") || (op == "#-") || op == "#*" || op == "#%")
       return true;

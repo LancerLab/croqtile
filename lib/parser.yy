@@ -149,6 +149,8 @@ void choreo_info(const char *message) {
   PIPE    "|"
   UBOUND  "#"
   AMP     "&"
+  CARET   "^"
+  TILDE   "~"
   UBPLUS  "#+"
   UBMINUS "#-"
   UBSTAR  "#*"
@@ -202,7 +204,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::Node>> any_code foreach_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt wait_stmt trigger_stmt call_stmt swap_stmt range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
 %nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params ids_list subscriptions data_indices
-%nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr call_expr ituple_derivation
+%nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr call_expr ituple_derivation internal_sizeof_expr sizeof_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type mdspan_as_type
 %nterm <AST::ptr<AST::DataAccess>> data_element
 %nterm <AST::ptr<AST::ParamList>> parameter_list
@@ -244,8 +246,9 @@ void choreo_info(const char *message) {
 %left UBMINUS UBPLUS
 %left UBSTAR UBSLASH UBPECET
 %right PPLUS MMINUS
-%right AMP
+%left AMP CARET PIPE
 %left UBOUND
+%left TILDE
 %left DOT
 %nonassoc LPAREN RPAREN
 %nonassoc LBRAKT RBRAKT
@@ -1023,6 +1026,11 @@ s_expr
     | s_expr PECET s_expr { $$ = AST::Make<AST::Expr>(@1, "%", $1, $3); }
     | CDIV LPAREN s_expr COMMA s_expr RPAREN { $$ = AST::Make<AST::Expr>(@1, "cdiv", $3, $5); }
     | s_expr OR s_expr { $$ = AST::Make<AST::Expr>(@1, "||", $1, $3); }
+    | s_expr PIPE s_expr { $$ = AST::Make<AST::Expr>(@1, "|", $1, $3); }
+    | s_expr AMP s_expr { $$ = AST::Make<AST::Expr>(@1, "&", $1, $3); }
+    | s_expr CARET s_expr { $$ = AST::Make<AST::Expr>(@1, "^", $1, $3); }
+    | s_expr LSHIFT s_expr { $$ = AST::Make<AST::Expr>(@1, "<<", $1, $3); }
+    | s_expr RSHIFT s_expr { $$ = AST::Make<AST::Expr>(@1, ">>", $1, $3); }
     | s_expr AND s_expr { $$ = AST::Make<AST::Expr>(@1, "&&", $1, $3); }
     | s_expr UBOUND s_expr {$$ = AST::Make<AST::Expr>(@1, "#", $1, $3); }
     | s_expr UBPLUS s_expr { $$ = AST::Make<AST::Expr>(@1, "#+", $1, $3); }
@@ -1031,6 +1039,7 @@ s_expr
     | s_expr UBSLASH s_expr { $$ = AST::Make<AST::Expr>(@1, "#/", $1, $3); }
     | s_expr UBPECET s_expr { $$ = AST::Make<AST::Expr>(@1, "#%", $1, $3); }
     | NOT s_expr { $$ = AST::Make<AST::Expr>(@1, "!", $2); }
+    | TILDE s_expr { $$ = AST::Make<AST::Expr>(@1, "~", $2); }
     | LPAREN s_expr RPAREN {
         // Does String "(0)" represent an indexing operation or an arithmetic operation
         if (!parsing_derivation_decl) {
@@ -1069,7 +1078,6 @@ s_expr
     | mdspan_list      { $$ = AST::Make<AST::Expr>(@1, $1); }
     | dataid_expr      { $$ = $1; }
     | subscript_like_expr { $$ = $1; }
-    | PIPE s_expr PIPE { $$ = AST::Make<AST::Expr>(@1, "sizeof", $2); }
     | s_expr LPAREN int_or_id RPAREN {
         $$ = AST::Make<AST::Expr>(@1, "dimof", $1, AST::Make<AST::IntIndex>(@3, $3));
       }
@@ -1091,6 +1099,22 @@ s_expr
     | data_element { $$ = AST::Make<AST::Expr>(@1, $1); }
     | call_expr { $$ = $1; }
     | const_sizeof { $$ = AST::MakeIntExpr(@1, $1); }
+    | sizeof_expr { $$ = $1; }
+    ;
+
+internal_sizeof_expr
+    : spanid { $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1)); }
+    | int_or_id { $$ = AST::Make<AST::Expr>(@1, $1); }
+    | internal_sizeof_expr PLUS internal_sizeof_expr { $$ = AST::Make<AST::Expr>(@1, "+", $1, $3); }
+    | internal_sizeof_expr MINUS internal_sizeof_expr { $$ = AST::Make<AST::Expr>(@1, "-", $1, $3); }
+    | internal_sizeof_expr STAR internal_sizeof_expr { $$ = AST::Make<AST::Expr>(@1, "*", $1, $3); }
+    | internal_sizeof_expr SLASH internal_sizeof_expr { $$ = AST::Make<AST::Expr>(@1, "/", $1, $3); }
+    | internal_sizeof_expr PECET internal_sizeof_expr { $$ = AST::Make<AST::Expr>(@1, "%", $1, $3); }
+    | CDIV LPAREN internal_sizeof_expr COMMA internal_sizeof_expr RPAREN { $$ = AST::Make<AST::Expr>(@1, "cdiv", $3, $5); }
+    ;
+
+sizeof_expr
+    : PIPE internal_sizeof_expr PIPE { $$ = AST::Make<AST::Expr>(@1, "sizeof", $2); }
     ;
 
 const_sizeof /* make it immediate values */

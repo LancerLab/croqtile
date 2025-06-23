@@ -515,6 +515,7 @@ bool TypeInference::Visit(AST::Expr& n) {
       return true;
     } else if (n.op == "sizeof") {
       SetNodeType(n, MakeIntegerType());
+      cur_type = n.GetType();
       return true;
     } else if (n.op == "dataof") {
       auto ref = cast<AST::Expr>(n.GetR())->GetReference();
@@ -531,9 +532,12 @@ bool TypeInference::Visit(AST::Expr& n) {
     } else if (n.op == "++" || n.op == "--") {
       SetNodeType(n, NodeType(*n.GetR()));
       return true;
-    }
-    choreo_unreachable("type inference is yet to implement for '" + n.op +
-                       "'.");
+    } else if (n.op == "~") {
+      assert(CanYieldAnInteger(NodeType(*n.GetR())));
+      SetNodeType(n, MakeIntegerType(true));
+    } else
+      choreo_unreachable("type inference is yet to implement for '" + n.op +
+                         "'.");
   }
 
   if (n.GetForm() == AST::Expr::Binary) {
@@ -663,6 +667,9 @@ bool TypeInference::Visit(AST::Expr& n) {
         Error(n.LOC(), "The operands of the expression cannot undergo '" +
                            n.op + "' binary operation.");
         error_count++;
+      } else if (n.op == "&" || n.op == "|" || n.op == "^" || n.op == "<<" ||
+                 n.op == ">>") {
+        SetNodeType(n, MakeIntegerType(true));
       } else
         SetNodeType(n, pty_lhs);
 
@@ -700,6 +707,10 @@ bool TypeInference::Visit(AST::Expr& n) {
         else
           SetNodeType(n, MakeIntegerType(is_mutable));
       }
+    } else if (n.isBitwise() && CanYieldAnInteger(pty_rhs) &&
+               CanYieldAnInteger(pty_lhs)) {
+      bool is_mutable = IsMutable(*pty_lhs) || IsMutable(*pty_rhs);
+      SetNodeType(n, MakeIntegerType(is_mutable));
     } else if (*pty_lhs != *pty_rhs) {
       Error(n.LOC(), "The operands of the expression cannot undergo '" + n.op +
                          "' binary operation.");

@@ -370,6 +370,56 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     }
     if (diverges.Contains(n.GetL()) || diverges.Contains(n.GetR()))
       diverges.Add(n);
+  } else if (n.op == "&" || n.op == "|" || n.op == "^") {
+    auto lty = NodeType(*n.GetL());
+    auto rty = NodeType(*n.GetR());
+    if (!(CanYieldAnInteger(lty) && CanYieldAnInteger(rty))) {
+      Error(n.LOC(), "in operation \"" + n.op +
+                         "\": unable to apply to the types (" + PSTR(lty) +
+                         " vs. " + PSTR(rty) + ").");
+      error_count++;
+      SetNodeType(n, MakeUnknownType());
+      return false;
+    }
+    SetNodeType(n, MakeIntegerType(true));
+    if (diverges.Contains(n.GetL()) || diverges.Contains(n.GetR()))
+      diverges.Add(n);
+  } else if (n.op == "~") {
+    assert(n.IsUnary() && "bitwise negation operator must be unary.");
+    auto rty = NodeType(*n.GetR());
+    if (!CanYieldAnInteger(rty)) {
+      Error(n.LOC(), "in operation \"" + n.op +
+                         "\": unable to apply to the type (" + PSTR(rty) +
+                         ").");
+      error_count++;
+      SetNodeType(n, MakeUnknownType());
+      return false;
+    }
+    SetNodeType(n, MakeIntegerType(true));
+    if (diverges.Contains(n.GetR())) diverges.Add(n);
+  } else if (n.op == "<<" || n.op == ">>") {
+    auto lty = NodeType(*n.GetL());
+    auto intr = AST::GetIntLiteral(*n.GetR());
+    if (!intr) {
+      Error(n.LOC(), "in operation \"" + n.op +
+                         "\": expect an integer literal as the right operand "
+                         "but got `" +
+                         PSTR(n.GetR()) + "'.");
+      error_count++;
+      SetNodeType(n, MakeUnknownType());
+      return false;
+    }
+    if (!CanYieldAnInteger(lty)) {
+      Error(n.LOC(), "in operation \"" + n.op +
+                         "\": unable to apply to the type (" + PSTR(lty) +
+                         ").");
+      error_count++;
+      SetNodeType(n, MakeUnknownType());
+      return false;
+    }
+    SetNodeType(n, MakeIntegerType(true));
+    if (diverges.Contains(n.GetL()) || diverges.Contains(n.GetR()))
+      diverges.Add(n);
   } else if (n.op == "#") {
     // allow only # operator for cartesian products on two bounded-vars
     // a # b => a * (#b) + b
@@ -525,7 +575,8 @@ bool EarlySemantics::Visit(AST::Expr& n) {
 
     if (error_count != old_ec) return false;
   } else
-    choreo_unreachable("operation in expression is not supported yet.");
+    choreo_unreachable("operation '" + n.op + "' in expression " + STR(n) +
+                       "is not supported yet.");
 
   if (mutables.Contains(n.GetL()) || mutables.Contains(n.GetR()) ||
       mutables.Contains(n.GetC()))

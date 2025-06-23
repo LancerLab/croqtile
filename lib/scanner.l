@@ -392,6 +392,8 @@ cstr        \"([^"\\]|\\.)*\"
                return Choreo::Parser::make_RBRACE(loc);
              }
   "|"        { return Choreo::Parser::make_PIPE(loc); }
+  "^"        { return Choreo::Parser::make_CARET(loc); }
+  "~"        { return Choreo::Parser::make_TILDE(loc); }
   "__cpp__"  { return Choreo::Parser::make_INLCPP(loc); }
   {id}       { return Choreo::Parser::make_IDENTIFIER(yytext, loc); }
   R\"\(      { BEGIN(RAW_STRING); }

@@ -827,7 +827,7 @@ public:
     return true;
   }
   bool Visit(AST::DataAccess& n) override {
-    TraceEachVisit(n, ", " + STR(n));
+    TraceEachVisit(n);
     if ((CCtx().GetArch() == TargetArch::GCU20 ||
          CCtx().GetArch() == TargetArch::GCU21 ||
          CCtx().GetArch() == TargetArch::GCU3) &&
