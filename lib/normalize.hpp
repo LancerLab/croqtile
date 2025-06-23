@@ -423,7 +423,8 @@ public:
     mnodes_insertions[multi_nodes.top()].emplace_back(
         std::make_tuple(index, assign, anon_sym));
     VST_DEBUG(dbgs() << n.TypeNameString() << ": replace " << PSTR(n.to)
-                     << " with " << anon_sym << ".\n");
+                     << " with " << anon_sym << "(" << PSTR(assign->GetType())
+                     << ".\n");
 
     n.to = AST::Make<AST::ChunkAt>(
         n.to->LOC(), AST::Make<AST::Identifier>(n.to->LOC(), anon_sym));
@@ -444,7 +445,8 @@ public:
       mnodes_insertions[multi_nodes.top()].emplace_back(
           std::make_tuple(index, assign, n.sa->nid->name));
       VST_DEBUG(dbgs() << n.TypeNameString() << ": replace " << PSTR(n.sa)
-                       << " with " << n.sa->nid->name << "\n");
+                       << " with " << n.sa->nid->name << "("
+                       << PSTR(assign->GetType()) << ")\n");
       n.sa.reset();
     }
 
@@ -488,13 +490,14 @@ public:
             cur_node_index + mnodes_insertions[multi_nodes.top()].size();
         auto nname = SymbolTable::GetAnonName();
         auto assign = AST::Make<AST::Assignment>(v->LOC(), nname, v);
-        assign->SetType(v->GetType());
-        assign->da->SetType(v->GetType());
+        assign->SetType(v->GetType()->Clone());
+        assign->da->SetType(v->GetType()->Clone());
         mnodes_insertions[multi_nodes.top()].emplace_back(
             std::make_tuple(index, assign, nname));
         repls.emplace_back(i, AST::Make<AST::Identifier>(v->LOC(), nname));
         VST_DEBUG(dbgs() << n.TypeNameString() << ": replace " << PSTR(v)
-                         << " with " << nname << "\n");
+                         << " with " << nname << "(" << PSTR(assign->GetType())
+                         << ")\n");
       }
       for (auto& repl : repls) {
         VST_DEBUG(dbgs() << n.TypeNameString() << ": replace "
@@ -503,8 +506,8 @@ public:
 
         tsi->Positions()->values[repl.first] = repl.second;
 
-        VST_DEBUG(dbgs() << PSTR(tsi->Positions()->ValueAt(repl.first))
-                         << ".\n");
+        VST_DEBUG(dbgs() << PSTR(tsi->Positions()->ValueAt(repl.first)) << "("
+                         << PSTR(repl.second->GetType()) << ").\n");
       }
     }
     return true;

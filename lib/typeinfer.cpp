@@ -350,7 +350,7 @@ bool TypeInference::Visit(AST::Assignment& n) {
   if (n.value && (isa<AST::Select>(n.value) || isa<AST::SpanAs>(n.value)))
     n.SetNote("ref");
 
-  if (SSTab().IsDeclared(n.GetName())) {
+  if (!n.IsDecl()) {
     auto vty = GetSymbolType(n.LOC(), n.GetName());
     auto ety = NodeType(*n.value);
     if (isa<FutureType>(vty)) {

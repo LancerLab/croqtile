@@ -202,11 +202,8 @@ public:
 
   ptr<Type> NodeType(const AST::Node& n) const override;
 
-  void SetNodeType(AST::Node& n, const ptr<Type>& ty, bool is_mutable = false) {
-    if (is_mutable && MutableType(*ty))
-      n.SetType(MutateType(*ty));
-    else
-      n.SetType(ty);
+  void SetNodeType(AST::Node& n, const ptr<Type>& ty) {
+    n.SetType(ty);
     if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       VST_DEBUG(dbgs() << " |-<type> set: [" << pb->TypeNameString() << "]";
                 pb->PrintWithoutStmts(dbgs(), "   ");

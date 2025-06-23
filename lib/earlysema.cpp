@@ -234,7 +234,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       SetNodeType(n, MakeUnknownType());
       return false;
     }
-    SetNodeType(n, sty, true);
+    SetNodeType(n, sty->Clone());
   } else if ((n.op == "+") || (n.op == "-") || (n.op == "*") || (n.op == "/") ||
              (n.op == "%") || (n.op == "cdiv")) {
     auto lty = NodeType(*n.GetL());
@@ -251,7 +251,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
         error_count++;
         return false;
       }
-      SetNodeType(n, MakeRankedMDSpanType(lty->Dims()), is_mutable);
+      MutateNodeType(n, MakeRankedMDSpanType(lty->Dims()), is_mutable);
     } else if ((isa<ITupleType>(lty) && isa<IntegerType>(rty)) ||
                (isa<MDSpanType>(lty) && isa<IntegerType>(rty))) {
       SetNodeType(n, lty);
@@ -779,8 +779,8 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
         Error(n.LOC(), "use ':' instead of '=' to define the \"" + PSTR(ety) +
                            "\" type variable.");
       error_count++;
-      if (debug_visit)
-        dbgs() << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
+      VST_DEBUG(dbgs() << "Error in " << __FILE__ << ", line: " << __LINE__
+                       << ".\n");
       // keep working
     } else if (isa<PlaceHolderType>(ety) && n.init_expr &&
                isa<AST::Expr>(n.init_expr) &&
@@ -789,8 +789,8 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
       Error(n.LOC(), "can not initialize variable `" + n.name_str +
                          "' with a placeholder.");
       error_count++;
-      if (debug_visit)
-        dbgs() << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
+      VST_DEBUG(dbgs() << "Error in " << __FILE__ << ", line: " << __LINE__
+                       << ".\n");
     } else if (isa<StringType>(ety)) {
       Error(n.LOC(), "string variables are not supported yet.");
       error_count++;
@@ -974,9 +974,32 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
     return true;
   }
 
-  if (!SSTab().DeclaredInScope(n.GetName())) {
-    // This is a definition rather than an assignment. The parser fails to make
-    // it correct
+  // Decide if it is a declaration or assignment
+  if (!SSTab().IsDeclared(n.GetName()))
+    n.SetDecl(true);
+  else {
+    // We must distiguish new decl with assignment
+    //
+    // (0)  sym = ...;
+    // (1)   {  sym = ...; }
+    //
+    // if 'symbol' is mutable, (1) is an assignment. Or else, it is creating a
+    // new symbol with identical nameof the outer scope.
+    if (IsMutable(*NodeType(*n.da)))
+      n.SetDecl(false);
+    else {
+      if (!SSTab().DeclaredInScope(n.GetName()))
+        n.SetDecl(true); // immutables in inner-scope: new decls
+      else {
+        Error(n.LOC(),
+              "only mutables can be re-assigned (" + n.GetName() + ").");
+        ++error_count;
+        return false;
+      }
+    }
+  }
+
+  if (n.IsDecl()) {
     auto sty = NodeType(*n.value);
     assert((sty && !isa<UnknownType>(sty)) &&
            "internal error: failed to find the type.");
@@ -1628,10 +1651,13 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
     size_t r_count = 0;
     for (auto& v : tsi->GetIndices()) {
       auto ty = NodeType(*v);
-      if (!isa<BoundedType>(ty)) {
-        Error(tsi->LOC(), "expect '" + PSTR(v) +
-                              "` be a bounded type (but got " + PSTR(ty) +
-                              ").");
+      if (!tsi->MultipleExprs() && !isa<BoundedType>(ty)) {
+        Error(v->LOC(), "expect '" + PSTR(v) + "` be a bounded type (but got " +
+                            PSTR(ty) + ").");
+        error_count++;
+      } else if (tsi->MultipleExprs() && !CanYieldIndex(ty)) {
+        Error(v->LOC(), "expect '" + PSTR(v) + "` to yield an index (but got " +
+                            PSTR(ty) + ").");
         error_count++;
       }
       r_count += ty->Dims();
@@ -1651,7 +1677,7 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
         auto ty = NodeType(*v);
         if (!isa<IntegerType>(ty) && !isa<ITupleType>(ty) &&
             !isa<MDSpanType>(ty)) {
-          Error(tsi->LOC(),
+          Error(v->LOC(),
                 "expect '" + PSTR(v) +
                     "` be either an integer, ituple or mdspan type (but got " +
                     PSTR(ty) + ").");
@@ -1714,13 +1740,13 @@ bool EarlySemantics::Visit(AST::Trigger& n) {
 
   for (auto& v : n.targets->AllValues()) {
     if (!AST::IsSymbolOrArrayRef(*v)) {
-      Error(n.LOC(),
+      Error(v->LOC(),
             "expect a symbol/array reference but got '" + AST::STR(*v) + "'.");
       error_count++;
     }
     auto ty = NodeType(*v);
     if (!isa<EventType>(ty)) {
-      Error(n.LOC(),
+      Error(v->LOC(),
             "expect `" + PSTR(v) + "' an event but got '" + PSTR(ty) + "'.");
       error_count++;
     }

@@ -1010,6 +1010,11 @@ struct Assignment : public Node, public TypeIDProvider<Assignment> {
   ptr<DataAccess> da = nullptr;
   ptr<Node> value = nullptr;
 
+private:
+  // if it is actually a declaration
+  bool is_decl = true;
+
+public:
   explicit Assignment(const location& l, const std::string& n,
                       const ptr<Node>& v)
       : Node(l), da(Make<DataAccess>(l, n)), value(v) {}
@@ -1018,6 +1023,9 @@ struct Assignment : public Node, public TypeIDProvider<Assignment> {
                       const ptr<Node>& v)
       : Node(l), da(n), value(v) {}
 
+  void SetDecl(bool d) { is_decl = d; }
+  bool IsDecl() const { return is_decl; }
+
   ptr<Node> CloneImpl() const override {
     return Make<Assignment>(LOC(), cast<DataAccess>(da->Clone()),
                             value->Clone());
@@ -1025,7 +1033,9 @@ struct Assignment : public Node, public TypeIDProvider<Assignment> {
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool with_type = false) const override {
-    os << "\n" << prefix << "`- Assign: ";
+    os << "\n" << prefix << "`- Assign";
+    if (with_type) os << "(" << (IsDecl() ? "decl" : "re-assign") << ")";
+    os << ": ";
     da->Print(os, "", with_type);
     os << " = ";
     value->Print(os, "", with_type);
@@ -1717,6 +1727,16 @@ public:
   }
 
   ptr<MultiValues> GetTFSSExpr() const { return tfss_expr; }
+
+  const ptr<Node> TFSSAt(size_t index) const {
+    assert(tfss_expr);
+    return tfss_expr->ValueAt(index);
+  }
+
+  const ptr<Node> PosAt(size_t index) const {
+    assert(positions);
+    return positions->ValueAt(index);
+  }
 
   auto GetIndices() const { return positions->AllValues(); }
   ptr<MultiValues> Positions() const { return positions; }

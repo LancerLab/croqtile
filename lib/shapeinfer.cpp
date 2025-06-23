@@ -193,7 +193,8 @@ void ShapeInference::CollapseMultiValues(const AST::MultiValues& mv) {
     }
   }
 
-  if (!uvs.empty()) assert(uvs.size() == vvs.size());
+  // for spanat, it allows mixup of bounded and non-bounded
+  if (!uvs.empty()) assert(uvs.size() <= vvs.size());
 
   auto SetMultiValNo = [this, &mv](const std::vector<NumTy> vs, VNKind vnt) {
     assert(!ast_vn.Hit(&mv, vnt));
@@ -213,10 +214,13 @@ void ShapeInference::CollapseMultiValues(const AST::MultiValues& mv) {
     ast_vn.Update(&mv, valno, vnt);
   };
 
-  // note: multivalues may represent a mdspan but does not have a VNK_MDSPAN
+  // Note: a multi-value may represent a mdspan but does not have a VNK_MDSPAN
   // valno.
   if (!vvs.empty()) SetMultiValNo(vvs, VNKind::VNK_VALUE);
-  if (!uvs.empty()) SetMultiValNo(uvs, VNKind::VNK_UBOUND);
+
+  // the multi-value has a ubound only when all values have ubounds
+  if (!uvs.empty() && uvs.size() == vvs.size())
+    SetMultiValNo(uvs, VNKind::VNK_UBOUND);
 }
 
 bool ShapeInference::Visit(AST::MultiValues& n) {
@@ -273,7 +277,6 @@ bool ShapeInference::Visit(AST::Expr& n) {
   }
 
   auto nty = NodeType(n);
-  // std::cout << "Node: " << STR(n) << ", type: " << PSTR(nty) << "\n";
   cur_vn = GenValNo(n);
 
   auto ShouldOpt = [](const ValueList& vl) -> bool {
@@ -426,7 +429,7 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
 
   ptr<Type> nty = nullptr;
   if (n.init_expr) {
-    nty = NodeType(*n.init_expr);
+    nty = NodeType(n);
     if (GetSpannedType(nty)) {
       cur_mdspan_vn = GetValNo(*n.init_expr, VNKind::VNK_MDSPAN);
       assert(ValidVN(cur_mdspan_vn) && "expecting a valid mdspan valno.");
@@ -476,11 +479,20 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
   if ((isa<FloatType>(nty) || isa<DoubleType>(nty) || isa<IntegerType>(nty) ||
        isa<HalfType>(nty) || isa<Half8Type>(nty)) &&
       ValidVN(cur_vn)) {
-    auto shape = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
-    assert(shape.DimCount() == 1);
-    VST_DEBUG(dbgs() << " |-<symval> " << InScopeName(name) << ": "
-                     << STR(shape.ValueAt(0)) << "\n");
-    SymVal(InScopeName(name)).SetVal(shape.ValueAt(0));
+    // mutables do not have constant values
+    if (IsMutable(*nty)) {
+      auto vi = sbe::sym(InScopeName(name));
+      VST_DEBUG(dbgs() << " |-<symval> " << InScopeName(name) << ": " << STR(vi)
+                       << "\n");
+      SymVal(InScopeName(name)).SetVal(vi);
+    } else {
+      auto shape =
+          GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
+      assert(shape.DimCount() == 1);
+      VST_DEBUG(dbgs() << " |-<symval> " << InScopeName(name) << ": "
+                       << STR(shape.ValueAt(0)) << "\n");
+      SymVal(InScopeName(name)).SetVal(shape.ValueAt(0));
+    }
   } else if (isa<ITupleType>(nty)) {
     SymVal(InScopeName(name)).SetVals(vn.GenValueListFromValueNumber(cur_vn));
     VST_DEBUG(dbgs() << " |-<symval> " << InScopeName(name) << ": "
@@ -521,8 +533,7 @@ bool ShapeInference::Visit(AST::Assignment& n) {
 
   if (cannot_proceed) return true;
 
-  if (IsMutable(*NodeType(n))) return true; // mutables are not valno-able
-
+  if (n.da->AccessElement()) return true;
   if (SSTab().IsDeclared(n.GetName())) return true;
 
   // this is the un-type-annotated declaration
@@ -544,6 +555,10 @@ bool ShapeInference::Visit(AST::Assignment& n) {
     cur_mdspan_vn = GetValNo(*n.value, VNKind::VNK_MDSPAN);
     ValNoAliasSign(SSTab().ScopedName(name), cur_mdspan_vn);
     return true;
+  } else if (auto sty = dyn_cast<ScalarType>(nty); sty && sty->IsMutable()) {
+    // we need to generate a valno for mutable names
+    cur_vn = vn.GetOrGenValueNumberFromSignature(SSTab().ScopedName(name));
+    return true;
   } else if (isa<BoundedType>(nty)) {
     auto uname = "@" + name;
     cur_ub_vn = GetValNo(*n.value, VNKind::VNK_UBOUND);
@@ -552,6 +567,8 @@ bool ShapeInference::Visit(AST::Assignment& n) {
     ValNoAliasSign(SSTab().ScopedName(uname), cur_ub_vn);
     InvalidateVN(cur_ub_vn);
   }
+
+  if (IsMutable(*NodeType(n))) return true; // other mutables are not valno-able
 
   cur_vn = GetValNo(*n.value);
   assert(ValidVN(cur_vn) && "expected a valid current value number.");
@@ -1094,33 +1111,34 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
     mod_vns.clear();
     res_vns.clear();
 
-    auto old_gv = gen_values;
-    gen_values = true;
-    // make sure all expressions get the value numbers
-    tsi->Positions()->accept(*this);
-    if (tsi->MultipleExprs()) tsi->GetTFSSExpr()->accept(*this);
-    gen_values = old_gv;
+    { // make sure all expressions get the value numbers
+      auto old_gv = gen_values;
+      gen_values = true;
+      tsi->Positions()->accept(*this);
+      if (tsi->MultipleExprs()) tsi->GetTFSSExpr()->accept(*this);
+      gen_values = old_gv;
+    }
 
     std::vector<NumTy> tfs_vns;
     std::vector<NumTy> pos_vns;
-
-    auto tsi_vn = GetValNo(*tsi->Positions(), VNKind::VNK_UBOUND);
-    pos_vns = vn.AsVector(tsi_vn);
-    assert(cur_vns.size() == pos_vns.size());
 
     if (tsi->MultipleExprs()) {
       // when the code provides explicit tiling factors or subspan
       tfs_vns = vn.AsVector(GetValNo(*tsi->GetTFSSExpr()));
       assert(tfs_vns.size() == pos_vns.size());
+    } else {
+      // or else, the ubounds are tiling factors
+      pos_vns = vn.AsVector(GetValNo(*tsi->Positions(), VNKind::VNK_UBOUND));
+      assert(cur_vns.size() == pos_vns.size());
     }
 
-    for (size_t index = 0; index < pos_vns.size(); ++index) {
+    for (size_t index = 0; index < cur_vns.size(); ++index) {
       if (tsi->HasSubSpanExpr()) {
         // block.span = subspan
         auto lvi = vn.GenValueItemFromValueNumber(cur_vns[index]);
         auto rvi = vn.GenValueItemFromValueNumber(tfs_vns[index]);
         if (sbe::clt(lvi, rvi)) {
-          Error(tsi->LOC(),
+          Error(tsi->TFSSAt(index)->LOC(),
                 "the subspan dimension (dim: " + std::to_string(index) +
                     ") is larger than original (" + STR(rvi) + " > " +
                     STR(lvi) + ").");
@@ -1132,7 +1150,7 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
         auto lvi = vn.GenValueItemFromValueNumber(cur_vns[index]);
         auto rvi = vn.GenValueItemFromValueNumber(tfs_vns[index]);
         if (sbe::clt(lvi, rvi)) {
-          Error(tsi->LOC(),
+          Error(tsi->TFSSAt(index)->LOC(),
                 "the subspan dimension (dim: " + std::to_string(index) +
                     ") is larger than the data (" + STR(rvi) + " > " +
                     PSTR(lvi) + ").");
@@ -1146,9 +1164,10 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
         auto lvi = vn.GenValueItemFromValueNumber(cur_vns[index]);
         auto rvi = vn.GenValueItemFromValueNumber(tfs_vns[index]);
         if (sbe::clt(lvi, rvi)) {
-          Error(tsi->LOC(), "the tiling factor (dim: " + std::to_string(index) +
-                                ") is larger than the data dimension (" +
-                                STR(rvi) + " > " + PSTR(lvi) + ").");
+          Error(tsi->TFSSAt(index)->LOC(),
+                "the tiling factor (dim: " + std::to_string(index) +
+                    ") is larger than the data dimension (" + STR(rvi) + " > " +
+                    PSTR(lvi) + ").");
           error_count++;
         }
         auto res_sig = SignatureOfBinOp("/", cur_vns[index], tfs_vns[index]);
@@ -1670,7 +1689,8 @@ bool ShapeInference::CanBeValueNumbered(AST::Node* n) const {
     // sometimes the symbol is yet to define, simply make it work.
     return true;
   }
-  if (IsMutable(*nty)) return false;
+  // mutable integers can now be valued
+  if (IsMutable(*nty) && !isa<IntegerType>(nty)) return false;
   if (isa<EventType>(nty)) return false;
   if (isa<StringType>(nty)) return false;
 
@@ -1687,14 +1707,16 @@ bool ShapeInference::CanBeValueNumbered(AST::Node* n) const {
 void ShapeInference::DefineASymbol(const std::string& name,
                                    const ptr<Type>& ty) {
   // assert(!SSTab().IsDeclared(name) && "symbol has been declared.");
-  SSTab().DefineSymbol(name, ty);
+  if (isa<ArrayType>(ty))
+    SSTab().DefineSymbol(name, ty);
+  else
+    SSTab().DefineSymbol(name, ty->Clone());
   if (debug_visit)
     dbgs() << " |-<symtab> add: " << SSTab().InScopeName(name)
            << ", type: " << PSTR(ty) << "\n";
 }
 
 const std::string ShapeInference::SignSpan(const AST::Node& n) {
-  // std::cout << "sign span: " << STR(n) << "\n";
   if (auto* id = dyn_cast<AST::Identifier>(&n)) {
     // only cares about value inside the mdspan
     auto name = RemoveSuffix(id->name, ".span") + ".span";
@@ -1752,7 +1774,6 @@ const std::string ShapeInference::SignSpan(const AST::Node& n) {
 }
 
 const std::string ShapeInference::SignNode(const AST::Node& n) {
-  // std::cout << "sign node: " << STR(n) << "\n";
   if (auto* id = dyn_cast<AST::Identifier>(&n)) {
     auto name = id->name;
     if (auto sname = SSTab().NameInScopeOrNull(name)) {
@@ -1797,7 +1818,6 @@ const std::string ShapeInference::SignNode(const AST::Node& n) {
 
 std::pair<const std::string, const std::string>
 ShapeInference::SignBounded(const AST::Node& n) {
-  // std::cout << "sign bounded: " << STR(n) << "\n";
   assert(!ast_vn.Hit(&n, VNKind::VNK_UBOUND));
 
   std::string v_sign = SignNode(n);

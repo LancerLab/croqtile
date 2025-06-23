@@ -830,6 +830,7 @@ struct ScalarType : public Type, public TypeIDProvider<ScalarType> {
   virtual bool IsMutable() const { return is_mutable; }
   virtual void SetMutable(bool m) { is_mutable = m; }
   virtual ptr<ScalarType> Clone(bool m) const = 0;
+  const ptr<Type> Clone() const override = 0;
 
   bool operator==(const Type& ty) const override {
     if (auto sty = dyn_cast<ScalarType>(&ty))
@@ -1863,7 +1864,7 @@ inline bool CanYieldAnInteger(const ptr<Type>& ty) {
 }
 
 inline bool CanYieldIndex(const ptr<Type>& ty) {
-  return isa<ScalarType>(ty) || isa<BoundedType>(ty) || (isa<ITupleType>(ty));
+  return isa<IntegerType>(ty) || isa<BoundedType>(ty) || (isa<ITupleType>(ty));
 }
 
 inline bool ConvertibleToInt(const ptr<Type>& ty) {
@@ -2311,11 +2312,10 @@ inline bool NeedPromotion(const BaseType& lty, const BaseType& rty) {
   return false;
 }
 
-inline static ptr<Type> MutateType(const Type& ty) {
-  auto sty = dyn_cast<ScalarType>(&ty);
-  if (!sty) choreo_unreachable("can not mutate a '" + STR(ty) + "' type.");
-
-  return MakeScalarType(TC2BT(sty->Category()));
+inline static ptr<Type> MutateType(const ptr<Type>& ty) {
+  auto sty = dyn_cast<ScalarType>(ty);
+  if (!sty) return ty->Clone();
+  return MakeScalarType(TC2BT(sty->Category()), true);
 }
 
 inline bool IsMutable(const Type& ty) {

@@ -106,11 +106,16 @@ private:
                                  const char*, int,
                                  const ptr<Type>& = MakeUnknownType());
 
-  void SetNodeType(AST::Node& n, const ptr<Type>& ty, bool is_mutable = false) {
-    if (is_mutable && MutableType(*ty))
-      n.SetType(MutateType(*ty));
+  void MutateNodeType(AST::Node& n, const ptr<Type>& ty, bool mutate) {
+    if (mutate)
+      n.SetType(MutateType(ty));
     else
       n.SetType(ty);
+    if (debug_visit)
+      dbgs() << "Set type of " << STR(n) << " as " << PSTR(n.GetType()) << "\n";
+  }
+  void SetNodeType(AST::Node& n, const ptr<Type>& ty) {
+    n.SetType(ty);
     if (debug_visit)
       dbgs() << "Set type of " << STR(n) << " as " << PSTR(n.GetType()) << "\n";
   }

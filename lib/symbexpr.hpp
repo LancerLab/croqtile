@@ -63,6 +63,13 @@ enum class OpCode {
   GE,
   LE,
   NE,
+  /* bitwise */
+  LSHIFT,
+  RSHIFT,
+  BIT_OR,
+  BIT_AND,
+  BIT_XOR,
+  BIT_INV,
   /* ternary */
   SELECT,
 };
@@ -103,6 +110,19 @@ inline static bool IsCompare(OpCode op) {
   return false;
 }
 
+inline static bool IsBitwise(OpCode op) {
+  switch (op) {
+  case OpCode::LSHIFT:
+  case OpCode::RSHIFT:
+  case OpCode::BIT_OR:
+  case OpCode::BIT_AND:
+  case OpCode::BIT_XOR:
+  case OpCode::BIT_INV: return true;
+  default: break;
+  }
+  return false;
+}
+
 inline static std::string STR(OpCode tc) {
   switch (tc) {
   case OpCode::ADD: return "+";
@@ -121,6 +141,12 @@ inline static std::string STR(OpCode tc) {
   case OpCode::LE: return "<=";
   case OpCode::NE: return "!=";
   case OpCode::SELECT: return "?";
+  case OpCode::LSHIFT: return "<<";
+  case OpCode::RSHIFT: return ">>";
+  case OpCode::BIT_OR: return "|";
+  case OpCode::BIT_AND: return "&";
+  case OpCode::BIT_XOR: return "^";
+  case OpCode::BIT_INV: return "~";
   default: choreo_unreachable("unsupported opcode");
   }
   return "";
@@ -155,6 +181,18 @@ inline static OpCode ToOpCode(const std::string& op) {
     return OpCode::EQ;
   else if (op == "!=")
     return OpCode::NE;
+  else if (op == "<<")
+    return OpCode::LSHIFT;
+  else if (op == ">>")
+    return OpCode::RSHIFT;
+  else if (op == "|")
+    return OpCode::BIT_OR;
+  else if (op == "&")
+    return OpCode::BIT_AND;
+  else if (op == "^")
+    return OpCode::BIT_XOR;
+  else if (op == "~")
+    return OpCode::BIT_INV;
   else
     choreo_unreachable("operation '" + op + "' is not supported.");
   return OpCode::NONE;
@@ -199,7 +237,9 @@ inline bool product_overflow(int64_t a, int64_t b) {
 class SymbolicExpression;
 class NumericValue;
 class SymbolicValue;
+class UnaryOperation;
 class BinaryOperation;
+class TernaryOperation;
 
 // Operand type can be either a numeric value, symbolic value, or another
 // SymbolicExpression
@@ -226,6 +266,7 @@ inline bool operator<(const SymbolicExpression&, const SymbolicExpression&);
 inline Operand nu(int64_t);
 inline Operand bl(bool);
 inline Operand sym(const std::string& name);
+inline Operand uop(OpCode, const Operand&);
 inline Operand bop(OpCode, const Operand&, const Operand&);
 inline Operand sel(const Operand&, const Operand&, const Operand&);
 
@@ -390,7 +431,65 @@ public:
   __UDT_TYPE_INFO__(SymbolicExpression, SymbolicValue)
 };
 
-class TernaryOperation;
+class UnaryOperation : public SymbolicExpression,
+                       public TypeIDProvider<UnaryOperation> {
+private:
+  OpCode op;
+  Operand oprd;
+
+public:
+  UnaryOperation(OpCode op, const Operand& o) : op(op), oprd(o) {}
+
+  std::string ToString() const override { return STR(op) + PSTR(oprd); }
+
+  bool IsNumeric() const override { return oprd->IsNumeric(); }
+
+  bool operator==(const SymbolicExpression& expr) const override {
+    if (auto se = dyn_cast<UnaryOperation>(&expr))
+      if (se->op == op && (*se->oprd == *oprd)) return true;
+    return false;
+  }
+
+  size_t Hash() const override { return std::hash<std::string>{}(ToString()); }
+
+public:
+  bool IsLeaf() const override { return false; }
+  const Operand GetOperand() const { return oprd; }
+  OpCode GetOpCode() const { return op; }
+
+  Operand Clone() const override {
+    return std::make_shared<UnaryOperation>(op, oprd->Clone());
+  }
+
+  Operand Fold() const override {
+    auto simplified = oprd->Fold();
+    // If both operands are numeric, compute the result
+    if (auto nv = dyn_cast<NumericValue>(simplified)) {
+      if (op == OpCode::BIT_INV) return nu(~nv->Value());
+    } else if (auto bv = dyn_cast<BooleanValue>(simplified)) {
+      if (op == OpCode::NOT) return bl(!bv->Value());
+    }
+    return std::make_shared<UnaryOperation>(op, simplified);
+  }
+
+  Operand Normalize() const override {
+    auto simplified = oprd->Normalize();
+    // If both operands are numeric, compute the result
+    if (auto nv = dyn_cast<NumericValue>(simplified)) {
+      if (op == OpCode::BIT_INV) return nu(~(nv->Value()));
+    } else if (auto bv = dyn_cast<BooleanValue>(simplified)) {
+      if (op == OpCode::NOT) return bl(!nv->Value());
+    }
+    return std::make_shared<UnaryOperation>(op, simplified);
+  }
+
+  Operand Reassociate() const override { return Clone(); }
+  Operand Reorder() const override { return Clone(); }
+
+public:
+  __UDT_TYPE_INFO__(SymbolicExpression, UnaryOperation)
+};
+
 class BinaryOperation : public SymbolicExpression,
                         public TypeIDProvider<BinaryOperation> {
 private:
@@ -493,6 +592,11 @@ public:
         if (rightVal == 0) choreo_unreachable("Division by zero");
         return nu(leftVal % rightVal);
       case OpCode::POWER: return nu(std::pow(leftVal, rightVal));
+      case OpCode::LSHIFT: return nu(leftVal << rightVal);
+      case OpCode::RSHIFT: return nu(leftVal >> rightVal);
+      case OpCode::BIT_AND: return nu(leftVal & rightVal);
+      case OpCode::BIT_OR: return nu(leftVal | rightVal);
+      case OpCode::BIT_XOR: return nu(leftVal ^ rightVal);
       default: choreo_unreachable("Unknown operation");
       }
     } else if (isa<BooleanValue>(simplifiedLeft) &&
@@ -544,6 +648,16 @@ public:
     else if (op == OpCode::POWER) {
       if (rnv && (rnv->Value() == 1)) return simplifiedLeft;
       if (lnv && (lnv->Value() == 1)) return nu(1);
+    }
+    // x&0 = 0, 0&x = 0
+    else if (op == OpCode::AND) {
+      if (rnv && (rnv->Value() == 0)) return nu(0);
+      if (lnv && (lnv->Value() == 0)) return nu(0);
+    }
+    // x|0 = x, 0|x = x
+    else if (op == OpCode::AND) {
+      if (rnv && (rnv->Value() == 0)) return simplifiedLeft;
+      if (lnv && (lnv->Value() == 0)) return simplifiedRight;
     }
 
     // If no simplification possible, return a new binary operation
@@ -954,6 +1068,10 @@ inline Operand make_symbolic(const std::string& name) {
   return std::make_shared<SymbolicValue>(name);
 }
 
+inline Operand make_operation(OpCode op, const Operand& oprd) {
+  return std::make_shared<UnaryOperation>(op, oprd);
+}
+
 inline Operand make_operation(OpCode op, const Operand& left,
                               const Operand& right) {
   return std::make_shared<BinaryOperation>(op, left, right);
@@ -970,6 +1088,10 @@ inline Operand nu(int64_t value) { return make_numeric(value); }
 inline Operand bl(bool value) { return make_boolean(value); }
 
 inline Operand sym(const std::string& name) { return make_symbolic(name); }
+
+inline Operand uop(OpCode op, const Operand& oprd) {
+  return make_operation(op, oprd);
+}
 
 inline Operand bop(OpCode op, const Operand& left, const Operand& right) {
   return make_operation(op, left, right);

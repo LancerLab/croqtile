@@ -1,0 +1,26 @@
+// RUN: choreo -es -t topscc --mem-reuse=false %s -o - | FileCheck --match-full-lines  %s
+
+__co__ void foo(s32 [77, 320] data, int i) {
+  parallel p by 2 foreach x in 3 {
+    f = dma.copy data.subspan(32, 44).at(0, i) => shared;
+    f1 = dma.copy f.data.modspan(18, 20).at(x, 7) => shared;
+#if 0
+    // TODO: enable this
+    index = {3, 2};
+    dma.copy f1.data.subspan(1, 4).at(index) => shared;
+#endif
+    dma.copy f1.data.modspan(4, 3).at(f.data.at(i, 7), 5) => shared;
+  }
+}
+
+// CHECK:       auto anon_0 = 0;
+// CHECK:       __shared__ int f__buf__[1408];
+// CHECK:       int __slice_offset0__data_2_f__buf__[] = {(int)(anon_0 * (32)), (int)(i * (44))};
+// CHECK:       tops::slice(*f.get_ctx(), __mds1_f__buf__, __mds0_data, __slice_offset0__data_2_f__buf__);
+// CHECK:       auto anon_1 = 7;
+// CHECK:       int __slice_offset1__f_2_f1__buf__[] = {(int)(__iv_x__elem__0 * (18)), (int)(anon_1 * (20))};
+// CHECK:       tops::slice(*f1.get_ctx(), __mds3_f1__buf__, __mds2_f, __slice_offset1__f_2_f1__buf__);
+// CHECK:       auto anon_2 = *((int*)f.data() + (i * 44) + 7);
+// CHECK:       auto anon_3 = 5;
+// CHECK:       int __slice_offset2__f1_2_anon_4[] = {(int)(anon_2 * (4)), (int)(anon_3 * (3))};
+// CHECK:       tops::slice(*__choreo_anon_fut__0.get_ctx(), __mds5_anon_4, __mds4_f1, __slice_offset2__f1_2_anon_4);

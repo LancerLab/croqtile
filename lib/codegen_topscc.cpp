@@ -837,7 +837,8 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
   }
 
   // when symbol is not valued
-  if (isa<ScalarType>(nty) && !FCtx(fname).HasSymbolValues(InScopeName(sym))) {
+  if (isa<ScalarType>(nty) &&
+      (IsMutable(*nty) || !FCtx(fname).HasSymbolValues(InScopeName(sym)))) {
     (IsHost() ? hs : ds) << (IsHost() ? h_indent : d_indent)
                          << NameBaseType(GetBaseType(*nty), false) << " " << sym
                          << " = " << ExprSTR(n.init_expr, false) << ";\n";
@@ -1006,11 +1007,11 @@ bool TopsccCodeGen::Visit(AST::Assignment& n) {
 
   if (isa<IntegerType>(nty)) {
     if (IsHost())
-      hs << h_indent << ((IsMutable(*nty)) ? "" : "auto ") << n.GetName()
-         << " = " << ExprSTR(n.value, false) << ";\n";
+      hs << h_indent << ((!n.IsDecl()) ? "" : "auto ") << n.GetName() << " = "
+         << ExprSTR(n.value, false) << ";\n";
     else
-      ds << d_indent << ((IsMutable(*nty)) ? "" : "auto ") << n.GetName()
-         << " = " << ExprSTR(n.value, false) << ";\n";
+      ds << d_indent << ((!n.IsDecl()) ? "" : "auto ") << n.GetName() << " = "
+         << ExprSTR(n.value, false) << ";\n";
     return true;
   }
 
@@ -1021,6 +1022,35 @@ bool TopsccCodeGen::Visit(AST::Assignment& n) {
 
 bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
+
+  // add the device name map
+  std::string dname[] = {"x", "y", "z"};
+  switch (n.GetLevel()) {
+  case Storage::SHARED:
+    for (size_t i = 0; i < n.AllSubPVs().size(); ++i)
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(i)->name),
+                          "__tops_bid_" + dname[i] + "()");
+    if (n.AllSubPVs().size() == 1)
+      ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "__tops_bid_x()");
+    break;
+  case Storage::LOCAL:
+    for (size_t i = 0; i < n.AllSubPVs().size(); ++i)
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(i)->name),
+                          "__tops_tid_" + dname[i] + "()");
+    if (n.AllSubPVs().size() == 1)
+      ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "__tops_tid_x()");
+    break;
+  case Storage::SUB:
+    for (size_t i = 0; i < n.AllSubPVs().size(); ++i)
+      ssm.MapDeviceSymbol(InScopeName(n.GetSubPV(i)->name),
+                          "__tops_stid_" + dname[i] + "()");
+    if (n.AllSubPVs().size() == 1)
+      ssm.MapDeviceSymbol(InScopeName(n.BPV()->name), "__tops_stid_x()");
+    break;
+  default:
+    choreo_unreachable("unsupported parallel-by level: " + STR(n.GetLevel()) +
+                       ".");
+  }
 
   // only do the whole codegen when accessing the outer parallel-by
   if (parallel_level != 1) return true;
@@ -1774,7 +1804,8 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
           print_format += ExprSTR(arg);
         } else if (isa<IntegerType>(type)) {
           print_format += "%lld";
-          print_args += "static_cast<long long>(" + ExprSTR(arg, false) + "), ";
+          print_args +=
+              "static_cast<long long>((int)(" + ExprSTR(arg, false) + ")), ";
         } else if (isa<BooleanType>(type) || isa<EventType>(type)) {
           if (CCtx().GetArch() == TargetArch::GCU20 ||
               CCtx().GetArch() == TargetArch::GCU21) {
@@ -2472,16 +2503,11 @@ const std::string TopsccCodeGen::ValueSTR(const ValueItem& vi) const {
     return PSTR(vi);
   else if (auto bv = VIBool(vi))
     return PSTR(vi);
-  else if (auto sv = VIStr(vi)) {
-    auto name = PSTR(vi);
-    if (within_map.count(name)) {
-      if (IsHost())
-        return ssm.HostName(name);
-      else
-        return ssm.DeviceName(name);
-    } else
-      return UnScopedExpr(PSTR(vi));
-  } else if (auto bo = VIBop(vi))
+  else if (auto sv = VIStr(vi))
+    return UnScopedExpr(SSMName(sv.value(), IsHost()));
+  else if (auto bo = VIUop(vi))
+    return STR(bo->GetOpCode()) + ValueSTR(bo->GetOperand());
+  else if (auto bo = VIBop(vi))
     return "(" + ValueSTR(bo->GetLeft()) + " " + STR(bo->GetOpCode()) + " " +
            ValueSTR(bo->GetRight()) + ")";
   else if (auto to = VITop(vi))
@@ -2753,10 +2779,8 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       for (auto iv_name : within_map.at(InScopeName(id->name)))
         oss << ((i++ == 0) ? "" : ", ")
             << UnScopedName(ssm.DeviceName(iv_name));
-    } else {
-      oss << UnScopedName(((is_host) ? ssm.HostName(InScopeName(id->name))
-                                     : ssm.DeviceName(InScopeName(id->name))));
-    }
+    } else
+      oss << UnScopedName(SSMName(InScopeName(id->name), is_host));
   } else if (auto il = dyn_cast<AST::IntLiteral>(e)) {
     oss << il->ValAsString();
   } else if (auto fl = dyn_cast<AST::FloatLiteral>(e)) {
@@ -2819,9 +2843,7 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
     } else {
       assert(!da->AccessElement());
       assert(!within_map.count(InScopeName(da->data->name)));
-      oss << UnScopedName(((is_host)
-                               ? ssm.HostName(InScopeName(da->data->name))
-                               : ssm.DeviceName(InScopeName(da->data->name))));
+      oss << UnScopedName(SSMName(InScopeName(da->data->name), is_host));
     }
   } else if (auto expr = dyn_cast<AST::Expr>(e)) {
     // utilize the optimize value whenever possible
@@ -2829,7 +2851,7 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       auto sname = InScopeName(sym->name);
       if (FCtx(fname).HasSymbolValues(sname)) {
         auto svs = FCtx(fname).GetSymbolValues(sname);
-        if (svs.HasVal()) return "(" + UnScopedExpr(STR(svs.GetVal())) + ")";
+        if (svs.HasVal()) return ValueSTR(svs.GetVal());
       }
     }
 

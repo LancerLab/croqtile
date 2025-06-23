@@ -141,6 +141,11 @@ inline static std::optional<std::string> VIStr(const ValueItem& vi) {
   return std::nullopt;
 }
 
+inline static std::shared_ptr<sbe::UnaryOperation> VIUop(const ValueItem& vi) {
+  return dyn_cast<sbe::UnaryOperation>(vi);
+}
+inline static bool VIIsUop(const ValueItem& vi) { return VIUop(vi) != nullptr; }
+
 inline static std::shared_ptr<sbe::BinaryOperation> VIBop(const ValueItem& vi) {
   return dyn_cast<sbe::BinaryOperation>(vi);
 }

@@ -19,7 +19,7 @@ __co__ auto foo1() {
 }
 
 // CHECK: int foo1()
-// CHECK:   return (3);
+// CHECK:   return 3;
 
 __co__ auto bar1() {
   s8[3,2] a;

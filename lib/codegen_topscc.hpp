@@ -420,6 +420,9 @@ private:
   std::pair<std::string, size_t> GenMdsOffset(const ptr<AST::ChunkAt>,
                                               ptr<DMAConfig> = nullptr) const;
   const std::string GenOffset(const ptr<AST::ChunkAt>&) const;
+  const std::string SSMName(const std::string& sname, bool is_host) const {
+    return (is_host) ? ssm.HostName(sname) : ssm.DeviceName(sname);
+  }
 };
 
 } // namespace Topscc

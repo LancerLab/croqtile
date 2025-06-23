@@ -132,11 +132,20 @@ ValueItem ValueNumbering::GenValueItemFromSignature(const std::string& input) {
     return nullptr;
   }
 
+  if (parts.size() == 2) {
+    if (PrefixedWith(input, "!:") || PrefixedWith(input, "~:")) {
+      if (auto ovi = GenValueItemFromSignature(
+              GetSignatureFromValueNumber(std::stoi(parts[1].substr(1)))))
+        return sbe::uop(ToOpCode(input.substr(0, 1)), ovi)->Normalize();
+    }
+  }
+
   if (parts.size() != 3) return nullptr;
   if (PrefixedWith(input, "+:") || PrefixedWith(input, "-:") ||
       PrefixedWith(input, "*:") || PrefixedWith(input, "/:") ||
       PrefixedWith(input, "%:") || PrefixedWith(input, ">:") ||
-      PrefixedWith(input, "<:")) {
+      PrefixedWith(input, "<:") || PrefixedWith(input, "|:") ||
+      PrefixedWith(input, "&:") || PrefixedWith(input, "^:")) {
     auto lvi = GenValueItemFromSignature(
         GetSignatureFromValueNumber(std::stoi(parts[1].substr(1))));
     auto rvi = GenValueItemFromSignature(
@@ -152,7 +161,8 @@ ValueItem ValueNumbering::GenValueItemFromSignature(const std::string& input) {
       return sbe::bop(OpCode::DIVIDE, lvi + (rvi - sbe::nu(1)), rvi)
           ->Normalize();
   } else if (PrefixedWith(input, ">=:") || PrefixedWith(input, "<=:") ||
-             PrefixedWith(input, "==:") || PrefixedWith(input, "!=:")) {
+             PrefixedWith(input, "==:") || PrefixedWith(input, "!=:") ||
+             PrefixedWith(input, ">>:") || PrefixedWith(input, "<<:")) {
     auto lvi = GenValueItemFromSignature(
         GetSignatureFromValueNumber(std::stoi(parts[1].substr(1))));
     auto rvi = GenValueItemFromSignature(
@@ -193,6 +203,15 @@ std::string ValueNumbering::ValueItemToSignature(const ValueItem& vi,
     assert(HasValueNumberOfSignature(sym.value()) &&
            "the symbol does have a value number.");
     return sym.value();
+  } else if (auto bop = VIUop(vi)) {
+    auto osign = ValueItemToSignature(bop->GetOperand(), true);
+    auto ovn = GetValueNumberOfSignature(osign);
+    auto sign = STR(bop->GetOpCode()) + ":#" + std::to_string(ovn);
+    if (gen) {
+      auto vn = GetOrGenValueNumberFromSignature(sign);
+      return GetSignatureFromValueNumber(vn);
+    } else
+      return sign;
   } else if (auto bop = VIBop(vi)) {
     auto lsign = ValueItemToSignature(bop->GetLeft(), true);
     auto rsign = ValueItemToSignature(bop->GetRight(), true);
