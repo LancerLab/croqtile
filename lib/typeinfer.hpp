@@ -55,6 +55,7 @@ public:
   bool Visit(AST::StringLiteral&) override;
   bool Visit(AST::BoolLiteral&) override;
   bool Visit(AST::Expr&) override;
+  bool Visit(AST::PromoteExpr&) override;
   bool Visit(AST::MultiDimSpans&) override;
   bool Visit(AST::NamedTypeDecl&) override;
   bool Visit(AST::NamedVariableDecl&) override;

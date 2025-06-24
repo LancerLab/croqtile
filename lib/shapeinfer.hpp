@@ -248,6 +248,7 @@ public:
   bool Visit(AST::StringLiteral& n) override;
   bool Visit(AST::BoolLiteral& n) override;
   bool Visit(AST::Expr& n) override;
+  bool Visit(AST::PromoteExpr& n) override;
   bool Visit(AST::MultiDimSpans& n) override;
   bool Visit(AST::NamedTypeDecl& n) override;
   bool Visit(AST::NamedVariableDecl& n) override;

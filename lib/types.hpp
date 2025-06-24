@@ -105,6 +105,89 @@ enum class BaseType {
   UNKNOWN
 };
 
+inline static int ScalarBaseTypeRank(BaseType bt) {
+  switch (bt) {
+  case BaseType::DOUBLE: return 13;
+  case BaseType::FLOAT:
+  case BaseType::F32: return 12;
+  case BaseType::F16:
+  case BaseType::HALF: return 11;
+  case BaseType::BF16:
+  case BaseType::BFP16: return 10;
+  case BaseType::F8:
+  case BaseType::HALF8: return 9;
+  case BaseType::U64: return 8;
+  case BaseType::S64: return 7;
+  case BaseType::U32: return 6;
+  case BaseType::S32:
+  case BaseType::INT: return 5;
+  case BaseType::U16: return 4;
+  case BaseType::S16: return 3;
+  case BaseType::U8: return 2;
+  case BaseType::S8: return 1;
+  case BaseType::BOOL: return 0;
+  case BaseType::UNKNOWN: return -1;
+  default: choreo_unreachable("unexpect BaseType for scalar rank.");
+  }
+}
+
+inline static int FloatPointBaseTypeRank(BaseType bt) {
+  switch (bt) {
+  case BaseType::DOUBLE: return 5;
+  case BaseType::FLOAT:
+  case BaseType::F32: return 4;
+  case BaseType::F16:
+  case BaseType::HALF: return 3;
+  case BaseType::BF16:
+  case BaseType::BFP16: return 2;
+  case BaseType::F8:
+  case BaseType::HALF8: return 1;
+  default: return 0;
+  }
+}
+
+inline static int IntegerBaseTypeRank(BaseType bt) {
+  switch (bt) {
+  case BaseType::U64: return 9;
+  case BaseType::S64: return 8;
+  case BaseType::U32: return 7;
+  case BaseType::S32:
+  case BaseType::INT: return 6;
+  case BaseType::U16: return 5;
+  case BaseType::S16: return 4;
+  case BaseType::U8: return 3;
+  case BaseType::S8: return 2;
+  case BaseType::BOOL: return 1;
+  case BaseType::UNKNOWN: return 0;
+  default: return -1;
+  }
+}
+
+inline static bool IntegerBaseType(BaseType bt) {
+  return bt == BaseType::S64 || bt == BaseType::U64 || bt == BaseType::S32 ||
+         bt == BaseType::INT || bt == BaseType::U32 || bt == BaseType::S16 ||
+         bt == BaseType::U16 || bt == BaseType::S8 || bt == BaseType::U8 ||
+         bt == BaseType::BOOL;
+}
+
+inline static bool SignedIntegerBaseType(BaseType bt) {
+  assert(IntegerBaseType(bt));
+  return bt == BaseType::S64 || bt == BaseType::S32 || bt == BaseType::INT ||
+         bt == BaseType::S16 || bt == BaseType::S8;
+}
+
+inline static bool UnsignedIntegerBaseType(BaseType bt) {
+  assert(IntegerBaseType(bt));
+  return !SignedIntegerBaseType(bt);
+}
+
+inline static bool FloatPointBaseType(BaseType bt) {
+  return bt == BaseType::DOUBLE || bt == BaseType::FLOAT ||
+         bt == BaseType::F32 || bt == BaseType::F16 || bt == BaseType::HALF ||
+         bt == BaseType::BF16 || bt == BaseType::BFP16 || bt == BaseType::F8 ||
+         bt == BaseType::HALF8;
+}
+
 enum class FundamentalType {
   F32 = (int)BaseType::F32,
   F16 = (int)BaseType::F16,
@@ -121,16 +204,14 @@ enum class FundamentalType {
   UND = (int)BaseType::UNKNOWN,
 };
 
+inline BaseType FT2BT(FundamentalType ft) { return BaseType{(int)ft}; }
+
 inline static bool IntegerFundamentalType(FundamentalType ft) {
-  return ft == FundamentalType::S64 || ft == FundamentalType::U64 ||
-         ft == FundamentalType::S32 || ft == FundamentalType::U32 ||
-         ft == FundamentalType::S16 || ft == FundamentalType::U16 ||
-         ft == FundamentalType::S8 || ft == FundamentalType::U8;
+  return IntegerBaseType(FT2BT(ft));
 }
 
 inline static bool FloatPointFundamentalType(FundamentalType ft) {
-  return ft == FundamentalType::F32 || ft == FundamentalType::F16 ||
-         ft == FundamentalType::BF16 || ft == FundamentalType::F8;
+  return FloatPointBaseType(FT2BT(ft));
 }
 
 inline static bool Compatible(const Storage& a, const Storage& b) {
@@ -317,6 +398,10 @@ inline static std::string STR(BaseType bt) {
 inline static std::string STR(FundamentalType ft) { return STR((BaseType)ft); }
 inline static std::string STR(Storage st) {
   return __internal__::GetStringFrom(st);
+}
+
+inline static std::ostream& operator<<(std::ostream& os, BaseType bt) {
+  return os << STR(bt);
 }
 
 // safe version for pointers
@@ -731,17 +816,25 @@ struct PlaceHolderType final : public Type,
 
 struct ScalarType : public Type, public TypeIDProvider<ScalarType> {
   bool is_mutable = false;
-  ScalarType(TypeCategory t, bool m) : Type(t), is_mutable(m) {}
+  BaseType btype;
+  ScalarType(TypeCategory t, bool m, BaseType bt = BaseType::UNKNOWN)
+      : Type(t), is_mutable(m), btype(bt) {
+    assert(IntegerBaseType(bt) || FloatPointBaseType(bt));
+  }
+
   size_t Dims() const override { return 1; }
   bool IsComplete() const override { return true; }
   bool HasSufficientInfo() const override { return true; }
+  virtual BaseType GetBaseType() const { return btype; }
+  virtual void SetBaseType(BaseType bt) { btype = bt; }
   virtual bool IsMutable() const { return is_mutable; }
   virtual void SetMutable(bool m) { is_mutable = m; }
   virtual ptr<ScalarType> Clone(bool m) const = 0;
 
   bool operator==(const Type& ty) const override {
     if (auto sty = dyn_cast<ScalarType>(&ty))
-      return sty->is_mutable == is_mutable;
+      return sty->is_mutable == is_mutable &&
+             GetBaseType() == sty->GetBaseType();
     return false;
   }
 
@@ -760,7 +853,11 @@ inline bool ConvertibleToInt(const Type& ty);
 
 struct IntegerType final : public ScalarType,
                            public TypeIDProvider<IntegerType> {
-  IntegerType(bool m) : ScalarType(TypeCategory::INT, m) {}
+  ValueItem value = GetInvalidValueItem(); // optional value expression
+  IntegerType(bool m, BaseType btype = BaseType::INT)
+      : ScalarType(TypeCategory::INT, m, btype) {}
+  IntegerType(const ValueItem& vi, bool m, BaseType btype = BaseType::INT)
+      : ScalarType(TypeCategory::INT, m, btype), value(vi) {}
 
   const ptr<Type> Clone() const override {
     return std::make_shared<IntegerType>(IsMutable());
@@ -770,7 +867,8 @@ struct IntegerType final : public ScalarType,
   }
   void Print(std::ostream& os) const override {
     ScalarType::Print(os);
-    os << "int";
+    os << STR(btype)
+       << (IsValidValueItem(value) ? (" [" + STR(value) + "]") : "");
   }
   const std::string Name() const override { return "integer"; }
 
@@ -787,9 +885,15 @@ struct IntegerType final : public ScalarType,
   __UDT_TYPE_INFO__(ScalarType, IntegerType)
 };
 
+struct PromoteResult {
+  BaseType lty;
+  BaseType rty;
+};
+inline PromoteResult PromoteType(BaseType lty, BaseType rty);
+
 struct ScalarFloatType : public ScalarType,
                          public TypeIDProvider<ScalarFloatType> {
-  ScalarFloatType(TypeCategory t, bool m) : ScalarType(t, m) {}
+  ScalarFloatType(TypeCategory t, bool m, BaseType bt) : ScalarType(t, m, bt) {}
   bool IsFloat() const override { return true; }
   bool IsBoolInteger() const override { return false; }
   __UDT_TYPE_INFO__(ScalarType, ScalarFloatType)
@@ -797,7 +901,8 @@ struct ScalarFloatType : public ScalarType,
 
 struct Half8Type final : public ScalarFloatType,
                          public TypeIDProvider<Half8Type> {
-  Half8Type(bool m) : ScalarFloatType(TypeCategory::HALF8, m) {}
+  Half8Type(bool m)
+      : ScalarFloatType(TypeCategory::HALF8, m, BaseType::HALF8) {}
   const ptr<Type> Clone() const override {
     return std::make_shared<Half8Type>(IsMutable());
   }
@@ -820,7 +925,7 @@ struct Half8Type final : public ScalarFloatType,
 
 struct HalfType final : public ScalarFloatType,
                         public TypeIDProvider<HalfType> {
-  HalfType(bool m) : ScalarFloatType(TypeCategory::HALF, m) {}
+  HalfType(bool m) : ScalarFloatType(TypeCategory::HALF, m, BaseType::HALF) {}
   const ptr<Type> Clone() const override {
     return std::make_shared<HalfType>(IsMutable());
   }
@@ -843,7 +948,8 @@ struct HalfType final : public ScalarFloatType,
 
 struct BFP16Type final : public ScalarFloatType,
                          public TypeIDProvider<BFP16Type> {
-  BFP16Type(bool m) : ScalarFloatType(TypeCategory::BFP16, m) {}
+  BFP16Type(bool m)
+      : ScalarFloatType(TypeCategory::BFP16, m, BaseType::BFP16) {}
   const ptr<Type> Clone() const override {
     return std::make_shared<BFP16Type>(IsMutable());
   }
@@ -866,7 +972,8 @@ struct BFP16Type final : public ScalarFloatType,
 
 struct FloatType final : public ScalarFloatType,
                          public TypeIDProvider<FloatType> {
-  FloatType(bool m) : ScalarFloatType(TypeCategory::FLOAT, m) {}
+  FloatType(bool m)
+      : ScalarFloatType(TypeCategory::FLOAT, m, BaseType::FLOAT) {}
   const ptr<Type> Clone() const override {
     return std::make_shared<FloatType>(IsMutable());
   }
@@ -889,7 +996,8 @@ struct FloatType final : public ScalarFloatType,
 
 struct DoubleType final : public ScalarFloatType,
                           public TypeIDProvider<DoubleType> {
-  DoubleType(bool m) : ScalarFloatType(TypeCategory::DOUBLE, m) {}
+  DoubleType(bool m)
+      : ScalarFloatType(TypeCategory::DOUBLE, m, BaseType::DOUBLE) {}
   const ptr<Type> Clone() const override {
     return std::make_shared<DoubleType>(IsMutable());
   }
@@ -914,7 +1022,7 @@ struct DoubleType final : public ScalarFloatType,
 
 struct BooleanType final : public ScalarType,
                            public TypeIDProvider<BooleanType> {
-  BooleanType(bool m) : ScalarType(TypeCategory::BOOL, m) {}
+  BooleanType(bool m) : ScalarType(TypeCategory::BOOL, m, BaseType::BOOL) {}
   const ptr<Type> Clone() const override {
     return std::make_shared<BooleanType>(IsMutable());
   }
@@ -1786,8 +1894,9 @@ inline ptr<UnknownType> MakeUnknownType() {
   return std::make_shared<UnknownType>();
 }
 
-inline ptr<IntegerType> MakeIntegerType(bool m = false) {
-  return std::make_shared<IntegerType>(m);
+inline ptr<IntegerType> MakeIntegerType(bool m = false,
+                                        BaseType bt = BaseType::INT) {
+  return std::make_shared<IntegerType>(m, bt);
 }
 
 inline ptr<BooleanType> MakeBooleanType(bool m = false) {
@@ -2084,9 +2193,122 @@ inline static ptr<Type> MakeElemScalarType(BaseType bt, bool m = false) {
   case BaseType::S16:
   case BaseType::U8:
   case BaseType::S8:
-    return std::make_shared<IntegerType>(m); // convert all implicitly?
+    return std::make_shared<IntegerType>(m,
+                                         bt); // convert all implicitly?
   default: choreo_unreachable("unsupported base type: " + STR(bt) + ".");
   }
+}
+
+inline PromoteResult PromoteType(BaseType lty, BaseType rty) {
+  for (const auto ty : {lty, rty}) {
+    (void)ty;
+    assert(IntegerBaseType(ty) || FloatPointBaseType(ty));
+  }
+
+  PromoteResult res{.lty = lty, .rty = rty};
+
+  // at least one is floating-point
+  if (FloatPointBaseType(lty) || FloatPointBaseType(rty)) {
+    int rank_l = FloatPointBaseTypeRank(lty);
+    int rank_r = FloatPointBaseTypeRank(rty);
+
+    // both is floating-point
+    if (rank_l > 0 && rank_r > 0) {
+      if (rank_l > rank_r)
+        res.rty = lty;
+      else
+        res.lty = rty;
+      return res;
+    }
+
+    // only one is floating-point
+    if (rank_l > 0) res.rty = lty;
+    if (rank_r > 0) res.lty = rty;
+    return res;
+  } else {
+    auto IntegralPromotion = [](BaseType bt) {
+      // maybe need promote all the integer type smaller than int
+      // to int first which is processed in cpp.
+      return bt;
+    };
+    auto CanRepresent = [](BaseType signed_type, BaseType unsigned_type) {
+      assert(SignedIntegerBaseType(signed_type));
+      assert(UnsignedIntegerBaseType(unsigned_type));
+      switch (signed_type) {
+      case BaseType::S64:
+        return unsigned_type == BaseType::U32 ||
+               unsigned_type == BaseType::U16 ||
+               unsigned_type == BaseType::U8 || unsigned_type == BaseType::BOOL;
+      case BaseType::S32:
+        return unsigned_type == BaseType::U16 ||
+               unsigned_type == BaseType::U8 || unsigned_type == BaseType::BOOL;
+      case BaseType::S16:
+        return unsigned_type == BaseType::U8 || unsigned_type == BaseType::BOOL;
+      default: return false;
+      }
+    };
+    auto UnsignedVersion = [](BaseType signed_type) {
+      assert(SignedIntegerBaseType(signed_type));
+      switch (signed_type) {
+      case BaseType::S64: return BaseType::U64;
+      case BaseType::S32: return BaseType::U32;
+      case BaseType::S16: return BaseType::U16;
+      case BaseType::S8: return BaseType::U8;
+      case BaseType::INT: return BaseType::U32;
+      default: choreo_unreachable("unexpect signed type!");
+      }
+    };
+
+    lty = IntegralPromotion(lty);
+    rty = IntegralPromotion(rty);
+
+    int rank_l = IntegerBaseTypeRank(lty);
+    int rank_r = IntegerBaseTypeRank(rty);
+
+    if (UnsignedIntegerBaseType(lty) && UnsignedIntegerBaseType(rty)) {
+      if (rank_l > rank_r)
+        res.rty = lty;
+      else
+        res.lty = rty;
+      return res;
+    }
+
+    if (SignedIntegerBaseType(lty) && SignedIntegerBaseType(rty)) {
+      if (rank_l > rank_r)
+        res.rty = lty;
+      else
+        res.lty = rty;
+      return res;
+    }
+
+    // one unsigned, one signed
+    if (UnsignedIntegerBaseType(lty) && SignedIntegerBaseType(rty)) {
+      if (rank_l > rank_r) // use the unsigned
+        res.rty = lty;
+      else if (CanRepresent(rty, lty)) // rty can represent lty
+        res.lty = rty;
+      else // both to the unsigned version of rty
+        res.lty = res.rty = UnsignedVersion(rty);
+      return res;
+    }
+    if (SignedIntegerBaseType(lty) && UnsignedIntegerBaseType(rty)) {
+      if (rank_r > rank_l)
+        res.lty = rty;
+      else if (CanRepresent(lty, rty))
+        res.rty = lty;
+      else
+        res.lty = res.rty = UnsignedVersion(lty);
+      return res;
+    }
+
+    assert(false);
+    return res;
+  }
+}
+
+inline bool NeedPromotion(const BaseType& lty, const BaseType& rty) {
+  if (ScalarBaseTypeRank(lty) != ScalarBaseTypeRank(rty)) return true;
+  return false;
 }
 
 inline static ptr<Type> MutateType(const Type& ty) {

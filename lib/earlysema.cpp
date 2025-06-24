@@ -585,6 +585,12 @@ bool EarlySemantics::Visit(AST::Expr& n) {
   return true;
 }
 
+bool EarlySemantics::Visit(AST::PromoteExpr& n) {
+  TraceEachVisit(n);
+  choreo_unreachable("AST::PromoteExpr should not appear at EarlySemantics.");
+  return true;
+}
+
 bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
   TraceEachVisit(n);
   size_t rank = GetInvalidRank();

@@ -339,6 +339,14 @@ bool ShapeInference::Visit(AST::Expr& n) {
   return true;
 }
 
+bool ShapeInference::Visit(AST::PromoteExpr& n) {
+  TraceEachVisit(n);
+
+  if (cannot_proceed) return true;
+  // all the context should not be unchanged.
+  return true;
+}
+
 bool ShapeInference::Visit(AST::MultiDimSpans& n) {
   TraceEachVisit(n);
 

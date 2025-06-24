@@ -347,6 +347,8 @@ void SymReplace::SymbolizeExprNode(ptr<AST::Node> n) {
       else
         sym_expr_r = SymExpr(GetSymbolFromName(sname));
       res = StringifyOpFromSymExpr(n, op, sym_expr_r);
+    } else if (op == "promote") {
+      res = sym_valno_sym_expr_map.at(expr_sym_valno_map.at(R));
     } else {
       choreo_unreachable("The operator " + e->op +
                          " is not supported in SymReplace yet.");

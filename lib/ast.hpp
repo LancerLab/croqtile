@@ -634,7 +634,8 @@ public:
   }
 
   bool IsUBArith() const {
-    if ((op == "#") || (op == "#+") || (op == "#-") || op == "#*" || op == "#%")
+    if ((op == "#") || (op == "#+") || (op == "#-") || (op == "#*") ||
+        (op == "#/") || (op == "#%"))
       return true;
     return false;
   }
@@ -689,6 +690,36 @@ public:
   void accept(Visitor&) override;
 
   __UDT_TYPE_INFO__(Node, Expr)
+};
+
+struct PromoteExpr : public Expr, public TypeIDProvider<PromoteExpr> {
+private:
+  BaseType from;
+  BaseType to;
+
+public:
+  PromoteExpr(const location& l, const ptr<Node>& val)
+      : Expr(l, "promote", val) {
+    assert(isa<Expr>(val));
+  }
+
+  BaseType FromType() const { return from; }
+  BaseType ToType() const { return to; }
+
+  void SetFrom(BaseType bty) { from = bty; }
+  void SetTo(BaseType bty) { to = bty; }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
+    os << prefix << "PROMOTE(from '" << FromType() << "' to '" << ToType()
+       << "': ";
+    GetR()->Print(os, {}, with_type);
+    os << ") ";
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_2TYPES_INFO__(Node, Expr, PromoteExpr);
 };
 
 // Represents both dimensions and s like {3, 4, 5} or {1, 2, 1}

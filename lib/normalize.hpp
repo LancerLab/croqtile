@@ -247,6 +247,48 @@ public:
           n.OverWrite(*new_expr);
         }
       }
+    } else if (n.IsBinary()) {
+      // TODO: skip this for now.
+      return true;
+      if (!(n.IsArith() && !n.IsUBArith())) return true;
+
+      auto l = n.GetL();
+      auto r = n.GetR();
+      auto lty = l->GetType();
+      auto rty = r->GetType();
+
+      auto lity = dyn_cast<IntegerType>(lty);
+      auto rity = dyn_cast<IntegerType>(rty);
+      if (!lity || !rity) return true;
+
+      auto lbty = lity->GetBaseType();
+      auto rbty = rity->GetBaseType();
+
+      if (!NeedPromotion(lbty, rbty)) return true;
+
+      auto promote_res = PromoteType(lbty, rbty);
+      if (lbty != promote_res.lty) {
+        auto promote_expr = AST::Make<AST::PromoteExpr>(l->LOC(), l);
+        promote_expr->SetType(l->GetType());
+        promote_expr->SetTo(promote_res.lty);
+        n.SetL(promote_expr);
+        VST_DEBUG({
+          dbgs() << "[do norm]\n";
+          dbgs() << "\tpromote " << PSTR(l) << "\n\t from type " << STR(lbty)
+                 << "\n\t to type " << STR(promote_res.lty) << "\n";
+        });
+      }
+      if (rbty != promote_res.rty) {
+        auto promote_expr = AST::Make<AST::PromoteExpr>(r->LOC(), r);
+        promote_expr->SetType(r->GetType());
+        promote_expr->SetTo(promote_res.rty);
+        n.SetR(promote_expr);
+        VST_DEBUG({
+          dbgs() << "[do norm]\n";
+          dbgs() << "\tpromote " << PSTR(r) << "\n\t from type " << STR(rbty)
+                 << "\n\t to type " << STR(promote_res.rty) << "\n";
+        });
+      }
     }
 
     return true;

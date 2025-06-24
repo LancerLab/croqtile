@@ -2556,7 +2556,11 @@ TopsccCodeGen::ExprCastSTR(AST::ptr<AST::Node> n,
   std::string value;
 
   if (n != nullptr) {
+#ifndef USING_OP_INFO
     value = ExprSTR(n, is_host);
+#else
+    value = OpExprSTR(n, is_host);
+#endif
   } else {
     assert(val.has_value());
     auto v = val.value();
@@ -2568,54 +2572,163 @@ TopsccCodeGen::ExprCastSTR(AST::ptr<AST::Node> n,
       choreo_unreachable("unexpect type of v");
   }
 
-  using FT = FundamentalType;
+  using BT = BaseType;
 
-  FT from = BT2FT(f);
-  FT to = BT2FT(t);
+  if (f == t) return value;
+  // TODO: actually, s32 is equal to int
 
-  if (from == to) return value;
+  if (t == BT::F8 || t == BT::HALF8)
+    choreo_unreachable("unsupport cast: '" + STR(f) + "' to " + STR(t));
 
   // need to do casting or converting.
+  /*
+  suppose
+  f8: E4M3: <= 240; E5M2: <= 57344
+  f16: E5M10: <= 65504
+  bf16: E8M7: <= 3.38×10^38
+  f32: <= 3.4×10^38
 
-  auto CheckScalarCast = [from, to]() {
-    static const std::unordered_map<FT, std::unordered_set<FT>> table = {
-        {FT::S32,
-         {FT::S32, FT::U32, FT::S16, FT::U16, FT::S8, FT::U8, FT::F32, FT::F16,
-          FT::BF16}},
-        {FT::F32, {FT::F32, FT::F16, FT::BF16}},
-        {FT::F16, {FT::F32}},
-        {FT::BF16, {FT::F32}},
+  U8: [0, 255]
+  S8: [-128, 127]
+  U16: [0, 65535]
+  S16: [-32768, 32767]
+  U32: [0, 2^32-1]
+  S32: [-2^16, 2^16-1]
+  U64: [0, 2^64-1]
+  S64: [-2^32, 2^32-1]
+  */
+  // here, safe means no
+  auto IsSafeCast = [f, t]() -> bool {
+    static const std::unordered_map<BT, std::unordered_set<BT>> table = {
+        {BT::BOOL,
+         {BT::BOOL, BT::U8, BT::S8, BT::U16, BT::S16, BT::U32, BT::S32, BT::INT,
+          BT::U64, BT::S64, BT::F8, BT::HALF8, BT::BF16, BT::BFP16, BT::F16,
+          BT::HALF, BT::F32, BT::FLOAT, BT::DOUBLE}},
+        {BT::U8,
+         {BT::U8, BT::U16, BT::S16, BT::U32, BT::S32, BT::INT, BT::U64, BT::S64,
+          BT::F8, BT::HALF8, BT::BF16, BT::F16, BT::BFP16, BT::HALF, BT::F32,
+          BT::FLOAT, BT::DOUBLE}},
+        {BT::S8,
+         {BT::S8, BT::S16, BT::S32, BT::INT, BT::U64, BT::S64, BT::F8,
+          BT::HALF8, BT::BF16, BT::BFP16, BT::F16, BT::HALF, BT::F32, BT::FLOAT,
+          BT::DOUBLE}},
+        {BT::U16,
+         {BT::U16, BT::U32, BT::S32, BT::INT, BT::U64, BT::S64, BT::BF16,
+          BT::BFP16, BT::F32, BT::FLOAT, BT::DOUBLE}},
+        {BT::S16,
+         {BT::S16, BT::S32, BT::INT, BT::U64, BT::S64, BT::BF16, BT::BFP16,
+          BT::F32, BT::FLOAT, BT::DOUBLE}},
+        {BT::U32,
+         {BT::U32, BT::U64, BT::S64, BT::BF16, BT::BFP16, BT::F32, BT::FLOAT,
+          BT::DOUBLE}},
+        {BT::S32,
+         {BT::S32, BT::S64, BT::BF16, BT::BFP16, BT::F32, BT::FLOAT,
+          BT::DOUBLE}},
+        {BT::U64,
+         {BT::U64, BT::BF16, BT::BFP16, BT::F32, BT::FLOAT, BT::DOUBLE}},
+        {BT::S64,
+         {BT::S64, BT::BF16, BT::BFP16, BT::F32, BT::FLOAT, BT::DOUBLE}},
+        {BT::F8,
+         {BT::F8, BT::HALF8, BT::BF16, BT::F16, BT::BFP16, BT::HALF, BT::F32,
+          BT::FLOAT, BT::DOUBLE}},
+        {BT::HALF8,
+         {BT::F8, BT::HALF8, BT::BF16, BT::F16, BT::BFP16, BT::HALF, BT::F32,
+          BT::FLOAT, BT::DOUBLE}},
+        {BT::BF16, {BT::BF16, BT::BFP16, BT::F32, BT::FLOAT, BT::DOUBLE}},
+        {BT::F16,
+         {BT::BF16, BT::F16, BT::BFP16, BT::HALF, BT::F32, BT::FLOAT,
+          BT::DOUBLE}},
+        {BT::HALF,
+         {BT::BF16, BT::F16, BT::BFP16, BT::HALF, BT::F32, BT::FLOAT,
+          BT::DOUBLE}},
+        {BT::F32, {BT::F32, BT::FLOAT, BT::DOUBLE}},
+        {BT::FLOAT, {BT::F32, BT::FLOAT, BT::DOUBLE}},
+        {BT::DOUBLE, {BT::DOUBLE}},
     };
-    auto it = table.find(from);
-    if (it != table.end() && it->second.count(to)) return;
-
-    choreo_unreachable("unsupported cast of scalar: " + STR(from) + " => " +
-                       STR(to));
+    auto it = table.find(f);
+    if (it != table.end() && it->second.count(t)) return true;
+    return false;
   };
 
-  CheckScalarCast();
+  // TODO: n maybe nullptr
+  if (!IsSafeCast() && n)
+    Warning(n->LOC(),
+            "type cast is unsafe: '" + STR(f) + "' to '" + STR(t) + "'");
 
-  switch (to) {
-  case FT::S32: [[fallthrough]];
-  case FT::U32: [[fallthrough]];
-  case FT::S16: [[fallthrough]];
-  case FT::U16: [[fallthrough]];
-  case FT::S8: [[fallthrough]];
-  case FT::U8:
-    res << "static_cast<" << NameBaseType(t, is_host) << ">(" << value << ")";
-    break;
-  case FT::F32: res << "static_cast<float>(" << value << ")"; break;
-  case FT::F16: res << "f32_to_f16(" << value << ")"; break;
-  case FT::BF16: {
-    if (from == FT::F32)
-      res << "choreo::bf16(" << value << ")";
-    else if (from == FT::S32)
-      res << "choreo::bf16(static_cast<float>(" << value << "))";
-    else
-      assert(false);
+  switch (t) {
+  case BT::S64: [[fallthrough]];
+  case BT::U64: [[fallthrough]];
+  case BT::S32: [[fallthrough]];
+  case BT::INT: [[fallthrough]];
+  case BT::U32: [[fallthrough]];
+  case BT::S16: [[fallthrough]];
+  case BT::U16: [[fallthrough]];
+  case BT::S8: [[fallthrough]];
+  case BT::U8: {
+    // TODO: workaround
+    if ((f == BT::INT && t == BT::S32) || (f == BT::S32 && t == BT::INT)) {
+      res << value;
+      break;
+    }
+    auto nbt = NameBaseType(t, is_host);
+    if (IntegerBaseType(f))
+      res << "static_cast<" << nbt << ">(" << value << ")";
+    else if (FloatPointBaseType(f)) {
+      if (f != BT::FLOAT && f != BT::DOUBLE)
+        res << "static_cast<" << nbt << ">("
+            << ExprCastSTR(n, val, BT::FLOAT, f) << ")";
+      else
+        res << "static_cast<" << nbt << ">(" << value << ")";
+    }
     break;
   }
-  default: choreo_unreachable("unexpect fundamental type of to: " + STR(to));
+  case BT::BOOL: {
+    if (IntegerBaseType(f))
+      res << "static_cast<bool>(" << ExprCastSTR(n, val, BT::S64, f) << ")";
+    else if (FloatPointBaseType(f))
+      res << "static_cast<bool>(" << ExprCastSTR(n, val, BT::DOUBLE, f) << ")";
+    break;
+  }
+  case BT::DOUBLE: {
+    if (IntegerBaseType(f))
+      res << "static_cast<double>(" << value << ")";
+    else
+      res << "static_cast<double>(" << ExprCastSTR(n, val, BT::FLOAT, f) << ")";
+    break;
+  }
+  case BT::FLOAT:
+  case BT::F32: {
+    if (IntegerBaseType(f))
+      res << "static_cast<float>(" << value << ")";
+    else {
+      if (f == BT::F16 || f == BT::HALF)
+        res << "f16_to_f32(" << value << ")";
+      else if (f == BaseType::BF16 || f == BaseType::BFP16)
+        res << "(float)(" << value << ")";
+      else if (f == BT::DOUBLE)
+        res << "static_cast<float>(" << value << ")";
+      else if (f == BT::F32 || f == BT::FLOAT)
+        res << value; // TODO: workaround
+      else
+        choreo_unreachable("unsupport cast: '" + STR(f) + "' to '" + STR(t) +
+                           "'");
+    }
+    break;
+  }
+  case BT::HALF:
+  case BT::F16:
+    res << "f32_to_f16(" << ExprCastSTR(n, val, BT::FLOAT, f) << ")";
+    break;
+  case BT::BFP16:
+  case BT::BF16: {
+    if (f == BT::BFP16 || f == BT::BF16)
+      res << value; // TODO: workaround
+    else
+      res << "choreo::bf16(" << ExprCastSTR(n, val, BT::FLOAT, f) << ")";
+    break;
+  }
+  default:
+    choreo_unreachable("unsupport cast: '" + STR(f) + "' to '" + STR(t) + "'");
   }
 
   return res.str();
@@ -2871,7 +2984,7 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e, bool is_host,
                                      : ssm.DeviceName(InScopeName(id->name))));
     }
   } else if (auto il = dyn_cast<AST::IntLiteral>(e)) {
-    oss << il->value;
+    oss << il->ValAsString();
   } else if (auto fl = dyn_cast<AST::FloatLiteral>(e)) {
     std::ostringstream fp_val;
     // std::fixed: the value should be in fixed-point notation
@@ -2942,6 +3055,13 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e, bool is_host,
                                : ssm.DeviceName(InScopeName(da->data->name))));
     }
   } else if (auto expr = dyn_cast<AST::Expr>(e)) {
+    // codegen for scalar type promotion
+    if (auto pe = dyn_cast<AST::PromoteExpr>(expr)) {
+      assert(expr->GetOp() == "promote");
+      return ExprCastSTR(pe->GetR(), std::nullopt, pe->ToType(),
+                         pe->FromType());
+    }
+
     // utilize the optimize value whenever possible
     if (auto sym = expr->GetSymbol()) {
       auto sname = InScopeName(sym->name);

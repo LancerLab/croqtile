@@ -1119,6 +1119,8 @@ sizeof_expr
 
 const_sizeof /* make it immediate values */
     : PIPE DOUBLE PIPE { $$ = 8; }
+    | PIPE S64 PIPE { $$ = 8; }
+    | PIPE U64 PIPE { $$ = 8; }
     | PIPE S32 PIPE { $$ = 4; }
     | PIPE U32 PIPE { $$ = 4; }
     | PIPE F32 PIPE { $$ = 4; }

@@ -747,6 +747,19 @@ bool TypeInference::Visit(AST::Expr& n) {
   return true;
 }
 
+bool TypeInference::Visit(AST::PromoteExpr& n) {
+  TraceEachVisit(n);
+  auto promote_from_type = n.GetR()->GetType();
+  auto promote_from_scalar_type = dyn_cast<ScalarType>(promote_from_type);
+  promote_from_scalar_type->SetBaseType(n.ToType());
+  SetNodeType(n, promote_from_scalar_type);
+  VST_DEBUG(dbgs() << "Promote type of node `" << PSTR(n.GetR()) << "`:\n\t`"
+                   << PSTR(promote_from_type) << "` to `" << PSTR(n.GetType())
+                   << "`");
+  cur_type = n.GetType();
+  return true;
+}
+
 bool TypeInference::Visit(AST::IntTuple& n) {
   TraceEachVisit(n);
   cur_type = n.GetType();

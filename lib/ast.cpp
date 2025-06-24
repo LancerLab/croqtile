@@ -33,6 +33,18 @@ void Expr::accept(Choreo::Visitor& v) {
   v.Visit(*this);
 }
 
+void PromoteExpr::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+  assert(!GetC());
+  assert(!GetL());
+
+  assert(GetR() && "invalid expression found.");
+  GetR()->accept(v);
+  // visit the inner expr first
+
+  v.Visit(*this);
+}
+
 void MultiDimSpans::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
 
