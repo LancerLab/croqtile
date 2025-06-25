@@ -206,6 +206,11 @@ enum class FundamentalType {
 
 inline BaseType FT2BT(FundamentalType ft) { return BaseType{(int)ft}; }
 
+inline static bool ApprxEqual(FundamentalType lty, FundamentalType rty) {
+  if (lty == FundamentalType::UND || rty == FundamentalType::UND) return true;
+  return lty == rty;
+}
+
 inline static bool IntegerFundamentalType(FundamentalType ft) {
   return IntegerBaseType(FT2BT(ft));
 }
@@ -1242,7 +1247,8 @@ struct SpannedType : public Type, public TypeIDProvider<SpannedType> {
     if (!isa<SpannedType>(&ty)) return false;
     auto& t = (SpannedType&)ty;
     // should the equivalence of storage be checked?
-    return t.f_type == f_type && t.s_type->ApprxEqual(*s_type);
+    return Choreo::ApprxEqual(t.f_type, f_type) &&
+           t.s_type->ApprxEqual(*s_type);
   }
 
   Shape GetShape() const { return s_type->GetShape(); }

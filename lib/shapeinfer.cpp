@@ -1125,7 +1125,7 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
     if (tsi->MultipleExprs()) {
       // when the code provides explicit tiling factors or subspan
       tfs_vns = vn.AsVector(GetValNo(*tsi->GetTFSSExpr()));
-      assert(tfs_vns.size() == pos_vns.size());
+      assert(tfs_vns.size() == cur_vns.size());
     } else {
       // or else, the ubounds are tiling factors
       pos_vns = vn.AsVector(GetValNo(*tsi->Positions(), VNKind::VNK_UBOUND));

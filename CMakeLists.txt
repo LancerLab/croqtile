@@ -192,14 +192,14 @@ install(TARGETS choreo copp
 #     message(FATAL_ERROR "Invalid package version selected. Please choose 'standalone' or 'core'.")
 # endif()
 
-# Set standalone packaging mode if CMake变量STANDALONE=ON
-option(STANDALONE "Build standalone package (打包tools和ginac/cln)" OFF)
+# Set standalone packaging mode if CMake variable STANDALONE=ON
+option(STANDALONE "Build standalone package (contains tools and ginac/cln)" OFF)
 if(STANDALONE)
   set(CHOREO_STANDALONE_PACKAGE ON)
-  message(STATUS "Building STANDALONE package: tools/bin, tools/include, tools/lib, tools/shared, ginac/cln库都会被打包")
+  message(STATUS "Building STANDALONE package: tools/bin, tools/include, tools/lib, tools/shared, and ginac/cln are all contained.")
 else()
   set(CHOREO_STANDALONE_PACKAGE OFF)
-  message(STATUS "Building CORE package: 只打包主程序和头文件，不包含tools和ginac/cln")
+  message(STATUS "Building CORE package: Only contains the main program and header files, excluding tools and ginac/cln.")
 endif()
 
 if(CHOREO_STANDALONE_PACKAGE)
