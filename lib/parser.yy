@@ -1103,7 +1103,7 @@ s_expr
     ;
 
 internal_sizeof_expr
-    : spanid { $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1)); }
+    : IDENTIFIER FNSPAN { $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1 + $2)); }
     | int_or_id { $$ = AST::Make<AST::Expr>(@1, $1); }
     | internal_sizeof_expr PLUS internal_sizeof_expr { $$ = AST::Make<AST::Expr>(@1, "+", $1, $3); }
     | internal_sizeof_expr MINUS internal_sizeof_expr { $$ = AST::Make<AST::Expr>(@1, "-", $1, $3); }
@@ -1315,7 +1315,6 @@ range_exprs
 integer_value
     : NUM { $$ = $1; }
     | MINUS NUM { $$ = -$2; }
-    | NUM LSHIFT NUM { $$ = $1 << $3; /* temporally */}
     ;
 
 index_or_none

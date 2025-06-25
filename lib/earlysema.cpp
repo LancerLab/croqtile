@@ -381,7 +381,8 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       SetNodeType(n, MakeUnknownType());
       return false;
     }
-    SetNodeType(n, MakeIntegerType(true));
+    bool is_mutable = IsMutable(*lty) || IsMutable(*rty);
+    SetNodeType(n, MakeIntegerType(is_mutable));
     if (diverges.Contains(n.GetL()) || diverges.Contains(n.GetR()))
       diverges.Add(n);
   } else if (n.op == "~") {
@@ -395,7 +396,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       SetNodeType(n, MakeUnknownType());
       return false;
     }
-    SetNodeType(n, MakeIntegerType(true));
+    SetNodeType(n, MakeIntegerType(IsMutable(*rty)));
     if (diverges.Contains(n.GetR())) diverges.Add(n);
   } else if (n.op == "<<" || n.op == ">>") {
     auto lty = NodeType(*n.GetL());
@@ -417,7 +418,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       SetNodeType(n, MakeUnknownType());
       return false;
     }
-    SetNodeType(n, MakeIntegerType(true));
+    SetNodeType(n, MakeIntegerType(IsMutable(*lty)));
     if (diverges.Contains(n.GetL()) || diverges.Contains(n.GetR()))
       diverges.Add(n);
   } else if (n.op == "#") {
