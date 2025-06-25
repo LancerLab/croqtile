@@ -246,7 +246,8 @@ setup-choreo-kit: check-choreo-kit
 	fi;
 
 setup-git-hooks:
-	@cp ./scripts/hooks/pre-commit-check.sh .git/hooks/pre-commit; \
+	@mkdir .git/hooks; \
+	cp ./scripts/hooks/pre-commit-check.sh .git/hooks/pre-commit; \
 	chmod +x .git/hooks/pre-commit
 
 setup-core: setup-choreo-kit setup-ginac setup-clang-format setup-git-hooks

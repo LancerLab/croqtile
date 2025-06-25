@@ -3,11 +3,13 @@
 // implementation based on the at semantics, as a response to the merge_emb_vec.co v2 approach.
 
 #include "choreo.h"
+#include <climits>
+#define UNKNOWN static_cast<unsigned long>(INT_MAX)>>8
 #define LEN 1000
 #define EMB_VEC_SIZE 64
 
 // New version: Finer-grained decompress_emb_vec_direct operator, refer to merge_emb_vec.co v2 style
-__co__ void decompress_emb_vec_direct(f32[LEN, EMB_VEC_SIZE] src_emb_vec, u32[LEN] src_index, f32[LEN, EMB_VEC_SIZE] dst_emb_vec) {
+__co__ void decompress_emb_vec_direct(f32[LEN_DYN, EMB_VEC_SIZE] src_emb_vec, u32[LEN_DYN] src_index, f32[?, EMB_VEC_SIZE] dst_emb_vec) {
   parallel p by 1 {
     parallel q by 1 {
       foreach {idx} in [LEN / #p / #q] {

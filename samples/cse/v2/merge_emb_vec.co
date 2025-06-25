@@ -1,12 +1,14 @@
 // cse/merge_emb_vec.co - Embedding vector merge function (op2 version)
 
 #include "choreo.h"
+#include <climits>
 #define LEN 1000
 #define EMB_VEC_SIZE 64
+#define UNKNOWN static_cast<unsigned long>(INT_MAX)>>8
 
 // LEN1, not known even at runtime.
 // LEN2, known at runtime
-__co__ void merge_emb_vec_direct(f32[LEN_DYN, EMB_VEC_SIZE] missing_emb_vec, u32[LEN_DYN] missing_index, f32[LEN_UNKNOWN, EMB_VEC_SIZE] output_emb_vec) {
+__co__ void merge_emb_vec_direct(f32[LEN_DYN, EMB_VEC_SIZE] missing_emb_vec, u32[LEN_DYN] missing_index, global f32[?, EMB_VEC_SIZE] output_emb_vec) {
 
   parallel p by 1 {
     parallel q by 1 {
@@ -26,7 +28,7 @@ __co__ void merge_emb_vec_direct(f32[LEN_DYN, EMB_VEC_SIZE] missing_emb_vec, u32
   }
 }
 
-__co__ void merge_emb_vec_direct_v2(f32[LEN_DYN, EMB_VEC_SIZE] missing_emb_vec, u32[LEN_DYN] missing_index, f32[LEN_UNKNOWN, EMB_VEC_SIZE] output_emb_vec) {
+__co__ void merge_emb_vec_direct_v2(f32[LEN_DYN, EMB_VEC_SIZE] missing_emb_vec, u32[LEN_DYN] missing_index, global f32[?, EMB_VEC_SIZE] output_emb_vec) {
 
   parallel p by 1 {
     parallel q by 1 {
@@ -108,6 +110,15 @@ int main() {
     float output_cpu[LEN][EMB_VEC_SIZE] = {0};
     float output_opt[LEN][EMB_VEC_SIZE] = {0};
     float output_adv[LEN][EMB_VEC_SIZE] = {0};
+    // create GCU device buffer
+    float * output_choreo__device = nullptr;
+    choreo::abend_true(topsMalloc(&output_choreo__device, ((LEN) * (64ULL)) * 4));
+    choreo::abend_true(topsMemcpy(output_choreo__device, output_choreo, ((LEN) * (64ULL)) * 4, topsMemcpyHostToDevice));
+
+    float * output_choreo_v2__device = nullptr;
+    choreo::abend_true(topsMalloc(&output_choreo_v2__device, ((LEN) * (64ULL)) * 4));
+    choreo::abend_true(topsMemcpy(output_choreo_v2__device, output_choreo_v2, ((LEN) * (64ULL)) * 4, topsMemcpyHostToDevice));
+
     // Randomly generate input
     for (int i = 0; i < LEN; ++i) {
         missing_index[i] = rand() % LEN;
@@ -122,10 +133,13 @@ int main() {
     // choreo operator call
     auto missing_index_view = choreo::make_spanview<1, choreo::u32>((uint32_t*)missing_index, {LEN});
     auto missing_emb_vec_view = choreo::make_spanview<2, choreo::f32>((float*)missing_emb_vec, {LEN, EMB_VEC_SIZE});
-    auto output_choreo_view = choreo::make_spanview<2, choreo::f32>((float*)output_choreo, {LEN, EMB_VEC_SIZE});
-    auto output_choreo_view_v2 = choreo::make_spanview<2, choreo::f32>((float*)output_choreo_v2, {LEN, EMB_VEC_SIZE});
+
+
+    auto output_choreo_view = choreo::make_spanview<2, choreo::f32>((float*)output_choreo__device, {UNKNOWN, EMB_VEC_SIZE});
+    auto output_choreo_view_v2 = choreo::make_spanview<2, choreo::f32>((float*)output_choreo_v2__device, {UNKNOWN, EMB_VEC_SIZE});
     
     merge_emb_vec_direct(missing_emb_vec_view, missing_index_view, output_choreo_view);
+    choreo::abend_true(topsMemcpy(output_choreo, output_choreo_view.data(), ((LEN) * (64ULL)) * 4, topsMemcpyDeviceToHost));
     
     // Verification
     int fail = 0;
@@ -142,6 +156,8 @@ int main() {
     printf("merge_emb_vec: %s\n", fail ? "FAIL" : "PASS");
 
     merge_emb_vec_direct_v2(missing_emb_vec_view, missing_index_view, output_choreo_view_v2);
+    choreo::abend_true(topsMemcpy(output_choreo_v2, output_choreo_view_v2.data(), ((LEN) * (64ULL)) * 4, topsMemcpyDeviceToHost));
+
     for (int i = 0; i < LEN; ++i) {
         for (int j = 0; j < EMB_VEC_SIZE; ++j) {
             float ref = output_cpu[i][j];
@@ -153,6 +169,7 @@ int main() {
         }
     }
     printf("merge_emb_vec_v2: %s\n", fail ? "FAIL" : "PASS");
+
     // Consistency with other versions
     int opt_fail = 0, adv_fail = 0;
     for (int i = 0; i < LEN * EMB_VEC_SIZE; ++i) {

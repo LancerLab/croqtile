@@ -1,11 +1,13 @@
 // cse/v2/fill_default_emb_vec.co - Default value fill function (choreo version, v2, fine-grained at semantics）
 
 #include "choreo.h"
+#include <climits>
+#define UNKNOWN static_cast<unsigned long>(INT_MAX)>>8
 #define LEN 1000
 #define EMB_VEC_SIZE 64
 #define DEFAULT_VALUE 0.5f
 
-__co__ void fill_default_emb_vec_direct(u32[LEN] missing_index, f32[LEN, EMB_VEC_SIZE] output_emb_vec) {
+__co__ void fill_default_emb_vec_direct(u32[LEN_DYN] missing_index, f32[?, EMB_VEC_SIZE] output_emb_vec) {
   parallel p by 1 {
     parallel q by 1 {
       foreach {idx} in [LEN / #p / #q] {

@@ -540,7 +540,7 @@ namespace {
 inline const std::string UnScopedExpr(const std::string& input) {
   // Regular expression to match scoped names
   std::regex scopedNameRegex(
-      R"((::[a-zA-Z_][a-zA-Z0-9_]*)(::[a-zA-Z_][a-zA-Z0-9_]*)*)");
+      R"((::[a-zA-Z_][a-zA-Z0-9_]*|::\$[0-9]+)(::[a-zA-Z_][a-zA-Z0-9_]*|::\$[0-9]+)*)");
 
   // Output string
   std::string output;
@@ -572,6 +572,25 @@ inline const std::string UnScopedExpr(const std::string& input) {
 
   return output;
 }
+// Remove all scope prefixes (e.g., ::foo::bar or ::$0) and return only the last symbol.
+// Handles both normal identifiers and dynamic shape variables like $0.
+// inline const std::string UnScopedExpr(const std::string& input) {
+//   // Match ::identifier or ::$number
+//   std::regex scopedNameRegex(R"((::[a-zA-Z_][a-zA-Z0-9_]*|::\$[0-9]+))");
+//   std::sregex_iterator it(input.begin(), input.end(), scopedNameRegex);
+//   std::sregex_iterator end;
+// 
+//   std::string last;
+//   for (; it != end; ++it) {
+//     last = it->str();
+//   }
+//   if (!last.empty()) {
+//     // Remove the leading '::'
+//     return last.substr(2);
+//   }
+//   // If no match, return the original input
+//   return input;
+// }
 
 inline const std::string UnScopedSizeExpr(const Type& ty) {
   return UnScopedExpr(SizeExprOf(ty, true));
