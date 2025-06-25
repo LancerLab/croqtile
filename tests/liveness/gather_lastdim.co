@@ -198,7 +198,6 @@ __co__ auto foo(s32[128] off_buff_L3, s32[102400, 512] input, s32[102400, 512] i
 
 #define PRINT(x) std::cout << ">>> " << #x << " = " << (x) << std::endl
 
-// 1024*6 = 6144
 const int N = 102400, M = 512;
 int nums[N][M];
 int indice[N][M]; 

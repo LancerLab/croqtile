@@ -245,7 +245,11 @@ setup-choreo-kit: check-choreo-kit
 	  $(MAKE) install-choreo-kit; \
 	fi;
 
-setup-core: setup-choreo-kit setup-ginac setup-clang-format
+setup-git-hooks:
+	@cp ./scripts/hooks/pre-commit-check.sh .git/hooks/pre-commit; \
+	chmod +x .git/hooks/pre-commit
+
+setup-core: setup-choreo-kit setup-ginac setup-clang-format setup-git-hooks
 	git submodule update --init --recursive;\
 	ln -sf extern/not.sh tests
 
