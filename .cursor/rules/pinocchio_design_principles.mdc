@@ -1,0 +1,155 @@
+---
+description: Design principles for the Pinocchio multi-agent system
+globs: ["tools/pinocchio/**/*.py", ".cursor/handlers/*.py", ".cursor/pinocchio/**/*"]
+alwaysApply: false
+---
+
+# Pinocchio System Design Principles
+
+This document outlines the core design principles and architecture guidelines for the Pinocchio multi-agent system. These principles should be followed when making changes to the system.
+
+## System Architecture
+
+### Single-Agent Multi-Role Architecture
+
+Pinocchio uses a **single-agent multi-role architecture** where one LLM simulates multiple specialized agents:
+
+1. **Role-Based Specialization**
+   - Each "agent" is a specialized role with clear responsibilities
+   - Roles are defined through rule files that shape behavior and expertise
+   - The system switches between roles based on task requirements
+
+2. **State Management**
+   - Central state management maintains context between role switches
+   - Agent history tracks the sequence of role activations
+   - Context data is preserved and passed between roles
+
+3. **Session Tracking**
+   - Each user interaction is tracked as a session
+   - Sessions record the complete history of role activations and responses
+   - Sessions are persisted for future reference and analysis
+
+## Core Components
+
+### 1. Agent Handler (`pinocchio_handler.py`)
+
+The central coordinator that manages role switching and workflow:
+
+- **Must maintain** the `AgentState` class for state management
+- **Must implement** role activation functions for each specialized role
+- **Must support** pipeline workflows that coordinate multiple roles
+- **Must integrate** with the session logging system
+
+### 2. Session Logger (`session_logger.py`)
+
+Records the history of interactions:
+
+- **Must maintain** the `SessionLogger` class for session management
+- **Must record** all role activations, inputs, outputs, and context updates
+- **Must support** session loading, listing, and analysis
+- **Must ensure** persistence of session data
+
+### 3. Rule Files
+
+Define the behavior of each specialized role:
+
+- **Must be stored** in MDC format in the rules directory
+- **Must define** clear responsibilities for each role
+- **Must include** role-specific knowledge and constraints
+- **Must establish** interaction protocols between roles
+
+### 4. Knowledge Files
+
+Provide domain-specific knowledge:
+
+- **Must be maintained** in structured JSON format
+- **Must be accessible** to all roles through a standardized interface
+- **Must include** syntax rules, common errors, and optimization patterns
+- **Must be summarized** in MDC format for Cursor integration
+
+## Design Principles
+
+### 1. Clear Role Separation
+
+- Each role must have a well-defined area of expertise
+- Roles should not overlap significantly in responsibilities
+- Transitions between roles should be explicit and documented
+
+### 2. Consistent Interaction Patterns
+
+- All roles must follow standardized response formats
+- Role switching must include explicit handoffs
+- Context passing must use a consistent structure
+
+### 3. State Preservation
+
+- Context must be preserved across role switches
+- State should be persisted to survive system restarts
+- History should be maintained for analysis and debugging
+
+### 4. Extensibility
+
+- New roles should be easy to add without modifying core architecture
+- Knowledge base should be expandable without code changes
+- Pipeline workflows should be configurable
+
+### 5. User Experience
+
+- Role switching should be transparent to the user
+- Commands should be simple and intuitive
+- Responses should maintain a consistent voice despite role changes
+
+## Implementation Guidelines
+
+### Adding a New Role
+
+1. Create a new rule file in MDC format
+2. Define the role's responsibilities, knowledge, and constraints
+3. Add the role to the configuration file
+4. Implement the activation function in the handler
+5. Update the pipeline workflow to include the new role where appropriate
+
+### Modifying Knowledge
+
+1. Update the JSON knowledge files with new information
+2. Regenerate the MDC summaries for Cursor integration
+3. Ensure all roles have access to the updated knowledge
+
+### Changing Interaction Patterns
+
+1. Update the agent interaction rules
+2. Modify the response templates in the handler
+3. Ensure all roles follow the new patterns
+4. Update the session logger to record the new interaction format
+
+## Integration with Cursor
+
+- Custom commands must follow Cursor's handler format
+- Rule files must use proper MDC format with metadata
+- Project rules must be registered in `agent_config.json`
+- Initialization must be handled through `init.py`
+
+## Testing and Validation
+
+Before deploying changes:
+
+1. Verify state management works across role switches
+2. Test the pipeline workflow with complex requests
+3. Ensure session logging captures all interactions
+4. Validate that knowledge is correctly accessed by all roles
+
+## Example: Role Interaction Flow
+
+```
+[User Request]
+↓
+[Coordinator Role]
+↓
+[Analyzer Role] → [Generator Role] → [Optimizer Role] → [Debugger Role]
+↓
+[Coordinator Role]
+↓
+[Final Response to User]
+```
+
+This design ensures that the Pinocchio system maintains the illusion of multiple specialized agents while operating within the constraints of a single LLM in the Cursor environment.

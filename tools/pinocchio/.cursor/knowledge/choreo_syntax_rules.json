@@ -205,16 +205,17 @@
     },
     "access": {
       "rule": "数组访问必须使用.at()方法",
-      "correct_examples": ["array.at(i)", "matrix.at(i, j)"],
+      "correct_examples": ["array.at(i)", "matrix.at(i, j)", "array.at(index.at(0), _)"],
       "incorrect_examples": ["array[i]", "matrix[i, j]", "matrix[i][j]"],
-      "notes": "不能使用方括号操作符访问数组元素"
+      "notes": "不能使用方括号操作符访问数组元素，可以使用已读取的数据作为索引"
     },
     "dimension_specification": {
       "constant": "f32[10, 20] X;",
       "symbolic": "f32[N, M] Y;",
       "computed": "f32[2*N, M/2] Z;",
       "dynamic": "f32[lhs.span] output; // 使用其他张量的维度",
-      "complex": "f32[input.span / {1, #n_tile}] buffer; // 使用除法和元组进行维度计算"
+      "complex": "f32[input.span / {1, #n_tile}] buffer; // 使用除法和元组进行维度计算",
+      "unknown": "f32[?, M] input; // 使用问号表示运行时也未知的维度"
     },
     "span_operations": {
       "span_as": {
@@ -252,6 +253,41 @@
           "dma.copy input.chunkat(_, n_tile) => l2_input[0];"
         ],
         "notes": "使用_表示保持该维度不变"
+      }
+    },
+    "nested_indexing": {
+      "description": "使用已读取的数据作为索引",
+      "syntax": "array.at(index.at(0), _)",
+      "examples": [
+        "dma.copy src_index.subspan(1).at(p#q#idx) => index;",
+        "dma.copy src_emb_vec.subspan(1, EMB_VEC_SIZE).at(index.at(0), _) => local_emb_vec;"
+      ],
+      "notes": "可以使用已读取到local的索引数据来访问其他数据，这在实现间接访问模式时特别有用"
+    },
+    "unknown_dimensions": {
+      "description": "处理未知维度的数据",
+      "function_parameters": {
+        "syntax": "f32[?, M] input",
+        "examples": [
+          "__co__ void decompress_emb_vec_direct(f32[LEN_DYN, EMB_VEC_SIZE] src_emb_vec, u32[LEN_DYN] src_index, f32[?, EMB_VEC_SIZE] dst_emb_vec)",
+          "__co__ void merge_emb_vec_direct(f32[LEN_DYN, EMB_VEC_SIZE] missing_emb_vec, u32[LEN_DYN] missing_index, global f32[?, EMB_VEC_SIZE] output_emb_vec)"
+        ],
+        "notes": "使用问号表示函数参数中运行时也未知的维度"
+      },
+      "device_buffers": {
+        "syntax": "make_spanview<2, f32>((float*)buffer, {UNKNOWN, M})",
+        "examples": [
+          "auto output_choreo_view = choreo::make_spanview<2, choreo::f32>((float*)output_choreo__device, {UNKNOWN, EMB_VEC_SIZE});"
+        ],
+        "notes": "对于设备缓冲区，可以使用UNKNOWN常量创建视图，表示维度非常大但未知"
+      },
+      "host_buffers": {
+        "description": "对于主机缓冲区，需要分块处理未知维度的数据",
+        "notes": [
+          "必须分配固定大小的设备缓冲区来处理数据",
+          "在主机端使用循环处理数据块，每次使用topsMemcpy传输固定大小的数据到设备缓冲区",
+          "内核每次只能处理固定大小的设备缓冲区"
+        ]
       }
     }
   },

@@ -27,5 +27,23 @@ tests/*.sh
 
 extern/clang-format*
 
+# Pinocchio system exceptions
 !tools/Makefile
 !tools/pinocchio
+!.cursor/handlers
+!.cursor/rules
+!.cursor/init.py
+!.cursor/agent_config.json
+!.cursor/README.md
+!.cursor/pinocchio/.cursor/knowledge
+!.cursor/pinocchio/.cursor/rules
+!.cursor/pinocchio/.cursor/pinocchio_config.json
+!.cursor/pinocchio/.cursor/state/README.md
+!.cursor/pinocchio/.cursor/state/state.json
+!.cursor/pinocchio/.cursor/state/sessions/example_session.json
+
+# Ignore temporary files and new sessions
+.cursor/handlers/*.log
+.cursor/pinocchio/.cursor/state/sessions/*
+!.cursor/pinocchio/.cursor/state/sessions/example_session.json
+.cursor/*.log

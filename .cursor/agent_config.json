@@ -1,0 +1,54 @@
+{
+  "project_rules": [
+    ".cursor/rules/development_rules.mdc",
+    ".cursor/rules/agent_interaction.mdc",
+    ".cursor/rules/pinocchio_design_principles.mdc",
+    ".cursor/rules/choreo_syntax.mdc",
+    ".cursor/rules/indirect_access_patterns.mdc"
+  ],
+  "language": "cpp",
+  "project_name": "Choreo",
+  "project_description": "Choreo is a low-level Embedded Domain Specific Language (EDSL) for C++ specifically engineered to program data movement entities like Direct-Memory-Accesses (DMA).",
+  "custom_commands": {
+    "choreo:dev": {
+      "description": "Develop the Choreo compiler project directly",
+      "handler": ".cursor/handlers/pinocchio_handler.py::handle_choreo_development_mode"
+    },
+    "pinocchio:pipeline": {
+      "description": "Activate the Pinocchio system pipeline",
+      "handler": ".cursor/handlers/pinocchio_handler.py::handle_activate_pinocchio_pipeline"
+    },
+    "pinocchio:analyze": {
+      "description": "Analyze Choreo code for issues",
+      "handler": ".cursor/handlers/pinocchio_handler.py::handle_activate_pinocchio_analyze"
+    },
+    "pinocchio:generate": {
+      "description": "Generate Choreo code based on description",
+      "handler": ".cursor/handlers/pinocchio_handler.py::handle_activate_pinocchio_generate"
+    },
+    "pinocchio:convert": {
+      "description": "Convert TopSCC code to Choreo",
+      "handler": ".cursor/handlers/pinocchio_handler.py::handle_activate_pinocchio_convert"
+    },
+    "pinocchio:optimize": {
+      "description": "Optimize existing Choreo code",
+      "handler": ".cursor/handlers/pinocchio_handler.py::handle_activate_pinocchio_optimize"
+    },
+    "pinocchio:debug": {
+      "description": "Help debug Choreo code",
+      "handler": ".cursor/handlers/pinocchio_handler.py::handle_activate_pinocchio_debug"
+    },
+    "pinocchio:sessions": {
+      "description": "List recent Pinocchio sessions",
+      "handler": ".cursor/handlers/pinocchio_handler.py::handle_list_sessions"
+    },
+    "pinocchio:session": {
+      "description": "Show details of a specific Pinocchio session",
+      "handler": ".cursor/handlers/pinocchio_handler.py::handle_show_session"
+    },
+    "pinocchio:upgrade": {
+      "description": "Develop, update, or evolve the Pinocchio system itself according to design principles",
+      "handler": ".cursor/handlers/pinocchio_handler.py::handle_pinocchio_upgrade"
+    }
+  }
+}

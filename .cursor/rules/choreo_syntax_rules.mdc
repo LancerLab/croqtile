@@ -1,0 +1,23 @@
+# Choreo Syntax Rules
+
+This file provides a summary of the choreo syntax rules for the Choreo project.
+The full knowledge base is available in JSON format at:
+
+`/home/albert/choreo/tools/pinocchio/.cursor/knowledge/choreo_syntax_rules.json`
+
+## Usage
+
+This knowledge can be accessed by the Pinocchio agents through the knowledge base system.
+The Cursor agent can also access this information directly.
+
+## Key Points
+
+- This is a summary of the choreo syntax rules
+- For detailed information, refer to the original JSON file
+- The Pinocchio system uses this knowledge to guide its behavior
+
+## Integration
+
+This file is part of the Cursor-Pinocchio integration system, which allows
+the Cursor agent to leverage the specialized knowledge and capabilities of
+the Pinocchio multi-agent system.
