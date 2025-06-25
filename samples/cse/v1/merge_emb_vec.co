@@ -1,4 +1,4 @@
-// cse/merge_emb_vec.co - 嵌入向量合并函数（op2版本）
+// cse/merge_emb_vec.co - Embedding vector merge function (op2 version)
 
 #include "choreo.h"
 #define LEN 1000
@@ -13,16 +13,16 @@ __co_device__ void fill_missing(float* dst_table, float* src_table, unsigned int
     }
 }
 
-// 带边界检查的设备函数
+// Device function with boundary check
 __co_device__ void fill_missing_with_bounds(float* dst_table, float* src_table, unsigned int* index, int block_size, int bDim, int tDim) {
   int start_idx = (blockIdx.x * tDim + threadIdx.x) * block_size;
   int end_idx = start_idx + block_size;
 
   for (int i = 0; i < LEN; ++i) {
     unsigned int dst_idx = index[i];
-    // 检查索引是否在当前线程负责范围内
+    // Check if the index is within the range handled by the current thread
     if (dst_idx >= start_idx && dst_idx < end_idx) {
-      // 转换为局部索引
+      // Convert to local index
       int local_dst_idx = dst_idx - start_idx;
       for (int j = 0; j < EMB_VEC_SIZE; ++j) {
         dst_table[local_dst_idx * EMB_VEC_SIZE + j] = src_table[i * EMB_VEC_SIZE + j];
@@ -34,7 +34,7 @@ __co_device__ void fill_missing_with_bounds(float* dst_table, float* src_table, 
 
 }
 
-// 实现merge_emb_vec函数 - 与CUDA核心对应
+// Implement merge_emb_vec function - corresponding to CUDA core
 __co__ void merge_emb_vec(f32[LEN2, EMB_VEC_SIZE] missing_emb_vec, u32[LEN2] missing_index, f32[LEN1, EMB_VEC_SIZE] output_emb_vec) {
   parallel {p, q} by [1, 1] {
     local f32[LEN1/#p/#q, EMB_VEC_SIZE] local_emb_vec_dst;
@@ -48,56 +48,34 @@ __co__ void merge_emb_vec(f32[LEN2, EMB_VEC_SIZE] missing_emb_vec, u32[LEN2] mis
   }
 }
 
-// LEN1, not known even at runtime.
-// LEN2, known at runtime
-__co__ void merge_emb_vec_direct(f32[LEN2, EMB_VEC_SIZE] missing_emb_vec, u32[LEN2] missing_index, f32[LEN1, EMB_VEC_SIZE] output_emb_vec) {
 
-  parallel p by 1 {
-    parallel q by 1 {
-      foreach {idx} in [LEN / #p / #q] {
-        local f32[1, EMB_VEC_SIZE] local_emb_vec_dst;
-        local f32[1, EMB_VEC_SIZE] local_emb_vec_src;
-        local u32[1] index;
-        dma.copy missing_emb_vec.subspan(1, EMB_VEC_SIZE).at(p#q#idx, _) => local_emb_vec_src;
-        dma.copy missing_index.subspan(1).at(p#q#idx) => index;
-        dma.copy output_emb_vec.subspan(1, EMB_VEC_SIZE).at(index.at(0), _) => local_emb_vec_dst;
-        foreach {j} in [EMB_VEC_SIZE] {
-            local_emb_vec_dst.at(j) = local_emb_vec_src.at(j);
-        }
-        dma.copy local_emb_vec_dst => output_emb_vec.subspan(1, EMB_VEC_SIZE).at(index.at(0), _);
-      }
-    }
-  }
-}
-
-
-// 优化版本 - 充分利用GCU的2个cluster和每个cluster的10个threads
+// Optimized version - make full use of GCU's 2 clusters and 10 threads per cluster
 __co__ void merge_emb_vec_optimized(f32[LEN, EMB_VEC_SIZE] missing_emb_vec, u32[LEN] missing_index, f32[LEN, EMB_VEC_SIZE] output_emb_vec) {
   parallel p by 2 { // launch 1 cluster
     parallel q by 10 { // launch 10 sips
-      // 计算每个线程处理的数据块大小
+      // Calculate the block size for each thread
       int block_size = LEN / #p / #q;
       
-      // 为每个线程分配本地存储
+      // Allocate local storage for each thread
       local f32[block_size, EMB_VEC_SIZE] local_emb_vec_dst;
       local f32[LEN, EMB_VEC_SIZE] local_emb_vec_src;
       local u32[LEN] local_index;
       
-      // 从全局内存拷贝数据到本地
+      // Copy data from global memory to local
       dma.copy output_emb_vec.chunkat(p#q, _) => local_emb_vec_dst;
       dma.copy missing_emb_vec => local_emb_vec_src;
       dma.copy missing_index => local_index;
       
       call fill_missing_with_bounds(local_emb_vec_dst, local_emb_vec_src, local_index, block_size, #p, #q);
       
-      // 将结果写回全局内存
+      // Write back the result to global memory
       dma.copy local_emb_vec_dst => output_emb_vec.chunkat(p#q, _);
     }
   }
 }
 
 
-// ================== CPU参考实现搬运 ==================
+// ================== CPU reference implementation ==================
 #include <stdint.h>
 #include <math.h>
 #include <stdio.h>
@@ -152,7 +130,7 @@ void merge_emb_vec_cpu_advanced(float* output_emb_vec, const float* missing_emb_
     }
 }
 
-// ================== main测试函数 ==================
+// ================== main test function ==================
 int main() {
     float missing_emb_vec[LEN][EMB_VEC_SIZE];
     uint32_t missing_index[LEN];
@@ -160,31 +138,30 @@ int main() {
     float output_cpu[LEN][EMB_VEC_SIZE] = {0};
     float output_opt[LEN][EMB_VEC_SIZE] = {0};
     float output_adv[LEN][EMB_VEC_SIZE] = {0};
-    // 随机生成输入
+    // Randomly generate input
     for (int i = 0; i < LEN; ++i) {
         missing_index[i] = rand() % LEN;
         for (int j = 0; j < EMB_VEC_SIZE; ++j) {
             missing_emb_vec[i][j] = ((float)rand() / RAND_MAX) * 2.0f - 1.0f;
         }
     }
-    // CPU参考实现
+    // CPU reference implementation
     merge_emb_vec_cpu(&output_cpu[0][0], &missing_emb_vec[0][0], missing_index, LEN, EMB_VEC_SIZE);
     merge_emb_vec_cpu_optimized(&output_opt[0][0], &missing_emb_vec[0][0], missing_index, LEN, EMB_VEC_SIZE);
     merge_emb_vec_cpu_advanced(&output_adv[0][0], &missing_emb_vec[0][0], missing_index, LEN, EMB_VEC_SIZE);
-    // choreo算子调用
+    // choreo operator call
     auto missing_index_view = choreo::make_spanview<1, choreo::u32>((uint32_t*)missing_index, {LEN});
     auto missing_emb_vec_view = choreo::make_spanview<2, choreo::f32>((float*)missing_emb_vec, {LEN, EMB_VEC_SIZE});
     auto output_choreo_view = choreo::make_spanview<2, choreo::f32>((float*)output_choreo, {LEN, EMB_VEC_SIZE});
     
-    // 原始版本
+    // Original version
     // merge_emb_vec(missing_emb_vec_view, missing_index_view, output_choreo_view);
     
-    // 使用优化版本
-    // merge_emb_vec_optimized(missing_emb_vec_view, missing_index_view, output_choreo_view);
-    merge_emb_vec_direct(missing_emb_vec_view, missing_index_view, output_choreo_view);
+    // Use optimized version
+    merge_emb_vec_optimized(missing_emb_vec_view, missing_index_view, output_choreo_view);
 
     
-    // 校验
+    // Verification
     int fail = 0;
     for (int i = 0; i < LEN; ++i) {
         for (int j = 0; j < EMB_VEC_SIZE; ++j) {
@@ -197,7 +174,7 @@ int main() {
         }
     }
     printf("merge_emb_vec: %s\n", fail ? "FAIL" : "PASS");
-    // 其它版本一致性
+    // Consistency with other versions
     int opt_fail = 0, adv_fail = 0;
     for (int i = 0; i < LEN * EMB_VEC_SIZE; ++i) {
         if (fabs(output_cpu[0][i] - output_opt[0][i]) > 1e-5) opt_fail = 1;

@@ -1,6 +1,6 @@
-// cse/fill_default_emb_vec_basic.co - 默认值填充函数（choreo版本）- 未优化版本
+// cse/fill_default_emb_vec_basic.co - Default value fill function (choreo version) - unoptimized version
 
-// 使用常量定义
+// Use constant definitions
 #include "choreo.h"
 #define LEN 1000
 #define EMB_VEC_SIZE 64
@@ -16,7 +16,7 @@ __co_device__ void fill_default(float* table, unsigned int* index) {
     }
 }
 
-// 带边界检查的设备函数
+// Device function with boundary check
 __co_device__ void fill_default_with_bounds(float* output, unsigned int* index, int block_size, int bDim, int tDim) {
   int start_idx = (blockIdx.x * tDim + threadIdx.x) * block_size;
   int end_idx = start_idx + block_size;
@@ -28,11 +28,11 @@ __co_device__ void fill_default_with_bounds(float* output, unsigned int* index, 
     unsigned int dst_idx = index[i];
     // if (blockIdx.x == 1 && threadIdx.x == 1) printf("i = %d; idx = %d\n", i, dst_idx);
     // if (blockIdx.x == 1 && threadIdx.x == 1) printf("hit or not = %s\n", ((dst_idx >= start_idx && dst_idx < end_idx) ? "true" : "false"));
-    // 检查索引是否在当前线程负责范围内
+    // Check if the index is within the range handled by the current thread
     if (dst_idx >= start_idx && dst_idx < end_idx) {
-      // 转换为局部索引
+      // Convert to local index
       int local_dst_idx = dst_idx - start_idx;
-      // 使用循环展开提高性能
+      // Use loop unrolling to improve performance
       for (int j = 0; j < EMB_VEC_SIZE; ++j) {
         output[local_dst_idx * EMB_VEC_SIZE + j] = DEFAULT_VALUE;
       }
@@ -43,7 +43,7 @@ __co_device__ void fill_default_with_bounds(float* output, unsigned int* index, 
 
 }
 
-// 实现fill_default_emb_vec函数 - 未优化版本
+// Implement fill_default_emb_vec function - unoptimized version
 __co__ void fill_default_emb_vec(u32[LEN] missing_index, f32[LEN, EMB_VEC_SIZE] output_emb_vec) {
 
   parallel p by 1 {
@@ -81,7 +81,7 @@ __co__ void fill_default_emb_vec(u32[LEN] missing_index, f32[LEN, EMB_VEC_SIZE] 
 // }
 
 // TODO: 1. call use global not report; 2. at use non-local.
-// 优化版本 - 充分利用GCU的2个cluster和每个cluster的12个threads
+// Optimized version - fully utilize 2 clusters of GCU and 12 threads per cluster
 __co__ void fill_default_emb_vec_optimized(u32[LEN] missing_index, f32[LEN, EMB_VEC_SIZE] output_emb_vec) {
   // TODO: when p == 2, error
   parallel p by 2 { // launch 1 cluster
@@ -93,14 +93,14 @@ __co__ void fill_default_emb_vec_optimized(u32[LEN] missing_index, f32[LEN, EMB_
     dma.copy missing_index => shared_index;
 
     parallel q by 10 { // launch 10 sips
-      // 计算每个线程处理的数据块大小
+      // Calculate the block size handled by each thread
       int block_size = LEN / #p / #q;
       
-      // 为每个线程分配本地存储
+      // Allocate local storage for each thread
       local f32[block_size, EMB_VEC_SIZE] local_emb_vec;
       local u32[LEN] local_index;
       
-      // 从全局内存拷贝数据到本地
+      // Copy data from global memory to local
       // TODO: subspan not report shape error
       // style 1, use subspan, this syntax use like tile to
       dma.copy shared_emb_vec.subspan(block_size, EMB_VEC_SIZE).at(q, _) => local_emb_vec;
@@ -121,7 +121,7 @@ __co__ void fill_default_emb_vec_optimized(u32[LEN] missing_index, f32[LEN, EMB_
       // local_emb_vec.at(i, j) = 0.5f;
       call fill_default_with_bounds(local_emb_vec, local_index, block_size, #p, #q);
       
-      // 将结果写回全局内存
+      // Write the result back to global memory
 
       // style 3
       // dma.copy local_emb_vec => output_emb_vec.chunkat(p#q, _);
@@ -135,7 +135,7 @@ __co__ void fill_default_emb_vec_optimized(u32[LEN] missing_index, f32[LEN, EMB_
 }
 
 
-// --- CPU参考实现 ---
+// --- CPU reference implementation ---
 void fill_default_emb_vec_cpu(float* output_emb_vec, const float default_emb_vec,
     const unsigned int* missing_index, const size_t len,
     const size_t emb_vec_size) {
@@ -185,7 +185,7 @@ void fill_default_emb_vec_cpu_advanced(float* output_emb_vec, const float defaul
     }
 }
 
-// --- main函数：对比choreo和CPU实现 ---
+// --- main function: compare choreo and CPU implementation ---
 int main() {
     float output_choreo[LEN][EMB_VEC_SIZE] = {0};
     float output_cpu[LEN][EMB_VEC_SIZE] = {0};
@@ -195,26 +195,20 @@ int main() {
 
     // for (int i = 0; i < LEN; ++i) printf("missing index[%d] = %d\n", i, missing_index[i]);
 
-    // CPU实现
     fill_default_emb_vec_cpu(&output_cpu[0][0], DEFAULT_VALUE, missing_index, LEN, EMB_VEC_SIZE);
 
-    // choreo调用
     auto missing_index_view = choreo::make_spanview<1, choreo::u32>((unsigned int*)missing_index, {LEN});
     auto output_choreo_view = choreo::make_spanview<2, choreo::f32>((float*)output_choreo, {LEN, EMB_VEC_SIZE});
     
-    // 如果需要对比原始版本，可以取消下面的注释
     // fill_default_emb_vec(missing_index_view, output_choreo_view);
     
     // use direct computation not call
     // fill_default_emb_vec_direct(missing_index_view, output_choreo_view);
     
-    // 使用优化版本的函数
     fill_default_emb_vec_optimized(missing_index_view, output_choreo_view);
 
-    // 使用新的优化版本v2
     // fill_default_emb_vec_optimized_v2(missing_index_view, output_choreo_view);
 
-    // 校验
     bool match = true;
     for (int i = 0; i < LEN; ++i) {
         for (int j = 0; j < EMB_VEC_SIZE; ++j) {
@@ -230,4 +224,4 @@ int main() {
     if (match) printf("fill_default_emb_vec: PASS\n");
     else printf("fill_default_emb_vec: FAIL\n");
     return 0;
-} 
+}

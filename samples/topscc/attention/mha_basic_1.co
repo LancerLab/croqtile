@@ -8,8 +8,8 @@ __co__ f32[B, S, D] mha_basic_1(f32[B, S, D] Q, f32[B, S, D] K, f32[B, S, D] V) 
         // 2. attn = softmax(attn)
         // 3. out = attn x V
         // 4. O = out
-        // (伪代码，实际kernel略)
+        // (Pseudocode, actual kernel omitted)
         dma.copy out => O.chunkat(b, _, _);
     }
     return O;
-} 
+}

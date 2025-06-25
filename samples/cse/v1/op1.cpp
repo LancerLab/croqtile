@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include <math.h>
-#include <string.h>  // 添加memcpy支持
+#include <string.h>  // Add memcpy support
 // #include <future>
 // #include <vector>
 // #include <chrono>
@@ -13,11 +13,11 @@
 #include <cuda_runtime.h>
 // #include <functional>
 
-// 测试配置常量 - 确保所有测试使用相同参数
-#define TEST_LEN 1000        // 使用较大数据量以获得更稳定的时间测量
+// Test configuration constants - ensure all tests use the same parameters
+#define TEST_LEN 1000        // Use larger data for more stable timing
 #define TEST_EMB_VEC_SIZE 64
 #define TEST_BLOCK_SIZE 256
-#define RANDOM_SEED 12345    // 固定随机种子确保数据一致性
+#define RANDOM_SEED 12345    // Fixed random seed for data consistency
 
 // Forward declarations of async functions
 void merge_emb_vec_async(float* d_output, const float* d_input, const uint64_t* d_index,
@@ -62,21 +62,21 @@ using DecompressFunc = void(*)(const float*, const uint64_t*, float*, size_t, si
 void fill_default_emb_vec_cpu_optimized(float* output_emb_vec, const float default_emb_vec,
     const uint64_t* missing_index, const size_t len,
     const size_t emb_vec_size) {
-    // 使用双层循环避免除法和模运算
+    // Use double loop to avoid division and modulo operations
     for (size_t i = 0; i < len; i++) {
         size_t dst_emb_vec = missing_index[i];
         float* dst_ptr = output_emb_vec + dst_emb_vec * emb_vec_size;
 
-        // 向量化填充 - 一次处理多个float值
+        // Vectorized fill - process multiple floats at once
         size_t j = 0;
-        // 4个float为一组进行处理，提升缓存效率
+        // Process 4 floats at a time to improve cache efficiency
         for (; j + 3 < emb_vec_size; j += 4) {
             dst_ptr[j] = default_emb_vec;
             dst_ptr[j + 1] = default_emb_vec;
             dst_ptr[j + 2] = default_emb_vec;
             dst_ptr[j + 3] = default_emb_vec;
         }
-        // 处理剩余的元素
+        // Handle remaining elements
         for (; j < emb_vec_size; j++) {
             dst_ptr[j] = default_emb_vec;
         }
@@ -86,22 +86,22 @@ void fill_default_emb_vec_cpu_optimized(float* output_emb_vec, const float defau
 void merge_emb_vec_cpu_optimized(float* output_emb_vec, const float* missing_emb_vec,
                   const uint64_t* missing_index, const size_t len,
                   const size_t emb_vec_size) {
-    // 使用双层循环避免除法和模运算
+    // Use double loop to avoid division and modulo operations
     for (size_t i = 0; i < len; i++) {
         size_t dst_emb_vec = missing_index[i];
         const float* src_ptr = missing_emb_vec + i * emb_vec_size;
         float* dst_ptr = output_emb_vec + dst_emb_vec * emb_vec_size;
 
-        // 向量化拷贝，利用内存局部性
+        // Vectorized copy, utilize memory locality
         size_t j = 0;
-        // 4个float为一组进行处理
+        // Process 4 floats at a time
         for (; j + 3 < emb_vec_size; j += 4) {
             dst_ptr[j] = src_ptr[j];
             dst_ptr[j + 1] = src_ptr[j + 1];
             dst_ptr[j + 2] = src_ptr[j + 2];
             dst_ptr[j + 3] = src_ptr[j + 3];
         }
-        // 处理剩余的元素
+        // Handle remaining elements
         for (; j < emb_vec_size; j++) {
             dst_ptr[j] = src_ptr[j];
         }
@@ -111,27 +111,27 @@ void merge_emb_vec_cpu_optimized(float* output_emb_vec, const float* missing_emb
 void decompress_emb_vec_cpu_optimized(const float* src_emb_vec, const uint64_t* src_index,
                        float* dst_emb_vec, const size_t len,
                        const size_t emb_vec_size) {
-    // 对于小的emb_vec_size，简单的循环更高效
+    // For small emb_vec_size, simple loop is more efficient
     if (emb_vec_size <= 8) {
         for (size_t i = 0; i < len; i++) {
             size_t src_idx = src_index[i];
             const float* src_ptr = src_emb_vec + src_idx * emb_vec_size;
             float* dst_ptr = dst_emb_vec + i * emb_vec_size;
-            // 简单循环，避免展开开销
+            // Simple loop, avoid unrolling overhead
             for (size_t j = 0; j < emb_vec_size; j++) {
                 dst_ptr[j] = src_ptr[j];
             }
         }
     } else {
-        // 对于大的emb_vec_size，使用向量化拷贝
+        // For large emb_vec_size, use vectorized copy
         for (size_t i = 0; i < len; i++) {
             size_t src_idx = src_index[i];
             const float* src_ptr = src_emb_vec + src_idx * emb_vec_size;
             float* dst_ptr = dst_emb_vec + i * emb_vec_size;
 
-            // 向量化拷贝
+            // Vectorized copy
             size_t j = 0;
-            // 8个float为一组进行处理，提升缓存利用率
+            // Process 8 floats at a time to improve cache utilization
             for (; j + 7 < emb_vec_size; j += 8) {
                 dst_ptr[j] = src_ptr[j];
                 dst_ptr[j + 1] = src_ptr[j + 1];
@@ -142,7 +142,7 @@ void decompress_emb_vec_cpu_optimized(const float* src_emb_vec, const uint64_t* 
                 dst_ptr[j + 6] = src_ptr[j + 6];
                 dst_ptr[j + 7] = src_ptr[j + 7];
             }
-            // 处理剩余的元素
+            // Handle remaining elements
             for (; j < emb_vec_size; j++) {
                 dst_ptr[j] = src_ptr[j];
             }
@@ -187,15 +187,15 @@ void decompress_emb_vec_cpu(const float* src_emb_vec, const uint64_t* src_index,
   }
 }
 
-// 更高级的优化版本
+// More advanced optimized version
 void merge_emb_vec_cpu_advanced(float* output_emb_vec, const float* missing_emb_vec,
                   const uint64_t* missing_index, const size_t len,
                   const size_t emb_vec_size) {
-    // 当向量大小较大时，使用memcpy会更高效
+    // For large vectors, using memcpy is more efficient
     const size_t vec_size_bytes = emb_vec_size * sizeof(float);
 
     if (emb_vec_size >= 16) {
-        // 对于大向量，使用memcpy
+        // For large vectors, use memcpy
         for (size_t i = 0; i < len; i++) {
             size_t dst_emb_vec = missing_index[i];
             const float* src_ptr = missing_emb_vec + i * emb_vec_size;
@@ -203,7 +203,7 @@ void merge_emb_vec_cpu_advanced(float* output_emb_vec, const float* missing_emb_
             memcpy(dst_ptr, src_ptr, vec_size_bytes);
         }
     } else {
-        // 对于小向量，使用优化的循环展开
+        // For small vectors, use optimized loop unrolling
         merge_emb_vec_cpu_optimized(output_emb_vec, missing_emb_vec, missing_index, len, emb_vec_size);
     }
 }
@@ -213,7 +213,7 @@ void fill_default_emb_vec_cpu_advanced(float* output_emb_vec, const float defaul
     const size_t emb_vec_size) {
 
     if (emb_vec_size >= 8) {
-        // 对于较大的向量，先创建一个模板向量，然后使用memcpy
+        // For larger vectors, create a template vector and use memcpy
         float* template_vec = (float*)malloc(emb_vec_size * sizeof(float));
         for (size_t j = 0; j < emb_vec_size; j++) {
             template_vec[j] = default_emb_vec;
@@ -227,7 +227,7 @@ void fill_default_emb_vec_cpu_advanced(float* output_emb_vec, const float defaul
 
         free(template_vec);
     } else {
-        // 对于小向量，使用优化的循环展开
+        // For small vectors, use optimized loop unrolling
         fill_default_emb_vec_cpu_optimized(output_emb_vec, default_emb_vec, missing_index, len, emb_vec_size);
     }
 }
@@ -238,7 +238,7 @@ void decompress_emb_vec_cpu_advanced(const float* src_emb_vec, const uint64_t* s
     const size_t vec_size_bytes = emb_vec_size * sizeof(float);
 
     if (emb_vec_size >= 16) {
-        // 对于大向量，使用memcpy
+        // For large vectors, use memcpy
         for (size_t i = 0; i < len; i++) {
             size_t src_idx = src_index[i];
             const float* src_ptr = src_emb_vec + src_idx * emb_vec_size;
@@ -246,7 +246,7 @@ void decompress_emb_vec_cpu_advanced(const float* src_emb_vec, const uint64_t* s
             memcpy(dst_ptr, src_ptr, vec_size_bytes);
         }
     } else {
-        // 对于小向量，使用优化的循环展开
+        // For small vectors, use optimized loop unrolling
         decompress_emb_vec_cpu_optimized(src_emb_vec, src_index, dst_emb_vec, len, emb_vec_size);
     }
 }
@@ -341,7 +341,7 @@ void generate_test_data(/* std::vector<float>& */ float* data, size_t size) {
   /* std::random_device rd;
   std::mt19937 gen(rd());
   std::uniform_real_distribution<float> dis(-1.0f, 1.0f); */
-  // 种子已在调用点设置
+  // Seed is set at the call site
   for (size_t i = 0; i < size; i++) {
     data[i] = ((float)rand() / RAND_MAX) * 2.0f - 1.0f;
   }
@@ -351,7 +351,7 @@ void generate_index_data(/* std::vector<uint64_t>& */ uint64_t* data, size_t siz
   /* std::random_device rd;
   std::mt19937 gen(rd());
   std::uniform_int_distribution<uint64_t> dis(0, max_value - 1); */
-  // 注意：不在这里设置srand，因为generate_test_data已经设置了种子
+  // Note: do not set srand here, as generate_test_data already sets the seed
   for (size_t i = 0; i < size; i++) {
     data[i] = rand() % max_value;
   }
@@ -368,118 +368,118 @@ void performance_comparison_test() {
     const size_t len = TEST_LEN;
     const size_t emb_vec_size = TEST_EMB_VEC_SIZE;
 
-    // 输出测试配置
-    printf("=== CPU算子性能比较测试 ===\n");
-    printf("测试配置: len=%zu, emb_vec_size=%zu\n", len, emb_vec_size);
-    printf("注意: 所有时间测量基于相同的数据量以确保可比性\n");
+    // Output test configuration
+    printf("=== CPU operator performance comparison test ===\n");
+    printf("Test config: len=%zu, emb_vec_size=%zu\n", len, emb_vec_size);
+    printf("Note: All timing is based on the same data size for comparability\n");
 
-    // 分配内存
+    // Allocate memory
     float* h_input = (float*)malloc(len * emb_vec_size * sizeof(float));
     float* h_output_original = (float*)malloc(len * emb_vec_size * sizeof(float));
     float* h_output_optimized = (float*)malloc(len * emb_vec_size * sizeof(float));
     float* h_output_advanced = (float*)malloc(len * emb_vec_size * sizeof(float));
     uint64_t* h_index = (uint64_t*)malloc(len * sizeof(uint64_t));
 
-    // 确保每次测试使用相同的数据
+    // Ensure each test uses the same data
     srand(RANDOM_SEED);
     generate_test_data(h_input, len * emb_vec_size);
     generate_index_data(h_index, len, len);
 
-    // 测试merge_emb_vec函数
-    printf("\n--- merge_emb_vec 性能比较 ---\n");
+    // Test merge_emb_vec function
+    printf("\n--- merge_emb_vec performance comparison ---\n");
 
-    // 原始版本
+    // Original version
     clock_t start = clock();
     merge_emb_vec_cpu(h_output_original, h_input, h_index, len, emb_vec_size);
     clock_t end = clock();
     double original_time = ((double)(end - start)) / CLOCKS_PER_SEC * 1000000;
 
-    // 优化版本
+    // Optimized version
     start = clock();
     merge_emb_vec_cpu_optimized(h_output_optimized, h_input, h_index, len, emb_vec_size);
     end = clock();
     double optimized_time = ((double)(end - start)) / CLOCKS_PER_SEC * 1000000;
 
-    // 高级版本
+    // Advanced version
     start = clock();
     merge_emb_vec_cpu_advanced(h_output_advanced, h_input, h_index, len, emb_vec_size);
     end = clock();
     double advanced_time = ((double)(end - start)) / CLOCKS_PER_SEC * 1000000;
 
-    // 验证结果一致性
+    // Verify result consistency
     bool optimized_match = compare_vectors(h_output_original, h_output_optimized, len * emb_vec_size);
     bool advanced_match = compare_vectors(h_output_original, h_output_advanced, len * emb_vec_size);
 
-    printf("原始版本时间: %.2f 微秒\n", original_time);
-    printf("优化版本时间: %.2f 微秒 (加速比: %.2fx, 结果匹配: %s)\n",
-           optimized_time, original_time / optimized_time, optimized_match ? "是" : "否");
-    printf("高级版本时间: %.2f 微秒 (加速比: %.2fx, 结果匹配: %s)\n",
-           advanced_time, original_time / advanced_time, advanced_match ? "是" : "否");
+    printf("Original version time: %.2f us\n", original_time);
+    printf("Optimized version time: %.2f us (Speedup: %.2fx, Match: %s)\n",
+           optimized_time, original_time / optimized_time, optimized_match ? "Yes" : "No");
+    printf("Advanced version time: %.2f us (Speedup: %.2fx, Match: %s)\n",
+           advanced_time, original_time / advanced_time, advanced_match ? "Yes" : "No");
 
-    // 测试fill_default_emb_vec函数
-    printf("\n--- fill_default_emb_vec 性能比较 ---\n");
+    // Test fill_default_emb_vec function
+    printf("\n--- fill_default_emb_vec performance comparison ---\n");
     float default_value = 0.5f;
 
-    // 原始版本
+    // Original version
     start = clock();
     fill_default_emb_vec_cpu(h_output_original, default_value, h_index, len, emb_vec_size);
     end = clock();
     original_time = ((double)(end - start)) / CLOCKS_PER_SEC * 1000000;
 
-    // 优化版本
+    // Optimized version
     start = clock();
     fill_default_emb_vec_cpu_optimized(h_output_optimized, default_value, h_index, len, emb_vec_size);
     end = clock();
     optimized_time = ((double)(end - start)) / CLOCKS_PER_SEC * 1000000;
 
-    // 高级版本
+    // Advanced version
     start = clock();
     fill_default_emb_vec_cpu_advanced(h_output_advanced, default_value, h_index, len, emb_vec_size);
     end = clock();
     advanced_time = ((double)(end - start)) / CLOCKS_PER_SEC * 1000000;
 
-    // 验证结果一致性
+    // Verify result consistency
     optimized_match = compare_vectors(h_output_original, h_output_optimized, len * emb_vec_size);
     advanced_match = compare_vectors(h_output_original, h_output_advanced, len * emb_vec_size);
 
-    printf("原始版本时间: %.2f 微秒\n", original_time);
-    printf("优化版本时间: %.2f 微秒 (加速比: %.2fx, 结果匹配: %s)\n",
-           optimized_time, original_time / optimized_time, optimized_match ? "是" : "否");
-    printf("高级版本时间: %.2f 微秒 (加速比: %.2fx, 结果匹配: %s)\n",
-           advanced_time, original_time / advanced_time, advanced_match ? "是" : "否");
+    printf("Original version time: %.2f us\n", original_time);
+    printf("Optimized version time: %.2f us (Speedup: %.2fx, Match: %s)\n",
+           optimized_time, original_time / optimized_time, optimized_match ? "Yes" : "No");
+    printf("Advanced version time: %.2f us (Speedup: %.2fx, Match: %s)\n",
+           advanced_time, original_time / advanced_time, advanced_match ? "Yes" : "No");
 
-    // 测试decompress_emb_vec函数
-    printf("\n--- decompress_emb_vec 性能比较 ---\n");
+    // Test decompress_emb_vec function
+    printf("\n--- decompress_emb_vec performance comparison ---\n");
 
-    // 原始版本
+    // Original version
     start = clock();
     decompress_emb_vec_cpu(h_input, h_index, h_output_original, len, emb_vec_size);
     end = clock();
     original_time = ((double)(end - start)) / CLOCKS_PER_SEC * 1000000;
 
-    // 优化版本
+    // Optimized version
     start = clock();
     decompress_emb_vec_cpu_optimized(h_input, h_index, h_output_optimized, len, emb_vec_size);
     end = clock();
     optimized_time = ((double)(end - start)) / CLOCKS_PER_SEC * 1000000;
 
-    // 高级版本
+    // Advanced version
     start = clock();
     decompress_emb_vec_cpu_advanced(h_input, h_index, h_output_advanced, len, emb_vec_size);
     end = clock();
     advanced_time = ((double)(end - start)) / CLOCKS_PER_SEC * 1000000;
 
-    // 验证结果一致性
+    // Verify result consistency
     optimized_match = compare_vectors(h_output_original, h_output_optimized, len * emb_vec_size);
     advanced_match = compare_vectors(h_output_original, h_output_advanced, len * emb_vec_size);
 
-    printf("原始版本时间: %.2f 微秒\n", original_time);
-    printf("优化版本时间: %.2f 微秒 (加速比: %.2fx, 结果匹配: %s)\n",
-           optimized_time, original_time / optimized_time, optimized_match ? "是" : "否");
-    printf("高级版本时间: %.2f 微秒 (加速比: %.2fx, 结果匹配: %s)\n",
-           advanced_time, original_time / advanced_time, advanced_match ? "是" : "否");
+    printf("Original version time: %.2f us\n", original_time);
+    printf("Optimized version time: %.2f us (Speedup: %.2fx, Match: %s)\n",
+           optimized_time, original_time / optimized_time, optimized_match ? "Yes" : "No");
+    printf("Advanced version time: %.2f us (Speedup: %.2fx, Match: %s)\n",
+           advanced_time, original_time / advanced_time, advanced_match ? "Yes" : "No");
 
-    // 释放内存
+    // Free memory
     free(h_input);
     free(h_output_original);
     free(h_output_optimized);
@@ -492,10 +492,10 @@ void test_functions() {
   const size_t emb_vec_size = TEST_EMB_VEC_SIZE;
   const size_t BLOCK_SIZE = TEST_BLOCK_SIZE;
 
-  // 输出GPU vs CPU测试配置
-  printf("\n=== GPU vs CPU 性能对比测试 ===\n");
-  printf("测试配置: len=%zu, emb_vec_size=%zu, block_size=%zu\n", len, emb_vec_size, BLOCK_SIZE);
-  printf("使用高级优化版本的CPU函数进行对比\n");
+  // Output GPU vs CPU test configuration
+  printf("\n=== GPU vs CPU performance comparison test ===\n");
+  printf("Test config: len=%zu, emb_vec_size=%zu, block_size=%zu\n", len, emb_vec_size, BLOCK_SIZE);
+  printf("Using advanced optimized CPU functions for comparison\n");
 
   /* std::vector<float> h_input(len * emb_vec_size);
   std::vector<float> h_output_cpu(len * emb_vec_size);
@@ -506,7 +506,7 @@ void test_functions() {
   float* h_output_gpu = (float*)malloc(len * emb_vec_size * sizeof(float));
   uint64_t* h_index = (uint64_t*)malloc(len * sizeof(uint64_t));
 
-  // 确保每次测试使用相同的数据
+  // Ensure each test uses the same data
   srand(RANDOM_SEED);
   generate_test_data(h_input, len * emb_vec_size);
   generate_index_data(h_index, len, len);
@@ -524,8 +524,8 @@ void test_functions() {
   FillDefaultFunc fill_default_func = fill_default_emb_vec_async;
   DecompressFunc decompress_func = decompress_emb_vec_async;
 
-  /* std::cout << "\n测试 merge_emb_vec 函数:\n"; */
-  printf("\n测试 merge_emb_vec 函数:\n");
+  /* std::cout << "\nTesting merge_emb_vec function:\n"; */
+  printf("\nTesting merge_emb_vec function:\n");
   {
     /* auto start = std::chrono::high_resolution_clock::now(); */
     clock_t start = clock();
@@ -551,18 +551,18 @@ void test_functions() {
     double gpu_time = ((double)(end - start)) / CLOCKS_PER_SEC * 1000000;
 
     bool results_match = compare_vectors(h_output_cpu, h_output_gpu, len * emb_vec_size);
-    /* std::cout << "结果匹配: " << (results_match ? "是" : "否") << std::endl;
-    std::cout << "CPU时间: " << cpu_time << " 微秒" << std::endl;
-    std::cout << "GPU时间: " << gpu_time << " 微秒" << std::endl;
-    std::cout << "加速比: " << static_cast<float>(cpu_time) / gpu_time << "x" << std::endl; */
-    printf("结果匹配: %s\n", results_match ? "是" : "否");
-    printf("CPU时间: %.2f 微秒\n", cpu_time);
-    printf("GPU时间: %.2f 微秒\n", gpu_time);
-    printf("加速比: %.2fx\n", (float)cpu_time / gpu_time);
+    /* std::cout << "Result match: " << (results_match ? "Yes" : "No") << std::endl;
+    std::cout << "CPU time: " << cpu_time << " us" << std::endl;
+    std::cout << "GPU time: " << gpu_time << " us" << std::endl;
+    std::cout << "Speedup: " << static_cast<float>(cpu_time) / gpu_time << "x" << std::endl; */
+    printf("Result match: %s\n", results_match ? "Yes" : "No");
+    printf("CPU time: %.2f us\n", cpu_time);
+    printf("GPU time: %.2f us\n", gpu_time);
+    printf("Speedup: %.2fx\n", (float)cpu_time / gpu_time);
   }
 
-  /* std::cout << "\n测试 fill_default_emb_vec 函数:\n"; */
-  printf("\n测试 fill_default_emb_vec 函数:\n");
+  /* std::cout << "\nTesting fill_default_emb_vec function:\n"; */
+  printf("\nTesting fill_default_emb_vec function:\n");
   {
     float default_value = 0.5f;
 
@@ -587,18 +587,18 @@ void test_functions() {
     double gpu_time = ((double)(end - start)) / CLOCKS_PER_SEC * 1000000;
 
     bool results_match = compare_vectors(h_output_cpu, h_output_gpu, len * emb_vec_size);
-    /* std::cout << "结果匹配: " << (results_match ? "是" : "否") << std::endl;
-    std::cout << "CPU时间: " << cpu_time << " 微秒" << std::endl;
-    std::cout << "GPU时间: " << gpu_time << " 微秒" << std::endl;
-    std::cout << "加速比: " << static_cast<float>(cpu_time) / gpu_time << "x" << std::endl; */
-    printf("结果匹配: %s\n", results_match ? "是" : "否");
-    printf("CPU时间: %.2f 微秒\n", cpu_time);
-    printf("GPU时间: %.2f 微秒\n", gpu_time);
-    printf("加速比: %.2fx\n", (float)cpu_time / gpu_time);
+    /* std::cout << "Result match: " << (results_match ? "Yes" : "No") << std::endl;
+    std::cout << "CPU time: " << cpu_time << " us" << std::endl;
+    std::cout << "GPU time: " << gpu_time << " us" << std::endl;
+    std::cout << "Speedup: " << static_cast<float>(cpu_time) / gpu_time << "x" << std::endl; */
+    printf("Result match: %s\n", results_match ? "Yes" : "No");
+    printf("CPU time: %.2f us\n", cpu_time);
+    printf("GPU time: %.2f us\n", gpu_time);
+    printf("Speedup: %.2fx\n", (float)cpu_time / gpu_time);
   }
 
-  /* std::cout << "\n测试 decompress_emb_vec 函数:\n"; */
-  printf("\n测试 decompress_emb_vec 函数:\n");
+  /* std::cout << "\nTesting decompress_emb_vec function:\n"; */
+  printf("\nTesting decompress_emb_vec function:\n");
   {
     /* auto start = std::chrono::high_resolution_clock::now(); */
     clock_t start = clock();
@@ -622,14 +622,14 @@ void test_functions() {
     double gpu_time = ((double)(end - start)) / CLOCKS_PER_SEC * 1000000;
 
     bool results_match = compare_vectors(h_output_cpu, h_output_gpu, len * emb_vec_size);
-    /* std::cout << "结果匹配: " << (results_match ? "是" : "否") << std::endl;
-    std::cout << "CPU时间: " << cpu_time << " 微秒" << std::endl;
-    std::cout << "GPU时间: " << gpu_time << " 微秒" << std::endl;
-    std::cout << "加速比: " << static_cast<float>(cpu_time) / gpu_time << "x" << std::endl; */
-    printf("结果匹配: %s\n", results_match ? "是" : "否");
-    printf("CPU时间: %.2f 微秒\n", cpu_time);
-    printf("GPU时间: %.2f 微秒\n", gpu_time);
-    printf("加速比: %.2fx\n", (float)cpu_time / gpu_time);
+    /* std::cout << "Result match: " << (results_match ? "Yes" : "No") << std::endl;
+    std::cout << "CPU time: " << cpu_time << " us" << std::endl;
+    std::cout << "GPU time: " << gpu_time << " us" << std::endl;
+    std::cout << "Speedup: " << static_cast<float>(cpu_time) / gpu_time << "x" << std::endl; */
+    printf("Result match: %s\n", results_match ? "Yes" : "No");
+    printf("CPU time: %.2f us\n", cpu_time);
+    printf("GPU time: %.2f us\n", gpu_time);
+    printf("Speedup: %.2fx\n", (float)cpu_time / gpu_time);
   }
 
   CHECK_CUDA(cudaFree(d_input));

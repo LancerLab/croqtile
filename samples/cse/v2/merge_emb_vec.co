@@ -1,0 +1,165 @@
+// cse/merge_emb_vec.co - Embedding vector merge function (op2 version)
+
+#include "choreo.h"
+#define LEN 1000
+#define EMB_VEC_SIZE 64
+
+// LEN1, not known even at runtime.
+// LEN2, known at runtime
+__co__ void merge_emb_vec_direct(f32[LEN_DYN, EMB_VEC_SIZE] missing_emb_vec, u32[LEN_DYN] missing_index, f32[LEN_UNKNOWN, EMB_VEC_SIZE] output_emb_vec) {
+
+  parallel p by 1 {
+    parallel q by 1 {
+      foreach {idx} in [LEN / #p / #q] {
+        local f32[1, EMB_VEC_SIZE] local_emb_vec_dst;
+        local f32[1, EMB_VEC_SIZE] local_emb_vec_src;
+        local u32[1] index;
+        dma.copy missing_emb_vec.subspan(1, EMB_VEC_SIZE).at(p#q#idx, _) => local_emb_vec_src;
+        dma.copy missing_index.subspan(1).at(p#q#idx) => index;
+        dma.copy output_emb_vec.subspan(1, EMB_VEC_SIZE).at(index.at(0), _) => local_emb_vec_dst;
+        foreach {j} in [EMB_VEC_SIZE] {
+            local_emb_vec_dst.at(0, j) = local_emb_vec_src.at(0, j);
+        }
+        dma.copy local_emb_vec_dst => output_emb_vec.subspan(1, EMB_VEC_SIZE).at(index.at(0), _);
+      }
+    }
+  }
+}
+
+__co__ void merge_emb_vec_direct_v2(f32[LEN_DYN, EMB_VEC_SIZE] missing_emb_vec, u32[LEN_DYN] missing_index, f32[LEN_UNKNOWN, EMB_VEC_SIZE] output_emb_vec) {
+
+  parallel p by 1 {
+    parallel q by 1 {
+      foreach {idx} in [LEN / #p / #q] {
+        local f32[1, EMB_VEC_SIZE] local_emb_vec_dst;
+        local f32[1, EMB_VEC_SIZE] local_emb_vec_src;
+        local u32[1] index;
+        dma.copy missing_emb_vec.subspan(1, EMB_VEC_SIZE).at(p#q#idx, _) => local_emb_vec_src;
+        dma.copy missing_index.subspan(1).at(p#q#idx) => index;
+        dma.copy local_emb_vec_src => output_emb_vec.subspan(1, EMB_VEC_SIZE).at(index.at(0), _);
+      }
+    }
+  }
+}
+
+
+
+// ================== CPU reference implementation ==================
+#include <stdint.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+void merge_emb_vec_cpu(float* output_emb_vec, const float* missing_emb_vec,
+                  const uint32_t* missing_index, const size_t len,
+                  const size_t emb_vec_size) {
+  for (size_t idx = 0; idx < (len * emb_vec_size); idx++) {
+    size_t src_emb_vec = idx / emb_vec_size;
+    size_t dst_emb_vec = missing_index[src_emb_vec];
+    size_t dst_float = idx % emb_vec_size;
+    output_emb_vec[dst_emb_vec * emb_vec_size + dst_float] =
+        missing_emb_vec[src_emb_vec * emb_vec_size + dst_float];
+  }
+}
+
+void merge_emb_vec_cpu_optimized(float* output_emb_vec, const float* missing_emb_vec,
+                  const uint32_t* missing_index, const size_t len,
+                  const size_t emb_vec_size) {
+    for (size_t i = 0; i < len; i++) {
+        size_t dst_emb_vec = missing_index[i];
+        const float* src_ptr = missing_emb_vec + i * emb_vec_size;
+        float* dst_ptr = output_emb_vec + dst_emb_vec * emb_vec_size;
+        size_t j = 0;
+        for (; j + 3 < emb_vec_size; j += 4) {
+            dst_ptr[j] = src_ptr[j];
+            dst_ptr[j + 1] = src_ptr[j + 1];
+            dst_ptr[j + 2] = src_ptr[j + 2];
+            dst_ptr[j + 3] = src_ptr[j + 3];
+        }
+        for (; j < emb_vec_size; j++) {
+            dst_ptr[j] = src_ptr[j];
+        }
+    }
+}
+
+void merge_emb_vec_cpu_advanced(float* output_emb_vec, const float* missing_emb_vec,
+                  const uint32_t* missing_index, const size_t len,
+                  const size_t emb_vec_size) {
+    const size_t vec_size_bytes = emb_vec_size * sizeof(float);
+    if (emb_vec_size >= 16) {
+        for (size_t i = 0; i < len; i++) {
+            size_t dst_emb_vec = missing_index[i];
+            const float* src_ptr = missing_emb_vec + i * emb_vec_size;
+            float* dst_ptr = output_emb_vec + dst_emb_vec * emb_vec_size;
+            memcpy(dst_ptr, src_ptr, vec_size_bytes);
+        }
+    } else {
+        merge_emb_vec_cpu_optimized(output_emb_vec, missing_emb_vec, missing_index, len, emb_vec_size);
+    }
+}
+
+// ================== main test function ==================
+int main() {
+    float missing_emb_vec[LEN][EMB_VEC_SIZE];
+    uint32_t missing_index[LEN];
+    float output_choreo[LEN][EMB_VEC_SIZE] = {0};
+    float output_choreo_v2[LEN][EMB_VEC_SIZE] = {0};
+    float output_cpu[LEN][EMB_VEC_SIZE] = {0};
+    float output_opt[LEN][EMB_VEC_SIZE] = {0};
+    float output_adv[LEN][EMB_VEC_SIZE] = {0};
+    // Randomly generate input
+    for (int i = 0; i < LEN; ++i) {
+        missing_index[i] = rand() % LEN;
+        for (int j = 0; j < EMB_VEC_SIZE; ++j) {
+            missing_emb_vec[i][j] = ((float)rand() / RAND_MAX) * 2.0f - 1.0f;
+        }
+    }
+    // CPU reference implementation
+    merge_emb_vec_cpu(&output_cpu[0][0], &missing_emb_vec[0][0], missing_index, LEN, EMB_VEC_SIZE);
+    merge_emb_vec_cpu_optimized(&output_opt[0][0], &missing_emb_vec[0][0], missing_index, LEN, EMB_VEC_SIZE);
+    merge_emb_vec_cpu_advanced(&output_adv[0][0], &missing_emb_vec[0][0], missing_index, LEN, EMB_VEC_SIZE);
+    // choreo operator call
+    auto missing_index_view = choreo::make_spanview<1, choreo::u32>((uint32_t*)missing_index, {LEN});
+    auto missing_emb_vec_view = choreo::make_spanview<2, choreo::f32>((float*)missing_emb_vec, {LEN, EMB_VEC_SIZE});
+    auto output_choreo_view = choreo::make_spanview<2, choreo::f32>((float*)output_choreo, {LEN, EMB_VEC_SIZE});
+    auto output_choreo_view_v2 = choreo::make_spanview<2, choreo::f32>((float*)output_choreo_v2, {LEN, EMB_VEC_SIZE});
+    
+    merge_emb_vec_direct(missing_emb_vec_view, missing_index_view, output_choreo_view);
+    
+    // Verification
+    int fail = 0;
+    for (int i = 0; i < LEN; ++i) {
+        for (int j = 0; j < EMB_VEC_SIZE; ++j) {
+            float ref = output_cpu[i][j];
+            float val = output_choreo[i][j];
+            if (fabs(ref - val) > 1e-5) {
+                fail = 1;
+                break;
+            }
+        }
+    }
+    printf("merge_emb_vec: %s\n", fail ? "FAIL" : "PASS");
+
+    merge_emb_vec_direct_v2(missing_emb_vec_view, missing_index_view, output_choreo_view_v2);
+    for (int i = 0; i < LEN; ++i) {
+        for (int j = 0; j < EMB_VEC_SIZE; ++j) {
+            float ref = output_cpu[i][j];
+            float val = output_choreo_v2[i][j];
+            if (fabs(ref - val) > 1e-5) {
+                fail = 1;
+                break;
+            }
+        }
+    }
+    printf("merge_emb_vec_v2: %s\n", fail ? "FAIL" : "PASS");
+    // Consistency with other versions
+    int opt_fail = 0, adv_fail = 0;
+    for (int i = 0; i < LEN * EMB_VEC_SIZE; ++i) {
+        if (fabs(output_cpu[0][i] - output_opt[0][i]) > 1e-5) opt_fail = 1;
+        if (fabs(output_cpu[0][i] - output_adv[0][i]) > 1e-5) adv_fail = 1;
+    }
+    printf("CPU optimized: %s\n", opt_fail ? "FAIL" : "PASS");
+    printf("CPU advanced: %s\n", adv_fail ? "FAIL" : "PASS");
+    return 0;
+}

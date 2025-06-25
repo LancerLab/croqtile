@@ -173,7 +173,7 @@ constexpr auto make_index() {
 }
 
 constexpr auto make_index(int value) {
-  return IndexDyn(value); // 返回 IndexDyn 实例
+  return IndexDyn(value); // Return IndexDyn instance
 }
 
 /////////// macros for convinience
@@ -182,7 +182,7 @@ constexpr auto make_index(int value) {
 #define DEFINE_INDEX(n) using I##n = Index<n>;
 using I = IndexDyn;
 
-// 展开所有 2 的幂次别名，从 1 到 1024
+// Expand all power-of-2 aliases, from 1 to 1024
 DEFINE_INDEX(0)
 DEFINE_INDEX(1)
 DEFINE_INDEX(2)

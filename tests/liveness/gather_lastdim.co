@@ -152,15 +152,15 @@ __co_device__ extern "C" void call_gather_kernel_2(
 }
 }
 
-// using RANK_MAX = 8; // 定义最大维度为8
+// using RANK_MAX = 8; // Define maximum rank as 8
 // struct GATHER_OP_PARAS {
-//   int in_dims[RANK_MAX];    // 输入张量的每个维度的大小
-//   int in_strides[RANK_MAX]; // 输入张量的每个维度的步长
-//   int id_dims[RANK_MAX];    // 索引张量的每个维度的大小
-//   int id_strides[RANK_MAX]; // 索引张量的每个维度的步长
-//   int dim;                  // 进行gather操作的维度
-//   int rank;                 // 张量的实际维度数
-//   int bpe; // bytes per element，每个元素占用的字节数
+//   int in_dims[RANK_MAX];    // Size of each dimension of input tensor
+//   int in_strides[RANK_MAX]; // Stride of each dimension of input tensor
+//   int id_dims[RANK_MAX];    // Size of each dimension of index tensor
+//   int id_strides[RANK_MAX]; // Stride of each dimension of index tensor
+//   int dim;                  // Dimension to perform gather operation
+//   int rank;                 // Actual number of dimensions of the tensor
+//   int bpe; // bytes per element, number of bytes per element
 // };
 
 __co__ auto foo(s32[128] off_buff_L3, s32[102400, 512] input, s32[102400, 512] id,

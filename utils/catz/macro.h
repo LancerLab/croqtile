@@ -32,7 +32,7 @@ namespace catz {
 
 #define CUDA_KERNEL_NAME(name) CONCATENATE(name, _cuda)
 
-// 检查 CUDA 错误的宏
+// Macro to check CUDA errors
 #define CUDA_CHECK_ERROR()                                                     \
   do {                                                                         \
     cudaError_t err = cudaGetLastError();                                      \

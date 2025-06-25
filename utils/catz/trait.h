@@ -18,13 +18,13 @@ constexpr bool is_compile_time_constant_v = is_compile_time_constant<T>::value;
 template <typename T, T Value, typename = void>
 struct is_integral_constant_convertible : std::false_type {};
 
-// 2. 如果能够作为模板参数，则匹配这个特化版本
+// 2. If it can be used as a template parameter, match this specialization version
 template <typename T, T Value>
 struct is_integral_constant_convertible<
     T, Value, std::void_t<decltype(std::integral_constant<T, Value>{})>>
     : std::true_type {};
 
-// 3. 简化版的判断变量是否可以转换
+// 3. Simplified version to check if a variable can be converted
 template <typename T, T Value>
 constexpr bool is_integral_constant_convertible_v =
     is_integral_constant_convertible<T, Value>::value;

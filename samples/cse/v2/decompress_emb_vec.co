@@ -1,0 +1,145 @@
+// cse/decompress_emb_vec.co - Embedding vector decompress function (v2)
+// This file implements the decompress_emb_vec_direct operator, which provides a finer-grained
+// implementation based on the at semantics, as a response to the merge_emb_vec.co v2 approach.
+
+#include "choreo.h"
+#define LEN 1000
+#define EMB_VEC_SIZE 64
+
+// New version: Finer-grained decompress_emb_vec_direct operator, refer to merge_emb_vec.co v2 style
+__co__ void decompress_emb_vec_direct(f32[LEN, EMB_VEC_SIZE] src_emb_vec, u32[LEN] src_index, f32[LEN, EMB_VEC_SIZE] dst_emb_vec) {
+  parallel p by 1 {
+    parallel q by 1 {
+      foreach {idx} in [LEN / #p / #q] {
+        local f32[1, EMB_VEC_SIZE] local_emb_vec;
+        local u32[1] index;
+        dma.copy src_index.subspan(1).at(p#q#idx) => index;
+        dma.copy src_emb_vec.subspan(1, EMB_VEC_SIZE).at(index.at(0), _) => local_emb_vec;
+        dma.copy local_emb_vec => dst_emb_vec.subspan(1, EMB_VEC_SIZE).at(p#q#idx, _);
+      }
+    }
+  }
+}
+
+// ================== CPU reference implementation ==================
+#include <stdint.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+void decompress_emb_vec_cpu(const float* src_emb_vec, const uint32_t* src_index,
+                       float* dst_emb_vec, const size_t len,
+                       const size_t emb_vec_size) {
+  for (size_t i = 0; i < len; i++) {
+    for (size_t j = 0; j < emb_vec_size; j++) {
+      size_t dst_idx = i;
+      size_t dst_float = j;
+      size_t src_idx = src_index[dst_idx];
+      dst_emb_vec[dst_idx * emb_vec_size + dst_float] =
+          src_emb_vec[src_idx * emb_vec_size + dst_float];
+    }
+  }
+}
+
+void decompress_emb_vec_cpu_optimized(const float* src_emb_vec, const uint32_t* src_index,
+                       float* dst_emb_vec, const size_t len,
+                       const size_t emb_vec_size) {
+    if (emb_vec_size <= 8) {
+        for (size_t i = 0; i < len; i++) {
+            size_t src_idx = src_index[i];
+            const float* src_ptr = src_emb_vec + src_idx * emb_vec_size;
+            float* dst_ptr = dst_emb_vec + i * emb_vec_size;
+            for (size_t j = 0; j < emb_vec_size; j++) {
+                dst_ptr[j] = src_ptr[j];
+            }
+        }
+    } else {
+        for (size_t i = 0; i < len; i++) {
+            size_t src_idx = src_index[i];
+            const float* src_ptr = src_emb_vec + src_idx * emb_vec_size;
+            float* dst_ptr = dst_emb_vec + i * emb_vec_size;
+            size_t j = 0;
+            for (; j + 7 < emb_vec_size; j += 8) {
+                dst_ptr[j] = src_ptr[j];
+                dst_ptr[j+1] = src_ptr[j+1];
+                dst_ptr[j+2] = src_ptr[j+2];
+                dst_ptr[j+3] = src_ptr[j+3];
+                dst_ptr[j+4] = src_ptr[j+4];
+                dst_ptr[j+5] = src_ptr[j+5];
+                dst_ptr[j+6] = src_ptr[j+6];
+                dst_ptr[j+7] = src_ptr[j+7];
+            }
+            for (; j < emb_vec_size; j++) {
+                dst_ptr[j] = src_ptr[j];
+            }
+        }
+    }
+}
+
+void decompress_emb_vec_cpu_advanced(const float* src_emb_vec, const uint32_t* src_index,
+                       float* dst_emb_vec, const size_t len,
+                       const size_t emb_vec_size) {
+    const size_t vec_size_bytes = emb_vec_size * sizeof(float);
+    if (emb_vec_size >= 16) {
+        for (size_t i = 0; i < len; i++) {
+            size_t src_idx = src_index[i];
+            const float* src_ptr = src_emb_vec + src_idx * emb_vec_size;
+            float* dst_ptr = dst_emb_vec + i * emb_vec_size;
+            memcpy(dst_ptr, src_ptr, vec_size_bytes);
+        }
+    } else {
+        decompress_emb_vec_cpu_optimized(src_emb_vec, src_index, dst_emb_vec, len, emb_vec_size);
+    }
+}
+
+// ================== main test function ==================
+int main() {
+    float compressed_emb_vec[LEN][EMB_VEC_SIZE];
+    uint32_t compressed_index[LEN];
+    float output_choreo[LEN][EMB_VEC_SIZE] = {0};
+    float output_cpu[LEN][EMB_VEC_SIZE] = {0};
+    float output_opt[LEN][EMB_VEC_SIZE] = {0};
+    float output_adv[LEN][EMB_VEC_SIZE] = {0};
+    // Randomly generate input
+    for (int i = 0; i < LEN; ++i) {
+        compressed_index[i] = rand() % LEN;
+        for (int j = 0; j < EMB_VEC_SIZE; ++j) {
+            compressed_emb_vec[i][j] = ((float)rand() / RAND_MAX) * 2.0f - 1.0f;
+        }
+    }
+    // CPU reference implementation
+    decompress_emb_vec_cpu(&compressed_emb_vec[0][0], compressed_index, &output_cpu[0][0], LEN, EMB_VEC_SIZE);
+    decompress_emb_vec_cpu_optimized(&compressed_emb_vec[0][0], compressed_index, &output_opt[0][0], LEN, EMB_VEC_SIZE);
+    decompress_emb_vec_cpu_advanced(&compressed_emb_vec[0][0], compressed_index, &output_adv[0][0], LEN, EMB_VEC_SIZE);
+    // choreo operator call
+    auto compressed_index_view = choreo::make_spanview<1, choreo::u32>((uint32_t*)compressed_index, {LEN});
+    auto compressed_emb_vec_view = choreo::make_spanview<2, choreo::f32>((float*)compressed_emb_vec, {LEN, EMB_VEC_SIZE});
+    auto output_choreo_view = choreo::make_spanview<2, choreo::f32>((float*)output_choreo, {LEN, EMB_VEC_SIZE});
+    
+    decompress_emb_vec_direct(compressed_emb_vec_view, compressed_index_view, output_choreo_view);
+    
+    // Verification
+    int fail = 0;
+    for (int i = 0; i < LEN; ++i) {
+        for (int j = 0; j < EMB_VEC_SIZE; ++j) {
+            float ref = output_cpu[i][j];
+            float val = output_choreo[i][j];
+            if (fabs(ref - val) > 1e-5) {
+                fail = 1;
+                break;
+            }
+        }
+    }
+    printf("decompress_emb_vec: %s\n", fail ? "FAIL" : "PASS");
+
+    // Consistency with other versions
+    int opt_fail = 0, adv_fail = 0;
+    for (int i = 0; i < LEN * EMB_VEC_SIZE; ++i) {
+        if (fabs(output_cpu[0][i] - output_opt[0][i]) > 1e-5) opt_fail = 1;
+        if (fabs(output_cpu[0][i] - output_adv[0][i]) > 1e-5) adv_fail = 1;
+    }
+    printf("CPU optimized: %s\n", opt_fail ? "FAIL" : "PASS");
+    printf("CPU advanced: %s\n", adv_fail ? "FAIL" : "PASS");
+    return 0;
+}
