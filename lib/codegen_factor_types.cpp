@@ -12,8 +12,7 @@ inline static std::string ToString(BaseType dataType) {
       {BaseType::BF16, "BFloatType()"}, {BaseType::U32, "IntType(32)"},
       {BaseType::S32, "IntType(32)"},   {BaseType::U16, "IntType(16)"},
       {BaseType::S16, "IntType(16)"},   {BaseType::U8, "IntType(8)"},
-      {BaseType::S8, "IntType(8)"},     {BaseType::INT, "IntType(32)"},
-      {BaseType::BOOL, "BoolType(32)"},
+      {BaseType::S8, "IntType(8)"},     {BaseType::BOOL, "BoolType(32)"},
   };
 
   auto it = enumToString.find(dataType);
@@ -37,10 +36,6 @@ inline static std::string ToString(Storage st) {
 
 } // end namespace __internal__
 
-std::string stringify(const FundamentalType& t) {
-  return __internal__::ToString((BaseType)t);
-}
-
 std::string stringify(const BaseType& t) { return __internal__::ToString(t); }
 
 std::string stringify(const Type& ty) {
@@ -52,7 +47,7 @@ std::string stringify(const Type& ty) {
   else if (isa<BoundedIntegerType>(&ty))
     return "IntType(32)";
   else if (auto t = dyn_cast<SpannedType>(&ty))
-    return stringify(t->f_type);
+    return stringify(t->e_type);
   choreo_unreachable(STR(ty) + " does not imply runtime storage.");
   return 0;
 }

@@ -20,10 +20,10 @@ __co__ void dma_test(int b, f32 [36, 27, 128] input) {
 // CHECK:  `- Name: dma_test
 // CHECK:  `- Return type: void
 // CHECK:  `- Parameters:
-// CHECK:    `-  type: int, symbol: b
+// CHECK:    `-  type: s32, symbol: b
 // CHECK:    `-  type: f32 [ 36 27 128 ], symbol: input
 // CHECK:  `- Type Decl: ndims - [ 3 b ]
-// CHECK:  `- Var Decl (int): sum = 0
+// CHECK:  `- Var Decl (s32): sum = 0
 // CHECK:  `- Parallelization:  index symbol: p, bound [0, 6)
 // CHECK:   `- With Block:
 // CHECK:     (within constraints)

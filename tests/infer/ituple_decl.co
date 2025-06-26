@@ -26,6 +26,6 @@ __co__ void foo(f32 [2, 3, 4] d, int e) {
 // VALNO:  } // end scope-1
 
 // CHECK: Parameter: ::foo::d, Type: f32 mdspan<3> [2, 3, 4]
-// CHECK: Parameter: ::foo::e, Type: int
+// CHECK: Parameter: ::foo::e, Type: s32
 // CHECK: Symbol:    ::foo::a, Type: ituple<3>
 // CHECK: Symbol:    ::foo::b, Type: ituple<2>

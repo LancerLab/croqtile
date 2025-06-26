@@ -15,12 +15,12 @@ __co__ int getith(int a, f32 [3, 4] input) {
 
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: getith
-// CHECK:  `- Return type: int
+// CHECK:  `- Return type: s32
 // CHECK:  `- Parameters:
-// CHECK:    `-  type: int, symbol: a
+// CHECK:    `-  type: s32, symbol: a
 // CHECK:    `-  type: f32 [ 3 4 ], symbol: input
 // CHECK:  `- Type Decl: ndims - [ 3 a ]
-// CHECK:  `- Var Decl (int): sum = 0
+// CHECK:  `- Var Decl (s32): sum = 0
 // CHECK:  `- Parallelization:  index symbol: p, bound [0, 6)
 // CHECK:   `- With Block:
 // CHECK:     (within constraints)

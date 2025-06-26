@@ -15,7 +15,7 @@ __co__ s16 mdspan<4> spans(f32 mdspan<3> d, int f) {
 // CHECK:  `- Return type: s16 <4>
 // CHECK:  `- Parameters:
 // CHECK:    `-  type: f32 <3>, symbol: d
-// CHECK:    `-  type: int, symbol: f
+// CHECK:    `-  type: s32, symbol: f
 // CHECK:  `- Type Decl: dim1 - [ 100 100 ]
 // CHECK:  `- Type Decl: dim2 - [ 9 f ]
 // CHECK:  `- Var Decl (f16 [ dim1 ], local): a

@@ -27,7 +27,7 @@ struct ASTVerify : public VisitorWithScope {
     if (n.GetType() == nullptr) {
       choreo_unreachable("[" + n.TypeNameString() +
                          "] is not typed: " + STR(n));
-    } else if (n.GetType()->Category() == TypeCategory::UNKNOWN)
+    } else if (n.GetType()->GetBaseType() == BaseType::UNKNOWN)
       dbgs() << "[" << n.TypeNameString() << "] is unknown: " << STR(n) << "\n";
 
     if (debug_visit)

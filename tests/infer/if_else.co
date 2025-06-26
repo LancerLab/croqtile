@@ -18,14 +18,14 @@ __co__ void foo(int k) {
   }
 }
 
-// CHECK: Parameter: ::foo::k, Type: int
-// CHECK: Symbol:    ::foo::a, Type: int
-// CHECK: Symbol:    ::foo::cond_if_0::b, Type: int
+// CHECK: Parameter: ::foo::k, Type: s32
+// CHECK: Symbol:    ::foo::a, Type: s32
+// CHECK: Symbol:    ::foo::cond_if_0::b, Type: s32
 // CHECK: Symbol:    ::foo::cond_if_0::ifv0, Type: global s32 mdspan<3> [3, 4, ::foo::k]
-// CHECK: Symbol:    ::foo::cond_else1::b, Type: int
+// CHECK: Symbol:    ::foo::cond_else1::b, Type: s32
 // CHECK: Symbol:    ::foo::cond_else1::ifv1, Type: global s32 mdspan<3> [3, 2, ::foo::k]
-// CHECK: Symbol:    ::foo::cond_else1::cond_if_1::c, Type: int
+// CHECK: Symbol:    ::foo::cond_else1::cond_if_1::c, Type: s32
 // CHECK: Symbol:    ::foo::cond_else1::cond_if_1::ifv2, Type: global s32 mdspan<3> [3, 4, 8]
-// CHECK: Symbol:    ::foo::cond_else1::cond_else2::c, Type: int
+// CHECK: Symbol:    ::foo::cond_else1::cond_else2::c, Type: s32
 // CHECK: Symbol:    ::foo::cond_else1::cond_else2::ifv3, Type: global s32 mdspan<3> [5, 1, 6]
-// CHECK: Function:  ::foo, Type: void (*)(int)
+// CHECK: Function:  ::foo, Type: void (*)(s32)

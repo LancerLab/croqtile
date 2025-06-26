@@ -33,28 +33,23 @@ enum CodeSegment {
   CS_CO,
 };
 
-inline const char* NameBaseType(BaseType ft, bool co_only = true) {
-  switch (ft) {
-  case BaseType::DOUBLE: return "double";
-  case BaseType::FLOAT: return "float";
+inline const char* NameBaseType(BaseType bt, bool co_only = true) {
+  switch (bt) {
+  case BaseType::F64: return "double";
   case BaseType::F32: return "float";
-  case BaseType::HALF:
   case BaseType::F16: return (co_only) ? "choreo::half" : "choreo::f16";
-  case BaseType::BFP16:
   case BaseType::BF16: return (co_only) ? "choreo::bfloat16" : "choreo::bf16";
-  case BaseType::HALF8:
   case BaseType::F8: return "choreo::f8";
   case BaseType::U64: return "unsigned long long";
   case BaseType::U32: return "unsigned int";
   case BaseType::U16: return "unsigned short";
   case BaseType::U8: return "unsigned char";
   case BaseType::S64: return "long long";
-  case BaseType::INT:
   case BaseType::S32: return "int";
   case BaseType::S16: return "short";
   case BaseType::S8: return "char";
   case BaseType::BOOL: return "bool";
-  default: choreo_unreachable("unsupported base-type: " + STR(ft) + ".");
+  default: choreo_unreachable("unsupported base-type: " + STR(bt) + ".");
   }
   return "";
 }

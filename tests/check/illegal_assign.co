@@ -21,7 +21,7 @@ __co__ void illegal_reassign_bool() {
 }
 // CHECK: error: only mutables can be re-assigned (ba).
 // CHECK-NOT: error:{{.*}}ba{{.*}}
-// CHECK: error: `bb' is declared as "bool" but initialized as "int".
+// CHECK: error: `bb' is declared as "bool" but initialized as "s32".
 // CHECK: error: only mutables can be re-assigned (ba).
 // CHECK: error: only mutables can be re-assigned (bc).
 
@@ -69,7 +69,7 @@ __co__ void illegal_reassign_span() {
 // CHECK: error: only mutables can be re-assigned (mdsa).
 // CHECK: error: symbol `mdsa' has been declared already.
 // CHECK: error: only mutables can be re-assigned (mdsa).
-// CHECK: error: `mdsg' is declared as "mdspan<>" but initialized as "int".
+// CHECK: error: `mdsg' is declared as "mdspan<>" but initialized as "s32".
 // CHECK: error: symbol `mdsg' has been declared already.
 // CHECK: error: only mutables can be re-assigned (mdsg).
 // CHECK: error: `mdsf' is declared as "mdspan<>" but initialized as "ituple<4>".

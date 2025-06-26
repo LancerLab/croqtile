@@ -19,11 +19,11 @@ __co__ void cofoo0() {
 int main() {}
 
 
-// INFER: Symbol:    ::cofoo0::a, Type: int
-// INFER: Symbol:    ::cofoo0::b, Type: int
-// INFER: Symbol:    ::cofoo0::c, Type: int
-// INFER: Symbol:    ::cofoo0::x, Type: int
-// INFER: Symbol:    ::cofoo0::y, Type: int
+// INFER: Symbol:    ::cofoo0::a, Type: s32
+// INFER: Symbol:    ::cofoo0::b, Type: s32
+// INFER: Symbol:    ::cofoo0::c, Type: s32
+// INFER: Symbol:    ::cofoo0::x, Type: s32
+// INFER: Symbol:    ::cofoo0::y, Type: s32
 // INFER: Symbol:    ::cofoo0::mds, Type: global u8 mdspan<5> [1, 2, 3, 1000, 2]
 // INFER: Bounded:   ::cofoo0::paraby_0::p, Type: {int}->[2](pv)
 // INFER: Bounded:   ::cofoo0::paraby_0::p__elem__x, Type: {int}->[2](pi:x)

@@ -71,8 +71,8 @@ __co__ void foo(f32 [2, 3, 4] d, int e) {
 // VALNO:  } // end scope-1
 
 // CHECK: Parameter: ::foo::d, Type: f32 mdspan<3> [2, 3, 4]
-// CHECK: Parameter: ::foo::e, Type: int
-// CHECK: Symbol:    ::foo::f, Type: int
+// CHECK: Parameter: ::foo::e, Type: s32
+// CHECK: Symbol:    ::foo::f, Type: s32
 // CHECK: Partial:   ::foo::a, Type: mdspan<3> [5, 1, 1]
 // CHECK: Partial:   ::foo::b, Type: mdspan<3> [1, (::foo::e + 1), 20]
 // CHECK: Symbol:    ::foo::c, Type: ituple<3>

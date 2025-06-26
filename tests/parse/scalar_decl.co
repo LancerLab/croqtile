@@ -9,10 +9,10 @@ __co__ u8 mdspan<1> scalar_decls(int a, int b) {
 // CHECK:  `- Name: scalar_decls
 // CHECK:  `- Return type: u8 <1>
 // CHECK:  `- Parameters:
-// CHECK:    `-  type: int, symbol: a
-// CHECK:    `-  type: int, symbol: b
-// CHECK:  `- Var Decl (int): c = 1
-// CHECK:  `- Var Decl (int): d = b
+// CHECK:    `-  type: s32, symbol: a
+// CHECK:    `-  type: s32, symbol: b
+// CHECK:  `- Var Decl (s32): c = 1
+// CHECK:  `- Var Decl (s32): d = b
 
 __co__ void mutables() {
   mutable a = 3;

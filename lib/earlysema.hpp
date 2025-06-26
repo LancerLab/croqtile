@@ -111,8 +111,10 @@ private:
       n.SetType(MutateType(ty));
     else
       n.SetType(ty);
-    if (debug_visit)
+    if (debug_visit) {
       dbgs() << "Set type of " << STR(n) << " as " << PSTR(n.GetType()) << "\n";
+      assert(false);
+    }
   }
   void SetNodeType(AST::Node& n, const ptr<Type>& ty) {
     n.SetType(ty);

@@ -15,5 +15,5 @@ __co__ auto illegal_ituple1() {
 // CHECK: error: must use '{' and '}' to initialize an ituple.
 // CHECK: error: `it2' is declared as "ituple<1>" but initialized as "ituple<2>".
 // CHECK: error: `it3' is declared as "ituple<5>" but initialized as "ituple<3>".
-// CHECK: `it4' is declared as "ituple<unknown>" but initialized as "int".
+// CHECK: `it4' is declared as "ituple<unknown>" but initialized as "s32".
 // CHECK: Totally 5 errors have been detected.

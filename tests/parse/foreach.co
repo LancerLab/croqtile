@@ -36,7 +36,7 @@ __co__ void foobar(int N, int M) {
 // CHECK:  `- Name: bar
 // CHECK:  `- Return type: void
 // CHECK:  `- Parameters:
-// CHECK:    `-  type: int, symbol: N
+// CHECK:    `-  type: s32, symbol: N
 // CHECK:  `- Parallelization:  index symbol: p, bound [0, 6)
 // CHECK:   `- With Block:
 // CHECK:     (within constraints)
@@ -50,8 +50,8 @@ __co__ void foobar(int N, int M) {
 // CHECK:  `- Name: foobar
 // CHECK:  `- Return type: void
 // CHECK:  `- Parameters:
-// CHECK:    `-  type: int, symbol: N
-// CHECK:    `-  type: int, symbol: M
+// CHECK:    `-  type: s32, symbol: N
+// CHECK:    `-  type: s32, symbol: M
 // CHECK:  `- With Block:
 // CHECK:    (within constraints)
 // CHECK:    `- index = {x, y, z} in [ M 2 1 ]

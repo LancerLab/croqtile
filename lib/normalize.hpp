@@ -257,8 +257,8 @@ public:
       auto lty = l->GetType();
       auto rty = r->GetType();
 
-      auto lity = dyn_cast<IntegerType>(lty);
-      auto rity = dyn_cast<IntegerType>(rty);
+      auto lity = dyn_cast<ScalarIntegerType>(lty);
+      auto rity = dyn_cast<ScalarIntegerType>(rty);
       if (!lity || !rity) return true;
 
       auto lbty = lity->GetBaseType();
@@ -370,7 +370,7 @@ public:
   bool Visit(AST::WithIn& n) override {
     TraceEachVisit(n);
 
-    if (isa<IntegerType>(n.in->GetType())) {
+    if (isa<ScalarIntegerType>(n.in->GetType())) {
       auto mv = AST::Make<AST::MultiValues>(n.in->LOC(), ",");
       mv->Append(n.in);
       n.in = AST::Make<AST::MultiDimSpans>(n.in->LOC(), "", mv, 1);
@@ -530,7 +530,7 @@ public:
 
     // tricky: we must convert a integer to be 's32 [1] ...' for a factor return
     // value;
-    if (isa<IntegerType>(vty)) {
+    if (isa<ScalarIntegerType>(vty)) {
       auto expr = cast<AST::Expr>(n.value);
       if (auto il = expr->GetInt()) {
         auto& loc = n.value->LOC();
