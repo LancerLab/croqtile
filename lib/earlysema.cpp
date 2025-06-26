@@ -46,13 +46,11 @@ bool EarlySemantics::AfterVisitImpl(AST::Node& n) {
       }
       // anything is ok
     } else if (requires_return && !found_return) {
-      Error(n.LOC(), "non-void function '" + f->name +
-                         "` does not contain a return statement.");
-      error_count++;
+      Error1(n.LOC(), "non-void function '" + f->name +
+                          "` does not contain a return statement.");
     } else if (!requires_return && found_return) {
-      Error(n.LOC(),
-            "return statement found in void function '" + f->name + "`.");
-      error_count++;
+      Error1(n.LOC(),
+             "return statement found in void function '" + f->name + "`.");
     }
   } else if (isa<AST::ParallelBy>(&n)) {
     assert(parallel_level > 0);
@@ -87,10 +85,8 @@ bool EarlySemantics::Visit(AST::MultiValues& n) {
     size_t dims = 0;
     for (auto v : n.values) {
       auto vty = NodeType(*v);
-      if (!isa<BoundedType>(ty)) {
-        Error(n.LOC(), PSTR(v) + "is not bounded value.");
-        error_count++;
-      }
+      if (!isa<BoundedType>(ty))
+        Error1(n.LOC(), PSTR(v) + "is not bounded value.");
       dims += vty->Dims();
     }
     SetNodeType(n, MakeBoundedITupleType(Shape(dims)));
@@ -147,10 +143,9 @@ bool EarlySemantics::Visit(AST::Expr& n) {
   } else if (n.op == "dataof") {
     auto ty = NodeType(*n.GetR());
     if (!isa<FutureType>(ty)) {
-      Error(n.LOC(), "in operation \"" + n.op +
-                         "\": expect a future type but got `" + PSTR(ty) +
-                         "'.");
-      error_count++;
+      Error1(n.LOC(), "in operation \"" + n.op +
+                          "\": expect a future type but got `" + PSTR(ty) +
+                          "'.");
       SetNodeType(n, MakeUnknownType());
       return false;
     }
@@ -161,9 +156,8 @@ bool EarlySemantics::Visit(AST::Expr& n) {
   } else if (n.op == "addrof") {
     auto ty = NodeType(*n.GetR());
     if (!isa<SpannedType>(ty) && !isa<AST::DataAccess>(n.GetR())) {
-      Error(n.LOC(), "in operation \"" + n.op +
-                         "\": expect a data type but got `" + PSTR(ty) + "'.");
-      error_count++;
+      Error1(n.LOC(), "in operation \"" + n.op +
+                          "\": expect a data type but got `" + PSTR(ty) + "'.");
       SetNodeType(n, MakeUnknownType());
       return false;
     }
@@ -171,10 +165,9 @@ bool EarlySemantics::Visit(AST::Expr& n) {
   } else if (n.op == "sizeof") {
     auto ty = NodeType(*n.GetR());
     if (!GetMDSpanType(ty)) {
-      Error(n.LOC(), "in operation \"" + n.op +
-                         "\": expect a mdspan type but got `" + PSTR(ty) +
-                         "'.");
-      error_count++;
+      Error1(n.LOC(), "in operation \"" + n.op +
+                          "\": expect a mdspan type but got `" + PSTR(ty) +
+                          "'.");
       SetNodeType(n, MakeUnknownType());
       return false;
     }
@@ -184,18 +177,16 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     auto rty = NodeType(*n.GetR());
     if (!isa<MDSpanType>(lty) && !isa<ITupleType>(lty) &&
         !isa<BoundedType>(lty)) {
-      Error(n.LOC(), "in operation \"" + n.op +
-                         "\": expect a indexable type but got `" + PSTR(lty) +
-                         "'.");
-      error_count++;
+      Error1(n.LOC(), "in operation \"" + n.op +
+                          "\": expect a indexable type but got `" + PSTR(lty) +
+                          "'.");
       SetNodeType(n, MakeUnknownType());
       return false;
     }
     if (!isa<IndexType>(rty)) {
-      Error(n.LOC(), "in operation \"" + n.op +
-                         "\": expect a index type but got `" + PSTR(rty) +
-                         "'.");
-      error_count++;
+      Error1(n.LOC(), "in operation \"" + n.op +
+                          "\": expect a index type but got `" + PSTR(rty) +
+                          "'.");
       SetNodeType(n, MakeUnknownType());
       return false;
     }
@@ -210,10 +201,9 @@ bool EarlySemantics::Visit(AST::Expr& n) {
   } else if (n.op == "ubound") {
     auto ty = NodeType(*n.GetR());
     if (!isa<BoundedType>(ty)) {
-      Error(n.LOC(), "in operation \"" + n.op +
-                         "\": expect a bounded type but got `" + PSTR(ty) +
-                         "'.");
-      error_count++;
+      Error1(n.LOC(), "in operation \"" + n.op +
+                          "\": expect a bounded type but got `" + PSTR(ty) +
+                          "'.");
       SetNodeType(n, MakeUnknownType());
       return false;
     }
@@ -229,10 +219,9 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     assert(!isa<BooleanType>(ty) &&
            "increment/decrement operation on boolean is not allowed.");
     if (!sty || !sty->IsMutable()) {
-      Error(n.LOC(), "in operation \"" + n.op +
-                         "\": expect a mutable scalar type but got `" +
-                         PSTR(ty) + "'.");
-      error_count++;
+      Error1(n.LOC(), "in operation \"" + n.op +
+                          "\": expect a mutable scalar type but got `" +
+                          PSTR(ty) + "'.");
       SetNodeType(n, MakeUnknownType());
       return false;
     }
@@ -242,15 +231,22 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
     bool is_mutable = IsMutable(*lty) || IsMutable(*rty);
-    if ((isa<MDSpanType>(lty) && isa<ITupleType>(rty)) ||
-        (isa<MDSpanType>(rty) && isa<ITupleType>(lty))) {
+    if (isa<NoValueType>(lty)) {
+      Error1(n.GetL()->LOC(),
+             "Can not evaluate the expression without a value.");
+      return false;
+    } else if (isa<NoValueType>(rty)) {
+      Error1(n.GetR()->LOC(),
+             "Can not evaluate the expression without a value.");
+      return false;
+    } else if ((isa<MDSpanType>(lty) && isa<ITupleType>(rty)) ||
+               (isa<MDSpanType>(rty) && isa<ITupleType>(lty))) {
       // mdspan + ituple
       if (lty->Dims() != rty->Dims()) {
-        Error(n.LOC(), "in operation \"" + n.op +
-                           "\": dimension inconsistent (" +
-                           std::to_string(lty->Dims()) + " vs. " +
-                           std::to_string(rty->Dims()) + ").");
-        error_count++;
+        Error1(n.LOC(), "in operation \"" + n.op +
+                            "\": dimension inconsistent (" +
+                            std::to_string(lty->Dims()) + " vs. " +
+                            std::to_string(rty->Dims()) + ").");
         return false;
       }
       MutateNodeType(n, MakeRankedMDSpanType(lty->Dims()), is_mutable);
@@ -264,11 +260,10 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       // ituple + ituple
       if (lty->HasSufficientInfo() && rty->HasSufficientInfo()) {
         if (lty->Dims() != rty->Dims()) {
-          Error(n.LOC(), "in operation \"" + n.op +
-                             "\": dimension inconsistent (" +
-                             std::to_string(lty->Dims()) + " vs. " +
-                             std::to_string(rty->Dims()) + ").");
-          error_count++;
+          Error1(n.LOC(), "in operation \"" + n.op +
+                              "\": dimension inconsistent (" +
+                              std::to_string(lty->Dims()) + " vs. " +
+                              std::to_string(rty->Dims()) + ").");
           return false;
         }
         SetNodeType(n, lty);
@@ -287,22 +282,20 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       // this is promissing, simply allow it
       if (IsActualBoundedIntegerType(lty))
         if (cast<AST::Expr>(n.GetL())->op == "getith") {
-          Error(n.LOC(),
-                "in operation \"" + n.op +
-                    "\": unable to apply to the getith bounded variable (" +
-                    PSTR(n.GetL()) + ").");
-          error_count++;
+          Error1(n.LOC(),
+                 "in operation \"" + n.op +
+                     "\": unable to apply to the getith bounded variable (" +
+                     PSTR(n.GetL()) + ").");
           SetNodeType(n, MakeUnknownType());
           return false;
         } else
           SetNodeType(n, lty);
       else {
         if (cast<AST::Expr>(n.GetR())->op == "getith") {
-          Error(n.LOC(),
-                "in operation \"" + n.op +
-                    "\": unable to apply to the 'getith' bounded variable (" +
-                    PSTR(n.GetR()) + ").");
-          error_count++;
+          Error1(n.LOC(),
+                 "in operation \"" + n.op +
+                     "\": unable to apply to the 'getith' bounded variable (" +
+                     PSTR(n.GetR()) + ").");
           SetNodeType(n, MakeUnknownType());
           return false;
         } else
@@ -311,30 +304,27 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     } else if ((isa<BoundedITupleType>(lty) && isa<ITupleType>(rty)) ||
                (isa<BoundedITupleType>(rty) && isa<ITupleType>(lty))) {
       if (lty->Dims() != rty->Dims()) {
-        Error(n.LOC(), "in operation \"" + n.op +
-                           "\": dimension inconsistent (" +
-                           std::to_string(lty->Dims()) + " vs. " +
-                           std::to_string(rty->Dims()) + ").");
-        error_count++;
+        Error1(n.LOC(), "in operation \"" + n.op +
+                            "\": dimension inconsistent (" +
+                            std::to_string(lty->Dims()) + " vs. " +
+                            std::to_string(rty->Dims()) + ").");
         return false;
       }
       SetNodeType(n, MakeITupleType(lty->Dims()));
     } else if (isa<MDSpanType>(lty) && isa<MDSpanType>(rty)) {
       // only allow div/mod operations
       if ((n.op != "/") && (n.op != "%") && (n.op != "cdiv")) {
-        Error(n.LOC(), "in operation \"" + n.op +
-                           "\": unable to apply to the types (" + PSTR(lty) +
-                           " vs. " + PSTR(rty) + ").");
-        error_count++;
+        Error1(n.LOC(), "in operation \"" + n.op +
+                            "\": unable to apply to the types (" + PSTR(lty) +
+                            " vs. " + PSTR(rty) + ").");
         SetNodeType(n, MakeUnknownType());
         return false;
       }
       if (lty->Dims() != rty->Dims()) {
-        Error(n.LOC(), "in operation \"" + n.op +
-                           "\": dimension inconsistent (" +
-                           std::to_string(lty->Dims()) + " vs. " +
-                           std::to_string(rty->Dims()) + ").");
-        error_count++;
+        Error1(n.LOC(), "in operation \"" + n.op +
+                            "\": dimension inconsistent (" +
+                            std::to_string(lty->Dims()) + " vs. " +
+                            std::to_string(rty->Dims()) + ").");
         SetNodeType(n, MakeUnknownType());
         return false;
       }
@@ -350,10 +340,9 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     } else if ((isa<ITupleType>(lty) && isa<ITupleType>(rty)) ||
                (isa<BooleanType>(lty) && isa<BooleanType>(rty)) ||
                (isa<IndexType>(lty) && isa<IndexType>(rty))) {
-      Error(n.LOC(), "in operation \"" + n.op +
-                         "\": unable to apply to the types (" + PSTR(lty) +
-                         " vs. " + PSTR(rty) + ").");
-      error_count++;
+      Error1(n.LOC(), "in operation \"" + n.op +
+                          "\": unable to apply to the types (" + PSTR(lty) +
+                          " vs. " + PSTR(rty) + ").");
       SetNodeType(n, MakeUnknownType());
       return false;
     } else if ((isa<ScalarIntegerType>(lty) && isa<IndexType>(rty)) ||
@@ -363,10 +352,9 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       //   a {1 + (1)}
       SetNodeType(n, lty);
     } else if (!lty->ApprxEqual(*rty)) {
-      Error(n.LOC(), "in operation \"" + n.op +
-                         "\": unable to apply to the types (" + PSTR(lty) +
-                         " vs. " + PSTR(rty) + ").");
-      error_count++;
+      Error1(n.LOC(), "in operation \"" + n.op +
+                          "\": unable to apply to the types (" + PSTR(lty) +
+                          " vs. " + PSTR(rty) + ").");
       SetNodeType(n, MakeUnknownType());
       return false;
     } else {
@@ -378,10 +366,9 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
     if (!(CanYieldAnInteger(lty) && CanYieldAnInteger(rty))) {
-      Error(n.LOC(), "in operation \"" + n.op +
-                         "\": unable to apply to the types (" + PSTR(lty) +
-                         " vs. " + PSTR(rty) + ").");
-      error_count++;
+      Error1(n.LOC(), "in operation \"" + n.op +
+                          "\": unable to apply to the types (" + PSTR(lty) +
+                          " vs. " + PSTR(rty) + ").");
       SetNodeType(n, MakeUnknownType());
       return false;
     }
@@ -393,10 +380,9 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     assert(n.IsUnary() && "bitwise negation operator must be unary.");
     auto rty = NodeType(*n.GetR());
     if (!CanYieldAnInteger(rty)) {
-      Error(n.LOC(), "in operation \"" + n.op +
-                         "\": unable to apply to the type (" + PSTR(rty) +
-                         ").");
-      error_count++;
+      Error1(n.LOC(), "in operation \"" + n.op +
+                          "\": unable to apply to the type (" + PSTR(rty) +
+                          ").");
       SetNodeType(n, MakeUnknownType());
       return false;
     }
@@ -406,19 +392,17 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     auto lty = NodeType(*n.GetL());
     auto intr = AST::GetIntLiteral(*n.GetR());
     if (!intr) {
-      Error(n.LOC(), "in operation \"" + n.op +
-                         "\": expect an integer literal as the right operand "
-                         "but got `" +
-                         PSTR(n.GetR()) + "'.");
-      error_count++;
+      Error1(n.LOC(), "in operation \"" + n.op +
+                          "\": expect an integer literal as the right operand "
+                          "but got `" +
+                          PSTR(n.GetR()) + "'.");
       SetNodeType(n, MakeUnknownType());
       return false;
     }
     if (!CanYieldAnInteger(lty)) {
-      Error(n.LOC(), "in operation \"" + n.op +
-                         "\": unable to apply to the type (" + PSTR(lty) +
-                         ").");
-      error_count++;
+      Error1(n.LOC(), "in operation \"" + n.op +
+                          "\": unable to apply to the type (" + PSTR(lty) +
+                          ").");
       SetNodeType(n, MakeUnknownType());
       return false;
     }
@@ -468,12 +452,11 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     auto rty = NodeType(*n.GetR());
     // only support ScalarIntegerType currently
     if (!(CanYieldAnInteger(lty) && CanYieldAnInteger(lty))) {
-      Error(n.LOC(), "in operation \"" + n.op +
-                         "\": unable to apply to the types (" + PSTR(lty) +
-                         " vs. " + PSTR(rty) +
-                         "). (Only the values that can produce integers are "
-                         "supported by now.)");
-      error_count++;
+      Error1(n.LOC(), "in operation \"" + n.op +
+                          "\": unable to apply to the types (" + PSTR(lty) +
+                          " vs. " + PSTR(rty) +
+                          "). (Only the values that can produce integers are "
+                          "supported by now.)");
       SetNodeType(n, MakeUnknownType());
       return false;
     }
@@ -482,10 +465,9 @@ bool EarlySemantics::Visit(AST::Expr& n) {
         (ConvertibleToInt(lty) && ConvertibleToInt(rty))) {
       // this is acceptable
     } else if (!(lty->ApprxEqual(*rty))) {
-      Error(n.LOC(), "in operation \"" + n.op +
-                         "\": unable to apply to the types (" + PSTR(lty) +
-                         " vs. " + PSTR(rty) + ").");
-      error_count++;
+      Error1(n.LOC(), "in operation \"" + n.op +
+                          "\": unable to apply to the types (" + PSTR(lty) +
+                          " vs. " + PSTR(rty) + ").");
       SetNodeType(n, MakeUnknownType());
       return false;
     }
@@ -506,10 +488,9 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     else if (isa<EventType>(lty) && isa<EventType>(rty) && (*lty == *rty))
       SetNodeType(n, lty);
     else {
-      Error(n.LOC(), "in operation \"" + n.op +
-                         "\": unable to apply to the types (" + PSTR(lty) +
-                         " vs. " + PSTR(rty) + ").");
-      error_count++;
+      Error1(n.LOC(), "in operation \"" + n.op +
+                          "\": unable to apply to the types (" + PSTR(lty) +
+                          " vs. " + PSTR(rty) + ").");
       SetNodeType(n, MakeUnknownType());
       return false;
     }
@@ -522,10 +503,9 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     if (isa<BooleanType>(rty) || isa<EventType>(rty)) {
       SetNodeType(n, rty);
     } else {
-      Error(n.LOC(), "in operation \"" + n.op +
-                         "\": unable to apply to the type (" + PSTR(rty) +
-                         ").");
-      error_count++;
+      Error1(n.LOC(), "in operation \"" + n.op +
+                          "\": unable to apply to the type (" + PSTR(rty) +
+                          ").");
       SetNodeType(n, MakeUnknownType());
       return false;
     }
@@ -535,10 +515,9 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
     if (!isa<BooleanType>(cty) || (!lty->ApprxEqual(*rty))) {
-      Error(n.LOC(), "in operation \"" + n.op +
-                         "\": unable to apply to the types (" + PSTR(cty) +
-                         ") " + PSTR(lty) + " : " + PSTR(rty) + ").");
-      error_count++;
+      Error1(n.LOC(), "in operation \"" + n.op +
+                          "\": unable to apply to the types (" + PSTR(cty) +
+                          ") " + PSTR(lty) + " : " + PSTR(rty) + ").");
       SetNodeType(n, MakeUnknownType());
       return false;
     }
@@ -548,10 +527,9 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     auto rty = NodeType(*n.GetR());
     if (!((isa<MDSpanType>(lty) || isa<ITupleType>(lty)) &&
           (isa<MDSpanType>(rty) || isa<ITupleType>(rty)))) {
-      Error(n.LOC(), "in operation \"" + n.op +
-                         "\": unable to apply to the types " + PSTR(lty) +
-                         " and " + PSTR(rty) + ".");
-      error_count++;
+      Error1(n.LOC(), "in operation \"" + n.op +
+                          "\": unable to apply to the types " + PSTR(lty) +
+                          " and " + PSTR(rty) + ".");
       SetNodeType(n, MakeUnknownType());
       return false;
     }
@@ -648,10 +626,9 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
       for (auto& v : mvals->AllValues()) {
         auto ty = NodeType(*v);
         if (!(isa<ScalarIntegerType>(ty)) && !isa<MDSpanType>(ty) &&
-            !isa<ITupleType>(ty)) {
-          Error(v->LOC(),
-                "unexpected data type '" + PSTR(ty) + "' is found in mdspan.");
-          error_count++;
+            !isa<ITupleType>(ty) && !isa<NoValueType>(ty)) {
+          Error1(v->LOC(),
+                 "unexpected data type '" + PSTR(ty) + "' is found in mdspan.");
         }
       }
     }
@@ -690,9 +667,8 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
     for (auto& v : mvals->AllValues())
       if (auto il = AST::GetIntLiteral(*v))
         if (il->Val() <= 0 && !IsUnKnownInteger(il->Val())) {
-          Error(v->LOC(), "The mdspan size \"" + std::to_string(il->Val()) +
-                              "\" is invalid!");
-          error_count++;
+          Error1(v->LOC(), "The mdspan size \"" + std::to_string(il->Val()) +
+                               "\" is invalid!");
         }
 
   // check if it use mutable values that can not be inferred
@@ -700,9 +676,8 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
     for (auto& v : mvals->AllValues()) {
       bool is_mutable = false;
       if (mutables.Contains(v)) {
-        Error(v->LOC(),
-              "the mutable value can not used for the mdspan declaration.");
-        error_count++;
+        Error1(v->LOC(),
+               "the mutable value can not used for the mdspan declaration.");
         is_mutable = true;
       }
       if (is_mutable) mutables.Add(*v);
@@ -722,16 +697,14 @@ bool EarlySemantics::Visit(AST::NamedTypeDecl& n) {
                                    : MakeUninitMDSpanType();
   // check for the type consistency
   if (!ety->ApprxEqual(*nty)) {
-    Error(n.LOC(), "`" + n.name_str + "' is declared as \"" + PSTR(nty) +
-                       "\" but initialized as \"" + PSTR(ety) + "\".");
-    error_count++;
+    Error1(n.LOC(), "`" + n.name_str + "' is declared as \"" + PSTR(nty) +
+                        "\" but initialized as \"" + PSTR(ety) + "\".");
     // keep processing
   }
 
   if (mutables.Contains(n.init_expr)) {
-    Error(n.init_expr->LOC(),
-          "mdspan/ituple can not be initialized with mutable values.");
-    error_count++;
+    Error1(n.init_expr->LOC(),
+           "mdspan/ituple can not be initialized with mutable values.");
   }
 
   ReportErrorWhenViolateODR(n.LOC(), n.name_str, __FILE__, __LINE__, ety);
@@ -739,11 +712,33 @@ bool EarlySemantics::Visit(AST::NamedTypeDecl& n) {
   return true;
 }
 
+bool EarlySemantics::CheckInitializerType(const ptr<Type>& ty,
+                                          const std::string& sym,
+                                          const location& loc) {
+  if (isa<UnknownType>(ty)) {
+    Error1(loc, "unable to inference the type from `" + sym +
+                    "'s initialization expression.");
+    return false;
+  } else if (isa<NoValueType>(ty)) {
+    Error1(loc, "unable to evaluate the initialization expression of `" + sym +
+                    "'.");
+    return false;
+  } else if (isa<StringType>(ty)) {
+    Error1(loc, "string variables are not supported yet.");
+    return false;
+  } else if (isa<AddrType>(ty)) {
+    Error1(loc, "pointer variables are not supported.");
+    return false;
+  }
+  return true;
+}
+
 bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
   TraceEachVisit(n);
 
-  ptr<Type> tty = nullptr;
-  ptr<Type> ety = nullptr;
+  ptr<Type> tty = nullptr; // type from the annotation
+  ptr<Type> ety = nullptr; // type from the initialization expression
+
   if (n.type) tty = n.type->GetType();
   if (n.init_expr) {
     ety = n.init_expr->GetType();
@@ -751,13 +746,17 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
   }
 
   if (!ety) {
-    // in this case, the type is deduced from type annotation
+    // The initializer expression does not render a type. In this case, the type
+    // is deduced directly from type annotation
+    assert(tty && "the annotation type must exist.");
+
     if (isa<UnknownType>(tty)) {
       Error(n.LOC(), "unable to deduce the type of `" + n.name_str + "'.");
       error_count++;
       return false;
     }
 
+    // event type is purely declarative
     if (isa<EventType>(tty) && inthreads_levels[parallel_level] > 0) {
       Error(n.LOC(),
             "the event should not be declared inside a inthreads block.");
@@ -776,7 +775,12 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
     ReportErrorWhenViolateODR(n.LOC(), n.name_str, __FILE__, __LINE__, tty);
     SetNodeType(n, tty);
   } else {
-    // in this case, the type is deduced from initialize expression
+    // The initializer expression DOES render a type
+    if (!CheckInitializerType(ety, n.name_str, n.init_expr->LOC()))
+      return false;
+
+    // since the type annotation exists, it requires to check its consistance
+    // with the initializer
     if (isa<MDSpanType>(ety)) {
       if (isa<ITupleType>(tty))
         Error(n.LOC(), "must use '{' and '}' to initialize an ituple.");
@@ -791,27 +795,17 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
                isa<AST::Expr>(n.init_expr) &&
                cast<AST::Expr>(n.init_expr)->GetSymbol()) {
       // forbid to directly initialize a placeholder with a placeholder
-      Error(n.LOC(), "can not initialize variable `" + n.name_str +
-                         "' with a placeholder.");
-      error_count++;
-      VST_DEBUG(dbgs() << "Error in " << __FILE__ << ", line: " << __LINE__
-                       << ".\n");
-    } else if (isa<StringType>(ety)) {
-      Error(n.LOC(), "string variables are not supported yet.");
-      error_count++;
-    } else if (isa<AddrType>(ety)) {
-      Error(n.LOC(), "pointer variables are not supported.");
-      error_count++;
+      Error1(n.LOC(), "can not initialize variable `" + n.name_str +
+                          "' with a placeholder.");
     }
 
     assert(tty && "no expression type.");
 
     // check for type consistency between annotation and init expr.
     if (!isa<UnknownType>(tty) && !tty->ApprxEqual(*ety)) {
-      Error(n.LOC(), "`" + n.name_str + "' is declared as \"" +
-                         PSTR(n.type->GetType()) + "\" but initialized as \"" +
-                         PSTR(n.init_expr->GetType()) + "\".");
-      error_count++;
+      Error1(n.LOC(), "`" + n.name_str + "' is declared as \"" +
+                          PSTR(n.type->GetType()) + "\" but initialized as \"" +
+                          PSTR(n.init_expr->GetType()) + "\".");
       // keep working
     }
 
@@ -820,9 +814,8 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
       if (auto sty = dyn_cast<ScalarType>(ety)) {
         ety = sty->Clone(n.IsMutable());
       } else {
-        Error(n.LOC(), "`" + n.name_str + "' with a type of \"" + PSTR(ety) +
-                           "\" can not be declared as 'mutable'.");
-        error_count++;
+        Error1(n.LOC(), "`" + n.name_str + "' with a type of \"" + PSTR(ety) +
+                            "\" can not be declared as 'mutable'.");
       }
     }
 
@@ -840,12 +833,11 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
     auto ty = dyn_cast<SpannedType>(n.GetType());
     auto iv_ty = n.init_value->GetType();
     if (!isa<ScalarType>(iv_ty)) {
-      Error(n.LOC(),
-            "'" + n.name_str +
-                "' is declared as a span but has an initialization value "
-                "which is not of scalar type: '" +
-                PSTR(iv_ty) + "'.");
-      error_count++;
+      Error1(n.LOC(),
+             "'" + n.name_str +
+                 "' is declared as a span but has an initialization value "
+                 "which is not of scalar type: '" +
+                 PSTR(iv_ty) + "'.");
       return false;
     }
   }
@@ -881,9 +873,8 @@ bool EarlySemantics::Visit(AST::IntTuple& n) {
   for (auto& v : n.GetValues()->AllValues()) {
     bool is_mutable = false;
     if (mutables.Contains(v)) {
-      Error(v->LOC(),
-            "mutable values can not used for the ituple declaration.");
-      error_count++;
+      Error1(v->LOC(),
+             "mutable values can not used for the ituple declaration.");
       is_mutable = true;
     }
     if (is_mutable) mutables.Add(*v);
@@ -905,8 +896,7 @@ bool EarlySemantics::Visit(AST::DataAccess& n) {
   }
 
   if (!SSTab().IsDeclared(dsym)) {
-    Error(n.LOC(), "unable to access an undeclared variable '" + dsym + "'.");
-    ++error_count;
+    Error1(n.LOC(), "unable to access an undeclared variable '" + dsym + "'.");
     return false;
   }
 
@@ -914,9 +904,8 @@ bool EarlySemantics::Visit(AST::DataAccess& n) {
   auto sty = dyn_cast<SpannedType>(dty);
 
   if (!sty) {
-    Error(n.LOC(), "expect '" + n.GetDataName() + "' a spanned type but got " +
-                       PSTR(dty) + ".");
-    error_count++;
+    Error1(n.LOC(), "expect '" + n.GetDataName() + "' a spanned type but got " +
+                        PSTR(dty) + ".");
     return false;
   }
 
@@ -924,18 +913,16 @@ bool EarlySemantics::Visit(AST::DataAccess& n) {
   for (auto idx : n.GetIndices()) {
     auto ity = NodeType(*idx);
     if (!CanYieldIndex(ity)) {
-      Error(n.LOC(), "expect '" + PSTR(idx) + "' to yield indices but got " +
-                         PSTR(ity) + ".");
-      error_count++;
+      Error1(n.LOC(), "expect '" + PSTR(idx) + "' to yield indices but got " +
+                          PSTR(ity) + ".");
     }
     idx_count += NodeType(*idx)->Dims();
   }
 
   if (sty->Dims() != idx_count) {
-    Error(n.LOC(),
-          "accessing an spanned data (rank: " + std::to_string(sty->Dims()) +
-              ") with " + std::to_string(idx_count) + " indices.");
-    ++error_count;
+    Error1(n.LOC(),
+           "accessing an spanned data (rank: " + std::to_string(sty->Dims()) +
+               ") with " + std::to_string(idx_count) + " indices.");
   }
 
   // data element is considered as mutable
@@ -949,26 +936,23 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
 
   // assign to the array element
   if (n.AssignToDataElement()) {
-    if (!SSTab().IsDeclared(n.GetDataArrayName())) {
-      Error(n.da->LOC(), "unable to access element of an undeclared variable " +
-                             n.GetName() + ".");
-      ++error_count;
-    }
+    if (!SSTab().IsDeclared(n.GetDataArrayName()))
+      Error1(n.da->LOC(),
+             "unable to access element of an undeclared variable " +
+                 n.GetName() + ".");
 
     auto ety = NodeType(*n.da);
     auto vty = NodeType(*n.value);
 
     if (!IsMutable(*ety)) {
-      Error(n.da->LOC(), "must assign to a mutable value.");
-      ++error_count;
+      Error1(n.da->LOC(), "must assign to a mutable value.");
     }
 
     if (!ety->ApprxEqual(*vty)) {
       // consider taking value of bounded variables
       if (!(isa<ScalarIntegerType>(ety) && CanYieldAnInteger(vty))) {
-        Error(n.da->LOC(), "type inconsistent: assign " + PSTR(vty) + " to " +
-                               PSTR(ety) + ".");
-        ++error_count;
+        Error1(n.da->LOC(), "type inconsistent: assign " + PSTR(vty) + " to " +
+                                PSTR(ety) + ".");
       } else {
         // for example: u8 <= u32
         // TODO: maybe generate a warning here?
@@ -996,9 +980,8 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
       if (!SSTab().DeclaredInScope(n.GetName()))
         n.SetDecl(true); // immutables in inner-scope: new decls
       else {
-        Error(n.LOC(),
-              "only mutables can be re-assigned (" + n.GetName() + ").");
-        ++error_count;
+        Error1(n.LOC(),
+               "only mutables can be re-assigned (" + n.GetName() + ").");
         return false;
       }
     }
@@ -1006,21 +989,12 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
 
   if (n.IsDecl()) {
     auto sty = NodeType(*n.value);
-    assert((sty && !isa<UnknownType>(sty)) &&
-           "internal error: failed to find the type.");
+    assert(sty && "internal error: failed to find the type.");
+    if (!CheckInitializerType(sty, n.GetName(), n.value->LOC())) return false;
+
     if (isa<MDSpanType>(sty)) {
-      Error(n.LOC(),
-            "use ':' to define the \"" + STR(*sty) + "\" type variable.");
-      ++error_count;
-      if (debug_visit)
-        dbgs() << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
+      Error1(loc, "use ':' to define the \"" + STR(*sty) + "\" type variable.");
       return false;
-    } else if (isa<StringType>(sty)) {
-      Error(n.LOC(), "string variable declarstions are not supported yet.");
-      error_count++;
-    } else if (isa<AddrType>(sty)) {
-      Error(n.LOC(), "pointer variable declarations are not supported.");
-      error_count++;
     }
 
     ReportErrorWhenViolateODR(n.LOC(), n.GetName(), __FILE__, __LINE__,
@@ -1052,9 +1026,8 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
 
     // check for type consistent
     if (!vty->ApprxEqual(*ety)) {
-      Error(n.LOC(), "`" + n.GetName() + "' of type '" + STR(*vty) +
-                         "' is assigned as " + STR(*ety) + ".");
-      ++error_count;
+      Error1(n.LOC(), "`" + n.GetName() + "' of type '" + STR(*vty) +
+                          "' is assigned as " + STR(*ety) + ".");
       if (debug_visit)
         dbgs() << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
       return false;
@@ -1070,16 +1043,14 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
 
   // Allow re-assignment only for mutables
   if (!IsMutable(*vty)) {
-    Error(n.LOC(), "only mutables can be re-assigned (" + n.GetName() + ").");
-    ++error_count;
+    Error1(n.LOC(), "only mutables can be re-assigned (" + n.GetName() + ").");
     SetNodeType(n, MakeUnknownType());
     return false;
   }
 
   if (!vty->ApprxEqual(*ety)) {
-    Error(n.LOC(), "`" + n.GetName() + "' of type \"" + STR(*vty) +
-                       "\" can not be re-assigned as \"" + STR(*ety) + "\".");
-    ++error_count;
+    Error1(n.LOC(), "`" + n.GetName() + "' of type \"" + STR(*vty) +
+                        "\" can not be re-assigned as \"" + STR(*ety) + "\".");
     SetNodeType(n, MakeUnknownType());
     return false;
   }
@@ -1153,42 +1124,36 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
 
   if (parallel_level > 1 && n.async) {
-    Error(n.LOC(), "inner parallel-by level can not be asynchronous.");
-    error_count++;
+    Error1(n.LOC(), "inner parallel-by level can not be asynchronous.");
   }
 
   auto bty = NodeType(*n.BoundExpr());
   if (!SupportIntListCollapse(bty)) {
-    Error(n.BoundExpr()->LOC(),
-          "the parallel bound requires integers but got '" + PSTR(bty) + "'.");
-    error_count++;
+    Error1(n.BoundExpr()->LOC(),
+           "the parallel bound requires integers but got '" + PSTR(bty) + "'.");
   } else if (isa<ITupleType>(bty) && !n.IsBracketed()) {
-    Error(n.BoundExpr()->LOC(),
-          "must use mdspan instead of ituple to define the parallel bound.");
-    error_count++;
+    Error1(n.BoundExpr()->LOC(),
+           "must use mdspan instead of ituple to define the parallel bound.");
   }
 
   if (n.HasSubPVs()) {
     for (auto sb : n.AllBoundExprs()) {
       auto sbty = NodeType(*sb);
       if (!SupportIntListCollapse(sbty)) {
-        Error(sb->LOC(), "the parallel bounds require integers but got '" +
-                             PSTR(sbty) + "'.");
-        error_count++;
+        Error1(sb->LOC(), "the parallel bounds require integers but got '" +
+                              PSTR(sbty) + "'.");
       } else if ((n.SubPVCount() == 1) && isa<ITupleType>(sbty) &&
                  !n.IsBracketed()) {
-        Error(
+        Error1(
             n.BoundExpr()->LOC(),
             "must use mdspan instead of ituple to define the parallel bound.");
-        error_count++;
       }
     }
 
     auto ub_count = CountMultiValues(n.BoundExprs());
     if (ub_count > 3) {
-      Error(n.LOC(),
-            "The number of parallel dimensions is limited to 3 (x, y, z).");
-      error_count++;
+      Error1(n.LOC(),
+             "The number of parallel dimensions is limited to 3 (x, y, z).");
     }
 
     SetNodeType(*n.BPV(), MakeBoundedITupleType(Shape(ub_count), "pv"));
@@ -1210,40 +1175,35 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
     auto pv_count = CountMultiValues(n.SubPVs());
     auto ub_count = CountMultiValues(n.BoundExprs());
     if (pv_count > ub_count) {
-      Error(n.LOC(), "parallel variables are more than their bounds (" +
-                         std::to_string(pv_count) + " vs. " +
-                         std::to_string(ub_count) + ").");
-      error_count++;
+      Error1(n.LOC(), "parallel variables are more than their bounds (" +
+                          std::to_string(pv_count) + " vs. " +
+                          std::to_string(ub_count) + ").");
     } else if (pv_count < ub_count) {
-      Error(n.LOC(), "parallel variables are less than their bounds (" +
-                         std::to_string(pv_count) + " vs. " +
-                         std::to_string(ub_count) + ").");
-      error_count++;
+      Error1(n.LOC(), "parallel variables are less than their bounds (" +
+                          std::to_string(pv_count) + " vs. " +
+                          std::to_string(ub_count) + ").");
     }
   }
 
   // simple integer value check
   if (auto il = AST::GetIntLiteral(*n.BoundExpr()); il && (il->Val() <= 0)) {
-    Error(n.BPV()->LOC(),
-          "bound " + STR(n.BoundExpr()) +
-              " in parallelby is invalid: should be greater than 0.");
-    error_count++;
+    Error1(n.BPV()->LOC(),
+           "bound " + STR(n.BoundExpr()) +
+               " in parallelby is invalid: should be greater than 0.");
   }
 
   for (auto& bv : n.AllBoundExprs()) {
     if (auto il = AST::GetIntLiteral(*bv); il && (il->Val() <= 0)) {
-      Error(n.LOC(),
-            "bound item " + STR(bv) +
-                " in parallelby is invalid: should be greater than 0.");
-      error_count++;
+      Error1(n.LOC(),
+             "bound item " + STR(bv) +
+                 " in parallelby is invalid: should be greater than 0.");
     }
   }
 
   if (auto size = parallel_levels.size(); size >= 2)
     if (parallel_levels[size - 1] == parallel_levels[size - 2] &&
         parallel_levels.back() == 2) {
-      Error(n.LOC(), "Multiple inner parallels are not allowed!");
-      error_count++;
+      Error1(n.LOC(), "Multiple inner parallels are not allowed!");
     }
 
   diverges.Add(InScopeName(n.BPV()->name));
@@ -1259,26 +1219,22 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
 bool EarlySemantics::Visit(AST::WhereBind& n) {
   TraceEachVisit(n);
   if (!isa<AST::Identifier>(n.lhs)) {
-    Error(n.lhs->LOC(), "expect an identifier.");
-    error_count++;
+    Error1(n.lhs->LOC(), "expect an identifier.");
     return false;
   }
   if (!isa<AST::Identifier>(n.rhs)) {
-    Error(n.rhs->LOC(), "expect an identifier.");
-    error_count++;
+    Error1(n.rhs->LOC(), "expect an identifier.");
     return false;
   }
   auto lname = cast<AST::Identifier>(n.lhs)->name;
   auto rname = cast<AST::Identifier>(n.rhs)->name;
   if (with_syms.count(lname) == 0) {
-    Error(n.lhs->LOC(),
-          "symbol `" + lname + "' is not defined inside the with statement.");
-    error_count++;
+    Error1(n.lhs->LOC(),
+           "symbol `" + lname + "' is not defined inside the with statement.");
   }
   if (with_syms.count(rname) == 0) {
-    Error(n.rhs->LOC(),
-          "symbol `" + rname + "' is not defined inside the with statement.");
-    error_count++;
+    Error1(n.rhs->LOC(),
+           "symbol `" + rname + "' is not defined inside the with statement.");
   }
   return true;
 }
@@ -1292,38 +1248,34 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
   size_t rank = 0;
   if (auto itty = dyn_cast<ScalarIntegerType>(ity)) {
     if (itty->IsMutable()) {
-      Error(n.in->LOC(), "mutable integer can not be used inside with-in.");
-      error_count++;
+      Error1(n.in->LOC(), "mutable integer can not be used inside with-in.");
     }
     rank = 1;
   } else if (auto mdst = dyn_cast<MDSpanType>(ity)) {
     rank = mdst->Dims();
   } else {
-    Error(n.in->LOC(), "expect a span type or int type, but got the " +
-                           PSTR(ity) + " type.");
-    error_count++;
+    Error1(n.in->LOC(), "expect a span type or int type, but got the " +
+                            PSTR(ity) + " type.");
   }
 
   // check the if rank equal between with-in and with-matcher
   if (n.with_matchers && n.with_matchers->Count() != rank) {
-    Error(n.in->LOC(), "un-matched with-matcher-count(" +
-                           std::to_string(n.with_matchers->Count()) +
-                           ") and mdspan rank(" + std::to_string(rank) + ").");
-    error_count++;
+    Error1(n.in->LOC(), "un-matched with-matcher-count(" +
+                            std::to_string(n.with_matchers->Count()) +
+                            ") and mdspan rank(" + std::to_string(rank) + ").");
   }
 
   if (n.with && n.with->name == "_") {
-    Error(n.LOC(),
-          "_ is not allowed as a with variable. Can only be used in chunkat.");
-    error_count++;
+    Error1(n.LOC(),
+           "_ is not allowed as a with variable. Can only be used in chunkat.");
   }
 
   if (n.with_matchers) {
     for (auto v : n.with_matchers->AllValues()) {
       if (auto id = dyn_cast<AST::Identifier>(v); id->name == "_") {
-        Error(v->LOC(), "_ is not allowed as a with variable. Can only be used "
-                        "in chunkat.");
-        error_count++;
+        Error1(v->LOC(),
+               "_ is not allowed as a with variable. Can only be used "
+               "in chunkat.");
         continue;
       }
     }
@@ -1389,16 +1341,14 @@ bool EarlySemantics::Visit(AST::SpanAs& n) {
 
   for (auto val : n.list->AllValues()) {
     if (mutables.Contains(val)) {
-      Error(val->LOC(),
-            "the mutable value can not used for mdspan declaration.");
-      error_count++;
+      Error1(val->LOC(),
+             "the mutable value can not used for mdspan declaration.");
     }
   }
 
   auto sty = GetSpannedType(NodeType(*n.id));
   if (!sty) {
-    Error(n.LOC(), "span-as operation operates on a non-mdspan type.");
-    error_count++;
+    Error1(n.LOC(), "span-as operation operates on a non-mdspan type.");
     return false;
   }
 
@@ -1431,9 +1381,8 @@ bool EarlySemantics::Visit(AST::DMA& n) {
   if (!isa<AST::Memory>(n.to)) {
     tty = dyn_cast<SpannedType>(NodeType(*n.to));
     if (!tty) {
-      Error(n.to->LOC(),
-            "The DMA destination is neither storage identifier nor span.");
-      ++error_count;
+      Error1(n.to->LOC(),
+             "The DMA destination is neither storage identifier nor span.");
       return true;
     }
   }
@@ -1444,17 +1393,16 @@ bool EarlySemantics::Visit(AST::DMA& n) {
       parallel_level == 0) {
     if (auto m = dyn_cast<AST::Memory>(n.to)) {
       if ((m->Get() != Storage::GLOBAL) && (m->Get() != Storage::DEFAULT)) {
-        Error(n.LOC(), "`" + STR(m->Get()) +
-                           "' can not be DMA destination outside parallel-by.");
-        ++error_count;
+        Error1(n.LOC(),
+               "`" + STR(m->Get()) +
+                   "' can not be DMA destination outside parallel-by.");
         if (debug_visit)
           dbgs() << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
       }
     } else if ((tty->GetStorage() != Storage::GLOBAL) &&
                (tty->GetStorage() != Storage::DEFAULT)) {
-      Error(n.LOC(), "`" + STR(tty->GetStorage()) +
-                         "' can not be DMA destination outside parallel-by.");
-      ++error_count;
+      Error1(n.LOC(), "`" + STR(tty->GetStorage()) +
+                          "' can not be DMA destination outside parallel-by.");
       if (debug_visit)
         dbgs() << "Error in " << __FILE__ << ", line: " << __LINE__ << ".\n";
     }
@@ -1503,33 +1451,28 @@ bool EarlySemantics::Visit(AST::DMA& n) {
     FCtx(fname).GetFutureBufferInfo().emplace(
         InScopeName(n.future), DMABufferInfo{to_sym, from_kind, to_kind});
   } else {
-    if (n.async) {
-      Error(n.LOC(), "forbid to associated async dma without a named future.");
-      error_count++;
-    }
+    if (n.async)
+      Error1(n.LOC(), "forbid to associated async dma without a named future.");
   }
 
   if (isa<AST::ChunkAt>(n.from) && isa<AST::ChunkAt>(n.to))
     if (cast<AST::ChunkAt>(n.from)->HasTile() &&
         cast<AST::ChunkAt>(n.to)->HasTile()) {
-      Error(n.LOC(),
-            "slice and deslice in single DMA statement is not supported yet.");
-      error_count++;
+      Error1(n.LOC(),
+             "slice and deslice in single DMA statement is not supported yet.");
     }
 
   if (!isa<AST::Memory>(n.to)) {
     if (sty->Dims() != tty->Dims() && !allow_auto_threading) {
-      Error(n.LOC(),
-            "The DMA statement contains a rank mismatch: the 'from' and 'to' "
-            "arrays have inconsistent dimensions.");
-      error_count++;
+      Error1(n.LOC(),
+             "The DMA statement contains a rank mismatch: the 'from' and 'to' "
+             "arrays have inconsistent dimensions.");
     } else if (sty->ElementType() != tty->ElementType()) {
-      Error(n.LOC(),
-            "The DMA statement contains a type mismatch: the element types of "
-            "the 'from'(" +
-                STR(sty->ElementType()) + ") and 'to'(" +
-                STR(tty->ElementType()) + ") arrays are inconsistent.");
-      error_count++;
+      Error1(n.LOC(),
+             "The DMA statement contains a type mismatch: the element types of "
+             "the 'from'(" +
+                 STR(sty->ElementType()) + ") and 'to'(" +
+                 STR(tty->ElementType()) + ") arrays are inconsistent.");
     }
   }
 
@@ -1537,20 +1480,17 @@ bool EarlySemantics::Visit(AST::DMA& n) {
   if (n.operation == ".pad") {
     auto pcfg = dyn_cast<PadConfig>(n.config);
     if (!pcfg) {
-      Error(n.LOC(), "The DMA PAD config is incorrect. The correct form: "
-                     "dma.pad(.async)<{pad_highs}, {pad_lows}, {pad_mids}>.");
-      error_count++;
+      Error1(n.LOC(), "The DMA PAD config is incorrect. The correct form: "
+                      "dma.pad(.async)<{pad_highs}, {pad_lows}, {pad_mids}>.");
     } else if (!((pcfg->pad_high.size() == pcfg->pad_low.size()) &&
                  (pcfg->pad_low.size() == pcfg->pad_mid.size()))) {
-      Error(n.LOC(),
-            "The DMA statement contains a rank mismatch: the paddings have "
-            "inconsistent ranks.");
-      error_count++;
+      Error1(n.LOC(),
+             "The DMA statement contains a rank mismatch: the paddings have "
+             "inconsistent ranks.");
     } else if (NodeType(*n.from)->Dims() != pcfg->pad_high.size()) {
-      Error(n.LOC(),
-            "The rank of the data to transfer is inconsistent with the DMA "
-            "padding settings.");
-      error_count++;
+      Error1(n.LOC(),
+             "The rank of the data to transfer is inconsistent with the DMA "
+             "padding settings.");
     }
   }
 
@@ -1558,31 +1498,28 @@ bool EarlySemantics::Visit(AST::DMA& n) {
   if (n.operation == ".transp") {
     auto tcfg = dyn_cast<TransposeConfig>(n.config);
     if (!tcfg) {
-      Error(n.LOC(), "The DMA TRANSPOSE config is incorrect. The correct form: "
-                     "dma.transp(.async)<dim0, dim1, ...>");
-      error_count++;
+      Error1(n.LOC(),
+             "The DMA TRANSPOSE config is incorrect. The correct form: "
+             "dma.transp(.async)<dim0, dim1, ...>");
     } else {
       auto dim_values = tcfg->dim_values;
       if (dim_values.size() != sty->Dims()) {
-        Error(n.LOC(),
-              "The DMA statement contains a rank mismatch: the 'transpose "
-              "layout' and 'from' arrays have inconsistent dimensions.");
-        error_count++;
+        Error1(n.LOC(),
+               "The DMA statement contains a rank mismatch: the 'transpose "
+               "layout' and 'from' arrays have inconsistent dimensions.");
       }
       if (!isa<AST::Memory>(n.to)) {
         if (dim_values.size() != sty->Dims()) {
-          Error(n.LOC(),
-                "The DMA statement contains a rank mismatch: the 'transpose "
-                "layout' and 'to' arrays have inconsistent dimensions.");
-          error_count++;
+          Error1(n.LOC(),
+                 "The DMA statement contains a rank mismatch: the 'transpose "
+                 "layout' and 'to' arrays have inconsistent dimensions.");
         }
       }
       std::sort(dim_values.begin(), dim_values.end());
       for (size_t i = 0; i < dim_values.size(); ++i) {
         if (dim_values[i] != i) {
-          Error(n.LOC(), "The DMA statement contains an error: the transpose "
-                         "layout is invalid.");
-          error_count++;
+          Error1(n.LOC(), "The DMA statement contains an error: the transpose "
+                          "layout is invalid.");
           break;
         }
       }
@@ -1615,12 +1552,10 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
       // the upper bound of notile must be 1
       for (auto& i : notile_indices) {
         auto il = GetIntLiteral(*tsi->GetTilingFactors()->ValueAt(i));
-        if ((il == nullptr) || (il->Val() != 1)) {
-          Error(tsi->LOC(), "upper bound of bounded variable '_' is " +
-                                PSTR(tsi->GetTilingFactors()->ValueAt(i)) +
-                                " (1 is expected).");
-          error_count++;
-        }
+        if ((il == nullptr) || (il->Val() != 1))
+          Error1(tsi->LOC(), "upper bound of bounded variable '_' is " +
+                                 PSTR(tsi->GetTilingFactors()->ValueAt(i)) +
+                                 " (1 is expected).");
       }
     }
   }
@@ -1630,9 +1565,8 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
   if (n.sa) nty = NodeType(*n.sa);
 
   if (!isa<SpannedType>(nty) && !isa<FutureType>(nty)) {
-    Error(n.LOC(),
-          "expect '" + n.data->name + "` of a spanned data or future type.");
-    error_count++;
+    Error1(n.LOC(),
+           "expect '" + n.data->name + "` of a spanned data or future type.");
     return true;
   }
 
@@ -1643,11 +1577,9 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
       tsi->GetTFSSExpr()->accept(*this);
 
       for (auto v : tsi->GetTFSSExpr()->AllValues()) {
-        if (mutables.Contains(v)) {
-          Error(v->LOC(), "the mutable value can not used for the "
-                          ".chunk/.subspan/.modspan expression.");
-          error_count++;
-        }
+        if (mutables.Contains(v))
+          Error1(v->LOC(), "the mutable value can not used for the "
+                           ".chunk/.subspan/.modspan expression.");
       }
     }
 
@@ -1657,47 +1589,38 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
     for (auto& v : tsi->GetIndices()) {
       auto ty = NodeType(*v);
       if (!tsi->MultipleExprs() && !isa<BoundedType>(ty)) {
-        Error(v->LOC(), "expect '" + PSTR(v) + "` be a bounded type (but got " +
-                            PSTR(ty) + ").");
-        error_count++;
-      } else if (tsi->MultipleExprs() && !CanYieldIndex(ty)) {
-        Error(v->LOC(), "expect '" + PSTR(v) + "` to yield an index (but got " +
-                            PSTR(ty) + ").");
-        error_count++;
-      }
+        Error1(v->LOC(), "expect '" + PSTR(v) +
+                             "` be a bounded type (but got " + PSTR(ty) + ").");
+      } else if (tsi->MultipleExprs() && !CanYieldIndex(ty))
+        Error1(v->LOC(), "expect '" + PSTR(v) +
+                             "` to yield an index (but got " + PSTR(ty) + ").");
       r_count += ty->Dims();
       SetNodeType(*v, ty);
     }
     // report error when the ranks do not match
-    if (rank != r_count) {
-      Error(tsi->LOC(), "un-matched ranks between spanned data (" +
-                            std::to_string(rank) + ") and bounded variables (" +
-                            std::to_string(r_count) + ").");
-      error_count++;
-    }
+    if (rank != r_count)
+      Error1(tsi->LOC(),
+             "un-matched ranks between spanned data (" + std::to_string(rank) +
+                 ") and bounded variables (" + std::to_string(r_count) + ").");
 
     if (tsi->MultipleExprs()) {
       size_t b_count = 0;
       for (auto& v : tsi->GetTFSSExpr()->AllValues()) {
         auto ty = NodeType(*v);
         if (!isa<ScalarIntegerType>(ty) && !isa<ITupleType>(ty) &&
-            !isa<MDSpanType>(ty)) {
-          Error(v->LOC(),
-                "expect '" + PSTR(v) +
-                    "` be either an integer, ituple or mdspan type (but got " +
-                    PSTR(ty) + ").");
-          error_count++;
-        }
+            !isa<MDSpanType>(ty))
+          Error1(v->LOC(),
+                 "expect '" + PSTR(v) +
+                     "` be either an integer, ituple or mdspan type (but got " +
+                     PSTR(ty) + ").");
         b_count += ty->Dims();
         SetNodeType(*v, ty);
       }
-      if (rank != b_count) {
-        Error(tsi->LOC(), "un-matched ranks between spanned data (" +
-                              std::to_string(rank) + ") and " +
-                              ((tsi->HasTilingExpr()) ? "tiling" : "subspan") +
-                              " variables (" + std::to_string(b_count) + ").");
-        error_count++;
-      }
+      if (rank != b_count)
+        Error1(tsi->LOC(), "un-matched ranks between spanned data (" +
+                               std::to_string(rank) + ") and " +
+                               ((tsi->HasTilingExpr()) ? "tiling" : "subspan") +
+                               " variables (" + std::to_string(b_count) + ").");
     }
   }
   assert(IsValidRank(nty->Dims()));
@@ -1710,32 +1633,24 @@ bool EarlySemantics::Visit(AST::Wait& n) {
   TraceEachVisit(n);
 
   for (auto& v : n.targets->AllValues()) {
-    if (!AST::IsSymbolOrArrayRef(*v)) {
-      Error(n.LOC(),
-            "expect a symbol/array reference but got '" + AST::STR(*v) + "'.");
-      error_count++;
-    }
+    if (!AST::IsSymbolOrArrayRef(*v))
+      Error1(n.LOC(),
+             "expect a symbol/array reference but got '" + AST::STR(*v) + "'.");
 
     auto ty = NodeType(*v);
 
     if (auto fty = dyn_cast<FutureType>(ty)) {
-      if (!fty->IsAsync()) {
-        Error(n.LOC(), "non-async future '" + AST::GetName(*v).value() +
-                           "` can not be waited.");
-        error_count++;
-      }
+      if (!fty->IsAsync())
+        Error1(n.LOC(), "non-async future '" + AST::GetName(*v).value() +
+                            "` can not be waited.");
       continue;
     } else if (auto pty = dyn_cast<PlaceHolderType>(ty)) {
-      if (pty->GetBaseType() != BaseType::FUTURE) {
-        Error(n.LOC(), "'" + AST::GetName(*v).value() + "` of type \"" +
-                           PSTR(ty) + "\" can not be waited.");
-        error_count++;
-      }
-    } else if (!isa<EventType>(ty)) {
-      Error(n.LOC(),
-            "'" + STR(n) + "` of type \"" + PSTR(ty) + "\" can not be waited.");
-      error_count++;
-    }
+      if (pty->GetBaseType() != BaseType::FUTURE)
+        Error1(n.LOC(), "'" + AST::GetName(*v).value() + "` of type \"" +
+                            PSTR(ty) + "\" can not be waited.");
+    } else if (!isa<EventType>(ty))
+      Error1(n.LOC(), "'" + STR(n) + "` of type \"" + PSTR(ty) +
+                          "\" can not be waited.");
   }
   return true;
 }
@@ -1744,17 +1659,13 @@ bool EarlySemantics::Visit(AST::Trigger& n) {
   TraceEachVisit(n);
 
   for (auto& v : n.targets->AllValues()) {
-    if (!AST::IsSymbolOrArrayRef(*v)) {
-      Error(v->LOC(),
-            "expect a symbol/array reference but got '" + AST::STR(*v) + "'.");
-      error_count++;
-    }
+    if (!AST::IsSymbolOrArrayRef(*v))
+      Error1(v->LOC(),
+             "expect a symbol/array reference but got '" + AST::STR(*v) + "'.");
     auto ty = NodeType(*v);
-    if (!isa<EventType>(ty)) {
-      Error(v->LOC(),
-            "expect `" + PSTR(v) + "' an event but got '" + PSTR(ty) + "'.");
-      error_count++;
-    }
+    if (!isa<EventType>(ty))
+      Error1(v->LOC(),
+             "expect `" + PSTR(v) + "' an event but got '" + PSTR(ty) + "'.");
   }
 
   return true;
@@ -1766,29 +1677,22 @@ bool EarlySemantics::Visit(AST::Call& n) {
   size_t ec = error_count;
 
   if ((parallel_level == 0) && !n.IsBIF()) {
-    Error(n.LOC(),
-          "unable to call kernel function outside the parallel-by block(s).");
-    error_count++;
+    Error1(n.LOC(),
+           "unable to call kernel function outside the parallel-by block(s).");
     return false;
   }
 
   if (n.IsBIF()) {
-    if (n.template_args) {
-      Error(n.LOC(), "the built-in functions are not function templates.");
-      error_count++;
-    }
+    if (n.template_args)
+      Error1(n.LOC(), "the built-in functions are not function templates.");
     const auto func_name = n.function->name;
     if (func_name == "assert") {
       auto pty = NodeType(*n.arguments->ValueAt(0));
-      if (!isa<BooleanType>(pty)) {
-        Error(n.LOC(), "expect a predicate but got '" + PSTR(pty) + "'.");
-        error_count++;
-      }
+      if (!isa<BooleanType>(pty))
+        Error1(n.LOC(), "expect a predicate but got '" + PSTR(pty) + "'.");
       auto sty = NodeType(*n.arguments->ValueAt(1));
-      if (!isa<StringType>(sty)) {
-        Error(n.LOC(), "expect a string but got '" + PSTR(sty) + "'.");
-        error_count++;
-      }
+      if (!isa<StringType>(sty))
+        Error1(n.LOC(), "expect a string but got '" + PSTR(sty) + "'.");
     } else if (func_name == "print" || func_name == "println") {
       auto Printable = [](ptr<Type> ty) -> bool {
         if (isa<StringType>(ty) || isa<ScalarIntegerType>(ty) ||
@@ -1827,28 +1731,22 @@ bool EarlySemantics::Visit(AST::Call& n) {
 
       for (size_t i = 1; i < n.arguments->Count(); ++i) {
         auto sty = NodeType(*n.arguments->ValueAt(i));
-        if (!sty->ApprxEqual(*pty)) {
-          Error(n.LOC(),
-                "expect the " + std::to_string(i) +
-                    "th argument to be the same type as the first one.");
-          error_count++;
-        }
+        if (!sty->ApprxEqual(*pty))
+          Error1(n.LOC(),
+                 "expect the " + std::to_string(i) +
+                     "th argument to be the same type as the first one.");
       }
       SetNodeType(n, pty);
     } else if (func_name == "__alignup" || func_name == "__aligndown") {
-      if (n.arguments->Count() != 2) {
-        Error(n.LOC(), "expect 2 arguments but got " +
-                           std::to_string(n.arguments->Count()) + ".");
-        error_count++;
-      }
+      if (n.arguments->Count() != 2)
+        Error1(n.LOC(), "expect 2 arguments but got " +
+                            std::to_string(n.arguments->Count()) + ".");
       for (size_t i = 0; i < n.arguments->Count(); ++i) {
         auto arg_ty = NodeType(*n.arguments->ValueAt(i));
-        if (!isa<ScalarIntegerType>(arg_ty)) {
-          Error(n.LOC(), "expect the " + std::to_string(i) +
-                             "th argument to be a integer type but got '" +
-                             PSTR(arg_ty) + "'.");
-          error_count++;
-        }
+        if (!isa<ScalarIntegerType>(arg_ty))
+          Error1(n.LOC(), "expect the " + std::to_string(i) +
+                              "th argument to be a integer type but got '" +
+                              PSTR(arg_ty) + "'.");
       }
       auto pty = NodeType(*n.arguments->ValueAt(0));
       SetNodeType(n, pty);
@@ -1863,12 +1761,10 @@ bool EarlySemantics::Visit(AST::Call& n) {
     count++;
     auto ty = NodeType(*v);
     // must be a callable type
-    if (!CanYieldAnInteger(ty) && !isa<SpannedType>(ty)) {
-      Error(n.LOC(), "(" + std::to_string(count) + "th) argument of type '" +
-                         PSTR(ty) +
-                         "` can not be passed to the kernel function.");
-      error_count++;
-    }
+    if (!CanYieldAnInteger(ty) && !isa<SpannedType>(ty))
+      Error1(n.LOC(), "(" + std::to_string(count) + "th) argument of type '" +
+                          PSTR(ty) +
+                          "` can not be passed to the kernel function.");
   }
 
   if (n.template_args) {
@@ -1877,13 +1773,11 @@ bool EarlySemantics::Visit(AST::Call& n) {
       count++;
       auto ty = NodeType(*v);
       // must be a scalar type
-      if (!ConvertibleToInt(ty)) {
-        Error(n.LOC(),
-              "(" + std::to_string(count) + "th) template argument of type '" +
-                  PSTR(ty) +
-                  "` can not be used to instantiate the kernel function.");
-        error_count++;
-      }
+      if (!ConvertibleToInt(ty))
+        Error1(n.LOC(),
+               "(" + std::to_string(count) + "th) template argument of type '" +
+                   PSTR(ty) +
+                   "` can not be used to instantiate the kernel function.");
     }
   }
 
@@ -1914,9 +1808,8 @@ bool EarlySemantics::Visit(AST::Rotate& n) {
     auto cname = cast<AST::Identifier>(pnode)->name;
     auto cty = NodeType(*pnode);
     if (!GeneralFutureType(*cty)) {
-      Error(n.LOC(), "only support swapping of 'future'. (" +
-                         n.IdAt(index)->name + ": " + PSTR(lty) + ").");
-      error_count++;
+      Error1(n.LOC(), "only support swapping of 'future'. (" +
+                          n.IdAt(index)->name + ": " + PSTR(lty) + ").");
       return false;
     }
 
@@ -1924,9 +1817,8 @@ bool EarlySemantics::Visit(AST::Rotate& n) {
     // associated.
     if (FCtx(fname).GetFutureBufferInfo()[InScopeName(cname)].to_kind ==
         DOK_CHUNK) {
-      Error(n.LOC(), "rotate/swap a 'future' referring a buffer chunk has not "
-                     "been supported yet.");
-      error_count++;
+      Error1(n.LOC(), "rotate/swap a 'future' referring a buffer chunk has not "
+                      "been supported yet.");
       return false;
     }
 
@@ -1934,9 +1826,8 @@ bool EarlySemantics::Visit(AST::Rotate& n) {
     lty = NodeType(*n.ValueAt(index - 1));
 
     if (!lty->ApprxEqual(*cty)) {
-      Error(n.LOC(), "rotate/swap data of different types (" + PSTR(lty) +
-                         " vs. " + PSTR(cty));
-      error_count++;
+      Error1(n.LOC(), "rotate/swap data of different types (" + PSTR(lty) +
+                          " vs. " + PSTR(cty));
       return false;
     }
   }
@@ -1944,8 +1835,7 @@ bool EarlySemantics::Visit(AST::Rotate& n) {
   auto fty = type_equals.ResolveEqualFutures(*n.ids);
 
   if (!fty) {
-    Error(n.LOC(), "Fail to resolve types for swap/rotate.");
-    error_count++;
+    Error1(n.LOC(), "Fail to resolve types for swap/rotate.");
     return false;
   } else if (isa<PlaceHolderType>(fty))
     return true; // do not apply placeholders
@@ -1969,11 +1859,9 @@ bool EarlySemantics::Visit(AST::Select& n) {
 
   // TODO(wsj) isa<ScalarIntegerType>(rty)?
   if (!isa<BoundedIntegerType>(NodeType(*n.select_factor)) &&
-      !isa<ScalarIntegerType>(NodeType(*n.select_factor))) {
-    Error(n.LOC(), "expect `" + PSTR(n.select_factor) +
-                       "` to be a (bounded) integer type.");
-    error_count++;
-  }
+      !isa<ScalarIntegerType>(NodeType(*n.select_factor)))
+    Error1(n.LOC(), "expect `" + PSTR(n.select_factor) +
+                        "` to be a (bounded) integer type.");
 
   // TODO(wsj) assert bound <= span_val_list.count ?
 
@@ -1983,21 +1871,18 @@ bool EarlySemantics::Visit(AST::Select& n) {
   auto v0ty = NodeType(*v0);
 
   if (!GeneralFutureType(v0ty) && !isa<SpannedType>(v0ty)) {
-    Error(v0->LOC(),
-          "expect `" + PSTR(v0ty) + "` to be a future/spanned type.");
-    error_count++;
+    Error1(v0->LOC(),
+           "expect `" + PSTR(v0ty) + "` to be a future/spanned type.");
     return ec == error_count;
   }
 
   ptr<Type> sel_fty = nullptr;
   for (auto& v : n.expr_list->AllValues()) {
     auto nty = NodeType(*v);
-    if (!nty->ApprxEqual(*v0ty)) {
-      Error(v->LOC(), "expect `" + PSTR(v) + "`(" + PSTR(nty) +
-                          ") to be the same type as `" + PSTR(v0) + "`(" +
-                          PSTR(v0ty) + ").");
-      error_count++;
-    }
+    if (!nty->ApprxEqual(*v0ty))
+      Error1(v->LOC(), "expect `" + PSTR(v) + "`(" + PSTR(nty) +
+                           ") to be the same type as `" + PSTR(v0) + "`(" +
+                           PSTR(v0ty) + ").");
 
     if (isa<FutureType>(nty)) sel_fty = nty;
   }
@@ -2032,33 +1917,30 @@ bool EarlySemantics::Visit(AST::Return& n) {
   TraceEachVisit(n);
   found_return = true;
   if (parallel_level != 0) {
-    Error(n.LOC(), "unable to return inside the parallel-by block(s).");
-    error_count++;
+    Error1(n.LOC(), "unable to return inside the parallel-by block(s).");
     return false;
   }
 
   if (n.value) {
     if (auto rexp = dyn_cast<AST::Expr>(n.value)) {
       if (isa<AST::ChunkAt>(rexp->GetR())) {
-        Error(n.LOC(), "illegal: chunkat is used in return expression.");
-        error_count++;
+        Error1(n.LOC(), "illegal: chunkat is used in return expression.");
         return false;
       }
     }
 
     auto vty = NodeType(*n.value);
     if (!(isa<SpannedType>(vty) || isa<ScalarType>(vty))) {
-      Error(n.LOC(),
-            "returning value with type '" + PSTR(vty) + "' is not supported.");
-      error_count++;
+      Error1(n.LOC(),
+             "returning value with type '" + PSTR(vty) + "' is not supported.");
       return false;
     }
 
     if (CCtx().GetTarget() == CompileTarget::Factor) {
       if (isa<ScalarType>(vty)) {
-        Error(n.LOC(),
-              "returning scalar value in Factor backend is not supported yet.");
-        error_count++;
+        Error1(
+            n.LOC(),
+            "returning scalar value in Factor backend is not supported yet.");
         return false;
       }
     }
@@ -2070,14 +1952,10 @@ bool EarlySemantics::Visit(AST::Return& n) {
 bool EarlySemantics::Visit(AST::LoopRange& n) {
   TraceEachVisit(n);
 
-  if (n.lbound && !isa<ScalarIntegerType>(NodeType(*n.lbound))) {
-    Error(n.lbound->LOC(), "the lower bound is not an integer.");
-    error_count++;
-  }
-  if (n.ubound && !isa<ScalarIntegerType>(NodeType(*n.ubound))) {
-    Error(n.ubound->LOC(), "the upper bound is not an integer.");
-    error_count++;
-  }
+  if (n.lbound && !isa<ScalarIntegerType>(NodeType(*n.lbound)))
+    Error1(n.lbound->LOC(), "the lower bound is not an integer.");
+  if (n.ubound && !isa<ScalarIntegerType>(NodeType(*n.ubound)))
+    Error1(n.ubound->LOC(), "the upper bound is not an integer.");
 
   return true;
 }
@@ -2088,15 +1966,13 @@ bool EarlySemantics::Visit(AST::ForeachBlock& n) {
   for (auto& i : n.GetRanges()) {
     if (auto id = dyn_cast<AST::LoopRange>(i)->iv) {
       if (id->name == "_") {
-        Error(id->LOC(), "_ is not allowed as an iteration variable.");
-        error_count++;
+        Error1(id->LOC(), "_ is not allowed as an iteration variable.");
         continue;
       }
       auto ity = NodeType(*id);
       if (!(isa<BoundedType>(ity))) {
-        Error(id->LOC(), "expect a bounded type for iteration variable '" +
-                             id->name + "' but got '" + PSTR(ity) + "'.");
-        error_count++;
+        Error1(id->LOC(), "expect a bounded type for iteration variable '" +
+                              id->name + "' but got '" + PSTR(ity) + "'.");
         continue;
       }
       std::string scope_name = GetScope(InScopeName(id->name));
@@ -2106,13 +1982,12 @@ bool EarlySemantics::Visit(AST::ForeachBlock& n) {
                                 "' to be declared by 'within' block";
         if (PrefixedWith(scopes.back(), "paraby_"))
           error_msg += " instead of 'parallel-by' block";
-        Error(id->LOC(), error_msg + ".");
-        error_count++;
+        Error1(id->LOC(), error_msg + ".");
       }
     } else {
       auto ity = i->GetType();
-      Error(i->LOC(), "expect a range expression but got '" + PSTR(ity) + "'.");
-      error_count++;
+      Error1(i->LOC(),
+             "expect a range expression but got '" + PSTR(ity) + "'.");
     }
   }
   return true;
@@ -2120,26 +1995,18 @@ bool EarlySemantics::Visit(AST::ForeachBlock& n) {
 
 bool EarlySemantics::Visit(AST::InThreadsBlock& n) {
   TraceEachVisit(n);
-  if (!isa<BooleanType>(NodeType(*n.pred))) {
-    Error(n.pred->LOC(), "requires a predication expression but got '" +
-                             PSTR(NodeType(*n.pred)) + "'.");
-    error_count++;
-  }
+  if (!isa<BooleanType>(NodeType(*n.pred)))
+    Error1(n.pred->LOC(), "requires a predication expression but got '" +
+                              PSTR(NodeType(*n.pred)) + "'.");
 
-  if (parallel_level == 0) {
-    Error(n.pred->LOC(), "inthreads can not be declared in global scope.");
-    error_count++;
-  }
+  if (parallel_level == 0)
+    Error1(n.pred->LOC(), "inthreads can not be declared in global scope.");
 
-  if (n.async && !n.outer) {
-    Error(n.pred->LOC(), "inner inthreads can not be declared as async.");
-    error_count++;
-  }
+  if (n.async && !n.outer)
+    Error1(n.pred->LOC(), "inner inthreads can not be declared as async.");
 
-  if (!diverges.Contains(n.pred)) {
-    Error(n.pred->LOC(), "inthreads' predicate must be strictly divergent.");
-    error_count++;
-  }
+  if (!diverges.Contains(n.pred))
+    Error1(n.pred->LOC(), "inthreads' predicate must be strictly divergent.");
 
   return true;
 }
@@ -2147,11 +2014,9 @@ bool EarlySemantics::Visit(AST::InThreadsBlock& n) {
 bool EarlySemantics::Visit(AST::WhileBlock& n) {
   TraceEachVisit(n);
 
-  if (!isa<EventType>(NodeType(*n.pred))) {
-    Error(n.pred->LOC(), "requires an event predication expression but got '" +
-                             PSTR(NodeType(*n.pred)) + "'.");
-    error_count++;
-  }
+  if (!isa<EventType>(NodeType(*n.pred)))
+    Error1(n.pred->LOC(), "requires an event predication expression but got '" +
+                              PSTR(NodeType(*n.pred)) + "'.");
 
   return true;
 }
@@ -2161,9 +2026,8 @@ bool EarlySemantics::Visit(AST::IfElseBlock& n) {
   if (isa<AST::Call>(n.pred)) return true; // can not derive function call
 
   if (!isa<BooleanType>(NodeType(*n.pred))) {
-    Error(n.pred->LOC(), "requires a predication expression but got '" +
-                             PSTR(NodeType(*n.pred)) + "'.");
-    error_count++;
+    Error1(n.pred->LOC(), "requires a predication expression but got '" +
+                              PSTR(NodeType(*n.pred)) + "'.");
   }
 
   return true;
@@ -2173,24 +2037,18 @@ bool EarlySemantics::Visit(AST::IncrementBlock& n) {
   TraceEachVisit(n);
   for (auto& iv : n.GetIterationVars()) {
     auto ity = NodeType(*iv);
-    if (!(isa<BoundedType>(ity))) {
-      Error(n.LOC(), "expect a bounded type but got '" + PSTR(ity) + "'.");
-      error_count++;
-    }
+    if (!(isa<BoundedType>(ity)))
+      Error1(n.LOC(), "expect a bounded type but got '" + PSTR(ity) + "'.");
     if (auto id = AST::GetIdentifier(*iv)) {
-      if (id->name == "_") {
-        Error(n.LOC(), "_ is not allowed as an iteration variable.");
-        error_count++;
-      }
+      if (id->name == "_")
+        Error1(n.LOC(), "_ is not allowed as an iteration variable.");
     }
   }
 
   auto pty = NodeType(*n.GetPredicate());
-  if (!isa<BooleanType>(pty)) {
-    Error(n.LOC(),
-          "expect the a boolean-typed predicate but got '" + PSTR(pty) + "'.");
-    error_count++;
-  }
+  if (!isa<BooleanType>(pty))
+    Error1(n.LOC(),
+           "expect the a boolean-typed predicate but got '" + PSTR(pty) + "'.");
 
   return true;
 }
@@ -2225,8 +2083,7 @@ bool EarlySemantics::Visit(AST::Program& n) {
 bool EarlySemantics::ReportErrorWhenUseBeforeDefine(const location& loc,
                                                     const std::string& name) {
   if (!SSTab().IsDeclared(name)) {
-    Error(loc, "symbol `" + name + "' is used before declaration.");
-    ++error_count;
+    Error1(loc, "symbol `" + name + "' is used before declaration.");
     return false;
   }
   return true;
@@ -2237,8 +2094,7 @@ bool EarlySemantics::ReportErrorWhenViolateODR(const location& loc,
                                                const char* file, int line,
                                                const ptr<Type>& type) {
   if (SSTab().DeclaredInScope(name)) {
-    Error(loc, "symbol `" + name + "' has been declared already.");
-    ++error_count;
+    Error1(loc, "symbol `" + name + "' has been declared already.");
     if (debug_visit)
       dbgs() << "Error in " << file << ", line: " << line << ".\n";
     return false;

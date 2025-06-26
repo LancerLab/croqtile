@@ -16,6 +16,7 @@ void MultiValues::accept(Choreo::Visitor& v) {
   v.Visit(*this);
 }
 
+void NoValue::accept(Choreo::Visitor& v) { v.Visit(*this); }
 void BoolLiteral::accept(Choreo::Visitor& v) { v.Visit(*this); }
 void IntLiteral::accept(Choreo::Visitor& v) { v.Visit(*this); }
 void FloatLiteral::accept(Choreo::Visitor& v) { v.Visit(*this); }

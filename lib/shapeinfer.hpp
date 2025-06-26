@@ -6,8 +6,14 @@
 
 namespace Choreo {
 
+using namespace Choreo::valno;
+
 // An AST node may have multiple value numbers
-enum class VNKind { VNK_VALUE, VNK_UBOUND, VNK_MDSPAN };
+enum class VNKind {
+  VNK_VALUE,  // valno of the current symbol, like 'a'
+  VNK_UBOUND, // valno of the implied upper-bound, like '#a'
+  VNK_MDSPAN, // valno of the implied mdspan, like 'a.span'
+};
 
 inline const std::string STR(VNKind vnt) {
   switch (vnt) {
@@ -73,7 +79,7 @@ public:
 
     if (debug)
       dbgs() << " |-<node-valno> update [" << node->TypeNameString() << "] "
-             << PSTR(node) << " - " << STR(vnt) << ": #" << vn << "\n";
+             << PSTR(node) << " - " << STR(vnt) << ": " << STR(vn) << "\n";
   }
 
   void Copy(const AST::Node* fn, const AST::Node* tn) {
@@ -81,20 +87,29 @@ public:
       Update(tn, *v, VNKind::VNK_MDSPAN);
       if (debug)
         dbgs() << " |-<node-valno> copy (mdspan): '" << PSTR(fn) << "' -> '"
-               << PSTR(tn) << "': #" << *v << "\n";
+               << PSTR(tn) << "': " << STR(*v) << "\n";
     }
     if (auto v = GetOrNull(fn, VNKind::VNK_UBOUND)) {
       Update(tn, *v, VNKind::VNK_UBOUND);
       if (debug)
         dbgs() << " |-<node-valno> copy (ubound): '" << PSTR(fn) << "' -> '"
-               << PSTR(tn) << "': #" << *v << "\n";
+               << PSTR(tn) << "': " << STR(*v) << "\n";
     }
     if (auto v = GetOrNull(fn, VNKind::VNK_VALUE)) {
       Update(tn, *v, VNKind::VNK_VALUE);
       if (debug)
         dbgs() << " |-<node-valno> copy (value): '" << PSTR(fn) << "' -> '"
-               << PSTR(tn) << "': #" << *v << "\n";
+               << PSTR(tn) << "': " << STR(*v) << "\n";
     }
+  }
+  void Copy(const AST::Node* fn, const AST::Node* tn, VNKind vnt) {
+    if (auto v = GetOrNull(fn, vnt)) {
+      Update(tn, *v, vnt);
+      if (debug)
+        dbgs() << " |-<node-valno> copy (" << STR(vnt) << "): '" << PSTR(fn)
+               << "' -> '" << PSTR(tn) << "': " << STR(*v) << "\n";
+    } else
+      choreo_unreachable("failed to copy " + STR(vnt) + ".");
   }
 }; // NodeValNo
 
@@ -103,13 +118,13 @@ private:
   valno::ValueNumbering vn;
 
   // valno rendered from current ast node
-  int cur_vn = GetInvalidValueNumber();
+  NumTy cur_vn = GetInvalidValueNumber();
 
   // implicit valno of spanned-type with ".span" annotation
-  int cur_mdspan_vn = GetInvalidValueNumber();
+  NumTy cur_mdspan_vn = GetInvalidValueNumber();
 
   // implicit valno of upper-bound
-  int cur_ub_vn = GetInvalidValueNumber();
+  NumTy cur_ub_vn = GetInvalidValueNumber();
 
   // when values are consumed instead of generated
   bool gen_values = true;
@@ -135,39 +150,39 @@ private:
 
   // Generate the signature for a node, simplify the signature when optimiz flag
   // is set.
-  const std::string SignNode(const AST::Node& node);
+  const SignTy SignNode(const AST::Node& node);
 
-  const std::string SignSpan(const AST::Node& node);
+  const SignTy SignSpan(const AST::Node& node);
 
-  std::pair<const std::string, const std::string> SignBounded(const AST::Node&);
+  std::pair<const SignTy, const SignTy> SignBounded(const AST::Node&);
 
   // Directly get the value number. Abort when it fails.
-  int GetValNo(const AST::Node&, VNKind vnt = VNKind::VNK_VALUE) const;
+  NumTy GetValNo(const AST::Node&, VNKind vnt = VNKind::VNK_VALUE) const;
 
   // Generate the new value number. Abort when the value number exists.
-  int GenValNo(const AST::Node&);
+  NumTy GenValNo(const AST::Node&);
 
   // Check if the value number exists for the node
   bool HasValNo(const AST::Node&, VNKind vnt = VNKind::VNK_VALUE) const;
 
   // Symbol names related to the value numbering
-  const std::string VNSymbolName(const AST::Identifier&) const;
+  const SignTy VNSymbolName(const AST::Identifier&) const;
 
-  const std::string GetSign(const AST::Node& n,
-                            VNKind vnt = VNKind::VNK_VALUE) const {
+  const SignTy GetSign(const AST::Node& n,
+                       VNKind vnt = VNKind::VNK_VALUE) const {
     return SignValNo(ast_vn.Get(&n, vnt));
   }
 
 private:
   // short-hands
-  const std::string SignValNo(int valno) const {
+  const SignTy SignValNo(NumTy valno) const {
     return vn.GetSignatureFromValueNumber(valno);
   }
-  int ValNoSign(const std::string& sign) const {
+  NumTy ValNoSign(const SignTy& sign) const {
     return vn.GetValueNumberOfSignature(sign);
   }
 
-  void ValNoAliasSign(const std::string& sign, int valno) {
+  void ValNoAliasSign(const SignTy& sign, NumTy valno) {
     vn.AssociateSignatureWithValueNumber(sign, valno);
   }
 
@@ -230,8 +245,7 @@ public:
                          n.TypeNameString());
     if (isa<BoundedType>(nty))
       return VNKind::VNK_UBOUND;
-    else if (isa<ITupleType>(nty) || isa<MDSpanType>(nty) ||
-             isa<SpannedType>(nty) || GeneralFutureType(nty))
+    else if (isa<SpannedType>(nty) || GeneralFutureType(nty))
       return VNKind::VNK_MDSPAN;
     else
       return VNKind::VNK_VALUE;
@@ -254,6 +268,7 @@ public:
   bool Visit(AST::Assignment& n) override;
   bool Visit(AST::IntIndex& n) override;
   bool Visit(AST::DataType& n) override;
+  bool Visit(AST::NoValue& n) override;
   bool Visit(AST::Identifier& n) override;
   bool Visit(AST::Parameter& n) override;
   bool Visit(AST::ParamList& n) override;
@@ -284,12 +299,12 @@ public:
 
 private:
   void CollapseMultiValues(const AST::MultiValues&);
-  std::string GenerateExpression(const std::string& sig);
-  int GetOnlyValueNumberFromMultiValues(const AST::MultiValues& mv);
-  void UpdateValueNumberForMultiValues(const AST::MultiValues& mv, int valno);
+  const std::optional<std::string> GenerateExpression(const SignTy& sig) const;
+  NumTy GetOnlyValueNumberFromMultiValues(const AST::MultiValues& mv);
+  void UpdateValueNumberForMultiValues(const AST::MultiValues& mv, NumTy valno);
   bool CanBeValueNumbered(AST::Node* n) const;
-  void DefineASymbol(const std::string& name, const ptr<Type>& ty);
-  Shape GenShapeFromSignature(const std::string&);
+  void DefineASymbol(const SignTy& name, const ptr<Type>& ty);
+  Shape GenShapeFromSignature(const SignTy&, const AST::Node&);
 }; // class ShapeInference
 
 } // end namespace Choreo

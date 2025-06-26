@@ -58,7 +58,8 @@ public:
     else if (auto sl = dyn_cast<AST::Select>(n))
       return nodes.count(sl.get());
     else if (AST::IsLiteral(*n) || isa<AST::IntIndex>(n) ||
-             isa<AST::SpanAs>(n) || isa<AST::ChunkAt>(n))
+             isa<AST::SpanAs>(n) || isa<AST::ChunkAt>(n) ||
+             isa<AST::NoValue>(n))
       return false;
     else if (auto c = dyn_cast<AST::Call>(n)) {
       return nodes.count(c.get());
@@ -136,6 +137,11 @@ private:
       dbgs() << m << n.TypeNameString() << "\n";
   }
 
+private:
+  // shared routine for declarations inside NameVariableDecl and Assignment
+  bool CheckInitializerType(const ptr<Type>&, const std::string&,
+                            const location&);
+
 public:
   EarlySemantics() : VisitorWithScope("sema") {
     //    if (trace_visit) debug_visit = true; // force debug when tracing
@@ -195,7 +201,6 @@ public:
 
   bool HasError() override;
 };
-
 } // end namespace Choreo
 
 #endif // __CHOREO_EARLY_SEMANTICS_CHECK_HPP__

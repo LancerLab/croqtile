@@ -28,6 +28,8 @@
 
 namespace choreo {
 
+constexpr size_t inf = (size_t)(-1LL);
+
 inline void choreo_assert(bool p, const char* msg, const char* file = __FILE__,
                           int line = __LINE__) {
   if (!p) {

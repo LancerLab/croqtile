@@ -352,8 +352,8 @@ public:
     if (!n.HasSubPVs()) {
       // `parallel p by 2`  ==> `parallel p={p__elem__x} by [2]`
       auto spv = AST::Make<AST::MultiValues>(n.LOC(), ", ");
-      spv->Append(
-          AST::Make<AST::Identifier>(n.LOC(), n.BPV()->name + "__elem__x"));
+      spv->Append(AST::Make<AST::Identifier>(n.BPV()->LOC(),
+                                             n.BPV()->name + "__elem__x"));
       n.SetSubPVs(spv);
       auto sub = AST::Make<AST::MultiValues>(n.LOC(), ", ");
       sub->Append(n.BoundExpr()->Clone());

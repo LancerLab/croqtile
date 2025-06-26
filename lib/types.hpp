@@ -47,6 +47,7 @@ enum class BaseType {
   BOUNDED_ITUPLE,
   FUTURE,
   STRING,
+  UNSPECVAL,
   FUNCTION,
   UNKNOWN,
 };
@@ -67,6 +68,7 @@ inline static int ScalarBaseTypeRank(BaseType bt) {
   case BaseType::U8: return 2;
   case BaseType::S8: return 1;
   case BaseType::BOOL: return 0;
+  case BaseType::UNSPECVAL:
   case BaseType::UNKNOWN: return -1;
   default: choreo_unreachable("unexpect BaseType for scalar rank.");
   }
@@ -95,6 +97,7 @@ inline static int IntegerBaseTypeRank(BaseType bt) {
   case BaseType::S8: return 2;
   case BaseType::BOOL: return 1;
   case BaseType::UNKNOWN: return 0;
+  case BaseType::UNSPECVAL: return 0;
   default: return -1;
   }
 }
@@ -218,6 +221,7 @@ inline static BaseType BaseTypeFromString(const std::string& input) {
       {"address", BaseType::ADDR},
       {"void", BaseType::VOID},
       {"unknown", BaseType::UNKNOWN},
+      {"inf", BaseType::UNSPECVAL},
   };
 
   auto it = typeMap.find(input);
@@ -258,6 +262,7 @@ inline static std::string GetStringFrom(BaseType dataType) {
       {BaseType::ADDR, "address"},
       {BaseType::VOID, "void"},
       {BaseType::UNKNOWN, "unknown"},
+      {BaseType::UNSPECVAL, "inf"},
   };
 
   auto it = enumToString.find(dataType);
@@ -675,6 +680,32 @@ struct UnknownType final : public Type, public TypeIDProvider<UnknownType> {
   bool ApprxEqual(const Type&) const override { return false; }
 
   __UDT_TYPE_INFO__(Type, UnknownType)
+};
+
+// NoValueType: the value is UNSPECIFIED at compile time. It could be even
+// UNKNOWN at runtime (like the size of a stream input). As a result, a
+// NoValueType value can not be utilized for any value operations, like
+// evaluation of its value, valno numbering, and etc..
+//
+// Note: NoValueType is different with UnknownType since UnknownType acts as the
+// bottom for type derivation, while NoValueType is a confirmed type.
+struct NoValueType final : public Type, public TypeIDProvider<NoValueType> {
+  explicit NoValueType() : Type(BaseType::UNSPECVAL) {}
+  size_t Dims() const override { return 1; }
+  bool IsComplete() const override { return true; }
+  void Print(std::ostream& os) const override { os << "Novalue"; }
+  const std::string Name() const override { return "un_specified_value_type"; }
+  bool HasSufficientInfo() const override { return true; }
+
+  const ptr<Type> Clone() const override {
+    return std::make_shared<NoValueType>();
+  }
+
+  // Not comparable
+  bool operator==(const Type&) const override { return false; }
+  bool ApprxEqual(const Type&) const override { return false; }
+
+  __UDT_TYPE_INFO__(Type, NoValueType)
 };
 
 struct PlaceHolderType final : public Type,
@@ -1759,8 +1790,8 @@ inline bool CanYieldAnInteger(const ptr<Type>& ty) {
 }
 
 inline bool CanYieldIndex(const ptr<Type>& ty) {
-  return isa<ScalarIntegerType>(ty) ||
-         isa<BoundedType>(ty) || (isa<ITupleType>(ty));
+  return isa<ScalarIntegerType>(ty) || isa<BoundedType>(ty) ||
+         (isa<ITupleType>(ty));
 }
 
 inline bool ConvertibleToInt(const ptr<Type>& ty) {
@@ -1812,6 +1843,10 @@ inline ptr<ScalarIntegerType> MakeScalarIntegerType(BaseType t,
 
 inline ptr<IntegerType> MakeIntegerType(bool m = false) {
   return std::make_shared<IntegerType>(m);
+}
+
+inline const ptr<NoValueType> MakeNoValueType() {
+  return std::make_shared<NoValueType>();
 }
 
 inline ptr<BooleanType> MakeBooleanType(bool m = false) {
@@ -2245,8 +2280,8 @@ inline bool IsMutable(const Type& ty) {
 inline bool MutableType(const Type& ty) { return isa<ScalarType>(&ty); }
 
 inline bool SupportIntListCollapse(const ptr<Type>& ty) {
-  return isa<ScalarIntegerType>(ty) ||
-         isa<MDSpanType>(ty) || isa<ITupleType>(ty);
+  return isa<ScalarIntegerType>(ty) || isa<MDSpanType>(ty) ||
+         isa<ITupleType>(ty);
 }
 
 } // end namespace Choreo

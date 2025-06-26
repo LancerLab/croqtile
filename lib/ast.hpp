@@ -294,6 +294,21 @@ struct BoolLiteral : public Node, public TypeIDProvider<BoolLiteral> {
   __UDT_TYPE_INFO__(Node, BoolLiteral)
 };
 
+struct NoValue : public Node, public TypeIDProvider<NoValue> {
+  explicit NoValue(const location& l) : Node(l, MakeNoValueType()) {}
+
+  ptr<Node> CloneImpl() const override { return Make<NoValue>(LOC()); }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool = false) const override {
+    os << prefix << "__noval__";
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, NoValue)
+};
+
 struct IntLiteral : public Node, public TypeIDProvider<IntLiteral> {
   std::variant<int8_t, uint8_t, int16_t, uint16_t, int, uint32_t, int64_t,
                uint64_t>
@@ -882,7 +897,7 @@ struct NamedTypeDecl : public Node, public TypeIDProvider<NamedTypeDecl> {
                          const ptr<Node>& v, const std::string& d = "-")
       : Node(l), name_str(n), init_str(d), init_expr(v) {
     assert(name_str.size() > 0 && "Invalid name string.");
-    assert(init_expr && "Invalid value.");
+    assert(init_expr && "Invalid expression.");
   }
 
   explicit NamedTypeDecl(const location& l, const std::string& n,
@@ -1430,6 +1445,8 @@ struct IfElseBlock : public Node, public TypeIDProvider<IfElseBlock> {
   }
 
   bool IsBlock() const override { return true; }
+
+  const ptr<Node> GetPred() const { return pred; }
 
   ptr<Node> CloneImpl() const override {
     return Make<IfElseBlock>(LOC(), pred->Clone(),
@@ -2226,6 +2243,7 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
       : Node(l), iv(i), lbound(lb), ubound(ub), stride(s) {}
 
   const std::string IVName() const { return iv->name; }
+  const ptr<Identifier> IV() const { return iv; }
 
   ptr<Node> CloneImpl() const override {
     return Make<LoopRange>(LOC(), cast<Identifier>(iv->Clone()),
@@ -2290,6 +2308,8 @@ struct InThreadsBlock : public Node, public TypeIDProvider<InThreadsBlock> {
   bool outer = true;
 
   bool IsBlock() const override { return true; }
+
+  const ptr<Node> GetPred() const { return pred; }
 
   explicit InThreadsBlock(const location& l, const ptr<Expr> p,
                           const ptr<MultiNodes>& s, bool a = false,

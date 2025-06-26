@@ -61,6 +61,7 @@ struct Visitor {
   // For any visitor, it should implement all the necessary steps
   virtual bool Visit(AST::MultiNodes&) = 0;
   virtual bool Visit(AST::MultiValues&) = 0;
+  virtual bool Visit(AST::NoValue&) = 0;
   virtual bool Visit(AST::IntLiteral&) = 0;
   virtual bool Visit(AST::FloatLiteral&) = 0;
   virtual bool Visit(AST::StringLiteral&) = 0;
@@ -275,6 +276,7 @@ public:
 private:
   static constexpr const char* color_red = "\033[31m";
   static constexpr const char* color_yellow = "\033[33m";
+  static constexpr const char* color_blue = "\033[34m";
   static constexpr const char* color_reset = "\033[0m";
 
 protected:
@@ -297,22 +299,30 @@ protected:
 
 public:
   void Error(const location& loc, const std::string& message) const {
-    errs() << loc << ": " << ((should_use_colors()) ? color_red : "")
-           << "error: " << ((should_use_colors()) ? color_reset : "");
+    errs() << loc << ": " << (should_use_colors() ? color_red : "")
+           << "error: " << (should_use_colors() ? color_reset : "");
     errs() << message << "\n";
     ShowSourceLocation(loc);
   }
 
   void Warning(const location& loc, const std::string& message) const {
-    errs() << loc << ": " << ((should_use_colors()) ? color_yellow : "")
-           << "warning: " << ((should_use_colors()) ? color_reset : "");
+    errs() << loc << ": " << (should_use_colors() ? color_yellow : "")
+           << "warning: " << (should_use_colors() ? color_reset : "");
     errs() << message << "\n";
     ShowSourceLocation(loc);
   }
 
   void Note(const location& loc, const std::string& message) const {
-    errs() << loc << ": note: " << message << std::endl;
+    errs() << loc << ": " << ((should_use_colors()) ? color_blue : "")
+           << "note: " << (should_use_colors() ? color_reset : "");
+    errs() << message << "\n";
     ShowSourceLocation(loc);
+  }
+
+  // short-hand: emit error with the error count incremented by 1
+  void Error1(const location& loc, const std::string& message) {
+    Error(loc, message);
+    error_count++;
   }
 
   virtual int Status() { return error_count; }
@@ -479,6 +489,7 @@ public:
   // provide the defaults
   bool Visit(AST::MultiNodes&) override { return true; }
   bool Visit(AST::MultiValues&) override { return true; }
+  bool Visit(AST::NoValue&) override { return true; }
   bool Visit(AST::IntLiteral&) override { return true; }
   bool Visit(AST::FloatLiteral&) override { return true; }
   bool Visit(AST::StringLiteral&) override { return true; }
@@ -593,6 +604,10 @@ public:
     return VisitNode(n);
   }
   bool Visit(AST::MultiValues& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::NoValue& n) final {
     TraceEachVisit(n);
     return VisitNode(n);
   }
@@ -769,6 +784,7 @@ public:
   // provide default
   virtual bool VisitNode(AST::MultiNodes&) { return true; }
   virtual bool VisitNode(AST::MultiValues&) { return true; }
+  virtual bool VisitNode(AST::NoValue&) { return true; }
   virtual bool VisitNode(AST::IntLiteral&) { return true; }
   virtual bool VisitNode(AST::FloatLiteral&) { return true; }
   virtual bool VisitNode(AST::StringLiteral&) { return true; }

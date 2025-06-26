@@ -263,6 +263,7 @@ inline Operand oc_eq(const Operand&, const Operand&);
 inline Operand oc_ne(const Operand&, const Operand&);
 inline int Compare(const SymbolicExpression&, const SymbolicExpression&);
 inline bool operator<(const SymbolicExpression&, const SymbolicExpression&);
+inline Operand nil();
 inline Operand nu(int64_t);
 inline Operand bl(bool);
 inline Operand sym(const std::string& name);
@@ -308,6 +309,7 @@ public:
   virtual size_t Hash() const = 0;
   virtual bool operator==(const SymbolicExpression&) const = 0;
   virtual bool IsLeaf() const = 0;
+  virtual bool Computable() const = 0;
   virtual void
   Apply(const std::function<void(const SymbolicExpression*)>& func) {
     func(this);
@@ -337,6 +339,31 @@ inline static std::string PSTR(const ptr<SymbolicExpression>& pse) {
   return pse->ToString();
 }
 
+class InvalidValue : public SymbolicExpression,
+                     public TypeIDProvider<InvalidValue> {
+public:
+  std::string ToString() const override { return "nil"; }
+  size_t Hash() const override { return std::hash<int64_t>{}(-1LL); }
+
+  bool IsNumeric() const override { return false; }
+  bool Computable() const override { return false; }
+
+  bool operator==(const SymbolicExpression& op) const override {
+    return isa<InvalidValue>(&op);
+  }
+
+public:
+  bool IsLeaf() const override { return true; }
+  Operand Clone() const override { return nil(); };
+  Operand Fold() const override { return Clone(); }
+  Operand Reorder() const override { return Clone(); };
+  Operand Normalize() const override { return Clone(); };
+  Operand Reassociate() const override { return Clone(); };
+
+public:
+  __UDT_TYPE_INFO__(SymbolicExpression, InvalidValue)
+};
+
 class NumericValue : public SymbolicExpression,
                      public TypeIDProvider<NumericValue> {
 public:
@@ -347,6 +374,7 @@ public:
   size_t Hash() const override { return std::hash<int64_t>{}(Value()); }
 
   bool IsNumeric() const override { return true; }
+  bool Computable() const override { return true; }
 
   bool operator==(const SymbolicExpression& op) const override {
     if (auto nv = dyn_cast<NumericValue>(&op)) return nv->value == value;
@@ -378,6 +406,7 @@ public:
   size_t Hash() const override { return std::hash<bool>{}(Value()); }
 
   bool IsNumeric() const override { return true; }
+  bool Computable() const override { return true; }
 
   bool operator==(const SymbolicExpression& op) const override {
     if (auto nv = dyn_cast<BooleanValue>(&op)) return nv->value == value;
@@ -407,6 +436,7 @@ public:
   std::string ToString() const override { return symbol; }
 
   bool IsNumeric() const override { return false; }
+  bool Computable() const override { return true; }
 
   bool operator==(const SymbolicExpression& op) const override {
     if (auto sv = dyn_cast<SymbolicValue>(&op)) return sv->symbol == symbol;
@@ -443,6 +473,7 @@ public:
   std::string ToString() const override { return STR(op) + PSTR(oprd); }
 
   bool IsNumeric() const override { return oprd->IsNumeric(); }
+  bool Computable() const override { return oprd->Computable(); }
 
   bool operator==(const SymbolicExpression& expr) const override {
     if (auto se = dyn_cast<UnaryOperation>(&expr))
@@ -507,6 +538,9 @@ public:
 
   bool IsNumeric() const override {
     return left->IsNumeric() && right->IsNumeric();
+  }
+  bool Computable() const override {
+    return left->Computable() && right->Computable();
   }
 
   bool operator==(const SymbolicExpression& expr) const override {
@@ -869,7 +903,10 @@ public:
 
   bool IsNumeric() const override {
     // can be optimized
-    return pred->IsNumeric() && left->IsNumeric() && right->IsNumeric();
+    return left->IsNumeric() && right->IsNumeric();
+  }
+  bool Computable() const override {
+    return pred->Computable() && left->Computable() && right->Computable();
   }
 
   bool operator==(const SymbolicExpression& expr) const override {
@@ -978,15 +1015,23 @@ inline int Compare(const SymbolicExpression& lhs,
                    const SymbolicExpression& rhs) {
   auto l = lhs.Fold();
   auto r = rhs.Fold();
-  if (isa<NumericValue>(l)) {
-    if (isa<NumericValue>(r))
+  if (isa<InvalidValue>(l)) {
+    return 0;
+  } else if (isa<NumericValue>(l)) {
+    if (isa<InvalidValue>(r)) {
+      return 0;
+    } else if (isa<NumericValue>(r))
       return 0;
     else if (isa<SymbolicValue>(r) || isa<BinaryOperation>(r) ||
              isa<TernaryOperation>(r))
       return -1;
   } else if (isa<BooleanValue>(&lhs)) {
-    if (isa<BooleanValue>(r)) return 0;
+    if (isa<InvalidValue>(r))
+      return 0;
+    else if (isa<BooleanValue>(r))
+      return 0;
   } else if (auto ls = dyn_cast<SymbolicValue>(&lhs)) {
+    if (isa<InvalidValue>(r)) { return 0; }
     if (isa<NumericValue>(r))
       return 1;
     else if (auto rs = dyn_cast<SymbolicValue>(r))
@@ -1000,7 +1045,9 @@ inline int Compare(const SymbolicExpression& lhs,
     }
   } else if (auto lb = dyn_cast<BinaryOperation>(l)) {
     auto hrs = GetHighRankString(*lb);
-    if (isa<NumericValue>(r))
+    if (isa<InvalidValue>(r))
+      return 0;
+    else if (isa<NumericValue>(r))
       return 1;
     else if (auto rs = dyn_cast<SymbolicValue>(r))
       return -hrs.compare(rs->Value());
@@ -1010,7 +1057,9 @@ inline int Compare(const SymbolicExpression& lhs,
       return -hrs.compare(GetHighRankString(*rb));
   } else if (auto lt = dyn_cast<TernaryOperation>(l)) {
     auto hrs = GetHighRankString(*lt);
-    if (isa<NumericValue>(r))
+    if (isa<InvalidValue>(r))
+      return 0;
+    else if (isa<NumericValue>(r))
       return 1;
     else if (auto rs = dyn_cast<SymbolicValue>(r))
       return -hrs.compare(rs->Value());
@@ -1064,6 +1113,8 @@ inline std::shared_ptr<SymbolicExpression> make_boolean(bool value) {
   return std::make_shared<BooleanValue>(value);
 }
 
+inline Operand make_none() { return std::make_shared<InvalidValue>(); }
+
 inline Operand make_symbolic(const std::string& name) {
   return std::make_shared<SymbolicValue>(name);
 }
@@ -1083,6 +1134,8 @@ inline Operand make_select(const Operand& pred, const Operand& left,
 }
 
 // short-cuts
+inline Operand nil() { return make_none(); }
+
 inline Operand nu(int64_t value) { return make_numeric(value); }
 
 inline Operand bl(bool value) { return make_boolean(value); }

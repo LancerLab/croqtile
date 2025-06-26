@@ -17,12 +17,6 @@ namespace Choreo {
 
 class ShapeInference;
 
-inline constexpr int UnknownValue() { return -1; }
-inline bool ValidVN(int vn) { return IsValidValueNumber(vn); }
-inline void InvalidateVN(int& vn) { vn = GetInvalidValueNumber(); }
-inline bool UnknownVN(int vn) { return vn == UnknownValue(); }
-inline void SetUnknownVN(int& vn) { vn = UnknownValue(); }
-
 // Remove the prefix
 inline std::string RemovePrefix(const std::string& str,
                                 const std::string& prefix) {
@@ -62,10 +56,37 @@ inline int CountElementsInSignature(const std::string& input) {
 namespace valno {
 
 using SignTy = std::string; // signature type. TODO: use structure
-using NumTy = int;          // value number type.
+using NumTy = int;          // value number type. TODO: wrap for special values
+
+inline bool ValidVN(NumTy vn) { return IsValidValueNumber(vn); }
+inline void InvalidateVN(NumTy& vn) { vn = GetInvalidValueNumber(); }
+
+// unknown valno: bottom value for exceptions
+// TODO: is it still useful?
+inline constexpr NumTy UnknownVN() { return -1; }
+inline bool IsUnknownVN(NumTy vn) { return vn == UnknownVN(); }
+inline SignTy UnknownSign() { return "__valno_not_known__"; }
+inline bool IsUnknownSign(SignTy Sign) { return Sign == UnknownSign(); }
+
+// none valno: unspecified value which can not be evaluate (but could be part of
+// multi-vns)
+inline constexpr NumTy NoneVN() {
+  return std::numeric_limits<NumTy>::max() - 1;
+}
+inline bool IsNoneVN(NumTy vn) { return vn == NoneVN(); }
+inline SignTy NoneSign() { return SignTy("__valno_not_specified__"); }
+inline bool IsNoneSign(const SignTy& s) { return s == NoneSign(); }
 
 inline const std::string STR(const SignTy& s) { return s; }
-inline const std::string STR(const NumTy& v) { return std::to_string(v); }
+inline const std::string STR(const NumTy& v, bool txt = false) {
+  if (txt) {
+    if (!ValidVN(v)) return "inv";
+    if (IsUnknownVN(v)) return "unk";
+    if (IsNoneVN(v)) return "nil";
+  }
+  return "#" + std::to_string(v);
+}
+
 using Choreo::STR;
 
 // Assumptions:
@@ -114,7 +135,13 @@ private:
   }
 
 public:
-  ValueNumberTable(bool t = false) : trace(t) {}
+  ValueNumberTable(bool t = false) : trace(t) {
+    // Add special values
+    const_pool.emplace(UnknownSign(), UnknownVN());
+    const_pool.emplace(NoneSign(), NoneVN());
+    value_nums[UnknownVN()].push_back(UnknownSign());
+    value_nums[NoneVN()].push_back(NoneSign());
+  }
 
   bool Exists(SignTy s) const { return ValueNumExists(s); }
   bool Exists(NumTy vn) const { return SignatureExists(vn); }
@@ -257,7 +284,8 @@ public:
   const ValueNumberTable& Tabel() const { return vntbl; }
 
 private:
-  const SignTy NumCharToSign(const std::string&) const;
+  NumTy VNReal(const std::string&) const;
+  const SignTy RealSign(const std::string&) const;
 
   bool need_bound = true;
   bool trace = false;
@@ -296,11 +324,12 @@ public:
   // Check if the value number exists and is valid for the signature
   bool HasValidValueNumberOfSignature(const SignTy&);
 
-  NumTy GetOrGenValueNumberFromSignature(const SignTy& signature);
+  NumTy GetOrGenValueNumberFromSignature(const SignTy&);
 
   // Retrieve the signature from a value number. About when fails.
   SignTy GetSignatureFromValueNumber(NumTy vn) const {
-    if (vn == UnknownValue()) return "?";
+    if (IsUnknownVN(vn)) return UnknownSign();
+    if (IsNoneVN(vn)) return NoneSign();
 
     if (!vntbl.Exists(vn))
       choreo_unreachable("value number " + std::to_string(vn) +
@@ -318,15 +347,16 @@ public:
                                             const SignTy&, const SignTy&,
                                             bool = false);
 
-  SignTy SignBinaryCompositeValues(const location&, const SignTy&,
-                                   const SignTy&, const SignTy&, bool = false);
+  const SignTy SignBinaryCompositeValues(const location&, const SignTy&,
+                                         const SignTy&, const SignTy&,
+                                         bool = false);
 
   ValueItem GenValueItemFromSignature(const SignTy&);
   ValueItem GenValueItemFromValueNumber(NumTy);
   const ValueList GenValueListFromSignature(const SignTy&);
   const ValueList GenValueListFromValueNumber(NumTy);
-  SignTy ValueItemToSignature(const ValueItem&, bool = false);
-  SignTy ValueListToSignature(const ValueList&, bool = true);
+  const SignTy ValueItemToSignature(const ValueItem&, bool = false);
+  const SignTy ValueListToSignature(const ValueList&, bool = true);
 
 public:
   ValBind::BindInfo<NumTy> bind_info; // TODO: to abondon
@@ -339,19 +369,19 @@ public:
   }
 
   // Bind two value numbers
-  const ValBind::Binds<int>::Set& GetBindSet(int vn) {
+  const ValBind::Binds<NumTy>::Set& GetBindSet(NumTy vn) {
     auto& ret = bind_info.GetSet(vn);
     return ret;
   }
 
-  void AddBind(int vn0, int vn1) { bind_info.AddBind(vn0, vn1); }
+  void AddBind(NumTy vn0, NumTy vn1) { bind_info.AddBind(vn0, vn1); }
 
 public:
   // retrieve the n-th element from the comma-separated input string
   NumTy GetNthValNo(const SignTy& input, NumTy n) const;
   const std::vector<NumTy> Flatten(NumTy) const;
 
-  std::string ScopeIndent();
+  const std::string ScopeIndent();
 
   const std::vector<NumTy> AsVector(const SignTy& sign) const {
     std::vector<NumTy> mvn;
@@ -387,7 +417,7 @@ inline void ForeachValueNumber(const SignTy& sign,
   for (auto i = begin; i != end; ++i, ++matchIndex) {
     std::smatch match = *i;
     std::string matchStr = match.str(1); // Capture the number part of the match
-    int number = std::stoi(matchStr);
+    NumTy number{std::stoi(matchStr)};
 
     // Call the passed lambda function with the extracted string and its
     // index

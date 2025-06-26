@@ -93,6 +93,17 @@ inline bool IsValueListNumericOrBool(const ValueList& vl) {
   return true;
 }
 
+inline bool IsComputable(const ValueItem& vi) {
+  assert(IsValidValueItem(vi));
+  return vi->Computable();
+}
+
+inline bool IsComputable(const ValueList& vl) {
+  for (auto& vi : vl)
+    if (!IsComputable(vi)) return false;
+  return true;
+}
+
 inline std::string ValueItemAsString(const ValueItem& vi,
                                      bool ULL_suffix = false) {
   if (ULL_suffix) {
@@ -121,6 +132,7 @@ inline std::string STR(const ValueItem& vi) {
   return vi->ToString();
 }
 
+inline bool VIIsNil(const ValueItem& vi) { return isa<sbe::InvalidValue>(vi); }
 inline static std::optional<int> VIInt(const ValueItem& vi) {
   if (auto iv = dyn_cast<sbe::NumericValue>(vi)) return iv->Value();
   return std::nullopt;

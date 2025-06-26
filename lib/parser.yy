@@ -343,9 +343,13 @@ param_mdspan_val
     : QES   { $$ = AST::Make<AST::IntLiteral>(@1); }
     | num_expr { $$ = $1; }
     | IDENTIFIER {
-        $$ = AST::Make<AST::Identifier>(@1, $1);
-        if (!symtab.Exists($1)) // allows same dim name
-          symtab.AddSymbol($1, MakeIntegerType());
+        if ($1 == "_")
+          $$ = AST::Make<AST::NoValue>(@1);
+        else {
+          $$ = AST::Make<AST::Identifier>(@1, $1);
+          if (!symtab.Exists($1)) // allows same dim name
+            symtab.AddSymbol($1, MakeIntegerType());
+        }
       }
     ;
 
