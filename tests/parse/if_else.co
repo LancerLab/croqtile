@@ -42,7 +42,7 @@ __co__ void if_else(int a) {
 // CHECK:  `- Name: if_else
 // CHECK:  `- Return type: void
 // CHECK:  `- Parameters:
-// CHECK:    `-  type: int, symbol: a
+// CHECK:    `-  type: s32, symbol: a
 // CHECK:  `- Var Decl (mutable unknown): b =  0
 // CHECK:  `- Branch On Condition:  (a > 0)
 // CHECK:   `- If-Block:
@@ -91,10 +91,10 @@ __co__ int dangling_else(int a, int b) {
 
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: dangling_else
-// CHECK:  `- Return type: int
+// CHECK:  `- Return type: s32
 // CHECK:  `- Parameters:
-// CHECK:    `-  type: int, symbol: a
-// CHECK:    `-  type: int, symbol: b
+// CHECK:    `-  type: s32, symbol: a
+// CHECK:    `-  type: s32, symbol: b
 // CHECK:  `- Branch On Condition:  (a > 3)
 // CHECK:   `- If-Block:
 // CHECK:    `- Branch On Condition:  (b < 2)

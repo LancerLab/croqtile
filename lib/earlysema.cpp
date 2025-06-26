@@ -225,7 +225,9 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       choreo_unreachable("unexpect");
   } else if ((n.op == "++") || (n.op == "--")) {
     auto ty = NodeType(*n.GetR());
-    auto sty = dyn_cast<IntegerType>(ty);
+    auto sty = dyn_cast<ScalarIntegerType>(ty);
+    assert(!isa<BooleanType>(ty) &&
+           "increment/decrement operation on boolean is not allowed.");
     if (!sty || !sty->IsMutable()) {
       Error(n.LOC(), "in operation \"" + n.op +
                          "\": expect a mutable scalar type but got `" +
@@ -252,11 +254,11 @@ bool EarlySemantics::Visit(AST::Expr& n) {
         return false;
       }
       MutateNodeType(n, MakeRankedMDSpanType(lty->Dims()), is_mutable);
-    } else if ((isa<ITupleType>(lty) && isa<IntegerType>(rty)) ||
-               (isa<MDSpanType>(lty) && isa<IntegerType>(rty))) {
+    } else if ((isa<ITupleType>(lty) && isa<ScalarIntegerType>(rty)) ||
+               (isa<MDSpanType>(lty) && isa<ScalarIntegerType>(rty))) {
       SetNodeType(n, lty);
-    } else if ((isa<ITupleType>(rty) && isa<IntegerType>(lty)) ||
-               (isa<MDSpanType>(rty) && isa<IntegerType>(lty))) {
+    } else if ((isa<ITupleType>(rty) && isa<ScalarIntegerType>((lty))) ||
+               (isa<MDSpanType>(rty) && isa<ScalarIntegerType>(lty))) {
       SetNodeType(n, rty);
     } else if ((isa<ITupleType>(lty) && isa<ITupleType>(rty))) {
       // ituple + ituple
@@ -278,8 +280,10 @@ bool EarlySemantics::Visit(AST::Expr& n) {
                          " vs. " + PSTR(rty) + ").");
       SetNodeType(n, MakeUnknownType());
       return false;
-    } else if ((IsActualBoundedIntegerType(lty) && isa<IntegerType>(rty)) ||
-               (IsActualBoundedIntegerType(rty) && isa<IntegerType>(lty))) {
+    } else if ((IsActualBoundedIntegerType(lty) &&
+                isa<ScalarIntegerType>(rty)) ||
+               (IsActualBoundedIntegerType(rty) &&
+                isa<ScalarIntegerType>(lty))) {
       // this is promissing, simply allow it
       if (IsActualBoundedIntegerType(lty))
         if (cast<AST::Expr>(n.GetL())->op == "getith") {
@@ -335,10 +339,10 @@ bool EarlySemantics::Visit(AST::Expr& n) {
         return false;
       }
       SetNodeType(n, MakeITupleType(lty->Dims()));
-    } else if ((isa<MDSpanType>(lty) && isa<IntegerType>(rty)) ||
-               (isa<MDSpanType>(rty) && isa<IntegerType>(lty)) ||
-               (isa<ITupleType>(lty) && isa<IntegerType>(rty)) ||
-               (isa<ITupleType>(rty) && isa<IntegerType>(lty))) {
+    } else if ((isa<MDSpanType>(lty) && isa<ScalarIntegerType>(rty)) ||
+               (isa<MDSpanType>(rty) && isa<ScalarIntegerType>(lty)) ||
+               (isa<ITupleType>(lty) && isa<ScalarIntegerType>(rty)) ||
+               (isa<ITupleType>(rty) && isa<ScalarIntegerType>(lty))) {
       if (isa<MDSpanType>(lty) || isa<ITupleType>(lty))
         SetNodeType(n, lty);
       else
@@ -352,8 +356,8 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       error_count++;
       SetNodeType(n, MakeUnknownType());
       return false;
-    } else if ((isa<IntegerType>(lty) && isa<IndexType>(rty)) ||
-               (isa<IntegerType>(rty) && isa<IndexType>(lty))) {
+    } else if ((isa<ScalarIntegerType>(lty) && isa<IndexType>(rty)) ||
+               (isa<ScalarIntegerType>(rty) && isa<IndexType>(lty))) {
       // when desugaring of ituple/mdspan has not been applied, we have to deal
       // with nodes like:
       //   a {1 + (1)}
@@ -441,7 +445,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
   } else if ((n.op == "#-") || (n.op == "#+")) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
-    if ((IsActualBoundedIntegerType(lty) && isa<IntegerType>(rty))) {
+    if ((IsActualBoundedIntegerType(lty) && isa<ScalarIntegerType>(rty))) {
       SetNodeType(n, MakeBoundedITupleType(Shape(1)));
     } else {
       // TODO: computation of multi-dim bounded vars is not supported yet.
@@ -462,7 +466,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
              (n.op == "!=") || (n.op == "<=") || (n.op == ">=")) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
-    // only support IntegerType currently
+    // only support ScalarIntegerType currently
     if (!(CanYieldAnInteger(lty) && CanYieldAnInteger(lty))) {
       Error(n.LOC(), "in operation \"" + n.op +
                          "\": unable to apply to the types (" + PSTR(lty) +
@@ -643,7 +647,7 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
     if (n.ref_name.empty()) {
       for (auto& v : mvals->AllValues()) {
         auto ty = NodeType(*v);
-        if (!isa<IntegerType>(ty) && !isa<MDSpanType>(ty) &&
+        if (!(isa<ScalarIntegerType>(ty)) && !isa<MDSpanType>(ty) &&
             !isa<ITupleType>(ty)) {
           Error(v->LOC(),
                 "unexpected data type '" + PSTR(ty) + "' is found in mdspan.");
@@ -961,7 +965,7 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
 
     if (!ety->ApprxEqual(*vty)) {
       // consider taking value of bounded variables
-      if (!(isa<IntegerType>(ety) && CanYieldAnInteger(vty))) {
+      if (!(isa<ScalarIntegerType>(ety) && CanYieldAnInteger(vty))) {
         Error(n.da->LOC(), "type inconsistent: assign " + PSTR(vty) + " to " +
                                PSTR(ety) + ".");
         ++error_count;
@@ -1286,7 +1290,7 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
   auto ity = NodeType(*n.in);
 
   size_t rank = 0;
-  if (auto itty = dyn_cast<IntegerType>(ity)) {
+  if (auto itty = dyn_cast<ScalarIntegerType>(ity)) {
     if (itty->IsMutable()) {
       Error(n.in->LOC(), "mutable integer can not be used inside with-in.");
       error_count++;
@@ -1398,7 +1402,7 @@ bool EarlySemantics::Visit(AST::SpanAs& n) {
     return false;
   }
 
-  auto asty = MakeRankedSpannedType(n.list->Count(), (BaseType)sty->f_type,
+  auto asty = MakeRankedSpannedType(n.list->Count(), (BaseType)sty->e_type,
                                     sty->m_type);
   ReportErrorWhenViolateODR(n.LOC(), n.nid->name, __FILE__, __LINE__, asty);
   SetNodeType(n, asty);
@@ -1676,7 +1680,7 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
       size_t b_count = 0;
       for (auto& v : tsi->GetTFSSExpr()->AllValues()) {
         auto ty = NodeType(*v);
-        if (!isa<IntegerType>(ty) && !isa<ITupleType>(ty) &&
+        if (!isa<ScalarIntegerType>(ty) && !isa<ITupleType>(ty) &&
             !isa<MDSpanType>(ty)) {
           Error(v->LOC(),
                 "expect '" + PSTR(v) +
@@ -1722,7 +1726,7 @@ bool EarlySemantics::Visit(AST::Wait& n) {
       }
       continue;
     } else if (auto pty = dyn_cast<PlaceHolderType>(ty)) {
-      if (pty->Category() != TypeCategory::FUTURE) {
+      if (pty->GetBaseType() != BaseType::FUTURE) {
         Error(n.LOC(), "'" + AST::GetName(*v).value() + "` of type \"" +
                            PSTR(ty) + "\" can not be waited.");
         error_count++;
@@ -1787,9 +1791,9 @@ bool EarlySemantics::Visit(AST::Call& n) {
       }
     } else if (func_name == "print" || func_name == "println") {
       auto Printable = [](ptr<Type> ty) -> bool {
-        if (isa<StringType>(ty) || isa<IntegerType>(ty) ||
-            isa<BooleanType>(ty) || isa<EventType>(ty) || isa<FloatType>(ty) ||
-            isa<DoubleType>(ty) || isa<ITupleType>(ty) || isa<MDSpanType>(ty) ||
+        if (isa<StringType>(ty) || isa<ScalarIntegerType>(ty) ||
+            isa<EventType>(ty) || isa<FloatType>(ty) || isa<DoubleType>(ty) ||
+            isa<ITupleType>(ty) || isa<MDSpanType>(ty) ||
             isa<BoundedType>(ty) || isa<HalfType>(ty) || isa<BFP16Type>(ty) ||
             isa<AddrType>(ty))
           return true;
@@ -1839,7 +1843,7 @@ bool EarlySemantics::Visit(AST::Call& n) {
       }
       for (size_t i = 0; i < n.arguments->Count(); ++i) {
         auto arg_ty = NodeType(*n.arguments->ValueAt(i));
-        if (!isa<IntegerType>(arg_ty)) {
+        if (!isa<ScalarIntegerType>(arg_ty)) {
           Error(n.LOC(), "expect the " + std::to_string(i) +
                              "th argument to be a integer type but got '" +
                              PSTR(arg_ty) + "'.");
@@ -1963,9 +1967,9 @@ bool EarlySemantics::Visit(AST::Select& n) {
 
   size_t ec = error_count;
 
-  // TODO(wsj) isa<IntegerType>(rty)?
+  // TODO(wsj) isa<ScalarIntegerType>(rty)?
   if (!isa<BoundedIntegerType>(NodeType(*n.select_factor)) &&
-      !isa<IntegerType>(NodeType(*n.select_factor))) {
+      !isa<ScalarIntegerType>(NodeType(*n.select_factor))) {
     Error(n.LOC(), "expect `" + PSTR(n.select_factor) +
                        "` to be a (bounded) integer type.");
     error_count++;
@@ -2066,11 +2070,11 @@ bool EarlySemantics::Visit(AST::Return& n) {
 bool EarlySemantics::Visit(AST::LoopRange& n) {
   TraceEachVisit(n);
 
-  if (n.lbound && !isa<IntegerType>(NodeType(*n.lbound))) {
+  if (n.lbound && !isa<ScalarIntegerType>(NodeType(*n.lbound))) {
     Error(n.lbound->LOC(), "the lower bound is not an integer.");
     error_count++;
   }
-  if (n.ubound && !isa<IntegerType>(NodeType(*n.ubound))) {
+  if (n.ubound && !isa<ScalarIntegerType>(NodeType(*n.ubound))) {
     Error(n.ubound->LOC(), "the upper bound is not an integer.");
     error_count++;
   }

@@ -12,11 +12,11 @@ __co__ int para_with(int b) {
 
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: para_with
-// CHECK:  `- Return type: int
+// CHECK:  `- Return type: s32
 // CHECK:  `- Parameters:
-// CHECK:    `-  type: int, symbol: b
+// CHECK:    `-  type: s32, symbol: b
 // CHECK:  `- Type Decl: ndims - [ 3 b ]
-// CHECK:  `- Var Decl (int): sum = 0
+// CHECK:  `- Var Decl (s32): sum = 0
 // CHECK:  `- Parallelization:  index symbol: p, bound [0, 6)
 // CHECK:   `- With Block:
 // CHECK:     (within constraints)

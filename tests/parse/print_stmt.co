@@ -8,9 +8,9 @@ __co__ int identity(int loc) { /// device program
 
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: identity
-// CHECK:  `- Return type: int
+// CHECK:  `- Return type: s32
 // CHECK:  `- Parameters:
-// CHECK:    `-  type: int, symbol: loc
+// CHECK:    `-  type: s32, symbol: loc
 // CHECK:  `- Call: print (built-in)
 // CHECK:    `- with arguments: loc
 // CHECK:  `- Return: loc

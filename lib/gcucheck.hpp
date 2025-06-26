@@ -189,7 +189,7 @@ public:
           CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
         for (size_t idx = 1; idx < t_rank; ++idx)
           CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
-        auto bpe = sbe::nu((int)(SizeOf(f_sty->f_type)));
+        auto bpe = sbe::nu((int)(SizeOf(f_sty->e_type)));
         auto value = (f_shape.ValueAt(0) * bpe + sbe::nu(127)) / sbe::nu(128) *
                      sbe::nu(128);
         CheckValue(value, "<", 1 << 24, n.from->LOC(),
@@ -269,21 +269,21 @@ public:
         }
 
         if (std::holds_alternative<int>(pc->value)) {
-          if (!IntegerFundamentalType(f_sty->f_type)) {
+          if (!IsIntegerFundamentalType(f_sty->e_type)) {
             Error(n.from->LOC(),
                   "On " + cur_arch +
                       ", data type of pad value is "
                       "incompatible with that of data in dma: int" +
-                      " vs. " + STR(f_sty->f_type) + ".");
+                      " vs. " + STR(f_sty->e_type) + ".");
             error_count++;
           }
         } else if (std::holds_alternative<float>(pc->value)) {
-          if (!FloatPointFundamentalType(f_sty->f_type)) {
+          if (!IsFloatPointFundamentalType(f_sty->e_type)) {
             Error(n.from->LOC(),
                   "On " + cur_arch +
                       ", data type of pad value is "
                       "incompatible with that of data in dma: float" +
-                      " vs. " + STR(f_sty->f_type) + ".");
+                      " vs. " + STR(f_sty->e_type) + ".");
             error_count++;
           }
         } else
@@ -360,7 +360,7 @@ public:
           CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
         for (size_t idx = 1; idx < t_rank; ++idx)
           CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
-        auto bpe = sbe::nu(SizeOf(f_sty->f_type));
+        auto bpe = sbe::nu(SizeOf(f_sty->e_type));
         auto value = (f_shape.ValueAt(0) * bpe + sbe::nu(127)) / sbe::nu(128) *
                      sbe::nu(128);
         CheckValue(value, "<", 1 << 24, n.from->LOC(),
@@ -383,7 +383,7 @@ public:
           CheckDimSize(f_shape, idx, "<", 1 << 24, n.from->LOC());
         for (size_t idx = 1; idx < t_rank; ++idx)
           CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
-        auto bpe = sbe::nu((int)(SizeOf(f_sty->f_type)));
+        auto bpe = sbe::nu((int)(SizeOf(f_sty->e_type)));
         auto value = (f_shape.ValueAt(0) * bpe + sbe::nu(127)) / sbe::nu(128) *
                      sbe::nu(128);
         CheckValue(value, "<", 1 << 24, n.from->LOC(),
@@ -419,7 +419,7 @@ public:
             CheckDimSize(f_shape, idx, "<", 1 << 16, n.from->LOC());
         }
 
-        if (SizeOf(t_sty->f_type) == 4) {
+        if (SizeOf(t_sty->e_type) == 4) {
           for (size_t idx = 0; idx < t_rank; ++idx) {
             CheckDimSize(t_shape, idx, ">", 1, n.to->LOC());
             CheckDimSize(t_shape, idx, "<", (1 << 16) - 32, n.to->LOC());
@@ -515,22 +515,22 @@ public:
         }
 
         if (std::holds_alternative<int>(pc->value)) {
-          if (!IntegerFundamentalType(f_sty->f_type)) {
+          if (!IsIntegerFundamentalType(f_sty->e_type)) {
             Error(n.from->LOC(),
                   "On " + cur_arch +
                       ", data type of pad value is "
                       "incompatible with that of data in dma: int" +
-                      " vs. " + STR(f_sty->f_type) + ".");
+                      " vs. " + STR(f_sty->e_type) + ".");
             error_count++;
           }
         } else if (std::holds_alternative<float>(pc->value)) {
           // pad value is a float point number.
-          if (!FloatPointFundamentalType(f_sty->f_type)) {
+          if (!IsFloatPointFundamentalType(f_sty->e_type)) {
             Error(n.from->LOC(),
                   "On " + cur_arch +
                       ", data type of pad value is "
                       "incompatible with that of data in span: float" +
-                      " vs. " + STR(f_sty->f_type) + ".");
+                      " vs. " + STR(f_sty->e_type) + ".");
             error_count++;
           }
         } else
@@ -590,7 +590,7 @@ public:
             CheckDimSize(f_shape, idx, "<", 1 << 16, n.from->LOC());
         }
 
-        if (SizeOf(t_sty->f_type) == 4) {
+        if (SizeOf(t_sty->e_type) == 4) {
           for (size_t idx = 0; idx < t_rank; ++idx) {
             CheckDimSize(t_shape, idx, ">", 1, n.to->LOC());
             CheckDimSize(t_shape, idx, "<", (1 << 16) - 32, n.to->LOC());
@@ -640,7 +640,7 @@ public:
             CheckDimSize(f_shape, idx, "<", 1 << 16, n.from->LOC());
         }
 
-        if (SizeOf(t_sty->f_type) == 4) {
+        if (SizeOf(t_sty->e_type) == 4) {
           for (size_t idx = 0; idx < t_rank; ++idx) {
             CheckDimSize(t_shape, idx, ">", 1, n.to->LOC());
             CheckDimSize(t_shape, idx, "<", (1 << 16) - 32, n.to->LOC());

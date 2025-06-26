@@ -50,12 +50,12 @@ __co__ int with_foreach(int b, f32 [36, 27, 128] input) {
 
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: with_foreach
-// CHECK:  `- Return type: int
+// CHECK:  `- Return type: s32
 // CHECK:  `- Parameters:
-// CHECK:    `-  type: int, symbol: b
+// CHECK:    `-  type: s32, symbol: b
 // CHECK:    `-  type: f32 [ 36 27 128  ], symbol: input
 // CHECK:  `- Type Decl: ndims - [ 3 b ]
-// CHECK:  `- Var Decl (int): sum = 0
+// CHECK:  `- Var Decl (s32): sum = 0
 // CHECK:  `- Parallelization: index symbol: p, bound [0, 6)
 // CHECK:   `- With Block:
 // CHECK:     (within constraints)
@@ -106,7 +106,7 @@ __co__ int with_foreach(int b, f32 [36, 27, 128] input) {
 // CHECK:     `- Foreach Block:
 // CHECK:      `- Iteration variables: m
 // CHECK:      `- Loop Control: (?:?:1)
-// CHECK:   `- Var Decl (int): bb =  (sizeof input.span) 
+// CHECK:   `- Var Decl (s32): bb =  (sizeof input.span)
 // CHECK:   `- With Block:
 // CHECK:     (within constraints)
 // CHECK:     `- idx0 in 3

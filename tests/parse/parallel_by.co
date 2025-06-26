@@ -7,7 +7,7 @@ __co__ int simple_pb() {
 
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: simple_pb
-// CHECK:  `- Return type: int
+// CHECK:  `- Return type: s32
 // CHECK:  `- Parameters:
 // CHECK:  `- Parallelization: index symbol: anon_0, bound [0, 12)
 
@@ -17,10 +17,10 @@ __co__ int parallel_by(int a, int b) {
 
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: parallel_by
-// CHECK:  `- Return type: int
+// CHECK:  `- Return type: s32
 // CHECK:  `- Parameters:
-// CHECK:    `-  type: int, symbol: a
-// CHECK:    `-  type: int, symbol: b
+// CHECK:    `-  type: s32, symbol: a
+// CHECK:    `-  type: s32, symbol: b
 // CHECK:  `- Parallelization: index symbol: p, bound [0, 6)
 
 __co__ int parallel_by_nest(int a, int b) {
@@ -31,10 +31,10 @@ __co__ int parallel_by_nest(int a, int b) {
 
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: parallel_by_nest
-// CHECK:  `- Return type: int
+// CHECK:  `- Return type: s32
 // CHECK:  `- Parameters:
-// CHECK:    `-  type: int, symbol: a
-// CHECK:    `-  type: int, symbol: b
+// CHECK:    `-  type: s32, symbol: a
+// CHECK:    `-  type: s32, symbol: b
 // CHECK:  `- Parallelization: index symbol: p, bound [0, 6)
 // CHECK:   `- Parallelization: index symbol: q, bound [0, 64)
 
@@ -46,11 +46,11 @@ __co__ int parallel_by0() {
 
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: parallel_by0
-// CHECK:  `- Return type: int
+// CHECK:  `- Return type: s32
 // CHECK:  `- Parameters:
 // CHECK:  `- Parallelization: index symbol: anon_1, bound [0, 6)
 // CHECK:                      index component: {p}, corresponding ubound: [6]
-// CHECK:   `- Var Decl (int): a = 100
+// CHECK:   `- Var Decl (s32): a = 100
 
 __co__ int parallel_by1() {
   parallel {p, q} by [128, 64] {
@@ -60,11 +60,11 @@ __co__ int parallel_by1() {
 
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: parallel_by1
-// CHECK:  `- Return type: int
+// CHECK:  `- Return type: s32
 // CHECK:  `- Parameters:
 // CHECK:  `- Parallelization: index symbol: anon_2, bound [0,  (128 * 64) )
 // CHECK:                      index component: {p, q}, corresponding ubound: [128, 64]
-// CHECK:   `- Var Decl (int): b = 100
+// CHECK:   `- Var Decl (s32): b = 100
 
 __co__ int parallel_by2() {
   parallel {p, q, r} by [6, 32, 64] {}
@@ -72,7 +72,7 @@ __co__ int parallel_by2() {
 
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: parallel_by2
-// CHECK:  `- Return type: int
+// CHECK:  `- Return type: s32
 // CHECK:  `- Parameters:
 // CHECK:  `- Parallelization: index symbol: anon_3, bound [0,  ( (6 * 32)  * 64) )
 // CHECK:                      index component: {p, q, r}, corresponding ubound: [6, 32, 64]
@@ -83,7 +83,7 @@ __co__ int parallel_by3() {
 
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: parallel_by3
-// CHECK:  `- Return type: int
+// CHECK:  `- Return type: s32
 // CHECK:  `- Parameters:
 // CHECK:  `- Parallelization: index symbol: bdim, bound [0,  ( (2 * 4)  * 8) )
 // CHECK:                      index component: {x, y, z}, corresponding ubound: [2, 4, 8]
@@ -140,7 +140,7 @@ __co__ void dyn_pb(int up, int uq) {
 // CHECK:  `- Name: dyn_pb
 // CHECK:  `- Return type: void
 // CHECK:  `- Parameters:
-// CHECK:    `-  type: int, symbol: up
-// CHECK:    `-  type: int, symbol: uq
+// CHECK:    `-  type: s32, symbol: up
+// CHECK:    `-  type: s32, symbol: uq
 // CHECK:  `- Parallelization: index symbol: p, bound [0, up)
 // CHECK:   `- Parallelization: index symbol: q, bound [0, uq)

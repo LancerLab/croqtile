@@ -21,10 +21,10 @@ __co__ void foo(f32 mdspan[2, 3, 4] d, int e, bool, f32 mdspan<2> a) { }
 // VALNO:  } // end scope-1
 
 // CHECK: Parameter: ::foo::d, Type: f32 mdspan<3> [2, 3, 4]
-// CHECK: Parameter: ::foo::e, Type: int
+// CHECK: Parameter: ::foo::e, Type: s32
 // CHECK: Parameter: ::foo::anon_0, Type: bool
 // CHECK: Parameter: ::foo::a, Type: f32 mdspan<2> [::foo::$0, ::foo::$1]
-// CHECK: Function:  ::foo, Type: void (*)(f32 mdspan<3> [2, 3, 4], int, bool, f32 mdspan<2> [::foo::$0, ::foo::$1])
+// CHECK: Function:  ::foo, Type: void (*)(f32 mdspan<3> [2, 3, 4], s32, bool, f32 mdspan<2> [::foo::$0, ::foo::$1])
 
 __co__ void bar(f32 mdspan[?, 2, ?, 4] d, f32 mdspan<4> a) { }
 

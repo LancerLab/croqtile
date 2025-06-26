@@ -80,8 +80,8 @@ public:
         auto sty = sym->GetType();
         // Currently it only allows resolving placeholder types.
         if (isa<PlaceHolderType>(sty)) {
-          assert(sty->Category() == ty->Category() &&
-                 "expect type to have same category.");
+          assert(sty->GetBaseType() == ty->GetBaseType() &&
+                 "expect type to have same BaseType.");
           visitor->SSTab().ModifyScopedSymbolType(e, ty);
           if (debug)
             dbgs() << "[RType] Set the type of '" << e << "' to be " << PSTR(ty)

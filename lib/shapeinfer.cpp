@@ -476,7 +476,8 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
   SetNodeType(n, nty);
 
   // TODO(wsj): BooleanType? HalfType...?
-  if ((isa<FloatType>(nty) || isa<DoubleType>(nty) || isa<IntegerType>(nty) ||
+  if ((isa<FloatType>(nty) || isa<DoubleType>(nty) ||
+       (isa<ScalarIntegerType>(nty)) ||
        isa<HalfType>(nty) || isa<Half8Type>(nty)) &&
       ValidVN(cur_vn)) {
     // mutables do not have constant values
@@ -574,7 +575,7 @@ bool ShapeInference::Visit(AST::Assignment& n) {
   assert(ValidVN(cur_vn) && "expected a valid current value number.");
   ValNoAliasSign(SSTab().ScopedName(name), cur_vn);
 
-  if (isa<IntegerType>(nty) && ValidVN(cur_vn)) {
+  if (isa<ScalarIntegerType>(nty) && ValidVN(cur_vn)) {
     auto shape = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn));
     assert(shape.DimCount() == 1);
     VST_DEBUG(dbgs() << " |-<symval> " << SSTab().ScopedName(name) << ": "
@@ -1029,8 +1030,9 @@ bool ShapeInference::Visit(AST::DMA& n) {
   }
 
   if (SSTab().IsDeclared(n.future)) {
-    assert(cast<PlaceHolderType>(SSTab().LookupSymbol(n.future))->Category() ==
-           TypeCategory::FUTURE);
+    assert(
+        cast<PlaceHolderType>(SSTab().LookupSymbol(n.future))->GetBaseType() ==
+        BaseType::FUTURE);
     vn.RebindSignatureWithValueNumber(SSTab().InScopeName(n.future) + ".span",
                                       cur_vn);
     SSTab().ModifySymbolType(n.future, n.GetType());
@@ -1067,7 +1069,7 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
         GenShapeFromSignature(vn.GetSignatureFromValueNumber(ca_valno));
     // set the chunkat's type
     SetNodeType(n,
-                MakeSpannedType(sty->f_type, future_shape, sty->GetStorage()));
+                MakeSpannedType(sty->e_type, future_shape, sty->GetStorage()));
     n.s = future_shape;
     assert(n.s.IsValid());
 
@@ -1229,7 +1231,7 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
       GenShapeFromSignature(vn.GetSignatureFromValueNumber(ca_valno));
 
   // set the chunkat's type
-  SetNodeType(n, MakeSpannedType(sty->f_type, future_shape, sty->GetStorage()));
+  SetNodeType(n, MakeSpannedType(sty->e_type, future_shape, sty->GetStorage()));
 
   if (is_modspan)
     n.s = block_shape;
@@ -1267,7 +1269,7 @@ bool ShapeInference::Visit(AST::Call& n) {
   // value the scalars
   for (auto& s : n.GetArguments()) {
     if (!CanBeValueNumbered(s.get())) continue;
-    if (isa<IntegerType>(NodeType(*s))) {
+    if (isa<ScalarIntegerType>(NodeType(*s))) {
       auto expr = cast<AST::Expr>(s);
       expr->s = GenShapeFromSignature(GetSign(*s));
       VST_DEBUG(dbgs() << "[ExprShape] Shape for " << PSTR(s) << ": "
@@ -1381,7 +1383,7 @@ bool ShapeInference::Visit(AST::Select& n) {
         error_count++;
         return false;
       }
-      auto nty = MakeSpannedType(sty->f_type, s0->s, sty->GetStorage());
+      auto nty = MakeSpannedType(sty->e_type, s0->s, sty->GetStorage());
       SetNodeType(n, nty);
     }
     ast_vn.Update(&n, GetValNo(*s0, VNKind::VNK_MDSPAN), VNKind::VNK_MDSPAN);
@@ -1690,7 +1692,7 @@ bool ShapeInference::CanBeValueNumbered(AST::Node* n) const {
     return true;
   }
   // mutable integers can now be valued
-  if (IsMutable(*nty) && !isa<IntegerType>(nty)) return false;
+  if (IsMutable(*nty) && !isa<ScalarIntegerType>(nty)) return false;
   if (isa<EventType>(nty)) return false;
   if (isa<StringType>(nty)) return false;
 
@@ -1867,7 +1869,7 @@ ShapeInference::SignBounded(const AST::Node& n) {
           choreo_unreachable("operation is not permitted.");
       } else if (e->op == "#+" || e->op == "#-") {
         if (IsActualBoundedIntegerType(lhs.GetType()) &&
-            isa<IntegerType>(rhs.GetType())) {
+            isa<ScalarIntegerType>(rhs.GetType())) {
           auto lvn = GetValNo(lhs, VNKind::VNK_UBOUND);
           auto rvn = GetValNo(rhs, VNKind::VNK_VALUE);
           ub_sign = vn.SimplifySignature(

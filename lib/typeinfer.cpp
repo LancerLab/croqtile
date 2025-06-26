@@ -213,7 +213,7 @@ bool TypeInference::Visit(AST::DataType& n) {
     if (n.isArray())
       SetNodeType(n, MakeSpannedArrayType(n.base_type, shape, n.array_dims));
     else
-      SetNodeType(n, MakeSpannedType(n.getFundamentalType(), shape));
+      SetNodeType(n, MakeSpannedType(n.getBaseType(), shape));
     cur_type = n.GetType();
   }
 
@@ -650,17 +650,18 @@ bool TypeInference::Visit(AST::Expr& n) {
         error_count++;
         return false;
       }
-    } else if (isa<ITupleType>(pty_rhs) && isa<IntegerType>(pty_lhs)) {
+    } else if (isa<ITupleType>(pty_rhs) && isa<ScalarIntegerType>(pty_lhs)) {
       SetNodeType(n, pty_rhs);
       cur_type = n.GetType();
-    } else if (isa<ITupleType>(pty_lhs) && isa<IntegerType>(pty_rhs)) {
+    } else if (isa<ITupleType>(pty_lhs) && isa<ScalarIntegerType>(pty_rhs)) {
       SetNodeType(n, pty_lhs);
       cur_type = n.GetType();
-    } else if ((isa<MDSpanType>(pty_rhs) && isa<IntegerType>(pty_lhs)) ||
-               (isa<MDSpanType>(pty_lhs) && isa<IntegerType>(pty_rhs))) {
+    } else if ((isa<MDSpanType>(pty_rhs) && isa<ScalarIntegerType>(pty_lhs)) ||
+               (isa<MDSpanType>(pty_lhs) && isa<ScalarIntegerType>(pty_rhs))) {
       SetNodeType(n, MakeMDSpanType(n.s));
       cur_type = n.GetType();
-    } else if (isa<BoundedITupleType>(pty_lhs) && isa<IntegerType>(pty_rhs)) {
+    } else if (isa<BoundedITupleType>(pty_lhs) &&
+               isa<ScalarIntegerType>(pty_rhs)) {
       if (n.op == "#-" || n.op == "#+")
         SetNodeType(n, MakeBoundedITupleType(n.s));
       else if (n.op == "#" || n.op == "#*" || n.op == "#/" || n.op == "#%") {
@@ -699,10 +700,11 @@ bool TypeInference::Visit(AST::Expr& n) {
           SetNodeType(n, MakeFloatType());
       } else {
         // it is ok to make compatible types to do arith
-        if (IsActualBoundedIntegerType(pty_lhs) && isa<IntegerType>(pty_rhs))
+        if (IsActualBoundedIntegerType(pty_lhs) &&
+            isa<ScalarIntegerType>(pty_rhs))
           SetNodeType(n, pty_lhs);
         else if (IsActualBoundedIntegerType(pty_rhs) &&
-                 isa<IntegerType>(pty_lhs))
+                 isa<ScalarIntegerType>(pty_lhs))
           SetNodeType(n, pty_rhs);
         else
           SetNodeType(n, MakeIntegerType(is_mutable));
@@ -786,7 +788,7 @@ bool TypeInference::Visit(AST::SpanAs& n) {
     auto fty =
         cast<SpannedType>(GetSymbolType(n.id->LOC(), n.id->name + ".data"));
     SetNodeType(n, ShadowTypeStorage(MakeSpannedType(
-                       fty->f_type, sty->GetShape(), fty->GetStorage())));
+                       fty->e_type, sty->GetShape(), fty->GetStorage())));
     cur_type = n.GetType();
   }
 

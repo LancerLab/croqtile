@@ -71,9 +71,9 @@ int main() { /// host program
 
 // CHECK: (  0) matmul_named_dims(s32 mdspan<2> [::matmul_named_dims::M, ::matmul_named_dims::K] lhs, s32 mdspan<2> [::matmul_named_dims::K, ::matmul_named_dims::N] rhs) {
 // CHECK: (  1)   global s32 [ lhs.span(0) rhs.span(1) ] output
-// CHECK: (  2)   int m = 4
-// CHECK: (  3)   int n = 64
-// CHECK: (  4)   int k = 512
+// CHECK: (  2)   s32 m = 4
+// CHECK: (  3)   s32 n = 64
+// CHECK: (  4)   s32 k = 512
 // CHECK: (  5)   parallel p = {p__elem__x} by [1] {
 // CHECK: (  6)     with tilings = {m_tile, k_tile, n_tile} in [ (M / m)  (K / k)  (N / n)  ] {
 // CHECK: (  7)       foreach m_tile(::), n_tile(::) {

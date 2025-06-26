@@ -24,7 +24,7 @@ __co__ f32 [M] softmax(f32 [M, N] input,int TILE_M) {
 }
 
 // CHECK: Parameter: ::softmax::input, Type: f32 mdspan<2> [::softmax::M, ::softmax::N]
-// CHECK: Parameter: ::softmax::TILE_M, Type: int
+// CHECK: Parameter: ::softmax::TILE_M, Type: s32
 // CHECK: Symbol:    ::softmax::output, Type: global f32 mdspan<1> [::softmax::M]
 // CHECK: Bounded:   ::softmax::paraby_0::p, Type: {int}->[1](pv)
 // CHECK: Bounded:   ::softmax::paraby_0::p__elem__x, Type: {int}->[1](pi:x)
@@ -34,7 +34,7 @@ __co__ f32 [M] softmax(f32 [M, N] input,int TILE_M) {
 // CHECK: Symbol:    ::softmax::paraby_0::within_0::foreach_0::local_output, Type: local f32 mdspan<1> [::softmax::TILE_M]
 // CHECK: Future:    ::softmax::paraby_0::within_0::foreach_0::local_input, Type: sync=>local f32 mdspan<2> [::softmax::TILE_M, ::softmax::N]
 // CHECK: Future:    ::softmax::paraby_0::within_0::foreach_0::(anon), Type: sync=>global f32 mdspan<1> [::softmax::TILE_M]
-// CHECK: Function:  ::softmax, Type: f32 mdspan<1> [::softmax::M] (*)(f32 mdspan<2> [::softmax::M, ::softmax::N], int)
+// CHECK: Function:  ::softmax, Type: f32 mdspan<1> [::softmax::M] (*)(f32 mdspan<2> [::softmax::M, ::softmax::N], s32)
 
 // CHKERR: GCU forbids local variable 'local_output` to be dynamically shaped (by [::softmax::TILE_M]).
 // CHKERR: GCU forbids local variable 'local_input__buf__` to be dynamically shaped (by [::softmax::TILE_M, ::softmax::N]).

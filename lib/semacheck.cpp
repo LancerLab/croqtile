@@ -162,7 +162,7 @@ bool SemaChecker::VisitNode(AST::Assignment& n) {
 
 bool SemaChecker::VisitNode(AST::IntIndex& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
-  if (!isa<IntegerType>(n.value->GetType())) {
+  if (!isa<ScalarIntegerType>(n.value->GetType())) {
     Error(n.LOC(), "Expect `" + PSTR(n.value) + "' to be a integer type.");
     error_count++;
     return false;
@@ -281,7 +281,7 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
       return false;
     }
     if (!isa<PlaceHolderType>(ty) ||
-        (cast<PlaceHolderType>(ty)->Category() != TypeCategory::FUTURE)) {
+        (cast<PlaceHolderType>(ty)->GetBaseType() != BaseType::FUTURE)) {
       Error(n.LOC(), "Expect a placeholder type but got '" + PSTR(ty) + "'.");
       error_count++;
       return false;
@@ -331,7 +331,7 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
     auto stty = cast<SpannedType>(tty);
     auto f_shape = sfty->GetShape();
     auto t_shape = stty->GetShape();
-    if (sfty->f_type != stty->f_type || !f_shape.SameRankAs(t_shape)) {
+    if (sfty->e_type != stty->e_type || !f_shape.SameRankAs(t_shape)) {
       Error(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
                          ") with " + PSTR(tc) + " and 'to'(" + PSTR(tty) +
                          ").");
@@ -357,7 +357,7 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
     auto stty = cast<SpannedType>(tty);
     auto f_shape = sfty->GetShape();
     auto t_shape = stty->GetShape();
-    if (sfty->f_type != stty->f_type || !f_shape.SameRankAs(t_shape)) {
+    if (sfty->e_type != stty->e_type || !f_shape.SameRankAs(t_shape)) {
       Error(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
                          ") with " + PSTR(pc) + " and 'to'(" + PSTR(tty) +
                          ").");
@@ -600,7 +600,7 @@ bool SemaChecker::VisitNode(AST::Rotate& n) {
 bool SemaChecker::VisitNode(AST::Select& n) {
   size_t ec = error_count;
 
-  if (!isa<IntegerType>(NodeType(*n.select_factor))) {
+  if (!isa<ScalarIntegerType>(NodeType(*n.select_factor))) {
     ++error_count;
     Error(n.select_factor->LOC(), "Expect " + PSTR(n.select_factor) +
                                       " to be an integer type but got " +

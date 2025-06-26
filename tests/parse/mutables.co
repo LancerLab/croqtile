@@ -22,7 +22,7 @@ __co__ void foo(f32 [14] b) {
 // CHECK:  `- Return type: void
 // CHECK:  `- Parameters:
 // CHECK:    `-  type: f32 [ 14 ], symbol: b
-// CHECK:  `- Var Decl (mutable int): a =  3
+// CHECK:  `- Var Decl (mutable s32): a =  3
 // CHECK:  `- Assign: a =  (a + 3)
 // CHECK:  `- Assign: a =  (a - 4)
 // CHECK:  `- Assign: a =  (a * 5)

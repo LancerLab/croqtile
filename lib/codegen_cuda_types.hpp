@@ -16,7 +16,6 @@ namespace CUDA {
 // we need util functions to stringify target related string for codegen
 // thus we need new utilities (not STR/PSTR)
 std::string stringify(const BaseType& type);
-std::string stringify(const FundamentalType& t);
 std::string stringify(const Type& ty); // this is abstract type, must use ref
 std::string stringify(const Storage& mspec);
 std::string stringify(const ValueList& vl);

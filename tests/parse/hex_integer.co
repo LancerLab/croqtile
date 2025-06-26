@@ -15,9 +15,9 @@ __co__ auto foo() {
 // CHECK:  `- Name: foo
 // CHECK:  `- Return type: unknown
 // CHECK:  `- Parameters:
-// CHECK:  `- Var Decl (int): x =  -2147483647
+// CHECK:  `- Var Decl (s32): x =  -2147483647
 // CHECK:  `- Var Decl (unknown): y =  1
-// CHECK:  `- Var Decl (int): z =  (-2147483647 - 1) 
+// CHECK:  `- Var Decl (s32): z =  (-2147483647 - 1)
 // CHECK:  `- Var Decl (s32 [ 16 256 ], default): g
 // CHECK:  `- Type Decl: mds - [ 15 31 ]
 // CHECK:  `- With Block:

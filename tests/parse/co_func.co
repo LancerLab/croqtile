@@ -9,10 +9,10 @@ __co__ int foo(f32 mdspan<1> a, int) { }
 
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: foo
-// CHECK:  `- Return type: int
+// CHECK:  `- Return type: s32
 // CHECK:  `- Parameters:
 // CHECK:    `-  type: f32 <1>, symbol: a
-// CHECK:    `-  type: int, symbol: anon_0
+// CHECK:    `-  type: s32, symbol: anon_0
 
 __co__ f16 [1, 2] bar(f32 [3, 4, 5] b) { }
 

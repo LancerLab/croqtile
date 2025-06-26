@@ -682,7 +682,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
         // the sym is choreo output
         std::string sym_data = sym + ".data()";
         hs << h_indent << "auto " << sym
-           << " = choreo::make_spandata<choreo::" << STR(sty->f_type) << ", "
+           << " = choreo::make_spandata<choreo::" << STR(sty->e_type) << ", "
            << shape.Rank() << ">({" << UnScopedExpr(RSTR(shape)) << "});\n";
         if (n.init_value) {
           // support initialization of output
@@ -690,7 +690,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
              << sym << ".element_count()"
              << ", "
              << ExprCastSTR(n.init_value, std::nullopt, GetBaseType(*sty),
-                            TC2BT(n.init_value->GetType()->tc))
+                            GetBaseType(*n.init_value->GetType()))
              << ");\n";
         }
         hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
@@ -814,7 +814,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
          << TopsMdsStorage(sto) << ", (" << NameBaseType(sty->ElementType())
          << "*)" << sym << ", " << UnScopedExpr(RSTR(sty->GetShape())) << "), "
          << ExprCastSTR(n.init_value, std::nullopt, GetBaseType(*sty),
-                        TC2BT(n.init_value->GetType()->tc), false)
+                        GetBaseType(*n.init_value->GetType()), false)
          << ");\n";
       DecrDeviceIndent();
       ds << d_indent << "} // single instance\n";
@@ -1005,7 +1005,7 @@ bool TopsccCodeGen::Visit(AST::Assignment& n) {
     return true;
   }
 
-  if (isa<IntegerType>(nty)) {
+  if (isa<ScalarIntegerType>(nty)) {
     if (IsHost())
       hs << h_indent << ((!n.IsDecl()) ? "" : "auto ") << n.GetName() << " = "
          << ExprSTR(n.value, false) << ";\n";
@@ -1160,7 +1160,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
 
   auto nty = NodeType(n);
   if (auto ph = dyn_cast<PlaceHolderType>(nty)) {
-    assert(ph->Category() == TypeCategory::FUTURE);
+    assert(ph->GetBaseType() == BaseType::FUTURE);
     // must set the buffer
     auto buf_name = FBInfo().at(InScopeName(n.future)).buffer;
 
@@ -1802,7 +1802,7 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
         auto e = cast<AST::Expr>(arg);
         if (isa<StringType>(type)) {
           print_format += ExprSTR(arg);
-        } else if (isa<IntegerType>(type)) {
+        } else if (isa<ScalarIntegerType>(type)) {
           print_format += "%lld";
           print_args +=
               "static_cast<long long>((int)(" + ExprSTR(arg, false) + ")), ";
@@ -2197,8 +2197,22 @@ static inline const std::string
 DeviceParamTypeStringify(const Choreo::Type& ty) {
   if (isa<VoidType>(&ty))
     return "void";
-  else if (isa<IntegerType>(&ty))
+  else if (isa<S8Type>(&ty))
+    return "char";
+  else if (isa<U8Type>(&ty))
+    return "unsigned char";
+  else if (isa<S16Type>(&ty))
+    return "short";
+  else if (isa<U16Type>(&ty))
+    return "unsigned short";
+  else if (isa<S32Type>(&ty))
     return "int";
+  else if (isa<U32Type>(&ty))
+    return "unsigned int";
+  else if (isa<S64Type>(&ty))
+    return "long long";
+  else if (isa<U64Type>(&ty))
+    return "unsigned long long";
   else if (isa<BooleanType>(&ty))
     return "bool";
   else if (isa<Half8Type>(&ty))
@@ -2598,12 +2612,10 @@ TopsccCodeGen::ExprCastSTR(AST::ptr<AST::Node> n,
       choreo_unreachable("unexpect type of v");
   }
 
-  using BT = BaseType;
-
   if (f == t) return value;
-  // TODO: actually, s32 is equal to int
 
-  if (t == BT::F8 || t == BT::HALF8)
+  using BT = BaseType;
+  if (t == BT::F8)
     choreo_unreachable("unsupport cast: '" + STR(f) + "' to " + STR(t));
 
   // need to do casting or converting.
@@ -2627,49 +2639,28 @@ TopsccCodeGen::ExprCastSTR(AST::ptr<AST::Node> n,
   auto IsSafeCast = [f, t]() -> bool {
     static const std::unordered_map<BT, std::unordered_set<BT>> table = {
         {BT::BOOL,
-         {BT::BOOL, BT::U8, BT::S8, BT::U16, BT::S16, BT::U32, BT::S32, BT::INT,
-          BT::U64, BT::S64, BT::F8, BT::HALF8, BT::BF16, BT::BFP16, BT::F16,
-          BT::HALF, BT::F32, BT::FLOAT, BT::DOUBLE}},
+         {BT::BOOL, BT::U8, BT::S8, BT::U16, BT::S16, BT::U32, BT::S32, BT::U64,
+          BT::S64, BT::F8, BT::BF16, BT::F16, BT::F32, BT::F64}},
         {BT::U8,
-         {BT::U8, BT::U16, BT::S16, BT::U32, BT::S32, BT::INT, BT::U64, BT::S64,
-          BT::F8, BT::HALF8, BT::BF16, BT::F16, BT::BFP16, BT::HALF, BT::F32,
-          BT::FLOAT, BT::DOUBLE}},
+         {BT::U8, BT::U16, BT::S16, BT::U32, BT::S32, BT::U64, BT::S64, BT::F8,
+          BT::BF16, BT::F16, BT::F32, BT::F64}},
         {BT::S8,
-         {BT::S8, BT::S16, BT::S32, BT::INT, BT::U64, BT::S64, BT::F8,
-          BT::HALF8, BT::BF16, BT::BFP16, BT::F16, BT::HALF, BT::F32, BT::FLOAT,
-          BT::DOUBLE}},
+         {BT::S8, BT::S16, BT::S32, BT::U64, BT::S64, BT::F8, BT::BF16, BT::F16,
+          BT::F32, BT::F64}},
         {BT::U16,
-         {BT::U16, BT::U32, BT::S32, BT::INT, BT::U64, BT::S64, BT::BF16,
-          BT::BFP16, BT::F32, BT::FLOAT, BT::DOUBLE}},
+         {BT::U16, BT::U32, BT::S32, BT::U64, BT::S64, BT::BF16, BT::F32,
+          BT::F64}},
         {BT::S16,
-         {BT::S16, BT::S32, BT::INT, BT::U64, BT::S64, BT::BF16, BT::BFP16,
-          BT::F32, BT::FLOAT, BT::DOUBLE}},
-        {BT::U32,
-         {BT::U32, BT::U64, BT::S64, BT::BF16, BT::BFP16, BT::F32, BT::FLOAT,
-          BT::DOUBLE}},
-        {BT::S32,
-         {BT::S32, BT::S64, BT::BF16, BT::BFP16, BT::F32, BT::FLOAT,
-          BT::DOUBLE}},
-        {BT::U64,
-         {BT::U64, BT::BF16, BT::BFP16, BT::F32, BT::FLOAT, BT::DOUBLE}},
-        {BT::S64,
-         {BT::S64, BT::BF16, BT::BFP16, BT::F32, BT::FLOAT, BT::DOUBLE}},
-        {BT::F8,
-         {BT::F8, BT::HALF8, BT::BF16, BT::F16, BT::BFP16, BT::HALF, BT::F32,
-          BT::FLOAT, BT::DOUBLE}},
-        {BT::HALF8,
-         {BT::F8, BT::HALF8, BT::BF16, BT::F16, BT::BFP16, BT::HALF, BT::F32,
-          BT::FLOAT, BT::DOUBLE}},
-        {BT::BF16, {BT::BF16, BT::BFP16, BT::F32, BT::FLOAT, BT::DOUBLE}},
-        {BT::F16,
-         {BT::BF16, BT::F16, BT::BFP16, BT::HALF, BT::F32, BT::FLOAT,
-          BT::DOUBLE}},
-        {BT::HALF,
-         {BT::BF16, BT::F16, BT::BFP16, BT::HALF, BT::F32, BT::FLOAT,
-          BT::DOUBLE}},
-        {BT::F32, {BT::F32, BT::FLOAT, BT::DOUBLE}},
-        {BT::FLOAT, {BT::F32, BT::FLOAT, BT::DOUBLE}},
-        {BT::DOUBLE, {BT::DOUBLE}},
+         {BT::S16, BT::S32, BT::U64, BT::S64, BT::BF16, BT::F32, BT::F64}},
+        {BT::U32, {BT::U32, BT::U64, BT::S64, BT::BF16, BT::F32, BT::F64}},
+        {BT::S32, {BT::S32, BT::S64, BT::BF16, BT::F32, BT::F64}},
+        {BT::U64, {BT::U64, BT::BF16, BT::F32, BT::F64}},
+        {BT::S64, {BT::S64, BT::BF16, BT::F32, BT::F64}},
+        {BT::F8, {BT::F8, BT::BF16, BT::F16, BT::F32, BT::F64}},
+        {BT::BF16, {BT::BF16, BT::F32, BT::F64}},
+        {BT::F16, {BT::BF16, BT::F16, BT::F32, BT::F64}},
+        {BT::F32, {BT::F32, BT::F64}},
+        {BT::F64, {BT::F64}},
     };
     auto it = table.find(f);
     if (it != table.end() && it->second.count(t)) return true;
@@ -2685,72 +2676,63 @@ TopsccCodeGen::ExprCastSTR(AST::ptr<AST::Node> n,
   case BT::S64: [[fallthrough]];
   case BT::U64: [[fallthrough]];
   case BT::S32: [[fallthrough]];
-  case BT::INT: [[fallthrough]];
   case BT::U32: [[fallthrough]];
   case BT::S16: [[fallthrough]];
   case BT::U16: [[fallthrough]];
   case BT::S8: [[fallthrough]];
   case BT::U8: {
-    // TODO: workaround
-    if ((f == BT::INT && t == BT::S32) || (f == BT::S32 && t == BT::INT)) {
-      res << value;
-      break;
-    }
     auto nbt = NameBaseType(t, is_host);
-    if (IntegerBaseType(f))
+    if (isBoolIntegerFundamentalType(f))
       res << "static_cast<" << nbt << ">(" << value << ")";
-    else if (FloatPointBaseType(f)) {
-      if (f != BT::FLOAT && f != BT::DOUBLE)
-        res << "static_cast<" << nbt << ">("
-            << ExprCastSTR(n, val, BT::FLOAT, f) << ")";
+    else if (IsFloatPointFundamentalType(f)) {
+      if (f != BT::F32 && f != BT::F64)
+        res << "static_cast<" << nbt << ">(" << ExprCastSTR(n, val, BT::F32, f)
+            << ")";
       else
         res << "static_cast<" << nbt << ">(" << value << ")";
     }
     break;
   }
   case BT::BOOL: {
-    if (IntegerBaseType(f))
+    if (isBoolIntegerFundamentalType(f))
       res << "static_cast<bool>(" << ExprCastSTR(n, val, BT::S64, f) << ")";
-    else if (FloatPointBaseType(f))
-      res << "static_cast<bool>(" << ExprCastSTR(n, val, BT::DOUBLE, f) << ")";
+    else if (IsFloatPointFundamentalType(f))
+      res << "static_cast<bool>(" << ExprCastSTR(n, val, BT::F64, f) << ")";
     break;
   }
-  case BT::DOUBLE: {
-    if (IntegerBaseType(f))
+  case BT::F64: {
+    if (isBoolIntegerFundamentalType(f))
       res << "static_cast<double>(" << value << ")";
     else
-      res << "static_cast<double>(" << ExprCastSTR(n, val, BT::FLOAT, f) << ")";
+      res << "static_cast<double>(" << ExprCastSTR(n, val, BT::F32, f) << ")";
     break;
   }
-  case BT::FLOAT:
   case BT::F32: {
-    if (IntegerBaseType(f))
+    if (isBoolIntegerFundamentalType(f))
       res << "static_cast<float>(" << value << ")";
     else {
-      if (f == BT::F16 || f == BT::HALF)
+      if (f == BT::F16)
         res << "f16_to_f32(" << value << ")";
-      else if (f == BaseType::BF16 || f == BaseType::BFP16)
+      else if (f == BT::BF16)
         res << "(float)(" << value << ")";
-      else if (f == BT::DOUBLE)
+      else if (f == BT::F64)
         res << "static_cast<float>(" << value << ")";
-      else if (f == BT::F32 || f == BT::FLOAT)
-        res << value; // TODO: workaround
+      else if (f == BT::F32)
+        res << value;
       else
         choreo_unreachable("unsupport cast: '" + STR(f) + "' to '" + STR(t) +
                            "'");
     }
     break;
   }
-  case BT::HALF:
   case BT::F16:
-    res << "f32_to_f16(" << ExprCastSTR(n, val, BT::FLOAT, f) << ")";
+    res << "f32_to_f16(" << ExprCastSTR(n, val, BT::F32, f) << ")";
     break;
-  case BT::BFP16:
   case BT::BF16: {
-    if (f == BT::BFP16 || f == BT::BF16)
-      res << value; // TODO: workaround
+    if (f == BT::BF16)
+      res << value;
     else
-      res << "choreo::bf16(" << ExprCastSTR(n, val, BT::FLOAT, f) << ")";
+      res << "choreo::bf16(" << ExprCastSTR(n, val, BT::F32, f) << ")";
     break;
   }
   default:
@@ -2946,7 +2928,7 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
                 << ExprSTR(r, is_host) << "))";
         } else if ((op == "#+" || op == "#-") &&
                    IsActualBoundedIntegerType(l->GetType()) &&
-                   isa<IntegerType>(r->GetType()))
+                   isa<ScalarIntegerType>(r->GetType()))
           oss << "(" << ExprSTR(l, is_host) << ")";
         else if (op == "#/" || op == "#*" || op == "#%")
           choreo_unreachable("unsupported expression '" + expr->GetOp() +
@@ -3196,35 +3178,35 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e, bool is_host,
           oss << WrapWithParen(res.str(), "+");
         } else if ((op == "#+" || op == "#-") &&
                    IsActualBoundedIntegerType(l->GetType()) &&
-                   isa<IntegerType>(r->GetType()))
+                   isa<ScalarIntegerType>(r->GetType())) {
           oss << OpExprSTR(l, is_host, parent_op);
-        else if (op == "#/" || op == "#*" || op == "#%")
-          choreo_unreachable("unsupported expression op: '" + expr->GetOp() +
-                             "', expr: " + PSTR(expr) + ".");
-        else {
-          std::ostringstream res;
-          res << OpExprSTR(l, is_host, op) << " " << op << " "
-              << OpExprSTR(r, is_host, op, false);
-          oss << WrapWithParen(res.str(), op);
+          else if (op == "#/" || op == "#*" || op == "#%") choreo_unreachable(
+              "unsupported expression op: '" + expr->GetOp() +
+              "', expr: " + PSTR(expr) + ".");
+          else {
+            std::ostringstream res;
+            res << OpExprSTR(l, is_host, op) << " " << op << " "
+                << OpExprSTR(r, is_host, op, false);
+            oss << WrapWithParen(res.str(), op);
+          }
         }
-      }
-    } else if (expr->IsTernary()) {
-      std::ostringstream res;
-      res << OpExprSTR(expr->GetC(), is_host, "?") << " ? "
-          << OpExprSTR(expr->GetL(), is_host, "?") << " : "
-          << OpExprSTR(expr->GetR(), is_host, "?", false);
-      oss << WrapWithParen(res.str(), "?");
+      } else if (expr->IsTernary()) {
+        std::ostringstream res;
+        res << OpExprSTR(expr->GetC(), is_host, "?") << " ? "
+            << OpExprSTR(expr->GetL(), is_host, "?") << " : "
+            << OpExprSTR(expr->GetR(), is_host, "?", false);
+        oss << WrapWithParen(res.str(), "?");
+      } else
+        choreo_unreachable("unsupported expression op: '" + expr->GetOp() +
+                           "', expr: " + PSTR(expr) + ".");
+    } else if (auto c = dyn_cast<AST::Call>(e)) {
+      assert(!is_host);
+      return CallSTR(*c);
     } else
-      choreo_unreachable("unsupported expression op: '" + expr->GetOp() +
-                         "', expr: " + PSTR(expr) + ".");
-  } else if (auto c = dyn_cast<AST::Call>(e)) {
-    assert(!is_host);
-    return CallSTR(*c);
-  } else
-    choreo_unreachable("unsupported expression op: '" + expr->GetOp() + "'.");
+      choreo_unreachable("unsupported expression op: '" + expr->GetOp() + "'.");
 
-  return oss.str();
-}
+    return oss.str();
+  }
 #endif
 
 const std::string TopsccCodeGen::CallSTR(AST::Call& n) const {

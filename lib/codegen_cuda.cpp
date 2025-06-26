@@ -277,7 +277,7 @@ bool CUDACodeGen::Visit(AST::NamedVariableDecl& node) {
   if (auto sty = dyn_cast<SpannedType>(nty)) {
     assert(isa<SpannedType>(GetSymbolType(sym)) && "Inconsistent types!");
     auto storage_type = sty->GetStorage();
-    auto base_type = Choreo::BaseType(sty->f_type);
+    auto base_type = Choreo::BaseType(sty->e_type);
     std::ostringstream _os;
     if (storage_type == Choreo::Storage::SHARED) {
 
@@ -1109,7 +1109,7 @@ bool CUDACodeGen::Visit(AST::FunctionDecl& d) {
     auto name = "output";
     auto type_name = "output_type";
     auto type_string =
-        "DRAMType(" + stringify(TC2BT(fty.out_ty->Category())) + ", (1));";
+        "DRAMType(" + stringify(fty.out_ty->GetBaseType()) + ", (1));";
     cuda_symbols.AddSymbol(name, type_name, type_string);
     // fs << indent << "auto " << type_name << " = " << type_string << "\n";
   }

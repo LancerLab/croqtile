@@ -328,7 +328,7 @@ bool FactorCodeGen::Visit(AST::NamedVariableDecl& node) {
       std::string buffer_name =
           arg_idx < 0 ? sa->id->name : "args[" + std::to_string(arg_idx) + "]";
       std::string storage_type = stringify(sty->GetStorage());
-      std::string base_type = stringify(Choreo::BaseType(sty->f_type));
+      std::string base_type = stringify(Choreo::BaseType(sty->e_type));
       fs << indent << "auto " << sym << " = bitcast_(" << storage_type << "("
          << base_type << ", ";
 
@@ -687,7 +687,7 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
   TraceEachVisit(d);
 
   if (auto ph = dyn_cast<PlaceHolderType>(NodeType(d))) {
-    assert(ph->Category() == TypeCategory::FUTURE);
+    assert(ph->GetBaseType() == BaseType::FUTURE);
     // TODO: optimize when it should be SDMA
     auto fty = cast<FutureType>(GetSymbolType(d.future));
     auto gcu_dma = "CDMA";
@@ -1184,7 +1184,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
         (cgi->HasReturnSymbol(fname)) ? cgi->GetReturnSymbol(fname) : "output";
     auto type_name = "__choreo_factor_out_type";
     auto type_string =
-        "DRAMType(" + stringify(TC2BT(fty->out_ty->Category())) + ", (1))";
+        "DRAMType(" + stringify(fty->out_ty->GetBaseType()) + ", (1))";
     fs << indent << "auto " << type_name << " = " << type_string << ";\n";
     factor_symbols.AddSymbol(name, type_name, type_string);
 

@@ -17,7 +17,7 @@ __co__ bf16 mdspan<3> span_arith(s32 mdspan<4> d, int c) {
 // CHECK:  `- Return type: bf16 <3>
 // CHECK:  `- Parameters:
 // CHECK:    `-  type: s32 <4>, symbol: d
-// CHECK:    `-  type: int, symbol: c
+// CHECK:    `-  type: s32, symbol: c
 // CHECK:  `- Type Decl: dims - [ 9 c ]
 // CHECK:  `- Type Decl: dim1 - [ 3 5 7 ]
 // CHECK:  `- Var Decl (ituple): e = {7, 8, 9}
@@ -41,7 +41,7 @@ __co__ void span_arith1(s32 [32, 18, 6, 1] d, int c) {
 // CHECK:  `- Return type: void
 // CHECK:  `- Parameters:
 // CHECK:    `-  type: s32 [ 32 18 6 1 ], symbol: d
-// CHECK:    `-  type: int, symbol: c
+// CHECK:    `-  type: s32, symbol: c
 // CHECK:  `- Var Decl (ituple): g = {c, 2, 4, 3}
 // CHECK:  `- Var Decl (ituple): a =  (d / [ 3 4 5 6 ])
 // CHECK:  `- Var Decl (unknown): b =  (d % [ 3 4 5 6 ])

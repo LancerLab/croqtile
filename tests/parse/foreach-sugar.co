@@ -13,8 +13,8 @@ __co__ void foo(int N, int M, s32[2,4] lhs) {
 // CHECK:  `- Name: foo
 // CHECK:  `- Return type: void
 // CHECK:  `- Parameters:
-// CHECK:    `-  type: int, symbol: N
-// CHECK:    `-  type: int, symbol: M
+// CHECK:    `-  type: s32, symbol: N
+// CHECK:    `-  type: s32, symbol: M
 // CHECK:    `-  type: s32 [ 2 4 ], symbol: lhs
 // CHECK:  `- Parallelization:  index symbol: p, bound [0, 6)
 // CHECK:   `- With Block:

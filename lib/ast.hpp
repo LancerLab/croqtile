@@ -295,35 +295,57 @@ struct BoolLiteral : public Node, public TypeIDProvider<BoolLiteral> {
 };
 
 struct IntLiteral : public Node, public TypeIDProvider<IntLiteral> {
-  std::variant<int, uint32_t, int64_t, uint64_t> value;
+  std::variant<int8_t, uint8_t, int16_t, uint16_t, int, uint32_t, int64_t,
+               uint64_t>
+      value;
 
   IntLiteral(const location& l)
       : Node(l, MakeIntegerType()), value(GetUnKnownInteger()) {}
-  IntLiteral(const location& l, int v) : Node(l, MakeIntegerType()), value(v) {}
+
+  IntLiteral(const location& l, int8_t v)
+      : Node(l, MakeScalarIntegerType(BaseType::S8)), value(v) {}
+  IntLiteral(const location& l, uint8_t v)
+      : Node(l, MakeScalarIntegerType(BaseType::U8)), value(v) {}
+  IntLiteral(const location& l, int16_t v)
+      : Node(l, MakeScalarIntegerType(BaseType::S16)), value(v) {}
+  IntLiteral(const location& l, uint16_t v)
+      : Node(l, MakeScalarIntegerType(BaseType::U16)), value(v) {}
+  IntLiteral(const location& l, int v)
+      : Node(l, MakeScalarIntegerType(BaseType::S32)), value(v) {}
   IntLiteral(const location& l, uint32_t v)
-      : Node(l, MakeIntegerType()), value(v) {}
+      : Node(l, MakeScalarIntegerType(BaseType::U32)), value(v) {}
   IntLiteral(const location& l, int64_t v)
-      : Node(l, MakeIntegerType()), value(v) {}
+      : Node(l, MakeScalarIntegerType(BaseType::S64)), value(v) {}
   IntLiteral(const location& l, uint64_t v)
-      : Node(l, MakeIntegerType()), value(v) {}
+      : Node(l, MakeScalarIntegerType(BaseType::U64)), value(v) {}
   IntLiteral(const location& l,
-             const std::variant<int, uint32_t, int64_t, uint64_t>& v)
-      : Node(l, MakeIntegerType()), value(v) {}
+             const std::variant<int8_t, uint8_t, int16_t, uint16_t, int,
+                                uint32_t, int64_t, uint64_t>& v)
+      : Node(l, MakeScalarIntegerType(BaseType::UNKNOWN)), value(v) {}
 
   // allow copy construction
   explicit IntLiteral(const IntLiteral& il)
-      : Node(il.LOC(), MakeIntegerType()), value(il.value) {}
+      : Node(il.LOC(), MakeScalarIntegerType(BaseType::UNKNOWN)),
+        value(il.value) {}
 
   int64_t Val() const {
     return std::visit([](auto x) -> int64_t { return static_cast<int64_t>(x); },
                       value);
   }
 
+  int8_t ValS8() const { return std::get<int8_t>(value); }
+  uint8_t ValU8() const { return std::get<uint8_t>(value); }
+  int16_t ValS16() const { return std::get<int16_t>(value); }
+  uint16_t ValU16() const { return std::get<uint16_t>(value); }
   int ValS32() const { return std::get<int>(value); }
   uint32_t ValU32() const { return std::get<uint32_t>(value); }
   uint64_t ValU64() const { return std::get<uint64_t>(value); }
   int64_t ValS64() const { return std::get<int64_t>(value); }
 
+  bool IsInt8() const { return std::holds_alternative<int8_t>(value); }
+  bool IsUint8() const { return std::holds_alternative<uint8_t>(value); }
+  bool IsInt16() const { return std::holds_alternative<int16_t>(value); }
+  bool IsUint16() const { return std::holds_alternative<uint16_t>(value); }
   bool IsInt() const { return std::holds_alternative<int>(value); }
   bool IsUint32() const { return std::holds_alternative<uint32_t>(value); }
   bool IsInt64() const { return std::holds_alternative<int64_t>(value); }
@@ -1119,7 +1141,6 @@ public:
                     bool m = false)
       : Node(l), base_type(bt), mdspan_type(st), is_mutable(m) {
     assert(bt != BaseType::ITUPLE && "unexpected type!");
-    assert(bt != BaseType::INT && "unexpected type!");
     assert(bt != BaseType::BOOL && "unexpected type!");
     InitSemaType();
   }
@@ -1146,18 +1167,14 @@ public:
         is_mutable(im) {}
 
   BaseType getBaseType() const { return base_type; }
-  FundamentalType getFundamentalType() const {
-    return (FundamentalType)base_type;
-  }
   Node* getPartialType() const { return mdspan_type.get(); }
 
   bool IsVoid() const { return base_type == BaseType::VOID; }
   bool IsUnknown() const { return base_type == BaseType::UNKNOWN; }
   bool isScalar() const {
-    return (base_type == BaseType::INT) || (base_type == BaseType::BOOL) ||
-           (base_type == BaseType::HALF8) || (base_type == BaseType::HALF) ||
-           (base_type == BaseType::BFP16) || (base_type == BaseType::FLOAT) ||
-           (base_type == BaseType::DOUBLE);
+    return (base_type != BaseType::ITUPLE) && (base_type != BaseType::EVENT) &&
+           (base_type != BaseType::ARRAY) && (base_type != BaseType::ADDR) &&
+           (base_type != BaseType::VOID) && (base_type != BaseType::VOID);
   }
   bool isArray() const { return !array_dims.empty(); }
   bool isITuple() const { return base_type == BaseType::ITUPLE; }
@@ -1187,53 +1204,71 @@ public:
 
 private:
   ptr<Type> InitSemaType() {
-    switch (base_type) {
-    case BaseType::INT: SetType(MakeIntegerType(is_mutable)); break;
-    case BaseType::BOOL: SetType(MakeBooleanType(is_mutable)); break;
-    case BaseType::HALF8:
-    case BaseType::HALF:
-    case BaseType::BFP16:
-    case BaseType::FLOAT:
-    case BaseType::DOUBLE:
-      SetType(MakeScalarFloatType(base_type, is_mutable));
-      break;
-    case BaseType::F32:
-    case BaseType::F16:
-    case BaseType::BF16:
-    case BaseType::U64:
-    case BaseType::S64:
-    case BaseType::U32:
-    case BaseType::S32:
-    case BaseType::U16:
-    case BaseType::S16:
-    case BaseType::F8:
-    case BaseType::U8:
-    case BaseType::S8:
-      assert(mdspan_type != nullptr && "Expecting a valid mdspan.");
-      // need type inference
-      if (array_dims.size() == 0)
-        SetType(MakeSpannedType(base_type, GenUninitShape()));
-      else
-        SetType(MakeSpannedArrayType(base_type, GenUninitShape(), array_dims));
-      break;
-    case BaseType::EVENT:
-      if (array_dims.size() == 0)
-        SetType(MakeEventType(Storage::DEFAULT));
-      else
-        SetType(MakeEventArrayType(Storage::DEFAULT, array_dims));
-      break;
-    case BaseType::ITUPLE:
-      if (!IsValidRank(rank))
-        SetType(MakeUninitITupleType()); // type inference to deduce the dim
-                                         // count
-      else
-        SetType(MakeITupleType(rank));
-      break;
-    case BaseType::UNKNOWN:
-      SetType(MakeUnknownType()); // need type inference
-      break;
-    case BaseType::VOID: SetType(MakeVoidType()); break;
-    default: choreo_unreachable("Unexpected BaseType."); break;
+    if (isSpanned()) {
+      switch (base_type) {
+      case BaseType::F32:
+      case BaseType::F16:
+      case BaseType::BF16:
+      case BaseType::U64:
+      case BaseType::S64:
+      case BaseType::U32:
+      case BaseType::S32:
+      case BaseType::U16:
+      case BaseType::S16:
+      case BaseType::F8:
+      case BaseType::U8:
+      case BaseType::S8:
+        assert(mdspan_type != nullptr && "Expecting a valid mdspan.");
+        // need type inference
+        if (array_dims.size() == 0)
+          SetType(MakeSpannedType(base_type, GenUninitShape()));
+        else
+          SetType(
+              MakeSpannedArrayType(base_type, GenUninitShape(), array_dims));
+        break;
+      default: choreo_unreachable("Unexpected BaseType."); break;
+      }
+    } else {
+      switch (base_type) {
+      case BaseType::U64:
+      case BaseType::S64:
+      case BaseType::U32:
+      case BaseType::S32:
+      case BaseType::U16:
+      case BaseType::S16:
+      case BaseType::U8:
+      case BaseType::S8:
+        SetType(MakeScalarIntegerType(base_type, is_mutable));
+        break;
+      case BaseType::BOOL: SetType(MakeBooleanType(is_mutable)); break;
+      case BaseType::F8:
+      case BaseType::F16:
+      case BaseType::BF16:
+      case BaseType::F32:
+      case BaseType::F64:
+        SetType(MakeScalarFloatType(base_type, is_mutable));
+        break;
+      case BaseType::EVENT:
+        if (array_dims.size() == 0)
+          SetType(MakeEventType(Storage::DEFAULT));
+        else
+          SetType(MakeEventArrayType(Storage::DEFAULT, array_dims));
+        break;
+      case BaseType::ITUPLE:
+        if (!IsValidRank(rank))
+          // type inference to deduce the dim count
+          SetType(MakeUninitITupleType());
+        else
+          SetType(MakeITupleType(rank));
+        break;
+      case BaseType::UNKNOWN:
+        SetType(MakeUnknownType()); // need type inference
+        break;
+      case BaseType::VOID: SetType(MakeVoidType()); break;
+      default:
+        choreo_unreachable("Unexpected BaseType." + STR(base_type));
+        break;
+      }
     }
     return nullptr;
   }

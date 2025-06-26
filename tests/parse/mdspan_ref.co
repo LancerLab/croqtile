@@ -8,10 +8,10 @@ __co__ int span_element(int d, int c) {
 
 // CHECK: ChoreoFunction
 // CHECK:  `- Name: span_element
-// CHECK:  `- Return type: int
+// CHECK:  `- Return type: s32
 // CHECK:  `- Parameters:
-// CHECK:    `-  type: int, symbol: d
-// CHECK:    `-  type: int, symbol: c
+// CHECK:    `-  type: s32, symbol: d
+// CHECK:    `-  type: s32, symbol: c
 // CHECK:  `- Type Decl: dims - [ 9 d ]
 // CHECK:  `- Type Decl: dim1 - [ c 10 ]
-// CHECK:  `- Var Decl (int): a =  ( (dims(c) + dim1(0))  + d)
+// CHECK:  `- Var Decl (s32): a =  ( (dims(c) + dim1(0))  + d)

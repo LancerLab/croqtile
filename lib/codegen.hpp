@@ -469,8 +469,22 @@ static inline std::string HostTypeStringify(const Choreo::Type& ty,
                                             bool is_ret = false) {
   if (isa<VoidType>(&ty))
     return "void";
-  else if (isa<IntegerType>(&ty))
+  else if (isa<S8Type>(&ty))
+    return "char";
+  else if (isa<U8Type>(&ty))
+    return "unsigned char";
+  else if (isa<S16Type>(&ty))
+    return "short";
+  else if (isa<U16Type>(&ty))
+    return "unsigned short";
+  else if (isa<S32Type>(&ty))
     return "int";
+  else if (isa<U32Type>(&ty))
+    return "unsigned int";
+  else if (isa<S64Type>(&ty))
+    return "long long";
+  else if (isa<U64Type>(&ty))
+    return "unsigned long long";
   else if (isa<BooleanType>(&ty))
     return "bool";
   else if (isa<Half8Type>(&ty))
@@ -485,10 +499,10 @@ static inline std::string HostTypeStringify(const Choreo::Type& ty,
     return "double";
   else if (auto sty = dyn_cast<SpannedType>(&ty)) {
     if (is_ret) // return by value
-      return "choreo::spanned_data<choreo::" + STR(sty->f_type) + ", " +
+      return "choreo::spanned_data<choreo::" + STR(sty->e_type) + ", " +
              std::to_string(sty->Dims()) + ">";
     else // pass in by reference
-      return "const choreo::spanned_view<choreo::" + STR(sty->f_type) + ", " +
+      return "const choreo::spanned_view<choreo::" + STR(sty->e_type) + ", " +
              std::to_string(sty->Dims()) + "> &";
   } else if (auto bitt = dyn_cast<BoundedITupleType>(&ty)) {
     assert(bitt->Dims() == 1);
@@ -508,7 +522,6 @@ static inline std::string KernelTypeStringify(const Choreo::BaseType& type) {
   case Choreo::BaseType::S32: return "int";
   case Choreo::BaseType::S16: return "int16_t";
   case Choreo::BaseType::S8: return "int8_t";
-  case Choreo::BaseType::INT: return "int";
   case Choreo::BaseType::BOOL: return "bool";
   default:
     choreo_unreachable("unsupported kernel function type: " + STR(type) + ".");
@@ -572,14 +585,14 @@ inline const std::string UnScopedExpr(const std::string& input) {
 
   return output;
 }
-// Remove all scope prefixes (e.g., ::foo::bar or ::$0) and return only the last symbol.
-// Handles both normal identifiers and dynamic shape variables like $0.
+// Remove all scope prefixes (e.g., ::foo::bar or ::$0) and return only the last
+// symbol. Handles both normal identifiers and dynamic shape variables like $0.
 // inline const std::string UnScopedExpr(const std::string& input) {
 //   // Match ::identifier or ::$number
 //   std::regex scopedNameRegex(R"((::[a-zA-Z_][a-zA-Z0-9_]*|::\$[0-9]+))");
 //   std::sregex_iterator it(input.begin(), input.end(), scopedNameRegex);
 //   std::sregex_iterator end;
-// 
+//
 //   std::string last;
 //   for (; it != end; ++it) {
 //     last = it->str();

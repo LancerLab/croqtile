@@ -23,10 +23,8 @@ public:
 
   const ptr<Type>& GetType() const { return type; }
   void SetType(const ptr<Type>& ty) { type = ty; }
-  TypeCategory GetTypeCategory() const { return type->Category(); }
-  bool IsComposite() const {
-    return GetTypeCategory() == TypeCategory::SPANNED;
-  }
+  BaseType GetBaseType() const { return type->GetBaseType(); }
+  bool IsComposite() const { return GetBaseType() == BaseType::SPANNED; }
 };
 
 class SymbolTable {
