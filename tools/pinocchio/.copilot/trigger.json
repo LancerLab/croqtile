@@ -1,8 +1,0 @@
-{
-  "triggers": [
-    {
-      "pattern": "#pinocchio",
-      "action": "activate_pinocchio_agents"
-    }
-  ]
-}
