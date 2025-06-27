@@ -68,36 +68,37 @@ bool SemaChecker::VisitNode(AST::Expr& n) {
     if (isa<BoundedType>(NodeType(*idx))) return true;
 
     // using shape info to check the index
-    auto shape = cast<AST::Expr>(idx)->s;
-    // if the shape is not valid, it means the index is mutable!
-    if (!shape.IsValid()) return true;
-    assert(shape.DimCount() == 1);
+    auto expr = cast<AST::Expr>(idx);
+    auto indices = expr->s;
+    // if the indices is not valid, it means the index is mutable!
+    if (!indices.IsValid()) return true;
+    assert(indices.DimCount() == 1);
 
-    if (shape.IsDynamic()) {
-      std::string shape_str = STR(shape);
-      std::string idx_str = shape_str.substr(1, shape_str.size() - 2);
-      std::string lhs, op, rhs, message;
-      lhs = idx_str;
-      op = "<";
-      rhs = std::to_string(bound);
-      message = "Index " + lhs + " is out of bounds of the " +
-                Ordinal(subscription_level) + " dimension of array '" +
-                PSTR(arr_sym) + "', where the valid range is [0, " + rhs + ").";
-      FCtx(fname).AppendRtCheck({lhs, op, rhs, idx->LOC(), message, {}});
-      FCtx(fname).AppendRtCheck({lhs, ">=", "0", idx->LOC(), message, {}});
-    } else {
-      auto idx_val = VIInt(shape.ValueAt(0));
-      assert(idx_val);
-      if (*idx_val < 0 || *idx_val >= bound) {
-        Error(idx->LOC(), "Index " + std::to_string(*idx_val) +
-                              " is out of bounds of the " +
-                              Ordinal(subscription_level) +
-                              " dimension of array '" + PSTR(arr_sym) +
-                              "', where the valid range is [0, " +
-                              std::to_string(bound) + ").");
-        error_count++;
-        return false;
+    for (auto& index : indices.Value()) {
+      if (!IsComputable(index)) {
+        Error1(expr->LOC(), "The " + Ordinal(subscription_level) +
+                                " subscription index can not be evaluated.");
+        continue;
       }
+      // 0 <= index < bound
+      auto asrt0 = sbe::bop(OpCode::LT, index, sbe::nu(bound))->Normalize();
+      auto asrt1 = sbe::bop(OpCode::GE, index, sbe::nu(0))->Normalize();
+      assert(IsValidValueItem(asrt0) && IsValidValueItem(asrt1));
+
+      auto message = "Index " + STR(index) + " is out of bounds of the " +
+                     Ordinal(subscription_level) + " dimension of array '" +
+                     PSTR(arr_sym) + "', where the valid range is [0, " +
+                     std::to_string(bound) + ").";
+
+      if (auto b = VIBool(asrt0)) {
+        if (b.value() == false) Error1(expr->LOC(), message);
+      } else
+        FCtx(fname).InsertAssertion(asrt0, expr->LOC(), message);
+
+      if (auto b = VIBool(asrt1)) {
+        if (b.value() == false) Error1(expr->LOC(), message);
+      } else
+        FCtx(fname).InsertAssertion(asrt1, expr->LOC(), message);
     }
   }
 
@@ -189,20 +190,25 @@ bool SemaChecker::VisitNode(AST::Parameter& n) {
 
 bool SemaChecker::VisitNode(AST::ParallelBy& n) {
   if (auto shape = GetShape(NodeType(n)); shape.IsDynamic()) {
-    std::string mds = STR(shape);
-    auto mds_vals = SplitStringByDelimiter(mds.substr(1, mds.size() - 2), ", ");
-    int idx = 1;
-    for (auto& mds_val : mds_vals) {
-      std::string lhs, op, rhs, message;
-      lhs = mds_val;
-      op = ">";
-      rhs = "0";
-      message =
-          "The " + Ordinal(idx) +
+    int index = 1;
+    for (auto& dim : shape.Value()) {
+      auto& loc = n.SubPVs()->ValueAt(index - 1)->LOC();
+      if (!IsComputable(dim)) {
+        Error1(loc, "The parallel count (" + Ordinal(index) +
+                        "th) can not be evaluated.");
+        continue;
+      }
+      auto message =
+          "The " + Ordinal(index) +
           " bound item of parallelby is invalid: should be greater than 0";
-      FCtx(fname).AppendRtCheck(
-          {lhs, op, rhs, n.SubPVs()->ValueAt(idx - 1)->LOC(), message, {}});
-      ++idx;
+      auto asrt = sbe::cmp(">", dim, sbe::nu(0))->Normalize();
+      assert(IsValidValueItem(asrt));
+
+      if (auto b = VIBool(asrt)) {
+        if (b.value() == false) Error1(loc, message);
+      } else
+        FCtx(fname).InsertAssertion(asrt, loc, message);
+      ++index;
     }
   }
 
@@ -211,18 +217,21 @@ bool SemaChecker::VisitNode(AST::ParallelBy& n) {
 
 bool SemaChecker::VisitNode(AST::WithIn& n) {
   if (auto shape = GetShape(NodeType(*n.in)); shape.IsDynamic()) {
-    std::string mds = STR(shape);
-    auto mds_vals = SplitStringByDelimiter(mds.substr(1, mds.size() - 2), ", ");
-    int idx = 1;
-    for (auto& mds_val : mds_vals) {
-      std::string lhs, op, rhs, message;
-      lhs = mds_val;
-      op = "!=";
-      rhs = "0";
-      message = "zero is detected for the " + Ordinal(idx) +
-                " dim of the mdspan inside the with-in statement",
-      FCtx(fname).AppendRtCheck({lhs, op, rhs, n.LOC(), message, {}});
-      ++idx;
+    int index = 1;
+    for (auto& dim : shape.Value()) {
+      if (!IsComputable(dim))
+        continue; // not reporting error since there could be no use of the
+                  // value
+      std::string message = "zero is detected for the " + Ordinal(index) +
+                            " dim of the mdspan inside the with-in statement";
+      auto asrt = sbe::cmp("!=", dim, sbe::nu(0))->Normalize();
+      assert(IsValidValueItem(asrt));
+
+      if (auto b = VIBool(asrt)) {
+        if (b.value() == false) Error1(n.in->LOC(), message);
+      } else
+        FCtx(fname).InsertAssertion(asrt, n.in->LOC(), message);
+      ++index;
     }
   }
   return true;
@@ -411,54 +420,47 @@ bool SemaChecker::VisitNode(AST::ChunkAt& n) {
       return false;
     }
 
-    // check if the indices are out of bound
+    // check if any indices are out of bound
     for (size_t i = 0; i < rank; ++i) {
       int bound = arr_ty->Dimension(i);
 
-      auto idx = n.indices->ValueAt(i);
+      auto expr = n.indices->ValueAt(i);
       // TODO: improve the out-of-bound check for bounded vars
-      if (isa<BoundedType>(NodeType(*idx))) continue;
+      if (isa<BoundedType>(NodeType(*expr))) continue;
 
-      auto shape = cast<AST::Expr>(idx)->s;
-      // if the shape is not valid, it means the index is mutable!
-      if (!shape.IsValid()) return true;
-      assert(shape.DimCount() == 1);
+      auto indices = cast<AST::Expr>(expr)->s;
+      // if the indices is not valid, it means the index is mutable!
+      if (!indices.IsValid()) return true;
+      assert(indices.DimCount() == 1);
 
-      if (shape.IsDynamic()) {
-        std::string shape_str = STR(shape);
-        std::string idx_str = shape_str.substr(1, shape_str.size() - 2);
-        std::string lhs, op, rhs, message;
-        lhs = idx_str;
-        op = "<";
-        rhs = std::to_string(bound);
-        message = "Index " + lhs + " is out of bounds of the " +
-                  Ordinal(i + 1) + " dimension of array '" + PSTR(n.data) +
-                  "', where the valid range is [0, " + rhs + ").";
-        FCtx(fname).AppendRtCheck({lhs, op, rhs, idx->LOC(), message, {}});
-        FCtx(fname).AppendRtCheck({lhs, ">=", "0", idx->LOC(), message, {}});
-      } else {
-        auto idx_val = VIInt(shape.ValueAt(0));
-        assert(idx_val);
-        if (*idx_val < 0 || *idx_val >= bound) {
-          Error(idx->LOC(), "Index " + std::to_string(*idx_val) +
-                                " is out of bounds of the " + Ordinal(i + 1) +
-                                " dimension of array '" + PSTR(n.data) +
-                                "', where the valid range is [0, " +
-                                std::to_string(bound) + ").");
-          error_count++;
-          return false;
+      for (auto& index : indices.Value()) {
+        if (!IsComputable(index)) {
+          Error1(expr->LOC(), "The " + Ordinal(i) +
+                                  " subscription index can not be evaluated.");
+          continue;
         }
+        // 0 <= index < bound
+        auto asrt0 = sbe::bop(OpCode::LT, index, sbe::nu(bound))->Normalize();
+        auto asrt1 = sbe::bop(OpCode::GE, index, sbe::nu(0))->Normalize();
+        assert(IsValidValueItem(asrt0) && IsValidValueItem(asrt1));
+
+        auto message = "Index " + STR(index) + " is out of bounds of the " +
+                       Ordinal(i + 1) + " dimension of array '" + PSTR(n.data) +
+                       "', where the valid range is [0, " +
+                       std::to_string(bound) + ").";
+
+        if (auto b = VIBool(asrt0)) {
+          if (b.value() == false) Error1(expr->LOC(), message);
+        } else
+          FCtx(fname).InsertAssertion(asrt0, expr->LOC(), message);
+
+        if (auto b = VIBool(asrt1)) {
+          if (b.value() == false) Error1(expr->LOC(), message);
+        } else
+          FCtx(fname).InsertAssertion(asrt1, expr->LOC(), message);
       }
     }
   }
-
-  // TODO: fix normalize to make it work
-#if 0
-  if (!n.s.IsValid()) {
-    Error(n.LOC(), "The tiled block shape is invalid.");
-    error_count++;
-  }
-#endif
 
   return true;
 }

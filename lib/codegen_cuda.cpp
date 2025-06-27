@@ -1037,7 +1037,7 @@ bool CUDACodeGen::Visit(AST::FunctionDecl& d) {
                                      const std::string& name, size_t p_index) {
     size_t count = 0;
     for (auto vi : sty->GetShape().Value()) {
-      if (auto vale = VIStr(vi)) {
+      if (auto vale = VISym(vi)) {
         auto elem_name = name + ".shape()[" + std::to_string(count) + "]";
         rts_nmap.emplace(*vale, elem_name);
         rts_pidx.emplace(*vale, p_index);
@@ -1443,7 +1443,7 @@ void CUDACodeGen::EmitRuntimeCheck(std::ostream& os, const Type& ty) {
           os << "  choreo::runtime_check(" << elem_name << " == " << *vale;
           os << ", \"shape inconsistent on the " << Ordinal(i + 1)
              << " parameter (dim: " << count << ").\");\n";
-        } else if (auto vale = VIStr(vi)) {
+        } else if (auto vale = VISym(vi)) {
           ve_entries_map[*vale].push_back({i + 1, count, elem_name});
         }
         count++;

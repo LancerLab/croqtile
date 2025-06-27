@@ -144,6 +144,7 @@ void choreo_info(const char *message) {
   LSHIFT  "<<"
   RSHIFT  ">>"
   QES     "?"
+  DQES    "??"
   TRANS   "=>"
   BIND    "<->"
   PIPE    "|"
@@ -341,15 +342,12 @@ optional_mutable
 
 param_mdspan_val
     : QES   { $$ = AST::Make<AST::IntLiteral>(@1); }
+    | DQES   { $$ = AST::Make<AST::NoValue>(@1); }
     | num_expr { $$ = $1; }
     | IDENTIFIER {
-        if ($1 == "_")
-          $$ = AST::Make<AST::NoValue>(@1);
-        else {
-          $$ = AST::Make<AST::Identifier>(@1, $1);
-          if (!symtab.Exists($1)) // allows same dim name
-            symtab.AddSymbol($1, MakeIntegerType());
-        }
+        $$ = AST::Make<AST::Identifier>(@1, $1);
+        if (!symtab.Exists($1)) // allows same dim name
+          symtab.AddSymbol($1, MakeIntegerType());
       }
     ;
 

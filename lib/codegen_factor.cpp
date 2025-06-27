@@ -1067,7 +1067,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
                                      size_t hp_index) {
     size_t dim_index = 0;
     for (auto vi : sty->GetShape().Value()) {
-      if (auto vale = VIStr(vi)) { // the dimension is symbolic
+      if (auto vale = VISym(vi)) { // the dimension is symbolic
         assert(PrefixedWith(*vale, "::" + fname + "::") &&
                "unexpected symbol name.");
 
@@ -1549,7 +1549,7 @@ void FactorCodeGen::EmitHostRuntimeCheck(std::ostream& os) {
           os << "  choreo::runtime_check(" << elem_name << " == " << *vale;
           os << ", \"shape inconsistent on the " << Ordinal(host_pindex + 1)
              << " parameter (dim: " << dim_count << ").\");\n";
-        } else if (auto vale = VIStr(vi)) {
+        } else if (auto vale = VISym(vi)) {
           ve_entries_map[*vale].push_back(
               {host_pindex + 1, dim_count, elem_name});
         }
@@ -1578,7 +1578,6 @@ void FactorCodeGen::EmitHostRuntimeCheck(std::ostream& os) {
   os << "\n";
 
   for (const auto& rc : FCtx(fname).GetRtChecks()) {
-
     os << "  choreo::runtime_check(" << ReplaceRuntimeNames(rc.lhs) << " "
        << rc.op << " " << rc.rhs << ", \"";
     if (!rc.message.empty() && rc.message.back() == '.')
@@ -1586,6 +1585,14 @@ void FactorCodeGen::EmitHostRuntimeCheck(std::ostream& os) {
     else
       os << rc.message;
     os << ", " << rc.loc << "\");\n";
+  }
+  for (const auto& ar : FCtx(fname).GetAssertions()) {
+    os << "  choreo::runtime_check(" << ValueSTR(ar.expr, false) << ", \"";
+    if (!ar.message.empty() && ar.message.back() == '.')
+      os << ar.message.substr(0, ar.message.size() - 1);
+    else
+      os << ar.message;
+    os << ", " << ar.loc << "\");\n";
   }
 }
 
@@ -1622,7 +1629,8 @@ void FactorCodeGen::EmitHostFuncDecl(std::ostringstream& oss,
 }
 
 const std::string FactorCodeGen::ValueSTR(const ValueItem& vi,
-                                          bool factor_value = true) const {
+                                          bool factor_value,
+                                          bool is_host) const {
   if (auto i = VIInt(vi)) {
     if (factor_value)
       return "Value(" + std::to_string(*i) + ")";
@@ -1630,18 +1638,20 @@ const std::string FactorCodeGen::ValueSTR(const ValueItem& vi,
       return std::to_string(*i);
   } else if (auto bv = VIBool(vi))
     return PSTR(vi);
-  else if (auto sv = VIStr(vi)) {
+  else if (auto sv = VISym(vi)) {
     if (factor_value) {
       // not int => this is a dynamic var or var bounded by dynamic var.
       return UnScopedExpr(ReplaceFactorDynDimName(STR(vi)));
     } else
-      return UnScopedExpr(ReplaceRuntimeNames(STR(vi), "", false));
+      return UnScopedExpr(ReplaceRuntimeNames(STR(vi), "", is_host));
   } else if (auto bo = VIBop(vi))
-    return "(" + ValueSTR(bo->GetLeft()) + " " + STR(bo->GetOpCode()) + " " +
-           ValueSTR(bo->GetRight()) + ")";
+    return "(" + ValueSTR(bo->GetLeft(), factor_value, is_host) + " " +
+           STR(bo->GetOpCode()) + " " +
+           ValueSTR(bo->GetRight(), factor_value, is_host) + ")";
   else if (auto to = VITop(vi))
-    return "(" + ValueSTR(to->GetPred()) + " ? " + ValueSTR(to->GetLeft()) +
-           " : " + ValueSTR(to->GetRight()) + ")";
+    return "(" + ValueSTR(to->GetPred(), factor_value, is_host) + " ? " +
+           ValueSTR(to->GetLeft(), factor_value, is_host) + " : " +
+           ValueSTR(to->GetRight(), factor_value, is_host) + ")";
   else
     choreo_unreachable("unsupported value.");
   return "";

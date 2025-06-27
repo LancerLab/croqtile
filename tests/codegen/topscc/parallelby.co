@@ -96,7 +96,7 @@ __co__ void dynamic_expr_paraby(int n) {
 }
 
 // CHECK: void dynamic_expr_paraby(int n) {
-// CHECK:   choreo::runtime_check(((n >= 4) ? 4 : n) > 0
+// CHECK:   choreo::runtime_check((((n >= 4) ? 4 : n) > 0)
 // CHECK:   dim3 __dynamic_expr_paraby_gdims0(1, 1, 1);
 // CHECK:   dim3 __dynamic_expr_paraby_bdims0(((n >= 4) ? 4 : n), 1, 1);
 // CHECK:   __choreo_device_dynamic_expr_paraby<<<__dynamic_expr_paraby_gdims0, __dynamic_expr_paraby_bdims0>>>(n);

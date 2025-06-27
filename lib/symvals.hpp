@@ -133,14 +133,14 @@ inline std::string STR(const ValueItem& vi) {
 }
 
 inline bool VIIsNil(const ValueItem& vi) { return isa<sbe::InvalidValue>(vi); }
-inline static std::optional<int> VIInt(const ValueItem& vi) {
+inline static std::optional<int64_t> VIInt(const ValueItem& vi) {
   if (auto iv = dyn_cast<sbe::NumericValue>(vi)) return iv->Value();
   return std::nullopt;
 }
 inline static bool VIIsInt(const ValueItem& vi) {
   return VIInt(vi).has_value();
 }
-inline static std::optional<int> VIBool(const ValueItem& vi) {
+inline static std::optional<bool> VIBool(const ValueItem& vi) {
   if (auto iv = dyn_cast<sbe::BooleanValue>(vi)) return iv->Value();
   return std::nullopt;
 }
@@ -148,9 +148,13 @@ inline static bool VIIsBool(const ValueItem& vi) {
   return VIBool(vi).has_value();
 }
 
-inline static std::optional<std::string> VIStr(const ValueItem& vi) {
+inline static std::optional<std::string> VISym(const ValueItem& vi) {
   if (auto iv = dyn_cast<sbe::SymbolicValue>(vi)) return iv->Value();
   return std::nullopt;
+}
+
+inline static bool VIIsSym(const ValueItem& vi) {
+  return VISym(vi).has_value();
 }
 
 inline static std::shared_ptr<sbe::UnaryOperation> VIUop(const ValueItem& vi) {
@@ -173,6 +177,37 @@ template <typename T>
 inline T GetValueAt(ValueList vlist, int idx) {
   return *(std::get_if<T>(&vlist[idx]));
 };
+
+inline const std::set<ValueItem> GetSymbols(const ValueItem& vi) {
+  if (VIIsSym(vi))
+    return {vi};
+  else if (auto uop = VIUop(vi)) {
+    return GetSymbols(uop);
+  } else if (auto bop = VIBop(vi)) {
+    auto ls = GetSymbols(bop->GetLeft());
+    auto rs = GetSymbols(bop->GetRight());
+    ls.insert(rs.begin(), rs.end());
+    return ls;
+  } else if (auto bop = VITop(vi)) {
+    auto ps = GetSymbols(bop->GetPred());
+    auto ls = GetSymbols(bop->GetLeft());
+    auto rs = GetSymbols(bop->GetRight());
+    ps.insert(ls.begin(), ls.end());
+    ps.insert(rs.begin(), rs.end());
+    return ps;
+  }
+
+  return {};
+}
+
+inline const std::set<ValueItem> GetSymbols(const ValueList& vl) {
+  std::set<ValueItem> res;
+  for (auto& vi : vl) {
+    auto vs = GetSymbols(vi);
+    res.insert(vs.begin(), vs.end());
+  }
+  return res;
+}
 
 struct ValueListHasher {
   std::size_t operator()(const ValueList& val) const noexcept {

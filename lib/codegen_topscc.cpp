@@ -518,7 +518,7 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
                                          size_t hp_index) {
     size_t dim_index = 0;
     for (auto vi : sty->GetShape().Value()) {
-      if (auto vale = VIStr(vi)) { // the dimension is symbolic
+      if (auto vale = VISym(vi)) { // the dimension is symbolic
         assert(PrefixedWith(*vale, "::" + fname + "::") &&
                "unexpected symbolic dimension name.");
 
@@ -2148,7 +2148,14 @@ void TopsccCodeGen::EmitHostRuntimeCheck() {
              << " parameter (\'" << name << "\', dim: " << dim_count
              << "): expect: " << *vale << ", but got \" + std::to_string("
              << elem_name << ") + \".\");\n";
-        } else if (auto vale = VIStr(vi)) {
+        } else if (VIIsNil(vi)) {
+          hs << h_indent << "choreo::runtime_check(" << elem_name
+             << " == choreo::__inf__, \"must set 'choreo::__inf__' to the "
+                "unbounded dimension on the "
+             << Ordinal(host_pindex + 1) << " parameter (\'" << name
+             << "\', dim: " << dim_count << "): got \" + std::to_string("
+             << elem_name << ") + \".\");\n";
+        } else if (auto vale = VISym(vi)) {
           ve_entries_map[*vale].push_back(
               {host_pindex + 1, dim_count, elem_name});
         }
@@ -2182,6 +2189,11 @@ void TopsccCodeGen::EmitHostRuntimeCheck() {
     hs << h_indent << "choreo::runtime_check(" << ValueSTR(sbe::sym(rc.lhs))
        << " " << rc.op << " " << ValueSTR(sbe::sym(rc.rhs)) << ", \""
        << rc.message << ", " << rc.loc << "\");\n";
+  }
+
+  for (const auto& ar : FCtx(fname).GetAssertions()) {
+    hs << h_indent << "choreo::runtime_check(" << ValueSTR(ar.expr) << ", \""
+       << ar.message << ", " << ar.loc << "\");\n";
   }
 }
 
@@ -2513,11 +2525,15 @@ bool TopsccCodeGen::CompileWithScript(const std::string& action) {
 // TODO: eliminate the need of the value replacement?
 const std::string TopsccCodeGen::ValueSTR(const ValueItem& vi) const {
   if (!IsValidValueItem(vi)) choreo_unreachable("invalid value item.");
-  if (auto iv = VIInt(vi))
+  if (auto iv = VIInt(vi)) {
+    if (iv >= (int64_t)std::numeric_limits<int32_t>::max() ||
+        iv <= (int64_t)std::numeric_limits<int32_t>::min())
+      return PSTR(vi) + "LL";
+    else
+      return PSTR(vi);
+  } else if (auto bv = VIBool(vi))
     return PSTR(vi);
-  else if (auto bv = VIBool(vi))
-    return PSTR(vi);
-  else if (auto sv = VIStr(vi))
+  else if (auto sv = VISym(vi))
     return UnScopedExpr(SSMName(sv.value(), IsHost()));
   else if (auto bo = VIUop(vi))
     return STR(bo->GetOpCode()) + ValueSTR(bo->GetOperand());

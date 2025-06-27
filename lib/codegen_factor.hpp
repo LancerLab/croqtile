@@ -138,7 +138,8 @@ private:
                                         bool host_code = true) const;
   const std::string ReplaceFactorDynDimName(const std::string&) const;
   std::optional<std::string> ReplaceDynDimRef(const std::string&) const;
-  const std::string ValueSTR(const ValueItem&, bool factor_value) const;
+  const std::string ValueSTR(const ValueItem&, bool factor_value = true,
+                             bool is_host = true) const;
 
   // common utils
   void IncrementIndent() { this->indent += "  "; }

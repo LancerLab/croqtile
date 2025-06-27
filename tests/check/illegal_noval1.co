@@ -1,6 +1,6 @@
 // RUN: not choreo %s 2>&1| FileCheck %s
 
-__co__ void foo(f32 [_, 16, M] a) {
+__co__ void foo(global f32 [??, 16, M] a) {
   b = a.span(0);
   c : a.span [ (0), 7];
   d = {a.span};

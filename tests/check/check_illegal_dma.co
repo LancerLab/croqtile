@@ -26,6 +26,8 @@ __co__ auto foo0(f32 [2,2,3,4,5,6] i, u8 [1024*1024*16,2,2,2,2] i1, f32 [1,1024*
 // CHECK3: error: On GCU300, must satisfy: CeilTo128Byte(dst_dim0_size * bpe) < 2^24.
 // CHECK3: error: On GCU300, must satisfy: the 5th dim 16777216 < 16777216.
 // CHECK3: error: On GCU300, must satisfy: CeilTo128Byte(src_dim0_size * bpe) < 2^24.
+// CHECK3: error: On GCU300, must satisfy: CeilTo128Byte(bpe * dst dim0) * dim1 * dim2 * dim3 * dim4 < 4GB.
+error: On GCU300, must satisfy: CeilTo128Byte(bpe * dst dim0) * dim1 * dim2 * dim3 * dim4 < 4GB.
 
 // pad
 __co__ auto foo1(s32 [2,2,3,4,5,6] i, s32 [10] i1, s32 [1,1024*64] i2, s32[1024, 1024] i3, s32[1,1,1,1,1] i4) {
@@ -165,4 +167,4 @@ __co__ auto foo5() {
 
 // CHECK2: Totally 35 errors have been detected.
 
-// CHECK3: Totally 22 errors have been detected.
+// CHECK3: Totally 23 errors have been detected.

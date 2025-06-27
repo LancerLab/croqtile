@@ -1100,17 +1100,35 @@ bool EarlySemantics::Visit(AST::Identifier& n) {
 
 bool EarlySemantics::Visit(AST::Parameter& n) {
   TraceEachVisit(n);
-  if (n.sym) {
-    ModifySymbolType(n.sym->name, n.type->GetType());
-    if (auto ty = dyn_cast<SpannedType>(n.type->GetType())) {
+  assert(n.type);
 
+  auto nty = n.type->GetType()->Clone();
+
+  if (n.attr == ParamAttr::GLOBAL_INPUT) {
+    if (auto sty = dyn_cast<SpannedType>(nty))
+      sty->SetStorage(Storage::GLOBAL);
+    else
+      Error1(n.LOC(),
+             "Unable to pass in a global with the type: " + PSTR(nty) + ".\n");
+  } else {
+    if (auto mds = dyn_cast<AST::MultiDimSpans>(n.type->mdspan_type))
+      if (auto mv = dyn_cast<AST::MultiValues>(mds->list))
+        for (auto e : mv->AllValues())
+          if (isa<NoValueType>(e->GetType()))
+            Error1(e->LOC(),
+                   "The parameter with an unbounded dimension must be global.");
+  }
+
+  if (n.sym) {
+    if (auto ty = dyn_cast<SpannedType>(nty)) {
       ReportErrorWhenViolateODR(n.LOC(), n.sym->name + ".span", __FILE__,
                                 __LINE__,
                                 ty->GetMDSpanType()); // named dim is integer
     }
+    ModifySymbolType(n.sym->name, nty);
   }
 
-  if (n.type) SetNodeType(n, n.type->GetType());
+  SetNodeType(n, nty);
 
   return true;
 }

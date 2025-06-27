@@ -28,7 +28,7 @@
 
 namespace choreo {
 
-constexpr size_t inf = (size_t)(-1LL);
+constexpr size_t __inf__ = (size_t)((1LL << 32) - 1);
 
 inline void choreo_assert(bool p, const char* msg, const char* file = __FILE__,
                           int line = __LINE__) {

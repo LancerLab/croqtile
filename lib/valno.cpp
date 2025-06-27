@@ -198,7 +198,7 @@ const SignTy ValueNumbering::ValueItemToSignature(const ValueItem& vi,
     auto sign = "const_" + STR(vi);
     auto vn = GetOrGenValueNumberFromSignature(sign); // always generate
     return GetSignatureFromValueNumber(vn);
-  } else if (auto sym = VIStr(vi)) {
+  } else if (auto sym = VISym(vi)) {
     assert(PrefixedWith(sym.value(), "::") && "expected a scoped symbol.");
     assert(HasValueNumberOfSignature(sym.value()) &&
            "the symbol does have a value number.");

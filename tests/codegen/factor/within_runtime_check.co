@@ -484,8 +484,7 @@ int main() {
   return 0;
 }
 
-// CHECK: choreo::runtime_check((hp0.shape()[0] / 6) != 0, "zero is detected for the 1st dim of the mdspan inside the with-in statement, {{.*}}.co{{.*}}");
-// CHECK: choreo::runtime_check(1 != 0, "zero is detected for the 2nd dim of the mdspan inside the with-in statement, {{.*}}.co{{.*}}");
-// CHECK: choreo::runtime_check((hp0.shape()[2] / 16) != 0, "zero is detected for the 3rd dim of the mdspan inside the with-in statement, {{.*}}.co{{.*}}");
-// CHECK: choreo::runtime_check((hp0.shape()[3] / 512) != 0, "zero is detected for the 4th dim of the mdspan inside the with-in statement, {{.*}}.co{{.*}}");
+// CHECK: choreo::runtime_check(((hp0.shape()[0] / 6) != 0), "zero is detected for the 1st dim of the mdspan inside the with-in statement, {{.*}}.co{{.*}}");
+// CHECK: choreo::runtime_check(((hp0.shape()[2] / 16) != 0), "zero is detected for the 3rd dim of the mdspan inside the with-in statement, {{.*}}.co{{.*}}");
+// CHECK: choreo::runtime_check(((hp0.shape()[3] / 512) != 0), "zero is detected for the 4th dim of the mdspan inside the with-in statement, {{.*}}.co{{.*}}");
 

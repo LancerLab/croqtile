@@ -5,7 +5,7 @@
 #define EMB_VEC_SIZE 64
 
 // This kernel intentionally uses a dynamic shape with ? to trigger codegen errors related to mdspan shape scoping.
-__co__ void fill_default_emb_vec_direct(u32[LEN] missing_index, f32[?, EMB_VEC_SIZE] output_emb_vec) {
+__co__ void fill_default_emb_vec_direct(u32[LEN] missing_index, global f32[??, EMB_VEC_SIZE] output_emb_vec) {
   parallel p by 1 {
     foreach {idx} in [LEN / #p] {
       local f32[1, EMB_VEC_SIZE] local_emb_vec;
@@ -23,6 +23,6 @@ __co__ void fill_default_emb_vec_direct(u32[LEN] missing_index, f32[?, EMB_VEC_S
 // The following main is just for completeness, not actually run in this test.
 int main() { return 0; }
 
-// CHECK: choreo::runtime_check((($0) * (64ULL)) * 4 < 4294967296ULL
-// CHECK: choreo::abend_true(topsMalloc(&output_emb_vec__device, (($0) * (64ULL)) * 4));
-// CHECK: choreo::abend_true(topsMemcpy(output_emb_vec__device, output_emb_vec.data(), (($0)
+// CHECK: choreo::runtime_check(output_emb_vec.shape()[0] == choreo::__inf__, "must set 'choreo::__inf__' to the unbounded dimension on the 2nd parameter ('output_emb_vec', dim: 0): got " + std::to_string(output_emb_vec.shape()[0]) + ".");
+// CHECK-NOT: choreo::abend_true(topsMalloc(&output_emb_vec__device, {{.*}}
+// CHECK-NOT: choreo::abend_true(topsMemcpy(output_emb_vec__device, {{.*}}

@@ -203,6 +203,15 @@ struct RuntimeCheckEntry {
   std::map<std::string, std::string> notes;
 };
 
+// TODO: use assert experssions to replace string like entry
+struct Assertion {
+  ptr<sbe::SymbolicExpression> expr;
+
+  bool is_host;
+  location loc;
+  std::string message;
+};
+
 // per-function context
 class FunctionContext {
 public:
@@ -212,6 +221,7 @@ private:
   FutureBufferInfo fbi;
   std::map<std::string, OptimizedValues> sym_values;
   std::vector<RuntimeCheckEntry> rt_checks;
+  std::vector<Assertion> assertions;
 
   struct MemReuseInfo {
     std::vector<std::string> mem_reuse_script;
@@ -233,6 +243,15 @@ public:
 
   void AppendRtCheck(RuntimeCheckEntry rc) { rt_checks.push_back(rc); }
   std::vector<RuntimeCheckEntry>& GetRtChecks() { return rt_checks; }
+
+  void InsertAssertion(const ptr<sbe::SymbolicExpression>& ar,
+                       const location& l, const std::string& s,
+                       bool is_host = true) {
+    // the none computable expressions are ignored. verbose?
+    assert(IsComputable(ar));
+    assertions.push_back({ar, is_host, l, s});
+  }
+  const std::vector<Assertion>& GetAssertions() const { return assertions; }
 
   std::optional<std::vector<std::string>>
   GetMemReuseScript(const std::string& dev_func) const {

@@ -614,7 +614,7 @@ inline static std::string UnScopedValueItemString(const ValueItem& input) {
     return "(" + UnScopedValueItemString(bo->GetLeft()) + " " +
            STR(bo->GetOpCode()) + " " +
            UnScopedValueItemString(bo->GetRight()) + ")";
-  } else if (auto name = VIStr(input)) {
+  } else if (auto name = VISym(input)) {
     size_t last_colon = name->find_last_of(":");
     return name->substr(last_colon + 1);
   } else if (auto iv = VIInt(input))

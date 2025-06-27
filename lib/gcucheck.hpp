@@ -144,14 +144,15 @@ public:
     // common limitation (currently guarded by memcheck)
     for (auto& sty : {f_sty, t_sty}) {
       if (sty->RuntimeShaped()) {
-        std::string bs = sty->ByteSizeExpression(true);
-        FCtx(cur_fname).AppendRtCheck(
-            {bs,
-             "<",
-             std::to_string(1ULL << 32) + "ULL",
-             n.LOC(),
-             "The size of data transferred by DMA cannot exceed 2^32",
-             {}});
+        auto bs = sty->ByteSizeValue();
+        if (!IsComputable(bs)) continue; // TODO: dst shape should be computable
+        constexpr size_t limit = 1ULL << 32;
+        auto msg = "The size of data transferred by DMA cannot exceed 2^32.";
+        auto asrt = sbe::oc_lt(bs, sbe::nu(limit))->Normalize();
+        if (auto b = VIBool(asrt)) {
+          if (b.value() == false) Error1(n.LOC(), msg);
+        } else
+          FCtx(cur_fname).InsertAssertion(asrt, n.LOC(), msg);
       } else {
         if (sty->ByteSize() >= (1ULL << 32)) {
           Error(n.LOC(), "On " + cur_arch +
@@ -161,7 +162,6 @@ public:
         }
       }
     }
-
     auto IsLinearCopy = [&]() -> bool {
       return f_ca->NoTile() && t_ca->NoTile();
     };
@@ -695,6 +695,11 @@ public:
 
   void CheckValue(const ValueItem& vi, const std::string& op, size_t limit,
                   const location& loc, std::string message = "") {
+    if (!IsComputable(vi)) {
+      VST_DEBUG(dbgs() << "[GCUCHECK] Not Checking " << STR(vi) << " " << op
+                       << " " << limit << ".\n");
+      return;
+    }
     VST_DEBUG(dbgs() << "[GCUCHECK] Generated check at " << loc << ": "
                      << ValueItemAsString(vi) << " " << op << " "
                      << std::to_string(limit) + "ULL"
@@ -711,8 +716,11 @@ public:
                        << ": " << vi_str << " " << op << " "
                        << std::to_string(limit) + "ULL"
                        << "\n\twith message: " << message << "\n");
-      FCtx(cur_fname).AppendRtCheck(
-          {vi_str, op, std::to_string(limit) + "ULL", loc, message, {}});
+      auto asrt = sbe::cmp(op, vi, sbe::nu(limit))->Normalize();
+      if (auto b = VIBool(asrt)) {
+        if (b.value() == false) Error1(loc, message);
+      } else
+        FCtx(cur_fname).InsertAssertion(asrt, loc, message);
     }
   }
 

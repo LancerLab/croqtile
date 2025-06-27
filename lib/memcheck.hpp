@@ -306,8 +306,10 @@ public:
     int param_idx = 0;
     Storage func_param_sto = Storage::GLOBAL;
     for (const auto& p : n.params->values) {
+      if (p->attr == ParamAttr::GLOBAL_INPUT) continue; // skip global input
       auto sty = dyn_cast<SpannedType>(p->GetType());
       if (!sty) continue;
+
       std::string name = "::" + n.name + "::";
       name +=
           (p->HasSymbol() ? p->sym->name : ("#" + std::to_string(param_idx)));

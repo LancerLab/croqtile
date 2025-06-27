@@ -444,6 +444,11 @@ struct Shape {
     return res;
   }
 
+  // retrieve all symbol references
+  const std::set<ValueItem> GetDynamicSymbols() const {
+    return GetSymbols(Value());
+  }
+
   std::string GetElementCountExpression(bool ULL_suffix = false) const {
     if (!IsDynamic())
       return std::to_string(ElementCount()) + (ULL_suffix ? "ULL" : "");
@@ -1191,6 +1196,9 @@ struct SpannedType : public Type, public TypeIDProvider<SpannedType> {
   // use these interface when the shape is NOT runtime-shaped
   size_t ElementCount() const { return GetShape().ElementCount(); }
   ValueItem ElementCountValue() const { return GetShape().ElementCountValue(); }
+  ValueItem ByteSizeValue() const {
+    return (ElementCountValue() * sbe::nu(SizeOf(e_type)))->Normalize();
+  }
   size_t ByteSize() const { return SizeOf(e_type) * GetShape().ElementCount(); }
 
   const std::string ShapeSizeExpression(bool ULL_suffix = false) const {

@@ -306,6 +306,7 @@ public:
   virtual ~SymbolicExpression() = default;
   virtual std::string ToString() const = 0;
   virtual bool IsNumeric() const = 0;
+  virtual bool IsBoolean() const = 0;
   virtual size_t Hash() const = 0;
   virtual bool operator==(const SymbolicExpression&) const = 0;
   virtual bool IsLeaf() const = 0;
@@ -346,6 +347,7 @@ public:
   size_t Hash() const override { return std::hash<int64_t>{}(-1LL); }
 
   bool IsNumeric() const override { return false; }
+  bool IsBoolean() const override { return false; }
   bool Computable() const override { return false; }
 
   bool operator==(const SymbolicExpression& op) const override {
@@ -374,6 +376,7 @@ public:
   size_t Hash() const override { return std::hash<int64_t>{}(Value()); }
 
   bool IsNumeric() const override { return true; }
+  bool IsBoolean() const override { return false; }
   bool Computable() const override { return true; }
 
   bool operator==(const SymbolicExpression& op) const override {
@@ -405,7 +408,11 @@ public:
   bool Value() const { return value; }
   size_t Hash() const override { return std::hash<bool>{}(Value()); }
 
+  bool IsTrue() const { return value == true; }
+  bool IsFalse() const { return value == false; }
+
   bool IsNumeric() const override { return true; }
+  bool IsBoolean() const override { return true; }
   bool Computable() const override { return true; }
 
   bool operator==(const SymbolicExpression& op) const override {
@@ -436,6 +443,7 @@ public:
   std::string ToString() const override { return symbol; }
 
   bool IsNumeric() const override { return false; }
+  bool IsBoolean() const override { return false; }
   bool Computable() const override { return true; }
 
   bool operator==(const SymbolicExpression& op) const override {
@@ -473,6 +481,7 @@ public:
   std::string ToString() const override { return STR(op) + PSTR(oprd); }
 
   bool IsNumeric() const override { return oprd->IsNumeric(); }
+  bool IsBoolean() const override { return false; }
   bool Computable() const override { return oprd->Computable(); }
 
   bool operator==(const SymbolicExpression& expr) const override {
@@ -539,6 +548,7 @@ public:
   bool IsNumeric() const override {
     return left->IsNumeric() && right->IsNumeric();
   }
+  bool IsBoolean() const override { return false; }
   bool Computable() const override {
     return left->Computable() && right->Computable();
   }
@@ -905,6 +915,7 @@ public:
     // can be optimized
     return left->IsNumeric() && right->IsNumeric();
   }
+  bool IsBoolean() const override { return false; }
   bool Computable() const override {
     return pred->Computable() && left->Computable() && right->Computable();
   }
@@ -1199,6 +1210,25 @@ inline Operand oc_ne(const Operand& vi1, const Operand& vi2) {
   return bop(OpCode::NE, vi1, vi2)->Normalize();
 }
 
+inline Operand cmp(const std::string op, const Operand& vi1,
+                   const Operand& vi2) {
+  if (op == "==")
+    return oc_eq(vi1, vi2);
+  else if (op == "!=")
+    return oc_ne(vi1, vi2);
+  else if (op == ">=")
+    return oc_ge(vi1, vi2);
+  else if (op == "<=")
+    return oc_le(vi1, vi2);
+  else if (op == ">")
+    return oc_gt(vi1, vi2);
+  else if (op == "<")
+    return oc_lt(vi1, vi2);
+  else
+    choreo_unreachable("operation '" + op + "' is not supported.");
+  return nullptr;
+}
+
 inline bool clt(const Operand& vi1, const Operand& vi2) {
   if (auto v = dyn_cast<BooleanValue>(oc_lt(vi1, vi2))) return v->Value();
   return false;
@@ -1221,6 +1251,16 @@ inline bool ceq(const Operand& vi1, const Operand& vi2) {
 }
 inline bool cne(const Operand& vi1, const Operand& vi2) {
   if (auto v = dyn_cast<BooleanValue>(oc_ne(vi1, vi2))) return v->Value();
+  return false;
+}
+inline bool is_true(const Operand& oprd) {
+  if (auto b = dyn_cast<BooleanValue>(oprd))
+    if (b->IsTrue()) return true;
+  return false;
+}
+inline bool is_false(const Operand& oprd) {
+  if (auto b = dyn_cast<BooleanValue>(oprd))
+    if (b->IsFalse()) return true;
   return false;
 }
 

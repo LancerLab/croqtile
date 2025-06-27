@@ -367,6 +367,7 @@ cstr        \"([^"\\]|\\.)*\"
   "<<"       return Choreo::Parser::make_LSHIFT (loc);
   ">>"       return Choreo::Parser::make_RSHIFT (loc);
   "?"        return Choreo::Parser::make_QES    (loc);
+  "??"       return Choreo::Parser::make_DQES   (loc);
   ","        return Choreo::Parser::make_COMMA  (loc);
   ";"        return Choreo::Parser::make_SEMCOL (loc);
   ":"        return Choreo::Parser::make_COL    (loc);
