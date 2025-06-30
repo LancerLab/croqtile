@@ -45,7 +45,7 @@ __co__ void qes_op(int u_x, int u_y, float _f, double _d) {
   d3 = (d1 != _d) ? d1 : _d;
 }
 
-// VALNO:  scope-1 {
+// VALNO: scope-1 {
 // VALNO:   New VN #0: 'const_1'
 // VALNO:   Alias "::@__choreo_no_tiling__" -> #0
 // VALNO:   New VN #1: '::__choreo_no_tiling__'
@@ -93,27 +93,15 @@ __co__ void qes_op(int u_x, int u_y, float _f, double _d) {
 // VALNO:   New VN #21: '?:#19:#20:#11'
 // VALNO:   Alias "::qes_op::u_5" -> #21
 // VALNO:   New VN #22: 'const_0.500000f'
-// VALNO:   Alias "::qes_op::f0" -> #22
 // VALNO:   New VN #23: 'const_1.500000f'
-// VALNO:   Alias "::qes_op::f1" -> #23
 // VALNO:   New VN #24: 'const_-0.500000'
-// VALNO:   Alias "::qes_op::d0" -> #24
 // VALNO:   New VN #25: 'const_1.700000'
-// VALNO:   Alias "::qes_op::d1" -> #25
-// VALNO:   Alias "::qes_op::f2" -> #23
-// VALNO:   New VN #26: '<:#23:#4'
-// VALNO:   New VN #27: '?:#26:#4:#23'
-// VALNO:   Alias "::qes_op::f3" -> #27
-// VALNO:   Alias "::qes_op::d2" -> #25
-// VALNO:   New VN #28: '!=:#25:#5'
-// VALNO:   New VN #29: '?:#28:#25:#5'
-// VALNO:   Alias "::qes_op::d3" -> #29
 // VALNO:  } // end scope-1
 
 // CHECK: Parameter: ::qes_op::u_x, Type: s32
 // CHECK: Parameter: ::qes_op::u_y, Type: s32
-// CHECK: Parameter: ::qes_op::_f, Type: f32
-// CHECK: Parameter: ::qes_op::_d, Type: f64
+// CHECK: Parameter: ::qes_op::_f, Type: mutable f32
+// CHECK: Parameter: ::qes_op::_d, Type: mutable f64
 // CHECK: Symbol:    ::qes_op::f, Type: bool
 // CHECK: Symbol:    ::qes_op::t, Type: bool
 // CHECK: Symbol:    ::qes_op::c_x, Type: s32
@@ -137,12 +125,12 @@ __co__ void qes_op(int u_x, int u_y, float _f, double _d) {
 // CHECK: Symbol:    ::qes_op::u_3, Type: s32
 // CHECK: Symbol:    ::qes_op::u_4, Type: s32
 // CHECK: Symbol:    ::qes_op::u_5, Type: s32
-// CHECK: Symbol:    ::qes_op::f0, Type: f32
-// CHECK: Symbol:    ::qes_op::f1, Type: f32
-// CHECK: Symbol:    ::qes_op::d0, Type: f64
-// CHECK: Symbol:    ::qes_op::d1, Type: f64
-// CHECK: Symbol:    ::qes_op::f2, Type: f32
-// CHECK: Symbol:    ::qes_op::f3, Type: f32
-// CHECK: Symbol:    ::qes_op::d2, Type: f64
-// CHECK: Symbol:    ::qes_op::d3, Type: f64
-// CHECK: Function:  ::qes_op, Type: void (*)(s32, s32, f32, f64)
+// CHECK: Symbol:    ::qes_op::f0, Type: mutable f32
+// CHECK: Symbol:    ::qes_op::f1, Type: mutable f32
+// CHECK: Symbol:    ::qes_op::d0, Type: mutable f64
+// CHECK: Symbol:    ::qes_op::d1, Type: mutable f64
+// CHECK: Symbol:    ::qes_op::f2, Type: mutable f32
+// CHECK: Symbol:    ::qes_op::f3, Type: mutable f32
+// CHECK: Symbol:    ::qes_op::d2, Type: mutable f64
+// CHECK: Symbol:    ::qes_op::d3, Type: mutable f64
+// CHECK: Function:  ::qes_op, Type: void (*)(s32, s32, mutable f32, mutable f64)

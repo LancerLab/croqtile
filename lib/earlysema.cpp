@@ -103,18 +103,6 @@ bool EarlySemantics::Visit(AST::MultiValues& n) {
 
 bool EarlySemantics::Visit(AST::IntLiteral& n) {
   TraceEachVisit(n);
-  BaseType res;
-  if (n.IsInt())
-    res = BaseType::S32;
-  else if (n.IsUint32())
-    res = BaseType::U32;
-  else if (n.IsInt64())
-    res = BaseType::S64;
-  else if (n.IsUint64())
-    res = BaseType::U64;
-  else
-    choreo_unreachable("unexpect");
-  SetNodeType(n, MakeScalarIntegerType(res, false));
   return true;
 }
 

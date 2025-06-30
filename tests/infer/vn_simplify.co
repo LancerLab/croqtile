@@ -23,23 +23,12 @@ __co__ void vn_simplify(s32 [N, M] i) {
   println(x);
 }
 
-// CHECK:  |-<symval> ::vn_simplify::d0: 1.500000
-// CHECK:  |-<symval> ::vn_simplify::d1: 3.900000
-// CHECK:  |-<symval> ::vn_simplify::d2: (1.500000)+(3.900000)
-// CHECK:  |-<symval> ::vn_simplify::f0: 1.500000f
-// CHECK:  |-<symval> ::vn_simplify::f1: 3.900000f
-// CHECK:  |-<symval> ::vn_simplify::f2: (1.500000f)-(3.900000f)
+
 // CHECK:  |-<symval> ::vn_simplify::i0: 2
 // CHECK:  |-<symval> ::vn_simplify::i1: 3
 // CHECK:  |-<symval> ::vn_simplify::i2: 6
 // CHECK:  |-<symval> ::vn_simplify::x: ((::vn_simplify::N / 5) * 5)
 
-// CHECK-SFV:  |-<symval> ::vn_simplify::d0: 1.500000
-// CHECK-SFV:  |-<symval> ::vn_simplify::d1: 3.900000
-// CHECK-SFV:  |-<symval> ::vn_simplify::d2: 5.400000
-// CHECK-SFV:  |-<symval> ::vn_simplify::f0: 1.500000f
-// CHECK-SFV:  |-<symval> ::vn_simplify::f1: 3.900000f
-// CHECK-SFV:  |-<symval> ::vn_simplify::f2: -2.400000f
 // CHECK-SFV:  |-<symval> ::vn_simplify::i0: 2
 // CHECK-SFV:  |-<symval> ::vn_simplify::i1: 3
 // CHECK-SFV:  |-<symval> ::vn_simplify::i2: 6

@@ -301,6 +301,23 @@ public:
   bool Visit(AST::NamedTypeDecl&) override { return true; }
   bool Visit(AST::NamedVariableDecl& n) override {
     TraceEachVisit(n);
+    auto nty = n.GetType();
+    auto mem = n.mem;
+    auto st = mem != nullptr ? mem->Get() : Storage::DEFAULT;
+    if (isa<ScalarType>(nty) && !n.init_expr &&
+        !(st == Storage::LOCAL || st == Storage::SHARED)) {
+      auto bt = nty->GetBaseType();
+      if (IsIntegerBaseType(bt)) {
+        n.init_expr = AST::Make<AST::Expr>(
+            n.LOC(), AST::Make<AST::IntLiteral>(n.LOC(), bt));
+        n.init_expr->SetType(MakeScalarIntegerType(bt, true));
+      } else if (IsFloatPointBaseType(bt)) {
+        n.init_expr = AST::Make<AST::Expr>(
+            n.LOC(), AST::Make<AST::FloatLiteral>(n.LOC(), bt));
+        n.init_expr->SetType(MakeScalarFloatType(bt, true));
+      }
+    }
+
     if (n.mem && (n.mem->Get() == Storage::DEFAULT)) {
       // Should this be set by target?
       n.mem->Set(Storage::GLOBAL);

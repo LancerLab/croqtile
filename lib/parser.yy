@@ -186,7 +186,7 @@ void choreo_info(const char *message) {
 // type related
 %token <std::string> MDSPAN ITUPLE EVENT MUTABLE
 %token <Choreo::Storage> SUBLOCAL LOCAL SHARED GLOBAL
-%token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 U64 S64 INT HALF8 HALF BFP16 FLOAT DOUBLE BOOL VOID
+%token <Choreo::BaseType> F64 F32 F16 BF16 F8 U16 S16 U8 S8 U32 S32 U64 S64 BOOL VOID INT
 // builtin operations
 %token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK SUBSPAN MODSPAN AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN
 %token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXPM1 FLOOR GELU ISFINITE ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN
@@ -196,7 +196,7 @@ void choreo_info(const char *message) {
 // non-terminals
 %nterm <std::string> dma_operation builtin_print_func arith_operation spanid cstrings arith_builtin_func align_func
 %nterm <ptr<DMAConfig>> dma_config
-%nterm <bool> bool_value sync_type optional_mutable
+%nterm <bool> bool_value sync_type
 %nterm <int> integer_value index_or_none const_sizeof
 %nterm <std::vector<size_t>> optional_array_dims
 %nterm <Choreo::Storage> storage pl_annotation 
@@ -338,11 +338,6 @@ param_mdspan_list
       }
     ;
 
-optional_mutable
-    : /* empty */ { $$ = false; }
-    | MUTABLE { $$ = true; }
-    ;
-
 param_mdspan_val
     : QES   { $$ = AST::Make<AST::IntLiteral>(@1); }
     | DQES   { $$ = AST::Make<AST::NoValue>(@1); }
@@ -373,13 +368,9 @@ auto_type
     ;
 
 scalar_type
-    : INT    { $$ = AST::Make<AST::DataType>(@1, $1); }
-    | HALF8  { $$ = AST::Make<AST::DataType>(@1, $1); }
-    | HALF   { $$ = AST::Make<AST::DataType>(@1, $1); }
-    | BFP16  { $$ = AST::Make<AST::DataType>(@1, $1); }
-    | FLOAT  { $$ = AST::Make<AST::DataType>(@1, $1); }
-    | DOUBLE { $$ = AST::Make<AST::DataType>(@1, $1); }
-    | BOOL   { $$ = AST::Make<AST::DataType>(@1, $1); }
+    : fundamental_type { $$ = AST::Make<AST::DataType>(@1, $1, true);}
+    | BOOL   { $$ = AST::Make<AST::DataType>(@1, $1, false); }
+    | INT { $$ = AST::Make<AST::DataType>(@1, $1, false); }
     ;
 
 mdspan_as_type
@@ -397,9 +388,11 @@ mdspan_as_type
     ;
 
 fundamental_type
-    : F32   { $$ = $1; }
+    : F64   { $$ = $1; }
+    | F32   { $$ = $1; }
     | F16   { $$ = $1; }
     | BF16  { $$ = $1; }
+    | F8    { $$ = $1; }
     | U16   { $$ = $1; }
     | S16   { $$ = $1; }
     | U8    { $$ = $1; }
@@ -632,18 +625,29 @@ multi_decls
     ;
 
 named_scalar_decls
-    : optional_mutable scalar_type scalar_decls {
+    : MUTABLE scalar_type scalar_decls {
         assert($2->isScalar() && "Not a scalar type.");
-        $2->SetMutable($1);
+        $2->SetMutable(true);
         $2->ReGenSemaType();
         for (auto sub : $3->AllSubs()) {
           auto decl = cast<AST::NamedVariableDecl>(sub);
           decl->type = cast<AST::DataType>($2->Clone());
-          decl->SetMutable($1);
+          decl->SetMutable(true);
           symtab.AddSymbol(decl->name_str, $2->GetType()->Clone());
           // override the data type
         }
         $$ = $3;
+      }
+    | scalar_type scalar_decls {
+        assert($1->isScalar() && "Not a scalar type.");
+        for (auto sub : $2->AllSubs()) {
+          auto decl = cast<AST::NamedVariableDecl>(sub);
+          decl->type = cast<AST::DataType>($1->Clone());
+          decl->SetMutable($1->IsMutable());
+          symtab.AddSymbol(decl->name_str, $1->GetType()->Clone());
+          // override the data type
+        }
+        $$ = $2;
       }
     | MUTABLE scalar_decls {
         // must apply type inference
@@ -656,6 +660,13 @@ named_scalar_decls
         }
         $$ = $2;
       }
+    | storage named_scalar_decls {
+        for (auto sub : $2->AllSubs()) {
+          auto decl = cast<AST::NamedVariableDecl>(sub);
+          decl->SetMemory(AST::Make<AST::Memory>(@1, $1));
+        }
+        $$ = $2;
+    }
     ;
 
 scalar_decls
@@ -681,6 +692,14 @@ scalar_decl
     | IDENTIFIER ASSIGN LBRAKT {
         Parser::error(@3, "must use '{' and '}' to define an ituple.");
         YYERROR;
+      }
+    | IDENTIFIER {
+        $$ = AST::Make<AST::NamedVariableDecl>(@1, $1,
+            AST::Make<AST::DataType>(@1, BaseType::UNKNOWN));
+      }
+    | IDENTIFIER LBRACE s_expr RBRACE {
+      $$ = AST::Make<AST::NamedVariableDecl>(@1, $1,
+            AST::Make<AST::DataType>(@1, BaseType::UNKNOWN), nullptr, $3);
       }
     ;
 
@@ -716,7 +735,8 @@ event_decl
     ;
 
 named_spanned_decls
-    : storage_qual mdspan_as_type spanned_decls {
+    : storage mdspan_as_type spanned_decls {
+        auto mem = AST::Make<AST::Memory>(@1, $1);
         for (auto item : $3->AllSubs()) {
           auto decl = cast<AST::NamedVariableDecl>(item);
           symtab.AddSymbol(decl->name_str, $2->GetType()->Clone());
@@ -725,10 +745,25 @@ named_spanned_decls
             decl->type->array_dims = decl->ArrayDimensions();
             decl->type->ReGenSemaType();
           }
-          decl->mem = cast<AST::Memory>($1->Clone());
+          decl->mem = cast<AST::Memory>(mem->Clone());
         }
         $3->SetLOC(@1);
         $$ = $3;
+      }
+    | mdspan_as_type spanned_decls {
+        auto mem = AST::Make<AST::Memory>(loc);
+        for (auto item : $2->AllSubs()) {
+          auto decl = cast<AST::NamedVariableDecl>(item);
+          symtab.AddSymbol(decl->name_str, $1->GetType()->Clone());
+          decl->type = cast<AST::DataType>($1->Clone());
+          if (decl->IsArray()) {
+            decl->type->array_dims = decl->ArrayDimensions();
+            decl->type->ReGenSemaType();
+          }
+          decl->mem = cast<AST::Memory>(mem->Clone());
+        }
+        $2->SetLOC(@1);
+        $$ = $2;
       }
     ;
 
@@ -1140,23 +1175,19 @@ sizeof_expr
     ;
 
 const_sizeof /* make it immediate values */
-    : PIPE DOUBLE PIPE { $$ = 8; }
-    | PIPE S64 PIPE { $$ = 8; }
+    : PIPE S64 PIPE { $$ = 8; }
     | PIPE U64 PIPE { $$ = 8; }
     | PIPE S32 PIPE { $$ = 4; }
     | PIPE U32 PIPE { $$ = 4; }
-    | PIPE F32 PIPE { $$ = 4; }
-    | PIPE INT PIPE { $$ = 4; }
-    | PIPE FLOAT PIPE { $$ = 4; }
     | PIPE S16 PIPE { $$ = 2; }
     | PIPE U16 PIPE { $$ = 2; }
-    | PIPE F16 PIPE { $$ = 2; }
-    | PIPE BF16 PIPE { $$ = 2; }
-    | PIPE BFP16 PIPE { $$ = 2; }
-    | PIPE HALF PIPE { $$ = 2; }
     | PIPE S8 PIPE { $$ = 1; }
     | PIPE U8 PIPE { $$ = 1; }
-    | PIPE HALF8 PIPE { $$ = 1; }
+    | PIPE F64 PIPE { $$ = 8; }
+    | PIPE F32 PIPE { $$ = 4; }
+    | PIPE BF16 PIPE { $$ = 2; }
+    | PIPE F16 PIPE { $$ = 2; }
+    | PIPE F8 PIPE { $$ = 1; }
     ;
 
 mdspan_expr

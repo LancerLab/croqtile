@@ -714,7 +714,27 @@ public:
       if (IsHost() && CCtx().GetTarget() != CompileTarget::Factor)
         Error1(n.LOC(), "select in host is not supported.");
 
-    if (!isa<SpannedType>(ty)) return true;
+    if (!isa<SpannedType>(ty)) {
+      auto mem = n.GetMemory();
+      if (!mem) return true;
+
+      auto st = mem->Get();
+      if (n.init_expr != nullptr) {
+        if (st == Storage::SHARED || st == Storage::LOCAL ||
+            st == Storage::SUB) {
+          Error(n.LOC(), "initialization is not supported for " + STR(st) +
+                             " variables");
+          error_count++;
+        }
+
+        if (st == Storage::GLOBAL) {
+          Error(n.LOC(), "'global' attribute only applies to functions ");
+          error_count++;
+        }
+      }
+      return true;
+    }
+
     auto sty = cast<SpannedType>(ty);
 
     auto st = sty->GetStorage();

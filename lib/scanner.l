@@ -196,7 +196,7 @@ cstr        \"([^"\\]|\\.)*\"
                    return Choreo::Parser::make_S64_LITERAL(val, loc);
                  }
                }
-               
+
              }
   {hex_num}  {
                bool is_unsigned = strchr(yytext, 'u') || strchr(yytext, 'U');
@@ -302,11 +302,11 @@ cstr        \"([^"\\]|\\.)*\"
   "s8"       { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_S8(BaseType::S8, loc); }
   "int"      return Choreo::Parser::make_INT(BaseType::S32, loc);
   "bool"     return Choreo::Parser::make_BOOL(BaseType::BOOL, loc);
-  "half8"    return Choreo::Parser::make_HALF8(BaseType::F8, loc);
-  "half"     return Choreo::Parser::make_HALF(BaseType::F16, loc);
-  "bfp16"    return Choreo::Parser::make_BFP16(BaseType::BF16, loc);
-  "float"    return Choreo::Parser::make_FLOAT(BaseType::F32, loc);
-  "double"   return Choreo::Parser::make_DOUBLE(BaseType::F64, loc);
+  "half8"    return Choreo::Parser::make_F8(BaseType::F8, loc);
+  "half"     return Choreo::Parser::make_F16(BaseType::F16, loc);
+  "bfp16"    return Choreo::Parser::make_BF16(BaseType::BF16, loc);
+  "float"    return Choreo::Parser::make_F32(BaseType::F32, loc);
+  "double"   return Choreo::Parser::make_F64(BaseType::F64, loc);
   "void"     return Choreo::Parser::make_VOID(BaseType::VOID, loc);
   "true"     return Choreo::Parser::make_TRUE(yytext, loc);
   "false"    return Choreo::Parser::make_FALSE(yytext, loc);
