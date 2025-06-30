@@ -1,0 +1,5 @@
+// RUN: not choreo %s 2>&1| FileCheck %s
+
+__co__ void foo(f32 [??, 16, M] a) {}
+
+// CHECK: error: The parameter with an unbounded dimension must be global.
