@@ -8,11 +8,11 @@
 
 // LEN1, not known even at runtime.
 // LEN2, known at runtime
-__co__ void merge_emb_vec_direct(f32[LEN_DYN, EMB_VEC_SIZE] missing_emb_vec, u32[LEN_DYN] missing_index, global f32[?, EMB_VEC_SIZE] output_emb_vec) {
+__co__ void merge_emb_vec_direct(f32[DYN_DIM, EMB_VEC_SIZE] missing_emb_vec, u32[DYN_DIM] missing_index, global f32[?, EMB_VEC_SIZE] output_emb_vec) {
 
   parallel p by 1 {
     parallel q by 1 {
-      foreach {idx} in [LEN / #p / #q] {
+      foreach {idx} in [DYN_DIM / #p / #q] {
         local f32[1, EMB_VEC_SIZE] local_emb_vec_dst;
         local f32[1, EMB_VEC_SIZE] local_emb_vec_src;
         local u32[1] index;
@@ -28,7 +28,7 @@ __co__ void merge_emb_vec_direct(f32[LEN_DYN, EMB_VEC_SIZE] missing_emb_vec, u32
   }
 }
 
-__co__ void merge_emb_vec_direct_v2(f32[LEN_DYN, EMB_VEC_SIZE] missing_emb_vec, u32[LEN_DYN] missing_index, global f32[?, EMB_VEC_SIZE] output_emb_vec) {
+__co__ void merge_emb_vec_direct_v2(f32[DYN_DIM, EMB_VEC_SIZE] missing_emb_vec, u32[DYN_DIM] missing_index, global f32[?, EMB_VEC_SIZE] output_emb_vec) {
 
   parallel p by 1 {
     parallel q by 1 {
