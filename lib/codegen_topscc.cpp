@@ -155,6 +155,19 @@ void GenerateSubscriptions(std::ostream& os, const std::string prefix,
 
 } // namespace
 
+const std::string TopsccCodeGen::ShapeSTR(const Shape& s,
+                                          const std::string& delimiter) const {
+  auto& vl = s.Value();
+  assert(!vl.empty());
+
+  std::ostringstream oss;
+  for (unsigned i = 0; i < vl.size(); ++i) {
+    if (i > 0) oss << delimiter;
+    oss << ValueSTR(vl[i]), IsHost();
+  }
+  return oss.str();
+}
+
 bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
   if (trace_visit) dbgs() << "Before visiting " << n.TypeNameString() << "\n";
 
@@ -424,7 +437,7 @@ TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
       else
 #ifndef USING_OP_INFO
         offsets[i] << "(int)(" << exprs[i] << " * ("
-                   << UnScopedExpr(STR(shape.ValueAt(i))) << "))";
+                   << ValueSTR(shape.ValueAt(i)) << "))";
 #else
         offsets[i] << "(int)((" << exprs[i] << ") * "
                    << UnScopedExpr(ValueItemAsString(shape.ValueAt(i))) << ")";
@@ -543,7 +556,6 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
     if (item.IsParameter()) {
       assert((int)host_pindex == item.p_index);
       item.host_name = UnScopedName(item.name);
-      ssm.MapDeviceSymbol(item.name, UnScopedName(item.name));
       if (auto sty = dyn_cast<SpannedType>(item.type)) {
         ssm.MapHostSymbol(item.name, item.host_name + ".data()");
         HandleSymbolicDimensions(sty, item.host_name, host_pindex);
@@ -580,9 +592,6 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
 
   // do not generate device function unless parallel-by exists
   if (NeedDeviceFunc()) {
-    for (auto item : symbolic_dimensions)
-      ssm.MapDeviceSymbol(item.first, UnScopedName(item.first));
-
     // map the choreo input to device memory
     for (auto& item : GetChoreoFuncIns(cgi)) {
       if (auto sty = dyn_cast<SpannedType>(item.type)) {
@@ -812,7 +821,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
          << ");\n";
       ds << d_indent << "tops::memset(" << sym__init << ", tops::mdspan("
          << TopsMdsStorage(sto) << ", (" << NameBaseType(sty->ElementType())
-         << "*)" << sym << ", " << UnScopedExpr(RSTR(sty->GetShape())) << "), "
+         << "*)" << sym << ", " << ShapeSTR(sty->GetShape()) << "), "
          << ExprCastSTR(n.init_value, std::nullopt, GetBaseType(*sty),
                         GetBaseType(*n.init_value->GetType()), false)
          << ");\n";
@@ -1312,7 +1321,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
                         ExprSTR(subscriptions[i], IsHost());
         }
         std::string elem_count =
-            cast<SpannedType>(sym_ty)->GetShape().GetElementCountExpression();
+            ValueSTR(cast<SpannedType>(sym_ty)->GetShape().ElementCountValue());
         buf_expr += " + (" + array_idx + ")*(" + elem_count + ")";
       } else {
         for (auto expr : subscription->AllValues())
@@ -1332,7 +1341,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     std::string bts{NameBaseType(sty->ElementType())};
     ds << d_indent << "tops::mdspan " << mds_name << "("
        << TopsMdsStorage(sty->GetStorage()) << ", (" << bts << "*)" << buf_expr
-       << ", " << UnScopedExpr(RSTR(sty->GetShape())) << ");\n";
+       << ", " << ShapeSTR(sty->GetShape()) << ");\n";
     return mds_name;
   };
 
@@ -2278,23 +2287,26 @@ void TopsccCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
   size_t index = 0;
   for (auto& item : GetDeviceFuncIns(updating_cgi)) {
     if (!PrefixedWith(scoped_symtab.ScopeName(), GetScope(item.name))) continue;
-    oss << ((index++ > 0) ? ", " : "");
-    oss << DeviceParamTypeStringify(*item.type) << " ";
-    oss << (item.need_iv_prefix ? "__iv_" : "") << UnScopedName(item.name);
+    auto dname = (item.need_iv_prefix ? "__iv_" : "") + UnScopedName(item.name);
+    if (index++ > 0) oss << ", ";
+    oss << DeviceParamTypeStringify(*item.type) << " " << dname;
+    ssm.MapDeviceSymbolIfNotExist(item.name, dname);
   }
 
   for (auto item : symbolic_dimensions) {
     oss << ((index++ > 0) ? ", unsigned " : "unsigned ");
     oss << UnScopedName(item.first);
+    ssm.MapDeviceSymbol(item.first, UnScopedName(item.first));
   }
 
   const auto& offset_args =
       FCtx(fname).GetMemReuseOffsetArgs(SSTab().ScopeName());
   if (offset_args.has_value())
     for (const auto& [_, offsets] : offset_args.value())
-      for (size_t idx = 0; idx < offsets.size(); ++idx)
-        oss << ((index++ > 0) ? ", " : "") << "unsigned long "
-            << RegexReplaceAll(offsets[idx], "::", "_");
+      for (size_t idx = 0; idx < offsets.size(); ++idx) {
+        auto dname = RegexReplaceAll(offsets[idx], "::", "_");
+        oss << ((index++ > 0) ? ", " : "") << "unsigned long " << dname;
+      }
 
   oss << ")";
 
@@ -2376,7 +2388,8 @@ TOPSCC_LIB=${TOPSCC_INSTALL}/lib
   if (use_sim)
     os << "gcu_arch=gcu400\n";
   else if (((CCtx().GetOutputKind() == OutputKind::TargetModule) ||
-            (CCtx().GetOutputKind() == OutputKind::TargetExecutable)) &&
+            (CCtx().GetOutputKind() == OutputKind::TargetExecutable) ||
+            (CCtx().GetOutputKind() == OutputKind::ShellScript)) &&
            !arch.GetValue().empty()) {
     // enforce the arch type
     os << "gcu_arch=" << arch.GetValue() << "\n";
@@ -2527,7 +2540,12 @@ bool TopsccCodeGen::CompileWithScript(const std::string& action) {
 // TODO: eliminate the need of the value replacement?
 const std::string TopsccCodeGen::ValueSTR(const ValueItem& vi) const {
   if (!IsValidValueItem(vi)) choreo_unreachable("invalid value item.");
-  if (auto iv = VIInt(vi)) {
+  if (VIIsNil(vi)) {
+    if (IsHost())
+      return "choreo::__inf__";
+    else
+      return "1"; // any number is accepatable
+  } else if (auto iv = VIInt(vi)) {
     if (iv >= (int64_t)std::numeric_limits<int32_t>::max() ||
         iv <= (int64_t)std::numeric_limits<int32_t>::min())
       return PSTR(vi) + "LL";

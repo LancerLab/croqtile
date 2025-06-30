@@ -300,7 +300,7 @@ inline void PrintValueList(const ValueList& vl, std::ostream& os,
   if (rb) os << rb;
 }
 
-inline std::string STR(const ValueList& vl) {
+inline const std::string STR(const ValueList& vl) {
   std::ostringstream os;
   PrintValueList(vl, os, "", "");
   return os.str();
