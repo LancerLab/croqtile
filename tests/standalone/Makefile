@@ -48,7 +48,13 @@ clean:
 
 # Additional rules
 test: $(TARGETS) $(NV_TARGETS)
-	@for test in $(TARGETS); do ./$${test}; done;
-	@for nv_test in $(NV_TARGETS); do ./$${nv_test}; done;
+	@for test in $(TARGETS); do \
+		echo "Running $$test..."; \
+		./$$test || exit $$?; \
+	done
+	@for nv_test in $(NV_TARGETS); do \
+		echo "Running $$nv_test..."; \
+		./$$nv_test || exit $$?; \
+	done
 
 .PHONY: all clean test

@@ -729,14 +729,13 @@ public:
   __UDT_TYPE_INFO__(Node, Expr)
 };
 
-struct PromoteExpr : public Expr, public TypeIDProvider<PromoteExpr> {
+struct CastExpr : public Expr, public TypeIDProvider<CastExpr> {
 private:
   BaseType from;
   BaseType to;
 
 public:
-  PromoteExpr(const location& l, const ptr<Node>& val)
-      : Expr(l, "promote", val) {
+  CastExpr(const location& l, const ptr<Node>& val) : Expr(l, "cast", val) {
     assert(isa<Expr>(val));
   }
 
@@ -748,15 +747,14 @@ public:
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool with_type = false) const override {
-    os << prefix << "PROMOTE(from '" << FromType() << "' to '" << ToType()
-       << "': ";
+    os << prefix << "CAST(" << FromType() << "=>" << ToType() << ": '";
     GetR()->Print(os, {}, with_type);
-    os << ") ";
+    os << "') ";
   }
 
   void accept(Visitor&) override;
 
-  __UDT_2TYPES_INFO__(Node, Expr, PromoteExpr);
+  __UDT_2TYPES_INFO__(Node, Expr, CastExpr);
 };
 
 // Represents both dimensions and s like {3, 4, 5} or {1, 2, 1}
@@ -1221,16 +1219,17 @@ private:
   ptr<Type> InitSemaType() {
     if (isSpanned()) {
       switch (base_type) {
+      case BaseType::F64:
       case BaseType::F32:
       case BaseType::F16:
       case BaseType::BF16:
+      case BaseType::F8:
       case BaseType::U64:
       case BaseType::S64:
       case BaseType::U32:
       case BaseType::S32:
       case BaseType::U16:
       case BaseType::S16:
-      case BaseType::F8:
       case BaseType::U8:
       case BaseType::S8:
         assert(mdspan_type != nullptr && "Expecting a valid mdspan.");
@@ -1298,7 +1297,7 @@ struct NamedVariableDecl : public Node,
   const std::string init_str;
   ptr<Memory> mem = nullptr;            // storage location
   ptr<DataType> type = nullptr;         // type annotation
-  const ptr<Node> init_expr = nullptr;  // associated initializer
+  ptr<Node> init_expr = nullptr;        // associated initializer
   const ptr<Node> init_value = nullptr; // associated initial value
   std::vector<size_t> array_dims = {};  // has element when it is an array
   bool is_mutable = false;

@@ -97,7 +97,18 @@ bool EarlySemantics::Visit(AST::MultiValues& n) {
 
 bool EarlySemantics::Visit(AST::IntLiteral& n) {
   TraceEachVisit(n);
-  SetNodeType(n, MakeIntegerType());
+  BaseType res;
+  if (n.IsInt())
+    res = BaseType::S32;
+  else if (n.IsUint32())
+    res = BaseType::U32;
+  else if (n.IsInt64())
+    res = BaseType::S64;
+  else if (n.IsUint64())
+    res = BaseType::U64;
+  else
+    choreo_unreachable("unexpect");
+  SetNodeType(n, MakeScalarIntegerType(res, false));
   return true;
 }
 
@@ -252,10 +263,10 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       MutateNodeType(n, MakeRankedMDSpanType(lty->Dims()), is_mutable);
     } else if ((isa<ITupleType>(lty) && isa<ScalarIntegerType>(rty)) ||
                (isa<MDSpanType>(lty) && isa<ScalarIntegerType>(rty))) {
-      SetNodeType(n, lty);
+      SetNodeType(n, lty->Clone());
     } else if ((isa<ITupleType>(rty) && isa<ScalarIntegerType>((lty))) ||
                (isa<MDSpanType>(rty) && isa<ScalarIntegerType>(lty))) {
-      SetNodeType(n, rty);
+      SetNodeType(n, rty->Clone());
     } else if ((isa<ITupleType>(lty) && isa<ITupleType>(rty))) {
       // ituple + ituple
       if (lty->HasSufficientInfo() && rty->HasSufficientInfo()) {
@@ -266,7 +277,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
                               std::to_string(rty->Dims()) + ").");
           return false;
         }
-        SetNodeType(n, lty);
+        SetNodeType(n, lty->Clone());
       } else
         SetNodeType(n, MakeUninitBoundedITupleType());
     } else if ((isa<BoundedType>(lty) && isa<BoundedType>(rty))) {
@@ -289,7 +300,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
           SetNodeType(n, MakeUnknownType());
           return false;
         } else
-          SetNodeType(n, lty);
+          SetNodeType(n, lty->Clone());
       else {
         if (cast<AST::Expr>(n.GetR())->op == "getith") {
           Error1(n.LOC(),
@@ -299,7 +310,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
           SetNodeType(n, MakeUnknownType());
           return false;
         } else
-          SetNodeType(n, rty);
+          SetNodeType(n, rty->Clone());
       }
     } else if ((isa<BoundedITupleType>(lty) && isa<ITupleType>(rty)) ||
                (isa<BoundedITupleType>(rty) && isa<ITupleType>(lty))) {
@@ -334,9 +345,9 @@ bool EarlySemantics::Visit(AST::Expr& n) {
                (isa<ITupleType>(lty) && isa<ScalarIntegerType>(rty)) ||
                (isa<ITupleType>(rty) && isa<ScalarIntegerType>(lty))) {
       if (isa<MDSpanType>(lty) || isa<ITupleType>(lty))
-        SetNodeType(n, lty);
+        SetNodeType(n, lty->Clone());
       else
-        SetNodeType(n, rty);
+        SetNodeType(n, rty->Clone());
     } else if ((isa<ITupleType>(lty) && isa<ITupleType>(rty)) ||
                (isa<BooleanType>(lty) && isa<BooleanType>(rty)) ||
                (isa<IndexType>(lty) && isa<IndexType>(rty))) {
@@ -350,7 +361,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       // when desugaring of ituple/mdspan has not been applied, we have to deal
       // with nodes like:
       //   a {1 + (1)}
-      SetNodeType(n, lty);
+      SetNodeType(n, lty->Clone());
     } else if (!lty->ApprxEqual(*rty)) {
       Error1(n.LOC(), "in operation \"" + n.op +
                           "\": unable to apply to the types (" + PSTR(lty) +
@@ -358,7 +369,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       SetNodeType(n, MakeUnknownType());
       return false;
     } else {
-      SetNodeType(n, lty);
+      SetNodeType(n, lty->Clone());
     }
     if (diverges.Contains(n.GetL()) || diverges.Contains(n.GetR()))
       diverges.Add(n);
@@ -521,7 +532,7 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       SetNodeType(n, MakeUnknownType());
       return false;
     }
-    SetNodeType(n, lty);
+    SetNodeType(n, lty->Clone());
   } else if (n.op == "concat") {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
@@ -568,9 +579,9 @@ bool EarlySemantics::Visit(AST::Expr& n) {
   return true;
 }
 
-bool EarlySemantics::Visit(AST::PromoteExpr& n) {
+bool EarlySemantics::Visit(AST::CastExpr& n) {
   TraceEachVisit(n);
-  choreo_unreachable("AST::PromoteExpr should not appear at EarlySemantics.");
+  choreo_unreachable("AST::CastExpr should not appear at EarlySemantics.");
   return true;
 }
 
@@ -819,11 +830,18 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
       }
     }
 
-    ReportErrorWhenViolateODR(n.LOC(), n.name_str, __FILE__, __LINE__, ety);
-    SetNodeType(n, ety);
-
-    // also set the type of type annotation
-    if (isa<UnknownType>(tty)) SetNodeType(*n.type, ety);
+    // use tty first if it is not UnknownType
+    if (isa<UnknownType>(tty) || !isa<ScalarType>(tty)) {
+      ReportErrorWhenViolateODR(n.LOC(), n.name_str, __FILE__, __LINE__, ety);
+      SetNodeType(n, ety);
+      // also set the type of type annotation
+      SetNodeType(*n.type, ety);
+    } else {
+      ReportErrorWhenViolateODR(n.LOC(), n.name_str, __FILE__, __LINE__, tty);
+      SetNodeType(n, tty);
+      // also set the type of type annotation
+      SetNodeType(*n.type, tty);
+    }
 
     if (diverges.Contains(n.init_expr)) diverges.Add(InScopeName(n.name_str));
   }

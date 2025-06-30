@@ -36,6 +36,15 @@ private:
 
   std::string GetInternalValueString() { return "$" + std::to_string(count++); }
 
+  ptr<AST::CastExpr> GenCastExprNode(BaseType to, BaseType from,
+                                     ptr<AST::Node> to_cast) {
+    auto ce = AST::Make<AST::CastExpr>(to_cast->LOC(), to_cast);
+    ce->SetType(MakeScalarType(to, true));
+    ce->SetFrom(from);
+    ce->SetTo(to);
+    return ce;
+  }
+
   void TraceEachVisit(const AST::Node& n) {
     if (trace_visit) {
       dbgs() << n.TypeNameString();
@@ -247,46 +256,40 @@ public:
           n.OverWrite(*new_expr);
         }
       }
-    } else if (n.IsBinary()) {
-      // TODO: skip this for now.
-      return true;
-      if (!(n.IsArith() && !n.IsUBArith())) return true;
+    } else if (n.IsBinary() || n.IsTernary()) {
+      if (n.IsBinary())
+        if (!(n.IsArith() && !n.IsUBArith())) return true;
 
       auto l = n.GetL();
       auto r = n.GetR();
       auto lty = l->GetType();
       auto rty = r->GetType();
 
-      auto lity = dyn_cast<ScalarIntegerType>(lty);
-      auto rity = dyn_cast<ScalarIntegerType>(rty);
-      if (!lity || !rity) return true;
+      auto lsty = dyn_cast<ScalarType>(lty);
+      auto rsty = dyn_cast<ScalarType>(rty);
+      if (!lsty || !rsty) return true;
 
-      auto lbty = lity->GetBaseType();
-      auto rbty = rity->GetBaseType();
+      auto lbty = lsty->GetBaseType();
+      auto rbty = rsty->GetBaseType();
 
       if (!NeedPromotion(lbty, rbty)) return true;
 
       auto promote_res = PromoteType(lbty, rbty);
+
       if (lbty != promote_res.lty) {
-        auto promote_expr = AST::Make<AST::PromoteExpr>(l->LOC(), l);
-        promote_expr->SetType(l->GetType());
-        promote_expr->SetTo(promote_res.lty);
-        n.SetL(promote_expr);
+        n.SetL(GenCastExprNode(promote_res.lty, lbty, l));
+        n.SetType(MakeScalarType(promote_res.lty, true));
         VST_DEBUG({
-          dbgs() << "[do norm]\n";
-          dbgs() << "\tpromote " << PSTR(l) << "\n\t from type " << STR(lbty)
-                 << "\n\t to type " << STR(promote_res.lty) << "\n";
+          dbgs() << "Promote '" << PSTR(l) << "' at " << l->LOC() << "\n\t'"
+                 << STR(lbty) << "' => '" << STR(promote_res.lty) << "'\n";
         });
       }
       if (rbty != promote_res.rty) {
-        auto promote_expr = AST::Make<AST::PromoteExpr>(r->LOC(), r);
-        promote_expr->SetType(r->GetType());
-        promote_expr->SetTo(promote_res.rty);
-        n.SetR(promote_expr);
+        n.SetR(GenCastExprNode(promote_res.rty, rbty, r));
+        n.SetType(MakeScalarType(promote_res.rty, true));
         VST_DEBUG({
-          dbgs() << "[do norm]\n";
-          dbgs() << "\tpromote " << PSTR(r) << "\n\t from type " << STR(rbty)
-                 << "\n\t to type " << STR(promote_res.rty) << "\n";
+          dbgs() << "Promote '" << PSTR(r) << "' at " << r->LOC() << "\n\t'"
+                 << STR(rbty) << "' => '" << STR(promote_res.rty) << "'\n";
         });
       }
     }
@@ -305,6 +308,26 @@ public:
       VST_DEBUG(dbgs() << "Place storage of '" << n.name_str
                        << "': DEFAULT ---> GLOBAL\n");
     }
+
+    // insert CastExpr node if needed
+    if (!n.init_expr) return true;
+    if (!n.type) return true;
+    auto r = n.init_expr;
+    auto lty = n.type->GetType();
+    auto rty = r->GetType();
+    auto lsty = dyn_cast<ScalarType>(lty);
+    auto rsty = dyn_cast<ScalarType>(rty);
+    if (!lsty || !rsty) return true;
+    auto lbty = lsty->GetBaseType();
+    auto rbty = rsty->GetBaseType();
+    if (lbty == rbty) return true;
+    // need to do type casting
+    auto casted = GenCastExprNode(lbty, rbty, n.init_expr);
+    VST_DEBUG({
+      dbgs() << "Cast '" << PSTR(n.init_expr) << "' at " << n.init_expr->LOC()
+             << "\n\t'" << STR(rbty) << "' => '" << STR(lbty) << "'\n";
+    });
+    n.init_expr = casted;
 
     return true;
   }
@@ -342,7 +365,32 @@ public:
     return true;
   }
   bool Visit(AST::DataAccess&) override { return true; }
-  bool Visit(AST::Assignment&) override { return true; }
+  bool Visit(AST::Assignment& n) override {
+    auto l = n.da;
+    auto r = n.value;
+    auto lty = l->GetType();
+    auto rty = r->GetType();
+
+    auto lsty = dyn_cast<ScalarType>(lty);
+    auto rsty = dyn_cast<ScalarType>(rty);
+    if (!lsty || !rsty) return true;
+
+    auto lbty = lsty->GetBaseType();
+    auto rbty = rsty->GetBaseType();
+
+    if (lbty == rbty) return true;
+
+    // need to do type casting
+
+    auto casted = GenCastExprNode(lbty, rbty, n.value);
+    VST_DEBUG({
+      dbgs() << "Cast '" << PSTR(n.value) << "'\n\t from type '" << STR(rbty)
+             << "'\n\t to type '" << STR(lbty) << "'\n";
+    });
+    n.value = casted;
+
+    return true;
+  }
   bool Visit(AST::IntIndex&) override { return true; }
   bool Visit(AST::DataType&) override { return true; }
   bool Visit(AST::Identifier&) override { return true; }

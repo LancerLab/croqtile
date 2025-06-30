@@ -269,7 +269,7 @@ public:
         }
 
         if (std::holds_alternative<int>(pc->value)) {
-          if (!IsIntegerFundamentalType(f_sty->e_type)) {
+          if (!IsIntegerBaseType(f_sty->e_type)) {
             Error(n.from->LOC(),
                   "On " + cur_arch +
                       ", data type of pad value is "
@@ -278,7 +278,7 @@ public:
             error_count++;
           }
         } else if (std::holds_alternative<float>(pc->value)) {
-          if (!IsFloatPointFundamentalType(f_sty->e_type)) {
+          if (!IsFloatPointBaseType(f_sty->e_type)) {
             Error(n.from->LOC(),
                   "On " + cur_arch +
                       ", data type of pad value is "
@@ -515,7 +515,7 @@ public:
         }
 
         if (std::holds_alternative<int>(pc->value)) {
-          if (!IsIntegerFundamentalType(f_sty->e_type)) {
+          if (!IsIntegerBaseType(f_sty->e_type)) {
             Error(n.from->LOC(),
                   "On " + cur_arch +
                       ", data type of pad value is "
@@ -525,7 +525,7 @@ public:
           }
         } else if (std::holds_alternative<float>(pc->value)) {
           // pad value is a float point number.
-          if (!IsFloatPointFundamentalType(f_sty->e_type)) {
+          if (!IsFloatPointBaseType(f_sty->e_type)) {
             Error(n.from->LOC(),
                   "On " + cur_arch +
                       ", data type of pad value is "

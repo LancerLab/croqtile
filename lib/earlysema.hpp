@@ -112,10 +112,8 @@ private:
       n.SetType(MutateType(ty));
     else
       n.SetType(ty);
-    if (debug_visit) {
+    if (debug_visit)
       dbgs() << "Set type of " << STR(n) << " as " << PSTR(n.GetType()) << "\n";
-      assert(false);
-    }
   }
   void SetNodeType(AST::Node& n, const ptr<Type>& ty) {
     n.SetType(ty);
@@ -161,7 +159,7 @@ public:
   bool Visit(AST::StringLiteral&) override;
   bool Visit(AST::BoolLiteral&) override;
   bool Visit(AST::Expr&) override;
-  bool Visit(AST::PromoteExpr&) override;
+  bool Visit(AST::CastExpr&) override;
   bool Visit(AST::MultiDimSpans&) override;
   bool Visit(AST::NamedTypeDecl&) override;
   bool Visit(AST::NamedVariableDecl&) override;

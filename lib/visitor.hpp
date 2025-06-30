@@ -67,7 +67,7 @@ struct Visitor {
   virtual bool Visit(AST::StringLiteral&) = 0;
   virtual bool Visit(AST::BoolLiteral&) = 0;
   virtual bool Visit(AST::Expr&) = 0;
-  virtual bool Visit(AST::PromoteExpr&) = 0;
+  virtual bool Visit(AST::CastExpr&) = 0;
   virtual bool Visit(AST::MultiDimSpans&) = 0;
   virtual bool Visit(AST::NamedTypeDecl&) = 0;
   virtual bool Visit(AST::NamedVariableDecl&) = 0;
@@ -495,7 +495,7 @@ public:
   bool Visit(AST::StringLiteral&) override { return true; }
   bool Visit(AST::BoolLiteral&) override { return true; }
   bool Visit(AST::Expr&) override { return true; }
-  bool Visit(AST::PromoteExpr&) override { return true; }
+  bool Visit(AST::CastExpr&) override { return true; }
   bool Visit(AST::MultiDimSpans&) override { return true; }
   bool Visit(AST::NamedTypeDecl&) override { return true; }
   bool Visit(AST::NamedVariableDecl&) override { return true; }
@@ -631,7 +631,7 @@ public:
     TraceEachVisit(n);
     return VisitNode(n);
   }
-  bool Visit(AST::PromoteExpr& n) final {
+  bool Visit(AST::CastExpr& n) final {
     TraceEachVisit(n);
     return VisitNode(n);
   }
@@ -790,7 +790,7 @@ public:
   virtual bool VisitNode(AST::StringLiteral&) { return true; }
   virtual bool VisitNode(AST::BoolLiteral&) { return true; }
   virtual bool VisitNode(AST::Expr&) { return true; }
-  virtual bool VisitNode(AST::PromoteExpr&) { return true; }
+  virtual bool VisitNode(AST::CastExpr&) { return true; }
   virtual bool VisitNode(AST::MultiDimSpans&) { return true; }
   virtual bool VisitNode(AST::NamedTypeDecl&) { return true; }
   virtual bool VisitNode(AST::NamedVariableDecl&) { return true; }

@@ -34,7 +34,7 @@ void Expr::accept(Choreo::Visitor& v) {
   v.Visit(*this);
 }
 
-void PromoteExpr::accept(Choreo::Visitor& v) {
+void CastExpr::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
   assert(!GetC());
   assert(!GetL());

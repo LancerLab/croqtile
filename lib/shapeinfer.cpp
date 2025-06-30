@@ -337,11 +337,11 @@ bool ShapeInference::Visit(AST::Expr& n) {
   return true;
 }
 
-bool ShapeInference::Visit(AST::PromoteExpr& n) {
+bool ShapeInference::Visit(AST::CastExpr& n) {
   TraceEachVisit(n);
 
   if (cannot_proceed) return true;
-  // all the context should not be unchanged.
+  InvalidateVN(cur_vn);
   return true;
 }
 
@@ -434,6 +434,11 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
 
   ptr<Type> nty = nullptr;
   if (n.init_expr) {
+    if (!CanBeValueNumbered(n.init_expr.get())) {
+      vn.GenerateValueNumberFromSignature(SSTab().ScopedName(name));
+      DefineASymbol(name, NodeType(n));
+      return true;
+    }
     nty = NodeType(n);
     if (GetSpannedType(nty)) {
       cur_mdspan_vn = GetValNo(*n.init_expr, VNKind::VNK_MDSPAN);
@@ -495,7 +500,6 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
   DefineASymbol(name, nty);
   SetNodeType(n, nty);
 
-  // TODO(wsj): BooleanType? HalfType...?
   if ((isa<FloatType>(nty) || isa<DoubleType>(nty) ||
        (isa<ScalarIntegerType>(nty)) || isa<HalfType>(nty) ||
        isa<Half8Type>(nty)) &&
@@ -1785,6 +1789,7 @@ bool ShapeInference::CanBeValueNumbered(AST::Node* n) const {
   if (auto e = dyn_cast<AST::Expr>(n)) {
     if (e->op == "elemof") return false;
     if (e->op == "addrof") return false;
+    if (e->op == "cast") return false;
     return CanBeValueNumbered(e->GetR().get()) &&
            CanBeValueNumbered(e->GetL().get()) &&
            CanBeValueNumbered(e->GetC().get());
@@ -2123,6 +2128,8 @@ int ShapeInference::GenValNo(const AST::Node& n) {
         ast_vn.Copy(e->GetR().get(), e);
         return ast_vn.Get(e, NodeValNoKind(n));
       }
+    } else if (e->op == "cast") {
+      assert(false);
     }
   }
 

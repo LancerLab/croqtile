@@ -165,7 +165,19 @@ bool TypeInference::Visit(AST::MultiValues& n) {
 
 bool TypeInference::Visit(AST::IntLiteral& n) {
   TraceEachVisit(n);
-  SetNodeType(n, MakeIntegerType());
+  BaseType res;
+  if (n.IsInt())
+    res = BaseType::S32;
+  else if (n.IsUint32())
+    res = BaseType::U32;
+  else if (n.IsInt64())
+    res = BaseType::S64;
+  else if (n.IsUint64())
+    res = BaseType::U64;
+  else
+    choreo_unreachable("unexpect");
+
+  SetNodeType(n, MakeScalarIntegerType(res, false));
   return true;
 }
 
@@ -749,15 +761,13 @@ bool TypeInference::Visit(AST::Expr& n) {
   return true;
 }
 
-bool TypeInference::Visit(AST::PromoteExpr& n) {
+bool TypeInference::Visit(AST::CastExpr& n) {
   TraceEachVisit(n);
-  auto promote_from_type = n.GetR()->GetType();
-  auto promote_from_scalar_type = dyn_cast<ScalarType>(promote_from_type);
-  promote_from_scalar_type->SetBaseType(n.ToType());
-  SetNodeType(n, promote_from_scalar_type);
-  VST_DEBUG(dbgs() << "Promote type of node `" << PSTR(n.GetR()) << "`:\n\t`"
-                   << PSTR(promote_from_type) << "` to `" << PSTR(n.GetType())
-                   << "`");
+  auto cast_from = n.GetR()->GetType();
+  SetNodeType(n, MakeScalarType(n.ToType(), true));
+  VST_DEBUG(dbgs() << "cast type of node `" << PSTR(n.GetR()) << "`:\n\t`"
+                   << PSTR(cast_from) << "` to `" << PSTR(n.GetType())
+                   << "`\n");
   cur_type = n.GetType();
   return true;
 }
@@ -979,7 +989,7 @@ bool TypeInference::Visit(AST::Select& n) {
     SetNodeType(*n.select_factor, MakeIntegerType());
   }
 
-  if (cur_type = type_equals.ResolveEqualFutures(*n.expr_list)) {
+  if ((cur_type = type_equals.ResolveEqualFutures(*n.expr_list))) {
     SetNodeType(n, cur_type);
     return true;
   }
