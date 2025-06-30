@@ -1,5 +1,4 @@
-// RUN: choreo %s -es -o - |FileCheck %s
-// RUN: choreo %s -arch=gcu300 -gs -o %s.result && bash %s.result 2>&1 | FileCheck --check-prefix=CHKEXE %s && rm -f %s.result
+// RUN: choreo %s -es -o - | FileCheck %s
 
 __co__ void foo(global f32 [M, ??] data) {
   parallel p by 1
@@ -14,5 +13,3 @@ int main() {
 
 // CHECK:   tops::mdspan __mds0_data(tops::Global, (float*)data, M, 1);
 // CHECK: choreo::runtime_check(data.shape()[1] == choreo::__inf__, "must set 'choreo::__inf__' to the unbounded dimension on the 1st parameter ('data', dim: 1): got " + std::to_string(data.shape()[1]) + ".");
-
-// CHKEXE: choreo runtime check failed: must set 'choreo::__inf__' to the unbounded dimension on the 1st parameter ('data', dim: 1): got 100.

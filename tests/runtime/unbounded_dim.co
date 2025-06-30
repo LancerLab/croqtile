@@ -1,0 +1,15 @@
+// REQUIRES: TARGET-GCU300
+// RUN: choreo %s -arch=gcu300 -gs -o %s.result && bash %s.result 2>&1 | FileCheck --check-prefix=CHKEXE %s && rm -f %s.result
+
+__co__ void foo(global f32 [M, ??] data) {
+  parallel p by 1
+    dma.copy data.subspan(7, 4).at(p, p) => local;
+}
+
+int main() {
+  float* d = nullptr;
+  topsMalloc(&d, 700);
+  foo(choreo::make_spanview<2>(d, {7, 100}));
+}
+
+// CHKEXE: choreo runtime check failed: must set 'choreo::__inf__' to the unbounded dimension on the 1st parameter ('data', dim: 1): got 100.
