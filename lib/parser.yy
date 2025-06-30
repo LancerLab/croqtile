@@ -11,6 +11,9 @@
 %locations
 %define api.location.type {Choreo::location}
 
+// guard the conflict count
+%expect 1
+
 %code requires {
 
 #include "loc.hpp"
