@@ -72,7 +72,6 @@ private:
         local_level = 0;
       }
     }
-
     // mask stmts that are possible to be shared
     else if (auto c = dyn_cast<AST::Call>(&n))
       if (!c->IsExpr()) n.SetLevel(PLevel(n, pl_depth));
@@ -87,23 +86,19 @@ private:
 private:
   Storage PLevel(AST::Node& n, int depth) {
     auto lvl = GCUDeviceParallelLevel(depth);
-    if (lvl == Storage::NONE) {
-      Error(n.LOC(), "the parallel level (depth: " + std::to_string(pl_depth) +
-                         ") is not supported by current GCU architecture (" +
-                         cur_arch + ").");
-      ++error_count;
-    }
+    if (lvl == Storage::NONE)
+      Error1(n.LOC(), "the parallel level (depth: " + std::to_string(pl_depth) +
+                          ") is not supported by current GCU architecture (" +
+                          cur_arch + ").");
     return lvl;
   }
 
   int PDepth(AST::Node& n, Storage l) {
     auto depth = GCUDeviceParallelDepth(l);
-    if (depth == -1) {
-      Error(n.LOC(), "the parallel level (" + STR(l) +
-                         ") is not supported by  current GCU architecture (" +
-                         cur_arch + ").");
-      ++error_count;
-    }
+    if (depth == -1)
+      Error1(n.LOC(), "the parallel level (" + STR(l) +
+                          ") is not supported by current GCU architecture (" +
+                          cur_arch + ").");
     return depth;
   }
 
@@ -154,12 +149,10 @@ public:
         } else
           FCtx(cur_fname).InsertAssertion(asrt, n.LOC(), msg);
       } else {
-        if (sty->ByteSize() >= (1ULL << 32)) {
-          Error(n.LOC(), "On " + cur_arch +
-                             ", the size of data transferred by "
-                             "DMA cannot exceed 2^32.");
-          error_count++;
-        }
+        if (sty->ByteSize() >= (1ULL << 32))
+          Error1(n.LOC(), "On " + cur_arch +
+                              ", the size of data transferred by "
+                              "DMA cannot exceed 2^32.");
       }
     }
     auto IsLinearCopy = [&]() -> bool {
@@ -170,11 +163,9 @@ public:
       return f_ca->NoTile() && t_ca->HasTile();
     };
     auto RankLE5 = [&](const std::string& dma_op) {
-      if (f_rank > 5) {
-        Error(n.LOC(), "On " + cur_arch + ", the rank in " + dma_op +
-                           " must be in range [1, 5].");
-        error_count++;
-      }
+      if (f_rank > 5)
+        Error1(n.LOC(), "On " + cur_arch + ", the rank in " + dma_op +
+                            " must be in range [1, 5].");
     };
 
     if (CCtx().GetArch() == TargetArch::GCU3 ||
@@ -211,81 +202,60 @@ public:
         auto pc = cast<PadConfig>(n.config);
         assert(f_rank == pc->pad_low.size());
 
-        for (auto v : pc->pad_low) {
-          if (v > (1 << 11)) {
-            Error(n.LOC(), "On GCU300, the value of padding_low in "
-                           "dma.pad must be in range [0, 2^11].");
-            error_count++;
-          }
-        }
+        for (auto v : pc->pad_low)
+          if (v > (1 << 11))
+            Error1(n.LOC(), "On GCU300, the value of padding_low in "
+                            "dma.pad must be in range [0, 2^11].");
 
-        for (auto v : pc->pad_high) {
-          if (v > (1 << 11)) {
-            Error(n.LOC(), "On " + cur_arch +
-                               ", the value of padding_high in dma.pad must be "
-                               "in range [0, 2^11].");
-            error_count++;
-          }
-        }
+        for (auto v : pc->pad_high)
+          if (v > (1 << 11))
+            Error1(n.LOC(),
+                   "On " + cur_arch +
+                       ", the value of padding_high in dma.pad must be "
+                       "in range [0, 2^11].");
         // padding_mid
         for (size_t idx = 0; idx < f_rank; ++idx) {
           size_t v = pc->pad_mid[idx];
-          if (idx == f_rank - 1) {
-            if (v != 0) {
-              Error(n.LOC(),
-                    "On " + cur_arch +
-                        ", the value of padding_mid[rank-1] in dma.pad "
-                        "must be 0 (mid padding of dim[rank-1] is not "
-                        "supported by "
-                        "the hardware).");
-              error_count++;
-            }
-          } else if (v > (1 << 10)) {
-            Error(n.LOC(), "On " + cur_arch +
-                               ", the value of padding_mid in "
-                               "dma.pad must be in range [0, 2^10].");
-            error_count++;
-          }
+          if (idx == f_rank - 1 && v != 0)
+            Error1(n.LOC(), "On " + cur_arch +
+                                ", the value of padding_mid[rank-1] in dma.pad "
+                                "must be 0 (mid padding of dim[rank-1] is not "
+                                "supported by "
+                                "the hardware).");
+          else if (v > (1 << 10))
+            Error1(n.LOC(), "On " + cur_arch +
+                                ", the value of padding_mid in "
+                                "dma.pad must be in range [0, 2^10].");
         }
         if (f_rank == 5) {
-          if (pc->pad_low[0] != 0) {
-            Error(n.LOC(), "On " + cur_arch +
-                               ", dma.pad does not support 5-dimensional "
-                               "array (if dim is 5, pad_low[0] must be 0).");
-            error_count++;
-          }
-          if (pc->pad_high[0] != 0) {
-            Error(n.LOC(), "On " + cur_arch +
-                               ", dma.pad does not support 5-dimensional "
-                               "array (if dim is 5, pad_high[0] must be 0).");
-            error_count++;
-          }
-          if (pc->pad_mid[0] != 0) {
-            Error(n.LOC(), "On " + cur_arch +
-                               ", dma.pad does not support 5-dimensional "
-                               "array (if dim is 5, pad_mid[0] must be 0).");
-            error_count++;
-          }
+          if (pc->pad_low[0] != 0)
+            Error1(n.LOC(), "On " + cur_arch +
+                                ", dma.pad does not support 5-dimensional "
+                                "array (if dim is 5, pad_low[0] must be 0).");
+          if (pc->pad_high[0] != 0)
+            Error1(n.LOC(), "On " + cur_arch +
+                                ", dma.pad does not support 5-dimensional "
+                                "array (if dim is 5, pad_high[0] must be 0).");
+          if (pc->pad_mid[0] != 0)
+            Error1(n.LOC(), "On " + cur_arch +
+                                ", dma.pad does not support 5-dimensional "
+                                "array (if dim is 5, pad_mid[0] must be 0).");
         }
 
         if (std::holds_alternative<int>(pc->value)) {
-          if (!IsIntegerBaseType(f_sty->e_type)) {
-            Error(n.from->LOC(),
-                  "On " + cur_arch +
-                      ", data type of pad value is "
-                      "incompatible with that of data in dma: int" +
-                      " vs. " + STR(f_sty->e_type) + ".");
-            error_count++;
-          }
+          if (!IsIntegerBaseType(f_sty->e_type))
+            Error1(n.from->LOC(),
+                   "On " + cur_arch +
+                       ", data type of pad value is "
+                       "incompatible with that of data in dma: int" +
+                       " vs. " + STR(f_sty->e_type) + ".");
         } else if (std::holds_alternative<float>(pc->value)) {
-          if (!IsFloatPointBaseType(f_sty->e_type)) {
-            Error(n.from->LOC(),
-                  "On " + cur_arch +
-                      ", data type of pad value is "
-                      "incompatible with that of data in dma: float" +
-                      " vs. " + STR(f_sty->e_type) + ".");
-            error_count++;
-          }
+          if (!IsFloatPointBaseType(f_sty->e_type))
+            Error1(n.from->LOC(),
+                   "On " + cur_arch +
+                       ", data type of pad value is "
+                       "incompatible with that of data in dma: float" +
+                       " vs. " + STR(f_sty->e_type) + ".");
         } else
           choreo_unreachable("unexpected pad value type in dma.pad");
       }
@@ -304,14 +274,12 @@ public:
             auto t = dyn_cast<BoundedITupleType>(first->GetType());
             assert(t != nullptr);
             if (VIIsInt(t->ubounds.ValueAt(0))) {
-              if (!IsValueItemEqual(1, t->ubounds.ValueAt(0))) {
-                Error(n.LOC(),
-                      "On " + cur_arch +
-                          ", dma.copy(slice) does not "
-                          "support 5-dimensional "
-                          "array (if dim is 5, offsets[0] must be 0).");
-                error_count++;
-              }
+              if (!IsValueItemEqual(1, t->ubounds.ValueAt(0)))
+                Error1(n.LOC(),
+                       "On " + cur_arch +
+                           ", dma.copy(slice) does not "
+                           "support 5-dimensional "
+                           "array (if dim is 5, offsets[0] must be 0).");
             } else {
               choreo_unreachable("unexpected situation");
               // TODO
@@ -336,14 +304,12 @@ public:
             auto t = dyn_cast<BoundedITupleType>(first->GetType());
             assert(t != nullptr);
             if (VIIsInt(t->ubounds.ValueAt(0))) {
-              if (!IsValueItemEqual(1, t->ubounds.ValueAt(0))) {
-                Error(n.LOC(),
-                      "On " + cur_arch +
-                          ", dma.copy(deslice) does not "
-                          "support 5-dimensional "
-                          "array (if dim is 5, offsets[0] must be 0).");
-                error_count++;
-              }
+              if (!IsValueItemEqual(1, t->ubounds.ValueAt(0)))
+                Error1(n.LOC(),
+                       "On " + cur_arch +
+                           ", dma.copy(deslice) does not "
+                           "support 5-dimensional "
+                           "array (if dim is 5, offsets[0] must be 0).");
             } else {
               choreo_unreachable("unexpected situation");
               // TODO
@@ -427,15 +393,13 @@ public:
         }
 
         auto tc = cast<TransposeConfig>(n.config);
-        if (f_rank == 5 && tc->dim_values[0] != 0) {
-          Error(
+        if (f_rank == 5 && tc->dim_values[0] != 0)
+          Error1(
               n.LOC(),
               "On " + cur_arch +
                   ", dma.transp(not slice nor deslice) does not "
                   "support 5-dimensional array (if dim is 5, layout[0] must be "
                   "0).");
-          error_count++;
-        }
       }
 
       // pad
@@ -456,83 +420,65 @@ public:
         auto pc = cast<PadConfig>(n.config);
         assert(f_rank == pc->pad_low.size());
 
-        for (auto v : pc->pad_low) {
-          if (v > (1 << 11)) {
-            Error(n.LOC(), "On " + cur_arch +
-                               ", the value of padding_low in "
-                               "dma.pad must be in range [0, 2^11].");
-            error_count++;
-          }
-        }
+        for (auto v : pc->pad_low)
+          if (v > (1 << 11))
+            Error1(n.LOC(), "On " + cur_arch +
+                                ", the value of padding_low in "
+                                "dma.pad must be in range [0, 2^11].");
 
-        for (auto v : pc->pad_high) {
-          if (v > (1 << 11)) {
-            Error(n.LOC(), "On " + cur_arch +
-                               ", the value of padding_high in "
-                               "dma.pad must be in range [0, 2^11].");
-            error_count++;
-          }
-        }
+        for (auto v : pc->pad_high)
+          if (v > (1 << 11))
+            Error1(n.LOC(), "On " + cur_arch +
+                                ", the value of padding_high in "
+                                "dma.pad must be in range [0, 2^11].");
+
         // padding_mid
         for (size_t idx = 0; idx < f_rank; ++idx) {
           size_t v = pc->pad_mid[idx];
           if (idx == f_rank - 1) {
-            if (v != 0) {
-              Error(n.LOC(),
-                    "On " + cur_arch +
-                        ", the value of padding_mid[rank-1] in dma.pad "
-                        "must be 0 (mid padding of dim[rank-1] is not "
-                        "supported by "
-                        "the hardware).");
-              error_count++;
-            }
+            if (v != 0)
+              Error1(n.LOC(),
+                     "On " + cur_arch +
+                         ", the value of padding_mid[rank-1] in dma.pad "
+                         "must be 0 (mid padding of dim[rank-1] is not "
+                         "supported by "
+                         "the hardware).");
           } else if (v > (1 << 10)) {
-            Error(n.LOC(), "On " + cur_arch +
-                               ", the value of padding_mid in "
-                               "dma.pad must be in range [0, 2^10].");
-            error_count++;
+            Error1(n.LOC(), "On " + cur_arch +
+                                ", the value of padding_mid in "
+                                "dma.pad must be in range [0, 2^10].");
           }
         }
         if (f_rank == 5) {
-          if (pc->pad_low[0] != 0) {
-            Error(n.LOC(), "On " + cur_arch +
-                               ", dma.pad does not support 5-dimensional "
-                               "array (if dim is 5, pad_low[0] must be 0).");
-            error_count++;
-          }
-          if (pc->pad_high[0] != 0) {
-            Error(n.LOC(), "On " + cur_arch +
-                               ", dma.pad does not support 5-dimensional "
-                               "array (if dim is 5, pad_high[0] must be 0).");
-            error_count++;
-          }
-          if (pc->pad_mid[0] != 0) {
-            Error(n.LOC(), "On " + cur_arch +
-                               ", dma.pad does not support 5-dimensional "
-                               "array (if dim is 5, pad_mid[0] must be 0).");
-            error_count++;
-          }
+          if (pc->pad_low[0] != 0)
+            Error1(n.LOC(), "On " + cur_arch +
+                                ", dma.pad does not support 5-dimensional "
+                                "array (if dim is 5, pad_low[0] must be 0).");
+          if (pc->pad_high[0] != 0)
+            Error1(n.LOC(), "On " + cur_arch +
+                                ", dma.pad does not support 5-dimensional "
+                                "array (if dim is 5, pad_high[0] must be 0).");
+          if (pc->pad_mid[0] != 0)
+            Error1(n.LOC(), "On " + cur_arch +
+                                ", dma.pad does not support 5-dimensional "
+                                "array (if dim is 5, pad_mid[0] must be 0).");
         }
 
         if (std::holds_alternative<int>(pc->value)) {
-          if (!IsIntegerBaseType(f_sty->e_type)) {
-            Error(n.from->LOC(),
-                  "On " + cur_arch +
-                      ", data type of pad value is "
-                      "incompatible with that of data in dma: int" +
-                      " vs. " + STR(f_sty->e_type) + ".");
-            error_count++;
-          }
+          if (!IsIntegerBaseType(f_sty->e_type))
+            Error1(n.from->LOC(),
+                   "On " + cur_arch +
+                       ", data type of pad value is "
+                       "incompatible with that of data in dma: int" +
+                       " vs. " + STR(f_sty->e_type) + ".");
         } else if (std::holds_alternative<float>(pc->value)) {
           // pad value is a float point number.
-          if (!IsFloatPointBaseType(f_sty->e_type)) {
-            Error(n.from->LOC(),
-                  "On " + cur_arch +
-                      ", data type of pad value is "
-                      "incompatible with that of data in span: float" +
-                      " vs. " + STR(f_sty->e_type) + ".");
-            error_count++;
-          }
+          if (!IsFloatPointBaseType(f_sty->e_type))
+            Error1(n.from->LOC(),
+                   "On " + cur_arch +
+                       ", data type of pad value is "
+                       "incompatible with that of data in span: float" +
+                       " vs. " + STR(f_sty->e_type) + ".");
         } else
           choreo_unreachable("unexpected pad value type in dma.pad");
       }
@@ -551,14 +497,12 @@ public:
             auto t = dyn_cast<BoundedITupleType>(first->GetType());
             assert(t != nullptr);
             if (VIIsInt(t->ubounds.ValueAt(0))) {
-              if (!IsValueItemEqual(1, t->ubounds.ValueAt(0))) {
-                Error(n.LOC(),
-                      "On " + cur_arch +
-                          ", dma.copy(slice) does not "
-                          "support 5-dimensional "
-                          "array (if dim is 5, offsets[0] must be 0).");
-                error_count++;
-              }
+              if (!IsValueItemEqual(1, t->ubounds.ValueAt(0)))
+                Error1(n.LOC(),
+                       "On " + cur_arch +
+                           ", dma.copy(slice) does not "
+                           "support 5-dimensional "
+                           "array (if dim is 5, offsets[0] must be 0).");
             } else {
               choreo_unreachable("unexpected situation");
               // TODO
@@ -603,14 +547,12 @@ public:
             auto t = dyn_cast<BoundedITupleType>(first->GetType());
             assert(t != nullptr);
             if (VIIsInt(t->ubounds.ValueAt(0))) {
-              if (!IsValueItemEqual(1, t->ubounds.ValueAt(0))) {
-                Error(n.LOC(),
-                      "On " + cur_arch +
-                          ", dma.transp(slice then "
-                          "transpose) does not support 5-dimensional "
-                          "array (if dim is 5, offsets[0] must be 0).");
-                error_count++;
-              }
+              if (!IsValueItemEqual(1, t->ubounds.ValueAt(0)))
+                Error1(n.LOC(),
+                       "On " + cur_arch +
+                           ", dma.transp(slice then "
+                           "transpose) does not support 5-dimensional "
+                           "array (if dim is 5, offsets[0] must be 0).");
             } else {
               // TODO
               // Is that the case?
@@ -619,13 +561,11 @@ public:
         }
 
         auto tc = cast<TransposeConfig>(n.config);
-        if (f_rank == 5 && tc->dim_values[0] != 0) {
-          Error(n.LOC(), "On " + cur_arch +
-                             ", dma.transp(slice then transpose) "
-                             "does not support 5-dimensional "
-                             "array (if dim is 5, layout[0] must be 0).");
-          error_count++;
-        }
+        if (f_rank == 5 && tc->dim_values[0] != 0)
+          Error1(n.LOC(), "On " + cur_arch +
+                              ", dma.transp(slice then transpose) "
+                              "does not support 5-dimensional "
+                              "array (if dim is 5, layout[0] must be 0).");
       }
 
       // transpose deslice
@@ -653,14 +593,12 @@ public:
             auto t = dyn_cast<BoundedITupleType>(first->GetType());
             assert(t != nullptr);
             if (VIIsInt(t->ubounds.ValueAt(0))) {
-              if (!IsValueItemEqual(1, t->ubounds.ValueAt(0))) {
-                Error(n.LOC(),
-                      "On " + cur_arch +
-                          ", dma.transp(transpose then "
-                          "deslice) does not support 5-dimensional "
-                          "array (if dim is 5, offsets[0] must be 0).");
-                error_count++;
-              }
+              if (!IsValueItemEqual(1, t->ubounds.ValueAt(0)))
+                Error1(n.LOC(),
+                       "On " + cur_arch +
+                           ", dma.transp(transpose then "
+                           "deslice) does not support 5-dimensional "
+                           "array (if dim is 5, offsets[0] must be 0).");
             } else {
               // TODO
               // Is that the case?
@@ -669,13 +607,11 @@ public:
         }
 
         auto tc = cast<TransposeConfig>(n.config);
-        if (t_rank == 5 && tc->dim_values[0] != 0) {
-          Error(n.LOC(), "On " + cur_arch +
-                             ", dma.transp(transpose then deslice) "
-                             "does not support 5-dimensional "
-                             "array (if dim is 5, layout[0] must be 0).");
-          error_count++;
-        }
+        if (t_rank == 5 && tc->dim_values[0] != 0)
+          Error1(n.LOC(), "On " + cur_arch +
+                              ", dma.transp(transpose then deslice) "
+                              "does not support 5-dimensional "
+                              "array (if dim is 5, layout[0] must be 0).");
       }
       return;
     }
@@ -706,10 +642,7 @@ public:
                      << "\n\twith message: " << message << "\n");
     message = "On " + cur_arch + ", must satisfy: " + message;
     if (auto vi_int = VIInt(vi); vi_int && op_map.count(op)) {
-      if (!op_map[op](*vi_int, limit)) {
-        Error(loc, message);
-        error_count++;
-      }
+      if (!op_map[op](*vi_int, limit)) Error1(loc, message);
     } else {
       auto vi_str = vi->ToString("ULL");
       VST_DEBUG(dbgs() << "[GCUCHECK] Generated runtime check at " << loc
@@ -746,11 +679,9 @@ public:
     TraceEachVisit(n);
 
     if (CCtx().GetTarget() == CompileTarget::Factor) {
-      if (!n.IsFloat32()) {
-        Error(n.LOC(), "Factor backend in Choreo does not support " +
-                           PSTR(n.GetType()) + " float-point number yet!");
-        error_count++;
-      }
+      if (!n.IsFloat32())
+        Error1(n.LOC(), "Factor backend in Choreo does not support " +
+                            PSTR(n.GetType()) + " float-point number yet!");
     }
 
     return true;
@@ -776,16 +707,12 @@ public:
     auto ty = GetSymbolType(n.name_str);
     if (isa<EventType>(ty) || isa<EventArrayType>(ty))
       if (CCtx().GetArch() == TargetArch::GCU20 ||
-          CCtx().GetArch() == TargetArch::GCU21) {
-        Error(n.LOC(), "Event is not supported on " + cur_arch + ".");
-        error_count++;
-      }
+          CCtx().GetArch() == TargetArch::GCU21)
+        Error1(n.LOC(), "Event is not supported on " + cur_arch + ".");
 
     if (isa<AST::Select>(n.init_expr))
-      if (IsHost() && CCtx().GetTarget() != CompileTarget::Factor) {
-        Error(n.LOC(), "select in host is not supported.");
-        error_count++;
-      }
+      if (IsHost() && CCtx().GetTarget() != CompileTarget::Factor)
+        Error1(n.LOC(), "select in host is not supported.");
 
     if (!isa<SpannedType>(ty)) return true;
     auto sty = cast<SpannedType>(ty);
@@ -793,43 +720,33 @@ public:
     auto st = sty->GetStorage();
     switch (st) {
     case Storage::GLOBAL:
-      if (pl_depth != 0) {
-        Error(n.LOC(), "global variable '" + n.name_str +
-                           "` mustn't be declared inside parallel-by.");
-        error_count++;
-      }
+      if (pl_depth != 0)
+        Error1(n.LOC(), "global variable '" + n.name_str +
+                            "` mustn't be declared inside parallel-by.");
       break;
     case Storage::SHARED:
-      if (pl_depth == 0) {
-        Error(n.LOC(), "shared variable '" + n.name_str +
-                           "` must be declared inside parallel-by.");
-        error_count++;
-      }
-      if (sty->RuntimeShaped() && !CCtx().MemReuse()) {
-        Error(n.LOC(), "GCU forbids shared variable '" + n.name_str +
-                           "` to be dynamically shaped (by " +
-                           STR(sty->GetShape()) + ").");
-        error_count++;
-      }
+      if (pl_depth == 0)
+        Error1(n.LOC(), "shared variable '" + n.name_str +
+                            "` must be declared inside parallel-by.");
+      if (sty->RuntimeShaped() && !CCtx().MemReuse())
+        Error1(n.LOC(), "GCU forbids shared variable '" + n.name_str +
+                            "` to be dynamically shaped (by " +
+                            STR(sty->GetShape()) + ").");
       break;
     case Storage::LOCAL:
-      if (pl_depth == 0) {
-        Error(n.LOC(), "local variable '" + n.name_str +
-                           "` must be declared inside parallel-by.");
-        error_count++;
-      } else if (local_level == 0)
+      if (pl_depth == 0)
+        Error1(n.LOC(), "local variable '" + n.name_str +
+                            "` must be declared inside parallel-by.");
+      else if (local_level == 0)
         local_level = pl_depth;
-      if (sty->RuntimeShaped() && !CCtx().MemReuse()) {
-        Error(n.LOC(), "GCU forbids local variable '" + n.name_str +
-                           "` to be dynamically shaped (by " +
-                           STR(sty->GetShape()) + ").");
-        error_count++;
-      }
+      if (sty->RuntimeShaped() && !CCtx().MemReuse())
+        Error1(n.LOC(), "GCU forbids local variable '" + n.name_str +
+                            "` to be dynamically shaped (by " +
+                            STR(sty->GetShape()) + ").");
       break;
     default:
-      Error(n.LOC(), "can not declare variable '" + n.name_str + "` as " +
-                         STR(st) + " inside choreo function.");
-      error_count++;
+      Error1(n.LOC(), "can not declare variable '" + n.name_str + "` as " +
+                          STR(st) + " inside choreo function.");
       break;
     }
     return true;
@@ -840,13 +757,11 @@ public:
          CCtx().GetArch() == TargetArch::GCU21 ||
          CCtx().GetArch() == TargetArch::GCU3) &&
         n.indices != nullptr) {
-      if (auto sty = GetSpannedType(GetSymbolType(n.data->name))) {
+      if (auto sty = GetSpannedType(GetSymbolType(n.data->name)))
         if (sty->GetStorage() == Storage::GLOBAL ||
-            cur_params.count(InScopeName(n.data->name))) {
-          Error(n.LOC(), "global data access '" + STR(n) + "` is not allowed.");
-          error_count++;
-        }
-      }
+            cur_params.count(InScopeName(n.data->name)))
+          Error1(n.LOC(),
+                 "global data access '" + STR(n) + "` is not allowed.");
     }
     return true;
   }
@@ -883,11 +798,9 @@ public:
     TraceEachVisit(n);
     if (CCtx().GetTarget() == CompileTarget::Factor) {
       auto shape = GetShape(NodeType(n));
-      if (shape.IsDynamic()) {
-        Error(n.LOC(),
-              "symbolic bound value is not supported for Factor backend yet.");
-        error_count++;
-      }
+      if (shape.IsDynamic())
+        Error1(n.LOC(),
+               "symbolic bound value is not supported for Factor backend yet.");
     }
     return true;
   }
@@ -962,30 +875,23 @@ public:
   bool Visit(AST::Call& n) override {
     TraceEachVisit(n);
     if (n.IsArith() && (CCtx().GetArch() == TargetArch::GCU20 ||
-                        CCtx().GetArch() == TargetArch::GCU21)) {
-      Error(n.LOC(), "Arithmetic built-in function is not supported on GCU2.");
-      error_count++;
-    }
+                        CCtx().GetArch() == TargetArch::GCU21))
+      Error1(n.LOC(), "Arithmetic built-in function is not supported on GCU2.");
 
     if (CCtx().GetArch() == TargetArch::GCU3 && n.function->name != "print" &&
         n.function->name != "println") {
       for (auto& arg : n.GetArguments()) {
-        if (auto sty = GetSpannedType(arg->GetType())) {
-          if (sty->GetStorage() == Storage::GLOBAL) {
-            Error(n.LOC(), "function call '" + STR(n) + "` with global data '" +
-                               STR(arg) + "` is not allowed.");
-            error_count++;
-          }
-        }
-
-        if (auto id = AST::GetIdentifier(arg)) {
+        if (auto sty = GetSpannedType(arg->GetType()))
+          if (sty->GetStorage() == Storage::GLOBAL)
+            Error1(n.LOC(), "function call '" + STR(n) +
+                                "` with global data '" + STR(arg) +
+                                "` is not allowed.");
+        if (auto id = AST::GetIdentifier(arg))
           if (cur_params.count(InScopeName(STR(id))) &&
-              isa<SpannedType>(GetSymbolType(id->name))) {
-            Error(n.LOC(), "function call '" + STR(n) + "` with global data '" +
-                               STR(arg) + "` is not allowed.");
-            error_count++;
-          }
-        }
+              isa<SpannedType>(GetSymbolType(id->name)))
+            Error1(n.LOC(), "function call '" + STR(n) +
+                                "` with global data '" + STR(arg) +
+                                "` is not allowed.");
       }
     }
     return true;
@@ -1011,33 +917,26 @@ public:
 
     switch (n.scope->Get()) {
     case Storage::GLOBAL:
-      if (pl_depth != 0) {
-        Error(n.LOC(), "unsupported: " + PSTR(n.scope) +
-                           " synchronization in " + STR(pl2s()) + " scope.");
-        error_count++;
-      }
+      if (pl_depth != 0)
+        Error1(n.LOC(), "unsupported: " + PSTR(n.scope) +
+                            " synchronization in " + STR(pl2s()) + " scope.");
       break;
     case Storage::SHARED:
-      if (pl_depth == 0) {
-        Error(n.LOC(), "unsupported: " + PSTR(n.scope) +
-                           " synchronization in " + STR(pl2s()) + " scope.");
-        error_count++;
-      }
+      if (pl_depth == 0)
+        Error1(n.LOC(), "unsupported: " + PSTR(n.scope) +
+                            " synchronization in " + STR(pl2s()) + " scope.");
       break;
     case Storage::LOCAL:
-      if (CCtx().GetArch() != TargetArch::GCU4) {
-        Error(n.LOC(), STR(CCtx().GetArch()) + " does not support " +
-                           PSTR(n.scope) + " synchronization.");
-        error_count++;
-      } else if (pl_depth != 3) {
-        Error(n.LOC(), "unsupported: " + PSTR(n.scope) +
-                           " synchronization in " + STR(pl2s()) + " scope.");
-        error_count++;
-      }
+      if (CCtx().GetArch() != TargetArch::GCU4)
+        Error1(n.LOC(), STR(CCtx().GetArch()) + " does not support " +
+                            PSTR(n.scope) + " synchronization.");
+      else if (pl_depth != 3)
+        Error1(n.LOC(), "unsupported: " + PSTR(n.scope) +
+                            " synchronization in " + STR(pl2s()) + " scope.");
       break;
     default:
-      Error(n.scope->LOC(),
-            "unsupported synchronization: " + PSTR(n.scope) + ".");
+      Error1(n.scope->LOC(),
+             "unsupported synchronization: " + PSTR(n.scope) + ".");
     }
     return true;
   }

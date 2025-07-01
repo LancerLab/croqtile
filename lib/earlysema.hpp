@@ -87,8 +87,9 @@ private:
       false; // only void function does not require return value
   bool found_return = false;
   bool return_deduction = false;
-  int parallel_level = 0;
-  std::vector<int> parallel_levels;
+  int pl_depth = 0;
+  std::vector<int> pl_depths;
+  bool explicit_pl = false;
   bool allow_auto_threading = false;
   bool inside_loop = false;
 

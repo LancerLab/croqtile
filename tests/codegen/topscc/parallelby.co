@@ -1,17 +1,62 @@
-// RUN: choreo -t topscc -es -dp=memreuse %s -o - | FileCheck %s
+// RUN: choreo -t topscc -es -dp=memreuse -arch=gcu400 %s -o - | FileCheck %s
 
 __co__ auto bar() {
   parallel by 2 {
     call foo();
   }
+  parallel by 2 : shared {}
+  parallel by 2 : local {}
+  parallel by 2 : sublocal {}
+
+  parallel {sx,sy,sz} by [2,2,1] : shared
+    parallel {lx,ly,lz} by [2,2,2] : local {}
+
+  parallel by 1 : shared
+    parallel by 2 : sublocal {}
 }
 
-// CHECK: __global__ void __choreo_device_bar()
+// CHECK: __thread_dims__(1, 1, 1)
+// CHECK: __global__ void __choreo_device_bar0()
+
+// CHECK: __thread_dims__(1, 1, 1)
+// CHECK: __global__ void __choreo_device_bar1()
+
+// CHECK: __thread_dims__(1, 1, 1)
+// CHECK: __global__ void __choreo_device_bar2()
+
+// CHECK: __thread_dims__(2, 1, 1)
+// CHECK: __global__ void __choreo_device_bar3()
+
+// CHECK: __thread_dims__(1, 1, 1)
+// CHECK: __global__ void __choreo_device_bar4()
+
+// CHECK: __thread_dims__(2, 1, 1)
+// CHECK: __global__ void __choreo_device_bar5()
 
 // CHECK: void bar() {
 // CHECK:   dim3 __bar_gdims0(1, 1, 1);
 // CHECK:   dim3 __bar_bdims0(2, 1, 1);
-// CHECK:   __choreo_device_bar<<<__bar_gdims0, __bar_bdims0>>>();
+// CHECK:   __choreo_device_bar0<<<__bar_gdims0, __bar_bdims0>>>();
+// CHECK:   choreo::abend_true(topsDeviceSynchronize());
+// CHECK:   dim3 __bar_gdims1(2, 1, 1);
+// CHECK:   dim3 __bar_bdims1(1, 1, 1);
+// CHECK:   __choreo_device_bar1<<<__bar_gdims1, __bar_bdims1>>>();
+// CHECK:   choreo::abend_true(topsDeviceSynchronize());
+// CHECK:   dim3 __bar_gdims2(1, 1, 1);
+// CHECK:   dim3 __bar_bdims2(2, 1, 1);
+// CHECK:   __choreo_device_bar2<<<__bar_gdims2, __bar_bdims2>>>();
+// CHECK:   choreo::abend_true(topsDeviceSynchronize());
+// CHECK:   dim3 __bar_gdims3(1, 1, 1);
+// CHECK:   dim3 __bar_bdims3(1, 1, 1);
+// CHECK:   __choreo_device_bar3<<<__bar_gdims3, __bar_bdims3>>>();
+// CHECK:   choreo::abend_true(topsDeviceSynchronize());
+// CHECK:   dim3 __bar_gdims4(2, 2, 1);
+// CHECK:   dim3 __bar_bdims4(2, 2, 2);
+// CHECK:   __choreo_device_bar4<<<__bar_gdims4, __bar_bdims4>>>();
+// CHECK:   choreo::abend_true(topsDeviceSynchronize());
+// CHECK:   dim3 __bar_gdims5(1, 1, 1);
+// CHECK:   dim3 __bar_bdims5(1, 1, 1);
+// CHECK:   __choreo_device_bar5<<<__bar_gdims5, __bar_bdims5>>>();
 // CHECK:   choreo::abend_true(topsDeviceSynchronize());
 // CHECK: }
 

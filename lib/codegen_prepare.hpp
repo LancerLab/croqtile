@@ -74,24 +74,41 @@ private:
 
       auto& lcs = cgi->GetFunctionLaunches(fname);
 
+      // Add a new launch config
       if (parallel_level == 1) {
         // represents the index of the current ParallelBy in cgi
         n.note += std::to_string(lcs.size()) + ", ";
         lcs.push_back({});
-        lcs.back().SetBlockDims(pb->BoundValues());
-      } else if (parallel_level == 2) {
+      }
+
+      // All the pb in a nested pb is explicitly specified with pb level.
+      if (Storage s = n.GetLevel(); s != Storage::NONE) {
         auto& lc = lcs.back();
-        lc.OverwriteGDimsByBDims();
-        lc.ResetBDims();
-        lc.SetBlockDims(pb->BoundValues());
-      } else if (parallel_level == 3) {
-        auto& lc = lcs.back();
-        lc.ResetWDims();
-        lc.SetWarpDims(pb->BoundValues());
-      } else
-        choreo_unreachable("The parallel-by level " +
-                           std::to_string(parallel_level) +
-                           " is not supported.");
+        switch (s) {
+        case Storage::SHARED: lc.SetGridDims(pb->BoundValues()); break;
+        case Storage::LOCAL: lc.SetBlockDims(pb->BoundValues()); break;
+        case Storage::SUB: lc.SetWarpDims(pb->BoundValues()); break;
+        default:
+          choreo_unreachable("The explicit parallel-by level " + STR(s) +
+                             " is not supported.");
+        }
+      } else {
+        if (parallel_level == 1) {
+          lcs.back().SetBlockDims(pb->BoundValues());
+        } else if (parallel_level == 2) {
+          auto& lc = lcs.back();
+          lc.OverwriteGDimsByBDims();
+          lc.ResetBDims();
+          lc.SetBlockDims(pb->BoundValues());
+        } else if (parallel_level == 3) {
+          auto& lc = lcs.back();
+          lc.ResetWDims();
+          lc.SetWarpDims(pb->BoundValues());
+        } else
+          choreo_unreachable("The parallel-by level " +
+                             std::to_string(parallel_level) +
+                             " is not supported.");
+      }
     }
     return true;
   }

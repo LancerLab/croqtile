@@ -185,7 +185,7 @@ void choreo_info(const char *message) {
 %token <std::string> IDENTIFIER ATTR_CO
 // type related
 %token <std::string> MDSPAN ITUPLE EVENT MUTABLE
-%token <Choreo::Storage> LOCAL SHARED GLOBAL
+%token <Choreo::Storage> SUBLOCAL LOCAL SHARED GLOBAL
 %token <Choreo::BaseType> F32 F16 BF16 U16 S16 U8 S8 U32 S32 U64 S64 INT HALF8 HALF BFP16 FLOAT DOUBLE BOOL VOID
 // builtin operations
 %token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK SUBSPAN MODSPAN AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN
@@ -199,7 +199,7 @@ void choreo_info(const char *message) {
 %nterm <bool> bool_value sync_type optional_mutable
 %nterm <int> integer_value index_or_none const_sizeof
 %nterm <std::vector<size_t>> optional_array_dims
-%nterm <Choreo::Storage> storage
+%nterm <Choreo::Storage> storage pl_annotation 
 %nterm <Choreo::BaseType> fundamental_type
 %nterm <AST::ptr<AST::CppSourceCode>> host_code inlcpp_stmt
 %nterm <AST::ptr<AST::Memory>> storage_qual
@@ -224,7 +224,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::IfElseBlock>> if_else_block
 %nterm <AST::ptr<AST::WithIn>> within
 %nterm <AST::ptr<AST::WhereBind>> where_bind
-%nterm <AST::ptr<AST::ParallelBy>> paraby_block parabys paraby
+%nterm <AST::ptr<AST::ParallelBy>> paraby_block parabys paraby paraby_with_pl_anno
 %nterm <AST::ptr<AST::Return>> return_stmt
 %nterm <AST::ptr<AST::Synchronize>> sync_stmt
 %nterm <std::vector<ptr<AST::TSInfo>>> ts_infos
@@ -541,7 +541,7 @@ paraby_block
     ;
 
 parabys
-    : parabys COMMA paraby {
+    : parabys COMMA paraby_with_pl_anno {
         // add the paraby as the first stmt of inner-most parallel-by
         auto pb = $1;
         while (!pb->stmts->None() && isa<AST::ParallelBy>(pb->stmts->SubAt(0)))
@@ -549,8 +549,14 @@ parabys
         pb->stmts->Append($3);
         $$ = $1;
       }
-    | paraby { $$ = $1; }
+    | paraby_with_pl_anno { $$ = $1; }
     ; /* do not allow empty paraby */
+
+paraby_with_pl_anno
+    : paraby pl_annotation {
+        $1->SetLevel($2);
+        $$ = $1;
+      }
 
 paraby
     : BY s_expr {
@@ -939,6 +945,12 @@ storage
     : LOCAL   { $$ = $1; }
     | SHARED  { $$ = $1; }
     | GLOBAL  { $$ = $1; }
+    ;
+
+pl_annotation
+    : COL storage { $$ = $2; }
+    | COL SUBLOCAL { $$ = $2; }
+    | /* empty */ { $$ = Storage::NONE; }
     ;
 
 storage_qual

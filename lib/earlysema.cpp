@@ -12,17 +12,18 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
     requires_return = false;
     return_deduction = false;
     found_return = false;
-    parallel_level = 0;
+    pl_depth = 0;
+    explicit_pl = false;
     inthreads_levels.clear();
     inthreads_levels.push_back(0);
   } else if (isa<AST::ParallelBy>(&n)) {
-    parallel_level++;
-    parallel_levels.push_back(parallel_level);
+    pl_depth++;
+    pl_depths.push_back(pl_depth);
     inthreads_levels.push_back(0);
-    assert(inthreads_levels.size() == (unsigned)parallel_level + 1);
+    assert(inthreads_levels.size() == (unsigned)pl_depth + 1);
   } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
-    ++inthreads_levels[parallel_level];
-    if (inthreads_levels[parallel_level] > 1)
+    ++inthreads_levels[pl_depth];
+    if (inthreads_levels[pl_depth] > 1)
       it->outer = false; // it is a inner inthreads
   } else if (isa<AST::Parameter>(&n)) {
     in_decl = true;
@@ -55,12 +56,13 @@ bool EarlySemantics::AfterVisitImpl(AST::Node& n) {
              "return statement found in void function '" + f->name + "`.");
     }
   } else if (isa<AST::ParallelBy>(&n)) {
-    assert(parallel_level > 0);
-    assert(inthreads_levels.size() == (unsigned)parallel_level + 1);
+    assert(pl_depth > 0);
+    assert(inthreads_levels.size() == (unsigned)pl_depth + 1);
     inthreads_levels.pop_back();
-    parallel_level--;
+    pl_depth--;
+    if (pl_depth == 0) explicit_pl = false;
   } else if (isa<AST::InThreadsBlock>(&n)) {
-    --inthreads_levels[parallel_level];
+    --inthreads_levels[pl_depth];
   } else if (isa<AST::WithBlock>(&n)) {
     with_syms.clear();
   } else if (isa<AST::Parameter>(&n)) {
@@ -772,7 +774,7 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
     }
 
     // event type is purely declarative
-    if (isa<EventType>(tty) && inthreads_levels[parallel_level] > 0) {
+    if (isa<EventType>(tty) && inthreads_levels[pl_depth] > 0) {
       Error(n.LOC(),
             "the event should not be declared inside a inthreads block.");
       error_count++;
@@ -1163,38 +1165,47 @@ bool EarlySemantics::Visit(AST::ParamList& n) {
 bool EarlySemantics::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
 
-  if (parallel_level > 1 && n.async) {
-    Error1(n.LOC(), "inner parallel-by level can not be asynchronous.");
+  const std::string pl_anno_msg =
+      "For nested parallel-by, either all must explicitly specify their "
+      "parallelism level, or none should specify it — allowing Choreo "
+      "to automatically infer the levels.";
+  // The pb is specified with parallel level explicitly.
+  if (n.GetLevel() != Storage::NONE) {
+    // current is specified, outer not.
+    if (pl_depth > 1 && !explicit_pl) Error1(n.LOC(), pl_anno_msg);
+    explicit_pl = true;
+  } else {
+    // outer is specified, current not.
+    if (explicit_pl) Error1(n.LOC(), pl_anno_msg);
   }
 
+  if (pl_depth > 1 && n.async)
+    Error1(n.LOC(), "inner parallel-by level can not be asynchronous.");
+
   auto bty = NodeType(*n.BoundExpr());
-  if (!SupportIntListCollapse(bty)) {
+  if (!SupportIntListCollapse(bty))
     Error1(n.BoundExpr()->LOC(),
            "the parallel bound requires integers but got '" + PSTR(bty) + "'.");
-  } else if (isa<ITupleType>(bty) && !n.IsBracketed()) {
+  else if (isa<ITupleType>(bty) && !n.IsBracketed())
     Error1(n.BoundExpr()->LOC(),
            "must use mdspan instead of ituple to define the parallel bound.");
-  }
 
   if (n.HasSubPVs()) {
     for (auto sb : n.AllBoundExprs()) {
       auto sbty = NodeType(*sb);
-      if (!SupportIntListCollapse(sbty)) {
+      if (!SupportIntListCollapse(sbty))
         Error1(sb->LOC(), "the parallel bounds require integers but got '" +
                               PSTR(sbty) + "'.");
-      } else if ((n.SubPVCount() == 1) && isa<ITupleType>(sbty) &&
-                 !n.IsBracketed()) {
+      else if ((n.SubPVCount() == 1) && isa<ITupleType>(sbty) &&
+               !n.IsBracketed())
         Error1(
             n.BoundExpr()->LOC(),
             "must use mdspan instead of ituple to define the parallel bound.");
-      }
     }
-
     auto ub_count = CountMultiValues(n.BoundExprs());
-    if (ub_count > 3) {
+    if (ub_count > 3)
       Error1(n.LOC(),
              "The number of parallel dimensions is limited to 3 (x, y, z).");
-    }
 
     SetNodeType(*n.BPV(), MakeBoundedITupleType(Shape(ub_count), "pv"));
   } else
@@ -1214,37 +1225,31 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
 
     auto pv_count = CountMultiValues(n.SubPVs());
     auto ub_count = CountMultiValues(n.BoundExprs());
-    if (pv_count > ub_count) {
+    if (pv_count > ub_count)
       Error1(n.LOC(), "parallel variables are more than their bounds (" +
                           std::to_string(pv_count) + " vs. " +
                           std::to_string(ub_count) + ").");
-    } else if (pv_count < ub_count) {
+    else if (pv_count < ub_count)
       Error1(n.LOC(), "parallel variables are less than their bounds (" +
                           std::to_string(pv_count) + " vs. " +
                           std::to_string(ub_count) + ").");
-    }
   }
 
   // simple integer value check
-  if (auto il = AST::GetIntLiteral(*n.BoundExpr()); il && (il->Val() <= 0)) {
+  if (auto il = AST::GetIntLiteral(*n.BoundExpr()); il && (il->Val() <= 0))
     Error1(n.BPV()->LOC(),
            "bound " + STR(n.BoundExpr()) +
                " in parallelby is invalid: should be greater than 0.");
-  }
 
-  for (auto& bv : n.AllBoundExprs()) {
-    if (auto il = AST::GetIntLiteral(*bv); il && (il->Val() <= 0)) {
+  for (auto& bv : n.AllBoundExprs())
+    if (auto il = AST::GetIntLiteral(*bv); il && (il->Val() <= 0))
       Error1(n.LOC(),
              "bound item " + STR(bv) +
                  " in parallelby is invalid: should be greater than 0.");
-    }
-  }
 
-  if (auto size = parallel_levels.size(); size >= 2)
-    if (parallel_levels[size - 1] == parallel_levels[size - 2] &&
-        parallel_levels.back() == 2) {
+  if (auto size = pl_depths.size(); size >= 2)
+    if (pl_depths[size - 1] == pl_depths[size - 2] && pl_depths.back() == 2)
       Error1(n.LOC(), "Multiple inner parallels are not allowed!");
-    }
 
   diverges.Add(InScopeName(n.BPV()->name));
   for (auto& v : n.AllSubPVs()) {
@@ -1287,9 +1292,8 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
 
   size_t rank = 0;
   if (auto itty = dyn_cast<ScalarIntegerType>(ity)) {
-    if (itty->IsMutable()) {
+    if (itty->IsMutable())
       Error1(n.in->LOC(), "mutable integer can not be used inside with-in.");
-    }
     rank = 1;
   } else if (auto mdst = dyn_cast<MDSpanType>(ity)) {
     rank = mdst->Dims();
@@ -1299,27 +1303,23 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
   }
 
   // check the if rank equal between with-in and with-matcher
-  if (n.with_matchers && n.with_matchers->Count() != rank) {
+  if (n.with_matchers && n.with_matchers->Count() != rank)
     Error1(n.in->LOC(), "un-matched with-matcher-count(" +
                             std::to_string(n.with_matchers->Count()) +
                             ") and mdspan rank(" + std::to_string(rank) + ").");
-  }
 
-  if (n.with && n.with->name == "_") {
+  if (n.with && n.with->name == "_")
     Error1(n.LOC(),
            "_ is not allowed as a with variable. Can only be used in chunkat.");
-  }
 
-  if (n.with_matchers) {
-    for (auto v : n.with_matchers->AllValues()) {
+  if (n.with_matchers)
+    for (auto v : n.with_matchers->AllValues())
       if (auto id = dyn_cast<AST::Identifier>(v); id->name == "_") {
         Error1(v->LOC(),
                "_ is not allowed as a with variable. Can only be used "
                "in chunkat.");
         continue;
       }
-    }
-  }
 
   // infer the type of bounded variable
   if (n.with) {
@@ -1339,7 +1339,7 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
     for (auto v : n.with_matchers->AllValues()) {
       // only id are accepted in with-matcher
       if (!isa<AST::Identifier>(v)) {
-        Error(v->LOC(), "expect an identifier.");
+        Error1(v->LOC(), "expect an identifier.");
         continue;
       }
       auto sname = cast<AST::Identifier>(v)->name;
@@ -1379,12 +1379,10 @@ bool EarlySemantics::Visit(AST::Memory& n) {
 bool EarlySemantics::Visit(AST::SpanAs& n) {
   TraceEachVisit(n);
 
-  for (auto val : n.list->AllValues()) {
-    if (mutables.Contains(val)) {
+  for (auto val : n.list->AllValues())
+    if (mutables.Contains(val))
       Error1(val->LOC(),
              "the mutable value can not used for mdspan declaration.");
-    }
-  }
 
   auto sty = GetSpannedType(NodeType(*n.id));
   if (!sty) {
@@ -1430,7 +1428,7 @@ bool EarlySemantics::Visit(AST::DMA& n) {
   // target specific check
   if ((CCtx().GetTarget() == CompileTarget::Factor ||
        CCtx().GetTarget() == CompileTarget::Topscc) &&
-      parallel_level == 0) {
+      pl_depth == 0) {
     if (auto m = dyn_cast<AST::Memory>(n.to)) {
       if ((m->Get() != Storage::GLOBAL) && (m->Get() != Storage::DEFAULT)) {
         Error1(n.LOC(),
@@ -1727,7 +1725,7 @@ bool EarlySemantics::Visit(AST::Call& n) {
 
   size_t ec = error_count;
 
-  if ((parallel_level == 0) && !n.IsBIF()) {
+  if ((pl_depth == 0) && !n.IsBIF()) {
     Error1(n.LOC(),
            "unable to call kernel function outside the parallel-by block(s).");
     return false;
@@ -1967,7 +1965,7 @@ bool EarlySemantics::Visit(AST::Select& n) {
 bool EarlySemantics::Visit(AST::Return& n) {
   TraceEachVisit(n);
   found_return = true;
-  if (parallel_level != 0) {
+  if (pl_depth != 0) {
     Error1(n.LOC(), "unable to return inside the parallel-by block(s).");
     return false;
   }
@@ -2050,7 +2048,7 @@ bool EarlySemantics::Visit(AST::InThreadsBlock& n) {
     Error1(n.pred->LOC(), "requires a predication expression but got '" +
                               PSTR(NodeType(*n.pred)) + "'.");
 
-  if (parallel_level == 0)
+  if (pl_depth == 0)
     Error1(n.pred->LOC(), "inthreads can not be declared in global scope.");
 
   if (n.async && !n.outer)

@@ -1,0 +1,18 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ auto foo() {
+  parallel by 2 {
+    parallel by 4 : sublocal {}
+  }
+}
+
+
+__co__ auto bar() {
+  parallel by 2 : shared {
+    parallel by 4 {}
+  }
+}
+
+// CHECK: error: For nested parallel-by, either all must explicitly specify their parallelism level, or none should specify it — allowing Choreo to automatically infer the levels.
+// CHECK: error: For nested parallel-by, either all must explicitly specify their parallelism level, or none should specify it — allowing Choreo to automatically infer the levels.
+// CHECK: Totally 2 errors have been detected.
