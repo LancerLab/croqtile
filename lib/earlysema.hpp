@@ -17,7 +17,7 @@ private:
 
   VisitorWithScope* vws = nullptr;
   std::string name;
-  bool debug;
+  bool debug = false;
 
 public:
   DerivableAttribute(VisitorWithScope* v, const std::string& n, bool d = false)
@@ -90,6 +90,7 @@ private:
   int parallel_level = 0;
   std::vector<int> parallel_levels;
   bool allow_auto_threading = false;
+  bool inside_loop = false;
 
   std::vector<int> inthreads_levels;
 
@@ -181,6 +182,7 @@ public:
   bool Visit(AST::ChunkAt&) override;
   bool Visit(AST::Wait&) override;
   bool Visit(AST::Trigger&) override;
+  bool Visit(AST::Break&) override;
   bool Visit(AST::Call&) override;
   bool Visit(AST::Rotate&) override;
   bool Visit(AST::Synchronize&) override;

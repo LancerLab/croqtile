@@ -29,6 +29,8 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
     allow_named_dim = true; // tolerate repeated symbols inside mdspan params
   } else if (isa<AST::Assignment>(&n)) {
     donot_check_id = true;
+  } else if (isa<AST::ForeachBlock>(&n) || isa<AST::WhileBlock>(&n)) {
+    inside_loop = true;
   }
 
   return true;
@@ -66,6 +68,8 @@ bool EarlySemantics::AfterVisitImpl(AST::Node& n) {
     allow_named_dim = false;
   } else if (isa<AST::Assignment>(&n)) {
     donot_check_id = false;
+  } else if (isa<AST::ForeachBlock>(&n) || isa<AST::WhileBlock>(&n)) {
+    inside_loop = false;
   }
 
   return true;
@@ -1702,6 +1706,17 @@ bool EarlySemantics::Visit(AST::Trigger& n) {
     if (!isa<EventType>(ty))
       Error1(v->LOC(),
              "expect `" + PSTR(v) + "' an event but got '" + PSTR(ty) + "'.");
+  }
+
+  return true;
+}
+
+bool EarlySemantics::Visit(AST::Break& n) {
+  TraceEachVisit(n);
+
+  if (!inside_loop) {
+    Error1(n.LOC(), "unable to break outside a loop.");
+    return false;
   }
 
   return true;

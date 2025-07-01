@@ -1690,6 +1690,15 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
   return true;
 }
 
+bool TopsccCodeGen::Visit(AST::Break& n) {
+  TraceEachVisit(n);
+  if (IsHost())
+    hs << h_indent << "break;\n";
+  else
+    ds << d_indent << "break;\n";
+  return true;
+}
+
 bool TopsccCodeGen::Visit(AST::Trigger& n) {
   TraceEachVisit(n);
 

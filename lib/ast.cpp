@@ -237,6 +237,12 @@ void Trigger::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
+void Break::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+  v.Visit(*this);
+  v.AfterVisit(*this);
+}
+
 void Return::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
   if (value) value->accept(v);

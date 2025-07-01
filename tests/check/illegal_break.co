@@ -1,0 +1,18 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ void foo(int a) {
+  if (a > 3) break;
+
+  event e;
+  while (e) break;
+
+  parallel by 1 {
+    break;
+    with a in [3] {
+     break;
+     foreach a break;
+    }
+  }
+}
+
+// CHECK-COUNT-3: error: unable to break outside a loop.

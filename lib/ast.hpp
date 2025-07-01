@@ -2079,6 +2079,21 @@ struct Trigger : public Node, public TypeIDProvider<Trigger> {
   __UDT_TYPE_INFO__(Node, Trigger)
 };
 
+struct Break : public Node, public TypeIDProvider<Break> {
+  Break(const location& l) : Node(l) {}
+
+  ptr<Node> CloneImpl() const override { return Make<Break>(LOC()); }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool = false) const override {
+    os << "\n" << prefix << "`- Break";
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, Break)
+};
+
 struct Return : public Node, public TypeIDProvider<Return> {
   ptr<Node> value = nullptr;
 

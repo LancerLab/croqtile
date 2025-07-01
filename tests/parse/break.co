@@ -1,0 +1,25 @@
+// RUN: choreo -e %s | FileCheck %s
+
+__co__ void foo() {
+  event e;
+  while (e) break;
+  foreach a in [3] if (a == 2) break;
+}
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: foo
+// CHECK:  `- Return type: void
+// CHECK:  `- Parameters:
+// CHECK:  `- Var Decl (event, default): e
+// CHECK:  `- While Block:
+// CHECK:   `- Predication: e
+// CHECK:   `- Break
+// CHECK:  `- With Block:
+// CHECK:    (within constraints)
+// CHECK:    `- a in [ 3 ]
+// CHECK:    (with statements)
+// CHECK:    `- Foreach Block:
+// CHECK:     `- Iteration variables: a
+// CHECK:     `- Branch On Condition:  (a == 2)
+// CHECK:      `- If-Block:
+// CHECK:       `- Break

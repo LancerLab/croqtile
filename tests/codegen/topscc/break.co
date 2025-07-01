@@ -1,0 +1,16 @@
+// RUN: choreo -es %s -o - | FileCheck %s
+
+__co__ void foo() {
+  event e;
+  while (e) break;
+  foreach a in [3] if (a == 2) break;
+}
+
+// CHECK:   while (e) {
+// CHECK:     break;
+// CHECK:   }
+// CHECK:     for (__iv_a__elem__0 = 0; __iv_a__elem__0 < 3; ++__iv_a__elem__0) {
+// CHECK:       if ((a == 2)) {
+// CHECK:         break;
+// CHECK:       }
+// CHECK:     }

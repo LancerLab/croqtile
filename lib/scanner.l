@@ -344,6 +344,7 @@ cstr        \"([^"\\]|\\.)*\"
   "return"   return Choreo::Parser::make_RET(yytext, loc);
   "where"    return Choreo::Parser::make_WHERE(yytext, loc);
   "while"    return Choreo::Parser::make_WHILE(yytext, loc);
+  "break"    return Choreo::Parser::make_BREAK(yytext, loc);
   "<->"      return Choreo::Parser::make_BIND   (loc);
   "-"        return Choreo::Parser::make_MINUS  (loc);
   "--"       return Choreo::Parser::make_MMINUS (loc);
