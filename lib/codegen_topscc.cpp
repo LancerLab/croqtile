@@ -2296,7 +2296,7 @@ void TopsccCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
   for (auto item : symbolic_dimensions) {
     oss << ((index++ > 0) ? ", unsigned " : "unsigned ");
     oss << UnScopedName(item.first);
-    ssm.MapDeviceSymbol(item.first, UnScopedName(item.first));
+    ssm.MapDeviceSymbolIfNotExist(item.first, UnScopedName(item.first));
   }
 
   const auto& offset_args =
