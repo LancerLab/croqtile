@@ -498,35 +498,20 @@ struct Shape {
     return values[val_no].at(index);
   }
 
-  int NthInteger(size_t index) const {
-    return cast<sbe::NumericValue>(Value().at(index))->Value();
-  }
-
-  std::optional<IntegerList> GetIntList() const {
-    IntegerList int_list;
-    for (auto v : Value()) {
-      if (auto pint = dyn_cast<sbe::NumericValue>(v))
-        int_list.push_back(pint->Value());
-      else
-        return std::nullopt;
-    }
-    return int_list;
-  }
-
   bool IsDynamic() const {
     for (auto v : Value())
-      if (!isa<sbe::NumericValue>(v))
+      if (!isa<sbe::NumericValue>(v->Normalize()))
         return true; // a symbolic value represents that the value is decided
                      // at runtime
     return false;
   }
 
   // retrieve the dimensions that are dynamic
-  std::vector<std::pair<int, ValueExpr>> GetDynamicDims() const {
-    std::vector<std::pair<int, ValueExpr>> res;
+  std::vector<std::pair<size_t, ValueItem>> DynamicDimensions() const {
+    std::vector<std::pair<size_t, ValueItem>> res;
     size_t i = 0;
     for (auto& v : Value()) {
-      if (!isa<sbe::NumericValue>(v)) res.emplace_back(i, PSTR(v));
+      if (!v->IsNumeric() && !v->IsBoolean()) res.emplace_back(i, v);
       ++i;
     }
     return res;
@@ -537,26 +522,7 @@ struct Shape {
     return GetSymbols(Value());
   }
 
-  std::string GetElementCountExpression(bool ULL_suffix = false) const {
-    if (!IsDynamic())
-      return std::to_string(ElementCount()) + (ULL_suffix ? "ULL" : "");
-
-    assert(!Value().empty() && "no values inside the shape.");
-    std::string res;
-#if 1
-    res = "(" + ValueItemAsString(Value()[0], ULL_suffix) + ")";
-    for (size_t i = 1; i < Value().size(); ++i)
-      res += " * (" + ValueItemAsString(Value()[i], ULL_suffix) + ")";
-    return res;
-#else
-    res = ValueItemAsString(Value()[0], ULL_suffix);
-    for (size_t i = 1; i < Value().size(); ++i)
-      res += " * " + ValueItemAsString(Value()[i], ULL_suffix);
-    return res;
-#endif
-  }
-
-  std::optional<std::vector<size_t>> GetUIntList() const {
+  std::optional<std::vector<size_t>> PosValList() const {
     std::vector<size_t> int_list;
     for (auto v : Value()) {
       if (auto pint = dyn_cast<sbe::NumericValue>(v)) {
@@ -568,38 +534,24 @@ struct Shape {
     return int_list;
   }
 
-  IntegerList IntList() const {
-    auto ilist = GetIntList();
-    if (!ilist) choreo_unreachable("fail to get an integer list.");
-    return *ilist;
+  const ValueItem ElementCountValue() const {
+    assert(!Value().empty() && "no values inside the shape.");
+    return MultiplyAll(Value());
   }
 
   size_t ElementCount() const {
-    auto ilist = IntList();
-    size_t sz = 1;
-    for (int s : ilist) {
-      if (s < 0) choreo_unreachable("negative value is found.");
-      sz *= s;
-    }
-    return sz;
+    auto ecv = ElementCountValue();
+    if (auto nv = dyn_cast<sbe::NumericValue>(ecv)) return nv->Value();
+    choreo_unreachable("fail to get an integer list.");
+    return 0;
   }
 
-  ValueItem ElementCountValue() const {
-    auto vi = sbe::nu(1);
-    for (auto v : Value()) vi = vi * v;
-    return vi->Normalize();
+  const std::string ElemCountExprString(bool ULL_suffix = false) const {
+    assert(!Value().empty() && "no values inside the shape.");
+    return ElementCountValue()->ToString((ULL_suffix ? "ULL" : ""));
   }
 
   void Print(std::ostream& os) const {
-    if (!IsValidValueNumber(val_no)) {
-      os << "[]";
-    } else {
-      assert(values.Exists(val_no) && "invalid value number.");
-      PrintValueList(Value(), os);
-    }
-  }
-
-  void PrintAsListSquared(std::ostream& os) const {
     if (!IsValidValueNumber(val_no)) {
       os << "[]";
     } else {
@@ -1294,16 +1246,16 @@ struct SpannedType : public Type, public TypeIDProvider<SpannedType> {
   }
   size_t ByteSize() const { return SizeOf(e_type) * GetShape().ElementCount(); }
 
-  const std::string ShapeSizeExpression(bool ULL_suffix = false) const {
+  const std::string ShapeSizeExpression() const {
     if (RuntimeShaped())
-      return "(" + GetShape().GetElementCountExpression(ULL_suffix) + ")";
+      return "(" + GetShape().ElemCountExprString() + ")";
     else
-      return std::to_string(ElementCount()) + (ULL_suffix ? "ULL" : "");
+      return std::to_string(ElementCount());
   }
 
   const std::string ByteSizeExpression(bool ULL_suffix = false) const {
     if (RuntimeShaped())
-      return "(" + GetShape().GetElementCountExpression(ULL_suffix) + ") * " +
+      return "(" + GetShape().ElemCountExprString(ULL_suffix) + ") * " +
              std::to_string(SizeOf(e_type));
     else
       return std::to_string(ByteSize()) + (ULL_suffix ? "ULL" : "");

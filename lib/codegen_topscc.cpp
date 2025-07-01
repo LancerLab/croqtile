@@ -440,7 +440,7 @@ TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
                    << ValueSTR(shape.ValueAt(i)) << "))";
 #else
         offsets[i] << "(int)((" << exprs[i] << ") * "
-                   << UnScopedExpr(ValueItemAsString(shape.ValueAt(i))) << ")";
+                   << UnScopedExpr(STR(shape.ValueAt(i))) << ")";
 #endif
       // TODO: should consider precedence of `*`
     }
@@ -472,8 +472,7 @@ const std::string TopsccCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca) const {
     for (auto p : tsi->GetIndices()) {
       auto idx_exprs = SplitStringByDelimiter(ExprSTR(p, IsHost()));
       std::string factor = "1";
-      if (shape.Rank() > i)
-        factor = shape.TrimDims(i).GetElementCountExpression();
+      if (shape.Rank() > i) factor = shape.TrimDims(i).ElemCountExprString();
       for (auto i_expr : idx_exprs) {
         if (i != 0) offset << " + ";
         if (i_expr == "__choreo_no_tiling__")
@@ -2142,7 +2141,7 @@ void TopsccCodeGen::EmitHostRuntimeCheck() {
     size_t dim;
     std::string elem_name;
   };
-  std::map<ValueExpr, std::vector<Entry>> ve_entries_map;
+  std::map<std::string, std::vector<Entry>> ve_entries_map;
 
   size_t host_pindex = 0;
   for (const auto& item : GetChoreoFuncIns(cgi)) {
@@ -2166,10 +2165,9 @@ void TopsccCodeGen::EmitHostRuntimeCheck() {
              << Ordinal(host_pindex + 1) << " parameter (\'" << name
              << "\', dim: " << dim_count << "): got \" + std::to_string("
              << elem_name << ") + \".\");\n";
-        } else if (auto vale = VISym(vi)) {
+        } else if (auto vale = VISym(vi))
           ve_entries_map[*vale].push_back(
               {host_pindex + 1, dim_count, elem_name});
-        }
         dim_count++;
       }
     }
@@ -2864,7 +2862,7 @@ const std::string TopsccCodeGen::ExprSTR(AST::ptr<AST::Node> e,
           auto var = RemoveSuffix(*AST::GetName(*expr->GetR()), ".span");
           auto shape = GetShape(GetSymbolType(var));
           assert(shape.IsValid() && "Invalid shape is found");
-          oss << shape.GetElementCountExpression();
+          oss << shape.ElemCountExprString();
         }
       } else if (expr->GetOp() == "++") {
         oss << "++" << ExprSTR(expr->GetR(), is_host);
@@ -3016,8 +3014,7 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e, bool is_host,
               oss << " + ";
               if (shape.Rank() > idx + 1)
                 oss << "(" << name << " * "
-                    << shape.TrimDims(idx + 1).GetElementCountExpression()
-                    << ")";
+                    << shape.TrimDims(idx + 1).ElemCountExprString() << ")";
               else
                 oss << name;
               ++idx;
@@ -3030,7 +3027,7 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e, bool is_host,
             oss << " + ";
             if (shape.Rank() > idx + 1)
               oss << "(" << name << " * "
-                  << shape.TrimDims(idx + 1).GetElementCountExpression() << ")";
+                  << shape.TrimDims(idx + 1).ElemCountExprString() << ")";
             else
               oss << name;
             ++idx;
@@ -3104,7 +3101,7 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e, bool is_host,
           auto var = RemoveSuffix(*AST::GetName(*expr->GetR()), ".span");
           auto shape = GetShape(GetSymbolType(var));
           assert(shape.IsValid() && "Invalid shape is found");
-          oss << shape.GetElementCountExpression();
+          oss << shape.ElemCountExprString();
         }
       } else if (expr->GetOp() == "++") {
         oss << "++"

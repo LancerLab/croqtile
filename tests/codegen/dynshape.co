@@ -10,11 +10,11 @@ __co__ void foo(f32 [M, K] lhs, f32 [N, K] rhs) {
 // CHECK:   auto M = lhs.shape()[0];
 // CHECK:   auto N = rhs.shape()[0];
 // CHECK:   float * lhs__device = nullptr;
-// CHECK:   choreo::abend_true(topsMalloc(&lhs__device, ((M) * (K)) * 4));
-// CHECK:   choreo::abend_true(topsMemcpy(lhs__device, lhs.data(), ((M) * (K)) * 4, topsMemcpyHostToDevice));
+// CHECK:   choreo::abend_true(topsMalloc(&lhs__device, ((K * M)) * 4));
+// CHECK:   choreo::abend_true(topsMemcpy(lhs__device, lhs.data(), ((K * M)) * 4, topsMemcpyHostToDevice));
 // CHECK:   float * rhs__device = nullptr;
-// CHECK:   choreo::abend_true(topsMalloc(&rhs__device, ((N) * (K)) * 4));
-// CHECK:   choreo::abend_true(topsMemcpy(rhs__device, rhs.data(), ((N) * (K)) * 4, topsMemcpyHostToDevice));
+// CHECK:   choreo::abend_true(topsMalloc(&rhs__device, ((K * N)) * 4));
+// CHECK:   choreo::abend_true(topsMemcpy(rhs__device, rhs.data(), ((K * N)) * 4, topsMemcpyHostToDevice));
 // CHECK:   dim3 __foo_gdims0(1, 1, 1);
 // CHECK:   dim3 __foo_bdims0(1, 1, 1);
 // CHECK:   __choreo_device_foo<<<__foo_gdims0, __foo_bdims0>>>(lhs__device, rhs__device, K, M, N);

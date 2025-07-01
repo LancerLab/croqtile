@@ -1156,7 +1156,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
     //   auto output_rt_dim0 = dim_(args[0], 1);
     //   auto output = alloc_({output_rt_dim0}, __choreo_factor_out_type);
     //
-    const auto& dyn_dims = rty->GetShape().GetDynamicDims();
+    const auto& dyn_dims = rty->GetShape().DynamicDimensions();
     if (!dyn_dims.empty()) {
       compile_with_dynshape = true;
       type_name.clear();
@@ -1164,7 +1164,7 @@ bool FactorCodeGen::Visit(AST::FunctionDecl& d) {
         auto ddim_name =
             UnScopedName(name) + "_rt_dim" + std::to_string(ddim.first);
         dss << indent << "  auto " << ddim_name << " = "
-            << ReplaceFactorDynDimName(ddim.second) << ";\n";
+            << ReplaceFactorDynDimName(STR(ddim.second)) << ";\n";
         if (type_name.size() == 0)
           type_name += ddim_name;
         else
@@ -1535,7 +1535,7 @@ void FactorCodeGen::EmitHostRuntimeCheck(std::ostream& os) {
     size_t dim;
     std::string elem_name;
   };
-  std::map<ValueExpr, std::vector<Entry>> ve_entries_map;
+  std::map<std::string, std::vector<Entry>> ve_entries_map;
 
   size_t host_pindex = 0;
   for (auto& item : GetChoreoParameters()) {
@@ -1755,7 +1755,7 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
         auto var = RemoveSuffix(*AST::GetName(*expr->GetR()), ".span");
         auto shape = GetShape(GetSymbolType(var));
         assert(shape.IsValid() && "Invalid shape is found");
-        oss << WrapWithValue(shape.GetElementCountExpression());
+        oss << WrapWithValue(shape.ElemCountExprString());
       } else
         choreo_unreachable("Unsupported choreo expression.");
     } else if (expr->IsBinary()) {
@@ -1789,7 +1789,7 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
       } else if (expr->op == "dimof") {
         assert(expr->s.Rank() == 1);
         auto val = expr->s.ValueAt(0);
-        auto str = ValueItemAsString(val);
+        auto str = val->ToString();
         if (expr->s.IsDynamic()) {
           auto res = ReplaceDynDimRef(str);
           oss << (res.has_value() ? res.value() : str);

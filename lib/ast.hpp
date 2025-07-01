@@ -1594,7 +1594,7 @@ public:
 
   void PrintBound(std::ostream& os) const {
     auto ob = BoundValue();
-    os << ((IsValidValueItem(ob)) ? ValueItemAsString(ob) : STR(bound_expr));
+    os << ((IsValidValueItem(ob)) ? ob->ToString() : STR(bound_expr));
   }
 
   void PrintBounds(std::ostream& os) const {

@@ -68,7 +68,6 @@ inline constexpr bool IsValidBound(int v) { return v != GetInvalidBound(); }
 inline constexpr bool IsValidStride(int v) { return v != GetInvalidStride(); }
 
 // ------------------------------------------------------------------------- //
-using ValueExpr = std::string;
 using ValueItem = sbe::Operand;
 using ValueList = std::vector<ValueItem>;
 
@@ -102,29 +101,6 @@ inline bool IsComputable(const ValueList& vl) {
   for (auto& vi : vl)
     if (!IsComputable(vi)) return false;
   return true;
-}
-
-inline std::string ValueItemAsString(const ValueItem& vi,
-                                     bool ULL_suffix = false) {
-  if (ULL_suffix) {
-    if (isa<sbe::NumericValue>(vi))
-      return PSTR(vi) + (ULL_suffix ? "ULL" : "");
-    else if (isa<sbe::BooleanValue>(vi))
-      return PSTR(vi);
-    else if (auto bo = dyn_cast<sbe::BinaryOperation>(vi))
-      return "(" + ValueItemAsString(bo->GetLeft()) + " " +
-             STR(bo->GetOpCode()) + " " + ValueItemAsString(bo->GetRight()) +
-             ")";
-    else if (auto tn = dyn_cast<sbe::TernaryOperation>(vi))
-      return "(" + ValueItemAsString(tn->GetPred()) + " ? " +
-             ValueItemAsString(tn->GetLeft()) + " : " +
-             ValueItemAsString(tn->GetRight()) + ")";
-    else if (isa<sbe::SymbolicValue>(vi))
-      return PSTR(vi);
-    else
-      choreo_unreachable("unsupported value item type.");
-  } else
-    return PSTR(vi);
 }
 
 inline std::string STR(const ValueItem& vi) {
@@ -294,7 +270,7 @@ inline void PrintValueList(const ValueList& vl, std::ostream& os,
                            const char* lb = "[", const char* rb = "]") {
   if (lb) os << lb;
   if (!vl.empty()) {
-    os << vl[0];
+    os << STR(vl[0]);
     for (unsigned i = 1; i < vl.size(); ++i) { os << ", " << vl[i]; }
   }
   if (rb) os << rb;

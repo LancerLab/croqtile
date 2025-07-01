@@ -687,7 +687,7 @@ public:
                     size_t limit, const location& loc) {
     assert(idx < s.Rank());
     std::string message = "the " + Ordinal(idx + 1) + " dim " +
-                          ValueItemAsString(s.ValueAt(idx)) + " " + op + " " +
+                          s.ValueAt(idx)->ToString() + " " + op + " " +
                           std::to_string(limit) + ".";
 
     CheckValue(s.ValueAt(idx), op, limit, loc, message);
@@ -701,7 +701,7 @@ public:
       return;
     }
     VST_DEBUG(dbgs() << "[GCUCHECK] Generated check at " << loc << ": "
-                     << ValueItemAsString(vi) << " " << op << " "
+                     << vi->ToString() << " " << op << " "
                      << std::to_string(limit) + "ULL"
                      << "\n\twith message: " << message << "\n");
     message = "On " + cur_arch + ", must satisfy: " + message;
@@ -711,7 +711,7 @@ public:
         error_count++;
       }
     } else {
-      auto vi_str = ValueItemAsString(vi, true);
+      auto vi_str = vi->ToString("ULL");
       VST_DEBUG(dbgs() << "[GCUCHECK] Generated runtime check at " << loc
                        << ": " << vi_str << " " << op << " "
                        << std::to_string(limit) + "ULL"

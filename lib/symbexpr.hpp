@@ -304,7 +304,7 @@ inline static int64_t IsAssociative(OpCode op) {
 class SymbolicExpression {
 public:
   virtual ~SymbolicExpression() = default;
-  virtual std::string ToString() const = 0;
+  virtual const std::string ToString(const std::string& = "") const = 0;
   virtual bool IsNumeric() const = 0;
   virtual bool IsBoolean() const = 0;
   virtual size_t Hash() const = 0;
@@ -343,7 +343,9 @@ inline static std::string PSTR(const ptr<SymbolicExpression>& pse) {
 class InvalidValue : public SymbolicExpression,
                      public TypeIDProvider<InvalidValue> {
 public:
-  std::string ToString() const override { return "nil"; }
+  const std::string ToString(const std::string& = "") const override {
+    return "nil";
+  }
   size_t Hash() const override { return std::hash<int64_t>{}(-1LL); }
 
   bool IsNumeric() const override { return false; }
@@ -371,7 +373,9 @@ class NumericValue : public SymbolicExpression,
 public:
   NumericValue(int64_t value) : value(value) {}
 
-  std::string ToString() const override { return std::to_string(value); }
+  const std::string ToString(const std::string& suffix = "") const override {
+    return std::to_string(value) + suffix;
+  }
   int64_t Value() const { return value; }
   size_t Hash() const override { return std::hash<int64_t>{}(Value()); }
 
@@ -404,7 +408,9 @@ class BooleanValue : public SymbolicExpression,
 public:
   BooleanValue(bool value) : value(value) {}
 
-  std::string ToString() const override { return (value) ? "true" : "false"; }
+  const std::string ToString(const std::string& = "") const override {
+    return (value) ? "true" : "false";
+  }
   bool Value() const { return value; }
   size_t Hash() const override { return std::hash<bool>{}(Value()); }
 
@@ -440,7 +446,9 @@ class SymbolicValue : public SymbolicExpression,
 public:
   SymbolicValue(const std::string& name) : symbol(name) {}
 
-  std::string ToString() const override { return symbol; }
+  const std::string ToString(const std::string& = "") const override {
+    return symbol;
+  }
 
   bool IsNumeric() const override { return false; }
   bool IsBoolean() const override { return false; }
@@ -478,7 +486,9 @@ private:
 public:
   UnaryOperation(OpCode op, const Operand& o) : op(op), oprd(o) {}
 
-  std::string ToString() const override { return STR(op) + PSTR(oprd); }
+  const std::string ToString(const std::string& suffix = "") const override {
+    return oprd->ToString(suffix) + PSTR(oprd);
+  }
 
   bool IsNumeric() const override { return oprd->IsNumeric(); }
   bool IsBoolean() const override { return false; }
@@ -541,8 +551,9 @@ public:
   BinaryOperation(OpCode op, const Operand& left, const Operand& right)
       : op(op), left(left), right(right) {}
 
-  std::string ToString() const override {
-    return "(" + PSTR(left) + " " + STR(op) + " " + PSTR(right) + ")";
+  const std::string ToString(const std::string& suffix = "") const override {
+    return "(" + left->ToString(suffix) + " " + STR(op) + " " +
+           right->ToString(suffix) + ")";
   }
 
   bool IsNumeric() const override {
@@ -906,9 +917,9 @@ public:
     assert(op == OpCode::SELECT);
   }
 
-  std::string ToString() const override {
-    return "(" + PSTR(pred) + " " + STR(op) + " " + PSTR(left) + " : " +
-           PSTR(right) + ")";
+  const std::string ToString(const std::string& suffix = "") const override {
+    return "(" + pred->ToString(suffix) + " " + STR(op) + " " +
+           left->ToString(suffix) + " : " + right->ToString(suffix) + ")";
   }
 
   bool IsNumeric() const override {

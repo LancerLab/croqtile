@@ -318,7 +318,7 @@ bool CUDACodeGen::Visit(AST::NamedVariableDecl& node) {
       _os << indent << "cudaMalloc(&";
       _os << sym;
       _os << ", ";
-      _os << sty->GetShape().GetElementCountExpression();
+      _os << sty->GetShape().ElemCountExprString();
       // TODO sort all size function together
       _os << "*4";
       _os << ");\n";
@@ -901,7 +901,7 @@ bool CUDACodeGen::Visit(AST::Call& c) {
             size = size * (*(std::get_if<int>(&shapes[dim_cursor++])));
           fs << std::to_string(size);
 #endif
-        fs << shape.GetElementCountExpression();
+        fs << shape.ElemCountExprString();
       } else if (arg->op == "dataof") {
         fs << STR(arg->GetR()) << "__buf__.data";
       }
@@ -1085,15 +1085,15 @@ bool CUDACodeGen::Visit(AST::FunctionDecl& d) {
     //   auto output_rt_dim0 = dim_(args[0], 1);
     //   auto output = alloc_({output_rt_dim0}, output_type);
     //
-    const auto& dyn_dims = rty->GetShape().GetDynamicDims();
+    const auto& dyn_dims = rty->GetShape().DynamicDimensions();
     if (!dyn_dims.empty()) {
       dyn_shaped = true;
       type_name = "{";
       size_t i = 0;
       for (auto& ddim : dyn_dims) {
         auto ddim_name = name + "_rt_dim" + std::to_string(ddim.first);
-        dss << "auto " << ddim_name << " = " << ReplaceDynDimName(ddim.second)
-            << ";\n";
+        dss << "auto " << ddim_name << " = "
+            << ReplaceDynDimName(STR(ddim.second)) << ";\n";
         type_name += ddim_name;
         if (++i != dyn_dims.size()) type_name += ", ";
       }
@@ -1431,7 +1431,7 @@ void CUDACodeGen::EmitRuntimeCheck(std::ostream& os, const Type& ty) {
     size_t dim;
     std::string elem_name;
   };
-  std::map<ValueExpr, std::vector<Entry>> ve_entries_map;
+  std::map<std::string, std::vector<Entry>> ve_entries_map;
 
   for (size_t i = 0; i < fty.in_tys.size(); ++i) {
     auto name = host_params[i];

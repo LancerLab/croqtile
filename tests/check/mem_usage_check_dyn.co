@@ -33,9 +33,9 @@ __co__ auto ele_add(s32 [6, ?, 128] lhs, s32 [6, ?, 128] rhs) {
   return output;
 }
 
-// CHECK: [MemUsage] Function parameter `::ele_add::lhs`(global) need ((6) * (::ele_add::$0) * (128)) * 4 bytes.
-// CHECK: [MemUsage] Function parameter `::ele_add::rhs`(global) need ((6) * (::ele_add::$1) * (128)) * 4 bytes.
-// CHECK: [MemUsage] global `::ele_add::output` need ((6) * (::ele_add::$0) * (128)) * 4 bytes.
+// CHECK: [MemUsage] Function parameter `::ele_add::lhs`(global) need ((::ele_add::$0 * 768)) * 4 bytes.
+// CHECK: [MemUsage] Function parameter `::ele_add::rhs`(global) need ((::ele_add::$1 * 768)) * 4 bytes.
+// CHECK: [MemUsage] global `::ele_add::output` need ((::ele_add::$0 * 768)) * 4 bytes.
 // CHECK: [MemUsage] local `::ele_add::paraby_0::within_0::foreach_0::lhs_load__buf__` need 1536 bytes(1.5 KB).
 // CHECK: [MemUsage] local `::ele_add::paraby_0::within_0::foreach_0::rhs_load__buf__` need 1536 bytes(1.5 KB).
 // CHECK: [MemUsage] local `::ele_add::paraby_0::within_0::foreach_0::l1_out` need 1536 bytes(1.5 KB).

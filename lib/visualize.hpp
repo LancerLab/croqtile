@@ -362,7 +362,7 @@ private:
     Shape data_shape = cast<SpannedType>(pdata_type)->GetShape();
 
     std::vector<size_t> data_sizes;
-    if (auto ilist = data_shape.GetUIntList())
+    if (auto ilist = data_shape.PosValList())
       data_sizes = *ilist;
     else {
       Warning(ca.LOC(),
@@ -433,7 +433,7 @@ private:
       return nullptr;
     }
 
-    auto psizes = block_shape.GetUIntList();
+    auto psizes = block_shape.PosValList();
     if (!psizes) {
       Warning(ca.LOC(), "unable to visualize tensors.");
       return nullptr;
@@ -458,7 +458,7 @@ private:
     std::string mem = STR(s.st);
 
     std::vector<size_t> sizes;
-    if (auto ilist = shape.GetUIntList())
+    if (auto ilist = shape.PosValList())
       sizes = *ilist;
     else {
       Warning(s.LOC(), "unable to handle '" + mem + "' with runtime shape.");
