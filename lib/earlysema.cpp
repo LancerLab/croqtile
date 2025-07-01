@@ -119,13 +119,13 @@ bool EarlySemantics::Visit(AST::FloatLiteral& n) {
            "unexpected floating-point type.");
     assert(!IsUnKnownFloatPoint(n.Val_f32()) &&
            "floating-point number can only used as literal for now.");
-    SetNodeType(n, MakeFloatType());
+    SetNodeType(n, MakeF32Type());
   } else if (n.IsFloat64()) {
     assert(std::holds_alternative<double>(n.value) &&
            "unexpected floating-point type.");
     assert(!IsUnKnownFloatPoint(n.Val_f64()) &&
            "floating-point number can only used as literal for now.");
-    SetNodeType(n, MakeDoubleType());
+    SetNodeType(n, MakeF64Type());
   } else
     choreo_unreachable("unexpected floating-point type.");
 
@@ -1732,9 +1732,9 @@ bool EarlySemantics::Visit(AST::Call& n) {
     } else if (func_name == "print" || func_name == "println") {
       auto Printable = [](ptr<Type> ty) -> bool {
         if (isa<StringType>(ty) || isa<ScalarIntegerType>(ty) ||
-            isa<EventType>(ty) || isa<FloatType>(ty) || isa<DoubleType>(ty) ||
+            isa<EventType>(ty) || isa<F32Type>(ty) || isa<F64Type>(ty) ||
             isa<ITupleType>(ty) || isa<MDSpanType>(ty) ||
-            isa<BoundedType>(ty) || isa<HalfType>(ty) || isa<BFP16Type>(ty) ||
+            isa<BoundedType>(ty) || isa<F16Type>(ty) || isa<BF16Type>(ty) ||
             isa<AddrType>(ty))
           return true;
         // half8 is invalid.

@@ -487,15 +487,15 @@ static inline std::string HostTypeStringify(const Choreo::Type& ty,
     return "unsigned long long";
   else if (isa<BooleanType>(&ty))
     return "bool";
-  else if (isa<Half8Type>(&ty))
+  else if (isa<F8Type>(&ty))
     return "choreo::half8";
-  else if (isa<HalfType>(&ty))
+  else if (isa<F16Type>(&ty))
     return "choreo::half";
-  else if (isa<BFP16Type>(&ty))
+  else if (isa<BF16Type>(&ty))
     return "choreo::bfp16";
-  else if (isa<FloatType>(&ty))
+  else if (isa<F32Type>(&ty))
     return "float";
-  else if (isa<DoubleType>(&ty))
+  else if (isa<F64Type>(&ty))
     return "double";
   else if (auto sty = dyn_cast<SpannedType>(&ty)) {
     if (is_ret) // return by value

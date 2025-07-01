@@ -184,9 +184,9 @@ bool TypeInference::Visit(AST::IntLiteral& n) {
 bool TypeInference::Visit(AST::FloatLiteral& n) {
   TraceEachVisit(n);
   if (std::holds_alternative<float>(n.value))
-    SetNodeType(n, MakeFloatType());
+    SetNodeType(n, MakeF32Type());
   else if (std::holds_alternative<double>(n.value))
-    SetNodeType(n, MakeDoubleType());
+    SetNodeType(n, MakeF64Type());
   else
     choreo_unreachable("unhandled floating-point type.");
   return true;
@@ -706,10 +706,10 @@ bool TypeInference::Visit(AST::Expr& n) {
     } else if (n.IsArith() && !n.IsUBArith() && CanYieldAnInteger(pty_lhs) &&
                CanYieldAnInteger(pty_rhs)) {
       if (isa<ScalarFloatType>(pty_lhs) || isa<ScalarFloatType>(pty_rhs)) {
-        if (isa<DoubleType>(pty_lhs) || isa<DoubleType>(pty_rhs))
-          SetNodeType(n, MakeDoubleType());
+        if (isa<F64Type>(pty_lhs) || isa<F64Type>(pty_rhs))
+          SetNodeType(n, MakeF64Type());
         else
-          SetNodeType(n, MakeFloatType());
+          SetNodeType(n, MakeF32Type());
       } else {
         // it is ok to make compatible types to do arith
         if (IsActualBoundedIntegerType(pty_lhs) &&

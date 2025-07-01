@@ -953,64 +953,60 @@ struct ScalarFloatType : public ScalarType,
   __UDT_TYPE_INFO__(ScalarType, ScalarFloatType)
 };
 
-struct Half8Type final : public ScalarFloatType,
-                         public TypeIDProvider<Half8Type> {
-  Half8Type(bool m) : ScalarFloatType(BaseType::F8, m) {}
+struct F8Type final : public ScalarFloatType, public TypeIDProvider<F8Type> {
+  F8Type(bool m) : ScalarFloatType(BaseType::F8, m) {}
   const ptr<Type> Clone() const override {
-    return std::make_shared<Half8Type>(IsMutable());
+    return std::make_shared<F8Type>(IsMutable());
   }
   ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<Half8Type>(m);
+    return std::make_shared<F8Type>(m);
   }
-  __UDT_TYPE_INFO__(ScalarFloatType, Half8Type)
+  __UDT_TYPE_INFO__(ScalarFloatType, F8Type)
 };
 
-struct HalfType final : public ScalarFloatType,
-                        public TypeIDProvider<HalfType> {
-  HalfType(bool m) : ScalarFloatType(BaseType::F16, m) {}
+struct F16Type final : public ScalarFloatType, public TypeIDProvider<F16Type> {
+  F16Type(bool m) : ScalarFloatType(BaseType::F16, m) {}
   const ptr<Type> Clone() const override {
-    return std::make_shared<HalfType>(IsMutable());
+    return std::make_shared<F16Type>(IsMutable());
   }
   ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<HalfType>(m);
+    return std::make_shared<F16Type>(m);
   }
-  __UDT_TYPE_INFO__(ScalarFloatType, HalfType)
+  __UDT_TYPE_INFO__(ScalarFloatType, F16Type)
 };
 
-struct BFP16Type final : public ScalarFloatType,
-                         public TypeIDProvider<BFP16Type> {
-  BFP16Type(bool m) : ScalarFloatType(BaseType::BF16, m) {}
+struct BF16Type final : public ScalarFloatType,
+                        public TypeIDProvider<BF16Type> {
+  BF16Type(bool m) : ScalarFloatType(BaseType::BF16, m) {}
   const ptr<Type> Clone() const override {
-    return std::make_shared<BFP16Type>(IsMutable());
+    return std::make_shared<BF16Type>(IsMutable());
   }
   ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<BFP16Type>(m);
+    return std::make_shared<BF16Type>(m);
   }
-  __UDT_TYPE_INFO__(ScalarFloatType, BFP16Type)
+  __UDT_TYPE_INFO__(ScalarFloatType, BF16Type)
 };
 
-struct FloatType final : public ScalarFloatType,
-                         public TypeIDProvider<FloatType> {
-  FloatType(bool m) : ScalarFloatType(BaseType::F32, m) {}
+struct F32Type final : public ScalarFloatType, public TypeIDProvider<F32Type> {
+  F32Type(bool m) : ScalarFloatType(BaseType::F32, m) {}
   const ptr<Type> Clone() const override {
-    return std::make_shared<FloatType>(IsMutable());
+    return std::make_shared<F32Type>(IsMutable());
   }
   ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<FloatType>(m);
+    return std::make_shared<F32Type>(m);
   }
-  __UDT_TYPE_INFO__(ScalarFloatType, FloatType)
+  __UDT_TYPE_INFO__(ScalarFloatType, F32Type)
 };
 
-struct DoubleType final : public ScalarFloatType,
-                          public TypeIDProvider<DoubleType> {
-  DoubleType(bool m) : ScalarFloatType(BaseType::F64, m) {}
+struct F64Type final : public ScalarFloatType, public TypeIDProvider<F64Type> {
+  F64Type(bool m) : ScalarFloatType(BaseType::F64, m) {}
   const ptr<Type> Clone() const override {
-    return std::make_shared<DoubleType>(IsMutable());
+    return std::make_shared<F64Type>(IsMutable());
   }
   ptr<ScalarType> Clone(bool m) const override {
-    return std::make_shared<DoubleType>(m);
+    return std::make_shared<F64Type>(m);
   }
-  __UDT_TYPE_INFO__(ScalarFloatType, DoubleType)
+  __UDT_TYPE_INFO__(ScalarFloatType, F64Type)
 };
 
 struct BooleanType final : public ScalarType,
@@ -1908,11 +1904,11 @@ inline ptr<BooleanType> MakeBooleanType(bool m = false) {
 
 inline ptr<ScalarFloatType> MakeScalarFloatType(BaseType bt, bool m = false) {
   switch (bt) {
-  case BaseType::F8: return std::make_shared<Half8Type>(m);
-  case BaseType::F16: return std::make_shared<HalfType>(m);
-  case BaseType::BF16: return std::make_shared<BFP16Type>(m);
-  case BaseType::F32: return std::make_shared<FloatType>(m);
-  case BaseType::F64: return std::make_shared<DoubleType>(m);
+  case BaseType::F8: return std::make_shared<F8Type>(m);
+  case BaseType::F16: return std::make_shared<F16Type>(m);
+  case BaseType::BF16: return std::make_shared<BF16Type>(m);
+  case BaseType::F32: return std::make_shared<F32Type>(m);
+  case BaseType::F64: return std::make_shared<F64Type>(m);
   default: choreo_unreachable("unsupported base type.");
   }
   return nullptr;
@@ -1929,21 +1925,21 @@ inline ptr<ScalarType> MakeScalarType(BaseType bt, bool m = false) {
   case BaseType::S64: return std::make_shared<S64Type>(m);
   case BaseType::U64: return std::make_shared<U64Type>(m);
   case BaseType::BOOL: return std::make_shared<BooleanType>(m);
-  case BaseType::F8: return std::make_shared<Half8Type>(m);
-  case BaseType::F16: return std::make_shared<HalfType>(m);
-  case BaseType::BF16: return std::make_shared<BFP16Type>(m);
-  case BaseType::F32: return std::make_shared<FloatType>(m);
-  case BaseType::F64: return std::make_shared<DoubleType>(m);
+  case BaseType::F8: return std::make_shared<F8Type>(m);
+  case BaseType::F16: return std::make_shared<F16Type>(m);
+  case BaseType::BF16: return std::make_shared<BF16Type>(m);
+  case BaseType::F32: return std::make_shared<F32Type>(m);
+  case BaseType::F64: return std::make_shared<F64Type>(m);
   default: choreo_unreachable("unsupported base type.");
   }
   return nullptr;
 }
 
-inline ptr<ScalarFloatType> MakeFloatType(bool m = false) {
+inline ptr<ScalarFloatType> MakeF32Type(bool m = false) {
   return MakeScalarFloatType(BaseType::F32, m);
 }
 
-inline ptr<ScalarFloatType> MakeDoubleType(bool m = false) {
+inline ptr<ScalarFloatType> MakeF64Type(bool m = false) {
   return MakeScalarFloatType(BaseType::F64, m);
 }
 

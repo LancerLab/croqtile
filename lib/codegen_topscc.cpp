@@ -1826,21 +1826,21 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
             print_args +=
                 "(" + ExprSTR(arg, false) + " ? \"true\" : \"false\"), ";
           }
-        } else if (isa<HalfType>(type)) {
+        } else if (isa<F16Type>(type)) {
           print_format += "%f";
           print_args += ExprCastSTR(arg, std::nullopt, BaseType::F32,
                                     BaseType::F16, false) +
                         ", ";
-        } else if (isa<BFP16Type>(type)) {
+        } else if (isa<BF16Type>(type)) {
           print_format += "%f";
           // because always use the choreo::bf16 in choreo.h as the type
           print_args += ExprCastSTR(arg, std::nullopt, BaseType::F32,
                                     BaseType::BF16, false) +
                         ", ";
-        } else if (isa<FloatType>(type)) {
+        } else if (isa<F32Type>(type)) {
           print_format += "%f";
           print_args += ExprSTR(arg, false) + ", ";
-        } else if (isa<DoubleType>(type)) {
+        } else if (isa<F64Type>(type)) {
           print_format += "%f";
           print_args += ExprSTR(arg, false) + ", ";
         } else if (isa<ITupleType>(type)) {
@@ -2236,15 +2236,15 @@ DeviceParamTypeStringify(const Choreo::Type& ty) {
     return "unsigned long long";
   else if (isa<BooleanType>(&ty))
     return "bool";
-  else if (isa<Half8Type>(&ty))
+  else if (isa<F8Type>(&ty))
     return "choreo::half8";
-  else if (isa<HalfType>(&ty))
+  else if (isa<F16Type>(&ty))
     return "choreo::half";
-  else if (isa<BFP16Type>(&ty))
+  else if (isa<BF16Type>(&ty))
     return "choreo::bfp16";
-  else if (isa<FloatType>(&ty))
+  else if (isa<F32Type>(&ty))
     return "float";
-  else if (isa<DoubleType>(&ty))
+  else if (isa<F64Type>(&ty))
     return "double";
   else if (isa<EventType>(&ty))
     return "bool"; // use bool for event

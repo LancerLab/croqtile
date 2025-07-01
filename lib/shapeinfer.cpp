@@ -500,9 +500,9 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
   DefineASymbol(name, nty);
   SetNodeType(n, nty);
 
-  if ((isa<FloatType>(nty) || isa<DoubleType>(nty) ||
-       (isa<ScalarIntegerType>(nty)) || isa<HalfType>(nty) ||
-       isa<Half8Type>(nty)) &&
+  if ((isa<F32Type>(nty) || isa<F64Type>(nty) ||
+       (isa<ScalarIntegerType>(nty)) || isa<F16Type>(nty) ||
+       isa<F8Type>(nty)) &&
       ValidVN(cur_vn)) {
     // mutables do not have constant values
     if (IsMutable(*nty)) {

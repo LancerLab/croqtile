@@ -394,11 +394,11 @@ struct FloatLiteral : public Node, public TypeIDProvider<FloatLiteral> {
   std::variant<float, double> value;
 
   FloatLiteral(const location& l, float v = GetUnKnownFloat())
-      : Node(l, MakeFloatType()) {
+      : Node(l, MakeF32Type()) {
     value = v;
   }
 
-  FloatLiteral(const location& l, double v) : Node(l, MakeDoubleType()) {
+  FloatLiteral(const location& l, double v) : Node(l, MakeF64Type()) {
     value = v;
   }
 
@@ -419,8 +419,8 @@ struct FloatLiteral : public Node, public TypeIDProvider<FloatLiteral> {
     return std::get<double>(value);
   }
 
-  bool IsFloat32() const { return isa<FloatType>(GetType()); }
-  bool IsFloat64() const { return isa<DoubleType>(GetType()); }
+  bool IsFloat32() const { return isa<F32Type>(GetType()); }
+  bool IsFloat64() const { return isa<F64Type>(GetType()); }
 
   ptr<Node> CloneImpl() const override {
     auto n = Make<FloatLiteral>(LOC());
