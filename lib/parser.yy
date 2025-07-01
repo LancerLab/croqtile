@@ -674,6 +674,10 @@ scalar_decl
         $$ = AST::Make<AST::NamedVariableDecl>(@1, $1,
              AST::Make<AST::DataType>(@1, BaseType::UNKNOWN), nullptr, $3);
       }
+    | IDENTIFIER ASSIGN call_stmt {
+        $$ = AST::Make<AST::NamedVariableDecl>(@1, $1,
+             AST::Make<AST::DataType>(@1, BaseType::UNKNOWN), nullptr, $3);
+      }
     | IDENTIFIER ASSIGN LBRAKT {
         Parser::error(@3, "must use '{' and '}' to define an ituple.");
         YYERROR;

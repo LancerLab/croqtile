@@ -191,7 +191,7 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
       EmitDeviceFuncDecl(ds);
       ds << " {\n";
       IncrDeviceIndent();
-      ds << d_indent << "// parallel-by: " << n.LOC() << "\n";
+      ds << d_indent << "{ // parallel-by: " << n.LOC() << "\n";
     }
     parallel_level++;
     max_parallel_level = GetMaxParallelLevelFromNote(*pb);
@@ -211,7 +211,8 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
       hs << h_indent << "// foreach: " << n.LOC() << "\n";
     else
       ds << d_indent << "// foreach: " << n.LOC() << "\n";
-  } else if (isa<AST::IfElseBlock>(&n)) {
+  }
+  if (isa<AST::IfElseBlock>(&n) || isa<AST::NamedVariableDecl>(&n)) {
     emit_call = false;
   } else if (isa<AST::IncrementBlock>(&n)) {
     if (IsHost()) {
@@ -303,6 +304,7 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
     parallel_level--;
     if (parallel_level == 0) {
       max_parallel_level = 0;
+      ds << d_indent << "} // end parallel-by\n";
       DecrDeviceIndent();
       ds << "}\n\n";
     }
@@ -364,6 +366,8 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
       DecrDeviceIndent();
       ds << d_indent << "}\n";
     }
+  } else if (isa<AST::NamedVariableDecl>(&n)) {
+    emit_call = true;
   }
 
   if (!IsHost() && max_parallel_level_valid && !n.IsBlock() &&

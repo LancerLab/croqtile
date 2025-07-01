@@ -1291,6 +1291,94 @@ public:
   __UDT_TYPE_INFO__(Node, DataType)
 };
 
+struct Call : public Node, public TypeIDProvider<Call> {
+  enum CallAttr : uint8_t {
+    NONE = 0,
+    BIF = 0x1,
+    COMPTIME = 0x2,
+    ARITH = 0x4,
+    EXPR = 0x8
+  };
+  // Overload bitwise OR
+  friend constexpr CallAttr operator|(CallAttr lhs, CallAttr rhs) {
+    return static_cast<CallAttr>(
+        static_cast<std::underlying_type_t<CallAttr>>(lhs) |
+        static_cast<std::underlying_type_t<CallAttr>>(rhs));
+  }
+
+public:
+  ptr<Identifier> function;
+  ptr<MultiValues> arguments;
+  ptr<MultiValues> template_args;
+
+private:
+  CallAttr attr;
+
+public:
+  Call(const location& l, const ptr<Identifier>& f, const ptr<MultiValues>& a,
+       CallAttr ba = NONE)
+      : Node(l), function(f), arguments(a), template_args(nullptr), attr(ba) {}
+
+  Call(const location& l, const ptr<Identifier>& f, const ptr<MultiValues>& a,
+       const ptr<MultiValues>& b)
+      : Node(l), function(f), arguments(a), template_args(b), attr(NONE) {
+    arguments->SetDelimiter(", ");
+    template_args->SetDelimiter(", ");
+  }
+
+  const std::vector<ptr<Node>>& GetArguments() const {
+    return arguments->AllValues();
+  }
+
+  bool IsBIF() const { return (bool)(attr & BIF); }
+  bool CompileTimeEval() const { return (bool)(attr & COMPTIME); }
+  bool IsArith() const { return (bool)(attr & ARITH); }
+  bool IsExpr() const { return (bool)(attr & EXPR); }
+
+  ptr<Node> CloneImpl() const override {
+    auto n = Make<Call>(LOC(), cast<Identifier>(function->Clone()),
+                        cast<MultiValues>(arguments->Clone()),
+                        cast<MultiValues>(template_args->Clone()));
+    n->attr = attr;
+    return n;
+  }
+
+  void InlinePrint(std::ostream& os, const std::string& prefix = {},
+                   bool with_type = false) {
+    os << prefix << "call " << STR(*function);
+    if (template_args) {
+      os << "<";
+      template_args->Print(os, {}, with_type);
+      os << ">";
+    }
+    os << "(";
+    if (arguments->Count()) arguments->Print(os, {}, with_type);
+    os << ")";
+  }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
+    os << "\n" << prefix << "`- Call: " << STR(*function);
+    if (IsBIF()) {
+      if (CompileTimeEval())
+        os << " (compile-time built-in)";
+      else
+        os << " (built-in)";
+    }
+    if (arguments->Count()) {
+      os << "\n" << prefix << "  `- with arguments: ";
+      arguments->Print(os, {}, with_type);
+    }
+    if (template_args) {
+      os << "\n" << prefix << "  `- with template parameters: ";
+      template_args->Print(os, {}, with_type);
+    }
+  }
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, Call)
+};
+
 struct NamedVariableDecl : public Node,
                            public TypeIDProvider<NamedVariableDecl> {
   const std::string name_str;
@@ -1361,7 +1449,10 @@ struct NamedVariableDecl : public Node,
     if (with_type) os << "<{" << PSTR(GetType()) << "}>";
     if (init_expr) {
       os << " " << init_str << " ";
-      init_expr->Print(os, " ", with_type);
+      if (auto call = dyn_cast<Call>(init_expr))
+        call->InlinePrint(os, "", with_type);
+      else
+        init_expr->Print(os, " ", with_type);
     } else if (init_value) {
       os << " " << init_str << " {";
       init_value->Print(os, "", with_type);
@@ -2119,81 +2210,6 @@ struct Return : public Node, public TypeIDProvider<Return> {
   void accept(Visitor&) override;
 
   __UDT_TYPE_INFO__(Node, Return)
-};
-
-struct Call : public Node, public TypeIDProvider<Call> {
-  enum CallAttr : uint8_t {
-    NONE = 0,
-    BIF = 0x1,
-    COMPTIME = 0x2,
-    ARITH = 0x4,
-    EXPR = 0x8
-  };
-  // Overload bitwise OR
-  friend constexpr CallAttr operator|(CallAttr lhs, CallAttr rhs) {
-    return static_cast<CallAttr>(
-        static_cast<std::underlying_type_t<CallAttr>>(lhs) |
-        static_cast<std::underlying_type_t<CallAttr>>(rhs));
-  }
-
-public:
-  ptr<Identifier> function;
-  ptr<MultiValues> arguments;
-  ptr<MultiValues> template_args;
-
-private:
-  CallAttr attr;
-
-public:
-  Call(const location& l, const ptr<Identifier>& f, const ptr<MultiValues>& a,
-       CallAttr ba = NONE)
-      : Node(l), function(f), arguments(a), template_args(nullptr), attr(ba) {}
-
-  Call(const location& l, const ptr<Identifier>& f, const ptr<MultiValues>& a,
-       const ptr<MultiValues>& b)
-      : Node(l), function(f), arguments(a), template_args(b), attr(NONE) {
-    arguments->SetDelimiter(", ");
-    template_args->SetDelimiter(", ");
-  }
-
-  const std::vector<ptr<Node>>& GetArguments() const {
-    return arguments->AllValues();
-  }
-
-  bool IsBIF() const { return (bool)(attr & BIF); }
-  bool CompileTimeEval() const { return (bool)(attr & COMPTIME); }
-  bool IsArith() const { return (bool)(attr & ARITH); }
-  bool IsExpr() const { return (bool)(attr & EXPR); }
-
-  ptr<Node> CloneImpl() const override {
-    auto n = Make<Call>(LOC(), cast<Identifier>(function->Clone()),
-                        cast<MultiValues>(arguments->Clone()),
-                        cast<MultiValues>(template_args->Clone()));
-    n->attr = attr;
-    return n;
-  }
-
-  void Print(std::ostream& os, const std::string& prefix = {},
-             bool with_type = false) const override {
-    os << "\n" << prefix << "`- Call: " << STR(*function);
-    if (IsBIF()) {
-      if (CompileTimeEval())
-        os << " (compile-time built-in)";
-      else
-        os << " (built-in)";
-    }
-    if (arguments->Count()) {
-      os << "\n" << prefix << "  `- with arguments: ";
-      arguments->Print(os, {}, with_type);
-    }
-    if (template_args) {
-      os << "\n" << prefix << "  `- with template parameters: ";
-      template_args->Print(os, {}, with_type);
-    }
-  }
-  void accept(Visitor&) override;
-
-  __UDT_TYPE_INFO__(Node, Call)
 };
 
 struct Rotate : public Node, public TypeIDProvider<Rotate> {

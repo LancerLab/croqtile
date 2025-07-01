@@ -415,7 +415,7 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
 
   if (cannot_proceed) return true;
 
-  auto name = n.name_str;
+  auto& name = n.name_str;
 
   if (!CanBeValueNumbered(&n)) {
     DefineASymbol(name, NodeType(n));
@@ -433,7 +433,8 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
   if (n.mem) sto = n.mem->st;
 
   ptr<Type> nty = nullptr;
-  if (n.init_expr) {
+
+  if (n.init_expr && !isa<AST::Call>(n.init_expr)) {
     if (!CanBeValueNumbered(n.init_expr.get())) {
       vn.GenerateValueNumberFromSignature(SSTab().ScopedName(name));
       DefineASymbol(name, NodeType(n));
@@ -491,8 +492,11 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
     } else if (ValidVN(cur_vn)) {
       ValNoAliasSign(SSTab().ScopedName(name), cur_vn);
       nty = NodeType(*n.type);
-    } else
+    } else {
+      if (isa<AST::Call>(n.init_expr))
+        cur_vn = vn.GenerateValueNumberFromSignature(SSTab().ScopedName(name));
       nty = NodeType(*n.type);
+    }
   }
 
   // fill-up the symbol table
@@ -1776,6 +1780,7 @@ bool ShapeInference::CanBeValueNumbered(AST::Node* n) const {
   if (isa<AST::ChunkAt>(n)) return false;
   if (isa<AST::StringLiteral>(n)) return false;
   if (isa<AST::DataAccess>(n)) return false;
+  if (isa<AST::Call>(n)) return false;
   auto nty = NodeType(*n);
   if (!nty) {
     // sometimes the symbol is yet to define, simply make it work.

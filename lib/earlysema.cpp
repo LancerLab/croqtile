@@ -756,10 +756,17 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
   ptr<Type> tty = nullptr; // type from the annotation
   ptr<Type> ety = nullptr; // type from the initialization expression
 
+  bool force_mutable = false;
+
   if (n.type) tty = n.type->GetType();
   if (n.init_expr) {
     ety = n.init_expr->GetType();
-    assert(!isa<UnknownType>(ety) && "no type for an init expression.");
+    if (!isa<AST::Call>(n.init_expr))
+      assert(!isa<UnknownType>(ety) && "no type for an init expression.");
+    else {
+      force_mutable = true;
+      ety = nullptr;
+    }
   }
 
   if (!ety) {
@@ -772,6 +779,10 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
       error_count++;
       return false;
     }
+
+    if (force_mutable && !n.IsMutable())
+      Error1(n.LOC(),
+             "`" + n.name_str + "' must be annotated as a mutable type.");
 
     // event type is purely declarative
     if (isa<EventType>(tty) && inthreads_levels[pl_depth] > 0) {

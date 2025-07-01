@@ -1,0 +1,11 @@
+// RUN: choreo -e %s | FileCheck %s
+
+__co__ void foo(int a, int b) {
+  parallel by 1 {
+    mutable int a = call bar(a, b);
+    mutable float b = call wow<3, 1 + 7>(a, b);
+  }
+}
+
+// CHECK: `- Var Decl (mutable s32): a = call bar(a, b)
+// CHECK: `- Var Decl (mutable f32): b = call wow<3,  (1 + 7) >(a, b)

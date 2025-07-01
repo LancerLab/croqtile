@@ -54,4 +54,16 @@ __co__ auto illegal_call3(f32 [36, 27, 128] input) {
 // CHECK: error: (1th) argument of type 'invalid` can not be passed to the kernel function.
 // CHECK: error: (3th) argument of type 'ituple<2>` can not be passed to the kernel function.
 // CHECK: error: (1th) argument of type 'mdspan<2> []` can not be passed to the kernel function.
-// CHECK: Totally 8 errors have been detected.
+
+__co__ auto illegal_call4() {
+  parallel by 1 {
+    int a = call bar();
+    mutable b = call bar();
+    mutable float c = call bar();
+  }
+}
+
+// CHECK: error: `a' must be annotated as a mutable type.
+// CHECK: error: unable to deduce the type of `b'.
+
+// CHECK: Totally 10 errors have been detected.
