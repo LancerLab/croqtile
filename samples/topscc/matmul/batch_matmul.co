@@ -1,0 +1,93 @@
+// MatMul Basic Version 1 (refer to identity_basic_1.co style)
+__co__ f32[bs, m, n] batch_matmul(f32[bs, m, k] A, f32[bs, k, n] B) {
+  f32[bs, m, n] C;
+
+  parallel p by 2 {
+    parallel q by bs/2 {
+      local f32[1, m, k] a_local;
+      local f32[1, k, n] b_local;
+      local f32[1, m, n] c_local;
+
+      foreach cnt in [bs/#p/#q] {
+        // DMA copy input blocks to local buffer
+        dma.copy A.chunkat(p#q#cnt, _, _) => a_local;
+        dma.copy B.chunkat(p#q#cnt, _, _) => b_local;
+
+        // Element-wise matmul computation
+        foreach {i, j, uiv} in [m, n, 1] {
+          f32 acc = 0.0f;
+          foreach kk in k {
+            acc += a_local.at(uiv, i, kk) * b_local.at(uiv, kk, j);
+            // if (j == 0) println("a_local = ", a_local.at(uiv, i, kk));
+          }
+          c_local.at(uiv, i, j) = acc;
+          // if (i ==0 && j == 0 && q == 1) println("c_local = ", acc);
+        }
+
+        // DMA copy result back
+        dma.copy c_local => C.chunkat(p#q#cnt, _, _);
+      }
+    }
+  }
+
+  return C;
+}
+
+int main() {
+  const int BATCH = 24;
+  const int M = 16;
+  const int K = 16;
+  const int N = 32;
+  choreo::f32 a[BATCH * M * K];
+  choreo::f32 b[BATCH * K * N];
+
+  // Construct input data
+  auto input_a = choreo::make_spanview<3, choreo::f32>((float*)a, {BATCH, M, K});
+  auto input_b = choreo::make_spanview<3, choreo::f32>((float*)b, {BATCH, K, N});
+  // input_a.fill_random(-1.0, 1.0);
+  // input_b.fill_random(-1.0, 1.0);
+  input_a.fill(1.0);
+  input_b.fill(1.0);
+
+  auto start = std::chrono::high_resolution_clock::now();
+  auto res = batch_matmul(input_a, input_b);
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
+  // Reference C++ implementation for verification
+  std::vector<float> ref(BATCH * M * N, 0.0f);
+  for (int b = 0; b < BATCH; ++b)
+    for (int i = 0; i < M; ++i)
+      for (int j = 0; j < N; ++j) {
+        float acc = 0.0f;
+        for (int k = 0; k < K; ++k) {
+          acc += input_a[b][i][k] * input_b[b][k][j];
+        }
+        ref[b * M * N + i * N + j] = acc;
+      }
+
+  // Verification and print
+  bool all_ok = true;
+  for (int b = 0; b < BATCH; ++b)
+    for (int i = 0; i < M; ++i)
+      for (int j = 0; j < N; ++j) {
+        float v1 = res[b][i][j];
+        float v2 = ref[b * M * N + i * N + j];
+        // std::cout << "{i,j,k}: {" << b << "," << i << "," << j << "}\n";
+        // std::cout << "<reference> res: " << v2 << "\n";
+        // std::cout << "<matmul> res: " << v1 << "\n";
+        if (std::abs(v1 - v2) > 1e-3f) {
+          std::cout << "[ERROR] Mismatch at (" << b << "," << i << "," << j << "): choreo=" << v1 << ", ref=" << v2 << std::endl;
+          all_ok = false;
+        }
+        // Optionally print values
+        std::cout << "C[" << b << "," << i << "," << j << "] = " << v1 << " ref=" << v2 << "\n";
+      }
+  if (all_ok) {
+    std::cout << "Test Passed\n" << std::endl;
+  } else {
+    std::cout << "Test Failed\n" << std::endl;
+  }
+  std::cout << "Function <batch_matmul> execution time: " << duration.count() << " microseconds" << std::endl;
+  return all_ok ? 0 : 1;
+}
