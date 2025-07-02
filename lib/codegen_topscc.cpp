@@ -851,9 +851,16 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
   // when symbol is not valued
   if (isa<ScalarType>(nty) &&
       (IsMutable(*nty) || !FCtx(fname).HasSymbolValues(InScopeName(sym)))) {
-    (IsHost() ? hs : ds) << (IsHost() ? h_indent : d_indent)
-                         << NameBaseType(GetBaseType(*nty), false) << " " << sym
-                         << " = " << ExprSTR(n.init_expr, false) << ";\n";
+    auto& ss = IsHost() ? hs : ds;
+    auto mem = n.GetMemory();
+    ss << (IsHost() ? h_indent : d_indent);
+    if (mem != nullptr) {
+      auto st = mem->Get();
+      ss << TopsDeviceMemory(st) << " ";
+    }
+    ss << NameBaseType(GetBaseType(*nty), false) << " " << sym;
+    if (n.init_expr) ss << " = " << ExprSTR(n.init_expr, false);
+    ss << ";\n";
 
     // mutables have references
     if (IsMutable(*nty))
@@ -1017,7 +1024,7 @@ bool TopsccCodeGen::Visit(AST::Assignment& n) {
     return true;
   }
 
-  if (isa<ScalarIntegerType>(nty)) {
+  if (isa<ScalarType>(nty)) {
     if (IsHost())
       hs << h_indent << ((!n.IsDecl()) ? "" : "auto ") << n.GetName() << " = "
          << ExprSTR(n.value, false) << ";\n";

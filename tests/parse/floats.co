@@ -14,13 +14,13 @@ __co__ void floats(bool a, int b, half8 c, half d, bfp16 e, float f, double g) {
 // CHECK:  `- Parameters:
 // CHECK:    `-  type: bool, symbol: a
 // CHECK:    `-  type: s32, symbol: b
-// CHECK:    `-  type: f8, symbol: c
-// CHECK:    `-  type: f16, symbol: d
-// CHECK:    `-  type: bf16, symbol: e
-// CHECK:    `-  type: f32, symbol: f
-// CHECK:    `-  type: f64, symbol: g
-// CHECK:  `- Var Decl (f8): aa = 1
-// CHECK:  `- Var Decl (f16): bb = 2.000000f
-// CHECK:  `- Var Decl (bf16): cc = 3
-// CHECK:  `- Var Decl (f32): dd = 3.000000f
-// CHECK:  `- Var Decl (f64): ee = 75.000000
+// CHECK:    `-  type: mutable f8, symbol: c
+// CHECK:    `-  type: mutable f16, symbol: d
+// CHECK:    `-  type: mutable bf16, symbol: e
+// CHECK:    `-  type: mutable f32, symbol: f
+// CHECK:    `-  type: mutable f64, symbol: g
+// CHECK:  `- Var Decl (mutable f8): aa = 1
+// CHECK:  `- Var Decl (mutable f16): bb = 2.000000f
+// CHECK:  `- Var Decl (mutable bf16): cc = 3
+// CHECK:  `- Var Decl (mutable f32): dd = 3.000000f
+// CHECK:  `- Var Decl (mutable f64): ee = 75.000000

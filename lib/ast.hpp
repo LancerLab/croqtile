@@ -337,6 +337,22 @@ struct IntLiteral : public Node, public TypeIDProvider<IntLiteral> {
              const std::variant<int8_t, uint8_t, int16_t, uint16_t, int,
                                 uint32_t, int64_t, uint64_t>& v)
       : Node(l, MakeScalarIntegerType(BaseType::UNKNOWN)), value(v) {}
+  IntLiteral(const location& l, BaseType bt)
+      : Node(l, MakeScalarIntegerType(bt)), value(0) {
+    assert(IsIntegerBaseType(bt) &&
+           "BaseType must be an integer fundamental type.");
+    switch (bt) {
+    case BaseType::S8: value = static_cast<int8_t>(0); break;
+    case BaseType::U8: value = static_cast<uint8_t>(0); break;
+    case BaseType::S16: value = static_cast<int16_t>(0); break;
+    case BaseType::U16: value = static_cast<uint16_t>(0); break;
+    case BaseType::S32: value = static_cast<int>(0); break;
+    case BaseType::U32: value = static_cast<uint32_t>(0); break;
+    case BaseType::S64: value = static_cast<int64_t>(0); break;
+    case BaseType::U64: value = static_cast<uint64_t>(0); break;
+    default: value = GetUnKnownInteger();
+    }
+  }
 
   // allow copy construction
   explicit IntLiteral(const IntLiteral& il)
@@ -400,6 +416,19 @@ struct FloatLiteral : public Node, public TypeIDProvider<FloatLiteral> {
 
   FloatLiteral(const location& l, double v) : Node(l, MakeF64Type()) {
     value = v;
+  }
+
+  FloatLiteral(const location& l, BaseType bt) : Node(l, MakeF32Type()) {
+    assert(IsFloatPointBaseType(bt) &&
+           "BaseType must be a float-point fundamental type.");
+    switch (bt) {
+    case BaseType::F8:
+    case BaseType::BF16:
+    case BaseType::F16:
+    case BaseType::F32: value = static_cast<float>(0.0); break;
+    case BaseType::F64: value = static_cast<double>(0.0); break;
+    default: value = GetUnKnownFloat();
+    }
   }
 
   // allow copy construction
@@ -1429,6 +1458,9 @@ struct NamedVariableDecl : public Node,
   }
   bool IsMutable() const { return is_mutable; }
   void SetMutable(bool m) { is_mutable = m; }
+
+  ptr<Memory> GetMemory() const { return mem; }
+  void SetMemory(ptr<Memory> m) { mem = m; }
 
   ptr<Node> CloneImpl() const override {
     auto n =

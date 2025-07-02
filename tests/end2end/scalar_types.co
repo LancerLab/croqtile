@@ -1,0 +1,30 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+__co__ void foo() {
+  parallel by 1 {
+    mutable s32 a;
+    mutable u32 b{1U};
+    mutable s64 c = 2LL;
+    mutable u64 d = 1ULL;
+    mutable f32 e = 0.0f;
+    shared f32 f;
+    f = 1.1f;
+    local f16 g;
+    bf16 h;
+    s8 i;
+    u8 j;
+    s16 k;
+    u16 l;
+
+    println("a: ", a, ", b: ", b, ", c: ", c, ", d: ", d, ", e: ", e,
+            ", f: ", f, ", g: ", g, ", h: ", h, ", i: ", i, ", j: ", j,
+            ", k: ", k, ", l: ", l);
+  }
+}
+
+int main () {
+  foo();
+  return 0;
+}
+
+// CHECK: [0, 0] a: 0, b: 1, c: 2, d: 1, e: 0.000000, f: 1.100000, g: 0.000000, h: 0.000000, i: 0, j: 0, k: 0, l: 0

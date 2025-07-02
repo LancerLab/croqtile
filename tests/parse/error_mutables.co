@@ -23,7 +23,7 @@ __co__ void foo() {
   mutable int e = 3; // ok
 }
 
-// CHK-SPANNED: error: syntax error, unexpected F32
+// CHK-SPANNED: error: syntax error, unexpected [, expecting IDENTIFIER
 // CHK-MDSPAN: error: syntax error, unexpected MDSPAN
 // CHK-ITUPLE: error: `b' with a type of "ituple<1>" can not be declared as 'mutable'.
-// CHK-INT: error: syntax error, unexpected ;, expecting =
+// CHK-INT: error: unable to deduce the type of `d'.
