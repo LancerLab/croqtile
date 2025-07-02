@@ -90,6 +90,11 @@ public:
   virtual void Print(std::ostream& os, const std::string& prefix = {},
                      bool with_type = false) const = 0;
 
+  virtual void InlinePrint(std::ostream& os, const std::string& prefix = {},
+                           bool with_type = false) const {
+    return Print(os, prefix, with_type);
+  }
+
   virtual void accept(Visitor&) = 0;
 
   // for runtime type disambiguation
@@ -258,7 +263,8 @@ struct MultiValues : public Node, public TypeIDProvider<MultiValues> {
 
   // TODO: workaround for "x, y" like print, we may need typeid to merge this
   // print logic into trivial Print()
-  void InlinePrint(std::ostream& os, const std::string& prefix = {}) const {
+  void InlinePrint(std::ostream& os, const std::string& prefix = {},
+                   bool = false) const override {
     for (auto& v : values) {
       v->Print(os, prefix);
       if (&v != &values.back()) os << ", ";
@@ -528,6 +534,7 @@ struct StringLiteral : public Node, public TypeIDProvider<StringLiteral> {
   __UDT_TYPE_INFO__(Node, StringLiteral)
 };
 
+struct Call;
 struct Expr : public Node, public TypeIDProvider<Expr> {
   // Different expression type
   enum Form { Unary, Binary, Ternary, Reference };
@@ -718,7 +725,10 @@ public:
              bool with_type = false) const override {
     if (with_type) os << "<{" << PSTR(GetType()) << "}>";
     if (t == Reference) {
-      value_r->Print(os, prefix, with_type);
+      if (isa<Call>(value_r))
+        value_r->InlinePrint(os, prefix, with_type);
+      else
+        value_r->Print(os, prefix, with_type);
       return;
     }
 
@@ -1373,7 +1383,7 @@ public:
   }
 
   void InlinePrint(std::ostream& os, const std::string& prefix = {},
-                   bool with_type = false) {
+                   bool with_type = false) const override {
     os << prefix << "call " << STR(*function);
     if (template_args) {
       os << "<";

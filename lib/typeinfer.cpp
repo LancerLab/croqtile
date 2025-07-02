@@ -695,22 +695,8 @@ bool TypeInference::Visit(AST::Expr& n) {
         SetNodeType(n, MakeUnknownType());
     } else if (n.IsArith() && !n.IsUBArith() && CanYieldAnInteger(pty_lhs) &&
                CanYieldAnInteger(pty_rhs)) {
-      if (isa<ScalarFloatType>(pty_lhs) || isa<ScalarFloatType>(pty_rhs)) {
-        if (isa<F64Type>(pty_lhs) || isa<F64Type>(pty_rhs))
-          SetNodeType(n, MakeF64Type());
-        else
-          SetNodeType(n, MakeF32Type());
-      } else {
-        // it is ok to make compatible types to do arith
-        if (IsActualBoundedIntegerType(pty_lhs) &&
-            isa<ScalarIntegerType>(pty_rhs))
-          SetNodeType(n, pty_lhs);
-        else if (IsActualBoundedIntegerType(pty_rhs) &&
-                 isa<ScalarIntegerType>(pty_lhs))
-          SetNodeType(n, pty_rhs);
-        else
-          SetNodeType(n, MakeIntegerType(is_mutable));
-      }
+      // use the type inferred by early sema
+      assert(n.GetType() != nullptr);
     } else if (n.isBitwise() && CanYieldAnInteger(pty_rhs) &&
                CanYieldAnInteger(pty_lhs)) {
       bool is_mutable = IsMutable(*pty_lhs) || IsMutable(*pty_rhs);
@@ -720,11 +706,11 @@ bool TypeInference::Visit(AST::Expr& n) {
                          "' binary operation.");
       error_count++;
       return false;
-    } else {
+    } else
       SetNodeType(n, n.GetR()->GetType());
-      cur_type = n.GetType();
-      return true;
-    }
+
+    cur_type = n.GetType();
+    return true;
   } // AST::Expr::Binary
 
   if (n.GetForm() == AST::Expr::Ternary) {
@@ -949,6 +935,10 @@ bool TypeInference::Visit(AST::Trigger& n) {
 
 bool TypeInference::Visit(AST::Call& n) {
   TraceEachVisit(n);
+
+  cur_type = n.GetType(); // use early-sema's type
+  assert(cur_type);
+
   return true;
 }
 

@@ -198,8 +198,8 @@ clobber: clean
 	find $(TOOLCHAIN_DIR) -mindepth 1 ! -name 'Makefile' -print0 | xargs -0 rm -rf
 
 lines:
-	echo "source files:"; wc -l lib/*.cpp lib/*.yy lib/*.l lib/*.hpp Makefile utils/*.h; \
-	echo "test files"; wc -l $$(find tests/ -type f |grep -v "\.test")
+	@echo "source code:"; wc -l lib/*.cpp lib/*.yy lib/*.l lib/*.hpp Makefile utils/*.h | grep total;
+	@echo "test code"; wc -l $$(find tests/ -type f |grep -v "\.test"|grep -v "\.result") | grep total;
 
 format:
 	$(CLANG_FORMAT) -i -Werror $(SRC_DIR)/*.cpp $(SRC_DIR)/*.hpp utils/*.h utils/*.cpp tests/standalone/*.cu tests/standalone/*.cpp

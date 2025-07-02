@@ -240,16 +240,15 @@ void choreo_info(const char *message) {
 %right ASSIGN
 %right QES COL
 %left OR
-%left GT LT
 %left AND
-%right NOT
+%left EQ NE
+%left LE GE GT LT
 %left LSHIFT RSHIFT
-%left LE GE EQ NE
 %left PLUS MINUS
 %left STAR SLASH PECET
 %left UBMINUS UBPLUS
 %left UBSTAR UBSLASH UBPECET
-%right PPLUS MMINUS
+%right NOT PPLUS MMINUS
 %left AMP CARET PIPE
 %left UBOUND
 %left TILDE
@@ -1035,6 +1034,9 @@ assignment
         $$ = AST::Make<AST::NamedVariableDecl>(@1,
               $1, AST::Make<AST::DataType>(@1, BaseType::ITUPLE), nullptr, $3);
       }
+    | IDENTIFIER ASSIGN call_stmt {
+        $$ = AST::Make<AST::Assignment>(@1, $1, $3);
+      }
     | IDENTIFIER arith_operation ASSIGN s_expr {
         if (!symtab.Exists($1)) {
           Parser::error(@1, "The symbol '" + $1 + "` has not been defined.");
@@ -1056,6 +1058,9 @@ assignment
         }
       }
     | data_element ASSIGN s_expr {
+        $$ = AST::Make<AST::Assignment>(@1, $1, $3);
+      }
+    | data_element ASSIGN call_stmt {
         $$ = AST::Make<AST::Assignment>(@1, $1, $3);
       }
     | data_element arith_operation ASSIGN s_expr {

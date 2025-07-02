@@ -275,11 +275,16 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       } else
         SetNodeType(n, MakeUninitBoundedITupleType());
     } else if ((isa<BoundedType>(lty) && isa<BoundedType>(rty))) {
-      Error(n.LOC(), "in operation \"" + n.op +
-                         "\": unable to apply to the types (" + PSTR(lty) +
-                         " vs. " + PSTR(rty) + ").");
-      SetNodeType(n, MakeUnknownType());
-      return false;
+      if (IsActualBoundedIntegerType(lty) && IsActualBoundedIntegerType(rty)) {
+        // decay the type to be mutable int
+        SetNodeType(n, MakeIntegerType(true));
+      } else {
+        Error(n.LOC(), "in operation \"" + n.op +
+                           "\": unable to apply to the types (" + PSTR(lty) +
+                           " vs. " + PSTR(rty) + ").");
+        SetNodeType(n, MakeUnknownType());
+        return false;
+      }
     } else if ((IsActualBoundedIntegerType(lty) &&
                 isa<ScalarIntegerType>(rty)) ||
                (IsActualBoundedIntegerType(rty) &&
@@ -293,6 +298,9 @@ bool EarlySemantics::Visit(AST::Expr& n) {
                      PSTR(n.GetL()) + ").");
           SetNodeType(n, MakeUnknownType());
           return false;
+        } else if (cast<ScalarIntegerType>(rty)->IsMutable()) {
+          // decay bounded to be non-bounded when mutable
+          SetNodeType(n, MakeScalarIntegerType(rty->GetBaseType(), true));
         } else
           SetNodeType(n, lty->Clone());
       else {
@@ -303,6 +311,9 @@ bool EarlySemantics::Visit(AST::Expr& n) {
                      PSTR(n.GetR()) + ").");
           SetNodeType(n, MakeUnknownType());
           return false;
+        } else if (cast<ScalarIntegerType>(lty)->IsMutable()) {
+          // decay bounded to be non-bounded when mutable
+          SetNodeType(n, MakeScalarIntegerType(lty->GetBaseType(), true));
         } else
           SetNodeType(n, rty->Clone());
       }
@@ -790,6 +801,7 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
 
     ReportErrorWhenViolateODR(n.LOC(), n.name_str, __FILE__, __LINE__, tty);
     SetNodeType(n, tty);
+    if (force_mutable) SetNodeType(*n.init_expr, tty);
   } else {
     // The initializer expression DOES render a type
     if (!CheckInitializerType(ety, n.name_str, n.init_expr->LOC()))
@@ -829,6 +841,9 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
       // update with the mutable attributes
       if (auto sty = dyn_cast<ScalarType>(ety)) {
         ety = sty->Clone(n.IsMutable());
+      } else if (IsActualBoundedIntegerType(sty)) {
+        // decay a bounded integer to be integer when it is mutable
+        ety = MakeIntegerType(true);
       } else {
         Error1(n.LOC(), "`" + n.name_str + "' with a type of \"" + PSTR(ety) +
                             "\" can not be declared as 'mutable'.");
@@ -1000,9 +1015,11 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
     if (IsMutable(*NodeType(*n.da)))
       n.SetDecl(false);
     else {
-      if (!SSTab().DeclaredInScope(n.GetName()))
+      if (!SSTab().DeclaredInScope(n.GetName())) {
         n.SetDecl(true); // immutables in inner-scope: new decls
-      else {
+        Note(n.LOC(), "new declaration shadows outer variable '" + n.GetName() +
+                          "' (not an assignment).");
+      } else {
         Error1(n.LOC(),
                "only mutables can be re-assigned (" + n.GetName() + ").");
         return false;
@@ -1071,7 +1088,9 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
     return false;
   }
 
-  if (!vty->ApprxEqual(*ety)) {
+  if (isa<AST::Call>(n.value)) {
+    SetNodeType(*n.value, vty);
+  } else if (!vty->ApprxEqual(*ety)) {
     Error1(n.LOC(), "`" + n.GetName() + "' of type \"" + STR(*vty) +
                         "\" can not be re-assigned as \"" + STR(*ety) + "\".");
     SetNodeType(n, MakeUnknownType());
