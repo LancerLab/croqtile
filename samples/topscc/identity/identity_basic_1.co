@@ -1,24 +1,96 @@
-// Identity Basic Version 1
-__co__ f32[batch, seq, hidden] identity_basic_1(f32[batch, seq, hidden] X) {
-    f32[batch, seq, hidden] Y;
+__co__ f32[batch, seq, hidden] identity(f32[batch, seq, hidden] X) {
+  f32[batch, seq, hidden] Y;
+
+  parallel p by 2 {
+    parallel q by 12 {
+      local f32[batch/#p, seq/#q, hidden] x_local;
+      local f32[batch/#p, seq/#q, hidden] y_local;
     
-    parallel b by batch {
-        parallel s by seq {
-            local f32[hidden] x_local;
-            local f32[hidden] y_local;
-            
-            // 复制输入数据到本地内存
-            dma.copy X.chunkat(b, s, _) => x_local;
-            
-            // 简单地复制数据，不做任何修改
-            foreach {h} in [hidden] {
-                y_local.at(h) = x_local.at(h);
-            }
-            
-            // 复制结果到输出
-            dma.copy y_local => Y.chunkat(b, s, _);
-        }
+      dma.copy X.chunkat(p, q, _) => x_local;
+    
+      // you can assign each elements from src to dst buffer
+      foreach {i, j, k} in [batch/#p, seq/#q, hidden] {
+        y_local.at(i, j, k) = x_local.at(i, j, k);
+      }
+    
+      dma.copy y_local => Y.chunkat(p, q, _);
     }
-    
-    return Y;
+  }
+
+  return Y;
+}
+
+__co__ f32[batch, seq, hidden] identity_vcopy(f32[batch, seq, hidden] X) {
+  f32[batch, seq, hidden] Y;
+
+  parallel p by 2 {
+    parallel q by 12 {
+      foreach {i, j} in [batch/#p, seq/#q] {
+        // you can simply copy data back without elementwise assignment by:
+        vec_load = dma.copy X.chunkat(p#i, q#j, _) => local;
+        dma.copy vec_load.data => Y.chunkat(p#i, q#j, _);
+      }
+    }
+  }
+
+  return Y;
 } 
+
+__co__ f32[batch, seq, hidden] identity_tcopy(f32[batch, seq, hidden] X) {
+  f32[batch, seq, hidden] Y;
+
+  parallel p by 2 {
+    parallel q by 12 {
+      // you can simply copy data back without elementwise assignment by:
+      vec_load = dma.copy X.chunkat(p, q, _) => local;
+      dma.copy vec_load.data => Y.chunkat(p, q, _);
+    }
+  }
+
+  return Y;
+} 
+
+int main() { /// host program
+  const int BATCH = 16;
+  const int SEQ = 16;
+  const int HIDDEN = 64;
+  choreo::f32 a[BATCH * SEQ * HIDDEN]; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge choreo::f32 b[512][512] = {0};
+
+  auto input_data = choreo::make_spanview<3, choreo::f32>((float*)a, {BATCH, SEQ, HIDDEN});
+  input_data.fill_random(-1.0, 1.0);
+
+  auto start = std::chrono::high_resolution_clock::now();
+  auto res = identity(input_data);
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
+  auto start2 = std::chrono::high_resolution_clock::now();
+  auto res_vcopy = identity_vcopy(input_data);
+  auto end2 = std::chrono::high_resolution_clock::now();
+  auto duration_vcopy = std::chrono::duration_cast<std::chrono::microseconds>(end2 - start2);
+
+  auto start3 = std::chrono::high_resolution_clock::now();
+  auto res_tcopy = identity_tcopy(input_data);
+  auto end3 = std::chrono::high_resolution_clock::now();
+  auto duration_tcopy = std::chrono::duration_cast<std::chrono::microseconds>(end3 - start3);
+
+  // verfication
+  for (size_t i = 0; i < BATCH; ++i)
+    for (size_t j = 0; j < SEQ; ++j)
+      for (size_t k = 0; k < HIDDEN; ++k) {
+        std::cout << "{i,j,k}: {" << i << "," << j << "," << k << "}\n";
+        std::cout << "<identity> res: " << res[i][j][k] << "\n";
+        std::cout << "<identity_vcopy> res: " << res_vcopy[i][j][k] << "\n";
+        std::cout << "<identity_tcopy> res: " << res_tcopy[i][j][k] << "\n";
+        float ref = input_data[i][j][k];
+
+        std::cout << "ref: " << ref << std::endl;
+        assert(ref == res[i]);
+        assert(ref == res_vcopy[i]);
+        assert(ref == res_tcopy[i]);
+      }
+  std::cout << "Test Passed\n" << std::endl;
+  std::cout << "Function <identity> execution time: " << duration.count() << " microseconds" << std::endl;
+  std::cout << "Function <identity_vcopy> execution time: " << duration_vcopy.count() << " microseconds" << std::endl;
+  std::cout << "Function <identity_tcopy> execution time: " << duration_tcopy.count() << " microseconds" << std::endl;
+}
