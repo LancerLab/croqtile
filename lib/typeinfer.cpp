@@ -45,7 +45,8 @@ bool TypeInference::AfterVisitImpl(AST::Node& n) {
       dbgs() << "Function:  " << SSTab().InScopeName(f->name)
              << ", Type: " << AST::TYPE_STR(*f) << "\n";
     }
-  } else if (isa<AST::DMA>(&n)) {
+  } else if (isa<AST::DMA>(&n) || isa<AST::NamedVariableDecl>(&n) ||
+             isa<AST::Assignment>(&n)) {
     dma_fmty = BaseType::UNKNOWN;
     dma_mem = Storage::NONE;
   } else if (isa<AST::Parameter>(&n)) {
@@ -554,8 +555,6 @@ bool TypeInference::Visit(AST::Expr& n) {
     auto& pty_lhs = n.GetL()->GetType();
     auto& pty_rhs = n.GetR()->GetType();
 
-    bool is_mutable = IsMutable(*pty_lhs) || IsMutable(*pty_rhs);
-
     if (n.IsCompare()) {
       if ((IsActualBoundedIntegerType(pty_lhs) && ConvertibleToInt(pty_rhs)) ||
           (IsActualBoundedIntegerType(pty_rhs) && ConvertibleToInt(pty_lhs)) ||
@@ -905,7 +904,7 @@ bool TypeInference::Visit(AST::ChunkAt& n) {
   auto sto = sty->GetStorage();
   assert(fmty != BaseType::UNKNOWN);
   if ((dma_fmty != BaseType::UNKNOWN) && (fmty != dma_fmty)) {
-    Error(n.LOC(), "transfer data type with different types: " + STR(fmty) +
+    Error(n.LOC(), "assign/transfer data with a different type: " + STR(fmty) +
                        " vs. " + STR(dma_fmty));
     error_count++;
   }

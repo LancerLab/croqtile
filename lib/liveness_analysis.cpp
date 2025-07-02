@@ -993,7 +993,7 @@ bool LivenessAnalyzer::Visit(AST::Assignment& n) {
     if (auto expr = dyn_cast<AST::Expr>(n.value)) {
       VarSet operands = GetAllSymbolicOperands(expr.get());
       AddUse(current_stmt, operands);
-    } else {
+    } else if (!isa<AST::Call>(n.value)) {
       assert(false && "expecting the assignment value is an expr.");
     }
   }

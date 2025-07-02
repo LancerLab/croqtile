@@ -34,6 +34,12 @@ private:
   int cur_node_index = -1;
   std::map<AST::MultiNodes*, NodeInsertInfo> mnodes_insertions;
 
+  void InsertNode(int index, const ptr<AST::Node>& n, const std::string& name) {
+    assert(index >= 0);
+    mnodes_insertions[multi_nodes.top()].emplace_back(
+        std::make_tuple(index, n, name));
+  }
+
   std::string GetInternalValueString() { return "$" + std::to_string(count++); }
 
   ptr<AST::CastExpr> GenCastExprNode(BaseType to, BaseType from,
@@ -85,14 +91,10 @@ public:
       changed = false;
     } else if (auto m = dyn_cast<AST::MultiNodes>(&n)) {
       multi_nodes.push(m);
-    } else if (auto d = dyn_cast<AST::DMA>(&n)) {
-      cur_node_index = multi_nodes.top()->GetIndex(d);
-      assert(cur_node_index != -1 && "unexpected node index.");
-    } else if (auto d = dyn_cast<AST::Return>(&n)) {
-      cur_node_index = multi_nodes.top()->GetIndex(d);
-      assert(cur_node_index != -1 && "unexpected node index.");
-    } else if (auto f = dyn_cast<AST::ForeachBlock>(&n)) {
-      cur_node_index = multi_nodes.top()->GetIndex(f);
+    } else if (isa<AST::DMA>(&n) || isa<AST::NamedVariableDecl>(&n) ||
+               isa<AST::Assignment>(&n) || isa<AST::Return>(&n) ||
+               isa<AST::ForeachBlock>(&n)) {
+      cur_node_index = multi_nodes.top()->GetIndex(&n);
       assert(cur_node_index != -1 && "unexpected node index.");
     }
     return true;
@@ -485,8 +487,7 @@ public:
     auto assign = AST::Make<AST::Assignment>(n.to->LOC(), anon_sym, n.to);
     assign->SetType(n.to->GetType()->Clone());
     assign->da->SetType(n.to->GetType()->Clone());
-    mnodes_insertions[multi_nodes.top()].emplace_back(
-        std::make_tuple(index, assign, anon_sym));
+    InsertNode(index, assign, anon_sym);
     VST_DEBUG(dbgs() << n.TypeNameString() << ": replace " << PSTR(n.to)
                      << " with " << anon_sym << "(" << PSTR(assign->GetType())
                      << ".\n");
@@ -507,8 +508,7 @@ public:
           AST::Make<AST::Assignment>(n.sa->LOC(), n.sa->nid->name, n.sa);
       assign->SetType(n.sa->GetType()->Clone());
       assign->da->SetType(n.sa->GetType()->Clone());
-      mnodes_insertions[multi_nodes.top()].emplace_back(
-          std::make_tuple(index, assign, n.sa->nid->name));
+      InsertNode(index, assign, n.sa->nid->name);
       VST_DEBUG(dbgs() << n.TypeNameString() << ": replace " << PSTR(n.sa)
                        << " with " << n.sa->nid->name << "("
                        << PSTR(assign->GetType()) << ")\n");
@@ -538,8 +538,7 @@ public:
                                                        nname, expr->GetL());
               assign->SetType(expr->GetL()->GetType()->Clone());
               assign->da->SetType(expr->GetL()->GetType()->Clone());
-              mnodes_insertions[multi_nodes.top()].emplace_back(
-                  std::make_tuple(index, assign, nname));
+              InsertNode(index, assign, nname);
               VST_DEBUG(dbgs()
                         << n.TypeNameString() << ": replace "
                         << PSTR(expr->GetL()) << " with " << nname << "\n");
@@ -557,8 +556,7 @@ public:
         auto assign = AST::Make<AST::Assignment>(v->LOC(), nname, v);
         assign->SetType(v->GetType()->Clone());
         assign->da->SetType(v->GetType()->Clone());
-        mnodes_insertions[multi_nodes.top()].emplace_back(
-            std::make_tuple(index, assign, nname));
+        InsertNode(index, assign, nname);
         repls.emplace_back(i, AST::Make<AST::Identifier>(v->LOC(), nname));
         VST_DEBUG(dbgs() << n.TypeNameString() << ": replace " << PSTR(v)
                          << " with " << nname << "(" << PSTR(assign->GetType())
@@ -614,8 +612,7 @@ public:
         assert(cur_node_index != -1);
         int index =
             cur_node_index + mnodes_insertions[multi_nodes.top()].size();
-        mnodes_insertions[multi_nodes.top()].emplace_back(
-            std::make_tuple(index, nv, anon_sym));
+        InsertNode(index, nv, anon_sym);
 
         // replace return value now
         VST_DEBUG(dbgs() << "[Norm] Replace " << STR(n) << "\n to be:\n");
@@ -655,8 +652,7 @@ public:
               auto lty = bound_expr->GetL()->GetType();
               assign->SetType(lty);
               assign->da->SetType(lty);
-              mnodes_insertions[multi_nodes.top()].emplace_back(
-                  std::make_tuple(index, assign, nname));
+              InsertNode(index, assign, nname);
               VST_DEBUG(dbgs() << "range - getith: replace "
                                << PSTR(bound_expr->GetL()) << "\n with "
                                << nname << ".\n");
@@ -676,8 +672,7 @@ public:
         auto bty = bound_expr->GetType();
         assign->SetType(bty);
         assign->da->SetType(bty);
-        mnodes_insertions[multi_nodes.top()].emplace_back(
-            std::make_tuple(index, assign, nname));
+        InsertNode(index, assign, nname);
         auto id_expr = AST::MakeIdExpr(v->LOC(), nname);
         id_expr->SetType(bty);
         repls.emplace_back(i, id_expr);

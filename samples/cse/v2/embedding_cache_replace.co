@@ -1,0 +1,200 @@
+// EmbeddingCacheReplaceChoreo kernel for Choreo
+
+// --------- choreo utility function implementation ---------
+__cok__ {
+    // MurmurHash3_32: hash each key, result mod index_mod
+    template <typename key_type, uint32_t m_seed = 0>
+    __co_device__ void MurmurHash3_32(
+        __private__ key_type* keys,
+        __private__ uint32_t* index,
+        int index_mod,
+        int keys_count)
+    {
+        constexpr uint32_t c1 = 0xcc9e2d51;
+        constexpr uint32_t c2 = 0x1b873593;
+        constexpr uint32_t n = 0xe6546b64;
+
+        constexpr int vector_length = TCLE_MAX_VECTOR_LENGTH;
+        using VT = tcle::simple_altivector<unsigned int>::VT;
+        auto index_ptr = tcle::simple_leaptr<VT>(index);
+
+        int vectors_count = ceil_(keys_count, vector_length);
+        for (int i = 0; i < vectors_count; i++) {
+            auto hash = (VT)m_seed;
+            // body
+            auto key_low = get_i64_part<key_type, vector_length, false>(keys + i * vector_length);
+            key_low = key_low * c1;
+            key_low = CIRCULAR_LEFT_SHIFT(key_low, 15, 32);
+            key_low *= c2;
+            hash ^= key_low;
+            hash = CIRCULAR_LEFT_SHIFT(hash, 13, 32);
+            hash = hash * 5 + n;
+            auto key_high = get_i64_part<key_type, vector_length, true>(keys + i * vector_length);
+            key_high = key_high * c1;
+            key_high = CIRCULAR_LEFT_SHIFT(key_high, 15, 32);
+            key_high *= c2;
+            hash ^= key_high;
+            hash = CIRCULAR_LEFT_SHIFT(hash, 13, 32);
+            hash = hash * 5 + n;
+            // finalization
+            hash ^= (uint32_t)(sizeof(key_type));
+            hash ^= hash >> 16;
+            hash *= 0x85ebca6b;
+            hash ^= hash >> 13;
+            hash *= 0xc2b2ae35;
+            hash ^= hash >> 16;
+            index_ptr.store(hash % index_mod);
+        }
+    }
+
+    template <typename T, int vector_length>
+    __co_device__ int index(__private__ T* array, T key) {
+        // find the first index of matching key in array
+        using vtype = typename tcle::altivector<unsigned int, vector_length>::VT;
+        auto v_key_high = (vtype)(static_cast<unsigned int>(key >> 32));
+        auto v_key_low = (vtype)(static_cast<unsigned int>(key & 0xFFFFFFFF));
+        auto v_array_high = get_i64_part<T, vector_length, true>(array);
+        auto v_array_low = get_i64_part<T, vector_length, false>(array);
+        auto v_mask_high = (v_key_high == v_array_high);
+        auto v_mask_low = (v_key_low == v_array_low);
+        auto v_mask = (v_mask_high & v_mask_low);
+        // OR bits together (vpt0, vpt1)
+        int has_one = tcle::aggr_mb<0, 0>(v_mask) | tcle::aggr_mb<0, 1>(v_mask);
+        return (has_one) ? bit_index(v_mask) : -1;
+    }
+
+    template <typename T, int vector_length>
+    __co_device__ int argmin(__private__ T* array, int segment_length = vector_length, int priority_segment = 0) {
+        // find the first index of min_value in array
+        using vtype = typename tcle::altivector<unsigned int, vector_length>::VT;
+        auto v_high = get_i64_part<T, vector_length, true>(array);
+        auto v_high_min = (vtype)tcle::redmin<1>(v_high)[0];
+        auto v_high_mask = (v_high == v_high_min);
+        auto v_low = get_i64_part<T, vector_length, false>(array);
+        auto v_low_valid = tcle::vsel(v_high_mask, v_low, (vtype)0);
+        auto v_low_min = (vtype)tcle::redmin<1>(v_low_valid)[0];
+        auto v_low_mask = (v_low_valid == v_low_min);
+        auto v_min_mask = (v_high_mask & v_low_mask);
+
+        auto v_priority_mask = (range<vector_length>() >= (priority_segment * segment_length));
+        auto v_priority_min_mask = (v_min_mask & v_priority_mask);
+        if (tcle::aggr_mb<0, 0>(v_priority_min_mask) | tcle::aggr_mb<0, 1>(v_priority_min_mask))
+            return bit_index(v_priority_min_mask);
+        return bit_index(v_min_mask);
+    }
+}
+
+// --------- operator implementation ---------
+
+// EmbeddingCacheReplaceChoreo_kernel: main choreo operator, two-level parallel simulates block/thread division
+// Supports block transfer, batch processing, parallel search and replacement, all data transfer uses dma+subspan/at
+#define PART_SIZE 1024
+#define TILE_SIZE 256
+__co__ void EmbeddingCacheReplaceChoreo_kernel(
+    s64[capacity_in_set, set_associativity, warp_size] keys, // global key table
+    f32[capacity_in_set, set_associativity, warp_size, embedding_vec_size] vals, // global value table
+    u64[capacity_in_set, set_associativity, warp_size] slot_counter, // global LRU counter
+    s64[len] d_keys, // input query key
+    f32[len, embedding_vec_size] d_values, // input query value
+    u64 global_counter, // global counter
+    int dim_grid, int dim_block                    //
+) {
+  parallel blockIdx by dim_grid {
+    parallel threadIdx by dim_block {
+      // Local buffer declaration, block processing key/counter
+      s64[PART_SIZE, set_associativity, warp_size] buffer_key;
+      u64[PART_SIZE, set_associativity, warp_size] buffer_counter;
+      s64[TILE_SIZE] buffer_query;
+      u32[TILE_SIZE] buffer_src_set;
+
+      // Outer loop: block copy key/counter to local buffer
+      foreach {k_loop_idx} in [cdiv(capacity_in_set, PART_SIZE)] {
+        // Block transfer key/counter to local buffer
+        dma.copy keys.subspan(PART_SIZE, set_associativity, warp_size).at(k_loop_idx, _, _) => buffer_key;
+        dma.copy slot_counter.subspan(PART_SIZE, set_associativity, warp_size).at(k_loop_idx, _, _) => buffer_counter;
+
+        // Inner loop: batch process input query
+        foreach {m_loop_idx} in [cdiv(len, TILE_SIZE)] {
+          // Block transfer query to local buffer
+          dma.copy d_keys.subspan(TILE_SIZE).at(m_loop_idx) => buffer_query;
+
+          // Hash bucket, get src_set for each query
+          call MurmurHash3_32(buffer_query, buffer_src_set, capacity_in_set, TILE_SIZE);
+          // Traverse all queries in this batch, search/replace/write back
+          foreach {query_idx} in [TILE_SIZE] {
+            mutable u64 query = buffer_query.at(query_idx); // current query key
+            mutable src_set = buffer_src_set.at(query_idx); // set mapped by query
+            mutable set_offset = src_set - k_loop_idx * PART_SIZE; // offset of set in local buffer
+            // Only process the key range handled by the current thread
+            if (src_set >= 0 && src_set < capacity_in_set && set_offset >= 0 && set_offset < PART_SIZE) {
+              mutable src_slab = query % set_associativity; // slab id
+              mutable flag_need_replace = 1;
+              mutable src_slot = -1;
+              // Search for key or empty slot in set
+              foreach {cnt} in [set_associativity] {
+                mutable int idx = call index(buffer_key.subspan(1,1,warp_size).at(set_offset, src_slab, 0), query);
+                if (idx >= 0) {
+                  src_slot = idx;
+                  flag_need_replace = 0;
+                  // TODO: choreo need break to exit loop
+                  break;
+                }
+                mutable key_a = buffer_key.at(set_offset, src_slab, warp_size-1);
+                // Check empty slot
+                if (key_a == 0x7FFFFFFFFFFFFFFF) {
+                  src_slot = call index(buffer_key.subspan(1,1,warp_size).at(set_offset, src_slab, 0), 0x7FFFFFFFFFFFFFFF);
+                  break;
+                }
+                src_slab = (src_slab + 1) % set_associativity;
+              }
+              // If none, find LRU slot
+              if (src_slot == -1) {
+                src_slot = call argmin(buffer_counter.subspan(1,1,warp_size).at(set_offset, src_slab, 0), warp_size, src_slab);
+              }
+              // Replace key/value/counter
+              if (flag_need_replace == 1) {
+                buffer_key.at(set_offset, src_slab, src_slot) = query;
+                foreach {e} in [embedding_vec_size] {
+                  vals.at(src_set, src_slab, src_slot, e) = d_values.at(m_loop_idx * TILE_SIZE + query_idx, e);
+                }
+              }
+              buffer_counter.at(set_offset, src_slab, src_slot) = global_counter;
+            }
+          }
+        }
+        // Block write back global key/counter
+        dma.copy buffer_key => keys.subspan(PART_SIZE, set_associativity, warp_size).at(k_loop_idx, 0, 0);
+        dma.copy buffer_counter => slot_counter.subspan(PART_SIZE, set_associativity, warp_size).at(k_loop_idx, 0, 0);
+      }
+    }
+  }
+}
+
+// TODO: choreo need to implement a new version of host wrapper
+// to take a send-in topsStream_t
+//
+// Host side interface, parameters consistent with the original header file
+void EmbeddingCacheReplaceChoreo(
+    int64_t *keys,
+    float *vals,
+    uint64_t *slot_counter,
+    int capacity_in_set,
+    int embedding_vec_size,
+    uint64_t global_counter,
+    int64_t *d_keys,
+    float *d_values,
+    int len,
+    int dim_grid,
+    int dim_block,
+    int num_bytes_in_SharedMem,
+    void* stream
+) {
+    using namespace choreo;
+    // Convert host pointers to choreo views
+    auto keys_view = spanned_view<int64_t, 3>(keys, {capacity_in_set, 2, 32});
+    auto vals_view = spanned_view<float, 4>(vals, {capacity_in_set, 2, 32, embedding_vec_size});
+    auto slot_counter_view = spanned_view<uint64_t, 3>(slot_counter, {capacity_in_set, 2, 32});
+    auto d_keys_view = spanned_view<int64_t, 1>(d_keys, {len});
+    auto d_values_view = spanned_view<float, 2>(d_values, {len, embedding_vec_size});
+    EmbeddingCacheReplaceChoreo_kernel(keys_view, vals_view, slot_counter_view, d_keys_view, d_values_view, global_counter, dim_grid, dim_block);
+}
