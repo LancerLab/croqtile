@@ -203,8 +203,6 @@ bool TypeInference::Visit(AST::DataType& n) {
   if (n.getBaseType() == BaseType::UNKNOWN)
     return true; // ignore the annotation that needs inference
 
-  assert((cur_type == nullptr) && "Expecting null type.");
-
   if (!n.mdspan_type) {
     cur_type = n.GetType(); // simple types
     return true;

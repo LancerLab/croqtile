@@ -16,7 +16,6 @@ private:
 private:
   ptr<Type> cur_type = nullptr;
   std::vector<ptr<Type>> cur_param_types;
-  Shape cur_mdspan_value;
   BaseType dma_fmty = BaseType::UNKNOWN;
   Storage dma_mem = Storage::NONE;
   bool allow_named_dim = false; // named dimensions (mdspan param only)
@@ -37,7 +36,13 @@ private:
   }
 
   void TraceEachVisit(const AST::Node& n) {
-    if (trace_visit) dbgs() << n.TypeNameString() << ":\n";
+    if (trace_visit)
+      dbgs() << n.TypeNameString() << ":\n";
+    else if (debug_visit) {
+      dbgs() << "[" << n.TypeNameString() << "] ";
+      n.InlinePrint(dbgs());
+      dbgs() << " | cur_type: " << PSTR(cur_type) << "\n";
+    }
   }
 
 public:

@@ -1766,7 +1766,7 @@ bool EarlySemantics::Visit(AST::Call& n) {
             isa<EventType>(ty) || isa<F32Type>(ty) || isa<F64Type>(ty) ||
             isa<ITupleType>(ty) || isa<MDSpanType>(ty) ||
             isa<BoundedType>(ty) || isa<F16Type>(ty) || isa<BF16Type>(ty) ||
-            isa<AddrType>(ty))
+            isa<AddrType>(ty) || isa<BooleanType>(ty))
           return true;
         // half8 is invalid.
         return false;

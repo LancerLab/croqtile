@@ -92,7 +92,7 @@ public:
 
   virtual void InlinePrint(std::ostream& os, const std::string& prefix = {},
                            bool with_type = false) const {
-    return Print(os, prefix, with_type);
+    if (!IsBlock()) Print(os, prefix, with_type);
   }
 
   virtual void accept(Visitor&) = 0;
@@ -1725,6 +1725,21 @@ public:
                             cast<MultiNodes>(stmts->Clone()), async);
   }
 
+  void InlinePrint(std::ostream& os, const std::string& prefix = {},
+                   bool with_type = false) const override {
+    os << prefix << "parallel ";
+    if (bpv) bpv->Print(os, "", with_type);
+    if (bpv && cmpt_bpvs) os << " = ";
+    if (cmpt_bpvs) {
+      os << "{";
+      cmpt_bpvs->InlinePrint(os, "", with_type);
+      os << "}";
+    }
+    os << " by [";
+    PrintBounds(os);
+    os << "]";
+  }
+
   void PrintBound(std::ostream& os) const {
     auto ob = BoundValue();
     os << ((IsValidValueItem(ob)) ? ob->ToString() : STR(bound_expr));
@@ -2566,6 +2581,8 @@ struct Program : public Node, public TypeIDProvider<Program> {
       : Node(l), nodes(ss) {
     if (!nodes) nodes = Make<MultiNodes>(l);
   }
+
+  bool IsBlock() const override { return true; }
 
   ptr<Node> CloneImpl() const override {
     return Make<Program>(LOC(), cast<MultiNodes>(nodes->Clone()));
