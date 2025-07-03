@@ -142,6 +142,11 @@ public:
     device_map.back()[csym] = name;
   }
 
+  void RemapHostSymbol(const std::string& csym, const std::string& name) {
+    assert(PrefixedWith(csym, "::") && "expect a scoped name.");
+    host_map.back()[csym] = name;
+  }
+
   const std::string HostName(const std::string& csym) const {
     for (auto mapit = host_map.rbegin(); mapit != host_map.rend(); ++mapit)
       if (mapit->count(csym)) return (*mapit).at(csym);
@@ -298,6 +303,20 @@ private:
       choreo_unreachable("the indent can not be decreased.");
     d_indent = d_indent.substr(0, d_indent.size() - 2);
   }
+
+  std::ostringstream& Stream() { return IsHost() ? hs : ds; }
+  std::ostringstream& IndStream() {
+    if (IsHost()) {
+      hs << h_indent;
+      return hs;
+    } else {
+      ds << d_indent;
+      return ds;
+    }
+  }
+  const std::string Indent() { return IsHost() ? h_indent : d_indent; }
+  void IncrIndent() { return IsHost() ? IncrHostIndent() : IncrDeviceIndent(); }
+  void DecrIndent() { return IsHost() ? DecrHostIndent() : DecrDeviceIndent(); }
 
 private:
   void ResetChoreoFunctionStates() {

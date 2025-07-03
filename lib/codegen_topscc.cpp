@@ -197,31 +197,17 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
     max_parallel_level = GetMaxParallelLevelFromNote(*pb);
     max_parallel_level_valid = true;
   } else if (isa<AST::WithBlock>(&n)) {
-    if (IsHost()) {
-      hs << h_indent << "// with-in: " << n.LOC() << "\n";
-      hs << h_indent << "{\n";
-      IncrHostIndent();
-    } else {
-      ds << d_indent << "// with-in: " << n.LOC() << "\n";
-      ds << d_indent << "{\n";
-      IncrDeviceIndent();
-    }
+    IndStream() << "// with-in: " << n.LOC() << "\n";
+    IndStream() << "{\n";
+    IncrIndent();
   } else if (isa<AST::ForeachBlock>(&n)) {
-    if (IsHost())
-      hs << h_indent << "// foreach: " << n.LOC() << "\n";
-    else
-      ds << d_indent << "// foreach: " << n.LOC() << "\n";
+    IndStream() << "// foreach: " << n.LOC() << "\n";
   }
   if (isa<AST::IfElseBlock>(&n) || isa<AST::NamedVariableDecl>(&n)) {
     emit_call = false;
   } else if (isa<AST::IncrementBlock>(&n)) {
-    if (IsHost()) {
-      hs << h_indent << "// incr: " << n.LOC() << "\n";
-      IncrHostIndent();
-    } else {
-      ds << d_indent << "// incr: " << n.LOC() << "\n";
-      IncrDeviceIndent();
-    }
+    IndStream() << "// incr: " << n.LOC() << "\n";
+    IncrIndent();
   }
 
   if (!IsHost() && max_parallel_level_valid && !n.IsBlock() &&
@@ -240,15 +226,9 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
 bool TopsccCodeGen::InMidVisitImpl(AST::Node& n) {
   if (auto ie = dyn_cast<AST::IfElseBlock>(&n)) {
     if (!ie->HasElse()) return true;
-    if (IsHost()) {
-      DecrHostIndent();
-      hs << h_indent << "} else {\n";
-      IncrHostIndent();
-    } else {
-      DecrDeviceIndent();
-      ds << d_indent << "} else {\n";
-      IncrDeviceIndent();
-    }
+    DecrIndent();
+    IndStream() << "} else {\n";
+    IncrIndent();
   }
   return true;
 }
@@ -309,13 +289,8 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
       ds << "}\n\n";
     }
   } else if (isa<AST::WithBlock>(&n)) {
-    if (IsHost()) {
-      DecrHostIndent();
-      hs << h_indent << "}\n";
-    } else {
-      DecrDeviceIndent();
-      ds << d_indent << "}\n";
-    }
+    DecrIndent();
+    IndStream() << "}\n";
   } else if (auto fb = dyn_cast<AST::ForeachBlock>(&n)) {
     const auto& ranges = fb->GetRangeNodes();
     for (int j = ranges->Count() - 1; j >= 0; --j) {
@@ -323,15 +298,9 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
       auto cname = rng->IVName();
       auto ivs = within_map.at(InScopeName(cname));
       for (auto iv_itr = ivs.rbegin(); iv_itr != ivs.rend(); ++iv_itr) {
-        if (IsHost()) {
-          DecrHostIndent();
-          hs << h_indent << "} // " << UnScopedName(*iv_itr) << "\n";
-          hs << h_indent << ssm.DeviceName(*iv_itr) << " = 0;\n"; // must reset
-        } else {
-          DecrDeviceIndent();
-          ds << d_indent << "} // " << UnScopedName(*iv_itr) << "\n";
-          ds << d_indent << ssm.DeviceName(*iv_itr) << " = 0;\n"; // must reset
-        }
+        DecrIndent();
+        IndStream() << "} // " << UnScopedName(*iv_itr) << "\n";
+        IndStream() << ssm.DeviceName(*iv_itr) << " = 0;\n"; // must reset
       }
     }
   } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
@@ -343,29 +312,14 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
       ds << " // end inthreads\n";
     }
   } else if (auto ie = dyn_cast<AST::IfElseBlock>(&n)) {
-    if (IsHost()) {
-      DecrHostIndent();
-      hs << h_indent << "} // end if-else: " << ie->LOC() << "\n";
-    } else {
-      DecrDeviceIndent();
-      ds << d_indent << "} // end if-else " << ie->LOC() << "\n";
-    }
+    DecrIndent();
+    IndStream() << "} // end if-else: " << ie->LOC() << "\n";
   } else if (auto ie = dyn_cast<AST::WhileBlock>(&n)) {
-    if (IsHost()) {
-      DecrHostIndent();
-      hs << h_indent << "} // end while: " << ie->LOC() << "\n";
-    } else {
-      DecrDeviceIndent();
-      ds << d_indent << "} // end while: " << ie->LOC() << "\n";
-    }
+    DecrIndent();
+    IndStream() << "} // end while: " << ie->LOC() << "\n";
   } else if (isa<AST::IncrementBlock>(&n)) {
-    if (IsHost()) {
-      DecrHostIndent();
-      hs << h_indent << "}\n";
-    } else {
-      DecrDeviceIndent();
-      ds << d_indent << "}\n";
-    }
+    DecrIndent();
+    IndStream() << "}\n";
   } else if (isa<AST::NamedVariableDecl>(&n)) {
     emit_call = true;
   }
@@ -843,28 +797,22 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
     if (!IsActualBoundedIntegerType(bty))
       choreo_unreachable(
           "yet to support: bounded ituple variable code generation.");
-    if (IsHost())
-      hs << h_indent << "int " << sym << " = " << ExprSTR(n.init_expr, false)
-         << ";\n";
-    else
-      ds << d_indent << "int " << sym << " = " << ExprSTR(n.init_expr, false)
-         << ";\n";
+    IndStream() << "int " << sym << " = " << ExprSTR(n.init_expr, false)
+                << ";\n";
     return true;
   }
 
   // when symbol is not valued
   if (isa<ScalarType>(nty) &&
       (IsMutable(*nty) || !FCtx(fname).HasSymbolValues(InScopeName(sym)))) {
-    auto& ss = IsHost() ? hs : ds;
     auto mem = n.GetMemory();
-    ss << (IsHost() ? h_indent : d_indent);
     if (mem != nullptr) {
       auto st = mem->Get();
-      ss << TopsDeviceMemory(st) << " ";
+      IndStream() << TopsDeviceMemory(st) << " ";
     }
-    ss << NameBaseType(GetBaseType(*nty), false) << " " << sym;
-    if (n.init_expr) ss << " = " << ExprSTR(n.init_expr, false);
-    ss << ";\n";
+    Stream() << NameBaseType(GetBaseType(*nty), false) << " " << sym;
+    if (n.init_expr) Stream() << " = " << ExprSTR(n.init_expr, false);
+    Stream() << ";\n";
 
     // mutables have references
     if (IsMutable(*nty))
@@ -1707,10 +1655,7 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
 
 bool TopsccCodeGen::Visit(AST::Break& n) {
   TraceEachVisit(n);
-  if (IsHost())
-    hs << h_indent << "break;\n";
-  else
-    ds << d_indent << "break;\n";
+  IndStream() << "break;\n";
   return true;
 }
 
@@ -1941,6 +1886,7 @@ bool TopsccCodeGen::Visit(AST::WithIn& n) {
   for (auto& v : n.GetMatchers()) {
     auto id = cast<AST::Identifier>(v);
     ssm.RemapDeviceSymbol(InScopeName(id->name), "__iv_" + id->name);
+    ssm.RemapHostSymbol(InScopeName(id->name), "__iv_" + id->name);
     // Keep the device side decl, even for host side iv.
     // for visibility of shapes
     if (IsHost()) {
@@ -1955,6 +1901,7 @@ bool TopsccCodeGen::Visit(AST::WithIn& n) {
   if (n.with && (n.GetMatchers().size() == 1)) {
     auto m1 = cast<AST::Identifier>(n.GetMatchers()[0]);
     ssm.RemapDeviceSymbol(InScopeName(n.with->name), "__iv_" + m1->name);
+    ssm.RemapHostSymbol(InScopeName(n.with->name), "__iv_" + m1->name);
   }
 
   return true;
@@ -1985,23 +1932,14 @@ bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
       auto iv_ty = GetSymbolType(UnScopedName(iv_name));
       assert(IsActualBoundedIntegerType(iv_ty));
       auto iv_bty = cast<BoundedType>(iv_ty);
-      if (IsHost()) {
-        hs << h_indent << "for (" << ssm.DeviceName(iv_name) << " = "
-           << (rng->lbound ? ("(" + ExprSTR(rng->lbound, false) + ")") : "0")
-           << "; " << ssm.DeviceName(iv_name) << " < "
-           << UnScopedExpr(STR(iv_bty->GetUpperBound()))
-           << (rng->ubound ? (" + " + ExprSTR(rng->ubound, false)) : "")
-           << "; ++" << ssm.DeviceName(iv_name) << ") {\n";
-        IncrHostIndent();
-      } else {
-        ds << d_indent << "for (" << ssm.DeviceName(iv_name) << " = "
-           << (rng->lbound ? ("(" + ExprSTR(rng->lbound, false) + ")") : "0")
-           << "; " << ssm.DeviceName(iv_name) << " < "
-           << UnScopedExpr(STR(iv_bty->GetUpperBound()))
-           << (rng->ubound ? (" + " + ExprSTR(rng->ubound, false)) : "")
-           << "; ++" << ssm.DeviceName(iv_name) << ") {\n";
-        IncrDeviceIndent();
-      }
+      IndStream() << "for (" << SSMName(iv_name, IsHost()) << " = "
+                  << (rng->lbound ? ("(" + ExprSTR(rng->lbound, IsHost()) + ")")
+                                  : "0")
+                  << "; " << SSMName(iv_name, IsHost()) << " < "
+                  << UnScopedExpr(STR(iv_bty->GetUpperBound()))
+                  << (rng->ubound ? (" + " + ExprSTR(rng->ubound, false)) : "")
+                  << "; ++" << SSMName(iv_name, IsHost()) << ") {\n";
+      IncrIndent();
     }
   }
 
@@ -2021,21 +1959,12 @@ bool TopsccCodeGen::Visit(AST::InThreadsBlock& n) {
 bool TopsccCodeGen::Visit(AST::IfElseBlock& n) {
   TraceEachVisit(n);
 
-  if (IsHost()) {
-    hs << h_indent << "// if-else: " << n.LOC() << "\n";
-    if (auto c = dyn_cast<AST::Call>(n.pred))
-      hs << h_indent << "if (" << CallSTR(*c) << ") {\n";
-    else
-      hs << h_indent << "if (" << ExprSTR(n.pred, true) << ") {\n";
-    IncrHostIndent();
-  } else {
-    ds << d_indent << "// if-else: " << n.LOC() << "\n";
-    if (auto c = dyn_cast<AST::Call>(n.pred))
-      ds << d_indent << "if (" << CallSTR(*c) << ") {\n";
-    else
-      ds << d_indent << "if (" << ExprSTR(n.pred, false) << ") {\n";
-    IncrDeviceIndent();
-  }
+  IndStream() << "// if-else: " << n.LOC() << "\n";
+  if (auto c = dyn_cast<AST::Call>(n.pred))
+    IndStream() << "if (" << CallSTR(*c) << ") {\n";
+  else
+    IndStream() << "if (" << ExprSTR(n.pred, IsHost()) << ") {\n";
+  IncrIndent();
   emit_call = true;
   return true;
 }
@@ -2043,15 +1972,10 @@ bool TopsccCodeGen::Visit(AST::IfElseBlock& n) {
 bool TopsccCodeGen::Visit(AST::WhileBlock& n) {
   TraceEachVisit(n);
 
-  if (IsHost()) {
-    hs << h_indent << "// while: " << n.LOC() << "\n";
-    hs << h_indent << "while (" << ExprSTR(n.pred, true) << ") {\n";
-    IncrHostIndent();
-  } else {
-    ds << d_indent << "// while: " << n.LOC() << "\n";
-    ds << d_indent << "while (" << ExprSTR(n.pred, false) << ") {\n";
-    IncrDeviceIndent();
-  }
+  IndStream() << "// while: " << n.LOC() << "\n";
+  IndStream() << "while (" << ExprSTR(n.pred, IsHost()) << ") {\n";
+  IncrIndent();
+
   return true;
 }
 
@@ -2111,10 +2035,7 @@ bool TopsccCodeGen::Visit(AST::CppSourceCode& n) {
   TraceEachVisit(n);
 
   if (n.kind == AST::CppSourceCode::Inline) {
-    if (IsHost())
-      hs << n.GetCode();
-    else
-      ds << n.GetCode();
+    Stream() << n.GetCode();
   } else {
     CodeSegment cur_cs =
         (n.kind == AST::CppSourceCode::Host) ? CS_USER : CS_COK;
@@ -3043,7 +2964,7 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e, bool is_host,
               ++idx;
             }
           } else {
-            auto name = SSMName(InScopeName(id->name));
+            auto name = SSMName(InScopeName(id->name), IsHost());
             assert(shape.Rank() >= idx + 1);
             oss << " + ";
             if (shape.Rank() > idx + 1)
