@@ -5,9 +5,9 @@ using namespace Choreo::valno;
 namespace Choreo {
 
 void ShapeInference::InvalidateVisitorValNOs() {
-  InvalidateVN(cur_vn);
-  InvalidateVN(cur_mdspan_vn);
-  InvalidateVN(cur_ub_vn);
+  cur_vn.Invalidate();
+  cur_mdspan_vn.Invalidate();
+  cur_ub_vn.Invalidate();
 }
 
 void ShapeInference::TraceEachVisit(AST::Node& n, bool detail,
@@ -22,9 +22,9 @@ void ShapeInference::TraceEachVisit(AST::Node& n, bool detail,
     dbgs() << m << n.TypeNameString();
 
   if (debug_visit)
-    dbgs() << "]\t " << STR(cur_vn, true) << "(vn),\t "
-           << STR(cur_mdspan_vn, true) << "(mds),\t " << STR(cur_ub_vn, true)
-           << "(ub)";
+    dbgs() << "]\t " << cur_vn.ToString(true) << "(vn),\t "
+           << cur_mdspan_vn.ToString(true) << "(mds),\t "
+           << cur_ub_vn.ToString(true) << "(ub)";
 
   dbgs() << "\n";
 }
@@ -202,7 +202,7 @@ void ShapeInference::CollapseMultiValues(const AST::MultiValues& mv) {
       std::ostringstream oss;
       for (size_t i = 0; i < vs.size(); ++i) {
         if (i > 0) oss << ",";
-        oss << "#" << vs[i];
+        oss << vs[i];
       }
       valno = vn.GetOrGenValueNumberFromSignature(oss.str());
     }
@@ -222,13 +222,13 @@ bool ShapeInference::Visit(AST::MultiValues& n) {
   TraceEachVisit(n);
 
   if (cannot_proceed || !CanBeValueNumbered(&n)) {
-    InvalidateVN(cur_vn);
+    cur_vn.Invalidate();
     return true;
   }
 
   if (gen_values) CollapseMultiValues(n);
 
-  InvalidateVN(cur_vn);
+  cur_vn.Invalidate();
 
   return true;
 }
@@ -250,7 +250,7 @@ bool ShapeInference::Visit(AST::FloatLiteral& n) {
 bool ShapeInference::Visit(AST::StringLiteral& n) {
   TraceEachVisit(n);
   if (cannot_proceed) return true;
-  InvalidateVN(cur_vn);
+  cur_vn.Invalidate();
   SetNodeType(n, MakeStringType());
   return true;
 }
@@ -267,7 +267,7 @@ bool ShapeInference::Visit(AST::Expr& n) {
   if (cannot_proceed) return true;
 
   if (!CanBeValueNumbered(&n)) {
-    InvalidateVN(cur_vn);
+    cur_vn.Invalidate();
     return true;
   }
 
@@ -301,7 +301,7 @@ bool ShapeInference::Visit(AST::Expr& n) {
   } break;
   case VNKind::VNK_MDSPAN: {
     auto mds_valno = GetValNo(n, VNKind::VNK_MDSPAN);
-    if (!ValidVN(mds_valno)) return true; // drop all the work
+    if (!mds_valno.IsValid()) return true; // drop all the work
     auto vl = vn.GenValueListFromSignature(SignValNo(mds_valno));
     if (ShouldOpt(vl)) n.Opts().SetVals(vl);
     VST_DEBUG(dbgs() << " |-<exprspan> <" << PSTR(nty) << "> " << STR(n) << ": "
@@ -326,12 +326,12 @@ bool ShapeInference::Visit(AST::Expr& n) {
     mty->SetShape(n.s);
     SetNodeType(n, mty);
     cur_mdspan_vn = cur_vn;
-    // InvalidateVN(cur_vn);
+    // cur_vn.Invalidate();
   }
 
   if (IsActualBoundedIntegerType(NodeType(n))) {
     cur_ub_vn = cur_vn;
-    InvalidateVN(cur_vn);
+    cur_vn.Invalidate();
   }
 
   return true;
@@ -341,7 +341,7 @@ bool ShapeInference::Visit(AST::CastExpr& n) {
   TraceEachVisit(n);
 
   if (cannot_proceed) return true;
-  InvalidateVN(cur_vn);
+  cur_vn.Invalidate();
   return true;
 }
 
@@ -351,12 +351,6 @@ bool ShapeInference::Visit(AST::MultiDimSpans& n) {
   if (cannot_proceed) return true;
 
   if (n.list) {
-    // TODO: should normalize as expr?
-#if 0
-    auto vnt =
-        (isa<AST::Expr>(n.list)) ? VNKind::VNK_MDSPAN : VNKind::VNK_VALUE;
-    auto sign = GetSign(*n.list, vnt);
-#endif
     auto sign = GetSign(*n.list, VNKind::VNK_VALUE);
     auto rank = CountElementsInSignature(sign);
 
@@ -373,17 +367,17 @@ bool ShapeInference::Visit(AST::MultiDimSpans& n) {
     cur_mdspan_vn = cur_vn;
 
   } else if (n.Rank() > 0) {
-    std::string unknown_spans = STR(UnknownVN());
+    std::string unknown_spans = NumTy::Unknown().ToString();
     for (size_t i = 1; i < n.Rank(); ++i)
-      unknown_spans = unknown_spans + ",#" + std::to_string(UnknownVN());
+      unknown_spans = unknown_spans + "," + NumTy::Unknown().ToString();
     cur_mdspan_vn = vn.GetOrGenValueNumberFromSignature(unknown_spans);
     SetMdsShape(n, GenShapeFromSignature(unknown_spans, n));
     ast_vn.Update(&n, cur_mdspan_vn, VNKind::VNK_VALUE);
   } else {
-    cur_mdspan_vn = UnknownVN(); // failed to deduce the type detail
+    cur_mdspan_vn = NumTy::Unknown(); // failed to deduce the type detail
   }
 
-  InvalidateVN(cur_vn);
+  cur_vn.Invalidate();
   return true;
 }
 
@@ -394,7 +388,7 @@ bool ShapeInference::Visit(AST::NamedTypeDecl& n) {
 
   auto name = n.name_str;
   if (n.init_expr) {
-    assert(ValidVN(cur_mdspan_vn) &&
+    assert(cur_mdspan_vn.IsValid() &&
            "invalid value number for the named type.");
 
     DefineASymbol(name, n.GetType());
@@ -405,7 +399,7 @@ bool ShapeInference::Visit(AST::NamedTypeDecl& n) {
     if (IsValidValueList(vl) && !IsComputable(vl))
       Note(n.init_expr->LOC(), "mdspan contains unspecific value.");
 
-    InvalidateVN(cur_mdspan_vn); // consumes the mdspan
+    cur_mdspan_vn.Invalidate(); // consumes the mdspan
   }
   return true;
 }
@@ -443,7 +437,7 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
     nty = NodeType(n);
     if (GetSpannedType(nty)) {
       cur_mdspan_vn = GetValNo(*n.init_expr, VNKind::VNK_MDSPAN);
-      assert(ValidVN(cur_mdspan_vn) && "expecting a valid mdspan valno.");
+      assert(cur_mdspan_vn.IsValid() && "expecting a valid mdspan valno.");
       auto vl = vn.GenValueListFromValueNumber(cur_mdspan_vn);
       if (IsValidValueList(vl) && !IsComputable(vl))
         Note(n.init_expr->LOC(),
@@ -451,8 +445,8 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
       ValNoAliasSign(SSTab().ScopedName(name + ".span"), cur_mdspan_vn);
     } else if (IsActualBoundedIntegerType(nty)) {
       cur_ub_vn = GetValNo(*n.init_expr, VNKind::VNK_UBOUND);
-      assert(ValidVN(cur_ub_vn));
-      DefineASymbol("@" + name, MakeBoundedIntegerType(cur_ub_vn));
+      assert(cur_ub_vn.IsValid());
+      DefineASymbol("@" + name, MakeBoundedIntegerType(cur_ub_vn.Value()));
       ValNoAliasSign(SSTab().ScopedName("@" + name), cur_ub_vn);
       Shape s = GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_ub_vn),
                                       *n.init_expr);
@@ -464,11 +458,11 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
              "`" + n.name_str + "'s upper-bound value can not be evaluated.");
 
       ValNoAliasSign(SSTab().ScopedName(name), GetValNo(*n.init_expr));
-      InvalidateVN(cur_ub_vn);
+      cur_ub_vn.Invalidate();
     } else {
       if (!isa<PlaceHolderType>(nty)) {
         cur_vn = GetValNo(*n.init_expr, VNKind::VNK_VALUE);
-        assert(ValidVN(cur_vn) &&
+        assert(cur_vn.IsValid() &&
                "cur_mdspan_vn and cur_vn must be exclusive.");
         auto vl = vn.GenValueListFromValueNumber(cur_vn);
         if (IsValidValueList(vl) && !IsComputable(vl))
@@ -480,7 +474,7 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
     }
   } else {
     // obtain the types from declaration.
-    if (ValidVN(cur_mdspan_vn)) {
+    if (cur_mdspan_vn.IsValid()) {
       ValNoAliasSign(SSTab().ScopedName(name + ".span"), cur_mdspan_vn);
       auto mds_value = GenShapeFromSignature(
           vn.GetSignatureFromValueNumber(cur_mdspan_vn), n);
@@ -489,7 +483,7 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
                                    n.ArrayDimensions(), sto);
       else
         nty = MakeSpannedType(n.type->base_type, mds_value, sto);
-    } else if (ValidVN(cur_vn)) {
+    } else if (cur_vn.IsValid()) {
       ValNoAliasSign(SSTab().ScopedName(name), cur_vn);
       nty = NodeType(*n.type);
     } else {
@@ -507,7 +501,7 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
   if ((isa<F32Type>(nty) || isa<F64Type>(nty) ||
        (isa<ScalarIntegerType>(nty)) || isa<F16Type>(nty) ||
        isa<F8Type>(nty)) &&
-      ValidVN(cur_vn)) {
+      cur_vn.IsValid()) {
     // mutables do not have constant values
     if (IsMutable(*nty)) {
       auto vi = sbe::sym(InScopeName(name));
@@ -531,8 +525,8 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
   if (isa<FutureType>(n.GetType()) || isa<SpannedType>(n.GetType()))
     DefineASymbol(name + ".span", GetSpannedType(n.GetType())->GetMDSpanType());
 
-  InvalidateVN(cur_mdspan_vn); // stop propagation
-  InvalidateVN(cur_vn);
+  cur_mdspan_vn.Invalidate(); // stop propagation
+  cur_vn.Invalidate();
 
   return true;
 }
@@ -548,7 +542,7 @@ bool ShapeInference::Visit(AST::IntTuple& n) {
   // cur_ituple_vn = cur_vn;
   SetNodeType(n, MakeITupleType(cnt));
 
-  InvalidateVN(cur_vn); // Currently cut off value numbering
+  cur_vn.Invalidate(); // Currently cut off value numbering
   return true;
 }
 
@@ -577,7 +571,7 @@ bool ShapeInference::Visit(AST::Assignment& n) {
     name = RemoveSuffix(name, ".span") + ".span";
     DefineASymbol(name, sty->GetMDSpanType());
     cur_mdspan_vn = GetValNo(*n.value, VNKind::VNK_MDSPAN);
-    assert(ValidVN(cur_mdspan_vn) && "expected a valid current value number.");
+    assert(cur_mdspan_vn.IsValid() && "expected a valid current value number.");
     ValNoAliasSign(SSTab().ScopedName(name), cur_mdspan_vn);
     return true;
   } else if (isa<ITupleType>(nty)) {
@@ -591,19 +585,19 @@ bool ShapeInference::Visit(AST::Assignment& n) {
   } else if (isa<BoundedType>(nty)) {
     auto uname = "@" + name;
     cur_ub_vn = GetValNo(*n.value, VNKind::VNK_UBOUND);
-    assert(ValidVN(cur_ub_vn));
+    assert(cur_ub_vn.IsValid());
     DefineASymbol(uname, MakeIntegerType());
     ValNoAliasSign(SSTab().ScopedName(uname), cur_ub_vn);
-    InvalidateVN(cur_ub_vn);
+    cur_ub_vn.Invalidate();
   }
 
   if (IsMutable(*NodeType(n))) return true; // other mutables are not valno-able
 
   cur_vn = GetValNo(*n.value);
-  assert(ValidVN(cur_vn) && "expected a valid current value number.");
+  assert(cur_vn.IsValid() && "expected a valid current value number.");
   ValNoAliasSign(SSTab().ScopedName(name), cur_vn);
 
-  if (isa<ScalarIntegerType>(nty) && ValidVN(cur_vn)) {
+  if (isa<ScalarIntegerType>(nty) && cur_vn.IsValid()) {
     auto shape =
         GenShapeFromSignature(vn.GetSignatureFromValueNumber(cur_vn), n);
     assert(shape.DimCount() == 1);
@@ -633,7 +627,7 @@ bool ShapeInference::Visit(AST::DataType& n) {
 
   if (cannot_proceed) return true;
 
-  if (ValidVN(cur_mdspan_vn)) { cur_vn = cur_mdspan_vn; }
+  if (cur_mdspan_vn.IsValid()) { cur_vn = cur_mdspan_vn; }
 
   if (n.mdspan_type) ast_vn.Copy(n.mdspan_type.get(), &n, VNKind::VNK_VALUE);
 
@@ -642,7 +636,7 @@ bool ShapeInference::Visit(AST::DataType& n) {
 
 bool ShapeInference::Visit(AST::NoValue& n) {
   TraceEachVisit(n);
-  ast_vn.Update(&n, NoneVN(), VNKind::VNK_VALUE);
+  ast_vn.Update(&n, NumTy::None(), VNKind::VNK_VALUE);
   return true;
 }
 
@@ -698,7 +692,7 @@ bool ShapeInference::Visit(AST::Identifier& n) {
 
   if (allow_named_dim) { // for named dims in parameters
     if (isa<NoValueType>(nty)) {
-      cur_vn = NoneVN();
+      cur_vn = NumTy::None();
     } else if (!SSTab().DeclaredInScope(n.name)) {
       DefineASymbol(n.name, MakeIntegerType());
       cur_vn = vn.GenerateValueNumberFromSignature(SSTab().InScopeName(n.name));
@@ -732,7 +726,7 @@ bool ShapeInference::Visit(AST::Parameter& n) {
     auto span = cast<AST::MultiDimSpans>(n.type->mdspan_type.get());
     if (span->list) {
       cur_mdspan_vn = GetValNo(*span->list);
-      assert(ValidVN(cur_mdspan_vn) && "unexpected value number for mdspan.");
+      assert(cur_mdspan_vn.IsValid() && "unexpected value number for mdspan.");
 
       // Put alias names of mdspan into the value number table
       ValNoAliasSign(SSTab().ScopedName(n.sym->name + ".span"), cur_mdspan_vn);
@@ -740,7 +734,7 @@ bool ShapeInference::Visit(AST::Parameter& n) {
                   MakeSpannedType(n.type->base_type, span->GetTypeDetail()));
     } else if (IsValidRank(span->Rank())) {
       cur_mdspan_vn = GetValNo(*span->list, VNKind::VNK_MDSPAN);
-      assert(ValidVN(cur_mdspan_vn) && "unexpected value number for mdspan.");
+      assert(cur_mdspan_vn.IsValid() && "unexpected value number for mdspan.");
       // Put alias names of mdspan into the value number table
       ValNoAliasSign(SSTab().ScopedName(n.sym->name + ".span"), cur_mdspan_vn);
       SetNodeType(*n.type,
@@ -765,7 +759,7 @@ bool ShapeInference::Visit(AST::Parameter& n) {
   }
 
   if (n.sym && n.type->isScalar()) {
-    assert(!ValidVN(cur_mdspan_vn) && "unexpected current mdspan value.");
+    assert(!cur_mdspan_vn.IsValid() && "unexpected current mdspan value.");
 
     // get the value number and make it defined
     vn.GenerateValueNumberFromSignature(SSTab().ScopedName(n.sym->name));
@@ -826,9 +820,9 @@ bool ShapeInference::Visit(AST::ParallelBy& n) {
   auto sign_cnt = CountElementsInSignature(b_sign);
   assert((size_t)sign_cnt == n.SubPVCount());
   auto sign = b_sign;
-  if (sign_cnt == 1) sign = STR(ValNoSign(b_sign), false);
+  if (sign_cnt == 1) sign = ValNoSign(b_sign).ToString();
   std::string idx2dim[] = {"x", "y", "z"};
-  ForeachValueNumber(sign, [this, &n, &idx2dim](int valno, size_t index) {
+  ForeachValueNumber(sign, [this, &n, &idx2dim](NumTy valno, size_t index) {
     auto id = n.GetSubPV(index);
     std::string pv_name = SSTab().ScopedName("@" + id->name);
     ValNoAliasSign(pv_name, valno);
@@ -876,7 +870,7 @@ bool ShapeInference::Visit(AST::WhereBind& n) {
   // bound. The problem here is how to judge if the upper bound of bounded
   // variables are actually illegal? (e.g, different static upper bound)
   vn.BindValueNumbers(l_vn, r_vn);
-  VST_DEBUG(dbgs() << vn.ScopeIndent() << "<Bind> VN #" << l_vn << " <-> VN #"
+  VST_DEBUG(dbgs() << vn.ScopeIndent() << "<Bind> VN " << l_vn << " <-> VN "
                    << r_vn << "\n");
   return true;
 }
@@ -892,7 +886,7 @@ bool ShapeInference::Visit(AST::WithIn& n) {
   // requires the elements inside mdspan to be non-zero values
   bool found_zero = false;
   ForeachValueNumber(mds_sign,
-                     [this, &mds_sign, &n, &found_zero](int valno, size_t) {
+                     [this, &mds_sign, &n, &found_zero](NumTy valno, size_t) {
                        auto sig = SignValNo(valno);
                        if (sig == "const_0") { found_zero = true; }
                      });
@@ -909,8 +903,8 @@ bool ShapeInference::Visit(AST::WithIn& n) {
     return false;
   }
 
-  auto GenSignatureAndDoValno = [this, &n](int valno, size_t index) {
-    if (IsUnknownVN(valno)) return; // do not associate it with vn of "?"
+  auto GenSignatureAndDoValno = [this, &n](NumTy valno, size_t index) {
+    if (valno.IsUnknown()) return; // do not associate it with vn of "?"
     if (n.with) {
       std::string name = SSTab().ScopedName("@" + n.with->name) + "(" +
                          std::to_string(index) + ")";
@@ -960,7 +954,7 @@ bool ShapeInference::Visit(AST::WithIn& n) {
     DefineASymbol("@" + n.with->name, MakeMDSpanType(s));
   }
 
-  InvalidateVN(cur_mdspan_vn);
+  cur_mdspan_vn.Invalidate();
 
   return true;
 }
@@ -1016,11 +1010,11 @@ bool ShapeInference::Visit(AST::DMA& n) {
     DefineASymbol(n.future + ".span", MakePlaceHolderMDSpanType());
     vn.AssociateSignatureWithInvalidValueNumber(
         SSTab().ScopedName(n.future + ".span"));
-    InvalidateVN(cur_vn);
+    cur_vn.Invalidate();
     return true;
   }
 
-  assert(ValidVN(cur_vn) &&
+  assert(cur_vn.IsValid() &&
          "unexpected current value number for shape inference of dma.");
 
   if (auto pcfg = dyn_cast<PadConfig>(n.config)) {
@@ -1064,7 +1058,7 @@ bool ShapeInference::Visit(AST::DMA& n) {
   SetNodeType(n, MakeShapedFutureType(s, n.async));
 
   if (n.future.empty()) {
-    InvalidateVN(cur_vn);
+    cur_vn.Invalidate();
     return true;
   }
 
@@ -1083,7 +1077,7 @@ bool ShapeInference::Visit(AST::DMA& n) {
     DefineASymbol(f_span, MakeMDSpanType(s)); // implicit symbol
   }
 
-  InvalidateVN(cur_vn);
+  cur_vn.Invalidate();
   return true;
 }
 
@@ -1123,18 +1117,18 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
 
   std::string data_sig = vn.SignatureOfSymbol(SSTab().InScopeName(span_name));
 
-  auto AddValno = [this](int valno, std::string& sign) {
+  auto AddValno = [this](const NumTy& valno, std::string& sign) {
     // and append the value number as
     if (!sign.empty()) sign += ",";
     sign += STR(valno);
   };
 
   auto SignatureOfBinOp = [this, &AddValno, &n](const std::string& op,
-                                                int dividend_vn,
-                                                int divisor_vn) {
+                                                const NumTy& dividend_vn,
+                                                const NumTy& divisor_vn) {
     // the signature without optimize
-    std::string res_sig = op + ":#" + std::to_string(dividend_vn) + ":#" +
-                          std::to_string(divisor_vn);
+    std::string res_sig =
+        op + ":" + dividend_vn.ToString() + ":" + divisor_vn.ToString();
 
     if (auto quotient = vn.TryToSimplifyBinary(
             n.LOC(), op, vn.GetSignatureFromValueNumber(dividend_vn),
@@ -1388,9 +1382,9 @@ bool ShapeInference::Visit(AST::Rotate& n) {
   // do not care about placeholders
   if (isa<PlaceHolderType>(rty)) return true;
 
-  int valno = GetOnlyValueNumberFromMultiValues(*n.ids);
+  NumTy valno = GetOnlyValueNumberFromMultiValues(*n.ids);
 
-  if (!ValidVN(valno)) {
+  if (!valno.IsValid()) {
     Error(n.LOC(), "failed to find a valid value number inside ROTATE.");
     error_count++;
     cannot_proceed = true;
@@ -1436,9 +1430,9 @@ bool ShapeInference::Visit(AST::Select& n) {
     }
     ast_vn.Copy(s0.get(), &n, VNKind::VNK_MDSPAN);
     cur_mdspan_vn = GetValNo(n, VNKind::VNK_MDSPAN);
-    InvalidateVN(cur_vn); // used for variable def
+    cur_vn.Invalidate(); // used for variable def
   } else if (GeneralFutureType(NodeType(n))) {
-    InvalidateVN(cur_vn);
+    cur_vn.Invalidate();
 
     auto fty = type_equals.ResolveEqualFutures(*n.expr_list, true);
     if (!fty) {
@@ -1450,7 +1444,7 @@ bool ShapeInference::Visit(AST::Select& n) {
     if (isa<PlaceHolderType>(fty)) return true;
 
     cur_mdspan_vn = GetOnlyValueNumberFromMultiValues(*n.expr_list);
-    if (!ValidVN(cur_mdspan_vn)) {
+    if (!cur_mdspan_vn.IsValid()) {
       Error(n.LOC(), "no valid value number is found for a SELECT expression.");
       error_count++;
       cannot_proceed = true;
@@ -1714,15 +1708,15 @@ ShapeInference::GenerateExpression(const std::string& sig) const {
   return sig;
 }
 
-int ShapeInference::GetOnlyValueNumberFromMultiValues(
+NumTy ShapeInference::GetOnlyValueNumberFromMultiValues(
     const AST::MultiValues& mv) {
-  int valno = GetInvalidValueNumber();
+  NumTy valno = GetInvalidValueNumber();
   for (auto& v : mv.AllValues()) {
     auto id = AST::GetIdentifier(*v);
     if (!id) choreo_unreachable("expect an identifier.\n");
     auto ln = SSTab().InScopeName(VNSymbolName(*id));
 
-    if (!ValidVN(valno)) {
+    if (!valno.IsValid()) {
       valno = vn.GetValueNumberOfSignature(ln);
       continue;
     }
@@ -1743,12 +1737,12 @@ int ShapeInference::GetOnlyValueNumberFromMultiValues(
 }
 
 void ShapeInference::UpdateValueNumberForMultiValues(const AST::MultiValues& mv,
-                                                     int valno) {
+                                                     const NumTy& valno) {
   for (auto& v : mv.AllValues()) {
     if (auto id = AST::GetIdentifier(*v)) {
       auto symbol = SSTab().InScopeName(VNSymbolName(*id));
       // the VN is considered to be identical if none exist
-      if (!ValidVN(vn.GetValueNumberOfSignature(symbol))) {
+      if (!vn.GetValueNumberOfSignature(symbol).IsValid()) {
         vn.RebindSignatureWithValueNumber(symbol, valno);
         auto equals = type_equals.GetEquals(SSTab().InScopeName(id->name));
         for (auto& e : equals.value()) {
@@ -1996,12 +1990,12 @@ bool ShapeInference::HasValNo(const AST::Node& n, VNKind vnt) const {
 //   1. integer value of the expression
 //   2. associated span value of the expression
 //   3. associated upper bound value of the expression
-int ShapeInference::GetValNo(const AST::Node& n, VNKind vnt) const {
+NumTy ShapeInference::GetValNo(const AST::Node& n, VNKind vnt) const {
   if (vnt == VNKind::VNK_UBOUND) assert(isa<BoundedType>(NodeType(n)));
   return ast_vn.Get(&n, vnt);
 }
 
-int ShapeInference::GenValNo(const AST::Node& n) {
+NumTy ShapeInference::GenValNo(const AST::Node& n) {
   // if (auto v = GetOrNull(n, NodeValNoKind(n))) return *v;
 
   auto Generate = [this, &n](const std::string& nsign, VNKind vnt) {
@@ -2017,7 +2011,7 @@ int ShapeInference::GenValNo(const AST::Node& n) {
 
     // Different expression could have the same signature, which implies
     // duplicated computation that requires optimization.
-    int val_no = vn.GetOrGenValueNumberFromSignature(nsign);
+    NumTy val_no = vn.GetOrGenValueNumberFromSignature(nsign);
 
     ast_vn.Update(&n, val_no, vnt);
 

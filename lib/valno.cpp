@@ -99,10 +99,11 @@ ValueItem ValueNumbering::GenValueItemFromValueNumber(NumTy vn) {
 
 ValueItem ValueNumbering::GenValueItemFromSignature(const SignTy& input) {
   if (auto v = RemovePrefixOrNull("#", input)) { // handle #0 string as well
-    int vn;
-    auto [ptr, ec] = std::from_chars(v->data(), v->data() + v->size(), vn);
+    int value;
+    auto [ptr, ec] = std::from_chars(v->data(), v->data() + v->size(), value);
     if (ec != std::errc()) return nullptr;
-    if (IsNoneVN(vn)) return sbe::nil();
+    NumTy vn{value};
+    if (vn.IsNone()) return sbe::nil();
     if (vntbl.Exists(vn))
       return GenValueItemFromSignature(GetSignatureFromValueNumber(vn));
     return nullptr;
@@ -272,7 +273,7 @@ void ValueNumbering::AssociateSignatureWithValueNumber(const SignTy& sig,
   vntbl.Alias(valno, sig);
 
   if (trace)
-    dbgs() << ScopeIndent() << "Alias \"" << sig << "\" -> #" << valno << "\n";
+    dbgs() << ScopeIndent() << "Alias \"" << sig << "\" -> " << valno << "\n";
 }
 
 void ValueNumbering::AssociateSignatureWithInvalidValueNumber(
@@ -307,7 +308,7 @@ const SignTy ValueNumbering::SignBinaryCompositeValues(const location& loc,
       if (CountElementsInSignature(sig) > 1)
         return sig;
       else
-        return "#" + std::to_string(GetValueNumberOfSignature(sig));
+        return GetValueNumberOfSignature(sig).ToString();
     };
     return GetSignature(l_sig) + "," + GetSignature(r_sig);
   }
@@ -353,7 +354,7 @@ const SignTy ValueNumbering::SignBinaryCompositeValues(const location& loc,
       signatures.push_back(GetOrGenValueNumberFromSignature(*opt_sig));
     else {
       std::ostringstream oss;
-      oss << op << ":#" << GetValueNumberOfSignature(l_sig) << ":#"
+      oss << op << ":" << GetValueNumberOfSignature(l_sig) << ":"
           << GetValueNumberOfSignature(r_sig);
       signatures.push_back(GetOrGenValueNumberFromSignature(oss.str()));
     }
@@ -720,7 +721,7 @@ ValueNumbering::TryToSimplifyBinary(const location& loc, const std::string& op,
     if (rhs == "const_1") return lhs;
     // useful simplification: a/(a/b) = b
     if (!PrefixedWith(lhs, "#") /*not multiple values*/) {
-      int rvn = GetValueNumberOfSignature(rhs);
+      NumTy rvn = GetValueNumberOfSignature(rhs);
       auto bind_set = GetBindSet(rvn);
       bind_set.insert(rvn); // always add self
       for (auto div_vn : bind_set) {
@@ -778,7 +779,7 @@ ValueNumbering::TryToSimplifyBinary(const location& loc, const std::string& op,
   } else if (op == "+") {
     // useful simplification: a-b+b = a
     if (!PrefixedWith(rhs, "#") /*not multiple values*/) {
-      int lvn = GetValueNumberOfSignature(lhs);
+      NumTy lvn = GetValueNumberOfSignature(lhs);
       auto bind_set = GetBindSet(lvn);
       bind_set.insert(lvn); // always add self
       for (auto minus_vn : bind_set) {
@@ -804,7 +805,7 @@ ValueNumbering::TryToSimplifyBinary(const location& loc, const std::string& op,
     // that is, N / (#a * #b) = N / N = 1
     // so, `a#b` should be simplified to a bounded var whose ubound is `N`
     if (!PrefixedWith(lhs, "#") /*not multiple values*/) {
-      int rvn = GetValueNumberOfSignature(rhs);
+      NumTy rvn = GetValueNumberOfSignature(rhs);
       auto bind_set = GetBindSet(rvn);
       bind_set.insert(rvn); // always add self
       for (auto div_vn : bind_set) {
@@ -827,7 +828,7 @@ ValueNumbering::TryToSimplifyBinary(const location& loc, const std::string& op,
       // TODO: # is different with *
       // a # (b/a) will alway result in a?
       // if so, we need to emphasize this optimization to our users.
-      int lvn = GetValueNumberOfSignature(lhs);
+      NumTy lvn = GetValueNumberOfSignature(lhs);
       auto bind_set = GetBindSet(lvn);
       bind_set.insert(lvn); // always add self
       for (auto div_vn : bind_set) {
@@ -853,8 +854,8 @@ ValueNumbering::TryToSimplifyBinary(const location& loc, const std::string& op,
 NumTy ValueNumbering::GetValueNumberOfSignature(const SignTy& signature) const {
   if (signature == "") choreo_unreachable("invalid signature provided.");
 
-  if (IsUnknownSign(signature)) return UnknownVN();
-  if (IsNoneSign(signature)) return NoneVN();
+  if (IsUnknownSign(signature)) return NumTy::Unknown();
+  if (IsNoneSign(signature)) return NumTy::None();
 
   // Check if this expression has been encountered before
   if (vntbl.Exists(signature))
@@ -873,7 +874,7 @@ bool ValueNumbering::HasValueNumberOfSignature(const SignTy& signature) const {
 
 bool ValueNumbering::HasValidValueNumberOfSignature(const SignTy& signature) {
   if (IsNoneSign(signature)) return true;
-  if (vntbl.Exists(signature)) return ValidVN(vntbl.GetValueNum(signature));
+  if (vntbl.Exists(signature)) return vntbl.GetValueNum(signature).IsValid();
 
   return false;
 }
@@ -892,8 +893,8 @@ NumTy ValueNumbering::GetOrGenValueNumberFromSignature(
 
 NumTy ValueNumbering::GenerateValueNumberFromSignature(
     const SignTy& signature) {
-  if (IsUnknownSign(signature)) return UnknownVN();
-  if (IsNoneSign(signature)) return NoneVN();
+  if (IsUnknownSign(signature)) return NumTy::Unknown();
+  if (IsNoneSign(signature)) return NumTy::None();
 
   if (HasValueNumberOfSignature(signature))
     choreo_unreachable("signature \"" + signature + "\" has already existed.");
@@ -908,7 +909,7 @@ NumTy ValueNumbering::GenerateValueNumberFromSignature(
 }
 
 const std::vector<NumTy> ValueNumbering::Flatten(NumTy valno) const {
-  if (!ValidVN(valno)) choreo_unreachable("expect a valid valno.");
+  if (!valno.IsValid()) choreo_unreachable("expect a valid valno.");
   std::vector<NumTy> mvn;
   std::deque<NumTy> work_list;
   work_list.push_back(valno);
@@ -916,7 +917,7 @@ const std::vector<NumTy> ValueNumbering::Flatten(NumTy valno) const {
   while (!work_list.empty()) {
     auto val_no = work_list.front();
     work_list.pop_front();
-    assert(ValidVN(val_no));
+    assert(val_no.IsValid());
 
     auto valsign = GetSignatureFromValueNumber(val_no);
     auto vn_count = CountElementsInSignature(valsign);
@@ -936,19 +937,16 @@ const std::vector<NumTy> ValueNumbering::Flatten(NumTy valno) const {
 }
 
 NumTy ValueNumbering::GetNthValNo(const SignTy& input, NumTy n) const {
-  auto ith_str = GetNthElement(input, n);
+  auto ith_str = GetNthElement(input, n.Value());
   if (!ith_str)
-    choreo_unreachable("no value number is found for (" + std::to_string(n) +
+    choreo_unreachable("no value number is found for (" + STR(n) +
                        "th): " + input + ".");
 
   assert(ith_str.value()[0] == '#' ||
          (ith_str.value().substr(0, 6) == "const_"));
 
-  int valno = ith_str.value()[0] == '#'
-                  ? VNReal(ith_str.value())
-                  : GetValueNumberOfSignature(ith_str.value());
-
-  return valno;
+  return ith_str.value()[0] == '#' ? VNReal(ith_str.value())
+                                   : GetValueNumberOfSignature(ith_str.value());
 }
 
 const std::string ValueNumbering::ScopeIndent() {

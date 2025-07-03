@@ -56,36 +56,80 @@ inline int CountElementsInSignature(const std::string& input) {
 namespace valno {
 
 using SignTy = std::string; // signature type. TODO: use structure
-using NumTy = int;          // value number type. TODO: wrap for special values
 
-inline bool ValidVN(NumTy vn) { return IsValidValueNumber(vn); }
-inline void InvalidateVN(NumTy& vn) { vn = GetInvalidValueNumber(); }
+class NumTy { // value number type
+private:
+  constexpr static int invalid_val = GetInvalidValueNumber();
+  // none valno: unspecified value which can not be evaluate (but could be part
+  // of multi-vns)
+  constexpr static int none_val = std::numeric_limits<int>::max() - 1;
+  // unknown valno: bottom value for exceptions
+  constexpr static int unknown_val = -1;
 
-// unknown valno: bottom value for exceptions
-// TODO: is it still useful?
-inline constexpr NumTy UnknownVN() { return -1; }
-inline bool IsUnknownVN(NumTy vn) { return vn == UnknownVN(); }
-inline SignTy UnknownSign() { return "__valno_not_known__"; }
-inline bool IsUnknownSign(SignTy Sign) { return Sign == UnknownSign(); }
+private:
+  int valno;
 
-// none valno: unspecified value which can not be evaluate (but could be part of
-// multi-vns)
-inline constexpr NumTy NoneVN() {
-  return std::numeric_limits<NumTy>::max() - 1;
+public:
+  NumTy(int v = invalid_val) : valno(v) {}
+  NumTy(const NumTy& n) = default;
+  NumTy& operator=(const NumTy& n) = default;
+
+  int Value() const { return valno; }
+  bool IsValid() const { return valno != invalid_val; }
+  bool IsInValid() const { return valno == invalid_val; }
+  bool IsNone() const { return valno == none_val; }
+  bool IsUnknown() const { return valno == unknown_val; }
+
+  void Invalidate() { valno = invalid_val; }
+
+  bool operator==(const NumTy& n) const { return valno == n.valno; }
+  bool operator!=(const NumTy& n) const { return valno != n.valno; }
+
+  const std::string ToString(bool textual = false) const {
+    if (textual) {
+      if (IsInValid()) return "inv";
+      if (IsUnknown()) return "unk";
+      if (IsNone()) return "nil";
+    }
+    return "#" + std::to_string(valno);
+  }
+
+public:
+  const static NumTy None() { return NumTy(none_val); }
+  const static NumTy Invalid() { return NumTy(invalid_val); }
+  const static NumTy Unknown() { return NumTy(unknown_val); }
+};
+
+} // end namespace valno
+
+inline std::ostream& operator<<(std::ostream& os, const valno::NumTy& n) {
+  os << n.ToString();
+  return os;
 }
-inline bool IsNoneVN(NumTy vn) { return vn == NoneVN(); }
-inline SignTy NoneSign() { return SignTy("__valno_not_specified__"); }
+
+} // end namespace Choreo
+
+// make NumTy to work with unordered_map
+namespace std {
+template <>
+struct hash<Choreo::valno::NumTy> {
+  size_t operator()(const Choreo::valno::NumTy& k) const {
+    return std::hash<int>{}(k.Value());
+  }
+};
+} // end namespace std
+
+namespace Choreo {
+namespace valno {
+
+inline const SignTy UnknownSign() { return "__valno_not_known__"; }
+inline bool IsUnknownSign(const SignTy& s) { return s == UnknownSign(); }
+
+inline const SignTy NoneSign() { return SignTy("__valno_not_specified__"); }
 inline bool IsNoneSign(const SignTy& s) { return s == NoneSign(); }
 
 inline const std::string STR(const SignTy& s) { return s; }
-inline const std::string STR(const NumTy& v, bool txt = false) {
-  if (txt) {
-    if (!ValidVN(v)) return "inv";
-    if (IsUnknownVN(v)) return "unk";
-    if (IsNoneVN(v)) return "nil";
-  }
-  return "#" + std::to_string(v);
-}
+inline const std::string STR(const NumTy& v) { return v.ToString(); }
 
 using Choreo::STR;
 
@@ -137,10 +181,10 @@ private:
 public:
   ValueNumberTable(bool t = false) : trace(t) {
     // Add special values
-    const_pool.emplace(UnknownSign(), UnknownVN());
-    const_pool.emplace(NoneSign(), NoneVN());
-    value_nums[UnknownVN()].push_back(UnknownSign());
-    value_nums[NoneVN()].push_back(NoneSign());
+    const_pool.emplace(UnknownSign(), NumTy::Unknown());
+    const_pool.emplace(NoneSign(), NumTy::None());
+    value_nums[NumTy::Unknown()].push_back(UnknownSign());
+    value_nums[NumTy::None()].push_back(NoneSign());
   }
 
   bool Exists(SignTy s) const { return ValueNumExists(s); }
@@ -193,7 +237,7 @@ public:
   // Generate a valno for the new signature
   NumTy Generate(const SignTy& s) {
     // note: dummy sign can be re-generated
-    if (Exists(s) && ValidVN(GetValueNum(s)))
+    if (Exists(s) && GetValueNum(s).IsValid())
       choreo_unreachable("signature: " + STR(s) + " exists.");
 
     // generate a new value number
@@ -223,7 +267,7 @@ public:
     if (!Exists(v))
       choreo_unreachable("valno: " + STR(s) + " does not exists.");
 
-    if (ValidVN(GetValueNum(s)))
+    if (GetValueNum(s).IsValid())
       choreo_unreachable("signature: " + STR(s) + " has a valid valno.");
 
     for (auto expr_valno = scoped_pool.rbegin();
@@ -243,7 +287,7 @@ public:
 
     for (auto& item : scoped_pool.back()) {
       // Dummy Signature is not associated with a valid valno
-      if (!ValidVN(item.second)) continue;
+      if (!item.second.IsValid()) continue;
 
       auto& signs = value_nums[item.second];
       signs.erase(std::remove(signs.begin(), signs.end(), item.first),
@@ -265,10 +309,10 @@ public:
     for (auto& stack : scoped_pool) {
       os << scope++ << "\n";
       for (auto& item : stack)
-        os << "expr: \"" << item.first << "\", valno: #" << item.second << "\n";
+        os << "expr: \"" << item.first << "\", valno: " << item.second << "\n";
     }
     for (auto& item : const_pool)
-      os << "const: \"" << item.first << "\", valno: #" << item.second << "\n";
+      os << "const: \"" << item.first << "\", valno: " << item.second << "\n";
   }
 };
 
@@ -328,11 +372,11 @@ public:
 
   // Retrieve the signature from a value number. About when fails.
   SignTy GetSignatureFromValueNumber(NumTy vn) const {
-    if (IsUnknownVN(vn)) return UnknownSign();
-    if (IsNoneVN(vn)) return NoneSign();
+    if (vn.IsUnknown()) return UnknownSign();
+    if (vn.IsNone()) return NoneSign();
 
     if (!vntbl.Exists(vn))
-      choreo_unreachable("value number " + std::to_string(vn) +
+      choreo_unreachable("value number " + STR(vn) +
                          " does not exists in the value number table.");
     return vntbl.GetSignature(vn);
   }
@@ -395,7 +439,7 @@ public:
   }
 
   const std::vector<NumTy> AsVector(NumTy valno) const {
-    assert(ValidVN(valno) && "not a valid value number.");
+    assert(valno.IsValid() && "not a valid value number.");
     return AsVector(GetSignatureFromValueNumber(valno));
   }
 

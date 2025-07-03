@@ -28,7 +28,7 @@ inline const std::string STR(VNKind vnt) {
 // value number for each AST node
 class NodeValNo {
 private:
-  std::vector<std::unordered_map<const AST::Node*, std::map<VNKind, int>>>
+  std::vector<std::unordered_map<const AST::Node*, std::map<VNKind, NumTy>>>
       node_valno; // cache to direct map node to value number
 
   bool debug = false;
@@ -50,8 +50,8 @@ public:
     return false;
   }
 
-  std::optional<int> GetOrNull(const AST::Node* node,
-                               VNKind vnt = VNKind::VNK_VALUE) const {
+  std::optional<NumTy> GetOrNull(const AST::Node* node,
+                                 VNKind vnt = VNKind::VNK_VALUE) const {
     for (auto nv = node_valno.rbegin(); nv != node_valno.rend(); nv++) {
       if (!nv->count(node)) continue;
       if (!(nv->at(node).count(vnt))) continue;
@@ -60,7 +60,7 @@ public:
     return std::nullopt;
   }
 
-  int Get(const AST::Node* node, VNKind vnt = VNKind::VNK_VALUE) const {
+  NumTy Get(const AST::Node* node, VNKind vnt = VNKind::VNK_VALUE) const {
     auto v = GetOrNull(node, vnt);
     if (v.has_value())
       return v.value();
@@ -68,7 +68,7 @@ public:
       choreo_unreachable("can not find valno of node: " + PSTR(node) + ".");
   }
 
-  void Update(const AST::Node* node, int vn, VNKind vnt = VNKind::VNK_VALUE) {
+  void Update(const AST::Node* node, NumTy vn, VNKind vnt = VNKind::VNK_VALUE) {
     for (auto nv = node_valno.rbegin(); nv != node_valno.rend(); nv++) {
       if (!nv->count(node)) continue;
       if (!(*nv)[node].count(vnt)) continue;
@@ -299,9 +299,9 @@ public:
 
 private:
   void CollapseMultiValues(const AST::MultiValues&);
-  const std::optional<std::string> GenerateExpression(const SignTy& sig) const;
-  NumTy GetOnlyValueNumberFromMultiValues(const AST::MultiValues& mv);
-  void UpdateValueNumberForMultiValues(const AST::MultiValues& mv, NumTy valno);
+  const std::optional<std::string> GenerateExpression(const SignTy&) const;
+  NumTy GetOnlyValueNumberFromMultiValues(const AST::MultiValues&);
+  void UpdateValueNumberForMultiValues(const AST::MultiValues&, const NumTy&);
   bool CanBeValueNumbered(AST::Node* n) const;
   void DefineASymbol(const SignTy& name, const ptr<Type>& ty);
   Shape GenShapeFromSignature(const SignTy&, const AST::Node&);
