@@ -11,5 +11,5 @@ int main() {
   foo(choreo::make_spanview<2>(d, {7, 100}));
 }
 
-// CHECK:   tops::mdspan __mds0_data(tops::Global, (float*)data, M, 1);
+// CHECK:   tops::mdspan __mds0_data(tops::Global, (float*)data, M, -1);
 // CHECK: choreo::runtime_check(data.shape()[1] == choreo::__inf__, "must set 'choreo::__inf__' to the unbounded dimension on the 1st parameter ('data', dim: 1): got " + std::to_string(data.shape()[1]) + ".");

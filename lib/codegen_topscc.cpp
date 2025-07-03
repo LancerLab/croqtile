@@ -2562,7 +2562,7 @@ const std::string TopsccCodeGen::ValueSTR(const ValueItem& vi) const {
     if (IsHost())
       return "choreo::__inf__";
     else
-      return "1"; // any number is accepatable
+      return "-1"; // it looks the API requires -1
   } else if (auto iv = VIInt(vi)) {
     if (iv >= (int64_t)std::numeric_limits<int32_t>::max() ||
         iv <= (int64_t)std::numeric_limits<int32_t>::min())
