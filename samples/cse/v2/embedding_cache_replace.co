@@ -102,11 +102,13 @@ __co__ void EmbeddingCacheReplaceChoreo_kernel(
   parallel blockIdx by dim_grid {
     parallel threadIdx by dim_block {
       // Local buffer declaration, block processing key/counter
-      s64[PART_SIZE, set_associativity, warp_size] buffer_key;
-      u64[PART_SIZE, set_associativity, warp_size] buffer_counter;
-      s64[TILE_SIZE] buffer_query;
-      u32[TILE_SIZE] buffer_src_set;
+      local s64[PART_SIZE, set_associativity, warp_size] buffer_key;
+      local u64[PART_SIZE, set_associativity, warp_size] buffer_counter;
+      local s64[TILE_SIZE] buffer_query;
+      local u32[TILE_SIZE] buffer_src_set;
 
+      fvals = dma.copy vals => local;
+      fdvals = dma.copy d_values => local;
       // Outer loop: block copy key/counter to local buffer
       foreach {k_loop_idx} in [cdiv(capacity_in_set, PART_SIZE)] {
         // Block transfer key/counter to local buffer
@@ -155,7 +157,7 @@ __co__ void EmbeddingCacheReplaceChoreo_kernel(
               if (flag_need_replace == 1) {
                 buffer_key.at(set_offset, src_slab, src_slot) = query;
                 foreach {e} in [embedding_vec_size] {
-                  vals.at(src_set, src_slab, src_slot, e) = d_values.at(m_loop_idx * TILE_SIZE + query_idx, e);
+                  fvals.data.at(src_set, src_slab, src_slot, e) = fdvals.data.at(m_loop_idx * TILE_SIZE + query_idx, e);
                 }
               }
               buffer_counter.at(set_offset, src_slab, src_slot) = global_counter;

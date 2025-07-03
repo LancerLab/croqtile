@@ -115,26 +115,28 @@ private:
     else
       n.SetType(ty);
     if (debug_visit)
-      dbgs() << "Set type of " << STR(n) << " as " << PSTR(n.GetType()) << "\n";
+      VST_DEBUG(dbgs() << "Set type of "; n.InlinePrint(dbgs());
+                dbgs() << " as " << PSTR(n.GetType()) << "\n");
   }
   void SetNodeType(AST::Node& n, const ptr<Type>& ty) {
     n.SetType(ty);
-    if (debug_visit)
-      dbgs() << "Set type of " << STR(n) << " as " << PSTR(n.GetType()) << "\n";
+    VST_DEBUG(dbgs() << "Set type of "; n.InlinePrint(dbgs());
+              dbgs() << " as " << PSTR(n.GetType()) << "\n");
   }
   void ModifySymbolType(const std::string& n, const ptr<Type>& ty) {
     SSTab().ModifySymbolType(n, ty);
-    if (debug_visit)
-      dbgs() << "Modify type of " << n << " as " << PSTR(ty) << "\n";
+    VST_DEBUG(dbgs() << "Modify type of " << n << " as " << PSTR(ty) << "\n");
   }
 
   virtual void TraceEachVisit(AST::Node& n, bool detail = false,
                               const std::string& m = "") const {
     if (!trace_visit) return;
-    if (detail && !n.IsBlock())
-      dbgs() << m << STR(n) << "\n";
+    dbgs() << m;
+    if (detail)
+      n.InlinePrint(dbgs());
     else
-      dbgs() << m << n.TypeNameString() << "\n";
+      dbgs() << n.TypeNameString();
+    dbgs() << "\n";
   }
 
 private:

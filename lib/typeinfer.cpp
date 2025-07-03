@@ -687,9 +687,9 @@ bool TypeInference::Visit(AST::Expr& n) {
             "for now only support multiplication of one dim bounded ituples.");
         auto ub = bitt_lhs->GetUpperBound(0) * bitt_rhs->GetUpperBound(0);
         SetNodeType(n, MakeBoundedITupleType(Shape(1, ub)));
-        cur_type = n.GetType();
-      } else
-        SetNodeType(n, MakeUnknownType());
+      }
+      // else the type is decayed. use the type of earlysema's
+      cur_type = n.GetType();
     } else if (n.IsArith() && !n.IsUBArith() && CanYieldAnInteger(pty_lhs) &&
                CanYieldAnInteger(pty_rhs)) {
       // use the type inferred by early sema

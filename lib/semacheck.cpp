@@ -28,14 +28,17 @@ bool SemaChecker::VisitNode(AST::IntLiteral& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
+
 bool SemaChecker::VisitNode(AST::FloatLiteral& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
+
 bool SemaChecker::VisitNode(AST::BoolLiteral& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
 }
+
 bool SemaChecker::VisitNode(AST::Expr& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
 
@@ -654,7 +657,7 @@ bool SemaChecker::ReportUnknownSymbol(const std::string& name,
   if (isa<UnknownType>(GetSymbolType(name))) {
     ++error_count;
     Error(loc, "failed to obtain the type of " + name + ".");
-    if (debug_visit) dbgs() << file << ":" << line << "\n";
+    VST_DEBUG(dbgs() << file << ":" << line << "\n");
     return false;
   }
   return true;
@@ -666,7 +669,7 @@ bool SemaChecker::ReportUnknown(AST::Node& n, const char* file, int line,
   if (isa<UnknownType>(NodeType(n))) {
     ++error_count;
     Error(n.LOC(), "failed to obtain a type.");
-    if (debug_visit) dbgs() << file << ":" << line << ", " << STR(n) << "\n";
+    VST_DEBUG(dbgs() << file << ":" << line << ", " << STR(n) << "\n");
     return false;
   }
 
@@ -678,9 +681,8 @@ bool SemaChecker::ReportUnknown(AST::Node& n, const char* file, int line,
   if (!ignore_detail && !NodeType(n)->HasSufficientInfo()) {
     ++error_count;
     Error(n.LOC(), "failed to obtain a type with sufficient info.");
-    if (debug_visit)
-      dbgs() << file << ":" << line << ", " << STR(n) << "("
-             << PSTR(NodeType(n)) << ")\n";
+    VST_DEBUG(dbgs() << file << ":" << line << ", " << STR(n) << "("
+                     << PSTR(NodeType(n)) << ")\n");
     return false;
   }
 
