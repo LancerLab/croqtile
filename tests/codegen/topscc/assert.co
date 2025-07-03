@@ -15,7 +15,7 @@ __co__ void foo(f32 [M, N] a) {
 // CHECK: }
 
 // CHECK: void foo(const choreo::spanned_view<choreo::f32, 2> & a) {
-// CHECK:   auto M = a.shape()[0];
-// CHECK:   auto N = a.shape()[1];
+// CHECK:   auto &M = a.shape()[0];
+// CHECK:   auto &N = a.shape()[1];
 // CHECK:   choreo_assert((M > 8), "expected \"M\" is larger than 8.", "tests/codegen/topscc/assert.co", 4);
 // CHECK: }

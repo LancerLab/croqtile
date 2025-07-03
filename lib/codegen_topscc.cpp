@@ -476,11 +476,14 @@ const std::string TopsccCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca) const {
     for (auto p : tsi->GetIndices()) {
       auto idx_exprs = SplitStringByDelimiter(ExprSTR(p, IsHost()));
       std::string factor = "1";
-      if (shape.Rank() > i) factor = shape.TrimDims(i).ElemCountExprString();
+      if (shape.Rank() > i)
+        factor = ValueSTR(shape.TrimDims(i).ElementCountValue());
       for (auto i_expr : idx_exprs) {
         if (i != 0) offset << " + ";
         if (i_expr == "__choreo_no_tiling__")
           offset << "0";
+        else if (factor == "1")
+          offset << i_expr;
         else
           offset << "(" << i_expr << " * " << factor << ")";
         ++i;
@@ -539,8 +542,10 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
                "unexpected symbolic dimension name.");
 
         auto dim_expr = hp_name + ".shape()[" + std::to_string(dim_index) + "]";
-        if (symbolic_dimensions.count(*vale) == 0)
+        if (symbolic_dimensions.count(*vale) == 0) {
           symbolic_dimensions[*vale] = {dim_expr, hp_index, dim_index};
+          ssm.MapDeviceSymbol(*vale, UnScopedName(*vale));
+        }
       }
       assert(!VIIsBop(vi) && "unexpected binary operation.");
       dim_index++;
@@ -582,10 +587,9 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
   hs << " {\n";
   IncrHostIndent();
 
-  // name the symbolic dimensions
+  // name the symbolic dimensions for better readability
   for (auto item : symbolic_dimensions) {
-    // type of symbolic dims is deduced from API of span
-    hs << h_indent << "auto " << UnScopedName(item.first) << " = "
+    hs << h_indent << "auto &" << UnScopedName(item.first) << " = "
        << item.second.hsd_expr << ";\n";
     ssm.MapHostSymbol(item.first, UnScopedName(item.first));
   }
@@ -3028,26 +3032,24 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e, bool is_host,
             auto ivs = within_map.at(InScopeName(id->name));
             for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr) {
               auto shape = sty->GetShape();
-              auto name =
-                  (is_host ? ssm.HostName(*iv_itr) : ssm.DeviceName(*iv_itr));
               assert(shape.Rank() >= idx + 1);
               oss << " + ";
               if (shape.Rank() > idx + 1)
-                oss << "(" << name << " * "
-                    << shape.TrimDims(idx + 1).ElemCountExprString() << ")";
+                oss << ValueSTR((sbe::nu(*iv_itr) *
+                                 shape.TrimDims(idx + 1).ElemCountValue())
+                                    ->Normalize());
               else
                 oss << name;
               ++idx;
             }
           } else {
-            auto name =
-                UnScopedName(is_host ? ssm.HostName(InScopeName(id->name))
-                                     : ssm.DeviceName(InScopeName(id->name)));
+            auto name = SSMName(InScopeName(id->name));
             assert(shape.Rank() >= idx + 1);
             oss << " + ";
             if (shape.Rank() > idx + 1)
-              oss << "(" << name << " * "
-                  << shape.TrimDims(idx + 1).ElemCountExprString() << ")";
+              oss << ValueSTR((sbe::nu(InScopeName(id->Name)) *
+                               shape.TrimDims(idx + 1).ElemCountValue())
+                                  ->Normalize());
             else
               oss << name;
             ++idx;

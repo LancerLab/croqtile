@@ -99,7 +99,7 @@ public:
         << "==================== Host Map Information ====================\n";
     // Print a formatted table with columns for symbol and buffer name
     dbgs() << std::setw(30) << std::left << "Symbol" << std::setw(50)
-           << std::left << " -> Buffer Name" << "\n";
+           << std::left << " -> Host Name" << "\n";
     dbgs()
         << "--------------------------------------------------------------\n";
 
@@ -119,9 +119,9 @@ public:
         << "==================== Device Map Information ====================\n";
     // Print a formatted table with columns for symbol and buffer name
     dbgs() << std::setw(30) << std::left << "Symbol" << std::setw(50)
-           << std::left << " -> Buffer Name" << "\n";
+           << std::left << " -> Device Name" << "\n";
     dbgs()
-        << "--------------------------------------------------------------\n";
+        << "----------------------------------------------------------------\n";
 
     for (auto& table : device_map) {
       if (table.empty()) continue;
