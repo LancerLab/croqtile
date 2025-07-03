@@ -40,6 +40,7 @@ enum class BaseType {
   PARTIAL,
   EVENT,
   ARRAY,
+  VECTOR,
   ADDR,
   VOID,
   SPANNED,
@@ -197,6 +198,7 @@ inline static BaseType BaseTypeFromString(const std::string& input) {
       {"ituple", BaseType::ITUPLE},
       {"event", BaseType::EVENT},
       {"array", BaseType::ARRAY},
+      {"vector", BaseType::VECTOR},
       {"address", BaseType::ADDR},
       {"void", BaseType::VOID},
       {"unknown", BaseType::UNKNOWN},
@@ -262,6 +264,7 @@ inline static std::string GetStringFrom(BaseType dataType) {
       {BaseType::INDEX, "index"},
       {BaseType::EVENT, "event"},
       {BaseType::ARRAY, "array"},
+      {BaseType::VECTOR, "vector"},
       {BaseType::ADDR, "address"},
       {BaseType::VOID, "void"},
       {BaseType::UNKNOWN, "unknown"},
@@ -849,6 +852,43 @@ struct ScalarType : public Type, public TypeIDProvider<ScalarType> {
   __UDT_TYPE_INFO__(Type, ScalarType)
 };
 
+struct VectorType final : public Type, public TypeIDProvider<VectorType> {
+  bool is_mutable = true;
+  using FundamentalType = BaseType;
+  FundamentalType e_type;
+  size_t ec = 0;
+  VectorType(BaseType e, size_t w) : Type(BaseType::VECTOR), e_type(e), ec(w) {
+    assert(w > 0 && "vector width must be positive.");
+  }
+
+  size_t VectorWidth() const { return ec; }
+  size_t Dims() const override { return 1; }
+  bool IsComplete() const override { return true; }
+  bool HasSufficientInfo() const override { return true; }
+  bool ApprxEqual(const Type& ty) const override {
+    if (auto vt = dyn_cast<VectorType>(&ty)) {
+      return vt->ec == ec && vt->e_type == e_type;
+    }
+    return false;
+  }
+  void Print(std::ostream& os) const override {
+    if (is_mutable) os << "mutable ";
+    os << "vector<" << STR(e_type) << "," << ec << ">";
+  }
+  const std::string Name() const override { return "vector"; }
+  virtual const ptr<Type> Clone() const override {
+    return std::make_shared<VectorType>(e_type, ec);
+  }
+  bool operator==(const Type& ty) const override {
+    if (auto vt = dyn_cast<VectorType>(&ty)) {
+      return vt->ec == ec && vt->e_type == e_type;
+    }
+    return false;
+  }
+
+  __UDT_TYPE_INFO__(Type, VectorType)
+};
+
 inline bool ConvertibleToInt(const Type& ty);
 
 struct ScalarFloatType;
@@ -1412,6 +1452,7 @@ struct BoundedIntegerType final : public BoundedType,
   ValueItem lbound = GetInvalidValueItem();
   ValueItem ubound = GetInvalidValueItem();
   int stride = GetInvalidStride();
+  int width = 1;
 
   BoundedIntegerType() : BoundedType(BaseType::BOUNDED_INT, "") {}
   BoundedIntegerType(int lb, int ub, int s = 1, const std::string& note = "")
@@ -1470,11 +1511,27 @@ struct BoundedITupleType final : public BoundedType,
   MultiBounds lbounds;
   MultiBounds ubounds;
   IntegerList strides;
+  IntegerList widths;
 
   BoundedITupleType(const MultiBounds& l, const MultiBounds& u,
                     const IntegerList s, const std::string& n = "")
       : BoundedType(BaseType::BOUNDED_ITUPLE, n), lbounds(l), ubounds(u),
         strides(s) {
+    if (lbounds.IsValid())
+      assert((lbounds.DimCount() == ubounds.DimCount()) &&
+             (lbounds.DimCount() == strides.size()) &&
+             "expecting a valid bound.");
+    else
+      assert(!ubounds.IsValid() && strides.empty() &&
+             "expecting an invalid bound.");
+    widths = IntegerList(lbounds.DimCount(), 1);
+  }
+
+  BoundedITupleType(const MultiBounds& l, const MultiBounds& u,
+                    const IntegerList s, const IntegerList w,
+                    const std::string& n = "")
+      : BoundedType(BaseType::BOUNDED_ITUPLE, n), lbounds(l), ubounds(u),
+        strides(s), widths(w) {
     if (lbounds.IsValid())
       assert((lbounds.DimCount() == ubounds.DimCount()) &&
              (lbounds.DimCount() == strides.size()) &&
@@ -1499,24 +1556,26 @@ struct BoundedITupleType final : public BoundedType,
   const ValueItem& GetUpperBound(size_t idx) const {
     return ubounds.ValueAt(idx);
   }
-  const ValueItem& GetLowerBound(size_t idx) const {
+  const ValueItem& GetLowerBound(size_t idx = 0) const {
     return lbounds.ValueAt(idx);
   }
   int GetStride(size_t idx) const { return strides[idx]; }
+  int GetWidth(size_t idx) const { return widths[idx]; }
   bool IsPlain(size_t idx) const {
     return (*lbounds.ValueAt(idx) == *sbe::nu(0)) && (strides[idx] == 1);
   }
   bool HasValidBound() const override {
     return lbounds.IsValid() && ubounds.IsValid() && !strides.empty() &&
            (lbounds.DimCount() == ubounds.DimCount()) &&
-           (lbounds.DimCount() == strides.size());
+           (lbounds.DimCount() == strides.size()) &&
+           (strides.size() == widths.size());
   }
 
   bool operator==(const Type& ty) const override {
     if (!isa<BoundedITupleType>(&ty)) return false;
     auto& t = (BoundedITupleType&)ty;
     return (t.lbounds == lbounds) && (t.ubounds == ubounds) &&
-           (t.strides == strides);
+           (t.strides == strides) && (t.widths == widths);
   }
 
   bool ApprxEqual(const Type& ty) const override {
@@ -1545,6 +1604,8 @@ struct BoundedITupleType final : public BoundedType,
 
     if (plain) {
       os << STR(ubounds);
+      if (strides[0] != 1) os << ", s = " << strides[0];
+      if (widths[0] != 1) os << ", w = " << widths[0];
       BoundedType::Print(os);
       return;
     }
@@ -2017,7 +2078,7 @@ inline bool IsActualBoundedIntegerType(const ptr<Type>& ty) {
 
 inline bool CanYieldAnInteger(const ptr<Type>& ty) {
   return isa<ScalarType>(ty) || IsActualBoundedIntegerType(ty) ||
-         (isa<ITupleType>(ty) && ty->Dims() == 1);
+         (isa<VectorType>(ty) || (isa<ITupleType>(ty) && ty->Dims() == 1));
 }
 
 inline bool CanYieldIndex(const ptr<Type>& ty) {
@@ -2031,7 +2092,7 @@ inline bool ConvertibleToInt(const ptr<Type>& ty) {
 
 inline bool ConvertibleToInt(const Type& ty) {
   return isa<ScalarIntegerType>(&ty) || isa<BooleanType>(&ty) ||
-         (isa<ITupleType>(&ty) && ty.Dims() == 1);
+         (isa<VectorType>(&ty) || (isa<ITupleType>(&ty) && ty.Dims() == 1));
 }
 
 inline ValueItem GetSingleUpperBound(const ptr<Type>& ty) {
@@ -2125,6 +2186,10 @@ inline ptr<ScalarFloatType> MakeF64Type(bool m = false) {
   return MakeScalarFloatType(BaseType::F64, m);
 }
 
+inline ptr<VectorType> MakeVectorType(BaseType bt, size_t n) {
+  return std::make_shared<VectorType>(bt, n);
+}
+
 inline ptr<StringType> MakeStringType() {
   return std::make_shared<StringType>();
 }
@@ -2213,6 +2278,14 @@ inline ptr<BoundedITupleType> MakeBoundedITupleType(const MultiBounds& lb,
                                                     const IntegerList& il,
                                                     const std::string& n = "") {
   return std::make_shared<BoundedITupleType>(lb, ub, il, n);
+}
+
+inline ptr<BoundedITupleType> MakeBoundedITupleType(const MultiBounds& lb,
+                                                    const MultiBounds& ub,
+                                                    const IntegerList& il,
+                                                    const IntegerList& wl,
+                                                    const std::string& n = "") {
+  return std::make_shared<BoundedITupleType>(lb, ub, il, wl, n);
 }
 
 inline ptr<BoundedITupleType> MakeUninitBoundedITupleType() {

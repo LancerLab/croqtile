@@ -515,6 +515,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "where"    return Choreo::Parser::make_WHERE(yytext, loc);
   "while"    return Choreo::Parser::make_WHILE(yytext, loc);
   "break"    return Choreo::Parser::make_BREAK(yytext, loc);
+  "vectorize" return Choreo::Parser::make_VECTORIZE(yytext, loc);
   "continue" return Choreo::Parser::make_CONTINUE(yytext, loc);
   "<->"      return Choreo::Parser::make_BIND   (loc);
   "-"        return Choreo::Parser::make_MINUS  (loc);

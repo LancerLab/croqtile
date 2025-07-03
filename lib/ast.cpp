@@ -107,6 +107,8 @@ void DataAccess::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
+int DataAccess::da_id = 0;
+
 void Assignment::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
 
@@ -309,6 +311,7 @@ void LoopRange::accept(Choreo::Visitor& v) {
 void ForeachBlock::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
   ranges->accept(v);
+  if (suffixs) suffixs->accept(v);
   v.Visit(*this);
   if (stmts) stmts->accept(v);
   v.AfterVisit(*this);

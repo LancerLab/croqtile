@@ -1,7 +1,5 @@
 #include "typeinfer.hpp"
 
-#include <iostream>
-
 #include "ast.hpp"
 #include "types.hpp"
 
@@ -24,6 +22,16 @@ bool TypeInference::BeforeVisitImpl(AST::Node& n) {
     dma_mem = Storage::NONE;
   } else if (isa<AST::Parameter>(&n)) {
     allow_named_dim = true;
+  } else if (auto call = dyn_cast<AST::Call>(&n)) {
+    auto func_name = call->function->name;
+    if (func_name == "vectorize" && call->IsAnno()) {
+      auto arg0 = call->GetArguments()[0];
+      auto arg0_ty = arg0->GetType();
+      if (auto arg0_expr = dyn_cast<AST::Expr>(arg0))
+        if (auto r = arg0_expr->GetReference())
+          if (auto id = dyn_cast<AST::Identifier>(r))
+            ModifySymbolType(n.LOC(), id->name, arg0_ty);
+    }
   }
   return true;
 }
@@ -59,6 +67,16 @@ bool TypeInference::AfterVisitImpl(AST::Node& n) {
     dma_mem = Storage::NONE;
   } else if (isa<AST::Parameter>(&n)) {
     allow_named_dim = false;
+  } else if (auto fb = dyn_cast<AST::ForeachBlock>(&n)) {
+    for (auto& rn : fb->GetRanges()) {
+      auto range = cast<AST::LoopRange>(rn);
+      auto sym_ty = GetSymbolType(n.LOC(), range->IVName());
+      // if (auto bty = cast<BoundedITupleType>(sym_ty)) {
+      //   assert(bty->Dims() == 1 &&
+      //          "expected one-dimensional bounded ituple for loop range.");
+      // }
+      SetNodeType(*range->iv, sym_ty);
+    }
   }
 
   Visitor::AfterVisit(n);
@@ -331,7 +349,35 @@ bool TypeInference::Visit(AST::DataAccess& n) {
   } else
     SetNodeType(n, dty);
 #endif
+  if (!n.AccessElement()) return true;
+  auto dty = GetSymbolType(n.LOC(), n.GetDataName());
+  SetNodeType(*n.data, dty);
+  auto ety = MakeElemScalarType(cast<SpannedType>(dty)->ElementType());
+  for (auto item : n.GetIndices()) {
+    auto ity = NodeType(*item);
+    if (auto bty = dyn_cast<BoundedITupleType>(ity)) {
+      SetNodeType(*item, bty);
+      if (auto id = AST::GetIdentifier(item)) SetNodeType(*id, bty);
 
+      auto width = bty->GetWidth(0);
+      if (bty->Dims() == 1 && width != 1) {
+        assert(isa<ScalarType>(ety) &&
+               "expected scalar type for element in vector access.");
+        auto vty = MakeVectorType(ety->GetBaseType(), width);
+        SetNodeType(n, vty);
+
+        if (CCtx().ShowInferredTypes()) {
+          dbgs() << "DataAcess: " << InScopeName(n.GetDataName());
+          for (auto& idx : n.GetIndices()) dbgs() << "[" << PSTR(idx) << "]";
+          dbgs() << ", Type: " << PSTR(vty) << "\n";
+        }
+      }
+    } else if (isa<UnknownType>(ity)) {
+      Error(n.LOC(), "unable to deduce the type of `" + n.GetDataName() + "'.");
+      error_count++;
+      return false;
+    }
+  }
   return true;
 }
 
@@ -340,10 +386,30 @@ bool TypeInference::Visit(AST::Assignment& n) {
   TraceEachVisit(n);
 
   if (n.AssignToDataElement()) {
-    // should be assigned already by DataAccess
-    assert(isa<ScalarType>(NodeType(*n.da)));
     auto dty = GetSymbolType(n.LOC(), n.GetDataArrayName());
     auto ety = MakeElemScalarType(cast<SpannedType>(dty)->ElementType());
+    // data array access
+    for (auto item : n.da->GetIndices()) {
+      auto ity = NodeType(*item);
+      if (auto bty = dyn_cast<BoundedITupleType>(ity)) {
+        auto width = bty->GetWidth(0);
+        if (bty->Dims() == 1 && width != 1) {
+          assert(isa<ScalarType>(ety) &&
+                 "expected scalar type for element in vector assignment.");
+          auto vty = MakeVectorType(ety->GetBaseType(), width);
+          SetNodeType(n, vty);
+          return true;
+        }
+      } else if (isa<UnknownType>(ity)) {
+        Error(n.LOC(),
+              "unable to deduce the type of `" + n.da->GetDataName() + "'.");
+        error_count++;
+        return false;
+      }
+    }
+    // should be assigned already by DataAccess
+    assert(isa<ScalarType>(NodeType(*n.da)) ||
+           isa<VectorType>(NodeType(*n.da)));
     SetNodeType(*n.da, ety);
     SetNodeType(n, ety);
     return true;

@@ -1005,11 +1005,15 @@ struct Identifier : public Node, public TypeIDProvider<Identifier> {
 struct DataAccess : public Node, public TypeIDProvider<DataAccess> {
   ptr<Identifier> data = nullptr;
   ptr<MultiValues> indices = nullptr;
+  int id = 0;
+  static int da_id; // for unique identification
 
   DataAccess(const location& l, const ptr<Identifier>& i,
              const ptr<MultiValues>& m = nullptr)
       : Node(l), data(i), indices(m) {
     assert(i != nullptr && "no data is specified.");
+    id = da_id;
+    da_id++;
     if (m) assert((m->Count() > 0) && "requires at least one index.");
   }
 
@@ -1047,6 +1051,8 @@ struct DataAccess : public Node, public TypeIDProvider<DataAccess> {
   }
 
   void accept(Visitor&) override;
+
+  std::string Id() const { return std::to_string(id); }
 
   __UDT_TYPE_INFO__(Node, DataAccess)
 };
@@ -1307,7 +1313,8 @@ struct Call : public Node, public TypeIDProvider<Call> {
     BIF = 0x1,
     COMPTIME = 0x2,
     ARITH = 0x4,
-    EXPR = 0x8
+    EXPR = 0x8,
+    ANNO = 0x10
   };
   // Overload bitwise OR
   friend constexpr CallAttr operator|(CallAttr lhs, CallAttr rhs) {
@@ -1345,6 +1352,7 @@ public:
   bool CompileTimeEval() const { return (bool)(attr & COMPTIME); }
   bool IsArith() const { return (bool)(attr & ARITH); }
   bool IsExpr() const { return (bool)(attr & EXPR); }
+  bool IsAnno() const { return (bool)(attr & ANNO); }
 
   void SetBIF() { attr = attr | BIF; }
   void SetCompileTimeEval() { attr = attr | COMPTIME; }
@@ -2560,11 +2568,13 @@ struct Synchronize : public Node, public TypeIDProvider<Synchronize> {
 };
 
 struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
+  std::string id;
   ptr<Identifier> iv; // induction variable
   // both will be normalized to Expr which ref to anon_x
   ptr<Node> lbound = nullptr;
   ptr<Node> ubound = nullptr;
   int stride = GetInvalidStride();
+  int width = 1; // default is 1
 
   LoopRange(const location& l, const ptr<Identifier>& i)
       : Node(l), iv(i) {} // the cmpt_bounds are yet to be inferred
@@ -2574,6 +2584,8 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
 
   const std::string IVName() const { return iv->name; }
   const ptr<Identifier> IV() const { return iv; }
+  const std::string LoopId() const { return id; }
+  void SetLoopId(const std::string& loop_id) { id = loop_id; }
 
   ptr<Node> CloneImpl() const override {
     return Make<LoopRange>(LOC(), (!iv) ? nullptr : CloneP(iv), CloneP(lbound),
@@ -2599,11 +2611,18 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
 
 struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
   ptr<MultiValues> ranges;
+  ptr<MultiNodes> suffixs;
   ptr<MultiNodes> stmts;
 
   explicit ForeachBlock(const location& l, const ptr<MultiValues>& i,
                         const ptr<MultiNodes>& s)
       : Node(l), ranges(i), stmts(s) {
+    assert(i != nullptr && "missing iteration variables for the statement.");
+  }
+
+  explicit ForeachBlock(const location& l, const ptr<MultiValues>& i,
+                        const ptr<MultiNodes>& se, const ptr<MultiNodes>& s)
+      : Node(l), ranges(i), suffixs(se), stmts(s) {
     assert(i != nullptr && "missing iteration variables for the statement.");
   }
 

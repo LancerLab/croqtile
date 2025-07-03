@@ -1907,6 +1907,8 @@ bool EarlySemantics::Visit(AST::Call& n) {
       }
       auto pty = NodeType(*n.arguments->ValueAt(0));
       SetNodeType(n, pty);
+    } else if (func_name == "vectorize" && n.IsAnno()) {
+      SetNodeType(n, MakeVoidType());
     } else
       choreo_unreachable("unsupported bif '" + func_name + "'.");
 

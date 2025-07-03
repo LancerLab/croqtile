@@ -123,6 +123,17 @@ inline const std::string GetDTEContextName() {
   return "choreo_topscc_ctx" + std::to_string(i++);
 }
 
+inline size_t GetSingleVectorByteSize(const std::string& arch) {
+  if (arch == "gcu300") {
+    return 128;
+  } else if (arch == "gcu400") {
+    return 1024;
+  } else {
+    choreo_unreachable("unsupported architecture for vector byte size.");
+  }
+  return 0;
+}
+
 inline void PrintSubscriptions(std::ostream& os, const std::string prefix,
                                const std::string suffix,
                                const std::vector<size_t>& dims,
@@ -1049,9 +1060,9 @@ bool TopsccCodeGen::Visit(AST::Assignment& n) {
   }
 
   if (n.AssignToDataElement()) {
-    if (!IsHost())
-      ds << d_indent << ExprSTR(n.da, false) << " = " << ExprSTR(n.value, false)
-         << ";\n";
+    if (!IsHost()) {
+      ds << d_indent << DASTR(n.da, ExprSTR(n.value, false), false) << ";\n";
+    }
 
     if (IsHost()) {
       // TODO: test the case!
@@ -2256,6 +2267,7 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
       os << ");\n";
       return true;
     } else if (n.IsArith()) {
+    } else if (n.IsAnno()) {
     } else
       choreo_unreachable("the bif '" + n.function->name +
                          "' is not supported by this target.");
@@ -2331,16 +2343,25 @@ bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
     for (auto iv_name : within_map.at(InScopeName(cname))) {
       auto iv_ty = GetSymbolType(UnScopedName(iv_name));
       assert(IsActualBoundedIntegerType(iv_ty));
-      auto iv_bty = cast<BoundedType>(iv_ty);
+      auto iv_bty = cast<BoundedITupleType>(iv_ty);
+      assert(iv_bty);
+      auto stride = iv_bty->GetStride(0);
+      auto width = iv_bty->GetWidth(0);
+      int increment = stride * width;
       IndStream() << "for (" << SSMName(iv_name, IsHost()) << " = "
                   << (rng->lbound ? ("(" + ExprSTR(rng->lbound, IsHost()) + ")")
                                   : "0")
                   << "; " << SSMName(iv_name, IsHost()) << " < "
                   << UnScopedExpr(ValueSTR(iv_bty->GetUpperBound()))
                   << (rng->ubound ? (" + " + ExprSTR(rng->ubound, IsHost()))
-                                  : "")
-                  << "; ++" << SSMName(iv_name, IsHost()) << ") {\n";
+                                  : "");
+      if (increment != 1)
+        IndStream() << "; " << SSMName(iv_name, IsHost()) << " += "
+                    << increment << ") {\n";
+      else
+        IndStream() << "; ++" << SSMName(iv_name, IsHost()) << ") {\n";
       IncrIndent();
+
     }
   }
 
@@ -3211,45 +3232,49 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
     return OpExprSTR(ii->value, parent_op, true, is_host);
   } else if (auto da = dyn_cast<AST::DataAccess>(e)) {
     if (auto sty = GetSpannedType(GetSymbolType(da->data->name))) {
-      oss << "*((" << NameBaseType(sty->ElementType()) << "*)"
-          << OpExprSTR(da->data, "+", true, is_host);
-      size_t idx = 0;
-      auto shape = sty->GetShape();
-      auto AppendOffset = [this, &oss, &shape, &idx](const ValueItem& op) {
-        auto offset = op;
-        assert(shape.Rank() >= idx + 1);
-        if (shape.Rank() > idx + 1)
-          offset = offset * shape.TrimDims(idx + 1).ElementCountValue();
-        SimplifyExpression(offset);
-        if (!sbe::ceq(offset, sbe::nu(0))) oss << " + " << ValueSTR(offset);
-        ++idx;
-      };
-      for (auto item : da->GetIndices()) {
-        if (auto id = AST::GetIdentifier(item)) {
-          if (auto ids = ThreadIdString(id))
-            AppendOffset(sbe::sym(ids.value()));
-          else if (auto sids = SubThreadIdString(id))
-            AppendOffset(sbe::sym(sids.value()));
-          else if (within_map.count(InScopeName(id->name))) {
-            auto ivs = within_map.at(InScopeName(id->name));
-            for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr)
-              AppendOffset(sbe::sym(*iv_itr));
-          } else
-            AppendOffset(sbe::sym(InScopeName(id->name)));
-        } else if (auto il = AST::GetIntLiteral(*item)) {
-          AppendOffset(sbe::nu(il->Val()));
-        } else {
-          oss << " + ";
+      if (auto da_ty = dyn_cast<VectorType>(da->GetType())) {
+        oss << DASTR(da);
+      } else {
+        oss << "*((" << NameBaseType(sty->ElementType()) << "*)"
+            << OpExprSTR(da->data, "+", true, is_host);
+        size_t idx = 0;
+        auto shape = sty->GetShape();
+        auto AppendOffset = [this, &oss, &shape, &idx](const ValueItem& op) {
+          auto offset = op;
           assert(shape.Rank() >= idx + 1);
           if (shape.Rank() > idx + 1)
-            oss << OpExprSTR(item, "*", true, is_host) << "*"
-                << ValueSTR(shape.TrimDims(idx + 1).ElementCountValue());
-          else
-            oss << OpExprSTR(item, "+", false, is_host);
+            offset = offset * shape.TrimDims(idx + 1).ElementCountValue();
+          SimplifyExpression(offset);
+          if (!sbe::ceq(offset, sbe::nu(0))) oss << " + " << ValueSTR(offset);
           ++idx;
+        };
+        for (auto item : da->GetIndices()) {
+          if (auto id = AST::GetIdentifier(item)) {
+            if (auto ids = ThreadIdString(id))
+              AppendOffset(sbe::sym(ids.value()));
+            else if (auto sids = SubThreadIdString(id))
+              AppendOffset(sbe::sym(sids.value()));
+            else if (within_map.count(InScopeName(id->name))) {
+              auto ivs = within_map.at(InScopeName(id->name));
+              for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr)
+                AppendOffset(sbe::sym(*iv_itr));
+            } else
+              AppendOffset(sbe::sym(InScopeName(id->name)));
+          } else if (auto il = AST::GetIntLiteral(*item)) {
+            AppendOffset(sbe::nu(il->Val()));
+          } else {
+            oss << " + ";
+            assert(shape.Rank() >= idx + 1);
+            if (shape.Rank() > idx + 1)
+              oss << OpExprSTR(item, "*", true, is_host) << "*"
+                  << ValueSTR(shape.TrimDims(idx + 1).ElementCountValue());
+          else
+              oss << OpExprSTR(item, "+", false, is_host);
+            ++idx;
+          }
         }
+        oss << ")";
       }
-      oss << ")";
     } else {
       assert(!da->AccessElement());
       assert(!within_map.count(InScopeName(da->data->name)));
@@ -3464,5 +3489,26 @@ const std::string TopsccCodeGen::CallSTR(AST::Call& n) const {
   }
   oss << ")";
 
+  return oss.str();
+}
+
+const std::string TopsccCodeGen::DASTR(AST::ptr<AST::DataAccess>& da,
+                                       const std::string& val_str,
+                                       bool is_load) const {
+  std::ostringstream oss;
+  if (auto sty = GetSpannedType(GetSymbolType(da->data->name))) {
+    auto da_ty = da->GetType();
+    if (isa<VectorType>(da_ty)) {
+      auto data_name = da->GetDataName();
+      auto leaptr_name = ssm.DeviceName(InScopeName(data_name) + da->Id());
+      if (is_load) {
+        oss << leaptr_name << ".load()";
+      } else {
+        oss << leaptr_name << ".store(" << val_str << ")";
+      }
+    } else {
+      oss << ExprSTR(da, false) << " = " << val_str;
+    }
+  }
   return oss.str();
 }

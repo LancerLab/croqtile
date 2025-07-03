@@ -417,6 +417,8 @@ private:
   const std::string OpExprSTR(AST::ptr<AST::Node>, const std::string& parent_op,
                               const bool is_left_child, bool is_host) const;
   const std::string CallSTR(AST::Call&) const;
+  const std::string DASTR(AST::ptr<AST::DataAccess>&, const std::string& = "",
+                          bool is_load = true) const;
 
   std::optional<std::string> ThreadIdString(const ptr<AST::Identifier>&) const;
   std::optional<std::string>
