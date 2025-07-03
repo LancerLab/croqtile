@@ -131,6 +131,21 @@ TEST_F(ExpressionTest, MuliplyDivide) {
   EXPECT_EQ(norm->ToString(), "(a * 2)");
 }
 
+TEST_F(ExpressionTest, Muliply3) {
+  // 0 * ((H * W) * 3) should normalize to 0
+  auto H = make_symbolic("H");
+  auto W = make_symbolic("W");
+  auto zero = make_numeric(0);
+  auto three = make_numeric(3);
+
+  auto x = make_operation(OpCode::MULTIPLY, H, W);
+  auto y = make_operation(OpCode::MULTIPLY, x, three);
+  auto z = make_operation(OpCode::MULTIPLY, zero, y);
+
+  auto norm = SimplifyExpression(z);
+  EXPECT_EQ(norm->ToString(), "0");
+}
+
 TEST_F(ExpressionTest, DivideDivide) {
   // a / (a / 2) should normalize to 2
   auto term = make_operation(OpCode::DIVIDE, a, two);

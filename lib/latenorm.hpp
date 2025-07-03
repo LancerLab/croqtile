@@ -68,7 +68,7 @@ protected:
   }
 
 protected:
-  bool BeforeVisitImpl(AST::Node& n) {
+  bool BeforeVisitImpl(AST::Node& n) override {
     if (trace_visit) dbgs() << "before visiting " << n.TypeNameString() << "\n";
     if (isa<AST::ChoreoFunction>(&n)) {
       VST_DEBUG(dbgs() << "Before " << GetName() << " - " << STR(FBInfo())
@@ -88,7 +88,7 @@ protected:
     return true;
   }
 
-  bool AfterVisitImpl(AST::Node& n) {
+  bool AfterVisitImpl(AST::Node& n) override {
     if (trace_visit) dbgs() << "after visiting " << n.TypeNameString() << "\n";
 
     if (isa<AST::ChoreoFunction>(&n)) {
@@ -263,6 +263,7 @@ public:
     }
     return true;
   }
+  using LateNormBase::Visit;
 
   // step 2: find out which host-side buffer is used at device-side and tiled by
   // above mentioned host-side IVs.
@@ -454,7 +455,9 @@ public:
   ~DummyBufferGen() {}
 
 public:
-  bool Visit(AST::DMA& n) {
+  using LateNormBase::Visit;
+
+  bool Visit(AST::DMA& n) override {
     // associate a future with its only buffer
     if (!n.future.empty() && (n.operation == ".any")) {
       auto future_name = InScopeName(n.future);
@@ -501,7 +504,9 @@ public:
   BufferInfoCollect(const ptr<SymbolTable> s_tab)
       : LateNormBase(s_tab, "buffer-info-collect") {}
 
-  bool Visit(AST::DMA& n) {
+  using LateNormBase::Visit;
+
+  bool Visit(AST::DMA& n) override {
     TraceEachVisit(n);
     // associate a future with its only buffer
     if (!n.future.empty() && (n.operation != ".any")) {
@@ -522,6 +527,8 @@ struct LateNorm : public LateNormBase {
 public:
   // it requires a symbol table
   LateNorm(const ptr<SymbolTable> s_tab) : LateNormBase(s_tab, "latenorm") {}
+
+  using LateNormBase::Visit;
 
   bool Visit(AST::DMA& n) override {
     TraceEachVisit(n);

@@ -1294,23 +1294,136 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   };
 
   // output mdspan declaration in device side, return mds name.
-  auto GetMDSName = [this](const std::string& buf_name,
-                           const std::string& buf_expr,
-                           const ptr<SpannedType>& sty) {
-    static int mds_cnt = 0;
-    auto mds_name = "__mds" + std::to_string(mds_cnt++) + "_" +
-                    RemoveSuffix(buf_name, ".data()");
-    std::string bts{NameBaseType(sty->ElementType())};
-    ds << d_indent << "tops::mdspan " << mds_name << "("
-       << TopsMdsStorage(sty->GetStorage()) << ", (" << bts << "*)" << buf_expr
-       << ", " << ShapeSTR(sty->GetShape()) << ");\n";
-    return mds_name;
+  // If offset is not empty, means that need to do memory viewing.
+  //   Just add offset to buf_expr, then utilize new_shape.
+  auto GetMDSName =
+      [this](const std::string& buf_name, const std::string& buf_expr,
+             const ptr<SpannedType>& sty, const std::string& offset = "",
+             const Shape& new_shape = Shape()) {
+        static int mds_cnt = 0;
+        auto mds_name = "__mds" + std::to_string(mds_cnt++) + "_" +
+                        RemoveSuffix(buf_name, ".data()");
+        std::string bts{NameBaseType(sty->ElementType())};
+        ds << d_indent << "tops::mdspan " << mds_name << "("
+           << TopsMdsStorage(sty->GetStorage()) << ", (" << bts << "*)"
+           << buf_expr << (offset.empty() ? "" : " + " + offset) << ", "
+           << (offset.empty() ? ShapeSTR(sty->GetShape()) : ShapeSTR(new_shape))
+           << ");\n";
+        return mds_name;
+      };
+
+  // Given shape and tile_shape. If the tiled span is address-continuous within
+  // the original span, then slice or deslice can be optimized to linear copy.
+  auto CanConvertToLinearCopy = [&]() -> bool {
+    if (SymbolToSymbol()) return false;
+
+    Shape shape, tile_shape;
+    if (SymbolToTile())
+      shape = t_sty->GetShape(), tile_shape = f_sty->GetShape();
+    else if (TileToSymbol())
+      shape = f_sty->GetShape(), tile_shape = t_sty->GetShape();
+    else
+      choreo_unreachable("unsupport");
+
+    int rank = shape.Rank();
+
+    // TODO: if nil*nil*64, then the stride is ?
+    // workaround: modify nil to a dummy value.
+    auto ModifyNil = [](Shape& s) {
+      auto vl = s.Value();
+      for (auto& vi : vl)
+        if (VIIsNil(vi)) vi = sbe::nu(2);
+      return s = Shape(s.Rank(), vl);
+    };
+    ModifyNil(shape);
+    ModifyNil(tile_shape);
+
+    auto ComputeStrides = [rank](const Shape shape) -> ValueList {
+      ValueList strides(rank, sbe::nu(1));
+      for (int i = rank - 2; i >= 0; --i)
+        strides[i] = strides[i + 1] * shape.ValueAt(i + 1);
+      return strides;
+    };
+
+    auto IsContiguous = [&]() {
+      auto strides = ComputeStrides(shape);
+      ValueList last_idx(rank);
+      for (int k = 0; k < rank; ++k)
+        last_idx[k] = tile_shape.ValueAt(k) - sbe::nu(1);
+      auto first = sbe::nu(0);
+      auto last = std::inner_product(last_idx.begin(), last_idx.end(),
+                                     strides.begin(), sbe::nu(0));
+      auto N = tile_shape.ElementCountValue();
+      return IsValueItemEqual(last - first + sbe::nu(1), N);
+    };
+
+    if (IsContiguous()) {
+      VST_DEBUG({
+        dbgs() << "Optimize DMA " << n.LOC()
+               << " to linear copy\n\toriginal shape: " << ShapeSTR(shape)
+               << "\n\ttiling shape:   " << ShapeSTR(tile_shape) << "\n";
+      });
+      return true;
+    }
+
+    return false;
   };
+
+  bool can_convert_to_linear_copy = CanConvertToLinearCopy();
+  // can_convert_to_linear_copy = false;
 
   auto [f_buf_name, f_buf_expr] = GetBufferExpr(f_sym, f_idx, f_ty);
   auto [t_buf_name, t_buf_expr] = GetBufferExpr(t_sym, t_idx, t_ty);
-  auto f_mds_name = GetMDSName(f_buf_name, f_buf_expr, f_sty);
-  auto t_mds_name = GetMDSName(t_buf_name, t_buf_expr, t_sty);
+
+  auto GenOffsetIfLinearCopyOpt = [&](const ptr<AST::ChunkAt>& ca,
+                                      const Shape& outer_shape =
+                                          Shape()) -> std::string {
+    // `outer_shape` is used to generate offset for linear copy optimization.
+    if (!outer_shape.IsValid()) return GenOffset(ca);
+
+    std::ostringstream offset;
+
+    if (ca->NoTile()) return "";
+
+    if (ca->AllTSInfo().size() > 1)
+      choreo_unreachable("multiple chunkat is yet to support.");
+
+    for (auto& tsi : ca->AllTSInfo()) {
+      size_t i = 0;
+      auto& shape = ca->GetShape();
+      for (auto p : tsi->GetIndices()) {
+        auto idx_exprs = SplitStringByDelimiter(ExprSTR(p, IsHost()));
+        for (auto i_expr : idx_exprs) {
+          ValueItem outer_factor = sbe::nu(1);
+          if (outer_shape.IsValid() && i + 1 < outer_shape.Rank())
+            outer_factor = outer_shape.TrimDims(i + 1).ElementCountValue();
+          std::string factor = "1";
+          factor = ValueSTR(shape.ValueAt(i) * outer_factor);
+          if (i != 0) offset << " + ";
+          if (i_expr == "__choreo_no_tiling__")
+            offset << "0";
+          else if (factor == "1")
+            offset << i_expr;
+          else
+            offset << "(" << i_expr << " * " << factor << ")";
+          ++i;
+        }
+      }
+    }
+    return offset.str();
+  };
+
+  std::string f_mds_offset = "";
+  if (can_convert_to_linear_copy && TileToSymbol())
+    f_mds_offset = GenOffsetIfLinearCopyOpt(f_ca, f_sty->GetShape());
+  std::string t_mds_offset = "";
+  if (can_convert_to_linear_copy && SymbolToTile())
+    t_mds_offset = GenOffsetIfLinearCopyOpt(t_ca, t_sty->GetShape());
+
+  auto f_mds_name = GetMDSName(f_buf_name, f_buf_expr, f_sty, f_mds_offset,
+                               t_sty->GetShape());
+  auto t_mds_name = GetMDSName(t_buf_name, t_buf_expr, t_sty, t_mds_offset,
+                               f_sty->GetShape());
 
   auto future_name = n.future;
   // bind the data to the future
@@ -1342,57 +1455,70 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   }
 
   if (n.operation == ".copy") {
-    if (SymbolToSymbol()) {
-      // no chunkat
+    auto CopySymToSym = [&]() -> void {
       ds << d_indent;
       if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
       ds << "tops::memcpy" << (fty->IsAsync() ? "_async" : "") << "(*"
          << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
          << ");\n";
-
       VerboseDMA(ds, d_indent, t_sym, f_sym, "copy", "", 0,
                  ", line " + std::to_string(n.LOC().begin.line));
       // set the device future
       if (!event_name.empty())
         ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
+    };
+
+    if (SymbolToSymbol()) {
+      // no chunkat
+      CopySymToSym();
     } else if (SymbolToTile()) {
-      static int ds_cnt = 0;
-      auto off_name = "__deslice_offset" + std::to_string(ds_cnt++) + "__" +
-                      t_sym + "_2_" + f_sym;
-      auto [offset, offcnt] = GenMdsOffset(t_ca);
-      VerboseDMA(ds, d_indent, t_sym, f_sym, "deslice", offset, offcnt,
-                 ", line " + std::to_string(n.LOC().begin.line));
-      ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
-      ds << d_indent;
-      if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-      ds << "tops::deslice" << (fty->IsAsync() ? "_async" : "") << "(*"
-         << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-         << ", " << off_name << ");\n";
-      // set the device future
-      if (!event_name.empty()) {
-        ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
+      if (can_convert_to_linear_copy) {
+        CopySymToSym();
+      } else {
+        static int ds_cnt = 0;
+        auto off_name = "__deslice_offset" + std::to_string(ds_cnt++) + "__" +
+                        t_sym + "_2_" + f_sym;
+        auto [offset, offcnt] = GenMdsOffset(t_ca);
+        VerboseDMA(ds, d_indent, t_sym, f_sym, "deslice", offset, offcnt,
+                   ", line " + std::to_string(n.LOC().begin.line));
+        ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
+        ds << d_indent;
+        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
+        ds << "tops::deslice" << (fty->IsAsync() ? "_async" : "") << "(*"
+           << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
+           << ", " << off_name << ");\n";
+        // set the device future
+        if (!event_name.empty()) {
+          ds << d_indent << future_name << ".set_event(" << event_name
+             << ");\n";
 #if 0
           std::string bts{NameBaseType(t_sty->ElementType())};
           ds << d_indent << future_name << ".set_data(&" << f_mds_name << ".get<"
              << bts << ">(" << offset.str() << "));\n";
 #endif
+        }
       }
     } else if (TileToSymbol()) {
-      static int s_cnt = 0;
-      auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
-                      f_sym + "_2_" + t_sym;
-      auto [offset, offcnt] = GenMdsOffset(f_ca);
-      VerboseDMA(ds, d_indent, f_sym, t_sym, "slice", offset, offcnt,
-                 ", line " + std::to_string(n.LOC().begin.line));
-      ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
-      ds << d_indent;
-      if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-      ds << "tops::slice" << (fty->IsAsync() ? "_async" : "") << "(*"
-         << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-         << ", " << off_name << ");\n";
-      // set the device future
-      if (!event_name.empty())
-        ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
+      if (can_convert_to_linear_copy) {
+        CopySymToSym();
+      } else {
+        static int s_cnt = 0;
+        auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
+                        f_sym + "_2_" + t_sym;
+        auto [offset, offcnt] = GenMdsOffset(f_ca);
+        VerboseDMA(ds, d_indent, f_sym, t_sym, "slice", offset, offcnt,
+                   ", line " + std::to_string(n.LOC().begin.line));
+        ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
+        ds << d_indent;
+        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
+        ds << "tops::slice" << (fty->IsAsync() ? "_async" : "") << "(*"
+           << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
+           << ", " << off_name << ");\n";
+        // set the device future
+        if (!event_name.empty())
+          ds << d_indent << future_name << ".set_event(" << event_name
+             << ");\n";
+      }
     } else {
       choreo_unreachable("not support dual chunkat in one DMA statement");
     }
@@ -1459,7 +1585,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         "__transpose_layout" + std::to_string(t_cnt++) + "__" + f_buf_name;
     ds << d_indent << "int " << layout_name << "[] = {"
        << DelimitedString(transp_config->dim_values) << "};\n";
-    if (SymbolToSymbol()) {
+    // TODO: check if optimized transp work
+    auto TranspSymToSym = [&]() -> void {
       ds << d_indent;
       if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
       ds << "tops::transpose" << (fty->IsAsync() ? "_async" : "") << "(*"
@@ -1468,34 +1595,48 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       // set the device future
       if (!event_name.empty())
         ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
+    };
+
+    if (SymbolToSymbol()) {
+      TranspSymToSym();
     } else if (TileToSymbol()) {
-      static int s_cnt = 0;
-      auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
-                      f_sym + "_2_" + t_sym;
-      auto [offset, offcnt] = GenMdsOffset(f_ca, n.GetConfig());
-      ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
-      ds << d_indent;
-      if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-      ds << "tops::slice_transpose" << (fty->IsAsync() ? "_async" : "") << "(*"
-         << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-         << ", " << off_name << ", " << layout_name << ");\n";
-      // set the device future
-      if (!event_name.empty())
-        ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
+      if (false) {
+        TranspSymToSym();
+      } else {
+        static int s_cnt = 0;
+        auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
+                        f_sym + "_2_" + t_sym;
+        auto [offset, offcnt] = GenMdsOffset(f_ca, n.GetConfig());
+        ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
+        ds << d_indent;
+        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
+        ds << "tops::slice_transpose" << (fty->IsAsync() ? "_async" : "")
+           << "(*" << future_name << ".get_ctx(), " << t_mds_name << ", "
+           << f_mds_name << ", " << off_name << ", " << layout_name << ");\n";
+        // set the device future
+        if (!event_name.empty())
+          ds << d_indent << future_name << ".set_event(" << event_name
+             << ");\n";
+      }
     } else if (SymbolToTile()) {
-      static int ds_cnt = 0;
-      auto off_name = "__deslice_offset" + std::to_string(ds_cnt++) + "__" +
-                      t_sym + "_2_" + f_sym;
-      auto [offset, offcnt] = GenMdsOffset(t_ca, n.GetConfig());
-      ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
-      ds << d_indent;
-      if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-      ds << "tops::transpose_deslice" << (fty->IsAsync() ? "_async" : "")
-         << "(*" << future_name << ".get_ctx(), " << t_mds_name << ", "
-         << f_mds_name << ", " << layout_name << ", " << off_name << ");\n";
-      // set the device future
-      if (!event_name.empty())
-        ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
+      if (false) {
+        TranspSymToSym();
+      } else {
+        static int ds_cnt = 0;
+        auto off_name = "__deslice_offset" + std::to_string(ds_cnt++) + "__" +
+                        t_sym + "_2_" + f_sym;
+        auto [offset, offcnt] = GenMdsOffset(t_ca, n.GetConfig());
+        ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
+        ds << d_indent;
+        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
+        ds << "tops::transpose_deslice" << (fty->IsAsync() ? "_async" : "")
+           << "(*" << future_name << ".get_ctx(), " << t_mds_name << ", "
+           << f_mds_name << ", " << layout_name << ", " << off_name << ");\n";
+        // set the device future
+        if (!event_name.empty())
+          ds << d_indent << future_name << ".set_event(" << event_name
+             << ");\n";
+      }
     }
   }
 

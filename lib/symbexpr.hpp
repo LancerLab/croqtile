@@ -682,7 +682,7 @@ public:
     // x * 0 = 0, 0 * x = 0
     else if (op == OpCode::MULTIPLY) {
       if ((lnv && (lnv->Value() == 0)) || (rnv && (rnv->Value() == 0)))
-        return 0;
+        return nu(0);
       // x * 1 = x, 1 * x = x
       if (rnv && (rnv->Value() == 1)) return simplifiedLeft;
       if (lnv && (lnv->Value() == 1)) return simplifiedRight;

@@ -846,7 +846,7 @@ bool LivenessAnalyzer::BeforeVisitImpl(AST::Node& n) {
         buffers.insert(sname);
         if (sty->RuntimeShaped()) {
           auto shape = sty->GetShape();
-          for (const auto v : shape.GetDynamicSymbols())
+          for (const auto& v : shape.GetDynamicSymbols())
             AddDef(current_stmt, STR(v));
         }
       }
