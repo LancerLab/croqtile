@@ -8,7 +8,7 @@ __co__  void foo(f32 [24] a) {
   }
 }
 // CHECK:   __shared__ float sa[3][8];
-// CHECK:   auto anon_0 = (__tops_tid_x() - 3);
+// CHECK:   auto anon_0 = __tops_tid_x() - 3;
 // CHECK:   tops::mdspan __mds0_a(tops::Global, (float*)a + (__tops_tid_x() * 8), 8);
 // CHECK:   tops::mdspan __mds1_sa(tops::Shared, (float*)sa[__tops_tid_x()], 8);
 // CHECK:   tops_dte_ctx_t choreo_topscc_ctx0;

@@ -1141,7 +1141,6 @@ struct IntIndex : public Node, public TypeIDProvider<IntIndex> {
   char lb = '(';
   char rb = ')';
 
-  // TODO(wsj): loc?
   explicit IntIndex(const IntIndex& ii) : Node(ii.LOC()), value(ii.value) {}
 
   void UseBracket() {

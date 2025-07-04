@@ -23,60 +23,81 @@ inline const std::unordered_map<std::string, OpInfo> op_table = {
     // L = ExprSTR(l), R = ExprSTR(r), C = ExprSTR(c)
     // Value(x) = ValueSTR(x) is always valid to use directly (already wrapped
     // with parentheses if needed).
-    // UNSUED means that the op is printed by oss directly, not OpExprSTR
+
+    // In fact, custom operators(e.g. sizeof, getith, cdiv...) can be classified
+    // as native C++ operators. Therefore, their priority is not necessary here.
+    // If these customoperators are encountered,then the corresponding native
+    // C++ operators will be used instead.That is,their specific priorities
+    // depend on the implementation rather than theoriginal definition.
 
     // clang-format off
-    {"",       {1, Assoc::Left}},
+    {"",       {0, Assoc::Left}},   // dummy operator with the lowest priority 
+
     {"?",      {1, Assoc::Right}},  // C ? L : R
 
     {"||",     {2, Assoc::Left}},
 
     {"&&",     {3, Assoc::Left}},
 
-    {"<",      {4, Assoc::Left}},
-    {"<=",     {4, Assoc::Left}},
-    {"==",     {4, Assoc::Left}},
-    {">",      {4, Assoc::Left}},
-    {">=",     {4, Assoc::Left}},
-    {"!=",     {4, Assoc::Left}},
-
-    {"+",      {5, Assoc::Left}},
-    {"-",      {5, Assoc::Left}},
-
-    {"getith", {6, Assoc::Left}}, // bv(idx) => `Value(bv)+idx` if idx<0
-                                  // bv(idx) => `Value(bv) if idx>=0
-
-    {"#",      {7, Assoc::Left}}, // L * UB(r) + R
-
-    {"*",      {8, Assoc::Left}},
-    {"/",      {8, Assoc::Left}},
-    {"%",      {8, Assoc::Left}},
-
-    // TODO: test
-    {"cdiv",   {9, Assoc::Left}}, // (L + R - 1) / R
-
-    {"!",      {10, Assoc::Right}},
-    {"addrof", {10, Assoc::Right}},
-    {"++",     {10, Assoc::Right}},
-    {"--",     {10, Assoc::Right}},
-
-    {"elemof", {11, Assoc::Left}}, // array[x][x]
-    {"ref",    {11, Assoc::Left}},
-    {"sizeof", {11, Assoc::Left}}, // UNUSED: Value(...)
-    {"ubound", {11, Assoc::Left}}, // UNUSED: value(ub(bv))
-    {"dataof", {11, Assoc::Left}}, // UNUSED: future.data => id__buf__ or id.data()
-
-    {"#+",     {12, Assoc::Left}}, // specia case: UB arith.
-    {"#-",     {12, Assoc::Left}}, // res is only related to the original bv,
-    {"#*",     {12, Assoc::Left}}, // and contains no operator.
-    {"#/",     {12, Assoc::Left}},
-    {"#%",     {12, Assoc::Left}},
-    // the res will be gain from shapeinfer, so no op "dimof" at CodeGen.
-    // {"dimof",  {x, Assoc::Left}},  // mdspan(idx)
+    {"|",      {4, Assoc::Left}},
     
-    // note: have no compound arith assign: "+=", "-=", ...
-    // they are normalized to "x = x + y"
+    {"^",      {5, Assoc::Left}},
+    
+    {"&",      {6, Assoc::Left}},
 
+    {"==",     {7, Assoc::Left}},
+    {"!=",     {7, Assoc::Left}},
+    
+    {"<",      {8, Assoc::Left}},
+    {"<=",     {8, Assoc::Left}},
+    {">",      {8, Assoc::Left}},
+    {">=",     {8, Assoc::Left}},
+    
+    {"<<",     {9, Assoc::Left}},
+    {">>",     {9, Assoc::Left}},
+
+    {"+",      {10, Assoc::Left}},
+    {"-",      {10, Assoc::Left}},
+    
+    {"*",      {11, Assoc::Left}},
+    {"/",      {11, Assoc::Left}},
+    {"%",      {11, Assoc::Left}},
+
+    {"++",     {12, Assoc::Right}},   // Prefix increment
+    {"--",     {12, Assoc::Right}},   // Prefix decrement
+    {"!",      {12, Assoc::Right}},
+    {"~",      {12, Assoc::Right}},
+    {"&",      {12,  Assoc::Right}},  // address-of
+    
+    {"[]",     {13,  Assoc::Right}},  // subscript, seems did not use
+    // {"suf_++",     {x, x}} // suffix increment         
+    // {"suf_--",     {x, x}} // suffix decrement
+    
+    /*
+    {"#",      {x, Assoc::Left}}, // L * UB(r) + R
+    {"getith", {x, Assoc::Left}}, // bv(idx) => `ub(bv)+idx` if idx<0
+                                  // bv(idx) => `idx`        if idx>=0
+    {"cdiv",   {x, Assoc::Left}}, // (L + R - 1) / R
+    {"addrof", {x, Assoc::Right}},
+
+    {"elemof", {x, Assoc::Left}}, // array[x][x]
+    {"ref",    {x, Assoc::Left}},
+    {"sizeof", {x, Assoc::Left}}, // UNUSED: Value(...)
+    {"ubound", {x, Assoc::Left}}, // UNUSED: Value(ub(bv))
+    {"dataof", {x, Assoc::Left}}, // UNUSED: future.data => id__buf__ or id.data()
+
+    {"#+",     {x, Assoc::Left}}, // the ub is changed
+    {"#-",     {x, Assoc::Left}}, 
+    {"#*",     {x, Assoc::Left}}, 
+    {"#/",     {x, Assoc::Left}},
+    {"#%",     {x, Assoc::Left}},
+
+    the res will be gain from shapeinfer, so no op "dimof" at CodeGen.
+    {"dimof",  {x, Assoc::Left}},  // mdspan(idx)
+    
+    note: have no compound arith assign: "+=", "-=", ...
+    they are normalized to "x = x + y"
+    */
     // clang-format on
 };
 
@@ -108,6 +129,9 @@ inline bool NeedParen(const std::string& child_op, const std::string& parent_op,
   Assoc parent_assoc = GetAssociativity(parent_op);
   if (parent_assoc == Assoc::Left && !is_left_child) return true;
   if (parent_assoc == Assoc::Right && is_left_child) return true;
+
+  // special case: make clear output if nested ? expr
+  if (child_op == "?" && parent_op == "?") return true;
 
   return false;
 }

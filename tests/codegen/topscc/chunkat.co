@@ -31,7 +31,7 @@ __co__ void foo(f32 [128, 72] a, f32 [1024, 512, 256] b) {
   }
 }
 
-// CHECK: {(int)(__tops_bid_x() * (64)), (int)(__tops_tid_x() * (24))}
-// CHECK: {(int)(__tops_tid_x() * (42)), (int)(__tops_tid_y() * (18))}
-// CHECK: {(int)(__tops_tid_x() * (31)), (int)(__tops_tid_y() * (11))}
-// CHECK: {(int)(__tops_tid_x() * (32)) + (int)(__tops_tid_x() * (9)), (int)(__tops_tid_y() * (16)) + (int)(__tops_bid_x() * (7))}
+// CHECK: {(int)(__tops_bid_x() * 64), (int)(__tops_tid_x() * 24)}
+// CHECK: {(int)(__tops_tid_x() * 42), (int)(__tops_tid_y() * 18)}
+// CHECK: {(int)(__tops_tid_x() * 31), (int)(__tops_tid_y() * 11)}
+// CHECK: {(int)(__tops_tid_x() * 32) + (int)(__tops_tid_x() * 9), (int)(__tops_tid_y() * 16) + (int)(__tops_bid_x() * 7)}

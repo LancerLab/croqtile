@@ -8,6 +8,7 @@
 
 #include "ast.hpp"
 #include "codegen.hpp"
+#include "operator_info.hpp"
 #include "types.hpp"
 
 using namespace Choreo;
@@ -424,9 +425,8 @@ private:
 
   const std::string ValueSTR(const ValueItem& vi) const;
   const std::string ExprSTR(AST::ptr<AST::Node>, bool is_host = true) const;
-  const std::string OpExprSTR(AST::ptr<AST::Node>, bool is_host = true,
-                              const std::string& parent_op = "",
-                              bool is_left = true) const;
+  const std::string OpExprSTR(AST::ptr<AST::Node>, const std::string& parent_op,
+                              const bool is_left_child, bool is_host) const;
   const std::string CallSTR(AST::Call&) const;
 
   std::optional<std::string> ThreadIdString(const ptr<AST::Identifier>&) const;

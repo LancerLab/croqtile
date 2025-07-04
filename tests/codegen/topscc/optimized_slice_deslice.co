@@ -52,6 +52,6 @@ int main() {
 // CHECK:      tops_dte_ctx_t choreo_topscc_ctx1;
 // CHECK:      choreo::future __choreo_anon_fut__0(choreo_topscc_ctx1, "", 17, 7);
 // CHECK:      int __transpose_layout0__anon_1[] = {0, 2, 1};
-// CHECK:      int __deslice_offset0__t_2_anon_1[] = {(int)(__iv_idx__elem__0 * (1)), 0, 0};
+// CHECK:      int __deslice_offset0__t_2_anon_1[] = {(int)(__iv_idx__elem__0 * 1), 0, 0};
 // CHECK:      tops::transpose_deslice(*__choreo_anon_fut__0.get_ctx(), __mds3_t, __mds2_anon_1, __transpose_layout0__anon_1, __deslice_offset0__t_2_anon_1);
 // CHECK:    } // idx__elem__0

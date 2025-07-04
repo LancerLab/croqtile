@@ -19,13 +19,13 @@ __co__  void foo(f32 [24] a) {
 // CHECK:   __shared__ __volatile__ bool ec; // shared event
 // CHECK:   ec = false;
 // CHECK:   ec = true;
-// CHECK:   bool pred = (__tops_tid_x() >= 3);
+// CHECK:   bool pred = __tops_tid_x() >= 3;
 // CHECK:   if (pred) {
 // CHECK:     while (ec == false) continue; // spinlock
 // CHECK:     ec = false; // reset event
 // CHECK:     ep = true;
 // CHECK:   } // end inthreads
-// CHECK:   if (!(pred)) {
+// CHECK:   if (!pred) {
 // CHECK:     while (ep == false) continue; // spinlock
 // CHECK:     ep = false; // reset event
 // CHECK:     ec = true;
