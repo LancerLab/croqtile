@@ -87,6 +87,9 @@ private:
   }
 
   std::map<std::string, DevFuncMemReuseCtx>& DFCtxs() { return df_ctxs; }
+  const std::map<std::string, DevFuncMemReuseCtx>& DFCtxs() const {
+    return df_ctxs;
+  }
 
   std::string GetFuncNameFromScopedName(const std::string& name) {
     // indicate that it is a co function name

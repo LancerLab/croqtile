@@ -176,7 +176,6 @@ void MemReuse::Initialize() {
     auto ranges = var_ranges.at(sname);
     if (ranges.Values().size() == 0) {
       VST_DEBUG(dbgs() << "Warning: buffer " << sname << " is never used!\n");
-      continue;
     }
     // For now, there is no case that a var is used in multiple ranges.
     // Because there is no reassignment.

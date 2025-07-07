@@ -477,7 +477,12 @@ void LivenessAnalyzer::ComputeLiveRange() {
       }
 
       // only add the live range if the variable is actually used.
-      if (end_point > def_point) ranges.PushBack(Range{def_point, end_point});
+      if (end_point > def_point)
+        ranges.PushBack(Range{def_point, end_point});
+      else if (buffers.count(var) && end_point == def_point) {
+        // tolerate buffer appears on the single location
+        ranges.PushBack(Range{def_point, end_point});
+      }
     }
 
     // merge the overlapping ranges.

@@ -1,4 +1,4 @@
-// RUN: choreo -t topscc -es %s -o - | FileCheck %s
+// RUN: choreo -t topscc --mem-reuse=false -es %s -o - | FileCheck %s
 
 __co__ void foo(f32 [128, 512] a) {
   parallel p by 1, q by 4 {

@@ -1,4 +1,4 @@
-// RUN: choreo -t topscc -es %s -o - | FileCheck %s
+// RUN: choreo -t topscc -es --mem-reuse=false %s -o - | FileCheck %s
 __co__ auto foo(int a, f32 [1, 2] b) {
   f16 [b.span] g_data;
   parallel p by 2 {
