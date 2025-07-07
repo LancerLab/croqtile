@@ -24,20 +24,18 @@ __co__ void foo(f32 [2, 3, 4] d, int e) {
 // VALNO:   Alias "::foo::d.span" -> #5
 // VALNO:   New VN #6: '::foo::e'
 // VALNO:   New VN #7: 'const_5'
-// VALNO:   New VN #8: 'index_const_2'
-// VALNO:   New VN #9: '#7,#0,#0'
-// VALNO:   Alias "::foo::a" -> #9
-// VALNO:   New VN #10: '+:#6:#0'
-// VALNO:   New VN #11: 'const_7'
-// VALNO:   New VN #12: 'const_21'
-// VALNO:   New VN #13: 'const_20'
-// VALNO:   New VN #14: '#0,#10,#13'
-// VALNO:   Alias "::foo::b" -> #14
-// VALNO:   New VN #15: 'const_0'
-// VALNO:   New VN #16: 'index_const_0'
-// VALNO:   New VN #17: 'const_23'
-// VALNO:   New VN #18: '#0,#17'
-// VALNO:   Alias "::foo::c" -> #18
+// VALNO:   New VN #8: '#7,#0,#0'
+// VALNO:   Alias "::foo::a" -> #8
+// VALNO:   New VN #9: '+:#6:#0'
+// VALNO:   New VN #10: 'const_7'
+// VALNO:   New VN #11: 'const_21'
+// VALNO:   New VN #12: 'const_20'
+// VALNO:   New VN #13: '#0,#9,#12'
+// VALNO:   Alias "::foo::b" -> #13
+// VALNO:   New VN #14: 'const_0'
+// VALNO:   New VN #15: 'const_23'
+// VALNO:   New VN #16: '#0,#15'
+// VALNO:   Alias "::foo::c" -> #16
 // VALNO:  } // end scope-1
 
 // CHECK: Parameter: ::foo::d, Type: f32 mdspan<3> [2, 3, 4]

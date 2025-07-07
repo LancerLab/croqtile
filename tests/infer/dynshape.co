@@ -76,20 +76,11 @@ __co__ auto ele_add(s32 [6, ?, 128] lhs, s32 [6, ?, 128] rhs) {
 // VALNO:      <Bind> VN #13 <-> VN #20
 // VALNO:     scope-4 {
 // VALNO:      New VN #26: '#16,#17,#18'
-// VALNO:      <Simplify> 'const_6 / const_1 to 'const_6'
-// VALNO:      <Simplify> '::ele_add::$0 / /:#3:#10 to 'const_2'
-// VALNO:      <Simplify> 'const_128 / const_4 to 'const_32'
 // VALNO:      Alias "::ele_add::paraby_0::within_0::foreach_0::lhs_load.span" -> #12
 // VALNO:      New VN #27: '#22,#23,#24'
-// VALNO:      <Simplify> 'const_6 / const_1 to 'const_6'
-// VALNO:      <Simplify> '::ele_add::$1 / /:#6:#10 to 'const_2'
-// VALNO:      <Simplify> 'const_128 / const_4 to 'const_32'
 // VALNO:      Alias "::ele_add::paraby_0::within_0::foreach_0::rhs_load.span" -> #12
 // VALNO:      Alias "::ele_add::paraby_0::within_0::foreach_0::l1_out.span" -> #12
 // VALNO:      New VN #28: 'const_384'
-// VALNO:      <Simplify> 'const_6 / const_1 to 'const_6'
-// VALNO:      <Simplify> '::ele_add::$0 / /:#3:#10 to 'const_2'
-// VALNO:      <Simplify> 'const_128 / const_4 to 'const_32'
 // VALNO:      Alias "::ele_add::paraby_0::within_0::foreach_0::out_store.span" -> #12
 // VALNO:     } // end scope-4
 // VALNO:    } // end scope-3

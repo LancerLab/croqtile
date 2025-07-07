@@ -18,11 +18,10 @@ __co__ void foo(f32 [2, 3, 4] d, int e) {
 // VALNO:   Alias "::foo::d.span" -> #5
 // VALNO:   New VN #6: '::foo::e'
 // VALNO:   New VN #7: 'const_5'
-// VALNO:   New VN #8: 'index_const_2'
-// VALNO:   New VN #9: '#7,#0,#0'
-// VALNO:   Alias "::foo::a" -> #9
-// VALNO:   New VN #10: '#6,#3'
-// VALNO:   Alias "::foo::b" -> #10
+// VALNO:   New VN #8: '#7,#0,#0'
+// VALNO:   Alias "::foo::a" -> #8
+// VALNO:   New VN #9: '#6,#3'
+// VALNO:   Alias "::foo::b" -> #9
 // VALNO:  } // end scope-1
 
 // CHECK: Parameter: ::foo::d, Type: f32 mdspan<3> [2, 3, 4]

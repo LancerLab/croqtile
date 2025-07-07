@@ -51,27 +51,27 @@ __co__ void bounded_decls() {
 
 // CHKVALNO:   scope-1 {
 // CHKVALNO:    Alias "::@__choreo_no_tiling__" -> #0
-// CHKVALNO:    New VN #42: '::__choreo_no_tiling__'
+// CHKVALNO:    New VN #39: '::__choreo_no_tiling__'
 // CHKVALNO:    scope-2 {
 // CHKVALNO:     Alias "::bounded_decls::paraby_1::@p" -> #6
-// CHKVALNO:     New VN #43: '::bounded_decls::paraby_1::p'
+// CHKVALNO:     New VN #40: '::bounded_decls::paraby_1::p'
 // CHKVALNO:     Alias "::bounded_decls::paraby_1::@p__elem__x" -> #6
-// CHKVALNO:     New VN #44: '::bounded_decls::paraby_1::p__elem__x'
+// CHKVALNO:     New VN #41: '::bounded_decls::paraby_1::p__elem__x'
 // CHKVALNO:     scope-3 {
-// CHKVALNO:      New VN #45: 'const_16'
-// CHKVALNO:      Alias "::bounded_decls::paraby_1::within_1::@n_tile(0)" -> #45
-// CHKVALNO:      Alias "::bounded_decls::paraby_1::within_1::@n_tile__elem__0" -> #45
-// CHKVALNO:      New VN #46: '::bounded_decls::paraby_1::within_1::n_tile__elem__0'
-// CHKVALNO:      New VN #47: '::bounded_decls::paraby_1::within_1::n_tile'
-// CHKVALNO:      Alias "::bounded_decls::paraby_1::within_1::@n_tile" -> #45
+// CHKVALNO:      New VN #42: 'const_16'
+// CHKVALNO:      Alias "::bounded_decls::paraby_1::within_1::@n_tile(0)" -> #42
+// CHKVALNO:      Alias "::bounded_decls::paraby_1::within_1::@n_tile__elem__0" -> #42
+// CHKVALNO:      New VN #43: '::bounded_decls::paraby_1::within_1::n_tile__elem__0'
+// CHKVALNO:      New VN #44: '::bounded_decls::paraby_1::within_1::n_tile'
+// CHKVALNO:      Alias "::bounded_decls::paraby_1::within_1::@n_tile" -> #42
 // CHKVALNO:      scope-4 {
-// CHKVALNO:       New VN #48: '%:#47:#11'
-// CHKVALNO:       Alias "::bounded_decls::paraby_1::within_1::foreach_1::@a" -> #45
-// CHKVALNO:       Alias "::bounded_decls::paraby_1::within_1::foreach_1::a" -> #48
-// CHKVALNO:       New VN #49: '+:#43:#25'
-// CHKVALNO:       New VN #50: '/:#49:#11'
+// CHKVALNO:       New VN #45: '%:#44:#11'
+// CHKVALNO:       Alias "::bounded_decls::paraby_1::within_1::foreach_1::@a" -> #42
+// CHKVALNO:       Alias "::bounded_decls::paraby_1::within_1::foreach_1::a" -> #45
+// CHKVALNO:       New VN #46: '+:#40:#23'
+// CHKVALNO:       New VN #47: '/:#46:#11'
 // CHKVALNO:       Alias "::bounded_decls::paraby_1::within_1::foreach_1::@b" -> #6
-// CHKVALNO:       Alias "::bounded_decls::paraby_1::within_1::foreach_1::b" -> #50
+// CHKVALNO:       Alias "::bounded_decls::paraby_1::within_1::foreach_1::b" -> #47
 // CHKVALNO:      } // end scope-4
 // CHKVALNO:     } // end scope-3
 // CHKVALNO:    } // end scope-2

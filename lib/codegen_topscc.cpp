@@ -1902,19 +1902,22 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
       std::string print_format;
       print_format += "\"";
       std::string print_args;
-      auto GenFormatAndArgsFromShape = [&](const Shape& shape) {
+      auto GenFormatAndArgsFromValueList = [&](const ValueList& vl) {
         std::string format;
         std::ostringstream oss;
-        for (int i = 0; i < (int)shape.Rank(); ++i) {
+        for (size_t i = 0; i < vl.size(); ++i) {
           if (i != 0) {
             format += ", ";
             oss << ", ";
           }
           format += "%lld";
-          oss << "static_cast<long long>(" << ValueSTR(shape.ValueAt(i)) << ")";
+          oss << "static_cast<long long>(" << ValueSTR(vl[i]) << ")";
         }
         std::string args = UnScopedExpr(oss.str());
         return std::make_pair(format, args);
+      };
+      auto GenFormatAndArgsFromShape = [&](const Shape& shape) {
+        return GenFormatAndArgsFromValueList(shape.Value());
       };
       for (const auto& arg : n.GetArguments()) {
         const auto type = NodeType(*arg);
@@ -1946,7 +1949,8 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
           print_args += ", ";
         } else if (isa<ITupleType>(type)) {
           print_format += "{";
-          auto [format, args] = GenFormatAndArgsFromShape(e->s);
+          auto [format, args] =
+              GenFormatAndArgsFromValueList(e->Opts().GetVals());
           print_format += format;
           print_format += "}";
           print_args += args + ", ";

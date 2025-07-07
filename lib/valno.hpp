@@ -55,8 +55,6 @@ inline int CountElementsInSignature(const std::string& input) {
 
 namespace valno {
 
-using SignTy = std::string; // signature type. TODO: use structure
-
 class NumTy { // value number type
 private:
   constexpr static int invalid_val = GetInvalidValueNumber();
@@ -100,6 +98,418 @@ public:
   const static NumTy Unknown() { return NumTy(unknown_val); }
 };
 
+using OpTy = std::string;
+inline const std::string STR(const OpTy& o) { return o; }
+
+class UnknownSign;
+class NoneSign;
+class Signature {
+protected:
+  static constexpr const char* unknown_sign = "__valno_not_known__";
+  static constexpr const char* none_sign = "__valno_not_specified__";
+
+public:
+  virtual size_t Count() const { return 1; }
+  virtual const std::string ToString() const { return ""; }
+
+  virtual bool operator==(const Signature&) = 0;
+  virtual bool operator!=(const Signature& s) { return !operator==(s); }
+
+public:
+  static const UnknownSign Unknown();
+  static const NoneSign None();
+
+public:
+  // for runtime type disambiguation
+  __UDT_TYPE_INFO_BASE__(notype)
+};
+
+using SignTy = std::shared_ptr<Signature>;
+
+class UnknownSign : public Signature, public TypeIDProvider<UnknownSign> {
+public:
+  UnknownSign() {}
+  const std::string ToString() const override { return "__valno_not_known__"; }
+
+  bool operator==(const Signature& st) override {
+    return isa<UnknownSign>(&st);
+  }
+
+public:
+  __UDT_TYPE_INFO__(Signature, UnknownSign)
+};
+
+class NoneSign : public Signature, public TypeIDProvider<NoneSign> {
+public:
+  NoneSign() {}
+  const std::string ToString() const override {
+    return "__valno_not_specified__";
+  }
+
+  bool operator==(const Signature& st) override { return isa<NoneSign>(&st); }
+
+public:
+  __UDT_TYPE_INFO__(Signature, NoneSign)
+};
+
+class ConstSign : public Signature, public TypeIDProvider<ConstSign> {
+private:
+  using Var = std::variant<int64_t, float, double, bool>;
+  Var value;
+
+public:
+  ConstSign(int v) : value((int64_t)v) {}
+  ConstSign(int64_t v) : value(v) {}
+  ConstSign(float v) : value(v) {}
+  ConstSign(double v) : value(v) {}
+  ConstSign(bool v) : value(v) {}
+
+  const std::variant<int64_t, float, double, bool>& Value() const {
+    return value;
+  }
+  template <typename T>
+  bool Holds() const {
+    return std::holds_alternative<T>(value);
+  }
+  template <typename T>
+  const T Get() const {
+    return std::get<T>(value);
+  }
+  bool IsFloat() const {
+    return std::holds_alternative<float>(value) ||
+           std::holds_alternative<double>(value);
+  }
+
+  struct IsZeroVisitor {
+    bool operator()(int64_t value) const { return value == 0; }
+    bool operator()(float value) const { return value == 0.0f; }
+    bool operator()(double value) const { return value == 0.0; }
+    // Never consider bool as zero
+    bool operator()(bool) const { return false; }
+  };
+  bool IsZero() { return std::visit(IsZeroVisitor{}, value); }
+
+  struct IsDenormalVisitor {
+    bool operator()(int64_t) const { return false; }
+    bool operator()(bool) const { return false; }
+    bool operator()(float value) const {
+      return std::fpclassify(value) == FP_SUBNORMAL;
+    }
+    bool operator()(double value) const {
+      return std::fpclassify(value) == FP_SUBNORMAL;
+    }
+  };
+  bool IsDenormal() { return std::visit(IsDenormalVisitor{}, value); }
+
+  struct IsNaNVisitor {
+    bool operator()(int64_t) const { return false; }
+    bool operator()(bool) const { return false; }
+    bool operator()(float value) const {
+      return std::fpclassify(value) == FP_NAN;
+    }
+    bool operator()(double value) const {
+      return std::fpclassify(value) == FP_NAN;
+    }
+  };
+  bool IsNaN() { return std::visit(IsNaNVisitor{}, value); }
+
+  int64_t GetInt() const {
+    if (!std::holds_alternative<int64_t>(value))
+      choreo_unreachable("the const is not an integer.");
+    return std::get<int64_t>(value);
+  }
+  bool GetBool() const {
+    if (!std::holds_alternative<bool>(value))
+      choreo_unreachable("the const is not a boolean.");
+    return std::get<bool>(value);
+  }
+  float GetFloat() const {
+    if (!std::holds_alternative<float>(value))
+      choreo_unreachable("the const is not a float.");
+    return std::get<float>(value);
+  }
+  double GetDouble() const {
+    if (!std::holds_alternative<double>(value))
+      choreo_unreachable("the const is not a double.");
+    return std::get<double>(value);
+  }
+  // Visitor that converts any supported variant type to string
+  struct ToStringVisitor {
+    template <typename T>
+    const std::string operator()(const T& value) const {
+      if constexpr (std::is_same_v<T, bool>)
+        return value ? "true" : "false";
+      else if constexpr (std::is_same_v<T, float>)
+        return "const_" + std::to_string(value) + "f";
+      else
+        return "const_" + std::to_string(value);
+    }
+  };
+
+  const std::string ToString() const override {
+    return std::visit(ToStringVisitor{}, value);
+  }
+
+public:
+  // Type promotion rules
+  template <typename T, typename U>
+  using promoted_t = std::conditional_t<
+      (std::is_same_v<T, double> || std::is_same_v<U, double>), double,
+      std::conditional_t<
+          (std::is_same_v<T, float> || std::is_same_v<U, float>), float,
+          std::conditional_t<(std::is_same_v<T, int64_t> ||
+                              std::is_same_v<U, int64_t>),
+                             int64_t, std::common_type_t<T, U>>>>;
+
+  // Arithmetic visitor with string opcode
+  struct ArithmeticVisitor {
+    const OpTy op;
+
+    template <typename T, typename U>
+    ptr<Signature> operator()(T a, U b) const {
+      // Convert bools to int for arithmetic
+      if constexpr (std::is_same_v<T, bool>) a = static_cast<int>(a);
+      if constexpr (std::is_same_v<U, bool>) b = static_cast<int>(b);
+
+      using ResultType = promoted_t<T, U>;
+      auto promoted_a = static_cast<ResultType>(a);
+      auto promoted_b = static_cast<ResultType>(b);
+
+      if (op == "+")
+        return std::make_shared<ConstSign>(promoted_a + promoted_b);
+      if (op == "-")
+        return std::make_shared<ConstSign>(promoted_a - promoted_b);
+      if (op == "*")
+        return std::make_shared<ConstSign>(promoted_a * promoted_b);
+      if (op == "/") {
+        if (promoted_b == 0) choreo_unreachable("divide by zero is found.");
+        return std::make_shared<ConstSign>(promoted_a / promoted_b);
+      }
+      if (op == "%") {
+        if constexpr (std::is_integral_v<T> && std::is_integral_v<U>) {
+          if (promoted_b == 0) choreo_unreachable("divide by zero is found.");
+          return std::make_shared<ConstSign>(promoted_a % promoted_b);
+        }
+        return std::make_shared<UnknownSign>();
+      }
+      if (op == "cdiv") {
+        if constexpr (std::is_integral_v<T> && std::is_integral_v<U>) {
+          if (promoted_b == 0) choreo_unreachable("divide by zero is found.");
+          return std::make_shared<ConstSign>((promoted_a + promoted_b - 1) /
+                                             promoted_b);
+        }
+        return std::make_shared<UnknownSign>();
+      }
+      if (op == "#") {
+        if constexpr (std::is_integral_v<T> && std::is_integral_v<U>)
+          return std::make_shared<ConstSign>(promoted_a * promoted_b);
+        return std::make_shared<UnknownSign>();
+      }
+      if (op == "#+") {
+        if constexpr (std::is_integral_v<T> && std::is_integral_v<U>)
+          return std::make_shared<ConstSign>(promoted_a + promoted_b);
+        return std::make_shared<UnknownSign>();
+      }
+      if (op == "#-") {
+        if constexpr (std::is_integral_v<T> && std::is_integral_v<U>)
+          return std::make_shared<ConstSign>(promoted_a - promoted_b);
+        return std::make_shared<UnknownSign>();
+      }
+
+      // Comparison operators return bool
+      if (op == "<")
+        return std::make_shared<ConstSign>(promoted_a < promoted_b);
+      if (op == ">")
+        return std::make_shared<ConstSign>(promoted_a > promoted_b);
+      if (op == "==")
+        return std::make_shared<ConstSign>(promoted_a == promoted_b);
+      if (op == "!=")
+        return std::make_shared<ConstSign>(promoted_a != promoted_b);
+      if (op == "<=")
+        return std::make_shared<ConstSign>(promoted_a <= promoted_b);
+      if (op == ">=")
+        return std::make_shared<ConstSign>(promoted_a >= promoted_b);
+
+      return std::make_shared<UnknownSign>();
+    }
+  }; // ArithmeticVisitor
+
+  bool operator==(const Signature& st) override {
+    if (auto csign = dyn_cast<ConstSign>(&st)) return value == csign->value;
+    return false;
+  }
+
+public:
+  __UDT_TYPE_INFO__(Signature, ConstSign)
+};
+
+class SymbolSign : public Signature, public TypeIDProvider<SymbolSign> {
+private:
+  const std::string symbol;
+
+public:
+  SymbolSign(const std::string& s) : symbol(s) {
+    assert(PrefixedWith(s, "::"));
+  }
+  const std::string Value() const { return symbol; }
+  const std::string ToString() const override { return symbol; }
+
+  bool operator==(const Signature& st) override {
+    if (auto sign = dyn_cast<SymbolSign>(&st)) return symbol == sign->symbol;
+    return false;
+  }
+
+public:
+  __UDT_TYPE_INFO__(Signature, SymbolSign)
+};
+
+class OperationSign : public Signature, public TypeIDProvider<OperationSign> {
+private:
+  const OpTy op;
+  std::vector<NumTy> operands;
+
+public:
+  template <
+      typename... Args,
+      typename = std::enable_if_t<
+          (std::conjunction_v<std::is_same<std::decay_t<Args>, NumTy>...>)>>
+  OperationSign(const OpTy& o, const Args&... ns) : op(o) {
+    operands.reserve(sizeof...(ns));
+    (operands.push_back(ns), ...);
+  }
+
+  const std::vector<NumTy>& OperandValueNums() const { return operands; }
+  const OpTy& Operation() const { return op; }
+  bool IsOp(const OpTy& o) const { return op == o; }
+  size_t OpCount() const { return operands.size(); }
+  void Append(const NumTy& n) { operands.push_back(n); }
+  const NumTy NumAt(size_t i) const {
+    if (i > OpCount())
+      choreo_unreachable("out of bound for an operation signature.");
+    return operands[i];
+  }
+
+  const std::string ToString() const override {
+    std::string res = STR(op);
+    for (auto& op : operands) res += ":" + op.ToString();
+    return res;
+  }
+
+  bool operator==(const Signature& st) override {
+    auto sign = dyn_cast<OperationSign>(&st);
+    if (!sign) return false;
+    if (!IsOp(sign->op)) return false;
+    if (OpCount() != sign->OpCount()) return false;
+    for (size_t i = 0; i < OpCount(); ++i)
+      if (NumAt(i) != sign->NumAt(i)) return false;
+    return true;
+  }
+
+public:
+  __UDT_TYPE_INFO__(Signature, OperationSign)
+};
+
+class MultiSigns : public Signature, public TypeIDProvider<MultiSigns> {
+private:
+  std::vector<NumTy> valnos;
+
+public:
+  // works for c++17
+  template <
+      typename... Args,
+      typename = std::enable_if_t<
+          (std::conjunction_v<std::is_same<std::decay_t<Args>, NumTy>...>)>>
+  MultiSigns(const Args&... ns) {
+    valnos.reserve(sizeof...(ns));
+    (valnos.push_back(ns), ...);
+  }
+
+  // broadcast init
+  MultiSigns(const NumTy& n, size_t count) {
+    for (size_t i = 0; i < count; ++i) valnos.push_back(n);
+  }
+
+  MultiSigns(const std::vector<NumTy>& vs) : valnos(vs) {}
+
+  size_t Count() const override { return valnos.size(); }
+  const std::vector<NumTy>& AllValueNums() const { return valnos; }
+  const NumTy NumAt(size_t i) const { return valnos.at(i); }
+  const NumTy NumAt(const NumTy& n) const { return valnos.at(n.Value()); }
+
+  void Append(const NumTy& n) { valnos.push_back(n); }
+  void Append(const NumTy& n, size_t count) {
+    for (size_t i = 0; i < count; ++i) valnos.push_back(n);
+  }
+
+  bool operator==(const Signature& st) override {
+    auto sign = dyn_cast<MultiSigns>(&st);
+    if (!sign) return false;
+    if (Count() != sign->Count()) return false;
+    for (size_t i = 0; i < Count(); ++i)
+      if (NumAt(i) != sign->NumAt(i)) return false;
+    return true;
+  }
+
+  const std::string ToString() const override {
+    std::string res;
+    for (size_t i = 0; i < valnos.size(); ++i) {
+      if (i > 0) res += ",";
+      res += valnos[i].ToString();
+    }
+    return res;
+  }
+
+public:
+  __UDT_TYPE_INFO__(Signature, MultiSigns)
+};
+
+inline const ptr<UnknownSign> unk_sn() {
+  return std::make_shared<UnknownSign>();
+}
+inline const ptr<NoneSign> non_sn() { return std::make_shared<NoneSign>(); }
+
+// short-hands
+template <typename T>
+inline const ptr<ConstSign> c_sn(const T& v) {
+  return std::make_shared<ConstSign>(v);
+}
+inline const ptr<SymbolSign> s_sn(const std::string& s) {
+  return std::make_shared<SymbolSign>(s);
+}
+template <typename... Args,
+          typename = std::enable_if_t<
+              (std::conjunction_v<std::is_same<std::decay_t<Args>, NumTy>...>)>>
+inline const ptr<OperationSign> o_sn(const std::string& op, Args... ns) {
+  return std::make_shared<OperationSign>(op, ns...);
+}
+template <typename... Args,
+          typename = std::enable_if_t<
+              (std::conjunction_v<std::is_same<std::decay_t<Args>, NumTy>...>)>>
+inline const ptr<MultiSigns> m_sn(Args... ns) {
+  return std::make_shared<MultiSigns>(ns...);
+}
+inline const ptr<MultiSigns> m_sn(const NumTy& n, size_t cnt) {
+  return std::make_shared<MultiSigns>(n, cnt);
+}
+inline const ptr<MultiSigns> m_sn(const std::vector<NumTy>& v) {
+  return std::make_shared<MultiSigns>(v);
+}
+inline bool IsValid(const SignTy& s) { return s != nullptr; }
+inline bool IsUnknown(const SignTy& s) { return isa<UnknownSign>(s); }
+inline bool IsNone(const SignTy& s) { return isa<NoneSign>(s); }
+inline const ptr<ConstSign> CSign(const SignTy& s) {
+  return dyn_cast<ConstSign>(s);
+}
+inline const ptr<SymbolSign> SSign(const SignTy& s) {
+  return dyn_cast<SymbolSign>(s);
+}
+inline const ptr<OperationSign> OpSign(const SignTy& s) {
+  return dyn_cast<OperationSign>(s);
+}
+inline const ptr<MultiSigns> MSign(const SignTy& s) {
+  return dyn_cast<MultiSigns>(s);
+}
+
 } // end namespace valno
 
 inline std::ostream& operator<<(std::ostream& os, const valno::NumTy& n) {
@@ -107,9 +517,14 @@ inline std::ostream& operator<<(std::ostream& os, const valno::NumTy& n) {
   return os;
 }
 
+inline std::ostream& operator<<(std::ostream& os, const valno::SignTy& n) {
+  os << n->ToString();
+  return os;
+}
+
 } // end namespace Choreo
 
-// make NumTy to work with unordered_map
+// make NumTy & SignTy to work with unordered_map
 namespace std {
 template <>
 struct hash<Choreo::valno::NumTy> {
@@ -117,18 +532,41 @@ struct hash<Choreo::valno::NumTy> {
     return std::hash<int>{}(k.Value());
   }
 };
+
+template <>
+struct hash<Choreo::valno::SignTy> {
+  size_t operator()(const Choreo::valno::SignTy& k) const {
+    return std::hash<std::string>{}(k->ToString());
+  }
+};
+
+// Add the matching equality comparator
+template <>
+struct equal_to<Choreo::valno::SignTy> {
+  bool operator()(const Choreo::valno::SignTy& a,
+                  const Choreo::valno::SignTy& b) const {
+    // Handle null pointers if applicable
+    if (!a || !b) return !a && !b;
+    return a->ToString() == b->ToString();
+  }
+};
+
 } // end namespace std
+
+inline bool operator==(const Choreo::valno::SignTy& lhs,
+                       const Choreo::valno::SignTy& rhs) {
+  return lhs->operator==(*rhs);
+}
+
+inline bool operator!=(const Choreo::valno::SignTy& lhs,
+                       const Choreo::valno::SignTy& rhs) {
+  return !lhs->operator==(*rhs);
+}
 
 namespace Choreo {
 namespace valno {
 
-inline const SignTy UnknownSign() { return "__valno_not_known__"; }
-inline bool IsUnknownSign(const SignTy& s) { return s == UnknownSign(); }
-
-inline const SignTy NoneSign() { return SignTy("__valno_not_specified__"); }
-inline bool IsNoneSign(const SignTy& s) { return s == NoneSign(); }
-
-inline const std::string STR(const SignTy& s) { return s; }
+inline const std::string STR(const SignTy& s) { return s->ToString(); }
 inline const std::string STR(const NumTy& v) { return v.ToString(); }
 
 using Choreo::STR;
@@ -141,8 +579,8 @@ using Choreo::STR;
 //  valid expression.
 class ValueNumberTable {
 private:
-  // a signature may either be inside the scoped_pool or const_pool
-  std::vector<std::unordered_map<SignTy, NumTy>> scoped_pool;
+  // a signature may either be inside the scoped_sign or const_pool
+  std::vector<std::unordered_map<SignTy, NumTy>> scoped_sign;
   std::unordered_map<SignTy, NumTy> const_pool;
   std::unordered_map<NumTy, std::vector<SignTy>> value_nums;
 
@@ -153,11 +591,11 @@ private:
 private:
   void Reset() {}
 
-  bool IsConstant(const SignTy& s) const { return PrefixedWith(s, "const_"); }
+  bool IsConstant(const SignTy& s) const { return isa<ConstSign>(s); }
 
   bool ValueNumExists(const SignTy& expr) const {
-    for (auto expr_valno = scoped_pool.rbegin();
-         expr_valno != scoped_pool.rend(); expr_valno++) {
+    for (auto expr_valno = scoped_sign.rbegin();
+         expr_valno != scoped_sign.rend(); expr_valno++) {
       if (!expr_valno->count(expr)) continue;
       return true;
     }
@@ -166,42 +604,31 @@ private:
 
   bool SignatureExists(NumTy vn) const { return value_nums.count(vn) != 0; }
 
-  bool InsertToSignTable(const SignTy& s, NumTy v) {
-    bool done = false;
-    for (auto expr_valno = scoped_pool.rbegin();
-         expr_valno != scoped_pool.rend(); expr_valno++) {
-      if (!expr_valno->count(s)) continue;
-      (*expr_valno)[s] = v;
-      done = true;
-      break;
-    }
-    return done;
-  }
-
 public:
   ValueNumberTable(bool t = false) : trace(t) {
     // Add special values
-    const_pool.emplace(UnknownSign(), NumTy::Unknown());
-    const_pool.emplace(NoneSign(), NumTy::None());
-    value_nums[NumTy::Unknown()].push_back(UnknownSign());
-    value_nums[NumTy::None()].push_back(NoneSign());
+    const_pool.emplace(unk_sn(), NumTy::Unknown());
+    const_pool.emplace(non_sn(), NumTy::None());
+    value_nums[NumTy::Unknown()].push_back(unk_sn());
+    value_nums[NumTy::None()].push_back(non_sn());
   }
 
   bool Exists(SignTy s) const { return ValueNumExists(s); }
   bool Exists(NumTy vn) const { return SignatureExists(vn); }
 
   NumTy GetValueNum(const SignTy& expr) const {
-    for (auto expr_valno = scoped_pool.rbegin();
-         expr_valno != scoped_pool.rend(); expr_valno++) {
+    for (auto expr_valno = scoped_sign.rbegin();
+         expr_valno != scoped_sign.rend(); expr_valno++) {
       if (!expr_valno->count(expr)) continue;
       return expr_valno->at(expr);
     }
     if (const_pool.count(expr) == 0)
-      choreo_unreachable("can not find valno of expression : " + expr + ".");
+      choreo_unreachable("can not find valno of expression : " + STR(expr) +
+                         ".");
     return const_pool.at(expr);
   }
 
-  const SignTy& GetSignature(NumTy vn) const {
+  const SignTy& GetSignature(const NumTy& vn) const {
     if (!Exists(vn))
       choreo_unreachable("can not find signature of valno: " + STR(vn) + ".");
 
@@ -220,7 +647,7 @@ public:
     if (IsConstant(s))
       const_pool.emplace(s, vn);
     else
-      scoped_pool.back().emplace(s, vn);
+      scoped_sign.back().emplace(s, vn);
 
     value_nums.at(vn).push_back(s);
   }
@@ -231,7 +658,7 @@ public:
 
     if (Exists(s)) choreo_unreachable("signature: " + STR(s) + " exists.");
 
-    scoped_pool.back().emplace(s, GetInvalidValueNumber());
+    scoped_sign.back().emplace(s, GetInvalidValueNumber());
   }
 
   // Generate a valno for the new signature
@@ -249,7 +676,7 @@ public:
     if (IsConstant(s))
       const_pool.emplace(s, valno);
     else
-      scoped_pool.back().emplace(s, valno);
+      scoped_sign.back().emplace(s, valno);
 
     value_nums.emplace(valno, std::vector<SignTy>{});
     value_nums[valno].push_back(s);
@@ -270,8 +697,8 @@ public:
     if (GetValueNum(s).IsValid())
       choreo_unreachable("signature: " + STR(s) + " has a valid valno.");
 
-    for (auto expr_valno = scoped_pool.rbegin();
-         expr_valno != scoped_pool.rend(); expr_valno++) {
+    for (auto expr_valno = scoped_sign.rbegin();
+         expr_valno != scoped_sign.rend(); expr_valno++) {
       if (!expr_valno->count(s)) continue;
       (*expr_valno)[s] = v;
     }
@@ -281,11 +708,11 @@ public:
 
   // Bind two value numbers
 public:
-  void EnterScope() { scoped_pool.push_back({}); }
+  void EnterScope() { scoped_sign.push_back({}); }
   void LeaveScope() {
-    assert(!scoped_pool.empty());
+    assert(!scoped_sign.empty());
 
-    for (auto& item : scoped_pool.back()) {
+    for (auto& item : scoped_sign.back()) {
       // Dummy Signature is not associated with a valid valno
       if (!item.second.IsValid()) continue;
 
@@ -297,16 +724,16 @@ public:
     }
 
     // drop all the signatures in the frame
-    scoped_pool.pop_back();
+    scoped_sign.pop_back();
 
     // reset value number when leaving the function scope
-    if (scoped_pool.size() <= 1) Reset();
+    if (scoped_sign.size() <= 1) Reset();
   }
 
 public:
   void Print(std::ostream& os) const {
     int scope = 0;
-    for (auto& stack : scoped_pool) {
+    for (auto& stack : scoped_sign) {
       os << scope++ << "\n";
       for (auto& item : stack)
         os << "expr: \"" << item.first << "\", valno: " << item.second << "\n";
@@ -328,9 +755,6 @@ public:
   const ValueNumberTable& Tabel() const { return vntbl; }
 
 private:
-  NumTy VNReal(const std::string&) const;
-  const SignTy RealSign(const std::string&) const;
-
   bool need_bound = true;
   bool trace = false;
 
@@ -348,19 +772,19 @@ public:
   void ResetListReference() { ref.reset(); }
 
   // It binds a expression signature with an existing value number.
-  void AssociateSignatureWithValueNumber(const SignTy& sig, NumTy valno);
-  void AssociateSignatureWithInvalidValueNumber(const SignTy& sig);
+  void AssociateSignatureWithValueNumber(const SignTy&, const NumTy&);
+  void AssociateSignatureWithInvalidValueNumber(const SignTy&);
   // rebind/modify the value number.
   // Caution: only used for scenario where the value number has not been
   // determined yet.
-  void RebindSignatureWithValueNumber(const SignTy& sig, NumTy valno);
+  void RebindSignatureWithValueNumber(const SignTy&, const NumTy&);
 
   // Directly get the value number from a signature. Abort when it fails.
-  NumTy GetValueNumberOfSignature(const SignTy&) const;
+  const NumTy GetValueNumberOfSignature(const SignTy&) const;
 
   // Generate the new value number from a signature. Abort when the value number
   // exists.
-  NumTy GenerateValueNumberFromSignature(const SignTy& signature);
+  const NumTy GenerateValueNumberFromSignature(const SignTy&);
 
   // Check if the value number exists for the signature
   bool HasValueNumberOfSignature(const SignTy&) const;
@@ -368,12 +792,12 @@ public:
   // Check if the value number exists and is valid for the signature
   bool HasValidValueNumberOfSignature(const SignTy&);
 
-  NumTy GetOrGenValueNumberFromSignature(const SignTy&);
+  const NumTy GetOrGenValueNumberFromSignature(const SignTy&);
 
   // Retrieve the signature from a value number. About when fails.
-  SignTy GetSignatureFromValueNumber(NumTy vn) const {
-    if (vn.IsUnknown()) return UnknownSign();
-    if (vn.IsNone()) return NoneSign();
+  const SignTy GetSignatureFromValueNumber(const NumTy& vn) const {
+    if (vn.IsUnknown()) return unk_sn();
+    if (vn.IsNone()) return non_sn();
 
     if (!vntbl.Exists(vn))
       choreo_unreachable("value number " + STR(vn) +
@@ -381,24 +805,36 @@ public:
     return vntbl.GetSignature(vn);
   }
 
-  SignTy SignatureOfSymbol(SignTy sym) {
-    return GetSignatureFromValueNumber(GetValueNumberOfSignature(sym));
+  // Simplify signature when possible, or else return origial signature
+  const SignTy Simplify(const SignTy&);
+
+  // Force to be multisigns
+  const ptr<MultiSigns> ToMSign(const SignTy& s) const {
+    if (auto ms = dyn_cast<MultiSigns>(s)) return ms;
+    return m_sn(NumSign(s));
   }
 
-  const SignTy SimplifySignature(const location&, const SignTy&);
+  bool ContainsZero(const SignTy& s) const {
+    auto msn = ToMSign(s);
+    for (const NumTy& n : msn->AllValueNums())
+      if (auto csn = CSign(SignNum(n)))
+        if (csn->IsZero()) return true;
 
-  std::optional<SignTy> TryToSimplifyBinary(const location&, const SignTy&,
-                                            const SignTy&, const SignTy&,
-                                            bool = false);
+    return false;
+  }
 
-  const SignTy SignBinaryCompositeValues(const location&, const SignTy&,
-                                         const SignTy&, const SignTy&,
+  // Try to generate simplified signature. when fails, return 'unknown'
+  const SignTy TryToSimplifyBinary(const OpTy&, const SignTy&, const SignTy&,
+                                   bool = false);
+
+  const SignTy SignBinaryCompositeValues(const location&, const OpTy&,
+                                         const MultiSigns&, const MultiSigns&,
                                          bool = false);
 
   ValueItem GenValueItemFromSignature(const SignTy&);
-  ValueItem GenValueItemFromValueNumber(NumTy);
+  ValueItem GenValueItemFromValueNumber(const NumTy&);
   const ValueList GenValueListFromSignature(const SignTy&);
-  const ValueList GenValueListFromValueNumber(NumTy);
+  const ValueList GenValueListFromValueNumber(const NumTy&);
   const SignTy ValueItemToSignature(const ValueItem&, bool = false);
   const SignTy ValueListToSignature(const ValueList&, bool = true);
 
@@ -413,7 +849,7 @@ public:
   }
 
   // Bind two value numbers
-  const ValBind::Binds<NumTy>::Set& GetBindSet(NumTy vn) {
+  const ValBind::Binds<NumTy>::Set& GetBindSet(const NumTy& vn) {
     auto& ret = bind_info.GetSet(vn);
     return ret;
   }
@@ -421,26 +857,25 @@ public:
   void AddBind(NumTy vn0, NumTy vn1) { bind_info.AddBind(vn0, vn1); }
 
 public:
-  // retrieve the n-th element from the comma-separated input string
-  NumTy GetNthValNo(const SignTy& input, NumTy n) const;
-  const std::vector<NumTy> Flatten(NumTy) const;
+  const std::vector<NumTy> Flatten(const NumTy&) const;
 
   const std::string ScopeIndent();
 
-  const std::vector<NumTy> AsVector(const SignTy& sign) const {
-    std::vector<NumTy> mvn;
-    if (!PrefixedWith(sign, "#"))
-      mvn.push_back(GetValueNumberOfSignature(sign));
-    else {
-      auto parts = SplitStringByDelimiter(sign, ",");
-      for (auto& p : parts) mvn.push_back(std::stoi(p.substr(1)));
-    }
-    return mvn;
+  const NumTy NumSign(const SignTy& s) const {
+    return GetValueNumberOfSignature(s);
+  }
+  const SignTy SignNum(const NumTy& n) const {
+    return GetSignatureFromValueNumber(n);
   }
 
-  const std::vector<NumTy> AsVector(NumTy valno) const {
+  const std::vector<NumTy> NumVector(const SignTy& sign) const {
+    if (auto ms = dyn_cast<MultiSigns>(sign)) return ms->AllValueNums();
+    return {GetValueNumberOfSignature(sign)};
+  }
+
+  const std::vector<NumTy> NumVector(const NumTy& valno) const {
     assert(valno.IsValid() && "not a valid value number.");
-    return AsVector(GetSignatureFromValueNumber(valno));
+    return NumVector(GetSignatureFromValueNumber(valno));
   }
 
   void Print(std::ostream& os) const { vntbl.Print(os); }
@@ -449,25 +884,6 @@ private:
   void Error(const location& loc, const std::string& message);
   void Warning(const location& loc, const std::string& message);
 };
-
-// Given a multi-value signature, process each value
-inline void ForeachValueNumber(const SignTy& sign,
-                               std::function<void(NumTy, size_t)> lambda) {
-  std::regex valuePattern("#(-?\\d+)");
-  auto begin = std::sregex_iterator(sign.begin(), sign.end(), valuePattern);
-  auto end = std::sregex_iterator();
-
-  size_t matchIndex = 0;
-  for (auto i = begin; i != end; ++i, ++matchIndex) {
-    std::smatch match = *i;
-    std::string matchStr = match.str(1); // Capture the number part of the match
-    NumTy number{std::stoi(matchStr)};
-
-    // Call the passed lambda function with the extracted string and its
-    // index
-    lambda(number, matchIndex);
-  }
-}
 
 } // end namespace valno
 

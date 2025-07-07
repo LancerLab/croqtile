@@ -40,6 +40,14 @@ bool TypeInference::AfterVisitImpl(AST::Node& n) {
       SetNodeType(*f->f_decl.ret_type, func_ty->out_ty);
       SetNodeType(f->f_decl, sym_ty);
       f->SetType(sym_ty);
+      // update the return information nodes
+      if (auto spty = dyn_cast<SpannedType>(func_ty->out_ty)) {
+        f->f_decl.ret_type->SetType(spty);
+        if (f->f_decl.ret_type->mdspan_type) {
+          assert(spty->s_type);
+          f->f_decl.ret_type->mdspan_type->SetType(spty->s_type->Clone());
+        }
+      }
     }
     if (CCtx().ShowInferredTypes()) {
       dbgs() << "Function:  " << SSTab().InScopeName(f->name)
@@ -1085,6 +1093,7 @@ bool TypeInference::Visit(AST::ChoreoFunction& n) {
   cur_type.reset(); // no current type to annotate the stmts inside
   return true;
 }
+
 bool TypeInference::Visit(AST::CppSourceCode& n) {
   TraceEachVisit(n);
   return true;

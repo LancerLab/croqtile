@@ -105,7 +105,6 @@ __co__ void with_foreach(s32 [6, 128] lhs, s32 [128] rhs) {
 // VALNO:    Alias "::with_foreach::within_4::@index" -> #5
 // VALNO:    scope-3 {
 // VALNO:     New VN #22: 'const_4'
-// VALNO:     <Simplify> 'const_128 / const_32 to 'const_4'
 // VALNO:     Alias "::with_foreach::within_4::foreach_4::rhs_load.span" -> #22
 // VALNO:    } // end scope-3
 // VALNO:   } // end scope-2
@@ -150,8 +149,6 @@ __co__ void with_foreach(s32 [6, 128] lhs, s32 [128] rhs) {
 // VALNO:     Alias "::with_foreach::paraby_0::within_6::@index" -> #26
 // VALNO:     scope-4 {
 // VALNO:      New VN #30: '#27,#28'
-// VALNO:      <Simplify> 'const_6 / const_6 to 'const_1'
-// VALNO:      <Simplify> 'const_128 / const_32 to 'const_4'
 // VALNO:      New VN #31: '#0,#22'
 // VALNO:      Alias "::with_foreach::paraby_0::within_6::foreach_6::lhs_load.span" -> #31
 // VALNO:     } // end scope-4

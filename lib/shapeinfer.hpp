@@ -157,16 +157,16 @@ private:
   std::pair<const SignTy, const SignTy> SignBounded(const AST::Node&);
 
   // Directly get the value number. Abort when it fails.
-  NumTy GetValNo(const AST::Node&, VNKind vnt = VNKind::VNK_VALUE) const;
+  const NumTy GetValNo(const AST::Node&, VNKind vnt = VNKind::VNK_VALUE) const;
 
   // Generate the new value number. Abort when the value number exists.
-  NumTy GenValNo(const AST::Node&);
+  const NumTy GenValNo(const AST::Node&);
 
   // Check if the value number exists for the node
   bool HasValNo(const AST::Node&, VNKind vnt = VNKind::VNK_VALUE) const;
 
   // Symbol names related to the value numbering
-  const SignTy VNSymbolName(const AST::Identifier&) const;
+  const std::string VNSymbolName(const AST::Identifier&) const;
 
   const SignTy GetSign(const AST::Node& n,
                        VNKind vnt = VNKind::VNK_VALUE) const {
@@ -175,15 +175,51 @@ private:
 
 private:
   // short-hands
-  const SignTy SignValNo(NumTy valno) const {
+  const SignTy SignValNo(const NumTy& valno) const {
     return vn.GetSignatureFromValueNumber(valno);
   }
-  NumTy ValNoSign(const SignTy& sign) const {
+  const NumTy ValNoSign(const SignTy& sign) const {
     return vn.GetValueNumberOfSignature(sign);
   }
 
-  void ValNoAliasSign(const SignTy& sign, NumTy valno) {
+  const NumTy GenValNum(const std::string& symbol) {
+    return vn.GenerateValueNumberFromSignature(s_sn(symbol));
+  }
+
+  const NumTy GetValNum(const std::string& symbol) const {
+    return vn.GetValueNumberOfSignature(s_sn(symbol));
+  }
+
+  const NumTy GetOrGenValNum(const std::string& symbol) {
+    return vn.GetOrGenValueNumberFromSignature(s_sn(symbol));
+  }
+
+  const NumTy GenValNum(const SignTy& sign) {
+    return vn.GenerateValueNumberFromSignature(sign);
+  }
+
+  const NumTy GetValNum(const SignTy& sign) const {
+    return vn.GetValueNumberOfSignature(sign);
+  }
+
+  const NumTy GetOrGenValNum(const SignTy& sign) {
+    return vn.GetOrGenValueNumberFromSignature(sign);
+  }
+
+  void SymbolAliasNum(const std::string& symbol, const NumTy& valno) {
+    vn.AssociateSignatureWithValueNumber(s_sn(symbol), valno);
+  }
+
+  void SymbolRebindNum(const std::string& symbol, const NumTy& valno) {
+    vn.RebindSignatureWithValueNumber(s_sn(symbol), valno);
+  }
+
+  void SignAliasNum(const SignTy& sign, const NumTy& valno) {
     vn.AssociateSignatureWithValueNumber(sign, valno);
+  }
+
+  const SignTy SymbolSign(const std::string& sym) const {
+    return SignValNo(ValNoSign(s_sn(sym)));
   }
 
 public:
@@ -299,12 +335,21 @@ public:
 
 private:
   void CollapseMultiValues(const AST::MultiValues&);
-  const std::optional<std::string> GenerateExpression(const SignTy&) const;
-  NumTy GetOnlyValueNumberFromMultiValues(const AST::MultiValues&);
+  //  const std::optional<std::string> GenerateExpression(const std::string&)
+  //  const;
+  const NumTy GetOnlyValueNumber(const AST::MultiValues&, VNKind);
+  const NumTy GetOnlyValueNumberFromMultiValues(const AST::MultiValues&);
   void UpdateValueNumberForMultiValues(const AST::MultiValues&, const NumTy&);
   bool CanBeValueNumbered(AST::Node* n) const;
-  void DefineASymbol(const SignTy& name, const ptr<Type>& ty);
-  Shape GenShapeFromSignature(const SignTy&, const AST::Node&);
+  void DefineASymbol(const std::string& name, const ptr<Type>& ty);
+  const Shape GenShape(const SignTy& input) {
+    auto result = vn.GenValueListFromSignature(input);
+    if (!IsValidValueList(result))
+      choreo_unreachable("failed to generate shape from signature: " +
+                         input->ToString());
+    return {result.size(), result};
+  }
+  const Shape GenShape(const NumTy& v) { return GenShape(vn.SignNum(v)); };
 }; // class ShapeInference
 
 } // end namespace Choreo

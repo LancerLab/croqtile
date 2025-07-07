@@ -70,39 +70,40 @@ bool SemaChecker::VisitNode(AST::Expr& n) {
     // if the index is a bounded var, hard to determine if it is out of bound
     if (isa<BoundedType>(NodeType(*idx))) return true;
 
-    // using shape info to check the index
     auto expr = cast<AST::Expr>(idx);
-    auto indices = expr->s;
-    // if the indices is not valid, it means the index is mutable!
-    if (!indices.IsValid()) return true;
-    assert(indices.DimCount() == 1);
-
-    for (auto& index : indices.Value()) {
-      if (!IsComputable(index)) {
-        Error1(expr->LOC(), "The " + Ordinal(subscription_level) +
-                                " subscription index can not be evaluated.");
-        continue;
-      }
-      // 0 <= index < bound
-      auto asrt0 = sbe::bop(OpCode::LT, index, sbe::nu(bound))->Normalize();
-      auto asrt1 = sbe::bop(OpCode::GE, index, sbe::nu(0))->Normalize();
-      assert(IsValidValueItem(asrt0) && IsValidValueItem(asrt1));
-
-      auto message = "Index " + STR(index) + " is out of bounds of the " +
-                     Ordinal(subscription_level) + " dimension of array '" +
-                     PSTR(arr_sym) + "', where the valid range is [0, " +
-                     std::to_string(bound) + ").";
-
-      if (auto b = VIBool(asrt0)) {
-        if (b.value() == false) Error1(expr->LOC(), message);
-      } else
-        FCtx(fname).InsertAssertion(asrt0, expr->LOC(), message);
-
-      if (auto b = VIBool(asrt1)) {
-        if (b.value() == false) Error1(expr->LOC(), message);
-      } else
-        FCtx(fname).InsertAssertion(asrt1, expr->LOC(), message);
+    if (!expr->Opts().HasVal()) {
+      VST_DEBUG(dbgs() << "Expression: " << PSTR(expr)
+                       << " does not have a value!\n");
+      return false;
     }
+    auto index = expr->Opts().GetVal();
+
+    // skip checking the one with 'nil' value though
+    if (!IsComputable(index)) {
+      Error1(expr->LOC(), "The " + Ordinal(subscription_level) +
+                              " subscription index can not be evaluated.");
+      return true;
+    }
+
+    // 0 <= index < bound
+    auto asrt0 = sbe::bop(OpCode::LT, index, sbe::nu(bound))->Normalize();
+    auto asrt1 = sbe::bop(OpCode::GE, index, sbe::nu(0))->Normalize();
+    assert(IsValidValueItem(asrt0) && IsValidValueItem(asrt1));
+
+    auto message = "Index " + STR(index) + " is out of bounds of the " +
+                   Ordinal(subscription_level) + " dimension of array '" +
+                   PSTR(arr_sym) + "', where the valid range is [0, " +
+                   std::to_string(bound) + ").";
+
+    if (auto b = VIBool(asrt0)) {
+      if (b.value() == false) Error1(expr->LOC(), message);
+    } else
+      FCtx(fname).InsertAssertion(asrt0, expr->LOC(), message);
+
+    if (auto b = VIBool(asrt1)) {
+      if (b.value() == false) Error1(expr->LOC(), message);
+    } else
+      FCtx(fname).InsertAssertion(asrt1, expr->LOC(), message);
   }
 
   return true;
@@ -431,37 +432,40 @@ bool SemaChecker::VisitNode(AST::ChunkAt& n) {
       // TODO: improve the out-of-bound check for bounded vars
       if (isa<BoundedType>(NodeType(*expr))) continue;
 
-      auto indices = cast<AST::Expr>(expr)->s;
-      // if the indices is not valid, it means the index is mutable!
-      if (!indices.IsValid()) return true;
-      assert(indices.DimCount() == 1);
-
-      for (auto& index : indices.Value()) {
-        if (!IsComputable(index)) {
-          Error1(expr->LOC(), "The " + Ordinal(i) +
-                                  " subscription index can not be evaluated.");
-          continue;
-        }
-        // 0 <= index < bound
-        auto asrt0 = sbe::bop(OpCode::LT, index, sbe::nu(bound))->Normalize();
-        auto asrt1 = sbe::bop(OpCode::GE, index, sbe::nu(0))->Normalize();
-        assert(IsValidValueItem(asrt0) && IsValidValueItem(asrt1));
-
-        auto message = "Index " + STR(index) + " is out of bounds of the " +
-                       Ordinal(i + 1) + " dimension of array '" + PSTR(n.data) +
-                       "', where the valid range is [0, " +
-                       std::to_string(bound) + ").";
-
-        if (auto b = VIBool(asrt0)) {
-          if (b.value() == false) Error1(expr->LOC(), message);
-        } else
-          FCtx(fname).InsertAssertion(asrt0, expr->LOC(), message);
-
-        if (auto b = VIBool(asrt1)) {
-          if (b.value() == false) Error1(expr->LOC(), message);
-        } else
-          FCtx(fname).InsertAssertion(asrt1, expr->LOC(), message);
+      auto e = cast<AST::Expr>(expr);
+      if (!e->Opts().HasVal()) {
+        VST_DEBUG(dbgs() << "Expression: " << PSTR(expr)
+                         << " does not have a value!\n");
+        return false;
       }
+      auto index = e->Opts().GetVal();
+
+      // skip checking the one with 'nil' value though
+      if (!IsComputable(index)) {
+        Error1(expr->LOC(), "The " + Ordinal(i) +
+                                " subscription index can not be evaluated.");
+        return true;
+      }
+
+      // 0 <= index < bound
+      auto asrt0 = sbe::bop(OpCode::LT, index, sbe::nu(bound))->Normalize();
+      auto asrt1 = sbe::bop(OpCode::GE, index, sbe::nu(0))->Normalize();
+      assert(IsValidValueItem(asrt0) && IsValidValueItem(asrt1));
+
+      auto message = "Index " + STR(index) + " is out of bounds of the " +
+                     Ordinal(i + 1) + " dimension of array '" + PSTR(n.data) +
+                     "', where the valid range is [0, " +
+                     std::to_string(bound) + ").";
+
+      if (auto b = VIBool(asrt0)) {
+        if (b.value() == false) Error1(expr->LOC(), message);
+      } else
+        FCtx(fname).InsertAssertion(asrt0, expr->LOC(), message);
+
+      if (auto b = VIBool(asrt1)) {
+        if (b.value() == false) Error1(expr->LOC(), message);
+      } else
+        FCtx(fname).InsertAssertion(asrt1, expr->LOC(), message);
     }
   }
 
@@ -547,16 +551,16 @@ bool SemaChecker::VisitNode(AST::Call& n) {
     const auto func_name = n.function->name;
     if (func_name == "assert") {
       auto cmp = n.arguments->ValueAt(0);
-      if (auto cexpr = dyn_cast<AST::Expr>(cmp)) {
-        auto is_false = cexpr->s.ValueAt(0)->ToString() == "false";
-        std::string msg;
-        if (auto str = dyn_cast<AST::StringLiteral>(n.arguments->ValueAt(1))) {
-          msg = str->value;
-        } else {
-          choreo_unreachable(
-              "choreo assertion requires a string message as the second.");
-        }
-        if (is_false) {
+      if (auto cexpr = dyn_cast<AST::Expr>(cmp);
+          cexpr && cexpr->Opts().HasVal()) {
+        if (auto bv = VIBool(cexpr->Opts().GetVal());
+            bv && (bv.value() == false)) {
+          std::string msg;
+          if (auto str = dyn_cast<AST::StringLiteral>(n.arguments->ValueAt(1)))
+            msg = str->value;
+          else
+            choreo_unreachable(
+                "choreo assertion requires a string message as the second.");
           Error(n.LOC(), "choreo assertion abort: " + msg);
           error_count++;
         }
