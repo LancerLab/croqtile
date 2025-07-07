@@ -783,13 +783,6 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
       Error1(n.LOC(),
              "`" + n.name_str + "' must be annotated as a mutable type.");
 
-    // event type is purely declarative
-    if (isa<EventType>(tty) && inthreads_levels[pl_depth] > 0) {
-      Error(n.LOC(),
-            "the event should not be declared inside a inthreads block.");
-      error_count++;
-    }
-
     // update the scope/storage for event types
     if (auto evty = dyn_cast<EventArrayType>(tty)) {
       tty = MakeEventArrayType(n.mem->Get(), evty->Dimensions());
@@ -797,6 +790,21 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
     } else if (isa<EventType>(tty)) {
       tty = MakeEventType(n.mem->Get());
       SetNodeType(*n.type, tty);
+    }
+
+    // event type is purely declarative
+    if (auto et = dyn_cast<EventType>(tty)) {
+      if (inthreads_levels[pl_depth] > 0)
+        Error1(n.LOC(),
+               "the event should not be declared inside a inthreads block.");
+      if (et->GetStorage() == Storage::GLOBAL)
+        if (pl_depth != 0)
+          Error1(n.LOC(), "global event can only be declared at host side.");
+      if (et->GetStorage() == Storage::SHARED ||
+          et->GetStorage() == Storage::LOCAL)
+        if (pl_depth == 0)
+          Error1(n.LOC(), STR(et->GetStorage()) +
+                              " event can only be declared at device side.");
     }
 
     ReportErrorWhenViolateODR(n.LOC(), n.name_str, __FILE__, __LINE__, tty);
@@ -811,11 +819,10 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
     // with the initializer
     if (isa<MDSpanType>(ety)) {
       if (isa<ITupleType>(tty))
-        Error(n.LOC(), "must use '{' and '}' to initialize an ituple.");
+        Error1(n.LOC(), "must use '{' and '}' to initialize an ituple.");
       else
-        Error(n.LOC(), "use ':' instead of '=' to define the \"" + PSTR(ety) +
-                           "\" type variable.");
-      error_count++;
+        Error1(n.LOC(), "use ':' instead of '=' to define the \"" + PSTR(ety) +
+                            "\" type variable.");
       VST_DEBUG(dbgs() << "Error in " << __FILE__ << ", line: " << __LINE__
                        << ".\n");
       // keep working
@@ -1704,9 +1711,14 @@ bool EarlySemantics::Visit(AST::Wait& n) {
       if (pty->GetBaseType() != BaseType::FUTURE)
         Error1(n.LOC(), "'" + AST::GetName(*v).value() + "` of type \"" +
                             PSTR(ty) + "\" can not be waited.");
-    } else if (!isa<EventType>(ty))
+    } else if (isa<EventArrayType>(ty)) {
+      if (inthreads_levels[pl_depth] == 0)
+        Warning(v->LOC(), "Be careful to wait event outside inthreads block, "
+                          "which may lead to parallelism issues.");
+    } else if (!isa<EventType>(ty)) {
       Error1(n.LOC(), "'" + STR(n) + "` of type \"" + PSTR(ty) +
                           "\" can not be waited.");
+    }
   }
   return true;
 }
@@ -1719,6 +1731,12 @@ bool EarlySemantics::Visit(AST::Trigger& n) {
       Error1(v->LOC(),
              "expect a symbol/array reference but got '" + AST::STR(*v) + "'.");
     auto ty = NodeType(*v);
+    if (isa<EventArrayType>(ty)) {
+      if (inthreads_levels[pl_depth] == 0)
+        Warning(v->LOC(),
+                "Be careful to trigger event outside inthreads block, "
+                "which may lead to parallelism issues.");
+    }
     if (!isa<EventType>(ty))
       Error1(v->LOC(),
              "expect `" + PSTR(v) + "' an event but got '" + PSTR(ty) + "'.");
