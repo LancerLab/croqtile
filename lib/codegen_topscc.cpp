@@ -2614,7 +2614,22 @@ bool TopsccCodeGen::CompileWithScript(const std::string& action) {
 }
 
 // TODO: eliminate the need of the value replacement?
+// Currently, it is guaranteed that ValueSTR can be used safely and direcctly.
 const std::string TopsccCodeGen::ValueSTR(const ValueItem& vi) const {
+  return OpValueSTR(vi, "", true);
+}
+
+const std::string TopsccCodeGen::OpValueSTR(const ValueItem& vi,
+                                            const std::string& parent_op,
+                                            const bool is_left_child) const {
+  auto WrapParen = [&](const std::string& s, const std::string& cur_op) {
+    if (Operator::NeedParen(cur_op, parent_op, is_left_child))
+      return "(" + s + ")";
+    // Used to ensure the above guarantee.
+    if (parent_op == "") return "(" + s + ")";
+    return s;
+  };
+
   if (!IsValidValueItem(vi)) choreo_unreachable("invalid value item.");
   if (VIIsNil(vi)) {
     if (IsHost())
@@ -2631,15 +2646,22 @@ const std::string TopsccCodeGen::ValueSTR(const ValueItem& vi) const {
     return PSTR(vi);
   else if (auto sv = VISym(vi))
     return UnScopedExpr(SSMName(sv.value(), IsHost()));
-  else if (auto bo = VIUop(vi))
-    return "(" + STR(bo->GetOpCode()) + ValueSTR(bo->GetOperand()) + ")";
-  else if (auto bo = VIBop(vi))
-    return "(" + ValueSTR(bo->GetLeft()) + " " + STR(bo->GetOpCode()) + " " +
-           ValueSTR(bo->GetRight()) + ")";
-  else if (auto to = VITop(vi))
-    return "(" + ValueSTR(to->GetPred()) + " ? " + ValueSTR(to->GetLeft()) +
-           " : " + ValueSTR(to->GetRight()) + ")";
-  else
+  else if (auto uo = VIUop(vi)) {
+    std::string op = STR(uo->GetOpCode());
+    std::string res = op + OpValueSTR(uo->GetOperand(), op, false);
+    return WrapParen(res, op);
+  } else if (auto bo = VIBop(vi)) {
+    std::string op = STR(bo->GetOpCode());
+    std::string res = OpValueSTR(bo->GetLeft(), op, true) + " " + op + " " +
+                      OpValueSTR(bo->GetRight(), op, false);
+    return WrapParen(res, op);
+  } else if (auto to = VITop(vi)) {
+    std::string op = "?";
+    std::string res = OpValueSTR(to->GetPred(), op, true) + " ? " +
+                      OpValueSTR(to->GetLeft(), op, true) + " : " +
+                      OpValueSTR(to->GetRight(), op, false);
+    return WrapParen(res, op);
+  } else
     choreo_unreachable("unsupported value.");
   return "";
 }

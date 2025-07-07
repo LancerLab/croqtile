@@ -72,6 +72,9 @@ enum class OpCode {
   BIT_INV,
   /* ternary */
   SELECT,
+
+  /* dummy */
+  NUM_CODES
 };
 
 inline static bool IsArith(OpCode op) {

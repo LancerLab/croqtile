@@ -4,7 +4,7 @@ __co__ auto foo(int a, int b) {
 }
 
 // CHECK: int foo(int a, int b)
-// CHECK:   return ((a + 1) + (b / 2));
+// CHECK:   return (a + 1 + b / 2);
 
 __co__ auto bar(bf16 [1] a) {
   return a;

@@ -424,6 +424,9 @@ private:
                                 bool is_host = true) const;
 
   const std::string ValueSTR(const ValueItem& vi) const;
+  const std::string OpValueSTR(const ValueItem& vi,
+                               const std::string& parent_op,
+                               const bool is_left_child) const;
   const std::string ExprSTR(AST::ptr<AST::Node>, bool is_host = true) const;
   const std::string OpExprSTR(AST::ptr<AST::Node>, const std::string& parent_op,
                               const bool is_left_child, bool is_host) const;
