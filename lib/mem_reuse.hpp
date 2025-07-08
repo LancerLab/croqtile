@@ -6,6 +6,7 @@
 #include "context.hpp"
 #include "ginac/ginac.h"
 #include "liveness_analysis.hpp"
+#include "symvals.hpp"
 #include "typeresolve.hpp"
 #include "types.hpp"
 #include "visitor.hpp"
@@ -26,8 +27,7 @@ struct MemAnalyzer : public VisitorWithSymTab {
   // the key is dec func name, the val is false by default.
   std::map<std::string, bool> have_dynamic_shape;
 
-  using BSize = std::variant<size_t, std::string>;
-  std::unordered_map<std::string, BSize> buf_size;
+  std::unordered_map<std::string, ValueItem> buf_size;
   std::unordered_map<std::string, Storage> buf_sto;
   std::unordered_map<std::string, std::string> buf_dev_func_name;
   std::set<std::string> event_vars;

@@ -1755,7 +1755,7 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
         auto var = RemoveSuffix(*AST::GetName(*expr->GetR()), ".span");
         auto shape = GetShape(GetSymbolType(var));
         assert(shape.IsValid() && "Invalid shape is found");
-        oss << WrapWithValue(shape.ElemCountExprString());
+        oss << ValueSTR(shape.ElementCountValue(), true);
       } else
         choreo_unreachable("Unsupported choreo expression.");
     } else if (expr->IsBinary()) {

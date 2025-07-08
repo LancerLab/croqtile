@@ -2987,7 +2987,7 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
           auto var = RemoveSuffix(*AST::GetName(*expr->GetR()), ".span");
           auto shape = GetShape(GetSymbolType(var));
           assert(shape.IsValid() && "Invalid shape is found");
-          oss << shape.ElemCountExprString();
+          oss << ValueSTR(shape.ElementCountValue());
         }
       } else if (expr->GetOp() == "++") {
         oss << "++"

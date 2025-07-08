@@ -18,14 +18,14 @@ bool MemAnalyzer::BeforeVisitImpl(AST::Node& n) {
       if (!sty) continue;
       VST_DEBUG(dbgs() << "[memanlz] BUFFER: " << sname << "\n");
       buf_sto.emplace(sname, sty->GetStorage());
+      // TODO: should we align the size to 512?!
+      buf_size.emplace(sname, sty->ByteSizeValue());
       if (!sty->RuntimeShaped()) {
-        // TODO: should we align the size to 512?!
-        VST_DEBUG(dbgs() << "\tstatic  size:  " << sty->ByteSize() << "\n");
-        buf_size.emplace(sname, sty->ByteSize());
+        VST_DEBUG(dbgs() << "\tstatic  size:  " << sty->ByteSizeValue()
+                         << "\n");
       } else {
-        auto size_expr = sty->ByteSizeExpression();
-        buf_size.emplace(sname, size_expr);
-        VST_DEBUG(dbgs() << "\tdynamic  size: " << size_expr << "\n";);
+        VST_DEBUG(dbgs() << "\tdynamic  size: " << sty->ByteSizeValue()
+                         << "\n";);
       }
       buf_dev_func_name.emplace(sname, cur_dev_func_name);
       VST_DEBUG(dbgs() << "\tdecl in dev func: " << cur_dev_func_name << "\n";);
@@ -56,7 +56,7 @@ bool MemAnalyzer::Visit(AST::NamedVariableDecl& n) {
     // need to consider the event type!
     event_vars.insert(sname);
     buf_sto.emplace(sname, n.mem->Get());
-    buf_size.emplace(sname, n.ArraySize());
+    buf_size.emplace(sname, sbe::nu(n.ArraySize()));
     buf_dev_func_name.emplace(sname, cur_dev_func_name);
     return true;
   }
@@ -65,15 +65,13 @@ bool MemAnalyzer::Visit(AST::NamedVariableDecl& n) {
     VST_DEBUG(dbgs() << "[memanlz] BUFFER: " << sname << "\n");
     buf_sto.emplace(sname, sty->GetStorage());
     if (!sty->RuntimeShaped()) {
-      size_t total_size = sty->ByteSize() * n.ArraySize();
+      auto total_size = sty->ByteSizeValue() * sbe::nu(n.ArraySize());
       buf_size.emplace(sname, total_size);
       VST_DEBUG(dbgs() << "\tstatic  size:  " << total_size << "\n");
     } else {
       have_dynamic_shape[cur_dev_func_name] = true;
-      auto size_expr = sty->ByteSizeExpression();
-      if (n.IsArray())
-        size_expr =
-            "(" + size_expr + ") * (" + std::to_string(n.ArraySize()) + ")";
+      auto size_expr = sty->ByteSizeValue();
+      if (n.IsArray()) size_expr = size_expr * sbe::nu(n.ArraySize());
       buf_size.emplace(sname, size_expr);
       VST_DEBUG(dbgs() << "\tdynamic  size: " << size_expr << "\n";);
     }
@@ -189,15 +187,15 @@ void MemReuse::Initialize() {
       choreo_unreachable("multiple ranges for a buffer is not supported yet.");
     }
     std::string dev_func_name = GetDeclDevFuncOfBuffer(sname);
-    if (std::holds_alternative<size_t>(size))
+    if (auto sv = VIInt(size))
       DFCtx(dev_func_name)
-          .buffers.push_back({.size = std::get<size_t>(size),
+          .buffers.push_back({.size = (size_t)sv.value(),
                               .start_time = ranges.Values()[0].start,
                               .end_time = ranges.Values()[0].end,
                               .buffer_id = sname});
     else
       DFCtx(dev_func_name)
-          .dynamic_buffers.push_back({.size = std::get<std::string>(size),
+          .dynamic_buffers.push_back({.size = STR(size),
                                       .start_time = ranges.Values()[0].start,
                                       .end_time = ranges.Values()[0].end,
                                       .buffer_id = sname});
@@ -275,8 +273,8 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx) {
         if (GetDeclDevFuncOfBuffer(event) != df_name) continue;
         if (ma.buf_sto.at(event) != sto) continue;
         auto event_size = ma.buf_size.at(event);
-        assert(std::holds_alternative<size_t>(event_size));
-        total_event_size += std::get<size_t>(event_size);
+        assert(VIIsInt(event_size));
+        total_event_size += VIInt(event_size).value();
       }
       return total_event_size;
     };
