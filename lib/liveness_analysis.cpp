@@ -978,6 +978,8 @@ bool LivenessAnalyzer::Visit(AST::NamedVariableDecl& n) {
     assert(false && "not implemented yet.");
   } else if (isa<EventType>(ty)) {
     AddDef(current_stmt, n.name_str);
+  } else if (isa<VectorType>(ty)) {
+    AddDef(current_stmt, n.name_str);
   } else {
     assert(false && "expecting the type is spanned, scalar, string, index, "
                     "ituple, or mdspan.");

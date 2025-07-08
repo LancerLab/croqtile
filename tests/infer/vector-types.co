@@ -1,0 +1,37 @@
+// RUN: choreo -i %s | FileCheck %s 
+__co__ auto vecadd(f32 [128, 512] a, f32 [128, 512] b)  {
+  f32 [a.span] c;
+  parallel p by 2, q by 2 {
+    l1_a = dma.copy a.chunkat(p, q) => local;
+    l1_b = dma.copy b.chunkat(p, q) => local;
+
+    local f32[l1_a.span] l1_c;
+    
+    foreach {i, j} in [l1_a.span(0), l1_a.span(1)] : vectorize(j, 128) {
+      l1_c.at(i, j) = l1_a.data.at(i, j) + l1_b.data.at(i, j);
+    }
+
+    out_store = dma.copy l1_c => c.chunkat(p, q);
+  }
+  return c;
+}
+
+// CHECK: Parameter: ::vecadd::a, Type: f32 mdspan<2> [128, 512]
+// CHECK: Parameter: ::vecadd::b, Type: f32 mdspan<2> [128, 512]
+// CHECK: Symbol:    ::vecadd::c, Type: global f32 mdspan<2> [128, 512]
+// CHECK: Bounded:   ::vecadd::paraby_0::p, Type: {int}->[2](pv)
+// CHECK: Bounded:   ::vecadd::paraby_0::p__elem__x, Type: {int}->[2](pi:x)
+// CHECK: Bounded:   ::vecadd::paraby_0::paraby_1::q, Type: {int}->[2](pv)
+// CHECK: Bounded:   ::vecadd::paraby_0::paraby_1::q__elem__x, Type: {int}->[2](pi:x)
+// CHECK: Future:    ::vecadd::paraby_0::paraby_1::l1_a, Type: sync=>local f32 mdspan<2> [64, 256]
+// CHECK: Future:    ::vecadd::paraby_0::paraby_1::l1_b, Type: sync=>local f32 mdspan<2> [64, 256]
+// CHECK: Symbol:    ::vecadd::paraby_0::paraby_1::l1_c, Type: local f32 mdspan<2> [64, 256]
+// CHECK: Bounded:   ::vecadd::paraby_0::paraby_1::within_0::i, Type: {int}->[64]
+// CHECK: Bounded:   ::vecadd::paraby_0::paraby_1::within_0::j, Type: {int}->[256]
+// CHECK: Symbol:    ::vecadd::paraby_0::paraby_1::within_0::vj, Type: mutable vector<s32,128>
+// CHECK: VBouned:   ::vecadd::paraby_0::paraby_1::within_0::foreach_0::j, Type: {int}->[256], w = 128
+// CHECK: DataAcess: ::vecadd::paraby_0::paraby_1::l1_c[i][j], Type: mutable vector<f32,128>
+// CHECK: DataAcess: ::vecadd::paraby_0::paraby_1::l1_a.data[i][j], Type: mutable vector<f32,128>
+// CHECK: DataAcess: ::vecadd::paraby_0::paraby_1::l1_b.data[i][j], Type: mutable vector<f32,128>
+// CHECK: Future:    ::vecadd::paraby_0::paraby_1::out_store, Type: sync=>global f32 mdspan<2> [64, 256]
+// CHECK: Function:  ::vecadd, Type: f32 mdspan<2> [128, 512] (*)(f32 mdspan<2> [128, 512], f32 mdspan<2> [128, 512])

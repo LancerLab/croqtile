@@ -1347,39 +1347,6 @@ bool ShapeInference::Visit(AST::Call& n) {
                            AST::TYPE_STR(*arg) + "\n\targ: " + PSTR(arg));
     }
     if (func_name == "println") dbgs() << "\n";
-  } else if (func_name == "vectorize" && n.IsAnno()) {
-    auto arg0 = dyn_cast<AST::Expr>(n.GetArguments()[0]);
-    auto arg1 = dyn_cast<AST::Expr>(n.GetArguments()[1]);
-    auto arg0_ty = NodeType(*arg0);
-    assert(isa<BoundedType>(arg0_ty) &&
-           "vectorize only supports bounded types.");
-    assert(isa<IntegerType>(NodeType(*arg1)) &&
-           arg1->s.ValueAt(0)->IsNumeric() &&
-           "vectorize only supports integer type as the second argument.");
-
-    // vectorize width is the second argument
-    int width = 1;
-    try {
-      width = std::stoi(arg1->s.ValueAt(0)->ToString());
-    } catch (const std::exception& e) {
-      Error(n.LOC(), "vectorize stride value is not a valid integer: " +
-                         arg1->s.ValueAt(0)->ToString());
-      error_count++;
-      return false;
-    }
-
-    auto lb = dyn_cast<BoundedITupleType>(arg0_ty)->GetLowerBounds();
-    auto ub = dyn_cast<BoundedITupleType>(arg0_ty)->GetUpperBounds();
-    auto s = dyn_cast<BoundedITupleType>(arg0_ty)->GetStrides();
-    IntegerList widths(arg0_ty->Dims(), width);
-    auto new_ty = MakeBoundedITupleType(lb, ub, s, widths);
-
-    SetNodeType(*arg0, new_ty);
-    if (arg0->IsReference())
-      if (auto id = cast<AST::Identifier>(arg0->GetReference())) {
-        SetNodeType(*id, new_ty);
-        SSTab().ModifySymbolType(id->name, new_ty);
-      }
   }
   return true;
 }

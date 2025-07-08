@@ -249,9 +249,91 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
     IndStream() << "// with-in: " << n.LOC() << "\n";
     IndStream() << "{\n";
     IncrIndent();
-  } else if (isa<AST::ForeachBlock>(&n)) {
+  } else if (auto fb = dyn_cast<AST::ForeachBlock>(&n)) {
     IndStream() << "// foreach: " << n.LOC() << "\n";
+
+    if (fb->suffixs) {
+      for (auto& suffix : fb->suffixs->values) {
+        if (auto suffix_call = AST::GetCall(suffix);
+            suffix_call->IsAnno() &&
+            suffix_call->function->name == "vectorize") {
+          auto iv = AST::GetIdentifier(suffix_call->GetArguments()[0]);
+          std::string sname = scoped_symtab.ScopeName() + iv->name;
+          within_map.emplace(sname, std::vector<std::string>{sname});
+          bv_map.emplace(sname, std::vector<std::string>{sname});
+          ssm.MapDeviceSymbol(sname, "__iv_" + iv->name);
+          return true;
+        }
+      }
+    }
+  } else if (auto da = dyn_cast<AST::DataAccess>(&n)) {
+    if (auto sty = GetSpannedType(GetSymbolType(da->data->name))) {
+      if (auto da_ty = dyn_cast<VectorType>(da->GetType())) {
+        // if the data access is a vector, we need to generate simple leaptr for
+        // this data access
+        auto elem_ty = da_ty->e_type;
+        auto ec = da_ty->ec;
+        auto elem_size = SizeOf(elem_ty);
+        auto vector_size = elem_size * ec;
+        std::string vty_str;
+        if (vector_size == GetSingleVectorByteSize(arch.GetValue()))
+          vty_str = "__vector ";
+        else if (vector_size == 2 * GetSingleVectorByteSize(arch.GetValue()))
+          vty_str = "__vector2 ";
+        else if (vector_size == 4 * GetSingleVectorByteSize(arch.GetValue()))
+          vty_str = "__vector4 ";
+        else
+          choreo_unreachable(
+              "unsupported vector size: " + std::to_string(vector_size) + ".");
+
+        vty_str += NameBaseType(elem_ty);
+
+        auto data_name = da->GetDataName();
+        auto leaptr_name = data_name.substr(0, data_name.find_last_of('.')) +
+                           "_ptr" + da->Id();
+
+        ssm.MapDeviceSymbol(InScopeName(data_name) + da->Id(), leaptr_name);
+
+        ds << d_indent << "auto " << leaptr_name << " = tcle::simple_leaptr<"
+           << vty_str << ">(";
+        ds << "(" << NameBaseType(elem_ty) << "*)"
+           << ssm.DeviceName(InScopeName(data_name));
+
+        size_t idx = 0;
+        auto shape = sty->GetShape();
+        for (auto item : da->GetIndices()) {
+          if (auto id = AST::GetIdentifier(item)) {
+            if (auto ids = ThreadIdString(id))
+              ds << " + " << ids.value();
+            else if (auto sids = SubThreadIdString(id))
+              ds << " + " << sids.value();
+            else if (within_map.count(InScopeName(id->name))) {
+              auto ivs = within_map.at(InScopeName(id->name));
+              for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr) {
+                auto shape = sty->GetShape();
+                ds << " + (" << (ssm.DeviceName(*iv_itr));
+                assert(shape.Rank() >= idx + 1);
+                if (shape.Rank() > idx + 1)
+                  ds << " * " << shape.TrimDims(idx + 1).ElementCountValue();
+                ds << ")";
+                ++idx;
+              }
+            } else {
+              ds << " + (" << (ssm.DeviceName(InScopeName(id->name)));
+              assert(shape.Rank() >= idx + 1);
+              if (shape.Rank() > idx + 1)
+                ds << " * " << shape.TrimDims(idx + 1).ElementCountValue();
+              ds << ")";
+              ++idx;
+            }
+          } else
+            choreo_unreachable("unsupported data access.");
+        }
+        ds << ");\n";
+      }
+    }
   }
+
   if (isa<AST::IfElseBlock>(&n) || isa<AST::NamedVariableDecl>(&n)) {
     emit_call = false;
   } else if (isa<AST::IncrementBlock>(&n)) {
@@ -2354,14 +2436,14 @@ bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
                   << "; " << SSMName(iv_name, IsHost()) << " < "
                   << UnScopedExpr(ValueSTR(iv_bty->GetUpperBound()))
                   << (rng->ubound ? (" + " + ExprSTR(rng->ubound, IsHost()))
-                                  : "");
-      if (increment != 1)
-        IndStream() << "; " << SSMName(iv_name, IsHost()) << " += "
-                    << increment << ") {\n";
-      else
-        IndStream() << "; ++" << SSMName(iv_name, IsHost()) << ") {\n";
-      IncrIndent();
+                                  : "")
+                  << "; "
+                  << (increment != 1 ? (SSMName(iv_name, IsHost()) +
+                                        " += " + std::to_string(increment))
+                                     : ("++" + SSMName(iv_name, IsHost())))
+                  << ") {\n";
 
+      IncrIndent();
     }
   }
 
@@ -3268,7 +3350,7 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
             if (shape.Rank() > idx + 1)
               oss << OpExprSTR(item, "*", true, is_host) << "*"
                   << ValueSTR(shape.TrimDims(idx + 1).ElementCountValue());
-          else
+            else
               oss << OpExprSTR(item, "+", false, is_host);
             ++idx;
           }
@@ -3454,6 +3536,15 @@ const std::string TopsccCodeGen::CallSTR(AST::Call& n) const {
       return "tcle::" + func_name;
     }
   };
+
+  if (n.IsAnno()) {
+    if (n.function->name == "vectorize")
+      oss << ExprSTR(n.GetArguments()[0], IsHost());
+    else
+      choreo_unreachable(
+          "unsupported annotation function: " + n.function->name + ".");
+    return oss.str();
+  }
 
   oss << func_name(n.function->name);
 

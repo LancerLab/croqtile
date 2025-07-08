@@ -2636,6 +2636,10 @@ struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
              bool with_type = false) const override {
     os << "\n" << prefix << "`- Foreach Block:";
     ranges->Print(os, prefix + " ", with_type);
+    if (suffixs) {
+      os << "\n" << prefix << " `- Suffixes: ";
+      suffixs->Print(os, prefix + " ", with_type);
+    }
     if (stmts) { stmts->Print(os, prefix + " ", with_type); }
   }
 
@@ -3005,11 +3009,28 @@ inline ptr<Identifier> GetIdentifier(const ptr<Node>& n) {
     return nullptr;
 }
 
+inline ptr<Call> GetCall(const ptr<Node>& n) {
+  if (auto call = dyn_cast<Call>(n))
+    return call;
+  else if (auto expr = dyn_cast<Expr>(n))
+    return GetCall(expr->GetReference());
+  else
+    return nullptr;
+}
+
 inline IntLiteral* GetIntLiteral(const Node& n) {
   if (auto il = dyn_cast<IntLiteral>(&n))
     return il;
   else if (auto expr = dyn_cast<Expr>(&n))
     return expr->GetInt().get();
+  else
+    return nullptr;
+}
+inline ptr<IntLiteral> GetIntLiteral(const ptr<Node>& n) {
+  if (auto il = dyn_cast<IntLiteral>(n))
+    return il;
+  else if (auto expr = dyn_cast<Expr>(n))
+    return expr->GetInt();
   else
     return nullptr;
 }

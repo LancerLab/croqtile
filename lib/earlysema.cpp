@@ -1908,6 +1908,26 @@ bool EarlySemantics::Visit(AST::Call& n) {
       auto pty = NodeType(*n.arguments->ValueAt(0));
       SetNodeType(n, pty);
     } else if (func_name == "vectorize" && n.IsAnno()) {
+      if (n.arguments->Count() != 2)
+        Error1(n.LOC(), "expect 2 argument but got " +
+                            std::to_string(n.arguments->Count()) + ".");
+
+      auto id = AST::GetIdentifier(*n.arguments->ValueAt(0));
+      if (!id)
+        Error1(id->LOC(), "expect the first argument to be an identifier.");
+
+      if (!SSTab().IsDeclared(id->name))
+        Error1(id->LOC(), "expect the first argument to be a defined symbol.");
+
+      auto width = AST::GetIntLiteral(*n.arguments->ValueAt(1));
+      if (!width)
+        Error1(width->LOC(),
+               "expect the second argument to be an integer literal.");
+
+      if (width->Val() <= 0)
+        Error1(width->LOC(),
+               "expect the second argument to be greater than 0.");
+
       SetNodeType(n, MakeVoidType());
     } else
       choreo_unreachable("unsupported bif '" + func_name + "'.");

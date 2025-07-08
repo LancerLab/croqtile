@@ -22,16 +22,6 @@ bool TypeInference::BeforeVisitImpl(AST::Node& n) {
     dma_mem = Storage::NONE;
   } else if (isa<AST::Parameter>(&n)) {
     allow_named_dim = true;
-  } else if (auto call = dyn_cast<AST::Call>(&n)) {
-    auto func_name = call->function->name;
-    if (func_name == "vectorize" && call->IsAnno()) {
-      auto arg0 = call->GetArguments()[0];
-      auto arg0_ty = arg0->GetType();
-      if (auto arg0_expr = dyn_cast<AST::Expr>(arg0))
-        if (auto r = arg0_expr->GetReference())
-          if (auto id = dyn_cast<AST::Identifier>(r))
-            ModifySymbolType(n.LOC(), id->name, arg0_ty);
-    }
   }
   return true;
 }
@@ -1003,6 +993,11 @@ bool TypeInference::Visit(AST::Trigger& n) {
 
 bool TypeInference::Visit(AST::Call& n) {
   TraceEachVisit(n);
+  // todo
+  if (n.IsAnno() && n.function->name == "vectorize") {
+    auto width = AST::GetIntLiteral(n.GetArguments()[1]);
+    n.SetType(MakeVectorType(BaseType::S32, width->ValS32()));
+  }
 
   cur_type = n.GetType(); // use early-sema's type
   assert(cur_type);
@@ -1123,6 +1118,39 @@ bool TypeInference::Visit(AST::LoopRange& n) {
 
 bool TypeInference::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
+  if (n.suffixs) {
+    for (auto& suffix : n.suffixs->values) {
+      if (auto suffix_call = AST::GetCall(suffix);
+          suffix_call->IsAnno() && suffix_call->function->name == "vectorize") {
+
+        auto iv = AST::GetIdentifier(suffix_call->GetArguments()[0]);
+        auto width = AST::GetIntLiteral(suffix_call->GetArguments()[1]);
+        auto iv_ty = NodeType(*iv);
+
+        // vectorize width is the second argument
+        int width_val = width->ValS32();
+
+        auto lb = dyn_cast<BoundedITupleType>(iv_ty)->GetLowerBounds();
+        auto ub = dyn_cast<BoundedITupleType>(iv_ty)->GetUpperBounds();
+        auto s = dyn_cast<BoundedITupleType>(iv_ty)->GetStrides();
+        IntegerList widths(iv_ty->Dims(), width_val);
+        auto new_ty = MakeBoundedITupleType(lb, ub, s, widths);
+
+        SetNodeType(*iv, new_ty);
+
+        if (auto id = AST::GetIdentifier(*iv))
+          AssignSymbolWithType(n.LOC(), id->name, new_ty);
+
+        if (CCtx().ShowInferredTypes()) {
+          dbgs() << "VBouned:   " << InScopeName(iv->name)
+                 << ", Type: " << AST::TYPE_STR(*iv) << "\n";
+        }
+
+        return true;
+      }
+    }
+  }
+
   cur_type.reset(); // no current type to annotate the stmts inside
   return true;
 }
