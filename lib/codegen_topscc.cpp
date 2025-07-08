@@ -2339,7 +2339,7 @@ DeviceParamTypeStringify(const Choreo::Type& ty) {
     (void)bitt;
     return "int";
   } else
-    choreo_unreachable("unsupported host function type.");
+    choreo_unreachable("unsupported host function type: " + STR(ty) + ".");
   return "";
 }
 
