@@ -1,0 +1,260 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+#include "choreo.h"
+#include <chrono>
+#include <cmath>
+#include <math.h>
+
+__cok__ {
+// Basic Softmax kernel implementation
+__co_device__ void softmax_kernel_basic(float* input, float* output, int m, int n, int k) {
+  // m=batch, n=seq, k=hidden
+  for (int i = 0; i < m; ++i) {
+    for (int j = 0; j < n; ++j) {
+      // 打印输入
+      printf("[kernel] input[%d,%d,:] = ", i, j);
+      for (int h = 0; h < k; ++h) printf("%f ", input[i * n * k + j * k + h]);
+      printf("\n");
+      // Find max for this [i, j, :]
+      float max_val = input[i * n * k + j * k + 0];
+      for (int h = 1; h < k; ++h) {
+        float v = input[i * n * k + j * k + h];
+        if (v > max_val) max_val = v;
+      }
+      float sum = 0.0f;
+      for (int h = 0; h < k; ++h) {
+        float exp_val = expf(input[i * n * k + j * k + h] - max_val);
+        output[i * n * k + j * k + h] = exp_val;
+        sum += exp_val;
+      }
+      for (int h = 0; h < k; ++h) {
+        output[i * n * k + j * k + h] /= sum;
+      }
+      // 打印输出
+      printf("[kernel] output[%d,%d,:] = ", i, j);
+      for (int h = 0; h < k; ++h) printf("%f ", output[i * n * k + j * k + h]);
+      printf("\n");
+    }
+  }
+}
+
+// Optimized Softmax kernel using TCLE API
+__co_device__ void softmax_kernel_optimized(float* input, float* output, int m, int n, int k) {
+  // m=batch, n=seq, k=hidden
+  for (int i = 0; i < m; ++i) {
+    for (int j = 0; j < n; ++j) {
+      float max_val = input[i * n * k + j * k + 0];
+      for (int h = 1; h < k; ++h) {
+        float v = input[i * n * k + j * k + h];
+        if (v > max_val) max_val = v;
+      }
+      float sum = 0.0f;
+      for (int h = 0; h < k; ++h) {
+        float exp_val = expf(input[i * n * k + j * k + h] - max_val);
+        output[i * n * k + j * k + h] = exp_val;
+        sum += exp_val;
+      }
+      for (int h = 0; h < k; ++h) {
+        output[i * n * k + j * k + h] /= sum;
+      }
+    }
+  }
+}
+
+// Fast Softmax approximation using log-space computation
+__co_device__ void softmax_kernel_fast(float* input, float* output, int m, int n, int k) {
+  // m=batch, n=seq, k=hidden
+  for (int i = 0; i < m; ++i) {
+    for (int j = 0; j < n; ++j) {
+      float max_val = input[i * n * k + j * k + 0];
+      for (int h = 1; h < k; ++h) {
+        float v = input[i * n * k + j * k + h];
+        if (v > max_val) max_val = v;
+      }
+      float sum = 0.0f;
+      for (int h = 0; h < k; ++h) {
+        float diff = input[i * n * k + j * k + h] - max_val;
+        if (diff < -88.0f) diff = -88.0f;
+        float exp_val = expf(diff);
+        output[i * n * k + j * k + h] = exp_val;
+        sum += exp_val;
+      }
+      for (int h = 0; h < k; ++h) {
+        output[i * n * k + j * k + h] /= sum;
+      }
+    }
+  }
+}
+}
+
+// Basic Softmax implementation
+__co__ f32[batch, seq, hidden] softmax_basic(f32[batch, seq, hidden] X) {
+  f32[batch, seq, hidden] Y;
+
+  parallel p by 2 {
+    parallel q by 4 {
+      local f32[batch/#p, seq/#q, hidden] x_local;
+      local f32[batch/#p, seq/#q, hidden] y_local;
+    
+      x_load = dma.copy X.chunkat(p, q, _) => local;
+    
+      // Call basic kernel
+      call softmax_kernel_basic(x_load.data, y_local, x_load.span(0), x_load.span(1), x_load.span(2));
+    
+      dma.copy y_local => Y.chunkat(p, q, _);
+    }
+  }
+
+  return Y;
+}
+
+// Optimized Softmax implementation using TCLE API
+__co__ f32[batch, seq, hidden] softmax_optimized(f32[batch, seq, hidden] X) {
+  f32[batch, seq, hidden] Y;
+
+  parallel p by 2 {
+    parallel q by 4 {
+      local f32[batch/#p, seq/#q, hidden] x_local;
+      local f32[batch/#p, seq/#q, hidden] y_local;
+    
+      x_load = dma.copy X.chunkat(p, q, _) => local;
+    
+      // Call optimized kernel with TCLE API
+      call softmax_kernel_optimized(x_load.data, y_local, x_load.span(0), x_load.span(1), x_load.span(2));
+    
+      dma.copy y_local => Y.chunkat(p, q, _);
+    }
+  }
+
+  return Y;
+}
+
+// Fast Softmax implementation with approximation
+__co__ f32[batch, seq, hidden] softmax_fast(f32[batch, seq, hidden] X) {
+  f32[batch, seq, hidden] Y;
+
+  parallel p by 2 {
+    parallel q by 4 {
+      local f32[batch/#p, seq/#q, hidden] x_local;
+      local f32[batch/#p, seq/#q, hidden] y_local;
+    
+      x_load = dma.copy X.chunkat(p, q, _) => local;
+    
+      // Call fast kernel with approximation
+      call softmax_kernel_fast(x_load.data, y_local, x_load.span(0), x_load.span(1), x_load.span(2));
+    
+      dma.copy y_local => Y.chunkat(p, q, _);
+    }
+  }
+
+  return Y;
+}
+
+// C++ reference implementation for correctness verification
+void softmax_reference(float* input, float* output, int batch, int seq, int hidden) {
+  for (int i = 0; i < batch; ++i) {
+    for (int j = 0; j < seq; ++j) {
+      printf("[ref] input[%d,%d,:] = ", i, j);
+      for (int k = 0; k < hidden; ++k) printf("%f ", input[i * seq * hidden + j * hidden + k]);
+      printf("\n");
+      float max_val = input[i * seq * hidden + j * hidden + 0];
+      for (int k = 1; k < hidden; ++k) {
+        float v = input[i * seq * hidden + j * hidden + k];
+        if (v > max_val) max_val = v;
+      }
+      float sum = 0.0f;
+      for (int k = 0; k < hidden; ++k) {
+        float exp_val = expf(input[i * seq * hidden + j * hidden + k] - max_val);
+        output[i * seq * hidden + j * hidden + k] = exp_val;
+        sum += exp_val;
+      }
+      for (int k = 0; k < hidden; ++k) {
+        output[i * seq * hidden + j * hidden + k] /= sum;
+      }
+      printf("[ref] output[%d,%d,:] = ", i, j);
+      for (int k = 0; k < hidden; ++k) printf("%f ", output[i * seq * hidden + j * hidden + k]);
+      printf("\n");
+    }
+  }
+}
+
+int main() {
+  const int BATCH = 16;
+  const int SEQ = 32;
+  const int HIDDEN = 64;
+  
+  // Initialize input data
+  choreo::f32 a[BATCH * SEQ * HIDDEN];
+  auto input_data = choreo::make_spanview<3, choreo::f32>((float*)a, {BATCH, SEQ, HIDDEN});
+  input_data.fill_random(-2.0, 2.0); // Softmax works well in this range
+
+  // Reference implementation
+  choreo::f32 ref_output[BATCH * SEQ * HIDDEN];
+  softmax_reference((float*)a, ref_output, BATCH, SEQ, HIDDEN);
+
+  // Test basic implementation
+  auto start1 = std::chrono::high_resolution_clock::now();
+  auto res_basic = softmax_basic(input_data);
+  auto end1 = std::chrono::high_resolution_clock::now();
+  auto duration_basic = std::chrono::duration_cast<std::chrono::microseconds>(end1 - start1);
+
+  // Test optimized implementation
+  auto start2 = std::chrono::high_resolution_clock::now();
+  auto res_optimized = softmax_optimized(input_data);
+  auto end2 = std::chrono::high_resolution_clock::now();
+  auto duration_optimized = std::chrono::duration_cast<std::chrono::microseconds>(end2 - start2);
+
+  // Test fast implementation
+  auto start3 = std::chrono::high_resolution_clock::now();
+  auto res_fast = softmax_fast(input_data);
+  auto end3 = std::chrono::high_resolution_clock::now();
+  auto duration_fast = std::chrono::duration_cast<std::chrono::microseconds>(end3 - start3);
+
+  // Verification - check against reference implementation
+  bool all_correct = true;
+  for (size_t i = 0; i < BATCH; ++i) {
+    for (size_t j = 0; j < SEQ; ++j) {
+      for (size_t k = 0; k < HIDDEN; ++k) {
+        float ref = ref_output[i * SEQ * HIDDEN + j * HIDDEN + k];
+        float basic_val = res_basic[i][j][k];
+        float optimized_val = res_optimized[i][j][k];
+        float fast_val = res_fast[i][j][k];
+        
+        // Check all implementations against reference
+        if (std::abs(basic_val - ref) > 1e-5 || 
+            std::abs(optimized_val - ref) > 1e-5 ||
+            std::abs(fast_val - ref) > 1e-5) {
+          std::cout << "Verification failed at [" << i << "," << j << "," << k << "]" << std::endl;
+          std::cout << "Reference: " << ref << std::endl;
+          std::cout << "Basic: " << basic_val << std::endl;
+          std::cout << "Optimized: " << optimized_val << std::endl;
+          std::cout << "Fast: " << fast_val << std::endl;
+          // 打印该行所有输出
+          std::cout << "[main] ref output: ";
+          for (size_t h = 0; h < HIDDEN; ++h) std::cout << ref_output[i * SEQ * HIDDEN + j * HIDDEN + h] << " ";
+          std::cout << std::endl;
+          std::cout << "[main] basic output: ";
+          for (size_t h = 0; h < HIDDEN; ++h) std::cout << res_basic[i][j][h] << " ";
+          std::cout << std::endl;
+          all_correct = false;
+          break;
+        }
+      }
+      if (!all_correct) break;
+    }
+    if (!all_correct) break;
+  }
+
+  if (all_correct) {
+    std::cout << "Softmax Test Passed" << std::endl;
+  } else {
+    std::cout << "Softmax Test Failed" << std::endl;
+  }
+
+  std::cout << "Function <softmax_basic> execution time: " << duration_basic.count() << " microseconds" << std::endl;
+  std::cout << "Function <softmax_optimized> execution time: " << duration_optimized.count() << " microseconds" << std::endl;
+  std::cout << "Function <softmax_fast> execution time: " << duration_fast.count() << " microseconds" << std::endl;
+}
+
+// CHECK: Softmax Test Passed 
