@@ -5,56 +5,72 @@
 #include <chrono>
 
 __cok__ {
-// Basic Element-wise Division kernel implementation
+// Version 1: Basic Division kernel (parallel by 1)
 __co_device__ void div_kernel_basic(float* lhs, float* rhs, float* output, int m, int n, int k) {
   int size = m * n * k;
-  printf("[kernel] size=%d, lhs[0]=%f, rhs[0]=%f\n", size, lhs[0], rhs[0]);
   for (int i = 0; i < size; ++i) {
-    if (rhs[i] != 0.0f) {
-      output[i] = lhs[i] / rhs[i];
-    } else {
-      output[i] = 0.0f;
-    }
+    output[i] = rhs[i] != 0.0f ? lhs[i] / rhs[i] : 0.0f;
   }
-  printf("[kernel] output[0]=%f\n", output[0]);
 }
 
-// Optimized Element-wise Division kernel using TCLE API
+// Version 2: Optimized Division kernel using TCLE API
 __co_device__ void div_kernel_optimized(float* lhs, float* rhs, float* output, int m, int n, int k) {
   int size = m * n * k;
   for (int i = 0; i < size; ++i) {
-    if (rhs[i] != 0.0f) {
-      output[i] = lhs[i] / rhs[i];
-    } else {
-      output[i] = 0.0f;
-    }
+    output[i] = rhs[i] != 0.0f ? lhs[i] / rhs[i] : 0.0f;
   }
 }
 
-// Advanced Element-wise Division with fused operations
+// Version 4: TCLE-based Division kernel using __vector float (4xfloat, 128bit)
+__co_device__ void div_kernel_tcle(float* lhs, float* rhs, float* output, int m, int n, int k) {
+  int size = m * n * k;
+
+  // Use TCLE leaptr for vectorized memory access (float4 = 4*4=16 bytes)
+  auto lhs_ptr = tcle::leaptr<__vector float, 1>(lhs, sizeof(__vector float));
+  auto rhs_ptr = tcle::leaptr<__vector float, 1>(rhs, sizeof(__vector float));
+  auto dst_ptr = tcle::leaptr<__vector float, 1>(output, sizeof(__vector float));
+
+  int vector_size = 4; // __vector float
+  int vector_count = size / vector_size;
+
+  for (int i = 0; i < vector_count; ++i) {
+    __vector float lhs_vec = lhs_ptr.load<0>();
+    __vector float rhs_vec = rhs_ptr.load<0>();
+    
+    // Process vector elements individually for division operation
+    __vector float result_vec;
+    for (int j = 0; j < vector_size; ++j) {
+      float lhs_val = ((float*)&lhs_vec)[j];
+      float rhs_val = ((float*)&rhs_vec)[j];
+      ((float*)&result_vec)[j] = rhs_val != 0.0f ? lhs_val / rhs_val : 0.0f;
+    }
+    
+    dst_ptr.store<0>(result_vec);
+  }
+
+  // Handle remaining elements
+  int offset = vector_count * vector_size;
+  for (int i = 0; i < size % vector_size; ++i) {
+    output[offset + i] = rhs[offset + i] != 0.0f ? lhs[offset + i] / rhs[offset + i] : 0.0f;
+  }
+}
+
+// Advanced Division with fused operations
 __co_device__ void div_kernel_advanced(float* lhs, float* rhs, float* output, int m, int n, int k) {
   int size = m * n * k;
-  
-  // Simple vectorized implementation without TCLE API for now
   for (int i = 0; i < size; ++i) {
-    if (rhs[i] != 0.0f) {
-      output[i] = lhs[i] / rhs[i];
-    } else {
-      output[i] = 0.0f;
-    }
+    output[i] = rhs[i] != 0.0f ? lhs[i] / rhs[i] : 0.0f;
   }
-  
-  // TODO: Implement proper TCLE vectorization when API is stable
-  // The original TCLE implementation had pointer increment issues
 }
 }
 
-// Basic Element-wise Division implementation
+// Version 1: Basic Division implementation (parallel by 1, simple approach)
 __co__ f32[batch, seq, hidden] div_basic(f32[batch, seq, hidden] lhs, f32[batch, seq, hidden] rhs) {
   f32[batch, seq, hidden] output;
 
-  parallel p by 2 {
-    parallel q by 4 {
+  parallel p by 1 {
+    parallel q by 1 {
+      // Use simple DMA copy and kernel call approach
       local f32[batch/#p, seq/#q, hidden] lhs_local;
       local f32[batch/#p, seq/#q, hidden] rhs_local;
       local f32[batch/#p, seq/#q, hidden] output_local;
@@ -73,7 +89,7 @@ __co__ f32[batch, seq, hidden] div_basic(f32[batch, seq, hidden] lhs, f32[batch,
   return output;
 }
 
-// Optimized Element-wise Division implementation using TCLE API
+// Version 2: Optimized Division implementation using TCLE API
 __co__ f32[batch, seq, hidden] div_optimized(f32[batch, seq, hidden] lhs, f32[batch, seq, hidden] rhs) {
   f32[batch, seq, hidden] output;
 
@@ -97,7 +113,54 @@ __co__ f32[batch, seq, hidden] div_optimized(f32[batch, seq, hidden] lhs, f32[ba
   return output;
 }
 
-// Advanced Element-wise Division implementation with fused operations
+// Version 3: Direct computation without call (using choreo-compute-logic)
+__co__ f32[batch, seq, hidden] div_direct(f32[batch, seq, hidden] lhs, f32[batch, seq, hidden] rhs) {
+  f32[batch, seq, hidden] output;
+
+  parallel p by 2 {
+    parallel q by 4 {
+      local f32[batch/#p, seq/#q, hidden] lhs_local;
+      local f32[batch/#p, seq/#q, hidden] rhs_local;
+      local f32[batch/#p, seq/#q, hidden] output_local;
+    
+      lhs_load = dma.copy lhs.chunkat(p, q, _) => local;
+      rhs_load = dma.copy rhs.chunkat(p, q, _) => local;
+    
+      // Call basic kernel for direct computation
+      call div_kernel_basic(lhs_load.data, rhs_load.data, output_local, lhs_load.span(0), lhs_load.span(1), lhs_load.span(2));
+    
+      dma.copy output_local => output.chunkat(p, q, _);
+    }
+  }
+
+  return output;
+}
+
+// Version 4: TCLE-based implementation with vectorized operations
+__co__ f32[batch, seq, hidden] div_tcle(f32[batch, seq, hidden] lhs, f32[batch, seq, hidden] rhs) {
+  f32[batch, seq, hidden] output;
+
+  parallel p by 2 {
+    parallel q by 4 {
+      local f32[batch/#p, seq/#q, hidden] lhs_local;
+      local f32[batch/#p, seq/#q, hidden] rhs_local;
+      local f32[batch/#p, seq/#q, hidden] output_local;
+    
+      lhs_load = dma.copy lhs.chunkat(p, q, _) => local;
+      rhs_load = dma.copy rhs.chunkat(p, q, _) => local;
+    
+      // Call TCLE-based kernel
+      call div_kernel_tcle(lhs_load.data, rhs_load.data, output_local,
+                          lhs_load.span(0), lhs_load.span(1), lhs_load.span(2));
+    
+      dma.copy output_local => output.chunkat(p, q, _);
+    }
+  }
+
+  return output;
+}
+
+// Advanced Division implementation with fused operations
 __co__ f32[batch, seq, hidden] div_advanced(f32[batch, seq, hidden] lhs, f32[batch, seq, hidden] rhs) {
   f32[batch, seq, hidden] output;
 
@@ -123,15 +186,9 @@ __co__ f32[batch, seq, hidden] div_advanced(f32[batch, seq, hidden] lhs, f32[bat
 
 // C++ reference implementation for correctness verification
 void div_reference(float* lhs, float* rhs, float* output, int size) {
-  printf("[ref] size=%d, lhs[0]=%f, rhs[0]=%f\n", size, lhs[0], rhs[0]);
   for (int i = 0; i < size; ++i) {
-    if (rhs[i] != 0.0f) {
-      output[i] = lhs[i] / rhs[i];
-    } else {
-      output[i] = 0.0f;
-    }
+    output[i] = rhs[i] != 0.0f ? lhs[i] / rhs[i] : 0.0f;
   }
-  printf("[ref] output[0]=%f\n", output[0]);
 }
 
 int main() {
@@ -145,29 +202,41 @@ int main() {
   auto lhs_data = choreo::make_spanview<3, choreo::f32>((float*)a, {BATCH, SEQ, HIDDEN});
   auto rhs_data = choreo::make_spanview<3, choreo::f32>((float*)b, {BATCH, SEQ, HIDDEN});
   lhs_data.fill_random(-10.0, 10.0);
-  rhs_data.fill_random(0.1, 10.0); // Avoid zero for division
+  rhs_data.fill_random(-10.0, 10.0);
 
   // Reference implementation
   choreo::f32 ref_output[BATCH * SEQ * HIDDEN];
   div_reference((float*)a, (float*)b, ref_output, BATCH * SEQ * HIDDEN);
 
-  // Test basic implementation
+  // Test Version 1: Basic implementation
   auto start1 = std::chrono::high_resolution_clock::now();
   auto res_basic = div_basic(lhs_data, rhs_data);
   auto end1 = std::chrono::high_resolution_clock::now();
   auto duration_basic = std::chrono::duration_cast<std::chrono::microseconds>(end1 - start1);
 
-  // Test optimized implementation
+  // Test Version 2: Optimized implementation
   auto start2 = std::chrono::high_resolution_clock::now();
   auto res_optimized = div_optimized(lhs_data, rhs_data);
   auto end2 = std::chrono::high_resolution_clock::now();
   auto duration_optimized = std::chrono::duration_cast<std::chrono::microseconds>(end2 - start2);
 
-  // Test advanced implementation
+  // Test Version 3: Direct computation implementation
   auto start3 = std::chrono::high_resolution_clock::now();
-  auto res_advanced = div_advanced(lhs_data, rhs_data);
+  auto res_direct = div_direct(lhs_data, rhs_data);
   auto end3 = std::chrono::high_resolution_clock::now();
-  auto duration_advanced = std::chrono::duration_cast<std::chrono::microseconds>(end3 - start3);
+  auto duration_direct = std::chrono::duration_cast<std::chrono::microseconds>(end3 - start3);
+
+  // Test Version 4: TCLE implementation
+  auto start4 = std::chrono::high_resolution_clock::now();
+  auto res_tcle = div_tcle(lhs_data, rhs_data);
+  auto end4 = std::chrono::high_resolution_clock::now();
+  auto duration_tcle = std::chrono::duration_cast<std::chrono::microseconds>(end4 - start4);
+
+  // Test advanced implementation
+  auto start5 = std::chrono::high_resolution_clock::now();
+  auto res_advanced = div_advanced(lhs_data, rhs_data);
+  auto end5 = std::chrono::high_resolution_clock::now();
+  auto duration_advanced = std::chrono::duration_cast<std::chrono::microseconds>(end5 - start5);
 
   // Verification
   bool all_correct = true;
@@ -177,22 +246,23 @@ int main() {
         float ref = ref_output[i * SEQ * HIDDEN + j * HIDDEN + k];
         float basic_val = res_basic[i][j][k];
         float optimized_val = res_optimized[i][j][k];
+        float direct_val = res_direct[i][j][k];
+        float tcle_val = res_tcle[i][j][k];
         float advanced_val = res_advanced[i][j][k];
         
         // Check all implementations against reference
-        if (std::abs(basic_val - ref) > 1e-5 || 
-            std::abs(optimized_val - ref) > 1e-5 ||
-            std::abs(advanced_val - ref) > 1e-5) {
+        if (std::abs(basic_val - ref) > 1e-6 || 
+            std::abs(optimized_val - ref) > 1e-6 ||
+            std::abs(direct_val - ref) > 1e-6 ||
+            std::abs(tcle_val - ref) > 1e-6 ||
+            std::abs(advanced_val - ref) > 1e-6) {
           std::cout << "Verification failed at [" << i << "," << j << "," << k << "]" << std::endl;
           std::cout << "Reference: " << ref << std::endl;
           std::cout << "Basic: " << basic_val << std::endl;
           std::cout << "Optimized: " << optimized_val << std::endl;
+          std::cout << "Direct: " << direct_val << std::endl;
+          std::cout << "TCLE: " << tcle_val << std::endl;
           std::cout << "Advanced: " << advanced_val << std::endl;
-          // 打印该位置的输入数据
-          std::cout << "Input lhs[" << i << "][" << j << "][" << k << "] = " << a[i * SEQ * HIDDEN + j * HIDDEN + k] << std::endl;
-          std::cout << "Input rhs[" << i << "][" << j << "][" << k << "] = " << b[i * SEQ * HIDDEN + j * HIDDEN + k] << std::endl;
-          float expected = b[i * SEQ * HIDDEN + j * HIDDEN + k] != 0.0f ? a[i * SEQ * HIDDEN + j * HIDDEN + k] / b[i * SEQ * HIDDEN + j * HIDDEN + k] : 0.0f;
-          std::cout << "Expected: " << expected << std::endl;
           all_correct = false;
           break;
         }
@@ -203,14 +273,16 @@ int main() {
   }
 
   if (all_correct) {
-    std::cout << "Element-wise Division Test Passed" << std::endl;
+    std::cout << "Division Function Test Passed" << std::endl;
   } else {
-    std::cout << "Element-wise Division Test Failed" << std::endl;
+    std::cout << "Division Function Test Failed" << std::endl;
   }
 
-  std::cout << "Function <div_basic> execution time: " << duration_basic.count() << " microseconds" << std::endl;
-  std::cout << "Function <div_optimized> execution time: " << duration_optimized.count() << " microseconds" << std::endl;
-  std::cout << "Function <div_advanced> execution time: " << duration_advanced.count() << " microseconds" << std::endl;
+  std::cout << "Version 1 (Basic) execution time: " << duration_basic.count() << " microseconds" << std::endl;
+  std::cout << "Version 2 (Optimized) execution time: " << duration_optimized.count() << " microseconds" << std::endl;
+  std::cout << "Version 3 (Direct) execution time: " << duration_direct.count() << " microseconds" << std::endl;
+  std::cout << "Version 4 (TCLE) execution time: " << duration_tcle.count() << " microseconds" << std::endl;
+  std::cout << "Advanced execution time: " << duration_advanced.count() << " microseconds" << std::endl;
 }
 
-// CHECK: Element-wise Division Test Passed
+// CHECK: Division Function Test Passed

@@ -5,20 +5,46 @@
 #include <chrono>
 
 __cok__ {
-// Basic Square kernel implementation
+// Version 1: Basic Square kernel (parallel by 1)
 __co_device__ void square_kernel_basic(float* input, float* output, int m, int n, int k) {
   int size = m * n * k;
   for (int i = 0; i < size; ++i) {
     output[i] = input[i] * input[i];
   }
 }
-// Optimized Square kernel using TCLE API
+
+// Version 2: Optimized Square kernel using TCLE API
 __co_device__ void square_kernel_optimized(float* input, float* output, int m, int n, int k) {
   int size = m * n * k;
   for (int i = 0; i < size; ++i) {
     output[i] = input[i] * input[i];
   }
 }
+
+// Version 4: TCLE-based Square kernel using __vector float (4xfloat, 128bit)
+__co_device__ void square_kernel_tcle(float* input, float* output, int m, int n, int k) {
+  int size = m * n * k;
+
+  // Use TCLE leaptr for vectorized memory access (float4 = 4*4=16 bytes)
+  auto input_ptr = tcle::leaptr<__vector float, 1>(input, sizeof(__vector float));
+  auto dst_ptr = tcle::leaptr<__vector float, 1>(output, sizeof(__vector float));
+
+  int vector_size = 4; // __vector float
+  int vector_count = size / vector_size;
+
+  for (int i = 0; i < vector_count; ++i) {
+    __vector float input_vec = input_ptr.load<0>();
+    __vector float result = input_vec * input_vec;
+    dst_ptr.store<0>(result);
+  }
+
+  // Handle remaining elements
+  int offset = vector_count * vector_size;
+  for (int i = 0; i < size % vector_size; ++i) {
+    output[offset + i] = input[offset + i] * input[offset + i];
+  }
+}
+
 // Advanced Square with fused operations
 __co_device__ void square_kernel_advanced(float* input, float* output, int m, int n, int k) {
   int size = m * n * k;
@@ -27,10 +53,13 @@ __co_device__ void square_kernel_advanced(float* input, float* output, int m, in
   }
 }
 }
+
+// Version 1: Basic Square implementation (parallel by 1, simple approach)
 __co__ f32[batch, seq, hidden] square_basic(f32[batch, seq, hidden] input) {
   f32[batch, seq, hidden] output;
-  parallel p by 2 {
-    parallel q by 4 {
+  parallel p by 1 {
+    parallel q by 1 {
+      // Use simple DMA copy and kernel call approach
       local f32[batch/#p, seq/#q, hidden] input_local;
       local f32[batch/#p, seq/#q, hidden] output_local;
       input_load = dma.copy input.chunkat(p, q, _) => local;
@@ -40,6 +69,8 @@ __co__ f32[batch, seq, hidden] square_basic(f32[batch, seq, hidden] input) {
   }
   return output;
 }
+
+// Version 2: Optimized Square implementation using TCLE API
 __co__ f32[batch, seq, hidden] square_optimized(f32[batch, seq, hidden] input) {
   f32[batch, seq, hidden] output;
   parallel p by 2 {
@@ -53,6 +84,46 @@ __co__ f32[batch, seq, hidden] square_optimized(f32[batch, seq, hidden] input) {
   }
   return output;
 }
+
+// Version 3: Direct computation without call (using choreo-compute-logic)
+__co__ f32[batch, seq, hidden] square_direct(f32[batch, seq, hidden] input) {
+  f32[batch, seq, hidden] output;
+  parallel p by 2 {
+    parallel q by 4 {
+      local f32[batch/#p, seq/#q, hidden] input_local;
+      local f32[batch/#p, seq/#q, hidden] output_local;
+      input_load = dma.copy input.chunkat(p, q, _) => local;
+      
+      // Direct computation using foreach loop
+      foreach i in [input_load.span] {
+        output_local.at(i) = input_load.data.at(i) * input_load.data.at(i);
+      }
+      
+      dma.copy output_local => output.chunkat(p, q, _);
+    }
+  }
+  return output;
+}
+
+// Version 4: TCLE-based implementation with vectorized operations
+__co__ f32[batch, seq, hidden] square_tcle(f32[batch, seq, hidden] input) {
+  f32[batch, seq, hidden] output;
+  parallel p by 2 {
+    parallel q by 4 {
+      local f32[batch/#p, seq/#q, hidden] input_local;
+      local f32[batch/#p, seq/#q, hidden] output_local;
+      input_load = dma.copy input.chunkat(p, q, _) => local;
+      
+      // Call TCLE-based kernel
+      call square_kernel_tcle(input_load.data, output_local, input_load.span(0), input_load.span(1), input_load.span(2));
+      
+      dma.copy output_local => output.chunkat(p, q, _);
+    }
+  }
+  return output;
+}
+
+// Advanced Square implementation with fused operations
 __co__ f32[batch, seq, hidden] square_advanced(f32[batch, seq, hidden] input) {
   f32[batch, seq, hidden] output;
   parallel p by 2 {
@@ -66,11 +137,13 @@ __co__ f32[batch, seq, hidden] square_advanced(f32[batch, seq, hidden] input) {
   }
   return output;
 }
+
 void square_reference(float* input, float* output, int size) {
   for (int i = 0; i < size; ++i) {
     output[i] = input[i] * input[i];
   }
 }
+
 int main() {
   const int BATCH = 16;
   const int SEQ = 32;
@@ -80,9 +153,36 @@ int main() {
   input_data.fill_random(-10.0, 10.0);
   choreo::f32 ref_output[BATCH * SEQ * HIDDEN];
   square_reference((float*)a, ref_output, BATCH * SEQ * HIDDEN);
+  
+  // Test Version 1: Basic implementation
+  auto start1 = std::chrono::high_resolution_clock::now();
   auto res_basic = square_basic(input_data);
+  auto end1 = std::chrono::high_resolution_clock::now();
+  auto duration_basic = std::chrono::duration_cast<std::chrono::microseconds>(end1 - start1);
+  
+  // Test Version 2: Optimized implementation
+  auto start2 = std::chrono::high_resolution_clock::now();
   auto res_optimized = square_optimized(input_data);
+  auto end2 = std::chrono::high_resolution_clock::now();
+  auto duration_optimized = std::chrono::duration_cast<std::chrono::microseconds>(end2 - start2);
+  
+  // Test Version 3: Direct computation implementation
+  auto start3 = std::chrono::high_resolution_clock::now();
+  auto res_direct = square_direct(input_data);
+  auto end3 = std::chrono::high_resolution_clock::now();
+  auto duration_direct = std::chrono::duration_cast<std::chrono::microseconds>(end3 - start3);
+  
+  // Test Version 4: TCLE implementation
+  auto start4 = std::chrono::high_resolution_clock::now();
+  auto res_tcle = square_tcle(input_data);
+  auto end4 = std::chrono::high_resolution_clock::now();
+  auto duration_tcle = std::chrono::duration_cast<std::chrono::microseconds>(end4 - start4);
+  
+  // Test advanced implementation
+  auto start5 = std::chrono::high_resolution_clock::now();
   auto res_advanced = square_advanced(input_data);
+  auto end5 = std::chrono::high_resolution_clock::now();
+  auto duration_advanced = std::chrono::duration_cast<std::chrono::microseconds>(end5 - start5);
 
   // Verify results
   bool all_correct = true;
@@ -93,19 +193,31 @@ int main() {
         float ref = ref_output[idx];
         float basic_val = res_basic[i][j][k];
         float optimized_val = res_optimized[i][j][k];
+        float direct_val = res_direct[i][j][k];
+        float tcle_val = res_tcle[i][j][k];
         float advanced_val = res_advanced[i][j][k];
-        if (std::abs(basic_val - ref) > 1e-4 || std::abs(optimized_val - ref) > 1e-4 || std::abs(advanced_val - ref) > 1e-4) {
+        if (std::abs(basic_val - ref) > 1e-4 || std::abs(optimized_val - ref) > 1e-4 || 
+            std::abs(direct_val - ref) > 1e-4 || std::abs(tcle_val - ref) > 1e-4 || 
+            std::abs(advanced_val - ref) > 1e-4) {
           std::cerr << "Mismatch at [" << i << "][" << j << "][" << k << "]: ref=" << ref
-                    << ", basic=" << basic_val << ", opt=" << optimized_val << ", adv=" << advanced_val << std::endl;
+                    << ", basic=" << basic_val << ", opt=" << optimized_val 
+                    << ", direct=" << direct_val << ", tcle=" << tcle_val 
+                    << ", adv=" << advanced_val << std::endl;
           all_correct = false;
         }
       }
     }
   }
   if (all_correct) {
-    std::cout << "Test Passed\n" << std::endl;
+    std::cout << "Square Function Test Passed" << std::endl;
   } else {
-    std::cout << "Test Failed\n" << std::endl;
+    std::cout << "Square Function Test Failed" << std::endl;
   }
+  
+  std::cout << "Version 1 (Basic) execution time: " << duration_basic.count() << " microseconds" << std::endl;
+  std::cout << "Version 2 (Optimized) execution time: " << duration_optimized.count() << " microseconds" << std::endl;
+  std::cout << "Version 3 (Direct) execution time: " << duration_direct.count() << " microseconds" << std::endl;
+  std::cout << "Version 4 (TCLE) execution time: " << duration_tcle.count() << " microseconds" << std::endl;
+  std::cout << "Advanced execution time: " << duration_advanced.count() << " microseconds" << std::endl;
 }
 // CHECK: Square Function Test Passed

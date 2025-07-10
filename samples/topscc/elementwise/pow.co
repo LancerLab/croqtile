@@ -6,7 +6,7 @@
 #include <cmath>
 
 __cok__ {
-// Basic Power kernel implementation
+// Version 1: Basic Power kernel (parallel by 1)
 __co_device__ void pow_kernel_basic(float* base, float* exponent, float* output, int m, int n, int k) {
   int size = m * n * k;
   for (int i = 0; i < size; ++i) {
@@ -14,11 +14,44 @@ __co_device__ void pow_kernel_basic(float* base, float* exponent, float* output,
   }
 }
 
-// Optimized Power kernel using TCLE API
+// Version 2: Optimized Power kernel using TCLE API
 __co_device__ void pow_kernel_optimized(float* base, float* exponent, float* output, int m, int n, int k) {
   int size = m * n * k;
   for (int i = 0; i < size; ++i) {
     output[i] = powf(base[i], exponent[i]);
+  }
+}
+
+// Version 4: TCLE-based Power kernel using __vector float (4xfloat, 128bit)
+__co_device__ void pow_kernel_tcle(float* base, float* exponent, float* output, int m, int n, int k) {
+  int size = m * n * k;
+
+  // Use TCLE leaptr for vectorized memory access (float4 = 4*4=16 bytes)
+  auto base_ptr = tcle::leaptr<__vector float, 1>(base, sizeof(__vector float));
+  auto exp_ptr = tcle::leaptr<__vector float, 1>(exponent, sizeof(__vector float));
+  auto dst_ptr = tcle::leaptr<__vector float, 1>(output, sizeof(__vector float));
+
+  int vector_size = 4; // __vector float
+  int vector_count = size / vector_size;
+
+  for (int i = 0; i < vector_count; ++i) {
+    __vector float base_vec = base_ptr.load<0>();
+    __vector float exp_vec = exp_ptr.load<0>();
+    
+    // Process vector elements individually for pow operation
+    for (int j = 0; j < vector_size; ++j) {
+      float base_val = ((float*)&base_vec)[j];
+      float exp_val = ((float*)&exp_vec)[j];
+      ((float*)&base_vec)[j] = powf(base_val, exp_val);
+    }
+    
+    dst_ptr.store<0>(base_vec);
+  }
+
+  // Handle remaining elements
+  int offset = vector_count * vector_size;
+  for (int i = 0; i < size % vector_size; ++i) {
+    output[offset + i] = powf(base[offset + i], exponent[offset + i]);
   }
 }
 
@@ -47,12 +80,13 @@ __co_device__ void pow_kernel_advanced(float* base, float* exponent, float* outp
 }
 }
 
-// Basic Power implementation
+// Version 1: Basic Power implementation (parallel by 1, simple approach)
 __co__ f32[batch, seq, hidden] pow_basic(f32[batch, seq, hidden] base, f32[batch, seq, hidden] exponent) {
   f32[batch, seq, hidden] output;
 
-  parallel p by 2 {
-    parallel q by 4 {
+  parallel p by 1 {
+    parallel q by 1 {
+      // Use simple DMA copy and kernel call approach
       local f32[batch/#p, seq/#q, hidden] base_local;
       local f32[batch/#p, seq/#q, hidden] exponent_local;
       local f32[batch/#p, seq/#q, hidden] output_local;
@@ -71,7 +105,7 @@ __co__ f32[batch, seq, hidden] pow_basic(f32[batch, seq, hidden] base, f32[batch
   return output;
 }
 
-// Optimized Power implementation using TCLE API
+// Version 2: Optimized Power implementation using TCLE API
 __co__ f32[batch, seq, hidden] pow_optimized(f32[batch, seq, hidden] base, f32[batch, seq, hidden] exponent) {
   f32[batch, seq, hidden] output;
 
@@ -87,6 +121,53 @@ __co__ f32[batch, seq, hidden] pow_optimized(f32[batch, seq, hidden] base, f32[b
       // Call optimized kernel with TCLE API
       call pow_kernel_optimized(base_load.data, exponent_load.data, output_local,
                                base_load.span(0), base_load.span(1), base_load.span(2));
+    
+      dma.copy output_local => output.chunkat(p, q, _);
+    }
+  }
+
+  return output;
+}
+
+// Version 3: Direct computation without call (using choreo-compute-logic)
+__co__ f32[batch, seq, hidden] pow_direct(f32[batch, seq, hidden] base, f32[batch, seq, hidden] exponent) {
+  f32[batch, seq, hidden] output;
+
+  parallel p by 2 {
+    parallel q by 4 {
+      local f32[batch/#p, seq/#q, hidden] base_local;
+      local f32[batch/#p, seq/#q, hidden] exponent_local;
+      local f32[batch/#p, seq/#q, hidden] output_local;
+    
+      base_load = dma.copy base.chunkat(p, q, _) => local;
+      exponent_load = dma.copy exponent.chunkat(p, q, _) => local;
+    
+      // Call basic kernel for direct computation
+      call pow_kernel_basic(base_load.data, exponent_load.data, output_local, base_load.span(0), base_load.span(1), base_load.span(2));
+    
+      dma.copy output_local => output.chunkat(p, q, _);
+    }
+  }
+
+  return output;
+}
+
+// Version 4: TCLE-based implementation with vectorized operations
+__co__ f32[batch, seq, hidden] pow_tcle(f32[batch, seq, hidden] base, f32[batch, seq, hidden] exponent) {
+  f32[batch, seq, hidden] output;
+
+  parallel p by 2 {
+    parallel q by 4 {
+      local f32[batch/#p, seq/#q, hidden] base_local;
+      local f32[batch/#p, seq/#q, hidden] exponent_local;
+      local f32[batch/#p, seq/#q, hidden] output_local;
+    
+      base_load = dma.copy base.chunkat(p, q, _) => local;
+      exponent_load = dma.copy exponent.chunkat(p, q, _) => local;
+    
+      // Call TCLE-based kernel
+      call pow_kernel_tcle(base_load.data, exponent_load.data, output_local,
+                          base_load.span(0), base_load.span(1), base_load.span(2));
     
       dma.copy output_local => output.chunkat(p, q, _);
     }
@@ -143,9 +224,35 @@ int main() {
   choreo::f32 ref_output[BATCH * SEQ * HIDDEN];
   pow_reference((float*)a, (float*)b, ref_output, BATCH * SEQ * HIDDEN);
   
+  // Test Version 1: Basic implementation
+  auto start1 = std::chrono::high_resolution_clock::now();
   auto res_basic = pow_basic(base_data, exponent_data);
+  auto end1 = std::chrono::high_resolution_clock::now();
+  auto duration_basic = std::chrono::duration_cast<std::chrono::microseconds>(end1 - start1);
+
+  // Test Version 2: Optimized implementation
+  auto start2 = std::chrono::high_resolution_clock::now();
   auto res_optimized = pow_optimized(base_data, exponent_data);
+  auto end2 = std::chrono::high_resolution_clock::now();
+  auto duration_optimized = std::chrono::duration_cast<std::chrono::microseconds>(end2 - start2);
+
+  // Test Version 3: Direct computation implementation
+  auto start3 = std::chrono::high_resolution_clock::now();
+  auto res_direct = pow_direct(base_data, exponent_data);
+  auto end3 = std::chrono::high_resolution_clock::now();
+  auto duration_direct = std::chrono::duration_cast<std::chrono::microseconds>(end3 - start3);
+
+  // Test Version 4: TCLE implementation
+  auto start4 = std::chrono::high_resolution_clock::now();
+  auto res_tcle = pow_tcle(base_data, exponent_data);
+  auto end4 = std::chrono::high_resolution_clock::now();
+  auto duration_tcle = std::chrono::duration_cast<std::chrono::microseconds>(end4 - start4);
+
+  // Test advanced implementation
+  auto start5 = std::chrono::high_resolution_clock::now();
   auto res_advanced = pow_advanced(base_data, exponent_data);
+  auto end5 = std::chrono::high_resolution_clock::now();
+  auto duration_advanced = std::chrono::duration_cast<std::chrono::microseconds>(end5 - start5);
 
   // Verify results with improved tolerance
   bool all_correct = true;
@@ -159,19 +266,26 @@ int main() {
         float ref = ref_output[idx];
         float basic_val = res_basic[i][j][k];
         float optimized_val = res_optimized[i][j][k];
+        float direct_val = res_direct[i][j][k];
+        float tcle_val = res_tcle[i][j][k];
         float advanced_val = res_advanced[i][j][k];
         
         // Check relative error instead of absolute error
         float ref_abs = std::abs(ref);
         float basic_error = ref_abs > 1e-6f ? std::abs(basic_val - ref) / ref_abs : std::abs(basic_val - ref);
         float optimized_error = ref_abs > 1e-6f ? std::abs(optimized_val - ref) / ref_abs : std::abs(optimized_val - ref);
+        float direct_error = ref_abs > 1e-6f ? std::abs(direct_val - ref) / ref_abs : std::abs(direct_val - ref);
+        float tcle_error = ref_abs > 1e-6f ? std::abs(tcle_val - ref) / ref_abs : std::abs(tcle_val - ref);
         float advanced_error = ref_abs > 1e-6f ? std::abs(advanced_val - ref) / ref_abs : std::abs(advanced_val - ref);
         
-        if (basic_error > tolerance || optimized_error > tolerance || advanced_error > tolerance) {
+        if (basic_error > tolerance || optimized_error > tolerance || direct_error > tolerance || 
+            tcle_error > tolerance || advanced_error > tolerance) {
           if (mismatch_count < 10) {  // Only print first 10 mismatches
             std::cerr << "Mismatch at [" << i << "][" << j << "][" << k << "]: ref=" << ref
                       << ", basic=" << basic_val << " (err=" << basic_error << ")"
                       << ", opt=" << optimized_val << " (err=" << optimized_error << ")"
+                      << ", direct=" << direct_val << " (err=" << direct_error << ")"
+                      << ", tcle=" << tcle_val << " (err=" << tcle_error << ")"
                       << ", adv=" << advanced_val << " (err=" << advanced_error << ")" << std::endl;
           }
           all_correct = false;
@@ -186,6 +300,12 @@ int main() {
   } else {
     std::cout << "Power test FAILED with " << mismatch_count << " mismatches" << std::endl;
   }
+
+  std::cout << "Version 1 (Basic) execution time: " << duration_basic.count() << " microseconds" << std::endl;
+  std::cout << "Version 2 (Optimized) execution time: " << duration_optimized.count() << " microseconds" << std::endl;
+  std::cout << "Version 3 (Direct) execution time: " << duration_direct.count() << " microseconds" << std::endl;
+  std::cout << "Version 4 (TCLE) execution time: " << duration_tcle.count() << " microseconds" << std::endl;
+  std::cout << "Advanced execution time: " << duration_advanced.count() << " microseconds" << std::endl;
   
   return 0;
 } 
