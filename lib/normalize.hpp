@@ -721,7 +721,7 @@ public:
           }
           auto new_iv = AST::Make<AST::NamedVariableDecl>(
               fb->LOC(), "v" + iv->name,
-              AST::Make<AST::DataType>(fb->LOC(), BaseType::S32), nullptr, se);
+              AST::Make<AST::DataType>(fb->LOC(), BaseType::U32), nullptr, se);
 
           new_iv->SetType(iv->GetType());
           n.stmts->Insert(new_iv, idx++);

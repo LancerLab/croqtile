@@ -28,7 +28,7 @@ __co__ auto vecadd(f32 [128, 512] a, f32 [128, 512] b)  {
 // CHECK: Symbol:    ::vecadd::paraby_0::paraby_1::l1_c, Type: local f32 mdspan<2> [64, 256]
 // CHECK: Bounded:   ::vecadd::paraby_0::paraby_1::within_0::i, Type: {int}->[64]
 // CHECK: Bounded:   ::vecadd::paraby_0::paraby_1::within_0::j, Type: {int}->[256]
-// CHECK: Symbol:    ::vecadd::paraby_0::paraby_1::within_0::vj, Type: mutable vector<s32,128>
+// CHECK: Symbol:    ::vecadd::paraby_0::paraby_1::within_0::vj, Type: mutable vector<u32,128>
 // CHECK: VBouned:   ::vecadd::paraby_0::paraby_1::within_0::foreach_0::j, Type: {int}->[256], w = 128
 // CHECK: DataAcess: ::vecadd::paraby_0::paraby_1::l1_c[i][j], Type: mutable vector<f32,128>
 // CHECK: DataAcess: ::vecadd::paraby_0::paraby_1::l1_a.data[i][j], Type: mutable vector<f32,128>

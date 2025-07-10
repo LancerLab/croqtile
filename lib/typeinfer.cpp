@@ -136,6 +136,13 @@ bool TypeInference::SetAsCurrentType(AST::Node& nd, const std::string& n) {
         assert(!BetterQuality(nty, cur_type) &&
                "the inference type should be better qualified.");
         if (!(cur_type->LogicalEqual(*nty))) {
+          if (auto vcur_type = dyn_cast<VectorType>(cur_type)) {
+            // if the current type is a vector type, we can update it to the new
+            // type
+            SetNodeType(nd, ShadowTypeStorage(vcur_type));
+            cur_type = nty;
+            return true;
+          }
           Error1(nd.LOC(), "can not infer the type of `" + n + "'.");
           return false;
         }
@@ -355,6 +362,7 @@ bool TypeInference::Visit(AST::DataAccess& n) {
                "expected scalar type for element in vector access.");
         auto vty = MakeVectorType(ety->GetBaseType(), width);
         SetNodeType(n, vty);
+        cur_type = vty;
 
         if (CCtx().ShowInferredTypes()) {
           dbgs() << "DataAcess: " << InScopeName(n.GetDataName());
@@ -996,7 +1004,7 @@ bool TypeInference::Visit(AST::Call& n) {
   // todo
   if (n.IsAnno() && n.function->name == "vectorize") {
     auto width = AST::GetIntLiteral(n.GetArguments()[1]);
-    n.SetType(MakeVectorType(BaseType::S32, width->ValS32()));
+    n.SetType(MakeVectorType(BaseType::U32, width->ValS32()));
   }
 
   cur_type = n.GetType(); // use early-sema's type

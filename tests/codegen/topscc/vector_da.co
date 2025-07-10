@@ -16,4 +16,5 @@ __co__ auto vecadd(f32 [128, 512] a, f32 [128, 512] b)  {
     return c;
 }
 
+// CHECK: __vector4 unsigned int vj = tcle::mid<__vector4 unsigned int>(__iv_j);
 // CHECK: l1_c_ptr0.store(l1_a_ptr1.load() + l1_b_ptr2.load());

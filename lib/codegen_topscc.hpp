@@ -434,6 +434,8 @@ private:
   const std::string SSMName(const std::string& sname, bool is_host) const {
     return (is_host) ? ssm.HostName(sname) : ssm.DeviceName(sname);
   }
+  const std::string AddressSTR(const Shape&, const AST::DataAccess&,
+                               bool) const;
   // if it requires wrapping code in a single thread
   bool RequiresImplPred(Storage) const;
 };

@@ -2568,7 +2568,6 @@ struct Synchronize : public Node, public TypeIDProvider<Synchronize> {
 };
 
 struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
-  std::string id;
   ptr<Identifier> iv; // induction variable
   // both will be normalized to Expr which ref to anon_x
   ptr<Node> lbound = nullptr;
@@ -2584,8 +2583,6 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
 
   const std::string IVName() const { return iv->name; }
   const ptr<Identifier> IV() const { return iv; }
-  const std::string LoopId() const { return id; }
-  void SetLoopId(const std::string& loop_id) { id = loop_id; }
 
   ptr<Node> CloneImpl() const override {
     return Make<LoopRange>(LOC(), (!iv) ? nullptr : CloneP(iv), CloneP(lbound),
