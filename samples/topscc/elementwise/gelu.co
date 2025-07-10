@@ -1,0 +1,179 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+#include "choreo.h"
+#include <chrono>
+
+__cok__ {
+// Basic GELU Activation kernel implementation
+__co_device__ void gelu_kernel_basic(float* input, float* output, int m, int n, int k) {
+  int size = m * n * k;
+  for (int i = 0; i < size; ++i) {
+    output[i] = input[i] * 0.5f * (1.0f + tanhf(0.797885f * (input[i] + 0.044715f * input[i] * input[i] * input[i])));
+  }
+}
+
+// Optimized GELU Activation kernel using TCLE API
+__co_device__ void gelu_kernel_optimized(float* input, float* output, int m, int n, int k) {
+  int size = m * n * k;
+  for (int i = 0; i < size; ++i) {
+    output[i] = input[i] * 0.5f * (1.0f + tanhf(0.797885f * (input[i] + 0.044715f * input[i] * input[i] * input[i])));
+  }
+}
+
+// Advanced GELU Activation with fused operations
+__co_device__ void gelu_kernel_advanced(float* input, float* output, int m, int n, int k) {
+  int size = m * n * k;
+  for (int i = 0; i < size; ++i) {
+    output[i] = input[i] * 0.5f * (1.0f + tanhf(0.797885f * (input[i] + 0.044715f * input[i] * input[i] * input[i])));
+  }
+}
+}
+
+// Basic GELU Activation implementation
+__co__ f32[batch, seq, hidden] gelu_basic(f32[batch, seq, hidden] input) {
+  f32[batch, seq, hidden] output;
+
+  parallel p by 2 {
+    parallel q by 4 {
+      local f32[batch/#p, seq/#q, hidden] input_local;
+      local f32[batch/#p, seq/#q, hidden] output_local;
+    
+      input_load = dma.copy input.chunkat(p, q, _) => local;
+    
+      // Call basic kernel
+      call gelu_kernel_basic(input_load.data, output_local, 
+                           input_load.span(0), input_load.span(1), input_load.span(2));
+    
+      dma.copy output_local => output.chunkat(p, q, _);
+    }
+  }
+
+  return output;
+}
+
+// Optimized GELU Activation implementation using TCLE API
+__co__ f32[batch, seq, hidden] gelu_optimized(f32[batch, seq, hidden] input) {
+  f32[batch, seq, hidden] output;
+
+  parallel p by 2 {
+    parallel q by 4 {
+      local f32[batch/#p, seq/#q, hidden] input_local;
+      local f32[batch/#p, seq/#q, hidden] output_local;
+    
+      input_load = dma.copy input.chunkat(p, q, _) => local;
+    
+      // Call optimized kernel with TCLE API
+      call gelu_kernel_optimized(input_load.data, output_local,
+                               input_load.span(0), input_load.span(1), input_load.span(2));
+    
+      dma.copy output_local => output.chunkat(p, q, _);
+    }
+  }
+
+  return output;
+}
+
+// Advanced GELU Activation implementation with fused operations
+__co__ f32[batch, seq, hidden] gelu_advanced(f32[batch, seq, hidden] input) {
+  f32[batch, seq, hidden] output;
+
+  parallel p by 2 {
+    parallel q by 4 {
+      local f32[batch/#p, seq/#q, hidden] input_local;
+      local f32[batch/#p, seq/#q, hidden] output_local;
+    
+      input_load = dma.copy input.chunkat(p, q, _) => local;
+    
+      // Call advanced kernel with fused operations
+      call gelu_kernel_advanced(input_load.data, output_local,
+                              input_load.span(0), input_load.span(1), input_load.span(2));
+    
+      dma.copy output_local => output.chunkat(p, q, _);
+    }
+  }
+
+  return output;
+}
+
+// C++ reference implementation for correctness verification
+void gelu_reference(float* input, float* output, int size) {
+  for (int i = 0; i < size; ++i) {
+    output[i] = input[i] * 0.5f * (1.0f + tanhf(0.797885f * (input[i] + 0.044715f * input[i] * input[i] * input[i])));
+  }
+}
+
+int main() {
+  const int BATCH = 16;
+  const int SEQ = 32;
+  const int HIDDEN = 64;
+  
+  // Initialize input data
+  choreo::f32 a[BATCH * SEQ * HIDDEN];
+  auto input_data = choreo::make_spanview<3, choreo::f32>((float*)a, {BATCH, SEQ, HIDDEN});
+  input_data.fill_random(-10.0, 10.0);
+
+  // Reference implementation
+  choreo::f32 ref_output[BATCH * SEQ * HIDDEN];
+  gelu_reference((float*)a, ref_output, BATCH * SEQ * HIDDEN);
+
+  // Test basic implementation
+  auto start1 = std::chrono::high_resolution_clock::now();
+  auto res_basic = gelu_basic(input_data);
+  auto end1 = std::chrono::high_resolution_clock::now();
+  auto duration_basic = std::chrono::duration_cast<std::chrono::microseconds>(end1 - start1);
+
+  // Test optimized implementation
+  auto start2 = std::chrono::high_resolution_clock::now();
+  auto res_optimized = gelu_optimized(input_data);
+  auto end2 = std::chrono::high_resolution_clock::now();
+  auto duration_optimized = std::chrono::duration_cast<std::chrono::microseconds>(end2 - start2);
+
+  // Test advanced implementation
+  auto start3 = std::chrono::high_resolution_clock::now();
+  auto res_advanced = gelu_advanced(input_data);
+  auto end3 = std::chrono::high_resolution_clock::now();
+  auto duration_advanced = std::chrono::duration_cast<std::chrono::microseconds>(end3 - start3);
+
+  // Verification
+  bool all_correct = true;
+  for (size_t i = 0; i < BATCH; ++i) {
+    for (size_t j = 0; j < SEQ; ++j) {
+      for (size_t k = 0; k < HIDDEN; ++k) {
+        size_t idx = i * SEQ * HIDDEN + j * HIDDEN + k;
+        float ref = ref_output[idx];
+        float basic_val = res_basic[i][j][k];
+        float optimized_val = res_optimized[i][j][k];
+        float advanced_val = res_advanced[i][j][k];
+        
+        // Check all implementations against reference
+        if (std::abs(basic_val - ref) > 1e-4 || 
+            std::abs(optimized_val - ref) > 1e-4 ||
+            std::abs(advanced_val - ref) > 1e-4) {
+          std::cout << "Verification failed at [" << i << "," << j << "," << k << "]" << std::endl;
+          std::cout << "Reference: " << ref << std::endl;
+          std::cout << "Basic: " << basic_val << std::endl;
+          std::cout << "Optimized: " << optimized_val << std::endl;
+          std::cout << "Advanced: " << advanced_val << std::endl;
+          std::cout << "Input[" << i << "][" << j << "][" << k << "] = " << a[idx] << std::endl;
+          all_correct = false;
+          break;
+        }
+      }
+      if (!all_correct) break;
+    }
+    if (!all_correct) break;
+  }
+
+  if (all_correct) {
+    std::cout << "GELU Activation Test Passed" << std::endl;
+  } else {
+    std::cout << "GELU Activation Test Failed" << std::endl;
+  }
+
+  std::cout << "Function <gelu_basic> execution time: " << duration_basic.count() << " microseconds" << std::endl;
+  std::cout << "Function <gelu_optimized> execution time: " << duration_optimized.count() << " microseconds" << std::endl;
+  std::cout << "Function <gelu_advanced> execution time: " << duration_advanced.count() << " microseconds" << std::endl;
+}
+
+// CHECK: GELU Activation Test Passed

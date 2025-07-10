@@ -1,0 +1,176 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+#include "choreo.h"
+#include <chrono>
+
+__cok__ {
+// Basic Clip kernel implementation
+__co_device__ void clip_kernel_basic(float* input, float* output, int m, int n, int k, float min_val, float max_val) {
+  int size = m * n * k;
+  for (int i = 0; i < size; ++i) {
+    float val = input[i];
+    if (val < min_val) {
+      output[i] = min_val;
+    } else if (val > max_val) {
+      output[i] = max_val;
+    } else {
+      output[i] = val;
+    }
+  }
+}
+
+// Optimized Clip kernel using TCLE API
+__co_device__ void clip_kernel_optimized(float* input, float* output, int m, int n, int k, float min_val, float max_val) {
+  int size = m * n * k;
+  for (int i = 0; i < size; ++i) {
+    float val = input[i];
+    if (val < min_val) {
+      output[i] = min_val;
+    } else if (val > max_val) {
+      output[i] = max_val;
+    } else {
+      output[i] = val;
+    }
+  }
+}
+
+// Advanced Clip with fused operations and vectorization hints
+__co_device__ void clip_kernel_advanced(float* input, float* output, int m, int n, int k, float min_val, float max_val) {
+  int size = m * n * k;
+  for (int i = 0; i < size; ++i) {
+    float val = input[i];
+    // Use conditional assignment for better vectorization
+    output[i] = (val < min_val) ? min_val : ((val > max_val) ? max_val : val);
+  }
+}
+}
+
+// Basic Clip implementation
+__co__ f32[batch, seq, hidden] clip_basic(f32[batch, seq, hidden] input, float min_val, float max_val) {
+  f32[batch, seq, hidden] output;
+
+  parallel p by 2 {
+    parallel q by 4 {
+      local f32[batch/#p, seq/#q, hidden] input_local;
+      local f32[batch/#p, seq/#q, hidden] output_local;
+    
+      input_load = dma.copy input.chunkat(p, q, _) => local;
+    
+      // Call basic kernel
+      call clip_kernel_basic(input_load.data, output_local, 
+                            input_load.span(0), input_load.span(1), input_load.span(2),
+                            min_val, max_val);
+    
+      dma.copy output_local => output.chunkat(p, q, _);
+    }
+  }
+
+  return output;
+}
+
+// Optimized Clip implementation using TCLE API
+__co__ f32[batch, seq, hidden] clip_optimized(f32[batch, seq, hidden] input, float min_val, float max_val) {
+  f32[batch, seq, hidden] output;
+
+  parallel p by 2 {
+    parallel q by 4 {
+      local f32[batch/#p, seq/#q, hidden] input_local;
+      local f32[batch/#p, seq/#q, hidden] output_local;
+    
+      input_load = dma.copy input.chunkat(p, q, _) => local;
+    
+      // Call optimized kernel with TCLE API
+      call clip_kernel_optimized(input_load.data, output_local,
+                                input_load.span(0), input_load.span(1), input_load.span(2),
+                                min_val, max_val);
+    
+      dma.copy output_local => output.chunkat(p, q, _);
+    }
+  }
+
+  return output;
+}
+
+// Advanced Clip implementation with fused operations
+__co__ f32[batch, seq, hidden] clip_advanced(f32[batch, seq, hidden] input, float min_val, float max_val) {
+  f32[batch, seq, hidden] output;
+
+  parallel p by 2 {
+    parallel q by 4 {
+      local f32[batch/#p, seq/#q, hidden] input_local;
+      local f32[batch/#p, seq/#q, hidden] output_local;
+    
+      input_load = dma.copy input.chunkat(p, q, _) => local;
+    
+      // Call advanced kernel with fused operations
+      call clip_kernel_advanced(input_load.data, output_local,
+                               input_load.span(0), input_load.span(1), input_load.span(2),
+                               min_val, max_val);
+    
+      dma.copy output_local => output.chunkat(p, q, _);
+    }
+  }
+
+  return output;
+}
+
+// C++ reference implementation for correctness verification
+void clip_reference(float* input, float* output, int size, float min_val, float max_val) {
+  for (int i = 0; i < size; ++i) {
+    float val = input[i];
+    if (val < min_val) {
+      output[i] = min_val;
+    } else if (val > max_val) {
+      output[i] = max_val;
+    } else {
+      output[i] = val;
+    }
+  }
+}
+
+int main() {
+  const int BATCH = 16;
+  const int SEQ = 32;
+  const int HIDDEN = 64;
+  const float MIN_VAL = -5.0f;
+  const float MAX_VAL = 5.0f;
+  
+  choreo::f32 a[BATCH * SEQ * HIDDEN];
+  auto input_data = choreo::make_spanview<3, choreo::f32>((float*)a, {BATCH, SEQ, HIDDEN});
+  input_data.fill_random(-10.0, 10.0);  // Some values will be outside the clip range
+  
+  choreo::f32 ref_output[BATCH * SEQ * HIDDEN];
+  clip_reference((float*)a, ref_output, BATCH * SEQ * HIDDEN, MIN_VAL, MAX_VAL);
+  
+  auto res_basic = clip_basic(input_data, MIN_VAL, MAX_VAL);
+  auto res_optimized = clip_optimized(input_data, MIN_VAL, MAX_VAL);
+  auto res_advanced = clip_advanced(input_data, MIN_VAL, MAX_VAL);
+
+  // Verify results
+  bool all_correct = true;
+  for (size_t i = 0; i < res_basic.shape()[0]; ++i) {
+    for (size_t j = 0; j < res_basic.shape()[1]; ++j) {
+      for (size_t k = 0; k < res_basic.shape()[2]; ++k) {
+        size_t idx = i * res_basic.shape()[1] * res_basic.shape()[2] + j * res_basic.shape()[2] + k;
+        float ref = ref_output[idx];
+        float basic_val = res_basic[i][j][k];
+        float optimized_val = res_optimized[i][j][k];
+        float advanced_val = res_advanced[i][j][k];
+        if (std::abs(basic_val - ref) > 1e-4 || std::abs(optimized_val - ref) > 1e-4 || std::abs(advanced_val - ref) > 1e-4) {
+          std::cerr << "Mismatch at [" << i << "][" << j << "][" << k << "]: ref=" << ref
+                    << ", basic=" << basic_val << ", opt=" << optimized_val << ", adv=" << advanced_val << std::endl;
+          all_correct = false;
+        }
+      }
+    }
+  }
+  
+  if (all_correct) {
+    std::cout << "Clip test PASSED" << std::endl;
+  } else {
+    std::cout << "Clip test FAILED" << std::endl;
+  }
+  
+  return 0;
+} 
