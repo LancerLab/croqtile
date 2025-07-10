@@ -203,7 +203,7 @@ private:
   }
 
   const NumTy GetOrGenValNum(const SignTy& sign) {
-    return vn.GetOrGenValueNumberFromSignature(sign);
+    return vn.GetOrGenValueNumberFromSignature(vn.Simplify(sign));
   }
 
   void SymbolAliasNum(const std::string& symbol, const NumTy& valno) {

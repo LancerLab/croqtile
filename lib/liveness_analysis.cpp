@@ -426,14 +426,25 @@ void LivenessAnalyzer::ComputeLiveInOut() {
     PrintSet(dbgs(), "buffers", buffers);
     dbgs() << "\n";
   });
+
+  auto IsGlobalOrBuiltIn = [&](const std::string& var_name) {
+    if (var_name == "::__choreo_no_tiling__") return true;
+    return false;
+  };
 #if 1
   VST_DEBUG({
     if (!linfo[preorder_stmts[0]].live_in.empty()) {
-      errs() << SSTR(preorder_stmts[0]);
-      errs() << "live_in of the first stmt is not empty, including:\n";
-      for (const auto& item : linfo[preorder_stmts[0]].live_in)
-        errs() << "\t" << item << "\n";
-      choreo_unreachable("expecting the live_in of the first stmt is empty.");
+      std::set<std::string> li_set;
+      for (const auto& item : linfo[preorder_stmts[0]].live_in) {
+        if (!IsGlobalOrBuiltIn(item)) li_set.insert(item);
+        if (!li_set.empty()) {
+          errs() << SSTR(preorder_stmts[0]);
+          errs() << "live_in of the first stmt is not empty, including:\n";
+          for (const auto& item : li_set) errs() << "\t" << item << "\n";
+          choreo_unreachable(
+              "expecting the live_in of the first stmt is empty.");
+        }
+      }
     }
   });
 #else
@@ -1098,7 +1109,7 @@ bool LivenessAnalyzer::Visit(AST::ChunkAt& n) {
   TraceEachVisit(n);
   assert(n.sa == nullptr && "after norm, there should be no span_as.");
   // `n.data` is already handled in Visit(AST::DMA& n)
-  for (auto tsi : n.AllTSInfo())
+  for (auto tsi : n.AllOperations())
     for (const auto& pos : tsi->GetIndices()) {
       VST_DEBUG(dbgs() << "chunkat position: " << PSTR(pos) << ".\n");
       if (auto expr = dyn_cast<AST::Expr>(pos)) {

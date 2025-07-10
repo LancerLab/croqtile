@@ -13,14 +13,11 @@ __co__ void foo(s32 [77, 320] data, int i) {
   }
 }
 
-// CHECK:       auto anon_0 = 0;
 // CHECK:       __shared__ int f__buf__[1408];
-// CHECK:       int __slice_offset0__data_2_f__buf__[] = {(int)(anon_0 * 32), (int)(i * 44)};
+// CHECK:       int __slice_offset0__data_2_f__buf__[] = {(int)(0 * 32), (int)(i * 44)};
 // CHECK:       tops::slice(*f.get_ctx(), __mds1_f__buf__, __mds0_data, __slice_offset0__data_2_f__buf__);
-// CHECK:       auto anon_1 = 7;
-// CHECK:       int __slice_offset1__f_2_f1__buf__[] = {(int)(__iv_x__elem__0 * 18), (int)(anon_1 * 20)};
+// CHECK:       int __slice_offset1__f_2_f1__buf__[] = {(int)(__iv_x__elem__0 * 18), (int)(7 * 20)};
 // CHECK:       tops::slice(*f1.get_ctx(), __mds3_f1__buf__, __mds2_f, __slice_offset1__f_2_f1__buf__);
-// CHECK:       auto anon_2 = *((int*)f.data() + (i * 44) + 7);
-// CHECK:       auto anon_3 = 5;
-// CHECK:       int __slice_offset2__f1_2_anon_4[] = {(int)(anon_2 * 4), (int)(anon_3 * 3)};
-// CHECK:       tops::slice(*__choreo_anon_fut__0.get_ctx(), __mds5_anon_4, __mds4_f1, __slice_offset2__f1_2_anon_4);
+// CHECK:       auto anon_0 = *((int*)f.data() + (i * 44) + 7);
+// CHECK:       int __slice_offset2__f1_2_anon_1[] = {(int)(anon_0 * 4), (int)(5 * 3)};
+// CHECK:       tops::slice(*__choreo_anon_fut__0.get_ctx(), __mds5_anon_1, __mds4_f1, __slice_offset2__f1_2_anon_1);

@@ -85,6 +85,6 @@ __co__ auto ele_add(int i, float f, double d) {
 // CODEGEN:   int x = static_cast<int>(1.500000f + static_cast<float>(13));
 // CODEGEN:   double y = static_cast<double>(static_cast<float>(i) + 1.300000f);
 // CODEGEN:   int z = static_cast<int>(static_cast<float>(i) + 1.300000f);
-// CODEGEN:   int p = static_cast<int>(x > z ? y : static_cast<double>(z));
-// CODEGEN:   return x + z + p;
+// CODEGEN:   int p = static_cast<int>((x > z) ? y : static_cast<double>(z));
+// CODEGEN:   return (p + (x + z));
 // CODEGEN: }

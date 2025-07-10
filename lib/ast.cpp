@@ -206,6 +206,17 @@ void DMA::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
+// this is not a visitor type that must be invoked manually
+void SpannedOperation::accept(Visitor& v) {
+  Verify();
+  if (SpecifyReshape())
+    RShape()->accept(v);
+  else {
+    Positions()->accept(v);
+    if (MultipleExprs()) TFSS()->accept(v);
+  }
+}
+
 void ChunkAt::accept(Choreo::Visitor& v) {
   // handle span_as
   if (sa) sa->accept(v);

@@ -178,10 +178,9 @@ public:
       choreo_unreachable("invalid value item.");
     return val_exprs[0];
   }
-  const std::vector<ValueItem>& GetVals() const { return val_exprs; }
-  std::vector<ValueItem>& GetVals() { return val_exprs; }
+  const ValueList& GetVals() const { return val_exprs; }
+  ValueList& GetVals() { return val_exprs; }
   ValueItem GetSize() const { return size_expr; }
-  const std::vector<ValueItem>& GetOptUBoundExprs() const { return ub_exprs; }
   const ValueItem GetUBound() const {
     if (ub_exprs.size() != 1)
       choreo_unreachable("not single value item.");
@@ -189,8 +188,8 @@ public:
       choreo_unreachable("invalid value item.");
     return ub_exprs[0];
   }
-  std::vector<ValueItem>& GetOptUBounds() { return ub_exprs; }
-  const std::vector<ValueItem>& GetOptUBounds() const { return ub_exprs; }
+  ValueList& GetUBounds() { return ub_exprs; }
+  const ValueList& GetUBounds() const { return ub_exprs; }
 };
 
 struct RuntimeCheckEntry {

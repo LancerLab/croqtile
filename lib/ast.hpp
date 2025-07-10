@@ -708,7 +708,7 @@ public:
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool with_type = false) const override {
-    if (with_type) os << "<{" << PSTR(GetType()) << "}>";
+    if (with_type) { os << "<{" << PSTR(GetType()) << "}>"; }
     if (t == Reference) {
       if (isa<Call>(value_r))
         value_r->InlinePrint(os, prefix, with_type);
@@ -1411,7 +1411,7 @@ struct NamedVariableDecl : public Node,
                            public TypeIDProvider<NamedVariableDecl> {
   const std::string name_str;
   const std::string init_str;
-  ptr<Memory> mem = nullptr;            // storage location
+  ptr<Memory> mem = nullptr;            // storage location (null for stack)
   ptr<DataType> type = nullptr;         // type annotation
   ptr<Node> init_expr = nullptr;        // associated initializer
   const ptr<Node> init_value = nullptr; // associated initial value
@@ -1884,140 +1884,310 @@ struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
   __UDT_TYPE_INFO__(Node, WithBlock)
 };
 
-// Information about tile/tiling and subscription
-struct TSInfo {
+// Information about operation on data, including tile/tiling, subscription, or
+// reshape, and etc..
+struct SpannedOperation {
 public:
-  enum OpKind {
-    TILING,
-    SUBSPAN,
-    MODSPAN,
+  enum Kind {
+    TILING,  // chunkat
+    TILEAT,  // chunk-at
+    SUBSPAN, // subspan-at
+    MODSPAN, // modspan-at
+    RESHAPE, // span_as
   };
 
 private:
   const location loc;
-  ptr<MultiValues> positions = nullptr; // subscription expression of data
-  ptr<MultiValues> tfss_expr = nullptr; // tiling-factor or shape values
-  OpKind op_kind = TILING;
-  Shape bs; // block shape
+
+  Kind tag = Kind::TILING;
+  struct TSInfo { // information about tiling and subscription
+    ptr<MultiValues> indices = nullptr;   // subscription expression of data
+    ptr<MultiValues> tfss_expr = nullptr; // tiling-factor or subspan values
+  };
+  using RSInfo = ptr<MultiValues>; // reshape Infomation
+
+  std::variant<TSInfo, RSInfo> info;
+
+  Shape block_shape; // block shape after applying the operation
+
+  size_t rank; // used for early semantics
 
 public:
-  TSInfo(const location& l, const ptr<MultiValues>& p,
-         const ptr<MultiValues>& b = nullptr, OpKind ok = TILING)
-      : loc(l), positions(p), tfss_expr(b), op_kind(ok) {
-    assert(p && "position is not provided.");
+  SpannedOperation(const location& l, const ptr<MultiValues>& p,
+                   const ptr<MultiValues>& b, Kind ok = Kind::TILEAT)
+      : loc(l), tag(ok), info(TSInfo{p, b}) {
+    assert(ok == Kind::TILEAT || ok == Kind::SUBSPAN || ok == Kind::MODSPAN);
+    Verify();
   }
+
+  SpannedOperation(const location& l, const ptr<MultiValues>& p,
+                   Kind ok = Kind::TILING)
+      : loc(l), tag(ok),
+        info((ok == Kind::TILING)
+                 ? std::variant<TSInfo, RSInfo>(TSInfo{p, nullptr})
+                 : std::variant<TSInfo, RSInfo>(RSInfo{p})) {
+    assert(ok == Kind::RESHAPE || ok == Kind::TILING);
+    Verify();
+  }
+
+  Kind OpCode() const { return tag; }
 
   const location& LOC() const { return loc; }
-  bool MultipleExprs() const { return tfss_expr != nullptr; }
 
-  bool HasTilingExpr() const {
-    return (tfss_expr != nullptr) && (op_kind == TILING);
+  bool SpecifyTileFactor() const {
+    return tag == Kind::TILING || tag == Kind::TILEAT;
   }
-  bool HasSubSpanExpr() const {
-    return (tfss_expr != nullptr) && (op_kind == SUBSPAN);
+  bool SpecifyBlock() const {
+    return tag == Kind::SUBSPAN || tag == Kind::MODSPAN;
   }
-  bool HasModSpanExpr() const {
-    return (tfss_expr != nullptr) && (op_kind == MODSPAN);
+  bool SpecifyReshape() const { return tag == Kind::RESHAPE; }
+
+  ptr<MultiValues>& Positions() { return std::get<0>(info).indices; }
+  ptr<MultiValues>& TFSS() { return std::get<0>(info).tfss_expr; }
+  ptr<MultiValues>& RShape() { return std::get<1>(info); }
+  const ptr<MultiValues>& Positions() const {
+    return std::get<0>(info).indices;
+  }
+  const ptr<MultiValues>& TFSS() const { return std::get<0>(info).tfss_expr; }
+  const ptr<MultiValues>& RShape() const { return std::get<1>(info); }
+
+  bool MultipleExprs() const { return !SpecifyReshape() && TFSS() != nullptr; }
+
+  // return a valid tiling-factor/subspan array
+  const std::vector<ptr<Node>> GetTFSSNodes() const {
+    if (info.index() != 0)
+      return {};
+    else if (TFSS())
+      return TFSS()->AllValues();
+    else
+      return {};
   }
 
-  ptr<MultiValues> GetTFSSExpr() const { return tfss_expr; }
+  // return a valid position array
+  const std::vector<ptr<Node>> GetIndices() const {
+    if (info.index() != 0) return {};
+    return Positions()->AllValues();
+  }
+
+  // return a valid span_as array
+  const std::vector<ptr<Node>> GetSANodes() const {
+    if (info.index() != 1) return {};
+    return RShape()->AllValues();
+  }
 
   const ptr<Node> TFSSAt(size_t index) const {
-    assert(tfss_expr);
-    return tfss_expr->ValueAt(index);
+    assert(TFSS());
+    return TFSS()->ValueAt(index);
   }
 
   const ptr<Node> PosAt(size_t index) const {
-    assert(positions);
-    return positions->ValueAt(index);
+    assert(Positions());
+    return Positions()->ValueAt(index);
   }
 
-  auto GetIndices() const { return positions->AllValues(); }
-  ptr<MultiValues> Positions() const { return positions; }
-
   ptr<MultiValues> GetTilingFactors() const {
-    if (op_kind != TILING) choreo_unreachable("no tiling factor exist.");
-    return tfss_expr;
+    if (tag != Kind::TILEAT) choreo_unreachable("no tiling factor exist.");
+    return TFSS();
   }
 
   ptr<MultiValues> GetSubSpanExpr() const {
-    if (op_kind != SUBSPAN) choreo_unreachable("no sub-span exist.");
-    return tfss_expr;
+    if (tag != Kind::SUBSPAN) choreo_unreachable("no sub-span exist.");
+    return TFSS();
   }
 
   ptr<MultiValues> GetModSpanExpr() const {
-    if (op_kind != MODSPAN) choreo_unreachable("no mod-span exist.");
-    return tfss_expr;
+    if (tag != Kind::MODSPAN) choreo_unreachable("no mod-span exist.");
+    return TFSS();
   }
 
   void SetBlockShape(const Shape shape) {
     if (!shape.IsValid()) choreo_unreachable("invalid shape is specified.");
-    bs = shape;
+    block_shape = shape;
+    rank = block_shape.Rank(); // update the rank
   }
 
   const Shape& GetBlockShape() const {
-    if (!bs.IsValid()) choreo_unreachable("retrieving an invalid shape.");
-    return bs;
+    if (!block_shape.IsValid())
+      choreo_unreachable("retrieving an invalid shape.");
+    return block_shape;
   }
 
-  const ptr<TSInfo> Clone() const {
-    auto n = Make<TSInfo>(loc, cast<MultiValues>(positions->Clone()),
-                          cast<MultiValues>(tfss_expr->Clone()), op_kind);
-    n->bs = bs;
+  size_t GetRank() const { return rank; }
+  void SetRank(size_t r) { rank = r; }
+
+  const ptr<SpannedOperation> Clone() const {
+    ptr<SpannedOperation> n = nullptr;
+    if (SpecifyReshape())
+      n = Make<SpannedOperation>(loc, cast<MultiValues>(RShape()->Clone()),
+                                 tag);
+    else if (TFSS() != nullptr)
+      n = Make<SpannedOperation>(loc, cast<MultiValues>(Positions()->Clone()),
+                                 cast<MultiValues>(TFSS()->Clone()), tag);
+    else
+      n = Make<SpannedOperation>(loc, cast<MultiValues>(Positions()->Clone()),
+                                 nullptr, tag);
+    n->block_shape = block_shape;
     return n;
   }
 
   void Print(std::ostream& os) const {
-    if (tfss_expr) {
-      switch (op_kind) {
-      case TILING: os << ".Chunk(" << STR(tfss_expr) << ").At("; break;
-      case SUBSPAN: os << ".SubSpan(" << STR(tfss_expr) << ").At("; break;
-      case MODSPAN: os << ".ModSpan(" << STR(tfss_expr) << ").At("; break;
-      }
-    } else
-      os << ".ChunkAt(";
-    os << STR(positions) << ")";
+    switch (tag) {
+    case Kind::TILING: os << ".ChunkAt(" << STR(Positions()) << ")"; break;
+    case Kind::TILEAT:
+      os << ".Chunk(" << STR(TFSS()) << ").At(" << STR(Positions()) << ")";
+      break;
+    case Kind::SUBSPAN:
+      os << ".SubSpan(" << STR(TFSS()) << ").At(" << STR(Positions()) << ")";
+      break;
+    case Kind::MODSPAN:
+      os << ".ModSpan(" << STR(TFSS()) << ").At(" << STR(Positions()) << ")";
+      break;
+    case Kind::RESHAPE: os << ".SpanAs(" << STR(RShape()) << ")"; break;
+    default: choreo_unreachable("unsupported SpannedOperation kind.");
+    }
+  }
+
+  void Dump(std::ostream& os) const {
+    Print(os);
+    os << "(shape: " << STR(GetBlockShape()) << ")";
+  }
+
+  void accept(Visitor&);
+
+private:
+  void Verify() {
+    switch (tag) {
+    case Kind::TILING:
+      if (info.index() != 0)
+        choreo_unreachable("unexpected reshape info for a tiling operation.");
+      if (!Positions()) choreo_unreachable("no tiling factors/subscriptions.");
+      if (TFSS()) choreo_unreachable("unexpected tiling/block info.");
+      break;
+    case Kind::TILEAT:
+      if (info.index() != 0)
+        choreo_unreachable("unexpected reshape info for a tiling operation.");
+      if (!Positions()) choreo_unreachable("no subscription Positions().");
+      if (!TFSS()) choreo_unreachable("no tiling factors.");
+      break;
+    case Kind::SUBSPAN:
+      if (info.index() != 0)
+        choreo_unreachable("unexpected reshape info for a tiling operation.");
+      if (!Positions()) choreo_unreachable("no subscription Positions().");
+      if (!TFSS()) choreo_unreachable("no block shape is provided.");
+      break;
+    case Kind::MODSPAN:
+      if (info.index() != 0)
+        choreo_unreachable("unexpected reshape info for a tiling operation.");
+      if (!Positions()) choreo_unreachable("no subscription Positions().");
+      if (!TFSS()) choreo_unreachable("no block shape is provided.");
+      break;
+    case Kind::RESHAPE:
+      if (info.index() != 1)
+        choreo_unreachable("unexpected tiling info for a reshape operation.");
+      if (!RShape()) choreo_unreachable("no reshape info is provided.");
+      break;
+    default: choreo_unreachable("unsupported SpannedOperation kind.");
+    }
   }
 };
 
+inline const std::string STR(const SpannedOperation::Kind& k) {
+  switch (k) {
+  case SpannedOperation::TILING: return "chunkat";
+  case SpannedOperation::TILEAT: return "chunk-at";
+  case SpannedOperation::SUBSPAN: return "subspan-at";
+  case SpannedOperation::MODSPAN: return "modspan-at";
+  case SpannedOperation::RESHAPE: return "span_as";
+  default: choreo_unreachable("unsupported SpannedOperation kind.");
+  }
+  return "";
+}
+
 struct ChunkAt : public Node, public TypeIDProvider<ChunkAt> {
-  ptr<Identifier> data;
+  ptr<Identifier> data;               // spanned data name
   ptr<MultiValues> indices = nullptr; // indexing of data arrays
-  ptr<SpanAs> sa = nullptr;           // for span_as expression
+  ptr<SpanAs> sa = nullptr;           // for span_as expression. TODO: deprecate
 
 private:
-  const std::vector<ptr<TSInfo>> ts_infos;
+  std::vector<ptr<SpannedOperation>> operations;
 
-public:
-  Shape s; // internally used to pass real shape of the tiled block
+private:
+  Shape bs; // internally used to pass real shape of the tiled block
 
 public:
   ChunkAt(const location& l, const ptr<Identifier>& d,
           const ptr<MultiValues>& idxes = nullptr,
-          const std::vector<ptr<TSInfo>>& infos = {})
-      : Node(l), data(d), indices(idxes), ts_infos(infos) {}
+          const std::vector<ptr<SpannedOperation>>& ops = {})
+      : Node(l), data(d), indices(idxes), operations(ops) {}
 
   ChunkAt(const location& l, const ptr<SpanAs>& s,
           const ptr<MultiValues>& idxes = nullptr,
-          const std::vector<ptr<TSInfo>>& infos = {})
-      : Node(l), data(s->nid), indices(idxes), sa(s), ts_infos(infos) {}
+          const std::vector<ptr<SpannedOperation>>& ops = {})
+      : Node(l), data(s->nid), indices(idxes), sa(s), operations(ops) {}
 
   std::string RefSymbol() const {
     assert(data && "ref data is not set.");
     return RemoveSuffix(data->name, ".data");
   }
 
-  bool SymbolicBufferName() { return ts_infos.empty(); }
-  bool NoTile() const { return ts_infos.empty(); }
-  bool HasTile() const { return !ts_infos.empty(); }
-  const std::vector<ptr<TSInfo>>& AllTSInfo() const { return ts_infos; }
+  bool NoOperation() const { return operations.empty(); }
+  bool HasOperation() const { return !operations.empty(); }
+  const std::vector<ptr<SpannedOperation>>& AllOperations() const {
+    return operations;
+  }
+  const ptr<SpannedOperation>& OpAt(size_t index) const {
+    assert(index < operations.size());
+    return operations[index];
+  }
+  size_t OpCount() const { return operations.size(); }
+  bool HasOperation(const SpannedOperation::Kind& k) const {
+    for (auto& so : AllOperations())
+      if (so->OpCode() == k) return true;
+    return false;
+  }
+  bool NoTilingOperation() const { return !HasTilingOperation(); }
+  bool HasTilingOperation() const { return TilingOperationCount() > 0; }
+  size_t TilingOperationCount() const {
+    size_t count = 0;
+    for (auto& so : AllOperations())
+      if (!so->SpecifyReshape()) count++;
+    return count;
+  }
+  bool HasReshape() const {
+    for (auto& so : AllOperations())
+      if (so->SpecifyReshape()) return true;
+    return false;
+  }
+  bool ReshapeOnly() const {
+    bool reshape_only = false;
+    for (auto& so : AllOperations()) {
+      if (!so->SpecifyReshape()) return false;
+      reshape_only = true;
+    }
+    return reshape_only;
+  }
 
-  const Shape& GetShape() const { return s; }
-  void SetShape(const Shape& shape) { s = shape; }
+  std::optional<size_t> IndexOfLastSpanAs() const {
+    int li = -1;
+    int i = 0;
+    for (auto sop : AllOperations()) {
+      if (sop->SpecifyReshape()) li = i;
+      ++i;
+    }
+    if (li == -1) return std::nullopt;
+    return li;
+  }
+
+  const Shape& GetBlockShape() const { return bs; }
+  void SetBlockShape(const Shape& shape) { bs = shape; }
+
+  void RemoveOperation(size_t index) {
+    operations.erase(operations.begin() + index);
+  }
 
   ptr<Node> CloneImpl() const override {
-    std::vector<ptr<TSInfo>> ntsis;
-    for (auto tsi : ts_infos) ntsis.push_back(tsi->Clone());
+    std::vector<ptr<SpannedOperation>> ntsis;
+    for (auto tsi : operations) ntsis.push_back(tsi->Clone());
     auto n = Make<ChunkAt>(LOC(), cast<Identifier>(data->Clone()),
                            cast<MultiValues>(indices->Clone()), ntsis);
     n->sa = cast<SpanAs>(sa->Clone());
@@ -2034,7 +2204,7 @@ public:
     if (indices)
       for (auto index : indices->AllValues()) os << "[" << PSTR(index) << "]";
 
-    for (auto tsi : ts_infos) tsi->Print(os);
+    for (auto tsi : operations) tsi->Print(os);
 
     if (with_type) os << "<{" << PSTR(GetType()) << "}>";
   }
@@ -2050,9 +2220,11 @@ struct Select : public Node, public TypeIDProvider<Select> {
   ptr<MultiValues> expr_list = nullptr;
   bool inDMA = false;
 
-  Select(const location& l, const ptr<Expr>& sf,
-         const ptr<MultiValues>& list = nullptr)
-      : Node(l), select_factor(sf), expr_list(list) {}
+  Select(const location& l, const ptr<Expr>& sf, const ptr<MultiValues>& list)
+      : Node(l), select_factor(sf), expr_list(list) {
+    assert(sf);
+    assert(list);
+  }
 
   ptr<Node> CloneImpl() const override {
     auto n = Make<Select>(LOC(), cast<Expr>(select_factor->Clone()),

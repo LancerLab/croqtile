@@ -197,11 +197,11 @@ struct ValueListHasher {
 };
 
 inline bool IsValueItemEqual(const ValueItem& a, const ValueItem& b) {
-  return *(a->Normalize()) == *(b->Normalize());
+  return sbe::ceq(a->Normalize(), b->Normalize());
 }
 
 inline bool IsValueItemEqual(int a, const ValueItem& b) {
-  return *sbe::nu(a) == *(b->Normalize());
+  return sbe::ceq(sbe::nu(a), b->Normalize());
 }
 
 inline const ValueItem MultiplyAll(const ValueList& vl) {
@@ -211,7 +211,7 @@ inline const ValueItem MultiplyAll(const ValueList& vl) {
 }
 
 // Function to compare two ValueList
-inline bool isValueListEqual(const ValueList& a, const ValueList& b) {
+inline bool IsValueListEqual(const ValueList& a, const ValueList& b) {
   if (a.size() != b.size()) return false; // Different sizes
 
   for (size_t i = 0; i < a.size(); ++i)
@@ -245,7 +245,7 @@ struct ValueListRepo {
     // value number exists
     while (hash_index.count(hash_val)) {
       // ValueList exists, return the value number directly
-      if (isValueListEqual(values[hash_index[hash_val]], st)) return hash_val;
+      if (IsValueListEqual(values[hash_index[hash_val]], st)) return hash_val;
 
       // conflicting keys, rehash
       hash_val++;

@@ -39,6 +39,7 @@ Option<bool> no_decay_spanview(OptionKind::Hidden, "--no-decay-spanview",
 Option<bool>
     dma_verbose(OptionKind::Hidden, "--dma-verbose", "", false,
                 " print DMA related informtion at runtime (debug only).");
+Option<bool> dma_opt(OptionKind::Hidden, "--dma-opt", "", true, " apply DMA .");
 
 namespace {
 
@@ -341,25 +342,43 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
 std::pair<std::string, size_t>
 TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
                             ptr<DMAConfig> config) const {
-  auto& tsis = ca->AllTSInfo();
-  assert(!tsis.empty());
+  auto& sops = ca->AllOperations();
+  assert(!sops.empty());
 
   std::vector<std::ostringstream> offsets;
+
+  size_t sop_base = 0;
+  if (auto li = ca->IndexOfLastSpanAs()) sop_base = *li + 1;
+
+  if (sop_base == sops.size()) {
+    // span_as is the tail spannedoperation
+    std::ostringstream oss;
+    auto sz = ca->GetBlockShape().DimCount();
+    for (size_t i = 0; i < sz; ++i) {
+      if (i > 0) oss << ", ";
+      oss << "0";
+    }
+    return {oss.str(), sz};
+  }
+
   // handle each chunkat inside a seqeunce like 'chunkat(a, b).chunat(c)...'
-  for (size_t tsi_idx = 0; tsi_idx < tsis.size(); ++tsi_idx) {
+  for (size_t sop_idx = sop_base; sop_idx < sops.size(); ++sop_idx) {
+    // span_as reshape operation would not affect index generation
+    assert(!sops[sop_idx]->SpecifyReshape());
+
     // For each chunkat expression, The tiled-block's shape is cooked by shape
     // inference. The block shape is different with the result shape of chunkat
     // expression when using 'modspan', where the result shape represents the
     // shape that applied mod (%) operation. Anyway, for offset, we only care
     // about the tiled-block's shape
-    auto& shape = tsis[tsi_idx]->GetBlockShape();
+    auto& shape = sops[sop_idx]->GetBlockShape();
 
     std::vector<std::string> exprs;
     // For each 'a, b, c, ...' inside 'chunkat(a, b, c, ...)', that 'b' inside
     // 'chunkat(a, b, c, ...)' could be bounded var like b = {b0, b1} Therefore,
     // we collect all the expressions first.
-    for (size_t pi = 0; pi < tsis[tsi_idx]->GetIndices().size(); ++pi) {
-      auto p = tsis[tsi_idx]->GetIndices()[pi];
+    for (size_t pi = 0; pi < sops[sop_idx]->GetIndices().size(); ++pi) {
+      auto p = sops[sop_idx]->GetIndices()[pi];
       // exprs[x] will perform multiplication operations with other values later
       // thus the parent_op is `*`
       auto idx_exprs =
@@ -368,10 +387,9 @@ TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
         exprs.push_back(idx_exprs[i]);
     }
 
-    auto tc = dyn_cast<TransposeConfig>(config);
-    if (tc) {
+    if (auto tc = dyn_cast<TransposeConfig>(config)) {
       assert(tc->dim_values.size() == exprs.size());
-      assert(tsis.size() == 1);
+      assert(ca->TilingOperationCount() == 1);
     }
 
 #if 0
@@ -391,7 +409,7 @@ TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
     for (size_t i = 0; i < exprs.size(); ++i) {
       // combine 'a' and 'c' between expressions like 'chunkat(a, b).chunk(c,
       // d)'
-      if (tsi_idx > 0) offsets[i] << " + ";
+      if (sop_idx > sop_base) offsets[i] << " + ";
 
       if (exprs[i] == "__choreo_no_tiling__")
         offsets[i] << "0";
@@ -413,18 +431,58 @@ TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
   return {offset.str(), offsets.size()};
 }
 
+// Example:
+//
+//   f32 [10, 9, 8] a;
+//   ... a.subspan(3, 4, 5).at(p, q, r).span_as(...);
+//
+// The "Tile Base Offset" (offset ahead of last span_as) is:
+//
+//    tbo = p * (4 * 5) + q * 5 + r
+//
+const ValueItem
+TopsccCodeGen::TileBaseOffset(const ptr<AST::ChunkAt>& ca) const {
+
+  auto offset = sbe::nu(0);
+  if (!ca->HasReshape()) return sbe::nu(0);
+
+  size_t sidx = 0;
+  auto lidx = ca->IndexOfLastSpanAs();
+
+  for (auto& sop : ca->AllOperations()) {
+    auto shape = sop->GetBlockShape();
+    size_t i = 0;
+    for (auto p : sop->GetIndices()) {
+      auto& vals = dyn_cast<AST::Expr>(p)->Opts().GetVals();
+      for (auto val : vals) {
+        auto factor = sbe::nu(1);
+        if (shape.Rank() > i + 1)
+          factor = shape.TrimDims(i + 1).ElementCountValue();
+        offset = offset + val * factor;
+        ++i;
+      }
+    }
+
+    // reach the last span_as, we are done
+    if (lidx.has_value() && *lidx == sidx) break;
+    ++sidx;
+  }
+  return offset;
+}
+
 const std::string TopsccCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca) const {
   std::ostringstream offset;
 
-  if (ca->NoTile()) return "";
+  if (ca->NoOperation()) return "";
 
-  if (ca->AllTSInfo().size() > 1)
+  if (ca->AllOperations().size() > 1)
     choreo_unreachable("multiple chunkat is yet to support.");
 
-  for (auto& tsi : ca->AllTSInfo()) {
+  for (auto& sop : ca->AllOperations()) {
+    if (sop->SpecifyReshape()) continue;
+    auto shape = sop->GetBlockShape();
     size_t i = 0;
-    auto& shape = ca->GetShape();
-    for (auto p : tsi->GetIndices()) {
+    for (auto p : sop->GetIndices()) {
       auto idx_exprs =
           SplitStringByDelimiter(OpExprSTR(p, "*", true, IsHost()));
       std::string factor = "1";
@@ -441,6 +499,8 @@ const std::string TopsccCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca) const {
         ++i;
       }
     }
+    // update the shape
+    shape = sop->GetBlockShape();
   }
   return offset.str();
 }
@@ -1184,16 +1244,19 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   assert(t_sty && "can not retrieve data from 'to'.");
 
   auto SymbolToSymbol = [f_ca, t_ca]() -> bool {
-    return f_ca->NoTile() && t_ca->NoTile();
+    return f_ca->NoTilingOperation() && t_ca->NoTilingOperation();
   };
   auto SymbolToTile = [f_ca, t_ca]() -> bool {
-    return f_ca->NoTile() && t_ca->HasTile();
+    return f_ca->NoTilingOperation() && t_ca->HasTilingOperation();
   };
   auto TileToSymbol = [f_ca, t_ca]() -> bool {
-    return f_ca->HasTile() && t_ca->NoTile();
+    return f_ca->HasTilingOperation() && t_ca->NoTilingOperation();
   };
   auto TileToTile = [f_ca, t_ca]() -> bool {
-    return f_ca->HasTile() && t_ca->HasTile();
+    return f_ca->HasTilingOperation() && t_ca->HasTilingOperation();
+  };
+  auto HasReshape = [f_ca, t_ca]() -> bool {
+    return f_ca->HasReshape() || t_ca->HasReshape();
   };
 
   if (t_sty->GetStorage() == Storage::GLOBAL && use_hetero_tileflow &&
@@ -1309,21 +1372,24 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   // output mdspan declaration in device side, return mds name.
   // If offset is not empty, means that need to do memory viewing.
   //   Just add offset to buf_expr, then utilize new_shape.
-  auto GetMDSName =
-      [this](const std::string& buf_name, const std::string& buf_expr,
-             const ptr<SpannedType>& sty, const std::string& offset = "",
-             const Shape& new_shape = Shape()) {
-        static int mds_cnt = 0;
-        auto mds_name = "__mds" + std::to_string(mds_cnt++) + "_" +
-                        RemoveSuffix(buf_name, ".data()");
-        std::string bts{NameBaseType(sty->ElementType())};
-        ds << d_indent << "tops::mdspan " << mds_name << "("
-           << TopsMdsStorage(sty->GetStorage()) << ", (" << bts << "*)"
-           << buf_expr << (offset.empty() ? "" : " + " + offset) << ", "
-           << (offset.empty() ? ShapeSTR(sty->GetShape()) : ShapeSTR(new_shape))
-           << ");\n";
-        return mds_name;
-      };
+  auto GetMDSName = [this](const std::string& buf_name,
+                           const std::string& buf_expr,
+                           const ptr<SpannedType>& sty,
+                           const std::string& offset = "",
+                           const Shape& new_shape = Shape()) {
+    static int mds_cnt = 0;
+    auto mds_name = "__mds" + std::to_string(mds_cnt++) + "_" +
+                    RemoveSuffix(buf_name, ".data()");
+    std::string bts{NameBaseType(sty->ElementType())};
+    ds << d_indent << "tops::mdspan " << mds_name << "("
+       << TopsMdsStorage(sty->GetStorage()) << ", (" << bts << "*)" << buf_expr;
+    if (offset == "")
+      ds << ", " << ShapeSTR(sty->GetShape());
+    else
+      ds << " + " << offset << ", " << ShapeSTR(new_shape);
+    ds << ");\n";
+    return mds_name;
+  };
 
   enum DMA_OP : uint8_t {
     none = 0,
@@ -1335,7 +1401,9 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   // Check the current DMA. If the tiled span is address-continuous within the
   // original span, then slice or deslice can be optimized to linear copy.
   auto OptToLinearCopy = [&]() -> DMA_OP {
+    if (!dma_opt) return DMA_OP::none;
     if (SymbolToSymbol()) return DMA_OP::none;
+    if (HasReshape()) return DMA_OP::none;
 
     // if `ts` is contiguous in `s`
     auto IsContiguous = [&](Shape s, Shape ts) {
@@ -1373,7 +1441,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     Shape shape, tile_shape;
     auto SetShapeAndTShape = [&](const ptr<AST::ChunkAt>& ca) {
       shape = GetSpannedType(GetSymbolType(ca->RefSymbol()))->GetShape();
-      tile_shape = ca->GetShape();
+      tile_shape = ca->GetBlockShape();
     };
     if (SymbolToTile()) {
       SetShapeAndTShape(t_ca);
@@ -1414,17 +1482,18 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
 
     std::ostringstream offset;
 
-    if (ca->NoTile()) return "";
+    if (ca->NoOperation()) return "";
 
-    if (ca->AllTSInfo().size() > 1)
+    if (ca->AllOperations().size() > 1)
       choreo_unreachable("multiple chunkat is yet to support.");
 
-    for (auto& tsi : ca->AllTSInfo()) {
+    for (auto& op : ca->AllOperations()) {
+      assert(!op->SpecifyReshape());
       size_t i = 0;
-      auto& shape = ca->GetShape();
-      for (auto p : tsi->GetIndices()) {
+      for (auto p : op->GetIndices()) {
         auto idx_exprs =
             SplitStringByDelimiter(OpExprSTR(p, "*", true, IsHost()));
+        auto& shape = ca->GetBlockShape();
         for (auto i_expr : idx_exprs) {
           ValueItem outer_factor = sbe::nu(1);
           if (outer_shape.IsValid() && i + 1 < outer_shape.Rank())
@@ -1448,25 +1517,43 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   std::string f_mds_offset = "";
   std::string t_mds_offset = "";
 
+  Shape f_shape = f_sty->GetShape();
+  Shape t_shape = t_sty->GetShape();
+
   if (opt_to_linear_copy != DMA_OP::none) {
     if (TileToSymbol()) {
       assert(opt_to_linear_copy == DMA_OP::src);
       f_mds_offset = GenOffsetIfLinearCopyOpt(f_ca, f_sty->GetShape());
+      f_shape = f_ca->GetBlockShape();
     } else if (SymbolToTile()) {
       assert(opt_to_linear_copy == DMA_OP::dst);
       t_mds_offset = GenOffsetIfLinearCopyOpt(t_ca, t_sty->GetShape());
+      t_shape = t_ca->GetBlockShape();
     } else if (TileToTile()) {
-      if (opt_to_linear_copy & DMA_OP::src)
+      if (opt_to_linear_copy & DMA_OP::src) {
         f_mds_offset = GenOffsetIfLinearCopyOpt(f_ca, f_sty->GetShape());
-      if (opt_to_linear_copy & DMA_OP::dst)
+        f_shape = f_ca->GetBlockShape();
+      }
+      if (opt_to_linear_copy & DMA_OP::dst) {
         t_mds_offset = GenOffsetIfLinearCopyOpt(t_ca, t_sty->GetShape());
+        t_shape = t_ca->GetBlockShape();
+      }
+    }
+  } else {
+    if (auto idx = f_ca->IndexOfLastSpanAs()) {
+      f_mds_offset = ValueSTR(TileBaseOffset(f_ca));
+      f_shape = f_ca->OpAt(*idx)->GetBlockShape();
+    }
+    if (auto idx = t_ca->IndexOfLastSpanAs()) {
+      t_mds_offset = ValueSTR(TileBaseOffset(t_ca));
+      t_shape = t_ca->OpAt(*idx)->GetBlockShape();
     }
   }
 
   auto f_mds_name =
-      GetMDSName(f_buf_name, f_buf_expr, f_sty, f_mds_offset, f_ca->GetShape());
+      GetMDSName(f_buf_name, f_buf_expr, f_sty, f_mds_offset, f_shape);
   auto t_mds_name =
-      GetMDSName(t_buf_name, t_buf_expr, t_sty, t_mds_offset, t_ca->GetShape());
+      GetMDSName(t_buf_name, t_buf_expr, t_sty, t_mds_offset, t_shape);
 
   auto future_name = n.future;
   // bind the data to the future
@@ -1562,7 +1649,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       auto slice_shape_name = "__slice_shape" + std::to_string(s_cnt) + "__" +
                               f_sym + "_2_" + t_sym;
       ds << d_indent << "unsigned int " << slice_shape_name << "[] = {"
-         << ShapeSTR(f_ca->GetShape()) << "};\n";
+         << ShapeSTR(f_ca->GetBlockShape()) << "};\n";
       ds << d_indent;
       if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
       ds << "tops::slice_deslice" << (fty->IsAsync() ? "_async" : "") << "(*"
@@ -1637,7 +1724,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       auto slice_shape_name = "__slice_shape" + std::to_string(s_cnt) + "__" +
                               f_sym + "_2_" + t_sym;
       ds << d_indent << "unsigned int " << slice_shape_name << "[] = {"
-         << ShapeSTR(f_ca->GetShape()) << "};\n";
+         << ShapeSTR(f_ca->GetBlockShape()) << "};\n";
       ds << d_indent;
       if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
       ds << "tops::slice_pad" << (fty->IsAsync() ? "_async" : "") << "(*"

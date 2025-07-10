@@ -600,7 +600,7 @@ struct Shape {
 
 inline bool operator==(const Shape& lhs, const Shape& rhs) {
   return lhs.IsValid() && rhs.IsValid() && (lhs.Rank() == rhs.Rank()) &&
-         isValueListEqual(lhs.Value(), rhs.Value());
+         IsValueListEqual(lhs.Value(), rhs.Value());
 }
 
 using MultiBounds = Shape; // using a shape as a multi-bound
@@ -2482,6 +2482,11 @@ inline bool MutableType(const Type& ty) { return isa<ScalarType>(&ty); }
 inline bool SupportIntListCollapse(const ptr<Type>& ty) {
   return isa<ScalarIntegerType>(ty) || isa<MDSpanType>(ty) ||
          isa<ITupleType>(ty);
+}
+
+inline bool CanYieldDimension(const ptr<Type>& ty) {
+  return (isa<ScalarIntegerType>(ty) || (isa<ITupleType>(ty))) &&
+         !IsMutable(*ty);
 }
 
 } // end namespace Choreo

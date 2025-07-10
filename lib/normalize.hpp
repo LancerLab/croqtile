@@ -22,7 +22,7 @@ private:
   bool handle_parameter = false;
   ptr<AST::Expr> list_ref = nullptr;
   void SetListReference(const location& l, const std::string& r) {
-    list_ref = AST::Make<AST::Expr>(l, AST::Make<AST::Identifier>(l, r));
+    list_ref = AST::MakeIdExpr(l, r);
   }
   void ResetListReference() { list_ref = nullptr; }
 
@@ -490,6 +490,7 @@ public:
 
   bool Visit(AST::DMA& n) override {
     if (n.operation == ".any") return true;
+
     if (!isa<AST::Select>(n.to)) return true;
 
     auto anon_sym = SymbolTable::GetAnonName();
@@ -501,7 +502,7 @@ public:
     assign->SetType(n.to->GetType()->Clone());
     assign->da->SetType(n.to->GetType()->Clone());
     InsertNode(index, assign, anon_sym);
-    VST_DEBUG(dbgs() << n.TypeNameString() << ": replace " << PSTR(n.to)
+    VST_DEBUG(dbgs() << n.TypeNameString() << ": replace-0 " << PSTR(n.to)
                      << " with " << anon_sym << "(" << PSTR(assign->GetType())
                      << ".\n");
 
@@ -522,24 +523,48 @@ public:
       assign->SetType(n.sa->GetType()->Clone());
       assign->da->SetType(n.sa->GetType()->Clone());
       InsertNode(index, assign, n.sa->nid->name);
-      VST_DEBUG(dbgs() << n.TypeNameString() << ": replace " << PSTR(n.sa)
+      VST_DEBUG(dbgs() << n.TypeNameString() << ": replace-1 " << PSTR(n.sa)
                        << " with " << n.sa->nid->name << "("
                        << PSTR(assign->GetType()) << ")\n");
       n.sa.reset();
     }
 
+    if (CCtx().GetTarget() == CompileTarget::Factor && n.OpCount() > 0 &&
+        // factor requires to generate 'bitcast' for a reshape
+        n.OpAt(0)->SpecifyReshape()) {
+      int index = cur_node_index + mnodes_insertions[multi_nodes.top()].size();
+      auto nname = SymbolTable::GetAnonName();
+      auto so = n.OpAt(0);
+      auto id = AST::Make<AST::Identifier>(so->LOC(), nname);
+      auto mv = cast<AST::MultiValues>(so->RShape()->Clone());
+      mv->SetDelimiter(", ");
+      auto sa = AST::Make<AST::SpanAs>(
+          id->LOC(), cast<AST::Identifier>(n.data->Clone()), id, mv);
+      auto assign = AST::Make<AST::Assignment>(id->LOC(), nname, sa);
+      auto sty = cast<SpannedType>(n.GetType());
+      auto nty = MakeRankedSpannedType(so->GetRank(), sty->ElementType(),
+                                       sty->GetStorage());
+      sa->SetType(nty);
+      assign->SetType(nty);
+      InsertNode(index, assign, nname);
+      VST_DEBUG(dbgs() << n.TypeNameString() << ": convert " << STR(n)
+                       << " as:";
+                assign->Print(dbgs(), "   ");
+                dbgs() << " (" << PSTR(assign->GetType()) << ")\n");
+      n.RemoveOperation(0);
+      n.data = cast<AST::Identifier>(id->Clone());
+      VST_DEBUG(dbgs() << "   `- " << STR(n) << " (" << PSTR(n.GetType())
+                       << ")\n");
+    }
+
     // hoist any arith inside of chunkat positions
-    for (auto tsi : n.AllTSInfo()) {
+    for (auto tsi : n.AllOperations()) {
       std::vector<std::pair<int, ptr<AST::Node>>> repls;
       int i = -1;
       for (auto& v : tsi->GetIndices()) {
         ++i;
         auto expr = cast<AST::Expr>(v);
-        if (expr->GetSymbol()) {
-          // replace expr reference by the id node
-          repls.emplace_back(i, expr->GetReference());
-          continue;
-        } else if (expr->op == "getith") {
+        if (expr->op == "getith") {
           // 'getith' must be kept.
           if (auto lexpr = dyn_cast<AST::Expr>(expr->GetL())) {
             if (!lexpr->GetSymbol()) {
@@ -553,12 +578,15 @@ public:
               assign->da->SetType(expr->GetL()->GetType()->Clone());
               InsertNode(index, assign, nname);
               VST_DEBUG(dbgs()
-                        << n.TypeNameString() << ": replace "
+                        << n.TypeNameString() << ": replace-2 "
                         << PSTR(expr->GetL()) << " with " << nname << "\n");
               expr->SetL(AST::Make<AST::Identifier>(v->LOC(), nname));
               VST_DEBUG(dbgs() << PSTR(expr->GetL()) << ".\n");
             }
           }
+          continue;
+        } else if (expr->GetSymbol() || expr->GetInt()) {
+          // do not hoist symbol or integer reference
           continue;
         }
 
@@ -570,8 +598,8 @@ public:
         assign->SetType(v->GetType()->Clone());
         assign->da->SetType(v->GetType()->Clone());
         InsertNode(index, assign, nname);
-        repls.emplace_back(i, AST::Make<AST::Identifier>(v->LOC(), nname));
-        VST_DEBUG(dbgs() << n.TypeNameString() << ": replace " << PSTR(v)
+        repls.emplace_back(i, AST::MakeIdExpr(v->LOC(), nname));
+        VST_DEBUG(dbgs() << n.TypeNameString() << ": replace-3 " << PSTR(v)
                          << " with " << nname << "(" << PSTR(assign->GetType())
                          << ")\n");
       }

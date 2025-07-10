@@ -97,7 +97,7 @@ ValueItem ValueNumbering::GenValueItemFromSignature(const SignTy& input) {
 
 const ValueList
 ValueNumbering::GenValueListFromValueNumber(const NumTy& valno) {
-  if (!valno.IsValid()) choreo_unreachable("signature is invalid.");
+  if (!valno.IsValid()) choreo_unreachable("value number is invalid.");
   return GenValueListFromSignature(SignNum(valno));
 }
 

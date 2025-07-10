@@ -373,7 +373,7 @@ private:
     std::vector<int> positions{start_x, start_y, 0};
     start_x += data_sizes[0] * axis_scale[0] + label_distance + 100;
 
-    if (ca.HasTile() && ca.AllTSInfo().size() == 1) {
+    if (ca.HasOperation() && ca.AllOperations().size() == 1) {
       // use whole data as a single chunk
 
       // dimension 1 is repeated parallel_count times
@@ -393,8 +393,8 @@ private:
     std::set<int>
         parallel_bounds; // specify which dimension is executed in parallel
 
-    if (ca.HasTile() && ca.AllTSInfo().size() == 1) {
-      for (auto pos : ca.AllTSInfo()[0]->GetIndices()) {
+    if (ca.HasOperation() && ca.AllOperations().size() == 1) {
+      for (auto pos : ca.AllOperations()[0]->GetIndices()) {
         auto id = dyn_cast<AST::Identifier>(pos);
         assert(id && "node other than identifier is not handled.");
         auto ty = GetSymbolType(id->name);

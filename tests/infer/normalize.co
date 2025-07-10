@@ -32,9 +32,7 @@ __co__ void hoist_spanas(f32 [3, 4, 5] b) {
     dma.copy b.span_as([4, 5, 6]).chunkat(abc) => global;
   }
 }
-// CHECK: AST::ChunkAt: replace abc with abc(unknown).
-// CHECK: Hoisted:
-// CHECK: `- Assign: anon_1 = b.span_as[ 4 5 6 ]
+// CHECK-NOT: AST::ChunkAt: replace abc with abc(unknown).
 
 __co__ void hoist_bounded(f32 [3, 4, 5] b) {
   with index = {x, y, z} in [b.span + 1] {
@@ -42,7 +40,7 @@ __co__ void hoist_bounded(f32 [3, 4, 5] b) {
   }
 }
 
-// CHECK: AST::ChunkAt: replace x with x(unknown).
-// CHECK: AST::ChunkAt: replace  (y + 1)  with anon_2(unknown).
+// CHECK-NOT: AST::ChunkAt: replace x with x(unknown).
+// CHECK: AST::ChunkAt: replace  (y + 1)  with anon_1(unknown).
 // CHECK: Hoisted:
-// CHECK: `- Assign: anon_2 =  (y + 1)
+// CHECK: `- Assign: anon_1 =  (y + 1)

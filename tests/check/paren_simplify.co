@@ -39,7 +39,7 @@ __co__ auto foo(s8[N,8] input, int x, int y, int z) {
 // CHECK:  if (((x > 5 ? y : z + 3) > z) && (((x > 5 ? y : z + 3) < x) || (x > y)))
 // CHECK:  if (((x > 5 ? y : z + 3) > z) && ((x > 5 ? y : z + 3) < x) || (x > y))
 // CHECK:  mx = (((N + 2) * 12 + 4) * x);
-// CHECK:  my = (((x + (y - 1)) / y) + (((N + 2) * 12) + mx - 1) / mx - 1) / ((((N + 2) * 12) + mx - 1) / mx) % z + mx;
+// CHECK:  my = (mx + (((N + 2) * 12 + (mx - 1)) / mx - 1 + (x + (y - 1)) / y) / (((N + 2) * 12 + (mx - 1)) / mx) % z);
 
 
 int main() {

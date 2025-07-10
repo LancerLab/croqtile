@@ -428,13 +428,13 @@ bool FactorCodeGen::Visit(AST::Assignment& node) {
     auto shape = sty->GetShape();
     if (shape.IsDynamic()) {
       fs << "{";
-      for (size_t i = 0; i < sa->list->Count(); ++i)
+      for (size_t i = 0; i < sty->Dims(); ++i)
         fs << (i != 0 ? ", " : "") << "-1";
       fs << "}), " << buffer_name << ", {";
       for (size_t i = 0; i < sa->list->Count(); ++i) {
         auto value = sa->list->ValueAt(i);
         // TODO: how to utilize shape info
-        auto expr_str = PSTR(cast<AST::Expr>(value));
+        auto expr_str = ExprSTR(value);
         for (auto& [id_name, _] : idnm_rts)
           expr_str = RegexReplaceAll(expr_str, "\\b" + id_name + "\\b",
                                      named_dim_ref_prefix + id_name);
@@ -725,19 +725,19 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
     size_t rank = sty->Dims();
 
     auto ca = cast<AST::ChunkAt>(&n);
-    if (ca->NoTile()) {
+    if (ca->NoOperation()) {
       // symbol only, the offset is a multi-dim-zeros
       return "{" + DelimitedString(std::vector<size_t>(rank, 0)) + "}";
     }
 
-    if (ca->AllTSInfo().size() != 1)
+    if (ca->TilingOperationCount() > 1)
       choreo_unreachable("multiple chunkat is not support by current target.");
 
     std::ostringstream offss;
     size_t dim_cursor = 0;
-    for (auto& bv : ca->AllTSInfo()[0]->GetIndices()) {
+    for (auto& bv : ca->AllOperations()[0]->GetIndices()) {
       // It could either be identifier or a 'getith' expr
-      if (auto id = dyn_cast<AST::Identifier>(bv)) {
+      if (auto id = AST::GetIdentifier(bv)) {
         auto bvn = id->name;
         if (bvn == "__choreo_no_tiling__") {
           offss << "0";
@@ -836,7 +836,7 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
   if (isa<AST::Memory>(d.to) || isa<AST::Select>(d.to))
     chunkat_node = d.from;
   else if (auto c = cast<AST::ChunkAt>(d.to)) {
-    if (c->NoTile()) // xxx.chunkat() => identifier
+    if (c->NoOperation()) // xxx.chunkat() => identifier
       chunkat_node = d.from;
     else
       chunkat_node = d.to;
@@ -1729,9 +1729,16 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
         return ExprSTR(expr->GetReference());
       else if (expr->GetSymbol())
         return ExprSTR(expr->GetReference());
-      else if (isa<AST::Expr>(NodeType(*expr->GetR()))) // should this happen?
+      else if (isa<AST::Expr>(expr->GetR())) // should this happen?
         return ExprSTR(expr->GetR());
-      else
+      else if (auto mds = dyn_cast<AST::MultiDimSpans>(expr->GetR())) {
+        if (isa<AST::Expr>(mds->list)) {
+          return ExprSTR(mds->list);
+        } else if (auto mv = dyn_cast<AST::MultiValues>(mds->list)) {
+          mv->SetDelimiter(", ");
+          return PSTR(mv);
+        }
+      } else
         choreo_unreachable("Unsupported reference: " + PSTR(expr));
     } else if (expr->IsUnary()) {
       if (expr->op == "!") {
@@ -1819,7 +1826,7 @@ const std::string FactorCodeGen::ExprSTR(AST::ptr<AST::Node> e,
     oss << PSTR(sl->expr_list->AllValues().back())
         << std::string(val_count - 1, ')');
   } else
-    choreo_unreachable("unsupported expression '" + expr->op + "'.");
+    choreo_unreachable("unsupported expression '" + PSTR(e) + "'.");
 
   return oss.str();
 }

@@ -29,8 +29,6 @@ __co__ void bar() {
 // CHECK: error: unsupported: global synchronization in local scope.
 // CHECK: error: GCU300 does not support local synchronization.
 // CHECK: error: the parallel level (depth: 3) is not supported by current GCU architecture (GCU300).
-// CHECK: error: unsupported: global synchronization in sub-local scope.
-// CHECK: error: GCU300 does not support local synchronization.
 
 // GCU4CHK: error: unsupported: shared synchronization in global scope.
 // GCU4CHK: error: unsupported: local synchronization in global scope.

@@ -90,7 +90,7 @@ bool EarlySemantics::Visit(AST::MultiValues& n) {
 
   if (auto ty = NodeType(*n.ValueAt(0)); ty && isa<BoundedType>(ty)) {
     size_t dims = 0;
-    for (auto v : n.values) {
+    for (auto v : n.AllValues()) {
       auto vty = NodeType(*v);
       if (!isa<BoundedType>(ty))
         Error1(n.LOC(), PSTR(v) + "is not bounded value.");
@@ -694,7 +694,7 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
       bool is_mutable = false;
       if (mutables.Contains(v)) {
         Error1(v->LOC(),
-               "the mutable value can not used for the mdspan declaration.");
+               "the mutable value can not be used for the mdspan declaration.");
         is_mutable = true;
       }
       if (is_mutable) mutables.Add(*v);
@@ -933,7 +933,7 @@ bool EarlySemantics::Visit(AST::IntTuple& n) {
     bool is_mutable = false;
     if (mutables.Contains(v)) {
       Error1(v->LOC(),
-             "mutable values can not used for the ituple declaration.");
+             "mutable values can not be used for the ituple declaration.");
       is_mutable = true;
     }
     if (is_mutable) mutables.Add(*v);
@@ -1536,15 +1536,14 @@ bool EarlySemantics::Visit(AST::DMA& n) {
     }
 
     // set the buffer kind
-    auto from_kind = (cast<AST::ChunkAt>(n.from)->SymbolicBufferName())
-                         ? DOK_SYMBOL
-                         : DOK_CHUNK;
+    auto from_kind =
+        (cast<AST::ChunkAt>(n.from)->NoOperation()) ? DOK_SYMBOL : DOK_CHUNK;
     auto to_kind = DOK_UNKNOWN;
     if (!isa<AST::ChunkAt>(n.to))
       to_kind = DOK_SYMBOL;
     else
-      to_kind = (cast<AST::ChunkAt>(n.to)->SymbolicBufferName()) ? DOK_SYMBOL
-                                                                 : DOK_CHUNK;
+      to_kind =
+          (cast<AST::ChunkAt>(n.to)->NoOperation()) ? DOK_SYMBOL : DOK_CHUNK;
     auto to_sym = n.ToSymbol();
     if (!to_sym.empty()) to_sym = InScopeName(to_sym);
     FCtx(fname).GetFutureBufferInfo().emplace(
@@ -1553,6 +1552,14 @@ bool EarlySemantics::Visit(AST::DMA& n) {
     if (n.async)
       Error1(n.LOC(), "forbid to associated async dma without a named future.");
   }
+
+  if (isa<AST::ChunkAt>(n.from) && isa<AST::ChunkAt>(n.to))
+    if (cast<AST::ChunkAt>(n.from)->HasTilingOperation() &&
+        cast<AST::ChunkAt>(n.to)->HasTilingOperation() &&
+        (CCtx().GetTarget() != CompileTarget::Topscc)) {
+      Error1(n.LOC(),
+             "slice and deslice in single DMA statement is not supported yet.");
+    }
 
   if (!isa<AST::Memory>(n.to)) {
     if (sty->Dims() != tty->Dims() && !allow_auto_threading) {
@@ -1624,31 +1631,29 @@ bool EarlySemantics::Visit(AST::DMA& n) {
 bool EarlySemantics::Visit(AST::ChunkAt& n) {
   TraceEachVisit(n);
 
-  if (n.HasTile()) {
-    for (auto tsi : n.AllTSInfo()) {
-      if (!tsi->HasTilingExpr()) continue;
+  for (auto tsi : n.AllOperations()) {
+    if (tsi->OpCode() != AST::SpannedOperation::TILEAT) continue;
 
-      // if notile has upper-bound rather than 1
-      std::vector<size_t> notile_indices;
-      size_t i = 0;
-      for (auto& v : tsi->GetIndices()) {
-        if (auto expr = cast<AST::Expr>(v); expr->IsReference())
-          if (auto id = dyn_cast<AST::Identifier>(expr->GetReference()))
-            if (id->name == "__choreo_no_tiling__") {
-              notile_indices.push_back(i);
-              break;
-            }
-        ++i;
-      }
+    // if notile has upper-bound rather than 1
+    std::vector<size_t> notile_indices;
+    size_t i = 0;
+    for (auto& v : tsi->GetIndices()) {
+      if (auto expr = cast<AST::Expr>(v); expr->IsReference())
+        if (auto id = dyn_cast<AST::Identifier>(expr->GetReference()))
+          if (id->name == "__choreo_no_tiling__") {
+            notile_indices.push_back(i);
+            break;
+          }
+      ++i;
+    }
 
-      // the upper bound of notile must be 1
-      for (auto& i : notile_indices) {
-        auto il = GetIntLiteral(*tsi->GetTilingFactors()->ValueAt(i));
-        if ((il == nullptr) || (il->Val() != 1))
-          Error1(tsi->LOC(), "upper bound of bounded variable '_' is " +
-                                 PSTR(tsi->GetTilingFactors()->ValueAt(i)) +
-                                 " (1 is expected).");
-      }
+    // the upper bound of notile must be 1
+    for (auto& i : notile_indices) {
+      auto il = GetIntLiteral(*tsi->GetTilingFactors()->ValueAt(i));
+      if ((il == nullptr) || (il->Val() != 1))
+        Error1(tsi->LOC(), "upper bound of bounded variable '_' is " +
+                               PSTR(tsi->GetTilingFactors()->ValueAt(i)) +
+                               " (1 is expected).");
     }
   }
 
@@ -1663,27 +1668,40 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
   }
 
   auto sty = GetSpannedType(nty);
+  assert(IsValidRank(sty->Dims()));
+  size_t rank = sty->Dims();
 
-  for (auto tsi : n.AllTSInfo()) {
-    if (tsi->MultipleExprs()) {
-      tsi->GetTFSSExpr()->accept(*this);
+  for (auto op : n.AllOperations()) {
+    op->accept(*this);
 
-      for (auto v : tsi->GetTFSSExpr()->AllValues()) {
-        if (mutables.Contains(v))
-          Error1(v->LOC(), "the mutable value can not used for the "
-                           ".chunk/.subspan/.modspan expression.");
-      }
+    for (auto v : op->GetTFSSNodes()) {
+      if (mutables.Contains(v))
+        Error1(v->LOC(), "the mutable value can not be used for the "
+                         ".chunk/.subspan/.modspan expression.");
     }
 
-    tsi->Positions()->accept(*this);
-    size_t rank = sty->Dims();
+    if (op->SpecifyReshape()) {
+      size_t r_count = 0;
+      for (auto v : op->GetSANodes()) {
+        auto ty = NodeType(*v);
+        if (!CanYieldDimension(ty) && !isa<MDSpanType>(ty))
+          Error1(v->LOC(), "the value (" + PSTR(ty) +
+                               ") can not used for declaring a mdspan.");
+        r_count += ty->Dims();
+      }
+      // can not check further util shapeinfer is done
+      rank = r_count;
+      op->SetRank(rank);
+      continue;
+    }
+
     size_t r_count = 0;
-    for (auto& v : tsi->GetIndices()) {
+    for (auto& v : op->GetIndices()) {
       auto ty = NodeType(*v);
-      if (!tsi->MultipleExprs() && !isa<BoundedType>(ty)) {
+      if (!op->MultipleExprs() && !isa<BoundedType>(ty)) {
         Error1(v->LOC(), "expect '" + PSTR(v) +
                              "` be a bounded type (but got " + PSTR(ty) + ").");
-      } else if (tsi->MultipleExprs() && !CanYieldIndex(ty))
+      } else if (op->MultipleExprs() && !CanYieldIndex(ty))
         Error1(v->LOC(), "expect '" + PSTR(v) +
                              "` to yield an index (but got " + PSTR(ty) + ").");
       r_count += ty->Dims();
@@ -1691,33 +1709,35 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
     }
     // report error when the ranks do not match
     if (rank != r_count)
-      Error1(tsi->LOC(),
-             "un-matched ranks between spanned data (" + std::to_string(rank) +
-                 ") and bounded variables (" + std::to_string(r_count) + ").");
+      Error1(op->LOC(), "un-matched ranks between spanned data (" +
+                            std::to_string(rank) + ") and bounded variables (" +
+                            std::to_string(r_count) + ").");
 
-    if (tsi->MultipleExprs()) {
+    if (op->MultipleExprs()) {
       size_t b_count = 0;
-      for (auto& v : tsi->GetTFSSExpr()->AllValues()) {
+      for (auto& v : op->GetTFSSNodes()) {
         auto ty = NodeType(*v);
         if (!isa<ScalarIntegerType>(ty) && !isa<ITupleType>(ty) &&
             !isa<MDSpanType>(ty))
-          Error1(v->LOC(),
-                 "expect '" + PSTR(v) +
-                     "` be either an integer, ituple or mdspan type (but got " +
-                     PSTR(ty) + ").");
+          Error1(
+              v->LOC(),
+              "expect '" + PSTR(v) +
+                  "` to be either an integer, ituple or mdspan type (but got " +
+                  PSTR(ty) + ").");
         b_count += ty->Dims();
         SetNodeType(*v, ty);
       }
       if (rank != b_count)
-        Error1(tsi->LOC(), "un-matched ranks between spanned data (" +
-                               std::to_string(rank) + ") and " +
-                               ((tsi->HasTilingExpr()) ? "tiling" : "subspan") +
-                               " variables (" + std::to_string(b_count) + ").");
+        Error1(op->LOC(), "un-matched ranks between spanned data (" +
+                              std::to_string(rank) + ") and " +
+                              STR(op->OpCode()) + " variables (" +
+                              std::to_string(b_count) + ").");
     }
+    op->SetRank(rank);
   }
-  assert(IsValidRank(nty->Dims()));
-  SetNodeType(n, MakeRankedSpannedType(nty->Dims(), sty->ElementType(),
-                                       sty->GetStorage()));
+
+  SetNodeType(
+      n, MakeRankedSpannedType(rank, sty->ElementType(), sty->GetStorage()));
   return true;
 }
 

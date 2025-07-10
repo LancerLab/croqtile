@@ -93,7 +93,7 @@ static bool ignore_fndata = false;
 std::pair<ptr<AST::Identifier>, ptr<AST::MultiValues>> ElementMultiValues(const ptr<AST::Expr>&);
 std::set<std::string> paraby_symbols;
 
-inline ptr<AST::TSInfo> OptTSInfo(const ptr<AST::TSInfo> &);
+inline ptr<AST::SpannedOperation> OptSpannedOperation(const ptr<AST::SpannedOperation> &);
 
 }
 
@@ -235,8 +235,8 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::ParallelBy>> paraby_block parabys paraby paraby_with_pl_anno
 %nterm <AST::ptr<AST::Return>> return_stmt
 %nterm <AST::ptr<AST::Synchronize>> sync_stmt
-%nterm <std::vector<ptr<AST::TSInfo>>> ts_infos
-%nterm <ptr<AST::TSInfo>> ts_info
+%nterm <std::vector<ptr<AST::SpannedOperation>>> spanned_ops
+%nterm <ptr<AST::SpannedOperation>> spanned_op
 %nterm <AST::ptr<AST::ChunkAt>> chunkat_expr subdata_expr
 %nterm <AST::ptr<AST::Select>> select_expr
 
@@ -1456,6 +1456,9 @@ if_else_block
     | IF LPAREN call_stmt RPAREN stmts_block ELSE stmts_block {
         $$ = AST::Make<AST::IfElseBlock>(@1, $3, $5, $7);
       }
+    | ELSE {
+        Parser::error(@1, "'else' without a previous 'if'.");
+      }
     ;
 
 withins
@@ -1625,8 +1628,8 @@ chunkat_or_storage_or_select
     ;
 
 span_as
-    : FNSPANAS LPAREN LBRAKT g_value_list RBRAKT RPAREN {
-        $$ = AST::Make<AST::SpanAs>(@1, nullptr/*fill later*/, $4);
+    : FNSPANAS LPAREN g_value_list RPAREN {
+        $$ = AST::Make<AST::SpanAs>(@1, nullptr/*fill later*/, $3);
         parsing_derivation_decl = false;
       }
     ;
@@ -1637,56 +1640,49 @@ chunkat_expr
         auto ide = ElementMultiValues($1);
         $$ = AST::Make<AST::ChunkAt>(@1, ide.first, ide.second);
       }
-    | ids_expr span_as {
-        auto ide = ElementMultiValues($1);
-        $2->id = ide.first;
-        $$ = AST::Make<AST::ChunkAt>(@1, $2, ide.second);
-      }
     ;
 
-ts_infos
-    : ts_infos ts_info {
+spanned_ops
+    : spanned_ops spanned_op {
         if ($2 != nullptr) $1.push_back($2);
         $$ = $1;
       }
-    | ts_info {
-        $$ = std::vector<ptr<AST::TSInfo>>();
+    | spanned_op {
+        $$ = std::vector<ptr<AST::SpannedOperation>>();
         if ($1 != nullptr) $$.push_back($1);
       }
     ;
 
-ts_info
+spanned_op
     : CHUNKAT LPAREN value_list RPAREN {
         $3->SetDelimiter(", ");
-        $$ = OptTSInfo(AST::Make<AST::TSInfo>(@1, $3));
+        $$ = OptSpannedOperation(AST::Make<AST::SpannedOperation>(@1, $3, AST::SpannedOperation::TILING));
       }
     | CHUNK LPAREN value_list RPAREN AT LPAREN value_list RPAREN {
         $3->SetDelimiter(", ");
         $7->SetDelimiter(", ");
-        $$ = OptTSInfo(AST::Make<AST::TSInfo>(@1, $7, $3, AST::TSInfo::TILING));
+        $$ = OptSpannedOperation(AST::Make<AST::SpannedOperation>(@1, $7, $3, AST::SpannedOperation::TILEAT));
       }
     | SUBSPAN LPAREN value_list RPAREN AT LPAREN value_list RPAREN {
         $3->SetDelimiter(", ");
         $7->SetDelimiter(", ");
-        $$ = OptTSInfo(AST::Make<AST::TSInfo>(@1, $7, $3, AST::TSInfo::SUBSPAN));
+        $$ = OptSpannedOperation(AST::Make<AST::SpannedOperation>(@1, $7, $3, AST::SpannedOperation::SUBSPAN));
       }
     | MODSPAN LPAREN value_list RPAREN AT LPAREN value_list RPAREN {
         $3->SetDelimiter(", ");
         $7->SetDelimiter(", ");
-        $$ = OptTSInfo(AST::Make<AST::TSInfo>(@1, $7, $3, AST::TSInfo::MODSPAN));
+        $$ = OptSpannedOperation(AST::Make<AST::SpannedOperation>(@1, $7, $3, AST::SpannedOperation::MODSPAN));
+      }
+    | FNSPANAS LPAREN g_value_list RPAREN {
+        $3->SetDelimiter(", ");
+        $$ = AST::Make<AST::SpannedOperation>(@1, $3, AST::SpannedOperation::RESHAPE);
       }
     ;
 
 subdata_expr
-    : ids_expr ts_infos {
+    : ids_expr spanned_ops {
         auto ide = ElementMultiValues($1);
         $$ = AST::Make<AST::ChunkAt>(@1, ide.first, ide.second, $2);
-      }
-    | ids_expr span_as ts_infos {
-        /* TODO: move span_as to ts_info */
-        auto ide = ElementMultiValues($1);
-        $2->id = ide.first;
-        $$ = AST::Make<AST::ChunkAt>(@1, $2, ide.second, $3);
       }
     ;
 
@@ -1995,7 +1991,7 @@ ElementMultiValues(const ptr<AST::Expr>&e) {
   return std::make_pair(id, mv);
 }
 
-inline ptr<AST::TSInfo> OptTSInfo(const ptr<AST::TSInfo> &tsi) {
+inline ptr<AST::SpannedOperation> OptSpannedOperation(const ptr<AST::SpannedOperation> &tsi) {
   if (tsi == nullptr) return nullptr;
 
   bool not_tiled = true;

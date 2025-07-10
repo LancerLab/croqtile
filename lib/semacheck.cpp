@@ -42,6 +42,20 @@ bool SemaChecker::VisitNode(AST::BoolLiteral& n) {
 bool SemaChecker::VisitNode(AST::Expr& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
 
+  if (input_deps.Contains(n.GetR()))
+    input_deps.Add(n);
+  else if (input_deps.Contains(n.GetL()))
+    input_deps.Add(n);
+  else if (input_deps.Contains(n.GetC()))
+    input_deps.Add(n);
+
+  if (local_deps.Contains(n.GetR()))
+    local_deps.Add(n);
+  else if (local_deps.Contains(n.GetL()))
+    local_deps.Add(n);
+  else if (local_deps.Contains(n.GetC()))
+    local_deps.Add(n);
+
   // check out-of-bound for the elemof operation in wait or trigger.
   // note: elemof in chunkat is not Expr node, so we do not check it here.
   if (n.op == "elemof") {
@@ -95,19 +109,13 @@ bool SemaChecker::VisitNode(AST::Expr& n) {
                    PSTR(arr_sym) + "', where the valid range is [0, " +
                    std::to_string(bound) + ").";
 
-    if (auto b = VIBool(asrt0)) {
-      if (b.value() == false) Error1(expr->LOC(), message);
-    } else
-      FCtx(fname).InsertAssertion(asrt0, expr->LOC(), message);
-
-    if (auto b = VIBool(asrt1)) {
-      if (b.value() == false) Error1(expr->LOC(), message);
-    } else
-      FCtx(fname).InsertAssertion(asrt1, expr->LOC(), message);
+    EmitAssertion(asrt0, message, expr->LOC(), expr);
+    EmitAssertion(asrt1, message, expr->LOC(), expr);
   }
 
   return true;
 }
+
 bool SemaChecker::VisitNode(AST::MultiDimSpans& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
@@ -129,6 +137,10 @@ bool SemaChecker::VisitNode(AST::NamedVariableDecl& n) {
         error_count++;
       }
   }
+
+  if (n.init_expr && input_deps.Contains(n.init_expr)) input_deps.Add(n);
+
+  local_deps.Add(InScopeName(n.name_str));
 
   return true;
 }
@@ -162,6 +174,10 @@ bool SemaChecker::VisitNode(AST::Assignment& n) {
     return false;
   }
 
+  if (n.value && input_deps.Contains(n.value)) input_deps.Add(n);
+
+  if (n.IsDecl()) local_deps.Add(InScopeName(n.da->GetDataName()));
+
   return true;
 }
 
@@ -189,6 +205,9 @@ bool SemaChecker::VisitNode(AST::Identifier& n) {
 
 bool SemaChecker::VisitNode(AST::Parameter& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
+
+  if (n.sym) input_deps.Add(InScopeName(n.sym->name));
+
   return true;
 }
 
@@ -196,7 +215,8 @@ bool SemaChecker::VisitNode(AST::ParallelBy& n) {
   if (auto shape = GetShape(NodeType(n)); shape.IsDynamic()) {
     int index = 1;
     for (auto& dim : shape.Value()) {
-      auto& loc = n.SubPVs()->ValueAt(index - 1)->LOC();
+      auto spv = n.SubPVs()->ValueAt(index - 1);
+      auto& loc = spv->LOC();
       if (!IsComputable(dim)) {
         Error1(loc, "The parallel count (" + Ordinal(index) +
                         "th) can not be evaluated.");
@@ -208,10 +228,7 @@ bool SemaChecker::VisitNode(AST::ParallelBy& n) {
       auto asrt = sbe::cmp(">", dim, sbe::nu(0))->Normalize();
       assert(IsValidValueItem(asrt));
 
-      if (auto b = VIBool(asrt)) {
-        if (b.value() == false) Error1(loc, message);
-      } else
-        FCtx(fname).InsertAssertion(asrt, loc, message);
+      EmitAssertion(asrt, message, loc, spv);
       ++index;
     }
   }
@@ -231,10 +248,7 @@ bool SemaChecker::VisitNode(AST::WithIn& n) {
       auto asrt = sbe::cmp("!=", dim, sbe::nu(0))->Normalize();
       assert(IsValidValueItem(asrt));
 
-      if (auto b = VIBool(asrt)) {
-        if (b.value() == false) Error1(n.in->LOC(), message);
-      } else
-        FCtx(fname).InsertAssertion(asrt, n.in->LOC(), message);
+      EmitAssertion(asrt, message, n.in->LOC(), n.in);
       ++index;
     }
   }
@@ -456,16 +470,8 @@ bool SemaChecker::VisitNode(AST::ChunkAt& n) {
                      Ordinal(i + 1) + " dimension of array '" + PSTR(n.data) +
                      "', where the valid range is [0, " +
                      std::to_string(bound) + ").";
-
-      if (auto b = VIBool(asrt0)) {
-        if (b.value() == false) Error1(expr->LOC(), message);
-      } else
-        FCtx(fname).InsertAssertion(asrt0, expr->LOC(), message);
-
-      if (auto b = VIBool(asrt1)) {
-        if (b.value() == false) Error1(expr->LOC(), message);
-      } else
-        FCtx(fname).InsertAssertion(asrt1, expr->LOC(), message);
+      EmitAssertion(asrt0, message, expr->LOC(), expr);
+      EmitAssertion(asrt1, message, expr->LOC(), expr);
     }
   }
 
@@ -649,20 +655,24 @@ bool SemaChecker::VisitNode(AST::Select& n) {
   } else {
     if (n.select_factor->Opts().HasVal()) {
       auto v = n.select_factor->Opts().GetVal();
-      FCtx(CurrentFunctionName())
-          .InsertAssertion(sbe::oc_ge(v, sbe::nu(0))->Normalize(),
-                           n.select_factor->LOC(),
-                           "The select factor `" + PSTR(n.select_factor) +
-                               "` should be greater than or equal to 0.");
-      FCtx(CurrentFunctionName())
-          .InsertAssertion(
-              sbe::oc_lt(v, sbe::nu(select_value_cnt))->Normalize(),
-              n.select_factor->LOC(),
-              "The select factor `" + PSTR(n.select_factor) +
-                  "` should be less than " + std::to_string(select_value_cnt) +
-                  ", which is the count of values in the select statement.");
+      EmitAssertion(sbe::oc_ge(v, sbe::nu(0)),
+                    "The select factor `" + PSTR(n.select_factor) +
+                        "` should be greater than or equal to 0.",
+                    n.select_factor->LOC(), n.select_factor);
+      EmitAssertion(
+          sbe::oc_lt(v, sbe::nu(select_value_cnt)),
+          "The select factor `" + PSTR(n.select_factor) +
+              "` should be less than " + std::to_string(select_value_cnt) +
+              ", which is the count of values in the select statement.",
+          n.select_factor->LOC(), n.select_factor);
     }
   }
+
+  for (auto& v : n.expr_list->AllValues())
+    if (input_deps.Contains(v)) {
+      input_deps.Add(n);
+      break;
+    }
 
   return ec == error_count;
 }
@@ -725,4 +735,24 @@ bool SemaChecker::HasError() {
     return true;
   }
   return false;
+}
+
+void SemaChecker::EmitAssertion(const ValueItem& pred,
+                                const std::string& message, const location& l,
+                                const ptr<AST::Node>& n) {
+  if (auto b = VIBool(pred)) {
+    if (b.value() == false) Error1(l, message);
+    // else no assertion is triggered
+  } else {
+    if (local_deps.Contains(n)) {
+      // TODO: emit device check that is related to the local values
+      VST_DEBUG(dbgs() << "failed to generate check for " << STR(n) << ".\n");
+    } else {
+      if (!input_deps.Contains(n))
+        VST_DEBUG(dbgs() << "questionable: check is not related to input: "
+                         << PSTR(n) << ".\n");
+
+      FCtx(fname).InsertAssertion(pred, l, message);
+    }
+  }
 }

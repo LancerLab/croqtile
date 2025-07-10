@@ -17,14 +17,14 @@ __co__ void bounded(s32 [180, 27, 12] a) {
 
 // CHECK:    for_(x, 10, 1, [&](auto iv_x) {
 // CHECK:      for_(y, 9, 1, [&](auto iv_y) {
-// CHECK:        auto anon_1 = ((iv_x)*(Value(9))+(iv_y));
-// CHECK:        auto anon_2 = ((iv_y)+(Value(1)));
-// CHECK:        async_load_(__choreo_anon_fut__0, a, anon_4, {Value(2)*anon_1,Value(3)*anon_2,Value(2)*thread_id});
+// CHECK:        auto anon_0 = ((iv_x)*(Value(9))+(iv_y));
+// CHECK:        auto anon_1 = ((iv_y)+(Value(1)));
+// CHECK:        async_load_(__choreo_anon_fut__0, a, anon_4, {Value(2)*anon_0,Value(3)*anon_1,Value(2)*thread_id});
 
 // CHECK:    for_(x, 10, 1, [&](auto iv_x) {
 // CHECK:      for_(y, 9, 1, [&](auto iv_y) {
 // CHECK:        for_(z, 2, 1, [&](auto iv_z) {
-// CHECK:          auto anon_0 = bitcast_(DRAMType(IntType(32), {58320}), a);
+// CHECK:          auto anon_2 = bitcast_(DRAMType(IntType(32), {58320}), a);
 // CHECK:          auto anon_3 = ((((iv_x)*(Value(9))+(iv_y)))*(Value(2))+(iv_z));
-// CHECK:          async_load_(__choreo_anon_fut__1, anon_0, anon_5, {Value(324)*anon_3});
+// CHECK:          async_load_(__choreo_anon_fut__1, anon_2, anon_5, {Value(324)*anon_3});
 // CHECK:    async_load_(__choreo_anon_fut__2, a, anon_6, {Value(18)*x,Value(3)*(Value(1)),Value(2)*(Value(6)+(Value(-1)))});

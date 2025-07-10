@@ -38,9 +38,11 @@
 //
 // Note: special thanks to deepseek for initiating the code
 
-extern Choreo::Option<bool> apprx_div;
-
 namespace Choreo {
+
+// requires C++17
+inline Option<bool> apprx_div(OptionKind::User, "--apprx-div", "", true,
+                              "Allows legacy inaccurate division patten.");
 
 // Supported operation types
 enum class OpCode {
@@ -490,7 +492,7 @@ public:
   UnaryOperation(OpCode op, const Operand& o) : op(op), oprd(o) {}
 
   const std::string ToString(const std::string& suffix = "") const override {
-    return oprd->ToString(suffix) + PSTR(oprd);
+    return STR(op) + oprd->ToString(suffix);
   }
 
   bool IsNumeric() const override { return oprd->IsNumeric(); }
@@ -521,6 +523,7 @@ public:
       if (op == OpCode::BIT_INV) return nu(~nv->Value());
     } else if (auto bv = dyn_cast<BooleanValue>(simplified)) {
       if (op == OpCode::NOT) return bl(!bv->Value());
+    } else if (auto bo = dyn_cast<BinaryOperation>(simplified)) {
     }
     return std::make_shared<UnaryOperation>(op, simplified);
   }
@@ -713,10 +716,14 @@ public:
       if (lnv && (lnv->Value() == 0)) return nu(0);
     }
     // x|0 = x, 0|x = x
-    else if (op == OpCode::AND) {
+    else if (op == OpCode::OR) {
       if (rnv && (rnv->Value() == 0)) return simplifiedLeft;
       if (lnv && (lnv->Value() == 0)) return simplifiedRight;
     }
+
+    // x - x = 0
+    if (op == OpCode::SUBTRACT && *simplifiedLeft == *simplifiedRight)
+      return sbe::nu(0);
 
     // If no simplification possible, return a new binary operation
     return std::make_shared<BinaryOperation>(op, simplifiedLeft,
@@ -727,9 +734,9 @@ public:
     Operand expr = std::make_shared<BinaryOperation>(op, left, right);
     while (true) {
       auto new_expr = expr->Reorder()->Fold()->Reassociate()->Fold();
-      if (*new_expr == *expr)
+      if (*new_expr == *expr) {
         return new_expr;
-      else
+      } else
         expr = new_expr;
     }
     choreo_unreachable("unexpected flow.");
@@ -853,14 +860,6 @@ public:
         auto cv = cast<NumericValue>(c)->Value();
         if (!product_overflow(bv, cv)) return (a / nu(bv * cv))->Fold();
       }
-#if 0
-      if (lbop->op == OpCode::DIVIDE && op == OpCode::MULTIPLY && (*b < *c || (b->IsNumeric() && c->IsNumeric()))) {
-        // (a / b) * c -> a * (c / b), when a is not numeric
-        auto bv = cast<NumericValue>(b)->Value();
-        auto cv = cast<NumericValue>(c)->Value();
-        if (gcd(bv, cv) == bv) return a * (c / b)->Fold();
-      }
-#endif
     }
 
     if (auto rbop = dyn_cast<BinaryOperation>(r)) {
@@ -873,16 +872,6 @@ public:
           // a / (b / c) -> c,  when a == b
           return c;
         }
-#if 0
-        if (b->IsNumeric() && c->IsNumeric()) {
-          auto bv = cast<NumericValue>(b)->Value();
-          auto cv = cast<NumericValue>(c)->Value();
-          if (cv > bv) {
-            // a / (b / c) = a * (c / b)
-            return a * (c / b);
-          }
-        }
-#endif
       } else if (apprx_div && op == OpCode::DIVIDE &&
                  rbop->op == OpCode::MULTIPLY && isa<BinaryOperation>(b) &&
                  !a->IsNumeric()) {

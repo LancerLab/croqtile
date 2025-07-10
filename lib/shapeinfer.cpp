@@ -277,15 +277,19 @@ bool ShapeInference::Visit(AST::Expr& n) {
   switch (NodeValNoKind(n)) {
   case VNKind::VNK_VALUE: {
     auto vl = vn.GenValueListFromSignature(GetSign(n));
-    if (ShouldOpt(vl) && !n.Note().count("diverge")) n.Opts().SetVals(vl);
-    VST_DEBUG(dbgs() << " |-<exprval> <" << PSTR(nty) << "> " << STR(n) << ": "
-                     << STR(vl) << "\n");
+    if (ShouldOpt(vl)) {
+      n.Opts().SetVals(vl);
+      VST_DEBUG(dbgs() << " |-<exprval> <" << PSTR(nty) << "> " << STR(n)
+                       << ": " << STR(vl) << "\n");
+    }
   } break;
   case VNKind::VNK_UBOUND: {
     auto vl = vn.GenValueListFromSignature(GetSign(n));
-    if (ShouldOpt(vl) && !n.Note().count("diverge")) n.Opts().SetVals(vl);
-    VST_DEBUG(dbgs() << " |-<exprval> <" << PSTR(nty) << "> " << STR(n) << ": "
-                     << STR(vl) << "\n");
+    if (ShouldOpt(vl)) {
+      n.Opts().SetVals(vl);
+      VST_DEBUG(dbgs() << " |-<exprval> <" << PSTR(nty) << "> " << STR(n)
+                       << ": " << STR(vl) << "\n");
+    }
     auto ub_vl = vn.GenValueListFromSignature(GetSign(n, VNKind::VNK_UBOUND));
     if (ShouldOpt(ub_vl)) n.Opts().SetUBounds(ub_vl);
     VST_DEBUG(dbgs() << " |-<exprbound> <" << PSTR(nty) << "> " << STR(n)
@@ -1047,31 +1051,31 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
 
   if (cannot_proceed) return true;
 
-  NumTy ca_valno = GetInvalidValueNumber();
-
   auto pty = SSTab().LookupSymbol(n.data->name);
   assert((isa<SpannedType>(pty) || isa<FutureType>(pty)) &&
          "unexpected data type.");
 
   auto span_name = RemoveSuffix(n.data->name, ".data") + ".span";
+
   auto sty = GetSpannedType(pty);
 
-  if (n.NoTile()) {
+  if (n.NoOperation()) {
     // it is just a symbol reference
-    ca_valno = GetValNum(SSTab().InScopeName(span_name));
 
-    auto vl = vn.GenValueListFromValueNumber(ca_valno);
+    cur_vn = GetValNum(SSTab().InScopeName(span_name));
+    auto vl = vn.GenValueListFromValueNumber(cur_vn);
     if (IsValidValueList(vl) && !IsComputable(vl))
       Error1(n.LOC(), "The destination block shape can not be evaluated.");
 
-    auto future_shape = GenShape(ca_valno);
+    auto future_shape = GenShape(cur_vn);
+
     // set the chunkat's type
     SetNodeType(n,
                 MakeSpannedType(sty->e_type, future_shape, sty->GetStorage()));
-    n.s = future_shape;
-    assert(n.s.IsValid());
 
-    cur_vn = ca_valno;
+    n.SetBlockShape(future_shape);
+    assert(n.GetBlockShape().IsValid());
+
     return true;
   }
 
@@ -1084,136 +1088,152 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
   bool is_modspan = false;
   auto cur_vns = data_vns;
 
-  // handle all chunkat expressions iteratively
-  for (auto tsi : n.AllTSInfo()) {
+  // handle all spanned expressions iteratively
+  for (auto op : n.AllOperations()) {
     mod_vns.clear();
     res_vns.clear();
 
     { // make sure all expressions get the value numbers
       auto old_gv = gen_values;
       gen_values = true;
-      tsi->Positions()->accept(*this);
-      if (tsi->MultipleExprs()) tsi->GetTFSSExpr()->accept(*this);
+      op->accept(*this);
       gen_values = old_gv;
     }
 
     std::vector<NumTy> tfs_vns;
     std::vector<NumTy> pos_vns;
 
-    if (tsi->MultipleExprs()) {
-      // when the code provides explicit tiling factors or subspan
-      tfs_vns = vn.NumVector(GetValNo(*tsi->GetTFSSExpr()));
-      assert(tfs_vns.size() == cur_vns.size());
-    } else {
-      // or else, the ubounds are tiling factors
-      pos_vns = vn.NumVector(GetValNo(*tsi->Positions(), VNKind::VNK_UBOUND));
-      assert(cur_vns.size() == pos_vns.size());
-    }
-
-    for (size_t index = 0; index < cur_vns.size(); ++index) {
-      if (tsi->HasSubSpanExpr()) {
-        // block.span = subspan
-        auto lvi = vn.GenValueItemFromValueNumber(cur_vns[index]);
-        auto rvi = vn.GenValueItemFromValueNumber(tfs_vns[index]);
-        if (sbe::clt(lvi, rvi)) {
-          Error(tsi->TFSSAt(index)->LOC(),
-                "the subspan dimension (dim: " + std::to_string(index) +
-                    ") is larger than original (" + STR(rvi) + " > " +
-                    STR(lvi) + ").");
+    if (op->SpecifyReshape()) {
+      auto rshp_vn = GetValNo(*op->RShape());
+      auto rvi = vn.GenValueListFromValueNumber(rshp_vn);
+      auto cvi = vn.GenValueListFromSignature(m_sn(cur_vns));
+      // check if the mutilplicant is equal
+      auto r_count = MultiplyAll(rvi);
+      auto c_count = MultiplyAll(cvi);
+      if (sbe::cne(r_count, c_count)) {
+        if (VIIsInt(r_count) && VIIsInt(c_count)) {
+          Error(op->LOC(), "can not apply span_as to reshape from [" +
+                               STR(cvi) + "](" + STR(c_count) + ") to [" +
+                               STR(rvi) + "](" + STR(r_count) + ").");
           error_count++;
-        }
-        res_vns.push_back(tfs_vns[index]);
-      } else if (tsi->HasModSpanExpr()) {
-        // block.span = data.span % tiling_factor
-        auto lvi = vn.GenValueItemFromValueNumber(cur_vns[index]);
-        auto rvi = vn.GenValueItemFromValueNumber(tfs_vns[index]);
-        if (sbe::clt(lvi, rvi)) {
-          Error(tsi->TFSSAt(index)->LOC(),
-                "the subspan dimension (dim: " + std::to_string(index) +
-                    ") is larger than the data (" + STR(rvi) + " > " +
-                    PSTR(lvi) + ").");
+        } else if (VIIsNil(r_count) || VIIsNil(c_count)) {
+          Error(op->LOC(), "can not apply span_as to a mdspan with infinite a "
+                           "dimension value.");
           error_count++;
+        } else {
+          Warning(op->LOC(), "can not prove equality of mdspan [" + STR(cvi) +
+                                 "] and mdspan [" + STR(rvi) +
+                                 "] at compile-time.");
+          // TODO: (at semacheck) emit runtime check
         }
-        auto mod_sig = vn.Simplify(o_sn("%", cur_vns[index], tfs_vns[index]));
-        mod_vns.push_back(GetOrGenValNum(mod_sig));
-        res_vns.push_back(tfs_vns[index]);
-      } else if (tsi->HasTilingExpr()) {
-        // block.span = data.span / tiling_factor
-        auto lvi = vn.GenValueItemFromValueNumber(cur_vns[index]);
-        auto rvi = vn.GenValueItemFromValueNumber(tfs_vns[index]);
-        if (sbe::clt(lvi, rvi)) {
-          Error(tsi->TFSSAt(index)->LOC(),
-                "the tiling factor (dim: " + std::to_string(index) +
-                    ") is larger than the data dimension (" + STR(rvi) + " > " +
-                    PSTR(lvi) + ").");
-          error_count++;
-        }
-        auto res_sig = vn.Simplify(o_sn("/", cur_vns[index], tfs_vns[index]));
-        res_vns.push_back(GetOrGenValNum(res_sig));
-      } else {
-        // block.span = data.span / #pos
-        auto lvi = vn.GenValueItemFromValueNumber(cur_vns[index]);
-        auto rvi = vn.GenValueItemFromValueNumber(pos_vns[index]);
-        if (sbe::clt(lvi, rvi)) {
-          Error(tsi->LOC(), "the tiling factor (dim: " + std::to_string(index) +
-                                ") is larger than the data dimension (" +
-                                STR(rvi) + " > " + STR(lvi) + ").");
-          error_count++;
-        }
-        auto res_sig = vn.Simplify(o_sn("/", cur_vns[index], pos_vns[index]));
-        res_vns.push_back(GetOrGenValNum(res_sig));
       }
+      res_vns = vn.NumVector(SignValNo(rshp_vn));
+    } else {
+      if (op->MultipleExprs()) {
+        // when the code provides explicit tiling factors or subspan
+        tfs_vns = vn.NumVector(GetValNo(*op->TFSS()));
+        assert(tfs_vns.size() == cur_vns.size());
+      } else {
+        // or else, the ubounds are tiling factors
+        pos_vns = vn.NumVector(GetValNo(*op->Positions(), VNKind::VNK_UBOUND));
+        assert(cur_vns.size() == pos_vns.size());
+      }
+
+      for (size_t index = 0; index < cur_vns.size(); ++index) {
+        if (op->OpCode() == AST::SpannedOperation::SUBSPAN) {
+          // block.span = subspan
+          auto lvi = vn.GenValueItemFromValueNumber(cur_vns[index]);
+          auto rvi = vn.GenValueItemFromValueNumber(tfs_vns[index]);
+          if (sbe::clt(lvi, rvi)) {
+            Error(op->TFSSAt(index)->LOC(),
+                  "the subspan dimension (dim: " + std::to_string(index) +
+                      ") is larger than original (" + STR(rvi) + " > " +
+                      STR(lvi) + ").");
+            error_count++;
+          }
+          res_vns.push_back(tfs_vns[index]);
+        } else if (op->OpCode() == AST::SpannedOperation::MODSPAN) {
+          // block.span = data.span % tiling_factor
+          auto lvi = vn.GenValueItemFromValueNumber(cur_vns[index]);
+          auto rvi = vn.GenValueItemFromValueNumber(tfs_vns[index]);
+          if (sbe::clt(lvi, rvi)) {
+            Error(op->TFSSAt(index)->LOC(),
+                  "the subspan dimension (dim: " + std::to_string(index) +
+                      ") is larger than the data (" + STR(rvi) + " > " +
+                      PSTR(lvi) + ").");
+            error_count++;
+          }
+          auto mod_sig = vn.Simplify(o_sn("%", cur_vns[index], tfs_vns[index]));
+          mod_vns.push_back(GetOrGenValNum(mod_sig));
+          res_vns.push_back(tfs_vns[index]);
+        } else if (op->OpCode() == AST::SpannedOperation::TILEAT) {
+          // block.span = data.span / tiling_factor
+          auto lvi = vn.GenValueItemFromValueNumber(cur_vns[index]);
+          auto rvi = vn.GenValueItemFromValueNumber(tfs_vns[index]);
+          if (sbe::clt(lvi, rvi)) {
+            Error(op->TFSSAt(index)->LOC(),
+                  "the tiling factor (dim: " + std::to_string(index) +
+                      ") is larger than the data dimension (" + STR(rvi) +
+                      " > " + PSTR(lvi) + ").");
+            error_count++;
+          }
+          auto res_sig = vn.Simplify(o_sn("/", cur_vns[index], tfs_vns[index]));
+          res_vns.push_back(GetOrGenValNum(res_sig));
+        } else if (op->OpCode() == AST::SpannedOperation::TILING) {
+          // block.span = data.span / #pos
+          auto lvi = vn.GenValueItemFromValueNumber(cur_vns[index]);
+          auto rvi = vn.GenValueItemFromValueNumber(pos_vns[index]);
+          if (sbe::clt(lvi, rvi)) {
+            Error(op->LOC(),
+                  "the tiling factor (dim: " + std::to_string(index) +
+                      ") is larger than the data dimension (" + STR(rvi) +
+                      " > " + STR(lvi) + ").");
+            error_count++;
+          }
+          auto res_sig = vn.Simplify(o_sn("/", cur_vns[index], pos_vns[index]));
+          res_vns.push_back(GetOrGenValNum(res_sig));
+        } else
+          choreo_unreachable("unsupported operation.");
+      }
+      assert(res_vns.size() == cur_vns.size());
     }
 
-    if (tsi->HasModSpanExpr()) {
+    if (op->OpCode() == AST::SpannedOperation::MODSPAN) {
       cur_vns = mod_vns;
       is_modspan = true;
     } else {
       cur_vns = res_vns;
       is_modspan = false;
     }
-    auto sign = m_sn(res_vns); // signature of the sub-block
-    tsi->SetBlockShape(GenShape(sign));
+    op->SetBlockShape(GenShape(m_sn(res_vns)));
   }
-
-  assert(res_vns.size() == data_vns.size());
 
   Shape block_shape;
-  if (res_vns.size() == 1) {
-    if (is_modspan) {
-      ca_valno = mod_vns[0];
-      block_shape = GenShape(res_vns[0]);
-    } else
-      ca_valno = res_vns[0];
-  } else {
-    // generate signature for multi-valnos
-    auto b_sign = m_sn(res_vns);   // signature of the sub-block
-    if (is_modspan) {              // remainder value as the current shape value
-      auto m_sign = m_sn(mod_vns); // specific for modspan operation
-      ca_valno = GetOrGenValNum(m_sign);
-      auto b_valno = GetOrGenValNum(b_sign);
-      block_shape = GenShape(b_valno);
-    } else
-      ca_valno = GetOrGenValNum(b_sign);
-  }
+  // generate signature for multi-valnos
+  auto b_sign = m_sn(res_vns);   // signature of the sub-block
+  if (is_modspan) {              // remainder value as the current shape value
+    auto m_sign = m_sn(mod_vns); // specific for modspan operation
+    cur_vn = GetOrGenValNum(m_sign);
+    auto b_valno = GetOrGenValNum(b_sign);
+    block_shape = GenShape(b_valno);
+  } else
+    cur_vn = GetOrGenValNum(b_sign);
 
-  auto vl = vn.GenValueListFromValueNumber(ca_valno);
+  auto vl = vn.GenValueListFromValueNumber(cur_vn);
   if (IsValidValueList(vl) && !IsComputable(vl))
     Error1(n.LOC(), "The destination block shape can not be evaluated.");
 
-  auto future_shape = GenShape(ca_valno);
+  auto future_shape = GenShape(cur_vn);
 
   // set the chunkat's type
   SetNodeType(n, MakeSpannedType(sty->e_type, future_shape, sty->GetStorage()));
 
   if (is_modspan)
-    n.s = block_shape;
+    n.SetBlockShape(block_shape);
   else
-    n.s = future_shape;
+    n.SetBlockShape(future_shape);
 
-  assert(n.s.IsValid());
-
-  cur_vn = ca_valno;
+  assert(n.GetBlockShape().IsValid());
 
   return true;
 }
@@ -1345,7 +1365,6 @@ bool ShapeInference::Visit(AST::Select& n) {
   assert(!n.inDMA);
   if (auto sty = dyn_cast<SpannedType>(NodeType(n))) {
     auto s0 = cast<AST::Expr>(n.expr_list->ValueAt(0));
-    std::cout << "s0: " << PSTR(s0) << "\n";
     auto s0ty = NodeType(*s0);
     if (s0ty && s0ty->HasSufficientInfo()) {
       SetNodeType(n, s0ty);

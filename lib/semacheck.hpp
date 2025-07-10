@@ -3,6 +3,7 @@
 
 // This apply the type check and symbol table generation
 
+#include "derivation.hpp"
 #include "visitor.hpp"
 
 namespace Choreo {
@@ -16,6 +17,9 @@ private:
   std::set<std::string> waited_async;  // a simple check to detect async
                                        // entities that are not waited
 
+  AttributeDeriver input_deps{this, "input-deps", false};
+  AttributeDeriver local_deps{this, "local-deps", false};
+
 private:
   bool BeforeVisitImpl(AST::Node&) override;
   bool AfterVisitImpl(AST::Node&) override;
@@ -23,6 +27,9 @@ private:
   bool ReportUnknown(AST::Node&, const char*, int, bool = false);
   bool ReportUnknownSymbol(const std::string&, const location&, const char*,
                            int);
+
+  void EmitAssertion(const ValueItem&, const std::string&, const location&,
+                     const ptr<AST::Node>&);
 
 public:
   SemaChecker()

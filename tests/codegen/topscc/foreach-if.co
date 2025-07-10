@@ -19,9 +19,9 @@ __co__ void bar(int N) {
 // CHECK:     for (__iv_x = 0; __iv_x < (N % 6); ++__iv_x) {
 // CHECK:       for (__iv_y = 0; __iv_y < 2; ++__iv_y) {
 // CHECK:         for (__iv_z = 0; __iv_z < 1; ++__iv_z) {
-// CHECK:           if (__tops_tid_x() < (N % 6)) {
+// CHECK:           if ((__tops_tid_x() < N % 6)) {
 
 // CHECK:     for (__iv_re__elem__0 = 0; __iv_re__elem__0 < (N % 6); ++__iv_re__elem__0) {
 // CHECK:       for (__iv_y = 0; __iv_y < 2; ++__iv_y) {
 // CHECK:         for (__iv_z = 0; __iv_z < 1; ++__iv_z) {
-// CHECK:           if (__tops_tid_x() == 0) {
+// CHECK:           if ((__tops_tid_x() == 0)) {

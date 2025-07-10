@@ -15,15 +15,15 @@ __co__  void foo(f32 [1, 2, 4] a) {
 }
 
 // CHECK: __global__ void __choreo_device_foo(float * a) {
-// CHECK:   if (__tops_tid_x() < 3) {
+// CHECK:   if ((__tops_tid_x() < 3)) {
 // CHECK:   }
 // CHECK:   __syncthreads(); // end inthreads
-// CHECK:   if (__tops_tid_x() > 0) {
-// CHECK:       if (__tops_tid_x() == 0) {
+// CHECK:   if ((__tops_tid_x() > 0)) {
+// CHECK:       if ((__tops_tid_x() == 0)) {
 // CHECK:       } // end inthreads
 // CHECK:   }
 // CHECK:   __syncthreads(); // end inthreads
-// CHECK:   if (__tops_tid_x() == 1) {
+// CHECK:   if ((__tops_tid_x() == 1)) {
 // CHECK:   }
 // CHECK:   __syncthreads(); // end inthreads
 // CHECK: }
@@ -35,9 +35,9 @@ __co__  void bar(f32 [1, 2, 4] a) {
     sync.shared;
   }
 }
-// CHECK:   if (__tops_tid_x() < 3) {
+// CHECK:   if ((__tops_tid_x() < 3)) {
 // CHECK:   } // end inthreads
 // CHECK-NOT:   __syncthreads();
-// CHECK:   if (__tops_tid_x() > 0) {
+// CHECK:   if ((__tops_tid_x() > 0)) {
 // CHECK:   } // end inthreads
 // CHECK:   __syncthreads();

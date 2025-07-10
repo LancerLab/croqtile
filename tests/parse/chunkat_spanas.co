@@ -1,0 +1,11 @@
+// RUN: choreo -e %s | FileCheck %s
+
+__co__ void foo(f32 [M, N] d_values, int query_idx, int embedding_vec_size) {
+  parallel by 1
+    foreach k_loop_idx in [1024]
+      dma.copy d_values.subspan(1, embedding_vec_size).at(m_loop_idx#query_idx, 0).span_as(1, 1, 1, embedding_vec_size) => local;
+}
+
+// CHECK:      `- DMA.copy
+// CHECK:        `- from: d_values.SubSpan(1, embedding_vec_size).At( (m_loop_idx # query_idx) , 0).SpanAs(1, 1, 1, embedding_vec_size)
+// CHECK:        `- to: local

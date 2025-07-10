@@ -609,18 +609,18 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
     size_t rank = sty->Dims();
 
     auto ca = cast<AST::ChunkAt>(&n);
-    if (ca->NoTile()) {
+    if (ca->NoOperation()) {
       // symbol only, the offset is a multi-dim-zeros
       return "[" + DelimitedString(std::vector<size_t>(rank, 0)) + "]";
     }
 
-    if (ca->AllTSInfo().size() != 1)
+    if (ca->TilingOperationCount() > 1)
       choreo_unreachable("multiple chunkat is not support by current target.");
 
     std::ostringstream offss;
     size_t dim_cursor = 0;
 
-    for (auto& bv : ca->AllTSInfo()[0]->GetIndices()) {
+    for (auto& bv : ca->AllOperations()[0]->GetIndices()) {
       auto bvn = cast<AST::Identifier>(bv)->name;
       if (bvn == "__choreo_no_tiling__") {
         offss << "I(0)";
@@ -665,17 +665,17 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
     size_t rank = sty->Dims();
 
     auto ca = cast<AST::ChunkAt>(&n);
-    if (ca->NoTile()) {
+    if (ca->NoOperation()) {
       // symbol only, the offset is a multi-dim-zeros
       return "[" + DelimitedString(std::vector<size_t>(rank, 0)) + "]";
     }
 
-    if (ca->AllTSInfo().size() != 1)
+    if (ca->TilingOperationCount() > 1)
       choreo_unreachable("multiple chunkat is not support by current target.");
 
     std::ostringstream offss;
     size_t dim_cursor = 0;
-    for (auto& bv : ca->AllTSInfo()[0]->GetIndices()) {
+    for (auto& bv : ca->AllOperations()[0]->GetIndices()) {
       auto bvn = cast<AST::Identifier>(bv)->name;
       if (auto bity = dyn_cast<BoundedITupleType>(bv->GetType())) {
         for (size_t it_idx = 0; it_idx < bity->Dims(); ++it_idx) {
@@ -740,7 +740,7 @@ bool CUDACodeGen::Visit(AST::DMA& d) {
   if (isa<AST::Memory>(d.to) || isa<AST::Select>(d.to))
     chunkat_node = d.from;
   else if (auto c = cast<AST::ChunkAt>(d.to)) {
-    if (c->HasTile()) // xxx.chunkat() => identifier
+    if (c->HasOperation()) // xxx.chunkat() => identifier
       chunkat_node = d.from;
     else
       chunkat_node = d.to;

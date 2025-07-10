@@ -95,85 +95,63 @@ int main() { /// host program
 // CHECK: (  2)   parallel p = {p__elem__x} by [1] {
 // CHECK: (  3)     with index = {a4, a5, b, c, d} in [ 3 1 1 1 1 ] {
 // CHECK: (  4)       foreach index(::) {
-// CHECK: (  5)         anon_0 = input.span_as[ 3 16 16 ]
-// CHECK: (  6)         anon_4 =  ( (b # c)  # d) 
-// CHECK: (  7)         local s32 mdspan<3> [1, 16, 16] input_shape_c__buf__
-// CHECK: (  8)         input_shape_c = dma.copy.async anon_0.ChunkAt(a4, a5, anon_4) => input_shape_c__buf__
-// CHECK: (  9)         wait input_shape_c
-// CHECK: ( 10)         local s32 [ 2 2 16 4 ] output_shape_c
-// CHECK: ( 11)         anon_1 = input_shape_c.span_as[ 16 2 4 2 ]
-// CHECK: ( 12)         dma.transp transpose: dims{1, 3, 0, 2} anon_1 => output_shape_c
-// CHECK: ( 13)         anon_2 = output_shape_c.span_as[ 4 1 64 ]
-// CHECK: ( 14)         anon_3 = output.span_as[ 4 3 64 ]
-// CHECK: ( 15)         anon_5 =  (b # d) 
-// CHECK: ( 16)         anon_6 =  (a5 # c) 
-// CHECK: ( 17)         out_store = dma.copy.async anon_2 => anon_3.ChunkAt(anon_5, a4, anon_6)
-// CHECK: ( 18)         wait out_store
-// CHECK: ( 19)       }
-// CHECK: ( 20)     }
-// CHECK: ( 21)   }
-// CHECK: ( 22)   return output
-// CHECK: ( 23) }
+// CHECK: (  5)         anon_0 =  ( (b # c)  # d)
+// CHECK: (  6)         local s32 mdspan<3> [1, 16, 16] input_shape_c__buf__
+// CHECK: (  7)         input_shape_c = dma.copy.async input.SpanAs([ 3 16 16 ]).ChunkAt(a4, a5, anon_0) => input_shape_c__buf__
+// CHECK: (  8)         wait input_shape_c
+// CHECK: (  9)         local s32 [ 2 2 16 4 ] output_shape_c
+// CHECK: ( 10)         dma.transp transpose: dims{1, 3, 0, 2} input_shape_c.SpanAs([ 16 2 4 2 ]) => output_shape_c
+// CHECK: ( 11)         anon_1 =  (b # d)
+// CHECK: ( 12)         anon_2 =  (a5 # c)
+// CHECK: ( 13)         out_store = dma.copy.async output_shape_c.SpanAs([ 4 1 64 ]) => output.SpanAs([ 4 3 64 ]).ChunkAt(anon_1, a4, anon_2)
+// CHECK: ( 14)         wait out_store
+// CHECK: ( 15)       }
+// CHECK: ( 16)     }
+// CHECK: ( 17)   }
+// CHECK: ( 18)   return output
+// CHECK: ( 19) }
 
 // CHECK: BUFFER ::transpose::input
-// CHECK:         range: [0, 21] 
+// CHECK:         range: [0, 17]
 // CHECK: VAR    ::transpose::input.span
-// CHECK:         range: [0, x] 
+// CHECK:         range: [0, x]
 // CHECK: BUFFER ::transpose::output
-// CHECK:         range: [1, 22] 
+// CHECK:         range: [1, 18]
 // CHECK: VAR    ::transpose::output.span
-// CHECK:         range: [1, x] 
+// CHECK:         range: [1, x]
 // CHECK: VAR    ::transpose::paraby_0::p
-// CHECK:         range: [2, 21] 
+// CHECK:         range: [2, 17]
 // CHECK: VAR    ::transpose::paraby_0::p__elem__x
-// CHECK:         range: [2, 21] 
+// CHECK:         range: [2, 17]
 // CHECK: VAR    ::transpose::paraby_0::within_0::a4
-// CHECK:         range: [3, 19] 
+// CHECK:         range: [3, 15]
 // CHECK: VAR    ::transpose::paraby_0::within_0::a5
-// CHECK:         range: [3, 19] 
+// CHECK:         range: [3, 15]
 // CHECK: VAR    ::transpose::paraby_0::within_0::b
-// CHECK:         range: [3, 19] 
+// CHECK:         range: [3, 15]
 // CHECK: VAR    ::transpose::paraby_0::within_0::c
-// CHECK:         range: [3, 19] 
+// CHECK:         range: [3, 15]
 // CHECK: VAR    ::transpose::paraby_0::within_0::d
-// CHECK:         range: [3, 19] 
+// CHECK:         range: [3, 15]
 // CHECK: VAR    ::transpose::paraby_0::within_0::index
-// CHECK:         range: [3, 19] 
-// CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::anon_0
-// CHECK:         range: [5, 9] 
-// CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::anon_0.span
-// CHECK:         range: [5, x] 
-// CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::anon_4
-// CHECK:         range: [6, 8] 
+// CHECK:         range: [3, 15]
 // CHECK: BUFFER ::transpose::paraby_0::within_0::foreach_0::input_shape_c__buf__
-// CHECK:         range: [7, 12] 
+// CHECK: 	      range: [6, 10]
 // CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::input_shape_c__buf__.span
-// CHECK:         range: [7, x] 
+// CHECK: 	      range: [6, x]
 // CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::input_shape_c
-// CHECK:         range: [8, 12] 
+// CHECK:         range: [7, 10]
 // CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::input_shape_c.span
-// CHECK:         range: [8, x] 
+// CHECK:         range: [7, x]
 // CHECK: BUFFER ::transpose::paraby_0::within_0::foreach_0::output_shape_c
-// CHECK:         range: [10, 18] 
+// CHECK:         range: [9, 14]
 // CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::output_shape_c.span
-// CHECK:         range: [10, x] 
+// CHECK:         range: [9, x]
 // CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::anon_1
-// CHECK:         range: [11, 12] 
-// CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::anon_1.span
-// CHECK:         range: [11, x] 
+// CHECK:         range: [11, 13]
 // CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::anon_2
-// CHECK:         range: [13, 18] 
-// CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::anon_2.span
-// CHECK:         range: [13, x] 
-// CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::anon_3
-// CHECK:         range: [14, 18] 
-// CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::anon_3.span
-// CHECK:         range: [14, x] 
-// CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::anon_5
-// CHECK:         range: [15, 17] 
-// CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::anon_6
-// CHECK:         range: [16, 17] 
+// CHECK:         range: [12, 13]
 // CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::out_store
-// CHECK:         range: [17, 18] 
+// CHECK:         range: [13, 14]
 // CHECK: VAR    ::transpose::paraby_0::within_0::foreach_0::out_store.span
-// CHECK:         range: [17, x]
+// CHECK:         range: [13, x]

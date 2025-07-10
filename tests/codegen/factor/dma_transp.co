@@ -28,15 +28,15 @@ __co__ auto dma_transp(s32 [8, 2, 3, 2, 4, 2] input) {
 // CHECK:          for_(c, 1, 1, [&](auto iv_c) {
 // CHECK:            for_(d, 1, 1, [&](auto iv_d) {
 // CHECK:              auto anon_0 = bitcast_(DRAMType(IntType(32), {3, 16, 16}), input);
-// CHECK:              auto anon_4 = ((((iv_b)*(Value(1))+(iv_c)))*(Value(1))+(iv_d));
-// CHECK:              async_load_(input_shape_c, anon_0, input_shape_c__buf__, {Value(1)*iv_a4,Value(16)*iv_a5,Value(16)*anon_4});
+// CHECK:              auto anon_1 = ((((iv_b)*(Value(1))+(iv_c)))*(Value(1))+(iv_d));
+// CHECK:              async_load_(input_shape_c, anon_0, input_shape_c__buf__, {Value(1)*iv_a4,Value(16)*iv_a5,Value(16)*anon_1});
 // CHECK:              wait_dma_(input_shape_c);
-// CHECK:              auto anon_1 = bitcast_(L1Type(IntType(32), {16, 2, 4, 2}), input_shape_c__buf__);
-// CHECK:              async_load_(__choreo_anon_fut__0, anon_1, output_shape_c, {0, 0, 0, 0}, {1, 3, 0, 2});
+// CHECK:              auto anon_2 = bitcast_(L1Type(IntType(32), {16, 2, 4, 2}), input_shape_c__buf__);
+// CHECK:              async_load_(__choreo_anon_fut__0, anon_2, output_shape_c, {0, 0, 0, 0}, {1, 3, 0, 2});
 // CHECK:              wait_dma_(__choreo_anon_fut__0);
-// CHECK:              auto anon_2 = bitcast_(L1Type(IntType(32), {4, 1, 64}), output_shape_c);
-// CHECK:              auto anon_3 = bitcast_(DRAMType(IntType(32), {4, 3, 64}), output);
+// CHECK:              auto anon_3 = bitcast_(L1Type(IntType(32), {4, 1, 64}), output_shape_c);
+// CHECK:              auto anon_4 = bitcast_(DRAMType(IntType(32), {4, 3, 64}), output);
 // CHECK:              auto anon_5 = ((iv_b)*(Value(1))+(iv_d));
 // CHECK:              auto anon_6 = ((iv_a5)*(Value(1))+(iv_c));
-// CHECK:              async_store_(out_store, anon_2, anon_3, {Value(4)*anon_5,Value(1)*iv_a4,Value(64)*anon_6});
+// CHECK:              async_store_(out_store, anon_3, anon_4, {Value(4)*anon_5,Value(1)*iv_a4,Value(64)*anon_6});
 // CHECK:              wait_dma_(out_store);

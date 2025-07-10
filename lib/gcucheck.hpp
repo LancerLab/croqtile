@@ -20,15 +20,6 @@ private:
   std::string cur_fname;
   std::string cur_arch;
 
-  std::map<std::string, std::function<bool(size_t, size_t)>> op_map = {
-      {">", [](size_t l, size_t r) { return l > r; }},
-      {"<", [](size_t l, size_t r) { return l < r; }},
-      {"==", [](size_t l, size_t r) { return l == r; }},
-      {"!=", [](size_t l, size_t r) { return l != r; }},
-      {">=", [](size_t l, size_t r) { return l >= r; }},
-      {"<=", [](size_t l, size_t r) { return l <= r; }},
-  };
-
 private:
   bool BeforeVisitImpl(AST::Node& n) override {
     TraceEachVisit(n, "(pre)");
@@ -40,7 +31,7 @@ private:
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       if (pb->GetLevel() == Storage::NONE) {
         pl_depth++;
-        pb->SetLevel(PLevel(*pb, pl_depth));
+        //        pb->SetLevel(PLevel(*pb, pl_depth));
       } else
         pl_depth = PDepth(*pb, pb->GetLevel());
       max_pl_depth = pl_depth;
@@ -53,11 +44,13 @@ private:
     TraceEachVisit(n, "(post)");
     if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       std::string append_note = ":";
-      assert(pb->GetLevel() != Storage::NONE);
+      //      assert(pb->GetLevel() != Storage::NONE);
       pl_depth = pl_depths.back();
-      if (CCtx().GetTarget() == CompileTarget::Topscc)
-        append_note += PBLevelString(*pb);
-      else
+      if (CCtx().GetTarget() == CompileTarget::Topscc) {
+        auto sto = PBLevel(*pb);
+        if (pb->GetLevel() == Storage::NONE) pb->SetLevel(sto);
+        append_note += STR(sto);
+      } else
         append_note += std::to_string(max_pl_depth - pl_depth);
       auto pty = cast<BoundedITupleType>(NodeType(*pb->BPV()));
       pty->AppendNote(append_note);
@@ -101,18 +94,18 @@ private:
   }
 
 public:
-  const std::string PBLevelString(AST::ParallelBy& n) {
+  Storage PBLevel(AST::ParallelBy& n) {
     if (max_pl_depth == 1) {
       switch (pl_depth) {
-      case 0: return "global"; break;
-      case 1: return "local"; break;
+      case 0: return Storage::GLOBAL; break;
+      case 1: return Storage::LOCAL; break;
       default:
         choreo_unreachable(
             "unsupported parallel level: " + std::to_string(pl_depth) + ".");
       }
     } else
-      return STR(PLevel(n, pl_depth));
-    return "";
+      return PLevel(n, pl_depth);
+    return Storage::NONE;
   }
 
   bool IsHost() const { return pl_depth == 0; }
@@ -134,6 +127,16 @@ public:
     auto t_shape = t_sty->GetShape();
     auto t_rank = t_shape.Rank();
 
+    // consider reshapes that may change the rank
+    if (f_ca->HasOperation()) {
+      f_rank = f_ca->AllOperations().back()->GetRank();
+      f_shape = f_ca->AllOperations().back()->GetBlockShape();
+    }
+    if (t_ca->HasOperation()) {
+      t_rank = t_ca->AllOperations().back()->GetRank();
+      t_shape = t_ca->AllOperations().back()->GetBlockShape();
+    }
+
     // common limitation (currently guarded by memcheck)
     for (auto& sty : {f_sty, t_sty}) {
       if (sty->RuntimeShaped()) {
@@ -154,16 +157,19 @@ public:
       }
     }
     auto IsLinearCopy = [&]() -> bool {
-      return f_ca->NoTile() && t_ca->NoTile();
+      return f_ca->NoTilingOperation() && t_ca->NoTilingOperation();
     };
-    auto IsSlice = [&]() -> bool { return f_ca->HasTile() && t_ca->NoTile(); };
+    auto IsSlice = [&]() -> bool {
+      return f_ca->HasTilingOperation() && t_ca->NoTilingOperation();
+    };
     auto IsDeslice = [&]() -> bool {
-      return f_ca->NoTile() && t_ca->HasTile();
+      return f_ca->NoTilingOperation() && t_ca->HasTilingOperation();
     };
     auto RankLE5 = [&](const std::string& dma_op) {
       if (f_rank > 5)
         Error1(n.LOC(), "On " + cur_arch + ", the rank in " + dma_op +
-                            " must be in range [1, 5].");
+                            " must be in range [1, 5], but got " +
+                            std::to_string(f_rank) + ".");
     };
 
     if (CCtx().GetArch() == TargetArch::GCU3 ||
@@ -267,7 +273,8 @@ public:
           CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
         // TODO: offset limitation: [0, 2^24)
         if (f_rank == 5) {
-          for (auto tsi : f_ca->AllTSInfo()) {
+          for (auto tsi : f_ca->AllOperations()) {
+            if (tsi->SpecifyReshape()) continue;
             auto first = tsi->Positions()->ValueAt(0);
             auto t = dyn_cast<BoundedITupleType>(first->GetType());
             assert(t != nullptr);
@@ -297,7 +304,8 @@ public:
           CheckDimSize(t_shape, idx, "<", 1 << 24, n.to->LOC());
         // TODO: offset limitation: [0, 2^24)
         if (t_rank == 5) {
-          for (auto tsi : t_ca->AllTSInfo()) {
+          for (auto tsi : t_ca->AllOperations()) {
+            if (tsi->SpecifyReshape()) continue;
             auto first = tsi->Positions()->ValueAt(0);
             auto t = dyn_cast<BoundedITupleType>(first->GetType());
             assert(t != nullptr);
@@ -490,7 +498,8 @@ public:
         for (size_t idx = 0; idx < t_rank; ++idx)
           CheckDimSize(t_shape, idx, "<", 1 << 16, n.to->LOC());
         if (f_rank == 5) {
-          for (auto tsi : f_ca->AllTSInfo()) {
+          for (auto tsi : f_ca->AllOperations()) {
+            if (tsi->SpecifyReshape()) continue;
             auto first = tsi->Positions()->ValueAt(0);
             auto t = dyn_cast<BoundedITupleType>(first->GetType());
             assert(t != nullptr);
@@ -540,7 +549,8 @@ public:
         }
 
         if (f_rank == 5) {
-          for (auto tsi : f_ca->AllTSInfo()) {
+          for (auto tsi : f_ca->AllOperations()) {
+            if (tsi->SpecifyReshape()) continue;
             auto first = tsi->Positions()->ValueAt(0);
             auto t = dyn_cast<BoundedITupleType>(first->GetType());
             assert(t != nullptr);
@@ -586,7 +596,8 @@ public:
         }
 
         if (t_rank == 5) {
-          for (auto tsi : t_ca->AllTSInfo()) {
+          for (auto tsi : t_ca->AllOperations()) {
+            if (tsi->SpecifyReshape()) continue;
             auto first = tsi->Positions()->ValueAt(0);
             auto t = dyn_cast<BoundedITupleType>(first->GetType());
             assert(t != nullptr);
@@ -634,25 +645,36 @@ public:
                        << " " << limit << ".\n");
       return;
     }
-    VST_DEBUG(dbgs() << "[GCUCHECK] Generated check at " << loc << ": "
-                     << vi->ToString() << " " << op << " "
+
+    message = "On " + cur_arch + ", must satisfy: " + message;
+
+    // try to evaluate at compilation time
+    auto cmp = sbe::cmp(op, vi, sbe::nu(limit))->Normalize();
+    if (auto tf = VIBool(cmp)) {
+      if (tf && tf.value() == false) {
+        VST_DEBUG(dbgs() << "[GCUCHECK] Generated check at " << loc << ": "
+                         << vi->ToString() << " " << op << " "
+                         << std::to_string(limit) + "ULL"
+                         << "\n\twith message: " << message << "\n");
+        Error1(loc, message);
+      } else
+        VST_DEBUG(dbgs() << "[GCUCHECK] Check at " << loc
+                         << " is statisfied: " << vi->ToString() << " " << op
+                         << " " << std::to_string(limit) + "ULL"
+                         << "\n\twith message: " << message << "\n");
+      return;
+    }
+
+    // or else, generate the runtime check
+    VST_DEBUG(dbgs() << "[GCUCHECK] Generated runtime check at " << loc << ": "
+                     << vi->ToString("ULL") << " " << op << " "
                      << std::to_string(limit) + "ULL"
                      << "\n\twith message: " << message << "\n");
-    message = "On " + cur_arch + ", must satisfy: " + message;
-    if (auto vi_int = VIInt(vi); vi_int && op_map.count(op)) {
-      if (!op_map[op](*vi_int, limit)) Error1(loc, message);
-    } else {
-      auto vi_str = vi->ToString("ULL");
-      VST_DEBUG(dbgs() << "[GCUCHECK] Generated runtime check at " << loc
-                       << ": " << vi_str << " " << op << " "
-                       << std::to_string(limit) + "ULL"
-                       << "\n\twith message: " << message << "\n");
-      auto asrt = sbe::cmp(op, vi, sbe::nu(limit))->Normalize();
-      if (auto b = VIBool(asrt)) {
-        if (b.value() == false) Error1(loc, message);
-      } else
-        FCtx(cur_fname).InsertAssertion(asrt, loc, message);
-    }
+    auto asrt = sbe::cmp(op, vi, sbe::nu(limit))->Normalize();
+    if (auto b = VIBool(asrt)) {
+      if (b.value() == false) Error1(loc, message);
+    } else
+      FCtx(cur_fname).InsertAssertion(asrt, loc, message);
   }
 
 public:
