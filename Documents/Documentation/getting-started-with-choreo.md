@@ -41,6 +41,20 @@ make gcu3-kmd
 ```
 assist in setting up the GCU-3.x compiler, runtime, and hardware driver.
 
+For development and testing purposes, the Makefile provides additional utilities:
+```
+make help
+```
+displays available build and test targets. To test elementwise operators in the samples:
+```
+make sample-test
+```
+runs all elementwise operator tests, while:
+```
+make sample-test-operator OPERATOR=add
+```
+tests a specific operator (e.g., add, mul, relu, sigmoid, softmax, tanh).
+
 
 ## Compile Choreo-C++ Program
 In the current implementation, Choreo performs **source-to-source translation** (or **transpilation**) to convert *Choreo-C++* programs into vendor-supported C++ language code and APIs (such as Factor, Topscc, and CUDA).

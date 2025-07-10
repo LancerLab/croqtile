@@ -197,6 +197,73 @@ clean-legacy:
 clobber: clean
 	find $(TOOLCHAIN_DIR) -mindepth 1 ! -name 'Makefile' -print0 | xargs -0 rm -rf
 
+# =============================================================================
+# Help and Documentation
+# =============================================================================
+
+help:
+	@echo "Choreo Build System"
+	@echo "==================="
+	@echo ""
+	@echo "Build Targets:"
+	@echo "  all, build          - Build choreo and copp"
+	@echo "  release             - Build release version"
+	@echo "  debug               - Build debug version"
+	@echo "  clean               - Clean build artifacts"
+	@echo ""
+	@echo "Test Targets:"
+	@echo "  test                - Run all tests"
+	@echo "  sample-test         - Test all elementwise operators"
+	@echo "  sample-test-operator OPERATOR=name"
+	@echo "                      - Test specific operator"
+	@echo "                        Available operators: $(OPERATOR_NAMES)"
+
+# =============================================================================
+# Sample Tests for topscc/elementwise
+# =============================================================================
+
+# 定义目录和文件
+ELEMENTWISE_DIR = samples/topscc/elementwise
+OPERATOR_NAMES = $(notdir $(basename $(wildcard $(ELEMENTWISE_DIR)/*.co)))
+CHOREO_FLAGS = -gs -t topscc
+
+# 测试所有算子
+sample-test: $(OPERATOR_NAMES:%=sample-test-%)
+
+sample-test-%: $(ELEMENTWISE_DIR)/%.co
+	@TMPDIR=$$(mktemp -d) && \
+	echo -n "Testing $*... " && \
+	if choreo $(CHOREO_FLAGS) $< -o $$TMPDIR/test.result > /dev/null 2>&1 && \
+	   bash $$TMPDIR/test.result --execute > /dev/null 2>&1; then \
+		echo "PASSED"; \
+		ret=0; \
+	else \
+		echo "FAILED"; \
+		ret=1; \
+	fi; \
+	rm -rf $$TMPDIR; \
+	exit $$ret
+
+# 测试特定算子
+sample-test-operator:
+	@if [ -z "$(OPERATOR)" ]; then \
+		echo "Usage: make sample-test-operator OPERATOR=operator_name"; \
+		echo "Available operators: $(OPERATOR_NAMES)"; \
+		exit 1; \
+	fi
+	@TMPDIR=$$(mktemp -d) && \
+	echo -n "Testing $(OPERATOR)... " && \
+	if choreo $(CHOREO_FLAGS) $(ELEMENTWISE_DIR)/$(OPERATOR).co -o $$TMPDIR/test.result > /dev/null 2>&1 && \
+	   bash $$TMPDIR/test.result --execute > /dev/null 2>&1; then \
+		echo "PASSED"; \
+		ret=0; \
+	else \
+		echo "FAILED"; \
+		ret=1; \
+	fi; \
+	rm -rf $$TMPDIR; \
+	exit $$ret
+
 lines:
 	@echo "source code:"; wc -l lib/*.cpp lib/*.yy lib/*.l lib/*.hpp Makefile utils/*.h | grep total;
 	@echo "test code"; wc -l $$(find tests/ -type f |grep -v "\.test"|grep -v "\.result") | grep total;
@@ -359,3 +426,5 @@ publish-to-topsop: package
 	@bash scripts/publish-choreo-for-topsop.sh
 
 prepare: cln-setup setup-ginac
+run-samples: $(OPERATOR_NAMES:%=test-%)
+
