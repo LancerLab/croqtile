@@ -17,7 +17,7 @@ __co__ void foo() {
   }
 }
 
-// CHECK300: __global__ void __choreo_device_foo(bool a, bool aa) {
+// CHECK300: __global__ void __choreo_device_foo(bool a, bool * aa) {
 // CHECK300:   __shared__ __volatile__ bool b; // shared event
 // CHECK300:   b = false;
 // CHECK300:   __shared__ __volatile__ bool bb[3]; // shared event

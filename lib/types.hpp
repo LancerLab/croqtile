@@ -2271,31 +2271,28 @@ struct PromoteResult {
 inline PromoteResult PromoteType(BaseType lty, BaseType rty) {
   using BT = BaseType;
 
-  for (const auto ty : {lty, rty}) {
-    (void)ty;
-    assert(IsIntegerBaseType(ty) || IsFloatPointBaseType(ty) ||
-           ty == BaseType::UNKNOWN);
-  }
-
-  auto PromoteLowPrecisionFP = [](BaseType& bt) -> void {
-    if (IsFloatPointBaseType(bt))
-      if (bt != BaseType::F64 && bt != BaseType::F32) bt = BaseType::F32;
-  };
-
-  // TODO: how to handle unknown?
-  if (lty == BaseType::UNKNOWN || rty == BaseType::UNKNOWN)
-    return PromoteResult{.lty = lty, .rty = rty};
-
-  // convert `f16`, `bf16`, `f8` to `f32` uniformly
-  PromoteLowPrecisionFP(lty);
-  PromoteLowPrecisionFP(rty);
+  for (const auto ty : {lty, rty})
+    if (!(IsIntegerBaseType(ty) || IsFloatPointBaseType(ty) ||
+          ty == BaseType::UNKNOWN))
+      choreo_unreachable("unexpect type in promote: " + STR(ty));
 
   PromoteResult res{.lty = lty, .rty = rty};
+
+  if (lty == BaseType::UNKNOWN || rty == BaseType::UNKNOWN) return res;
+
+  if (lty == rty) return res;
+
+  for (const auto ty : {lty, rty})
+    if (IsFloatPointBaseType(ty))
+      if (ty != BaseType::F64 && ty != BaseType::F32)
+        choreo_unreachable("unexpect type in promote: " + STR(ty));
 
   if (IsFloatPointBaseType(lty) && IsFloatPointBaseType(rty)) {
     // both floating-point
     if (lty == BaseType::F64 || rty == BaseType::F64)
       res.lty = res.rty = BaseType::F64;
+    else if (lty == BaseType::F32 || rty == BaseType::F32)
+      res.lty = res.rty = BaseType::F32;
     return res;
   } else if (IsFloatPointBaseType(lty) || IsFloatPointBaseType(rty)) {
     // only one is floating-point
@@ -2373,11 +2370,6 @@ inline PromoteResult PromoteType(BaseType lty, BaseType rty) {
     assert(false);
     return res;
   }
-}
-
-inline bool NeedPromotion(const BaseType& lty, const BaseType& rty) {
-  if (lty != rty) return true;
-  return false;
 }
 
 inline static ptr<Type> MutateType(const ptr<Type>& ty) {

@@ -274,7 +274,16 @@ public:
       auto lbty = lsty->GetBaseType();
       auto rbty = rsty->GetBaseType();
 
-      if (!NeedPromotion(lbty, rbty)) return true;
+      auto NotStandardFP = [](BaseType bt) {
+        return IsFloatPointBaseType(bt) && bt != BaseType::F64 &&
+               bt != BaseType::F32;
+      };
+      if (lbty != rbty && (NotStandardFP(lbty) || NotStandardFP(rbty))) {
+        Error1(n.LOC(), "in operation \"" + n.op +
+                            "\": unable to apply to the types (" + PSTR(lty) +
+                            " vs. " + PSTR(rty) + ").");
+        return true;
+      }
 
       auto promote_res = PromoteType(lbty, rbty);
 

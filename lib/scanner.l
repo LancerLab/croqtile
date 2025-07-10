@@ -289,6 +289,7 @@ cstr        \"([^"\\]|\\.)*\"
   "shared"   return Choreo::Parser::make_SHARED(Storage::SHARED, loc);
   "global"   return Choreo::Parser::make_GLOBAL(Storage::GLOBAL, loc);
   "mutable"  return Choreo::Parser::make_MUTABLE(yytext, loc);
+  "f64"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_F64(BaseType::F64, loc); }
   "f32"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_F32(BaseType::F32, loc); }
   "f16"      { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_F16(BaseType::F16, loc); }
   "bf16"     { BEGIN(MDSPAN_SUGER); return Choreo::Parser::make_BF16(BaseType::BF16, loc); }

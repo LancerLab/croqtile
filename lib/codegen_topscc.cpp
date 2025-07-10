@@ -803,9 +803,10 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
   if (isa<ScalarType>(nty) &&
       (IsMutable(*nty) || !FCtx(fname).HasSymbolValues(InScopeName(sym)))) {
     auto mem = n.GetMemory();
+    IndStream();
     if (mem != nullptr) {
       auto st = mem->Get();
-      IndStream() << TopsDeviceMemory(st) << " ";
+      Stream() << TopsDeviceMemory(st) << " ";
     }
     Stream() << NameBaseType(GetBaseType(*nty), false) << " " << sym;
     if (n.init_expr) Stream() << " = " << ExprSTR(n.init_expr, false);
@@ -2328,6 +2329,8 @@ DeviceParamTypeStringify(const Choreo::Type& ty) {
     return "float";
   else if (isa<F64Type>(&ty))
     return "double";
+  else if (isa<EventArrayType>(&ty))
+    return "bool *";
   else if (isa<EventType>(&ty))
     return "bool"; // use bool for event
   else if (auto sty = dyn_cast<SpannedType>(&ty))
