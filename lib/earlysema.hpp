@@ -90,6 +90,7 @@ private:
   int pl_depth = 0;
   std::vector<int> pl_depths;
   bool explicit_pl = false;
+  std::stack<Storage> explicit_pl_stk;
   bool allow_auto_threading = false;
   bool inside_loop = false;
 

@@ -124,6 +124,11 @@ inline static Storage ProjectStorage(const Storage& a) {
     return a;
 }
 
+// return `a` lower than `b`. E.g., local is lower than shared.
+inline static bool LowerLevelStorage(const Storage& a, const Storage& b) {
+  return static_cast<int>(a) < static_cast<int>(b);
+}
+
 enum class ParamAttr : uint16_t {
   NONE = 0,
   SHADOW_TO_GLOBAL = 1, // shadow the host memory to global
