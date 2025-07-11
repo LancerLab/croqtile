@@ -527,6 +527,10 @@ bool SemaChecker::VisitNode(AST::Call& n) {
     for (auto& v : n.template_args->AllValues()) {
       count++;
       auto ty = NodeType(*v);
+      auto expr = cast<AST::Expr>(v);
+      if (expr->IsReference() && isa<AST::DataType>(expr->GetReference())) {
+        continue;
+      }
       // must be a scalar type
       if (!CanYieldAnInteger(ty)) {
         Error(n.LOC(),
@@ -535,7 +539,6 @@ bool SemaChecker::VisitNode(AST::Call& n) {
                   "` can not be used to instantiate the kernel function.");
         error_count++;
       }
-      auto expr = cast<AST::Expr>(v);
       // fail if the template argument can not be evaluated as a compile-time
       // constant
       if (!expr->Opts().HasVal() || !expr->Opts().GetVal()->IsNumeric()) {

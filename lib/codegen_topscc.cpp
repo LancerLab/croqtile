@@ -3081,6 +3081,8 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
   } else if (auto c = dyn_cast<AST::Call>(e)) {
     assert(!is_host);
     return CallSTR(*c);
+  } else if (isa<AST::DataType>(e)) {
+    return NameBaseType(e->GetType()->GetBaseType());
   } else
     choreo_unreachable("unsupported expression op: '" + expr->GetOp() + "'.");
 

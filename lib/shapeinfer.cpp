@@ -1600,6 +1600,7 @@ bool ShapeInference::CanBeValueNumbered(AST::Node* n) const {
   if (isa<AST::StringLiteral>(n)) return false;
   if (isa<AST::DataAccess>(n)) return false;
   if (isa<AST::Call>(n)) return false;
+  if (isa<AST::DataType>(n)) return false;
   auto nty = NodeType(*n);
   if (!nty) {
     // sometimes the symbol is yet to define, simply make it work.

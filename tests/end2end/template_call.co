@@ -1,0 +1,80 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+
+__cok__ {
+  template <typename T>
+  __co_device__ void template_func() {
+    if constexpr (std::is_same_v<T, long long>) {
+      printf("Called template_func with long long\n");
+    } else if constexpr (std::is_same_v<T, unsigned long long>) {
+      printf("Called template_func with unsigned long long\n");
+    } else if constexpr (std::is_same_v<T, int>) {
+      printf("Called template_func with int\n");
+    } else if constexpr (std::is_same_v<T, unsigned int>) {
+      printf("Called template_func with unsigned int\n");
+    } else if constexpr (std::is_same_v<T, short>) {
+      printf("Called template_func with short\n");
+    } else if constexpr (std::is_same_v<T, unsigned short>) {
+      printf("Called template_func with unsigned short\n");
+    } else if constexpr (std::is_same_v<T, char>) {
+      printf("Called template_func with char\n");
+    } else if constexpr (std::is_same_v<T, unsigned char>) {
+      printf("Called template_func with unsigned char\n");
+    } else if constexpr (std::is_same_v<T, bool>) {
+      printf("Called template_func with bool\n");
+    } else if constexpr (std::is_same_v<T, double>) {
+      printf("Called template_func with double\n");
+    } else if constexpr (std::is_same_v<T, float>) {
+      printf("Called template_func with float\n");
+    } else if constexpr (std::is_same_v<T, choreo::f16>) {
+      printf("Called template_func with fp16\n");
+    } else if constexpr (std::is_same_v<T, choreo::bf16>) {
+      printf("Called template_func with bf16\n");
+    } else {
+      printf("Called template_func with unknown type\n");
+    }
+  }
+}
+
+__co__ void foo() {
+  parallel by 1 {
+    call template_func<s64>();
+    call template_func<u64>();
+    call template_func<s32>();
+    call template_func<int>();
+    call template_func<u32>();
+    call template_func<s16>();
+    call template_func<u16>();
+    call template_func<s8>();
+    call template_func<u8>();
+    call template_func<bool>();
+    call template_func<f64>();
+    call template_func<double>();
+    call template_func<f32>();
+    call template_func<float>();
+    call template_func<f16>();
+    call template_func<bf16>();
+  }
+}
+
+int main() {
+  foo();
+  return 0;
+}
+
+// CHECK: [0, 0] Called template_func with long long
+// CHECK: [0, 0] Called template_func with unsigned long long
+// CHECK: [0, 0] Called template_func with int
+// CHECK: [0, 0] Called template_func with int
+// CHECK: [0, 0] Called template_func with unsigned int
+// CHECK: [0, 0] Called template_func with short
+// CHECK: [0, 0] Called template_func with unsigned short
+// CHECK: [0, 0] Called template_func with char
+// CHECK: [0, 0] Called template_func with unsigned char
+// CHECK: [0, 0] Called template_func with bool
+// CHECK: [0, 0] Called template_func with double
+// CHECK: [0, 0] Called template_func with double
+// CHECK: [0, 0] Called template_func with float
+// CHECK: [0, 0] Called template_func with float
+// CHECK: [0, 0] Called template_func with fp16
+// CHECK: [0, 0] Called template_func with bf16

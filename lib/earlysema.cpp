@@ -1856,6 +1856,10 @@ bool EarlySemantics::Visit(AST::Call& n) {
     size_t count = 0;
     for (auto& v : n.template_args->AllValues()) {
       count++;
+      auto expr = cast<AST::Expr>(v);
+      if (expr->IsReference() && isa<AST::DataType>(expr->GetReference())) {
+        continue;
+      }
       auto ty = NodeType(*v);
       // must be a scalar type
       if (!ConvertibleToInt(ty))
