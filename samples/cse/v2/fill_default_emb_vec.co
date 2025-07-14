@@ -1,4 +1,4 @@
-// cse/v2/fill_default_emb_vec.co - Default value fill function (choreo version, v2, fine-grained at semantics）
+// cse/v2/fill_default_emb_vec.co - Default value fill function (choreo version, v2, fine-grained at semantics)
 
 #include "choreo.h"
 #include <climits>
@@ -7,10 +7,12 @@
 #define EMB_VEC_SIZE 64
 #define DEFAULT_VALUE 0.5f
 
-__co__ void fill_default_emb_vec_direct(u32[LEN_DYN] missing_index, f32[?, EMB_VEC_SIZE] output_emb_vec) {
+// ================== Choreo kernel implementation ==================
+// Kernel: fill_default_emb_vec_direct
+__co__ void fill_default_emb_vec_direct(u32[DYN_DIM] missing_index, global f32[??, EMB_VEC_SIZE] output_emb_vec) {
   parallel p by 1 {
     parallel q by 1 {
-      foreach {idx} in [LEN / #p / #q] {
+      foreach {idx} in [DYN_DIM / #p / #q] {
         local f32[1, EMB_VEC_SIZE] local_emb_vec;
         local u32[1] index;
         dma.copy missing_index.subspan(1).at(p#q#idx) => index;
@@ -23,6 +25,13 @@ __co__ void fill_default_emb_vec_direct(u32[LEN_DYN] missing_index, f32[?, EMB_V
     }
   }
 }
+
+// ================== CPU reference implementation ==================
+#include <stdint.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 void fill_default_emb_vec_cpu(float* output_emb_vec, const float default_emb_vec,
     const unsigned int* missing_index, const size_t len,
@@ -73,6 +82,7 @@ void fill_default_emb_vec_cpu_advanced(float* output_emb_vec, const float defaul
     }
 }
 
+// ================== main test function ==================
 int main() {
     float output_choreo[LEN][EMB_VEC_SIZE] = {0};
     float output_cpu[LEN][EMB_VEC_SIZE] = {0};
@@ -80,16 +90,23 @@ int main() {
     float output_adv[LEN][EMB_VEC_SIZE] = {0};
     unsigned int missing_index[LEN];
     for (int i = 0; i < LEN; ++i) missing_index[i] = rand() % LEN;
-    // for (int i = 0; i < LEN; ++i) missing_index[i] = 5;
 
     fill_default_emb_vec_cpu(&output_cpu[0][0], DEFAULT_VALUE, missing_index, LEN, EMB_VEC_SIZE);
     fill_default_emb_vec_cpu_optimized(&output_opt[0][0], DEFAULT_VALUE, missing_index, LEN, EMB_VEC_SIZE);
     fill_default_emb_vec_cpu_advanced(&output_adv[0][0], DEFAULT_VALUE, missing_index, LEN, EMB_VEC_SIZE);
 
+    // Allocate device/global buffer for output_choreo
+    float * output_choreo__device = nullptr;
+    choreo::abend_true(topsMalloc(&output_choreo__device, ((LEN) * (64ULL)) * 4));
+    choreo::abend_true(topsMemcpy(output_choreo__device, output_choreo, ((LEN) * (64ULL)) * 4, topsMemcpyHostToDevice));
+
     auto missing_index_view = choreo::make_spanview<1, choreo::u32>((unsigned int*)missing_index, {LEN});
-    auto output_choreo_view = choreo::make_spanview<2, choreo::f32>((float*)output_choreo, {LEN, EMB_VEC_SIZE});
+    auto output_choreo_view = choreo::make_spanview<2, choreo::f32>((float*)output_choreo__device, {UNKNOWN, EMB_VEC_SIZE});
     
+    // Call choreo kernel on device buffer
     fill_default_emb_vec_direct(missing_index_view, output_choreo_view);
+    // Copy result back to host
+    choreo::abend_true(topsMemcpy(output_choreo, output_choreo__device, ((LEN) * (64ULL)) * 4, topsMemcpyDeviceToHost));
 
     bool match = true;
     for (int i = 0; i < LEN; ++i) {
