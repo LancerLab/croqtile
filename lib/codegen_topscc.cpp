@@ -595,7 +595,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
   auto nty = NodeType(n);
   auto sym = n.name_str;
 
-  bool ref = (n.GetNote().find("ref") != std::string::npos);
+  bool ref = n.Note().count("ref");
   // workaround:
   // if a symbol is declared but have no symbol value(optimized value)
   // pass it to device func even it is unused.
@@ -727,28 +727,24 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
 
       // memory reuse is enabled
 
-      if (n.note.find("spm") != std::string::npos) {
+      if (n.Note().count("spm")) {
         ds << d_indent << type_modifiers << bts << " " << sym << "["
            << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
         return;
       }
 
       // the buffer is not the declared whole spm.
-      auto notes = SplitStringByDelimiter(n.note, ", ");
-      auto reuse_idx = std::find(notes.begin(), notes.end(), "reuse");
-      auto offset_idx = std::find(notes.begin(), notes.end(), "offset");
-      if (reuse_idx == notes.end()) {
+      if (auto reuse = FindOrNull(n.Note(), "reuse")) {
+        auto offset = n.Note().at("offset");
+        ds << d_indent << bts << "* " << sym << " = (" << bts << "*)"
+           << "(" << *reuse << " + " << offset << ");\n";
+      } else {
         // the buffer is not reused
         // which means that it is declared but never used.
-        assert(offset_idx == notes.end());
         // TODO: should we DCE the unused buffer?
+        assert(!n.Note().count("offset"));
         ds << d_indent << type_modifiers << bts << " " << sym << "["
            << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
-      } else {
-        auto reuse_name = *(reuse_idx + 1);
-        auto offset = *(offset_idx + 1);
-        ds << d_indent << bts << "* " << sym << " = (" << bts << "*)"
-           << "(" << reuse_name << " + " << offset << ");\n";
       }
     };
 
@@ -899,7 +895,7 @@ bool TopsccCodeGen::Visit(AST::Assignment& n) {
 
   if (!n.AssignToDataElement()) {
     auto name = n.GetName();
-    bool ref = (n.GetNote().find("ref") != std::string::npos);
+    bool ref = n.Note().count("ref");
     if (!SSTab().IsDeclared(name) && !isa<AST::SpanAs>(n.value))
       updating_cgi->AddSymbolDetail(
           fname, {InScopeName(name), GetSymbolType(name), ref});
@@ -1251,9 +1247,9 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       buf_expr = ssm.DeviceName(buf_name);
     } else if (isa<FutureType>(sym_ty)
                // This only matches the host-side buffer that is defined in
-               // choreo DMA and tied to future but host-side data copy does not
-               // really do device-level DMA, and the future is basically a
-               // phantom handle do not emit any concrete code at host-side.
+               // choreo DMA and tied to future but host-side data copy does
+               // not really do device-level DMA, and the future is basically
+               // a phantom handle do not emit any concrete code at host-side.
                && IsHostSymbol(sname) && !IsChoreoInput(sname) &&
                !IsChoreoOutput(sname)) {
       buf_expr =
@@ -1267,8 +1263,9 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
           array_ty && CCtx().MemReuse()) {
         // Suppose we declared `shared s32[3,4] i[2]`
         // For `i[1]`, if memory reuse is enabled, we need to generate pointer
-        // expr `i + 1 * (3*4)` rather than array subscript expr `i[1]`. Because
-        // if memory reuse is enabled, `i` is declared as point not array!
+        // expr `i + 1 * (3*4)` rather than array subscript expr `i[1]`.
+        // Because if memory reuse is enabled, `i` is declared as point not
+        // array!
         std::string array_idx = "";
         auto subscriptions = subscription->AllValues();
         auto array_sizes = array_ty->Dimensions();
@@ -1310,8 +1307,9 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         return mds_name;
       };
 
-  // Given shape and tile_shape. If the tiled span is address-continuous within
-  // the original span, then slice or deslice can be optimized to linear copy.
+  // Given shape and tile_shape. If the tiled span is address-continuous
+  // within the original span, then slice or deslice can be optimized to
+  // linear copy.
   auto CanConvertToLinearCopy = [&]() -> bool {
     if (SymbolToSymbol()) return false;
 
@@ -1434,7 +1432,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   std::string event_name;
   if (fty->IsAsync()) event_name = future_name + "__event__";
 
-  // handles dma related to shared memory, where only single thread can operate
+  // handles dma related to shared memory, where only single thread can
+  // operate
   bool local_in_warp = false, shared_in_block = false;
   if (!n.future.empty()) {
     shared_in_block = IsDMABlockShared(n);

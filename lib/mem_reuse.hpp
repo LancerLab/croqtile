@@ -40,9 +40,7 @@ private:
   bool AfterVisitImpl(AST::Node&) override;
   bool Visit(AST::NamedVariableDecl& n) override;
 
-  static bool IsRef(const AST::Node& n) {
-    return n.GetNote().find("ref") != std::string::npos;
-  }
+  static bool IsRef(const AST::Node& n) { return n.Note().count("ref"); }
 };
 
 struct MemReuse : public VisitorWithSymTab {

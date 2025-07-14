@@ -107,7 +107,7 @@ bool MemReuse::BeforeVisitImpl(AST::Node& n) {
             BaseType::U8, Shape(1, Size_t2Int(DFCtx().shared_spm_size)),
             Storage::SHARED);
         shared_spm->SetType(ssty);
-        shared_spm->AppendNote("spm,");
+        shared_spm->Note().insert_or_assign("spm", "true");
         pb->stmts->values.insert(pb->stmts->values.begin(), shared_spm);
         SSTab().DefineSymbol(DFCtx().shared_spm_name, ssty);
         VST_DEBUG(dbgs() << "Defined shared scratch pad memory: "
@@ -124,7 +124,7 @@ bool MemReuse::BeforeVisitImpl(AST::Node& n) {
             BaseType::U8, Shape(1, Size_t2Int(DFCtx().local_spm_size)),
             Storage::LOCAL);
         local_spm->SetType(lsty);
-        local_spm->AppendNote("spm,");
+        local_spm->Note().insert_or_assign("spm", "true");
         pb->stmts->values.insert(pb->stmts->values.begin(), local_spm);
         SSTab().DefineSymbol(DFCtx().local_spm_name, lsty);
         VST_DEBUG(dbgs() << "Defined local scratch pad memory: "
@@ -150,7 +150,7 @@ bool MemReuse::AfterVisitImpl(AST::Node& n) {
 
 bool MemReuse::Visit(AST::NamedVariableDecl& n) {
   if (isa<AST::Select>(n.init_expr)) return true;
-  if (n.note.find("spm") != std::string::npos) return true;
+  if (n.Note().count("spm")) return true;
   auto ty = GetSymbolType(n.name_str);
   if (auto sty = dyn_cast<SpannedType>(ty)) {
     auto sto = sty->GetStorage();
@@ -407,6 +407,6 @@ void MemReuse::ApplyMemOffset(AST::NamedVariableDecl& n, Storage sto) {
            << "\n";
   });
 
-  n.note.append("reuse, " + spm_name + ", ");
-  n.note.append("offset, " + offset + ", ");
+  n.Note().emplace("reuse", spm_name);
+  n.Note().emplace("offset", offset);
 }

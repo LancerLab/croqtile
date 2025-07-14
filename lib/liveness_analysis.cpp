@@ -74,7 +74,7 @@ LivenessAnalyzer::GetAllSymbolicOperands(const AST::Node* n) const {
 }
 
 inline bool LivenessAnalyzer::IsRef(const AST::Node& n) {
-  return n.GetNote().find("ref") != std::string::npos;
+  return n.Note().count("ref");
 }
 
 bool LivenessAnalyzer::HasStmt(const AST::Node& n) const {

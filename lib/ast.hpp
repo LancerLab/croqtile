@@ -39,7 +39,10 @@ struct DataType;
 struct Node {
   location loc;
   ptr<Type> pty = MakeUnknownType();
-  std::string note;
+  using NoteMapType = std::unordered_map<std::string, std::string>;
+
+private:
+  NoteMapType note;
 
 protected:
   Storage level = Storage::NONE; // belongs to a specific level
@@ -57,23 +60,8 @@ public:
 
   virtual ~Node() = default;
 
-  virtual const std::string& GetNote() const { return note; }
-  virtual void SetNote(const std::string& n) {
-    assert(!n.empty() && "can not set empty note.");
-    note = n;
-  }
-  virtual void AppendNote(const std::string& n) {
-    assert(!n.empty() && "can not append empty note.");
-    if (note.empty())
-      SetNote(n);
-    else
-      note += "," + n;
-  }
-  virtual bool ContainsNote(const std::string& n) const {
-    assert(!n.empty() && "can not find an empty note.");
-    if (note.find(n) != std::string::npos) return true;
-    return false;
-  }
+  virtual const NoteMapType& Note() const { return note; }
+  virtual NoteMapType& Note() { return note; }
 
   virtual bool IsBlock() const { return false; }
   virtual Storage GetLevel() const { return level; }
@@ -82,7 +70,7 @@ public:
     auto n = CloneImpl();
     n->SetType(GetType());
     n->SetLevel(GetLevel());
-    if (!GetNote().empty()) n->SetNote(GetNote());
+    if (!Note().empty()) n->Note() = Note();
     return n;
   }
   virtual ptr<Node> CloneImpl() const = 0;
@@ -1768,7 +1756,10 @@ public:
       PrintBounds(os);
       os << "]";
     }
-    if (!note.empty()) os << "\n" << prefix << "   (note: " << GetNote() << ")";
+    if (!Note().empty()) {
+      for (const auto& [k, v] : Note())
+        os << "\n" << prefix << "   (note: [" << k << ", " << v << "])";
+    }
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -2260,7 +2251,8 @@ struct Return : public Node, public TypeIDProvider<Return> {
       os << "void";
     else
       value->Print(os, {}, with_type);
-    if (!note.empty()) os << " (" << note << ")";
+    if (!Note().empty())
+      for (const auto& [k, v] : Note()) os << " [" << k << ", " << v << "]";
   }
 
   void accept(Visitor&) override;

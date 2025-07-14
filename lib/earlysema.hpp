@@ -36,7 +36,8 @@ public:
   void Add(AST::Node& n) {
     nodes.insert(&n);
 
-    if (auto e = dyn_cast<AST::Expr>(&n)) e->AppendNote("diverge");
+    if (auto e = dyn_cast<AST::Expr>(&n))
+      e->Note().insert_or_assign("diverge", "true");
 
     if (debug) dbgs() << "[" << name << "] added expr: " << STR(n) << ".\n";
   }

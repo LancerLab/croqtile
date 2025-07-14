@@ -200,6 +200,14 @@ inline const std::string RemoveDirectoryPrefix(const std::string& path) {
   return path.substr(pos + 1);
 }
 
+template <typename Map, typename Key>
+auto FindOrNull(const Map& m, const Key& key)
+    -> std::optional<typename Map::mapped_type> {
+  auto it = m.find(key);
+  if (it != m.end()) return it->second;
+  return std::nullopt;
+}
+
 // A range class since we lack c++20 range
 template <typename T>
 class FilterRange {

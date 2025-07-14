@@ -77,7 +77,7 @@ private:
       // Add a new launch config
       if (parallel_level == 1) {
         // represents the index of the current ParallelBy in cgi
-        n.note += std::to_string(lcs.size()) + ", ";
+        n.Note().insert_or_assign("outer_pb_idx", std::to_string(lcs.size()));
         lcs.push_back({});
       }
 
@@ -122,7 +122,7 @@ private:
                << ", index: " << item.p_index << "\n";
       });
     } else if (isa<AST::ParallelBy>(&n)) {
-      n.AppendNote("mxl-" + std::to_string(max_parallel_level));
+      n.Note().insert_or_assign("mxl", std::to_string(max_parallel_level));
       if (parallel_level == 1) {
         VST_DEBUG(dbgs() << "\tGrid Dims: "
                          << cgi->GetFunctionLaunches(fname).back().grid_dim_x
@@ -159,7 +159,7 @@ public:
 
   bool Visit(AST::NamedVariableDecl& n) override {
     auto name = n.name_str;
-    bool ref = (n.GetNote().find("ref") != std::string::npos);
+    bool ref = n.Note().count("ref");
     cgi->AddSymbolDetail(fname, {InScopeName(name), GetSymbolType(name), ref});
     if (isa<AST::Select>(n.init_expr)) select_syms.insert(InScopeName(name));
     return true;
@@ -170,7 +170,7 @@ public:
   bool Visit(AST::Assignment& n) override {
     if (n.AssignToDataElement()) return true;
     auto name = n.GetName();
-    bool ref = (n.GetNote().find("ref") != std::string::npos);
+    bool ref = n.Note().count("ref");
     if (!SSTab().IsDeclared(name) && !isa<AST::SpanAs>(n.value)) {
       cgi->AddSymbolDetail(fname,
                            {InScopeName(name), GetSymbolType(name), ref});
@@ -228,9 +228,8 @@ public:
     }
     for (auto& item : cgi->GetFunctionSymbols(fname)) {
       if (item.name == InScopeName(ret_name)) {
-        auto rty_str = RemovePrefixOrNull("host-type:", n.GetNote());
-        if (rty_str.has_value())
-          item.SetAsReturn(rty_str.value());
+        if (auto val = FindOrNull(n.Note(), "host-type"))
+          item.SetAsReturn(*val);
         else
           item.SetAsReturn("$");
       }

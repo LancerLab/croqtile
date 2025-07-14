@@ -250,19 +250,13 @@ public:
     auto sto = sty->GetStorage();
     assert(valid_storage_type.count(sto) &&
            "Only support Storage types in `valid_storage_type`!");
-    if (n.note.find("offset") != std::string::npos) {
+    if (n.Note().count("offset")) {
       VST_DEBUG({
         dbgs() << "[MemUsage] The mem space of buffer " << n.name_str
                << " reuses the space of self-defined SPM!\n";
       });
       return true;
     }
-    // if (n.note.find("spm") != std::string::npos) {
-    //   VST_DEBUG(dbgs() << "[MemUsage] The buffer " << n.name_str
-    //                    << " is self-defined SPM whose memory usage is not "
-    //                       "counted for now\n");
-    //   return true;
-    // }
     size_t array_dim_product = 1;
     if (n.IsArray())
       array_dim_product = std::accumulate(n.ArrayDimensions().begin(),

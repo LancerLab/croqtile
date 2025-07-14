@@ -628,9 +628,8 @@ inline const std::string UnScopedValueItem(const ValueItem& input) {
 }
 
 inline int GetMaxParallelLevelFromNote(AST::ParallelBy& n) {
-  auto pos = n.GetNote().find("mxl-");
-  if (pos != std::string::npos)
-    return std::stoi(n.GetNote().substr(pos + 4, pos + 5));
+  auto value = FindOrNull(n.Note(), "mxl");
+  if (value.has_value()) return std::stoi(*value);
   return -1;
 }
 

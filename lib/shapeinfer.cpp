@@ -277,13 +277,13 @@ bool ShapeInference::Visit(AST::Expr& n) {
   switch (NodeValNoKind(n)) {
   case VNKind::VNK_VALUE: {
     auto vl = vn.GenValueListFromSignature(GetSign(n));
-    if (ShouldOpt(vl) && !n.ContainsNote("diverge")) n.Opts().SetVals(vl);
+    if (ShouldOpt(vl) && !n.Note().count("diverge")) n.Opts().SetVals(vl);
     VST_DEBUG(dbgs() << " |-<exprval> <" << PSTR(nty) << "> " << STR(n) << ": "
                      << STR(vl) << "\n");
   } break;
   case VNKind::VNK_UBOUND: {
     auto vl = vn.GenValueListFromSignature(GetSign(n));
-    if (ShouldOpt(vl) && !n.ContainsNote("diverge")) n.Opts().SetVals(vl);
+    if (ShouldOpt(vl) && !n.Note().count("diverge")) n.Opts().SetVals(vl);
     VST_DEBUG(dbgs() << " |-<exprval> <" << PSTR(nty) << "> " << STR(n) << ": "
                      << STR(vl) << "\n");
     auto ub_vl = vn.GenValueListFromSignature(GetSign(n, VNKind::VNK_UBOUND));

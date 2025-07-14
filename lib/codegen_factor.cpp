@@ -473,12 +473,11 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
     // std::cout << alloc_pos_stack.top() << std::endl;
     return true;
   }
-
-  assert(by.note.length() >= 3);
-  auto cur_pb_idx_str = SplitStringByDelimiter(by.note, ", ")[0];
+  auto outer_pb_idx = FindOrNull(by.Note(), "outer_pb_idx");
+  assert(outer_pb_idx.has_value());
 
   // generate all launch configs when entered the first Parallel node
-  if (cur_pb_idx_str == "0") {
+  if (*outer_pb_idx == "0") {
     int pb_idx = 0;
     for (auto& lc : cgi->GetFunctionLaunches(fname)) {
       auto pb_idx_str = pb_idx == 0 ? "" : "_" + std::to_string(pb_idx);
@@ -546,7 +545,7 @@ bool FactorCodeGen::Visit(AST::ParallelBy& by) {
     {
 
       dfun << this->indent << "D(func_)(\"" << factor_fname << "_parallel"
-           << (cur_pb_idx_str == "0" ? "" : "_" + cur_pb_idx_str) << "\", ";
+           << (*outer_pb_idx == "0" ? "" : "_" + *outer_pb_idx) << "\", ";
 
       // input arguments of factor device function
       dfun << "{";
@@ -788,7 +787,7 @@ bool FactorCodeGen::Visit(AST::DMA& d) {
 
   // buffer the allocation in another stream
   // if use pipeline-mode, make all cdma with shared_ annotation
-  if (d.GetNote() != "use-fut") {
+  if (!d.Note().count("use-fut")) {
     if (d.chained == true && ((d.chain_to != "" && src_level > dst_level) ||
                               (d.chain_from != "" && src_level < dst_level)))
       alloc_fs_stack.top() << alloc_indent_stack.top() << "auto " << future_name
