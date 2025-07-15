@@ -2,9 +2,6 @@
 
 #include "choreo.h"
 #include <climits>
-#define LEN 1000
-#define EMB_VEC_SIZE 64
-#define UNKNOWN static_cast<unsigned long>(INT_MAX)>>8
 
 // LEN1, not known even at runtime.
 // LEN2, known at runtime
@@ -32,7 +29,7 @@ __co__ void merge_emb_vec_direct_v2(f32[DYN_DIM, EMB_VEC_SIZE] missing_emb_vec, 
 
   parallel p by 1 {
     parallel q by 1 {
-      foreach {idx} in [LEN / #p / #q] {
+      foreach {idx} in [DYN_DIM / #p / #q] {
         local f32[1, EMB_VEC_SIZE] local_emb_vec_dst;
         local f32[1, EMB_VEC_SIZE] local_emb_vec_src;
         local u32[1] index;
@@ -103,6 +100,8 @@ void merge_emb_vec_cpu_advanced(float* output_emb_vec, const float* missing_emb_
 
 // ================== main test function ==================
 int main() {
+    const int LEN = 1000;
+    const int EMB_VEC_SIZE = 64;
     float missing_emb_vec[LEN][EMB_VEC_SIZE];
     uint32_t missing_index[LEN];
     float output_choreo[LEN][EMB_VEC_SIZE] = {0};
@@ -135,8 +134,8 @@ int main() {
     auto missing_emb_vec_view = choreo::make_spanview<2, choreo::f32>((float*)missing_emb_vec, {LEN, EMB_VEC_SIZE});
 
 
-    auto output_choreo_view = choreo::make_spanview<2, choreo::f32>((float*)output_choreo__device, {UNKNOWN, EMB_VEC_SIZE});
-    auto output_choreo_view_v2 = choreo::make_spanview<2, choreo::f32>((float*)output_choreo_v2__device, {UNKNOWN, EMB_VEC_SIZE});
+    auto output_choreo_view = choreo::make_spanview<2, choreo::f32>((float*)output_choreo__device, {choreo::__inf__, EMB_VEC_SIZE});
+    auto output_choreo_view_v2 = choreo::make_spanview<2, choreo::f32>((float*)output_choreo_v2__device, {choreo::__inf__, EMB_VEC_SIZE});
     
     merge_emb_vec_direct(missing_emb_vec_view, missing_index_view, output_choreo_view);
     choreo::abend_true(topsMemcpy(output_choreo, output_choreo_view.data(), ((LEN) * (64ULL)) * 4, topsMemcpyDeviceToHost));

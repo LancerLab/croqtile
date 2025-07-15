@@ -2,9 +2,6 @@
 
 #include "choreo.h"
 #include <climits>
-#define UNKNOWN static_cast<unsigned long>(INT_MAX)>>8
-#define LEN 1000
-#define EMB_VEC_SIZE 64
 #define DEFAULT_VALUE 0.5f
 
 // ================== Choreo kernel implementation ==================
@@ -84,6 +81,10 @@ void fill_default_emb_vec_cpu_advanced(float* output_emb_vec, const float defaul
 
 // ================== main test function ==================
 int main() {
+    // #define LEN 1000
+    // #define EMB_VEC_SIZE 64
+    const int LEN = 1000;
+    const int EMB_VEC_SIZE = 64;
     float output_choreo[LEN][EMB_VEC_SIZE] = {0};
     float output_cpu[LEN][EMB_VEC_SIZE] = {0};
     float output_opt[LEN][EMB_VEC_SIZE] = {0};
@@ -101,7 +102,7 @@ int main() {
     choreo::abend_true(topsMemcpy(output_choreo__device, output_choreo, ((LEN) * (64ULL)) * 4, topsMemcpyHostToDevice));
 
     auto missing_index_view = choreo::make_spanview<1, choreo::u32>((unsigned int*)missing_index, {LEN});
-    auto output_choreo_view = choreo::make_spanview<2, choreo::f32>((float*)output_choreo__device, {UNKNOWN, EMB_VEC_SIZE});
+    auto output_choreo_view = choreo::make_spanview<2, choreo::f32>((float*)output_choreo__device, {choreo::__inf__, EMB_VEC_SIZE});
     
     // Call choreo kernel on device buffer
     fill_default_emb_vec_direct(missing_index_view, output_choreo_view);

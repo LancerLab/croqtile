@@ -4,15 +4,12 @@
 
 #include "choreo.h"
 #include <climits>
-#define UNKNOWN static_cast<unsigned long>(INT_MAX)>>8
-#define LEN 1000
-#define EMB_VEC_SIZE 64
 
 // New version: Finer-grained decompress_emb_vec_direct operator, refer to merge_emb_vec.co v2 style
 __co__ void decompress_emb_vec_direct(f32[LEN_DYN, EMB_VEC_SIZE] src_emb_vec, u32[LEN_DYN] src_index, f32[?, EMB_VEC_SIZE] dst_emb_vec) {
   parallel p by 1 {
     parallel q by 1 {
-      foreach {idx} in [LEN / #p / #q] {
+      foreach {idx} in [LEN_DYN / #p / #q] {
         local f32[1, EMB_VEC_SIZE] local_emb_vec;
         local u32[1] index;
         dma.copy src_index.subspan(1).at(p#q#idx) => index;
@@ -97,6 +94,8 @@ void decompress_emb_vec_cpu_advanced(const float* src_emb_vec, const uint32_t* s
 
 // ================== main test function ==================
 int main() {
+    const int LEN = 1000;
+    const int EMB_VEC_SIZE = 64;
     float compressed_emb_vec[LEN][EMB_VEC_SIZE];
     uint32_t compressed_index[LEN];
     float output_choreo[LEN][EMB_VEC_SIZE] = {0};
