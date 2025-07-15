@@ -1528,13 +1528,6 @@ bool EarlySemantics::Visit(AST::DMA& n) {
       Error1(n.LOC(), "forbid to associated async dma without a named future.");
   }
 
-  if (isa<AST::ChunkAt>(n.from) && isa<AST::ChunkAt>(n.to))
-    if (cast<AST::ChunkAt>(n.from)->HasTile() &&
-        cast<AST::ChunkAt>(n.to)->HasTile()) {
-      Error1(n.LOC(),
-             "slice and deslice in single DMA statement is not supported yet.");
-    }
-
   if (!isa<AST::Memory>(n.to)) {
     if (sty->Dims() != tty->Dims() && !allow_auto_threading) {
       Error1(n.LOC(),

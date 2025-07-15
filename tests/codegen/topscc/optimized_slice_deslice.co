@@ -1,57 +1,97 @@
 // REQUIRES: TARGET-GCUALL
 // RUN: choreo -es -t topscc %s  | FileCheck --match-full-lines %s
 
+#include <cmath>
+#include "choreo.h"
 
-__cok__ {
-__co_device__ extern "C" void kernel(int* i, char* ii) {
-  i[0] += 1;
-}
-}
-
-__co__ auto foo(s64[N,8] input, s32[N,8] input2) {
+__co__ auto foo(s32[N,8] input2) {
   
-  global s32 [N, 4, 2] t;
+  global s32 [N, 8] t{55};
   parallel by 1 {
     foreach idx in [N] {
       i1 = dma.copy input2.chunkat(idx, _) => local;
-      dma.transp<0, 2, 1> i1.span_as([1, 2, 4]) => t.chunkat(idx, _, _);
+      dma.copy i1.data => t.subspan(1, 8).at(idx, _);
     }
   }
 
-  return input;
+  return t;
 }
 
+// CHECK: tops::mdspan __mds0_input2(tops::Global, (int*)input2 + (__iv_idx__elem__0 * 8) + 0, 1, 8);
+// CHECK: tops::mdspan __mds1_i1__buf__(tops::Private, (int*)i1__buf__, 1, 8);
+// CHECK: tops::memcpy(*i1.get_ctx(), __mds1_i1__buf__, __mds0_input2);
 
+// slice_transp => transp
+__co__ auto bar(f32 [8, 12, 24] a) {
+  global f32[12, 24, 8] ans{3.9f};
+  parallel by 1 {
+    parallel p by 4 {
+      local f32 [12, 24, 2] ans_l{-1.0f};
+      dma.transp<1, 2, 0> a.chunkat(p, _, _) => ans_l;
+      dma.copy ans_l => ans.chunkat(_, _, p);
+    }
+  }
+  return ans;
+}
+
+// CHECK:  tops::mdspan __mds4_a(tops::Global, (float*)a + (__tops_tid_x() * 576) + 0 + 0, 2, 12, 24);
+// CHECK:  tops::mdspan __mds5_ans_l(tops::Private, (float*)ans_l, 12, 24, 2);
+// CHECK:  int __transpose_layout0__a[] = {1, 2, 0};
+// CHECK:  tops::transpose(*__choreo_anon_fut__1.get_ctx(), __mds5_ans_l, __mds4_a, __transpose_layout0__a);
+
+// transp_deslice => transp
+__co__ auto baz(f32 [8, 12, 24] a) {
+  global f32[12, 24, 8] ans{3.9f};
+  parallel by 1 {
+    parallel p by 4 {
+      l = dma.copy a.chunkat(_, p, _) => local;
+      dma.transp<1, 2, 0> l.data => ans.chunkat(p, _, _);
+    }
+  }
+  return ans;
+}
+
+// CHECK: tops::mdspan __mds10_l(tops::Private, (float*)l.data(), 8, 3, 24);
+// CHECK: tops::mdspan __mds11_ans(tops::Global, (float*)ans + (__tops_tid_x() * 576) + 0 + 0, 3, 24, 8);
+// CHECK: int __transpose_layout1__l[] = {1, 2, 0};
+// CHECK: tops::transpose(*__choreo_anon_fut__3.get_ctx(), __mds11_ans, __mds10_l, __transpose_layout1__l);
+
+
+// The program should be able to run properly.
 int main() {
-  auto input = choreo::make_spandata<choreo::s64>(4, 8);
-  input.fill(99);
   auto input2 = choreo::make_spandata<choreo::s32>(4, 8);
-  input2.fill(199);
+  input2.fill_random(-10, 10);
+  
+  auto res = foo(input2.view());
+  
+  for (int i = 0; i < res.shape()[0]; ++i)
+    for (int j = 0; j < res.shape()[1]; ++j)
+      choreo::choreo_assert(res[i][j] == input2[i][j], "error");
+  
 
-  auto res = foo(input.view(), input2.view());
 
-  for (int i = 0; i < res.shape()[0]; ++i) {
-    for (int j = 0; j < res.shape()[1]; ++j) {
-      std::cout << res[i][j] << " ";
-    }
-    std::cout << std::endl;
-  }
+  auto input = choreo::make_spandata<choreo::f32>(8, 12, 24);
+  input.fill_random(-1.0f, 1.0f);
+
+  int x = input.shape()[0];
+  int y = input.shape()[1];
+  int z = input.shape()[2];
+
+  auto res1 = bar(input.view());
+  for (int i=0; i<x; i++)
+    for (int j=0; j<y; j++)
+      for (int k=0; k<z; k++) {
+        float expected = input[i][j][k];
+        float actual = res1[j][k][i];
+        choreo::choreo_assert(std::fabs(expected - actual) < 1e-4, "error");
+      }
+
+  auto res2 = baz(input.view());
+  for (int i=0; i<x; i++)
+    for (int j=0; j<y; j++)
+      for (int k=0; k<z; k++) {
+        float expected = input[i][j][k];
+        float actual = res2[j][k][i];
+        choreo::choreo_assert(std::fabs(expected - actual) < 1e-4, "error");
+      }
 }
-
-
-// CHECK:    for (__iv_idx__elem__0 = 0; __iv_idx__elem__0 < N; ++__iv_idx__elem__0) {
-// CHECK:      int* i1__buf__ = (int*)(anon_2 + 0);
-// CHECK:      tops::mdspan __mds0_input2(tops::Global, (int*)input2 + (__iv_idx__elem__0 * 8) + 0, 1, 8);
-// CHECK:      tops::mdspan __mds1_i1__buf__(tops::Private, (int*)i1__buf__, 1, 8);
-// CHECK:      tops_dte_ctx_t choreo_topscc_ctx0;
-// CHECK:      choreo::future i1(choreo_topscc_ctx0, "i1", 16, 12, i1__buf__);
-// CHECK:      tops::memcpy(*i1.get_ctx(), __mds1_i1__buf__, __mds0_input2);
-// CHECK:      auto * anon_1 = i1.data();
-// CHECK:      tops::mdspan __mds2_anon_1(tops::Private, (int*)anon_1, 1, 2, 4);
-// CHECK:      tops::mdspan __mds3_t(tops::Global, (int*)t, N, 4, 2);
-// CHECK:      tops_dte_ctx_t choreo_topscc_ctx1;
-// CHECK:      choreo::future __choreo_anon_fut__0(choreo_topscc_ctx1, "", 17, 7);
-// CHECK:      int __transpose_layout0__anon_1[] = {0, 2, 1};
-// CHECK:      int __deslice_offset0__t_2_anon_1[] = {(int)(__iv_idx__elem__0 * 1), 0, 0};
-// CHECK:      tops::transpose_deslice(*__choreo_anon_fut__0.get_ctx(), __mds3_t, __mds2_anon_1, __transpose_layout0__anon_1, __deslice_offset0__t_2_anon_1);
-// CHECK:    } // idx__elem__0
