@@ -16,11 +16,11 @@ check_choreo_installed() {
 
 # Function to download and install choreo
 install_choreo() {
-    local FILENAME="choreo-1.0.0.alpha-Linux.deb"         # Replace with your actual filename
+    local VERSION=$(cat VERSION.txt | tr -d '[:space:]')
+    local FILENAME="choreo-${VERSION}-Linux.deb"         # Replace with your actual filename
     local PROJECT_ID="xiaofeng.guan%2Fchoreo"  # Use URL-encoded project path
     local TOKEN=$(<.gitlab-install-token.txt)
     local PKG_PATH="package/"  # Path where packages are stored
-    local VERSION="1.0.0.alpha"  # Read version and remove spaces
     local checksum="f1b70b17b30efcb37bbd2a084e4a11ececd73e8a2f80c4aed8f1a88bd025ffe1"
     
     # Construct the download URL

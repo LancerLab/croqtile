@@ -1,8 +1,9 @@
 #!/bin/bash
 
 PROJECT_ID="xiaofeng.guan%2Fchoreo"  # Replace with your actual project ID
-TAG_NAME="v1.0.0"  # Replace with your release tag
-PACKAGE_PATH="package/choreo-1.0.0.alpha-Linux.deb"
+VERSION=$(cat VERSION.txt | tr -d '[:space:]')
+TAG_NAME="v${VERSION}"  # Replace with your release tag
+PACKAGE_PATH="package/choreo-${VERSION}-Linux.deb"
 TOKEN=$(<.gitlab-release-token.txt)
 
 # Upload the .deb package

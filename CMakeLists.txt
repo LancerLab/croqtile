@@ -1,5 +1,12 @@
 cmake_minimum_required(VERSION 3.22)
-project(Choreo VERSION 0.0.2)
+
+# Read version from VERSION.txt
+file(READ "${CMAKE_SOURCE_DIR}/VERSION.txt" VERSION_FROM_FILE)
+string(STRIP "${VERSION_FROM_FILE}" VERSION_FROM_FILE)
+# Extract major.minor.patch for CMake project version
+string(REGEX MATCH "^[0-9]+\.[0-9]+\.[0-9]+" PROJECT_VERSION_ONLY "${VERSION_FROM_FILE}")
+
+project(Choreo VERSION ${PROJECT_VERSION_ONLY})
 
 # Set C++ Standard
 set(CMAKE_CXX_STANDARD 17)
@@ -125,7 +132,7 @@ set(MIN_GLIBC_VERSION "2.27")
 
 # Set package information
 set(CPACK_PACKAGE_NAME "choreo")
-#set(CPACK_PACKAGE_VERSION "1.0.0.alpha")
+#set(CPACK_PACKAGE_VERSION "1.0.3.pre-beta")
 set(CPACK_PACKAGE_DESCRIPTION "Installed package for choreo")
 set(CPACK_PACKAGE_VENDOR "ERA Developers")
 

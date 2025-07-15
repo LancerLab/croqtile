@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # Variables for GitLab project and token
-FILENAME="choreo-1.0.0.alpha-Linux.deb"         # Replace with your actual filename
+VERSION=$(cat VERSION.txt | tr -d '[:space:]')
+FILENAME="choreo-${VERSION}-Linux.deb"         # Replace with your actual filename
 PROJECT_ID="xiaofeng.guan%2Fchoreo"  # Use URL-encoded project path
 TOKEN=$(<.gitlab-install-token.txt)
 PKG_PATH="package/"  # Path where packages are stored
