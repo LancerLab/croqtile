@@ -604,8 +604,6 @@ public:
       : Node(l), op(o), value_c(c), value_l(v1), value_r(v2), t(f),
         opt_vals(ov), s(sp) {}
 
-  // copy constructor for reconstructing expr in SymReplace pass
-  // TODO(wsj): loc?
   explicit Expr(const Expr& e) : Node(e.LOC()) { OverWrite(e); }
 
   void OverWrite(const Expr& e) {
@@ -2042,7 +2040,6 @@ public:
 struct Select : public Node, public TypeIDProvider<Select> {
   std::string rname;
   ptr<Expr> select_factor = nullptr;
-  int bound;
   ptr<MultiValues> expr_list = nullptr;
   bool inDMA = false;
 
@@ -2050,13 +2047,10 @@ struct Select : public Node, public TypeIDProvider<Select> {
          const ptr<MultiValues>& list = nullptr)
       : Node(l), select_factor(sf), expr_list(list) {}
 
-  // TODO(wsj)
-  // x = select(IntLiteral, a, b, c)
   ptr<Node> CloneImpl() const override {
     auto n = Make<Select>(LOC(), cast<Expr>(select_factor->Clone()),
                           cast<MultiValues>(expr_list->Clone()));
     n->rname = rname;
-    n->bound = bound;
     n->inDMA = inDMA;
     return n;
   }

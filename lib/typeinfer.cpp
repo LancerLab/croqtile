@@ -969,10 +969,10 @@ bool TypeInference::Visit(AST::Synchronize& n) {
 bool TypeInference::Visit(AST::Select& n) {
   TraceEachVisit(n);
 
-  if (CanYieldAnInteger(NodeType(*n.select_factor))) {
-    // normalize the shape
-    SetNodeType(*n.select_factor, MakeIntegerType());
-  }
+  // if (CanYieldAnInteger(NodeType(*n.select_factor))) {
+  //   // normalize the shape
+  //   SetNodeType(*n.select_factor, MakeIntegerType());
+  // }
 
   if ((cur_type = type_equals.ResolveEqualFutures(*n.expr_list))) {
     SetNodeType(n, cur_type);

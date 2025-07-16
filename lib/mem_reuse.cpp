@@ -18,7 +18,6 @@ bool MemAnalyzer::BeforeVisitImpl(AST::Node& n) {
       if (!sty) continue;
       VST_DEBUG(dbgs() << "[memanlz] BUFFER: " << sname << "\n");
       buf_sto.emplace(sname, sty->GetStorage());
-      // TODO: should we align the size to 512?!
       buf_size.emplace(sname, sty->ByteSizeValue());
       if (!sty->RuntimeShaped()) {
         VST_DEBUG(dbgs() << "\tstatic  size:  " << sty->ByteSizeValue()
@@ -285,7 +284,6 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx) {
     script.push_back("HeapSimulator __co__heap_simulator;");
     for (const auto& sto : required_storage) {
       std::string stos = STR(sto);
-      // TODO: Is shared alignment needed?
       script.push_back("HeapSimulator::Result __co__" + stos +
                        "_result = "
                        "__co__heap_simulator.Allocate(__co__" +

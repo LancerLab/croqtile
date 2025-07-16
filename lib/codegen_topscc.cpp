@@ -360,6 +360,8 @@ TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
     // we collect all the expressions first.
     for (size_t pi = 0; pi < tsis[tsi_idx]->GetIndices().size(); ++pi) {
       auto p = tsis[tsi_idx]->GetIndices()[pi];
+      // exprs[x] will perform multiplication operations with other values later
+      // thus the parent_op is `*`
       auto idx_exprs =
           SplitStringByDelimiter(OpExprSTR(p, "*", true, IsHost()));
       for (size_t i = 0; i < idx_exprs.size(); ++i)
@@ -396,7 +398,6 @@ TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
       else
         offsets[i] << "(int)(" << exprs[i] << " * "
                    << ValueSTR(shape.ValueAt(i)) << ")";
-      // TODO: should consider precedence of `*`
     }
   }
 
@@ -2942,7 +2943,7 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
   } else if (auto b = dyn_cast<AST::BoolLiteral>(e)) {
     oss << b->value;
   } else if (auto ii = dyn_cast<AST::IntIndex>(e)) {
-    // TODO: ture or is_left_child here?
+    // currently, value of IntIndex is always IntLiteral or Identifier
     return OpExprSTR(ii->value, parent_op, true, is_host);
   } else if (auto da = dyn_cast<AST::DataAccess>(e)) {
     if (auto sty = GetSpannedType(GetSymbolType(da->data->name))) {

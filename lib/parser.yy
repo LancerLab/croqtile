@@ -840,8 +840,9 @@ g_value_list /* contains at least two value */
       }
     ;
 
-template_val /* TODO: could be negative number? */
+template_val
     : NUM { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
+    | MINUS NUM { $$ = AST::Make<AST::IntLiteral>(@1, -$2); }
     | spanid { $$ = AST::Make<AST::Identifier>(@1, $1); }
     | scalar_type { $$ = $1; }
     ;

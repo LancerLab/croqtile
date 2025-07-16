@@ -999,9 +999,6 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
       if (!(isa<ScalarIntegerType>(ety) && CanYieldAnInteger(vty))) {
         Error1(n.da->LOC(), "type inconsistent: assign " + PSTR(vty) + " to " +
                                 PSTR(ety) + ".");
-      } else {
-        // for example: u8 <= u32
-        // TODO: maybe generate a warning here?
       }
     }
 
@@ -1949,13 +1946,11 @@ bool EarlySemantics::Visit(AST::Select& n) {
 
   size_t ec = error_count;
 
-  // TODO(wsj) isa<ScalarIntegerType>(rty)?
-  if (!isa<BoundedIntegerType>(NodeType(*n.select_factor)) &&
-      !isa<ScalarIntegerType>(NodeType(*n.select_factor)))
+  if (auto sf_type = NodeType(*n.select_factor);
+      !isa<BoundedIntegerType>(sf_type) && !isa<ScalarIntegerType>(sf_type))
     Error1(n.LOC(), "expect `" + PSTR(n.select_factor) +
-                        "` to be a (bounded) integer type.");
-
-  // TODO(wsj) assert bound <= span_val_list.count ?
+                        "` to be a (bounded) integer type, but got " +
+                        sf_type->TypeNameString() + ".");
 
   // check value types in val_list are the same
   assert(n.expr_list->Count() > 0);

@@ -52,14 +52,12 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
   but there is another use in scope A later.
   so the live range is still [def point, the second use]
 
-  dst of DMA is treated as use for now.
-  TODO: be treated as def if it is the whole buffer(position is nullptr)
-    def in scope A
-      def in scope A::B
-      use in scope A
-      because we may of may not enter scope A::B
-      so should pick def in scope A as the begin of live range
-      just find the def inside the current scope or outer scope!
+  def in scope A
+    def in scope A::B
+    use in scope A
+    because we may of may not enter scope A::B
+    so should pick def in scope A as the begin of live range
+    just find the def inside the current scope or outer scope!
   */
 
   // Certain types of nodes are treated as statements.

@@ -612,20 +612,18 @@ bool SemaChecker::VisitNode(AST::Rotate& n) {
 bool SemaChecker::VisitNode(AST::Select& n) {
   size_t ec = error_count;
 
-  if (!isa<ScalarIntegerType>(NodeType(*n.select_factor))) {
-    ++error_count;
-    Error(n.select_factor->LOC(), "Expect " + PSTR(n.select_factor) +
-                                      " to be an integer type but got " +
-                                      PSTR(NodeType(*n.select_factor)) + ".");
-  }
+  if (!CanYieldAnInteger(n.select_factor->GetType()))
+    Error1(n.select_factor->LOC(),
+           "Expect " + PSTR(n.select_factor) +
+               " to be an integer type but got " +
+               NodeType(*n.select_factor)->TypeNameString() + ".");
 
   auto expr_list = n.expr_list;
   auto expr0 = expr_list->ValueAt(0);
   if (!isa<FutureType>(NodeType(*expr0)) &&
       !isa<SpannedType>(NodeType(*expr0))) {
-    ++error_count;
-    Error(expr0->LOC(),
-          "Expect " + PSTR(expr0) + " to be a future/spanned type.");
+    Error1(expr0->LOC(),
+           "Expect " + PSTR(expr0) + " to be a future/spanned type.");
     return false;
   }
 
@@ -635,10 +633,35 @@ bool SemaChecker::VisitNode(AST::Select& n) {
 
     if (*NodeType(*expr) == *NodeType(*expr0)) continue;
 
-    ++error_count;
-    Error(expr->LOC(), "Type mismatch inside SELECT: " + PSTR(expr) + "(" +
-                           TYPE_STR(expr) + ") vs. " + PSTR(expr0) + "(" +
-                           TYPE_STR(expr0) + ").");
+    Error1(expr->LOC(), "Type mismatch inside SELECT: " + PSTR(expr) + "(" +
+                            TYPE_STR(expr) + ") vs. " + PSTR(expr0) + "(" +
+                            TYPE_STR(expr0) + ").");
+  }
+
+  int64_t select_value_cnt = static_cast<int64_t>(expr_list->Count());
+  if (auto il = AST::GetIntLiteral(*n.select_factor)) {
+    if (il->Val() < 0 || il->Val() >= select_value_cnt)
+      Error1(il->LOC(), "The select factor `" + PSTR(il) +
+                            "` is not in bound [0, " +
+                            std::to_string(select_value_cnt) + ")");
+  } else if (isa<BoundedType>(NodeType(*n.select_factor))) {
+    // TODO: check
+  } else {
+    if (n.select_factor->Opts().HasVal()) {
+      auto v = n.select_factor->Opts().GetVal();
+      FCtx(CurrentFunctionName())
+          .InsertAssertion(sbe::oc_ge(v, sbe::nu(0))->Normalize(),
+                           n.select_factor->LOC(),
+                           "The select factor `" + PSTR(n.select_factor) +
+                               "` should be greater than or equal to 0.");
+      FCtx(CurrentFunctionName())
+          .InsertAssertion(
+              sbe::oc_lt(v, sbe::nu(select_value_cnt))->Normalize(),
+              n.select_factor->LOC(),
+              "The select factor `" + PSTR(n.select_factor) +
+                  "` should be less than " + std::to_string(select_value_cnt) +
+                  ", which is the count of values in the select statement.");
+    }
   }
 
   return ec == error_count;

@@ -718,17 +718,12 @@ public:
 
       auto st = mem->Get();
       if (n.init_expr != nullptr) {
-        if (st == Storage::SHARED || st == Storage::LOCAL ||
-            st == Storage::SUB) {
-          Error(n.LOC(), "initialization is not supported for " + STR(st) +
-                             " variables");
-          error_count++;
-        }
+        if (st == Storage::SHARED || st == Storage::LOCAL || st == Storage::SUB)
+          Error1(n.LOC(), "initialization is not supported for " + STR(st) +
+                              " variables");
 
-        if (st == Storage::GLOBAL) {
-          Error(n.LOC(), "'global' attribute only applies to functions ");
-          error_count++;
-        }
+        if (st == Storage::GLOBAL)
+          Error1(n.LOC(), "'global' attribute only applies to functions ");
       }
       return true;
     }
@@ -899,13 +894,13 @@ public:
       for (auto& arg : n.GetArguments()) {
         if (auto sty = GetSpannedType(arg->GetType()))
           if (sty->GetStorage() == Storage::GLOBAL)
-            Error1(n.LOC(), "function call '" + STR(n) +
+            Error1(n.LOC(), "function call '" + n.function->name +
                                 "` with global data '" + STR(arg) +
                                 "` is not allowed.");
         if (auto id = AST::GetIdentifier(arg))
           if (cur_params.count(InScopeName(STR(id))) &&
               isa<SpannedType>(GetSymbolType(id->name)))
-            Error1(n.LOC(), "function call '" + STR(n) +
+            Error1(n.LOC(), "function call '" + n.function->name +
                                 "` with global data '" + STR(arg) +
                                 "` is not allowed.");
       }
