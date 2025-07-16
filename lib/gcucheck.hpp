@@ -14,10 +14,9 @@ extern int GCUDeviceParallelDepth(Storage);
 struct GCUCheck : public VisitorWithSymTab {
 private:
   std::unordered_map<std::string, AST::Parameter*> cur_params;
+  std::vector<int> pl_depths;
   int pl_depth = 0;
   int max_pl_depth = 0;
-  int kernel_launch_count = 0;
-  int local_level = 0;
   std::string cur_fname;
   std::string cur_arch;
 
@@ -34,18 +33,18 @@ private:
   bool BeforeVisitImpl(AST::Node& n) override {
     TraceEachVisit(n, "(pre)");
     if (auto cf = dyn_cast<AST::ChoreoFunction>(&n)) {
-      local_level = 0;
       cur_params.clear();
       cur_fname = cf->name;
-      kernel_launch_count = 0;
+      pl_depths.clear();
+      pl_depths.push_back(0);
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       if (pb->GetLevel() == Storage::NONE) {
         pl_depth++;
         pb->SetLevel(PLevel(*pb, pl_depth));
       } else
         pl_depth = PDepth(*pb, pb->GetLevel());
-      if (pb->GetLevel() == Storage::SHARED) ++kernel_launch_count;
       max_pl_depth = pl_depth;
+      pl_depths.push_back(pl_depth);
     }
     return true;
   }
@@ -55,7 +54,7 @@ private:
     if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       std::string append_note = ":";
       assert(pb->GetLevel() != Storage::NONE);
-      pl_depth = PDepth(*pb, pb->GetLevel());
+      pl_depth = pl_depths.back();
       if (CCtx().GetTarget() == CompileTarget::Topscc)
         append_note += PBLevelString(*pb);
       else
@@ -64,13 +63,12 @@ private:
       pty->AppendNote(append_note);
       for (auto& symbol : pb->AllSubPVs())
         cast<BoundedITupleType>(NodeType(*symbol))->AppendNote(append_note);
-
-      pl_depth--;
+      pl_depths.pop_back();
+      // pl_depth may not be increasing in a sequential manner
+      // so need a container to store the state.
+      pl_depth = pl_depths.back();
       assert(pl_depth >= 0 && "Unexpected parallel level");
-      if (pl_depth == 0) {
-        max_pl_depth = 0;
-        local_level = 0;
-      }
+      if (pl_depth == 0) { max_pl_depth = 0; }
     }
     // mask stmts that are possible to be shared
     else if (auto c = dyn_cast<AST::Call>(&n))
@@ -757,8 +755,6 @@ public:
       if (pl_depth == 0)
         Error1(n.LOC(), "local variable '" + n.name_str +
                             "` must be declared inside parallel-by.");
-      else if (local_level == 0)
-        local_level = pl_depth;
       if (sty->RuntimeShaped() && !CCtx().MemReuse())
         Error1(n.LOC(), "GCU forbids local variable '" + n.name_str +
                             "` to be dynamically shaped (by " +

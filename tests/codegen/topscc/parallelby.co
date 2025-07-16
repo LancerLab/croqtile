@@ -12,7 +12,8 @@ __co__ auto bar() {
     parallel {lx,ly,lz} by [2,2,2] : local {}
 
   parallel by 1 : shared
-    parallel by 2 : sublocal {}
+    parallel by 2 : local
+      parallel by 4 : sublocal {}
 }
 
 // CHECK: __thread_dims__(1, 1, 1)
@@ -30,7 +31,7 @@ __co__ auto bar() {
 // CHECK: __thread_dims__(1, 1, 1)
 // CHECK: __global__ void __choreo_device_bar4()
 
-// CHECK: __thread_dims__(2, 1, 1)
+// CHECK: __thread_dims__(4, 1, 1)
 // CHECK: __global__ void __choreo_device_bar5()
 
 // CHECK: void bar() {
@@ -55,7 +56,7 @@ __co__ auto bar() {
 // CHECK:   __choreo_device_bar4<<<__bar_gdims4, __bar_bdims4>>>();
 // CHECK:   choreo::abend_true(topsDeviceSynchronize());
 // CHECK:   dim3 __bar_gdims5(1, 1, 1);
-// CHECK:   dim3 __bar_bdims5(1, 1, 1);
+// CHECK:   dim3 __bar_bdims5(2, 1, 1);
 // CHECK:   __choreo_device_bar5<<<__bar_gdims5, __bar_bdims5>>>();
 // CHECK:   choreo::abend_true(topsDeviceSynchronize());
 // CHECK: }
@@ -146,3 +147,35 @@ __co__ void dynamic_expr_paraby(int n) {
 // CHECK:   dim3 __dynamic_expr_paraby_bdims0((n >= 4 ? 4 : n), 1, 1);
 // CHECK:   __choreo_device_dynamic_expr_paraby<<<__dynamic_expr_paraby_gdims0, __dynamic_expr_paraby_bdims0>>>(n);
 // CHECK: }
+
+__co__ auto F(f32 [8, 8, 24] a) {
+  global f32[a.span] ans{1.0f};
+  parallel p by 4 : local {
+    f = dma.copy.async a.chunkat(p, _, _) => ans.chunkat(p, _, _);
+    wait f;
+  }
+  return ans;
+}
+
+// the below decl of global span used to have error due to the `: local` above
+// so add the multi co funcs test case.
+__co__ auto B(f32 [8, 8, 24] a) {
+  f32[a.span] ans{1.9f};
+  parallel p by 4 : local {
+    dma.copy a.chunkat(_, p, _) => ans.chunkat(_, p, _);
+  }
+  return ans;
+}
+
+__co__ auto Z(f32 [8, 8, 24] a) {
+  global f32[a.span] ans{2.9f};
+  parallel by 1 : shared {
+    f = dma.copy a => shared;
+    parallel p by 4 : local {
+      dma.copy f.data.chunkat(p, _, _) => ans.chunkat(p, _, _);
+    }
+  }
+  return ans;
+}
+
+// CHECK-NOT: error

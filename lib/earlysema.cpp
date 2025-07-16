@@ -1197,20 +1197,20 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
       "to automatically infer the levels.";
   // The pb is specified with parallel level explicitly.
   if (n.GetLevel() != Storage::NONE) {
-    // current is specified, outer not.
+    // current is specified, but outer not.
     if (pl_depth > 1 && !explicit_pl) Error1(n.LOC(), pl_anno_msg);
     explicit_pl = true;
-    // ensure that the parallel scopes follow a decreasing hierarchy
     if (!explicit_pl_stk.empty() &&
-        !LowerLevelStorage(n.GetLevel(), explicit_pl_stk.top()))
-      Error1(
-          n.LOC(),
-          "Parallel levels must be specified in decreasing order. Current: '" +
-              STR(n.GetLevel()) + "', previous outer one: '" +
-              STR(explicit_pl_stk.top()) + "'.");
+        !NextLevelStorage(explicit_pl_stk.top(), n.GetLevel())) {
+      // ensure that the parallel scopes follow a decreasing hierarchy
+      Error1(n.LOC(), "Parallel levels must be specified in adjacent "
+                      "decreasing order. Current: '" +
+                          STR(n.GetLevel()) + "', previous outer one: '" +
+                          STR(explicit_pl_stk.top()) + "'.");
+    }
     explicit_pl_stk.push(n.GetLevel());
   } else {
-    // outer is specified, current not.
+    // outer is specified, but current not.
     if (explicit_pl) Error1(n.LOC(), pl_anno_msg);
   }
 

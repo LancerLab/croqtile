@@ -124,9 +124,9 @@ inline static Storage ProjectStorage(const Storage& a) {
     return a;
 }
 
-// return `a` lower than `b`. E.g., local is lower than shared.
-inline static bool LowerLevelStorage(const Storage& a, const Storage& b) {
-  return static_cast<int>(a) < static_cast<int>(b);
+// return if the next level of `a` is `b`. E.g., next level of shared is local.
+inline static bool NextLevelStorage(const Storage& a, const Storage& b) {
+  return static_cast<int>(a) == static_cast<int>(b) + 1;
 }
 
 enum class ParamAttr : uint16_t {

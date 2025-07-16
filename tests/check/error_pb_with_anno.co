@@ -21,10 +21,15 @@ __co__ auto baz() {
   parallel p by 3 : shared {
     parallel by 4 : shared {}
   }
+
+  parallel p by 2 : shared {
+    parallel q by 4 : sublocal {}
+  }
 }
 
 // CHECK: error: For nested parallel-by, either all must explicitly specify their parallelism level, or none should specify it — allowing Choreo to automatically infer the levels.
 // CHECK: error: For nested parallel-by, either all must explicitly specify their parallelism level, or none should specify it — allowing Choreo to automatically infer the levels.
-// CHECK: error: Parallel levels must be specified in decreasing order. Current: 'shared', previous outer one: 'local'.
-// CHECK: error: Parallel levels must be specified in decreasing order. Current: 'shared', previous outer one: 'shared'.
-// CHECK: Totally 4 errors have been detected.
+// CHECK: error: Parallel levels must be specified in adjacent decreasing order. Current: 'shared', previous outer one: 'local'.
+// CHECK: error: Parallel levels must be specified in adjacent decreasing order. Current: 'shared', previous outer one: 'shared'.
+// CHECK: error: Parallel levels must be specified in adjacent decreasing order. Current: 'sub-local', previous outer one: 'shared'.
+// CHECK: Totally 5 errors have been detected.
