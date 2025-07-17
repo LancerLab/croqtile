@@ -459,8 +459,10 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
         if (IsValidValueList(vl) && !IsComputable(vl))
           Note(n.init_expr->LOC(),
                "`" + n.name_str + "'s value can not be evaluated.");
-
-        SymbolAliasNum(SSTab().ScopedName(name), cur_vn);
+        if (IsMutable(*nty))
+          GenValNum(SSTab().ScopedName(name));
+        else
+          SymbolAliasNum(SSTab().ScopedName(name), cur_vn);
       }
     }
   } else {
@@ -488,9 +490,7 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
   DefineASymbol(name, nty);
   SetNodeType(n, nty);
 
-  if ((isa<F32Type>(nty) || isa<F64Type>(nty) ||
-       (isa<ScalarIntegerType>(nty)) || isa<F16Type>(nty) ||
-       isa<F8Type>(nty)) &&
+  if ((isa<ScalarIntegerType>(nty) || isa<ScalarFloatType>(nty)) &&
       cur_vn.IsValid()) {
     // mutables do not have constant values
     if (IsMutable(*nty)) {
