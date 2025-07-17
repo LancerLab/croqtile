@@ -2,11 +2,10 @@
 
 #include "choreo.h"
 #include <climits>
-#define DEFAULT_VALUE 0.5f
 
 // ================== Choreo kernel implementation ==================
 // Kernel: fill_default_emb_vec_direct
-__co__ void fill_default_emb_vec_direct(u32[DYN_DIM] missing_index, global f32[??, EMB_VEC_SIZE] output_emb_vec) {
+__co__ void fill_default_emb_vec_direct(u32[DYN_DIM] missing_index, global f32[??, EMB_VEC_SIZE] output_emb_vec, float default_emb_vec) {
   parallel p by 1 {
     parallel q by 1 {
       foreach {idx} in [DYN_DIM / #p / #q] {
@@ -15,7 +14,7 @@ __co__ void fill_default_emb_vec_direct(u32[DYN_DIM] missing_index, global f32[?
         dma.copy missing_index.subspan(1).at(p#q#idx) => index;
         dma.copy output_emb_vec.subspan(1, EMB_VEC_SIZE).at(index.at(0), _) => local_emb_vec;
         foreach {j} in [EMB_VEC_SIZE] {
-          local_emb_vec.at(0, j) = DEFAULT_VALUE;
+          local_emb_vec.at(0, j) = default_emb_vec;
         }
         dma.copy local_emb_vec => output_emb_vec.subspan(1, EMB_VEC_SIZE).at(index.at(0), _);
       }
@@ -85,6 +84,8 @@ int main() {
     // #define EMB_VEC_SIZE 64
     const int LEN = 1000;
     const int EMB_VEC_SIZE = 64;
+    const float DEFAULT_VALUE = 0.5f; 
+
     float output_choreo[LEN][EMB_VEC_SIZE] = {0};
     float output_cpu[LEN][EMB_VEC_SIZE] = {0};
     float output_opt[LEN][EMB_VEC_SIZE] = {0};
@@ -105,7 +106,7 @@ int main() {
     auto output_choreo_view = choreo::make_spanview<2, choreo::f32>((float*)output_choreo__device, {choreo::__inf__, EMB_VEC_SIZE});
     
     // Call choreo kernel on device buffer
-    fill_default_emb_vec_direct(missing_index_view, output_choreo_view);
+    fill_default_emb_vec_direct(missing_index_view, output_choreo_view, DEFAULT_VALUE);
     // Copy result back to host
     choreo::abend_true(topsMemcpy(output_choreo, output_choreo__device, ((LEN) * (64ULL)) * 4, topsMemcpyDeviceToHost));
 
