@@ -137,6 +137,9 @@ Option<bool> verify_visitors(OptionKind::Hidden, "--verify", "-vf", false,
 Option<bool> no_show_source(
     OptionKind::Hidden, "-fno-show-source-location", "", false,
     "Do not show the source code location when error/warning/etc..");
+Option<bool> analyze_device_functions(
+    OptionKind::Hidden, "--analyze-device-functions", "-adf", false,
+    "Analyze the device functions in the choreo code. (Experimental)");
 
 // Some system missed c++17 filesystem support. Use POSIX instead
 inline bool file_exists(const std::string& filename) {
@@ -277,6 +280,9 @@ bool CommandLine::Parse(int argc, char** argv) {
   if (!abend_after.GetValue().empty())
     setenv("CHOREO_STOP_AFTER_PASS", ToUpper(abend_after.GetValue()).c_str(),
            1);
+
+  if (analyze_device_functions)
+    setenv("CHOREO_ANALYZE_DEVICE_FUNCTIONS", "", 1);
 
   if (!r.StdinAsInput()) {
     std::string filename = r.GetInputFileName();

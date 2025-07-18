@@ -1,0 +1,23 @@
+// RUN: choreo -es -adf %s -o - 2>&1 | FileCheck %s
+__cok__ {
+  __device__ int getInt();
+  __device__ float getfloat();
+  __device__ void getVoid();
+  __device__ int* getIntPtr();
+  __device__ std::set<int>* getUnKnown();
+}
+
+__co__ void func() {
+  parallel by 1 {
+    mutable int a = call getInt();
+    mutable float b = call getInt(); // cast int to float
+    mutable c = call getInt(); // legal if option '-adf' on, illegal if not
+    // mutable d = call getVoid(); // illegal, void type
+    // mutable e = call getUnKnown(); // illegal, unknown type
+    // mutable f = call getIntPtr(); // illegal, pointer type to span type, span type should not be mutable
+  }
+}
+
+// CHECK: int a = getInt();
+// CHECK: float b = static_cast<float>(getInt());
+// CHECK: int c = getInt();

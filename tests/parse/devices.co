@@ -1,0 +1,42 @@
+// RUN: choreo -e -adf %s | FileCheck %s
+__cok__ {
+  struct st {};
+  __device__ void abc(const std::vector<std::map<st*,std::string>> &a) {}
+
+  __device__ static inline constexpr st const *def(const ID &&a, float* b) {
+    return a + (int)b;
+  }
+
+  __device__  
+  extern int foo(int, __private__ __align__ char*, float, void**) {} ;
+
+  __device__ extern int index ();
+
+  template <typename T>
+  __device__ __attribute__((noinline, no_mem_alias_in_vldst_tar))
+  void dynamic_scaled_int8_quant_kernel(
+    int8_t* out, float* scales, T* in,
+    const DYNAMIC_SCALED_INT8_QUANT_OP_PARAS para) {}
+
+  // __device__ void illegal_fun0() const; // illegal parsing, 'const' function
+}
+
+// CHECK: DeviceFunction: abc -> void (unknown)
+// CHECK: DeviceFunction: def -> unknown * (unknown, f32 *)
+// CHECK: DeviceFunction: foo -> s32 (s32, s8 *, f32, unknown *)
+// CHECK: DeviceFunction: index -> s32 ()
+// CHECK: DeviceFunction: dynamic_scaled_int8_quant_kernel -> void (unknown *, f32 *, unknown *, unknown)
+
+// CHECK: struct st {};
+// CHECK: __device__ void abc(const std::vector<std::map<st*,std::string>> &a) {}
+// CHECK: __device__ static inline constexpr st const *def(const ID &&a, float* b) {
+// CHECK:   return a + (int)b;
+// CHECK: }
+// CHECK: __device__  
+// CHECK: extern int foo(int, __private__ __align__ char*, float, void**) {} ;
+// CHECK: __device__ extern int index ();
+// CHECK: template <typename T>
+// CHECK: __device__ __attribute__((noinline, no_mem_alias_in_vldst_tar))
+// CHECK: void dynamic_scaled_int8_quant_kernel(
+// CHECK:   int8_t* out, float* scales, T* in,
+// CHECK:   const DYNAMIC_SCALED_INT8_QUANT_OP_PARAS para) {}

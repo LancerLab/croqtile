@@ -3,11 +3,9 @@
 #include "preprocess.hpp"
 
 using namespace Choreo;
+extern Option<std::string> output;
 
 int main(int argc, char* argv[]) {
-  Option<std::string> output(OptionKind::User, "--output", "-o", "",
-                             "Place the output into <file>.", "-o <file>",
-                             true);
   // parse all the options
   OptionRegistry& r = OptionRegistry::GetInstance();
   for (int i = 1; i < argc; ++i) {

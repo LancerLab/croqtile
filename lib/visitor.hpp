@@ -2,8 +2,6 @@
 #define __CHOREO_VISITOR_HPP__
 
 #include <cstring>
-#include <iostream>
-#include <optional>
 #include <unistd.h>
 #include <unordered_set>
 
@@ -104,6 +102,7 @@ struct Visitor {
   virtual bool Visit(AST::FunctionDecl&) = 0;
   virtual bool Visit(AST::ChoreoFunction&) = 0;
   virtual bool Visit(AST::CppSourceCode&) = 0;
+  virtual bool Visit(AST::DeviceFunctionDecl&) = 0;
   virtual bool Visit(AST::Program&) = 0;
 
 protected:
@@ -120,6 +119,7 @@ protected:
   bool abend_after = false;
   bool prt_visitor = false;
   bool prt_node_ty = false;
+  bool analyze_device_functions = false;
   bool disabled = false;
   size_t error_count = 0;
 
@@ -181,6 +181,9 @@ public:
     if (std::getenv("CHOREO_PRINT_PASSES")) prt_visitor = true;
 
     if (std::getenv("CHOREO_PRINT_NODETYPE")) prt_node_ty = true;
+
+    if (std::getenv("CHOREO_ANALYZE_DEVICE_FUNCTIONS"))
+      analyze_device_functions = true;
   }
 
   virtual ~Visitor() {}
@@ -533,6 +536,7 @@ public:
   bool Visit(AST::FunctionDecl&) override { return true; }
   bool Visit(AST::ChoreoFunction&) override { return true; }
   bool Visit(AST::CppSourceCode&) override { return true; }
+  bool Visit(AST::DeviceFunctionDecl&) override { return true; }
   bool Visit(AST::Program&) override { return true; }
 };
 

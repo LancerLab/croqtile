@@ -4,7 +4,6 @@
 // This applies 'normalization' or 'canonicalization' of AST for easier handling
 // in later visiting passes.
 
-#include <iostream>
 #include <tuple>
 
 #include "symtab.hpp"
@@ -337,9 +336,14 @@ public:
                        << "': DEFAULT ---> GLOBAL\n");
     }
 
-    // insert CastExpr node if needed
     if (!n.init_expr) return true;
     if (!n.type) return true;
+    if (isa<AST::Call>(n.init_expr)) {
+      auto init_ty = n.init_expr->GetType();
+      n.init_expr = AST::Make<AST::Expr>(n.init_expr->LOC(), n.init_expr);
+      n.init_expr->SetType(init_ty);
+    }
+    // insert CastExpr node if needed
     auto r = n.init_expr;
     auto lty = n.type->GetType();
     auto rty = r->GetType();

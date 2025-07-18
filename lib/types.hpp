@@ -49,6 +49,7 @@ enum class BaseType {
   STRING,
   UNSPECVAL,
   FUNCTION,
+  DEVICE,
   UNKNOWN,
 };
 
@@ -191,6 +192,7 @@ inline static BaseType BaseTypeFromString(const std::string& input) {
       {"FUTURE", BaseType::FUTURE},
       {"string", BaseType::STRING},
       {"function", BaseType::FUNCTION},
+      {"device", BaseType::DEVICE},
       {"index", BaseType::INDEX},
       {"ituple", BaseType::ITUPLE},
       {"event", BaseType::EVENT},
@@ -233,6 +235,7 @@ inline static std::string GetStringFrom(BaseType dataType) {
       {BaseType::FUTURE, "FUTURE"},
       {BaseType::STRING, "string"},
       {BaseType::FUNCTION, "function"},
+      {BaseType::DEVICE, "device"},
       {BaseType::INDEX, "index"},
       {BaseType::EVENT, "event"},
       {BaseType::ARRAY, "array"},
@@ -1181,6 +1184,9 @@ struct MDSpanType : public Type, public TypeIDProvider<MDSpanType> {
 struct SpannedType;
 template <>
 inline bool isa<SpannedType>(const Type*);
+template <>
+inline SpannedType* dyn_cast<SpannedType>(const Type* ty);
+
 struct SpannedType : public Type, public TypeIDProvider<SpannedType> {
   using FundamentalType = BaseType;
   FundamentalType e_type;
@@ -1271,6 +1277,66 @@ struct SpannedType : public Type, public TypeIDProvider<SpannedType> {
   const std::string Name() const override { return "spanned"; }
 
   __UDT_TYPE_INFO__(Type, SpannedType)
+};
+
+struct DeviceDataType final : public Type,
+                              public TypeIDProvider<DeviceDataType> {
+  DeviceDataType(std::string str, BaseType bt = BaseType::UNKNOWN,
+                 bool ip = false)
+      : Type(BaseType::DEVICE), str(str), data_type(bt), is_pointer(ip) {}
+  std::string str;
+  BaseType data_type;
+  bool is_pointer;
+
+  const ptr<Type> Clone() const override {
+    return std::make_shared<DeviceDataType>(str, data_type, is_pointer);
+  }
+
+  size_t Dims() const override { return GetInvalidRank(); }
+  bool IsComplete() const override { return true; }
+  void Print(std::ostream& os) const override {
+    os << STR(data_type);
+    if (is_pointer) os << " *";
+  }
+  const std::string Name() const override { return str; }
+
+  bool HasSufficientInfo() const override { return true; }
+
+  bool operator==(const Type& ty) const override {
+    return isa<DeviceDataType>(&ty) && str == ((const DeviceDataType&)ty).str;
+  }
+
+  std::string GetTypeStr() { return str; }
+  void SetTypeStr(std::string s) { str = s; }
+
+  BaseType GetDataType() { return data_type; }
+  void SetDataType(BaseType bt) { data_type = bt; }
+
+  bool IsPointerType() { return is_pointer; }
+  void SetPointerType(bool ip) { is_pointer = ip; }
+
+  // used to march with choreo type including scalar type and spanned type.
+  bool ApprxEqual(const Type& ty) const override {
+    dbgs() << "check device type '" << STR(*this) << "' against choreo type'"
+           << STR(ty.GetBaseType()) << "'\n";
+    if (data_type == BaseType::UNKNOWN) return false;
+    if (isa<ScalarType>(&ty)) {
+      return ty.GetBaseType() == data_type ||
+             IsValuePreservingCast(ty.GetBaseType(), data_type);
+    }
+    // spanned type with the same element type
+    if (SpannedType* spanned_ty = dyn_cast<SpannedType>(&ty); is_pointer)
+      if (data_type == BaseType::VOID ||
+          IsValuePreservingCast(spanned_ty->ElementType(), data_type))
+        return true;
+
+    return false;
+  }
+
+  bool IsNaiveType() {
+    return IsFundamentalType(data_type) || data_type == BaseType::VOID;
+  }
+  __UDT_TYPE_INFO__(Type, DeviceDataType)
 };
 
 struct BoundedType : public Type, public TypeIDProvider<BoundedType> {
@@ -2155,6 +2221,30 @@ inline ptr<PlaceHolderType> MakePlaceHolderSpannedType() {
 
 inline ptr<PlaceHolderType> MakePlaceHolderFutureType() {
   return std::make_shared<PlaceHolderType>(BaseType::FUTURE);
+}
+
+inline ptr<DeviceDataType> MakeDeviceDataType(const std::string& name,
+                                              BaseType ty, bool ip = false) {
+  return std::make_shared<DeviceDataType>(name, ty, ip);
+}
+
+// only return spanned type, scalar type, void type and unknown type
+inline ptr<Type> MakeChoreoDataType(const ptr<DeviceDataType>& dt) {
+  if (dt->is_pointer) {
+    if (IsFundamentalType(dt->data_type) || dt->data_type == BaseType::VOID)
+      return MakeSpannedType(dt->data_type, GenUninitShape());
+    else
+      return MakeDummySpannedType();
+  } else {
+    if (IsFundamentalType(dt->data_type) || dt->data_type == BaseType::BOOL)
+      return MakeScalarType(dt->data_type, true);
+    else if (dt->data_type == BaseType::VOID)
+      return MakeVoidType();
+    else if (dt->data_type == BaseType::UNKNOWN)
+      return MakeUnknownType();
+    else
+      choreo_unreachable("unsupported DeviceDataType.");
+  }
 }
 
 inline ptr<FunctionType> MakeFunctionType(const ptr<Type> ot,

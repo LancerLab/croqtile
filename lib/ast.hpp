@@ -1,7 +1,6 @@
 #ifndef __CHOREO_AST_HPP__
 #define __CHOREO_AST_HPP__
 
-#include <map>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -1359,6 +1358,11 @@ public:
   bool IsArith() const { return (bool)(attr & ARITH); }
   bool IsExpr() const { return (bool)(attr & EXPR); }
 
+  void SetBIF() { attr = attr | BIF; }
+  void SetCompileTimeEval() { attr = attr | COMPTIME; }
+  void SetArith() { attr = attr | ARITH; }
+  void SetExpr() { attr = attr | EXPR; }
+
   ptr<Node> CloneImpl() const override {
     auto n = Make<Call>(LOC(), cast<Identifier>(function->Clone()),
                         cast<MultiValues>(arguments->Clone()),
@@ -2559,6 +2563,43 @@ struct CppSourceCode : public Node, public TypeIDProvider<CppSourceCode> {
   void accept(Visitor&) override;
 
   __UDT_TYPE_INFO__(Node, CppSourceCode)
+};
+
+struct DeviceFunctionDecl final : public Node,
+                                  public TypeIDProvider<DeviceFunctionDecl> {
+  std::string name;
+  ptr<DeviceDataType> ret_type;
+  std::vector<ptr<DeviceDataType>> param_types;
+  std::vector<std::string> attributes;
+  DeviceFunctionDecl(const location& l) : Node(l) {}
+
+  ptr<Node> CloneImpl() const override {
+    auto copy = Make<DeviceFunctionDecl>(LOC());
+    copy->name = name;
+    copy->ret_type = cast<DeviceDataType>(ret_type->Clone());
+    for (const auto& pt : param_types) {
+      copy->param_types.push_back(cast<DeviceDataType>(pt->Clone()));
+    }
+    copy->attributes = attributes;
+    return copy;
+  }
+
+  void Print(std::ostream& os, const std::string& = {},
+             bool = false) const override {
+    os << "DeviceFunction: ";
+    os << name;
+    os << " -> " << PSTR(ret_type);
+    os << " (";
+    for (size_t i = 0; i < param_types.size(); ++i) {
+      if (i > 0) os << ", ";
+      os << PSTR(param_types[i]);
+    }
+    os << ")\n";
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, DeviceFunctionDecl)
 };
 
 // Top-level program structure

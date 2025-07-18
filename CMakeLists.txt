@@ -91,6 +91,7 @@ target_link_libraries(copp PRIVATE
   parser_obj
   scanner_obj
   codegen
+  cl_obj
   ${GINAC_DIR}/lib/libginac.a
   ${CLN_DIR}/lib/libcln.a
   gmp

@@ -134,6 +134,7 @@ void choreo_info(const char *message) {
   COMMA   ","
   SEMCOL  ";"
   COL     ":"
+  SCOPE   "::"
   DOT     "."
   LT      "<"
   GT      ">"
@@ -183,6 +184,7 @@ void choreo_info(const char *message) {
 %token <std::string> STRING
 %token <std::string> HOST_CODE DEVICE_CODE
 %token <std::string> IDENTIFIER ATTR_CO
+%token <std::string> VOID_STR BOOL_STR CHAR_STR SHORT_STR INT_STR LONG_STR FLOAT_STR DOUBLE_STR CONST STATIC EXTERN INLINE ATTR_ID ATTRIBUTE SIGNED UNSIGNED
 // type related
 %token <std::string> MDSPAN ITUPLE EVENT MUTABLE
 %token <Choreo::Storage> SUBLOCAL LOCAL SHARED GLOBAL
@@ -199,13 +201,19 @@ void choreo_info(const char *message) {
 %nterm <bool> bool_value sync_type pass_by_ref
 %nterm <int> integer_value index_or_none const_sizeof
 %nterm <std::vector<size_t>> optional_array_dims
-%nterm <Choreo::Storage> storage pl_annotation 
+%nterm <Choreo::Storage> storage pl_annotation
 %nterm <Choreo::BaseType> fundamental_type
 %nterm <AST::ptr<AST::CppSourceCode>> host_code inlcpp_stmt
+
+%nterm <AST::ptr<AST::DeviceFunctionDecl>> device_function_decl
+%nterm <std::string> device_attr device_attr_lists
+%nterm <std::vector<AST::ptr<Choreo::DeviceDataType>>> device_params
+%nterm <AST::ptr<Choreo::DeviceDataType>> device_type device_base_type device_complex_type device_param device_nested_type
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::SpanAs>> span_as
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
-%nterm <AST::ptr<AST::Node>> any_code foreach_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt wait_stmt trigger_stmt call_stmt swap_stmt break_stmt range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
+%nterm <AST::ptr<AST::Call>> call_stmt
+%nterm <AST::ptr<AST::Node>> any_code device_code foreach_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt wait_stmt trigger_stmt swap_stmt break_stmt range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
 %nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params ids_list subscriptions data_indices
 %nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr call_expr ituple_derivation internal_sizeof_expr sizeof_expr
@@ -269,9 +277,14 @@ program
 any_code
     : host_code { $$ = $1; }
     | dsl_function { $$ = $1; }
-    | DEVICE_CODE {
+    | device_code { $$ = $1; }
+    ;
+
+device_code
+    : DEVICE_CODE /* can not be empty */ {
         $$ = AST::Make<AST::CppSourceCode>(@1, $1, AST::CppSourceCode::Device);
       }
+    | device_function_decl { $$ = $1; }
     ;
 
 host_code
@@ -281,6 +294,140 @@ host_code
     | host_code HOST_CODE {
         $1->code += $2;
         $$ = $1;
+      }
+    ;
+
+device_base_type
+    : BOOL_STR { $$ = MakeDeviceDataType($1, BaseType::BOOL); }
+    | CHAR_STR { $$ = MakeDeviceDataType($1, BaseType::S8); }
+    | SHORT_STR { $$ = MakeDeviceDataType($1, BaseType::S16); }
+    | INT_STR { $$ = MakeDeviceDataType($1, BaseType::S32); }
+    | LONG_STR { $$ = MakeDeviceDataType($1, BaseType::S64); }
+    | SIGNED CHAR_STR { $$ = MakeDeviceDataType($1 + " " + $2, BaseType::S8); }
+    | SIGNED SHORT_STR { $$ = MakeDeviceDataType($1 + " " + $2, BaseType::S16); }
+    | SIGNED INT_STR { $$ = MakeDeviceDataType($1 + " " + $2, BaseType::S32); }
+    | SIGNED LONG_STR { $$ = MakeDeviceDataType($1 + " " + $2, BaseType::S64); }
+    | UNSIGNED CHAR_STR { $$ = MakeDeviceDataType($1 + " " + $2, BaseType::U8); }
+    | UNSIGNED SHORT_STR { $$ = MakeDeviceDataType($1 + " " + $2, BaseType::U16); }
+    | UNSIGNED INT_STR { $$ = MakeDeviceDataType($1 + " " + $2, BaseType::U32); }
+    | UNSIGNED LONG_STR { $$ = MakeDeviceDataType($1 + " " + $2, BaseType::U64); }
+    | FLOAT_STR { $$ = MakeDeviceDataType($1, BaseType::F32); }
+    | DOUBLE_STR { $$ = MakeDeviceDataType($1, BaseType::F64); }
+    | VOID_STR { $$ = MakeDeviceDataType($1, BaseType::VOID); }
+    | IDENTIFIER { $$ = MakeDeviceDataType($1, BaseType::UNKNOWN); }
+    | SIGNED IDENTIFIER { $$ = MakeDeviceDataType($1, BaseType::UNKNOWN); }
+    | UNSIGNED IDENTIFIER { $$ = MakeDeviceDataType($1, BaseType::UNKNOWN); }
+    ;
+
+device_nested_type
+    : /* Empty */ { $$ = MakeDeviceDataType("", BaseType::UNKNOWN); }
+    | device_nested_type COMMA device_complex_type {
+        auto type_str = $3->GetTypeStr() + ", " + $3->GetTypeStr();
+        $3->SetTypeStr(type_str);
+        $3->SetDataType(BaseType::UNKNOWN);
+        $$ = $3;
+      }
+    | device_type { $$ = $1; }
+    ;
+
+device_complex_type
+    : IDENTIFIER SCOPE device_complex_type {
+        auto type_str = $1 + "::" + $3->GetTypeStr();
+        $3->SetTypeStr(type_str);
+        $3->SetDataType(BaseType::UNKNOWN);
+        $$ = $3;
+      }
+    | IDENTIFIER LT device_nested_type GT {
+        auto type_str = $1 + "<" + $3->GetTypeStr() + ">";
+        $3->SetTypeStr(type_str);
+        $3->SetDataType(BaseType::UNKNOWN);
+        $$ = $3;
+      }
+    | device_base_type {
+        $$ = $1;
+      }
+    ;
+
+device_type
+    : device_complex_type { $$ = $1; }
+    | device_type STAR {
+        auto type_str = $1->GetTypeStr() + " *";
+        $1->SetTypeStr(type_str);
+        if (!$1->IsNaiveType() || $1->IsPointerType()) {
+          $1->SetDataType(BaseType::UNKNOWN);
+        }
+        $1->SetPointerType(true);
+        $$ = $1;
+      }
+    | device_type AMP {
+        auto type_str = $1->GetTypeStr() + " &";
+        $1->SetTypeStr(type_str);
+        $$ = $1;
+      }
+    | device_type AND {
+        auto type_str = $1->GetTypeStr() + " &&";
+        $1->SetTypeStr(type_str);
+        $$ = $1;
+      }
+    | device_type CONST STAR {
+        auto type_str =$1->GetTypeStr() + " const *";
+        $1->SetTypeStr(type_str);
+        if (!$1->IsNaiveType() || $1->IsPointerType()) {
+          $1->SetDataType(BaseType::UNKNOWN);
+        }
+        $1->SetPointerType(true);
+        $$ = $1;
+      }
+    | CONST device_complex_type {
+        auto type_str = $2->GetTypeStr() + " " + $1;
+        $2->SetTypeStr(type_str);
+        $$ = $2;
+      }
+    ;
+
+device_params
+    : /* Empty */  {$$ = std::vector<AST::ptr<Choreo::DeviceDataType>>(); }
+    | device_param { $$ = std::vector<AST::ptr<Choreo::DeviceDataType>>({$1}); }
+    | device_params COMMA device_param { $1.push_back($3); $$ = $1; }
+    ;
+
+device_param
+    : device_type { $$ = $1; }
+    | device_type IDENTIFIER { $$ = $1; }
+    | ATTR_ID device_param { $$ = $2; }
+    ;
+
+device_attr_lists
+    : LPAREN device_attr_lists RPAREN {
+        $$ = "(" + $2 + ")";
+      }
+    | IDENTIFIER COMMA device_attr_lists {
+        $$ = $1 + ", " + $3;
+      }
+    | IDENTIFIER {
+        $$ = $1;
+      }
+    ;
+
+device_attr
+    : ATTR_ID { $$ = $1; }
+    | STATIC { $$ = $1; }
+    | INLINE { $$ = $1; }
+    | EXTERN { $$ = $1; }
+    | ATTRIBUTE device_attr_lists {
+        $$ = $1 + $2;
+      }
+    ;
+
+device_function_decl
+    : device_type IDENTIFIER LPAREN device_params RPAREN {
+        $$ = AST::Make<AST::DeviceFunctionDecl>(@2);
+        $$->name = $2;
+        $$->ret_type = $1;
+        $$->param_types = $4;
+      }
+    | device_attr device_function_decl {
+        $$ = $2;
       }
     ;
 
@@ -690,6 +837,7 @@ scalar_decl
              AST::Make<AST::DataType>(@1, BaseType::UNKNOWN), nullptr, $3);
       }
     | IDENTIFIER ASSIGN call_stmt {
+        $3->SetExpr();
         $$ = AST::Make<AST::NamedVariableDecl>(@1, $1,
              AST::Make<AST::DataType>(@1, BaseType::UNKNOWN), nullptr, $3);
       }
@@ -1042,6 +1190,7 @@ assignment
               $1, AST::Make<AST::DataType>(@1, BaseType::ITUPLE), nullptr, $3);
       }
     | IDENTIFIER ASSIGN call_stmt {
+        $3->SetExpr();
         $$ = AST::Make<AST::Assignment>(@1, $1, $3);
       }
     | IDENTIFIER arith_operation ASSIGN s_expr {
@@ -1068,6 +1217,7 @@ assignment
         $$ = AST::Make<AST::Assignment>(@1, $1, $3);
       }
     | data_element ASSIGN call_stmt {
+        $3->SetExpr();
         $$ = AST::Make<AST::Assignment>(@1, $1, $3);
       }
     | data_element arith_operation ASSIGN s_expr {

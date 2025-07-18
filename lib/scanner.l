@@ -18,15 +18,17 @@
 #include "scanner.hpp"
 #include "parser.tab.hh"
 #include "loc.hpp"
-
+#include "options.hpp"
+#include "command_line.hpp"
 
 static int scope = 0;
 
 extern Choreo::location loc;
-
+extern Choreo::Option<bool> analyze_device_functions;
 static std::string kernel_buffer; // buffering the kernel code
 static std::string rawstr_delimiter;
 static std::string rawstr_buffer;
+static std::string analyze_free_buffer;
 static Choreo::location rawstr_loc;
 
 void update_location(const char *text);
@@ -44,9 +46,10 @@ static bool no_line_update = false;
 
 %}
 
-%x CO_FUNC KERNEL MDSPAN_SUGER RAW_STRING
+%x CO_FUNC DEVICE_FUNC KERNEL MDSPAN_SUGER RAW_STRING
 
 id          [a-zA-Z_][a-zA-Z0-9_]*
+attr_id     (__{id}__|\[\[{id}\]\])
 num         (0|[1-9][0-9]*)[uU]?[lL]{0,2}
 hex_num     0[xX][0-9a-fA-F]+[uU]?[lL]{0,2}
 fpnum       -?[0-9]+\.[0-9]+
@@ -55,7 +58,7 @@ blank       [ \t\r]
 cstr        \"([^"\\]|\\.)*\"
 
 %%
-<INITIAL,KERNEL,CO_FUNC>{
+<INITIAL,KERNEL,CO_FUNC,DEVICE_FUNC>{
     #line[ \t]+([0-9]+)[ \t]+\"([^\"]*)\" {
       handle_line_directive(yytext);
     }
@@ -101,6 +104,15 @@ cstr        \"([^"\\]|\\.)*\"
              } else
                kernel_buffer += yytext;
            }
+  "//".*   { if (scope > 0) kernel_buffer += yytext; }
+  "__device__" {
+                if (analyze_device_functions) {
+                  BEGIN(DEVICE_FUNC);
+                  kernel_buffer += yytext;
+                } else {
+                  kernel_buffer += yytext;
+                }
+               }
   .        { if (scope > 0) kernel_buffer += yytext; }
   \n+      { if (scope > 0) kernel_buffer += yytext; }
   <<EOF>>  { if (scope > 0)
@@ -111,6 +123,46 @@ cstr        \"([^"\\]|\\.)*\"
              return res;
            }
 } // state <KERNEL>
+
+<DEVICE_FUNC>{
+  {blank}+    { if (scope > 0) kernel_buffer += yytext; }
+  \n+         { if (scope > 0) kernel_buffer += yytext; }
+  "//".*      { if (scope > 0) kernel_buffer += yytext; }
+  "<"         { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_LT(loc); }
+  ">"         { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_GT(loc); }
+  "("         { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_LPAREN(loc); }
+  ")"         { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_RPAREN(loc); }
+  "{"         { scope++; if (scope > 0) kernel_buffer += yytext; BEGIN(KERNEL); }
+  "}"         { Choreo::Scanner::Error(loc, "redundant '}' for the kernel code."); }
+  ";"         { if (scope > 0) kernel_buffer += yytext; BEGIN(KERNEL); }
+  "::"        { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_SCOPE(loc); }
+  "*"         { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_STAR(loc); }
+  "&"         { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_AMP(loc); }
+  "&&"        { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_AND(loc); }
+  ","         { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_COMMA(loc); }
+  "signed"    { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_SIGNED(yytext, loc); }
+  "unsigned"  { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_UNSIGNED(yytext, loc); }
+  "auto"      { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_AUTO(yytext, loc); }
+  "void"      { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_VOID_STR(yytext, loc); }
+  "bool"      { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_BOOL_STR(yytext, loc); }
+  "char"      { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_CHAR_STR(yytext, loc); }
+  "short"     { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_SHORT_STR(yytext, loc); }
+  "int"       { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_INT_STR(yytext, loc); }
+  "long long" { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_LONG_STR(yytext, loc); }
+  "float"     { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_FLOAT_STR(yytext, loc); }
+  "double"    { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_DOUBLE_STR(yytext, loc); }
+  "const"     { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_CONST(yytext, loc); }
+  "constexpr" { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_CONST(yytext, loc); }
+  "constval"  { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_CONST(yytext, loc); }
+  "static"    { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_STATIC(yytext, loc); }
+  "extern"    { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_EXTERN(yytext, loc); }
+  "inline"    { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_INLINE(yytext, loc); }
+  "__attribute__" { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_ATTRIBUTE(yytext, loc); }
+  {attr_id}   { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_ATTR_ID(yytext, loc); }
+  {id}        { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_IDENTIFIER(yytext, loc); }
+  .           { if (scope > 0) kernel_buffer += yytext; BEGIN(KERNEL); } // Any other single character within the function
+
+} // state <DEVICE_FUNC>
 
 <MDSPAN_SUGER>{
   "["/[^\[\],]*,[^\[\]]*"]" { // sugar form: emit '[['

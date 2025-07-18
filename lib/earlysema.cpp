@@ -746,6 +746,12 @@ bool EarlySemantics::CheckInitializerType(const ptr<Type>& ty,
   } else if (isa<AddrType>(ty)) {
     Error1(loc, "pointer variables are not supported.");
     return false;
+  } else if (isa<VoidType>(ty)) {
+    Error1(loc, "can not initialize `" + sym + "' with a void type.");
+    return false;
+  } else if (isa<DeviceDataType>(ty)) {
+    Error1(loc, "can not initialize `" + sym + "' with a device data type.");
+    return false;
   }
   return true;
 }
@@ -765,7 +771,14 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
       assert(!isa<UnknownType>(ety) && "no type for an init expression.");
     else {
       force_mutable = true;
-      ety = nullptr;
+      if (analyze_device_functions) {
+        ety = n.init_expr->GetType();
+        if (isa<UnknownType>(ety))
+          Warning(n.LOC(), "can not infer the type of `" + n.name_str +
+                               "' from the initialization expression '" +
+                               STR(n.init_expr) + "'.");
+      } else
+        ety = nullptr;
     }
   }
 
@@ -1857,6 +1870,55 @@ bool EarlySemantics::Visit(AST::Call& n) {
     return ec == error_count;
   }
 
+  if (analyze_device_functions && !n.IsBIF()) {
+    auto function_name = n.function->name;
+
+    ptr<AST::DeviceFunctionDecl> matched_function = nullptr;
+    ptr<AST::DeviceFunctionDecl> candidate_function = nullptr;
+    for (auto& f : device_functions) {
+      if (f->name != n.function->name) continue;
+      candidate_function = f;
+      if (f->param_types.size() != n.arguments->Count()) continue;
+      size_t param_index = 0;
+      bool arg_match = true;
+      for (; param_index < f->param_types.size(); ++param_index) {
+        auto arg_ty = NodeType(*n.arguments->ValueAt(param_index));
+        auto param_ty = f->param_types[param_index];
+        // We allow the argument type promoted to parameter type, which means
+        // IsValuePreservingCast(arg_ty, param_ty) should return true. For
+        // example, a float argument can be passed to a double parameter. Other
+        // type cast is not allowed.
+        if (!param_ty->ApprxEqual(*arg_ty)) {
+          arg_match = false;
+          break;
+        }
+      }
+      if (arg_match) {
+        matched_function = f;
+        break;
+      }
+    }
+    // if no matched function, we will report a warning
+    // and suggest the candidate function.
+    if (!matched_function) {
+      Warning(n.LOC(),
+              "unable to find a device function '" + function_name + "'.");
+      if (candidate_function)
+        Warning(
+            candidate_function->LOC(),
+            "candidate function '" + candidate_function->name + "' with " +
+                std::to_string(candidate_function->param_types.size()) +
+                " parameters is found, but the argument types do not match.");
+    }
+
+    if (matched_function) {
+      // the type of the call node is the return type of the function, only
+      // includes spanned type, scalar type, void type and unknown type
+      auto call_ty = MakeChoreoDataType(matched_function->ret_type);
+      SetNodeType(n, call_ty);
+    }
+  }
+
   size_t count = 0;
   for (auto& v : n.arguments->AllValues()) {
     count++;
@@ -2175,6 +2237,13 @@ bool EarlySemantics::Visit(AST::ChoreoFunction& n) {
 }
 bool EarlySemantics::Visit(AST::CppSourceCode& n) {
   TraceEachVisit(n);
+  return true;
+}
+
+bool EarlySemantics::Visit(AST::DeviceFunctionDecl& n) {
+  TraceEachVisit(n);
+  dbgs() << "Found a device function: " << STR(n) << "\n";
+  device_functions.push_back(dyn_cast<AST::DeviceFunctionDecl>(n.CloneImpl()));
   return true;
 }
 

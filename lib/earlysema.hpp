@@ -77,6 +77,7 @@ private:
 
   DerivableAttribute mutables{this, "mutables"};
   DerivableAttribute diverges{this, "diverges"};
+  std::vector<ptr<AST::DeviceFunctionDecl>> device_functions;
 
 private:
   bool in_decl =
@@ -202,6 +203,7 @@ public:
   bool Visit(AST::FunctionDecl&) override;
   bool Visit(AST::ChoreoFunction&) override;
   bool Visit(AST::CppSourceCode&) override;
+  bool Visit(AST::DeviceFunctionDecl&) override;
   bool Visit(AST::Program&) override;
 
   bool HasError() override;
