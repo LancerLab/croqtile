@@ -196,7 +196,7 @@ void choreo_info(const char *message) {
 // non-terminals
 %nterm <std::string> dma_operation builtin_print_func arith_operation spanid cstrings arith_builtin_func align_func
 %nterm <ptr<DMAConfig>> dma_config
-%nterm <bool> bool_value sync_type
+%nterm <bool> bool_value sync_type pass_by_ref
 %nterm <int> integer_value index_or_none const_sizeof
 %nterm <std::vector<size_t>> optional_array_dims
 %nterm <Choreo::Storage> storage pl_annotation 
@@ -445,22 +445,27 @@ parameter_list
     ;
 
 parameter
-    : param_type IDENTIFIER { /* handle parameter type and name here */
-        symtab.AddSymbol($2, $1->GetType());
-        $$ = AST::Make<AST::Parameter>(@1, $1, AST::Make<AST::Identifier>(@2, $2));
+    : param_type pass_by_ref IDENTIFIER { /* handle parameter type and name here */
+        symtab.AddSymbol($3, $1->GetType());
+        $$ = AST::Make<AST::Parameter>(@1, $1, AST::Make<AST::Identifier>(@3, $3), $2);
       }
-    | param_type {
-        $$ = AST::Make<AST::Parameter>(@1, $1, AST::Make<AST::Identifier>(@1));
+    | param_type pass_by_ref {
+        $$ = AST::Make<AST::Parameter>(@1, $1, AST::Make<AST::Identifier>(@1), $2);
       }
-    | GLOBAL param_type IDENTIFIER { /* handle parameter type and name here */
-        symtab.AddSymbol($3, $2->GetType());
-        $$ = AST::Make<AST::Parameter>(@1, $2, AST::Make<AST::Identifier>(@3, $3), ParamAttr::GLOBAL_INPUT);
+    | GLOBAL param_type pass_by_ref IDENTIFIER { /* handle parameter type and name here */
+        symtab.AddSymbol($4, $2->GetType());
+        $$ = AST::Make<AST::Parameter>(@1, $2, AST::Make<AST::Identifier>(@4, $4), $3, ParamAttr::GLOBAL_INPUT);
       }
-    | GLOBAL param_type {
-        $$ = AST::Make<AST::Parameter>(@1, $2, AST::Make<AST::Identifier>(@2), ParamAttr::GLOBAL_INPUT);
+    | GLOBAL param_type pass_by_ref {
+        $$ = AST::Make<AST::Parameter>(@1, $2, AST::Make<AST::Identifier>(@2), $3, ParamAttr::GLOBAL_INPUT);
       }
     | SHARED { Parser::error(@1, "the shared data can not be used as a parameter."); }
     | LOCAL { Parser::error(@1, "the local data can not be used as a parameter."); }
+    ;
+
+pass_by_ref
+    : /* Empty */ { $$ = false; }
+    | AMP { $$ = true; }
     ;
 
 statements

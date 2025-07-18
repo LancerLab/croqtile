@@ -36,10 +36,7 @@ public:
                int index = -1, ParamAttr a = ParamAttr::NONE,
                const std::string& ret = "", bool iv = false)
       : name(n), type(t), rty_str(ret), is_reference(ref), p_index(index),
-        attr(a), need_iv_prefix(iv) {
-    assert((!(IsParameter() && IsReference())) &&
-           "Parameters are not references.");
-  }
+        attr(a), need_iv_prefix(iv) {}
 
   bool IsParameter() const { return p_index != -1; }
   bool IsReturn() const { return !rty_str.empty(); }
@@ -466,51 +463,57 @@ inline static void ReplaceInString(std::string* pstr, const std::string& from,
 }
 
 static inline std::string HostTypeStringify(const Choreo::Type& ty,
-                                            bool is_ret = false) {
+                                            bool is_ret = false,
+                                            bool is_ref = false) {
+  std::string res;
   if (isa<VoidType>(&ty))
-    return "void";
+    res = "void";
   else if (isa<S8Type>(&ty))
-    return "char";
+    res = "char";
   else if (isa<U8Type>(&ty))
-    return "unsigned char";
+    res = "unsigned char";
   else if (isa<S16Type>(&ty))
-    return "short";
+    res = "short";
   else if (isa<U16Type>(&ty))
-    return "unsigned short";
+    res = "unsigned short";
   else if (isa<S32Type>(&ty))
-    return "int";
+    res = "int";
   else if (isa<U32Type>(&ty))
-    return "unsigned int";
+    res = "unsigned int";
   else if (isa<S64Type>(&ty))
-    return "long long";
+    res = "long long";
   else if (isa<U64Type>(&ty))
-    return "unsigned long long";
+    res = "unsigned long long";
   else if (isa<BooleanType>(&ty))
-    return "bool";
+    res = "bool";
   else if (isa<F8Type>(&ty))
-    return "choreo::half8";
+    res = "choreo::half8";
   else if (isa<F16Type>(&ty))
-    return "choreo::half";
+    res = "choreo::half";
   else if (isa<BF16Type>(&ty))
-    return "choreo::bfp16";
+    res = "choreo::bfp16";
   else if (isa<F32Type>(&ty))
-    return "float";
+    res = "float";
   else if (isa<F64Type>(&ty))
-    return "double";
+    res = "double";
   else if (auto sty = dyn_cast<SpannedType>(&ty)) {
     if (is_ret) // return by value
-      return "choreo::spanned_data<choreo::" + STR(sty->e_type) + ", " +
-             std::to_string(sty->Dims()) + ">";
-    else // pass in by reference
-      return "const choreo::spanned_view<choreo::" + STR(sty->e_type) + ", " +
-             std::to_string(sty->Dims()) + "> &";
+      res = "choreo::spanned_data<choreo::" + STR(sty->e_type) + ", " +
+            std::to_string(sty->Dims()) + ">";
+    else // always pass in by reference
+      res = "const choreo::spanned_view<choreo::" + STR(sty->e_type) + ", " +
+            std::to_string(sty->Dims()) + "> &";
   } else if (auto bitt = dyn_cast<BoundedITupleType>(&ty)) {
     assert(bitt->Dims() == 1);
     (void)bitt;
-    return "int";
+    res = "int";
   } else
     choreo_unreachable("unsupported host function type: " + STR(ty) + ".");
-  return "";
+
+  if (isa<ScalarType>(&ty)) assert(!is_ref);
+  // if (isa<ScalarType>(&ty) && is_ref) res += "&";
+
+  return res;
 }
 
 static inline std::string KernelTypeStringify(const Choreo::BaseType& type) {

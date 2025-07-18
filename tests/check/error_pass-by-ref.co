@@ -1,0 +1,13 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ void foo(global f32[1]& g, f32[1]& h, int x, s32 y, int& xx, s32& yy, bool b, bool& bb, float f, float& ff, f32& fff) {
+}
+
+// CHECK: error: The parameter 'g' is global, which is not allowed to be passed by reference.
+// CHECK: error: Scalar parameter is not supported to be passed by reference for now.
+// CHECK: error: Scalar parameter is not supported to be passed by reference for now.
+// CHECK: error: Scalar parameter is not supported to be passed by reference for now.
+// CHECK: error: Scalar parameter is not supported to be passed by reference for now.
+// CHECK: error: Scalar parameter is not supported to be passed by reference for now.
+
+// CHECK: Totally 6 errors have been detected.

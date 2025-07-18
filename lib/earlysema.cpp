@@ -1151,7 +1151,7 @@ bool EarlySemantics::Visit(AST::Parameter& n) {
 
   auto nty = n.type->GetType()->Clone();
 
-  if (n.attr == ParamAttr::GLOBAL_INPUT) {
+  if (n.GetAttr() == ParamAttr::GLOBAL_INPUT) {
     if (auto sty = dyn_cast<SpannedType>(nty))
       sty->SetStorage(Storage::GLOBAL);
     else
@@ -1166,7 +1166,23 @@ bool EarlySemantics::Visit(AST::Parameter& n) {
                    "The parameter with an unbounded dimension must be global.");
   }
 
-  if (n.sym) {
+  // check the validity of pass-by-ref
+  if (!n.HasSymbol())
+    if (n.pass_by_ref)
+      Error1(n.LOC(),
+             "Unnamed parameter is not allowed to be passed by reference.");
+  if (isa<ScalarType>(nty))
+    if (n.pass_by_ref)
+      Error1(n.LOC(), "Scalar parameter is not supported to be passed by "
+                      "reference for now.");
+  if (isa<SpannedType>(nty) && n.GetAttr() == ParamAttr::GLOBAL_INPUT)
+    if (n.pass_by_ref)
+      Error1(
+          n.sym->LOC(),
+          "The parameter '" + n.sym->name +
+              "' is global, which is not allowed to be passed by reference.");
+
+  if (n.HasSymbol()) {
     if (auto ty = dyn_cast<SpannedType>(nty)) {
       ReportErrorWhenViolateODR(n.LOC(), n.sym->name + ".span", __FILE__,
                                 __LINE__,

@@ -1062,6 +1062,18 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
   if (!n.async)
     hs << h_indent << "choreo::abend_true(topsDeviceSynchronize());\n";
 
+  // copy the span passed by ref back to host
+  for (const auto& item : GetChoreoFuncIns(updating_cgi)) {
+    if (isa<SpannedType>(item.type)) {
+      auto oname = UnScopedName(item.name);
+      if (item.attr != ParamAttr::GLOBAL_INPUT && item.IsReference())
+        hs << h_indent << "choreo::abend_true(topsMemcpy(" << oname
+           << ".data(), " << oname + "__device" << ", "
+           << UnScopedSizeExpr(*item.type) << ", topsMemcpyDeviceToHost));\n";
+    }
+  }
+
+  // TODO: keep the convention or not?
   // typically, the last buffer is used as output in destination-passing-style
   // convention
   if (!HasChoreoOutput()) {
@@ -1069,6 +1081,7 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
     ptr<Type> otype;
     ParamAttr oattr = ParamAttr::NONE;
     bool has_spanned_arg = false;
+    bool is_ref = false;
     for (const auto& item : GetChoreoFuncIns(updating_cgi)) {
       auto sname = item.name;
       if (isa<SpannedType>(item.type)) {
@@ -1076,10 +1089,12 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
         otype = item.type;
         oattr = item.attr;
         has_spanned_arg = true;
+        is_ref = item.IsReference();
       }
     }
 
-    if (has_spanned_arg && oattr != ParamAttr::GLOBAL_INPUT)
+    // workaround: `!is_ref` works with the above topsMemcpy.
+    if (has_spanned_arg && oattr != ParamAttr::GLOBAL_INPUT && !is_ref)
       hs << h_indent << "choreo::abend_true(topsMemcpy(" << oname << ".data(), "
          << oname + "__device" << ", " << UnScopedSizeExpr(*otype)
          << ", topsMemcpyDeviceToHost));\n";
@@ -2069,8 +2084,8 @@ bool TopsccCodeGen::Visit(AST::ParamList& n) {
   int index = 0;
   for (auto param : n.values)
     updating_cgi->AddSymbolDetail(fname, {InScopeName(param->sym->name),
-                                          param->GetType(), false, index++,
-                                          param->GetAttr()});
+                                          param->GetType(), param->pass_by_ref,
+                                          index++, param->GetAttr()});
   return true;
 }
 
@@ -2268,8 +2283,9 @@ void TopsccCodeGen::EmitHostFuncDecl(std::ostringstream& oss) {
   size_t host_pindex = 0;
   for (auto& item : GetChoreoFuncIns(cgi)) {
     if (item.IsParameter()) assert((int)host_pindex == item.p_index);
-    oss << ((host_pindex == 0) ? "" : ", ") << HostTypeStringify(*item.type)
-        << " " << item.host_name;
+    oss << ((host_pindex == 0) ? "" : ", ")
+        << HostTypeStringify(*item.type, false, item.IsReference()) << " "
+        << item.host_name;
     ++host_pindex;
   }
   oss << ")";

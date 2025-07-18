@@ -188,7 +188,7 @@ public:
     for (auto param : n.values) {
       cgi->AddSymbolDetail(fname,
                            {InScopeName(param->sym->name), param->GetType(),
-                            false, index++, param->GetAttr()});
+                            param->pass_by_ref, index++, param->GetAttr()});
     }
     return true;
   }

@@ -1,0 +1,57 @@
+// RUN: choreo -t topscc -es %s -o - | FileCheck %s --check-prefix=CODEGEN
+
+// for now, scalar reference is not supported.
+__co__ void foo(global f32 [3,2,2] ggg, f32 [3, 2, 2] temp, f32 [3, 2, 2] & temp_ref, s32 [1] bar, int x, s32 refx) {
+  refx = -1;
+  parallel p by 3 : local {
+    local f32 [1, 2, 2] l{9999.99f};
+    dma.copy l => ggg.chunkat(p, _, _);
+    dma.copy l => temp.chunkat(p, _, _);
+    dma.copy l => temp_ref.chunkat(p, _, _);
+    x = 10;
+    refx = 100;
+  }
+}
+
+// CODEGEN: void foo(const choreo::spanned_view<choreo::f32, 3> & ggg, const choreo::spanned_view<choreo::f32, 3> & temp, const choreo::spanned_view<choreo::f32, 3> & temp_ref, const choreo::spanned_view<choreo::s32, 1> & bar, int x, int refx)
+
+// CODEGEN-NOT: choreo::abend_true(topsMemcpy(ggg.data(), {{.*}}
+// CODEGEN-NOT: choreo::abend_true(topsMemcpy(temp.data(), {{.*}}
+// CODEGEN: choreo::abend_true(topsMemcpy(temp_ref.data(), temp_ref__device, 48ULL, topsMemcpyDeviceToHost));
+
+// note: the next is generated due to destination-passing-style convention
+// CODEGEN: choreo::abend_true(topsMemcpy(bar.data(), bar__device, 4ULL, topsMemcpyDeviceToHost));
+
+int main() {
+  constexpr float ggg_init_val = 1.0f;
+  constexpr float temp_init_val = 2.0f;
+  constexpr float temp_ref_init_val = 3.0f;
+
+  auto ggg = choreo::make_spandata<choreo::f32>(3, 2, 2);
+  ggg.fill(ggg_init_val);
+  auto temp = choreo::make_spandata<choreo::f32>(3, 2, 2);
+  temp.fill(temp_init_val);
+  auto temp_ref = choreo::make_spandata<choreo::f32>(3, 2, 2);
+  temp_ref.fill(temp_ref_init_val);
+
+  int x = 99;
+  int refx = 999;
+
+  auto bar = choreo::make_spandata<choreo::s32>(1);
+
+  foo(ggg.view(), temp.view(), temp_ref.view(), bar.view(), x, refx);
+
+  std::cout << "after running\n";
+  std::cout << "\tggg: " << ggg[0][0][0] << "\n";
+  std::cout << "\ttemp: " << temp[0][0][0] << "\n";
+  std::cout << "\ttemp_ref: " << temp_ref[0][0][0] << "\n";
+  std::cout << "\tx: " << x << "\n";
+  std::cout << "\trefx: " << refx << "\n";
+}
+
+// CHECK: after running
+// CHECK:         ggg: 9999.99
+// CHECK:         temp: 2
+// CHECK:         temp_ref: 9999.99
+// CHECK:         x: 99
+// CHECK:         refx: 999

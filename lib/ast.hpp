@@ -1495,11 +1495,13 @@ struct NamedVariableDecl : public Node,
 struct Parameter : public Node, public TypeIDProvider<Parameter> {
   ptr<DataType> type = nullptr;
   ptr<Identifier> sym = nullptr;
+  bool pass_by_ref = false;
   ParamAttr attr = ParamAttr::NONE;
 
   Parameter(const location& l, const ptr<DataType>& t,
-            const ptr<Identifier>& n = nullptr, ParamAttr a = ParamAttr::NONE)
-      : Node(l), type(t), sym(n), attr(a) {
+            const ptr<Identifier>& n = nullptr, bool r = false,
+            ParamAttr a = ParamAttr::NONE)
+      : Node(l), type(t), sym(n), pass_by_ref(r), attr(a) {
     assert(t && "invalid parameter without a type.");
   }
 
@@ -1508,13 +1510,14 @@ struct Parameter : public Node, public TypeIDProvider<Parameter> {
 
   ptr<Node> CloneImpl() const override {
     return Make<Parameter>(LOC(), cast<DataType>(type->Clone()),
-                           cast<Identifier>(sym->Clone()), attr);
+                           cast<Identifier>(sym->Clone()), pass_by_ref, attr);
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool with_type = false) const override {
     type->Print(os, prefix + " type: ");
     if (sym) sym->Print(os, ", symbol: ");
+    if (pass_by_ref) os << "(pass by ref)";
     if (attr != ParamAttr::NONE) os << ", attr: " << STR(attr);
     if (with_type) os << "<{" << PSTR(GetType()) << "}>";
   }
