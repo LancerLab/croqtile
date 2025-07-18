@@ -805,7 +805,7 @@ bool ShapeInference::Visit(AST::ParallelBy& n) {
 
   assert(n.HasSubPVs() && "normalization failed.");
 
-  auto sign_cnt = b_sign->Count();
+  [[maybe_unused]] auto sign_cnt = b_sign->Count();
   assert((size_t)sign_cnt == n.SubPVCount());
   auto msn = vn.ToMSign(b_sign);
   std::string idx2dim[] = {"x", "y", "z"};

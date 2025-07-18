@@ -1,0 +1,48 @@
+// RUN: choreo -e %s | FileCheck --match-full-lines %s
+
+__cok__ {
+void kernel0() {}
+void kernel1() {}
+}
+
+__co__ void co0() {}
+__co__ void co1() {}
+
+void host0() {}
+void host1() {}
+
+__cok__ {
+void kernel2() {}
+}
+
+void host2() {}
+
+__co__ void co2() {}
+
+int main() {}
+
+// CHECK: void kernel0() {}
+// CHECK: void kernel1() {}
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: co0
+// CHECK:  `- Return type: void
+// CHECK:  `- Parameters:
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: co1
+// CHECK:  `- Return type: void
+// CHECK:  `- Parameters:
+
+// CHECK: void host0() {}
+// CHECK: void host1() {}
+
+// CHECK: void kernel2() {}
+// CHECK: void host2() {}
+
+// CHECK: ChoreoFunction
+// CHECK:  `- Name: co2
+// CHECK:  `- Return type: void
+// CHECK:  `- Parameters:
+
+// CHECK: int main() {}

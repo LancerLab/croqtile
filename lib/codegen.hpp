@@ -462,9 +462,9 @@ inline static void ReplaceInString(std::string* pstr, const std::string& from,
   }
 }
 
-static inline std::string HostTypeStringify(const Choreo::Type& ty,
-                                            bool is_ret = false,
-                                            bool is_ref = false) {
+static inline std::string
+HostTypeStringify(const Choreo::Type& ty, bool is_ret = false,
+                  [[maybe_unused]] bool is_ref = false) {
   std::string res;
   if (isa<VoidType>(&ty))
     res = "void";

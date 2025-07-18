@@ -12,7 +12,7 @@
 %define api.location.type {Choreo::location}
 
 // guard the conflict count
-%expect 1
+%expect 0
 
 %code requires {
 
@@ -265,6 +265,8 @@ void choreo_info(const char *message) {
 %nonassoc LBRAKT RBRAKT
 %left FNSPAN
 
+%nonassoc BELOW_HC_MERGE
+%left HC_MERGE
 %left HOST_CODE
 
 %%
@@ -275,7 +277,7 @@ program
     ;
 
 any_code
-    : host_code { $$ = $1; }
+    : host_code %prec BELOW_HC_MERGE { $$ = $1; }
     | dsl_function { $$ = $1; }
     | device_code { $$ = $1; }
     ;
@@ -291,7 +293,7 @@ host_code
     : HOST_CODE /* can not be empty */ {
         $$ = AST::Make<AST::CppSourceCode>(@1, $1, AST::CppSourceCode::Host);
       }
-    | host_code HOST_CODE {
+    | host_code HOST_CODE %prec HC_MERGE {
         $1->code += $2;
         $$ = $1;
       }
