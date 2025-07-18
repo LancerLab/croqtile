@@ -2242,7 +2242,6 @@ bool EarlySemantics::Visit(AST::CppSourceCode& n) {
 
 bool EarlySemantics::Visit(AST::DeviceFunctionDecl& n) {
   TraceEachVisit(n);
-  dbgs() << "Found a device function: " << STR(n) << "\n";
   device_functions.push_back(dyn_cast<AST::DeviceFunctionDecl>(n.CloneImpl()));
   return true;
 }

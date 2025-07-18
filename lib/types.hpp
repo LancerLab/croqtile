@@ -1317,8 +1317,6 @@ struct DeviceDataType final : public Type,
 
   // used to march with choreo type including scalar type and spanned type.
   bool ApprxEqual(const Type& ty) const override {
-    dbgs() << "check device type '" << STR(*this) << "' against choreo type'"
-           << STR(ty.GetBaseType()) << "'\n";
     if (data_type == BaseType::UNKNOWN) return false;
     if (isa<ScalarType>(&ty)) {
       return ty.GetBaseType() == data_type ||
