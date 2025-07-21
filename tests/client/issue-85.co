@@ -1,0 +1,57 @@
+// RUN: choreo -es -t topscc %s -o - | FileCheck --match-full-lines %s
+
+#define A1 32
+#define A2 32
+#define A3 32
+#define A4 4096
+#define A5 8
+#define B 32
+#define C 32
+#define D 32
+// The test case comes from http://wiki.enflame.cn/display/AUS/indim3_split0_outdim3_split1_perm1302
+
+// clang-format off
+__co__ auto indim3_split0_outdim3_split1_perm1302(f16 [A1, A2, A3, B, C, D] input) {
+  f16 [B, D, A1, A2, A3, C] output;
+  parallel p by 1 {
+    with x in [A4] {
+      foreach x {
+        in_local_F = dma.copy.async input.span_as([A4, A5, B * C * D]).chunkat(x, _, _) => local;
+        wait in_local_F;
+        out_local_F = dma.transp.async<1, 3, 0, 2> in_local_F.span_as([A5, B, C, D]) => local;
+        wait out_local_F;
+        out_global_F = dma.copy.async out_local_F.span_as([B * D, 1, A5 * C])
+                                   => output.span_as([B * D, A4, A5 * C]).chunkat(_, x, _);
+        wait out_global_F;
+      }
+    }
+  }
+  return output;
+}
+// clang-format on
+
+#define LOOP 256
+int main() {
+  auto input = new choreo::f16[A1 * A2 * A3 * B * C * D];
+  auto input_view = choreo::make_spanview<6, choreo::f16>(reinterpret_cast<choreo::f16*>(input),
+                                                          {A1, A2, A3, B, C, D});
+  topsEvent_t start, stop;
+  choreo::abend_true(topsEventCreate(&start));
+  choreo::abend_true(topsEventCreate(&stop));
+  indim3_split0_outdim3_split1_perm1302(input_view); // warm up
+  choreo::abend_true(topsEventRecord(start, 0));
+  for (size_t i = 0; i < LOOP; ++i) { indim3_split0_outdim3_split1_perm1302(input_view); }
+  choreo::abend_true(topsEventRecord(stop, 0));
+  choreo::abend_true(topsEventSynchronize(stop));
+  float elapsed_time;
+  choreo::abend_true(topsEventElapsedTime(&elapsed_time, start, stop));
+  std::cout << elapsed_time / LOOP << "ms" << std::endl;
+
+  choreo::abend_true(topsEventDestroy(start));
+  choreo::abend_true(topsEventDestroy(stop));
+  delete[] input;
+  return 0;
+}
+
+// CHECK:   choreo::abend_true(topsFree(input__device));
+// CHECK:   choreo::abend_true(topsFree(output__device));
