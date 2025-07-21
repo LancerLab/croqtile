@@ -178,6 +178,7 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
     EmitFixedHostHead();
     EmitFixedDeviceHead();
     ssm.EnterScope();
+    ssm.MapDeviceSymbolIfNotExist("::__choreo_no_tiling__", "0");
   } else if (isa<AST::ChoreoFunction>(&n)) {
     ResetChoreoFunctionStates();
     device_fn = "__choreo_device_" + fname;
