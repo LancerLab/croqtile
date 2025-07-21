@@ -33,7 +33,7 @@ $(GTEST_DIR)/libgtest_main.a: $(GTEST_DIR)/googletest/src/gtest_main.cc
 	ar -rv $@ $(GTEST_DIR)/gtest_main.o
 
 %.test: %.o $(GTEST_LIBS)
-	$(CXX) $(CXXFLAGS) -I$(ROOT)/ -I$(ROOT)/lib -L$(ROOT) -L$(GTEST_DIR) -lgtest_main -lgtest -o $@ $< -pthread
+	$(CXX) $(CXXFLAGS) -I$(ROOT)/ -I$(ROOT)/lib -L$(GTEST_DIR) -lgtest_main -lgtest -o $@ $< -pthread
 
 # Pattern rule for object files
 %.o: %.cpp $(HEADER_FILES)

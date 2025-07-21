@@ -114,6 +114,7 @@ standalone-test-with-cmake: build-with-cmake-ninja
 
 clean:
 	@rm -rf $(BUILD_DIR) $(DBG_BUILD_DIR) $(REL_BUILD_DIR) $(TEST_TARGETS) tests/*.result
+	@cd tests/standalone/ && $(MAKE) clean
 
 build-with-cmake:
 	@echo "Starting build with CMake..."
@@ -193,6 +194,7 @@ cuda_script.inc : scripts/cuda_script.sh
 
 clean-legacy:
 	@rm -f *.cc *.hh *.inc *.o $(TEST_TARGETS) tests/*.result
+	@cd tests/standalone/ && $(MAKE) clean
 
 clobber: clean
 	find $(TOOLCHAIN_DIR) -mindepth 1 ! -name 'Makefile' -print0 | xargs -0 rm -rf

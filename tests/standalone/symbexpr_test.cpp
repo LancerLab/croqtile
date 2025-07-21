@@ -4,9 +4,6 @@
 using namespace Choreo;
 using namespace Choreo::sbe;
 
-Option<bool> apprx_div(OptionKind::User, "--apprx-div", "", true,
-                       "Allows legacy inaccurate division patten.");
-
 class ExpressionTest : public ::testing::Test {
 protected:
   void SetUp() override {
