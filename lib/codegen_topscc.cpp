@@ -39,7 +39,7 @@ Option<bool> no_decay_spanview(OptionKind::Hidden, "--no-decay-spanview",
 Option<bool>
     dma_verbose(OptionKind::Hidden, "--dma-verbose", "", false,
                 " print DMA related informtion at runtime (debug only).");
-Option<bool> dma_opt(OptionKind::Hidden, "--dma-opt", "", true, " apply DMA .");
+Option<bool> dma_opt(OptionKind::Hidden, "-fopt-dma", "", true, " apply DMA .");
 
 namespace {
 
@@ -471,7 +471,7 @@ TopsccCodeGen::TileBaseOffset(const ptr<AST::ChunkAt>& ca) const {
 }
 
 const std::string TopsccCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca) const {
-  std::ostringstream offset;
+  auto offset = sbe::nu(0);
 
   if (ca->NoOperation()) return "";
 
@@ -483,26 +483,18 @@ const std::string TopsccCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca) const {
     auto shape = sop->GetBlockShape();
     size_t i = 0;
     for (auto p : sop->GetIndices()) {
-      auto idx_exprs =
-          SplitStringByDelimiter(OpExprSTR(p, "*", true, IsHost()));
-      std::string factor = "1";
-      if (shape.Rank() > i)
-        factor = ValueSTR(shape.TrimDims(i).ElementCountValue());
-      for (auto i_expr : idx_exprs) {
-        if (i != 0) offset << " + ";
-        if (i_expr == "__choreo_no_tiling__")
-          offset << "0";
-        else if (factor == "1")
-          offset << i_expr;
-        else
-          offset << "(" << i_expr << " * " << factor << ")";
+      auto& vals = dyn_cast<AST::Expr>(p)->Opts().GetVals();
+      for (auto val : vals) {
+        auto factor = sbe::nu(1);
+        if (shape.Rank() > i + 1)
+          factor = shape.TrimDims(i + 1).ElementCountValue();
+        offset = offset + val * factor;
         ++i;
       }
     }
-    // update the shape
-    shape = sop->GetBlockShape();
   }
-  return offset.str();
+
+  return ValueSTR(offset);
 }
 
 void TopsccCodeGen::EmitFixedHostHead() {
