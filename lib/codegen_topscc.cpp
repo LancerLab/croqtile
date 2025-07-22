@@ -439,13 +439,12 @@ TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
 //
 // The "Tile Base Offset" (offset ahead of last span_as) is:
 //
-//    tbo = p * (4 * 5) + q * 5 + r
+//    tbo = p * (3 * 4 * 5) + q * (4 * 5) + r * 5
 //
 const ValueItem
 TopsccCodeGen::TileBaseOffset(const ptr<AST::ChunkAt>& ca) const {
-
   auto offset = sbe::nu(0);
-  if (!ca->HasReshape()) return sbe::nu(0);
+  if (!ca->HasReshape()) return offset;
 
   size_t sidx = 0;
   auto lidx = ca->IndexOfLastSpanAs();
@@ -457,8 +456,8 @@ TopsccCodeGen::TileBaseOffset(const ptr<AST::ChunkAt>& ca) const {
       auto& vals = dyn_cast<AST::Expr>(p)->Opts().GetVals();
       for (auto val : vals) {
         auto factor = sbe::nu(1);
-        if (shape.Rank() > i + 1)
-          factor = shape.TrimDims(i + 1).ElementCountValue();
+        if (shape.Rank() > i)
+          factor = shape.TrimDims(i).ElementCountValue();
         offset = offset + val * factor;
         ++i;
       }
@@ -472,9 +471,9 @@ TopsccCodeGen::TileBaseOffset(const ptr<AST::ChunkAt>& ca) const {
 }
 
 const std::string TopsccCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca) const {
-  auto offset = sbe::nu(0);
-
   if (ca->NoOperation()) return "";
+
+  auto offset = sbe::nu(0);
 
   if (ca->AllOperations().size() > 1)
     choreo_unreachable("multiple chunkat is yet to support.");
@@ -487,8 +486,8 @@ const std::string TopsccCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca) const {
       auto& vals = dyn_cast<AST::Expr>(p)->Opts().GetVals();
       for (auto val : vals) {
         auto factor = sbe::nu(1);
-        if (shape.Rank() > i + 1)
-          factor = shape.TrimDims(i + 1).ElementCountValue();
+        if (shape.Rank() > i)
+          factor = shape.TrimDims(i).ElementCountValue();
         offset = offset + val * factor;
         ++i;
       }

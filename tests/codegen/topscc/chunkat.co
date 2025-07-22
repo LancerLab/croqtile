@@ -13,7 +13,7 @@ __co__ void only_chunkat(s32 [16, 32] lhs, s32 [24, 32] rhs) {
   }
 }
 
-// CHECK:       kernel((int*)lhs + (__tops_tid_x() * 2 + __iv_i__elem__0), (int*)rhs + (__tops_tid_x() * 2 + __iv_i__elem__0), 512);
+// CHECK:       kernel((int*)lhs + (__tops_tid_x() * 8 + __iv_i__elem__0 * 2), (int*)rhs + (__tops_tid_x() * 12 + __iv_i__elem__0 * 2), 512);
 
 __co__ void foo(f32 [128, 72] a, f32 [1024, 512, 256] b) {
   parallel p by 2, q = {q0, q1} by [3, 4] {

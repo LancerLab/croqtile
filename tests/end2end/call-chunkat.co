@@ -1,0 +1,63 @@
+// REQUIRES: TARGET-GCU300
+// RUN: choreo -t topscc -arch=gcu300 %s -o %s.topscc.result && %s.topscc.result | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+#include "choreo.h"
+
+__cok__ { /// kernel program
+__co_device__ extern "C" void kernel(int * a, int * b, int * c, int n) {
+  for (int i = 0; i < n; ++i)
+    c[i] = a[i] + b[i];
+}
+} /// end of kernel decl
+
+__co__ s32 [4, 6, 64] ele_add(s32 [4, 6, 64] lhs, s32 [4, 6, 64] rhs) { /// device program
+  s32[lhs.span] output; // use same shape as lhs
+
+  parallel p by 4 {
+    parallel q by 6 {
+      lhs_load = dma.copy.async lhs.chunkat(p, q, _) => local;
+      rhs_load = dma.copy.async rhs.chunkat(p, q, _) => local;
+      local s32[lhs_load.span] l1_out;
+      wait lhs_load, rhs_load;
+      foreach r in 4 {
+        call kernel(lhs_load.data.chunkat(_, _, r),
+                    rhs_load.data.chunkat(_, _, r),
+                    l1_out.chunkat(_, _, r),
+                    |lhs_load.span| / #r); // |span| calculate the total size of span.
+      }
+      out_store = dma.copy.async l1_out => output.chunkat(p, q, _); // can use defined vars
+      wait out_store;
+    }
+  }
+
+  return output;
+}
+
+int main() { /// host program
+  choreo::s32 a[4][6][64] = {0}; // unified abstraction in choreo type system, no need for C++ vectors/uint8_t, no factor Data/Mem types, we handles the bridge
+  choreo::s32 b[4][6][64] = {0};
+
+  auto a_data = choreo::make_spanview<3, choreo::s32>((int*)a, {4, 6, 64});
+  auto b_data = choreo::make_spanview<3, choreo::s32>((int*)b, {4, 6, 64});
+  a_data.fill_random(-10, 10);
+  b_data.fill_random(-10, 10);
+
+  auto res = ele_add(a_data, b_data);
+  std::cout << res.shape()[0] << std::endl;
+  std::cout << res.shape()[1] << std::endl;
+  std::cout << res.shape()[2] << std::endl;
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k) {
+        // std::cout << "i: " << i << ", j: " << j << ", k: " << k << "\n";
+        // std::cout << "a: " << a[i][j][k] << ", b: " << b[i][j][k] << ", res: " << res[i][j][k] << "\n";
+        if (a[i][j][k] + b[i][j][k] != res[i][j][k]) {
+          choreo::choreo_assert(a[i][j][k] + b[i][j][k] == res[i][j][k], "values are not equal.");
+        }
+      }
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK: Test Passed
