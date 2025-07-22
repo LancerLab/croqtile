@@ -1730,6 +1730,11 @@ const SignTy ShapeInference::SignNode(const AST::Node& n) {
       auto vl = vn.GenValueListFromSignature(esign);
       auto sz = MultiplyAll(vl);
       return vn.ValueItemToSignature(sz);
+    } else if (e->op == "#") {
+      // TODO:
+    } else if (e->op == "#+" || e->op == "#-") {
+      // bound is mutated without value change
+      return GetSign(*e->GetL());
     }
     if (e->IsReference()) return GetSign(n);
     if (e->op == "ubound") return GetSign(*e->GetR(), VNKind::VNK_UBOUND);
