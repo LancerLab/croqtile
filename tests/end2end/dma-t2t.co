@@ -1,0 +1,169 @@
+// REQUIRES: TARGET-GCUALL
+
+// RUN: choreo -t topscc -es %s -o - | FileCheck %s --check-prefix=CODEGEN-OPT
+// RUN: choreo -t topscc -es -dlo=false %s -o - | FileCheck %s --check-prefix=CODEGEN
+// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines --check-prefix=END2END %s && rm -f %s.topscc.result
+// RUN: choreo -gs -t topscc -dlo=false %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines --check-prefix=END2END %s && rm -f %s.topscc.result
+
+#include <functional>
+#include <cmath>
+#include <iostream>
+
+// t2t => s2s
+__co__ auto foo(f32 [8, 8, 24] a) {
+  global f32[a.span] ans{1.0f};
+  parallel p by 4 {
+    f = dma.copy.async a.chunkat(p, _, _) => ans.chunkat(p, _, _);
+    wait f;
+  }
+  return ans;
+}
+
+// CODEGEN-OPT: tops::mdspan __mds0_a(tops::Global, (float*)a + (__tops_tid_x() * 384) + 0 + 0, 2, 8, 24);
+// CODEGEN-OPT: tops::mdspan __mds1_ans(tops::Global, (float*)ans + (__tops_tid_x() * 384) + 0 + 0, 2, 8, 24);
+// CODEGEN-OPT: tops::event f__event__ = tops::memcpy_async(*f.get_ctx(), __mds1_ans, __mds0_a);
+
+// CODEGEN:     tops::mdspan __mds0_a(tops::Global, (float*)a, 8, 8, 24);
+// CODEGEN:     tops::mdspan __mds1_ans(tops::Global, (float*)ans, 8, 8, 24);
+// CODEGEN:     int __slice_offset0__a_2_ans[] = {(int)(__tops_tid_x() * 2), 0, 0};
+// CODEGEN:     int __deslice_offset0__ans_2_a[] = {(int)(__tops_tid_x() * 2), 0, 0};
+// CODEGEN:     unsigned int __slice_shape1__a_2_ans[] = {2, 8, 24};
+// CODEGEN:     tops::event f__event__ = tops::slice_deslice_async(*f.get_ctx(), __mds1_ans, __mds0_a, __slice_offset0__a_2_ans, __slice_shape1__a_2_ans, __deslice_offset0__ans_2_a);
+  
+
+// t2t, no optimization
+__co__ auto bar(f32 [8, 8, 24] a) {
+  f32[a.span] ans{1.9f};
+  parallel p by 4 {
+    dma.copy a.chunkat(_, p, _) => ans.chunkat(_, p, _);
+  }
+  return ans;
+}
+
+// CODEGEN-OPT: tops::mdspan __mds2_a(tops::Global, (float*)a, 8, 8, 24);
+// CODEGEN-OPT: tops::mdspan __mds3_ans(tops::Global, (float*)ans, 8, 8, 24);
+// CODEGEN-OPT: int __slice_offset0__a_2_ans[] = {0, (int)(__tops_tid_x() * 2), 0};
+// CODEGEN-OPT: int __deslice_offset0__ans_2_a[] = {0, (int)(__tops_tid_x() * 2), 0};
+// CODEGEN-OPT: unsigned int __slice_shape1__a_2_ans[] = {8, 2, 24};
+// CODEGEN-OPT: tops::slice_deslice(*__choreo_anon_fut__0.get_ctx(), __mds3_ans, __mds2_a, __slice_offset0__a_2_ans, __slice_shape1__a_2_ans, __deslice_offset0__ans_2_a);
+
+// CODEGEN:     tops::mdspan __mds2_a(tops::Global, (float*)a, 8, 8, 24);
+// CODEGEN:     tops::mdspan __mds3_ans(tops::Global, (float*)ans, 8, 8, 24);
+// CODEGEN:     int __slice_offset1__a_2_ans[] = {0, (int)(__tops_tid_x() * 2), 0};
+// CODEGEN:     int __deslice_offset1__ans_2_a[] = {0, (int)(__tops_tid_x() * 2), 0};
+// CODEGEN:     unsigned int __slice_shape2__a_2_ans[] = {8, 2, 24};
+// CODEGEN:     tops::slice_deslice(*__choreo_anon_fut__0.get_ctx(), __mds3_ans, __mds2_a, __slice_offset1__a_2_ans, __slice_shape2__a_2_ans, __deslice_offset1__ans_2_a);
+
+
+// t2t => s2t
+__co__ auto foo_src(f32 [8, 8, 24] a) {
+  global f32[2, 8, 24*4] ans{2.9f};
+  parallel by 1 {
+    f = dma.copy a => shared;
+    parallel p by 4 {
+      dma.copy f.data.chunkat(p, _, _) => ans.chunkat(_, _, p);
+    }
+  }
+  return ans;
+}
+// CODEGEN-OPT: tops::mdspan __mds6_f(tops::Shared, (float*)f.data() + (__tops_tid_x() * 384) + 0 + 0, 2, 8, 24);
+// CODEGEN-OPT: tops::mdspan __mds7_ans(tops::Global, (float*)ans, 2, 8, 96);
+// CODEGEN-OPT: int __deslice_offset0__ans_2_f[] = {0, 0, (int)(__tops_tid_x() * 24)};
+// CODEGEN-OPT: tops::deslice(*__choreo_anon_fut__1.get_ctx(), __mds7_ans, __mds6_f, __deslice_offset0__ans_2_f);
+
+// CODEGEN:     tops::mdspan __mds6_f(tops::Shared, (float*)f.data(), 8, 8, 24);
+// CODEGEN:     tops::mdspan __mds7_ans(tops::Global, (float*)ans, 2, 8, 96);
+// CODEGEN:     int __slice_offset2__f_2_ans[] = {(int)(__tops_tid_x() * 2), 0, 0};
+// CODEGEN:     int __deslice_offset2__ans_2_f[] = {0, 0, (int)(__tops_tid_x() * 24)};
+// CODEGEN:     unsigned int __slice_shape3__f_2_ans[] = {2, 8, 24};
+// CODEGEN:     tops::slice_deslice(*__choreo_anon_fut__1.get_ctx(), __mds7_ans, __mds6_f, __slice_offset2__f_2_ans, __slice_shape3__f_2_ans, __deslice_offset2__ans_2_f);
+  
+
+// t2t => t2s
+__co__ auto foo_dst(f32 [8, 8, 24] a) {
+  global f32[32, 2, 24] ans{3.9f};
+  parallel by 1 {
+    f = dma.copy a => shared;
+    parallel p by 4 {
+      dma.copy f.data.chunkat(_, p, _) => ans.chunkat(p, _, _);
+    }
+  }
+  return ans;
+}
+
+// CODEGEN-OPT: tops::mdspan __mds10_f(tops::Shared, (float*)f.data(), 8, 8, 24);
+// CODEGEN-OPT: tops::mdspan __mds11_ans(tops::Global, (float*)ans + (__tops_tid_x() * 384) + 0 + 0, 8, 2, 24);
+// CODEGEN-OPT: int __slice_offset0__f_2_ans[] = {0, (int)(__tops_tid_x() * 2), 0};
+// CODEGEN-OPT: tops::slice(*__choreo_anon_fut__2.get_ctx(), __mds11_ans, __mds10_f, __slice_offset0__f_2_ans);
+
+// CODEGEN:     tops::mdspan __mds10_f(tops::Shared, (float*)f.data(), 8, 8, 24);
+// CODEGEN:     tops::mdspan __mds11_ans(tops::Global, (float*)ans, 32, 2, 24);
+// CODEGEN:     int __slice_offset3__f_2_ans[] = {0, (int)(__tops_tid_x() * 2), 0};
+// CODEGEN:     int __deslice_offset3__ans_2_f[] = {(int)(__tops_tid_x() * 8), 0, 0};
+// CODEGEN:     unsigned int __slice_shape4__f_2_ans[] = {8, 2, 24};
+// CODEGEN:     tops::slice_deslice(*__choreo_anon_fut__2.get_ctx(), __mds11_ans, __mds10_f, __slice_offset3__f_2_ans, __slice_shape4__f_2_ans, __deslice_offset3__ans_2_f);
+  
+int main() {
+
+
+  auto input = choreo::make_spandata<choreo::f32>(8, 8, 24);
+  input.fill_random(-1.0f, 1.0f);
+
+  auto check_res = [&](std::function<spanned_data<float, 3>(spanned_view<float, 3UL>)> f) -> void {
+    auto res = f(input.view());
+
+    for (int i = 0; i < res.shape()[0]; ++i)
+      for (int j = 0; j < res.shape()[1]; ++j)
+        for (int k = 0; k < res.shape()[2]; ++k)
+          choreo::choreo_assert(std::fabs(res[i][j][k] - input[i][j][k]) < 1e-4, "error");
+  };
+
+  check_res(foo);
+  std::cout << "foo pass\n";
+  check_res(bar);
+  std::cout << "bar pass\n";
+
+  auto res0 = foo_src(input.view());
+  int x = input.shape()[0];
+  int y = input.shape()[1];
+  int z = input.shape()[2];
+  int p = 4;
+  int tile_i = x / p;
+  int tile_k = res0.shape()[2] / p;
+  for (int i=0; i<p; i++) {
+    for (int ii=0; ii<tile_i; ii++) {
+      for (int j=0; j<y; j++) {
+        for (int k=0; k<z; k++) {
+          float expected = input[i * tile_i + ii][j][k];
+          float actual = res0[ii][j][i * tile_k + k];
+          choreo::choreo_assert(std::fabs(expected - actual) < 1e-4, "error");
+        }
+      }
+    }
+  }
+  std::cout << "foo_src pass\n";
+
+
+  auto res1 = foo_dst(input.view());
+  p = 4;
+  int tile_j = x / p;
+  tile_i = res1.shape()[0] / p;
+  for (int i=0; i<x; i++) {
+    for (int j=0; j<p; j++) {
+      for (int jj=0; jj<tile_j; jj++)
+        for (int k=0; k<z; k++) {
+          float expected = input[i][j * tile_j + jj][k];
+          float actual = res1[j * tile_i + i][jj][k];
+          choreo::choreo_assert(std::fabs(expected - actual) < 1e-4, "error");
+        }
+    }
+  }
+  std::cout << "foo_dst pass\n";
+
+  return 0;
+}
+
+// END2END: foo pass
+// END2END: bar pass
+// END2END: foo_src pass
+// END2END: foo_dst pass

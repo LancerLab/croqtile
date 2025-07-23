@@ -1,6 +1,6 @@
 // RUN: choreo -es -t topscc %s -o - | FileCheck --match-full-lines %s
 
-__co__ auto foo(global f32 [1, 2] a, s32 [3, 5] b) {
+__co__ auto foo(global f32 [1, 2] a, s32 [3, 5] & b) {
   parallel p by 1{
     dma.copy a => shared;
     dma.copy b => local;

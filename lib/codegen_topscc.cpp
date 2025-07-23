@@ -1103,33 +1103,6 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
     }
   }
 
-  // TODO: keep the convention or not?
-  // typically, the last buffer is used as output in destination-passing-style
-  // convention
-  if (!HasChoreoOutput()) {
-    std::string oname = "";
-    ptr<Type> otype;
-    ParamAttr oattr = ParamAttr::NONE;
-    bool has_spanned_arg = false;
-    bool is_ref = false;
-    for (const auto& item : GetChoreoFuncIns(updating_cgi)) {
-      auto sname = item.name;
-      if (isa<SpannedType>(item.type)) {
-        oname = UnScopedName(sname);
-        otype = item.type;
-        oattr = item.attr;
-        has_spanned_arg = true;
-        is_ref = item.IsReference();
-      }
-    }
-
-    // workaround: `!is_ref` works with the above topsMemcpy.
-    if (has_spanned_arg && oattr != ParamAttr::GLOBAL_INPUT && !is_ref)
-      hs << h_indent << "choreo::abend_true(topsMemcpy(" << oname << ".data(), "
-         << oname + "__device" << ", " << UnScopedSizeExpr(*otype)
-         << ", topsMemcpyDeviceToHost));\n";
-  }
-
   return true;
 }
 
@@ -1439,7 +1412,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   };
 
   // indicate which side can be optimized to linear copy
-  DMA_OP opt_to_linear_copy = OptToLinearCopy();
+  DMA_OP opt_to_linear_copy = DMA_OP::none;
+  if (CCtx().DmaLinearOpt()) opt_to_linear_copy = OptToLinearCopy();
 
   auto [f_buf_name, f_buf_expr] = GetBufferExpr(f_sym, f_idx, f_ty);
   auto [t_buf_name, t_buf_expr] = GetBufferExpr(t_sym, t_idx, t_ty);

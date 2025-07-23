@@ -303,6 +303,7 @@ private:
   bool simplify_fp_valno = false; // simplify the floating point value number
   bool verify = false;            // verify visitors for legality
   bool gen_debug_info = false;    // generate debug information
+  bool dma_linear_opt = false;    // optimize dma to linear copy
 
 private:
   std::shared_ptr<SymbolTable> sym_tab = nullptr; // global symbol table
@@ -416,6 +417,7 @@ public:
   bool SimplifyFpValno() const { return simplify_fp_valno; }
   bool VerifyVisitors() const { return verify; }
   bool GenDebugInfo() const { return gen_debug_info; }
+  bool DmaLinearOpt() const { return dma_linear_opt; }
 
   // Setters of compiler configurations
   void SetDumpAst(bool value) { dump_ast = value; }
@@ -434,6 +436,7 @@ public:
   void SetSimplifyFpValno(bool value) { simplify_fp_valno = value; }
   void SetVerifyVisitors(bool value) { verify = value; }
   void SetGenDebugInfo(bool value) { gen_debug_info = value; }
+  void SetDmaLinearOpt(bool value) { dma_linear_opt = value; }
 
   const std::unordered_map<std::string, std::string>& GetCLMacros() const {
     return cl_macros;
