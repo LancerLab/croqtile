@@ -21,7 +21,10 @@
 #include "options.hpp"
 #include "command_line.hpp"
 
+typedef Choreo::Parser::token::token_kind_type token_type;
 static int scope = 0;
+static int device_param_paren_scope = 0;
+static int device_param_brace_scope = 0;
 
 extern Choreo::location loc;
 extern Choreo::Option<bool> analyze_device_functions;
@@ -30,9 +33,16 @@ static std::string rawstr_delimiter;
 static std::string rawstr_buffer;
 static std::string analyze_free_buffer;
 static Choreo::location rawstr_loc;
+static std::string device_expr_buffer; // buffering the device expression
+static std::string device_token_buffer;
+
+static token_type device_token_id = token_type::END;
+static token_type token_id;
 
 void update_location(const char *text);
 void handle_line_directive(const char* text);
+bool accumulate_buffer(const char* text, token_type current_token_id);
+Choreo::Parser::symbol_type make_device_symbol();
 
 // Original yyterminate() macro returns int. Since we're using Bison 3 variants
 // as tokens, we must redefine it to change type from `int` to `Parser::semantic_type`
@@ -43,19 +53,21 @@ void handle_line_directive(const char* text);
 
 static bool double_bracket = false;
 static bool no_line_update = false;
+static bool accumulate_expr_buffer = false;
 
 %}
 
 %x CO_FUNC DEVICE_FUNC KERNEL MDSPAN_SUGER RAW_STRING
 
 id          [a-zA-Z_][a-zA-Z0-9_]*
-attr_id     (__{id}__|\[\[{id}\]\])
 num         (0|[1-9][0-9]*)[uU]?[lL]{0,2}
 hex_num     0[xX][0-9a-fA-F]+[uU]?[lL]{0,2}
 fpnum       -?[0-9]+\.[0-9]+
 fpnum_f     -?[0-9]+\.[0-9]+[fF]
-blank       [ \t\r]
 cstr        \"([^"\\]|\\.)*\"
+blank       [ \t\r]
+attr_id     (__{id}__|\[\[{blank}*{id}{blank}*(?:\({blank}*{cstr}{blank}*\){blank}*)?\]\])
+val         ({num}|{hex_num}|{fpnum}|{fpnum_f}|{cstr})
 
 %%
 <INITIAL,KERNEL,CO_FUNC,DEVICE_FUNC>{
@@ -128,40 +140,78 @@ cstr        \"([^"\\]|\\.)*\"
   {blank}+    { if (scope > 0) kernel_buffer += yytext; }
   \n+         { if (scope > 0) kernel_buffer += yytext; }
   "//".*      { if (scope > 0) kernel_buffer += yytext; }
-  "<"         { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_LT(loc); }
-  ">"         { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_GT(loc); }
-  "("         { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_LPAREN(loc); }
-  ")"         { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_RPAREN(loc); }
-  "{"         { scope++; if (scope > 0) kernel_buffer += yytext; BEGIN(KERNEL); }
-  "}"         { Choreo::Scanner::Error(loc, "redundant '}' for the kernel code."); }
-  ";"         { if (scope > 0) kernel_buffer += yytext; BEGIN(KERNEL); }
-  "::"        { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_SCOPE(loc); }
-  "*"         { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_STAR(loc); }
-  "&"         { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_AMP(loc); }
-  "&&"        { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_AND(loc); }
-  ","         { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_COMMA(loc); }
-  "signed"    { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_SIGNED(yytext, loc); }
-  "unsigned"  { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_UNSIGNED(yytext, loc); }
-  "auto"      { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_AUTO(yytext, loc); }
-  "void"      { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_VOID_STR(yytext, loc); }
-  "bool"      { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_BOOL_STR(yytext, loc); }
-  "char"      { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_CHAR_STR(yytext, loc); }
-  "short"     { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_SHORT_STR(yytext, loc); }
-  "int"       { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_INT_STR(yytext, loc); }
-  "long long" { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_LONG_STR(yytext, loc); }
-  "float"     { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_FLOAT_STR(yytext, loc); }
-  "double"    { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_DOUBLE_STR(yytext, loc); }
-  "const"     { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_CONST(yytext, loc); }
-  "constexpr" { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_CONST(yytext, loc); }
-  "constval"  { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_CONST(yytext, loc); }
-  "static"    { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_STATIC(yytext, loc); }
-  "extern"    { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_EXTERN(yytext, loc); }
-  "inline"    { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_INLINE(yytext, loc); }
-  "__attribute__" { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_ATTRIBUTE(yytext, loc); }
-  {attr_id}   { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_ATTR_ID(yytext, loc); }
-  {id}        { if (scope > 0) kernel_buffer += yytext; return Choreo::Parser::make_IDENTIFIER(yytext, loc); }
-  .           { if (scope > 0) kernel_buffer += yytext; BEGIN(KERNEL); } // Any other single character within the function
-
+  "<"         { if (accumulate_buffer(yytext, token_type::LT_STR)) return make_device_symbol(); }
+  ">"         { if (accumulate_buffer(yytext, token_type::GT_STR)) return make_device_symbol(); }
+  "("         { device_param_paren_scope++; if (accumulate_buffer(yytext, token_type::LPAREN_STR)) return make_device_symbol(); }
+  ")"         { if (accumulate_buffer(yytext, token_type::RPAREN_STR)) {
+                  device_param_paren_scope--;
+                  return make_device_symbol();
+                } else
+                  device_param_paren_scope--;
+              }
+  "{"         { scope++; device_param_brace_scope++;
+                if (accumulate_buffer(yytext, token_type::LBRACE_STR)) {
+                  if (device_param_paren_scope == 0) {
+                    if (device_param_brace_scope != 1)
+                      Choreo::Scanner::Error(loc, "unmatched '{' in device function declaration.");
+                    BEGIN(KERNEL);
+                    device_param_brace_scope = 0;
+                    device_param_paren_scope = 0;
+                    device_token_id = token_type::END;
+                  }
+                  return make_device_symbol();
+                }
+              }
+  "}"         { scope--;
+                if (accumulate_buffer(yytext, token_type::RBRACE_STR)) {
+                  device_param_brace_scope--;
+                  return make_device_symbol();
+                } else
+                  device_param_brace_scope--;
+                if (device_param_brace_scope < 0)
+                  Choreo::Scanner::Error(loc, "unmatched '}' in device function declaration.");
+              }
+  ";"         { if (accumulate_buffer(yytext, token_type::END)) {
+                  BEGIN(KERNEL);
+                  device_param_brace_scope = 0;
+                  device_param_paren_scope = 0;
+                  device_token_id = token_type::END;
+                  return make_device_symbol();
+                }
+              }
+  "::"        { if (accumulate_buffer(yytext, token_type::SCOPE_STR)) return make_device_symbol(); }
+  "*"         { if (accumulate_buffer(yytext, token_type::STAR_STR)) return make_device_symbol(); }
+  "="         { if (accumulate_buffer(yytext, token_type::ASSIGN_STR)) {
+                  if (device_param_paren_scope == 1 && device_param_brace_scope == 0)
+                    accumulate_expr_buffer = true;
+                  return make_device_symbol();
+                }
+              }
+  "&"         { if (accumulate_buffer(yytext, token_type::AMP_STR)) return make_device_symbol(); }
+  "&&"        { if (accumulate_buffer(yytext, token_type::AND_STR)) return make_device_symbol(); }
+  ","         { if (accumulate_buffer(yytext, token_type::COMMA_STR)) return make_device_symbol(); }
+  "signed"    { if (accumulate_buffer(yytext, token_type::SIGNED)) return make_device_symbol(); }
+  "unsigned"  { if (accumulate_buffer(yytext, token_type::UNSIGNED)) return make_device_symbol(); }
+  "auto"      { if (accumulate_buffer(yytext, token_type::AUTO)) return make_device_symbol(); }
+  "void"      { if (accumulate_buffer(yytext, token_type::VOID_STR)) return make_device_symbol(); }
+  "bool"      { if (accumulate_buffer(yytext, token_type::BOOL_STR)) return make_device_symbol(); }
+  "char"      { if (accumulate_buffer(yytext, token_type::CHAR_STR)) return make_device_symbol(); }
+  "short"     { if (accumulate_buffer(yytext, token_type::SHORT_STR)) return make_device_symbol(); }
+  "int"       { if (accumulate_buffer(yytext, token_type::INT_STR)) return make_device_symbol(); }
+  "long long" { if (accumulate_buffer(yytext, token_type::LONG_STR)) return make_device_symbol(); }
+  "float"     { if (accumulate_buffer(yytext, token_type::FLOAT_STR)) return make_device_symbol(); }
+  "double"    { if (accumulate_buffer(yytext, token_type::DOUBLE_STR)) return make_device_symbol(); }
+  "const"     { if (accumulate_buffer(yytext, token_type::CONST)) return make_device_symbol(); }
+  "constexpr" { if (accumulate_buffer(yytext, token_type::CONST)) return make_device_symbol(); }
+  "constval"  { if (accumulate_buffer(yytext, token_type::CONST)) return make_device_symbol(); }
+  "static"    { if (accumulate_buffer(yytext, token_type::STATIC)) return make_device_symbol(); }
+  "extern"    { if (accumulate_buffer(yytext, token_type::EXTERN)) return make_device_symbol(); }
+  "inline"    { if (accumulate_buffer(yytext, token_type::INLINE)) return make_device_symbol(); }
+  "__attribute__" { if (accumulate_buffer(yytext, token_type::ATTRIBUTE)) return make_device_symbol(); }
+  {attr_id}   { if (accumulate_buffer(yytext, token_type::ATTR_ID)) return make_device_symbol(); }
+  {id}        { if (accumulate_buffer(yytext, token_type::IDENTIFIER)) return make_device_symbol(); }
+  {val}       { if (accumulate_buffer(yytext, token_type::VAL)) return make_device_symbol(); }
+  .           { if (accumulate_buffer(yytext, token_type::CHAR)) return make_device_symbol(); }
 } // state <DEVICE_FUNC>
 
 <MDSPAN_SUGER>{
@@ -494,6 +544,49 @@ void update_location(const char *text) {
     }
     ++it;
   }
+}
+
+bool accumulate_buffer(const char* text, token_type current_token_id) {
+  if (scope > 0) {
+    kernel_buffer += text;
+  }
+  device_token_buffer = device_expr_buffer;
+  token_id = device_token_id;
+
+  if (device_token_id == token_type::END) {
+    device_token_id = current_token_id;
+    return false;
+  }
+  device_token_id = current_token_id;
+
+  // reset buffer if we are not accumulating
+  if (!accumulate_expr_buffer) {
+    device_expr_buffer = text;
+  }
+
+  // accumlate current device expression
+  if (accumulate_expr_buffer) {
+    // stop accumulating on comma or closing parenthesis
+    if (device_param_paren_scope == 1 && device_param_brace_scope == 0 && (text[0] == ',' || text[0] == ')')) {
+      accumulate_expr_buffer = false;
+      token_id = token_type::DEVICE_EXPR;
+      Choreo::Scanner::Debug("accumulate device expression: " + device_expr_buffer);
+      return true;
+    }
+    if (text[0] != '=')
+      device_expr_buffer += text;
+
+    if (token_id == token_type::ASSIGN_STR) {
+      return true;
+    }
+    return false; // continue accumulating
+  }
+
+  return true;
+}
+
+Choreo::Parser::symbol_type make_device_symbol() {
+  return Choreo::Parser::symbol_type (token_id, std::move(device_token_buffer), std::move(loc));
 }
 
 int yywrap() {

@@ -181,9 +181,10 @@ void choreo_info(const char *message) {
 %token <float> FPVAL
 %token <double> DFPVAL
 %token <std::string> TRUE FALSE
-%token <std::string> STRING
+%token <std::string> LT_STR GT_STR LPAREN_STR RPAREN_STR LBRACE_STR RBRACE_STR SCOPE_STR STAR_STR ASSIGN_STR AMP_STR AND_STR COMMA_STR
+%token <std::string> STRING VAL
 %token <std::string> HOST_CODE DEVICE_CODE
-%token <std::string> IDENTIFIER ATTR_CO
+%token <std::string> IDENTIFIER ATTR_CO DEVICE_EXPR
 %token <std::string> VOID_STR BOOL_STR CHAR_STR SHORT_STR INT_STR LONG_STR FLOAT_STR DOUBLE_STR CONST STATIC EXTERN INLINE ATTR_ID ATTRIBUTE SIGNED UNSIGNED
 // type related
 %token <std::string> MDSPAN ITUPLE EVENT MUTABLE
@@ -206,7 +207,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::CppSourceCode>> host_code inlcpp_stmt
 
 %nterm <AST::ptr<AST::DeviceFunctionDecl>> device_function_decl
-%nterm <std::string> device_attr device_attr_lists
+%nterm <std::string> device_attr device_attr_lists device_op
 %nterm <std::vector<AST::ptr<Choreo::DeviceDataType>>> device_params
 %nterm <AST::ptr<Choreo::DeviceDataType>> device_type device_base_type device_complex_type device_param device_nested_type
 %nterm <AST::ptr<AST::Memory>> storage_qual
@@ -323,7 +324,7 @@ device_base_type
 
 device_nested_type
     : /* Empty */ { $$ = MakeDeviceDataType("", BaseType::UNKNOWN); }
-    | device_nested_type COMMA device_complex_type {
+    | device_nested_type COMMA_STR device_complex_type {
         auto type_str = $3->GetTypeStr() + ", " + $3->GetTypeStr();
         $3->SetTypeStr(type_str);
         $3->SetDataType(BaseType::UNKNOWN);
@@ -333,13 +334,13 @@ device_nested_type
     ;
 
 device_complex_type
-    : IDENTIFIER SCOPE device_complex_type {
+    : IDENTIFIER SCOPE_STR device_complex_type {
         auto type_str = $1 + "::" + $3->GetTypeStr();
         $3->SetTypeStr(type_str);
         $3->SetDataType(BaseType::UNKNOWN);
         $$ = $3;
       }
-    | IDENTIFIER LT device_nested_type GT {
+    | IDENTIFIER LT_STR device_nested_type GT_STR {
         auto type_str = $1 + "<" + $3->GetTypeStr() + ">";
         $3->SetTypeStr(type_str);
         $3->SetDataType(BaseType::UNKNOWN);
@@ -352,7 +353,7 @@ device_complex_type
 
 device_type
     : device_complex_type { $$ = $1; }
-    | device_type STAR {
+    | device_type STAR_STR {
         auto type_str = $1->GetTypeStr() + " *";
         $1->SetTypeStr(type_str);
         if (!$1->IsNaiveType() || $1->IsPointerType()) {
@@ -361,17 +362,17 @@ device_type
         $1->SetPointerType(true);
         $$ = $1;
       }
-    | device_type AMP {
+    | device_type AMP_STR {
         auto type_str = $1->GetTypeStr() + " &";
         $1->SetTypeStr(type_str);
         $$ = $1;
       }
-    | device_type AND {
+    | device_type AND_STR {
         auto type_str = $1->GetTypeStr() + " &&";
         $1->SetTypeStr(type_str);
         $$ = $1;
       }
-    | device_type CONST STAR {
+    | device_type CONST STAR_STR {
         auto type_str =$1->GetTypeStr() + " const *";
         $1->SetTypeStr(type_str);
         if (!$1->IsNaiveType() || $1->IsPointerType()) {
@@ -390,20 +391,21 @@ device_type
 device_params
     : /* Empty */  {$$ = std::vector<AST::ptr<Choreo::DeviceDataType>>(); }
     | device_param { $$ = std::vector<AST::ptr<Choreo::DeviceDataType>>({$1}); }
-    | device_params COMMA device_param { $1.push_back($3); $$ = $1; }
+    | device_params COMMA_STR device_param { $1.push_back($3); $$ = $1; }
     ;
 
 device_param
     : device_type { $$ = $1; }
     | device_type IDENTIFIER { $$ = $1; }
+    | device_type IDENTIFIER ASSIGN_STR DEVICE_EXPR { $$ = $1; }
     | ATTR_ID device_param { $$ = $2; }
     ;
 
 device_attr_lists
-    : LPAREN device_attr_lists RPAREN {
+    : LPAREN_STR device_attr_lists RPAREN_STR {
         $$ = "(" + $2 + ")";
       }
-    | IDENTIFIER COMMA device_attr_lists {
+    | IDENTIFIER COMMA_STR device_attr_lists {
         $$ = $1 + ", " + $3;
       }
     | IDENTIFIER {
@@ -422,7 +424,7 @@ device_attr
     ;
 
 device_function_decl
-    : device_type IDENTIFIER LPAREN device_params RPAREN {
+    : device_type IDENTIFIER LPAREN_STR device_params RPAREN_STR {
         $$ = AST::Make<AST::DeviceFunctionDecl>(@2);
         $$->name = $2;
         $$->ret_type = $1;
@@ -433,6 +435,7 @@ device_function_decl
       }
     ;
 
+// choreo function declaration
 dsl_function
     : ATTR_CO return_type IDENTIFIER LPAREN parameter_list RPAREN LBRACE statements RBRACE {
         $$ = AST::Make<AST::ChoreoFunction>(@1);
