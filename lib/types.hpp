@@ -1281,15 +1281,21 @@ struct SpannedType : public Type, public TypeIDProvider<SpannedType> {
 
 struct DeviceDataType final : public Type,
                               public TypeIDProvider<DeviceDataType> {
-  DeviceDataType(std::string str, BaseType bt = BaseType::UNKNOWN,
-                 bool ip = false)
-      : Type(BaseType::DEVICE), str(str), data_type(bt), is_pointer(ip) {}
-  std::string str;
+  std::string name;
+  std::string attr;
   BaseType data_type;
   bool is_pointer;
+  std::string init_expr;
+
+  DeviceDataType(std::string str, std::string at = "",
+                 BaseType bt = BaseType::UNKNOWN, bool ip = false,
+                 std::string init = "")
+      : Type(BaseType::DEVICE), name(str), attr(at), data_type(bt),
+        is_pointer(ip), init_expr(init) {}
 
   const ptr<Type> Clone() const override {
-    return std::make_shared<DeviceDataType>(str, data_type, is_pointer);
+    return std::make_shared<DeviceDataType>(name, attr, data_type, is_pointer,
+                                            init_expr);
   }
 
   size_t Dims() const override { return GetInvalidRank(); }
@@ -1298,22 +1304,24 @@ struct DeviceDataType final : public Type,
     os << STR(data_type);
     if (is_pointer) os << " *";
   }
-  const std::string Name() const override { return str; }
+  const std::string Name() const override { return name; }
 
   bool HasSufficientInfo() const override { return true; }
 
   bool operator==(const Type& ty) const override {
-    return isa<DeviceDataType>(&ty) && str == ((const DeviceDataType&)ty).str;
+    return isa<DeviceDataType>(&ty) && name == ((const DeviceDataType&)ty).name;
   }
 
-  std::string GetTypeStr() { return str; }
-  void SetTypeStr(std::string s) { str = s; }
+  std::string GetTypeStr() { return name; }
+  void SetTypeStr(std::string s) { name = s; }
 
   BaseType GetDataType() { return data_type; }
   void SetDataType(BaseType bt) { data_type = bt; }
 
   bool IsPointerType() { return is_pointer; }
   void SetPointerType(bool ip) { is_pointer = ip; }
+
+  bool Initized() const { return !init_expr.empty(); }
 
   // used to march with choreo type including scalar type and spanned type.
   bool ApprxEqual(const Type& ty) const override {
@@ -1323,10 +1331,11 @@ struct DeviceDataType final : public Type,
              IsValuePreservingCast(ty.GetBaseType(), data_type);
     }
     // spanned type with the same element type
-    if (SpannedType* spanned_ty = dyn_cast<SpannedType>(&ty); is_pointer)
+    if (SpannedType* spanned_ty = dyn_cast<SpannedType>(&ty); is_pointer) {
       if (data_type == BaseType::VOID ||
           IsValuePreservingCast(spanned_ty->ElementType(), data_type))
         return true;
+    }
 
     return false;
   }
@@ -2222,8 +2231,11 @@ inline ptr<PlaceHolderType> MakePlaceHolderFutureType() {
 }
 
 inline ptr<DeviceDataType> MakeDeviceDataType(const std::string& name,
-                                              BaseType ty, bool ip = false) {
-  return std::make_shared<DeviceDataType>(name, ty, ip);
+                                              BaseType ty,
+                                              const std::string& attr = "",
+                                              bool ip = false,
+                                              const std::string& init = "") {
+  return std::make_shared<DeviceDataType>(name, attr, ty, ip, init);
 }
 
 // only return spanned type, scalar type, void type and unknown type

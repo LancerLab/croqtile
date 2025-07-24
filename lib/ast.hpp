@@ -1314,6 +1314,7 @@ public:
   __UDT_TYPE_INFO__(Node, DataType)
 };
 
+struct DeviceFunctionDecl;
 struct Call : public Node, public TypeIDProvider<Call> {
   enum CallAttr : uint8_t {
     NONE = 0,
@@ -1333,6 +1334,7 @@ public:
   ptr<Identifier> function;
   ptr<MultiValues> arguments;
   ptr<MultiValues> template_args;
+  ptr<DeviceFunctionDecl> device_function = nullptr;
 
 private:
   CallAttr attr;
@@ -1368,6 +1370,7 @@ public:
                         cast<MultiValues>(arguments->Clone()),
                         cast<MultiValues>(template_args->Clone()));
     n->attr = attr;
+    n->device_function = device_function;
     return n;
   }
 

@@ -343,7 +343,11 @@ void ChoreoFunction::accept(Choreo::Visitor& v) {
 
 void CppSourceCode::accept(Choreo::Visitor& v) { v.Visit(*this); }
 
-void DeviceFunctionDecl::accept(Choreo::Visitor& v) { v.Visit(*this); }
+void DeviceFunctionDecl::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+  v.Visit(*this);
+}
+
 void Program::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
 

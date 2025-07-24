@@ -17,7 +17,6 @@ private:
 
   AttributeDeriver mutables{this, "mutables"};
   AttributeDeriver diverges{this, "diverges"};
-  std::vector<ptr<AST::DeviceFunctionDecl>> device_functions;
 
 private:
   bool in_decl =

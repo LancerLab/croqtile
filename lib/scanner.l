@@ -117,14 +117,10 @@ val         ({num}|{hex_num}|{fpnum}|{fpnum_f}|{cstr})
                kernel_buffer += yytext;
            }
   "//".*   { if (scope > 0) kernel_buffer += yytext; }
-  "__device__" {
-                if (analyze_device_functions) {
-                  BEGIN(DEVICE_FUNC);
-                  kernel_buffer += yytext;
-                } else {
-                  kernel_buffer += yytext;
-                }
-               }
+  "__device__"    { if (analyze_device_functions) BEGIN(DEVICE_FUNC);
+                    if (scope > 0) kernel_buffer += yytext; }
+  "__co_device__" { if (analyze_device_functions) BEGIN(DEVICE_FUNC);
+                    if (scope > 0) kernel_buffer += yytext; }
   .        { if (scope > 0) kernel_buffer += yytext; }
   \n+      { if (scope > 0) kernel_buffer += yytext; }
   <<EOF>>  { if (scope > 0)
@@ -142,7 +138,8 @@ val         ({num}|{hex_num}|{fpnum}|{fpnum_f}|{cstr})
   "//".*      { if (scope > 0) kernel_buffer += yytext; }
   "<"         { if (accumulate_buffer(yytext, token_type::LT_STR)) return make_device_symbol(); }
   ">"         { if (accumulate_buffer(yytext, token_type::GT_STR)) return make_device_symbol(); }
-  "("         { device_param_paren_scope++; if (accumulate_buffer(yytext, token_type::LPAREN_STR)) return make_device_symbol(); }
+  "("         { device_param_paren_scope++;
+                if (accumulate_buffer(yytext, token_type::LPAREN_STR)) return make_device_symbol(); }
   ")"         { if (accumulate_buffer(yytext, token_type::RPAREN_STR)) {
                   device_param_paren_scope--;
                   return make_device_symbol();

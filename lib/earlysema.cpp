@@ -1895,21 +1895,46 @@ bool EarlySemantics::Visit(AST::Call& n) {
 
     ptr<AST::DeviceFunctionDecl> matched_function = nullptr;
     ptr<AST::DeviceFunctionDecl> candidate_function = nullptr;
+    std::string mismatch_msg;
     for (auto& f : device_functions) {
       if (f->name != n.function->name) continue;
       candidate_function = f;
-      if (f->param_types.size() != n.arguments->Count()) continue;
-      size_t param_index = 0;
+      mismatch_msg = "";
+
+      size_t param_count_uninitized = 0;
+      for (auto& param : f->param_types) {
+        if (!param->Initized())
+          param_count_uninitized++;
+        else
+          break;
+      }
+
+      if (!(f->param_types.size() >= n.arguments->Count() &&
+            n.arguments->Count() >= param_count_uninitized)) {
+        mismatch_msg = "the function '" + function_name + "' requires " +
+                       std::to_string(param_count_uninitized) +
+                       " parameters, but only " +
+                       std::to_string(n.arguments->Count()) +
+                       " arguments are "
+                       "provided.";
+        continue;
+      }
+
       bool arg_match = true;
-      for (; param_index < f->param_types.size(); ++param_index) {
-        auto arg_ty = NodeType(*n.arguments->ValueAt(param_index));
-        auto param_ty = f->param_types[param_index];
+      for (size_t param_idx = 0; param_idx < n.arguments->Count();
+           ++param_idx) {
+        auto arg_ty = NodeType(*n.arguments->ValueAt(param_idx));
+        auto param_ty = f->param_types[param_idx];
         // We allow the argument type promoted to parameter type, which means
         // IsValuePreservingCast(arg_ty, param_ty) should return true. For
         // example, a float argument can be passed to a double parameter. Other
         // type cast is not allowed.
         if (!param_ty->ApprxEqual(*arg_ty)) {
           arg_match = false;
+          mismatch_msg = "the type of " + std::to_string(param_idx + 1) +
+                         "th argument '" + PSTR(arg_ty) +
+                         "' is not compatible with the parameter type '" +
+                         PSTR(param_ty) + "'.";
           break;
         }
       }
@@ -1924,20 +1949,20 @@ bool EarlySemantics::Visit(AST::Call& n) {
       Warning(n.LOC(),
               "unable to find a device function '" + function_name + "'.");
       if (candidate_function)
-        Warning(
-            candidate_function->LOC(),
-            "candidate function '" + candidate_function->name + "' with " +
-                std::to_string(candidate_function->param_types.size()) +
-                " parameters is found, but the argument types do not match.");
+        Warning(candidate_function->LOC(),
+                "candidate function '" + candidate_function->name + "' with " +
+                    std::to_string(candidate_function->param_types.size()) +
+                    " parameters is found, but " + mismatch_msg);
     }
 
     if (matched_function) {
       // the type of the call node is the return type of the function, only
       // includes spanned type, scalar type, void type and unknown type
+      n.device_function = matched_function;
       auto call_ty = MakeChoreoDataType(matched_function->ret_type);
       SetNodeType(n, call_ty);
     }
-  }
+  } // end of analyze_device_functions
 
   size_t count = 0;
   for (auto& v : n.arguments->AllValues()) {
@@ -2262,7 +2287,19 @@ bool EarlySemantics::Visit(AST::CppSourceCode& n) {
 
 bool EarlySemantics::Visit(AST::DeviceFunctionDecl& n) {
   TraceEachVisit(n);
-  device_functions.push_back(dyn_cast<AST::DeviceFunctionDecl>(n.CloneImpl()));
+  if (analyze_device_functions) {
+    bool initized = false;
+    for (size_t param_idx = 0; param_idx < n.param_types.size(); param_idx++) {
+      auto param_ty = n.param_types[param_idx];
+      if (param_ty->Initized())
+        initized = true;
+      else if (param_idx > 0 && initized) {
+        Error1(n.LOC(), "Missing default argument on " +
+                            std::to_string(param_idx + 1) + "th parameter");
+        return false;
+      }
+    }
+  }
   return true;
 }
 

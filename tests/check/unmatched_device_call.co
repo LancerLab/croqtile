@@ -1,0 +1,36 @@
+// RUN: choreo -es -adf %s -o - 2>&1 | FileCheck %s
+__cok__ {
+  __device__ void fooA(int);
+  // type attributes
+  __device__ void fooB(__private__ int *);
+  // unhandled type
+  __device__ void fooC(const std::vector<int> &);
+  // template function params type inference is still not supported
+  template <typename T>
+  __device__ void fooD(T*);
+
+  __device__ void fooE(int a, int b, int c=2);
+
+}
+__co__ void func() {
+  parallel by 1 {
+    local s32 [10] l1_cache;
+    shared s32 [10] l2_cache;
+
+    call fooA(l1_cache);
+    call fooB(l2_cache);
+    call fooC(l1_cache);
+    call fooD(l1_cache);
+    call fooE(1);
+  }
+}
+
+// CHECK: candidate function 'fooA' with 1 parameters is found, but the type of 1th argument 's32 mdspan<1> []' is not compatible with the parameter type 's32'.
+// CHECK: unable to find a device function 'fooC'.
+// CHECK: candidate function 'fooC' with 1 parameters is found, but the type of 1th argument 's32 mdspan<1> []' is not compatible with the parameter type 'unknown'.
+// CHECK: unable to find a device function 'fooD'.
+// CHECK: candidate function 'fooD' with 1 parameters is found, but the type of 1th argument 's32 mdspan<1> []' is not compatible with the parameter type 'unknown *'.
+// CHECK: unable to find a device function 'fooE'.
+// CHECK: candidate function 'fooE' with 3 parameters is found, but the function 'fooE' requires 2 parameters, but only 1 arguments are provided.
+// CHECK: unable to find a device function 'fooB'.
+// CHECK: candidate function 'fooB' with 1 parameters is found, but the type of 1th argument 'shared s32 mdspan<1> [10]' is not __private__.

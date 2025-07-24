@@ -108,6 +108,7 @@ struct Visitor {
 protected:
   // scoped variable handling
   ScopedSymbolTable scoped_symtab;
+  std::vector<ptr<AST::DeviceFunctionDecl>> device_functions;
 
 protected:
   std::string name;
@@ -435,6 +436,9 @@ public:
           bv_map.emplace(sname, std::vector<std::string>{sname});
         }
       }
+    } else if (auto d = dyn_cast<AST::DeviceFunctionDecl>(&n)) {
+      device_functions.push_back(
+          dyn_cast<AST::DeviceFunctionDecl>(d->CloneImpl()));
     }
     return BeforeVisitImpl(n); // derived class to customize
   }

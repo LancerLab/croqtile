@@ -456,8 +456,7 @@ TopsccCodeGen::TileBaseOffset(const ptr<AST::ChunkAt>& ca) const {
       auto& vals = dyn_cast<AST::Expr>(p)->Opts().GetVals();
       for (auto val : vals) {
         auto factor = sbe::nu(1);
-        if (shape.Rank() > i)
-          factor = shape.TrimDims(i).ElementCountValue();
+        if (shape.Rank() > i) factor = shape.TrimDims(i).ElementCountValue();
         offset = offset + val * factor;
         ++i;
       }
@@ -486,8 +485,7 @@ const std::string TopsccCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca) const {
       auto& vals = dyn_cast<AST::Expr>(p)->Opts().GetVals();
       for (auto val : vals) {
         auto factor = sbe::nu(1);
-        if (shape.Rank() > i)
-          factor = shape.TrimDims(i).ElementCountValue();
+        if (shape.Rank() > i) factor = shape.TrimDims(i).ElementCountValue();
         offset = offset + val * factor;
         ++i;
       }

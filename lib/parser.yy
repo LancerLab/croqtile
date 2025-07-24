@@ -397,8 +397,8 @@ device_params
 device_param
     : device_type { $$ = $1; }
     | device_type IDENTIFIER { $$ = $1; }
-    | device_type IDENTIFIER ASSIGN_STR DEVICE_EXPR { $$ = $1; }
-    | ATTR_ID device_param { $$ = $2; }
+    | device_type IDENTIFIER ASSIGN_STR DEVICE_EXPR { $$ = $1; $$->init_expr = $4; }
+    | ATTR_ID device_param { $$ = $2; $$->attr = $1; }
     ;
 
 device_attr_lists
