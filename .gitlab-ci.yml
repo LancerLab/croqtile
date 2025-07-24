@@ -3,6 +3,8 @@ stages:
   - pre-release-tests
   - docgen
 
+variables:
+  GIT_SUBMODULE_STRATEGY: recursive
 # TODO: make package release work
 #  - artifacts
 # GPU Testing
