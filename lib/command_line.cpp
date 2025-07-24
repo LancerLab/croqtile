@@ -12,7 +12,7 @@ Option<std::string> target(
     OptionKind::User, "--target", "-t", "topscc",
     "Set the compilation target. The 'platform' includes <factor|topscc|cuda>.",
     "--target <platform>", true);
-Option<std::string> arch(OptionKind::User, "-arch", "", "gcu300",
+Option<std::string> arch(OptionKind::User, "-arch", "", ""/*default empty*/,
                          "Set the architecture to execute the binary code.",
                          "-arch=<processor>");
 Option<std::string> output(OptionKind::User, "-o", "", "",
@@ -202,6 +202,8 @@ bool CommandLine::Parse(int argc, char** argv) {
     CCtx().SetArch(TargetArch::GCU4);
   else if (ToUpper(arch.GetValue()) == "GPU")
     CCtx().SetArch(TargetArch::GPU);
+  else if (arch.GetValue() == "")
+    CCtx().SetArch(TargetArch::GCU3); // fill the default
   else {
     errs() << "Arch '" << arch.GetValue()
            << "' is invalid. Compilation abort.\n";

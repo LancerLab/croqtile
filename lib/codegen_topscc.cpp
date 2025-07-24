@@ -60,39 +60,18 @@ inline void VerboseDMA(std::ostringstream& os, const std::string& indent,
   os << ");\n";
 }
 
-inline const char* LocalSharedPredicate() {
-  return "threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0";
-}
-inline const char* SubSharedPredicate() {
-  return "threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0 && "
-         "subThreadIdx.x == 0 && subThreadIdx.y == 0 && subThreadIdx.z == 0";
-}
-
-const char* SingleThreadPredicate() {
-  if (arch.GetValue() == "gcu400") return SubSharedPredicate();
-  return LocalSharedPredicate();
-}
-
-const char* SingleSubThreadPredicate() {
-  static const char* pred_subthread =
-      "subThreadIdx.x == 0 && subThreadIdx.y == 0 && subThreadIdx.z == 0";
-  return pred_subthread;
-}
-
 inline std::string ImplicitPred(Storage max, Storage cur) {
-  if (max == Storage::SUB) {
-    if (cur == Storage::LOCAL)
-      return SingleSubThreadPredicate();
-    else if (cur == Storage::SHARED)
-      return SubSharedPredicate();
-  } else if (max == Storage::LOCAL && cur == Storage::SHARED)
-    return LocalSharedPredicate();
+  switch (cur) {
+    case Storage::LOCAL: return "__CHOREO_SINGLE_LOCAL__";
+    case Storage::SHARED: return "__CHOREO_SINGLE_SHARED__";
+    default: choreo_unreachable("unsupported storage level.");
+  }
   return "";
 }
 
 const char* SingleInstancePredicate(bool shared_in_block) {
-  if (shared_in_block) return SingleThreadPredicate();
-  return SingleSubThreadPredicate();
+  if (shared_in_block) return "__CHOREO_SINGLE_SHARED__";
+  return "__CHOREO_SINGLE_LOCAL__";
 }
 
 inline const char* SyncByLevel(Storage s) {
@@ -511,8 +490,9 @@ void TopsccCodeGen::EmitFixedHostHead() {
 
 )";
 
-  if (arch.GetValue() == "gcu400" || arch.GetValue() == "gcu300")
-    oss << "#include \"tcle.h\"\n";
+  oss << "#if __GCU_ARCH__ >= 300\n";
+  oss << "#include \"tcle.h\"\n";
+  oss << "#endif // __GCU_ARCH__ >= 300\n";
 
   oss << "// include the choreo header;\n";
   if (native_f16)
@@ -1566,7 +1546,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   assert(!(shared_in_block && local_in_warp) &&
          "local and shared memory should not be used at the same time");
   if (local_in_warp)
-    assert(arch.GetValue() == "gcu400" &&
+    assert(CCtx().GetArch() == TargetArch::GCU4 &&
            "only gcu400 need handle local synchronization");
 
   if (shared_in_block || local_in_warp) {
@@ -1859,7 +1839,7 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
   assert(!(local_in_warp && shared_in_block) &&
          "local and shared memory should not be used at the same time");
   if (local_in_warp)
-    assert(arch.GetValue() == "gcu400" &&
+    assert(CCtx().GetArch() == TargetArch::GCU4 &&
            "only gcu400 need handle local synchronization");
 
   if (shared_in_block || local_in_warp) {
@@ -2514,7 +2494,7 @@ void TopsccCodeGen::EmitTopsFree() {
 }
 
 void TopsccCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
-  if (arch.GetValue() == "gcu400") {
+  if (CCtx().GetArch() == TargetArch::GCU4) {
     auto& lconfig = cgi->GetFunctionLaunches(fname)[parallel_idx];
     oss << "__thread_dims__(" << lconfig.warp_dim_x << ", "
         << lconfig.warp_dim_y << ", " << lconfig.warp_dim_z << ")\n";
@@ -2620,7 +2600,7 @@ TOPSCC_LIB=${TOPSCC_INSTALL}/lib
   os << "\nEOF\n\n";
 
   // use simulator at this time
-  bool use_sim = arch.GetValue() == "gcu400";
+  bool use_sim = (CCtx().GetArch() == TargetArch::GCU4);
 
   // JIT: detect the environment
   if (use_sim)
@@ -2628,9 +2608,9 @@ TOPSCC_LIB=${TOPSCC_INSTALL}/lib
   else if (((CCtx().GetOutputKind() == OutputKind::TargetModule) ||
             (CCtx().GetOutputKind() == OutputKind::TargetExecutable) ||
             (CCtx().GetOutputKind() == OutputKind::ShellScript)) &&
-           !arch.GetValue().empty()) {
+           arch.GetValue() != "") {
     // enforce the arch type
-    os << "gcu_arch=" << arch.GetValue() << "\n";
+    os << "gcu_arch=" << ToLower(STR(CCtx().GetArch())) << "\n";
   } else
     os << R"script(
   # check the device just-in-time
