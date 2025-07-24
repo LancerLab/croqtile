@@ -52,7 +52,7 @@ gcu2_test:
       - tools/factor_backend
       - tools/shared
   tags:
-    - GPU
+    - GCU2
   only:
     - main
     - release/alpha
@@ -112,7 +112,7 @@ gcu4_test:
       - tools/factor_backend
       - tools/shared
   tags:
-    - GCU3
+    - GCU4SIM
   only:
     - main
     - release/alpha
@@ -215,7 +215,7 @@ package_test:
     - sudo dpkg -r choreo
     - echo "dpkg -r completed!"
   tags:
-    - GPU
+    - PKG
   only:
     - main
     - release/alpha
