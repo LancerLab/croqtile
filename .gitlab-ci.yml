@@ -3,12 +3,13 @@ stages:
   - pre-release-tests
   - docgen
 
-variables:
-  GIT_SUBMODULE_STRATEGY: recursive
 # TODO: make package release work
 #  - artifacts
 # GPU Testing
 gpu_test:
+  variables:
+   GIT_SUBMODULE_STRATEGY: recursive
+   GIT_SSH_COMMAND: 'ssh -F /opt/gitlab-runner/ssh/config'
   stage: check-in-tests
   script:
     - echo "Running tests with GPU..."
