@@ -109,6 +109,12 @@ inline std::string TYPE_STR(const std::shared_ptr<AST::Node>& n) {
   return STR(*n->GetType());
 }
 
+template <typename N>
+const ptr<N> CloneP(const ptr<N>& i) {
+  if (i == nullptr) return nullptr;
+  return cast<N>(i->Clone());
+}
+
 //---------------------------------------------------------------------------//
 
 // A group of nodes
@@ -148,6 +154,8 @@ struct MultiNodes : public Node, public TypeIDProvider<MultiNodes> {
     return values[idx];
   }
 
+  const ptr<Node> Last() { return values.back(); }
+
   // retrieve the index if the element is inside the MultiNodes
   int GetIndex(Node* n) const {
     for (size_t i = 0; i < values.size(); ++i) {
@@ -160,7 +168,7 @@ struct MultiNodes : public Node, public TypeIDProvider<MultiNodes> {
 
   ptr<Node> CloneImpl() const override {
     auto mv = Make<MultiNodes>(LOC(), delimiter);
-    for (auto v : values) mv->Append(v->Clone());
+    for (auto v : values) mv->Append(CloneP(v));
     return mv;
   }
 
@@ -228,7 +236,7 @@ struct MultiValues : public Node, public TypeIDProvider<MultiValues> {
 
   ptr<Node> CloneImpl() const override {
     auto mv = Make<MultiValues>(LOC(), delimiter);
-    for (auto v : values) mv->Append(v->Clone());
+    for (auto v : values) mv->Append(CloneP(v));
     return mv;
   }
 
@@ -699,54 +707,10 @@ public:
   }
 
 public:
-  ptr<Node> CloneImpl() const override {
-    return Make<Expr>(
-        LOC(), op, ((!value_c) ? nullptr : cast<Expr>(value_c->Clone())),
-        ((!value_l) ? nullptr : value_l->Clone()),
-        ((!value_r) ? nullptr : value_r->Clone()), t, opt_vals, s);
-  }
+  ptr<Node> CloneImpl() const override;
 
   void Print(std::ostream& os, const std::string& prefix = {},
-             bool with_type = false) const override {
-    if (with_type) { os << "<{" << PSTR(GetType()) << "}>"; }
-    if (t == Reference) {
-      if (isa<Call>(value_r))
-        value_r->InlinePrint(os, prefix, with_type);
-      else
-        value_r->Print(os, prefix, with_type);
-      return;
-    }
-
-    assert(op.size() > 0 && "must have an operand.");
-
-    if (op == "dimof" || op == "getith") {
-      value_l->Print(os, prefix, with_type);
-      value_r->Print(os, "", with_type);
-      return;
-    }
-
-    os << " (";
-    switch (t) {
-    case Unary:
-      os << op << " ";
-      value_r->Print(os, "", with_type);
-      break;
-    case Binary:
-      value_l->Print(os, "", with_type);
-      os << " " << op << " ";
-      value_r->Print(os, "", with_type);
-      break;
-    case Ternary:
-      value_c->Print(os, "", with_type);
-      os << " ? ";
-      value_l->Print(os, "", with_type);
-      os << " : ";
-      value_r->Print(os, "", with_type);
-      break;
-    default: choreo_unreachable("unhandled expression type."); break;
-    }
-    os << ") ";
-  }
+             bool with_type = false) const override;
 
   void accept(Visitor&) override;
 
@@ -769,6 +733,14 @@ public:
   void SetFrom(BaseType bty) { from = bty; }
   void SetTo(BaseType bty) { to = bty; }
 
+public:
+  ptr<Node> CloneImpl() const override {
+    auto n = Make<CastExpr>(LOC(), CloneP(GetR()));
+    n->from = from;
+    n->to = to;
+    return n;
+  }
+
   void Print(std::ostream& os, const std::string& prefix = {},
              bool with_type = false) const override {
     os << prefix << "CAST(" << FromType() << "=>" << ToType() << ": '";
@@ -778,7 +750,7 @@ public:
 
   void accept(Visitor&) override;
 
-  __UDT_2TYPES_INFO__(Node, Expr, CastExpr);
+  __UDT_TYPE_INFO__(Expr, CastExpr);
 };
 
 // Represents both dimensions and s like {3, 4, 5} or {1, 2, 1}
@@ -836,7 +808,7 @@ struct MultiDimSpans : public Node, public TypeIDProvider<MultiDimSpans> {
   }
 
   ptr<Node> CloneImpl() const override {
-    return Make<MultiDimSpans>(LOC(), ref_name, list->Clone());
+    return Make<MultiDimSpans>(LOC(), ref_name, CloneP(list));
   }
 
   void Print(std::ostream& os, const std::string& = {},
@@ -888,7 +860,7 @@ struct SpanAs : public Node, public TypeIDProvider<SpanAs> {
   }
 
   ptr<Node> CloneImpl() const override {
-    return Make<SpanAs>(LOC(), id, nid, cast<MultiValues>(list->Clone()));
+    return Make<SpanAs>(LOC(), id, nid, cast<MultiValues>(CloneP(list)));
   }
 
   void Print(std::ostream& os, const std::string& = {},
@@ -931,7 +903,7 @@ struct NamedTypeDecl : public Node, public TypeIDProvider<NamedTypeDecl> {
   }
 
   ptr<Node> CloneImpl() const override {
-    return Make<NamedTypeDecl>(LOC(), name_str, init_expr->Clone(), rank,
+    return Make<NamedTypeDecl>(LOC(), name_str, CloneP(init_expr), rank,
                                init_str);
   }
 
@@ -981,7 +953,7 @@ struct IntTuple : public Node, public TypeIDProvider<IntTuple> {
   const ptr<MultiValues>& GetValues() const { return vlist; }
 
   ptr<Node> CloneImpl() const override {
-    return Make<IntTuple>(LOC(), ref_name, cast<MultiValues>(vlist->Clone()));
+    return Make<IntTuple>(LOC(), ref_name, CloneP(vlist));
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -1040,8 +1012,7 @@ struct DataAccess : public Node, public TypeIDProvider<DataAccess> {
   }
 
   ptr<Node> CloneImpl() const override {
-    return Make<DataAccess>(LOC(), cast<Identifier>(data->Clone()),
-                            cast<MultiValues>(indices->Clone()));
+    return Make<DataAccess>(LOC(), CloneP(data), CloneP(indices));
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -1086,14 +1057,15 @@ public:
   bool IsDecl() const { return is_decl; }
 
   ptr<Node> CloneImpl() const override {
-    return Make<Assignment>(LOC(), cast<DataAccess>(da->Clone()),
-                            value->Clone());
+    auto c = Make<Assignment>(LOC(), CloneP(da), CloneP(value));
+    c->is_decl = is_decl;
+    return c;
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool with_type = false) const override {
     os << "\n" << prefix << "`- Assign";
-    if (with_type) os << "(" << (IsDecl() ? "decl" : "re-assign") << ")";
+    if (with_type) os << (IsDecl() ? "(decl)" : "");
     os << ": ";
     da->Print(os, "", with_type);
     os << " = ";
@@ -1139,7 +1111,7 @@ struct IntIndex : public Node, public TypeIDProvider<IntIndex> {
   }
 
   ptr<Node> CloneImpl() const override {
-    return Make<IntIndex>(LOC(), value->Clone());
+    return Make<IntIndex>(LOC(), CloneP(value));
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -1223,8 +1195,7 @@ public:
   void ReGenSemaType() { InitSemaType(); }
 
   ptr<Node> CloneImpl() const override {
-    return Make<DataType>(LOC(), base_type, rank,
-                          ((!mdspan_type) ? nullptr : mdspan_type->Clone()),
+    return Make<DataType>(LOC(), base_type, rank, CloneP(mdspan_type),
                           array_dims, is_mutable);
   }
 
@@ -1331,9 +1302,9 @@ struct Call : public Node, public TypeIDProvider<Call> {
   }
 
 public:
-  ptr<Identifier> function;
-  ptr<MultiValues> arguments;
-  ptr<MultiValues> template_args;
+  ptr<Identifier> function = nullptr;
+  ptr<MultiValues> arguments = nullptr;
+  ptr<MultiValues> template_args = nullptr;
   ptr<DeviceFunctionDecl> device_function = nullptr;
 
 private:
@@ -1347,8 +1318,8 @@ public:
   Call(const location& l, const ptr<Identifier>& f, const ptr<MultiValues>& a,
        const ptr<MultiValues>& b)
       : Node(l), function(f), arguments(a), template_args(b), attr(NONE) {
-    arguments->SetDelimiter(", ");
-    template_args->SetDelimiter(", ");
+    if (arguments) arguments->SetDelimiter(", ");
+    if (template_args) template_args->SetDelimiter(", ");
   }
 
   const std::vector<ptr<Node>>& GetArguments() const {
@@ -1366,9 +1337,8 @@ public:
   void SetExpr() { attr = attr | EXPR; }
 
   ptr<Node> CloneImpl() const override {
-    auto n = Make<Call>(LOC(), cast<Identifier>(function->Clone()),
-                        cast<MultiValues>(arguments->Clone()),
-                        cast<MultiValues>(template_args->Clone()));
+    auto n = Make<Call>(LOC(), CloneP(function), CloneP(arguments),
+                        CloneP(template_args));
     n->attr = attr;
     n->device_function = device_function;
     return n;
@@ -1465,10 +1435,9 @@ struct NamedVariableDecl : public Node,
   void SetMemory(ptr<Memory> m) { mem = m; }
 
   ptr<Node> CloneImpl() const override {
-    auto n =
-        Make<NamedVariableDecl>(LOC(), name_str, cast<DataType>(type->Clone()),
-                                cast<Memory>(mem->Clone()), init_expr->Clone(),
-                                array_dims, init_value->Clone(), init_str);
+    auto n = Make<NamedVariableDecl>(LOC(), name_str, CloneP(type), CloneP(mem),
+                                     CloneP(init_expr), array_dims,
+                                     CloneP(init_value), init_str);
     n->SetMutable(IsMutable());
     return n;
   }
@@ -1516,8 +1485,7 @@ struct Parameter : public Node, public TypeIDProvider<Parameter> {
   ParamAttr GetAttr() const { return attr; }
 
   ptr<Node> CloneImpl() const override {
-    return Make<Parameter>(LOC(), cast<DataType>(type->Clone()),
-                           cast<Identifier>(sym->Clone()), pass_by_ref, attr);
+    return Make<Parameter>(LOC(), CloneP(type), CloneP(sym), pass_by_ref, attr);
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -1542,7 +1510,7 @@ struct ParamList : public Node, public TypeIDProvider<ParamList> {
 
   ptr<Node> CloneImpl() const override {
     auto n = Make<ParamList>(LOC());
-    for (auto v : values) n->values.push_back(cast<Parameter>(v->Clone()));
+    for (auto v : values) n->values.push_back(CloneP(v));
     return n;
   }
 
@@ -1576,9 +1544,8 @@ struct IfElseBlock : public Node, public TypeIDProvider<IfElseBlock> {
   const ptr<Node> GetPred() const { return pred; }
 
   ptr<Node> CloneImpl() const override {
-    return Make<IfElseBlock>(LOC(), pred->Clone(),
-                             cast<MultiNodes>(if_stmts->Clone()),
-                             cast<MultiNodes>(else_stmts->Clone()));
+    return Make<IfElseBlock>(LOC(), CloneP(pred), CloneP(if_stmts),
+                             CloneP(else_stmts));
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -1615,9 +1582,14 @@ private:
 public:
   ptr<MultiNodes> stmts = nullptr;
 
+private:
   bool async = false;
   bool bracketed = false; // for late syntax check
 
+  Storage max_lvl = Storage::NONE;
+  bool is_outer = false; // if it is the outer-most pb
+
+public:
   ParallelBy(const location& l, const ptr<Identifier>& pv,
              const ptr<Expr>& pb = nullptr, const ptr<MultiValues>& c = nullptr,
              const ptr<MultiValues>& cbs = nullptr,
@@ -1649,7 +1621,7 @@ public:
     if (bpv != nullptr && bound_expr == nullptr && cmpt_bounds->Count() > 0) {
       auto e = cast<Expr>(cmpt_bounds->ValueAt(0)->Clone());
       for (size_t i = 1; i < cmpt_bounds->Count(); ++i)
-        e = Make<Expr>(e->LOC(), "*", e, cmpt_bounds->ValueAt(i)->Clone());
+        e = Make<Expr>(e->LOC(), "*", e, CloneP(cmpt_bounds->ValueAt(i)));
       bound_expr = e;
     }
   }
@@ -1663,6 +1635,7 @@ public:
   //  size_t SubCount() const { return cmpt_bpvs->Count(); }
 
   const ptr<Identifier> BPV() const { return bpv; }
+  void SetPV(const ptr<Identifier>& pv) { bpv = pv; }
 
   const ptr<MultiValues> SubPVs() const { return cmpt_bpvs; }
   void SetSubPVs(const ptr<MultiValues>& spv) { cmpt_bpvs = spv; }
@@ -1681,6 +1654,7 @@ public:
     return bound_expr->Opts().GetVal();
   }
   ptr<Expr> BoundExpr() const { return bound_expr; }
+  void SetBoundExpr(const ptr<Expr>& be) { bound_expr = be; }
   ptr<Expr> BoundExprAt(size_t idx) {
     assert(cmpt_bounds != nullptr);
     return cast<Expr>(cmpt_bounds->ValueAt(idx));
@@ -1710,14 +1684,22 @@ public:
     return vl;
   }
 
+  Storage GetMaxLevel() const { return max_lvl; }
+  void SetMaxLevel(Storage s) { max_lvl = s; }
+  bool IsOuter() const { return is_outer; }
+  void SetOuter(bool o) { is_outer = o; }
+
+public:
   bool IsBlock() const override { return true; }
 
   ptr<Node> CloneImpl() const override {
-    return Make<ParallelBy>(LOC(), cast<Identifier>(bpv->Clone()),
-                            cast<Expr>(bound_expr->Clone()),
-                            cast<MultiValues>(cmpt_bpvs->Clone()),
-                            cast<MultiValues>(cmpt_bounds->Clone()),
-                            cast<MultiNodes>(stmts->Clone()), async);
+    auto pb = Make<ParallelBy>(LOC(), CloneP(bpv), CloneP(bound_expr),
+                               CloneP(cmpt_bpvs), CloneP(cmpt_bounds),
+                               CloneP(stmts), async);
+    pb->SetBracketed(IsBracketed());
+    pb->SetMaxLevel(GetMaxLevel());
+    pb->SetOuter(IsOuter());
+    return pb;
   }
 
   void InlinePrint(std::ostream& os, const std::string& prefix = {},
@@ -1733,6 +1715,7 @@ public:
     os << " by [";
     PrintBounds(os);
     os << "]";
+    if (GetLevel() != Storage::NONE) os << " : " << STR(GetLevel());
   }
 
   void PrintBound(std::ostream& os) const {
@@ -1750,8 +1733,9 @@ public:
 
   void PrintWithoutStmts(std::ostream& os, const std::string& prefix,
                          bool = false) const {
-    os << "\n"
-       << prefix << "`- Parallelization:"
+    os << "\n" << prefix << "`- ";
+    if (GetLevel() != Storage::NONE) os << STR(GetLevel()) << " ";
+    os << "Parallelization" << (IsOuter() ? "(o)" : "") << ":"
        << " index symbol: " << bpv->name << ", bound [0, ";
     PrintBound(os);
     os << ")";
@@ -1790,7 +1774,7 @@ struct WhereBind : public Node, public TypeIDProvider<WhereBind> {
       : Node(l), lhs(lhs), rhs(rhs) {}
 
   ptr<Node> CloneImpl() const override {
-    return Make<WhereBind>(LOC(), lhs->Clone(), rhs->Clone());
+    return Make<WhereBind>(LOC(), CloneP(lhs), CloneP(rhs));
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -1823,8 +1807,7 @@ struct WithIn : public Node, public TypeIDProvider<WithIn> {
   }
 
   ptr<Node> CloneImpl() const override {
-    return Make<WithIn>(LOC(), cast<Identifier>(with->Clone()), in->Clone(),
-                        cast<MultiValues>(with_matchers->Clone()));
+    return Make<WithIn>(LOC(), CloneP(with), CloneP(in), CloneP(with_matchers));
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -1858,9 +1841,7 @@ struct WithBlock : public Node, public TypeIDProvider<WithBlock> {
   bool IsBlock() const override { return true; }
 
   ptr<Node> CloneImpl() const override {
-    return Make<WithBlock>(LOC(), cast<MultiNodes>(withins->Clone()),
-                           cast<MultiNodes>(withins->Clone()),
-                           cast<MultiNodes>(stmts->Clone()));
+    return Make<WithBlock>(LOC(), CloneP(withins), CloneP(reqs), CloneP(stmts));
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -2021,15 +2002,13 @@ public:
   const ptr<SpannedOperation> Clone() const {
     ptr<SpannedOperation> n = nullptr;
     if (SpecifyReshape())
-      n = Make<SpannedOperation>(loc, cast<MultiValues>(RShape()->Clone()),
-                                 tag);
+      n = Make<SpannedOperation>(loc, CloneP(RShape()), tag);
     else if (TFSS() != nullptr)
-      n = Make<SpannedOperation>(loc, cast<MultiValues>(Positions()->Clone()),
-                                 cast<MultiValues>(TFSS()->Clone()), tag);
+      n = Make<SpannedOperation>(loc, CloneP(Positions()), CloneP(TFSS()), tag);
     else
-      n = Make<SpannedOperation>(loc, cast<MultiValues>(Positions()->Clone()),
-                                 nullptr, tag);
+      n = Make<SpannedOperation>(loc, CloneP(Positions()), tag);
     n->block_shape = block_shape;
+    n->rank = rank;
     return n;
   }
 
@@ -2191,9 +2170,9 @@ public:
   ptr<Node> CloneImpl() const override {
     std::vector<ptr<SpannedOperation>> ntsis;
     for (auto tsi : operations) ntsis.push_back(tsi->Clone());
-    auto n = Make<ChunkAt>(LOC(), cast<Identifier>(data->Clone()),
-                           cast<MultiValues>(indices->Clone()), ntsis);
-    n->sa = cast<SpanAs>(sa->Clone());
+    auto n = Make<ChunkAt>(LOC(), CloneP(data), CloneP(indices), ntsis);
+    n->sa = (!sa) ? nullptr : CloneP(sa);
+    n->bs = bs;
     return n;
   }
 
@@ -2230,8 +2209,7 @@ struct Select : public Node, public TypeIDProvider<Select> {
   }
 
   ptr<Node> CloneImpl() const override {
-    auto n = Make<Select>(LOC(), cast<Expr>(select_factor->Clone()),
-                          cast<MultiValues>(expr_list->Clone()));
+    auto n = Make<Select>(LOC(), CloneP(select_factor), CloneP(expr_list));
     n->rname = rname;
     n->inDMA = inDMA;
     return n;
@@ -2302,7 +2280,7 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
   const ptr<DMAConfig>& GetConfig() const { return config; }
 
   ptr<Node> CloneImpl() const override {
-    auto n = Make<DMA>(LOC(), operation, future, from->Clone(), to->Clone(),
+    auto n = Make<DMA>(LOC(), operation, future, CloneP(from), CloneP(to),
                        async, config);
     n->chained = chained;
     n->chain_from = chain_from;
@@ -2351,7 +2329,7 @@ struct Wait : public Node, public TypeIDProvider<Wait> {
   Wait(const location& l, const ptr<MultiValues>& t) : Node(l), targets(t) {}
 
   ptr<Node> CloneImpl() const override {
-    return Make<Wait>(LOC(), cast<MultiValues>(targets->Clone()));
+    return Make<Wait>(LOC(), CloneP(targets));
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -2375,7 +2353,7 @@ struct Trigger : public Node, public TypeIDProvider<Trigger> {
   Trigger(const location& l, const ptr<MultiValues>& t) : Node(l), targets(t) {}
 
   ptr<Node> CloneImpl() const override {
-    return Make<Trigger>(LOC(), cast<MultiValues>(targets->Clone()));
+    return Make<Trigger>(LOC(), CloneP(targets));
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -2430,7 +2408,7 @@ struct Return : public Node, public TypeIDProvider<Return> {
   Return(const location& l, const ptr<Node>& t) : Node(l), value(t) {}
 
   ptr<Node> CloneImpl() const override {
-    return Make<Return>(LOC(), value->Clone());
+    return Make<Return>(LOC(), CloneP(value));
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -2465,7 +2443,7 @@ struct Rotate : public Node, public TypeIDProvider<Rotate> {
   const std::vector<ptr<Node>>& GetIds() const { return ids->AllValues(); }
 
   ptr<Node> CloneImpl() const override {
-    return Make<Rotate>(LOC(), cast<MultiValues>(ids->Clone()));
+    return Make<Rotate>(LOC(), CloneP(ids));
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -2486,7 +2464,7 @@ struct Synchronize : public Node, public TypeIDProvider<Synchronize> {
       : Node(loc), scope(s) {}
 
   ptr<Node> CloneImpl() const override {
-    return Make<Synchronize>(LOC(), cast<Memory>(scope->Clone()));
+    return Make<Synchronize>(LOC(), CloneP(scope));
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -2515,8 +2493,8 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   const ptr<Identifier> IV() const { return iv; }
 
   ptr<Node> CloneImpl() const override {
-    return Make<LoopRange>(LOC(), cast<Identifier>(iv->Clone()),
-                           lbound->Clone(), ubound->Clone(), stride);
+    return Make<LoopRange>(LOC(), (!iv) ? nullptr : CloneP(iv), CloneP(lbound),
+                           CloneP(ubound), stride);
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -2549,8 +2527,7 @@ struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
   bool IsBlock() const override { return true; }
 
   ptr<Node> CloneImpl() const override {
-    return Make<ForeachBlock>(LOC(), cast<MultiValues>(ranges->Clone()),
-                              cast<MultiNodes>(stmts->Clone()));
+    return Make<ForeachBlock>(LOC(), CloneP(ranges), CloneP(stmts));
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -2588,8 +2565,8 @@ struct InThreadsBlock : public Node, public TypeIDProvider<InThreadsBlock> {
   }
 
   ptr<Node> CloneImpl() const override {
-    return Make<InThreadsBlock>(LOC(), cast<Expr>(pred->Clone()),
-                                cast<MultiNodes>(stmts->Clone()), async, outer);
+    return Make<InThreadsBlock>(LOC(), CloneP(pred), CloneP(stmts), async,
+                                outer);
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -2618,8 +2595,7 @@ struct WhileBlock : public Node, public TypeIDProvider<WhileBlock> {
   }
 
   ptr<Node> CloneImpl() const override {
-    return Make<WhileBlock>(LOC(), cast<Expr>(pred->Clone()),
-                            cast<MultiNodes>(stmts->Clone()));
+    return Make<WhileBlock>(LOC(), CloneP(pred), CloneP(stmts));
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -2649,9 +2625,8 @@ struct IncrementBlock : public Node, public TypeIDProvider<IncrementBlock> {
   bool IsBlock() const override { return true; }
 
   ptr<Node> CloneImpl() const override {
-    return Make<IncrementBlock>(LOC(), cast<MultiValues>(bvs->Clone()),
-                                pred->Clone(),
-                                cast<MultiNodes>(stmts->Clone()));
+    return Make<IncrementBlock>(LOC(), CloneP(bvs), CloneP(pred),
+                                CloneP(stmts));
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -2683,8 +2658,7 @@ struct FunctionDecl : public Node, public TypeIDProvider<FunctionDecl> {
       : Node(l), ret_type(rt), params(pl) {}
 
   ptr<Node> CloneImpl() const override {
-    auto n = Make<FunctionDecl>(LOC(), cast<DataType>(ret_type->Clone()),
-                                cast<ParamList>(params->Clone()));
+    auto n = Make<FunctionDecl>(LOC(), CloneP(ret_type), CloneP(params));
     n->name = name;
     return n;
   }
@@ -2714,7 +2688,7 @@ struct ChoreoFunction : public Node, public TypeIDProvider<ChoreoFunction> {
     auto n = Make<ChoreoFunction>(LOC());
     n->name = name;
     n->f_decl = f_decl;
-    n->stmts = cast<MultiNodes>(stmts->Clone());
+    n->stmts = CloneP(stmts);
     return n;
   }
 
@@ -2744,9 +2718,12 @@ struct CppSourceCode : public Node, public TypeIDProvider<CppSourceCode> {
     return Make<CppSourceCode>(LOC(), code, kind);
   }
 
-  void Print(std::ostream& os, const std::string& = {},
+  void Print(std::ostream& os, const std::string& prefix = {},
              bool = false) const override {
-    os << code;
+    if (kind == Inline)
+      os << "\n" << prefix << "`- [cpp] " << code;
+    else
+      os << code;
   }
 
   std::string GetCode() { return code; }
@@ -2766,9 +2743,9 @@ struct DeviceFunctionDecl final : public Node,
   ptr<Node> CloneImpl() const override {
     auto copy = Make<DeviceFunctionDecl>(LOC());
     copy->name = name;
-    copy->ret_type = cast<DeviceDataType>(ret_type->Clone());
+    copy->ret_type = CloneP(ret_type);
     for (const auto& pt : param_types) {
-      copy->param_types.push_back(cast<DeviceDataType>(pt->Clone()));
+      copy->param_types.push_back(CloneP(pt));
     }
     copy->attributes = attributes;
     return copy;
@@ -2804,7 +2781,7 @@ struct Program : public Node, public TypeIDProvider<Program> {
   bool IsBlock() const override { return true; }
 
   ptr<Node> CloneImpl() const override {
-    return Make<Program>(LOC(), cast<MultiNodes>(nodes->Clone()));
+    return Make<Program>(LOC(), CloneP(nodes));
   }
   void Print(std::ostream& os, const std::string& prefix = {},
              bool with_type = false) const override {
@@ -2817,6 +2794,64 @@ struct Program : public Node, public TypeIDProvider<Program> {
   __UDT_TYPE_INFO__(Node, Program)
 };
 
+inline ptr<Node> Expr::CloneImpl() const {
+  if (op == "cast") {
+    auto ce = cast<CastExpr>(this);
+    return ce->CloneImpl();
+  }
+
+  return Make<Expr>(LOC(), op, CloneP(value_c), CloneP(value_l),
+                    CloneP(value_r), t, opt_vals, s);
+}
+inline void Expr::Print(std::ostream& os, const std::string& prefix,
+                        bool with_type) const {
+  if (with_type) { os << "<{" << PSTR(GetType()) << "}>"; }
+  if (t == Reference) {
+    if (isa<Call>(value_r))
+      value_r->InlinePrint(os, prefix, with_type);
+    else
+      value_r->Print(os, prefix, with_type);
+    return;
+  }
+
+  assert(op.size() > 0 && "must have an operand.");
+
+  if (op == "dimof" || op == "getith") {
+    value_l->Print(os, prefix, with_type);
+    value_r->Print(os, "", with_type);
+    return;
+  }
+
+  if (op == "cast") {
+    auto ce = cast<CastExpr>(this);
+    os << "(" << ce->ToType() << ")(";
+    value_r->Print(os, "", with_type);
+    os << ")";
+    return;
+  }
+
+  os << " (";
+  switch (t) {
+  case Unary:
+    os << op << " ";
+    value_r->Print(os, "", with_type);
+    break;
+  case Binary:
+    value_l->Print(os, "", with_type);
+    os << " " << op << " ";
+    value_r->Print(os, "", with_type);
+    break;
+  case Ternary:
+    value_c->Print(os, "", with_type);
+    os << " ? ";
+    value_l->Print(os, "", with_type);
+    os << " : ";
+    value_r->Print(os, "", with_type);
+    break;
+  default: choreo_unreachable("unhandled expression type."); break;
+  }
+  os << ") ";
+}
 //---------------------------------------------------------------------------//
 // Utility Functions
 //---------------------------------------------------------------------------//
@@ -2897,6 +2932,27 @@ inline ptr<Expr> MakeIntExpr(const location& l, int val) {
 inline bool IsLiteral(const Node& n) {
   return isa<IntLiteral>(&n) || isa<FloatLiteral>(&n) || isa<BoolLiteral>(&n) ||
          isa<StringLiteral>(&n);
+}
+
+inline ptr<ParallelBy>
+MakeSimpleParallelBy(const location& l, const ptr<MultiNodes> stmts = nullptr) {
+  auto anon_sym = SymbolTable::GetAnonPBName();
+  auto pv = AST::Make<AST::Identifier>(l, anon_sym);
+  pv->SetType(MakeBoundedITupleType(Shape(1, 1)));
+  // elements
+  auto spv = AST::Make<AST::MultiValues>(l, ", ");
+  auto epv = AST::Make<AST::Identifier>(l, anon_sym + "__elem__x");
+  epv->SetType(MakeBoundedIntegerType(sbe::nu(1)));
+  spv->Append(epv);
+
+  // bound
+  auto p_bound = AST::MakeIntExpr(l, 1);
+  p_bound->SetType(MakeIntegerType());
+  auto spv_bounds = AST::Make<AST::MultiValues>(l, ", ");
+  spv_bounds->Append(p_bound->Clone());
+  spv_bounds->SetType(MakeITupleType(1));
+
+  return AST::Make<AST::ParallelBy>(l, pv, p_bound, spv, spv_bounds, stmts);
 }
 
 } // end of namespace AST

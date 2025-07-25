@@ -40,11 +40,11 @@ __co__ auto chunkat_tile_one3(f32 [M, 1] input) {
 // INFER: Parameter: ::chunkat_tile_one3::input, Type: f32 mdspan<2> [128, 1]
 // INFER: Symbol:    ::chunkat_tile_one3::out, Type: global f32 mdspan<2> [128, 1]
 // INFER: Partial:   ::chunkat_tile_one3::block_span, Type: mdspan<2> [64, 1]
-// INFER: Bounded:   ::chunkat_tile_one3::paraby_0::p, Type: {int}->[2](pv)
-// INFER: Symbol:    ::chunkat_tile_one3::paraby_0::a, Type: shared f32 mdspan<2> [128, 1]
-// INFER: Future:    ::chunkat_tile_one3::paraby_0::(anon), Type: sync=>shared f32 mdspan<2> [128, 1]
-// INFER: Symbol:    ::chunkat_tile_one3::paraby_0::lin, Type: local f32 mdspan<2> [64, 1]
-// INFER: Symbol:    ::chunkat_tile_one3::paraby_0::res, Type: local f32 mdspan<2> [64, 1]
-// INFER: Future:    ::chunkat_tile_one3::paraby_0::(anon), Type: sync=>local f32 mdspan<2> [64, 1]
-// INFER: Future:    ::chunkat_tile_one3::paraby_0::(anon), Type: sync=>global f32 mdspan<2> [64, 1]
+// INFER: Bounded:   ::chunkat_tile_one3::paraby_0::paraby_1::p, Type: {int}->[2](pv)
+// INFER: Symbol:    ::chunkat_tile_one3::paraby_0::paraby_1::a, Type: shared f32 mdspan<2> [128, 1]
+// INFER: Future:    ::chunkat_tile_one3::paraby_0::paraby_1::(anon), Type: sync=>shared f32 mdspan<2> [128, 1]
+// INFER: Symbol:    ::chunkat_tile_one3::paraby_0::paraby_1::lin, Type: local f32 mdspan<2> [64, 1]
+// INFER: Symbol:    ::chunkat_tile_one3::paraby_0::paraby_1::res, Type: local f32 mdspan<2> [64, 1]
+// INFER: Future:    ::chunkat_tile_one3::paraby_0::paraby_1::(anon), Type: sync=>local f32 mdspan<2> [64, 1]
+// INFER: Future:    ::chunkat_tile_one3::paraby_0::paraby_1::(anon), Type: sync=>global f32 mdspan<2> [64, 1]
 // INFER: Function:  ::chunkat_tile_one3, Type: f32 mdspan<2> [128, 1] (*)(f32 mdspan<2> [128, 1])

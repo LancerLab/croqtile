@@ -16,7 +16,8 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
     explicit_pl = false;
     inthreads_levels.clear();
     inthreads_levels.push_back(0);
-  } else if (isa<AST::ParallelBy>(&n)) {
+  } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+    if (pl_depth == 0) pb->SetOuter(true);
     pl_depth++;
     pl_depths.push_back(pl_depth);
     inthreads_levels.push_back(0);
@@ -1016,6 +1017,7 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
     }
 
     SetNodeType(n, ety);
+    n.SetDecl(false);
     return true;
   }
 
@@ -1240,7 +1242,7 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
     if (explicit_pl) Error1(n.LOC(), pl_anno_msg);
   }
 
-  if (pl_depth > 1 && n.async)
+  if (pl_depth > 1 && n.IsAsync())
     Error1(n.LOC(), "inner parallel-by level can not be asynchronous.");
 
   auto bty = NodeType(*n.BoundExpr());

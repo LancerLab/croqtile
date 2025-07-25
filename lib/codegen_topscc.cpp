@@ -60,11 +60,11 @@ inline void VerboseDMA(std::ostringstream& os, const std::string& indent,
   os << ");\n";
 }
 
-inline std::string ImplicitPred(Storage max, Storage cur) {
+inline const std::string ImplicitPred(Storage cur) {
   switch (cur) {
-    case Storage::LOCAL: return "__CHOREO_SINGLE_LOCAL__";
-    case Storage::SHARED: return "__CHOREO_SINGLE_SHARED__";
-    default: choreo_unreachable("unsupported storage level.");
+  case Storage::LOCAL: return "__CHOREO_SINGLE_LOCAL__";
+  case Storage::SHARED: return "__CHOREO_SINGLE_SHARED__";
+  default: choreo_unreachable("unsupported storage level.");
   }
   return "";
 }
@@ -135,6 +135,33 @@ void GenerateSubscriptions(std::ostream& os, const std::string prefix,
 
 } // namespace
 
+bool TopsccCodeGen::RequiresImplPred(Storage cur) const {
+  // ignore any host code
+  if (IsHost()) return false;
+  // ignore any expression without storage
+  if (cur == Storage::NONE) return false;
+
+  if (max_parallel_level == Storage::SUB) {
+    switch (cur) {
+    case Storage::SUB: return false;
+    case Storage::LOCAL:
+    case Storage::SHARED: return true;
+    default: choreo_unreachable("irrational storage level.");
+    }
+  } else if (max_parallel_level == Storage::LOCAL) {
+    switch (cur) {
+    case Storage::SUB:
+    case Storage::LOCAL: return false;
+    case Storage::SHARED: return true;
+    default: choreo_unreachable("irrational storage level.");
+    }
+  } else if (max_parallel_level == Storage::SHARED)
+    choreo_unreachable("irrational max_parallel_level storage level.");
+
+  choreo_unreachable("unexpected storage level.");
+  return false;
+}
+
 const std::string TopsccCodeGen::ShapeSTR(const Shape& s,
                                           const std::string& delimiter) const {
   auto& vl = s.Value();
@@ -163,9 +190,10 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
     device_fn = "__choreo_device_" + fname;
     fty = cast<FunctionType>(GetSymbolType(fname));
     ssm.EnterScope();
+    pl_stack.clear();
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     // only on device-side
-    if (parallel_level == 0) {
+    if (pb->IsOuter()) {
       parallel_idx += 1;
       if (cgi->GetFunctionTrait(fname).multiple_parallelby)
         device_fn = "__choreo_device_" + fname + std::to_string(parallel_idx);
@@ -173,10 +201,12 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
       ds << " {\n";
       IncrDeviceIndent();
       ds << d_indent << "{ // parallel-by: " << n.LOC() << "\n";
+      max_parallel_level = pb->GetMaxLevel();
+      VST_DEBUG(pb->InlinePrint(dbgs());
+                dbgs() << " (max-level: " << STR(max_parallel_level) << ")\n");
     }
-    parallel_level++;
-    max_parallel_level = GetMaxParallelLevelFromNote(*pb);
-    max_parallel_level_valid = true;
+    parallel_level = pb->GetLevel();
+    pl_stack.push_back(parallel_level);
   } else if (isa<AST::WithBlock>(&n)) {
     IndStream() << "// with-in: " << n.LOC() << "\n";
     IndStream() << "{\n";
@@ -191,14 +221,10 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
     IncrIndent();
   }
 
-  if (!IsHost() && max_parallel_level_valid && !n.IsBlock() &&
-      n.GetLevel() != Storage::NONE) {
-    auto max_pl = GCUDeviceParallelLevel(max_parallel_level);
-    auto pred = ImplicitPred(max_pl, n.GetLevel());
-    if (!pred.empty()) {
-      ds << d_indent << "if (" << pred << ") { // implicit inthreads\n";
-      IncrDeviceIndent();
-    }
+  if (!n.IsBlock() && RequiresImplPred(n.GetLevel())) {
+    ds << d_indent << "if (" << ImplicitPred(n.GetLevel())
+       << ") { // implicit inthreads\n";
+    IncrDeviceIndent();
   }
 
   return true;
@@ -260,14 +286,19 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
     ds.str(""); // reset the streams
     hs.str("");
     return_stream.str("");
-  } else if (isa<AST::ParallelBy>(&n)) {
+  } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     // only on device-side
-    parallel_level--;
-    if (parallel_level == 0) {
-      max_parallel_level = 0;
+    if (pb->IsOuter()) {
+      max_parallel_level = Storage::NONE;
+      parallel_level = Storage::NONE;
+      pl_stack.clear();
       ds << d_indent << "} // end parallel-by\n";
       DecrDeviceIndent();
       ds << "}\n\n";
+    } else {
+      assert(!pl_stack.empty());
+      pl_stack.pop_back();
+      parallel_level = pl_stack.back();
     }
   } else if (isa<AST::WithBlock>(&n)) {
     DecrIndent();
@@ -305,14 +336,9 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
     emit_call = true;
   }
 
-  if (!IsHost() && max_parallel_level_valid && !n.IsBlock() &&
-      n.GetLevel() != Storage::NONE) {
-    auto max_pl = GCUDeviceParallelLevel(max_parallel_level);
-    auto pred = ImplicitPred(max_pl, n.GetLevel());
-    if (!pred.empty()) {
-      DecrDeviceIndent();
-      ds << d_indent << "} // end implicit inthreads\n";
-    }
+  if (!n.IsBlock() && RequiresImplPred(n.GetLevel())) {
+    DecrDeviceIndent();
+    ds << d_indent << "} // end implicit inthreads\n";
   }
 
   return true;
@@ -704,7 +730,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
 
       // the sym is not choreo output
       if (FBIContainsBuffer(FBInfo(), InScopeName(sym)) &&
-          use_hetero_tileflow && IsHostSide()) {
+          use_hetero_tileflow && IsHost()) {
         // a non-init global var decl tied with future
         // this hint is enough to say a host side dataflow
         VST_DEBUG(dbgs() << "Found " << buf_sym << " in FBInfo - "
@@ -869,10 +895,8 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       ety->PrintAsCArray(ds);
       ds << "; // " << STR(ety->GetStorage()) << " event\n";
       ds << d_indent << "// initialize the event\n";
-      auto max_pl = GCUDeviceParallelLevel(max_parallel_level);
-      auto pred = ImplicitPred(max_pl, ety->GetStorage());
-      if (!pred.empty()) {
-        ds << d_indent << "if (" << pred << ") {\n";
+      if (RequiresImplPred(ety->GetStorage())) {
+        ds << d_indent << "if (" << ImplicitPred(ety->GetStorage()) << ") {\n";
         GenerateSubscriptions(ds, "  " + d_indent + n.name_str, " = false;\n",
                               ety->Dimensions());
         ds << d_indent << "}\n";
@@ -903,10 +927,8 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       ds << d_indent << TopsDeviceMemory(ety->GetStorage())
          << " __volatile__ bool " << n.name_str << "; // "
          << STR(ety->GetStorage()) << " event\n";
-      auto max_pl = GCUDeviceParallelLevel(max_parallel_level);
-      auto pred = ImplicitPred(max_pl, ety->GetStorage());
-      if (!pred.empty()) {
-        ds << d_indent << "if (" << pred << ") {\n";
+      if (RequiresImplPred(ety->GetStorage())) {
+        ds << d_indent << "if (" << ImplicitPred(ety->GetStorage()) << ") {\n";
         ds << d_indent << "  " << n.name_str
            << " = false;\n"; // inited as untriggered
         ds << d_indent << "}\n";
@@ -1049,7 +1071,7 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
   }
 
   // only do the whole codegen when accessing the outer parallel-by
-  if (parallel_level != 1) return true;
+  if (!n.IsOuter()) return true;
 
   EmitMemReuse(SSTab().ScopeName());
 
@@ -1089,7 +1111,7 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
 
   hs << ");\n";
 
-  if (!n.async)
+  if (!n.IsAsync())
     hs << h_indent << "choreo::abend_true(topsDeviceSynchronize());\n";
 
   // copy the span passed by ref back to host
@@ -1203,7 +1225,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   };
 
   if (t_sty->GetStorage() == Storage::GLOBAL && use_hetero_tileflow &&
-      IsHostSide()) {
+      IsHost()) {
     std::string bts = NameBaseType(t_sty->ElementType(), false);
     auto buf_sym = t_sym + "__device";
     auto buf_sym_from = f_sym + "__device";
@@ -3045,13 +3067,12 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
       assert(!within_map.count(InScopeName(da->data->name)));
       oss << UnScopedName(SSMName(InScopeName(da->data->name), is_host));
     }
-  } else if (auto expr = dyn_cast<AST::Expr>(e)) {
+  } else if (auto ce = dyn_cast<AST::CastExpr>(e)) {
     // codegen for scalar type cast
-    if (auto ce = dyn_cast<AST::CastExpr>(expr)) {
-      assert(expr->GetOp() == "cast");
-      return ExprCastSTR(ce->GetR(), std::nullopt, ce->ToType(), ce->FromType(),
-                         is_host);
-    }
+    assert(ce->GetOp() == "cast");
+    return ExprCastSTR(ce->GetR(), std::nullopt, ce->ToType(), ce->FromType(),
+                       is_host);
+  } else if (auto expr = dyn_cast<AST::Expr>(e)) {
 
     // utilize the optimize value whenever possible
     if (auto sym = expr->GetSymbol()) {

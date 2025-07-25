@@ -39,9 +39,9 @@ __co__ auto foo1(s32 [N, M] a) {
   return res;
 }
 
-// CHECK: __global__ void __choreo_device_foo1(int * a, int * res, unsigned M, unsigned N, unsigned long mr_offset_foo1_paraby_1_paraby_2_f1__buf__) {
+// CHECK: __global__ void __choreo_device_foo1(int * a, int * res, unsigned M, unsigned N, unsigned long mr_offset_foo1_paraby_2_paraby_3_f1__buf__) {
 // CHECK:   __local__ __valigned__ unsigned char anon_2[1572352];
-// CHECK:   int* f1__buf__ = (int*)(anon_2 + mr_offset_foo1_paraby_1_paraby_2_f1__buf__);
+// CHECK:   int* f1__buf__ = (int*)(anon_2 + mr_offset_foo1_paraby_2_paraby_3_f1__buf__);
 // CHECK:   tops::mdspan __mds4_a(tops::Global, (int*)a, N, M);
 // CHECK:   tops::mdspan __mds5_f1__buf__(tops::Private, (int*)f1__buf__, (N + 1), (M / 2));
 // CHECK:   tops_dte_ctx_t choreo_topscc_ctx2;

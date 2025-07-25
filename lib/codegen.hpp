@@ -630,12 +630,6 @@ inline const std::string UnScopedValueItem(const ValueItem& input) {
   return UnScopedValueItemString(input);
 }
 
-inline int GetMaxParallelLevelFromNote(AST::ParallelBy& n) {
-  auto value = FindOrNull(n.Note(), "mxl");
-  if (value.has_value()) return std::stoi(*value);
-  return -1;
-}
-
 } // end anonymous namespace
 
 } // end namespace Choreo

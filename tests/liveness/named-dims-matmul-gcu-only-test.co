@@ -74,77 +74,79 @@ int main() { /// host program
 // CHECK: (  2)   s32 m = 4
 // CHECK: (  3)   s32 n = 64
 // CHECK: (  4)   s32 k = 512
-// CHECK: (  5)   parallel p = {p__elem__x} by [1] {
-// CHECK: (  6)     with tilings = {m_tile, k_tile, n_tile} in [ (M / m)  (K / k)  (N / n)  ] {
-// CHECK: (  7)       foreach m_tile(::), n_tile(::) {
-// CHECK: (  8)         local s32 [ m n ] l1_out = {0}
-// CHECK: (  9)         foreach k_tile(::) {
-// CHECK: ( 10)           local s32 mdspan<2> [4, 512] lhs_load__buf__
-// CHECK: ( 11)           lhs_load = dma.copy lhs.ChunkAt(m_tile, k_tile) => lhs_load__buf__
-// CHECK: ( 12)           local s32 mdspan<2> [512, 64] rhs_load__buf__
-// CHECK: ( 13)           rhs_load = dma.copy rhs.ChunkAt(k_tile, n_tile) => rhs_load__buf__
-// CHECK: ( 14)           call kernel( (dataof lhs_load) ,  (dataof rhs_load) , l1_out)
-// CHECK: ( 15)           dma.copy l1_out => output.ChunkAt(m_tile, n_tile)
-// CHECK: ( 16)         }
-// CHECK: ( 17)       }
-// CHECK: ( 18)     }
-// CHECK: ( 19)   }
-// CHECK: ( 20)   return output
-// CHECK: ( 21) }
+// CHECK: (  5)   parallel anon_pb_0 = {anon_pb_0__elem__x} by [1] {
+// CHECK: (  6)     parallel p = {p__elem__x} by [1] {
+// CHECK: (  7)       with tilings = {m_tile, k_tile, n_tile} in [ (M / m)  (K / k)  (N / n)  ] {
+// CHECK: (  8)         foreach m_tile(::), n_tile(::) {
+// CHECK: (  9)           local s32 [ m n ] l1_out = {0}
+// CHECK: ( 10)           foreach k_tile(::) {
+// CHECK: ( 11)             local s32 mdspan<2> [4, 512] lhs_load__buf__
+// CHECK: ( 12)             lhs_load = dma.copy lhs.ChunkAt(m_tile, k_tile) => lhs_load__buf__
+// CHECK: ( 13)             local s32 mdspan<2> [512, 64] rhs_load__buf__
+// CHECK: ( 14)             rhs_load = dma.copy rhs.ChunkAt(k_tile, n_tile) => rhs_load__buf__
+// CHECK: ( 15)             call kernel( (dataof lhs_load) ,  (dataof rhs_load) , l1_out)
+// CHECK: ( 16)             dma.copy l1_out => output.ChunkAt(m_tile, n_tile)
+// CHECK: ( 17)           }
+// CHECK: ( 18)         }
+// CHECK: ( 19)       }
+// CHECK: ( 20)     }
+// CHECK: ( 21)   }
+// CHECK: ( 22)   return output
+// CHECK: ( 23) }
 
 // CHECK: VAR    ::matmul_named_dims::K
-// CHECK:         range: [0, 19] 
+// CHECK:         range: [0, 21] 
 // CHECK: VAR    ::matmul_named_dims::M
-// CHECK:         range: [0, 19] 
+// CHECK:         range: [0, 21] 
 // CHECK: VAR    ::matmul_named_dims::N
-// CHECK:         range: [0, 19] 
+// CHECK:         range: [0, 21] 
 // CHECK: BUFFER ::matmul_named_dims::lhs
-// CHECK:         range: [0, 19] 
+// CHECK:         range: [0, 21] 
 // CHECK: VAR    ::matmul_named_dims::lhs.span
 // CHECK:         range: [0, x] 
 // CHECK: BUFFER ::matmul_named_dims::rhs
-// CHECK:         range: [0, 19] 
+// CHECK:         range: [0, 21] 
 // CHECK: VAR    ::matmul_named_dims::rhs.span
 // CHECK:         range: [0, x] 
 // CHECK: BUFFER ::matmul_named_dims::output
-// CHECK:         range: [1, 20] 
+// CHECK:         range: [1, 22] 
 // CHECK: VAR    ::matmul_named_dims::output.span
 // CHECK:         range: [1, x] 
 // CHECK: VAR    ::matmul_named_dims::m
-// CHECK:         range: [2, 19] 
+// CHECK:         range: [2, 21] 
 // CHECK: VAR    ::matmul_named_dims::n
-// CHECK:         range: [3, 19] 
+// CHECK:         range: [3, 21] 
 // CHECK: VAR    ::matmul_named_dims::k
-// CHECK:         range: [4, 19] 
-// CHECK: VAR    ::matmul_named_dims::paraby_0::p
-// CHECK:         range: [5, 19] 
-// CHECK: VAR    ::matmul_named_dims::paraby_0::p__elem__x
-// CHECK:         range: [5, 19] 
-// CHECK: VAR    ::matmul_named_dims::paraby_0::within_0::k_tile
-// CHECK:         range: [6, 17] 
-// CHECK: VAR    ::matmul_named_dims::paraby_0::within_0::m_tile
-// CHECK:         range: [6, 17] 
-// CHECK: VAR    ::matmul_named_dims::paraby_0::within_0::n_tile
-// CHECK:         range: [6, 17] 
-// CHECK: VAR    ::matmul_named_dims::paraby_0::within_0::tilings
-// CHECK:         range: [6, x] 
-// CHECK: BUFFER ::matmul_named_dims::paraby_0::within_0::foreach_0::l1_out
-// CHECK:         range: [8, 16] 
-// CHECK: VAR    ::matmul_named_dims::paraby_0::within_0::foreach_0::l1_out.span
-// CHECK:         range: [8, x] 
-// CHECK: BUFFER ::matmul_named_dims::paraby_0::within_0::foreach_0::foreach_1::lhs_load__buf__
-// CHECK:         range: [10, 14] 
-// CHECK: VAR    ::matmul_named_dims::paraby_0::within_0::foreach_0::foreach_1::lhs_load__buf__.span
-// CHECK:         range: [10, x] 
-// CHECK: VAR    ::matmul_named_dims::paraby_0::within_0::foreach_0::foreach_1::lhs_load
-// CHECK:         range: [11, 14] 
-// CHECK: VAR    ::matmul_named_dims::paraby_0::within_0::foreach_0::foreach_1::lhs_load.span
+// CHECK:         range: [4, 21] 
+// CHECK: VAR    ::matmul_named_dims::paraby_0::paraby_1::p
+// CHECK:         range: [6, 20] 
+// CHECK: VAR    ::matmul_named_dims::paraby_0::paraby_1::p__elem__x
+// CHECK:         range: [6, 20] 
+// CHECK: VAR    ::matmul_named_dims::paraby_0::paraby_1::within_0::k_tile
+// CHECK:         range: [7, 18] 
+// CHECK: VAR    ::matmul_named_dims::paraby_0::paraby_1::within_0::m_tile
+// CHECK:         range: [7, 18] 
+// CHECK: VAR    ::matmul_named_dims::paraby_0::paraby_1::within_0::n_tile
+// CHECK:         range: [7, 18] 
+// CHECK: VAR    ::matmul_named_dims::paraby_0::paraby_1::within_0::tilings
+// CHECK:         range: [7, x] 
+// CHECK: BUFFER ::matmul_named_dims::paraby_0::paraby_1::within_0::foreach_0::l1_out
+// CHECK:         range: [9, 17] 
+// CHECK: VAR    ::matmul_named_dims::paraby_0::paraby_1::within_0::foreach_0::l1_out.span
+// CHECK:         range: [9, x] 
+// CHECK: BUFFER ::matmul_named_dims::paraby_0::paraby_1::within_0::foreach_0::foreach_1::lhs_load__buf__
+// CHECK:         range: [11, 15] 
+// CHECK: VAR    ::matmul_named_dims::paraby_0::paraby_1::within_0::foreach_0::foreach_1::lhs_load__buf__.span
 // CHECK:         range: [11, x] 
-// CHECK: BUFFER ::matmul_named_dims::paraby_0::within_0::foreach_0::foreach_1::rhs_load__buf__
-// CHECK:         range: [12, 14] 
-// CHECK: VAR    ::matmul_named_dims::paraby_0::within_0::foreach_0::foreach_1::rhs_load__buf__.span
+// CHECK: VAR    ::matmul_named_dims::paraby_0::paraby_1::within_0::foreach_0::foreach_1::lhs_load
+// CHECK:         range: [12, 15] 
+// CHECK: VAR    ::matmul_named_dims::paraby_0::paraby_1::within_0::foreach_0::foreach_1::lhs_load.span
 // CHECK:         range: [12, x] 
-// CHECK: VAR    ::matmul_named_dims::paraby_0::within_0::foreach_0::foreach_1::rhs_load
-// CHECK:         range: [13, 14] 
-// CHECK: VAR    ::matmul_named_dims::paraby_0::within_0::foreach_0::foreach_1::rhs_load.span
-// CHECK:         range: [13, x]
+// CHECK: BUFFER ::matmul_named_dims::paraby_0::paraby_1::within_0::foreach_0::foreach_1::rhs_load__buf__
+// CHECK:         range: [13, 15] 
+// CHECK: VAR    ::matmul_named_dims::paraby_0::paraby_1::within_0::foreach_0::foreach_1::rhs_load__buf__.span
+// CHECK:         range: [13, x] 
+// CHECK: VAR    ::matmul_named_dims::paraby_0::paraby_1::within_0::foreach_0::foreach_1::rhs_load
+// CHECK:         range: [14, 15] 
+// CHECK: VAR    ::matmul_named_dims::paraby_0::paraby_1::within_0::foreach_0::foreach_1::rhs_load.span
+// CHECK:         range: [14, x]

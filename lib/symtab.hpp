@@ -58,9 +58,13 @@ public:
   static std::string GetAnonTypeName() {
     return "anon_t_" + std::to_string(anon_type_count++);
   }
+  static std::string GetAnonPBName() {
+    return "anon_pb_" + std::to_string(anon_pb_count++);
+  }
 
   static unsigned anonymous_count;
   static unsigned anon_type_count;
+  static unsigned anon_pb_count;
 
   void Print(std::ostream& os) {
     for (auto item : table)

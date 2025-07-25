@@ -8,4 +8,4 @@ __co__  void foo() {
   }
 }
 
-// CHECK: Symbol:    ::foo::paraby_0::pred, Type: bool
+// CHECK: Symbol:    ::foo::paraby_0::paraby_1::pred, Type: bool

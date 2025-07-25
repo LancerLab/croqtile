@@ -32,72 +32,73 @@ __co__ s32 [6, 17, 64] ele_add(s32 [6, 17, 64] lhs, s32 [6, 17, 64] rhs) {
 }
 
 // CHECK: (  0) ele_add(s32 mdspan<3> [6, 17, 64] lhs, s32 mdspan<3> [6, 17, 64] rhs) {
-// CHECK: (  1)   global s32 [ lhs.span ] output
-// CHECK: (  2)   parallel p = {p__elem__x} by [6] {
-// CHECK: (  3)     with index = {x, y, z} in [ 17 4 1 ] {
-// CHECK: (  4)       foreach x(::) {
-// CHECK: (  5)         foreach y(::) {
-// CHECK: (  6)           local s32 mdspan<3> [1, 1, 16] lhs_load__buf__
-// CHECK: (  7)           lhs_load = dma.copy.async lhs.ChunkAt(p, x, y) => lhs_load__buf__
-// CHECK: (  8)           local s32 mdspan<3> [1, 1, 16] rhs_load__buf__
-// CHECK: (  9)           rhs_load = dma.copy.async rhs.ChunkAt(p, x, y) => rhs_load__buf__
-// CHECK: ( 10)           wait lhs_load, rhs_load
-// CHECK: ( 11)           local s32 [ lhs_load.span ] l1_out
-// CHECK: ( 12)           call kernel( (dataof lhs_load) ,  (dataof rhs_load) , l1_out,  (sizeof lhs_load.span) )
-// CHECK: ( 13)           out_store = dma.copy.async l1_out => output.ChunkAt(p, x, y)
-// CHECK: ( 14)           wait out_store
-// CHECK: ( 15)         }
-// CHECK: ( 16)       }
-// CHECK: ( 17)     }
-// CHECK: ( 18)   }
-// CHECK: ( 19)   return output
-// CHECK: ( 20) }
+// CHECK: (  2)   parallel anon_pb_0 = {anon_pb_0__elem__x} by [1] {
+// CHECK: (  3)     parallel p = {p__elem__x} by [6] {
+// CHECK: (  4)       with index = {x, y, z} in [ 17 4 1 ] {
+// CHECK: (  5)         foreach x(::) {
+// CHECK: (  6)           foreach y(::) {
+// CHECK: (  7)             local s32 mdspan<3> [1, 1, 16] lhs_load__buf__
+// CHECK: (  8)             lhs_load = dma.copy.async lhs.ChunkAt(p, x, y) => lhs_load__buf__
+// CHECK: (  9)             local s32 mdspan<3> [1, 1, 16] rhs_load__buf__
+// CHECK: ( 10)             rhs_load = dma.copy.async rhs.ChunkAt(p, x, y) => rhs_load__buf__
+// CHECK: ( 11)             wait lhs_load, rhs_load
+// CHECK: ( 12)             local s32 [ lhs_load.span ] l1_out
+// CHECK: ( 13)             call kernel( (dataof lhs_load) ,  (dataof rhs_load) , l1_out,  (sizeof lhs_load.span) )
+// CHECK: ( 14)             out_store = dma.copy.async l1_out => output.ChunkAt(p, x, y)
+// CHECK: ( 15)             wait out_store
+// CHECK: ( 16)           }
+// CHECK: ( 17)         }
+// CHECK: ( 18)       }
+// CHECK: ( 19)     }
+// CHECK: ( 20)   }
+// CHECK: ( 21)   return output
+// CHECK: ( 22) }
 
 // CHECK: BUFFER ::ele_add::lhs
-// CHECK:         range: [0, 18] 
+// CHECK:         range: [0, 20] 
 // CHECK: VAR    ::ele_add::lhs.span
 // CHECK:         range: [0, x] 
 // CHECK: BUFFER ::ele_add::rhs
-// CHECK:         range: [0, 18] 
+// CHECK:         range: [0, 20] 
 // CHECK: VAR    ::ele_add::rhs.span
 // CHECK:         range: [0, x] 
 // CHECK: BUFFER ::ele_add::output
-// CHECK:         range: [1, 19] 
+// CHECK:         range: [1, 21] 
 // CHECK: VAR    ::ele_add::output.span
 // CHECK:         range: [1, x] 
-// CHECK: VAR    ::ele_add::paraby_0::p
-// CHECK:         range: [2, 18] 
-// CHECK: VAR    ::ele_add::paraby_0::p__elem__x
-// CHECK:         range: [2, 18] 
-// CHECK: VAR    ::ele_add::paraby_0::within_0::index
-// CHECK:         range: [3, x] 
-// CHECK: VAR    ::ele_add::paraby_0::within_0::x
-// CHECK:         range: [3, 16] 
-// CHECK: VAR    ::ele_add::paraby_0::within_0::y
-// CHECK:         range: [3, 16] 
-// CHECK: VAR    ::ele_add::paraby_0::within_0::z
-// CHECK:         range: [3, x] 
-// CHECK: BUFFER ::ele_add::paraby_0::within_0::foreach_0::foreach_1::lhs_load__buf__
-// CHECK:         range: [6, 12] 
-// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::foreach_1::lhs_load__buf__.span
-// CHECK:         range: [6, x] 
-// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::foreach_1::lhs_load
-// CHECK:         range: [7, 12] 
-// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::foreach_1::lhs_load.span
-// CHECK:         range: [7, 12] 
-// CHECK: BUFFER ::ele_add::paraby_0::within_0::foreach_0::foreach_1::rhs_load__buf__
-// CHECK:         range: [8, 12] 
-// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::foreach_1::rhs_load__buf__.span
-// CHECK:         range: [8, x] 
-// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::foreach_1::rhs_load
-// CHECK:         range: [9, 12] 
-// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::foreach_1::rhs_load.span
+// CHECK: VAR    ::ele_add::paraby_0::paraby_1::p
+// CHECK:         range: [3, 19] 
+// CHECK: VAR    ::ele_add::paraby_0::paraby_1::p__elem__x
+// CHECK:         range: [3, 19] 
+// CHECK: VAR    ::ele_add::paraby_0::paraby_1::within_0::index
+// CHECK:         range: [4, x] 
+// CHECK: VAR    ::ele_add::paraby_0::paraby_1::within_0::x
+// CHECK:         range: [4, 17] 
+// CHECK: VAR    ::ele_add::paraby_0::paraby_1::within_0::y
+// CHECK:         range: [4, 17] 
+// CHECK: VAR    ::ele_add::paraby_0::paraby_1::within_0::z
+// CHECK:         range: [4, x] 
+// CHECK: BUFFER ::ele_add::paraby_0::paraby_1::within_0::foreach_0::foreach_1::lhs_load__buf__
+// CHECK:         range: [7, 13] 
+// CHECK: VAR    ::ele_add::paraby_0::paraby_1::within_0::foreach_0::foreach_1::lhs_load__buf__.span
+// CHECK:         range: [7, x] 
+// CHECK: VAR    ::ele_add::paraby_0::paraby_1::within_0::foreach_0::foreach_1::lhs_load
+// CHECK:         range: [8, 13] 
+// CHECK: VAR    ::ele_add::paraby_0::paraby_1::within_0::foreach_0::foreach_1::lhs_load.span
+// CHECK:         range: [8, 13] 
+// CHECK: BUFFER ::ele_add::paraby_0::paraby_1::within_0::foreach_0::foreach_1::rhs_load__buf__
+// CHECK:         range: [9, 13] 
+// CHECK: VAR    ::ele_add::paraby_0::paraby_1::within_0::foreach_0::foreach_1::rhs_load__buf__.span
 // CHECK:         range: [9, x] 
-// CHECK: BUFFER ::ele_add::paraby_0::within_0::foreach_0::foreach_1::l1_out
-// CHECK:         range: [11, 14] 
-// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::foreach_1::l1_out.span
-// CHECK:         range: [11, x] 
-// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::foreach_1::out_store
-// CHECK:         range: [13, 14] 
-// CHECK: VAR    ::ele_add::paraby_0::within_0::foreach_0::foreach_1::out_store.span
-// CHECK:         range: [13, x]
+// CHECK: VAR    ::ele_add::paraby_0::paraby_1::within_0::foreach_0::foreach_1::rhs_load
+// CHECK:         range: [10, 13] 
+// CHECK: VAR    ::ele_add::paraby_0::paraby_1::within_0::foreach_0::foreach_1::rhs_load.span
+// CHECK:         range: [10, x] 
+// CHECK: BUFFER ::ele_add::paraby_0::paraby_1::within_0::foreach_0::foreach_1::l1_out
+// CHECK:         range: [12, 15] 
+// CHECK: VAR    ::ele_add::paraby_0::paraby_1::within_0::foreach_0::foreach_1::l1_out.span
+// CHECK:         range: [12, x] 
+// CHECK: VAR    ::ele_add::paraby_0::paraby_1::within_0::foreach_0::foreach_1::out_store
+// CHECK:         range: [14, 15] 
+// CHECK: VAR    ::ele_add::paraby_0::paraby_1::within_0::foreach_0::foreach_1::out_store.span
+// CHECK:         range: [14, x]

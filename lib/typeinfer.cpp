@@ -544,6 +544,9 @@ bool TypeInference::Visit(AST::Expr& n) {
     } else if (n.op == "~") {
       assert(CanYieldAnInteger(NodeType(*n.GetR())));
       SetNodeType(n, MakeIntegerType(true));
+    } else if (n.op == "cast") {
+      auto cexpr = cast<AST::CastExpr>(&n);
+      SetNodeType(n, MakeScalarType(cexpr->ToType(), true));
     } else
       choreo_unreachable("type inference is yet to implement for '" + n.op +
                          "'.");

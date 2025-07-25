@@ -7,10 +7,16 @@
 
 namespace Choreo {
 
+int GetMaxParallelLevelFromNote(AST::ParallelBy& n) {
+  auto value = FindOrNull(n.Note(), "mxl");
+  if (value.has_value()) return std::stoi(*value);
+  return -1;
+}
+
 struct CodegenPrepareStage2 : public CodeGenerator {
 private:
   ptr<CodeGenInfo> cgi = nullptr;
-  int parallel_level = 0;
+  int parallel_depth = 0;
   int mxpl = 0;
 
 public:
@@ -19,10 +25,10 @@ public:
 
   bool BeforeVisitImpl(AST::Node& n) override {
     if (isa<AST::ChoreoFunction>(&n)) {
-      parallel_level = 0;
+      parallel_depth = 0;
       mxpl = 0;
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
-      parallel_level++;
+      parallel_depth++;
       mxpl = GetMaxParallelLevelFromNote(*pb);
     }
     return true;
@@ -30,20 +36,20 @@ public:
 
   bool AfterVisitImpl(AST::Node& n) override {
     if (isa<AST::ParallelBy>(&n)) {
-      if (parallel_level == 1) mxpl = 0;
-      parallel_level--;
+      if (parallel_depth == 1) mxpl = 0;
+      parallel_depth--;
     }
     return true;
   }
 
   bool Visit(AST::DMA& n) override {
     if (n.future.empty() || (n.operation == ".any")) return true;
-    if ((mxpl == 2 || mxpl == 3) && parallel_level == 1) {
+    if ((mxpl == 2 || mxpl == 3) && parallel_depth == 1) {
       // the DMA is inside block-shared zone
       cgi->GetFunctionSharedFutures(fname).insert(InScopeName(n.future));
       VST_DEBUG(dbgs() << "Shared Future: " << InScopeName(n.future) << "\n");
     }
-    if (mxpl == 3 && parallel_level == 2) {
+    if (mxpl == 3 && parallel_depth == 2) {
       // the DMA is inside warp-local zone
       cgi->GetFunctionLocalFutures(fname).insert(InScopeName(n.future));
       VST_DEBUG(dbgs() << "Local Future: " << InScopeName(n.future) << "\n");
@@ -55,8 +61,8 @@ public:
 struct CodegenPrepare : public CodeGenerator {
 private:
   ptr<CodeGenInfo> cgi;
-  int parallel_level = 0;
-  int max_parallel_level = 0;
+  int parallel_depth = 0;
+  int max_parallel_depth = 0;
 
   // special case for `return select.data;`
   std::set<std::string> select_syms;
@@ -64,18 +70,19 @@ private:
 private:
   bool BeforeVisitImpl(AST::Node& n) override {
     if (isa<AST::ChoreoFunction>(&n)) {
-      parallel_level = 0;
+      parallel_depth = 0;
       cgi->GetFunctionTrait(fname).has_parallelby = false;
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
-      if (parallel_level == 0 && cgi->GetFunctionTrait(fname).has_parallelby)
+      if (parallel_depth == 0 && cgi->GetFunctionTrait(fname).has_parallelby)
         cgi->GetFunctionTrait(fname).multiple_parallelby = true;
-      parallel_level++;
-      max_parallel_level = std::max(parallel_level, max_parallel_level);
+      parallel_depth++;
+      assert(parallel_depth > max_parallel_depth);
+      max_parallel_depth = parallel_depth;
 
       auto& lcs = cgi->GetFunctionLaunches(fname);
 
       // Add a new launch config
-      if (parallel_level == 1) {
+      if (parallel_depth == 1) {
         // represents the index of the current ParallelBy in cgi
         n.Note().insert_or_assign("outer_pb_idx", std::to_string(lcs.size()));
         lcs.push_back({});
@@ -93,21 +100,25 @@ private:
                              " is not supported.");
         }
       } else {
-        if (parallel_level == 1) {
+        if (parallel_depth == 1) {
           lcs.back().SetBlockDims(pb->BoundValues());
-        } else if (parallel_level == 2) {
+        } else if (parallel_depth == 2) {
           auto& lc = lcs.back();
           lc.OverwriteGDimsByBDims();
           lc.ResetBDims();
           lc.SetBlockDims(pb->BoundValues());
-        } else if (parallel_level == 3) {
+        } else if (parallel_depth == 3) {
           auto& lc = lcs.back();
           lc.ResetWDims();
           lc.SetWarpDims(pb->BoundValues());
-        } else
+        } else {
+          // make the target to check
+#if 0
           choreo_unreachable("The parallel-by level " +
-                             std::to_string(parallel_level) +
+                             std::to_string(parallel_depth) +
                              " is not supported.");
+#endif
+        }
       }
     }
     return true;
@@ -121,24 +132,26 @@ private:
                << (item.rty_str.empty() ? "no" : "yes(" + item.rty_str + ")")
                << ", index: " << item.p_index << "\n";
       });
-    } else if (isa<AST::ParallelBy>(&n)) {
-      n.Note().insert_or_assign("mxl", std::to_string(max_parallel_level));
-      if (parallel_level == 1) {
+    } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+      n.Note().insert_or_assign("mxl", std::to_string(max_parallel_depth));
+      VST_DEBUG(dbgs() << "max depth of `"; pb->InlinePrint(dbgs());
+                dbgs() << "': " << max_parallel_depth << "\n");
+      if (parallel_depth == 1) {
         VST_DEBUG(dbgs() << "\tGrid Dims: "
                          << cgi->GetFunctionLaunches(fname).back().grid_dim_x
                          << "\n");
         VST_DEBUG(dbgs() << "\tBlock Dims: "
                          << cgi->GetFunctionLaunches(fname).back().block_dim_x
                          << "\n");
-        max_parallel_level = 0;
+        max_parallel_depth = 0;
       }
-      parallel_level--;
+      parallel_depth--;
     }
     return true;
   }
 
 private:
-  bool IsHost() const { return parallel_level == 0; }
+  bool IsHost() const { return parallel_depth == 0; }
 
 public:
   CodegenPrepare() : CodeGenerator("prepare", CCtx().GetGlobalSymbolTable()) {

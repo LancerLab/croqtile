@@ -23,11 +23,11 @@ __co__ auto placeholder(f32 [24, 17, 128] a) {
 
 // CHECK:    Alias "::placeholder::a.span" -> #{{[0-9]+}}
 // CHECK:    Alias "::placeholder::f.span" -> #<invalid>
-// CHECK:      Alias "::placeholder::paraby_0::within_0::f1.span" -> #<invalid>
-// CHECK:      Alias "::placeholder::paraby_0::within_0::f3.span" -> #<invalid>
-// CHECK:      Alias "::placeholder::paraby_0::within_0::f4.span" -> [[VALNO:#[0-9]+]]
-// CHECK:       Alias(Rebind) "::placeholder::paraby_0::within_0::f1.span" -> [[VALNO]]
-// CHECK:       Alias "::placeholder::paraby_0::within_0::foreach_0::f5.span" -> [[VALNO]]
+// CHECK:      Alias "::placeholder::paraby_0::paraby_1::within_0::f1.span" -> #<invalid>
+// CHECK:      Alias "::placeholder::paraby_0::paraby_1::within_0::f3.span" -> #<invalid>
+// CHECK:      Alias "::placeholder::paraby_0::paraby_1::within_0::f4.span" -> [[VALNO:#[0-9]+]]
+// CHECK:       Alias(Rebind) "::placeholder::paraby_0::paraby_1::within_0::f1.span" -> [[VALNO]]
+// CHECK:       Alias "::placeholder::paraby_0::paraby_1::within_0::foreach_0::f5.span" -> [[VALNO]]
 // CHECK:       Alias(Rebind) "::placeholder::f.span" -> [[VALNO]]
-// CHECK:    Alias(Rebind) "::placeholder::paraby_0::within_0::f3.span" -> [[VALNO]]
-// CHECK:      Alias "::placeholder::paraby_0::within_0::data.span" -> [[VALNO]]
+// CHECK:    Alias(Rebind) "::placeholder::paraby_0::paraby_1::within_0::f3.span" -> [[VALNO]]
+// CHECK:      Alias "::placeholder::paraby_0::paraby_1::within_0::data.span" -> [[VALNO]]

@@ -92,11 +92,11 @@ int main() { /// host program
 // CHECK-TOPSCC:       tops::mdspan __mds0_input(tops::Global, (int*)input + (__tops_bid_x() * 262144) + (__iv_n_tile * 1024), 256, 1024);
 // CHECK-TOPSCC:       tops::mdspan __mds1_input_load__buf__(tops::Shared, (int*)input_load__buf__, 256, 1024);
 // CHECK-TOPSCC:       tops_dte_ctx_t choreo_topscc_ctx0;
-// CHECK-TOPSCC:       if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {
+// CHECK-TOPSCC:       if (__CHOREO_SINGLE_SHARED__) {
 // CHECK-TOPSCC:         tops::event input_load__event__ = tops::memcpy_async(*input_load.get_ctx(), __mds1_input_load__buf__, __mds0_input);
 // CHECK-TOPSCC:         input_load.set_event(input_load__event__);
 // CHECK-TOPSCC:       } // single instance
-// CHECK-TOPSCC:       if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {
+// CHECK-TOPSCC:       if (__CHOREO_SINGLE_SHARED__) {
 // CHECK-TOPSCC:         input_load.wait();
 // CHECK-TOPSCC:       }
 // CHECK-TOPSCC:       __syncthreads();
@@ -137,11 +137,11 @@ int main() { /// host program
 // CHECK-TOPSCC:       tops::mdspan __mds8_l2_out(tops::Shared, (int*)l2_out, 256, 1024);
 // CHECK-TOPSCC:       tops::mdspan __mds9_output(tops::Global, (int*)output + (__tops_bid_x() * 262144) + (__iv_n_tile * 1024), 256, 1024);
 // CHECK-TOPSCC:       tops_dte_ctx_t choreo_topscc_ctx4;
-// CHECK-TOPSCC:       if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {
+// CHECK-TOPSCC:       if (__CHOREO_SINGLE_SHARED__) {
 // CHECK-TOPSCC:         tops::event out_store__event__ = tops::memcpy_async(*out_store.get_ctx(), __mds9_output, __mds8_l2_out);
 // CHECK-TOPSCC:         out_store.set_event(out_store__event__);
 // CHECK-TOPSCC:       } // single instance
-// CHECK-TOPSCC:       if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {
+// CHECK-TOPSCC:       if (__CHOREO_SINGLE_SHARED__) {
 // CHECK-TOPSCC:         out_store.wait();
 // CHECK-TOPSCC:       }
 // CHECK-TOPSCC:       __syncthreads();

@@ -28,13 +28,13 @@ __co__ void cofoo0() {
 // INFER: Symbol:    ::cofoo0::c, Type: ituple<2>
 // INFER: Symbol:    ::cofoo0::bb, Type: ituple<4>
 // INFER: Symbol:    ::cofoo0::b, Type: ituple<4>
-// INFER: Bounded:   ::cofoo0::paraby_0::p, Type: {int}->[2](pv)
-// INFER: Bounded:   ::cofoo0::paraby_0::p__elem__x, Type: {int}->[2](pi:x)
-// INFER: Bounded:   ::cofoo0::paraby_0::within_0::idx, Type: {int,int,int,int}->[6, 4, 6, 3]
-// INFER: Bounded:   ::cofoo0::paraby_0::within_0::idx__elem__0, Type: {int}->[6]
-// INFER: Bounded:   ::cofoo0::paraby_0::within_0::idx__elem__1, Type: {int}->[4]
-// INFER: Bounded:   ::cofoo0::paraby_0::within_0::idx__elem__2, Type: {int}->[6]
-// INFER: Bounded:   ::cofoo0::paraby_0::within_0::idx__elem__3, Type: {int}->[3]
+// INFER: Bounded:   ::cofoo0::paraby_0::paraby_1::p, Type: {int}->[2](pv)
+// INFER: Bounded:   ::cofoo0::paraby_0::paraby_1::p__elem__x, Type: {int}->[2](pi:x)
+// INFER: Bounded:   ::cofoo0::paraby_0::paraby_1::within_0::idx, Type: {int,int,int,int}->[6, 4, 6, 3]
+// INFER: Bounded:   ::cofoo0::paraby_0::paraby_1::within_0::idx__elem__0, Type: {int}->[6]
+// INFER: Bounded:   ::cofoo0::paraby_0::paraby_1::within_0::idx__elem__1, Type: {int}->[4]
+// INFER: Bounded:   ::cofoo0::paraby_0::paraby_1::within_0::idx__elem__2, Type: {int}->[6]
+// INFER: Bounded:   ::cofoo0::paraby_0::paraby_1::within_0::idx__elem__3, Type: {int}->[3]
 // INFER: Function:  ::cofoo0, Type: void (*)()
 
 __co__ void cofoo1() {
@@ -53,6 +53,6 @@ __co__ void cofoo1() {
 // NORM: 	 (a + 1) (0)
 // NORM: 	 (a + 1) (1)
 
-// INFER: Bounded:   ::cofoo1::paraby_1::within_1::idx, Type: {int,int,int,int}->[6, 4, 6, 3]
+// INFER: Bounded:   ::cofoo1::paraby_2::paraby_3::within_1::idx, Type: {int,int,int,int}->[6, 4, 6, 3]
 
 int main() {}

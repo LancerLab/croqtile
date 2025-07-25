@@ -95,10 +95,10 @@ test-legacy: legacy
 	$(LIT) tests && $(MAKE) standalone_test
 
 test: build-with-cmake-ninja
-	$(LIT) tests && $(MAKE) standalone-test-with-cmake
+	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake
 
 test-debug: debug
-	$(LIT) tests && $(MAKE) standalone_test
+	$(LIT) -l tests && $(MAKE) standalone_test
 
 test-release: release
 	$(LIT) tests && $(MAKE) standalone_test
@@ -224,12 +224,10 @@ help:
 # Sample Tests for topscc/elementwise
 # =============================================================================
 
-# 定义目录和文件
 ELEMENTWISE_DIR = samples/topscc/elementwise
 OPERATOR_NAMES = $(notdir $(basename $(wildcard $(ELEMENTWISE_DIR)/*.co)))
 CHOREO_FLAGS = -gs -t topscc
 
-# 测试所有算子
 sample-test: $(OPERATOR_NAMES:%=sample-test-%)
 
 sample-test-%: $(ELEMENTWISE_DIR)/%.co
@@ -246,7 +244,6 @@ sample-test-%: $(ELEMENTWISE_DIR)/%.co
 	rm -rf $$TMPDIR; \
 	exit $$ret
 
-# 测试特定算子
 sample-test-operator:
 	@if [ -z "$(OPERATOR)" ]; then \
 		echo "Usage: make sample-test-operator OPERATOR=operator_name"; \

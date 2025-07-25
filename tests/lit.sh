@@ -28,9 +28,8 @@ if ! which not.sh &>/dev/null; then
   exit 1
 fi
 
-
 echo "---------------------------------------"
-echo "        Choreo SimpleLit - v0.1"
+echo "        Choreo SimpleLit - v0.2"
 echo "---------------------------------------"
 echo ""
 
@@ -342,6 +341,10 @@ while [[ $# -gt 0 ]]; do
       max_jobs="$num_jobs"
       shift
       ;;
+    -l)
+      save_log=true
+      shift
+      ;;
     -*)
       # Handle invalid option
       echo "Unknown option: $1"
@@ -572,4 +575,23 @@ for file in "${files_array[@]}"; do
 done
 
 cleantmplocks
-showresult
+
+# Check for required commands
+if [ -n "$save_log" ] && command -v date >/dev/null 2>&1 && command -v tee >/dev/null 2>&1; then
+  # Prepare output directory and file
+  LOG_DIR="/tmp/choreo_log/$(whoami)"
+  mkdir -p "$LOG_DIR"
+
+  TIMESTAMP=$(date "+%Y%m%d_%H%M%S")
+  LOG_FILE="${LOG_DIR}/log_${TIMESTAMP}.txt"
+
+  # Run showresult, tee output to log file
+  showresult | tee "$LOG_FILE"
+  RET_CODE=${PIPESTATUS[0]}  # Get exit code of showresult
+  echo "Find the test result: ${LOG_FILE}"
+  exit "$RET_CODE"
+else
+  # Fallback: run showresult only
+  showresult
+  exit $?
+fi

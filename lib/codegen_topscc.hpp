@@ -254,9 +254,9 @@ private:
   std::string h_indent; // host indentation
   std::string d_indent; // device indentation
 
-  int parallel_level = 0;
-  int max_parallel_level = 0;
-  bool max_parallel_level_valid = false;
+  Storage parallel_level = Storage::NONE;
+  Storage max_parallel_level = Storage::NONE;
+  std::vector<Storage> pl_stack;
   // idx of the most outer pb
   int parallel_idx = -1;
 
@@ -376,31 +376,15 @@ private:
     return cgi->IsReturnSymbol(fname, sname);
   }
 
-  bool IsHostSide() const {
-    // if current stmt not enter parallel-by btw device and host
-    // max_parallel_level is not set or set to 0 or has explicit distance to
-    // inner-most
-    return (max_parallel_level == 0 || parallel_level + 1 < max_parallel_level);
-  }
-
   bool IsHostSymbol(const std::string& sym) const {
-    int count = 0;
-    size_t pos = 0;
-    std::string target = "paraby";
-    int host_side_parallel_lv_cnt = std::max(max_parallel_level - 2, 0);
-
-    // find the target substring from the current position
-    while ((pos = sym.find(target, pos)) != std::string::npos) {
-      count++;
-      pos += target.length(); // Move pos to the end of the found target
-    }
-
-    return (count <= host_side_parallel_lv_cnt);
+    assert(PrefixedWith(sym, "::") && "expect a scoped name.");
+    // host symbol does not have any paraby
+    return sym.find("::paraby") == std::string::npos;
   }
 
   bool NeedDeviceFunc() const { return cgi->HasParallelBy(fname); }
 
-  bool IsHost() const { return parallel_level == 0; }
+  bool IsHost() const { return parallel_level == Storage::NONE; }
 
   bool IsFutureBlockShared(const std::string& n) const {
     assert(PrefixedWith(n, "::") && "requires a scoped name.");
@@ -412,11 +396,13 @@ private:
   }
 
   bool IsDMABlockShared(AST::DMA&) const {
-    return (parallel_level == 1) &&
-           (max_parallel_level == 2 || max_parallel_level == 3);
+    return (parallel_level == Storage::SHARED) &&
+           (max_parallel_level == Storage::LOCAL ||
+            max_parallel_level == Storage::SUB);
   }
   bool IsDMAWarpLocal(AST::DMA&) const {
-    return (parallel_level == 2) && (max_parallel_level == 3);
+    return (parallel_level == Storage::LOCAL &&
+            max_parallel_level == Storage::SUB);
   }
 
   const std::string ExprCastSTR(AST::ptr<AST::Node> n,
@@ -444,6 +430,8 @@ private:
   const std::string SSMName(const std::string& sname, bool is_host) const {
     return (is_host) ? ssm.HostName(sname) : ssm.DeviceName(sname);
   }
+  // if it requires wrapping code in a single thread
+  bool RequiresImplPred(Storage) const;
 };
 
 } // namespace Topscc

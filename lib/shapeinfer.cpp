@@ -483,9 +483,9 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
       SymbolAliasNum(SSTab().ScopedName(name), cur_vn);
       nty = NodeType(*n.type);
     } else {
-      if (isa<AST::Call>(n.init_expr))
-        cur_vn = GenValNum(SSTab().ScopedName(name));
       nty = NodeType(*n.type);
+      if (auto sty = dyn_cast<ScalarIntegerType>(nty); sty && sty->IsMutable())
+        cur_vn = GenValNum(SSTab().ScopedName(name));
     }
   }
 
@@ -805,7 +805,7 @@ bool ShapeInference::Visit(AST::ParallelBy& n) {
   auto sname = SSTab().ScopedName(n.BPV()->name);
   auto vv = GetOrGenValNum(sname);
   ast_vn.Update(n.BPV().get(), vv, VNKind::VNK_VALUE);
-  n.BoundExpr()->Opts().SetVals(vn.GenValueListFromValueNumber(vv));
+  n.BoundExpr()->Opts().SetVals(s.Value());
 
   assert(n.HasSubPVs() && "normalization failed.");
 
@@ -1260,17 +1260,21 @@ bool ShapeInference::Visit(AST::Call& n) {
   if (cannot_proceed) return true;
 
   // value the scalars
-  for (auto& s : n.GetArguments()) {
-    if (!CanBeValueNumbered(s.get())) continue;
-    if (isa<ScalarIntegerType>(NodeType(*s))) {
-      auto expr = cast<AST::Expr>(s);
-      expr->s = GenShape(GetSign(*s));
-      VST_DEBUG(dbgs() << "[ExprShape] Shape for " << PSTR(s) << ": "
-                       << STR(expr->s) << "\n");
-      assert(expr->s.DimCount() == 1);
-      expr->Opts().SetVal(expr->s.ValueAt(0));
-      VST_DEBUG(dbgs() << "[ExprVal] Value for " << PSTR(expr) << ": "
-                       << STR(expr->s.ValueAt(0)) << "\n");
+  for (auto& arg : n.GetArguments()) {
+    if (!CanBeValueNumbered(arg.get())) continue;
+    auto expr = cast<AST::Expr>(arg);
+    if (auto sty = dyn_cast<ScalarIntegerType>(NodeType(*arg))) {
+      if (!sty->IsMutable()) {
+        expr->s = GenShape(GetSign(*arg));
+        VST_DEBUG(dbgs() << " |-<exprshape> Shape for " << PSTR(arg) << ": "
+                         << STR(expr->s) << "\n");
+        assert(expr->s.DimCount() == 1);
+        expr->Opts().SetVal(expr->s.ValueAt(0));
+      } else {
+        expr->Opts().SetVal(sbe::sym(GetSign(*arg)->ToString()));
+      }
+      VST_DEBUG(dbgs() << " |-<exprval> Value for " << PSTR(expr) << ": "
+                       << STR(expr->Opts().GetVal()) << "\n");
     }
   }
 

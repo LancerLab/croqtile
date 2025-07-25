@@ -8,8 +8,37 @@
 
 namespace Choreo {
 
-extern Storage GCUDeviceParallelLevel(int);
-extern int GCUDeviceParallelDepth(Storage);
+extern int GetMaxParallelLevelFromNote(AST::ParallelBy& n);
+
+inline Storage GCUDeviceParallelLevel(int pl_depth) {
+  assert(pl_depth >= 0 && pl_depth <= 3);
+  static std::unordered_map<int, Storage> levels = {
+      {0, Storage::GLOBAL},
+      {1, Storage::SHARED},
+      {2, Storage::LOCAL},
+      {3, Storage::SUB},
+  };
+
+  if (!levels.count(pl_depth) ||
+      (pl_depth == 3 && (CCtx().GetArch() != TargetArch::GCU4)))
+    return Storage::NONE;
+
+  return levels[pl_depth];
+}
+
+inline int GCUDeviceParallelDepth(Storage l) {
+  static std::unordered_map<Storage, int> levels = {
+      {Storage::GLOBAL, 0},
+      {Storage::SHARED, 1},
+      {Storage::LOCAL, 2},
+      {Storage::SUB, 3},
+  };
+  if (!levels.count(l) ||
+      (l == Storage::SUB && (CCtx().GetArch() != TargetArch::GCU4)))
+    return -1;
+
+  return levels[l];
+}
 
 struct GCUCheck : public VisitorWithSymTab {
 private:
@@ -26,16 +55,25 @@ private:
     if (auto cf = dyn_cast<AST::ChoreoFunction>(&n)) {
       cur_params.clear();
       cur_fname = cf->name;
-      pl_depths.clear();
-      pl_depths.push_back(0);
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       if (pb->GetLevel() == Storage::NONE) {
         pl_depth++;
-        //        pb->SetLevel(PLevel(*pb, pl_depth));
       } else
-        pl_depth = PDepth(*pb, pb->GetLevel());
-      max_pl_depth = pl_depth;
+        pl_depth = PDepth(pb->GetLevel()); // depth from annotation
       pl_depths.push_back(pl_depth);
+
+      max_pl_depth = GetMaxParallelLevelFromNote(*pb);
+      assert(max_pl_depth >= 2);
+
+      if (!ValidDepth(*pb, pl_depth)) return false;
+      if (!ValidDepth(*pb, max_pl_depth)) return false;
+
+      pb->SetMaxLevel(PLevel(max_pl_depth));
+      if (pb->GetLevel() == Storage::NONE) pb->SetLevel(PLevel(pl_depth));
+
+      VST_DEBUG(pb->InlinePrint(dbgs());
+                dbgs() << ": level << " << STR(pb->GetLevel()) << " / "
+                       << STR(pb->GetMaxLevel()) << "\n");
     }
     return true;
   }
@@ -46,26 +84,34 @@ private:
       std::string append_note = ":";
       //      assert(pb->GetLevel() != Storage::NONE);
       pl_depth = pl_depths.back();
-      if (CCtx().GetTarget() == CompileTarget::Topscc) {
-        auto sto = PBLevel(*pb);
-        if (pb->GetLevel() == Storage::NONE) pb->SetLevel(sto);
-        append_note += STR(sto);
-      } else
-        append_note += std::to_string(max_pl_depth - pl_depth);
-      auto pty = cast<BoundedITupleType>(NodeType(*pb->BPV()));
-      pty->AppendNote(append_note);
-      for (auto& symbol : pb->AllSubPVs())
-        cast<BoundedITupleType>(NodeType(*symbol))->AppendNote(append_note);
+      if (ValidDepth(*pb, pl_depth)) {
+        if (CCtx().GetTarget() == CompileTarget::Topscc) {
+          auto sto = PBLevel();
+          // set the storage level when it is not explicitly set
+          if (pb->GetLevel() == Storage::NONE) pb->SetLevel(sto);
+          VST_DEBUG(dbgs() << "In function '" << fname << "': ";
+                    pb->InlinePrint(dbgs());
+                    dbgs() << ", level: " << STR(pb->GetLevel()) << " / "
+                           << STR(pb->GetMaxLevel()) << "\n");
+          append_note += STR(sto);
+        } else
+          append_note += std::to_string(max_pl_depth - pl_depth);
+        auto pty = cast<BoundedITupleType>(NodeType(*pb->BPV()));
+        pty->AppendNote(append_note);
+        for (auto& symbol : pb->AllSubPVs())
+          cast<BoundedITupleType>(NodeType(*symbol))->AppendNote(append_note);
+      }
       pl_depths.pop_back();
       // pl_depth may not be increasing in a sequential manner
       // so need a container to store the state.
       pl_depth = pl_depths.back();
       assert(pl_depth >= 0 && "Unexpected parallel level");
-      if (pl_depth == 0) { max_pl_depth = 0; }
+      if (pb->IsOuter()) { max_pl_depth = 0; }
     }
+
     // mask stmts that are possible to be shared
     else if (auto c = dyn_cast<AST::Call>(&n))
-      if (!c->IsExpr()) n.SetLevel(PLevel(n, pl_depth));
+      if (!c->IsExpr()) n.SetLevel(PLevel(pl_depth));
 
     return true;
   }
@@ -75,26 +121,31 @@ private:
   }
 
 private:
-  Storage PLevel(AST::Node& n, int depth) {
+  Storage PLevel(int depth) {
     auto lvl = GCUDeviceParallelLevel(depth);
-    if (lvl == Storage::NONE)
-      Error1(n.LOC(), "the parallel level (depth: " + std::to_string(pl_depth) +
-                          ") is not supported by current GCU architecture (" +
-                          cur_arch + ").");
+    assert(lvl != Storage::NONE);
     return lvl;
   }
 
-  int PDepth(AST::Node& n, Storage l) {
+  int PDepth(Storage l) {
     auto depth = GCUDeviceParallelDepth(l);
-    if (depth == -1)
-      Error1(n.LOC(), "the parallel level (" + STR(l) +
-                          ") is not supported by current GCU architecture (" +
-                          cur_arch + ").");
+    assert(depth != -1);
     return depth;
   }
 
 public:
-  Storage PBLevel(AST::ParallelBy& n) {
+  bool ValidDepth(const AST::Node& n, int depth) {
+    if ((CCtx().GetArch() == TargetArch::GCU3 && depth >= 3) ||
+        (CCtx().GetArch() == TargetArch::GCU4 && depth >= 4)) {
+      Error1(n.LOC(), "the parallel level (depth: " + std::to_string(depth) +
+                          ") is not supported by current GCU architecture (" +
+                          cur_arch + ").");
+      return false;
+    }
+    return true;
+  }
+
+  Storage PBLevel() {
     if (max_pl_depth == 1) {
       switch (pl_depth) {
       case 0: return Storage::GLOBAL; break;
@@ -104,7 +155,7 @@ public:
             "unsupported parallel level: " + std::to_string(pl_depth) + ".");
       }
     } else
-      return PLevel(n, pl_depth);
+      return PLevel(pl_depth);
     return Storage::NONE;
   }
 

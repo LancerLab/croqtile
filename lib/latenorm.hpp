@@ -51,7 +51,9 @@ protected:
   std::stack<AST::MultiNodes*> multi_nodes;
   int cur_dma_index = -1;
   int cur_pb_index = -1;
+  int outer_pb_index = -1;
   AST::MultiNodes* cur_pb_mn = nullptr;
+  AST::MultiNodes* outer_pb_mn = nullptr;
   WorkingList workinglist;
   std::map<AST::MultiNodes*, BufferInsertInfo> mnodes_insertions;
 
@@ -75,9 +77,13 @@ protected:
                        << "\n");
     } else if (auto m = dyn_cast<AST::MultiNodes>(&n)) {
       multi_nodes.push(m);
-    } else if (auto m = dyn_cast<AST::ParallelBy>(&n)) {
-      cur_pb_index = multi_nodes.top()->GetIndex(m);
+    } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+      cur_pb_index = multi_nodes.top()->GetIndex(pb);
       cur_pb_mn = multi_nodes.top();
+      if (pb->IsOuter()) {
+        outer_pb_index = cur_pb_index;
+        outer_pb_mn = cur_pb_mn;
+      }
       assert(cur_pb_index != -1 && "unexpected node index.");
       // handle parallel-level
       parallel_level++;
@@ -94,9 +100,13 @@ protected:
     if (isa<AST::ChoreoFunction>(&n)) {
       VST_DEBUG(dbgs() << "After " << GetName() << " - " << STR(FBInfo())
                        << "\n");
-    } else if (isa<AST::ParallelBy>(&n)) {
+    } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       cur_pb_index = -1;
       cur_pb_mn = nullptr;
+      if (pb->IsOuter()) {
+        outer_pb_index = -1;
+        outer_pb_mn = nullptr;
+      }
       // handle parallel-level
       parallel_level--;
     }
@@ -126,7 +136,11 @@ protected:
   }
 
   void TraceEachVisit(const AST::Node& n) {
-    if (trace_visit) { dbgs() << n.TypeNameString() << ": " << STR(n) << "\n"; }
+    if (trace_visit) {
+      dbgs() << n.TypeNameString() << ": ";
+      n.InlinePrint(dbgs());
+      dbgs() << "\n";
+    }
   }
 
 public:
@@ -482,9 +496,9 @@ public:
         if (sty->GetStorage() == Storage::GLOBAL) {
           // it is a global, must not be inside parallel_by
           // no outer PB exists
-          assert(cur_pb_index == -1);
-          int index = cur_pb_index + mnodes_insertions[cur_pb_mn].size();
-          mnodes_insertions[cur_pb_mn].push_back(
+          assert(outer_pb_index != -1);
+          int index = outer_pb_index + mnodes_insertions[outer_pb_mn].size();
+          mnodes_insertions[outer_pb_mn].push_back(
               {index, var, anon_sym, future_name, nullptr});
         } else {
           assert(cur_dma_index != -1);
@@ -564,10 +578,10 @@ public:
       var->SetType(sty);
 
       if (sty->GetStorage() == Storage::GLOBAL) {
-        if (cur_pb_index != -1) {
+        if (outer_pb_index != -1) {
           // DMA dst is a global, must not be inside parallel_by
-          int index = cur_pb_index + mnodes_insertions[cur_pb_mn].size();
-          mnodes_insertions[cur_pb_mn].push_back(
+          int index = outer_pb_index + mnodes_insertions[outer_pb_mn].size();
+          mnodes_insertions[outer_pb_mn].push_back(
               {index, var, to_buffer_name, future_name, &n});
         } else {
           // moving global dma

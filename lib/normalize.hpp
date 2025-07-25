@@ -12,12 +12,37 @@
 
 namespace Choreo {
 
+extern int GCUDeviceParallelDepth(Storage);
+extern Storage GCUDeviceParallelLevel(int);
+
+inline int TargetDepth(Storage s) {
+  if (CCtx().GetTarget() == CompileTarget::Topscc)
+    return GCUDeviceParallelDepth(s);
+  else
+    choreo_unreachable("unsupported target: " + STR(CCtx().GetTarget()) + ".");
+  return -1;
+}
+
+inline Storage TargetLevel(int depth) {
+  if (CCtx().GetTarget() == CompileTarget::Topscc)
+    return GCUDeviceParallelLevel(depth);
+  else
+    choreo_unreachable("unsupported target: " + STR(CCtx().GetTarget()) + ".");
+  return Storage::NONE;
+}
+
 struct Normalizer : public VisitorWithScope {
 private:
   bool changed = false;
 
   std::string old;
   size_t count = 0; // name suffix of runtime int values
+
+  // parallelization depth
+  int pdepth = 0;
+  int max_pdepth = 0;
+  int depth_count = 0;
+  std::vector<int> depth_stack;
 
   bool handle_parameter = false;
   ptr<AST::Expr> list_ref = nullptr;
@@ -95,6 +120,17 @@ public:
                isa<AST::ForeachBlock>(&n)) {
       cur_node_index = multi_nodes.top()->GetIndex(&n);
       assert(cur_node_index != -1 && "unexpected node index.");
+    } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+      assert(pdepth >= 0);
+      if (pdepth == 0) depth_stack.push_back(0);
+      if (pb->GetLevel() != Storage::NONE)
+        pdepth = TargetDepth(pb->GetLevel()); // depth from the annotation
+      else
+        pdepth++;
+      assert(pdepth > max_pdepth);
+      max_pdepth = pdepth;
+      depth_stack.push_back(pdepth);
+      depth_count = depth_stack.size();
     }
     return true;
   }
@@ -118,6 +154,196 @@ public:
       count = 0;
     } else if (isa<AST::Return>(&n)) {
       cur_node_index = -1;
+    } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+      auto last_depth = depth_stack.back();
+      depth_stack.pop_back();
+      pdepth = depth_stack.back();
+      assert(pdepth >= 0);
+
+      bool annotate = pb->GetLevel() != Storage::NONE;
+      if (CCtx().GetTarget() == CompileTarget::Factor ||
+          CCtx().GetTarget() == CompileTarget::Topscc ||
+          CCtx().GetTarget() == CompileTarget::CUDA) {
+        // may fill gap only for a single level
+        assert(pdepth < last_depth);
+        if (pdepth > 0) assert(pdepth >= last_depth - 2);
+        if (pdepth > 0 && pdepth == last_depth - 2) {
+          // This fills the missing parallel-by levels. e.g:
+          //
+          //   `__co__ void foo() {
+          //      parallel p by 10 : shared
+          //        parallelqp by 3 : sublocal {...}
+          //    }`
+          //
+          // is normalized as
+          //
+          //   `__co__ void foo() {
+          //      parallel p by 10 : shared
+          //       parallel 1 by 1 : local
+          //        parallel q by 3 : sublocal {...}
+          //    }`
+          //
+          // add the pb level
+          VST_DEBUG(dbgs() << "Replace `"; pb->InlinePrint(dbgs());
+                    dbgs() << "` by\n  +-");
+
+          auto new_pb = AST::MakeSimpleParallelBy(pb->LOC(), pb->stmts);
+          if (annotate) new_pb->SetLevel(TargetLevel(pdepth + 1));
+          new_pb->SetType(MakeBoundedIntegerType(sbe::nu(1)));
+          auto new_stmts = AST::Make<AST::MultiNodes>(pb->LOC());
+          new_stmts->Append(new_pb);
+          pb->stmts = new_stmts;
+
+          VST_DEBUG(pb->InlinePrint(dbgs()); dbgs() << "\n   +-";
+                    new_pb->InlinePrint(dbgs()); dbgs() << "\n");
+        } else if (pdepth == 0 && depth_count == 2 &&
+                   (!annotate || (annotate && last_depth == 2))) {
+          //
+          //   `__co__ void foo() { parallel p by 10 {...}}`
+          //
+          // is normalized as
+          //
+          //   `__co__ void foo() { parallel p by 10 parallel q by 1 {...}}`
+          //
+          VST_DEBUG(dbgs() << "Replace `"; pb->InlinePrint(dbgs());
+                    dbgs() << "` by\n  +-");
+          auto new_pb = cast<AST::ParallelBy>(pb->Clone());
+          new_pb->SetOuter(false);
+          new_pb->SetLevel(Storage::LOCAL);
+
+          auto anon_sym = SymbolTable::GetAnonPBName();
+          auto pv = AST::Make<AST::Identifier>(new_pb->LOC(), anon_sym);
+          pv->SetType(MakeBoundedITupleType(Shape(1, 1)));
+          pb->SetPV(pv);
+
+          // elements
+          auto spv = AST::Make<AST::MultiValues>(new_pb->LOC(), ", ");
+          auto epv =
+              AST::Make<AST::Identifier>(new_pb->LOC(), anon_sym + "__elem__x");
+          epv->SetType(MakeBoundedIntegerType(sbe::nu(1)));
+          spv->Append(epv);
+          pb->SetSubPVs(spv);
+
+          // bound
+          auto p_bound = AST::MakeIntExpr(new_pb->LOC(), 1);
+          p_bound->SetType(MakeIntegerType());
+          pb->SetBoundExpr(p_bound);
+
+          // element-bounds
+          auto spv_bounds = AST::Make<AST::MultiValues>(new_pb->LOC(), ", ");
+          spv_bounds->Append(p_bound->Clone());
+          spv_bounds->SetType(MakeITupleType(1));
+          pb->SetBoundExprs(spv_bounds);
+          pb->SetOuter(true);
+          pb->SetLevel(Storage::SHARED);
+
+          // add the pb level
+          pb->stmts->values.clear();
+          pb->stmts->Append(new_pb);
+          VST_DEBUG(pb->InlinePrint(dbgs()); dbgs() << "\n   +-";
+                    new_pb->InlinePrint(dbgs()); dbgs() << "\n");
+        } else if (pdepth == 0 && depth_count == 2 && annotate &&
+                   last_depth == 1) {
+          //
+          //   `__co__ void foo() { parallel p by 10 : shared {...}}`
+          //
+          // is normalized as
+          //
+          //   `__co__ void foo() { parallel p by 10 : shared {...; parallel q
+          //   by 1{} }`
+          //
+          auto anon_sym = SymbolTable::GetAnonPBName();
+          auto pv = AST::Make<AST::Identifier>(pb->LOC(), anon_sym);
+          pv->SetType(MakeBoundedITupleType(Shape(1, 1)));
+          // elements
+          auto spv = AST::Make<AST::MultiValues>(n.LOC(), ", ");
+          auto epv =
+              AST::Make<AST::Identifier>(pb->LOC(), anon_sym + "__elem__x");
+          epv->SetType(MakeBoundedIntegerType(sbe::nu(1)));
+          spv->Append(epv);
+
+          // bound
+          auto p_bound = AST::MakeIntExpr(pb->LOC(), 1);
+          p_bound->SetType(MakeIntegerType());
+          auto spv_bounds = AST::Make<AST::MultiValues>(n.LOC(), ", ");
+          spv_bounds->Append(p_bound->Clone());
+          spv_bounds->SetType(MakeITupleType(1));
+
+          // add the level for completeness
+          VST_DEBUG(dbgs() << "Append `"; pb->InlinePrint(dbgs());
+                    dbgs() << "` with\n  +-");
+
+          auto new_pb = AST::Make<AST::ParallelBy>(pb->LOC(), pv, p_bound, spv,
+                                                   spv_bounds);
+          new_pb->SetOuter(false);
+          new_pb->SetLevel(Storage::LOCAL);
+          pb->stmts->Append(new_pb);
+          VST_DEBUG(new_pb->InlinePrint(dbgs()); dbgs() << "\n");
+        } else if (pdepth == 0 && depth_count == 2 && annotate &&
+                   last_depth == 3) {
+          //   `__co__ void foo() {
+          //      parallel p by 3 : sublocal {...}
+          //    }`
+          //
+          // is normalized as
+          //
+          //   `__co__ void foo() {
+          //      parallel q by 1 : shared
+          //       parallel r by 1 : local
+          //        parallel q by 3 : sublocal {...}
+          //    }`
+          //
+          VST_DEBUG(dbgs() << "Replace `"; pb->InlinePrint(dbgs());
+                    dbgs() << "` by\n  +-");
+          auto new_pb = cast<AST::ParallelBy>(pb->Clone());
+          new_pb->SetOuter(false);
+          new_pb->SetLevel(Storage::SUB);
+
+          auto new1_pb = AST::MakeSimpleParallelBy(pb->LOC());
+          new1_pb->SetOuter(false);
+          new1_pb->SetLevel(Storage::LOCAL);
+          new1_pb->stmts->Append(new_pb);
+
+          auto anon_sym = SymbolTable::GetAnonPBName();
+          auto pv = AST::Make<AST::Identifier>(new_pb->LOC(), anon_sym);
+          pv->SetType(MakeBoundedITupleType(Shape(1, 1)));
+          pb->SetPV(pv);
+
+          // elements
+          auto spv = AST::Make<AST::MultiValues>(new_pb->LOC(), ", ");
+          auto epv =
+              AST::Make<AST::Identifier>(new_pb->LOC(), anon_sym + "__elem__x");
+          epv->SetType(MakeBoundedIntegerType(sbe::nu(1)));
+          spv->Append(epv);
+          pb->SetSubPVs(spv);
+
+          // bound
+          auto p_bound = AST::MakeIntExpr(new_pb->LOC(), 1);
+          p_bound->SetType(MakeIntegerType());
+          pb->SetBoundExpr(p_bound);
+
+          // element-bounds
+          auto spv_bounds = AST::Make<AST::MultiValues>(new_pb->LOC(), ", ");
+          spv_bounds->Append(p_bound->Clone());
+          spv_bounds->SetType(MakeITupleType(1));
+          pb->SetBoundExprs(spv_bounds);
+          pb->SetOuter(true);
+          pb->SetLevel(Storage::SHARED);
+
+          // add the pb level
+          pb->stmts->values.clear();
+          pb->stmts->Append(new1_pb);
+          VST_DEBUG(pb->InlinePrint(dbgs()); dbgs() << "\n   +-";
+                    new1_pb->InlinePrint(dbgs()); dbgs() << "\n    +-";
+                    new_pb->InlinePrint(dbgs()); dbgs() << "\n");
+        }
+      }
+
+      if (pdepth == 0) {
+        depth_stack.clear();
+        max_pdepth = 0;
+        depth_count = 0;
+      }
     }
     return true;
   }
@@ -311,22 +537,6 @@ public:
   bool Visit(AST::NamedTypeDecl&) override { return true; }
   bool Visit(AST::NamedVariableDecl& n) override {
     TraceEachVisit(n);
-    auto nty = n.GetType();
-    auto mem = n.mem;
-    auto st = mem != nullptr ? mem->Get() : Storage::DEFAULT;
-    if (isa<ScalarType>(nty) && !n.init_expr &&
-        !(st == Storage::LOCAL || st == Storage::SHARED)) {
-      auto bt = nty->GetBaseType();
-      if (IsIntegerBaseType(bt)) {
-        n.init_expr = AST::Make<AST::Expr>(
-            n.LOC(), AST::Make<AST::IntLiteral>(n.LOC(), bt));
-        n.init_expr->SetType(MakeScalarIntegerType(bt, true));
-      } else if (IsFloatPointBaseType(bt)) {
-        n.init_expr = AST::Make<AST::Expr>(
-            n.LOC(), AST::Make<AST::FloatLiteral>(n.LOC(), bt));
-        n.init_expr->SetType(MakeScalarFloatType(bt, true));
-      }
-    }
 
     if (n.mem && (n.mem->Get() == Storage::DEFAULT)) {
       // Should this be set by target?

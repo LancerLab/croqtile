@@ -1,4 +1,4 @@
-// RUN: choreo %s 2>&1 | FileCheck %s
+// RUN: choreo -arch=gcu300 %s 2>&1 | FileCheck --check-prefix=CHECK %s
 // RUN: choreo -arch=gcu400 %s 2>&1 | FileCheck --check-prefix=GCU4CHK %s
 
 __co__ void bar() {

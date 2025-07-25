@@ -385,92 +385,94 @@ int main() {
 
 // CHECK: (  0) foo(s32 mdspan<1> [128] off_buff_L3, s32 mdspan<2> [102400, 512] input, s32 mdspan<2> [102400, 512] id, s32 mdspan<1> [10] para) {
 // CHECK: (  1)   global s32 [ id.span ] output
-// CHECK: (  2)   parallel p = {p__elem__x} by [10] {
-// CHECK: (  3)     local s32 [ 1 512 ] output_L1
-// CHECK: (  4)     local s32 [ 128 ] off_buff
-// CHECK: (  5)     dma.copy off_buff_L3 => off_buff
-// CHECK: (  6)     local s32 mdspan<1> [10] para_L1__buf__
-// CHECK: (  7)     para_L1 = dma.copy para => para_L1__buf__
-// CHECK: (  8)     with {d0, d1} in [ 10240 1 ] {
-// CHECK: (  9)       foreach d0(::), d1(::) {
-// CHECK: ( 10)         anon_0 =  (p # d0) 
-// CHECK: ( 11)         local s32 mdspan<2> [1, 512] input_L1__buf__
-// CHECK: ( 12)         input_L1 = dma.copy input.ChunkAt(anon_0, d1) => input_L1__buf__
-// CHECK: ( 13)         anon_1 =  (p # d0) 
-// CHECK: ( 14)         local s32 mdspan<2> [1, 512] id_L1__buf__
-// CHECK: ( 15)         id_L1 = dma.copy id.ChunkAt(anon_1, d1) => id_L1__buf__
-// CHECK: ( 16)         call call_gather_kernel_2( (dataof input_L1) ,  (dataof id_L1) , output_L1, off_buff,  (dataof para_L1) )
-// CHECK: ( 17)         anon_2 =  (p # d0) 
-// CHECK: ( 18)         dma.copy output_L1 => output.ChunkAt(anon_2, d1)
-// CHECK: ( 19)       }
-// CHECK: ( 20)     }
-// CHECK: ( 21)   }
-// CHECK: ( 22)   return output
-// CHECK: ( 23) }
+// CHECK: (  2)   parallel anon_pb_0 = {anon_pb_0__elem__x} by [1] {
+// CHECK: (  3)     parallel p = {p__elem__x} by [10] {
+// CHECK: (  4)       local s32 [ 1 512 ] output_L1
+// CHECK: (  5)       local s32 [ 128 ] off_buff
+// CHECK: (  6)       dma.copy off_buff_L3 => off_buff
+// CHECK: (  7)       local s32 mdspan<1> [10] para_L1__buf__
+// CHECK: (  8)       para_L1 = dma.copy para => para_L1__buf__
+// CHECK: (  9)       with {d0, d1} in [ 10240 1 ] {
+// CHECK: ( 10)         foreach d0(::), d1(::) {
+// CHECK: ( 11)           anon_0 =  (p # d0) 
+// CHECK: ( 12)           local s32 mdspan<2> [1, 512] input_L1__buf__
+// CHECK: ( 13)           input_L1 = dma.copy input.ChunkAt(anon_0, d1) => input_L1__buf__
+// CHECK: ( 14)           anon_1 =  (p # d0) 
+// CHECK: ( 15)           local s32 mdspan<2> [1, 512] id_L1__buf__
+// CHECK: ( 16)           id_L1 = dma.copy id.ChunkAt(anon_1, d1) => id_L1__buf__
+// CHECK: ( 17)           call call_gather_kernel_2( (dataof input_L1) ,  (dataof id_L1) , output_L1, off_buff,  (dataof para_L1) )
+// CHECK: ( 18)           anon_2 =  (p # d0) 
+// CHECK: ( 19)           dma.copy output_L1 => output.ChunkAt(anon_2, d1)
+// CHECK: ( 20)         }
+// CHECK: ( 21)       }
+// CHECK: ( 22)     }
+// CHECK: ( 23)   }
+// CHECK: ( 24)   return output
+// CHECK: ( 25) }
 
 // CHECK: BUFFER ::foo::id
-// CHECK:         range: [0, 21] 
+// CHECK:         range: [0, 23] 
 // CHECK: VAR    ::foo::id.span
 // CHECK:         range: [0, x] 
 // CHECK: BUFFER ::foo::input
-// CHECK:         range: [0, 21] 
+// CHECK:         range: [0, 23] 
 // CHECK: VAR    ::foo::input.span
 // CHECK:         range: [0, x] 
 // CHECK: BUFFER ::foo::off_buff_L3
-// CHECK:         range: [0, 21] 
+// CHECK:         range: [0, 23] 
 // CHECK: VAR    ::foo::off_buff_L3.span
 // CHECK:         range: [0, x] 
 // CHECK: BUFFER ::foo::para
-// CHECK:         range: [0, 21] 
+// CHECK:         range: [0, 23] 
 // CHECK: VAR    ::foo::para.span
 // CHECK:         range: [0, x] 
 // CHECK: BUFFER ::foo::output
-// CHECK:         range: [1, 22] 
+// CHECK:         range: [1, 24] 
 // CHECK: VAR    ::foo::output.span
 // CHECK:         range: [1, x] 
-// CHECK: VAR    ::foo::paraby_0::p
-// CHECK:         range: [2, 21] 
-// CHECK: VAR    ::foo::paraby_0::p__elem__x
-// CHECK:         range: [2, 21] 
-// CHECK: BUFFER ::foo::paraby_0::output_L1
-// CHECK:         range: [3, 19] 
-// CHECK: VAR    ::foo::paraby_0::output_L1.span
-// CHECK:         range: [3, x] 
-// CHECK: BUFFER ::foo::paraby_0::off_buff
-// CHECK:         range: [4, 19] 
-// CHECK: VAR    ::foo::paraby_0::off_buff.span
+// CHECK: VAR    ::foo::paraby_0::paraby_1::p
+// CHECK:         range: [3, 22] 
+// CHECK: VAR    ::foo::paraby_0::paraby_1::p__elem__x
+// CHECK:         range: [3, 22] 
+// CHECK: BUFFER ::foo::paraby_0::paraby_1::output_L1
+// CHECK:         range: [4, 20] 
+// CHECK: VAR    ::foo::paraby_0::paraby_1::output_L1.span
 // CHECK:         range: [4, x] 
-// CHECK: BUFFER ::foo::paraby_0::para_L1__buf__
-// CHECK:         range: [6, 19] 
-// CHECK: VAR    ::foo::paraby_0::para_L1__buf__.span
-// CHECK:         range: [6, x] 
-// CHECK: VAR    ::foo::paraby_0::para_L1
-// CHECK:         range: [7, 19] 
-// CHECK: VAR    ::foo::paraby_0::para_L1.span
+// CHECK: BUFFER ::foo::paraby_0::paraby_1::off_buff
+// CHECK:         range: [5, 20] 
+// CHECK: VAR    ::foo::paraby_0::paraby_1::off_buff.span
+// CHECK:         range: [5, x] 
+// CHECK: BUFFER ::foo::paraby_0::paraby_1::para_L1__buf__
+// CHECK:         range: [7, 20] 
+// CHECK: VAR    ::foo::paraby_0::paraby_1::para_L1__buf__.span
 // CHECK:         range: [7, x] 
-// CHECK: VAR    ::foo::paraby_0::within_0::d0
-// CHECK:         range: [8, 19] 
-// CHECK: VAR    ::foo::paraby_0::within_0::d1
-// CHECK:         range: [8, 19] 
-// CHECK: VAR    ::foo::paraby_0::within_0::foreach_0::anon_0
-// CHECK:         range: [10, 12] 
-// CHECK: BUFFER ::foo::paraby_0::within_0::foreach_0::input_L1__buf__
-// CHECK:         range: [11, 16] 
-// CHECK: VAR    ::foo::paraby_0::within_0::foreach_0::input_L1__buf__.span
-// CHECK:         range: [11, x] 
-// CHECK: VAR    ::foo::paraby_0::within_0::foreach_0::input_L1
-// CHECK:         range: [12, 16] 
-// CHECK: VAR    ::foo::paraby_0::within_0::foreach_0::input_L1.span
+// CHECK: VAR    ::foo::paraby_0::paraby_1::para_L1
+// CHECK:         range: [8, 20] 
+// CHECK: VAR    ::foo::paraby_0::paraby_1::para_L1.span
+// CHECK:         range: [8, x] 
+// CHECK: VAR    ::foo::paraby_0::paraby_1::within_0::d0
+// CHECK:         range: [9, 20] 
+// CHECK: VAR    ::foo::paraby_0::paraby_1::within_0::d1
+// CHECK:         range: [9, 20] 
+// CHECK: VAR    ::foo::paraby_0::paraby_1::within_0::foreach_0::anon_0
+// CHECK:         range: [11, 13] 
+// CHECK: BUFFER ::foo::paraby_0::paraby_1::within_0::foreach_0::input_L1__buf__
+// CHECK:         range: [12, 17] 
+// CHECK: VAR    ::foo::paraby_0::paraby_1::within_0::foreach_0::input_L1__buf__.span
 // CHECK:         range: [12, x] 
-// CHECK: VAR    ::foo::paraby_0::within_0::foreach_0::anon_1
-// CHECK:         range: [13, 15] 
-// CHECK: BUFFER ::foo::paraby_0::within_0::foreach_0::id_L1__buf__
+// CHECK: VAR    ::foo::paraby_0::paraby_1::within_0::foreach_0::input_L1
+// CHECK:         range: [13, 17] 
+// CHECK: VAR    ::foo::paraby_0::paraby_1::within_0::foreach_0::input_L1.span
+// CHECK:         range: [13, x] 
+// CHECK: VAR    ::foo::paraby_0::paraby_1::within_0::foreach_0::anon_1
 // CHECK:         range: [14, 16] 
-// CHECK: VAR    ::foo::paraby_0::within_0::foreach_0::id_L1__buf__.span
-// CHECK:         range: [14, x] 
-// CHECK: VAR    ::foo::paraby_0::within_0::foreach_0::id_L1
-// CHECK:         range: [15, 16] 
-// CHECK: VAR    ::foo::paraby_0::within_0::foreach_0::id_L1.span
+// CHECK: BUFFER ::foo::paraby_0::paraby_1::within_0::foreach_0::id_L1__buf__
+// CHECK:         range: [15, 17] 
+// CHECK: VAR    ::foo::paraby_0::paraby_1::within_0::foreach_0::id_L1__buf__.span
 // CHECK:         range: [15, x] 
-// CHECK: VAR    ::foo::paraby_0::within_0::foreach_0::anon_2
-// CHECK:         range: [17, 18]
+// CHECK: VAR    ::foo::paraby_0::paraby_1::within_0::foreach_0::id_L1
+// CHECK:         range: [16, 17] 
+// CHECK: VAR    ::foo::paraby_0::paraby_1::within_0::foreach_0::id_L1.span
+// CHECK:         range: [16, x] 
+// CHECK: VAR    ::foo::paraby_0::paraby_1::within_0::foreach_0::anon_2
+// CHECK:         range: [18, 19]
