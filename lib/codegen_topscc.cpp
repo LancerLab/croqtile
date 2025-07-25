@@ -2600,6 +2600,7 @@ TOPSCC_LIB=${TOPSCC_INSTALL}/lib
     gcu_arch=gcu300
   elif [[ "${GCU_DEVICE_STR}" == *"I20"* ]]; then
     gcu_arch=gcu210
+    export TOPS_VISIBLE_DEVICES=1
   elif [[ "$(lspci | grep Tencent)" != "" ]]; then
     gcu_arch=gcu210
   else
