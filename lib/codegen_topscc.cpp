@@ -3536,7 +3536,7 @@ const std::string TopsccCodeGen::CallSTR(AST::Call& n) const {
     if (n.function->name == "vectorize") {
       auto vty = n.GetType();
       assert(isa<VectorType>(vty) && "vectorize should be a vector type.");
-      oss << "tcle::mid<" <<  VectorTypeSTR(dyn_cast<VectorType>(vty)) << ">("
+      oss << "tcle::mid<" << VectorTypeSTR(dyn_cast<VectorType>(vty)) << ">("
           << ExprSTR(n.GetArguments()[0], IsHost()) << ")";
     }
 

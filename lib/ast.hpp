@@ -1588,6 +1588,8 @@ struct IfElseBlock : public Node, public TypeIDProvider<IfElseBlock> {
 
   bool HasElse() const { return else_stmts && else_stmts->Count(); }
 
+  bool IsNorm() const { return !HasElse(); }
+
   void accept(Visitor&) override;
 
   __UDT_TYPE_INFO__(Node, IfElseBlock)
