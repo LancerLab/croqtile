@@ -194,7 +194,7 @@ void choreo_info(const char *message) {
 %token <std::string> DMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNSPANAS CHUNKAT CHUNK SUBSPAN MODSPAN AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN
 %token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXPM1 FLOOR GELU ISFINITE ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN
 // control related
-%token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH INCR RET WHERE WHILE BREAK
+%token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH INCR RET WHERE WHILE BREAK CONTINUE
 
 // non-terminals
 %nterm <std::string> dma_operation builtin_print_func arith_operation spanid cstrings arith_builtin_func align_func
@@ -207,14 +207,14 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::CppSourceCode>> host_code inlcpp_stmt
 
 %nterm <AST::ptr<AST::DeviceFunctionDecl>> device_function_decl
-%nterm <std::string> device_attr device_attr_lists device_op
+%nterm <std::string> device_attr device_attr_lists
 %nterm <std::vector<AST::ptr<Choreo::DeviceDataType>>> device_params
 %nterm <AST::ptr<Choreo::DeviceDataType>> device_type device_base_type device_complex_type device_param device_nested_type
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::SpanAs>> span_as
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
 %nterm <AST::ptr<AST::Call>> call_stmt
-%nterm <AST::ptr<AST::Node>> any_code device_code foreach_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt wait_stmt trigger_stmt swap_stmt break_stmt range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
+%nterm <AST::ptr<AST::Node>> any_code device_code foreach_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt wait_stmt trigger_stmt swap_stmt break_stmt continue_stmt range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause multi_decls named_spanned_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
 %nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params ids_list subscriptions data_indices
 %nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr call_expr ituple_derivation internal_sizeof_expr sizeof_expr
@@ -646,6 +646,7 @@ statement
     | sync_stmt    SEMCOL        { $$ = $1; }
     | inlcpp_stmt  SEMCOL        { $$ = $1; }
     | break_stmt   SEMCOL        { $$ = $1; }
+    | continue_stmt  SEMCOL      { $$ = $1; }
     | paraby_block               { $$ = $1; }
     | within_block               { $$ = $1; }
     | inthreads_block            { $$ = $1; }
@@ -1970,6 +1971,8 @@ swap_stmt
     ;
 
 break_stmt : BREAK { $$ = AST::Make<AST::Break>(@1); }
+
+continue_stmt : CONTINUE { $$ = AST::Make<AST::Continue>(@1); }
 
 %%
 

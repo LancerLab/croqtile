@@ -2408,6 +2408,21 @@ struct Break : public Node, public TypeIDProvider<Break> {
   __UDT_TYPE_INFO__(Node, Break)
 };
 
+struct Continue : public Node, public TypeIDProvider<Continue> {
+  Continue(const location& l) : Node(l) {}
+
+  ptr<Node> CloneImpl() const override { return Make<Continue>(LOC()); }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool = false) const override {
+    os << "\n" << prefix << "`- Continue";
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, Continue)
+};
+
 struct Return : public Node, public TypeIDProvider<Return> {
   ptr<Node> value = nullptr;
 

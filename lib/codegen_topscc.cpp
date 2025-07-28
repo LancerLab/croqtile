@@ -1908,6 +1908,12 @@ bool TopsccCodeGen::Visit(AST::Break& n) {
   return true;
 }
 
+bool TopsccCodeGen::Visit(AST::Continue& n) {
+  TraceEachVisit(n);
+  IndStream() << "continue;\n";
+  return true;
+}
+
 bool TopsccCodeGen::Visit(AST::Trigger& n) {
   TraceEachVisit(n);
 
