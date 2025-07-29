@@ -221,6 +221,7 @@ execute_command() {
   command=${command//choreo/"$(which choreo) -n"}
   command=${command//copp/"$(which copp)"}
   command=${command//FileCheck/"$(which FileCheck)"}
+  command=${command//%gcu_arch/"-arch=${gcu_arch}"}
   local not_command=$(which not.sh | sed 's/[&/\]/\\&/g')
   command=$(echo "$command" | sed "s/\bnot \(.*\)/${not_command} \1/")
 

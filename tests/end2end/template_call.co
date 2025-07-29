@@ -62,19 +62,19 @@ int main() {
   return 0;
 }
 
-// CHECK: [0, 0] Called template_func with long long
-// CHECK: [0, 0] Called template_func with unsigned long long
-// CHECK: [0, 0] Called template_func with int
-// CHECK: [0, 0] Called template_func with int
-// CHECK: [0, 0] Called template_func with unsigned int
-// CHECK: [0, 0] Called template_func with short
-// CHECK: [0, 0] Called template_func with unsigned short
-// CHECK: [0, 0] Called template_func with char
-// CHECK: [0, 0] Called template_func with unsigned char
-// CHECK: [0, 0] Called template_func with bool
-// CHECK: [0, 0] Called template_func with double
-// CHECK: [0, 0] Called template_func with double
-// CHECK: [0, 0] Called template_func with float
-// CHECK: [0, 0] Called template_func with float
-// CHECK: [0, 0] Called template_func with fp16
-// CHECK: [0, 0] Called template_func with bf16
+// CHECK: Called template_func with long long
+// CHECK: Called template_func with unsigned long long
+// CHECK: Called template_func with int
+// CHECK: Called template_func with int
+// CHECK: Called template_func with unsigned int
+// CHECK: Called template_func with short
+// CHECK: Called template_func with unsigned short
+// CHECK: Called template_func with char
+// CHECK: Called template_func with unsigned char
+// CHECK: Called template_func with bool
+// CHECK: Called template_func with double
+// CHECK: Called template_func with double
+// CHECK: Called template_func with float
+// CHECK: Called template_func with float
+// CHECK: Called template_func with fp16
+// CHECK: Called template_func with bf16

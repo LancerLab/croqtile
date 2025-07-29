@@ -2,8 +2,8 @@
 
 // RUN: choreo -t topscc -es %s -o - | FileCheck %s --check-prefix=CODEGEN-OPT
 // RUN: choreo -t topscc -es -dlo=false %s -o - | FileCheck %s --check-prefix=CODEGEN
-// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines --check-prefix=END2END %s && rm -f %s.topscc.result
-// RUN: choreo -gs -t topscc -dlo=false %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines --check-prefix=END2END %s && rm -f %s.topscc.result
+// RUN-GCU300: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines --check-prefix=END2END %s && rm -f %s.topscc.result
+// RUN-GCU300: choreo -gs -t topscc -dlo=false %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines --check-prefix=END2END %s && rm -f %s.topscc.result
 
 #include <functional>
 #include <cmath>

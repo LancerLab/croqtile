@@ -1,5 +1,6 @@
 // REQUIRES: TARGET-GCUALL
-// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+// RUN-GCU210: choreo -gs -t topscc -arch=gcu210 %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --check-prefix=CHK200 --match-full-lines %s && rm -f %s.topscc.result
+// RUN-GCU300: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
 __co__ void foo() {
   parallel q by 1, p by 2 {
     mutable int a = 12;
@@ -25,6 +26,10 @@ int main() {
   foo();
   return 0;
 }
+
+// CHK200: Block ID 0, Thread ID 1 Sub-thread 0 print debug buffer
+// CHK200: a:12, b:13, c:4, d:9, e:-13, f:48, g:3
+// CHK200: p12:13, p5:32, p6:0, negp:-2
 
 // CHECK: [0, 1] a:12, b:13, c:4, d:9, e:-13, f:48, g:3
 // CHECK: [0, 1] p12:13, p5:32, p6:0, negp:-2
