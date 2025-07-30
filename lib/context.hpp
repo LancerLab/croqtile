@@ -453,6 +453,14 @@ public:
     return 0;
   }
 
+  size_t GetSingleVectorByteSize() {
+    switch (GetArch()) {
+    case TargetArch::GCU3: return 128;
+    case TargetArch::GCU4: return 1024;
+    default: choreo_unreachable("Unsupported target arch.");
+    }
+  }
+
 public:
   // Getters of compiler configurations
   bool DumpAst() const { return dump_ast; }

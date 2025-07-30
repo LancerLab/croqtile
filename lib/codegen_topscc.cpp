@@ -123,16 +123,6 @@ inline const std::string GetDTEContextName() {
   return "choreo_topscc_ctx" + std::to_string(i++);
 }
 
-inline size_t GetSingleVectorByteSize(const std::string& arch) {
-  if (arch == "gcu300") {
-    return 128;
-  } else if (arch == "gcu400") {
-    return 1024;
-  } else {
-    choreo_unreachable("unsupported architecture for vector byte size.");
-  }
-  return 0;
-}
 
 inline void PrintSubscriptions(std::ostream& os, const std::string prefix,
                                const std::string suffix,
@@ -174,11 +164,11 @@ inline const std::string VectorTypeSTR(const ptr<VectorType>& vt) {
   auto elem_size = SizeOf(elem_ty);
   auto vector_size = elem_size * ec;
   std::string vty_str;
-  if (vector_size == GetSingleVectorByteSize(arch.GetValue()))
+  if (vector_size == CCtx().GetSingleVectorByteSize())
     vty_str = "__vector ";
-  else if (vector_size == 2 * GetSingleVectorByteSize(arch.GetValue()))
+  else if (vector_size == 2 * CCtx().GetSingleVectorByteSize())
     vty_str = "__vector2 ";
-  else if (vector_size == 4 * GetSingleVectorByteSize(arch.GetValue()))
+  else if (vector_size == 4 * CCtx().GetSingleVectorByteSize())
     vty_str = "__vector4 ";
   else
     choreo_unreachable(
