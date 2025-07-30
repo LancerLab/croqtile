@@ -281,6 +281,7 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
           within_map.emplace(sname, std::vector<std::string>{sname});
           bv_map.emplace(sname, std::vector<std::string>{sname});
           ssm.MapDeviceSymbol(sname, "__iv_" + iv->name);
+          ssm.MapHostSymbol(sname, "__iv_" + iv->name);
           return true;
         }
       }
@@ -293,7 +294,6 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
         auto elem_ty = da_ty->e_type;
         auto ec = da_ty->ec;
         auto elem_size = SizeOf(elem_ty);
-        auto vector_size = elem_size * ec;
         std::string vty_str = VectorTypeSTR(da_ty);
 
         auto data_name = da->GetDataName();

@@ -31,6 +31,109 @@ inline Storage TargetLevel(int depth) {
   return Storage::NONE;
 }
 
+struct LoopNorm final : public VisitorWithScope {
+public:
+  std::map<std::string, ptr<AST::MultiValues>> within_map; // map of with-in
+
+  LoopNorm() : VisitorWithScope("loopnorm") {}
+  bool BeforeVisitImpl(AST::Node& n) override {
+    if (trace_visit) dbgs() << "before visiting " << n.TypeNameString() << "\n";
+    return true;
+  }
+  bool AfterVisitImpl(AST::Node& n) override {
+    if (trace_visit) dbgs() << "after visiting " << n.TypeNameString() << "\n";
+    return true;
+  }
+
+  bool Visit(AST::WithIn& n) override {
+    if (n.with && n.with_matchers) {
+      within_map[n.with->name] = n.with_matchers;
+    }
+    return true;
+  }
+
+  bool Visit(AST::MultiNodes& n) override {
+    for (size_t idx = 0; idx < n.Count(); ++idx) {
+      if (auto fb = dyn_cast<AST::ForeachBlock>(n.SubAt(idx))) {
+        if (fb->IsNorm()) continue; // already normalized
+        std::vector<ptr<AST::ForeachBlock>> loops;
+        auto rng = dyn_cast<AST::LoopRange>(fb->ranges->ValueAt(0));
+        auto rng_type = dyn_cast<BoundedITupleType>(rng->GetType());
+        if (fb->ranges->Count() == 1 && rng_type && rng_type->Dims() > 1) {
+          assert(!fb->suffixs || fb->suffixs->None());
+
+          auto cname = rng->IVName();
+          // create foreachblocks for each index variable
+          for (auto with : within_map[cname]->values) {
+            auto with_iv = AST::GetIdentifier(with);
+
+            auto iv_ty = with_iv->GetType();
+            auto iv_name = with_iv->name;
+            auto new_iv =
+                AST::Make<AST::Identifier>(rng->LOC(), iv_name);
+            new_iv->SetType(iv_ty);
+            auto ranges = AST::Make<AST::MultiValues>(fb->ranges->LOC());
+            ranges->Append(AST::Make<AST::LoopRange>(rng->LOC(), new_iv));
+            auto stmts = AST::Make<AST::MultiNodes>(fb->stmts->LOC());
+            auto new_fb =
+                AST::Make<AST::ForeachBlock>(fb->LOC(), ranges, stmts);
+            loops.push_back(new_fb);
+          }
+        } else {
+          const auto& ranges = fb->GetRangeNodes();
+          for (size_t i = 0; i < ranges->Count(); ++i) {
+            auto rng = cast<AST::LoopRange>(ranges->ValueAt(i));
+            auto ranges = AST::Make<AST::MultiValues>(rng->LOC());
+            ranges->Append(rng);
+            auto stmts = AST::Make<AST::MultiNodes>(fb->stmts->LOC());
+            auto new_fb =
+                AST::Make<AST::ForeachBlock>(fb->LOC(), ranges, stmts);
+            loops.push_back(new_fb);
+          }
+        }
+        // construct the loop hierarchy
+        size_t loop_level = 0;
+        for (; loop_level < loops.size() - 1; ++loop_level) {
+          assert(loops[loop_level]->stmts);
+          loops[loop_level]->stmts->Append(loops[loop_level + 1]);
+        }
+        // apply suffixes to the correct loop level
+        auto suffixs = fb->suffixs;
+        if (suffixs && suffixs->Count() > 0) {
+          for (auto& suffix : suffixs->values) {
+            auto suffix_call = AST::GetCall(suffix);
+            assert(suffix_call && "expect a suffix call to be a Call node.");
+            auto args = suffix_call->arguments;
+            auto arg_id = AST::GetIdentifier(args->ValueAt(0));
+            bool found = false;
+            for (size_t j = 0; j < loops.size(); ++j) {
+              auto sub_fb = loops[j];
+              assert(sub_fb->ranges->Count() == 1 &&
+                     "expect only one range in the loop hierarchy.");
+              if (arg_id->name ==
+                  dyn_cast<AST::LoopRange>(sub_fb->GetRanges()[0])->IVName()) {
+                found = true;
+                sub_fb->suffixs = suffixs;
+              }
+            }
+            // suffixes are not matched to any loop index variable
+            if (!found) {
+              Error(suffix_call->LOC(),
+                    "suffix expr '" + PSTR(suffix) +
+                        "' does not match any loop index variable.");
+            }
+          }
+        }
+
+        loops[loop_level]->stmts = fb->stmts;
+        // replace the original node with the new loop hierarchy
+        n.values[idx] = loops[0];
+      }
+    }
+    return true;
+  }
+};
+
 struct Normalizer : public VisitorWithScope {
 private:
   bool changed = false;
@@ -1093,6 +1196,27 @@ public:
   bool Visit(AST::ChoreoFunction&) override { return true; }
   bool Visit(AST::CppSourceCode&) override { return true; }
   bool Visit(AST::Program&) override { return true; }
+  bool RunOnProgram(AST::Node& root) override {
+    if (!isa<AST::Program>(&root)) {
+      Error(root.LOC(), "Not running a choreo program.");
+      return false;
+    }
+
+    if (prt_visitor) dbgs() << "|- " << GetName() << NewL;
+
+    if (!disabled) root.accept(*this);
+
+    if (HasError() || abend_after) return false;
+
+    if (CCtx().LoopNorm()) {
+      LoopNorm ln;
+      if (prt_visitor) dbgs() << " |- " << ln.GetName() << NewL;
+      root.accept(ln);
+      if (ln.HasError()) return false;
+    }
+
+    return true;
+  }
 };
 
 } // end namespace Choreo

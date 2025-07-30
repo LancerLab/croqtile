@@ -140,6 +140,8 @@ Option<bool> analyze_device_functions(
     "Analyze the device functions in the choreo code. (Experimental)");
 Option<bool> branch_norm(OptionKind::Hidden, "--branch-norm", "-bn", false,
                          "Normalize the if-else branches in the choreo code.");
+Option<bool> loop_norm(OptionKind::Hidden, "--loop-norm", "-ln", false,
+                       "Normalize the loops in the choreo code.");
 
 // Some system missed c++17 filesystem support. Use POSIX instead
 inline bool file_exists(const std::string& filename) {
@@ -282,6 +284,7 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetSimplifyFpValno(simplify_fp_valno.GetValue());
   CCtx().SetVerifyVisitors(verify_visitors.GetValue());
   CCtx().SetBranchNorm(branch_norm.GetValue());
+  CCtx().SetLoopNorm(loop_norm.GetValue());
 
   if (!trace_visit.GetValue().empty())
     setenv("CHOREO_TRACE_VISITOR", ToUpper(trace_visit.GetValue()).c_str(), 1);

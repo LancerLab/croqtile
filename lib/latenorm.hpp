@@ -547,8 +547,7 @@ public:
     if (n.HasElse()) return true;
 
     auto if_stmts = n.if_stmts;
-    if (!if_stmts || if_stmts->Count() == 0)
-      return true;
+    if (!if_stmts || if_stmts->Count() == 0) return true;
     // unfold nested if-else blocks
     if (if_stmts->Count() == 1) {
       if (auto single_IF = dyn_cast<AST::IfElseBlock>(if_stmts->values[0])) {

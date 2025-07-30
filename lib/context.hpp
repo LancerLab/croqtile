@@ -340,6 +340,7 @@ private:
   bool verify = false;            // verify visitors for legality
   bool gen_debug_info = false;    // generate debug information
   bool branch_norm = false;       // enable branch normalization
+  bool loop_norm = false;         // enable loop normalization
 
 private:
   std::shared_ptr<SymbolTable> sym_tab = nullptr; // global symbol table
@@ -471,6 +472,7 @@ public:
   bool VerifyVisitors() const { return verify; }
   bool GenDebugInfo() const { return gen_debug_info; }
   bool BranchNorm() const { return branch_norm; }
+  bool LoopNorm() const { return loop_norm; }
 
   // Setters of compiler configurations
   void SetDumpAst(bool value) { dump_ast = value; }
@@ -490,6 +492,7 @@ public:
   void SetVerifyVisitors(bool value) { verify = value; }
   void SetGenDebugInfo(bool value) { gen_debug_info = value; }
   void SetBranchNorm(bool value) { branch_norm = value; }
+  void SetLoopNorm(bool value) { loop_norm = value; }
 
   const std::unordered_map<std::string, std::string>& GetCLMacros() const {
     return cl_macros;

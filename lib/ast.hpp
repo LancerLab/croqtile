@@ -2649,6 +2649,15 @@ struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
 
   void accept(Visitor&) override;
 
+  bool IsNorm() {
+    if (ranges->Count() != 1) return false;
+    auto range = ranges->ValueAt(0);
+    auto range_type = dyn_cast<BoundedITupleType>(range->GetType());
+    if (!range_type) return false;
+
+    return range_type->Dims() == 1;
+  }
+
   __UDT_TYPE_INFO__(Node, ForeachBlock)
 };
 
