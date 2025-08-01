@@ -382,6 +382,7 @@ public:
     return std::to_string(value) + suffix;
   }
   int64_t Value() const { return value; }
+  void SetValue(int64_t v) { value = v; }
   size_t Hash() const override { return std::hash<int64_t>{}(Value()); }
 
   bool IsNumeric() const override { return true; }
@@ -422,7 +423,7 @@ public:
   bool IsTrue() const { return value == true; }
   bool IsFalse() const { return value == false; }
 
-  bool IsNumeric() const override { return true; }
+  bool IsNumeric() const override { return false; }
   bool IsBoolean() const override { return true; }
   bool Computable() const override { return true; }
 
@@ -554,10 +555,22 @@ private:
   Operand right;
 
 public:
-  BinaryOperation(OpCode op, const Operand& left, const Operand& right)
-      : op(op), left(left), right(right) {}
+  BinaryOperation(OpCode o, const Operand& l, const Operand& r)
+      : op(o), left(l), right(r) {
+    // always turn subtract to add to enable association
+    if (op == OpCode::SUBTRACT && right->IsNumeric()) {
+      op = OpCode::ADD;
+      right = nu(-cast<NumericValue>(r)->Value());
+    }
+  }
 
   const std::string ToString(const std::string& suffix = "") const override {
+    if (op == OpCode::ADD && right->IsNumeric()) {
+      int64_t v = cast<NumericValue>(right)->Value();
+      if (v < 0)
+        return "(" + left->ToString(suffix) + " - " + std::to_string(-v) + ")";
+    }
+
     return "(" + left->ToString(suffix) + " " + STR(op) + " " +
            right->ToString(suffix) + ")";
   }

@@ -1369,6 +1369,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     if (!dma_opt) return DMA_OP::none;
     if (SymbolToSymbol()) return DMA_OP::none;
     if (HasReshape()) return DMA_OP::none;
+    if (f_ca->AllOperations().size() > 1 || t_ca->AllOperations().size() > 1)
+      return DMA_OP::none;
 
     // if `ts` is contiguous in `s`
     auto IsContiguous = [&](Shape s, Shape ts) {
@@ -2796,6 +2798,16 @@ const std::string TopsccCodeGen::OpValueSTR(const ValueItem& vi,
     std::string res = op + OpValueSTR(uo->GetOperand(), op, false);
     return WrapParen(res, op);
   } else if (auto bo = VIBop(vi)) {
+    if (bo->GetOpCode() == OpCode::ADD) {
+      if (auto rv = VIInt(bo->GetRight()); rv && rv.value() < 0) {
+        std::string res = OpValueSTR(bo->GetLeft(), "-", true) + " - " +
+                          std::to_string(-rv.value());
+        if (rv.value() >= (int64_t)std::numeric_limits<int32_t>::max() ||
+            rv.value() <= (int64_t)std::numeric_limits<int32_t>::min())
+          res += "LL";
+        return WrapParen(res, "-");
+      }
+    }
     std::string op = STR(bo->GetOpCode());
     std::string res = OpValueSTR(bo->GetLeft(), op, true) + " " + op + " " +
                       OpValueSTR(bo->GetRight(), op, false);

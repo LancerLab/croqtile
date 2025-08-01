@@ -1,4 +1,4 @@
-// RUN: choreo -es %s | FileCheck --match-full-lines --check-prefix=CHECK %s
+// RUN: choreo -dlo=false -es %s | FileCheck --match-full-lines --check-prefix=CHECK %s
 
 __co__ auto foo(f32 [M] a, s16 [M, N] b, int x, int y, double d) {
   int r1 = cdiv(x, 5) + y;

@@ -191,3 +191,15 @@ TEST_F(ExpressionTest, Divdiv) {
   auto norm = SimplifyExpression(expr);
   EXPECT_EQ(norm->ToString(), "((a + 2) / 20)");
 }
+
+TEST_F(ExpressionTest, SubSubAdd) {
+  // ((H - 1) - 0) + 1 should normalize to H
+  auto H = make_symbolic("H");
+  auto one = make_numeric(1);
+  auto zero = make_numeric(0);
+
+  auto r = H - one - zero + one;
+
+  auto norm = SimplifyExpression(r);
+  EXPECT_EQ(norm->ToString(), H->ToString());
+}
