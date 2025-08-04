@@ -1,9 +1,9 @@
 // REQUIRES: TARGET-GCUALL
 
 // RUN: choreo -t topscc -es %s -o - | FileCheck %s --check-prefix=CODEGEN-OPT
-// RUN: choreo -t topscc -es -dlo=false %s -o - | FileCheck %s --check-prefix=CODEGEN
+// RUN: choreo -t topscc -es -fopt-dma=false %s -o - | FileCheck %s --check-prefix=CODEGEN
 // RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines --check-prefix=END2END %s && rm -f %s.topscc.result
-// RUN: choreo -gs -t topscc -dlo=false %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines --check-prefix=END2END %s && rm -f %s.topscc.result
+// RUN: choreo -gs -t topscc -fopt-dma=false %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines --check-prefix=END2END %s && rm -f %s.topscc.result
 
 #include <cmath>
 #include "choreo.h"
@@ -21,7 +21,7 @@ __co__ auto foo(s32[N,8] input2) {
   return t;
 }
 
-// CODEGEN-OPT:  tops::mdspan __mds0_input2(tops::Global, (int*)input2 + (__iv_idx__elem__0 * 8) + 0, 1, 8);
+// CODEGEN-OPT:  tops::mdspan __mds0_input2(tops::Global, (int*)input2 + (0 * 8 + __iv_idx__elem__0 * 8), 1, 8);
 // CODEGEN-OPT:  tops::mdspan __mds1_i1__buf__(tops::Private, (int*)i1__buf__, 1, 8);
 // CODEGEN-OPT:  tops::memcpy(*i1.get_ctx(), __mds1_i1__buf__, __mds0_input2);
 
@@ -43,7 +43,7 @@ __co__ auto bar(f32 [8, 12, 24] a) {
   return ans;
 }
 
-// CODEGEN-OPT:  tops::mdspan __mds4_a(tops::Global, (float*)a + (__tops_tid_x() * 576) + 0 + 0, 2, 12, 24);
+// CODEGEN-OPT:  tops::mdspan __mds4_a(tops::Global, (float*)a + (0 * 24 + (0 * 288 + __tops_tid_x() * 576)), 2, 12, 24);
 // CODEGEN-OPT:  tops::mdspan __mds5_ans_l(tops::Private, (float*)ans_l, 12, 24, 2);
 // CODEGEN-OPT:  int __transpose_layout0__a[] = {1, 2, 0};
 // CODEGEN-OPT:  tops::transpose(*__choreo_anon_fut__1.get_ctx(), __mds5_ans_l, __mds4_a, __transpose_layout0__a);
@@ -67,7 +67,7 @@ __co__ auto baz(f32 [8, 12, 24] a) {
 }
 
 // CODEGEN-OPT: tops::mdspan __mds10_l(tops::Private, (float*)l.data(), 8, 3, 24);
-// CODEGEN-OPT: tops::mdspan __mds11_ans(tops::Global, (float*)ans + (__tops_tid_x() * 576) + 0 + 0, 3, 24, 8);
+// CODEGEN-OPT: tops::mdspan __mds11_ans(tops::Global, (float*)ans + (0 * 8 + (0 * 192 + __tops_tid_x() * 576)), 3, 24, 8);
 // CODEGEN-OPT: int __transpose_layout1__l[] = {1, 2, 0};
 // CODEGEN-OPT: tops::transpose(*__choreo_anon_fut__3.get_ctx(), __mds11_ans, __mds10_l, __transpose_layout1__l);
 
@@ -77,18 +77,92 @@ __co__ auto baz(f32 [8, 12, 24] a) {
 // CODEGEN:     int __deslice_offset0__ans_2_l[] = {(int)(__tops_tid_x() * 3), 0, 0};
 // CODEGEN:     tops::transpose_deslice(*__choreo_anon_fut__3.get_ctx(), __mds11_ans, __mds10_l, __transpose_layout1__l, __deslice_offset0__ans_2_l);
 
+__co__ auto ccc_sss(s32[4, 8, 16] input) {
+  
+  global s32 [input.span] t{55};
+  parallel p by 4 {
+    foreach {x, y} in [8, 2] {
+      i1 = dma.copy input.chunkat(p, _, _).chunkat(_, x, _).chunkat(_, _, y) => local;
+      dma.copy i1.data => t.subspan(1, 8, 16).at(p, _, _).subspan(1, 1, 16).at(_, x, _).subspan(1, 1, 8).at(_, _, y);
+    }
+  }
 
-// The program should be able to run properly.
+  return t;
+}
+
+// CODEGEN-OPT: tops::mdspan __mds12_input(tops::Global, (int*)input + (0 * 16 + (0 * 16 + (0 * 16 + (0 * 128 + (0 * 16 + (0 * 128 + __tops_tid_x() * 128)) + __iv_x * 16))) + __iv_y * 8), 1, 1, 8);
+// CODEGEN-OPT: tops::mdspan __mds13_i1__buf__(tops::Private, (int*)i1__buf__, 1, 1, 8);
+// CODEGEN-OPT: tops::memcpy(*i1.get_ctx(), __mds13_i1__buf__, __mds12_input);
+// CODEGEN-OPT: tops::mdspan __mds14_i1(tops::Private, (int*)i1.data(), 1, 1, 8);
+// CODEGEN-OPT: tops::mdspan __mds15_t(tops::Global, (int*)t + (0 * 16 + (0 * 16 + (0 * 16 + (0 * 128 + (0 * 16 + (0 * 128 + __tops_tid_x() * 128)) + __iv_x * 16))) + __iv_y * 8), 1, 1, 8);
+// CODEGEN-OPT: tops::memcpy(*__choreo_anon_fut__4.get_ctx(), __mds15_t, __mds14_i1);
+
+// CODEGEN:     tops::mdspan __mds12_input(tops::Global, (int*)input, 4, 8, 16);
+// CODEGEN:     tops::mdspan __mds13_i1__buf__(tops::Private, (int*)i1__buf__, 1, 1, 8);
+// CODEGEN:     int __slice_offset2__input_2_i1__buf__[] = {(int)(__tops_tid_x() * 1) + 0 + 0, 0 + (int)(__iv_x * 1) + 0, 0 + 0 + (int)(__iv_y * 8)};
+// CODEGEN:     tops::slice(*i1.get_ctx(), __mds13_i1__buf__, __mds12_input, __slice_offset2__input_2_i1__buf__);
+// CODEGEN:     tops::mdspan __mds14_i1(tops::Private, (int*)i1.data(), 1, 1, 8);
+// CODEGEN:     tops::mdspan __mds15_t(tops::Global, (int*)t, 4, 8, 16);
+// CODEGEN:     int __deslice_offset2__t_2_i1[] = {(int)(__tops_tid_x() * 1) + 0 + 0, 0 + (int)(__iv_x * 1) + 0, 0 + 0 + (int)(__iv_y * 8)};
+// CODEGEN:     tops::deslice(*__choreo_anon_fut__4.get_ctx(), __mds15_t, __mds14_i1, __deslice_offset2__t_2_i1);
+
+__co__ auto rcrs_rsrc(s32[4*8*16] input) {
+  
+  global s32 [input.span] t{55};
+  parallel p by 1 {
+    si = dma.copy input => shared;
+    foreach {z, x, y} in [4, 4, 2] {
+      dma.copy si.data.span_as(4, 8, 16).chunkat(z, _, _).span_as(4, 32).subspan(1, 16).at(x, y) =>
+        t.span_as(4, 8, 16).subspan(1, 8, 16).at(z, _, _).span_as(4, 32).chunkat(x, y);
+    }
+  }
+
+  return t;
+}
+
+// CODEGEN-OPT: tops::mdspan __mds18_si(tops::Shared, (int*)si.data() + (__iv_y * 16 + (__iv_x * 32 + (0 * 16 + (0 * 128 + __iv_z * 128)))), 1, 16);
+// CODEGEN-OPT: tops::mdspan __mds19_t(tops::Global, (int*)t + (__iv_y * 16 + (__iv_x * 32 + (0 * 16 + (0 * 128 + __iv_z * 128)))), 1, 16);
+// CODEGEN-OPT: tops::memcpy(*__choreo_anon_fut__5.get_ctx(), __mds19_t, __mds18_si);
+
+// CODEGEN:     tops::mdspan __mds18_si(tops::Shared, (int*)si.data() + (0 * 16 + (0 * 128 + __iv_z * 128)), 4, 32);
+// CODEGEN:     tops::mdspan __mds19_t(tops::Global, (int*)t + (0 * 16 + (0 * 128 + __iv_z * 128)), 4, 32);
+// CODEGEN:     int __slice_offset0__si_2_t[] = {(int)(__iv_x * 1), (int)(__iv_y * 16)};
+// CODEGEN:     int __deslice_offset0__t_2_si[] = {(int)(__iv_x * 1), (int)(__iv_y * 16)};
+// CODEGEN:     unsigned int __slice_shape1__si_2_t[] = {1, 16};
+// CODEGEN:     tops::slice_deslice(*__choreo_anon_fut__5.get_ctx(), __mds19_t, __mds18_si, __slice_offset0__si_2_t, __slice_shape1__si_2_t, __deslice_offset0__t_2_si);
+
+__co__ auto not_contiguous(s32[8*16*128] input2) {
+  // the dma is not optimizable.
+  global s32 [128*128] t{55};
+  parallel p by 2, q by 4
+    foreach idx in [16]
+      dma.copy input2.span_as(8, 16, 128).chunkat(p, _, _).span_as(64, 128).chunkat(q, idx) =>
+        t.span_as(128, 128).chunkat(p#q, idx);
+
+  return t;
+}
+
+// CODEGEN-OPT: tops::mdspan __mds20_input2(tops::Global, (int*)input2 + (0 * 128 + (0 * 2048 + __tops_bid_x() * 8192)), 64, 128);
+// CODEGEN-OPT: tops::mdspan __mds21_t(tops::Global, (int*)t + 0, 128, 128);
+// CODEGEN-OPT: int __slice_offset0__input2_2_t[] = {(int)(__tops_tid_x() * 16), (int)(__iv_idx__elem__0 * 8)};
+// CODEGEN-OPT: int __deslice_offset0__t_2_input2[] = {(int)(anon_3 * 16), (int)(__iv_idx__elem__0 * 8)};
+// CODEGEN-OPT: unsigned int __slice_shape1__input2_2_t[] = {16, 8};
+// CODEGEN-OPT: tops::slice_deslice(*__choreo_anon_fut__6.get_ctx(), __mds21_t, __mds20_input2, __slice_offset0__input2_2_t, __slice_shape1__input2_2_t, __deslice_offset0__t_2_input2);
+
+// CODEGEN:     tops::mdspan __mds20_input2(tops::Global, (int*)input2 + (0 * 128 + (0 * 2048 + __tops_bid_x() * 8192)), 64, 128);
+// CODEGEN:     tops::mdspan __mds21_t(tops::Global, (int*)t + 0, 128, 128);
+// CODEGEN:     int __slice_offset1__input2_2_t[] = {(int)(__tops_tid_x() * 16), (int)(__iv_idx__elem__0 * 8)};
+// CODEGEN:     int __deslice_offset1__t_2_input2[] = {(int)(anon_3 * 16), (int)(__iv_idx__elem__0 * 8)};
+// CODEGEN:     unsigned int __slice_shape2__input2_2_t[] = {16, 8};
+// CODEGEN:     tops::slice_deslice(*__choreo_anon_fut__6.get_ctx(), __mds21_t, __mds20_input2, __slice_offset1__input2_2_t, __slice_shape2__input2_2_t, __deslice_offset1__t_2_input2);
+
 int main() {
   auto input2 = choreo::make_spandata<choreo::s32>(4, 8);
   input2.fill_random(-10, 10);
-  
   auto res = foo(input2.view());
-  
   for (int i = 0; i < res.shape()[0]; ++i)
     for (int j = 0; j < res.shape()[1]; ++j)
       choreo::choreo_assert(res[i][j] == input2[i][j], "error");
-  
   std::cout << "foo pass\n";
 
 
@@ -121,6 +195,32 @@ int main() {
       }
 
   std::cout << "baz pass\n";
+
+  auto input3 = choreo::make_spandata<choreo::s32>(4, 8, 16);
+  input3.fill_random(-10, 10);
+  auto res3 = ccc_sss(input3.view());
+  for (int i = 0; i < res3.shape()[0]; ++i)
+    for (int j = 0; j < res3.shape()[1]; ++j)
+      for (int k = 0; k < res3.shape()[2]; ++k)
+        choreo::choreo_assert(res3[i][j][k] == input3[i][j][k], "error");
+  std::cout << "ccc_sss pass\n";
+
+  auto input4 = choreo::make_spandata<choreo::s32>(4*8*16);
+  input4.fill_random(-10, 10);
+  auto res4 = rcrs_rsrc(input4.view());
+  for (int i = 0; i < res4.shape()[0]; ++i)
+    if (res4[i] != input4[i])
+      choreo::choreo_assert(res4[i] == input4[i], "error");
+  std::cout << "rcrs_rsrc pass\n";
+
+  auto input5 = choreo::make_spandata<choreo::s32>(8*16*128);
+  input5.fill_random(-10, 10);
+  auto res5 = not_contiguous(input5.view());
+  for (int i = 0; i < res5.shape()[0]; ++i)
+    if (res5[i] != input5[i])
+      choreo::choreo_assert(res5[i] == input5[i], "error");
+  std::cout << "not_contiguous pass\n";
+
   
   return 0;
 }
@@ -128,3 +228,6 @@ int main() {
 // END2END: foo pass
 // END2END: bar pass
 // END2END: baz pass
+// END2END: ccc_sss pass
+// END2END: rcrs_rsrc pass
+// END2END: not_contiguous pass

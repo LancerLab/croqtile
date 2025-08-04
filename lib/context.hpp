@@ -178,8 +178,14 @@ public:
       choreo_unreachable("invalid value item.");
     return val_exprs[0];
   }
-  const ValueList& GetVals() const { return val_exprs; }
-  ValueList& GetVals() { return val_exprs; }
+  const ValueList& GetVals() const {
+    if (!HasVals()) choreo_unreachable("have no value.");
+    return val_exprs;
+  }
+  ValueList& GetVals() {
+    if (!HasVals()) choreo_unreachable("have no value.");
+    return val_exprs;
+  }
   ValueItem GetSize() const { return size_expr; }
   const ValueItem GetUBound() const {
     if (ub_exprs.size() != 1)
@@ -417,7 +423,6 @@ public:
   bool SimplifyFpValno() const { return simplify_fp_valno; }
   bool VerifyVisitors() const { return verify; }
   bool GenDebugInfo() const { return gen_debug_info; }
-  bool DmaLinearOpt() const { return dma_linear_opt; }
 
   // Setters of compiler configurations
   void SetDumpAst(bool value) { dump_ast = value; }
@@ -436,7 +441,6 @@ public:
   void SetSimplifyFpValno(bool value) { simplify_fp_valno = value; }
   void SetVerifyVisitors(bool value) { verify = value; }
   void SetGenDebugInfo(bool value) { gen_debug_info = value; }
-  void SetDmaLinearOpt(bool value) { dma_linear_opt = value; }
 
   const std::unordered_map<std::string, std::string>& GetCLMacros() const {
     return cl_macros;

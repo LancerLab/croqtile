@@ -286,9 +286,18 @@ bool ShapeInference::Visit(AST::Expr& n) {
   case VNKind::VNK_UBOUND: {
     auto vl = vn.GenValueListFromSignature(GetSign(n));
     if (ShouldOpt(vl)) {
-      n.Opts().SetVals(vl);
+      // If there is symval of `id`, use it first (`id` is the with in
+      // AST::WithIn). For example, `id` = `within_0::index`, then `vl` is just
+      // the symbolic expr `within_0::index`, which is useless. While the symval
+      // is `within_0::index__elem__0, within_0::index__elem__1`, which is
+      // useful when generating offset in spanned operation.
+      if (auto id = AST::GetIdentifier(n);
+          id && SymVal(InScopeName(id->name)).HasVals())
+        n.Opts().SetVals(SymVal(InScopeName(id->name)).GetVals());
+      else
+        n.Opts().SetVals(vl);
       VST_DEBUG(dbgs() << " |-<exprval> <" << PSTR(nty) << "> " << STR(n)
-                       << ": " << STR(vl) << "\n");
+                       << ": " << STR(n.Opts().GetVals()) << "\n");
     }
     auto ub_vl = vn.GenValueListFromSignature(GetSign(n, VNKind::VNK_UBOUND));
     if (ShouldOpt(ub_vl)) n.Opts().SetUBounds(ub_vl);
@@ -925,6 +934,13 @@ bool ShapeInference::Visit(AST::WithIn& n) {
     auto sname = SSTab().ScopedName(n.with->name);
     auto vv = GetOrGenValNum(sname);
     ast_vn.Update(n.with.get(), vv, VNKind::VNK_VALUE);
+
+    // fill the detail values
+    if (n.with_matchers) CollapseMultiValues(*n.with_matchers);
+    SymVal(sname).SetVals(
+        vn.GenValueListFromValueNumber(ast_vn.Get(n.with_matchers.get())));
+    VST_DEBUG(dbgs() << " |-<symval> " << sname << ": "
+                     << STR(SymVal(sname).GetVals()) << "\n");
 
     // upper-bound valnos
     SymbolAliasNum(SSTab().ScopedName("@" + n.with->name), cur_mdspan_vn);

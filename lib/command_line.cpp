@@ -130,9 +130,6 @@ Option<bool> print_node_type(OptionKind::Hidden, "--print-node-type", "-pnt",
                              false, "Print node with its type.");
 Option<bool> verify_visitors(OptionKind::Hidden, "--verify", "-vf", false,
                              "verify all visitors for legality.");
-Option<bool> dma_linear_opt(
-    OptionKind::Hidden, "--dma-linear-optimize", "-dlo", true,
-    "Optimize dma of slice or deslice to linear copy if possible.");
 
 // TODO: add mechanism to handle GCC-style "-f" options
 Option<bool> no_show_source(
@@ -252,7 +249,6 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetMemReuse(mem_reuse.GetValue());
   CCtx().SetSimplifyFpValno(simplify_fp_valno.GetValue());
   CCtx().SetVerifyVisitors(verify_visitors.GetValue());
-  CCtx().SetDmaLinearOpt(dma_linear_opt.GetValue());
 
   if (!trace_visit.GetValue().empty())
     setenv("CHOREO_TRACE_VISITOR", ToUpper(trace_visit.GetValue()).c_str(), 1);
