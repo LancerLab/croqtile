@@ -350,14 +350,15 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
   auto& fty = n.from->GetType();
   auto& tty = n.to->GetType();
 
+  auto sfty = cast<SpannedType>(fty);
+  auto stty = cast<SpannedType>(tty);
+  auto f_shape = sfty->GetShape();
+  auto t_shape = stty->GetShape();
+
   if (n.operation == ".transp") {
     // no transposed shape need to be generated
     // do LogicalEqual() manually
     auto tc = cast<TransposeConfig>(n.config);
-    auto sfty = cast<SpannedType>(fty);
-    auto stty = cast<SpannedType>(tty);
-    auto f_shape = sfty->GetShape();
-    auto t_shape = stty->GetShape();
     if (sfty->e_type != stty->e_type || !f_shape.SameRankAs(t_shape)) {
       Error(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
                          ") with " + PSTR(tc) + " and 'to'(" + PSTR(tty) +
@@ -380,10 +381,6 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
     // no padded shape need to be generated
     // do LogicalEqual() manually
     auto pc = cast<PadConfig>(n.config);
-    auto sfty = cast<SpannedType>(fty);
-    auto stty = cast<SpannedType>(tty);
-    auto f_shape = sfty->GetShape();
-    auto t_shape = stty->GetShape();
     if (sfty->e_type != stty->e_type || !f_shape.SameRankAs(t_shape)) {
       Error(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
                          ") with " + PSTR(pc) + " and 'to'(" + PSTR(tty) +
@@ -411,9 +408,45 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
     }
   } else if (!(cast<SpannedType>(fty)->LogicalEqual(*tty)) &&
              !allow_auto_threading) {
-    Error(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
-                       ") and 'to'(" + PSTR(tty) + ").");
-    error_count++;
+    // check: to-buffer size must be larger or equal than from
+    auto asrt = sbe::bop(OpCode::LE, f_shape.ElementCountValue(),
+                         t_shape.ElementCountValue())
+                    ->Normalize();
+    assert(IsValidValueItem(asrt));
+
+    auto message = "DMA to-buffer is too small (" +
+                   STR(f_shape.ElementCountValue()) + " > " +
+                   STR(t_shape.ElementCountValue()) + ").";
+    EmitAssertion(asrt, message, n.LOC(), n.from);
+
+    bool emit_error = true;
+    std::string msg;
+    if (f_shape != t_shape && f_shape.IsValid() && t_shape.IsValid()) {
+      // ignore the symbolic value inconsistance
+      for (size_t i = 0; i < f_shape.Rank(); ++i) {
+        auto& fv = f_shape.ValueAt(i);
+        auto& tv = t_shape.ValueAt(i);
+        if (!IsValueItemEqual(fv, tv)) {
+          if (tv->IsSymbolic() || fv->IsSymbolic()) {
+            emit_error = false;
+            msg += " 'from[" + std::to_string(i) + "](" + STR(fv) +
+                   ")' v.s. 'to[" + std::to_string(i) + "](" + STR(tv) + ")";
+            continue;
+          } else {
+            emit_error = true;
+            break;
+          }
+        }
+      }
+    }
+    if (emit_error) {
+      Error(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
+                         ") and 'to'(" + PSTR(tty) + ").");
+      error_count++;
+    } else {
+      Warning(n.LOC(),
+              "Dimensions could be inconsistent between DMA" + msg + ").");
+    }
   }
 
   return true;
@@ -790,11 +823,15 @@ void SemaChecker::EmitAssertion(const ValueItem& pred,
   } else {
     if (local_deps.Contains(n)) {
       // TODO: emit device check that is related to the local values
-      VST_DEBUG(dbgs() << "failed to generate check for " << STR(n) << ".\n");
+      if (isa<AST::Expr>(n) || isa<AST::NamedVariableDecl>(n) ||
+          isa<AST::Assignment>(n))
+        VST_DEBUG(dbgs() << "failed to generate check for " << STR(n) << ".\n");
     } else {
-      if (!input_deps.Contains(n))
-        VST_DEBUG(dbgs() << "questionable: check is not related to input: "
-                         << PSTR(n) << ".\n");
+      if (isa<AST::Expr>(n) || isa<AST::NamedVariableDecl>(n) ||
+          isa<AST::Assignment>(n))
+        if (!input_deps.Contains(n))
+          VST_DEBUG(dbgs() << "questionable: check is not related to input: "
+                           << PSTR(n) << ".\n");
 
       FCtx(fname).InsertAssertion(pred, l, message);
     }

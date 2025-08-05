@@ -312,6 +312,7 @@ public:
   virtual const std::string ToString(const std::string& = "") const = 0;
   virtual bool IsNumeric() const = 0;
   virtual bool IsBoolean() const = 0;
+  virtual bool IsSymbolic() const = 0;
   virtual size_t Hash() const = 0;
   virtual bool operator==(const SymbolicExpression&) const = 0;
   virtual bool IsLeaf() const = 0;
@@ -355,6 +356,7 @@ public:
 
   bool IsNumeric() const override { return false; }
   bool IsBoolean() const override { return false; }
+  bool IsSymbolic() const override { return false; }
   bool Computable() const override { return false; }
 
   bool operator==(const SymbolicExpression& op) const override {
@@ -387,6 +389,7 @@ public:
 
   bool IsNumeric() const override { return true; }
   bool IsBoolean() const override { return false; }
+  bool IsSymbolic() const override { return false; }
   bool Computable() const override { return true; }
 
   bool operator==(const SymbolicExpression& op) const override {
@@ -425,6 +428,7 @@ public:
 
   bool IsNumeric() const override { return false; }
   bool IsBoolean() const override { return true; }
+  bool IsSymbolic() const override { return false; }
   bool Computable() const override { return true; }
 
   bool operator==(const SymbolicExpression& op) const override {
@@ -458,6 +462,7 @@ public:
 
   bool IsNumeric() const override { return false; }
   bool IsBoolean() const override { return false; }
+  bool IsSymbolic() const override { return true; }
   bool Computable() const override { return true; }
 
   bool operator==(const SymbolicExpression& op) const override {
@@ -498,6 +503,7 @@ public:
 
   bool IsNumeric() const override { return oprd->IsNumeric(); }
   bool IsBoolean() const override { return false; }
+  bool IsSymbolic() const override { return oprd->IsSymbolic(); }
   bool Computable() const override { return oprd->Computable(); }
 
   bool operator==(const SymbolicExpression& expr) const override {
@@ -579,6 +585,9 @@ public:
     return left->IsNumeric() && right->IsNumeric();
   }
   bool IsBoolean() const override { return false; }
+  bool IsSymbolic() const override {
+    return left->IsSymbolic() || right->IsSymbolic();
+  }
   bool Computable() const override {
     return left->Computable() && right->Computable();
   }
@@ -932,6 +941,9 @@ public:
     return left->IsNumeric() && right->IsNumeric();
   }
   bool IsBoolean() const override { return false; }
+  bool IsSymbolic() const override {
+    return pred->IsSymbolic() || left->IsSymbolic() || right->IsSymbolic();
+  }
   bool Computable() const override {
     return pred->Computable() && left->Computable() && right->Computable();
   }

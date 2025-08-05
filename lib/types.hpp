@@ -603,6 +603,10 @@ inline bool operator==(const Shape& lhs, const Shape& rhs) {
          IsValueListEqual(lhs.Value(), rhs.Value());
 }
 
+inline bool operator!=(const Shape& lhs, const Shape& rhs) {
+  return !(lhs == rhs);
+}
+
 using MultiBounds = Shape; // using a shape as a multi-bound
 
 inline MultiBounds operator-(const MultiBounds& lhs, const MultiBounds& rhs) {
