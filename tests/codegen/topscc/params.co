@@ -21,6 +21,6 @@ __co__ auto mou(half8 d, half c, float a, bfp16 e, s32 [7] b) {
 // CHECK: __global__ void __choreo_device_mou(choreo::half8 d, choreo::half c, float a, choreo::bfp16 e, int * b) {
 // CHECK:   __local__ __valigned__ unsigned char anon_2[512];
 // CHECK:   int* l_b = (int*)(anon_2 + 0);
-// CHECK:   miao((int*)l_b, a, 7, c, d, e);
+// CHECK:   miao((__private__ int*)l_b, a, 7, c, d, e);
 // CHECK: }
 // CHECK: void mou(choreo::half8 d, choreo::half c, float a, choreo::bfp16 e, const choreo::spanned_view<choreo::s32, 1> & b)

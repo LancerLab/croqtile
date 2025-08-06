@@ -22,4 +22,3 @@ __co__ void func() {
 // CHECK: error: `e' with a type of "unknown mdspan<>" can not be declared as 'mutable'.
 // CHECK: error: `f' with a type of "s32 mdspan<>" can not be declared as 'mutable'.
 // CHECK: warning: can not infer the type of `g' from the initialization expression '
-// CHECK: error: unable to inference the type from `g's initialization expression.

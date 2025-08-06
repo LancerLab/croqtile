@@ -774,10 +774,12 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
       force_mutable = true;
       if (analyze_device_functions) {
         ety = n.init_expr->GetType();
-        if (isa<UnknownType>(ety))
+        if (isa<UnknownType>(ety)) {
           Warning(n.LOC(), "can not infer the type of `" + n.name_str +
                                "' from the initialization expression '" +
                                STR(n.init_expr) + "'.");
+          ety = nullptr;
+        }
       } else
         ety = nullptr;
     }

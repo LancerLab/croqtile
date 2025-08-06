@@ -104,6 +104,15 @@ inline const char* TopsDeviceMemory(Storage st) {
   return "";
 }
 
+inline std::string TopsParamStorage(Storage st) {
+  switch (st) {
+  case Storage::SHARED: return "__shared__";
+  case Storage::LOCAL: return "__private__";
+  default: return "";
+  }
+  return "";
+}
+
 inline const std::string GetDTEContextName() {
   static unsigned i = 0;
   return "choreo_topscc_ctx" + std::to_string(i++);
@@ -3271,6 +3280,10 @@ const std::string TopsccCodeGen::CallSTR(AST::Call& n) const {
     oss << ((i++ == 0) ? "" : ", ");
     if (auto sty = GetSpannedType(NodeType(*a))) {
       std::string bts{NameBaseType(sty->ElementType(), IsHost())};
+      auto m_ty = sty->GetStorage();
+      auto mem_attr = TopsParamStorage(m_ty);
+      if (!mem_attr.empty())
+        bts = mem_attr + " " + bts;
       if (!no_decay_spanview || IsHost())
         oss << "(" << bts << "*)" << ExprSTR(a, IsHost());
       else

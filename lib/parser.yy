@@ -418,6 +418,7 @@ device_attr
     | STATIC { $$ = $1; }
     | INLINE { $$ = $1; }
     | EXTERN { $$ = $1; }
+    | EXTERN VAL { $$ = $1 + " " + $2; }
     | ATTRIBUTE device_attr_lists {
         $$ = $1 + $2;
       }
