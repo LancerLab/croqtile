@@ -855,9 +855,11 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
 
     // check for type consistency between annotation and init expr.
     if (!isa<UnknownType>(tty) && !tty->ApprxEqual(*ety)) {
-      Error1(n.LOC(), "`" + n.name_str + "' is declared as \"" +
-                          PSTR(n.type->GetType()) + "\" but initialized as \"" +
-                          PSTR(n.init_expr->GetType()) + "\".");
+      if (!n.IsMutable())
+        Error1(n.LOC(), "`" + n.name_str + "' is declared as \"" +
+                            PSTR(n.type->GetType()) +
+                            "\" but initialized as \"" +
+                            PSTR(n.init_expr->GetType()) + "\".");
       // keep working
     }
 
@@ -865,7 +867,7 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
       // update with the mutable attributes
       if (auto sty = dyn_cast<ScalarType>(ety)) {
         ety = sty->Clone(n.IsMutable());
-      } else if (IsActualBoundedIntegerType(sty)) {
+      } else if (IsActualBoundedIntegerType(ety)) {
         // decay a bounded integer to be integer when it is mutable
         ety = MakeIntegerType(true);
       } else {

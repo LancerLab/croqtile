@@ -3232,8 +3232,7 @@ const std::string TopsccCodeGen::CallSTR(AST::Call& n) const {
       std::string bts{NameBaseType(sty->ElementType(), IsHost())};
       auto m_ty = sty->GetStorage();
       auto mem_attr = TopsParamStorage(m_ty);
-      if (!mem_attr.empty())
-        bts = mem_attr + " " + bts;
+      if (!mem_attr.empty()) bts = mem_attr + " " + bts;
       if (!no_decay_spanview || IsHost())
         oss << "(" << bts << "*)" << ExprSTR(a, IsHost());
       else

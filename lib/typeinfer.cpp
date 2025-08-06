@@ -120,6 +120,10 @@ bool TypeInference::SetAsCurrentType(AST::Node& nd, const std::string& n) {
   const auto nty = nd.GetType();
   if (nty->HasSufficientInfo()) {
     // already has a type with sufficient info, check for consistence.
+
+    // ignore mutable integer type
+    if (IsMutable(*nty)) return true;
+
     if (cur_type->HasSufficientInfo()) {
       if (BetterQuality(cur_type, nty)) {
         SetNodeType(nd, ShadowTypeStorage(cur_type));
@@ -572,7 +576,8 @@ bool TypeInference::Visit(AST::Expr& n) {
         return true;
       } else {
         Error(n.LOC(), "The operands of the expression cannot undergo '" +
-                           n.op + "' logical operation.");
+                           n.op + "' logical operation, the types are '" +
+                           PSTR(pty_lhs) + "' and '" + PSTR(pty_rhs) + "'");
         error_count++;
         return false;
       }
@@ -728,10 +733,13 @@ bool TypeInference::Visit(AST::Expr& n) {
 
       if (pty_lhs->HasSufficientInfo() && pty_rhs->HasSufficientInfo()) {
         if (*pty_lhs != *pty_rhs) {
-          Error(n.LOC(), "The operands of the expression cannot undergo '" +
-                             n.op + "' operation.");
-          error_count++;
-          return false;
+          if (!(IsMutable(*pty_lhs) || IsMutable(*pty_rhs))) {
+            Error1(n.LOC(), "The operands of the expression cannot undergo '" +
+                                n.op + "' operation, the types are '" +
+                                PSTR(pty_lhs) + "' and '" + PSTR(pty_rhs) +
+                                "'");
+            return false;
+          }
         }
         SetNodeType(n, pty_lhs);
         cur_type = n.GetType();

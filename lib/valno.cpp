@@ -77,7 +77,7 @@ ValueItem ValueNumbering::GenValueItemFromSignature(const SignTy& input) {
         auto lvi = GenValueItemFromSignature(SignNum(oprds[0]));
         auto rvi = GenValueItemFromSignature(SignNum(oprds[1]));
         if (lvi && rvi) return sbe::bop(ToOpCode(op), lvi, rvi)->Normalize();
-      } else if ((op == "cdiv")) {
+      } else if (op == "cdiv") {
         auto lvi = GenValueItemFromSignature(SignNum(oprds[0]));
         auto rvi = GenValueItemFromSignature(SignNum(oprds[1]));
         if (lvi && rvi)
