@@ -26,7 +26,6 @@ __co__ void foo(f32 [128, 72] a, f32 [1024, 512, 256] b) {
 #else
     dma.copy a.subspan(42, 18).at(q0, q1) => local;
     dma.copy a.modspan(31, 11).at(q0, q1) => local;
-    dma.copy a.subspan(32, 16).at(q0, q1).modspan(9, 7).at(q0, p) => local;
 #endif
   }
 }
@@ -34,4 +33,3 @@ __co__ void foo(f32 [128, 72] a, f32 [1024, 512, 256] b) {
 // CHECK: {(int)(__tops_bid_x() * 64), (int)(__tops_tid_x() * 24)}
 // CHECK: {(int)(__tops_tid_x() * 42), (int)(__tops_tid_y() * 18)}
 // CHECK: {(int)(__tops_tid_x() * 31), (int)(__tops_tid_y() * 11)}
-// CHECK: {(int)(__tops_tid_x() * 32) + (int)(__tops_tid_x() * 9), (int)(__tops_tid_y() * 16) + (int)(__tops_bid_x() * 7)}

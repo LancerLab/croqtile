@@ -449,6 +449,31 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
     }
   }
 
+  // Check if the spanned operations are valid
+  for (const auto& ca_node : {n.from, n.to}) {
+    const auto& ca = cast<AST::ChunkAt>(ca_node);
+    if (ca->NoTilingOperation()) continue;
+    Shape original_shape = GetShape(GetSymbolType(ca->RefSymbol()));
+    bool has_noncontiguous = false;
+    size_t last_tiling = 0;
+    for (size_t i = 0; i < ca->OpCount(); ++i)
+      if (!ca->OpAt(i)->SpecifyReshape()) last_tiling = i;
+    for (size_t i = 0; i < ca->OpCount(); ++i) {
+      const auto& sop = ca->OpAt(i);
+      if (!AST::IsContiguousSOp(*sop, original_shape)) {
+        has_noncontiguous = true;
+        if (i != last_tiling)
+          Error1(
+              sop->LOC(),
+              "Only the last tiling can be executed in noncontiguous manner.");
+      }
+      if (has_noncontiguous && sop->SpecifyReshape())
+        Error1(sop->LOC(), "Reshape operation inside DMA expression can not be "
+                           "executed on a noncontiguous tiling result.");
+      original_shape = sop->GetBlockShape();
+    }
+  }
+
   return true;
 }
 

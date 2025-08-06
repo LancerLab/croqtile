@@ -450,70 +450,28 @@ TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
 // Example:
 //
 //   f32 [10, 9, 8] a;
-//   ... a.subspan(3, 4, 5).at(p, q, r).span_as(...);
+//   ... a.subspan(2, 9, 8).at(p, _, _).span_as(...);
 //
 // The "Tile Base Offset" (offset ahead of last span_as) is:
 //
-//    tbo = p * (3 * 4 * 5) + q * (4 * 5) + r * 5
+//    tbo = p * 2 * (9 * 8)
 //
-const ValueItem
+const std::string
 TopsccCodeGen::TileBaseOffset(const ptr<AST::ChunkAt>& ca) const {
-  Shape outer_shape = GetSpannedType(GetSymbolType(ca->data->name))->GetShape();
-
-  auto offset = sbe::nu(0);
-  if (!ca->HasReshape()) return offset;
-
-  size_t sidx = 0;
   auto lidx = ca->IndexOfLastSpanAs();
-
-  // outer_shape is the shape of original span
-  // new_shape is the shape of tiled span
-  Shape new_shape;
-  for (auto& sop : ca->AllOperations()) {
-    if (sop->SpecifyReshape()) {
-      outer_shape = sop->GetBlockShape();
-    } else {
-      new_shape = sop->GetBlockShape();
-      size_t i = 0;
-      for (auto p : sop->GetIndices()) {
-        if (const auto& o = dyn_cast<AST::Expr>(p)->Opts(); o.HasVals()) {
-          const auto& vals = o.GetVals();
-          for (auto val : vals) {
-            auto outer_factor = sbe::nu(1);
-            if (outer_shape.Rank() > i + 1)
-              outer_factor = outer_shape.TrimDims(i + 1).ElementCountValue();
-            auto factor = new_shape.ValueAt(i) * outer_factor;
-            offset = offset + val * factor;
-            ++i;
-          }
-        } else {
-          auto idx_exprs =
-              SplitStringByDelimiter(OpExprSTR(p, "*", true, IsHost()));
-          for (auto i_expr : idx_exprs) {
-            ValueItem outer_factor = sbe::nu(1);
-            if (outer_shape.Rank() > i + 1)
-              outer_factor = outer_shape.TrimDims(i + 1).ElementCountValue();
-            auto factor = new_shape.ValueAt(i) * outer_factor;
-            offset = offset + sbe::sym(i_expr) * factor;
-            ++i;
-          }
-        }
-      }
-      outer_shape = new_shape;
-    }
-
-    // reach the last span_as, we are done
-    if (lidx.has_value() && *lidx == sidx) break;
-    ++sidx;
-  }
-  return offset;
+  if (!lidx.has_value()) choreo_unreachable("unexpect");
+  return GenOffset(ca, lidx.value());
 }
 
 // given i.sop(...).sop(...)..., generate the offset of the final span in the
 // original span. It is VALID if and only if the final span is
-// address-continuous within the original span
-const std::string TopsccCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca) const {
+// address-contiguous within the original span.
+// end_idx: the offset is computed by sop in range [0, end_idx).
+const std::string TopsccCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
+                                           size_t end_idx) const {
   if (ca->NoOperation()) return "";
+
+  end_idx = std::min(end_idx, ca->OpCount());
 
   Shape outer_shape = GetSpannedType(GetSymbolType(ca->data->name))->GetShape();
 
@@ -522,7 +480,8 @@ const std::string TopsccCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca) const {
   // outer_shape is the shape of original span
   // new_shape is the shape of tiled span
   Shape new_shape;
-  for (auto& sop : ca->AllOperations()) {
+  for (size_t i = 0; i < end_idx; ++i) {
+    const auto& sop = ca->OpAt(i);
     if (sop->SpecifyReshape()) {
       outer_shape = sop->GetBlockShape();
     } else {
@@ -1422,54 +1381,22 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     both = src | dst
   };
 
-  // Check the current DMA. If the new span is address-continuous within the
+  // Check the current DMA. If the new span is address-contiguous within the
   // original span, then slice or deslice can be optimized to linear copy.
   auto OptToLinearCopy = [&]() -> DMA_OP {
     if (!dma_opt) return DMA_OP::none;
     if (SymbolToSymbol()) return DMA_OP::none;
 
-    // if `ts` is contiguous in `s`
-    auto IsContiguous = [&](Shape s, Shape ts) {
-      int rank = s.Rank();
-
-      // TODO: if nil*nil*64, then the stride is ?
-      // workaround: modify nil to a dummy value.
-      auto ModifyNil = [](Shape& s) {
-        auto vl = s.Value();
-        for (auto& vi : vl)
-          if (VIIsNil(vi)) vi = sbe::nu(2);
-        return s = Shape(s.Rank(), vl);
-      };
-      ModifyNil(s);
-      ModifyNil(ts);
-
-      auto ComputeStrides = [rank](const Shape s) -> ValueList {
-        ValueList strides(rank, sbe::nu(1));
-        for (int i = rank - 2; i >= 0; --i)
-          strides[i] = strides[i + 1] * s.ValueAt(i + 1);
-        return strides;
-      };
-      auto strides = ComputeStrides(s);
-
-      ValueList last_idx(rank);
-      for (int k = 0; k < rank; ++k) last_idx[k] = ts.ValueAt(k) - sbe::nu(1);
-      auto first = sbe::nu(0);
-      auto last = std::inner_product(last_idx.begin(), last_idx.end(),
-                                     strides.begin(), sbe::nu(0));
-      auto N = ts.ElementCountValue();
-      return IsValueItemEqual(last - first + sbe::nu(1), N);
-    };
-
     auto IsOptimizableChunkat = [&](const ptr<AST::ChunkAt>& ca) -> bool {
       Shape shape, new_shape;
       shape = GetSpannedType(GetSymbolType(ca->RefSymbol()))->GetShape();
       // check the shape transformation of each op inside ca
-      for (auto& sop : ca->AllOperations()) {
+      for (const auto& sop : ca->AllOperations()) {
         if (sop->SpecifyReshape()) {
           shape = sop->GetBlockShape();
         } else {
           new_shape = sop->GetBlockShape();
-          if (!IsContiguous(shape, new_shape)) return false;
+          if (!IsContiguousSOp(*sop, shape)) return false;
           shape = new_shape;
         }
       }
@@ -1508,9 +1435,6 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     return optimizable;
   };
 
-  // indicate which side can be optimized to linear copy
-  DMA_OP opt_to_linear_copy = OptToLinearCopy();
-
   auto [f_buf_name, f_buf_expr] = GetBufferExpr(f_sym, f_idx, f_ty);
   auto [t_buf_name, t_buf_expr] = GetBufferExpr(t_sym, t_idx, t_ty);
 
@@ -1519,6 +1443,9 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
 
   Shape f_shape = f_sty->GetShape();
   Shape t_shape = t_sty->GetShape();
+
+  // indicate which side can be optimized to linear copy
+  DMA_OP opt_to_linear_copy = OptToLinearCopy();
 
   if (opt_to_linear_copy != DMA_OP::none) {
     if (TileToSymbol()) {
@@ -1541,11 +1468,11 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     }
   } else {
     if (auto idx = f_ca->IndexOfLastSpanAs()) {
-      f_mds_offset = ValueSTR(TileBaseOffset(f_ca));
+      f_mds_offset = TileBaseOffset(f_ca);
       f_shape = f_ca->OpAt(*idx)->GetBlockShape();
     }
     if (auto idx = t_ca->IndexOfLastSpanAs()) {
-      t_mds_offset = ValueSTR(TileBaseOffset(t_ca));
+      t_mds_offset = TileBaseOffset(t_ca);
       t_shape = t_ca->OpAt(*idx)->GetBlockShape();
     }
   }

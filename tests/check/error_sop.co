@@ -1,0 +1,21 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ auto foo(s32[2, 16, 128] input2) {
+  
+  global s32 [32, 128] t{55};
+  parallel p by 2, q by 4
+    foreach i in [16] {
+      dma.copy input2.chunkat(p, q, i).span_as(4, 8) =>
+        t.chunkat(p#q, i);
+      dma.copy input2.chunkat(p, q, _).span_as(1, 4*128) => local;
+      foreach j in [4]
+        dma.copy input2.chunkat(_, p, q).chunkat(_, j, i) => local;
+    }
+
+  return t;
+}
+
+// CHECK: error: Reshape operation inside DMA expression can not be executed on a noncontiguous tiling result.
+// CHECK: error: Only the last tiling can be executed in noncontiguous manner.
+// CHECK-NOT: error:
+// CHECK: Totally 2 errors have been detected.

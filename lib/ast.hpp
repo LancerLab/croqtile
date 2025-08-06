@@ -2,6 +2,7 @@
 #define __CHOREO_AST_HPP__
 
 #include <memory>
+#include <numeric>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -2072,6 +2073,46 @@ private:
     }
   }
 };
+
+// Return true if the block after applying the operation is contiguous in the
+// original block.
+inline bool IsContiguousSOp(const SpannedOperation& k, Shape original_shape) {
+  if (k.SpecifyReshape()) return true;
+
+  Shape new_shape = k.GetBlockShape();
+  assert(original_shape.SameRankAs(new_shape));
+
+  size_t rank = original_shape.Rank();
+
+  // TODO: if nil*nil*64, then the stride is ?
+  // workaround: modify nil to a dummy value.
+  auto ModifyNil = [](Shape& s) {
+    auto vl = s.Value();
+    for (auto& vi : vl)
+      if (VIIsNil(vi)) vi = sbe::nu(2);
+    return s = Shape(s.Rank(), vl);
+  };
+  ModifyNil(original_shape);
+  ModifyNil(new_shape);
+
+  auto ComputeStrides = [rank](const Shape s) -> ValueList {
+    ValueList strides(rank, sbe::nu(1));
+    for (int i = rank - 2; i >= 0; --i)
+      strides[i] = strides[i + 1] * s.ValueAt(i + 1);
+    return strides;
+  };
+  auto strides = ComputeStrides(original_shape);
+
+  ValueList last_idx(rank);
+  for (size_t k = 0; k < rank; ++k)
+    last_idx[k] = new_shape.ValueAt(k) - sbe::nu(1);
+  auto first = sbe::nu(0);
+  auto last = std::inner_product(last_idx.begin(), last_idx.end(),
+                                 strides.begin(), sbe::nu(0));
+  auto N = new_shape.ElementCountValue();
+
+  return IsValueItemEqual(last - first + sbe::nu(1), N);
+}
 
 inline const std::string STR(const SpannedOperation::Kind& k) {
   switch (k) {
