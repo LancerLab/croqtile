@@ -521,7 +521,7 @@ private:
         if (std::regex_match(bline, match, defineRegex))
           globalDefines[match[1]] = match[2].matched ? match[2].str() : "1";
         else {
-          defineRegex = std::regex(R"(#define\s+(\w+)\((.*)\)\s+(.*))");
+          defineRegex = std::regex(R"(#define\s+(\w+)\(([^)]*)\)\s+(.*))");
           if (std::regex_match(bline, match, defineRegex)) {
             assert(match[2].matched && match[3].matched &&
                    "Expecting a function-like macro definition.");
@@ -806,7 +806,7 @@ private:
         if (std::regex_match(bline, match, defineRegex)) {
           localDefines[match[1]] = match[2].matched ? match[2].str() : "1";
         } else {
-          defineRegex = std::regex(R"(#define\s+(\w+)\((.*)\)\s+(.*))");
+          defineRegex = std::regex(R"(#define\s+(\w+)\(([^)]*)\)\s+(.*))");
           if (std::regex_match(bline, match, defineRegex)) {
             assert(match[2].matched && match[3].matched &&
                    "Expecting a function-like macro definition.");
