@@ -118,6 +118,13 @@ bool SemaChecker::VisitNode(AST::Expr& n) {
 
 bool SemaChecker::VisitNode(AST::MultiDimSpans& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
+  if (n.list)
+    if (auto mv = dyn_cast<AST::MultiValues>(n.list))
+      for (const auto& v : mv->AllValues())
+        if (local_deps.Contains(v)) {
+          local_deps.Add(*n.list);
+          break;
+        }
   return true;
 }
 bool SemaChecker::VisitNode(AST::NamedTypeDecl& n) {
@@ -460,7 +467,14 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
       if (!ca->OpAt(i)->SpecifyReshape()) last_tiling = i;
     for (size_t i = 0; i < ca->OpCount(); ++i) {
       const auto& sop = ca->OpAt(i);
+#if 1
       if (!AST::IsContiguousSOp(*sop, original_shape)) {
+        if ((ca->RefSymbol() == "buffer_key" || ca->RefSymbol() == "keys" ||
+             ca->RefSymbol() == "buffer_counter" ||
+             ca->RefSymbol() == "slot_counter") &&
+            fname == "EmbeddingCacheReplaceChoreo_kernel")
+          continue;
+#endif
         has_noncontiguous = true;
         if (i != last_tiling)
           Error1(

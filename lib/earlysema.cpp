@@ -693,11 +693,7 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
   if (auto mvals = dyn_cast<AST::MultiValues>(n.list)) {
     for (auto& v : mvals->AllValues()) {
       bool is_mutable = false;
-      if (mutables.Contains(v)) {
-        Error1(v->LOC(),
-               "the mutable value can not be used for the mdspan declaration.");
-        is_mutable = true;
-      }
+      if (mutables.Contains(v)) is_mutable = true;
       if (is_mutable) mutables.Add(*v);
     }
   }
@@ -1359,8 +1355,6 @@ bool EarlySemantics::Visit(AST::WithIn& n) {
 
   size_t rank = 0;
   if (auto itty = dyn_cast<ScalarIntegerType>(ity)) {
-    if (itty->IsMutable())
-      Error1(n.in->LOC(), "mutable integer can not be used inside with-in.");
     rank = 1;
   } else if (auto mdst = dyn_cast<MDSpanType>(ity)) {
     rank = mdst->Dims();
@@ -1679,12 +1673,6 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
 
   for (auto op : n.AllOperations()) {
     op->accept(*this);
-
-    for (auto v : op->GetTFSSNodes()) {
-      if (mutables.Contains(v))
-        Error1(v->LOC(), "the mutable value can not be used for the "
-                         ".chunk/.subspan/.modspan expression.");
-    }
 
     if (op->SpecifyReshape()) {
       size_t r_count = 0;

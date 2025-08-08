@@ -62,9 +62,9 @@ public:
              isa<AST::SpanAs>(n) || isa<AST::ChunkAt>(n) ||
              isa<AST::NoValue>(n) || isa<AST::DataType>(n))
       return false;
-    else if (auto c = dyn_cast<AST::Call>(n)) {
+    else if (auto c = dyn_cast<AST::Call>(n))
       return nodes.count(c.get());
-    } else
+    else
       choreo_unreachable("unsupported node: " + n->TypeNameString() + ": " +
                          PSTR(n) + ".");
     return false;

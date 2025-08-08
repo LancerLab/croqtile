@@ -1,172 +1,267 @@
 // EmbeddingCacheReplaceChoreo kernel for Choreo
+#include "choreo.h"
 
-// --------- choreo utility function implementation ---------
+// Add missing function declarations and macros
+#define min_(a, b) (((a) > (b)) ? (b) : (a))
+#define ceil_(a, b) (((a) + (b) - 1) / (b))
+#define CIRCULAR_LEFT_SHIFT(x, shift, bits) (((x) << (shift)) | ((x) >> ((bits) - (shift))))
+
 __cok__ {
-    // MurmurHash3_32: hash each key, result mod index_mod
-    template <typename key_type, uint32_t m_seed = 0>
-    __co_device__ void MurmurHash3_32(
-        __private__ key_type* keys,
-        __private__ uint32_t* index,
-        int index_mod,
-        int keys_count)
-    {
-        constexpr uint32_t c1 = 0xcc9e2d51;
-        constexpr uint32_t c2 = 0x1b873593;
-        constexpr uint32_t n = 0xe6546b64;
 
-        constexpr int vector_length = TCLE_MAX_VECTOR_LENGTH;
-        using VT = tcle::simple_altivector<unsigned int>::VT;
-        auto index_ptr = tcle::simple_leaptr<VT>(index);
-
-        int vectors_count = ceil_(keys_count, vector_length);
-        for (int i = 0; i < vectors_count; i++) {
-            auto hash = (VT)m_seed;
-            // body
-            auto key_low = get_i64_part<key_type, vector_length, false>(keys + i * vector_length);
-            key_low = key_low * c1;
-            key_low = CIRCULAR_LEFT_SHIFT(key_low, 15, 32);
-            key_low *= c2;
-            hash ^= key_low;
-            hash = CIRCULAR_LEFT_SHIFT(hash, 13, 32);
-            hash = hash * 5 + n;
-            auto key_high = get_i64_part<key_type, vector_length, true>(keys + i * vector_length);
-            key_high = key_high * c1;
-            key_high = CIRCULAR_LEFT_SHIFT(key_high, 15, 32);
-            key_high *= c2;
-            hash ^= key_high;
-            hash = CIRCULAR_LEFT_SHIFT(hash, 13, 32);
-            hash = hash * 5 + n;
-            // finalization
-            hash ^= (uint32_t)(sizeof(key_type));
-            hash ^= hash >> 16;
-            hash *= 0x85ebca6b;
-            hash ^= hash >> 13;
-            hash *= 0xc2b2ae35;
-            hash ^= hash >> 16;
-            index_ptr.store(hash % index_mod);
-        }
-    }
-
-    template <typename T, int vector_length>
-    __co_device__ int index(__private__ T* array, T key) {
-        // find the first index of matching key in array
-        using vtype = typename tcle::altivector<unsigned int, vector_length>::VT;
-        auto v_key_high = (vtype)(static_cast<unsigned int>(key >> 32));
-        auto v_key_low = (vtype)(static_cast<unsigned int>(key & 0xFFFFFFFF));
-        auto v_array_high = get_i64_part<T, vector_length, true>(array);
-        auto v_array_low = get_i64_part<T, vector_length, false>(array);
-        auto v_mask_high = (v_key_high == v_array_high);
-        auto v_mask_low = (v_key_low == v_array_low);
-        auto v_mask = (v_mask_high & v_mask_low);
-        // OR bits together (vpt0, vpt1)
-        int has_one = tcle::aggr_mb<0, 0>(v_mask) | tcle::aggr_mb<0, 1>(v_mask);
-        return (has_one) ? bit_index(v_mask) : -1;
-    }
-
-    template <typename T, int vector_length>
-    __co_device__ int argmin(__private__ T* array, int segment_length = vector_length, int priority_segment = 0) {
-        // find the first index of min_value in array
-        using vtype = typename tcle::altivector<unsigned int, vector_length>::VT;
-        auto v_high = get_i64_part<T, vector_length, true>(array);
-        auto v_high_min = (vtype)tcle::redmin<1>(v_high)[0];
-        auto v_high_mask = (v_high == v_high_min);
-        auto v_low = get_i64_part<T, vector_length, false>(array);
-        auto v_low_valid = tcle::vsel(v_high_mask, v_low, (vtype)0);
-        auto v_low_min = (vtype)tcle::redmin<1>(v_low_valid)[0];
-        auto v_low_mask = (v_low_valid == v_low_min);
-        auto v_min_mask = (v_high_mask & v_low_mask);
-
-        auto v_priority_mask = (range<vector_length>() >= (priority_segment * segment_length));
-        auto v_priority_min_mask = (v_min_mask & v_priority_mask);
-        if (tcle::aggr_mb<0, 0>(v_priority_min_mask) | tcle::aggr_mb<0, 1>(v_priority_min_mask))
-            return bit_index(v_priority_min_mask);
-        return bit_index(v_min_mask);
+template <int N>
+constexpr typename tcle::altivector<unsigned int, N>::VT range() {
+    using vtype = typename tcle::altivector<unsigned int, N>::VT;
+    if constexpr (N == 32) {
+        return (vtype){
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+            16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31};
+	return tcle::extract<__vector unsigned int, 0>(tcle::mid<__vector4 unsigned int, 1>(0));
+    } else if constexpr (N == 64) {
+        return (vtype){
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+            16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+            32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
+            48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63};
+	//return tcle::extract<__vector2 unsigned int, 0>(tcle::mid<__vector4 unsigned int, 1>(0));
+    } else if constexpr (N == 128) {
+        return (vtype){
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+            16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+            32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
+            48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
+            64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79,
+            80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95,
+            96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111,
+            112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127};
+	//return tcle::mid<__vector4 unsigned int, 1>(0);
+    } else {
+        static_assert(N == 32 || N == 64 || N == 128, "Unsupported type");
     }
 }
+
+template <typename VBT>
+constexpr int bit_size_of_mask() {
+    if constexpr (tcle::is_same_vt<VBT, __vector bool int>::value) {
+        return 32;
+    } else if constexpr (tcle::is_same_vt<VBT, __vector2 bool int>::value) {
+        return 64;
+    } else if constexpr (tcle::is_same_vt<VBT, __vector4 bool int>::value) {
+        return 128;
+    } else {
+        static_assert(tcle::is_same_vt<VBT, __vector bool int>::value ||
+            tcle::is_same_vt<VBT, __vector2 bool int>::value ||
+            tcle::is_same_vt<VBT, __vector4 bool int>::value,
+            "Unsupported type");
+    }
+}
+
+
+template <typename VBT>
+__device__ int bit_index(VBT v_mask) {
+    // find the index of 1 in 32 bits
+    constexpr int vector_length = bit_size_of_mask<VBT>();
+    using vtype = typename tcle::altivector<unsigned int, vector_length>::VT;
+    constexpr auto idx_seq = range<vector_length>();
+    constexpr auto len_seq = (vtype)vector_length;
+    auto valid_idx = tcle::vsel(v_mask, idx_seq, len_seq);
+    return tcle::redmin<1>(valid_idx)[0];  // <1> for res_raw
+}
+
+template <typename T, int vector_length, bool high>
+__co_device__ typename tcle::altivector<unsigned int, vector_length>::VT
+get_i64_part(T* ptr) {
+    using vtype = typename tcle::altivector<unsigned int, vector_length>::VT;
+    auto off_steps = range<vector_length>() * sizeof(T) + (high ? sizeof(unsigned int) : 0);
+    return tcle::gather<vtype>((__attribute__((address_space(5))) void *)((long)ptr), off_steps);
+}
+
+// MurmurHash3_32: hash each key, result mod index_mod
+template <typename key_type, uint32_t m_seed = 0>
+__co_device__ void MurmurHash3_32(
+    __private__ key_type* keys,
+    __private__ uint32_t* index,
+    int index_mod,
+    int keys_count)
+{
+    constexpr uint32_t c1 = 0xcc9e2d51;
+    constexpr uint32_t c2 = 0x1b873593;
+    constexpr uint32_t n = 0xe6546b64;
+
+    constexpr int vector_length = TCLE_MAX_VECTOR_LENGTH;
+    using VT = tcle::simple_altivector<unsigned int>::VT;
+    auto index_ptr = tcle::simple_leaptr<VT>(index);
+
+    int vectors_count = ceil_(keys_count, vector_length);
+    for (int i = 0; i < vectors_count; i++) {
+        auto hash = (VT)m_seed;
+        // body
+        auto key_low = get_i64_part<key_type, vector_length, false>(keys + i * vector_length);
+        key_low = key_low * c1;
+        key_low = CIRCULAR_LEFT_SHIFT(key_low, 15, 32);
+        key_low *= c2;
+        hash ^= key_low;
+        hash = CIRCULAR_LEFT_SHIFT(hash, 13, 32);
+        hash = hash * 5 + n;
+        auto key_high = get_i64_part<key_type, vector_length, true>(keys + i * vector_length);
+        key_high = key_high * c1;
+        key_high = CIRCULAR_LEFT_SHIFT(key_high, 15, 32);
+        key_high *= c2;
+        hash ^= key_high;
+        hash = CIRCULAR_LEFT_SHIFT(hash, 13, 32);
+        hash = hash * 5 + n;
+        // finalization
+        hash ^= (uint32_t)(sizeof(key_type));
+        hash ^= hash >> 16;
+        hash *= 0x85ebca6b;
+        hash ^= hash >> 13;
+        hash *= 0xc2b2ae35;
+        hash ^= hash >> 16;
+        index_ptr.store(hash % index_mod);
+    }
+}
+
+template <typename T, int vector_length>
+__co_device__ int get_index(__private__ T* array, T key) {
+    // find the first index of matching key in array
+    using vtype = typename tcle::altivector<unsigned int, vector_length>::VT;
+    auto v_key_high = (vtype)(static_cast<unsigned int>(key >> 32));
+    auto v_key_low = (vtype)(static_cast<unsigned int>(key & 0xFFFFFFFF));
+    auto v_array_high = get_i64_part<T, vector_length, true>(array);
+    auto v_array_low = get_i64_part<T, vector_length, false>(array);
+    auto v_mask_high = (v_key_high == v_array_high);
+    auto v_mask_low = (v_key_low == v_array_low);
+    auto v_mask = (v_mask_high & v_mask_low);
+    // OR bits together (vpt0, vpt1)
+    int has_one = tcle::aggr_mb<0, 0>(v_mask) | tcle::aggr_mb<0, 1>(v_mask);
+    return (has_one) ? bit_index(v_mask) : -1;
+}
+
+template <typename T, int vector_length>
+__co_device__ int argmin(__private__ T* array, int segment_length = vector_length, int priority_segment = 0) {
+    // find the first index of min_value in array
+    using vtype = typename tcle::altivector<unsigned int, vector_length>::VT;
+    auto v_high = get_i64_part<T, vector_length, true>(array);
+    auto v_high_min = (vtype)tcle::redmin<1>(v_high)[0];
+    auto v_high_mask = (v_high == v_high_min);
+    auto v_low = get_i64_part<T, vector_length, false>(array);
+    auto v_low_valid = tcle::vsel(v_high_mask, v_low, (vtype)0);
+    auto v_low_min = (vtype)tcle::redmin<1>(v_low_valid)[0];
+    auto v_low_mask = (v_low_valid == v_low_min);
+    auto v_min_mask = (v_high_mask & v_low_mask);
+
+    auto v_priority_mask = (range<vector_length>() >= (priority_segment * segment_length));
+    auto v_priority_min_mask = (v_min_mask & v_priority_mask);
+    if (tcle::aggr_mb<0, 0>(v_priority_min_mask) | tcle::aggr_mb<0, 1>(v_priority_min_mask))
+        return bit_index(v_priority_min_mask);
+    return bit_index(v_min_mask);
+}
+} // end of __cok__
 
 // --------- operator implementation ---------
 
 // EmbeddingCacheReplaceChoreo_kernel: main choreo operator, two-level parallel simulates block/thread division
 // Supports block transfer, batch processing, parallel search and replacement, all data transfer uses dma+subspan/at
+
 #define PART_SIZE 1024
-#define TILE_SIZE 256
+#define WARP_SIZE 32
+#define SET_ASSOCIATIVITY 2
+#define TILE_SIZE 8*1024
+#define KEY_TYPE s64
 __co__ void EmbeddingCacheReplaceChoreo_kernel(
-    s64[capacity_in_set, set_associativity, warp_size] keys, // global key table
-    f32[capacity_in_set, set_associativity, warp_size, embedding_vec_size] vals, // global value table
-    u64[capacity_in_set, set_associativity, warp_size] slot_counter, // global LRU counter
-    s64[len] d_keys, // input query key
+    KEY_TYPE[capacity_in_set, set_associativity, warp_size] & keys, // global key table
+    f32[capacity_in_set, set_associativity, warp_size, embedding_vec_size] & vals, // global value table
+    u64[capacity_in_set, set_associativity, warp_size] & slot_counter, // global LRU counter
+    KEY_TYPE[len] d_keys, // input query key
     f32[len, embedding_vec_size] d_values, // input query value
     u64 global_counter, // global counter
-    int dim_grid, int dim_block                    //
+    int dim_grid, int dim_block
 ) {
   parallel blockIdx by dim_grid {
     parallel threadIdx by dim_block {
       // Local buffer declaration, block processing key/counter
-      local s64[PART_SIZE, set_associativity, warp_size] buffer_key;
+      local KEY_TYPE[PART_SIZE, set_associativity, warp_size] buffer_key;
       local u64[PART_SIZE, set_associativity, warp_size] buffer_counter;
-      local s64[TILE_SIZE] buffer_query;
+      local KEY_TYPE[TILE_SIZE] buffer_query;
       local u32[TILE_SIZE] buffer_src_set;
 
-      fvals = dma.copy vals => local;
-      fdvals = dma.copy d_values => local;
+      s32 k_total_len0 = cdiv(capacity_in_set, dim_block);
+      s32 k_total_start = threadIdx * k_total_len0;
+      s32 k_total_end = min_(k_total_start + k_total_len0, capacity_in_set);
+      s32 k_total_len = k_total_end - k_total_start;
+      
+      s32 k_loop_num = cdiv(k_total_len, PART_SIZE);
+      s32 k_len0 = PART_SIZE;
       // Outer loop: block copy key/counter to local buffer
-      foreach {k_loop_idx} in [cdiv(capacity_in_set, PART_SIZE)] {
-        // Block transfer key/counter to local buffer
-        dma.copy keys.subspan(PART_SIZE, set_associativity, warp_size).at(k_loop_idx, _, _) => buffer_key;
-        dma.copy slot_counter.subspan(PART_SIZE, set_associativity, warp_size).at(k_loop_idx, _, _) => buffer_counter;
+      foreach {k_loop_idx} in [k_loop_num] {
+        s32 k_start = k_total_start + k_len0 * k_loop_idx;
+        s32 k_end = min_(k_start + k_len0, k_total_end);
+        s32 k_len = k_end - k_start;
 
+        // Block transfer key/counter to local buffer
+        dma.copy keys.subspan(k_total_len0, set_associativity, warp_size).at(threadIdx, _, _).subspan(k_len0, set_associativity, warp_size).at(k_loop_idx, _, _).subspan(k_len, set_associativity, warp_size) => buffer_key.subspan(k_len, set_associativity, warp_size);
+        dma.copy slot_counter.subspan(k_total_len0, set_associativity, warp_size).at(threadIdx, _, _).subspan(k_len0, set_associativity, warp_size).at(k_loop_idx, _, _).subspan(k_len, set_associativity, warp_size) => buffer_counter.subspan(k_len, set_associativity, warp_size);
+
+        int m_loop_num = cdiv(len, TILE_SIZE);
+        s32 m_len0 = cdiv(len, m_loop_num);
         // Inner loop: batch process input query
-        foreach {m_loop_idx} in [cdiv(len, TILE_SIZE)] {
+        foreach {m_loop_idx} in [m_loop_num] {
+          s32 m_start = m_loop_idx * m_len0;
+          s32 m_end = min_(m_start + m_len0, len);
+          s32 m_len = m_end - m_start;
+
           // Block transfer query to local buffer
-          dma.copy d_keys.subspan(TILE_SIZE).at(m_loop_idx) => buffer_query;
+          dma.copy d_keys.subspan(m_len0).at(m_loop_idx).subspan(m_len) => buffer_query.subspan(m_len);
 
           // Hash bucket, get src_set for each query
-          call MurmurHash3_32(buffer_query, buffer_src_set, capacity_in_set, TILE_SIZE);
+          call MurmurHash3_32(buffer_query, buffer_src_set, capacity_in_set, m_len);
+
+
           // Traverse all queries in this batch, search/replace/write back
-          foreach {query_idx} in [TILE_SIZE] {
-            mutable u64 query = buffer_query.at(query_idx); // current query key
+          foreach {query_idx} in [m_len] {
             mutable src_set = buffer_src_set.at(query_idx); // set mapped by query
-            mutable set_offset = src_set - k_loop_idx * PART_SIZE; // offset of set in local buffer
+            if (!(k_start <= src_set && src_set < k_end))
+              continue;
+
+            s64 query = buffer_query.at(query_idx); // current query key
+            s64 set_offset = src_set - k_start; // offset of set in local buffer
             // Only process the key range handled by the current thread
-            if (src_set >= 0 && src_set < capacity_in_set && set_offset >= 0 && set_offset < PART_SIZE) {
-              mutable src_slab = query % set_associativity; // slab id
-              mutable flag_need_replace = 1;
-              mutable src_slot = -1;
-              // Search for key or empty slot in set
-              foreach {cnt} in [set_associativity] {
-                mutable int idx = call index(buffer_key.subspan(1,1,warp_size).at(set_offset, src_slab, 0), query);
-                if (idx >= 0) {
-                  src_slot = idx;
-                  flag_need_replace = 0;
-                  // TODO: choreo need break to exit loop
-                  break;
-                }
-                mutable key_a = buffer_key.at(set_offset, src_slab, warp_size-1);
-                // Check empty slot
-                if (key_a == 0x7FFFFFFFFFFFFFFF) {
-                  src_slot = call index(buffer_key.subspan(1,1,warp_size).at(set_offset, src_slab, 0), 0x7FFFFFFFFFFFFFFF);
-                  break;
-                }
-                src_slab = (src_slab + 1) % set_associativity;
+            mutable src_slab = query % set_associativity; // slab id
+            mutable flag_need_replace = 1;
+            mutable src_slot = 0;
+            // Search for key or empty slot in set
+            foreach {cnt} in [set_associativity] {
+              src_slot = call get_index<s64, WARP_SIZE>(buffer_key.subspan(1,1,warp_size).at(set_offset, src_slab, _), query);
+              if (src_slot >= 0) {
+                flag_need_replace = 0;
+                break;
               }
-              // If none, find LRU slot
-              if (src_slot == -1) {
-                src_slot = call argmin(buffer_counter.subspan(1,1,warp_size).at(set_offset, src_slab, 0), warp_size, src_slab);
+              mutable s64 key_a = buffer_key.at(set_offset, src_slab, warp_size-1);
+              // Check empty slot
+              if (key_a == 0x7FFFFFFFFFFFFFFF) {
+                src_slot = call get_index<s64, WARP_SIZE>(buffer_key.subspan(1,1,warp_size).at(set_offset, src_slab, _), 0x7FFFFFFFFFFFFFFF);
+                break;
               }
-              // Replace key/value/counter
-              if (flag_need_replace == 1) {
-                buffer_key.at(set_offset, src_slab, src_slot) = query;
-                foreach {e} in [embedding_vec_size] {
-                  fvals.data.at(src_set, src_slab, src_slot, e) = fdvals.data.at(m_loop_idx * TILE_SIZE + query_idx, e);
-                }
-              }
-              buffer_counter.at(set_offset, src_slab, src_slot) = global_counter;
+              src_slab = (src_slab + 1) % set_associativity;
             }
+            // If none, find LRU slot
+            if (src_slot == -1) {
+              mutable int idx = call argmin<u64, SET_ASSOCIATIVITY * WARP_SIZE>(buffer_counter.subspan(1,set_associativity,warp_size).at(set_offset, _, _), warp_size, src_slab);
+              src_slab = idx / warp_size;
+              src_slot = idx % warp_size;
+            }
+            // Replace key/value/counter
+            if (flag_need_replace == 1) {
+              buffer_key.at(set_offset, src_slab, src_slot) = query;
+              dma.copy d_values.subspan(1, embedding_vec_size).at(m_loop_idx * m_len0 + query_idx, _).span_as(1, 1, 1, embedding_vec_size)
+                => vals.subspan(1, 1, 1, embedding_vec_size).at(src_set, src_slab, src_slot, _);
+            }
+            buffer_counter.at(set_offset, src_slab, src_slot) = global_counter;
           }
         }
         // Block write back global key/counter
-        dma.copy buffer_key => keys.subspan(PART_SIZE, set_associativity, warp_size).at(k_loop_idx, 0, 0);
-        dma.copy buffer_counter => slot_counter.subspan(PART_SIZE, set_associativity, warp_size).at(k_loop_idx, 0, 0);
+
+        dma.copy buffer_key.subspan(k_len, set_associativity, warp_size) => keys.subspan(k_total_len0, set_associativity, warp_size).at(threadIdx, _, _).subspan(k_len0, set_associativity, warp_size).at(k_loop_idx, _, _).subspan(k_len, set_associativity, warp_size);
+        dma.copy buffer_counter.subspan(k_len, set_associativity, warp_size) => slot_counter.subspan(k_total_len0, set_associativity, warp_size).at(threadIdx, _, _).subspan(k_len0, set_associativity, warp_size).at(k_loop_idx, _, _).subspan(k_len, set_associativity, warp_size);
       }
     }
   }
@@ -176,7 +271,7 @@ __co__ void EmbeddingCacheReplaceChoreo_kernel(
 // to take a send-in topsStream_t
 //
 // Host side interface, parameters consistent with the original header file
-void EmbeddingCacheReplaceChoreo(
+extern "C" void EmbeddingCacheReplaceChoreo(
     int64_t *keys,
     float *vals,
     uint64_t *slot_counter,
@@ -193,10 +288,10 @@ void EmbeddingCacheReplaceChoreo(
 ) {
     using namespace choreo;
     // Convert host pointers to choreo views
-    auto keys_view = spanned_view<int64_t, 3>(keys, {capacity_in_set, 2, 32});
-    auto vals_view = spanned_view<float, 4>(vals, {capacity_in_set, 2, 32, embedding_vec_size});
-    auto slot_counter_view = spanned_view<uint64_t, 3>(slot_counter, {capacity_in_set, 2, 32});
-    auto d_keys_view = spanned_view<int64_t, 1>(d_keys, {len});
-    auto d_values_view = spanned_view<float, 2>(d_values, {len, embedding_vec_size});
+    auto keys_view = spanned_view<int64_t, 3>(keys, {static_cast<unsigned long>(capacity_in_set), 2, 32});
+    auto vals_view = spanned_view<float, 4>(vals, {static_cast<unsigned long>(capacity_in_set), 2, 32, static_cast<unsigned long>(embedding_vec_size)});
+    auto slot_counter_view = spanned_view<uint64_t, 3>(slot_counter, {static_cast<unsigned long>(capacity_in_set), 2, 32});
+    auto d_keys_view = spanned_view<int64_t, 1>(d_keys, {static_cast<unsigned long>(len)});
+    auto d_values_view = spanned_view<float, 2>(d_values, {static_cast<unsigned long>(len), static_cast<unsigned long>(embedding_vec_size)});
     EmbeddingCacheReplaceChoreo_kernel(keys_view, vals_view, slot_counter_view, d_keys_view, d_values_view, global_counter, dim_grid, dim_block);
 }

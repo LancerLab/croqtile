@@ -1275,6 +1275,8 @@ bool ShapeInference::Visit(AST::Call& n) {
 
   if (cannot_proceed) return true;
 
+// the opts val of expr have been processed when visiting AST::Expr
+#if 0
   // value the scalars
   for (auto& arg : n.GetArguments()) {
     if (!CanBeValueNumbered(arg.get())) continue;
@@ -1293,6 +1295,7 @@ bool ShapeInference::Visit(AST::Call& n) {
                        << STR(expr->Opts().GetVal()) << "\n");
     }
   }
+#endif
 
   InvalidateVisitorValNOs();
 

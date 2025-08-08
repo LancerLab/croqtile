@@ -1668,6 +1668,12 @@ spanned_op
         $7->SetDelimiter(", ");
         $$ = OptSpannedOperation(AST::Make<AST::SpannedOperation>(@1, $7, $3, AST::SpannedOperation::TILEAT));
       }
+    | SUBSPAN LPAREN value_list RPAREN {
+        $3->SetDelimiter(", ");
+        auto p = AST::Make<AST::MultiValues>(@3, ", ");
+        for (size_t i = 0; i < $3->Count(); ++i) p->Append(AST::Make<AST::Expr>(@3, AST::Make<AST::IntLiteral>(@3, 0)));
+        $$ = OptSpannedOperation(AST::Make<AST::SpannedOperation>(@1, p, $3, AST::SpannedOperation::SUBSPAN));
+      }
     | SUBSPAN LPAREN value_list RPAREN AT LPAREN value_list RPAREN {
         $3->SetDelimiter(", ");
         $7->SetDelimiter(", ");

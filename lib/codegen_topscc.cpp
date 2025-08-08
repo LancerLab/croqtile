@@ -41,6 +41,10 @@ Option<bool>
                 " print DMA related informtion at runtime (debug only).");
 Option<bool> dma_opt(OptionKind::Hidden, "-fopt-dma", "", true,
                      "optimize dma to linear copy.");
+Option<bool> split_8byte_dma_transfer(
+    OptionKind::Hidden, "-fsplit-8b-dma", "", true,
+    "8-byte DMA transfers will be split into 1-byte chunks when platforms that "
+    "do not support native 8-byte DMA.");
 
 namespace {
 
@@ -439,6 +443,11 @@ TopsccCodeGen::GenMdsOffset(const ptr<AST::ChunkAt> ca,
   for (size_t i = 0; i < offsets.size(); ++i) {
     if (i != 0) offset << ", ";
     offset << offsets[i].str();
+  }
+
+  if (split_8byte_dma_transfer) {
+    auto sty = GetSpannedType(GetSymbolType(ca->data->name));
+    if (SizeOf(sty->ElementType()) == 8) offset << ", 0";
   }
 
   VST_DEBUG(dbgs() << "Offset for chunkat (" << PSTR(ca)
@@ -1363,13 +1372,24 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     static int mds_cnt = 0;
     auto mds_name = "__mds" + std::to_string(mds_cnt++) + "_" +
                     RemoveSuffix(buf_name, ".data()");
-    std::string bts{NameBaseType(sty->ElementType())};
+    auto bt = sty->ElementType();
+    bool split_to_char = false;
+    if (split_8byte_dma_transfer && SizeOf(bt) == 8) split_to_char = true;
+    std::string bts{split_to_char ? "char" : NameBaseType(bt)};
+
     ds << d_indent << "tops::mdspan " << mds_name << "("
        << TopsMdsStorage(sty->GetStorage()) << ", (" << bts << "*)" << buf_expr;
     if (offset == "")
       ds << ", " << ShapeSTR(sty->GetShape());
-    else
-      ds << " + " << offset << ", " << ShapeSTR(new_shape);
+    else {
+      ds << " + ";
+      if (split_to_char)
+        ds << offset << " * 8";
+      else
+        ds << offset;
+      ds << ", " << ShapeSTR(new_shape);
+    }
+    if (split_to_char) ds << ", 8";
     ds << ");\n";
     return mds_name;
   };
@@ -1388,6 +1408,13 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     if (SymbolToSymbol()) return DMA_OP::none;
 
     auto IsOptimizableChunkat = [&](const ptr<AST::ChunkAt>& ca) -> bool {
+#if 1
+      if ((ca->RefSymbol() == "buffer_key" || ca->RefSymbol() == "keys" ||
+           ca->RefSymbol() == "buffer_counter" ||
+           ca->RefSymbol() == "slot_counter") &&
+          fname == "EmbeddingCacheReplaceChoreo_kernel")
+        return true;
+#endif
       Shape shape, new_shape;
       shape = GetSpannedType(GetSymbolType(ca->RefSymbol()))->GetShape();
       // check the shape transformation of each op inside ca
