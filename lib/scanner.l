@@ -25,6 +25,7 @@ typedef Choreo::Parser::token::token_kind_type token_type;
 static int scope = 0;
 static int device_param_paren_scope = 0;
 static int device_param_brace_scope = 0;
+static int device_template_scope = 0;
 
 extern Choreo::location loc;
 extern Choreo::Option<bool> analyze_device_functions;
@@ -35,6 +36,7 @@ static std::string analyze_free_buffer;
 static Choreo::location rawstr_loc;
 static std::string device_expr_buffer; // buffering the device expression
 static std::string device_token_buffer;
+static std::string device_template_buffer;
 
 static token_type device_token_id = token_type::END;
 static token_type token_id;
@@ -57,7 +59,7 @@ static bool accumulate_expr_buffer = false;
 
 %}
 
-%x CO_FUNC DEVICE_FUNC KERNEL MDSPAN_SUGER RAW_STRING
+%x CO_FUNC DEVICE_FUNC KERNEL MDSPAN_SUGER RAW_STRING TEMPLATE
 
 id          [a-zA-Z_][a-zA-Z0-9_]*
 num         (0|[1-9][0-9]*)[uU]?[lL]{0,2}
@@ -118,9 +120,28 @@ val         ({num}|{hex_num}|{fpnum}|{fpnum_f}|{cstr})
            }
   "//".*   { if (scope > 0) kernel_buffer += yytext; }
   "__device__"    { if (analyze_device_functions) BEGIN(DEVICE_FUNC);
-                    if (scope > 0) kernel_buffer += yytext; }
+                    if (scope > 0) kernel_buffer += yytext;
+                    if (!device_template_buffer.empty()) {
+                      return Choreo::Parser::make_DEVICE_TEMPLATE(device_template_buffer, loc);
+                    }
+                  }
   "__co_device__" { if (analyze_device_functions) BEGIN(DEVICE_FUNC);
-                    if (scope > 0) kernel_buffer += yytext; }
+                    if (scope > 0) kernel_buffer += yytext;
+                    if (!device_template_buffer.empty()) {
+                      return Choreo::Parser::make_DEVICE_TEMPLATE(device_template_buffer, loc);
+                    }
+                  }
+  "template" {  device_template_buffer = "";
+                device_template_scope = 0;
+                if (scope > 0) kernel_buffer += yytext;
+                if (analyze_device_functions) {
+                  BEGIN(TEMPLATE);
+                  device_template_buffer += yytext;
+                }
+             }
+  {cstr}     { if (scope > 0) kernel_buffer += yytext; }
+  R\"\(      { if (scope > 0) kernel_buffer += yytext; }
+  R\"{id}\(  { if (scope > 0) kernel_buffer += yytext; }
   .        { if (scope > 0) kernel_buffer += yytext; }
   \n+      { if (scope > 0) kernel_buffer += yytext; }
   <<EOF>>  { if (scope > 0)
@@ -130,7 +151,31 @@ val         ({num}|{hex_num}|{fpnum}|{fpnum_f}|{cstr})
              kernel_buffer = "";  // reset the buffer
              return res;
            }
+
 } // state <KERNEL>
+
+<TEMPLATE>{
+  {blank}+    { if (scope > 0) kernel_buffer += yytext; device_template_buffer += " "; }
+  \n+         { if (scope > 0) kernel_buffer += yytext; }
+  "//".*      { if (scope > 0) kernel_buffer += yytext; }
+  "<"         { if (device_template_scope < 0)
+                  Choreo::Scanner::Error(loc, "unmatched '<' in device template declaration.");
+                device_template_scope++;
+                device_template_buffer += yytext;
+                if (scope > 0) kernel_buffer += yytext;
+              }
+  ">"         { if (device_template_scope <= 0)
+                  Choreo::Scanner::Error(loc, "unmatched '>' in device template declaration.");
+                device_template_scope--;
+                device_template_buffer += yytext;
+                if (device_template_scope == 0)
+                  BEGIN(KERNEL);
+                if (scope > 0) kernel_buffer += yytext;
+
+              }
+  .           { if (scope > 0) kernel_buffer += yytext;
+                if (device_template_scope > 0) device_template_buffer += yytext; }
+}
 
 <DEVICE_FUNC>{
   {blank}+    { if (scope > 0) kernel_buffer += yytext; }
@@ -204,6 +249,7 @@ val         ({num}|{hex_num}|{fpnum}|{fpnum_f}|{cstr})
   "static"    { if (accumulate_buffer(yytext, token_type::STATIC)) return make_device_symbol(); }
   "extern"    { if (accumulate_buffer(yytext, token_type::EXTERN)) return make_device_symbol(); }
   "inline"    { if (accumulate_buffer(yytext, token_type::INLINE)) return make_device_symbol(); }
+  "typename" { if (accumulate_buffer(yytext, token_type::TYPENAME)) return make_device_symbol(); }
   "__attribute__" { if (accumulate_buffer(yytext, token_type::ATTRIBUTE)) return make_device_symbol(); }
   {attr_id}   { if (accumulate_buffer(yytext, token_type::ATTR_ID)) return make_device_symbol(); }
   {id}        { if (accumulate_buffer(yytext, token_type::IDENTIFIER)) return make_device_symbol(); }

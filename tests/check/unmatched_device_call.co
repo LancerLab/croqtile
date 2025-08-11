@@ -31,6 +31,5 @@ __co__ void func() {
 // CHECK: unable to find a device function 'fooD'.
 // CHECK: candidate function 'fooD' with 1 parameters is found, but the type of 1th argument 's32 mdspan<1> []' is not compatible with the parameter type 'unknown *'.
 // CHECK: unable to find a device function 'fooE'.
-// CHECK: candidate function 'fooE' with 3 parameters is found, but the function 'fooE' requires 2 parameters, but only 1 arguments are provided.
-// CHECK: unable to find a device function 'fooB'.
-// CHECK: candidate function 'fooB' with 1 parameters is found, but the type of 1th argument 'shared s32 mdspan<1> [10]' is not __private__.
+// CHECK: candidate function 'fooE' with 3 parameters is found, but the function 'fooE' requires 2 parameters, but 1 arguments are provided.
+// CHECK: unable to find a device function 'fooB', because the type of 1th argument 'shared s32 mdspan<1> [10]' is not shared.

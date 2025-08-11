@@ -1,0 +1,118 @@
+// RUN: choreo %s -dv=sema 2>&1 | FileCheck --check-prefix=CHECK-SEMA %s
+// RUN: choreo -es %s -dv=check 2>&1 | FileCheck %s
+__cok__ {
+
+  template <typename T>
+  __device__ void print_buffer(__private__ T * buffer, int len);
+  template <typename T>
+  __device__ void print_vector(T vec, int len);
+
+  template <typename T, int vector_length, bool high>
+  __device__
+      typename tcle::altivector<unsigned int, vector_length>::VT get_i64_part(
+          __private__ T * ptr);
+  template <typename T, int vector_length, bool high>
+  __device__
+      typename tcle::altivector<unsigned int, vector_length>::VT get_i64_part(
+          T * ptr);
+
+  template <typename T, int vector_length>
+  __device__ bool contain(__private__ T * array, T key);
+  template <typename T, int vector_length>
+  __device__ int index(__private__ T * array, T key);
+  template <typename T, int vector_length>
+  __device__ int index(T * array, T key);
+
+  template <typename T, int vector_length>
+  __device__ int argmin(__private__ T * array,
+                        int segment_length = vector_length,
+                        int priority_segment = 0);
+
+  template <typename T, typename T_K, int BS_GATHER_LEN, int LOOP_SIZE,
+            T_K empty_key>
+  __attribute__((noinline, no_mem_alias_in_vldst, no_mem_alias_in_tar,
+                 dtu_vld_latency(512))) __device__ int
+  indexAllVecL3(__private__ int* out_slot_idx,
+                __private__ int* out_empty_slot_idx, __private__ T* buffer_key,
+                __private__ uint32_t* buffer_key_indices, int k_total_end,
+                __private__ T* buffer_query, char* ld_tmp_addr,
+                char* st_tmp_addr, uint32_t q_len);
+
+  template <typename T, typename T_K, int vector_length, int LOOP_SIZE>
+  __attribute__((noinline, no_mem_alias_in_vldst, no_mem_alias_in_tar,
+                 dtu_vld_latency(512))) __device__ int
+  argminAllVecL3(__private__ int* out_slot_idx,
+                 __private__ T* buffer_counter_addr,
+                 __private__ uint32_t* buffer_key_indices, int k_total_end,
+                 char* ld_tmp_addr, char* st_tmp_addr, uint32_t q_len);
+
+  template <int LOOP_SIZE>
+  __attribute__((noinline, no_mem_alias_in_vldst, no_mem_alias_in_tar,
+                 dtu_vld_latency(512))) __device__ void
+  load_and_store_func_L3( // __private__ attributes are lost in the arguments
+      float* input, uint32_t* indices, int* ind_offset, int* empty_offset,
+      int* argmin_offset, int query_offset, float* d_values_addr,
+      char* ld_tmp_addr, char* st_tmp_addr, int indices_cnt, int table_dim,
+      int feature_dim, int feature_size, int feature_ld_cnt);
+
+  //todo: support default template parameters
+  template <typename key_type, uint32_t m_seed = 0>
+  __device__ void MurmurHash3_32(__private__ key_type * keys,
+                                 __private__ uint32_t* index, int index_mod,
+                                 int keys_count);
+}
+
+__co__ void func() {
+#define NUM 100
+  parallel by 1 {
+    local f32[NUM] fp32_input;
+    local s32[NUM] out_slot_idx;
+    local s32[NUM] out_empty_slot_idx;
+    local s32[NUM] buffer_key;
+    local u32[NUM] buffer_key_indices;
+    local s32[NUM] buffer_query;
+    local s8[NUM] ld_tmp_addr;
+    local s8[NUM] st_tmp_addr;
+    u32 q_len = NUM;
+    s32 k_total_end = NUM;
+    int vector_length = 128;
+
+    call print_buffer<int>(buffer_key, NUM);
+    call print_vector<int>(k_total_end, NUM);
+    call get_i64_part<s32, vector_length>(buffer_key);
+    call contain<s32, vector_length>(buffer_key, 42);
+    call index<s32, vector_length>(buffer_key, 42);
+    call argmin<s32, vector_length>(buffer_key, 10, 0);
+    call indexAllVecL3<int, int, 0, 1, 0>(
+        out_slot_idx, out_empty_slot_idx, buffer_key, buffer_key_indices,
+        k_total_end, buffer_query, ld_tmp_addr, st_tmp_addr, q_len);
+    call argminAllVecL3<int, int, vector_length, 1>(
+        out_slot_idx, buffer_key, buffer_key_indices, k_total_end,
+        ld_tmp_addr, st_tmp_addr, q_len);
+    call load_and_store_func_L3<1>(fp32_input, // warnings without __private__
+        buffer_key_indices, out_slot_idx, out_empty_slot_idx,
+        out_slot_idx, 0, fp32_input, ld_tmp_addr, st_tmp_addr,
+       1, 1, 1, 1, 1);
+    call MurmurHash3_32<int, 0>(buffer_key, buffer_key_indices,
+                                k_total_end, NUM);
+  }
+}
+
+// CHECK-SEMA:  <resolved> DeviceFunction: print_buffer -> template <typename T> void (unknown *, s32)
+// CHECK-SEMA:  <resolved> DeviceFunction: print_vector -> template <typename T> void (unknown, s32)
+// CHECK-SEMA:  <resolved> DeviceFunction: argmin -> template <typename T, int vector_length> s32 (unknown *, s32, s32)
+// CHECK-SEMA:  <resolved> DeviceFunction: indexAllVecL3 -> template <typename T, typename T_K, int BS_GATHER_LEN, int LOOP_SIZE, T_K empty_key> s32 (s32 *, s32 *, unknown *, u32 *, s32, unknown *, s8 *, s8 *, u32)
+// CHECK-SEMA:  <resolved> DeviceFunction: argminAllVecL3 -> template <typename T, typename T_K, int vector_length, int LOOP_SIZE> s32 (s32 *, unknown *, u32 *, s32, s8 *, s8 *, u32)
+// CHECK-SEMA:  <resolved> DeviceFunction: load_and_store_func_L3 -> template <int LOOP_SIZE> void (f32 *, u32 *, s32 *, s32 *, s32 *, s32, f32 *, s8 *, s8 *, s32, s32, s32, s32, s32)
+// CHECK-SEMA:  <resolved> DeviceFunction: MurmurHash3_32 -> template <typename key_type, uint32_t m_seed = 0> void (unknown *, u32 *, s32, s32)
+
+// CHECK: Find instantiated device function 'print_buffer' -> void (s32 *, s32)
+// CHECK: Find instantiated device function 'print_vector' -> void (s32, s32)
+// CHECK: Find instantiated device function 'get_i64_part' -> unknown (s32 *, s32 *)
+// CHECK: Find instantiated device function 'contain' -> bool (s32 *, s32)
+// CHECK: Find instantiated device function 'index' -> s32 (s32 *, s32, s32 *, s32)
+// CHECK: Find instantiated device function 'argmin' -> s32 (s32 *, s32, s32)
+// CHECK: Find instantiated device function 'indexAllVecL3' -> s32 (s32 *, s32 *, s32 *, u32 *, s32, s32 *, s8 *, s8 *, u32)
+// CHECK: Find instantiated device function 'argminAllVecL3' -> s32 (s32 *, s32 *, u32 *, s32, s8 *, s8 *, u32)
+// CHECK: warning: unable to find a device function 'load_and_store_func_L3', because the type of 1th argument 'local f32 mdspan<1> [100]' is not local.
+// CHECK: Find instantiated device function 'MurmurHash3_32' -> void (s32 *, u32 *, s32, s32)

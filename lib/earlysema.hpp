@@ -17,6 +17,7 @@ private:
 
   AttributeDeriver mutables{this, "mutables"};
   AttributeDeriver diverges{this, "diverges"};
+  std::vector<ptr<AST::DeviceFunctionDecl>> device_functions;
 
 private:
   bool in_decl =
@@ -85,6 +86,9 @@ private:
   // shared routine for declarations inside NameVariableDecl and Assignment
   bool CheckInitializerType(const ptr<Type>&, const std::string&,
                             const location&);
+  using DeviceTemplateParam = AST::DeviceFunctionDecl::DeviceTemplateParam;
+  bool ParseTemplateParams(std::string input,
+                           std::vector<DeviceTemplateParam>& template_params);
 
 public:
   EarlySemantics() : VisitorWithScope("sema") {

@@ -1889,6 +1889,7 @@ bool EarlySemantics::Visit(AST::Call& n) {
 
     ptr<AST::DeviceFunctionDecl> matched_function = nullptr;
     ptr<AST::DeviceFunctionDecl> candidate_function = nullptr;
+    std::vector<ptr<DeviceDataType>> real_param_types;
     std::string mismatch_msg;
     for (auto& f : device_functions) {
       if (f->name != n.function->name) continue;
@@ -1903,40 +1904,112 @@ bool EarlySemantics::Visit(AST::Call& n) {
           break;
       }
 
-      if (!(f->param_types.size() >= n.arguments->Count() &&
+      if (!(candidate_function->param_types.size() >= n.arguments->Count() &&
             n.arguments->Count() >= param_count_uninitized)) {
         mismatch_msg = "the function '" + function_name + "' requires " +
                        std::to_string(param_count_uninitized) +
-                       " parameters, but only " +
+                       " parameters, but " +
                        std::to_string(n.arguments->Count()) +
                        " arguments are "
                        "provided.";
         continue;
       }
+      // check the template arguments
+      bool template_match = true;
+      using TemplateParam = AST::DeviceFunctionDecl::DeviceTemplateParam;
+      std::unordered_map<std::string, BaseType> template_param_map;
+      if (candidate_function->IsTemplated() && n.template_args) {
+        auto templ_params = candidate_function->template_params;
+        // note:the number of template arguments may not equal the number of
+        // template parameters, since there may be some template parameters with
+        // default values
+        size_t count = std::min(templ_params.size(), n.template_args->Count());
+        // deduce the types of template parameters by the template arguments
+        for (size_t i = 0; i < count; i++) {
+          auto& templ_param = templ_params[i];
+          auto templ_arg = dyn_cast<AST::Expr>(n.template_args->ValueAt(i));
+          auto templ_arg_ty = templ_arg->GetType();
 
+          if (templ_param.kind == TemplateParam::UNKNOWN) {
+            template_match = false;
+            break;
+          } else if (templ_param.kind == TemplateParam::VALUE) {
+            auto arg_bt = templ_arg_ty->GetBaseType();
+            auto device_type_match = [](BaseType lhs, std::string str) {
+              using BT = BaseType;
+              if (!(IsBoolIntegerBaseType(lhs) || lhs == BT::BOUNDED_INT ||
+                    lhs == BT::INDEX)) {
+                choreo_unreachable(
+                    "Unexpected base type for device type match: " + STR(lhs));
+              }
+              auto rhs = DSTR2BT(str);
+              if (rhs == BaseType::UNKNOWN) { return false; }
+              return IsLossyCast(lhs, rhs);
+            };
+
+            if (!device_type_match(arg_bt, templ_param.type_name)) {
+              auto it = template_param_map.find(templ_param.type_name);
+              if (it != template_param_map.end()) {
+                if (it->second != arg_bt) {
+                  template_match = false;
+                  break;
+                }
+              } else {
+                template_match = false;
+                break;
+              }
+            }
+          } else if (templ_param.kind == TemplateParam::TYPE) {
+            if (templ_arg->IsReference() &&
+                isa<AST::DataType>(templ_arg->GetReference())) {
+              auto arg_dt = dyn_cast<AST::DataType>(templ_arg->GetReference());
+              auto param_name = templ_param.param_name;
+              template_param_map[param_name] = arg_dt->getBaseType();
+            } else {
+              template_match = false;
+              break;
+            }
+          }
+        }
+      }
+      if (!template_match)
+        Warning(n.LOC(), "unmatched template arguments of the device "
+                         "function '" +
+                             n.function->name + "'.");
+
+      // check the argument types
       bool arg_match = true;
       for (size_t param_idx = 0; param_idx < n.arguments->Count();
            ++param_idx) {
         auto arg_ty = NodeType(*n.arguments->ValueAt(param_idx));
-        auto param_ty = f->param_types[param_idx];
+        auto param_ty = candidate_function->param_types[param_idx];
+        auto param_name = param_ty->PlainName();
+        auto real_param_type = dyn_cast<DeviceDataType>(param_ty->Clone());
+        // update param type with template arguments
+        if (template_param_map.find(param_name) != template_param_map.end())
+          real_param_type->SetDataType(template_param_map[param_name]);
+        real_param_types.push_back(real_param_type);
         // We allow the argument type promoted to parameter type, which means
         // IsValuePreservingCast(arg_ty, param_ty) should return true. For
         // example, a float argument can be passed to a double parameter. Other
         // type cast is not allowed.
-        if (!param_ty->ApprxEqual(*arg_ty)) {
+        if (!real_param_type->ApprxEqual(*arg_ty)) {
           arg_match = false;
           mismatch_msg = "the type of " + std::to_string(param_idx + 1) +
                          "th argument '" + PSTR(arg_ty) +
                          "' is not compatible with the parameter type '" +
-                         PSTR(param_ty) + "'.";
+                         PSTR(real_param_type) + "'.";
           break;
         }
       }
+      // if all arguments match, we will use this function
       if (arg_match) {
-        matched_function = f;
-        break;
+        matched_function =
+            dyn_cast<AST::DeviceFunctionDecl>(candidate_function->Clone());
+        matched_function->param_types = real_param_types;
       }
-    }
+    } // for each device function
+
     // if no matched function, we will report a warning
     // and suggest the candidate function.
     if (!matched_function) {
@@ -1947,12 +2020,8 @@ bool EarlySemantics::Visit(AST::Call& n) {
                 "candidate function '" + candidate_function->name + "' with " +
                     std::to_string(candidate_function->param_types.size()) +
                     " parameters is found, but " + mismatch_msg);
-    }
-
-    if (matched_function) {
-      // the type of the call node is the return type of the function, only
-      // includes spanned type, scalar type, void type and unknown type
-      n.device_function = matched_function;
+    } else {
+      n.device_functions.push_back(matched_function);
       auto call_ty = MakeChoreoDataType(matched_function->ret_type);
       SetNodeType(n, call_ty);
     }
@@ -2279,10 +2348,76 @@ bool EarlySemantics::Visit(AST::CppSourceCode& n) {
   return true;
 }
 
+bool EarlySemantics::ParseTemplateParams(
+    std::string input, std::vector<DeviceTemplateParam>& template_params) {
+
+  auto trim = [](const std::string& str) {
+    size_t first = str.find_first_not_of(" \t");
+    size_t last = str.find_last_not_of(" \t");
+    return (first == std::string::npos || last == std::string::npos)
+               ? ""
+               : str.substr(first, last - first + 1);
+  };
+  std::regex re(R"(template\s*<(.*)>)");
+  std::smatch match;
+  if (!std::regex_search(input, match, re) || match.size() < 2) {
+    return false;
+  }
+  std::vector<std::string> params;
+  std::string inner = match[1].str();
+
+  std::string current;
+  int depth = 0;
+  for (char c : inner) {
+    if (c == '<') {
+      depth++;
+      current += c;
+    } else if (c == '>') {
+      depth--;
+      current += c;
+    } else if (c == ',' && depth == 0) {
+      params.push_back(trim(current));
+      current.clear();
+    } else {
+      current += c;
+    }
+  }
+
+  if (!current.empty()) { params.push_back(trim(current)); }
+  if (params.empty()) {
+    return false; // No valid template parameters found
+  }
+  for (auto param : params) {
+    DeviceTemplateParam tp;
+    std::regex type_re(R"((\w+)\s*(\w+)\s*(=\s*([^,>]+))?)");
+    std::smatch type_match;
+    if (std::regex_match(param, type_match, type_re)) {
+      auto type_name = type_match[1].str();
+      auto param_name = type_match[2].str();
+      auto default_value = type_match[4].str();
+      if (type_name.empty() || param_name.empty()) {
+        template_params.push_back(tp);
+        continue;
+      }
+      if (type_name == "typename" || type_name == "class") {
+        tp.kind = DeviceTemplateParam::TYPE; // This is a type parameter
+      } else {
+        tp.kind = DeviceTemplateParam::VALUE; // This is a value parameter
+      }
+      tp.param_name = param_name;
+      tp.type_name = type_name;
+      tp.default_value = default_value;
+    }
+    template_params.push_back(tp);
+  }
+  return true;
+}
+
 bool EarlySemantics::Visit(AST::DeviceFunctionDecl& n) {
   TraceEachVisit(n);
   if (analyze_device_functions) {
     bool initized = false;
+    bool change_type = false;
     for (size_t param_idx = 0; param_idx < n.param_types.size(); param_idx++) {
       auto param_ty = n.param_types[param_idx];
       if (param_ty->Initized())
@@ -2292,8 +2427,30 @@ bool EarlySemantics::Visit(AST::DeviceFunctionDecl& n) {
                             std::to_string(param_idx + 1) + "th parameter");
         return false;
       }
+
+      // if the parameter type is still UNKNOWN, we will try to resolve it
+      auto plain_name = param_ty->PlainName();
+      auto known_type = DSTR2BT(plain_name);
+      if (known_type != BaseType::UNKNOWN && param_ty->pointer_count <= 1) {
+        param_ty->SetDataType(known_type);
+        change_type = true;
+      }
+    }
+
+    if (change_type && debug_visit) dbgs() << "<resolved> " << STR(n) << "\n";
+
+    // parse template parameters according to the template string
+    if (!n.templates.empty()) {
+      std::vector<DeviceTemplateParam> template_params;
+      if (ParseTemplateParams(n.templates, template_params))
+        n.template_params = template_params;
+      else
+        Warning(n.LOC(), "unparsed template parameters in device function: " +
+                             n.templates);
     }
   }
+  auto df = dyn_cast<AST::DeviceFunctionDecl>(n.Clone());
+  device_functions.push_back(df);
   return true;
 }
 

@@ -1306,7 +1306,7 @@ public:
   ptr<Identifier> function = nullptr;
   ptr<MultiValues> arguments = nullptr;
   ptr<MultiValues> template_args = nullptr;
-  ptr<DeviceFunctionDecl> device_function = nullptr;
+  std::vector<ptr<DeviceFunctionDecl>> device_functions;
 
 private:
   CallAttr attr;
@@ -1341,7 +1341,7 @@ public:
     auto n = Make<Call>(LOC(), CloneP(function), CloneP(arguments),
                         CloneP(template_args));
     n->attr = attr;
-    n->device_function = device_function;
+    n->device_functions = device_functions;
     return n;
   }
 
@@ -2779,6 +2779,21 @@ struct DeviceFunctionDecl final : public Node,
   ptr<DeviceDataType> ret_type;
   std::vector<ptr<DeviceDataType>> param_types;
   std::vector<std::string> attributes;
+  std::string templates;
+
+  struct DeviceTemplateParam {
+    enum Kind { TYPE, VALUE, UNKNOWN } kind;
+    std::string param_name;
+    std::string type_name;
+    std::string default_value; // for value type, the default value
+    DeviceTemplateParam(const std::string& name = "", Kind k = UNKNOWN,
+                        const std::string& type = "",
+                        const std::string& def = "")
+        : kind(k), param_name(name), type_name(type), default_value(def) {};
+  };
+  std::vector<DeviceTemplateParam> template_params;
+  bool IsTemplated() const { return !template_params.empty(); }
+
   DeviceFunctionDecl(const location& l) : Node(l) {}
 
   ptr<Node> CloneImpl() const override {
@@ -2789,6 +2804,10 @@ struct DeviceFunctionDecl final : public Node,
       copy->param_types.push_back(CloneP(pt));
     }
     copy->attributes = attributes;
+    for (const auto& tp : template_params) {
+      copy->template_params.push_back(tp);
+    }
+    copy->templates = templates;
     return copy;
   }
 
@@ -2796,7 +2815,9 @@ struct DeviceFunctionDecl final : public Node,
              bool = false) const override {
     os << "DeviceFunction: ";
     os << name;
-    os << " -> " << PSTR(ret_type);
+    os << " -> ";
+    if (templates.size() > 0) os << templates << " ";
+    os << PSTR(ret_type);
     os << " (";
     for (size_t i = 0; i < param_types.size(); ++i) {
       if (i > 0) os << ", ";

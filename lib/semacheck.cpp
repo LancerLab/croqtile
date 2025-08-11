@@ -649,49 +649,63 @@ bool SemaChecker::VisitNode(AST::Call& n) {
     }
   }
 
-  auto device_function = n.device_function;
-  if (!n.IsBIF() && analyze_device_functions && device_function) {
-    size_t param_index = 0;
+  if (!n.IsBIF() && analyze_device_functions && n.device_functions.size() > 0) {
+    bool function_found = false;
+    auto function_name = n.function->name;
+    ptr<AST::DeviceFunctionDecl> matched_function = nullptr;
     std::string mismatch_msg = "";
-    bool arg_match = true;
-    for (; param_index < n.arguments->Count(); param_index++) {
-      auto arg_ty = NodeType(*n.arguments->ValueAt(param_index));
-      auto param_ty = device_function->param_types[param_index];
+    for (size_t i = 0; i < n.device_functions.size(); i++) {
+      auto device_function = n.device_functions[i];
+      bool arg_match = true;
+      for (size_t param_index = 0; param_index < n.arguments->Count();
+           param_index++) {
+        auto arg_ty = NodeType(*n.arguments->ValueAt(param_index));
+        auto param_ty = device_function->param_types[param_index];
 
-      std::string attr = param_ty->attr;
-      if (auto spanned_ty = dyn_cast<SpannedType>(arg_ty)) {
-        auto m_ty = spanned_ty->GetStorage();
-        if ((attr == "__private__" && m_ty != Storage::LOCAL) ||
-            (attr == "__shared__" && m_ty != Storage::SHARED) ||
-            (attr == "__global__" && m_ty != Storage::GLOBAL))
-          arg_match = false;
+        std::string attr = param_ty->attr;
+        if (auto spanned_ty = dyn_cast<SpannedType>(arg_ty)) {
+          auto m_ty = spanned_ty->GetStorage();
+          if (m_ty == Storage::LOCAL || m_ty == Storage::SHARED) {
+            if ((attr.find("__private__") == std::string::npos &&
+                 m_ty == Storage::LOCAL) ||
+                (attr.find("__shared__") == std::string::npos &&
+                 m_ty == Storage::SHARED))
+              arg_match = false;
 
-        if (!arg_match) {
-          mismatch_msg = "the type of " + std::to_string(param_index + 1) +
-                         "th argument '" + PSTR(arg_ty) + "' is not " + attr +
-                         ".";
-          break;
+            if (!arg_match) {
+              mismatch_msg = "the type of " + std::to_string(param_index + 1) +
+                             "th argument '" + PSTR(arg_ty) + "' is not " +
+                             STR(m_ty) + ".";
+              break;
+            }
+          }
         }
-      }
 
-      if (!param_ty->ApprxEqual(*arg_ty)) {
-        arg_match = false;
-        mismatch_msg = "the type of " + std::to_string(param_index + 1) +
-                       "th argument '" + PSTR(arg_ty) +
-                       "' is not compatible with the parameter type '" +
-                       PSTR(param_ty) + "'.";
-        break;
+        if (arg_match) {
+          matched_function = device_function;
+          function_found = true;
+        }
+      } // end of analyze_device_functions
+    } // end of device function loop
+
+    if (!function_found) {
+      Warning(n.LOC(), "unable to find a device function '" + function_name +
+                           "', because " + mismatch_msg);
+    } else if (debug_visit) {
+      if (matched_function->IsTemplated())
+        dbgs() << "Find instantiated device function '";
+      else
+        dbgs() << "Find matched device function '";
+      dbgs() << matched_function->name << "' -> "
+             << PSTR(matched_function->ret_type) << " (";
+      for (size_t i = 0; i < matched_function->param_types.size(); ++i) {
+        auto& pt = matched_function->param_types[i];
+        if (i > 0) dbgs() << ", ";
+        dbgs() << PSTR(pt);
       }
+      dbgs() << ")\n";
     }
-    if (!arg_match) {
-      Warning(n.LOC(),
-              "unable to find a device function '" + n.function->name + "'.");
-      Warning(device_function->LOC(),
-              "candidate function '" + device_function->name + "' with " +
-                  std::to_string(device_function->param_types.size()) +
-                  " parameters is found, but " + mismatch_msg);
-    }
-  } // end of analyze_device_functions
+  }
 
   return true;
 }

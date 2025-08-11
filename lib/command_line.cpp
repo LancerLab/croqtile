@@ -136,7 +136,7 @@ Option<bool> no_show_source(
     OptionKind::Hidden, "-fno-show-source-location", "", false,
     "Do not show the source code location when error/warning/etc..");
 Option<bool> analyze_device_functions(
-    OptionKind::Hidden, "--analyze-device-functions", "-adf", false,
+    OptionKind::Hidden, "--analyze-device-functions", "-adf", true,
     "Analyze the device functions in the choreo code. (Experimental)");
 
 // Some system missed c++17 filesystem support. Use POSIX instead

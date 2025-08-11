@@ -185,7 +185,7 @@ void choreo_info(const char *message) {
 %token <std::string> STRING VAL
 %token <std::string> HOST_CODE DEVICE_CODE
 %token <std::string> IDENTIFIER ATTR_CO DEVICE_EXPR
-%token <std::string> VOID_STR BOOL_STR CHAR_STR SHORT_STR INT_STR LONG_STR FLOAT_STR DOUBLE_STR CONST STATIC EXTERN INLINE ATTR_ID ATTRIBUTE SIGNED UNSIGNED
+%token <std::string> VOID_STR BOOL_STR CHAR_STR SHORT_STR INT_STR LONG_STR FLOAT_STR DOUBLE_STR CONST STATIC EXTERN INLINE ATTR_ID ATTRIBUTE SIGNED UNSIGNED TYPENAME DEVICE_TEMPLATE
 // type related
 %token <std::string> MDSPAN ITUPLE EVENT MUTABLE
 %token <Choreo::Storage> SUBLOCAL LOCAL SHARED GLOBAL
@@ -209,7 +209,7 @@ void choreo_info(const char *message) {
 %nterm <AST::ptr<AST::DeviceFunctionDecl>> device_function_decl
 %nterm <std::string> device_attr device_attr_lists
 %nterm <std::vector<AST::ptr<Choreo::DeviceDataType>>> device_params
-%nterm <AST::ptr<Choreo::DeviceDataType>> device_type device_base_type device_complex_type device_param device_nested_type
+%nterm <AST::ptr<Choreo::DeviceDataType>> device_type device_base_type device_complex_type device_param device_nested_type_list device_nested_type
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::SpanAs>> span_as
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
@@ -323,24 +323,7 @@ device_base_type
     ;
 
 device_nested_type
-    : /* Empty */ { $$ = MakeDeviceDataType("", BaseType::UNKNOWN); }
-    | device_nested_type COMMA_STR device_complex_type {
-        auto type_str = $3->GetTypeStr() + ", " + $3->GetTypeStr();
-        $3->SetTypeStr(type_str);
-        $3->SetDataType(BaseType::UNKNOWN);
-        $$ = $3;
-      }
-    | device_type { $$ = $1; }
-    ;
-
-device_complex_type
-    : IDENTIFIER SCOPE_STR device_complex_type {
-        auto type_str = $1 + "::" + $3->GetTypeStr();
-        $3->SetTypeStr(type_str);
-        $3->SetDataType(BaseType::UNKNOWN);
-        $$ = $3;
-      }
-    | IDENTIFIER LT_STR device_nested_type GT_STR {
+    : IDENTIFIER LT_STR device_nested_type_list GT_STR {
         auto type_str = $1 + "<" + $3->GetTypeStr() + ">";
         $3->SetTypeStr(type_str);
         $3->SetDataType(BaseType::UNKNOWN);
@@ -351,6 +334,29 @@ device_complex_type
       }
     ;
 
+device_nested_type_list
+    : /* Empty */ { $$ = MakeDeviceDataType("", BaseType::UNKNOWN); }
+    | device_nested_type_list COMMA_STR device_complex_type {
+        auto type_str = $3->GetTypeStr() + ", " + $3->GetTypeStr();
+        $3->SetTypeStr(type_str);
+        $3->SetDataType(BaseType::UNKNOWN);
+        $$ = $3;
+      }
+    | device_type { $$ = $1; }
+    ;
+
+device_complex_type
+    :  device_complex_type SCOPE_STR device_nested_type  {
+        auto type_str = $1->GetTypeStr() + "::" + $3->GetTypeStr();
+        $1->SetTypeStr(type_str);
+        $1->SetDataType(BaseType::UNKNOWN);
+        $$ = $1;
+      }
+    | device_nested_type {
+      $$ = $1;
+    }
+    ;
+
 device_type
     : device_complex_type { $$ = $1; }
     | device_type STAR_STR {
@@ -359,6 +365,7 @@ device_type
         if (!$1->IsNaiveType() || $1->IsPointerType()) {
           $1->SetDataType(BaseType::UNKNOWN);
         }
+        $1->pointer_count++;
         $1->SetPointerType(true);
         $$ = $1;
       }
@@ -382,6 +389,11 @@ device_type
         $$ = $1;
       }
     | CONST device_complex_type {
+        auto type_str = $2->GetTypeStr() + " " + $1;
+        $2->SetTypeStr(type_str);
+        $$ = $2;
+      }
+    | TYPENAME device_complex_type {
         auto type_str = $2->GetTypeStr() + " " + $1;
         $2->SetTypeStr(type_str);
         $$ = $2;
@@ -431,8 +443,18 @@ device_function_decl
         $$->ret_type = $1;
         $$->param_types = $4;
       }
+    | device_type device_attr IDENTIFIER LPAREN_STR device_params RPAREN_STR {
+        $$ = AST::Make<AST::DeviceFunctionDecl>(@2);
+        $$->name = $3;
+        $$->ret_type = $1;
+        $$->param_types = $5;
+      }
     | device_attr device_function_decl {
         $$ = $2;
+      }
+    | DEVICE_TEMPLATE device_function_decl {
+        $$ = $2;
+        $$->templates = $1;
       }
     ;
 

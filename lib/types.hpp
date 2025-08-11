@@ -209,6 +209,29 @@ inline static BaseType BaseTypeFromString(const std::string& input) {
   return it->second;
 }
 
+// map from device type string to BaseType
+inline static BaseType DSTR2BT(std::string type_name) {
+  static const std::map<std::string, BaseType> known_types = {
+      {"char", BaseType::S8},          {"short", BaseType::S16},
+      {"int", BaseType::S32},          {"long long", BaseType::S64},
+      {"long long", BaseType::S64},    {"bool", BaseType::BOOL},
+      {"unsigned char", BaseType::U8}, {"unsigned short", BaseType::U16},
+      {"unsigned int", BaseType::U32}, {"unsigned long long", BaseType::U64},
+      {"int8_t", BaseType::S16},       {"int16_t", BaseType::S16},
+      {"int32_t", BaseType::S32},      {"int64_t", BaseType::S64},
+      {"uint8_t", BaseType::U16},      {"uint16_t", BaseType::U16},
+      {"uint32_t", BaseType::U32},     {"size_t", BaseType::U32},
+      {"uint64_t", BaseType::U64},     {"float", BaseType::F32},
+      {"double", BaseType::F64},       {"__bf16", BaseType::BF16},
+      {"__fp16", BaseType::F16}};
+
+  if (known_types.find(type_name) != known_types.end()) {
+    return known_types.at(type_name);
+  } else {
+    return BaseType::UNKNOWN;
+  }
+}
+
 namespace __internal__ {
 
 inline static std::string GetStringFrom(BaseType dataType) {
@@ -1286,20 +1309,28 @@ struct SpannedType : public Type, public TypeIDProvider<SpannedType> {
 struct DeviceDataType final : public Type,
                               public TypeIDProvider<DeviceDataType> {
   std::string name;
+  std::string plain_name;
   std::string attr;
   BaseType data_type;
   bool is_pointer;
   std::string init_expr;
+  size_t pointer_count = 0; // for pointer type, the pointer count
 
   DeviceDataType(std::string str, std::string at = "",
                  BaseType bt = BaseType::UNKNOWN, bool ip = false,
                  std::string init = "")
-      : Type(BaseType::DEVICE), name(str), attr(at), data_type(bt),
-        is_pointer(ip), init_expr(init) {}
+      : Type(BaseType::DEVICE), name(str), plain_name(str), attr(at),
+        data_type(bt), is_pointer(ip), init_expr(init) {}
+
+  DeviceDataType(std::string str, std::string plain_str, std::string at = "",
+                 BaseType bt = BaseType::UNKNOWN, bool ip = false,
+                 std::string init = "")
+      : Type(BaseType::DEVICE), name(str), plain_name(plain_str), attr(at),
+        data_type(bt), is_pointer(ip), init_expr(init) {}
 
   const ptr<Type> Clone() const override {
-    return std::make_shared<DeviceDataType>(name, attr, data_type, is_pointer,
-                                            init_expr);
+    return std::make_shared<DeviceDataType>(name, plain_name, attr, data_type,
+                                            is_pointer, init_expr);
   }
 
   size_t Dims() const override { return GetInvalidRank(); }
@@ -1309,6 +1340,7 @@ struct DeviceDataType final : public Type,
     if (is_pointer) os << " *";
   }
   const std::string Name() const override { return name; }
+  const std::string PlainName() const { return plain_name; }
 
   bool HasSufficientInfo() const override { return true; }
 
@@ -1330,12 +1362,14 @@ struct DeviceDataType final : public Type,
   // used to march with choreo type including scalar type and spanned type.
   bool ApprxEqual(const Type& ty) const override {
     if (data_type == BaseType::UNKNOWN) return false;
+    if (ty.GetBaseType() == BaseType::UNKNOWN) return false;
     if (isa<ScalarType>(&ty)) {
       return ty.GetBaseType() == data_type ||
              IsValuePreservingCast(ty.GetBaseType(), data_type);
     }
     // spanned type with the same element type
     if (SpannedType* spanned_ty = dyn_cast<SpannedType>(&ty); is_pointer) {
+      if (spanned_ty->ElementType() == BaseType::UNKNOWN) return false;
       if (data_type == BaseType::VOID ||
           IsValuePreservingCast(spanned_ty->ElementType(), data_type))
         return true;
