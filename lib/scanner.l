@@ -119,13 +119,19 @@ val         ({num}|{hex_num}|{fpnum}|{fpnum_f}|{cstr})
                kernel_buffer += yytext;
            }
   "//".*   { if (scope > 0) kernel_buffer += yytext; }
-  "__device__"    { if (analyze_device_functions) BEGIN(DEVICE_FUNC);
+  "__device__"    { if (analyze_device_functions) {
+                      BEGIN(DEVICE_FUNC);
+                      device_expr_buffer = "";
+                    }
                     if (scope > 0) kernel_buffer += yytext;
                     if (!device_template_buffer.empty()) {
                       return Choreo::Parser::make_DEVICE_TEMPLATE(device_template_buffer, loc);
                     }
                   }
-  "__co_device__" { if (analyze_device_functions) BEGIN(DEVICE_FUNC);
+  "__co_device__" { if (analyze_device_functions){
+                      BEGIN(DEVICE_FUNC);
+                      device_expr_buffer = "";
+                    }
                     if (scope > 0) kernel_buffer += yytext;
                     if (!device_template_buffer.empty()) {
                       return Choreo::Parser::make_DEVICE_TEMPLATE(device_template_buffer, loc);
@@ -591,9 +597,12 @@ void update_location(const char *text) {
 }
 
 bool accumulate_buffer(const char* text, token_type current_token_id) {
-  if (scope > 0) {
+  if (scope > 0)
     kernel_buffer += text;
-  }
+
+  if (device_expr_buffer == "")
+    device_expr_buffer = text;
+
   device_token_buffer = device_expr_buffer;
   token_id = device_token_id;
 

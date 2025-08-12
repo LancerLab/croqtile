@@ -1348,7 +1348,7 @@ struct DeviceDataType final : public Type,
     return isa<DeviceDataType>(&ty) && name == ((const DeviceDataType&)ty).name;
   }
 
-  std::string GetTypeStr() { return name; }
+  const std::string GetTypeStr() { return name; }
   void SetTypeStr(std::string s) { name = s; }
 
   BaseType GetDataType() { return data_type; }

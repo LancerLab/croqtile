@@ -1890,11 +1890,13 @@ bool EarlySemantics::Visit(AST::Call& n) {
     ptr<AST::DeviceFunctionDecl> matched_function = nullptr;
     ptr<AST::DeviceFunctionDecl> candidate_function = nullptr;
     std::vector<ptr<DeviceDataType>> real_param_types;
+    ptr<DeviceDataType> real_ret_type = nullptr;
     std::string mismatch_msg;
     for (auto& f : device_functions) {
       if (f->name != n.function->name) continue;
       candidate_function = f;
       mismatch_msg = "";
+      std::unordered_map<std::string, BaseType> template_param_map;
 
       size_t param_count_uninitized = 0;
       for (auto& param : f->param_types) {
@@ -1917,7 +1919,7 @@ bool EarlySemantics::Visit(AST::Call& n) {
       // check the template arguments
       bool template_match = true;
       using TemplateParam = AST::DeviceFunctionDecl::DeviceTemplateParam;
-      std::unordered_map<std::string, BaseType> template_param_map;
+
       if (candidate_function->IsTemplated() && n.template_args) {
         auto templ_params = candidate_function->template_params;
         // note:the number of template arguments may not equal the number of
@@ -1944,7 +1946,7 @@ bool EarlySemantics::Visit(AST::Call& n) {
               }
               auto rhs = DSTR2BT(str);
               if (rhs == BaseType::UNKNOWN) { return false; }
-              return IsLossyCast(lhs, rhs);
+              return IsValuePreservingCast(lhs, rhs) || IsReinterpretiveCast(lhs, rhs);
             };
 
             if (!device_type_match(arg_bt, templ_param.type_name)) {
@@ -2007,6 +2009,13 @@ bool EarlySemantics::Visit(AST::Call& n) {
         matched_function =
             dyn_cast<AST::DeviceFunctionDecl>(candidate_function->Clone());
         matched_function->param_types = real_param_types;
+        real_ret_type = dyn_cast<DeviceDataType>(matched_function->ret_type->Clone());
+
+        if (template_param_map.find(real_ret_type->PlainName()) !=
+           template_param_map.end()) {
+            real_ret_type->SetDataType(template_param_map[real_ret_type->PlainName()]);
+            matched_function->ret_type = real_ret_type;
+        }
       }
     } // for each device function
 
@@ -2022,8 +2031,10 @@ bool EarlySemantics::Visit(AST::Call& n) {
                     " parameters is found, but " + mismatch_msg);
     } else {
       n.device_functions.push_back(matched_function);
-      auto call_ty = MakeChoreoDataType(matched_function->ret_type);
-      SetNodeType(n, call_ty);
+      if (real_ret_type) {
+        auto call_ty = MakeChoreoDataType(real_ret_type);
+        SetNodeType(n, call_ty);
+      }
     }
   } // end of analyze_device_functions
 

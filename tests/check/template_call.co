@@ -60,6 +60,10 @@ __cok__ {
   __device__ void MurmurHash3_32(__private__ key_type * keys,
                                  __private__ uint32_t* index, int index_mod,
                                  int keys_count);
+  template <typename key_type>
+  __device__ key_type get_at(__private__ key_type * ptr, int idx) {
+    return ptr[idx];
+  }
 }
 
 __co__ void func() {
@@ -95,6 +99,7 @@ __co__ void func() {
        1, 1, 1, 1, 1);
     call MurmurHash3_32<int, 0>(buffer_key, buffer_key_indices,
                                 k_total_end, NUM);
+    mutable at = call get_at<s32>(buffer_key, 1);
   }
 }
 
@@ -116,3 +121,4 @@ __co__ void func() {
 // CHECK: Find instantiated device function 'argminAllVecL3' -> s32 (s32 *, s32 *, u32 *, s32, s8 *, s8 *, u32)
 // CHECK: warning: unable to find a device function 'load_and_store_func_L3', because the type of 1th argument 'local f32 mdspan<1> [100]' is not local.
 // CHECK: Find instantiated device function 'MurmurHash3_32' -> void (s32 *, u32 *, s32, s32)
+// CHECK: Find instantiated device function 'get_at' -> s32 (s32 *, s32)
