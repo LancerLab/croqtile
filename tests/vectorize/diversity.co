@@ -1,0 +1,33 @@
+// RUN: choreo %s -dv=loop -es | FileCheck %s
+__co__ void vecadd(s32 [H, W] a, s32 [H, W] b, f32 uni)
+{
+  parallel q by 1 {
+    l1_a = dma.copy a => local;
+    l1_b = dma.copy b => local;
+    with {i, j} in [a.span] {
+      foreach i, j: vectorize(j, 128) {
+        index = i * W + j;
+        val = 0; // uni
+        if (i==0) { //uni
+          call abc(val);
+        } else {
+          if (index < 100) {
+            val = l1_a.data.at(i, j) + l1_b.data.at(i, j); // vary
+            call abc(val);
+          }
+        }
+        call abc(val);
+      }
+    }
+  }
+}
+
+// CHECK: Diversity Shapes:
+// CHECK:   ::vecadd::paraby_0::paraby_1::within_0::foreach_0::foreach_1::cond_if_1::cond_if_2::val : divergent
+// CHECK:   ::vecadd::paraby_0::paraby_1::within_0::foreach_0::foreach_1::val : uniform
+// CHECK:   ::vecadd::paraby_0::paraby_1::l1_b.data : uniform
+// CHECK:   ::vecadd::paraby_0::paraby_1::l1_a.data : uniform
+// CHECK:   ::vecadd::paraby_0::paraby_1::within_0::foreach_0::foreach_1::index : stride(1)
+// CHECK:   ::vecadd::W : uniform
+// CHECK:   ::vecadd::paraby_0::paraby_1::within_0::i : uniform
+// CHECK:   ::vecadd::paraby_0::paraby_1::within_0::foreach_0::foreach_1::j : stride(1)

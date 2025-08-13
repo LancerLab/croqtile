@@ -155,6 +155,67 @@ inline bool FBIContainsBuffer(const FutureBufferInfo& buffer_info,
   return false;
 }
 
+enum DiversityShapeKind { UNKNOWN = 0, UNIFORM, STRIDE, DIVERGENT };
+
+static inline ValueItem UncomputableValueItem() {
+  return sbe::sym("uncomputable");
+}
+
+struct DiversityShape {
+  using Kind = DiversityShapeKind;
+  DiversityShapeKind shape = UNKNOWN;
+  ValueItem stride; // stride for STRIDE shape
+  ValueItem value;  // value for UNIFORM shape
+
+  DiversityShape() = default;
+  DiversityShape(Kind k, ValueItem s = UncomputableValueItem(),
+                 ValueItem v = UncomputableValueItem())
+      : shape(k), stride(s), value(v) {
+    if (shape == Kind::STRIDE) {
+      if (!VIIsInt(stride) || !stride->Computable()) {
+        shape = Kind::DIVERGENT;
+        stride = UncomputableValueItem();
+        value = UncomputableValueItem();
+      }
+    }
+    if (shape == Kind::UNIFORM) {
+      if (!value->Computable()) value = UncomputableValueItem();
+    }
+    assert(shape != Kind::UNKNOWN &&
+           "DiversityShape should not be UNKNOWN at construction.");
+  }
+  DiversityShape(const DiversityShape& other)
+      : shape(other.shape), stride(other.stride), value(other.value) {}
+
+  bool Uniform() const { return shape == Kind::UNIFORM; }
+
+  bool Stride() const { return shape == Kind::STRIDE; }
+
+  bool Divergent() const { return shape == Kind::DIVERGENT; }
+
+  bool Unknown() const { return shape == Kind::UNKNOWN; }
+
+  bool ApprxEqual(const DiversityShape& other) const {
+    if (shape != other.shape) return false;
+    return true; // for DIVERGENT or UNKNOWN
+  }
+
+  DiversityShape& operator=(const DiversityShape& other) {
+    shape = other.shape;
+    stride = other.stride;
+    value = other.value;
+    return *this;
+  }
+
+  bool operator<(const DiversityShape& other) const {
+    return shape < other.shape;
+  }
+
+  bool operator>(const DiversityShape& other) const {
+    return shape > other.shape;
+  }
+};
+
 struct OptimizedValues {
 private:
   std::vector<ValueItem> val_exprs;

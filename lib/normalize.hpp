@@ -58,19 +58,16 @@ public:
         if (fb->IsNorm()) continue; // already normalized
         std::vector<ptr<AST::ForeachBlock>> loops;
         auto rng = dyn_cast<AST::LoopRange>(fb->ranges->ValueAt(0));
-        auto rng_type = dyn_cast<BoundedITupleType>(rng->GetType());
+        auto rng_type = dyn_cast<BoundedITupleType>(rng->IV()->GetType());
         if (fb->ranges->Count() == 1 && rng_type && rng_type->Dims() > 1) {
           assert(!fb->suffixs || fb->suffixs->None());
-
           auto cname = rng->IVName();
           // create foreachblocks for each index variable
           for (auto with : within_map[cname]->values) {
             auto with_iv = AST::GetIdentifier(with);
-
             auto iv_ty = with_iv->GetType();
             auto iv_name = with_iv->name;
-            auto new_iv =
-                AST::Make<AST::Identifier>(rng->LOC(), iv_name);
+            auto new_iv = AST::Make<AST::Identifier>(rng->LOC(), iv_name);
             new_iv->SetType(iv_ty);
             auto ranges = AST::Make<AST::MultiValues>(fb->ranges->LOC());
             ranges->Append(AST::Make<AST::LoopRange>(rng->LOC(), new_iv));
@@ -160,7 +157,7 @@ private:
   std::stack<AST::MultiNodes*> multi_nodes;
   int cur_node_index = -1;
   std::map<AST::MultiNodes*, NodeInsertInfo> mnodes_insertions;
-  std::map<std::string, std::vector<std::string>> normalzied_matchers;
+  ptr<AST::ForeachBlock> cur_loop = nullptr;
 
   void InsertNode(int index, const ptr<AST::Node>& n, const std::string& name) {
     assert(index >= 0);
@@ -470,7 +467,8 @@ public:
     multi_nodes.pop();
     cur_node_index = -1;
 
-    if (CCtx().BranchNorm()) {
+    // todo: branch normalization base on diversity analysis
+    if (CCtx().BranchNorm() || (cur_loop && AST::NeedVectorize(*cur_loop))) {
       for (size_t stmt_index = 0; stmt_index < n.Count(); ++stmt_index) {
         auto stmt = n.SubAt(stmt_index);
         if (auto if_block = dyn_cast<AST::IfElseBlock>(stmt)) {
@@ -806,8 +804,6 @@ public:
             MakeBoundedIntegerType(bity->GetUpperBound(i)));
       else
         mval->ValueAt(i)->SetType(MakeUnknownBoundedIntegerType());
-      auto& matchers = normalzied_matchers[n.with->name];
-      matchers.push_back(n.with->name + "__elem__" + std::to_string(i));
     }
 
     n.with_matchers = mval;
@@ -818,43 +814,7 @@ public:
     return true;
   }
 
-  bool Visit(AST::WithBlock& n) override {
-    size_t idx = 0;
-    for (; idx < n.stmts->Count(); ++idx) {
-      auto stmt = n.stmts->values[idx];
-      if (auto fb = dyn_cast<AST::ForeachBlock>(stmt)) {
-        if (!fb->suffixs || fb->suffixs->None()) continue;
-
-        for (size_t i = 0; i < fb->suffixs->Count(); i++) {
-          auto se = dyn_cast<AST::Expr>(fb->suffixs->AllSubs()[i]);
-          if (!se || se->GetSymbol()) continue;
-
-          auto call = dyn_cast<AST::Call>(se->GetReference());
-          if (call->function->name != "vectorize") continue;
-          auto iv = AST::GetIdentifier(call->GetArguments()[0]);
-          auto width = AST::GetIntLiteral(call->GetArguments()[1]);
-
-          const auto& matchers = normalzied_matchers[iv->name];
-          if (!matchers.empty()) {
-            Error(fb->LOC(),
-                  "cannot vectorize a bounded variable with rank > 1");
-            error_count++;
-          }
-          auto new_iv = AST::Make<AST::NamedVariableDecl>(
-              fb->LOC(), "v" + iv->name,
-              AST::Make<AST::DataType>(fb->LOC(), BaseType::U32), nullptr, se);
-
-          new_iv->SetType(iv->GetType());
-          n.stmts->Insert(new_iv, idx++);
-          VST_DEBUG(dbgs() << "Insert vectorized variable: " << PSTR(new_iv)
-                           << "\n");
-
-          break;
-        }
-      }
-    }
-    return true;
-  }
+  bool Visit(AST::WithBlock&) override { return true; }
   bool Visit(AST::Memory&) override { return true; }
   bool Visit(AST::SpanAs&) override { return true; }
 
@@ -1117,6 +1077,7 @@ public:
   }
   bool Visit(AST::LoopRange&) override { return true; }
   bool Visit(AST::ForeachBlock& n) override {
+    cur_loop = dyn_cast<AST::ForeachBlock>(n.CloneImpl());
     auto handle_bounds = [this, &n](auto get_bound, auto set_bound) {
       std::vector<std::pair<int, ptr<AST::Node>>> repls;
       int i = -1;
@@ -1208,7 +1169,10 @@ public:
 
     if (HasError() || abend_after) return false;
 
-    if (CCtx().LoopNorm()) {
+    LoopChecker lc;
+    root.accept(lc);
+    if (prt_visitor) dbgs() << " |- " << lc.GetName() << NewL;
+    if (CCtx().LoopNorm() || lc.HasVectorization()) {
       LoopNorm ln;
       if (prt_visitor) dbgs() << " |- " << ln.GetName() << NewL;
       root.accept(ln);

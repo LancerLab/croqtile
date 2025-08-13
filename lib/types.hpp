@@ -1477,7 +1477,7 @@ struct BoundedIntegerType final : public BoundedType,
   const MultiBounds GetUpperBounds() const override {
     return MultiBounds(1, ubound);
   }
-  ValueItem GetStride() const { return ubound; }
+  int GetStride() const { return stride; }
 
   bool operator==(const Type& ty) const override {
     if (!isa<BoundedIntegerType>(&ty)) return false;

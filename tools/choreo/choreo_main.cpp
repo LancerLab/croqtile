@@ -11,6 +11,7 @@
 #include "gpuadapt.hpp"
 #include "latenorm.hpp"
 #include "liveness_analysis.hpp"
+#include "loop_vectorize.hpp"
 #include "mem_reuse.hpp"
 #include "memcheck.hpp"
 #include "normalize.hpp"
@@ -137,6 +138,10 @@ int main(int argc, char* argv[]) {
   // late normalize
   LateNorm ln(ti.SymTab());
   if (!ln.RunOnProgram(root)) return ln.Status();
+  if (CCtx().VerifyVisitors()) vf.RunOnProgram(root);
+
+  LoopHandler lh(ti.SymTab());
+  if (!lh.RunOnProgram(root)) return lh.Status();
   if (CCtx().VerifyVisitors()) vf.RunOnProgram(root);
 
   CCtx().SetGlobalSymbolTable(ln.SymTab());

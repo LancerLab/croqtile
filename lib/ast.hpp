@@ -43,6 +43,7 @@ struct Node {
 
 private:
   NoteMapType note;
+  DiversityShape dshape;
 
 protected:
   Storage level = Storage::NONE; // belongs to a specific level
@@ -57,7 +58,8 @@ public:
   virtual const ptr<Type>& GetType() const { return pty; }
   virtual const location& LOC() const { return loc; }
   virtual void SetLOC(const location& l) { loc = l; }
-
+  virtual void SetDiversityShape(const DiversityShape ds) { dshape = ds; }
+  virtual DiversityShape GetDiversityShape() { return dshape; }
   virtual ~Node() = default;
 
   virtual const NoteMapType& Note() const { return note; }
@@ -1550,6 +1552,39 @@ struct ParamList : public Node, public TypeIDProvider<ParamList> {
   __UDT_TYPE_INFO__(Node, ParamList)
 };
 
+struct DivergentBranch : public Node, public TypeIDProvider<DivergentBranch> {
+  ptr<Node> pred = nullptr;        // the predicate expression
+  ptr<MultiNodes> stmts = nullptr; // the statements in this branch
+
+  DivergentBranch(const location& l, const ptr<Node>& c,
+                  const ptr<MultiNodes>& s)
+      : Node(l), pred(c), stmts(s) {
+    assert(pred != nullptr && "must contains the predicate expression.");
+    assert(stmts != nullptr && "must contains the statements.");
+  }
+
+  bool IsBlock() const override { return true; }
+
+  const ptr<Node> GetPred() const { return pred; }
+
+  ptr<Node> CloneImpl() const override {
+    return Make<DivergentBranch>(LOC(), CloneP(pred), CloneP(stmts));
+  }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
+    os << "\n" << prefix << "`- Divergent Branch On Condition: ";
+    pred->Print(os, " ");
+    if (with_type) os << "<{" << PSTR(GetType()) << "}>";
+    os << "\n" << prefix << " `- Statements:";
+    stmts->Print(os, prefix + "  ", with_type);
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, DivergentBranch)
+};
+
 struct IfElseBlock : public Node, public TypeIDProvider<IfElseBlock> {
   ptr<Node> pred;
   ptr<MultiNodes> if_stmts;
@@ -2608,6 +2643,7 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   __UDT_TYPE_INFO__(Node, LoopRange)
 };
 
+ptr<Call> GetCall(const ptr<Node>& n);
 struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
   ptr<MultiValues> ranges;
   ptr<MultiNodes> suffixs;
@@ -2628,7 +2664,8 @@ struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
   bool IsBlock() const override { return true; }
 
   ptr<Node> CloneImpl() const override {
-    return Make<ForeachBlock>(LOC(), CloneP(ranges), CloneP(stmts));
+    return Make<ForeachBlock>(LOC(), CloneP(ranges), CloneP(suffixs),
+                              CloneP(stmts));
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -2649,13 +2686,23 @@ struct ForeachBlock : public Node, public TypeIDProvider<ForeachBlock> {
 
   void accept(Visitor&) override;
 
-  bool IsNorm() {
+  bool IsNorm() const {
     if (ranges->Count() != 1) return false;
-    auto range = ranges->ValueAt(0);
-    auto range_type = dyn_cast<BoundedITupleType>(range->GetType());
-    if (!range_type) return false;
+    auto range = dyn_cast<LoopRange>(ranges->ValueAt(0));
+    assert(range && "invalid range in foreach block.");
+    auto range_type = dyn_cast<BoundedType>(range->IV()->GetType());
+    if (!range_type) return true;
+    assert(range_type && "invalid range type in foreach block.");
 
     return range_type->Dims() == 1;
+  }
+
+  ptr<Identifier> GetIV() const {
+    if (ranges->Count() == 1) {
+      auto range = dyn_cast<AST::LoopRange>(ranges->ValueAt(0));
+      return range->IV();
+    }
+    return nullptr;
   }
 
   __UDT_TYPE_INFO__(Node, ForeachBlock)
@@ -3049,6 +3096,25 @@ inline bool IsSymbolOrArrayRef(const Node& n) {
   if (auto e = dyn_cast<Expr>(&n))
     if (e->op == "elemof") return true;
   return false;
+}
+
+inline bool NeedVectorize(const ForeachBlock& n, ptr<AST::Call>& c) {
+  if (!n.suffixs) return false;
+
+  for (auto suffix : n.suffixs->values) {
+    if (auto suffix_call = GetCall(suffix);
+        suffix_call->IsAnno() && suffix_call->function->name == "vectorize") {
+      c = suffix_call;
+      return true;
+    }
+  }
+  c = nullptr;
+  return false;
+}
+
+inline bool NeedVectorize(const ForeachBlock& n) {
+  ptr<AST::Call> c;
+  return NeedVectorize(n, c);
 }
 
 inline const ptr<Identifier> GetArrayBaseSymbol(const Expr& n) {

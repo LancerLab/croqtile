@@ -123,7 +123,6 @@ inline const std::string GetDTEContextName() {
   return "choreo_topscc_ctx" + std::to_string(i++);
 }
 
-
 inline void PrintSubscriptions(std::ostream& os, const std::string prefix,
                                const std::string suffix,
                                const std::vector<size_t>& dims,
@@ -282,8 +281,6 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
         // if the data access is a vector, we need to generate simple leaptr for
         // this data access
         auto elem_ty = da_ty->e_type;
-        auto ec = da_ty->ec;
-        auto elem_size = SizeOf(elem_ty);
         std::string vty_str = VectorTypeSTR(da_ty);
 
         auto data_name = da->GetDataName();
