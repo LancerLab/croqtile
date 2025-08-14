@@ -1,0 +1,13 @@
+// RUN: choreo -es %s -o - | FileCheck %s
+
+__co__ void foo(s32[N, M, K] input2) {
+  parallel p by 2, q by 4
+    foreach i in [16] {
+      dma.copy input2.chunkat(p, q, i).span_as(N/2*M/4, K/16) => local;
+      foreach j in [4]
+        dma.copy input2.chunkat(_, p, q).chunkat(_, j, i) => local;
+    }
+}
+
+// CHECK: choreo::runtime_check((K / 16 + (K * (M / 4 - 1) - 1 + K * M * (N / 2 - 1)) + 1 == K / 16 * (M / 4 * (N / 2))), "Reshape operation inside DMA expression can not be executed on a noncontiguous tiling result, tests/check/error_sop_runtime.co
+// CHECK: choreo::runtime_check((K / 4 + (K * (M / 2 - 1) - 1 + K * M * (N - 1)) + 1 == K / 4 * (M / 2 * N)), "Only the last tiling can be executed in noncontiguous manner, tests/check/error_sop_runtime.co

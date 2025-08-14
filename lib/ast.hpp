@@ -2074,9 +2074,12 @@ private:
   }
 };
 
-// Return true if the block after applying the operation is contiguous in the
-// original block.
-inline bool IsContiguousSOp(const SpannedOperation& k, Shape original_shape) {
+// If the block after applying the operation is contiguous in the original
+// block. Return true/false: true positive or true negative Return ValueItem if
+// the result cannot be determined definitively. Contiguous if
+//  the ValueItem is evaluted to true at runtime.
+inline std::variant<bool, ValueItem> IsContiguousSOp(const SpannedOperation& k,
+                                                     Shape original_shape) {
   if (k.SpecifyReshape()) return true;
 
   Shape new_shape = k.GetBlockShape();
@@ -2111,7 +2114,10 @@ inline bool IsContiguousSOp(const SpannedOperation& k, Shape original_shape) {
                                  strides.begin(), sbe::nu(0));
   auto N = new_shape.ElementCountValue();
 
-  return IsValueItemEqual(last - first + sbe::nu(1), N);
+  auto res = oc_eq(last - first + sbe::nu(1), N);
+  if (sbe::is_true(res)) return true;
+  if (sbe::is_false(res)) return false;
+  return res->Normalize();
 }
 
 inline const std::string STR(const SpannedOperation::Kind& k) {

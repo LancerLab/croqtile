@@ -64,7 +64,11 @@ public:
       return false;
     else if (auto c = dyn_cast<AST::Call>(n))
       return nodes.count(c.get());
-    else
+    else if (auto mv = dyn_cast<AST::MultiValues>(n)) {
+      bool res = false;
+      for (const auto& v : mv->AllValues()) res |= Contains(v);
+      return res;
+    } else
       choreo_unreachable("unsupported node: " + n->TypeNameString() + ": " +
                          PSTR(n) + ".");
     return false;

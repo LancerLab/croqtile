@@ -411,6 +411,8 @@ private:
                                 bool is_host = true) const;
 
   const std::string ValueSTR(const ValueItem& vi) const;
+  const std::string ValueListSTR(const ValueList& vl,
+                                 std::string sep = ", ") const;
   const std::string OpValueSTR(const ValueItem& vi,
                                const std::string& parent_op,
                                const bool is_left_child) const;

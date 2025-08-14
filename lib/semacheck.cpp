@@ -465,21 +465,28 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
     size_t last_tiling = 0;
     for (size_t i = 0; i < ca->OpCount(); ++i)
       if (!ca->OpAt(i)->SpecifyReshape()) last_tiling = i;
+    bool has_reshape = false;
     for (size_t i = 0; i < ca->OpCount(); ++i) {
       const auto& sop = ca->OpAt(i);
-#if 1
-      if (!AST::IsContiguousSOp(*sop, original_shape)) {
-        if ((ca->RefSymbol() == "buffer_key" || ca->RefSymbol() == "keys" ||
-             ca->RefSymbol() == "buffer_counter" ||
-             ca->RefSymbol() == "slot_counter") &&
-            fname == "EmbeddingCacheReplaceChoreo_kernel")
-          continue;
-#endif
+      if (ca->OpAt(ca->OpCount() - i - 1)->SpecifyReshape()) has_reshape = true;
+      auto is_contiguous = AST::IsContiguousSOp(*sop, original_shape);
+      if (auto val = std::get_if<bool>(&is_contiguous); val && *val == false) {
         has_noncontiguous = true;
         if (i != last_tiling)
           Error1(
               sop->LOC(),
               "Only the last tiling can be executed in noncontiguous manner.");
+      } else if (!val) {
+        if (i != last_tiling)
+          EmitAssertion(
+              std::get<ValueItem>(is_contiguous),
+              "Only the last tiling can be executed in noncontiguous manner",
+              sop->LOC(), sop->TFSS());
+        if (has_reshape)
+          EmitAssertion(std::get<ValueItem>(is_contiguous),
+                        "Reshape operation inside DMA expression can not be "
+                        "executed on a noncontiguous tiling result",
+                        sop->LOC(), sop->TFSS());
       }
       if (has_noncontiguous && sop->SpecifyReshape())
         Error1(sop->LOC(), "Reshape operation inside DMA expression can not be "

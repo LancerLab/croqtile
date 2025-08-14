@@ -184,7 +184,7 @@ const std::string TopsccCodeGen::ShapeSTR(const Shape& s,
   std::ostringstream oss;
   for (unsigned i = 0; i < vl.size(); ++i) {
     if (i > 0) oss << delimiter;
-    oss << ValueSTR(vl[i]), IsHost();
+    oss << ValueSTR(vl[i]);
   }
   return oss.str();
 }
@@ -1361,14 +1361,14 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     return std::make_pair(buf_name, buf_expr);
   };
 
-  // output mdspan declaration in device side, return mds name.
+  // return mds name and the declaration string.
   // If offset is not empty, means that need to do memory viewing.
   //   Just add offset to buf_expr, then utilize new_shape.
-  auto GetMDSName = [this](const std::string& buf_name,
-                           const std::string& buf_expr,
-                           const ptr<SpannedType>& sty,
-                           const std::string& offset = "",
-                           const Shape& new_shape = Shape()) {
+  auto GenMDSDecl =
+      [this](const std::string& buf_name, const std::string& buf_expr,
+             const ptr<SpannedType>& sty, const std::string& offset = "",
+             const Shape& new_shape =
+                 Shape()) -> std::pair<std::string, std::string> {
     static int mds_cnt = 0;
     auto mds_name = "__mds" + std::to_string(mds_cnt++) + "_" +
                     RemoveSuffix(buf_name, ".data()");
@@ -1377,27 +1377,33 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     if (split_8byte_dma_transfer && SizeOf(bt) == 8) split_to_char = true;
     std::string bts{split_to_char ? "char" : NameBaseType(bt)};
 
-    ds << d_indent << "tops::mdspan " << mds_name << "("
-       << TopsMdsStorage(sty->GetStorage()) << ", (" << bts << "*)" << buf_expr;
+    std::ostringstream mds_decl;
+
+    mds_decl << d_indent << "tops::mdspan " << mds_name << "("
+             << TopsMdsStorage(sty->GetStorage()) << ", (" << bts << "*)"
+             << buf_expr;
     if (offset == "")
-      ds << ", " << ShapeSTR(sty->GetShape());
+      mds_decl << ", " << ShapeSTR(sty->GetShape());
     else {
-      ds << " + ";
+      mds_decl << " + ";
       if (split_to_char)
-        ds << offset << " * 8";
+        mds_decl << offset << " * 8";
       else
-        ds << offset;
-      ds << ", " << ShapeSTR(new_shape);
+        mds_decl << offset;
+      mds_decl << ", " << ShapeSTR(new_shape);
     }
-    if (split_to_char) ds << ", 8";
-    ds << ");\n";
-    return mds_name;
+    if (split_to_char) mds_decl << ", 8";
+    mds_decl << ");\n";
+    return {mds_name, mds_decl.str()};
   };
 
+  ValueList f_opt_condition, t_opt_condition;
+
+  // if the value is dst, means MAY do optimization on dst
   enum DMA_OP : uint8_t {
     none = 0,
-    src = 1 << 1,
     dst = 1 << 0,
+    src = 1 << 1,
     both = src | dst
   };
 
@@ -1407,14 +1413,11 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     if (!dma_opt) return DMA_OP::none;
     if (SymbolToSymbol()) return DMA_OP::none;
 
-    auto IsOptimizableChunkat = [&](const ptr<AST::ChunkAt>& ca) -> bool {
-#if 1
-      if ((ca->RefSymbol() == "buffer_key" || ca->RefSymbol() == "keys" ||
-           ca->RefSymbol() == "buffer_counter" ||
-           ca->RefSymbol() == "slot_counter") &&
-          fname == "EmbeddingCacheReplaceChoreo_kernel")
-        return true;
-#endif
+    // return `bool` if able to ensure true positive or true negative.
+    // return `ValueList` as the runtime condition if unable to ensure.
+    auto IsOptimizableChunkat =
+        [&](const ptr<AST::ChunkAt>& ca) -> std::variant<bool, ValueList> {
+      ValueList opt_condition;
       Shape shape, new_shape;
       shape = GetSpannedType(GetSymbolType(ca->RefSymbol()))->GetShape();
       // check the shape transformation of each op inside ca
@@ -1423,350 +1426,421 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
           shape = sop->GetBlockShape();
         } else {
           new_shape = sop->GetBlockShape();
-          if (!IsContiguousSOp(*sop, shape)) return false;
+          auto is_contiguous = IsContiguousSOp(*sop, shape);
+          if (auto val = std::get_if<bool>(&is_contiguous);
+              val && *val == false)
+            return false;
+          else if (!val)
+            opt_condition.push_back(std::get<ValueItem>(is_contiguous));
+
           shape = new_shape;
         }
       }
-      return true;
+      if (opt_condition.empty()) return true;
+      return opt_condition;
     };
 
     DMA_OP optimizable = DMA_OP::none;
     if (SymbolToTile()) {
-      if (IsOptimizableChunkat(t_ca)) optimizable = DMA_OP::dst;
+      auto res = IsOptimizableChunkat(t_ca);
+      if (auto val = std::get_if<bool>(&res); val && *val == true)
+        optimizable = DMA_OP::dst;
+      else if (!val) {
+        t_opt_condition = std::get<ValueList>(res);
+        optimizable = DMA_OP::dst;
+      }
     } else if (TileToSymbol()) {
-      if (IsOptimizableChunkat(f_ca)) optimizable = DMA_OP::src;
+      auto res = IsOptimizableChunkat(f_ca);
+      if (auto val = std::get_if<bool>(&res); val && *val == true)
+        optimizable = DMA_OP::src;
+      else if (!val) {
+        f_opt_condition = std::get<ValueList>(res);
+        optimizable = DMA_OP::src;
+      }
     } else if (TileToTile()) {
       // For tile to tile, there are 3 situtations.
-      if (IsOptimizableChunkat(f_ca)) optimizable = DMA_OP::src;
-      if (IsOptimizableChunkat(t_ca)) {
-        if (optimizable & DMA_OP::src)
-          optimizable = DMA_OP::both;
-        else
-          optimizable = DMA_OP::dst;
+      auto res_f = IsOptimizableChunkat(f_ca);
+      if (auto val = std::get_if<bool>(&res_f); val && *val == true)
+        optimizable = DMA_OP::src;
+      else if (!val) {
+        f_opt_condition = std::get<ValueList>(res_f);
+        optimizable = DMA_OP::src;
+      }
+      auto res_t = IsOptimizableChunkat(t_ca);
+      if (auto val = std::get_if<bool>(&res_t); val && *val == true)
+        optimizable = (optimizable & DMA_OP::src) ? DMA_OP::both : DMA_OP::dst;
+      else if (!val) {
+        t_opt_condition = std::get<ValueList>(res_t);
+        optimizable = (optimizable & DMA_OP::src) ? DMA_OP::both : DMA_OP::dst;
       }
     }
 
     VST_DEBUG({
       if (optimizable != DMA_OP::none) {
-        dbgs() << "Optimize ";
-        switch (optimizable) {
-        case DMA_OP::src: dbgs() << "SRC"; break;
-        case DMA_OP::dst: dbgs() << "DST"; break;
-        case DMA_OP::both: dbgs() << "both SRC and DST"; break;
-        default: choreo_unreachable("unexpected situation.");
+        dbgs() << "Optimize DMA at " << n.LOC() << " to linear copy:\n";
+        if (optimizable & DMA_OP::src) {
+          dbgs() << "\tSRC";
+          if (!f_opt_condition.empty()) dbgs() << " (runtime)";
         }
-        dbgs() << " of DMA " << n.LOC() << " to linear copy.\n";
+        if (optimizable & DMA_OP::dst) {
+          dbgs() << "\tDST";
+          if (!t_opt_condition.empty()) dbgs() << " (runtime)";
+        }
+        dbgs() << "\n";
       }
     });
 
     return optimizable;
   };
 
-  auto [f_buf_name, f_buf_expr] = GetBufferExpr(f_sym, f_idx, f_ty);
-  auto [t_buf_name, t_buf_expr] = GetBufferExpr(t_sym, t_idx, t_ty);
-
-  std::string f_mds_offset = "";
-  std::string t_mds_offset = "";
-
-  Shape f_shape = f_sty->GetShape();
-  Shape t_shape = t_sty->GetShape();
-
-  // indicate which side can be optimized to linear copy
-  DMA_OP opt_to_linear_copy = OptToLinearCopy();
-
-  if (opt_to_linear_copy != DMA_OP::none) {
-    if (TileToSymbol()) {
-      assert(opt_to_linear_copy == DMA_OP::src);
-      f_mds_offset = GenOffset(f_ca);
-      f_shape = f_ca->GetBlockShape();
-    } else if (SymbolToTile()) {
-      assert(opt_to_linear_copy == DMA_OP::dst);
-      t_mds_offset = GenOffset(t_ca);
-      t_shape = t_ca->GetBlockShape();
-    } else if (TileToTile()) {
-      if (opt_to_linear_copy & DMA_OP::src) {
-        f_mds_offset = GenOffset(f_ca);
-        f_shape = f_ca->GetBlockShape();
-      }
-      if (opt_to_linear_copy & DMA_OP::dst) {
-        t_mds_offset = GenOffset(t_ca);
-        t_shape = t_ca->GetBlockShape();
-      }
-    }
-  } else {
-    if (auto idx = f_ca->IndexOfLastSpanAs()) {
-      f_mds_offset = TileBaseOffset(f_ca);
-      f_shape = f_ca->OpAt(*idx)->GetBlockShape();
-    }
-    if (auto idx = t_ca->IndexOfLastSpanAs()) {
-      t_mds_offset = TileBaseOffset(t_ca);
-      t_shape = t_ca->OpAt(*idx)->GetBlockShape();
-    }
-  }
-
-  auto f_mds_name =
-      GetMDSName(f_buf_name, f_buf_expr, f_sty, f_mds_offset, f_shape);
-  auto t_mds_name =
-      GetMDSName(t_buf_name, t_buf_expr, t_sty, t_mds_offset, t_shape);
+  const auto f_buf = GetBufferExpr(f_sym, f_idx, f_ty);
+  const auto t_buf = GetBufferExpr(t_sym, t_idx, t_ty);
 
   auto future_name = n.future;
   // bind the data to the future
   if (SymbolToSymbol() || TileToSymbol() || TileToTile())
-    future_name = claimFuture(t_buf_expr);
+    future_name = claimFuture(t_buf.second);
   else
     future_name = claimFuture("");
 
   std::string event_name;
   if (fty->IsAsync()) event_name = future_name + "__event__";
 
-  // handles dma related to shared memory, where only single thread can
-  // operate
-  bool local_in_warp = false, shared_in_block = false;
-  if (!n.future.empty()) {
-    shared_in_block = IsDMABlockShared(n);
-    local_in_warp = IsDMAWarpLocal(n);
-  }
+  // indicate which side can be optimized to linear copy
+  DMA_OP opt_to_linear_copy = OptToLinearCopy();
 
-  assert(!(shared_in_block && local_in_warp) &&
-         "local and shared memory should not be used at the same time");
-  if (local_in_warp)
-    assert(CCtx().GetArch() == TargetArch::GCU4 &&
-           "only gcu400 need handle local synchronization");
+  // if `no_linear_opt` is true, will not do linear optimization even
+  // `opt_to_linear_copy` is available. Use it to control runtime opt.
+  auto DMACodeGen = [&](bool no_linear_opt) {
+    std::string f_mds_offset = "";
+    std::string t_mds_offset = "";
+    Shape f_shape = f_sty->GetShape();
+    Shape t_shape = t_sty->GetShape();
+    const auto& [f_buf_name, f_buf_expr] = f_buf;
+    const auto& [t_buf_name, t_buf_expr] = t_buf;
+    if (!no_linear_opt && opt_to_linear_copy != DMA_OP::none) {
+      if (TileToSymbol()) {
+        assert(opt_to_linear_copy == DMA_OP::src);
+        f_mds_offset = GenOffset(f_ca);
+        f_shape = f_ca->GetBlockShape();
+      } else if (SymbolToTile()) {
+        assert(opt_to_linear_copy == DMA_OP::dst);
+        t_mds_offset = GenOffset(t_ca);
+        t_shape = t_ca->GetBlockShape();
+      } else if (TileToTile()) {
+        if (opt_to_linear_copy & DMA_OP::src) {
+          f_mds_offset = GenOffset(f_ca);
+          f_shape = f_ca->GetBlockShape();
+        }
+        if (opt_to_linear_copy & DMA_OP::dst) {
+          t_mds_offset = GenOffset(t_ca);
+          t_shape = t_ca->GetBlockShape();
+        }
+      }
+    } else {
+      if (auto idx = f_ca->IndexOfLastSpanAs()) {
+        f_mds_offset = TileBaseOffset(f_ca);
+        f_shape = f_ca->OpAt(*idx)->GetBlockShape();
+      }
+      if (auto idx = t_ca->IndexOfLastSpanAs()) {
+        t_mds_offset = TileBaseOffset(t_ca);
+        t_shape = t_ca->OpAt(*idx)->GetBlockShape();
+      }
+    }
+    const auto f_mds =
+        GenMDSDecl(f_buf_name, f_buf_expr, f_sty, f_mds_offset, f_shape);
+    const auto t_mds =
+        GenMDSDecl(t_buf_name, t_buf_expr, t_sty, t_mds_offset, t_shape);
 
-  if (shared_in_block || local_in_warp) {
-    ds << d_indent << "if (" << SingleInstancePredicate(shared_in_block)
-       << ") {\n";
-    IncrDeviceIndent();
-  }
+    std::string f_mds_name{f_mds.first};
+    std::string f_mds_decl{f_mds.second};
+    std::string t_mds_name{t_mds.first};
+    std::string t_mds_decl{t_mds.second};
 
-  if (n.operation == ".copy") {
-    auto LinearCopy = [&]() -> void {
-      ds << d_indent;
-      if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-      ds << "tops::memcpy" << (fty->IsAsync() ? "_async" : "") << "(*"
-         << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-         << ");\n";
-      VerboseDMA(ds, d_indent, t_sym, f_sym, "copy", "", 0,
-                 ", line " + std::to_string(n.LOC().begin.line));
-      if (!event_name.empty())
-        ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
-    };
-    auto Deslice = [&]() -> void {
-      static int ds_cnt = 0;
-      auto off_name = "__deslice_offset" + std::to_string(ds_cnt++) + "__" +
-                      t_sym + "_2_" + f_sym;
-      auto [offset, offcnt] = GenMdsOffset(t_ca);
-      VerboseDMA(ds, d_indent, t_sym, f_sym, "deslice", offset, offcnt,
-                 ", line " + std::to_string(n.LOC().begin.line));
-      ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
-      ds << d_indent;
-      if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-      ds << "tops::deslice" << (fty->IsAsync() ? "_async" : "") << "(*"
-         << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-         << ", " << off_name << ");\n";
-      if (!event_name.empty())
-        ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
-    };
-    auto Slice = [&]() -> void {
-      static int s_cnt = 0;
-      auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
-                      f_sym + "_2_" + t_sym;
-      auto [offset, offcnt] = GenMdsOffset(f_ca);
-      VerboseDMA(ds, d_indent, f_sym, t_sym, "slice", offset, offcnt,
-                 ", line " + std::to_string(n.LOC().begin.line));
-      ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
-      ds << d_indent;
-      if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-      ds << "tops::slice" << (fty->IsAsync() ? "_async" : "") << "(*"
-         << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-         << ", " << off_name << ");\n";
-      if (!event_name.empty())
-        ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
-    };
-    auto SliceDeslice = [&]() -> void {
-      static int s_cnt = 0;
-      auto s_off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
+    ds << f_mds_decl;
+    ds << t_mds_decl;
+
+    // handles dma related to shared memory, where only single thread can
+    // operate
+    bool local_in_warp = false, shared_in_block = false;
+    if (!n.future.empty()) {
+      shared_in_block = IsDMABlockShared(n);
+      local_in_warp = IsDMAWarpLocal(n);
+    }
+
+    assert(!(shared_in_block && local_in_warp) &&
+           "local and shared memory should not be used at the same time");
+    if (local_in_warp)
+      assert(CCtx().GetArch() == TargetArch::GCU4 &&
+             "only gcu400 need handle local synchronization");
+
+    if (shared_in_block || local_in_warp) {
+      ds << d_indent << "if (" << SingleInstancePredicate(shared_in_block)
+         << ") {\n";
+      IncrDeviceIndent();
+    }
+
+    if (n.operation == ".copy") {
+      auto LinearCopy = [&]() -> void {
+        ds << d_indent;
+        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
+        ds << "tops::memcpy" << (fty->IsAsync() ? "_async" : "") << "(*"
+           << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
+           << ");\n";
+        VerboseDMA(ds, d_indent, t_sym, f_sym, "copy", "", 0,
+                   ", line " + std::to_string(n.LOC().begin.line));
+        if (!event_name.empty())
+          ds << d_indent << future_name << ".set_event(" << event_name
+             << ");\n";
+      };
+      auto Deslice = [&]() -> void {
+        static int ds_cnt = 0;
+        auto off_name = "__deslice_offset" + std::to_string(ds_cnt++) + "__" +
+                        t_sym + "_2_" + f_sym;
+        auto [offset, offcnt] = GenMdsOffset(t_ca);
+        VerboseDMA(ds, d_indent, t_sym, f_sym, "deslice", offset, offcnt,
+                   ", line " + std::to_string(n.LOC().begin.line));
+        ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
+        ds << d_indent;
+        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
+        ds << "tops::deslice" << (fty->IsAsync() ? "_async" : "") << "(*"
+           << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
+           << ", " << off_name << ");\n";
+        if (!event_name.empty())
+          ds << d_indent << future_name << ".set_event(" << event_name
+             << ");\n";
+      };
+      auto Slice = [&]() -> void {
+        static int s_cnt = 0;
+        auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
                         f_sym + "_2_" + t_sym;
-      auto [s_offset, s_offcnt] = GenMdsOffset(f_ca);
+        auto [offset, offcnt] = GenMdsOffset(f_ca);
+        VerboseDMA(ds, d_indent, f_sym, t_sym, "slice", offset, offcnt,
+                   ", line " + std::to_string(n.LOC().begin.line));
+        ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
+        ds << d_indent;
+        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
+        ds << "tops::slice" << (fty->IsAsync() ? "_async" : "") << "(*"
+           << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
+           << ", " << off_name << ");\n";
+        if (!event_name.empty())
+          ds << d_indent << future_name << ".set_event(" << event_name
+             << ");\n";
+      };
+      auto SliceDeslice = [&]() -> void {
+        static int s_cnt = 0;
+        auto s_off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
+                          f_sym + "_2_" + t_sym;
+        auto [s_offset, s_offcnt] = GenMdsOffset(f_ca);
 
-      static int ds_cnt = 0;
-      auto ds_off_name = "__deslice_offset" + std::to_string(ds_cnt++) + "__" +
-                         t_sym + "_2_" + f_sym;
-      auto [ds_offset, ds_offcnt] = GenMdsOffset(t_ca);
+        static int ds_cnt = 0;
+        auto ds_off_name = "__deslice_offset" + std::to_string(ds_cnt++) +
+                           "__" + t_sym + "_2_" + f_sym;
+        auto [ds_offset, ds_offcnt] = GenMdsOffset(t_ca);
 
-      VerboseDMA(ds, d_indent, t_sym, f_sym, "deslice", ds_offset, ds_offcnt,
-                 ", line " + std::to_string(n.LOC().begin.line));
-      ds << d_indent << "int " << s_off_name << "[] = {" << s_offset << "};\n";
-      ds << d_indent << "int " << ds_off_name << "[] = {" << ds_offset
-         << "};\n";
+        VerboseDMA(ds, d_indent, t_sym, f_sym, "deslice", ds_offset, ds_offcnt,
+                   ", line " + std::to_string(n.LOC().begin.line));
+        ds << d_indent << "int " << s_off_name << "[] = {" << s_offset
+           << "};\n";
+        ds << d_indent << "int " << ds_off_name << "[] = {" << ds_offset
+           << "};\n";
 
-      auto slice_shape_name = "__slice_shape" + std::to_string(s_cnt) + "__" +
-                              f_sym + "_2_" + t_sym;
-      ds << d_indent << "unsigned int " << slice_shape_name << "[] = {"
-         << ShapeSTR(f_ca->GetBlockShape()) << "};\n";
-      ds << d_indent;
-      if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-      ds << "tops::slice_deslice" << (fty->IsAsync() ? "_async" : "") << "(*"
-         << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-         << ", " << s_off_name << ", " << slice_shape_name << ", "
-         << ds_off_name << ");\n";
+        auto slice_shape_name = "__slice_shape" + std::to_string(s_cnt) + "__" +
+                                f_sym + "_2_" + t_sym;
+        ds << d_indent << "unsigned int " << slice_shape_name << "[] = {"
+           << ShapeSTR(f_ca->GetBlockShape()) << "};\n";
+        ds << d_indent;
+        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
+        ds << "tops::slice_deslice" << (fty->IsAsync() ? "_async" : "") << "(*"
+           << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
+           << ", " << s_off_name << ", " << slice_shape_name << ", "
+           << ds_off_name << ");\n";
 
-      if (!event_name.empty())
-        ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
-    };
+        if (!event_name.empty())
+          ds << d_indent << future_name << ".set_event(" << event_name
+             << ");\n";
+      };
 
-    if (SymbolToSymbol()) {
-      LinearCopy();
-    } else if (SymbolToTile()) {
-      if (opt_to_linear_copy == DMA_OP::dst)
+      if (SymbolToSymbol()) {
         LinearCopy();
-      else
-        Deslice();
-    } else if (TileToSymbol()) {
-      if (opt_to_linear_copy == DMA_OP::src)
-        LinearCopy();
-      else
-        Slice();
-    } else if (TileToTile()) {
-      if (opt_to_linear_copy == DMA_OP::both)
-        LinearCopy();
-      else if (opt_to_linear_copy == DMA_OP::src)
-        Deslice();
-      else if (opt_to_linear_copy == DMA_OP::dst)
-        Slice();
-      else
-        SliceDeslice();
-    } else {
-      choreo_unreachable("unexpected situation.");
-    }
-  } else if (n.operation == ".pad") {
-    // note: linear copy optimization is not processed on dma.pad
-    auto pad_config = cast<PadConfig>(n.GetConfig());
-    ds << d_indent << "unsigned int __pad_low_" << f_buf_name << "[] = {"
-       << DelimitedString(pad_config->pad_low) << "};\n";
-    ds << d_indent << "unsigned int __pad_high_" << f_buf_name << "[] = {"
-       << DelimitedString(pad_config->pad_high) << "};\n";
-    ds << d_indent << "unsigned int __pad_mid_" << f_buf_name << "[] = {"
-       << DelimitedString(pad_config->pad_mid) << "};\n";
+      } else if (SymbolToTile()) {
+        if (opt_to_linear_copy == DMA_OP::dst && !no_linear_opt)
+          LinearCopy();
+        else
+          Deslice();
+      } else if (TileToSymbol()) {
+        if (opt_to_linear_copy == DMA_OP::src && !no_linear_opt)
+          LinearCopy();
+        else
+          Slice();
+      } else if (TileToTile()) {
+        if (opt_to_linear_copy == DMA_OP::both && !no_linear_opt)
+          LinearCopy();
+        else if (opt_to_linear_copy == DMA_OP::src && !no_linear_opt)
+          Deslice();
+        else if (opt_to_linear_copy == DMA_OP::dst && !no_linear_opt)
+          Slice();
+        else
+          SliceDeslice();
+      } else {
+        choreo_unreachable("unexpected situation.");
+      }
+    } else if (n.operation == ".pad") {
+      // note: linear copy optimization is not processed on dma.pad
+      auto pad_config = cast<PadConfig>(n.GetConfig());
+      ds << d_indent << "unsigned int __pad_low_" << f_buf_name << "[] = {"
+         << DelimitedString(pad_config->pad_low) << "};\n";
+      ds << d_indent << "unsigned int __pad_high_" << f_buf_name << "[] = {"
+         << DelimitedString(pad_config->pad_high) << "};\n";
+      ds << d_indent << "unsigned int __pad_mid_" << f_buf_name << "[] = {"
+         << DelimitedString(pad_config->pad_mid) << "};\n";
 
-    // Make a dummy node to show location
-    std::string pad_value_str = ExprCastSTR(
-        AST::Make<AST::DMA>(n.LOC(), ""), pad_config->value,
-        GetBaseType(*f_sty),
-        (std::holds_alternative<int>(pad_config->value) ? BaseType::S32
-                                                        : BaseType::F32),
-        IsHost());
+      // Make a dummy node to show location
+      std::string pad_value_str = ExprCastSTR(
+          AST::Make<AST::DMA>(n.LOC(), ""), pad_config->value,
+          GetBaseType(*f_sty),
+          (std::holds_alternative<int>(pad_config->value) ? BaseType::S32
+                                                          : BaseType::F32),
+          IsHost());
 
-    if (SymbolToSymbol()) {
-      ds << d_indent;
-      if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-      ds << "tops::pad" << (fty->IsAsync() ? "_async" : "") << "(*"
-         << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-         << ", __pad_low_" << f_buf_name << ", __pad_high_" << f_buf_name
-         << ", __pad_mid_" << f_buf_name << ", " << pad_value_str << ");\n";
-      // set the device future
-      if (!event_name.empty())
-        ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
-    } else if (TileToSymbol()) {
-      static int s_cnt = 0;
-      auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
-                      f_sym + "_2_" + t_sym;
-      auto [offset, offcnt] = GenMdsOffset(f_ca);
-      VerboseDMA(ds, d_indent, t_sym, f_sym, "slice+pad", offset, offcnt,
-                 ", line " + std::to_string(n.LOC().begin.line));
-      ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
-      auto slice_shape_name = "__slice_shape" + std::to_string(s_cnt) + "__" +
-                              f_sym + "_2_" + t_sym;
-      ds << d_indent << "unsigned int " << slice_shape_name << "[] = {"
-         << ShapeSTR(f_ca->GetBlockShape()) << "};\n";
-      ds << d_indent;
-      if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-      ds << "tops::slice_pad" << (fty->IsAsync() ? "_async" : "") << "(*"
-         << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-         << ", " << off_name << ", " << slice_shape_name << ", __pad_low_"
-         << f_buf_name << ", __pad_high_" << f_buf_name << ", __pad_mid_"
-         << f_buf_name << ", " << pad_value_str << ");\n";
-      // set the device future
-      if (!event_name.empty())
-        ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
-    } else {
-      choreo_unreachable(
-          "only support dma.pad with (symbol=>symbol), (tile=>symbol).");
-    }
-  } else if (n.operation == ".transp") {
-    static int t_cnt = 0;
-    auto transp_config = cast<TransposeConfig>(n.GetConfig());
-    auto f_buf_name = RemoveSuffix(f_buf_expr, ".data()");
-    auto t_buf_name = RemoveSuffix(t_buf_expr, ".data()");
-    auto layout_name =
-        "__transpose_layout" + std::to_string(t_cnt++) + "__" + f_buf_name;
-    ds << d_indent << "int " << layout_name << "[] = {"
-       << DelimitedString(transp_config->dim_values) << "};\n";
+      if (SymbolToSymbol()) {
+        ds << d_indent;
+        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
+        ds << "tops::pad" << (fty->IsAsync() ? "_async" : "") << "(*"
+           << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
+           << ", __pad_low_" << f_buf_name << ", __pad_high_" << f_buf_name
+           << ", __pad_mid_" << f_buf_name << ", " << pad_value_str << ");\n";
+        // set the device future
+        if (!event_name.empty())
+          ds << d_indent << future_name << ".set_event(" << event_name
+             << ");\n";
+      } else if (TileToSymbol()) {
+        static int s_cnt = 0;
+        auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
+                        f_sym + "_2_" + t_sym;
+        auto [offset, offcnt] = GenMdsOffset(f_ca);
+        VerboseDMA(ds, d_indent, t_sym, f_sym, "slice+pad", offset, offcnt,
+                   ", line " + std::to_string(n.LOC().begin.line));
+        ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
+        auto slice_shape_name = "__slice_shape" + std::to_string(s_cnt) + "__" +
+                                f_sym + "_2_" + t_sym;
+        ds << d_indent << "unsigned int " << slice_shape_name << "[] = {"
+           << ShapeSTR(f_ca->GetBlockShape()) << "};\n";
+        ds << d_indent;
+        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
+        ds << "tops::slice_pad" << (fty->IsAsync() ? "_async" : "") << "(*"
+           << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
+           << ", " << off_name << ", " << slice_shape_name << ", __pad_low_"
+           << f_buf_name << ", __pad_high_" << f_buf_name << ", __pad_mid_"
+           << f_buf_name << ", " << pad_value_str << ");\n";
+        // set the device future
+        if (!event_name.empty())
+          ds << d_indent << future_name << ".set_event(" << event_name
+             << ");\n";
+      } else {
+        choreo_unreachable(
+            "only support dma.pad with (symbol=>symbol), (tile=>symbol).");
+      }
+    } else if (n.operation == ".transp") {
+      static int t_cnt = 0;
+      auto transp_config = cast<TransposeConfig>(n.GetConfig());
+      auto f_buf_name = RemoveSuffix(f_buf_expr, ".data()");
+      auto t_buf_name = RemoveSuffix(t_buf_expr, ".data()");
+      auto layout_name =
+          "__transpose_layout" + std::to_string(t_cnt++) + "__" + f_buf_name;
+      ds << d_indent << "int " << layout_name << "[] = {"
+         << DelimitedString(transp_config->dim_values) << "};\n";
 
-    auto Transpose = [&]() -> void {
-      ds << d_indent;
-      if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-      ds << "tops::transpose" << (fty->IsAsync() ? "_async" : "") << "(*"
-         << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-         << ", " << layout_name << ");\n";
-      if (!event_name.empty())
-        ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
-    };
-    auto SliceTranspose = [&]() -> void {
-      static int s_cnt = 0;
-      auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
-                      f_sym + "_2_" + t_sym;
-      auto [offset, offcnt] = GenMdsOffset(f_ca, n.GetConfig());
-      ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
-      ds << d_indent;
-      if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-      ds << "tops::slice_transpose" << (fty->IsAsync() ? "_async" : "") << "(*"
-         << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
-         << ", " << off_name << ", " << layout_name << ");\n";
-      if (!event_name.empty())
-        ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
-    };
-    auto TransposeDeslice = [&]() -> void {
-      static int ds_cnt = 0;
-      auto off_name = "__deslice_offset" + std::to_string(ds_cnt++) + "__" +
-                      t_sym + "_2_" + f_sym;
-      auto [offset, offcnt] = GenMdsOffset(t_ca, n.GetConfig());
-      ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
-      ds << d_indent;
-      if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
-      ds << "tops::transpose_deslice" << (fty->IsAsync() ? "_async" : "")
-         << "(*" << future_name << ".get_ctx(), " << t_mds_name << ", "
-         << f_mds_name << ", " << layout_name << ", " << off_name << ");\n";
-      if (!event_name.empty())
-        ds << d_indent << future_name << ".set_event(" << event_name << ");\n";
-    };
+      auto Transpose = [&]() -> void {
+        ds << d_indent;
+        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
+        ds << "tops::transpose" << (fty->IsAsync() ? "_async" : "") << "(*"
+           << future_name << ".get_ctx(), " << t_mds_name << ", " << f_mds_name
+           << ", " << layout_name << ");\n";
+        if (!event_name.empty())
+          ds << d_indent << future_name << ".set_event(" << event_name
+             << ");\n";
+      };
+      auto SliceTranspose = [&]() -> void {
+        static int s_cnt = 0;
+        auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
+                        f_sym + "_2_" + t_sym;
+        auto [offset, offcnt] = GenMdsOffset(f_ca, n.GetConfig());
+        ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
+        ds << d_indent;
+        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
+        ds << "tops::slice_transpose" << (fty->IsAsync() ? "_async" : "")
+           << "(*" << future_name << ".get_ctx(), " << t_mds_name << ", "
+           << f_mds_name << ", " << off_name << ", " << layout_name << ");\n";
+        if (!event_name.empty())
+          ds << d_indent << future_name << ".set_event(" << event_name
+             << ");\n";
+      };
+      auto TransposeDeslice = [&]() -> void {
+        static int ds_cnt = 0;
+        auto off_name = "__deslice_offset" + std::to_string(ds_cnt++) + "__" +
+                        t_sym + "_2_" + f_sym;
+        auto [offset, offcnt] = GenMdsOffset(t_ca, n.GetConfig());
+        ds << d_indent << "int " << off_name << "[] = {" << offset << "};\n";
+        ds << d_indent;
+        if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
+        ds << "tops::transpose_deslice" << (fty->IsAsync() ? "_async" : "")
+           << "(*" << future_name << ".get_ctx(), " << t_mds_name << ", "
+           << f_mds_name << ", " << layout_name << ", " << off_name << ");\n";
+        if (!event_name.empty())
+          ds << d_indent << future_name << ".set_event(" << event_name
+             << ");\n";
+      };
 
-    if (SymbolToSymbol()) {
-      Transpose();
-    } else if (SymbolToTile()) {
-      if (opt_to_linear_copy == DMA_OP::dst)
+      if (SymbolToSymbol()) {
         Transpose();
-      else
-        TransposeDeslice();
-    } else if (TileToSymbol()) {
-      if (opt_to_linear_copy == DMA_OP::src)
-        Transpose();
-      else
-        SliceTranspose();
-    } else if (TileToTile()) {
-      choreo_unreachable("slice-transpose-deslice is not supported now.");
+      } else if (SymbolToTile()) {
+        if (opt_to_linear_copy == DMA_OP::dst && !no_linear_opt)
+          Transpose();
+        else
+          TransposeDeslice();
+      } else if (TileToSymbol()) {
+        if (opt_to_linear_copy == DMA_OP::src && !no_linear_opt)
+          Transpose();
+        else
+          SliceTranspose();
+      } else if (TileToTile()) {
+        choreo_unreachable("slice-transpose-deslice is not supported now.");
+      }
     }
-  }
 
-  if (local_in_warp || shared_in_block) {
+    if (local_in_warp || shared_in_block) {
+      DecrDeviceIndent();
+      ds << d_indent << "} // single instance\n";
+      if (!fty->IsAsync()) {
+        // not async, must syncthreads immediately
+        // else, defer the sync till the wait time
+        if (shared_in_block) ds << d_indent << "__syncthreads();\n";
+        if (local_in_warp) ds << d_indent << "__syncsubthreads();\n";
+      }
+    }
+  };
+
+  if (!f_opt_condition.empty() || !t_opt_condition.empty()) {
+    // need generating runtime conditional optimization
+    std::ostringstream condition;
+    if (!f_opt_condition.empty())
+      condition << ValueListSTR(f_opt_condition, " && ");
+    if (!t_opt_condition.empty()) {
+      if (!f_opt_condition.empty()) condition << " && ";
+      condition << ValueListSTR(t_opt_condition, " && ");
+    }
+    IndStream() << "if (" << condition.str() << ") {\n";
+    IncrDeviceIndent();
+    DMACodeGen(false);
     DecrDeviceIndent();
-    ds << d_indent << "} // single instance\n";
-    if (!fty->IsAsync()) {
-      // not async, must syncthreads immediately
-      // else, defer the sync till the wait time
-      if (shared_in_block) ds << d_indent << "__syncthreads();\n";
-      if (local_in_warp) ds << d_indent << "__syncsubthreads();\n";
-    }
+    IndStream() << "} else {\n";
+    IncrDeviceIndent();
+    DMACodeGen(true);
+    DecrDeviceIndent();
+    IndStream() << "} // end DMA opt: " << n.LOC() << "\n";
+  } else {
+    DMACodeGen(false);
   }
 
   return true;
@@ -2750,6 +2824,16 @@ bool TopsccCodeGen::CompileWithScript(const std::string& action) {
 // Currently, it is guaranteed that ValueSTR can be used safely and direcctly.
 const std::string TopsccCodeGen::ValueSTR(const ValueItem& vi) const {
   return OpValueSTR(vi, "", true);
+}
+
+const std::string TopsccCodeGen::ValueListSTR(const ValueList& vl,
+                                              std::string sep) const {
+  std::ostringstream oss;
+  if (!vl.empty()) {
+    oss << ValueSTR(vl[0]);
+    for (unsigned i = 1; i < vl.size(); ++i) oss << sep << ValueSTR(vl[i]);
+  }
+  return oss.str();
 }
 
 const std::string TopsccCodeGen::OpValueSTR(const ValueItem& vi,

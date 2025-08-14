@@ -144,10 +144,10 @@ int main() { /// host program
   std::cout << "Test Passed\n" << std::endl;
   std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
 }
-// CHECK-TOPSCC:   tops::mdspan __mds0_f__buf__(tops::Global, (float*)f__buf__ + (anon_0 * 1024), 1024);
-// CHECK-TOPSCC:      tops::mdspan __mds1_input_load__buf__(tops::Shared, (float*)input_load__buf__, 1024);
 // CHECK-TOPSCC:      tops_dte_ctx_t choreo_topscc_ctx0;
 // CHECK-TOPSCC:      choreo::future input_load(choreo_topscc_ctx0, "input_load", 32, 26, input_load__buf__);
+// CHECK-TOPSCC:      tops::mdspan __mds0_f__buf__(tops::Global, (float*)f__buf__ + (anon_0 * 1024), 1024);
+// CHECK-TOPSCC:      tops::mdspan __mds1_input_load__buf__(tops::Shared, (float*)input_load__buf__, 1024);
 // CHECK-TOPSCC:      if (__CHOREO_SINGLE_SHARED__) {
 // CHECK-TOPSCC:        tops::event input_load__event__ = tops::memcpy_async(*input_load.get_ctx(), __mds1_input_load__buf__, __mds0_f__buf__);
 // CHECK-TOPSCC:        input_load.set_event(input_load__event__);

@@ -14,15 +14,15 @@ __co__ auto foo(bf16[2, 3] i) {
 // CHECK: __global__ void __choreo_device_foo(choreo::bf16 * i, choreo::bf16 * res) {
 // CHECK:   __local__ __valigned__ unsigned char anon_1[512];
 // CHECK:   choreo::bfloat16* anon_0 = (choreo::bfloat16*)(anon_1 + 0);
-// CHECK:   tops::mdspan __mds0_i(tops::Global, (choreo::bfloat16*)i, 2, 3);
-// CHECK:   tops::mdspan __mds1_anon_0(tops::Private, (choreo::bfloat16*)anon_0, 2, 3);
 // CHECK:   tops_dte_ctx_t choreo_topscc_ctx0;
 // CHECK:   choreo::future __choreo_anon_fut__0(choreo_topscc_ctx0, "", {{[0-9]*}}, {{[0-9]*}}, anon_0);
+// CHECK:   tops::mdspan __mds0_i(tops::Global, (choreo::bfloat16*)i, 2, 3);
+// CHECK:   tops::mdspan __mds1_anon_0(tops::Private, (choreo::bfloat16*)anon_0, 2, 3);
 // CHECK:   tops::memcpy(*__choreo_anon_fut__0.get_ctx(), __mds1_anon_0, __mds0_i);
-// CHECK:   tops::mdspan __mds2_i(tops::Global, (choreo::bfloat16*)i, 2, 3);
-// CHECK:   tops::mdspan __mds3_res(tops::Global, (choreo::bfloat16*)res, 2, 5);
 // CHECK:   tops_dte_ctx_t choreo_topscc_ctx1;
 // CHECK:   choreo::future __choreo_anon_fut__1(choreo_topscc_ctx1, "", {{[0-9]*}}, {{[0-9]*}}, res);
+// CHECK:   tops::mdspan __mds2_i(tops::Global, (choreo::bfloat16*)i, 2, 3);
+// CHECK:   tops::mdspan __mds3_res(tops::Global, (choreo::bfloat16*)res, 2, 5);
 // CHECK:   unsigned int __pad_low_i[] = {0, 0};
 // CHECK:   unsigned int __pad_high_i[] = {0, 2};
 // CHECK:   unsigned int __pad_mid_i[] = {0, 0};
@@ -42,24 +42,42 @@ __co__ auto foo1(s32 [N, M] a) {
 // CHECK: __global__ void __choreo_device_foo1(int * a, int * res, unsigned M, unsigned N, unsigned long mr_offset_foo1_paraby_2_paraby_3_f1__buf__) {
 // CHECK:   __local__ __valigned__ unsigned char anon_2[1572352];
 // CHECK:   int* f1__buf__ = (int*)(anon_2 + mr_offset_foo1_paraby_2_paraby_3_f1__buf__);
-// CHECK:   tops::mdspan __mds4_a(tops::Global, (int*)a, N, M);
-// CHECK:   tops::mdspan __mds5_f1__buf__(tops::Private, (int*)f1__buf__, (N + 1), (M / 2));
 // CHECK:   tops_dte_ctx_t choreo_topscc_ctx2;
-// CHECK:   choreo::future f1(choreo_topscc_ctx2, "f1", {{[0-9]*}}, {{[0-9]*}}, f1__buf__);
-// CHECK:   unsigned int __pad_low_a[] = {1, 0};
-// CHECK:   unsigned int __pad_high_a[] = {0, 0};
-// CHECK:   unsigned int __pad_mid_a[] = {0, 0};
-// CHECK:   int __slice_offset0__a_2_f1__buf__[] = {0, (int)(__tops_tid_x() * (M / 2))};
-// CHECK:   unsigned int __slice_shape1__a_2_f1__buf__[] = {N, (M / 2)};
-// CHECK:   tops::event f1__event__ = tops::slice_pad_async(*f1.get_ctx(), __mds5_f1__buf__, __mds4_a, __slice_offset0__a_2_f1__buf__, __slice_shape1__a_2_f1__buf__, __pad_low_a, __pad_high_a, __pad_mid_a, -1);
-// CHECK:   f1.set_event(f1__event__);
+// CHECK:   choreo::future f1(choreo_topscc_ctx2, "f1", {{.*}}, {{.*}}, f1__buf__);
+// CHECK:   if ((M / 2 - 1 + M * (N - 1) + 1 == M / 2 * N)) {
+// CHECK:     tops::mdspan __mds4_a(tops::Global, (int*)a + (0 * (M * N) + M / 2 * __tops_tid_x()), N, (M / 2));
+// CHECK:     tops::mdspan __mds5_f1__buf__(tops::Private, (int*)f1__buf__, (N + 1), (M / 2));
+// CHECK:     unsigned int __pad_low_a[] = {1, 0};
+// CHECK:     unsigned int __pad_high_a[] = {0, 0};
+// CHECK:     unsigned int __pad_mid_a[] = {0, 0};
+// CHECK:     int __slice_offset0__a_2_f1__buf__[] = {0, (int)(__tops_tid_x() * (M / 2))};
+// CHECK:     unsigned int __slice_shape1__a_2_f1__buf__[] = {N, (M / 2)};
+// CHECK:     tops::event f1__event__ = tops::slice_pad_async(*f1.get_ctx(), __mds5_f1__buf__, __mds4_a, __slice_offset0__a_2_f1__buf__, __slice_shape1__a_2_f1__buf__, __pad_low_a, __pad_high_a, __pad_mid_a, -1);
+// CHECK:     f1.set_event(f1__event__);
+// CHECK:   } else {
+// CHECK:     tops::mdspan __mds6_a(tops::Global, (int*)a, N, M);
+// CHECK:     tops::mdspan __mds7_f1__buf__(tops::Private, (int*)f1__buf__, (N + 1), (M / 2));
+// CHECK:     unsigned int __pad_low_a[] = {1, 0};
+// CHECK:     unsigned int __pad_high_a[] = {0, 0};
+// CHECK:     unsigned int __pad_mid_a[] = {0, 0};
+// CHECK:     int __slice_offset1__a_2_f1__buf__[] = {0, (int)(__tops_tid_x() * (M / 2))};
+// CHECK:     unsigned int __slice_shape2__a_2_f1__buf__[] = {N, (M / 2)};
+// CHECK:     tops::event f1__event__ = tops::slice_pad_async(*f1.get_ctx(), __mds7_f1__buf__, __mds6_a, __slice_offset1__a_2_f1__buf__, __slice_shape2__a_2_f1__buf__, __pad_low_a, __pad_high_a, __pad_mid_a, -1);
+// CHECK:     f1.set_event(f1__event__);
+// CHECK:   } // end DMA opt:
 // CHECK:   f1.wait();
-// CHECK:   tops::mdspan __mds6_f1(tops::Private, (int*)f1.data(), (N + 1), (M / 2));
-// CHECK:   tops::mdspan __mds7_res(tops::Global, (int*)res, (N + 1), M);
 // CHECK:   tops_dte_ctx_t choreo_topscc_ctx3;
-// CHECK:   choreo::future __choreo_anon_fut__2(choreo_topscc_ctx3, "", {{[0-9]*}}, {{[0-9]*}});
-// CHECK:   int __deslice_offset0__res_2_f1[] = {0, (int)(__tops_tid_x() * (M / 2))};
-// CHECK:   tops::deslice(*__choreo_anon_fut__2.get_ctx(), __mds7_res, __mds6_f1, __deslice_offset0__res_2_f1);
+// CHECK:   choreo::future __choreo_anon_fut__2(choreo_topscc_ctx3, "", {{.*}}, {{.*}});
+// CHECK:   if ((M / 2 - 1 + M * N + 1 == M / 2 * (N + 1))) {
+// CHECK:     tops::mdspan __mds8_f1(tops::Private, (int*)f1.data(), (N + 1), (M / 2));
+// CHECK:     tops::mdspan __mds9_res(tops::Global, (int*)res + (0 * (M * (N + 1)) + M / 2 * __tops_tid_x()), (N + 1), (M / 2));
+// CHECK:     tops::memcpy(*__choreo_anon_fut__2.get_ctx(), __mds9_res, __mds8_f1);
+// CHECK:   } else {
+// CHECK:     tops::mdspan __mds10_f1(tops::Private, (int*)f1.data(), (N + 1), (M / 2));
+// CHECK:     tops::mdspan __mds11_res(tops::Global, (int*)res, (N + 1), M);
+// CHECK:     int __deslice_offset0__res_2_f1[] = {0, (int)(__tops_tid_x() * (M / 2))};
+// CHECK:     tops::deslice(*__choreo_anon_fut__2.get_ctx(), __mds11_res, __mds10_f1, __deslice_offset0__res_2_f1);
+// CHECK:   } // end DMA opt:
 // CHECK: }
 
 int main()

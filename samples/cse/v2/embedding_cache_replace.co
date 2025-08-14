@@ -184,30 +184,30 @@ __co__ void EmbeddingCacheReplaceChoreo_kernel(
       local KEY_TYPE[TILE_SIZE] buffer_query;
       local u32[TILE_SIZE] buffer_src_set;
 
-      s32 k_total_len0 = cdiv(capacity_in_set, dim_block);
-      s32 k_total_start = threadIdx * k_total_len0;
-      s32 k_total_end = min_(k_total_start + k_total_len0, capacity_in_set);
-      s32 k_total_len = k_total_end - k_total_start;
+      u32 k_total_len0 = cdiv(capacity_in_set, dim_block);
+      u32 k_total_start = threadIdx * k_total_len0;
+      u32 k_total_end = min_(k_total_start + k_total_len0, capacity_in_set);
+      u32 k_total_len = k_total_end - k_total_start;
       
-      s32 k_loop_num = cdiv(k_total_len, PART_SIZE);
-      s32 k_len0 = PART_SIZE;
+      u32 k_loop_num = cdiv(k_total_len, PART_SIZE);
+      u32 k_len0 = PART_SIZE;
       // Outer loop: block copy key/counter to local buffer
       foreach {k_loop_idx} in [k_loop_num] {
-        s32 k_start = k_total_start + k_len0 * k_loop_idx;
-        s32 k_end = min_(k_start + k_len0, k_total_end);
-        s32 k_len = k_end - k_start;
+        u32 k_start = k_total_start + k_len0 * k_loop_idx;
+        u32 k_end = min_(k_start + k_len0, k_total_end);
+        u32 k_len = k_end - k_start;
 
         // Block transfer key/counter to local buffer
-        dma.copy keys.subspan(k_total_len0, set_associativity, warp_size).at(threadIdx, _, _).subspan(k_len0, set_associativity, warp_size).at(k_loop_idx, _, _).subspan(k_len, set_associativity, warp_size) => buffer_key.subspan(k_len, set_associativity, warp_size);
-        dma.copy slot_counter.subspan(k_total_len0, set_associativity, warp_size).at(threadIdx, _, _).subspan(k_len0, set_associativity, warp_size).at(k_loop_idx, _, _).subspan(k_len, set_associativity, warp_size) => buffer_counter.subspan(k_len, set_associativity, warp_size);
-
+        aa = dma.copy.async keys.subspan(k_total_len0, set_associativity, warp_size).at(threadIdx, _, _).subspan(k_len0, set_associativity, warp_size).at(k_loop_idx, _, _).subspan(k_len, set_associativity, warp_size) => buffer_key.subspan(k_len, set_associativity, warp_size);
+        bb = dma.copy.async slot_counter.subspan(k_total_len0, set_associativity, warp_size).at(threadIdx, _, _).subspan(k_len0, set_associativity, warp_size).at(k_loop_idx, _, _).subspan(k_len, set_associativity, warp_size) => buffer_counter.subspan(k_len, set_associativity, warp_size);
+        wait aa, bb;
         int m_loop_num = cdiv(len, TILE_SIZE);
-        s32 m_len0 = cdiv(len, m_loop_num);
+        u32 m_len0 = cdiv(len, m_loop_num);
         // Inner loop: batch process input query
         foreach {m_loop_idx} in [m_loop_num] {
-          s32 m_start = m_loop_idx * m_len0;
-          s32 m_end = min_(m_start + m_len0, len);
-          s32 m_len = m_end - m_start;
+          u32 m_start = m_loop_idx * m_len0;
+          u32 m_end = min_(m_start + m_len0, len);
+          u32 m_len = m_end - m_start;
 
           // Block transfer query to local buffer
           dma.copy d_keys.subspan(m_len0).at(m_loop_idx).subspan(m_len) => buffer_query.subspan(m_len);

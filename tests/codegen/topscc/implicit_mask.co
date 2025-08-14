@@ -51,20 +51,20 @@ __co__ auto foo1(f16 [36, 15, 14, 64] a) {
 // CHECK: __thread_dims__(4, 1, 1)
 // CHECK: __global__ void __choreo_device_foo1(choreo::f16 * a) {
 // CHECK:   __shared__ choreo::half a_shared__buf__[80640];
-// CHECK:   tops::mdspan __mds0_a(tops::Global, (choreo::half*)a, 36, 15, 14, 64);
-// CHECK:   tops::mdspan __mds1_a_shared__buf__(tops::Shared, (choreo::half*)a_shared__buf__, 18, 5, 14, 64);
 // CHECK:   tops_dte_ctx_t choreo_topscc_ctx0;
 // CHECK:   choreo::future a_shared(choreo_topscc_ctx0, "a_shared", 16, 16, a_shared__buf__);
+// CHECK:   tops::mdspan __mds0_a(tops::Global, (choreo::half*)a, 36, 15, 14, 64);
+// CHECK:   tops::mdspan __mds1_a_shared__buf__(tops::Shared, (choreo::half*)a_shared__buf__, 18, 5, 14, 64);
 // CHECK:   if (__CHOREO_SINGLE_SHARED__) {
 // CHECK:     int __slice_offset0__a_2_a_shared__buf__[] = {(int)(__tops_bid_x() * 18), 0, 0};
 // CHECK:     tops::slice(*a_shared.get_ctx(), __mds1_a_shared__buf__, __mds0_a, __slice_offset0__a_2_a_shared__buf__);
 // CHECK:   } // single instance
 // CHECK:   __syncthreads();
 // CHECK:   __local__ __valigned__ choreo::half a_local__buf__[11520];
-// CHECK:   tops::mdspan __mds2_a(tops::Global, (choreo::half*)a, 36, 15, 14, 64);
-// CHECK:   tops::mdspan __mds3_a_local__buf__(tops::Private, (choreo::half*)a_local__buf__, 18, 5, 2, 64);
 // CHECK:   tops_dte_ctx_t choreo_topscc_ctx1;
 // CHECK:   choreo::future a_local(choreo_topscc_ctx1, "a_local", 18, 17, a_local__buf__);
+// CHECK:   tops::mdspan __mds2_a(tops::Global, (choreo::half*)a, 36, 15, 14, 64);
+// CHECK:   tops::mdspan __mds3_a_local__buf__(tops::Private, (choreo::half*)a_local__buf__, 18, 5, 2, 64);
 // CHECK:   if (__CHOREO_SINGLE_LOCAL__) {
 // CHECK:     int __slice_offset1__a_2_a_local__buf__[] = {(int)(__tops_bid_x() * 18), (int)(__tops_tid_x() * 5), 0};
 // CHECK:     tops::slice(*a_local.get_ctx(), __mds3_a_local__buf__, __mds2_a, __slice_offset1__a_2_a_local__buf__);
