@@ -15,6 +15,8 @@ __co__ void foo(f32 [2, 3, 4] d, int e) {
     a : [ 25, 1, e ];                // [25, 1, e]
     with g in [3] {
       b : a[ (0) / 5, 3 + b(2) ];   // [5, 23] (not [1, 23])
+      f = 5;                  // f is in another scope
+      call abc(5);
       //c : [c(1) + 1, b(0)];
     }
   }
@@ -64,6 +66,7 @@ __co__ void foo(f32 [2, 3, 4] d, int e) {
 // VALNO:      New VN #26: 'const_23'
 // VALNO:      New VN #27: '#7,#26'
 // VALNO:      Alias "::foo::paraby_0::paraby_1::within_0::b" -> #27
+// VALNO:      Alias "::foo::paraby_0::paraby_1::within_0::f" -> #7
 // VALNO:     } // end scope-4
 // VALNO:    } // end scope-3
 // VALNO:   } // end scope-2
@@ -77,3 +80,4 @@ __co__ void foo(f32 [2, 3, 4] d, int e) {
 // CHECK: Symbol:    ::foo::c, Type: ituple<3>
 // CHECK: Partial:   ::foo::paraby_0::paraby_1::a, Type: mdspan<3> [25, 1, ::foo::e]
 // CHECK: Partial:   ::foo::paraby_0::paraby_1::within_0::b, Type: mdspan<2> [5, 23]
+// CHECK: Symbol:    ::foo::paraby_0::paraby_1::within_0::f, Type: s32

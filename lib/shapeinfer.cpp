@@ -558,7 +558,10 @@ bool ShapeInference::Visit(AST::Assignment& n) {
   if (cannot_proceed) return true;
 
   if (n.da->AccessElement()) return true;
-  if (SSTab().IsDeclared(n.GetName())) return true;
+  // if defined in current scope, do not re-define
+  if (SSTab().DeclaredInScope(n.GetName())) return true;
+  // if assigned to a mutable variable, do not re-define
+  if (IsMutable(*NodeType(*n.da->data))) return true;
 
   // this is the un-type-annotated declaration
   auto nty = n.value->GetType();

@@ -1946,7 +1946,8 @@ bool EarlySemantics::Visit(AST::Call& n) {
               }
               auto rhs = DSTR2BT(str);
               if (rhs == BaseType::UNKNOWN) { return false; }
-              return IsValuePreservingCast(lhs, rhs) || IsReinterpretiveCast(lhs, rhs);
+              return IsValuePreservingCast(lhs, rhs) ||
+                     IsReinterpretiveCast(lhs, rhs);
             };
 
             if (!device_type_match(arg_bt, templ_param.type_name)) {
@@ -2009,12 +2010,14 @@ bool EarlySemantics::Visit(AST::Call& n) {
         matched_function =
             dyn_cast<AST::DeviceFunctionDecl>(candidate_function->Clone());
         matched_function->param_types = real_param_types;
-        real_ret_type = dyn_cast<DeviceDataType>(matched_function->ret_type->Clone());
+        real_ret_type =
+            dyn_cast<DeviceDataType>(matched_function->ret_type->Clone());
 
         if (template_param_map.find(real_ret_type->PlainName()) !=
-           template_param_map.end()) {
-            real_ret_type->SetDataType(template_param_map[real_ret_type->PlainName()]);
-            matched_function->ret_type = real_ret_type;
+            template_param_map.end()) {
+          real_ret_type->SetDataType(
+              template_param_map[real_ret_type->PlainName()]);
+          matched_function->ret_type = real_ret_type;
         }
       }
     } // for each device function
