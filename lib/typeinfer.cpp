@@ -69,8 +69,8 @@ bool TypeInference::AssignSymbolWithType(const location& loc,
                                          const std::string& sym,
                                          const ptr<Type>& ty) {
   if (!SSTab().DefineSymbol(sym, ty)) {
-    Error(loc, "symbol `" + sym + "' has already been associated with a type.");
-    error_count++;
+    Error1(loc,
+           "symbol `" + sym + "' has already been associated with a type.");
     return false;
   }
 
@@ -83,15 +83,13 @@ bool TypeInference::AssignSymbolWithType(const location& loc,
 ptr<Type> TypeInference::GetSymbolType(const location& loc,
                                        const std::string& name) {
   if (!SSTab().IsDeclared(name)) {
-    Error(loc, "The symbol `" + name + "' has not been defined.");
-    error_count++;
+    Error1(loc, "The symbol `" + name + "' has not been defined.");
     return nullptr;
   }
   if (auto pty = SSTab().LookupSymbol(name)) {
     return pty;
   } else {
     Error(loc, "symbol `" + name + "' is not associated with a type.");
-    error_count++;
     return nullptr;
   }
 }
@@ -100,13 +98,11 @@ bool TypeInference::ModifySymbolType(const location& loc,
                                      const std::string& name,
                                      const ptr<Type>& ty) {
   if (!SSTab().IsDeclared(name)) {
-    Error(loc, "The symbol `" + name + "' has not been defined.");
-    error_count++;
+    Error1(loc, "The symbol `" + name + "' has not been defined.");
     return false;
   }
   if (!SSTab().ModifySymbolType(name, ty)) {
-    Error(loc, "symbol `" + name + "' is not associated with a type.");
-    error_count++;
+    Error1(loc, "symbol `" + name + "' is not associated with a type.");
     return false;
   }
 
@@ -132,8 +128,7 @@ bool TypeInference::SetAsCurrentType(AST::Node& nd, const std::string& n) {
         assert(!BetterQuality(nty, cur_type) &&
                "the inference type should be better qualified.");
         if (!(cur_type->LogicalEqual(*nty))) {
-          Error(nd.LOC(), "can not infer the type of `" + n + "'.");
-          error_count++;
+          Error1(nd.LOC(), "can not infer the type of `" + n + "'.");
           return false;
         }
       }
@@ -143,15 +138,13 @@ bool TypeInference::SetAsCurrentType(AST::Node& nd, const std::string& n) {
   // Or else we need to set the type with current
   // Check for inference failures
   if (isa<UnknownType>(cur_type)) {
-    Error(nd.LOC(), "can not infer the type of `" + n + "'.");
-    error_count++;
+    Error1(nd.LOC(), "can not infer the type of `" + n + "'.");
     return false;
   }
 
   if (!cur_type->HasSufficientInfo()) {
-    Error(nd.LOC(), "can not infer '" + cur_type->Name() +
-                        "' type detail of symbol `" + n + "'.");
-    error_count++;
+    Error1(nd.LOC(), "can not infer '" + cur_type->Name() +
+                         "' type detail of symbol `" + n + "'.");
     return false;
   }
 
@@ -260,8 +253,7 @@ bool TypeInference::Visit(AST::NamedVariableDecl& n) {
   cur_type.reset();
 
   if (AST::istypeof<UnknownType>(&n)) {
-    Error(n.LOC(), "can not infer the type of `" + n.name_str + "'.");
-    error_count++;
+    Error1(n.LOC(), "can not infer the type of `" + n.name_str + "'.");
     return false;
   }
 
@@ -295,25 +287,22 @@ bool TypeInference::Visit(AST::NamedTypeDecl& n) {
 
   if (n.init_expr) {
     if (AST::istypeof<UnknownType>(n.init_expr)) {
-      Error(n.LOC(), "unable to inference the type of `" + n.name_str + "'.");
-      error_count++;
+      Error1(n.LOC(), "unable to inference the type of `" + n.name_str + "'.");
       return false;
     }
 
     if (!n.init_expr->GetType()->HasSufficientInfo()) {
-      Error(n.LOC(),
-            "unable to inference the type detail of `" + n.name_str + "'.");
-      error_count++;
+      Error1(n.LOC(),
+             "unable to inference the type detail of `" + n.name_str + "'.");
       return false;
     }
 
     SetNodeType(n, n.init_expr->GetType());
   } else if (AST::istypeof<UnknownType>(&n)) {
     // need type inference
-    Error(n.LOC(),
-          "`" + n.name_str +
-              "' is declared without type annotation or initialization.");
-    error_count++;
+    Error1(n.LOC(),
+           "`" + n.name_str +
+               "' is declared without type annotation or initialization.");
     return false;
   }
 
@@ -379,11 +368,10 @@ bool TypeInference::Visit(AST::Assignment& n) {
       cur_type.reset();
       return true;
     } else {
-      Error(n.LOC(),
-            "current choreo does not support symbol re-assignment except for "
-            "future/mutable type. Current type: " +
-                PSTR(vty));
-      error_count++;
+      Error1(n.LOC(),
+             "current choreo does not support symbol re-assignment except for "
+             "future/mutable type. Current type: " +
+                 PSTR(vty));
       SetNodeType(n, MakeUnknownType());
       cur_type.reset();
       return false;
@@ -393,8 +381,7 @@ bool TypeInference::Visit(AST::Assignment& n) {
   assert(!n.da->AccessElement());
 
   if (isa<UnknownType>(NodeType(*n.value))) {
-    Error(n.LOC(), "fail to deduce type of `" + n.GetName() + "'.");
-    error_count++;
+    Error1(n.LOC(), "fail to deduce type of `" + n.GetName() + "'.");
     cur_type.reset();
     return false;
   }
@@ -445,9 +432,8 @@ bool TypeInference::Visit(AST::Parameter& p) {
 
   if (p.HasSymbol()) {
     if (isa<UnknownType>(p.type->GetType()) || isa<UnknownType>(p.GetType())) {
-      Error(p.LOC(),
-            "fail to deduce the type of parameter `" + p.sym->name + "'.");
-      error_count++;
+      Error1(p.LOC(),
+             "fail to deduce the type of parameter `" + p.sym->name + "'.");
       return false;
     }
 
@@ -505,8 +491,7 @@ bool TypeInference::Visit(AST::Expr& n) {
     assert(!isa<AST::IntIndex>(ref));
 
     if (AST::istypeof<UnknownType>(ref)) {
-      Error(n.LOC(), "unable to infer the type of expression.");
-      error_count++;
+      Error1(n.LOC(), "unable to infer the type of expression.");
       return false;
     }
 
@@ -575,10 +560,9 @@ bool TypeInference::Visit(AST::Expr& n) {
         SetNodeType(n, MakeBooleanType());
         return true;
       } else {
-        Error(n.LOC(), "The operands of the expression cannot undergo '" +
-                           n.op + "' logical operation, the types are '" +
-                           PSTR(pty_lhs) + "' and '" + PSTR(pty_rhs) + "'");
-        error_count++;
+        Error1(n.LOC(), "The operands of the expression cannot undergo '" +
+                            n.op + "' logical operation, the types are '" +
+                            PSTR(pty_lhs) + "' and '" + PSTR(pty_rhs) + "'");
         return false;
       }
     }
@@ -588,9 +572,8 @@ bool TypeInference::Visit(AST::Expr& n) {
         SetNodeType(n, MakeBooleanType());
         return true;
       } else {
-        Error(n.LOC(), "The operands of the expression cannot undergo '" +
-                           n.op + "' logical operation.");
-        error_count++;
+        Error1(n.LOC(), "The operands of the expression cannot undergo '" +
+                            n.op + "' logical operation.");
         return false;
       }
     }
@@ -616,12 +599,11 @@ bool TypeInference::Visit(AST::Expr& n) {
             return true;
           }
 
-      Error(n.LOC(),
-            "The operands of the expression be performed for inconsistent "
-            "shape dimension: " +
-                std::to_string(pty_lhs->Dims()) + " vs. " +
-                std::to_string(pty_rhs->Dims()));
-      error_count++;
+      Error1(n.LOC(),
+             "The operands of the expression be performed for inconsistent "
+             "shape dimension: " +
+                 std::to_string(pty_lhs->Dims()) + " vs. " +
+                 std::to_string(pty_rhs->Dims()));
       return false;
     } else if (isa<MDSpanType>(pty_lhs) && isa<MDSpanType>(pty_rhs)) {
       if (n.op == "concat") {
@@ -629,10 +611,9 @@ bool TypeInference::Visit(AST::Expr& n) {
         return true;
       }
       if (!((n.op == "/") || (n.op == "%") || (n.op == "cdiv"))) {
-        Error(n.LOC(),
-              "The operands of the div/mod expression cannot undergo '" + n.op +
-                  "' operation.");
-        error_count++;
+        Error1(n.LOC(),
+               "The operands of the div/mod expression cannot undergo '" +
+                   n.op + "' operation.");
         SetNodeType(n, MakeUnknownType());
         return false;
       } else if (pty_lhs->Dims() == pty_rhs->Dims()) {
@@ -640,10 +621,9 @@ bool TypeInference::Visit(AST::Expr& n) {
         cur_type = n.GetType();
         return true;
       } else {
-        Error(n.LOC(),
-              "The operands of the expression be performed for inconsistent "
-              "shape dimension.");
-        error_count++;
+        Error1(n.LOC(),
+               "The operands of the expression be performed for inconsistent "
+               "shape dimension.");
         return false;
       }
     } else if (isa<ITupleType>(pty_rhs) && isa<ITupleType>(pty_lhs)) {
@@ -659,10 +639,9 @@ bool TypeInference::Visit(AST::Expr& n) {
         cur_type = n.GetType();
         return true;
       } else {
-        Error(n.LOC(),
-              "The operands of the expression be performed for inconsistent "
-              "shape dimension.");
-        error_count++;
+        Error1(n.LOC(),
+               "The operands of the expression be performed for inconsistent "
+               "shape dimension.");
         return false;
       }
     } else if (isa<ITupleType>(pty_rhs) && isa<ScalarIntegerType>(pty_lhs)) {
@@ -680,9 +659,8 @@ bool TypeInference::Visit(AST::Expr& n) {
       if (n.op == "#-" || n.op == "#+")
         SetNodeType(n, MakeBoundedITupleType(n.s));
       else if (n.op == "#" || n.op == "#*" || n.op == "#/" || n.op == "#%") {
-        Error(n.LOC(), "The operands of the expression cannot undergo '" +
-                           n.op + "' binary operation.");
-        error_count++;
+        Error1(n.LOC(), "The operands of the expression cannot undergo '" +
+                            n.op + "' binary operation.");
       } else if (n.op == "&" || n.op == "|" || n.op == "^" || n.op == "<<" ||
                  n.op == ">>") {
         SetNodeType(n, MakeIntegerType(true));
@@ -715,9 +693,8 @@ bool TypeInference::Visit(AST::Expr& n) {
       bool is_mutable = IsMutable(*pty_lhs) || IsMutable(*pty_rhs);
       SetNodeType(n, MakeIntegerType(is_mutable));
     } else if (*pty_lhs != *pty_rhs) {
-      Error(n.LOC(), "The operands of the expression cannot undergo '" + n.op +
-                         "' binary operation.");
-      error_count++;
+      Error1(n.LOC(), "The operands of the expression cannot undergo '" + n.op +
+                          "' binary operation.");
       return false;
     } else
       SetNodeType(n, n.GetR()->GetType());
@@ -732,16 +709,21 @@ bool TypeInference::Visit(AST::Expr& n) {
       auto& pty_rhs = n.GetR()->GetType();
 
       if (pty_lhs->HasSufficientInfo() && pty_rhs->HasSufficientInfo()) {
-        if (*pty_lhs != *pty_rhs) {
-          if (!(IsMutable(*pty_lhs) || IsMutable(*pty_rhs))) {
-            Error1(n.LOC(), "The operands of the expression cannot undergo '" +
-                                n.op + "' operation, the types are '" +
-                                PSTR(pty_lhs) + "' and '" + PSTR(pty_rhs) +
-                                "'");
-            return false;
+        if (CanYieldAnInteger(pty_lhs) && CanYieldAnInteger(pty_rhs)) {
+          SetNodeType(n, pty_lhs->Clone());
+          if (isa<ScalarType>(pty_rhs)) SetNodeType(n, pty_rhs->Clone());
+        } else {
+          if (*pty_lhs != *pty_rhs) {
+            if (!(IsMutable(*pty_lhs) || IsMutable(*pty_rhs))) {
+              Error1(n.LOC(),
+                     "The operands of the expression cannot undergo '" + n.op +
+                         "' operation, the types are '" + PSTR(pty_lhs) +
+                         "' and '" + PSTR(pty_rhs) + "'");
+              return false;
+            }
           }
+          SetNodeType(n, pty_lhs);
         }
-        SetNodeType(n, pty_lhs);
         cur_type = n.GetType();
         return true;
       }
@@ -775,8 +757,7 @@ bool TypeInference::Visit(AST::SpanAs& n) {
 
   auto ity = NodeType(*n.id);
   if (!isa<SpannedType>(ity) && !isa<FutureType>(ity)) {
-    Error(n.LOC(), "fail to infer the type of `" + STR(n.id) + "'.");
-    error_count++;
+    Error1(n.LOC(), "fail to infer the type of `" + STR(n.id) + "'.");
     return false;
   }
 
@@ -802,8 +783,7 @@ bool TypeInference::Visit(AST::DMA& n) {
 
   // future's type has been obtained by shape inference
   if (AST::istypeof<UnknownType>(&n)) {
-    Error(n.LOC(), "fail to infer the FUTURE type of `" + n.future + "'.");
-    error_count++;
+    Error1(n.LOC(), "fail to infer the FUTURE type of `" + n.future + "'.");
     return false;
   }
 
@@ -921,9 +901,8 @@ bool TypeInference::Visit(AST::ChunkAt& n) {
   auto sto = sty->GetStorage();
   assert(fmty != BaseType::UNKNOWN);
   if ((dma_fmty != BaseType::UNKNOWN) && (fmty != dma_fmty)) {
-    Error(n.LOC(), "assign/transfer data with a different type: " + STR(fmty) +
-                       " vs. " + STR(dma_fmty));
-    error_count++;
+    Error1(n.LOC(), "assign/transfer data with a different type: " + STR(fmty) +
+                        " vs. " + STR(dma_fmty));
   }
   dma_fmty = fmty;
   dma_mem = sto;
@@ -964,8 +943,7 @@ bool TypeInference::Visit(AST::Rotate& n) {
   auto ty = type_equals.ResolveEqualFutures(*n.ids);
 
   if (!ty) {
-    Error(n.LOC(), "Failed to deduce types inside ROTATE.");
-    error_count++;
+    Error1(n.LOC(), "Failed to deduce types inside ROTATE.");
     return false;
   }
 
@@ -1014,8 +992,7 @@ bool TypeInference::Visit(AST::Return& n) {
 
   // get the return value's type
   if (isa<UnknownType>(vty)) {
-    Error(n.LOC(), "failed to inference the type of " + AST::STR(*n.value));
-    error_count++;
+    Error1(n.LOC(), "failed to inference the type of " + AST::STR(*n.value));
     return false;
   }
 
@@ -1024,15 +1001,13 @@ bool TypeInference::Visit(AST::Return& n) {
     if (auto rty = dyn_cast<SpannedType>(fty->out_ty)) {
       auto tty = cast<SpannedType>(vty);
       if (!tty->HasSufficientInfo()) {
-        Error(n.LOC(),
-              "failed to inference the type detail of " + AST::STR(*n.value));
-        error_count++;
+        Error1(n.LOC(),
+               "failed to inference the type detail of " + AST::STR(*n.value));
         return false;
       }
       if (rty->Dims() != tty->Dims()) {
-        Error(n.LOC(),
-              "return type inconsistent: " + STR(*rty) + " vs. " + STR(*tty));
-        error_count++;
+        Error1(n.LOC(),
+               "return type inconsistent: " + STR(*rty) + " vs. " + STR(*tty));
         return false;
       }
 
@@ -1041,15 +1016,13 @@ bool TypeInference::Visit(AST::Return& n) {
       if (rty->HasSufficientInfo() && !rty->RuntimeShaped()) {
         if (*rty->GetMDSpanType() != *tty->GetMDSpanType() ||
             rty->ElementType() != tty->ElementType()) {
-          Error(n.LOC(),
-                "return type inconsistent: " + STR(*rty) + " vs. " + STR(*tty));
-          error_count++;
+          Error1(n.LOC(), "return type inconsistent: " + STR(*rty) + " vs. " +
+                              STR(*tty));
           return false;
         } else if (tty->m_type != Storage::DEFAULT &&
                    tty->m_type != Storage::GLOBAL) {
-          Error(n.LOC(),
-                "can not return type with non-default/global storage.");
-          error_count++;
+          Error1(n.LOC(),
+                 "can not return type with non-default/global storage.");
           return false;
         }
       } else {

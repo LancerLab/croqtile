@@ -184,30 +184,30 @@ __co__ void EmbeddingCacheReplaceChoreo_kernel(
       local KEY_TYPE[TILE_SIZE] buffer_query;
       local u32[TILE_SIZE] buffer_src_set;
 
-      u32 k_total_len0 = cdiv(capacity_in_set, dim_block);
-      u32 k_total_start = threadIdx * k_total_len0;
-      u32 k_total_end = min_(k_total_start + k_total_len0, capacity_in_set);
-      u32 k_total_len = k_total_end - k_total_start;
+      k_total_len0 = cdiv(capacity_in_set, dim_block);
+      k_total_start = threadIdx * k_total_len0;
+      k_total_end = min_(k_total_start + k_total_len0, capacity_in_set);
+      k_total_len = k_total_end - k_total_start;
       
-      u32 k_loop_num = cdiv(k_total_len, PART_SIZE);
-      u32 k_len0 = PART_SIZE;
+      k_loop_num = cdiv(k_total_len, PART_SIZE);
+      k_len0 = PART_SIZE;
       // Outer loop: block copy key/counter to local buffer
       foreach {k_loop_idx} in [k_loop_num] {
-        u32 k_start = k_total_start + k_len0 * k_loop_idx;
-        u32 k_end = min_(k_start + k_len0, k_total_end);
-        u32 k_len = k_end - k_start;
+        k_start = k_total_start + k_len0 * k_loop_idx;
+        k_end = min_(k_start + k_len0, k_total_end);
+        k_len = k_end - k_start;
 
         // Block transfer key/counter to local buffer
         aa = dma.copy.async keys.subspan(k_total_len0, set_associativity, warp_size).at(threadIdx, _, _).subspan(k_len0, set_associativity, warp_size).at(k_loop_idx, _, _).subspan(k_len, set_associativity, warp_size) => buffer_key.subspan(k_len, set_associativity, warp_size);
         bb = dma.copy.async slot_counter.subspan(k_total_len0, set_associativity, warp_size).at(threadIdx, _, _).subspan(k_len0, set_associativity, warp_size).at(k_loop_idx, _, _).subspan(k_len, set_associativity, warp_size) => buffer_counter.subspan(k_len, set_associativity, warp_size);
         wait aa, bb;
-        int m_loop_num = cdiv(len, TILE_SIZE);
-        u32 m_len0 = cdiv(len, m_loop_num);
+        m_loop_num = cdiv(len, TILE_SIZE);
+        m_len0 = cdiv(len, m_loop_num);
         // Inner loop: batch process input query
         foreach {m_loop_idx} in [m_loop_num] {
-          u32 m_start = m_loop_idx * m_len0;
-          u32 m_end = min_(m_start + m_len0, len);
-          u32 m_len = m_end - m_start;
+          m_start = m_loop_idx * m_len0;
+          m_end = min_(m_start + m_len0, len);
+          m_len = m_end - m_start;
 
           // Block transfer query to local buffer
           dma.copy d_keys.subspan(m_len0).at(m_loop_idx).subspan(m_len) => buffer_query.subspan(m_len);
@@ -218,12 +218,12 @@ __co__ void EmbeddingCacheReplaceChoreo_kernel(
 
           // Traverse all queries in this batch, search/replace/write back
           foreach {query_idx} in [m_len] {
-            mutable src_set = buffer_src_set.at(query_idx); // set mapped by query
+            src_set = buffer_src_set.at(query_idx); // set mapped by query
             if (!(k_start <= src_set && src_set < k_end))
               continue;
 
-            s64 query = buffer_query.at(query_idx); // current query key
-            s64 set_offset = src_set - k_start; // offset of set in local buffer
+            query = buffer_query.at(query_idx); // current query key
+            set_offset = src_set - k_start; // offset of set in local buffer
             // Only process the key range handled by the current thread
             mutable src_slab = query % set_associativity; // slab id
             mutable flag_need_replace = 1;
@@ -235,7 +235,7 @@ __co__ void EmbeddingCacheReplaceChoreo_kernel(
                 flag_need_replace = 0;
                 break;
               }
-              mutable s64 key_a = buffer_key.at(set_offset, src_slab, warp_size-1);
+              key_a = buffer_key.at(set_offset, src_slab, warp_size-1);
               // Check empty slot
               if (key_a == 0x7FFFFFFFFFFFFFFF) {
                 src_slot = call get_index<s64, WARP_SIZE>(buffer_key.subspan(1,1,warp_size).at(set_offset, src_slab, _), 0x7FFFFFFFFFFFFFFF);
@@ -245,7 +245,7 @@ __co__ void EmbeddingCacheReplaceChoreo_kernel(
             }
             // If none, find LRU slot
             if (src_slot == -1) {
-              mutable int idx = call argmin<u64, SET_ASSOCIATIVITY * WARP_SIZE>(buffer_counter.subspan(1,set_associativity,warp_size).at(set_offset, _, _), warp_size, src_slab);
+              s32 idx = call argmin<u64, SET_ASSOCIATIVITY * WARP_SIZE>(buffer_counter.subspan(1,set_associativity,warp_size).at(set_offset, _, _), warp_size, src_slab);
               src_slab = idx / warp_size;
               src_slot = idx % warp_size;
             }

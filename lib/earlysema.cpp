@@ -281,9 +281,9 @@ bool EarlySemantics::Visit(AST::Expr& n) {
         // decay the type to be mutable int
         SetNodeType(n, MakeIntegerType(true));
       } else {
-        Error(n.LOC(), "in operation \"" + n.op +
-                           "\": unable to apply to the types (" + PSTR(lty) +
-                           " vs. " + PSTR(rty) + ").");
+        Error1(n.LOC(), "in operation \"" + n.op +
+                            "\": unable to apply to the types (" + PSTR(lty) +
+                            " vs. " + PSTR(rty) + ").");
         SetNodeType(n, MakeUnknownType());
         return false;
       }
@@ -436,9 +436,9 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       SetNodeType(n, MakeBoundedITupleType(Shape(1)));
     } else {
       // TODO: computation of multi-dim bounded vars is not supported yet.
-      Error(n.LOC(), "in operation \"" + n.op +
-                         "\": unable to apply to the types (" + PSTR(lty) +
-                         " vs. " + PSTR(rty) + ").");
+      Error1(n.LOC(), "in operation \"" + n.op +
+                          "\": unable to apply to the types (" + PSTR(lty) +
+                          " vs. " + PSTR(rty) + ").");
       SetNodeType(n, MakeUnknownType());
       return false;
     }
@@ -451,18 +451,18 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       SetNodeType(n, MakeBoundedITupleType(Shape(1)));
     } else {
       // TODO: computation of multi-dim bounded vars is not supported yet.
-      Error(n.LOC(), "in operation \"" + n.op +
-                         "\": unable to apply to the types (" + PSTR(lty) +
-                         " vs. " + PSTR(rty) + ").");
+      Error1(n.LOC(), "in operation \"" + n.op +
+                          "\": unable to apply to the types (" + PSTR(lty) +
+                          " vs. " + PSTR(rty) + ").");
       SetNodeType(n, MakeUnknownType());
       return false;
     }
   } else if ((n.op == "#*") || (n.op == "#/") || (n.op == "#%")) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
-    Error(n.LOC(), "in operation \"" + n.op +
-                       "\": unable to apply to the types (" + PSTR(lty) +
-                       " vs. " + PSTR(rty) + ").");
+    Error1(n.LOC(), "in operation \"" + n.op +
+                        "\": unable to apply to the types (" + PSTR(lty) +
+                        " vs. " + PSTR(rty) + ").");
     return false;
   } else if ((n.op == "<") || (n.op == ">") || (n.op == "==") ||
              (n.op == "!=") || (n.op == "<=") || (n.op == ">=")) {
@@ -532,14 +532,27 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     auto cty = NodeType(*n.GetC());
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
-    if (!isa<BooleanType>(cty) || (!lty->ApprxEqual(*rty))) {
-      Error1(n.LOC(), "in operation \"" + n.op +
-                          "\": unable to apply to the types (" + PSTR(cty) +
-                          ") " + PSTR(lty) + " : " + PSTR(rty) + ").");
+    if (!isa<BooleanType>(cty)) {
+      Error1(n.LOC(),
+             "in operation \"" + n.op +
+                 "\": expect an expr of bool type as condition but got " +
+                 PSTR(cty) + " type.");
       SetNodeType(n, MakeUnknownType());
-      return false;
     }
-    SetNodeType(n, lty->Clone());
+    // allow BoundedInteger to participate in scalar computation.
+    if (CanYieldAnInteger(lty) && CanYieldAnInteger(rty)) {
+      SetNodeType(n, lty->Clone());
+      if (isa<ScalarType>(rty)) SetNodeType(n, rty->Clone());
+    } else {
+      if (!lty->ApprxEqual(*rty)) {
+        Error1(n.LOC(), "in operation \"" + n.op +
+                            "\": unable to apply to the types (" + PSTR(cty) +
+                            ") " + PSTR(lty) + " : " + PSTR(rty) + ").");
+        SetNodeType(n, MakeUnknownType());
+        return false;
+      }
+      SetNodeType(n, lty->Clone());
+    }
   } else if (n.op == "concat") {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
@@ -559,17 +572,13 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
     auto old_ec = error_count;
-    if (!isa<ArrayType>(lty)) {
-      Error(n.LOC(), "in operation \"" + n.op + "\": expect an array but got " +
-                         PSTR(lty) + ".");
-      error_count++;
-    }
-    if (!CanYieldAnInteger(rty)) {
-      Error(n.LOC(), "in operation \"" + n.op +
-                         "\": expect an integer index expression but got " +
-                         PSTR(rty) + ".");
-      error_count++;
-    }
+    if (!isa<ArrayType>(lty))
+      Error1(n.LOC(), "in operation \"" + n.op +
+                          "\": expect an array but got " + PSTR(lty) + ".");
+    if (!CanYieldAnInteger(rty))
+      Error1(n.LOC(), "in operation \"" + n.op +
+                          "\": expect an integer index expression but got " +
+                          PSTR(rty) + ".");
 
     auto aty = cast<ArrayType>(lty);
     SetNodeType(n, aty->SubScriptType(1));
@@ -643,8 +652,9 @@ bool EarlySemantics::Visit(AST::MultiDimSpans& n) {
     if (n.ref_name.empty()) {
       for (auto& v : mvals->AllValues()) {
         auto ty = NodeType(*v);
-        if (!(isa<ScalarIntegerType>(ty)) && !isa<MDSpanType>(ty) &&
-            !isa<ITupleType>(ty) && !isa<NoValueType>(ty)) {
+        if (!isa<ScalarIntegerType>(ty) && !isa<MDSpanType>(ty) &&
+            !isa<ITupleType>(ty) && !isa<NoValueType>(ty) &&
+            !isa<BoundedType>(ty)) {
           Error1(v->LOC(),
                  "unexpected data type '" + PSTR(ty) + "' is found in mdspan.");
         }
@@ -787,8 +797,7 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
     assert(tty && "the annotation type must exist.");
 
     if (isa<UnknownType>(tty)) {
-      Error(n.LOC(), "unable to deduce the type of `" + n.name_str + "'.");
-      error_count++;
+      Error1(n.LOC(), "unable to deduce the type of `" + n.name_str + "'.");
       return false;
     }
 
@@ -1712,12 +1721,11 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
       for (auto& v : op->GetTFSSNodes()) {
         auto ty = NodeType(*v);
         if (!isa<ScalarIntegerType>(ty) && !isa<ITupleType>(ty) &&
-            !isa<MDSpanType>(ty))
-          Error1(
-              v->LOC(),
-              "expect '" + PSTR(v) +
-                  "` to be either an integer, ituple or mdspan type (but got " +
-                  PSTR(ty) + ").");
+            !isa<MDSpanType>(ty) && !isa<BoundedType>(ty))
+          Error1(v->LOC(), "expect '" + PSTR(v) +
+                               "` to be either an integer, ituple, mdspan type "
+                               "or bounded type (but got " +
+                               PSTR(ty) + ").");
         b_count += ty->Dims();
         SetNodeType(*v, ty);
       }
@@ -1848,14 +1856,14 @@ bool EarlySemantics::Visit(AST::Call& n) {
                                     "determined at runtime.");
           }
         } else if (!Printable(aty))
-          Error(arg->LOC(), "the argument of type '" + PSTR(aty) +
-                                "' is not supported for printing.");
+          Error1(arg->LOC(), "the argument of type '" + PSTR(aty) +
+                                 "' is not supported for printing.");
       }
     } else if (n.IsArith()) {
       auto pty = NodeType(*n.arguments->ValueAt(0));
       if (!isa<ScalarFloatType>(pty))
-        Error(n.LOC(), "expect the argument to be a float type but got '" +
-                           PSTR(pty) + "'.");
+        Error1(n.LOC(), "expect the argument to be a float type but got '" +
+                            PSTR(pty) + "'.");
 
       for (size_t i = 1; i < n.arguments->Count(); ++i) {
         auto sty = NodeType(*n.arguments->ValueAt(i));
@@ -2081,8 +2089,8 @@ bool EarlySemantics::Visit(AST::Synchronize& n) {
   case Storage::SHARED:
   case Storage::LOCAL: break;
   default:
-    Error(n.scope->LOC(),
-          "Unsupported synchronization: " + PSTR(n.scope) + ".");
+    Error1(n.scope->LOC(),
+           "Unsupported synchronization: " + PSTR(n.scope) + ".");
     break;
   }
   return true;

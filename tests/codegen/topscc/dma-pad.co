@@ -51,7 +51,7 @@ __co__ auto foo1(s32 [N, M] a) {
 // CHECK:     unsigned int __pad_high_a[] = {0, 0};
 // CHECK:     unsigned int __pad_mid_a[] = {0, 0};
 // CHECK:     int __slice_offset0__a_2_f1__buf__[] = {0, (int)(__tops_tid_x() * (M / 2))};
-// CHECK:     unsigned int __slice_shape1__a_2_f1__buf__[] = {N, (M / 2)};
+// CHECK:     unsigned int __slice_shape1__a_2_f1__buf__[] = {static_cast<unsigned int>(N), static_cast<unsigned int>((M / 2))};
 // CHECK:     tops::event f1__event__ = tops::slice_pad_async(*f1.get_ctx(), __mds5_f1__buf__, __mds4_a, __slice_offset0__a_2_f1__buf__, __slice_shape1__a_2_f1__buf__, __pad_low_a, __pad_high_a, __pad_mid_a, -1);
 // CHECK:     f1.set_event(f1__event__);
 // CHECK:   } else {
@@ -61,7 +61,7 @@ __co__ auto foo1(s32 [N, M] a) {
 // CHECK:     unsigned int __pad_high_a[] = {0, 0};
 // CHECK:     unsigned int __pad_mid_a[] = {0, 0};
 // CHECK:     int __slice_offset1__a_2_f1__buf__[] = {0, (int)(__tops_tid_x() * (M / 2))};
-// CHECK:     unsigned int __slice_shape2__a_2_f1__buf__[] = {N, (M / 2)};
+// CHECK:     unsigned int __slice_shape2__a_2_f1__buf__[] = {static_cast<unsigned int>(N), static_cast<unsigned int>((M / 2))};
 // CHECK:     tops::event f1__event__ = tops::slice_pad_async(*f1.get_ctx(), __mds7_f1__buf__, __mds6_a, __slice_offset1__a_2_f1__buf__, __slice_shape2__a_2_f1__buf__, __pad_low_a, __pad_high_a, __pad_mid_a, -1);
 // CHECK:     f1.set_event(f1__event__);
 // CHECK:   } // end DMA opt:

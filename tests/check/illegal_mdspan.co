@@ -32,13 +32,8 @@ __co__ auto illegal_mdspan(f32 [?] a) {
 // CHECK-NOT: error:{{.*}}mds4{{.*}}
 // CHECK: error: unexpected data type 'bool' is found in mdspan.
 // CHECK: error: unexpected data type 'f32 mdspan<1> []' is found in mdspan.
-// CHECK: error: unexpected data type '{int,int,int}->[]' is found in mdspan.
-// CHECK: error: unexpected data type 'int->[0,p]' is found in mdspan.
-// CHECK: error: unexpected data type 'int->[0,x]' is found in mdspan.
-// CHECK: error: unexpected data type 'int->[0,y]' is found in mdspan.
-// CHECK: error: unexpected data type 'int->[0,z]' is found in mdspan.
 // CHECK: error: The mdspan size "0" is invalid!
 // CHECK: error: The mdspan size "-1" is invalid!
 // CHECK: error: The mdspan size "0" is invalid!
-// CHECK: Totally 13 errors have been detected.
+// CHECK: Totally 8 errors have been detected.
 

@@ -177,14 +177,19 @@ bool TopsccCodeGen::RequiresImplPred(Storage cur) const {
 }
 
 const std::string TopsccCodeGen::ShapeSTR(const Shape& s,
-                                          const std::string& delimiter) const {
+                                          const std::string& delimiter,
+                                          BaseType cast_to) const {
   auto& vl = s.Value();
   assert(!vl.empty());
 
   std::ostringstream oss;
   for (unsigned i = 0; i < vl.size(); ++i) {
     if (i > 0) oss << delimiter;
+    bool need_static_cast = (cast_to != BaseType::UNKNOWN && !VIIsInt(vl[i]));
+    if (need_static_cast)
+      oss << "static_cast<" << NameBaseType(cast_to) << ">(";
     oss << ValueSTR(vl[i]);
+    if (need_static_cast) oss << ")";
   }
   return oss.str();
 }
@@ -1648,7 +1653,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         auto slice_shape_name = "__slice_shape" + std::to_string(s_cnt) + "__" +
                                 f_sym + "_2_" + t_sym;
         ds << d_indent << "unsigned int " << slice_shape_name << "[] = {"
-           << ShapeSTR(f_ca->GetBlockShape()) << "};\n";
+           << ShapeSTR(f_ca->GetBlockShape(), ", ", BaseType::U32) << "};\n";
         ds << d_indent;
         if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
         ds << "tops::slice_deslice" << (fty->IsAsync() ? "_async" : "") << "(*"
@@ -1725,7 +1730,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         auto slice_shape_name = "__slice_shape" + std::to_string(s_cnt) + "__" +
                                 f_sym + "_2_" + t_sym;
         ds << d_indent << "unsigned int " << slice_shape_name << "[] = {"
-           << ShapeSTR(f_ca->GetBlockShape()) << "};\n";
+           << ShapeSTR(f_ca->GetBlockShape(), ", ", BaseType::U32) << "};\n";
         ds << d_indent;
         if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
         ds << "tops::slice_pad" << (fty->IsAsync() ? "_async" : "") << "(*"
@@ -2271,7 +2276,7 @@ bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
                   << (rng->lbound ? ("(" + ExprSTR(rng->lbound, IsHost()) + ")")
                                   : "0")
                   << "; " << SSMName(iv_name, IsHost()) << " < "
-                  << UnScopedExpr(STR(iv_bty->GetUpperBound()))
+                  << UnScopedExpr(ValueSTR(iv_bty->GetUpperBound()))
                   << (rng->ubound ? (" + " + ExprSTR(rng->ubound, IsHost()))
                                   : "")
                   << "; ++" << SSMName(iv_name, IsHost()) << ") {\n";

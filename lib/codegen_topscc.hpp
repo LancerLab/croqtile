@@ -430,7 +430,8 @@ private:
   const std::string
   GenOffset(const ptr<AST::ChunkAt>&,
             size_t end_idx = std::numeric_limits<size_t>::max()) const;
-  const std::string ShapeSTR(const Shape&, const std::string& = ", ") const;
+  const std::string ShapeSTR(const Shape&, const std::string& = ", ",
+                             BaseType cast_to = BaseType::UNKNOWN) const;
   const std::string SSMName(const std::string& sname, bool is_host) const {
     return (is_host) ? ssm.HostName(sname) : ssm.DeviceName(sname);
   }
