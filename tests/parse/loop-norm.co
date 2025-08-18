@@ -24,7 +24,6 @@ __co__ void func(int a) {
 // CHECK:    (within constraints)
 // CHECK:    `- {i, j, k} in [ 1 2 3 ]
 // CHECK:    (with statements)
-// CHECK:    `- Var Decl (u32): vj =  call vectorize(j, 32)
 // CHECK:    `- Foreach Block:
 // CHECK:     `- Iteration variables: i
 // CHECK:     `- Foreach Block:

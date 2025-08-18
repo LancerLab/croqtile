@@ -1,0 +1,58 @@
+// RUN: choreo %s -dv=loop --masking | FileCheck %s
+__co__ void vecadd(s32 [H, W] a, s32 [H, W] b, f32 uni)
+{
+  parallel q by 1 {
+    l1_a = dma.copy a => local;
+    l1_b = dma.copy b => local;
+    with {i, j} in [a.span] {
+      foreach i, j: vectorize(j, 128) {
+        index = i * W + j; // stride = 1, scev => {}
+        s32 val = 0; // uni
+        if (i==0) { //uni
+          call abc(val);
+        } else {
+          if (index < 100) {
+            val = l1_a.data.at(i, j); // vary
+            call abc(val);
+          } else {
+            val = l1_b.data.at(i, j); // vary
+            call abc(val);
+          }
+        }
+        call abc(val);
+      }
+    }
+  }
+}
+
+
+// CHECK: [diversity] Symbol Shape:
+// CHECK:   ::vecadd::paraby_0::paraby_1::within_0::foreach_0::foreach_1::val : divergent
+// CHECK:   ::vecadd::paraby_0::paraby_1::l1_b.data : uniform
+// CHECK:   ::vecadd::paraby_0::paraby_1::l1_a.data : uniform
+// CHECK:   ::vecadd::paraby_0::paraby_1::within_0::foreach_0::foreach_1::index : stride(1)
+// CHECK:   ::vecadd::W : uniform
+// CHECK:   ::vecadd::paraby_0::paraby_1::within_0::i : uniform
+// CHECK:   ::vecadd::paraby_0::paraby_1::within_0::foreach_0::foreach_1::j : stride(1)
+
+
+// CHECK: [linearize] start linearization.
+// CHECK: [linearize] Inserted negated if-else block:  (!  (index < 100) )  after original if-else block:  (index < 100) 
+
+// CHECK: [mask] start geneating masks.
+// CHECK: [mask] Inserted loop condition(exec): 
+// CHECK: `- Var Decl (bool): exec =  (j <=  (ubound j) )  at the beginning of loop: j
+// CHECK: [mask] Inserted scoped mask: 
+// CHECK: `- Var Decl (bool): mask0 =  exec at the beginning of loop: j
+// CHECK: [mask] Inserted scoped mask: 
+// CHECK: `- Var Decl (bool): mask1 =  (mask0 &&  (index < 100) )  at the beginning of divergent branch:  (index < 100) 
+// CHECK: [mask] Inserted exec assignment: 
+// CHECK: `- Assign: exec = mask1 after divergenet branch:  (index < 100) 
+// CHECK: [mask] Inserted scoped mask: 
+// CHECK: `- Var Decl (bool): mask2 =  (mask0 &&  (!  (index < 100) ) )  at the beginning of divergent branch:  (!  (index < 100) ) 
+// CHECK: [mask] Inserted exec assignment: 
+// CHECK: `- Assign: exec = mask2 after divergenet branch:  (!  (index < 100) ) 
+// CHECK: [mask] Inserted exec assignment: 
+// CHECK: `- Assign: exec = mask0 after divergenet branch:  (index < 100) 
+// CHECK: [mask] Inserted exec assignment: 
+// CHECK: `- Assign: exec = mask0 after divergenet branch:  (!  (index < 100) ) 

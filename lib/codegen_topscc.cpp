@@ -1145,6 +1145,16 @@ bool TopsccCodeGen::Visit(AST::Assignment& n) {
     return true;
   }
 
+  if (isa<VectorType>(nty)) {
+    if (IsHost())
+      hs << h_indent << ((!n.IsDecl()) ? "" : "auto ") << n.GetName() << " = "
+         << ExprSTR(n.value, true) << ";\n";
+    else
+      ds << d_indent << ((!n.IsDecl()) ? "" : "auto ") << n.GetName() << " = "
+         << ExprSTR(n.value, false) << ";\n";
+    return true;
+  }
+
   errs() << "Assignment " << STR(n) << " unprocessed, not supported "
          << PSTR(nty) << "\n";
   return false;

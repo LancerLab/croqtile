@@ -73,6 +73,7 @@ set(CORE_SOURCES
   visitor.cpp
   liveness_analysis.cpp
   mem_reuse.cpp
+  diversity_analysis.cpp
 )
 
 # Define the source files for your codegen library

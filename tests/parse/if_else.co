@@ -1,4 +1,4 @@
-// RUN: choreo -e %s | FileCheck --match-full-lines %s
+// RUN: choreo -e %s | FileCheck %s
 
 __co__ void if_else(int a) {
   mutable b = 0;

@@ -1,39 +1,37 @@
 // RUN: choreo -es -t topscc -bn %s | FileCheck %s
 __co__ void func(int a) {
-  parallel q by 1 {
-    if (q == 0) {
-      call abc();
-    } else if (a == 0) {
-      if (q == 1) {
-        if (a > 0) {
-          call def();
-        } else if (a == 1) {
-          call ghi();
+  parallel by 1 {
+    foreach {q} in [1000] : vectorize(q, 128) {
+      if (q == 0) {
+        call abc();
+      } else if (a > 0) {
+        if (q == 1) {
+          if (a > 2) {
+            call def();
+          } else if (a == 0) {
+            call ghi();
+          }
+        } else {
+          call klm();
         }
-      } else {
-        call ghi();
       }
     }
   }
 }
 
-// CHECK: __global__ void __choreo_device_func(int a) {
-// CHECK:   {
-// CHECK:   if ((__tops_tid_x() == 0)) {
-// CHECK:     abc();
-// CHECK:   }
-// CHECK:   if ((!(__tops_tid_x() == 0)) && (a == 0)) {
-// CHECK:     if ((__tops_tid_x() == 1)) {
-// CHECK:       if ((a > 0)) {
-// CHECK:         def();
-// CHECK:       }
-// CHECK:       if ((!(a > 0)) && (a == 1)) {
-// CHECK:         ghi();
-// CHECK:       }
-// CHECK:     }
-// CHECK:     if ((!(__tops_tid_x() == 1))) {
-// CHECK:       ghi();
-// CHECK:     }
-// CHECK:   }
-// CHECK:   }
-// CHECK: }
+
+// CHECK: for (__iv_q = 0; __iv_q < 1000; __iv_q += 128) {
+// CHECK:   if ((__iv_q == 0)) {
+// CHECK:   } 
+// CHECK:   if (!(__iv_q == 0) && (a > 0)) {
+// CHECK:     if ((__iv_q == 1)) {
+// CHECK:       if ((a > 2)) {
+// CHECK:       } else {
+// CHECK:         if ((a == 0)) {
+// CHECK:         } 
+// CHECK:       } 
+// CHECK:     } 
+// CHECK:     if (!(__iv_q == 1)) {
+// CHECK:     } 
+// CHECK:   } 
+// CHECK: } 

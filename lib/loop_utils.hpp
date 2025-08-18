@@ -49,11 +49,11 @@ protected:
 
   void EnterLoopScope(const std::string& loop_name) {
     lname = lname + "::loop_" + loop_name + std::to_string(loop_count++);
-    if (debug_visit && !lname.empty()) dbgs() << "Entering : " << lname << "\n";
+    // if (debug_visit && !lname.empty()) dbgs() << "Entering : " << lname << "\n";
   }
 
   void LeaveLoopScope() {
-    if (debug_visit && !lname.empty()) dbgs() << "Leaving :  " << lname << "\n";
+    // if (debug_visit && !lname.empty()) dbgs() << "Leaving :  " << lname << "\n";
     size_t pos = lname.rfind("::loop_");
     if (pos != std::string::npos) {
       lname = lname.substr(0, pos);
@@ -62,7 +62,6 @@ protected:
     }
   }
   virtual bool AfterBeforeVisitImpl(AST::Node&) { return true; }
-
   virtual bool BeforeAfterVisitImpl(AST::Node&) { return true; }
 
   bool BeforeVisitImpl(AST::Node& n) override {
@@ -135,9 +134,9 @@ struct Loop {
 };
 
 struct LoopInfo {
-  std::unordered_map<std::string, std::string> iv2loop;
+  std::unordered_map<std::string, std::string> iv2loop; // iv name to loop name
   std::unordered_map<std::string, Loop> loops;
-  std::unordered_map<std::string, Loop> top_loops;
+  // std::unordered_map<std::string, Loop> top_loops;
 
   std::string GetParentLoopName(const std::string& lname) const {
     auto removeLastLoop = [](const std::string& input) -> std::string {

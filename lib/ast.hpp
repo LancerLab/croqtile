@@ -1610,6 +1610,10 @@ struct IfElseBlock : public Node, public TypeIDProvider<IfElseBlock> {
              bool with_type = false) const override {
     os << "\n" << prefix << "`- Branch On Condition: ";
     pred->Print(os, " ");
+    if (pred->GetDiversityShape().Uniform())
+      os << " (uniform predicate)";
+    else
+      os << " (divergent predicate)";
     if (with_type) os << "<{" << PSTR(GetType()) << "}>";
     if (if_stmts->Count()) {
       os << "\n" << prefix << " `- If-Block:";
@@ -1623,7 +1627,16 @@ struct IfElseBlock : public Node, public TypeIDProvider<IfElseBlock> {
 
   bool HasElse() const { return else_stmts && else_stmts->Count(); }
 
-  bool IsNorm() const { return !HasElse(); }
+  bool IsNorm() const {
+    if (pred->GetDiversityShape().Uniform()) return true; // uniform predicate
+    return false;
+  }
+
+  bool IsDivergent() const {
+    if (pred->GetDiversityShape().Divergent())
+      return true; // divergent predicate
+    return false;
+  }
 
   void accept(Visitor&) override;
 

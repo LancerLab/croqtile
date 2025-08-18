@@ -9,6 +9,8 @@ void MultiNodes::accept(Choreo::Visitor& v) {
 
   for (auto& sub : values) sub->accept(v);
   v.Visit(*this);
+
+  v.AfterVisit(*this);
 }
 
 void MultiValues::accept(Choreo::Visitor& v) {

@@ -536,33 +536,6 @@ public:
   }
 };
 
-struct BranchSimplicition : public LateNormBase {
-public:
-  BranchSimplicition(const ptr<SymbolTable> s_tab)
-      : LateNormBase(s_tab, "branch-norm") {}
-  using LateNormBase::Visit;
-  bool Visit(AST::IfElseBlock& n) override {
-    TraceEachVisit(n);
-    if (!CCtx().BranchNorm()) return true;
-    if (n.HasElse()) return true;
-
-    auto if_stmts = n.if_stmts;
-    if (!if_stmts || if_stmts->Count() == 0) return true;
-    // unfold nested if-else blocks
-    if (if_stmts->Count() == 1) {
-      if (auto single_IF = dyn_cast<AST::IfElseBlock>(if_stmts->values[0])) {
-        auto new_pred = AST::Make<AST::Expr>(n.LOC(), "&&", n.GetPred(),
-                                             single_IF->GetPred());
-        new_pred->SetType(n.GetPred()->GetType());
-        n.pred = new_pred;
-        n.if_stmts = single_IF->if_stmts;
-      }
-    }
-    // todo: handle the case of multiple if-else blocks
-    return true;
-  }
-};
-
 struct LateNorm : public LateNormBase {
 public:
   // it requires a symbol table
@@ -682,16 +655,6 @@ public:
     if (prt_visitor) dbgs() << " |- " << bic.GetName() << NewL;
     root.accept(bic);
     if (bic.HasError()) return false;
-
-    if (CCtx().BranchNorm()) {
-      BranchSimplicition bs(SymTab());
-      bs.SetTraceVisit(trace_visit);
-      bs.SetDebugVisit(debug_visit);
-      if (prt_visitor) dbgs() << " |- " << bs.GetName() << NewL;
-      root.accept(bs);
-      if (bs.HasError()) return false;
-    }
-
     if (abend_after) return false;
 
     return true;

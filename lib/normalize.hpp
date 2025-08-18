@@ -467,25 +467,6 @@ public:
     multi_nodes.pop();
     cur_node_index = -1;
 
-    // todo: branch normalization base on diversity analysis
-    if (CCtx().BranchNorm() || (cur_loop && AST::NeedVectorize(*cur_loop))) {
-      for (size_t stmt_index = 0; stmt_index < n.Count(); ++stmt_index) {
-        auto stmt = n.SubAt(stmt_index);
-        if (auto if_block = dyn_cast<AST::IfElseBlock>(stmt)) {
-          if (if_block->IsNorm()) continue; // already normalized
-          auto pred = if_block->GetPred();
-          auto else_stmts = if_block->else_stmts;
-          auto neg_pred =
-              AST::Make<AST::Expr>(if_block->LOC(), "!", pred->Clone());
-          neg_pred->SetType(pred->GetType());
-          auto neg_if_block = AST::Make<AST::IfElseBlock>(if_block->LOC(),
-                                                          neg_pred, else_stmts);
-          n.Insert(neg_if_block, ++stmt_index);
-          if_block->else_stmts = nullptr; // remove the else stmts
-        }
-      }
-    }
-
     return true;
   }
 
