@@ -166,6 +166,10 @@ inline DiversityShape ExprDShape(const ptr<AST::Expr> e, ptr<DiversityInfo>) {
     shape = e->GetR()->GetDiversityShape();
     if (shape.Uniform()) shape.value = expr_val;
   } else if (e->IsBinary()) {
+    if (e->op == "dimof") {
+      shape = DiversityShape(DiversityShapeKind::UNIFORM, sbe::nu(0), expr_val);
+      return shape;
+    }
     auto lhs_shape = e->GetL()->GetDiversityShape();
     auto rhs_shape = e->GetR()->GetDiversityShape();
     shape = ComputeDiversityShape(lhs_shape, rhs_shape, e->op);

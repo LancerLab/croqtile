@@ -139,7 +139,6 @@ ptr<T> cast_dbg(const ptr<U>& n) {
   }
   return t;
 }
-
 } // end namespace Choreo
 
 #endif // __CHOREO_UTILITY_HPP__

@@ -11,6 +11,7 @@
 #include <string>
 #include <unordered_map>
 namespace Choreo {
+inline static const std::string NoLoopName() { return "no_loop"; }
 
 struct LoopChecker final : public VisitorWithScope {
   LoopChecker() : VisitorWithScope("loop-checker") {}
@@ -49,11 +50,13 @@ protected:
 
   void EnterLoopScope(const std::string& loop_name) {
     lname = lname + "::loop_" + loop_name + std::to_string(loop_count++);
-    // if (debug_visit && !lname.empty()) dbgs() << "Entering : " << lname << "\n";
+    // if (debug_visit && !lname.empty()) dbgs() << "Entering : " << lname <<
+    // "\n";
   }
 
   void LeaveLoopScope() {
-    // if (debug_visit && !lname.empty()) dbgs() << "Leaving :  " << lname << "\n";
+    // if (debug_visit && !lname.empty()) dbgs() << "Leaving :  " << lname <<
+    // "\n";
     size_t pos = lname.rfind("::loop_");
     if (pos != std::string::npos) {
       lname = lname.substr(0, pos);
@@ -100,8 +103,9 @@ struct Loop {
     return nullptr;
   }
 
-  explicit Loop(std::string n, const ptr<AST::ForeachBlock> l)
-      : lname(n), loop(l), sub_loops() {
+  explicit Loop(std::string n, const ptr<AST::ForeachBlock> l,
+                std::vector<ptr<Loop>> subs = {})
+      : lname(n), loop(l), sub_loops(subs) {
     assert(l && "Loop cannot be null.");
   }
 
@@ -131,6 +135,17 @@ struct Loop {
   }
 
   std::string IVName() { return loop->GetIV()->name; }
+
+  bool operator==(const Loop& other) const { return lname == other.lname; }
+  bool operator!=(const Loop& other) const { return !(*this == other); }
+
+  bool HasLoop(const std::string& search_lname) const {
+    for (const auto& sub_loop : sub_loops) {
+      if (sub_loop->lname == search_lname || sub_loop->HasLoop(search_lname))
+        return true;
+    }
+    return false;
+  }
 };
 
 struct LoopInfo {
@@ -148,7 +163,8 @@ struct LoopInfo {
       if (lastPos == 0) return "";
       return input.substr(0, lastPos);
     };
-
+    if (lname == NoLoopName()) return "";
+    assert(lname.find("::loop_") != std::string::npos && "invalid loop name.");
     std::string parent_loop_name = removeLastLoop(lname);
     while (!parent_loop_name.empty()) {
       if (loops.find(parent_loop_name) != loops.end()) {
@@ -176,7 +192,8 @@ struct LoopInfo {
   ptr<Loop> GetLoop(const std::string& lname) const {
     auto it = loops.find(lname);
     if (it != loops.end()) {
-      return AST::Make<Loop>(it->second.lname, it->second.loop);
+      return AST::Make<Loop>(it->second.lname, it->second.loop,
+                             it->second.sub_loops);
     }
     return nullptr;
   }

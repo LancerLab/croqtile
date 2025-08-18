@@ -52,8 +52,8 @@ bool DiversityAnalysis::Visit(AST::Expr& n) {
   assert(shape.shape != DiversityShapeKind::UNKNOWN);
   if (!n.GetDiversityShape().ApprxEqual(shape)) {
     if (debug_visit)
-      dbgs() << "[diversity] [expr] `" << STR(n) << "` " << STR(n.GetDiversityShape())
-             << " -> " << STR(shape) << "\n";
+      dbgs() << "[diversity] [expr] `" << STR(n) << "` "
+             << STR(n.GetDiversityShape()) << " -> " << STR(shape) << "\n";
     n.SetDiversityShape(shape);
     changed = true;
   }
@@ -219,8 +219,7 @@ bool DiversityAnalysisHandler::RunOnProgram(AST::Node& root) {
     root.accept(da);
     if (da.HasError() || abend_after) return false;
     if (debug_visit && da.changed) {
-      dbgs() << "[diversity] iteration " << ++times
-             << " finished.\n";
+      dbgs() << "[diversity] iteration " << ++times << " finished.\n";
       di->Dump(dbgs());
       dbgs() << "\n";
     }

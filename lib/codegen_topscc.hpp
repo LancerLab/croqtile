@@ -8,6 +8,7 @@
 
 #include "ast.hpp"
 #include "codegen.hpp"
+#include "io.hpp"
 #include "operator_info.hpp"
 #include "types.hpp"
 
@@ -95,7 +96,7 @@ public:
     }
   }
 
-  void DumpHostMap() {
+  void DumpHostMap() const {
     dbgs()
         << "==================== Host Map Information ====================\n";
     // Print a formatted table with columns for symbol and buffer name
@@ -115,7 +116,7 @@ public:
     dbgs() << "================================================================"
            << "\n";
   }
-  void DumpDeviceMap() {
+  void DumpDeviceMap() const {
     dbgs()
         << "==================== Device Map Information ====================\n";
     // Print a formatted table with columns for symbol and buffer name

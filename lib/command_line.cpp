@@ -142,7 +142,7 @@ Option<bool> branch_norm(OptionKind::Hidden, "--branch-norm", "-bn", false,
                          "Normalize the if-else branches in the choreo code.");
 Option<bool> loop_norm(OptionKind::Hidden, "--loop-norm", "-ln", false,
                        "Normalize the loops in the choreo code.");
-Option<bool> masking(OptionKind::Hidden, "--masking", "-m", false,
+Option<bool> vectorize(OptionKind::Hidden, "--vectorize", "-m", false,
                      "Apply masking to the vectorized foreach loop.");
 
 // Some system missed c++17 filesystem support. Use POSIX instead
@@ -280,7 +280,7 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetVisualize(visualiz.GetValue());
   CCtx().SetCrossCompile(cross_compile.GetValue());
   CCtx().SetTraceValueNumbers(print_vn.GetValue());
-  CCtx().SetMasking(masking.GetValue());
+  CCtx().SetVectorize(vectorize.GetValue());
   CCtx().SetShowSourceLocation(!no_show_source.GetValue());
   CCtx().SetLivenessAnalysis(liveness.GetValue());
   CCtx().SetMemReuse(mem_reuse.GetValue());

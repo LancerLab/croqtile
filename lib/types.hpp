@@ -1434,6 +1434,10 @@ struct BoundedType : public Type, public TypeIDProvider<BoundedType> {
   virtual void AppendNote(const std::string& n) { note += n; };
   virtual const ValueItem& GetUpperBound() const = 0;
   virtual const MultiBounds GetUpperBounds() const = 0;
+  virtual int GetStride() const = 0;
+  virtual IntegerList GetStrides() const = 0;
+  virtual int GetWidth() const = 0;
+  virtual IntegerList GetWidths() const = 0;
 
   bool LogicalEqual(const Type& ty) const override {
     if (auto fty = dyn_cast<BoundedType>(&ty)) return Dims() == fty->Dims();
@@ -1477,8 +1481,10 @@ struct BoundedIntegerType final : public BoundedType,
   const MultiBounds GetUpperBounds() const override {
     return MultiBounds(1, ubound);
   }
-  int GetStride() const { return stride; }
-
+  int GetStride() const override { return stride; }
+  IntegerList GetStrides() const override { return IntegerList(1, stride); }
+  int GetWidth() const override { return width; }
+  IntegerList GetWidths() const override { return IntegerList(1, width); }
   bool operator==(const Type& ty) const override {
     if (!isa<BoundedIntegerType>(&ty)) return false;
     auto bty = (BoundedIntegerType&)ty;
@@ -1551,7 +1557,10 @@ struct BoundedITupleType final : public BoundedType,
   const MultiBounds GetLowerBounds() const { return lbounds; }
   const MultiBounds GetUpperBounds() const override { return ubounds; }
   const Shape GetSizes() const { return ubounds - lbounds; }
-  IntegerList GetStrides() const { return strides; }
+  int GetStride() const override { return strides[0]; }
+  IntegerList GetStrides() const override { return strides; }
+  int GetWidth() const override { return widths[0]; }
+  IntegerList GetWidths() const override { return widths; }
   const ValueItem& GetUpperBound() const override { return ubounds.ValueAt(0); }
   const ValueItem& GetUpperBound(size_t idx) const {
     return ubounds.ValueAt(idx);
@@ -2100,6 +2109,20 @@ inline ValueItem GetSingleUpperBound(const ptr<Type>& ty) {
     choreo_unreachable("can not get the single upper bound for a " + PSTR(ty) +
                        " type.");
   return cast<BoundedType>(ty)->GetUpperBound();
+}
+
+inline int GetSingleStride(const ptr<Type>& ty) {
+  if (!IsActualBoundedIntegerType(ty))
+    choreo_unreachable("can not get the single stride for a " + PSTR(ty) +
+                       " type.");
+  return cast<BoundedType>(ty)->GetStride();
+}
+
+inline int GetSingleWidth(const ptr<Type>& ty) {
+  if (!IsActualBoundedIntegerType(ty))
+    choreo_unreachable("can not get the single width for a " + PSTR(ty) +
+                       " type.");
+  return cast<BoundedType>(ty)->GetWidth();
 }
 
 // utility functions to generate types

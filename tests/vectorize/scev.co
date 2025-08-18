@@ -1,0 +1,43 @@
+// RUN: choreo --vectorize %s | FileCheck --match-full-lines %s
+___co__ void vecadd(s32 [N, C, H, W] a, s32 [N,C,H, W] b)
+{
+  parallel q by 1 {
+    l1_a = dma.copy a => local;
+    l1_b = dma.copy b => local;
+    with {n, c, h, w} in [a.span] {
+      foreach n, c, h, w: vectorize(w, 128) {
+        index_0 = h * W + w;
+        index_1 = h + 1;
+        index_2 = h * 3;
+        index_3 = h % W; // not supported by scev
+        index_4 = h / W;
+        index_5 = index_1 + index_2;
+        index_6 = l1_a.span(0) + index_1 * 2;
+        s32 val = l1_a.data.at(n, c, h, w);
+        val = 1;
+        index_0 = 1;
+    }
+  }
+}
+}
+
+// CHECK: [scev][param]: ::vecadd::C -> ::vecadd::C
+// CHECK: [scev][param]: ::vecadd::W -> ::vecadd::W
+// CHECK: [scev][param]: ::vecadd::H -> ::vecadd::H
+// CHECK: [scev][param]: ::vecadd::N -> ::vecadd::N
+// CHECK: [scev][pid]: anon_pb_0__elem__x -> ::vecadd::paraby_0::anon_pb_0__elem__x
+// CHECK: [scev][pid]: q__elem__x -> ::vecadd::paraby_0::paraby_1::q__elem__x
+// CHECK: [scev][iv]: n -> {0, +, 1} <::loop_n0>
+// CHECK: [scev][iv]: c -> {0, +, 1} <::loop_n0::loop_c1>
+// CHECK: [scev][iv]: h -> {0, +, 1} <::loop_n0::loop_c1::loop_h2>
+// CHECK: [scev][iv]: w -> {0, +, 128} <::loop_n0::loop_c1::loop_h2::loop_w3>
+// CHECK{LITERAL}: [scev][decl]: index_0 -> {{0, +, ::vecadd::W} <::loop_n0::loop_c1::loop_h2>, +, 128} <::loop_n0::loop_c1::loop_h2::loop_w3>
+// CHECK: [scev][decl]: index_1 -> {1, +, 1} <::loop_n0::loop_c1::loop_h2>
+// CHECK: [scev][decl]: index_2 -> {0, +, 3} <::loop_n0::loop_c1::loop_h2>
+// CHECK: [scev][decl]: index_3 -> (::vecadd::paraby_0::paraby_1::within_0::h % ::vecadd::W)
+// CHECK: [scev][decl]: index_4 -> {0, +, (1 / ::vecadd::W)} <::loop_n0::loop_c1::loop_h2>
+// CHECK: [scev][decl]: index_5 -> {1, +, 4} <::loop_n0::loop_c1::loop_h2>
+// CHECK: [scev][decl]: index_6 -> {(::vecadd::N + 2), +, 2} <::loop_n0::loop_c1::loop_h2>
+// CHECK: [scev][decl]: val -> UNKNOWN
+// CHECK: [scev][assign]: val is re-assigned, invalidate its scev.
+// CHECK: [scev][assign]: index_0 is re-assigned, invalidate its scev.

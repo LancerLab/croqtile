@@ -143,7 +143,7 @@ int main(int argc, char* argv[]) {
   LoopHandler lh(ti.SymTab());
   if (!lh.RunOnProgram(root)) return lh.Status();
   if (CCtx().VerifyVisitors()) vf.RunOnProgram(root);
-  if (CCtx().TraceMasking()) return 0;
+  if (CCtx().TraceVectorize()) return 0;
 
   CCtx().SetGlobalSymbolTable(ln.SymTab());
 

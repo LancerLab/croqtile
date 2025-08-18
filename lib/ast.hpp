@@ -561,6 +561,7 @@ private:
 
 private:
   OptimizedValues opt_vals;
+  ptr<SCEV> scev = nullptr;
 
 public:
   const ptr<Node>& GetR() const { return value_r; }
@@ -596,6 +597,8 @@ public:
 
   OptimizedValues& Opts() { return opt_vals; }
   const OptimizedValues& Opts() const { return opt_vals; }
+  ptr<SCEV> GetSCEV() const { return scev; }
+  void SetSCEV(const ptr<SCEV>& s) { scev = s; }
 
 public:
   Shape s; // to pass information between shape inference & type inference

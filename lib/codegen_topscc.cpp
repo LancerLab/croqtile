@@ -9,6 +9,7 @@
 #include "ast.hpp"
 #include "choreo_header.inc"
 #include "codegen.hpp"
+#include "io.hpp"
 #include "operator_info.hpp"
 #include "types.hpp"
 
@@ -2401,6 +2402,16 @@ bool TopsccCodeGen::Visit(AST::WithBlock& n) {
 
 bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
+
+  // dbgs() << "within_map in foreach block: \n";
+  // ssm.DumpDeviceMap();
+  // for (const auto& [name, ivs] : within_map) {
+  //   dbgs() << "  " << name << ": ";
+  //   for (const auto& iv : ivs) {
+  //     dbgs() << iv << ", ";
+  //   }
+  //   dbgs() << "\n";
+  // }
 
   for (auto& rn : n.GetRanges()) {
     auto rng = cast<AST::LoopRange>(rn);

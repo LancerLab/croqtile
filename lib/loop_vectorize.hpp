@@ -5,6 +5,7 @@
 #include "diversity_analysis.hpp" // Ensure this header defines DiversityAnalysis
 #include "io.hpp"
 #include "loop_utils.hpp"
+#include "scalar_evolution.hpp"
 #include "visitor.hpp"
 
 namespace Choreo {
@@ -186,9 +187,9 @@ public:
         // if this is a uniform branch, keep it
         if (pred_ds.Uniform()) continue;
         // if this is a divergent branch, we need to linearize it
-        // Firstly, we need to normalize the if_else block to ensure it does not have
-        // else branch. Secondly, we need to insert a negated if-else block consecutively after
-        // the original if-else block.
+        // Firstly, we need to normalize the if_else block to ensure it does not
+        // have else branch. Secondly, we need to insert a negated if-else block
+        // consecutively after the original if-else block.
 
         auto else_stmts = if_block->else_stmts;
         if (!else_stmts) continue;
@@ -202,8 +203,9 @@ public:
         if_block->else_stmts = nullptr; // remove the else stmts
         if (debug_visit) {
           dbgs() << "[linearize] Inserted negated if-else block: "
-                 << STR(neg_if_block->pred) << " after original if-else block: "
-                 << STR(if_block->pred) << "\n";
+                 << STR(neg_if_block->pred)
+                 << " after original if-else block: " << STR(if_block->pred)
+                 << "\n";
         }
       }
     }
@@ -240,9 +242,7 @@ public:
   bool Visit(AST::MultiNodes& n) override {
     TraceEachVisit(n);
     if (!NeedTransform()) return true;
-    if (mask_stack.empty()) {
-      return true;
-    }
+    if (mask_stack.empty()) { return true; }
 
     auto mask = mask_stack.top();
     for (size_t stmt_index = 0; stmt_index < n.Count(); ++stmt_index) {
@@ -255,9 +255,9 @@ public:
         exec->da->SetType(vbool_ty);
         n.Insert(exec, ++stmt_index);
         if (debug_visit)
-          dbgs() << "[mask] Inserted exec assignment: "
-                 << STR(exec) << " after divergenet branch: "
-                 << STR(if_block->GetPred()) << "\n";
+          dbgs() << "[mask] Inserted exec assignment: " << STR(exec)
+                 << " after divergenet branch: " << STR(if_block->GetPred())
+                 << "\n";
       }
     }
     return true;
@@ -275,16 +275,32 @@ public:
 
     auto iv = n.GetIV();
     auto iv_ty = iv->GetType();
-    auto upper_bound = AST::Make<AST::Expr>(n.LOC(), "ubound", iv);
-    upper_bound->SetType(MakeIntegerType());
-    auto mask_expr = AST::Make<AST::Expr>(n.LOC(), "<=", iv, upper_bound);
-    mask_expr->SetType(vbool_ty);
+    auto upper_bound = GetSingleUpperBound(iv_ty);
+    ptr<AST::NamedVariableDecl> loop_cond = nullptr;
     auto data_type = AST::Make<AST::DataType>(loc, BaseType::BOOL);
     data_type->SetType(vbool_ty);
-    auto loop_cond = AST::Make<AST::NamedVariableDecl>(loc, "exec", data_type,
-                                                       nullptr, mask_expr);
-    loop_cond->SetType(vbool_ty);
-    loop_cond->SetDiversityShape(DiversityShape(DiversityShapeKind::DIVERGENT));
+    if (auto ub_nu = dyn_cast<sbe::NumericValue>(upper_bound);
+        ub_nu && ub_nu->Value() % vector_width == 0) {
+      auto bool_literal = AST::Make<AST::BoolLiteral>(loc, true);
+      bool_literal->SetType(vbool_ty);
+      auto mask_expr = AST::Make<AST::Expr>(n.LOC(), bool_literal);
+      mask_expr->SetType(vbool_ty);
+      loop_cond = AST::Make<AST::NamedVariableDecl>(loc, "exec", data_type,
+                                                    nullptr, mask_expr);
+      loop_cond->SetType(vbool_ty);
+      loop_cond->SetDiversityShape(DiversityShape(DiversityShapeKind::UNIFORM));
+    } else {
+      auto ub_expr = AST::Make<AST::Expr>(n.LOC(), "ubound", iv);
+      ub_expr->SetType(MakeIntegerType());
+      auto mask_expr = AST::Make<AST::Expr>(n.LOC(), "<=", iv, ub_expr);
+      mask_expr->SetType(vbool_ty);
+      loop_cond = AST::Make<AST::NamedVariableDecl>(loc, "exec", data_type,
+                                                    nullptr, mask_expr);
+      loop_cond->SetType(vbool_ty);
+      loop_cond->SetDiversityShape(
+          DiversityShape(DiversityShapeKind::DIVERGENT));
+    }
+
     SSTab().DefineSymbol(loop_cond->name_str, vbool_ty);
     di->AssignSymbolShape(InScopeName("exec"), loop_cond->GetDiversityShape());
 
@@ -305,9 +321,9 @@ public:
     n.stmts->Insert(cur_mask, 1);
     if (debug_visit) {
       dbgs() << "[mask] Inserted loop condition(exec): " << STR(loop_cond)
-              << " at the beginning of loop: " << n.GetIV()->name << "\n";
+             << " at the beginning of loop: " << n.GetIV()->name << "\n";
       dbgs() << "[mask] Inserted scoped mask: " << STR(cur_mask)
-             << " at the beginning of loop: " <<  n.GetIV()->name << "\n";
+             << " at the beginning of loop: " << n.GetIV()->name << "\n";
     }
 
     return true;
@@ -357,9 +373,8 @@ public:
     if (debug_visit) {
       dbgs() << "[mask] Inserted scoped mask: " << STR(cur_mask)
              << " at the beginning of divergent branch: " << STR(pred) << "\n";
-      dbgs() << "[mask] Inserted exec assignment: "
-             << STR(cur_exec) << " after divergenet branch: "
-             << STR(pred) << "\n";
+      dbgs() << "[mask] Inserted exec assignment: " << STR(cur_exec)
+             << " after divergenet branch: " << STR(pred) << "\n";
     }
     return true;
   }
@@ -388,6 +403,7 @@ struct LoopHandler final : public VisitorWithSymTab {
     }
     if (prt_visitor) dbgs() << "|- " << GetName() << NewL;
 
+    debug_visit |= CCtx().TraceVectorize();
     LoopChecker lc;
     lc.SetDebugVisit(debug_visit);
     lc.SetTraceVisit(trace_visit);
@@ -417,18 +433,23 @@ struct LoopHandler final : public VisitorWithSymTab {
     if (prt_visitor) dbgs() << " |- " << lvlc.GetName() << NewL;
 
     if (lc.HasVectorization()) {
-      if (debug_visit)
-        dbgs() << "\n[diversity] start diversity analysis.\n";
+      if (debug_visit) dbgs() << "\n[diversity] start diversity analysis.\n";
       DiversityAnalysisHandler da(SymTab(), li);
       da.SetDebugVisit(debug_visit);
       da.SetTraceVisit(trace_visit);
-      da.RunOnProgram(root); 
+      da.RunOnProgram(root);
       if (prt_visitor) dbgs() << " |- " << da.GetName() << NewL;
       if (HasError() || abend_after) return false;
       auto di = da.GetDiversityAnalysis();
 
-      if (debug_visit)
-        dbgs() << "\n[linearize] start linearization.\n";
+      ScalarEvolutionAnalysis sba(SymTab(), li);
+      sba.SetDebugVisit(debug_visit);
+      sba.SetTraceVisit(trace_visit);
+      root.accept(sba);
+      if (prt_visitor) dbgs() << " |- " << sba.GetName() << NewL;
+      if (HasError() || abend_after) return false;
+
+      if (debug_visit) dbgs() << "\n[linearize] start linearization.\n";
       Linearizer ln(SymTab(), li, di);
       ln.SetDebugVisit(debug_visit);
       ln.SetTraceVisit(trace_visit);
@@ -443,8 +464,7 @@ struct LoopHandler final : public VisitorWithSymTab {
       if (prt_visitor) dbgs() << " |- " << bs.GetName() << NewL;
       if (HasError() || abend_after) return false;
 
-      if (debug_visit)
-        dbgs() << "\n[mask] start geneating masks.\n";
+      if (debug_visit) dbgs() << "\n[mask] start geneating masks.\n";
       MaskGen mg(SymTab(), li, di);
       mg.SetDebugVisit(debug_visit);
       mg.SetTraceVisit(trace_visit);
