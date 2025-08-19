@@ -654,6 +654,20 @@ bool SemaChecker::VisitNode(AST::Call& n) {
         }
       }
     }
+    if (n.IsArith()) {
+      auto pty = NodeType(*n.arguments->ValueAt(0));
+      if (!isa<ScalarFloatType>(pty))
+        Error1(n.LOC(), "expect the argument to be a float type but got '" +
+                            PSTR(pty) + "'.");
+
+      for (size_t i = 1; i < n.arguments->Count(); ++i) {
+        auto sty = NodeType(*n.arguments->ValueAt(i));
+        if (!sty->ApprxEqual(*pty))
+          Error1(n.LOC(),
+                 "expect the " + std::to_string(i) +
+                     "th argument to be the same type as the first one.");
+      }
+    }
   }
 
   if (!n.IsBIF() && analyze_device_functions && n.device_functions.size() > 0) {

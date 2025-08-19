@@ -556,7 +556,7 @@ bool TypeInference::Visit(AST::Expr& n) {
     if (n.IsCompare()) {
       if ((IsActualBoundedIntegerType(pty_lhs) && ConvertibleToInt(pty_rhs)) ||
           (IsActualBoundedIntegerType(pty_rhs) && ConvertibleToInt(pty_lhs)) ||
-          (ConvertibleToInt(pty_lhs) && ConvertibleToInt(pty_rhs))) {
+          (CanYieldAnInteger(pty_lhs) && CanYieldAnInteger(pty_rhs))) {
         SetNodeType(n, MakeBooleanType());
         return true;
       } else {

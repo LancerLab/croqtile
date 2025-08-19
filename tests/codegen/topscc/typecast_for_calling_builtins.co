@@ -1,0 +1,15 @@
+// RUN: choreo -es %s | FileCheck %s
+__co__ s32 [100] co_sqrt_s32(s32 [100] input) {
+  s32[input.span(0)] output;
+  parallel p by 1 {
+    L1_input = dma.copy input.chunkat(p) => local;
+    local s32 [L1_input.span(0)] L1_output;
+    foreach {i} in [L1_input.span(0)] {
+      L1_output.at(i) = __sqrt(L1_input.data.at(i));
+    }
+    dma.copy L1_output => output.chunkat(p);
+  }
+  return output;
+}
+
+// CHECK: *((int*)L1_output + __iv_i) = tcle::sqrt(static_cast<float>(*((int*)L1_input.data() + __iv_i)));

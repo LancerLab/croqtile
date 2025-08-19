@@ -828,7 +828,53 @@ public:
   }
   bool Visit(AST::Wait&) override { return true; }
   bool Visit(AST::Trigger&) override { return true; }
-  bool Visit(AST::Call&) override { return true; }
+  bool Visit(AST::Call& n) override {
+    TraceEachVisit(n);
+    if (n.IsArith() && n.IsBIF()) {
+      auto normalized_args =
+          AST::Make<AST::MultiValues>(n.arguments->LOC(), ", ");
+      bool normalized = false;
+      ptr<Type> normalized_ty = nullptr;
+      for (size_t i = 0; i < n.arguments->Count(); ++i) {
+        auto arg = n.arguments->ValueAt(i);
+        auto arg_ty = arg->GetType();
+
+        if (isa<ScalarFloatType>(arg_ty)) {
+          if (!normalized_ty) {
+            normalized_ty = arg_ty->Clone();
+            continue;
+          }
+          auto bty_f = arg_ty->GetBaseType();
+          auto bty_t = normalized_ty->GetBaseType();
+          if (bty_f != bty_t && IsLossyCast(bty_f, bty_t))
+            normalized_ty = arg_ty->Clone();
+        } else
+          normalized_ty = MakeScalarFloatType(BaseType::F32);
+      }
+
+      assert(normalized_ty && "must have a type to normalize to");
+      for (size_t i = 0; i < n.arguments->Count(); ++i) {
+        auto arg = n.arguments->ValueAt(i);
+        auto arg_ty = arg->GetType();
+        if (arg_ty == normalized_ty) {
+          normalized_args->Append(arg->Clone());
+          continue;
+        }
+        if (auto casted = GenCastExprNode(normalized_ty->GetBaseType(),
+                                          arg_ty->GetBaseType(), arg)) {
+          normalized_args->Append(casted);
+          normalized = true;
+        } else
+          choreo_unreachable("unable to normalize argument type: " +
+                             STR(*arg_ty) + " to " + STR(*normalized_ty));
+      }
+
+      n.SetType(normalized_ty);
+      if (normalized) { n.arguments = normalized_args; }
+    }
+    return true;
+  }
+
   bool Visit(AST::Rotate&) override { return true; }
   bool Visit(AST::Synchronize&) override { return true; }
   bool Visit(AST::Select&) override { return true; }
