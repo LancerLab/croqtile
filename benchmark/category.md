@@ -17,6 +17,8 @@ Each operator includes:
 
 ## ADD Operations (Garfee)
 
+**Format**: [input_tensor_a] + [input_tensor_b] --> [output_tensor] (supports broadcasting)
+
 - case1: [32, 512, 768] + [32, 512, 768] --> [32, 512, 768] (BERT)
 - case2: [128, 256, 28, 28] + [256] --> [128, 256, 28, 28] (Broadcast)
 - case3: [32, 512, 768] + [1] --> [32, 512, 768] (Broadcast)
@@ -41,6 +43,8 @@ Each operator includes:
 
 ## MATMUL Operations (Enmin)
 
+**Format**: [input_tensor] + [weight_matrix] --> [output_tensor] (matrix multiplication)
+
 - case1: [32, 512, 768] + [768, 768] --> [32, 512, 768] (BERT)
 - case2: [32, 512, 30522] + [30522, 768] --> [32, 512, 768] (BERT)
 - case3: [256, 512] + [512, 10] --> [256, 10] (CNN)
@@ -64,28 +68,33 @@ Each operator includes:
 
 ## CONV2D Operations (Sijie)
 
-- case1: [32, 512, attn_h, attn_w] --> [32, 1024, attn_h, attn_w] (Attention)
-- case2: [batch_size, 64, 56, 56] --> [batch_size, 128, 56, 56] (Dynamic)
-- case3: [16, 256, pyramid_h, pyramid_w] --> [16, 256, pyramid_h, pyramid_w] (Dynamic)
-- case4: [32, 128, height, width] --> [32, 256, height, width] (Dynamic)
-- case5: [128, in_channels, 112, 112] --> [128, 64, 112, 112] (Dynamic)
-- case6: [64, 64, 56, 56] --> [64, 128, 56, 56] (Dynamic)
-- case7: [8, 256, scale_h, scale_w] --> [8, 512, scale_h, scale_w] (Dynamic)
-- case8: [64, 256, 28, 28] --> [64, out_channels, 28, 28] (Dynamic)
-- case9: [16, 64, 224, 224] --> [16, 128, output_h, output_w] (Dynamic)
-- case10: [32, 128, 112, 112] --> [32, 256, output_h, output_w] (Dynamic)
-- case11: [64, 128, 32, 32] --> [64, 32, 32, 32] (Static)
-- case12: [64, 40, 56, 56] --> [64, 240, 56, 56] (EfficientNet)
-- case13: [32, 192, 28, 28] --> [32, 64, 28, 28] (Static)
-- case14: [128, 32, 112, 112] --> [128, 32, 112, 112] (MobileNet)
-- case15: [32, 256, 56, 56] --> [32, 64, 56, 56] (ResNet)
-- case16: [64, 3, 224, 224] --> [64, 64, 112, 112] (ResNet)
-- case17: [8, 256, 64, 64] --> [8, 21, 64, 64] (Static)
-- case18: [16, 64, 128, 128] --> [16, 128, 128, 128] (U-Net)
-- case19: [32, 3, 224, 224] --> [32, 768, 14, 14] (ViT)
-- case20: [16, 1024, 13, 13] --> [16, 255, 13, 13] (Static)
+**Format**: [input_tensor] + [weight/kernel] --> [output_tensor] (stride, padding, dilation)
+
+- case1: [32, 512, attn_h, attn_w] + [1024, 512, 1, 1] --> [32, 1024, attn_h, attn_w] (Attention, stride=1, padding=0, dilation=1)
+- case2: [batch_size, 64, 56, 56] + [128, 64, 3, 3] --> [batch_size, 128, 56, 56] (Dynamic, stride=1, padding=1, dilation=1)
+- case3: [16, 256, pyramid_h, pyramid_w] + [256, 256, 3, 3] --> [16, 256, pyramid_h, pyramid_w] (Dynamic, stride=1, padding=1, dilation=1)
+- case4: [32, 128, height, width] + [256, 128, 3, 3] --> [32, 256, height, width] (Dynamic, stride=1, padding=1, dilation=1)
+- case5: [128, in_channels, 112, 112] + [64, in_channels, 1, 1] --> [128, 64, 112, 112] (Dynamic, stride=1, padding=0, dilation=1)
+- case6: [64, 64, 56, 56] + [128, 64, 3, 3] --> [64, 128, 56, 56] (Dynamic, stride=1, padding=1, dilation=1)
+- case7: [8, 256, scale_h, scale_w] + [512, 256, 1, 1] --> [8, 512, scale_h, scale_w] (Dynamic, stride=1, padding=0, dilation=1)
+- case8: [64, 256, 28, 28] + [out_channels, 256, 3, 3] --> [64, out_channels, 28, 28] (Dynamic, stride=1, padding=1, dilation=1)
+- case9: [16, 64, 224, 224] + [128, 64, 7, 7] --> [16, 128, output_h, output_w] (Dynamic, stride=2, padding=3, dilation=1)
+- case10: [32, 128, 112, 112] + [256, 128, 3, 3] --> [32, 256, output_h, output_w] (Dynamic, stride=2, padding=1, dilation=1)
+- case11: [64, 128, 32, 32] + [32, 128, 1, 1] --> [64, 32, 32, 32] (Static, stride=1, padding=0, dilation=1)
+- case12: [64, 40, 56, 56] + [240, 40, 1, 1] --> [64, 240, 56, 56] (EfficientNet, stride=1, padding=0, dilation=1)
+- case13: [32, 192, 28, 28] + [64, 192, 1, 1] --> [32, 64, 28, 28] (Static, stride=1, padding=0, dilation=1)
+- case14: [128, 32, 112, 112] + [32, 32, 3, 3] --> [128, 32, 112, 112] (MobileNet, stride=1, padding=1, dilation=1)
+- case15: [32, 256, 56, 56] + [64, 256, 1, 1] --> [32, 64, 56, 56] (ResNet, stride=1, padding=0, dilation=1)
+- case16: [64, 3, 224, 224] + [64, 3, 7, 7] --> [64, 64, 112, 112] (ResNet, stride=2, padding=3, dilation=1)
+- case17: [8, 256, 64, 64] + [21, 256, 1, 1] --> [8, 21, 64, 64] (Static, stride=1, padding=0, dilation=1)
+- case18: [16, 64, 128, 128] + [128, 64, 3, 3] --> [16, 128, 128, 128] (U-Net, stride=1, padding=1, dilation=1)
+- case19: [32, 3, 224, 224] + [768, 3, 16, 16] --> [32, 768, 14, 14] (ViT, stride=16, padding=0, dilation=1)
+- case20: [16, 1024, 13, 13] + [255, 1024, 1, 1] --> [16, 255, 13, 13] (Static, stride=1, padding=0, dilation=1)
+- case21: [32, 768, 14, 14] + [1000, 768, 7, 7] --> [32, 1000, 7, 7] (ViT, stride=1, padding=0, dilation=1)
 
 ## RELU Operations (Hufan)
+
+**Format**: [input_tensor] --> [output_tensor] (element-wise activation)
 
 - case1: [32, 512, 768] --> [32, 512, 768] (BERT)
 - case2: [128, 128, 28, 28] --> [128, 128, 28, 28] (CNN)
@@ -111,6 +120,8 @@ Each operator includes:
 
 ## SIGMOID Operations (Garfee)
 
+**Format**: [input_tensor] --> [output_tensor] (element-wise activation)
+
 - case1: [32, 512, 768] --> [32, 512, 768] (BERT)
 - case2: [128, 128, 28, 28] --> [128, 128, 28, 28] (CNN)
 - case3: [32, num_heads, 512, 64] --> [32, num_heads, 512, 64] (Attention)
@@ -134,6 +145,8 @@ Each operator includes:
 - case21: [32, 197, 3072] --> [32, 197, 3072] (ViT)
 
 ## SOFTMAX Operations (Enmin)
+
+**Format**: [input_tensor] --> [output_tensor] (element-wise activation with normalization)
 
 - case1: [32, 512, 768] --> [32, 512, 768] (BERT)
 - case2: [128, 128, 28, 28] --> [128, 128, 28, 28] (CNN)
@@ -159,6 +172,8 @@ Each operator includes:
 
 ## GELU Operations (Sijie)
 
+**Format**: [input_tensor] --> [output_tensor] (element-wise activation)
+
 - case1: [32, 512, 768] --> [32, 512, 768] (BERT)
 - case2: [128, 128, 28, 28] --> [128, 128, 28, 28] (CNN)
 - case3: [32, num_heads, 512, 64] --> [32, num_heads, 512, 64] (Attention)
@@ -183,53 +198,59 @@ Each operator includes:
 
 ## BATCH_NORM Operations (Hufan)
 
-- case1: [32, 512, 768] --> [32, 512, 768] (BERT)
-- case2: [128, 128, 28, 28] --> [128, 128, 28, 28] (CNN)
-- case3: [32, num_heads, 512, 64] --> [32, num_heads, 512, 64] (Attention)
-- case4: [batch_size, 256, 56, 56] --> [batch_size, 256, 56, 56] (Dynamic)
-- case5: [batch_size, 1280, height, width] --> [batch_size, 1280, height, width] (Dynamic)
-- case6: [128, channels, 112, 112] --> [128, channels, 112, 112] (Dynamic)
-- case7: [32, 197, embed_dim] --> [32, 197, embed_dim] (Dynamic)
-- case8: [16, 1024, d_model] --> [16, 1024, d_model] (Dynamic)
-- case9: [64, 128, height, width] --> [64, 128, height, width] (Dynamic)
-- case10: [16, 512, scale_h, scale_w] --> [16, 512, scale_h, scale_w] (Dynamic)
-- case11: [32, seq_len, 768] --> [32, seq_len, 768] (Dynamic)
-- case12: [64, time_steps, 256] --> [64, time_steps, 256] (Dynamic)
-- case13: [32, 512, vocab_size] --> [32, 512, vocab_size] (Dynamic)
-- case14: [64, 1280, 7, 7] --> [64, 1280, 7, 7] (EfficientNet)
-- case15: [16, 1024, 4096] --> [16, 1024, 4096] (GPT)
-- case16: [64, 100, 256] --> [64, 100, 256] (LSTM)
-- case17: [128, 96, 112, 112] --> [128, 96, 112, 112] (MobileNet)
-- case18: [64, 256, 56, 56] --> [64, 256, 56, 56] (ResNet)
-- case19: [32, 512, 2048] --> [32, 512, 2048] (Transformer)
-- case20: [16, 512, 32, 32] --> [16, 512, 32, 32] (U-Net)
-- case21: [32, 197, 3072] --> [32, 197, 3072] (ViT)
+**Format**: [input_tensor] + [scale/weight] + [shift/bias] --> [output_tensor] (normalization across batch dimension)
+
+- case1: [32, 512, 768] + [512] + [512] --> [32, 512, 768] (BERT)
+- case2: [128, 128, 28, 28] + [128] + [128] --> [128, 128, 28, 28] (CNN)
+- case3: [32, num_heads, 512, 64] + [num_heads] + [num_heads] --> [32, num_heads, 512, 64] (Attention)
+- case4: [batch_size, 256, 56, 56] + [256] + [256] --> [batch_size, 256, 56, 56] (Dynamic)
+- case5: [batch_size, 1280, height, width] + [1280] + [1280] --> [batch_size, 1280, height, width] (Dynamic)
+- case6: [128, channels, 112, 112] + [channels] + [channels] --> [128, channels, 112, 112] (Dynamic)
+- case7: [32, 197, embed_dim] + [197] + [197] --> [32, 197, embed_dim] (Dynamic)
+- case8: [16, 1024, d_model] + [1024] + [1024] --> [16, 1024, d_model] (Dynamic)
+- case9: [64, 128, height, width] + [128] + [128] --> [64, 128, height, width] (Dynamic)
+- case10: [16, 512, scale_h, scale_w] + [512] + [512] --> [16, 512, scale_h, scale_w] (Dynamic)
+- case11: [32, seq_len, 768] + [seq_len] + [seq_len] --> [32, seq_len, 768] (Dynamic)
+- case12: [64, time_steps, 256] + [time_steps] + [time_steps] --> [64, time_steps, 256] (Dynamic)
+- case13: [32, 512, vocab_size] + [512] + [512] --> [32, 512, vocab_size] (Dynamic)
+- case14: [64, 1280, 7, 7] + [1280] + [1280] --> [64, 1280, 7, 7] (EfficientNet)
+- case15: [16, 1024, 4096] + [1024] + [1024] --> [16, 1024, 4096] (GPT)
+- case16: [64, 100, 256] + [100] + [100] --> [64, 100, 256] (LSTM)
+- case17: [128, 96, 112, 112] + [96] + [96] --> [128, 96, 112, 112] (MobileNet)
+- case18: [64, 256, 56, 56] + [256] + [256] --> [64, 256, 56, 56] (ResNet)
+- case19: [32, 512, 2048] + [512] + [512] --> [32, 512, 2048] (Transformer)
+- case20: [16, 512, 32, 32] + [512] + [512] --> [16, 512, 32, 32] (U-Net)
+- case21: [32, 197, 3072] + [197] + [197] --> [32, 197, 3072] (ViT)
 
 ## LAYER_NORM Operations (Garfee)
 
-- case1: [32, 512, 768] --> [32, 512, 768] (BERT)
-- case2: [128, 128, 28, 28] --> [128, 128, 28, 28] (CNN)
-- case3: [32, num_heads, 512, 64] --> [32, num_heads, 512, 64] (Attention)
-- case4: [batch_size, 256, 56, 56] --> [batch_size, 256, 56, 56] (Dynamic)
-- case5: [batch_size, 1280, height, width] --> [batch_size, 1280, height, width] (Dynamic)
-- case6: [128, channels, 112, 112] --> [128, channels, 112, 112] (Dynamic)
-- case7: [32, 197, embed_dim] --> [32, 197, embed_dim] (Dynamic)
-- case8: [16, 1024, d_model] --> [16, 1024, d_model] (Dynamic)
-- case9: [64, 128, height, width] --> [64, 128, height, width] (Dynamic)
-- case10: [16, 512, scale_h, scale_w] --> [16, 512, scale_h, scale_w] (Dynamic)
-- case11: [32, seq_len, 768] --> [32, seq_len, 768] (Dynamic)
-- case12: [64, time_steps, 256] --> [64, time_steps, 256] (Dynamic)
-- case13: [32, 512, vocab_size] --> [32, 512, vocab_size] (Dynamic)
-- case14: [64, 1280, 7, 7] --> [64, 1280, 7, 7] (EfficientNet)
-- case15: [16, 1024, 4096] --> [16, 1024, 4096] (GPT)
-- case16: [64, 100, 256] --> [64, 100, 256] (LSTM)
-- case17: [128, 96, 112, 112] --> [128, 96, 112, 112] (MobileNet)
-- case18: [64, 256, 56, 56] --> [64, 256, 56, 56] (ResNet)
-- case19: [32, 512, 2048] --> [32, 512, 2048] (Transformer)
-- case20: [16, 512, 32, 32] --> [16, 512, 32, 32] (U-Net)
-- case21: [32, 197, 3072] --> [32, 197, 3072] (ViT)
+**Format**: [input_tensor] + [scale/weight] + [shift/bias] --> [output_tensor] (normalization across feature dimensions)
+
+- case1: [32, 512, 768] + [768] + [768] --> [32, 512, 768] (BERT)
+- case2: [128, 128, 28, 28] + [28, 28] + [28, 28] --> [128, 128, 28, 28] (CNN)
+- case3: [32, num_heads, 512, 64] + [64] + [64] --> [32, num_heads, 512, 64] (Attention)
+- case4: [batch_size, 256, 56, 56] + [56, 56] + [56, 56] --> [batch_size, 256, 56, 56] (Dynamic)
+- case5: [batch_size, 1280, height, width] + [height, width] + [height, width] --> [batch_size, 1280, height, width] (Dynamic)
+- case6: [128, channels, 112, 112] + [112, 112] + [112, 112] --> [128, channels, 112, 112] (Dynamic)
+- case7: [32, 197, embed_dim] + [embed_dim] + [embed_dim] --> [32, 197, embed_dim] (Dynamic)
+- case8: [16, 1024, d_model] + [d_model] + [d_model] --> [16, 1024, d_model] (Dynamic)
+- case9: [64, 128, height, width] + [height, width] + [height, width] --> [64, 128, height, width] (Dynamic)
+- case10: [16, 512, scale_h, scale_w] + [scale_h, scale_w] + [scale_h, scale_w] --> [16, 512, scale_h, scale_w] (Dynamic)
+- case11: [32, seq_len, 768] + [768] + [768] --> [32, seq_len, 768] (Dynamic)
+- case12: [64, time_steps, 256] + [256] + [256] --> [64, time_steps, 256] (Dynamic)
+- case13: [32, 512, vocab_size] + [vocab_size] + [vocab_size] --> [32, 512, vocab_size] (Dynamic)
+- case14: [64, 1280, 7, 7] + [7, 7] + [7, 7] --> [64, 1280, 7, 7] (EfficientNet)
+- case15: [16, 1024, 4096] + [4096] + [4096] --> [16, 1024, 4096] (GPT)
+- case16: [64, 100, 256] + [256] + [256] --> [64, 100, 256] (LSTM)
+- case17: [128, 96, 112, 112] + [112, 112] + [112, 112] --> [128, 96, 112, 112] (MobileNet)
+- case18: [64, 256, 56, 56] + [56, 56] + [56, 56] --> [64, 256, 56, 56] (ResNet)
+- case19: [32, 512, 2048] + [2048] + [2048] --> [32, 512, 2048] (Transformer)
+- case20: [16, 512, 32, 32] + [32, 32] + [32, 32] --> [16, 512, 32, 32] (U-Net)
+- case21: [32, 197, 3072] + [3072] + [3072] --> [32, 197, 3072] (ViT)
 
 ## RESHAPE Operations (Enmin)
+
+**Format**: [input_tensor] --> [output_tensor] (shape transformation preserving total elements)
 
 - case1: [32, 512, 768] --> [32, 512, 12, 64] (BERT)
 - case2: [128, 128, 28, 28] --> [128, 100352] (CNN)
@@ -255,6 +276,8 @@ Each operator includes:
 
 ## TRANSPOSE Operations (Sijie)
 
+**Format**: [input_tensor] --> [output_tensor] (dimension permutation)
+
 - case1: [32, 512, 768] --> [32, 768, 512] (BERT)
 - case2: [128, 128, 28, 28] --> [128, 128, 28, 28] (CNN)
 - case3: [32, num_heads, 512, 64] --> [32, 512, num_heads, 64] (Attention)
@@ -279,6 +302,8 @@ Each operator includes:
 
 ## CONCAT Operations (Hufan)
 
+**Format**: [input_tensor_1] + [input_tensor_2] + ... --> [output_tensor] (concatenation along specified axis)
+
 - case1: [32, 512, 768] + [32, 512, 768] --> [32, 512, 1536] (BERT)
 - case2: [128, 128, 28, 28] + [128, 256, 28, 28] --> [128, 384, 28, 28] (CNN)
 - case3: [32, num_heads, 512, 64] + [32, num_heads, 512, 64] --> [32, num_heads, 512, 128] (Attention)
@@ -302,6 +327,8 @@ Each operator includes:
 - case21: [32, 196, 768] + [32, 1, 768] --> [32, 197, 768] (ViT)
 
 ## SPLIT Operations
+
+**Format**: [input_tensor] --> [output_tensor_1] + [output_tensor_2] + ... (split along specified axis)
 
 - case1: [32, 512, 768] --> [32, 512, 64] + [32, 512, 64] + [32, 512, 64] + ... (12 total) (BERT)
 - case2: [128, 384, 28, 28] --> [128, 128, 28, 28] + [128, 128, 28, 28] + [128, 128, 28, 28] (CNN)
@@ -349,26 +376,26 @@ Each operator includes:
 
 ## EMBEDDING Operations (Sijie)
 
-- case1: [32, 512] --> [32, 512, 768] (BERT)
-- case2: [128, 50] --> [128, 50, 128] (General)
-- case3: [128, 1000] --> [128, 1000, 256] (CNN)
-- case4: [batch_size, 512] --> [batch_size, 512, 768] (Dynamic)
-- case5: [32, num_bpe_tokens] --> [32, num_bpe_tokens, 1024] (Dynamic)
-- case6: [16, num_chars] --> [16, num_chars, 128] (Dynamic)
-- case7: [128, seq_len] --> [128, seq_len, 768] (Dynamic)
-- case8: [16, num_positions] --> [16, num_positions, 768] (Dynamic)
-- case9: [32, num_pieces] --> [32, num_pieces, 768] (Dynamic)
-- case10: [32, seq_len] --> [32, seq_len, 768] (Dynamic)
-- case11: [64, num_subwords] --> [64, num_subwords, 512] (Dynamic)
-- case12: [64, 256] --> [64, 256, embed_dim] (Dynamic)
-- case13: [batch_size, num_wordpieces] --> [batch_size, num_wordpieces, 768] (Dynamic)
-- case14: [16, 1024] --> [16, 1024, 1024] (GPT)
-- case15: [32, 512] --> [32, 512, 768] (BERT)
-- case16: [64, 256] --> [64, 256, 512] (General)
-- case17: [16, 512] --> [16, 512, 768] (General)
-- case18: [32, 512] --> [32, 512, 512] (Transformer)
-- case19: [32, 197] --> [32, 197, 768] (ViT)
-- case20: [64, 100] --> [64, 100, 300] (General)
+- case1: [32, 512] + [30522, 768] --> [32, 512, 768] (BERT)
+- case2: [128, 50] + [10000, 128] --> [128, 50, 128] (General)
+- case3: [128, 1000] + [50000, 256] --> [128, 1000, 256] (CNN)
+- case4: [batch_size, 512] + [vocab_size, 768] --> [batch_size, 512, 768] (Dynamic)
+- case5: [32, num_bpe_tokens] + [50000, 1024] --> [32, num_bpe_tokens, 1024] (Dynamic)
+- case6: [16, num_chars] + [256, 128] --> [16, num_chars, 128] (Dynamic)
+- case7: [128, seq_len] + [30522, 768] --> [128, seq_len, 768] (Dynamic)
+- case8: [16, num_positions] + [512, 768] --> [16, num_positions, 768] (Dynamic)
+- case9: [32, num_pieces] + [32000, 768] --> [32, num_pieces, 768] (Dynamic)
+- case10: [32, seq_len] + [vocab_size, 768] --> [32, seq_len, 768] (Dynamic)
+- case11: [64, num_subwords] + [40000, 512] --> [64, num_subwords, 512] (Dynamic)
+- case12: [64, 256] + [vocab_size, embed_dim] --> [64, 256, embed_dim] (Dynamic)
+- case13: [batch_size, num_wordpieces] + [30522, 768] --> [batch_size, num_wordpieces, 768] (Dynamic)
+- case14: [16, 1024] + [50257, 1024] --> [16, 1024, 1024] (GPT)
+- case15: [32, 512] + [30522, 768] --> [32, 512, 768] (BERT)
+- case16: [64, 256] + [20000, 512] --> [64, 256, 512] (General)
+- case17: [16, 512] + [25000, 768] --> [16, 512, 768] (General)
+- case18: [32, 512] + [32000, 512] --> [32, 512, 512] (Transformer)
+- case19: [32, 197] + [1000, 768] --> [32, 197, 768] (ViT)
+- case20: [64, 100] + [10000, 300] --> [64, 100, 300] (General)
 
 ## REDUCE_MEAN Operations (Hufan)
 
