@@ -1176,7 +1176,7 @@ public:
         is_mutable(im) {}
 
   BaseType getBaseType() const { return base_type; }
-  Node* getPartialType() const { return mdspan_type.get(); }
+  ptr<Node> getPartialType() const { return mdspan_type; }
 
   bool IsVoid() const { return base_type == BaseType::VOID; }
   bool IsUnknown() const { return base_type == BaseType::UNKNOWN; }

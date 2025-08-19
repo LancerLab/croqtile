@@ -897,6 +897,26 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
     if (diverges.Contains(n.init_expr)) diverges.Add(InScopeName(n.name_str));
   }
 
+  if (isa<SpannedType>(n.GetType())) {
+    auto mds = dyn_cast<AST::MultiDimSpans>(n.type->mdspan_type);
+    if (mds && mds->list) {
+      auto mv = cast<AST::MultiValues>(mds->list);
+      for (const auto& v : mv->AllValues()) {
+        auto bt = dyn_cast<BoundedType>(v->GetType());
+        if (bt)
+          Error1(v->LOC(), "Dimension of span can only be const integer "
+                           "value, but got value of type " +
+                               v->GetType()->TypeNameString() + ": " +
+                               PSTR(v->GetType()) + ".");
+        if (mutables.Contains(v))
+          Error1(v->LOC(), "Dimension of span can only be const integer "
+                           "value, but got value of type " +
+                               v->GetType()->TypeNameString() + ": " +
+                               PSTR(v->GetType()) + ".");
+      }
+    }
+  }
+
   // check the type of init_value of span
   if (isa<SpannedType>(n.GetType()) && n.init_value) {
     auto ty = dyn_cast<SpannedType>(n.GetType());

@@ -1,0 +1,18 @@
+// RUN: not choreo %s 2>&1| FileCheck %s
+
+__co__ void foo(int N) {
+  parallel p by 1 {
+    s32 m = 5;
+    foreach x in [4] {
+      y = x * 2;
+      shared f32 [x, m, 1.5, p, y] s0;
+    }
+  }
+}
+
+// CHECK: error: unexpected data type 'f64' is found in mdspan.
+// CHECK: error: Dimension of span can only be const integer value, but got value of type BoundedITupleType: {int}->[].
+// CHECK: error: Dimension of span can only be const integer value, but got value of type S32Type: mutable s32.
+// CHECK: error: Dimension of span can only be const integer value, but got value of type BoundedIntegerType: int->[0,p].
+// CHECK: error: Dimension of span can only be const integer value, but got value of type BoundedITupleType: {int}->[].
+// CHECK: Totally 5 errors have been detected.
