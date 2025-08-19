@@ -708,8 +708,7 @@ bool ShapeInference::Visit(AST::Identifier& n) {
   }
 
   if (HasValNo(n)) {
-    Error(n.LOC(), "value number has been generated for `" + n.name + "'.");
-    error_count++;
+    Error1(n.LOC(), "value number has been generated for `" + n.name + "'.");
     return false;
   }
 
@@ -745,8 +744,7 @@ bool ShapeInference::Visit(AST::Parameter& n) {
                   MakeSpannedType(n.type->base_type, span->GetTypeDetail()));
     } else {
       // the value number is unknown at compile time
-      Error(n.LOC(), "The type can not be inference at compile time.");
-      error_count++;
+      Error1(n.LOC(), "The type can not be inference at compile time.");
       return false;
     }
 
@@ -888,9 +886,9 @@ bool ShapeInference::Visit(AST::WithIn& n) {
   // requires the elements inside mdspan to be non-zero values
   // we have to abend early here since it blocks further shape inference
   if (vn.ContainsZero(mds_sign)) {
-    Error(n.LOC(),
-          "zero value is deduced for the mdspan inside the with-in statement.");
-    error_count++;
+    Error1(
+        n.LOC(),
+        "zero value is deduced for the mdspan inside the with-in statement.");
     cannot_proceed = true;
     Error(n.LOC(),
           "unable to apply shape inference for function '" + fname + "'.");
@@ -1131,14 +1129,12 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
       auto c_count = MultiplyAll(cvi);
       if (sbe::cne(r_count, c_count)) {
         if (VIIsInt(r_count) && VIIsInt(c_count)) {
-          Error(op->LOC(), "can not apply span_as to reshape from [" +
-                               STR(cvi) + "](" + STR(c_count) + ") to [" +
-                               STR(rvi) + "](" + STR(r_count) + ").");
-          error_count++;
+          Error1(op->LOC(), "can not apply span_as to reshape from [" +
+                                STR(cvi) + "](" + STR(c_count) + ") to [" +
+                                STR(rvi) + "](" + STR(r_count) + ").");
         } else if (VIIsNil(r_count) || VIIsNil(c_count)) {
-          Error(op->LOC(), "can not apply span_as to a mdspan with infinite a "
-                           "dimension value.");
-          error_count++;
+          Error1(op->LOC(), "can not apply span_as to a mdspan with infinite a "
+                            "dimension value.");
         } else {
           Warning(op->LOC(), "can not prove equality of mdspan [" + STR(cvi) +
                                  "] and mdspan [" + STR(rvi) +
@@ -1164,11 +1160,10 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
           auto lvi = vn.GenValueItemFromValueNumber(cur_vns[index]);
           auto rvi = vn.GenValueItemFromValueNumber(tfs_vns[index]);
           if (sbe::clt(lvi, rvi)) {
-            Error(op->TFSSAt(index)->LOC(),
-                  "the subspan dimension (dim: " + std::to_string(index) +
-                      ") is larger than original (" + STR(rvi) + " > " +
-                      STR(lvi) + ").");
-            error_count++;
+            Error1(op->TFSSAt(index)->LOC(),
+                   "the subspan dimension (dim: " + std::to_string(index) +
+                       ") is larger than original (" + STR(rvi) + " > " +
+                       STR(lvi) + ").");
           }
           res_vns.push_back(tfs_vns[index]);
         } else if (op->OpCode() == AST::SpannedOperation::MODSPAN) {
@@ -1176,11 +1171,10 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
           auto lvi = vn.GenValueItemFromValueNumber(cur_vns[index]);
           auto rvi = vn.GenValueItemFromValueNumber(tfs_vns[index]);
           if (sbe::clt(lvi, rvi)) {
-            Error(op->TFSSAt(index)->LOC(),
-                  "the subspan dimension (dim: " + std::to_string(index) +
-                      ") is larger than the data (" + STR(rvi) + " > " +
-                      PSTR(lvi) + ").");
-            error_count++;
+            Error1(op->TFSSAt(index)->LOC(),
+                   "the subspan dimension (dim: " + std::to_string(index) +
+                       ") is larger than the data (" + STR(rvi) + " > " +
+                       PSTR(lvi) + ").");
           }
           auto mod_sig = vn.Simplify(o_sn("%", cur_vns[index], tfs_vns[index]));
           mod_vns.push_back(GetOrGenValNum(mod_sig));
@@ -1190,11 +1184,10 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
           auto lvi = vn.GenValueItemFromValueNumber(cur_vns[index]);
           auto rvi = vn.GenValueItemFromValueNumber(tfs_vns[index]);
           if (sbe::clt(lvi, rvi)) {
-            Error(op->TFSSAt(index)->LOC(),
-                  "the tiling factor (dim: " + std::to_string(index) +
-                      ") is larger than the data dimension (" + STR(rvi) +
-                      " > " + PSTR(lvi) + ").");
-            error_count++;
+            Error1(op->TFSSAt(index)->LOC(),
+                   "the tiling factor (dim: " + std::to_string(index) +
+                       ") is larger than the data dimension (" + STR(rvi) +
+                       " > " + PSTR(lvi) + ").");
           }
           auto res_sig = vn.Simplify(o_sn("/", cur_vns[index], tfs_vns[index]));
           res_vns.push_back(GetOrGenValNum(res_sig));
@@ -1203,11 +1196,10 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
           auto lvi = vn.GenValueItemFromValueNumber(cur_vns[index]);
           auto rvi = vn.GenValueItemFromValueNumber(pos_vns[index]);
           if (sbe::clt(lvi, rvi)) {
-            Error(op->LOC(),
-                  "the tiling factor (dim: " + std::to_string(index) +
-                      ") is larger than the data dimension (" + STR(rvi) +
-                      " > " + STR(lvi) + ").");
-            error_count++;
+            Error1(op->LOC(),
+                   "the tiling factor (dim: " + std::to_string(index) +
+                       ") is larger than the data dimension (" + STR(rvi) +
+                       " > " + STR(lvi) + ").");
           }
           auto res_sig = vn.Simplify(o_sn("/", cur_vns[index], pos_vns[index]));
           res_vns.push_back(GetOrGenValNum(res_sig));
@@ -1351,8 +1343,7 @@ bool ShapeInference::Visit(AST::Rotate& n) {
   auto rty = type_equals.ResolveEqualFutures(*n.ids, true);
 
   if (!rty) {
-    Error(n.LOC(), "Failed to resolve future types.");
-    error_count++;
+    Error1(n.LOC(), "Failed to resolve future types.");
     return false;
   }
 
@@ -1362,8 +1353,7 @@ bool ShapeInference::Visit(AST::Rotate& n) {
   NumTy valno = GetOnlyValueNumberFromMultiValues(*n.ids);
 
   if (!valno.IsValid()) {
-    Error(n.LOC(), "failed to find a valid value number inside ROTATE.");
-    error_count++;
+    Error1(n.LOC(), "failed to find a valid value number inside ROTATE.");
     cannot_proceed = true;
     return false;
   }
@@ -1398,9 +1388,8 @@ bool ShapeInference::Visit(AST::Select& n) {
       cur_mdspan_vn = GetOnlyValueNumber(*n.expr_list, VNKind::VNK_MDSPAN);
       // handle dataof expr (TODO: any better idea?)
       if (!cur_mdspan_vn.IsValid()) {
-        Error(n.LOC(), "Failed to decide the type of Select." + STR(n) +
-                           ", type0: " + PSTR(s0ty));
-        error_count++;
+        Error1(n.LOC(), "Failed to decide the type of Select." + STR(n) +
+                            ", type0: " + PSTR(s0ty));
         return false;
       }
       auto nty = MakeSpannedType(sty->e_type, GenShape(cur_mdspan_vn),
@@ -1415,8 +1404,7 @@ bool ShapeInference::Visit(AST::Select& n) {
 
     auto fty = type_equals.ResolveEqualFutures(*n.expr_list, true);
     if (!fty) {
-      Error(n.LOC(), "Failed to resolve future types.");
-      error_count++;
+      Error1(n.LOC(), "Failed to resolve future types.");
       return false;
     }
     SetNodeType(n, fty);
@@ -1424,8 +1412,8 @@ bool ShapeInference::Visit(AST::Select& n) {
 
     cur_mdspan_vn = GetOnlyValueNumberFromMultiValues(*n.expr_list);
     if (!cur_mdspan_vn.IsValid()) {
-      Error(n.LOC(), "no valid value number is found for a SELECT expression.");
-      error_count++;
+      Error1(n.LOC(),
+             "no valid value number is found for a SELECT expression.");
       cannot_proceed = true;
       return false;
     }

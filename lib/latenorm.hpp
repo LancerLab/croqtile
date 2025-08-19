@@ -480,9 +480,8 @@ public:
         // the buffer does not exist
         auto sym_type = GetSymbolType(n.future);
         if (isa<PlaceHolderType>(sym_type)) {
-          Error(n.LOC(),
-                "dma.any '" + n.future + "' is defined but never used!");
-          error_count++;
+          Error1(n.LOC(),
+                 "dma.any '" + n.future + "' is defined but never used!");
           return false;
         }
         auto sty = GetSpannedType(sym_type);

@@ -15,11 +15,9 @@ bool SemaChecker::AfterVisitImpl(AST::Node& n) {
   if (isa<AST::ChoreoFunction>(&n)) {
     for (auto n : waited_async) pending_async.erase(n);
 
-    if (!pending_async.empty()) {
-      Error(n.LOC(), "some asyncs are not explicitly waited: " +
-                         DelimitedString(pending_async) + ".");
-      error_count++;
-    }
+    if (!pending_async.empty())
+      Error1(n.LOC(), "some asyncs are not explicitly waited: " +
+                          DelimitedString(pending_async) + ".");
   }
   return true;
 }
@@ -69,10 +67,9 @@ bool SemaChecker::VisitNode(AST::Expr& n) {
 
     size_t arr_rank = arr_ty->ArrayRank();
     if (subscription_level > arr_rank) {
-      Error(n.LOC(), "Invalid array access: expected " +
-                         std::to_string(arr_rank) + " dimensions, but " +
-                         std::to_string(subscription_level) + " were used.");
-      error_count++;
+      Error1(n.LOC(), "Invalid array access: expected " +
+                          std::to_string(arr_rank) + " dimensions, but " +
+                          std::to_string(subscription_level) + " were used.");
       return false;
     }
 
@@ -136,14 +133,11 @@ bool SemaChecker::VisitNode(AST::NamedVariableDecl& n) {
 
   auto ty = NodeType(n);
   auto s = GetShape(ty);
-  if (s.IsValid()) {
+  if (s.IsValid())
     for (auto sv : s.Value())
-      if (*sv == *sbe::nu(0)) {
-        Error(n.LOC(), "found 0-dimension within the shape of variable `" +
-                           n.name_str + "'.");
-        error_count++;
-      }
-  }
+      if (*sv == *sbe::nu(0))
+        Error1(n.LOC(), "found 0-dimension within the shape of variable `" +
+                            n.name_str + "'.");
 
   if (n.init_expr && input_deps.Contains(n.init_expr)) input_deps.Add(n);
 
@@ -174,10 +168,9 @@ bool SemaChecker::VisitNode(AST::Assignment& n) {
   return false;
 
   if ((*NodeType(n) != *NodeType(*n.value))) {
-    Error(n.LOC(), "inconsistent types are found in the assignment: " +
-                       STR(*NodeType(*n.value)) + " vs. " + STR(*NodeType(n)) +
-                       ".");
-    error_count++;
+    Error1(n.LOC(), "inconsistent types are found in the assignment: " +
+                        STR(*NodeType(*n.value)) + " vs. " + STR(*NodeType(n)) +
+                        ".");
     return false;
   }
 
@@ -191,8 +184,7 @@ bool SemaChecker::VisitNode(AST::Assignment& n) {
 bool SemaChecker::VisitNode(AST::IntIndex& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   if (!isa<ScalarIntegerType>(n.value->GetType())) {
-    Error(n.LOC(), "Expect `" + PSTR(n.value) + "' to be a integer type.");
-    error_count++;
+    Error1(n.LOC(), "Expect `" + PSTR(n.value) + "' to be a integer type.");
     return false;
   }
   return true;
@@ -269,14 +261,12 @@ bool SemaChecker::VisitNode(AST::SpanAs& n) {
   auto ity = GetSymbolType(n.id->name);
 
   if (!(isa<SpannedType>(ity) || isa<FutureType>(ity))) {
-    Error(n.LOC(), "Expect symbol `" + n.id->name + "' to be a spanned type.");
-    error_count++;
+    Error1(n.LOC(), "Expect symbol `" + n.id->name + "' to be a spanned type.");
     return false;
   }
 
   if (!(AST::istypeof<SpannedType>(&n))) {
-    Error(n.LOC(), "Invalid type of span_as expression.");
-    error_count++;
+    Error1(n.LOC(), "Invalid type of span_as expression.");
     return false;
   }
 
@@ -284,19 +274,17 @@ bool SemaChecker::VisitNode(AST::SpanAs& n) {
   auto nty = cast<SpannedType>(NodeType(n));
 
   if (sty->ElementType() != nty->ElementType()) {
-    Error(n.LOC(), "Inconsistent element type: (" + STR(nty->ElementType()) +
-                       " = span_as(" + STR(sty->ElementType()) + ".");
-    error_count++;
+    Error1(n.LOC(), "Inconsistent element type: (" + STR(nty->ElementType()) +
+                        " = span_as(" + STR(sty->ElementType()) + ".");
     return false;
   }
 
   if (!sty->RuntimeShaped() && !nty->RuntimeShaped()) {
     // check if the shape size are same
     if (sty->ElementCount() != nty->ElementCount()) {
-      Error(n.LOC(), "Inconsistent mdspan size: " + n.id->name + "(" +
-                         STR(sty->ElementCount()) + ") = spanas (" +
-                         n.nid->name + "(" + STR(nty->ElementCount()) + ")).");
-      error_count++;
+      Error1(n.LOC(), "Inconsistent mdspan size: " + n.id->name + "(" +
+                          STR(sty->ElementCount()) + ") = spanas (" +
+                          n.nid->name + "(" + STR(nty->ElementCount()) + ")).");
       return false;
     }
   }
@@ -310,14 +298,12 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
 
   if (IsDummy) {
     if (n.future.empty()) {
-      Error(n.LOC(), "A dummy/async DMA must be named.");
-      error_count++;
+      Error1(n.LOC(), "A dummy/async DMA must be named.");
       return false;
     }
     if (!isa<PlaceHolderType>(ty) ||
         (cast<PlaceHolderType>(ty)->GetBaseType() != BaseType::FUTURE)) {
-      Error(n.LOC(), "Expect a placeholder type but got '" + PSTR(ty) + "'.");
-      error_count++;
+      Error1(n.LOC(), "Expect a placeholder type but got '" + PSTR(ty) + "'.");
       return false;
     }
     return true;
@@ -325,34 +311,26 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
 
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
 
-  if (!isa<FutureType>(ty)) {
-    Error(n.LOC(), "Expect the DMA to produce a FutureType, but got '" +
-                       PSTR(n.GetType()) + "'.");
-    error_count++;
-  }
+  if (!isa<FutureType>(ty))
+    Error1(n.LOC(), "Expect the DMA to produce a FutureType, but got '" +
+                        PSTR(n.GetType()) + "'.");
 
-  if (cast<FutureType>(ty)->IsAsync() && n.future.empty()) {
-    Error(n.LOC(), "A dummy/async DMA must be named.");
-    error_count++;
-  }
+  if (cast<FutureType>(ty)->IsAsync() && n.future.empty())
+    Error1(n.LOC(), "A dummy/async DMA must be named.");
 
   if (!n.future.empty() && cast<FutureType>(ty)->IsAsync())
     pending_async.insert(InScopeName(n.future));
   if (!n.chain_from.empty()) waited_async.insert(InScopeName(n.chain_from));
 
-  if (!isa<AST::ChunkAt>(n.from) || !isa<SpannedType>(n.from->GetType())) {
-    Error(n.LOC(),
-          "The 'from' of DMA is not as expected: " + n.from->TypeNameString() +
-              "(" + PSTR(n.from->GetType()) + ").");
-    error_count++;
-  }
+  if (!isa<AST::ChunkAt>(n.from) || !isa<SpannedType>(n.from->GetType()))
+    Error1(n.LOC(),
+           "The 'from' of DMA is not as expected: " + n.from->TypeNameString() +
+               "(" + PSTR(n.from->GetType()) + ").");
 
-  if (!isa<AST::ChunkAt>(n.to) || !isa<SpannedType>(n.to->GetType())) {
-    Error(n.LOC(),
-          "The 'to' of DMA is not as expected: " + n.to->TypeNameString() +
-              "(" + PSTR(n.from->GetType()) + ").");
-    error_count++;
-  }
+  if (!isa<AST::ChunkAt>(n.to) || !isa<SpannedType>(n.to->GetType()))
+    Error1(n.LOC(),
+           "The 'to' of DMA is not as expected: " + n.to->TypeNameString() +
+               "(" + PSTR(n.from->GetType()) + ").");
 
   auto& fty = n.from->GetType();
   auto& tty = n.to->GetType();
@@ -367,19 +345,17 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
     // do LogicalEqual() manually
     auto tc = cast<TransposeConfig>(n.config);
     if (sfty->e_type != stty->e_type || !f_shape.SameRankAs(t_shape)) {
-      Error(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
-                         ") with " + PSTR(tc) + " and 'to'(" + PSTR(tty) +
-                         ").");
-      error_count++;
+      Error1(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
+                          ") with " + PSTR(tc) + " and 'to'(" + PSTR(tty) +
+                          ").");
     } else {
       auto& dim_values = tc->dim_values;
       for (size_t i = 0; i < dim_values.size(); ++i) {
         if (!IsValueItemEqual(f_shape.ValueAt(dim_values[i]),
                               t_shape.ValueAt(i))) {
-          Error(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
-                             ") with " + PSTR(tc) + " and 'to'(" + PSTR(tty) +
-                             ").");
-          error_count++;
+          Error1(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
+                              ") with " + PSTR(tc) + " and 'to'(" + PSTR(tty) +
+                              ").");
           break;
         }
       }
@@ -389,10 +365,9 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
     // do LogicalEqual() manually
     auto pc = cast<PadConfig>(n.config);
     if (sfty->e_type != stty->e_type || !f_shape.SameRankAs(t_shape)) {
-      Error(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
-                         ") with " + PSTR(pc) + " and 'to'(" + PSTR(tty) +
-                         ").");
-      error_count++;
+      Error1(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
+                          ") with " + PSTR(pc) + " and 'to'(" + PSTR(tty) +
+                          ").");
     } else {
       size_t dim_count = f_shape.DimCount();
       auto clampLongToInt = [](long value) {
@@ -405,10 +380,9 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
         if (!IsValueItemEqual(f_shape.ValueAt(i) +
                                   sbe::nu(clampLongToInt(pad_length)),
                               t_shape.ValueAt(i))) {
-          Error(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
-                             ") with " + PSTR(pc) + " and 'to'(" + PSTR(tty) +
-                             ").");
-          error_count++;
+          Error1(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
+                              ") with " + PSTR(pc) + " and 'to'(" + PSTR(tty) +
+                              ").");
           break;
         }
       }
@@ -447,9 +421,8 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
       }
     }
     if (emit_error) {
-      Error(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
-                         ") and 'to'(" + PSTR(tty) + ").");
-      error_count++;
+      Error1(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
+                          ") and 'to'(" + PSTR(tty) + ").");
     } else {
       Warning(n.LOC(),
               "Dimensions could be inconsistent between DMA" + msg + ").");
@@ -510,10 +483,9 @@ bool SemaChecker::VisitNode(AST::ChunkAt& n) {
     size_t idx_cnt = n.indices->Count();
     // need exactly `rank` indices to access the array!
     if (idx_cnt != rank) {
-      Error(n.LOC(), "Invalid array access: expected " + std::to_string(rank) +
-                         " dimensions, but " + std::to_string(idx_cnt) +
-                         " were used.");
-      error_count++;
+      Error1(n.LOC(), "Invalid array access: expected " + std::to_string(rank) +
+                          " dimensions, but " + std::to_string(idx_cnt) +
+                          " were used.");
       return false;
     }
 
@@ -561,17 +533,16 @@ bool SemaChecker::VisitNode(AST::Trigger& n) {
   for (auto& f : n.GetEvents()) {
     auto fty = NodeType(*f);
     if (!isa<EventType>(fty)) {
-      Error(n.LOC(),
-            "trigger a non-event type " + PSTR(f) + " (" + PSTR(fty) + ").");
-      error_count++;
+      Error1(n.LOC(),
+             "trigger a non-event type " + PSTR(f) + " (" + PSTR(fty) + ").");
       continue;
     }
     if (auto id = AST::GetIdentifier(*f))
       pending_async.insert(InScopeName(id->name));
     else if (auto e = dyn_cast<AST::Expr>(f)) {
       if (e->op != "elemof") {
-        Error(n.LOC(), "expect a element-of operation but got " + e->op + ").");
-        error_count++;
+        Error1(n.LOC(),
+               "expect a element-of operation but got " + e->op + ").");
         continue;
       }
       auto bid = GetArrayBaseSymbol(*e);
@@ -585,17 +556,16 @@ bool SemaChecker::VisitNode(AST::Wait& n) {
   for (auto& f : n.GetTargets()) {
     auto fty = NodeType(*f);
     if (!isa<FutureType>(fty) && !isa<EventType>(fty)) {
-      Error(n.LOC(),
-            "wait for a non-async type " + PSTR(f) + " (" + PSTR(fty) + ").");
-      error_count++;
+      Error1(n.LOC(),
+             "wait for a non-async type " + PSTR(f) + " (" + PSTR(fty) + ").");
       continue;
     }
     if (auto id = AST::GetIdentifier(*f))
       waited_async.insert(InScopeName(id->name));
     else if (auto e = dyn_cast<AST::Expr>(f)) {
       if (e->op != "elemof") {
-        Error(n.LOC(), "expect a element-of operation but got " + e->op + ").");
-        error_count++;
+        Error1(n.LOC(),
+               "expect a element-of operation but got " + e->op + ").");
         continue;
       }
       auto bid = GetArrayBaseSymbol(*e);
@@ -617,21 +587,17 @@ bool SemaChecker::VisitNode(AST::Call& n) {
         continue;
       }
       // must be a scalar type
-      if (!CanYieldAnInteger(ty)) {
-        Error(n.LOC(),
-              "The " + Ordinal(count) + " template argument of type '" +
-                  PSTR(ty) +
-                  "` can not be used to instantiate the kernel function.");
-        error_count++;
-      }
+      if (!CanYieldAnInteger(ty))
+        Error1(n.LOC(),
+               "The " + Ordinal(count) + " template argument of type '" +
+                   PSTR(ty) +
+                   "` can not be used to instantiate the kernel function.");
       // fail if the template argument can not be evaluated as a compile-time
       // constant
-      if (!expr->Opts().HasVal() || !expr->Opts().GetVal()->IsNumeric()) {
-        Error(n.LOC(), "The " + Ordinal(count) +
-                           " template argument of type '" + PSTR(ty) +
-                           "` can not be evaluated at choreo compile time.");
-        error_count++;
-      }
+      if (!expr->Opts().HasVal() || !expr->Opts().GetVal()->IsNumeric())
+        Error1(n.LOC(), "The " + Ordinal(count) +
+                            " template argument of type '" + PSTR(ty) +
+                            "` can not be evaluated at choreo compile time.");
     }
   }
 
@@ -649,8 +615,7 @@ bool SemaChecker::VisitNode(AST::Call& n) {
           else
             choreo_unreachable(
                 "choreo assertion requires a string message as the second.");
-          Error(n.LOC(), "choreo assertion abort: " + msg);
-          error_count++;
+          Error1(n.LOC(), "choreo assertion abort: " + msg);
         }
       }
     }
@@ -743,23 +708,19 @@ bool SemaChecker::VisitNode(AST::Rotate& n) {
     }
     auto lty = NodeType(*n.ids->ValueAt(index - 1));
     auto rty = NodeType(*n.ids->ValueAt(index));
-    if (*lty != *rty) {
-      Error(n.LOC(), "swapping values of different types (" + PSTR(lty) +
-                         " vs. " + PSTR(rty));
-      error_count++;
-    }
+    if (*lty != *rty)
+      Error1(n.LOC(), "swapping values of different types (" + PSTR(lty) +
+                          " vs. " + PSTR(rty));
 
     auto lid = AST::GetIdentifier(*n.ids->ValueAt(index - 1));
     auto rid = AST::GetIdentifier(*n.ids->ValueAt(index));
     assert(lid && rid && "no identifier is found.");
     auto l_scope = GetScope(InScopeName(lid->name));
     auto r_scope = GetScope(InScopeName(rid->name));
-    if (l_scope != r_scope) {
-      Error(n.LOC(),
-            "swapping values defined in different scopes is forbidden (" +
-                InScopeName(lid->name) + " vs. " + InScopeName(rid->name));
-      error_count++;
-    }
+    if (l_scope != r_scope)
+      Error1(n.LOC(),
+             "swapping values defined in different scopes is forbidden (" +
+                 InScopeName(lid->name) + " vs. " + InScopeName(rid->name));
 
     index++;
   }
@@ -832,9 +793,8 @@ bool SemaChecker::VisitNode(AST::Return& n) {
   if (n.value) {
     auto vty = NodeType(*n.value);
     if (!(isa<SpannedType>(vty) || isa<ScalarType>(vty))) {
-      Error(n.LOC(),
-            "returning value with type '" + PSTR(vty) + "' is not supported.");
-      error_count++;
+      Error1(n.LOC(),
+             "returning value with type '" + PSTR(vty) + "' is not supported.");
       return false;
     }
   }
@@ -846,8 +806,7 @@ bool SemaChecker::ReportUnknownSymbol(const std::string& name,
                                       const location& loc, const char* file,
                                       int line) {
   if (isa<UnknownType>(GetSymbolType(name))) {
-    ++error_count;
-    Error(loc, "failed to obtain the type of " + name + ".");
+    Error1(loc, "failed to obtain the type of " + name + ".");
     VST_DEBUG(dbgs() << file << ":" << line << "\n");
     return false;
   }
@@ -858,8 +817,7 @@ bool SemaChecker::ReportUnknown(AST::Node& n, const char* file, int line,
                                 bool ignore_detail) {
   if (STR(n) == "_") return true; // ignore built-in unit iv.
   if (isa<UnknownType>(NodeType(n))) {
-    ++error_count;
-    Error(n.LOC(), "failed to obtain a type.");
+    Error1(n.LOC(), "failed to obtain a type.");
     VST_DEBUG(dbgs() << file << ":" << line << ", " << STR(n) << "\n");
     return false;
   }
@@ -870,8 +828,7 @@ bool SemaChecker::ReportUnknown(AST::Node& n, const char* file, int line,
   // dbgs() << "has-sufficient-info = " << NodeType(n)->HasSufficientInfo() <<
   // "\n";
   if (!ignore_detail && !NodeType(n)->HasSufficientInfo()) {
-    ++error_count;
-    Error(n.LOC(), "failed to obtain a type with sufficient info.");
+    Error1(n.LOC(), "failed to obtain a type with sufficient info.");
     VST_DEBUG(dbgs() << file << ":" << line << ", " << STR(n) << "("
                      << PSTR(NodeType(n)) << ")\n");
     return false;

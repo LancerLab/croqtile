@@ -111,14 +111,13 @@ private:
           if (inst_set.count(sto))
             for (const auto& inst : inst_set.at(sto)) oss << "\n\t\t" << inst;
 
-        Error(n.LOC(),
-              __internal__::GetStringFrom(sto) + " memory OUT OF BOUND!\n\t" +
-                  "In the scope " + SSTab().ScopeName() + ", compile-time " +
-                  __internal__::GetStringFrom(sto) +
-                  " memory:\n\tUsed: " + std::to_string(ct_tot_mem_usage[sto]) +
-                  " bytes, Limit: " + std::to_string(mem_usage_limit[sto]) +
-                  " bytes. With variables:" + oss.str());
-        error_count++;
+        Error1(n.LOC(),
+               __internal__::GetStringFrom(sto) + " memory OUT OF BOUND!\n\t" +
+                   "In the scope " + SSTab().ScopeName() + ", compile-time " +
+                   __internal__::GetStringFrom(sto) + " memory:\n\tUsed: " +
+                   std::to_string(ct_tot_mem_usage[sto]) +
+                   " bytes, Limit: " + std::to_string(mem_usage_limit[sto]) +
+                   " bytes. With variables:" + oss.str());
       }
     }
   }

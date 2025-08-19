@@ -160,10 +160,8 @@ bool FactorCodeGen::AfterVisitImpl(AST::Node& n) {
       std::ofstream tmpfs("./temp.sh");
       EmitScript(tmpfs);
       tmpfs.close();
-      if (!ExecuteScript("./temp.sh", "--compile-binary")) {
-        Error(n.LOC(), "failed to compile program.");
-        error_count++;
-      }
+      if (!ExecuteScript("./temp.sh", "--compile-binary"))
+        Error1(n.LOC(), "failed to compile program.");
       break;
     }
     case OutputKind::ShellScript: EmitScript(outs()); break;

@@ -89,7 +89,7 @@ ptr<Type> TypeInference::GetSymbolType(const location& loc,
   if (auto pty = SSTab().LookupSymbol(name)) {
     return pty;
   } else {
-    Error(loc, "symbol `" + name + "' is not associated with a type.");
+    Error1(loc, "symbol `" + name + "' is not associated with a type.");
     return nullptr;
   }
 }
