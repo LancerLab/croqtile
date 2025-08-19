@@ -1938,7 +1938,7 @@ call_expr
     : arith_builtin_func LPAREN value_list RPAREN {
         $$ = AST::Make<AST::Expr>(@1,
              AST::Make<AST::Call>(@1,
-             AST::Make<AST::Identifier>(@1, $1), $3, AST::Call::BIF | AST::Call::ARITH));
+             AST::Make<AST::Identifier>(@1, $1), $3, AST::Call::BIF | AST::Call::ARITH | AST::Call::EXPR));
       }
     | align_func LPAREN s_expr COMMA s_expr RPAREN {
         auto mn = AST::Make<AST::MultiValues>(@1, ", ");
