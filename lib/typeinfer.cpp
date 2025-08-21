@@ -427,6 +427,12 @@ bool TypeInference::Visit(AST::FunctionDecl& n) {
 
 bool TypeInference::Visit(AST::Parameter& p) {
   TraceEachVisit(p);
+
+  if (auto sty = dyn_cast<SpannedType>(p.type->GetType())) {
+    if (p.GetAttr() == ParamAttr::GLOBAL_INPUT)
+      sty->SetStorage(Storage::GLOBAL);
+  }
+
   // obtain its type
   SetNodeType(p, p.type->GetType());
 

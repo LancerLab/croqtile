@@ -659,6 +659,7 @@ bool TopsccCodeGen::Visit(AST::FunctionDecl& n) {
            << ssm.HostName(item.name) << ", " << UnScopedSizeExpr(*sty)
            << ", topsMemcpyHostToDevice));\n";
         ssm.MapHostSymbol(item.name + "__device", buf_sym);
+        global_buffers.insert(buf_sym);
       }
     }
   }
@@ -757,6 +758,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
              << sym_data << ", " << UnScopedSizeExpr(*sty)
              << ", topsMemcpyHostToDevice));\n";
         }
+        global_buffers.insert(buf_sym);
         return;
       }
 
@@ -843,6 +845,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       ssm.MapHostSymbol(InScopeName(sym) + "__device", buf_sym);
       ssm.MapHostSymbol(InScopeName(sym), buf_sym);
       ssm.MapDeviceSymbolIfNotExist(InScopeName(sym), sym);
+      global_buffers.insert(buf_sym);
     } else if (sto == Storage::SHARED || sto == Storage::LOCAL) {
       if (IsHost()) choreo_unreachable("error: shared/local var decl in host.");
       HandleSharedLocal();
@@ -918,6 +921,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
          << ety->ElemCount() << "));\n";
       ssm.MapHostSymbol(sym, buf_sym);
       ssm.MapDeviceSymbol(sym, n.name_str);
+      global_buffers.insert(buf_sym);
     } break;
     case Storage::SHARED:
     case Storage::LOCAL: {
@@ -952,6 +956,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
          << ", 0, 1));\n";
       ssm.MapHostSymbol(sym, buf_sym);
       ssm.MapDeviceSymbol(sym, n.name_str);
+      global_buffers.insert(buf_sym);
     } break;
     case Storage::SHARED:
     case Storage::LOCAL: {
@@ -1292,17 +1297,42 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   }
 
   // TODO: how to do tiling in host-side?
-  if (t_sty->GetStorage() == Storage::GLOBAL && IsHost()) {
+  if ((t_sty->GetStorage() == Storage::GLOBAL ||
+       IsChoreoInput(InScopeName(t_sym))) &&
+      IsHost()) {
     if (n.async) choreo_unreachable("not support host-side async dma yet");
     std::string bts = NameBaseType(t_sty->ElementType(), false);
-    auto buf_sym = t_sym + "__device";
-    auto buf_sym_from = f_sym + "__device";
+    std::string buf_sym_from;
+    std::string buf_sym;
+    std::string tops_dma_kind = "topsMemcpy";
+    if (global_buffers.count(f_sym + "__device")) {
+      buf_sym_from = f_sym + "__device";
+      tops_dma_kind.append("Device");
+    } else {
+      buf_sym_from = f_sym + ".data()";
+      if (f_sty->GetStorage() == Storage::GLOBAL)
+        tops_dma_kind.append("Device");
+      else
+        tops_dma_kind.append("Host");
+    }
+
+    if (global_buffers.count(t_sym + "__device")) {
+      buf_sym = t_sym + "__device";
+      tops_dma_kind.append("ToDevice");
+    } else {
+      buf_sym = t_sym + ".data()";
+      if (f_sty->GetStorage() == Storage::GLOBAL)
+        tops_dma_kind.append("ToDevice");
+      else
+        tops_dma_kind.append("ToHost");
+    }
+
     if (n.operation == ".copy") {
       if (SymbolToSymbol()) {
         // direct copy
         hs << h_indent << "choreo::abend_true(topsMemcpy(" << buf_sym << ", "
-           << buf_sym_from << ", " << UnScopedSizeExpr(*f_sty)
-           << ", topsMemcpyDeviceToDevice));\n";
+           << buf_sym_from << ", " << UnScopedSizeExpr(*f_sty) << ", "
+           << tops_dma_kind << "));\n";
       } else
         choreo_unreachable(
             "not support tiling chunkat in dma copy at host side for now");

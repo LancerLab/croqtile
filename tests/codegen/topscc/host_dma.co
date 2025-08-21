@@ -1,0 +1,21 @@
+// RUN: choreo -es -t topscc %s -o - | FileCheck --match-full-lines %s
+__co__ auto foo1(f32 [32] input) {
+  output = dma.copy input => global;
+  return output.data;
+}
+// CHECK: choreo::abend_true(topsMemcpy(output__buf____device, input.data(), 128ULL, topsMemcpyHostToDevice));
+__co__ auto foo2(global f32 [32] input) {
+  output = dma.copy input => global;
+  return output.data;
+}
+// CHECK: choreo::abend_true(topsMemcpy(output__buf____device, input.data(), 128ULL, topsMemcpyDeviceToDevice));
+__co__ auto foo3(f32 [32] ouput) {
+  f32 [32] input;
+  dma.copy input => ouput;
+}
+// CHECK: choreo::abend_true(topsMemcpy(ouput.data(), input__device, 128ULL, topsMemcpyDeviceToDevice));
+__co__ auto foo4(global f32 [32] ouput) {
+  f32 [32] input;
+  dma.copy input => ouput;
+}
+// CHECK: choreo::abend_true(topsMemcpy(ouput.data(), input__device, 128ULL, topsMemcpyDeviceToDevice));
