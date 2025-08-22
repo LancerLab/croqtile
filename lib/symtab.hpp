@@ -288,10 +288,10 @@ public:
 public:
   // utility functions
   const std::string UnScopedName(const std::string& name) const {
-    size_t pos = name.find_last_of(':');
+    size_t pos = name.find_last_of("::");
     if (pos != std::string::npos) {
-      // If found, return the substring after the last ":"
-      return name.substr(pos + 1); // skip the ":"
+      // If found, return the substring after the last "::"
+      return name.substr(pos + 1); // skip the "::"
     }
     return name; // Return the original string if ":" is not found
   }

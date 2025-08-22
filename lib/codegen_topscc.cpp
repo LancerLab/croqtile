@@ -3391,7 +3391,7 @@ const std::string TopsccCodeGen::CallSTR(AST::Call& n) const {
     oss << "<";
     size_t i = 0;
     for (auto& ta : n.template_args->AllValues())
-      oss << ((i++ == 0) ? "" : ", ") << ExprSTR(ta, IsHost());
+      oss << ((i++ == 0) ? "" : ", ") << OpExprSTR(ta, "", true, IsHost());
     oss << ">";
   }
 
@@ -3405,14 +3405,15 @@ const std::string TopsccCodeGen::CallSTR(AST::Call& n) const {
       auto mem_attr = TopsParamStorage(m_ty);
       if (!mem_attr.empty()) bts = mem_attr + " " + bts;
       if (!no_decay_spanview || IsHost())
-        oss << "(" << bts << "*)" << ExprSTR(a, IsHost());
+        oss << "(" << bts << "*)" << OpExprSTR(a, "", true, IsHost());
       else
         oss << "choreo::make_spanview<" << sty->Dims() << ">((" << bts << "*)"
-            << ExprSTR(a, IsHost()) << ", " << LSTR(sty->GetShape()) << ")";
+            << OpExprSTR(a, "", true, IsHost()) << ", " << LSTR(sty->GetShape())
+            << ")";
     } else if (n.IsArith())
-      oss << ExprSTR(a, IsHost());
+      oss << OpExprSTR(a, "", true, IsHost());
     else
-      oss << UnScopedName(ExprSTR(a, IsHost()));
+      oss << UnScopedExpr(OpExprSTR(a, "", true, IsHost()));
   }
   oss << ")";
 
