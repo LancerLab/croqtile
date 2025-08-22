@@ -222,10 +222,35 @@ void MemReuse::Initialize() {
 }
 
 void MemReuse::AnalyzeMemOffset() {
-  for (auto& [df_name, ctx] : DFCtxs()) ProtoType(df_name, ctx);
+  std::map<std::string, std::string> df_name_idx;
+  std::map<std::string, size_t> idx_count;
+  for (const auto& [df_name, _] : DFCtxs()) {
+    if (ma.have_dynamic_shape.count(df_name) &&
+        ma.have_dynamic_shape.at(df_name)) {
+      std::string co_func_name = GetFuncNameFromScopedName(df_name);
+      // TODO: check that no pb, but dynamic
+      if (df_name == co_func_name) continue;
+      if (!idx_count.count(co_func_name)) {
+        idx_count[co_func_name] = 0;
+      } else {
+        idx_count[co_func_name] += 1;
+      }
+      df_name_idx[df_name] = std::to_string(idx_count[co_func_name]);
+    }
+  }
+  for (auto& [df_name, ctx] : DFCtxs()) {
+    if (ma.have_dynamic_shape.count(df_name) &&
+        ma.have_dynamic_shape.at(df_name)) {
+      std::string co_func_name = GetFuncNameFromScopedName(df_name);
+      if (idx_count[co_func_name] == 0) df_name_idx[df_name] = "";
+    }
+    ProtoType(df_name, ctx,
+              (df_name_idx.count(df_name) ? df_name_idx.at(df_name) : ""));
+  }
 }
 
-void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx) {
+void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
+                         std::string idx_suffix) {
   std::string co_func_name = GetFuncNameFromScopedName(df_name);
   if (ma.have_dynamic_shape.count(df_name) &&
       ma.have_dynamic_shape.at(df_name)) {
@@ -246,8 +271,9 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx) {
         offset_args[sto].push_back("mr_offset" + buffer.buffer_id);
         if (!required_storage.count(sto)) {
           required_storage.insert(sto);
-          script.insert(script.begin(),
-                        "HeapSimulator::Chunks __co__" + STR(sto) + "_chunks;");
+          script.insert(script.begin(), "HeapSimulator::Chunks __co__" +
+                                            STR(sto) + "_chunks" + idx_suffix +
+                                            ";");
         }
         std::string buffer_size;
         bool buffer_size_is_str = false;
@@ -260,13 +286,13 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx) {
           choreo_unreachable("Unexpected type of buffer.size: " +
                              std::string(typeid(buffer.size).name()) +
                              "\n\twith buffer " + buffer.buffer_id);
-        script.push_back("__co__" + STR(sto) + "_chunks.push_back({" +
-                         (buffer_size_is_str ? "static_cast<size_t>(" : "") +
-                         buffer_size + (buffer_size_is_str ? ")" : "") + ", " +
-                         std::to_string(buffer.start_time) + ", " +
-                         std::to_string(buffer.end_time) + ", \"" +
-                         RegexReplaceAll(buffer.buffer_id, "::", "_") +
-                         "\"});");
+        script.push_back(
+            "__co__" + STR(sto) + "_chunks" + idx_suffix + ".push_back({" +
+            (buffer_size_is_str ? "static_cast<size_t>(" : "") + buffer_size +
+            (buffer_size_is_str ? ")" : "") + ", " +
+            std::to_string(buffer.start_time) + ", " +
+            std::to_string(buffer.end_time) + ", \"" +
+            RegexReplaceAll(buffer.buffer_id, "::", "_") + "\"});");
       }
     };
 
@@ -285,16 +311,19 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx) {
     GenPushBackScript(ctx.buffers);
     GenPushBackScript(ctx.dynamic_buffers);
 
-    script.push_back("HeapSimulator __co__heap_simulator;");
+    script.push_back("HeapSimulator __co__heap_simulator" + idx_suffix + ";");
     for (const auto& sto : required_storage) {
       std::string stos = STR(sto);
-      script.push_back("HeapSimulator::Result __co__" + stos +
-                       "_result = "
-                       "__co__heap_simulator.Allocate(__co__" +
-                       stos + "_chunks, 512);");
-      std::string spm_size_var = "__co__" + stos + "_spm_size";
-      script.push_back("unsigned " + spm_size_var + " = __co__" + stos +
-                       "_result.heap_size;");
+      std::string result = "__co__" + stos + "_result" + idx_suffix;
+      std::string offsets = "__co__" + stos + "_chunk_offsets" + idx_suffix;
+      script.push_back("HeapSimulator::Result " + result +
+                       " = "
+                       "__co__heap_simulator" +
+                       idx_suffix + ".Allocate(__co__" + stos + "_chunks" +
+                       idx_suffix + ", 512);");
+      std::string spm_size_var = "__co__" + stos + "_spm_size" + idx_suffix;
+      script.push_back("unsigned " + spm_size_var + " = " + result +
+                       ".heap_size;");
       // special case for RtCheck which emits after general RtCheck.
       size_t mem_capacity = CCtx().GetMemCapacity(sto);
       script.push_back("choreo::runtime_check(" + spm_size_var +
@@ -309,14 +338,15 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx) {
       else if (sto == Storage::SHARED)
         ctx.shared_spm_size = mem_capacity - AlignUp(total_event_size, 8);
       // generate offsets in array
-      script.push_back("unsigned long __co__" + stos + "_chunk_offsets[" +
+      script.push_back("unsigned long " + offsets + "[" +
                        std::to_string(offset_args.at(sto).size()) + "];");
       // TODO: need validation?
-      script.push_back("size_t __co__" + stos + "_chunk_idx = 0;");
-      script.push_back("for (const auto& [buffer_id, offset] : __co__" + stos +
-                       "_result.chunk_offsets)");
-      script.push_back("  __co__" + stos + "_chunk_offsets[__co__" + stos +
-                       "_chunk_idx++] = offset;");
+      script.push_back("size_t __co__" + stos + "_chunk_idx" + idx_suffix +
+                       " = 0;");
+      script.push_back("for (const auto& [buffer_id, offset] : " + result +
+                       ".chunk_offsets)");
+      script.push_back("  " + offsets + "[__co__" + stos + "_chunk_idx" +
+                       idx_suffix + "++] = offset;");
     }
     FCtx(co_func_name).SetMemReuseScript(df_name, script);
 

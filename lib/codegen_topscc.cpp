@@ -1141,11 +1141,14 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
   }
   const auto& offset_args =
       FCtx(fname).GetMemReuseOffsetArgs(SSTab().ScopeName());
+  std::string mr_idx_suffix = "";
+  if (cgi->GetFunctionTrait(fname).multiple_parallelby)
+    mr_idx_suffix = std::to_string(parallel_idx);
   if (offset_args.has_value())
     for (const auto& [sto, offsets] : offset_args.value())
       for (size_t idx = 0; idx < offsets.size(); ++idx)
         hs << ((i++ > 0) ? ", " : "") << "__co__" << STR(sto)
-           << "_chunk_offsets[" << idx << "]";
+           << "_chunk_offsets" << mr_idx_suffix << "[" << idx << "]";
 
   hs << ");\n";
 

@@ -263,7 +263,8 @@ private:
   bool Visit(AST::NamedVariableDecl&) override;
   void Initialize();
   void AnalyzeMemOffset();
-  void ProtoType(const std::string& dev_fname, DevFuncMemReuseCtx& ctx);
+  void ProtoType(const std::string& dev_fname, DevFuncMemReuseCtx& ctx,
+                 std::string idx_suffix);
   bool ValidateResult(const HeapSimulator::Result& res,
                       const HeapSimulator::Chunks& chunks);
   void ApplyMemOffset(AST::NamedVariableDecl& n, Storage sto);

@@ -275,7 +275,7 @@ private:
   std::vector<std::string> pld_checklist = {};
 
   std::set<std::string> global_buffers; // global buffers
-  bool emit_call = true; // emit the call statement
+  bool emit_call = true;                // emit the call statement
 
 private:
   void EmitFixedHostHead();
