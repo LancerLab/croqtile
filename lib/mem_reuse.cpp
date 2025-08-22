@@ -250,19 +250,23 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx) {
                         "HeapSimulator::Chunks __co__" + STR(sto) + "_chunks;");
         }
         std::string buffer_size;
-        if constexpr (std::is_same_v<decltype(buffer.size), std::string>)
+        bool buffer_size_is_str = false;
+        if constexpr (std::is_same_v<decltype(buffer.size), std::string>) {
+          buffer_size_is_str = true;
           buffer_size = UnScopedExpr(buffer.size);
-        else if constexpr (std::is_same_v<decltype(buffer.size), size_t>)
+        } else if constexpr (std::is_same_v<decltype(buffer.size), size_t>)
           buffer_size = UnScopedExpr(std::to_string(buffer.size));
         else
           choreo_unreachable("Unexpected type of buffer.size: " +
                              std::string(typeid(buffer.size).name()) +
                              "\n\twith buffer " + buffer.buffer_id);
-        script.push_back(
-            "__co__" + STR(sto) + "_chunks.push_back({" + buffer_size + ", " +
-            std::to_string(buffer.start_time) + ", " +
-            std::to_string(buffer.end_time) + ", \"" +
-            RegexReplaceAll(buffer.buffer_id, "::", "_") + "\"});");
+        script.push_back("__co__" + STR(sto) + "_chunks.push_back({" +
+                         (buffer_size_is_str ? "static_cast<size_t>(" : "") +
+                         buffer_size + (buffer_size_is_str ? ")" : "") + ", " +
+                         std::to_string(buffer.start_time) + ", " +
+                         std::to_string(buffer.end_time) + ", \"" +
+                         RegexReplaceAll(buffer.buffer_id, "::", "_") +
+                         "\"});");
       }
     };
 

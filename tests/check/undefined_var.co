@@ -1,0 +1,19 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ void foo(f32 [M, N] i, int x) {
+}
+
+__co__ void bar() {
+  x = M + 5;
+  println(x);
+}
+
+int main() {
+  bar();
+}
+
+// CHECK: error: The symbol is undefined.
+// CHECK: error: unable to inference the type from `x's initialization expression.
+// CHECK: error: symbol `x' is used before declaration.
+// CHECK: error: the argument of type 'invalid' is not supported for printing.
+// CHECK: Totally 4 errors have been detected.

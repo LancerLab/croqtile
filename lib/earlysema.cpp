@@ -237,6 +237,14 @@ bool EarlySemantics::Visit(AST::Expr& n) {
              (n.op == "%") || (n.op == "cdiv")) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
+    if (!lty) {
+      Error1(n.GetL()->LOC(), "The symbol is undefined.");
+      return false;
+    }
+    if (!rty) {
+      Error1(n.GetR()->LOC(), "The symbol is undefined.");
+      return false;
+    }
     bool is_mutable = IsMutable(*lty) || IsMutable(*rty);
     if (isa<NoValueType>(lty)) {
       Error1(n.GetL()->LOC(),
@@ -1609,7 +1617,8 @@ bool EarlySemantics::Visit(AST::DMA& n) {
     auto pcfg = dyn_cast<PadConfig>(n.config);
     if (!pcfg) {
       Error1(n.LOC(), "The DMA PAD config is incorrect. The correct form: "
-                      "dma.pad(.async)<{pad_highs}, {pad_lows}, {pad_mids}>.");
+                      "dma.pad(.async)<{pad_highs}, {pad_lows}, {pad_mids}, "
+                      "padding value>.");
     } else if (!((pcfg->pad_high.size() == pcfg->pad_low.size()) &&
                  (pcfg->pad_low.size() == pcfg->pad_mid.size()))) {
       Error1(n.LOC(),

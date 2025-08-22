@@ -104,7 +104,7 @@ bool SemaChecker::VisitNode(AST::Expr& n) {
     auto message = "Index " + STR(index) + " is out of bounds of the " +
                    Ordinal(subscription_level) + " dimension of array '" +
                    PSTR(arr_sym) + "', where the valid range is [0, " +
-                   std::to_string(bound) + ").";
+                   std::to_string(bound) + ")";
 
     EmitAssertion(asrt0, message, expr->LOC(), expr);
     EmitAssertion(asrt1, message, expr->LOC(), expr);
@@ -397,7 +397,7 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
 
     auto message = "DMA to-buffer is too small (" +
                    STR(f_shape.ElementCountValue()) + " > " +
-                   STR(t_shape.ElementCountValue()) + ").";
+                   STR(t_shape.ElementCountValue()) + ")";
     EmitAssertion(asrt, message, n.LOC(), n.from);
 
     bool emit_error = true;
@@ -520,7 +520,7 @@ bool SemaChecker::VisitNode(AST::ChunkAt& n) {
       auto message = "Index " + STR(index) + " is out of bounds of the " +
                      Ordinal(i + 1) + " dimension of array '" + PSTR(n.data) +
                      "', where the valid range is [0, " +
-                     std::to_string(bound) + ").";
+                     std::to_string(bound) + ")";
       EmitAssertion(asrt0, message, expr->LOC(), expr);
       EmitAssertion(asrt1, message, expr->LOC(), expr);
     }
@@ -762,20 +762,18 @@ bool SemaChecker::VisitNode(AST::Select& n) {
       Error1(il->LOC(), "The select factor `" + PSTR(il) +
                             "` is not in bound [0, " +
                             std::to_string(select_value_cnt) + ")");
-  } else if (isa<BoundedType>(NodeType(*n.select_factor))) {
-    // TODO: check
   } else {
     if (n.select_factor->Opts().HasVal()) {
       auto v = n.select_factor->Opts().GetVal();
       EmitAssertion(sbe::oc_ge(v, sbe::nu(0)),
                     "The select factor `" + PSTR(n.select_factor) +
-                        "` should be greater than or equal to 0.",
+                        "` should be greater than or equal to 0",
                     n.select_factor->LOC(), n.select_factor);
       EmitAssertion(
           sbe::oc_lt(v, sbe::nu(select_value_cnt)),
           "The select factor `" + PSTR(n.select_factor) +
               "` should be less than " + std::to_string(select_value_cnt) +
-              ", which is the count of values in the select statement.",
+              ", which is the count of values in the select statement",
           n.select_factor->LOC(), n.select_factor);
     }
   }

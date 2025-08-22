@@ -740,7 +740,8 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
         std::string sym_data = sym + ".data()";
         hs << h_indent << "auto " << sym
            << " = choreo::make_spandata<choreo::" << STR(sty->e_type) << ", "
-           << shape.Rank() << ">({" << ShapeSTR(shape) << "});\n";
+           << shape.Rank() << ">({" << ShapeSTR(shape, ", ", BaseType::U64)
+           << "});\n";
         if (n.init_value) {
           // support initialization of output
           hs << h_indent << "std::fill(" << sym_data << ", " << sym_data << "+"
@@ -1551,8 +1552,10 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     std::string t_mds_offset = "";
     Shape f_shape = f_sty->GetShape();
     Shape t_shape = t_sty->GetShape();
-    const auto& [f_buf_name, f_buf_expr] = f_buf;
-    const auto& [t_buf_name, t_buf_expr] = t_buf;
+    const auto& f_buf_name = f_buf.first;
+    const auto& f_buf_expr = f_buf.second;
+    const auto& t_buf_name = t_buf.first;
+    const auto& t_buf_expr = t_buf.second;
     if (!no_linear_opt && opt_to_linear_copy != DMA_OP::none) {
       if (TileToSymbol()) {
         assert(opt_to_linear_copy == DMA_OP::src);
@@ -1721,7 +1724,6 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         choreo_unreachable("unexpected situation.");
       }
     } else if (n.operation == ".pad") {
-      // note: linear copy optimization is not processed on dma.pad
       auto pad_config = cast<PadConfig>(n.GetConfig());
       ds << d_indent << "unsigned int __pad_low_" << f_buf_name << "[] = {"
          << DelimitedString(pad_config->pad_low) << "};\n";
@@ -1738,7 +1740,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
                                                           : BaseType::F32),
           IsHost());
 
-      if (SymbolToSymbol()) {
+      auto Pad = [&]() -> void {
         ds << d_indent;
         if (!event_name.empty()) ds << "tops::event " + event_name + " = ";
         ds << "tops::pad" << (fty->IsAsync() ? "_async" : "") << "(*"
@@ -1749,7 +1751,9 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         if (!event_name.empty())
           ds << d_indent << future_name << ".set_event(" << event_name
              << ");\n";
-      } else if (TileToSymbol()) {
+      };
+
+      auto SlicePad = [&]() -> void {
         static int s_cnt = 0;
         auto off_name = "__slice_offset" + std::to_string(s_cnt++) + "__" +
                         f_sym + "_2_" + t_sym;
@@ -1772,6 +1776,15 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
         if (!event_name.empty())
           ds << d_indent << future_name << ".set_event(" << event_name
              << ");\n";
+      };
+
+      if (SymbolToSymbol()) {
+        Pad();
+      } else if (TileToSymbol()) {
+        if (opt_to_linear_copy == DMA_OP::src && !no_linear_opt)
+          Pad();
+        else
+          SlicePad();
       } else {
         choreo_unreachable(
             "only support dma.pad with (symbol=>symbol), (tile=>symbol).");
@@ -2518,8 +2531,8 @@ void TopsccCodeGen::EmitHostRuntimeCheck() {
   }
 
   for (const auto& ar : FCtx(fname).GetAssertions()) {
-    hs << h_indent << "choreo::runtime_check(" << ValueSTR(ar.expr) << ", \""
-       << ar.message << ", " << ar.loc << "\");\n";
+    hs << h_indent << "choreo::runtime_check(" << ValueSTR(ar.expr, true)
+       << ", \"" << ar.message << ", " << ar.loc << "\");\n";
   }
 }
 
@@ -2856,24 +2869,28 @@ bool TopsccCodeGen::CompileWithScript(const std::string& action) {
 }
 
 // TODO: eliminate the need of the value replacement?
-// Currently, it is guaranteed that ValueSTR can be used safely and direcctly.
-const std::string TopsccCodeGen::ValueSTR(const ValueItem& vi) const {
-  return OpValueSTR(vi, "", true);
+// Currently, it is guaranteed that ValueSTR can be used safely and directly.
+const std::string TopsccCodeGen::ValueSTR(const ValueItem& vi,
+                                          bool LL_suffix) const {
+  return OpValueSTR(vi, "", true, LL_suffix);
 }
 
 const std::string TopsccCodeGen::ValueListSTR(const ValueList& vl,
-                                              std::string sep) const {
+                                              std::string sep,
+                                              bool LL_suffix) const {
   std::ostringstream oss;
   if (!vl.empty()) {
-    oss << ValueSTR(vl[0]);
-    for (unsigned i = 1; i < vl.size(); ++i) oss << sep << ValueSTR(vl[i]);
+    oss << ValueSTR(vl[0], LL_suffix);
+    for (unsigned i = 1; i < vl.size(); ++i)
+      oss << sep << ValueSTR(vl[i], LL_suffix);
   }
   return oss.str();
 }
 
 const std::string TopsccCodeGen::OpValueSTR(const ValueItem& vi,
                                             const std::string& parent_op,
-                                            const bool is_left_child) const {
+                                            const bool is_left_child,
+                                            bool LL_suffix) const {
   auto WrapParen = [&](const std::string& s, const std::string& cur_op) {
     if (Operator::NeedParen(cur_op, parent_op, is_left_child))
       return "(" + s + ")";
@@ -2892,21 +2909,25 @@ const std::string TopsccCodeGen::OpValueSTR(const ValueItem& vi,
     if (iv >= (int64_t)std::numeric_limits<int32_t>::max() ||
         iv <= (int64_t)std::numeric_limits<int32_t>::min())
       return PSTR(vi) + "LL";
+    else if (LL_suffix)
+      return PSTR(vi) + "LL";
     else
       return PSTR(vi);
   } else if (auto bv = VIBool(vi))
     return PSTR(vi);
-  else if (auto sv = VISym(vi))
-    return UnScopedExpr(SSMName(sv.value(), IsHost()));
-  else if (auto uo = VIUop(vi)) {
+  else if (auto sv = VISym(vi)) {
+    auto res = UnScopedExpr(SSMName(sv.value(), IsHost()));
+    if (LL_suffix) return "static_cast<long long>(" + res + ")";
+    return res;
+  } else if (auto uo = VIUop(vi)) {
     std::string op = STR(uo->GetOpCode());
-    std::string res = op + OpValueSTR(uo->GetOperand(), op, false);
+    std::string res = op + OpValueSTR(uo->GetOperand(), op, false, LL_suffix);
     return WrapParen(res, op);
   } else if (auto bo = VIBop(vi)) {
     if (bo->GetOpCode() == OpCode::ADD) {
       if (auto rv = VIInt(bo->GetRight()); rv && rv.value() < 0) {
-        std::string res = OpValueSTR(bo->GetLeft(), "-", true) + " - " +
-                          std::to_string(-rv.value());
+        std::string res = OpValueSTR(bo->GetLeft(), "-", true, LL_suffix) +
+                          " - " + std::to_string(-rv.value());
         if (rv.value() >= (int64_t)std::numeric_limits<int32_t>::max() ||
             rv.value() <= (int64_t)std::numeric_limits<int32_t>::min())
           res += "LL";
@@ -2914,14 +2935,15 @@ const std::string TopsccCodeGen::OpValueSTR(const ValueItem& vi,
       }
     }
     std::string op = STR(bo->GetOpCode());
-    std::string res = OpValueSTR(bo->GetLeft(), op, true) + " " + op + " " +
-                      OpValueSTR(bo->GetRight(), op, false);
+    std::string res = OpValueSTR(bo->GetLeft(), op, true, LL_suffix) + " " +
+                      op + " " +
+                      OpValueSTR(bo->GetRight(), op, false, LL_suffix);
     return WrapParen(res, op);
   } else if (auto to = VITop(vi)) {
     std::string op = "?";
     std::string res = OpValueSTR(to->GetPred(), op, true) + " ? " +
-                      OpValueSTR(to->GetLeft(), op, true) + " : " +
-                      OpValueSTR(to->GetRight(), op, false);
+                      OpValueSTR(to->GetLeft(), op, true, LL_suffix) + " : " +
+                      OpValueSTR(to->GetRight(), op, false, LL_suffix);
     return WrapParen(res, op);
   } else
     choreo_unreachable("unsupported value.");

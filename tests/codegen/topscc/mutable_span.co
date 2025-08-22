@@ -8,4 +8,4 @@ __co__ void foo(int M, f32 [3, 2, 12] data) {
 }
 
 // CHECK: warning: Dimensions could be inconsistent between DMA 'from[0](::foo::M)' v.s. 'to[0](3))
-// CHECK: choreo::runtime_check((M * 2 <= 6), "DMA to-buffer is too small ((::foo::M * 2) > 6)
+// CHECK: choreo::runtime_check((static_cast<long long>(M) * 2LL <= 6LL), "DMA to-buffer is too small ((::foo::M * 2) > 6)

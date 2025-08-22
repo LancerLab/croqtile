@@ -69,8 +69,8 @@ int main() {
   std::cout << "Test Passed with PF: " << PF << "\n";
 }
 
-// CHECK:  choreo::runtime_check((PF > 0), "The 1st bound item of parallelby is invalid: should be greater than 0
-// CHECK:  choreo::runtime_check((N / PF != 0), "zero is detected for the 1st dim of the mdspan inside the with-in statement
+// CHECK:  choreo::runtime_check((static_cast<long long>(PF) > 0LL), "The 1st bound item of parallelby is invalid: should be greater than 0
+// CHECK:  choreo::runtime_check((static_cast<long long>(N) / static_cast<long long>(PF) != 0LL), "zero is detected for the 1st dim of the mdspan inside the with-in statement
 
 // CHECK:  dim3 __ele_add_gdims0(1, 1, 1);
 // CHECK:  dim3 __ele_add_bdims0(PF, 1, 1);

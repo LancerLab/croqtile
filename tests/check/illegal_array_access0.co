@@ -14,10 +14,10 @@ __co__ auto check_spanned_arr(f32 [2,4] a) {
   }
 }
 
-// CHECK: error: Index -1 is out of bounds of the 2nd dimension of array 'b', where the valid range is [0, 3).
+// CHECK: error: Index -1 is out of bounds of the 2nd dimension of array 'b', where the valid range is [0, 3)
 // CHECK:         dma.copy a => b[1][-1].chunkat(_, p);
 // CHECK:                            ^
-// CHECK: error: Index 5 is out of bounds of the 1st dimension of array 'b', where the valid range is [0, 2).
+// CHECK: error: Index 5 is out of bounds of the 1st dimension of array 'b', where the valid range is [0, 2)
 // CHECK:         dma.copy b[5][1].chunkat(_, p) => a;
 // CHECK:                    ^
 // CHECK: error: Invalid array access: expected 2 dimensions, but 1 were used.
@@ -43,19 +43,19 @@ __co__ void check_event_arr() {
    }
 }
 
-// CHECK: error: Index 10 is out of bounds of the 1st dimension of array 'e', where the valid range is [0, 3).
+// CHECK: error: Index 10 is out of bounds of the 1st dimension of array 'e', where the valid range is [0, 3)
 // CHECK:         trigger e[10];
 // CHECK:                   ^
-// CHECK: error: Index -1 is out of bounds of the 1st dimension of array 'e', where the valid range is [0, 3).
+// CHECK: error: Index -1 is out of bounds of the 1st dimension of array 'e', where the valid range is [0, 3)
 // CHECK:         trigger e[-1];
 // CHECK:                   ^
 // CHECK: error: Invalid array access: expected 1 dimensions, but 2 were used.
 // CHECK:         trigger e[1][1];
 // CHECK:                 ^
-// CHECK: error: Index 4 is out of bounds of the 1st dimension of array 'e', where the valid range is [0, 3).
+// CHECK: error: Index 4 is out of bounds of the 1st dimension of array 'e', where the valid range is [0, 3)
 // CHECK:         wait e[4];
 // CHECK:                ^
-// CHECK: error: Index -1 is out of bounds of the 1st dimension of array 'e', where the valid range is [0, 3).
+// CHECK: error: Index -1 is out of bounds of the 1st dimension of array 'e', where the valid range is [0, 3)
 // CHECK:         wait e[-1];
 // CHECK:                ^
 // CHECK: error: Invalid array access: expected 1 dimensions, but 2 were used.

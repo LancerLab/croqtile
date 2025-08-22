@@ -12,7 +12,7 @@ __co__ void foo(int xx) {
   }
 }
 
-// TODO: check `idx + 1`
-
-// CHECK: choreo::runtime_check((xx >= 0), "The select factor `xx` should be greater than or equal to 0., {{.*}}");
-// CHECK: choreo::runtime_check((xx < 3), "The select factor `xx` should be less than 3, which is the count of values in the select statement., {{.*}}");
+// CHECK: choreo::runtime_check((static_cast<long long>(idx) + 1LL >= 0LL), "The select factor ` (idx + 1) ` should be greater than or equal to 0, {{.*}}");
+// CHECK: choreo::runtime_check((static_cast<long long>(idx) + 1LL < 3LL), "The select factor ` (idx + 1) ` should be less than 3, which is the count of values in the select statement, {{.*}}");
+// CHECK: choreo::runtime_check((static_cast<long long>(xx) >= 0LL), "The select factor `xx` should be greater than or equal to 0, {{.*}}");
+// CHECK: choreo::runtime_check((static_cast<long long>(xx) < 3LL), "The select factor `xx` should be less than 3, which is the count of values in the select statement, {{.*}}");
