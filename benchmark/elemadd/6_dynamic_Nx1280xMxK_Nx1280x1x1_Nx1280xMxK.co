@@ -1,0 +1,54 @@
+#define I 2
+#define J 1280
+#define K 3
+#define L 3
+
+#define NUM_BLOCK 2
+// TODO: make it 12
+#define NUM_THREAD 8 
+
+__co__ auto ele_add(f32 [N0, J, N1, N2] lhs, f32 [N0, J] rhs) {
+  f32 [lhs.span] out;
+  parallel p by NUM_BLOCK {
+    lfs = dma.copy.async lhs.chunkat(_,p,_,_) => shared;
+    rfs = dma.copy.async rhs.chunkat(_,p) => shared;
+    wait lfs, rfs;
+    shared f32 [lfs.span] sout;
+    parallel q by NUM_THREAD {
+      lfl = dma.copy.async lfs.chunkat(_,q,_,_) => local;
+      rfl = dma.copy.async rfs.chunkat(_,q) => local;
+      wait lfl, rfl;
+      local f32 [lfl.span] lout;
+      foreach index = {i,j,k,l} in lfl.span
+        lout.at(index) = lfl.data.at(index) + rfl.data.at(i,j);
+      dma.copy lout => sout.chunkat(_,q,_,_);
+      dma.copy sout => out.chunkat(_,p,_,_);
+    }
+  }
+  return out;
+}
+
+
+int main() {
+  auto a = choreo::make_spandata<choreo::f32>(I, J, K, L);
+  auto b = choreo::make_spandata<choreo::f32>(I, J);
+  a.fill_random(-1.0, 1.0);
+  b.fill_random(-1.0, 1.0);
+
+  auto res = ele_add(a.view(), b.view());
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k) {
+        for (size_t l = 0; l < res.shape()[3]; ++l) {
+          if (a[i][j][k][l] + b[i][j] != res[i][j][k][l]) {
+            std::cout << "i: " << i << ", j: " << j << ", k: " << k << ", l: " << l << "\n";
+            std::cout << a[i][j][k][l] << " + " << b[i][j] << " != " << res[i][j][k][l] << "\n";
+            choreo::choreo_assert(a[i][j][k][l] + b[i][j] == res[i][j][k][l], "values are not equal.");
+          }
+        }
+      }
+
+  std::cout << "Passed.\n";
+}
