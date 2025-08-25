@@ -1,0 +1,44 @@
+#define I 64
+#define J 100
+#define K 256
+
+#define NUM_BLOCK 2
+// TODO: make it 12
+#define NUM_THREAD 10
+
+__co__ auto ele_add(f32 [I, J, K] lhs, f32 [I, J, K] rhs) {
+  f32 [lhs.span] out;
+  parallel p by NUM_BLOCK, q by NUM_THREAD {
+    foreach {r,s} in [2, 8] {
+      lfl = dma.copy.async lhs.chunkat(p,q#r,s) => local;
+      rfl = dma.copy.async rhs.chunkat(p,q#r,s) => local;
+      wait lfl, rfl;
+      local f32 [lfl.span] lout;
+      foreach index in lfl.span
+        lout.at(index) = lfl.data.at(index) + rfl.data.at(index);
+      dma.copy lout => out.chunkat(p,q#r,s);
+    }
+  }
+  return out;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::f32>(I, J, K);
+  auto b = choreo::make_spandata<choreo::f32>(I, J, K);
+  a.fill_random(-1.0, 1.0);
+  b.fill_random(-1.0, 1.0);
+
+  auto res = ele_add(a.view(), b.view());
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k) {
+        if (a[i][j][k] + b[i][j][k] != res[i][j][k]) {
+          std::cout << a[i][j][k] << " + " << b[i][j][k] << " != " << res[i][j][k] << "\n";
+          choreo::choreo_assert(a[i][j][k] + b[i][j][k] == res[i][j][k], "values are not equal.");
+        }
+      }
+
+  std::cout << "Passed.\n";
+}
