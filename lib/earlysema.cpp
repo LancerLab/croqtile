@@ -29,8 +29,8 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
   } else if (isa<AST::Parameter>(&n)) {
     in_decl = true;
     allow_named_dim = true; // tolerate repeated symbols inside mdspan params
-  } else if (isa<AST::Assignment>(&n)) {
-    donot_check_id = true;
+  } else if (auto a = dyn_cast<AST::Assignment>(&n)) {
+    if (!a->AssignToDataElement()) assign_id = a->GetName();
   } else if (isa<AST::ForeachBlock>(&n) || isa<AST::WhileBlock>(&n)) {
     inside_loop = true;
   }
@@ -71,7 +71,7 @@ bool EarlySemantics::AfterVisitImpl(AST::Node& n) {
     in_decl = false;
     allow_named_dim = false;
   } else if (isa<AST::Assignment>(&n)) {
-    donot_check_id = false;
+    assign_id = "";
   } else if (isa<AST::ForeachBlock>(&n) || isa<AST::WhileBlock>(&n)) {
     inside_loop = false;
   }
@@ -237,14 +237,8 @@ bool EarlySemantics::Visit(AST::Expr& n) {
              (n.op == "%") || (n.op == "cdiv")) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
-    if (!lty) {
-      Error1(n.GetL()->LOC(), "The symbol is undefined.");
-      return false;
-    }
-    if (!rty) {
-      Error1(n.GetR()->LOC(), "The symbol is undefined.");
-      return false;
-    }
+    if (!lty || !rty)
+      choreo_unreachable("expect the both types to be not nullptr.");
     bool is_mutable = IsMutable(*lty) || IsMutable(*rty);
     if (isa<NoValueType>(lty)) {
       Error1(n.GetL()->LOC(),
@@ -1182,7 +1176,7 @@ bool EarlySemantics::Visit(AST::Identifier& n) {
   TraceEachVisit(n);
 
   // to check in parent node
-  if (donot_check_id) return true;
+  if (n.name == assign_id) return true;
 
   if (in_decl) {
     if (allow_named_dim) {

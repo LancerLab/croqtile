@@ -4,6 +4,7 @@ __co__ void foo(f32 [M, N] i, int x) {
 }
 
 __co__ void bar() {
+  x = 10;
   x = M + 5;
   println(x);
 }
