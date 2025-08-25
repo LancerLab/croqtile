@@ -1,0 +1,42 @@
+#define I 32
+#define J 2
+#define K 768
+
+#define NUM_BLOCK 2
+// TODO: make it 12
+#define NUM_THREAD 8 
+
+__co__ auto sigmoid(f32 [I, ?, K] lhs) {
+  f32 [lhs.span] out;
+  parallel p by NUM_BLOCK, q by NUM_THREAD {
+    foreach r in [1, 16] {
+      lfl = dma.copy lhs.chunkat(p#q,r) => local;
+      local f32 [lfl.span] lout;
+      foreach index in lfl.span
+        lout.at(index) = 1.0f / (1.0f + __exp(0.0f - lfl.data.at(index)));
+      dma.copy lout => out.chunkat(p#q,r);
+    }
+  }
+  return out;
+}
+
+
+int main() {
+  auto a = choreo::make_spandata<choreo::f32>(I, J, K);
+  a.fill_random(-1.0, 1.0);
+
+  auto res = sigmoid(a.view());
+
+  // verfication
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k) {
+        auto sm = 1.0f / (1.0f + expf(-a[i][j][k]));
+        if (fabs(sm - res[i][j][k]) > 0.001f) {
+          std::cout << sm << " != " << res[i][j][k] << "\n";
+          choreo::choreo_assert(sm == res[i][j][k], "values are not equal.");
+        }
+      }
+
+  std::cout << "Passed.\n";
+}
