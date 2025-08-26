@@ -140,6 +140,13 @@ inline void PrintSubscriptions(std::ostream& os, const std::string prefix,
   }
 }
 
+std::string GetAbsPath(const std::filesystem::path& cwd, const std::string& relative_path) {
+  std::filesystem::path rel_path(relative_path);
+  std::filesystem::path abs_path = cwd / rel_path;
+  abs_path = std::filesystem::weakly_canonical(abs_path).parent_path();
+  return abs_path.string();
+}
+
 void GenerateSubscriptions(std::ostream& os, const std::string prefix,
                            const std::string suffix,
                            const std::vector<size_t>& dims) {
@@ -2791,7 +2798,11 @@ option_detect() {
   if (use_pic) os << " -fPIC";
   if (verbose) os << " -v"; // if it requires to be verbose
   // always enclose
-  os << " ${EXTRA_TARGET_CFLAGS}\"";
+  os << " ${EXTRA_TARGET_CFLAGS}";
+  std::filesystem::path cwd = std::filesystem::current_path();
+  auto input_file = OptionRegistry::GetInstance().GetInputFileName();
+  auto input_abs_path = GetAbsPath(cwd.string(), input_file);
+  os << " -I" << input_abs_path << "\"";
   os << "\noption_detect";
   if (use_sim) os << "\nexport INTERNAL_GCU_SIM=LIBRA";
   os << "\nexport LD_LIBRARY_PATH=${TOPSCC_LIB}:${LD_LIBRARY_PATH}\n\n";
