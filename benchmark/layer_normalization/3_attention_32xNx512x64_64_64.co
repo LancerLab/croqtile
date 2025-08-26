@@ -1,0 +1,115 @@
+#define I 32
+#define J 2
+#define K 512
+#define L 64
+
+#define NUM_BLOCK 2
+// TODO: make it 12
+#define NUM_THREAD 8 
+
+//#define __STATIC_SHAPE__
+#ifdef __STATIC_SHAPE__
+#define N0 J
+#endif
+
+__co__ auto layer_norm(f32 [I, N0, K, L] lhs, f32 [L] scale, f32 [L] bias) {
+  f32 [lhs.span] out;
+  parallel p by NUM_BLOCK, q by NUM_THREAD {
+    tilings : [2, 16];
+    n = p # q;
+
+    // FIXME: when the DMA is placed into foreach, buffer allocation fails for dynamic shape
+    sl = dma.copy.async scale => local;
+    bl = dma.copy.async bias => local;
+
+    wait sl, bl;
+    foreach r = {rh, rc} in tilings {
+      lfl = dma.copy.async lhs.chunkat(n,r,_) => local;
+      wait lfl;
+
+      local f32 [lfl.span] lout;
+      foreach bhc in lfl.span[(0),(1),(2)] {
+
+        // TODO: support
+        //   local f32 mean{0.0f}, variance{0.0f}, std_div;
+        local f32 mean, variance, std_div;
+        mean = 0.0f;
+        foreach s in [lfl.span(3)]
+          mean += lfl.data.at(bhc, s);
+        mean /= lhs.span(3);
+
+        variance = 0.0f;
+        foreach s in [lfl.span(3)] {
+          f32 diff = lfl.data.at(bhc, s) - mean;
+          variance += diff * diff;
+        }
+        variance /= lhs.span(3);
+        std_div = __sqrt(variance);
+
+        foreach s in [lfl.span(3)] {
+          local f32 normalized;
+          normalized = (lfl.data.at(bhc, s) - mean) / std_div;
+          lout.at(bhc, s) = sl.data.at(s) * normalized + bl.data.at(s);
+        }
+      }
+      dma.copy lout => out.chunkat(n,r,_);
+    }
+  }
+  return out;
+}
+
+int main() {
+  auto input = choreo::make_spandata<choreo::f32>(I, J, K, L);
+  auto scale = choreo::make_spandata<choreo::f32>(L);
+  auto bias = choreo::make_spandata<choreo::f32>(L);
+  input.fill_random(-1.0, 1.0);
+  scale.fill_random(-1.0, 1.0);
+  bias.fill_random(-1.0, 1.0);
+
+  auto res = layer_norm(input.view(), scale.view(), bias.view());
+
+  // verfication
+  auto out = choreo::make_spandata<choreo::f32>(I, J, K, L);
+  for (int i = 0; i < I; ++i)
+    for (int c = 0; c < J; ++c)
+      for (int h = 0; h < K; ++h) {
+        // Calculate mean across ALL elements of this sample
+        float mean = 0.0f;
+
+        for (int w = 0; w < L; ++w) {
+          mean += input[i][c][h][w];
+        }
+
+        mean /= L;
+
+        // Calculate variance
+        float variance = 0.0f;
+        for (int w = 0; w < L; ++w) {
+          float diff = input[i][c][h][w] - mean;
+          variance += diff * diff;
+        }
+
+        variance /= L;
+        float std_div = std::sqrt(variance);
+
+        // Normalize and apply scale/shift
+        for (int w = 0; w < L; ++w) {
+          float normalized = (input[i][c][h][w] - mean) / std_div;
+          out[i][c][h][w] = scale[w] * normalized + bias[w];
+        }
+      }
+
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k)
+        for (size_t l = 0; l < res.shape()[3]; ++l) {
+        auto sm = out[i][j][k][l];
+        if (fabs(sm - res[i][j][k][l]) > 1e-3) {
+          std::cout << "i: " << i << ", j: " << j << ", k: " << k << ", l: " << l << "\n";
+          std::cout << sm << " != " << res[i][j][k][l] << "\n";
+          choreo::choreo_assert(sm == res[i][j][k][l], "values are not equal.");
+        }
+      }
+
+  std::cout << "Passed.\n";
+}
