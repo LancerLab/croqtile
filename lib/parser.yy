@@ -467,6 +467,7 @@ dsl_function
         $$->f_decl.ret_type = $2;
         $$->f_decl.params = $5;
         $$->stmts = $8;
+        symtab.Reset();
       }
     ;
 

@@ -3,7 +3,11 @@
 void test3(std::string name, std::function<spanned_data<float, 3>(spanned_view<float, 3UL>)> f, std::vector<int> dims, std::vector<size_t> td) {
   auto input = choreo::make_spandata<choreo::f32>(dims[0], dims[1], dims[2]);
   input.fill_random(-1.0f, 1.0f);
+
+  auto start = std::chrono::high_resolution_clock::now();
   auto res = f(input.view());
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
   for (size_t i = 0; i < input.shape()[0]; ++i)
     for (size_t j = 0; j < input.shape()[1]; ++j)
@@ -19,12 +23,18 @@ void test3(std::string name, std::function<spanned_data<float, 3>(spanned_view<f
         }
       }
   std::cout << name << " is PASS.\n";
+  std::cout << "Execution time: " << duration.count() << " microseconds" << std::endl;
 }
 
 void test4(std::string name, std::function<spanned_data<float, 4>(spanned_view<float, 4UL>)> f, std::vector<int> dims, std::vector<size_t> td) {
   auto input = choreo::make_spandata<choreo::f32>(dims[0], dims[1], dims[2], dims[3]);
   input.fill_random(-1.0f, 1.0f);
+
+  auto start = std::chrono::high_resolution_clock::now();
   auto res = f(input.view());
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
   for (size_t i = 0; i < input.shape()[0]; ++i)
     for (size_t j = 0; j < input.shape()[1]; ++j)
       for (size_t k = 0; k < input.shape()[2]; ++k)
@@ -40,4 +50,5 @@ void test4(std::string name, std::function<spanned_data<float, 4>(spanned_view<f
           }
         }
   std::cout << name << " is PASS.\n";
+  std::cout << "Execution time: " << duration.count() << " microseconds" << std::endl;
 }

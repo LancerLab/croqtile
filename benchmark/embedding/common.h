@@ -29,7 +29,11 @@ void test(std::string name, std::function<spanned_data<float, 3>(spanned_view<in
   auto weight = choreo::make_spandata<choreo::f32>(wds[0], wds[1]);
   weight.fill_random(-1.0f, 1.0f);
 
+  auto start = std::chrono::high_resolution_clock::now();
   auto res = f(input.view(), weight.view());
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+  
   auto res_cpu = embedding_cpu(input.data(), weight.data(), ids[0], ids[1], wds[0], wds[1]);
 
   auto nearlyEqual = [](float a, float b,
@@ -54,4 +58,5 @@ void test(std::string name, std::function<spanned_data<float, 3>(spanned_view<in
       }
   delete[] res_cpu;
   std::cout << name << " is PASS.\n";
+  std::cout << "Execution time: " << duration.count() << " microseconds" << std::endl;
 }
