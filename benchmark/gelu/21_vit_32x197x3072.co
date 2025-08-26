@@ -1,0 +1,19 @@
+#include "choreo.h"
+#include "common.h"
+
+__co__ auto GELU(f32 [32, 197, 3072] i) {
+  f32 [i.span] o;
+  parallel p by 4 : local {
+    foreach {x, y} in [8, 197] {
+      l = dma.copy i.chunkat(p#x, y, _) => local;
+      foreach idx in [l.span]
+        l.data.at(idx) = __gelu(l.data.at(idx));
+      dma.copy l.data => o.chunkat(p#x, y, _);
+    }
+  }
+  return o;
+}
+
+int main() {
+  test3("GELU", GELU, {32, 197, 3072});
+}

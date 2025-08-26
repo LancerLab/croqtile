@@ -1,0 +1,25 @@
+#include "choreo.h"
+#include "common.h"
+
+#ifdef __STATIC_SHAPE__
+#define batch_size 100
+#define height 32
+#define width 32
+#endif
+
+__co__ auto GELU(f32 [batch_size, 1280, height, width] i) {
+  f32 [i.span] o;
+  parallel p by 4 : local {
+    foreach {b, x} in [batch_size, 16] {
+      l = dma.copy i.chunkat(b, p#x, _, _) => local;
+      foreach idx in [l.span]
+        l.data.at(idx) = __gelu(l.data.at(idx));
+      dma.copy l.data => o.chunkat(b, p#x, _, _);
+    }
+  }
+  return o;
+}
+
+int main() {
+  test4("GELU", GELU, {100, 1280, 32, 32});
+}

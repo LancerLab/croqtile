@@ -140,7 +140,8 @@ inline void PrintSubscriptions(std::ostream& os, const std::string prefix,
   }
 }
 
-std::string GetAbsPath(const std::filesystem::path& cwd, const std::string& relative_path) {
+std::string GetAbsPath(const std::filesystem::path& cwd,
+                       const std::string& relative_path) {
   std::filesystem::path rel_path(relative_path);
   std::filesystem::path abs_path = cwd / rel_path;
   abs_path = std::filesystem::weakly_canonical(abs_path).parent_path();

@@ -1,0 +1,33 @@
+#include "choreo.h"
+#include "common.h"
+
+__co__ auto EMBEDDING(s32 [64, 256] id, f32 [20000, 512] w) {
+  bs = id.span(0);
+  tokens = id.span(1);
+  vs = w.span(0);
+  hidden_size = w.span(1);
+
+  f32 [bs, tokens, hidden_size] o;
+  
+  parallel p by 2 : shared {
+    shared f32 [bs / #p, tokens, hidden_size] _o;
+    parallel q by 4 : local {
+      foreach {n} in [bs / #p / #q] {
+        local s32 [tokens] _id;
+        dma.copy id.chunkat(p#q#n, _).span_as(tokens) => _id;
+        foreach idx in [tokens] {
+          v = _id.at(idx);
+          assert(v >= 0, "expect v >= 0");
+          assert(v < vs, "expect v < vs");
+          dma.copy w.subspan(1, hidden_size).at(v, 0).span_as(1, 1, hidden_size) => _o.chunkat(q#n, idx, _);
+        }
+      }
+    }
+    dma.copy _o => o.chunkat(p, _, _);
+  }
+  return o;
+}
+
+int main() {
+  test("EMBEDDING", EMBEDDING, {64, 256}, {20000, 512});
+}

@@ -1,0 +1,19 @@
+#include "choreo.h"
+#include "common.h"
+
+__co__ auto TRANSPOSE(f32 [16, 16, 1024, 64] i) {
+  f32 [i.span(0), i.span(2), i.span(1), i.span(3)] o;
+  parallel p by 2 : shared {
+    parallel q by 4 : local {
+      foreach {x, y} in [i.span(0)/#p/#q, i.span(1)] {
+        l = dma.transp<0, 2, 1, 3> i.chunkat(p#q#x, y, _, _) => local;
+        dma.copy l.data => o.chunkat(p#q#x, _, y, _);
+      }
+    }
+  }
+  return o;
+}
+
+int main() {
+  test4("TRANSPOSE", TRANSPOSE, {16, 16, 1024, 64}, {0, 2, 1, 3});
+}

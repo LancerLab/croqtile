@@ -279,9 +279,9 @@ Each operator includes:
 **Format**: [input_tensor] --> [output_tensor] (dimension permutation)
 
 - case1: [32, 512, 768] --> [32, 768, 512] (BERT)
-- case2: [128, 128, 28, 28] --> [128, 128, 28, 28] (CNN)
+- case2: [128, 128, 28, 28] --> [128, 28, 28, 128] (CNN)
 - case3: [32, num_heads, 512, 64] --> [32, 512, num_heads, 64] (Attention)
-- case4: [batch_size, 256, 56, 56] --> [batch_size, 256, 56, 56] (Dynamic)
+- case4: [batch_size, 256, 56, 56] --> [batch_size, 56, 56, 256] (Dynamic)
 - case5: [batch_size, 1280, height, width] --> [batch_size, height, width, 1280] (Dynamic)
 - case6: [128, channels, 112, 112] --> [128, 112, 112, channels] (Dynamic)
 - case7: [32, 197, embed_dim] --> [32, embed_dim, 197] (Dynamic)
@@ -296,7 +296,7 @@ Each operator includes:
 - case16: [64, 100, 256] --> [100, 64, 256] (LSTM)
 - case17: [128, 96, 112, 112] --> [128, 112, 112, 96] (MobileNet)
 - case18: [64, 256, 56, 56] --> [64, 56, 56, 256] (ResNet)
-- case19: [32, 512, 2048] --> [32, 512, 2048] (Transformer)
+- case19: [32, 512, 2048] --> [32, 2048, 512] (Transformer)
 - case20: [16, 512, 32, 32] --> [16, 32, 32, 512] (U-Net)
 - case21: [32, 3, 224, 224] --> [32, 224, 224, 3] (ViT)
 

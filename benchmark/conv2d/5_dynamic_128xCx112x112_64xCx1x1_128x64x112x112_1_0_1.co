@@ -1,0 +1,49 @@
+#include "choreo.h"
+#include "common.h"
+
+#ifdef __STATIC_SHAPE__
+#define attn_h 4
+#define attn_w 4
+#endif
+
+#define _padding 0
+__co__ auto CONV2D(f32 [32, 512, attn_h, attn_w] i, f32 [1024, 512, 1, 1] w, int stride, int padding, int dilation) {
+  in_h = i.span(2);
+  in_w = i.span(3);
+  batch_size = i.span(0);
+  channel_in = i.span(1);
+  channel_out = w.span(0);
+  out_h = (in_h + 2 * padding - dilation * (w.span(2) - 1) - 1) / stride + 1;
+  out_w = (in_w + 2 * padding - dilation * (w.span(3) - 1) - 1) / stride + 1;
+
+  f32 [batch_size, channel_out, out_h, out_w] o;
+  
+  assert(_padding == padding, "expect the padding values to be equal.");
+
+  parallel p by 2 : shared {
+    parallel q by 4 : local {
+      foreach {co, n} in [channel_out, batch_size / #p / #q] {
+        local f32 [out_h, out_w] Y{0.0f};
+        foreach ci in [channel_in] {
+          il = dma.pad<{0, 0, _padding, _padding}, {0, 0, _padding, _padding}, {0, 0, 0, 0}, 0.0f> i.chunkat(p#q#n, ci, _, _) => local;
+          ws = dma.copy w.chunkat(co, ci, _, _) => local;
+          foreach {ho, wo} in [out_h, out_w] {
+            f32 sum = 0.0f;
+            foreach {hw, ww} in [w.span(2), w.span(3)] {
+              hi = ho * stride + hw * dilation;
+              wi = wo * stride + ww * dilation;
+              sum += il.data.at(0, 0, hi, wi) * ws.data.at(0, 0, hw, ww);
+            }
+            Y.at(ho, wo) += sum;
+          }
+        }
+        dma.copy Y.span_as(1, 1, out_h, out_w) => o.chunkat(p#q#n, co, _, _);
+      }
+    }
+  }
+  return o;
+}
+
+int main() {
+  test("CONV2D", CONV2D, {32, 512, 4, 4}, {1024, 512, 1, 1}, 1, 0, 1);
+}

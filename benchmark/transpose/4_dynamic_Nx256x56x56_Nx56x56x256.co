@@ -1,0 +1,23 @@
+#include "choreo.h"
+#include "common.h"
+
+#ifdef __STATIC_SHAPE__
+#define batch_size 32
+#endif
+
+__co__ auto TRANSPOSE(f32 [batch_size, 256, 56, 56] i) {
+  f32 [i.span(0), i.span(2), i.span(3), i.span(1)] o;
+  parallel p by 2 : shared {
+    parallel q by 4 : local {
+      foreach {x, y} in [i.span(0)/#p/#q, i.span(1)] {
+        l = dma.transp<0, 2, 3, 1> i.chunkat(p#q#x, y, _, _) => local;
+        dma.copy l.data => o.chunkat(p#q#x, _, _, y);
+      }
+    }
+  }
+  return o;
+}
+
+int main() {
+  test4("TRANSPOSE", TRANSPOSE, {32, 256, 56, 56}, {0, 2, 3, 1});
+}

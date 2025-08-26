@@ -1,0 +1,23 @@
+#include "choreo.h"
+#include "common.h"
+
+#ifdef __STATIC_SHAPE__
+#define vocab_size 1023
+#endif
+
+__co__ auto GELU(f32 [32, 512, vocab_size] i) {
+  f32 [i.span] o;
+  parallel p by 4 : local {
+    foreach {x, y} in [8, 512] {
+      l = dma.copy i.chunkat(p#x, y, _) => local;
+      foreach idx in [l.span]
+        l.data.at(idx) = __gelu(l.data.at(idx));
+      dma.copy l.data => o.chunkat(p#x, y, _);
+    }
+  }
+  return o;
+}
+
+int main() {
+  test3("GELU", GELU, {32, 512, 1023});
+}

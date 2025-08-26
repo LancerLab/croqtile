@@ -1,0 +1,23 @@
+#include "choreo.h"
+#include "common.h"
+
+#ifdef __STATIC_SHAPE__
+#define vocab_size 300
+#endif
+
+__co__ auto TRANSPOSE(f32 [32, 512, vocab_size] i) {
+  f32 [i.span(0), i.span(2), i.span(1)] o;
+  parallel p by 2 : shared {
+    parallel q by 4 : local {
+      foreach {x, y} in [i.span(0)/#p/#q, 128] {
+        l = dma.transp<0, 2, 1> i.chunkat(p#q#x, y, _) => local;
+        dma.copy l.data => o.chunkat(p#q#x, _, y);
+      }
+    }
+  }
+  return o;
+}
+
+int main() {
+  test3("TRANSPOSE", TRANSPOSE, {32, 512, 300}, {0, 2, 1});
+}
