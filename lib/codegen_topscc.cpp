@@ -2803,7 +2803,12 @@ option_detect() {
   std::filesystem::path cwd = std::filesystem::current_path();
   auto input_file = OptionRegistry::GetInstance().GetInputFileName();
   auto input_abs_path = GetAbsPath(cwd.string(), input_file);
-  os << " -I" << input_abs_path << "\"";
+  os << " -I" << input_abs_path;
+  for (auto inc_path : CCtx().GetIncPaths())
+    os << " -I" << inc_path;
+  for (auto lib_path : CCtx().GetLibPaths())
+    os << " -L" << lib_path;
+  os << "\"";
   os << "\noption_detect";
   if (use_sim) os << "\nexport INTERNAL_GCU_SIM=LIBRA";
   os << "\nexport LD_LIBRARY_PATH=${TOPSCC_LIB}:${LD_LIBRARY_PATH}\n\n";

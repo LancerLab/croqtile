@@ -316,6 +316,8 @@ private:
 
 private:
   std::unordered_map<std::string, std::string> cl_macros; // defined macros
+  std::vector<std::string> include_paths;
+  std::vector<std::string> library_paths;
   std::vector<std::string> source_lines;
 
 public:
@@ -448,6 +450,22 @@ public:
 
   std::unordered_map<std::string, std::string>& GetCLMacros() {
     return cl_macros;
+  }
+
+  const std::vector<std::string>& GetIncPaths() const {
+    return include_paths;
+  }
+
+  std::vector<std::string>& GetIncPaths() {
+    return include_paths;
+  }
+
+  const std::vector<std::string>& GetLibPaths() const {
+    return library_paths;
+  }
+
+  std::vector<std::string>& GetLibPaths() {
+    return library_paths;
   }
 
   void SetShowSourceLocation(bool s) { show_source_loc = s; }
