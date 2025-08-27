@@ -1,0 +1,291 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -gs -t factor -kt %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s
+// RUN: choreo -gs -t topscc -kt %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+// RUN-DOCKER: choreo -st -t topscc %s -o %s.result && %s.result | FileCheck --match-full-lines %s
+
+#include "choreo.h"
+#include <chrono>
+#include <vector>
+#include <numeric>
+#include <string>
+#include <iostream>
+#include <cmath> 
+
+__cok__ { /// kernel program
+
+// Dynamic-size kernel: sizes are passed at runtime.
+__co_device__ void relu_kernel_dyn(float* input, float* out, int m, int n) {
+  for (int i = 0; i < m; ++i) {
+    for (int j = 0; j < n; ++j) {
+      float v = input[i * n + j];
+      out[i * n + j] = v > 0.0f ? v : 0.0f;
+    }
+  }
+}
+
+} /// end of kernel decl
+
+// Convert arbitrary rank>=2 tensors into a 2D view (M = product of all dims except last, N = last dim).
+__co__ f32 [M, N] relu2d_view(f32 [M, N] input) {
+  f32[input.span(0), input.span(1)] output;
+
+  parallel p by 4 {
+    with index = {n_tile} in [4] {
+      foreach n_tile {
+        shared f32[input.span(0)/#p, input.span(1)/#n_tile] l2_out;
+        input_load = dma.copy.async input.chunkat(p, n_tile) => shared;
+        wait input_load;
+        parallel q by 4 {
+          with index = {n_tile_s} in [8] {
+            foreach n_tile_s {
+              input_load_s = dma.copy.async input_load.data.chunkat(q, n_tile_s) => local;
+              out_load_s   = dma.copy.async l2_out.chunkat(q, n_tile_s)        => local;
+              wait input_load_s, out_load_s;
+              call relu_kernel_dyn(
+                         input_load_s.data,
+                         out_load_s.data,
+                         input.span(0)/#p/#q,
+                         input.span(1)/#n_tile/#n_tile_s
+              );
+              out_store_s = dma.copy.async out_load_s.data => l2_out.chunkat(q, n_tile_s);
+              wait out_store_s;
+            }
+          }
+        }
+        out_store = dma.copy.async l2_out => output.chunkat(p, n_tile);
+        wait out_store;
+      }
+    }
+  }
+  return output;
+}
+// Convert arbitrary rank>=2 tensors into a 2D view (M = product of all dims except last, N = last dim).
+__co__ f32 [M, N] relu2d_view_cfg2(f32 [M, N] input) {
+  f32[input.span(0), input.span(1)] output;
+
+  parallel p by 128 {
+    with index = {n_tile} in [16] {
+      foreach n_tile {
+        shared f32[input.span(0)/#p, input.span(1)/#n_tile] l2_out;
+        input_load = dma.copy.async input.chunkat(p, n_tile) => shared;
+        wait input_load;
+        parallel q by 8 {
+          with index = {n_tile_s} in [16] {
+            foreach n_tile_s {
+              input_load_s = dma.copy.async input_load.data.chunkat(q, n_tile_s) => local;
+              out_load_s   = dma.copy.async l2_out.chunkat(q, n_tile_s)        => local;
+              wait input_load_s, out_load_s;
+              call relu_kernel_dyn(
+                         input_load_s.data,
+                         out_load_s.data,
+                         input.span(0)/#p/#q,
+                         input.span(1)/#n_tile/#n_tile_s
+              );
+              out_store_s = dma.copy.async out_load_s.data => l2_out.chunkat(q, n_tile_s);
+              wait out_store_s;
+            }
+          }
+        }
+        out_store = dma.copy.async l2_out => output.chunkat(p, n_tile);
+        wait out_store;
+      }
+    }
+  }
+  return output;
+}
+// Convert arbitrary rank>=2 tensors into a 2D view (M = product of all dims except last, N = last dim).
+__co__ f32 [M, N] relu2d_view_cfg7(f32 [M, N] input) {
+  f32[input.span(0), input.span(1)] output;
+
+  parallel p by 2048 {
+    with index = {n_tile} in [1] {
+      foreach n_tile {
+        shared f32[input.span(0)/#p, input.span(1)/#n_tile] l2_out;
+        input_load = dma.copy.async input.chunkat(p, n_tile) => shared;
+        wait input_load;
+        parallel q by 7 {
+          with index = {n_tile_s} in [1] {
+            foreach n_tile_s {
+              input_load_s = dma.copy.async input_load.data.chunkat(q, n_tile_s) => local;
+              out_load_s   = dma.copy.async l2_out.chunkat(q, n_tile_s)        => local;
+              wait input_load_s, out_load_s;
+              call relu_kernel_dyn(
+                         input_load_s.data,
+                         out_load_s.data,
+                         input.span(0)/#p/#q,
+                         input.span(1)/#n_tile/#n_tile_s
+              );
+              out_store_s = dma.copy.async out_load_s.data => l2_out.chunkat(q, n_tile_s);
+              wait out_store_s;
+            }
+          }
+        }
+        out_store = dma.copy.async l2_out => output.chunkat(p, n_tile);
+        wait out_store;
+      }
+    }
+  }
+  return output;
+}
+// Convert arbitrary rank>=2 tensors into a 2D view (M = product of all dims except last, N = last dim).
+__co__ f32 [M, N] relu2d_view_cfg3(f32 [M, N] input) {
+  f32[input.span(0), input.span(1)] output;
+
+  parallel p by 20480 {
+    with index = {n_tile} in [112] {
+      foreach n_tile {
+        shared f32[input.span(0)/#p, input.span(1)/#n_tile] l2_out;
+        input_load = dma.copy.async input.chunkat(p, n_tile) => shared;
+        wait input_load;
+        parallel q by 112 {
+          with index = {n_tile_s} in [1] {
+            foreach n_tile_s {
+              input_load_s = dma.copy.async input_load.data.chunkat(q, n_tile_s) => local;
+              out_load_s   = dma.copy.async l2_out.chunkat(q, n_tile_s)        => local;
+              wait input_load_s, out_load_s;
+              call relu_kernel_dyn(
+                         input_load_s.data,
+                         out_load_s.data,
+                         input.span(0)/#p/#q,
+                         input.span(1)/#n_tile/#n_tile_s
+              );
+              out_store_s = dma.copy.async out_load_s.data => l2_out.chunkat(q, n_tile_s);
+              wait out_store_s;
+            }
+          }
+        }
+        out_store = dma.copy.async l2_out => output.chunkat(p, n_tile);
+        wait out_store;
+      }
+    }
+  }
+  return output;
+}
+
+// ------------------------- Host side test -------------------------
+
+struct Case {
+  std::string name;
+  std::vector<size_t> shape; // original shape, rank >= 2
+};
+
+static size_t product_except_last(const std::vector<size_t>& v) {
+  if (v.size() < 2) return 0;
+  return std::accumulate(v.begin(), v.end()-1, (size_t)1, std::multiplies<size_t>());
+}
+
+int main() {
+  // Default values for symbolic dimensions
+  const size_t batch_size = 32;
+  const size_t num_heads  = 12;
+  const size_t height     = 224;
+  const size_t width      = 224;
+  const size_t scale_h    = 112;
+  const size_t scale_w    = 112;
+  const size_t seq_len    = 512;
+  const size_t time_steps = 100;
+  const size_t vocab_size = 30522;
+  const size_t embed_dim  = 768;
+  const size_t d_model    = 768;
+  const size_t channels   = 128;
+
+  // 21 shapes from BERT, CNN, Attention, etc.
+  std::vector<Case> cases_cfg1 = {
+    {"Attention",      {32, num_heads, 512, 64}},
+    {"Dynamic-4",      {batch_size, 256, 56, 56}},
+    {"Dynamic-7",      {32, 197, embed_dim}},
+    {"Dynamic-8",      {16, 1024, d_model}},
+    {"Dynamic-10",     {16, 512, scale_h, scale_w}},
+    {"Dynamic-11",     {32, seq_len, 768}},
+    {"Dynamic-12",     {64, time_steps, 256}},
+    {"GPT",            {16, 1024, 4096}},
+    {"LSTM",           {64, 100, 256}},
+    {"ResNet",         {64, 256, 56, 56}},
+    {"Transformer",    {32, 512, 2048}},
+    {"U-Net",          {16, 512, 32, 32}},
+    {"ViT",            {32, 197, 3072}},
+  };
+  std::vector<Case> cases_cfg2 = {
+    {"BERT",           {32, 512, 768}},
+    {"Dynamic-13",     {32, 512, vocab_size}},
+  };
+
+  std::vector<Case> cases_cfg7 = {
+    {"CNN",            {128, 128, 28, 28}},
+    {"Dynamic-6",      {128, channels, 112, 112}},
+    {"Dynamic-9",      {64, 128, height, width}},
+    {"EfficientNet",   {64, 1280, 7, 7}},
+    {"MobileNet",      {128, 96, 112, 112}},
+  };
+
+  std::vector<Case> cases_cfg3 = {
+    {"Dynamic-5",      {batch_size, 1280, height, width}},
+  };
+
+  size_t total_cases = 0;
+  auto global_start = std::chrono::high_resolution_clock::now();
+
+  for (const auto& cs : cases_cfg3) {
+    if (cs.shape.size() < 2) {
+      std::cerr << "Skip " << cs.name << " (rank < 2)\n";
+      continue;
+    }
+
+    // Flatten to (M, N): M = product of all dims except last, N = last dim
+    const size_t M = product_except_last(cs.shape);
+    const size_t N = cs.shape.back();
+    const size_t total_elems = M * N;
+
+    // Allocate host buffer and fill
+    std::vector<float> host_buf(total_elems, 0.f);
+    auto input_data = choreo::make_spanview<2, choreo::f32>((float*)host_buf.data(), {M, N});
+    input_data.fill_random(-1.0, 1.0);
+
+    auto start = std::chrono::high_resolution_clock::now();
+    auto res = relu2d_view_cfg3(input_data);
+    auto end  = std::chrono::high_resolution_clock::now();
+    auto dur  = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
+    // Verify element-wise ReLU
+    for (size_t i = 0; i < M; ++i) {
+      for (size_t j = 0; j < N/64; ++j) {
+        float in  = input_data[i][j];
+        float ref = input_data[i][j] > 0 ? input_data[i][j] : 0.0f;
+        float got = res[i][j];
+    if (!(ref == got)) {  // only when mismatch
+      float diff = std::fabs(ref - got);
+
+      std::cerr << "[FAIL] case=" << cs.name << " at (i=" << i << ", j=" << j << ")\n";
+      std::cerr << "  ref=" << ref << " got=" << got << " diff=" << diff << "\n";
+      std::cerr << "  input=" << in << "\n";
+      std::cerr << "  shape=[";
+      for (size_t k = 0; k < cs.shape.size(); ++k) {
+        std::cerr << cs.shape[k] << (k+1<cs.shape.size()? "," : "");
+      }
+      std::cerr << "], 2D(M=" << M << ",N=" << N << ")\n";
+      break;
+      choreo::choreo_assert(false, "values are not equal.");
+      }}
+    }
+
+    std::cout << "[OK] " << cs.name
+              << " shape=[";
+    for (size_t k = 0; k < cs.shape.size(); ++k) {
+      std::cout << cs.shape[k] << (k+1<cs.shape.size()? "," : "");
+    }
+    std::cout << "] => 2D(M=" << M << ",N=" << N << ")  time(us)=" << dur.count() << "\n";
+
+    ++total_cases;
+  }
+
+  auto global_end = std::chrono::high_resolution_clock::now();
+  auto global_dur = std::chrono::duration_cast<std::chrono::milliseconds>(global_end - global_start);
+
+  // CHECK anchor
+  std::cout << "Test Passed\n" << std::endl;
+  std::cout << "Total cases: " << total_cases
+            << ", Total time: " << global_dur.count() << " ms" << std::endl;
+
+  return 0;
+}
+

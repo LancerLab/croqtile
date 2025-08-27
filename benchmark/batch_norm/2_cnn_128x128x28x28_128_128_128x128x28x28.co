@@ -1,0 +1,266 @@
+#include "choreo.h"
+#include <chrono>
+#include <iostream>
+#include <vector>
+#include <cmath>
+
+/* ---------------- Problem dims (CNN) ---------------- */
+#define N 128   
+#define C 128   
+#define H 28    
+#define W 28    
+
+/* ---------------- Parallel config ---------------- */
+#ifndef NUM_BLOCK
+  #define NUM_BLOCK 2
+#endif
+#ifndef NUM_THREAD
+  #define NUM_THREAD 8
+#endif
+
+#ifndef BN_EPS
+  #define BN_EPS 1e-5f
+#endif
+
+/* ============================================================
+ *                         Device kernels
+ * ============================================================ */
+__cok__ {
+  // Reduce mean/var over the LAST dimension:
+  // in:  [rows, cols] (cols reduced)
+  // mean/var: [rows]
+  __co_device__ void reduce_lastdim_mean_var(float* in, float* mean, float* var,
+                                             int rows, int cols) {
+    for (int r = 0; r < rows; ++r) {
+      float s = 0.f, sq = 0.f;
+      int base = r * cols;
+      for (int c = 0; c < cols; ++c) {
+        float v = in[base + c];
+        s  += v;
+        sq += v * v;
+      }
+      float m = s / cols;
+      float vv = sq / cols - m * m;
+      mean[r] = m;
+      var [r] = vv;
+    }
+  }
+
+  // Apply BN along last dim:
+  // in/out: [rows, cols]
+  // mean/var/gamma/beta: [rows]
+  __co_device__ void apply_bn_lastdim(float* in, float* out,
+                                      const float* mean, const float* var,
+                                      const float* gamma, const float* beta,
+                                      int rows, int cols) {
+    for (int r = 0; r < rows; ++r) {
+      float m = mean[r];
+      float rs = 1.0f / sqrtf(var[r] + BN_EPS);
+      float g = gamma[r];
+      float b = beta[r];
+      int base = r * cols;
+      for (int c = 0; c < cols; ++c) {
+        float x = in[base + c];
+        out[base + c] = ((x - m) * rs) * g + b;
+      }
+    }
+  }
+} // __cok__
+
+/* ============================================================
+ *                         Operator
+ * BN over batch (N): Input [N,C,H,W], Gamma [C], Beta [C] -> Output [N,C,H,W]
+ * Steps:
+ *   1) transpose to [C, H, W, N]
+ *   2) for each (c,h,w) reduce over N to get mean[c,h,w], var[c,h,w]
+ *   3) apply ((x-mean)/sqrt(var+eps))*gamma[c] + beta[c]
+ * ============================================================ */
+__co__ f32 [N, C, H, W] ele_batch_norm(f32 [N, C, H, W] inp, f32 [C] gamma, f32 [C] beta) {
+  f32 [N, C, H, W] out;
+
+  // Statistics for each (c,h,w)
+  f32 [C, H, W] mean;
+  f32 [C, H, W] var;
+
+  // Channel tiling: with NUM_BLOCK=2, NUM_THREAD=8 => C/NUM_BLOCK=64, each q-tile handles 1 channel row
+  #define C_BLOCKS   64
+  #define C_PER_QBLK  8
+
+  /* ---------------- Pass 1: compute mean/var over N ---------------- */
+  parallel p by NUM_BLOCK {
+    // [N,C,H,W] -> [C/NUM_BLOCK, H, W, N]
+    tc_all = dma.transp<1, 2, 3, 0> inp.chunkat(_, p, _, _) => shared;
+
+    // Iterate all H and W; for each (h,w) reduce over N for all C in this block
+    with index = {h_tile} in [H] {
+      foreach h_tile {
+        with index = {w_tile} in [W] {
+          foreach w_tile {
+            ss_all = dma.copy.async tc_all.chunkat(_, h_tile, w_tile, _) => shared; // [C/NUM_BLOCK, 1, 1, N]
+            ms_all = dma.copy.async mean   .chunkat(p, h_tile, w_tile)   => shared; // [C/NUM_BLOCK, 1, 1]
+            vs_all = dma.copy.async var    .chunkat(p, h_tile, w_tile)   => shared; // [C/NUM_BLOCK, 1, 1]
+            wait ss_all, ms_all, vs_all;
+
+            // Split C/NUM_BLOCK rows into NUM_THREAD-sized tiles
+            with index = {c_blk} in [C_PER_QBLK] {
+              foreach c_blk {
+                ss = dma.copy.async ss_all.chunkat(c_blk, _, _, _) => shared; // [NUM_THREAD, 1, 1, N]
+                ms = dma.copy.async ms_all.chunkat(c_blk, _, _)    => shared; // [NUM_THREAD, 1, 1]
+                vs = dma.copy.async vs_all.chunkat(c_blk, _, _)    => shared; // [NUM_THREAD, 1, 1]
+                wait ss, ms, vs;
+
+                parallel q by NUM_THREAD {
+                  il = dma.copy.async ss.chunkat(q, _, _, _) => local; // [1,1,1,N]
+                  ml = dma.copy.async ms.chunkat(q, _, _)    => local; // [1,1,1] -> rows=1
+                  vl = dma.copy.async vs.chunkat(q, _, _)    => local; // [1,1,1]
+                  wait il, ml, vl;
+
+                  // rows = 1, cols = N
+                  call reduce_lastdim_mean_var(
+                    il.data, ml.data, vl.data,
+                    il.span(0) * il.span(1) * il.span(2), // 1
+                    il.span(3)                              // N
+                  );
+
+                  dma.copy ml => ms.chunkat(q, _, _);
+                  dma.copy vl => vs.chunkat(q, _, _);
+                }
+
+                dma.copy ms => ms_all.chunkat(c_blk, _, _);
+                dma.copy vs => vs_all.chunkat(c_blk, _, _);
+              }
+            }
+
+            dma.copy ms_all => mean.chunkat(p, h_tile, w_tile);
+            dma.copy vs_all => var .chunkat(p, h_tile, w_tile);
+          }
+        }
+      }
+    }
+  }
+
+  /* --------------- Pass 2: apply BN with gamma/beta --------------- */
+  parallel p by NUM_BLOCK {
+    ic_all = dma.transp<1, 2, 3, 0> inp.chunkat(_, p, _, _) => shared; // [C/NUM_BLOCK, H, W, N]
+    oc_all = dma.copy.async           ic_all                 => shared; // [C/NUM_BLOCK, H, W, N]
+    gs_all = dma.copy.async gamma.chunkat(p)                 => shared; // [C/NUM_BLOCK]
+    bs_all = dma.copy.async beta .chunkat(p)                 => shared; // [C/NUM_BLOCK]
+    wait oc_all, gs_all, bs_all;
+
+    with index = {h_tile} in [H] {
+      foreach h_tile {
+        with index = {w_tile} in [W] {
+          foreach w_tile {
+            is_all = dma.copy.async ic_all.chunkat(_, h_tile, w_tile, _) => shared; // [C/NUM_BLOCK,1,1,N]
+            os_all = dma.copy.async oc_all.chunkat(_, h_tile, w_tile, _) => shared; // [C/NUM_BLOCK,1,1,N]
+            ms_all = dma.copy.async mean  .chunkat(p, h_tile, w_tile)    => shared; // [C/NUM_BLOCK,1,1]
+            vs_all = dma.copy.async var   .chunkat(p, h_tile, w_tile)    => shared; // [C/NUM_BLOCK,1,1]
+            wait is_all, os_all, ms_all, vs_all;
+
+            with index = {c_blk} in [8] {
+              foreach c_blk {
+                is = dma.copy.async is_all.chunkat(c_blk, _, _, _) => shared; // [NUM_THREAD,1,1,N]
+                os = dma.copy.async os_all.chunkat(c_blk, _, _, _) => shared; // [NUM_THREAD,1,1,N]
+                ms = dma.copy.async ms_all.chunkat(c_blk, _, _)    => shared; // [NUM_THREAD,1,1]
+                vs = dma.copy.async vs_all.chunkat(c_blk, _, _)    => shared; // [NUM_THREAD,1,1]
+                gs = dma.copy.async gs_all.chunkat(c_blk)          => shared; // [NUM_THREAD]
+                bs = dma.copy.async bs_all.chunkat(c_blk)          => shared; // [NUM_THREAD]
+                wait is, os, ms, vs, gs, bs;
+
+                parallel q by 8 {
+                  il = dma.copy.async is.chunkat(q, _, _, _) => local; // [1,1,1,N]
+                  ol = dma.copy.async os.chunkat(q, _, _, _) => local; // [1,1,1,N]
+                  ml = dma.copy.async ms.chunkat(q, _, _)    => local; // [1,1,1]
+                  vl = dma.copy.async vs.chunkat(q, _, _)    => local; // [1,1,1]
+                  gl = dma.copy.async gs.chunkat(q)          => local; // [1]
+                  bl = dma.copy.async bs.chunkat(q)          => local; // [1]
+                  wait il, ol, ml, vl, gl, bl;
+
+                  // rows = 1 (one channel row), cols = N
+                  call apply_bn_lastdim(
+                    il.data, ol.data,
+                    ml.data, vl.data, gl.data, bl.data,
+                    il.span(0) * il.span(1) * il.span(2), // 1
+                    il.span(3)                           // N
+                  );
+
+                  dma.copy ol => os.chunkat(q, _, _, _);
+                }
+
+                dma.copy os => os_all.chunkat(c_blk, _, _, _);
+              }
+            }
+
+            dma.copy os_all => oc_all.chunkat(_, h_tile, w_tile, _);
+          }
+        }
+      }
+    }
+
+    // Write back with inverse transpose: [C,H,W,N] -> [N,C,H,W]
+    dma.transp<3, 0, 1, 2> oc_all => out.chunkat(_, p, _, _);
+  }
+
+  return out;
+}
+
+/* =============================== Host test =============================== */
+int main() {
+  auto x  = choreo::make_spandata<choreo::f32>(N, C, H, W);
+  auto gm = choreo::make_spandata<choreo::f32>(C);
+  auto bt = choreo::make_spandata<choreo::f32>(C);
+
+  x.fill_random(-1.0, 1.0);
+  gm.fill_random(0.5, 1.5);
+  bt.fill_random(-0.5, 0.5);
+
+  auto t0 = std::chrono::high_resolution_clock::now();
+  auto y  = ele_batch_norm(x.view(), gm.view(), bt.view());
+  auto t1 = std::chrono::high_resolution_clock::now();
+  auto dur = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0);
+
+  // Host verification: for each (c,h,w), reduce over N, then apply BN using gamma[c], beta[c]
+  const float eps = BN_EPS;
+
+  std::vector<float> mean(C*H*W, 0.f), var(C*H*W, 0.f);
+  for (size_t c = 0; c < C; ++c) {
+    for (size_t h = 0; h < H; ++h) {
+      for (size_t w = 0; w < W; ++w) {
+        double acc = 0.0, sq = 0.0;
+        for (size_t n = 0; n < N; ++n) {
+          float v = x[n][c][h][w];
+          acc += v; sq += double(v) * v;
+        }
+        double m = acc / double(N);
+        double vv = sq  / double(N) - m * m;
+        mean[(c*H + h)*W + w] = float(m);
+        var [(c*H + h)*W + w] = float(vv);
+      }
+    }
+  }
+
+  for (size_t n = 0; n < N; ++n) {
+    for (size_t c = 0; c < C; ++c) {
+      float g = gm[c];
+      float b = bt[c];
+      for (size_t h = 0; h < H; ++h) {
+        for (size_t w = 0; w < W; ++w) {
+          float xv = x[n][c][h][w];
+          float m  = mean[(c*H + h)*W + w];
+          float vv = var [(c*H + h)*W + w];
+          float ref = ((xv - m) / std::sqrt(vv + eps)) * g + b;
+          if (std::fabs(ref - y[n][c][h][w]) > 1e-4f) {
+            std::cout << "BN mismatch at (n="<<n<<", c="<<c<<", h="<<h<<", w="<<w
+                      <<") ref="<<ref<<" got="<<y[n][c][h][w]<<"\n";
+            choreo::choreo_assert(false, "batch_norm mismatch (case2)");
+          }
+        }
+      }
+    }
+  }
+
+  std::cout << "Passed.\n";
+  std::cout << "Execution time: " << dur.count() << " us\n";
+  return 0;
+}
+

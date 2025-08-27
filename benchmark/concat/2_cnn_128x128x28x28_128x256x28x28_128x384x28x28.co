@@ -1,0 +1,93 @@
+#include "choreo.h"
+#include <chrono>
+#include <iostream>
+
+#define I 128   
+#define J1 128  
+#define J2 256  
+#define J_OUT 384
+#define K 28   
+#define L 28   
+
+#ifndef NUM_BLOCK
+  #define NUM_BLOCK 2
+#endif
+#ifndef NUM_THREAD
+  #define NUM_THREAD 1
+#endif
+
+__cok__ {
+  __co_device__ void concat_kernel(float* in1, float* in2, float* out,
+                                   int m, int n1, int n2) {
+    // m = number of outer elements (batch * H * W per tile)
+    // n1 = size of channel slice from a
+    // n2 = size of channel slice from b
+    for (int i = 0; i < m; ++i) {
+      int base_out = i * (n1 + n2);
+      int base_in1 = i * n1;
+      int base_in2 = i * n2;
+      for (int j = 0; j < n1; ++j)
+        out[base_out + j] = in1[base_in1 + j];
+      for (int j = 0; j < n2; ++j)
+        out[base_out + n1 + j] = in2[base_in2 + j];
+    }
+  }
+}
+
+// ---------------- choreo operator ----------------
+// Concatenate along channel dimension J
+// Input a: [I, J1, K, L]
+// Input b: [I, J2, K, L]
+// Output:  [I, J_OUT, K, L]
+
+__co__ f32 [I, J_OUT, K, L] ele_concat_J(f32 [I, J1, K, L] a, f32 [I, J2, K, L] b) {
+  f32 [I, J_OUT, K, L] out;
+
+  parallel p by 2 {
+    with index = {i_tile} in [128] {
+      foreach i_tile {
+        as = dma.transp<0,2,3,1> a.chunkat(i_tile, _, p, _) => local;
+        bs = dma.transp<0,2,3,1>  b.chunkat(i_tile, _, p, _) => local;
+        ol = dma.transp<0,2,3,1>  out.chunkat(i_tile, _, p, _) => local;
+
+        call concat_kernel(as.data, bs.data, ol.data,
+                             as.span(0) * as.span(1) * as.span(2), // M
+                             as.span(3),                           // n1 = J1
+                             bs.span(3) );                          // n2 = J2
+        dma.transp<0,3,1,2>  ol => out.chunkat(i_tile, _, p, _);
+      }
+    }
+  }
+  return out;
+}
+
+// ---------------- host test ----------------
+int main() {
+  auto a = choreo::make_spandata<choreo::f32>(I, J1, K, L);
+  auto b = choreo::make_spandata<choreo::f32>(I, J2, K, L);
+  a.fill_random(-1.0, 1.0);
+  b.fill_random(-1.0, 1.0);
+
+  auto t0 = std::chrono::high_resolution_clock::now();
+  auto r  = ele_concat_J(a.view(), b.view());
+  auto t1 = std::chrono::high_resolution_clock::now();
+  auto dur = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0);
+  // Verify channel concatenation
+  for (size_t i = 0; i < I; ++i)
+    for (size_t j = 0; j < J_OUT; ++j)
+      for (size_t k = 0; k < K; ++k)
+        for (size_t l = 0; l < L; ++l) {
+          float got = r[i][j][k][l];
+          float ref = (j < J1) ? a[i][j][k][l] : b[i][j - J1][k][l];
+          if (ref != got) {
+            std::cout << "Mismatch at (" << i << "," << j
+                      << "," << k << "," << l << ")\n";
+            choreo::choreo_assert(false, "concat mismatch");
+          }
+        }
+  
+  std::cout << "Passed.\n";
+  std::cout << "Execution time: " << dur.count() << " us\n";
+  return 0;
+}
+

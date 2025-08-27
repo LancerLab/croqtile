@@ -1,0 +1,205 @@
+#include "choreo.h"
+#include <chrono>
+#include <iostream>
+#include <vector>
+#include <cmath>
+
+/* ---------------- Problem dims (Dynamic: [N,S,E]) ---------------- */
+#define N 32
+#define S 512
+
+/* embed_dim: static or dynamic  */
+#ifdef __STATIC_SHAPE__
+  #define E 768
+#else
+  /* If not static, use a global provided by caller; default 768 */
+  extern const size_t embed_dim;
+  #define E embed_dim
+#endif
+
+/* ---------------- Parallel config ---------------- */
+#ifndef NUM_BLOCK
+  #define NUM_BLOCK 1
+#endif
+#ifndef NUM_THREAD
+  #define NUM_THREAD 1
+#endif
+
+#ifndef BN_EPS
+  #define BN_EPS 1e-5f
+#endif
+
+/* ============================================================
+ *                        Device kernels
+ * ============================================================ */
+__cok__ {
+  // Reduce mean/var over the LAST dimension:
+  // in:  [rows, cols] (cols reduced)
+  // mean/var: [rows]
+  __co_device__ void reduce_lastdim_mean_var(float* in, float* mean, float* var,
+                                             int rows, int cols) {
+    for (int r = 0; r < rows; ++r) {
+      float s = 0.f, sq = 0.f;
+      int base = r * cols;
+      for (int c = 0; c < cols; ++c) {
+        float v = in[base + c];
+        s  += v;
+        sq += v * v;
+      }
+      float m  = s / cols;
+      float vv = sq / cols - m * m;
+      mean[r] = m;
+      var [r] = vv;
+    }
+  }
+
+  // Apply BN along last dim (N), but scale/bias depend only on 'e' (last axis of input [N,S,E]).
+  // We pass pointers gamma_e/beta_e that point to a single scalar (the e-th element).
+  // in/out: [rows, cols] where rows=S, cols=N (we handle fixed e while looping at choreo level)
+  __co_device__ void apply_bn_lastdim_gptr(float* in, float* out,
+                                           const float* mean, const float* var,
+                                           const float* gamma_e, const float* beta_e,
+                                           int rows, int cols) {
+    float g = gamma_e[0];
+    float b = beta_e[0];
+    for (int r = 0; r < rows; ++r) {
+      float m  = mean[r];
+      float rs = 1.0f / sqrtf(var[r] + BN_EPS);
+      int base = r * cols;
+      for (int c = 0; c < cols; ++c) {
+        float x = in[base + c];
+        out[base + c] = ((x - m) * rs) * g + b;
+      }
+    }
+  }
+} // __cok__
+
+/* ============================================================
+ *                         Operator
+ * BN over batch (N): Input [N,S,E], Gamma [E], Beta [E] -> Output [N,S,E]
+ * For each e in [0..E-1], we:
+ *   1) take inp[:, :, e] -> transpose to [S, N] so N is contiguous (cols)
+ *   2) reduce over N to get mean[S], var[S]
+ *   3) apply ((x-mean)/sqrt(var+eps))*gamma[e] + beta[e] onto that [S,N]
+ *   4) inverse transpose back to out[:, :, e]
+ * ============================================================ */
+__co__ f32 [N, S, E] ele_batch_norm(f32 [N, S, E] inp, f32 [E] gamma, f32 [E] beta) {
+  f32 [N, S, E] out;
+
+  // Statistics per (s,e): we store as mean[S, E], var[S, E]
+  f32 [S, E] mean;
+  f32 [S, E] var;
+
+  /* ---------------- Pass 1: compute mean/var over N ---------------- */
+  parallel p by NUM_BLOCK {
+    with index = {e_idx} in [E] {
+      foreach e_idx {
+        // Grab inp[:, :, e] and make it [S, N] by transposing (N,S) -> (S,N)
+        il = dma.transp<2, 1, 0> inp.chunkat(_, _, e_idx) => local; // [S, N]
+        ml = dma.copy.async mean.chunkat(_, e_idx)     => local; // [S]
+        vl = dma.copy.async var .chunkat(_, e_idx)     => local; // [S]
+        wait ml, vl;
+
+        call reduce_lastdim_mean_var(
+          il.data, ml.data, vl.data,
+          il.span(1),    // rows = S
+          il.span(2)     // cols = N
+        );
+
+        dma.copy ml => mean.chunkat(_, e_idx);
+        dma.copy vl => var .chunkat(_, e_idx);
+      }
+    }
+  }
+
+  /* --------------- Pass 2: apply BN with gamma[e]/beta[e] --------------- */
+  parallel p by NUM_BLOCK {
+    with index = {e_idx} in [E] {
+      foreach e_idx {
+        // Input slice [S,N]
+        il = dma.transp<2, 1, 0> inp.chunkat(_, _, e_idx) => local; // [S, N]
+        // Output local buffer [S,N]
+        local f32 [il.span] ol;
+
+        ml = dma.copy.async mean .chunkat(_, e_idx) => local; // [S]
+        vl = dma.copy.async var  .chunkat(_, e_idx) => local; // [S]
+        gl = dma.copy.async gamma.chunkat(e_idx)    => local; // [1]
+        bl = dma.copy.async beta .chunkat(e_idx)    => local; // [1]
+        wait ml, vl, gl, bl;
+
+        call apply_bn_lastdim_gptr(
+          il.data, ol,
+          ml.data, vl.data, gl.data, bl.data,
+          il.span(1),   // S
+          il.span(2)    // N
+        );
+
+        // Write back: [S,N] -> [N,S] at e=e_idx
+        dma.transp<2, 1, 0> ol => out.chunkat(_, _, e_idx);
+      }
+    }
+  }
+
+  return out;
+}
+
+/* =============================== Host test =============================== */
+int main() {
+#ifndef __STATIC_SHAPE__
+  const size_t embed_dim = 768; // default dynamic value if not static
+#endif
+
+  auto x  = choreo::make_spandata<choreo::f32>(N, S, E);
+  auto gm = choreo::make_spandata<choreo::f32>(E);
+  auto bt = choreo::make_spandata<choreo::f32>(E);
+
+  x.fill_random(-1.0, 1.0);
+  gm.fill_random(0.5, 1.5);
+  bt.fill_random(-0.5, 0.5);
+
+  auto t0 = std::chrono::high_resolution_clock::now();
+  auto y  = ele_batch_norm(x.view(), gm.view(), bt.view());
+  auto t1 = std::chrono::high_resolution_clock::now();
+  auto dur = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0);
+
+  // Host verification: for each (s,e) reduce over N; apply gamma[e], beta[e]
+  const float eps = BN_EPS;
+
+  std::vector<float> mean(S*E, 0.f), var(S*E, 0.f);
+  for (size_t e = 0; e < E; ++e) {
+    for (size_t s = 0; s < S; ++s) {
+      double acc = 0.0, sq = 0.0;
+      for (size_t n = 0; n < N; ++n) {
+        float v = x[n][s][e];
+        acc += v; sq += double(v) * v;
+      }
+      double m  = acc / double(N);
+      double vv = sq  / double(N) - m * m;
+      mean[s*E + e] = float(m);
+      var [s*E + e] = float(vv);
+    }
+  }
+
+  for (size_t n = 0; n < N; ++n) {
+    for (size_t e = 0; e < E; ++e) {
+      float g = gm[e];
+      float b = bt[e];
+      for (size_t s = 0; s < S; ++s) {
+        float xv = x[n][s][e];
+        float m  = mean[s*E + e];
+        float vv = var [s*E + e];
+        float ref = ((xv - m) / std::sqrt(vv + eps)) * g + b;
+        if (std::fabs(ref - y[n][s][e]) > 1e-4f) {
+          std::cout << "BN mismatch at (n="<<n<<", s="<<s<<", e="<<e
+                    <<") ref="<<ref<<" got="<<y[n][s][e]<<"\n";
+          choreo::choreo_assert(false, "batch_norm mismatch (case7)");
+        }
+      }
+    }
+  }
+
+  std::cout << "Passed.\n";
+  std::cout << "Execution time: " << dur.count() << " us\n";
+  return 0;
+}
+

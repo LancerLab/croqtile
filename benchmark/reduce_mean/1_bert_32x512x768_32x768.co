@@ -1,0 +1,75 @@
+#include "choreo.h"
+#include <chrono>
+#include <iostream>
+#include <cmath>
+
+#define I 32
+#define S 512
+#define H 768
+
+#ifndef NUM_BLOCK
+  #define NUM_BLOCK 2
+#endif
+#ifndef NUM_THREAD
+  #define NUM_THREAD 8
+#endif
+
+__cok__ {
+  __co_device__ void reduce_mean_kernel(float* in, float* out, int m, int n) {
+    // in: [m, n], out: [m]
+    for (int i = 0; i < m; ++i) {
+      float acc = 0.f;
+      int base = i * n;
+      for (int j = 0; j < n; ++j)
+        acc += in[base + j];
+      out[i] = acc / n;
+    }
+  }
+}
+
+__co__ f32 [I, H] ele_reduce_mean(f32 [I, S, H] inp) {
+  f32 [I, H] out;
+
+  parallel p by NUM_BLOCK {
+    with index = {s_tile} in [H] {
+      foreach s_tile {
+        il = dma.transp<0,2,1> inp.chunkat(p, _, s_tile) => local;
+        ol = dma.transp<0,1> out.chunkat(p, s_tile)    => local;
+
+        call reduce_mean_kernel(il.data, ol.data,
+                                il.span(0) * il.span(1), // M = batch*H
+                                il.span(2));             // N = seq_len/S_tile
+        dma.transp<0,1> ol => out.chunkat(p, s_tile);
+      }
+    }
+  }
+  return out;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::f32>(I, S, H);
+  a.fill_random(-1.0, 1.0);
+
+  auto t0 = std::chrono::high_resolution_clock::now();
+  auto r  = ele_reduce_mean(a.view());
+  auto t1 = std::chrono::high_resolution_clock::now();
+  auto dur = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0);
+
+  // verify
+  for (size_t i = 0; i < I; ++i)
+    for (size_t h = 0; h < H; ++h) {
+      float acc = 0.f;
+      for (size_t s = 0; s < S; ++s) acc += a[i][s][h];
+      float ref = acc / S;
+      if (std::fabs(ref - r[i][h]) > 1e-5) {
+        std::cout << "Mismatch at ("<<i<<","<<h<<") "
+                  << "ref="<<ref<<" got="<<r[i][h]<<"\n";
+        choreo::choreo_assert(false, "reduce_mean mismatch");
+      }
+    }
+
+  std::cout << "Passed.\n";
+  std::cout << "Execution time: " << dur.count() << " us\n";
+  return 0;
+}
+

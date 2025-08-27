@@ -1,0 +1,99 @@
+#include "choreo.h"
+#include <chrono>
+#include <iostream>
+#include <cmath>
+
+#define N 32
+#define S 512
+#define H 2048
+
+#ifndef NUM_BLOCK
+  #define NUM_BLOCK 2
+#endif
+#ifndef NUM_THREAD
+  #define NUM_THREAD 8
+#endif
+
+__cok__ {
+  // in: [m, n], out: [m]; reduce mean over n
+  __co_device__ void reduce_mean_kernel(float* in, float* out, int m, int n) {
+    for (int i = 0; i < m; ++i) {
+      float acc = 0.f;
+      int base = i * n;
+      for (int j = 0; j < n; ++j) acc += in[base + j];
+      out[i] = acc / n;
+    }
+  }
+}
+
+// Reduce over S (second dim):
+// Input  [N, S, H]
+// Output [N, H]
+__co__ f32 [N, H] ele_reduce_mean(f32 [N, S, H] inp) {
+  f32 [N, H] out;
+
+  // Split N by NUM_BLOCK; foreach over H; split N again by NUM_THREAD.
+  parallel p by NUM_BLOCK {
+    with index = {h_tile} in [H] {
+      foreach h_tile {
+        // Transpose [N/#p, S, 1] -> [N/#p, 1, S], so S becomes the last (contiguous) dim.
+        ts = dma.transp<0, 2, 1> inp.chunkat(p, _, h_tile) => shared; // [N/#p, 1, S]
+
+        // Shared output tile [N/#p, 1]
+        os = dma.copy.async out.chunkat(p, h_tile) => shared;         // [N/#p, 1]
+        wait os;
+
+        // Further split N slice by threads
+        parallel q by NUM_THREAD {
+          il = dma.copy.async ts.chunkat(q, _, _) => local; // [N/#p/#q, 1, S]
+          ol = dma.copy.async os.chunkat(q, _)       => local; // [N/#p/#q, 1]
+          wait il, ol;
+
+          // View as [m, n] with m=(N/#p/#q)*1, n=S
+          call reduce_mean_kernel(
+            il.data,                   // in
+            ol.data,                   // out
+            il.span(0) * il.span(1),  // m
+            il.span(2)                // n = S
+          );
+
+          dma.copy ol => os.chunkat(q, _);
+        }
+
+        dma.copy os => out.chunkat(p, h_tile);
+      }
+    }
+  }
+
+  return out;
+}
+
+// --------------------------- Host / main ---------------------------
+int main() {
+  auto a = choreo::make_spandata<choreo::f32>(N, S, H);
+  a.fill_random(-1.0, 1.0);
+
+  auto t0 = std::chrono::high_resolution_clock::now();
+  auto r  = ele_reduce_mean(a.view());
+  auto t1 = std::chrono::high_resolution_clock::now();
+  auto dur = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0);
+
+  // Verification: for each (n, h), average over S
+  for (size_t n = 0; n < N; ++n) {
+    for (size_t h = 0; h < H; ++h) {
+      double acc = 0.0;
+      for (size_t s = 0; s < S; ++s) acc += a[n][s][h];
+      float ref = static_cast<float>(acc / S);
+      if (std::fabs(ref - r[n][h]) > 1e-5f) {
+        std::cout << "Mismatch at (n=" << n << ", h=" << h
+                  << ") ref=" << ref << " got=" << r[n][h] << "\n";
+        choreo::choreo_assert(false, "reduce_mean mismatch (case18)");
+      }
+    }
+  }
+
+  std::cout << "Passed.\n";
+  std::cout << "Execution time: " << dur.count() << " us\n";
+  return 0;
+}
+
