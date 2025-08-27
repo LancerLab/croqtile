@@ -1,0 +1,117 @@
+#include "choreo.h"
+#include <chrono>
+#include <iostream>
+#include <cmath>
+
+#define N 32
+#define S 512
+
+/* ---------------- Variable macros ----------------
+   If __STATIC_SHAPE__ is defined, freeze VOCAB_SIZE=30522.
+   Otherwise, V is provided externally (default 30522 in main).
+-------------------------------------------------- */
+// #define __STATIC_SHAPE__
+#ifdef __STATIC_SHAPE__
+  #define VOCAB_SIZE 30522
+  #define V VOCAB_SIZE
+#else
+  extern const size_t vocab_size;
+  #define V vocab_size
+#endif
+/* ------------------------------------------------- */
+
+#ifndef NUM_BLOCK
+  #define NUM_BLOCK 2
+#endif
+#ifndef NUM_THREAD
+  #define NUM_THREAD 8
+#endif
+
+__cok__ {
+  // Reduce-mean over the second dimension (n).
+  // in:  [m, n]
+  // out: [m]
+  __co_device__ void reduce_mean_kernel(float* in, float* out, int m, int n) {
+    for (int i = 0; i < m; ++i) {
+      float acc = 0.f;
+      int base = i * n;
+      for (int j = 0; j < n; ++j) acc += in[base + j];
+      out[i] = acc / n;
+    }
+  }
+}
+
+// Reduce over the last dim V: [N, S, V] -> [N, S]
+__co__ f32 [N, S] ele_reduce_mean(f32 [N, S, V] inp) {
+  f32 [N, S] out;
+
+  // Split N by NUM_BLOCK; foreach over S; split N again by NUM_THREAD.
+  parallel p by NUM_BLOCK {
+    with index = {s_tile} in [S] {
+      foreach s_tile {
+        // Shared tiles for this (p, s_tile)
+        is = dma.copy.async inp.chunkat(p, s_tile, _) => shared; // [N/#p, 1, V]
+        os = dma.copy.async out.chunkat(p, s_tile)    => shared; // [N/#p, 1]
+        wait is, os;
+
+        parallel q by NUM_THREAD {
+          // Local slices for this (p, q, s_tile)
+          il = dma.copy.async is.chunkat(q, _, _) => local; // [N/#p/#q, 1, V]
+          ol = dma.copy.async os.chunkat(q, _)       => local; // [N/#p/#q, 1]
+          wait il, ol;
+
+          // View as [m, n] with m=(N/#p/#q)*1, n=V
+          call reduce_mean_kernel(
+            il.data,                  // in
+            ol.data,                  // out
+            il.span(0) * il.span(1), // m
+            il.span(2)               // n = V
+          );
+
+          // Store back local slice
+          dma.copy ol => os.chunkat(q, _);
+        }
+
+        // Store back shared slice for this S tile
+        dma.copy os => out.chunkat(p, s_tile);
+      }
+    }
+  }
+
+  return out;
+}
+
+// --------------------------- Host / main ---------------------------
+int main() {
+#ifndef __STATIC_SHAPE__
+  // Provide runtime value for V when using dynamic shapes
+  const size_t vocab_size = 30522;
+#endif
+
+  auto a = choreo::make_spandata<choreo::f32>(N, S, V);
+  a.fill_random(-1.0, 1.0);
+
+  auto t0 = std::chrono::high_resolution_clock::now();
+  auto r  = ele_reduce_mean(a.view());
+  auto t1 = std::chrono::high_resolution_clock::now();
+  auto dur = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0);
+
+  // Verification: for each (n, s), average over V
+  for (size_t n = 0; n < N; ++n) {
+    for (size_t s = 0; s < S; ++s) {
+      double acc = 0.0;
+      for (size_t v = 0; v < V; ++v) acc += a[n][s][v];
+      float ref = static_cast<float>(acc / V);
+      if (std::fabs(ref - r[n][s]) > 1e-5f) {
+        std::cout << "Mismatch at (n=" << n << ", s=" << s
+                  << ") ref=" << ref << " got=" << r[n][s] << "\n";
+        choreo::choreo_assert(false, "reduce_mean mismatch (case12)");
+      }
+    }
+  }
+
+  std::cout << "Passed.\n";
+  std::cout << "Execution time: " << dur.count() << " us\n";
+  return 0;
+}
+

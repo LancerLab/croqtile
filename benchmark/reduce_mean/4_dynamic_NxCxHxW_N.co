@@ -1,0 +1,91 @@
+#include "choreo.h"
+#include <chrono>
+#include <iostream>
+#include <cmath>
+size_t b = 128;
+size_t c = 128;
+size_t h = 28;
+size_t w = 28;
+#ifdef __STATIC_SHAPE__
+#define B 128
+#define C 128
+#define H 28
+#define W 28
+#else
+#define B b
+#define C c
+#define H h
+#define W w
+#endif
+#ifndef NUM_BLOCK
+  #define NUM_BLOCK 2
+#endif
+#ifndef NUM_THREAD
+  #define NUM_THREAD 8
+#endif
+
+__cok__ {
+  __co_device__ void reduce_mean_kernel(float* in, float* out, int m, int n) {
+    // in: [m, n], out: [m]
+    for (int i = 0; i < m; ++i) {
+      float acc = 0.f;
+      int base = i * n;
+      for (int j = 0; j < n; ++j)
+        acc += in[base + j];
+      out[i] = acc / n;
+    }
+  }
+}
+
+// Reduce over C,H,W  ->  output [B]
+__co__ f32 [B] ele_reduce_mean(f32 [B, C, H, W] inp) {
+  f32 [B] out;
+
+  parallel p by NUM_BLOCK {
+    with index = {b_tile} in [B] {
+      foreach b_tile {
+        il = dma.transp<0,1,2,3> inp.chunkat(b_tile, _, _, _) => local; // shape: [1, C, H, W]
+        ol = dma.copy.async           out.chunkat(b_tile)      => local; // shape: [1]
+        wait ol;
+
+        // m = il.span(0) = 1；n = C*H*W
+        call reduce_mean_kernel(
+          il.data, ol.data,
+          il.span(0),                 // 1
+          il.span(1) * il.span(2) * il.span(3)  // C*H*W
+        );
+
+        dma.copy ol => out.chunkat(b_tile);
+      }
+    }
+  }
+  return out;
+}
+
+int main() {
+  auto a = choreo::make_spandata<choreo::f32>(B, C, H, W);
+  a.fill_random(-1.0, 1.0);
+
+  auto t0 = std::chrono::high_resolution_clock::now();
+  auto r  = ele_reduce_mean(a.view());
+  auto t1 = std::chrono::high_resolution_clock::now();
+  auto dur = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0);
+
+  for (size_t b = 0; b < B; ++b) {
+    double acc = 0.0;
+    for (size_t c = 0; c < C; ++c)
+      for (size_t h = 0; h < H; ++h)
+        for (size_t w = 0; w < W; ++w)
+          acc += a[b][c][h][w];
+    float ref = static_cast<float>(acc / (C * H * W));
+    if (std::fabs(ref - r[b]) > 1e-5) {
+      std::cout << "Mismatch at (b=" << b << ") ref=" << ref << " got=" << r[b] << "\n";
+      choreo::choreo_assert(false, "reduce_mean mismatch (CNN)");
+    }
+  }
+
+  std::cout << "Passed.\n";
+  std::cout << "Execution time: " << dur.count() << " us\n";
+  return 0;
+}
+

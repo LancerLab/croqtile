@@ -1,0 +1,134 @@
+#include "choreo.h"
+#include <chrono>
+#include <iostream>
+#include <cmath>
+#define I 32
+#define J 197
+#define K 3072
+#define L 1
+/* ---------------- Variable macros ----------------
+   If __STATIC_SHAPE__ is defined, we freeze the typical
+   ML placeholders to concrete constants here. Otherwise
+   we map them to extern symbols provided by the caller. */
+#define __STATIC_SHAPE__
+#ifdef __STATIC_SHAPE__
+  #define BATCH_SIZE 32
+  #define NUM_HEADS  12
+  #define HEIGHT     224
+  #define WIDTH      224
+  #define SCALE_H    112
+  #define SCALE_W    112
+  #define SEQ_LEN    512
+  #define TIME_STEPS 100
+  #define VOCAB_SIZE 30522
+  #define EMBED_DIM  768
+  #define D_MODEL    768
+  #define CHANNELS   128
+#else
+  extern const size_t batch_size, num_heads, height, width, scale_h, scale_w,
+                      seq_len, time_steps, vocab_size, embed_dim, d_model, channels;
+  #define BATCH_SIZE batch_size
+  #define NUM_HEADS  num_heads
+  #define HEIGHT     height
+  #define WIDTH      width
+  #define SCALE_H    scale_h
+  #define SCALE_W    scale_w
+  #define SEQ_LEN    seq_len
+  #define TIME_STEPS time_steps
+  #define VOCAB_SIZE vocab_size
+  #define EMBED_DIM  embed_dim
+  #define D_MODEL    d_model
+  #define CHANNELS   channels
+#endif
+/* ------------------------------------------------- */
+
+/* Parallel configuration (tune as needed) */
+#ifndef NUM_BLOCK
+  #define NUM_BLOCK  8
+#endif
+#ifndef NUM_THREAD
+  #define NUM_THREAD 8   /* TODO: make it 12 */
+#endif
+
+/* ---------------- C-style device kernel ----------------*/
+__cok__ {
+  __co_device__ void relu_kernel_2d(float* in, float* out, int m, int n) {
+    for (int i = 0; i < m; ++i) {
+      int base = i * n;
+      for (int j = 0; j < n; ++j) {
+        float v = in[base + j];
+        out[base + j] = (v > 0.0f) ? v : 0.0f;
+      }
+    }
+  }
+}
+/* ------------------------------------------------------ */
+
+/* Local chunk element count:
+   Each (p,q) thread sees a tile of shape
+   [I/NUM_BLOCK, J/NUM_THREAD, K, L]. */
+#define CHUNK_I      (I / NUM_BLOCK)
+#define CHUNK_J      (J / NUM_THREAD)
+#define LOCAL_ELEMS  (CHUNK_I * CHUNK_J * K * L)
+
+/* Operator: same DMA/parallel skeleton as your ele_add,
+   but calls the C-style kernel with pointers. */
+__co__ auto ele_relu(f32 [I, J, K, L] inp) {
+  f32 [inp.span] out;
+
+  parallel p by 2 {
+    with index = {n_tile} in [197] {
+    foreach n_tile {
+
+    ifs = dma.copy.async inp.chunkat(p,n_tile,_,_) => shared;
+    wait ifs;
+
+    parallel q by 6 {
+      ifl = dma.copy.async ifs.chunkat(_,_,q,_) => local;
+      wait ifl;
+
+      local f32 [ifl.span] lout;
+
+      /* NOTE: use .data() to pass raw pointers to the C kernel */
+      call relu_kernel_2d( ifl.data, lout, inp.span(0) / #p  *
+                inp.span(1) /#n_tile *
+                 inp.span(2)/#q ,
+                 inp.span(3) );
+
+      dma.copy lout => out.chunkat(p,n_tile,q,_);
+  }
+    }
+  }
+  }
+  return out;
+}
+
+/* --------------------------- Host / main ---------------------------
+   Matches your ele_add template: allocate, fill, run, verify, time. */
+int main() {
+  auto a = choreo::make_spandata<choreo::f32>(I, J, K, L);
+  a.fill_random(-1.0, 1.0);
+
+  auto t0 = std::chrono::high_resolution_clock::now();
+  auto r  = ele_relu(a.view());
+  auto t1 = std::chrono::high_resolution_clock::now();
+  auto dur = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0);
+
+  /* Verification */
+  for (size_t i = 0; i < r.shape()[0]; ++i)
+    for (size_t j = 0; j < r.shape()[1]; ++j)
+      for (size_t k = 0; k < r.shape()[2]; ++k)
+        for (size_t l = 0; l < r.shape()[3]; ++l) {
+          float vin = a[i][j][k][l];
+          float ref = (vin > 0.0f) ? vin : 0.0f;
+          if (ref != r[i][j][k][l]) {
+            std::cout << "relu(" << vin << ") != " << r[i][j][k][l] << "\n";
+            choreo::choreo_assert(false, "values are not equal.");
+          }
+        }
+
+  std::cout << "Passed.\n";
+  std::cout << "Execution time: " << dur.count() << " microseconds\n";
+  return 0;
+}
+

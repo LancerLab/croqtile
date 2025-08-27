@@ -1,0 +1,109 @@
+#include "choreo.h"
+#include <chrono>
+#include <iostream>
+#include <cmath>
+
+#define N 16
+#define S 512
+
+/* ---------------- Variable macros ----------------
+   If __STATIC_SHAPE__ is defined, freeze E=768.
+   Otherwise, E is provided externally (default=768).
+-------------------------------------------------- */
+#define __STATIC_SHAPE__
+#ifdef __STATIC_SHAPE__
+  #define E 768
+#else
+  size_t embed_dim;
+  #define E embed_dim
+#endif
+/* ------------------------------------------------- */
+
+#ifndef NUM_BLOCK
+  #define NUM_BLOCK 2
+#endif
+#ifndef NUM_THREAD
+  #define NUM_THREAD 8
+#endif
+
+__cok__ {
+  // Reduce-mean kernel: input [m, n] -> output [m], reduce along n
+  __co_device__ void reduce_mean_kernel(float* in, float* out, int m, int n) {
+    for (int i = 0; i < m; ++i) {
+      float acc = 0.f;
+      int base = i * n;
+      for (int j = 0; j < n; ++j) acc += in[base + j];
+      out[i] = acc / n;
+    }
+  }
+}
+
+// Reduce last dim E: [N, S, E] -> [N, S]
+__co__ f32 [N, S] ele_reduce_mean(f32 [N, S, E] inp) {
+  f32 [N, S] out;
+
+  parallel p by NUM_BLOCK {
+    with index = {s_tile} in [S] {
+      foreach s_tile {
+        is = dma.copy.async inp.chunkat(p, s_tile, _) => shared;
+        os = dma.copy.async out.chunkat(p, s_tile)    => shared;
+        wait is, os;
+
+        parallel q by NUM_THREAD {
+          il = dma.copy.async is.chunkat(q, _, _) => local;
+          ol = dma.copy.async os.chunkat(q, _)       => local;
+          wait il, ol;
+
+          // View as [m, n] where n = E
+          call reduce_mean_kernel(
+            il.data,                  // in
+            ol.data,                  // out
+            il.span(0) * il.span(1), // m = N/#p/#q * 1
+            il.span(2)               // n = E
+          );
+
+          dma.copy ol => os.chunkat(q, _);
+        }
+
+        dma.copy os => out.chunkat(p, s_tile);
+      }
+    }
+  }
+
+  return out;
+}
+
+/* ---------------- Host test ---------------- */
+int main() {
+#ifndef __STATIC_SHAPE__
+  // provide runtime value for E
+  embed_dim = 768;
+#endif
+
+  auto a = choreo::make_spandata<choreo::f32>(N, S, E);
+  a.fill_random(-1.0, 1.0);
+
+  auto t0 = std::chrono::high_resolution_clock::now();
+  auto r  = ele_reduce_mean(a.view());
+  auto t1 = std::chrono::high_resolution_clock::now();
+  auto dur = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0);
+
+  // Verify: average over last dim E
+  for (size_t n = 0; n < N; ++n) {
+    for (size_t s = 0; s < S; ++s) {
+      double acc = 0.0;
+      for (size_t e = 0; e < E; ++e) acc += a[n][s][e];
+      float ref = static_cast<float>(acc / E);
+      if (std::fabs(ref - r[n][s]) > 1e-5f) {
+        std::cout << "Mismatch at (n=" << n << ", s=" << s
+                  << ") ref=" << ref << " got=" << r[n][s] << "\n";
+        choreo::choreo_assert(false, "reduce_mean mismatch (case6)");
+      }
+    }
+  }
+
+  std::cout << "Passed.\n";
+  std::cout << "Execution time: " << dur.count() << " us\n";
+  return 0;
+}
+

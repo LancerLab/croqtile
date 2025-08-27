@@ -1,0 +1,89 @@
+#include "choreo.h"
+#include <chrono>
+#include <iostream>
+
+#define I 64
+#define J 100
+#define K 256
+#define L 1
+
+#ifndef NUM_BLOCK
+  #define NUM_BLOCK 2
+#endif
+#ifndef NUM_THREAD
+  #define NUM_THREAD 2
+#endif
+
+__cok__ {
+  __co_device__ void concat_kernel(float* in1, float* in2, float* out, int m, int n) {
+    // m = I*J/tiles, n = K/NUM_THREAD * L
+    for (int i = 0; i < m; ++i) {
+      int base_out = i * (2*n);
+      int base_in  = i * n;
+      for (int j = 0; j < n; ++j) {
+        out[base_out + j]     = in1[base_in + j];  
+        out[base_out + n + j] = in2[base_in + j];  
+      }
+    }
+  }
+}
+
+// ---------------- choreo operator ----------------
+__co__ f32 [I, J, 2*K, L] ele_concat_K(f32 [I, J, K, L] a, f32 [I, J, K, L] b) {
+  f32 [I, J, 2*K, L] out;
+
+  parallel p by NUM_BLOCK {
+    with index = {n_tile} in [J] {
+      foreach n_tile {
+        as = dma.copy.async a.chunkat(p, n_tile, _, _) => shared;
+        bs = dma.copy.async b.chunkat(p, n_tile, _, _) => shared;
+        wait as, bs;
+
+        parallel q by 1 {
+          al = dma.copy.async as.chunkat(_, _, q, _) => local;
+          bl = dma.copy.async bs.chunkat(_, _, q, _) => local;
+          ol = dma.copy.async out.chunkat(p, n_tile, q, _) => local;
+          wait al, bl, ol;
+
+          call concat_kernel(al.data, bl.data, ol.data,
+                             al.span(0)*al.span(1),   // M = I/NUM_BLOCK * 1
+                             al.span(2)*al.span(3));  // N = (K/NUM_THREAD)*L
+
+          dma.copy ol => out.chunkat(p, n_tile, q, _);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+// ---------------- host test ----------------
+int main() {
+  auto a = choreo::make_spandata<choreo::f32>(I, J, K, L);
+  auto b = choreo::make_spandata<choreo::f32>(I, J, K, L);
+  a.fill_random(-1.0, 1.0);
+  b.fill_random(-1.0, 1.0);
+
+  auto t0 = std::chrono::high_resolution_clock::now();
+  auto r  = ele_concat_K(a.view(), b.view());
+  auto t1 = std::chrono::high_resolution_clock::now();
+  auto dur = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0);
+
+  for (size_t i=0;i<I;++i)
+    for (size_t j=0;j<J;++j)
+      for (size_t kk=0; kk<2*K; ++kk) {
+        size_t which = kk / K;
+        size_t k     = kk % K;
+        float got = r[i][j][kk][0];
+        float ref = (which==0)? a[i][j][k][0] : b[i][j][k][0];
+        if (ref!=got) {
+          std::cout << "Mismatch at ("<<i<<","<<j<<","<<kk<<")\n";
+          choreo::choreo_assert(false,"concat mismatch");
+        }
+      }
+
+  std::cout << "Passed.\n";
+  std::cout << "Execution time: " << dur.count() << " us\n";
+  return 0;
+}
+

@@ -1,0 +1,119 @@
+#include "choreo.h"
+#include <chrono>
+#include <iostream>
+#include <cmath>
+
+#define N 32
+#define H 768
+
+/* ---------------- Variable macros ----------------
+   If __STATIC_SHAPE__ is defined, freeze NUM_PATCHES (e.g. 196).
+   Otherwise, P is provided externally (default 196).
+-------------------------------------------------- */
+// #define __STATIC_SHAPE__
+#ifdef __STATIC_SHAPE__
+  #define NUM_PATCHES 196
+  #define P NUM_PATCHES
+#else
+  extern const size_t num_patches;
+  #define P num_patches
+#endif
+/* ------------------------------------------------- */
+
+#ifndef NUM_BLOCK
+  #define NUM_BLOCK 2
+#endif
+#ifndef NUM_THREAD
+  #define NUM_THREAD 8
+#endif
+
+__cok__ {
+  // in: [m, n], out: [m]; reduce-mean over the n dimension
+  __co_device__ void reduce_mean_kernel(float* in, float* out, int m, int n) {
+    for (int i = 0; i < m; ++i) {
+      float acc = 0.f;
+      int base = i * n;
+      for (int j = 0; j < n; ++j) acc += in[base + j];
+      out[i] = acc / n;
+    }
+  }
+}
+
+// Reduce over P (num_patches):
+// Input  [N, P, H]
+// Output [N, H]
+__co__ f32 [N, H] ele_reduce_mean(f32 [N, P, H] inp) {
+  f32 [N, H] out;
+
+  // Split along N by NUM_BLOCK; foreach tiles over H; inside use NUM_THREAD on N.
+  parallel p by NUM_BLOCK {
+    with index = {h_tile} in [H] {
+      foreach h_tile {
+        // Take [N/#p, P, 1], transpose to [N/#p, 1, P] so P is contiguous (last dim).
+        // No wait for dma.transp (only for copy.async).
+        il = dma.transp<0, 2, 1> inp.chunkat(p, _, h_tile) => shared; // [N/#p, 1, P]
+        os = dma.copy.async       out.chunkat(p, h_tile)    => shared; // [N/#p, 1]
+        wait os;
+
+        // Further split N slice by threads
+        parallel q by NUM_THREAD {
+          // Local slices
+          ill = dma.copy.async il.chunkat(q, _, _) => local; // [N/#p/#q, 1, P]
+          oll = dma.copy.async os.chunkat(q, _)       => local; // [N/#p/#q, 1]
+          wait ill, oll;
+
+          // View as [m, n] with m=(N/#p/#q)*1, n=P
+          call reduce_mean_kernel(
+            ill.data,                      // in
+            oll.data,                      // out
+            ill.span(0) * ill.span(1),    // m
+            ill.span(2)                   // n = P
+          );
+
+          // Store back this thread's output
+          dma.copy oll => os.chunkat(q, _);
+        }
+
+        // Store back this H tile
+        dma.copy os => out.chunkat(p, h_tile);
+      }
+    }
+  }
+
+  return out;
+}
+
+// --------------------------- Host / main ---------------------------
+int main() {
+#ifndef __STATIC_SHAPE__
+  // Provide runtime value for P when using dynamic shapes
+  const size_t num_patches = 196;
+#endif
+
+  auto a = choreo::make_spandata<choreo::f32>(N, P, H);
+  a.fill_random(-1.0, 1.0);
+
+  auto t0 = std::chrono::high_resolution_clock::now();
+  auto r  = ele_reduce_mean(a.view());
+  auto t1 = std::chrono::high_resolution_clock::now();
+  auto dur = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0);
+
+  // Verification: for each (n, h) average over P
+  for (size_t n = 0; n < N; ++n) {
+    for (size_t h = 0; h < H; ++h) {
+      double acc = 0.0;
+      for (size_t p = 0; p < P; ++p) acc += a[n][p][h];
+      float ref = static_cast<float>(acc / P);
+      if (std::fabs(ref - r[n][h]) > 1e-5f) {
+        std::cout << "Mismatch at (n=" << n << ", h=" << h
+                  << ") ref=" << ref << " got=" << r[n][h] << "\n";
+        choreo::choreo_assert(false, "reduce_mean mismatch (case9)");
+      }
+    }
+  }
+
+  std::cout << "Passed.\n";
+  std::cout << "Execution time: " << dur.count() << " us\n";
+  return 0;
+}
+
