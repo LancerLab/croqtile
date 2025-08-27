@@ -1,0 +1,12 @@
+#include "common.hpp"
+
+// - case2: [128, 128, 28, 28] --> [128, 100352] (CNN)
+__co__ auto reshape2(f32 [128, 128, 28, 28] input) {
+  output = dma.copy input.span_as([128, 100352]) => global;
+  return output.data;
+}
+
+int main() {
+  TEST2(reshape2, 128, 128, 28, 28, 128, 100352);
+  return 0;
+}

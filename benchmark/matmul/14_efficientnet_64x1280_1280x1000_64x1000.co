@@ -1,0 +1,25 @@
+#include "common.hpp"
+
+// case14: [64, 1280] + [1280, 1000] --> [64, 1000] (EfficientNet)
+__co__ auto matmul14(f32 [64, 1280] lhs, f32 [1280, 1000] rhs) {
+  f32 [lhs.span(0), rhs.span(1)] output;
+  parallel p by 4, q by 10 {
+    foreach {m_tile, n_tile} in [4, 5] {
+      local f32[lhs.span(0)/#m_tile/#p, rhs.span(1)/#n_tile/#q] l1_out {0.0f};
+      foreach {k_tile} in [16] {
+        l1_a = dma.copy lhs.chunkat(p#m_tile, k_tile) => local;
+        l1_b = dma.copy rhs.chunkat(k_tile, q#n_tile) => local;
+        foreach {i, j, k} in [l1_a.span(0), l1_b.span(1), l1_a.span(1)] {
+          l1_out.at(i, j) += l1_a.data.at(i, k) * l1_b.data.at(k, j);
+        }
+      }
+      dma.copy l1_out => output.chunkat(p#m_tile, q#n_tile);
+    }
+  }
+  return output;
+}
+
+int main() {
+  TEST1(matmul14, 64, 1000, 1280);
+  return 0;
+}

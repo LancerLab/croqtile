@@ -1,0 +1,28 @@
+#include "common.hpp"
+#define max_(a, b) (((a) > (b)) ? (a) : (b))
+// - case16: [128, 96, 224, 224] --> [128, 96, 112, 112] (MobileNet)
+__co__ auto max_pool2d16(f32 [128, 96, 224, 224] input) {
+  f32 [input.span(0), input.span(1), input.span(2)/2, input.span(3)/2] output;
+  parallel p by 4, q by 12 {
+    foreach {n_tile, c_tile} in [16, 8] {
+      l1_input = dma.copy input.chunkat(n_tile#p, c_tile#q, _, _) => local;
+      local f32[l1_input.span(0), l1_input.span(1), l1_input.span(2)/2, l1_input.span(3)/2] l1_out;
+      foreach {i, j} in [l1_out.span(0), l1_out.span(1)] {
+        foreach {h, w} in [l1_out.span(2), l1_out.span(3)] {
+          f32 max_val = l1_input.data.at(i, j, h * 2, w * 2);
+          max_val = max_(max_val, l1_input.data.at(i, j, h * 2 + 1, w * 2));
+          max_val = max_(max_val, l1_input.data.at(i, j, h * 2, w * 2 + 1));
+          max_val = max_(max_val, l1_input.data.at(i, j, h * 2 + 1, w * 2 + 1));
+          l1_out.at(i, j, h, w) = max_val;
+        }
+      }
+      dma.copy l1_out => output.chunkat(n_tile#p, c_tile#q, _, _);
+    }
+  }
+  return output;
+}
+
+int main() {
+  TESTP(max_pool2d16, 128, 96, 224, 224);
+  return 0;
+}

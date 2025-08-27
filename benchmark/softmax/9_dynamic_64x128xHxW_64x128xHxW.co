@@ -1,0 +1,41 @@
+#include "common.hpp"
+#ifdef __STATIC_SHAPE__
+#define height 56
+#define width 56
+#endif
+
+// case9: [64, 128, height, width] --> [64, 128, height, width] (Dynamic)
+__co__ auto softmax9(f32 [64, 128, height, width] input) {
+  f32 [input.span] output;
+  parallel p by 4 {
+    foreach batch_idx in [input.span(0)/#p] {
+      foreach {h_tile, w_tile} in [7, 7] {
+        l1_input = dma.copy input.chunkat(batch_idx#p, _, h_tile, w_tile) => local;
+        local f32[l1_input.span] l1_out;
+        foreach {i, j} in [l1_input.span(2), l1_input.span(3)] {
+          // Find max for numerical stability
+          f32 max_val = l1_input.data.at(0, 0, i, j);
+          foreach {k} in [l1_input.span(1)]
+            if (l1_input.data.at(0, k, i, j) > max_val)
+              max_val = l1_input.data.at(0, k, i, j);
+          // Compute exp and sum
+          f32 sum_exp = 0.0f;
+          foreach {k} in [l1_input.span(1)] {
+            l1_out.at(0, k, i, j) = __exp(l1_input.data.at(0, k, i, j) - max_val);
+            sum_exp += l1_out.at(0, k, i, j);
+          }
+          // Normalize
+          foreach {k} in [l1_input.span(1)]
+            l1_out.at(0, k, i, j) = l1_out.at(0, k, i, j) / sum_exp;
+        }
+        dma.copy l1_out => output.chunkat(batch_idx#p, _, h_tile, w_tile);
+      }
+    }
+  }
+  return output;
+}
+
+int main() {
+  TEST2(softmax9, 64, 128, 56, 56);
+  return 0;
+}

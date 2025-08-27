@@ -1,0 +1,12 @@
+#include "common.hpp"
+
+// - case15: [16, 1024, 1024] --> [16, 16, 1024, 64] (GPT)
+__co__ auto reshape15(f32 [16, 1024, 1024] input) {
+  output = dma.copy input.span_as([16, 16, 1024, 64]) => global;
+  return output.data;
+}
+
+int main() {
+  TEST1(reshape15, 16, 1024, 1024, 16, 16, 1024, 64);
+  return 0;
+}

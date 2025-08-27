@@ -1,0 +1,12 @@
+#include "common.hpp"
+
+// - case18: [64, 512, 7, 7] --> [64, 25088] (ResNet)
+__co__ auto reshape18(f32 [64, 512, 7, 7] input) {
+  output = dma.copy input.span_as([64, 25088]) => global;
+  return output.data;
+}
+
+int main() {
+  TEST2(reshape18, 64, 512, 7, 7, 64, 25088);
+  return 0;
+}

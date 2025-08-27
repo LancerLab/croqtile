@@ -1,0 +1,16 @@
+#include "common.hpp"
+
+#ifdef __STATIC_SHAPE__
+#define vocab_size 2048
+#endif
+
+// - case13: [32, 512, vocab_size] --> [32, 512 * vocab_size] (Dynamic)
+__co__ auto reshape13(f32 [32, 512, vocab_size] input) {
+  output = dma.copy input.span_as([32, 512 * vocab_size]) => global;
+  return output.data;
+}
+
+int main() {
+  TEST5(reshape13, 32, 512, 2048, 32, 512 * 2048);
+  return 0;
+}

@@ -1,0 +1,12 @@
+#include "common.hpp"
+
+// - case21: [32, 3, 224, 224] --> [32, 196, 768] (ViT)
+__co__ auto reshape21(f32 [32, 3, 224, 224] input) {
+  output = dma.copy input.span_as([32, 196, 768]) => global;
+  return output.data;
+}
+
+int main() {
+  TEST3(reshape21, 32, 3, 224, 224, 32, 196, 768);
+  return 0;
+}

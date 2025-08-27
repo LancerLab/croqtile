@@ -1,0 +1,12 @@
+#include "common.hpp"
+
+// - case16: [64, 100, 256] --> [6400, 256] (LSTM)
+__co__ auto reshape16(f32 [64, 100, 256] input) {
+  output = dma.copy input.span_as([6400, 256]) => global;
+  return output.data;
+}
+
+int main() {
+  TEST5(reshape16, 64, 100, 256, 6400, 256);
+  return 0;
+}

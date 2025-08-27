@@ -1,0 +1,16 @@
+#include "common.hpp"
+
+#ifdef __STATIC_SHAPE__
+#define time_steps 64
+#endif
+
+// - case12: [64, time_steps, 256] --> [64 * time_steps, 256] (Dynamic)
+__co__ auto reshape12(f32 [64, time_steps, 256] input) {
+  output = dma.copy input.span_as([64 * time_steps, 256]) => global;
+  return output.data;
+}
+
+int main() {
+  TEST5(reshape12, 64, 64, 256, 64 * 64, 256);
+  return 0;
+}

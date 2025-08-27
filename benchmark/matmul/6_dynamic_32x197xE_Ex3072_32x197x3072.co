@@ -1,0 +1,31 @@
+#include "common.hpp"
+
+#ifdef __STATIC_SHAPE__
+#define E 768
+#endif
+
+// case6: [32, 197, E] + [E, 3072] --> [32, 197, 3072] (Dynamic)
+__co__ auto matmul6(f32 [32, 197, E] lhs, f32 [E, 3072] rhs) {
+  f32 [lhs.span(0), lhs.span(1), rhs.span(1)] output;
+  parallel p by 4, q by 8 {
+    with index = {m_tile, n_tile, k_tile} in [197, 128, 1] {
+      foreach m_tile, n_tile {
+        local f32[output.span(0)/#p/#q, output.span(1)/#m_tile, output.span(2)/#n_tile] l1_out {0.0f};
+        foreach k_tile {
+          l1_a = dma.copy lhs.chunkat(p#q, m_tile, k_tile) => local;
+          l1_b = dma.copy rhs.chunkat(k_tile, n_tile) => local;
+          foreach {i, j, k, l} in [l1_a.span(0), l1_a.span(1), l1_b.span(1), l1_a.span(2)] {
+            l1_out.at(i, j, k) += l1_a.data.at(i, j, l) * l1_b.data.at(l, k);
+          }
+          dma.copy l1_out => output.chunkat(p#q, m_tile, n_tile);
+        }
+      }
+    }
+  }
+  return output;
+}
+
+int main() {
+  TEST2(matmul6, 32, 197, 3072, 768);
+  return 0;
+}

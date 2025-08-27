@@ -1,0 +1,16 @@
+#include "common.hpp"
+
+#ifdef __STATIC_SHAPE__
+#define d_model 1024
+#endif
+
+// - case8: [16, 1024, d_model] --> [16, 1024, d_model / 64, 64] (Dynamic)
+__co__ auto reshape8(f32 [16, 1024, d_model] input) {
+  output = dma.copy input.span_as([16, 1024, d_model / 64, 64]) => global;
+  return output.data;
+}
+
+int main() {
+  TEST1(reshape8, 16, 1024, 1024, 16, 1024, 1024 / 64, 64);
+  return 0;
+}

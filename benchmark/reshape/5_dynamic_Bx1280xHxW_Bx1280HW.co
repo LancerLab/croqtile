@@ -1,0 +1,18 @@
+#include "common.hpp"
+
+#ifdef __STATIC_SHAPE__
+#define batch_size 32
+#define height 28
+#define width 28
+#endif
+
+// - case5: [batch_size, 1280, height, width] --> [batch_size, 1280 * height * width] (Dynamic)
+__co__ auto reshape5(f32 [batch_size, 1280, height, width] input) {
+  output = dma.copy input.span_as([batch_size, 1280 * height * width]) => global;
+  return output.data;
+}
+
+int main() {
+  TEST2(reshape5, 32, 1280, 28, 28, 32, 1280 * 28 * 28);
+  return 0;
+}

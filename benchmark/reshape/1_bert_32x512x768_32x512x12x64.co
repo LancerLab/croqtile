@@ -1,0 +1,11 @@
+#include "common.hpp"
+// - case1: [32, 512, 768] --> [32, 512, 12, 64] (BERT)
+__co__ auto reshape1(f32 [32, 512, 768] input) {
+  output = dma.copy input.span_as([32, 512, 12, 64]) => global;
+  return output.data;
+}
+
+int main() {
+  TEST1(reshape1, 32, 512, 768, 32, 512, 12, 64);
+  return 0;
+}

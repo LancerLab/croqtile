@@ -1,0 +1,12 @@
+#include "common.hpp"
+
+// - case19: [32, 512, 2048] --> [32, 1048576] (Transformer)
+__co__ auto reshape19(f32 [32, 512, 2048] input) {
+  output = dma.copy input.span_as([32, 1048576]) => global;
+  return output.data;
+}
+
+int main() {
+  TEST5(reshape19, 32, 512, 2048, 32, 1048576);
+  return 0;
+}

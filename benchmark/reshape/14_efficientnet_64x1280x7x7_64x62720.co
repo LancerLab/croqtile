@@ -1,0 +1,12 @@
+#include "common.hpp"
+
+// - case14: [64, 1280, 7, 7] --> [64, 62720] (EfficientNet)
+__co__ auto reshape14(f32 [64, 1280, 7, 7] input) {
+  output = dma.copy input.span_as([64, 1280 * 7 * 7]) => global;
+  return output.data;
+}
+
+int main() {
+  TEST2(reshape14, 64, 1280, 7, 7, 64, 1280 * 7 * 7);
+  return 0;
+}

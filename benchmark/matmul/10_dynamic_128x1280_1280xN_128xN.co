@@ -1,0 +1,29 @@
+#include "common.hpp"
+
+#ifdef __STATIC_SHAPE__
+#define H 1000
+#endif
+
+// case10: [128, 1280] + [1280, N] --> [128, N] (Dynamic)
+__co__ auto matmul10(f32 [128, 1280] lhs, f32 [1280, N] rhs) {
+  f32 [lhs.span(0), rhs.span(1)] output;
+  parallel p by 4, q by 1 {
+    foreach {m_tile, n_tile} in [8, 1] {
+      local f32[lhs.span(0)/#m_tile/#p, rhs.span(1)/#n_tile/#q] l1_out {0.0f};
+      foreach {k_tile} in [32] {
+        l1_a = dma.copy lhs.chunkat(p#m_tile, k_tile) => local;
+        l1_b = dma.copy rhs.chunkat(k_tile, q#n_tile) => local;
+        foreach {i, j, k} in [l1_a.span(0), l1_b.span(1), l1_a.span(1)] {
+          l1_out.at(i, j) += l1_a.data.at(i, k) * l1_b.data.at(k, j);
+        }
+      }
+      dma.copy l1_out => output.chunkat(p#m_tile, q#n_tile);
+    }
+  }
+  return output;
+}
+
+int main() {
+  TEST1(matmul10, 128, 1000, 1280);
+  return 0;
+}

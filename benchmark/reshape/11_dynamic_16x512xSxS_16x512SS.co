@@ -1,0 +1,17 @@
+#include "common.hpp"
+
+#ifdef __STATIC_SHAPE__
+#define scale_h 28
+#define scale_w 28
+#endif
+
+// - case11: [16, 512, scale_h, scale_w] --> [16, 512 * scale_h * scale_w] (Dynamic)
+__co__ auto reshape11(f32 [16, 512, scale_h, scale_w] input) {
+  output = dma.copy input.span_as([16, 512 * scale_h * scale_w]) => global;
+  return output.data;
+}
+
+int main() {
+  TEST2(reshape11, 16, 512, 28, 28, 16, 512 * 28 * 28);
+  return 0;
+}

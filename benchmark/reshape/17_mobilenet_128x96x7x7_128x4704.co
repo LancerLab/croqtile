@@ -1,0 +1,12 @@
+#include "common.hpp"
+
+// - case17: [128, 96, 7, 7] --> [128, 4704] (MobileNet)
+__co__ auto reshape17(f32 [128, 96, 7, 7] input) {
+  output = dma.copy input.span_as([128, 4704]) => global;
+  return output.data;
+}
+
+int main() {
+  TEST2(reshape17, 128, 96, 7, 7, 128, 4704);
+  return 0;
+}

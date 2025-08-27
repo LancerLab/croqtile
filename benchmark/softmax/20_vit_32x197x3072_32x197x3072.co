@@ -1,0 +1,36 @@
+#include "common.hpp"
+
+// case20: [32, 197, 3072] --> [32, 197, 3072] (ViT)
+__co__ auto softmax20(f32 [32, 197, 3072] input) {
+  f32 [input.span(0), input.span(1), input.span(2)] output;
+  parallel p by 4, q by 8 {
+    l2_input = dma.copy input.chunkat(p#q, _, _) => shared;
+    shared f32[1, l2_input.span(1), l2_input.span(2)] l2_out;
+    foreach {i} in [l2_input.span(1)] {
+      // Find max for numerical stability
+      f32 max_val = l2_input.data.at(0, i, 0);
+      foreach {k} in [l2_input.span(2)]
+        if (l2_input.data.at(0, i, k) > max_val)
+          max_val = l2_input.data.at(0, i, k);
+
+      // Compute exp and sum
+      f32 sum_exp = 0.0f;
+      foreach {k} in [l2_input.span(2)] {
+        l2_out.at(0, i, k) = __exp(l2_input.data.at(0, i, k) - max_val);
+        sum_exp += l2_out.at(0, i, k);
+      }
+
+      // Normalize
+      foreach {k} in [l2_input.span(2)]
+        l2_out.at(0, i, k) = l2_out.at(0, i, k) / sum_exp;
+
+      dma.copy l2_out => output.chunkat(p#q, _, _);
+    }
+  }
+  return output;
+}
+
+int main() {
+  TEST1(softmax20, 32, 197, 3072);
+  return 0;
+}

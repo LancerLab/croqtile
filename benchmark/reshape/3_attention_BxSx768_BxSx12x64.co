@@ -1,0 +1,17 @@
+#include "common.hpp"
+
+#ifdef __STATIC_SHAPE__
+#define batch_size 32
+#define seq_len 512
+#endif
+
+// - case3: [batch_size, seq_len, 768] --> [batch_size, seq_len, 12, 64] (Attention)
+__co__ auto reshape3(f32 [batch_size, seq_len, 768] input) {
+  output = dma.copy input.span_as([batch_size, seq_len, 12, 64]) => global;
+  return output.data;
+}
+
+int main() {
+  TEST1(reshape3, 32, 512, 768, 32, 512, 12, 64);
+  return 0;
+}

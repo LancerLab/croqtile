@@ -1,0 +1,12 @@
+#include "common.hpp"
+
+// - case20: [16, 512, 32, 32] --> [16, 32, 32, 512] (U-Net)
+__co__ auto reshape20(f32 [16, 512, 32, 32] input) {
+  output = dma.copy input.span_as([16, 32, 32, 512]) => global;
+  return output.data;
+}
+
+int main() {
+  TEST4(reshape20, 16, 512, 32, 32, 16, 32, 32, 512);
+  return 0;
+}

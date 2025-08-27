@@ -1,0 +1,40 @@
+#include "common.hpp"
+#ifdef __STATIC_SHAPE__
+#define seq_len 128
+#endif
+
+// case11: [32, seq_len, 768] --> [32, seq_len, 768] (Dynamic)
+__co__ auto softmax11(f32 [32, seq_len, 768] input) {
+  f32 [input.span(0), input.span(1), input.span(2)] output;
+  parallel p by 4 {
+    foreach {i} in [input.span(0)/#p] {
+      l1_input = dma.copy input.chunkat(i#p, _, _) => local;
+      local f32[1, l1_input.span(1), l1_input.span(2)] l1_out;
+      foreach {j} in [l1_input.span(1)] {
+        // Find max for numerical stability
+        f32 max_val = l1_input.data.at(0, j, 0);
+        foreach {k} in [l1_input.span(2)]
+          if (l1_input.data.at(0, j, k) > max_val)
+            max_val = l1_input.data.at(0, j, k);
+
+        // Compute exp and sum
+        f32 sum_exp = 0.0f;
+        foreach {k} in [l1_input.span(2)] {
+          l1_out.at(0, j, k) = __exp(l1_input.data.at(0, j, k) - max_val);
+          sum_exp += l1_out.at(0, j, k);
+        }
+
+        // Normalize
+        foreach {k} in [l1_input.span(2)]
+          l1_out.at(0, j, k) = l1_out.at(0, j, k) / sum_exp;
+      }
+      dma.copy l1_out => output.chunkat(i#p, _, _);
+    }
+  }
+  return output;
+}
+
+int main() {
+  TEST1(softmax11, 32, 128, 768);
+  return 0;
+}

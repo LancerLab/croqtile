@@ -1,0 +1,16 @@
+#include "common.hpp"
+
+#ifdef __STATIC_SHAPE__
+#define embed_dim 768
+#endif
+
+// - case7: [32, 197, embed_dim] --> [32, 197, embed_dim / 64, 64] (Dynamic)
+__co__ auto reshape7(f32 [32, 197, embed_dim] input) {
+  output = dma.copy input.span_as([32, 197, embed_dim / 64, 64]) => global;
+  return output.data;
+}
+
+int main() {
+  TEST1(reshape7, 32, 197, 768, 32, 197, 768 / 64, 64);
+  return 0;
+}

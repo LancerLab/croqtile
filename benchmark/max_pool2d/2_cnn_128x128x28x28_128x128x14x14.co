@@ -1,0 +1,27 @@
+#include "common.hpp"
+#define max_(a, b) (((a) > (b)) ? (a) : (b))
+__co__ auto max_pool2d2(f32 [128, 128, 28, 28] input) {
+  f32 [128, 128, 14, 14] output;
+  parallel p by 4 {
+    foreach n in [128/#p] {
+      l1_input = dma.copy input.chunkat(n#p, _, _, _) => local;
+      local f32[1, 128, 14, 14] l1_out;
+      foreach {c} in [l1_input.span(1)] {
+        foreach {oh, ow} in [14, 14] {
+          f32 m = l1_input.data.at(0, c, 2*oh, 2*ow);
+          if (l1_input.data.at(0, c, 2*oh, 2*ow+1) > m) m = l1_input.data.at(0, c, 2*oh, 2*ow+1);
+          if (l1_input.data.at(0, c, 2*oh+1, 2*ow) > m) m = l1_input.data.at(0, c, 2*oh+1, 2*ow);
+          if (l1_input.data.at(0, c, 2*oh+1, 2*ow+1) > m) m = l1_input.data.at(0, c, 2*oh+1, 2*ow+1);
+          l1_out.at(0, c, oh, ow) = m;
+        }
+      }
+      dma.copy l1_out => output.chunkat(n#p, _, _, _);
+    }
+  }
+  return output;
+}
+
+int main() {
+  TESTP(max_pool2d2, 128, 128, 28, 28);
+  return 0;
+}

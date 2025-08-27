@@ -1,0 +1,16 @@
+#include "common.hpp"
+
+#ifdef __STATIC_SHAPE__
+#define num_heads 12
+#endif
+
+// - case4: [32, num_heads, 512, 64] --> [32, 512, num_heads * 64] (Attention)
+__co__ auto reshape4(f32 [32, num_heads, 512, 64] input) {
+  output = dma.copy input.span_as([32, 512, num_heads * 64]) => global;
+  return output.data;
+}
+
+int main() {
+  TEST3(reshape4, 32, 12, 512, 64, 32, 512, 12 * 64);
+  return 0;
+}

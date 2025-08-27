@@ -1,0 +1,17 @@
+#include "common.hpp"
+
+#ifdef __STATIC_SHAPE__
+#define height 28
+#define width 28
+#endif
+
+// - case10: [64, 128, height, width] --> [64, 128 * height * width] (Dynamic)
+__co__ auto reshape10(f32 [64, 128, height, width] input) {
+  output = dma.copy input.span_as([64, 128 * height * width]) => global;
+  return output.data;
+}
+
+int main() {
+  TEST2(reshape10, 64, 128, 28, 28, 64, 128 * 28 * 28);
+  return 0;
+}

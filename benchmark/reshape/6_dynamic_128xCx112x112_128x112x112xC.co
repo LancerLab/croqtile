@@ -1,0 +1,16 @@
+#include "common.hpp"
+
+#ifdef __STATIC_SHAPE__
+#define channels 197
+#endif
+
+// - case6: [128, channels, 112, 112] --> [128, 112, 112, channels] (Dynamic)
+__co__ auto reshape6(f32 [128, channels, 112, 112] input) {
+  output = dma.copy input.span_as([128, 112, 112, channels]) => global;
+  return output.data;
+}
+
+int main() {
+  TEST4(reshape6, 128, 197, 112, 112, 128, 112, 112, 197);
+  return 0;
+}
