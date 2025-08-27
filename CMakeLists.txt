@@ -85,6 +85,7 @@ target_link_libraries(choreo PRIVATE
   ${GINAC_DIR}/lib/libginac.a
   ${CLN_DIR}/lib/libcln.a
   gmp
+  stdc++fs
 )
 
 target_link_libraries(copp PRIVATE
