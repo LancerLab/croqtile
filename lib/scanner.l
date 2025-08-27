@@ -70,6 +70,8 @@ cstr        \"([^"\\]|\\.)*\"
 blank       [ \t\r]
 attr_id     (__{id}__|\[\[{blank}*{id}{blank}*(?:\({blank}*{cstr}{blank}*\){blank}*)?\]\])
 val         ({num}|{hex_num}|{fpnum}|{fpnum_f}|{cstr})
+comments    \/\*([^*]|\*+[^*/])*\*+\/
+
 
 %%
 <INITIAL,KERNEL,CO_FUNC,DEVICE_FUNC>{
@@ -83,6 +85,10 @@ val         ({num}|{hex_num}|{fpnum}|{fpnum_f}|{cstr})
 
 <INITIAL>{
   "//".*   {
+    if (Choreo::Scanner::KeepComments())
+      return Choreo::Parser::make_HOST_CODE(yytext, loc);
+  }
+  {comments} {
     if (Choreo::Scanner::KeepComments())
       return Choreo::Parser::make_HOST_CODE(yytext, loc);
   }
@@ -119,6 +125,7 @@ val         ({num}|{hex_num}|{fpnum}|{fpnum_f}|{cstr})
                kernel_buffer += yytext;
            }
   "//".*   { if (scope > 0) kernel_buffer += yytext; }
+  {comments} { if (scope > 0) kernel_buffer += yytext; }
   "__device__"    { if (analyze_device_functions) {
                       BEGIN(DEVICE_FUNC);
                       device_expr_buffer = "";
@@ -164,6 +171,7 @@ val         ({num}|{hex_num}|{fpnum}|{fpnum_f}|{cstr})
   {blank}+    { if (scope > 0) kernel_buffer += yytext; device_template_buffer += " "; }
   \n+         { if (scope > 0) kernel_buffer += yytext; }
   "//".*      { if (scope > 0) kernel_buffer += yytext; }
+  {comments}  { if (scope > 0) kernel_buffer += yytext; }
   "<"         { if (device_template_scope < 0)
                   Choreo::Scanner::Error(loc, "unmatched '<' in device template declaration.");
                 device_template_scope++;
@@ -187,6 +195,7 @@ val         ({num}|{hex_num}|{fpnum}|{fpnum_f}|{cstr})
   {blank}+    { if (scope > 0) kernel_buffer += yytext; }
   \n+         { if (scope > 0) kernel_buffer += yytext; }
   "//".*      { if (scope > 0) kernel_buffer += yytext; }
+  {comments}  { if (scope > 0) kernel_buffer += yytext; }
   "<"         { if (accumulate_buffer(yytext, token_type::LT_STR)) return make_device_symbol(); }
   ">"         { if (accumulate_buffer(yytext, token_type::GT_STR)) return make_device_symbol(); }
   "("         { device_param_paren_scope++;
@@ -402,6 +411,7 @@ val         ({num}|{hex_num}|{fpnum}|{fpnum_f}|{cstr})
                return Choreo::Parser::make_STRING(str, loc);
              }
   "//".*     {}  // Ignore everything from // to the end of the line
+  {comments} {}  // Ignore comments
   "auto"     return Choreo::Parser::make_AUTO(yytext, loc);
   "mdspan"   return Choreo::Parser::make_MDSPAN(yytext, loc);
   "ituple"   return Choreo::Parser::make_ITUPLE(yytext, loc);
